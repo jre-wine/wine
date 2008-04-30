@@ -51,7 +51,6 @@ COLOR=' -xrm *.Command.background:darkgrey
 -xrm *.foreground:green
 -xrm *.background:black'
 
-
 #------------------------------------------------------------------------------
 #  Locate either xmessage or gmessage, if we can.
 #------------------------------------------------------------------------------
@@ -60,6 +59,7 @@ if [ $? -ne 0 ] ; then
     # xmessage not found; make sure the user notices this error
     # (GUI users wouldn't even notice if we printed the text on console !)
     MSGFILE=`mktemp "/tmp/wine.xmessage.XXXXXX"`
+    [ $? -eq 0 ] || exit 1
     cat > $MSGFILE <<EOF
 Warning:
     The Wine launcher is unable to find the xmessage program,
@@ -90,6 +90,34 @@ EOF
     rm $MSGFILE
 else
     XMESSAGE="xmessage $COLOR"
+fi
+
+
+# Debian-specific: give a warning if launched from mailcap
+if [ `basename $0` = "wine-safe" ]; then
+ $XMESSAGE -default "             No             " \
+ -title "Launching Wine" \
+ -buttons "             No             ":0,"             Yes             ":2 \
+ "
+ Wine will launch to run the requested Windows executable.
+ To protect you from accidentally running a Windows virus,
+ you must confirm that this is what you intented to do.
+ " 2>/dev/null
+ safe_launch=$?
+ if [ $safe_launch -eq 0 ] ; then
+  exit 1
+ fi
+ if [ $safe_launch -eq 1 ] ; then
+  # this means xmessage was unable to ask the user, try tty instead
+  echo "Wine will launch to run the requested Windows executable."
+  echo "To protect you from accidentally running a Windows virus,"
+  echo "you must confirm that this is what you intented to do."
+  echo -n "(yes/no) "
+  read safe_confirm
+  if [ "$safe_confirm" != 'yes' -a "$safe_confirm" != 'y' ] ; then
+   exit 1
+  fi
+ fi
 fi
 
 #------------------------------------------------------------------------------
@@ -142,12 +170,12 @@ if [ ! -x $WINEBIN/$WINE_BIN_NAME ] ; then
     fi
 fi
 
-if [ ! -r $WINELIB/libwine.so ] ; then
-    WINELIB=`find $argv0_dir -maxdepth 2 -name 'libwine.so' -printf "%h\n" | head -n 1`
+if [ ! -r $WINELIB/libwine.so.1 ] ; then
+    WINELIB=`find $argv0_dir -maxdepth 2 -name 'libwine.so.1' -printf "%h\n" | head -n 1`
 fi
 
-if [ ! -r $WINELIB/libwine.so ] ; then
-    WINELIB=`find $argv0_dir/../ -maxdepth 2 -name 'libwine.so' -printf "%h\n" | head -n 1`
+if [ ! -r $WINELIB/libwine.so.1 ] ; then
+    WINELIB=`find $argv0_dir/../ -maxdepth 2 -name 'libwine.so.1' -printf "%h\n" | head -n 1`
 fi
 
 if [ -x $WINEBIN/wineserver ] ; then
@@ -180,8 +208,13 @@ export WINELOADER=$WINEBIN/$WINE_BIN_NAME
 export WINEDLLPATH
 export WINESERVER
 
-info_flag=~/.wine/.no_prelaunch_window_flag
-debug_flag=~/.wine/.no_debug_window_flag
+if [ -n "$WINEPREFIX" ]; then
+    info_flag="$WINEPREFIX/.no_prelaunch_window_flag"
+    debug_flag="$WINEPREFIX/.no_debug_window_flag"
+else
+    info_flag=~/.wine/.no_prelaunch_window_flag
+    debug_flag=~/.wine/.no_debug_window_flag
+fi
 debug_options="warn+all"
 
 if [ -f $info_flag ] ; then
@@ -229,6 +262,7 @@ if [ $no_args -eq 1 ] ; then
     echo "Invoking $WINEBIN/$WINE_BIN_NAME $@ ..."
     $XMESSAGE -buttons "    Okay    ":0," See the Wine Usage Statement ":1,"  Configure Wine  ":2 \
         -title "Welcome to Wine" \
+        -default "    Okay    " \
         "
 
         You have started Wine without specifying any arguments.
@@ -248,7 +282,7 @@ if [ $no_args -eq 1 ] ; then
         If you would like to see the command line arguments
         for Wine, select the second option, below.
 
-        "
+        " 2>/dev/null
     welcome_rc=$?
     if [ $welcome_rc -eq 0 ] ; then
         exit
@@ -270,6 +304,7 @@ if [ $use_info_message -ne 0 ] ; then
     echo "Invoking $WINEBIN/$WINE_BIN_NAME $@ ..."
     $XMESSAGE -timeout 30 -buttons "    Dismiss    ":0," Never display this message again ":3 \
         -title "Wine Launch Window" \
+        -default "    Dismiss    " \
         "Invoking $WINEBIN/$WINE_BIN_NAME $@ ...
 
         This dialog box is a temporary status dialog to let you know
@@ -285,7 +320,7 @@ if [ $use_info_message -ne 0 ] ; then
 
         You can permanently disable this dialog by selecting
         the option below.
-        " &
+        " 2>/dev/null &
     info_message_pid=$!
 fi
 
@@ -318,7 +353,9 @@ clean_up_info_message ()
             to start a Windows application.
 
             Please take note that you can reenable this window
-            by removing the $info_flag file." -buttons "  Okay  ":0," Cancel ":1
+            by removing the $info_flag file." \
+            -default "  Okay  " \
+            -buttons "  Okay  ":0," Cancel ":1 2>/dev/null
             if [ $? -eq 0 ] ; then
                 touch $info_flag
             fi
@@ -344,6 +381,7 @@ use_status_name=0
 status_name=`mktemp "$log_dir/wine.status.XXXXXX"`
 if [ $? -eq 0 ] ; then
     use_status_name=1
+    echo 130 >$status_name # in case of ctrl-c
 fi
 
 #------------------------------------------------------------------------------
@@ -364,13 +402,13 @@ fi
 #  Test the return code, and see if it fails
 #------------------------------------------------------------------------------
 if [ $always_see_output -eq 0 -a $wine_return -eq 0 ] ; then
-    echo "Wine exited with a successful status"
+    echo "Wine exited with a successful status" >&2
     if [ $use_log_name -ne 0 ] ; then
         rm -f "$log_name"
     fi
 else
     if [ $always_see_output -eq 0 ] ; then
-        echo "Wine failed with return code $wine_return"
+        echo "Wine failed with return code $wine_return" >&2
     fi
 
     #------------------------------------------------------------------------------
@@ -383,12 +421,14 @@ else
         #------------------------------------------------------------------------------
         BUTTONS='    Okay    :0'
         if [ $use_log_name -ne 0 ] ; then
-            BUTTONS="$BUTTONS"', View Log :1'
+            BUTTONS="$BUTTONS"', View Log :5'
         fi
 
         BUTTONS="$BUTTONS"',  Debug  :2'
         BUTTONS="$BUTTONS"',  Configure :4'
         BUTTONS="$BUTTONS"',  Disable :3'
+
+        DEFAULT='    Okay    '
 
         #------------------------------------------------------------------------------
         #  Build an error message
@@ -428,7 +468,7 @@ You may view this file by selecting View Log, below."
         #------------------------------------------------------------------------------
         #  Display the message
         #------------------------------------------------------------------------------
-        $XMESSAGE -title "Wine Finished With Error" -buttons "$BUTTONS" "$MESSAGE"
+        $XMESSAGE -title "Wine Finished With Error" -buttons "$BUTTONS" -default "$DEFAULT" "$MESSAGE" 2>/dev/null
         debug_return=$?
 
         #------------------------------------------------------------------------------
@@ -447,8 +487,8 @@ You may view this file by selecting View Log, below."
         #------------------------------------------------------------------------------
         #  Process a view instruction
         #------------------------------------------------------------------------------
-        if [ $debug_return -eq 1 ] ; then
-            $XMESSAGE -title "View Wine Log" -file "$log_name" -buttons "  Okay  ":0,"Delete $log_name":1
+        if [ $debug_return -eq 5 ] ; then
+            $XMESSAGE -title "View Wine Log" -file "$log_name" -buttons "  Okay  ":0,"Delete $log_name":1 -default "  Okay  "
             if [ $? -eq 1 ] ; then
                 echo "Deleting $log_name"
                 rm -f "$log_name"
@@ -468,7 +508,9 @@ You may view this file by selecting View Log, below."
             Windows application.
 
             Please take note that you can reenable this window
-            by removing the $debug_flag file." -buttons "  Okay  ":0," Cancel ":1
+            by removing the $debug_flag file." \
+            -buttons "  Okay  ":0," Cancel ":1 \
+            -default "  Okay  "
 
             if [ $? -eq 0 ] ; then
                 touch $debug_flag
@@ -492,7 +534,9 @@ clean_up_info_message
 # killed by signal?
 if [ $wine_return -ge 128 ]; then
 	# try to kill myself with the same signal
-	kill -$[wine_return - 128] $$
+	kill -$(($wine_return - 128)) $$ >/dev/null 2>&1
 	# if we get here the kill didn't work
-	exit 1
+	#exit 1
 fi
+
+exit $wine_return

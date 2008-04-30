@@ -1,0 +1,108 @@
+# wine debconf translation to spanish
+# Copyright (C) 2001, 2006 Software in the Public Interest
+# This file is distributed under the same license as the wine package.
+#
+# Changes:
+# - Initial translation
+#        Carlos Valdivia Yagüe <valyag@dat.etsit.upm.es>, 2001, 2006
+#
+#    Translators, if you are not familiar with the PO format, gettext
+#    documentation is worth reading, especially sections dedicated to
+#    this format, e.g. by running:
+#         info -n '(gettext)PO Files'
+#         info -n '(gettext)Header Entry'
+#
+#    Some information specific to po-debconf are available at
+#            /usr/share/doc/po-debconf/README-trans
+#         or http://www.debian.org/intl/l10n/po-debconf/README-trans
+#
+#    Developers do not need to manually edit POT or PO files.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: wine 0.9.15-1\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2006-07-04 05:03-0600\n"
+"PO-Revision-Date: 2006-08-27 04:30+0200\n"
+"Last-Translator: Carlos Valdivia Yagüe <valyag@dat.etsit.upm.es>\n"
+"Language-Team: Debian L10n Spanish <debian-l10n-spanish@lists.debian.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=ISO-8859-15\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: note
+#. Description
+#: ../libwine.templates.master:1001
+msgid "Moving /usr/share/wine/drivec to /var/lib/wine/drivec"
+msgstr "/usr/share/wine/drivec se ha cambiado a /var/lib/wine/drivec"
+
+#. Type: note
+#. Description
+#: ../libwine.templates.master:1002
+msgid ""
+"The previous default Drive C location in /usr/share/wine violates the "
+"Filesystem Hierarchy Standard and is thus being relocated to /var/lib/wine. "
+"Your /etc/wine.conf should be updated automatically, but if you have a ."
+"winerc or have written scripts that depend on the old location, you must "
+"update these yourself."
+msgstr ""
+"La antigua ubicación predeterminada de la Unidad C en /usr/share/wine "
+"contradecía el Estándar de la Jerarquía del Sistema de Ficheros (FHS), por "
+"lo que se ha cambiado a /var/lib/wine. Su /etc/wine.conf debería "
+"actualizarse automáticamente, pero si tiene algún fichero .winerc o scripts "
+"que dependan de la ubicación anterior, tendrá que modificarlos por su cuenta."
+
+#. Type: boolean
+#. Description
+#: ../wine.templates.master:1001
+msgid "Old wine.conf detected, remove it?"
+msgstr "Se ha detectado un wine.conf antiguo. ¿Quiere borrarlo?"
+
+#. Type: boolean
+#. Description
+#: ../wine.templates.master:1002
+msgid ""
+"Wine no longer tries to load /etc/wine.conf by default. Thus, users that "
+"don't have a ~/.winerc (or ~/.wine/config) file will not be able to run "
+"Wine, unless they set up a ~/.wine/config file for themselves. This is "
+"easily done with the winesetup tool, found in the winesetuptk package (or "
+"else each user can copy the old /etc/wine.conf to ~/.winerc and let wine "
+"convert it). If you remove the /etc/wine.conf file, then winesetup will "
+"launch automatically for users that don't have a config file, instead of "
+"requiring the users to do any of the above themselves."
+msgstr ""
+"Wine ya no carga /etc/wine.conf por defecto. Por tanto, los usuarios que "
+"no tengan un fichero ~/.winerc (o ~/.wine/config) no podrán ejecutar Wine, a "
+"menos que configuren un fichero ~/.wine/config. Esto puede hacerse "
+"fácilmente con la herramienta winesetup, que se encuentra en el paquete "
+"winesetuptk, o bien cada usuario puede copiar el fichero /etc/wine.conf en "
+"~/.winerc y dejar que wine lo convierta. Si borra el fichero /etc/wine.conf, "
+"winesetup se lanzará automáticamente para los usuarios que no tengan fichero "
+"de configuración, en vez de obligarle a hacer por su cuenta algo de lo "
+"anterior."
+
+#. Type: select
+#. Choices
+#: ../wine.templates.master:2001
+msgid "Autodetect, Existing-Windows, No-Windows, Skip"
+msgstr "Autodectar, Con Windows, Sin Windows, Saltar"
+
+#. Type: select
+#. Description
+#: ../wine.templates.master:2002
+msgid "What kind of Wine configuration do you want?"
+msgstr "¿Qué tipo de configuración de Wine desea?"
+
+#. Type: select
+#. Description
+#: ../wine.templates.master:2003
+msgid ""
+"Wine is able to use an existing Windows installation if you have one mounted "
+"(preferably with write permissions), but if you don't have one (or don't "
+"want to use it), Wine can also run completely Microsoft-free. Choose the "
+"setup most appropriate for you."
+msgstr ""
+"Wine ofrece la posibilidad de usar una instalación existente de Windows "
+"(preferiblemente con permiso de escritura), pero si no tiene una o no quiere "
+"usarla, Wine puede ejecutarse perfectamente sin ella. Escoja la opción que "
+"considere más apropiada."

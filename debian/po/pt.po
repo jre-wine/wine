@@ -1,0 +1,93 @@
+# Portuguese translation of wine's debconf messages.
+# 2005, Rui Branco <ruipb@netcabo.pt>>
+#
+# 2005-09-25 - Rui Branco <ruipb@netcabo.pt>
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: wine 0.0.20050725\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2003-11-15 23:40+0100\n"
+"PO-Revision-Date: 2005-10-02 00:57+0100\n"
+"Last-Translator: Rui Branco <ruipb@netcabo.pt>\n"
+"Language-Team: Portuguese <traduz@debianpt.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: note
+#. Description
+#: ../libwine.templates.master:3
+msgid "Moving /usr/share/wine/drivec to /var/lib/wine/drivec"
+msgstr "A mover /usr/share/wine/drivec para /var/lib/wine/drivec"
+
+#. Type: note
+#. Description
+#: ../libwine.templates.master:3
+msgid ""
+"The previous default Drive C location in /usr/share/wine violates the "
+"Filesystem Hierarchy Standard and is thus being relocated to /var/lib/wine. "
+"Your /etc/wine.conf should be updated automatically, but if you have a ."
+"winerc or have written scripts that depend on the old location, you must "
+"update these yourself."
+msgstr ""
+"A localização anterior, por omissão, da Drive C localizada em /usr/share/"
+"wine viola a Hierarquia Standard do sistema de Ficheiros (FHS), como tal "
+"será transferida para /var/lib/wine. O seu ficheiro /etc/wine.conf será "
+"actualizado automáticamente, no entanto se tiver um winerc ou tiver escrito "
+"'scripts' que dependam do local antigo terá de os actualizar."
+
+#. Type: boolean
+#. Description
+#: ../wine.templates.master:4
+msgid "Old wine.conf detected, remove it?"
+msgstr "Configuração antiga wine.conf detectada, remover?"
+
+#. Type: boolean
+#. Description
+#: ../wine.templates.master:4
+msgid ""
+"Wine no longer tries to load /etc/wine.conf by default. Thus, users that "
+"don't have a ~/.winerc (or ~/.wine/config) file will not be able to run "
+"Wine, unless they set up a ~/.wine/config file for themselves. This is "
+"easily done with the winesetup tool, found in the winesetuptk package (or "
+"else each user can copy the old /etc/wine.conf to ~/.winerc and let wine "
+"convert it). If you remove the /etc/wine.conf file, then winesetup will "
+"launch automatically for users that don't have a config file, instead of "
+"requiring the users to do any of the above themselves."
+msgstr ""
+"O wine, por omissão, já não carrega o ficheiro /etc/wine.conf. Deste modo, "
+"os utilizadores que não tenham um ficheiro ~/.winerc (ou ~/.wine/config) "
+"serão impossibilitados de correr o wine, a não ser que criem um ~/.wine/"
+"config. Pode ser facilmente criado com a ferramenta winesetup, que se "
+"encontra no pacote winesetuptk (de outro modo cada utilizador pode também "
+"copiar o antigo /etc/wine.conf para ~/.winerc e deixar que o wine o "
+"converta). Se remover o ficheiro /etc/wine.conf, o winesetup será iniciado "
+"automáticamente para os utilizadores que não o possuam em vez de pedir aos "
+"utilizadores para efectuar qualquer dos procedimentos acima referidos."
+
+#. Type: select
+#. Choices
+#: ../wine.templates.master:16
+msgid "Autodetect, Existing-Windows, No-Windows, Skip"
+msgstr "Autodetecção, Windows-Existente, Sem-Windows, Passar à frente"
+
+#. Type: select
+#. Description
+#: ../wine.templates.master:18
+msgid "What kind of Wine configuration do you want?"
+msgstr "Que tipo de configuração Wine pretende?"
+
+#. Type: select
+#. Description
+#: ../wine.templates.master:18
+msgid ""
+"Wine is able to use an existing Windows installation if you have one mounted "
+"(preferably with write permissions), but if you don't have one (or don't "
+"want to use it), Wine can also run completely Microsoft-free. Choose the "
+"setup most appropriate for you."
+msgstr ""
+"O wine consegue usar uma instalação Windows existente, se tiver uma montada "
+"(de preferência com permissões de escrita), no caso de não ter nenhuma (ou "
+"não a quiser usar), o wine pode correr completamente livre da Microsoft. "
+"Escolha a configuração que lhe seja mais adequada."
