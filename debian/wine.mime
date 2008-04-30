@@ -1,0 +1,2 @@
+application/x-msdos-program; /usr/bin/wine-safe '%s'; description=Windows Executable
+application/x-msdos-program; /usr/bin/wine-safe '%s'; description=Windows Executable

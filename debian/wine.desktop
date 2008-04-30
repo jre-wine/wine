@@ -1,0 +1,30 @@
+[Desktop Entry]
+Type=Application
+Encoding=UTF-8
+Name=WINE
+GenericName=Win32 API Emulator
+GenericName[ru]=Эмулятор Win32 API
+Comment=Launch your windows programs
+Comment[ru]=Программа для запуска приложений для ОС Windows
+NoDisplay=true
+TryExec=wine
+Exec=wine %f
+Terminal=false
+Categories=Emulator;
+MimeType=application/x-ms-dos-executable
+Icon=wine
+[Desktop Entry]
+Type=Application
+Encoding=UTF-8
+Name=WINE
+GenericName=Win32 API Emulator
+GenericName[ru]=Эмулятор Win32 API
+Comment=Launch your windows programs
+Comment[ru]=Программа для запуска приложений для ОС Windows
+NoDisplay=true
+TryExec=wine
+Exec=wine %f
+Terminal=false
+Categories=Emulator;
+MimeType=application/x-ms-dos-executable
+Icon=wine

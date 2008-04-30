@@ -1,0 +1,14 @@
+#!/bin/sh -e
+
+if [ "$1" = "purge" ] ; then
+  rm -f /etc/wine.conf
+fi
+
+#DEBHELPER#
+#!/bin/sh -e
+
+if [ "$1" = "purge" ] ; then
+  rm -f /etc/wine.conf
+fi
+
+#DEBHELPER#

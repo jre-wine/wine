@@ -1,0 +1,6 @@
+application/x-msdos-program:
+	open=wine %f
+	icon-filename=/usr/share/pixmaps/wine.xpm
+application/x-msdos-program:
+	open=wine %f
+	icon-filename=/usr/share/pixmaps/wine.xpm

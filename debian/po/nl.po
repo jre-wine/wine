@@ -1,0 +1,202 @@
+#
+#    Translators, if you are not familiar with the PO format, gettext
+#    documentation is worth reading, especially sections dedicated to
+#    this format, e.g. by running:
+#         info -n '(gettext)PO Files'
+#         info -n '(gettext)Header Entry'
+#
+#    Some information specific to po-debconf are available at
+#            /usr/share/doc/po-debconf/README-trans
+#         or http://www.debian.org/intl/l10n/po-debconf/README-trans
+#
+#    Developers do not need to manually edit POT or PO files.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: wine 0.0.20040716-1.2\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2003-11-15 23:40+0100\n"
+"PO-Revision-Date: 2004-12-02 18:20+0100\n"
+"Last-Translator: Luk Claes <luk.claes@ugent.be>\n"
+"Language-Team: Debian l10n Dutch <debian-l10n-dutch@lists.debian.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: note
+#. Description
+#: ../libwine.templates.master:3
+msgid "Moving /usr/share/wine/drivec to /var/lib/wine/drivec"
+msgstr "Verplaatsen van /usr/share/wine/drivec naar /var/lib/wine/drivec"
+
+#. Type: note
+#. Description
+#: ../libwine.templates.master:3
+msgid ""
+"The previous default Drive C location in /usr/share/wine violates the "
+"Filesystem Hierarchy Standard and is thus being relocated to /var/lib/wine. "
+"Your /etc/wine.conf should be updated automatically, but if you have a ."
+"winerc or have written scripts that depend on the old location, you must "
+"update these yourself."
+msgstr ""
+"De vorige standaard Schijf-C-lokatie in /usr/share/wine schendt de "
+"Filesystem Hierarchy Standard en is dus verplaatst naar /var/lib/wine. Uw /"
+"etc/wine.conf zou automatisch moeten worden bijgewerkt, maar als u een ."
+"winerc heeft of u heeft scripts geschreven die afhankelijk zijn van de oude "
+"lokatie, dan moet u deze zelf bijwerken."
+
+#. Type: boolean
+#. Description
+#: ../wine.templates.master:4
+msgid "Old wine.conf detected, remove it?"
+msgstr "Oude wine.conf gedetecteerd, verwijderen?"
+
+#. Type: boolean
+#. Description
+#: ../wine.templates.master:4
+msgid ""
+"Wine no longer tries to load /etc/wine.conf by default. Thus, users that "
+"don't have a ~/.winerc (or ~/.wine/config) file will not be able to run "
+"Wine, unless they set up a ~/.wine/config file for themselves. This is "
+"easily done with the winesetup tool, found in the winesetuptk package (or "
+"else each user can copy the old /etc/wine.conf to ~/.winerc and let wine "
+"convert it). If you remove the /etc/wine.conf file, then winesetup will "
+"launch automatically for users that don't have a config file, instead of "
+"requiring the users to do any of the above themselves."
+msgstr ""
+"Wine probeert niet langer standaard /etc/wine.conf te laden. Dus gebruikers "
+"die geen bestand ~/.winerc (of ~/.wine/config) hebben, zullen Wine niet "
+"kunnen uitvoeren tenzij ze voor zichzelf een ~/.wine/config-bestand "
+"opzetten. Dit kan gemakkelijk gedaan worden met het winesetup-hulpmiddel in "
+"het winesetuptk-pakket (of anders kan elke gebruiker de oude /etc/wine.conf "
+"kopiëren naar ~/.winerc en wine het laten converteren). Als u het /etc/wine."
+"conf-bestand verwijdert, dan zal automatisch winesetup opgestart worden voor "
+"gebruikers die geen configuratiebestand hebben in plaats van het "
+"bovenstaande van de gebruikers zelf te vereisen."
+
+#. Type: select
+#. Choices
+#: ../wine.templates.master:16
+msgid "Autodetect, Existing-Windows, No-Windows, Skip"
+msgstr "Automatisch detecteren, Bestaande Windows, Geen Windows, Overslaan"
+
+#. Type: select
+#. Description
+#: ../wine.templates.master:18
+msgid "What kind of Wine configuration do you want?"
+msgstr "Welk soort Wine-configuratie wilt u?"
+
+#. Type: select
+#. Description
+#: ../wine.templates.master:18
+msgid ""
+"Wine is able to use an existing Windows installation if you have one mounted "
+"(preferably with write permissions), but if you don't have one (or don't "
+"want to use it), Wine can also run completely Microsoft-free. Choose the "
+"setup most appropriate for you."
+msgstr ""
+"Wine kan een bestaande Windows-installatie gebruiken als u er één gemount "
+"hebt (bij voorkeur met schrijfpermissies), maar als u er geen heeft (of u "
+"wil ze niet gebruiken), dan kan Wine ook volledig zonder Microsoft worden "
+"uitgevoerd. Kies de voor u meest geschikte installatie."
+#
+#    Translators, if you are not familiar with the PO format, gettext
+#    documentation is worth reading, especially sections dedicated to
+#    this format, e.g. by running:
+#         info -n '(gettext)PO Files'
+#         info -n '(gettext)Header Entry'
+#
+#    Some information specific to po-debconf are available at
+#            /usr/share/doc/po-debconf/README-trans
+#         or http://www.debian.org/intl/l10n/po-debconf/README-trans
+#
+#    Developers do not need to manually edit POT or PO files.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: wine 0.0.20040716-1.2\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2003-11-15 23:40+0100\n"
+"PO-Revision-Date: 2004-12-02 18:20+0100\n"
+"Last-Translator: Luk Claes <luk.claes@ugent.be>\n"
+"Language-Team: Debian l10n Dutch <debian-l10n-dutch@lists.debian.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: note
+#. Description
+#: ../libwine.templates.master:3
+msgid "Moving /usr/share/wine/drivec to /var/lib/wine/drivec"
+msgstr "Verplaatsen van /usr/share/wine/drivec naar /var/lib/wine/drivec"
+
+#. Type: note
+#. Description
+#: ../libwine.templates.master:3
+msgid ""
+"The previous default Drive C location in /usr/share/wine violates the "
+"Filesystem Hierarchy Standard and is thus being relocated to /var/lib/wine. "
+"Your /etc/wine.conf should be updated automatically, but if you have a ."
+"winerc or have written scripts that depend on the old location, you must "
+"update these yourself."
+msgstr ""
+"De vorige standaard Schijf-C-lokatie in /usr/share/wine schendt de "
+"Filesystem Hierarchy Standard en is dus verplaatst naar /var/lib/wine. Uw /"
+"etc/wine.conf zou automatisch moeten worden bijgewerkt, maar als u een ."
+"winerc heeft of u heeft scripts geschreven die afhankelijk zijn van de oude "
+"lokatie, dan moet u deze zelf bijwerken."
+
+#. Type: boolean
+#. Description
+#: ../wine.templates.master:4
+msgid "Old wine.conf detected, remove it?"
+msgstr "Oude wine.conf gedetecteerd, verwijderen?"
+
+#. Type: boolean
+#. Description
+#: ../wine.templates.master:4
+msgid ""
+"Wine no longer tries to load /etc/wine.conf by default. Thus, users that "
+"don't have a ~/.winerc (or ~/.wine/config) file will not be able to run "
+"Wine, unless they set up a ~/.wine/config file for themselves. This is "
+"easily done with the winesetup tool, found in the winesetuptk package (or "
+"else each user can copy the old /etc/wine.conf to ~/.winerc and let wine "
+"convert it). If you remove the /etc/wine.conf file, then winesetup will "
+"launch automatically for users that don't have a config file, instead of "
+"requiring the users to do any of the above themselves."
+msgstr ""
+"Wine probeert niet langer standaard /etc/wine.conf te laden. Dus gebruikers "
+"die geen bestand ~/.winerc (of ~/.wine/config) hebben, zullen Wine niet "
+"kunnen uitvoeren tenzij ze voor zichzelf een ~/.wine/config-bestand "
+"opzetten. Dit kan gemakkelijk gedaan worden met het winesetup-hulpmiddel in "
+"het winesetuptk-pakket (of anders kan elke gebruiker de oude /etc/wine.conf "
+"kopiëren naar ~/.winerc en wine het laten converteren). Als u het /etc/wine."
+"conf-bestand verwijdert, dan zal automatisch winesetup opgestart worden voor "
+"gebruikers die geen configuratiebestand hebben in plaats van het "
+"bovenstaande van de gebruikers zelf te vereisen."
+
+#. Type: select
+#. Choices
+#: ../wine.templates.master:16
+msgid "Autodetect, Existing-Windows, No-Windows, Skip"
+msgstr "Automatisch detecteren, Bestaande Windows, Geen Windows, Overslaan"
+
+#. Type: select
+#. Description
+#: ../wine.templates.master:18
+msgid "What kind of Wine configuration do you want?"
+msgstr "Welk soort Wine-configuratie wilt u?"
+
+#. Type: select
+#. Description
+#: ../wine.templates.master:18
+msgid ""
+"Wine is able to use an existing Windows installation if you have one mounted "
+"(preferably with write permissions), but if you don't have one (or don't "
+"want to use it), Wine can also run completely Microsoft-free. Choose the "
+"setup most appropriate for you."
+msgstr ""
+"Wine kan een bestaande Windows-installatie gebruiken als u er één gemount "
+"hebt (bij voorkeur met schrijfpermissies), maar als u er geen heeft (of u "
+"wil ze niet gebruiken), dan kan Wine ook volledig zonder Microsoft worden "
+"uitgevoerd. Kies de voor u meest geschikte installatie."

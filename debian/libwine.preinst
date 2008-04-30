@@ -1,0 +1,150 @@
+#!/bin/sh
+
+# very old stuff from the previous wine maintainers
+# (don't know what the purpose of this could be anymore)
+if [ -f /usr/X11R6/lib/libwine.so ]; then
+    rm /usr/X11R6/lib/libwine.so
+    rm /usr/X11R6/lib/libwine.so.1
+    rm /usr/X11R6/lib/libwine.so.1.0.971116-orig
+    rm /usr/X11R6/lib/wine.sym-orig
+    rm /usr/X11R6/lib/winestub.o
+fi
+
+true && set -e
+
+# Prior to Wine 20030408, libwine was named libwine.so.1.0,
+# and had a SONAME of libwine.so, which prompted ldconfig
+# to generate a symlink called libwine.so.
+# Unfortunately ldconfig won't remove this symlink again
+# all by itself after deinstalling libwine or upgrading to
+# Wine 20030408 or later, and I hadn't noticed these issues
+# before, so now I have to clean this mess up on package upgrade.
+#
+# Of course, we should not remove the symlink if libwine-dev
+# (which has its own symlink) is installed, therefore we won't
+# remove it if the symlink is pointing to an existing file,
+# such as the new libwine.so.1 that libwine-dev would point
+# the symlink to.
+
+if [ -h /usr/lib/libwine.so ] && ! [ -f /usr/lib/libwine.so ]; then
+    rm -f /usr/lib/libwine.so
+fi
+if [ -h /usr/lib/libwine_unicode.so ] && ! [ -f /usr/lib/libwine_unicode.so ]; then
+    rm -f /usr/lib/libwine_unicode.so
+fi
+
+# The following check is useless in current Wine versions because Wine
+# can't be configured system-wide anymore, but remains for completeness.
+
+if [ -d /usr/share/wine/drivec ] && ! [ -d /var/lib/wine/drivec ]; then
+    # yuck, the previous package is using the old location...
+    # we must relocate for FHS conformance
+
+    # first, warn the user
+    if [ -e /usr/share/debconf/confmodule ]; then
+        # give the message to the user the preferred way
+        . /usr/share/debconf/confmodule
+        db_input high wine/move_to_fhs || true
+        db_go || true
+    else
+        # debconf not available... use the old-fashioned method
+cat << EOT
+NOTE: Moving /usr/share/wine/drivec to /var/lib/wine/drivec
+The previous default Drive C location in /usr/share/wine violates
+the Filesystem Hierarchy Standard and is thus being relocated to
+/var/lib/wine. Your /etc/wine.conf should be updated automatically,
+but if you have a .winerc or have written scripts that depend on
+the old location, you must update these yourself.
+Press Enter to proceed.
+EOT
+       read dust_in_the_wind
+    fi
+
+    # perform the relocation
+    mkdir -p /var/lib/wine
+    mv /usr/share/wine/drivec /var/lib/wine/drivec
+    rmdir /usr/share/wine || true
+
+    # update wine.conf
+    if [ -e /etc/wine.conf ]; then
+        sed 's|/usr/share/wine/drivec|/var/lib/wine/drivec|g' /etc/wine.conf > /etc/wine.conf.new
+        mv /etc/wine.conf.new /etc/wine.conf
+    fi
+fi
+
+#DEBHELPER#
+#!/bin/sh
+
+# very old stuff from the previous wine maintainers
+# (don't know what the purpose of this could be anymore)
+if [ -f /usr/X11R6/lib/libwine.so ]; then
+    rm /usr/X11R6/lib/libwine.so
+    rm /usr/X11R6/lib/libwine.so.1
+    rm /usr/X11R6/lib/libwine.so.1.0.971116-orig
+    rm /usr/X11R6/lib/wine.sym-orig
+    rm /usr/X11R6/lib/winestub.o
+fi
+
+true && set -e
+
+# Prior to Wine 20030408, libwine was named libwine.so.1.0,
+# and had a SONAME of libwine.so, which prompted ldconfig
+# to generate a symlink called libwine.so.
+# Unfortunately ldconfig won't remove this symlink again
+# all by itself after deinstalling libwine or upgrading to
+# Wine 20030408 or later, and I hadn't noticed these issues
+# before, so now I have to clean this mess up on package upgrade.
+#
+# Of course, we should not remove the symlink if libwine-dev
+# (which has its own symlink) is installed, therefore we won't
+# remove it if the symlink is pointing to an existing file,
+# such as the new libwine.so.1 that libwine-dev would point
+# the symlink to.
+
+if [ -h /usr/lib/libwine.so ] && ! [ -f /usr/lib/libwine.so ]; then
+    rm -f /usr/lib/libwine.so
+fi
+if [ -h /usr/lib/libwine_unicode.so ] && ! [ -f /usr/lib/libwine_unicode.so ]; then
+    rm -f /usr/lib/libwine_unicode.so
+fi
+
+# The following check is useless in current Wine versions because Wine
+# can't be configured system-wide anymore, but remains for completeness.
+
+if [ -d /usr/share/wine/drivec ] && ! [ -d /var/lib/wine/drivec ]; then
+    # yuck, the previous package is using the old location...
+    # we must relocate for FHS conformance
+
+    # first, warn the user
+    if [ -e /usr/share/debconf/confmodule ]; then
+        # give the message to the user the preferred way
+        . /usr/share/debconf/confmodule
+        db_input high wine/move_to_fhs || true
+        db_go || true
+    else
+        # debconf not available... use the old-fashioned method
+cat << EOT
+NOTE: Moving /usr/share/wine/drivec to /var/lib/wine/drivec
+The previous default Drive C location in /usr/share/wine violates
+the Filesystem Hierarchy Standard and is thus being relocated to
+/var/lib/wine. Your /etc/wine.conf should be updated automatically,
+but if you have a .winerc or have written scripts that depend on
+the old location, you must update these yourself.
+Press Enter to proceed.
+EOT
+       read dust_in_the_wind
+    fi
+
+    # perform the relocation
+    mkdir -p /var/lib/wine
+    mv /usr/share/wine/drivec /var/lib/wine/drivec
+    rmdir /usr/share/wine || true
+
+    # update wine.conf
+    if [ -e /etc/wine.conf ]; then
+        sed 's|/usr/share/wine/drivec|/var/lib/wine/drivec|g' /etc/wine.conf > /etc/wine.conf.new
+        mv /etc/wine.conf.new /etc/wine.conf
+    fi
+fi
+
+#DEBHELPER#

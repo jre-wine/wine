@@ -1,0 +1,16 @@
+Template: wine/move_to_fhs
+Type: note
+_Description: Moving /usr/share/wine/drivec to /var/lib/wine/drivec
+ The previous default Drive C location in /usr/share/wine violates the
+ Filesystem Hierarchy Standard and is thus being relocated to
+ /var/lib/wine. Your /etc/wine.conf should be updated automatically, but if
+ you have a .winerc or have written scripts that depend on the old
+ location, you must update these yourself.
+Template: wine/move_to_fhs
+Type: note
+_Description: Moving /usr/share/wine/drivec to /var/lib/wine/drivec
+ The previous default Drive C location in /usr/share/wine violates the
+ Filesystem Hierarchy Standard and is thus being relocated to
+ /var/lib/wine. Your /etc/wine.conf should be updated automatically, but if
+ you have a .winerc or have written scripts that depend on the old
+ location, you must update these yourself.

@@ -1,0 +1,72 @@
+Template: wine/move_to_fhs
+Type: note
+Description: Moving /usr/share/wine/drivec to /var/lib/wine/drivec
+ The previous default Drive C location in /usr/share/wine violates the
+ Filesystem Hierarchy Standard and is thus being relocated to
+ /var/lib/wine. Your /etc/wine.conf should be updated automatically, but if
+ you have a .winerc or have written scripts that depend on the old
+ location, you must update these yourself.
+Description-ca.UTF-8: Mouré /usr/share/wine/drivec a /var/lib/wine/drivec
+ L'anterior localització per defecte de Drive C en /usr/share/wine viola la Jerarquia estàndard del sistema de fitxers (FHS) i serà mogut a /var/lib/wine. El vostre /etc/wine.conf serà actualitzat automàticament, però si teniu un .winerc o heu escrit scripts que depenguin de l'antiga localització, els haureu de posar al dia vosaltres mateixos.
+Description-cs.UTF-8: Přesunuji /usr/share/wine/drivec do /var/lib/wine/drivec
+ Předchozí implicitní umístění disku C v /usr/share/wine porušuje Filesystem Hierarchy Standard a je tedy přesunuto do /var/lib/wine. Váš /etc/wine.conf se aktualizuje automaticky, ale pokud máte vlastní .winerc nebo pokud jste si napsali skripty, které závisí na staré cestě, budete je muset upravit sami.
+Description-da.UTF-8: Flytter /usr/share/wine/drivec til /var/lib/wine/drivec
+ Den tidligere placering af C-drevet i /usr/share/wine bryder filsystemhierakistandarden (FHS), og den flyttes derfor til /var/lib/wine. Din /etc/wine.conf bliver opdateret automatisk, men hvis du har en .winerc eller selv har skrevet skripter, der afhænger af den gamle placering, skal du selv opdatere disse.
+Description-de.UTF-8: /usr/share/wine/drivec wurde nach /var/lib/win/drivec verschoben
+ Die ehemalige Standard Pfad /usr/share/wine verletzt den Dateisystem Hierarchie Standard und wurde deshalb nach /var/lib/wine verlegt. Ihre /etc/wine.conf sollte automatisch aktualisiert werden, falls Ihre .winerc oder ein Skript den alten Pfad enthält müssen Sie diese selbst anpassen.
+Description-es.UTF-8: /usr/share/wine/drivec se ha cambiado a /var/lib/wine/drivec
+ La antigua ubicación predeterminada de la Unidad C en /usr/share/wine contradecía el Estándar de la Jerarquía del Sistema de Ficheros (FHS), por lo que se ha cambiado a /var/lib/wine. Su /etc/wine.conf debería actualizarse automáticamente, pero si tiene algún fichero .winerc o scripts que dependan de la ubicación anterior, tendrá que modificarlos por su cuenta.
+Description-fr.UTF-8: Déplacement de /usr/share/wine/drivec vers /var/lib/wine/drivec
+ Placer le pseudo-disque C dans /usr/share/wine violait la norme de hiérarchie du système de fichiers (FHS : « Filesystem Hierarchy Standard »). Il a donc été déplacé vers /var/lib/wine. Votre fichier /etc/wine.conf devrait être mis à jour automatiquement. Cependant, si vous avez des fichiers .winerc ou bien si vous avez écrit des scripts qui dépendent de l'ancien emplacement, vous devrez les mettre à jour vous-même.
+Description-it.UTF-8: Sposto /usr/share/wine/drivec in /var/lib/wine/drivec
+ La precedente posizione di default del Drive C in /usr/share/wine viola il Filesystem Hierarchy Standard, quindi viene spostato in /var/lib/wine. Il tuo /etc/wine.conf dovrebbe essere aggiornato in automatico, ma se hai un .winerc o hai scritto degli script che dipendono dalla vecchia posizione, dovrai aggiornarli da solo.
+Description-ja.UTF-8: /usr/share/wine/drivec を /var/lib/wine/drivec に移動しています
+ 以前のドライブ C のデフォルト位置 /usr/share/wine は、ファイルシステム階層標準に違反していたので、/var/lib/wine に再配置するようになっています。あなたの /etc/wine.conf は自動的に更新されるはずですが、もし .winerc や古い位置に依存して書かれたスクリプトがある場合には、それらをあなた自身で更新する必要があります。
+Description-nl.UTF-8: Verplaatsen van /usr/share/wine/drivec naar /var/lib/wine/drivec
+ De vorige standaard Schijf-C-lokatie in /usr/share/wine schendt de Filesystem Hierarchy Standard en is dus verplaatst naar /var/lib/wine. Uw /etc/wine.conf zou automatisch moeten worden bijgewerkt, maar als u een .winerc heeft of u heeft scripts geschreven die afhankelijk zijn van de oude lokatie, dan moet u deze zelf bijwerken.
+Description-pt.UTF-8: A mover /usr/share/wine/drivec para /var/lib/wine/drivec
+ A localização anterior, por omissão, da Drive C localizada em /usr/share/wine viola a Hierarquia Standard do sistema de Ficheiros (FHS), como tal será transferida para /var/lib/wine. O seu ficheiro /etc/wine.conf será actualizado automáticamente, no entanto se tiver um winerc ou tiver escrito 'scripts' que dependam do local antigo terá de os actualizar.
+Description-pt_BR.UTF-8: Movendo /usr/share/wine/drivec para /var/lib/wine/drivec
+ A antiga localização padrão do Drive C em /usr/share/wine viola a Hierarquia Padrão de Sistema de Arquivos e está sendo, portanto, movido para /var/lib/wine. O seu /etc/wine.conf deve ser atualizado automaticamente, exceto se você tiver um arquivo .winerc ou tiver escrito scripts que dependam da localização antiga, tendo, nesse caso, que atualizá-los manualmente.
+Description-ru.UTF-8: Каталог /usr/share/wine/drivec перемещён в /var/lib/wine/drivec
+ Предыдущее место по умолчанию для Диска C, /usr/share/wine, нарушает Filesystem Hierarchy Standard и поэтому перемещается в /var/lib/wine. Ваш /etc/wine.conf будет обновлён автоматически, но если у вас есть .winerc или написаны сценарии, которые зависят от старого места, то вы должны обновить путь самостоятельно.
+Description-sv.UTF-8: Flyttar /usr/share/wine/drivec till /var/lib/wine/drivec
+ Den tidigare standard sökvägen till Drive C i /usr/share/wine inkräktar på Filesystem Hierachy Standard som är därför flyttad till /var/lib/wine. Din /etc/wine.conf borde uppdateras automatiskt men om du har en winerc eller har skrivna skript som använder den gamla sökvägen måste du uppdatera dessa på egen hand.
+Description-tr.UTF-8: /usr/share/wine/drivec, /var/lib/wine/drivec'ye taşınıyor.
+ C sürücüsü için önceki öntanımlı konum olan /usr/share/wine Dosya Sistemi Düzeni standartlarını (FHS) ihlâl ediyor ve bu yüzden /var/lib/wine olarak değiştirilecek. /etc/wine.conf dosyası bu değişikliğe uygun şekilde otomatik olarak güncellenecektir, ancak eğer .winerc veya eski konuma göre yazılmış bir betik varsa bunları kendiniz güncellemelisiniz.
+Template: wine/move_to_fhs
+Type: note
+Description: Moving /usr/share/wine/drivec to /var/lib/wine/drivec
+ The previous default Drive C location in /usr/share/wine violates the
+ Filesystem Hierarchy Standard and is thus being relocated to
+ /var/lib/wine. Your /etc/wine.conf should be updated automatically, but if
+ you have a .winerc or have written scripts that depend on the old
+ location, you must update these yourself.
+Description-ca.UTF-8: Mouré /usr/share/wine/drivec a /var/lib/wine/drivec
+ L'anterior localització per defecte de Drive C en /usr/share/wine viola la Jerarquia estàndard del sistema de fitxers (FHS) i serà mogut a /var/lib/wine. El vostre /etc/wine.conf serà actualitzat automàticament, però si teniu un .winerc o heu escrit scripts que depenguin de l'antiga localització, els haureu de posar al dia vosaltres mateixos.
+Description-cs.UTF-8: Přesunuji /usr/share/wine/drivec do /var/lib/wine/drivec
+ Předchozí implicitní umístění disku C v /usr/share/wine porušuje Filesystem Hierarchy Standard a je tedy přesunuto do /var/lib/wine. Váš /etc/wine.conf se aktualizuje automaticky, ale pokud máte vlastní .winerc nebo pokud jste si napsali skripty, které závisí na staré cestě, budete je muset upravit sami.
+Description-da.UTF-8: Flytter /usr/share/wine/drivec til /var/lib/wine/drivec
+ Den tidligere placering af C-drevet i /usr/share/wine bryder filsystemhierakistandarden (FHS), og den flyttes derfor til /var/lib/wine. Din /etc/wine.conf bliver opdateret automatisk, men hvis du har en .winerc eller selv har skrevet skripter, der afhænger af den gamle placering, skal du selv opdatere disse.
+Description-de.UTF-8: /usr/share/wine/drivec wurde nach /var/lib/win/drivec verschoben
+ Die ehemalige Standard Pfad /usr/share/wine verletzt den Dateisystem Hierarchie Standard und wurde deshalb nach /var/lib/wine verlegt. Ihre /etc/wine.conf sollte automatisch aktualisiert werden, falls Ihre .winerc oder ein Skript den alten Pfad enthält müssen Sie diese selbst anpassen.
+Description-es.UTF-8: /usr/share/wine/drivec se ha cambiado a /var/lib/wine/drivec
+ La antigua ubicación predeterminada de la Unidad C en /usr/share/wine contradecía el Estándar de la Jerarquía del Sistema de Ficheros (FHS), por lo que se ha cambiado a /var/lib/wine. Su /etc/wine.conf debería actualizarse automáticamente, pero si tiene algún fichero .winerc o scripts que dependan de la ubicación anterior, tendrá que modificarlos por su cuenta.
+Description-fr.UTF-8: Déplacement de /usr/share/wine/drivec vers /var/lib/wine/drivec
+ Placer le pseudo-disque C dans /usr/share/wine violait la norme de hiérarchie du système de fichiers (FHS : « Filesystem Hierarchy Standard »). Il a donc été déplacé vers /var/lib/wine. Votre fichier /etc/wine.conf devrait être mis à jour automatiquement. Cependant, si vous avez des fichiers .winerc ou bien si vous avez écrit des scripts qui dépendent de l'ancien emplacement, vous devrez les mettre à jour vous-même.
+Description-it.UTF-8: Sposto /usr/share/wine/drivec in /var/lib/wine/drivec
+ La precedente posizione di default del Drive C in /usr/share/wine viola il Filesystem Hierarchy Standard, quindi viene spostato in /var/lib/wine. Il tuo /etc/wine.conf dovrebbe essere aggiornato in automatico, ma se hai un .winerc o hai scritto degli script che dipendono dalla vecchia posizione, dovrai aggiornarli da solo.
+Description-ja.UTF-8: /usr/share/wine/drivec を /var/lib/wine/drivec に移動しています
+ 以前のドライブ C のデフォルト位置 /usr/share/wine は、ファイルシステム階層標準に違反していたので、/var/lib/wine に再配置するようになっています。あなたの /etc/wine.conf は自動的に更新されるはずですが、もし .winerc や古い位置に依存して書かれたスクリプトがある場合には、それらをあなた自身で更新する必要があります。
+Description-nl.UTF-8: Verplaatsen van /usr/share/wine/drivec naar /var/lib/wine/drivec
+ De vorige standaard Schijf-C-lokatie in /usr/share/wine schendt de Filesystem Hierarchy Standard en is dus verplaatst naar /var/lib/wine. Uw /etc/wine.conf zou automatisch moeten worden bijgewerkt, maar als u een .winerc heeft of u heeft scripts geschreven die afhankelijk zijn van de oude lokatie, dan moet u deze zelf bijwerken.
+Description-pt.UTF-8: A mover /usr/share/wine/drivec para /var/lib/wine/drivec
+ A localização anterior, por omissão, da Drive C localizada em /usr/share/wine viola a Hierarquia Standard do sistema de Ficheiros (FHS), como tal será transferida para /var/lib/wine. O seu ficheiro /etc/wine.conf será actualizado automáticamente, no entanto se tiver um winerc ou tiver escrito 'scripts' que dependam do local antigo terá de os actualizar.
+Description-pt_BR.UTF-8: Movendo /usr/share/wine/drivec para /var/lib/wine/drivec
+ A antiga localização padrão do Drive C em /usr/share/wine viola a Hierarquia Padrão de Sistema de Arquivos e está sendo, portanto, movido para /var/lib/wine. O seu /etc/wine.conf deve ser atualizado automaticamente, exceto se você tiver um arquivo .winerc ou tiver escrito scripts que dependam da localização antiga, tendo, nesse caso, que atualizá-los manualmente.
+Description-ru.UTF-8: Каталог /usr/share/wine/drivec перемещён в /var/lib/wine/drivec
+ Предыдущее место по умолчанию для Диска C, /usr/share/wine, нарушает Filesystem Hierarchy Standard и поэтому перемещается в /var/lib/wine. Ваш /etc/wine.conf будет обновлён автоматически, но если у вас есть .winerc или написаны сценарии, которые зависят от старого места, то вы должны обновить путь самостоятельно.
+Description-sv.UTF-8: Flyttar /usr/share/wine/drivec till /var/lib/wine/drivec
+ Den tidigare standard sökvägen till Drive C i /usr/share/wine inkräktar på Filesystem Hierachy Standard som är därför flyttad till /var/lib/wine. Din /etc/wine.conf borde uppdateras automatiskt men om du har en winerc eller har skrivna skript som använder den gamla sökvägen måste du uppdatera dessa på egen hand.
+Description-tr.UTF-8: /usr/share/wine/drivec, /var/lib/wine/drivec'ye taşınıyor.
+ C sürücüsü için önceki öntanımlı konum olan /usr/share/wine Dosya Sistemi Düzeni standartlarını (FHS) ihlâl ediyor ve bu yüzden /var/lib/wine olarak değiştirilecek. /etc/wine.conf dosyası bu değişikliğe uygun şekilde otomatik olarak güncellenecektir, ancak eğer .winerc veya eski konuma göre yazılmış bir betik varsa bunları kendiniz güncellemelisiniz.
