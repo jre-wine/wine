@@ -34,7 +34,7 @@
 #  Primary configuration area - change this if you installed Wine to
 #    a different location
 #------------------------------------------------------------------------------
-WINEBIN=@bindir@
+WINEBIN=@libdir@/wine
 WINELIB=@libdir@
 WINESERVER=
 WINEDLLPATH=@dlldir@
