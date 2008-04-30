@@ -51,7 +51,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(font);
 #define X_PFONT_MAGIC		(0xFADE0000)
 #define X_FMC_MAGIC		(0x0000CAFE)
 
-#define MAX_FONTS	        1024*16
+#define MAX_FONTS	        1024*32
 #define MAX_LFD_LENGTH		256
 #define TILDE                   '~'
 #define HYPHEN                  '-'
