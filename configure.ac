@@ -1067,9 +1067,6 @@ case $host_os in
       WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                       [AC_SUBST(LDEXECFLAGS,["-Wl,--export-dynamic"])])
 
-      WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
-                      [LIBWINE_LDFLAGS="-Wl,--rpath,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"])
-
       case $host_cpu in
         *i[[3456789]]86* | x86_64)
           WINE_TRY_CFLAGS([-Wl,--section-start,.interp=0x7bf00400],
