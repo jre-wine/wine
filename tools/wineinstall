@@ -21,10 +21,10 @@
 
 #--- defaults (change these if you are a packager)
 CONFARGS=""                   # configure args, e.g. --prefix=/usr
-prefix=/usr/local             # installation prefix
+prefix=/usr                   # installation prefix
 bindir=$prefix/bin            # where winelib apps will be (or are) installed
 libdir=$prefix/lib            # where libwine.so will be (or is) installed
-BINDIST=no                    # whether called from a binary package config script
+BINDIST=yes                   # whether called from a binary package config script
 
 # functions
 
@@ -283,6 +283,9 @@ then {
   fi # [ `whoami` != 'root' ]
 
 }
+else {
+  WINEINSTALLED=yes
+}
 fi # BINDIST
 
 if [ "$WINEINSTALLED" = 'no' ]
@@ -300,4 +303,3 @@ echo "Installation complete for now. Good luck (this is still beta software)."
 echo "If you have problems with WINE, please read the documentation first,"
 echo "as many kinds of potential problems are explained there."
 
-exit 0
