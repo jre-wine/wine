@@ -318,6 +318,7 @@ typedef struct tagMSIFOLDER
 {
     struct list entry;
     LPWSTR Directory;
+    LPWSTR Parent;
     LPWSTR TargetDefault;
     LPWSTR SourceLongPath;
     LPWSTR SourceShortPath;
@@ -325,7 +326,6 @@ typedef struct tagMSIFOLDER
     LPWSTR ResolvedTarget;
     LPWSTR ResolvedSource;
     LPWSTR Property;   /* initially set property */
-    struct tagMSIFOLDER *Parent;
     INT   State;
         /* 0 = uninitialized */
         /* 1 = existing */
@@ -366,7 +366,6 @@ typedef struct tagMSIFILE
 typedef struct tagMSITEMPFILE
 {
     struct list entry;
-    LPWSTR File;
     LPWSTR Path;
 } MSITEMPFILE;
 
@@ -751,7 +750,7 @@ extern MSICOMPONENT *get_loaded_component( MSIPACKAGE* package, LPCWSTR Componen
 extern MSIFEATURE *get_loaded_feature( MSIPACKAGE* package, LPCWSTR Feature );
 extern MSIFILE *get_loaded_file( MSIPACKAGE* package, LPCWSTR file );
 extern MSIFOLDER *get_loaded_folder( MSIPACKAGE *package, LPCWSTR dir );
-extern int track_tempfile(MSIPACKAGE *package, LPCWSTR name, LPCWSTR path);
+extern int track_tempfile(MSIPACKAGE *package, LPCWSTR path);
 extern UINT schedule_action(MSIPACKAGE *package, UINT script, LPCWSTR action);
 extern void msi_free_action_script(MSIPACKAGE *package, UINT script);
 extern LPWSTR build_icon_path(MSIPACKAGE *, LPCWSTR);

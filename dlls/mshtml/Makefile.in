@@ -10,6 +10,7 @@ EXTRADEFS = -DCOM_NO_WINDOWS_H
 
 C_SRCS = \
 	conpoint.c \
+	editor.c \
 	hlink.c \
 	htmlbody.c \
 	htmldoc.c \
@@ -19,6 +20,8 @@ C_SRCS = \
 	htmlinput.c \
 	htmlnode.c \
 	htmlselect.c \
+	htmlstyle.c \
+	htmlstylesheet.c \
 	htmltextcont.c \
 	htmltextarea.c \
 	install.c \

@@ -1980,7 +1980,7 @@ HIMAGELIST WINAPI ImageList_Read (LPSTREAM pstm)
 {
     ILHEAD	ilHead;
     HIMAGELIST	himl;
-    HBITMAP	hbmColor=0,hbmMask=0;
+    HBITMAP	hbmColor=0;
     int		i;
 
     TRACE("%p\n", pstm);
@@ -1995,7 +1995,6 @@ HIMAGELIST WINAPI ImageList_Read (LPSTREAM pstm)
     himl = ImageList_Create(ilHead.cx, ilHead.cy, ilHead.flags, ilHead.cCurImage, ilHead.cMaxImage);
     if (!himl) {
 	DeleteObject(hbmColor);
-	DeleteObject(hbmMask);
 	return NULL;
     }
     if (!_read_bitmap(himl, himl->hdcImage, pstm, ilHead.flags & ~ILC_MASK)) {
@@ -2012,11 +2011,6 @@ HIMAGELIST WINAPI ImageList_Read (LPSTREAM pstm)
     SelectObject(himl->hdcImage, hbmColor);
     DeleteObject(himl->hbmImage);
     himl->hbmImage = hbmColor;
-    if (hbmMask){
-        SelectObject(himl->hdcMask, hbmMask);
-        DeleteObject(himl->hbmMask);
-        himl->hbmMask = hbmMask;
-    }
     himl->cCurImage = ilHead.cCurImage;
     himl->cMaxImage = ilHead.cMaxImage;
 
@@ -2129,12 +2123,12 @@ ImageList_Remove (HIMAGELIST himl, INT i)
 
             SelectObject (hdcBmp, hbmNewImage);
             imagelist_copy_images( himl, himl->hdcImage, hdcBmp, i,
-                                   (himl->cCurImage - i - 1), i + 1 );
+                                   (himl->cCurImage - i - 1), i - 1 );
 
             if (himl->hbmMask) {
                 SelectObject (hdcBmp, hbmNewMask);
                 imagelist_copy_images( himl, himl->hdcMask, hdcBmp, i,
-                                       (himl->cCurImage - i - 1), i + 1 );
+                                       (himl->cCurImage - i - 1), i - 1 );
             }
         }
 
@@ -2249,10 +2243,9 @@ ImageList_Replace (HIMAGELIST himl, INT i, HBITMAP hbmImage,
  */
 
 INT WINAPI
-ImageList_ReplaceIcon (HIMAGELIST himl, INT i, HICON hIcon)
+ImageList_ReplaceIcon (HIMAGELIST himl, INT nIndex, HICON hIcon)
 {
     HDC     hdcImage;
-    INT     nIndex;
     HICON   hBestFitIcon;
     HBITMAP hbmOldSrc;
     ICONINFO  ii;
@@ -2260,14 +2253,14 @@ ImageList_ReplaceIcon (HIMAGELIST himl, INT i, HICON hIcon)
     BOOL    ret;
     POINT   pt;
 
-    TRACE("(%p %d %p)\n", himl, i, hIcon);
+    TRACE("(%p %d %p)\n", himl, nIndex, hIcon);
 
     if (!is_valid(himl)) {
         ERR("invalid image list\n");
         return -1;
     }
-    if ((i >= himl->cMaxImage) || (i < -1)) {
-        ERR("invalid image index %d / %d\n", i, himl->cMaxImage);
+    if ((nIndex >= himl->cMaxImage) || (nIndex < -1)) {
+        ERR("invalid image index %d / %d\n", nIndex, himl->cMaxImage);
         return -1;
     }
 
@@ -2304,15 +2297,13 @@ ImageList_ReplaceIcon (HIMAGELIST himl, INT i, HICON hIcon)
         return -1;
     }
 
-    if (i == -1) {
+    if (nIndex == -1) {
         if (himl->cCurImage + 1 > himl->cMaxImage)
             IMAGELIST_InternalExpandBitmaps (himl, 1, 0, 0);
 
         nIndex = himl->cCurImage;
         himl->cCurImage++;
     }
-    else
-        nIndex = i;
 
     hdcImage = CreateCompatibleDC (0);
     TRACE("hdcImage=%p\n", hdcImage);

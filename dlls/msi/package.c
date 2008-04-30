@@ -54,11 +54,10 @@ static void MSI_FreePackage( MSIOBJECTHDR *arg)
 
     if( package->dialog )
         msi_dialog_destroy( package->dialog );
-    ACTION_free_package_structures(package);
-
-    msi_free_properties( package );
 
     msiobj_release( &package->db->hdr );
+    ACTION_free_package_structures(package);
+    msi_free_properties( package );
 }
 
 static UINT clone_properties( MSIPACKAGE *package )
@@ -428,34 +427,20 @@ static UINT msi_get_word_count( MSIPACKAGE *package )
     return word_count;
 }
 
-MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db, LPWSTR base_url )
+static MSIPACKAGE *msi_alloc_package( void )
 {
-    static const WCHAR szLevel[] = { 'U','I','L','e','v','e','l',0 };
-    static const WCHAR szpi[] = {'%','i',0};
-    static const WCHAR szProductCode[] = {
-        'P','r','o','d','u','c','t','C','o','d','e',0};
-    MSIPACKAGE *package = NULL;
-    WCHAR uilevel[10];
+    MSIPACKAGE *package;
     int i;
-
-    TRACE("%p\n", db);
 
     package = alloc_msiobject( MSIHANDLETYPE_PACKAGE, sizeof (MSIPACKAGE),
                                MSI_FreePackage );
     if( package )
     {
-        msiobj_addref( &db->hdr );
-
-        package->db = db;
         list_init( &package->components );
         list_init( &package->features );
         list_init( &package->files );
         list_init( &package->tempfiles );
         list_init( &package->folders );
-        package->ActionFormat = NULL;
-        package->LastAction = NULL;
-        package->dialog = NULL;
-        package->next_dialog = NULL;
         list_init( &package->subscriptions );
         list_init( &package->appids );
         list_init( &package->classes );
@@ -464,15 +449,38 @@ MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db, LPWSTR base_url )
         list_init( &package->progids );
         list_init( &package->RunningActions );
 
+        for (i=0; i<PROPERTY_HASH_SIZE; i++)
+            list_init( &package->props[i] );
+
+        package->ActionFormat = NULL;
+        package->LastAction = NULL;
+        package->dialog = NULL;
+        package->next_dialog = NULL;
+    }
+
+    return package;
+}
+
+MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db, LPWSTR base_url )
+{
+    static const WCHAR szLevel[] = { 'U','I','L','e','v','e','l',0 };
+    static const WCHAR szpi[] = {'%','i',0};
+    static const WCHAR szProductCode[] = {
+        'P','r','o','d','u','c','t','C','o','d','e',0};
+    MSIPACKAGE *package;
+    WCHAR uilevel[10];
+
+    TRACE("%p\n", db);
+
+    package = msi_alloc_package();
+    if (package)
+    {
+        msiobj_addref( &db->hdr );
+        package->db = db;
+
         package->WordCount = msi_get_word_count( package );
         package->PackagePath = strdupW( db->path );
         package->BaseURL = strdupW( base_url );
-
-        /* OK, here is where we do a slew of things to the database to 
-         * prep for all that is to come as a package */
-
-        for (i=0; i<PROPERTY_HASH_SIZE; i++)
-            list_init( &package->props[i] );
 
         clone_properties( package );
         set_installer_properties(package);
@@ -499,13 +507,14 @@ MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db, LPWSTR base_url )
 static LPCWSTR copy_package_to_temp( LPCWSTR szPackage, LPWSTR filename )
 {
     WCHAR path[MAX_PATH];
-    static const WCHAR szMSI[] = {'M','S','I',0};
+    static const WCHAR szMSI[] = {'m','s','i',0};
 
     GetTempPathW( MAX_PATH, path );
     GetTempFileNameW( path, szMSI, 0, filename );
 
     if( !CopyFileW( szPackage, filename, FALSE ) )
     {
+        DeleteFileW( filename );
         ERR("failed to copy package %s\n", debugstr_w(szPackage) );
         return szPackage;
     }
@@ -548,15 +557,16 @@ LPCWSTR msi_download_file( LPCWSTR szUrl, LPWSTR filename )
 
 UINT MSI_OpenPackageW(LPCWSTR szPackage, MSIPACKAGE **pPackage)
 {
+    static const WCHAR OriginalDatabase[] =
+        {'O','r','i','g','i','n','a','l','D','a','t','a','b','a','s','e',0};
+    static const WCHAR Database[] = {'D','A','T','A','B','A','S','E',0};
     MSIDATABASE *db = NULL;
     MSIPACKAGE *package;
     MSIHANDLE handle;
     LPWSTR ptr, base_url = NULL;
     UINT r;
-
-    static const WCHAR OriginalDatabase[] =
-        {'O','r','i','g','i','n','a','l','D','a','t','a','b','a','s','e',0};
-    static const WCHAR Database[] = {'D','A','T','A','B','A','S','E',0};
+    WCHAR temppath[MAX_PATH];
+    LPCWSTR file = szPackage;
 
     TRACE("%s %p\n", debugstr_w(szPackage), pPackage);
 
@@ -569,9 +579,6 @@ UINT MSI_OpenPackageW(LPCWSTR szPackage, MSIPACKAGE **pPackage)
     }
     else
     {
-        WCHAR temppath[MAX_PATH];
-        LPCWSTR file;
-
         if ( UrlIsW( szPackage, URLIS_URL ) )
         {
             file = msi_download_file( szPackage, temppath );
@@ -587,14 +594,12 @@ UINT MSI_OpenPackageW(LPCWSTR szPackage, MSIPACKAGE **pPackage)
             file = copy_package_to_temp( szPackage, temppath );
 
         r = MSI_OpenDatabaseW( file, MSIDBOPEN_READONLY, &db );
-
-        if (file != szPackage)
-            DeleteFileW( file );
-
         if( r != ERROR_SUCCESS )
         {
             if (GetLastError() == ERROR_FILE_NOT_FOUND)
                 msi_ui_error( 4, MB_OK | MB_ICONWARNING );
+            if (file != szPackage)
+                DeleteFileW( file );
 
             return r;
         }
@@ -604,7 +609,14 @@ UINT MSI_OpenPackageW(LPCWSTR szPackage, MSIPACKAGE **pPackage)
     msi_free( base_url );
     msiobj_release( &db->hdr );
     if( !package )
+    {
+        if (file != szPackage)
+            DeleteFileW( file );
         return ERROR_FUNCTION_FAILED;
+    }
+
+    if( file != szPackage )
+        track_tempfile( package, file );
 
     if( szPackage[0] != '#' )
     {

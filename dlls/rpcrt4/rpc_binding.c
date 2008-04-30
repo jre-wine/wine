@@ -255,9 +255,13 @@ RPC_STATUS RPCRT4_OpenBinding(RpcBinding* Binding, RpcConnection** Connection,
   }
   
   /* create a new connection */
-  RPCRT4_CreateConnection(&NewConnection, Binding->server, Binding->Protseq,
-                          Binding->NetworkAddr, Binding->Endpoint, NULL,
-                          Binding->AuthInfo, Binding);
+  status = RPCRT4_CreateConnection(&NewConnection, Binding->server,
+                                   Binding->Protseq, Binding->NetworkAddr,
+                                   Binding->Endpoint, NULL, Binding->AuthInfo,
+                                   Binding);
+  if (status != RPC_S_OK)
+    return status;
+
   status = RPCRT4_OpenClientConnection(NewConnection);
   if (status != RPC_S_OK)
   {
@@ -1045,9 +1049,23 @@ RpcBindingSetAuthInfoExA( RPC_BINDING_HANDLE Binding, RPC_CSTR ServerPrincName,
   TRACE("%p %s %lu %lu %p %lu %p\n", Binding, debugstr_a((const char*)ServerPrincName),
         AuthnLevel, AuthnSvc, AuthIdentity, AuthzSvr, SecurityQos);
 
-  if (AuthnLevel != RPC_C_AUTHN_LEVEL_CONNECT)
+  if (AuthnSvc == RPC_C_AUTHN_DEFAULT)
+    AuthnSvc = RPC_C_AUTHN_WINNT;
+
+  /* FIXME: the mapping should probably be retrieved using SSPI somehow */
+  if (AuthnLevel == RPC_C_AUTHN_LEVEL_DEFAULT)
+    AuthnLevel = RPC_C_AUTHN_LEVEL_NONE;
+
+  if ((AuthnLevel == RPC_C_AUTHN_LEVEL_NONE) || (AuthnSvc == RPC_C_AUTHN_NONE))
   {
-    FIXME("unsupported AuthnLevel %lu\n", AuthnLevel);
+    if (bind->AuthInfo) RpcAuthInfo_Release(bind->AuthInfo);
+    bind->AuthInfo = NULL;
+    return RPC_S_OK;
+  }
+
+  if (AuthnLevel > RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
+  {
+    FIXME("unknown AuthnLevel %lu\n", AuthnLevel);
     return RPC_S_UNKNOWN_AUTHN_LEVEL;
   }
 
@@ -1117,9 +1135,23 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
   TRACE("%p %s %lu %lu %p %lu %p\n", Binding, debugstr_w((const WCHAR*)ServerPrincName),
         AuthnLevel, AuthnSvc, AuthIdentity, AuthzSvr, SecurityQos);
 
-  if (AuthnLevel != RPC_C_AUTHN_LEVEL_CONNECT)
+  if (AuthnSvc == RPC_C_AUTHN_DEFAULT)
+    AuthnSvc = RPC_C_AUTHN_WINNT;
+
+  /* FIXME: the mapping should probably be retrieved using SSPI somehow */
+  if (AuthnLevel == RPC_C_AUTHN_LEVEL_DEFAULT)
+    AuthnLevel = RPC_C_AUTHN_LEVEL_NONE;
+
+  if ((AuthnLevel == RPC_C_AUTHN_LEVEL_NONE) || (AuthnSvc == RPC_C_AUTHN_NONE))
   {
-    FIXME("unsupported AuthnLevel %lu\n", AuthnLevel);
+    if (bind->AuthInfo) RpcAuthInfo_Release(bind->AuthInfo);
+    bind->AuthInfo = NULL;
+    return RPC_S_OK;
+  }
+
+  if (AuthnLevel > RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
+  {
+    FIXME("unknown AuthnLevel %lu\n", AuthnLevel);
     return RPC_S_UNKNOWN_AUTHN_LEVEL;
   }
 

@@ -34,6 +34,7 @@
 #include "mshtmcid.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 #include "mshtml_private.h"
 
@@ -45,6 +46,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 #define NSCMD_FONTCOLOR "cmd_fontColor"
 #define NSCMD_ALIGN "cmd_align"
 #define NSCMD_FONTFACE "cmd_fontFace"
+#define NSCMD_INDENT "cmd_indent"
+#define NSCMD_OUTDENT "cmd_outdent"
+#define NSCMD_INSERTHR "cmd_insertHR"
+#define NSCMD_UL "cmd_ul"
+#define NSCMD_OL "cmd_ol"
 
 #define NSSTATE_ATTRIBUTE "state_attribute"
 #define NSSTATE_ALL "state_all"
@@ -459,8 +465,43 @@ static HRESULT exec_forecolor(HTMLDocument *This, VARIANT *in, VARIANT *out)
 
 static HRESULT exec_fontsize(HTMLDocument *This, VARIANT *in, VARIANT *out)
 {
-    FIXME("(%p)->(%p %p)\n", This, in, out);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p %p)\n", This, in, out);
+
+    if(out) {
+        WCHAR val[10] = {0};
+
+        switch(V_VT(out)) {
+        case VT_I4:
+            get_font_size(This, val);
+            V_I4(out) = strtolW(val, NULL, 10);
+            break;
+        case VT_BSTR:
+            get_font_size(This, val);
+            V_BSTR(out) = SysAllocString(val);
+            break;
+        default:
+            FIXME("unsupported vt %d\n", V_VT(out));
+        }
+    }
+
+    if(in) {
+        switch(V_VT(in)) {
+        case VT_I4: {
+            WCHAR size[10];
+            static const WCHAR format[] = {'%','d',0};
+            wsprintfW(size, format, V_I4(in));
+            set_font_size(This, size);
+            break;
+        }
+        case VT_BSTR:
+            set_font_size(This, V_BSTR(in));
+            break;
+        default:
+            FIXME("unsupported vt %d\n", V_VT(out));
+        }
+    }
+
+    return S_OK;
 }
 
 static HRESULT exec_bold(HTMLDocument *This)
@@ -613,6 +654,56 @@ static HRESULT exec_editmode(HTMLDocument *This)
 static HRESULT exec_baselinefont3(HTMLDocument *This)
 {
     FIXME("(%p)\n", This);
+    return S_OK;
+}
+
+static HRESULT exec_horizontalline(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_INSERTHR, NULL);
+
+    return S_OK;
+}
+
+static HRESULT exec_orderlist(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_OL, NULL);
+
+    return S_OK;
+}
+
+static HRESULT exec_unorderlist(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_UL, NULL);
+
+    return S_OK;
+}
+
+static HRESULT exec_indent(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_INDENT, NULL);
+
+    return S_OK;
+}
+
+static HRESULT exec_outdent(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_OUTDENT, NULL);
+
     return S_OK;
 }
 
@@ -779,24 +870,24 @@ static HRESULT WINAPI OleCommandTarget_QueryStatus(IOleCommandTarget *iface, con
                 prgCmds[i].cmdf = query_edit_status(This, NSCMD_UNDERLINE);
                 break;
             case IDM_HORIZONTALLINE:
-                FIXME("CGID_MSHTML: IDM_HORIZONTALLINE\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_HORIZONTALLINE\n");
+                prgCmds[i].cmdf = query_edit_status(This, NULL);
                 break;
             case IDM_ORDERLIST:
-                FIXME("CGID_MSHTML: IDM_ORDERLIST\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_ORDERLIST\n");
+                prgCmds[i].cmdf = query_edit_status(This, NSCMD_OL);
                 break;
             case IDM_UNORDERLIST:
-                FIXME("CGID_MSHTML: IDM_UNORDERLIST\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_HORIZONTALLINE\n");
+                prgCmds[i].cmdf = query_edit_status(This, NSCMD_UL);
                 break;
             case IDM_INDENT:
-                FIXME("CGID_MSHTML: IDM_INDENT\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_INDENT\n");
+                prgCmds[i].cmdf = query_edit_status(This, NULL);
                 break;
             case IDM_OUTDENT:
-                FIXME("CGID_MSHTML: IDM_OUTDENT\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_OUTDENT\n");
+                prgCmds[i].cmdf = query_edit_status(This, NULL);
                 break;
             case IDM_BLOCKDIRLTR:
                 FIXME("CGID_MSHTML: IDM_BLOCKDIRLTR\n");
@@ -885,6 +976,26 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             return exec_editmode(This);
         case IDM_BASELINEFONT3:
             return exec_baselinefont3(This);
+        case IDM_HORIZONTALLINE:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_horizontalline(This);
+        case IDM_ORDERLIST:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_orderlist(This);
+        case IDM_UNORDERLIST:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_unorderlist(This);
+        case IDM_INDENT:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_indent(This);
+        case IDM_OUTDENT:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_outdent(This);
         default:
             FIXME("unsupported nCmdID %d of CGID_MSHTML group\n", nCmdID);
             return OLECMDERR_E_NOTSUPPORTED;

@@ -692,6 +692,10 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PFILEPATHS)
 #define LogSevFatalError    0x00000003
 #define LogSevMaximum       0x00000004
 
+#define SRCINFO_PATH           1
+#define SRCINFO_TAGFILE        2
+#define SRCINFO_DESCRIPTION    3
+
 LONG     WINAPI AddTagToGroupOrderList(PCWSTR lpGroupName, DWORD dwUnknown2, DWORD dwUnknown3);
 DWORD    WINAPI CaptureAndConvertAnsiArg(PCSTR lpSrc, PWSTR *lpDst);
 DWORD    WINAPI CaptureStringArg(PCWSTR lpSrc, PWSTR *lpDst);
@@ -814,9 +818,18 @@ BOOL     WINAPI SetupGetLineTextW( PINFCONTEXT context, HINF hinf, PCWSTR sectio
 BOOL     WINAPI SetupGetMultiSzFieldA( PINFCONTEXT context, DWORD index, PSTR buffer, DWORD size, LPDWORD required );
 BOOL     WINAPI SetupGetMultiSzFieldW( PINFCONTEXT context, DWORD index, PWSTR buffer, DWORD size, LPDWORD required );
 #define         SetupGetMultiSzField WINELIB_NAME_AW(SetupGetMultiSzField)
+BOOL     WINAPI SetupGetSourceFileLocationA( HINF hinf, PINFCONTEXT context, PCSTR filename, PUINT source_id, PSTR buffer, DWORD buffer_size, PDWORD required_size );
+BOOL     WINAPI SetupGetSourceFileLocationW( HINF hinf, PINFCONTEXT context, PCWSTR filename, PUINT source_id, PWSTR buffer, DWORD buffer_size, PDWORD required_size );
+#define         SetupGetSourceFileLocation WINELIB_NAME_AW(SetupGetSourceFileLocation)
+BOOL     WINAPI SetupGetSourceInfoA( HINF hinf, UINT source_id, UINT info, PSTR buffer, DWORD buffer_size, LPDWORD required_size );
+BOOL     WINAPI SetupGetSourceInfoW( HINF hinf, UINT source_id, UINT info, PWSTR buffer, DWORD buffer_size, LPDWORD required_size );
+#define         SetupGetSourceInfo WINELIB_NAME_AW(SetupGetSourceInfo)
 BOOL     WINAPI SetupGetStringFieldA( PINFCONTEXT context, DWORD index, PSTR buffer, DWORD size, PDWORD required );
 BOOL     WINAPI SetupGetStringFieldW( PINFCONTEXT context, DWORD index, PWSTR buffer, DWORD size, PDWORD required );
 #define         SetupGetStringField WINELIB_NAME_AW(SetupGetStringField)
+BOOL     WINAPI SetupGetTargetPathA( HINF hinf, PINFCONTEXT context, PCSTR section, PSTR buffer, DWORD buffer_size, PDWORD required_size );
+BOOL     WINAPI SetupGetTargetPathW( HINF hinf, PINFCONTEXT context, PCWSTR section, PWSTR buffer, DWORD buffer_size, PDWORD required_size );
+#define         SetupGetTargetPath WINELIB_NAME_AW(SetupGetTargetPath)
 PVOID    WINAPI SetupInitDefaultQueueCallback( HWND );
 PVOID    WINAPI SetupInitDefaultQueueCallbackEx( HWND, HWND, UINT, DWORD, PVOID );
 BOOL     WINAPI SetupInstallFilesFromInfSectionA( HINF, HINF, HSPFILEQ, PCSTR, PCSTR, UINT );

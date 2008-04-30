@@ -135,6 +135,10 @@ static WINED3DGLTYPE const glTypeLookup[WINED3DDECLTYPE_UNUSED] = {
 #define NP2_REPACK 1
 #define NP2_NATIVE 2
 
+#define ORM_BACKBUFFER  0
+#define ORM_PBUFFER     1
+#define ORM_FBO         2
+
 #define SHADER_SW   0
 #define SHADER_ARB  1
 #define SHADER_GLSL 2
@@ -160,6 +164,7 @@ typedef struct wined3d_settings_s {
   BOOL glslRequested;
 /* nonpower 2 function */
   int nonpower2_mode;
+  int offscreen_rendering_mode;
   int rendertargetlock_mode;
 /* Memory tracking and object counting */
   unsigned int emulated_textureram;
@@ -209,8 +214,6 @@ extern int num_lock;
   (vec)[1] = D3DCOLOR_G(dw); \
   (vec)[2] = D3DCOLOR_B(dw); \
   (vec)[3] = D3DCOLOR_A(dw);
-
-#define GLTEXTURECUBEMAP GL_TEXTURE_CUBE_MAP_ARB
 
 /* DirectX Device Limits */
 /* --------------------- */
@@ -545,7 +548,9 @@ typedef struct IWineD3DDeviceImpl
     UINT                    currentPalette;
 
     /* For rendering to a texture using glCopyTexImage */
-    BOOL                    renderUpsideDown;
+    BOOL                    render_offscreen;
+    WINED3D_DEPTHCOPYSTATE  depth_copy_state;
+    GLuint                  fbo;
 
     /* Cursor management */
     BOOL                    bCursorVisible;

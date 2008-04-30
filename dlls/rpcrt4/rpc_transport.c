@@ -115,16 +115,16 @@ static RPC_STATUS rpcrt4_conn_listen_pipe(RpcConnection_np *npc)
   if (ConnectNamedPipe(npc->pipe, &npc->ovl))
     return RPC_S_OK;
 
-  WARN("Couldn't ConnectNamedPipe (error was %d)\n", GetLastError());
   if (GetLastError() == ERROR_PIPE_CONNECTED) {
     SetEvent(npc->ovl.hEvent);
     return RPC_S_OK;
   }
   if (GetLastError() == ERROR_IO_PENDING) {
-    /* FIXME: looks like we need to GetOverlappedResult here? */
+    /* will be completed in rpcrt4_protseq_np_wait_for_new_connection */
     return RPC_S_OK;
   }
   npc->listening = FALSE;
+  WARN("Couldn't ConnectNamedPipe (error was %d)\n", GetLastError());
   return RPC_S_OUT_OF_RESOURCES;
 }
 
@@ -1293,7 +1293,10 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
 
   ops = rpcrt4_get_conn_protseq_ops(Protseq);
   if (!ops)
+  {
+    FIXME("not supported for protseq %s\n", Protseq);
     return RPC_S_PROTSEQ_NOT_SUPPORTED;
+  }
 
   NewConnection = ops->alloc();
   NewConnection->Next = NULL;
@@ -1306,7 +1309,7 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
   memset(&NewConnection->ActiveInterface, 0, sizeof(NewConnection->ActiveInterface));
   NewConnection->NextCallId = 1;
 
-  memset(&NewConnection->ctx, 0, sizeof(NewConnection->ctx));
+  SecInvalidateHandle(&NewConnection->ctx);
   if (AuthInfo) RpcAuthInfo_AddRef(AuthInfo);
   NewConnection->AuthInfo = AuthInfo;
   list_init(&NewConnection->conn_pool_entry);

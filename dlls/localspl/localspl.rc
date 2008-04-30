@@ -39,3 +39,4 @@
 #include "spl_En.rc"
 #include "spl_De.rc"
 #include "spl_Ko.rc"
+#include "spl_No.rc"

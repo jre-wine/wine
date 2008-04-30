@@ -67,9 +67,32 @@ LPWSTR build_icon_path(MSIPACKAGE *package, LPCWSTR icon_name )
     return FilePath;
 }
 
-LPWSTR msi_dup_record_field( MSIRECORD *row, INT index )
+LPWSTR msi_dup_record_field( MSIRECORD *rec, INT field )
 {
-    return strdupW( MSI_RecordGetString(row,index) );
+    DWORD sz = 0;
+    LPWSTR str;
+    UINT r;
+
+    if (MSI_RecordIsNull( rec, field ))
+        return NULL;
+
+    r = MSI_RecordGetStringW( rec, field, NULL, &sz );
+    if (r != ERROR_SUCCESS)
+        return NULL;
+
+    sz ++;
+    str = msi_alloc( sz * sizeof (WCHAR) );
+    if (!str)
+        return str;
+    str[0] = 0;
+    r = MSI_RecordGetStringW( rec, field, str, &sz );
+    if (r != ERROR_SUCCESS)
+    {
+        ERR("failed to get string!\n");
+        msi_free( str );
+        return NULL;
+    }
+    return str;
 }
 
 MSICOMPONENT* get_loaded_component( MSIPACKAGE* package, LPCWSTR Component )
@@ -108,31 +131,22 @@ MSIFILE* get_loaded_file( MSIPACKAGE* package, LPCWSTR key )
     return NULL;
 }
 
-int track_tempfile( MSIPACKAGE *package, LPCWSTR name, LPCWSTR path )
+int track_tempfile( MSIPACKAGE *package, LPCWSTR path )
 {
     MSITEMPFILE *temp;
 
+    TRACE("%s\n", debugstr_w(path));
+
     LIST_FOR_EACH_ENTRY( temp, &package->tempfiles, MSITEMPFILE, entry )
-    {
-        if (lstrcmpW( name, temp->File )==0)
-        {
-            TRACE("tempfile %s already exists with path %s\n",
-                debugstr_w(temp->File), debugstr_w(temp->Path));
-            return -1;
-        }
-    }
+        if (!lstrcmpW( path, temp->Path ))
+            return 0;
 
     temp = msi_alloc_zero( sizeof (MSITEMPFILE) );
     if (!temp)
         return -1;
 
     list_add_head( &package->tempfiles, &temp->entry );
-
-    temp->File = strdupW( name );
     temp->Path = strdupW( path );
-
-    TRACE("adding tempfile %s with path %s\n",
-           debugstr_w(temp->File), debugstr_w(temp->Path));
 
     return 0;
 }
@@ -140,7 +154,7 @@ int track_tempfile( MSIPACKAGE *package, LPCWSTR name, LPCWSTR path )
 MSIFOLDER *get_loaded_folder( MSIPACKAGE *package, LPCWSTR dir )
 {
     MSIFOLDER *folder;
-    
+
     LIST_FOR_EACH_ENTRY( folder, &package->folders, MSIFOLDER, entry )
     {
         if (lstrcmpW( dir, folder->Directory )==0)
@@ -210,19 +224,22 @@ LPWSTR resolve_folder(MSIPACKAGE *package, LPCWSTR name, BOOL source,
                       BOOL set_prop, MSIFOLDER **folder)
 {
     MSIFOLDER *f;
-    LPWSTR p, path = NULL;
+    LPWSTR p, path = NULL, parent;
 
     TRACE("Working to resolve %s\n",debugstr_w(name));
 
     if (!name)
         return NULL;
 
+    if (!lstrcmpW(name,cszSourceDir))
+        name = cszTargetDir;
+
     f = get_loaded_folder( package, name );
     if (!f)
         return NULL;
 
     /* special resolving for Target and Source root dir */
-    if (strcmpW(name,cszTargetDir)==0 || strcmpW(name,cszSourceDir)==0)
+    if (!strcmpW(name,cszTargetDir))
     {
         if (!f->ResolvedTarget && !f->Property)
         {
@@ -258,76 +275,79 @@ LPWSTR resolve_folder(MSIPACKAGE *package, LPCWSTR name, BOOL source,
         TRACE("   already resolved to %s\n",debugstr_w(path));
         return path;
     }
-    else if (source && f->ResolvedSource)
+
+    if (source && f->ResolvedSource)
     {
         path = strdupW( f->ResolvedSource );
         TRACE("   (source)already resolved to %s\n",debugstr_w(path));
         return path;
     }
-    else if (!source && f->Property)
+
+    if (!source && f->Property)
     {
         path = build_directory_name( 2, f->Property, NULL );
-                    
+
         TRACE("   internally set to %s\n",debugstr_w(path));
         if (set_prop)
             MSI_SetPropertyW( package, name, path );
         return path;
     }
 
-    if (f->Parent)
+    if (!f->Parent)
+        return path;
+
+    parent = f->Parent;
+
+    TRACE(" ! Parent is %s\n", debugstr_w(parent));
+
+    p = resolve_folder(package, parent, source, set_prop, NULL);
+    if (!source)
     {
-        LPWSTR parent = f->Parent->Directory;
+        TRACE("   TargetDefault = %s\n", debugstr_w(f->TargetDefault));
 
-        TRACE(" ! Parent is %s\n", debugstr_w(parent));
-
-        p = resolve_folder(package, parent, source, set_prop, NULL);
-        if (!source)
-        {
-            TRACE("   TargetDefault = %s\n", debugstr_w(f->TargetDefault));
-
-            path = build_directory_name( 3, p, f->TargetDefault, NULL );
-            clean_spaces_from_path( path );
-            f->ResolvedTarget = strdupW( path );
-            TRACE("target -> %s\n", debugstr_w(path));
-            if (set_prop)
-                MSI_SetPropertyW(package,name,path);
-        }
-        else 
-        {
-            /* source may be in a few different places ... check each of them */
-            path = NULL;
-
-            /* try the long path directory */
-            if (f->SourceLongPath)
-            {
-                path = build_directory_name( 3, p, f->SourceLongPath, NULL );
-                if (INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
-                {
-                    msi_free( path );
-                    path = NULL;
-                }
-            }
-
-            /* try the short path directory */
-            if (!path && f->SourceShortPath)
-            {
-                path = build_directory_name( 3, p, f->SourceShortPath, NULL );
-                if (INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
-                {
-                    msi_free( path );
-                    path = NULL;
-                }
-            }
-
-            /* try the root of the install */
-            if (!path)
-                path = get_source_root( package );
-
-            TRACE("source -> %s\n", debugstr_w(path));
-            f->ResolvedSource = strdupW( path );
-        }
-        msi_free(p);
+        path = build_directory_name( 3, p, f->TargetDefault, NULL );
+        clean_spaces_from_path( path );
+        f->ResolvedTarget = strdupW( path );
+        TRACE("target -> %s\n", debugstr_w(path));
+        if (set_prop)
+            MSI_SetPropertyW(package,name,path);
     }
+    else
+    {
+        /* source may be in a few different places ... check each of them */
+        path = NULL;
+
+        /* try the long path directory */
+        if (f->SourceLongPath)
+        {
+            path = build_directory_name( 3, p, f->SourceLongPath, NULL );
+            if (INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
+            {
+                msi_free( path );
+                path = NULL;
+            }
+        }
+
+        /* try the short path directory */
+        if (!path && f->SourceShortPath)
+        {
+            path = build_directory_name( 3, p, f->SourceShortPath, NULL );
+            if (INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
+            {
+                msi_free( path );
+                path = NULL;
+            }
+        }
+
+        /* try the root of the install */
+        if (!path)
+            path = get_source_root( package );
+
+        TRACE("source -> %s\n", debugstr_w(path));
+        f->ResolvedSource = strdupW( path );
+    }
+    msi_free(p);
+
     return path;
 }
 
@@ -405,8 +425,8 @@ static void remove_tracked_tempfiles(MSIPACKAGE* package)
 
         list_remove( &temp->entry );
         TRACE("deleting temp file %s\n", debugstr_w( temp->Path ));
-        DeleteFileW( temp->Path );
-        msi_free( temp->File );
+        if (!DeleteFileW( temp->Path ))
+            ERR("failed to delete %s\n", debugstr_w( temp->Path ));
         msi_free( temp->Path );
         msi_free( temp );
     }
@@ -479,6 +499,7 @@ void ACTION_free_package_structures( MSIPACKAGE* package)
         MSIFOLDER *folder = LIST_ENTRY( item, MSIFOLDER, entry );
 
         list_remove( &folder->entry );
+        msi_free( folder->Parent );
         msi_free( folder->Directory );
         msi_free( folder->TargetDefault );
         msi_free( folder->SourceLongPath );
@@ -492,7 +513,7 @@ void ACTION_free_package_structures( MSIPACKAGE* package)
     LIST_FOR_EACH_SAFE( item, cursor, &package->components )
     {
         MSICOMPONENT *comp = LIST_ENTRY( item, MSICOMPONENT, entry );
-        
+
         list_remove( &comp->entry );
         msi_free( comp->Component );
         msi_free( comp->ComponentId );

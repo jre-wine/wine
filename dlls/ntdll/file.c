@@ -286,7 +286,6 @@ typedef struct async_fileio
     void*               apc_user;
     char*               buffer;
     unsigned int        count;
-    off_t               offset;
     int                 queue_apc_on_error;
     BOOL                avail_mode;
     HANDLE              event;
@@ -371,6 +370,7 @@ NTSTATUS FILE_GetNtStatus(void)
     case ENOTTY:
     case EOPNOTSUPP:return STATUS_NOT_SUPPORTED;
     case ECONNRESET:return STATUS_PIPE_DISCONNECTED;
+    case EFAULT:    return STATUS_ACCESS_VIOLATION;
     case ENOEXEC:   /* ?? */
     case ESPIPE:    /* ?? */
     case EEXIST:    /* ?? */
@@ -396,21 +396,13 @@ static void WINAPI FILE_AsyncReadService(void *user, PIO_STATUS_BLOCK iosb, ULON
     case STATUS_ALERTED: /* got some new data */
         if (iosb->u.Status != STATUS_PENDING) FIXME("unexpected status %08x\n", iosb->u.Status);
         /* check to see if the data is ready (non-blocking) */
-        if ((iosb->u.Status = server_get_unix_fd( fileio->handle, FILE_READ_DATA, &fd, &needs_close, NULL )))
+        if ((iosb->u.Status = server_get_unix_fd( fileio->handle, FILE_READ_DATA, &fd,
+                                                  &needs_close, NULL, NULL )))
         {
             fileio_terminate(fileio, iosb);
             break;
         }
-        if ( fileio->avail_mode )
-            result = read(fd, &fileio->buffer[already], fileio->count - already);
-        else
-        {
-            result = pread(fd, &fileio->buffer[already],
-                           fileio->count - already,
-                           fileio->offset + already);
-            if ((result < 0) && (errno == ESPIPE))
-                result = read(fd, &fileio->buffer[already], fileio->count - already);
-        }
+        result = read(fd, &fileio->buffer[already], fileio->count - already);
         if (needs_close) close( fd );
 
         if (result < 0)
@@ -486,7 +478,8 @@ NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
                            PIO_STATUS_BLOCK io_status, void* buffer, ULONG length,
                            PLARGE_INTEGER offset, PULONG key)
 {
-    int unix_handle, needs_close, flags;
+    int result, unix_handle, needs_close, flags;
+    enum server_fd_type type;
 
     TRACE("(%p,%p,%p,%p,%p,%p,0x%08x,%p,%p),partial stub!\n",
           hFile,hEvent,apc,apc_user,io_status,buffer,length,offset,key);
@@ -494,8 +487,45 @@ NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
     if (!io_status) return STATUS_ACCESS_VIOLATION;
 
     io_status->Information = 0;
-    io_status->u.Status = server_get_unix_fd( hFile, FILE_READ_DATA, &unix_handle, &needs_close, &flags );
+    io_status->u.Status = server_get_unix_fd( hFile, FILE_READ_DATA, &unix_handle,
+                                              &needs_close, &type, &flags );
     if (io_status->u.Status) return io_status->u.Status;
+
+    if (type == FD_TYPE_FILE && offset)
+    {
+        /* async I/O doesn't make sense on regular files */
+        if (flags & FD_FLAG_OVERLAPPED)
+        {
+            while ((result = pread( unix_handle, buffer, length, offset->QuadPart )) == -1)
+            {
+                if (errno == EINTR) continue;
+                if (errno == EAGAIN || errno == ESPIPE)
+                {
+                    io_status->u.Status = STATUS_PENDING;
+                    break;
+                }
+                result = 0;
+                io_status->u.Status = FILE_GetNtStatus();
+                goto done;
+            }
+            if (result >= 0)
+            {
+                io_status->Information = result;
+                io_status->u.Status = result ? STATUS_SUCCESS : STATUS_END_OF_FILE;
+                if (hEvent) NtSetEvent( hEvent, NULL );
+                if (apc && !io_status->u.Status) apc( apc_user, io_status, io_status->Information );
+                goto done;
+            }
+        }
+        else
+        {
+            if (lseek( unix_handle, offset->QuadPart, SEEK_SET ) == (off_t)-1)
+            {
+                io_status->u.Status = FILE_GetNtStatus();
+                goto done;
+            }
+        }
+    }
 
     if (flags & FD_FLAG_RECV_SHUTDOWN)
     {
@@ -533,14 +563,6 @@ NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
         }
         fileio->handle = hFile;
         fileio->count = length;
-        if ( offset == NULL ) 
-            fileio->offset = 0;
-        else
-        {
-            fileio->offset = offset->QuadPart;
-            if (offset->u.HighPart && fileio->offset == offset->u.LowPart)
-                FIXME("High part of offset is lost\n");
-        } 
         fileio->apc = apc;
         fileio->apc_user = apc_user;
         fileio->buffer = buffer;
@@ -587,27 +609,15 @@ NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
         return io_status->u.Status;
     }
 
-    if (offset)
-    {
-        FILE_POSITION_INFORMATION   fpi;
-
-        fpi.CurrentByteOffset = *offset;
-        io_status->u.Status = NtSetInformationFile(hFile, io_status, &fpi, sizeof(fpi), 
-                                                   FilePositionInformation);
-        if (io_status->u.Status) goto done;
-    }
     /* code for synchronous reads */
-    while ((io_status->Information = read( unix_handle, buffer, length )) == -1)
+    while ((result = read( unix_handle, buffer, length )) == -1)
     {
         if ((errno == EAGAIN) || (errno == EINTR)) continue;
-        if (errno == EFAULT)
-        {
-            io_status->Information = 0;
-            io_status->u.Status = STATUS_ACCESS_VIOLATION;
-        }
-        else io_status->u.Status = FILE_GetNtStatus();
-	break;
+        io_status->u.Status = FILE_GetNtStatus();
+        result = 0;
+        break;
     }
+    io_status->Information = result;
     if (io_status->u.Status == STATUS_SUCCESS && io_status->Information == 0)
     {
         struct stat st;
@@ -637,20 +647,13 @@ static void WINAPI FILE_AsyncWriteService(void *ovp, IO_STATUS_BLOCK *iosb, ULON
     {
     case STATUS_ALERTED:
         /* write some data (non-blocking) */
-        if ((iosb->u.Status = server_get_unix_fd( fileio->handle, FILE_WRITE_DATA, &fd, &needs_close, NULL )))
+        if ((iosb->u.Status = server_get_unix_fd( fileio->handle, FILE_WRITE_DATA, &fd,
+                                                  &needs_close, NULL, NULL )))
         {
             fileio_terminate(fileio, iosb);
             break;
         }
-        if ( fileio->avail_mode )
-            result = write(fd, &fileio->buffer[already], fileio->count - already);
-        else
-        {
-            result = pwrite(fd, &fileio->buffer[already],
-                            fileio->count - already, fileio->offset + already);
-            if ((result < 0) && (errno == ESPIPE))
-                result = write(fd, &fileio->buffer[already], fileio->count - already);
-        }
+        result = write(fd, &fileio->buffer[already], fileio->count - already);
         if (needs_close) close( fd );
 
         if (result < 0)
@@ -705,7 +708,8 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
                             const void* buffer, ULONG length,
                             PLARGE_INTEGER offset, PULONG key)
 {
-    int unix_handle, needs_close, flags;
+    int result, unix_handle, needs_close, flags;
+    enum server_fd_type type;
 
     TRACE("(%p,%p,%p,%p,%p,%p,0x%08x,%p,%p)!\n",
           hFile,hEvent,apc,apc_user,io_status,buffer,length,offset,key);
@@ -713,8 +717,46 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
     if (!io_status) return STATUS_ACCESS_VIOLATION;
 
     io_status->Information = 0;
-    io_status->u.Status = server_get_unix_fd( hFile, FILE_WRITE_DATA, &unix_handle, &needs_close, &flags );
+    io_status->u.Status = server_get_unix_fd( hFile, FILE_WRITE_DATA, &unix_handle,
+                                              &needs_close, &type, &flags );
     if (io_status->u.Status) return io_status->u.Status;
+
+    if (type == FD_TYPE_FILE && offset)
+    {
+        if (flags & FD_FLAG_OVERLAPPED)
+        {
+            /* async I/O doesn't make sense on regular files */
+            while ((result = pwrite( unix_handle, buffer, length, offset->QuadPart )) == -1)
+            {
+                if (errno == EINTR) continue;
+                if (errno == EAGAIN || errno == ESPIPE)
+                {
+                    io_status->u.Status = STATUS_PENDING;
+                    break;
+                }
+                result = 0;
+                if (errno == EFAULT) io_status->u.Status = STATUS_INVALID_USER_BUFFER;
+                else io_status->u.Status = FILE_GetNtStatus();
+                goto done;
+            }
+            if (result >= 0)
+            {
+                io_status->Information = result;
+                io_status->u.Status = STATUS_SUCCESS;
+                if (hEvent) NtSetEvent( hEvent, NULL );
+                if (apc) apc( apc_user, io_status, io_status->Information );
+                goto done;
+            }
+        }
+        else
+        {
+            if (lseek( unix_handle, offset->QuadPart, SEEK_SET ) == (off_t)-1)
+            {
+                io_status->u.Status = FILE_GetNtStatus();
+                goto done;
+            }
+        }
+    }
 
     if (flags & FD_FLAG_SEND_SHUTDOWN)
     {
@@ -752,16 +794,6 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
         }
         fileio->handle = hFile;
         fileio->count = length;
-        if (offset)
-        {
-            fileio->offset = offset->QuadPart;
-            if (offset->u.HighPart && fileio->offset == offset->u.LowPart)
-                FIXME("High part of offset is lost\n");
-        }
-        else  
-        {
-            fileio->offset = 0;
-        }
         fileio->apc = apc;
         fileio->apc_user = apc_user;
         fileio->buffer = (void*)buffer;
@@ -808,29 +840,16 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
         return io_status->u.Status;
     }
 
-    if (offset)
-    {
-        FILE_POSITION_INFORMATION   fpi;
-
-        fpi.CurrentByteOffset = *offset;
-        io_status->u.Status = NtSetInformationFile(hFile, io_status, &fpi, sizeof(fpi),
-                                                   FilePositionInformation);
-        if (io_status->u.Status) goto done;
-    }
-
     /* synchronous file write */
-    while ((io_status->Information = write( unix_handle, buffer, length )) == -1)
+    while ((result = write( unix_handle, buffer, length )) == -1)
     {
         if ((errno == EAGAIN) || (errno == EINTR)) continue;
-        if (errno == EFAULT)
-        {
-            io_status->Information = 0;
-            io_status->u.Status = STATUS_INVALID_USER_BUFFER;
-        }
-        else if (errno == ENOSPC) io_status->u.Status = STATUS_DISK_FULL;
+        result = 0;
+        if (errno == EFAULT) io_status->u.Status = STATUS_INVALID_USER_BUFFER;
         else io_status->u.Status = FILE_GetNtStatus();
         break;
     }
+    io_status->Information = result;
 done:
     if (needs_close) close( unix_handle );
     return io_status->u.Status;
@@ -1028,7 +1047,8 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
                 break;
             }
 
-            if ((io->u.Status = server_get_unix_fd( handle, FILE_READ_DATA, &fd, &needs_close, &flags )))
+            if ((io->u.Status = server_get_unix_fd( handle, FILE_READ_DATA, &fd,
+                                                    &needs_close, NULL, &flags )))
                 break;
 
             if (flags & FD_FLAG_RECV_SHUTDOWN)
@@ -1217,7 +1237,7 @@ NTSTATUS WINAPI NtQueryInformationFile( HANDLE hFile, PIO_STATUS_BLOCK io,
 
     if (class != FilePipeLocalInformation)
     {
-        if ((io->u.Status = server_get_unix_fd( hFile, 0, &fd, &needs_close, NULL )))
+        if ((io->u.Status = server_get_unix_fd( hFile, 0, &fd, &needs_close, NULL, NULL )))
             return io->u.Status;
     }
 
@@ -1366,7 +1386,7 @@ NTSTATUS WINAPI NtQueryInformationFile( HANDLE hFile, PIO_STATUS_BLOCK io,
                 if (tmpbuf)
                 {
                     int fd, needs_close;
-                    if (!server_get_unix_fd( hFile, FILE_READ_DATA, &fd, &needs_close, NULL ))
+                    if (!server_get_unix_fd( hFile, FILE_READ_DATA, &fd, &needs_close, NULL, NULL ))
                     {
                         int res = recv( fd, tmpbuf, size, MSG_PEEK );
                         info->MessagesAvailable = (res > 0);
@@ -1438,7 +1458,7 @@ NTSTATUS WINAPI NtSetInformationFile(HANDLE handle, PIO_STATUS_BLOCK io,
 
     TRACE("(%p,%p,%p,0x%08x,0x%08x)\n", handle, io, ptr, len, class);
 
-    if ((io->u.Status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL )))
+    if ((io->u.Status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, NULL )))
         return io->u.Status;
 
     io->u.Status = STATUS_SUCCESS;
@@ -1827,7 +1847,7 @@ NTSTATUS WINAPI NtQueryVolumeInformationFile( HANDLE handle, PIO_STATUS_BLOCK io
     int fd, needs_close;
     struct stat st;
 
-    if ((io->u.Status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL )) != STATUS_SUCCESS)
+    if ((io->u.Status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, NULL )) != STATUS_SUCCESS)
         return io->u.Status;
 
     io->u.Status = STATUS_NOT_IMPLEMENTED;

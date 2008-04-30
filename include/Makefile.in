@@ -32,6 +32,7 @@ WINDOWS_IDL_SRCS = \
 	objidl.idl \
 	objsafe.idl \
 	ocidl.idl \
+	ocmm.idl \
 	oledb.idl \
 	oleidl.idl \
 	optary.idl \
@@ -70,6 +71,7 @@ WINDOWS_INCLUDES = \
 	$(WINDOWS_IDL_INCLUDES) \
 	accctrl.h \
 	aclapi.h \
+	adshlp.h \
 	advpub.h \
 	appmgmt.h \
 	audevcod.h \
@@ -289,6 +291,7 @@ WINDOWS_INCLUDES = \
 	vfwmsgs.h \
 	winbase.h \
 	wincon.h \
+	wincred.h \
 	wincrypt.h \
 	windef.h \
 	windns.h \

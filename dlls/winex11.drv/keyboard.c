@@ -1561,6 +1561,7 @@ void X11DRV_InitKeyboard(void)
     int keyc, i, keyn, syms;
     char ckey[4]={0,0,0,0};
     const char (*lkey)[MAIN_LEN][4];
+    char vkey_used[256] = { 0 };
 
     wine_tsx11_lock();
     XDisplayKeycodes(display, &min_keycode, &max_keycode);
@@ -1604,6 +1605,7 @@ void X11DRV_InitKeyboard(void)
     e2.state = 0;
 
     OEMvkey = VK_OEM_8; /* next is available.  */
+    memset(keyc2vkey, 0, sizeof(keyc2vkey));
     for (keyc = min_keycode; keyc <= max_keycode; keyc++)
     {
         char buf[30];
@@ -1649,6 +1651,7 @@ void X11DRV_InitKeyboard(void)
 	      for (keyn=0; keyn<MAIN_LEN; keyn++) {
 		for (ok=(*lkey)[keyn][i=0]; ok&&(i<4); i++)
 		  if ((*lkey)[keyn][i] && (*lkey)[keyn][i]!=ckey[i]) ok=0;
+		if (!ok) i--; /* we overshot */
 		if (ok||(i>maxlen)) {
 		  maxlen=i; maxval=keyn;
 		}
@@ -1662,76 +1665,99 @@ void X11DRV_InitKeyboard(void)
 		vkey = (*lvkey)[maxval];
 	      }
 	    }
-#if 0 /* this breaks VK_OEM_x VKeys in some layout tables by inserting
-       * a VK code into a not appropriate place.
-       */
-            /* find a suitable layout-dependent VK code */
-	    /* (most Winelib apps ought to be able to work without layout tables!) */
-            for (i = 0; (i < keysyms_per_keycode) && (!vkey); i++)
-            {
-                keysym = XLookupKeysym(&e2, i);
-                if ((keysym >= VK_0 && keysym <= VK_9)
-                    || (keysym >= VK_A && keysym <= VK_Z)) {
-		    vkey = keysym;
-		}
+        }
+        TRACE("keycode %04x => vkey %04x\n", e2.keycode, vkey);
+        keyc2vkey[e2.keycode] = vkey;
+        keyc2scan[e2.keycode] = scan;
+        if ((vkey & 0xff) && vkey_used[(vkey & 0xff)])
+            WARN("vkey %04x is being used by more than one keycode\n", vkey);
+        vkey_used[(vkey & 0xff)] = 1;
+    } /* for */
+
+#define VKEY_IF_NOT_USED(vkey) (vkey_used[(vkey)] ? 0 : (vkey_used[(vkey)] = 1, (vkey)))
+    for (keyc = min_keycode; keyc <= max_keycode; keyc++)
+    {
+        vkey = keyc2vkey[keyc] & 0xff;
+        if (vkey)
+            continue;
+
+        e2.keycode = (KeyCode)keyc;
+        keysym = XLookupKeysym(&e2, 0);
+        if (!keysym)
+           continue;
+
+        /* find a suitable layout-dependent VK code */
+        /* (most Winelib apps ought to be able to work without layout tables!) */
+        for (i = 0; (i < keysyms_per_keycode) && (!vkey); i++)
+        {
+            keysym = XLookupKeysym(&e2, i);
+            if ((keysym >= XK_0 && keysym <= XK_9)
+                || (keysym >= XK_A && keysym <= XK_Z)) {
+                vkey = VKEY_IF_NOT_USED(keysym);
             }
+        }
 
-            for (i = 0; (i < keysyms_per_keycode) && (!vkey); i++)
+        for (i = 0; (i < keysyms_per_keycode) && (!vkey); i++)
+        {
+            keysym = XLookupKeysym(&e2, i);
+            switch (keysym)
             {
-                keysym = XLookupKeysym(&e2, i);
-		switch (keysym)
-		{
-		case ';':             vkey = VK_OEM_1; break;
-		case '/':             vkey = VK_OEM_2; break;
-		case '`':             vkey = VK_OEM_3; break;
-		case '[':             vkey = VK_OEM_4; break;
-		case '\\':            vkey = VK_OEM_5; break;
-		case ']':             vkey = VK_OEM_6; break;
-		case '\'':            vkey = VK_OEM_7; break;
-		case ',':             vkey = VK_OEM_COMMA; break;
-		case '.':             vkey = VK_OEM_PERIOD; break;
-		case '-':             vkey = VK_OEM_MINUS; break;
-		case '+':             vkey = VK_OEM_PLUS; break;
-		}
-	    }
+            case ';':             vkey = VKEY_IF_NOT_USED(VK_OEM_1); break;
+            case '/':             vkey = VKEY_IF_NOT_USED(VK_OEM_2); break;
+            case '`':             vkey = VKEY_IF_NOT_USED(VK_OEM_3); break;
+            case '[':             vkey = VKEY_IF_NOT_USED(VK_OEM_4); break;
+            case '\\':            vkey = VKEY_IF_NOT_USED(VK_OEM_5); break;
+            case ']':             vkey = VKEY_IF_NOT_USED(VK_OEM_6); break;
+            case '\'':            vkey = VKEY_IF_NOT_USED(VK_OEM_7); break;
+            case ',':             vkey = VKEY_IF_NOT_USED(VK_OEM_COMMA); break;
+            case '.':             vkey = VKEY_IF_NOT_USED(VK_OEM_PERIOD); break;
+            case '-':             vkey = VKEY_IF_NOT_USED(VK_OEM_MINUS); break;
+            case '+':             vkey = VKEY_IF_NOT_USED(VK_OEM_PLUS); break;
+            }
+        }
 
-            if (!vkey)
+        if (!vkey)
+        {
+            /* Others keys: let's assign OEM virtual key codes in the allowed range,
+             * that is ([0xba,0xc0], [0xdb,0xe4], 0xe6 (given up) et [0xe9,0xf5]) */
+            do
             {
-                /* Others keys: let's assign OEM virtual key codes in the allowed range,
-                 * that is ([0xba,0xc0], [0xdb,0xe4], 0xe6 (given up) et [0xe9,0xf5]) */
                 switch (++OEMvkey)
                 {
                 case 0xc1 : OEMvkey=0xdb; break;
                 case 0xe5 : OEMvkey=0xe9; break;
                 case 0xf6 : OEMvkey=0xf5; WARN("No more OEM vkey available!\n");
                 }
+            } while (OEMvkey < 0xf5 && vkey_used[OEMvkey]);
 
-                vkey = OEMvkey;
+            vkey = VKEY_IF_NOT_USED(OEMvkey);
 
-                if (TRACE_ON(keyboard))
+            if (TRACE_ON(keyboard))
+            {
+                TRACE("OEM specific virtual key %X assigned to keycode %X:\n",
+                                 OEMvkey, e2.keycode);
+                TRACE("(");
+                for (i = 0; i < keysyms_per_keycode; i += 1)
                 {
-                    TRACE("OEM specific virtual key %X assigned to keycode %X:\n",
-                                     OEMvkey, e2.keycode);
-                    TRACE("(");
-                    for (i = 0; i < keysyms_per_keycode; i += 1)
-                    {
-                        const char *ksname;
+                    const char *ksname;
 
-                        keysym = XLookupKeysym(&e2, i);
-                        ksname = XKeysymToString(keysym);
-                        if (!ksname)
-			    ksname = "NoSymbol";
-                        TRACE( "%lX (%s) ", keysym, ksname);
-                    }
-                    TRACE(")\n");
+                    keysym = XLookupKeysym(&e2, i);
+                    ksname = XKeysymToString(keysym);
+                    if (!ksname)
+                        ksname = "NoSymbol";
+                    TRACE( "%lX (%s) ", keysym, ksname);
                 }
+                TRACE(")\n");
             }
-#endif
         }
-        TRACE("keycode %04x => vkey %04x\n", e2.keycode, vkey);
-        keyc2vkey[e2.keycode] = vkey;
-        keyc2scan[e2.keycode] = scan;
+
+        if (vkey)
+        {
+            TRACE("keycode %04x => vkey %04x\n", e2.keycode, vkey);
+            keyc2vkey[e2.keycode] = vkey;
+        }
     } /* for */
+#undef VKEY_IF_NOT_USED
 
     /* If some keys still lack scancodes, assign some arbitrary ones to them now */
     for (scan = 0x60, keyc = min_keycode; keyc <= max_keycode; keyc++)

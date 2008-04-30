@@ -29,7 +29,6 @@
 #include "winbase.h"
 #include "winreg.h"
 
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -193,6 +192,7 @@ static struct graphics_driver *create_driver( HMODULE module )
         GET_FUNC(StrokeAndFillPath);
         GET_FUNC(StrokePath);
         GET_FUNC(SwapBuffers);
+        GET_FUNC(UnrealizePalette);
         GET_FUNC(WidenPath);
 
         /* OpenGL32 */

@@ -25,7 +25,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "enhmfdrv/enhmetafiledrv.h"
 #include "wine/debug.h"
@@ -152,6 +151,7 @@ static const DC_FUNCTIONS EMFDRV_Funcs =
     EMFDRV_StrokeAndFillPath,        /* pStrokeAndFillPath */
     EMFDRV_StrokePath,               /* pStrokePath */
     NULL,                            /* pSwapBuffers */
+    NULL,                            /* pUnrealizePalette */
     EMFDRV_WidenPath                 /* pWidenPath */
 };
 

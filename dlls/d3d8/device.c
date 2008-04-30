@@ -139,7 +139,6 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetDirect3D(LPDIRECT3DDEVICE8 iface, 
     if (hr == D3D_OK && pWineD3D != NULL)
     {
         IWineD3DResource_GetParent((IWineD3DResource *)pWineD3D,(IUnknown **)ppD3D8);
-        IWineD3DResource_Release((IWineD3DResource *)pWineD3D);
     } else {
         FIXME("Call to IWineD3DDevice_GetDirect3D failed\n");
         *ppD3D8 = NULL;
@@ -296,7 +295,6 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetBackBuffer(LPDIRECT3DDEVICE8 iface
     rc = IWineD3DDevice_GetBackBuffer(This->WineD3DDevice, 0, BackBuffer, (WINED3DBACKBUFFER_TYPE) Type, (IWineD3DSurface **)&retSurface);
     if (rc == D3D_OK && NULL != retSurface && NULL != ppBackBuffer) {
         IWineD3DSurface_GetParent(retSurface, (IUnknown **)ppBackBuffer);
-        IWineD3DSurface_Release(retSurface);
     }
     return rc;
 }
@@ -679,7 +677,6 @@ static HRESULT  WINAPI  IDirect3DDevice8Impl_GetRenderTarget(LPDIRECT3DDEVICE8 i
 
     if (hr == D3D_OK && pRenderTarget != NULL) {
         IWineD3DResource_GetParent((IWineD3DResource *)pRenderTarget,(IUnknown**)ppRenderTarget);
-        IWineD3DResource_Release((IWineD3DResource *)pRenderTarget);
     } else {
         FIXME("Call to IWineD3DDevice_GetRenderTarget failed\n");
         *ppRenderTarget = NULL;
@@ -701,7 +698,6 @@ static HRESULT  WINAPI  IDirect3DDevice8Impl_GetDepthStencilSurface(LPDIRECT3DDE
     hr=IWineD3DDevice_GetDepthStencilSurface(This->WineD3DDevice,&pZStencilSurface);
     if(hr == D3D_OK && pZStencilSurface != NULL){
         IWineD3DResource_GetParent((IWineD3DResource *)pZStencilSurface,(IUnknown**)ppZStencilSurface);
-        IWineD3DResource_Release((IWineD3DResource *)pZStencilSurface);
     }else{
         FIXME("Call to IWineD3DDevice_GetDepthStencilSurface failed\n");
         *ppZStencilSurface = NULL;
@@ -967,7 +963,6 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetTexture(LPDIRECT3DDEVICE8 iface, D
     rc = IWineD3DDevice_GetTexture(This->WineD3DDevice, Stage, (IWineD3DBaseTexture **)&retTexture);
     if (rc == D3D_OK && NULL != retTexture) {
         IWineD3DBaseTexture_GetParent(retTexture, (IUnknown **)ppTexture);
-        IWineD3DBaseTexture_Release(retTexture);
     } else {
         FIXME("Call to get texture  (%d) failed (%p)\n", Stage, retTexture);
         *ppTexture = NULL;
@@ -1316,7 +1311,6 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetIndices(LPDIRECT3DDEVICE8 iface, I
     rc = IWineD3DDevice_GetIndices(This->WineD3DDevice, &retIndexData, &tmp);
     if (D3D_OK == rc && NULL != retIndexData) {
         IWineD3DVertexBuffer_GetParent(retIndexData, (IUnknown **)ppIndexData);
-        IWineD3DVertexBuffer_Release(retIndexData);
     } else {
         if(rc != D3D_OK)  FIXME("Call to GetIndices failed\n");
         *ppIndexData = NULL;
@@ -1492,7 +1486,6 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetStreamSource(LPDIRECT3DDEVICE8 ifa
     rc = IWineD3DDevice_GetStreamSource(This->WineD3DDevice, StreamNumber, (IWineD3DVertexBuffer **)&retStream, 0 /* Offset in bytes */, pStride);
     if (rc == D3D_OK  && NULL != retStream) {
         IWineD3DVertexBuffer_GetParent(retStream, (IUnknown **)pStream);
-        IWineD3DVertexBuffer_Release(retStream);
     }else{
          FIXME("Call to GetStreamSource failed %p\n",  pStride);
         *pStream = NULL;

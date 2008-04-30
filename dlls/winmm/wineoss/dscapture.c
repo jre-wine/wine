@@ -657,7 +657,7 @@ static HRESULT WINAPI IDsCaptureDriverBufferImpl_Stop(PIDSCDRIVERBUFFER iface)
     if (!This->is_capturing)
         return DS_OK;
 
-    /* no more captureing */
+    /* no more capturing */
     WInDev[This->drv->wDevID].ossdev->bInputEnabled = FALSE;
     enable = getEnables(WInDev[This->drv->wDevID].ossdev);
     if (ioctl(WInDev[This->drv->wDevID].ossdev->fd, SNDCTL_DSP_SETTRIGGER, &enable) < 0) {
@@ -853,7 +853,7 @@ static void * my_memcpy(void * dst, const void * src, int length)
 {
     int i;
     for (i = 0; i < length; i++)
-        ((char *)dst)[i] = ((char *)src)[i];
+        ((char *)dst)[i] = ((const char *)src)[i];
     return dst;
 }
 

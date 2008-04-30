@@ -69,20 +69,30 @@ struct media_info {
 
 static UINT msi_change_media( MSIPACKAGE *package, struct media_info *mi )
 {
+    LPSTR msg;
     LPWSTR error, error_dialog;
     UINT r = ERROR_SUCCESS;
 
     static const WCHAR szUILevel[] = {'U','I','L','e','v','e','l',0};
     static const WCHAR error_prop[] = {'E','r','r','o','r','D','i','a','l','o','g',0};
 
-    if ( msi_get_property_int(package, szUILevel, 0) == INSTALLUILEVEL_NONE )
+    if ( msi_get_property_int(package, szUILevel, 0) == INSTALLUILEVEL_NONE && !gUIHandlerA )
         return ERROR_SUCCESS;
 
     error = generate_error_string( package, 1302, 1, mi->disk_prompt );
     error_dialog = msi_dup_property( package, error_prop );
 
     while ( r == ERROR_SUCCESS && GetFileAttributesW( mi->source ) == INVALID_FILE_ATTRIBUTES )
+    {
         r = msi_spawn_error_dialog( package, error_dialog, error );
+
+        if (gUIHandlerA)
+        {
+            msg = strdupWtoA( error );
+            gUIHandlerA( gUIContext, MB_RETRYCANCEL | INSTALLMESSAGE_ERROR, msg );
+            msi_free(msg);
+        }
+    }
 
     msi_free( error );
     msi_free( error_dialog );
@@ -113,7 +123,7 @@ static UINT writeout_cabinet_stream(MSIPACKAGE *package, LPCWSTR stream_name,
 
     GetTempFileNameW(tmp,stream_name,0,source);
 
-    track_tempfile(package,strrchrW(source,'\\'), source);
+    track_tempfile(package, source);
     the_file = CreateFileW(source, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, NULL);
 
@@ -233,9 +243,8 @@ static void msi_file_update_ui( MSIPACKAGE *package, MSIFILE *f, const WCHAR *ac
     ui_progress( package, 2, f->FileSize, 0, 0);
 }
 
-static UINT msi_media_get_disk_info( CabData *data )
+static UINT msi_media_get_disk_info( MSIPACKAGE *package, struct media_info *mi )
 {
-    MSIPACKAGE *package = data->package;
     MSIRECORD *row;
     LPWSTR ptr;
 
@@ -244,18 +253,19 @@ static UINT msi_media_get_disk_info( CabData *data )
          '`','M','e','d','i','a','`',' ','W','H','E','R','E',' ',
          '`','D','i','s','k','I','d','`',' ','=',' ','%','i',0};
 
-    row = MSI_QueryGetRecord(package->db, query, data->mi->disk_id);
+    row = MSI_QueryGetRecord(package->db, query, mi->disk_id);
     if (!row)
     {
         TRACE("Unable to query row\n");
         return ERROR_FUNCTION_FAILED;
     }
 
-    data->mi->disk_prompt = strdupW(MSI_RecordGetString(row, 3));
-    data->mi->cabinet = strdupW(MSI_RecordGetString(row, 4));
+    mi->disk_prompt = strdupW(MSI_RecordGetString(row, 3));
+    mi->cabinet = strdupW(MSI_RecordGetString(row, 4));
 
-    ptr = strrchrW(data->mi->source, '\\') + 1;
-    lstrcpyW(ptr, data->mi->cabinet);
+    ptr = strrchrW(mi->source, '\\') + 1;
+    lstrcpyW(ptr, mi->cabinet);
+    msiobj_release(&row->hdr);
 
     return ERROR_SUCCESS;
 }
@@ -284,7 +294,7 @@ static INT_PTR cabinet_notify(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
         mi->disk_id++;
         mi->is_continuous = TRUE;
 
-        rc = msi_media_get_disk_info(data);
+        rc = msi_media_get_disk_info(data->package, mi);
         if (rc != ERROR_SUCCESS)
         {
             ERR("Failed to get next cabinet information: %d\n", rc);
@@ -469,8 +479,13 @@ static UINT download_remote_cabinet(MSIPACKAGE *package, struct media_info *mi)
 
     *(ptr + 1) = '\0';
     ptr = strrchrW(mi->source, '\\');
+    src = msi_realloc(src, (lstrlenW(src) + lstrlenW(ptr)) * sizeof(WCHAR));
+    if (!src)
+        return ERROR_OUTOFMEMORY;
+
     lstrcatW(src, ptr + 1);
 
+    temppath[0] = '\0';
     cab = msi_download_file(src, temppath);
     lstrcpyW(mi->source, cab);
 
@@ -502,8 +517,11 @@ static UINT load_media_info(MSIPACKAGE *package, MSIFILE *file, struct media_inf
 
     mi->disk_id = MSI_RecordGetInteger(row, 1);
     mi->last_sequence = MSI_RecordGetInteger(row, 2);
+    msi_free(mi->disk_prompt);
     mi->disk_prompt = strdupW(MSI_RecordGetString(row, 3));
+    msi_free(mi->cabinet);
     mi->cabinet = strdupW(MSI_RecordGetString(row, 4));
+    msi_free(mi->volume_label);
     mi->volume_label = strdupW(MSI_RecordGetString(row, 5));
     msiobj_release(&row->hdr);
 

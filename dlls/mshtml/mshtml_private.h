@@ -91,6 +91,8 @@ struct HTMLDocument {
     HWND hwnd;
     HWND tooltips_hwnd;
 
+    DOCHOSTUIINFO hostinfo;
+
     USERMODE usermode;
     READYSTATE readystate;
     BOOL in_place_active;
@@ -327,6 +329,8 @@ void set_document_bscallback(HTMLDocument*,BSCallback*);
 IHlink *Hlink_Create(void);
 IHTMLSelectionObject *HTMLSelectionObject_Create(nsISelection*);
 IHTMLTxtRange *HTMLTxtRange_Create(nsISelection*);
+IHTMLStyle *HTMLStyle_Create(nsIDOMCSSStyleDeclaration*);
+IHTMLStyleSheet *HTMLStyleSheet_Create(void);
 
 void HTMLElement_Create(HTMLDOMNode*);
 void HTMLBodyElement_Create(HTMLElement*);
@@ -345,6 +349,10 @@ HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*);
 void release_nodes(HTMLDocument*);
 
 void install_wine_gecko(void);
+
+/* editor */
+void get_font_size(HTMLDocument*,WCHAR*);
+void set_font_size(HTMLDocument*,LPCWSTR);
 
 extern DWORD mshtml_tls;
 

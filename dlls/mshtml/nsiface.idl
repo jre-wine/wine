@@ -34,9 +34,7 @@ typedef REFIID nsIIDRef;
 typedef nsIIDRef nsCIDRef;
 
 typedef void** nsQIResult;
-typedef LPCSTR nscstring;
 typedef WCHAR PRUnichar;
-typedef LPCWSTR nscwstring;
 typedef ULONG PRUint32;
 typedef LONG PRInt32;
 typedef WORD PRUint16;
@@ -107,9 +105,10 @@ typedef nsISupports nsIDOMEntityReference;
 typedef nsISupports nsIDOMHTMLFormElement;
 typedef nsISupports nsIDOMHTMLOptionsCollection;
 typedef nsISupports nsIDOMHTMLCollection;
-typedef nsISupports nsIDOMRange;
 typedef nsISupports nsIEditor;
 typedef nsISupports nsIWebProgressListener;
+typedef nsISupports nsIDOMCSSValue;
+typedef nsISupports nsIDOMCSSRule;
 
 [
     object,
@@ -118,9 +117,9 @@ typedef nsISupports nsIWebProgressListener;
 interface nsIServiceManager : nsISupports
 {
     nsresult GetService(nsCIDRef aClass, nsIIDRef aIID, void **result);
-    nsresult GetServiceByContactID(nscstring aContactID, nsIIDRef aIID, void **result);
+    nsresult GetServiceByContactID(const char *aContactID, nsIIDRef aIID, void **result);
     nsresult IsServiceInstantiated(nsCIDRef aClass, nsIIDRef aIID, BOOL *_retval);
-    nsresult IsServiceInstantiatedByContractID(nscstring aContractID, nsIIDRef aIID, BOOL *_retval);
+    nsresult IsServiceInstantiatedByContractID(const char *aContractID, nsIIDRef aIID, BOOL *_retval);
 }
 
 [
@@ -139,7 +138,7 @@ interface nsIFactory : nsISupports
 ]
 interface nsIObserver : nsISupports
 {
-    nsresult Observe(nsISupports *aSubject, nscstring aTopic, nscwstring aData);
+    nsresult Observe(nsISupports *aSubject, const char *aTopic, const PRUnichar *aData);
 }
 
 [
@@ -149,10 +148,10 @@ interface nsIObserver : nsISupports
 interface nsIComponentManager : nsISupports
 {
     nsresult GetClassObject(nsCIDRef aClass, nsIIDRef aIID, nsQIResult result);
-    nsresult GetClassObjectByContractID(nscstring aContractID, nsIIDRef aIID, nsQIResult result);
+    nsresult GetClassObjectByContractID(const char *aContractID, nsIIDRef aIID, nsQIResult result);
     nsresult CreateInstance(nsCIDRef aClass, nsISupports *aDelegate, nsIIDRef aIID,
             nsQIResult result);
-    nsresult CreateInstanceByContractID(nscstring aContractID, nsISupports *aDelegate,
+    nsresult CreateInstanceByContractID(const char *aContractID, nsISupports *aDelegate,
             nsIIDRef aIID, nsQIResult result);
 }
 
@@ -377,6 +376,25 @@ interface nsIUploadChannel : nsISupports
 
 [
     object,
+    uuid(a6cf90be-15b3-11d2-932e-00805f8add32)
+]
+interface nsIDOMCSSStyleDeclaration : nsISupports
+{
+    nsresult GetCssText(nsAString *aCssText);
+    nsresult SetCssText(const nsAString *aCssText);
+    nsresult GetPropertyValue(const nsAString *propertyName, nsAString *_retval);
+    nsresult GetPropertyCSSValue(const nsAString *propertyName, nsIDOMCSSValue **_retval);
+    nsresult RemoveProperty(const nsAString *propertyName, nsAString *_retval);
+    nsresult GetPropertyPriority(const nsAString *propertyName, nsAString *_retval);
+    nsresult SetProperty(const nsAString *propertyName, const nsAString *value,
+                         const nsAString *priority);
+    nsresult GetLength(PRUint32 *aLength);
+    nsresult Item(PRUint32 index, nsAString *_retval);
+    nsresult GetParentRule(nsIDOMCSSRule **aParentRule);
+}
+
+[
+    object,
     uuid(a6cf907d-15b3-11d2-932e-00805f8add32)
 ]
 interface nsIDOMNodeList : nsISupports
@@ -460,6 +478,15 @@ interface nsIDOMElement : nsIDOMNode
     nsresult HasAttribute(const nsAString *name, PRBool *_retval);
     nsresult HasAttributeNS(const nsAString *namespaceURI, const nsAString *localName,
                             PRBool *_retval);
+}
+
+[
+    object,
+    uuid(99715845-95fc-4a56-aa53-214b65c26e22)
+]
+interface nsIDOMElementCSSInlineStyle : nsISupports
+{
+    nsresult GetStyle(nsIDOMCSSStyleDeclaration **aStyle);
 }
 
 cpp_quote("#undef GetClassName");
@@ -585,6 +612,38 @@ interface nsIDOMHTMLDocument : nsIDOMDocument
     nsresult Write(const nsAString *text);
     nsresult Writeln(const nsAString *text);
     nsresult GetElementsByName(const nsAString *elementName, nsIDOMNodeList **_retval);
+}
+
+[
+    object,
+    uuid(a6cf90ce-15b3-11d2-932e-00805f8add32)
+]
+interface nsIDOMRange : nsISupports
+{
+    nsresult GetStartContainer(nsIDOMNode **aStartContainer);
+    nsresult GetStartOffset(PRInt32 *aStartOffset);
+    nsresult GetEndContainer(nsIDOMNode **aEndContainer);
+    nsresult GetEndOffset(PRInt32 *aEndOffset);
+    nsresult GetCollapsed(PRBool *aCollapsed);
+    nsresult GetCommonAncestorContainer(nsIDOMNode **aCommonAncestorContainer);
+    nsresult SetStart(nsIDOMNode *refNode, PRInt32 offset);
+    nsresult SetEnd(nsIDOMNode *refNode, PRInt32 offset);
+    nsresult SetStartBefore(nsIDOMNode *refNode);
+    nsresult SetStartAfter(nsIDOMNode *refNode);
+    nsresult SetEndBefore(nsIDOMNode *refNode);
+    nsresult SetEndAfter(nsIDOMNode *refNode);
+    nsresult Collapse(PRBool toStart);
+    nsresult SelectNode(nsIDOMNode *refNode);
+    nsresult SelectNodeContents(nsIDOMNode *refNode);
+    nsresult CompareBoundaryPoints(PRUint16 how, nsIDOMRange *sourceRange, PRInt16 *_retval);
+    nsresult DeleteContents();
+    nsresult ExtractContents(nsIDOMDocumentFragment **_retval);
+    nsresult CloneContents(nsIDOMDocumentFragment **_retval);
+    nsresult InsertNode(nsIDOMNode *newNode);
+    nsresult SurroundContents(nsIDOMNode *newParent);
+    nsresult CloneRange(nsIDOMRange **_retval);
+    nsresult ToString(nsAString *_retval);
+    nsresult Detach();
 }
 
 [

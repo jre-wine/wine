@@ -1344,6 +1344,50 @@ static void test_props(void)
     DeleteFile(msifile);
 }
 
+static void test_properties_table(void)
+{
+    const char *query;
+    UINT r;
+    MSIHANDLE hpkg, hdb;
+    char buffer[0x10];
+    DWORD sz;
+
+    hdb = create_package_db();
+    ok( hdb, "failed to create package\n");
+
+    hpkg = package_from_db(hdb);
+    ok( hpkg, "failed to create package\n");
+
+    query = "CREATE TABLE `_Properties` ( "
+        "`foo` INT NOT NULL, `bar` INT LOCALIZABLE PRIMARY KEY `foo`)";
+    r = run_query(hdb, query);
+    ok(r == ERROR_INVALID_HANDLE, "failed to create table\n");
+
+    MsiCloseHandle( hpkg );
+    DeleteFile(msifile);
+
+    hdb = create_package_db();
+    ok( hdb, "failed to create package\n");
+
+    query = "CREATE TABLE `_Properties` ( "
+        "`foo` INT NOT NULL, `bar` INT LOCALIZABLE PRIMARY KEY `foo`)";
+    r = run_query(hdb, query);
+    ok(r == ERROR_SUCCESS, "failed to create table\n");
+
+    hpkg = package_from_db(hdb);
+    ok( hpkg, "failed to create package\n");
+
+    r = MsiSetProperty( hpkg, "foo", "bar");
+    ok(r == ERROR_SUCCESS, "failed to create table\n");
+
+    sz = sizeof buffer;
+    r = MsiGetProperty( hpkg, "foo", buffer, &sz);
+    ok(r == ERROR_SUCCESS, "failed to create table\n");
+
+    MsiCloseHandle( hpkg );
+    DeleteFile(msifile);
+}
+
 static UINT try_query_param( MSIHANDLE hdb, LPCSTR szQuery, MSIHANDLE hrec )
 {
     MSIHANDLE htab = 0;
@@ -2849,6 +2893,80 @@ static void test_sourcedirprop(void)
     DeleteFileA(msifile);
 }
 
+static void test_prop_path(void)
+{
+    MSIHANDLE hpkg, hdb;
+    char buffer[MAX_PATH], cwd[MAX_PATH];
+    DWORD sz;
+    UINT r;
+
+    GetCurrentDirectory(MAX_PATH, cwd);
+    strcat(cwd, "\\");
+
+    hdb = create_package_db();
+    ok( hdb, "failed to create database\n");
+
+    r = add_directory_entry( hdb, "'TARGETDIR','','SourceDir'" );
+    ok( r == ERROR_SUCCESS, "cannot add directory: %d\n", r );
+
+    r = add_directory_entry( hdb, "'foo','TARGETDIR','foosrc:footgt'" );
+    ok( r == ERROR_SUCCESS, "cannot add directory: %d\n", r );
+
+    hpkg = package_from_db(hdb);
+    ok( hpkg, "failed to create package\n");
+
+    r = MsiGetSourcePath(hpkg, "SourceDir", buffer, &sz );
+    ok( r == ERROR_DIRECTORY, "failed to get source path\n");
+
+    r = MsiGetSourcePath(hpkg, "SOURCEDIR", buffer, &sz );
+    ok( r == ERROR_DIRECTORY, "failed to get source path\n");
+
+    r = MsiDoAction( hpkg, "CostInitialize");
+    ok( r == ERROR_SUCCESS, "cost init failed\n");
+
+    sz = sizeof buffer;
+    buffer[0] = 0;
+    r = MsiGetProperty(hpkg, "SourceDir", buffer, &sz);
+    ok( r == ERROR_SUCCESS, "property not set\n");
+    ok( !buffer[0], "SourceDir should be empty\n");
+
+    sz = sizeof buffer;
+    buffer[0] = 0;
+    r = MsiGetProperty(hpkg, "SOURCEDIR", buffer, &sz);
+    ok( r == ERROR_SUCCESS, "property not set\n");
+    ok( !buffer[0], "SourceDir should be empty\n");
+
+    sz = sizeof buffer;
+    buffer[0] = 0;
+    r = MsiGetSourcePath(hpkg, "SourceDir", buffer, &sz );
+    ok( r == ERROR_SUCCESS, "failed to get source path\n");
+    ok( !lstrcmpi(cwd, buffer), "SourceDir (%s) should be current dir (%s)\n", buffer, cwd);
+
+    sz = sizeof buffer;
+    buffer[0] = 0;
+    r = MsiGetProperty(hpkg, "SourceDir", buffer, &sz);
+    ok( r == ERROR_SUCCESS, "property not set\n");
+    todo_wine {
+    ok( !lstrcmpi(cwd, buffer), "SourceDir (%s) should be current dir (%s)\n", buffer, cwd);
+    }
+
+    sz = sizeof buffer;
+    buffer[0] = 0;
+    r = MsiGetSourcePath(hpkg, "SOURCEDIR", buffer, &sz );
+    ok( r == ERROR_DIRECTORY, "failed to get source path\n");
+
+    sz = sizeof buffer;
+    buffer[0] = 0;
+    r = MsiGetProperty(hpkg, "SOURCEDIR", buffer, &sz);
+    ok( r == ERROR_SUCCESS, "property not set\n");
+    todo_wine {
+    ok( !lstrcmpi(cwd, buffer), "SourceDir (%s) should be current dir (%s)\n", buffer, cwd);
+    }
+
+    MsiCloseHandle( hpkg );
+    DeleteFile(msifile);
+}
+
 START_TEST(package)
 {
     test_createpackage();
@@ -2858,6 +2976,7 @@ START_TEST(package)
     test_gettargetpath_bad();
     test_settargetpath();
     test_props();
+    test_properties_table();
     test_condition();
     test_msipackage();
     test_formatrecord2();
@@ -2868,4 +2987,5 @@ START_TEST(package)
     test_featureparents();
     test_installprops();
     test_sourcedirprop();
+    test_prop_path();
 }

@@ -294,7 +294,6 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
                 glXDestroyContext(oldDisplay, oldContext); /* Should this happen on an active context? seems a bad idea */
                 LEAVE_GL();
             }
-            IWineD3DSwapChain_Release((IWineD3DSwapChain *)swapChainImpl);
 
         }
 
@@ -461,8 +460,6 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_GetBackBuffer(IWineD3DSwapChain *ifa
     *ppBackBuffer = This->backBuffer[iBackBuffer];
     TRACE("(%p) : BackBuf %d Type %d  returning %p\n", This, iBackBuffer, Type, *ppBackBuffer);
 
-    /* Note inc ref on returned surface */
-    if(*ppBackBuffer) IWineD3DSurface_AddRef(*ppBackBuffer);
     return WINED3D_OK;
 
 }

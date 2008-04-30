@@ -25,8 +25,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include <windows.h>
 #include <stdio.h>
 
@@ -77,7 +75,7 @@ static void IDirectSound8_test(LPDIRECTSOUND8 dso, BOOL initialized,
         IDirectSound8_Release(ds8);
 
     if (initialized == FALSE) {
-        /* try unitialized object */
+        /* try uninitialized object */
         rc=IDirectSound8_GetCaps(dso,0);
         ok(rc==DSERR_UNINITIALIZED,"IDirectSound8_GetCaps(NULL) "
            "should have returned DSERR_UNINITIALIZED, returned: %s\n",

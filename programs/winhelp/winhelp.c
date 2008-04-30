@@ -117,8 +117,25 @@ HLPFILE* WINHELP_LookupHelpFile(LPCSTR lpszFile)
 {
     HLPFILE*        hlpfile;
     char szFullName[MAX_PATH];
+    char szAddPath[MAX_PATH];
+    char *p;
 
-    if (!SearchPath(NULL, lpszFile, ".hlp", MAX_PATH, szFullName, NULL))
+    /*
+     * NOTE: This is needed by popup windows only.
+     * In other cases it's not needed but does not hurt though.
+     */
+    if (Globals.active_win && Globals.active_win->page && Globals.active_win->page->file)
+    {
+        strcpy(szAddPath, Globals.active_win->page->file->lpszPath);
+        p = strrchr(szAddPath, '\\');
+        if (p) *p = 0;
+    }
+
+    /*
+     * FIXME: Should we swap conditions?
+     */
+    if (!SearchPath(NULL, lpszFile, ".hlp", MAX_PATH, szFullName, NULL) &&
+        !SearchPath(szAddPath, lpszFile, ".hlp", MAX_PATH, szFullName, NULL))
     {
         if (WINHELP_MessageBoxIDS_s(STID_FILE_NOT_FOUND_s, lpszFile, STID_WHERROR,
                                     MB_YESNO|MB_ICONQUESTION) != IDYES)
@@ -1195,7 +1212,7 @@ static LRESULT CALLBACK WINHELP_TextWndProc(HWND hWnd, UINT msg, WPARAM wParam, 
                 break;
             case hlp_link_popup:
                 hlpfile = WINHELP_LookupHelpFile(part->link->lpszString);
-                WINHELP_CreateHelpWindowByHash(hlpfile, part->link->lHash, 
+                if (hlpfile) WINHELP_CreateHelpWindowByHash(hlpfile, part->link->lHash, 
                                                WINHELP_GetPopupWindowInfo(hlpfile, hWnd, &mouse),
                                                SW_NORMAL);
                 break;
@@ -1779,6 +1796,13 @@ static void WINHELP_DeleteWindow(WINHELP_WINDOW* win)
             *w = win->next;
             break;
         }
+    }
+
+    if (Globals.active_win == win)
+    {
+        Globals.active_win = Globals.win_list;
+        if (Globals.win_list)
+            SetActiveWindow(Globals.win_list->hMainWnd);
     }
 
     for (b = win->first_button; b; b = bp)

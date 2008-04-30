@@ -17,12 +17,18 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
- 
+
+#include "config.h"
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#ifdef HAVE_SYS_STAT_H
+# include <sys/stat.h>
+#endif
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif
 #include <errno.h>
  
 #include "windef.h"
@@ -142,7 +148,7 @@ const char *XDG_GetPath(int path_id)
 }
 
 /******************************************************************************
- * XDG_GetPath    [internal]
+ * XDG_BuildPath    [internal]
  *
  * Build a string with a subpath of one of the XDG standard paths.
  * The root can be one of XDG_DATA_HOME, XDG_CONFIG_HOME and XDG_CACHE_HOME.

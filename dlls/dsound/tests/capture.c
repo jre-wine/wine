@@ -19,8 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include <windows.h>
 
 #include <stdio.h>
@@ -127,7 +125,7 @@ static void IDirectSoundCapture_test(LPDIRECTSOUNDCAPTURE dsco,
         IDirectSoundCapture_Release(dsc);
 
     if (initialized == FALSE) {
-        /* try unitialized object */
+        /* try uninitialized object */
         rc=IDirectSoundCapture_GetCaps(dsco,0);
         ok(rc==DSERR_UNINITIALIZED||rc==E_INVALIDARG,
            "IDirectSoundCapture_GetCaps(NULL) should have returned "

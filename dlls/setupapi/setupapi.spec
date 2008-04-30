@@ -413,16 +413,16 @@
 @ stdcall SetupGetLineTextW(ptr long wstr wstr ptr long ptr)
 @ stdcall SetupGetMultiSzFieldA(ptr long ptr long ptr)
 @ stdcall SetupGetMultiSzFieldW(ptr long ptr long ptr)
-@ stub SetupGetSourceFileLocationA
-@ stub SetupGetSourceFileLocationW
+@ stdcall SetupGetSourceFileLocationA(ptr ptr str ptr ptr long ptr)
+@ stdcall SetupGetSourceFileLocationW(ptr ptr wstr ptr ptr long ptr)
 @ stub SetupGetSourceFileSizeA
 @ stub SetupGetSourceFileSizeW
-@ stdcall SetupGetSourceInfoA(ptr long long str long ptr)
-@ stdcall SetupGetSourceInfoW(ptr long long wstr long ptr)
+@ stdcall SetupGetSourceInfoA(ptr long long ptr long ptr)
+@ stdcall SetupGetSourceInfoW(ptr long long ptr long ptr)
 @ stdcall SetupGetStringFieldA(ptr long ptr long ptr)
 @ stdcall SetupGetStringFieldW(ptr long ptr long ptr)
-@ stub SetupGetTargetPathA
-@ stub SetupGetTargetPathW
+@ stdcall SetupGetTargetPathA(ptr ptr str ptr long ptr)
+@ stdcall SetupGetTargetPathW(ptr ptr wstr ptr long ptr)
 @ stdcall SetupInitDefaultQueueCallback(long)
 @ stdcall SetupInitDefaultQueueCallbackEx(long long long long ptr)
 @ stdcall SetupInitializeFileLogA (str long)

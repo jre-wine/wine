@@ -58,6 +58,7 @@ static BOOL  (WINAPI *pXcvOpenPort)(HANDLE, LPCWSTR, ACCESS_MASK, PHANDLE phXcv)
 static DWORD (WINAPI *pXcvDataPort)(HANDLE, LPCWSTR, PBYTE, DWORD, PBYTE, DWORD, PDWORD);
 static BOOL  (WINAPI *pXcvClosePort)(HANDLE);
 
+static WCHAR does_not_existW[] = {'d','o','e','s','_','n','o','t','_','e','x','i','s','t',0};
 static WCHAR emptyW[] = {0};
 static WCHAR invalid_serverW[] = {'\\','\\','i','n','v','a','l','i','d','_','s','e','r','v','e','r',0};
 static WCHAR Monitors_LocalPortW[] = { \
@@ -67,8 +68,84 @@ static WCHAR Monitors_LocalPortW[] = { \
                                 'P','r','i','n','t','\\',
                                 'M','o','n','i','t','o','r','s','\\',
                                 'L','o','c','a','l',' ','P','o','r','t',0};
+
+static WCHAR portname_com1W[] = {'C','O','M','1',':',0};
+static WCHAR portname_fileW[] = {'F','I','L','E',':',0};
+static WCHAR portname_lpt1W[] = {'L','P','T','1',':',0};
+
+/* ########################### */
                                        
-/* ##### */
+static void test_ConfigurePort(void)
+{
+    DWORD   res;
+
+    /* moved to localui.dll since w2k */
+    if (!pConfigurePort) return;
+
+#if 0
+    /* NT4 crash on this test */
+    res = pConfigurePort(NULL, 0, NULL);
+#endif
+
+    /*  Testing-Results (localmon.dll from NT4.0):
+        - Case of Portname is ignored
+        - "COM1:" and "COM01:" are the same (Compared by value)
+        - Portname without ":" => Dialog "Nothing to configure" comes up; Success
+        - "LPT1:", "LPT0:" and "LPT:" are the same (Numbers in "LPT:" are ignored)
+        - Empty Servername (LPT1:) => Dialog comes up (Servername is ignored)
+        - "FILE:" => Dialog "Nothing to configure" comes up; Success
+        - Empty Portname =>  => Dialog "Nothing to configure" comes up; Success
+        - Port "does_not_exist" => Dialog "Nothing to configure" comes up; Success
+    */
+    if (winetest_interactive > 0) {
+
+        SetLastError(0xdeadbeef);
+        res = pConfigurePort(NULL, 0, portname_com1W);
+        trace("returned %d with %d\n", res, GetLastError());
+
+        SetLastError(0xdeadbeef);
+        res = pConfigurePort(NULL, 0, portname_lpt1W);
+        trace("returned %d with %d\n", res, GetLastError());
+
+        SetLastError(0xdeadbeef);
+        res = pConfigurePort(NULL, 0, portname_fileW);
+        trace("returned %d with %d\n", res, GetLastError());
+    }
+}
+
+/* ########################### */
+
+static void test_DeletePort(void)
+{
+    DWORD   res;
+
+    /* moved to localui.dll since w2k */
+    if (!pDeletePort) return;
+
+#if 0
+    /* NT4 crash on this test */
+    res = pDeletePort(NULL, 0, NULL);
+#endif
+
+    /*  Testing-Results (localmon.dll from NT4.0):
+        - Case of Portname is ignored (returned '1' on Success)
+        - "COM1:" and "COM01:" are different (Compared as string)
+        - server_does_not_exist (LPT1:) => Port deleted, Success (Servername is ignored)
+        - Empty Portname =>  => FALSE (LastError not changed)
+        - Port "does_not_exist" => FALSE (LastError not changed)
+    */
+
+    SetLastError(0xdeadbeef);
+    res = pDeletePort(NULL, 0, emptyW);
+    ok(!res, "returned %d with 0x%x (expected '0')\n", res, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    res = pDeletePort(NULL, 0, does_not_existW);
+    ok(!res, "returned %d with 0x%x (expected '0')\n", res, GetLastError());
+
+}
+
+/* ########################### */
 
 static void test_EnumPorts(void)
 {
@@ -241,5 +318,8 @@ START_TEST(localmon)
         GET_MONITOR_FUNC(XcvClosePort);
     }
     test_InitializePrintMonitor();
+
+    test_ConfigurePort();
+    test_DeletePort();
     test_EnumPorts();
 }

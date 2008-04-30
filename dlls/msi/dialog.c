@@ -175,6 +175,8 @@ static msi_control *msi_dialog_find_control( msi_dialog *dialog, LPCWSTR name )
 
     if( !name )
         return NULL;
+    if( !dialog->hwnd )
+        return NULL;
     LIST_FOR_EACH_ENTRY( control, &dialog->controls, msi_control, entry )
         if( !strcmpW( control->name, name ) ) /* FIXME: case sensitive? */
             return control;
@@ -187,6 +189,8 @@ static msi_control *msi_dialog_find_control_by_type( msi_dialog *dialog, LPCWSTR
 
     if( !type )
         return NULL;
+    if( !dialog->hwnd )
+        return NULL;
     LIST_FOR_EACH_ENTRY( control, &dialog->controls, msi_control, entry )
         if( !strcmpW( control->type, type ) ) /* FIXME: case sensitive? */
             return control;
@@ -197,6 +201,8 @@ static msi_control *msi_dialog_find_control_by_hwnd( msi_dialog *dialog, HWND hw
 {
     msi_control *control;
 
+    if( !dialog->hwnd )
+        return NULL;
     LIST_FOR_EACH_ENTRY( control, &dialog->controls, msi_control, entry )
         if( hwnd == control->hwnd )
             return control;
@@ -373,6 +379,23 @@ static UINT msi_dialog_build_font_list( msi_dialog *dialog )
     return r;
 }
 
+static void msi_destroy_control( msi_control *t )
+{
+    list_remove( &t->entry );
+    /* leave dialog->hwnd - destroying parent destroys child windows */
+    msi_free( t->property );
+    msi_free( t->value );
+    if( t->hBitmap )
+        DeleteObject( t->hBitmap );
+    if( t->hIcon )
+        DestroyIcon( t->hIcon );
+    msi_free( t->tabnext );
+    msi_free( t->type );
+    if (t->hDll)
+        FreeLibrary( t->hDll );
+    msi_free( t );
+}
+
 static msi_control *msi_dialog_create_window( msi_dialog *dialog,
                 MSIRECORD *rec, DWORD exstyle, LPCWSTR szCls, LPCWSTR name, LPCWSTR text,
                 DWORD style, HWND parent )
@@ -505,10 +528,10 @@ static HANDLE msi_load_image( MSIDATABASE *db, LPCWSTR name, UINT type,
         if( r == ERROR_SUCCESS )
         {
             himage = LoadImageW( 0, tmp, type, cx, cy, flags );
-            DeleteFileW( tmp );
         }
         msiobj_release( &rec->hdr );
     }
+    DeleteFileW( tmp );
 
     msi_free( tmp );
     return himage;
@@ -3150,7 +3173,7 @@ static LRESULT WINAPI MSIDialog_WndProc( HWND hwnd, UINT msg,
         dialog->package->center_x = LOWORD(lParam) + dialog->size.cx / 2.0;
         dialog->package->center_y = HIWORD(lParam) + dialog->size.cy / 2.0;
         break;
-        
+
     case WM_CREATE:
         return msi_dialog_oncreate( hwnd, (LPCREATESTRUCTW)lParam );
 
@@ -3370,28 +3393,18 @@ void msi_dialog_destroy( msi_dialog *dialog )
 
     if( dialog->hwnd )
         ShowWindow( dialog->hwnd, SW_HIDE );
-    
+
     if( dialog->hwnd )
         DestroyWindow( dialog->hwnd );
 
     /* destroy the list of controls */
     while( !list_empty( &dialog->controls ) )
     {
-        msi_control *t = LIST_ENTRY( list_head( &dialog->controls ),
-                                     msi_control, entry );
-        list_remove( &t->entry );
-        /* leave dialog->hwnd - destroying parent destroys child windows */
-        msi_free( t->property );
-        msi_free( t->value );
-        if( t->hBitmap )
-            DeleteObject( t->hBitmap );
-        if( t->hIcon )
-            DestroyIcon( t->hIcon );
-        msi_free( t->tabnext );
-        msi_free( t->type );
-        msi_free( t );
-        if (t->hDll)
-            FreeLibrary( t->hDll );
+        msi_control *t;
+
+        t = LIST_ENTRY( list_head( &dialog->controls ),
+                        msi_control, entry );
+        msi_destroy_control( t );
     }
 
     /* destroy the list of fonts */
@@ -3505,12 +3518,16 @@ UINT msi_spawn_error_dialog( MSIPACKAGE *package, LPWSTR error_dialog, LPWSTR er
     DWORD size = MAX_PATH;
     int res;
 
+    static const WCHAR szUILevel[] = {'U','I','L','e','v','e','l',0};
     static const WCHAR pn_prop[] = {'P','r','o','d','u','c','t','N','a','m','e',0};
     static const WCHAR title_fmt[] = {'%','s',' ','W','a','r','n','i','n','g',0};
     static const WCHAR error_abort[] = {'E','r','r','o','r','A','b','o','r','t',0};
     static const WCHAR result_prop[] = {
         'M','S','I','E','r','r','o','r','D','i','a','l','o','g','R','e','s','u','l','t',0
     };
+
+    if ( msi_get_property_int(package, szUILevel, 0) == INSTALLUILEVEL_NONE )
+        return ERROR_SUCCESS;
 
     if ( !error_dialog )
     {

@@ -69,17 +69,13 @@ BOOL WINAPI DdePostAdvise(DWORD idInst, HSZ hszTopic, HSZ hszItem)
 
     TRACE("(%d,%p,%p)\n", idInst, hszTopic, hszItem);
 
-    EnterCriticalSection(&WDML_CritSect);
-
     pInstance = WDML_GetInstance(idInst);
 
     if (pInstance == NULL || pInstance->links == NULL)
-    {
-	goto theError;
-    }
+        return FALSE;
 
     atom = WDML_MakeAtomFromHsz(hszItem);
-    if (!atom) goto theError;
+    if (!atom) return FALSE;
 
     /* first compute the number of links which will trigger a message */
     count = 0;
@@ -136,6 +132,7 @@ BOOL WINAPI DdePostAdvise(DWORD idInst, HSZ hszTopic, HSZ hszItem)
 		{
 		    ERR("post message failed\n");
                     pConv->wStatus &= ~ST_CONNECTED;
+                    pConv->instance->lastError = DMLERR_POSTMSG_FAILED;
 		    if (!WDML_IsAppOwned(hDdeData))  DdeFreeDataHandle(hDdeData);
 		    GlobalFree(hItemData);
 		    goto theError;
@@ -144,10 +141,9 @@ BOOL WINAPI DdePostAdvise(DWORD idInst, HSZ hszTopic, HSZ hszItem)
 	    }
 	}
     }
-    LeaveCriticalSection(&WDML_CritSect);
     return TRUE;
+
  theError:
-    LeaveCriticalSection(&WDML_CritSect);
     if (atom) GlobalDeleteAtom(atom);
     return FALSE;
 }
@@ -178,8 +174,6 @@ HDDEDATA WINAPI DdeNameService(DWORD idInst, HSZ hsz1, HSZ hsz2, UINT afCmd)
 
     TRACE("(%d,%p,%p,%x)\n", idInst, hsz1, hsz2, afCmd);
 
-    EnterCriticalSection(&WDML_CritSect);
-
     /*  First check instance
      */
     pInstance = WDML_GetInstance(idInst);
@@ -187,7 +181,7 @@ HDDEDATA WINAPI DdeNameService(DWORD idInst, HSZ hsz1, HSZ hsz2, UINT afCmd)
     {
 	TRACE("Instance not found as initialised\n");
 	/*  Nothing has been initialised - exit now ! can return TRUE since effect is the same */
-	goto theError;
+        return NULL;
     }
 
     if (hsz2 != 0L)
@@ -196,7 +190,7 @@ HDDEDATA WINAPI DdeNameService(DWORD idInst, HSZ hsz1, HSZ hsz2, UINT afCmd)
 	 */
 	pInstance->lastError = DMLERR_INVALIDPARAMETER;
 	WARN("Reserved parameter no-zero !!\n");
-	goto theError;
+        return NULL;
     }
     if (hsz1 == 0 && !(afCmd & DNS_UNREGISTER))
     {
@@ -205,7 +199,7 @@ HDDEDATA WINAPI DdeNameService(DWORD idInst, HSZ hsz1, HSZ hsz2, UINT afCmd)
 	 */
 	TRACE("General unregister unexpected flags\n");
 	pInstance->lastError = DMLERR_INVALIDPARAMETER;
-	goto theError;
+        return NULL;
     }
 
     switch (afCmd & (DNS_REGISTER | DNS_UNREGISTER))
@@ -216,7 +210,7 @@ HDDEDATA WINAPI DdeNameService(DWORD idInst, HSZ hsz1, HSZ hsz2, UINT afCmd)
 	{
 	    ERR("Trying to register already registered service!\n");
 	    pInstance->lastError = DMLERR_DLL_USAGE;
-	    goto theError;
+            return NULL;
 	}
 
 	TRACE("Adding service name\n");
@@ -243,11 +237,9 @@ HDDEDATA WINAPI DdeNameService(DWORD idInst, HSZ hsz1, HSZ hsz2, UINT afCmd)
 
 	RegisterClassExW(&wndclass);
 
-	LeaveCriticalSection(&WDML_CritSect);
 	hwndServer = CreateWindowW(szServerNameClass, NULL,
 				   WS_POPUP, 0, 0, 0, 0,
 				   0, 0, 0, 0);
-	EnterCriticalSection(&WDML_CritSect);
 
 	SetWindowLongPtrW(hwndServer, GWL_WDML_INSTANCE, (ULONG_PTR)pInstance);
 	SetWindowLongPtrW(hwndServer, GWL_WDML_SERVER, (ULONG_PTR)pServer);
@@ -284,19 +276,14 @@ HDDEDATA WINAPI DdeNameService(DWORD idInst, HSZ hsz1, HSZ hsz2, UINT afCmd)
 	    /*  trying to filter where no service names !!
 	     */
 	    pInstance->lastError = DMLERR_DLL_USAGE;
-	    goto theError;
+            return NULL;
 	}
 	else
 	{
 	    pServer->filterOn = (afCmd & DNS_FILTERON) != 0;
 	}
     }
-    LeaveCriticalSection(&WDML_CritSect);
     return (HDDEDATA)TRUE;
-
- theError:
-    LeaveCriticalSection(&WDML_CritSect);
-    return FALSE;
 }
 
 /******************************************************************
@@ -587,6 +574,7 @@ static	WDML_QUEUE_STATE WDML_ServerHandleRequest(WDML_CONV* pConv, WDML_XACT* pX
 			      ReuseDDElParam(pXAct->lParam, WM_DDE_REQUEST, WM_DDE_DATA,
 					     (UINT_PTR)hMem, (UINT_PTR)pXAct->atom)))
 	    {
+                pConv->instance->lastError = DMLERR_POSTMSG_FAILED;
 		DdeFreeDataHandle(hDdeData);
 		GlobalFree(hMem);
 		fAck = FALSE;
@@ -996,13 +984,11 @@ static LRESULT CALLBACK WDML_ServerConvProc(HWND hwndServer, UINT iMsg, WPARAM w
 
     if (iMsg == WM_DESTROY)
     {
-	EnterCriticalSection(&WDML_CritSect);
 	pConv = WDML_GetConvFromWnd(hwndServer);
 	if (pConv && !(pConv->wStatus & ST_TERMINATED))
 	{
 	    WDML_ServerHandleTerminate(pConv, NULL);
 	}
-	LeaveCriticalSection(&WDML_CritSect);
     }
     if (iMsg < WM_DDE_FIRST || iMsg > WM_DDE_LAST)
     {
@@ -1010,25 +996,23 @@ static LRESULT CALLBACK WDML_ServerConvProc(HWND hwndServer, UINT iMsg, WPARAM w
                                              DefWindowProcA(hwndServer, iMsg, wParam, lParam);
     }
 
-    EnterCriticalSection(&WDML_CritSect);
-
     pInstance = WDML_GetInstanceFromWnd(hwndServer);
     pConv = WDML_GetConvFromWnd(hwndServer);
 
     if (!pConv)
     {
 	ERR("Got a message (%x) on a not known conversation, dropping request\n", iMsg);
-	goto theError;
+        return 0;
     }
     if (pConv->hwndClient != WIN_GetFullHandle( (HWND)wParam ) || pConv->hwndServer != hwndServer)
     {
 	ERR("mismatch between C/S windows and converstation\n");
-	goto theError;
+        return 0;
     }
     if (pConv->instance != pInstance || pConv->instance == NULL)
     {
 	ERR("mismatch in instances\n");
-	goto theError;
+        return 0;
     }
 
     switch (iMsg)
@@ -1067,13 +1051,16 @@ static LRESULT CALLBACK WDML_ServerConvProc(HWND hwndServer, UINT iMsg, WPARAM w
 
     default:
 	FIXME("Unsupported message %x\n", iMsg);
+        break;
     }
 
     if (pXAct)
     {
 	pXAct->lParam = lParam;
-	if (WDML_ServerHandle(pConv, pXAct) == WDML_QS_BLOCK)
+
+	if ((pConv->wStatus & ST_BLOCKED) || WDML_ServerHandle(pConv, pXAct) == WDML_QS_BLOCK)
 	{
+            TRACE("Transactions are blocked, add to the queue and exit\n");
 	    WDML_QueueTransaction(pConv, pXAct);
 	}
 	else
@@ -1081,7 +1068,8 @@ static LRESULT CALLBACK WDML_ServerConvProc(HWND hwndServer, UINT iMsg, WPARAM w
 	    WDML_FreeTransaction(pInstance, pXAct, TRUE);
 	}
     }
- theError:
-    LeaveCriticalSection(&WDML_CritSect);
+    else
+        pConv->instance->lastError = DMLERR_MEMORY_ERROR;
+
     return 0;
 }
