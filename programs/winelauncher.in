@@ -92,6 +92,34 @@ else
     XMESSAGE="xmessage $COLOR"
 fi
 
+
+# Debian-specific: give a warning if launched from mailcap
+if [ `basename $0` = "wine-safe" ]; then
+ $XMESSAGE -default "             No             " \
+ -title "Launching Wine" \
+ -buttons "             No             ":0,"             Yes             ":2 \
+ "
+ Wine will launch to run the requested Windows executable.
+ To protect you from accidentally running a Windows virus,
+ you must confirm that this is what you intented to do.
+ " 2>/dev/null
+ safe_launch=$?
+ if [ $safe_launch -eq 0 ] ; then
+  exit 1
+ fi
+ if [ $safe_launch -eq 1 ] ; then
+  # this means xmessage was unable to ask the user, try tty instead
+  echo "Wine will launch to run the requested Windows executable."
+  echo "To protect you from accidentally running a Windows virus,"
+  echo "you must confirm that this is what you intented to do."
+  echo -n "(yes/no) "
+  read safe_confirm
+  if [ "$safe_confirm" != 'yes' -a "$safe_confirm" != 'y' ] ; then
+   exit 1
+  fi
+ fi
+fi
+
 #------------------------------------------------------------------------------
 #  We're going to do a lot of fancy footwork below.
 #    Before we get started, it would be nice to know the argv0
