@@ -142,12 +142,12 @@ if [ ! -x $WINEBIN/$WINE_BIN_NAME ] ; then
     fi
 fi
 
-if [ ! -r $WINELIB/libwine.so ] ; then
-    WINELIB=`find $argv0_dir -maxdepth 2 -name 'libwine.so' -printf "%h\n" | head -n 1`
+if [ ! -r $WINELIB/libwine.so.1 ] ; then
+    WINELIB=`find $argv0_dir -maxdepth 2 -name 'libwine.so.1' -printf "%h\n" | head -n 1`
 fi
 
-if [ ! -r $WINELIB/libwine.so ] ; then
-    WINELIB=`find $argv0_dir/../ -maxdepth 2 -name 'libwine.so' -printf "%h\n" | head -n 1`
+if [ ! -r $WINELIB/libwine.so.1 ] ; then
+    WINELIB=`find $argv0_dir/../ -maxdepth 2 -name 'libwine.so.1' -printf "%h\n" | head -n 1`
 fi
 
 if [ -x $WINEBIN/wineserver ] ; then
