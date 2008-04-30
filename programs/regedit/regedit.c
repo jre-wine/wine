@@ -169,6 +169,7 @@ BOOL PerformRegAction(REGEDIT_ACTION action, LPSTR s)
             while(filename[0]) {
                 char* realname = NULL;
                 int size;
+                if (!strcmp(filename,"-")) reg_file = stdin; else {
                 size=SearchPath(NULL,filename,NULL,0,NULL,NULL);
                 if (size>0)
                 {
@@ -182,6 +183,7 @@ BOOL PerformRegAction(REGEDIT_ACTION action, LPSTR s)
                     exit(1);
                 }
                 reg_file = fopen(realname, "r");
+                } /* if (!strcmp(realname,"-")) */
                 if (reg_file==NULL)
                 {
                     perror("");
