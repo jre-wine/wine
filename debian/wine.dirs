@@ -11,12 +11,3 @@ usr/share/mime-info
 usr/share/binfmts
 usr/share/pixmaps
 usr/share/wine
-usr/share/wine/skel
-usr/share/wine/skel/c
-usr/share/wine/skel/c/windows
-usr/share/wine/skel/c/windows/system
-usr/share/wine/skel/c/windows/system32
-usr/share/wine/skel/c/windows/command
-usr/share/wine/skel/c/windows/Fonts
-usr/share/wine/skel/c/windows/Profiles
-usr/share/wine/skel/dosdevices

@@ -22,11 +22,13 @@ PO2DEBCONF := yes
 MINDEBCONFVER := 1.2.0
 endif
 
-DEB_HOST_GNU_SYSTEM ?= $(shell dpkg-architecture -qDEB_HOST_GNU_SYSTEM)
+DEB_HOST_GNU_SYSTEM	?= $(shell dpkg-architecture -qDEB_HOST_GNU_SYSTEM)
+DEB_HOST_GNU_CPU	?= $(shell dpkg-architecture -qDEB_HOST_GNU_CPU)
 
 configure: configure-stamp
 configure-stamp:
 	dh_testdir
+ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	CFLAGS="$(CFLAGS)" \
 	ICUUC_LIB="` \
 	(dpkg -s libicu36-dev >/dev/null && \
@@ -54,6 +56,7 @@ configure-stamp:
 	--libdir=\$${prefix}/lib \
 	--mandir=\$${prefix}/share/man \
 	--infodir=\$${prefix}/share/info
+endif
 
 	touch configure-stamp
 
@@ -67,11 +70,13 @@ build-arch: configure-stamp build-arch-stamp
 build-arch-stamp:
 	dh_testdir
 
+ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	$(MAKE) depend
 	# build wine & tools
 	$(MAKE)
 	# build winelib programs
 	$(MAKE) -C programs
+endif
 
 	touch build-arch-stamp
 
@@ -111,6 +116,7 @@ install-arch: build-arch
 	# create installation directories
 	dh_installdirs -s
 
+ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	# install wine, libwine, and tools
 	$(MAKE) install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
 	# move the real binaries into /usr/lib/wine,
@@ -126,6 +132,7 @@ install-arch: build-arch
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
 	# install winelib programs
 	$(MAKE) -C programs install prefix=`pwd`/debian/tmp/usr
+endif
 
 install: install-arch
 
@@ -151,6 +158,7 @@ binary-arch: build-arch install-arch
 	dh_testdir
 	dh_testroot
 
+ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	# distribute the files in debian/tmp into debian/<packagename>
 	# according to the <packagename>.files files
 	dh_movefiles -s
@@ -169,6 +177,7 @@ binary-arch: build-arch install-arch
 	install tools/fnt2bdf debian/wine-utils/usr/bin
 	install tools/font_convert.sh debian/wine-utils/usr/bin
 	cp tools/winedump/README debian/wine-utils/usr/share/doc/wine-utils/README.winedump
+	cp debian/winecfg.desktop debian/wine-utils/usr/share/applications/winecfg.desktop
 
 	# split up libwine
 ifeq ($(DEB_HOST_GNU_SYSTEM), linux-gnu)
@@ -188,41 +197,7 @@ endif
 	mv debian/libwine/usr/lib/wine/wldap32*  debian/libwine-ldap/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/winenas*  debian/libwine-nas/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/wineps*   debian/libwine-print/usr/lib/wine
-
-	# create a default wine configuration in /usr/share/wine/skel
-	# create directories that dh_installdirs didn't create
-	mkdir -p "debian/wine/usr/share/wine/skel/c/windows/Profiles/Administrator"
-	mkdir -p "debian/wine/usr/share/wine/skel/c/windows/Start Menu/Programs/Startup"
-	mkdir -p "debian/wine/usr/share/wine/skel/c/Program Files/Common Files"
-	# install default registry
-	ln -s ../c debian/wine/usr/share/wine/skel/dosdevices/c:
-	ln -s ../../../../../../.. debian/wine/usr/share/wine/skel/dosdevices/d:
-	ln -s /tmp debian/wine/usr/share/wine/skel/dosdevices/e:
-	(WINEPREFIX=`pwd`/debian/wine/usr/share/wine/skel \
-	 programs/rundll32/rundll32 setupapi.dll,InstallHinfSection \
-	 DefaultInstall 128 tools/wine.inf >/dev/null) \
-	 || true
-	rm -f debian/wine/usr/share/wine/skel/cachedmetrics.*
-	rm -rf debian/wine/usr/share/wine/skel/wineserver-*
-	rm -f debian/wine/usr/share/wine/skel/*.ini
-	rm -f debian/wine/usr/share/wine/skel/dosdevices/*
-	rm -rf debian/wine/usr/share/wine/skel/c/windows/Profiles/root
-	# install default drive mappings
-	ln -s /floppy debian/wine/usr/share/wine/skel/dosdevices/a:
-	ln -s ../c debian/wine/usr/share/wine/skel/dosdevices/c:
-	ln -s /cdrom debian/wine/usr/share/wine/skel/dosdevices/d:
-	ln -s /tmp debian/wine/usr/share/wine/skel/dosdevices/e:
-	ln -s ../.. debian/wine/usr/share/wine/skel/dosdevices/f:
-	ln -s / debian/wine/usr/share/wine/skel/dosdevices/z:
-	# install default devices
-	ln -s /dev/ttyS0 debian/wine/usr/share/wine/skel/dosdevices/com1
-	ln -s /dev/ttyS1 debian/wine/usr/share/wine/skel/dosdevices/com2
-	ln -s /dev/ttyS2 debian/wine/usr/share/wine/skel/dosdevices/com3
-	ln -s /dev/modem debian/wine/usr/share/wine/skel/dosdevices/com4
-	ln -s /dev/lp0 debian/wine/usr/share/wine/skel/dosdevices/lpt1
-
-	# install wineinstall tool
-	install tools/wineinstall debian/wine/usr/share/wine
+endif
 
 ifeq ($(PO2DEBCONF),yes)
 	po2debconf -e utf8 debian/wine.templates.master > debian/wine.templates
@@ -233,8 +208,6 @@ endif
 	dh_installdocs -s
 #	dh_installmenu -s
 	dh_installmime -s
-
-	# FIXME: concatenate wineinstall script
 
 	dh_undocumented -s
 	dh_installchangelogs -s ChangeLog
@@ -279,6 +252,14 @@ endif
 	 echo "icu=, icu" >> debian/libwine.substvars) || \
 	true
 
+ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM), x86_64-linux-gnu)
+	# Using compressed 32-bit build.  Make sure it's the latest one!!
+	uudecode < debian/amd64.tar.lzma.uu | lzma -d | tar -xpf -
+endif
+ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM), i486-linux-gnu)
+	# Generating compressed 32-bit build.  Make sure to keep your *_i386.deb in sync with this file in your *.diff.gz!!
+	tar -cpf - `grep "^Package: " debian/control | sed -e "s,^Package: ,debian/,g"` | lzma -c9 | uuencode - > debian/amd64.tar.lzma.uu
+endif
 	dh_gencontrol -s -- -V'debconf-depends=debconf (>= $(MINDEBCONFVER)) | debconf-2.0'
 	dh_md5sums -s
 	dh_builddeb -s

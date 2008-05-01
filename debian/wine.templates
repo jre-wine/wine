@@ -22,6 +22,8 @@ Description-es.UTF-8: Se ha detectado un wine.conf antiguo. ¿Quiere borrarlo?
  Wine ya no carga /etc/wine.conf por defecto. Por tanto, los usuarios que no tengan un fichero ~/.winerc (o ~/.wine/config) no podrán ejecutar Wine, a menos que configuren un fichero ~/.wine/config. Esto puede hacerse fácilmente con la herramienta winesetup, que se encuentra en el paquete winesetuptk, o bien cada usuario puede copiar el fichero /etc/wine.conf en ~/.winerc y dejar que wine lo convierta. Si borra el fichero /etc/wine.conf, winesetup se lanzará automáticamente para los usuarios que no tengan fichero de configuración, en vez de obligarle a hacer por su cuenta algo de lo anterior.
 Description-fr.UTF-8: Un fichier wine.conf obsolète a été trouvé, souhaitez-vous l'effacer ?
  Wine n'utilise plus /etc/wine.conf par défaut. Aussi, les utilisateurs qui n'ont pas créé de fichier ~/.winerc (ou ~/.wine/config) ne pourront pas démarrer Wine, tant qu'ils n'auront pas créé ce fichier. Cette création est simplifiée par l'outil winesetup qui se trouve dans le paquet winesetuptk. Les utilisateurs peuvent également copier le fichier /etc/wine.conf vers ~/.winerc et laisser Wine effectuer la conversion. Si vous supprimez /etc/wine.conf, winesetup démarrera automatiquement pour les utilisateurs qui n'ont pas de fichier de configuration, ce qui leur évitera d'avoir à faire eux-mêmes les opérations décrites ci-dessus.
+Description-gl.UTF-8: Detectouse un ficheiro wine.conf antigo, ¿eliminalo?
+ Wine xa non tenta cargar /etc/wine.conf por defecto. Polo tanto, os usuarios que non teñan un ficheiro ~/.winerc (ou ~/.wine/config) non han poder executar Wine, a menos que configuren un ficheiro ~/.wine/config eles mesmos. Isto faise de xeito doado coa ferramenta winesetup, que está no paquete winesetuptk (ou cada usuario pode copiar o antigo ficheiro /etc/wine.conf a ~/.winerc e deixar que wine o convirta). Se elimina o ficheiro /etc/wine.conf, winesetup hase lanzar automaticamente para os usuarios que non teñan un ficheiro de configuración, no canto de obrigalos a facer eles o de enriba.
 Description-it.UTF-8: Individuato un vecchio wine.conf, rimuoverlo?
  Wine non prova più a caricare /etc/wine.conf di default. Quindi, gli utenti che non hannno un file ~/.winerc (o ~/.wine/config) non saranno in grado di eseguire Wine, a meno che non creino un file ~/.wine/conf da soli. Si può farlo facilmente usando il tool winesetup, che si trova nel pacchetto winesetuptk; in alternativa ogni utente può copiare il vecchio /etc/wine.conf in ~/.winerc e lasciare che Wine lo converta. Se rimuovi il file /etc/wine.conf, winesetup verrà lanciato in automatico per gli utenti che non hanno un file di configurazione, senza che l'utente debba fare nessuna delle operazioni citate sopra.
 Description-ja.UTF-8: 古い wine.conf が検出されました。削除しますか?
@@ -49,6 +51,7 @@ Choices-da.UTF-8: Automatisk søgning, Eksisterende windows, Ikke windows, Sprin
 Choices-de.UTF-8: Automatische Erkennung, Vorhandenes Windows, Kein Windows, Abbrechen
 Choices-es.UTF-8: Autodectar, Con Windows, Sin Windows, Saltar
 Choices-fr.UTF-8: Auto-détection, Windows existant, Pas de Windows, Passer
+Choices-gl.UTF-8: Autodetectar, Windows-existente, Sen-windows, Omitir
 Choices-it.UTF-8: Rilevamento automatico, Installazione di Windows esistente, Nessuna installazione di Windows, Salta
 Choices-ja.UTF-8: 自動検出, 既存のWindows, Windowsなし, スキップ
 Choices-nl.UTF-8: Automatisch detecteren, Bestaande Windows, Geen Windows, Overslaan
@@ -76,6 +79,8 @@ Description-es.UTF-8: ¿Qué tipo de configuración de Wine desea?
  Wine ofrece la posibilidad de usar una instalación existente de Windows (preferiblemente con permiso de escritura), pero si no tiene una o no quiere usarla, Wine puede ejecutarse perfectamente sin ella. Escoja la opción que considere más apropiada.
 Description-fr.UTF-8: Quel type de configuration voulez-vous pour Wine ?
  Wine peut utiliser une installation Windows existante, si elle est accessible (de préférence avec les droits d'écriture). Mais si vous n'en avez pas (ou ne souhaitez pas l'utiliser), Wine peut aussi fonctionner sans le moindre logiciel Microsoft. Veuillez choisir la configuration que vous souhaitez.
+Description-gl.UTF-8: ¿Que tipo de configuración de Wine quere?
+ Wine pode empregar unha instalación existente de Windows se ten unha montada (preferiblemente con permisos de escritura), pero se non a ten (ou non a quere empregar), Wine tamén pode funcionar totalmente libre de Microsoft. Escolla a configuración que lle sexa máis axeitada.
 Description-it.UTF-8: Che tipo di configurazione vuoi per Wine?
  Wine può usare un'installazione esistente di Windows se ne hai una montata (preferibilmente con permessi in scrittura), ma se non ne hai una, o non vuoi usarla, Wine può funzionare anche in maniera totalmente Microsoft-free. Scegli la configurazione più adatta a te.
 Description-ja.UTF-8: 行いたい Wine 設定はどの種類ですか?
