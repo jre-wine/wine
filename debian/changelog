@@ -1,3 +1,16 @@
+wine (0.9.30-1) unstable; urgency=low
+
+  * New upstream release 0.9.30.
+    - Many improvements to Direct3D shaders and state management.
+    - Support for inter-process memory allocations.
+    - OLE32 marshalling fixes.
+    - Lots of bug fixes.
+  * This version was released Jan 25, 2007.
+  * libwine-arts depends on ia32-libs-gtk on amd64. Closes: #408433.
+  * libwine depends on ia32-libs (>= 1.19) on amd64. Closes: #408539.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon,  5 Feb 2007 05:13:30 -0500
+
 wine (0.9.29-1) unstable; urgency=high
 
   * New upstream release 0.9.29.

@@ -58,7 +58,7 @@ Description: Windows API Implementation (Development files)
 Package: libwine
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: ${debconf-depends}, ${shlibs:Depends}${freetype}, ia32-libs [amd64]
+Depends: ${debconf-depends}, ${shlibs:Depends}${freetype}, ia32-libs (>= 1.19) [amd64]
 Replaces: libwine0.0.971116, wine (<< 0.9.11-1), libwine-twain (<< 0.9.13)
 Conflicts: libwine0.0.971116
 Recommends: libwine-print, libwine-gl${icu}
@@ -73,7 +73,7 @@ Description: Windows API Implementation (Library)
 
 Package: libwine-alsa
 Section: libs
-Architecture: amd64 i386
+Architecture: i386 amd64 powerpc sparc
 Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
 Description: Windows API Implementation (ALSA Sound Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
@@ -86,7 +86,7 @@ Description: Windows API Implementation (ALSA Sound Module)
 Package: libwine-arts
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${Source-Version}), ${shlibs:Depends}, ia32-libs-gtk [amd64]
 Replaces: libwine (<< 0.0.20020710)
 Description: Windows API Implementation (aRts Sound Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
@@ -98,7 +98,7 @@ Description: Windows API Implementation (aRts Sound Module)
 
 Package: libwine-capi
 Section: libs
-Architecture: amd64 i386
+Architecture: i386 amd64
 Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
 Description: Windows API Implementation (ISDN Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
