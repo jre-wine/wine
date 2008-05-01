@@ -1,0 +1,2 @@
+debian/wine.desktop			usr/share/applications
+programs/winemenubuilder/wine*.xpm	usr/share/pixmaps

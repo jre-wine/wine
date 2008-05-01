@@ -1,3 +1,32 @@
+wine (0.9.35-1) unstable; urgency=low
+
+  * New upstream release 0.9.35. Closes: #420680.
+    - Broken aRts sound driver now removed for good.
+    - Many fixes to the Quartz DLL sound support.
+    - File I/O performance improvements.
+    - The usual assortment of Direct3D fixes.
+    - Lots of bug fixes.
+  * This version was released Apr 13, 2007.
+  * Applied patch by Robert Millan to rename the current "wine" package
+    to "wine-bin", and make "wine" a metapackage that depends on all the
+    other packages. (I'm very much in doubt whether packages like
+    libwine-capi, which probably nobody has used for years, really should
+    be depended on by such a metapackage, but I've left it as "everything"
+    for now.) Closes: #416525.
+  * Removed the libwine-arts package.
+  * Split wineoss into a new libwine-oss package. While
+    (at least under Linux) wineoss do not actually have any
+    extra dependencies to worry about, nor is it very large,
+    this does allow the metapackage's dependency on "at least
+    one libwine sound driver package" to make more sense,
+    for those users who's only using OSS.
+  * Installed the hh and xcopy tools into wine-utils.
+  * Installed the spoolsv service into libwine-print.
+  * Add libcupsys2 as an alternative dependency to libcupsys2-gnutls10.
+    Closes: #433376.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Tue, 17 Jul 2007 14:06:51 -0400
+
 wine (0.9.34-1) unstable; urgency=low
 
   * New upstream release 0.9.34.

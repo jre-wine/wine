@@ -10,6 +10,7 @@ usr/bin/winepath
 usr/bin/winhelp
 usr/lib/wine/cmd.exe.so
 usr/lib/wine/control.exe.so
+usr/lib/wine/hh.exe.so
 usr/lib/wine/iexplore.exe.so
 usr/lib/wine/notepad.exe.so
 usr/lib/wine/oleview.exe.so
@@ -23,6 +24,7 @@ usr/lib/wine/winepath.exe.so
 usr/lib/wine/winhelp.exe.so
 usr/lib/wine/winver.exe.so
 usr/lib/wine/wordpad.exe.so
+usr/lib/wine/xcopy.exe.so
 usr/share/man/man1/winedbg.1
 usr/share/man/man1/winedump.1
 usr/share/man/man1/winemaker.1

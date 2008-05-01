@@ -1,6 +1,7 @@
 #!/usr/bin/make -f
 # Sample debian/rules that uses debhelper.
 # GNU copyright 1997 to 1999 by Joey Hess.
+export SHELL=bash
 
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
@@ -97,7 +98,7 @@ ifeq ($(PO2DEBCONF),yes)
 	# 4.1.16) depends on it), the binary-arch target will generate a
 	# better version for sarge.
 	echo 1 > debian/po/output
-	po2debconf debian/wine.templates.master > debian/wine.templates
+	po2debconf debian/wine-bin.templates.master > debian/wine-bin.templates
 	po2debconf debian/libwine.templates.master > debian/libwine.templates
 	rm -f debian/po/output
 endif
@@ -132,6 +133,10 @@ ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
 	# install winelib programs
 	$(MAKE) -C programs install prefix=`pwd`/debian/tmp/usr
+	mkdir -p debian/tmp/usr/share/{mime-info,binfmts}
+	cp debian/mime-info.mime	debian/tmp/usr/share/mime-info/wine.mime
+	cp debian/mime-info.keys	debian/tmp/usr/share/mime-info/wine.keys
+	cp debian/wine.binfmt		debian/tmp/usr/share/binfmts/wine
 endif
 
 install: install-arch
@@ -140,9 +145,6 @@ install: install-arch
 binary-indep: build-indep install-indep
 	dh_testdir
 	dh_testroot
-
-	cp documentation/ChangeLog.OLD \
-	 debian/wine/usr/share/doc/wine
 
 	dh_installdocs -i
 	dh_installchangelogs -i ChangeLog
@@ -162,16 +164,12 @@ ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	# distribute the files in debian/tmp into debian/<packagename>
 	# according to the <packagename>.files files
 	dh_movefiles -s
+	# copy additional files into debian/<packagename>
+	# according to the <packagename>.install files
+	dh_install -s
 
 	# distribute files we want that weren't in debian/tmp
 	cp dlls/twain_32/README debian/libwine/usr/share/doc/libwine/README.twain
-	# wine files (bugreport tool, file associations)
-	install tools/bug_report.pl debian/wine/usr/share/doc/wine
-	cp debian/mime-info.mime debian/wine/usr/share/mime-info/wine.mime
-	cp debian/mime-info.keys debian/wine/usr/share/mime-info/wine.keys
-	cp debian/wine.desktop debian/wine/usr/share/applications/wine.desktop
-	cp debian/wine.binfmt debian/wine/usr/share/binfmts/wine
-	cp programs/winemenubuilder/wine*.xpm debian/wine/usr/share/pixmaps
 	# wine-utils
 	install tools/bin2res debian/wine-utils/usr/bin
 	install tools/fnt2bdf debian/wine-utils/usr/bin
@@ -185,8 +183,8 @@ ifeq ($(DEB_HOST_GNU_SYSTEM), linux-gnu)
 	mv debian/libwine/usr/lib/wine/winealsa* debian/libwine-alsa/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/capi*     debian/libwine-capi/usr/lib/wine
 endif
-	mv debian/libwine/usr/lib/wine/winearts* debian/libwine-arts/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/mscms*    debian/libwine-cms/usr/lib/wine
+	mv debian/libwine/usr/lib/wine/wineoss*  debian/libwine-oss/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/wineesd*  debian/libwine-esd/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/d3d8*     debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/d3d9*     debian/libwine-gl/usr/lib/wine
@@ -201,7 +199,7 @@ endif
 endif
 
 ifeq ($(PO2DEBCONF),yes)
-	po2debconf -e utf8 debian/wine.templates.master > debian/wine.templates
+	po2debconf -e utf8 debian/wine-bin.templates.master > debian/wine-bin.templates
 	po2debconf -e utf8 debian/libwine.templates.master > debian/libwine.templates
 endif
 
@@ -228,7 +226,7 @@ endif
 
 	# if the distro we're compiling for has cups, depend on it
 	(dpkg -s libcupsys2-dev >/dev/null && \
-	 echo "cupsys=, libcupsys2-gnutls10" >> debian/libwine-print.substvars) || \
+	 echo "cupsys=, libcupsys2-gnutls10 | libcupsys2" >> debian/libwine-print.substvars) || \
 	true
 
 	# if the distro we're compiling for has jack, depend on it
@@ -259,12 +257,13 @@ ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM), x86_64-linux-gnu)
 endif
 ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM), i486-linux-gnu)
 	# Generating compressed 32-bit build.  Make sure to keep your *_i386.deb in sync with this file in your *.diff.gz!!
-	tar -cpf - `grep "^Package: " debian/control | sed -e "s,^Package: ,debian/,g"` | lzma -c9 | uuencode - > debian/amd64.tar.lzma.uu
+	tar -cpf - `grep-dctrl -v "Architecture: all" debian/control | grep "^Package: " | sed -e "s,^Package: ,debian/,g"` \
+		| lzma -c9 | uuencode - > debian/amd64.tar.lzma.uu
 endif
 	dh_gencontrol -s -- -V'debconf-depends=debconf (>= $(MINDEBCONFVER)) | debconf-2.0'
 	dh_md5sums -s
 	dh_builddeb -s
 
-binary: binary-arch
+binary: binary-arch binary-indep
 .PHONY: build-indep build-arch build clean binary-indep binary-arch binary \
 	install-indep install-arch install configure
