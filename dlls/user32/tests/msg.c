@@ -3625,6 +3625,49 @@ static const struct message WmSetIcon_2[] = {
     { 0 }
 };
 
+static void test_MsgWaitForMultipleObjects(HWND hwnd)
+{
+    DWORD ret;
+    MSG msg;
+
+    ret = MsgWaitForMultipleObjects(0, NULL, FALSE, 0, QS_POSTMESSAGE);
+    ok(ret == WAIT_TIMEOUT, "MsgWaitForMultipleObjects returned %x\n", ret);
+
+    PostMessageA(hwnd, WM_USER, 0, 0);
+
+    ret = MsgWaitForMultipleObjects(0, NULL, FALSE, 0, QS_POSTMESSAGE);
+    ok(ret == WAIT_OBJECT_0, "MsgWaitForMultipleObjects returned %x\n", ret);
+
+    ok(PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ), "PeekMessage should succeed\n");
+    ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
+
+    ret = MsgWaitForMultipleObjects(0, NULL, FALSE, 0, QS_POSTMESSAGE);
+    ok(ret == WAIT_TIMEOUT, "MsgWaitForMultipleObjects returned %x\n", ret);
+
+    PostMessageA(hwnd, WM_USER, 0, 0);
+
+    ret = MsgWaitForMultipleObjects(0, NULL, FALSE, 0, QS_POSTMESSAGE);
+    ok(ret == WAIT_OBJECT_0, "MsgWaitForMultipleObjects returned %x\n", ret);
+
+    ok(PeekMessageW( &msg, 0, 0, 0, PM_NOREMOVE ), "PeekMessage should succeed\n");
+    ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
+
+    /* shows QS_POSTMESSAGE flag is cleared in the PeekMessage call */
+    ret = MsgWaitForMultipleObjects(0, NULL, FALSE, 0, QS_POSTMESSAGE);
+    ok(ret == WAIT_TIMEOUT, "MsgWaitForMultipleObjects returned %x\n", ret);
+
+    PostMessageA(hwnd, WM_USER, 0, 0);
+
+    /* new incoming message causes it to become signaled again */
+    ret = MsgWaitForMultipleObjects(0, NULL, FALSE, 0, QS_POSTMESSAGE);
+    ok(ret == WAIT_OBJECT_0, "MsgWaitForMultipleObjects returned %x\n", ret);
+
+    ok(PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ), "PeekMessage should succeed\n");
+    ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
+    ok(PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ), "PeekMessage should succeed\n");
+    ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
+}
+
 /* test if we receive the right sequence of messages */
 static void test_messages(void)
 {
@@ -3632,7 +3675,6 @@ static void test_messages(void)
     HWND hchild2, hbutton;
     HMENU hmenu;
     MSG msg;
-    DWORD ret;
 
     flush_sequence();
 
@@ -3921,21 +3963,7 @@ static void test_messages(void)
     while (PeekMessage( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessage( &msg );
     flush_sequence();
 
-    /* MsgWaitForMultipleObjects test */
-    ret = MsgWaitForMultipleObjects(0, NULL, FALSE, 0, QS_POSTMESSAGE);
-    ok(ret == WAIT_TIMEOUT, "MsgWaitForMultipleObjects returned %x\n", ret);
-
-    PostMessageA(hparent, WM_USER, 0, 0);
-
-    ret = MsgWaitForMultipleObjects(0, NULL, FALSE, 0, QS_POSTMESSAGE);
-    ok(ret == WAIT_OBJECT_0, "MsgWaitForMultipleObjects returned %x\n", ret);
-
-    ok(PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ), "PeekMessage should succeed\n");
-    ok(msg.message == WM_USER, "got %04x instead of WM_USER\n", msg.message);
-
-    ret = MsgWaitForMultipleObjects(0, NULL, FALSE, 0, QS_POSTMESSAGE);
-    ok(ret == WAIT_TIMEOUT, "MsgWaitForMultipleObjects returned %x\n", ret);
-    /* end of MsgWaitForMultipleObjects test */
+    test_MsgWaitForMultipleObjects(hparent);
 
     /* the following test causes an exception in user.exe under win9x */
     if (!PostMessageW( hparent, WM_USER, 0, 0 ))
@@ -4232,7 +4260,7 @@ static const struct message WmSetFontButtonSeq[] =
 {
     { WM_SETFONT, sent },
     { WM_PAINT, sent },
-    { WM_ERASEBKGND, sent|defwinproc },
+    { WM_ERASEBKGND, sent|defwinproc|optional },
     { WM_CTLCOLORBTN, sent|defwinproc },
     { 0 }
 };
@@ -4372,7 +4400,7 @@ static const struct message WmSetFontStaticSeq[] =
 {
     { WM_SETFONT, sent },
     { WM_PAINT, sent|defwinproc },
-    { WM_ERASEBKGND, sent|defwinproc },
+    { WM_ERASEBKGND, sent|defwinproc|optional },
     { WM_CTLCOLORSTATIC, sent|defwinproc },
     { 0 }
 };
@@ -8010,7 +8038,10 @@ static void test_PeekMessage(void)
        "wrong qstatus %08x\n", qstatus);
 
     msg.message = 0;
-    ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | (QS_RAWINPUT << 16));
+    if (qs_all_input & QS_RAWINPUT) /* use QS_RAWINPUT only if supported */
+        ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | (QS_RAWINPUT << 16));
+    else /* workaround for a missing QS_RAWINPUT support */
+        ret = PeekMessageA(&msg, 0, WM_KEYDOWN, WM_KEYDOWN, PM_REMOVE);
     ok(ret && msg.message == WM_KEYDOWN && msg.wParam == 'N',
        "got %d and %04x wParam %08x instead of TRUE and WM_KEYDOWN wParam 'N'\n",
        ret, msg.message, msg.wParam);
@@ -8021,7 +8052,10 @@ static void test_PeekMessage(void)
        "wrong qstatus %08x\n", qstatus);
 
     msg.message = 0;
-    ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | (QS_RAWINPUT << 16));
+    if (qs_all_input & QS_RAWINPUT) /* use QS_RAWINPUT only if supported */
+        ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | (QS_RAWINPUT << 16));
+    else /* workaround for a missing QS_RAWINPUT support */
+        ret = PeekMessageA(&msg, 0, WM_KEYUP, WM_KEYUP, PM_REMOVE);
     ok(ret && msg.message == WM_KEYUP && msg.wParam == 'N',
        "got %d and %04x wParam %08x instead of TRUE and WM_KEYUP wParam 'N'\n",
        ret, msg.message, msg.wParam);

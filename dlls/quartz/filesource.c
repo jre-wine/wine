@@ -314,6 +314,7 @@ HRESULT AsyncReader_create(IUnknown * pUnkOuter, LPVOID * ppv)
     pAsyncRead->pOutputPin = NULL;
 
     InitializeCriticalSection(&pAsyncRead->csFilter);
+    pAsyncRead->csFilter.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": AsyncReader.csFilter");
 
     pAsyncRead->pszFileName = NULL;
     pAsyncRead->pmt = NULL;
@@ -362,7 +363,7 @@ static ULONG WINAPI AsyncReader_AddRef(IBaseFilter * iface)
     AsyncReader *This = (AsyncReader *)iface;
     ULONG refCount = InterlockedIncrement(&This->refCount);
     
-    TRACE("(%p/%p)->() AddRef from %d\n", This, iface, refCount - 1);
+    TRACE("(%p)->() AddRef from %d\n", This, refCount - 1);
     
     return refCount;
 }
@@ -372,12 +373,13 @@ static ULONG WINAPI AsyncReader_Release(IBaseFilter * iface)
     AsyncReader *This = (AsyncReader *)iface;
     ULONG refCount = InterlockedDecrement(&This->refCount);
     
-    TRACE("(%p/%p)->() Release from %d\n", This, iface, refCount + 1);
+    TRACE("(%p)->() Release from %d\n", This, refCount + 1);
     
     if (!refCount)
     {
         if (This->pOutputPin)
             IPin_Release(This->pOutputPin);
+        This->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->csFilter);
         This->lpVtbl = NULL;
         CoTaskMemFree(This);
@@ -751,7 +753,7 @@ static ULONG WINAPI FileAsyncReaderPin_Release(IPin * iface)
     FileAsyncReader *This = (FileAsyncReader *)iface;
     ULONG refCount = InterlockedDecrement(&This->pin.pin.refCount);
     
-    TRACE("()\n");
+    TRACE("(%p)->() Release from %d\n", This, refCount + 1);
     
     if (!refCount)
     {
@@ -764,6 +766,8 @@ static ULONG WINAPI FileAsyncReaderPin_Release(IPin * iface)
         }
         CloseHandle(This->hFile);
         CloseHandle(This->hEvent);
+        This->csList.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->csList);
         CoTaskMemFree(This);
         return 0;
     }
@@ -862,6 +866,7 @@ static HRESULT FileAsyncReader_Construct(HANDLE hFile, IBaseFilter * pBaseFilter
         pPinImpl->pHead = NULL;
         pPinImpl->pin.pConnectSpecific = FileAsyncReaderPin_ConnectSpecific;
         InitializeCriticalSection(&pPinImpl->csList);
+        pPinImpl->csList.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": FileAsyncReader.csList");
 
         *ppPin = (IPin *)(&pPinImpl->pin.pin.lpVtbl);
         return S_OK;
@@ -928,7 +933,6 @@ static HRESULT WINAPI FileAsyncReader_RequestAllocator(IAsyncReader * iface, IMe
         /* FIXME: check we are still aligned */
         if (SUCCEEDED(hr))
         {
-            IMemAllocator_AddRef(pPreferred);
             *ppActual = pPreferred;
             TRACE("FileAsyncReader_RequestAllocator -- %x\n", hr);
             return S_OK;

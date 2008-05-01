@@ -59,10 +59,14 @@
 #include "thread.h"
 #include "wine/library.h"
 #include "ntdll_misc.h"
+#include "wine/exception.h"
+#include "wine/debug.h"
 
 #ifdef HAVE_VALGRIND_MEMCHECK_H
 #include <valgrind/memcheck.h>
 #endif
+
+#undef ERR  /* Solaris needs to define this */
 
 /***********************************************************************
  * signal context platform-specific definitions
@@ -196,10 +200,7 @@ typedef struct sigcontext SIGCONTEXT;
 #ifdef _SCO_DS
 #include <sys/regset.h>
 #endif
-/* Solaris kludge */
-#undef ERR
 #include <sys/ucontext.h>
-#undef ERR
 typedef struct ucontext SIGCONTEXT;
 
 #ifdef _SCO_DS
@@ -232,6 +233,9 @@ typedef struct ucontext SIGCONTEXT;
 #else
 #define ESP_sig(context)     ((context)->uc_mcontext.gregs[ESP])
 #endif
+#ifdef ERR
+#define ERROR_sig(context)   ((context)->uc_mcontext.gregs[ERR])
+#endif
 #ifdef TRAPNO
 #define TRAP_sig(context)     ((context)->uc_mcontext.gregs[TRAPNO])
 #endif
@@ -243,6 +247,27 @@ typedef struct ucontext SIGCONTEXT;
 
 typedef ucontext_t SIGCONTEXT;
 
+/* work around silly renaming of struct members in OS X 10.5 */
+#if __DARWIN_UNIX03 && defined(_STRUCT_X86_EXCEPTION_STATE32)
+#define EAX_sig(context)     ((context)->uc_mcontext->__ss.__eax)
+#define EBX_sig(context)     ((context)->uc_mcontext->__ss.__ebx)
+#define ECX_sig(context)     ((context)->uc_mcontext->__ss.__ecx)
+#define EDX_sig(context)     ((context)->uc_mcontext->__ss.__edx)
+#define ESI_sig(context)     ((context)->uc_mcontext->__ss.__esi)
+#define EDI_sig(context)     ((context)->uc_mcontext->__ss.__edi)
+#define EBP_sig(context)     ((context)->uc_mcontext->__ss.__ebp)
+#define CS_sig(context)      ((context)->uc_mcontext->__ss.__cs)
+#define DS_sig(context)      ((context)->uc_mcontext->__ss.__ds)
+#define ES_sig(context)      ((context)->uc_mcontext->__ss.__es)
+#define FS_sig(context)      ((context)->uc_mcontext->__ss.__fs)
+#define GS_sig(context)      ((context)->uc_mcontext->__ss.__gs)
+#define SS_sig(context)      ((context)->uc_mcontext->__ss.__ss)
+#define EFL_sig(context)     ((context)->uc_mcontext->__ss.__eflags)
+#define EIP_sig(context)     (*((unsigned long*)&(context)->uc_mcontext->__ss.__eip))
+#define ESP_sig(context)     (*((unsigned long*)&(context)->uc_mcontext->__ss.__esp))
+#define TRAP_sig(context)    ((context)->uc_mcontext->__es.__trapno)
+#define ERROR_sig(context)   ((context)->uc_mcontext->__es.__err)
+#else
 #define EAX_sig(context)     ((context)->uc_mcontext->ss.eax)
 #define EBX_sig(context)     ((context)->uc_mcontext->ss.ebx)
 #define ECX_sig(context)     ((context)->uc_mcontext->ss.ecx)
@@ -250,26 +275,20 @@ typedef ucontext_t SIGCONTEXT;
 #define ESI_sig(context)     ((context)->uc_mcontext->ss.esi)
 #define EDI_sig(context)     ((context)->uc_mcontext->ss.edi)
 #define EBP_sig(context)     ((context)->uc_mcontext->ss.ebp)
-
 #define CS_sig(context)      ((context)->uc_mcontext->ss.cs)
 #define DS_sig(context)      ((context)->uc_mcontext->ss.ds)
 #define ES_sig(context)      ((context)->uc_mcontext->ss.es)
 #define FS_sig(context)      ((context)->uc_mcontext->ss.fs)
 #define GS_sig(context)      ((context)->uc_mcontext->ss.gs)
 #define SS_sig(context)      ((context)->uc_mcontext->ss.ss)
-
 #define EFL_sig(context)     ((context)->uc_mcontext->ss.eflags)
-
 #define EIP_sig(context)     (*((unsigned long*)&(context)->uc_mcontext->ss.eip))
 #define ESP_sig(context)     (*((unsigned long*)&(context)->uc_mcontext->ss.esp))
-
 #define TRAP_sig(context)    ((context)->uc_mcontext->es.trapno)
 #define ERROR_sig(context)   ((context)->uc_mcontext->es.err)
+#endif
 
 #endif /* __APPLE__ */
-
-#include "wine/exception.h"
-#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
 
@@ -324,7 +343,8 @@ enum i386_trap_code
     TRAP_x86_ARITHTRAP  = 16,  /* Floating point exception */
     TRAP_x86_ALIGNFLT   = 17,  /* Alignment check exception */
     TRAP_x86_MCHK       = 18,  /* Machine check exception */
-    TRAP_x86_CACHEFLT   = 19   /* Cache flush exception */
+    TRAP_x86_CACHEFLT   = 19   /* SIMD exception (via SIGFPE) if CPU is SSE capable
+                                  otherwise Cache flush exception (via SIGSEV) */
 #endif
 };
 
@@ -752,7 +772,7 @@ void set_cpu_context( const CONTEXT *context )
  * Check if the fault location is a privileged instruction.
  * Based on the instruction emulation code in dlls/kernel/instr.c.
  */
-static inline int is_privileged_instr( CONTEXT86 *context )
+static inline DWORD is_privileged_instr( CONTEXT86 *context )
 {
     const BYTE *instr;
     unsigned int prefix_count = 0;
@@ -774,7 +794,7 @@ static inline int is_privileged_instr( CONTEXT86 *context )
     case 0xf0:  /* lock */
     case 0xf2:  /* repne */
     case 0xf3:  /* repe */
-        if (++prefix_count >= 15) return 0;
+        if (++prefix_count >= 15) return EXCEPTION_ILLEGAL_INSTRUCTION;
         instr++;
         continue;
 
@@ -785,7 +805,7 @@ static inline int is_privileged_instr( CONTEXT86 *context )
         case 0x21: /* mov drX, reg */
         case 0x22: /* mov reg, crX */
         case 0x23: /* mov reg drX */
-            return 1;
+            return EXCEPTION_PRIV_INSTRUCTION;
         }
         return 0;
     case 0x6c: /* insb (%dx) */
@@ -804,7 +824,7 @@ static inline int is_privileged_instr( CONTEXT86 *context )
     case 0xf4: /* hlt */
     case 0xfa: /* cli */
     case 0xfb: /* sti */
-        return 1;
+        return EXCEPTION_PRIV_INSTRUCTION;
     default:
         return 0;
     }
@@ -880,10 +900,10 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
     if ((char *)stack >= (char *)get_signal_stack() &&
         (char *)stack < (char *)get_signal_stack() + signal_stack_size)
     {
-        ERR( "nested exception on signal stack in thread %04x eip %08x esp %08x stack %p-%p\n",
-             GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
-             (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
-             NtCurrentTeb()->Tib.StackBase );
+        WINE_ERR( "nested exception on signal stack in thread %04x eip %08x esp %08x stack %p-%p\n",
+                  GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
+                  (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
+                  NtCurrentTeb()->Tib.StackBase );
         server_abort_thread(1);
     }
 
@@ -894,10 +914,10 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
         UINT diff = (char *)NtCurrentTeb()->Tib.StackLimit - (char *)stack;
         if (diff < 4096)
         {
-            ERR( "stack overflow %u bytes in thread %04x eip %08x esp %08x stack %p-%p\n",
-                 diff, GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
-                 (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
-                 NtCurrentTeb()->Tib.StackBase );
+            WINE_ERR( "stack overflow %u bytes in thread %04x eip %08x esp %08x stack %p-%p\n",
+                      diff, GetCurrentThreadId(), (unsigned int) EIP_sig(sigcontext),
+                      (unsigned int) ESP_sig(sigcontext), NtCurrentTeb()->Tib.StackLimit,
+                      NtCurrentTeb()->Tib.StackBase );
             server_abort_thread(1);
         }
         else WARN( "exception outside of stack limits in thread %04x eip %08x esp %08x stack %p-%p\n",
@@ -1124,16 +1144,17 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     case TRAP_x86_SEGNPFLT:  /* Segment not present exception */
     case TRAP_x86_PROTFLT:   /* General protection fault */
     case TRAP_x86_UNKNOWN:   /* Unknown fault code */
-        if (!get_error_code(context) && is_privileged_instr( get_exception_context(rec) ))
-            rec->ExceptionCode = EXCEPTION_PRIV_INSTRUCTION;
-        else
         {
             WORD err = get_error_code(context);
+            if (!err && (rec->ExceptionCode = is_privileged_instr( get_exception_context(rec) ))) break;
             rec->ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
             rec->NumberParameters = 2;
             rec->ExceptionInformation[0] = 0;
             /* if error contains a LDT selector, use that as fault address */
-            rec->ExceptionInformation[1] = (err & 7) == 4 ? (err & ~7) : 0xffffffff;
+            if ((err & 7) == 4 && !wine_ldt_is_system( err | 7 ))
+                rec->ExceptionInformation[1] = err & ~7;
+            else
+                rec->ExceptionInformation[1] = 0xffffffff;
         }
         break;
     case TRAP_x86_PAGEFLT:  /* Page fault */
@@ -1146,7 +1167,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         rec->ExceptionCode = EXCEPTION_DATATYPE_MISALIGNMENT;
         break;
     default:
-        ERR( "Got unexpected trap %d\n", get_trap_code(context) );
+        WINE_ERR( "Got unexpected trap %d\n", get_trap_code(context) );
         /* fall through */
     case TRAP_x86_NMI:       /* NMI interrupt */
     case TRAP_x86_DNA:       /* Device not available exception */
@@ -1210,8 +1231,21 @@ static void fpe_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     case TRAP_x86_UNKNOWN:    /* Unknown fault code */
         rec->ExceptionCode = get_fpu_code( win_context );
         break;
+    case TRAP_x86_CACHEFLT:  /* SIMD exception */
+        /* TODO:
+         * Behaviour only tested for divide-by-zero exceptions
+         * Check for other SIMD exceptions as well */
+        if(siginfo->si_code != FPE_FLTDIV)
+            FIXME("untested SIMD exception: %#x. Might not work correctly\n",
+                  siginfo->si_code);
+
+        rec->ExceptionCode = STATUS_FLOAT_MULTIPLE_TRAPS;
+        rec->NumberParameters = 1;
+        /* no idea what meaning is actually behind this but thats what native does */
+        rec->ExceptionInformation[0] = 0;
+        break;
     default:
-        ERR( "Got unexpected trap %d\n", get_trap_code(context) );
+        WINE_ERR( "Got unexpected trap %d\n", get_trap_code(context) );
         rec->ExceptionCode = EXCEPTION_FLT_INVALID_OPERATION;
         break;
     }
@@ -1321,7 +1355,7 @@ BOOL SIGNAL_Init(void)
     struct sigaction sig_act;
 
 #ifdef HAVE_SIGALTSTACK
-    struct sigaltstack ss;
+    stack_t ss;
 
 #ifdef __APPLE__
     int mib[2], val = 1;
@@ -1453,7 +1487,7 @@ void __wine_enter_vm86( CONTEXT *context )
             break;
         case VM86_SIGNAL: /* cannot happen because vm86_enter handles this case */
         default:
-            ERR( "unhandled result from vm86 mode %x\n", res );
+            WINE_ERR( "unhandled result from vm86 mode %x\n", res );
             continue;
         }
         __regs_RtlRaiseException( &rec, context );

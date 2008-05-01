@@ -176,7 +176,7 @@ static void PSDRV_UpdateDevCaps( PSDRV_PDEVICE *physDev )
     INT width = 0, height = 0;
 
     if(physDev->Devmode->dmPublic.dmFields & DM_PAPERSIZE) {
-        for(page = physDev->pi->ppd->PageSizes; page; page = page->next) {
+        LIST_FOR_EACH_ENTRY(page, &physDev->pi->ppd->PageSizes, PAGESIZE, entry) {
 	    if(page->WinPage == physDev->Devmode->dmPublic.u1.s1.dmPaperSize)
 	        break;
 	}
@@ -426,8 +426,10 @@ INT PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
         return MulDiv(physDev->vertSize, 100,
 		      physDev->Devmode->dmPublic.dmScale);
     case HORZRES:
+    case DESKTOPHORZRES:
         return physDev->horzRes;
     case VERTRES:
+    case DESKTOPVERTRES:
         return physDev->vertRes;
     case BITSPIXEL:
         return (physDev->pi->ppd->ColorDevice != CD_False) ? 8 : 1;
@@ -508,8 +510,6 @@ INT PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
     case SCALINGFACTORX:
     case SCALINGFACTORY:
     case VREFRESH:
-    case DESKTOPVERTRES:
-    case DESKTOPHORZRES:
     case BLTALIGNMENT:
         return 0;
     default:

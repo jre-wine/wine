@@ -161,6 +161,17 @@ void primitiveDeclarationConvertToStridedData(
 
     memset(isPreLoaded, 0, sizeof(isPreLoaded));
 
+    /* Check for transformed vertices, disable vertex shader if present */
+    strided->u.s.position_transformed = FALSE;
+    for (i = 0; i < vertexDeclaration->declarationWNumElements - 1; ++i) {
+        element = vertexDeclaration->pDeclarationWine + i;
+
+        if (element->Usage == WINED3DDECLUSAGE_POSITIONT) {
+            strided->u.s.position_transformed = TRUE;
+            useVertexShaderFunction = FALSE;
+        }
+    }
+
     /* Translate the declaration into strided data */
     for (i = 0 ; i < vertexDeclaration->declarationWNumElements - 1; ++i) {
         GLint streamVBO = 0;
@@ -188,7 +199,7 @@ void primitiveDeclarationConvertToStridedData(
             data    = IWineD3DVertexBufferImpl_GetMemory(This->stateBlock->streamSource[element->Stream], 0, &streamVBO);
             if(fixup) {
                 if( streamVBO != 0) *fixup = TRUE;
-                else if(*fixup && This->stateBlock->vertexShader == NULL) {
+                else if(*fixup && !useVertexShaderFunction) {
                     /* This may be bad with the fixed function pipeline */
                     FIXME("Missing fixed and unfixed vertices, expect graphics glitches\n");
                 }
@@ -207,25 +218,19 @@ void primitiveDeclarationConvertToStridedData(
             stride_used = fixed_get_input(element->Usage, element->UsageIndex, &idx);
 
         if (stride_used) {
-           TRACE("Loaded %s array %u [usage=%s, usage_idx=%u, "
-                 "stream=%u, offset=%u, stride=%u, VBO=%u]\n",
-                 useVertexShaderFunction? "shader": "fixed function", idx,
-                 debug_d3ddeclusage(element->Usage), element->UsageIndex,
-                 element->Stream, element->Offset, stride, streamVBO);
+            TRACE("Loaded %s array %u [usage=%s, usage_idx=%u, "
+                    "stream=%u, offset=%u, stride=%u, VBO=%u]\n",
+                    useVertexShaderFunction? "shader": "fixed function", idx,
+                    debug_d3ddeclusage(element->Usage), element->UsageIndex,
+                    element->Stream, element->Offset, stride, streamVBO);
 
-           strided->u.input[idx].lpData = data;
-           strided->u.input[idx].dwType = element->Type;
-           strided->u.input[idx].dwStride = stride;
-           strided->u.input[idx].VBO = streamVBO;
-           strided->u.input[idx].streamNo = element->Stream;
-           if (!useVertexShaderFunction) {
-               if (element->Usage == WINED3DDECLUSAGE_POSITION)
-                   strided->u.s.position_transformed = FALSE;
-               else if (element->Usage == WINED3DDECLUSAGE_POSITIONT)
-                   strided->u.s.position_transformed = TRUE;
-           }
+            strided->u.input[idx].lpData = data;
+            strided->u.input[idx].dwType = element->Type;
+            strided->u.input[idx].dwStride = stride;
+            strided->u.input[idx].VBO = streamVBO;
+            strided->u.input[idx].streamNo = element->Stream;
         }
-    };
+    }
     /* Now call PreLoad on all the vertex buffers. In the very rare case
      * that the buffers stopps converting PreLoad will dirtify the VDECL again.
      * The vertex buffer can now use the strided structure in the device instead of finding its
@@ -235,7 +240,7 @@ void primitiveDeclarationConvertToStridedData(
      * once in there.
      */
     for(i=0; i < numPreloadStreams; i++) {
-            IWineD3DVertexBuffer_PreLoad(This->stateBlock->streamSource[preLoadStreams[i]]);
+        IWineD3DVertexBuffer_PreLoad(This->stateBlock->streamSource[preLoadStreams[i]]);
     }
 }
 
@@ -796,9 +801,7 @@ static void depth_blt(IWineD3DDevice *iface, GLuint texture) {
      * and this seems easier and more efficient than providing the shader backend with a private
      * storage to read and restore the old shader settings
      */
-    This->shader_backend->shader_select(iface,
-        This->stateBlock->pixelShader && ((IWineD3DPixelShaderImpl *)This->stateBlock->pixelShader)->baseShader.function,
-        This->stateBlock->vertexShader && ((IWineD3DVertexShaderImpl *)This->stateBlock->vertexShader)->baseShader.function);
+    This->shader_backend->shader_select(iface, use_ps(This), use_vs(This));
 }
 
 static void depth_copy(IWineD3DDevice *iface) {
@@ -853,7 +856,7 @@ static void depth_copy(IWineD3DDevice *iface) {
     }
 }
 
-inline void drawStridedInstanced(IWineD3DDevice *iface, WineDirect3DVertexStridedData *sd, UINT numberOfVertices,
+static inline void drawStridedInstanced(IWineD3DDevice *iface, WineDirect3DVertexStridedData *sd, UINT numberOfVertices,
                                  GLenum glPrimitiveType, const void *idxData, short idxSize, ULONG minIndex,
                                  ULONG startIdx, ULONG startVertex) {
     UINT numInstances = 0;
@@ -989,6 +992,127 @@ inline void drawStridedInstanced(IWineD3DDevice *iface, WineDirect3DVertexStride
     }
 }
 
+struct coords {
+    int x, y, z;
+};
+
+void blt_to_drawable(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *surface) {
+    struct coords coords[4];
+    int low_coord;
+
+    /* TODO: This could be supported for lazy unlocking */
+    if(!(surface->Flags & SFLAG_INTEXTURE)) {
+        /* It is ok at init to be nowhere */
+        if(!(surface->Flags & SFLAG_INSYSMEM)) {
+            ERR("Blitting surfaces from sysmem not supported yet\n");
+        }
+        return;
+    }
+
+    ENTER_GL();
+    ActivateContext(This, This->render_targets[0], CTXUSAGE_BLIT);
+
+    if(surface->glDescription.target == GL_TEXTURE_2D) {
+        glBindTexture(GL_TEXTURE_2D, surface->glDescription.textureName);
+        checkGLcall("GL_TEXTURE_2D, This->glDescription.textureName)");
+
+        coords[0].x = 0;    coords[0].y = 0;    coords[0].z = 0;
+        coords[1].x = 0;    coords[1].y = 1;    coords[1].z = 0;
+        coords[2].x = 1;    coords[2].y = 1;    coords[2].z = 0;
+        coords[3].x = 1;    coords[3].y = 0;    coords[3].z = 0;
+
+        low_coord = 0;
+    } else {
+        /* Must be a cube map */
+        glDisable(GL_TEXTURE_2D);
+        checkGLcall("glDisable(GL_TEXTURE_2D)");
+        glEnable(GL_TEXTURE_CUBE_MAP_ARB);
+        checkGLcall("glEnable(surface->glDescription.target)");
+        glBindTexture(GL_TEXTURE_CUBE_MAP_ARB, surface->glDescription.textureName);
+        checkGLcall("GL_TEXTURE_CUBE_MAP_ARB, This->glDescription.textureName)");
+
+        switch(surface->glDescription.target) {
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+                coords[0].x =  1;   coords[0].y = -1;   coords[0].z =  1;
+                coords[1].x =  1;   coords[1].y =  1;   coords[1].z =  1;
+                coords[2].x =  1;   coords[2].y =  1;   coords[2].z = -1;
+                coords[3].x =  1;   coords[3].y = -1;   coords[3].z = -1;
+                break;
+
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+                coords[0].x = -1;   coords[0].y = -1;   coords[0].z =  1;
+                coords[1].x = -1;   coords[1].y =  1;   coords[1].z =  1;
+                coords[2].x = -1;   coords[2].y =  1;   coords[2].z = -1;
+                coords[3].x = -1;   coords[3].y = -1;   coords[3].z = -1;
+                break;
+
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+                coords[0].x = -1;   coords[0].y =  1;   coords[0].z =  1;
+                coords[1].x =  1;   coords[1].y =  1;   coords[1].z =  1;
+                coords[2].x =  1;   coords[2].y =  1;   coords[2].z = -1;
+                coords[3].x = -1;   coords[3].y =  1;   coords[3].z = -1;
+                break;
+
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+                coords[0].x = -1;   coords[0].y = -1;   coords[0].z =  1;
+                coords[1].x =  1;   coords[1].y = -1;   coords[1].z =  1;
+                coords[2].x =  1;   coords[2].y = -1;   coords[2].z = -1;
+                coords[3].x = -1;   coords[3].y = -1;   coords[3].z = -1;
+                break;
+
+            case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+                coords[0].x = -1;   coords[0].y = -1;   coords[0].z =  1;
+                coords[1].x =  1;   coords[1].y = -1;   coords[1].z =  1;
+                coords[2].x =  1;   coords[2].y = -1;   coords[2].z =  1;
+                coords[3].x = -1;   coords[3].y = -1;   coords[3].z =  1;
+                break;
+
+            case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+                coords[0].x = -1;   coords[0].y = -1;   coords[0].z = -1;
+                coords[1].x =  1;   coords[1].y = -1;   coords[1].z = -1;
+                coords[2].x =  1;   coords[2].y = -1;   coords[2].z = -1;
+                coords[3].x = -1;   coords[3].y = -1;   coords[3].z = -1;
+
+            default:
+                ERR("Unexpected texture target\n");
+                LEAVE_GL();
+                return;
+        }
+
+        low_coord = -1;
+    }
+
+    if(This->render_offscreen) {
+        coords[0].y = coords[0].y == 1 ? low_coord : 1;
+        coords[1].y = coords[1].y == 1 ? low_coord : 1;
+        coords[2].y = coords[2].y == 1 ? low_coord : 1;
+        coords[3].y = coords[3].y == 1 ? low_coord : 1;
+    }
+
+    glBegin(GL_QUADS);
+        glTexCoord3iv((GLint *) &coords[0]);
+        glVertex2i(0, 0);
+
+        glTexCoord3iv((GLint *) &coords[1]);
+        glVertex2i(0, surface->pow2Height);
+
+        glTexCoord3iv((GLint *) &coords[2]);
+        glVertex2i(surface->pow2Width, surface->pow2Height);
+
+        glTexCoord3iv((GLint *) &coords[3]);
+        glVertex2i(surface->pow2Width, 0);
+    glEnd();
+    checkGLcall("glEnd");
+
+    if(surface->glDescription.target != GL_TEXTURE_2D) {
+        glEnable(GL_TEXTURE_2D);
+        checkGLcall("glEnable(GL_TEXTURE_2D)");
+        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
+        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+    }
+    LEAVE_GL();
+}
+
 /* Routine common to the draw primitive and draw indexed primitive routines */
 void drawPrimitive(IWineD3DDevice *iface,
                    int PrimitiveType,
@@ -1002,6 +1126,9 @@ void drawPrimitive(IWineD3DDevice *iface,
                    int   minIndex) {
 
     IWineD3DDeviceImpl           *This = (IWineD3DDeviceImpl *)iface;
+    IWineD3DSwapChain            *swapchain;
+    IWineD3DBaseTexture          *texture = NULL;
+    IWineD3DSurfaceImpl          *target;
     int i;
 
     /* Signals other modules that a drawing is in progress and the stateblock finalized */
@@ -1009,8 +1136,48 @@ void drawPrimitive(IWineD3DDevice *iface,
 
     /* Invalidate the back buffer memory so LockRect will read it the next time */
     for(i = 0; i < GL_LIMITS(buffers); i++) {
-        if(This->render_targets[i]) {
-            ((IWineD3DSurfaceImpl *) This->render_targets[i])->Flags |= SFLAG_GLDIRTY;
+        target = (IWineD3DSurfaceImpl *) This->render_targets[i];
+
+        /* TODO: Only do all that if we're going to change anything
+         * Texture container dirtification does not work quite right yet
+         */
+        if(target /*&& target->Flags & (SFLAG_INTEXTURE | SFLAG_INSYSMEM)*/) {
+            swapchain = NULL;
+            texture = NULL;
+
+            if(i == 0) {
+                IWineD3DSurface_GetContainer((IWineD3DSurface *) target, &IID_IWineD3DSwapChain, (void **)&swapchain);
+
+                /* Need the surface in the drawable! */
+                if(!(target->Flags & SFLAG_INDRAWABLE) && (swapchain || wined3d_settings.offscreen_rendering_mode != ORM_FBO)) {
+                    blt_to_drawable(This, target);
+                }
+
+                if(swapchain) {
+                    /* Onscreen target. Invalidate system memory copy and texture copy */
+                    target->Flags &= ~(SFLAG_INSYSMEM | SFLAG_INTEXTURE);
+                    target->Flags |= SFLAG_INDRAWABLE;
+                    IWineD3DSwapChain_Release(swapchain);
+                } else if(wined3d_settings.offscreen_rendering_mode != ORM_FBO) {
+                    /* Non-FBO target: Invalidate system copy, texture copy and dirtify the container */
+                    IWineD3DSurface_GetContainer((IWineD3DSurface *) target, &IID_IWineD3DBaseTexture, (void **)&texture);
+
+                    if(texture) {
+                        IWineD3DBaseTexture_SetDirty(texture, TRUE);
+                        IWineD3DTexture_Release(texture);
+                    }
+
+                    target->Flags &= ~(SFLAG_INSYSMEM | SFLAG_INTEXTURE);
+                    target->Flags |= SFLAG_INDRAWABLE;
+                } else {
+                    /* FBO offscreen target. Invalidate system memory copy */
+                    target->Flags &= ~SFLAG_INSYSMEM;
+                }
+            } else {
+                /* Must be an fbo render target */
+                target->Flags &= ~SFLAG_INSYSMEM;
+                target->Flags |=  SFLAG_INTEXTURE;
+            }
         }
     }
 

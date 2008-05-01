@@ -152,7 +152,6 @@ static WINED3DGLTYPE const glTypeLookup[WINED3DDECLTYPE_UNUSED] = {
  */
 #define VS_NONE    0
 #define VS_HW      1
-#define VS_SW      2
 
 #define PS_NONE    0
 #define PS_HW      1
@@ -168,7 +167,6 @@ static WINED3DGLTYPE const glTypeLookup[WINED3DDECLTYPE_UNUSED] = {
 #define ORM_PBUFFER     1
 #define ORM_FBO         2
 
-#define SHADER_SW   0
 #define SHADER_ARB  1
 #define SHADER_GLSL 2
 #define SHADER_NONE 3
@@ -428,6 +426,8 @@ void primitiveConvertFVFtoOffset(DWORD thisFVF,
                                  UINT streamNo);
 
 DWORD get_flexible_vertex_size(DWORD d3dvtVertexType);
+
+void blt_to_drawable(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *surface);
 
 #define eps 1e-8
 
@@ -1084,7 +1084,6 @@ HRESULT WINAPI IWineD3DSurfaceImpl_SetColorKey(IWineD3DSurface *iface, DWORD Fla
 HRESULT WINAPI IWineD3DSurfaceImpl_CleanDirtyRect(IWineD3DSurface *iface);
 extern HRESULT WINAPI IWineD3DSurfaceImpl_AddDirtyRect(IWineD3DSurface *iface, CONST RECT* pDirtyRect);
 HRESULT WINAPI IWineD3DSurfaceImpl_SetContainer(IWineD3DSurface *iface, IWineD3DBase *container);
-HRESULT WINAPI IWineD3DSurfaceImpl_SetPBufferState(IWineD3DSurface *iface, BOOL inPBuffer, BOOL  inTexture);
 void WINAPI IWineD3DSurfaceImpl_SetGlTextureDesc(IWineD3DSurface *iface, UINT textureName, int target);
 void WINAPI IWineD3DSurfaceImpl_GetGlDesc(IWineD3DSurface *iface, glDescriptor **glDescription);
 const void *WINAPI IWineD3DSurfaceImpl_GetData(IWineD3DSurface *iface);
@@ -1106,27 +1105,24 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
 #define SFLAG_OVERSIZE    0x00000001 /* Surface is bigger than gl size, blts only */
 #define SFLAG_CONVERTED   0x00000002 /* Converted for color keying or Palettized */
 #define SFLAG_DIBSECTION  0x00000004 /* Has a DIB section attached for getdc */
-#define SFLAG_DIRTY       0x00000008 /* Surface was locked by the app */
-#define SFLAG_LOCKABLE    0x00000010 /* Surface can be locked */
-#define SFLAG_DISCARD     0x00000020 /* ??? */
-#define SFLAG_LOCKED      0x00000040 /* Surface is locked atm */
-#define SFLAG_INTEXTURE   0x00000080 /* ??? */
-#define SFLAG_INPBUFFER   0x00000100 /* ??? */
+#define SFLAG_LOCKABLE    0x00000008 /* Surface can be locked */
+#define SFLAG_DISCARD     0x00000010 /* ??? */
+#define SFLAG_LOCKED      0x00000020 /* Surface is locked atm */
+#define SFLAG_INTEXTURE   0x00000040 /* The GL texture contains the newest surface content */
+#define SFLAG_INDRAWABLE  0x00000080 /* The gl drawable contains the most up to date data */
+#define SFLAG_INSYSMEM    0x00000100 /* The system memory copy is most up to date */
 #define SFLAG_NONPOW2     0x00000200 /* Surface sizes are not a power of 2 */
 #define SFLAG_DYNLOCK     0x00000400 /* Surface is often locked by the app */
 #define SFLAG_DYNCHANGE   0x00000C00 /* Surface contents are changed very often, implies DYNLOCK */
 #define SFLAG_DCINUSE     0x00001000 /* Set between GetDC and ReleaseDC calls */
-#define SFLAG_GLDIRTY     0x00002000 /* The opengl texture is more up to date than the surface mem */
-#define SFLAG_LOST        0x00004000 /* Surface lost flag for DDraw */
-#define SFLAG_FORCELOAD   0x00008000 /* To force PreLoading of a scratch cursor */
-#define SFLAG_USERPTR     0x00010000 /* The application allocated the memory for this surface */
-#define SFLAG_GLCKEY      0x00020000 /* The gl texture was created with a color key */
+#define SFLAG_LOST        0x00002000 /* Surface lost flag for DDraw */
+#define SFLAG_USERPTR     0x00004000 /* The application allocated the memory for this surface */
+#define SFLAG_GLCKEY      0x00008000 /* The gl texture was created with a color key */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_OVERSIZE: Not all data can be kept in GL
  * SFLAG_CONVERTED: Converting the data back would take too long
  * SFLAG_DIBSECTION: The dib code manages the memory
- * SFLAG_DIRTY: GL surface isn't up to date
  * SFLAG_LOCKED: The app requires access to the surface data
  * SFLAG_DYNLOCK: Avoid freeing the data for performance
  * SFLAG_DYNCHANGE: Same reason as DYNLOCK
@@ -1134,7 +1130,6 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
 #define SFLAG_DONOTFREE  (SFLAG_OVERSIZE   | \
                           SFLAG_CONVERTED  | \
                           SFLAG_DIBSECTION | \
-                          SFLAG_DIRTY      | \
                           SFLAG_LOCKED     | \
                           SFLAG_DYNLOCK    | \
                           SFLAG_DYNCHANGE  | \
@@ -1149,18 +1144,15 @@ BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]
  * IWineD3DVertexDeclaration implementation structure
  */
 typedef struct IWineD3DVertexDeclarationImpl {
- /* IUnknown  Information     */
-  const IWineD3DVertexDeclarationVtbl *lpVtbl;
-  LONG                    ref;     /* Note: Ref counting not required */
+    /* IUnknown  Information */
+    const IWineD3DVertexDeclarationVtbl *lpVtbl;
+    LONG                    ref;
 
-  IUnknown               *parent;
-  /** precomputed fvf if simple declaration */
-  IWineD3DDeviceImpl     *wineD3DDevice;
-  DWORD   fvf[MAX_STREAMS];
-  DWORD   allFVF;
+    IUnknown                *parent;
+    IWineD3DDeviceImpl      *wineD3DDevice;
 
-  WINED3DVERTEXELEMENT  *pDeclarationWine;
-  UINT                   declarationWNumElements;
+    WINED3DVERTEXELEMENT    *pDeclarationWine;
+    UINT                    declarationWNumElements;
 } IWineD3DVertexDeclarationImpl;
 
 extern const IWineD3DVertexDeclarationVtbl IWineD3DVertexDeclaration_Vtbl;
@@ -1461,7 +1453,6 @@ void multiply_matrix(WINED3DMATRIX *dest, const WINED3DMATRIX *src1, const WINED
     void IWineD3DBaseTextureImpl_CleanUp(IWineD3DBaseTexture *iface);
 
 struct SHADER_OPCODE_ARG;
-typedef void (*shader_fct_t)();
 typedef void (*SHADER_HANDLER) (struct SHADER_OPCODE_ARG*);
 
 /* Struct to maintain a list of GLSL shader programs and their associated pixel and
@@ -1557,7 +1548,6 @@ typedef struct SHADER_OPCODE {
     const char*   glname;
     char          dst_token;
     CONST UINT    num_params;
-    shader_fct_t  soft_fct;
     SHADER_HANDLER hw_fct;
     SHADER_HANDLER hw_glsl_fct;
     DWORD         min_version;
@@ -1945,4 +1935,18 @@ typedef struct {
 } PixelFormatDesc;
 
 const PixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt);
+
+inline static BOOL use_vs(IWineD3DDeviceImpl *device) {
+    return (device->vs_selected_mode != SHADER_NONE
+            && device->stateBlock->vertexShader
+            && ((IWineD3DVertexShaderImpl *)device->stateBlock->vertexShader)->baseShader.function
+            && !device->strided_streams.u.s.position_transformed);
+}
+
+inline static BOOL use_ps(IWineD3DDeviceImpl *device) {
+    return (device->ps_selected_mode != SHADER_NONE
+            && device->stateBlock->pixelShader
+            && ((IWineD3DPixelShaderImpl *)device->stateBlock->pixelShader)->baseShader.function);
+}
+
 #endif

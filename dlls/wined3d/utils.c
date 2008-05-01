@@ -82,11 +82,11 @@ static const PixelFormatDesc formats[] = {
     {WINED3DFMT_A8L8        ,0x0000ff00 ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_LUMINANCE8_ALPHA8   ,GL_LUMINANCE_ALPHA ,GL_UNSIGNED_BYTE               },
     {WINED3DFMT_A4L4        ,0x000000f0 ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_LUMINANCE4_ALPHA4   ,GL_LUMINANCE_ALPHA ,GL_UNSIGNED_BYTE               },
     /* Bump mapping stuff */
-    {WINED3DFMT_V8U8        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_RGB8                ,GL_BGR             ,GL_BYTE /* needs conversion! */},
+    {WINED3DFMT_V8U8        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DSDT8_NV            ,GL_DSDT_NV         ,GL_BYTE                        },
     {WINED3DFMT_L6V5U5      ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_COLOR_INDEX8_EXT    ,GL_COLOR_INDEX     ,GL_UNSIGNED_SHORT_5_5_5_1      },
-    {WINED3DFMT_X8L8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_RGBA8               ,GL_BGRA            ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_Q8W8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_RGBA8               ,GL_RGBA            ,GL_UNSIGNED_INT_8_8_8_8_REV/*?*/},
-    {WINED3DFMT_V16U16      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_SHORT              },
+    {WINED3DFMT_X8L8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DSDT8_MAG8_INTENSITY8_NV,GL_DSDT_MAG_INTENSITY_NV,GL_BYTE               },
+    {WINED3DFMT_Q8W8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_SIGNED_RGBA8_NV     ,GL_RGBA            ,GL_BYTE                        },
+    {WINED3DFMT_V16U16      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_SIGNED_HILO16_NV    ,GL_HILO_NV         ,GL_SHORT                       },
     {WINED3DFMT_W11V11U10   ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
     {WINED3DFMT_A2W10V10U10 ,0xb0000000 ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
     /* Depth stencil formats */
@@ -604,7 +604,7 @@ const char* debug_d3dtexturestate(DWORD state) {
   }
 }
 
-const char* debug_d3dtop(WINED3DTEXTUREOP d3dtop) {
+static const char* debug_d3dtop(WINED3DTEXTUREOP d3dtop) {
     switch (d3dtop) {
 #define D3DTOP_TO_STR(u) case u: return #u
         D3DTOP_TO_STR(WINED3DTOP_DISABLE);
@@ -2508,7 +2508,7 @@ BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]
          * If the texture is dirty, or the part can't be used,
          * re-position the part to load
          */
-        if(!(This->Flags & SFLAG_DIRTY)) {
+        if(This->Flags & SFLAG_INTEXTURE) {
             if(This->glRect.left <= x1 && This->glRect.right >= x2 &&
                This->glRect.top <= y1 && This->glRect.bottom >= x2 ) {
                 /* Ok, the rectangle is ok, re-use it */
@@ -2516,12 +2516,12 @@ BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]
             } else {
                 /* Rectangle is not ok, dirtify the texture to reload it */
                 TRACE("Dirtifying texture to force reload\n");
-                This->Flags |= SFLAG_DIRTY;
+                This->Flags &= ~SFLAG_INTEXTURE;
             }
         }
 
         /* Now if we are dirty(no else if!) */
-        if(This->Flags & SFLAG_DIRTY) {
+        if(!(This->Flags & SFLAG_INTEXTURE)) {
             /* Set the new rectangle. Use the following strategy:
              * 1) Use as big textures as possible.
              * 2) Place the texture part in the way that the requested

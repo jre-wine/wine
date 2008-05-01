@@ -118,7 +118,7 @@ static const struct exception
 
     /* test overlong instruction (limit is 16 bytes) */
     { { 0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0xfa,0xc3 },
-      0, 16, STATUS_ACCESS_VIOLATION, 2, { 0, 0xffffffff } },
+      0, 16, STATUS_ILLEGAL_INSTRUCTION, 0 },
     { { 0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0x64,0xfa,0xc3 },
       0, 15, STATUS_PRIVILEGED_INSTRUCTION, 0 },
 
@@ -321,7 +321,7 @@ static void run_rtlraiseexception_test(DWORD exceptioncode)
     pNtCurrentTeb()->Tib.ExceptionList = frame.Prev;
 }
 
-static void test_rtlraiseexcpetion(void)
+static void test_rtlraiseexception(void)
 {
     if (!pRtlRaiseException)
     {
@@ -553,7 +553,7 @@ static void test_exceptions(void)
     res = pNtGetContextThread(GetCurrentThread(), &ctx);
     ok (res == STATUS_SUCCESS,"NtGetContextThread failed with %x\n", res);
     ok(ctx.Dr0 == 0x42424242,"failed to set debugregister 0 to 0x42424242, got %x\n", ctx.Dr0);
-    ok(ctx.Dr7 == 0x155,"failed to set debugregister 7 to 0x155, got %x\n", ctx.Dr7);
+    ok((ctx.Dr7 & ~0xdc00) == 0x155,"failed to set debugregister 7 to 0x155, got %x\n", ctx.Dr7);
 
     /* test single stepping behavior */
     got_exception = 0;
@@ -591,6 +591,7 @@ static void test_debugger(void)
     PVOID code_mem_address = NULL;
     NTSTATUS status;
     SIZE_T size_read;
+    BOOL ret;
     int counter = 0;
     si.cb = sizeof(si);
 
@@ -601,8 +602,10 @@ static void test_debugger(void)
     }
 
     sprintf(cmdline, "%s %s %s", my_argv[0], my_argv[1], "debuggee");
-    ok(CreateProcess(NULL, cmdline, NULL, NULL, FALSE, DEBUG_PROCESS, NULL, NULL,
-                     &si, &pi) != 0, "error: %u\n", GetLastError());
+    ret = CreateProcess(NULL, cmdline, NULL, NULL, FALSE, DEBUG_PROCESS, NULL, NULL, &si, &pi);
+    ok(ret, "could not create child process error: %u\n", GetLastError());
+    if (!ret)
+        return;
 
     do
     {
@@ -641,7 +644,7 @@ static void test_debugger(void)
             status = pNtGetContextThread(pi.hThread, &ctx);
             ok(!status, "NtGetContextThread failed with 0x%x\n", status);
 
-            trace("excpetion 0x%x at %p firstchance=%d Eip=0x%x, Eax=0x%x\n",
+            trace("exception 0x%x at %p firstchance=%d Eip=0x%x, Eax=0x%x\n",
                   de.u.Exception.ExceptionRecord.ExceptionCode,
                   de.u.Exception.ExceptionRecord.ExceptionAddress, de.u.Exception.dwFirstChance, ctx.Eip, ctx.Eax);
 
@@ -720,6 +723,82 @@ static void test_debugger(void)
     return;
 }
 
+static DWORD simd_fault_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
+                                 CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
+{
+    int *stage = *(int **)(frame + 1);
+
+    got_exception++;
+
+    if( *stage == 1) {
+        /* fault while executing sse instruction */
+        context->Eip += 3; /* skip addps */
+        return ExceptionContinueExecution;
+    }
+
+    /* stage 2 - divide by zero fault */
+    if( rec->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION)
+        skip("system doesn't support SIMD exceptions\n");
+    else {
+        ok( rec->ExceptionCode ==  STATUS_FLOAT_MULTIPLE_TRAPS,
+            "exception code: %#x, should be %#x\n",
+            rec->ExceptionCode,  STATUS_FLOAT_MULTIPLE_TRAPS);
+        ok( rec->NumberParameters == 1, "# of params: %i, should be 1\n",
+            rec->NumberParameters);
+        if( rec->NumberParameters == 1 )
+            ok( rec->ExceptionInformation[0] == 0, "param #1: %lx, should be 0\n", rec->ExceptionInformation[0]);
+    }
+
+    context->Eip += 3; /* skip divps */
+
+    return ExceptionContinueExecution;
+}
+
+static const BYTE simd_exception_test[] = {
+    0x83, 0xec, 0x4,                     /* sub $0x4, %esp       */
+    0x0f, 0xae, 0x1c, 0x24,              /* stmxcsr (%esp)       */
+    0x66, 0x81, 0x24, 0x24, 0xff, 0xfd,  /* andw $0xfdff,(%esp)  * enable divide by */
+    0x0f, 0xae, 0x14, 0x24,              /* ldmxcsr (%esp)       * zero exceptions  */
+    0x6a, 0x01,                          /* push   $0x1          */
+    0x6a, 0x01,                          /* push   $0x1          */
+    0x6a, 0x01,                          /* push   $0x1          */
+    0x6a, 0x01,                          /* push   $0x1          */
+    0x0f, 0x10, 0x0c, 0x24,              /* movups (%esp),%xmm1  * fill dividend  */
+    0x0f, 0x57, 0xc0,                    /* xorps  %xmm0,%xmm0   * clear divisor  */
+    0x0f, 0x5e, 0xc8,                    /* divps  %xmm0,%xmm1   * generate fault */
+    0x83, 0xc4, 0x10,                    /* add    $0x10,%esp    */
+    0x66, 0x81, 0x0c, 0x24, 0x00, 0x02,  /* orw    $0x200,(%esp) * disable exceptions */
+    0x0f, 0xae, 0x14, 0x24,              /* ldmxcsr (%esp)       */
+    0x83, 0xc4, 0x04,                    /* add    $0x4,%esp     */
+    0xc3,                                /* ret */
+};
+
+static const BYTE sse_check[] = {
+    0x0f, 0x58, 0xc8,                    /* addps  %xmm0,%xmm1 */
+    0xc3,                                /* ret */
+};
+
+static void test_simd_exceptions(void)
+{
+    int stage;
+
+    /* test if CPU & OS can do sse */
+    stage = 1;
+    got_exception = 0;
+    run_exception_test(simd_fault_handler, &stage, sse_check, sizeof(sse_check));
+    if(got_exception) {
+        skip("system doesn't support SSE\n");
+        return;
+    }
+
+    /* generate a SIMD exception */
+    stage = 2;
+    got_exception = 0;
+    run_exception_test(simd_fault_handler, &stage, simd_exception_test,
+                       sizeof(simd_exception_test));
+    ok( got_exception == 1, "got exception: %i, should be 1\n", got_exception);
+}
+
 #endif  /* __i386__ */
 
 START_TEST(exception)
@@ -783,9 +862,9 @@ START_TEST(exception)
 
     test_prot_fault();
     test_exceptions();
-    test_rtlraiseexcpetion();
-
+    test_rtlraiseexception();
     test_debugger();
+    test_simd_exceptions();
 
     VirtualFree(code_mem, 1024, MEM_RELEASE);
 #endif

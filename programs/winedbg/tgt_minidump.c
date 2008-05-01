@@ -44,7 +44,6 @@ void minidump_write(const char* file, const EXCEPTION_RECORD* rec)
     HANDLE                              hFile;
     MINIDUMP_EXCEPTION_INFORMATION      mei;
     EXCEPTION_POINTERS                  ep;
-    DWORD                               wine_opt;
 
     hFile = CreateFile(file, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                        FILE_ATTRIBUTE_NORMAL, NULL);
@@ -59,14 +58,9 @@ void minidump_write(const char* file, const EXCEPTION_RECORD* rec)
         ep.ContextRecord = &dbg_context;
         mei.ClientPointers = FALSE;
     }
-    /* this is a wine specific options to return also ELF modules in the
-     * dumping
-     */
-    SymSetOptions((wine_opt = SymGetOptions()) | 0x40000000);
     MiniDumpWriteDump(dbg_curr_process->handle, dbg_curr_process->pid,
                       hFile, MiniDumpNormal/*|MiniDumpWithDataSegs*/,
                       rec ? &mei : NULL, NULL, NULL);
-    SymSetOptions(wine_opt);
     CloseHandle(hFile);
 }
 
@@ -283,11 +277,14 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
 
     if (MiniDumpReadDumpStream(data->mapping, ThreadListStream, &dir, &stream, &size))
     {
-        MINIDUMP_THREAD_LIST*     mtl = (MINIDUMP_THREAD_LIST*)stream;
-        MINIDUMP_THREAD*          mt = &mtl->Threads[0];
+        MINIDUMP_THREAD_LIST*   mtl = (MINIDUMP_THREAD_LIST*)stream;
+        ULONG                   i;
 
-        dbg_add_thread(dbg_curr_process, mt->ThreadId, NULL, 
-                       (void*)(DWORD_PTR)mt->Teb);
+        for (i = 0; i < mtl->NumberOfThreads; i++)
+        {
+            dbg_add_thread(dbg_curr_process, mtl->Threads[i].ThreadId, NULL,
+                           (void*)(DWORD_PTR)mtl->Threads[i].Teb);
+        }
     }
     /* first load ELF modules, then do the PE ones */
     if (MiniDumpReadDumpStream(data->mapping, Wine_ElfModuleListStream, &dir,

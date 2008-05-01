@@ -469,23 +469,17 @@ static BOOL PSDRV_PPDGetNextTuple(FILE *fp, PPDTuple *tuple)
  */
 static PAGESIZE *PSDRV_PPDGetPageSizeInfo(PPD *ppd, char *name)
 {
-    PAGESIZE *page = ppd->PageSizes, *lastpage;
+    PAGESIZE *page;
 
-    if(!page) {
-       page = ppd->PageSizes = HeapAlloc( PSDRV_Heap,
-					    HEAP_ZERO_MEMORY, sizeof(*page) );
-       return page;
-    } else {
-        for( ; page; page = page->next) {
-	    if(!strcmp(page->Name, name))
-	         return page;
-	    lastpage = page;
-	}
-
-	lastpage->next = HeapAlloc( PSDRV_Heap,
-					   HEAP_ZERO_MEMORY, sizeof(*page) );
-	return lastpage->next;
+    LIST_FOR_EACH_ENTRY(page, &ppd->PageSizes, PAGESIZE, entry)
+    {
+        if(!strcmp(page->Name, name))
+            return page;
     }
+
+    page = HeapAlloc( PSDRV_Heap,  HEAP_ZERO_MEMORY, sizeof(*page) );
+    list_add_tail(&ppd->PageSizes, &page->entry);
+    return page;
 }
 
 /**********************************************************************
@@ -557,6 +551,7 @@ PPD *PSDRV_ParsePPD(char *fname)
     PPD *ppd;
     PPDTuple tuple;
     char *default_pagesize = NULL, *default_duplex = NULL;
+    PAGESIZE *page, *page_cursor2;
 
     TRACE("file '%s'\n", fname);
 
@@ -573,6 +568,7 @@ PPD *PSDRV_ParsePPD(char *fname)
     }
 
     ppd->ColorDevice = CD_NotSpecified;
+    list_init(&ppd->PageSizes);
 
     /*
      *	The Windows PostScript drivers create the following "virtual bin" for
@@ -652,7 +648,6 @@ PPD *PSDRV_ParsePPD(char *fname)
 	}
 
 	else if(!strcmp("*PageSize", tuple.key)) {
-	    PAGESIZE *page;
 	    page = PSDRV_PPDGetPageSizeInfo(ppd, tuple.option);
 
 	    if(!page->Name) {
@@ -699,7 +694,6 @@ PPD *PSDRV_ParsePPD(char *fname)
         }
 
         else if(!strcmp("*ImageableArea", tuple.key)) {
-	    PAGESIZE *page;
 	    page = PSDRV_PPDGetPageSizeInfo(ppd, tuple.option);
 
 	    if(!page->Name) {
@@ -724,7 +718,6 @@ PPD *PSDRV_ParsePPD(char *fname)
 
 
 	else if(!strcmp("*PaperDimension", tuple.key)) {
-	    PAGESIZE *page;
 	    page = PSDRV_PPDGetPageSizeInfo(ppd, tuple.option);
 
 	    if(!page->Name) {
@@ -864,11 +857,26 @@ PPD *PSDRV_ParsePPD(char *fname)
 
     }
 
+    /* Remove any partial page size entries, that is any without a PageSize or a PaperDimension (we can
+       cope with a missing ImageableArea). */
+    LIST_FOR_EACH_ENTRY_SAFE(page, page_cursor2, &ppd->PageSizes, PAGESIZE, entry)
+    {
+        if(!page->InvocationString || !page->PaperDimension)
+        {
+            WARN("Removing page %s since it has a missing %s entry\n", debugstr_a(page->FullName),
+                 page->InvocationString ? "PaperDimension" : "InvocationString");
+            HeapFree(PSDRV_Heap, 0, page->Name);
+            HeapFree(PSDRV_Heap, 0, page->FullName);
+            HeapFree(PSDRV_Heap, 0, page->InvocationString);
+            HeapFree(PSDRV_Heap, 0, page->ImageableArea);
+            HeapFree(PSDRV_Heap, 0, page->PaperDimension);
+            list_remove(&page->entry);
+        }
+    }
 
     ppd->DefaultPageSize = NULL;
     if(default_pagesize) {
-	PAGESIZE *page;
-	for(page = ppd->PageSizes; page; page = page->next) {
+	LIST_FOR_EACH_ENTRY(page, &ppd->PageSizes, PAGESIZE, entry) {
             if(!strcmp(page->Name, default_pagesize)) {
                 ppd->DefaultPageSize = page;
                 TRACE("DefaultPageSize: %s\n", page->Name);
@@ -878,7 +886,7 @@ PPD *PSDRV_ParsePPD(char *fname)
         HeapFree(PSDRV_Heap, 0, default_pagesize);
     }
     if(!ppd->DefaultPageSize) {
-        ppd->DefaultPageSize = ppd->PageSizes;
+        ppd->DefaultPageSize = LIST_ENTRY(list_head(&ppd->PageSizes), PAGESIZE, entry);
         TRACE("Setting DefaultPageSize to first in list\n");
     }
 
@@ -911,7 +919,7 @@ PPD *PSDRV_ParsePPD(char *fname)
 	for(fn = ppd->InstalledFonts; fn; fn = fn->next)
 	    TRACE("'%s'\n", fn->Name);
 
-	for(page = ppd->PageSizes; page; page = page->next) {
+	LIST_FOR_EACH_ENTRY(page, &ppd->PageSizes, PAGESIZE, entry) {
 	    TRACE("'%s' aka '%s' (%d) invoked by '%s'\n", page->Name,
 	      page->FullName, page->WinPage, page->InvocationString);
 	    if(page->ImageableArea)

@@ -139,6 +139,45 @@ static const IClassFactoryVtbl TestClassFactory_Vtbl =
 
 static IClassFactory Test_ClassFactory = { &TestClassFactory_Vtbl };
 
+typedef struct
+{
+    const IUnknownVtbl *lpVtbl;
+    ULONG refs;
+} HeapUnknown;
+
+static HRESULT WINAPI HeapUnknown_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
+{
+    if (IsEqualIID(riid, &IID_IUnknown))
+    {
+        IUnknown_AddRef(iface);
+        *ppv = (LPVOID)iface;
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI HeapUnknown_AddRef(IUnknown *iface)
+{
+    HeapUnknown *This = (HeapUnknown *)iface;
+    return InterlockedIncrement((LONG*)&This->refs);
+}
+
+static ULONG WINAPI HeapUnknown_Release(IUnknown *iface)
+{
+    HeapUnknown *This = (HeapUnknown *)iface;
+    ULONG refs = InterlockedDecrement((LONG*)&This->refs);
+    if (!refs) HeapFree(GetProcessHeap(), 0, This);
+    return refs;
+}
+
+static const IUnknownVtbl HeapUnknown_Vtbl =
+{
+    HeapUnknown_QueryInterface,
+    HeapUnknown_AddRef,
+    HeapUnknown_Release
+};
+
 static HRESULT WINAPI
 MonikerNoROTData_QueryInterface(IMoniker* iface,REFIID riid,void** ppvObject)
 {
@@ -588,7 +627,6 @@ static void test_ROT(void)
     hr = IRunningObjectTable_Register(pROT, 0, (IUnknown*)&Test_ClassFactory,
                                       pMoniker, &dwCookie);
     ok_ole_success(hr, IRunningObjectTable_Register);
-    IMoniker_Release(pMoniker);
 
     ok_more_than_one_lock();
 
@@ -1398,6 +1436,106 @@ static void test_generic_composite_moniker(void)
     IMoniker_Release(moniker);
 }
 
+static void test_bind_context(void)
+{
+    HRESULT hr;
+    IBindCtx *pBindCtx;
+    IEnumString *pEnumString;
+    BIND_OPTS2 bind_opts;
+    HeapUnknown *unknown;
+    HeapUnknown *unknown2;
+    IUnknown *param_obj;
+    ULONG refs;
+    static const WCHAR wszParamName[] = {'G','e','m','m','a',0};
+    static const WCHAR wszNonExistant[] = {'N','o','n','E','x','i','s','t','a','n','t',0};
+
+    hr = CreateBindCtx(0, NULL);
+    ok(hr == E_INVALIDARG, "CreateBindCtx with NULL ppbc should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = CreateBindCtx(0xdeadbeef, &pBindCtx);
+    ok(hr == E_INVALIDARG, "CreateBindCtx with reserved value non-zero should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = CreateBindCtx(0, &pBindCtx);
+    ok_ole_success(hr, "CreateBindCtx");
+
+    bind_opts.cbStruct = -1;
+    hr = IBindCtx_GetBindOptions(pBindCtx, (BIND_OPTS *)&bind_opts);
+    ok_ole_success(hr, "IBindCtx_GetBindOptions");
+    ok(bind_opts.cbStruct == sizeof(bind_opts), "bind_opts.cbStruct was %d\n", bind_opts.cbStruct);
+
+    bind_opts.cbStruct = sizeof(BIND_OPTS);
+    hr = IBindCtx_GetBindOptions(pBindCtx, (BIND_OPTS *)&bind_opts);
+    ok_ole_success(hr, "IBindCtx_GetBindOptions");
+    ok(bind_opts.cbStruct == sizeof(BIND_OPTS), "bind_opts.cbStruct was %d\n", bind_opts.cbStruct);
+
+    bind_opts.cbStruct = sizeof(bind_opts);
+    hr = IBindCtx_GetBindOptions(pBindCtx, (BIND_OPTS *)&bind_opts);
+    ok_ole_success(hr, "IBindCtx_GetBindOptions");
+    ok(bind_opts.cbStruct == sizeof(bind_opts), "bind_opts.cbStruct was %d\n", bind_opts.cbStruct);
+    ok(bind_opts.grfFlags == 0, "bind_opts.grfFlags was 0x%x instead of 0\n", bind_opts.grfFlags);
+    ok(bind_opts.grfMode == STGM_READWRITE, "bind_opts.grfMode was 0x%x instead of STGM_READWRITE\n", bind_opts.grfMode);
+    ok(bind_opts.dwTickCountDeadline == 0, "bind_opts.dwTickCountDeadline was %d instead of 0\n", bind_opts.dwTickCountDeadline);
+    ok(bind_opts.dwTrackFlags == 0, "bind_opts.dwTrackFlags was 0x%x instead of 0\n", bind_opts.dwTrackFlags);
+    ok(bind_opts.dwClassContext == (CLSCTX_INPROC_SERVER|CLSCTX_LOCAL_SERVER|CLSCTX_REMOTE_SERVER),
+        "bind_opts.dwClassContext should have been 0x15 instead of 0x%x\n", bind_opts.dwClassContext);
+    ok(bind_opts.locale == GetThreadLocale(), "bind_opts.locale should have been 0x%x instead of 0x%x\n", GetThreadLocale(), bind_opts.locale);
+    ok(bind_opts.pServerInfo == NULL, "bind_opts.pServerInfo should have been NULL instead of %p\n", bind_opts.pServerInfo);
+
+    bind_opts.cbStruct = -1;
+    hr = IBindCtx_SetBindOptions(pBindCtx, (BIND_OPTS *)&bind_opts);
+    ok(hr == E_INVALIDARG, "IBindCtx_SetBindOptions with bad cbStruct should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = IBindCtx_RegisterObjectParam(pBindCtx, (WCHAR *)wszParamName, NULL);
+    ok(hr == E_INVALIDARG, "IBindCtx_RegisterObjectParam should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    unknown = HeapAlloc(GetProcessHeap(), 0, sizeof(*unknown));
+    unknown->lpVtbl = &HeapUnknown_Vtbl;
+    unknown->refs = 1;
+    hr = IBindCtx_RegisterObjectParam(pBindCtx, (WCHAR *)wszParamName, (IUnknown *)&unknown->lpVtbl);
+    ok_ole_success(hr, "IBindCtx_RegisterObjectParam");
+
+    hr = IBindCtx_GetObjectParam(pBindCtx, (WCHAR *)wszParamName, &param_obj);
+    ok_ole_success(hr, "IBindCtx_GetObjectParam");
+    IUnknown_Release(param_obj);
+
+    hr = IBindCtx_GetObjectParam(pBindCtx, (WCHAR *)wszNonExistant, &param_obj);
+    ok(hr == E_FAIL, "IBindCtx_GetObjectParam with non-existing key should have failed with E_FAIL instead of 0x%08x\n", hr);
+    ok(param_obj == NULL, "IBindCtx_GetObjectParam with non-existing key should have set output parameter to NULL instead of %p\n", param_obj);
+
+    hr = IBindCtx_RevokeObjectParam(pBindCtx, (WCHAR *)wszNonExistant);
+    ok(hr == E_FAIL, "IBindCtx_RevokeObjectParam with non-existing key should have failed with E_FAIL instead of 0x%08x\n", hr);
+
+    hr = IBindCtx_EnumObjectParam(pBindCtx, &pEnumString);
+    ok(hr == E_NOTIMPL, "IBindCtx_EnumObjectParam should have returned E_NOTIMPL instead of 0x%08x\n", hr);
+    ok(!pEnumString, "pEnumString should be NULL\n");
+
+    hr = IBindCtx_RegisterObjectBound(pBindCtx, NULL);
+    ok_ole_success(hr, "IBindCtx_RegisterObjectBound(NULL)");
+
+    hr = IBindCtx_RevokeObjectBound(pBindCtx, NULL);
+    ok(hr == E_INVALIDARG, "IBindCtx_RevokeObjectBound(NULL) should have return E_INVALIDARG instead of 0x%08x\n", hr);
+
+    unknown2 = HeapAlloc(GetProcessHeap(), 0, sizeof(*unknown));
+    unknown2->lpVtbl = &HeapUnknown_Vtbl;
+    unknown2->refs = 1;
+    hr = IBindCtx_RegisterObjectBound(pBindCtx, (IUnknown *)&unknown2->lpVtbl);
+    ok_ole_success(hr, "IBindCtx_RegisterObjectBound");
+
+    hr = IBindCtx_RevokeObjectBound(pBindCtx, (IUnknown *)&unknown2->lpVtbl);
+    ok_ole_success(hr, "IBindCtx_RevokeObjectBound");
+
+    hr = IBindCtx_RevokeObjectBound(pBindCtx, (IUnknown *)&unknown2->lpVtbl);
+    ok(hr == MK_E_NOTBOUND, "IBindCtx_RevokeObjectBound with not bound object should have returned MK_E_NOTBOUND instead of 0x%08x\n", hr);
+
+    IBindCtx_Release(pBindCtx);
+
+    refs = IUnknown_Release((IUnknown *)&unknown->lpVtbl);
+    ok(!refs, "object param should have been destroyed, instead of having %d refs\n", refs);
+
+    refs = IUnknown_Release((IUnknown *)&unknown2->lpVtbl);
+    ok(!refs, "bound object should have been destroyed, instead of having %d refs\n", refs);
+}
+
 START_TEST(moniker)
 {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -1411,6 +1549,8 @@ START_TEST(moniker)
     test_generic_composite_moniker();
 
     /* FIXME: test moniker creation funcs and parsing other moniker formats */
+
+    test_bind_context();
 
     CoUninitialize();
 }

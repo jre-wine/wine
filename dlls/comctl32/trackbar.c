@@ -1042,7 +1042,10 @@ TRACKBAR_GetNumTics (TRACKBAR_INFO *infoPtr)
     if (GetWindowLongW (infoPtr->hwndSelf, GWL_STYLE) & TBS_NOTICKS)
         return 0;
 
-    return infoPtr->uNumTics + 2;
+    if(infoPtr->uNumTics == 0)
+        return 2;
+    else
+        return infoPtr->uNumTics + 1;
 }
 
 
@@ -1216,8 +1219,11 @@ TRACKBAR_SetRangeMin (TRACKBAR_INFO *infoPtr, BOOL fRedraw, LONG lMin)
 inline static LRESULT
 TRACKBAR_SetSel (TRACKBAR_INFO *infoPtr, BOOL fRedraw, LONG lSel)
 {
-    if (!GetWindowLongW (infoPtr->hwndSelf, GWL_STYLE) & TBS_ENABLESELRANGE)
+    if (!(GetWindowLongW (infoPtr->hwndSelf, GWL_STYLE) & TBS_ENABLESELRANGE)){
+        infoPtr->lSelMin = 0;
+        infoPtr->lSelMax = 0;
         return 0;
+    }
 
     infoPtr->lSelMin = (SHORT)LOWORD(lSel);
     infoPtr->lSelMax = (SHORT)HIWORD(lSel);
@@ -1237,8 +1243,10 @@ TRACKBAR_SetSel (TRACKBAR_INFO *infoPtr, BOOL fRedraw, LONG lSel)
 inline static LRESULT
 TRACKBAR_SetSelEnd (TRACKBAR_INFO *infoPtr, BOOL fRedraw, LONG lEnd)
 {
-    if (!GetWindowLongW (infoPtr->hwndSelf, GWL_STYLE) & TBS_ENABLESELRANGE)
+    if (!(GetWindowLongW (infoPtr->hwndSelf, GWL_STYLE) & TBS_ENABLESELRANGE)){
+        infoPtr->lSelMax = 0;
 	return 0;
+    }
 
     infoPtr->lSelMax = lEnd;
     infoPtr->flags |= TB_SELECTIONCHANGED;
@@ -1255,8 +1263,10 @@ TRACKBAR_SetSelEnd (TRACKBAR_INFO *infoPtr, BOOL fRedraw, LONG lEnd)
 inline static LRESULT
 TRACKBAR_SetSelStart (TRACKBAR_INFO *infoPtr, BOOL fRedraw, LONG lStart)
 {
-    if (!GetWindowLongW (infoPtr->hwndSelf, GWL_STYLE) & TBS_ENABLESELRANGE)
+    if (!(GetWindowLongW (infoPtr->hwndSelf, GWL_STYLE) & TBS_ENABLESELRANGE)){
+        infoPtr->lSelMin = 0;
 	return 0;
+    }
 
     infoPtr->lSelMin = lStart;
     infoPtr->flags  |=TB_SELECTIONCHANGED;

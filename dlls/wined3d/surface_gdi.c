@@ -1600,12 +1600,10 @@ const IWineD3DSurfaceVtbl IWineGDISurface_Vtbl =
     IWineD3DSurfaceImpl_UpdateOverlayZOrder,
     IWineD3DSurfaceImpl_UpdateOverlay,
     /* Internal use: */
-    IWineD3DSurfaceImpl_CleanDirtyRect,
     IWineD3DSurfaceImpl_AddDirtyRect,
     IWineGDISurfaceImpl_LoadTexture,
     IWineGDISurfaceImpl_SaveSnapshot,
     IWineD3DSurfaceImpl_SetContainer,
-    IWineD3DSurfaceImpl_SetPBufferState,
     IWineD3DSurfaceImpl_SetGlTextureDesc,
     IWineD3DSurfaceImpl_GetGlDesc,
     IWineD3DSurfaceImpl_GetData,

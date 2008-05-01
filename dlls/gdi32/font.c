@@ -287,10 +287,17 @@ static void FONT_TextMetricWToA(const TEXTMETRICW *ptmW, LPTEXTMETRICA ptmA )
     ptmA->tmOverhang = ptmW->tmOverhang;
     ptmA->tmDigitizedAspectX = ptmW->tmDigitizedAspectX;
     ptmA->tmDigitizedAspectY = ptmW->tmDigitizedAspectY;
-    ptmA->tmFirstChar = ptmW->tmFirstChar > 255 ? 255 : ptmW->tmFirstChar;
-    ptmA->tmLastChar = ptmW->tmLastChar > 255 ? 255 : ptmW->tmLastChar;
-    ptmA->tmDefaultChar = ptmW->tmDefaultChar > 255 ? 255 : ptmW->tmDefaultChar;
-    ptmA->tmBreakChar = ptmW->tmBreakChar > 255 ? 255 : ptmW->tmBreakChar;
+    ptmA->tmFirstChar = min(ptmW->tmFirstChar, 255);
+    if (ptmW->tmCharSet == SYMBOL_CHARSET)
+    {
+        UINT last_char = ptmW->tmLastChar;
+        if (last_char > 0xf000) last_char -= 0xf000;
+        ptmA->tmLastChar = min(last_char, 255);
+    }
+    else
+        ptmA->tmLastChar = min(ptmW->tmLastChar, 255);
+    ptmA->tmDefaultChar = min(ptmW->tmDefaultChar, 255);
+    ptmA->tmBreakChar = min(ptmW->tmBreakChar, 255);
     ptmA->tmItalic = ptmW->tmItalic;
     ptmA->tmUnderlined = ptmW->tmUnderlined;
     ptmA->tmStruckOut = ptmW->tmStruckOut;
@@ -877,7 +884,11 @@ INT16 WINAPI EnumFontFamilies16( HDC16 hDC, LPCSTR lpFamily,
     LOGFONT16	lf;
 
     lf.lfCharSet = DEFAULT_CHARSET;
-    if( lpFamily ) lstrcpynA( lf.lfFaceName, lpFamily, LF_FACESIZE );
+    if (lpFamily)
+    {
+        if (!*lpFamily) return 1;
+        lstrcpynA( lf.lfFaceName, lpFamily, LF_FACESIZE );
+    }
     else lf.lfFaceName[0] = '\0';
 
     return EnumFontFamiliesEx16( hDC, &lf, efproc, lpData, 0 );
@@ -892,7 +903,11 @@ INT WINAPI EnumFontFamiliesA( HDC hDC, LPCSTR lpFamily,
     LOGFONTA	lf;
 
     lf.lfCharSet = DEFAULT_CHARSET;
-    if( lpFamily ) lstrcpynA( lf.lfFaceName, lpFamily, LF_FACESIZE );
+    if (lpFamily)
+    {
+        if (!*lpFamily) return 1;
+        lstrcpynA( lf.lfFaceName, lpFamily, LF_FACESIZE );
+    }
     else lf.lfFaceName[0] = lf.lfFaceName[1] = '\0';
 
     return EnumFontFamiliesExA( hDC, &lf, efproc, lpData, 0 );
@@ -907,7 +922,11 @@ INT WINAPI EnumFontFamiliesW( HDC hDC, LPCWSTR lpFamily,
     LOGFONTW  lf;
 
     lf.lfCharSet = DEFAULT_CHARSET;
-    if( lpFamily ) lstrcpynW( lf.lfFaceName, lpFamily, LF_FACESIZE );
+    if (lpFamily)
+    {
+        if (!*lpFamily) return 1;
+        lstrcpynW( lf.lfFaceName, lpFamily, LF_FACESIZE );
+    }
     else lf.lfFaceName[0] = 0;
 
     return EnumFontFamiliesExW( hDC, &lf, efproc, lpData, 0 );
@@ -1353,6 +1372,9 @@ BOOL WINAPI GetTextMetricsW( HDC hdc, TEXTMETRICW *metrics )
     {
     /* device layer returns values in device units
      * therefore we have to convert them to logical */
+
+        metrics->tmDigitizedAspectX = GetDeviceCaps(hdc, LOGPIXELSX);
+        metrics->tmDigitizedAspectY = GetDeviceCaps(hdc, LOGPIXELSY);
 
 #define WDPTOLP(x) ((x<0)?					\
 		(-abs(INTERNAL_XDSTOWS(dc, (x)))):		\
@@ -3223,14 +3245,14 @@ UINT WINAPI GetTextCharsetInfo(HDC hdc, LPFONTSIGNATURE fs, DWORD flags)
     UINT ret = DEFAULT_CHARSET;
     DC *dc = DC_GetDCPtr(hdc);
 
-    if (!dc) goto done;
+    if (dc)
+    {
+        if (dc->gdiFont)
+            ret = WineEngGetTextCharsetInfo(dc->gdiFont, fs, flags);
 
-    if (dc->gdiFont)
-        ret = WineEngGetTextCharsetInfo(dc->gdiFont, fs, flags);
+        GDI_ReleaseObj(hdc);
+    }
 
-    GDI_ReleaseObj(hdc);
-
-done:
     if (ret == DEFAULT_CHARSET && fs)
         memset(fs, 0, sizeof(FONTSIGNATURE));
     return ret;

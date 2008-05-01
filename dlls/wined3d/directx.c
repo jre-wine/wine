@@ -246,26 +246,17 @@ static void select_shader_mode(
     int* ps_selected,
     int* vs_selected) {
 
-    /* Give priority to user disable/emulation request.
-     * Then respect REF device for software.
-     * Then check capabilities for hardware, and fallback to software */
-
     if (wined3d_settings.vs_mode == VS_NONE) {
         *vs_selected = SHADER_NONE;
-    } else if (DeviceType == WINED3DDEVTYPE_REF || wined3d_settings.vs_mode == VS_SW) {
-        *vs_selected = SHADER_SW;
     } else if (gl_info->supported[ARB_VERTEX_SHADER] && wined3d_settings.glslRequested) {
         *vs_selected = SHADER_GLSL;
     } else if (gl_info->supported[ARB_VERTEX_PROGRAM]) {
         *vs_selected = SHADER_ARB;
     } else {
-        *vs_selected = SHADER_SW;
+        *vs_selected = SHADER_NONE;
     }
 
-    /* Fallback to SHADER_NONE where software pixel shaders should be used */
     if (wined3d_settings.ps_mode == PS_NONE) {
-        *ps_selected = SHADER_NONE;
-    } else if (DeviceType == WINED3DDEVTYPE_REF) {
         *ps_selected = SHADER_NONE;
     } else if (gl_info->supported[ARB_FRAGMENT_SHADER] && wined3d_settings.glslRequested) {
         *ps_selected = SHADER_GLSL;
@@ -277,7 +268,7 @@ static void select_shader_mode(
 }
 
 /** Select the number of report maximum shader constants based on the selected shader modes */
-void select_shader_max_constants(
+static void select_shader_max_constants(
     int ps_selected_mode,
     int vs_selected_mode,
     WineD3D_GL_Info *gl_info) {
@@ -292,9 +283,6 @@ void select_shader_max_constants(
              * ATI seems to count 2 implicit PARAMs when we use fog and NVIDIA counts 1,
              * and we reference one row of the PROJECTION matrix which counts as 1 PARAM. */
             gl_info->max_vshader_constantsF = gl_info->vs_arb_constantsF - 3;
-            break;
-        case SHADER_SW:
-            gl_info->max_vshader_constantsF = 96;  /* TODO: Fixup software shaders */
             break;
         default:
             gl_info->max_vshader_constantsF = 0;
@@ -315,9 +303,6 @@ void select_shader_max_constants(
              * a free constant to do that, so no need to reduce the number of available constants.
              */
             gl_info->max_pshader_constantsF = gl_info->ps_arb_constantsF;
-            break;
-        case SHADER_SW:
-            gl_info->max_pshader_constantsF = 96;  /* TODO: Fixup software shaders */
             break;
         default:
             gl_info->max_pshader_constantsF = 0;
@@ -546,6 +531,10 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
     gl_info->max_pointsize = gl_floatv[1];
     TRACE_(d3d_caps)("Maximum point size support - max point size=%f\n", gl_floatv[1]);
 
+    glGetIntegerv(GL_AUX_BUFFERS, &gl_max);
+    gl_info->max_aux_buffers = gl_max;
+    TRACE_(d3d_caps)("Offscreen rendering support - number of aux buffers=%d\n", gl_max);
+
     /* Parse the gl supported features, in theory enabling parts of our code appropriately */
     GL_Extensions = (const char *) glGetString(GL_EXTENSIONS);
     TRACE_(d3d_caps)("GL_Extensions reported:\n");
@@ -700,7 +689,7 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
                 TRACE_(d3d_caps)(" FOUND: EXT Point parameters support\n");
                 gl_info->supported[EXT_POINT_PARAMETERS] = TRUE;
             } else if (strcmp(ThisExtn, "GL_EXT_secondary_color") == 0) {
-                TRACE_(d3d_caps)(" FOUND: EXT Secondary coord support\n");
+                TRACE_(d3d_caps)(" FOUND: EXT Secondary color support\n");
                 gl_info->supported[EXT_SECONDARY_COLOR] = TRUE;
             } else if (strcmp(ThisExtn, "GL_EXT_stencil_two_side") == 0) {
                 TRACE_(d3d_caps)(" FOUND: EXT Stencil two side support\n");
@@ -1890,7 +1879,8 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
 
     *pCaps->Caps                    = 0;
     *pCaps->Caps2                   = WINED3DCAPS2_CANRENDERWINDOWED |
-                                      WINED3DCAPS2_FULLSCREENGAMMA;
+                                      WINED3DCAPS2_FULLSCREENGAMMA |
+                                      WINED3DCAPS2_DYNAMICTEXTURES;
     *pCaps->Caps3                   = 0;
     *pCaps->PresentationIntervals   = WINED3DPRESENT_INTERVAL_IMMEDIATE;
 
@@ -2259,9 +2249,6 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     } else if (vs_selected_mode == SHADER_ARB) {
         *pCaps->VertexShaderVersion = WINED3DVS_VERSION(1,1);
         TRACE_(d3d_caps)("Hardware vertex shader version 1.1 enabled (ARB_PROGRAM)\n");
-    } else if (vs_selected_mode == SHADER_SW) {
-        *pCaps->VertexShaderVersion = WINED3DVS_VERSION(3,0);
-        TRACE_(d3d_caps)("Software vertex shader version 3.0 enabled\n");
     } else {
         *pCaps->VertexShaderVersion  = 0;
         TRACE_(d3d_caps)("Vertex shader functionality not available\n");
@@ -2283,11 +2270,6 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
         *pCaps->PixelShaderVersion    = WINED3DPS_VERSION(1,4);
         *pCaps->PixelShader1xMaxValue = 1.0;
         TRACE_(d3d_caps)("Hardware pixel shader version 1.4 enabled (ARB_PROGRAM)\n");
-    /* FIXME: Uncomment this when there is support for software Pixel Shader 3.0 and PS_SW is defined
-    } else if (ps_selected_mode = SHADER_SW) {
-        *pCaps->PixelShaderVersion    = WINED3DPS_VERSION(3,0);
-        *pCaps->PixelShader1xMaxValue = 1.0;
-        TRACE_(d3d_caps)("Software pixel shader version 3.0 enabled\n"); */
     } else {
         *pCaps->PixelShaderVersion    = 0;
         *pCaps->PixelShader1xMaxValue = 0.0;

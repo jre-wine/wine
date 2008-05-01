@@ -243,6 +243,7 @@ static BOOL DP_CreateIUnknown( LPVOID lpDP )
   }
 
   InitializeCriticalSection( &This->unk->DP_lock );
+  This->unk->DP_lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IDirectPlay2AImpl*->DirectPlayIUnknownData*->DP_lock");
 
   return TRUE;
 }
@@ -251,6 +252,7 @@ static BOOL DP_DestroyIUnknown( LPVOID lpDP )
 {
   IDirectPlay2AImpl *This = (IDirectPlay2AImpl *)lpDP;
 
+  This->unk->DP_lock.DebugInfo->Spare[0] = 0;
   DeleteCriticalSection( &This->unk->DP_lock );
   HeapFree( GetProcessHeap(), 0, This->unk );
 
@@ -1225,6 +1227,9 @@ lpPlayerData DP_CreatePlayer( IDirectPlay2Impl* This, LPDPID lpid,
 
   TRACE( "Created player id 0x%08x\n", *lpid );
 
+  if( ~dwFlags & DPLAYI_PLAYER_SYSPLAYER )
+    This->dp2->lpSessionDesc->dwCurrentPlayers++;
+
   return lpPData;
 }
 
@@ -1476,8 +1481,9 @@ static HRESULT WINAPI DP_IF_CreatePlayer
      */
   }
 
-  /* FIXME: Should we be storing these dwFlags or the creation ones? */
-  lpPData = DP_CreatePlayer( This, lpidPlayer, lpPlayerName, dwFlags,
+  /* We pass creation flags, so we can distinguish sysplayers and not count them in the current
+     player total */
+  lpPData = DP_CreatePlayer( This, lpidPlayer, lpPlayerName, dwCreateFlags,
                              hEvent, bAnsi );
 
   if( lpPData == NULL )

@@ -75,7 +75,7 @@ void print_glsl_info_log(WineD3D_GL_Info *gl_info, GLhandleARB obj) {
 /**
  * Loads (pixel shader) samplers
  */
-void shader_glsl_load_psamplers(
+static void shader_glsl_load_psamplers(
     WineD3D_GL_Info *gl_info,
     IWineD3DStateBlock* iface) {
 
@@ -165,7 +165,7 @@ static void shader_glsl_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL
  * Loads integer constants (aka uniforms) into the currently set GLSL program.
  * When @constants_set == NULL, it will load all the constants.
  */
-void shader_glsl_load_constantsI(
+static void shader_glsl_load_constantsI(
     IWineD3DBaseShaderImpl* This,
     WineD3D_GL_Info *gl_info,
     GLhandleARB programId,
@@ -223,7 +223,7 @@ void shader_glsl_load_constantsI(
  * Loads boolean constants (aka uniforms) into the currently set GLSL program.
  * When @constants_set == NULL, it will load all the constants.
  */
-void shader_glsl_load_constantsB(
+static void shader_glsl_load_constantsB(
     IWineD3DBaseShaderImpl* This,
     WineD3D_GL_Info *gl_info,
     GLhandleARB programId,
@@ -1994,7 +1994,7 @@ void vshader_glsl_output_unpack(
                break;
 
            case WINED3DDECLUSAGE_FOG:
-               shader_addline(buffer, "gl_FogFragCoord%s = OUT%u%s;\n", reg_mask, i, reg_mask);
+               shader_addline(buffer, "gl_FogFragCoord = OUT%u%s;\n", i, reg_mask);
                break;
 
            default:
@@ -2049,7 +2049,7 @@ void delete_glsl_program_entry(IWineD3DDevice *iface, struct glsl_shader_prog_li
  * the program in the hash table.  If it creates a program, it will link the
  * given objects, too.
  */
-static void set_glsl_shader_program(IWineD3DDevice *iface) {
+static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use_vs) {
     IWineD3DDeviceImpl *This               = (IWineD3DDeviceImpl *)iface;
     WineD3D_GL_Info *gl_info               = &((IWineD3DImpl *)(This->wineD3D))->gl_info;
     IWineD3DPixelShader  *pshader          = This->stateBlock->pixelShader;
@@ -2059,8 +2059,8 @@ static void set_glsl_shader_program(IWineD3DDevice *iface) {
     int i;
     char glsl_name[8];
 
-    GLhandleARB vshader_id = (vshader && This->vs_selected_mode == SHADER_GLSL) ? ((IWineD3DBaseShaderImpl*)vshader)->baseShader.prgId : 0;
-    GLhandleARB pshader_id = (pshader && This->ps_selected_mode == SHADER_GLSL) ? ((IWineD3DBaseShaderImpl*)pshader)->baseShader.prgId : 0;
+    GLhandleARB vshader_id = use_vs ? ((IWineD3DBaseShaderImpl*)vshader)->baseShader.prgId : 0;
+    GLhandleARB pshader_id = use_ps ? ((IWineD3DBaseShaderImpl*)pshader)->baseShader.prgId : 0;
     entry = get_glsl_program_entry(This, vshader_id, pshader_id);
     if (entry) {
         This->stateBlock->glsl_program = entry;
@@ -2179,7 +2179,7 @@ static void shader_glsl_select(IWineD3DDevice *iface, BOOL usePS, BOOL useVS) {
     WineD3D_GL_Info *gl_info = &((IWineD3DImpl *)(This->wineD3D))->gl_info;
     GLhandleARB program_id = 0;
 
-    if (useVS || usePS) set_glsl_shader_program(iface);
+    if (useVS || usePS) set_glsl_shader_program(iface, usePS, useVS);
     else This->stateBlock->glsl_program = NULL;
 
     program_id = This->stateBlock->glsl_program ? This->stateBlock->glsl_program->programId : 0;

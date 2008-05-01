@@ -25,8 +25,6 @@
  * environment-variable and batch parameter substitution already done.
  */
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #define WIN32_LEAN_AND_MEAN
 
 #include "wcmd.h"
@@ -35,14 +33,33 @@ int WCMD_dir_sort (const void *a, const void *b);
 void WCMD_list_directory (char *path, int level);
 char * WCMD_filesize64 (ULONGLONG free);
 char * WCMD_strrev (char *buff);
-
+static void WCMD_getfileowner(char *filename, char *owner, int ownerlen);
 
 extern int echo_mode;
 extern char quals[MAX_PATH], param1[MAX_PATH], param2[MAX_PATH];
 extern DWORD errorlevel;
 
-static int file_total, dir_total, recurse, wide, bare, max_width;
+typedef enum _DISPLAYTIME
+{
+    Creation = 0,
+    Access,
+    Written
+} DISPLAYTIME;
+
+typedef enum _DISPLAYORDER
+{
+    Name = 0,
+    Extension,
+    Size,
+    Date
+} DISPLAYORDER;
+
+static int file_total, dir_total, recurse, wide, bare, max_width, lower;
+static int shortname, usernames;
 static ULONGLONG byte_total;
+static DISPLAYTIME dirTime;
+static DISPLAYORDER dirOrder;
+static BOOL orderReverse, orderGroupDirs, orderGroupDirsReverse;
 
 /*****************************************************************************
  * WCMD_directory
@@ -57,18 +74,68 @@ void WCMD_directory (void) {
   int status, paged_mode;
   ULARGE_INTEGER avail, total, free;
   CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
+  char *p;
 
   byte_total = 0;
   file_total = dir_total = 0;
+  dirTime = Written;
+  dirOrder = Name;
+  orderReverse = FALSE;
+  orderGroupDirs = FALSE;
+  orderGroupDirsReverse = FALSE;
 
   /* Handle args */
   paged_mode = (strstr(quals, "/P") != NULL);
-  recurse = (strstr(quals, "/S") != NULL);
-  wide    = (strstr(quals, "/W") != NULL);
-  bare    = (strstr(quals, "/B") != NULL);
+  recurse    = (strstr(quals, "/S") != NULL);
+  wide       = (strstr(quals, "/W") != NULL);
+  bare       = (strstr(quals, "/B") != NULL);
+  lower      = (strstr(quals, "/L") != NULL);
+  shortname  = (strstr(quals, "/X") != NULL);
+  usernames  = (strstr(quals, "/Q") != NULL);
+
+  if ((p = strstr(quals, "/T")) != NULL) {
+    p = p + 2;
+    if (*p==':') p++;  /* Skip optional : */
+
+    if (*p == 'A') dirTime = Access;
+    else if (*p == 'C') dirTime = Creation;
+    else if (*p == 'W') dirTime = Written;
+
+    /* Support /T and /T: with no parms, default to written */
+    else if (*p == '/') dirTime = Written;
+    else {
+      SetLastError(ERROR_INVALID_PARAMETER);
+      WCMD_print_error();
+      return;
+    }
+  }
+
+  if ((p = strstr(quals, "/O")) != NULL) {
+    p = p + 2;
+    if (*p==':') p++;  /* Skip optional : */
+    while (*p && *p != '/') {
+      switch (*p) {
+      case 'N': dirOrder = Name;       break;
+      case 'E': dirOrder = Extension;  break;
+      case 'S': dirOrder = Size;       break;
+      case 'D': dirOrder = Date;       break;
+      case '-': if (*(p+1)=='G') orderGroupDirsReverse=TRUE;
+                else orderReverse = TRUE;
+                break;
+      case 'G': orderGroupDirs = TRUE; break;
+      default:
+          SetLastError(ERROR_INVALID_PARAMETER);
+          WCMD_print_error();
+          return;
+      }
+      p++;
+    }
+  }
 
   /* Handle conflicting args and initialization */
-  if (bare) wide = FALSE;
+  if (bare || shortname) wide = FALSE;
+  if (bare) shortname = FALSE;
+  if (wide) usernames = FALSE;
 
   if (wide) {
       if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &consoleInfo))
@@ -169,12 +236,12 @@ void WCMD_list_directory (char *search_path, int level) {
   lstrcpyn (real_path, search_path, (p-search_path+2));
 
   /* Load all files into an in memory structure */
-  fd = malloc (sizeof(WIN32_FIND_DATA));
+  fd = HeapAlloc(GetProcessHeap(),0,sizeof(WIN32_FIND_DATA));
   hff = FindFirstFile (search_path, fd);
   if (hff == INVALID_HANDLE_VALUE) {
     SetLastError (ERROR_FILE_NOT_FOUND);
     WCMD_print_error ();
-    free (fd);
+    HeapFree(GetProcessHeap(),0,fd);
     return;
   }
   do {
@@ -187,7 +254,7 @@ void WCMD_list_directory (char *search_path, int level) {
        if (tmpLen > widest) widest = tmpLen;
     }
 
-    fd = realloc (fd, (entry_count+1)*sizeof(WIN32_FIND_DATA));
+    fd = HeapReAlloc(GetProcessHeap(),0,fd,(entry_count+1)*sizeof(WIN32_FIND_DATA));
     if (fd == NULL) {
       FindClose (hff);
       WCMD_output ("Memory Allocation Error");
@@ -206,7 +273,29 @@ void WCMD_list_directory (char *search_path, int level) {
   }
 
   for (i=0; i<entry_count; i++) {
-    FileTimeToLocalFileTime (&(fd+i)->ftLastWriteTime, &ft);
+    char username[24];
+
+    /* /L convers all names to lower case */
+    if (lower) {
+        char *p = (fd+i)->cFileName;
+        while ( (*p = tolower(*p)) ) ++p;
+    }
+
+    /* /Q gets file ownership information */
+    if (usernames) {
+        p = strrchr (search_path, '\\');
+        lstrcpyn (string, search_path, (p-search_path+2));
+        lstrcat (string, (fd+i)->cFileName);
+        WCMD_getfileowner(string, username, sizeof(username));
+    }
+
+    if (dirTime == Written) {
+      FileTimeToLocalFileTime (&(fd+i)->ftLastWriteTime, &ft);
+    } else if (dirTime == Access) {
+      FileTimeToLocalFileTime (&(fd+i)->ftLastAccessTime, &ft);
+    } else {
+      FileTimeToLocalFileTime (&(fd+i)->ftCreationTime, &ft);
+    }
     FileTimeToSystemTime (&ft, &st);
     GetDateFormat (0, DATE_SHORTDATE, &st, NULL, datestring,
       		sizeof(datestring));
@@ -224,13 +313,8 @@ void WCMD_list_directory (char *search_path, int level) {
           WCMD_output ("%s", (fd+i)->cFileName);
           tmp_width = tmp_width + strlen((fd+i)->cFileName) ;
           file_count++;
-#ifndef NONAMELESSSTRUCT
-          file_size.LowPart = (fd+i)->nFileSizeLow;
-          file_size.HighPart = (fd+i)->nFileSizeHigh;
-#else
           file_size.u.LowPart = (fd+i)->nFileSizeLow;
           file_size.u.HighPart = (fd+i)->nFileSizeHigh;
-#endif
       byte_count.QuadPart += file_size.QuadPart;
       }
       cur_width = cur_width + widest;
@@ -246,8 +330,10 @@ void WCMD_list_directory (char *search_path, int level) {
       dir_count++;
 
       if (!bare) {
-         WCMD_output ("%10s  %8s  <DIR>         %s\n",
-      	     datestring, timestring, (fd+i)->cFileName);
+         WCMD_output ("%10s  %8s  <DIR>         ", datestring, timestring);
+         if (shortname) WCMD_output ("%-13s", (fd+i)->cAlternateFileName);
+         if (usernames) WCMD_output ("%-23s", username);
+         WCMD_output("%s\n",(fd+i)->cFileName);
       } else {
          if (!((strcmp((fd+i)->cFileName, ".") == 0) ||
                (strcmp((fd+i)->cFileName, "..") == 0))) {
@@ -257,18 +343,15 @@ void WCMD_list_directory (char *search_path, int level) {
     }
     else {
       file_count++;
-#ifndef NONAMELESSSTRUCT
-      file_size.LowPart = (fd+i)->nFileSizeLow;
-      file_size.HighPart = (fd+i)->nFileSizeHigh;
-#else
       file_size.u.LowPart = (fd+i)->nFileSizeLow;
       file_size.u.HighPart = (fd+i)->nFileSizeHigh;
-#endif
       byte_count.QuadPart += file_size.QuadPart;
-	  if (!bare) {
-         WCMD_output ("%10s  %8s    %10s  %s\n",
-     	     datestring, timestring,
-	         WCMD_filesize64(file_size.QuadPart), (fd+i)->cFileName);
+      if (!bare) {
+         WCMD_output ("%10s  %8s    %10s  ", datestring, timestring,
+                      WCMD_filesize64(file_size.QuadPart));
+         if (shortname) WCMD_output ("%-13s", (fd+i)->cAlternateFileName);
+         if (usernames) WCMD_output ("%-23s", username);
+         WCMD_output("%s\n",(fd+i)->cFileName);
       } else {
          WCMD_output ("%s%s\n", recurse?real_path:"", (fd+i)->cFileName);
       }
@@ -309,7 +392,7 @@ void WCMD_list_directory (char *search_path, int level) {
       WCMD_list_directory (string, 1);
     }
   }
-  free (fd);
+  HeapFree(GetProcessHeap(),0,fd);
   return;
 }
 
@@ -363,8 +446,134 @@ char * WCMD_strrev (char *buff) {
 }
 
 
+/*****************************************************************************
+ * WCMD_dir_sort
+ *
+ * Sort based on the /O options supplied on the command line
+ */
 int WCMD_dir_sort (const void *a, const void *b)
 {
-  return (lstrcmpi(((const WIN32_FIND_DATA *)a)->cFileName,
-                   ((const WIN32_FIND_DATA *)b)->cFileName));
+  WIN32_FIND_DATA *filea = (WIN32_FIND_DATA *)a;
+  WIN32_FIND_DATA *fileb = (WIN32_FIND_DATA *)b;
+  int result = 0;
+
+  /* If /OG or /O-G supplied, dirs go at the top or bottom, ignoring the
+     requested sort order for the directory components                   */
+  if (orderGroupDirs &&
+      ((filea->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+       (fileb->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)))
+  {
+    BOOL aDir = filea->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+    if (aDir) result = -1;
+    else result = 1;
+    if (orderGroupDirsReverse) result = -result;
+    return result;
+
+  /* Order by Name: */
+  } else if (dirOrder == Name) {
+    result = lstrcmpi(filea->cFileName, fileb->cFileName);
+
+  /* Order by Size: */
+  } else if (dirOrder == Size) {
+    ULONG64 sizea = (((ULONG64)filea->nFileSizeHigh) << 32) + filea->nFileSizeLow;
+    ULONG64 sizeb = (((ULONG64)fileb->nFileSizeHigh) << 32) + fileb->nFileSizeLow;
+    if( sizea < sizeb ) result = -1;
+    else if( sizea == sizeb ) result = 0;
+    else result = 1;
+
+  /* Order by Date: (Takes into account which date (/T option) */
+  } else if (dirOrder == Date) {
+
+    FILETIME *ft;
+    ULONG64 timea, timeb;
+
+    if (dirTime == Written) {
+      ft = &filea->ftLastWriteTime;
+      timea = (((ULONG64)ft->dwHighDateTime) << 32) + ft->dwLowDateTime;
+      ft = &fileb->ftLastWriteTime;
+      timeb = (((ULONG64)ft->dwHighDateTime) << 32) + ft->dwLowDateTime;
+    } else if (dirTime == Access) {
+      ft = &filea->ftLastAccessTime;
+      timea = (((ULONG64)ft->dwHighDateTime) << 32) + ft->dwLowDateTime;
+      ft = &fileb->ftLastAccessTime;
+      timeb = (((ULONG64)ft->dwHighDateTime) << 32) + ft->dwLowDateTime;
+    } else {
+      ft = &filea->ftCreationTime;
+      timea = (((ULONG64)ft->dwHighDateTime) << 32) + ft->dwLowDateTime;
+      ft = &fileb->ftCreationTime;
+      timeb = (((ULONG64)ft->dwHighDateTime) << 32) + ft->dwLowDateTime;
+    }
+    if( timea < timeb ) result = -1;
+    else if( timea == timeb ) result = 0;
+    else result = 1;
+
+  /* Order by Extension: (Takes into account which date (/T option) */
+  } else if (dirOrder == Extension) {
+      char drive[10];
+      char dir[MAX_PATH];
+      char fname[MAX_PATH];
+      char extA[MAX_PATH];
+      char extB[MAX_PATH];
+
+      /* Split into components */
+      WCMD_splitpath(filea->cFileName, drive, dir, fname, extA);
+      WCMD_splitpath(fileb->cFileName, drive, dir, fname, extB);
+      result = lstrcmpi(extA, extB);
+  }
+
+  if (orderReverse) result = -result;
+  return result;
+}
+
+/*****************************************************************************
+ * WCMD_getfileowner
+ *
+ * Reverse a character string in-place (strrev() is not available under unixen :-( ).
+ */
+void WCMD_getfileowner(char *filename, char *owner, int ownerlen) {
+
+    ULONG sizeNeeded = 0;
+    DWORD rc;
+    char name[MAXSTRING];
+    char domain[MAXSTRING];
+
+    /* In case of error, return empty string */
+    *owner = 0x00;
+
+    /* Find out how much space we need for the owner security descritpor */
+    GetFileSecurity(filename, OWNER_SECURITY_INFORMATION, 0, 0, &sizeNeeded);
+    rc = GetLastError();
+
+    if(rc == ERROR_INSUFFICIENT_BUFFER && sizeNeeded > 0) {
+
+        LPBYTE secBuffer;
+        PSID pSID = NULL;
+        BOOL defaulted = FALSE;
+        ULONG nameLen = MAXSTRING;
+        ULONG domainLen = MAXSTRING;
+        SID_NAME_USE nameuse;
+
+        secBuffer = (LPBYTE) HeapAlloc(GetProcessHeap(),0,sizeNeeded * sizeof(BYTE));
+        if(!secBuffer) return;
+
+        /* Get the owners security descriptor */
+        if(!GetFileSecurity(filename, OWNER_SECURITY_INFORMATION, secBuffer,
+                            sizeNeeded, &sizeNeeded)) {
+            HeapFree(GetProcessHeap(),0,secBuffer);
+            return;
+        }
+
+        /* Get the SID from the SD */
+        if(!GetSecurityDescriptorOwner(secBuffer, &pSID, &defaulted)) {
+            HeapFree(GetProcessHeap(),0,secBuffer);
+            return;
+        }
+
+        /* Convert to a username */
+        if (LookupAccountSid(NULL, pSID, name, &nameLen, domain, &domainLen, &nameuse)) {
+            snprintf(owner, ownerlen, "%s%c%s", domain, '\\', name);
+        }
+        HeapFree(GetProcessHeap(),0,secBuffer);
+    }
+    return;
 }

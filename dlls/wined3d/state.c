@@ -105,6 +105,13 @@ static void state_lighting(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
 }
 
 static void state_zenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    /* No z test without depth stencil buffers */
+    if(stateblock->wineD3DDevice->stencilBufferTarget == NULL) {
+        glDisable(GL_DEPTH_TEST); /* This also disables z writing in gl */
+        checkGLcall("glDisable GL_DEPTH_TEST");
+        return;
+    }
+
     switch ((WINED3DZBUFFERTYPE) stateblock->renderState[WINED3DRS_ZENABLE]) {
         case WINED3DZB_FALSE:
             glDisable(GL_DEPTH_TEST);
@@ -388,7 +395,7 @@ static void state_clipping(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
     DWORD enable  = 0xFFFFFFFF;
     DWORD disable = 0x00000000;
 
-    if(stateblock->vertexShader) {
+    if (use_vs(stateblock->wineD3DDevice)) {
         /* The spec says that opengl clipping planes are disabled when using shaders. Direct3D planes aren't,
          * so that is an issue. The MacOS ATI driver keeps clipping planes activated with shaders in some
          * contitions I got sick of tracking down. The shader state handler disables all clip planes because
@@ -611,6 +618,13 @@ state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *c
     GLint depthFail_ccw = GL_KEEP;
     GLint stencilPass_ccw = GL_KEEP;
 
+    /* No stencil test without a stencil buffer */
+    if(stateblock->wineD3DDevice->stencilBufferTarget == NULL) {
+        glDisable(GL_STENCIL_TEST);
+        checkGLcall("glDisable GL_STENCIL_TEST");
+        return;
+    }
+
     if( stateblock->set.renderState[WINED3DRS_STENCILENABLE] )
         onesided_enable = stateblock->renderState[WINED3DRS_STENCILENABLE];
     if( stateblock->set.renderState[WINED3DRS_TWOSIDEDSTENCILMODE] )
@@ -664,7 +678,11 @@ state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *c
 }
 
 static void state_stencilwrite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    glStencilMask(stateblock->renderState[WINED3DRS_STENCILWRITEMASK]);
+    if(stateblock->wineD3DDevice->stencilBufferTarget) {
+        glStencilMask(stateblock->renderState[WINED3DRS_STENCILWRITEMASK]);
+    } else {
+        glStencilMask(0);
+    }
     checkGLcall("glStencilMask");
 }
 
@@ -690,9 +708,28 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
     tmpvalue.d = stateblock->renderState[WINED3DRS_FOGEND];
     fogend = tmpvalue.f;
 
-    /* Activate when vertex shaders are in the state table */
-    if(stateblock->vertexShader && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.function &&
-       ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->usesFog) {
+    /* Fog Rules:
+     *
+     * With fixed function vertex processing, Direct3D knows 2 different fog input sources.
+     * It can use the Z value of the vertex, or the alpha component of the specular color.
+     * This depends on the fog vertex, fog table and the vertex declaration. If the Z value
+     * is used, fogstart, fogend and the equation type are used, otherwise linear fog with
+     * start = 255, end = 0 is used. Obviously the msdn is not very clear on that.
+     *
+     * FOGTABLEMODE != NONE:
+     *  The Z value is used, with the equation specified, no matter what vertex type.
+     *
+     * FOGTABLEMODE == NONE, FOGVERTEXMODE != NONE, untransformed:
+     *  Per vertex fog is calculated using the specified fog equation and the parameters
+     *
+     * FOGTABLEMODE == NONE, FOGVERTEXMODE != NONE, transformed, OR
+     * FOGTABLEMODE == NONE, FOGVERTEXMODE == NONE, untransformed:
+     *  Linear fog with start = 255.0, end = 0.0, input comes from the specular color
+     *
+     * Vertex shaders work in a simmilar way, but need more testing
+     */
+    if (use_vs(stateblock->wineD3DDevice)
+            && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->usesFog) {
         glFogi(GL_FOG_MODE, GL_LINEAR);
         checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR)");
         if (stateblock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE) {
@@ -710,9 +747,7 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
         context->last_was_foggy_shader = FALSE;
 
         switch (stateblock->renderState[WINED3DRS_FOGVERTEXMODE]) {
-            /* Processed vertices have their fog factor stored in the specular value. Fall too the none case.
-             * If we are drawing untransformed vertices atm, d3ddevice_set_ortho will update the fog
-             */
+            /* If processed vertices are used, fall through to the NONE case */
             case WINED3DFOG_EXP:  {
                 if(!context->last_was_rhw) {
                     glFogi(GL_FOG_MODE, GL_EXP);
@@ -1155,7 +1190,7 @@ static void state_pointsprite(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         val = GL_FALSE;
     }
 
-    for (i = 0; i < GL_LIMITS(texture_stages); i++) {
+    for (i = 0; i < GL_LIMITS(textures); i++) {
         /* Note the WINED3DRS value applies to all textures, but GL has one
          * per texture, so apply it now ready to be used!
          */
@@ -1478,7 +1513,7 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 
     if (mapped_stage != -1) {
         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-            if (mapped_stage >= GL_LIMITS(sampler_stages)) {
+            if (mapped_stage >= GL_LIMITS(textures)) {
                 if (stateblock->textureState[stage][WINED3DTSS_COLOROP] != WINED3DTOP_DISABLE &&
                         stateblock->textureState[stage][WINED3DTSS_COLOROP] != 0) {
                     FIXME("Attempt to enable unsupported stage!\n");
@@ -1551,7 +1586,7 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     /* Do not care for enabled / disabled stages, just assign the settigns. colorop disables / enables required stuff */
     if (mapped_stage != -1) {
         if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-            if (stage >= GL_LIMITS(sampler_stages)) {
+            if (stage >= GL_LIMITS(textures)) {
                 if (stateblock->textureState[stage][WINED3DTSS_COLOROP] != WINED3DTOP_DISABLE &&
                         stateblock->textureState[stage][WINED3DTSS_COLOROP] != 0) {
                     FIXME("Attempt to enable unsupported stage!\n");
@@ -1607,14 +1642,17 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 
 static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD texUnit = state - STATE_TRANSFORM(WINED3DTS_TEXTURE0);
+    DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[texUnit];
+
+    if (mapped_stage < 0) return;
 
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        if(texUnit >= GL_LIMITS(sampler_stages)) {
+        if(mapped_stage >= GL_LIMITS(textures)) {
             return;
         }
-        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stateblock->wineD3DDevice->texUnitMap[texUnit]));
+        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
         checkGLcall("glActiveTextureARB");
-    } else if (texUnit > 0) {
+    } else if (mapped_stage > 0) {
         /* We can't do anything here */
         WARN("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
         return;
@@ -1638,7 +1676,7 @@ static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
     }
 
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        if(stage >= GL_LIMITS(sampler_stages)) {
+        if(mapped_stage >= GL_LIMITS(samplers)) {
             return;
         }
         GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
@@ -1863,7 +1901,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
     }
 
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        if(sampler >= GL_LIMITS(sampler_stages)) {
+        if (mapped_stage >= GL_LIMITS(samplers)) {
             return;
         }
         GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
@@ -1956,17 +1994,16 @@ static void shaderconstant(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
        return;
     }
     
-    device->shader_backend->shader_load_constants((IWineD3DDevice *) device,
-        stateblock->pixelShader && ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.function,
-        stateblock->vertexShader && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.function);
+    device->shader_backend->shader_load_constants((IWineD3DDevice *) device, use_ps(device), use_vs(device));
 }
 
 static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    BOOL use_ps = stateblock->pixelShader && ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.function != NULL;
-    BOOL use_vs = stateblock->vertexShader && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.function != NULL;
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+    BOOL use_pshader = use_ps(device);
+    BOOL use_vshader = use_vs(device);
     int i;
 
-    if (use_ps) {
+    if (use_pshader) {
         if(!context->last_was_pshader) {
             /* Former draw without a pixel shader, some samplers
              * may be disabled because of WINED3DTSS_COLOROP = WINED3DTOP_DISABLE
@@ -1997,14 +2034,14 @@ static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     }
 
     if(!isStateDirty(context, StateTable[STATE_VSHADER].representative)) {
-        stateblock->wineD3DDevice->shader_backend->shader_select((IWineD3DDevice *)stateblock->wineD3DDevice, use_ps, use_vs);
+        device->shader_backend->shader_select((IWineD3DDevice *)stateblock->wineD3DDevice, use_pshader, use_vshader);
 
-        if(!isStateDirty(context, STATE_VERTEXSHADERCONSTANT) && (use_vs || use_ps)) {
+        if (!isStateDirty(context, STATE_VERTEXSHADERCONSTANT) && (use_vshader || use_pshader)) {
             shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock, context);
         }
     }
 
-    context->last_was_pshader = use_ps;
+    context->last_was_pshader = use_pshader;
 }
 
 static void tex_bumpenvmat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
@@ -2053,7 +2090,7 @@ static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
 static void clipplane(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     UINT index = state - STATE_CLIPPLANE(0);
 
-    if(isStateDirty(context, STATE_TRANSFORM(WINED3DTS_VIEW)) || index > GL_LIMITS(clipplanes)) {
+    if(isStateDirty(context, STATE_TRANSFORM(WINED3DTS_VIEW)) || index >= GL_LIMITS(clipplanes)) {
         return;
     }
 
@@ -2154,7 +2191,11 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
              * the Z coordinate does not affect the size of the primitives
              */
             TRACE("Calling glOrtho with %f, %f, %f, %f\n", width, height, -minZ, -maxZ);
-            glOrtho(X, X + width, Y + height, Y, -minZ, -maxZ);
+            if(stateblock->wineD3DDevice->render_offscreen) {
+                glOrtho(X, X + width, -Y, -Y - height, -minZ, -maxZ);
+            } else {
+                glOrtho(X, X + width, Y + height, Y, -minZ, -maxZ);
+            }
         } else {
             /* If the app mixes transformed and untransformed primitives we can't use the coordinate system
              * trick above because this would mess up transformed and untransformed Z order. Pass the z position
@@ -2164,7 +2205,11 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
              * replacement shader.
              */
             TRACE("Calling glOrtho with %f, %f, %f, %f\n", width, height, 1.0, -1.0);
-            glOrtho(X, X + width, Y + height, Y, 1.0, -1.0);
+            if(stateblock->wineD3DDevice->render_offscreen) {
+                glOrtho(X, X + width, -Y, -Y - height, 1.0, -1.0);
+            } else {
+                glOrtho(X, X + width, Y + height, Y, 1.0, -1.0);
+            }
         }
         checkGLcall("glOrtho");
 
@@ -2726,7 +2771,7 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
     }
 }
 
-inline void drawPrimitiveTraceDataLocations(
+static inline void drawPrimitiveTraceDataLocations(
     WineDirect3DVertexStridedData *dataLocations) {
 
     /* Dump out what parts we have supplied */
@@ -2772,7 +2817,7 @@ static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVer
         if(TRACE_ON(d3d)) {
             drawPrimitiveTraceDataLocations(dataLocations);
         }
-    } else if (stateblock->vertexDecl || stateblock->vertexShader) {
+    } else if (stateblock->vertexDecl) {
         /* Note: This is a fixed function or shader codepath.
          * This means it must handle both types of strided data.
          * Shaders must go through here to zero the strided data, even if they
@@ -2780,11 +2825,8 @@ static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVer
          */
         TRACE("================ Vertex Declaration  ===================\n");
         memset(dataLocations, 0, sizeof(*dataLocations));
-
-        if (stateblock->vertexDecl) {
-            primitiveDeclarationConvertToStridedData((IWineD3DDevice *) device, useVertexShaderFunction,
-                dataLocations, &fixup);
-        }
+        primitiveDeclarationConvertToStridedData((IWineD3DDevice *) device,
+                useVertexShaderFunction, dataLocations, &fixup);
     } else {
         /* Note: This codepath is not reachable from d3d9 (see fvf->decl9 conversion)
          * It is reachable through d3d8, but only for fixed-function.
@@ -2797,6 +2839,10 @@ static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVer
             drawPrimitiveTraceDataLocations(dataLocations);
         }
      }
+
+    if (dataLocations->u.s.position_transformed) {
+        useVertexShaderFunction = FALSE;
+    }
 
     /* Unload the old arrays before loading the new ones to get old junk out */
     if(context->numberedArraysLoaded) {
@@ -2873,10 +2919,8 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
 
     handleStreams(stateblock, useVertexShaderFunction, context);
 
-    /* Do I have to use ? TRUE : FALSE ? Or can I rely on 15==15 being equal to TRUE(=1)? */
-    transformed = ((device->strided_streams.u.s.position.lpData != NULL ||
-                    device->strided_streams.u.s.position.VBO != 0) &&
-                    device->strided_streams.u.s.position_transformed) ? TRUE : FALSE;
+    transformed = device->strided_streams.u.s.position_transformed;
+    if (transformed) useVertexShaderFunction = FALSE;
 
     if(transformed != context->last_was_rhw && !useVertexShaderFunction) {
         updateFog = TRUE;
@@ -2887,7 +2931,7 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         state_lighting(STATE_RENDER(WINED3DRS_LIGHTING), stateblock, context);
     }
 
-    if (!useVertexShaderFunction && transformed) {
+    if (transformed) {
         context->last_was_rhw = TRUE;
     } else {
 
@@ -2989,11 +3033,17 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
 static void viewport(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     glDepthRange(stateblock->viewport.MinZ, stateblock->viewport.MaxZ);
     checkGLcall("glDepthRange");
-    /* Note: GL requires lower left, DirectX supplies upper left */
-    /* TODO: replace usage of renderTarget with context management */
-    glViewport(stateblock->viewport.X,
-               (((IWineD3DSurfaceImpl *)stateblock->wineD3DDevice->render_targets[0])->currentDesc.Height - (stateblock->viewport.Y + stateblock->viewport.Height)),
-               stateblock->viewport.Width, stateblock->viewport.Height);
+    /* Note: GL requires lower left, DirectX supplies upper left. This is reversed when using offscreen rendering
+     */
+    if(stateblock->wineD3DDevice->render_offscreen) {
+        glViewport(stateblock->viewport.X,
+                   stateblock->viewport.Y,
+                   stateblock->viewport.Width, stateblock->viewport.Height);
+    } else {
+        glViewport(stateblock->viewport.X,
+                   (((IWineD3DSurfaceImpl *)stateblock->wineD3DDevice->render_targets[0])->currentDesc.Height - (stateblock->viewport.Y + stateblock->viewport.Height)),
+                   stateblock->viewport.Width, stateblock->viewport.Height);
+    }
 
     checkGLcall("glViewport");
 

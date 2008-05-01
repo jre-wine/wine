@@ -180,6 +180,22 @@ HRESULT FilterMapper2_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     return S_OK;
 }
 
+HRESULT FilterMapper_create(IUnknown *pUnkOuter, LPVOID *ppObj)
+{
+    FilterMapper2Impl *pFM2impl;
+    HRESULT hr;
+
+    TRACE("(%p, %p)\n", pUnkOuter, ppObj);
+
+    hr = FilterMapper2_create(pUnkOuter, (LPVOID*)&pFM2impl);
+    if (FAILED(hr))
+        return hr;
+
+    *ppObj = &pFM2impl->lpVtblFilterMapper;
+
+    return hr;
+}
+
 /*** IUnknown methods ***/
 
 static HRESULT WINAPI FilterMapper2_QueryInterface(IFilterMapper2 * iface, REFIID riid, LPVOID *ppv)
@@ -212,7 +228,7 @@ static ULONG WINAPI FilterMapper2_AddRef(IFilterMapper2 * iface)
     FilterMapper2Impl *This = (FilterMapper2Impl *)iface;
     ULONG refCount = InterlockedIncrement(&This->refCount);
 
-    TRACE("(%p)->()\n", iface);
+    TRACE("(%p)->() AddRef from %d\n", This, refCount - 1);
 
     return refCount;
 }
@@ -222,7 +238,7 @@ static ULONG WINAPI FilterMapper2_Release(IFilterMapper2 * iface)
     FilterMapper2Impl *This = (FilterMapper2Impl *)iface;
     ULONG refCount = InterlockedDecrement(&This->refCount);
 
-    TRACE("(%p)->()\n", iface);
+    TRACE("(%p)->() Release from %d\n", This, refCount + 1);
 
     if (refCount == 0)
     {

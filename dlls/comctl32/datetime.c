@@ -161,6 +161,17 @@ DATETIME_SetSystemTime (DATETIME_INFO *infoPtr, DWORD flag, SYSTEMTIME *lprgSysT
           lprgSysTimeArray->wHour, lprgSysTimeArray->wMinute, lprgSysTimeArray->wSecond);
 
     if (flag == GDT_VALID) {
+      if (lprgSysTimeArray->wYear < 1601 || lprgSysTimeArray->wYear > 30827 ||
+          lprgSysTimeArray->wMonth < 1 || lprgSysTimeArray->wMonth > 12 ||
+          lprgSysTimeArray->wDayOfWeek > 6 ||
+          lprgSysTimeArray->wDay < 1 || lprgSysTimeArray->wDay > 31 ||
+          lprgSysTimeArray->wHour > 23 ||
+          lprgSysTimeArray->wMinute > 59 ||
+          lprgSysTimeArray->wSecond > 59 ||
+          lprgSysTimeArray->wMilliseconds > 999
+          )
+        return 0;
+
         infoPtr->dateValid = TRUE;
         MONTHCAL_CopyTime (lprgSysTimeArray, &infoPtr->date);
         SendMessageW (infoPtr->hMonthCal, MCM_SETCURSEL, 0, (LPARAM)(&infoPtr->date));
@@ -268,7 +279,7 @@ DATETIME_SetFormatW (DATETIME_INFO *infoPtr, LPCWSTR lpszFormat)
     DATETIME_UseFormat (infoPtr, lpszFormat);
     InvalidateRect (infoPtr->hwndSelf, NULL, TRUE);
 
-    return infoPtr->nrFields;
+    return 1;
 }
 
 

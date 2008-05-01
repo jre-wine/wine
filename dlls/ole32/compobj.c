@@ -106,6 +106,8 @@ struct registered_psclsid
  * libraries are freed
  */
 static LONG s_COMLockCount = 0;
+/* Reference count used by CoAddRefServerProcess/CoReleaseServerProcess */
+static LONG s_COMServerProcessReferences = 0;
 
 /*
  * This linked list contains the list of registered class objects. These
@@ -117,16 +119,17 @@ static LONG s_COMLockCount = 0;
  */
 typedef struct tagRegisteredClass
 {
+  struct list entry;
   CLSID     classIdentifier;
   LPUNKNOWN classObject;
   DWORD     runContext;
   DWORD     connectFlags;
   DWORD     dwCookie;
   LPSTREAM  pMarshaledData; /* FIXME: only really need to store OXID and IPID */
-  struct tagRegisteredClass* nextClass;
+  void     *RpcRegistration;
 } RegisteredClass;
 
-static RegisteredClass* firstRegisteredClass = NULL;
+static struct list RegisteredClassList = LIST_INIT(RegisteredClassList);
 
 static CRITICAL_SECTION csRegisteredClassList;
 static CRITICAL_SECTION_DEBUG class_cs_debug =
@@ -1444,32 +1447,23 @@ static HRESULT COM_GetRegisteredClassObject(
 	LPUNKNOWN*  ppUnk)
 {
   HRESULT hr = S_FALSE;
-  RegisteredClass* curClass;
-
-  EnterCriticalSection( &csRegisteredClassList );
+  RegisteredClass *curClass;
 
   /*
    * Sanity check
    */
   assert(ppUnk!=0);
 
-  /*
-   * Iterate through the whole list and try to match the class ID.
-   */
-  curClass = firstRegisteredClass;
+  EnterCriticalSection( &csRegisteredClassList );
 
-  while (curClass != 0)
+  LIST_FOR_EACH_ENTRY(curClass, &RegisteredClassList, RegisteredClass, entry)
   {
     /*
-     * Check if we have a match on the class ID.
+     * Check if we have a match on the class ID and context.
      */
-    if (IsEqualGUID(&(curClass->classIdentifier), rclsid))
+    if ((dwClsContext & curClass->runContext) &&
+        IsEqualGUID(&(curClass->classIdentifier), rclsid))
     {
-      /*
-       * Since we don't do out-of process or DCOM just right away, let's ignore the
-       * class context.
-       */
-
       /*
        * We have a match, return the pointer to the class object.
        */
@@ -1478,20 +1472,12 @@ static HRESULT COM_GetRegisteredClassObject(
       IUnknown_AddRef(curClass->classObject);
 
       hr = S_OK;
-      goto end;
+      break;
     }
-
-    /*
-     * Step to the next class in the list.
-     */
-    curClass = curClass->nextClass;
   }
 
-end:
   LeaveCriticalSection( &csRegisteredClassList );
-  /*
-   * If we get to here, we haven't found our class.
-   */
+
   return hr;
 }
 
@@ -1546,6 +1532,11 @@ HRESULT WINAPI CoRegisterClassObject(
 
   *lpdwRegister = 0;
 
+  /* REGCLS_MULTIPLEUSE implies registering as inproc server. This is what
+   * differentiates the flag from REGCLS_MULTI_SEPARATE. */
+  if (flags & REGCLS_MULTIPLEUSE)
+    dwClsContext |= CLSCTX_INPROC_SERVER;
+
   /*
    * First, check if the class is already registered.
    * If it is, this should cause an error.
@@ -1567,19 +1558,17 @@ HRESULT WINAPI CoRegisterClassObject(
   if ( newClass == NULL )
     return E_OUTOFMEMORY;
 
-  EnterCriticalSection( &csRegisteredClassList );
-
   newClass->classIdentifier = *rclsid;
   newClass->runContext      = dwClsContext;
   newClass->connectFlags    = flags;
   newClass->pMarshaledData  = NULL;
+  newClass->RpcRegistration = NULL;
 
   /*
    * Use the address of the chain node as the cookie since we are sure it's
    * unique. FIXME: not on 64-bit platforms.
    */
   newClass->dwCookie        = (DWORD)newClass;
-  newClass->nextClass       = firstRegisteredClass;
 
   /*
    * Since we're making a copy of the object pointer, we have to increase its
@@ -1588,7 +1577,8 @@ HRESULT WINAPI CoRegisterClassObject(
   newClass->classObject     = pUnk;
   IUnknown_AddRef(newClass->classObject);
 
-  firstRegisteredClass = newClass;
+  EnterCriticalSection( &csRegisteredClassList );
+  list_add_tail(&RegisteredClassList, &newClass->entry);
   LeaveCriticalSection( &csRegisteredClassList );
 
   *lpdwRegister = newClass->dwCookie;
@@ -1617,7 +1607,10 @@ HRESULT WINAPI CoRegisterClassObject(
 
       IUnknown_Release(classfac);
 
-      RPC_StartLocalServer(&newClass->classIdentifier, newClass->pMarshaledData);
+      hr = RPC_StartLocalServer(&newClass->classIdentifier,
+                                newClass->pMarshaledData,
+                                flags & (REGCLS_MULTIPLEUSE|REGCLS_MULTI_SEPARATE),
+                                &newClass->RpcRegistration);
   }
   return S_OK;
 }
@@ -1641,30 +1634,23 @@ HRESULT WINAPI CoRevokeClassObject(
         DWORD dwRegister)
 {
   HRESULT hr = E_INVALIDARG;
-  RegisteredClass** prevClassLink;
-  RegisteredClass*  curClass;
+  RegisteredClass *curClass;
 
   TRACE("(%08x)\n",dwRegister);
 
   EnterCriticalSection( &csRegisteredClassList );
 
-  /*
-   * Iterate through the whole list and try to match the cookie.
-   */
-  curClass      = firstRegisteredClass;
-  prevClassLink = &firstRegisteredClass;
-
-  while (curClass != 0)
+  LIST_FOR_EACH_ENTRY(curClass, &RegisteredClassList, RegisteredClass, entry)
   {
     /*
      * Check if we have a match on the cookie.
      */
     if (curClass->dwCookie == dwRegister)
     {
-      /*
-       * Remove the class from the chain.
-       */
-      *prevClassLink = curClass->nextClass;
+      list_remove(&curClass->entry);
+
+      if (curClass->runContext & CLSCTX_LOCAL_SERVER)
+        RPC_StopLocalServer(curClass->RpcRegistration);
 
       /*
        * Release the reference to the class object.
@@ -1675,7 +1661,6 @@ HRESULT WINAPI CoRevokeClassObject(
       {
         LARGE_INTEGER zero;
         memset(&zero, 0, sizeof(zero));
-        /* FIXME: stop local server thread */
         IStream_Seek(curClass->pMarshaledData, zero, STREAM_SEEK_SET, NULL);
         CoReleaseMarshalData(curClass->pMarshaledData);
       }
@@ -1686,21 +1671,12 @@ HRESULT WINAPI CoRevokeClassObject(
       HeapFree(GetProcessHeap(), 0, curClass);
 
       hr = S_OK;
-      goto end;
+      break;
     }
-
-    /*
-     * Step to the next class in the list.
-     */
-    prevClassLink = &(curClass->nextClass);
-    curClass      = curClass->nextClass;
   }
 
-end:
   LeaveCriticalSection( &csRegisteredClassList );
-  /*
-   * If we get to here, we haven't found our class.
-   */
+
   return hr;
 }
 
@@ -2375,9 +2351,11 @@ static void COM_RevokeAllClasses(void)
 {
   EnterCriticalSection( &csRegisteredClassList );
 
-  while (firstRegisteredClass!=0)
+  while (list_head(&RegisteredClassList))
   {
-    CoRevokeClassObject(firstRegisteredClass->dwCookie);
+    RegisteredClass *curClass = LIST_ENTRY(list_head(&RegisteredClassList),
+                                           RegisteredClass, entry);
+    CoRevokeClassObject(curClass->dwCookie);
   }
 
   LeaveCriticalSection( &csRegisteredClassList );
@@ -2795,11 +2773,23 @@ HRESULT WINAPI CoSuspendClassObjects(void)
  *
  * RETURNS
  *  New reference count.
+ *
+ * SEE ALSO
+ *  CoReleaseServerProcess().
  */
 ULONG WINAPI CoAddRefServerProcess(void)
 {
-    FIXME("\n");
-    return 2;
+    ULONG refs;
+
+    TRACE("\n");
+
+    EnterCriticalSection(&csRegisteredClassList);
+    refs = ++s_COMServerProcessReferences;
+    LeaveCriticalSection(&csRegisteredClassList);
+
+    TRACE("refs before: %d\n", refs - 1);
+
+    return refs;
 }
 
 /***********************************************************************
@@ -2810,11 +2800,30 @@ ULONG WINAPI CoAddRefServerProcess(void)
  *
  * RETURNS
  *  New reference count.
+ *
+ * NOTES
+ *  When reference count reaches 0, this function suspends all registered
+ *  classes so no new connections are accepted.
+ *
+ * SEE ALSO
+ *  CoAddRefServerProcess(), CoSuspendClassObjects().
  */
 ULONG WINAPI CoReleaseServerProcess(void)
 {
-    FIXME("\n");
-    return 1;
+    ULONG refs;
+
+    TRACE("\n");
+
+    EnterCriticalSection(&csRegisteredClassList);
+
+    refs = --s_COMServerProcessReferences;
+    /* FIXME: if (!refs) COM_SuspendClassObjects(); */
+
+    LeaveCriticalSection(&csRegisteredClassList);
+
+    TRACE("refs after: %d\n", refs);
+
+    return refs;
 }
 
 /***********************************************************************
@@ -3119,7 +3128,7 @@ static BOOL COM_PeekMessage(struct apartment *apt, MSG *msg)
     /* first try to retrieve messages for incoming COM calls to the apartment window */
     return PeekMessageW(msg, apt->win, WM_USER, WM_APP - 1, PM_REMOVE|PM_NOYIELD) ||
            /* next retrieve other messages necessary for the app to remain responsive */
-           PeekMessageW(msg, NULL, 0, WM_USER - 1, PM_REMOVE|PM_NOYIELD);
+           PeekMessageW(msg, NULL, 0, 0, PM_QS_PAINT|PM_QS_POSTMESSAGE|PM_REMOVE|PM_NOYIELD);
 }
 
 /***********************************************************************

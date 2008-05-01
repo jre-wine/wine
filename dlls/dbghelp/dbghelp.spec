@@ -43,10 +43,10 @@
 @ stub SymEnumSymbolsForAddr
 @ stub SymEnumSymbolsForAddrW
 @ stdcall SymEnumTypes(ptr double ptr ptr)
-@ stub SymEnumTypesW
+@ stdcall SymEnumTypesW(ptr double ptr ptr)
 @ stdcall SymEnumerateModules(long ptr ptr)
 @ stdcall SymEnumerateModules64(long ptr ptr)
-@ stub SymEnumerateModulesW64
+@ stdcall SymEnumerateModulesW64(long ptr ptr)
 @ stdcall SymEnumerateSymbols(long long ptr ptr)
 @ stub SymEnumerateSymbols64
 @ stub SymEnumerateSymbolsW

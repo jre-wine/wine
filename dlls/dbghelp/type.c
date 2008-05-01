@@ -164,7 +164,8 @@ struct symt_udt* symt_new_udt(struct module* module, const char* typename,
 {
     struct symt_udt*            sym;
 
-    TRACE_(dbghelp_symt)("Adding udt %s:%s\n", module->module_name, typename);
+    TRACE_(dbghelp_symt)("Adding udt %s:%s\n",
+                         debugstr_w(module->module.ModuleName), typename);
     if ((sym = pool_alloc(&module->pool, sizeof(*sym))))
     {
         sym->symt.tag = SymTagUDT;
@@ -419,6 +420,38 @@ BOOL WINAPI SymEnumTypes(HANDLE hProcess, ULONG64 BaseOfDll,
         if (!EnumSymbolsCallback(sym_info, sym_info->Size, UserContext)) break;
     }
     return TRUE;
+}
+
+struct enum_types_AtoW
+{
+    char                                buffer[sizeof(SYMBOL_INFOW) + 256 * sizeof(WCHAR)];
+    void*                               user;
+    PSYM_ENUMERATESYMBOLS_CALLBACKW     callback;
+};
+
+BOOL CALLBACK enum_types_AtoW(PSYMBOL_INFO si, ULONG addr, PVOID _et)
+{
+    struct enum_types_AtoW*     et = _et;
+    SYMBOL_INFOW*               siW = (SYMBOL_INFOW*)et->buffer;
+
+    copy_symbolW(siW, si);
+    return et->callback(siW, addr, et->user);
+}
+
+/******************************************************************
+ *		SymEnumTypesW (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymEnumTypesW(HANDLE hProcess, ULONG64 BaseOfDll,
+                          PSYM_ENUMERATESYMBOLS_CALLBACKW EnumSymbolsCallback,
+                          PVOID UserContext)
+{
+    struct enum_types_AtoW     et;
+
+    et.callback = EnumSymbolsCallback;
+    et.user = UserContext;
+
+    return SymEnumTypes(hProcess, BaseOfDll, enum_types_AtoW, &et);
 }
 
 /******************************************************************

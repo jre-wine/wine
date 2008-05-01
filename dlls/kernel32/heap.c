@@ -24,6 +24,7 @@
 #include "wine/port.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -1261,14 +1262,6 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
                 lpmemex->ullAvailPhys += cached*1024;
         }
         fclose( f );
-
-        if (lpmemex->ullTotalPhys)
-        {
-            DWORDLONG TotalPhysical = lpmemex->ullTotalPhys+lpmemex->ullTotalPageFile;
-            DWORDLONG AvailPhysical = lpmemex->ullAvailPhys+lpmemex->ullAvailPageFile;
-            lpmemex->dwMemoryLoad = (TotalPhysical-AvailPhysical)
-                                      / (TotalPhysical / 100);
-        }
     }
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__APPLE__)
     mib[0] = CTL_HW;
@@ -1283,7 +1276,6 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     lpmemex->ullAvailPhys = val;
     lpmemex->ullTotalPageFile = val;
     lpmemex->ullAvailPageFile = val;
-    lpmemex->dwMemoryLoad = lpmemex->ullTotalPhys - lpmemex->ullAvailPhys;
 #elif defined ( sun )
     pagesize=sysconf(_SC_PAGESIZE);
     maxpages=sysconf(_SC_PHYS_PAGES);
@@ -1304,14 +1296,28 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     lpmemex->ullAvailPhys = pagesize*freepages;
     lpmemex->ullTotalPageFile = swapspace;
     lpmemex->ullAvailPageFile = swapfree;
-    lpmemex->dwMemoryLoad =  lpmemex->ullTotalPhys - lpmemex->ullAvailPhys;
 #endif
 
-    /* Project2k refuses to start if it sees less than 1Mb of free swap */
-    if (lpmemex->ullTotalPageFile < lpmemex->ullTotalPhys)
-        lpmemex->ullTotalPageFile = lpmemex->ullTotalPhys;
-    if (lpmemex->ullAvailPageFile < lpmemex->ullAvailPhys)
-        lpmemex->ullAvailPageFile = lpmemex->ullAvailPhys;
+    if (lpmemex->ullTotalPhys)
+    {
+        lpmemex->dwMemoryLoad = (lpmemex->ullTotalPhys-lpmemex->ullAvailPhys)
+                                  / (lpmemex->ullTotalPhys / 100);
+    }
+
+    /* Win98 returns only the swapsize in ullTotalPageFile/ullAvailPageFile,
+       WinXP returns the size of physical memory + swapsize;
+       mimic the behavior of XP.
+       Note: Project2k refuses to start if it sees less than 1Mb of free swap.
+    */
+    lpmemex->ullTotalPageFile += lpmemex->ullTotalPhys;
+    lpmemex->ullAvailPageFile += lpmemex->ullAvailPhys;
+
+    /* Titan Quest refuses to run if TotalPageFile <= ullTotalPhys */
+    if(lpmemex->ullTotalPageFile == lpmemex->ullTotalPhys)
+    {
+        lpmemex->ullTotalPhys -= 1;
+        lpmemex->ullAvailPhys -= 1;
+    }
 
     /* FIXME: should do something for other systems */
     GetSystemInfo(&si);

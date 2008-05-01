@@ -105,6 +105,7 @@ static HRESULT BaseMemAllocator_Init(HRESULT (* fnAlloc)(IMemAllocator *), HRESU
     pMemAlloc->lWaiting = 0;
 
     InitializeCriticalSection(&pMemAlloc->csState);
+    pMemAlloc->csState.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": BaseMemAllocator.csState");
 
     return S_OK;
 }
@@ -154,7 +155,9 @@ static ULONG WINAPI BaseMemAllocator_Release(IMemAllocator * iface)
         CloseHandle(This->hSemWaiting);
         if (This->bCommitted)
             This->fnFree(iface);
-        HeapFree(GetProcessHeap(), 0, This->pProps);
+        CoTaskMemFree(This->pProps);
+        This->csState.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->csState);
         CoTaskMemFree(This);
         return 0;
     }
@@ -179,7 +182,7 @@ static HRESULT WINAPI BaseMemAllocator_SetProperties(IMemAllocator * iface, ALLO
         else
         {
             if (!This->pProps)
-                This->pProps = HeapAlloc(GetProcessHeap(), 0, sizeof(*This->pProps));
+                This->pProps = CoTaskMemAlloc(sizeof(*This->pProps));
 
             if (!This->pProps)
                 hr = E_OUTOFMEMORY;
@@ -487,7 +490,10 @@ static ULONG WINAPI StdMediaSample2_Release(IMediaSample2 * iface)
 
     if (!ref)
     {
-        IMemAllocator_ReleaseBuffer(This->pParent, (IMediaSample *)iface);
+        if (This->pParent)
+            IMemAllocator_ReleaseBuffer(This->pParent, (IMediaSample *)iface);
+        else
+            StdMediaSample2_Delete(This);
         return 0;
     }
     return ref;
@@ -810,7 +816,17 @@ static HRESULT StdMemAllocator_Free(IMemAllocator * iface)
     StdMemAllocator *This = (StdMemAllocator *)iface;
     struct list * cursor;
 
-    assert(list_empty(&This->base.used_list));
+    if (!list_empty(&This->base.used_list))
+    {
+        WARN("Freeing allocator with outstanding samples!\n");
+        while ((cursor = list_head(&This->base.used_list)) != NULL)
+        {
+            StdMediaSample2 *pSample;
+            list_remove(cursor);
+            pSample = LIST_ENTRY(cursor, StdMediaSample2, listentry);
+            pSample->pParent = NULL;
+        }
+    }
 
     while ((cursor = list_head(&This->base.free_list)) != NULL)
     {

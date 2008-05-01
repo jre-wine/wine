@@ -72,16 +72,19 @@ static int EventsQueue_Init(EventsQueue* omr)
     omr->msg_tosave = 0;
     omr->msg_event = CreateEventW(NULL, TRUE, FALSE, NULL);
     omr->ring_buffer_size = EVENTS_RING_BUFFER_INCREMENT;
-    omr->messages = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,omr->ring_buffer_size * sizeof(Event));
+    omr->messages = CoTaskMemAlloc(omr->ring_buffer_size * sizeof(Event));
+    ZeroMemory(omr->messages, omr->ring_buffer_size * sizeof(Event));
 
     InitializeCriticalSection(&omr->msg_crst);
+    omr->msg_crst.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": EventsQueue.msg_crst");
     return TRUE;
 }
 
 static int EventsQueue_Destroy(EventsQueue* omr)
 {
     CloseHandle(omr->msg_event);
-    HeapFree(GetProcessHeap(),0,omr->messages);
+    CoTaskMemFree(omr->messages);
+    omr->msg_crst.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&omr->msg_crst);
     return TRUE;
 }
@@ -267,10 +270,11 @@ static ULONG Filtergraph_Release(IFilterGraphImpl *This) {
 	IFilterMapper2_Release(This->pFilterMapper2);
 	CloseHandle(This->hEventCompletion);
 	EventsQueue_Destroy(&This->evqueue);
+        This->cs.DebugInfo->Spare[0] = 0;
 	DeleteCriticalSection(&This->cs);
-	HeapFree(GetProcessHeap(), 0, This->ppFiltersInGraph);
-	HeapFree(GetProcessHeap(), 0, This->pFilterNames);
-	HeapFree(GetProcessHeap(), 0, This);
+	CoTaskMemFree(This->ppFiltersInGraph);
+	CoTaskMemFree(This->pFilterNames);
+	CoTaskMemFree(This);
     }
     return ref;
 }
@@ -4167,21 +4171,21 @@ static const IMediaEventExVtbl IMediaEventEx_VTable =
 
 static HRESULT WINAPI MediaFilter_QueryInterface(IMediaFilter *iface, REFIID riid, LPVOID *ppv)
 {
-    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaEventEx_vtbl, iface);
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaFilter_vtbl, iface);
 
     return Filtergraph_QueryInterface(This, riid, ppv);
 }
 
 static ULONG WINAPI MediaFilter_AddRef(IMediaFilter *iface)
 {
-    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaEventEx_vtbl, iface);
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaFilter_vtbl, iface);
 
     return Filtergraph_AddRef(This);
 }
 
 static ULONG WINAPI MediaFilter_Release(IMediaFilter *iface)
 {
-    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaEventEx_vtbl, iface);
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaFilter_vtbl, iface);
 
     return Filtergraph_Release(This);
 }
@@ -4487,7 +4491,7 @@ HRESULT FilterGraph_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     if( pUnkOuter )
         return CLASS_E_NOAGGREGATION;
 
-    fimpl = HeapAlloc(GetProcessHeap(), 0, sizeof(*fimpl));
+    fimpl = CoTaskMemAlloc(sizeof(*fimpl));
     fimpl->IGraphBuilder_vtbl = &IGraphBuilder_VTable;
     fimpl->IMediaControl_vtbl = &IMediaControl_VTable;
     fimpl->IMediaSeeking_vtbl = &IMediaSeeking_VTable;
@@ -4515,9 +4519,10 @@ HRESULT FilterGraph_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     fimpl->state = State_Stopped;
     EventsQueue_Init(&fimpl->evqueue);
     InitializeCriticalSection(&fimpl->cs);
+    fimpl->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IFilterGraphImpl.cs");
     fimpl->nItfCacheEntries = 0;
 
-    hr = CoCreateInstance(&CLSID_FilterMapper, NULL, CLSCTX_INPROC_SERVER, &IID_IFilterMapper2, (LPVOID*)&fimpl->pFilterMapper2);
+    hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER, &IID_IFilterMapper2, (LPVOID*)&fimpl->pFilterMapper2);
     if (FAILED(hr)) {
         ERR("Unable to create filter mapper (%x)\n", hr);
 	return hr;

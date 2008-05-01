@@ -36,21 +36,18 @@
 
 #include "wcmd.h"
 #include <shellapi.h>
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(cmd);
 
 void WCMD_execute (char *orig_command, char *parameter, char *substitution);
-
-struct env_stack
-{
-  struct env_stack *next;
-  WCHAR *strings;
-};
 
 struct env_stack *saved_environment;
 struct env_stack *pushd_directories;
 
 extern HINSTANCE hinst;
 extern char *inbuilt[];
-extern int echo_mode, verify_mode;
+extern int echo_mode, verify_mode, defaultColor;
 extern char quals[MAX_PATH], param1[MAX_PATH], param2[MAX_PATH];
 extern BATCH_CONTEXT *context;
 extern DWORD errorlevel;
@@ -176,7 +173,7 @@ void WCMD_copy (void) {
  * they do not already exist.
  */
 
-BOOL create_full_path(CHAR* path)
+static BOOL create_full_path(CHAR* path)
 {
     int len;
     CHAR *new_path;
@@ -242,156 +239,174 @@ void WCMD_create_dir (void) {
  *         non-hidden files
  */
 
-void WCMD_delete (int recurse) {
+void WCMD_delete (char *command) {
 
-  WIN32_FIND_DATA fd;
-  HANDLE hff;
-  char fpath[MAX_PATH];
-  char *p;
+    int   argno         = 0;
+    int   argsProcessed = 0;
+    char *argN          = command;
 
-  if (param1[0] == 0x00) {
-    WCMD_output ("Argument missing\n");
-    return;
-  }
+    /* Loop through all args */
+    while (argN) {
+      char *thisArg = WCMD_parameter (command, argno++, &argN);
+      if (argN && argN[0] != '/') {
 
-  /* If filename part of parameter is * or *.*, prompt unless
-     /Q supplied.                                            */
-  if ((strstr (quals, "/Q") == NULL) && (strstr (quals, "/P") == NULL)) {
+        WIN32_FIND_DATA fd;
+        HANDLE hff;
+        char fpath[MAX_PATH];
+        char *p;
 
-    char drive[10];
-    char dir[MAX_PATH];
-    char fname[MAX_PATH];
-    char ext[MAX_PATH];
 
-    /* Convert path into actual directory spec */
-    GetFullPathName (param1, sizeof(fpath), fpath, NULL);
-    WCMD_splitpath(fpath, drive, dir, fname, ext);
+        WINE_TRACE("del: Processing arg %s (quals:%s)\n", thisArg, quals);
+        argsProcessed++;
 
-    /* Only prompt for * and *.*, not *a, a*, *.a* etc */
-    if ((strcmp(fname, "*") == 0) &&
-        (*ext == 0x00 || (strcmp(ext, ".*") == 0))) {
-      BOOL  ok;
-      char  question[MAXSTRING];
+        /* If filename part of parameter is * or *.*, prompt unless
+           /Q supplied.                                            */
+        if ((strstr (quals, "/Q") == NULL) && (strstr (quals, "/P") == NULL)) {
 
-      /* Ask for confirmation */
-      sprintf(question, "%s, ", fpath);
-      ok = WCMD_ask_confirm(question, TRUE);
+          char drive[10];
+          char dir[MAX_PATH];
+          char fname[MAX_PATH];
+          char ext[MAX_PATH];
 
-      /* Abort if answer is 'N' */
-      if (!ok) return;
-    }
-  }
+          /* Convert path into actual directory spec */
+          GetFullPathName (thisArg, sizeof(fpath), fpath, NULL);
+          WCMD_splitpath(fpath, drive, dir, fname, ext);
 
-  hff = FindFirstFile (param1, &fd);
-  if (hff == INVALID_HANDLE_VALUE) {
-    WCMD_output ("%s :File Not Found\n",param1);
-    return;
-  }
-  /* Support del <dirname> by just deleting all files dirname\* */
-  if ((strchr(param1,'*') == NULL) && (strchr(param1,'?') == NULL)
-  	&& (!recurse) && (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-    strcat (param1, "\\*");
-    FindClose(hff);
-    WCMD_delete (1);
-    return;
+          /* Only prompt for * and *.*, not *a, a*, *.a* etc */
+          if ((strcmp(fname, "*") == 0) &&
+              (*ext == 0x00 || (strcmp(ext, ".*") == 0))) {
+            BOOL  ok;
+            char  question[MAXSTRING];
 
-  } else {
+            /* Ask for confirmation */
+            sprintf(question, "%s, ", fpath);
+            ok = WCMD_ask_confirm(question, TRUE);
 
-    /* Build the filename to delete as <supplied directory>\<findfirst filename> */
-    strcpy (fpath, param1);
-    do {
-      p = strrchr (fpath, '\\');
-      if (p != NULL) {
-        *++p = '\0';
-        strcat (fpath, fd.cFileName);
-      }
-      else strcpy (fpath, fd.cFileName);
-      if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-        BOOL  ok = TRUE;
-        char *nextA = strstr (quals, "/A");
+            /* Abort if answer is 'N' */
+            if (!ok) continue;
+          }
+        }
 
-        /* Handle attribute matching (/A) */
-        if (nextA != NULL) {
-          ok = FALSE;
-          while (nextA != NULL && !ok) {
+        hff = FindFirstFile (thisArg, &fd);
+        if (hff == INVALID_HANDLE_VALUE) {
+          WCMD_output ("%s :File Not Found\n", thisArg);
+          continue;
+        }
+        /* Support del <dirname> by just deleting all files dirname\* */
+        if ((strchr(thisArg,'*') == NULL) && (strchr(thisArg,'?') == NULL)
+		&& (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+          char modifiedParm[MAX_PATH];
+          strcpy(modifiedParm, thisArg);
+          strcat(modifiedParm, "\\*");
+          FindClose(hff);
+          WCMD_delete(modifiedParm);
+          continue;
 
-            char *thisA = (nextA+2);
-            BOOL  stillOK = TRUE;
+        } else {
 
-            /* Skip optional : */
-            if (*thisA == ':') thisA++;
-
-            /* Parse each of the /A[:]xxx in turn */
-            while (*thisA && *thisA != '/') {
-              BOOL negate    = FALSE;
-              BOOL attribute = FALSE;
-
-              /* Match negation of attribute first */
-              if (*thisA == '-') {
-                negate=TRUE;
-                thisA++;
-              }
-
-              /* Match attribute */
-              switch (*thisA) {
-              case 'R': attribute = (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY);
-                        break;
-              case 'H': attribute = (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
-                        break;
-              case 'S': attribute = (fd.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM);
-                        break;
-              case 'A': attribute = (fd.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE);
-                        break;
-              default:
-                  WCMD_output ("Syntax error\n");
-              }
-
-              /* Now check result, keeping a running boolean about whether it
-                 matches all parsed attribues so far                         */
-              if (attribute && !negate) {
-                  stillOK = stillOK;
-              } else if (!attribute && negate) {
-                  stillOK = stillOK;
-              } else {
-                  stillOK = FALSE;
-              }
-              thisA++;
+          /* Build the filename to delete as <supplied directory>\<findfirst filename> */
+          strcpy (fpath, thisArg);
+          do {
+            p = strrchr (fpath, '\\');
+            if (p != NULL) {
+              *++p = '\0';
+              strcat (fpath, fd.cFileName);
             }
+            else strcpy (fpath, fd.cFileName);
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+              BOOL  ok = TRUE;
+              char *nextA = strstr (quals, "/A");
 
-            /* Save the running total as the final result */
-            ok = stillOK;
+              /* Handle attribute matching (/A) */
+              if (nextA != NULL) {
+                ok = FALSE;
+                while (nextA != NULL && !ok) {
 
-            /* Step on to next /A set */
-            nextA = strstr (nextA+1, "/A");
-          }
+                  char *thisA = (nextA+2);
+                  BOOL  stillOK = TRUE;
+
+                  /* Skip optional : */
+                  if (*thisA == ':') thisA++;
+
+                  /* Parse each of the /A[:]xxx in turn */
+                  while (*thisA && *thisA != '/') {
+                    BOOL negate    = FALSE;
+                    BOOL attribute = FALSE;
+
+                    /* Match negation of attribute first */
+                    if (*thisA == '-') {
+                      negate=TRUE;
+                      thisA++;
+                    }
+
+                    /* Match attribute */
+                    switch (*thisA) {
+                    case 'R': attribute = (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY);
+                              break;
+                    case 'H': attribute = (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
+                              break;
+                    case 'S': attribute = (fd.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM);
+                              break;
+                    case 'A': attribute = (fd.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE);
+                              break;
+                    default:
+                        WCMD_output ("Syntax error\n");
+                    }
+
+                    /* Now check result, keeping a running boolean about whether it
+                       matches all parsed attribues so far                         */
+                    if (attribute && !negate) {
+                        stillOK = stillOK;
+                    } else if (!attribute && negate) {
+                        stillOK = stillOK;
+                    } else {
+                        stillOK = FALSE;
+                    }
+                    thisA++;
+                  }
+
+                  /* Save the running total as the final result */
+                  ok = stillOK;
+
+                  /* Step on to next /A set */
+                  nextA = strstr (nextA+1, "/A");
+                }
+              }
+
+              /* /P means prompt for each file */
+              if (ok && strstr (quals, "/P") != NULL) {
+                char  question[MAXSTRING];
+
+                /* Ask for confirmation */
+                sprintf(question, "%s, Delete", fpath);
+                ok = WCMD_ask_confirm(question, FALSE);
+              }
+
+              /* Only proceed if ok to */
+              if (ok) {
+
+                /* If file is read only, and /F supplied, delete it */
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY &&
+                    strstr (quals, "/F") != NULL) {
+                    SetFileAttributes(fpath, fd.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY);
+                }
+
+                /* Now do the delete */
+                if (!DeleteFile (fpath)) WCMD_print_error ();
+              }
+
+            }
+          } while (FindNextFile(hff, &fd) != 0);
+          FindClose (hff);
         }
-
-        /* /P means prompt for each file */
-        if (ok && strstr (quals, "/P") != NULL) {
-          char  question[MAXSTRING];
-
-          /* Ask for confirmation */
-          sprintf(question, "%s, Delete", fpath);
-          ok = WCMD_ask_confirm(question, FALSE);
-        }
-
-        /* Only proceed if ok to */
-        if (ok) {
-
-          /* If file is read only, and /F supplied, delete it */
-          if (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY &&
-              strstr (quals, "/F") != NULL) {
-              SetFileAttributes(fpath, fd.dwFileAttributes & ~FILE_ATTRIBUTE_READONLY);
-          }
-
-          /* Now do the delete */
-          if (!DeleteFile (fpath)) WCMD_print_error ();
-        }
-
       }
-    } while (FindNextFile(hff, &fd) != 0);
-    FindClose (hff);
-  }
+    }
+
+    /* Handle no valid args */
+    if (argsProcessed == 0) {
+      WCMD_output ("Argument missing\n");
+      return;
+    }
 }
 
 /****************************************************************************
@@ -585,10 +600,15 @@ void WCMD_goto (void) {
  *	Push a directory onto the stack
  */
 
-void WCMD_pushd (void) {
+void WCMD_pushd (char *command) {
     struct env_stack *curdir;
-    BOOL   status;
     WCHAR *thisdir;
+
+    if (strchr(command, '/') != NULL) {
+      SetLastError(ERROR_INVALID_PARAMETER);
+      WCMD_print_error();
+      return;
+    }
 
     curdir  = LocalAlloc (LMEM_FIXED, sizeof (struct env_stack));
     thisdir = LocalAlloc (LMEM_FIXED, 1024 * sizeof(WCHAR));
@@ -599,16 +619,23 @@ void WCMD_pushd (void) {
       return;
     }
 
+    /* Change directory using CD code with /D parameter */
+    strcpy(quals, "/D");
     GetCurrentDirectoryW (1024, thisdir);
-    status = SetCurrentDirectoryA (param1);
-    if (!status) {
-      WCMD_print_error ();
+    errorlevel = 0;
+    WCMD_setshow_default(command);
+    if (errorlevel) {
       LocalFree(curdir);
       LocalFree(thisdir);
       return;
     } else {
       curdir -> next    = pushd_directories;
       curdir -> strings = thisdir;
+      if (pushd_directories == NULL) {
+        curdir -> u.stackdepth = 1;
+      } else {
+        curdir -> u.stackdepth = pushd_directories -> u.stackdepth + 1;
+      }
       pushd_directories = curdir;
     }
 }
@@ -752,44 +779,59 @@ void WCMD_pause (void) {
  * Delete a directory.
  */
 
-void WCMD_remove_dir (void) {
+void WCMD_remove_dir (char *command) {
 
-  if (param1[0] == 0x00) {
+  int   argno         = 0;
+  int   argsProcessed = 0;
+  char *argN          = command;
+
+  /* Loop through all args */
+  while (argN) {
+    char *thisArg = WCMD_parameter (command, argno++, &argN);
+    if (argN && argN[0] != '/') {
+      WINE_TRACE("rd: Processing arg %s (quals:%s)\n", thisArg, quals);
+      argsProcessed++;
+
+      /* If subdirectory search not supplied, just try to remove
+         and report error if it fails (eg if it contains a file) */
+      if (strstr (quals, "/S") == NULL) {
+        if (!RemoveDirectory (thisArg)) WCMD_print_error ();
+
+      /* Otherwise use ShFileOp to recursively remove a directory */
+      } else {
+
+        SHFILEOPSTRUCT lpDir;
+
+        /* Ask first */
+        if (strstr (quals, "/Q") == NULL) {
+          BOOL  ok;
+          char  question[MAXSTRING];
+
+          /* Ask for confirmation */
+          sprintf(question, "%s, ", thisArg);
+          ok = WCMD_ask_confirm(question, TRUE);
+
+          /* Abort if answer is 'N' */
+          if (!ok) return;
+        }
+
+        /* Do the delete */
+        lpDir.hwnd   = NULL;
+        lpDir.pTo    = NULL;
+        lpDir.pFrom  = thisArg;
+        lpDir.fFlags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI;
+        lpDir.wFunc  = FO_DELETE;
+        if (SHFileOperationA(&lpDir)) WCMD_print_error ();
+      }
+    }
+  }
+
+  /* Handle no valid args */
+  if (argsProcessed == 0) {
     WCMD_output ("Argument missing\n");
     return;
   }
 
-  /* If subdirectory search not supplied, just try to remove
-     and report error if it fails (eg if it contains a file) */
-  if (strstr (quals, "/S") == NULL) {
-    if (!RemoveDirectory (param1)) WCMD_print_error ();
-
-  /* Otherwise use ShFileOp to recursively remove a directory */
-  } else {
-
-    SHFILEOPSTRUCT lpDir;
-
-    /* Ask first */
-    if (strstr (quals, "/Q") == NULL) {
-      BOOL  ok;
-      char  question[MAXSTRING];
-
-      /* Ask for confirmation */
-      sprintf(question, "%s, ", param1);
-      ok = WCMD_ask_confirm(question, TRUE);
-
-      /* Abort if answer is 'N' */
-      if (!ok) return;
-    }
-
-    /* Do the delete */
-    lpDir.hwnd   = NULL;
-    lpDir.pTo    = NULL;
-    lpDir.pFrom  = param1;
-    lpDir.fFlags = FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI;
-    lpDir.wFunc  = FO_DELETE;
-    if (SHFileOperationA(&lpDir)) WCMD_print_error ();
-  }
 }
 
 /****************************************************************************
@@ -853,6 +895,7 @@ static WCHAR *WCMD_dupenv( const WCHAR *env )
 void WCMD_setlocal (const char *s) {
   WCHAR *env;
   struct env_stack *env_copy;
+  char cwd[MAX_PATH];
 
   /* DISABLEEXTENSIONS ignored */
 
@@ -870,11 +913,16 @@ void WCMD_setlocal (const char *s) {
   {
     env_copy->next = saved_environment;
     saved_environment = env_copy;
+
+    /* Save the current drive letter */
+    GetCurrentDirectory (MAX_PATH, cwd);
+    env_copy->u.cwd = cwd[0];
   }
   else
     LocalFree (env_copy);
 
   FreeEnvironmentStringsW (env);
+
 }
 
 /*****************************************************************************
@@ -895,6 +943,8 @@ static inline WCHAR *WCMD_strchrW(WCHAR *str, WCHAR ch)
  * WCMD_endlocal
  *
  *  endlocal pops the environment off a stack
+ *  Note: When searching for '=', search from char position 1, to handle
+ *        special internal environment variables =C:, =D: etc
  */
 void WCMD_endlocal (void) {
   WCHAR *env, *old, *p;
@@ -914,7 +964,7 @@ void WCMD_endlocal (void) {
   len = 0;
   while (old[len]) {
     n = lstrlenW(&old[len]) + 1;
-    p = WCMD_strchrW(&old[len], '=');
+    p = WCMD_strchrW(&old[len] + 1, '=');
     if (p)
     {
       *p++ = 0;
@@ -930,7 +980,7 @@ void WCMD_endlocal (void) {
   len = 0;
   while (env[len]) {
     n = lstrlenW(&env[len]) + 1;
-    p = WCMD_strchrW(&env[len], '=');
+    p = WCMD_strchrW(&env[len] + 1, '=');
     if (p)
     {
       *p++ = 0;
@@ -938,6 +988,18 @@ void WCMD_endlocal (void) {
     }
     len += n;
   }
+
+  /* Restore current drive letter */
+  if (IsCharAlpha(temp->u.cwd)) {
+    char envvar[4];
+    char cwd[MAX_PATH];
+    sprintf(envvar, "=%c:", temp->u.cwd);
+    if (GetEnvironmentVariable(envvar, cwd, MAX_PATH)) {
+      WINE_TRACE("Resetting cwd to %s\n", cwd);
+      SetCurrentDirectory(cwd);
+    }
+  }
+
   LocalFree (env);
   LocalFree (temp);
 }
@@ -1011,22 +1073,101 @@ void WCMD_setshow_attrib (void) {
  *	Set/Show the current default directory
  */
 
-void WCMD_setshow_default (void) {
+void WCMD_setshow_default (char *command) {
 
   BOOL status;
   char string[1024];
+  char cwd[1024];
+  char *pos;
+  WIN32_FIND_DATA fd;
+  HANDLE hff;
 
-  if (strlen(param1) == 0) {
-    GetCurrentDirectory (sizeof(string), string);
-    strcat (string, "\n");
-    WCMD_output (string);
+  WINE_TRACE("Request change to directory '%s'\n", command);
+
+  /* Skip /D and trailing whitespace if on the front of the command line */
+  if (CompareString (LOCALE_USER_DEFAULT,
+                     NORM_IGNORECASE | SORT_STRINGSORT,
+                     command, 2, "/D", -1) == 2) {
+    command += 2;
+    while (*command && *command==' ') command++;
+  }
+
+  GetCurrentDirectory (sizeof(cwd), cwd);
+  if (strlen(command) == 0) {
+    strcat (cwd, "\n");
+    WCMD_output (cwd);
   }
   else {
-    status = SetCurrentDirectory (param1);
+    /* Remove any double quotes, which may be in the
+       middle, eg. cd "C:\Program Files"\Microsoft is ok */
+    pos = string;
+    while (*command) {
+      if (*command != '"') *pos++ = *command;
+      command++;
+    }
+    *pos = 0x00;
+
+    /* Search for approprate directory */
+    WINE_TRACE("Looking for directory '%s'\n", string);
+    hff = FindFirstFile (string, &fd);
+    while (hff != INVALID_HANDLE_VALUE) {
+      if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+        char fpath[MAX_PATH];
+        char drive[10];
+        char dir[MAX_PATH];
+        char fname[MAX_PATH];
+        char ext[MAX_PATH];
+
+        /* Convert path into actual directory spec */
+        GetFullPathName (string, sizeof(fpath), fpath, NULL);
+        WCMD_splitpath(fpath, drive, dir, fname, ext);
+
+        /* Rebuild path */
+        sprintf(string, "%s%s%s", drive, dir, fd.cFileName);
+
+        FindClose(hff);
+        hff = INVALID_HANDLE_VALUE;
+        break;
+      }
+
+      /* Step on to next match */
+      if (FindNextFile(hff, &fd) == 0) {
+        FindClose(hff);
+        hff = INVALID_HANDLE_VALUE;
+        break;
+      }
+    }
+
+    /* Change to that directory */
+    WINE_TRACE("Really changing to directory '%s'\n", string);
+
+    status = SetCurrentDirectory (string);
     if (!status) {
+      errorlevel = 1;
       WCMD_print_error ();
       return;
+    } else {
+
+      /* Restore old directory if drive letter would change, and
+           CD x:\directory /D (or pushd c:\directory) not supplied */
+      if ((strstr(quals, "/D") == NULL) &&
+          (param1[1] == ':') && (toupper(param1[0]) != toupper(cwd[0]))) {
+        SetCurrentDirectory(cwd);
+      }
     }
+
+    /* Set special =C: type environment variable, for drive letter of
+       change of directory, even if path was restored due to missing
+       /D (allows changing drive letter when not resident on that
+       drive                                                          */
+    if ((string[1] == ':') && IsCharAlpha (string[0])) {
+      char env[4];
+      strcpy(env, "=");
+      strncpy(env+1, string, 2);
+      env[3] = 0x00;
+      SetEnvironmentVariable(env, string);
+    }
+
    }
   return;
 }
@@ -1046,10 +1187,13 @@ void WCMD_setshow_date (void) {
   if (lstrlen(param1) == 0) {
     if (GetDateFormat (LOCALE_USER_DEFAULT, 0, NULL, NULL,
   		curdate, sizeof(curdate))) {
-      WCMD_output ("Current Date is %s\nEnter new date: ", curdate);
-      ReadFile (GetStdHandle(STD_INPUT_HANDLE), buffer, sizeof(buffer), &count, NULL);
-      if (count > 2) {
-        WCMD_output (nyi);
+      WCMD_output ("Current Date is %s\n", curdate);
+      if (strstr (quals, "/T") == NULL) {
+        WCMD_output("Enter new date: ");
+        ReadFile (GetStdHandle(STD_INPUT_HANDLE), buffer, sizeof(buffer), &count, NULL);
+        if (count > 2) {
+          WCMD_output (nyi);
+        }
       }
     }
     else WCMD_print_error ();
@@ -1109,9 +1253,12 @@ static int WCMD_setshow_sortenv(const char *s, const char *stub)
     if (!stub || CompareString (LOCALE_USER_DEFAULT,
                                 NORM_IGNORECASE | SORT_STRINGSORT,
                                 str[i], stublen, stub, -1) == 2) {
-      WCMD_output_asis(str[i]);
-      WCMD_output_asis("\n");
-      displayedcount++;
+      /* Don't display special internal variables */
+      if (str[i][0] != '=') {
+        WCMD_output_asis(str[i]);
+        WCMD_output_asis("\n");
+        displayedcount++;
+      }
     }
   }
 
@@ -1131,16 +1278,50 @@ void WCMD_setshow_env (char *s) {
   char *p;
   int status;
 
-  if (strlen(param1) == 0) {
+  errorlevel = 0;
+  if (param1[0] == 0x00 && quals[0] == 0x00) {
     env = GetEnvironmentStrings ();
     WCMD_setshow_sortenv( env, NULL );
+    return;
   }
-  else {
+
+  /* See if /P supplied, and if so echo the prompt, and read in a reply */
+  if (CompareString (LOCALE_USER_DEFAULT,
+                     NORM_IGNORECASE | SORT_STRINGSORT,
+                     s, 2, "/P", -1) == 2) {
+    char string[MAXSTRING];
+    DWORD count;
+
+    s += 2;
+    while (*s && *s==' ') s++;
+
+    /* If no parameter, or no '=' sign, return an error */
+    if (!(*s) || ((p = strchr (s, '=')) == NULL )) {
+      WCMD_output ("Argument missing\n");
+      return;
+    }
+
+    /* Output the prompt */
+    *p++ = '\0';
+    if (strlen(p) != 0) WCMD_output(p);
+
+    /* Read the reply */
+    ReadFile (GetStdHandle(STD_INPUT_HANDLE), string, sizeof(string), &count, NULL);
+    if (count > 1) {
+      string[count-1] = '\0'; /* ReadFile output is not null-terminated! */
+      if (string[count-2] == '\r') string[count-2] = '\0'; /* Under Windoze we get CRLF! */
+      WINE_TRACE("set /p: Setting var '%s' to '%s'\n", s, string);
+      status = SetEnvironmentVariable (s, string);
+    }
+
+  } else {
+    DWORD gle;
     p = strchr (s, '=');
     if (p == NULL) {
       env = GetEnvironmentStrings ();
       if (WCMD_setshow_sortenv( env, s ) == 0) {
         WCMD_output ("Environment variable %s not defined\n", s);
+        errorlevel = 1;
       }
       return;
     }
@@ -1148,7 +1329,10 @@ void WCMD_setshow_env (char *s) {
 
     if (strlen(p) == 0) p = NULL;
     status = SetEnvironmentVariable (s, p);
-    if ((!status) & (GetLastError() != ERROR_ENVVAR_NOT_FOUND)) WCMD_print_error();
+    gle = GetLastError();
+    if ((!status) & (gle == ERROR_ENVVAR_NOT_FOUND)) {
+      errorlevel = 1;
+    } else if ((!status)) WCMD_print_error();
   }
 }
 
@@ -1221,10 +1405,13 @@ void WCMD_setshow_time (void) {
     GetLocalTime(&st);
     if (GetTimeFormat (LOCALE_USER_DEFAULT, 0, &st, NULL,
   		curtime, sizeof(curtime))) {
-      WCMD_output ("Current Time is %s\nEnter new time: ", curtime);
-      ReadFile (GetStdHandle(STD_INPUT_HANDLE), buffer, sizeof(buffer), &count, NULL);
-      if (count > 2) {
-        WCMD_output (nyi);
+      WCMD_output ("Current Time is %s\n", curtime);
+      if (strstr (quals, "/T") == NULL) {
+        WCMD_output ("Enter new time: ", curtime);
+        ReadFile (GetStdHandle(STD_INPUT_HANDLE), buffer, sizeof(buffer), &count, NULL);
+        if (count > 2) {
+          WCMD_output (nyi);
+        }
       }
     }
     else WCMD_print_error ();
@@ -1238,11 +1425,32 @@ void WCMD_setshow_time (void) {
  * WCMD_shift
  *
  * Shift batch parameters.
+ * Optional /n says where to start shifting (n=0-8)
  */
 
-void WCMD_shift (void) {
+void WCMD_shift (char *command) {
+  int start;
 
-  if (context != NULL) context -> shift_count++;
+  if (context != NULL) {
+    char *pos = strchr(command, '/');
+    int   i;
+
+    if (pos == NULL) {
+      start = 0;
+    } else if (*(pos+1)>='0' && *(pos+1)<='8') {
+      start = (*(pos+1) - '0');
+    } else {
+      SetLastError(ERROR_INVALID_PARAMETER);
+      WCMD_print_error();
+      return;
+    }
+
+    WINE_TRACE("Shifting variables, starting at %d\n", start);
+    for (i=start;i<=8;i++) {
+      context -> shift_count[i] = context -> shift_count[i+1] + 1;
+    }
+    context -> shift_count[9] = context -> shift_count[9] + 1;
+  }
 
 }
 
@@ -1261,28 +1469,49 @@ void WCMD_title (char *command) {
  * Copy a file to standard output.
  */
 
-void WCMD_type (void) {
+void WCMD_type (char *command) {
 
-  HANDLE h;
-  char buffer[512];
-  DWORD count;
+  int   argno         = 0;
+  char *argN          = command;
+  BOOL  writeHeaders  = FALSE;
 
   if (param1[0] == 0x00) {
     WCMD_output ("Argument missing\n");
     return;
   }
-  h = CreateFile (param1, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
-  		FILE_ATTRIBUTE_NORMAL, NULL);
-  if (h == INVALID_HANDLE_VALUE) {
-    WCMD_print_error ();
-    return;
+
+  if (param2[0] != 0x00) writeHeaders = TRUE;
+
+  /* Loop through all args */
+  errorlevel = 0;
+  while (argN) {
+    char *thisArg = WCMD_parameter (command, argno++, &argN);
+
+    HANDLE h;
+    char buffer[512];
+    DWORD count;
+
+    if (!argN) break;
+
+    WINE_TRACE("type: Processing arg '%s'\n", thisArg);
+    h = CreateFile (thisArg, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+      WCMD_print_error ();
+      WCMD_output ("%s :Failed\n", thisArg);
+      errorlevel = 1;
+    } else {
+      if (writeHeaders) {
+        WCMD_output("\n%s\n\n", thisArg);
+      }
+      while (ReadFile (h, buffer, sizeof(buffer), &count, NULL)) {
+        if (count == 0) break;	/* ReadFile reports success on EOF! */
+        buffer[count] = 0;
+        WCMD_output_asis (buffer);
+      }
+      CloseHandle (h);
+    }
   }
-  while (ReadFile (h, buffer, sizeof(buffer), &count, NULL)) {
-    if (count == 0) break;	/* ReadFile reports success on EOF! */
-    buffer[count] = 0;
-    WCMD_output_asis (buffer);
-  }
-  CloseHandle (h);
 }
 
 /****************************************************************************
@@ -1439,4 +1668,236 @@ BOOL WCMD_ask_confirm (char *message, BOOL showSureText) {
 
     /* Return the answer */
     return (answer[0] == Ybuffer[0]);
+}
+
+/*****************************************************************************
+ * WCMD_assoc
+ *
+ *	Lists or sets file associations  (assoc = TRUE)
+ *      Lists or sets file types         (assoc = FALSE)
+ */
+void WCMD_assoc (char *command, BOOL assoc) {
+
+    HKEY    key;
+    DWORD   accessOptions = KEY_READ;
+    char   *newValue;
+    LONG    rc = ERROR_SUCCESS;
+    char    keyValue[MAXSTRING];
+    DWORD   valueLen = MAXSTRING;
+    HKEY    readKey;
+
+
+    /* See if parameter includes '=' */
+    errorlevel = 0;
+    newValue = strchr(command, '=');
+    if (newValue) accessOptions |= KEY_WRITE;
+
+    /* Open a key to HKEY_CLASSES_ROOT for enumerating */
+    if (RegOpenKeyEx(HKEY_CLASSES_ROOT, "", 0,
+                     accessOptions, &key) != ERROR_SUCCESS) {
+      WINE_FIXME("Unexpected failure opening HKCR key: %d\n", GetLastError());
+      return;
+    }
+
+    /* If no parameters then list all associations */
+    if (*command == 0x00) {
+      int index = 0;
+
+      /* Enumerate all the keys */
+      while (rc != ERROR_NO_MORE_ITEMS) {
+        char  keyName[MAXSTRING];
+        DWORD nameLen;
+
+        /* Find the next value */
+        nameLen = MAXSTRING;
+        rc = RegEnumKeyEx(key, index++,
+                          keyName, &nameLen,
+                          NULL, NULL, NULL, NULL);
+
+        if (rc == ERROR_SUCCESS) {
+
+          /* Only interested in extension ones if assoc, or others
+             if not assoc                                          */
+          if ((keyName[0] == '.' && assoc) ||
+              (!(keyName[0] == '.') && (!assoc)))
+          {
+            char subkey[MAXSTRING];
+            strcpy(subkey, keyName);
+            if (!assoc) strcat(subkey, "\\Shell\\Open\\Command");
+
+            if (RegOpenKeyEx(key, subkey, 0,
+                             accessOptions, &readKey) == ERROR_SUCCESS) {
+
+              valueLen = sizeof(keyValue);
+              rc = RegQueryValueEx(readKey, NULL, NULL, NULL,
+                                   (LPBYTE)keyValue, &valueLen);
+              WCMD_output_asis(keyName);
+              WCMD_output_asis("=");
+              /* If no default value found, leave line empty after '=' */
+              if (rc == ERROR_SUCCESS) {
+                WCMD_output_asis(keyValue);
+              }
+              WCMD_output_asis("\n");
+            }
+          }
+        }
+      }
+      RegCloseKey(readKey);
+
+    } else {
+
+      /* Parameter supplied - if no '=' on command line, its a query */
+      if (newValue == NULL) {
+        char *space;
+        char subkey[MAXSTRING];
+
+        /* Query terminates the parameter at the first space */
+        strcpy(keyValue, command);
+        space = strchr(keyValue, ' ');
+        if (space) *space=0x00;
+
+        /* Set up key name */
+        strcpy(subkey, keyValue);
+        if (!assoc) strcat(subkey, "\\Shell\\Open\\Command");
+
+        if (RegOpenKeyEx(key, subkey, 0,
+                         accessOptions, &readKey) == ERROR_SUCCESS) {
+
+          rc = RegQueryValueEx(readKey, NULL, NULL, NULL,
+                               (LPBYTE)keyValue, &valueLen);
+          WCMD_output_asis(command);
+          WCMD_output_asis("=");
+          /* If no default value found, leave line empty after '=' */
+          if (rc == ERROR_SUCCESS) WCMD_output_asis(keyValue);
+          WCMD_output_asis("\n");
+          RegCloseKey(readKey);
+
+        } else {
+          char  msgbuffer[MAXSTRING];
+          char  outbuffer[MAXSTRING];
+
+          /* Load the translated 'File association not found' */
+          if (assoc) {
+            LoadString (hinst, WCMD_NOASSOC, msgbuffer, sizeof(msgbuffer));
+          } else {
+            LoadString (hinst, WCMD_NOFTYPE, msgbuffer, sizeof(msgbuffer));
+          }
+          sprintf(outbuffer, msgbuffer, keyValue);
+          WCMD_output_asis(outbuffer);
+          errorlevel = 2;
+        }
+
+      /* Not a query - its a set or clear of a value */
+      } else {
+
+        char subkey[MAXSTRING];
+
+        /* Get pointer to new value */
+        *newValue = 0x00;
+        newValue++;
+
+        /* Set up key name */
+        strcpy(subkey, command);
+        if (!assoc) strcat(subkey, "\\Shell\\Open\\Command");
+
+        /* If nothing after '=' then clear value - only valid for ASSOC */
+        if (*newValue == 0x00) {
+
+          if (assoc) rc = RegDeleteKey(key, command);
+          if (assoc && rc == ERROR_SUCCESS) {
+            WINE_TRACE("HKCR Key '%s' deleted\n", command);
+
+          } else if (assoc && rc != ERROR_FILE_NOT_FOUND) {
+            WCMD_print_error();
+            errorlevel = 2;
+
+          } else {
+            char  msgbuffer[MAXSTRING];
+            char  outbuffer[MAXSTRING];
+
+            /* Load the translated 'File association not found' */
+            if (assoc) {
+              LoadString (hinst, WCMD_NOASSOC, msgbuffer, sizeof(msgbuffer));
+            } else {
+              LoadString (hinst, WCMD_NOFTYPE, msgbuffer, sizeof(msgbuffer));
+            }
+            sprintf(outbuffer, msgbuffer, keyValue);
+            WCMD_output_asis(outbuffer);
+            errorlevel = 2;
+          }
+
+        /* It really is a set value = contents */
+        } else {
+          rc = RegCreateKeyEx(key, subkey, 0, NULL, REG_OPTION_NON_VOLATILE,
+                              accessOptions, NULL, &readKey, NULL);
+          if (rc == ERROR_SUCCESS) {
+            rc = RegSetValueEx(readKey, NULL, 0, REG_SZ,
+                                 (LPBYTE)newValue, strlen(newValue));
+            RegCloseKey(readKey);
+          }
+
+          if (rc != ERROR_SUCCESS) {
+            WCMD_print_error();
+            errorlevel = 2;
+          } else {
+            WCMD_output_asis(command);
+            WCMD_output_asis("=");
+            WCMD_output_asis(newValue);
+            WCMD_output_asis("\n");
+          }
+        }
+      }
+    }
+
+    /* Clean up */
+    RegCloseKey(key);
+}
+
+/****************************************************************************
+ * WCMD_color
+ *
+ * Clear the terminal screen.
+ */
+
+void WCMD_color (void) {
+
+  /* Emulate by filling the screen from the top left to bottom right with
+        spaces, then moving the cursor to the top left afterwards */
+  CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
+  HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+
+  if (param1[0] != 0x00 && strlen(param1) > 2) {
+    WCMD_output ("Argument invalid\n");
+    return;
+  }
+
+  if (GetConsoleScreenBufferInfo(hStdOut, &consoleInfo))
+  {
+      COORD topLeft;
+      DWORD screenSize;
+      DWORD color = 0;
+
+      screenSize = consoleInfo.dwSize.X * (consoleInfo.dwSize.Y + 1);
+
+      topLeft.X = 0;
+      topLeft.Y = 0;
+
+      /* Convert the color hex digits */
+      if (param1[0] == 0x00) {
+        color = defaultColor;
+      } else {
+        color = strtoul(param1, NULL, 16);
+      }
+
+      /* Fail if fg == bg color */
+      if (((color & 0xF0) >> 4) == (color & 0x0F)) {
+        errorlevel = 1;
+        return;
+      }
+
+      /* Set the current screen contents and ensure all future writes
+         remain this color                                             */
+      FillConsoleOutputAttribute(hStdOut, color, screenSize, topLeft, &screenSize);
+      SetConsoleTextAttribute(hStdOut, color);
+  }
 }

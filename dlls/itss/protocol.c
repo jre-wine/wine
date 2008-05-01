@@ -194,11 +194,16 @@ static HRESULT WINAPI ITSProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     }
 
     object_name = p+2;
+    len = strlenW(object_name);
+
     if(*object_name != '/' && *object_name != '\\') {
-        int len = strlenW(object_name)+1;
-        memmove(object_name+1, object_name, len*sizeof(WCHAR));
+        memmove(object_name+1, object_name, (len+1)*sizeof(WCHAR));
         *object_name = '/';
+        len++;
     }
+
+    if(object_name[len-1] == '/')
+        object_name[--len] = 0;
 
     for(p=object_name; *p; p++) {
         if(*p == '\\')
@@ -221,7 +226,7 @@ static HRESULT WINAPI ITSProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     HeapFree(GetProcessHeap(), 0, file_name);
 
     /* FIXME: Native doesn't use FindMimeFromData */
-    hres = FindMimeFromData(NULL, szUrl, NULL, 0, NULL, 0, &mime, 0);
+    hres = FindMimeFromData(NULL, object_name, NULL, 0, NULL, 0, &mime, 0);
     if(SUCCEEDED(hres)) {
         IInternetProtocolSink_ReportProgress(pOIProtSink, BINDSTATUS_MIMETYPEAVAILABLE, mime);
         CoTaskMemFree(mime);

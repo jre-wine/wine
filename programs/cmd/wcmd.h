@@ -27,13 +27,15 @@
 #include <stdio.h>
 #include <ctype.h>
 
+void WCMD_assoc (char *, BOOL);
 void WCMD_batch (char *, char *, int, char *, HANDLE);
 void WCMD_call (char *command);
 void WCMD_change_tty (void);
 void WCMD_clear_screen (void);
+void WCMD_color (void);
 void WCMD_copy (void);
 void WCMD_create_dir (void);
-void WCMD_delete (int recurse);
+void WCMD_delete (char *);
 void WCMD_directory (void);
 void WCMD_echo (const char *);
 void WCMD_endlocal (void);
@@ -53,23 +55,23 @@ void WCMD_pipe (char *command);
 void WCMD_popd (void);
 void WCMD_print_error (void);
 void WCMD_process_command (char *command);
-void WCMD_pushd (void);
+void WCMD_pushd (char *);
 int  WCMD_read_console (char *string, int str_len);
-void WCMD_remove_dir (void);
+void WCMD_remove_dir (char *command);
 void WCMD_rename (void);
 void WCMD_run_program (char *command, int called);
 void WCMD_setlocal (const char *command);
 void WCMD_setshow_attrib (void);
 void WCMD_setshow_date (void);
-void WCMD_setshow_default (void);
+void WCMD_setshow_default (char *command);
 void WCMD_setshow_env (char *command);
 void WCMD_setshow_path (char *command);
 void WCMD_setshow_prompt (void);
 void WCMD_setshow_time (void);
-void WCMD_shift (void);
+void WCMD_shift (char *command);
 void WCMD_show_prompt (void);
 void WCMD_title (char *);
-void WCMD_type (void);
+void WCMD_type (char *);
 void WCMD_verify (char *command);
 void WCMD_version (void);
 int  WCMD_volume (int mode, char *command);
@@ -89,10 +91,22 @@ void WCMD_splitpath(const CHAR* path, CHAR* drv, CHAR* dir, CHAR* name, CHAR* ex
 typedef struct {
   char *command;	/* The command which invoked the batch file */
   HANDLE h;             /* Handle to the open batch file */
-  int shift_count;	/* Number of SHIFT commands executed */
+  int shift_count[10];	/* Offset in terms of shifts for %0 - %9 */
   void *prev_context;	/* Pointer to the previous context block */
   BOOL  skip_rest;      /* Skip the rest of the batch program and exit */
 } BATCH_CONTEXT;
+
+/* Data structure to save setlocal and pushd information */
+
+struct env_stack
+{
+  struct env_stack *next;
+  union {
+    int    stackdepth;       /* Only used for pushd and popd */
+    char   cwd;              /* Only used for set/endlocal   */
+  } u;
+  WCHAR *strings;
+};
 
 #endif /* !RC_INVOKED */
 
@@ -146,9 +160,12 @@ typedef struct {
 #define WCMD_SETLOCAL 37
 #define WCMD_PUSHD  38
 #define WCMD_POPD   39
+#define WCMD_ASSOC  40
+#define WCMD_COLOR  41
+#define WCMD_FTYPE  42
 
 /* Must be last in list */
-#define WCMD_EXIT   40
+#define WCMD_EXIT   43
 
 /* Some standard messages */
 extern const char nyi[];
@@ -160,6 +177,8 @@ extern const char anykey[];
 #define WCMD_CONFIRM  1001
 #define WCMD_YES      1002
 #define WCMD_NO       1003
+#define WCMD_NOASSOC  1004
+#define WCMD_NOFTYPE  1005
 
 /* msdn specified max for Win XP */
 #define MAXSTRING 8192

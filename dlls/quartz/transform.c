@@ -187,6 +187,7 @@ HRESULT TransformFilter_Create(TransformFilterImpl* pTransformFilter, const CLSI
 
     pTransformFilter->refCount = 1;
     InitializeCriticalSection(&pTransformFilter->csFilter);
+    pTransformFilter->csFilter.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": TransformFilterImpl.csFilter");
     pTransformFilter->state = State_Stopped;
     pTransformFilter->pClock = NULL;
     ZeroMemory(&pTransformFilter->filterInfo, sizeof(FILTER_INFO));
@@ -219,6 +220,7 @@ HRESULT TransformFilter_Create(TransformFilterImpl* pTransformFilter, const CLSI
     else
     {
         CoTaskMemFree(pTransformFilter->ppPins);
+        pTransformFilter->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&pTransformFilter->csFilter);
         CoTaskMemFree(pTransformFilter);
     }
@@ -274,15 +276,27 @@ static ULONG WINAPI TransformFilter_Release(IBaseFilter * iface)
     {
         ULONG i;
 
+        This->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->csFilter);
 
         if (This->pClock)
             IReferenceClock_Release(This->pClock);
 
         for (i = 0; i < 2; i++)
-            IPin_Release(This->ppPins[i]);
+        {
+            IPin *pConnectedTo;
 
-        HeapFree(GetProcessHeap(), 0, This->ppPins);
+            if (SUCCEEDED(IPin_ConnectedTo(This->ppPins[i], &pConnectedTo)))
+            {
+                IPin_Disconnect(pConnectedTo);
+                IPin_Release(pConnectedTo);
+            }
+            IPin_Disconnect(This->ppPins[i]);
+
+            IPin_Release(This->ppPins[i]);
+        }
+
+        CoTaskMemFree(This->ppPins);
         This->lpVtbl = NULL;
 
 	This->pFuncsTable->pfnCleanup(This);

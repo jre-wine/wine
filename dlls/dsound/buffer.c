@@ -565,7 +565,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetFormat(
 }
 
 static HRESULT WINAPI IDirectSoundBufferImpl_Lock(
-	LPDIRECTSOUNDBUFFER8 iface,DWORD writecursor,DWORD writebytes,LPVOID lplpaudioptr1,LPDWORD audiobytes1,LPVOID lplpaudioptr2,LPDWORD audiobytes2,DWORD flags
+	LPDIRECTSOUNDBUFFER8 iface,DWORD writecursor,DWORD writebytes,LPVOID *lplpaudioptr1,LPDWORD audiobytes1,LPVOID *lplpaudioptr2,LPDWORD audiobytes2,DWORD flags
 ) {
 	HRESULT hres = DS_OK;
 	IDirectSoundBufferImpl *This = (IDirectSoundBufferImpl *)iface;
@@ -1180,7 +1180,7 @@ HRESULT IDirectSoundBufferImpl_Create(
 		DSOUND_RecalcVolPan(&(dsb->volpan));
 
 	InitializeCriticalSection(&(dsb->lock));
-        dsb->lock.DebugInfo->Spare[0] = (DWORD_PTR)"DSOUNDBUFFER_lock";
+        dsb->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IDirectSoundBufferImpl.lock");
 
 	/* register buffer if not primary */
 	if (!(dsbd->dwFlags & DSBCAPS_PRIMARYBUFFER)) {
@@ -1319,7 +1319,7 @@ HRESULT IDirectSoundBufferImpl_Duplicate(
     CopyMemory(dsb->pwfx, pdsb->pwfx, size);
 
     InitializeCriticalSection(&(dsb->lock));
-    dsb->lock.DebugInfo->Spare[0] = (DWORD_PTR)"DSOUNDBUFFER_lock";
+    dsb->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IDirectSoundBufferImpl.lock");
 
     /* register buffer */
     hres = DirectSoundDevice_AddBuffer(device, dsb);
@@ -1450,9 +1450,9 @@ static HRESULT WINAPI SecondaryBufferImpl_Lock(
     LPDIRECTSOUNDBUFFER8 iface,
     DWORD writecursor,
     DWORD writebytes,
-    LPVOID lplpaudioptr1,
+    LPVOID *lplpaudioptr1,
     LPDWORD audiobytes1,
-    LPVOID lplpaudioptr2,
+    LPVOID *lplpaudioptr2,
     LPDWORD audiobytes2,
     DWORD dwFlags)
 {

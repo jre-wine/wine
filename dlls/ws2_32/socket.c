@@ -1204,7 +1204,7 @@ static int WS2_recv( int fd, struct iovec* iov, int count,
         if ( !hdr.msg_name )
         {
             WSASetLastError( WSAEFAULT );
-            n = -1;
+            n = SOCKET_ERROR;
             goto out;
         }
     }
@@ -1313,7 +1313,7 @@ static int WS2_send( int fd, struct iovec* iov, int count,
                      const struct WS_sockaddr *to, INT tolen, DWORD dwFlags )
 {
     struct msghdr hdr;
-    int n = -1;
+    int n;
     TRACE( "fd %d, iovec %p, count %d addr %s, len %d, flags %x\n",
            fd, iov, count, debugstr_sockaddr(to), tolen, dwFlags);
 
@@ -1325,6 +1325,7 @@ static int WS2_send( int fd, struct iovec* iov, int count,
         if ( !hdr.msg_name )
         {
             WSASetLastError( WSAEFAULT );
+            n = SOCKET_ERROR;
             goto out;
         }
 
@@ -2732,7 +2733,7 @@ int WINAPI WS_select(int nfds, WS_fd_set *ws_readfds,
     if (!(pollfds = fd_sets_to_poll( ws_readfds, ws_writefds, ws_exceptfds, &count )) && count)
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-        return -1;
+        return SOCKET_ERROR;
     }
 
     if (ws_timeout) timeout = (ws_timeout->tv_sec * 1000) + (ws_timeout->tv_usec + 999) / 1000;
@@ -4265,9 +4266,9 @@ INT WINAPI WSARecvFrom( SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
     struct ws2_async *wsa;
     IO_STATUS_BLOCK* iosb;
 
-    TRACE("socket %04x, wsabuf %p, nbufs %d, flags %d, from %p, fromlen %ld, ovl %p, func %p\n",
+    TRACE("socket %04x, wsabuf %p, nbufs %d, flags %d, from %p, fromlen %d, ovl %p, func %p\n",
           s, lpBuffers, dwBufferCount, *lpFlags, lpFrom,
-          (lpFromlen ? *lpFromlen : -1L),
+          (lpFromlen ? *lpFromlen : -1),
           lpOverlapped, lpCompletionRoutine);
 
     fd = get_sock_fd( s, FILE_READ_DATA, &flags );

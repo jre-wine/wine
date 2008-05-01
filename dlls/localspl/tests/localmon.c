@@ -66,9 +66,11 @@ static BOOL  (WINAPI *pConfigurePortUI)(PCWSTR, HWND, PCWSTR);
 static BOOL  (WINAPI *pDeletePortUI)(PCWSTR, HWND, PCWSTR);
 
 
+static const WCHAR cmd_AddPortW[] = {'A','d','d','P','o','r','t',0};
 static const WCHAR cmd_ConfigureLPTPortCommandOKW[] = {'C','o','n','f','i','g','u','r','e',
                                     'L','P','T','P','o','r','t',
                                     'C','o','m','m','a','n','d','O','K',0};
+static WCHAR cmd_DeletePortW[] = {'D','e','l','e','t','e','P','o','r','t',0};
 static WCHAR cmd_GetTransmissionRetryTimeoutW[] = {'G','e','t',
                                     'T','r','a','n','s','m','i','s','s','i','o','n',
                                     'R','e','t','r','y','T','i','m','e','o','u','t',0};
@@ -345,7 +347,6 @@ static void test_XcvClosePort(void)
     DWORD   res;
     HANDLE hXcv;
 
-    if ((pXcvOpenPort == NULL) || (pXcvClosePort == NULL)) return;
 
     if (0)
     {
@@ -375,6 +376,59 @@ static void test_XcvClosePort(void)
 
 /* ########################### */
 
+static void test_XcvDataPort_AddPort(void)
+{
+    DWORD   res;
+    HANDLE  hXcv;
+
+
+    hXcv = (HANDLE) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvOpenPort(emptyW, SERVER_ALL_ACCESS, &hXcv);
+    ok(res, "hXcv: %d with %u and %p (expected '!= 0')\n", res, GetLastError(), hXcv);
+    if (!res) return;
+
+    /*
+     * The following tests crash with native localspl.dll on w2k and xp,
+     * but it works, when the native dll (w2k and xp) is used in wine.
+     * also tested (same crash): replacing emptyW with portname_lpt1W
+     * and replacing "NULL, 0, NULL" with "buffer, MAX_PATH, &needed"
+     *
+     * We need to use a different API (AddPortEx) instead
+     */
+    if (0)
+    {
+    /* create a Port for a normal, writeable file */
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_AddPortW, (PBYTE) tempfileW, (lstrlenW(tempfileW) + 1) * sizeof(WCHAR), NULL, 0, NULL);
+
+    /* add our testport again */
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_AddPortW, (PBYTE) tempfileW, (lstrlenW(tempfileW) + 1) * sizeof(WCHAR), NULL, 0, NULL);
+
+    /* create a well-known Port  */
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_AddPortW, (PBYTE) portname_lpt1W, (lstrlenW(portname_lpt1W) + 1) * sizeof(WCHAR), NULL, 0, NULL);
+
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_AddPortW, (PBYTE) portname_lpt1W, (lstrlenW(portname_lpt1W) + 1) * sizeof(WCHAR), NULL, 0, NULL);
+    /* native localspl.dll on wine: ERROR_ALREADY_EXISTS */
+
+    /* ERROR_ALREADY_EXISTS is also returned from native localspl.dll on wine,
+       when "RPT1:" was already installed for redmonnt.dll:
+       res = pXcvDataPort(hXcv, cmd_AddPortW, (PBYTE) portname_rpt1W, ...
+    */
+
+    /* cleanup */
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_DeletePortW, (PBYTE) tempfileW, (lstrlenW(tempfileW) + 1) * sizeof(WCHAR), NULL, 0, NULL);
+    }
+
+    pXcvClosePort(hXcv);
+}
+
+/* ########################### */
+
 static void test_XcvDataPort_ConfigureLPTPortCommandOK(void)
 {
     CHAR    org_value[16];
@@ -384,7 +438,6 @@ static void test_XcvDataPort_ConfigureLPTPortCommandOK(void)
     DWORD   res;
     DWORD   needed;
 
-    if ((pXcvOpenPort == NULL) || (pXcvDataPort == NULL) || (pXcvClosePort == NULL)) return;
 
     hXcv = (HANDLE) 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -483,6 +536,46 @@ static void test_XcvDataPort_ConfigureLPTPortCommandOK(void)
 
 /* ########################### */
 
+static void test_XcvDataPort_DeletePort(void)
+{
+    DWORD   res;
+    HANDLE  hXcv;
+    DWORD   needed;
+
+
+    hXcv = (HANDLE) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvOpenPort(emptyW, SERVER_ALL_ACCESS, &hXcv);
+    ok(res, "hXcv: %d with %u and %p (expected '!= 0')\n", res, GetLastError(), hXcv);
+    if (!res) return;
+
+    /* cleanup: just to make sure */
+    needed = (DWORD) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_DeletePortW, (PBYTE) tempfileW, (lstrlenW(tempfileW) + 1) * sizeof(WCHAR), NULL, 0, &needed);
+    ok( !res  || (res == ERROR_FILE_NOT_FOUND),
+        "returned %d with %u (expected ERROR_SUCCESS or ERROR_FILE_NOT_FOUND)\n",
+        res, GetLastError());
+
+
+    /* ToDo: cmd_AddPortW for tempfileW, then cmd_DeletePortW for the existing Port */
+
+
+    /* try to delete a non-existing Port */
+    needed = (DWORD) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_DeletePortW, (PBYTE) tempfileW, (lstrlenW(tempfileW) + 1) * sizeof(WCHAR), NULL, 0, &needed);
+    ok( res == ERROR_FILE_NOT_FOUND,
+        "returned %d with %u (expected ERROR_FILE_NOT_FOUND)\n", res, GetLastError());
+
+    /* emptyW as Portname: ERROR_FILE_NOT_FOUND is returned */
+    /* NULL as Portname: Native localspl.dll crashed */
+
+    pXcvClosePort(hXcv);
+}
+
+/* ########################### */
+
 static void test_XcvDataPort_GetTransmissionRetryTimeout(void)
 {
     CHAR    org_value[16];
@@ -493,8 +586,6 @@ static void test_XcvDataPort_GetTransmissionRetryTimeout(void)
     DWORD   needed;
     DWORD   len;
 
-
-    if ((pXcvOpenPort == NULL) || (pXcvDataPort == NULL) || (pXcvClosePort == NULL)) return;
 
     hXcv = (HANDLE) 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -620,8 +711,6 @@ static void test_XcvDataPort_MonitorUI(void)
     DWORD   len;
 
 
-    if ((pXcvOpenPort == NULL) || (pXcvDataPort == NULL) || (pXcvClosePort == NULL)) return;
-
     hXcv = (HANDLE) 0xdeadbeef;
     SetLastError(0xdeadbeef);
     res = pXcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv);
@@ -734,8 +823,6 @@ static void test_XcvDataPort_PortIsValid(void)
     HANDLE  hXcv;
     DWORD   needed;
 
-
-    if ((pXcvOpenPort == NULL) || (pXcvDataPort == NULL) || (pXcvClosePort == NULL)) return;
 
     hXcv = (HANDLE) 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -892,7 +979,6 @@ static void test_XcvOpenPort(void)
     DWORD   res;
     HANDLE  hXcv;
 
-    if ((pXcvOpenPort == NULL) || (pXcvClosePort == NULL)) return;
 
     if (0)
     {
@@ -1037,10 +1123,21 @@ START_TEST(localmon)
     test_ConfigurePort();
     test_DeletePort();
     test_EnumPorts();
-    test_XcvClosePort();
-    test_XcvDataPort_ConfigureLPTPortCommandOK();
-    test_XcvDataPort_GetTransmissionRetryTimeout();
-    test_XcvDataPort_MonitorUI();
-    test_XcvDataPort_PortIsValid();
-    test_XcvOpenPort();
+    if ((pXcvOpenPort == NULL) || (pXcvDataPort == NULL) || (pXcvClosePort == NULL)) {
+        skip("Xcv not supported\n");
+    }
+    else
+    {
+        test_XcvClosePort();
+        test_XcvDataPort_AddPort();
+        test_XcvDataPort_ConfigureLPTPortCommandOK();
+        test_XcvDataPort_DeletePort();
+        test_XcvDataPort_GetTransmissionRetryTimeout();
+        test_XcvDataPort_MonitorUI();
+        test_XcvDataPort_PortIsValid();
+        test_XcvOpenPort();
+    }
+
+    /* Cleanup our temporary file */
+    DeleteFileW(tempfileW);
 }

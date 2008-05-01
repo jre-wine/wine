@@ -690,7 +690,7 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     object->pow2Height = pow2Height;
 
     /* Flags */
-    object->Flags      = 0; /* We start without flags set */
+    object->Flags      = SFLAG_DYNLOCK;
     object->Flags     |= (pow2Width != Width || pow2Height != Height) ? SFLAG_NONPOW2 : 0;
     object->Flags     |= Discard ? SFLAG_DISCARD : 0;
     object->Flags     |= (WINED3DFMT_D16_LOCKABLE == Format) ? SFLAG_LOCKABLE : 0;
@@ -1507,7 +1507,7 @@ error:
             FIXME("(%p) Something's still holding the front buffer\n",This);
         }
     }
-    if(object) HeapFree(GetProcessHeap(), 0, object);
+    HeapFree(GetProcessHeap(), 0, object);
     return hr;
 }
 
@@ -1548,7 +1548,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclaration(IWineD3DDevice*
             This, ((IWineD3DImpl *)This->wineD3D)->dxVersion, elements, element_count, ppVertexDeclaration);
 
     D3DCREATEOBJECTINSTANCE(object, VertexDeclaration)
-    object->allFVF = 0;
 
     hr = IWineD3DVertexDeclaration_SetDeclaration((IWineD3DVertexDeclaration *)object, elements, element_count);
 
@@ -1730,10 +1729,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
 
         case ORM_BACKBUFFER:
         {
-            GLint auxBuffers;
-            glGetIntegerv(GL_AUX_BUFFERS, &auxBuffers);
-            TRACE("Got %d aux buffers\n", auxBuffers);
-            if(auxBuffers > 0) {
+            if(GL_LIMITS(aux_buffers) > 0) {
                 TRACE("Using auxilliary buffer for offscreen rendering\n");
                 This->offscreenBuffer = GL_AUX0;
             } else {
@@ -1747,7 +1743,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     LEAVE_GL();
 
     /* Clear the screen */
-    IWineD3DDevice_Clear((IWineD3DDevice *) This, 0, NULL, WINED3DCLEAR_STENCIL|WINED3DCLEAR_ZBUFFER|WINED3DCLEAR_TARGET, 0x00, 1.0, 0);
+    IWineD3DDevice_Clear((IWineD3DDevice *) This, 0, NULL,
+                          WINED3DCLEAR_TARGET | pPresentationParameters->EnableAutoDepthStencil ? WINED3DCLEAR_ZBUFFER | WINED3DCLEAR_STENCIL : 0,
+                          0x00, 1.0, 0);
 
     This->d3d_initialized = TRUE;
     return WINED3D_OK;
@@ -4125,10 +4123,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Present(IWineD3DDevice *iface,
 static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Count, CONST WINED3DRECT* pRects,
                                         DWORD Flags, WINED3DCOLOR Color, float Z, DWORD Stencil) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    IWineD3DSurfaceImpl *target = (IWineD3DSurfaceImpl *)This->render_targets[0];
 
-    /* TODO: From MSDN This method fails if you specify the WINED3DCLEAR_ZBUFFER or WINED3DCLEAR_STENCIL flags when the
-      render target does not have an attached depth buffer. Similarly, if you specify the WINED3DCLEAR_STENCIL flag
-      when the depth-buffer format does not contain stencil buffer information, this method fails. */
     GLbitfield     glMask = 0;
     unsigned int   i;
     CONST WINED3DRECT* curRect;
@@ -4136,16 +4132,17 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
     TRACE("(%p) Count (%d), pRects (%p), Flags (%x), Z (%f), Stencil (%d)\n", This,
           Count, pRects, Flags, Z, Stencil);
 
+    if(Flags & (WINED3DCLEAR_ZBUFFER | WINED3DCLEAR_STENCIL) && This->stencilBufferTarget == NULL) {
+        WARN("Clearing depth and/or stencil without a depth stencil buffer attached, returning WINED3DERR_INVALIDCALL\n");
+        /* TODO: What about depth stencil buffers without stencil bits? */
+        return WINED3DERR_INVALIDCALL;
+    }
+
     ENTER_GL();
 
-    if(pRects) {
-        glEnable(GL_SCISSOR_TEST);
-        checkGLcall("glEnable GL_SCISSOR_TEST");
-        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SCISSORRECT);
-    } else {
-        glDisable(GL_SCISSOR_TEST);
-        checkGLcall("glEnable GL_SCISSOR_TEST");
-    }
+    glEnable(GL_SCISSOR_TEST);
+    checkGLcall("glEnable GL_SCISSOR_TEST");
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SCISSORRECT);
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_SCISSORTESTENABLE));
 
     if (Count > 0 && pRects) {
@@ -4184,15 +4181,34 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
     }
 
     if (!curRect) {
+        /* In drawable flag is set below */
+
+        glScissor(This->stateBlock->viewport.X,
+                  (((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height -
+                  (This->stateBlock->viewport.Y + This->stateBlock->viewport.Height)),
+                   This->stateBlock->viewport.Width,
+                   This->stateBlock->viewport.Height);
+        checkGLcall("glScissor");
         glClear(glMask);
         checkGLcall("glClear");
     } else {
+        if(!(target->Flags & SFLAG_INDRAWABLE) &&
+           !(wined3d_settings.offscreen_rendering_mode == ORM_FBO && This->render_offscreen && target->Flags & SFLAG_INTEXTURE)) {
+
+            if(curRect[0].x1 > 0 || curRect[0].y1 > 0 ||
+               curRect[0].x2 < target->currentDesc.Width ||
+               curRect[0].y2 < target->currentDesc.Height) {
+                TRACE("Partial clear, and surface not in drawable. Blitting texture to drawable\n");
+                blt_to_drawable(This, target);
+            }
+        }
+
         /* Now process each rect in turn */
         for (i = 0; i < Count; i++) {
             /* Note gl uses lower left, width/height */
             TRACE("(%p) %p Rect=(%d,%d)->(%d,%d) glRect=(%d,%d), len=%d, hei=%d\n", This, curRect,
                   curRect[i].x1, curRect[i].y1, curRect[i].x2, curRect[i].y2,
-                  curRect[i].x1, (((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height - curRect[i].y2),
+                  curRect[i].x1, (target->currentDesc.Height - curRect[i].y2),
                   curRect[i].x2 - curRect[i].x1, curRect[i].y2 - curRect[i].y1);
 
             /* Tests show that rectangles where x1 > x2 or y1 > y2 are ignored silently.
@@ -4204,8 +4220,13 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
                 continue;
             }
 
-            glScissor(curRect[i].x1, ((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height - curRect[i].y2,
-                        curRect[i].x2 - curRect[i].x1, curRect[i].y2 - curRect[i].y1);
+            if(This->render_offscreen) {
+                glScissor(curRect[i].x1, curRect[i].y1,
+                          curRect[i].x2 - curRect[i].x1, curRect[i].y2 - curRect[i].y1);
+            } else {
+                glScissor(curRect[i].x1, target->currentDesc.Height - curRect[i].y2,
+                          curRect[i].x2 - curRect[i].x1, curRect[i].y2 - curRect[i].y1);
+            }
             checkGLcall("glScissor");
 
             glClear(glMask);
@@ -4230,7 +4251,13 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
     /* Dirtify the target surface for now. If the surface is locked regularily, and an up to date sysmem copy exists,
      * it is most likely more efficient to perform a clear on the sysmem copy too isntead of downloading it
      */
-    ((IWineD3DSurfaceImpl *)This->render_targets[0])->Flags |= SFLAG_GLDIRTY;
+    if(This->render_offscreen && wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+        target->Flags |= SFLAG_INTEXTURE;
+        target->Flags &= ~SFLAG_INSYSMEM;
+    } else {
+        target->Flags |= SFLAG_INDRAWABLE;
+        target->Flags &= ~(SFLAG_INTEXTURE | SFLAG_INSYSMEM);
+    }
     return WINED3D_OK;
 }
 
@@ -4241,11 +4268,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawPrimitive(IWineD3DDevice *iface, WI
                                                 UINT PrimitiveCount) {
 
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    This->stateBlock->streamIsUP = FALSE;
 
     TRACE("(%p) : Type=(%d,%s), Start=%d, Count=%d\n", This, PrimitiveType,
                                debug_d3dprimitivetype(PrimitiveType),
                                StartVertex, PrimitiveCount);
+
+    /* The index buffer is not needed here, but restore it, otherwise it is hell to keep track of */
+    if(This->stateBlock->streamIsUP) {
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_INDEXBUFFER);
+        This->stateBlock->streamIsUP = FALSE;
+    }
 
     if(This->stateBlock->loadBaseVertexIndex != 0) {
         This->stateBlock->loadBaseVertexIndex = 0;
@@ -4268,8 +4300,11 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_DrawIndexedPrimitive(IWineD3DDevice *
     WINED3DINDEXBUFFER_DESC  IdxBufDsc;
     GLuint vbo;
 
+    if(This->stateBlock->streamIsUP) {
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_INDEXBUFFER);
+        This->stateBlock->streamIsUP = FALSE;
+    }
     pIB = This->stateBlock->pIndexData;
-    This->stateBlock->streamIsUP = FALSE;
     vbo = ((IWineD3DIndexBufferImpl *) pIB)->vbo;
 
     TRACE("(%p) : Type=(%d,%s), min=%d, CountV=%d, startIdx=%d, countP=%d\n", This,
@@ -4719,7 +4754,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
 
     /* this needs to be done in lines if the sourceRect != the sourceWidth */
     srcWidth   = pSourceRect ? pSourceRect->right - pSourceRect->left   : srcSurfaceWidth;
-    srcHeight  = pSourceRect ? pSourceRect->top   - pSourceRect->bottom : srcSurfaceHeight;
+    srcHeight  = pSourceRect ? pSourceRect->bottom - pSourceRect->top   : srcSurfaceHeight;
     srcLeft    = pSourceRect ? pSourceRect->left : 0;
     destLeft   = pDestPoint  ? pDestPoint->x : 0;
     destTop    = pDestPoint  ? pDestPoint->y : 0;
@@ -4824,7 +4859,8 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
 
     LEAVE_GL();
 
-    ((IWineD3DSurfaceImpl *)pDestinationSurface)->Flags |= SFLAG_GLDIRTY;
+    ((IWineD3DSurfaceImpl *)pDestinationSurface)->Flags &= ~SFLAG_INSYSMEM;
+    ((IWineD3DSurfaceImpl *)pDestinationSurface)->Flags |= SFLAG_INTEXTURE;
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(0));
 
     return WINED3D_OK;
@@ -5131,6 +5167,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderTarget(IWineD3DDevice *iface, 
         viewport.MaxZ   = 1.0f;
         viewport.MinZ   = 0.0f;
         IWineD3DDeviceImpl_SetViewport(iface, &viewport);
+        /* Make sure the viewport state is dirty, because the render_offscreen thing affects it.
+         * SetViewport may catch NOP viewport changes, which would occur when switching between equally sized targets
+         */
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VIEWPORT);
 
         /* Activate the new render target for now. This shouldn't stay here, but is needed until all methods using gl activate the
          * ctx properly.
@@ -5162,18 +5202,22 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetDepthStencilSurface(IWineD3DDevice *
         * stencil buffer and incure an extra memory overhead
          ******************************************************/
 
-
         tmp = This->stencilBufferTarget;
         This->stencilBufferTarget = pNewZStencil;
         /* should we be calling the parent or the wined3d surface? */
         if (NULL != This->stencilBufferTarget) IWineD3DSurface_AddRef(This->stencilBufferTarget);
         if (NULL != tmp) IWineD3DSurface_Release(tmp);
         hr = WINED3D_OK;
-        /** TODO: glEnable/glDisable on depth/stencil    depending on
-         *   pNewZStencil is NULL and the depth/stencil is enabled in d3d
-          **********************************************************/
+
         if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
             set_depth_stencil_fbo(iface, pNewZStencil);
+        }
+
+        if((!tmp && pNewZStencil) || (!pNewZStencil && tmp)) {
+            /* Swapping NULL / non NULL depth stencil affects the depth and tests */
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_ZENABLE));
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_STENCILENABLE));
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_STENCILWRITEMASK));
         }
     }
 
@@ -5197,6 +5241,8 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
     }
 
     if(pCursorBitmap) {
+        WINED3DLOCKED_RECT rect;
+
         /* MSDN: Cursor must be A8R8G8B8 */
         if (WINED3DFMT_A8R8G8B8 != pSur->resource.format) {
             ERR("(%p) : surface(%p) has an invalid format\n", This, pCursorBitmap);
@@ -5211,20 +5257,54 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
         }
 
         /* TODO: MSDN: Cursor sizes must be a power of 2 */
-        /* This is to tell our texture code to load a SCRATCH surface. This allows us to use out
-         * Texture and Blitting code to draw the cursor
-         */
-        pSur->Flags |= SFLAG_FORCELOAD;
-        IWineD3DSurface_PreLoad(pCursorBitmap);
-        pSur->Flags &= ~SFLAG_FORCELOAD;
+
         /* Do not store the surface's pointer because the application may release
          * it after setting the cursor image. Windows doesn't addref the set surface, so we can't
          * do this either without creating circular refcount dependencies. Copy out the gl texture instead.
          */
-        This->cursorTexture = pSur->glDescription.textureName;
         This->cursorWidth = pSur->currentDesc.Width;
         This->cursorHeight = pSur->currentDesc.Height;
-        pSur->glDescription.textureName = 0; /* Prevent the texture from being changed or deleted */
+        if (SUCCEEDED(IWineD3DSurface_LockRect(pCursorBitmap, &rect, NULL, WINED3DLOCK_READONLY)))
+        {
+            const PixelFormatDesc *tableEntry = getFormatDescEntry(WINED3DFMT_A8R8G8B8);
+            char *mem, *bits = (char *)rect.pBits;
+            GLint intfmt = tableEntry->glInternal;
+            GLint format = tableEntry->glFormat;
+            GLint type = tableEntry->glType;
+            INT height = This->cursorHeight;
+            INT width = This->cursorWidth;
+            INT bpp = tableEntry->bpp;
+            INT i;
+
+            /* Reformat the texture memory (pitch and width can be different) */
+            mem = HeapAlloc(GetProcessHeap(), 0, width * height * bpp);
+            for(i = 0; i < height; i++)
+                memcpy(&mem[width * bpp * i], &bits[rect.Pitch * i], width * bpp);
+            IWineD3DSurface_UnlockRect(pCursorBitmap);
+            ENTER_GL();
+            /* Make sure that a proper texture unit is selected */
+            if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+                GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
+                checkGLcall("glActiveTextureARB");
+            }
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(0));
+            /* Create a new cursor texture */
+            glGenTextures(1, &This->cursorTexture);
+            checkGLcall("glGenTextures");
+            glBindTexture(GL_TEXTURE_2D, This->cursorTexture);
+            checkGLcall("glBindTexture");
+            /* Copy the bitmap memory into the cursor texture */
+            glTexImage2D(GL_TEXTURE_2D, 0, intfmt, width, height, 0, format, type, mem);
+            HeapFree(GetProcessHeap(), 0, mem);
+            checkGLcall("glTexImage2D");
+            LEAVE_GL();
+        }
+        else
+        {
+            FIXME("A cursor texture was not returned.\n");
+            This->cursorTexture = 0;
+        }
+
     }
 
     This->xHotSpot = XHotSpot;
@@ -5246,10 +5326,20 @@ static void     WINAPI  IWineD3DDeviceImpl_SetCursorPosition(IWineD3DDevice* ifa
 static BOOL     WINAPI  IWineD3DDeviceImpl_ShowCursor(IWineD3DDevice* iface, BOOL bShow) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
     BOOL oldVisible = This->bCursorVisible;
+    POINT pt;
+
     TRACE("(%p) : visible(%d)\n", This, bShow);
 
     if(This->cursorTexture)
         This->bCursorVisible = bShow;
+    /*
+     * When ShowCursor is first called it should make the cursor appear at the OS's last
+     * known cursor position.  Because of this, some applications just repetitively call
+     * ShowCursor in order to update the cursor's position.  This behavior is undocumented.
+     */
+    GetCursorPos(&pt);
+    This->xScreenSpace = pt.x;
+    This->yScreenSpace = pt.y;
 
     return oldVisible;
 }
@@ -5290,7 +5380,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_EvictManagedResources(IWineD3DDevice*
     return WINED3D_OK;
 }
 
-void updateSurfaceDesc(IWineD3DSurfaceImpl *surface, WINED3DPRESENT_PARAMETERS* pPresentationParameters) {
+static void updateSurfaceDesc(IWineD3DSurfaceImpl *surface, WINED3DPRESENT_PARAMETERS* pPresentationParameters) {
     IWineD3DDeviceImpl *This = surface->resource.wineD3DDevice; /* for GL_SUPPORT */
 
     /* Reallocate proper memory for the front and back buffer and adjust their sizes */

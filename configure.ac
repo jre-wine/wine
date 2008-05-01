@@ -84,14 +84,12 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
 AC_SUBST(TOOLSDIR,$wine_cv_toolsdir)
 
 AC_PATH_XTRA
-AC_PROG_LEX
 
-dnl **** Just additional warning checks, since AC_PROG just sets 'lex' even
-dnl **** without one present.
-AC_CHECK_PROGS(XLEX,$LEX flex lex,none)
-if test "$XLEX" = "none"
+dnl Check for flex
+AC_CHECK_PROGS(FLEX,flex,none)
+if test "$FLEX" = "none"
 then
-  AC_MSG_ERROR([no suitable lex found. Please install the 'flex' package.])
+  AC_MSG_ERROR([no suitable flex found. Please install the 'flex' package.])
 fi
 
 dnl Check for bison
@@ -543,24 +541,15 @@ LIBS="$ac_save_LIBS"
 
 dnl **** Check for SANE ****
 AC_CHECK_PROG(sane_devel,sane-config,sane-config,no)
-AC_SUBST(SANELIBS,"")
 AC_SUBST(SANEINCL,"")
 if test "$sane_devel" != "no"
 then
-    SANELIBS="`$sane_devel --libs`"
     SANEINCL="`$sane_devel --cflags`"
     ac_save_CPPFLAGS="$CPPFLAGS"
-    ac_save_LIBS="$LIBS"
     CPPFLAGS="$CPPFLAGS $SANEINCL"
-    LIBS="$LIBS $SANELIBS"
     AC_CHECK_HEADER(sane/sane.h,
-                    [AC_CHECK_LIB(sane,sane_open,
-                                  [AC_DEFINE(HAVE_SANE, 1, [Define if we have SANE development environment])],
-                                  [SANELIBS=""
-                                  SANEINCL=""])],
-                    [SANELIBS=""
-                    SANEINCL=""])
-    LIBS="$ac_save_LIBS"
+                    [AC_DEFINE(HAVE_SANE, 1, [Define if we have SANE development environment])],
+                    [SANEINCL=""])
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
 
@@ -1180,6 +1169,7 @@ then
   WINE_GET_SONAME(curses,waddch)
   WINE_GET_SONAME(jpeg,jpeg_start_decompress)
   WINE_GET_SONAME(capi20,capi20_isinstalled)
+  WINE_GET_SONAME(sane,sane_init)
 fi
 
 
@@ -1485,7 +1475,7 @@ AC_SUBST(DEPENDENCIES,m4_if(m4_version_compare(m4_defn([m4_PACKAGE_VERSION]), [2
 Makefile: dummy\\
 	-\$(MAKEDEP) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)\\
 \\
-\$(ALL_OBJS): \$(IDL_GEN_HEADERS)\\
+\$(OBJS): \$(IDL_GEN_HEADERS)\\
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)\\
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)\\
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"],
@@ -1496,7 +1486,7 @@ Makefile: dummy\\
 Makefile: dummy
 	-\$(MAKEDEP) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)
 
-\$(ALL_OBJS): \$(IDL_GEN_HEADERS)
+\$(OBJS): \$(IDL_GEN_HEADERS)
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"]))
@@ -1596,6 +1586,7 @@ AC_CONFIG_FILES([dlls/dnsapi/tests/Makefile])
 AC_CONFIG_FILES([dlls/dplay/Makefile])
 AC_CONFIG_FILES([dlls/dplayx/Makefile])
 AC_CONFIG_FILES([dlls/dplayx/tests/Makefile])
+AC_CONFIG_FILES([dlls/dpnaddr/Makefile])
 AC_CONFIG_FILES([dlls/dpnet/Makefile])
 AC_CONFIG_FILES([dlls/dpnhpast/Makefile])
 AC_CONFIG_FILES([dlls/dsound/Makefile])

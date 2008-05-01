@@ -441,10 +441,13 @@ extern struct module*
                                         enum module_type type);
 extern struct module*
                     module_find_by_name(const struct process* pcs,
-                                        const WCHAR* name, enum module_type type);
+                                        const WCHAR* name);
 extern struct module*
                     module_find_by_nameA(const struct process* pcs,
-                                         const char* name, enum module_type type);
+                                         const char* name);
+extern struct module*
+                    module_is_already_loaded(const struct process* pcs,
+                                             const WCHAR* imgname);
 extern BOOL         module_get_debug(struct module_pair*);
 extern struct module*
                     module_new(struct process* pcs, const WCHAR* name,
@@ -475,11 +478,11 @@ extern BOOL         pdb_fetch_file_info(struct pdb_lookup* pdb_lookup);
 /* pe_module.c */
 extern BOOL         pe_load_nt_header(HANDLE hProc, DWORD base, IMAGE_NT_HEADERS* nth);
 extern struct module*
-                    pe_load_module(struct process* pcs, const WCHAR* name,
-                                   HANDLE hFile, DWORD base, DWORD size);
+                    pe_load_native_module(struct process* pcs, const WCHAR* name,
+                                          HANDLE hFile, DWORD base, DWORD size);
 extern struct module*
-                    pe_load_module_from_pcs(struct process* pcs, const WCHAR* name,
-                                            const WCHAR* mod_name, DWORD base, DWORD size);
+                    pe_load_builtin_module(struct process* pcs, const WCHAR* name,
+                                           DWORD base, DWORD size);
 extern BOOL         pe_load_debug_info(const struct process* pcs,
                                        struct module* module);
 /* source.c */
@@ -503,6 +506,7 @@ extern BOOL         dwarf2_parse(struct module* module, unsigned long load_offse
 /* symbol.c */
 extern const char*  symt_get_name(const struct symt* sym);
 extern int          symt_cmp_addr(const void* p1, const void* p2);
+extern void         copy_symbolW(SYMBOL_INFOW* siw, const SYMBOL_INFO* si);
 extern struct symt_ht*
                     symt_find_nearest(struct module* module, DWORD addr);
 extern struct symt_compiland*

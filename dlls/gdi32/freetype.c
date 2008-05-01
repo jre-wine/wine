@@ -740,7 +740,25 @@ static Family *find_family_from_name(const WCHAR *name)
 
     return NULL;
 }
-    
+
+static Face *find_face_from_path_index(const CHAR *file_name, const INT index)
+{
+    Family *family;
+    Face *face;
+
+    TRACE("looking for file %s index %i\n", debugstr_a(file_name), index);
+
+    LIST_FOR_EACH_ENTRY(family, &font_list, Family, entry)
+    {
+        LIST_FOR_EACH_ENTRY(face, &family->faces, Face, entry)
+        {
+            if(!strcasecmp(face->file, file_name) && face->face_index == index)
+                return face;
+	}
+    }
+    return NULL;
+}
+
 static void DumpSubstList(void)
 {
     FontSubst *psub;
@@ -1018,6 +1036,7 @@ static BOOL AddFontFileToList(const char *file, char *fake_family, const WCHAR *
                 TRACE("Skipping Index %i: Incorrect Family name for replacement\n",(INT)face_index);
                 HeapFree(GetProcessHeap(), 0, localised_family);
                 num_faces = ft_face->num_faces;
+                pFT_Done_Face(ft_face);
                 continue;
             }
             HeapFree(GetProcessHeap(), 0, localised_family);
@@ -1732,67 +1751,84 @@ static const struct nls_update_font_list
     UINT ansi_cp, oem_cp;
     const char *oem, *fixed, *system;
     const char *courier, *serif, *small, *sserif;
+   /* these are for font substitute */
+    const char *shelldlg, *tmsrmn;
 } nls_update_font_list[] =
 {
     /* Latin 1 (United States) */
     { 1252, 437, "vgaoem.fon", "vgafix.fon", "vgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "Tahoma","Times New Roman",
     },
     /* Latin 1 (Multilingual) */
     { 1252, 850, "vga850.fon", "vgafix.fon", "vgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "Tahoma","Times New Roman",  /* FIXME unverified */
     },
     /* Eastern Europe */
     { 1250, 852, "vga852.fon", "vgafixe.fon", "vgasyse.fon",
       "couree.fon", "serifee.fon", "smallee.fon", "sserifee.fon",
+      "Tahoma","Times New Roman", /* FIXME unverified */
     },
     /* Cyrillic */
     { 1251, 866, "vga866.fon", "vgafixr.fon", "vgasysr.fon",
       "courer.fon", "serifer.fon", "smaller.fon", "sserifer.fon",
+      "Tahoma","Times New Roman", /* FIXME unverified */
     },
     /* Greek */
     { 1253, 737, "vga869.fon", "vgafixg.fon", "vgasysg.fon",
       "coureg.fon", "serifeg.fon", "smalleg.fon", "sserifeg.fon",
+      "Tahoma","Times New Roman", /* FIXME unverified */
     },
     /* Turkish */
     { 1254, 857, "vga857.fon", "vgafixt.fon", "vgasyst.fon",
       "couret.fon", "serifet.fon", "smallet.fon", "sserifet.fon",
+      "Tahoma","Times New Roman", /* FIXME unverified */
     },
     /* Hebrew */
     { 1255, 862, "vgaoem.fon", "vgaf1255.fon", "vgas1255.fon",
       "coue1255.fon", "sere1255.fon", "smae1255.fon", "ssee1255.fon",
+      "Tahoma","Times New Roman", /* FIXME unverified */
     },
     /* Arabic */
     { 1256, 720, "vgaoem.fon", "vgaf1256.fon", "vgas1256.fon",
       "coue1256.fon", "sere1256.fon", "smae1256.fon", "ssee1256.fon",
+      "Tahoma","Times New Roman", /* FIXME unverified */
     },
     /* Baltic */
     { 1257, 775, "vga775.fon", "vgaf1257.fon", "vgas1257.fon",
       "coue1257.fon", "sere1257.fon", "smae1257.fon", "ssee1257.fon",
+      "Tahoma","Times New Roman", /* FIXME unverified */
     },
     /* Vietnamese */
     { 1258, 1258, "vga850.fon", "vgafix.fon", "vgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "Tahoma","Times New Roman", /* FIXME unverified */
     },
     /* Thai */
     { 874, 874, "vga850.fon", "vgaf874.fon", "vgas874.fon",
       "coure.fon", "serife.fon", "smalle.fon", "ssee874.fon",
+      "Tahoma","Times New Roman", /* FIXME unverified */
     },
     /* Japanese */
     { 932, 932, "vga932.fon", "jvgafix.fon", "jvgasys.fon",
       "coure.fon", "serife.fon", "jsmalle.fon", "sserife.fon",
+      "MS UI Gothic","MS Serif",
     },
     /* Chinese Simplified */
     { 936, 936, "vga936.fon", "svgafix.fon", "svgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "Tahoma", "Times New Roman", /* FIXME unverified */
     },
     /* Korean */
     { 949, 949, "vga949.fon", "hvgafix.fon", "hvgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "Gulim",  "Batang",
     },
     /* Chinese Traditional */
     { 950, 950, "vga950.fon", "cvgafix.fon", "cvgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "Tahoma",  "Times New Roman", /* FIXME unverified */
     }
 };
 
@@ -1883,6 +1919,14 @@ static void update_font_info(void)
             add_font_list(hkey, &nls_update_font_list[i]);
             RegCloseKey(hkey);
 
+            if (!RegCreateKeyA( HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows NT\\CurrentVersion\\FontSubstitutes", &hkey ))
+            {
+                RegSetValueExA(hkey, "MS Shell Dlg", 0, REG_SZ, (const BYTE *)nls_update_font_list[i].shelldlg,
+                               strlen(nls_update_font_list[i].shelldlg)+1);
+                RegSetValueExA(hkey, "Tms Rmn", 0, REG_SZ, (const BYTE *)nls_update_font_list[i].tmsrmn,
+                               strlen(nls_update_font_list[i].tmsrmn)+1);
+                RegCloseKey(hkey);
+            }
             return;
         }
     }
@@ -2688,6 +2732,9 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
     family = NULL;
     if(lf.lfFaceName[0] != '\0') {
         FontSubst *psub;
+        SYSTEM_LINKS *font_link;
+        CHILD_FONT *font_link_entry;
+
         psub = get_font_subst(&font_subst_list, lf.lfFaceName, lf.lfCharSet);
 
 	if(psub) {
@@ -2713,6 +2760,33 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
                 }
             }
 	}
+
+        /*
+	 * Try check the SystemLink list first for a replacement font.
+	 * We may find good replacements there.
+         */
+        LIST_FOR_EACH_ENTRY(font_link, &system_links, SYSTEM_LINKS, entry)
+        {
+            if(!strcmpW(font_link->font_name, lf.lfFaceName))
+            {
+                TRACE("found entry in system list\n");
+                LIST_FOR_EACH_ENTRY(font_link_entry, &font_link->links, CHILD_FONT, entry)
+                {
+                    face = find_face_from_path_index(font_link_entry->file_name,
+                                font_link_entry->index);
+                    if (face)
+                    {
+                        family = face->family;
+                        if(csi.fs.fsCsb[0] &
+                            (face->fs.fsCsb[0] | face->fs_links.fsCsb[0]))
+                        {
+                            if(face->scalable || can_use_bitmap)
+                                goto found;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /* If requested charset was DEFAULT_CHARSET then try using charset
@@ -3948,9 +4022,15 @@ UINT WineEngGetOutlineTextMetrics(GdiFont *font, UINT cbSize,
     TM.tmOverhang = 0;
     TM.tmDigitizedAspectX = 300;
     TM.tmDigitizedAspectY = 300;
-    TM.tmFirstChar = pOS2->usFirstCharIndex;
+    /* It appears that for fonts with SYMBOL_CHARSET Windows always sets
+     * symbol range to 0 - f0ff
+     */
+    if (font->charset == SYMBOL_CHARSET)
+        TM.tmFirstChar = 0;
+    else
+        TM.tmFirstChar = pOS2->usFirstCharIndex;
     TM.tmLastChar = pOS2->usLastCharIndex;
-    TM.tmDefaultChar = pOS2->usDefaultChar;
+    TM.tmDefaultChar = pOS2->usDefaultChar ? pOS2->usDefaultChar : 0x1f;
     TM.tmBreakChar = pOS2->usBreakChar ? pOS2->usBreakChar : ' ';
     TM.tmItalic = font->fake_italic ? 255 : ((ft_face->style_flags & FT_STYLE_FLAG_ITALIC) ? 255 : 0);
     TM.tmUnderlined = font->underline;

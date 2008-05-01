@@ -353,7 +353,7 @@ static void update_now( HWND hwnd, UINT rdw_flags )
  * caret. Its caret needs to be hidden during the scroll operation and
  * moved to new_caret_pos if move_caret is TRUE.
  */
-static HWND fix_caret(HWND hWnd, const LPRECT scroll_rect, INT dx, INT dy,
+static HWND fix_caret(HWND hWnd, const RECT *scroll_rect, INT dx, INT dy,
                      UINT flags, LPBOOL move_caret, LPPOINT new_caret_pos)
 {
     GUITHREADINFO info;
@@ -869,7 +869,6 @@ INT WINAPI ScrollWindowEx( HWND hwnd, INT dx, INT dy,
             if( !bOwnRgn)
                 CombineRgn( hrgnWinupd, hrgnWinupd, hrgnTemp, RGN_OR );
             RedrawWindow( hwnd, NULL, hrgnTemp, rdw_flags);
-            DeleteObject( hrgnClip );
 
            /* Catch the case where the scolling amount exceeds the size of the
             * original window. This generated a second update area that is the
@@ -889,6 +888,7 @@ INT WINAPI ScrollWindowEx( HWND hwnd, INT dx, INT dy,
                 if( !bOwnRgn)
                     CombineRgn( hrgnWinupd, hrgnWinupd, hrgnTemp, RGN_OR );
             }
+            DeleteObject( hrgnClip );
         }
         DeleteObject( hrgnTemp );
     } else {

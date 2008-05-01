@@ -26,17 +26,21 @@
 
 #include "config.h"
 #include "wcmd.h"
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(cmd);
 
 const char * const inbuilt[] = {"ATTRIB", "CALL", "CD", "CHDIR", "CLS", "COPY", "CTTY",
 		"DATE", "DEL", "DIR", "ECHO", "ERASE", "FOR", "GOTO",
 		"HELP", "IF", "LABEL", "MD", "MKDIR", "MOVE", "PATH", "PAUSE",
 		"PROMPT", "REM", "REN", "RENAME", "RD", "RMDIR", "SET", "SHIFT",
                 "TIME", "TITLE", "TYPE", "VERIFY", "VER", "VOL", 
-                "ENDLOCAL", "SETLOCAL", "PUSHD", "POPD", "EXIT" };
+                "ENDLOCAL", "SETLOCAL", "PUSHD", "POPD", "ASSOC", "COLOR", "FTYPE",
+                "EXIT" };
 
 HINSTANCE hinst;
 DWORD errorlevel;
-int echo_mode = 1, verify_mode = 0;
+int echo_mode = 1, verify_mode = 0, defaultColor = 7;
 static int opt_c, opt_k, opt_s;
 const char nyi[] = "Not Yet Implemented\n\n";
 const char newline[] = "\n";
@@ -44,7 +48,7 @@ const char version_string[] = "CMD Version " PACKAGE_VERSION "\n\n";
 const char anykey[] = "Press Return key to continue: ";
 char quals[MAX_PATH], param1[MAX_PATH], param2[MAX_PATH];
 BATCH_CONTEXT *context = NULL;
-static HANDLE old_stdin = INVALID_HANDLE_VALUE, old_stdout = INVALID_HANDLE_VALUE;
+extern struct env_stack *pushd_directories;
 
 static char *WCMD_expand_envvar(char *start);
 
@@ -56,10 +60,12 @@ static char *WCMD_expand_envvar(char *start);
 int main (int argc, char *argv[])
 {
   char string[1024];
+  char envvar[4];
   char* cmd=NULL;
   DWORD count;
   HANDLE h;
   int opt_q;
+  int opt_t = 0;
 
   opt_c=opt_k=opt_q=opt_s=0;
   while (*argv!=NULL)
@@ -79,7 +85,9 @@ int main (int argc, char *argv[])
           opt_k=1;
       } else if (tolower(c)=='s') {
           opt_s=1;
-      } else if (tolower(c)=='t' || tolower(c)=='x' || tolower(c)=='y') {
+      } else if (tolower(c)=='t' && (*argv)[2]==':') {
+          opt_t=strtoul(&(*argv)[3], NULL, 16);
+      } else if (tolower(c)=='x' || tolower(c)=='y') {
           /* Ignored for compatibility with Windows */
       }
 
@@ -253,6 +261,80 @@ int main (int argc, char *argv[])
                  ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
   SetConsoleTitle("Wine Command Prompt");
 
+  /* Note: cmd.exe /c dir does not get a new color, /k dir does */
+  if (opt_t) {
+      if (!(((opt_t & 0xF0) >> 4) == (opt_t & 0x0F))) {
+          defaultColor = opt_t & 0xFF;
+          param1[0] = 0x00;
+          WCMD_color();
+      }
+  } else {
+      /* Check HKCU\Software\Microsoft\Command Processor
+         Then  HKLM\Software\Microsoft\Command Processor
+           for defaultcolour value
+           Note  Can be supplied as DWORD or REG_SZ
+           Note2 When supplied as REG_SZ it's in decimal!!! */
+      HKEY key;
+      DWORD type;
+      DWORD value=0, size=4;
+
+      if (RegOpenKeyEx(HKEY_CURRENT_USER, "Software\\Microsoft\\Command Processor",
+                       0, KEY_READ, &key) == ERROR_SUCCESS) {
+          char  strvalue[4];
+
+          /* See if DWORD or REG_SZ */
+          if (RegQueryValueEx(key, "DefaultColor", NULL, &type,
+                     NULL, NULL) == ERROR_SUCCESS) {
+              if (type == REG_DWORD) {
+                  size = sizeof(DWORD);
+                  RegQueryValueEx(key, "DefaultColor", NULL, NULL,
+                                  (LPBYTE)&value, &size);
+              } else if (type == REG_SZ) {
+                  size = sizeof(strvalue);
+                  RegQueryValueEx(key, "DefaultColor", NULL, NULL,
+                                  (LPBYTE)strvalue, &size);
+                  value = strtoul(strvalue, NULL, 10);
+              }
+          }
+      }
+
+      if (value == 0 && RegOpenKeyEx(HKEY_LOCAL_MACHINE,
+                       "Software\\Microsoft\\Command Processor",
+                       0, KEY_READ, &key) == ERROR_SUCCESS) {
+          char  strvalue[4];
+
+          /* See if DWORD or REG_SZ */
+          if (RegQueryValueEx(key, "DefaultColor", NULL, &type,
+                     NULL, NULL) == ERROR_SUCCESS) {
+              if (type == REG_DWORD) {
+                  size = sizeof(DWORD);
+                  RegQueryValueEx(key, "DefaultColor", NULL, NULL,
+                                  (LPBYTE)&value, &size);
+              } else if (type == REG_SZ) {
+                  size = sizeof(strvalue);
+                  RegQueryValueEx(key, "DefaultColor", NULL, NULL,
+                                  (LPBYTE)strvalue, &size);
+                  value = strtoul(strvalue, NULL, 10);
+              }
+          }
+      }
+
+      /* If one found, set the screen to that colour */
+      if (!(((value & 0xF0) >> 4) == (value & 0x0F))) {
+          defaultColor = value & 0xFF;
+          param1[0] = 0x00;
+          WCMD_color();
+      }
+
+  }
+
+  /* Save cwd into appropriate env var */
+  GetCurrentDirectory(1024, string);
+  if (IsCharAlpha(string[0]) && string[1] == ':') {
+    sprintf(envvar, "=%c:", string[0]);
+    SetEnvironmentVariable(envvar, string);
+  }
+
   if (opt_k) {
       WCMD_process_command(cmd);
       HeapFree(GetProcessHeap(), 0, cmd);
@@ -303,13 +385,20 @@ int main (int argc, char *argv[])
 
 void WCMD_process_command (char *command)
 {
-    char *cmd, *p, *s, *t;
+    char *cmd, *p, *s, *t, *redir;
     int status, i;
     DWORD count, creationDisposition;
     HANDLE h;
     char *whichcmd;
     SECURITY_ATTRIBUTES sa;
     char *new_cmd;
+    char *first_redir = NULL;
+    HANDLE old_stdhandles[3] = {INVALID_HANDLE_VALUE,
+                                INVALID_HANDLE_VALUE,
+                                INVALID_HANDLE_VALUE};
+    DWORD  idx_stdhandles[3] = {STD_INPUT_HANDLE,
+                                STD_OUTPUT_HANDLE,
+                                STD_ERROR_HANDLE};
 
     /* Move copy of the command onto the heap so it can be expanded */
     new_cmd = HeapAlloc( GetProcessHeap(), 0, MAXSTRING );
@@ -336,7 +425,7 @@ void WCMD_process_command (char *command)
       /* Replace use of %0...%9 if in batch program*/
       } else if (context && (i >= 0) && (i <= 9)) {
         s = strdup (p+2);
-        t = WCMD_parameter (context -> command, i + context -> shift_count, NULL);
+        t = WCMD_parameter (context -> command, i + context -> shift_count[i], NULL);
         strcpy (p, t);
         strcat (p, s);
         free (s);
@@ -385,22 +474,33 @@ void WCMD_process_command (char *command)
  */
 
     if ((cmd[1] == ':') && IsCharAlpha (cmd[0]) && (strlen(cmd) == 2)) {
+      char envvar[5];
+      char dir[MAX_PATH];
+
+      /* According to MSDN CreateProcess docs, special env vars record
+         the current directory on each drive, in the form =C:
+         so see if one specified, and if so go back to it             */
+      strcpy(envvar, "=");
+      strcat(envvar, cmd);
+      if (GetEnvironmentVariable(envvar, dir, MAX_PATH) == 0) {
+        sprintf(cmd, "%s\\", cmd);
+      }
       status = SetCurrentDirectory (cmd);
       if (!status) WCMD_print_error ();
       HeapFree( GetProcessHeap(), 0, cmd );
       return;
     }
 
-    /* Don't issue newline WCMD_output (newline);           @JED*/
-
     sa.nLength = sizeof(sa);
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = TRUE;
+
 /*
- *	Redirect stdin and/or stdout if required.
+ *	Redirect stdin, stdout and/or stderr if required.
  */
 
     if ((p = strchr(cmd,'<')) != NULL) {
+      if (first_redir == NULL) first_redir = p;
       h = CreateFile (WCMD_parameter (++p, 0, NULL), GENERIC_READ, FILE_SHARE_READ, &sa, OPEN_EXISTING,
 		FILE_ATTRIBUTE_NORMAL, NULL);
       if (h == INVALID_HANDLE_VALUE) {
@@ -408,11 +508,24 @@ void WCMD_process_command (char *command)
         HeapFree( GetProcessHeap(), 0, cmd );
 	return;
       }
-      old_stdin = GetStdHandle (STD_INPUT_HANDLE);
+      old_stdhandles[0] = GetStdHandle (STD_INPUT_HANDLE);
       SetStdHandle (STD_INPUT_HANDLE, h);
     }
-    if ((p = strchr(cmd,'>')) != NULL) {
-      *p++ = '\0';
+
+    /* Scan the whole command looking for > and 2> */
+    redir = cmd;
+    while (redir != NULL && ((p = strchr(redir,'>')) != NULL)) {
+      int handle = 0;
+
+      if (*(p-1)!='2') {
+        if (first_redir == NULL) first_redir = p;
+        handle = 1;
+      } else {
+        if (first_redir == NULL) first_redir = (p-1);
+        handle = 2;
+      }
+
+      p++;
       if ('>' == *p) {
         creationDisposition = OPEN_ALWAYS;
         p++;
@@ -420,26 +533,49 @@ void WCMD_process_command (char *command)
       else {
         creationDisposition = CREATE_ALWAYS;
       }
-      h = CreateFile (WCMD_parameter (p, 0, NULL), GENERIC_WRITE, 0, &sa, creationDisposition,
-		FILE_ATTRIBUTE_NORMAL, NULL);
-      if (h == INVALID_HANDLE_VALUE) {
-	WCMD_print_error ();
-        HeapFree( GetProcessHeap(), 0, cmd );
-	return;
+
+      /* Add support for 2>&1 */
+      redir = p;
+      if (*p == '&') {
+        int idx = *(p+1) - '0';
+
+        if (DuplicateHandle(GetCurrentProcess(),
+                        GetStdHandle(idx_stdhandles[idx]),
+                        GetCurrentProcess(),
+                        &h,
+                        0, TRUE, DUPLICATE_SAME_ACCESS) == 0) {
+          WINE_FIXME("Duplicating handle failed with gle %d\n", GetLastError());
+        }
+        WINE_TRACE("Redirect %d (%p) to %d (%p)\n", handle, GetStdHandle(idx_stdhandles[idx]), idx, h);
+
+      } else {
+        char *param = WCMD_parameter (p, 0, NULL);
+        h = CreateFile (param, GENERIC_WRITE, 0, &sa, creationDisposition,
+                        FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h == INVALID_HANDLE_VALUE) {
+          WCMD_print_error ();
+          HeapFree( GetProcessHeap(), 0, cmd );
+          return;
+        }
+        if (SetFilePointer (h, 0, NULL, FILE_END) ==
+              INVALID_SET_FILE_POINTER) {
+          WCMD_print_error ();
+        }
+        WINE_TRACE("Redirect %d to '%s' (%p)\n", handle, param, h);
       }
-      if (SetFilePointer (h, 0, NULL, FILE_END) ==
-          INVALID_SET_FILE_POINTER) {
-        WCMD_print_error ();
-      }
-      old_stdout = GetStdHandle (STD_OUTPUT_HANDLE);
-      SetStdHandle (STD_OUTPUT_HANDLE, h);
+
+      old_stdhandles[handle] = GetStdHandle (idx_stdhandles[handle]);
+      SetStdHandle (idx_stdhandles[handle], h);
     }
-    if ((p = strchr(cmd,'<')) != NULL) *p = '\0';
+
+    /* Terminate the command string at <, or first 2> or > */
+    if (first_redir != NULL) *first_redir = '\0';
 
 /*
  * Strip leading whitespaces, and a '@' if supplied
  */
     whichcmd = WCMD_strtrim_leading_spaces(cmd);
+    WINE_TRACE("Command: '%s'\n", cmd);
     if (whichcmd[0] == '@') whichcmd++;
 
 /*
@@ -467,7 +603,7 @@ void WCMD_process_command (char *command)
         break;
       case WCMD_CD:
       case WCMD_CHDIR:
-        WCMD_setshow_default ();
+        WCMD_setshow_default (p);
         break;
       case WCMD_CLS:
         WCMD_clear_screen ();
@@ -483,7 +619,7 @@ void WCMD_process_command (char *command)
 	break;
       case WCMD_DEL:
       case WCMD_ERASE:
-        WCMD_delete (0);
+        WCMD_delete (p);
         break;
       case WCMD_DIR:
         WCMD_directory ();
@@ -530,7 +666,7 @@ void WCMD_process_command (char *command)
 	break;
       case WCMD_RD:
       case WCMD_RMDIR:
-        WCMD_remove_dir ();
+        WCMD_remove_dir (p);
         break;
       case WCMD_SETLOCAL:
         WCMD_setlocal(p);
@@ -542,7 +678,7 @@ void WCMD_process_command (char *command)
         WCMD_setshow_env (p);
 	break;
       case WCMD_SHIFT:
-        WCMD_shift ();
+        WCMD_shift (p);
         break;
       case WCMD_TIME:
         WCMD_setshow_time ();
@@ -552,7 +688,7 @@ void WCMD_process_command (char *command)
           WCMD_title(&whichcmd[count+1]);
         break;
       case WCMD_TYPE:
-        WCMD_type ();
+        WCMD_type (p);
 	break;
       case WCMD_VER:
         WCMD_version ();
@@ -564,10 +700,19 @@ void WCMD_process_command (char *command)
         WCMD_volume (0, p);
         break;
       case WCMD_PUSHD:
-        WCMD_pushd();
+        WCMD_pushd(p);
         break;
       case WCMD_POPD:
         WCMD_popd();
+        break;
+      case WCMD_ASSOC:
+        WCMD_assoc(p, TRUE);
+        break;
+      case WCMD_COLOR:
+        WCMD_color();
+        break;
+      case WCMD_FTYPE:
+        WCMD_assoc(p, FALSE);
         break;
       case WCMD_EXIT:
         WCMD_exit ();
@@ -576,15 +721,13 @@ void WCMD_process_command (char *command)
         WCMD_run_program (whichcmd, 0);
     }
     HeapFree( GetProcessHeap(), 0, cmd );
-    if (old_stdin != INVALID_HANDLE_VALUE) {
-      CloseHandle (GetStdHandle (STD_INPUT_HANDLE));
-      SetStdHandle (STD_INPUT_HANDLE, old_stdin);
-      old_stdin = INVALID_HANDLE_VALUE;
-    }
-    if (old_stdout != INVALID_HANDLE_VALUE) {
-      CloseHandle (GetStdHandle (STD_OUTPUT_HANDLE));
-      SetStdHandle (STD_OUTPUT_HANDLE, old_stdout);
-      old_stdout = INVALID_HANDLE_VALUE;
+
+    /* Restore old handles */
+    for (i=0; i<3; i++) {
+      if (old_stdhandles[i] != INVALID_HANDLE_VALUE) {
+        CloseHandle (GetStdHandle (idx_stdhandles[i]));
+        SetStdHandle (idx_stdhandles[i], old_stdhandles[i]);
+      }
     }
 }
 
@@ -598,8 +741,7 @@ static void init_msvcrt_io_block(STARTUPINFO* st)
     GetStartupInfo(&st_p);
     st->cbReserved2 = st_p.cbReserved2;
     st->lpReserved2 = st_p.lpReserved2;
-    if (st_p.cbReserved2 && st_p.lpReserved2 &&
-        (old_stdin != INVALID_HANDLE_VALUE || old_stdout != INVALID_HANDLE_VALUE))
+    if (st_p.cbReserved2 && st_p.lpReserved2)
     {
         /* Override the entries for fd 0,1,2 if we happened
          * to change those std handles (this depends on the way wcmd sets
@@ -878,8 +1020,14 @@ void WCMD_show_prompt (void) {
         case '$':
 	  *q++ = '$';
 	  break;
+	case 'A':
+	  *q++ = '&';
+	  break;
 	case 'B':
 	  *q++ = '|';
+	  break;
+	case 'C':
+	  *q++ = '(';
 	  break;
 	case 'D':
 	  GetDateFormat (LOCALE_USER_DEFAULT, DATE_SHORTDATE, NULL, NULL, q, MAX_PATH);
@@ -888,8 +1036,14 @@ void WCMD_show_prompt (void) {
 	case 'E':
 	  *q++ = '\E';
 	  break;
+	case 'F':
+	  *q++ = ')';
+	  break;
 	case 'G':
 	  *q++ = '>';
+	  break;
+	case 'H':
+	  *q++ = '\b';
 	  break;
 	case 'L':
 	  *q++ = '<';
@@ -910,16 +1064,25 @@ void WCMD_show_prompt (void) {
 	case 'Q':
 	  *q++ = '=';
 	  break;
+	case 'S':
+	  *q++ = ' ';
+	  break;
 	case 'T':
 	  GetTimeFormat (LOCALE_USER_DEFAULT, 0, NULL, NULL, q, MAX_PATH);
 	  while (*q) q++;
 	  break;
-       case 'V':
-           lstrcat (q, version_string);
-           while (*q) q++;
-         break;
+	case 'V':
+	  lstrcat (q, version_string);
+	  while (*q) q++;
+          break;
 	case '_':
 	  *q++ = '\n';
+	  break;
+	case '+':
+	  if (pushd_directories) {
+	    memset(q, '+', pushd_directories->u.stackdepth);
+	    q = q + pushd_directories->u.stackdepth;
+	  }
 	  break;
       }
       p++;
@@ -1317,7 +1480,7 @@ static char *WCMD_expand_envvar(char *start) {
     /* ~ is substring manipulation */
     if (savedchar == '~') {
 
-      int   substrposition, substrlength;
+      int   substrposition, substrlength = 0;
       char *commapos = strchr(colonpos+2, ',');
       char *startCopy;
 

@@ -89,7 +89,7 @@ void WCMD_batch (char *file, char *command, int called, char *startLabel, HANDLE
   context = (BATCH_CONTEXT *)LocalAlloc (LMEM_FIXED, sizeof (BATCH_CONTEXT));
   context -> h = h;
   context -> command = command;
-  context -> shift_count = 0;
+  memset(context -> shift_count, 0x00, sizeof(context -> shift_count));
   context -> prev_context = prev_context;
   context -> skip_rest = FALSE;
 
@@ -386,7 +386,7 @@ void WCMD_HandleTildaModifiers(char **start, char *forVariable) {
   /* Extract the parameter to play with */
   if ((*lastModifier >= '0' && *lastModifier <= '9')) {
     strcpy(outputparam, WCMD_parameter (context -> command,
-                 *lastModifier-'0' + context -> shift_count, NULL));
+                 *lastModifier-'0' + context -> shift_count[*lastModifier-'0'], NULL));
   } else {
     /* FIXME: Retrieve 'for' variable %c\n", *lastModifier); */
     /* Need to get 'for' loop variable into outputparam      */
@@ -495,7 +495,7 @@ void WCMD_HandleTildaModifiers(char **start, char *forVariable) {
     /* 4. Handle 'z' : File length */
     if (exists &&
         memchr(firstModifier, 'z', modifierLen) != NULL) {
-      /* FIXME: Output full 64 bit size (sprintf not support I64 here) */
+      /* FIXME: Output full 64 bit size (sprintf does not support I64 here) */
       ULONG/*64*/ fullsize = /*(fileInfo.nFileSizeHigh << 32) +*/
                                   fileInfo.nFileSizeLow;
 
@@ -505,14 +505,14 @@ void WCMD_HandleTildaModifiers(char **start, char *forVariable) {
       strcat(finaloutput, thisoutput);
     }
 
-    /* 4. Handle 's' : Use short paths (File doesnt have to exist) */
+    /* 4. Handle 's' : Use short paths (File doesn't have to exist) */
     if (memchr(firstModifier, 's', modifierLen) != NULL) {
       if (finaloutput[0] != 0x00) strcat(finaloutput, " ");
-      /* Dont flag as doneModifier - %~s on its own is processed later */
+      /* Don't flag as doneModifier - %~s on its own is processed later */
       GetShortPathName(outputparam, outputparam, sizeof(outputparam));
     }
 
-    /* 5. Handle 'f' : Fully qualified path (File doesnt have to exist) */
+    /* 5. Handle 'f' : Fully qualified path (File doesn't have to exist) */
     /*      Note this overrides d,p,n,x                                 */
     if (memchr(firstModifier, 'f', modifierLen) != NULL) {
       doneModifier = TRUE;
@@ -603,13 +603,13 @@ void WCMD_call (char *command) {
       /* Save the current file position, call the same file,
          restore position                                    */
       li.QuadPart = 0;
-      li.LowPart = SetFilePointer(context -> h, li.LowPart,
-                     &li.HighPart, FILE_CURRENT);
+      li.u.LowPart = SetFilePointer(context -> h, li.u.LowPart,
+                     &li.u.HighPart, FILE_CURRENT);
 
       WCMD_batch (param1, command, 1, gotoLabel, context->h);
 
-      SetFilePointer(context -> h, li.LowPart,
-                     &li.HighPart, FILE_BEGIN);
+      SetFilePointer(context -> h, li.u.LowPart,
+                     &li.u.HighPart, FILE_BEGIN);
     } else {
       printf("Cannot call batch label outside of a batch script\n");
     }

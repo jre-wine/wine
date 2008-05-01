@@ -33,6 +33,22 @@ static DWORD GLE;
 static const char * sTestpath1 = "%LONGSYSTEMVAR%\\subdir1";
 static const char * sTestpath2 = "%FOO%\\subdir1";
 
+static HMODULE hadvapi32;
+static DWORD (WINAPI *pRegGetValueA)(HKEY,LPCSTR,LPCSTR,DWORD,LPDWORD,PVOID,LPDWORD);
+
+#define ADVAPI32_GET_PROC(func) \
+    p ## func = (void*)GetProcAddress(hadvapi32, #func); \
+    if(!p ## func) \
+      trace("GetProcAddress(%s) failed\n", #func);
+
+static void InitFunctionPtrs(void)
+{
+    hadvapi32 = GetModuleHandleA("advapi32.dll");
+
+    /* This function was introduced with Windows 2003 SP1 */
+    ADVAPI32_GET_PROC(RegGetValueA)
+}
+
 /* delete key and all its subkeys */
 static DWORD delete_key( HKEY hkey )
 {
@@ -360,9 +376,6 @@ static void test_query_value_ex(void)
 
 static void test_get_value(void)
 {
-    HMODULE hadvapi32;
-    DWORD (WINAPI *pRegGetValueA)(HKEY,LPCSTR,LPCSTR,DWORD,LPDWORD,PVOID,LPDWORD);
-    
     DWORD ret;
     DWORD size;
     DWORD type;
@@ -370,16 +383,11 @@ static void test_get_value(void)
     CHAR buf[80];
     CHAR expanded[] = "bar\\subdir1";
    
-    /* This function was introduced with Windows 2003 SP1 */
-    hadvapi32 = LoadLibraryA("advapi32.dll");
-    if(!hadvapi32) 
+    if(!pRegGetValueA)
     {
-        ok(0, "error=%d\n", GetLastError());
+        skip("RegGetValue not available on this platform\n");
         return;
     }
-    pRegGetValueA = (PVOID)GetProcAddress(hadvapi32, "RegGetValueA");
-    if(!pRegGetValueA) 
-        return;
 
     /* Query REG_DWORD using RRF_RT_REG_DWORD (ok) */
     size = type = dw = 0xdeadbeef;
@@ -754,7 +762,6 @@ static void test_reg_query_value(void)
     LONG size, ret;
 
     static const WCHAR expected[] = {'d','a','t','a',0};
-    static const WCHAR set[] = {'d','a','t','a'};
 
     ret = RegCreateKeyA(hkey_main, "subkey", &subkey);
     ok(ret == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", ret);
@@ -823,6 +830,11 @@ static void test_reg_query_value(void)
     valW[0] = '\0';
     size = 0;
     ret = RegQueryValueW(subkey, NULL, valW, &size);
+    if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("RegQueryValueW is not implemented\n");
+        goto cleanup;
+    }
     ok(ret == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", ret);
     ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
     ok(lstrlenW(valW) == 0, "Expected valW to be untouched\n");
@@ -845,25 +857,26 @@ static void test_reg_query_value(void)
     ok(size == sizeof(expected), "Got wrong size: %d\n", size);
 
     /* unicode - set the value without a NULL terminator */
-    ret = RegSetValueW(subkey, NULL, REG_SZ, set, sizeof(set));
+    ret = RegSetValueW(subkey, NULL, REG_SZ, expected, sizeof(expected)-sizeof(WCHAR));
     ok(ret == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", ret);
 
     /* unicode - read the unterminated value, value is terminated for us */
     memset(valW, 'a', sizeof(valW));
     size = sizeof(valW);
     ret = RegQueryValueW(subkey, NULL, valW, &size);
-    todo_wine
-    {
-        ok(ret == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", ret);
-        ok(!lstrcmpW(valW, expected), "Got wrong value\n");
-        ok(size == sizeof(expected), "Got wrong size: %d\n", size);
-    }
+    ok(ret == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", ret);
+    ok(!lstrcmpW(valW, expected), "Got wrong value\n");
+    ok(size == sizeof(expected), "Got wrong size: %d\n", size);
 
+cleanup:
     RegDeleteKeyA(subkey, "");
 }
 
 START_TEST(registry)
 {
+    /* Load pointers for functions that are not available in all Windows versions */
+    InitFunctionPtrs();
+
     setup_main_key();
     test_set_value();
     create_test_entries();

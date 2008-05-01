@@ -30,8 +30,252 @@
 #include "wine/test.h"
 #include <assert.h>
 #include <windows.h>
+#include "msg.h"
 
 #define expect(expected, got) ok(expected == got, "Expected %d, got %d\n", expected, got);
+
+#define NUM_MSG_SEQUENCES   2
+#define PARENT_SEQ_INDEX    0
+#define MONTHCAL_SEQ_INDEX  1
+
+struct subclass_info
+{
+    WNDPROC oldproc;
+};
+
+static struct msg_sequence *sequences[NUM_MSG_SEQUENCES];
+
+static const struct message create_parent_window_seq[] = {
+    { WM_GETMINMAXINFO, sent },
+    { WM_NCCREATE, sent },
+    { WM_NCCALCSIZE, sent|wparam, 0 },
+    { WM_CREATE, sent },
+    { WM_SHOWWINDOW, sent|wparam, 1 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
+    { WM_ACTIVATEAPP, sent|wparam, 1 },
+    { WM_NCACTIVATE, sent|wparam, 1 },
+    { WM_ACTIVATE, sent|wparam, 1 },
+    { WM_IME_SETCONTEXT, sent|wparam|defwinproc|optional, 1 },
+    { WM_IME_NOTIFY, sent|defwinproc|optional },
+    { WM_SETFOCUS, sent|wparam|defwinproc, 0 },
+    /* Win9x adds SWP_NOZORDER below */
+    { WM_WINDOWPOSCHANGED, sent, /*|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE*/ },
+    { WM_NCCALCSIZE, sent|wparam|optional, 1 },
+    { WM_SIZE, sent },
+    { WM_MOVE, sent },
+    { 0 }
+};
+
+static const struct message create_monthcal_control_seq[] = {
+    { WM_NOTIFYFORMAT, sent|lparam, 0, NF_QUERY },
+    { WM_QUERYUISTATE, sent },
+    { WM_GETFONT, sent },
+    { WM_PARENTNOTIFY, sent|wparam, WM_CREATE},
+    { 0 }
+};
+
+static const struct message create_monthcal_multi_sel_style_seq[] = {
+    { WM_NOTIFYFORMAT, sent|lparam, 0, NF_QUERY },
+    { WM_QUERYUISTATE, sent },
+    { WM_GETFONT, sent },
+    { 0 }
+};
+
+static const struct message monthcal_color_seq[] = {
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_BACKGROUND, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_BACKGROUND, RGB(0,0,0)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_BACKGROUND, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_BACKGROUND, RGB(255,255,255)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_BACKGROUND, 0},
+
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_MONTHBK, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_MONTHBK, RGB(0,0,0)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_MONTHBK, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_MONTHBK, RGB(255,255,255)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_MONTHBK, 0},
+
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TEXT, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_TEXT, RGB(0,0,0)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TEXT, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_TEXT, RGB(255,255,255)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TEXT, 0},
+
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TITLEBK, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_TITLEBK, RGB(0,0,0)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TITLEBK, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_TITLEBK, RGB(255,255,255)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TITLEBK, 0},
+
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TITLETEXT, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_TITLETEXT, RGB(0,0,0)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TITLETEXT, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_TITLETEXT, RGB(255,255,255)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TITLETEXT, 0},
+
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TRAILINGTEXT, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_TRAILINGTEXT, RGB(0,0,0)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TRAILINGTEXT, 0},
+    { MCM_SETCOLOR, sent|wparam|lparam, MCSC_TRAILINGTEXT, RGB(255,255,255)},
+    { MCM_GETCOLOR, sent|wparam|lparam, MCSC_TRAILINGTEXT, 0},
+    { 0 }
+};
+
+static const struct message monthcal_curr_date_seq[] = {
+    { MCM_SETCURSEL, sent|wparam, 0},
+    { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
+    { WM_NCPAINT, sent|wparam|lparam|defwinproc, 1, 0},
+    { WM_ERASEBKGND, sent|lparam|defwinproc, 0},
+    { MCM_SETCURSEL, sent|wparam, 0},
+    { MCM_SETCURSEL, sent|wparam, 0},
+    { MCM_GETCURSEL, sent|wparam, 0},
+    { MCM_GETCURSEL, sent|wparam|lparam, 0, 0},
+    { 0 }
+};
+
+static const struct message monthcal_first_day_seq[] = {
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, -5},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, -4},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, -3},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, -2},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, -1},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 1},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 2},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 3},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 4},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 5},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 6},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 7},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 8},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 9},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 10},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+
+    { MCM_SETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 11},
+    { MCM_GETFIRSTDAYOFWEEK, sent|wparam|lparam, 0, 0},
+    { 0 }
+};
+
+static const struct message monthcal_unicode_seq[] = {
+    { MCM_GETUNICODEFORMAT, sent|wparam|lparam, 0, 0},
+    { MCM_SETUNICODEFORMAT, sent|wparam|lparam, 1, 0},
+    { MCM_GETUNICODEFORMAT, sent|wparam|lparam, 0, 0},
+    { MCM_SETUNICODEFORMAT, sent|wparam|lparam, 0, 0},
+    { MCM_GETUNICODEFORMAT, sent|wparam|lparam, 0, 0},
+    { MCM_SETUNICODEFORMAT, sent|wparam|lparam, 1, 0},
+    { 0 }
+};
+
+static const struct message monthcal_hit_test_seq[] = {
+    { MCM_HITTEST, sent|wparam, 0},
+    { MCM_HITTEST, sent|wparam, 0},
+    { MCM_HITTEST, sent|wparam, 0},
+    { MCM_HITTEST, sent|wparam, 0},
+    { 0 }
+};
+
+static const struct message monthcal_today_seq[] = {
+    { MCM_SETTODAY, sent|wparam, 0},
+    { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
+    { MCM_GETTODAY, sent|wparam, 0},
+    { MCM_SETTODAY, sent|wparam, 0},
+    { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
+    { MCM_GETTODAY, sent|wparam, 0},
+    { 0 }
+};
+
+static const struct message monthcal_scroll_seq[] = {
+    { MCM_SETMONTHDELTA, sent|wparam|lparam, 2, 0},
+    { MCM_SETMONTHDELTA, sent|wparam|lparam, 3, 0},
+    { MCM_GETMONTHDELTA, sent|wparam|lparam, 0, 0},
+    { MCM_SETMONTHDELTA, sent|wparam|lparam, 12, 0},
+    { MCM_GETMONTHDELTA, sent|wparam|lparam, 0, 0},
+    { MCM_SETMONTHDELTA, sent|wparam|lparam, 15, 0},
+    { MCM_GETMONTHDELTA, sent|wparam|lparam, 0, 0},
+    { MCM_SETMONTHDELTA, sent|wparam|lparam, -5, 0},
+    { MCM_GETMONTHDELTA, sent|wparam|lparam, 0, 0},
+    { 0 }
+};
+
+static const struct message monthcal_max_sel_day_seq[] = {
+    { MCM_SETMAXSELCOUNT, sent|wparam|lparam, 5, 0},
+    { MCM_GETMAXSELCOUNT, sent|wparam|lparam, 0, 0},
+    { MCM_SETMAXSELCOUNT, sent|wparam|lparam, 15, 0},
+    { MCM_GETMAXSELCOUNT, sent|wparam|lparam, 0, 0},
+    { MCM_SETMAXSELCOUNT, sent|wparam|lparam, -1, 0},
+    { MCM_GETMAXSELCOUNT, sent|wparam|lparam, 0, 0},
+    { 0 }
+};
+
+/* expected message sequence for parent*/
+static const struct message destroy_monthcal_parent_msgs_seq[] = {
+    { WM_PARENTNOTIFY, sent|wparam, WM_DESTROY},
+    { 0 }
+};
+
+/* expected message sequence for child*/
+static const struct message destroy_monthcal_child_msgs_seq[] = {
+    { WM_SHOWWINDOW, sent|wparam|lparam, 0, 0},
+    { WM_WINDOWPOSCHANGING, sent|wparam, 0},
+    { WM_WINDOWPOSCHANGED, sent|wparam, 0},
+    { WM_DESTROY, sent|wparam|lparam, 0, 0},
+    { WM_NCDESTROY, sent|wparam|lparam, 0, 0},
+    { 0 }
+};
+
+static const struct message destroy_monthcal_multi_sel_style_seq[] = {
+    { WM_DESTROY, sent|wparam|lparam, 0, 0},
+    { WM_NCDESTROY, sent|wparam|lparam, 0, 0},
+    { 0 }
+};
+
+/* expected message sequence for parent window*/
+static const struct message destroy_parent_seq[] = {
+    { WM_WINDOWPOSCHANGING, sent|wparam, 0},
+    { WM_WINDOWPOSCHANGED, sent|wparam, 0},
+    { WM_NCACTIVATE, sent|wparam|lparam, 0, 0},
+    { WM_ACTIVATE, sent|wparam|lparam, 0, 0},
+    { WM_ACTIVATEAPP, sent|wparam, 0},
+    { WM_KILLFOCUS, sent|wparam|lparam, 0, 0},
+    { WM_IME_SETCONTEXT, sent|wparam|optional, 0},
+    { WM_IME_NOTIFY, sent|wparam|lparam|defwinproc|optional, 1, 0},
+    { WM_DESTROY, sent|wparam|lparam, 0, 0},
+    { WM_NCDESTROY, sent|wparam|lparam, 0, 0},
+    { 0 }
+};
 
 static void test_monthcal(void)
 {
@@ -99,26 +343,145 @@ static void test_monthcal(void)
     DestroyWindow(hwnd);
 }
 
-static HWND create_monthcal_control(DWORD style)
+static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    static long defwndproc_counter = 0;
+    LRESULT ret;
+    struct message msg;
+
+    /* do not log painting messages */
+    if (message != WM_PAINT &&
+        message != WM_ERASEBKGND &&
+        message != WM_NCPAINT &&
+        message != WM_NCHITTEST &&
+        message != WM_GETTEXT &&
+        message != WM_GETICON &&
+        message != WM_DEVICECHANGE)
+    {
+        trace("parent: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+
+        msg.message = message;
+        msg.flags = sent|wparam|lparam;
+        if (defwndproc_counter) msg.flags |= defwinproc;
+        msg.wParam = wParam;
+        msg.lParam = lParam;
+        add_message(sequences, PARENT_SEQ_INDEX, &msg);
+    }
+
+    defwndproc_counter++;
+    ret = DefWindowProcA(hwnd, message, wParam, lParam);
+    defwndproc_counter--;
+
+    return ret;
+}
+
+static BOOL register_parent_wnd_class()
+{
+    WNDCLASSA cls;
+
+    cls.style = 0;
+    cls.lpfnWndProc = parent_wnd_proc;
+    cls.cbClsExtra = 0;
+    cls.cbWndExtra = 0;
+    cls.hInstance = GetModuleHandleA(NULL);
+    cls.hIcon = 0;
+    cls.hCursor = LoadCursorA(0, (LPSTR)IDC_ARROW);
+    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
+    cls.lpszMenuName = NULL;
+    cls.lpszClassName = "Month-Cal test parent class";
+    return RegisterClassA(&cls);
+}
+
+static HWND create_parent_window(void)
+{
+    HWND hwnd;
+
+    InitCommonControls();
+
+    /* flush message sequences, so we can check the new sequence by the end of function */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    if (!register_parent_wnd_class())
+        return NULL;
+
+    hwnd = CreateWindowEx(0, "Month-Cal test parent class",
+                          "Month-Cal test parent window",
+                          WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
+                          WS_MAXIMIZEBOX | WS_VISIBLE,
+                          0, 0, 500, 500,
+                          GetDesktopWindow(), NULL, GetModuleHandleA(NULL), NULL);
+
+    assert(hwnd);
+
+    /* check for message sequences */
+    ok_sequence(sequences, PARENT_SEQ_INDEX, create_parent_window_seq, "create parent window", TRUE);
+
+    return hwnd;
+}
+
+static LRESULT WINAPI monthcal_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    struct subclass_info *info = (struct subclass_info *)GetWindowLongA(hwnd, GWL_USERDATA);
+    static long defwndproc_counter = 0;
+    LRESULT ret;
+    struct message msg;
+
+    trace("monthcal: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+
+    msg.message = message;
+    msg.flags = sent|wparam|lparam;
+    if (defwndproc_counter) msg.flags |= defwinproc;
+    msg.wParam = wParam;
+    msg.lParam = lParam;
+    add_message(sequences, MONTHCAL_SEQ_INDEX, &msg);
+
+    defwndproc_counter++;
+    ret = CallWindowProcA(info->oldproc, hwnd, message, wParam, lParam);
+    defwndproc_counter--;
+
+    return ret;
+}
+
+static HWND create_monthcal_control(DWORD style, HWND parent_window)
+{
+    struct subclass_info *info;
     HWND hwnd;
     static const INITCOMMONCONTROLSEX ic = {sizeof(INITCOMMONCONTROLSEX), ICC_DATE_CLASSES};
 
     InitCommonControlsEx(&ic);
 
+    info = HeapAlloc(GetProcessHeap(), 0, sizeof(struct subclass_info));
+    if (!info)
+        return NULL;
+
     hwnd = CreateWindowEx(0,
                     MONTHCAL_CLASS,
                     "",
                     style,
-                    0, 300, 300, 0, NULL, NULL, NULL, NULL);
+                    0, 0, 300, 300,
+                    parent_window, NULL, GetModuleHandleA(NULL), NULL);
 
-    assert(hwnd);
+    if (!hwnd)
+    {
+        HeapFree(GetProcessHeap(), 0, info);
+        return NULL;
+    }
+
+    info->oldproc = (WNDPROC)SetWindowLongA(hwnd, GWL_WNDPROC,
+                                            (LONG)monthcal_subclass_proc);
+    SetWindowLongA(hwnd, GWL_USERDATA, (LONG)info);
+
     return hwnd;
 }
+
+
+/* Setter and Getters Tests */
 
 static void test_monthcal_color(HWND hwnd)
 {
     int res, temp;
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     /* Setter and Getters for color*/
     temp = SendMessage(hwnd, MCM_GETCOLOR, MCSC_BACKGROUND, 0);
@@ -180,12 +543,16 @@ static void test_monthcal_color(HWND hwnd)
     expect(temp, res);
     temp = SendMessage(hwnd, MCM_GETCOLOR, MCSC_TRAILINGTEXT, 0);
     expect(RGB(255,255,255), temp);
+
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_color_seq, "monthcal color", FALSE);
 }
 
 static void test_monthcal_currDate(HWND hwnd)
 {
     SYSTEMTIME st_original, st_new, st_test;
     int res;
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     /* Setter and Getters for current date selected */
     st_original.wYear = 2000;
@@ -206,7 +573,7 @@ static void test_monthcal_currDate(HWND hwnd)
     /* Overflow matters, check for wDay */
     st_test.wDay += 4;
     res = SendMessage(hwnd, MCM_SETCURSEL, 0, (LPARAM)&st_test);
-    todo_wine {expect(0,res);}
+    expect(0,res);
 
     /* correct wDay before checking for wMonth */
     st_test.wDay -= 4;
@@ -215,7 +582,7 @@ static void test_monthcal_currDate(HWND hwnd)
     /* Overflow matters, check for wMonth */
     st_test.wMonth += 4;
     res = SendMessage(hwnd, MCM_SETCURSEL, 0, (LPARAM)&st_test);
-    todo_wine {expect(0,res);}
+    expect(0,res);
 
     /* checking if gets the information right, modify st_new */
     st_new.wYear += 4;
@@ -231,7 +598,7 @@ static void test_monthcal_currDate(HWND hwnd)
     /* st_new change to st_origin, above settings with overflow */
     /* should not change the current settings */
     expect(st_original.wYear, st_new.wYear);
-    todo_wine {expect(st_original.wMonth, st_new.wMonth);}
+    expect(st_original.wMonth, st_new.wMonth);
     expect(st_original.wDay, st_new.wDay);
     expect(st_original.wHour, st_new.wHour);
     expect(st_original.wMinute, st_new.wMinute);
@@ -240,45 +607,56 @@ static void test_monthcal_currDate(HWND hwnd)
     /* lparam cannot be NULL */
     res = SendMessage(hwnd, MCM_GETCURSEL, 0, (LPARAM) NULL);
     expect(0, res);
+
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_curr_date_seq, "monthcal currDate", TRUE);
 }
 
 static void test_monthcal_firstDay(HWND hwnd)
 {
-    int res, fday, i, temp;
+    int res, fday, i, prev;
     TCHAR b[128];
     LCID lcid = LOCALE_USER_DEFAULT;
 
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
     /* Setter and Getters for first day of week */
-    todo_wine {
-        /* check for locale first day */
-        if(GetLocaleInfo(lcid, LOCALE_IFIRSTDAYOFWEEK, b, 128)){
-            fday = atoi(b);
-            res = SendMessage(hwnd, MCM_GETFIRSTDAYOFWEEK, 0, 0);
-            expect(fday, res);
-            res = SendMessage(hwnd, MCM_SETFIRSTDAYOFWEEK, 0, (LPARAM) 0);
-            expect(fday, res);
-        }else{
-            skip("Cannot retrieve first day of the week\n");
-            SendMessage(hwnd, MCM_SETFIRSTDAYOFWEEK, 0, (LPARAM) 0);
-        }
-
-        /* check for days of the week*/
-        for (i = 1, temp = 0x10000; i < 7; i++, temp++){
-            res = SendMessage(hwnd, MCM_GETFIRSTDAYOFWEEK, 0, 0);
-            expect(temp, res);
-            res = SendMessage(hwnd, MCM_SETFIRSTDAYOFWEEK, 0, (LPARAM) i);
-            expect(temp, res);
-        }
-
-        /* check for returning to the original first day */
+    /* check for locale first day */
+    if(GetLocaleInfo(lcid, LOCALE_IFIRSTDAYOFWEEK, b, 128)){
+        fday = atoi(b);
         res = SendMessage(hwnd, MCM_GETFIRSTDAYOFWEEK, 0, 0);
-        todo_wine {expect(temp, res);}
+        expect(fday, res);
+        prev = fday;
+
+        /* checking for the values that actually will be stored as */
+        /* current first day when we set a new value */
+        for (i = -5; i < 12; i++){
+            res = SendMessage(hwnd, MCM_SETFIRSTDAYOFWEEK, 0, (LPARAM) i);
+            expect(prev, res);
+            res = SendMessage(hwnd, MCM_GETFIRSTDAYOFWEEK, 0, 0);
+            prev = res;
+
+            if (i == -1){
+                expect(MAKELONG(fday, FALSE), res);
+            }else if (i >= 7){
+                expect(MAKELONG(fday, TRUE), res);
+            }else{
+                expect(MAKELONG(i, TRUE), res);
+            }
+        }
+
+        ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_first_day_seq, "monthcal firstDay", FALSE);
+
+    }else{
+        skip("Cannot retrieve first day of the week\n");
     }
+
 }
 
 static void test_monthcal_unicode(HWND hwnd)
 {
     int res, temp;
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     /* Setter and Getters for Unicode format */
 
@@ -304,6 +682,8 @@ static void test_monthcal_unicode(HWND hwnd)
     /* should return previous settings */
     res = SendMessage(hwnd, MCM_SETUNICODEFORMAT, 1, 0);
     expect(0, res);
+
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_unicode_seq, "monthcal unicode", FALSE);
 }
 
 static void test_monthcal_HitTest(HWND hwnd)
@@ -312,6 +692,8 @@ static void test_monthcal_HitTest(HWND hwnd)
     int res;
 
     memset(&mchit, 0, sizeof(MCHITTESTINFO));
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     /* Setters for HITTEST */
 
@@ -350,12 +732,16 @@ static void test_monthcal_HitTest(HWND hwnd)
     expect(150, mchit.pt.x);
     expect(200, mchit.pt.y);
     expect(mchit.uHit, res);
+
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_hit_test_seq, "monthcal hit test", FALSE);
 }
 
 static void test_monthcal_today(HWND hwnd)
 {
     SYSTEMTIME st_test, st_new;
     int res;
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     /* Setter and Getters for "today" information */
 
@@ -395,11 +781,15 @@ static void test_monthcal_today(HWND hwnd)
     /* st_new should change to zero*/
     expect(0, st_new.wDay);
     expect(0, st_new.wMonth);
+
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_today_seq, "monthcal today", TRUE);
 }
 
 static void test_monthcal_scroll(HWND hwnd)
 {
     int res;
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     /* Setter and Getters for scroll rate */
     res = SendMessage(hwnd, MCM_SETMONTHDELTA, 2, 0);
@@ -424,11 +814,15 @@ static void test_monthcal_scroll(HWND hwnd)
     expect(15, res);
     res = SendMessage(hwnd, MCM_GETMONTHDELTA, 0, 0);
     expect(-5, res);
+
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_scroll_seq, "monthcal scroll", FALSE);
 }
 
 static void test_monthcal_MaxSelDay(HWND hwnd)
 {
     int res;
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     /* Setter and Getters for max selected days */
     res = SendMessage(hwnd, MCM_SETMAXSELCOUNT, 5, 0);
@@ -445,15 +839,25 @@ static void test_monthcal_MaxSelDay(HWND hwnd)
     todo_wine {expect(0, res);}
     res = SendMessage(hwnd, MCM_GETMAXSELCOUNT, 0, 0);
     todo_wine {expect(15, res);}
+
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_max_sel_day_seq, "monthcal MaxSelDay", FALSE);
 }
 
 
 START_TEST(monthcal)
 {
-    HWND hwnd;
+    HWND hwnd, parent_wnd;
     test_monthcal();
 
-    hwnd = create_monthcal_control(0);
+    init_msg_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    parent_wnd = create_parent_window();
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    hwnd = create_monthcal_control(WS_CHILD | WS_BORDER | WS_VISIBLE, parent_wnd);
+    assert(hwnd);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, create_monthcal_control_seq, "create monthcal control", TRUE);
+
     test_monthcal_color(hwnd);
     test_monthcal_currDate(hwnd);
     test_monthcal_firstDay(hwnd);
@@ -462,10 +866,23 @@ START_TEST(monthcal)
     test_monthcal_today(hwnd);
     test_monthcal_scroll(hwnd);
 
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
     DestroyWindow(hwnd);
-    hwnd = create_monthcal_control(MCS_MULTISELECT);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, destroy_monthcal_parent_msgs_seq, "Destroy monthcal (parent msg)", FALSE);
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, destroy_monthcal_child_msgs_seq, "Destroy monthcal (child msg)", FALSE);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    hwnd = create_monthcal_control(MCS_MULTISELECT, parent_wnd);
+    assert(hwnd);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, create_monthcal_multi_sel_style_seq, "create monthcal (multi sel style)", TRUE);
 
     test_monthcal_MaxSelDay(hwnd);
 
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
     DestroyWindow(hwnd);
+    ok_sequence(sequences, MONTHCAL_SEQ_INDEX, destroy_monthcal_multi_sel_style_seq, "Destroy monthcal (multi sel style)", FALSE);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    DestroyWindow(parent_wnd);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, destroy_parent_seq, "Destroy parent window", FALSE);
 }

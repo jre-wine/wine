@@ -253,7 +253,6 @@ typedef struct tagLISTVIEW_INFO
   COLORREF clrBk;
   COLORREF clrText;
   COLORREF clrTextBk;
-  COLORREF clrTextBkDefault;
   HIMAGELIST himlNormal;
   HIMAGELIST himlSmall;
   HIMAGELIST himlState;
@@ -947,6 +946,11 @@ static inline DWORD notify_customdraw (LISTVIEW_INFO *infoPtr, DWORD dwDrawStage
 
 static void prepaint_setup (LISTVIEW_INFO *infoPtr, HDC hdc, NMLVCUSTOMDRAW *lpnmlvcd)
 {
+    if (lpnmlvcd->clrTextBk == CLR_DEFAULT)
+        lpnmlvcd->clrTextBk = comctl32_color.clrWindow;
+    if (lpnmlvcd->clrText == CLR_DEFAULT)
+        lpnmlvcd->clrText = comctl32_color.clrWindowText;
+
     /* apprently, for selected items, we have to override the returned values */
     if (lpnmlvcd->nmcd.uItemState & CDIS_SELECTED)
     {
@@ -966,10 +970,7 @@ static void prepaint_setup (LISTVIEW_INFO *infoPtr, HDC hdc, NMLVCUSTOMDRAW *lpn
     if (lpnmlvcd->clrTextBk != CLR_NONE)
     {
 	SetBkMode(hdc, OPAQUE);
-	if (lpnmlvcd->clrTextBk == CLR_DEFAULT)
-	    SetBkColor(hdc, infoPtr->clrTextBkDefault);
-	else
-	    SetBkColor(hdc,lpnmlvcd->clrTextBk);
+	SetBkColor(hdc,lpnmlvcd->clrTextBk);
     }
     else
 	SetBkMode(hdc, TRANSPARENT);
@@ -1885,10 +1886,11 @@ static void LISTVIEW_GetItemOrigin(LISTVIEW_INFO *infoPtr, INT nItem, LPPOINT lp
  * [I] lpLVItem : item to compute the measures for
  * [O] lprcBox : ptr to Box rectangle
  *                Same as LVM_GETITEMRECT with LVIR_BOUNDS
- * [0] lprcSelectBox : ptr to State icon rectangle
+ * [0] lprcSelectBox : ptr to select box rectangle
  *  		  Same as LVM_GETITEMRECT with LVIR_SELECTEDBOUNDS
  * [O] lprcIcon : ptr to Icon rectangle
  *                Same as LVM_GETITEMRECT with LVIR_ICON
+ * [O] lprcStateIcon: ptr to State Icon rectangle
  * [O] lprcLabel : ptr to Label rectangle
  *                Same as LVM_GETITEMRECT with LVIR_LABEL
  *
@@ -1897,7 +1899,7 @@ static void LISTVIEW_GetItemOrigin(LISTVIEW_INFO *infoPtr, INT nItem, LPPOINT lp
  */
 static void LISTVIEW_GetItemMetrics(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem,
 				    LPRECT lprcBox, LPRECT lprcSelectBox,
-				    LPRECT lprcIcon, LPRECT lprcLabel)
+				    LPRECT lprcIcon, LPRECT lprcStateIcon, LPRECT lprcLabel)
 {
     UINT uView = infoPtr->dwStyle & LVS_TYPEMASK;
     BOOL doSelectBox = FALSE, doIcon = FALSE, doLabel = FALSE, oversizedBox = FALSE;
@@ -1916,7 +1918,7 @@ static void LISTVIEW_GetItemMetrics(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVI
     }
     if (lprcSelectBox) doSelectBox = TRUE;
     if (lprcLabel) doLabel = TRUE;
-    if (doLabel || lprcIcon) doIcon = TRUE;
+    if (doLabel || lprcIcon || lprcStateIcon) doIcon = TRUE;
     if (doSelectBox)
     {
         doIcon = TRUE;
@@ -1941,9 +1943,9 @@ static void LISTVIEW_GetItemMetrics(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVI
     Box.top = 0;
     Box.bottom = infoPtr->nItemHeight;
 
-    /************************************************************/
-    /* compute ICON bounding box (ala LVM_GETITEMRECT)          */
-    /************************************************************/
+    /******************************************************************/
+    /* compute ICON bounding box (ala LVM_GETITEMRECT) and STATEICON  */
+    /******************************************************************/
     if (doIcon)
     {
 	LONG state_width = 0;
@@ -1982,6 +1984,16 @@ static void LISTVIEW_GetItemMetrics(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVI
 	}
 	if(lprcIcon) *lprcIcon = Icon;
 	TRACE("    - icon=%s\n", wine_dbgstr_rect(&Icon));
+
+        /* TODO: is this correct? */
+        if (lprcStateIcon)
+        {
+            lprcStateIcon->left = Icon.left - state_width;
+            lprcStateIcon->right = Icon.left;
+            lprcStateIcon->top = Icon.top;
+            lprcStateIcon->bottom = lprcStateIcon->top + infoPtr->iconSize.cy;
+            TRACE("    - state icon=%s\n", wine_dbgstr_rect(lprcStateIcon));
+        }
      }
      else Icon.right = 0;
 
@@ -2143,7 +2155,7 @@ static void LISTVIEW_GetItemBox(LISTVIEW_INFO *infoPtr, INT nItem, LPRECT lprcBo
 	lvItem.stateMask = LVIS_FOCUSED;
 	lvItem.state = (lvItem.mask & LVIF_TEXT ? LVIS_FOCUSED : 0);
     }
-    LISTVIEW_GetItemMetrics(infoPtr, &lvItem, lprcBox, 0, 0, 0);
+    LISTVIEW_GetItemMetrics(infoPtr, &lvItem, lprcBox, 0, 0, 0, 0);
 
     OffsetRect(lprcBox, Position.x + Origin.x, Position.y + Origin.y);
 }
@@ -3713,7 +3725,7 @@ static BOOL LISTVIEW_DrawItem(LISTVIEW_INFO *infoPtr, HDC hdc, INT nItem, INT nS
     WCHAR szDispText[DISP_TEXT_SIZE] = { '\0' };
     static const WCHAR szCallback[] = { '(', 'c', 'a', 'l', 'l', 'b', 'a', 'c', 'k', ')', 0 };
     DWORD cdsubitemmode = CDRF_DODEFAULT;
-    RECT* lprcFocus, rcSelect, rcBox, rcIcon, rcLabel;
+    RECT *lprcFocus, rcSelect, rcBox, rcIcon, rcLabel, rcStateIcon;
     NMLVCUSTOMDRAW nmlvcd;
     HIMAGELIST himl;
     LVITEMW lvItem;
@@ -3742,10 +3754,11 @@ static BOOL LISTVIEW_DrawItem(LISTVIEW_INFO *infoPtr, HDC hdc, INT nItem, INT nS
     lprcFocus = infoPtr->bFocus && (lvItem.state & LVIS_FOCUSED) ? &infoPtr->rcFocus : 0;
 
     if (!lprcFocus) lvItem.state &= ~LVIS_FOCUSED;
-    LISTVIEW_GetItemMetrics(infoPtr, &lvItem, &rcBox, &rcSelect, &rcIcon, &rcLabel);
+    LISTVIEW_GetItemMetrics(infoPtr, &lvItem, &rcBox, &rcSelect, &rcIcon, &rcStateIcon, &rcLabel);
     OffsetRect(&rcBox, pos.x, pos.y);
     OffsetRect(&rcSelect, pos.x, pos.y);
     OffsetRect(&rcIcon, pos.x, pos.y);
+    OffsetRect(&rcStateIcon, pos.x, pos.y);
     OffsetRect(&rcLabel, pos.x, pos.y);
     TRACE("    rcBox=%s, rcSelect=%s, rcIcon=%s. rcLabel=%s\n",
         wine_dbgstr_rect(&rcBox), wine_dbgstr_rect(&rcSelect),
@@ -3782,8 +3795,7 @@ static BOOL LISTVIEW_DrawItem(LISTVIEW_INFO *infoPtr, HDC hdc, INT nItem, INT nS
 	{
 	     TRACE("uStateImage=%d\n", uStateImage);
 	     ImageList_Draw(infoPtr->himlState, uStateImage - 1, hdc,
-	         rcIcon.left - infoPtr->iconStateSize.cx,
-	         rcIcon.top, ILD_NORMAL);
+	         rcStateIcon.left, rcStateIcon.top, ILD_NORMAL);
 	}
     }
 
@@ -4029,31 +4041,68 @@ static void LISTVIEW_RefreshList(LISTVIEW_INFO *infoPtr, ITERATOR *i, HDC hdc, D
  * PARAMETER(S):
  * [I] infoPtr : valid pointer to the listview structure
  * [I] hdc : device context handle
+ * [I] prcErase : rect to be erased before refresh (may be NULL)
  *
  * RETURN:
  * NoneX
  */
-static void LISTVIEW_Refresh(LISTVIEW_INFO *infoPtr, HDC hdc)
+static void LISTVIEW_Refresh(LISTVIEW_INFO *infoPtr, HDC hdc, RECT *prcErase)
 {
     UINT uView = infoPtr->dwStyle & LVS_TYPEMASK;
-    COLORREF oldTextColor, oldClrTextBk, oldClrText;
+    COLORREF oldTextColor = 0, oldBkColor = 0, oldClrTextBk, oldClrText;
     NMLVCUSTOMDRAW nmlvcd;
-    HFONT hOldFont;
+    HFONT hOldFont = 0;
     DWORD cdmode;
-    INT oldBkMode;
+    INT oldBkMode = 0;
     RECT rcClient;
     ITERATOR i;
+    HDC hdcOrig = hdc;
+    HBITMAP hbmp = NULL;
 
     LISTVIEW_DUMP(infoPtr);
-  
+
+    if (infoPtr->dwLvExStyle & LVS_EX_DOUBLEBUFFER) {
+        TRACE("double buffering\n");
+
+        hdc = CreateCompatibleDC(hdcOrig);
+        if (!hdc) {
+            ERR("Failed to create DC for backbuffer\n");
+            return;
+        }
+        hbmp = CreateCompatibleBitmap(hdcOrig, infoPtr->rcList.right,
+                                      infoPtr->rcList.bottom);
+        if (!hbmp) {
+            ERR("Failed to create bitmap for backbuffer\n");
+            DeleteDC(hdc);
+            return;
+        }
+
+        SelectObject(hdc, hbmp);
+        SelectObject(hdc, infoPtr->hFont);
+    } else {
+        /* Save dc values we're gonna trash while drawing
+         * FIXME: Should be done in LISTVIEW_DrawItem() */
+        hOldFont = SelectObject(hdc, infoPtr->hFont);
+        oldBkMode = GetBkMode(hdc);
+        oldBkColor = GetBkColor(hdc);
+        oldTextColor = GetTextColor(hdc);
+    }
+
     infoPtr->bIsDrawing = TRUE;
 
-    /* save dc values we're gonna trash while drawing */
-    hOldFont = SelectObject(hdc, infoPtr->hFont);
-    oldBkMode = GetBkMode(hdc);
-    infoPtr->clrTextBkDefault = GetBkColor(hdc);
-    oldTextColor = GetTextColor(hdc);
+    if (prcErase) {
+        LISTVIEW_FillBkgnd(infoPtr, hdc, prcErase);
+    } else if (infoPtr->dwLvExStyle & LVS_EX_DOUBLEBUFFER) {
+        /* If no erasing was done (usually because RedrawWindow was called
+         * with RDW_INVALIDATE only) we need to copy the old contents into
+         * the backbuffer before continuing. */
+        BitBlt(hdc, infoPtr->rcList.left, infoPtr->rcList.top,
+               infoPtr->rcList.right - infoPtr->rcList.left,
+               infoPtr->rcList.bottom - infoPtr->rcList.top,
+               hdcOrig, infoPtr->rcList.left, infoPtr->rcList.top, SRCCOPY);
+    }
 
+    /* FIXME: Shouldn't need to do this */
     oldClrTextBk = infoPtr->clrTextBk;
     oldClrText   = infoPtr->clrText;
    
@@ -4109,10 +4158,21 @@ enddraw:
     infoPtr->clrTextBk = oldClrTextBk;
     infoPtr->clrText = oldClrText;
 
-    SelectObject(hdc, hOldFont);
-    SetBkMode(hdc, oldBkMode);
-    SetBkColor(hdc, infoPtr->clrTextBkDefault);
-    SetTextColor(hdc, oldTextColor);
+    if(hbmp) {
+        BitBlt(hdcOrig, infoPtr->rcList.left, infoPtr->rcList.top,
+               infoPtr->rcList.right - infoPtr->rcList.left,
+               infoPtr->rcList.bottom - infoPtr->rcList.top,
+               hdc, infoPtr->rcList.left, infoPtr->rcList.top, SRCCOPY);
+
+        DeleteObject(hbmp);
+        DeleteDC(hdc);
+    } else {
+        SelectObject(hdc, hOldFont);
+        SetBkMode(hdc, oldBkMode);
+        SetBkColor(hdc, oldBkColor);
+        SetTextColor(hdc, oldTextColor);
+    }
+
     infoPtr->bIsDrawing = FALSE;
 }
 
@@ -5596,19 +5656,19 @@ static BOOL LISTVIEW_GetItemRect(LISTVIEW_INFO *infoPtr, INT nItem, LPRECT lprc)
     switch(lprc->left)
     {
     case LVIR_ICON:
-	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, NULL, NULL, lprc, NULL);
+	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, NULL, NULL, lprc, NULL, NULL);
         break;
 
     case LVIR_LABEL:
-	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, NULL, NULL, NULL, lprc);
+	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, NULL, NULL, NULL, NULL, lprc);
         break;
 
     case LVIR_BOUNDS:
-	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, lprc, NULL, NULL, NULL);
+	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, lprc, NULL, NULL, NULL, NULL);
         break;
 
     case LVIR_SELECTBOUNDS:
-	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, NULL, lprc, NULL, NULL);
+	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, NULL, lprc, NULL, NULL, NULL);
         break;
 
     default:
@@ -5670,12 +5730,12 @@ static BOOL LISTVIEW_GetSubItemRect(LISTVIEW_INFO *infoPtr, INT nItem, LPRECT lp
     switch(lprc->left)
     {
     case LVIR_ICON:
-	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, NULL, NULL, lprc, NULL);
+	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, NULL, NULL, lprc, NULL, NULL);
         break;
 
     case LVIR_LABEL:
     case LVIR_BOUNDS:
-	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, lprc, NULL, NULL, NULL);
+	LISTVIEW_GetItemMetrics(infoPtr, &lvItem, lprc, NULL, NULL, NULL, NULL);
         break;
 
     default:
@@ -6154,7 +6214,7 @@ static INT LISTVIEW_HitTest(LISTVIEW_INFO *infoPtr, LPLVHITTESTINFO lpht, BOOL s
     if (!LISTVIEW_GetItemW(infoPtr, &lvItem)) return -1;
     if (!infoPtr->bFocus) lvItem.state &= ~LVIS_FOCUSED;
 
-    LISTVIEW_GetItemMetrics(infoPtr, &lvItem, &rcBox, NULL, &rcIcon, &rcLabel);
+    LISTVIEW_GetItemMetrics(infoPtr, &lvItem, &rcBox, NULL, &rcIcon, &rcState, &rcLabel);
     LISTVIEW_GetItemOrigin(infoPtr, iItem, &Position);
     opt.x = lpht->pt.x - Position.x - Origin.x;
     opt.y = lpht->pt.y - Position.y - Origin.y;
@@ -6165,9 +6225,6 @@ static INT LISTVIEW_HitTest(LISTVIEW_INFO *infoPtr, LPLVHITTESTINFO lpht, BOOL s
 	UnionRect(&rcBounds, &rcIcon, &rcLabel);
     TRACE("rcBounds=%s\n", wine_dbgstr_rect(&rcBounds));
     if (!PtInRect(&rcBounds, opt)) return -1;
-
-    rcState = rcIcon;
-    OffsetRect(&rcState, -infoPtr->iconStateSize.cx, 0);
 
     if (PtInRect(&rcIcon, opt))
 	lpht->flags |= LVHT_ONITEMICON;
@@ -7720,7 +7777,7 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, const CREATESTRUCTW *lpcs)
 
   /* initialize color information  */
   infoPtr->clrBk = CLR_NONE;
-  infoPtr->clrText = comctl32_color.clrWindowText;
+  infoPtr->clrText = CLR_DEFAULT;
   infoPtr->clrTextBk = CLR_DEFAULT;
   LISTVIEW_SetBkColor(infoPtr, comctl32_color.clrWindow);
 
@@ -7882,6 +7939,9 @@ static inline BOOL LISTVIEW_EraseBkgnd(LISTVIEW_INFO *infoPtr, HDC hdc)
     TRACE("(hdc=%p)\n", hdc);
 
     if (!GetClipBox(hdc, &rc)) return FALSE;
+
+    /* for double buffered controls we need to do this during refresh */
+    if (infoPtr->dwLvExStyle & LVS_EX_DOUBLEBUFFER) return FALSE;
 
     return LISTVIEW_FillBkgnd(infoPtr, hdc, &rc);
 }
@@ -8802,15 +8862,14 @@ static LRESULT LISTVIEW_Paint(LISTVIEW_INFO *infoPtr, HDC hdc)
     UpdateWindow(infoPtr->hwndHeader);
 
     if (hdc) 
-	LISTVIEW_Refresh(infoPtr, hdc);
+        LISTVIEW_Refresh(infoPtr, hdc, NULL);
     else
     {
 	PAINTSTRUCT ps;
 
 	hdc = BeginPaint(infoPtr->hwndSelf, &ps);
 	if (!hdc) return 1;
-	if (ps.fErase) LISTVIEW_FillBkgnd(infoPtr, hdc, &ps.rcPaint);
-	LISTVIEW_Refresh(infoPtr, hdc);
+	LISTVIEW_Refresh(infoPtr, hdc, ps.fErase ? &ps.rcPaint : NULL);
 	EndPaint(infoPtr->hwndSelf, &ps);
     }
 

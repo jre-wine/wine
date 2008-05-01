@@ -65,6 +65,7 @@ static struct list xcv_handles = LIST_INIT( xcv_handles );
 
 /* ############################### */
 
+static const WCHAR cmd_DeletePortW[] = {'D','e','l','e','t','e','P','o','r','t',0};
 static const WCHAR cmd_ConfigureLPTPortCommandOKW[] = {'C','o','n','f','i','g','u','r','e',
                                     'L','P','T','P','o','r','t',
                                     'C','o','m','m','a','n','d','O','K',0};
@@ -458,6 +459,9 @@ DWORD WINAPI localmon_XcvDataPort(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInput
     TRACE("(%p, %s, %p, %d, %p, %d, %p)\n", hXcv, debugstr_w(pszDataName),
           pInputData, cbInputData, pOutputData, cbOutputData, pcbOutputNeeded);
 
+    /* Native localspl.dll crashes on w2k and xp, when XcvDataPort is called
+       with "AddPort" as command. We do not need to implement this */
+
     if (!lstrcmpW(pszDataName, cmd_ConfigureLPTPortCommandOKW)) {
         TRACE("InputData (%d): %s\n", cbInputData, debugstr_w( (LPWSTR) pInputData));
         res = RegCreateKeyW(HKEY_LOCAL_MACHINE, WinNT_CV_WindowsW, &hroot);
@@ -466,6 +470,18 @@ DWORD WINAPI localmon_XcvDataPort(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInput
             RegCloseKey(hroot);
         }
         return res;
+    }
+
+    if (!lstrcmpW(pszDataName, cmd_DeletePortW)) {
+        TRACE("InputData (%d): %s\n", cbInputData, debugstr_w( (LPWSTR) pInputData));
+        res = RegOpenKeyW(HKEY_LOCAL_MACHINE, WinNT_CV_PortsW, &hroot);
+        if (res == ERROR_SUCCESS) {
+            res = RegDeleteValueW(hroot, (LPWSTR) pInputData);
+            RegCloseKey(hroot);
+            TRACE("=> %u with %u\n", res, GetLastError() );
+            return res;
+        }
+        return ERROR_FILE_NOT_FOUND;
     }
 
     if (!lstrcmpW(pszDataName, cmd_GetDefaultCommConfigW)) {
@@ -520,7 +536,13 @@ DWORD WINAPI localmon_XcvDataPort(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInput
     if (!lstrcmpW(pszDataName, cmd_SetDefaultCommConfigW)) {
         /* get the portname from the Handle */
         ptr =  strchrW(((xcv_t *)hXcv)->nameW, ' ');
-        ptr++;  /* skip the space */
+        if (ptr) {
+            ptr++;  /* skip the space */
+        }
+        else
+        {
+            ptr =  ((xcv_t *)hXcv)->nameW;
+        }
         lstrcpynW(buffer, ptr, sizeof(buffer)/sizeof(WCHAR));
         if (buffer[0]) buffer[lstrlenW(buffer)-1] = '\0';  /* remove the ':' */
         res = SetDefaultCommConfigW(buffer, (LPCOMMCONFIG) pInputData, cbInputData);

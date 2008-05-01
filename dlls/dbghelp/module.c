@@ -64,17 +64,25 @@ static int match_ext(const WCHAR* ptr, size_t len)
     return 0;
 }
 
+static const WCHAR* get_filename(const WCHAR* name, const WCHAR* endptr)
+{
+    const WCHAR*        ptr;
+
+    if (!endptr) endptr = name + strlenW(name);
+    for (ptr = endptr - 1; ptr >= name; ptr--)
+    {
+        if (*ptr == '/' || *ptr == '\\') break;
+    }
+    return ++ptr;
+}
+
 static void module_fill_module(const WCHAR* in, WCHAR* out, size_t size)
 {
-    const WCHAR *ptr,*endptr;
+    const WCHAR *ptr, *endptr;
     size_t      len, l;
 
-    endptr = in + strlenW(in);
-    for (ptr = endptr - 1;
-         ptr >= in && *ptr != '/' && *ptr != '\\';
-         ptr--);
-    ptr++;
-    len = min(endptr-ptr,size-1);
+    ptr = get_filename(in, endptr = in + strlenW(in));
+    len = min(endptr - ptr, size - 1);
     memcpy(out, ptr, len * sizeof(WCHAR));
     out[len] = '\0';
     if (len > 4 && (l = match_ext(out, len)))
@@ -182,46 +190,50 @@ struct module* module_new(struct process* pcs, const WCHAR* name,
  *	module_find_by_name
  *
  */
-struct module* module_find_by_name(const struct process* pcs,
-                                   const WCHAR* name, enum module_type type)
+struct module* module_find_by_name(const struct process* pcs, const WCHAR* name)
 {
     struct module*      module;
 
-    if (type == DMT_UNKNOWN)
+    for (module = pcs->lmodules; module; module = module->next)
     {
-        if ((module = module_find_by_name(pcs, name, DMT_PE)) ||
-            (module = module_find_by_name(pcs, name, DMT_ELF)))
-            return module;
-    }
-    else
-    {
-        WCHAR   modname[MAX_PATH];
-
-        for (module = pcs->lmodules; module; module = module->next)
-        {
-            if (type == module->type &&
-                !strcmpiW(name, module->module.LoadedImageName))
-                return module;
-        }
-        module_fill_module(name, modname, sizeof(modname));
-        for (module = pcs->lmodules; module; module = module->next)
-        {
-            if (type == module->type &&
-                !strcmpiW(modname, module->module.ModuleName))
-                return module;
-        }
+        if (!strcmpiW(name, module->module.ModuleName)) return module;
     }
     SetLastError(ERROR_INVALID_NAME);
     return NULL;
 }
 
-struct module* module_find_by_nameA(const struct process* pcs,
-                                    const char* name, enum module_type type)
+struct module* module_find_by_nameA(const struct process* pcs, const char* name)
 {
     WCHAR wname[MAX_PATH];
 
     MultiByteToWideChar(CP_ACP, 0, name, -1, wname, sizeof(wname) / sizeof(WCHAR));
-    return module_find_by_name(pcs, wname, type);
+    return module_find_by_name(pcs, wname);
+}
+
+/***********************************************************************
+ *	module_is_already_loaded
+ *
+ */
+struct module* module_is_already_loaded(const struct process* pcs, const WCHAR* name)
+{
+    struct module*      module;
+    const WCHAR*        filename;
+
+    /* first compare the loaded image name... */
+    for (module = pcs->lmodules; module; module = module->next)
+    {
+        if (!strcmpiW(name, module->module.LoadedImageName))
+            return module;
+    }
+    /* then compare the standard filenames (without the path) ... */
+    filename = get_filename(name, NULL);
+    for (module = pcs->lmodules; module; module = module->next)
+    {
+        if (!strcmpiW(filename, get_filename(module->module.LoadedImageName, NULL)))
+            return module;
+    }
+    SetLastError(ERROR_INVALID_NAME);
+    return NULL;
 }
 
 /***********************************************************************
@@ -350,27 +362,39 @@ struct module* module_find_by_addr(const struct process* pcs, unsigned long addr
     return module;
 }
 
+/******************************************************************
+ *		module_is_elf_container_loaded
+ *
+ * checks whether the ELF container, for a (supposed) PE builtin is
+ * already loaded
+ */
 static BOOL module_is_elf_container_loaded(struct process* pcs,
-                                           const WCHAR* ImageName,
-                                           const WCHAR* ModuleName)
+                                           const WCHAR* ImageName, DWORD base)
 {
-    WCHAR               buffer[MAX_PATH];
     size_t              len;
     struct module*      module;
+    LPCWSTR             filename, modname;
 
-    if (!ModuleName)
-    {
-        module_fill_module(ImageName, buffer, sizeof(buffer));
-        ModuleName = buffer;
-    }
-    len = strlenW(ModuleName);
+    if (!base) return FALSE;
+    filename = get_filename(ImageName, NULL);
+    len = strlenW(filename);
+
     for (module = pcs->lmodules; module; module = module->next)
     {
-        if (!strncmpiW(module->module.ModuleName, ModuleName, len) &&
-            module->type == DMT_ELF &&
-            !strcmpW(module->module.ModuleName + len, S_ElfW))
-            return TRUE;
+        if (module->type == DMT_ELF &&
+            base >= module->module.BaseOfImage &&
+            base < module->module.BaseOfImage + module->module.ImageSize)
+        {
+            modname = get_filename(module->module.LoadedImageName, NULL);
+            if (!strncmpiW(modname, filename, len) &&
+                !memcmp(modname + len, S_DotSoW, 3 * sizeof(WCHAR)))
+            {
+                return TRUE;
+            }
+        }
     }
+    /* likely a native PE module */
+    WARN("Couldn't find container for %s\n", debugstr_w(ImageName));
     return FALSE;
 }
 
@@ -491,33 +515,36 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
     /* this is a Wine extension to the API just to redo the synchronisation */
     if (!wImageName && !hFile) return 0;
 
-    if (module_is_elf_container_loaded(pcs, wImageName, wModuleName))
+    /* check if the module is already loaded, or if it's a builtin PE module with
+     * an containing ELF module
+     */
+    if (wImageName)
     {
-        /* force the loading of DLL as builtin */
-        if ((module = pe_load_module_from_pcs(pcs, wImageName, wModuleName,
-                                              BaseOfDll, SizeOfDll)))
-            goto done;
-        WARN("Couldn't locate %s\n", debugstr_w(wImageName));
-        return 0;
+        module = module_is_already_loaded(pcs, wImageName);
+        if (!module && module_is_elf_container_loaded(pcs, wImageName, BaseOfDll))
+        {
+            /* force the loading of DLL as builtin */
+            module = pe_load_builtin_module(pcs, wImageName, BaseOfDll, SizeOfDll);
+        }
     }
-    TRACE("Assuming %s as native DLL\n", debugstr_w(wImageName));
-    if (!(module = pe_load_module(pcs, wImageName, hFile, BaseOfDll, SizeOfDll)))
+    if (!module)
     {
-        if (module_get_type_by_name(wImageName) == DMT_ELF &&
-            (module = elf_load_module(pcs, wImageName, BaseOfDll)))
-            goto done;
-        FIXME("Should have successfully loaded debug information for image %s\n",
-              debugstr_w(wImageName));
-        if ((module = pe_load_module_from_pcs(pcs, wImageName, wModuleName,
-                                              BaseOfDll, SizeOfDll)))
-            goto done;
+        /* otherwise, try a regular PE module */
+        if (!(module = pe_load_native_module(pcs, wImageName, hFile, BaseOfDll, SizeOfDll)))
+        {
+            /* and finally and ELF module */
+            if (module_get_type_by_name(wImageName) == DMT_ELF)
+                module = elf_load_module(pcs, wImageName, BaseOfDll);
+        }
+    }
+    if (!module)
+    {
         WARN("Couldn't locate %s\n", debugstr_w(wImageName));
         return 0;
     }
     module->module.NumSyms = module->ht_symbols.num_elts;
-done:
-    /* by default pe_load_module fills module.ModuleName from a derivation
-     * of ImageName. Overwrite it, if we have better information
+    /* by default module_new fills module.ModuleName from a derivation
+     * of LoadedImageName. Overwrite it, if we have better information
      */
     if (wModuleName)
         module_set_module(module, wModuleName);
@@ -545,7 +572,7 @@ BOOL module_remove(struct process* pcs, struct module* module)
 {
     struct module**     p;
 
-    TRACE("%s (%p)\n", module->module_name, module);
+    TRACE("%s (%p)\n", debugstr_w(module->module.ModuleName), module);
     hash_table_destroy(&module->ht_symbols);
     hash_table_destroy(&module->ht_types);
     HeapFree(GetProcessHeap(), 0, (char*)module->sources);
@@ -605,33 +632,71 @@ BOOL WINAPI SymUnloadModule64(HANDLE hProcess, DWORD64 BaseOfDll)
  *		SymEnumerateModules (DBGHELP.@)
  *
  */
+struct enum_modW64_32
+{
+    PSYM_ENUMMODULES_CALLBACK   cb;
+    PVOID                       user;
+    char                        module[MAX_PATH];
+};
+
+static BOOL CALLBACK enum_modW64_32(PWSTR name, DWORD64 base, PVOID user)
+{
+    struct enum_modW64_32*      x = user;
+
+    WideCharToMultiByte(CP_ACP, 0, name, -1, x->module, sizeof(x->module), NULL, NULL);
+    return x->cb(x->module, (DWORD)base, x->user);
+}
+
 BOOL  WINAPI SymEnumerateModules(HANDLE hProcess,
                                  PSYM_ENUMMODULES_CALLBACK EnumModulesCallback,  
                                  PVOID UserContext)
 {
-    struct process*     pcs = process_find_by_handle(hProcess);
-    struct module*      module;
+    struct enum_modW64_32       x;
 
-    if (!pcs) return FALSE;
-    
-    for (module = pcs->lmodules; module; module = module->next)
-    {
-        if (!(dbghelp_options & SYMOPT_WINE_WITH_ELF_MODULES) && module->type == DMT_ELF)
-            continue;
-        if (!EnumModulesCallback(module->module_name,
-                                 module->module.BaseOfImage, UserContext))
-            break;
-    }
-    return TRUE;
+    x.cb = EnumModulesCallback;
+    x.user = UserContext;
+
+    return SymEnumerateModulesW64(hProcess, enum_modW64_32, &x);
 }
 
 /******************************************************************
  *		SymEnumerateModules64 (DBGHELP.@)
  *
  */
+struct enum_modW64_64
+{
+    PSYM_ENUMMODULES_CALLBACK64 cb;
+    PVOID                       user;
+    char                        module[MAX_PATH];
+};
+
+static BOOL CALLBACK enum_modW64_64(PWSTR name, DWORD64 base, PVOID user)
+{
+    struct enum_modW64_64*      x = user;
+
+    WideCharToMultiByte(CP_ACP, 0, name, -1, x->module, sizeof(x->module), NULL, NULL);
+    return x->cb(x->module, base, x->user);
+}
+
 BOOL  WINAPI SymEnumerateModules64(HANDLE hProcess,
                                    PSYM_ENUMMODULES_CALLBACK64 EnumModulesCallback,  
                                    PVOID UserContext)
+{
+    struct enum_modW64_64       x;
+
+    x.cb = EnumModulesCallback;
+    x.user = UserContext;
+
+    return SymEnumerateModulesW64(hProcess, enum_modW64_64, &x);
+}
+
+/******************************************************************
+ *		SymEnumerateModulesW64 (DBGHELP.@)
+ *
+ */
+BOOL  WINAPI SymEnumerateModulesW64(HANDLE hProcess,
+                                    PSYM_ENUMMODULES_CALLBACKW64 EnumModulesCallback,
+                                    PVOID UserContext)
 {
     struct process*     pcs = process_find_by_handle(hProcess);
     struct module*      module;
@@ -642,7 +707,7 @@ BOOL  WINAPI SymEnumerateModules64(HANDLE hProcess,
     {
         if (!(dbghelp_options & SYMOPT_WINE_WITH_ELF_MODULES) && module->type == DMT_ELF)
             continue;
-        if (!EnumModulesCallback(module->module_name,
+        if (!EnumModulesCallback(module->module.ModuleName,
                                  module->module.BaseOfImage, UserContext))
             break;
     }

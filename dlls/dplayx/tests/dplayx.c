@@ -18,6 +18,7 @@
  */
 
 #include "wine/test.h"
+#define INITGUID
 #include <dplay.h>
 
 static BOOL validSP = FALSE; /*This global variable is needed until wine has a working service provider
@@ -32,7 +33,6 @@ static BOOL CALLBACK EnumConnectionsCallback(LPCGUID lpguidSP, LPVOID lpConnecti
     {
         /*I'm forcing TCP/IP Sevice provider*/
         hr = IDirectPlayX_InitializeConnection((LPDIRECTPLAY4) lpContext, lpConnection, 0);
-        todo_wine ok( SUCCEEDED( hr ), "It's not possible to initialize TCP/IP service provider\n");
         if( SUCCEEDED( hr ))
             validSP = TRUE;
         return FALSE;
@@ -51,29 +51,34 @@ static void test_session_guid(LPDIRECTPLAY4 pDP)
 
     CoCreateGuid( &appGuid );
     IDirectPlayX_EnumConnections(pDP, &appGuid, EnumConnectionsCallback, pDP, 0);
-    if( validSP )
+
+    if( !validSP )
     {
-        memset(&sessionDesc, 0, sizeof( DPSESSIONDESC2 ));
-        memset(&zeroGuid, 0, 16);
-
-        sessionDesc.dwSize = sizeof( DPSESSIONDESC2 );
-        memcpy(&sessionDesc.guidApplication, &appGuid, 16);
-        sessionDesc.dwFlags = DPSESSION_CLIENTSERVER;
-        sessionDesc.lpszSessionNameA = name;
-        sessionDesc.dwMaxPlayers = 10;
-        sessionDesc.dwCurrentPlayers = 0;
-        IDirectPlayX_Open(pDP, &sessionDesc, DPOPEN_CREATE);
-        /* I read the sessiondesc from directplay in a fresh memory location,
-	   because directplay does not touch the original struct, but saves
-	   internally a version with the session guid set*/
-        IDirectPlayX_GetSessionDesc(pDP, NULL, &sessionSize);
-        newSession=HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sessionSize);
-        IDirectPlayX_GetSessionDesc(pDP, newSession, &sessionSize);
-        todo_wine ok( !IsEqualGUID(&newSession->guidInstance, &zeroGuid), "Session guid not initialized");
-        HeapFree(GetProcessHeap(), 0, newSession);
+        skip("Tests will not work without a valid service provider, skipping.\n");
+        return;
     }
-}
 
+    memset(&sessionDesc, 0, sizeof( DPSESSIONDESC2 ));
+    memset(&zeroGuid, 0, 16);
+
+    sessionDesc.dwSize = sizeof( DPSESSIONDESC2 );
+    memcpy(&sessionDesc.guidApplication, &appGuid, 16);
+    sessionDesc.dwFlags = DPSESSION_CLIENTSERVER;
+    U1(sessionDesc).lpszSessionNameA = name;
+    sessionDesc.dwMaxPlayers = 10;
+    sessionDesc.dwCurrentPlayers = 0;
+    IDirectPlayX_Open(pDP, &sessionDesc, DPOPEN_CREATE);
+
+    /* I read the sessiondesc from directplay in a fresh memory location,
+       because directplay does not touch the original struct, but saves
+       internally a version with the session guid set*/
+
+    IDirectPlayX_GetSessionDesc(pDP, NULL, &sessionSize);
+    newSession = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sessionSize);
+    IDirectPlayX_GetSessionDesc(pDP, newSession, &sessionSize);
+    todo_wine ok( !IsEqualGUID(&newSession->guidInstance, &zeroGuid), "Session guid not initialized\n");
+    HeapFree(GetProcessHeap(), 0, newSession);
+}
 
 START_TEST(dplayx)
 {

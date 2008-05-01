@@ -897,19 +897,23 @@ static LRESULT
 MONTHCAL_SetFirstDayOfWeek(MONTHCAL_INFO *infoPtr, LPARAM lParam)
 {
   int prev = infoPtr->firstDay;
+  int localFirstDay;
   WCHAR buf[40];
 
   TRACE("day %ld\n", lParam);
 
-  if((lParam >= 0) && (lParam < 7)) {
-    infoPtr->firstDay = (int)lParam;
-  }
+  GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK, buf, countof(buf));
+  TRACE("%s %d\n", debugstr_w(buf), strlenW(buf));
+
+  localFirstDay = atoiW(buf);
+
+  if(lParam == -1)
+    infoPtr->firstDay = MAKELONG(localFirstDay, FALSE);
+  else if(lParam >= 7)
+    infoPtr->firstDay = MAKELONG(localFirstDay, TRUE);
   else
-    {
-      GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK, buf, countof(buf));
-      TRACE("%s %d\n", debugstr_w(buf), strlenW(buf));
-      infoPtr->firstDay = (atoiW(buf)+1)%7;
-    }
+    infoPtr->firstDay = MAKELONG(lParam, TRUE);
+
   return prev;
 }
 
@@ -1037,6 +1041,8 @@ MONTHCAL_SetCurSel(MONTHCAL_INFO *infoPtr, LPARAM lParam)
   TRACE("%lx\n", lParam);
   if((infoPtr==NULL) ||(lpSel==NULL)) return FALSE;
   if(GetWindowLongW(infoPtr->hwndSelf, GWL_STYLE) & MCS_MULTISELECT) return FALSE;
+
+  if(!MONTHCAL_ValidateTime(*lpSel)) return FALSE;
 
   infoPtr->currentMonth=lpSel->wMonth;
   infoPtr->currentYear=lpSel->wYear;

@@ -30,8 +30,43 @@
 
 #include "wine/test.h"
 
+LONG  (WINAPI *pGdiGetCharDimensions)(HDC hdc, LPTEXTMETRICW lptm, LONG *height);
+BOOL  (WINAPI *pGetCharABCWidthsW)(HDC hdc, UINT first, UINT last, LPABC abc);
+DWORD (WINAPI *pGetFontUnicodeRanges)(HDC hdc, LPGLYPHSET lpgs);
 DWORD (WINAPI *pGetGlyphIndicesA)(HDC hdc, LPCSTR lpstr, INT count, LPWORD pgi, DWORD flags);
 DWORD (WINAPI *pGetGlyphIndicesW)(HDC hdc, LPCWSTR lpstr, INT count, LPWORD pgi, DWORD flags);
+
+static HMODULE hgdi32 = 0;
+
+static void init(void)
+{
+    hgdi32 = GetModuleHandleA("gdi32.dll");
+
+    pGdiGetCharDimensions = (void *)GetProcAddress(hgdi32, "GdiGetCharDimensions");
+    pGetCharABCWidthsW = (void *)GetProcAddress(hgdi32, "GetCharABCWidthsW");
+    pGetFontUnicodeRanges = (void *)GetProcAddress(hgdi32, "GetFontUnicodeRanges");
+    pGetGlyphIndicesA = (void *)GetProcAddress(hgdi32, "GetGlyphIndicesA");
+    pGetGlyphIndicesW = (void *)GetProcAddress(hgdi32, "GetGlyphIndicesW");
+}
+
+static INT CALLBACK is_truetype_font_installed_proc(const LOGFONT *elf, const TEXTMETRIC *ntm, DWORD type, LPARAM lParam)
+{
+    if (type != TRUETYPE_FONTTYPE) return 1;
+
+    return 0;
+}
+
+static BOOL is_truetype_font_installed(const char *name)
+{
+    HDC hdc = GetDC(0);
+    BOOL ret = FALSE;
+
+    if (!EnumFontFamiliesA(hdc, name, is_truetype_font_installed_proc, 0))
+        ret = TRUE;
+
+    ReleaseDC(0, hdc);
+    return ret;
+}
 
 static INT CALLBACK is_font_installed_proc(const LOGFONT *elf, const TEXTMETRIC *ntm, DWORD type, LPARAM lParam)
 {
@@ -370,27 +405,30 @@ static void test_GdiGetCharDimensions(void)
     SIZE size;
     LONG avgwidth, height;
     static const char szAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    typedef LONG (WINAPI *fnGdiGetCharDimensions)(HDC hdc, LPTEXTMETRICW lptm, LONG *height);
-    fnGdiGetCharDimensions GdiGetCharDimensions = (fnGdiGetCharDimensions)GetProcAddress(LoadLibrary("gdi32"), "GdiGetCharDimensions");
-    if (!GdiGetCharDimensions) return;
+
+    if (!pGdiGetCharDimensions)
+    {
+        skip("GdiGetCharDimensions not available on this platform\n");
+        return;
+    }
 
     hdc = CreateCompatibleDC(NULL);
 
     GetTextExtentPoint(hdc, szAlphabet, strlen(szAlphabet), &size);
     avgwidth = ((size.cx / 26) + 1) / 2;
 
-    ret = GdiGetCharDimensions(hdc, &tm, &height);
+    ret = pGdiGetCharDimensions(hdc, &tm, &height);
     ok(ret == avgwidth, "GdiGetCharDimensions should have returned width of %d instead of %d\n", avgwidth, ret);
     ok(height == tm.tmHeight, "GdiGetCharDimensions should have set height to %d instead of %d\n", tm.tmHeight, height);
 
-    ret = GdiGetCharDimensions(hdc, &tm, NULL);
+    ret = pGdiGetCharDimensions(hdc, &tm, NULL);
     ok(ret == avgwidth, "GdiGetCharDimensions should have returned width of %d instead of %d\n", avgwidth, ret);
 
-    ret = GdiGetCharDimensions(hdc, NULL, NULL);
+    ret = pGdiGetCharDimensions(hdc, NULL, NULL);
     ok(ret == avgwidth, "GdiGetCharDimensions should have returned width of %d instead of %d\n", avgwidth, ret);
 
     height = 0;
-    ret = GdiGetCharDimensions(hdc, NULL, &height);
+    ret = pGdiGetCharDimensions(hdc, NULL, &height);
     ok(ret == avgwidth, "GdiGetCharDimensions should have returned width of %d instead of %d\n", avgwidth, ret);
     ok(height == size.cy, "GdiGetCharDimensions should have set height to %d instead of %d\n", size.cy, height);
 
@@ -401,11 +439,9 @@ static void test_GetCharABCWidthsW(void)
 {
     BOOL ret;
     ABC abc[1];
-    typedef BOOL (WINAPI *fnGetCharABCWidthsW)(HDC hdc, UINT first, UINT last, LPABC abc);
-    fnGetCharABCWidthsW GetCharABCWidthsW = (fnGetCharABCWidthsW)GetProcAddress(LoadLibrary("gdi32"), "GetCharABCWidthsW");
-    if (!GetCharABCWidthsW) return;
+    if (!pGetCharABCWidthsW) return;
 
-    ret = GetCharABCWidthsW(NULL, 'a', 'a', abc);
+    ret = pGetCharABCWidthsW(NULL, 'a', 'a', abc);
     ok(!ret, "GetCharABCWidthsW should have returned FALSE\n");
 }
 
@@ -482,7 +518,7 @@ static void test_text_extents(void)
     ReleaseDC(NULL, hdc);
 }
 
-static void test_GetGlyphIndices()
+static void test_GetGlyphIndices(void)
 {
     HDC      hdc;
     HFONT    hfont;
@@ -493,17 +529,14 @@ static void test_GetGlyphIndices()
     WORD     glyphs[(sizeof(testtext)/2)-1];
     TEXTMETRIC textm;
 
-    typedef BOOL (WINAPI *fnGetGlyphIndicesW)(HDC hdc, LPCWSTR lpstr, INT count, LPWORD pgi, DWORD flags);
-    fnGetGlyphIndicesW GetGlyphIndicesW = (fnGetGlyphIndicesW)GetProcAddress(LoadLibrary("gdi32"), 
-                                           "GetGlyphIndicesW");
-    if (!GetGlyphIndicesW) {
-        trace("GetGlyphIndices not available on platform\n");
+    if (!pGetGlyphIndicesW) {
+        skip("GetGlyphIndices not available on platform\n");
         return;
     }
 
     if(!is_font_installed("Symbol"))
     {
-        trace("Symbol is not installed so skipping this test\n");
+        skip("Symbol is not installed so skipping this test\n");
         return;
     }
 
@@ -516,11 +549,11 @@ static void test_GetGlyphIndices()
 
     ok(GetTextMetrics(hdc, &textm), "GetTextMetric failed\n");
     flags |= GGI_MARK_NONEXISTING_GLYPHS;
-    charcount = GetGlyphIndicesW(hdc, testtext, (sizeof(testtext)/2)-1, glyphs, flags);
+    charcount = pGetGlyphIndicesW(hdc, testtext, (sizeof(testtext)/2)-1, glyphs, flags);
     ok(charcount == 5, "GetGlyphIndices count of glyphs should = 5 not %d\n", charcount);
     ok(glyphs[4] == 0x001f, "GetGlyphIndices should have returned a nonexistent char not %04x\n", glyphs[4]);
     flags = 0;
-    charcount = GetGlyphIndicesW(hdc, testtext, (sizeof(testtext)/2)-1, glyphs, flags);
+    charcount = pGetGlyphIndicesW(hdc, testtext, (sizeof(testtext)/2)-1, glyphs, flags);
     ok(charcount == 5, "GetGlyphIndices count of glyphs should = 5 not %d\n", charcount);
     ok(glyphs[4] == textm.tmDefaultChar, "GetGlyphIndices should have returned a %04x not %04x\n", 
                     textm.tmDefaultChar, glyphs[4]);
@@ -1048,9 +1081,6 @@ static void test_font_charset(void)
     };
     int i;
 
-    pGetGlyphIndicesA = (void *)GetProcAddress(GetModuleHandle("gdi32.dll"), "GetGlyphIndicesA");
-    pGetGlyphIndicesW = (void *)GetProcAddress(GetModuleHandle("gdi32.dll"), "GetGlyphIndicesW");
-
     if (!pGetGlyphIndicesA || !pGetGlyphIndicesW)
     {
         skip("Skipping the font charset test on a Win9x platform\n");
@@ -1093,8 +1123,14 @@ static void test_GetFontUnicodeRanges(void)
     LOGFONTA lf;
     HDC hdc;
     HFONT hfont, hfont_old;
-    DWORD size, i;
+    DWORD size;
     GLYPHSET *gs;
+
+    if (!pGetFontUnicodeRanges)
+    {
+        skip("GetFontUnicodeRanges not available before W2K\n");
+        return;
+    }
 
     memset(&lf, 0, sizeof(lf));
     lstrcpyA(lf.lfFaceName, "Arial");
@@ -1103,19 +1139,20 @@ static void test_GetFontUnicodeRanges(void)
     hdc = GetDC(0);
     hfont_old = SelectObject(hdc, hfont);
 
-    size = GetFontUnicodeRanges(NULL, NULL);
+    size = pGetFontUnicodeRanges(NULL, NULL);
     ok(!size, "GetFontUnicodeRanges succeeded unexpectedly\n");
 
-    size = GetFontUnicodeRanges(hdc, NULL);
+    size = pGetFontUnicodeRanges(hdc, NULL);
     ok(size, "GetFontUnicodeRanges failed unexpectedly\n");
 
     gs = HeapAlloc(GetProcessHeap(), 0, size);
 
-    size = GetFontUnicodeRanges(hdc, gs);
+    size = pGetFontUnicodeRanges(hdc, gs);
     ok(size, "GetFontUnicodeRanges failed\n");
-
+#if 0
     for (i = 0; i < gs->cRanges; i++)
         trace("%03d wcLow %04x cGlyphs %u\n", i, gs->ranges[i].wcLow, gs->ranges[i].cGlyphs);
+#endif
     trace("found %u ranges\n", gs->cRanges);
 
     HeapFree(GetProcessHeap(), 0, gs);
@@ -1125,8 +1162,461 @@ static void test_GetFontUnicodeRanges(void)
     ReleaseDC(NULL, hdc);
 }
 
+#define MAX_ENUM_FONTS 256
+
+struct enum_font_data
+{
+    int total;
+    LOGFONT lf[MAX_ENUM_FONTS];
+};
+
+static INT CALLBACK arial_enum_proc(const LOGFONT *lf, const TEXTMETRIC *tm, DWORD type, LPARAM lParam)
+{
+    struct enum_font_data *efd = (struct enum_font_data *)lParam;
+
+    if (type != TRUETYPE_FONTTYPE) return 1;
+#if 0
+    trace("enumed font \"%s\", charset %d, weight %d, italic %d\n",
+          lf->lfFaceName, lf->lfCharSet, lf->lfWeight, lf->lfItalic);
+#endif
+    if (efd->total < MAX_ENUM_FONTS)
+        efd->lf[efd->total++] = *lf;
+
+    return 1;
+}
+
+static void get_charset_stats(struct enum_font_data *efd,
+                              int *ansi_charset, int *symbol_charset,
+                              int *russian_charset)
+{
+    int i;
+
+    *ansi_charset = 0;
+    *symbol_charset = 0;
+    *russian_charset = 0;
+
+    for (i = 0; i < efd->total; i++)
+    {
+        switch (efd->lf[i].lfCharSet)
+        {
+        case ANSI_CHARSET:
+            (*ansi_charset)++;
+            break;
+        case SYMBOL_CHARSET:
+            (*symbol_charset)++;
+            break;
+        case RUSSIAN_CHARSET:
+            (*russian_charset)++;
+            break;
+        }
+    }
+}
+
+static void test_EnumFontFamilies(const char *font_name, INT font_charset)
+{
+    struct enum_font_data efd;
+    LOGFONT lf;
+    HDC hdc;
+    int i, ret, ansi_charset, symbol_charset, russian_charset;
+
+    trace("Testing font %s, charset %d\n", *font_name ? font_name : "<empty>", font_charset);
+
+    if (*font_name && !is_truetype_font_installed(font_name))
+    {
+        skip("%s is not installed\n", font_name);
+        return;
+    }
+
+    hdc = GetDC(0);
+
+    /* Observed behaviour: EnumFontFamilies enumerates aliases like "Arial Cyr"
+     * while EnumFontFamiliesEx doesn't.
+     */
+    if (!*font_name && font_charset == DEFAULT_CHARSET) /* do it only once */
+    {
+        efd.total = 0;
+        SetLastError(0xdeadbeef);
+        ret = EnumFontFamilies(hdc, NULL, arial_enum_proc, (LPARAM)&efd);
+        ok(ret, "EnumFontFamilies error %u\n", GetLastError());
+        get_charset_stats(&efd, &ansi_charset, &symbol_charset, &russian_charset);
+        trace("enumerated ansi %d, symbol %d, russian %d fonts for NULL\n",
+              ansi_charset, symbol_charset, russian_charset);
+        ok(efd.total > 0, "no fonts enumerated: NULL\n");
+        ok(ansi_charset > 0, "NULL family should enumerate ANSI_CHARSET\n");
+        ok(symbol_charset > 0, "NULL family should enumerate SYMBOL_CHARSET\n");
+        ok(russian_charset > 0, "NULL family should enumerate RUSSIAN_CHARSET\n");
+    }
+
+    efd.total = 0;
+    SetLastError(0xdeadbeef);
+    ret = EnumFontFamilies(hdc, font_name, arial_enum_proc, (LPARAM)&efd);
+    ok(ret, "EnumFontFamilies error %u\n", GetLastError());
+    get_charset_stats(&efd, &ansi_charset, &symbol_charset, &russian_charset);
+    trace("enumerated ansi %d, symbol %d, russian %d fonts for %s\n",
+          ansi_charset, symbol_charset, russian_charset,
+          *font_name ? font_name : "<empty>");
+    if (*font_name)
+        ok(efd.total > 0, "no fonts enumerated: %s\n", font_name);
+    else
+        ok(!efd.total, "no fonts should be enumerated for empty font_name\n");
+    for (i = 0; i < efd.total; i++)
+    {
+/* FIXME: remove completely once Wine is fixed */
+if (efd.lf[i].lfCharSet != font_charset)
+{
+todo_wine
+    ok(efd.lf[i].lfCharSet == font_charset, "%d: got charset %d\n", i, efd.lf[i].lfCharSet);
+}
+else
+        ok(efd.lf[i].lfCharSet == font_charset, "%d: got charset %d\n", i, efd.lf[i].lfCharSet);
+        ok(!lstrcmp(efd.lf[i].lfFaceName, font_name), "expected %s, got %s\n",
+           font_name, efd.lf[i].lfFaceName);
+    }
+
+    memset(&lf, 0, sizeof(lf));
+    lf.lfCharSet = ANSI_CHARSET;
+    lstrcpy(lf.lfFaceName, font_name);
+    efd.total = 0;
+    SetLastError(0xdeadbeef);
+    ret = EnumFontFamiliesEx(hdc, &lf, arial_enum_proc, (LPARAM)&efd, 0);
+    ok(ret, "EnumFontFamiliesEx error %u\n", GetLastError());
+    get_charset_stats(&efd, &ansi_charset, &symbol_charset, &russian_charset);
+    trace("enumerated ansi %d, symbol %d, russian %d fonts for %s ANSI_CHARSET\n",
+          ansi_charset, symbol_charset, russian_charset,
+          *font_name ? font_name : "<empty>");
+    if (font_charset == SYMBOL_CHARSET)
+    {
+        if (*font_name)
+            ok(efd.total == 0, "no fonts should be enumerated: %s ANSI_CHARSET\n", font_name);
+        else
+            ok(efd.total > 0, "no fonts enumerated: %s\n", font_name);
+    }
+    else
+    {
+        ok(efd.total > 0, "no fonts enumerated: %s ANSI_CHARSET\n", font_name);
+        for (i = 0; i < efd.total; i++)
+        {
+            ok(efd.lf[i].lfCharSet == ANSI_CHARSET, "%d: got charset %d\n", i, efd.lf[i].lfCharSet);
+            if (*font_name)
+                ok(!lstrcmp(efd.lf[i].lfFaceName, font_name), "expected %s, got %s\n",
+                   font_name, efd.lf[i].lfFaceName);
+        }
+    }
+
+    /* DEFAULT_CHARSET should enumerate all available charsets */
+    memset(&lf, 0, sizeof(lf));
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lstrcpy(lf.lfFaceName, font_name);
+    efd.total = 0;
+    SetLastError(0xdeadbeef);
+    EnumFontFamiliesEx(hdc, &lf, arial_enum_proc, (LPARAM)&efd, 0);
+    ok(ret, "EnumFontFamiliesEx error %u\n", GetLastError());
+    get_charset_stats(&efd, &ansi_charset, &symbol_charset, &russian_charset);
+    trace("enumerated ansi %d, symbol %d, russian %d fonts for %s DEFAULT_CHARSET\n",
+          ansi_charset, symbol_charset, russian_charset,
+          *font_name ? font_name : "<empty>");
+    ok(efd.total > 0, "no fonts enumerated: %s DEFAULT_CHARSET\n", font_name);
+    for (i = 0; i < efd.total; i++)
+    {
+        if (*font_name)
+            ok(!lstrcmp(efd.lf[i].lfFaceName, font_name), "expected %s, got %s\n",
+               font_name, efd.lf[i].lfFaceName);
+    }
+    if (*font_name)
+    {
+        switch (font_charset)
+        {
+        case ANSI_CHARSET:
+            ok(ansi_charset > 0,
+               "ANSI_CHARSET should enumerate ANSI_CHARSET for %s\n", font_name);
+            ok(!symbol_charset,
+               "ANSI_CHARSET should NOT enumerate SYMBOL_CHARSET for %s\n", font_name);
+            ok(russian_charset > 0,
+               "ANSI_CHARSET should enumerate RUSSIAN_CHARSET for %s\n", font_name);
+            break;
+        case SYMBOL_CHARSET:
+            ok(!ansi_charset,
+               "SYMBOL_CHARSET should NOT enumerate ANSI_CHARSET for %s\n", font_name);
+            ok(symbol_charset,
+               "SYMBOL_CHARSET should enumerate SYMBOL_CHARSET for %s\n", font_name);
+            ok(!russian_charset,
+               "SYMBOL_CHARSET should NOT enumerate RUSSIAN_CHARSET for %s\n", font_name);
+            break;
+        case DEFAULT_CHARSET:
+            ok(ansi_charset > 0,
+               "DEFAULT_CHARSET should enumerate ANSI_CHARSET for %s\n", font_name);
+            ok(symbol_charset > 0,
+               "DEFAULT_CHARSET should enumerate SYMBOL_CHARSET for %s\n", font_name);
+            ok(russian_charset > 0,
+               "DEFAULT_CHARSET should enumerate RUSSIAN_CHARSET for %s\n", font_name);
+            break;
+        }
+    }
+    else
+    {
+        ok(ansi_charset > 0,
+           "DEFAULT_CHARSET should enumerate ANSI_CHARSET for %s\n", *font_name ? font_name : "<empty>");
+        ok(symbol_charset > 0,
+           "DEFAULT_CHARSET should enumerate SYMBOL_CHARSET for %s\n", *font_name ? font_name : "<empty>");
+        ok(russian_charset > 0,
+           "DEFAULT_CHARSET should enumerate RUSSIAN_CHARSET for %s\n", *font_name ? font_name : "<empty>");
+    }
+
+    memset(&lf, 0, sizeof(lf));
+    lf.lfCharSet = SYMBOL_CHARSET;
+    lstrcpy(lf.lfFaceName, font_name);
+    efd.total = 0;
+    SetLastError(0xdeadbeef);
+    EnumFontFamiliesEx(hdc, &lf, arial_enum_proc, (LPARAM)&efd, 0);
+    ok(ret, "EnumFontFamiliesEx error %u\n", GetLastError());
+    get_charset_stats(&efd, &ansi_charset, &symbol_charset, &russian_charset);
+    trace("enumerated ansi %d, symbol %d, russian %d fonts for %s SYMBOL_CHARSET\n",
+          ansi_charset, symbol_charset, russian_charset,
+          *font_name ? font_name : "<empty>");
+    if (*font_name && font_charset == ANSI_CHARSET)
+        ok(efd.total == 0, "no fonts should be enumerated: %s SYMBOL_CHARSET\n", font_name);
+    else
+    {
+        ok(efd.total > 0, "no fonts enumerated: %s SYMBOL_CHARSET\n", font_name);
+        for (i = 0; i < efd.total; i++)
+        {
+            ok(efd.lf[i].lfCharSet == SYMBOL_CHARSET, "%d: got charset %d\n", i, efd.lf[i].lfCharSet);
+            if (*font_name)
+                ok(!lstrcmp(efd.lf[i].lfFaceName, font_name), "expected %s, got %s\n",
+                   font_name, efd.lf[i].lfFaceName);
+        }
+
+        ok(!ansi_charset,
+           "SYMBOL_CHARSET should NOT enumerate ANSI_CHARSET for %s\n", *font_name ? font_name : "<empty>");
+        ok(symbol_charset > 0,
+           "SYMBOL_CHARSET should enumerate SYMBOL_CHARSET for %s\n", *font_name ? font_name : "<empty>");
+        ok(!russian_charset,
+           "SYMBOL_CHARSET should NOT enumerate RUSSIAN_CHARSET for %s\n", *font_name ? font_name : "<empty>");
+    }
+
+    ReleaseDC(0, hdc);
+}
+
+/* PANOSE is 10 bytes in size, need to pack the structure properly */
+#include "pshpack2.h"
+typedef struct
+{
+    USHORT version;
+    SHORT xAvgCharWidth;
+    USHORT usWeightClass;
+    USHORT usWidthClass;
+    SHORT fsType;
+    SHORT ySubscriptXSize;
+    SHORT ySubscriptYSize;
+    SHORT ySubscriptXOffset;
+    SHORT ySubscriptYOffset;
+    SHORT ySuperscriptXSize;
+    SHORT ySuperscriptYSize;
+    SHORT ySuperscriptXOffset;
+    SHORT ySuperscriptYOffset;
+    SHORT yStrikeoutSize;
+    SHORT yStrikeoutPosition;
+    SHORT sFamilyClass;
+    PANOSE panose;
+    ULONG ulUnicodeRange1;
+    ULONG ulUnicodeRange2;
+    ULONG ulUnicodeRange3;
+    ULONG ulUnicodeRange4;
+    CHAR achVendID[4];
+    USHORT fsSelection;
+    USHORT usFirstCharIndex;
+    USHORT usLastCharIndex;
+    /* According to the Apple spec, original version didn't have the below fields,
+     * version numbers were taked from the OpenType spec.
+     */
+    /* version 0 (TrueType 1.5) */
+    USHORT sTypoAscender;
+    USHORT sTypoDescender;
+    USHORT sTypoLineGap;
+    USHORT usWinAscent;
+    USHORT usWinDescent;
+    /* version 1 (TrueType 1.66) */
+    ULONG ulCodePageRange1;
+    ULONG ulCodePageRange2;
+    /* version 2 (OpenType 1.2) */
+    SHORT sxHeight;
+    SHORT sCapHeight;
+    USHORT usDefaultChar;
+    USHORT usBreakChar;
+    USHORT usMaxContext;
+} TT_OS2_V2;
+#include "poppack.h"
+
+#ifdef WORDS_BIGENDIAN
+#define GET_BE_WORD(x) (x)
+#else
+#define GET_BE_WORD(x) MAKEWORD(HIBYTE(x), LOBYTE(x))
+#endif
+
+#define MS_MAKE_TAG(ch0, ch1, ch2, ch3) \
+                    ((DWORD)(BYTE)(ch0) | ((DWORD)(BYTE)(ch1) << 8) | \
+                    ((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24))
+#define MS_OS2_TAG MS_MAKE_TAG('O','S','/','2')
+
+static void test_text_metrics(const LOGFONTA *lf)
+{
+    HDC hdc;
+    HFONT hfont, hfont_old;
+    TEXTMETRICA tmA;
+    TEXTMETRICW tmW;
+    UINT first_unicode_char, last_unicode_char, default_char, break_char;
+    INT test_char;
+    TT_OS2_V2 tt_os2;
+    USHORT version;
+    LONG size, ret;
+    const char *font_name = lf->lfFaceName;
+
+    trace("Testing font metrics for %s, charset %d\n", font_name, lf->lfCharSet);
+
+    hdc = GetDC(0);
+
+    SetLastError(0xdeadbeef);
+    hfont = CreateFontIndirectA(lf);
+    ok(hfont != 0, "CreateFontIndirect error %u\n", GetLastError());
+
+    hfont_old = SelectObject(hdc, hfont);
+
+    size = GetFontData(hdc, MS_OS2_TAG, 0, NULL, 0);
+    if (size == GDI_ERROR)
+    {
+        trace("OS/2 chunk was not found\n");
+        goto end_of_test;
+    }
+    if (size > sizeof(tt_os2))
+    {
+        trace("got too large OS/2 chunk of size %u\n", size);
+        size = sizeof(tt_os2);
+    }
+
+    memset(&tt_os2, 0, sizeof(tt_os2));
+    ret = GetFontData(hdc, MS_OS2_TAG, 0, &tt_os2, size);
+    ok(ret == size, "GetFontData should return %u not %u\n", size, ret);
+
+    version = GET_BE_WORD(tt_os2.version);
+    trace("OS/2 chunk version %u, vendor %4.4s\n", version, (LPCSTR)&tt_os2.achVendID);
+
+    first_unicode_char = GET_BE_WORD(tt_os2.usFirstCharIndex);
+    last_unicode_char = GET_BE_WORD(tt_os2.usLastCharIndex);
+    default_char = GET_BE_WORD(tt_os2.usDefaultChar);
+    break_char = GET_BE_WORD(tt_os2.usBreakChar);
+
+    trace("for %s first %x, last %x, default %x, break %x\n", font_name,
+           first_unicode_char, last_unicode_char, default_char, break_char);
+
+    SetLastError(0xdeadbeef);
+    ret = GetTextMetricsA(hdc, &tmA);
+    ok(ret, "GetTextMetricsA error %u\n", GetLastError());
+
+    trace("A: first %x, last %x, default %x, break %x\n",
+          tmA.tmFirstChar, tmA.tmLastChar, tmA.tmDefaultChar, tmA.tmBreakChar);
+
+    SetLastError(0xdeadbeef);
+    ret = GetTextMetricsW(hdc, &tmW);
+    ok(ret, "GetTextMetricsA error %u\n", GetLastError());
+
+    trace("W: first %x, last %x, default %x, break %x\n",
+          tmW.tmFirstChar, tmW.tmLastChar, tmW.tmDefaultChar, tmW.tmBreakChar);
+
+    if (lf->lfCharSet == SYMBOL_CHARSET)
+    {
+        test_char = min(last_unicode_char - 0xf000, 255);
+        ok(tmA.tmLastChar == test_char, "A: tmLastChar for %s %02x != %02x\n",
+           font_name, tmA.tmLastChar, test_char);
+
+        /* It appears that for fonts with SYMBOL_CHARSET Windows always sets
+         * symbol range to 0 - f0ff
+         */
+        ok(tmW.tmFirstChar == 0, "W: tmFirstChar for %s %02x != 0\n",
+           font_name, tmW.tmFirstChar);
+        /* FIXME: Windows returns f0ff here, while Wine f0xx */
+        ok(tmW.tmLastChar >= 0xf000, "W: tmLastChar for %s %02x != 0xf0ff\n",
+           font_name, tmW.tmLastChar);
+
+        ok(tmA.tmDefaultChar == 0x1f, "A: tmDefaultChar for %s %02x != 0\n",
+           font_name, tmW.tmDefaultChar);
+        ok(tmA.tmBreakChar == 0x20, "A: tmBreakChar for %s %02x != 0xf0ff\n",
+           font_name, tmW.tmBreakChar);
+        ok(tmW.tmDefaultChar == 0x1f, "W: tmDefaultChar for %s %02x != 0\n",
+           font_name, tmW.tmDefaultChar);
+        ok(tmW.tmBreakChar == 0x20, "W: tmBreakChar for %s %02x != 0xf0ff\n",
+           font_name, tmW.tmBreakChar);
+    }
+    else
+    {
+        test_char = min(tmW.tmLastChar, 255);
+        ok(tmA.tmLastChar == test_char, "A: tmLastChar for %s %02x != %02x\n",
+           font_name, tmA.tmLastChar, test_char);
+
+        ok(tmW.tmFirstChar == first_unicode_char, "W: tmFirstChar for %s %02x != %02x\n",
+           font_name, tmW.tmFirstChar, first_unicode_char);
+        ok(tmW.tmLastChar == last_unicode_char, "W: tmLastChar for %s %02x != %02x\n",
+           font_name, tmW.tmLastChar, last_unicode_char);
+    }
+#if 0 /* FIXME: This doesn't appear to be what Windows does */
+    test_char = min(tmW.tmFirstChar - 1, 255);
+    ok(tmA.tmFirstChar == test_char, "A: tmFirstChar for %s %02x != %02x\n",
+       font_name, tmA.tmFirstChar, test_char);
+#endif
+    ret = GetDeviceCaps(hdc, LOGPIXELSX);
+    ok(tmW.tmDigitizedAspectX == ret, "tmDigitizedAspectX %u != %u\n",
+       tmW.tmDigitizedAspectX, ret);
+    ret = GetDeviceCaps(hdc, LOGPIXELSY);
+    ok(tmW.tmDigitizedAspectX == ret, "tmDigitizedAspectY %u != %u\n",
+       tmW.tmDigitizedAspectX, ret);
+
+end_of_test:
+    SelectObject(hdc, hfont_old);
+    DeleteObject(hfont);
+
+    ReleaseDC(0, hdc);
+}
+
+static INT CALLBACK enum_truetype_font_proc(const LOGFONT *lf, const TEXTMETRIC *ntm, DWORD type, LPARAM lParam)
+{
+    INT *enumed = (INT *)lParam;
+
+    if (type == TRUETYPE_FONTTYPE)
+    {
+        (*enumed)++;
+        test_text_metrics(lf);
+    }
+    return 1;
+}
+
+static void test_GetTextMetrics(void)
+{
+    LOGFONTA lf;
+    HDC hdc;
+    INT enumed;
+
+    SetLastError(0xdeadbeef);
+    GetTextMetricsW(0, NULL);
+    if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("Skipping GetTextMetrics test on a Win9x platform\n");
+        return;
+    }
+
+    hdc = GetDC(0);
+
+    memset(&lf, 0, sizeof(lf));
+    lf.lfCharSet = DEFAULT_CHARSET;
+    enumed = 0;
+    EnumFontFamiliesExA(hdc, &lf, enum_truetype_font_proc, (LPARAM)&enumed, 0);
+    trace("Tested metrics of %d truetype fonts\n", enumed);
+
+    ReleaseDC(0, hdc);
+}
+
 START_TEST(font)
 {
+    init();
+
     test_logfont();
     test_bitmap_font();
     test_bitmap_font_metrics();
@@ -1139,4 +1629,19 @@ START_TEST(font)
     test_SetTextJustification();
     test_font_charset();
     test_GetFontUnicodeRanges();
+    /* On Windows Arial has a lot of default charset aliases such as Arial Cyr,
+     * I'd like to avoid them in this test.
+     */
+    test_EnumFontFamilies("Arial Black", ANSI_CHARSET);
+    test_EnumFontFamilies("Symbol", SYMBOL_CHARSET);
+    if (is_truetype_font_installed("Arial Black") &&
+        (is_truetype_font_installed("Symbol") || is_truetype_font_installed("Wingdings")))
+    {
+        test_EnumFontFamilies("", ANSI_CHARSET);
+        test_EnumFontFamilies("", SYMBOL_CHARSET);
+        test_EnumFontFamilies("", DEFAULT_CHARSET);
+    }
+    else
+        skip("Arial Black or Symbol/Wingdings is not installed\n");
+    test_GetTextMetrics();
 }

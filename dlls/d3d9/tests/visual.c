@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Henri Verbeet
+ * Copyright 2005, 2007 Henri Verbeet
  * Copyright (C) 2007 Stefan Dösinger(for CodeWeavers)
  *
  * This library is free software; you can redistribute it and/or
@@ -314,21 +314,396 @@ static void clear_test(IDirect3DDevice9 *device)
     ok(color == 0x00ffffff, "Clear rectangle 4(neg, neg) has color %08x\n", color);
 }
 
+typedef struct {
+    float in[4];
+    DWORD out;
+} test_data_t;
+
+/*
+ *  c7      rounded     ARGB
+ * -2.4     -2          0x00ffff00
+ * -1.6     -2          0x00ffff00
+ * -0.4      0          0x0000ffff
+ *  0.4      0          0x0000ffff
+ *  1.6      2          0x00ff00ff
+ *  2.4      2          0x00ff00ff
+ */
+static void test_mova(IDirect3DDevice9 *device)
+{
+    static const DWORD mova_test[] = {
+        0xfffe0200,                                                             /* vs_2_0                       */
+        0x0200001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0              */
+        0x05000051, 0xa00f0000, 0x3f800000, 0x00000000, 0x00000000, 0x3f800000, /* def c0, 1.0, 0.0, 0.0, 1.0   */
+        0x05000051, 0xa00f0001, 0x3f800000, 0x3f800000, 0x00000000, 0x3f800000, /* def c1, 1.0, 1.0, 0.0, 1.0   */
+        0x05000051, 0xa00f0002, 0x00000000, 0x3f800000, 0x00000000, 0x3f800000, /* def c2, 0.0, 1.0, 0.0, 1.0   */
+        0x05000051, 0xa00f0003, 0x00000000, 0x3f800000, 0x3f800000, 0x3f800000, /* def c3, 0.0, 1.0, 1.0, 1.0   */
+        0x05000051, 0xa00f0004, 0x00000000, 0x00000000, 0x3f800000, 0x3f800000, /* def c4, 0.0, 0.0, 1.0, 1.0   */
+        0x05000051, 0xa00f0005, 0x3f800000, 0x00000000, 0x3f800000, 0x3f800000, /* def c5, 1.0, 0.0, 1.0, 1.0   */
+        0x05000051, 0xa00f0006, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000, /* def c6, 1.0, 1.0, 1.0, 1.0   */
+        0x0200002e, 0xb0010000, 0xa0000007,                                     /* mova a0.x, c7.x              */
+        0x03000001, 0xd00f0000, 0xa0e42003, 0xb0000000,                         /* mov oD0, c[a0.x + 3]         */
+        0x02000001, 0xc00f0000, 0x90e40000,                                     /* mov oPos, v0                 */
+        0x0000ffff                                                              /* END                          */
+    };
+
+    static const test_data_t test_data[] = {
+        {{-2.4f, 0.0f, 0.0f, 0.0f}, 0x00ffff00},
+        {{-1.6f, 0.0f, 0.0f, 0.0f}, 0x00ffff00},
+        {{-0.4f, 0.0f, 0.0f, 0.0f}, 0x0000ffff},
+        {{ 0.4f, 0.0f, 0.0f, 0.0f}, 0x0000ffff},
+        {{ 1.6f, 0.0f, 0.0f, 0.0f}, 0x00ff00ff},
+        {{ 2.4f, 0.0f, 0.0f, 0.0f}, 0x00ff00ff}
+    };
+
+    static const float quad[][3] = {
+        {-1.0f, -1.0f, 0.0f},
+        {-1.0f,  1.0f, 0.0f},
+        { 1.0f, -1.0f, 0.0f},
+        { 1.0f,  1.0f, 0.0f},
+    };
+
+    static const D3DVERTEXELEMENT9 decl_elements[] = {
+        {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        D3DDECL_END()
+    };
+
+    IDirect3DVertexDeclaration9 *vertex_declaration = NULL;
+    IDirect3DVertexShader9 *mova_shader = NULL;
+    HRESULT hr;
+    int i;
+
+    hr = IDirect3DDevice9_CreateVertexShader(device, mova_test, &mova_shader);
+    ok(SUCCEEDED(hr), "CreateVertexShader failed (%08x)\n", hr);
+    hr = IDirect3DDevice9_SetVertexShader(device, mova_shader);
+    ok(SUCCEEDED(hr), "SetVertexShader failed (%08x)\n", hr);
+
+    hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &vertex_declaration);
+    ok(SUCCEEDED(hr), "CreateVertexDeclaration failed (%08x)\n", hr);
+    hr = IDirect3DDevice9_SetVertexDeclaration(device, vertex_declaration);
+    ok(SUCCEEDED(hr), "SetVertexDeclaration failed (%08x)\n", hr);
+
+    for (i = 0; i < (sizeof(test_data) / sizeof(test_data_t)); ++i)
+    {
+        DWORD color;
+
+        hr = IDirect3DDevice9_SetVertexShaderConstantF(device, 7, test_data[i].in, 1);
+        ok(SUCCEEDED(hr), "SetVertexShaderConstantF failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(SUCCEEDED(hr), "BeginScene failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quad[0], 3 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(SUCCEEDED(hr), "EndScene failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+        ok(SUCCEEDED(hr), "Present failed (%08x)\n", hr);
+
+        color = getPixelColor(device, 320, 240);
+        ok(color == test_data[i].out, "Expected color %08x, got %08x (for input %f)\n", test_data[i].out, color, test_data[i].in[0]);
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0, 0.0f, 0);
+        ok(SUCCEEDED(hr), "Clear failed (%08x)\n", hr);
+    }
+
+    IDirect3DVertexDeclaration9_Release(vertex_declaration);
+    IDirect3DVertexShader9_Release(mova_shader);
+}
+
+struct sVertex {
+    float x, y, z;
+    DWORD diffuse;
+    DWORD specular;
+};
+
+struct sVertexT {
+    float x, y, z, rhw;
+    DWORD diffuse;
+    DWORD specular;
+};
+
+static void fog_test(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    DWORD color;
+    float start = 0.0, end = 1.0;
+
+    /* Gets full z based fog with linear fog, no fog with specular color */
+    struct sVertex unstransformed_1[] = {
+        {-1,    -1,   0.1,          0xFFFF0000,     0xFF000000  },
+        {-1,     0,   0.1,          0xFFFF0000,     0xFF000000  },
+        { 0,     0,   0.1,          0xFFFF0000,     0xFF000000  },
+        { 0,    -1,   0.1,          0xFFFF0000,     0xFF000000  },
+    };
+    /* Ok, I am too lazy to deal with transform matrices */
+    struct sVertex unstransformed_2[] = {
+        {-1,     0,   1.0,          0xFFFF0000,     0xFF000000  },
+        {-1,     1,   1.0,          0xFFFF0000,     0xFF000000  },
+        { 0,     1,   1.0,          0xFFFF0000,     0xFF000000  },
+        { 0,     0,   1.0,          0xFFFF0000,     0xFF000000  },
+    };
+    /* Untransformed ones. Give them a different diffuse color to make the test look
+     * nicer. It also makes making sure that they are drawn correctly easier.
+     */
+    struct sVertexT transformed_1[] = {
+        {320,    0,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {640,    0,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {640,  240,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {320,  240,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+    };
+    struct sVertexT transformed_2[] = {
+        {320,  240,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {640,  240,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {640,  480,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {320,  480,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+    };
+    WORD Indices[] = {0, 1, 2, 2, 3, 0};
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
+
+    /* Setup initial states: No lighting, fog on, fog color */
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "Turning off lighting returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGENABLE, TRUE);
+    ok(hr == D3D_OK, "Turning on fog calculations returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGCOLOR, 0xFF00FF00 /* A nice green */);
+    ok(hr == D3D_OK, "Turning on fog calculations returned %s\n", DXGetErrorString9(hr));
+
+    /* First test: Both table fog and vertex fog off */
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGTABLEMODE, D3DFOG_NONE);
+    ok(hr == D3D_OK, "Turning off table fog returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGVERTEXMODE, D3DFOG_NONE);
+    ok(hr == D3D_OK, "Turning off table fog returned %s\n", DXGetErrorString9(hr));
+
+    /* Start = 0, end = 1. Should be default, but set them */
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGSTART, *((DWORD *) &start));
+    ok(hr == D3D_OK, "Setting fog start returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGEND, *((DWORD *) &end));
+    ok(hr == D3D_OK, "Setting fog start returned %s\n", DXGetErrorString9(hr));
+
+    if(IDirect3DDevice9_BeginScene(device) == D3D_OK)
+    {
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR);
+        ok( hr == D3D_OK, "SetFVF returned %s\n", DXGetErrorString9(hr));
+        /* Untransformed, vertex fog = NONE, table fog = NONE: Read the fog weighting from the specular color */
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0 /* MinIndex */, 4 /* NumVerts */,
+                                                     2 /*PrimCount */, Indices, D3DFMT_INDEX16, unstransformed_1,
+                                                     sizeof(unstransformed_1[0]));
+        ok(hr == D3D_OK, "DrawIndexedPrimitiveUP returned %s\n", DXGetErrorString9(hr));
+
+        /* That makes it use the Z value */
+        hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR);
+        ok(hr == D3D_OK, "Turning off table fog returned %s\n", DXGetErrorString9(hr));
+        /* Untransformed, vertex fog != none (or table fog != none):
+         * Use the Z value as input into the equation
+         */
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0 /* MinIndex */, 4 /* NumVerts */,
+                                                     2 /*PrimCount */, Indices, D3DFMT_INDEX16, unstransformed_2,
+                                                     sizeof(unstransformed_1[0]));
+        ok(hr == D3D_OK, "DrawIndexedPrimitiveUP returned %s\n", DXGetErrorString9(hr));
+
+        /* transformed verts */
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR);
+        ok( hr == D3D_OK, "SetFVF returned %s\n", DXGetErrorString9(hr));
+        /* Transformed, vertex fog != NONE, pixel fog == NONE: Use specular color alpha component */
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0 /* MinIndex */, 4 /* NumVerts */,
+                                                     2 /*PrimCount */, Indices, D3DFMT_INDEX16, transformed_1,
+                                                     sizeof(transformed_1[0]));
+        ok(hr == D3D_OK, "DrawIndexedPrimitiveUP returned %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGTABLEMODE, D3DFOG_LINEAR);
+        ok( hr == D3D_OK, "Setting fog table mode to D3DFOG_LINEAR returned %s\n", DXGetErrorString9(hr));
+        /* Transformed, table fog != none, vertex anything: Use Z value as input to the fog
+         * equation
+         */
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0 /* MinIndex */, 4 /* NumVerts */,
+                                                     2 /*PrimCount */, Indices, D3DFMT_INDEX16, transformed_2,
+                                                     sizeof(transformed_2[0]));
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "EndScene returned %s\n", DXGetErrorString9(hr));
+    }
+    else
+    {
+        ok(FALSE, "BeginScene failed\n");
+    }
+
+    IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    color = getPixelColor(device, 160, 360);
+    ok(color == 0x00FF0000, "Untransformed vertex with no table or vertex fog has color %08x\n", color);
+    color = getPixelColor(device, 160, 120);
+    ok(color == 0x0000FF00, "Untransformed vertex with linear vertex fog has color %08x\n", color);
+    color = getPixelColor(device, 480, 120);
+    ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
+    color = getPixelColor(device, 480, 360);
+    ok(color == 0x0000FF00, "Transformed vertex with linear table fog has color %08x\n", color);
+
+    /* Turn off the fog master switch to avoid confusing other tests */
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGENABLE, FALSE);
+    ok(hr == D3D_OK, "Turning off fog calculations returned %s\n", DXGetErrorString9(hr));
+
+    IDirect3DDevice9_SetVertexDeclaration(device, NULL);
+}
+
+/* This test verifies the behaviour of cube maps wrt. texture wrapping.
+ * D3D cube map wrapping always behaves like GL_CLAMP_TO_EDGE,
+ * regardless of the actual addressing mode set. */
+static void test_cube_wrap(IDirect3DDevice9 *device)
+{
+    static const float quad[][6] = {
+        {-1.0f, -1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+        {-1.0f,  1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+        { 1.0f, -1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+        { 1.0f,  1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+    };
+
+    static const D3DVERTEXELEMENT9 decl_elements[] = {
+        {0, 0,  D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, 12, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+        D3DDECL_END()
+    };
+
+    static const struct {
+        D3DTEXTUREADDRESS mode;
+        const char *name;
+    } address_modes[] = {
+        {D3DTADDRESS_WRAP, "D3DTADDRESS_WRAP"},
+        {D3DTADDRESS_MIRROR, "D3DTADDRESS_MIRROR"},
+        {D3DTADDRESS_CLAMP, "D3DTADDRESS_CLAMP"},
+        {D3DTADDRESS_BORDER, "D3DTADDRESS_BORDER"},
+        {D3DTADDRESS_MIRRORONCE, "D3DTADDRESS_MIRRORONCE"},
+    };
+
+    IDirect3DVertexDeclaration9 *vertex_declaration = NULL;
+    IDirect3DCubeTexture9 *texture = NULL;
+    IDirect3DSurface9 *surface = NULL;
+    D3DLOCKED_RECT locked_rect;
+    HRESULT hr;
+    INT x, y, face;
+
+    hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &vertex_declaration);
+    ok(SUCCEEDED(hr), "CreateVertexDeclaration failed (0x%08x)\n", hr);
+    hr = IDirect3DDevice9_SetVertexDeclaration(device, vertex_declaration);
+    ok(SUCCEEDED(hr), "SetVertexDeclaration failed (0x%08x)\n", hr);
+
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 128, 128,
+            D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &surface, NULL);
+    ok(SUCCEEDED(hr), "CreateOffscreenPlainSurface failed (0x%08x)\n", hr);
+
+    hr = IDirect3DSurface9_LockRect(surface, &locked_rect, NULL, D3DLOCK_DISCARD);
+    ok(SUCCEEDED(hr), "LockRect failed (0x%08x)\n", hr);
+
+    for (y = 0; y < 128; ++y)
+    {
+        DWORD *ptr = (DWORD *)(((BYTE *)locked_rect.pBits) + (y * locked_rect.Pitch));
+        for (x = 0; x < 64; ++x)
+        {
+            *ptr++ = 0xffff0000;
+        }
+        for (x = 64; x < 128; ++x)
+        {
+            *ptr++ = 0xff0000ff;
+        }
+    }
+
+    hr = IDirect3DSurface9_UnlockRect(surface);
+    ok(SUCCEEDED(hr), "UnlockRect failed (0x%08x)\n", hr);
+
+    hr = IDirect3DDevice9_CreateCubeTexture(device, 128, 1, 0, D3DFMT_A8R8G8B8,
+            D3DPOOL_DEFAULT, &texture, NULL);
+    ok(SUCCEEDED(hr), "CreateCubeTexture failed (0x%08x)\n", hr);
+
+    /* Create cube faces */
+    for (face = 0; face < 6; ++face)
+    {
+        IDirect3DSurface9 *face_surface = NULL;
+
+        hr= IDirect3DCubeTexture9_GetCubeMapSurface(texture, face, 0, &face_surface);
+        ok(SUCCEEDED(hr), "GetCubeMapSurface failed (0x%08x)\n", hr);
+
+        hr = IDirect3DDevice9_UpdateSurface(device, surface, NULL, face_surface, NULL);
+        ok(SUCCEEDED(hr), "UpdateSurface failed (0x%08x)\n", hr);
+
+        IDirect3DSurface9_Release(face_surface);
+    }
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *)texture);
+    ok(SUCCEEDED(hr), "SetTexture failed (0x%08x)\n", hr);
+
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    ok(SUCCEEDED(hr), "SetSamplerState D3DSAMP_MINFILTER failed (0x%08x)\n", hr);
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    ok(SUCCEEDED(hr), "SetSamplerState D3DSAMP_MAGFILTER failed (0x%08x)\n", hr);
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_BORDERCOLOR, 0xff00ff00);
+    ok(SUCCEEDED(hr), "SetSamplerState D3DSAMP_BORDERCOLOR failed (0x%08x)\n", hr);
+
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %s\n", DXGetErrorString9(hr));
+
+    for (x = 0; x < (sizeof(address_modes) / sizeof(*address_modes)); ++x)
+    {
+        DWORD color;
+
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_ADDRESSU, address_modes[x].mode);
+        ok(SUCCEEDED(hr), "SetSamplerState D3DSAMP_ADDRESSU (%s) failed (0x%08x)\n", address_modes[x].name, hr);
+        hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_ADDRESSV, address_modes[x].mode);
+        ok(SUCCEEDED(hr), "SetSamplerState D3DSAMP_ADDRESSV (%s) failed (0x%08x)\n", address_modes[x].name, hr);
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(SUCCEEDED(hr), "BeginScene failed (0x%08x)\n", hr);
+
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, &quad[0], sizeof(quad[0]));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (0x%08x)\n", hr);
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(SUCCEEDED(hr), "EndScene failed (0x%08x)\n", hr);
+
+        hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+        ok(SUCCEEDED(hr), "Present failed (0x%08x)\n", hr);
+
+        /* Due to the nature of this test, we sample essentially at the edge
+         * between two faces. Because of this it's undefined from which face
+         * the driver will sample. Furtunately that's not important for this
+         * test, since all we care about is that it doesn't sample from the
+         * other side of the surface or from the border. */
+        color = getPixelColor(device, 320, 240);
+        ok(color == 0x00ff0000 || color == 0x000000ff,
+                "Got color 0x%08x for addressing mode %s, expected 0x00ff0000 or 0x000000ff.\n",
+                color, address_modes[x].name);
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0, 0.0f, 0);
+        ok(SUCCEEDED(hr), "Clear failed (0x%08x)\n", hr);
+    }
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+    ok(SUCCEEDED(hr), "SetTexture failed (0x%08x)\n", hr);
+
+    IDirect3DVertexDeclaration9_Release(vertex_declaration);
+    IDirect3DCubeTexture9_Release(texture);
+    IDirect3DSurface9_Release(surface);
+}
+
 START_TEST(visual)
 {
     IDirect3DDevice9 *device_ptr;
+    D3DCAPS9 caps;
     HRESULT hr;
     DWORD color;
 
     d3d9_handle = LoadLibraryA("d3d9.dll");
     if (!d3d9_handle)
     {
-        trace("Could not load d3d9.dll, skipping tests\n");
+        skip("Could not load d3d9.dll\n");
         return;
     }
 
     device_ptr = init_d3d9();
     if (!device_ptr) return;
+
+    IDirect3DDevice9_GetDeviceCaps(device_ptr, &caps);
 
     /* Check for the reliability of the returned data */
     hr = IDirect3DDevice9_Clear(device_ptr, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
@@ -364,6 +739,14 @@ START_TEST(visual)
     /* Now execute the real tests */
     lighting_test(device_ptr);
     clear_test(device_ptr);
+    fog_test(device_ptr);
+    test_cube_wrap(device_ptr);
+
+    if (caps.VertexShaderVersion >= D3DVS_VERSION(2, 0))
+    {
+        test_mova(device_ptr);
+    }
+    else skip("No vs_2_0 support\n");
 
 cleanup:
     if(device_ptr) IDirect3DDevice9_Release(device_ptr);

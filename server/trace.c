@@ -239,6 +239,11 @@ static void dump_apc_result( const apc_result_t *result )
     fputc( '}', stderr );
 }
 
+static void dump_luid( const luid_t *luid )
+{
+    fprintf( stderr, "%d.%u", luid->high_part, luid->low_part );
+}
+
 static void dump_context( const CONTEXT *context )
 {
 #ifdef __i386__
@@ -2708,6 +2713,7 @@ static void dump_get_window_region_reply( const struct get_window_region_reply *
 static void dump_set_window_region_request( const struct set_window_region_request *req )
 {
     fprintf( stderr, " window=%p,", req->window );
+    fprintf( stderr, " redraw=%d,", req->redraw );
     fprintf( stderr, " region=" );
     dump_varargs_rectangles( cur_size );
 }
@@ -3453,6 +3459,16 @@ static void dump_get_token_impersonation_level_reply( const struct get_token_imp
     fprintf( stderr, " impersonation_level=%d", req->impersonation_level );
 }
 
+static void dump_allocate_locally_unique_id_request( const struct allocate_locally_unique_id_request *req )
+{
+}
+
+static void dump_allocate_locally_unique_id_reply( const struct allocate_locally_unique_id_reply *req )
+{
+    fprintf( stderr, " luid=" );
+    dump_luid( &req->luid );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_get_new_process_info_request,
@@ -3671,6 +3687,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_query_symlink_request,
     (dump_func)dump_get_object_info_request,
     (dump_func)dump_get_token_impersonation_level_request,
+    (dump_func)dump_allocate_locally_unique_id_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -3891,6 +3908,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_query_symlink_reply,
     (dump_func)dump_get_object_info_reply,
     (dump_func)dump_get_token_impersonation_level_reply,
+    (dump_func)dump_allocate_locally_unique_id_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] = {
@@ -4111,6 +4129,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "query_symlink",
     "get_object_info",
     "get_token_impersonation_level",
+    "allocate_locally_unique_id",
 };
 
 static const struct

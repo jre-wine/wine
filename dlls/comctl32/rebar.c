@@ -1575,7 +1575,7 @@ REBAR_CommonSetupBand(HWND hwnd, LPREBARBANDINFOW lprbbi, REBAR_BAND *lpBand)
 	lpBand->cxMinChild = lprbbi->cxMinChild;
 	lpBand->cyMinChild = lprbbi->cyMinChild;
         /* These fields where added in WIN32_IE == 0x400 and are set only for RBBS_VARIABLEHEIGHT bands */
-        if (lprbbi->cbSize >= sizeof (REBARBANDINFOA) && (lprbbi->fStyle & RBBS_VARIABLEHEIGHT)) {
+        if (lprbbi->cbSize >= sizeof (REBARBANDINFOA) && (lpBand->fStyle & RBBS_VARIABLEHEIGHT)) {
 	    lpBand->cyMaxChild = lprbbi->cyMaxChild;
             lpBand->cyIntegral = lprbbi->cyIntegral;
 
@@ -1762,7 +1762,7 @@ REBAR_InternalEraseBkGnd (REBAR_INFO *infoPtr, WPARAM wParam, LPARAM lParam, REC
 }
 
 static void
-REBAR_InternalHitTest (REBAR_INFO *infoPtr, const LPPOINT lpPt, UINT *pFlags, INT *pBand)
+REBAR_InternalHitTest (REBAR_INFO *infoPtr, const POINT *lpPt, UINT *pFlags, INT *pBand)
 {
     REBAR_BAND *lpBand;
     RECT rect;
@@ -2750,10 +2750,8 @@ REBAR_Destroy (REBAR_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 	    lpBand = &infoPtr->bands[i];
 
 	    /* delete text strings */
-	    if (lpBand->lpText) {
-		Free (lpBand->lpText);
-		lpBand->lpText = NULL;
-	    }
+            Free (lpBand->lpText);
+            lpBand->lpText = NULL;
 	    /* destroy child window */
 	    DestroyWindow (lpBand->hwndChild);
 	}

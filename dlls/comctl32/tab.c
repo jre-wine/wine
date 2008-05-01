@@ -2768,11 +2768,8 @@ TAB_SetItemT (TAB_INFO *infoPtr, INT iItem, LPTCITEMW tabItem, BOOL bUnicode)
 
   if (tabItem->mask & TCIF_TEXT)
   {
-    if (wineItem->pszText)
-    {
-      Free(wineItem->pszText);
-      wineItem->pszText = NULL;
-    }
+    Free(wineItem->pszText);
+    wineItem->pszText = NULL;
     if (bUnicode)
       Str_SetPtrW(&wineItem->pszText, tabItem->pszText);
     else
@@ -2933,6 +2930,8 @@ static inline LRESULT TAB_SetImageList (TAB_INFO *infoPtr, HIMAGELIST himlNew)
     HIMAGELIST himlPrev = infoPtr->himl;
     TRACE("\n");
     infoPtr->himl = himlNew;
+    TAB_SetItemBounds(infoPtr);
+    InvalidateRect(infoPtr->hwnd, NULL, TRUE);
     return (LRESULT)himlPrev;
 }
 

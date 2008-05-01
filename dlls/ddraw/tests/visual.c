@@ -31,7 +31,7 @@ IDirect3DDevice7    *Direct3DDevice = NULL;
 
 static HRESULT (WINAPI *pDirectDrawCreateEx)(LPGUID,LPVOID*,REFIID,LPUNKNOWN);
 
-static BOOL createObjects()
+static BOOL createObjects(void)
 {
     HRESULT hr;
     HMODULE hmod = GetModuleHandleA("ddraw.dll");
@@ -104,7 +104,7 @@ static BOOL createObjects()
     return FALSE;
 }
 
-static void releaseObjects()
+static void releaseObjects(void)
 {
     IDirect3DDevice7_Release(Direct3DDevice);
     IDirect3D7_Release(Direct3D);
@@ -313,16 +313,16 @@ static void clear_test(IDirect3DDevice7 *device)
     ok(hr == D3D_OK, "IDirect3DDevice7_Clear failed with %08x\n", hr);
 
     /* Positive x, negative y */
-    rect[0].x1 = 0;
-    rect[0].y1 = 480;
-    rect[0].x2 = 320;
-    rect[0].y2 = 240;
+    U1(rect[0]).x1 = 0;
+    U2(rect[0]).y1 = 480;
+    U3(rect[0]).x2 = 320;
+    U4(rect[0]).y2 = 240;
 
     /* Positive x, positive y */
-    rect[1].x1 = 0;
-    rect[1].y1 = 0;
-    rect[1].x2 = 320;
-    rect[1].y2 = 240;
+    U1(rect[1]).x1 = 0;
+    U2(rect[1]).y1 = 0;
+    U3(rect[1]).x2 = 320;
+    U4(rect[1]).y2 = 240;
     /* Clear 2 rectangles with one call. Shows that a positive value is returned, but the negative rectangle
      * is ignored, the positive is still cleared afterwards
      */
@@ -330,10 +330,10 @@ static void clear_test(IDirect3DDevice7 *device)
     ok(hr == D3D_OK, "IDirect3DDevice7_Clear failed with %08x\n", hr);
 
     /* negative x, negative y */
-    rect_negneg.x1 = 640;
-    rect_negneg.x1 = 240;
-    rect_negneg.x2 = 320;
-    rect_negneg.y2 = 0;
+    U1(rect_negneg).x1 = 640;
+    U2(rect_negneg).y1 = 240;
+    U3(rect_negneg).x2 = 320;
+    U4(rect_negneg).y2 = 0;
     hr = IDirect3DDevice7_Clear(device, 1, &rect_negneg, D3DCLEAR_TARGET, 0xff00ff00, 0.0, 0);
     ok(hr == D3D_OK, "IDirect3DDevice7_Clear failed with %08x\n", hr);
 
@@ -345,6 +345,133 @@ static void clear_test(IDirect3DDevice7 *device)
     ok(color == 0x00ffffff, "Clear rectangle 4(NULL) has color %08x\n", color);
     color = getPixelColor(device, 480, 120); /* upper right quad */
     ok(color == 0x00ffffff, "Clear rectangle 4(neg, neg) has color %08x\n", color);
+}
+
+struct sVertex {
+    float x, y, z;
+    DWORD diffuse;
+    DWORD specular;
+};
+
+struct sVertexT {
+    float x, y, z, rhw;
+    DWORD diffuse;
+    DWORD specular;
+};
+
+static void fog_test(IDirect3DDevice7 *device)
+{
+    HRESULT hr;
+    DWORD color;
+    float start = 0.0, end = 1.0;
+
+    /* Gets full z based fog with linear fog, no fog with specular color */
+    struct sVertex unstransformed_1[] = {
+        {-1,    -1,   0.1,          0xFFFF0000,     0xFF000000  },
+        {-1,     0,   0.1,          0xFFFF0000,     0xFF000000  },
+        { 0,     0,   0.1,          0xFFFF0000,     0xFF000000  },
+        { 0,    -1,   0.1,          0xFFFF0000,     0xFF000000  },
+    };
+    /* Ok, I am too lazy to deal with transform matrices */
+    struct sVertex unstransformed_2[] = {
+        {-1,     0,   1.0,          0xFFFF0000,     0xFF000000  },
+        {-1,     1,   1.0,          0xFFFF0000,     0xFF000000  },
+        { 0,     1,   1.0,          0xFFFF0000,     0xFF000000  },
+        { 0,     0,   1.0,          0xFFFF0000,     0xFF000000  },
+    };
+    /* Untransformed ones. Give them a different diffuse color to make the test look
+     * nicer. It also makes making sure that they are drawn correctly easier.
+     */
+    struct sVertexT transformed_1[] = {
+        {320,    0,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {640,    0,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {640,  240,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {320,  240,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+    };
+    struct sVertexT transformed_2[] = {
+        {320,  240,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {640,  240,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {640,  480,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+        {320,  480,   1.0,  1.0,    0xFFFFFF00,     0xFF000000  },
+    };
+    WORD Indices[] = {0, 1, 2, 2, 3, 0};
+
+    hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice7_Clear returned %08x\n", hr);
+
+    /* Setup initial states: No lighting, fog on, fog color */
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_LIGHTING, FALSE);
+    ok(hr == D3D_OK, "Turning off lighting returned %08x\n", hr);
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGENABLE, TRUE);
+    ok(hr == D3D_OK, "Turning on fog calculations returned %08x\n", hr);
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGCOLOR, 0xFF00FF00 /* A nice green */);
+    ok(hr == D3D_OK, "Turning on fog calculations returned %08x\n", hr);
+
+    /* First test: Both table fog and vertex fog off */
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGTABLEMODE, D3DFOG_NONE);
+    ok(hr == D3D_OK, "Turning off table fog returned %08x\n", hr);
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGVERTEXMODE, D3DFOG_NONE);
+    ok(hr == D3D_OK, "Turning off table fog returned %08x\n", hr);
+
+    /* Start = 0, end = 1. Should be default, but set them */
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGSTART, *((DWORD *) &start));
+    ok(hr == D3D_OK, "Setting fog start returned %08x\n", hr);
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGEND, *((DWORD *) &end));
+    ok(hr == D3D_OK, "Setting fog start returned %08x\n", hr);
+
+    if(IDirect3DDevice7_BeginScene(device) == D3D_OK)
+    {
+        /* Untransformed, vertex fog = NONE, table fog = NONE: Read the fog weighting from the specular color */
+        hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR,
+                                                   unstransformed_1, 4, Indices, 6, 0);
+        ok(hr == D3D_OK, "DrawIndexedPrimitive returned %08x\n", hr);
+
+        /* That makes it use the Z value */
+        hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGVERTEXMODE, D3DFOG_LINEAR);
+        ok(hr == D3D_OK, "Turning off table fog returned %08x\n", hr);
+        /* Untransformed, vertex fog != none (or table fog != none):
+         * Use the Z value as input into the equation
+         */
+        hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR,
+                                                   unstransformed_2, 4, Indices, 6, 0);
+        ok(hr == D3D_OK, "DrawIndexedPrimitive returned %08x\n", hr);
+
+        /* transformed verts */
+        ok( hr == D3D_OK, "SetFVF returned %08x\n", hr);
+        /* Transformed, vertex fog != NONE, pixel fog == NONE: Use specular color alpha component */
+        hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR,
+                                                   transformed_1, 4, Indices, 6, 0);
+        ok(hr == D3D_OK, "DrawIndexedPrimitive returned %08x\n", hr);
+
+        hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGTABLEMODE, D3DFOG_LINEAR);
+        ok( hr == D3D_OK, "Setting fog table mode to D3DFOG_LINEAR returned %08x\n", hr);
+        /* Transformed, table fog != none, vertex anything: Use Z value as input to the fog
+         * equation
+         */
+        hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR,
+                                                   transformed_2, 4, Indices, 6, 0);
+        ok(hr == D3D_OK, "DrawIndexedPrimitive returned %08x\n", hr);
+
+        hr = IDirect3DDevice7_EndScene(device);
+        ok(hr == D3D_OK, "EndScene returned %08x\n", hr);
+    }
+    else
+    {
+        ok(FALSE, "BeginScene failed\n");
+    }
+
+    color = getPixelColor(device, 160, 360);
+    ok(color == 0x00FF0000, "Untransformed vertex with no table or vertex fog has color %08x\n", color);
+    color = getPixelColor(device, 160, 120);
+    ok(color == 0x0000FF00, "Untransformed vertex with linear vertex fog has color %08x\n", color);
+    color = getPixelColor(device, 480, 120);
+    ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
+    color = getPixelColor(device, 480, 360);
+    ok(color == 0x0000FF00, "Transformed vertex with linear table fog has color %08x\n", color);
+
+    /* Turn off the fog master switch to avoid confusing other tests */
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGENABLE, FALSE);
+    ok(hr == D3D_OK, "Turning off fog calculations returned %08x\n", hr);
 }
 
 START_TEST(visual)
@@ -389,6 +516,7 @@ START_TEST(visual)
     /* Now run the tests */
     lighting_test(Direct3DDevice);
     clear_test(Direct3DDevice);
+    fog_test(Direct3DDevice);
 
 cleanup:
     releaseObjects();
