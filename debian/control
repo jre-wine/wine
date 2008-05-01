@@ -26,10 +26,10 @@ Build-Depends: debhelper (>= 4.1.16), flex-old | flex (<< 2.5.31), bison,
 Standards-Version: 3.6.0
 
 Package: wine
-Architecture: all
-Depends: wine-bin (= ${Source-Version}), wine-utils (= ${Source-Version}),
- libwine-alsa (= ${Source-Version}) | libwine-oss (= ${Source-Version}) | libwine-esd (= ${Source-Version}) | libwine-jack (= ${Source-Version}) | libwine-nas (= ${Source-Version}),
- libwine-capi (= ${Source-Version}), libwine-cms (= ${Source-Version}), libwine-gl (= ${Source-Version}), libwine-gphoto2 (= ${Source-Version}), libwine-ldap (= ${Source-Version}), libwine-print (= ${Source-Version}), libwine-sane (= ${Source-Version})
+Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Depends: wine-bin (= ${binary:Version}), wine-utils (= ${binary:Version}),
+ libwine-alsa (= ${binary:Version}) | libwine-oss (= ${binary:Version}) | libwine-esd (= ${binary:Version}) | libwine-jack (= ${binary:Version}) | libwine-nas (= ${binary:Version}),
+ libwine-capi (= ${binary:Version}), libwine-cms (= ${binary:Version}), libwine-gl (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version}), libwine-print (= ${binary:Version}), libwine-sane (= ${binary:Version})
 Recommends: msttcorefonts
 Suggests: wine-doc, binfmt-support, avscan | klamav | clamav
 Description: Windows API Implementation (standard suite)
@@ -42,7 +42,7 @@ Description: Windows API Implementation (standard suite)
 
 Package: wine-bin
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: ${debconf-depends}, libwine (= ${Source-Version}), xbase-clients (>= 4.0) | xcontrib
+Depends: ${debconf-depends}, libwine (= ${binary:Version}), xbase-clients (>= 4.0) | xcontrib
 Conflicts: binfmt-support (<< 1.1.2)
 Replaces: libwine (<< 0.0.20010216), wine-utils (<< 0.9.29), wine (<< 0.9.35)
 Description: Windows API Implementation (Binary Loader)
@@ -57,7 +57,7 @@ Description: Windows API Implementation (Binary Loader)
 Package: libwine-dev
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Section: libdevel
-Depends: libwine (= ${Source-Version}), libc6-dev
+Depends: libwine (= ${binary:Version}), libc6-dev
 Replaces: libwine (<< 0.0.20010216)
 Recommends: wine-utils
 Suggests: wine-doc
@@ -88,7 +88,7 @@ Description: Windows API Implementation (Library)
 Package: libwine-alsa
 Section: libs
 Architecture: i386 amd64 powerpc sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Description: Windows API Implementation (ALSA Sound Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -100,7 +100,7 @@ Description: Windows API Implementation (ALSA Sound Module)
 Package: libwine-capi
 Section: libs
 Architecture: i386 amd64
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Description: Windows API Implementation (ISDN Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -113,7 +113,7 @@ Description: Windows API Implementation (ISDN Module)
 Package: libwine-cms
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Replaces: libwine (<< 0.0.20050830)
 Description: Windows API Implementation (Color Management Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
@@ -127,7 +127,7 @@ Description: Windows API Implementation (Color Management Module)
 Package: libwine-esd
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Description: Windows API Implementation (EsounD Sound Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -139,7 +139,7 @@ Description: Windows API Implementation (EsounD Sound Module)
 Package: libwine-gl
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Description: Windows API Implementation (OpenGL Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -152,7 +152,7 @@ Description: Windows API Implementation (OpenGL Module)
 Package: libwine-gphoto2
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Description: Windows API Implementation (Camera Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -165,7 +165,7 @@ Description: Windows API Implementation (Camera Module)
 Package: libwine-jack
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}${jack}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}${jack}
 Description: Windows API Implementation (JACK Sound Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -177,7 +177,7 @@ Description: Windows API Implementation (JACK Sound Module)
 Package: libwine-ldap
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Description: Windows API Implementation (LDAP Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -190,7 +190,7 @@ Description: Windows API Implementation (LDAP Module)
 Package: libwine-nas
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Replaces: libwine (<< 0.0.20020710)
 Description: Windows API Implementation (NAS Sound Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
@@ -203,7 +203,7 @@ Description: Windows API Implementation (NAS Sound Module)
 Package: libwine-oss
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Description: Windows API Implementation (OSS Sound Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -215,7 +215,7 @@ Description: Windows API Implementation (OSS Sound Module)
 Package: libwine-print
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}${freetype}${cupsys}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}${freetype}${cupsys}
 Replaces: libwine (<< 0.0.20020710)
 Description: Windows API Implementation (Printing Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
@@ -229,7 +229,7 @@ Description: Windows API Implementation (Printing Module)
 Package: libwine-sane
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), ${shlibs:Depends}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Description: Windows API Implementation (Scanner Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -250,7 +250,7 @@ Description: Windows API Implementation (empty transitional package)
 
 Package: wine-utils
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${Source-Version}), wine-bin
+Depends: libwine (= ${binary:Version}), wine-bin
 Replaces: libwine-dev (<< 0.0.20010216)
 Description: Windows API Implementation (Utilities)
  This is a BETA release of Wine, the free MS-Windows API implementation.

@@ -1,3 +1,23 @@
+wine (0.9.37-1) unstable; urgency=low
+
+  * New upstream release 0.9.37.
+    - MSI automation with JScript/VBScript support.
+    - Various MSHTML improvements.
+    - The usual assortment of Direct3D fixes.
+    - Support for a few more exe protection schemes.
+    - Lots of bug fixes.
+  * This version was released May 11, 2007.
+  * The wine metapackage is no longer Arch: all, it now only exists
+    on architectures where the other packages also exist.
+    (Then I could later also make it depend on things like
+    libwine-alsa and libwine-capi only on platforms where it's
+    actually possible to build them.)
+  * Though the above should probably restore binNMU-safety on its own,
+    I also replaced Source-Version with binary:Version in the control
+    file. Closes: #434446.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 03 Aug 2007 09:46:36 -0400
+
 wine (0.9.36-1) unstable; urgency=low
 
   * New upstream release 0.9.36.
