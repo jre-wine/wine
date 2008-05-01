@@ -422,7 +422,12 @@ void nsACString_Init(nsACString *str, const char *data)
 {
     NS_CStringContainerInit(str);
     if(data)
-        NS_CStringSetData(str, data, PR_UINT32_MAX);
+        nsACString_SetData(str, data);
+}
+
+void nsACString_SetData(nsACString *str, const char *data)
+{
+    NS_CStringSetData(str, data, PR_UINT32_MAX);
 }
 
 PRUint32 nsACString_GetData(const nsACString *str, const char **data, PRBool *termited)
@@ -926,6 +931,7 @@ static nsresult NSAPI nsURIContentListener_OnStartURIOpen(nsIURIContentListener 
     }
 
     nsIWineURI_SetNSContainer(wine_uri, This);
+    nsIWineURI_SetIsDocumentURI(wine_uri, TRUE);
 
     if(This->bscallback && This->bscallback->mon) {
         LPWSTR url = NULL;

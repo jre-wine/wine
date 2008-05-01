@@ -139,7 +139,7 @@ static const char * const DirectoryNames[16] = {
     "EXPORT",		"IMPORT",	"RESOURCE", 	"EXCEPTION",
     "SECURITY", 	"BASERELOC", 	"DEBUG", 	"ARCHITECTURE",
     "GLOBALPTR", 	"TLS", 		"LOAD_CONFIG",	"Bound IAT",
-    "IAT", 		"Delay IAT",	"COM Descript", ""
+    "IAT", 		"Delay IAT",	"CLR Header", ""
 };
 
 static const char *get_magic_type(WORD magic)
@@ -412,7 +412,7 @@ void dump_section(const IMAGE_SECTION_HEADER *sectHead)
 
         switch (sectHead->Characteristics & IMAGE_SCN_ALIGN_MASK)
         {
-#define X2(b,s)	case b: printf("  " s); break;
+#define X2(b,s)	case b: printf("  " s); break
         X2(IMAGE_SCN_ALIGN_1BYTES, 		"ALIGN_1BYTES");
         X2(IMAGE_SCN_ALIGN_2BYTES, 		"ALIGN_2BYTES");
         X2(IMAGE_SCN_ALIGN_4BYTES, 		"ALIGN_4BYTES");
@@ -608,7 +608,7 @@ static	void	dump_dir_imported_functions(void)
 
 	printf("  offset %08lx %s\n", Offset(importDesc), (const char*)RVA(importDesc->Name, sizeof(DWORD)));
 	printf("  Hint/Name Table: %08X\n", (DWORD)importDesc->u.OriginalFirstThunk);
-	printf("  TimeDataStamp:   %08X (%s)\n",
+	printf("  TimeDateStamp:   %08X (%s)\n",
 	       importDesc->TimeDateStamp, get_time_str(importDesc->TimeDateStamp));
 	printf("  ForwarderChain:  %08X\n", importDesc->ForwarderChain);
 	printf("  First thunk RVA: %08X\n", (DWORD)importDesc->FirstThunk);
@@ -673,7 +673,7 @@ static void dump_dir_delay_imported_functions(void)
         printf("  grAttrs %08x offset %08lx %s\n", importDesc->grAttrs, Offset(importDesc),
                use_rva ? (const char *)RVA(importDesc->szName, sizeof(DWORD)) : (char *)importDesc->szName);
         printf("  Hint/Name Table: %08x\n", importDesc->pINT);
-        printf("  TimeDataStamp:   %08X (%s)\n",
+        printf("  TimeDateStamp:   %08X (%s)\n",
                importDesc->dwTimeStamp, get_time_str(importDesc->dwTimeStamp));
 
         printf("  Ordn  Name\n");
@@ -783,6 +783,47 @@ static void	dump_dir_debug(void)
 	dump_dir_debug_dir(debugDir, i);
 	debugDir++;
     }
+    printf("\n");
+}
+
+static inline void print_clrflags(const char *title, WORD value)
+{
+    printf("  %-34s 0x%X\n", title, value);
+#define X(f,s) if (value & f) printf("    %s\n", s)
+    X(COMIMAGE_FLAGS_ILONLY,           "ILONLY");
+    X(COMIMAGE_FLAGS_32BITREQUIRED,    "32BITREQUIRED");
+    X(COMIMAGE_FLAGS_IL_LIBRARY,       "IL_LIBRARY");
+    X(COMIMAGE_FLAGS_STRONGNAMESIGNED, "STRONGNAMESIGNED");
+    X(COMIMAGE_FLAGS_TRACKDEBUGDATA,   "TRACKDEBUGDATA");
+#undef X
+}
+
+static inline void print_clrdirectory(const char *title, const IMAGE_DATA_DIRECTORY *dir)
+{
+    printf("  %-23s rva: 0x%-8x  size: 0x%-8x\n", title, dir->VirtualAddress, dir->Size);
+}
+
+static void dump_dir_clr_header(void)
+{
+    unsigned int size = 0;
+    const IMAGE_COR20_HEADER *dir = get_dir_and_size(IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR, &size);
+
+    if (!dir) return;
+
+    printf( "CLR Header\n" );
+    print_dword( "Header Size", dir->cb );
+    print_ver( "Required runtime version", dir->MajorRuntimeVersion, dir->MinorRuntimeVersion );
+    print_clrflags( "Flags", dir->Flags );
+    print_dword( "EntryPointToken", dir->EntryPointToken );
+    printf("\n");
+    printf( "CLR Data Directory\n" );
+    print_clrdirectory( "MetaData", &dir->MetaData );
+    print_clrdirectory( "Resources", &dir->Resources );
+    print_clrdirectory( "StrongNameSignature", &dir->StrongNameSignature );
+    print_clrdirectory( "CodeManagerTable", &dir->CodeManagerTable );
+    print_clrdirectory( "VTableFixups", &dir->VTableFixups );
+    print_clrdirectory( "ExportAddressTableJumps", &dir->ExportAddressTableJumps );
+    print_clrdirectory( "ManagedNativeHeader", &dir->ManagedNativeHeader );
     printf("\n");
 }
 
@@ -1227,6 +1268,8 @@ void pe_dump(void)
 	    dump_dir_resource();
 	if (all || !strcmp(globals.dumpsect, "tls"))
 	    dump_dir_tls();
+	if (all || !strcmp(globals.dumpsect, "clr"))
+	    dump_dir_clr_header();
 #if 0
 	/* FIXME: not implemented yet */
 	if (all || !strcmp(globals.dumpsect, "reloc"))

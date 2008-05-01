@@ -135,12 +135,17 @@ BOOL X11DRV_CreateDC( HDC hdc, X11DRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR de
         physDev->bitmap    = &BITMAP_stock_phys_bitmap;
         physDev->drawable  = BITMAP_stock_phys_bitmap.pixmap;
         physDev->depth     = 1;
+        SetRect( &physDev->drawable_rect, 0, 0, 1, 1 );
+        physDev->dc_rect = physDev->drawable_rect;
     }
     else
     {
         physDev->bitmap    = NULL;
         physDev->drawable  = root_window;
         physDev->depth     = screen_depth;
+        physDev->drawable_rect = virtual_screen_rect;
+        SetRect( &physDev->dc_rect, 0, 0, virtual_screen_rect.right - virtual_screen_rect.left,
+                 virtual_screen_rect.bottom - virtual_screen_rect.top );
     }
     physDev->region = CreateRectRgn( 0, 0, 0, 0 );
 
@@ -189,6 +194,10 @@ INT X11DRV_GetDeviceCaps( X11DRV_PDEVICE *physDev, INT cap )
         return screen_width;
     case VERTRES:
         return screen_height;
+    case DESKTOPHORZRES:
+        return virtual_screen_rect.right - virtual_screen_rect.left;
+    case DESKTOPVERTRES:
+        return virtual_screen_rect.bottom - virtual_screen_rect.top;
     case BITSPIXEL:
         return screen_depth;
     case PLANES:
@@ -253,8 +262,6 @@ INT X11DRV_GetDeviceCaps( X11DRV_PDEVICE *physDev, INT cap )
     case SCALINGFACTORX:
     case SCALINGFACTORY:
     case VREFRESH:
-    case DESKTOPVERTRES:
-    case DESKTOPHORZRES:
     case BLTALIGNMENT:
         return 0;
     default:
@@ -327,9 +334,9 @@ INT X11DRV_ExtEscape( X11DRV_PDEVICE *physDev, INT escape, INT in_count, LPCVOID
                 {
                     const struct x11drv_escape_set_drawable *data = (const struct x11drv_escape_set_drawable *)in_data;
                     if(physDev->xrender) X11DRV_XRender_UpdateDrawable( physDev );
-                    physDev->org = data->org;
+                    physDev->dc_rect = data->dc_rect;
                     physDev->drawable = data->drawable;
-                    physDev->drawable_org = data->drawable_org;
+                    physDev->drawable_rect = data->drawable_rect;
                     wine_tsx11_lock();
                     XSetSubwindowMode( gdi_display, physDev->gc, data->mode );
                     wine_tsx11_unlock();
@@ -359,8 +366,8 @@ INT X11DRV_ExtEscape( X11DRV_PDEVICE *physDev, INT escape, INT in_count, LPCVOID
                             if (event.type == NoExpose) break;
                             if (event.type == GraphicsExpose)
                             {
-                                int x = event.xgraphicsexpose.x - physDev->org.x;
-                                int y = event.xgraphicsexpose.y - physDev->org.y;
+                                int x = event.xgraphicsexpose.x - physDev->dc_rect.left;
+                                int y = event.xgraphicsexpose.y - physDev->dc_rect.top;
 
                                 TRACE( "got %d,%d %dx%d count %d\n", x, y,
                                        event.xgraphicsexpose.width,

@@ -369,9 +369,9 @@ static const struct message WmCreateMaxPopupSeq[] = {
     { WM_MOVE, sent },
     { HCBT_MINMAX, hook|lparam, 0, SW_MAXIMIZE },
     { WM_GETMINMAXINFO, sent },
-    { WM_WINDOWPOSCHANGING, sent /*|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|0x8000*/ },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|0x8000 },
     { WM_NCCALCSIZE, sent|wparam, TRUE },
-    { WM_WINDOWPOSCHANGED, sent /*|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOREDRAW|SWP_NOZORDER|0x8000*/ },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOREDRAW|SWP_NOZORDER|0x8000 },
     { WM_MOVE, sent|defwinproc },
     { WM_SIZE, sent|defwinproc },
     { WM_SHOWWINDOW, sent|wparam, 1 },
@@ -400,9 +400,9 @@ static const struct message WmCreateInvisibleMaxPopupSeq[] = {
     { WM_MOVE, sent },
     { HCBT_MINMAX, hook|lparam, 0, SW_MAXIMIZE },
     { WM_GETMINMAXINFO, sent },
-    { WM_WINDOWPOSCHANGING, sent /*|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|0x8000*/ },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|0x8000 },
     { WM_NCCALCSIZE, sent|wparam, TRUE },
-    { WM_WINDOWPOSCHANGED, sent /*|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOREDRAW|SWP_NOZORDER|0x8000*/ },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOREDRAW|SWP_NOZORDER|0x8000 },
     { WM_MOVE, sent|defwinproc },
     { WM_SIZE, sent|defwinproc },
     { 0 }
@@ -2996,7 +2996,7 @@ static void test_mdi_messages(void)
 
     trace("call ShowWindow(mdi_child, SW_MAXIMIZE)\n");
     ShowWindow(mdi_child2, SW_MAXIMIZE);
-    ok_sequence(WmMaximizeMDIchildInvisibleSeq2, "ShowWindow(SW_MAXIMIZE):invisible maximized MDI child", TRUE);
+    ok_sequence(WmMaximizeMDIchildInvisibleSeq2, "ShowWindow(SW_MAXIMIZE):invisible maximized MDI child", FALSE);
     ok(IsZoomed(mdi_child2), "MDI child should be maximized\n");
     ok(GetWindowLongA(mdi_child2, GWL_STYLE) & WS_VISIBLE, "MDI child should be visible\n");
     ok(IsWindowVisible(mdi_child2), "MDI child should be visible\n");
@@ -3433,7 +3433,7 @@ static void test_showwindow(void)
     trace("calling ShowWindow( SW_SHOWMAXIMIZE ) for invisible maximized popup window\n");
     ShowWindow(hwnd, SW_SHOWMAXIMIZED);
     ok(IsZoomed(hwnd), "window should be maximized\n");
-    ok_sequence(WmShowMaxPopupResizedSeq, "ShowWindow(SW_SHOWMAXIMIZED):popup", FALSE);
+    ok_sequence(WmShowMaxPopupResizedSeq, "ShowWindow(SW_SHOWMAXIMIZED):invisible maximized and resized popup", FALSE);
     trace("done\n");
 
     GetWindowRect(hwnd, &rc);
@@ -3459,7 +3459,7 @@ static void test_showwindow(void)
     trace("calling ShowWindow( SW_SHOWMAXIMIZE ) for invisible maximized popup window\n");
     ShowWindow(hwnd, SW_SHOWMAXIMIZED);
     ok(IsZoomed(hwnd), "window should be maximized\n");
-    ok_sequence(WmShowMaxPopupSeq, "ShowWindow(SW_SHOWMAXIMIZED):popup", FALSE);
+    ok_sequence(WmShowMaxPopupSeq, "ShowWindow(SW_SHOWMAXIMIZED):invisible maximized popup", FALSE);
     trace("done\n");
     DestroyWindow(hwnd);
     flush_sequence();
@@ -3492,7 +3492,7 @@ static void test_showwindow(void)
     trace("calling ShowWindow( SW_SHOWMAXIMIZE ) for visible popup window\n");
     ShowWindow(hwnd, SW_SHOWMAXIMIZED);
     ok(IsZoomed(hwnd), "window should be maximized\n");
-    ok_sequence(WmShowVisMaxPopupSeq, "ShowWindow(SW_SHOWMAXIMIZED):popup", TRUE);
+    ok_sequence(WmShowVisMaxPopupSeq, "ShowWindow(SW_SHOWMAXIMIZED):popup", FALSE);
     trace("done\n");
     DestroyWindow(hwnd);
     flush_sequence();
@@ -3641,7 +3641,7 @@ static void test_messages(void)
     hchild = CreateWindowExA(0, "TestWindowClass", "Test child", WS_CHILD | WS_MAXIMIZE,
                              0, 0, 10, 10, hparent, 0, 0, NULL);
     ok (hchild != 0, "Failed to create child window\n");
-    ok_sequence(WmCreateMaximizedChildSeq, "CreateWindow:maximized child", TRUE);
+    ok_sequence(WmCreateMaximizedChildSeq, "CreateWindow:maximized child", FALSE);
     DestroyWindow(hchild);
     flush_sequence();
 
@@ -3920,6 +3920,16 @@ static void invisible_parent_tests(void)
     flush_events();
     ShowWindow( hchild, SW_MAXIMIZE );
     ok_sequence(WmShowChildInvisibleParentSeq_2r, "ShowWindow(SW_MAXIMIZE) child with invisible parent", FALSE);
+
+    DestroyWindow(hchild);
+    hchild = CreateWindowExA(0, "TestWindowClass", "Test child", WS_CHILD,
+                             0, 0, 10, 10, hparent, 0, 0, NULL);
+    flush_sequence();
+
+    ShowWindow( hchild, SW_RESTORE );
+    ok_sequence(WmShowChildInvisibleParentSeq_5, "ShowWindow(SW_RESTORE) child with invisible parent", FALSE);
+    ok(GetWindowLongA(hchild, GWL_STYLE) & WS_VISIBLE, "WS_VISIBLE should be set\n");
+    ok(!IsWindowVisible(hchild), "IsWindowVisible() should return FALSE\n");
 
     DestroyWindow(hchild);
     hchild = CreateWindowExA(0, "TestWindowClass", "Test child", WS_CHILD,
@@ -5288,6 +5298,17 @@ static const struct message WmF1Seq[] = {
     { WM_KEYUP, sent|wparam|lparam, VK_F1, 0xc0000001 },
     { 0 }
 };
+static const struct message WmVkAppsSeq[] = {
+    { HCBT_KEYSKIPPED, hook|wparam|lparam|optional, VK_APPS, 1 }, /* XP */
+    { WM_KEYDOWN, wparam|lparam, VK_APPS, 1 },
+    { WM_KEYDOWN, sent|wparam|lparam, VK_APPS, 0x00000001 },
+    { HCBT_KEYSKIPPED, hook|wparam|lparam|optional, VK_APPS, 0xc0000001 }, /* XP */
+    { WM_KEYUP, wparam|lparam, VK_APPS, 0xc0000001 },
+    { WM_KEYUP, sent|wparam|lparam, VK_APPS, 0xc0000001 },
+    { WM_CONTEXTMENU, lparam, /*hwnd*/0, (LPARAM)-1 },
+    { WM_CONTEXTMENU, sent|lparam, /*hwnd*/0, (LPARAM)-1 },
+    { 0 }
+};
 
 static void pump_msg_loop(HWND hwnd, HACCEL hAccel)
 {
@@ -5495,10 +5516,17 @@ static void test_accelerators(void)
     pump_msg_loop(hwnd, 0);
     ok_sequence(WmAltMouseButton, "Alt+MouseButton press/release", FALSE);
 
+    trace("testing VK_F1 press/release\n");
     keybd_event(VK_F1, 0, 0, 0);
     keybd_event(VK_F1, 0, KEYEVENTF_KEYUP, 0);
     pump_msg_loop(hwnd, 0);
     ok_sequence(WmF1Seq, "F1 press/release", TRUE);
+
+    trace("testing VK_APPS press/release\n");
+    keybd_event(VK_APPS, 0, 0, 0);
+    keybd_event(VK_APPS, 0, KEYEVENTF_KEYUP, 0);
+    pump_msg_loop(hwnd, 0);
+    ok_sequence(WmVkAppsSeq, "VK_APPS press/release", FALSE);
 
     DestroyWindow(hwnd);
 }
@@ -5820,6 +5848,115 @@ static LRESULT WINAPI TestDlgProcA(HWND hwnd, UINT message, WPARAM wParam, LPARA
     return ret;
 }
 
+static void dump_winpos_flags(UINT flags)
+{
+    if (!winetest_debug) return;
+
+    if (flags & SWP_SHOWWINDOW) printf("|SWP_SHOWWINDOW");
+    if (flags & SWP_HIDEWINDOW) printf("|SWP_HIDEWINDOW");
+    if (flags & SWP_NOACTIVATE) printf("|SWP_NOACTIVATE");
+    if (flags & SWP_FRAMECHANGED) printf("|SWP_FRAMECHANGED");
+    if (flags & SWP_NOCOPYBITS) printf("|SWP_NOCOPYBITS");
+    if (flags & SWP_NOOWNERZORDER) printf("|SWP_NOOWNERZORDER");
+    if (flags & SWP_NOSENDCHANGING) printf("|SWP_NOSENDCHANGING");
+    if (flags & SWP_DEFERERASE) printf("|SWP_DEFERERASE");
+    if (flags & SWP_ASYNCWINDOWPOS) printf("|SWP_ASYNCWINDOWPOS");
+    if (flags & SWP_NOZORDER) printf("|SWP_NOZORDER");
+    if (flags & SWP_NOREDRAW) printf("|SWP_NOREDRAW");
+    if (flags & SWP_NOSIZE) printf("|SWP_NOSIZE");
+    if (flags & SWP_NOMOVE) printf("|SWP_NOMOVE");
+    if (flags & SWP_NOCLIENTSIZE) printf("|SWP_NOCLIENTSIZE");
+    if (flags & SWP_NOCLIENTMOVE) printf("|SWP_NOCLIENTMOVE");
+
+#define DUMPED_FLAGS \
+    (SWP_NOSIZE | \
+    SWP_NOMOVE | \
+    SWP_NOZORDER | \
+    SWP_NOREDRAW | \
+    SWP_NOACTIVATE | \
+    SWP_FRAMECHANGED | \
+    SWP_SHOWWINDOW | \
+    SWP_HIDEWINDOW | \
+    SWP_NOCOPYBITS | \
+    SWP_NOOWNERZORDER | \
+    SWP_NOSENDCHANGING | \
+    SWP_DEFERERASE | \
+    SWP_ASYNCWINDOWPOS | \
+    SWP_NOCLIENTSIZE | \
+    SWP_NOCLIENTMOVE)
+
+    if(flags & ~DUMPED_FLAGS) printf("|0x%04x", flags & ~DUMPED_FLAGS);
+    printf("\n");
+#undef DUMPED_FLAGS
+}
+
+static LRESULT WINAPI ShowWindowProcA(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    static long defwndproc_counter = 0;
+    LRESULT ret;
+    struct message msg;
+
+    /* log only specific messages we are interested in */
+    switch (message)
+    {
+#if 0 /* probably log these as well */
+    case WM_ACTIVATE:
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+#endif
+    case WM_SHOWWINDOW:
+        trace("WM_SHOWWINDOW %d\n", wParam);
+        break;
+    case WM_SIZE:
+        trace("WM_SIZE %d\n", wParam);
+        break;
+    case WM_MOVE:
+        trace("WM_MOVE\n");
+        break;
+    case WM_GETMINMAXINFO:
+        trace("WM_GETMINMAXINFO\n");
+        break;
+
+    case WM_WINDOWPOSCHANGING:
+    case WM_WINDOWPOSCHANGED:
+    {
+        WINDOWPOS *winpos = (WINDOWPOS *)lParam;
+
+        trace("%s\n", (message == WM_WINDOWPOSCHANGING) ? "WM_WINDOWPOSCHANGING" : "WM_WINDOWPOSCHANGED");
+        trace("%p after %p, x %d, y %d, cx %d, cy %d flags %08x\n",
+              winpos->hwnd, winpos->hwndInsertAfter,
+              winpos->x, winpos->y, winpos->cx, winpos->cy, winpos->flags);
+        trace("flags: ");
+        dump_winpos_flags(winpos->flags);
+
+        /* Log only documented flags, win2k uses 0x1000 and 0x2000
+         * in the high word for internal purposes
+         */
+        wParam = winpos->flags & 0xffff;
+        /* I'm not interested in the flags that don't match under XP and Win9x */
+        wParam &= ~(SWP_NOZORDER);
+        break;
+    }
+
+    default: /* ignore */
+        /*trace("showwindow: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);*/
+        return DefWindowProcA(hwnd, message, wParam, lParam);
+    }
+
+    msg.message = message;
+    msg.flags = sent|wparam|lparam;
+    if (defwndproc_counter) msg.flags |= defwinproc;
+    msg.wParam = wParam;
+    msg.lParam = lParam;
+    add_message(&msg);
+
+    defwndproc_counter++;
+    ret = DefWindowProcA(hwnd, message, wParam, lParam);
+    defwndproc_counter--;
+
+    return ret;
+}
+
 static BOOL RegisterWindowClasses(void)
 {
     WNDCLASSA cls;
@@ -5834,6 +5971,10 @@ static BOOL RegisterWindowClasses(void)
     cls.hbrBackground = GetStockObject(WHITE_BRUSH);
     cls.lpszMenuName = NULL;
     cls.lpszClassName = "TestWindowClass";
+    if(!RegisterClassA(&cls)) return FALSE;
+
+    cls.lpfnWndProc = ShowWindowProcA;
+    cls.lpszClassName = "ShowWindowClass";
     if(!RegisterClassA(&cls)) return FALSE;
 
     cls.lpfnWndProc = PopupMsgCheckProcA;
@@ -5920,6 +6061,7 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
     if (GetClassNameA(hwnd, buf, sizeof(buf)))
     {
 	if (!lstrcmpiA(buf, "TestWindowClass") ||
+	    !lstrcmpiA(buf, "ShowWindowClass") ||
 	    !lstrcmpiA(buf, "TestParentClass") ||
 	    !lstrcmpiA(buf, "TestPopupClass") ||
 	    !lstrcmpiA(buf, "SimpleWindowClass") ||
@@ -6545,15 +6687,17 @@ static void test_winevents(void)
 
     flush_sequence();
 
-#if 0 /* this test doesn't pass under Win9x */
+    if (0)
+    {
+    /* this test doesn't pass under Win9x */
     /* win2k ignores events with hwnd == 0 */
     SetLastError(0xdeadbeef);
     pNotifyWinEvent(events[0].message, 0, events[0].wParam, events[0].lParam);
     ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE || /* Win2k */
        GetLastError() == 0xdeadbeef, /* Win9x */
-       "unexpected error %ld\n", GetLastError());
+       "unexpected error %d\n", GetLastError());
     ok_sequence(WmEmptySeq, "empty notify winevents", FALSE);
-#endif
+    }
 
     for (i = 0; i < sizeof(WmWinEventsSeq)/sizeof(WmWinEventsSeq[0]); i++)
 	pNotifyWinEvent(events[i].message, hwnd, events[i].wParam, events[i].lParam);
@@ -6700,12 +6844,14 @@ static void test_set_hook(void)
     ok(hhook != 0, "local hook does not require hModule set to 0\n");
     UnhookWindowsHookEx(hhook);
 
-#if 0 /* this test doesn't pass under Win9x: BUG! */
+    if (0)
+    {
+    /* this test doesn't pass under Win9x: BUG! */
     SetLastError(0xdeadbeef);
     hhook = SetWindowsHookExA(WH_CBT, cbt_hook_proc, 0, 0);
     ok(!hhook, "global hook requires hModule != 0\n");
-    ok(GetLastError() == ERROR_HOOK_NEEDS_HMOD, "unexpected error %ld\n", GetLastError());
-#endif
+    ok(GetLastError() == ERROR_HOOK_NEEDS_HMOD, "unexpected error %d\n", GetLastError());
+    }
 
     SetLastError(0xdeadbeef);
     hhook = SetWindowsHookExA(WH_CBT, 0, GetModuleHandleA(0), GetCurrentThreadId());
@@ -6740,25 +6886,27 @@ static void test_set_hook(void)
        GetLastError() == 0xdeadbeef, /* Win9x */
        "unexpected error %d\n", GetLastError());
 
-#if 0 /* these 3 tests don't pass under Win9x */
+    if (0)
+    {
+    /* these 3 tests don't pass under Win9x */
     SetLastError(0xdeadbeef);
     hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(1, 0,
 	0, win_event_proc, GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
     ok(!hwinevent_hook, "SetWinEventHook with invalid event range should fail\n");
-    ok(GetLastError() == ERROR_INVALID_HOOK_FILTER, "unexpected error %ld\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_HOOK_FILTER, "unexpected error %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(-1, 1,
 	0, win_event_proc, GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
     ok(!hwinevent_hook, "SetWinEventHook with invalid event range should fail\n");
-    ok(GetLastError() == ERROR_INVALID_HOOK_FILTER, "unexpected error %ld\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_HOOK_FILTER, "unexpected error %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(EVENT_MIN, EVENT_MAX,
 	0, win_event_proc, 0, 0xdeadbeef, WINEVENT_OUTOFCONTEXT);
     ok(!hwinevent_hook, "SetWinEventHook with invalid tid should fail\n");
-    ok(GetLastError() == ERROR_INVALID_THREAD_ID, "unexpected error %ld\n", GetLastError());
-#endif
+    ok(GetLastError() == ERROR_INVALID_THREAD_ID, "unexpected error %d\n", GetLastError());
+    }
 
     SetLastError(0xdeadbeef);
     hwinevent_hook = (HWINEVENTHOOK)pSetWinEventHook(0, 0,
@@ -8177,6 +8325,311 @@ static void test_SetWindowRgn(void)
     DestroyWindow( hwnd );
 }
 
+/*************************** ShowWindow() test ******************************/
+static const struct message WmShowNormal[] = {
+    { WM_SHOWWINDOW, sent|wparam, 1 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE },
+    { HCBT_ACTIVATE, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { HCBT_SETFOCUS, hook },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { 0 }
+};
+static const struct message WmShow[] = {
+    { WM_SHOWWINDOW, sent|wparam, 1 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE },
+    { HCBT_ACTIVATE, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { HCBT_SETFOCUS, hook },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { 0 }
+};
+static const struct message WmShowNoActivate_1[] = {
+    { HCBT_MINMAX, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_FRAMECHANGED|0x8000 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_FRAMECHANGED|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_RESTORED },
+    { 0 }
+};
+static const struct message WmShowNoActivate_2[] = {
+    { HCBT_MINMAX, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_RESTORED },
+    { HCBT_SETFOCUS, hook },
+    { HCBT_ACTIVATE, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { HCBT_SETFOCUS, hook },
+    { 0 }
+};
+static const struct message WmShowNA_1[] = {
+    { WM_SHOWWINDOW, sent|wparam, 1 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { 0 }
+};
+static const struct message WmShowNA_2[] = {
+    { WM_SHOWWINDOW, sent|wparam, 1 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
+    { 0 }
+};
+static const struct message WmRestore_1[] = {
+    { HCBT_MINMAX, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { HCBT_ACTIVATE, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { HCBT_SETFOCUS, hook },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_RESTORED },
+    { 0 }
+};
+static const struct message WmRestore_2[] = {
+    { WM_SHOWWINDOW, sent|wparam, 1 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { 0 }
+};
+static const struct message WmRestore_3[] = {
+    { HCBT_MINMAX, hook },
+    { WM_GETMINMAXINFO, sent },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { HCBT_ACTIVATE, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { HCBT_SETFOCUS, hook },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_MAXIMIZED },
+    { 0 }
+};
+static const struct message WmRestore_4[] = {
+    { HCBT_MINMAX, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|0x8000 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_RESTORED },
+    { 0 }
+};
+static const struct message WmHide_1[] = {
+    { WM_SHOWWINDOW, sent|wparam, 0 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_HIDEWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { 0 }
+};
+static const struct message WmHide_2[] = {
+    { WM_SHOWWINDOW, sent|wparam, 0 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { 0 }
+};
+static const struct message WmHide_3[] = {
+    { WM_SHOWWINDOW, sent|wparam, 0 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_HIDEWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { HCBT_SETFOCUS, hook },
+    { 0 }
+};
+static const struct message WmShowMinimized_1[] = {
+    { HCBT_MINMAX, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { HCBT_ACTIVATE, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_MINIMIZED },
+    { 0 }
+};
+static const struct message WmMinimize_1[] = {
+    { HCBT_MINMAX, hook },
+    { HCBT_SETFOCUS, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_MINIMIZED },
+    { 0 }
+};
+static const struct message WmMinimize_2[] = {
+    { HCBT_MINMAX, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_MINIMIZED },
+    { 0 }
+};
+static const struct message WmMinimize_3[] = {
+    { HCBT_MINMAX, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_MINIMIZED },
+    { 0 }
+};
+static const struct message WmShowMinNoActivate[] = {
+    { HCBT_MINMAX, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { 0 }
+};
+static const struct message WmMinMax[] = {
+    { HCBT_MINMAX, hook },
+    { 0 }
+};
+static const struct message WmShowMaximized_1[] = {
+    { HCBT_MINMAX, hook },
+    { WM_GETMINMAXINFO, sent },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { HCBT_ACTIVATE, hook },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { HCBT_SETFOCUS, hook },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_MAXIMIZED },
+    { 0 }
+};
+static const struct message WmShowMaximized_2[] = {
+    { HCBT_MINMAX, hook },
+    { WM_GETMINMAXINFO, sent },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { WM_MOVE, sent|optional }, /* Win9x doesn't send it */
+    { WM_SIZE, sent|wparam|optional, SIZE_MAXIMIZED }, /* Win9x doesn't send it */
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_MAXIMIZED },
+    { HCBT_SETFOCUS, hook },
+    { 0 }
+};
+static const struct message WmShowMaximized_3[] = {
+    { HCBT_MINMAX, hook },
+    { WM_GETMINMAXINFO, sent },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|0x8000 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|wparam|defwinproc, SIZE_MAXIMIZED },
+    { 0 }
+};
+
+static void test_ShowWindow(void)
+{
+    /* ShowWindow commands in random order */
+    static const struct
+    {
+        INT cmd; /* ShowWindow command */
+        LPARAM ret; /* ShowWindow return value */
+        DWORD style; /* window style after the command */
+        const struct message *msg; /* message sequence the command produces */
+        BOOL todo_msg; /* message sequence doesn't match what Wine does */
+    } sw[] =
+    {
+/*  1 */ { SW_SHOWNORMAL, FALSE, WS_VISIBLE, WmShowNormal, TRUE },
+/*  2 */ { SW_SHOWNORMAL, TRUE, WS_VISIBLE, WmEmptySeq, TRUE },
+/*  3 */ { SW_HIDE, TRUE, 0, WmHide_1, FALSE },
+/*  4 */ { SW_HIDE, FALSE, 0, WmEmptySeq, FALSE },
+/*  5 */ { SW_SHOWMINIMIZED, FALSE, WS_VISIBLE|WS_MINIMIZE, WmShowMinimized_1, TRUE },
+/*  6 */ { SW_SHOWMINIMIZED, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinMax, FALSE },
+/*  7 */ { SW_HIDE, TRUE, WS_MINIMIZE, WmHide_1, FALSE },
+/*  8 */ { SW_HIDE, FALSE, WS_MINIMIZE, WmEmptySeq, FALSE },
+/*  9 */ { SW_SHOWMAXIMIZED, FALSE, WS_VISIBLE|WS_MAXIMIZE, WmShowMaximized_1, TRUE },
+/* 10 */ { SW_SHOWMAXIMIZED, TRUE, WS_VISIBLE|WS_MAXIMIZE, WmMinMax, FALSE },
+/* 11 */ { SW_HIDE, TRUE, WS_MAXIMIZE, WmHide_1, FALSE },
+/* 12 */ { SW_HIDE, FALSE, WS_MAXIMIZE, WmEmptySeq, FALSE },
+/* 13 */ { SW_SHOWNOACTIVATE, FALSE, WS_VISIBLE, WmShowNoActivate_1, FALSE },
+/* 14 */ { SW_SHOWNOACTIVATE, TRUE, WS_VISIBLE, WmEmptySeq, TRUE },
+/* 15 */ { SW_HIDE, TRUE, 0, WmHide_2, FALSE },
+/* 16 */ { SW_HIDE, FALSE, 0, WmEmptySeq, FALSE },
+/* 17 */ { SW_SHOW, FALSE, WS_VISIBLE, WmShow, TRUE },
+/* 18 */ { SW_SHOW, TRUE, WS_VISIBLE, WmEmptySeq, FALSE },
+/* 19 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinimize_1, TRUE },
+/* 20 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinMax, FALSE },
+/* 21 */ { SW_HIDE, TRUE, WS_MINIMIZE, WmHide_2, TRUE },
+/* 22 */ { SW_SHOWMINNOACTIVE, FALSE, WS_VISIBLE|WS_MINIMIZE, WmShowMinNoActivate, TRUE },
+/* 23 */ { SW_SHOWMINNOACTIVE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinMax, FALSE },
+/* 24 */ { SW_HIDE, TRUE, WS_MINIMIZE, WmHide_2, FALSE },
+/* 25 */ { SW_HIDE, FALSE, WS_MINIMIZE, WmEmptySeq, FALSE },
+/* 26 */ { SW_SHOWNA, FALSE, WS_VISIBLE|WS_MINIMIZE, WmShowNA_1, FALSE },
+/* 27 */ { SW_SHOWNA, TRUE, WS_VISIBLE|WS_MINIMIZE, WmShowNA_2, FALSE },
+/* 28 */ { SW_HIDE, TRUE, WS_MINIMIZE, WmHide_2, FALSE },
+/* 29 */ { SW_HIDE, FALSE, WS_MINIMIZE, WmEmptySeq, FALSE },
+/* 30 */ { SW_RESTORE, FALSE, WS_VISIBLE, WmRestore_1, TRUE },
+/* 31 */ { SW_RESTORE, TRUE, WS_VISIBLE, WmEmptySeq, TRUE },
+/* 32 */ { SW_HIDE, TRUE, 0, WmHide_3, TRUE },
+/* 33 */ { SW_HIDE, FALSE, 0, WmEmptySeq, FALSE },
+/* 34 */ { SW_NORMALNA, FALSE, 0, WmEmptySeq, TRUE }, /* what does this mean?! */
+/* 35 */ { SW_NORMALNA, FALSE, 0, WmEmptySeq, TRUE },
+/* 36 */ { SW_HIDE, FALSE, 0, WmEmptySeq, FALSE },
+/* 37 */ { SW_RESTORE, FALSE, WS_VISIBLE, WmRestore_2, TRUE },
+/* 38 */ { SW_RESTORE, TRUE, WS_VISIBLE, WmEmptySeq, TRUE },
+/* 39 */ { SW_SHOWNOACTIVATE, TRUE, WS_VISIBLE, WmEmptySeq, TRUE },
+/* 40 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinimize_2, TRUE },
+/* 41 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinMax, FALSE },
+/* 42 */ { SW_SHOWMAXIMIZED, TRUE, WS_VISIBLE|WS_MAXIMIZE, WmShowMaximized_2, TRUE },
+/* 43 */ { SW_SHOWMAXIMIZED, TRUE, WS_VISIBLE|WS_MAXIMIZE, WmMinMax, FALSE },
+/* 44 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinimize_1, TRUE },
+/* 45 */ { SW_MINIMIZE, TRUE, WS_VISIBLE|WS_MINIMIZE, WmMinMax, FALSE },
+/* 46 */ { SW_RESTORE, TRUE, WS_VISIBLE|WS_MAXIMIZE, WmRestore_3, TRUE },
+/* 47 */ { SW_RESTORE, TRUE, WS_VISIBLE, WmRestore_4, FALSE },
+/* 48 */ { SW_SHOWMAXIMIZED, TRUE, WS_VISIBLE|WS_MAXIMIZE, WmShowMaximized_3, FALSE },
+/* 49 */ { SW_SHOW, TRUE, WS_VISIBLE|WS_MAXIMIZE, WmEmptySeq, FALSE },
+/* 50 */ { SW_SHOWNORMAL, TRUE, WS_VISIBLE, WmRestore_4, FALSE },
+/* 51 */ { SW_SHOWNORMAL, TRUE, WS_VISIBLE, WmEmptySeq, TRUE },
+/* 52 */ { SW_HIDE, TRUE, 0, WmHide_1, FALSE },
+/* 53 */ { SW_HIDE, FALSE, 0, WmEmptySeq, FALSE },
+/* 54 */ { SW_MINIMIZE, FALSE, WS_VISIBLE|WS_MINIMIZE, WmMinimize_3, TRUE },
+/* 55 */ { SW_HIDE, TRUE, WS_MINIMIZE, WmHide_2, TRUE },
+/* 56 */ { SW_SHOWNOACTIVATE, FALSE, WS_VISIBLE, WmShowNoActivate_2, TRUE },
+/* 57 */ { SW_SHOW, TRUE, WS_VISIBLE, WmEmptySeq, FALSE }
+    };
+    HWND hwnd;
+    DWORD style;
+    LPARAM ret;
+    INT i;
+
+#define WS_BASE (WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_POPUP|WS_CLIPSIBLINGS)
+    hwnd = CreateWindowEx(0, "ShowWindowClass", NULL, WS_BASE,
+                          120, 120, 90, 90,
+                          0, 0, 0, NULL);
+    assert(hwnd);
+
+    style = GetWindowLong(hwnd, GWL_STYLE) & ~WS_BASE;
+    ok(style == 0, "expected style 0, got %08x\n", style);
+
+    flush_events();
+    flush_sequence();
+
+    for (i = 0; i < sizeof(sw)/sizeof(sw[0]); i++)
+    {
+        static const char * const sw_cmd_name[13] =
+        {
+            "SW_HIDE", "SW_SHOWNORMAL", "SW_SHOWMINIMIZED", "SW_SHOWMAXIMIZED",
+            "SW_SHOWNOACTIVATE", "SW_SHOW", "SW_MINIMIZE", "SW_SHOWMINNOACTIVE",
+            "SW_SHOWNA", "SW_RESTORE", "SW_SHOWDEFAULT", "SW_FORCEMINIMIZE",
+            "SW_NORMALNA" /* 0xCC */
+        };
+        char comment[64];
+        INT idx; /* index into the above array of names */
+
+        idx = (sw[i].cmd == SW_NORMALNA) ? 12 : sw[i].cmd;
+
+        style = GetWindowLong(hwnd, GWL_STYLE);
+        trace("%d: sending %s, current window style %08x\n", i+1, sw_cmd_name[idx], style);
+        ret = ShowWindow(hwnd, sw[i].cmd);
+        ok(!ret == !sw[i].ret, "%d: cmd %s: expected ret %lu, got %lu\n", i+1, sw_cmd_name[idx], sw[i].ret, ret);
+        style = GetWindowLong(hwnd, GWL_STYLE) & ~WS_BASE;
+        ok(style == sw[i].style, "%d: expected style %08x, got %08x\n", i+1, sw[i].style, style);
+
+        sprintf(comment, "%d: ShowWindow(%s)", i+1, sw_cmd_name[idx]);
+        ok_sequence(sw[i].msg, comment, sw[i].todo_msg);
+
+        flush_events();
+        flush_sequence();
+    }
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(msg)
 {
     BOOL ret;
@@ -8223,6 +8676,7 @@ START_TEST(msg)
     hEvent_hook = 0;
 #endif
 
+    test_ShowWindow();
     test_PeekMessage();
     test_scrollwindowex();
     test_messages();

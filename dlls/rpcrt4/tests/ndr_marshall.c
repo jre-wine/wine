@@ -33,13 +33,13 @@
 
 static int my_alloc_called;
 static int my_free_called;
-void * CALLBACK my_alloc(size_t size)
+static void * CALLBACK my_alloc(size_t size)
 {
     my_alloc_called++;
     return NdrOleAllocate(size);
 }
 
-void CALLBACK my_free(void *ptr)
+static void CALLBACK my_free(void *ptr)
 {
     my_free_called++;
     NdrOleFree(ptr);
@@ -224,7 +224,7 @@ todo_wine {
 
 static int deref_cmp(const void *s1, const void *s2, size_t num)
 {
-    return memcmp(*(void**)s1, *(void**)s2, num);
+    return memcmp(*(const void *const *)s1, *(const void *const *)s2, num);
 }
 
 

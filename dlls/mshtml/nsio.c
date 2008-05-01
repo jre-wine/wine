@@ -54,6 +54,7 @@ typedef struct {
     NSContainer *container;
     IMoniker *mon;
     LPSTR spec;
+    PRBool is_doc_uri;
 } nsURI;
 
 #define NSURI(x)         ((nsIURI*)            &(x)->lpWineURIVtbl)
@@ -475,7 +476,7 @@ static nsresult NSAPI nsChannel_GetContentType(nsIHttpChannel *iface, nsACString
     TRACE("(%p)->(%p)\n", This, aContentType);
 
     if(This->content) {
-        nsACString_Init(aContentType, This->content);
+        nsACString_SetData(aContentType, This->content);
         return S_OK;
     }
 
@@ -483,7 +484,7 @@ static nsresult NSAPI nsChannel_GetContentType(nsIHttpChannel *iface, nsACString
         return nsIChannel_GetContentType(This->channel, aContentType);
 
     TRACE("returning default text/html\n");
-    nsACString_Init(aContentType, "text/html");
+    nsACString_SetData(aContentType, "text/html");
     return NS_OK;
 }
 
@@ -598,17 +599,20 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
     BSCallback *bscallback;
     nsIWineURI *wine_uri;
     IMoniker *mon;
+    PRBool is_doc_uri;
     nsresult nsres;
 
     TRACE("(%p)->(%p %p)\n", This, aListener, aContext);
 
-    if(This->load_flags & LOAD_INITIAL_DOCUMENT_URI) {
+    nsIWineURI_GetIsDocumentURI(This->uri, &is_doc_uri);
+
+    if(is_doc_uri && (This->load_flags & LOAD_INITIAL_DOCUMENT_URI)) {
         NSContainer *container;
 
         nsIWineURI_GetNSContainer(This->uri, &container);
         if(!container) {
-            ERR("container = NULL\n");
-            return NS_ERROR_UNEXPECTED;
+            TRACE("container = NULL\n");
+            return nsIChannel_AsyncOpen(This->channel, aListener, aContext);
         }
 
         if(container->bscallback) {
@@ -633,10 +637,9 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
                     if(NS_FAILED(nsres))
                         ERR("AddRequest failed:%08x\n", nsres);
                 }
-
                 return WINE_NS_LOAD_FROM_MONIKER;
             }
-        }else {
+        }else if(container->doc) {
             BOOL cont = before_async_open(This, container);
             nsIWebBrowserChrome_Release(NSWBCHROME(container));
 
@@ -644,6 +647,11 @@ static nsresult NSAPI nsChannel_AsyncOpen(nsIHttpChannel *iface, nsIStreamListen
                 TRACE("canceled\n");
                 return NS_ERROR_UNEXPECTED;
             }
+        }else {
+            nsIWebBrowserChrome_Release(NSWBCHROME(container));
+            return This->channel
+                ?  nsIChannel_AsyncOpen(This->channel, aListener, aContext)
+                : NS_ERROR_UNEXPECTED;
         }
     }
 
@@ -1154,7 +1162,7 @@ static nsresult NSAPI nsURI_GetSpec(nsIWineURI *iface, nsACString *aSpec)
         return nsIURI_GetSpec(This->uri, aSpec);
 
     if(This->spec) {
-        nsACString_Init(aSpec, This->spec);
+        nsACString_SetData(aSpec, This->spec);
         return NS_OK;
     }
 
@@ -1519,6 +1527,8 @@ static nsresult NSAPI nsURI_SetNSContainer(nsIWineURI *iface, NSContainer *aCont
     TRACE("(%p)->(%p)\n", This, aContainer);
 
     if(This->container) {
+        if(This->container == aContainer)
+            return NS_OK;
         WARN("Container already set: %p\n", This->container);
         nsIWebBrowserChrome_Release(NSWBCHROME(This->container));
     }
@@ -1582,6 +1592,26 @@ static nsresult NSAPI nsURI_SetMoniker(nsIWineURI *iface, IMoniker *aMoniker)
     return NS_OK;
 }
 
+static nsresult NSAPI nsURI_GetIsDocumentURI(nsIWineURI *iface, PRBool *aIsDocumentURI)
+{
+    nsURI *This = NSURI_THIS(iface);
+
+    TRACE("(%p)->(%p)\n", This, aIsDocumentURI);
+
+    *aIsDocumentURI = This->is_doc_uri;
+    return NS_OK;
+}
+
+static nsresult NSAPI nsURI_SetIsDocumentURI(nsIWineURI *iface, PRBool aIsDocumentURI)
+{
+    nsURI *This = NSURI_THIS(iface);
+
+    TRACE("(%p)->(%x)\n", This, aIsDocumentURI);
+
+    This->is_doc_uri = aIsDocumentURI;
+    return NS_OK;
+}
+
 #undef NSURI_THIS
 
 static const nsIWineURIVtbl nsWineURIVtbl = {
@@ -1617,7 +1647,9 @@ static const nsIWineURIVtbl nsWineURIVtbl = {
     nsURI_GetNSContainer,
     nsURI_SetNSContainer,
     nsURI_GetMoniker,
-    nsURI_SetMoniker
+    nsURI_SetMoniker,
+    nsURI_GetIsDocumentURI,
+    nsURI_SetIsDocumentURI
 };
 
 static nsresult create_uri(nsIURI *uri, NSContainer *container, nsIURI **_retval)
@@ -1630,6 +1662,7 @@ static nsresult create_uri(nsIURI *uri, NSContainer *container, nsIURI **_retval
     ret->container = container;
     ret->mon = NULL;
     ret->spec = NULL;
+    ret->is_doc_uri = FALSE;
 
     if(container)
         nsIWebBrowserChrome_AddRef(NSWBCHROME(container));
@@ -1704,6 +1737,8 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
         nsACString base_uri_str;
         const char *base_uri = NULL;
 
+        static const char szChrome[] = "chrome:";
+
         nsACString_Init(&base_uri_str, NULL);
 
         nsres = nsIURI_GetSpec(aBaseURI, &base_uri_str);
@@ -1715,6 +1750,9 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
         }
 
         nsACString_Finish(&base_uri_str);
+
+        if(!strncmp(spec, szChrome, sizeof(szChrome)-1))
+            aBaseURI = NULL;
     }
 
     nsres = nsIIOService_NewURI(nsio, aSpec, aOriginCharset, aBaseURI, &uri);

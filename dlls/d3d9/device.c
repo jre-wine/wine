@@ -53,12 +53,16 @@ static ULONG WINAPI IDirect3DDevice9Impl_AddRef(LPDIRECT3DDEVICE9 iface) {
 
 static ULONG WINAPI IDirect3DDevice9Impl_Release(LPDIRECT3DDEVICE9 iface) {
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
-    ULONG ref = InterlockedDecrement(&This->ref);
+    ULONG ref;
+
+    if (This->inDestruction) return 0;
+    ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) : ReleaseRef to %d\n", This, ref);
 
     if (ref == 0) {
-      IWineD3DDevice_Uninit3D(This->WineD3DDevice, D3D9CB_DestroyDepthStencilSurface);
+      This->inDestruction = TRUE;
+      IWineD3DDevice_Uninit3D(This->WineD3DDevice, D3D9CB_DestroyDepthStencilSurface, D3D9CB_DestroySwapChain);
       IWineD3DDevice_Release(This->WineD3DDevice);
       HeapFree(GetProcessHeap(), 0, This);
     }
@@ -1009,10 +1013,23 @@ HRESULT WINAPI D3D9CB_CreateSurface(IUnknown *device, IUnknown *pSuperior, UINT 
 
     if (SUCCEEDED(res)) {
         *ppSurface = d3dSurface->wineD3DSurface;
+        d3dSurface->container = pSuperior;
         IUnknown_Release(d3dSurface->parentDevice);
         d3dSurface->parentDevice = NULL;
+        d3dSurface->forwardReference = pSuperior;
     } else {
         FIXME("(%p) IDirect3DDevice9_CreateSurface failed\n", device);
     }
     return res;
+}
+
+ULONG WINAPI D3D9CB_DestroySurface(IWineD3DSurface *pSurface) {
+    IDirect3DSurface9Impl* surfaceParent;
+    TRACE("(%p) call back\n", pSurface);
+
+    IWineD3DSurface_GetParent(pSurface, (IUnknown **) &surfaceParent);
+    /* GetParent's AddRef was forwarded to an object in destruction.
+     * Releasing it here again would cause an endless recursion. */
+    surfaceParent->forwardReference = NULL;
+    return IDirect3DSurface9_Release((IDirect3DSurface9*) surfaceParent);
 }

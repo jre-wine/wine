@@ -1017,6 +1017,7 @@ static int ws_sockaddr_u2ws(const struct sockaddr* uaddr, int uaddrlen, struct W
         win->sin_family = WS_AF_INET;
         win->sin_port   = uin->sin_port;
         memcpy(&win->sin_addr,&uin->sin_addr,4); /* 4 bytes = 32 address bits */
+        memset(&win->sin_zero, 0, 8); /* Make sure the null padding is null */
         *wsaddrlen = sizeof(struct WS_sockaddr_in);
         return 0;
     }
@@ -2389,9 +2390,78 @@ INT WINAPI WSAIoctl(SOCKET s,
        break;
 
    case WS_SIO_ADDRESS_LIST_QUERY:
-        FIXME("-> SIO_ADDRESS_LIST_QUERY request: stub\n");
-        break;
+   {
+        DWORD size;
 
+        TRACE("-> SIO_ADDRESS_LIST_QUERY request\n");
+
+        if (!lpcbBytesReturned)
+        {
+            WSASetLastError(WSAEFAULT);
+            return SOCKET_ERROR;
+        }
+
+        if (GetAdaptersInfo(NULL, &size) == ERROR_BUFFER_OVERFLOW)
+        {
+            IP_ADAPTER_INFO *p, *table = HeapAlloc(GetProcessHeap(), 0, size);
+            DWORD need, num;
+
+            if (!table || GetAdaptersInfo(table, &size))
+            {
+                HeapFree(GetProcessHeap(), 0, table);
+                WSASetLastError(WSAEINVAL);
+                return SOCKET_ERROR;
+            }
+
+            for (p = table, num = 0; p; p = p->Next)
+                if (p->IpAddressList.IpAddress.String[0]) num++;
+
+            need = sizeof(SOCKET_ADDRESS_LIST) + sizeof(SOCKET_ADDRESS) * (num - 1);
+            need += sizeof(SOCKADDR) * num;
+            *lpcbBytesReturned = need;
+
+            if (need > cbOutBuffer)
+            {
+                HeapFree(GetProcessHeap(), 0, table);
+                WSASetLastError(WSAEFAULT);
+                return SOCKET_ERROR;
+            }
+
+            if (lpbOutBuffer)
+            {
+                unsigned int i;
+                SOCKET_ADDRESS *sa;
+                SOCKET_ADDRESS_LIST *sa_list = (SOCKET_ADDRESS_LIST *)lpbOutBuffer;
+                SOCKADDR_IN *sockaddr;
+
+                sa = sa_list->Address;
+                sockaddr = (SOCKADDR_IN *)((char *)sa + num * sizeof(SOCKET_ADDRESS));
+                sa_list->iAddressCount = num;
+
+                for (p = table, i = 0; p; p = p->Next)
+                {
+                    if (!p->IpAddressList.IpAddress.String[0]) continue;
+
+                    sa[i].lpSockaddr = (SOCKADDR *)&sockaddr[i];
+                    sa[i].iSockaddrLength = sizeof(SOCKADDR);
+
+                    sockaddr[i].sin_family = AF_INET;
+                    sockaddr[i].sin_port = 0;
+                    sockaddr[i].sin_addr.WS_s_addr = inet_addr(p->IpAddressList.IpAddress.String);
+                    i++;
+                }
+            }
+
+            HeapFree(GetProcessHeap(), 0, table);
+            return 0;
+        }
+        else
+        {
+            WARN("unable to get IP address list\n");
+            WSASetLastError(WSAEINVAL);
+            return SOCKET_ERROR;
+        }
+   }
    case WS_SIO_FLUSH:
 	FIXME("SIO_FLUSH: stub.\n");
 	break;

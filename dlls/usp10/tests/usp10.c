@@ -256,7 +256,7 @@ static void test_ScriptItemIzeShapePlace(HDC hdc, unsigned short pwOutGlyphs[256
                                        pItem[0].a.s.uBidiLevel);
 }
 
-void test_ScriptGetCMap(HDC hdc, unsigned short pwOutGlyphs[256])
+static void test_ScriptGetCMap(HDC hdc, unsigned short pwOutGlyphs[256])
 {
     HRESULT         hr;
     SCRIPT_CACHE    psc = NULL;
@@ -312,7 +312,7 @@ void test_ScriptGetCMap(HDC hdc, unsigned short pwOutGlyphs[256])
 
 }
 
-void test_ScriptGetFontProperties(void)
+static void test_ScriptGetFontProperties(void)
 {
     HRESULT         hr;
     HDC             hdc;
@@ -388,7 +388,7 @@ void test_ScriptGetFontProperties(void)
     DestroyWindow(hwnd);
 }
 
-void test_ScriptTextOut(void)
+static void test_ScriptTextOut(void)
 {
     HRESULT         hr;
     HWND            hwnd;
@@ -574,6 +574,25 @@ static void test_ScriptXtoX(void)
     ok(hr == S_OK, "ScriptXtoCP should return S_OK not %08x\n", hr);
     ok(piCP == 4, "iX=%d should return piCP=4 not %d\n", iX, piCP);
 
+    iX = 0;
+    cChars = 10;
+    cGlyphs = 10;
+    hr = ScriptXtoCP(iX, cChars, cGlyphs, pwLogClust, psva, piAdvance, &psa, &piCP, &piTrailing);
+    ok(hr == S_OK, "ScriptXtoCP should return S_OK not %08x\n", hr);
+    ok(piCP == 0, "iX=%d should return piCP=0 not %d\n", iX, piCP);
+    iX = 195;
+    cChars = 10;
+    cGlyphs = 10;
+    hr = ScriptXtoCP(iX, cChars, cGlyphs, pwLogClust, psva, piAdvance, &psa, &piCP, &piTrailing);
+    ok(hr == S_OK, "ScriptXtoCP should return S_OK not %08x\n", hr);
+    ok(piCP == 0, "iX=%d should return piCP=0 not %d\n", iX, piCP);
+    iX = 196;
+    cChars = 10;
+    cGlyphs = 10;
+    hr = ScriptXtoCP(iX, cChars, cGlyphs, pwLogClust, psva, piAdvance, &psa, &piCP, &piTrailing);
+    ok(hr == S_OK, "ScriptXtoCP should return S_OK not %08x\n", hr);
+    ok(piCP == 1, "iX=%d should return piCP=1 not %d\n", iX, piCP);
+
     iCP=5;
     fTrailing = FALSE;
     cChars = 10;
@@ -682,25 +701,25 @@ static void test_ScriptString(void)
     hr = ScriptStringAnalyse( hdc, teststr, String, Glyphs, Charset, Flags,
                               ReqWidth, &Control, &State, Dx, &Tabdef,
                               &InClass, &ssa);
-    todo_wine ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
+    ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
 
     /* test makes sure that a call with a valid pssa still works */
     hr = ScriptStringAnalyse( hdc, teststr, String, Glyphs, Charset, Flags,
                               ReqWidth, &Control, &State, Dx, &Tabdef,
                               &InClass, &ssa);
-    todo_wine ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
-    todo_wine ok(ssa != NULL, "ScriptStringAnalyse pssa should not be NULL\n");
+    ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
+    ok(ssa != NULL, "ScriptStringAnalyse pssa should not be NULL\n");
 
     if  (hr == 0)
     {
         hr = ScriptStringOut(ssa, X, Y, Options, &rc, MinSel, MaxSel, Disabled);
         todo_wine ok(hr == S_OK, "ScriptStringOut should return S_OK not %08x\n", hr);
         hr = ScriptStringFree(&ssa);
-        todo_wine ok(hr == S_OK, "ScriptStringFree should return S_OK not %08x\n", hr);
+        ok(hr == S_OK, "ScriptStringFree should return S_OK not %08x\n", hr);
     }
 }
 
-void test_ScriptStringXtoCP_CPtoX(HDC hdc)
+static void test_ScriptStringXtoCP_CPtoX(HDC hdc)
 {
 /*****************************************************************************************
  *
@@ -755,8 +774,8 @@ void test_ScriptStringXtoCP_CPtoX(HDC hdc)
     hr = ScriptStringAnalyse( hdc, String, String_len, Glyphs, Charset, Flags,
                               ReqWidth, &Control, &State, NULL, &Tabdef,
                               &InClass, &ssa);
-    todo_wine ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
-    todo_wine ok(ssa != NULL, "ScriptStringAnalyse ssa should not be NULL\n");
+    ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
+    ok(ssa != NULL, "ScriptStringAnalyse ssa should not be NULL\n");
     if  (hr == 0)
     {
         /*
@@ -773,28 +792,27 @@ void test_ScriptStringXtoCP_CPtoX(HDC hdc)
              */
             fTrailing = FALSE;
             hr = ScriptStringCPtoX(ssa, Cp, fTrailing, &X);
-            todo_wine ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
+            ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
             hr = ScriptStringXtoCP(ssa, X, &Ch, &iTrailing);
-            todo_wine ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
-            todo_wine ok(Cp == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp, Ch, X);
-            todo_wine ok(iTrailing == FALSE, "ScriptStringXtoCP should return iTrailing = 0 not %d for X = %d\n", 
+            ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
+            ok(Cp == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp, Ch, X);
+            ok(iTrailing == FALSE, "ScriptStringXtoCP should return iTrailing = 0 not %d for X = %d\n", 
                                   iTrailing, X);
             fTrailing = TRUE;
             hr = ScriptStringCPtoX(ssa, Cp, fTrailing, &X);
-            todo_wine ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
+            ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
             hr = ScriptStringXtoCP(ssa, X, &Ch, &iTrailing);
-            todo_wine ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
+            ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
 
             /*
-             * Check that character position returned by ScriptStringXtoCP in Ch matches the 
+             * Check that character position returned by ScriptStringXtoCP in Ch matches the
              * one input to ScriptStringCPtoX.  This means that the Cp to X position and back
              * again works
              */
-            todo_wine ok(Cp + 1 == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp + 1, Ch, X);
-            todo_wine ok(iTrailing == FALSE, "ScriptStringXtoCP should return iTrailing = 0 not %d for X = %d\n", 
+            ok(Cp + 1 == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp + 1, Ch, X);
+            ok(iTrailing == FALSE, "ScriptStringXtoCP should return iTrailing = 0 not %d for X = %d\n", 
                                    iTrailing, X);
         }
-
         /*
          * This test is to check that if the X position is just inside the trailing edge of the
          * character then iTrailing will indicate the trailing edge, ie. TRUE
@@ -802,12 +820,12 @@ void test_ScriptStringXtoCP_CPtoX(HDC hdc)
         fTrailing = TRUE;
         Cp = 3;
         hr = ScriptStringCPtoX(ssa, Cp, fTrailing, &X);
-        todo_wine ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
+        ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
         X--;                                /* put X just inside the trailing edge */
         hr = ScriptStringXtoCP(ssa, X, &Ch, &iTrailing);
-        todo_wine ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
-        todo_wine ok(Cp == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp, Ch, X);
-        todo_wine ok(iTrailing == TRUE, "ScriptStringXtoCP should return iTrailing = 1 not %d for X = %d\n", 
+        ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
+        ok(Cp == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp, Ch, X);
+        ok(iTrailing == TRUE, "ScriptStringXtoCP should return iTrailing = 1 not %d for X = %d\n", 
                                   iTrailing, X);
 
         /*
@@ -818,12 +836,12 @@ void test_ScriptStringXtoCP_CPtoX(HDC hdc)
         fTrailing = TRUE;
         Cp = 3;
         hr = ScriptStringCPtoX(ssa, Cp, fTrailing, &X);
-        todo_wine ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
+        ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
         X++;                                /* put X just outside the trailing edge */
         hr = ScriptStringXtoCP(ssa, X, &Ch, &iTrailing);
-        todo_wine ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
-        todo_wine ok(Cp + 1 == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp + 1, Ch, X);
-        todo_wine ok(iTrailing == FALSE, "ScriptStringXtoCP should return iTrailing = 0 not %d for X = %d\n", 
+        ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
+        ok(Cp + 1 == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp + 1, Ch, X);
+        ok(iTrailing == FALSE, "ScriptStringXtoCP should return iTrailing = 0 not %d for X = %d\n", 
                                   iTrailing, X);
 
         /*
@@ -834,19 +852,19 @@ void test_ScriptStringXtoCP_CPtoX(HDC hdc)
         fTrailing = FALSE;
         Cp = 3;
         hr = ScriptStringCPtoX(ssa, Cp, fTrailing, &X);
-        todo_wine ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
+        ok(hr == S_OK, "ScriptStringCPtoX should return S_OK not %08x\n", hr);
         X--;                                /* put X just outside the leading edge */
         hr = ScriptStringXtoCP(ssa, X, &Ch, &iTrailing);
-        todo_wine ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
-        todo_wine ok(Cp - 1 == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp - 1, Ch, X);
-        todo_wine ok(iTrailing == TRUE, "ScriptStringXtoCP should return iTrailing = 1 not %d for X = %d\n", 
+        ok(hr == S_OK, "ScriptStringXtoCP should return S_OK not %08x\n", hr);
+        ok(Cp - 1 == Ch, "ScriptStringXtoCP should return Ch = %d not %d for X = %d\n", Cp - 1, Ch, X);
+        ok(iTrailing == TRUE, "ScriptStringXtoCP should return iTrailing = 1 not %d for X = %d\n", 
                                   iTrailing, X);
 
         /*
          * Cleanup the the SSA for the next round of tests
-         */ 
+         */
         hr = ScriptStringFree(&ssa);
-        todo_wine ok(hr == S_OK, "ScriptStringFree should return S_OK not %08x\n", hr);
+        ok(hr == S_OK, "ScriptStringFree should return S_OK not %08x\n", hr);
 
         /*
          * Test to see that exceeding the number of chars returns E_INVALIDARG.  First
@@ -855,27 +873,27 @@ void test_ScriptStringXtoCP_CPtoX(HDC hdc)
         hr = ScriptStringAnalyse( hdc, String, String_len, Glyphs, Charset, Flags,
                                   ReqWidth, &Control, &State, NULL, &Tabdef,
                                   &InClass, &ssa);
-        todo_wine ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
+        ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
 
         /*
-         * When ScriptStringCPtoX is called with a character position Cp that exceeds the 
+         * When ScriptStringCPtoX is called with a character position Cp that exceeds the
          * string length, return E_INVALIDARG.  This also invalidates the ssa so a 
          * ScriptStringFree should also fail.
          */
         fTrailing = FALSE;
         Cp = String_len + 1; 
         hr = ScriptStringCPtoX(ssa, Cp, fTrailing, &X);
-        todo_wine ok(hr == E_INVALIDARG, "ScriptStringCPtoX should return E_INVALIDARG not %08x\n", hr);
+        ok(hr == E_INVALIDARG, "ScriptStringCPtoX should return E_INVALIDARG not %08x\n", hr);
 
         hr = ScriptStringFree(&ssa);
         /*
          * ScriptStringCPtoX should free ssa, hence ScriptStringFree should fail
          */
-        todo_wine ok(hr == E_INVALIDARG, "ScriptStringFree should return E_INVALIDARG not %08x\n", hr);
-    }   
+        ok(hr == E_INVALIDARG, "ScriptStringFree should return E_INVALIDARG not %08x\n", hr);
+    }
 }
 
-void test_ScriptCacheGetHeight(HDC hdc)
+static void test_ScriptCacheGetHeight(HDC hdc)
 {
     HRESULT hr;
     SCRIPT_CACHE sc = NULL;
@@ -898,7 +916,7 @@ void test_ScriptCacheGetHeight(HDC hdc)
     ok(height > 0, "expected height > 0\n");
 }
 
-void test_ScriptGetGlyphABCWidth(HDC hdc)
+static void test_ScriptGetGlyphABCWidth(HDC hdc)
 {
     HRESULT hr;
     LOGFONTA lf;
@@ -927,7 +945,7 @@ void test_ScriptGetGlyphABCWidth(HDC hdc)
     ok(hr == S_OK, "expected S_OK, got 0x%08x\n", hr);
 }
 
-void test_ScriptLayout(void)
+static void test_ScriptLayout(void)
 {
     HRESULT hr;
     static const BYTE levels[][5] =
@@ -1218,11 +1236,22 @@ static void test_digit_substitution(void)
         LGRPID_GEORGIAN,
         LGRPID_ARMENIAN
     };
+    HMODULE hKernel32;
+    static BOOL (WINAPI * pEnumLanguageGroupLocalesA)(LANGGROUPLOCALE_ENUMPROC,LGRPID,DWORD,LONG_PTR);
+
+    hKernel32 = GetModuleHandleA("kernel32.dll");
+    pEnumLanguageGroupLocalesA = (void*)GetProcAddress(hKernel32, "EnumLanguageGroupLocalesA");
+
+    if (!pEnumLanguageGroupLocalesA)
+    {
+        trace("EnumLanguageGroupLocalesA not available on this platform\n");
+        return;
+    }
 
     for (i = 0; i < sizeof(groups)/sizeof(groups[0]); i++)
     {
-        ret = EnumLanguageGroupLocales(enum_proc, groups[i], 0, 0);
-        ok(ret, "EnumLanguageGroupLocales failed unexpectedly: 0x%08x\n", GetLastError());
+        ret = pEnumLanguageGroupLocalesA(enum_proc, groups[i], 0, 0);
+        ok(ret, "EnumLanguageGroupLocalesA failed unexpectedly: 0x%08x\n", GetLastError());
     }
 }
 

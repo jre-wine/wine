@@ -76,7 +76,7 @@
 @ cdecl _Strftime(str long str ptr ptr)
 @ cdecl _XcptFilter(long ptr)
 @ cdecl -i386 -norelay __CxxFrameHandler(ptr ptr ptr ptr)
-@ stub __CxxLongjmpUnwind #(ptr) stdcall
+@ stdcall -i386 __CxxLongjmpUnwind(ptr)
 @ cdecl __RTCastToVoid(ptr) MSVCRT___RTCastToVoid
 @ cdecl __RTDynamicCast(ptr long ptr ptr long) MSVCRT___RTDynamicCast
 @ cdecl __RTtypeid(ptr) MSVCRT___RTtypeid
@@ -166,7 +166,7 @@
 @ cdecl _assert(str str long) MSVCRT__assert
 @ stub _atodbl #(ptr str)
 @ cdecl -ret64 _atoi64(str) ntdll._atoi64
-@ stub _atoldbl #(ptr str)
+@ cdecl _atoldbl(ptr str) MSVCRT__atoldbl
 @ cdecl _beep(long long)
 @ cdecl _beginthread (ptr long ptr)
 @ cdecl _beginthreadex (ptr long ptr ptr long ptr)

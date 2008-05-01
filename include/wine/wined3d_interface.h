@@ -241,8 +241,10 @@ typedef HRESULT WINAPI (*D3DCB_ENUMDISPLAYMODESCALLBACK) (IUnknown *pDevice,
                                                           LPVOID context);
 
 /*****************************************************************************
- * Callback functions for custom implicit surface / volume destruction.
+ * Callback functions for custom implicit object destruction.
  */
+typedef ULONG WINAPI (*D3DCB_DESTROYSWAPCHAINFN) (struct IWineD3DSwapChain *pSwapChain);
+
 typedef ULONG WINAPI (*D3DCB_DESTROYSURFACEFN) (struct IWineD3DSurface *pSurface);
 
 typedef ULONG WINAPI (*D3DCB_DESTROYVOLUMEFN) (struct IWineD3DVolume *pVolume);
@@ -359,7 +361,7 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
     STDMETHOD(CreatePixelShader)(THIS_ CONST DWORD* pFunction, struct IWineD3DPixelShader** ppShader, IUnknown *pParent) PURE;
     STDMETHOD_(HRESULT,CreatePalette)(THIS_ DWORD Flags, PALETTEENTRY *PalEnt, struct IWineD3DPalette **Palette, IUnknown *Parent);
     STDMETHOD(Init3D)(THIS_ WINED3DPRESENT_PARAMETERS* pPresentationParameters, D3DCB_CREATEADDITIONALSWAPCHAIN D3DCB_CreateAdditionalSwapChain);
-    STDMETHOD(Uninit3D)(THIS, D3DCB_DESTROYSURFACEFN pFn);
+    STDMETHOD(Uninit3D)(THIS, D3DCB_DESTROYSURFACEFN pFn, D3DCB_DESTROYSWAPCHAINFN pFn2);
     STDMETHOD_(void, SetFullscreen)(THIS_ BOOL fullscreen);
     STDMETHOD(EnumDisplayModes)(THIS_ DWORD Flags, UINT Width, UINT Height, WINED3DFORMAT Format, void *context, D3DCB_ENUMDISPLAYMODESCALLBACK cb) PURE;
     STDMETHOD(EvictManagedResources)(THIS) PURE;
@@ -499,7 +501,7 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
 #define IWineD3DDevice_CreatePixelShader(p,a,b,c)               (p)->lpVtbl->CreatePixelShader(p,a,b,c)
 #define IWineD3DDevice_CreatePalette(p, a, b, c, d)             (p)->lpVtbl->CreatePalette(p, a, b, c, d)
 #define IWineD3DDevice_Init3D(p, a, b)                          (p)->lpVtbl->Init3D(p, a, b)
-#define IWineD3DDevice_Uninit3D(p, a)                           (p)->lpVtbl->Uninit3D(p, a)
+#define IWineD3DDevice_Uninit3D(p, a, b)                        (p)->lpVtbl->Uninit3D(p, a, b)
 #define IWineD3DDevice_SetFullscreen(p, a)                      (p)->lpVtbl->SetFullscreen(p, a)
 #define IWineD3DDevice_EnumDisplayModes(p,a,b,c,d,e,f)          (p)->lpVtbl->EnumDisplayModes(p,a,b,c,d,e,f)
 #define IWineD3DDevice_EvictManagedResources(p)                 (p)->lpVtbl->EvictManagedResources(p)
@@ -1096,7 +1098,6 @@ DECLARE_INTERFACE_(IWineD3DSurface,IWineD3DResource)
     STDMETHOD_(void,PreLoad)(THIS) PURE;
     STDMETHOD_(WINED3DRESOURCETYPE,GetType)(THIS) PURE;
     /*** IWineD3DSurface methods ***/
-    STDMETHOD(GetContainerParent)(THIS_ IUnknown **ppContainerParent) PURE;
     STDMETHOD(GetContainer)(THIS_ REFIID  riid, void ** ppContainer) PURE;
     STDMETHOD(GetDesc)(THIS_ WINED3DSURFACE_DESC * pDesc) PURE;
     STDMETHOD(LockRect)(THIS_ WINED3DLOCKED_RECT * pLockedRect, CONST RECT * pRect,DWORD  Flags) PURE;
@@ -1152,7 +1153,6 @@ DECLARE_INTERFACE_(IWineD3DSurface,IWineD3DResource)
 #define IWineD3DSurface_PreLoad(p)                   (p)->lpVtbl->PreLoad(p)
 #define IWineD3DSurface_GetType(p)                   (p)->lpVtbl->GetType(p)
 /*** IWineD3DSurface methods ***/
-#define IWineD3DSurface_GetContainerParent(p,a)      (p)->lpVtbl->GetContainerParent(p,a)
 #define IWineD3DSurface_GetContainer(p,a,b)          (p)->lpVtbl->GetContainer(p,a,b)
 #define IWineD3DSurface_GetDesc(p,a)                 (p)->lpVtbl->GetDesc(p,a)
 #define IWineD3DSurface_LockRect(p,a,b,c)            (p)->lpVtbl->LockRect(p,a,b,c)
@@ -1212,7 +1212,6 @@ DECLARE_INTERFACE_(IWineD3DVolume,IWineD3DResource)
     STDMETHOD_(void,PreLoad)(THIS) PURE;
     STDMETHOD_(WINED3DRESOURCETYPE, GetType)(THIS) PURE;    
     /*** IWineD3DVolume methods ***/    
-    STDMETHOD(GetContainerParent)(THIS_ IUnknown **ppContainerParent) PURE;
     STDMETHOD(GetContainer)(THIS_ REFIID  riid, void ** ppContainer) PURE;
     STDMETHOD(GetDesc)(THIS_ WINED3DVOLUME_DESC * pDesc) PURE;
     STDMETHOD(LockBox)(THIS_ WINED3DLOCKED_BOX* pLockedVolume, CONST WINED3DBOX* pBox, DWORD Flags) PURE;
@@ -1241,7 +1240,6 @@ DECLARE_INTERFACE_(IWineD3DVolume,IWineD3DResource)
 #define IWineD3DVolume_PreLoad(p)                 (p)->lpVtbl->PreLoad(p)
 #define IWineD3DVolume_GetType(p)                 (p)->lpVtbl->GetType(p)
 /*** IWineD3DVolume methods ***/
-#define IWineD3DVolume_GetContainerParent(p,a)    (p)->lpVtbl->GetContainerParent(p,a)
 #define IWineD3DVolume_GetContainer(p,a,b)        (p)->lpVtbl->GetContainer(p,a,b)
 #define IWineD3DVolume_GetDesc(p,a)               (p)->lpVtbl->GetDesc(p,a)
 #define IWineD3DVolume_LockBox(p,a,b,c)           (p)->lpVtbl->LockBox(p,a,b,c)

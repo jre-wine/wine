@@ -103,6 +103,10 @@ static UINT WINAPI IDirect3D9Impl_GetAdapterModeCount(LPDIRECT3D9 iface, UINT Ad
 
 static HRESULT WINAPI IDirect3D9Impl_EnumAdapterModes(LPDIRECT3D9 iface, UINT Adapter, D3DFORMAT Format, UINT Mode, D3DDISPLAYMODE* pMode) {
     IDirect3D9Impl *This = (IDirect3D9Impl *)iface;
+    /* We can't pass this to WineD3D, otherwise it'll think it came from D3D8.
+       It's supposed to fail anyway, so no harm returning failure. */
+    if(Format == D3DFMT_UNKNOWN)
+        return D3DERR_INVALIDCALL;
     return IWineD3D_EnumAdapterModes(This->WineD3D, Adapter, Format, Mode, (WINED3DDISPLAYMODE *) pMode);
 }
 
@@ -189,12 +193,24 @@ HRESULT WINAPI D3D9CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior, 
 
     if (SUCCEEDED(res)) {
         *ppSurface = d3dSurface->wineD3DSurface;
-        IUnknown_Release(d3dSurface->parentDevice);
-        d3dSurface->parentDevice = NULL;
+        d3dSurface->container = pSuperior;
+        d3dSurface->isImplicit = TRUE;
+        /* Implicit surfaces are created with an refcount of 0 */
+        IUnknown_Release((IUnknown *)d3dSurface);
     } else {
         *ppSurface = NULL;
     }
     return res;
+}
+
+ULONG WINAPI D3D9CB_DestroyRenderTarget(IWineD3DSurface *pSurface) {
+    IDirect3DSurface9Impl* surfaceParent;
+    TRACE("(%p) call back\n", pSurface);
+
+    IWineD3DSurface_GetParent(pSurface, (IUnknown **) &surfaceParent);
+    surfaceParent->isImplicit = FALSE;
+    /* Surface had refcount of 0 GetParent addrefed to 1, so 1 Release is enough */
+    return IDirect3DSurface9_Release((IDirect3DSurface9*) surfaceParent);
 }
 
 HRESULT WINAPI D3D9CB_CreateAdditionalSwapChain(IUnknown *device,
@@ -225,8 +241,9 @@ HRESULT WINAPI D3D9CB_CreateAdditionalSwapChain(IUnknown *device,
 
     if (SUCCEEDED(res)) {
         *ppSwapChain = d3dSwapChain->wineD3DSwapChain;
-        IUnknown_Release(d3dSwapChain->parentDevice);
-        d3dSwapChain->parentDevice = NULL;
+        d3dSwapChain->isImplicit = TRUE;
+        /* Implicit swap chains are created with an refcount of 0 */
+        IUnknown_Release((IUnknown *)d3dSwapChain);
     } else {
         *ppSwapChain = NULL;
     }
@@ -249,6 +266,16 @@ HRESULT WINAPI D3D9CB_CreateAdditionalSwapChain(IUnknown *device,
    return res;
 }
 
+ULONG WINAPI D3D9CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain) {
+    IDirect3DSwapChain9Impl* swapChainParent;
+    TRACE("(%p) call back\n", pSwapChain);
+
+    IWineD3DSwapChain_GetParent(pSwapChain,(IUnknown **) &swapChainParent);
+    swapChainParent->isImplicit = FALSE;
+    /* Swap chain had refcount of 0 GetParent addrefed to 1, so 1 Release is enough */
+    return IDirect3DSwapChain9_Release((IDirect3DSwapChain9*) swapChainParent);
+}
+
 /* Internal function called back during the CreateDevice to create a render target */
 HRESULT WINAPI D3D9CB_CreateDepthStencilSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
@@ -263,8 +290,10 @@ HRESULT WINAPI D3D9CB_CreateDepthStencilSurface(IUnknown *device, IUnknown *pSup
                                          (IDirect3DSurface9 **)&d3dSurface, pSharedHandle);
     if (SUCCEEDED(res)) {
         *ppSurface = d3dSurface->wineD3DSurface;
-        IUnknown_Release(d3dSurface->parentDevice);
-        d3dSurface->parentDevice = NULL;
+        d3dSurface->container = device;
+        d3dSurface->isImplicit = TRUE;
+        /* Implicit surfaces are created with an refcount of 0 */
+        IUnknown_Release((IUnknown *)d3dSurface);
     }
     return res;
 }
@@ -274,7 +303,8 @@ ULONG WINAPI D3D9CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface) {
     TRACE("(%p) call back\n", pSurface);
 
     IWineD3DSurface_GetParent(pSurface, (IUnknown **) &surfaceParent);
-    IDirect3DSurface9_Release((IDirect3DSurface9*) surfaceParent);
+    surfaceParent->isImplicit = FALSE;
+    /* Surface had refcount of 0 GetParent addrefed to 1, so 1 Release is enough */
     return IDirect3DSurface9_Release((IDirect3DSurface9*) surfaceParent);
 }
 

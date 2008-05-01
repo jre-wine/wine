@@ -98,7 +98,7 @@ static void check_parents( HWND hwnd, HWND ga_parent, HWND gwl_parent, HWND get_
     }
 }
 
-BOOL CALLBACK EnumChildProc( HWND hwndChild, LPARAM lParam) 
+static BOOL CALLBACK EnumChildProc( HWND hwndChild, LPARAM lParam)
 {
     (*(LPINT)lParam)++;
     trace("EnumChildProc on %p\n", hwndChild);
@@ -107,7 +107,7 @@ BOOL CALLBACK EnumChildProc( HWND hwndChild, LPARAM lParam)
 }
 
 /* will search for the given window */
-BOOL CALLBACK EnumChildProc1( HWND hwndChild, LPARAM lParam) 
+static BOOL CALLBACK EnumChildProc1( HWND hwndChild, LPARAM lParam)
 {
     trace("EnumChildProc1 on %p\n", hwndChild);
     if ((HWND)lParam == hwndChild) return FALSE;
@@ -319,13 +319,15 @@ static void test_parent_owner(void)
 
     /* desktop window */
     check_parents( desktop, 0, 0, 0, 0, 0, 0 );
-#if 0 /* this test succeeds on NT but crashes on win9x systems */
+    if (0)
+    {
+    /* this test succeeds on NT but crashes on win9x systems */
     ret = (HWND)SetWindowLongA( test, GWL_HWNDPARENT, (LONG_PTR)hwndMain2 );
     ok( !ret, "Set GWL_HWNDPARENT succeeded on desktop\n" );
     check_parents( desktop, 0, 0, 0, 0, 0, 0 );
     ok( !SetParent( desktop, hwndMain ), "SetParent succeeded on desktop\n" );
     check_parents( desktop, 0, 0, 0, 0, 0, 0 );
-#endif
+    }
     /* normal child window */
     test = create_tool_window( WS_CHILD, hwndMain );
     trace( "created child %p\n", test );
@@ -596,9 +598,11 @@ static LRESULT WINAPI main_window_procA(HWND hwnd, UINT msg, WPARAM wparam, LPAR
             /* note: winpos coordinates are relative to parent */
             MapWindowPoints(GetParent(hwnd), 0, (LPPOINT)&rc2, 2);
             trace("pos: (%d,%d)-(%d,%d)\n", rc2.left, rc2.top, rc2.right, rc2.bottom);
-#if 0 /* Uncomment this once the test succeeds in all cases */
+            if (0)
+            {
+            /* Uncomment this once the test succeeds in all cases */
             ok(EqualRect(&rc1, &rc2), "rects do not match\n");
-#endif
+            }
 
             GetClientRect(hwnd, &rc2);
             DefWindowProcA(hwnd, WM_NCCALCSIZE, 0, (LPARAM)&rc1);
@@ -855,10 +859,8 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
     {
 	case HCBT_CREATEWND:
 	{
-#if 0 /* Uncomment this once the test succeeds in all cases */
 	    static const RECT rc_null;
 	    RECT rc;
-#endif
 	    LONG style;
 	    CBT_CREATEWNDA *createwnd = (CBT_CREATEWNDA *)lParam;
             trace("HCBT_CREATEWND: hwnd %p, parent %p, style %08x\n",
@@ -871,7 +873,9 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 		"style of hwnd and style in the CREATESTRUCT do not match: %08x != %08x\n",
 		GetWindowLongA((HWND)wParam, GWL_STYLE), style);
 
-#if 0 /* Uncomment this once the test succeeds in all cases */
+            if (0)
+            {
+            /* Uncomment this once the test succeeds in all cases */
 	    if ((style & (WS_CHILD|WS_POPUP)) == WS_CHILD)
 	    {
 		ok(GetParent((HWND)wParam) == hwndMessage,
@@ -882,17 +886,21 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 		ok(!GetParent((HWND)wParam), "GetParent should return 0 at this point\n");
 
 	    ok(!GetWindow((HWND)wParam, GW_OWNER), "GW_OWNER should be set to 0 at this point\n");
-#endif
-#if 0	    /* while NT assigns GW_HWNDFIRST/LAST some values at this point,
+            }
+            if (0)
+            {
+	    /* while NT assigns GW_HWNDFIRST/LAST some values at this point,
 	     * Win9x still has them set to 0.
 	     */
 	    ok(GetWindow((HWND)wParam, GW_HWNDFIRST) != 0, "GW_HWNDFIRST should not be set to 0 at this point\n");
 	    ok(GetWindow((HWND)wParam, GW_HWNDLAST) != 0, "GW_HWNDLAST should not be set to 0 at this point\n");
-#endif
+            }
 	    ok(!GetWindow((HWND)wParam, GW_HWNDPREV), "GW_HWNDPREV should be set to 0 at this point\n");
 	    ok(!GetWindow((HWND)wParam, GW_HWNDNEXT), "GW_HWNDNEXT should be set to 0 at this point\n");
 
-#if 0 /* Uncomment this once the test succeeds in all cases */
+            if (0)
+            {
+            /* Uncomment this once the test succeeds in all cases */
 	    if (pGetAncestor)
 	    {
 		ok(pGetAncestor((HWND)wParam, GA_PARENT) == hwndMessage, "GA_PARENT should be set to hwndMessage at this point\n");
@@ -911,7 +919,7 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 	    ok(EqualRect(&rc, &rc_null), "window rect should be set to 0 HCBT_CREATEWND\n");
 	    ok(GetClientRect((HWND)wParam, &rc), "GetClientRect failed\n");
 	    ok(EqualRect(&rc, &rc_null), "client rect should be set to 0 on HCBT_CREATEWND\n");
-#endif
+            }
 	    break;
 	}
     }
@@ -1866,10 +1874,11 @@ static void test_SetMenu(HWND parent)
     assert(hMenu);
 
     ok(SetMenu(parent, hMenu), "SetMenu on a top level window should not fail\n");
-#if 0
+    if (0)
+    {
     /* fails on (at least) Wine, NT4, XP SP2 */
     test_nonclient_area(parent); 
-#endif
+    }
     ret = GetMenu(parent);
     ok(ret == hMenu, "unexpected menu id %p\n", ret);
     /* test whether we can destroy a menu assigned to a window */
@@ -1896,10 +1905,11 @@ static void test_SetMenu(HWND parent)
     ok(ret == 0, "unexpected menu id %p\n", ret);
 
     ok(SetMenu(parent, hMenu), "SetMenu on a top level window should not fail\n");
-#if 0
+    if (0)
+    {
     /* fails on (at least) Wine, NT4, XP SP2 */
     test_nonclient_area(parent);
-#endif
+    }
     ret = GetMenu(parent);
     ok(ret == hMenu, "unexpected menu id %p\n", ret);
 
@@ -2490,6 +2500,15 @@ static void test_mouse_input(HWND hwnd)
     SetCursorPos(x, y);
     GetCursorPos(&pt);
     ok(x == pt.x && y == pt.y, "wrong cursor pos (%d,%d), expected (%d,%d)\n", pt.x, pt.y, x, y);
+
+    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessageA(&msg);
+
+    /* Check that setting the same position will generate WM_MOUSEMOVE */
+    SetCursorPos(x, y);
+    msg.message = 0;
+    ok(PeekMessageA(&msg, 0, 0, 0, PM_REMOVE), "no message available\n");
+    ok(msg.hwnd == popup && msg.message == WM_MOUSEMOVE, "hwnd %p message %04x\n", msg.hwnd, msg.message);
+    ok(msg.pt.x == x && msg.pt.y == y, "wrong message coords (%d,%d)/(%d,%d)\n", x, y, msg.pt.x, msg.pt.y);
 
     /* force the system to update its internal queue mouse position,
      * otherwise it won't generate relative mouse movements below.

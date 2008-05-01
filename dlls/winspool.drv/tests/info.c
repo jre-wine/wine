@@ -32,17 +32,17 @@
 #define MAGIC_DEAD  0xdeadbeef
 #define DEFAULT_PRINTER_SIZE 1000
 
-static CHAR does_not_exist_dll[]= "does_not_exists.dll";
-static CHAR does_not_exist[]    = "does_not_exists";
+static CHAR does_not_exist_dll[]= "does_not_exist.dll";
+static CHAR does_not_exist[]    = "does_not_exist";
 static CHAR empty[]             = "";
 static CHAR env_x86[]           = "Windows NT x86";
 static CHAR env_win9x_case[]    = "windowS 4.0";
 static CHAR illegal_name[]      = "illegal,name";
 static CHAR invalid_env[]       = "invalid_env";
-static CHAR invalid_server[]    = "\\invalid_server";
 static CHAR portname_com1[]     = "COM1:";
 static CHAR portname_file[]     = "FILE:";
 static CHAR portname_lpt1[]     = "LPT1:";
+static CHAR server_does_not_exist[] = "\\does_not_exist";
 static CHAR version_dll[]       = "version.dll";
 static CHAR winetest_monitor[]  = "winetest";
 
@@ -54,6 +54,9 @@ struct monitor_entry {
     LPSTR  env;
     CHAR  dllname[32];
 };
+
+static LPSTR   default_printer = NULL;
+static LPSTR   local_server = NULL;
 
 /* report common behavior only once */
 static DWORD report_deactivated_spooler = 1;
@@ -68,9 +71,8 @@ static DWORD report_deactivated_spooler = 1;
     }
 
 
-static LPSTR find_default_printer(VOID)
+static void find_default_printer(VOID)
 {
-    static  LPSTR   default_printer = NULL;
     static  char    buffer[DEFAULT_PRINTER_SIZE];
     DWORD   needed;
     DWORD   res;
@@ -121,7 +123,6 @@ static LPSTR find_default_printer(VOID)
         }
         trace("default_printer: '%s'\n", default_printer);
     }
-    return default_printer;
 }
 
 
@@ -177,6 +178,30 @@ static struct monitor_entry * find_installed_monitor(void)
         }
     }
     return entry;
+}
+
+
+/* ########################### */
+
+static void find_local_server(VOID)
+{
+    static  char    buffer[MAX_PATH];
+    DWORD   res;
+    DWORD   size;
+
+    size = sizeof(buffer) - 3 ;
+    buffer[0] = '\\';
+    buffer[1] = '\\';
+    buffer[2] = '\0';
+
+    SetLastError(0xdeadbeef);
+    res = GetComputerNameA(&buffer[2], &size);
+    trace("returned %d with %d and %d: '%s'\n", res, GetLastError(), size, buffer);
+
+    ok( res != 0, "returned %d with %d and %d: '%s' (expected '!= 0')\n",
+        res, GetLastError(), size, buffer);
+
+    if (res) local_server = buffer;
 }
 
 /* ########################### */
@@ -1069,7 +1094,7 @@ static void test_GetPrinterDriverDirectory(void)
         "'len > 0' or '0' with ERROR_INVALID_ENVIRONMENT)\n",
         res, GetLastError(), lstrlenA((char *)buffer));
 
-    /* A Setup-Programm (PDFCreator_0.8.0) use empty strings */
+    /* A setup program (PDFCreator_0.8.0) use empty strings */
     SetLastError(MAGIC_DEAD);
     res = GetPrinterDriverDirectoryA(empty, empty, 1, buffer, cbBuf*2, &pcbNeeded);
     ok(res, "returned %d with %d (expected '!=0')\n", res, GetLastError() );
@@ -1097,7 +1122,7 @@ static void test_GetPrintProcessorDirectory(void)
 
     SetLastError(0xdeadbeef);
     res = GetPrintProcessorDirectoryA(NULL, NULL, 1, NULL, 0, &cbBuf);
-    /* The deactivated Spooler is catched here on NT3.51 */
+    /* The deactivated Spooler is caught here on NT3.51 */
     RETURN_ON_DEACTIVATED_SPOOLER(res)
     ok( !res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER),
         "returned %d with %d (expected '0' with ERROR_INSUFFICIENT_BUFFER)\n",
@@ -1125,7 +1150,7 @@ static void test_GetPrintProcessorDirectory(void)
         res, GetLastError());
 
 #if 0
-    /* XPsp2: the programm will crash here, when the spooler is not running  */
+    /* XPsp2: the program will crash here, when the spooler is not running  */
     /*        GetPrinterDriverDirectory has the same bug */
     pcbNeeded = 0;
     SetLastError(0xdeadbeef);
@@ -1204,7 +1229,7 @@ static void test_GetPrintProcessorDirectory(void)
     /* invalid on all Systems */
     buffer[0] = '\0';
     SetLastError(0xdeadbeef);
-    res = GetPrintProcessorDirectoryA(invalid_server, NULL, 1, buffer, cbBuf*2, &pcbNeeded);
+    res = GetPrintProcessorDirectoryA(server_does_not_exist, NULL, 1, buffer, cbBuf*2, &pcbNeeded);
     ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER), 
         "returned %d with %d (expected '0' with ERROR_INVALID_PARAMETER)\n",
         res, GetLastError());
@@ -1218,16 +1243,11 @@ static void test_OpenPrinter(void)
 {
     PRINTER_DEFAULTSA   defaults;
     HANDLE              hprinter;
-    LPSTR               default_printer;
     DWORD               res;
-    DWORD               size;
-    CHAR                buffer[DEFAULT_PRINTER_SIZE];
-    LPSTR               ptr;
-
 
     SetLastError(MAGIC_DEAD);
     res = OpenPrinter(NULL, NULL, NULL);    
-    /* The deactivated Spooler is catched here on NT3.51 */
+    /* The deactivated Spooler is caught here on NT3.51 */
     RETURN_ON_DEACTIVATED_SPOOLER(res)
     ok(!res && (GetLastError() == ERROR_INVALID_PARAMETER),
         "returned %d with %d (expected '0' with ERROR_INVALID_PARAMETER)\n",
@@ -1238,7 +1258,7 @@ static void test_OpenPrinter(void)
     hprinter = (HANDLE) MAGIC_DEAD;
     SetLastError(MAGIC_DEAD);
     res = OpenPrinter(NULL, &hprinter, NULL);
-    /* The deactivated Spooler is catched here on XPsp2 */
+    /* The deactivated Spooler is caught here on XPsp2 */
     RETURN_ON_DEACTIVATED_SPOOLER(res)
     ok(res || (!res && GetLastError() == ERROR_INVALID_PARAMETER),
         "returned %d with %d (expected '!=0' or '0' with ERROR_INVALID_PARAMETER)\n",
@@ -1269,17 +1289,11 @@ static void test_OpenPrinter(void)
 
     }
 
-    size = sizeof(buffer) - 3 ;
-    ptr = buffer;
-    ptr[0] = '\\';
-    ptr++;
-    ptr[0] = '\\';
-    ptr++;
-    if (GetComputerNameA(ptr, &size)) {
 
-        hprinter = (HANDLE) MAGIC_DEAD;
-        SetLastError(MAGIC_DEAD);
-        res = OpenPrinter(buffer, &hprinter, NULL);
+    if (local_server != NULL) {
+        hprinter = (HANDLE) 0xdeadbeef;
+        SetLastError(0xdeadbeef);
+        res = OpenPrinter(local_server, &hprinter, NULL);
         todo_wine {
         ok(res || (!res && GetLastError() == ERROR_INVALID_PARAMETER),
             "returned %d with %d (expected '!=0' or '0' with ERROR_INVALID_PARAMETER)\n",
@@ -1311,7 +1325,7 @@ static void test_OpenPrinter(void)
 
 
     /* Get Handle for the default Printer */
-    if ((default_printer = find_default_printer()))
+    if (default_printer)
     {
         hprinter = (HANDLE) MAGIC_DEAD;
         SetLastError(MAGIC_DEAD);
@@ -1386,7 +1400,6 @@ static void test_OpenPrinter(void)
 static void test_SetDefaultPrinter(void)
 {
     DWORD   res;
-    LPSTR   default_printer;
     DWORD   size = DEFAULT_PRINTER_SIZE;
     CHAR    buffer[DEFAULT_PRINTER_SIZE];
     CHAR    org_value[DEFAULT_PRINTER_SIZE];
@@ -1394,8 +1407,6 @@ static void test_SetDefaultPrinter(void)
 
     if (!pSetDefaultPrinterA)  return;
 	/* only supported on win2k and above */
-
-    default_printer = find_default_printer();
 
     /* backup the original value */
     org_value[0] = '\0';
@@ -1486,14 +1497,12 @@ static void test_SetDefaultPrinter(void)
 
 static void test_GetPrinterDriver(void)
 {
-    LPSTR default_printer;
     HANDLE hprn;
     BOOL ret;
     BYTE *buf;
     INT level;
     DWORD needed, filled;
 
-    default_printer = find_default_printer();
     if (!default_printer)
     {
         trace("There is no default printer installed, skiping the test\n");
@@ -1599,12 +1608,10 @@ static void test_DEVMODE(const DEVMODE *dm, LONG dmSize, LPCSTR exp_prn_name)
 
 static void test_DocumentProperties(void)
 {
-    LPSTR default_printer;
     HANDLE hprn;
     LONG dm_size, ret;
     DEVMODE *dm;
 
-    default_printer = find_default_printer();
     if (!default_printer)
     {
         trace("There is no default printer installed, skiping the test\n");
@@ -1644,15 +1651,37 @@ static void test_EnumPrinters(void)
     DWORD ret;
 
     SetLastError(0xdeadbeef);
+    neededA = -1;
     ret = EnumPrintersA(PRINTER_ENUM_LOCAL, NULL, 2, NULL, 0, &neededA, &num);
-    ok(ret == 0, "ret %d\n", ret);
-    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "gle %d\n", GetLastError());
+    if (!ret)
+    {
+        /* We have 1 or more printers */
+        ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "gle %d\n", GetLastError());
+        ok(neededA > 0, "Expected neededA to show the number of needed bytes\n");
+    }
+    else
+    {
+        /* We don't have any printers defined */
+        ok(GetLastError() == S_OK, "gle %d\n", GetLastError());
+        ok(neededA == 0, "Expected neededA to be zero\n");
+    }
     ok(num == 0, "num %d\n", num);
 
     SetLastError(0xdeadbeef);
-    EnumPrintersW(PRINTER_ENUM_LOCAL, NULL, 2, NULL, 0, &neededW, &num);
-    ok(ret == 0, "ret %d\n", ret);
-    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "gle %d\n", GetLastError());
+    neededW = -1;
+    ret = EnumPrintersW(PRINTER_ENUM_LOCAL, NULL, 2, NULL, 0, &neededW, &num);
+    if (!ret)
+    {
+        /* We have 1 or more printers */
+        ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "gle %d\n", GetLastError());
+        ok(neededW > 0, "Expected neededW to show the number of needed bytes\n");
+    }
+    else
+    {
+        /* We don't have any printers defined */
+        ok(GetLastError() == S_OK, "gle %d\n", GetLastError());
+        ok(neededW == 0, "Expected neededW to be zero\n");
+    }
     ok(num == 0, "num %d\n", num);
 
     /* Outlook2003 relies on the buffer size returned by EnumPrintersA being big enough
@@ -1662,13 +1691,12 @@ static void test_EnumPrinters(void)
 
 START_TEST(info)
 {
-    LPSTR   default_printer;
-
     hwinspool = GetModuleHandleA("winspool.drv");
     pGetDefaultPrinterA = (void *) GetProcAddress(hwinspool, "GetDefaultPrinterA");
     pSetDefaultPrinterA = (void *) GetProcAddress(hwinspool, "SetDefaultPrinterA");
 
-    default_printer = find_default_printer();
+    find_default_printer();
+    find_local_server();
 
     test_AddMonitor();
     test_AddPort();

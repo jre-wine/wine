@@ -804,6 +804,11 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
         wined3d_settings.offscreen_rendering_mode = ORM_PBUFFER;
     }
 
+    /* MRTs are currently only supported when FBOs are used. */
+    if (wined3d_settings.offscreen_rendering_mode != ORM_FBO) {
+        gl_info->max_buffers = 1;
+    }
+
     /* Below is a list of Nvidia and ATI GPUs. Both vendors have dozens of different GPUs with roughly the same
      * features. In most cases GPUs from a certain family differ in clockspeeds, the amount of video memory and
      * in case of the latest videocards in the number of pixel/vertex pipelines.
@@ -1075,31 +1080,23 @@ static UINT     WINAPI IWineD3DImpl_GetAdapterModeCount(IWineD3D *iface, UINT Ad
 #if !defined( DEBUG_SINGLE_MODE )
         DEVMODEW DevModeW;
 
-        /* Work out the current screen bpp */
-        HDC hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
-        int bpp = GetDeviceCaps(hdc, BITSPIXEL);
-        DeleteDC(hdc);
-
         while (EnumDisplaySettingsExW(NULL, j, &DevModeW, 0)) {
             j++;
             switch (Format)
             {
-            case WINED3DFMT_UNKNOWN:
-                   i++;
-                   break;
-            case WINED3DFMT_X8R8G8B8:
-            case WINED3DFMT_A8R8G8B8:
-                   if (min(DevModeW.dmBitsPerPel, bpp) == 32) i++;
-                   if (min(DevModeW.dmBitsPerPel, bpp) == 24) i++;
-                   break;
-            case WINED3DFMT_X1R5G5B5:
-            case WINED3DFMT_A1R5G5B5:
-            case WINED3DFMT_R5G6B5:
-                   if (min(DevModeW.dmBitsPerPel, bpp) == 16) i++;
-                   break;
-            default:
-                   /* Skip other modes as they do not match the requested format */
-                   break;
+                case WINED3DFMT_UNKNOWN:
+                    if (DevModeW.dmBitsPerPel == 32 ||
+                        DevModeW.dmBitsPerPel == 16) i++;
+                    break;
+                case WINED3DFMT_X8R8G8B8:
+                    if (DevModeW.dmBitsPerPel == 32) i++;
+                    break;
+                case WINED3DFMT_R5G6B5:
+                    if (DevModeW.dmBitsPerPel == 16) i++;
+                    break;
+                default:
+                    /* Skip other modes as they do not match the requested format */
+                    break;
             }
         }
 #else
@@ -1127,79 +1124,67 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
     }
 
     if (Adapter == 0) { /* Display */
-        int bpp;
 #if !defined( DEBUG_SINGLE_MODE )
         DEVMODEW DevModeW;
         int ModeIdx = 0;
+        int i = 0;
+        int j = 0;
 
-        /* Work out the current screen bpp */
-        HDC hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
-        bpp = GetDeviceCaps(hdc, BITSPIXEL);
-        DeleteDC(hdc);
-
-        /* If we are filtering to a specific format, then need to skip all unrelated
-           modes, but if mode is irrelevant, then we can use the index directly      */
-        if (Format == WINED3DFMT_UNKNOWN)
-        {
-            ModeIdx = Mode;
-        } else {
-            int i = 0;
-            int j = 0;
-            DEVMODEW DevModeWtmp;
-
-
-            while (i<(Mode) && EnumDisplaySettingsExW(NULL, j, &DevModeWtmp, 0)) {
-                j++;
-                switch (Format)
-                {
+        /* If we are filtering to a specific format (D3D9), then need to skip
+           all unrelated modes, but if mode is irrelevant (D3D8), then we can
+           just count through the ones with valid bit depths */
+        while ((i<=Mode) && EnumDisplaySettingsExW(NULL, j++, &DevModeW, 0)) {
+            switch (Format)
+            {
                 case WINED3DFMT_UNKNOWN:
-                       i++;
-                       break;
+                    if (DevModeW.dmBitsPerPel == 32 ||
+                        DevModeW.dmBitsPerPel == 16) i++;
+                    break;
                 case WINED3DFMT_X8R8G8B8:
-                case WINED3DFMT_A8R8G8B8:
-                       if (min(DevModeWtmp.dmBitsPerPel, bpp) == 32) i++;
-                       if (min(DevModeWtmp.dmBitsPerPel, bpp) == 24) i++;
-                       break;
-                case WINED3DFMT_X1R5G5B5:
-                case WINED3DFMT_A1R5G5B5:
+                    if (DevModeW.dmBitsPerPel == 32) i++;
+                    break;
                 case WINED3DFMT_R5G6B5:
-                       if (min(DevModeWtmp.dmBitsPerPel, bpp) == 16) i++;
-                       break;
+                    if (DevModeW.dmBitsPerPel == 16) i++;
+                    break;
                 default:
-                       /* Skip other modes as they do not match requested format */
-                       break;
-                }
+                    /* Modes that don't match what we support can get an early-out */
+                    TRACE_(d3d_caps)("Searching for %s, returning D3DERR_INVALIDCALL\n", debug_d3dformat(Format));
+                    return WINED3DERR_INVALIDCALL;
             }
-            ModeIdx = j;
         }
 
+        if (i == 0) {
+            TRACE_(d3d_caps)("No modes found for format (%x - %s)\n", Format, debug_d3dformat(Format));
+            return WINED3DERR_INVALIDCALL;
+        }
+        ModeIdx = j - 1;
+
         /* Now get the display mode via the calculated index */
-        if (EnumDisplaySettingsExW(NULL, ModeIdx, &DevModeW, 0))
-        {
+        if (EnumDisplaySettingsExW(NULL, ModeIdx, &DevModeW, 0)) {
             pMode->Width        = DevModeW.dmPelsWidth;
             pMode->Height       = DevModeW.dmPelsHeight;
-            bpp                 = min(DevModeW.dmBitsPerPel, bpp);
             pMode->RefreshRate  = D3DADAPTER_DEFAULT;
             if (DevModeW.dmFields & DM_DISPLAYFREQUENCY)
-            {
                 pMode->RefreshRate = DevModeW.dmDisplayFrequency;
-            }
 
             if (Format == WINED3DFMT_UNKNOWN)
             {
-                switch (bpp) {
-                case  8: pMode->Format = WINED3DFMT_R3G3B2;   break;
-                case 16: pMode->Format = WINED3DFMT_R5G6B5;   break;
-                case 24: /* Robots and EVE Online need 24 and 32 bit as A8R8G8B8 to start */
-                case 32: pMode->Format = WINED3DFMT_A8R8G8B8; break;
-                default: pMode->Format = WINED3DFMT_UNKNOWN;
+                switch (DevModeW.dmBitsPerPel)
+                {
+                    case 16:
+                        pMode->Format = WINED3DFMT_R5G6B5;
+                        break;
+                    case 32:
+                        pMode->Format = WINED3DFMT_X8R8G8B8;
+                        break;
+                    default:
+                        pMode->Format = WINED3DFMT_UNKNOWN;
+                        ERR("Unhandled bit depth (%u) in mode list!\n", DevModeW.dmBitsPerPel);
                 }
             } else {
                 pMode->Format = Format;
             }
-        }
-        else
-        {
+        } else {
             TRACE_(d3d_caps)("Requested mode out of range %d\n", Mode);
             return WINED3DERR_INVALIDCALL;
         }
@@ -1210,11 +1195,11 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
         pMode->Width        = 800;
         pMode->Height       = 600;
         pMode->RefreshRate  = D3DADAPTER_DEFAULT;
-        pMode->Format       = (Format == WINED3DFMT_UNKNOWN) ? WINED3DFMT_A8R8G8B8 : Format;
-        bpp = 32;
+        pMode->Format       = (Format == WINED3DFMT_UNKNOWN) ? WINED3DFMT_X8R8G8B8 : Format;
 #endif
         TRACE_(d3d_caps)("W %d H %d rr %d fmt (%x - %s) bpp %u\n", pMode->Width, pMode->Height,
-                 pMode->RefreshRate, pMode->Format, debug_d3dformat(pMode->Format), bpp);
+                 pMode->RefreshRate, pMode->Format, debug_d3dformat(pMode->Format),
+                 DevModeW.dmBitsPerPel);
 
     } else {
         FIXME_(d3d_caps)("Adapter not primary display\n");
@@ -1391,7 +1376,6 @@ static BOOL IWineD3DImpl_IsGLXFBConfigCompatibleWithRenderFmt(Display *display, 
     if (type & GLX_COLOR_INDEX_BIT && 8 == buf_sz) return TRUE;
     break;
   default:
-    ERR("unsupported format %s\n", debug_d3dformat(Format));
     break;
   }
   return FALSE;
@@ -1409,7 +1393,6 @@ switch (Format) {
   case WINED3DFMT_P8:
 return TRUE;
   default:
-    ERR("unsupported format %s\n", debug_d3dformat(Format));
     break;
   }
 return FALSE;
@@ -1451,7 +1434,6 @@ static BOOL IWineD3DImpl_IsGLXFBConfigCompatibleWithDepthFmt(Display *display, G
     if (32 == db) return TRUE;
     break;
   default:
-    ERR("unsupported format %s\n", debug_d3dformat(Format));
     break;
   }
   return FALSE;
@@ -1468,7 +1450,6 @@ static BOOL IWineD3DImpl_IsGLXFBConfigCompatibleWithDepthFmt(Display *display, G
   case WINED3DFMT_D32F_LOCKABLE:
     return TRUE;
   default:
-    ERR("unsupported format %s\n", debug_d3dformat(Format));
     break;
   }
   return FALSE;
@@ -1510,6 +1491,8 @@ static HRESULT WINAPI IWineD3DImpl_CheckDepthStencilMatch(IWineD3D *iface, UINT 
             }
         }
         XFree(cfgs);
+        if(hr != WINED3D_OK)
+            ERR("unsupported format pair: %s and %s\n", debug_d3dformat(RenderTargetFormat), debug_d3dformat(DepthStencilFormat));
     } else {
         ERR_(d3d_caps)("returning WINED3D_OK even so CreateFakeGLContext or glXGetFBConfigs failed\n");
         hr = WINED3D_OK;
@@ -1587,6 +1570,8 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter
           }
       }
       if(cfgs) XFree(cfgs);
+      if(hr != WINED3D_OK)
+          ERR("unsupported format %s\n", debug_d3dformat(DisplayFormat));
       WineD3D_ReleaseFakeGLContext();
     }
 
@@ -2267,10 +2252,13 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
         *pCaps->NumberOfAdaptersInGroup           = 1;
 
         if(*pCaps->VertexShaderVersion >= WINED3DVS_VERSION(2,0)) {
-            /* OpenGL supports all formats below, perhaps not always without conversion but it supports them.
-               Further GLSL doesn't seem to have an official unsigned type as I'm not sure how we handle it
-               don't advertise it yet. We might need to add some clamping in the shader engine to support it.
-               TODO: D3DDTCAPS_USHORT2N, D3DDTCAPS_USHORT4N, D3DDTCAPS_UDEC3, D3DDTCAPS_DEC3N */
+            /* OpenGL supports all the formats below, perhaps not always
+             * without conversion, but it supports them.
+             * Further GLSL doesn't seem to have an official unsigned type so
+             * don't advertise it yet as I'm not sure how we handle it.
+             * We might need to add some clamping in the shader engine to
+             * support it.
+             * TODO: D3DDTCAPS_USHORT2N, D3DDTCAPS_USHORT4N, D3DDTCAPS_UDEC3, D3DDTCAPS_DEC3N */
             *pCaps->DeclTypes = D3DDTCAPS_UBYTE4    |
                                 D3DDTCAPS_UBYTE4N   |
                                 D3DDTCAPS_SHORT2N   |
@@ -2281,12 +2269,8 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
         } else
             *pCaps->DeclTypes                         = 0;
 
-#if 0 /* We don't properly support multiple render targets yet, so disable this for now */
-        if (GL_SUPPORT(ARB_DRAWBUFFERS)) {
-            *pCaps->NumSimultaneousRTs = GL_LIMITS(buffers);
-        } else    
-#endif
-            *pCaps->NumSimultaneousRTs = 1;
+        *pCaps->NumSimultaneousRTs = GL_LIMITS(buffers);
+
             
         *pCaps->StretchRectFilterCaps             = 0;
         *pCaps->VertexTextureFilterCaps           = 0;
@@ -2445,6 +2429,10 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     if (WINED3D_OK != temp_result)
         return temp_result;
 
+    object->render_targets = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
+
+    object->draw_buffers = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(GLenum) * GL_LIMITS(buffers));
+
     /* set the state of the device to valid */
     object->state = WINED3D_OK;
 
@@ -2469,9 +2457,9 @@ create_device_error:
         IWineD3DStateBlock_Release((IWineD3DStateBlock *)object->stateBlock);
         object->stateBlock = NULL;
     }
-    if (object->renderTarget != NULL) {
-        IWineD3DSurface_Release(object->renderTarget);
-        object->renderTarget = NULL;
+    if (object->render_targets[0] != NULL) {
+        IWineD3DSurface_Release(object->render_targets[0]);
+        object->render_targets[0] = NULL;
     }
     if (object->stencilBufferTarget != NULL) {
         IWineD3DSurface_Release(object->stencilBufferTarget);

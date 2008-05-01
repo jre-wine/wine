@@ -85,7 +85,7 @@ static inline struct tgt_process_minidump_data* PRIVATE(struct dbg_process* pcs)
 }
 
 static BOOL WINAPI tgt_process_minidump_read(HANDLE hProcess, const void* addr, 
-                                             void* buffer, DWORD len, DWORD* rlen)
+                                             void* buffer, SIZE_T len, SIZE_T* rlen)
 {
     ULONG               size;
     MINIDUMP_DIRECTORY* dir;
@@ -127,7 +127,7 @@ static BOOL WINAPI tgt_process_minidump_read(HANDLE hProcess, const void* addr,
 }
 
 static BOOL WINAPI tgt_process_minidump_write(HANDLE hProcess, void* addr,
-                                             const void* buffer, DWORD len, DWORD* wlen)
+                                             const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
     return FALSE;
 }
@@ -193,7 +193,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
         const char *str;
         char tmp[128];
 
-        dbg_printf("WineDbg starting on minidump on pid %lu\n", pid);
+        dbg_printf("WineDbg starting on minidump on pid %04x\n", pid);
         switch (msi->ProcessorArchitecture)
         {
         case PROCESSOR_ARCHITECTURE_UNKNOWN: 
@@ -271,7 +271,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             break;
         default: str = "???"; break;
         }
-        dbg_printf(" on Windows %s (%lu)\n", str, msi->BuildNumber);
+        dbg_printf(" on Windows %s (%u)\n", str, msi->BuildNumber);
         /* FIXME CSD: msi->CSDVersionRva */
     }
 

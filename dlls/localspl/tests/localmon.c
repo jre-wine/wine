@@ -54,13 +54,14 @@ static BOOL  (WINAPI *pConfigurePort)(LPWSTR, HWND, LPWSTR);
 static BOOL  (WINAPI *pDeletePort)(LPWSTR, HWND, LPWSTR);
 static BOOL  (WINAPI *pGetPrinterDataFromPort)(HANDLE, DWORD, LPWSTR, LPWSTR, DWORD, LPWSTR, DWORD, LPDWORD);
 static BOOL  (WINAPI *pSetPortTimeOuts)(HANDLE, LPCOMMTIMEOUTS, DWORD);
-static BOOL  (WINAPI *pXcvOpenPort)(HANDLE, LPCWSTR, ACCESS_MASK, PHANDLE phXcv);
+static BOOL  (WINAPI *pXcvOpenPort)(LPCWSTR, ACCESS_MASK, PHANDLE phXcv);
 static DWORD (WINAPI *pXcvDataPort)(HANDLE, LPCWSTR, PBYTE, DWORD, PBYTE, DWORD, PDWORD);
 static BOOL  (WINAPI *pXcvClosePort)(HANDLE);
 
+static WCHAR cmd_MonitorUIW[] = {'M','o','n','i','t','o','r','U','I',0};
+static WCHAR cmd_MonitorUI_lcaseW[] = {'m','o','n','i','t','o','r','u','i',0};
 static WCHAR does_not_existW[] = {'d','o','e','s','_','n','o','t','_','e','x','i','s','t',0};
 static WCHAR emptyW[] = {0};
-static WCHAR invalid_serverW[] = {'\\','\\','i','n','v','a','l','i','d','_','s','e','r','v','e','r',0};
 static WCHAR Monitors_LocalPortW[] = { \
                                 'S','y','s','t','e','m','\\',
                                 'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
@@ -73,6 +74,8 @@ static WCHAR portname_com1W[] = {'C','O','M','1',':',0};
 static WCHAR portname_fileW[] = {'F','I','L','E',':',0};
 static WCHAR portname_lpt1W[] = {'L','P','T','1',':',0};
 
+static WCHAR server_does_not_existW[] = {'\\','\\','d','o','e','s','_','n','o','t','_','e','x','i','s','t',0};
+
 /* ########################### */
 
 static void test_AddPort(void)
@@ -82,10 +85,11 @@ static void test_AddPort(void)
     /* moved to localui.dll since w2k */
     if (!pAddPort) return;
 
-#if 0
+    if (0)
+    {
     /* NT4 crash on this test */
     res = pAddPort(NULL, 0, NULL);
-#endif
+    }
 
     /*  Testing-Results (localmon.dll from NT4.0):
         - The Servername is ignored
@@ -111,10 +115,11 @@ static void test_ConfigurePort(void)
     /* moved to localui.dll since w2k */
     if (!pConfigurePort) return;
 
-#if 0
+    if (0)
+    {
     /* NT4 crash on this test */
     res = pConfigurePort(NULL, 0, NULL);
-#endif
+    }
 
     /*  Testing-Results (localmon.dll from NT4.0):
         - Case of Portname is ignored
@@ -151,10 +156,11 @@ static void test_DeletePort(void)
     /* moved to localui.dll since w2k */
     if (!pDeletePort) return;
 
-#if 0
+    if (0)
+    {
     /* NT4 crash on this test */
     res = pDeletePort(NULL, 0, NULL);
-#endif
+    }
 
     /*  Testing-Results (localmon.dll from NT4.0):
         - Case of Portname is ignored (returned '1' on Success)
@@ -218,7 +224,7 @@ static void test_EnumPorts(void)
         SetLastError(0xdeadbeef);
         res = pEnumPorts(NULL, level, buffer, cbBuf, &pcbNeeded, &pcReturned);
         ok( res, "(%d) returned %d with %d and %d, %d (expected '!= 0')\n",
-            level, res, GetLastError(), cbBuf, pcReturned);
+            level, res, GetLastError(), pcbNeeded, pcReturned);
         /* We can compare the returned Data with the Registry / "win.ini",[Ports] here */
 
         pcbNeeded = 0xdeadbeef;
@@ -226,7 +232,7 @@ static void test_EnumPorts(void)
         SetLastError(0xdeadbeef);
         res = pEnumPorts(NULL, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
         ok( res, "(%d) returned %d with %d and %d, %d (expected '!= 0')\n",
-            level, res, GetLastError(), cbBuf, pcReturned);
+            level, res, GetLastError(), pcbNeeded, pcReturned);
 
         pcbNeeded = 0xdeadbeef;
         pcReturned = 0xdeadbeef;
@@ -235,14 +241,15 @@ static void test_EnumPorts(void)
         ok( !res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER),
             "(%d) returned %d with %d and %d, %d (expected '0' with " \
             "ERROR_INSUFFICIENT_BUFFER)\n",
-            level, res, GetLastError(), cbBuf, pcReturned);
+            level, res, GetLastError(), pcbNeeded, pcReturned);
 
-#if 0
+        if (0)
+        {
         /* The following tests crash this app with native localmon/localspl */
         res = pEnumPorts(NULL, level, NULL, cbBuf, &pcbNeeded, &pcReturned);
         res = pEnumPorts(NULL, level, buffer, cbBuf, NULL, &pcReturned);
         res = pEnumPorts(NULL, level, buffer, cbBuf, &pcbNeeded, NULL);
-#endif
+        }
 
         /* The Servername is ignored */
         pcbNeeded = 0xdeadbeef;
@@ -250,14 +257,14 @@ static void test_EnumPorts(void)
         SetLastError(0xdeadbeef);
         res = pEnumPorts(emptyW, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
         ok( res, "(%d) returned %d with %d and %d, %d (expected '!= 0')\n",
-            level, res, GetLastError(), cbBuf, pcReturned);
+            level, res, GetLastError(), pcbNeeded, pcReturned);
 
         pcbNeeded = 0xdeadbeef;
         pcReturned = 0xdeadbeef;
         SetLastError(0xdeadbeef);
-        res = pEnumPorts(invalid_serverW, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
+        res = pEnumPorts(server_does_not_existW, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
         ok( res, "(%d) returned %d with %d and %d, %d (expected '!= 0')\n",
-            level, res, GetLastError(), cbBuf, pcReturned);
+            level, res, GetLastError(), pcbNeeded, pcReturned);
 
         HeapFree(GetProcessHeap(), 0, buffer);
     }
@@ -289,6 +296,178 @@ static void test_InitializePrintMonitor(void)
     res = pInitializePrintMonitor(Monitors_LocalPortW);
     ok( res == pm,
         "returned %p with %d (expected %p)\n", res, GetLastError(), pm);
+}
+
+/* ########################### */
+
+static void test_XcvClosePort(void)
+{
+    DWORD   res;
+    HANDLE hXcv;
+
+    if ((pXcvOpenPort == NULL) || (pXcvClosePort == NULL)) return;
+
+    if (0)
+    {
+    /* crash with native localspl.dll (w2k+xp) */
+    res = pXcvClosePort(NULL);
+    res = pXcvClosePort(INVALID_HANDLE_VALUE);
+    }
+
+
+    SetLastError(0xdeadbeef);
+    hXcv = (HANDLE) 0xdeadbeef;
+    res = pXcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv);
+    ok(res, "returned %d with 0x%x and %p (expected '!= 0')\n", res, GetLastError(), hXcv);
+
+    if (res) {
+        SetLastError(0xdeadbeef);
+        res = pXcvClosePort(hXcv);
+        ok( res, "returned %d with 0x%x(expected '!= 0')\n", res, GetLastError());
+
+        if (0)
+        {
+        /* test for "Double Free": crash with native localspl.dll (w2k+xp) */
+        res = pXcvClosePort(hXcv);
+        }
+    }
+}
+
+/* ########################### */
+
+static void test_XcvDataPort(void)
+{
+    DWORD   res;
+    HANDLE  hXcv;
+    BYTE    buffer[MAX_PATH + 2];
+    DWORD   needed;
+    DWORD   len;
+
+
+    if ((pXcvOpenPort == NULL) || (pXcvDataPort == NULL) || (pXcvClosePort == NULL)) return;
+
+    hXcv = (HANDLE) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv);
+    ok(res, "returned %d with 0x%x and %p (expected '!= 0')\n", res, GetLastError(), hXcv);
+    if (!res) return;
+
+    /* ask for needed size */
+    needed = (DWORD) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_MonitorUIW, NULL, 0, NULL, 0, &needed);
+    ok( (res == ERROR_INSUFFICIENT_BUFFER) && (needed <= MAX_PATH),
+        "returned %d with 0x%x and 0x%x (expected 'ERROR_INSUFFICIENT_BUFFER' " \
+        " and '<= MAX_PATH')\n", res, GetLastError(), needed);
+
+    if (needed > MAX_PATH) goto xcv_cleanup;
+    len = needed;
+
+    /* the command is required */
+    needed = (DWORD) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, emptyW, NULL, 0, NULL, 0, &needed);
+    ok( res == ERROR_INVALID_PARAMETER, "returned %d with 0x%x and 0x%x " \
+        "(expected 'ERROR_INVALID_PARAMETER')\n", res, GetLastError(), needed);
+
+    if (0) {
+    /* crash with native localspl.dll (w2k+xp) */
+    res = pXcvDataPort(hXcv, NULL, NULL, 0, buffer, MAX_PATH, &needed);
+    res = pXcvDataPort(hXcv, cmd_MonitorUIW, NULL, 0, NULL, len, &needed);
+    res = pXcvDataPort(hXcv, cmd_MonitorUIW, NULL, 0, buffer, len, NULL);
+    }
+
+
+    /* hXcv is ignored for the command "MonitorUI" */
+    needed = (DWORD) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(NULL, cmd_MonitorUIW, NULL, 0, buffer, len, &needed);
+    ok( res == ERROR_SUCCESS, "returned %d with 0x%x and 0x%x " \
+        "(expected 'ERROR_SUCCESS')\n", res, GetLastError(), needed);
+
+
+    /* pszDataName is case-sensitive */
+    memset(buffer, 0, len);
+    needed = (DWORD) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_MonitorUI_lcaseW, NULL, 0, buffer, len, &needed);
+    ok( res == ERROR_INVALID_PARAMETER, "returned %d with 0x%x and 0x%x " \
+        "(expected 'ERROR_INVALID_PARAMETER')\n", res, GetLastError(), needed);
+
+    /* off by one: larger  */
+    needed = (DWORD) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_MonitorUIW, NULL, 0, buffer, len+1, &needed);
+    ok( res == ERROR_SUCCESS, "returned %d with 0x%x and 0x%x " \
+        "(expected 'ERROR_SUCCESS')\n", res, GetLastError(), needed);
+
+
+    /* off by one: smaller */
+    needed = (DWORD) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_MonitorUIW, NULL, 0, buffer, len-1, &needed);
+    ok( res == ERROR_INSUFFICIENT_BUFFER, "returned %d with 0x%x and 0x%x " \
+        "(expected 'ERROR_INSUFFICIENT_BUFFER')\n", res, GetLastError(), needed);
+
+    /* Normal use. The DLL-Name without a Path is returned */
+    memset(buffer, 0, len);
+    needed = (DWORD) 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = pXcvDataPort(hXcv, cmd_MonitorUIW, NULL, 0, buffer, len, &needed);
+    ok( res == ERROR_SUCCESS, "returned %d with 0x%x and 0x%x " \
+        "(expected 'ERROR_SUCCESS')\n", res, GetLastError(), needed);
+
+xcv_cleanup:
+    pXcvClosePort(hXcv);
+
+}
+
+/* ########################### */
+
+static void test_XcvOpenPort(void)
+{
+    DWORD   res;
+    HANDLE  hXcv;
+
+    if ((pXcvOpenPort == NULL) || (pXcvClosePort == NULL)) return;
+
+    if (0)
+    {
+    /* crash with native localspl.dll (w2k+xp) */
+    res = pXcvOpenPort(NULL, SERVER_ACCESS_ADMINISTER, &hXcv);
+    res = pXcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, NULL);
+    }
+
+
+    /* The returned handle is the result from a previous "spoolss.dll,DllAllocSplMem" */
+    SetLastError(0xdeadbeef);
+    hXcv = (HANDLE) 0xdeadbeef;
+    res = pXcvOpenPort(emptyW, SERVER_ACCESS_ADMINISTER, &hXcv);
+    ok(res, "returned %d with 0x%x and %p (expected '!= 0')\n", res, GetLastError(), hXcv);
+    if (res) pXcvClosePort(hXcv);
+
+
+    /* The ACCESS_MASK is not checked in XcvOpenPort */
+    SetLastError(0xdeadbeef);
+    hXcv = (HANDLE) 0xdeadbeef;
+    res = pXcvOpenPort(emptyW, 0, &hXcv);
+    ok(res, "returned %d with 0x%x and %p (expected '!= 0')\n", res, GetLastError(), hXcv);
+    if (res) pXcvClosePort(hXcv);
+
+
+    /* A copy of pszObject is saved in the Memory-Block */
+    SetLastError(0xdeadbeef);
+    hXcv = (HANDLE) 0xdeadbeef;
+    res = pXcvOpenPort(portname_lpt1W, SERVER_ALL_ACCESS, &hXcv);
+    ok(res, "returned %d with 0x%x and %p (expected '!= 0')\n", res, GetLastError(), hXcv);
+    if (res) pXcvClosePort(hXcv);
+
+    SetLastError(0xdeadbeef);
+    hXcv = (HANDLE) 0xdeadbeef;
+    res = pXcvOpenPort(portname_fileW, SERVER_ALL_ACCESS, &hXcv);
+    ok(res, "returned %d with 0x%x and %p (expected '!= 0')\n", res, GetLastError(), hXcv);
+    if (res) pXcvClosePort(hXcv);
+
 }
 
 /* ########################### */
@@ -352,4 +531,7 @@ START_TEST(localmon)
     test_ConfigurePort();
     test_DeletePort();
     test_EnumPorts();
+    test_XcvClosePort();
+    test_XcvDataPort();
+    test_XcvOpenPort();
 }

@@ -176,6 +176,9 @@ typedef struct IDirect3DDevice9Impl
     /* IDirect3DDevice9 fields */
     IWineD3DDevice               *WineD3DDevice;
 
+    /* Avoids recursion with nested ReleaseRef to 0 */
+    BOOL                          inDestruction;
+
 } IDirect3DDevice9Impl;
 
 
@@ -235,7 +238,12 @@ typedef struct IDirect3DVolume9Impl
 
     /* IDirect3DVolume9 fields */
     IWineD3DVolume         *wineD3DVolume;
-    
+
+    /* The volume container */
+    IUnknown                    *container;
+
+    /* If set forward refcounting to this object */
+    IUnknown                    *forwardReference;
 } IDirect3DVolume9Impl;
 
 /* ------------------- */
@@ -256,6 +264,9 @@ typedef struct IDirect3DSwapChain9Impl
 
     /* Parent reference */
     LPDIRECT3DDEVICE9       parentDevice;
+
+    /* Flags an implicit swap chain */
+    BOOL                        isImplicit;
 } IDirect3DSwapChain9Impl;
 
 /* ------------------ */
@@ -301,6 +312,15 @@ typedef struct IDirect3DSurface9Impl
 
     /* Parent reference */
     LPDIRECT3DDEVICE9       parentDevice;
+
+    /* The surface container */
+    IUnknown                    *container;
+
+    /* If set forward refcounting to this object */
+    IUnknown                    *forwardReference;
+
+    /* Flags an implicit surface */
+    BOOL                        isImplicit;
 } IDirect3DSurface9Impl;
 
 /* ---------------------- */
@@ -541,6 +561,14 @@ extern HRESULT WINAPI D3D9CB_CreateRenderTarget(IUnknown *device, IUnknown *pSup
                                          DWORD MultisampleQuality, BOOL Lockable,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
 
+extern ULONG WINAPI D3D9CB_DestroySwapChain (IWineD3DSwapChain *pSwapChain);
+
 extern ULONG WINAPI D3D9CB_DestroyDepthStencilSurface (IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3D9CB_DestroyRenderTarget (IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3D9CB_DestroySurface(IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3D9CB_DestroyVolume(IWineD3DVolume *pVolume);
 
 #endif /* __WINE_D3D9_PRIVATE_H */

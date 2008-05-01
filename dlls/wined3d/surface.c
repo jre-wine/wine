@@ -337,29 +337,6 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetParent(IWineD3DSurface *iface, IUnknown **
    IWineD3DSurface IWineD3DSurface parts follow
    ****************************************************** */
 
-HRESULT WINAPI IWineD3DSurfaceImpl_GetContainerParent(IWineD3DSurface* iface, IUnknown **ppContainerParent) {
-    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
-
-    TRACE("(%p) : ppContainerParent %p)\n", This, ppContainerParent);
-
-    if (!ppContainerParent) {
-        ERR("(%p) : Called without a valid ppContainerParent.\n", This);
-    }
-
-    if (This->container) {
-        IWineD3DBase_GetParent(This->container, ppContainerParent);
-        if (!ppContainerParent) {
-            /* WineD3D objects should always have a parent */
-            ERR("(%p) : GetParent returned NULL\n", This);
-        }
-        IUnknown_Release(*ppContainerParent); /* GetParent adds a reference; we want just the pointer */
-    } else {
-        *ppContainerParent = NULL;
-    }
-
-    return WINED3D_OK;
-}
-
 HRESULT WINAPI IWineD3DSurfaceImpl_GetContainer(IWineD3DSurface* iface, REFIID riid, void** ppContainer) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     IWineD3DBase *container = 0;
@@ -568,7 +545,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
     if (This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
         IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain);
 
-        if (swapchain != NULL ||  iface == myDevice->renderTarget || iface == myDevice->depthStencilBuffer) {
+        if (swapchain != NULL ||  iface == myDevice->render_targets[0] || iface == myDevice->depthStencilBuffer) {
             if(swapchain != NULL) {
                 int i;
                 for(i = 0; i < swapchain->presentParms.BackBufferCount; i++) {
@@ -582,7 +559,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
                 TRACE("(%p, backBuffer) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
             } else if (swapchain != NULL && iface ==  swapchain->frontBuffer) {
                 TRACE("(%p, frontBuffer) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
-            } else if (iface == myDevice->renderTarget) {
+            } else if (iface == myDevice->render_targets[0]) {
                 TRACE("(%p, renderTarget) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
             } else if (iface == myDevice->depthStencilBuffer) {
                 TRACE("(%p, stencilBuffer) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
@@ -712,15 +689,15 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
                 if not, we need to switch contexts and then switchback at the end.
             */
             IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain);
-            IWineD3DSurface_GetContainer(myDevice->renderTarget, &IID_IWineD3DSwapChain, (void **)&targetSwapChain);
+            IWineD3DSurface_GetContainer(myDevice->render_targets[0], &IID_IWineD3DSwapChain, (void **)&targetSwapChain);
 
             /* NOTE: In a shared context environment the renderTarget will use the same context as the implicit swapchain (we're not in a shared environment yet! */
-            if ((swapchain == targetSwapChain && targetSwapChain != NULL) || iface == myDevice->renderTarget) {
+            if ((swapchain == targetSwapChain && targetSwapChain != NULL) || iface == myDevice->render_targets[0]) {
                     if (swapchain && iface == swapchain->frontBuffer) {
                         TRACE("locking front\n");
                         glReadBuffer(GL_FRONT);
                     }
-                    else if (iface == myDevice->renderTarget || backbuf) {
+                    else if (iface == myDevice->render_targets[0] || backbuf) {
                         TRACE("locking back buffer\n");
                         glReadBuffer(GL_BACK);
                     } else if (iface == myDevice->depthStencilBuffer) {
@@ -1125,7 +1102,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
                 buffername = "frontBuffer";
         } else if (iface == myDevice->depthStencilBuffer) {
                 buffername = "depthStencilBuffer";
-        } else if (iface == myDevice->renderTarget) {
+        } else if (iface == myDevice->render_targets[0]) {
                 buffername = "renderTarget";
         }
     }
@@ -1142,10 +1119,17 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
     }
 
     if (0 == This->resource.usage) { /* classic surface */
-        /**
-         * nothing to do
-         * waiting to reload the surface via IDirect3DDevice8::UpdateTexture
+        IWineD3DBaseTextureImpl *impl;
+        /* Check if the texture is bound, if yes dirtify the sampler to force a re-upload of the texture
+         * Can't load the texture here because PreLoad may destroy and recreate the gl texture, so sampler
+         * states need resetting
          */
+        if(IWineD3DSurface_GetContainer(iface, &IID_IWineD3DBaseTexture, (void **)&impl) == WINED3D_OK) {
+            if(impl->baseTexture.bindCount) {
+                IWineD3DDeviceImpl_MarkStateDirty(myDevice, STATE_SAMPLER(impl->baseTexture.sampler));
+            }
+            IWineD3DBaseTexture_Release((IWineD3DBaseTexture *) impl);
+        }
     } else if (WINED3DUSAGE_RENDERTARGET & This->resource.usage) { /* render surfaces */
 
         /****************************
@@ -1157,7 +1141,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
         IWineD3DSwapChainImpl *implSwapChain;
         IWineD3DDevice_GetSwapChain((IWineD3DDevice *)myDevice, 0, (IWineD3DSwapChain **)&implSwapChain);
 
-        if (backbuf || iface ==  implSwapChain->frontBuffer || iface == myDevice->renderTarget) {
+        if (backbuf || iface ==  implSwapChain->frontBuffer || iface == myDevice->render_targets[0]) {
             int tex;
 
             ENTER_GL();
@@ -1170,7 +1154,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
             if (iface ==  implSwapChain->frontBuffer) {
                 glDrawBuffer(GL_FRONT);
                 checkGLcall("glDrawBuffer GL_FRONT");
-            } else if (backbuf || iface == myDevice->renderTarget) {
+            } else if (backbuf || iface == myDevice->render_targets[0]) {
                 glDrawBuffer(GL_BACK);
                 checkGLcall("glDrawBuffer GL_BACK");
             }
@@ -1181,6 +1165,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
                     GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + tex));
                     checkGLcall("glActiveTextureARB");
                 }
+                IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(tex));
                 glDisable(GL_TEXTURE_2D);
                 checkGLcall("glDisable GL_TEXTURE_2D");
                 glDisable(GL_TEXTURE_1D);
@@ -1191,6 +1176,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
                 GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
                 checkGLcall("glActiveTextureARB");
             }
+            IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(0));
 
             /* And back buffers are not blended. Disable the depth test, 
                that helps performance */
@@ -2417,6 +2403,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
 
             /* Unbind the old texture */
             glBindTexture(GL_TEXTURE_2D, 0);
+            IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(0));
 
             if (GL_SUPPORT(ARB_MULTITEXTURE)) {
             /* We use texture unit 0 for blts */
@@ -3115,7 +3102,6 @@ const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl =
     IWineD3DSurfaceImpl_PreLoad,
     IWineD3DSurfaceImpl_GetType,
     /* IWineD3DSurface */
-    IWineD3DSurfaceImpl_GetContainerParent,
     IWineD3DSurfaceImpl_GetContainer,
     IWineD3DSurfaceImpl_GetDesc,
     IWineD3DSurfaceImpl_LockRect,

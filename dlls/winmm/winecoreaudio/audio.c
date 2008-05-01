@@ -32,9 +32,6 @@
 # include <unistd.h>
 #endif
 #include <fcntl.h>
-#ifdef HAVE_PTHREAD_H
-# include <pthread.h>
-#endif
 
 #include "windef.h"
 #include "winbase.h"
@@ -55,6 +52,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(wave);
 #if defined(HAVE_COREAUDIO_COREAUDIO_H) && defined(HAVE_AUDIOUNIT_AUDIOUNIT_H)
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <libkern/OSAtomic.h>
 
 /*
     Due to AudioUnit headers conflict define some needed types.
@@ -63,6 +61,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(wave);
 typedef void *AudioUnit;
 
 /* From AudioUnit/AUComponents.h */
+enum
+{
+    kAudioUnitRenderAction_OutputIsSilence  = (1 << 4),
+        /* provides hint on return from Render(): if set the buffer contains all zeroes */
+};
 typedef UInt32 AudioUnitRenderActionFlags;
 
 /* only allow 10 output devices through this driver, this ought to be adequate */
@@ -147,7 +150,11 @@ typedef struct {
         
     DWORD                       tickCountMS; /* time in MS of last AudioUnit callback */
 
-    pthread_mutex_t             lock;         /* synchronization stuff */
+    OSSpinLock                  lock;         /* synchronization stuff */
+
+    BOOL trace_on;
+    BOOL warn_on;
+    BOOL err_on;
 } WINE_WAVEOUT;
 
 typedef struct {
@@ -168,15 +175,15 @@ typedef struct {
     char              interface_name[32];*/
         
     /* synchronization stuff */
-    pthread_mutex_t lock;
+    OSSpinLock lock;
 } WINE_WAVEIN;
 
 static WINE_WAVEOUT WOutDev   [MAX_WAVEOUTDRV];
 
-static CFStringRef MessageThreadPortName;
+static CFMessagePortRef Port_SendToMessageThread;
 
-static LPWAVEHDR wodHelper_PlayPtrNext(WINE_WAVEOUT* wwo);
-static DWORD wodHelper_NotifyCompletions(WINE_WAVEOUT* wwo, BOOL force);
+static void wodHelper_PlayPtrNext(WINE_WAVEOUT* wwo);
+static void wodHelper_NotifyCompletions(WINE_WAVEOUT* wwo, BOOL force);
 
 extern int AudioUnit_CreateDefaultAudioUnit(void *wwo, AudioUnit *au);
 extern int AudioUnit_CloseAudioUnit(AudioUnit au);
@@ -247,26 +254,19 @@ static const char * getMessage(UINT msg)
 }
 
 #define kStopLoopMessage 0
-#define kWaveOutCallbackMessage 1
+#define kWaveOutNotifyCompletionsMessage 1
 #define kWaveInCallbackMessage 2
 
 /* Mach Message Handling */
-static CFDataRef wodMessageHandler(CFMessagePortRef local, SInt32 msgid, CFDataRef data, void *info)
+static CFDataRef wodMessageHandler(CFMessagePortRef port_ReceiveInMessageThread, SInt32 msgid, CFDataRef data, void *info)
 {
     UInt32 *buffer = NULL;
-    WINE_WAVEOUT* wwo = NULL;
-    
+
     switch (msgid)
     {
-        case kWaveOutCallbackMessage:
+        case kWaveOutNotifyCompletionsMessage:
             buffer = (UInt32 *) CFDataGetBytePtr(data);
-            wwo = &WOutDev[buffer[0]];
-            
-            pthread_mutex_lock(&wwo->lock);
-            DriverCallback(wwo->waveDesc.dwCallback, wwo->wFlags,
-                           (HDRVR)wwo->waveDesc.hWave, (WORD)buffer[1], wwo->waveDesc.dwInstance,
-                           (DWORD)buffer[2], (DWORD)buffer[3]);
-            pthread_mutex_unlock(&wwo->lock);
+            wodHelper_NotifyCompletions(&WOutDev[buffer[0]], FALSE);
             break;
         case kWaveInCallbackMessage:
         default:
@@ -279,50 +279,38 @@ static CFDataRef wodMessageHandler(CFMessagePortRef local, SInt32 msgid, CFDataR
 
 static DWORD WINAPI messageThread(LPVOID p)
 {
-    CFMessagePortRef local;
+    CFMessagePortRef port_ReceiveInMessageThread = (CFMessagePortRef) p;
     CFRunLoopSourceRef source;
-    Boolean info;
     
-    local = CFMessagePortCreateLocal(kCFAllocatorDefault, MessageThreadPortName,
-                                        &wodMessageHandler, NULL, &info);
-                                        
-    source = CFMessagePortCreateRunLoopSource(kCFAllocatorDefault, local, (CFIndex)0);
+    source = CFMessagePortCreateRunLoopSource(kCFAllocatorDefault, port_ReceiveInMessageThread, (CFIndex)0);
     CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode);
         
     CFRunLoopRun();
 
     CFRunLoopSourceInvalidate(source);
     CFRelease(source);
-    CFRelease(local);
-    CFRelease(MessageThreadPortName);
-    MessageThreadPortName = NULL;
+    CFRelease(port_ReceiveInMessageThread);
 
     return 0;
 }
 
-static DWORD wodSendDriverCallbackMessage(WINE_WAVEOUT* wwo, WORD wMsg, DWORD dwParam1, DWORD dwParam2)
+/**************************************************************************
+* 			wodSendNotifyCompletionsMessage			[internal]
+*   Call from AudioUnit IO thread can't use Wine debug channels.
+*/
+static void wodSendNotifyCompletionsMessage(WINE_WAVEOUT* wwo)
 {
     CFDataRef data;
-    UInt32 buffer[4];
-    SInt32 ret;
-    
-    CFMessagePortRef messagePort;
-    messagePort = CFMessagePortCreateRemote(kCFAllocatorDefault, MessageThreadPortName);
-        
-    buffer[0] = (UInt32) wwo->woID;
-    buffer[1] = (UInt32) wMsg;
-    buffer[2] = (UInt32) dwParam1;
-    buffer[3] = (UInt32) dwParam2;
+    UInt32 buffer;
 
-    data = CFDataCreate(kCFAllocatorDefault, (UInt8 *)buffer, sizeof(buffer));
+    buffer = (UInt32) wwo->woID;
+
+    data = CFDataCreate(kCFAllocatorDefault, (UInt8 *)&buffer, sizeof(buffer));
     if (!data)
-        return 0;
-    
-    ret = CFMessagePortSendRequest(messagePort, kWaveOutCallbackMessage, data, 0.0, 0.0, NULL, NULL);
+        return;
+
+    CFMessagePortSendRequest(Port_SendToMessageThread, kWaveOutNotifyCompletionsMessage, data, 0.0, 0.0, NULL, NULL);
     CFRelease(data);
-    CFRelease(messagePort);
-    
-    return (ret == kCFMessagePortSuccess)?1:0;
 }
 
 static DWORD bytes_to_mmtime(LPMMTIME lpTime, DWORD position,
@@ -448,9 +436,10 @@ LONG CoreAudio_WaveInit(void)
     OSStatus status;
     UInt32 propertySize;
     CHAR szPname[MAXPNAMELEN];
-    pthread_mutexattr_t mutexattr;
     int i;
     HANDLE hThread;
+    CFStringRef  messageThreadPortName;
+    CFMessagePortRef port_ReceiveInMessageThread;
 
     TRACE("()\n");
     
@@ -480,9 +469,6 @@ LONG CoreAudio_WaveInit(void)
     CoreAudio_DefaultDevice.interface_name=HeapAlloc(GetProcessHeap(),0,strlen(CoreAudio_DefaultDevice.dev_name)+1);
     sprintf(CoreAudio_DefaultDevice.interface_name, "%s", CoreAudio_DefaultDevice.dev_name);
     
-    pthread_mutexattr_init(&mutexattr);
-    pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_RECURSIVE);
-
     for (i = 0; i < MAX_WAVEOUTDRV; ++i)
     {
         WOutDev[i].state = WINE_WS_CLOSED;
@@ -517,47 +503,60 @@ LONG CoreAudio_WaveInit(void)
         WOutDev[i].caps.dwFormats |= WAVE_FORMAT_1M16;
         WOutDev[i].caps.dwFormats |= WAVE_FORMAT_1S16;
 
-        pthread_mutex_init(&WOutDev[i].lock, &mutexattr); /* initialize the mutex */
+        WOutDev[i].lock = 0; /* initialize the mutex */
     }
-
-    pthread_mutexattr_destroy(&mutexattr);
     
     /* create mach messages handler */
     srandomdev();
-    MessageThreadPortName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL,
+    messageThreadPortName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL,
         CFSTR("WaveMessagePort.%d.%lu"), getpid(), (unsigned long)random());
-    if (!MessageThreadPortName)
+    if (!messageThreadPortName)
     {
         ERR("Can't create message thread port name\n");
         return 1;
     }
 
-    hThread = CreateThread(NULL, 0, messageThread, NULL, 0, NULL);
+    port_ReceiveInMessageThread = CFMessagePortCreateLocal(kCFAllocatorDefault, messageThreadPortName,
+                                        &wodMessageHandler, NULL, NULL);
+    if (!port_ReceiveInMessageThread)
+    {
+        ERR("Can't create message thread local port\n");
+        CFRelease(messageThreadPortName);
+        return 1;
+    }
+
+    Port_SendToMessageThread = CFMessagePortCreateRemote(kCFAllocatorDefault, messageThreadPortName);
+    CFRelease(messageThreadPortName);
+    if (!Port_SendToMessageThread)
+    {
+        ERR("Can't create port for sending to message thread\n");
+        CFRelease(port_ReceiveInMessageThread);
+        return 1;
+    }
+
+    hThread = CreateThread(NULL, 0, messageThread, (LPVOID)port_ReceiveInMessageThread, 0, NULL);
     if ( !hThread )
     {
         ERR("Can't create message thread\n");
+        CFRelease(port_ReceiveInMessageThread);
+        CFRelease(Port_SendToMessageThread);
+        Port_SendToMessageThread = NULL;
         return 1;
     }
-    
+
+    /* The message thread is responsible for releasing port_ReceiveInMessageThread. */
+
     return 0;
 }
 
 void CoreAudio_WaveRelease(void)
 {
     /* Stop CFRunLoop in messageThread */
-    CFMessagePortRef messagePort;
-    int i;
-
     TRACE("()\n");
 
-    messagePort = CFMessagePortCreateRemote(kCFAllocatorDefault, MessageThreadPortName);
-    CFMessagePortSendRequest(messagePort, kStopLoopMessage, NULL, 0.0, 0.0, NULL, NULL);
-    CFRelease(messagePort);
-
-    for (i = 0; i < MAX_WAVEOUTDRV; ++i)
-    {
-        pthread_mutex_destroy(&WOutDev[i].lock);
-    }
+    CFMessagePortSendRequest(Port_SendToMessageThread, kStopLoopMessage, NULL, 0.0, 0.0, NULL, NULL);
+    CFRelease(Port_SendToMessageThread);
+    Port_SendToMessageThread = NULL;
 }
 
 /*======================================================================*
@@ -566,24 +565,17 @@ void CoreAudio_WaveRelease(void)
 
 /**************************************************************************
 * 			wodNotifyClient			[internal]
-*   Call from AudioUnit IO thread can't use Wine debug channels.
 */
 static DWORD wodNotifyClient(WINE_WAVEOUT* wwo, WORD wMsg, DWORD dwParam1, DWORD dwParam2)
 {
     switch (wMsg) {
         case WOM_OPEN:
         case WOM_CLOSE:
+        case WOM_DONE:
             if (wwo->wFlags != DCB_NULL &&
                 !DriverCallback(wwo->waveDesc.dwCallback, wwo->wFlags,
                                 (HDRVR)wwo->waveDesc.hWave, wMsg, wwo->waveDesc.dwInstance,
                                 dwParam1, dwParam2))
-            {
-                return MMSYSERR_ERROR;
-            }
-            break;
-        case WOM_DONE:
-            if (wwo->wFlags != DCB_NULL &&
-                ! wodSendDriverCallbackMessage(wwo, wMsg, dwParam1, dwParam2))
             {
                 return MMSYSERR_ERROR;
             }
@@ -660,18 +652,19 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     }
     
     wwo = &WOutDev[wDevID];
-    pthread_mutex_lock(&wwo->lock);
+    if (!OSSpinLockTry(&wwo->lock))
+        return MMSYSERR_ALLOCATED;
 
     if (wwo->state != WINE_WS_CLOSED)
     {
-        pthread_mutex_unlock(&wwo->lock);
+        OSSpinLockUnlock(&wwo->lock);
         return MMSYSERR_ALLOCATED;
     }
 
     if (!AudioUnit_CreateDefaultAudioUnit((void *) wwo, &wwo->audioUnit))
     {
         ERR("CoreAudio_CreateDefaultAudioUnit(%p) failed\n", wwo);
-        pthread_mutex_unlock(&wwo->lock);
+        OSSpinLockUnlock(&wwo->lock);
         return MMSYSERR_ERROR;
     }
 
@@ -700,10 +693,21 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     if (!ret) 
     {
         AudioUnit_CloseAudioUnit(wwo->audioUnit);
-        pthread_mutex_unlock(&wwo->lock);
+        OSSpinLockUnlock(&wwo->lock);
         return WAVERR_BADFORMAT; /* FIXME return an error based on the OSStatus */
     }
     wwo->streamDescription = streamFormat;
+
+    ret = AudioOutputUnitStart(wwo->audioUnit);
+    if (ret)
+    {
+        ERR("AudioOutputUnitStart failed: %08x\n", ret);
+        AudioUnitUninitialize(wwo->audioUnit);
+        AudioUnit_CloseAudioUnit(wwo->audioUnit);
+        OSSpinLockUnlock(&wwo->lock);
+        return MMSYSERR_ERROR; /* FIXME return an error based on the OSStatus */
+    }
+
     wwo->state = WINE_WS_STOPPED;
                 
     wwo->wFlags = HIWORD(dwFlags & CALLBACK_TYPEMASK);
@@ -721,8 +725,12 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     
     wwo->dwPlayedTotal = 0;
     wwo->dwWrittenTotal = 0;
-        
-    pthread_mutex_unlock(&wwo->lock);
+
+    wwo->trace_on = TRACE_ON(wave);
+    wwo->warn_on  = WARN_ON(wave);
+    wwo->err_on   = ERR_ON(wave);
+
+    OSSpinLockUnlock(&wwo->lock);
     
     retval = wodNotifyClient(wwo, WOM_OPEN, 0L, 0L);
     
@@ -746,11 +754,11 @@ static DWORD wodClose(WORD wDevID)
     }
     
     wwo = &WOutDev[wDevID];
-    pthread_mutex_lock(&wwo->lock);
+    OSSpinLockLock(&wwo->lock);
     if (wwo->lpQueuePtr)
     {
         WARN("buffers still playing !\n");
-        pthread_mutex_unlock(&wwo->lock);
+        OSSpinLockUnlock(&wwo->lock);
         ret = WAVERR_STILLPLAYING;
     } else
     {
@@ -760,23 +768,22 @@ static DWORD wodClose(WORD wDevID)
         
         wwo->state = WINE_WS_CLOSED; /* mark the device as closed */
         
+        OSSpinLockUnlock(&wwo->lock);
+
         err = AudioUnitUninitialize(wwo->audioUnit);
         if (err) {
             ERR("AudioUnitUninitialize return %c%c%c%c\n", (char) (err >> 24),
                                                             (char) (err >> 16),
                                                             (char) (err >> 8),
                                                             (char) err);
-            pthread_mutex_unlock(&wwo->lock);
             return MMSYSERR_ERROR; /* FIXME return an error based on the OSStatus */
         }
         
         if ( !AudioUnit_CloseAudioUnit(wwo->audioUnit) )
         {
             ERR("Can't close AudioUnit\n");
-            pthread_mutex_unlock(&wwo->lock);
             return MMSYSERR_ERROR; /* FIXME return an error based on the OSStatus */
         }  
-        pthread_mutex_unlock(&wwo->lock);
         
         ret = wodNotifyClient(wwo, WOM_CLOSE, 0L, 0L);
     }
@@ -826,51 +833,30 @@ static DWORD wodUnprepare(WORD wDevID, LPWAVEHDR lpWaveHdr, DWORD dwSize)
     return MMSYSERR_NOERROR;
 }
 
+
 /**************************************************************************
-* 				wodHelper_BeginWaveHdr          [internal]
+* 				wodHelper_CheckForLoopBegin	        [internal]
 *
-* Makes the specified lpWaveHdr the currently playing wave header.
-* If the specified wave header is a begin loop and we're not already in
-* a loop, setup the loop.
+* Check if the new waveheader is the beginning of a loop, and set up
+* state if so.
+* This is called with the WAVEOUT lock held.
 * Call from AudioUnit IO thread can't use Wine debug channels.
 */
-static void wodHelper_BeginWaveHdr(WINE_WAVEOUT* wwo, LPWAVEHDR lpWaveHdr)
+static void wodHelper_CheckForLoopBegin(WINE_WAVEOUT* wwo)
 {
-    OSStatus status;
+    LPWAVEHDR lpWaveHdr = wwo->lpPlayPtr;
 
-    wwo->lpPlayPtr = lpWaveHdr;
-    
-    if (!lpWaveHdr)
-    {
-        if (wwo->state == WINE_WS_PLAYING)
-        {
-            wwo->state = WINE_WS_STOPPED;
-            status = AudioOutputUnitStop(wwo->audioUnit);
-            if (status)
-                fprintf(stderr, "err:winecoreaudio:wodHelper_BeginWaveHdr AudioOutputUnitStop return %c%c%c%c\n",
-                        (char) (status >> 24), (char) (status >> 16), (char) (status >> 8), (char) status);
-        }
-        return;
-    }
-
-    if (wwo->state == WINE_WS_STOPPED)
-    {
-        status = AudioOutputUnitStart(wwo->audioUnit);
-        if (status) {
-            fprintf(stderr, "err:winecoreaudio:AudioOutputUnitStart return %c%c%c%c\n",
-                    (char) (status >> 24), (char) (status >> 16), (char) (status >> 8), (char) status);
-        }
-        else wwo->state = WINE_WS_PLAYING;
-    }
-    
     if (lpWaveHdr->dwFlags & WHDR_BEGINLOOP)
     {
         if (wwo->lpLoopPtr)
         {
-            fprintf(stderr, "trace:winecoreaudio:wodHelper_BeginWaveHdr Already in a loop. Discarding loop on this header (%p)\n", lpWaveHdr);
-        } else
+            if (wwo->warn_on)
+                fprintf(stderr, "warn:winecoreaudio:wodHelper_CheckForLoopBegin Already in a loop. Discarding loop on this header (%p)\n", lpWaveHdr);
+        }
+        else
         {
-            fprintf(stderr, "trace:winecoreaudio:wodHelper_BeginWaveHdr Starting loop (%dx) with %p\n", lpWaveHdr->dwLoops, lpWaveHdr);
+            if (wwo->trace_on)
+                fprintf(stderr, "trace:winecoreaudio:wodHelper_CheckForLoopBegin Starting loop (%dx) with %p\n", lpWaveHdr->dwLoops, lpWaveHdr);
 
             wwo->lpLoopPtr = lpWaveHdr;
             /* Windows does not touch WAVEHDR.dwLoops,
@@ -878,7 +864,6 @@ static void wodHelper_BeginWaveHdr(WINE_WAVEOUT* wwo, LPWAVEHDR lpWaveHdr)
             wwo->dwLoops = lpWaveHdr->dwLoops;
         }
     }
-    wwo->dwPartialOffset = 0;
 }
 
 
@@ -886,158 +871,95 @@ static void wodHelper_BeginWaveHdr(WINE_WAVEOUT* wwo, LPWAVEHDR lpWaveHdr)
 * 				wodHelper_PlayPtrNext	        [internal]
 *
 * Advance the play pointer to the next waveheader, looping if required.
+* This is called with the WAVEOUT lock held.
 * Call from AudioUnit IO thread can't use Wine debug channels.
 */
-static LPWAVEHDR wodHelper_PlayPtrNext(WINE_WAVEOUT* wwo)
+static void wodHelper_PlayPtrNext(WINE_WAVEOUT* wwo)
 {
-    LPWAVEHDR lpWaveHdr;
-
-    pthread_mutex_lock(&wwo->lock);
-    
-    lpWaveHdr = wwo->lpPlayPtr;
-    if (!lpWaveHdr)
-    {
-        pthread_mutex_unlock(&wwo->lock);
-        return NULL;
-    }
+    BOOL didLoopBack = FALSE;
 
     wwo->dwPartialOffset = 0;
-    if ((lpWaveHdr->dwFlags & WHDR_ENDLOOP) && wwo->lpLoopPtr)
+    if ((wwo->lpPlayPtr->dwFlags & WHDR_ENDLOOP) && wwo->lpLoopPtr)
     {
         /* We're at the end of a loop, loop if required */
         if (wwo->dwLoops > 1)
         {
             wwo->dwLoops--;
             wwo->lpPlayPtr = wwo->lpLoopPtr;
-        } else
-        {
-            /* Handle overlapping loops correctly */
-            if (wwo->lpLoopPtr != lpWaveHdr && (lpWaveHdr->dwFlags & WHDR_BEGINLOOP)) {
-                /* shall we consider the END flag for the closing loop or for
-                * the opening one or for both ???
-                * code assumes for closing loop only
-                */
-            } else
-            {
-                lpWaveHdr = lpWaveHdr->lpNext;
-            }
-            wwo->lpLoopPtr = NULL;
-            wodHelper_BeginWaveHdr(wwo, lpWaveHdr);
+            didLoopBack = TRUE;
         }
-    } else
-    {
-        /* We're not in a loop.  Advance to the next wave header */
-        wodHelper_BeginWaveHdr(wwo, lpWaveHdr = lpWaveHdr->lpNext);
+        else
+        {
+            wwo->lpLoopPtr = NULL;
+        }
     }
-    
-    pthread_mutex_unlock(&wwo->lock);
-    
-    return lpWaveHdr;
+    if (!didLoopBack)
+    {
+        /* We didn't loop back.  Advance to the next wave header */
+        wwo->lpPlayPtr = wwo->lpPlayPtr->lpNext;
+
+        if (!wwo->lpPlayPtr)
+            wwo->state = WINE_WS_STOPPED;
+        else
+            wodHelper_CheckForLoopBegin(wwo);
+    }
 }
 
 /* if force is TRUE then notify the client that all the headers were completed
- * Call from AudioUnit IO thread can't use Wine debug channels.
  */
-static DWORD wodHelper_NotifyCompletions(WINE_WAVEOUT* wwo, BOOL force)
+static void wodHelper_NotifyCompletions(WINE_WAVEOUT* wwo, BOOL force)
 {
     LPWAVEHDR		lpWaveHdr;
-    DWORD retval;
+    LPWAVEHDR		lpFirstDoneWaveHdr = NULL;
 
-    pthread_mutex_lock(&wwo->lock);
+    OSSpinLockLock(&wwo->lock);
 
-    /* Start from lpQueuePtr and keep notifying until:
-        * - we hit an unwritten wavehdr
-        * - we hit the beginning of a running loop
-        * - we hit a wavehdr which hasn't finished playing
-        */
-    while ((lpWaveHdr = wwo->lpQueuePtr) &&
-           (force || 
-            (lpWaveHdr != wwo->lpPlayPtr &&
-             lpWaveHdr != wwo->lpLoopPtr)))
+    /* First, excise all of the done headers from the queue into
+     * a free-standing list. */
+    if (force)
     {
-        wwo->lpQueuePtr = lpWaveHdr->lpNext;
-        
-        lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
-        lpWaveHdr->dwFlags |= WHDR_DONE;
-        
-        wodNotifyClient(wwo, WOM_DONE, (DWORD)lpWaveHdr, 0);
+        lpFirstDoneWaveHdr = wwo->lpQueuePtr;
+        wwo->lpQueuePtr = NULL;
     }
-
-    retval = (lpWaveHdr && lpWaveHdr != wwo->lpPlayPtr && lpWaveHdr != 
-              wwo->lpLoopPtr) ? 0 : INFINITE;
-    
-    pthread_mutex_unlock(&wwo->lock);
-    
-    return retval;
-}
-
-/**************************************************************************
-* 				wodHelper_Reset			[internal]
-*
-* Resets current output stream.
-*/
-static  DWORD  wodHelper_Reset(WINE_WAVEOUT* wwo, BOOL reset)
-{
-    OSStatus status;
-
-    FIXME("\n");
-   
-    /* updates current notify list */
-    /* if resetting, remove all wave headers and notify client that all headers were completed */
-    wodHelper_NotifyCompletions(wwo, reset);
-    
-    pthread_mutex_lock(&wwo->lock);
-    
-    if (reset)
-    {
-        wwo->lpPlayPtr = wwo->lpQueuePtr = wwo->lpLoopPtr = NULL;
-        wwo->state = WINE_WS_STOPPED;
-        wwo->dwPlayedTotal = wwo->dwWrittenTotal = 0;
-        
-        wwo->dwPartialOffset = 0;        /* Clear partial wavehdr */
-    } 
     else
     {
-        if (wwo->lpLoopPtr)
+        LPWAVEHDR lpLastDoneWaveHdr = NULL;
+
+        /* Start from lpQueuePtr and keep notifying until:
+            * - we hit an unwritten wavehdr
+            * - we hit the beginning of a running loop
+            * - we hit a wavehdr which hasn't finished playing
+            */
+        for (
+            lpWaveHdr = wwo->lpQueuePtr;
+            lpWaveHdr &&
+                lpWaveHdr != wwo->lpPlayPtr &&
+                lpWaveHdr != wwo->lpLoopPtr;
+            lpWaveHdr = lpWaveHdr->lpNext
+            )
         {
-            /* complicated case, not handled yet (could imply modifying the loop counter) */
-            FIXME("Pausing while in loop isn't correctly handled yet, except strange results\n");
-            wwo->lpPlayPtr = wwo->lpLoopPtr;
-            wwo->dwPartialOffset = 0;
-            wwo->dwWrittenTotal = wwo->dwPlayedTotal; /* this is wrong !!! */
-        } else
-        {
-            LPWAVEHDR   ptr;
-            DWORD       sz = wwo->dwPartialOffset;
-            
-            /* reset all the data as if we had written only up to lpPlayedTotal bytes */
-            /* compute the max size playable from lpQueuePtr */
-            for (ptr = wwo->lpQueuePtr; ptr && ptr != wwo->lpPlayPtr; ptr = ptr->lpNext)
-            {
-                sz += ptr->dwBufferLength;
-            }
-            
-            /* because the reset lpPlayPtr will be lpQueuePtr */
-            if (wwo->dwWrittenTotal > wwo->dwPlayedTotal + sz) ERR("doh\n");
-            wwo->dwPartialOffset = sz - (wwo->dwWrittenTotal - wwo->dwPlayedTotal);
-            wwo->dwWrittenTotal = wwo->dwPlayedTotal;
-            wwo->lpPlayPtr = wwo->lpQueuePtr;
+            if (!lpFirstDoneWaveHdr)
+                lpFirstDoneWaveHdr = lpWaveHdr;
+            lpLastDoneWaveHdr = lpWaveHdr;
         }
-        
-        wwo->state = WINE_WS_PAUSED;
+
+        if (lpLastDoneWaveHdr)
+        {
+            wwo->lpQueuePtr = lpLastDoneWaveHdr->lpNext;
+            lpLastDoneWaveHdr->lpNext = NULL;
+        }
     }
+    
+    OSSpinLockUnlock(&wwo->lock);
 
-    status = AudioOutputUnitStop(wwo->audioUnit);
+    /* Now, send the "done" notification for each header in our list. */
+    for (lpWaveHdr = lpFirstDoneWaveHdr; lpWaveHdr; lpWaveHdr = lpWaveHdr->lpNext)
+    {
+        lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
+        lpWaveHdr->dwFlags |= WHDR_DONE;
 
-    pthread_mutex_unlock(&wwo->lock);
-
-    if (status) {
-        ERR( "AudioOutputUnitStop return %c%c%c%c\n",
-             (char) (status >> 24), (char) (status >> 16), (char) (status >> 8), (char) status);
-        return MMSYSERR_ERROR; /* FIXME return an error based on the OSStatus */
+        wodNotifyClient(wwo, WOM_DONE, (DWORD)lpWaveHdr, 0);
     }
-
-    return MMSYSERR_NOERROR;
 }
 
 
@@ -1077,16 +999,25 @@ static DWORD wodWrite(WORD wDevID, LPWAVEHDR lpWaveHdr, DWORD dwSize)
     lpWaveHdr->dwFlags |= WHDR_INQUEUE;
     lpWaveHdr->lpNext = 0;
 
-    pthread_mutex_lock(&wwo->lock);
+    OSSpinLockLock(&wwo->lock);
     /* insert buffer at the end of queue */
     for (wh = &(wwo->lpQueuePtr); *wh; wh = &((*wh)->lpNext))
         /* Do nothing */;
     *wh = lpWaveHdr;
     
     if (!wwo->lpPlayPtr)
-        wodHelper_BeginWaveHdr(wwo,lpWaveHdr);
-    pthread_mutex_unlock(&wwo->lock);
-    
+    {
+        wwo->lpPlayPtr = lpWaveHdr;
+
+        if (wwo->state == WINE_WS_STOPPED)
+            wwo->state = WINE_WS_PLAYING;
+
+        wodHelper_CheckForLoopBegin(wwo);
+
+        wwo->dwPartialOffset = 0;
+    }
+    OSSpinLockUnlock(&wwo->lock);
+
     return MMSYSERR_NOERROR;
 }
 
@@ -1104,21 +1035,26 @@ static DWORD wodPause(WORD wDevID)
         WARN("bad device ID !\n");
         return MMSYSERR_BADDEVICEID;
     }
-    
-    pthread_mutex_lock(&WOutDev[wDevID].lock);
-    if (WOutDev[wDevID].state == WINE_WS_PLAYING || WOutDev[wDevID].state == WINE_WS_STOPPED)
-    {
-        WOutDev[wDevID].state = WINE_WS_PAUSED;
-        status = AudioOutputUnitStop(WOutDev[wDevID].audioUnit);
-        if (status) {
-            ERR( "AudioOutputUnitStop return %c%c%c%c\n",
-                 (char) (status >> 24), (char) (status >> 16), (char) (status >> 8), (char) status);
-            pthread_mutex_unlock(&WOutDev[wDevID].lock);
-            return MMSYSERR_ERROR; /* FIXME return an error based on the OSStatus */
-        }
+
+    /* The order of the following operations is important since we can't hold
+     * the mutex while we make an Audio Unit call.  Stop the Audio Unit before
+     * setting the PAUSED state.  In wodRestart, the order is reversed.  This
+     * guarantees that we can't get into a situation where the state is
+     * PLAYING or STOPPED but the Audio Unit isn't running.  Although we can
+     * be in PAUSED state with the Audio Unit still running, that's harmless
+     * because the render callback will just produce silence.
+     */
+    status = AudioOutputUnitStop(WOutDev[wDevID].audioUnit);
+    if (status) {
+        WARN("AudioOutputUnitStop return %c%c%c%c\n",
+             (char) (status >> 24), (char) (status >> 16), (char) (status >> 8), (char) status);
     }
-    pthread_mutex_unlock(&WOutDev[wDevID].lock);
-    
+
+    OSSpinLockLock(&WOutDev[wDevID].lock);
+    if (WOutDev[wDevID].state == WINE_WS_PLAYING || WOutDev[wDevID].state == WINE_WS_STOPPED)
+        WOutDev[wDevID].state = WINE_WS_PAUSED;
+    OSSpinLockUnlock(&WOutDev[wDevID].lock);
+
     return MMSYSERR_NOERROR;
 }
 
@@ -1127,6 +1063,8 @@ static DWORD wodPause(WORD wDevID)
 */
 static DWORD wodRestart(WORD wDevID)
 {
+    OSStatus status;
+
     TRACE("(%u);\n", wDevID);
     
     if (wDevID >= MAX_WAVEOUTDRV )
@@ -1134,26 +1072,32 @@ static DWORD wodRestart(WORD wDevID)
         WARN("bad device ID !\n");
         return MMSYSERR_BADDEVICEID;
     }
-    
-    pthread_mutex_lock(&WOutDev[wDevID].lock);
+
+    /* The order of the following operations is important since we can't hold
+     * the mutex while we make an Audio Unit call.  Set the PLAYING/STOPPED
+     * state before starting the Audio Unit.  In wodPause, the order is
+     * reversed.  This guarantees that we can't get into a situation where
+     * the state is PLAYING or STOPPED but the Audio Unit isn't running.
+     * Although we can be in PAUSED state with the Audio Unit still running,
+     * that's harmless because the render callback will just produce silence.
+     */
+    OSSpinLockLock(&WOutDev[wDevID].lock);
     if (WOutDev[wDevID].state == WINE_WS_PAUSED)
     {
         if (WOutDev[wDevID].lpPlayPtr)
-        {
-            OSStatus status = AudioOutputUnitStart(WOutDev[wDevID].audioUnit);
-            if (status) {
-                ERR("AudioOutputUnitStart return %c%c%c%c\n",
-                    (char) (status >> 24), (char) (status >> 16), (char) (status >> 8), (char) status);
-                pthread_mutex_unlock(&WOutDev[wDevID].lock);
-                return MMSYSERR_ERROR; /* FIXME return an error based on the OSStatus */
-            }
             WOutDev[wDevID].state = WINE_WS_PLAYING;
-        }
         else
             WOutDev[wDevID].state = WINE_WS_STOPPED;
     }
-    pthread_mutex_unlock(&WOutDev[wDevID].lock);
-    
+    OSSpinLockUnlock(&WOutDev[wDevID].lock);
+
+    status = AudioOutputUnitStart(WOutDev[wDevID].audioUnit);
+    if (status) {
+        ERR("AudioOutputUnitStart return %c%c%c%c\n",
+            (char) (status >> 24), (char) (status >> 16), (char) (status >> 8), (char) status);
+        return MMSYSERR_ERROR; /* FIXME return an error based on the OSStatus */
+    }
+
     return MMSYSERR_NOERROR;
 }
 
@@ -1162,15 +1106,44 @@ static DWORD wodRestart(WORD wDevID)
 */
 static DWORD wodReset(WORD wDevID)
 {
+    WINE_WAVEOUT* wwo;
+    OSStatus status;
+
     TRACE("(%u);\n", wDevID);
-    
+
     if (wDevID >= MAX_WAVEOUTDRV)
     {
         WARN("bad device ID !\n");
         return MMSYSERR_BADDEVICEID;
     }
+
+    wwo = &WOutDev[wDevID];
+
+    FIXME("\n");
+
+    /* updates current notify list */
+    /* if resetting, remove all wave headers and notify client that all headers were completed */
+    wodHelper_NotifyCompletions(wwo, TRUE);
     
-    return wodHelper_Reset(&WOutDev[wDevID], TRUE);
+    OSSpinLockLock(&wwo->lock);
+    
+    wwo->lpPlayPtr = wwo->lpQueuePtr = wwo->lpLoopPtr = NULL;
+    wwo->state = WINE_WS_STOPPED;
+    wwo->dwPlayedTotal = wwo->dwWrittenTotal = 0;
+
+    wwo->dwPartialOffset = 0;        /* Clear partial wavehdr */
+
+    OSSpinLockUnlock(&wwo->lock);
+
+    status = AudioOutputUnitStart(wwo->audioUnit);
+
+    if (status) {
+        ERR( "AudioOutputUnitStart return %c%c%c%c\n",
+             (char) (status >> 24), (char) (status >> 16), (char) (status >> 8), (char) status);
+        return MMSYSERR_ERROR; /* FIXME return an error based on the OSStatus */
+    }
+
+    return MMSYSERR_NOERROR;
 }
 
 /**************************************************************************
@@ -1194,9 +1167,9 @@ static DWORD wodGetPosition(WORD wDevID, LPMMTIME lpTime, DWORD uSize)
     
     wwo = &WOutDev[wDevID];
     
-    pthread_mutex_lock(&WOutDev[wDevID].lock);
+    OSSpinLockLock(&WOutDev[wDevID].lock);
     val = wwo->dwPlayedTotal;
-    pthread_mutex_unlock(&WOutDev[wDevID].lock);
+    OSSpinLockUnlock(&WOutDev[wDevID].lock);
     
     return bytes_to_mmtime(lpTime, val, &wwo->format);
 }
@@ -1216,13 +1189,9 @@ static DWORD wodGetVolume(WORD wDevID, LPDWORD lpdwVol)
     }    
     
     TRACE("(%u, %p);\n", wDevID, lpdwVol);
-    
-    pthread_mutex_lock(&WOutDev[wDevID].lock);
-    
+
     AudioUnit_GetVolume(WOutDev[wDevID].audioUnit, &left, &right); 
-        
-    pthread_mutex_unlock(&WOutDev[wDevID].lock);
-        
+
     *lpdwVol = ((WORD) left * 0xFFFFl) + (((WORD) right * 0xFFFFl) << 16);
     
     return MMSYSERR_NOERROR;
@@ -1246,13 +1215,9 @@ static DWORD wodSetVolume(WORD wDevID, DWORD dwParam)
     right = HIWORD(dwParam) / 65535.0f;
     
     TRACE("(%u, %08x);\n", wDevID, dwParam);
-    
-    pthread_mutex_lock(&WOutDev[wDevID].lock);
-    
+
     AudioUnit_SetVolume(WOutDev[wDevID].audioUnit, left, right); 
-        
-    pthread_mutex_unlock(&WOutDev[wDevID].lock);
-    
+
     return MMSYSERR_NOERROR;
 }
 
@@ -1385,56 +1350,51 @@ OSStatus CoreAudio_woAudioUnitIOProc(void *inRefCon,
 {
     UInt32 buffer;
     WINE_WAVEOUT *wwo = (WINE_WAVEOUT *) inRefCon;
-    int nextPtr = 0;
     int needNotify = 0;
 
     unsigned int dataNeeded = ioData->mBuffers[0].mDataByteSize;
     unsigned int dataProvided = 0;
 
-    while (dataNeeded > 0)
+    OSSpinLockLock(&wwo->lock);
+
+    while (dataNeeded > 0 && wwo->state == WINE_WS_PLAYING && wwo->lpPlayPtr)
     {
-        pthread_mutex_lock(&wwo->lock);
+        unsigned int available = wwo->lpPlayPtr->dwBufferLength - wwo->dwPartialOffset;
+        unsigned int toCopy;
 
-        if (wwo->state == WINE_WS_PLAYING && wwo->lpPlayPtr)
-        {
-            unsigned int available = wwo->lpPlayPtr->dwBufferLength - wwo->dwPartialOffset;
-            unsigned int toCopy;
-
-            if (available >= dataNeeded)
-                toCopy = dataNeeded;
-            else
-                toCopy = available;
-
-            if (toCopy > 0)
-            {
-                memcpy((char*)ioData->mBuffers[0].mData + dataProvided,
-                    wwo->lpPlayPtr->lpData + wwo->dwPartialOffset, toCopy);
-                wwo->dwPartialOffset += toCopy;
-                wwo->dwPlayedTotal += toCopy;
-                dataProvided += toCopy;
-                dataNeeded -= toCopy;
-                available -= toCopy;
-            }
-
-            if (available == 0)
-                nextPtr = 1;
-
-            needNotify = 1;
-        }
+        if (available >= dataNeeded)
+            toCopy = dataNeeded;
         else
+            toCopy = available;
+
+        if (toCopy > 0)
         {
-            memset((char*)ioData->mBuffers[0].mData + dataProvided, 0, dataNeeded);
-            dataProvided += dataNeeded;
-            dataNeeded = 0;
+            memcpy((char*)ioData->mBuffers[0].mData + dataProvided,
+                wwo->lpPlayPtr->lpData + wwo->dwPartialOffset, toCopy);
+            wwo->dwPartialOffset += toCopy;
+            wwo->dwPlayedTotal += toCopy;
+            dataProvided += toCopy;
+            dataNeeded -= toCopy;
+            available -= toCopy;
         }
 
-        pthread_mutex_unlock(&wwo->lock);
-
-        if (nextPtr)
+        if (available == 0)
         {
             wodHelper_PlayPtrNext(wwo);
-            nextPtr = 0;
+            needNotify = 1;
         }
+    }
+
+    OSSpinLockUnlock(&wwo->lock);
+
+    /* We can't provide any more wave data.  Fill the rest with silence. */
+    if (dataNeeded > 0)
+    {
+        if (!dataProvided)
+            *ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
+        memset((char*)ioData->mBuffers[0].mData + dataProvided, 0, dataNeeded);
+        dataProvided += dataNeeded;
+        dataNeeded = 0;
     }
 
     /* We only fill buffer 0.  Set any others that might be requested to 0. */
@@ -1443,7 +1403,7 @@ OSStatus CoreAudio_woAudioUnitIOProc(void *inRefCon,
         memset(ioData->mBuffers[buffer].mData, 0, ioData->mBuffers[buffer].mDataByteSize);
     }
 
-    if (needNotify) wodHelper_NotifyCompletions(wwo, FALSE);
+    if (needNotify) wodSendNotifyCompletionsMessage(wwo);
     return noErr;
 }
 #else

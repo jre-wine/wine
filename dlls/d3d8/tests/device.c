@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 Vitaliy Margolen
+ * Copyright (C) 2006 Chris Robinson
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -332,7 +333,7 @@ static void test_refcount(void)
     CHECK_CALL( hr, "GetRenderTarget", pDevice, ++refcount);
     if(pRenderTarget)
     {
-        todo_wine CHECK_SURFACE_CONTAINER( pRenderTarget, IID_IDirect3DDevice8, pDevice);
+        CHECK_SURFACE_CONTAINER( pRenderTarget, IID_IDirect3DDevice8, pDevice);
         CHECK_REFCOUNT( pRenderTarget, 1);
 
         CHECK_ADDREF_REFCOUNT(pRenderTarget, 2);
@@ -476,10 +477,13 @@ static void test_refcount(void)
     /* Surfaces */
     hr = IDirect3DDevice8_CreateDepthStencilSurface( pDevice, 32, 32, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, &pStencilSurface );
     CHECK_CALL( hr, "CreateDepthStencilSurface", pDevice, ++refcount );
+    CHECK_REFCOUNT( pStencilSurface, 1);
     hr = IDirect3DDevice8_CreateImageSurface( pDevice, 32, 32, D3DFMT_X8R8G8B8, &pImageSurface );
     CHECK_CALL( hr, "CreateImageSurface", pDevice, ++refcount );
+    CHECK_REFCOUNT( pImageSurface, 1);
     hr = IDirect3DDevice8_CreateRenderTarget( pDevice, 32, 32, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, TRUE, &pRenderTarget3 );
     CHECK_CALL( hr, "CreateRenderTarget", pDevice, ++refcount );
+    CHECK_REFCOUNT( pRenderTarget3, 1);
     /* Misc */
     hr = IDirect3DDevice8_CreateStateBlock( pDevice, D3DSBT_ALL, &dStateBlock );
     CHECK_CALL( hr, "CreateStateBlock", pDevice, refcount );
@@ -493,7 +497,7 @@ static void test_refcount(void)
         CHECK_REFCOUNT( pSwapChain, 1);
         if(pBackBuffer)
         {
-            todo_wine CHECK_SURFACE_CONTAINER( pBackBuffer, IID_IDirect3DDevice8, pDevice);
+            CHECK_SURFACE_CONTAINER( pBackBuffer, IID_IDirect3DDevice8, pDevice);
             CHECK_REFCOUNT( pBackBuffer, 1);
             CHECK_RELEASE_REFCOUNT( pBackBuffer, 0);
             CHECK_REFCOUNT( pDevice, --refcount);
@@ -645,6 +649,73 @@ cleanup:
     if(pDevice) IDirect3D8_Release(pDevice);
 }
 
+static void test_states(void)
+{
+    HRESULT                      hr;
+    HWND                         hwnd               = NULL;
+    IDirect3D8                  *pD3d               = NULL;
+    IDirect3DDevice8            *pDevice            = NULL;
+    D3DPRESENT_PARAMETERS        d3dpp;
+    D3DDISPLAYMODE               d3ddm;
+
+    pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!pD3d || !hwnd) goto cleanup;
+
+    IDirect3D8_GetAdapterDisplayMode( pD3d, D3DADAPTER_DEFAULT, &d3ddm );
+    ZeroMemory( &d3dpp, sizeof(d3dpp) );
+    d3dpp.Windowed         = TRUE;
+    d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferWidth  = 640;
+    d3dpp.BackBufferHeight  = 480;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+
+    hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
+                                  D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
+    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
+    if (FAILED(hr)) goto cleanup;
+
+    hr = IDirect3DDevice8_SetRenderState(pDevice, D3DRS_ZVISIBLE, TRUE);
+    ok(hr == D3D_OK, "IDirect3DDevice8_SetRenderState(D3DRS_ZVISIBLE, TRUE) returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_SetRenderState(pDevice, D3DRS_ZVISIBLE, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice8_SetRenderState(D3DRS_ZVISIBLE, FALSE) returned %s\n", DXGetErrorString8(hr));
+
+cleanup:
+    if(pD3d) IDirect3D8_Release(pD3d);
+    if(pDevice) IDirect3D8_Release(pDevice);
+}
+
+/* Test adapter display modes */
+static void test_display_modes(void)
+{
+    UINT max_modes, i;
+    D3DDISPLAYMODE dmode;
+    HRESULT res;
+    IDirect3D8 *pD3d;
+
+    pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
+    if(!pD3d) return;
+
+    max_modes = IDirect3D8_GetAdapterModeCount(pD3d, D3DADAPTER_DEFAULT);
+    ok(max_modes > 0, "GetAdapterModeCount(D3DADAPTER_DEFAULT) returned 0!\n");
+
+    for(i=0; i<max_modes;i++) {
+        res = IDirect3D8_EnumAdapterModes(pD3d, D3DADAPTER_DEFAULT, i, &dmode);
+        ok(res==D3D_OK, "EnumAdapterModes returned %s for mode %u!\n", DXGetErrorString8(res), i);
+        if(res != D3D_OK)
+            continue;
+
+        ok(dmode.Format==D3DFMT_X8R8G8B8 || dmode.Format==D3DFMT_R5G6B5,
+           "Unexpected display mode returned for mode %u: %#x\n", i , dmode.Format);
+    }
+
+    IDirect3D8_Release(pD3d);
+}
+
+
 START_TEST(device)
 {
     HMODULE d3d8_handle = LoadLibraryA( "d3d8.dll" );
@@ -652,9 +723,11 @@ START_TEST(device)
     pDirect3DCreate8 = (void *)GetProcAddress( d3d8_handle, "Direct3DCreate8" );
     if (pDirect3DCreate8)
     {
+        test_display_modes();
         test_swapchain();
         test_refcount();
         test_mipmap_levels();
         test_cursor();
+        test_states();
     }
 }

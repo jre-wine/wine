@@ -43,18 +43,17 @@ static HRESULT WINAPI IDirect3DSurface9Impl_QueryInterface(LPDIRECT3DSURFACE9 if
 
 static ULONG WINAPI IDirect3DSurface9Impl_AddRef(LPDIRECT3DSURFACE9 iface) {
     IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
-    IUnknown *containerParent = NULL;
 
     TRACE("(%p)\n", This);
 
-    IWineD3DSurface_GetContainerParent(This->wineD3DSurface, &containerParent);
-    if (containerParent) {
-        /* Forward to the containerParent */
-        TRACE("(%p) : Forwarding to %p\n", This, containerParent);
-        return IUnknown_AddRef(containerParent);
+    if (This->forwardReference) {
+        /* Forward refcounting */
+        TRACE("(%p) : Forwarding to %p\n", This, This->forwardReference);
+        return IUnknown_AddRef(This->forwardReference);
     } else {
         /* No container, handle our own refcounting */
         ULONG ref = InterlockedIncrement(&This->ref);
+        if(ref == 1 && This->parentDevice) IUnknown_AddRef(This->parentDevice);
         TRACE("(%p) : AddRef from %d\n", This, ref - 1);
 
         return ref;
@@ -64,24 +63,24 @@ static ULONG WINAPI IDirect3DSurface9Impl_AddRef(LPDIRECT3DSURFACE9 iface) {
 
 static ULONG WINAPI IDirect3DSurface9Impl_Release(LPDIRECT3DSURFACE9 iface) {
     IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
-    IUnknown *containerParent = NULL;
 
     TRACE("(%p)\n", This);
 
-    IWineD3DSurface_GetContainerParent(This->wineD3DSurface, &containerParent);
-    if (containerParent) {
+    if (This->forwardReference) {
         /* Forward to the containerParent */
-        TRACE("(%p) : Forwarding to %p\n", This, containerParent);
-        return IUnknown_Release(containerParent);
+        TRACE("(%p) : Forwarding to %p\n", This, This->forwardReference);
+        return IUnknown_Release(This->forwardReference);
     } else {
         /* No container, handle our own refcounting */
         ULONG ref = InterlockedDecrement(&This->ref);
         TRACE("(%p) : ReleaseRef to %d\n", This, ref);
 
         if (ref == 0) {
-            IWineD3DSurface_Release(This->wineD3DSurface);
             if (This->parentDevice) IUnknown_Release(This->parentDevice);
-            HeapFree(GetProcessHeap(), 0, This);
+            if (!This->isImplicit) {
+                IWineD3DSurface_Release(This->wineD3DSurface);
+                HeapFree(GetProcessHeap(), 0, This);
+            }
         }
 
         return ref;
@@ -140,35 +139,17 @@ static D3DRESOURCETYPE WINAPI IDirect3DSurface9Impl_GetType(LPDIRECT3DSURFACE9 i
 /* IDirect3DSurface9 Interface follow: */
 static HRESULT WINAPI IDirect3DSurface9Impl_GetContainer(LPDIRECT3DSURFACE9 iface, REFIID riid, void** ppContainer) {
     IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
-    IWineD3DBase *wineD3DContainer = NULL;
-    IUnknown *wineD3DContainerParent = NULL;
     HRESULT res;
 
     TRACE("(This %p, riid %s, ppContainer %p)\n", This, debugstr_guid(riid), ppContainer);
+
+    if (!This->container) return E_NOINTERFACE;
 
     if (!ppContainer) {
         ERR("Called without a valid ppContainer\n");
     }
 
-    /* Get the WineD3D container. */
-    res = IWineD3DSurface_GetContainer(This->wineD3DSurface, &IID_IWineD3DBase, (void **)&wineD3DContainer);
-    if (res != D3D_OK) return res;
-
-    if (!wineD3DContainer) {
-        ERR("IWineD3DSurface_GetContainer should never return NULL\n");
-    }
-
-    /* Get the parent */
-    IWineD3DBase_GetParent(wineD3DContainer, &wineD3DContainerParent);
-    IUnknown_Release(wineD3DContainer);
-
-    if (!wineD3DContainerParent) {
-        ERR("IWineD3DBase_GetParent should never return NULL\n");
-    }
-
-    /* Now, query the interface of the parent for the riid */
-    res = IUnknown_QueryInterface(wineD3DContainerParent, riid, ppContainer);
-    IUnknown_Release(wineD3DContainerParent);
+    res = IUnknown_QueryInterface(This->container, riid, ppContainer);
 
     TRACE("Returning ppContainer %p, *ppContainer %p\n", ppContainer, *ppContainer);
 

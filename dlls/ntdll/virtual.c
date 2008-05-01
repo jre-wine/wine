@@ -974,11 +974,12 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
     status = STATUS_INVALID_IMAGE_FORMAT;  /* generic error */
     if (!st.st_size) goto error;
     header_size = min( header_size, st.st_size );
-    if (map_file_into_view( view, fd, 0, header_size, 0, VPROT_COMMITTED | VPROT_READ,
+    if (map_file_into_view( view, fd, 0, header_size, 0, VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
                             removable ) != STATUS_SUCCESS) goto error;
     dos = (IMAGE_DOS_HEADER *)ptr;
     nt = (IMAGE_NT_HEADERS *)(ptr + dos->e_lfanew);
     header_end = ptr + ROUND_SIZE( 0, header_size );
+    memset( ptr + header_size, 0, header_end - (ptr + header_size) );
     if ((char *)(nt + 1) > header_end) goto error;
     sec = (IMAGE_SECTION_HEADER*)((char*)&nt->OptionalHeader+nt->FileHeader.SizeOfOptionalHeader);
     if ((char *)(sec + nt->FileHeader.NumberOfSections) > header_end) goto error;
@@ -1050,25 +1051,25 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
 
     for (i = pos = 0; i < nt->FileHeader.NumberOfSections; i++, sec++)
     {
-        SIZE_T map_size, file_size, end;
+        static const SIZE_T sector_align = 0x1ff;
+        SIZE_T map_size, file_start, file_size, end;
 
         if (!sec->Misc.VirtualSize)
-        {
-            file_size = sec->SizeOfRawData;
-            map_size  = ROUND_SIZE( 0, file_size );
-        }
+            map_size = ROUND_SIZE( 0, sec->SizeOfRawData );
         else
-        {
             map_size = ROUND_SIZE( 0, sec->Misc.VirtualSize );
-            file_size = min( sec->SizeOfRawData, map_size );
-        }
+
+        /* file positions are rounded to sector boundaries regardless of OptionalHeader.FileAlignment */
+        file_start = sec->PointerToRawData & ~sector_align;
+        file_size = (sec->SizeOfRawData + (sec->PointerToRawData & sector_align) + sector_align) & ~sector_align;
+        if (file_size > map_size) file_size = map_size;
 
         /* a few sanity checks */
         end = sec->VirtualAddress + ROUND_SIZE( sec->VirtualAddress, map_size );
         if (sec->VirtualAddress > total_size || end > total_size || end < sec->VirtualAddress)
         {
-            ERR_(module)( "Section %.8s too large (%x+%lx/%lx)\n",
-                          sec->Name, sec->VirtualAddress, map_size, total_size );
+            WARN_(module)( "Section %.8s too large (%x+%lx/%lx)\n",
+                           sec->Name, sec->VirtualAddress, map_size, total_size );
             goto error;
         }
 
@@ -1080,7 +1081,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
                             sec->PointerToRawData, (int)pos, file_size, map_size,
                             sec->Characteristics );
             if (map_file_into_view( view, shared_fd, sec->VirtualAddress, map_size, pos,
-                                    VPROT_COMMITTED | VPROT_READ | PROT_WRITE,
+                                    VPROT_COMMITTED | VPROT_READ | VPROT_WRITE,
                                     FALSE ) != STATUS_SUCCESS)
             {
                 ERR_(module)( "Could not map shared section %.8s\n", sec->Name );
@@ -1114,9 +1115,11 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
         /* Note: if the section is not aligned properly map_file_into_view will magically
          *       fall back to read(), so we don't need to check anything here.
          */
-        end = sec->PointerToRawData + file_size;
-        if (sec->PointerToRawData >= st.st_size || end > st.st_size || end < sec->PointerToRawData ||
-            map_file_into_view( view, fd, sec->VirtualAddress, file_size, sec->PointerToRawData,
+        end = file_start + file_size;
+        if (sec->PointerToRawData >= st.st_size ||
+            end > ((st.st_size + sector_align) & ~sector_align) ||
+            end < file_start ||
+            map_file_into_view( view, fd, sec->VirtualAddress, file_size, file_start,
                                 VPROT_COMMITTED | VPROT_READ | VPROT_WRITECOPY,
                                 removable ) != STATUS_SUCCESS)
         {
@@ -1165,6 +1168,8 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
     }
 
     /* set the image protections */
+
+    VIRTUAL_SetProt( view, ptr, ROUND_SIZE( 0, header_size ), VPROT_COMMITTED | VPROT_READ );
 
     sec = (IMAGE_SECTION_HEADER*)((char *)&nt->OptionalHeader+nt->FileHeader.SizeOfOptionalHeader);
     for (i = 0; i < nt->FileHeader.NumberOfSections; i++, sec++)

@@ -413,6 +413,18 @@ typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock);
 #define STATE_RENDER(a) (a)
 #define STATE_IS_RENDER(a) ((a) >= STATE_RENDER(1) && (a) <= STATE_RENDER(WINEHIGHEST_RENDER_STATE))
 
+#define STATE_TEXTURESTAGE(stage, num) (STATE_RENDER(WINEHIGHEST_RENDER_STATE) + (stage) * WINED3D_HIGHEST_TEXTURE_STATE + (num))
+#define STATE_IS_TEXTURESTAGE(a) ((a) >= STATE_TEXTURESTAGE(0, 1) && (a) <= STATE_TEXTURESTAGE(MAX_TEXTURES - 1, WINED3D_HIGHEST_TEXTURE_STATE))
+
+/* + 1 because samplers start with 0 */
+#define STATE_SAMPLER(num) (STATE_TEXTURESTAGE(MAX_TEXTURES - 1, WINED3D_HIGHEST_TEXTURE_STATE) + 1 + (num))
+#define STATE_IS_SAMPLER(num) ((num) >= STATE_SAMPLER(0) && (num) <= STATE_SAMPLER(MAX_SAMPLERS - 1))
+
+#define STATE_PIXELSHADER (STATE_SAMPLER(MAX_SAMPLERS - 1) + 1)
+#define STATE_IS_PIXELSHADER(a) ((a) == STATE_PIXELSHADER)
+
+#define STATE_HIGHEST (STATE_PIXELSHADER)
+
 struct StateEntry
 {
     DWORD           representative;
@@ -555,6 +567,7 @@ typedef struct IWineD3DDeviceImpl
     BOOL                    texture_shader_active;  /* TODO: Confirm use is correct */
     BOOL                    last_was_notclipped;
     BOOL                    untransformed;
+    BOOL                    last_was_pshader;
 
     /* State block related */
     BOOL                    isRecordingState;
@@ -572,9 +585,9 @@ typedef struct IWineD3DDeviceImpl
     ResourceList           *resources; /* a linked list to track resources created by the device */
 
     /* Render Target Support */
+    IWineD3DSurface       **render_targets;
     IWineD3DSurface        *depthStencilBuffer;
 
-    IWineD3DSurface        *renderTarget;
     IWineD3DSurface        *stencilBufferTarget;
 
     /* palettes texture management */
@@ -585,6 +598,7 @@ typedef struct IWineD3DDeviceImpl
     BOOL                    render_offscreen;
     WINED3D_DEPTHCOPYSTATE  depth_copy_state;
     GLuint                  fbo;
+    GLenum                  *draw_buffers;
 
     /* Cursor management */
     BOOL                    bCursorVisible;
@@ -627,9 +641,31 @@ typedef struct IWineD3DDeviceImpl
 
     /* Final position fixup constant */
     float                       posFixup[4];
+
+    /* State dirtification
+     * dirtyArray is an array that contains markers for dirty states. numDirtyEntries states are dirty, their numbers are in indices
+     * 0...numDirtyEntries - 1. isStateDirty is a redundant copy of the dirtyArray. Technically only one of them would be needed,
+     * but with the help of both it is easy to find out if a state is dirty(just check the array index), and for applying dirty states
+     * only numDirtyEntries array elements have to be checked, not STATE_HIGHEST states.
+     */
+    DWORD                   dirtyArray[STATE_HIGHEST + 1]; /* Won't get bigger than that, a state is never marked dirty 2 times */
+    DWORD                   numDirtyEntries;
+    DWORD                   isStateDirty[STATE_HIGHEST/32 + 1]; /* Bitmap to find out quickly if a state is dirty */
+
+    /* With register combiners we can skip junk texture stages */
+    DWORD                     texUnitMap[MAX_SAMPLERS];
+    BOOL                      oneToOneTexUnitMap;
+
 } IWineD3DDeviceImpl;
 
 extern const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl;
+
+void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state);
+static inline BOOL isStateDirty(IWineD3DDeviceImpl *This, DWORD state) {
+    DWORD idx = state >> 5;
+    BYTE shift = state & 0x1f;
+    return This->isStateDirty[idx] & (1 << shift);
+}
 
 /* Support for IWineD3DResource ::Set/Get/FreePrivateData. I don't think
  * anybody uses it for much so a good implementation is optional. */
@@ -770,7 +806,8 @@ typedef struct IWineD3DBaseTextureClass
     UINT                    LOD;
     WINED3DTEXTUREFILTERTYPE filterType;
     DWORD                   states[MAX_WINETEXTURESTATES];
-
+    LONG                    bindCount;
+    DWORD                   sampler;
 } IWineD3DBaseTextureClass;
 
 typedef struct IWineD3DBaseTextureImpl
@@ -961,7 +998,6 @@ DWORD   WINAPI IWineD3DSurfaceImpl_SetPriority(IWineD3DSurface *iface, DWORD Pri
 DWORD   WINAPI IWineD3DSurfaceImpl_GetPriority(IWineD3DSurface *iface);
 void    WINAPI IWineD3DSurfaceImpl_PreLoad(IWineD3DSurface *iface);
 WINED3DRESOURCETYPE WINAPI IWineD3DSurfaceImpl_GetType(IWineD3DSurface *iface);
-HRESULT WINAPI IWineD3DSurfaceImpl_GetContainerParent(IWineD3DSurface* iface, IUnknown **ppContainerParent);
 HRESULT WINAPI IWineD3DSurfaceImpl_GetContainer(IWineD3DSurface* iface, REFIID riid, void** ppContainer);
 HRESULT WINAPI IWineD3DSurfaceImpl_GetDesc(IWineD3DSurface *iface, WINED3DSURFACE_DESC *pDesc);
 HRESULT WINAPI IWineD3DSurfaceImpl_GetBltStatus(IWineD3DSurface *iface, DWORD Flags);
@@ -1171,10 +1207,6 @@ struct IWineD3DStateBlockImpl
     INT                        pixelShaderConstantI[MAX_CONST_I * 4];
     float                     *pixelShaderConstantF;
 
-    /* Indexed Vertex Blending */
-    WINED3DVERTEXBLENDFLAGS   vertex_blend;
-    FLOAT                     tween_factor;
-
     /* RenderState */
     DWORD                     renderState[WINEHIGHEST_RENDER_STATE + 1];
 
@@ -1184,6 +1216,7 @@ struct IWineD3DStateBlockImpl
 
     /* Texture State Stage */
     DWORD                     textureState[MAX_TEXTURES][WINED3D_HIGHEST_TEXTURE_STATE + 1];
+    DWORD                     lowest_disabled_stage;
     /* Sampler States */
     DWORD                     samplerState[MAX_SAMPLERS][WINED3D_HIGHEST_SAMPLER_STATE + 1];
 
@@ -1246,7 +1279,7 @@ typedef struct  WineQueryOcclusionData {
 typedef struct IWineD3DSwapChainImpl
 {
     /*IUnknown part*/
-    IWineD3DSwapChainVtbl    *lpVtbl;
+    const IWineD3DSwapChainVtbl *lpVtbl;
     LONG                      ref;     /* Note: Ref counting not required */
 
     IUnknown                 *parent;
@@ -1257,6 +1290,7 @@ typedef struct IWineD3DSwapChainImpl
     IWineD3DSurface          *frontBuffer;
     BOOL                      wantsDepthStencilBuffer;
     D3DPRESENT_PARAMETERS     presentParms;
+    DWORD                     orig_width, orig_height;
 
     /* TODO: move everything up to drawable off into a context manager
       and store the 'data' in the contextManagerData interface.
@@ -1274,7 +1308,7 @@ typedef struct IWineD3DSwapChainImpl
     Drawable                drawable;
 } IWineD3DSwapChainImpl;
 
-extern IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl;
+extern const IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl;
 
 /*****************************************************************************
  * Utility function prototypes 

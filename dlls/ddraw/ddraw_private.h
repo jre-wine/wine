@@ -76,6 +76,8 @@ typedef struct IDirect3DVertexBufferImpl  IDirect3DVertexBufferImpl;
 typedef struct IParentImpl                IParentImpl;
 
 /* Callbacks for implicit object destruction */
+extern ULONG WINAPI D3D7CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain);
+
 extern ULONG WINAPI D3D7CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface);
 
 /*****************************************************************************
@@ -87,6 +89,7 @@ struct IDirectDrawImpl
     /* IUnknown fields */
     ICOM_VFIELD_MULTI(IDirectDraw7);
     ICOM_VFIELD_MULTI(IDirectDraw4);
+    ICOM_VFIELD_MULTI(IDirectDraw3);
     ICOM_VFIELD_MULTI(IDirectDraw2);
     ICOM_VFIELD_MULTI(IDirectDraw);
     ICOM_VFIELD_MULTI(IDirect3D7);
@@ -95,7 +98,7 @@ struct IDirectDrawImpl
     ICOM_VFIELD_MULTI(IDirect3D);
 
     /* See comment in IDirectDraw::AddRef */
-    LONG                    ref7, ref4, ref2, ref1, numIfaces;
+    LONG                    ref7, ref4, ref2, ref3, ref1, numIfaces;
 
     /* WineD3D linkage */
     IWineD3D                *wineD3D;
@@ -154,6 +157,7 @@ struct IDirectDrawImpl
 /* Declare the VTables. They can be found ddraw.c */
 const IDirectDraw7Vtbl IDirectDraw7_Vtbl;
 const IDirectDraw4Vtbl IDirectDraw4_Vtbl;
+const IDirectDraw3Vtbl IDirectDraw3_Vtbl;
 const IDirectDraw2Vtbl IDirectDraw2_Vtbl;
 const IDirectDrawVtbl  IDirectDraw1_Vtbl;
 

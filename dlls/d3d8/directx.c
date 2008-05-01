@@ -200,6 +200,7 @@ HRESULT WINAPI D3D8CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior, 
 
     if (SUCCEEDED(res)) {
         *ppSurface = d3dSurface->wineD3DSurface;
+        d3dSurface->container = device;
         d3dSurface->isImplicit = TRUE;
         /* Implicit surfaces are created with an refcount of 0 */
         IUnknown_Release((IUnknown *)d3dSurface);
@@ -277,6 +278,15 @@ static HRESULT WINAPI D3D8CB_CreateAdditionalSwapChain(IUnknown *device,
    return res;
 }
 
+ULONG WINAPI D3D8CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain) {
+    IUnknown* swapChainParent;
+    TRACE("(%p) call back\n", pSwapChain);
+
+    IWineD3DSwapChain_GetParent(pSwapChain, &swapChainParent);
+    IUnknown_Release(swapChainParent);
+    return IUnknown_Release(swapChainParent);
+}
+
 /* Internal function called back during the CreateDevice to create a render target */
 HRESULT WINAPI D3D8CB_CreateDepthStencilSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
@@ -290,6 +300,7 @@ HRESULT WINAPI D3D8CB_CreateDepthStencilSurface(IUnknown *device, IUnknown *pSup
                                          (D3DFORMAT)Format, MultiSample, (IDirect3DSurface8 **)&d3dSurface);
     if (SUCCEEDED(res)) {
         *ppSurface = d3dSurface->wineD3DSurface;
+        d3dSurface->container = device;
         d3dSurface->isImplicit = TRUE;
         /* Implicit surfaces are created with an refcount of 0 */
         IUnknown_Release((IUnknown *)d3dSurface);

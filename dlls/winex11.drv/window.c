@@ -1162,9 +1162,9 @@ BOOL X11DRV_CreateWindow( HWND hwnd, CREATESTRUCTA *cs, BOOL unicode )
         RECT newPos;
         UINT swFlag = (style & WS_MINIMIZE) ? SW_MINIMIZE : SW_MAXIMIZE;
         WIN_SetStyle( hwnd, 0, WS_MAXIMIZE | WS_MINIMIZE );
-        WINPOS_MinMaximize( hwnd, swFlag, &newPos );
+        swFlag = WINPOS_MinMaximize( hwnd, swFlag, &newPos );
 
-        swFlag = SWP_FRAMECHANGED | SWP_NOZORDER; /* Frame always gets changed */
+        swFlag |= SWP_FRAMECHANGED; /* Frame always gets changed */
         if (!(style & WS_VISIBLE) || (style & WS_CHILD) || GetActiveWindow()) swFlag |= SWP_NOACTIVATE;
 
         SetWindowPos( hwnd, 0, newPos.left, newPos.top,
@@ -1230,72 +1230,33 @@ XIC X11DRV_get_ic( HWND hwnd )
 /*****************************************************************
  *		SetParent   (X11DRV.@)
  */
-HWND X11DRV_SetParent( HWND hwnd, HWND parent )
+void X11DRV_SetParent( HWND hwnd, HWND parent, HWND old_parent )
 {
     Display *display = thread_display();
-    WND *wndPtr;
-    BOOL ret;
-    HWND old_parent = 0;
+    struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
 
-    /* Windows hides the window first, then shows it again
-     * including the WM_SHOWWINDOW messages and all */
-    BOOL was_visible = ShowWindow( hwnd, SW_HIDE );
+    if (!data) return;
+    if (parent == old_parent) return;
 
-    wndPtr = WIN_GetPtr( hwnd );
-    if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return 0;
-
-    SERVER_START_REQ( set_parent )
+    if (parent != GetDesktopWindow()) /* a child window */
     {
-        req->handle = hwnd;
-        req->parent = parent;
-        if ((ret = !wine_server_call( req )))
+        if (old_parent == GetDesktopWindow())
         {
-            old_parent = reply->old_parent;
-            wndPtr->parent = parent = reply->full_parent;
-        }
-
-    }
-    SERVER_END_REQ;
-    WIN_ReleasePtr( wndPtr );
-    if (!ret) return 0;
-
-    if (parent != old_parent)
-    {
-        struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
-
-        if (!data) return 0;
-
-        if (parent != GetDesktopWindow()) /* a child window */
-        {
-            if (old_parent == GetDesktopWindow())
+            /* destroy the old X windows */
+            destroy_whole_window( display, data );
+            destroy_icon_window( display, data );
+            if (data->managed)
             {
-                /* destroy the old X windows */
-                destroy_whole_window( display, data );
-                destroy_icon_window( display, data );
-                if (data->managed)
-                {
-                    data->managed = FALSE;
-                    RemovePropA( data->hwnd, managed_prop );
-                }
+                data->managed = FALSE;
+                RemovePropA( data->hwnd, managed_prop );
             }
         }
-        else  /* new top level window */
-        {
-            /* FIXME: we ignore errors since we can't really recover anyway */
-            create_whole_window( display, data, GetWindowLongW( hwnd, GWL_STYLE ) );
-        }
     }
-
-    /* SetParent additionally needs to make hwnd the topmost window
-       in the x-order and send the expected WM_WINDOWPOSCHANGING and
-       WM_WINDOWPOSCHANGED notification messages.
-    */
-    SetWindowPos( hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                  SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | (was_visible ? SWP_SHOWWINDOW : 0) );
-    /* FIXME: a WM_MOVE is also generated (in the DefWindowProc handler
-     * for WM_WINDOWPOSCHANGED) in Windows, should probably remove SWP_NOMOVE */
-
-    return old_parent;
+    else  /* new top level window */
+    {
+        /* FIXME: we ignore errors since we can't really recover anyway */
+        create_whole_window( display, data, GetWindowLongW( hwnd, GWL_STYLE ) );
+    }
 }
 
 

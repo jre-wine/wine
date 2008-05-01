@@ -42,15 +42,13 @@ static HRESULT WINAPI IDirect3DVolume9Impl_QueryInterface(LPDIRECT3DVOLUME9 ifac
 
 static ULONG WINAPI IDirect3DVolume9Impl_AddRef(LPDIRECT3DVOLUME9 iface) {
     IDirect3DVolume9Impl *This = (IDirect3DVolume9Impl *)iface;
-    IUnknown *containerParent = NULL;
 
     TRACE("(%p)\n", This);
 
-    IWineD3DVolume_GetContainerParent(This->wineD3DVolume, &containerParent);
-    if (containerParent) {
-        /* Forward to the containerParent */
-        TRACE("(%p) : Forwarding to %p\n", This, containerParent);
-        return IUnknown_AddRef(containerParent);
+    if (This->forwardReference) {
+        /* Forward refcounting */
+        TRACE("(%p) : Forwarding to %p\n", This, This->forwardReference);
+        return IUnknown_AddRef(This->forwardReference);
     } else {
         /* No container, handle our own refcounting */
         ULONG ref = InterlockedIncrement(&This->ref);
@@ -61,15 +59,13 @@ static ULONG WINAPI IDirect3DVolume9Impl_AddRef(LPDIRECT3DVOLUME9 iface) {
 
 static ULONG WINAPI IDirect3DVolume9Impl_Release(LPDIRECT3DVOLUME9 iface) {
     IDirect3DVolume9Impl *This = (IDirect3DVolume9Impl *)iface;
-    IUnknown *containerParent = NULL;
 
     TRACE("(%p)\n", This);
 
-    IWineD3DVolume_GetContainerParent(This->wineD3DVolume, &containerParent);
-    if (containerParent) {
-        /* Forward to the containerParent */
-        TRACE("(%p) : Forwarding to %p\n", This, containerParent);
-        return IUnknown_Release(containerParent);
+    if (This->forwardReference) {
+        /* Forward refcounting */
+        TRACE("(%p) : Forwarding to %p\n", This, This->forwardReference);
+        return IUnknown_Release(This->forwardReference);
     } else {
         /* No container, handle our own refcounting */
         ULONG ref = InterlockedDecrement(&This->ref);
@@ -115,35 +111,17 @@ static HRESULT WINAPI IDirect3DVolume9Impl_FreePrivateData(LPDIRECT3DVOLUME9 ifa
 
 static HRESULT WINAPI IDirect3DVolume9Impl_GetContainer(LPDIRECT3DVOLUME9 iface, REFIID riid, void** ppContainer) {
     IDirect3DVolume9Impl *This = (IDirect3DVolume9Impl *)iface;
-    IWineD3DBase *wineD3DContainer = NULL;
-    IUnknown *wineD3DContainerParent = NULL;
     HRESULT res;
 
     TRACE("(This %p, riid %s, ppContainer %p)\n", This, debugstr_guid(riid), ppContainer);
+
+    if (!This->container) return E_NOINTERFACE;
 
     if (!ppContainer) {
         ERR("Called without a valid ppContainer.\n");
     }
 
-    /* Get the WineD3D container. */
-    res = IWineD3DVolume_GetContainer(This->wineD3DVolume, &IID_IWineD3DBase, (void **)&wineD3DContainer);
-    if (res != D3D_OK) return res;
-
-    if (!wineD3DContainer) {
-        ERR("IWineD3DSurface_GetContainer should never return NULL\n");
-    }
-
-    /* Get the parent */
-    IWineD3DBase_GetParent(wineD3DContainer, &wineD3DContainerParent);
-    IUnknown_Release(wineD3DContainer);
-
-    if (!wineD3DContainerParent) {
-        ERR("IWineD3DBase_GetParent should never return NULL\n");
-    }
-
-    /* Now, query the interface of the parent for the riid */
-    res = IUnknown_QueryInterface(wineD3DContainerParent, riid, ppContainer);
-    IUnknown_Release(wineD3DContainerParent);
+    res = IUnknown_QueryInterface(This->container, riid, ppContainer);
 
     TRACE("Returning ppContainer %p, *ppContainer %p\n", ppContainer, *ppContainer);
 
@@ -228,7 +206,19 @@ HRESULT WINAPI D3D9CB_CreateVolume(IUnknown  *pDevice, IUnknown *pSuperior, UINT
         *ppVolume = NULL;
     } else {
         *ppVolume = (IWineD3DVolume *)object->wineD3DVolume;
+        object->container = pSuperior;
+        object->forwardReference = pSuperior;
     }
     TRACE("(%p) Created volume %p\n", This, *ppVolume);
     return hrc;
+}
+
+ULONG WINAPI D3D9CB_DestroyVolume(IWineD3DVolume *pVolume) {
+    IDirect3DVolume9Impl* volumeParent;
+
+    IWineD3DVolume_GetParent(pVolume, (IUnknown **) &volumeParent);
+    /* GetParent's AddRef was forwarded to an object in destruction.
+     * Releasing it here again would cause an endless recursion. */
+    volumeParent->forwardReference = NULL;
+    return IDirect3DVolume9_Release((IDirect3DVolume9*) volumeParent);
 }

@@ -16,7 +16,6 @@ AC_ARG_ENABLE(win16, AC_HELP_STRING([--disable-win16],[do not include Win16 supp
 AC_ARG_ENABLE(win64, AC_HELP_STRING([--enable-win64], [build a Win64 emulator on AMD64 (won't run Win32 binaries)]))
 
 AC_ARG_WITH(opengl,    AC_HELP_STRING([--without-opengl],[do not use OpenGL]))
-AC_ARG_WITH(curses,    AC_HELP_STRING([--without-curses],[do not use curses]))
 AC_ARG_WITH(wine-tools,AC_HELP_STRING([--with-wine-tools=<dir>],[use Wine tools from directory <dir>]))
 
 AC_CANONICAL_HOST
@@ -520,25 +519,17 @@ fi
 
 dnl **** Check which curses lib to use ***
 CURSESLIBS=""
-if test "x$with_curses" != "xno"
+if test "$ac_cv_header_ncurses_h" = "yes"
 then
-    if test "$ac_cv_header_ncurses_h" = "yes"
-    then
-        AC_CHECK_LIB(ncurses,waddch,
-            [AC_DEFINE(HAVE_LIBNCURSES, 1, [Define if you have the ncurses library (-lncurses)])
-             CURSESLIBS="-lncurses"])
-    elif test "$ac_cv_header_curses_h" = "yes"
-    then
-        AC_CHECK_LIB(curses,waddch,
-            [AC_DEFINE(HAVE_LIBCURSES, 1, [Define if you have the curses library (-lcurses)])
-             CURSESLIBS="-lcurses"])
-    fi
-    ac_save_LIBS="$LIBS"
-    LIBS="$LIBS $CURSESLIBS"
-    AC_CHECK_FUNCS(mousemask)
-    LIBS="$ac_save_LIBS"
+    AC_CHECK_LIB(ncurses,waddch,[CURSESLIBS="-lncurses"])
+elif test "$ac_cv_header_curses_h" = "yes"
+then
+    AC_CHECK_LIB(curses,waddch,[CURSESLIBS="-lcurses"])
 fi
-AC_SUBST(CURSESLIBS)
+ac_save_LIBS="$LIBS"
+LIBS="$LIBS $CURSESLIBS"
+AC_CHECK_FUNCS(mousemask)
+LIBS="$ac_save_LIBS"
 
 dnl **** Check for SANE ****
 AC_CHECK_PROG(sane_devel,sane-config,sane-config,no)
@@ -1032,6 +1023,7 @@ case $host_os in
     dnl Enable quartz driver on Mac OS X
     if test "$ac_cv_header_Carbon_Carbon_h" = "yes"
     then
+        AC_SUBST(CARBONLIB,"-framework Carbon")
         QUARTZFILES='$(QUARTZFILES)'
     fi
     ;;
@@ -1234,6 +1226,7 @@ AC_CHECK_FUNCS(\
 	strcasecmp \
 	strerror \
 	strncasecmp \
+	strtold \
 	tcgetattr \
 	timegm \
 	usleep \
@@ -1558,6 +1551,7 @@ dlls/dbghelp/Makefile
 dlls/dciman32/Makefile
 dlls/ddraw/Makefile
 dlls/ddraw/tests/Makefile
+dlls/ddrawex/Makefile
 dlls/devenum/Makefile
 dlls/dinput/Makefile
 dlls/dinput/tests/Makefile

@@ -168,6 +168,7 @@ struct oletls
     IErrorInfo       *errorinfo;   /* see errorinfo.c */
     IUnknown         *state;       /* see CoSetState */
     DWORD            inits;        /* number of times CoInitializeEx called */
+    GUID             causality_id; /* unique identifier for each COM call */
 };
 
 
@@ -200,7 +201,7 @@ BOOL stub_manager_notify_unmarshal(struct stub_manager *m, const IPID *ipid);
 BOOL stub_manager_is_table_marshaled(struct stub_manager *m, const IPID *ipid);
 void stub_manager_release_marshal_data(struct stub_manager *m, ULONG refs, const IPID *ipid);
 HRESULT ipid_to_stub_manager(const IPID *ipid, APARTMENT **stub_apt, struct stub_manager **stubmgr_ret);
-HRESULT ipid_get_dispatch_params(const IPID *ipid, APARTMENT **stub_apt, IRpcStubBuffer **stub, IRpcChannelBuffer **chan);
+HRESULT ipid_get_dispatch_params(const IPID *ipid, APARTMENT **stub_apt, IRpcStubBuffer **stub, IRpcChannelBuffer **chan, IID *iid, IUnknown **iface);
 HRESULT start_apartment_remote_unknown(void);
 
 HRESULT marshal_object(APARTMENT *apt, STDOBJREF *stdobjref, REFIID riid, IUnknown *obj, MSHLFLAGS mshlflags);
@@ -219,6 +220,8 @@ HRESULT RPC_RegisterInterface(REFIID riid);
 void    RPC_UnregisterInterface(REFIID riid);
 void    RPC_StartLocalServer(REFCLSID clsid, IStream *stream);
 HRESULT RPC_GetLocalClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv);
+HRESULT RPC_RegisterChannelHook(REFGUID rguid, IChannelHook *hook);
+void    RPC_UnregisterAllChannelHooks(void);
 
 /* This function initialize the Running Object Table */
 HRESULT WINAPI RunningObjectTableImpl_Initialize(void);
@@ -269,6 +272,16 @@ static inline struct oletls *COM_CurrentInfo(void)
 static inline APARTMENT* COM_CurrentApt(void)
 {  
     return COM_CurrentInfo()->apt;
+}
+
+static inline GUID COM_CurrentCausalityId(void)
+{
+    struct oletls *info = COM_CurrentInfo();
+    if (!info)
+        return GUID_NULL;
+    if (IsEqualGUID(&info->causality_id, &GUID_NULL))
+        CoCreateGuid(&info->causality_id);
+    return info->causality_id;
 }
 
 #define ICOM_THIS_MULTI(impl,field,iface) impl* const This=(impl*)((char*)(iface) - offsetof(impl,field))

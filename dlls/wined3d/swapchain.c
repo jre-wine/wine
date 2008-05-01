@@ -279,7 +279,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
                 checkGLcall("glLightModeli(GL_LIGHT_MODEL_COLOR_CONTROL, GL_SEPARATE_SPECULAR_COLOR);");
 
                 /* If this swapchain is currently the active context then make this swapchain active */
-                if(IWineD3DSurface_GetContainer(This->wineD3DDevice->renderTarget, &IID_IWineD3DSwapChain, (void **)&tmp) == WINED3D_OK){
+                if(IWineD3DSurface_GetContainer(This->wineD3DDevice->render_targets[0], &IID_IWineD3DSwapChain, (void **)&tmp) == WINED3D_OK){
                     if(tmp != (IUnknown *)This){
                         glXMakeCurrent(This->display, currentDrawable, currentContext);
                         checkGLcall("glXMakeCurrent");
@@ -564,7 +564,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_GetGammaRamp(IWineD3DSwapChain *ifac
 }
 
 
-IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl =
+const IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl =
 {
     /* IUnknown */
     IWineD3DSwapChainImpl_QueryInterface,
