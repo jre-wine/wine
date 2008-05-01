@@ -1,3 +1,17 @@
+wine (0.9.27-1) unstable; urgency=low
+
+  * New upstream release 0.9.27.
+    - Better support for noexec kernels.
+    - Better Dwarf support in dbghelp.
+    - Several Winsock fixes.
+    - Various code cleanups.
+    - Lots of bug fixes.
+  * This version was released Dec 8, 2006.
+  * glut32 has been removed, and is thus no longer
+    installed into libwine-gl.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 29 Dec 2006 21:30:11 -0500
+
 wine (0.9.26-1) unstable; urgency=low
 
   * New upstream release 0.9.26.

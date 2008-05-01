@@ -182,7 +182,6 @@ endif
 	mv debian/libwine/usr/lib/wine/d3d9*     debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/d3dx8*    debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/glu32*    debian/libwine-gl/usr/lib/wine
-	mv debian/libwine/usr/lib/wine/glut32*   debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/opengl32* debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/wined3d*  debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/winejack* debian/libwine-jack/usr/lib/wine
