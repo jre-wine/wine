@@ -69,11 +69,11 @@ static struct handle_table *global_table;
 /* handle to table index conversion */
 
 /* handles are a multiple of 4 under NT; handle 0 is not used */
-inline static obj_handle_t index_to_handle( int index )
+static inline obj_handle_t index_to_handle( int index )
 {
     return (obj_handle_t)((unsigned long)(index + 1) << 2);
 }
-inline static int handle_to_index( obj_handle_t handle )
+static inline int handle_to_index( obj_handle_t handle )
 {
     return ((unsigned long)handle >> 2) - 1;
 }
@@ -82,16 +82,16 @@ inline static int handle_to_index( obj_handle_t handle )
 
 #define HANDLE_OBFUSCATOR 0x544a4def
 
-inline static int handle_is_global( obj_handle_t handle)
+static inline int handle_is_global( obj_handle_t handle)
 {
     return ((unsigned long)handle ^ HANDLE_OBFUSCATOR) < 0x10000;
 }
-inline static obj_handle_t handle_local_to_global( obj_handle_t handle )
+static inline obj_handle_t handle_local_to_global( obj_handle_t handle )
 {
     if (!handle) return 0;
     return (obj_handle_t)((unsigned long)handle ^ HANDLE_OBFUSCATOR);
 }
-inline static obj_handle_t handle_global_to_local( obj_handle_t handle )
+static inline obj_handle_t handle_global_to_local( obj_handle_t handle )
 {
     return (obj_handle_t)((unsigned long)handle ^ HANDLE_OBFUSCATOR);
 }
@@ -112,6 +112,7 @@ static const struct object_ops handle_table_ops =
     no_get_fd,                       /* get_fd */
     no_map_access,                   /* map_access */
     no_lookup_name,                  /* lookup_name */
+    no_open_file,                    /* open_file */
     no_close_handle,                 /* close_handle */
     handle_table_destroy             /* destroy */
 };

@@ -93,6 +93,7 @@ struct stub_manager
     OID               oid;        /* apartment-scoped unique identifier (RO) */
     IUnknown         *object;     /* the object we are managing the stub for (RO) */
     ULONG             next_ipid;  /* currently unused (LOCK) */
+    OXID_INFO         oxid_info;  /* string binding, ipid of rem unknown and other information (RO) */
 
     /* We need to keep a count of the outstanding marshals, so we can enforce the
      * marshalling rules (ie, you can only unmarshal normal marshals once). Note
@@ -121,9 +122,11 @@ struct proxy_manager
 {
   const IMultiQIVtbl *lpVtbl;
   const IMarshalVtbl *lpVtblMarshal;
+  const IClientSecurityVtbl *lpVtblCliSec;
   struct apartment *parent; /* owning apartment (RO) */
   struct list entry;        /* entry in apartment (CS parent->cs) */
   OXID oxid;                /* object exported ID (RO) */
+  OXID_INFO oxid_info;      /* string binding, ipid of rem unknown and other information (RO) */
   OID oid;                  /* object ID (RO) */
   struct list interfaces;   /* imported interfaces (CS cs) */
   LONG refs;                /* proxy reference count (LOCK) */
@@ -215,6 +218,7 @@ struct dispatch_params;
 
 void    RPC_StartRemoting(struct apartment *apt);
 HRESULT RPC_CreateClientChannel(const OXID *oxid, const IPID *ipid,
+                                const OXID_INFO *oxid_info,
                                 DWORD dest_context, void *dest_context_data,
                                 IRpcChannelBuffer **chan);
 HRESULT RPC_CreateServerChannel(IRpcChannelBuffer **chan);
@@ -226,6 +230,7 @@ void    RPC_StopLocalServer(void *registration);
 HRESULT RPC_GetLocalClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv);
 HRESULT RPC_RegisterChannelHook(REFGUID rguid, IChannelHook *hook);
 void    RPC_UnregisterAllChannelHooks(void);
+HRESULT RPC_ResolveOxid(OXID oxid, OXID_INFO *oxid_info);
 
 /* This function initialize the Running Object Table */
 HRESULT WINAPI RunningObjectTableImpl_Initialize(void);

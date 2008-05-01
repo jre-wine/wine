@@ -50,7 +50,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(shell);
   } while (0)
 
 /* DLL handles for late bound calls */
-extern HMODULE SHLWAPI_hshell32;
+static HMODULE SHLWAPI_hshell32;
 
 /* Function pointers for GET_FUNC macro; these need to be global because of gcc bug */
 typedef BOOL (WINAPI *fnpIsNetDrive)(int);
@@ -1181,7 +1181,7 @@ static BOOL WINAPI SHLWAPI_PathFindInOtherDirs(LPWSTR lpszFile, DWORD dwWhich)
   /* Try dirs listed in %PATH% */
   dwLenPATH = GetEnvironmentVariableW(szPath, buff, MAX_PATH);
 
-  if (!dwLenPATH || !(lpszPATH = HeapAlloc(GetProcessHeap, 0, (dwLenPATH + 1) * sizeof (WCHAR))))
+  if (!dwLenPATH || !(lpszPATH = HeapAlloc(GetProcessHeap(), 0, (dwLenPATH + 1) * sizeof (WCHAR))))
     return FALSE;
 
   GetEnvironmentVariableW(szPath, lpszPATH, dwLenPATH + 1);
@@ -1204,17 +1204,17 @@ static BOOL WINAPI SHLWAPI_PathFindInOtherDirs(LPWSTR lpszFile, DWORD dwWhich)
 
     if (!PathAppendW(buff, lpszFile))
     {
-      HeapFree(GetProcessHeap, 0, lpszPATH);
+      HeapFree(GetProcessHeap(), 0, lpszPATH);
       return FALSE;
     }
     if (PathFileExistsDefExtW(buff, dwWhich))
     {
       strcpyW(lpszFile, buff);
-      HeapFree(GetProcessHeap, 0, lpszPATH);
+      HeapFree(GetProcessHeap(), 0, lpszPATH);
       return TRUE;
     }
   }
-  HeapFree(GetProcessHeap, 0, lpszPATH);
+  HeapFree(GetProcessHeap(), 0, lpszPATH);
   return FALSE;
 }
 

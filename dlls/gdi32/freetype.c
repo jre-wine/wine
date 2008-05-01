@@ -1832,7 +1832,7 @@ static const struct nls_update_font_list
     }
 };
 
-inline static HKEY create_fonts_NT_registry_key(void)
+static inline HKEY create_fonts_NT_registry_key(void)
 {
     HKEY hkey = 0;
 
@@ -1841,7 +1841,7 @@ inline static HKEY create_fonts_NT_registry_key(void)
     return hkey;
 }
 
-inline static HKEY create_fonts_9x_registry_key(void)
+static inline HKEY create_fonts_9x_registry_key(void)
 {
     HKEY hkey = 0;
 
@@ -1850,7 +1850,7 @@ inline static HKEY create_fonts_9x_registry_key(void)
     return hkey;
 }
 
-inline static HKEY create_config_fonts_registry_key(void)
+static inline HKEY create_config_fonts_registry_key(void)
 {
     HKEY hkey = 0;
 
@@ -2205,7 +2205,6 @@ static LONG calc_ppem_for_height(FT_Face ft_face, LONG height)
 
 static struct font_mapping *map_font( const char *name )
 {
-#ifndef __APPLE__  /* Mac OS fonts use resource forks, we can't simply mmap them */
     struct font_mapping *mapping;
     struct stat st;
     int fd;
@@ -2242,7 +2241,6 @@ static struct font_mapping *map_font( const char *name )
 
 error:
     close( fd );
-#endif
     return NULL;
 }
 
@@ -2265,11 +2263,13 @@ static FT_Face OpenFontFile(GdiFont *font, char *file, FT_Long face_index, LONG 
 
     TRACE("%s, %ld, %d x %d\n", debugstr_a(file), face_index, width, height);
 
-    if ((font->mapping = map_font( file )))
-        err = pFT_New_Memory_Face(library, font->mapping->data, font->mapping->size, face_index, &ft_face);
-    else
-        err = pFT_New_Face(library, file, face_index, &ft_face);
+    if (!(font->mapping = map_font( file )))
+    {
+        WARN("failed to map %s\n", debugstr_a(file));
+        return 0;
+    }
 
+    err = pFT_New_Memory_Face(library, font->mapping->data, font->mapping->size, face_index, &ft_face);
     if(err) {
         ERR("FT_New_Face rets %d\n", err);
 	return 0;
@@ -3398,7 +3398,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *font, UINT glyph, UINT format,
     err = pFT_Load_Glyph(ft_face, glyph_index, load_flags);
 
     if(err) {
-        FIXME("FT_Load_Glyph on index %x returns %d\n", glyph_index, err);
+        WARN("FT_Load_Glyph on index %x returns %d\n", glyph_index, err);
 	return GDI_ERROR;
     }
 	

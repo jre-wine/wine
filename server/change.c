@@ -177,6 +177,7 @@ static const struct object_ops dir_ops =
     dir_get_fd,               /* get_fd */
     dir_map_access,           /* map_access */
     no_lookup_name,           /* lookup_name */
+    no_open_file,             /* open_file */
     fd_close_handle,          /* close_handle */
     dir_destroy               /* destroy */
 };
@@ -282,10 +283,7 @@ void do_change_notify( int unix_fd )
 
 static void dir_signal_changed( struct dir *dir )
 {
-    if (dir->event)
-        set_event( dir->event );
-    else
-        wake_up( &dir->obj, 0 );
+    if (!dir->event) wake_up( &dir->obj, 0 );
 }
 
 /* SIGIO callback, called synchronously with the poll loop */
@@ -347,11 +345,7 @@ static void dir_destroy( struct object *obj )
     async_terminate_queue( &dir->change_q, STATUS_CANCELLED );
     while ((record = get_first_change_record( dir ))) free( record );
 
-    if (dir->event)
-    {
-        set_event( dir->event );
-        release_object( dir->event );
-    }
+    if (dir->event) release_object( dir->event );
     release_object( dir->fd );
 
     if (inotify_fd && list_empty( &change_list ))
@@ -1088,21 +1082,16 @@ DECL_HANDLER(read_directory_changes)
         return;
 
     /* possibly send changes through an event flag */
-    if (req->event)
-    {
-        event = get_event_obj( current->process, req->event, EVENT_MODIFY_STATE );
-        if (!event)
-            goto end;
-    }
+    if (req->async.event &&
+        !(event = get_event_obj( current->process, req->async.event, EVENT_MODIFY_STATE )))
+        goto end;
 
     /* discard the current data, and move onto the next event */
     if (dir->event) release_object( dir->event );
     dir->event = event;
 
     /* requests don't timeout */
-    if ( req->io_apc && !create_async( current, NULL, &dir->change_q,
-                        req->io_apc, req->io_user, req->io_sb ))
-        return;
+    if (!create_async( current, NULL, &dir->change_q, &req->async )) goto end;
 
     /* assign it once */
     if (!dir->filter)
@@ -1117,10 +1106,6 @@ DECL_HANDLER(read_directory_changes)
     /* remove any notifications */
     if (dir->signaled>0)
         dir->signaled--;
-
-    /* clear the event */
-    if (event)
-        reset_event( event );
 
     /* if there's already a change in the queue, send it */
     if (!list_empty( &dir->change_q ) &&

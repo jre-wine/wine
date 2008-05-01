@@ -64,8 +64,8 @@ static void serial_destroy(struct object *obj);
 static int serial_get_poll_events( struct fd *fd );
 static void serial_poll_event( struct fd *fd, int event );
 static enum server_fd_type serial_get_info( struct fd *fd, int *flags );
-static int serial_flush( struct fd *fd, struct event **event );
-static void serial_queue_async( struct fd *fd, void *apc, void *user, void *iosb, int type, int count );
+static void serial_flush( struct fd *fd, struct event **event );
+static void serial_queue_async( struct fd *fd, const async_data_t *data, int type, int count );
 static void serial_cancel_async( struct fd *fd );
 
 struct serial
@@ -104,6 +104,7 @@ static const struct object_ops serial_ops =
     serial_get_fd,                /* get_fd */
     serial_map_access,            /* map_access */
     no_lookup_name,               /* lookup_name */
+    no_open_file,                 /* open_file */
     fd_close_handle,              /* close_handle */
     serial_destroy                /* destroy */
 };
@@ -241,8 +242,7 @@ static void serial_poll_event(struct fd *fd, int event)
     set_fd_events( fd, serial_get_poll_events(fd) );
 }
 
-static void serial_queue_async( struct fd *fd, void *apc, void *user, void *iosb,
-                                int type, int count )
+static void serial_queue_async( struct fd *fd, const async_data_t *data, int type, int count )
 {
     struct serial *serial = get_fd_user( fd );
     struct list *queue;
@@ -272,7 +272,8 @@ static void serial_queue_async( struct fd *fd, void *apc, void *user, void *iosb
     }
 
     add_timeout( &when, timeout );
-    if (!create_async( current, timeout ? &when : NULL, queue, apc, user, iosb )) return;
+    if (!create_async( current, timeout ? &when : NULL, queue, data )) return;
+    set_error( STATUS_PENDING );
 
     /* Check if the new pending request can be served immediately */
     events = check_fd_events( fd, serial_get_poll_events( fd ) );
@@ -296,14 +297,12 @@ static void serial_cancel_async( struct fd *fd )
     async_terminate_queue( &serial->wait_q, STATUS_CANCELLED );
 }
 
-static int serial_flush( struct fd *fd, struct event **event )
+static void serial_flush( struct fd *fd, struct event **event )
 {
     /* MSDN says: If hFile is a handle to a communications device,
      * the function only flushes the transmit buffer.
      */
-    int ret = (tcflush( get_unix_fd(fd), TCOFLUSH ) != -1);
-    if (!ret) file_set_error();
-    return ret;
+    if (tcflush( get_unix_fd(fd), TCOFLUSH ) == -1) file_set_error();
 }
 
 DECL_HANDLER(get_serial_info)

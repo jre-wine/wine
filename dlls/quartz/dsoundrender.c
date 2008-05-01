@@ -66,7 +66,9 @@ typedef struct DSoundRenderImpl
     LPDIRECTSOUNDBUFFER dsbuffer;
     DWORD write_pos;
     BOOL init;
-    BOOL started;
+
+    long volume;
+    long pan;
 } DSoundRenderImpl;
 
 static HRESULT DSoundRender_InputPin_Construct(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
@@ -130,11 +132,20 @@ static HRESULT DSoundRender_CreateSoundBuffer(IBaseFilter * iface)
     TRACE("nBlockAlign = %d\n", format->nBlockAlign);
     TRACE("wBitsPerSample = %d\n", format->wBitsPerSample);
     TRACE("cbSize = %d\n", format->cbSize);
-    
+
+    /* Lock the critical section to make sure we're still marked to play while
+       setting up the playback buffer */
+    EnterCriticalSection(&This->csFilter);
+
+    if (This->state != State_Running) {
+        hr = VFW_E_WRONG_STATE;
+        goto getout;
+    }
+
     hr = DirectSoundCreate(NULL, &This->dsound, NULL);
     if (FAILED(hr)) {
 	ERR("Cannot create Direct Sound object\n");
-	return hr;
+	goto getout;
     }
 
     wav_fmt = *format;
@@ -142,17 +153,36 @@ static HRESULT DSoundRender_CreateSoundBuffer(IBaseFilter * iface)
 
     memset(&buf_desc,0,sizeof(DSBUFFERDESC));
     buf_desc.dwSize = sizeof(DSBUFFERDESC);
+    buf_desc.dwFlags = DSBCAPS_CTRLVOLUME | DSBCAPS_CTRLPAN | DSBCAPS_CTRLFREQUENCY;
     buf_desc.dwBufferBytes = DSBUFFERSIZE;
     buf_desc.lpwfxFormat = &wav_fmt;
     hr = IDirectSound_CreateSoundBuffer(This->dsound, &buf_desc, &This->dsbuffer, NULL);
     if (FAILED(hr)) {
         ERR("Can't create sound buffer !\n");
         IDirectSound_Release(This->dsound);
-        return hr;
+        goto getout;
+    }
+
+    hr = IDirectSoundBuffer_SetVolume(This->dsbuffer, This->volume);
+    if (FAILED(hr))
+        ERR("Can't set volume to %ld (%x)!\n", This->volume, hr);
+
+    hr = IDirectSoundBuffer_SetPan(This->dsbuffer, This->pan);
+    if (FAILED(hr))
+        ERR("Can't set pan to %ld (%x)!\n", This->pan, hr);
+
+    hr = IDirectSoundBuffer_Play(This->dsbuffer, 0, 0, DSBPLAY_LOOPING);
+    if (FAILED(hr)) {
+        ERR("Can't start sound buffer (%x)!\n", hr);
+        IDirectSoundBuffer_Release(This->dsbuffer);
+        IDirectSound_Release(This->dsound);
+        goto getout;
     }
 
     This->write_pos = 0;
-    
+
+getout:
+    LeaveCriticalSection(&This->csFilter);
     return hr;
 }
 
@@ -166,8 +196,7 @@ static HRESULT DSoundRender_SendSampleData(DSoundRenderImpl* This, LPBYTE data, 
     DWORD size2;
     DWORD play_pos,buf_free;
 
-    while (1)
-    {
+    do {
         hr = IDirectSoundBuffer_GetCurrentPosition(This->dsbuffer, &play_pos, NULL);
         if (hr != DS_OK)
         {
@@ -180,7 +209,7 @@ static HRESULT DSoundRender_SendSampleData(DSoundRenderImpl* This, LPBYTE data, 
              buf_free = DSBUFFERSIZE - This->write_pos + play_pos;
 
         /* This situation is ambiguous; Assume full when playing */
-        if(buf_free == DSBUFFERSIZE && This->started)
+        if(buf_free == DSBUFFERSIZE)
         {
             Sleep(10);
             continue;
@@ -201,14 +230,7 @@ static HRESULT DSoundRender_SendSampleData(DSoundRenderImpl* This, LPBYTE data, 
         hr = IDirectSoundBuffer_Unlock(This->dsbuffer, lpbuf1, dwsize1, lpbuf2, dwsize2);
         if (hr != DS_OK)
             ERR("Unable to unlock sound buffer! (%x)\n", hr);
-        if (!This->started)
-        {
-            hr = IDirectSoundBuffer_Play(This->dsbuffer, 0, 0, DSBPLAY_LOOPING);
-            if (hr == DS_OK)
-                This->started = TRUE;
-            else
-                ERR("Can't start playing! (%x)\n", hr);
-        }
+
         size -= dwsize1 + dwsize2;
         data += dwsize1 + dwsize2;
         This->write_pos = (This->write_pos + dwsize1 + dwsize2) % DSBUFFERSIZE;
@@ -216,7 +238,7 @@ static HRESULT DSoundRender_SendSampleData(DSoundRenderImpl* This, LPBYTE data, 
         if (!size)
             break;
         Sleep(10);
-    }
+    } while (This->state == State_Running);
 
     return hr;
 }
@@ -400,8 +422,6 @@ static ULONG WINAPI DSoundRender_Release(IBaseFilter * iface)
     {
         IPin *pConnectedTo;
 
-        This->csFilter.DebugInfo->Spare[0] = 0;
-        DeleteCriticalSection(&This->csFilter);
         if (This->pClock)
             IReferenceClock_Release(This->pClock);
 
@@ -425,6 +445,9 @@ static ULONG WINAPI DSoundRender_Release(IBaseFilter * iface)
         This->lpVtbl = NULL;
         This->IBasicAudio_vtbl = NULL;
         
+        This->csFilter.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->csFilter);
+
         TRACE("Destroying Audio Renderer\n");
         CoTaskMemFree(This);
         
@@ -468,10 +491,7 @@ static HRESULT WINAPI DSoundRender_Stop(IBaseFilter * iface)
             }
         }
         if (SUCCEEDED(hr))
-        {
-            This->started = FALSE;
             This->state = State_Stopped;
-        }
     }
     LeaveCriticalSection(&This->csFilter);
     
@@ -498,10 +518,7 @@ static HRESULT WINAPI DSoundRender_Pause(IBaseFilter * iface)
             }
         }
         if (SUCCEEDED(hr))
-        {
-            This->started = FALSE;
             This->state = State_Paused;
-        }
     }
     LeaveCriticalSection(&This->csFilter);
 
@@ -517,8 +534,18 @@ static HRESULT WINAPI DSoundRender_Run(IBaseFilter * iface, REFERENCE_TIME tStar
 
     EnterCriticalSection(&This->csFilter);
     {
-        This->rtStreamStart = tStart;
-        This->state = State_Running;
+        /* It's okay if there's no buffer yet. It'll start when it's created */
+        if (This->dsbuffer)
+        {
+            hr = IDirectSoundBuffer_Play(This->dsbuffer, 0, 0, DSBPLAY_LOOPING);
+            if (FAILED(hr))
+                ERR("Can't start playing! (%x)\n", hr);
+        }
+        if (SUCCEEDED(hr))
+        {
+            This->rtStreamStart = tStart;
+            This->state = State_Running;
+        }
     }
     LeaveCriticalSection(&This->csFilter);
 
@@ -798,8 +825,17 @@ static HRESULT WINAPI Basicaudio_put_Volume(IBasicAudio *iface,
 					    long lVolume) {
     ICOM_THIS_MULTI(DSoundRenderImpl, IBasicAudio_vtbl, iface);
 
-    TRACE("(%p/%p)->(%ld): stub !!!\n", This, iface, lVolume);
+    TRACE("(%p/%p)->(%ld)\n", This, iface, lVolume);
 
+    if (lVolume > DSBVOLUME_MAX || lVolume < DSBVOLUME_MIN)
+        return E_INVALIDARG;
+
+    if (This->dsbuffer) {
+        if (FAILED(IDirectSoundBuffer_SetVolume(This->dsbuffer, lVolume)))
+            return E_FAIL;
+    }
+
+    This->volume = lVolume;
     return S_OK;
 }
 
@@ -807,8 +843,12 @@ static HRESULT WINAPI Basicaudio_get_Volume(IBasicAudio *iface,
 					    long *plVolume) {
     ICOM_THIS_MULTI(DSoundRenderImpl, IBasicAudio_vtbl, iface);
 
-    TRACE("(%p/%p)->(%p): stub !!!\n", This, iface, plVolume);
+    TRACE("(%p/%p)->(%p)\n", This, iface, plVolume);
 
+    if (!plVolume)
+        return E_POINTER;
+
+    *plVolume = This->volume;
     return S_OK;
 }
 
@@ -816,8 +856,17 @@ static HRESULT WINAPI Basicaudio_put_Balance(IBasicAudio *iface,
 					     long lBalance) {
     ICOM_THIS_MULTI(DSoundRenderImpl, IBasicAudio_vtbl, iface);
 
-    TRACE("(%p/%p)->(%ld): stub !!!\n", This, iface, lBalance);
+    TRACE("(%p/%p)->(%ld)\n", This, iface, lBalance);
 
+    if (lBalance < DSBPAN_LEFT || lBalance > DSBPAN_RIGHT)
+        return E_INVALIDARG;
+
+    if (This->dsbuffer) {
+        if (FAILED(IDirectSoundBuffer_SetPan(This->dsbuffer, lBalance)))
+            return E_FAIL;
+    }
+
+    This->pan = lBalance;
     return S_OK;
 }
 
@@ -825,8 +874,12 @@ static HRESULT WINAPI Basicaudio_get_Balance(IBasicAudio *iface,
 					     long *plBalance) {
     ICOM_THIS_MULTI(DSoundRenderImpl, IBasicAudio_vtbl, iface);
 
-    TRACE("(%p/%p)->(%p): stub !!!\n", This, iface, plBalance);
+    TRACE("(%p/%p)->(%p)\n", This, iface, plBalance);
 
+    if (!plBalance)
+        return E_POINTER;
+
+    *plBalance = This->pan;
     return S_OK;
 }
 

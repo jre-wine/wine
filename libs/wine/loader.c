@@ -24,6 +24,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -147,14 +148,14 @@ static void build_dll_path(void)
 }
 
 /* check if a given file can be opened */
-inline static int file_exists( const char *name )
+static inline int file_exists( const char *name )
 {
     int fd = open( name, O_RDONLY );
     if (fd != -1) close( fd );
     return (fd != -1);
 }
 
-inline static char *prepend( char *buffer, const char *str, size_t len )
+static inline char *prepend( char *buffer, const char *str, size_t len )
 {
     return memcpy( buffer - len, str, len );
 }
@@ -217,7 +218,7 @@ static char *first_dll_path( const char *name, const char *ext, struct dll_path_
 
 
 /* free the dll path context created by first_dll_path */
-inline static void free_dll_path( struct dll_path_context *context )
+static inline void free_dll_path( struct dll_path_context *context )
 {
     free( context->buffer );
 }
@@ -689,6 +690,16 @@ void *wine_dlopen( const char *filename, int flag, char *error, size_t errorsize
     void *ret;
     const char *s;
     dlerror(); dlerror();
+#ifdef __sun
+    if (strchr( filename, ':' ))
+    {
+        char path[PATH_MAX];
+        /* Solaris' brain damaged dlopen() treats ':' as a path separator */
+        realpath( filename, path );
+        ret = dlopen( path, flag | RTLD_FIRST );
+    }
+    else
+#endif
     ret = dlopen( filename, flag | RTLD_FIRST );
     s = dlerror();
     if (error && errorsize)

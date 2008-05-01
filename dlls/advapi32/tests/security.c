@@ -55,6 +55,8 @@ typedef BOOL (WINAPI *fnGetFileSecurityA)(LPCSTR, SECURITY_INFORMATION,
                                           PSECURITY_DESCRIPTOR, DWORD, LPDWORD);
 typedef DWORD (WINAPI *fnRtlAdjustPrivilege)(ULONG,BOOLEAN,BOOLEAN,PBOOLEAN);
 typedef BOOL (WINAPI *fnCreateWellKnownSid)(WELL_KNOWN_SID_TYPE,PSID,PSID,DWORD*);
+typedef BOOL (WINAPI *fnDuplicateTokenEx)(HANDLE,DWORD,LPSECURITY_ATTRIBUTES,
+                                        SECURITY_IMPERSONATION_LEVEL,TOKEN_TYPE,PHANDLE);
 
 typedef NTSTATUS (WINAPI *fnLsaQueryInformationPolicy)(LSA_HANDLE,POLICY_INFORMATION_CLASS,PVOID*);
 typedef NTSTATUS (WINAPI *fnLsaClose)(LSA_HANDLE);
@@ -76,6 +78,7 @@ fnConvertStringSidToSidA pConvertStringSidToSidA;
 fnGetFileSecurityA pGetFileSecurityA;
 fnRtlAdjustPrivilege pRtlAdjustPrivilege;
 fnCreateWellKnownSid pCreateWellKnownSid;
+fnDuplicateTokenEx pDuplicateTokenEx;
 fnLsaQueryInformationPolicy pLsaQueryInformationPolicy;
 fnLsaClose pLsaClose;
 fnLsaFreeMemory pLsaFreeMemory;
@@ -669,15 +672,18 @@ static void test_AccessCheck(void)
     DWORD err;
 
     NtDllModule = GetModuleHandle("ntdll.dll");
-
     if (!NtDllModule)
     {
-        trace("not running on NT, skipping test\n");
+        skip("not running on NT, skipping test\n");
         return;
     }
     pRtlAdjustPrivilege = (fnRtlAdjustPrivilege)
                           GetProcAddress(NtDllModule, "RtlAdjustPrivilege");
-    if (!pRtlAdjustPrivilege) return;
+    if (!pRtlAdjustPrivilege)
+    {
+        skip("missing RtlAdjustPrivilege, skipping test\n");
+        return;
+    }
 
     Acl = HeapAlloc(GetProcessHeap(), 0, 256);
     res = InitializeAcl(Acl, 256, ACL_REVISION);
@@ -851,7 +857,13 @@ static void test_token_attr(void)
     SECURITY_IMPERSONATION_LEVEL ImpersonationLevel;
 
     /* cygwin-like use case */
+    SetLastError(0xdeadbeef);
     ret = OpenProcessToken(GetCurrentProcess(), MAXIMUM_ALLOWED, &Token);
+    if(!ret && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        skip("OpenProcessToken is not implemented\n");
+        return;
+    }
     ok(ret, "OpenProcessToken failed with error %d\n", GetLastError());
     if (ret)
     {
@@ -867,17 +879,14 @@ static void test_token_attr(void)
     }
 
     if(!pConvertSidToStringSidA)
-        return;
-
-    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY|TOKEN_DUPLICATE, &Token);
-    GLE = GetLastError();
-    ok(ret || (GLE == ERROR_CALL_NOT_IMPLEMENTED), 
-        "OpenProcessToken failed with error %d\n", GLE);
-    if(!ret && (GLE == ERROR_CALL_NOT_IMPLEMENTED))
     {
-        trace("OpenProcessToken() not implemented, skipping test_token_attr()\n");
+        skip("ConvertSidToStringSidA is not available\n");
         return;
     }
+
+    SetLastError(0xdeadbeef);
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY|TOKEN_DUPLICATE, &Token);
+    ok(ret, "OpenProcessToken failed with error %d\n", GetLastError());
 
     /* groups */
     ret = GetTokenInformation(Token, TokenGroups, NULL, 0, &Size);
@@ -1290,6 +1299,11 @@ static void test_LookupAccountName(void)
     sid_use = 0xcafebabe;
     SetLastError(0xdeadbeef);
     ret = LookupAccountNameA(NULL, user_name, NULL, &sid_size, NULL, &domain_size, &sid_use);
+    if(!ret && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        skip("LookupAccountNameA is not implemented\n");
+        return;
+    }
     ok(!ret, "Expected 0, got %d\n", ret);
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
@@ -1592,7 +1606,18 @@ static void test_impersonation_level(void)
     HKEY hkey;
     DWORD error;
 
+    pDuplicateTokenEx = (fnDuplicateTokenEx) GetProcAddress(hmod, "DuplicateTokenEx");
+    if( !pDuplicateTokenEx ) {
+        skip("DuplicateTokenEx is not available\n");
+        return;
+    }
+    SetLastError(0xdeadbeef);
     ret = ImpersonateSelf(SecurityAnonymous);
+    if(!ret && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        skip("ImpersonateSelf is not implemented\n");
+        return;
+    }
     ok(ret, "ImpersonateSelf(SecurityAnonymous) failed with error %d\n", GetLastError());
     ret = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY_SOURCE | TOKEN_IMPERSONATE | TOKEN_ADJUST_DEFAULT, TRUE, &Token);
     ok(!ret, "OpenThreadToken should have failed\n");
@@ -1608,7 +1633,7 @@ static void test_impersonation_level(void)
     ret = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE, &ProcessToken);
     ok(ret, "OpenProcessToken failed with error %d\n", GetLastError());
 
-    ret = DuplicateTokenEx(ProcessToken,
+    ret = pDuplicateTokenEx(ProcessToken,
         TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_IMPERSONATE, NULL,
         SecurityAnonymous, TokenImpersonation, &Token);
     ok(ret, "DuplicateTokenEx failed with error %d\n", GetLastError());
@@ -1678,6 +1703,21 @@ static void test_impersonation_level(void)
     HeapFree(GetProcessHeap(), 0, PrivilegeSet);
 }
 
+static void test_SetEntriesInAcl(void)
+{
+    ACL *acl = (ACL*)0xdeadbeef;
+    DWORD res;
+
+    res = SetEntriesInAclW(0, NULL, NULL, &acl);
+    if(res == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("SetEntriesInAclW is not implemented\n");
+        return;
+    }
+    ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
+    ok(acl == NULL, "acl=%p, expected NULL\n", acl);
+}
+
 START_TEST(security)
 {
     init();
@@ -1698,4 +1738,5 @@ START_TEST(security)
     test_LookupAccountName();
     test_process_security();
     test_impersonation_level();
+    test_SetEntriesInAcl();
 }

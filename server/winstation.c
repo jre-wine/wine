@@ -64,6 +64,7 @@ static const struct object_ops winstation_ops =
     no_get_fd,                    /* get_fd */
     winstation_map_access,        /* map_access */
     no_lookup_name,               /* lookup_name */
+    no_open_file,                 /* open_file */
     winstation_close_handle,      /* close_handle */
     winstation_destroy            /* destroy */
 };
@@ -81,6 +82,7 @@ static const struct object_ops desktop_ops =
     no_get_fd,                    /* get_fd */
     desktop_map_access,           /* map_access */
     no_lookup_name,               /* lookup_name */
+    no_open_file,                 /* open_file */
     desktop_close_handle,         /* close_handle */
     desktop_destroy               /* destroy */
 };
@@ -186,7 +188,7 @@ static WCHAR *build_desktop_name( const struct unicode_str *name,
 }
 
 /* retrieve a pointer to a desktop object */
-inline static struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle,
+static inline struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle,
                                                unsigned int access )
 {
     return (struct desktop *)get_handle_obj( process, handle, access, &desktop_ops );

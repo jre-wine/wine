@@ -150,6 +150,7 @@ static const struct object_ops key_ops =
     no_get_fd,               /* get_fd */
     key_map_access,          /* map_access */
     no_lookup_name,          /* lookup_name */
+    no_open_file,            /* open_file */
     key_close_handle,        /* close_handle */
     key_destroy              /* destroy */
 };
@@ -350,7 +351,7 @@ static void key_destroy( struct object *obj )
 }
 
 /* get the request vararg as registry path */
-inline static void get_req_path( struct unicode_str *str, int skip_root )
+static inline void get_req_path( struct unicode_str *str, int skip_root )
 {
     static const WCHAR root_name[] = { '\\','R','e','g','i','s','t','r','y','\\' };
 

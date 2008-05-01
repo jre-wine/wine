@@ -886,20 +886,22 @@ BOOL WINAPI SetupCopyOEMInfA( PCSTR source, PCSTR location,
                               DWORD buffer_size, PDWORD required_size, PSTR *component )
 {
     BOOL ret = FALSE;
-    WCHAR destW[MAX_PATH], *sourceW = NULL, *locationW = NULL;
-    INT size = sizeof(destW);
+    LPWSTR destW = NULL, sourceW = NULL, locationW = NULL;
+    DWORD size;
 
     TRACE("%s, %s, %d, %d, %p, %d, %p, %p\n", debugstr_a(source), debugstr_a(location),
           media_type, style, dest, buffer_size, required_size, component);
 
-    if (source && !(sourceW = strdupAtoW( source ))) return FALSE;
+    if (dest && !(destW = MyMalloc( buffer_size * sizeof(WCHAR) ))) return FALSE;
+    if (source && !(sourceW = strdupAtoW( source ))) goto done;
     if (location && !(locationW = strdupAtoW( location ))) goto done;
 
-    if (!(ret = SetupCopyOEMInfW( sourceW, locationW, media_type, style, destW, size, NULL, NULL )))
+    if (!(ret = SetupCopyOEMInfW( sourceW, locationW, media_type, style, destW,
+                                  buffer_size, &size, NULL )))
+    {
+        if (required_size) *required_size = size;
         goto done;
-
-    size = WideCharToMultiByte( CP_ACP, 0, destW, -1, NULL, 0, NULL, NULL );
-    if (required_size) *required_size = size;
+    }
 
     if (dest)
     {
@@ -916,8 +918,10 @@ BOOL WINAPI SetupCopyOEMInfA( PCSTR source, PCSTR location,
     }
 
 done:
+    MyFree( destW );
     HeapFree( GetProcessHeap(), 0, sourceW );
     HeapFree( GetProcessHeap(), 0, locationW );
+    if (ret) SetLastError(ERROR_SUCCESS);
     return ret;
 }
 
@@ -936,23 +940,37 @@ BOOL WINAPI SetupCopyOEMInfW( PCWSTR source, PCWSTR location,
     TRACE("%s, %s, %d, %d, %p, %d, %p, %p\n", debugstr_w(source), debugstr_w(location),
           media_type, style, dest, buffer_size, required_size, component);
 
+    if (!source)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    /* check for a relative path */
+    if (!(*source == '\\' || (*source && source[1] == ':')))
+    {
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return FALSE;
+    }
+
     if (!GetWindowsDirectoryW( target, sizeof(target)/sizeof(WCHAR) )) return FALSE;
 
     strcatW( target, inf_oem );
-    p = strrchrW( source, '\\' ) + 1;
-    strcatW( target, p );
+    if ((p = strrchrW( source, '\\' )))
+        strcatW( target, p + 1 );
+
+    if (!(ret = CopyFileW( source, target, (style & SP_COPY_NOOVERWRITE) != 0 )))
+        return ret;
+
+    if (style & SP_COPY_DELETESOURCE)
+        DeleteFileW( source );
 
     size = strlenW( target ) + 1;
     if (dest)
     {
         if (buffer_size >= size)
         {
-            /* FIXME: honour style flags */
-            if ((ret = CopyFileW( source, target, FALSE )))
-            {
-                if (style & SP_COPY_DELETESOURCE) DeleteFileW( source );
-                strcpyW( dest, target );
-            }
+            strcpyW( dest, target );
         }
         else
         {
@@ -961,8 +979,18 @@ BOOL WINAPI SetupCopyOEMInfW( PCWSTR source, PCWSTR location,
         }
     }
 
-    if (component) *component = p;
+    if (component) *component = p + 1;
     if (required_size) *required_size = size;
+    if (ret) SetLastError(ERROR_SUCCESS);
 
     return ret;
+}
+
+/***********************************************************************
+ *      InstallCatalog  (SETUPAPI.@)
+ */
+DWORD WINAPI InstallCatalog( LPCSTR catalog, LPCSTR basename, LPSTR fullname )
+{
+    FIXME("%s, %s, %p\n", debugstr_a(catalog), debugstr_a(basename), fullname);
+    return 0;
 }

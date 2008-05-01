@@ -142,8 +142,6 @@ NTSTATUS WINAPI NtCreateFile( PHANDLE handle, ACCESS_MASK access, POBJECT_ATTRIB
                               ULONG attributes, ULONG sharing, ULONG disposition,
                               ULONG options, PVOID ea_buffer, ULONG ea_length )
 {
-    static const WCHAR pipeW[] = {'\\','?','?','\\','p','i','p','e','\\'};
-    static const WCHAR mailslotW[] = {'\\','?','?','\\','M','A','I','L','S','L','O','T','\\'};
     ANSI_STRING unix_name;
     int created = FALSE;
 
@@ -156,50 +154,6 @@ NTSTATUS WINAPI NtCreateFile( PHANDLE handle, ACCESS_MASK access, POBJECT_ATTRIB
     if (!attr || !attr->ObjectName) return STATUS_INVALID_PARAMETER;
 
     if (alloc_size) FIXME( "alloc_size not supported\n" );
-
-    /* check for named pipe */
-
-    if (attr->ObjectName->Length > sizeof(pipeW) &&
-        !memicmpW( attr->ObjectName->Buffer, pipeW, sizeof(pipeW)/sizeof(WCHAR) ))
-    {
-        if (attr->SecurityQualityOfService)
-            FIXME("SecurityQualityOfService ignored\n");
-        SERVER_START_REQ( open_named_pipe )
-        {
-            req->access = access;
-            req->attributes = attr->Attributes;
-            req->rootdir = attr->RootDirectory;
-            req->flags = options;
-            wine_server_add_data( req, attr->ObjectName->Buffer,
-                                  attr->ObjectName->Length );
-            io->u.Status = wine_server_call( req );
-            *handle = reply->handle;
-        }
-        SERVER_END_REQ;
-        return io->u.Status;
-    }
-
-    /* check for mailslot */
-
-    if (attr->ObjectName->Length > sizeof(mailslotW) &&
-        !memicmpW( attr->ObjectName->Buffer, mailslotW, sizeof(mailslotW)/sizeof(WCHAR) ))
-    {
-        if (attr->SecurityQualityOfService)
-            FIXME("SecurityQualityOfService ignored\n");
-        SERVER_START_REQ( open_mailslot )
-        {
-            req->access = access & GENERIC_WRITE;
-            req->attributes = attr->Attributes;
-            req->rootdir = attr->RootDirectory;
-            req->sharing = sharing;
-            wine_server_add_data( req, attr->ObjectName->Buffer,
-                                  attr->ObjectName->Length );
-            io->u.Status = wine_server_call( req );
-            *handle = reply->handle;
-        }
-        SERVER_END_REQ;
-        return io->u.Status;
-    }
 
     if (attr->RootDirectory)
     {
@@ -218,6 +172,7 @@ NTSTATUS WINAPI NtCreateFile( PHANDLE handle, ACCESS_MASK access, POBJECT_ATTRIB
             req->attributes = attr->Attributes;
             req->rootdir    = attr->RootDirectory;
             req->sharing    = sharing;
+            req->options    = options;
             wine_server_add_data( req, attr->ObjectName->Buffer, attr->ObjectName->Length );
             io->u.Status = wine_server_call( req );
             *handle = reply->handle;
@@ -299,8 +254,6 @@ static void fileio_terminate(async_fileio *fileio, IO_STATUS_BLOCK* iosb)
 {
     TRACE("data: %p\n", fileio);
 
-    if (fileio->event) NtSetEvent( fileio->event, NULL );
-
     if (fileio->apc && 
         (iosb->u.Status == STATUS_SUCCESS || fileio->queue_apc_on_error))
         fileio->apc( fileio->apc_user, iosb, iosb->Information );
@@ -318,9 +271,10 @@ static ULONG fileio_queue_async(async_fileio* fileio, IO_STATUS_BLOCK* iosb,
     SERVER_START_REQ( register_async )
     {
         req->handle = fileio->handle;
-        req->io_apc = apc;
-        req->io_sb = iosb;
-        req->io_user = fileio;
+        req->async.callback = apc;
+        req->async.iosb     = iosb;
+        req->async.arg      = fileio;
+        req->async.event    = fileio->event;
         req->type = do_read ? ASYNC_TYPE_READ : ASYNC_TYPE_WRITE;
         req->count = (fileio->count < iosb->Information) ? 
             0 : fileio->count - iosb->Information;
@@ -328,14 +282,13 @@ static ULONG fileio_queue_async(async_fileio* fileio, IO_STATUS_BLOCK* iosb,
     }
     SERVER_END_REQ;
 
-    if ( status ) iosb->u.Status = status;
-    if ( iosb->u.Status != STATUS_PENDING )
+    if (status != STATUS_PENDING)
     {
+        iosb->u.Status = status;
         (apc)( fileio, iosb, iosb->u.Status );
-        return iosb->u.Status;
     }
-    NtCurrentTeb()->num_async_io++;
-    return STATUS_SUCCESS;
+    else NtCurrentTeb()->num_async_io++;
+    return status;
 }
 
 /***********************************************************************
@@ -573,12 +526,11 @@ NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
         fileio->queue_apc_on_error = 0;
         fileio->avail_mode = (flags & FD_FLAG_AVAILABLE);
         fileio->event = hEvent;
-        if (hEvent) NtResetEvent(hEvent, NULL);
         if (needs_close) close( unix_handle );
 
         io_status->u.Status = STATUS_PENDING;
         ret = fileio_queue_async(fileio, io_status, TRUE);
-        if (ret != STATUS_SUCCESS)
+        if (ret != STATUS_PENDING)
         {
             if (flags & FD_FLAG_TIMEOUT) NtClose(hEvent);
             return ret;
@@ -804,13 +756,12 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
         fileio->queue_apc_on_error = 0;
         fileio->avail_mode = (flags & FD_FLAG_AVAILABLE);
         fileio->event = hEvent;
-        if (hEvent) NtResetEvent(hEvent, NULL);
         if (needs_close) close( unix_handle );
 
         io_status->Information = 0;
         io_status->u.Status = STATUS_PENDING;
         ret = fileio_queue_async(fileio, io_status, FALSE);
-        if (ret != STATUS_SUCCESS)
+        if (ret != STATUS_PENDING)
         {
             if (flags & FD_FLAG_TIMEOUT) NtClose(hEvent);
             return ret;
@@ -923,14 +874,10 @@ NTSTATUS WINAPI NtDeviceIoControlFile(HANDLE handle, HANDLE event,
 /***********************************************************************
  *           pipe_completion_wait   (Internal)
  */
-static void CALLBACK pipe_completion_wait(HANDLE event, PIO_STATUS_BLOCK iosb, ULONG status)
+static void CALLBACK pipe_completion_wait(void *arg, PIO_STATUS_BLOCK iosb, ULONG status)
 {
-    TRACE("for %p/%p, status=%08x\n", event, iosb, status);
-
-    if (iosb)
-        iosb->u.Status = status;
-    NtSetEvent(event, NULL);
-    TRACE("done\n");
+    TRACE("for %p, status=%08x\n", iosb, status);
+    iosb->u.Status = status;
 }
 
 /**************************************************************************
@@ -975,29 +922,27 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
         {
             HANDLE internal_event = 0;
 
-            if(!event)
+            if(!event && !apc)
             {
                 io->u.Status = NtCreateEvent(&internal_event, EVENT_ALL_ACCESS, NULL, FALSE, FALSE);
                 if (io->u.Status != STATUS_SUCCESS) return io->u.Status;
             }
             SERVER_START_REQ(connect_named_pipe)
             {
-                req->handle = handle;
-                req->event = event ? event : internal_event;
-                req->func = pipe_completion_wait;
+                req->handle  = handle;
+                req->async.callback = pipe_completion_wait;
+                req->async.iosb     = io;
+                req->async.arg      = NULL;
+                req->async.apc      = apc;
+                req->async.apc_arg  = apc_context;
+                req->async.event    = event ? event : internal_event;
                 io->u.Status = wine_server_call(req);
             }
             SERVER_END_REQ;
 
-            if(io->u.Status == STATUS_SUCCESS)
+            if (internal_event && io->u.Status == STATUS_PENDING)
             {
-                if(event) io->u.Status = STATUS_PENDING;
-                else
-                {
-                    do
-                        io->u.Status = NtWaitForSingleObject(internal_event, TRUE, NULL);
-                    while(io->u.Status == STATUS_USER_APC);
-                }
+                while (NtWaitForSingleObject(internal_event, TRUE, NULL) == STATUS_USER_APC) /*nothing*/ ;
             }
             if (internal_event) NtClose(internal_event);
         }
@@ -1008,7 +953,7 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
             HANDLE internal_event = 0;
             FILE_PIPE_WAIT_FOR_BUFFER *buff = in_buffer;
 
-            if(!event)
+            if(!event && !apc)
             {
                 io->u.Status = NtCreateEvent(&internal_event, EVENT_ALL_ACCESS, NULL, FALSE, FALSE);
                 if (io->u.Status != STATUS_SUCCESS) return io->u.Status;
@@ -1018,23 +963,20 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
                 req->handle = handle;
                 req->timeout = buff->TimeoutSpecified ? buff->Timeout.QuadPart / -10000L
                                : NMPWAIT_USE_DEFAULT_WAIT;
-                req->event = event ? event : internal_event;
-                req->func = pipe_completion_wait;
+                req->async.callback = pipe_completion_wait;
+                req->async.iosb     = io;
+                req->async.arg      = NULL;
+                req->async.apc      = apc;
+                req->async.apc_arg  = apc_context;
+                req->async.event    = event ? event : internal_event;
                 wine_server_add_data( req, buff->Name, buff->NameLength );
                 io->u.Status = wine_server_call( req );
             }
             SERVER_END_REQ;
 
-            if(io->u.Status == STATUS_SUCCESS)
+            if (internal_event && io->u.Status == STATUS_PENDING)
             {
-                if(event)
-                    io->u.Status = STATUS_PENDING;
-                else
-                {
-                    do
-                        io->u.Status = NtWaitForSingleObject(internal_event, TRUE, NULL);
-                    while(io->u.Status == STATUS_USER_APC);
-                }
+                while (NtWaitForSingleObject(internal_event, TRUE, NULL) == STATUS_USER_APC) /*nothing*/ ;
             }
             if (internal_event) NtClose(internal_event);
         }
@@ -2096,17 +2038,12 @@ NTSTATUS WINAPI NtCreateNamedPipeFile( PHANDLE handle, ULONG access,
                                        PLARGE_INTEGER timeout)
 {
     NTSTATUS    status;
-    static const WCHAR leadin[] = {'\\','?','?','\\','P','I','P','E','\\'};
 
     TRACE("(%p %x %s %p %x %d %x %d %d %d %d %d %d %p)\n",
           handle, access, debugstr_w(attr->ObjectName->Buffer), iosb, sharing, dispo,
           options, pipe_type, read_mode, completion_mode, max_inst, inbound_quota,
           outbound_quota, timeout);
 
-    if (attr->ObjectName->Length < sizeof(leadin) ||
-        strncmpiW( attr->ObjectName->Buffer, 
-                   leadin, sizeof(leadin)/sizeof(leadin[0]) ))
-        return STATUS_OBJECT_NAME_INVALID;
     /* assume we only get relative timeout, and storable in a DWORD as ms */
     if (timeout->QuadPart > 0 || (timeout->QuadPart / -10000) >> 32)
         FIXME("Wrong time %s\n", wine_dbgstr_longlong(timeout->QuadPart));
@@ -2203,8 +2140,6 @@ NTSTATUS WINAPI NtCreateMailslotFile(PHANDLE pHandle, ULONG DesiredAccess,
      PLARGE_INTEGER TimeOut)
 {
     LARGE_INTEGER timeout;
-    static const WCHAR leadin[] = {
-        '\\','?','?','\\','M','A','I','L','S','L','O','T','\\'};
     NTSTATUS ret;
 
     TRACE("%p %08x %p %p %08x %08x %08x %p\n",
@@ -2212,17 +2147,8 @@ NTSTATUS WINAPI NtCreateMailslotFile(PHANDLE pHandle, ULONG DesiredAccess,
               CreateOptions, MailslotQuota, MaxMessageSize, TimeOut);
 
     if (!pHandle) return STATUS_ACCESS_VIOLATION;
-
     if (!attr) return STATUS_INVALID_PARAMETER;
-
     if (!attr->ObjectName) return STATUS_OBJECT_PATH_SYNTAX_BAD;
-
-    if (attr->ObjectName->Length < sizeof(leadin) ||
-        strncmpiW( attr->ObjectName->Buffer, 
-                   leadin, sizeof(leadin)/sizeof(leadin[0]) ))
-    {
-        return STATUS_OBJECT_NAME_INVALID;
-    }
 
     /*
      *  For a NULL TimeOut pointer set the default timeout value

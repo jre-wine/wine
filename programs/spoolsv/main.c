@@ -1,7 +1,5 @@
 /*
- * Copyright 2002 Andriy Palamarchuk
- *
- * netapi32 internal functions.
+ * Copyright 2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -14,22 +12,33 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, writ
-e to the Free Software
+ * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_NETAPI32_MISC_H
-#define __WINE_NETAPI32_MISC_H
+#define WIN32_LEAN_AND_MEAN
 
-extern BOOL NETAPI_IsLocalComputer(LPCWSTR ServerName);
+#include <windows.h>
 
-#define NETAPI_ForceLocalComputer(ServerName, FailureCode) \
-    if (!NETAPI_IsLocalComputer(ServerName)) \
-    { \
-        FIXME("Action Implemented for local computer only. " \
-              "Requested for server %s\n", debugstr_w(ServerName)); \
-        return FailureCode; \
-    }
+#include "wine/debug.h"
 
-#endif
+WINE_DEFAULT_DEBUG_CHANNEL(spoolsv);
+
+static void WINAPI serv_main(DWORD argc, LPWSTR *argv)
+{
+    WINE_FIXME("(%d %p)\n", argc, argv);
+}
+
+int main(int argc, char **argv)
+{
+    static WCHAR wszSPOOLER[] = {'S','P','O','O','L','E','R',0};
+    static const SERVICE_TABLE_ENTRYW servtbl[] = {
+        {wszSPOOLER, serv_main},
+        {NULL, NULL}
+    };
+
+    WINE_TRACE("(%d %p)\n", argc, argv);
+
+    StartServiceCtrlDispatcherW(servtbl);
+    return 0;
+}

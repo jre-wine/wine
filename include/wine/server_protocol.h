@@ -157,6 +157,17 @@ typedef struct
 } rectangle_t;
 
 
+typedef struct
+{
+    void           *callback;
+    void           *iosb;
+    void           *arg;
+    void           *apc;
+    void           *apc_arg;
+    obj_handle_t    event;
+} async_data_t;
+
+
 
 struct callback_msg_data
 {
@@ -334,6 +345,11 @@ typedef union
 typedef union
 {
     enum apc_type type;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+    } async_io;
     struct
     {
         enum apc_type    type;
@@ -1021,6 +1037,7 @@ struct open_file_object_request
     unsigned int attributes;
     obj_handle_t rootdir;
     unsigned int sharing;
+    unsigned int options;
     /* VARARG(filename,unicode_str); */
 };
 struct open_file_object_reply
@@ -1641,12 +1658,9 @@ struct read_directory_changes_request
     struct request_header __header;
     unsigned int filter;
     obj_handle_t handle;
-    obj_handle_t event;
     int          subtree;
     int          want_data;
-    void*        io_apc;
-    void*        io_sb;
-    void*        io_user;
+    async_data_t async;
 };
 struct read_directory_changes_reply
 {
@@ -2634,10 +2648,8 @@ struct register_async_request
     struct request_header __header;
     obj_handle_t handle;
     int          type;
-    void*        io_apc;
-    void*        io_sb;
-    void*        io_user;
     int          count;
+    async_data_t async;
 };
 struct register_async_reply
 {
@@ -2688,29 +2700,11 @@ struct create_named_pipe_reply
 #define NAMED_PIPE_SERVER_END           0x8000
 
 
-struct open_named_pipe_request
-{
-    struct request_header __header;
-    unsigned int   access;
-    unsigned int   attributes;
-    obj_handle_t   rootdir;
-    unsigned int   flags;
-    /* VARARG(name,unicode_str); */
-};
-struct open_named_pipe_reply
-{
-    struct reply_header __header;
-    obj_handle_t   handle;
-};
-
-
-
 struct connect_named_pipe_request
 {
     struct request_header __header;
     obj_handle_t   handle;
-    obj_handle_t   event;
-    void*          func;
+    async_data_t   async;
 };
 struct connect_named_pipe_reply
 {
@@ -2723,9 +2717,8 @@ struct wait_named_pipe_request
 {
     struct request_header __header;
     obj_handle_t   handle;
+    async_data_t   async;
     unsigned int   timeout;
-    obj_handle_t   event;
-    void*          func;
     /* VARARG(name,unicode_str); */
 };
 struct wait_named_pipe_reply
@@ -3873,23 +3866,6 @@ struct create_mailslot_reply
 
 
 
-struct open_mailslot_request
-{
-    struct request_header __header;
-    unsigned int   access;
-    unsigned int   attributes;
-    obj_handle_t   rootdir;
-    unsigned int   sharing;
-    /* VARARG(name,unicode_str); */
-};
-struct open_mailslot_reply
-{
-    struct reply_header __header;
-    obj_handle_t   handle;
-};
-
-
-
 struct set_mailslot_info_request
 {
     struct request_header __header;
@@ -4159,7 +4135,6 @@ enum request
     REQ_register_async,
     REQ_cancel_async,
     REQ_create_named_pipe,
-    REQ_open_named_pipe,
     REQ_connect_named_pipe,
     REQ_wait_named_pipe,
     REQ_disconnect_named_pipe,
@@ -4232,7 +4207,6 @@ enum request
     REQ_get_token_groups,
     REQ_set_security_object,
     REQ_create_mailslot,
-    REQ_open_mailslot,
     REQ_set_mailslot_info,
     REQ_create_directory,
     REQ_open_directory,
@@ -4384,7 +4358,6 @@ union generic_request
     struct register_async_request register_async_request;
     struct cancel_async_request cancel_async_request;
     struct create_named_pipe_request create_named_pipe_request;
-    struct open_named_pipe_request open_named_pipe_request;
     struct connect_named_pipe_request connect_named_pipe_request;
     struct wait_named_pipe_request wait_named_pipe_request;
     struct disconnect_named_pipe_request disconnect_named_pipe_request;
@@ -4457,7 +4430,6 @@ union generic_request
     struct get_token_groups_request get_token_groups_request;
     struct set_security_object_request set_security_object_request;
     struct create_mailslot_request create_mailslot_request;
-    struct open_mailslot_request open_mailslot_request;
     struct set_mailslot_info_request set_mailslot_info_request;
     struct create_directory_request create_directory_request;
     struct open_directory_request open_directory_request;
@@ -4607,7 +4579,6 @@ union generic_reply
     struct register_async_reply register_async_reply;
     struct cancel_async_reply cancel_async_reply;
     struct create_named_pipe_reply create_named_pipe_reply;
-    struct open_named_pipe_reply open_named_pipe_reply;
     struct connect_named_pipe_reply connect_named_pipe_reply;
     struct wait_named_pipe_reply wait_named_pipe_reply;
     struct disconnect_named_pipe_reply disconnect_named_pipe_reply;
@@ -4680,7 +4651,6 @@ union generic_reply
     struct get_token_groups_reply get_token_groups_reply;
     struct set_security_object_reply set_security_object_reply;
     struct create_mailslot_reply create_mailslot_reply;
-    struct open_mailslot_reply open_mailslot_reply;
     struct set_mailslot_info_reply set_mailslot_info_reply;
     struct create_directory_reply create_directory_reply;
     struct open_directory_reply open_directory_reply;
@@ -4692,6 +4662,6 @@ union generic_reply
     struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 280
+#define SERVER_PROTOCOL_VERSION 289
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

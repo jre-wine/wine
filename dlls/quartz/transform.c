@@ -92,9 +92,7 @@ static HRESULT TransformFilter_Sample(LPVOID iface, IMediaSample * pSample)
     }
 #endif
 
-    This->pFuncsTable->pfnProcessSampleData(This, pbSrcStream, cbSrcStream);
-
-    return S_OK;
+    return This->pFuncsTable->pfnProcessSampleData(This, pbSrcStream, cbSrcStream);
 }
 
 static HRESULT TransformFilter_Input_QueryAccept(LPVOID iface, const AM_MEDIA_TYPE * pmt)
@@ -276,9 +274,6 @@ static ULONG WINAPI TransformFilter_Release(IBaseFilter * iface)
     {
         ULONG i;
 
-        This->csFilter.DebugInfo->Spare[0] = 0;
-        DeleteCriticalSection(&This->csFilter);
-
         if (This->pClock)
             IReferenceClock_Release(This->pClock);
 
@@ -300,6 +295,9 @@ static ULONG WINAPI TransformFilter_Release(IBaseFilter * iface)
         This->lpVtbl = NULL;
 
 	This->pFuncsTable->pfnCleanup(This);
+
+        This->csFilter.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->csFilter);
 
         TRACE("Destroying transform filter\n");
         CoTaskMemFree(This);

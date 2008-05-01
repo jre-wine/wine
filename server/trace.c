@@ -47,7 +47,7 @@ static const char *get_status_name( unsigned int status );
 
 /* utility functions */
 
-inline static void remove_data( data_size_t size )
+static inline void remove_data( data_size_t size )
 {
     cur_data = (const char *)cur_data + size;
     cur_size -= size;
@@ -116,8 +116,9 @@ static void dump_apc_call( const apc_call_t *call )
         fprintf( stderr, ",arg=%p", call->timer.arg );
         break;
     case APC_ASYNC_IO:
-        fprintf( stderr, "APC_ASYNC_IO,user=%p,sb=%p,status=%s",
-                 call->async_io.user, call->async_io.sb, get_status_name(call->async_io.status) );
+        fprintf( stderr, "APC_ASYNC_IO,func=%p,user=%p,sb=%p,status=%s",
+                 call->async_io.func, call->async_io.user, call->async_io.sb,
+                 get_status_name(call->async_io.status) );
         break;
     case APC_VIRTUAL_ALLOC:
         fprintf( stderr, "APC_VIRTUAL_ALLOC,addr=%p,size=%lu,zero_bits=%u,op_type=%x,prot=%x",
@@ -179,6 +180,10 @@ static void dump_apc_result( const apc_result_t *result )
     {
     case APC_NONE:
         break;
+    case APC_ASYNC_IO:
+        fprintf( stderr, "APC_ASYNC_IO,status=%s",
+                 get_status_name( result->async_io.status ) );
+        break;
     case APC_VIRTUAL_ALLOC:
         fprintf( stderr, "APC_VIRTUAL_ALLOC,status=%s,addr=%p,size=%lu",
                  get_status_name( result->virtual_alloc.status ),
@@ -237,6 +242,12 @@ static void dump_apc_result( const apc_result_t *result )
         break;
     }
     fputc( '}', stderr );
+}
+
+static void dump_async_data( const async_data_t *data )
+{
+    fprintf( stderr, "{callback=%p,iosb=%p,arg=%p,apc=%p,apc_arg=%p,event=%p}",
+             data->callback, data->iosb, data->arg, data->apc, data->apc_arg, data->event );
 }
 
 static void dump_luid( const luid_t *luid )
@@ -1239,6 +1250,7 @@ static void dump_open_file_object_request( const struct open_file_object_request
     fprintf( stderr, " attributes=%08x,", req->attributes );
     fprintf( stderr, " rootdir=%p,", req->rootdir );
     fprintf( stderr, " sharing=%08x,", req->sharing );
+    fprintf( stderr, " options=%08x,", req->options );
     fprintf( stderr, " filename=" );
     dump_varargs_unicode_str( cur_size );
 }
@@ -1645,12 +1657,10 @@ static void dump_read_directory_changes_request( const struct read_directory_cha
 {
     fprintf( stderr, " filter=%08x,", req->filter );
     fprintf( stderr, " handle=%p,", req->handle );
-    fprintf( stderr, " event=%p,", req->event );
     fprintf( stderr, " subtree=%d,", req->subtree );
     fprintf( stderr, " want_data=%d,", req->want_data );
-    fprintf( stderr, " io_apc=%p,", req->io_apc );
-    fprintf( stderr, " io_sb=%p,", req->io_sb );
-    fprintf( stderr, " io_user=%p", req->io_user );
+    fprintf( stderr, " async=" );
+    dump_async_data( &req->async );
 }
 
 static void dump_read_change_request( const struct read_change_request *req )
@@ -2376,10 +2386,9 @@ static void dump_register_async_request( const struct register_async_request *re
 {
     fprintf( stderr, " handle=%p,", req->handle );
     fprintf( stderr, " type=%d,", req->type );
-    fprintf( stderr, " io_apc=%p,", req->io_apc );
-    fprintf( stderr, " io_sb=%p,", req->io_sb );
-    fprintf( stderr, " io_user=%p,", req->io_user );
-    fprintf( stderr, " count=%d", req->count );
+    fprintf( stderr, " count=%d,", req->count );
+    fprintf( stderr, " async=" );
+    dump_async_data( &req->async );
 }
 
 static void dump_cancel_async_request( const struct cancel_async_request *req )
@@ -2407,34 +2416,20 @@ static void dump_create_named_pipe_reply( const struct create_named_pipe_reply *
     fprintf( stderr, " handle=%p", req->handle );
 }
 
-static void dump_open_named_pipe_request( const struct open_named_pipe_request *req )
-{
-    fprintf( stderr, " access=%08x,", req->access );
-    fprintf( stderr, " attributes=%08x,", req->attributes );
-    fprintf( stderr, " rootdir=%p,", req->rootdir );
-    fprintf( stderr, " flags=%08x,", req->flags );
-    fprintf( stderr, " name=" );
-    dump_varargs_unicode_str( cur_size );
-}
-
-static void dump_open_named_pipe_reply( const struct open_named_pipe_reply *req )
-{
-    fprintf( stderr, " handle=%p", req->handle );
-}
-
 static void dump_connect_named_pipe_request( const struct connect_named_pipe_request *req )
 {
     fprintf( stderr, " handle=%p,", req->handle );
-    fprintf( stderr, " event=%p,", req->event );
-    fprintf( stderr, " func=%p", req->func );
+    fprintf( stderr, " async=" );
+    dump_async_data( &req->async );
 }
 
 static void dump_wait_named_pipe_request( const struct wait_named_pipe_request *req )
 {
     fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " async=" );
+    dump_async_data( &req->async );
+    fprintf( stderr, "," );
     fprintf( stderr, " timeout=%08x,", req->timeout );
-    fprintf( stderr, " event=%p,", req->event );
-    fprintf( stderr, " func=%p,", req->func );
     fprintf( stderr, " name=" );
     dump_varargs_unicode_str( cur_size );
 }
@@ -3339,21 +3334,6 @@ static void dump_create_mailslot_reply( const struct create_mailslot_reply *req 
     fprintf( stderr, " handle=%p", req->handle );
 }
 
-static void dump_open_mailslot_request( const struct open_mailslot_request *req )
-{
-    fprintf( stderr, " access=%08x,", req->access );
-    fprintf( stderr, " attributes=%08x,", req->attributes );
-    fprintf( stderr, " rootdir=%p,", req->rootdir );
-    fprintf( stderr, " sharing=%08x,", req->sharing );
-    fprintf( stderr, " name=" );
-    dump_varargs_unicode_str( cur_size );
-}
-
-static void dump_open_mailslot_reply( const struct open_mailslot_reply *req )
-{
-    fprintf( stderr, " handle=%p", req->handle );
-}
-
 static void dump_set_mailslot_info_request( const struct set_mailslot_info_request *req )
 {
     fprintf( stderr, " handle=%p,", req->handle );
@@ -3605,7 +3585,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_register_async_request,
     (dump_func)dump_cancel_async_request,
     (dump_func)dump_create_named_pipe_request,
-    (dump_func)dump_open_named_pipe_request,
     (dump_func)dump_connect_named_pipe_request,
     (dump_func)dump_wait_named_pipe_request,
     (dump_func)dump_disconnect_named_pipe_request,
@@ -3678,7 +3657,6 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_token_groups_request,
     (dump_func)dump_set_security_object_request,
     (dump_func)dump_create_mailslot_request,
-    (dump_func)dump_open_mailslot_request,
     (dump_func)dump_set_mailslot_info_request,
     (dump_func)dump_create_directory_request,
     (dump_func)dump_open_directory_request,
@@ -3826,7 +3804,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)0,
     (dump_func)0,
     (dump_func)dump_create_named_pipe_reply,
-    (dump_func)dump_open_named_pipe_reply,
     (dump_func)0,
     (dump_func)0,
     (dump_func)0,
@@ -3899,7 +3876,6 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_token_groups_reply,
     (dump_func)0,
     (dump_func)dump_create_mailslot_reply,
-    (dump_func)dump_open_mailslot_reply,
     (dump_func)dump_set_mailslot_info_reply,
     (dump_func)dump_create_directory_reply,
     (dump_func)dump_open_directory_reply,
@@ -4047,7 +4023,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "register_async",
     "cancel_async",
     "create_named_pipe",
-    "open_named_pipe",
     "connect_named_pipe",
     "wait_named_pipe",
     "disconnect_named_pipe",
@@ -4120,7 +4095,6 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_token_groups",
     "set_security_object",
     "create_mailslot",
-    "open_mailslot",
     "set_mailslot_info",
     "create_directory",
     "open_directory",

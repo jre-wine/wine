@@ -35,7 +35,7 @@ enum x11drv_escape_codes
 };
 
 /* retrieve the X display to use on a given DC */
-inline static Display *get_display( HDC hdc )
+static inline Display *get_display( HDC hdc )
 {
     Display *display;
     enum x11drv_escape_codes escape = X11DRV_GET_DISPLAY;
@@ -105,6 +105,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_GetParent(IWineD3DSwapChain *iface, 
 static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface, D3DCB_DESTROYSURFACEFN D3DCB_DestroyRenderTarget) {
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
     WINED3DDISPLAYMODE mode;
+    int i;
 
     /* release the ref to the front and back buffer parents */
     if(This->frontBuffer) {
@@ -136,7 +137,10 @@ static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface, D3DCB
         mode.Format = This->orig_fmt;
         IWineD3DDevice_SetDisplayMode((IWineD3DDevice *) This->wineD3DDevice, 0, &mode);
     }
-    DestroyContext(This->wineD3DDevice, This->context);
+    for(i = 0; i < This->num_contexts; i++) {
+        DestroyContext(This->wineD3DDevice, This->context[i]);
+    }
+    HeapFree(GetProcessHeap(), 0, This->context);
 
     HeapFree(GetProcessHeap(), 0, This);
 }
@@ -145,6 +149,8 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
 
     ENTER_GL();
+
+    /* Does glXSwapBuffers need a glx context? I don't think so. Blt will activate its own context if needed */
 
     /* Render the cursor onto the back buffer, using our nifty directdraw blitting code :-) */
     if(This->wineD3DDevice->bCursorVisible && This->wineD3DDevice->cursorTexture) {
@@ -190,7 +196,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
 
     if (pSourceRect || pDestRect) FIXME("Unhandled present options %p/%p\n", pSourceRect, pDestRect);
     /* TODO: If only source rect or dest rect are supplied then clip the window to match */
-    TRACE("preseting display %p, drawable %ld\n", This->context->display, This->context->drawable);
+    TRACE("preseting display %p, drawable %ld\n", This->context[0]->display, This->context[0]->drawable);
 
     /* Don't call checkGLcall, as glGetError is not applicable here */
     if (hDestWindowOverride && This->win_handle != hDestWindowOverride) {
@@ -200,7 +206,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         BYTE *mem;
 
         TRACE("Performing dest override of swapchain %p from window %p to %p\n", This, This->win_handle, hDestWindowOverride);
-        if(This->context == This->wineD3DDevice->contexts[0]) {
+        if(This->context[0] == This->wineD3DDevice->contexts[0]) {
             /* The primary context 'owns' all the opengl resources. Destroying and recreating that context would require downloading
              * all opengl resources, deleting the gl resources, destroying all other contexts, then recreating all other contexts
              * and reload the resources
@@ -222,8 +228,8 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
             memcpy(mem, r.pBits, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
             IWineD3DSurface_UnlockRect(This->backBuffer[0]);
 
-            DestroyContext(This->wineD3DDevice, This->context);
-            This->context = CreateContext(This->wineD3DDevice, (IWineD3DSurfaceImpl *) This->frontBuffer, display, This->win);
+            DestroyContext(This->wineD3DDevice, This->context[0]);
+            This->context[0] = CreateContext(This->wineD3DDevice, (IWineD3DSurfaceImpl *) This->frontBuffer, display, This->win);
 
             IWineD3DSurface_LockRect(This->backBuffer[0], &r, NULL, WINED3DLOCK_DISCARD);
             memcpy(r.pBits, mem, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
@@ -232,7 +238,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         }
     }
 
-    glXSwapBuffers(This->context->display, This->context->drawable); /* TODO: cycle through the swapchain buffers */
+    glXSwapBuffers(This->context[0]->display, This->context[0]->drawable); /* TODO: cycle through the swapchain buffers */
 
     TRACE("glXSwapBuffers called, Starting new frame\n");
     /* FPS support */

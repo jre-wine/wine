@@ -479,14 +479,14 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
             GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
             checkGLcall("glActiveTextureARB");
 
-            glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-            checkGLcall("glDisable GL_TEXTURE_CUBE_MAP_ARB");
+            if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+                glDisable(GL_TEXTURE_CUBE_MAP_ARB);
+                checkGLcall("glDisable GL_TEXTURE_CUBE_MAP_ARB");
+            }
             glDisable(GL_TEXTURE_3D);
             checkGLcall("glDisable GL_TEXTURE_3D");
             glDisable(GL_TEXTURE_2D);
             checkGLcall("glDisable GL_TEXTURE_2D");
-            glDisable(GL_TEXTURE_1D);
-            checkGLcall("glDisable GL_TEXTURE_1D");
 
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
             checkGLcall("glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);");
@@ -497,12 +497,12 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
         GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
         checkGLcall("glActiveTextureARB");
     }
-    glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-    checkGLcall("glDisable GL_TEXTURE_CUBE_MAP_ARB");
+    if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
+        checkGLcall("glDisable GL_TEXTURE_CUBE_MAP_ARB");
+    }
     glDisable(GL_TEXTURE_3D);
     checkGLcall("glDisable GL_TEXTURE_3D");
-    glDisable(GL_TEXTURE_1D);
-    checkGLcall("glDisable GL_TEXTURE_1D");
     glEnable(GL_TEXTURE_2D);
     checkGLcall("glEnable GL_TEXTURE_2D");
 
@@ -616,7 +616,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
         hr = IWineD3DSurface_GetContainer(target, &IID_IWineD3DSwapChain, (void **) &swapchain);
         if(hr == WINED3D_OK && swapchain) {
             TRACE("Rendering onscreen\n");
-            context = ((IWineD3DSwapChainImpl *) swapchain)->context;
+            context = ((IWineD3DSwapChainImpl *) swapchain)->context[0];
             This->render_offscreen = FALSE;
             /* The context != This->activeContext will catch a NOP context change. This can occur
              * if we are switching back to swapchain rendering in case of FBO or Back Buffer offscreen
@@ -638,6 +638,9 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
 
             if(oldRenderOffscreen) {
                 Context_MarkStateDirty(context, WINED3DRS_CULLMODE);
+                Context_MarkStateDirty(context, WINED3DTS_PROJECTION);
+                Context_MarkStateDirty(context, STATE_VDECL);
+                Context_MarkStateDirty(context, STATE_VIEWPORT);
             }
         } else {
             TRACE("Rendering offscreen\n");
@@ -652,7 +655,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
                         /* This may happen if the app jumps streight into offscreen rendering
                          * Start using the context of the primary swapchain
                          */
-                        context = ((IWineD3DSwapChainImpl *) This->swapchains[0])->context;
+                        context = ((IWineD3DSwapChainImpl *) This->swapchains[0])->context[0];
                     }
                     set_render_target_fbo((IWineD3DDevice *) This, 0, target);
                     break;
@@ -671,7 +674,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
                          * Create the context on the same server as the primary swapchain. The primary swapchain is exists at this point.
                          */
                         This->pbufferContext = CreateContext(This, targetimpl,
-                                                             ((IWineD3DSwapChainImpl *) This->swapchains[0])->context->display,
+                                                             ((IWineD3DSwapChainImpl *) This->swapchains[0])->context[0]->display,
                                                              0 /* Window */);
                         This->pbufferWidth = targetimpl->currentDesc.Width;
                         This->pbufferHeight = targetimpl->currentDesc.Height;
@@ -694,7 +697,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
                         /* This may happen if the app jumps streight into offscreen rendering
                          * Start using the context of the primary swapchain
                          */
-                        context = ((IWineD3DSwapChainImpl *) This->swapchains[0])->context;
+                        context = ((IWineD3DSwapChainImpl *) This->swapchains[0])->context[0];
                     }
                     glDrawBuffer(This->offscreenBuffer);
                     checkGLcall("glDrawBuffer(This->offscreenBuffer)");
@@ -703,9 +706,20 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
 
             if(!oldRenderOffscreen) {
                 Context_MarkStateDirty(context, WINED3DRS_CULLMODE);
+                Context_MarkStateDirty(context, WINED3DTS_PROJECTION);
+                Context_MarkStateDirty(context, STATE_VDECL);
+                Context_MarkStateDirty(context, STATE_VIEWPORT);
             }
         }
         if (readTexture) {
+            BOOL oldInDraw = This->isInDraw;
+
+            /* PreLoad requires a context to load the texture, thus it will call ActivateContext.
+             * Set the isInDraw to true to signal PreLoad that it has a context. Will be tricky
+             * when using offscreen rendering with multithreading
+             */
+            This->isInDraw = TRUE;
+
             /* Do that before switching the context:
              * Read the back buffer of the old drawable into the destination texture
              */
@@ -713,6 +727,8 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
 
             /* Assume that the drawable will be modified by some other things now */
             ((IWineD3DSurfaceImpl *) This->lastActiveRenderTarget)->Flags &= ~SFLAG_INDRAWABLE;
+
+            This->isInDraw = oldInDraw;
         }
         This->lastActiveRenderTarget = target;
         if(oldRenderOffscreen != This->render_offscreen && This->depth_copy_state != WINED3D_DCS_NO_COPY) {

@@ -228,6 +228,7 @@ extern BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev);
 
 /* X11 driver internal functions */
 
+extern void X11DRV_Xcursor_Init(void);
 extern void X11DRV_BITMAP_Init(void);
 extern void X11DRV_FONT_Init( int log_pixels_x, int log_pixels_y );
 
@@ -510,14 +511,14 @@ struct x11drv_thread_data
 extern struct x11drv_thread_data *x11drv_init_thread_data(void);
 extern DWORD thread_data_tls_index;
 
-inline static struct x11drv_thread_data *x11drv_thread_data(void)
+static inline struct x11drv_thread_data *x11drv_thread_data(void)
 {
     struct x11drv_thread_data *data = TlsGetValue( thread_data_tls_index );
     if (!data) data = x11drv_init_thread_data();
     return data;
 }
 
-inline static Display *thread_display(void) { return x11drv_thread_data()->display; }
+static inline Display *thread_display(void) { return x11drv_thread_data()->display; }
 
 extern Visual *visual;
 extern Window root_window;

@@ -239,7 +239,7 @@ CONST SHADER_OPCODE IWineD3DPixelShaderImpl_shader_ins[] = {
     {WINED3DSIO_TEXDP3,   "texdp3",   GLNAME_REQUIRE_GLSL, 1, 2, NULL, pshader_glsl_texdp3, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXM3x3,  "texm3x3",  GLNAME_REQUIRE_GLSL, 1, 2, NULL, pshader_glsl_texm3x3, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXDEPTH, "texdepth", GLNAME_REQUIRE_GLSL, 1, 1, NULL, pshader_glsl_texdepth, WINED3DPS_VERSION(1,4), WINED3DPS_VERSION(1,4)},
-    {WINED3DSIO_BEM,      "bem",      GLNAME_REQUIRE_GLSL, 1, 3, NULL, NULL, WINED3DPS_VERSION(1,4), WINED3DPS_VERSION(1,4)},
+    {WINED3DSIO_BEM,      "bem",      "undefined",         1, 3, pshader_hw_bem, pshader_glsl_bem, WINED3DPS_VERSION(1,4), WINED3DPS_VERSION(1,4)},
     {WINED3DSIO_DSX,      "dsx",      GLNAME_REQUIRE_GLSL, 1, 2, NULL, NULL, 0, 0},
     {WINED3DSIO_DSY,      "dsy",      GLNAME_REQUIRE_GLSL, 1, 2, NULL, NULL, 0, 0},
     {WINED3DSIO_TEXLDD,   "texldd",   GLNAME_REQUIRE_GLSL, 1, 5, NULL, NULL, WINED3DPS_VERSION(2,1), -1},
@@ -330,7 +330,7 @@ static void pshader_set_limits(
 
 /** Generate a pixel shader string using either GL_FRAGMENT_PROGRAM_ARB
     or GLSL and send it to the card */
-inline static VOID IWineD3DPixelShaderImpl_GenerateShader(
+static inline VOID IWineD3DPixelShaderImpl_GenerateShader(
     IWineD3DPixelShader *iface,
     shader_reg_maps* reg_maps,
     CONST DWORD *pFunction) {
@@ -381,6 +381,21 @@ inline static VOID IWineD3DPixelShaderImpl_GenerateShader(
             else
                 shader_addline(&buffer, "gl_FragColor = R0;\n");
         }
+
+        /* Pixel shader < 3.0 do not replace the fog stage.
+         * This implements linear fog computation and blending.
+         * TODO: non linear fog
+         * NOTE: gl_Fog.start and gl_Fog.end don't hold fog start s and end e but
+         * -1/(e-s) and e/(e-s) respectively.
+         */
+        if(This->baseShader.hex_version < WINED3DPS_VERSION(3,0)) {
+            shader_addline(&buffer, "float Fog = clamp(gl_FogFragCoord * gl_Fog.start + gl_Fog.end, 0.0, 1.0);\n");
+            if(GL_SUPPORT(ARB_DRAW_BUFFERS))
+                shader_addline(&buffer, "gl_FragData[0].xyz = mix(gl_Fog.color.xyz, gl_FragData[0].xyz, Fog);\n");
+            else
+                shader_addline(&buffer, "gl_FragColor.xyz = mix(gl_Fog.color.xyz, gl_FragColor.xyz, Fog);\n");
+        }
+
         shader_addline(&buffer, "}\n");
 
         TRACE("Compiling shader object %u\n", shader_obj);
@@ -407,11 +422,28 @@ inline static VOID IWineD3DPixelShaderImpl_GenerateShader(
         /* Base Declarations */
         shader_generate_arb_declarations( (IWineD3DBaseShader*) This, reg_maps, &buffer, &GLINFO_LOCATION);
 
+        /* We need two variables for fog blending */
+        shader_addline(&buffer, "TEMP TMP_FOG;\n");
+        if (This->baseShader.hex_version >= WINED3DPS_VERSION(2,0)) {
+            shader_addline(&buffer, "TEMP TMP_COLOR;\n");
+        }
+
         /* Base Shader Body */
         shader_generate_main( (IWineD3DBaseShader*) This, &buffer, reg_maps, pFunction);
 
-        if (This->baseShader.hex_version < WINED3DPS_VERSION(2,0))
-            shader_addline(&buffer, "MOV result.color, R0;\n");
+        /* calculate fog and blend it
+         * NOTE: state.fog.params.y and state.fog.params.z don't hold fog start s and end e but
+         * -1/(e-s) and e/(e-s) respectively.
+         */
+        shader_addline(&buffer, "MAD_SAT TMP_FOG, fragment.fogcoord, state.fog.params.y, state.fog.params.z;\n");
+        if (This->baseShader.hex_version < WINED3DPS_VERSION(2,0)) {
+            shader_addline(&buffer, "LRP result.color.rgb, TMP_FOG.x, R0, state.fog.color;\n");
+            shader_addline(&buffer, "MOV result.color.a, R0.a;\n");
+        } else {
+            shader_addline(&buffer, "LRP result.color.rgb, TMP_FOG.x, TMP_COLOR, state.fog.color;\n");
+            shader_addline(&buffer, "MOV result.color.a, TMP_COLOR.a;\n");
+        }
+
         shader_addline(&buffer, "END\n"); 
 
         /* TODO: change to resource.glObjectHandle or something like that */

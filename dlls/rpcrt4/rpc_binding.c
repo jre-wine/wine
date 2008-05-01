@@ -110,7 +110,7 @@ static RPC_STATUS RPCRT4_AllocBinding(RpcBinding** Binding, BOOL server)
   return RPC_S_OK;
 }
 
-static RPC_STATUS RPCRT4_CreateBindingA(RpcBinding** Binding, BOOL server, LPSTR Protseq)
+static RPC_STATUS RPCRT4_CreateBindingA(RpcBinding** Binding, BOOL server, LPCSTR Protseq)
 {
   RpcBinding* NewBinding;
 
@@ -123,7 +123,7 @@ static RPC_STATUS RPCRT4_CreateBindingA(RpcBinding** Binding, BOOL server, LPSTR
   return RPC_S_OK;
 }
 
-static RPC_STATUS RPCRT4_CreateBindingW(RpcBinding** Binding, BOOL server, LPWSTR Protseq)
+static RPC_STATUS RPCRT4_CreateBindingW(RpcBinding** Binding, BOOL server, LPCWSTR Protseq)
 {
   RpcBinding* NewBinding;
 
@@ -136,9 +136,11 @@ static RPC_STATUS RPCRT4_CreateBindingW(RpcBinding** Binding, BOOL server, LPWST
   return RPC_S_OK;
 }
 
-static RPC_STATUS RPCRT4_CompleteBindingA(RpcBinding* Binding, LPSTR NetworkAddr,
-                                          LPSTR Endpoint, LPSTR NetworkOptions)
+static RPC_STATUS RPCRT4_CompleteBindingA(RpcBinding* Binding, LPCSTR NetworkAddr,
+                                          LPCSTR Endpoint, LPCSTR NetworkOptions)
 {
+  RPC_STATUS status;
+
   TRACE("(RpcBinding == ^%p, NetworkAddr == %s, EndPoint == %s, NetworkOptions == %s)\n", Binding,
    debugstr_a(NetworkAddr), debugstr_a(Endpoint), debugstr_a(NetworkOptions));
 
@@ -154,12 +156,20 @@ static RPC_STATUS RPCRT4_CompleteBindingA(RpcBinding* Binding, LPSTR NetworkAddr
   Binding->NetworkOptions = RPCRT4_strdupAtoW(NetworkOptions);
   if (!Binding->Endpoint) ERR("out of memory?\n");
 
+  status = RPCRT4_GetAssociation(Binding->Protseq, Binding->NetworkAddr,
+                                 Binding->Endpoint, Binding->NetworkOptions,
+                                 &Binding->Assoc);
+  if (status != RPC_S_OK)
+      return status;
+
   return RPC_S_OK;
 }
 
-static RPC_STATUS RPCRT4_CompleteBindingW(RpcBinding* Binding, LPWSTR NetworkAddr,
-                                          LPWSTR Endpoint, LPWSTR NetworkOptions)
+static RPC_STATUS RPCRT4_CompleteBindingW(RpcBinding* Binding, LPCWSTR NetworkAddr,
+                                          LPCWSTR Endpoint, LPCWSTR NetworkOptions)
 {
+  RPC_STATUS status;
+
   TRACE("(RpcBinding == ^%p, NetworkAddr == %s, EndPoint == %s, NetworkOptions == %s)\n", Binding, 
    debugstr_w(NetworkAddr), debugstr_w(Endpoint), debugstr_w(NetworkOptions));
 
@@ -175,20 +185,36 @@ static RPC_STATUS RPCRT4_CompleteBindingW(RpcBinding* Binding, LPWSTR NetworkAdd
   HeapFree(GetProcessHeap(), 0, Binding->NetworkOptions);
   Binding->NetworkOptions = RPCRT4_strdupW(NetworkOptions);
 
+  status = RPCRT4_GetAssociation(Binding->Protseq, Binding->NetworkAddr,
+                                 Binding->Endpoint, Binding->NetworkOptions,
+                                 &Binding->Assoc);
+  if (status != RPC_S_OK)
+      return status;
+
   return RPC_S_OK;
 }
 
-RPC_STATUS RPCRT4_ResolveBinding(RpcBinding* Binding, LPSTR Endpoint)
+RPC_STATUS RPCRT4_ResolveBinding(RpcBinding* Binding, LPCSTR Endpoint)
 {
+  RPC_STATUS status;
+
   TRACE("(RpcBinding == ^%p, EndPoint == \"%s\"\n", Binding, Endpoint);
 
   RPCRT4_strfree(Binding->Endpoint);
   Binding->Endpoint = RPCRT4_strdupA(Endpoint);
 
+  RpcAssoc_Release(Binding->Assoc);
+  Binding->Assoc = NULL;
+  status = RPCRT4_GetAssociation(Binding->Protseq, Binding->NetworkAddr,
+                                 Binding->Endpoint, Binding->NetworkOptions,
+                                 &Binding->Assoc);
+  if (status != RPC_S_OK)
+      return status;
+
   return RPC_S_OK;
 }
 
-RPC_STATUS RPCRT4_SetBindingObject(RpcBinding* Binding, UUID* ObjectUuid)
+RPC_STATUS RPCRT4_SetBindingObject(RpcBinding* Binding, const UUID* ObjectUuid)
 {
   TRACE("(*RpcBinding == ^%p, UUID == %s)\n", Binding, debugstr_guid(ObjectUuid)); 
   if (ObjectUuid) memcpy(&Binding->ObjectUuid, ObjectUuid, sizeof(UUID));
@@ -226,7 +252,7 @@ RPC_STATUS RPCRT4_DestroyBinding(RpcBinding* Binding)
     return RPC_S_OK;
 
   TRACE("binding: %p\n", Binding);
-  /* FIXME: release connections */
+  if (Binding->Assoc) RpcAssoc_Release(Binding->Assoc);
   RPCRT4_strfree(Binding->Endpoint);
   RPCRT4_strfree(Binding->NetworkAddr);
   RPCRT4_strfree(Binding->Protseq);
@@ -248,9 +274,8 @@ RPC_STATUS RPCRT4_OpenBinding(RpcBinding* Binding, RpcConnection** Connection,
 
   if (!Binding->server) {
     /* try to find a compatible connection from the connection pool */
-    NewConnection = RPCRT4_GetIdleConnection(InterfaceId, TransferSyntax,
-        Binding->Protseq, Binding->NetworkAddr, Binding->Endpoint,
-        Binding->AuthInfo, Binding->QOS);
+    NewConnection = RpcAssoc_GetIdleConnection(Binding->Assoc, InterfaceId,
+        TransferSyntax, Binding->AuthInfo, Binding->QOS);
     if (NewConnection) {
       *Connection = NewConnection;
       return RPC_S_OK;
@@ -340,7 +365,7 @@ RPC_STATUS RPCRT4_CloseBinding(RpcBinding* Binding, RpcConnection* Connection)
     return RPCRT4_DestroyConnection(Connection);
   }
   else {
-    RPCRT4_ReleaseIdleConnection(Connection);
+    RpcAssoc_ReleaseIdleConnection(Binding->Assoc, Connection);
     return RPC_S_OK;
   }
 }
@@ -813,17 +838,17 @@ RPC_STATUS WINAPI RpcBindingToStringBindingA( RPC_BINDING_HANDLE Binding, RPC_CS
 {
   RPC_STATUS ret;
   RpcBinding* bind = (RpcBinding*)Binding;
-  LPSTR ObjectUuid;
+  RPC_CSTR ObjectUuid;
 
   TRACE("(%p,%p)\n", Binding, StringBinding);
 
-  ret = UuidToStringA(&bind->ObjectUuid, (unsigned char**)&ObjectUuid);
+  ret = UuidToStringA(&bind->ObjectUuid, &ObjectUuid);
   if (ret != RPC_S_OK) return ret;
 
-  ret = RpcStringBindingComposeA((unsigned char*) ObjectUuid, (unsigned char*)bind->Protseq, (unsigned char*) bind->NetworkAddr,
+  ret = RpcStringBindingComposeA(ObjectUuid, (unsigned char*)bind->Protseq, (unsigned char*) bind->NetworkAddr,
                                  (unsigned char*) bind->Endpoint, NULL, StringBinding);
 
-  RpcStringFreeA((unsigned char**)&ObjectUuid);
+  RpcStringFreeA(&ObjectUuid);
 
   return ret;
 }
@@ -881,6 +906,8 @@ RPC_STATUS RPC_ENTRY RpcBindingCopy(
   DestBinding->NetworkAddr = RPCRT4_strndupA(SrcBinding->NetworkAddr, -1);
   DestBinding->Endpoint = RPCRT4_strndupA(SrcBinding->Endpoint, -1);
   DestBinding->NetworkOptions = RPCRT4_strdupW(SrcBinding->NetworkOptions);
+  if (SrcBinding->Assoc) SrcBinding->Assoc->refs++;
+  DestBinding->Assoc = SrcBinding->Assoc;
 
   if (SrcBinding->AuthInfo) RpcAuthInfo_AddRef(SrcBinding->AuthInfo);
   DestBinding->AuthInfo = SrcBinding->AuthInfo;
@@ -940,7 +967,9 @@ RPC_STATUS WINAPI RpcRevertToSelfEx(RPC_BINDING_HANDLE BindingHandle)
     return RPC_S_OK;
 }
 
-static RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc, CredHandle cred, TimeStamp exp, RpcAuthInfo **ret)
+static RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc,
+                                     CredHandle cred, TimeStamp exp,
+                                     ULONG cbMaxToken, RpcAuthInfo **ret)
 {
     RpcAuthInfo *AuthInfo = HeapAlloc(GetProcessHeap(), 0, sizeof(*AuthInfo));
     if (!AuthInfo)
@@ -951,6 +980,7 @@ static RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc, CredHandl
     AuthInfo->AuthnSvc = AuthnSvc;
     AuthInfo->cred = cred;
     AuthInfo->exp = exp;
+    AuthInfo->cbMaxToken = cbMaxToken;
     *ret = AuthInfo;
     return RPC_S_OK;
 }
@@ -1198,6 +1228,7 @@ RpcBindingSetAuthInfoExA( RPC_BINDING_HANDLE Binding, RPC_CSTR ServerPrincName,
   ULONG package_count;
   ULONG i;
   PSecPkgInfoA packages;
+  ULONG cbMaxToken;
 
   TRACE("%p %s %u %u %p %u %p\n", Binding, debugstr_a((const char*)ServerPrincName),
         AuthnLevel, AuthnSvc, AuthIdentity, AuthzSvr, SecurityQos);
@@ -1279,12 +1310,14 @@ RpcBindingSetAuthInfoExA( RPC_BINDING_HANDLE Binding, RPC_CSTR ServerPrincName,
   TRACE("found package %s for service %u\n", packages[i].Name, AuthnSvc);
   r = AcquireCredentialsHandleA((SEC_CHAR *)ServerPrincName, packages[i].Name, SECPKG_CRED_OUTBOUND, NULL,
                                 AuthIdentity, NULL, NULL, &cred, &exp);
+  cbMaxToken = packages[i].cbMaxToken;
   FreeContextBuffer(packages);
   if (r == ERROR_SUCCESS)
   {
     if (bind->AuthInfo) RpcAuthInfo_Release(bind->AuthInfo);
     bind->AuthInfo = NULL;
-    r = RpcAuthInfo_Create(AuthnLevel, AuthnSvc, cred, exp, &bind->AuthInfo);
+    r = RpcAuthInfo_Create(AuthnLevel, AuthnSvc, cred, exp, cbMaxToken,
+                           &bind->AuthInfo);
     if (r != RPC_S_OK)
       FreeCredentialsHandle(&cred);
     return RPC_S_OK;
@@ -1311,6 +1344,7 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
   ULONG package_count;
   ULONG i;
   PSecPkgInfoW packages;
+  ULONG cbMaxToken;
 
   TRACE("%p %s %u %u %p %u %p\n", Binding, debugstr_w((const WCHAR*)ServerPrincName),
         AuthnLevel, AuthnSvc, AuthIdentity, AuthzSvr, SecurityQos);
@@ -1392,12 +1426,14 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
   TRACE("found package %s for service %u\n", debugstr_w(packages[i].Name), AuthnSvc);
   r = AcquireCredentialsHandleW((SEC_WCHAR *)ServerPrincName, packages[i].Name, SECPKG_CRED_OUTBOUND, NULL,
                                 AuthIdentity, NULL, NULL, &cred, &exp);
+  cbMaxToken = packages[i].cbMaxToken;
   FreeContextBuffer(packages);
   if (r == ERROR_SUCCESS)
   {
     if (bind->AuthInfo) RpcAuthInfo_Release(bind->AuthInfo);
     bind->AuthInfo = NULL;
-    r = RpcAuthInfo_Create(AuthnLevel, AuthnSvc, cred, exp, &bind->AuthInfo);
+    r = RpcAuthInfo_Create(AuthnLevel, AuthnSvc, cred, exp, cbMaxToken,
+                           &bind->AuthInfo);
     if (r != RPC_S_OK)
       FreeCredentialsHandle(&cred);
     return RPC_S_OK;

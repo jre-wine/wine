@@ -237,11 +237,23 @@
  
 WINE_DEFAULT_DEBUG_CHANNEL(richedit);
 
+static BOOL ME_RegisterEditorClass(HINSTANCE);
+
+static const WCHAR RichEdit20W[] = {'R', 'i', 'c', 'h', 'E', 'd', 'i', 't', '2', '0', 'W', 0};
+static const WCHAR RichEdit50W[] = {'R', 'i', 'c', 'h', 'E', 'd', 'i', 't', '5', '0', 'W', 0};
+static const WCHAR REListBox20W[] = {'R','E','L','i','s','t','B','o','x','2','0','W', 0};
+static const WCHAR REComboBox20W[] = {'R','E','C','o','m','b','o','B','o','x','2','0','W', 0};
+
 int me_debug = 0;
 HANDLE me_heap = NULL;
 
 static BOOL ME_ListBoxRegistered = FALSE;
 static BOOL ME_ComboBoxRegistered = FALSE;
+
+static inline int is_version_nt(void)
+{
+    return !(GetVersion() & 0x80000000);
+}
 
 static ME_TextBuffer *ME_MakeText(void) {
   
@@ -1232,11 +1244,6 @@ void ME_DestroyEditor(ME_TextEditor *editor)
   FREE_OBJ(editor);
 }
 
-static const WCHAR wszClassName[] = {'R', 'i', 'c', 'h', 'E', 'd', 'i', 't', '2', '0', 'W', 0};
-static const WCHAR wszClassName50[] = {'R', 'i', 'c', 'h', 'E', 'd', 'i', 't', '5', '0', 'W', 0};
-static const WCHAR wszClassNameListBox[] = {'R','E','L','i','s','t','B','o','x','2','0','W', 0};
-static const WCHAR wszClassNameComboBox[] = {'R','E','C','o','m','b','o','B','o','x','2','0','W', 0};
-
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
     TRACE("\n");
@@ -1245,19 +1252,19 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     case DLL_PROCESS_ATTACH:
       DisableThreadLibraryCalls(hinstDLL);
       me_heap = HeapCreate (0, 0x10000, 0);
-      ME_RegisterEditorClass(hinstDLL);
+      if (!ME_RegisterEditorClass(hinstDLL)) return FALSE;
       LookupInit();
       break;
 
     case DLL_PROCESS_DETACH:
-      UnregisterClassW(wszClassName, 0);
-      UnregisterClassW(wszClassName50, 0);
+      UnregisterClassW(RichEdit20W, 0);
+      UnregisterClassW(RichEdit50W, 0);
       UnregisterClassA("RichEdit20A", 0);
       UnregisterClassA("RichEdit50A", 0);
       if (ME_ListBoxRegistered)
-          UnregisterClassW(wszClassNameListBox, 0);
+          UnregisterClassW(REListBox20W, 0);
       if (ME_ComboBoxRegistered)
-          UnregisterClassW(wszClassNameComboBox, 0);
+          UnregisterClassW(REComboBox20W, 0);
       LookupCleanup();
       HeapDestroy (me_heap);
       me_heap = NULL;
@@ -1406,17 +1413,16 @@ get_msg_name(UINT msg)
   return "";
 }
 
-/******************************************************************
- *        RichEditANSIWndProc (RICHED20.10)
- */
-LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
+                                      LPARAM lParam, BOOL unicode)
+{
   ME_TextEditor *editor = (ME_TextEditor *)GetWindowLongPtrW(hWnd, 0);
   
-  TRACE("hWnd %p msg %04x (%s) %08x %08lx\n",
-        hWnd, msg, get_msg_name(msg), wParam, lParam);
+  TRACE("hwnd %p msg %04x (%s) %x %lx, unicode %d\n",
+        hWnd, msg, get_msg_name(msg), wParam, lParam, unicode);
   
   if (!editor && msg != WM_NCCREATE && msg != WM_NCDESTROY) {
-    ERR("RichEditANSIWndProc called with invalid hWnd %p - application bug?\n", hWnd);
+    ERR("called with invalid hWnd %p - application bug?\n", hWnd);
     return 0; 
   }
 
@@ -1483,7 +1489,6 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     TRACE("WM_NCCREATE: style 0x%08x\n", pcs->style);
     editor = ME_MakeEditor(hWnd);
     SetWindowLongPtrW(hWnd, 0, (LONG_PTR)editor);
-    pcs = 0; /* ignore */
     return TRUE;
   }
   case EM_EMPTYUNDOBUFFER:
@@ -1810,7 +1815,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   {
     int from, to;
     ME_Style *style;
-    LPWSTR wszText = ME_ToUnicode(hWnd, (void *)lParam);
+    LPWSTR wszText = ME_ToUnicode(unicode, (void *)lParam);
     size_t len = lstrlenW(wszText);
     TRACE("EM_REPLACESEL - %s\n", debugstr_w(wszText));
 
@@ -1826,7 +1831,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
      */
     if (len>0 && wszText[len-1] == '\n')
       ME_ClearTempStyle(editor);
-    ME_EndToUnicode(hWnd, wszText);
+    ME_EndToUnicode(unicode, wszText);
     ME_CommitUndo(editor);
     if (!wParam)
       ME_EmptyUndoStack(editor);
@@ -1878,21 +1883,21 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     if (lParam)
     {
       TRACE("WM_SETTEXT lParam==%lx\n",lParam);
-      if (!IsWindowUnicode(hWnd) && !strncmp((char *)lParam, "{\\rtf", 5))
+      if (!unicode && !strncmp((char *)lParam, "{\\rtf", 5))
       {
         /* Undocumented: WM_SETTEXT supports RTF text */
         ME_StreamInRTFString(editor, 0, (char *)lParam);
       }
       else
       {
-        LPWSTR wszText = ME_ToUnicode(hWnd, (void *)lParam);
+        LPWSTR wszText = ME_ToUnicode(unicode, (void *)lParam);
         TRACE("WM_SETTEXT - %s\n", debugstr_w(wszText)); /* debugstr_w() */
         if (lstrlenW(wszText) > 0)
         {
           /* uses default style! */
           ME_InsertTextFromCursor(editor, 0, wszText, -1, editor->pBuffer->pDefaultStyle);
         }
-        ME_EndToUnicode(hWnd, wszText);
+        ME_EndToUnicode(unicode, wszText);
       }
     }
     else
@@ -1901,7 +1906,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     ME_EmptyUndoStack(editor);
     ME_SetSelection(editor, 0, 0);
     ME_UpdateRepaint(editor);
-    return 0;
+    return 1;
   }
   case EM_CANPASTE:
   {
@@ -1973,9 +1978,9 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   {
     TEXTRANGEW tr; /* W and A differ only by rng->lpstrText */
     tr.chrg.cpMin = 0;
-    tr.chrg.cpMax = wParam-1;
+    tr.chrg.cpMax = wParam ? (wParam - 1) : 0;
     tr.lpstrText = (WCHAR *)lParam;
-    return RichEditANSIWndProc(hWnd, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
+    return RichEditWndProc_common(hWnd, EM_GETTEXTRANGE, 0, (LPARAM)&tr, unicode);
   }
   case EM_GETTEXTEX:
   {
@@ -1996,7 +2001,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
       nStart = 0;
       nCount = ex->cb - 1;
     }
-    if (ex->codepage == 1200 || IsWindowUnicode(hWnd))
+    if (ex->codepage == 1200 || unicode)
     {
       nCount = min(nCount, ex->cb / sizeof(WCHAR) - 1);
       return ME_GetTextW(editor, (LPWSTR)lParam, nStart, nCount, ex->flags & GT_USECRLF);
@@ -2026,7 +2031,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     tr.chrg.cpMin = from;
     tr.chrg.cpMax = to;
     tr.lpstrText = (WCHAR *)lParam;
-    return RichEditANSIWndProc(hWnd, EM_GETTEXTRANGE, 0, (LPARAM)&tr);
+    return RichEditWndProc_common(hWnd, EM_GETTEXTRANGE, 0, (LPARAM)&tr, unicode);
   }
   case EM_GETSCROLLPOS:
   {
@@ -2039,9 +2044,9 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   {
     TEXTRANGEW *rng = (TEXTRANGEW *)lParam;
     TRACE("EM_GETTEXTRANGE min=%d max=%d unicode=%d emul1.0=%d length=%d\n",
-      rng->chrg.cpMin, rng->chrg.cpMax, IsWindowUnicode(hWnd), 
+      rng->chrg.cpMin, rng->chrg.cpMax, unicode,
       editor->bEmulateVersion10, ME_GetTextLength(editor));
-    if (IsWindowUnicode(hWnd))
+    if (unicode)
       return ME_GetTextW(editor, rng->lpstrText, rng->chrg.cpMin, rng->chrg.cpMax-rng->chrg.cpMin, editor->bEmulateVersion10);
     else
     {
@@ -2059,7 +2064,6 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   case EM_GETLINE:
   {
     ME_DisplayItem *run;
-    const BOOL bUnicode = IsWindowUnicode(hWnd);
     const unsigned int nMaxChars = *(WORD *) lParam;
     unsigned int nEndChars, nCharsLeft = nMaxChars;
     char *dest = (char *) lParam;
@@ -2068,7 +2072,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     int nLF = editor->bEmulateVersion10;
 
     TRACE("EM_GETLINE: row=%d, nMaxChars=%d (%s)\n", (int) wParam, nMaxChars,
-          bUnicode ? "Unicode" : "Ansi");
+          unicode ? "Unicode" : "Ansi");
 
     run = ME_FindRowWithNumber(editor, wParam);
     if (run == NULL)
@@ -2084,19 +2088,19 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
       strText = run->member.run.strText;
       nCopy = min(nCharsLeft, strText->nLen);
 
-      if (bUnicode)
+      if (unicode)
         lstrcpynW((LPWSTR) dest, strText->szData, nCopy);
       else
         nCopy = WideCharToMultiByte(CP_ACP, 0, strText->szData, nCopy, dest,
                                     nCharsLeft, NULL, NULL);
-      dest += nCopy * (bUnicode ? sizeof(WCHAR) : 1);
+      dest += nCopy * (unicode ? sizeof(WCHAR) : 1);
       nCharsLeft -= nCopy;
     }
 
     /* append \r\0 (or \r\n\0 in 1.0), space allowing */
     nEndChars = min(nCharsLeft, 2 + nLF);
     nCharsLeft -= nEndChars;
-    if (bUnicode)
+    if (unicode)
     {
       const WCHAR src[] = {'\r', '\0'};
       const WCHAR src10[] = {'\r', '\n', '\0'};
@@ -2355,7 +2359,15 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     goto do_default;
   case WM_CHAR: 
   {
-    WCHAR wstr = LOWORD(wParam);
+    WCHAR wstr;
+
+    if (unicode)
+        wstr = (WCHAR)wParam;
+    else
+    {
+        CHAR charA = wParam;
+        MultiByteToWideChar(CP_ACP, 0, &charA, 1, &wstr, 1);
+    }
     if (editor->AutoURLDetect_bEnable)
       ME_AutoURLDetect(editor, wstr);
         
@@ -2525,7 +2537,8 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     LRESULT ret;
     int mask = 0;
     int changes = 0;
-    if ((ret = RichEditANSIWndProc(hWnd, WM_GETTEXTLENGTH, 0, 0)) == 0)
+    ret = RichEditWndProc_common(hWnd, WM_GETTEXTLENGTH, 0, 0, unicode);
+    if (!ret)
     {
       /*Check for valid wParam*/
       if ((((wParam & TM_RICHTEXT) && ((wParam & TM_PLAINTEXT) << 1))) ||
@@ -2559,6 +2572,29 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   return 0L;
 }
 
+static LRESULT WINAPI RichEditWndProcW(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    BOOL unicode = TRUE;
+
+    /* Under Win9x RichEdit20W returns ANSI strings, see the tests. */
+    if (msg == WM_GETTEXT && (GetVersion() & 0x80000000))
+        unicode = FALSE;
+
+    return RichEditWndProc_common(hWnd, msg, wParam, lParam, unicode);
+}
+
+static LRESULT WINAPI RichEditWndProcA(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    return RichEditWndProc_common(hWnd, msg, wParam, lParam, FALSE);
+}
+
+/******************************************************************
+ *        RichEditANSIWndProc (RICHED20.10)
+ */
+LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    return RichEditWndProcA(hWnd, msg, wParam, lParam);
+}
 
 /******************************************************************
  *        RichEdit10ANSIWndProc (RICHED20.9)
@@ -2641,7 +2677,7 @@ int ME_GetTextW(ME_TextEditor *editor, WCHAR *buffer, int nStart, int nChars, in
   WCHAR *pStart = buffer;
   
   if (!item) {
-    *buffer = L'\0';
+    *buffer = 0;
     return 0;
   }
   
@@ -2693,24 +2729,23 @@ int ME_GetTextW(ME_TextEditor *editor, WCHAR *buffer, int nStart, int nChars, in
     if (!nChars)
     {
       TRACE("nWritten=%d, actual=%d\n", nWritten, buffer-pStart);
-      *buffer = L'\0';
+      *buffer = 0;
       return nWritten;
     }
     item = ME_FindItemFwd(item, diRun);
   }
-  *buffer = L'\0';
+  *buffer = 0;
   TRACE("nWritten=%d, actual=%d\n", nWritten, buffer-pStart);
   return nWritten;  
 }
 
-void ME_RegisterEditorClass(HINSTANCE hInstance)
+static BOOL ME_RegisterEditorClass(HINSTANCE hInstance)
 {
-  BOOL bResult;
   WNDCLASSW wcW;
   WNDCLASSA wcA;
   
   wcW.style = CS_DBLCLKS | CS_HREDRAW | CS_VREDRAW | CS_GLOBALCLASS;
-  wcW.lpfnWndProc = RichEditANSIWndProc;
+  wcW.lpfnWndProc = RichEditWndProcW;
   wcW.cbClsExtra = 0;
   wcW.cbWndExtra = sizeof(ME_TextEditor *);
   wcW.hInstance = NULL; /* hInstance would register DLL-local class */
@@ -2718,15 +2753,25 @@ void ME_RegisterEditorClass(HINSTANCE hInstance)
   wcW.hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(IDC_IBEAM));
   wcW.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
   wcW.lpszMenuName = NULL;
-  wcW.lpszClassName = wszClassName;
-  bResult = RegisterClassW(&wcW);  
-  assert(bResult);
-  wcW.lpszClassName = wszClassName50;
-  bResult = RegisterClassW(&wcW);  
-  assert(bResult);
+
+  if (is_version_nt())
+  {
+    wcW.lpszClassName = RichEdit20W;
+    if (!RegisterClassW(&wcW)) return FALSE;
+    wcW.lpszClassName = RichEdit50W;
+    if (!RegisterClassW(&wcW)) return FALSE;
+  }
+  else
+  {
+    /* WNDCLASSA/W have the same layout */
+    wcW.lpszClassName = (LPCWSTR)"RichEdit20W";
+    if (!RegisterClassA((WNDCLASSA *)&wcW)) return FALSE;
+    wcW.lpszClassName = (LPCWSTR)"RichEdit50W";
+    if (!RegisterClassA((WNDCLASSA *)&wcW)) return FALSE;
+  }
 
   wcA.style = CS_DBLCLKS | CS_HREDRAW | CS_VREDRAW | CS_GLOBALCLASS;
-  wcA.lpfnWndProc = RichEditANSIWndProc;
+  wcA.lpfnWndProc = RichEditWndProcA;
   wcA.cbClsExtra = 0;
   wcA.cbWndExtra = sizeof(ME_TextEditor *);
   wcA.hInstance = NULL; /* hInstance would register DLL-local class */
@@ -2735,11 +2780,11 @@ void ME_RegisterEditorClass(HINSTANCE hInstance)
   wcA.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
   wcA.lpszMenuName = NULL;
   wcA.lpszClassName = "RichEdit20A";
-  bResult = RegisterClassA(&wcA);  
-  assert(bResult);
+  if (!RegisterClassA(&wcA)) return FALSE;
   wcA.lpszClassName = "RichEdit50A";
-  bResult = RegisterClassA(&wcA);  
-  assert(bResult);
+  if (!RegisterClassA(&wcA)) return FALSE;
+
+  return TRUE;
 }
 
 LRESULT WINAPI REComboWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -2781,7 +2826,7 @@ LRESULT WINAPI REExtendedRegisterClass(void)
   {
       wcW.style = CS_PARENTDC | CS_DBLCLKS | CS_GLOBALCLASS;
       wcW.lpfnWndProc = REListWndProc;
-      wcW.lpszClassName = wszClassNameListBox;
+      wcW.lpszClassName = REListBox20W;
       if (RegisterClassW(&wcW)) ME_ListBoxRegistered = TRUE;
   }
 
@@ -2789,7 +2834,7 @@ LRESULT WINAPI REExtendedRegisterClass(void)
   {
       wcW.style = CS_PARENTDC | CS_DBLCLKS | CS_GLOBALCLASS | CS_VREDRAW | CS_HREDRAW;
       wcW.lpfnWndProc = REComboWndProc;
-      wcW.lpszClassName = wszClassNameComboBox;
+      wcW.lpszClassName = REComboBox20W;
       if (RegisterClassW(&wcW)) ME_ComboBoxRegistered = TRUE;  
   }
 

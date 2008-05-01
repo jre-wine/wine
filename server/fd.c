@@ -190,6 +190,7 @@ static const struct object_ops fd_ops =
     no_get_fd,                /* get_fd */
     no_map_access,            /* map_access */
     no_lookup_name,           /* lookup_name */
+    no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
     fd_destroy                /* destroy */
 };
@@ -223,6 +224,7 @@ static const struct object_ops device_ops =
     no_get_fd,                /* get_fd */
     no_map_access,            /* map_access */
     no_lookup_name,           /* lookup_name */
+    no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
     device_destroy            /* destroy */
 };
@@ -255,6 +257,7 @@ static const struct object_ops inode_ops =
     no_get_fd,                /* get_fd */
     no_map_access,            /* map_access */
     no_lookup_name,           /* lookup_name */
+    no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
     inode_destroy             /* destroy */
 };
@@ -289,6 +292,7 @@ static const struct object_ops file_lock_ops =
     no_get_fd,                  /* get_fd */
     no_map_access,              /* map_access */
     no_lookup_name,             /* lookup_name */
+    no_open_file,               /* open_file */
     no_close_handle,            /* close_handle */
     no_destroy                  /* destroy */
 };
@@ -1026,7 +1030,7 @@ static int set_unix_lock( struct fd *fd, file_pos_t start, file_pos_t end, int t
 }
 
 /* check if interval [start;end) overlaps the lock */
-inline static int lock_overlaps( struct file_lock *lock, file_pos_t start, file_pos_t end )
+static inline int lock_overlaps( struct file_lock *lock, file_pos_t start, file_pos_t end )
 {
     if (lock->end && start >= lock->end) return 0;
     if (end && lock->start >= end) return 0;
@@ -1265,78 +1269,6 @@ void unlock_fd( struct fd *fd, file_pos_t start, file_pos_t count )
     set_error( STATUS_FILE_LOCK_CONFLICT );
 }
 
-
-/****************************************************************/
-/* asynchronous operations support */
-
-struct async
-{
-    struct thread       *thread;
-    void                *apc;
-    void                *user;
-    void                *sb;
-    struct timeout_user *timeout;
-    struct list          entry;
-};
-
-/* notifies client thread of new status of its async request */
-/* destroys the server side of it */
-static void async_terminate( struct async *async, int status )
-{
-    apc_call_t data;
-
-    memset( &data, 0, sizeof(data) );
-    data.type            = APC_ASYNC_IO;
-    data.async_io.func   = async->apc;
-    data.async_io.user   = async->user;
-    data.async_io.sb     = async->sb;
-    data.async_io.status = status;
-    thread_queue_apc( async->thread, NULL, &data );
-
-    if (async->timeout) remove_timeout_user( async->timeout );
-    async->timeout = NULL;
-    list_remove( &async->entry );
-    release_object( async->thread );
-    free( async );
-}
-
-/* cb for timeout on an async request */
-static void async_callback(void *private)
-{
-    struct async *async = (struct async *)private;
-
-    /* fprintf(stderr, "async timeout out %p\n", async); */
-    async->timeout = NULL;
-    async_terminate( async, STATUS_TIMEOUT );
-}
-
-/* create an async on a given queue of a fd */
-struct async *create_async( struct thread *thread, const struct timeval *timeout,
-                            struct list *queue, void *io_apc, void *io_user, void* io_sb )
-{
-    struct async *async = mem_alloc( sizeof(struct async) );
-
-    if (!async) return NULL;
-
-    async->thread = (struct thread *)grab_object(thread);
-    async->apc = io_apc;
-    async->user = io_user;
-    async->sb = io_sb;
-
-    list_add_tail( queue, &async->entry );
-
-    if (timeout) async->timeout = add_timeout_user( timeout, async_callback, async );
-    else async->timeout = NULL;
-
-    return async;
-}
-
-/* terminate the async operation at the head of the queue */
-void async_terminate_head( struct list *queue, int status )
-{
-    struct list *ptr = list_head( queue );
-    if (ptr) async_terminate( LIST_ENTRY( ptr, struct async, entry ), status );
-}
 
 /****************************************************************/
 /* file descriptor functions */
@@ -1783,7 +1715,7 @@ void default_poll_event( struct fd *fd, int event )
     wake_up( fd->user, 0 );
 }
 
-void fd_queue_async_timeout( struct fd *fd, void *apc, void *user, void *io_sb, int type, int count,
+void fd_queue_async_timeout( struct fd *fd, const async_data_t *data, int type, int count,
                              const struct timeval *timeout )
 {
     struct list *queue;
@@ -1809,8 +1741,8 @@ void fd_queue_async_timeout( struct fd *fd, void *apc, void *user, void *io_sb, 
         return;
     }
 
-    if (!create_async( current, timeout, queue, apc, user, io_sb ))
-        return;
+    if (!create_async( current, timeout, queue, data )) return;
+    set_error( STATUS_PENDING );
 
     /* Check if the new pending request can be served immediately */
     events = check_fd_events( fd, fd->fd_ops->get_poll_events( fd ) );
@@ -1819,9 +1751,9 @@ void fd_queue_async_timeout( struct fd *fd, void *apc, void *user, void *io_sb, 
     set_fd_events( fd, fd->fd_ops->get_poll_events( fd ) );
 }
 
-void default_fd_queue_async( struct fd *fd, void *apc, void *user, void *io_sb, int type, int count )
+void default_fd_queue_async( struct fd *fd, const async_data_t *data, int type, int count )
 {
-    fd_queue_async_timeout( fd, apc, user, io_sb, type, count, NULL );
+    fd_queue_async_timeout( fd, data, type, count, NULL );
 }
 
 void default_fd_cancel_async( struct fd *fd )
@@ -1831,10 +1763,9 @@ void default_fd_cancel_async( struct fd *fd )
 }
 
 /* default flush() routine */
-int no_flush( struct fd *fd, struct event **event )
+void no_flush( struct fd *fd, struct event **event )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
-    return 0;
 }
 
 /* default get_file_info() routine */
@@ -1845,8 +1776,7 @@ enum server_fd_type no_get_file_info( struct fd *fd, int *flags )
 }
 
 /* default queue_async() routine */
-void no_queue_async( struct fd *fd, void* apc, void* user, void* io_sb, 
-                     int type, int count)
+void no_queue_async( struct fd *fd, const async_data_t *data, int type, int count)
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
 }
@@ -1941,7 +1871,7 @@ DECL_HANDLER(open_file_object)
 {
     struct unicode_str name;
     struct directory *root = NULL;
-    struct object *obj;
+    struct object *obj, *result;
 
     get_req_unicode_str( &name );
     if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
@@ -1949,12 +1879,10 @@ DECL_HANDLER(open_file_object)
 
     if ((obj = open_object_dir( root, &name, req->attributes, NULL )))
     {
-        /* make sure this is a valid file object */
-        struct fd *fd = get_obj_fd( obj );
-        if (fd)
+        if ((result = obj->ops->open_file( obj, req->access, req->sharing, req->options )))
         {
-            reply->handle = alloc_handle( current->process, obj, req->access, req->attributes );
-            release_object( fd );
+            reply->handle = alloc_handle( current->process, result, req->access, req->attributes );
+            release_object( result );
         }
         release_object( obj );
     }
@@ -2009,16 +1937,13 @@ DECL_HANDLER(register_async)
      * 3. Carry out any operations necessary to adjust the object's poll events
      *    Usually: set_elect_events (obj, obj->ops->get_poll_events()).
      * 4. When the async request is triggered, then send back (with a proper APC)
-     *    the trigger (STATUS_ALERTED) to the thread that posted the request. 
-     *    async_destroy() is to be called: it will both notify the sender about
-     *    the trigger and destroy the request by itself
+     *    the trigger (STATUS_ALERTED) to the thread that posted the request.
      * See also the implementations in file.c, serial.c, and sock.c.
      */
 
     if (fd)
     {
-        fd->fd_ops->queue_async( fd, req->io_apc, req->io_user, req->io_sb, 
-                                 req->type, req->count );
+        fd->fd_ops->queue_async( fd, &req->async, req->type, req->count );
         release_object( fd );
     }
 }

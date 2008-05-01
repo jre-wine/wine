@@ -187,8 +187,6 @@ static ULONG WINAPI Parser_Release(IBaseFilter * iface)
     {
         ULONG i;
 
-        This->csFilter.DebugInfo->Spare[0] = 0;
-        DeleteCriticalSection(&This->csFilter);
         if (This->pClock)
             IReferenceClock_Release(This->pClock);
         
@@ -208,6 +206,9 @@ static ULONG WINAPI Parser_Release(IBaseFilter * iface)
         
         CoTaskMemFree(This->ppPins);
         This->lpVtbl = NULL;
+
+        This->csFilter.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->csFilter);
         
         TRACE("Destroying parser\n");
         CoTaskMemFree(This);
@@ -222,9 +223,11 @@ static ULONG WINAPI Parser_Release(IBaseFilter * iface)
 
 static HRESULT WINAPI Parser_GetClassID(IBaseFilter * iface, CLSID * pClsid)
 {
+    ParserImpl *This = (ParserImpl *)iface;
+
     TRACE("(%p)\n", pClsid);
 
-    *pClsid = CLSID_AviSplitter;
+    *pClsid = This->clsid;
 
     return S_OK;
 }

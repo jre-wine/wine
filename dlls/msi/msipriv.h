@@ -755,7 +755,7 @@ extern LPWSTR msi_dup_record_field(MSIRECORD *row, INT index);
 extern LPWSTR msi_dup_property(MSIPACKAGE *package, LPCWSTR prop);
 extern int msi_get_property_int( MSIPACKAGE *package, LPCWSTR prop, int def );
 extern LPWSTR resolve_folder(MSIPACKAGE *package, LPCWSTR name, BOOL source,
-                      BOOL set_prop, MSIFOLDER **folder);
+                      BOOL set_prop, BOOL load_prop, MSIFOLDER **folder);
 extern MSICOMPONENT *get_loaded_component( MSIPACKAGE* package, LPCWSTR Component );
 extern MSIFEATURE *get_loaded_feature( MSIPACKAGE* package, LPCWSTR Feature );
 extern MSIFILE *get_loaded_file( MSIPACKAGE* package, LPCWSTR file );
@@ -825,7 +825,7 @@ static inline BOOL msi_free( void *mem )
     return HeapFree( GetProcessHeap(), 0, mem );
 }
 
-inline static char *strdupWtoA( LPCWSTR str )
+static inline char *strdupWtoA( LPCWSTR str )
 {
     LPSTR ret = NULL;
     DWORD len;
@@ -838,7 +838,7 @@ inline static char *strdupWtoA( LPCWSTR str )
     return ret;
 }
 
-inline static LPWSTR strdupAtoW( LPCSTR str )
+static inline LPWSTR strdupAtoW( LPCSTR str )
 {
     LPWSTR ret = NULL;
     DWORD len;
@@ -851,7 +851,7 @@ inline static LPWSTR strdupAtoW( LPCSTR str )
     return ret;
 }
 
-inline static LPWSTR strdupW( LPCWSTR src )
+static inline LPWSTR strdupW( LPCWSTR src )
 {
     LPWSTR dest;
     if (!src) return NULL;

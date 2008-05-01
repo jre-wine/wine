@@ -506,7 +506,7 @@ struct WineD3DContext {
     DWORD                   isStateDirty[STATE_HIGHEST/32 + 1]; /* Bitmap to find out quickly if a state is dirty */
 
     IWineD3DSurface         *surface;
-    /* TODO: Thread this ctx belongs to                    */
+    DWORD                   tid;    /* Thread ID which owns this context at the moment */
 
     /* Stores some inforation about the context state for optimization */
     BOOL                    last_was_rhw;      /* true iff last draw_primitive was in xyzrhw mode */
@@ -1023,7 +1023,6 @@ struct IWineD3DSurfaceImpl
 
     UINT                      pow2Width;
     UINT                      pow2Height;
-    UINT                      pow2Size;
 
     /* Oversized texture */
     RECT                      glRect;
@@ -1358,7 +1357,8 @@ typedef struct IWineD3DSwapChainImpl
 
     long prev_time, frames;   /* Performance tracking */
 
-    WineD3DContext         *context; /* Later a array for multithreading */
+    WineD3DContext        **context; /* Later a array for multithreading */
+    unsigned int            num_contexts;
 
     HWND                    win_handle;
     Window                  win;
@@ -1625,6 +1625,7 @@ extern void shader_arb_load_constants(
 extern void shader_hw_def(SHADER_OPCODE_ARG *arg);
 
 /* ARB pixel shader prototypes */
+extern void pshader_hw_bem(SHADER_OPCODE_ARG* arg);
 extern void pshader_hw_cnd(SHADER_OPCODE_ARG* arg);
 extern void pshader_hw_cmp(SHADER_OPCODE_ARG* arg);
 extern void pshader_hw_map2gl(SHADER_OPCODE_ARG* arg);
@@ -1700,6 +1701,7 @@ extern void pshader_glsl_texm3x3spec(SHADER_OPCODE_ARG* arg);
 extern void pshader_glsl_texm3x3vspec(SHADER_OPCODE_ARG* arg);
 extern void pshader_glsl_texkill(SHADER_OPCODE_ARG* arg);
 extern void pshader_glsl_texbem(SHADER_OPCODE_ARG* arg);
+extern void pshader_glsl_bem(SHADER_OPCODE_ARG* arg);
 extern void pshader_glsl_texreg2ar(SHADER_OPCODE_ARG* arg);
 extern void pshader_glsl_texreg2gb(SHADER_OPCODE_ARG* arg);
 extern void pshader_glsl_texreg2rgb(SHADER_OPCODE_ARG* arg);
@@ -1806,22 +1808,22 @@ extern void print_glsl_info_log(
     WineD3D_GL_Info *gl_info,
     GLhandleARB obj);
 
-inline static int shader_get_regtype(const DWORD param) {
+static inline int shader_get_regtype(const DWORD param) {
     return (((param & WINED3DSP_REGTYPE_MASK) >> WINED3DSP_REGTYPE_SHIFT) |
             ((param & WINED3DSP_REGTYPE_MASK2) >> WINED3DSP_REGTYPE_SHIFT2));
 }
 
 extern unsigned int shader_get_float_offset(const DWORD reg);
 
-inline static BOOL shader_is_pshader_version(DWORD token) {
+static inline BOOL shader_is_pshader_version(DWORD token) {
     return 0xFFFF0000 == (token & 0xFFFF0000);
 }
 
-inline static BOOL shader_is_vshader_version(DWORD token) {
+static inline BOOL shader_is_vshader_version(DWORD token) {
     return 0xFFFE0000 == (token & 0xFFFF0000);
 }
 
-inline static BOOL shader_is_comment(DWORD token) {
+static inline BOOL shader_is_comment(DWORD token) {
     return WINED3DSIO_COMMENT == (token & WINED3DSI_OPCODE_MASK);
 }
 
@@ -1936,14 +1938,14 @@ typedef struct {
 
 const PixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt);
 
-inline static BOOL use_vs(IWineD3DDeviceImpl *device) {
+static inline BOOL use_vs(IWineD3DDeviceImpl *device) {
     return (device->vs_selected_mode != SHADER_NONE
             && device->stateBlock->vertexShader
             && ((IWineD3DVertexShaderImpl *)device->stateBlock->vertexShader)->baseShader.function
             && !device->strided_streams.u.s.position_transformed);
 }
 
-inline static BOOL use_ps(IWineD3DDeviceImpl *device) {
+static inline BOOL use_ps(IWineD3DDeviceImpl *device) {
     return (device->ps_selected_mode != SHADER_NONE
             && device->stateBlock->pixelShader
             && ((IWineD3DPixelShaderImpl *)device->stateBlock->pixelShader)->baseShader.function);

@@ -94,6 +94,7 @@ static const struct object_ops thread_apc_ops =
     no_get_fd,                  /* get_fd */
     no_map_access,              /* map_access */
     no_lookup_name,             /* lookup_name */
+    no_open_file,               /* open_file */
     no_close_handle,            /* close_handle */
     thread_apc_destroy          /* destroy */
 };
@@ -119,6 +120,7 @@ static const struct object_ops thread_ops =
     no_get_fd,                  /* get_fd */
     thread_map_access,          /* map_access */
     no_lookup_name,             /* lookup_name */
+    no_open_file,               /* open_file */
     no_close_handle,            /* close_handle */
     destroy_thread              /* destroy */
 };
@@ -136,7 +138,7 @@ static const struct fd_ops thread_fd_ops =
 static struct list thread_list = LIST_INIT(thread_list);
 
 /* initialize the structure for a newly allocated thread */
-inline static void init_thread_structure( struct thread *thread )
+static inline void init_thread_structure( struct thread *thread )
 {
     int i;
 
@@ -318,6 +320,7 @@ static void thread_apc_destroy( struct object *obj )
 {
     struct thread_apc *apc = (struct thread_apc *)obj;
     if (apc->caller) release_object( apc->caller );
+    if (apc->owner) release_object( apc->owner );
 }
 
 /* queue an async procedure call */
@@ -332,6 +335,7 @@ static struct thread_apc *create_apc( struct object *owner, const apc_call_t *ca
         apc->owner       = owner;
         apc->executed    = 0;
         apc->result.type = APC_NONE;
+        if (owner) grab_object( owner );
     }
     return apc;
 }
@@ -1243,6 +1247,10 @@ DECL_HANDLER(get_apc)
             close_handle( current->process, apc->result.create_thread.handle );
             apc->result.create_thread.handle = handle;
             clear_error();  /* ignore errors from the above calls */
+        }
+        else if (apc->result.type == APC_ASYNC_IO)
+        {
+            if (apc->owner) async_set_result( apc->owner, apc->result.async_io.status );
         }
         wake_up( &apc->obj, 0 );
         close_handle( current->process, req->prev );

@@ -701,7 +701,7 @@ BOOL WINPROC_IsUnicode( WNDPROC proc, BOOL def_val )
  *
  * Return TRUE if the lparam is a string
  */
-inline static BOOL WINPROC_TestLBForStr( HWND hwnd, UINT msg )
+static inline BOOL WINPROC_TestLBForStr( HWND hwnd, UINT msg )
 {
     DWORD style = GetWindowLongA( hwnd, GWL_STYLE );
     if (msg <= CB_MSGMAX)
@@ -856,9 +856,11 @@ LRESULT WINPROC_CallProcAtoW( winproc_callback_t callback, HWND hwnd, UINT msg, 
 
             if (!(ptr = get_buffer( buffer, sizeof(buffer), len ))) break;
             ret = callback( hwnd, msg, wParam, (LPARAM)ptr, result, arg );
-            if (*result && wParam)
+            if (wParam)
             {
-                RtlUnicodeToMultiByteN( str, wParam - 1, &len, ptr, strlenW(ptr) * sizeof(WCHAR) );
+                len = 0;
+                if (*result)
+                    RtlUnicodeToMultiByteN( str, wParam - 1, &len, ptr, strlenW(ptr) * sizeof(WCHAR) );
                 str[len] = 0;
                 *result = len;
             }
@@ -1091,10 +1093,13 @@ static LRESULT WINPROC_CallProcWtoA( winproc_callback_t callback, HWND hwnd, UIN
 
             if (!(ptr = get_buffer( buffer, sizeof(buffer), len ))) break;
             ret = callback( hwnd, msg, wParam, (LPARAM)ptr, result, arg );
-            if (*result && len)
+            if (len)
             {
-                RtlMultiByteToUnicodeN( (LPWSTR)lParam, wParam*sizeof(WCHAR), &len, ptr, strlen(ptr)+1 );
-                *result = len/sizeof(WCHAR) - 1;  /* do not count terminating null */
+                if (*result)
+                {
+                    RtlMultiByteToUnicodeN( (LPWSTR)lParam, wParam*sizeof(WCHAR), &len, ptr, strlen(ptr)+1 );
+                    *result = len/sizeof(WCHAR) - 1;  /* do not count terminating null */
+                }
                 ((LPWSTR)lParam)[*result] = 0;
             }
             free_buffer( buffer, ptr );

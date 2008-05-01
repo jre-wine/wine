@@ -29,6 +29,7 @@
 #include "winbase.h"
 #include "objbase.h"
 #include "comcat.h"
+#include "olectl.h"
 
 #include "wine/test.h"
 
@@ -666,6 +667,55 @@ static void test_ROT(void)
     IRunningObjectTable_Release(pROT);
 }
 
+static HRESULT WINAPI ParseDisplayName_QueryInterface(IParseDisplayName *iface, REFIID riid, void **ppv)
+{
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IParseDisplayName))
+    {
+        *ppv = iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI ParseDisplayName_AddRef(IParseDisplayName *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI ParseDisplayName_Release(IParseDisplayName *iface)
+{
+    return 1;
+}
+
+static LPCWSTR expected_display_name;
+
+static HRESULT WINAPI ParseDisplayName_ParseDisplayName(IParseDisplayName *iface,
+                                                        IBindCtx *pbc,
+                                                        LPOLESTR pszDisplayName,
+                                                        ULONG *pchEaten,
+                                                        IMoniker **ppmkOut)
+{
+    char display_nameA[256];
+    WideCharToMultiByte(CP_ACP, 0, pszDisplayName, -1, display_nameA, sizeof(display_nameA), NULL, NULL);
+    ok(!lstrcmpW(pszDisplayName, expected_display_name), "unexpected display name \"%s\"\n", display_nameA);
+    ok(pszDisplayName == expected_display_name, "pszDisplayName should be the same pointer as passed into MkParseDisplayName\n");
+    *pchEaten = lstrlenW(pszDisplayName);
+    return CreateAntiMoniker(ppmkOut);
+}
+
+static const IParseDisplayNameVtbl ParseDisplayName_Vtbl =
+{
+    ParseDisplayName_QueryInterface,
+    ParseDisplayName_AddRef,
+    ParseDisplayName_Release,
+    ParseDisplayName_ParseDisplayName
+};
+
+static IParseDisplayName ParseDisplayName = { &ParseDisplayName_Vtbl };
+
 static int count_moniker_matches(IBindCtx * pbc, IEnumMoniker * spEM)
 {
     IMoniker * spMoniker;
@@ -679,7 +729,7 @@ static int count_moniker_matches(IBindCtx * pbc, IEnumMoniker * spEM)
         hr=IMoniker_GetDisplayName(spMoniker, pbc, NULL, &szDisplayn);
         if (SUCCEEDED(hr))
         {
-            if (!lstrcmpW(szDisplayn, wszFileName1) || !lstrcmpW(szDisplayn, wszFileName2))
+            if (!lstrcmpiW(szDisplayn, wszFileName1) || !lstrcmpiW(szDisplayn, wszFileName2))
                 matchCnt++;
             CoTaskMemFree(szDisplayn);
         }
@@ -708,19 +758,118 @@ static void test_MkParseDisplayName(void)
     DWORD pdwReg1=0;
     DWORD grflags=0;
     DWORD pdwReg2=0;
+    DWORD moniker_type;
     IRunningObjectTable * pprot=NULL;
 
     /* CLSID of My Computer */
     static const WCHAR wszDisplayName[] = {'c','l','s','i','d',':',
         '2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-','A','2','D','8','-','0','8','0','0','2','B','3','0','3','0','9','D',':',0};
+    static const WCHAR wszDisplayNameClsid[] = {'c','l','s','i','d',':',0};
+    static const WCHAR wszNonExistantProgId[] = {'N','o','n','E','x','i','s','t','a','n','t','P','r','o','g','I','d',':',0};
+    static const WCHAR wszDisplayNameRunning[] = {'W','i','n','e','T','e','s','t','R','u','n','n','i','n','g',0};
+    static const WCHAR wszDisplayNameProgId1[] = {'S','t','d','F','o','n','t',':',0};
+    static const WCHAR wszDisplayNameProgId2[] = {'@','S','t','d','F','o','n','t',0};
+    static const WCHAR wszDisplayNameProgIdFail[] = {'S','t','d','F','o','n','t',0};
+    char szDisplayNameFile[256];
+    WCHAR wszDisplayNameFile[256];
 
     hr = CreateBindCtx(0, &pbc);
     ok_ole_success(hr, CreateBindCtx);
 
-    hr = MkParseDisplayName(pbc, wszDisplayName, &eaten, &pmk);
-    todo_wine { ok_ole_success(hr, MkParseDisplayName); }
+    hr = MkParseDisplayName(pbc, wszNonExistantProgId, &eaten, &pmk);
+    ok(hr == MK_E_CANTOPENFILE, "MkParseDisplayName should have failed with MK_E_CANTOPENFILE instead of 0x%08x\n", hr);
 
-    if (object)
+    /* no special handling of "clsid:" without the string form of the clsid
+     * following */
+    hr = MkParseDisplayName(pbc, wszDisplayNameClsid, &eaten, &pmk);
+    ok(hr == MK_E_CANTOPENFILE, "MkParseDisplayName should have failed with MK_E_CANTOPENFILE instead of 0x%08x\n", hr);
+
+    /* shows clsid has higher precedence than a running object */
+    hr = CreateFileMoniker(wszDisplayName, &pmk);
+    ok_ole_success(hr, CreateFileMoniker);
+    hr = IBindCtx_GetRunningObjectTable(pbc, &pprot);
+    ok_ole_success(hr, IBindCtx_GetRunningObjectTable);
+    hr = IRunningObjectTable_Register(pprot, 0, (IUnknown *)&Test_ClassFactory, pmk, &pdwReg1);
+    ok_ole_success(hr, IRunningObjectTable_Register);
+    IMoniker_Release(pmk);
+    pmk = NULL;
+    hr = MkParseDisplayName(pbc, wszDisplayName, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_CLASSMONIKER, "moniker_type was %d instead of MKSYS_CLASSMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+    hr = IRunningObjectTable_Revoke(pprot, pdwReg1);
+    ok_ole_success(hr, IRunningObjectTable_Revoke);
+    IRunningObjectTable_Release(pprot);
+
+    hr = CreateFileMoniker(wszDisplayNameRunning, &pmk);
+    ok_ole_success(hr, CreateFileMoniker);
+    hr = IBindCtx_GetRunningObjectTable(pbc, &pprot);
+    ok_ole_success(hr, IBindCtx_GetRunningObjectTable);
+    hr = IRunningObjectTable_Register(pprot, 0, (IUnknown *)&Test_ClassFactory, pmk, &pdwReg1);
+    ok_ole_success(hr, IRunningObjectTable_Register);
+    IMoniker_Release(pmk);
+    pmk = NULL;
+    hr = MkParseDisplayName(pbc, wszDisplayNameRunning, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_FILEMONIKER, "moniker_type was %d instead of MKSYS_FILEMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+    hr = IRunningObjectTable_Revoke(pprot, pdwReg1);
+    ok_ole_success(hr, IRunningObjectTable_Revoke);
+    IRunningObjectTable_Release(pprot);
+
+    hr = CoRegisterClassObject(&CLSID_StdFont, (IUnknown *)&ParseDisplayName, CLSCTX_INPROC_SERVER, REGCLS_MULTI_SEPARATE, &pdwReg1);
+    ok_ole_success(hr, CoRegisterClassObject);
+
+    expected_display_name = wszDisplayNameProgId1;
+    hr = MkParseDisplayName(pbc, wszDisplayNameProgId1, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_ANTIMONIKER, "moniker_type was %d instead of MKSYS_ANTIMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+
+    expected_display_name = wszDisplayNameProgId2;
+    hr = MkParseDisplayName(pbc, wszDisplayNameProgId2, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_ANTIMONIKER, "moniker_type was %d instead of MKSYS_ANTIMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+
+    hr = MkParseDisplayName(pbc, wszDisplayNameProgIdFail, &eaten, &pmk);
+    ok(hr == MK_E_CANTOPENFILE, "MkParseDisplayName with ProgId without marker should fail with MK_E_CANTOPENFILE instead of 0x%08x\n", hr);
+
+    hr = CoRevokeClassObject(pdwReg1);
+    ok_ole_success(hr, CoRevokeClassObject);
+
+    GetSystemDirectoryA(szDisplayNameFile, sizeof(szDisplayNameFile));
+    strcat(szDisplayNameFile, "\\kernel32.dll");
+    MultiByteToWideChar(CP_ACP, 0, szDisplayNameFile, -1, wszDisplayNameFile, sizeof(wszDisplayNameFile)/sizeof(wszDisplayNameFile[0]));
+    hr = MkParseDisplayName(pbc, wszDisplayNameFile, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_FILEMONIKER, "moniker_type was %d instead of MKSYS_FILEMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+
+    hr = MkParseDisplayName(pbc, wszDisplayName, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+
+    if (pmk)
     {
         hr = IMoniker_BindToObject(pmk, pbc, NULL, &IID_IUnknown, (LPVOID*)&object);
         ok_ole_success(hr, IMoniker_BindToObject);
@@ -961,7 +1110,7 @@ static void test_moniker(
 
     hr = IMoniker_GetDisplayName(moniker, bindctx, NULL, &display_name);
     ok_ole_success(hr, IMoniker_GetDisplayName);
-	ok(!lstrcmpW(display_name, expected_display_name), "display name wasn't what was expected\n");
+    ok(!lstrcmpW(display_name, expected_display_name), "%s: display name wasn't what was expected\n", testname);
 
     CoTaskMemFree(display_name);
     IBindCtx_Release(bindctx);

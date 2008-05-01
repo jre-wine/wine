@@ -759,6 +759,7 @@ programs/regsvr32/regsvr32
 programs/regsvr32/regsvr32.res
 programs/rpcss/rpcss
 programs/rundll32/rundll32
+programs/spoolsv/spoolsv
 programs/start/rsrc.res
 programs/start/start
 programs/taskmgr/font.bmp
@@ -874,6 +875,7 @@ programs/winver/winver
 programs/wordpad/rsrc.res
 programs/wordpad/toolbar.bmp
 programs/wordpad/wordpad
+programs/xcopy/xcopy
 server/wineserver
 server/wineserver.man
 tools/bin2res

@@ -132,10 +132,12 @@ $(TESTSUBDIRS:%=%/__crosstest__): tools include
 # Misc rules
 
 TAGS etags:
-	(test -d .git && git-ls-files '*.[chly]' '*.idl' || find -L $(TOPSRCDIR) -name '*.[ch]' -print) | etags -
+	$(RM) TAGS
+	(test -d .git && git-ls-files '*.[chly]' '*.idl' || find -L $(TOPSRCDIR) -name '*.[ch]' -print) | xargs etags -a
 
 tags ctags:
-	(test -d .git && git-ls-files '*.[chly]' '*.idl' || find -L $(TOPSRCDIR) -name '*.[ch]' -print) | ctags -
+	$(RM) tags
+	(test -d .git && git-ls-files '*.[chly]' '*.idl' || find -L $(TOPSRCDIR) -name '*.[ch]' -print) | xargs ctags -a
 
 manpages htmlpages sgmlpages: dummy
 	@cd documentation && $(MAKE) $@
@@ -449,6 +451,7 @@ ALL_MAKEFILES = \
 	programs/regsvr32/Makefile \
 	programs/rpcss/Makefile \
 	programs/rundll32/Makefile \
+	programs/spoolsv/Makefile \
 	programs/start/Makefile \
 	programs/taskmgr/Makefile \
 	programs/uninstaller/Makefile \
@@ -467,6 +470,7 @@ ALL_MAKEFILES = \
 	programs/winhelp/Makefile \
 	programs/winver/Makefile \
 	programs/wordpad/Makefile \
+	programs/xcopy/Makefile \
 	server/Makefile \
 	tools/Makefile \
 	tools/widl/Makefile \
@@ -478,6 +482,8 @@ ALL_MAKEFILES = \
 
 Makefile $(ALL_MAKEFILES): config.status
 	@./config.status $@
+.INIT: Makefile
+.BEGIN: Makefile
 
 $(RECURSE_TARGETS) $(MAKEDEP): $(ALL_MAKEFILES)
 
@@ -785,6 +791,7 @@ programs/regedit/Makefile: programs/regedit/Makefile.in programs/Makeprog.rules
 programs/regsvr32/Makefile: programs/regsvr32/Makefile.in programs/Makeprog.rules
 programs/rpcss/Makefile: programs/rpcss/Makefile.in programs/Makeprog.rules
 programs/rundll32/Makefile: programs/rundll32/Makefile.in programs/Makeprog.rules
+programs/spoolsv/Makefile: programs/spoolsv/Makefile.in programs/Makeprog.rules
 programs/start/Makefile: programs/start/Makefile.in programs/Makeprog.rules
 programs/taskmgr/Makefile: programs/taskmgr/Makefile.in programs/Makeprog.rules
 programs/uninstaller/Makefile: programs/uninstaller/Makefile.in programs/Makeprog.rules
@@ -803,6 +810,7 @@ programs/winevdm/Makefile: programs/winevdm/Makefile.in programs/Makeprog.rules
 programs/winhelp/Makefile: programs/winhelp/Makefile.in programs/Makeprog.rules
 programs/winver/Makefile: programs/winver/Makefile.in programs/Makeprog.rules
 programs/wordpad/Makefile: programs/wordpad/Makefile.in programs/Makeprog.rules
+programs/xcopy/Makefile: programs/xcopy/Makefile.in programs/Makeprog.rules
 server/Makefile: server/Makefile.in Make.rules
 tools/Makefile: tools/Makefile.in Make.rules
 tools/widl/Makefile: tools/widl/Makefile.in Make.rules

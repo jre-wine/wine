@@ -31,7 +31,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
 
 #define GLNAME_REQUIRE_GLSL  ((const char *)1)
 
-inline static BOOL shader_is_version_token(DWORD token) {
+static inline BOOL shader_is_version_token(DWORD token) {
     return shader_is_pshader_version(token) ||
            shader_is_vshader_version(token);
 }
@@ -197,6 +197,8 @@ HRESULT shader_get_registers_used(
     /* There are some minor differences between pixel and vertex shaders */
     char pshader = shader_is_pshader_version(This->baseShader.hex_version);
 
+    reg_maps->bumpmat = -1;
+
     if (pToken == NULL)
         return WINED3D_OK;
 
@@ -295,7 +297,15 @@ HRESULT shader_get_registers_used(
             DWORD snum = *pToken & WINED3DSP_REGNUM_MASK; 
             reg_maps->labels[snum] = 1;
             pToken += curOpcode->num_params;
- 
+
+        } else if(WINED3DSIO_BEM == curOpcode->opcode) {
+            DWORD regnum = *pToken & WINED3DSP_REGNUM_MASK;
+            if(reg_maps->bumpmat != -1 && reg_maps->bumpmat != regnum) {
+                FIXME("Pixel shader uses bem or texbem instruction on more than 1 sampler\n");
+            } else {
+                reg_maps->bumpmat = regnum;
+            }
+
         /* Set texture, address, temporary registers */
         } else {
             int i, limit;
@@ -323,10 +333,6 @@ HRESULT shader_get_registers_used(
                 } else {
                     int texType = IWineD3DBaseTexture_GetTextureDimensions(stateBlock->textures[sampler_code]);
                     switch(texType) {
-                        case GL_TEXTURE_1D:
-                            reg_maps->samplers[sampler_code] = (0x1 << 31) | WINED3DSTT_1D;
-                            break;
-
                         case GL_TEXTURE_2D:
                             reg_maps->samplers[sampler_code] = (0x1 << 31) | WINED3DSTT_2D;
                             break;
@@ -347,7 +353,7 @@ HRESULT shader_get_registers_used(
 
                 /* texbem is only valid with < 1.4 pixel shaders */
                 if(WINED3DSIO_TEXBEM == curOpcode->opcode) {
-                    if(reg_maps->bumpmat != 0 && reg_maps->bumpmat != sampler_code) {
+                    if(reg_maps->bumpmat != -1 && reg_maps->bumpmat != sampler_code) {
                         FIXME("Pixel shader uses texbem instruction on more than 1 sampler\n");
                     } else {
                         reg_maps->bumpmat = sampler_code;
@@ -931,6 +937,9 @@ void shader_trace_init(
                             default:
                                 TRACE("_(%u)", op);
                         }
+                    } else if (curOpcode->opcode == WINED3DSIO_TEX &&
+                               This->baseShader.hex_version >= WINED3DPS_VERSION(2,0)) {
+                        if(opcode_token & WINED3DSI_TEXLD_PROJECT) TRACE("p");
                     }
 
                     /* Destination token */

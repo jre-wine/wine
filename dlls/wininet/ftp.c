@@ -737,7 +737,6 @@ HINTERNET WINAPI FTP_FtpFindFirstFileW(LPWININETFTPSESSIONW lpwfs,
     if (!FTP_SendPortOrPasv(lpwfs))
         goto lend;
 
-    hIC = lpwfs->lpAppInfo;
     if (!FTP_SendCommand(lpwfs->sndSocket, FTP_CMD_LIST, NULL,
         lpwfs->hdr.lpfnStatusCB, &lpwfs->hdr, lpwfs->hdr.dwContext))
         goto lend;
@@ -767,6 +766,7 @@ lend:
     if (lpwfs->lstnSocket != -1)
         closesocket(lpwfs->lstnSocket);
 
+    hIC = lpwfs->lpAppInfo;
     if (hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC)
     {
         INTERNET_ASYNC_RESULT iar;
@@ -1317,7 +1317,7 @@ BOOL WINAPI FTP_FtpGetFileW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszRemoteFile, 
     hFile = CreateFileW(lpszNewFile, GENERIC_WRITE, 0, 0, fFailIfExists ?
         CREATE_NEW : CREATE_ALWAYS, dwLocalFlagsAttribute, 0);
     if (INVALID_HANDLE_VALUE == hFile)
-        goto lend;
+        return FALSE;
 
     /* Set up socket to retrieve data */
     nBytes = FTP_SendRetrieve(lpwfs, lpszRemoteFile, dwInternetFlags);
@@ -1345,12 +1345,10 @@ BOOL WINAPI FTP_FtpGetFileW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszRemoteFile, 
         }
     }
 
-lend:
     if (lpwfs->lstnSocket != -1)
         closesocket(lpwfs->lstnSocket);
 
-    if (INVALID_HANDLE_VALUE != hFile)
-        CloseHandle(hFile);
+    CloseHandle(hFile);
 
     hIC = lpwfs->lpAppInfo;
     if (hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC)
@@ -2803,9 +2801,6 @@ static BOOL FTP_RetrieveFileData(LPWININETFTPSESSIONW lpwfs, INT nDataSocket, DW
 
     TRACE("\n");
 
-    if (INVALID_HANDLE_VALUE == hFile)
-        return FALSE;
-
     lpszBuffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(CHAR)*DATA_PACKET_SIZE);
     if (NULL == lpszBuffer)
     {
@@ -2830,9 +2825,10 @@ static BOOL FTP_RetrieveFileData(LPWININETFTPSESSIONW lpwfs, INT nDataSocket, DW
     }
 
     TRACE("Data transfer complete\n");
-    HeapFree(GetProcessHeap(), 0, lpszBuffer);
 
 recv_end:
+    HeapFree(GetProcessHeap(), 0, lpszBuffer);
+
     return  (nRC != -1);
 }
 

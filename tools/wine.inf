@@ -45,6 +45,7 @@ AddReg=\
     Nls,\
     OLE,\
     Printing,\
+    Services, \
     Tapi,\
     Timezones
 
@@ -68,6 +69,7 @@ AddReg=\
     Nls,\
     OLE,\
     Printing,\
+    Services, \
     Tapi,\
     Timezones,\
     VersionInfo
@@ -81,6 +83,7 @@ CurrentVersion="Software\Microsoft\Windows\CurrentVersion"
 CurrentVersionNT="Software\Microsoft\Windows NT\CurrentVersion"
 FontSubStr="Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes"
 Control="System\CurrentControlSet\Control"
+Services="System\CurrentControlSet\Services"
 
 [Classes]
 HKCR,.avi,"Content Type",2,"video/avi"
@@ -92,10 +95,12 @@ HKCR,.htm,,2,"htmlfile"
 HKCR,.htm,"Content Type",2,"text/html"
 HKCR,.html,,2,"htmlfile"
 HKCR,.html,"Content Type",2,"text/html"
+HKCR,.inf,,2,"inffile"
 HKCR,.ini,,2,"inifile"
 HKCR,.jfif,"Content Type",2,"image/jpeg"
 HKCR,.lnk,,2,"lnkfile"
 HKCR,.msi,,2,"Msi.Package" 
+HKCR,.rtf,,2,"rtffile"
 HKCR,.tif,"Content Type",2,"image/tiff"
 HKCR,.tiff,"Content Type",2,"image/tiff"
 HKCR,.txt,,2,"txtfile"
@@ -110,6 +115,7 @@ HKCR,folder\shell\open\ddeexec,"NoActivateHandler",2,""
 HKCR,folder\shell\open\ddeexec\application,,2,"Folders"
 HKCR,hlpfile\shell\open\command,,2,"%10%\winhelp.exe %1"
 HKCR,htmlfile\shell\open\command,,2,"winebrowser"
+HKCR,inffile\shell\install\command,,2,"%10%\rundll32.exe setupapi,InstallHinfSection DefaultInstall 132 %1"
 HKCR,inifile\shell\open\command,,2,"%11%\notepad.exe %1"
 HKCR,inifile\shell\print\command,,2,"%11%\notepad.exe /p %1"
 HKCR,lnkfile,,2,"Shortcut"
@@ -122,6 +128,8 @@ HKCR,Msi.Package\DefaultIcon,,2,"msiexec.exe"
 HKCR,Msi.Package\shell\Open\command,,2,"msiexec /i %1"
 HKCR,Msi.Package\shell\Repair\command,,2,"msiexec /f %1"
 HKCR,Msi.Package\shell\Uninstall\command,,2,"msiexec /x %1"
+HKCR,rtffile\shell\open\command,,2,"%11%\wordpad.exe %1"
+HKCR,rtffile\shell\print\command,,2,"%11%\wordpad.exe /p %1"
 HKCR,txtfile\shell\open\command,,2,"%11%\notepad.exe %1"
 HKCR,txtfile\shell\print\command,,2,"%11%\notepad.exe /p %1"
 HKCR,wrifile\shell\open\command,,2,"%11%\wordpad.exe %1"
@@ -310,7 +318,6 @@ HKLM,Software\Microsoft\Rpc\SecurityService,68,2,"netlogon.dll"
 HKLM,Software\Microsoft\Rpc\SecurityService,9,2,"secur32.dll"
 HKLM,System\CurrentControlSet\Control\Session Manager,,,""
 HKLM,System\CurrentControlSet\Control\VMM32Files,,,""
-HKLM,System\CurrentControlSet\Services\VxD\MSTCP,,,""
 HKCU,Software\Wine\MSHTML,"GeckoUrl",,"http://source.winehq.org/winegecko.php"
 HKLM,HARDWARE\DEVICEMAP\PARALLEL PORTS,,,""
 HKLM,HARDWARE\DEVICEMAP\SERIALCOMM,,,""
@@ -2148,12 +2155,12 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 [FakeDllsSection]
 10,,notepad.exe
 10,,regedit.exe
-10,,rundll32.exe
 10,,winebrowser.exe
 10,,winhelp.exe
 10,command,start.exe
 11,,advapi32.dll
 11,,advpack.dll
+11,,cabinet.dll
 11,,cmd.exe
 11,,comctl32.dll
 11,,comdlg32.dll
@@ -2189,6 +2196,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,riched20.dll
 11,,riched32.dll
 11,,rpcrt4.dll
+11,,rundll32.exe
 11,,setupapi.dll
 11,,shdocvw.dll
 11,,shell32.dll
@@ -2571,6 +2579,17 @@ HKLM,%CurrentVersionNT%\Time Zones\Tasmania Standard Time,"Display",,"Australia/
 HKLM,%CurrentVersionNT%\Time Zones\Tasmania Standard Time,"Dlt",,"Tasmania Daylight Time"
 HKLM,%CurrentVersionNT%\Time Zones\Tasmania Standard Time,"Std",,"Tasmania Standard Time"
 HKLM,%CurrentVersionNT%\Time Zones\Tasmania Standard Time,"TZI",1,a8,fd,ff,ff,00,00,00,00,c4,ff,ff,ff,00,00,03,00,00,00,05,00,03,00,00,00,00,00,00,00,00,00,0a,00,00,00,01,00,02,00,00,00,00,00,00,00
+
+[Services]
+HKLM,"%Services%\Spooler","Description",,"Loads files to memory for later printing."
+HKLM,"%Services%\Spooler","DisplayName",,"Print Spooler"
+HKLM,"%Services%\Spooler","ErrorControl",0x10001,1
+HKLM,"%Services%\Spooler","Group",,"SpoolerGroup"
+HKLM,"%Services%\Spooler","ImagePath",,"spoolsv.exe"
+HKLM,"%Services%\Spooler","ObjectName",,"LocalSystem"
+HKLM,"%Services%\Spooler","Start",0x10001,2
+HKLM,"%Services%\Spooler","Type",0x10001,0x110
+HKLM,"%Services%\VxD\MSTCP",,,""
 
 [VersionInfo]
 HKLM,%CurrentVersionNT%,"CurrentVersion",2,"5.0"

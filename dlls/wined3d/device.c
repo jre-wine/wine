@@ -60,7 +60,7 @@ enum x11drv_escape_codes
 };
 
 /* retrieve the X display to use on a given DC */
-inline static Display *get_display( HDC hdc )
+static inline Display *get_display( HDC hdc )
 {
     Display *display;
     enum x11drv_escape_codes escape = X11DRV_GET_DISPLAY;
@@ -69,9 +69,6 @@ inline static Display *get_display( HDC hdc )
                     sizeof(display), (LPSTR)&display )) display = NULL;
     return display;
 }
-
-/* allocate one pbuffer per surface */
-BOOL pbuffer_per_surface = FALSE;
 
 /* static function declarations */
 static void WINAPI IWineD3DDeviceImpl_AddResource(IWineD3DDevice *iface, IWineD3DResource *resource);
@@ -253,6 +250,9 @@ static void CreateVBO(IWineD3DVertexBufferImpl *object) {
     TRACE("Creating an OpenGL vertex buffer object for IWineD3DVertexBuffer %p  Usage(%s)\n", object, debug_d3dusage(vboUsage));
 
     ENTER_GL();
+    /* Make sure that a context is there. Needed in a multithreaded environment. Otherwise this call is a nop */
+    ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+
     /* Make sure that the gl error is cleared. Do not use checkGLcall
       * here because checkGLcall just prints a fixme and continues. However,
       * if an error during VBO creation occurs we can fall back to non-vbo operation
@@ -380,6 +380,9 @@ static void CreateIndexBufferVBO(IWineD3DDeviceImpl *This, IWineD3DIndexBufferIm
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_INDEXBUFFER);
 
     ENTER_GL();
+    /* Make sure that a context is there. Needed in a multithreaded environment. Otherwise this call is a nop */
+    ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+
     while(glGetError());
 
     GL_EXTCALL(glGenBuffersARB(1, &object->vbo));
@@ -820,6 +823,8 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface, U
     object->pow2scalingFactorY  =  (((float)Height) / ((float)pow2Height));
     TRACE(" xf(%f) yf(%f)\n", object->pow2scalingFactorX, object->pow2scalingFactorY);
 
+    object->baseTexture.format = Format;
+
     /* Calculate levels for mip mapping */
     if (Levels == 0) {
         TRACE("calculating levels %d\n", object->baseTexture.levels);
@@ -893,6 +898,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVolumeTexture(IWineD3DDevice *ifa
     object->width  = Width;
     object->height = Height;
     object->depth  = Depth;
+    object->baseTexture.format = Format;
 
     /* Calculate levels for mip mapping */
     if (Levels == 0) {
@@ -1008,6 +1014,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
     /* TODO: support for native non-power 2 */
     /* Precalculated scaling for 'faked' non power of two texture coords */
     object->pow2scalingFactor    = ((float)EdgeLength) / ((float)pow2EdgeLength);
+    object->baseTexture.format = Format;
 
     /* Calculate levels for mip mapping */
     if (Levels == 0) {
@@ -1348,10 +1355,15 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
     *     doesn't match actual visual? Cannot choose one here - code removed as it ONLY works if the one
     *     it chooses is identical to the one already being used!
      **********************************/
-
     /** FIXME: Handle stencil appropriately via EnableAutoDepthStencil / AutoDepthStencilFormat **/
+
+    object->context = HeapAlloc(GetProcessHeap(), 0, sizeof(object->context));
+    if(!object->context) {
+    }
+    object->num_contexts = 1;
+
     ENTER_GL();
-    object->context = CreateContext(This, (IWineD3DSurfaceImpl *) object->frontBuffer, display, object->win);
+    object->context[0] = CreateContext(This, (IWineD3DSurfaceImpl *) object->frontBuffer, display, object->win);
     LEAVE_GL();
 
     if (!object->context) {
@@ -1360,7 +1372,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         goto error;
     } else {
         TRACE("Context created (HWND=%p, glContext=%p, Window=%ld)\n",
-               object->win_handle, object->context->glCtx, object->win);
+               object->win_handle, object->context[0]->glCtx, object->win);
     }
 
    /*********************
@@ -1498,7 +1510,7 @@ error:
         object->backBuffer = NULL;
     }
     if(object->context) {
-        DestroyContext(This, object->context);
+        DestroyContext(This, object->context[0]);
     }
     if(object->frontBuffer) {
         IWineD3DSurface_GetParent(object->frontBuffer, &bufferParent);
@@ -1679,7 +1691,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
         This->lastActiveRenderTarget = swapchain->frontBuffer;
     }
     IWineD3DSurface_AddRef(This->render_targets[0]);
-    This->activeContext = swapchain->context;
+    This->activeContext = swapchain->context[0];
 
     /* Depth Stencil support */
     This->stencilBufferTarget = This->depthStencilBuffer;
@@ -1697,7 +1709,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     *  with Default values
     */
 
-    ((IWineD3DImpl *) This->wineD3D)->isGLInfoValid = IWineD3DImpl_FillGLCaps( This->wineD3D, swapchain->context->display);
+    ((IWineD3DImpl *) This->wineD3D)->isGLInfoValid = IWineD3DImpl_FillGLCaps(This->wineD3D, swapchain->context[0]->display);
     /* Setup all the devices defaults */
     IWineD3DStateBlock_InitStartupStateBlock((IWineD3DStateBlock *)This->stateBlock);
 #if 0
@@ -1758,6 +1770,13 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
     TRACE("(%p)\n", This);
 
     if(!This->d3d_initialized) return WINED3DERR_INVALIDCALL;
+
+    ENTER_GL();
+    /* I don't think that the interface guarants that the device is destroyed from the same thread
+     * it was created. Thus make sure a context is active for the glDelete* calls
+     */
+    ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+    LEAVE_GL();
 
     /* Delete the pbuffer context if there is any */
     if(This->pbufferContext) DestroyContext(This, This->pbufferContext);
@@ -1828,6 +1847,22 @@ static void WINAPI IWineD3DDeviceImpl_SetFullscreen(IWineD3DDevice *iface, BOOL 
      * separately.
      */
     This->ddraw_fullscreen = fullscreen;
+}
+
+/* Enables thead safety in the wined3d device and its resources. Called by DirectDraw
+ * from SetCooperativeLeven if DDSCL_MULTITHREADED is specified, and by d3d8/9 from
+ * CreateDevice if D3DCREATE_MULTITHREADED is passed.
+ *
+ * There is no way to deactivate thread safety once it is enabled
+ */
+static void WINAPI IWineD3DDeviceImpl_SetMultithreaded(IWineD3DDevice *iface) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
+    FIXME("No thread safety in wined3d yet\n");
+
+    /*For now just store the flag(needed in case of ddraw) */
+    This->createParms.BehaviorFlags |= WINED3DCREATE_MULTITHREADED;
+
+    return;
 }
 
 static HRESULT WINAPI IWineD3DDeviceImpl_SetDisplayMode(IWineD3DDevice *iface, UINT iSwapChain, WINED3DDISPLAYMODE* pMode) {
@@ -3661,6 +3696,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
         WARN("NULL source vertex buffer\n");
         return WINED3DERR_INVALIDCALL;
     }
+
+    /* Need any context to write to the vbo. In a non-multithreaded environment a context is there anyway,
+     * and this call is quite performance critical, so don't call needlessly
+     */
+    if(This->createParms.BehaviorFlags & WINED3DCREATE_MULTITHREADED) {
+        ENTER_GL();
+        ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        LEAVE_GL();
+    }
+
     /* We don't need the source vbo because this buffer is only used as
      * a source for ProcessVertices. Avoid wasting resources by converting the
      * buffer and loading the VBO
@@ -4090,6 +4135,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_EndScene(IWineD3DDevice *iface) {
     }
 
     ENTER_GL();
+    if(This->createParms.BehaviorFlags & WINED3DCREATE_MULTITHREADED) {
+        ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+    }
     /* We only have to do this if we need to read the, swapbuffers performs a flush for us */
     glFlush();
     checkGLcall("glFlush");
@@ -4139,6 +4187,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
     }
 
     ENTER_GL();
+    /* This is for offscreen rendering as well as for multithreading, thus activate the set render target
+     * and not the last active one.
+     */
+    ActivateContext(This, This->render_targets[0], CTXUSAGE_RESOURCELOAD);
 
     glEnable(GL_SCISSOR_TEST);
     checkGLcall("glEnable GL_SCISSOR_TEST");
@@ -4742,6 +4794,9 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
     }
 
     ENTER_GL();
+
+    ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
         GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
         checkGLcall("glActiveTextureARB");
@@ -4982,6 +5037,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetFrontBackBuffers(IWineD3DDevice *ifa
 
     if(Swapchain->backBuffer[0] != Back) {
         TRACE("Changing the back buffer from %p to %p\n", Swapchain->backBuffer, Back);
+
+        /* What to do about the context here in the case of multithreading? Not sure.
+         * This function is called by IDirect3D7::CreateDevice so in theory its initialization code
+         */
         ENTER_GL();
         if(!Swapchain->backBuffer[0]) {
             /* GL was told to draw to the front buffer at creation,
@@ -5235,6 +5294,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
     /* some basic validation checks */
     if(This->cursorTexture) {
         ENTER_GL();
+        ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
         glDeleteTextures(1, &This->cursorTexture);
         LEAVE_GL();
         This->cursorTexture = 0;
@@ -5406,6 +5466,7 @@ static void updateSurfaceDesc(IWineD3DSurfaceImpl *surface, WINED3DPRESENT_PARAM
     }
     if(surface->glDescription.textureName) {
         ENTER_GL();
+        ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
         glDeleteTextures(1, &surface->glDescription.textureName);
         LEAVE_GL();
         surface->glDescription.textureName = 0;
@@ -5779,6 +5840,7 @@ const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl =
     IWineD3DDeviceImpl_Init3D,
     IWineD3DDeviceImpl_Uninit3D,
     IWineD3DDeviceImpl_SetFullscreen,
+    IWineD3DDeviceImpl_SetMultithreaded,
     IWineD3DDeviceImpl_EvictManagedResources,
     IWineD3DDeviceImpl_GetAvailableTextureMem,
     IWineD3DDeviceImpl_GetBackBuffer,

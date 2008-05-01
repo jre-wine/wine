@@ -51,7 +51,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(sync);
 
 /* check if current version is NT or Win95 */
-inline static int is_version_nt(void)
+static inline int is_version_nt(void)
 {
     return !(GetVersion() & 0x80000000);
 }
@@ -1287,7 +1287,7 @@ BOOL WINAPI WaitNamedPipeW (LPCWSTR name, DWORD nTimeOut)
     }
 
     pipe_wait->TimeoutSpecified = !(nTimeOut == NMPWAIT_USE_DEFAULT_WAIT);
-    pipe_wait->Timeout.QuadPart = nTimeOut * -10000L;
+    pipe_wait->Timeout.QuadPart = (ULONGLONG)nTimeOut * -10000;
     pipe_wait->NameLength = nt_name.Length - sizeof(leadin);
     memcpy(pipe_wait->Name, nt_name.Buffer + sizeof(leadin)/sizeof(WCHAR),
            pipe_wait->NameLength);

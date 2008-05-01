@@ -66,32 +66,32 @@ extern void trace_request(void);
 extern void trace_reply( enum request req, const union generic_reply *reply );
 
 /* get the request vararg data */
-inline static const void *get_req_data(void)
+static inline const void *get_req_data(void)
 {
     return current->req_data;
 }
 
 /* get the request vararg size */
-inline static data_size_t get_req_data_size(void)
+static inline data_size_t get_req_data_size(void)
 {
     return current->req.request_header.request_size;
 }
 
 /* get the request vararg as unicode string */
-inline static void get_req_unicode_str( struct unicode_str *str )
+static inline void get_req_unicode_str( struct unicode_str *str )
 {
     str->str = get_req_data();
     str->len = (get_req_data_size() / sizeof(WCHAR)) * sizeof(WCHAR);
 }
 
 /* get the reply maximum vararg size */
-inline static data_size_t get_reply_max_size(void)
+static inline data_size_t get_reply_max_size(void)
 {
     return current->req.request_header.reply_size;
 }
 
 /* allocate and fill the reply data */
-inline static void *set_reply_data( const void *data, data_size_t size )
+static inline void *set_reply_data( const void *data, data_size_t size )
 {
     void *ret = set_reply_data_size( size );
     if (ret) memcpy( ret, data, size );
@@ -99,7 +99,7 @@ inline static void *set_reply_data( const void *data, data_size_t size )
 }
 
 /* set the reply data pointer directly (will be freed by request code) */
-inline static void set_reply_data_ptr( void *data, data_size_t size )
+static inline void set_reply_data_ptr( void *data, data_size_t size )
 {
     assert( size <= get_reply_max_size() );
     current->reply_size = size;
@@ -245,7 +245,6 @@ DECL_HANDLER(set_serial_info);
 DECL_HANDLER(register_async);
 DECL_HANDLER(cancel_async);
 DECL_HANDLER(create_named_pipe);
-DECL_HANDLER(open_named_pipe);
 DECL_HANDLER(connect_named_pipe);
 DECL_HANDLER(wait_named_pipe);
 DECL_HANDLER(disconnect_named_pipe);
@@ -318,7 +317,6 @@ DECL_HANDLER(get_token_user);
 DECL_HANDLER(get_token_groups);
 DECL_HANDLER(set_security_object);
 DECL_HANDLER(create_mailslot);
-DECL_HANDLER(open_mailslot);
 DECL_HANDLER(set_mailslot_info);
 DECL_HANDLER(create_directory);
 DECL_HANDLER(open_directory);
@@ -469,7 +467,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_register_async,
     (req_handler)req_cancel_async,
     (req_handler)req_create_named_pipe,
-    (req_handler)req_open_named_pipe,
     (req_handler)req_connect_named_pipe,
     (req_handler)req_wait_named_pipe,
     (req_handler)req_disconnect_named_pipe,
@@ -542,7 +539,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_token_groups,
     (req_handler)req_set_security_object,
     (req_handler)req_create_mailslot,
-    (req_handler)req_open_mailslot,
     (req_handler)req_set_mailslot_info,
     (req_handler)req_create_directory,
     (req_handler)req_open_directory,

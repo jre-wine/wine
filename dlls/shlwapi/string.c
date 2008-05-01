@@ -37,6 +37,7 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "shlobj.h"
+#include "mlang.h"
 #include "ddeml.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -45,21 +46,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
-/* Get a function pointer from a DLL handle */
-#define GET_FUNC(func, module, name, fail) \
-  do { \
-    if (!func) { \
-      if (!SHLWAPI_h##module && !(SHLWAPI_h##module = LoadLibraryA(#module ".dll"))) return fail; \
-      func = (fn##func)GetProcAddress(SHLWAPI_h##module, name); \
-      if (!func) return fail; \
-    } \
-  } while (0)
-
-extern HMODULE SHLWAPI_hmlang;
 extern HINSTANCE shlwapi_hInstance;
-
-typedef HRESULT (WINAPI *fnpConvertINetUnicodeToMultiByte)(LPDWORD,DWORD,LPCWSTR,LPINT,LPSTR,LPINT);
-static  fnpConvertINetUnicodeToMultiByte pConvertINetUnicodeToMultiByte;
 
 static HRESULT WINAPI _SHStrDupAA(LPCSTR,LPSTR*);
 static HRESULT WINAPI _SHStrDupAW(LPCWSTR,LPSTR*);
@@ -1958,7 +1945,7 @@ HRESULT WINAPI SHStrDupW(LPCWSTR src, LPWSTR * dest)
  *
  * Internal helper for SHLWAPI_WriteTimeClass.
  */
-inline static LPWSTR SHLWAPI_WriteReverseNum(LPWSTR lpszOut, DWORD dwNum)
+static inline LPWSTR SHLWAPI_WriteReverseNum(LPWSTR lpszOut, DWORD dwNum)
 {
   *lpszOut-- = '\0';
 
@@ -1978,7 +1965,7 @@ inline static LPWSTR SHLWAPI_WriteReverseNum(LPWSTR lpszOut, DWORD dwNum)
  *
  * Internal helper for SHLWAPI_WriteTimeClass.
  */
-inline static int SHLWAPI_FormatSignificant(LPWSTR lpszNum, int dwDigits)
+static inline int SHLWAPI_FormatSignificant(LPWSTR lpszNum, int dwDigits)
 {
   /* Zero non significant digits, return remaining significant digits */
   while (*lpszNum)
@@ -2609,8 +2596,7 @@ INT WINAPI SHUnicodeToAnsiCP(UINT CodePage, LPCWSTR lpSrcStr, LPSTR lpDstStr,
       DWORD dwMode = 0;
       INT nWideCharCount = len - 1;
 
-      GET_FUNC(pConvertINetUnicodeToMultiByte, mlang, "ConvertINetUnicodeToMultiByte", 0);
-      if (!pConvertINetUnicodeToMultiByte(&dwMode, CodePage, lpSrcStr, &nWideCharCount, lpDstStr,
+      if (!ConvertINetUnicodeToMultiByte(&dwMode, CodePage, lpSrcStr, &nWideCharCount, lpDstStr,
                                           lpiLen))
         return 0;
 
@@ -2622,7 +2608,7 @@ INT WINAPI SHUnicodeToAnsiCP(UINT CodePage, LPCWSTR lpSrcStr, LPSTR lpDstStr,
 
         *lpiLen = 0;
 
-        if (pConvertINetUnicodeToMultiByte(&dwMode, CodePage, lpSrcStr, &len, mem, lpiLen))
+        if (ConvertINetUnicodeToMultiByte(&dwMode, CodePage, lpSrcStr, &len, mem, lpiLen))
         {
           SHTruncateString(mem, *lpiLen);
           lstrcpynA(lpDstStr, mem, *lpiLen + 1);

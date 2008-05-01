@@ -172,6 +172,17 @@ typedef struct
     int  bottom;
 } rectangle_t;
 
+/* structure for parameters of async I/O calls */
+typedef struct
+{
+    void           *callback;      /* client-side callback to call upon end of async */
+    void           *iosb;          /* I/O status block in client addr space */
+    void           *arg;           /* opaque user data to pass to callback */
+    void           *apc;           /* user apc to call */
+    void           *apc_arg;       /* argument for user apc */
+    obj_handle_t    event;         /* event to signal when done */
+} async_data_t;
+
 /* structures for extra message data */
 
 struct callback_msg_data
@@ -350,6 +361,11 @@ typedef union
 typedef union
 {
     enum apc_type type;
+    struct
+    {
+        enum apc_type    type;      /* APC_ASYNC_IO */
+        unsigned int     status;    /* new status of async operation */
+    } async_io;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
@@ -847,6 +863,7 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
     unsigned int attributes;    /* open attributes */
     obj_handle_t rootdir;       /* root directory */
     unsigned int sharing;       /* sharing flags */
+    unsigned int options;       /* file options */
     VARARG(filename,unicode_str); /* file name */
 @REPLY
     obj_handle_t handle;        /* handle to the file */
@@ -1285,12 +1302,9 @@ enum char_info_mode
 @REQ(read_directory_changes)
     unsigned int filter;        /* notification filter */
     obj_handle_t handle;        /* handle to the directory */
-    obj_handle_t event;         /* handle to the event */
     int          subtree;       /* watch the subtree? */
     int          want_data;     /* flag indicating whether change data should be collected */
-    void*        io_apc;        /* APC routine to queue upon end of async */
-    void*        io_sb;         /* I/O status block (unique across all async on this handle) */
-    void*        io_user;       /* data to pass back to caller */
+    async_data_t async;         /* async I/O parameters */
 @END
 
 
@@ -1944,10 +1958,8 @@ enum message_type
 @REQ(register_async)
     obj_handle_t handle;        /* handle to comm port, socket or file */
     int          type;          /* type of queue to look after */
-    void*        io_apc;        /* APC routine to queue upon end of async */
-    void*        io_sb;         /* I/O status block (unique across all async on this handle) */
-    void*        io_user;       /* data to pass back to caller */
     int          count;         /* count - usually # of bytes to be read/written */
+    async_data_t async;         /* async I/O parameters */
 @END
 #define ASYNC_TYPE_READ  0x01
 #define ASYNC_TYPE_WRITE 0x02
@@ -1982,32 +1994,18 @@ enum message_type
 #define NAMED_PIPE_NONBLOCKING_MODE     0x0004
 #define NAMED_PIPE_SERVER_END           0x8000
 
-/* Open an existing named pipe */
-@REQ(open_named_pipe)
-    unsigned int   access;
-    unsigned int   attributes;   /* object attributes */
-    obj_handle_t   rootdir;      /* root directory */
-    unsigned int   flags;        /* file flags */
-    VARARG(name,unicode_str);    /* pipe name */
-@REPLY
-    obj_handle_t   handle;       /* handle to the pipe */
-@END
-
-
 /* Connect to a named pipe */
 @REQ(connect_named_pipe)
     obj_handle_t   handle;
-    obj_handle_t   event;
-    void*          func;
+    async_data_t   async;       /* async I/O parameters */
 @END
 
 
 /* Wait for a named pipe */
 @REQ(wait_named_pipe)
     obj_handle_t   handle;
+    async_data_t   async;        /* async I/O parameters */
     unsigned int   timeout;
-    obj_handle_t   event;
-    void*          func;
     VARARG(name,unicode_str);    /* pipe name */
 @END
 
@@ -2778,18 +2776,6 @@ enum message_type
     obj_handle_t   rootdir;       /* root directory */
     unsigned int   max_msgsize;
     int            read_timeout;
-    VARARG(name,unicode_str);     /* mailslot name */
-@REPLY
-    obj_handle_t   handle;        /* handle to the mailslot */
-@END
-
-
-/* Open an existing mailslot */
-@REQ(open_mailslot)
-    unsigned int   access;
-    unsigned int   attributes;    /* object attributes */
-    obj_handle_t   rootdir;       /* root directory */
-    unsigned int   sharing;       /* sharing mode */
     VARARG(name,unicode_str);     /* mailslot name */
 @REPLY
     obj_handle_t   handle;        /* handle to the mailslot */

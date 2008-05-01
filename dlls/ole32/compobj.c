@@ -833,7 +833,6 @@ void WINAPI CoUninitialize(void)
 
 /******************************************************************************
  *		CoDisconnectObject	[OLE32.@]
- *		CoDisconnectObject	[COMPOBJ.15]
  *
  * Disconnects all connections to this object from remote processes. Dispatches
  * pending RPCs while blocking new RPCs from occurring, and then calls
@@ -1247,6 +1246,7 @@ HRESULT WINAPI CLSIDFromProgID(LPCOLESTR progid, LPCLSID clsid)
     if (RegOpenKeyW(HKEY_CLASSES_ROOT,buf,&xhkey))
     {
         HeapFree(GetProcessHeap(),0,buf);
+        WARN("couldn't open key for ProgID %s\n", debugstr_w(progid));
         return CO_E_CLASSSTRING;
     }
     HeapFree(GetProcessHeap(),0,buf);
@@ -1254,6 +1254,7 @@ HRESULT WINAPI CLSIDFromProgID(LPCOLESTR progid, LPCLSID clsid)
     if (RegQueryValueW(xhkey,NULL,buf2,&buf2len))
     {
         RegCloseKey(xhkey);
+        WARN("couldn't query clsid value for ProgID %s\n", debugstr_w(progid));
         return CO_E_CLASSSTRING;
     }
     RegCloseKey(xhkey);
@@ -1841,10 +1842,28 @@ static HRESULT get_inproc_class_object(HKEY hkeydll, REFCLSID rclsid, REFIID rii
 /***********************************************************************
  *           CoGetClassObject [OLE32.@]
  *
- * FIXME.  If request allows of several options and there is a failure
- *         with one (other than not being registered) do we try the
- *         others or return failure?  (E.g. inprocess is registered but
- *         the DLL is not found but the server version works)
+ * Creates an object of the specified class.
+ *
+ * PARAMS
+ *  rclsid       [I] Class ID to create an instance of.
+ *  dwClsContext [I] Flags to restrict the location of the created instance.
+ *  pServerInfo  [I] Optional. Details for connecting to a remote server.
+ *  iid          [I] The ID of the interface of the instance to return.
+ *  ppv          [O] On returns, contains a pointer to the specified interface of the object.
+ *
+ * RETURNS
+ *  Success: S_OK
+ *  Failure: HRESULT code.
+ *
+ * NOTES
+ *  The dwClsContext parameter can be one or more of the following:
+ *| CLSCTX_INPROC_SERVER - Use an in-process server, such as from a DLL.
+ *| CLSCTX_INPROC_HANDLER - Use an in-process object which handles certain functions for an object running in another process.
+ *| CLSCTX_LOCAL_SERVER - Connect to an object running in another process.
+ *| CLSCTX_REMOTE_SERVER - Connect to an object running on another machine.
+ *
+ * SEE ALSO
+ *  CoCreateInstance()
  */
 HRESULT WINAPI CoGetClassObject(
     REFCLSID rclsid, DWORD dwClsContext, COSERVERINFO *pServerInfo,
@@ -1981,100 +2000,6 @@ HRESULT WINAPI CoResumeClassObjects(void)
 {
        FIXME("stub\n");
 	return S_OK;
-}
-
-/***********************************************************************
- *        GetClassFile (OLE32.@)
- *
- * This function supplies the CLSID associated with the given filename.
- */
-HRESULT WINAPI GetClassFile(LPCOLESTR filePathName,CLSID *pclsid)
-{
-    IStorage *pstg=0;
-    HRESULT res;
-    int nbElm, length, i;
-    LONG sizeProgId;
-    LPOLESTR *pathDec=0,absFile=0,progId=0;
-    LPWSTR extension;
-    static const WCHAR bkslashW[] = {'\\',0};
-    static const WCHAR dotW[] = {'.',0};
-
-    TRACE("%s, %p\n", debugstr_w(filePathName), pclsid);
-
-    /* if the file contain a storage object the return the CLSID written by IStorage_SetClass method*/
-    if((StgIsStorageFile(filePathName))==S_OK){
-
-        res=StgOpenStorage(filePathName,NULL,STGM_READ | STGM_SHARE_DENY_WRITE,NULL,0,&pstg);
-
-        if (SUCCEEDED(res))
-            res=ReadClassStg(pstg,pclsid);
-
-        IStorage_Release(pstg);
-
-        return res;
-    }
-    /* if the file is not a storage object then attemps to match various bits in the file against a
-       pattern in the registry. this case is not frequently used ! so I present only the psodocode for
-       this case
-
-     for(i=0;i<nFileTypes;i++)
-
-        for(i=0;j<nPatternsForType;j++){
-
-            PATTERN pat;
-            HANDLE  hFile;
-
-            pat=ReadPatternFromRegistry(i,j);
-            hFile=CreateFileW(filePathName,,,,,,hFile);
-            SetFilePosition(hFile,pat.offset);
-            ReadFile(hFile,buf,pat.size,&r,NULL);
-            if (memcmp(buf&pat.mask,pat.pattern.pat.size)==0){
-
-                *pclsid=ReadCLSIDFromRegistry(i);
-                return S_OK;
-            }
-        }
-     */
-
-    /* if the above strategies fail then search for the extension key in the registry */
-
-    /* get the last element (absolute file) in the path name */
-    nbElm=FileMonikerImpl_DecomposePath(filePathName,&pathDec);
-    absFile=pathDec[nbElm-1];
-
-    /* failed if the path represente a directory and not an absolute file name*/
-    if (!lstrcmpW(absFile, bkslashW))
-        return MK_E_INVALIDEXTENSION;
-
-    /* get the extension of the file */
-    extension = NULL;
-    length=lstrlenW(absFile);
-    for(i = length-1; (i >= 0) && *(extension = &absFile[i]) != '.'; i--)
-        /* nothing */;
-
-    if (!extension || !lstrcmpW(extension, dotW))
-        return MK_E_INVALIDEXTENSION;
-
-    res=RegQueryValueW(HKEY_CLASSES_ROOT, extension, NULL, &sizeProgId);
-
-    /* get the progId associated to the extension */
-    progId = CoTaskMemAlloc(sizeProgId);
-    res = RegQueryValueW(HKEY_CLASSES_ROOT, extension, progId, &sizeProgId);
-
-    if (res==ERROR_SUCCESS)
-        /* return the clsid associated to the progId */
-        res= CLSIDFromProgID(progId,pclsid);
-
-    for(i=0; pathDec[i]!=NULL;i++)
-        CoTaskMemFree(pathDec[i]);
-    CoTaskMemFree(pathDec);
-
-    CoTaskMemFree(progId);
-
-    if (res==ERROR_SUCCESS)
-        return res;
-
-    return MK_E_INVALIDEXTENSION;
 }
 
 /***********************************************************************

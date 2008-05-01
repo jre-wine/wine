@@ -51,7 +51,7 @@ enum x11drv_escape_codes
 };
 
 /* retrieve the X display to use on a given DC */
-inline static Display *get_display( HDC hdc )
+static inline Display *get_display( HDC hdc )
 {
     Display *display;
     enum x11drv_escape_codes escape = X11DRV_GET_DISPLAY;
@@ -291,18 +291,18 @@ static void select_shader_max_constants(
 
     switch (ps_selected_mode) {
         case SHADER_GLSL:
-            /* Subtract the other potential uniforms from the max available (bools & ints).
+            /* Subtract the other potential uniforms from the max available (bools & ints), and 2 states for fog.
              * In theory the texbem instruction may need one more shader constant too. But lets assume
              * that a sm <= 1.3 shader does not need all the uniforms provided by a glsl-capable card,
              * and lets not take away a uniform needlessly from all other shaders.
              */
-            gl_info->max_pshader_constantsF = gl_info->ps_glsl_constantsF - (MAX_CONST_B / 4) - MAX_CONST_I;
+            gl_info->max_pshader_constantsF = gl_info->ps_glsl_constantsF - (MAX_CONST_B / 4) - MAX_CONST_I - 2;
             break;
         case SHADER_ARB:
             /* The arb shader only loads the bump mapping environment matrix into the shader if it finds
-             * a free constant to do that, so no need to reduce the number of available constants.
+             * a free constant to do that, so only reduce the number of available constants by 2 for the fog states.
              */
-            gl_info->max_pshader_constantsF = gl_info->ps_arb_constantsF;
+            gl_info->max_pshader_constantsF = gl_info->ps_arb_constantsF - 2;
             break;
         default:
             gl_info->max_pshader_constantsF = 0;
@@ -798,6 +798,9 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
                 gl_info->vs_ati_version = VS_VERSION_11;
                 TRACE_(d3d_caps)(" FOUND: ATI (EXT) Vertex Shader support - version=%02x\n", gl_info->vs_ati_version);
                 gl_info->supported[EXT_VERTEX_SHADER] = TRUE;
+            } else if (strcmp(ThisExtn, "GL_ATI_envmap_bumpmap") == 0) {
+                TRACE_(d3d_caps)(" FOUND: ATI Environment Bump Mapping support\n");
+                gl_info->supported[ATI_ENVMAP_BUMPMAP] = TRUE;
             /**
              * Apple
              */
@@ -1662,6 +1665,21 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
             case WINED3DFMT_P8:
                 TRACE_(d3d_caps)("[OK]\n");
                 return WINED3D_OK;
+            case WINED3DFMT_R16F:
+            case WINED3DFMT_A16B16G16R16F:
+                if (!GL_SUPPORT(ARB_HALF_FLOAT_PIXEL)) {
+                    TRACE_(d3d_caps)("[FAILED]\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+                /* Fall through, support not fully determined yet. */
+            case WINED3DFMT_R32F:
+            case WINED3DFMT_A32B32G32R32F:
+                if (!GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
+                    TRACE_(d3d_caps)("[FAILED]\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+                TRACE_(d3d_caps)("[OK]\n");
+                return WINED3D_OK;
             default:
                 TRACE_(d3d_caps)("[FAILED]\n");
                 return WINED3DERR_NOTAVAILABLE;
@@ -1679,23 +1697,6 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
           return WINED3D_OK;
         default:
             break; /* Avoid compiler warnings */
-        }
-    }
-
-    if (GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
-
-        BOOL half_pixel_support = GL_SUPPORT(ARB_HALF_FLOAT_PIXEL);
-
-        switch (CheckFormat) {
-            case WINED3DFMT_R16F:
-            case WINED3DFMT_A16B16G16R16F:
-                if (!half_pixel_support) break;
-            case WINED3DFMT_R32F:
-            case WINED3DFMT_A32B32G32R32F:
-                TRACE_(d3d_caps)("[OK]\n");
-                return WINED3D_OK;
-            default:
-                break; /* Avoid compiler warnings */
         }
     }
 

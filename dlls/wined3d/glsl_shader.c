@@ -355,11 +355,11 @@ void shader_glsl_load_constants(
         /* Upload the environment bump map matrix if needed. The needsbumpmat member specifies the texture stage to load the matrix from.
          * It can't be 0 for a valid texbem instruction.
          */
-        if(((IWineD3DPixelShaderImpl *) pshader)->needsbumpmat != 0) {
+        if(((IWineD3DPixelShaderImpl *) pshader)->needsbumpmat != -1) {
             float *data = (float *) &stateBlock->textureState[(int) ((IWineD3DPixelShaderImpl *) pshader)->needsbumpmat][WINED3DTSS_BUMPENVMAT00];
             pos = GL_EXTCALL(glGetUniformLocationARB(programId, "bumpenvmat"));
             checkGLcall("glGetUniformLocationARB");
-            GL_EXTCALL(glUniform4fvARB(pos, 1, data));
+            GL_EXTCALL(glUniformMatrix2fvARB(pos, 1, 0, data));
             checkGLcall("glUniform4fvARB");
         }
     }
@@ -400,8 +400,8 @@ void shader_generate_glsl_declarations(
 
     if(!pshader)
         shader_addline(buffer, "uniform vec4 posFixup;\n");
-    else if(reg_maps->bumpmat)
-        shader_addline(buffer, "uniform vec4 bumpenvmat;\n");
+    else if(reg_maps->bumpmat != -1)
+        shader_addline(buffer, "uniform mat2 bumpenvmat;\n");
 
     /* Declare texture samplers */ 
     for (i = 0; i < This->baseShader.limits.sampler; i++) {
@@ -1472,8 +1472,13 @@ void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
         }
     } else {
         sampler_idx = arg->src[1] & WINED3DSP_REGNUM_MASK;
-        /* TODO: Handle D3DSI_TEXLD_PROJECTED... */
-        projected = FALSE;
+        if(arg->opcode_token & WINED3DSI_TEXLD_PROJECT) {
+                /* ps 2.0 texldp instruction always divides by the fourth component. */
+                projected = TRUE;
+                mask = WINED3DSP_WRITEMASK_3;
+        } else {
+            projected = FALSE;
+        }
     }
 
     sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
@@ -1783,43 +1788,56 @@ void pshader_glsl_texbem(SHADER_OPCODE_ARG* arg) {
     IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
     char dst_swizzle[6];
     glsl_sample_function_t sample_function;
+    glsl_src_param_t coord_param;
     DWORD sampler_type;
     DWORD sampler_idx;
-    BOOL projected;
-    DWORD mask = 0;
+    DWORD mask;
     DWORD flags;
     char coord_mask[6];
-
-    /* All versions have a destination register */
-    shader_glsl_append_dst(arg->buffer, arg);
 
     sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
     flags = deviceImpl->stateBlock->textureState[sampler_idx][WINED3DTSS_TEXTURETRANSFORMFLAGS];
 
-    /* TODO: Does texbem even support projected textures? half-life 2 uses it */
-    if (flags & WINED3DTTFF_PROJECTED) {
-        projected = TRUE;
-        switch (flags & ~WINED3DTTFF_PROJECTED) {
-            case WINED3DTTFF_COUNT1: FIXME("WINED3DTTFF_PROJECTED with WINED3DTTFF_COUNT1?\n"); break;
-            case WINED3DTTFF_COUNT2: mask = WINED3DSP_WRITEMASK_1; break;
-            case WINED3DTTFF_COUNT3: mask = WINED3DSP_WRITEMASK_2; break;
-            case WINED3DTTFF_COUNT4:
-            case WINED3DTTFF_DISABLE: mask = WINED3DSP_WRITEMASK_3; break;
-        }
-    } else {
-        projected = FALSE;
-    }
-
     sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
-    shader_glsl_get_sample_function(sampler_type, projected, &sample_function);
-    mask |= sample_function.coord_mask;
+    shader_glsl_get_sample_function(sampler_type, FALSE, &sample_function);
+    mask = sample_function.coord_mask;
 
     shader_glsl_get_write_mask(arg->dst, dst_swizzle);
 
     shader_glsl_get_write_mask(mask, coord_mask);
-    FIXME("Bump map transform not handled yet\n");
-    shader_addline(arg->buffer, "%s(Psampler%u, T%u%s)%s);\n",
-                   sample_function.name, sampler_idx, sampler_idx, coord_mask, dst_swizzle);
+
+    /* with projective textures, texbem only divides the static texture coord, not the displacement,
+         * so we can't let the GL handle this.
+         */
+    if (flags & WINED3DTTFF_PROJECTED) {
+        DWORD div_mask=0;
+        char coord_div_mask[3];
+        switch (flags & ~WINED3DTTFF_PROJECTED) {
+            case WINED3DTTFF_COUNT1: FIXME("WINED3DTTFF_PROJECTED with WINED3DTTFF_COUNT1?\n"); break;
+            case WINED3DTTFF_COUNT2: div_mask = WINED3DSP_WRITEMASK_1; break;
+            case WINED3DTTFF_COUNT3: div_mask = WINED3DSP_WRITEMASK_2; break;
+            case WINED3DTTFF_COUNT4:
+            case WINED3DTTFF_DISABLE: div_mask = WINED3DSP_WRITEMASK_3; break;
+        }
+        shader_glsl_get_write_mask(div_mask, coord_div_mask);
+        shader_addline(arg->buffer, "T%u%s /= T%u%s;\n", sampler_idx, coord_mask, sampler_idx, coord_div_mask);
+    }
+
+    shader_glsl_append_dst(arg->buffer, arg);
+    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_0|WINED3DSP_WRITEMASK_1, &coord_param);
+    shader_addline(arg->buffer, "%s(Psampler%u, T%u%s + vec4(bumpenvmat * %s, 0.0, 0.0)%s )%s);\n",
+                   sample_function.name, sampler_idx, sampler_idx, coord_mask, coord_param.param_str, coord_mask, dst_swizzle);
+}
+
+void pshader_glsl_bem(SHADER_OPCODE_ARG* arg) {
+    glsl_src_param_t src0_param, src1_param;
+
+    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_0|WINED3DSP_WRITEMASK_1, &src0_param);
+    shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], WINED3DSP_WRITEMASK_0|WINED3DSP_WRITEMASK_1, &src1_param);
+
+    shader_glsl_append_dst(arg->buffer, arg);
+    shader_addline(arg->buffer, "%s + bumpenvmat * %s);\n",
+                   src0_param.param_str, src1_param.param_str);
 }
 
 /** Process the WINED3DSIO_TEXREG2AR instruction in GLSL

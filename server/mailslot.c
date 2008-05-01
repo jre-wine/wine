@@ -66,6 +66,8 @@ struct mailslot
 static void mailslot_dump( struct object*, int );
 static struct fd *mailslot_get_fd( struct object * );
 static unsigned int mailslot_map_access( struct object *obj, unsigned int access );
+static struct object *mailslot_open_file( struct object *obj, unsigned int access,
+                                          unsigned int sharing, unsigned int options );
 static void mailslot_destroy( struct object * );
 
 static const struct object_ops mailslot_ops =
@@ -80,12 +82,13 @@ static const struct object_ops mailslot_ops =
     mailslot_get_fd,           /* get_fd */
     mailslot_map_access,       /* map_access */
     no_lookup_name,            /* lookup_name */
+    mailslot_open_file,        /* open_file */
     fd_close_handle,           /* close_handle */
     mailslot_destroy           /* destroy */
 };
 
 static enum server_fd_type mailslot_get_info( struct fd *fd, int *flags );
-static void mailslot_queue_async( struct fd *, void*, void*, void*, int, int );
+static void mailslot_queue_async( struct fd *fd, const async_data_t *data, int type, int count );
 
 static const struct fd_ops mailslot_fd_ops =
 {
@@ -124,6 +127,7 @@ static const struct object_ops mail_writer_ops =
     mail_writer_get_fd,         /* get_fd */
     mail_writer_map_access,     /* map_access */
     no_lookup_name,             /* lookup_name */
+    no_open_file,               /* open_file */
     fd_close_handle,            /* close_handle */
     mail_writer_destroy         /* destroy */
 };
@@ -152,6 +156,8 @@ static void mailslot_device_dump( struct object *obj, int verbose );
 static struct fd *mailslot_device_get_fd( struct object *obj );
 static struct object *mailslot_device_lookup_name( struct object *obj, struct unicode_str *name,
                                                    unsigned int attr );
+static struct object *mailslot_device_open_file( struct object *obj, unsigned int access,
+                                                 unsigned int sharing, unsigned int options );
 static void mailslot_device_destroy( struct object *obj );
 static enum server_fd_type mailslot_device_get_file_info( struct fd *fd, int *flags );
 
@@ -167,6 +173,7 @@ static const struct object_ops mailslot_device_ops =
     mailslot_device_get_fd,         /* get_fd */
     no_map_access,                  /* map_access */
     mailslot_device_lookup_name,    /* lookup_name */
+    mailslot_device_open_file,      /* open_file */
     fd_close_handle,                /* close_handle */
     mailslot_device_destroy         /* destroy */
 };
@@ -236,8 +243,44 @@ static unsigned int mailslot_map_access( struct object *obj, unsigned int access
     return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
-static void mailslot_queue_async( struct fd *fd, void *apc, void *user,
-                                  void *iosb, int type, int count )
+static struct object *mailslot_open_file( struct object *obj, unsigned int access,
+                                          unsigned int sharing, unsigned int options )
+{
+    struct mailslot *mailslot = (struct mailslot *)obj;
+    struct mail_writer *writer;
+
+    if (!(sharing & FILE_SHARE_READ))
+    {
+        set_error( STATUS_SHARING_VIOLATION );
+        return NULL;
+    }
+
+    if (!list_empty( &mailslot->writers ))
+    {
+        /* Readers and writers cannot be mixed.
+         * If there's more than one writer, all writers must open with FILE_SHARE_WRITE
+         */
+        writer = LIST_ENTRY( list_head(&mailslot->writers), struct mail_writer, entry );
+
+        if (((access & (GENERIC_WRITE|FILE_WRITE_DATA)) || (writer->access & FILE_WRITE_DATA)) &&
+           !((sharing & FILE_SHARE_WRITE) && (writer->sharing & FILE_SHARE_WRITE)))
+        {
+            set_error( STATUS_SHARING_VIOLATION );
+            return NULL;
+        }
+    }
+
+    if (!(writer = alloc_object( &mail_writer_ops ))) return NULL;
+    grab_object( mailslot );
+    writer->mailslot = mailslot;
+    writer->access   = mail_writer_map_access( &writer->obj, access );
+    writer->sharing  = sharing;
+
+    list_add_head( &mailslot->writers, &writer->entry );
+    return &writer->obj;
+}
+
+static void mailslot_queue_async( struct fd *fd, const async_data_t *data, int type, int count )
 {
     struct mailslot *mailslot = get_fd_user( fd );
 
@@ -260,9 +303,9 @@ static void mailslot_queue_async( struct fd *fd, void *apc, void *user,
     {
         struct timeval when = current_time;
         add_timeout( &when, mailslot->read_timeout );
-        fd_queue_async_timeout( fd, apc, user, iosb, type, count, &when );
+        fd_queue_async_timeout( fd, data, type, count, &when );
     }
-    else fd_queue_async_timeout( fd, apc, user, iosb, type, count, NULL );
+    else fd_queue_async_timeout( fd, data, type, count, NULL );
 }
 
 static void mailslot_device_dump( struct object *obj, int verbose )
@@ -289,6 +332,12 @@ static struct object *mailslot_device_lookup_name( struct object *obj, struct un
         name->len = 0;
 
     return found;
+}
+
+static struct object *mailslot_device_open_file( struct object *obj, unsigned int access,
+                                                 unsigned int sharing, unsigned int options )
+{
+    return grab_object( obj );
 }
 
 static void mailslot_device_destroy( struct object *obj )
@@ -335,7 +384,11 @@ static struct mailslot *create_mailslot( struct directory *root,
 
     if (!name || !name->len) return alloc_object( &mailslot_ops );
 
-    if (!(obj = find_object_dir( root, name, attr, &new_name ))) return NULL;
+    if (!(obj = find_object_dir( root, name, attr, &new_name )))
+    {
+        set_error( STATUS_OBJECT_NAME_INVALID );
+        return NULL;
+    }
 
     if (!new_name.len)
     {
@@ -352,7 +405,7 @@ static struct mailslot *create_mailslot( struct directory *root,
 
     if (obj->ops != &mailslot_device_ops)
     {
-        set_error( STATUS_OBJECT_TYPE_MISMATCH );
+        set_error( STATUS_OBJECT_NAME_INVALID );
         release_object( obj );
         return NULL;
     }
@@ -413,46 +466,10 @@ static struct fd *mail_writer_get_fd( struct object *obj )
 
 static unsigned int mail_writer_map_access( struct object *obj, unsigned int access )
 {
-    if (access & GENERIC_READ)    access |= FILE_GENERIC_READ;
+    /* mailslot writers can only get write access */
     if (access & GENERIC_WRITE)   access |= FILE_GENERIC_WRITE;
-    if (access & GENERIC_EXECUTE) access |= FILE_GENERIC_EXECUTE;
-    if (access & GENERIC_ALL)     access |= FILE_ALL_ACCESS;
+    if (access & GENERIC_ALL)     access |= FILE_GENERIC_WRITE;
     return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
-}
-
-/*
- * Readers and writers cannot be mixed.
- * If there's more than one writer, all writers must open with FILE_SHARE_WRITE
- */
-static struct mail_writer *create_mail_writer( struct mailslot *mailslot, unsigned int access,
-                                               unsigned int sharing )
-{
-    struct mail_writer *writer;
-
-    if (!list_empty( &mailslot->writers ))
-    {
-        writer = LIST_ENTRY( list_head(&mailslot->writers), struct mail_writer, entry );
-
-        if (((access & (GENERIC_WRITE|FILE_WRITE_DATA)) || (writer->access & FILE_WRITE_DATA)) &&
-           !((sharing & FILE_SHARE_WRITE) && (writer->sharing & FILE_SHARE_WRITE)))
-        {
-            set_error( STATUS_SHARING_VIOLATION );
-            return NULL;
-        }
-    }
-
-    writer = alloc_object( &mail_writer_ops );
-    if (!writer)
-        return NULL;
-
-    grab_object( mailslot );
-    writer->mailslot = mailslot;
-    writer->access   = mail_writer_map_access( &writer->obj, access );
-    writer->sharing  = sharing;
-
-    list_add_head( &mailslot->writers, &writer->entry );
-
-    return writer;
 }
 
 static struct mailslot *get_mailslot_obj( struct process *process, obj_handle_t handle,
@@ -482,44 +499,6 @@ DECL_HANDLER(create_mailslot)
     }
 
     if (root) release_object( root );
-}
-
-
-/* open an existing mailslot */
-DECL_HANDLER(open_mailslot)
-{
-    struct mailslot *mailslot;
-    struct unicode_str name;
-    struct directory *root = NULL;
-
-    reply->handle = 0;
-    get_req_unicode_str( &name );
-
-    if (!(req->sharing & FILE_SHARE_READ))
-    {
-        set_error( STATUS_SHARING_VIOLATION );
-        return;
-    }
-
-    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
-        return;
-    mailslot = open_object_dir( root, &name, req->attributes, &mailslot_ops );
-    if (root) release_object( root );
-
-    if (mailslot)
-    {
-        struct mail_writer *writer;
-
-        writer = create_mail_writer( mailslot, req->access, req->sharing );
-        if (writer)
-        {
-            reply->handle = alloc_handle( current->process, writer, req->access, req->attributes );
-            release_object( writer );
-        }
-        release_object( mailslot );
-    }
-    else
-        set_error( STATUS_NO_SUCH_FILE );
 }
 
 

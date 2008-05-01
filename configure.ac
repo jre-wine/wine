@@ -335,6 +335,7 @@ then
     AC_CHECK_HEADERS([X11/Xlib.h \
                       X11/XKBlib.h \
                       X11/Xutil.h \
+                      X11/Xcursor/Xcursor.h \
                       X11/extensions/shape.h \
                       X11/extensions/XInput.h \
                       X11/extensions/XShm.h \
@@ -457,7 +458,11 @@ then
          [AC_CHECK_HEADERS(audio/soundlib.h,,,[#include <audio/audiolib.h>])
           AC_CHECK_LIB(audio,AuCreateFlow,
                        [AC_DEFINE(HAVE_NAS,1,[Define if you have NAS including devel headers])
-                        NASLIBS="-laudio -lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS"],,
+                        AC_CHECK_LIB(Xau,XauGetBestAuthByAddr,
+                          [NASLIBS="-lXau -laudio -lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS"],
+                          [NASLIBS="-laudio -lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS"],
+                          [$X_LIBS])
+                       ],,
                        [-lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS])])
 
     CPPFLAGS="$ac_save_CPPFLAGS"
@@ -1156,6 +1161,7 @@ then
   WINE_GET_SONAME(Xinerama,XineramaQueryScreens,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
   WINE_GET_SONAME(Xrender,XRenderQueryExtension,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
   WINE_GET_SONAME(Xrandr,XRRQueryExtension,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
+  WINE_GET_SONAME(Xcursor,XcursorImageLoadCursor,[$X_LIBS -lX11 $X_EXTRA_LIBS])
   WINE_GET_SONAME(freetype,FT_Init_FreeType,[$X_LIBS])
   WINE_GET_SONAME(GL,glXQueryExtension,[$X_LIBS $X_EXTRA_LIBS])
   WINE_GET_SONAME(hal,libhal_ctx_new)
@@ -1818,6 +1824,7 @@ AC_CONFIG_FILES([programs/regedit/Makefile])
 AC_CONFIG_FILES([programs/regsvr32/Makefile])
 AC_CONFIG_FILES([programs/rpcss/Makefile])
 AC_CONFIG_FILES([programs/rundll32/Makefile])
+AC_CONFIG_FILES([programs/spoolsv/Makefile])
 AC_CONFIG_FILES([programs/start/Makefile])
 AC_CONFIG_FILES([programs/taskmgr/Makefile])
 AC_CONFIG_FILES([programs/uninstaller/Makefile])
@@ -1836,6 +1843,7 @@ AC_CONFIG_FILES([programs/winevdm/Makefile])
 AC_CONFIG_FILES([programs/winhelp/Makefile])
 AC_CONFIG_FILES([programs/winver/Makefile])
 AC_CONFIG_FILES([programs/wordpad/Makefile])
+AC_CONFIG_FILES([programs/xcopy/Makefile])
 AC_CONFIG_FILES([server/Makefile])
 AC_CONFIG_FILES([tools/Makefile])
 AC_CONFIG_FILES([tools/widl/Makefile])

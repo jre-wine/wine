@@ -28,6 +28,9 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include "wcmd.h"
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(cmd);
 
 int WCMD_dir_sort (const void *a, const void *b);
 void WCMD_list_directory (char *path, int level);
@@ -59,7 +62,9 @@ static int shortname, usernames;
 static ULONGLONG byte_total;
 static DISPLAYTIME dirTime;
 static DISPLAYORDER dirOrder;
-static BOOL orderReverse, orderGroupDirs, orderGroupDirsReverse;
+static BOOL orderReverse, orderGroupDirs, orderGroupDirsReverse, orderByCol;
+static BOOL separator;
+static ULONG showattrs, attrsbits;
 
 /*****************************************************************************
  * WCMD_directory
@@ -75,67 +80,176 @@ void WCMD_directory (void) {
   ULARGE_INTEGER avail, total, free;
   CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
   char *p;
+  char string[MAXSTRING];
+
+  errorlevel = 0;
+
+  /* Prefill Quals with (uppercased) DIRCMD env var */
+  if (GetEnvironmentVariable ("DIRCMD", string, sizeof(string))) {
+    p = string;
+    while ( (*p = toupper(*p)) ) ++p;
+    strcat(string,quals);
+    strcpy(quals, string);
+  }
 
   byte_total = 0;
   file_total = dir_total = 0;
+
+  /* Initialize all flags to their defaults as if no DIRCMD or quals */
+  paged_mode = FALSE;
+  recurse    = FALSE;
+  wide       = FALSE;
+  bare       = FALSE;
+  lower      = FALSE;
+  shortname  = FALSE;
+  usernames  = FALSE;
+  orderByCol = FALSE;
+  separator  = TRUE;
   dirTime = Written;
   dirOrder = Name;
   orderReverse = FALSE;
   orderGroupDirs = FALSE;
   orderGroupDirsReverse = FALSE;
+  showattrs  = 0;
+  attrsbits  = 0;
 
-  /* Handle args */
-  paged_mode = (strstr(quals, "/P") != NULL);
-  recurse    = (strstr(quals, "/S") != NULL);
-  wide       = (strstr(quals, "/W") != NULL);
-  bare       = (strstr(quals, "/B") != NULL);
-  lower      = (strstr(quals, "/L") != NULL);
-  shortname  = (strstr(quals, "/X") != NULL);
-  usernames  = (strstr(quals, "/Q") != NULL);
+  /* Handle args - Loop through so right most is the effective one */
+  /* Note: /- appears to be a negate rather than an off, eg. dir
+           /-W is wide, or dir /w /-w /-w is also wide             */
+  p = quals;
+  while (*p && (*p=='/' || *p==' ')) {
+    BOOL negate = FALSE;
+    if (*p++==' ') continue;  /* Skip / and blanks introduced through DIRCMD */
 
-  if ((p = strstr(quals, "/T")) != NULL) {
-    p = p + 2;
-    if (*p==':') p++;  /* Skip optional : */
-
-    if (*p == 'A') dirTime = Access;
-    else if (*p == 'C') dirTime = Creation;
-    else if (*p == 'W') dirTime = Written;
-
-    /* Support /T and /T: with no parms, default to written */
-    else if (*p == '/') dirTime = Written;
-    else {
-      SetLastError(ERROR_INVALID_PARAMETER);
-      WCMD_print_error();
-      return;
-    }
-  }
-
-  if ((p = strstr(quals, "/O")) != NULL) {
-    p = p + 2;
-    if (*p==':') p++;  /* Skip optional : */
-    while (*p && *p != '/') {
-      switch (*p) {
-      case 'N': dirOrder = Name;       break;
-      case 'E': dirOrder = Extension;  break;
-      case 'S': dirOrder = Size;       break;
-      case 'D': dirOrder = Date;       break;
-      case '-': if (*(p+1)=='G') orderGroupDirsReverse=TRUE;
-                else orderReverse = TRUE;
-                break;
-      case 'G': orderGroupDirs = TRUE; break;
-      default:
-          SetLastError(ERROR_INVALID_PARAMETER);
-          WCMD_print_error();
-          return;
-      }
+    if (*p=='-') {
+      negate = TRUE;
       p++;
     }
+
+    WINE_TRACE("Processing arg '%c' (in %s)\n", *p, quals);
+    switch (*p) {
+    case 'P': if (negate) paged_mode = !paged_mode;
+              else paged_mode = TRUE;
+              break;
+    case 'S': if (negate) recurse = !recurse;
+              else recurse = TRUE;
+              break;
+    case 'W': if (negate) wide = !wide;
+              else wide = TRUE;
+              break;
+    case 'B': if (negate) bare = !bare;
+              else bare = TRUE;
+              break;
+    case 'L': if (negate) lower = !lower;
+              else lower = TRUE;
+              break;
+    case 'X': if (negate) shortname = !shortname;
+              else shortname = TRUE;
+              break;
+    case 'Q': if (negate) usernames = !usernames;
+              else usernames = TRUE;
+              break;
+    case 'D': if (negate) orderByCol = !orderByCol;
+              else orderByCol = TRUE;
+              break;
+    case 'C': if (negate) separator = !separator;
+              else separator = TRUE;
+              break;
+    case 'T': p = p + 1;
+              if (*p==':') p++;  /* Skip optional : */
+
+              if (*p == 'A') dirTime = Access;
+              else if (*p == 'C') dirTime = Creation;
+              else if (*p == 'W') dirTime = Written;
+
+              /* Support /T and /T: with no parms, default to written */
+              else if (*p == 0x00 || *p == '/') {
+                dirTime = Written;
+                p = p - 1; /* So when step on, move to '/' */
+              } else {
+                SetLastError(ERROR_INVALID_PARAMETER);
+                WCMD_print_error();
+                errorlevel = 1;
+                return;
+              }
+              break;
+    case 'O': p = p + 1;
+              if (*p==':') p++;  /* Skip optional : */
+              while (*p && *p != '/') {
+                WINE_TRACE("Processing subparm '%c' (in %s)\n", *p, quals);
+                switch (*p) {
+                case 'N': dirOrder = Name;       break;
+                case 'E': dirOrder = Extension;  break;
+                case 'S': dirOrder = Size;       break;
+                case 'D': dirOrder = Date;       break;
+                case '-': if (*(p+1)=='G') orderGroupDirsReverse=TRUE;
+                          else orderReverse = TRUE;
+                          break;
+                case 'G': orderGroupDirs = TRUE; break;
+                default:
+                    SetLastError(ERROR_INVALID_PARAMETER);
+                    WCMD_print_error();
+                    errorlevel = 1;
+                    return;
+                }
+                p++;
+              }
+              p = p - 1; /* So when step on, move to '/' */
+              break;
+    case 'A': p = p + 1;
+              showattrs = 0;
+              attrsbits = 0;
+              if (*p==':') p++;  /* Skip optional : */
+              while (*p && *p != '/') {
+                BOOL anegate = FALSE;
+                ULONG mask;
+
+                /* Note /A: - options are 'offs' not toggles */
+                if (*p=='-') {
+                  anegate = TRUE;
+                  p++;
+                }
+
+                WINE_TRACE("Processing subparm '%c' (in %s)\n", *p, quals);
+                switch (*p) {
+                case 'D': mask = FILE_ATTRIBUTE_DIRECTORY; break;
+                case 'H': mask = FILE_ATTRIBUTE_HIDDEN;    break;
+                case 'S': mask = FILE_ATTRIBUTE_SYSTEM;    break;
+                case 'R': mask = FILE_ATTRIBUTE_READONLY;  break;
+                case 'A': mask = FILE_ATTRIBUTE_ARCHIVE;   break;
+                default:
+                    SetLastError(ERROR_INVALID_PARAMETER);
+                    WCMD_print_error();
+                    errorlevel = 1;
+                    return;
+                }
+
+                /* Keep running list of bits we care about */
+                attrsbits |= mask;
+
+                /* Mask shows what MUST be in the bits we care about */
+                if (anegate) showattrs = showattrs & ~mask;
+                else showattrs |= mask;
+
+                p++;
+              }
+              p = p - 1; /* So when step on, move to '/' */
+              WINE_TRACE("Result: showattrs %x, bits %x\n", showattrs, attrsbits);
+              break;
+    default:
+              SetLastError(ERROR_INVALID_PARAMETER);
+              WCMD_print_error();
+              errorlevel = 1;
+              return;
+    }
+    p = p + 1;
   }
 
   /* Handle conflicting args and initialization */
   if (bare || shortname) wide = FALSE;
   if (bare) shortname = FALSE;
   if (wide) usernames = FALSE;
+  if (orderByCol) wide = TRUE;
 
   if (wide) {
       if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &consoleInfo))
@@ -152,6 +266,7 @@ void WCMD_directory (void) {
   if (!status) {
     WCMD_print_error();
     if (paged_mode) WCMD_leave_paged_mode();
+    errorlevel = 1;
     return;
   }
   lstrcpyn (drive, path, 3);
@@ -160,6 +275,7 @@ void WCMD_directory (void) {
      status = WCMD_volume (0, drive);
      if (!status) {
          if (paged_mode) WCMD_leave_paged_mode();
+       errorlevel = 1;
        return;
      }
   }
@@ -168,7 +284,7 @@ void WCMD_directory (void) {
   lstrcpyn (drive, path, 4);
   GetDiskFreeSpaceEx (drive, &avail, &total, &free);
 
-  if (!bare) {
+  if (errorlevel==0 && !bare) {
      if (recurse) {
        WCMD_output ("\n\n     Total files listed:\n%8d files%25s bytes\n",
             file_total, WCMD_filesize64 (byte_total));
@@ -203,6 +319,8 @@ void WCMD_list_directory (char *search_path, int level) {
   SYSTEMTIME st;
   HANDLE hff;
   int status, dir_count, file_count, entry_count, i, widest, cur_width, tmp_width;
+  int numCols, numRows;
+  int rows, cols;
   ULARGE_INTEGER byte_count, file_size;
 
   dir_count = 0;
@@ -242,13 +360,17 @@ void WCMD_list_directory (char *search_path, int level) {
     SetLastError (ERROR_FILE_NOT_FOUND);
     WCMD_print_error ();
     HeapFree(GetProcessHeap(),0,fd);
+    errorlevel = 1;
     return;
   }
   do {
+    /* Skip any which are filtered out by attribute */
+    if (((fd+entry_count)->dwFileAttributes & attrsbits) != showattrs) continue;
+
     entry_count++;
 
     /* Keep running track of longest filename for wide output */
-    if (wide) {
+    if (wide || orderByCol) {
        int tmpLen = strlen((fd+(entry_count-1))->cFileName) + 3;
        if ((fd+(entry_count-1))->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) tmpLen = tmpLen + 2;
        if (tmpLen > widest) widest = tmpLen;
@@ -258,10 +380,20 @@ void WCMD_list_directory (char *search_path, int level) {
     if (fd == NULL) {
       FindClose (hff);
       WCMD_output ("Memory Allocation Error");
-       return;
+      errorlevel = 1;
+      return;
     }
   } while (FindNextFile(hff, (fd+entry_count)) != 0);
   FindClose (hff);
+
+  /* Handle case where everything is filtered out */
+  if (entry_count == 0) {
+    SetLastError (ERROR_FILE_NOT_FOUND);
+    WCMD_print_error ();
+    HeapFree(GetProcessHeap(),0,fd);
+    errorlevel = 1;
+    return;
+  }
 
   /* Sort the list of files */
   qsort (fd, entry_count, sizeof(WIN32_FIND_DATA), WCMD_dir_sort);
@@ -272,8 +404,30 @@ void WCMD_list_directory (char *search_path, int level) {
      WCMD_output ("Directory of %s\n\n", real_path);
   }
 
-  for (i=0; i<entry_count; i++) {
+  /* Work out the number of columns */
+  WINE_TRACE("%d entries, maxwidth=%d, widest=%d\n", entry_count, max_width, widest);
+  if (wide || orderByCol) {
+    numCols = max(1, (int)max_width / widest);
+    numRows = entry_count / numCols;
+    if (entry_count % numCols) numRows++;
+  } else {
+    numCols = 1;
+    numRows = entry_count;
+  }
+  WINE_TRACE("cols=%d, rows=%d\n", numCols, numRows);
+
+  for (rows=0; rows<numRows; rows++) {
+   for (cols=0; cols<numCols; cols++) {
     char username[24];
+
+    /* Work out the index of the entry being pointed to */
+    if (orderByCol) {
+      i = (cols * numRows) + rows;
+      if (i >= entry_count) continue;
+    } else {
+      i = (rows * numCols) + cols;
+      if (i >= entry_count) continue;
+    }
 
     /* /L convers all names to lower case */
     if (lower) {
@@ -320,7 +474,6 @@ void WCMD_list_directory (char *search_path, int level) {
       cur_width = cur_width + widest;
 
       if ((cur_width + widest) > max_width) {
-          WCMD_output ("\n");
           cur_width = 0;
       } else {
           WCMD_output ("%*.s", (tmp_width - cur_width) ,"");
@@ -333,11 +486,11 @@ void WCMD_list_directory (char *search_path, int level) {
          WCMD_output ("%10s  %8s  <DIR>         ", datestring, timestring);
          if (shortname) WCMD_output ("%-13s", (fd+i)->cAlternateFileName);
          if (usernames) WCMD_output ("%-23s", username);
-         WCMD_output("%s\n",(fd+i)->cFileName);
+         WCMD_output("%s",(fd+i)->cFileName);
       } else {
          if (!((strcmp((fd+i)->cFileName, ".") == 0) ||
                (strcmp((fd+i)->cFileName, "..") == 0))) {
-            WCMD_output ("%s%s\n", recurse?real_path:"", (fd+i)->cFileName);
+            WCMD_output ("%s%s", recurse?real_path:"", (fd+i)->cFileName);
          }
       }
     }
@@ -351,15 +504,14 @@ void WCMD_list_directory (char *search_path, int level) {
                       WCMD_filesize64(file_size.QuadPart));
          if (shortname) WCMD_output ("%-13s", (fd+i)->cAlternateFileName);
          if (usernames) WCMD_output ("%-23s", username);
-         WCMD_output("%s\n",(fd+i)->cFileName);
+         WCMD_output("%s",(fd+i)->cFileName);
       } else {
-         WCMD_output ("%s%s\n", recurse?real_path:"", (fd+i)->cFileName);
+         WCMD_output ("%s%s", recurse?real_path:"", (fd+i)->cFileName);
       }
     }
-  }
-
-  if (wide && cur_width>0) {
-      WCMD_output ("\n");
+   }
+   WCMD_output ("\n");
+   cur_width = 0;
   }
 
   if (!bare) {
@@ -414,7 +566,7 @@ char * WCMD_filesize64 (ULONGLONG n) {
   p = buff;
   i = -3;
   do {
-    if ((++i)%3 == 1) *p++ = ',';
+    if (separator && ((++i)%3 == 1)) *p++ = ',';
     q = n / 10;
     r = n - (q * 10);
     *p++ = r + '0';
