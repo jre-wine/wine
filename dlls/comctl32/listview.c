@@ -7458,7 +7458,23 @@ static HWND LISTVIEW_SetToolTips( LISTVIEW_INFO *infoPtr, HWND hwndNewToolTip)
   return hwndOldToolTip;
 }
 
-/* LISTVIEW_SetUnicodeFormat */
+/*
+ * DESCRIPTION:
+ *   sets the Unicode character format flag for the control
+ * PARAMETER(S):
+ *    [I] infoPtr         :valid pointer to the listview structure
+ *    [I] fUnicode        :true to switch to UNICODE false to switch to ANSI
+ *
+ * RETURN:
+ *    Old Unicode Format
+ */
+static BOOL LISTVIEW_SetUnicodeFormat( LISTVIEW_INFO *infoPtr, BOOL fUnicode)
+{
+  BOOL rc = infoPtr->notifyFormat;
+  infoPtr->notifyFormat = (fUnicode)?NFR_UNICODE:NFR_ANSI;
+  return rc;
+}
+
 /* LISTVIEW_SetWorkAreas */
 
 /***
@@ -7686,7 +7702,6 @@ static CALLBACK VOID LISTVIEW_DelayedEditItem(HWND hwnd, UINT uMsg, UINT_PTR idE
 static LRESULT LISTVIEW_NCCreate(HWND hwnd, const CREATESTRUCTW *lpcs)
 {
   LISTVIEW_INFO *infoPtr;
-  UINT uView = lpcs->style & LVS_TYPEMASK;
   LOGFONTW logFont;
 
   TRACE("(lpcs=%p)\n", lpcs);
@@ -7698,7 +7713,7 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, const CREATESTRUCTW *lpcs)
   SetWindowLongPtrW(hwnd, 0, (DWORD_PTR)infoPtr);
 
   infoPtr->hwndSelf = hwnd;
-  infoPtr->dwStyle = lpcs->style;
+  infoPtr->dwStyle = lpcs->style;    /* Note: may be changed in WM_CREATE */
   /* determine the type of structures to use */
   infoPtr->hwndNotify = lpcs->hwndParent;
   /* infoPtr->notifyFormat will be filled in WM_CREATE */
@@ -7736,10 +7751,6 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, const CREATESTRUCTW *lpcs)
   if (!(infoPtr->hdpaPosX  = DPA_Create(10))) goto fail;
   if (!(infoPtr->hdpaPosY  = DPA_Create(10))) goto fail;
   if (!(infoPtr->hdpaColumns = DPA_Create(10))) goto fail;
-
-  /* initialize the icon sizes */
-  set_icon_size(&infoPtr->iconSize, infoPtr->himlNormal, uView != LVS_ICON);
-  set_icon_size(&infoPtr->iconStateSize, infoPtr->himlState, TRUE);
   return TRUE;
 
 fail:
@@ -7773,6 +7784,7 @@ static LRESULT LISTVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
 
   TRACE("(lpcs=%p)\n", lpcs);
 
+  infoPtr->dwStyle = lpcs->style;
   infoPtr->notifyFormat = SendMessageW(infoPtr->hwndNotify, WM_NOTIFYFORMAT,
                                        (WPARAM)infoPtr->hwndSelf, (LPARAM)NF_QUERY);
 
@@ -7808,6 +7820,9 @@ static LRESULT LISTVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
 
   OpenThemeData(hwnd, themeClass);
 
+  /* initialize the icon sizes */
+  set_icon_size(&infoPtr->iconSize, infoPtr->himlNormal, uView != LVS_ICON);
+  set_icon_size(&infoPtr->iconStateSize, infoPtr->himlState, TRUE);
   return 0;
 }
 
@@ -8783,6 +8798,9 @@ static LRESULT LISTVIEW_Paint(LISTVIEW_INFO *infoPtr, HDC hdc)
 	    LISTVIEW_Arrange(infoPtr, LVA_DEFAULT);
 	LISTVIEW_UpdateScroll(infoPtr);
     }
+
+    UpdateWindow(infoPtr->hwndHeader);
+
     if (hdc) 
 	LISTVIEW_Refresh(infoPtr, hdc);
     else
@@ -9604,7 +9622,8 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
   case LVM_SETTOOLTIPS:
     return (LRESULT)LISTVIEW_SetToolTips(infoPtr, (HWND)lParam);
 
-  /* case LVM_SETUNICODEFORMAT: */
+  case LVM_SETUNICODEFORMAT:
+    return LISTVIEW_SetUnicodeFormat(infoPtr, wParam);
 
   /* case LVM_SETVIEW: */
 

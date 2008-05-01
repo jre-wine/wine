@@ -4,7 +4,7 @@
  * Copyright (C) 1995, Alexandre Julliard
  * Copyright (C) 1996, Eric Youngdale.
  * Copyright (C) 1999-2000, Ulrich Weigand.
- * Copyright (C) 2004, Eric Pouech.
+ * Copyright (C) 2004-2007, Eric Pouech.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -28,6 +28,8 @@
 #include "dbghelp.h"
 #include "objbase.h"
 #include "oaidl.h"
+#include "winnls.h"
+#include "wine/unicode.h"
 
 #include "cvconst.h"
 
@@ -310,13 +312,17 @@ struct process;
 
 struct module
 {
-    IMAGEHLP_MODULE64           module;
+    IMAGEHLP_MODULEW64          module;
+    /* ANSI copy of module.ModuleName for efficiency */
+    char                        module_name[MAX_PATH];
     struct module*              next;
     enum module_type		type : 16;
     unsigned short              is_virtual : 1;
+
+    /* specific information for debug types */
     struct elf_module_info*	elf_info;
     struct dwarf2_module_info_s*dwarf2_info;
-    
+
     /* memory allocation pool */
     struct pool                 pool;
 
@@ -410,13 +416,13 @@ extern void*        fetch_buffer(struct process* pcs, unsigned size);
 
 /* elf_module.c */
 #define ELF_NO_MAP      ((const void*)0xffffffff)
-typedef BOOL (*elf_enum_modules_cb)(const char*, unsigned long addr, void* user);
+typedef BOOL (*elf_enum_modules_cb)(const WCHAR*, unsigned long addr, void* user);
 extern BOOL         elf_enum_modules(HANDLE hProc, elf_enum_modules_cb, void*);
-extern BOOL         elf_fetch_file_info(const char* name, DWORD* base, DWORD* size, DWORD* checksum);
+extern BOOL         elf_fetch_file_info(const WCHAR* name, DWORD* base, DWORD* size, DWORD* checksum);
 struct elf_file_map;
 extern BOOL         elf_load_debug_info(struct module* module, struct elf_file_map* fmap);
 extern struct module*
-                    elf_load_module(struct process* pcs, const char* name, unsigned long);
+                    elf_load_module(struct process* pcs, const WCHAR* name, unsigned long);
 extern BOOL         elf_read_wine_loader_dbg_info(struct process* pcs);
 extern BOOL         elf_synchronize_module_list(struct process* pcs);
 struct elf_thunk_area;
@@ -424,15 +430,24 @@ extern int          elf_is_in_thunk_area(unsigned long addr, const struct elf_th
 extern DWORD WINAPI addr_to_linear(HANDLE hProcess, HANDLE hThread, ADDRESS* addr);
 
 /* module.c */
+extern const WCHAR      S_ElfW[];
+extern const WCHAR      S_WineLoaderW[];
+extern const WCHAR      S_WinePThreadW[];
+extern const WCHAR      S_WineKThreadW[];
+extern const WCHAR      S_SlashW[];
+
 extern struct module*
                     module_find_by_addr(const struct process* pcs, unsigned long addr,
                                         enum module_type type);
 extern struct module*
-                    module_find_by_name(const struct process* pcs, 
-                                        const char* name, enum module_type type);
+                    module_find_by_name(const struct process* pcs,
+                                        const WCHAR* name, enum module_type type);
+extern struct module*
+                    module_find_by_nameA(const struct process* pcs,
+                                         const char* name, enum module_type type);
 extern BOOL         module_get_debug(struct module_pair*);
 extern struct module*
-                    module_new(struct process* pcs, const char* name, 
+                    module_new(struct process* pcs, const WCHAR* name,
                                enum module_type type, BOOL virtual,
                                unsigned long addr, unsigned long size,
                                unsigned long stamp, unsigned long checksum);
@@ -443,12 +458,14 @@ extern struct module*
                     module_get_containee(const struct process* pcs,
                                          const struct module* inner);
 extern enum module_type
-                    module_get_type_by_name(const char* name);
+                    module_get_type_by_name(const WCHAR* name);
 extern void         module_reset_debug_info(struct module* module);
-extern BOOL         module_remove(struct process* pcs, 
+extern BOOL         module_remove(struct process* pcs,
                                   struct module* module);
+extern void         module_set_module(struct module* module, const WCHAR* name);
+
 /* msc.c */
-extern BOOL         pe_load_debug_directory(const struct process* pcs, 
+extern BOOL         pe_load_debug_directory(const struct process* pcs,
                                             struct module* module, 
                                             const BYTE* mapping,
                                             const IMAGE_SECTION_HEADER* sectp, DWORD nsect,
@@ -458,12 +475,12 @@ extern BOOL         pdb_fetch_file_info(struct pdb_lookup* pdb_lookup);
 /* pe_module.c */
 extern BOOL         pe_load_nt_header(HANDLE hProc, DWORD base, IMAGE_NT_HEADERS* nth);
 extern struct module*
-                    pe_load_module(struct process* pcs, const char* name,
+                    pe_load_module(struct process* pcs, const WCHAR* name,
                                    HANDLE hFile, DWORD base, DWORD size);
 extern struct module*
-                    pe_load_module_from_pcs(struct process* pcs, const char* name, 
-                                            const char* mod_name, DWORD base, DWORD size);
-extern BOOL         pe_load_debug_info(const struct process* pcs, 
+                    pe_load_module_from_pcs(struct process* pcs, const WCHAR* name,
+                                            const WCHAR* mod_name, DWORD base, DWORD size);
+extern BOOL         pe_load_debug_info(const struct process* pcs,
                                        struct module* module);
 /* source.c */
 extern unsigned     source_new(struct module* module, const char* basedir, const char* source);

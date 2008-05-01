@@ -1124,7 +1124,8 @@ static WORD EVENT_event_to_vkey( XIC xic, XKeyEvent *e)
     Status status;
     char buf[24];
 
-    if (xic)
+    /* Clients should pass only KeyPress events to XmbLookupString */
+    if (xic && e->type == KeyPress)
         XmbLookupString(xic, e, buf, sizeof(buf), &keysym, &status);
     else
         XLookupString(e, buf, sizeof(buf), &keysym, NULL);
@@ -1365,7 +1366,8 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
 		event->type, event->window, event->state, event->keycode);
 
     wine_tsx11_lock();
-    if (xic)
+    /* Clients should pass only KeyPress events to XmbLookupString */
+    if (xic && event->type == KeyPress)
         ascii_chars = XmbLookupString(xic, event, Str, sizeof(Str), &keysym, &status);
     else
         ascii_chars = XLookupString(event, Str, sizeof(Str), &keysym, NULL);
@@ -1833,8 +1835,12 @@ void X11DRV_InitKeyboard(void)
  */
 SHORT X11DRV_GetAsyncKeyState(INT key)
 {
-    SHORT retval = ((key_state_table[key] & 0x40) ? 0x0001 : 0) |
-                   ((key_state_table[key] & 0x80) ? 0x8000 : 0);
+    SHORT retval;
+
+    X11DRV_MsgWaitForMultipleObjectsEx( 0, NULL, 0, QS_KEY, 0 );
+
+    retval = ((key_state_table[key] & 0x40) ? 0x0001 : 0) |
+             ((key_state_table[key] & 0x80) ? 0x8000 : 0);
     key_state_table[key] &= ~0x40;
     TRACE_(key)("(%x) -> %x\n", key, retval);
     return retval;
@@ -2486,6 +2492,9 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
     TRACE_(key)("type %d, window %lx, state 0x%04x, keycode 0x%04x\n",
 		e.type, e.window, e.state, e.keycode);
 
+    /* Clients should pass only KeyPress events to XmbLookupString,
+     * e.type was set to KeyPress above.
+     */
     if (xic)
         ret = XmbLookupString(xic, &e, lpChar, sizeof(lpChar), &keysym, &status);
     else

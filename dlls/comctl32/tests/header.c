@@ -520,7 +520,7 @@ static void test_hdm_getitemrect(void)
     expect(80, rect.right);
     expect(18, rect.bottom);
     retVal = SendMessage(hWndHeader, HDM_GETITEMRECT, 10, (LPARAM) &rect);
-    ok(retVal == 0, "Getting rect of non-existing item should return 0, got %d\n", retVal);
+    ok(retVal == 0, "Getting rect of nonexistent item should return 0, got %d\n", retVal);
 }
 
 static void test_hdm_layout (void)
@@ -596,9 +596,9 @@ static void test_hdm_sethotdivider (void)
 
 static void test_hdm_imageMessages (void)
 {
-    HIMAGELIST hImageList;
+    HIMAGELIST hImageList = ImageList_Create (4, 4, 0, 1, 0);
     HIMAGELIST hImageListRetVal;
-    hImageListRetVal = (HIMAGELIST) SendMessage(hWndHeader, HDM_SETIMAGELIST, 0, (LPARAM) &hImageList);
+    hImageListRetVal = (HIMAGELIST) SendMessage(hWndHeader, HDM_SETIMAGELIST, 0, (LPARAM) hImageList);
     ok(hImageListRetVal == NULL, "Expected NULL, got %d\n", (int) hImageListRetVal);
     hImageListRetVal = (HIMAGELIST) SendMessage(hWndHeader, HDM_GETIMAGELIST, 0, 0);
     ok(hImageListRetVal != NULL, "Expected non-NULL handle, got %d\n", (int) hImageListRetVal);
@@ -1052,7 +1052,9 @@ static void init(void) {
     RegisterClassA(&wc);
 
     hHeaderParentWnd = CreateWindowExA(0, "HeaderTestClass", "Header test", WS_OVERLAPPEDWINDOW, 
-      CW_USEDEFAULT, CW_USEDEFAULT, 680, 260, NULL, NULL, GetModuleHandleA(NULL), 0);
+      CW_USEDEFAULT, CW_USEDEFAULT, 672+2*GetSystemMetrics(SM_CXSIZEFRAME),
+      226+GetSystemMetrics(SM_CYCAPTION)+2*GetSystemMetrics(SM_CYSIZEFRAME),
+      NULL, NULL, GetModuleHandleA(NULL), 0);
     assert(hHeaderParentWnd != NULL);
     ShowWindow(hHeaderParentWnd, SW_SHOW);
 }

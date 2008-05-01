@@ -1,7 +1,7 @@
 /*
- * HTML Help
+ * SSL/TLS Security Library
  *
- * Copyright 2005 James Hawkins
+ * Copyright 2007 Rob Shearman, for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,24 +22,19 @@
 
 #include "windef.h"
 #include "winbase.h"
+
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(htmlhelp);
+WINE_DEFAULT_DEBUG_CHANNEL(schannel);
 
-HINSTANCE hhctrl_hinstance;
-
-BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD fdwReason, LPVOID lpvReserved)
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("(%p,%d,%p)\n", hInstance, fdwReason, lpvReserved);
+	TRACE("(0x%p, %d, %p)\n",hinstDLL,fdwReason,lpvReserved);
 
-    switch (fdwReason)
-    {
-    case DLL_PROCESS_ATTACH:
-        hhctrl_hinstance = hInstance;
-        DisableThreadLibraryCalls(hInstance);
-        break;
-    case DLL_PROCESS_DETACH:
-        break;
-    }
-    return TRUE;
+	if (fdwReason == DLL_WINE_PREATTACH) return FALSE;	/* prefer native version */
+
+	if (fdwReason == DLL_PROCESS_ATTACH)
+		DisableThreadLibraryCalls(hinstDLL);
+
+	return TRUE;
 }

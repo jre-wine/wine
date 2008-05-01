@@ -112,33 +112,6 @@ DWORD WINAPI CM_Get_Device_ID_ListA(
     return CR_SUCCESS;
 }
 
-
-/***********************************************************************
- *		SetupCopyOEMInfA  (SETUPAPI.@)
- */
-BOOL WINAPI SetupCopyOEMInfA(PCSTR sourceinffile, PCSTR sourcemedialoc,
-			    DWORD mediatype, DWORD copystyle, PSTR destinfname,
-			    DWORD destnamesize, PDWORD required,
-			    PSTR *destinfnamecomponent)
-{
-  FIXME("stub: source %s location %s ...\n", debugstr_a(sourceinffile),
-        debugstr_a(sourcemedialoc));
-  return FALSE;
-}
-
-/***********************************************************************
- *      SetupCopyOEMInfW  (SETUPAPI.@)
- */
-BOOL WINAPI SetupCopyOEMInfW(PCWSTR sourceinffile, PCWSTR sourcemedialoc,
-                DWORD mediatype, DWORD copystyle, PWSTR destinfname,
-                DWORD destnamesize, PDWORD required,
-                PWSTR *destinfnamecomponent)
-{
-  FIXME("stub: source %s location %s ...\n", debugstr_w(sourceinffile),
-        debugstr_w(sourcemedialoc));
-  return FALSE;
-}
-
 /***********************************************************************
  *		SetupInitializeFileLogW(SETUPAPI.@)
  */
@@ -208,4 +181,42 @@ INT WINAPI SetupPromptReboot( HSPFILEQ file_queue, HWND owner, BOOL scan_only )
 {
     FIXME("%p, %p, %d\n", file_queue, owner, scan_only);
     return 0;
+}
+
+/***********************************************************************
+ *      SetupSetSourceListA (SETUPAPI.@)
+ */
+BOOL WINAPI SetupSetSourceListA(DWORD flags, PCSTR *list, UINT count)
+{
+    FIXME("0x%08x %p %d\n", flags, list, count);
+    return FALSE;
+}
+
+/***********************************************************************
+ *      SetupSetSourceListW (SETUPAPI.@)
+ */
+BOOL WINAPI SetupSetSourceListW(DWORD flags, PCWSTR *list, UINT count)
+{
+    FIXME("0x%08x %p %d\n", flags, list, count);
+    return FALSE;
+}
+
+/***********************************************************************
+ *      SetupDiGetINFClassA (SETUPAPI.@)
+ */
+BOOL WINAPI SetupDiGetINFClassA(PCSTR inf, LPGUID class_guid, PSTR class_name,
+        DWORD size, PDWORD required_size)
+{
+    FIXME("%s %p %p %d %p\n", debugstr_a(inf), class_guid, class_name, size, required_size);
+    return FALSE;
+}
+
+/***********************************************************************
+ *      SetupDiGetINFClassW (SETUPAPI.@)
+ */
+BOOL WINAPI SetupDiGetINFClassW(PCWSTR inf, LPGUID class_guid, PWSTR class_name,
+        DWORD size, PDWORD required_size)
+{
+    FIXME("%s %p %p %d %p\n", debugstr_w(inf), class_guid, class_name, size, required_size);
+    return FALSE;
 }

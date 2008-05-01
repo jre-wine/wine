@@ -840,7 +840,7 @@ static void test_AccessCheck(void)
 /* test GetTokenInformation for the various attributes */
 static void test_token_attr(void)
 {
-    HANDLE Token;
+    HANDLE Token, ImpersonationToken;
     DWORD Size;
     TOKEN_PRIVILEGES *Privileges;
     TOKEN_GROUPS *Groups;
@@ -848,6 +848,7 @@ static void test_token_attr(void)
     BOOL ret;
     DWORD i, GLE;
     LPSTR SidString;
+    SECURITY_IMPERSONATION_LEVEL ImpersonationLevel;
 
     /* cygwin-like use case */
     ret = OpenProcessToken(GetCurrentProcess(), MAXIMUM_ALLOWED, &Token);
@@ -855,16 +856,20 @@ static void test_token_attr(void)
     if (ret)
     {
         BYTE buf[1024];
-        DWORD bufsize = sizeof(buf);
-        ret = GetTokenInformation(Token, TokenUser,(void*)buf, bufsize, &bufsize);
-        todo_wine ok(ret, "GetTokenInformation failed with error %d\n", GetLastError());
+        Size = sizeof(buf);
+        ret = GetTokenInformation(Token, TokenUser,(void*)buf, Size, &Size);
+        ok(ret, "GetTokenInformation failed with error %d\n", GetLastError());
+        Size = sizeof(ImpersonationLevel);
+        ret = GetTokenInformation(Token, TokenImpersonationLevel, &ImpersonationLevel, Size, &Size);
+        GLE = GetLastError();
+        ok(!ret && (GLE == ERROR_INVALID_PARAMETER), "GetTokenInformation(TokenImpersonationLevel) on primary token should have failed with ERROR_INVALID_PARAMETER instead of %d\n", GLE);
         CloseHandle(Token);
     }
 
     if(!pConvertSidToStringSidA)
         return;
 
-    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &Token);
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY|TOKEN_DUPLICATE, &Token);
     GLE = GetLastError();
     ok(ret || (GLE == ERROR_CALL_NOT_IMPLEMENTED), 
         "OpenProcessToken failed with error %d\n", GLE);
@@ -928,6 +933,17 @@ static void test_token_attr(void)
         trace("\t%s, 0x%x\n", Name, Privileges->Privileges[i].Attributes);
     }
     HeapFree(GetProcessHeap(), 0, Privileges);
+
+    ret = DuplicateToken(Token, SecurityAnonymous, &ImpersonationToken);
+    ok(ret, "DuplicateToken failed with error %d\n", GetLastError());
+
+    Size = sizeof(ImpersonationLevel);
+    ret = GetTokenInformation(ImpersonationToken, TokenImpersonationLevel, &ImpersonationLevel, Size, &Size);
+    ok(ret, "GetTokenInformation(TokenImpersonationLevel) failed with error %d\n", GetLastError());
+    ok(ImpersonationLevel == SecurityAnonymous, "ImpersonationLevel should have been SecurityAnonymous instead of %d\n", ImpersonationLevel);
+
+    CloseHandle(ImpersonationToken);
+    CloseHandle(Token);
 }
 
 typedef union _MAX_SID
@@ -1461,9 +1477,16 @@ static void test_process_security(void)
     event = CreateEvent( NULL, TRUE, TRUE, "test_event" );
     ok(event != NULL, "CreateEvent %d\n", GetLastError());
 
+    SecurityDescriptor->Revision = 0;
+    CHECK_SET_SECURITY( event, OWNER_SECURITY_INFORMATION, ERROR_UNKNOWN_REVISION );
+    SecurityDescriptor->Revision = SECURITY_DESCRIPTOR_REVISION;
+
     CHECK_SET_SECURITY( event, OWNER_SECURITY_INFORMATION, ERROR_INVALID_SECURITY_DESCR );
     CHECK_SET_SECURITY( event, GROUP_SECURITY_INFORMATION, ERROR_INVALID_SECURITY_DESCR );
     CHECK_SET_SECURITY( event, SACL_SECURITY_INFORMATION, ERROR_ACCESS_DENIED );
+    CHECK_SET_SECURITY( event, DACL_SECURITY_INFORMATION, ERROR_SUCCESS );
+    /* NULL DACL is valid and means default DACL from token */
+    SecurityDescriptor->Control |= SE_DACL_PRESENT;
     CHECK_SET_SECURITY( event, DACL_SECURITY_INFORMATION, ERROR_SUCCESS );
 
     /* Set owner and group and dacl */

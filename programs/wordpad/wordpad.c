@@ -21,6 +21,8 @@
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_IE 0x0400
 
+#define MAX_STRING_LEN 255
+
 #include <stdarg.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -29,9 +31,9 @@
 #include <windows.h>
 #include <richedit.h>
 #include <commctrl.h>
+#include <commdlg.h>
 
 #include "resource.h"
-
 
 /* use LoadString */
 static const WCHAR xszAppTitle[] = {'W','i','n','e',' ','W','o','r','d','p','a','d',0};
@@ -43,6 +45,32 @@ static const WCHAR wszAppTitle[] = {'W','i','n','e',' ','W','o','r','d','p','a',
 
 static HWND hMainWnd;
 static HWND hEditorWnd;
+
+static char szFilter[MAX_STRING_LEN];
+
+/* Load string resources */
+static void DoLoadStrings()
+{
+    LPSTR p = szFilter;
+    char files_rtf[] = "*.rtf";
+    char files_txt[] = "*.txt";
+    char files_all[] = "*.*";
+    HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hMainWnd, GWLP_HINSTANCE);
+
+    LoadString(hInstance, STRING_RICHTEXT_FILES_RTF, p, MAX_STRING_LEN);
+    p += strlen(p) + 1;
+    lstrcpy(p, files_rtf);
+    p += strlen(p) + 1;
+    LoadString(hInstance, STRING_TEXT_FILES_TXT, p, MAX_STRING_LEN);
+    p += strlen(p) + 1;
+    lstrcpy(p, files_txt);
+    p += strlen(p) + 1;
+    LoadString(hInstance, STRING_ALL_FILES, p, MAX_STRING_LEN);
+    p += strlen(p) + 1;
+    lstrcpy(p, files_all);
+    p += strlen(p) + 1;
+    *p = '\0';
+}
 
 static void AddButton(HWND hwndToolBar, int nImage, int nCommand)
 {
@@ -94,6 +122,10 @@ static void DoOpenFile(LPCWSTR szFileName)
     DWORD dwNumRead;
     EDITSTREAM es;
 
+    char szCaption[MAX_PATH];
+    char szAppTitle[sizeof(wszAppTitle)];
+    char szSeparator[] = " - ";
+
     hFile = CreateFileW(szFileName, GENERIC_READ, FILE_SHARE_READ, NULL,
                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE)
@@ -133,6 +165,42 @@ static void DoOpenFile(LPCWSTR szFileName)
     HeapFree(GetProcessHeap(), 0, pTemp);
 
     SetFocus(hEditorWnd);
+
+    WideCharToMultiByte(CP_ACP, 0, wszAppTitle, -1, szAppTitle, sizeof(wszAppTitle), NULL, NULL);
+
+    WideCharToMultiByte(CP_ACP, 0, szFileName, -1, szCaption, MAX_PATH, NULL, NULL);
+
+    lstrcat(szCaption, szSeparator);
+    lstrcat(szCaption, szAppTitle);
+
+    SetWindowText(hMainWnd, szCaption);
+}
+
+static void DialogOpenFile()
+{
+    OPENFILENAME ofn;
+
+    char szFile[MAX_PATH] = "";
+    char szDefExt[] = "rtf";
+
+    ZeroMemory(&ofn, sizeof(ofn));
+
+    ofn.lStructSize = sizeof(ofn);
+    ofn.Flags = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.hwndOwner = hMainWnd;
+    ofn.lpstrFilter = szFilter;
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrDefExt = szDefExt;
+
+    if(GetOpenFileName(&ofn))
+    {
+        WCHAR szOpenFile[MAX_PATH];
+
+        MultiByteToWideChar(CP_ACP, 0, ofn.lpstrFile, MAX_PATH, szOpenFile, sizeof(szOpenFile)/sizeof(szOpenFile[0]));
+
+        DoOpenFile(szOpenFile);
+    }
 }
 
 static void HandleCommandLine(LPWSTR cmdline)
@@ -185,6 +253,21 @@ static void HandleCommandLine(LPWSTR cmdline)
         MessageBox(hMainWnd, "Printing not implemented", "WordPad", MB_OK);
 }
 
+static void DoDefaultFont()
+{
+    static const WCHAR szFaceName[] = {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n',0};
+    CHARFORMAT2W fmt;
+
+    ZeroMemory(&fmt, sizeof(fmt));
+
+    fmt.cbSize = sizeof(fmt);
+    fmt.dwMask = CFM_FACE;
+
+    lstrcpyW(fmt.szFaceName, szFaceName);
+
+    SendMessage(hEditorWnd, EM_SETCHARFORMAT,  SCF_DEFAULT, (LPARAM)&fmt);
+}
+
 static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
     HWND hToolBarWnd, hReBarWnd;
@@ -207,28 +290,37 @@ static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
     if(!SendMessage(hReBarWnd, RB_SETBARINFO, 0, (LPARAM)&rbi))
         return -1;
 
-    hToolBarWnd = CreateToolbarEx(hReBarWnd, CCS_NOPARENTALIGN|CCS_NODIVIDER|CCS_NOMOVEY|WS_VISIBLE|WS_CHILD|TBSTYLE_TOOLTIPS|TBSTYLE_FLAT,
+    hToolBarWnd = CreateToolbarEx(hReBarWnd, CCS_NOPARENTALIGN|CCS_NOMOVEY|WS_VISIBLE|WS_CHILD|TBSTYLE_TOOLTIPS|TBSTYLE_BUTTON,
       IDC_TOOLBAR,
-      3, hInstance, IDB_TOOLBAR,
+      6, hInstance, IDB_TOOLBAR,
       NULL, 0,
       24, 24, 16, 16, sizeof(TBBUTTON));
 
     ab.hInst = HINST_COMMCTRL;
     ab.nID = IDB_STD_SMALL_COLOR;
-    nStdBitmaps = SendMessage(hToolBarWnd, TB_ADDBITMAP, 3, (LPARAM)&ab);
+    nStdBitmaps = SendMessage(hToolBarWnd, TB_ADDBITMAP, 6, (LPARAM)&ab);
     AddButton(hToolBarWnd, nStdBitmaps+STD_FILENEW, ID_FILE_NEW);
     AddButton(hToolBarWnd, nStdBitmaps+STD_FILEOPEN, ID_FILE_OPEN);
     AddButton(hToolBarWnd, nStdBitmaps+STD_FILESAVE, ID_FILE_SAVE);
     AddSeparator(hToolBarWnd);
+    AddButton(hToolBarWnd, nStdBitmaps+STD_PRINT, ID_PRINT);
+    AddButton(hToolBarWnd, nStdBitmaps+STD_PRINTPRE, ID_PREVIEW);
+    AddSeparator(hToolBarWnd);
+    AddButton(hToolBarWnd, nStdBitmaps+STD_FIND, ID_FIND);
+    AddSeparator(hToolBarWnd);
     AddButton(hToolBarWnd, nStdBitmaps+STD_CUT, ID_EDIT_CUT);
     AddButton(hToolBarWnd, nStdBitmaps+STD_COPY, ID_EDIT_COPY);
-    AddSeparator(hToolBarWnd);
+    AddButton(hToolBarWnd, nStdBitmaps+STD_PASTE, ID_EDIT_PASTE);
     AddButton(hToolBarWnd, nStdBitmaps+STD_UNDO, ID_EDIT_UNDO);
     AddButton(hToolBarWnd, nStdBitmaps+STD_REDOW, ID_EDIT_REDO);
     AddSeparator(hToolBarWnd);
     AddButton(hToolBarWnd, 0, ID_FORMAT_BOLD);
     AddButton(hToolBarWnd, 1, ID_FORMAT_ITALIC);
     AddButton(hToolBarWnd, 2, ID_FORMAT_UNDERLINE);
+    AddSeparator(hToolBarWnd);
+    AddButton(hToolBarWnd, 3, ID_ALIGN_LEFT);
+    AddButton(hToolBarWnd, 4, ID_ALIGN_CENTER);
+    AddButton(hToolBarWnd, 5, ID_ALIGN_RIGHT);
 
     SendMessage(hToolBarWnd, TB_ADDSTRING, 0, (LPARAM)"Exit\0");
     SendMessage(hToolBarWnd, TB_AUTOSIZE, 0, 0);
@@ -258,6 +350,11 @@ static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
 
     SetFocus(hEditorWnd);
     SendMessage(hEditorWnd, EM_SETEVENTMASK, 0, ENM_SELCHANGE);
+
+    DoDefaultFont();
+
+    DoLoadStrings();
+
     return 0;
 }
 
@@ -268,9 +365,13 @@ static LRESULT OnUser( HWND hWnd, WPARAM wParam, LPARAM lParam)
     HWND hwndToolBar = GetDlgItem(hwndReBar, IDC_TOOLBAR);
     int from, to;
     CHARFORMAT2W fmt;
+    PARAFORMAT2 pf;
 
     ZeroMemory(&fmt, sizeof(fmt));
     fmt.cbSize = sizeof(fmt);
+
+    ZeroMemory(&pf, sizeof(pf));
+    pf.cbSize = sizeof(pf);
 
     SendMessage(hwndEditor, EM_GETCHARFORMAT, TRUE, (LPARAM)&fmt);
 
@@ -287,6 +388,12 @@ static LRESULT OnUser( HWND hWnd, WPARAM wParam, LPARAM lParam)
     SendMessage(hwndToolBar, TB_INDETERMINATE, ID_FORMAT_ITALIC, !(fmt.dwMask & CFM_ITALIC));
     SendMessage(hwndToolBar, TB_CHECKBUTTON, ID_FORMAT_UNDERLINE, (fmt.dwMask & CFM_UNDERLINE) && (fmt.dwEffects & CFE_UNDERLINE));
     SendMessage(hwndToolBar, TB_INDETERMINATE, ID_FORMAT_UNDERLINE, !(fmt.dwMask & CFM_UNDERLINE));
+
+    SendMessage(hwndEditor, EM_GETPARAFORMAT, 0, (LPARAM)&pf);
+    SendMessage(hwndToolBar, TB_CHECKBUTTON, ID_ALIGN_LEFT, (pf.wAlignment == PFA_LEFT));
+    SendMessage(hwndToolBar, TB_CHECKBUTTON, ID_ALIGN_CENTER, (pf.wAlignment == PFA_CENTER));
+    SendMessage(hwndToolBar, TB_CHECKBUTTON, ID_ALIGN_RIGHT, (pf.wAlignment == PFA_RIGHT));
+
     return 0;
 }
 
@@ -303,7 +410,7 @@ static LRESULT OnNotify( HWND hWnd, WPARAM wParam, LPARAM lParam)
         SELCHANGE *pSC = (SELCHANGE *)lParam;
         char buf[128];
 
-        sprintf( buf,"selection = %d..%d, line count=%ld\n",
+        sprintf( buf,"selection = %d..%d, line count=%ld",
                  pSC->chrg.cpMin, pSC->chrg.cpMax,
         SendMessage(hwndEditor, EM_GETLINECOUNT, 0, 0));
         SetWindowText(GetDlgItem(hWnd, IDC_STATUSBAR), buf);
@@ -328,12 +435,19 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
 
     case ID_FILE_NEW:
         SetWindowTextA(hwndEditor, "");
+        SetWindowTextW(hMainWnd, wszAppTitle);
         /* FIXME: set default format too */
         break;
 
     case ID_FILE_OPEN:
+        DialogOpenFile();
+        break;
+
     case ID_FILE_SAVE:
-        MessageBox(hWnd, "Open/Save not implemented", "WordPad", MB_OK);
+    case ID_PRINT:
+    case ID_PREVIEW:
+    case ID_FIND:
+        MessageBox(hWnd, "Not implemented", "WordPad", MB_OK);
         break;
 
     case ID_FORMAT_BOLD:
@@ -363,6 +477,14 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
 
     case ID_EDIT_COPY:
         PostMessage(hwndEditor, WM_COPY, 0, 0);
+        break;
+
+    case ID_EDIT_PASTE:
+        PostMessage(hwndEditor, WM_PASTE, 0, 0);
+        break;
+
+    case ID_EDIT_CLEAR:
+        PostMessage(hwndEditor, WM_CLEAR, 0, 0);
         break;
 
     case ID_EDIT_SELECTALL:
@@ -612,7 +734,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hOldInstance, LPSTR szCmdPar
 
     hMainWnd = CreateWindowExW(0, wszMainWndClass, wszAppTitle, WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT, CW_USEDEFAULT, 680, 260, NULL, NULL, hInstance, NULL);
-    ShowWindow(hMainWnd, SW_SHOWMAXIMIZED);
+    ShowWindow(hMainWnd, SW_SHOWDEFAULT);
 
     HandleCommandLine(GetCommandLineW());
 

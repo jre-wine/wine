@@ -213,6 +213,9 @@ dlls/dnsapi/tests/testlist.c
 dlls/dplay/libdplay.def
 dlls/dplay/version.res
 dlls/dplayx/libdplayx.def
+dlls/dplayx/tests/*.ok
+dlls/dplayx/tests/dplayx_crosstest.exe
+dlls/dplayx/tests/testlist.c
 dlls/dplayx/version.res
 dlls/dpnet/libdpnet.def
 dlls/dpnet/version.res
@@ -441,6 +444,9 @@ dlls/secur32/tests/testlist.c
 dlls/sensapi/libsensapi.def
 dlls/serialui/libserialui.def
 dlls/serialui/serialui_rc.res
+dlls/serialui/tests/*.ok
+dlls/serialui/tests/serialui_crosstest.exe
+dlls/serialui/tests/testlist.c
 dlls/setupapi/libsetupapi.def
 dlls/setupapi/setupapi.res
 dlls/setupapi/tests/*.ok
@@ -800,6 +806,7 @@ programs/winetest/d3d9_test.exe
 programs/winetest/ddraw_test.exe
 programs/winetest/dinput_test.exe
 programs/winetest/dnsapi_test.exe
+programs/winetest/dplayx_test.exe
 programs/winetest/dsound_test.exe
 programs/winetest/gdi32_test.exe
 programs/winetest/hlink_test.exe
@@ -830,6 +837,7 @@ programs/winetest/rpcrt4_test.exe
 programs/winetest/rsabase_test.exe
 programs/winetest/rsaenh_test.exe
 programs/winetest/secur32_test.exe
+programs/winetest/serialui_test.exe
 programs/winetest/setupapi_test.exe
 programs/winetest/shdocvw_test.exe
 programs/winetest/shell32_test.exe

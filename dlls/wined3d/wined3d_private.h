@@ -44,6 +44,36 @@
 #include "wine/wined3d_gl.h"
 #include "wine/list.h"
 
+/* Hash table functions */
+typedef unsigned int (hash_function_t)(void *key);
+typedef BOOL (compare_function_t)(void *keya, void *keyb);
+
+typedef struct {
+    void *key;
+    void *value;
+    unsigned int hash;
+    struct list entry;
+} hash_table_entry_t;
+
+typedef struct {
+    hash_function_t *hash_function;
+    compare_function_t *compare_function;
+    struct list *buckets;
+    unsigned int bucket_count;
+    hash_table_entry_t *entries;
+    unsigned int entry_count;
+    struct list free_entries;
+    unsigned int count;
+    unsigned int grow_size;
+    unsigned int shrink_size;
+} hash_table_t;
+
+hash_table_t *hash_table_create(hash_function_t *hash_function, compare_function_t *compare_function);
+void hash_table_destroy(hash_table_t *table);
+void *hash_table_get(hash_table_t *table, void *key);
+void hash_table_put(hash_table_t *table, void *key, void *value);
+void hash_table_remove(hash_table_t *table, void *key);
+
 /* Device caps */
 #define MAX_PALETTES      256
 #define MAX_STREAMS       16
@@ -426,8 +456,10 @@ typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock, 
 
 #define STATE_STREAMSRC (STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)) + 1)
 #define STATE_IS_STREAMSRC(a) ((a) == STATE_STREAMSRC)
+#define STATE_INDEXBUFFER (STATE_STREAMSRC + 1)
+#define STATE_IS_INDEXBUFFER(a) ((a) == STATE_INDEXBUFFER)
 
-#define STATE_VDECL (STATE_STREAMSRC + 1)
+#define STATE_VDECL (STATE_INDEXBUFFER + 1)
 #define STATE_IS_VDECL(a) ((a) == STATE_VDECL)
 
 #define STATE_VSHADER (STATE_VDECL + 1)
@@ -444,7 +476,13 @@ typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock, 
 #define STATE_ACTIVELIGHT(a) (STATE_PIXELSHADERCONSTANT + (a) + 1)
 #define STATE_IS_ACTIVELIGHT(a) ((a) >= STATE_ACTIVELIGHT(0) && (a) < STATE_PIXELSHADERCONSTANT(MAX_ACTIVE_LIGHTS))
 
-#define STATE_HIGHEST (STATE_ACTIVELIGHT(MAX_ACTIVE_LIGHTS - 1))
+#define STATE_SCISSORRECT (STATE_ACTIVELIGHT(MAX_ACTIVE_LIGHTS - 1) + 1)
+#define STATE_IS_SCISSORRECT(a) ((a) == STATE_SCISSORRECT)
+
+#define STATE_CLIPPLANE(a) (STATE_SCISSORRECT + 1 + (a))
+#define STATE_IS_CLIPPLANE(a) ((a) >= STATE_CLIPPLANE(0) && (a) <= STATE_CLIPPLANE(MAX_CLIPPLANES - 1))
+
+#define STATE_HIGHEST (STATE_CLIPPLANE(MAX_CLIPPLANES - 1))
 
 struct StateEntry
 {
@@ -555,7 +593,7 @@ typedef struct IWineD3DImpl
 
 extern const IWineD3DVtbl IWineD3D_Vtbl;
 
-/* TODO: setup some flags in the regestry to enable, disable pbuffer support
+/* TODO: setup some flags in the registry to enable, disable pbuffer support
 (since it will break quite a few things until contexts are managed properly!) */
 extern BOOL pbuffer_support;
 /* allocate one pbuffer per surface */
@@ -588,11 +626,13 @@ struct IWineD3DDeviceImpl
 
     /* X and GL Information */
     GLint                   maxConcurrentLights;
+    GLenum                  offscreenBuffer;
 
     /* Selected capabilities */
     int vs_selected_mode;
     int ps_selected_mode;
     const shader_backend_t *shader_backend;
+    hash_table_t *glsl_program_lookup;
 
     /* To store */
     BOOL                    view_ident;        /* true iff view matrix is identity                */
@@ -665,10 +705,6 @@ struct IWineD3DDeviceImpl
     DWORD ddraw_width, ddraw_height;
     WINED3DFORMAT ddraw_format;
     BOOL ddraw_fullscreen;
-
-    /* List of GLSL shader programs and their associated vertex & pixel shaders */
-    struct list glsl_shader_progs;
-
 
     /* Final position fixup constant */
     float                       posFixup[4];
@@ -789,6 +825,10 @@ typedef struct IWineD3DIndexBufferImpl
     /* IUnknown & WineD3DResource Information     */
     const IWineD3DIndexBufferVtbl *lpVtbl;
     IWineD3DResourceClass     resource;
+
+    GLuint                    vbo;
+    UINT                      dirtystart, dirtyend;
+    LONG                      lockcount;
 
     /* WineD3DVertexBuffer specifics */
 } IWineD3DIndexBufferImpl;
@@ -973,7 +1013,8 @@ struct IWineD3DSurfaceImpl
     /* IWineD3DSurface fields */
     IWineD3DBase              *container;
     WINED3DSURFACET_DESC      currentDesc;
-    IWineD3DPaletteImpl      *palette;
+    IWineD3DPaletteImpl       *palette; /* D3D7 style palette handling */
+    PALETTEENTRY              *palette9; /* D3D8/9 style palette handling */
 
     UINT                      bytesPerPixel;
 
@@ -1157,9 +1198,10 @@ typedef struct SAVEDSTATES {
 } SAVEDSTATES;
 
 typedef struct {
-    struct list entry;
-    int idx;
-} constant_entry;
+    struct  list entry;
+    DWORD   count;
+    DWORD   idx[13];
+} constants_entry;
 
 struct IWineD3DStateBlockImpl
 {
@@ -1297,6 +1339,9 @@ typedef struct  WineQueryOcclusionData {
     GLuint  queryId;
 } WineQueryOcclusionData;
 
+typedef struct  WineQueryEventData {
+    GLuint  fenceId;
+} WineQueryEventData;
 
 /*****************************************************************************
  * IWineD3DSwapChainImpl implementation structure (extends IUnknown)
@@ -1423,13 +1468,19 @@ typedef void (*SHADER_HANDLER) (struct SHADER_OPCODE_ARG*);
  * vertex shaders.  A list of this type is maintained on the DeviceImpl, and is only
  * used if the user is using GLSL shaders. */
 struct glsl_shader_prog_link {
-    struct list             entry;
+    struct list             vshader_entry;
+    struct list             pshader_entry;
     GLhandleARB             programId;
     GLhandleARB             *vuniformF_locations;
     GLhandleARB             *puniformF_locations;
-    IWineD3DVertexShader*   vertexShader;
-    IWineD3DPixelShader*    pixelShader;
+    GLhandleARB             vshader;
+    GLhandleARB             pshader;
 };
+
+typedef struct {
+    GLhandleARB vshader;
+    GLhandleARB pshader;
+} glsl_program_key_t;
 
 /* TODO: Make this dynamic, based on shader limits ? */
 #define MAX_REG_ADDR 1
@@ -1560,6 +1611,8 @@ extern const SHADER_OPCODE* shader_get_opcode(
 extern void shader_delete_constant_list(
     struct list* clist);
 
+void delete_glsl_program_entry(IWineD3DDevice *iface, struct glsl_shader_prog_link *entry);
+
 /* Vertex shader utility functions */
 extern BOOL vshader_get_input(
     IWineD3DVertexShader* iface,
@@ -1686,6 +1739,9 @@ typedef struct IWineD3DBaseShaderClass
 
     /* Type of shader backend */
     int shader_mode;
+
+    /* Programs this shader is linked with */
+    struct list linked_programs;
 
     /* Immediate constants (override global ones) */
     struct list constantsB;

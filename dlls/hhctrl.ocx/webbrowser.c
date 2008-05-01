@@ -18,17 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-
-#define COBJMACROS
-
-#include "windef.h"
-#include "winbase.h"
-#include "winuser.h"
-#include "winnls.h"
-#include "ole2.h"
-
-#include "webbrowser.h"
+#include "hhctrl.h"
 
 #define ICOM_THIS_MULTI(impl,field,iface) impl* const This=(impl*)((char*)(iface) - offsetof(impl,field))
 
@@ -84,7 +74,7 @@ static ULONG STDMETHODCALLTYPE Site_Release(IOleClientSite *iface)
     if (refCount)
         return refCount;
 
-    HeapFree(GetProcessHeap(), 0, This);
+    hhctrl_free(This);
     return 0;
 }
 
@@ -577,7 +567,7 @@ static const IStorageVtbl MyIStorageTable =
 
 static IStorage MyIStorage = { &MyIStorageTable };
 
-BOOL WB_EmbedBrowser(WBInfo *pWBInfo, HWND hwndParent)
+BOOL InitWebBrowser(HHInfo *info, HWND hwndParent)
 {
     IOleClientSiteImpl *iOleClientSiteImpl;
     IOleInPlaceObject *inplace;
@@ -586,15 +576,11 @@ BOOL WB_EmbedBrowser(WBInfo *pWBInfo, HWND hwndParent)
     HRESULT hr;
     RECT rc;
 
-    /* clear out struct to keep from accessing invalid ptrs */
-    ZeroMemory(pWBInfo, sizeof(WBInfo));
-
-    iOleClientSiteImpl = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                   sizeof(IOleClientSiteImpl));
+    iOleClientSiteImpl = hhctrl_alloc_zero(sizeof(IOleClientSiteImpl));
     if (!iOleClientSiteImpl)
         return FALSE;
 
-    iOleClientSiteImpl->ref = 0;
+    iOleClientSiteImpl->ref = 1;
     iOleClientSiteImpl->lpVtbl = &MyIOleClientSiteTable;
     iOleClientSiteImpl->lpvtblOleInPlaceSite = &MyIOleInPlaceSiteTable;
     iOleClientSiteImpl->lpvtblOleInPlaceFrame = &MyIOleInPlaceFrameTable;
@@ -605,8 +591,8 @@ BOOL WB_EmbedBrowser(WBInfo *pWBInfo, HWND hwndParent)
                    (IOleClientSite *)iOleClientSiteImpl, &MyIStorage,
                    (void **)&browserObject);
 
-    pWBInfo->pOleClientSite = (IOleClientSite *)iOleClientSiteImpl;
-    pWBInfo->pBrowserObject = browserObject;
+    info->client_site = (IOleClientSite *)iOleClientSiteImpl;
+    info->wb_object = browserObject;
 
     if (FAILED(hr)) goto error;
 
@@ -633,55 +619,61 @@ BOOL WB_EmbedBrowser(WBInfo *pWBInfo, HWND hwndParent)
                                    (void **)&webBrowser2);
     if (SUCCEEDED(hr))
     {
-        pWBInfo->pWebBrowser2 = webBrowser2;
-        pWBInfo->hwndParent = hwndParent;
-
+        info->web_browser = webBrowser2;
         return TRUE;
     }
 
 error:
-    WB_UnEmbedBrowser(pWBInfo);
-    HeapFree(GetProcessHeap(), 0, iOleClientSiteImpl);
+    ReleaseWebBrowser(info);
+    hhctrl_free(iOleClientSiteImpl);
 
     return FALSE;
 }
 
-void WB_UnEmbedBrowser(WBInfo *pWBInfo)
+void ReleaseWebBrowser(HHInfo *info)
 {
-    if (pWBInfo->pBrowserObject)
+    HRESULT hres;
+
+    if (info->web_browser)
     {
-        IOleObject_Close(pWBInfo->pBrowserObject, OLECLOSE_NOSAVE);
-        IOleObject_Release(pWBInfo->pBrowserObject);
-        pWBInfo->pBrowserObject = NULL;
+        IWebBrowser2_Release(info->web_browser);
+        info->web_browser = NULL;
     }
 
-    if (pWBInfo->pWebBrowser2)
+    if (info->client_site)
     {
-        IWebBrowser2_Release(pWBInfo->pWebBrowser2);
-        pWBInfo->pWebBrowser2 = NULL;
+        IOleClientSite_Release(info->client_site);
+        info->client_site = NULL;
     }
 
-    if (pWBInfo->pOleClientSite)
-    {
-        IOleClientSite_Release(pWBInfo->pOleClientSite);
-        pWBInfo->pOleClientSite = NULL;
+    if(info->wb_object) {
+        IOleInPlaceSite *inplace;
+
+        hres = IOleObject_QueryInterface(info->wb_object, &IID_IOleInPlaceSite, (void**)&inplace);
+        if(SUCCEEDED(hres)) {
+            IOleInPlaceSite_OnInPlaceDeactivate(inplace);
+            IOleInPlaceSite_Release(inplace);
+        }
+
+        IOleObject_SetClientSite(info->wb_object, NULL);
+
+        IOleObject_Release(info->wb_object);
+        info->wb_object = NULL;
     }
 }
 
-void WB_ResizeBrowser(WBInfo *pWBInfo, DWORD dwWidth, DWORD dwHeight)
+void ResizeWebBrowser(HHInfo *info, DWORD dwWidth, DWORD dwHeight)
 {
-    IWebBrowser2 *pWebBrowser2 = pWBInfo->pWebBrowser2;
-
-    if (!pWebBrowser2)
+    if (!info->web_browser)
         return;
 
-    IWebBrowser2_put_Width(pWebBrowser2, dwWidth);
-    IWebBrowser2_put_Height(pWebBrowser2, dwHeight);
+    IWebBrowser2_put_Width(info->web_browser, dwWidth);
+    IWebBrowser2_put_Height(info->web_browser, dwHeight);
 }
 
-void WB_DoPageAction(WBInfo *pWBInfo, DWORD dwAction)
+void DoPageAction(HHInfo *info, DWORD dwAction)
 {
-    IWebBrowser2 *pWebBrowser2 = pWBInfo->pWebBrowser2;
+    IWebBrowser2 *pWebBrowser2 = info->web_browser;
 
     if (!pWebBrowser2)
         return;

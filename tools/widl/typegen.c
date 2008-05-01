@@ -1428,8 +1428,7 @@ static size_t write_typeformatstring_var(FILE *file, int indent, const func_t *f
             if (pointer_attr)
             {
                 if (! ptr_level)
-                    error("'%s': pointer attribute applied to non-pointer type",
-                          var->name);
+                    error("'%s': pointer attribute applied to non-pointer type\n", var->name);
                 pointer_type = pointer_attr;
             }
             else
@@ -2177,7 +2176,7 @@ static void write_struct_expr(FILE *h, const expr_t *e, int brackets,
         case EXPR_VOID:
             break;
         case EXPR_NUM:
-            fprintf(h, "%ld", e->u.lval);
+            fprintf(h, "%lu", e->u.lval);
             break;
         case EXPR_HEXNUM:
             fprintf(h, "0x%lx", e->u.lval);

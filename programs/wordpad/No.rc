@@ -30,14 +30,16 @@ BEGIN
     END
     POPUP "R&ediger"
     BEGIN
-        MENUITEM "&Angre\tCtrl+Z",               ID_EDIT_UNDO
-        MENUITEM "&Gjenta\tCtrl+Y",               ID_EDIT_REDO
+        MENUITEM "&Angre\tCtrl+Z",            ID_EDIT_UNDO
+        MENUITEM "&Gjenta\tCtrl+Y",           ID_EDIT_REDO
+        MENUITEM SEPARATOR
+        MENUITEM "Klipp u&t\tCtrl+X",         ID_EDIT_CUT
+        MENUITEM "&Kopier\tCtrl+C",           ID_EDIT_COPY
+        MENUITEM "&Lim inn\tCtrl+V",          ID_EDIT_PASTE
+        MENUITEM "&Fjern\tDEL",               ID_EDIT_CLEAR
         MENUITEM "&Merk alt\tCtrl+A",         ID_EDIT_SELECTALL
         MENUITEM SEPARATOR
-        MENUITEM "Klipp u&t\tCtrl+X",                ID_EDIT_CUT
-        MENUITEM "&Kopier\tCtrl+C",               ID_EDIT_COPY
-        MENUITEM SEPARATOR
-        MENUITEM "&Skrivebeskyttet",                  ID_EDIT_READONLY
+        MENUITEM "&Skrivebeskyttet",          ID_EDIT_READONLY
         MENUITEM "E&ndret",                   ID_EDIT_MODIFIED
         MENUITEM SEPARATOR
         POPUP "&Ekstra"
@@ -63,4 +65,11 @@ BEGIN
             MENUITEM "Høy&restilt\tCtrl+R",        ID_ALIGN_RIGHT
         END
     END
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    STRING_RICHTEXT_FILES_RTF,  "Rikt tekstformat (*.rtf)"
+    STRING_TEXT_FILES_TXT,      "Tekstfiler (*.txt)"
+    STRING_ALL_FILES,           "Alle filer (*.*)"
 END

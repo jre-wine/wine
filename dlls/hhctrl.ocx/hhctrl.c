@@ -2,6 +2,7 @@
  * hhctrl implementation
  *
  * Copyright 2004 Krzysztof Foltman
+ * Copyright 2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,19 +19,31 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-#include <string.h>
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
-#include "winnls.h"
-#include "winuser.h"
 #include "wine/debug.h"
-#include "htmlhelp.h"
+
+#define INIT_GUID
+#include "hhctrl.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(htmlhelp);
 
-int WINAPI doWinMain(HINSTANCE hInstance, LPSTR szCmdLine);
+HINSTANCE hhctrl_hinstance;
+BOOL hh_process = FALSE;
+
+BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD fdwReason, LPVOID lpvReserved)
+{
+    TRACE("(%p,%d,%p)\n", hInstance, fdwReason, lpvReserved);
+
+    switch (fdwReason)
+    {
+    case DLL_PROCESS_ATTACH:
+        hhctrl_hinstance = hInstance;
+        DisableThreadLibraryCalls(hInstance);
+        break;
+    case DLL_PROCESS_DETACH:
+        break;
+    }
+    return TRUE;
+}
 
 static const char *command_to_string(UINT command)
 {
@@ -72,38 +85,60 @@ static const char *command_to_string(UINT command)
 #undef X
 }
 
+/******************************************************************
+ *		HtmlHelpW (hhctrl.ocx.15)
+ */
 HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD data)
 {
-    CHAR *file = NULL;
-
     TRACE("(%p, %s, command=%s, data=%d)\n",
           caller, debugstr_w( filename ),
           command_to_string( command ), data);
 
-    if (filename)
-    {
-        DWORD len = WideCharToMultiByte( CP_ACP, 0, filename, -1, NULL, 0, NULL, NULL );
-
-        file = HeapAlloc( GetProcessHeap(), 0, len );
-        WideCharToMultiByte( CP_ACP, 0, filename, -1, file, len, NULL, NULL );
-    }
-
     switch (command)
     {
-        case HH_DISPLAY_TOPIC:
-        case HH_DISPLAY_TOC:
-        case HH_DISPLAY_SEARCH:
-        case HH_HELP_CONTEXT:
-            FIXME("Not all HH cases handled correctly\n");
-            doWinMain(GetModuleHandleW(NULL), file);
-            break;
-        default:
-            FIXME("HH case %s not handled.\n", command_to_string( command ));
+    case HH_DISPLAY_TOPIC:
+    case HH_DISPLAY_TOC:
+    case HH_DISPLAY_SEARCH:{
+        HHInfo *info;
+        BOOL res;
+
+        FIXME("Not all HH cases handled correctly\n");
+
+        info = CreateHelpViewer(filename);
+
+        res = NavigateToChm(info, info->pCHMInfo->szFile, info->WinType.pszFile);
+        if(!res)
+            ReleaseHelpViewer(info);
+
+        return NULL; /* FIXME */
     }
-    HeapFree(GetProcessHeap(), 0, file);
+    case HH_HELP_CONTEXT: {
+        HHInfo *info;
+        LPWSTR url;
+
+        info = CreateHelpViewer(filename);
+        if(!info)
+            return NULL;
+
+        url = FindContextAlias(info->pCHMInfo, data);
+        if(!url)
+            return NULL;
+
+        NavigateToUrl(info, url);
+        hhctrl_free(url);
+
+        return NULL; /* FIXME */
+    }
+    default:
+        FIXME("HH case %s not handled.\n", command_to_string( command ));
+    }
+
     return 0;
 }
 
+/******************************************************************
+ *		HtmlHelpA (hhctrl.ocx.14)
+ */
 HWND WINAPI HtmlHelpA(HWND caller, LPCSTR filename, UINT command, DWORD data)
 {
     WCHAR *wfile = NULL;
@@ -113,12 +148,42 @@ HWND WINAPI HtmlHelpA(HWND caller, LPCSTR filename, UINT command, DWORD data)
     {
         DWORD len = MultiByteToWideChar( CP_ACP, 0, filename, -1, NULL, 0 );
 
-        wfile = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR));
+        wfile = hhctrl_alloc(len*sizeof(WCHAR));
         MultiByteToWideChar( CP_ACP, 0, filename, -1, wfile, len );
     }
 
     result = HtmlHelpW( caller, wfile, command, data );
 
-    HeapFree( GetProcessHeap(), 0, wfile );
+    hhctrl_free(wfile);
     return result;
+}
+
+/******************************************************************
+ *		doWinMain (hhctrl.ocx.13)
+ */
+int WINAPI doWinMain(HINSTANCE hInstance, LPSTR szCmdLine)
+{
+    MSG msg;
+
+    hh_process = TRUE;
+
+    /* FIXME: Check szCmdLine for bad arguments */
+    HtmlHelpA(GetDesktopWindow(), szCmdLine, HH_DISPLAY_TOPIC, 0);
+
+    while (GetMessageW(&msg, 0, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    return 0;
+}
+
+/******************************************************************
+ *		DllGetClassObject (hhctrl.ocx.@)
+ */
+HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
+{
+    FIXME("(%s %s %p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
+    return CLASS_E_CLASSNOTAVAILABLE;
 }

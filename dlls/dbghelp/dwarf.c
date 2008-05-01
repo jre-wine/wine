@@ -328,12 +328,12 @@ static const char* dwarf2_debug_traverse_ctx(const dwarf2_traverse_context_t* ct
     return wine_dbg_sprintf("ctx(%p)", ctx->data); 
 }
 
-static const char* dwarf2_debug_ctx(const dwarf2_parse_context_t* ctx) 
+static const char* dwarf2_debug_ctx(const dwarf2_parse_context_t* ctx)
 {
-    return wine_dbg_sprintf("ctx(%p,%s)", ctx, ctx->module->module.ModuleName);
+    return wine_dbg_sprintf("ctx(%p,%s)", ctx, ctx->module->module_name);
 }
 
-static const char* dwarf2_debug_di(const dwarf2_debug_info_t* di) 
+static const char* dwarf2_debug_di(const dwarf2_debug_info_t* di)
 {
     return wine_dbg_sprintf("debug_info(abbrev:%p,symt:%p)",
                             di->abbrev, di->symt);
@@ -1203,7 +1203,7 @@ static void dwarf2_parse_enumerator(dwarf2_parse_context_t* ctx,
 
     TRACE("%s, for %s\n", dwarf2_debug_ctx(ctx), dwarf2_debug_di(di)); 
 
-    if (!dwarf2_find_attribute(ctx, di, DW_AT_name, &name)) name.u.string = NULL;
+    if (!dwarf2_find_attribute(ctx, di, DW_AT_name, &name)) return;
     if (!dwarf2_find_attribute(ctx, di, DW_AT_const_value, &value)) value.u.svalue = 0;
     symt_add_enum_element(ctx->module, parent, name.u.string, value.u.svalue);
 
@@ -1278,8 +1278,10 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
     is_pmt = !block && di->abbrev->tag == DW_TAG_formal_parameter;
     param_type = dwarf2_lookup_type(subpgm->ctx, di);
         
-    if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_name, &name))
-        name.u.string = NULL;
+    if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_name, &name)) {
+	/* cannot do much without the name, the functions below won't like it. */
+        return;
+    }
     if (dwarf2_compute_location_attr(subpgm->ctx, di, DW_AT_location,
                                      &loc, &subpgm->frame))
     {
@@ -1747,7 +1749,7 @@ static void dwarf2_set_line_number(struct module* module, unsigned long address,
 
     if (!file || !(psrc = vector_at(v, file - 1))) return;
 
-    TRACE("%s %lx %s %u\n", module->module.ModuleName, address, source_get(module, *psrc), line);
+    TRACE("%s %lx %s %u\n", module->module_name, address, source_get(module, *psrc), line);
     if (!(symt = symt_find_nearest(module, address)) ||
         symt->symt.tag != SymTagFunction) return;
     func = (struct symt_function*)symt;

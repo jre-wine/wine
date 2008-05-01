@@ -376,7 +376,7 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
         IDirectDrawSurfaceImpl_Destroy(This);
 
         /* Reduce the ddraw refcount */
-        IUnknown_Release(ifaceToRelease);
+        if(ifaceToRelease) IUnknown_Release(ifaceToRelease);
     }
 
     return ref;
@@ -1667,10 +1667,7 @@ IDirectDrawSurfaceImpl_GetDDInterface(IDirectDrawSurface7 *iface,
 {
     ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
 
-    /* It is not quite correct to use the same lpVtable for the different
-     * IDirectDrawSurface versions because the GetDDInterface return different interfaces
-     */
-    FIXME("(%p)->(%p)\n",This,DD);
+    TRACE("(%p)->(%p)\n",This,DD);
 
     if(!DD)
         return DDERR_INVALIDPARAMS;
@@ -1685,8 +1682,13 @@ IDirectDrawSurfaceImpl_GetDDInterface(IDirectDrawSurface7 *iface,
         case 4:
             *((IDirectDraw4 **) DD) = ICOM_INTERFACE(This->ddraw, IDirectDraw4);
             IDirectDraw4_AddRef(*(IDirectDraw4 **) DD);
+            break;
 
         case 2:
+            *((IDirectDraw2 **) DD) = ICOM_INTERFACE(This->ddraw, IDirectDraw2);
+            IDirectDraw_AddRef( *(IDirectDraw2 **) DD);
+            break;
+
         case 1:
             *((IDirectDraw **) DD) = ICOM_INTERFACE(This->ddraw, IDirectDraw);
             IDirectDraw_AddRef( *(IDirectDraw **) DD);
@@ -1882,17 +1884,18 @@ IDirectDrawSurfaceImpl_SetClipper(IDirectDrawSurface7 *iface,
                                   IDirectDrawClipper *Clipper)
 {
     ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
+    IDirectDrawClipperImpl *oldClipper = This->clipper;
 
     TRACE("(%p)->(%p)\n",This,Clipper);
     if (ICOM_OBJECT(IDirectDrawClipperImpl, IDirectDrawClipper, Clipper) == This->clipper)
         return DD_OK;
 
-    if (This->clipper != NULL)
-        IDirectDrawClipper_Release(ICOM_INTERFACE(This->clipper, IDirectDrawClipper) );
-
     This->clipper = ICOM_OBJECT(IDirectDrawClipperImpl, IDirectDrawClipper, Clipper);
+
     if (Clipper != NULL)
         IDirectDrawClipper_AddRef(Clipper);
+    if(oldClipper)
+        IDirectDrawClipper_Release(ICOM_INTERFACE(oldClipper, IDirectDrawClipper));
 
     return DD_OK;
 }

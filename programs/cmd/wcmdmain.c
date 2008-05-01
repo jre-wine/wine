@@ -32,7 +32,7 @@ const char * const inbuilt[] = {"ATTRIB", "CALL", "CD", "CHDIR", "CLS", "COPY", 
 		"HELP", "IF", "LABEL", "MD", "MKDIR", "MOVE", "PATH", "PAUSE",
 		"PROMPT", "REM", "REN", "RENAME", "RD", "RMDIR", "SET", "SHIFT",
                 "TIME", "TITLE", "TYPE", "VERIFY", "VER", "VOL", 
-                "ENDLOCAL", "SETLOCAL", "EXIT" };
+                "ENDLOCAL", "SETLOCAL", "PUSHD", "POPD", "EXIT" };
 
 HINSTANCE hinst;
 DWORD errorlevel;
@@ -45,6 +45,8 @@ const char anykey[] = "Press Return key to continue: ";
 char quals[MAX_PATH], param1[MAX_PATH], param2[MAX_PATH];
 BATCH_CONTEXT *context = NULL;
 static HANDLE old_stdin = INVALID_HANDLE_VALUE, old_stdout = INVALID_HANDLE_VALUE;
+
+static char *WCMD_expand_envvar(char *start);
 
 /*****************************************************************************
  * Main entry point. This is a console application so we have a main() not a
@@ -244,7 +246,7 @@ int main (int argc, char *argv[])
       else
           WCMD_process_command(cmd);
       HeapFree(GetProcessHeap(), 0, cmd);
-      return 0;
+      return errorlevel;
   }
 
   SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), ENABLE_LINE_INPUT |
@@ -265,7 +267,7 @@ int main (int argc, char *argv[])
   if (h != INVALID_HANDLE_VALUE) {
     CloseHandle (h);
 #if 0
-    WCMD_batch_command (string);
+    WCMD_batch ((char *)"\\autoexec.bat", (char *)"\\autoexec.bat", 0, NULL, INVALID_HANDLE_VALUE);
 #endif
   }
 
@@ -301,23 +303,81 @@ int main (int argc, char *argv[])
 
 void WCMD_process_command (char *command)
 {
-    char *cmd, *p;
-    int status, i, len;
+    char *cmd, *p, *s, *t;
+    int status, i;
     DWORD count, creationDisposition;
     HANDLE h;
     char *whichcmd;
     SECURITY_ATTRIBUTES sa;
+    char *new_cmd;
 
-/*
- *	Expand up environment variables.
- */
-    len = ExpandEnvironmentStrings (command, NULL, 0);
-    cmd = HeapAlloc( GetProcessHeap(), 0, len );
-    status = ExpandEnvironmentStrings (command, cmd, len);
-    if (!status) {
-      WCMD_print_error ();
-      HeapFree( GetProcessHeap(), 0, cmd );
-      return;
+    /* Move copy of the command onto the heap so it can be expanded */
+    new_cmd = HeapAlloc( GetProcessHeap(), 0, MAXSTRING );
+    strcpy(new_cmd, command);
+
+    /* For commands in a context (batch program):                  */
+    /*   Expand environment variables in a batch file %{0-9} first */
+    /*     including support for any ~ modifiers                   */
+    /* Additionally:                                               */
+    /*   Expand the DATE, TIME, CD, RANDOM and ERRORLEVEL special  */
+    /*     names allowing environment variable overrides           */
+    /* NOTE: To support the %PATH:xxx% syntax, also perform        */
+    /*   manual expansion of environment variables here            */
+
+    p = new_cmd;
+    while ((p = strchr(p, '%'))) {
+      i = *(p+1) - '0';
+
+      /* Replace %~ modifications if in batch program */
+      if (context && *(p+1) == '~') {
+        WCMD_HandleTildaModifiers(&p, NULL);
+        p++;
+
+      /* Replace use of %0...%9 if in batch program*/
+      } else if (context && (i >= 0) && (i <= 9)) {
+        s = strdup (p+2);
+        t = WCMD_parameter (context -> command, i + context -> shift_count, NULL);
+        strcpy (p, t);
+        strcat (p, s);
+        free (s);
+
+      /* Replace use of %* if in batch program*/
+      } else if (context && *(p+1)=='*') {
+        char *startOfParms = NULL;
+        s = strdup (p+2);
+        t = WCMD_parameter (context -> command, 1, &startOfParms);
+        if (startOfParms != NULL) strcpy (p, startOfParms);
+        else *p = 0x00;
+        strcat (p, s);
+        free (s);
+
+      } else {
+        p = WCMD_expand_envvar(p);
+      }
+    }
+    cmd = new_cmd;
+
+    /* In a batch program, unknown variables are replace by nothing */
+    /* so remove any remaining %var%                                */
+    if (context) {
+      p = cmd;
+      while ((p = strchr(p, '%'))) {
+        s = strchr(p+1, '%');
+        if (!s) {
+          *p=0x00;
+        } else {
+          t = strdup(s+1);
+          strcpy(p, t);
+          free(t);
+        }
+      }
+
+      /* Show prompt before batch line IF echo is on and in batch program */
+      if (echo_mode && (cmd[0] != '@')) {
+        WCMD_show_prompt();
+        WCMD_output_asis ( cmd);
+        WCMD_output_asis ( "\n");
+      }
     }
 
 /*
@@ -403,7 +463,7 @@ void WCMD_process_command (char *command)
         WCMD_setshow_attrib ();
         break;
       case WCMD_CALL:
-        WCMD_run_program (p, 1);
+        WCMD_call (p);
         break;
       case WCMD_CD:
       case WCMD_CHDIR:
@@ -503,8 +563,15 @@ void WCMD_process_command (char *command)
       case WCMD_VOL:
         WCMD_volume (0, p);
         break;
+      case WCMD_PUSHD:
+        WCMD_pushd();
+        break;
+      case WCMD_POPD:
+        WCMD_popd();
+        break;
       case WCMD_EXIT:
-        ExitProcess (0);
+        WCMD_exit ();
+        break;
       default:
         WCMD_run_program (whichcmd, 0);
     }
@@ -574,104 +641,209 @@ static void init_msvcrt_io_block(STARTUPINFO* st)
 /******************************************************************************
  * WCMD_run_program
  *
- *	Execute a command line as an external program. If no extension given then
- *	precedence is given to .BAT files. Must allow recursion.
- *	
- *	called is 1 if the program was invoked with a CALL command - removed
- *	from command -. It is only used for batch programs.
+ *	Execute a command line as an external program. Must allow recursion.
  *
- *	FIXME: Case sensitivity in suffixes!
+ *      Precedence:
+ *        Manual testing under windows shows PATHEXT plays a key part in this,
+ *      and the search algorithm and precedence appears to be as follows.
+ *
+ *      Search locations:
+ *        If directory supplied on command, just use that directory
+ *        If extension supplied on command, look for that explicit name first
+ *        Otherwise, search in each directory on the path
+ *      Precedence:
+ *        If extension supplied on command, look for that explicit name first
+ *        Then look for supplied name .* (even if extension supplied, so
+ *          'garbage.exe' will match 'garbage.exe.cmd')
+ *        If any found, cycle through PATHEXT looking for name.exe one by one
+ *      Launching
+ *        Once a match has been found, it is launched - Code currently uses
+ *          findexecutable to acheive this which is left untouched.
  */
 
 void WCMD_run_program (char *command, int called) {
 
-STARTUPINFO st;
-PROCESS_INFORMATION pe;
-SHFILEINFO psfi;
-DWORD console;
-BOOL status;
-HANDLE h;
-HINSTANCE hinst;
-char filetorun[MAX_PATH];
+  char  temp[MAX_PATH];
+  char  pathtosearch[MAX_PATH];
+  char *pathposn;
+  char  stemofsearch[MAX_PATH];
+  char *lastSlash;
+  char  pathext[MAXSTRING];
+  BOOL  extensionsupplied = FALSE;
+  BOOL  launched = FALSE;
+  BOOL  status;
+  DWORD len;
+
 
   WCMD_parse (command, quals, param1, param2);	/* Quick way to get the filename */
   if (!(*param1) && !(*param2))
     return;
-  if (strpbrk (param1, "/\\:") == NULL) {  /* No explicit path given */
-    char *ext = strrchr( param1, '.' );
-    if (!ext || !strcasecmp( ext, ".bat"))
-    {
-      if (SearchPath (NULL, param1, ".bat", sizeof(filetorun), filetorun, NULL)) {
-        WCMD_batch (filetorun, command, called);
-        return;
-      }
+
+  /* Calculate the search path and stem to search for */
+  if (strpbrk (param1, "/\\:") == NULL) {  /* No explicit path given, search path */
+    strcpy(pathtosearch,".;");
+    len = GetEnvironmentVariable ("PATH", &pathtosearch[2], sizeof(pathtosearch)-2);
+    if ((len == 0) || (len >= sizeof(pathtosearch) - 2)) {
+      lstrcpy (pathtosearch, ".");
     }
-    if (!ext || !strcasecmp( ext, ".cmd"))
-    {
-      if (SearchPath (NULL, param1, ".cmd", sizeof(filetorun), filetorun, NULL)) {
-        WCMD_batch (filetorun, command, called);
-        return;
-      }
-    }
+    if (strchr(param1, '.') != NULL) extensionsupplied = TRUE;
+    strcpy(stemofsearch, param1);
+
+  } else {
+
+    /* Convert eg. ..\fred to include a directory by removing file part */
+    GetFullPathName(param1, MAX_PATH, pathtosearch, NULL);
+    lastSlash = strrchr(pathtosearch, '\\');
+    if (lastSlash) *lastSlash = 0x00;
+    if (strchr(lastSlash, '.') != NULL) extensionsupplied = TRUE;
+    strcpy(stemofsearch, lastSlash+1);
   }
-  else {                                        /* Explicit path given */
-    char *ext = strrchr( param1, '.' );
-    if (ext && (!strcasecmp( ext, ".bat" ) || !strcasecmp( ext, ".cmd" )))
-    {
-      WCMD_batch (param1, command, called);
-      return;
+
+  /* Now extract PATHEXT */
+  len = GetEnvironmentVariable ("PATHEXT", pathext, sizeof(pathext));
+  if ((len == 0) || (len >= sizeof(pathext))) {
+    lstrcpy (pathext, ".bat;.com;.cmd;.exe");
+  }
+
+  /* Loop through the search path, dir by dir */
+  pathposn = pathtosearch;
+  while (!launched && pathposn) {
+
+    char  thisDir[MAX_PATH] = "";
+    char *pos               = NULL;
+    BOOL  found             = FALSE;
+
+    /* Work on the first directory on the search path */
+    pos = strchr(pathposn, ';');
+    if (pos) {
+      strncpy(thisDir, pathposn, (pos-pathposn));
+      thisDir[(pos-pathposn)] = 0x00;
+      pathposn = pos+1;
+
+    } else {
+      strcpy(thisDir, pathposn);
+      pathposn = NULL;
     }
 
-    if (ext && strpbrk( ext, "/\\:" )) ext = NULL;
-    if (!ext)
-    {
-      strcpy (filetorun, param1);
-      strcat (filetorun, ".bat");
-      h = CreateFile (filetorun, GENERIC_READ, FILE_SHARE_READ,
-                      NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    /* Since you can have eg. ..\.. on the path, need to expand
+       to full information                                      */
+    strcpy(temp, thisDir);
+    GetFullPathName(temp, MAX_PATH, thisDir, NULL);
+
+    /* 1. If extension supplied, see if that file exists */
+    strcat(thisDir, "\\");
+    strcat(thisDir, stemofsearch);
+    pos = &thisDir[strlen(thisDir)]; /* Pos = end of name */
+
+    if (GetFileAttributes(thisDir) != INVALID_FILE_ATTRIBUTES) {
+      found = TRUE;
+    }
+
+    /* 2. Any .* matches? */
+    if (!found) {
+      HANDLE          h;
+      WIN32_FIND_DATA finddata;
+
+      strcat(thisDir,".*");
+      h = FindFirstFile(thisDir, &finddata);
+      FindClose(h);
       if (h != INVALID_HANDLE_VALUE) {
-        CloseHandle (h);
-        WCMD_batch (param1, command, called);
+
+        char *thisExt = pathext;
+
+        /* 3. Yes - Try each path ext */
+        while (thisExt) {
+          char *nextExt = strchr(thisExt, ';');
+
+          if (nextExt) {
+            strncpy(pos, thisExt, (nextExt-thisExt));
+            pos[(nextExt-thisExt)] = 0x00;
+            thisExt = nextExt+1;
+          } else {
+            strcpy(pos, thisExt);
+            thisExt = NULL;
+          }
+
+          if (GetFileAttributes(thisDir) != INVALID_FILE_ATTRIBUTES) {
+            found = TRUE;
+            thisExt = NULL;
+          }
+        }
+      }
+    }
+
+    /* Once found, launch it */
+    if (found) {
+      STARTUPINFO st;
+      PROCESS_INFORMATION pe;
+      SHFILEINFO psfi;
+      DWORD console;
+      HINSTANCE hinst;
+      char *ext = strrchr( thisDir, '.' );
+      launched = TRUE;
+
+      /* Special case BAT and CMD */
+      if (ext && !strcasecmp(ext, ".bat")) {
+        WCMD_batch (thisDir, command, called, NULL, INVALID_HANDLE_VALUE);
+        return;
+      } else if (ext && !strcasecmp(ext, ".cmd")) {
+        WCMD_batch (thisDir, command, called, NULL, INVALID_HANDLE_VALUE);
+        return;
+      } else {
+
+        /* thisDir contains the file to be launched, but with what?
+           eg. a.exe will require a.exe to be launched, a.html may be iexplore */
+        hinst = FindExecutable (param1, NULL, temp);
+        if ((INT_PTR)hinst < 32)
+          console = 0;
+        else
+          console = SHGetFileInfo (temp, 0, &psfi, sizeof(psfi), SHGFI_EXETYPE);
+
+        ZeroMemory (&st, sizeof(STARTUPINFO));
+        st.cb = sizeof(STARTUPINFO);
+        init_msvcrt_io_block(&st);
+
+        /* Launch the process and if a CUI wait on it to complete */
+        status = CreateProcess (thisDir, command, NULL, NULL, TRUE,
+                                0, NULL, NULL, &st, &pe);
+        if ((opt_c || opt_k) && !opt_s && !status
+            && GetLastError()==ERROR_FILE_NOT_FOUND && command[0]=='\"') {
+          /* strip first and last quote characters and try again */
+          WCMD_opt_s_strip_quotes(command);
+          opt_s=1;
+          WCMD_run_program(command, called);
+          return;
+        }
+        if (!status) {
+          WCMD_print_error ();
+          /* If a command fails to launch, it sets errorlevel 9009 - which
+             does not seem to have any associated constant definition     */
+          errorlevel = 9009;
+          return;
+        }
+        if (!console) errorlevel = 0;
+        else
+        {
+            if (!HIWORD(console)) WaitForSingleObject (pe.hProcess, INFINITE);
+            GetExitCodeProcess (pe.hProcess, &errorlevel);
+            if (errorlevel == STILL_ACTIVE) errorlevel = 0;
+        }
+        CloseHandle(pe.hProcess);
+        CloseHandle(pe.hThread);
         return;
       }
     }
   }
 
-	/* No batch file found, assume executable */
+  /* Not found anywhere - give up */
+  SetLastError(ERROR_FILE_NOT_FOUND);
+  WCMD_print_error ();
 
-  hinst = FindExecutable (param1, NULL, filetorun);
-  if ((INT_PTR)hinst < 32)
-    console = 0;
-  else
-    console = SHGetFileInfo (filetorun, 0, &psfi, sizeof(psfi), SHGFI_EXETYPE);
+  /* If a command fails to launch, it sets errorlevel 9009 - which
+     does not seem to have any associated constant definition     */
+  errorlevel = 9009;
+  return;
 
-  ZeroMemory (&st, sizeof(STARTUPINFO));
-  st.cb = sizeof(STARTUPINFO);
-  init_msvcrt_io_block(&st);
-
-  status = CreateProcess (NULL, command, NULL, NULL, TRUE, 
-                          0, NULL, NULL, &st, &pe);
-  if ((opt_c || opt_k) && !opt_s && !status
-      && GetLastError()==ERROR_FILE_NOT_FOUND && command[0]=='\"') {
-    /* strip first and last quote characters and try again */
-    WCMD_opt_s_strip_quotes(command);
-    opt_s=1;
-    WCMD_run_program(command, called);
-    return;
-  }
-  if (!status) {
-    WCMD_print_error ();
-    return;
-  }
-  if (!console) errorlevel = 0;
-  else
-  {
-      if (!HIWORD(console)) WaitForSingleObject (pe.hProcess, INFINITE);
-      GetExitCodeProcess (pe.hProcess, &errorlevel);
-      if (errorlevel == STILL_ACTIVE) errorlevel = 0;
-  }
-  CloseHandle(pe.hProcess);
-  CloseHandle(pe.hThread);
 }
 
 /******************************************************************************
@@ -683,12 +855,13 @@ char filetorun[MAX_PATH];
 
 void WCMD_show_prompt (void) {
 
-int status;
-char out_string[MAX_PATH], curdir[MAX_PATH], prompt_string[MAX_PATH];
-char *p, *q;
+  int status;
+  char out_string[MAX_PATH], curdir[MAX_PATH], prompt_string[MAX_PATH];
+  char *p, *q;
+  DWORD len;
 
-  status = GetEnvironmentVariable ("PROMPT", prompt_string, sizeof(prompt_string));
-  if ((status == 0) || (status > sizeof(prompt_string))) {
+  len = GetEnvironmentVariable ("PROMPT", prompt_string, sizeof(prompt_string));
+  if ((len == 0) || (len >= sizeof(prompt_string))) {
     lstrcpy (prompt_string, "$P$G");
   }
   p = prompt_string;
@@ -763,9 +936,9 @@ char *p, *q;
  */
 
 void WCMD_print_error (void) {
-LPVOID lpMsgBuf;
-DWORD error_code;
-int status;
+  LPVOID lpMsgBuf;
+  DWORD error_code;
+  int status;
 
   error_code = GetLastError ();
   status = FormatMessage (FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
@@ -842,9 +1015,9 @@ int p = 0;
 
 void WCMD_output (const char *format, ...) {
 
-va_list ap;
-char string[1024];
-int ret;
+  va_list ap;
+  char string[1024];
+  int ret;
 
   va_start(ap,format);
   ret = vsnprintf (string, sizeof( string), format, ap);
@@ -863,7 +1036,7 @@ static BOOL paged_mode;
 
 void WCMD_enter_paged_mode(void)
 {
-CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
+  CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
 
   if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &consoleInfo))
     max_height = consoleInfo.dwSize.Y;
@@ -916,7 +1089,7 @@ void WCMD_output_asis (const char *message) {
 
 char *WCMD_strtrim_leading_spaces (char *string) {
 
-char *ptr;
+  char *ptr;
 
   ptr = string;
   while (*ptr == ' ') ptr++;
@@ -932,7 +1105,7 @@ char *ptr;
 
 void WCMD_strtrim_trailing_spaces (char *string) {
 
-char *ptr;
+  char *ptr;
 
   ptr = string + lstrlen (string) - 1;
   while ((*ptr == ' ') && (ptr >= string)) {
@@ -969,8 +1142,8 @@ void WCMD_opt_s_strip_quotes(char *cmd) {
 
 void WCMD_pipe (char *command) {
 
-char *p;
-char temp_path[MAX_PATH], temp_file[MAX_PATH], temp_file2[MAX_PATH], temp_cmd[1024];
+  char *p;
+  char temp_path[MAX_PATH], temp_file[MAX_PATH], temp_file2[MAX_PATH], temp_cmd[1024];
 
   GetTempPath (sizeof(temp_path), temp_path);
   GetTempFileName (temp_path, "CMD", 0, temp_file);
@@ -991,4 +1164,255 @@ char temp_path[MAX_PATH], temp_file[MAX_PATH], temp_file2[MAX_PATH], temp_cmd[10
   wsprintf (temp_cmd, "%s < %s", command, temp_file);
   WCMD_process_command (temp_cmd);
   DeleteFile (temp_file);
+}
+
+/*************************************************************************
+ * WCMD_expand_envvar
+ *
+ *	Expands environment variables, allowing for character substitution
+ */
+static char *WCMD_expand_envvar(char *start) {
+    char *endOfVar = NULL, *s;
+    char *colonpos = NULL;
+    char thisVar[MAXSTRING];
+    char thisVarContents[MAXSTRING];
+    char savedchar = 0x00;
+    int len;
+
+    /* Find the end of the environment variable, and extract name */
+    endOfVar = strchr(start+1, '%');
+    if (endOfVar == NULL) {
+      /* FIXME: Some special conditions here depending opn whether
+         in batch, complex or not, and whether env var exists or not! */
+      return start+1;
+    }
+    strncpy(thisVar, start, (endOfVar - start)+1);
+    thisVar[(endOfVar - start)+1] = 0x00;
+    colonpos = strchr(thisVar+1, ':');
+
+    /* If there's complex substitution, just need %var% for now
+       to get the expanded data to play with                    */
+    if (colonpos) {
+        *colonpos = '%';
+        savedchar = *(colonpos+1);
+        *(colonpos+1) = 0x00;
+    }
+
+    /* Expand to contents, if unchanged, return */
+    /* Handle DATE, TIME, ERRORLEVEL and CD replacements allowing */
+    /* override if existing env var called that name              */
+    if ((CompareString (LOCALE_USER_DEFAULT,
+                        NORM_IGNORECASE | SORT_STRINGSORT,
+                        thisVar, 12, "%ERRORLEVEL%", -1) == 2) &&
+                (GetEnvironmentVariable("ERRORLEVEL", thisVarContents, 1) == 0) &&
+                (GetLastError() == ERROR_ENVVAR_NOT_FOUND)) {
+      sprintf(thisVarContents, "%d", errorlevel);
+      len = strlen(thisVarContents);
+
+    } else if ((CompareString (LOCALE_USER_DEFAULT,
+                               NORM_IGNORECASE | SORT_STRINGSORT,
+                               thisVar, 6, "%DATE%", -1) == 2) &&
+                (GetEnvironmentVariable("DATE", thisVarContents, 1) == 0) &&
+                (GetLastError() == ERROR_ENVVAR_NOT_FOUND)) {
+
+      GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, NULL,
+                    NULL, thisVarContents, MAXSTRING);
+      len = strlen(thisVarContents);
+
+    } else if ((CompareString (LOCALE_USER_DEFAULT,
+                               NORM_IGNORECASE | SORT_STRINGSORT,
+                               thisVar, 6, "%TIME%", -1) == 2) &&
+                (GetEnvironmentVariable("TIME", thisVarContents, 1) == 0) &&
+                (GetLastError() == ERROR_ENVVAR_NOT_FOUND)) {
+      GetTimeFormat(LOCALE_USER_DEFAULT, TIME_NOSECONDS, NULL,
+                        NULL, thisVarContents, MAXSTRING);
+      len = strlen(thisVarContents);
+
+    } else if ((CompareString (LOCALE_USER_DEFAULT,
+                               NORM_IGNORECASE | SORT_STRINGSORT,
+                               thisVar, 4, "%CD%", -1) == 2) &&
+                (GetEnvironmentVariable("CD", thisVarContents, 1) == 0) &&
+                (GetLastError() == ERROR_ENVVAR_NOT_FOUND)) {
+      GetCurrentDirectory (MAXSTRING, thisVarContents);
+      len = strlen(thisVarContents);
+
+    } else if ((CompareString (LOCALE_USER_DEFAULT,
+                               NORM_IGNORECASE | SORT_STRINGSORT,
+                               thisVar, 8, "%RANDOM%", -1) == 2) &&
+                (GetEnvironmentVariable("RANDOM", thisVarContents, 1) == 0) &&
+                (GetLastError() == ERROR_ENVVAR_NOT_FOUND)) {
+      sprintf(thisVarContents, "%d", rand() % 32768);
+      len = strlen(thisVarContents);
+
+    } else {
+
+      len = ExpandEnvironmentStrings(thisVar, thisVarContents,
+                                      sizeof(thisVarContents));
+    }
+
+    if (len == 0)
+      return endOfVar+1;
+
+    /* In a batch program, unknown env vars are replaced with nothing,
+         note syntax %garbage:1,3% results in anything after the ':'
+         except the %
+       From the command line, you just get back what you entered      */
+    if (lstrcmpi(thisVar, thisVarContents) == 0) {
+
+      /* Restore the complex part after the compare */
+      if (colonpos) {
+        *colonpos = ':';
+        *(colonpos+1) = savedchar;
+      }
+
+      s = strdup (endOfVar + 1);
+
+      /* Command line - just ignore this */
+      if (context == NULL) return endOfVar+1;
+
+      /* Batch - replace unknown env var with nothing */
+      if (colonpos == NULL) {
+        strcpy (start, s);
+
+      } else {
+        len = strlen(thisVar);
+        thisVar[len-1] = 0x00;
+        /* If %:...% supplied, : is retained */
+        if (colonpos == thisVar+1) {
+          strcpy (start, colonpos);
+        } else {
+          strcpy (start, colonpos+1);
+        }
+        strcat (start, s);
+      }
+      free (s);
+      return start;
+
+    }
+
+    /* See if we need to do complex substitution (any ':'s), if not
+       then our work here is done                                  */
+    if (colonpos == NULL) {
+      s = strdup (endOfVar + 1);
+      strcpy (start, thisVarContents);
+      strcat (start, s);
+      free(s);
+      return start;
+    }
+
+    /* Restore complex bit */
+    *colonpos = ':';
+    *(colonpos+1) = savedchar;
+
+    /*
+        Handle complex substitutions:
+           xxx=yyy    (replace xxx with yyy)
+           *xxx=yyy   (replace up to and including xxx with yyy)
+           ~x         (from x chars in)
+           ~-x        (from x chars from the end)
+           ~x,y       (from x chars in for y characters)
+           ~x,-y      (from x chars in until y characters from the end)
+     */
+
+    /* ~ is substring manipulation */
+    if (savedchar == '~') {
+
+      int   substrposition, substrlength;
+      char *commapos = strchr(colonpos+2, ',');
+      char *startCopy;
+
+      substrposition = atol(colonpos+2);
+      if (commapos) substrlength = atol(commapos+1);
+
+      s = strdup (endOfVar + 1);
+
+      /* Check bounds */
+      if (substrposition >= 0) {
+        startCopy = &thisVarContents[min(substrposition, len)];
+      } else {
+        startCopy = &thisVarContents[max(0, len+substrposition-1)];
+      }
+
+      if (commapos == NULL) {
+        strcpy (start, startCopy); /* Copy the lot */
+      } else if (substrlength < 0) {
+
+        int copybytes = (len+substrlength-1)-(startCopy-thisVarContents);
+        if (copybytes > len) copybytes = len;
+        else if (copybytes < 0) copybytes = 0;
+        strncpy (start, startCopy, copybytes); /* Copy the lot */
+        start[copybytes] = 0x00;
+      } else {
+        strncpy (start, startCopy, substrlength); /* Copy the lot */
+        start[substrlength] = 0x00;
+      }
+
+      strcat (start, s);
+      free(s);
+      return start;
+
+    /* search and replace manipulation */
+    } else {
+      char *equalspos = strstr(colonpos, "=");
+      char *replacewith = equalspos+1;
+      char *found       = NULL;
+      char *searchIn;
+      char *searchFor;
+
+      s = strdup (endOfVar + 1);
+      if (equalspos == NULL) return start+1;
+
+      /* Null terminate both strings */
+      thisVar[strlen(thisVar)-1] = 0x00;
+      *equalspos = 0x00;
+
+      /* Since we need to be case insensitive, copy the 2 buffers */
+      searchIn  = strdup(thisVarContents);
+      CharUpperBuff(searchIn, strlen(thisVarContents));
+      searchFor = strdup(colonpos+1);
+      CharUpperBuff(searchFor, strlen(colonpos+1));
+
+
+      /* Handle wildcard case */
+      if (*(colonpos+1) == '*') {
+        /* Search for string to replace */
+        found = strstr(searchIn, searchFor+1);
+
+        if (found) {
+          /* Do replacement */
+          strcpy(start, replacewith);
+          strcat(start, thisVarContents + (found-searchIn) + strlen(searchFor+1));
+          strcat(start, s);
+          free(s);
+        } else {
+          /* Copy as it */
+          strcpy(start, thisVarContents);
+          strcat(start, s);
+        }
+
+      } else {
+        /* Loop replacing all instances */
+        char *lastFound = searchIn;
+        char *outputposn = start;
+
+        *start = 0x00;
+        while ((found = strstr(lastFound, searchFor))) {
+            strncpy(outputposn,
+                    thisVarContents + (lastFound-searchIn),
+                    (found - lastFound));
+            outputposn  = outputposn + (found - lastFound);
+            *outputposn = 0x00;
+            strcat(outputposn, replacewith);
+            outputposn = outputposn + strlen(replacewith);
+            lastFound = found + strlen(searchFor);
+        }
+        strcat(outputposn,
+                thisVarContents + (lastFound-searchIn));
+        strcat(outputposn, s);
+      }
+      free(searchIn);
+      free(searchFor);
+      return start;
+    }
+    return start+1;
 }

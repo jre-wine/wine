@@ -2004,7 +2004,7 @@ static const struct message WmCreateMDIchildInvisibleMaxSeq4[] = {
     { WM_NCCALCSIZE, sent|wparam, 1 },
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI frame */
-    { WM_NCCALCSIZE, sent|wparam, 1 }, /* MDI child */
+    { WM_NCCALCSIZE, sent|wparam|optional, 1 }, /* MDI child */
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI child */
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI child */
     /* Win2k sends wparam set to
@@ -4278,6 +4278,7 @@ static void subclass_button(void)
     cls.hInstance = GetModuleHandle(0);
     cls.lpfnWndProc = button_hook_proc;
     cls.lpszClassName = "my_button_class";
+    UnregisterClass(cls.lpszClassName, cls.hInstance);
     if (!RegisterClassA(&cls)) assert(0);
 }
 
@@ -4415,6 +4416,7 @@ static void subclass_static(void)
     cls.hInstance = GetModuleHandle(0);
     cls.lpfnWndProc = static_hook_proc;
     cls.lpszClassName = "my_static_class";
+    UnregisterClass(cls.lpszClassName, cls.hInstance);
     if (!RegisterClassA(&cls)) assert(0);
 }
 
@@ -7630,6 +7632,7 @@ static void subclass_edit(void)
     cls.hInstance = GetModuleHandle(0);
     cls.lpfnWndProc = edit_hook_proc;
     cls.lpszClassName = "my_edit_class";
+    UnregisterClass(cls.lpszClassName, cls.hInstance);
     if (!RegisterClassA(&cls)) assert(0);
 }
 
@@ -7873,73 +7876,55 @@ static void test_PeekMessage(void)
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | (qs_input << 16));
-todo_wine {
     ok(!ret,
        "PeekMessageA should have returned FALSE instead of msg %04x\n",
         msg.message);
-}
     ok_sequence(WmUser, "WmUser", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_PAINT|QS_POSTMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     trace("signalling to send message\n");
     SetEvent(info.hevent[EV_SENDMSG]);
     WaitForSingleObject(info.hevent[EV_ACK], INFINITE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(QS_SENDMESSAGE, QS_SENDMESSAGE|QS_PAINT|QS_POSTMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | PM_QS_POSTMESSAGE);
-todo_wine {
     ok(!ret,
        "PeekMessageA should have returned FALSE instead of msg %04x\n",
         msg.message);
-}
     ok_sequence(WmUser, "WmUser", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_PAINT|QS_POSTMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | PM_QS_POSTMESSAGE);
-todo_wine {
     ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
        "got %d and %04x wParam %08x instead of TRUE and WM_CHAR wParam 'z'\n",
        ret, msg.message, msg.wParam);
-}
     ok_sequence(WmEmptySeq, "WmEmptySeq", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_PAINT|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | PM_QS_POSTMESSAGE);
-todo_wine {
     ok(!ret,
        "PeekMessageA should have returned FALSE instead of msg %04x\n",
         msg.message);
-}
     ok_sequence(WmEmptySeq, "WmEmptySeq", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_PAINT|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | PM_QS_PAINT);
@@ -7949,10 +7934,8 @@ todo_wine {
     ok_sequence(WmPaint, "WmPaint", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | PM_QS_PAINT);
@@ -7962,28 +7945,22 @@ todo_wine {
     ok_sequence(WmEmptySeq, "WmEmptySeq", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     trace("signalling to send message\n");
     SetEvent(info.hevent[EV_SENDMSG]);
     WaitForSingleObject(info.hevent[EV_ACK], INFINITE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(QS_SENDMESSAGE, QS_SENDMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     PostMessageA(info.hwnd, WM_CHAR, 'z', 0);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(QS_POSTMESSAGE, QS_SENDMESSAGE|QS_POSTMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, WM_CHAR, WM_CHAR, PM_REMOVE);
@@ -7993,10 +7970,8 @@ todo_wine {
     ok_sequence(WmUser, "WmUser", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, WM_CHAR, WM_CHAR, PM_REMOVE);
@@ -8006,73 +7981,55 @@ todo_wine {
     ok_sequence(WmEmptySeq, "WmEmptySeq", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     PostMessageA(info.hwnd, WM_CHAR, 'z', 0);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(QS_POSTMESSAGE, QS_POSTMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     trace("signalling to send message\n");
     SetEvent(info.hevent[EV_SENDMSG]);
     WaitForSingleObject(info.hevent[EV_ACK], INFINITE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(QS_SENDMESSAGE, QS_SENDMESSAGE|QS_POSTMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | (QS_KEY << 16));
-todo_wine {
     ok(!ret,
        "PeekMessageA should have returned FALSE instead of msg %04x\n",
         msg.message);
-}
     ok_sequence(WmUser, "WmUser", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_POSTMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | (QS_RAWINPUT << 16));
-todo_wine {
     ok(ret && msg.message == WM_KEYDOWN && msg.wParam == 'N',
        "got %d and %04x wParam %08x instead of TRUE and WM_KEYDOWN wParam 'N'\n",
        ret, msg.message, msg.wParam);
     ok_sequence(WmKeyDownSkippedSeq, "WmKeyDownSkippedSeq", FALSE);
-}
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_POSTMESSAGE|QS_KEY),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | (QS_RAWINPUT << 16));
-todo_wine {
     ok(ret && msg.message == WM_KEYUP && msg.wParam == 'N',
        "got %d and %04x wParam %08x instead of TRUE and WM_KEYUP wParam 'N'\n",
        ret, msg.message, msg.wParam);
     ok_sequence(WmKeyUpSkippedSeq, "WmKeyUpSkippedSeq", FALSE);
-}
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_POSTMESSAGE),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE);
@@ -8082,18 +8039,14 @@ todo_wine {
     ok_sequence(WmEmptySeq, "WmEmptySeq", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
-todo_wine {
     ok(qstatus == MAKELONG(0, QS_POSTMESSAGE),
        "wrong qstatus %08x\n", qstatus);
-}
 
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE);
-todo_wine {
     ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
        "got %d and %04x wParam %08x instead of TRUE and WM_CHAR wParam 'z'\n",
        ret, msg.message, msg.wParam);
-}
     ok_sequence(WmEmptySeq, "WmEmptySeq", FALSE);
 
     qstatus = GetQueueStatus(qs_all_input);
@@ -8832,6 +8785,124 @@ static void test_ShowWindow(void)
     DestroyWindow(hwnd);
 }
 
+static const struct message WmDefDlgSetFocus_1[] = {
+    { WM_GETDLGCODE, sent|wparam|lparam, 0, 0 },
+    { WM_GETTEXTLENGTH, sent|wparam|lparam|optional, 0, 0 }, /* XP */
+    { WM_GETTEXT, sent|wparam|optional, 6 }, /* XP */
+    { WM_GETTEXT, sent|wparam|optional, 12 }, /* XP */
+    { EM_SETSEL, sent|wparam, 0 }, /* XP sets lparam to text length, Win9x to -2 */
+    { HCBT_SETFOCUS, hook },
+    { WM_IME_SETCONTEXT, sent|wparam|optional, 1 },
+    { WM_IME_NOTIFY, sent|wparam|defwinproc|optional, 2 },
+    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
+    { WM_SETFOCUS, sent|wparam, 0 },
+    { WM_CTLCOLOREDIT, sent },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, OBJID_CARET, 0 },
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, OBJID_CARET, 0 },
+    { EVENT_OBJECT_SHOW, winevent_hook|wparam|lparam, OBJID_CARET, 0 },
+    { WM_COMMAND, sent|wparam, MAKEWPARAM(1, EN_SETFOCUS) },
+    { 0 }
+};
+static const struct message WmDefDlgSetFocus_2[] = {
+    { WM_GETDLGCODE, sent|wparam|lparam, 0, 0 },
+    { WM_GETTEXTLENGTH, sent|wparam|lparam|optional, 0, 0 }, /* XP */
+    { WM_GETTEXT, sent|wparam|optional, 6 }, /* XP */
+    { WM_GETTEXT, sent|wparam|optional, 12 }, /* XP */
+    { EM_SETSEL, sent|wparam, 0 }, /* XP sets lparam to text length, Win9x to -2 */
+    { 0 }
+};
+
+static void test_dialog_messages(void)
+{
+    HWND hdlg, hedit1, hedit2, hfocus;
+    LRESULT ret;
+
+#define set_selection(hctl, start, end) \
+    ret = SendMessage(hctl, EM_SETSEL, start, end); \
+    ok(ret == 1, "EM_SETSEL returned %ld\n", ret);
+
+#define check_selection(hctl, start, end) \
+    ret = SendMessage(hctl, EM_GETSEL, 0, 0); \
+    ok(ret == MAKELRESULT(start, end), "wrong selection (%d - %d)\n", LOWORD(ret), HIWORD(ret));
+
+    subclass_edit();
+
+    hdlg = CreateWindowEx(WS_EX_DLGMODALFRAME, "TestDialogClass", NULL,
+                          WS_VISIBLE|WS_CAPTION|WS_SYSMENU|WS_DLGFRAME,
+                          0, 0, 100, 100, 0, 0, 0, NULL);
+    ok(hdlg != 0, "Failed to create custom dialog window\n");
+
+    hedit1 = CreateWindowEx(0, "my_edit_class", NULL,
+                           WS_CHILD|WS_BORDER|WS_VISIBLE|WS_TABSTOP,
+                           0, 0, 80, 20, hdlg, (HMENU)1, 0, NULL);
+    ok(hedit1 != 0, "Failed to create edit control\n");
+    hedit2 = CreateWindowEx(0, "my_edit_class", NULL,
+                           WS_CHILD|WS_BORDER|WS_VISIBLE|WS_TABSTOP,
+                           0, 40, 80, 20, hdlg, (HMENU)2, 0, NULL);
+    ok(hedit2 != 0, "Failed to create edit control\n");
+
+    SendMessage(hedit1, WM_SETTEXT, 0, (LPARAM)"hello");
+    SendMessage(hedit2, WM_SETTEXT, 0, (LPARAM)"bye");
+
+    hfocus = GetFocus();
+    ok(hfocus == hdlg, "wrong focus %p\n", hfocus);
+
+    SetFocus(hedit2);
+    hfocus = GetFocus();
+    ok(hfocus == hedit2, "wrong focus %p\n", hfocus);
+
+    check_selection(hedit1, 0, 0);
+    check_selection(hedit2, 0, 0);
+
+    set_selection(hedit2, 0, -1);
+    check_selection(hedit2, 0, 3);
+
+    SetFocus(0);
+    hfocus = GetFocus();
+    ok(hfocus == 0, "wrong focus %p\n", hfocus);
+
+    flush_sequence();
+    ret = DefDlgProc(hdlg, WM_SETFOCUS, 0, 0);
+    ok(ret == 0, "WM_SETFOCUS returned %ld\n", ret);
+    ok_sequence(WmDefDlgSetFocus_1, "DefDlgProc(WM_SETFOCUS) 1", FALSE);
+
+    hfocus = GetFocus();
+    ok(hfocus == hedit1, "wrong focus %p\n", hfocus);
+
+    check_selection(hedit1, 0, 5);
+    check_selection(hedit2, 0, 3);
+
+    flush_sequence();
+    ret = DefDlgProc(hdlg, WM_SETFOCUS, 0, 0);
+    ok(ret == 0, "WM_SETFOCUS returned %ld\n", ret);
+    ok_sequence(WmDefDlgSetFocus_2, "DefDlgProc(WM_SETFOCUS) 2", FALSE);
+
+    hfocus = GetFocus();
+    ok(hfocus == hedit1, "wrong focus %p\n", hfocus);
+
+    check_selection(hedit1, 0, 5);
+    check_selection(hedit2, 0, 3);
+
+    EndDialog(hdlg, 0);
+
+#undef set_selection
+#undef check_selection
+}
+
+static void test_nullCallback(void)
+{
+    HWND hwnd;
+    MSG msg;
+
+    hwnd = CreateWindowExA(0, "TestWindowClass", "Test overlapped", WS_OVERLAPPEDWINDOW,
+                           100, 100, 200, 200, 0, 0, 0, NULL);
+    ok (hwnd != 0, "Failed to create overlapped window\n");
+
+    SendMessageCallbackA(hwnd,WM_NULL,0,0,NULL,0);
+    while (PeekMessage( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessage( &msg );
+    DestroyWindow(hwnd);
+}
+
 START_TEST(msg)
 {
     BOOL ret;
@@ -8901,6 +8972,8 @@ START_TEST(msg)
     test_TrackMouseEvent();
     test_SetWindowRgn();
     test_sys_menu();
+    test_dialog_messages();
+    test_nullCallback();
 
     UnhookWindowsHookEx(hCBT_hook);
     if (pUnhookWinEvent)

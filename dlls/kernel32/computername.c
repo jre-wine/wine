@@ -89,9 +89,14 @@ static BOOL dns_gethostbyname ( char *name, int *size )
         ebufsize *= 2;
         extrabuf = HeapReAlloc( GetProcessHeap(), 0, extrabuf, ebufsize ) ;
     }
-    
+
     if ( res )
         WARN ("Error in gethostbyname_r %d (%d)\n", res, locerr);
+    else if ( !host )
+    {
+        WARN ("gethostbyname_r returned NULL host, locerr = %d\n", locerr);
+        res = 1;
+    }
     else
     {
         int len = strlen ( host->h_name );
@@ -406,7 +411,7 @@ BOOL WINAPI GetComputerNameA(LPSTR name, LPDWORD size)
 BOOL WINAPI GetComputerNameExA(COMPUTER_NAME_FORMAT type, LPSTR name, LPDWORD size)
 {
     char buf[256];
-    int len = sizeof (buf), ret;
+    int len = sizeof(buf) - 1, ret;
     TRACE("%d, %p, %p\n", type, name, size);
     switch( type )
     {
@@ -458,7 +463,7 @@ BOOL WINAPI GetComputerNameExA(COMPUTER_NAME_FORMAT type, LPSTR name, LPDWORD si
 BOOL WINAPI GetComputerNameExW( COMPUTER_NAME_FORMAT type, LPWSTR name, LPDWORD size )
 {
     char buf[256];
-    int len = sizeof (buf), ret;
+    int len = sizeof(buf) - 1, ret;
 
     TRACE("%d, %p, %p\n", type, name, size);
     switch( type )

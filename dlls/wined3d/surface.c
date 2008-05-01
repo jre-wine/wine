@@ -247,6 +247,38 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
     if (ref == 0) {
         IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) This->resource.wineD3DDevice;
         TRACE("(%p) : cleaning up\n", This);
+
+        if(iface == device->lastActiveRenderTarget) {
+            IWineD3DSwapChainImpl *swapchain = device->swapchains ? (IWineD3DSwapChainImpl *) device->swapchains[0] : NULL;
+
+            TRACE("Last active render target destroyed\n");
+            /* Find a replacement surface for the currently active back buffer. The context manager does not do NULL
+             * checks, so switch to a valid target as long as the currently set surface is still valid. Use the
+             * surface of the implicit swpchain. If that is the same as the destroyed surface the device is destroyed
+             * and the lastActiveRenderTarget member shouldn't matter
+             */
+            if(swapchain) {
+                if(swapchain->backBuffer && swapchain->backBuffer[0] != iface) {
+                    TRACE("Activating primary back buffer\n");
+                    ActivateContext(device, swapchain->backBuffer[0], CTXUSAGE_RESOURCELOAD);
+                } else if(!swapchain->backBuffer && swapchain->frontBuffer != iface) {
+                    /* Single buffering environment */
+                    TRACE("Activating primary front buffer\n");
+                    ActivateContext(device, swapchain->frontBuffer, CTXUSAGE_RESOURCELOAD);
+                } else {
+                    TRACE("Device is being destroyed, setting lastActiveRenderTarget = 0xdeadbabe\n");
+                    /* Implicit render target destroyed, that means the device is being destroyed
+                     * whatever we set here, it shouldn't matter
+                     */
+                    device->lastActiveRenderTarget = (IWineD3DSurface *) 0xdeadbabe;
+                }
+            } else {
+                /* May happen during ddraw uninitialization */
+                TRACE("Render target set, but swapchain does not exist!\n");
+                device->lastActiveRenderTarget = (IWineD3DSurface *) 0xdeadcafe;
+            }
+        }
+
         if (This->glDescription.textureName != 0) { /* release the openGL texture.. */
             ENTER_GL();
             TRACE("Deleting texture %d\n", This->glDescription.textureName);
@@ -265,13 +297,11 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
         }
         if(This->Flags & SFLAG_USERPTR) IWineD3DSurface_SetMem(iface, NULL);
 
+        HeapFree(GetProcessHeap(), 0, This->palette9);
+
         IWineD3DResourceImpl_CleanUp((IWineD3DResource *)iface);
         if(iface == device->ddraw_primary)
             device->ddraw_primary = NULL;
-
-        if(iface == device->lastActiveRenderTarget) {
-            device->lastActiveRenderTarget = NULL;
-        }
 
         TRACE("(%p) Released\n", This);
         HeapFree(GetProcessHeap(), 0, This);
@@ -661,7 +691,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
              * Read from the back buffer
              */
             TRACE("Locking offscreen render target\n");
-            glReadBuffer(GL_BACK);
+            glReadBuffer(myDevice->offscreenBuffer);
             srcIsUpsideDown = TRUE;
         } else {
             if(iface == swapchain->frontBuffer) {
@@ -730,7 +760,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
 
         /* TODO: Make sure that *any* context is active for this thread. It is not important which context that is,
          * nor that is has any special setup(CTXUSAGE_LOADRESOURCE is fine), but the code below needs a context.
-         * A context is guaranted to be there in a single threaded environment, but not with multithreading
+         * A context is guaranteed to be there in a single threaded environment, but not with multithreading
          */
         if (0 != This->glDescription.textureName) {
             /* Now I have to copy thing bits back */
@@ -1057,8 +1087,8 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
         if(!swapchain) {
             /* Primary offscreen render target */
             TRACE("Offscreen render target\n");
-            glDrawBuffer(GL_BACK);
-            checkGLcall("glDrawBuffer(GL_BACK)");
+            glDrawBuffer(myDevice->offscreenBuffer);
+            checkGLcall("glDrawBuffer(myDevice->offscreenBuffer)");
         } else {
             if(iface == swapchain->frontBuffer) {
                 TRACE("Onscreen front buffer\n");
@@ -1088,7 +1118,10 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
                 flush_to_framebuffer_texture(This);
                 break;
         }
-        if(!swapchain || swapchain->backBuffer) {
+        if(!swapchain) {
+            glDrawBuffer(myDevice->offscreenBuffer);
+            checkGLcall("glDrawBuffer(myDevice->offscreenBuffer)");
+        } else if(swapchain->backBuffer) {
             glDrawBuffer(GL_BACK);
             checkGLcall("glDrawBuffer(GL_BACK)");
         } else {
@@ -1621,6 +1654,27 @@ void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES convert) {
     GL_EXTCALL(glColorTableEXT(GL_TEXTURE_2D,GL_RGBA,256,GL_RGBA,GL_UNSIGNED_BYTE, table));
 }
 
+static BOOL palette9_changed(IWineD3DSurfaceImpl *This) {
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+
+    if(This->palette || (This->resource.format != WINED3DFMT_P8 && This->resource.format != WINED3DFMT_A8P8)) {
+        /* If a ddraw-style palette is attached assume no d3d9 palette change.
+         * Also the palette isn't interesting if the surface format isn't P8 or A8P8
+         */
+        return FALSE;
+    }
+
+    if(This->palette9) {
+        if(memcmp(This->palette9, &device->palettes[device->currentPalette], sizeof(PALETTEENTRY) * 256) == 0) {
+            return FALSE;
+        }
+    } else {
+        This->palette9 = (PALETTEENTRY *) HeapAlloc(GetProcessHeap(), 0, sizeof(PALETTEENTRY) * 256);
+    }
+    memcpy(This->palette9, &device->palettes[device->currentPalette], sizeof(PALETTEENTRY) * 256);
+    return TRUE;
+}
+
 static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     GLenum format, internal, type;
@@ -1644,6 +1698,8 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface) {
                 (This->glCKey.dwColorSpaceLowValue != This->SrcBltCKey.dwColorSpaceLowValue) ||
                 (This->glCKey.dwColorSpaceHighValue != This->SrcBltCKey.dwColorSpaceHighValue)))) {
         TRACE("Reloading because of color keying\n");
+    } else if(palette9_changed(This)) {
+        TRACE("Reloading surface because the d3d8/9 palette was changed\n");
     } else {
         TRACE("surface isn't dirty\n");
         return WINED3D_OK;
@@ -1677,7 +1733,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface) {
 
             glGetIntegerv(GL_READ_BUFFER, &prevRead);
             vcheckGLcall("glGetIntegerv");
-            glReadBuffer(GL_BACK);
+            glReadBuffer(This->resource.wineD3DDevice->offscreenBuffer);
             vcheckGLcall("glReadBuffer");
 
             glCopyTexImage2D(This->glDescription.target,
@@ -1838,7 +1894,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_SaveSnapshot(IWineD3DSurface *iface, const ch
 
         glGetIntegerv(GL_READ_BUFFER, &prevRead);
         vcheckGLcall("glGetIntegerv");
-        glReadBuffer(GL_BACK);
+        glReadBuffer(swapChain ? GL_BACK : This->resource.wineD3DDevice->offscreenBuffer);
         vcheckGLcall("glReadBuffer");
         glCopyTexImage2D(GL_TEXTURE_2D,
                             0,
@@ -2126,7 +2182,9 @@ static inline void fb_copy_to_texture_direct(IWineD3DSurfaceImpl *This, IWineD3D
     /* Bind the target texture */
     glBindTexture(GL_TEXTURE_2D, This->glDescription.textureName);
     checkGLcall("glBindTexture");
-    if(!swapchain || (swapchain->backBuffer && SrcSurface == swapchain->backBuffer[0])) {
+    if(!swapchain) {
+        glReadBuffer(myDevice->offscreenBuffer);
+    } else if(swapchain->backBuffer && SrcSurface == swapchain->backBuffer[0]) {
         glReadBuffer(GL_BACK);
     } else {
         glReadBuffer(GL_FRONT);
@@ -2193,7 +2251,7 @@ static inline void fb_copy_to_texture_direct(IWineD3DSurfaceImpl *This, IWineD3D
 
 /* Uses the hardware to stretch and flip the image */
 static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWineD3DSurface *SrcSurface, IWineD3DSwapChainImpl *swapchain, WINED3DRECT *srect, WINED3DRECT *drect, BOOL upsidedown) {
-    GLuint backup, src;
+    GLuint src, backup = 0;
     IWineD3DDeviceImpl *myDevice = This->resource.wineD3DDevice;
     IWineD3DSurfaceImpl *Src = (IWineD3DSurfaceImpl *) SrcSurface;
     float left, right, top, bottom; /* Texture coordinates */
@@ -2205,22 +2263,27 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
     ENTER_GL();
     ActivateContext(myDevice, SrcSurface, CTXUSAGE_BLIT);
 
-    /* Backup the back buffer and copy the source buffer into a texture to draw an upside down stretched quad. If
-     * we are reading from the back buffer, the backup can be used as source texture
-     */
-    glGenTextures(1, &backup);
-    checkGLcall("glGenTextures(1, &backup)");
-    glBindTexture(GL_TEXTURE_2D, backup);
-    checkGLcall("glBindTexture(GL_TEXTURE_2D, backup)");
+    if(!swapchain && wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+        glGenTextures(1, &backup);
+        checkGLcall("glGenTextures\n");
+        glBindTexture(GL_TEXTURE_2D, backup);
+        checkGLcall("glBindTexture(Src->glDescription.target, Src->glDescription.textureName)");
+    } else {
+        /* Backup the back buffer and copy the source buffer into a texture to draw an upside down stretched quad. If
+         * we are reading from the back buffer, the backup can be used as source texture
+         */
+        if(Src->glDescription.textureName == 0) {
+            /* Get it a description */
+            IWineD3DSurface_PreLoad(SrcSurface);
+        }
+        glBindTexture(GL_TEXTURE_2D, Src->glDescription.textureName);
+        checkGLcall("glBindTexture(Src->glDescription.target, Src->glDescription.textureName)");
+    }
 
     glReadBuffer(GL_BACK);
     checkGLcall("glReadBuffer(GL_BACK)");
 
     /* TODO: Only back up the part that will be overwritten */
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, Src->pow2Width, Src->pow2Height, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-    checkGLcall("glTexImage2D");
-
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0,
                         0, 0 /* read offsets */,
                         0, 0,
@@ -2229,13 +2292,14 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
 
     checkGLcall("glCopyTexSubImage2D");
 
+    /* No issue with overriding these - the sampler is dirty due to blit usage */
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     checkGLcall("glTexParameteri");
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     checkGLcall("glTexParameteri");
 
-    if(!swapchain || (IWineD3DSurface *) This == swapchain->backBuffer[0]) {
-        src = backup;
+    if(!swapchain || (IWineD3DSurface *) Src == swapchain->backBuffer[0]) {
+        src = backup ? backup : Src->glDescription.textureName;
     } else {
         glReadBuffer(GL_FRONT);
         checkGLcall("glReadBuffer(GL_FRONT)");
@@ -2312,8 +2376,8 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
     checkGLcall("glCopyTexSubImage2D");
 
     /* Write the back buffer backup back */
-    glBindTexture(GL_TEXTURE_2D, backup);
-    checkGLcall("glBindTexture(GL_TEXTURE_2D, backup)");
+    glBindTexture(GL_TEXTURE_2D, backup ? backup : Src->glDescription.textureName);
+    checkGLcall("glBindTexture(GL_TEXTURE_2D, Src->glDescription.textureName)");
 
     glBegin(GL_QUADS);
         /* top left */
@@ -2334,12 +2398,14 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
     glEnd();
 
     /* Cleanup */
-    if(src != backup) {
+    if(src != Src->glDescription.textureName && src != backup) {
         glDeleteTextures(1, &src);
         checkGLcall("glDeleteTextures(1, &src)");
     }
-    glDeleteTextures(1, &backup);
-    checkGLcall("glDeleteTextures(1, &backup)");
+    if(backup) {
+        glDeleteTextures(1, &backup);
+        checkGLcall("glDeleteTextures(1, &backup)");
+    }
     LEAVE_GL();
 }
 
@@ -2722,8 +2788,8 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
                 glDrawBuffer(GL_FRONT);
                 checkGLcall("glDrawBuffer(GL_FRONT)");
             } else if(This == (IWineD3DSurfaceImpl *) myDevice->render_targets[0]) {
-                glDrawBuffer(GL_BACK);
-                checkGLcall("glDrawBuffer(GL_BACK)");
+                glDrawBuffer(myDevice->offscreenBuffer);
+                checkGLcall("glDrawBuffer(myDevice->offscreenBuffer3)");
             } else {
                 TRACE("Surface is higher back buffer, falling back to software\n");
                 return WINED3DERR_INVALIDCALL;
@@ -2740,16 +2806,18 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
                                 0 /* Stencil */);
 
             /* Restore the original draw buffer */
-            if(!dstSwapchain || (dstSwapchain->backBuffer && dstSwapchain->backBuffer[0])) {
+            if(!dstSwapchain) {
+                glDrawBuffer(myDevice->offscreenBuffer);
+            } else if(dstSwapchain->backBuffer && dstSwapchain->backBuffer[0]) {
                 glDrawBuffer(GL_BACK);
-                vcheckGLcall("glDrawBuffer");
             }
+            vcheckGLcall("glDrawBuffer");
 
             return WINED3D_OK;
         }
     }
 
-    /* Default: Fall back to the generic blt. Not an error, a TRACE is enought */
+    /* Default: Fall back to the generic blt. Not an error, a TRACE is enough */
     TRACE("Didn't find any usable render target setup for hw blit, falling back to software\n");
     return WINED3DERR_INVALIDCALL;
 }

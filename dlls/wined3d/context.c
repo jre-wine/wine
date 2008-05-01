@@ -197,7 +197,7 @@ static GLXFBConfig* pbuffer_find_fbconfigs(
  *  This: Device to activate the context for
  *  target: Surface this context will render to
  *  display: X11 connection
- *  win: Taget window. NULL for a pbuffer
+ *  win: Target window. NULL for a pbuffer
  *
  *****************************************************************************/
 WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, Display *display, Window win) {
@@ -368,7 +368,7 @@ out:
  * Removes a context from the context manager. The opengl context is not
  * destroyed or unset. context is not a valid pointer after that call.
  *
- * Simmilar to the former call this isn't a performance critical function. A
+ * Similar to the former call this isn't a performance critical function. A
  * helper function for DestroyContext.
  *
  * Params:
@@ -472,11 +472,13 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
         checkGLcall("glDisable(GL_REGISTER_COMBINERS_NV)");
     }
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        for(i = GL_LIMITS(samplers) - 1; i > 0 ; i--) {
-            if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
-                checkGLcall("glActiveTextureARB");
-            }
+        /* The blitting code uses (for now) the fixed function pipeline, so make sure to reset all fixed
+         * function texture unit. No need to care for higher samplers
+         */
+        for(i = GL_LIMITS(textures) - 1; i > 0 ; i--) {
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
+            checkGLcall("glActiveTextureARB");
+
             glDisable(GL_TEXTURE_CUBE_MAP_ARB);
             checkGLcall("glDisable GL_TEXTURE_CUBE_MAP_ARB");
             glDisable(GL_TEXTURE_3D);
@@ -486,9 +488,10 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
             glDisable(GL_TEXTURE_1D);
             checkGLcall("glDisable GL_TEXTURE_1D");
 
-            if(i < MAX_TEXTURES) {
-                Context_MarkStateDirty(context, STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP));
-            }
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+            checkGLcall("glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);");
+
+            Context_MarkStateDirty(context, STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP));
             Context_MarkStateDirty(context, STATE_SAMPLER(i));
         }
         GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
@@ -622,6 +625,14 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
 
             if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && oldRenderOffscreen) {
                 set_render_target_fbo((IWineD3DDevice *) This, 0, target);
+            } else if(wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER) {
+                if(((IWineD3DSwapChainImpl *) swapchain)->backBuffer) {
+                    glDrawBuffer(GL_BACK);
+                    checkGLcall("glDrawBuffer(GL_BACK)");
+                } else {
+                    glDrawBuffer(GL_FRONT);
+                    checkGLcall("glDrawBuffer(GL_FRONT)");
+                }
             }
             IWineD3DSwapChain_Release(swapchain);
 
@@ -685,6 +696,8 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
                          */
                         context = ((IWineD3DSwapChainImpl *) This->swapchains[0])->context;
                     }
+                    glDrawBuffer(This->offscreenBuffer);
+                    checkGLcall("glDrawBuffer(This->offscreenBuffer)");
                     break;
             }
 

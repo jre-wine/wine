@@ -218,6 +218,65 @@ static void LightTest(void)
     /* Light 23 has not been set */
     rc = IDirect3DDevice7_GetLightEnable(lpD3DDevice, 23, &bEnabled );
     ok(rc==DDERR_INVALIDPARAMS, "GetLightEnable returned: %x\n", rc);
+
+    /* Set some lights with invalid parameters */
+    memset(&light, 0, sizeof(D3DLIGHT7));
+    light.dltType = 0;
+    U1(light.dcvDiffuse).r = 1.f;
+    U2(light.dcvDiffuse).g = 1.f;
+    U3(light.dcvDiffuse).b = 1.f;
+    U3(light.dvDirection).z = 1.f;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 100, &light);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    memset(&light, 0, sizeof(D3DLIGHT7));
+    light.dltType = 12345;
+    U1(light.dcvDiffuse).r = 1.f;
+    U2(light.dcvDiffuse).g = 1.f;
+    U3(light.dcvDiffuse).b = 1.f;
+    U3(light.dvDirection).z = 1.f;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 101, &light);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 102, NULL);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    memset(&light, 0, sizeof(D3DLIGHT7));
+    light.dltType = D3DLIGHT_SPOT;
+    U1(light.dcvDiffuse).r = 1.f;
+    U2(light.dcvDiffuse).g = 1.f;
+    U3(light.dcvDiffuse).b = 1.f;
+    U3(light.dvDirection).z = 1.f;
+
+    light.dvAttenuation0 = -1.0 / 0.0; /* -INFINITY */
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = -1.0;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = 0.0;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = 1.0;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = 1.0 / 0.0; /* +INFINITY */
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+
+    light.dvAttenuation0 = 0.0 / 0.0; /* NaN */
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+
+    /* Directional light ignores attenuation */
+    light.dltType = D3DLIGHT_DIRECTIONAL;
+    light.dvAttenuation0 = -1.0;
+    rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
+    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
 }
 
 static void ProcessVerticesTest(void)
@@ -521,6 +580,35 @@ static void SceneTest(void)
     /* TODO: Verify that blitting works in the same way as in d3d9 */
 }
 
+static void LimitTest(void)
+{
+    IDirectDrawSurface7 *pTexture = NULL;
+    HRESULT hr;
+    int i;
+    DDSURFACEDESC2 ddsd;
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+    ddsd.dwWidth = 16;
+    ddsd.dwHeight = 16;
+    hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &pTexture, NULL);
+    ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+    if(!pTexture) return;
+
+    for(i = 0; i < 8; i++) {
+        hr = IDirect3DDevice7_SetTexture(lpD3DDevice, i, pTexture);
+        ok(hr == D3D_OK, "IDirect3DDevice8_SetTexture for sampler %d failed with %08x\n", i, hr);
+        hr = IDirect3DDevice7_SetTexture(lpD3DDevice, i, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice8_SetTexture for sampler %d failed with %08x\n", i, hr);
+        hr = IDirect3DDevice7_SetTextureStageState(lpD3DDevice, i, D3DTSS_COLOROP, D3DTOP_ADD);
+        ok(hr == D3D_OK, "IDirect3DDevice8_SetTextureStageState for texture %d failed with %08x\n", i, hr);
+    }
+
+    IDirectDrawSurface7_Release(pTexture);
+}
+
 START_TEST(d3d)
 {
     init_function_pointers();
@@ -537,5 +625,6 @@ START_TEST(d3d)
     ProcessVerticesTest();
     StateTest();
     SceneTest();
+    LimitTest();
     ReleaseDirect3D();
 }

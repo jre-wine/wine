@@ -23,8 +23,10 @@
 
 /* Compile time diagnostics: */
 
-/* Uncomment this to force only a single display mode to be exposed: */
-/*#define DEBUG_SINGLE_MODE*/
+#ifndef DEBUG_SINGLE_MODE
+/* Set to 1 to force only a single display mode to be exposed: */
+#define DEBUG_SINGLE_MODE 0
+#endif
 
 
 #include "config.h"
@@ -78,11 +80,24 @@ static BOOL            wined3d_fake_gl_context_foreign;
 static BOOL            wined3d_fake_gl_context_available = FALSE;
 static Display*        wined3d_fake_gl_context_display = NULL;
 
+static CRITICAL_SECTION wined3d_fake_gl_context_cs;
+static CRITICAL_SECTION_DEBUG wined3d_fake_gl_context_cs_debug =
+{
+    0, 0, &wined3d_fake_gl_context_cs,
+    { &wined3d_fake_gl_context_cs_debug.ProcessLocksList,
+      &wined3d_fake_gl_context_cs_debug.ProcessLocksList },
+    0, 0, { (DWORD_PTR)(__FILE__ ": wined3d_fake_gl_context_cs") }
+};
+static CRITICAL_SECTION wined3d_fake_gl_context_cs = { &wined3d_fake_gl_context_cs_debug, -1, 0, 0, 0, 0 };
+
 static void WineD3D_ReleaseFakeGLContext(void) {
     GLXContext glCtx;
 
+    EnterCriticalSection(&wined3d_fake_gl_context_cs);
+
     if(!wined3d_fake_gl_context_available) {
         TRACE_(d3d_caps)("context not available\n");
+        LeaveCriticalSection(&wined3d_fake_gl_context_cs);
         return;
     }
 
@@ -95,16 +110,20 @@ static void WineD3D_ReleaseFakeGLContext(void) {
             glXMakeCurrent(wined3d_fake_gl_context_display, None, NULL);
             glXDestroyContext(wined3d_fake_gl_context_display, glCtx);
         }
-        LEAVE_GL();
         wined3d_fake_gl_context_available = FALSE;
     }
     assert(wined3d_fake_gl_context_ref >= 0);
 
+    LeaveCriticalSection(&wined3d_fake_gl_context_cs);
+    LEAVE_GL();
 }
 
 static BOOL WineD3D_CreateFakeGLContext(void) {
     XVisualInfo* visInfo;
     GLXContext   glCtx;
+
+    ENTER_GL();
+    EnterCriticalSection(&wined3d_fake_gl_context_cs);
 
     TRACE_(d3d_caps)("getting context...\n");
     if(wined3d_fake_gl_context_ref > 0) goto ret;
@@ -118,8 +137,6 @@ static BOOL WineD3D_CreateFakeGLContext(void) {
         wined3d_fake_gl_context_display = get_display(device_context);
         ReleaseDC(0, device_context);
     }
-
-    ENTER_GL();
 
     visInfo = NULL;
     glCtx = glXGetCurrentContext();
@@ -170,10 +187,12 @@ static BOOL WineD3D_CreateFakeGLContext(void) {
     TRACE_(d3d_caps)("incrementing ref from %i\n", wined3d_fake_gl_context_ref);
     wined3d_fake_gl_context_ref++;
     wined3d_fake_gl_context_available = TRUE;
+    LeaveCriticalSection(&wined3d_fake_gl_context_cs);
     return TRUE;
   fail:
     if(visInfo) XFree(visInfo);
     if(glCtx) glXDestroyContext(wined3d_fake_gl_context_display, glCtx);
+    LeaveCriticalSection(&wined3d_fake_gl_context_cs);
     LEAVE_GL();
     return FALSE;
 }
@@ -266,7 +285,7 @@ void select_shader_max_constants(
     switch (vs_selected_mode) {
         case SHADER_GLSL:
             /* Subtract the other potential uniforms from the max available (bools, ints, and 1 row of projection matrix) */
-            gl_info->max_vshader_constantsF = gl_info->vs_glsl_constantsF - MAX_CONST_B - MAX_CONST_I - 1;
+            gl_info->max_vshader_constantsF = gl_info->vs_glsl_constantsF - (MAX_CONST_B / 4) - MAX_CONST_I - 1;
             break;
         case SHADER_ARB:
             /* We have to subtract any other PARAMs that we might use in our shader programs.
@@ -289,7 +308,7 @@ void select_shader_max_constants(
              * that a sm <= 1.3 shader does not need all the uniforms provided by a glsl-capable card,
              * and lets not take away a uniform needlessly from all other shaders.
              */
-            gl_info->max_pshader_constantsF = gl_info->ps_glsl_constantsF - MAX_CONST_B - MAX_CONST_I;
+            gl_info->max_pshader_constantsF = gl_info->ps_glsl_constantsF - (MAX_CONST_B / 4) - MAX_CONST_I;
             break;
         case SHADER_ARB:
             /* The arb shader only loads the bump mapping environment matrix into the shader if it finds
@@ -768,6 +787,10 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
                     gl_info->vs_nv_version = VS_VERSION_10;
                 TRACE_(d3d_caps)(" FOUND: NVIDIA (NV) Vertex Shader support - version=%02x\n", gl_info->vs_nv_version);
                 gl_info->supported[NV_VERTEX_PROGRAM] = TRUE;
+            } else if (strstr(ThisExtn, "GL_NV_fence")) {
+                if(!gl_info->supported[APPLE_FENCE]) {
+                    gl_info->supported[NV_FENCE] = TRUE;
+                }
 
             /**
              * ATI
@@ -786,8 +809,18 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
                 gl_info->vs_ati_version = VS_VERSION_11;
                 TRACE_(d3d_caps)(" FOUND: ATI (EXT) Vertex Shader support - version=%02x\n", gl_info->vs_ati_version);
                 gl_info->supported[EXT_VERTEX_SHADER] = TRUE;
+            /**
+             * Apple
+             */
+            } else if (strstr(ThisExtn, "GL_APPLE_fence")) {
+                /* GL_NV_fence and GL_APPLE_fence provide the same functionality basically.
+                 * The apple extension interacts with some other apple exts. Disable the NV
+                 * extension if the apple one is support to prevent confusion in other parts
+                 * of the code
+                 */
+                gl_info->supported[NV_FENCE] = FALSE;
+                gl_info->supported[APPLE_FENCE] = TRUE;
             }
-
 
             if (*GL_Extensions == ' ') GL_Extensions++;
         }
@@ -1078,32 +1111,34 @@ static UINT     WINAPI IWineD3DImpl_GetAdapterModeCount(IWineD3D *iface, UINT Ad
     if (Adapter == 0) { /* Display */
         int i = 0;
         int j = 0;
-#if !defined( DEBUG_SINGLE_MODE )
-        DEVMODEW DevModeW;
 
-        while (EnumDisplaySettingsExW(NULL, j, &DevModeW, 0)) {
-            j++;
-            switch (Format)
-            {
-                case WINED3DFMT_UNKNOWN:
-                    if (DevModeW.dmBitsPerPel == 32 ||
-                        DevModeW.dmBitsPerPel == 16) i++;
-                    break;
-                case WINED3DFMT_X8R8G8B8:
-                    if (DevModeW.dmBitsPerPel == 32) i++;
-                    break;
-                case WINED3DFMT_R5G6B5:
-                    if (DevModeW.dmBitsPerPel == 16) i++;
-                    break;
-                default:
-                    /* Skip other modes as they do not match the requested format */
-                    break;
+        if (!DEBUG_SINGLE_MODE) {
+            DEVMODEW DevModeW;
+
+            while (EnumDisplaySettingsExW(NULL, j, &DevModeW, 0)) {
+                j++;
+                switch (Format)
+                {
+                    case WINED3DFMT_UNKNOWN:
+                        if (DevModeW.dmBitsPerPel == 32 ||
+                            DevModeW.dmBitsPerPel == 16) i++;
+                        break;
+                    case WINED3DFMT_X8R8G8B8:
+                        if (DevModeW.dmBitsPerPel == 32) i++;
+                        break;
+                    case WINED3DFMT_R5G6B5:
+                        if (DevModeW.dmBitsPerPel == 16) i++;
+                        break;
+                    default:
+                        /* Skip other modes as they do not match the requested format */
+                        break;
+                }
             }
+        } else {
+            i = 1;
+            j = 1;
         }
-#else
-        i = 1;
-        j = 1;
-#endif
+
         TRACE_(d3d_caps)("(%p}->(Adapter: %d) => %d (out of %d)\n", This, Adapter, i, j);
         return i;
     } else {
@@ -1124,8 +1159,7 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
         return WINED3DERR_INVALIDCALL;
     }
 
-    if (Adapter == 0) { /* Display */
-#if !defined( DEBUG_SINGLE_MODE )
+    if (Adapter == 0 && !DEBUG_SINGLE_MODE) { /* Display */
         DEVMODEW DevModeW;
         int ModeIdx = 0;
         int i = 0;
@@ -1190,18 +1224,17 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
             return WINED3DERR_INVALIDCALL;
         }
 
-#else
+        TRACE_(d3d_caps)("W %d H %d rr %d fmt (%x - %s) bpp %u\n", pMode->Width, pMode->Height,
+                pMode->RefreshRate, pMode->Format, debug_d3dformat(pMode->Format),
+                DevModeW.dmBitsPerPel);
+
+    } else if (DEBUG_SINGLE_MODE) {
         /* Return one setting of the format requested */
         if (Mode > 0) return WINED3DERR_INVALIDCALL;
         pMode->Width        = 800;
         pMode->Height       = 600;
-        pMode->RefreshRate  = WINED3DADAPTER_DEFAULT;
+        pMode->RefreshRate  = 60;
         pMode->Format       = (Format == WINED3DFMT_UNKNOWN) ? WINED3DFMT_X8R8G8B8 : Format;
-#endif
-        TRACE_(d3d_caps)("W %d H %d rr %d fmt (%x - %s) bpp %u\n", pMode->Width, pMode->Height,
-                 pMode->RefreshRate, pMode->Format, debug_d3dformat(pMode->Format),
-                 DevModeW.dmBitsPerPel);
-
     } else {
         FIXME_(d3d_caps)("Adapter not primary display\n");
     }
@@ -2367,6 +2400,26 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     return WINED3D_OK;
 }
 
+static unsigned int glsl_program_key_hash(void *key) {
+    glsl_program_key_t *k = (glsl_program_key_t *)key;
+
+    unsigned int hash = k->vshader | k->pshader << 16;
+    hash += ~(hash << 15);
+    hash ^=  (hash >> 10);
+    hash +=  (hash << 3);
+    hash ^=  (hash >> 6);
+    hash += ~(hash << 11);
+    hash ^=  (hash >> 16);
+
+    return hash;
+}
+
+static BOOL glsl_program_key_compare(void *keya, void *keyb) {
+    glsl_program_key_t *ka = (glsl_program_key_t *)keya;
+    glsl_program_key_t *kb = (glsl_program_key_t *)keyb;
+
+    return ka->vshader == kb->vshader && ka->pshader == kb->pshader;
+}
 
 /* Note due to structure differences between dx8 and dx9 D3DPRESENT_PARAMETERS,
    and fields being inserted in the middle, a new structure is used in place    */
@@ -2437,6 +2490,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     select_shader_mode(&This->gl_info, DeviceType, &object->ps_selected_mode, &object->vs_selected_mode);
     if (object->ps_selected_mode == SHADER_GLSL || object->vs_selected_mode == SHADER_GLSL) {
         object->shader_backend = &glsl_shader_backend;
+        object->glsl_program_lookup = hash_table_create(&glsl_program_key_hash, &glsl_program_key_compare);
     } else if (object->ps_selected_mode == SHADER_ARB || object->vs_selected_mode == SHADER_ARB) {
         object->shader_backend = &arb_program_shader_backend;
     } else {

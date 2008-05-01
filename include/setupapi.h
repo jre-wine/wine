@@ -723,6 +723,9 @@ BOOL     WINAPI SetupCommitFileQueueW( HWND, HSPFILEQ, PSP_FILE_CALLBACK_W, PVOI
 UINT     WINAPI SetupCopyErrorA( HWND, PCSTR, PCSTR, PCSTR, PCSTR, PCSTR, UINT, DWORD, PSTR, DWORD, PDWORD );
 UINT     WINAPI SetupCopyErrorW( HWND, PCWSTR, PCWSTR, PCWSTR, PCWSTR, PCWSTR, UINT, DWORD, PWSTR, DWORD, PDWORD );
 #define         SetupCopyError WINELIB_NAME_AW(SetupCopyError)
+BOOL     WINAPI SetupCopyOEMInfA( PCSTR, PCSTR, DWORD, DWORD, PSTR, DWORD, PDWORD, PSTR * );
+BOOL     WINAPI SetupCopyOEMInfW( PCWSTR, PCWSTR, DWORD, DWORD, PWSTR, DWORD, PDWORD, PWSTR * );
+#define         SetupCopyOEMInf WINELIB_NAME_AW(SetupCopyOEMInf)
 UINT     WINAPI SetupDefaultQueueCallbackA( PVOID, UINT, UINT_PTR, UINT_PTR );
 UINT     WINAPI SetupDefaultQueueCallbackW( PVOID, UINT, UINT_PTR, UINT_PTR );
 #define         SetupDefaultQueueCallback WINELIB_NAME_AW(SetupDefaultQueueCallback)
@@ -777,6 +780,9 @@ BOOL     WINAPI SetupDiGetDeviceInstallParamsA(HDEVINFO, PSP_DEVINFO_DATA, PSP_D
 BOOL     WINAPI SetupDiGetDeviceInstallParamsW(HDEVINFO, PSP_DEVINFO_DATA, PSP_DEVINSTALL_PARAMS_W);
 #define         SetupDiGetDeviceInstallParams WINELIB_NAME_AW(SetupDiGetDeviceInstallParams)
 BOOL     WINAPI SetupDiGetDeviceRegistryPropertyA(HDEVINFO, PSP_DEVINFO_DATA, DWORD, PDWORD, PBYTE, DWORD, PDWORD);
+BOOL     WINAPI SetupDiGetINFClassA(PCSTR, LPGUID, PSTR, DWORD, PDWORD);
+BOOL     WINAPI SetupDiGetINFClassW(PCWSTR, LPGUID, PWSTR, DWORD, PDWORD);
+#define         SetupDiGetINFClass WINELIB_NAME_AW(SetupDiGetINFClass)
 BOOL     WINAPI SetupDiInstallClassA(HWND, PCSTR, DWORD, HSPFILEQ);
 BOOL     WINAPI SetupDiInstallClassW(HWND, PCWSTR, DWORD, HSPFILEQ);
 #define         SetupDiInstallClass WINELIB_NAME_AW(SetupDiInstallClass)
@@ -892,6 +898,9 @@ BOOL     WINAPI SetupSetFileQueueAlternatePlatformA( HSPFILEQ, PSP_ALTPLATFORM_I
 BOOL     WINAPI SetupSetFileQueueAlternatePlatformW( HSPFILEQ, PSP_ALTPLATFORM_INFO, PCWSTR );
 #define         SetupSetFileQueueAlternatePlatform WINELIB_NAME_AW(SetupSetFileQueueAlternatePlatform)
 BOOL     WINAPI SetupSetFileQueueFlags( HSPFILEQ, DWORD, DWORD );
+BOOL     WINAPI SetupSetSourceListA(DWORD, PCSTR *, UINT);
+BOOL     WINAPI SetupSetSourceListW(DWORD, PCWSTR *, UINT);
+#define         SetupSetSourceList WINELIB_NAME_AW(SetupSetSourceList)
 void     WINAPI SetupTermDefaultQueueCallback( PVOID );
 DWORD    WINAPI StampFileSecurity(PCWSTR, PSECURITY_DESCRIPTOR);
 DWORD    WINAPI TakeOwnershipOfFile(PCWSTR);

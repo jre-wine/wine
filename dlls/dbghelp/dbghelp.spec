@@ -1,7 +1,7 @@
 @ stub DbgHelpCreateUserDump
 @ stub DbgHelpCreateUserDumpW
 @ stdcall EnumDirTree(long str str ptr ptr ptr)
-@ stub EnumDirTreeW
+@ stdcall EnumDirTreeW(long wstr wstr ptr ptr ptr)
 @ stdcall EnumerateLoadedModules(long ptr ptr)
 @ stdcall EnumerateLoadedModules64(long ptr ptr)
 @ stdcall EnumerateLoadedModulesW64(long ptr ptr)
@@ -10,8 +10,8 @@
 @ stdcall FindDebugInfoFileEx(str str ptr ptr ptr)
 @ stub FindDebugInfoFileExW
 @ stdcall FindExecutableImage(str str str)
-@ stub FindExecutableImageEx
-@ stub FindExecutableImageExW
+@ stdcall FindExecutableImageEx(str str ptr ptr ptr)
+@ stdcall FindExecutableImageExW(wstr wstr ptr ptr ptr)
 @ stub FindFileInPath
 @ stub FindFileInSearchPath
 @ stdcall GetTimestampForLoadedLibrary(long)
@@ -26,8 +26,8 @@
 @ stdcall MapDebugInformation(long str str long)
 @ stdcall MiniDumpReadDumpStream(ptr long ptr ptr ptr)
 @ stdcall MiniDumpWriteDump(ptr long ptr long long long long)
-@ stdcall SearchTreeForFile(str str str)
-@ stub SearchTreeForFileW
+@ stdcall SearchTreeForFile(str str ptr)
+@ stdcall SearchTreeForFileW(wstr wstr ptr)
 @ stdcall StackWalk(long long long ptr ptr ptr ptr ptr ptr)
 @ stdcall StackWalk64(long long long ptr ptr ptr ptr ptr ptr)
 @ stub SymAddSymbol
@@ -54,7 +54,7 @@
 @ stub SymFindDebugInfoFile
 @ stub SymFindDebugInfoFileW
 @ stdcall SymFindFileInPath(long str str ptr long long long ptr ptr ptr)
-@ stub SymFindFileInPathW
+@ stdcall SymFindFileInPathW(long wstr wstr ptr long long long ptr ptr ptr)
 @ stdcall SymFromAddr(ptr double ptr ptr)
 @ stdcall SymFromAddrW(ptr double ptr ptr)
 @ stub SymFromIndex
@@ -119,7 +119,7 @@
 @ stdcall SymLoadModuleEx(long long str str double long ptr long)
 @ stdcall SymLoadModuleExW(long long wstr wstr double long ptr long)
 @ stdcall SymMatchFileName(str str ptr ptr)
-@ stub SymMatchFileNameW
+@ stdcall SymMatchFileNameW(wstr wstr ptr ptr)
 @ stdcall SymMatchString(str str long)
 @ stub SymMatchStringA
 @ stub SymMatchStringW

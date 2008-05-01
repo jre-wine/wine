@@ -27,7 +27,8 @@
 #include <stdio.h>
 #include <ctype.h>
 
-void WCMD_batch (char *, char *, int);
+void WCMD_batch (char *, char *, int, char *, HANDLE);
+void WCMD_call (char *command);
 void WCMD_change_tty (void);
 void WCMD_clear_screen (void);
 void WCMD_copy (void);
@@ -37,6 +38,7 @@ void WCMD_directory (void);
 void WCMD_echo (const char *);
 void WCMD_endlocal (void);
 void WCMD_enter_paged_mode(void);
+void WCMD_exit (void);
 void WCMD_for (char *);
 void WCMD_give_help (char *command);
 void WCMD_goto (void);
@@ -48,8 +50,10 @@ void WCMD_output_asis (const char *message);
 void WCMD_parse (char *s, char *q, char *p1, char *p2);
 void WCMD_pause (void);
 void WCMD_pipe (char *command);
+void WCMD_popd (void);
 void WCMD_print_error (void);
 void WCMD_process_command (char *command);
+void WCMD_pushd (void);
 int  WCMD_read_console (char *string, int str_len);
 void WCMD_remove_dir (void);
 void WCMD_rename (void);
@@ -75,6 +79,10 @@ char *WCMD_parameter (char *s, int n, char **where);
 char *WCMD_strtrim_leading_spaces (char *string);
 void WCMD_strtrim_trailing_spaces (char *string);
 void WCMD_opt_s_strip_quotes(char *cmd);
+void WCMD_HandleTildaModifiers(char **start, char *forVariable);
+BOOL WCMD_ask_confirm (char *message, BOOL showSureText);
+
+void WCMD_splitpath(const CHAR* path, CHAR* drv, CHAR* dir, CHAR* name, CHAR* ext);
 
 /*	Data structure to hold context when executing batch files */
 
@@ -83,6 +91,7 @@ typedef struct {
   HANDLE h;             /* Handle to the open batch file */
   int shift_count;	/* Number of SHIFT commands executed */
   void *prev_context;	/* Pointer to the previous context block */
+  BOOL  skip_rest;      /* Skip the rest of the batch program and exit */
 } BATCH_CONTEXT;
 
 #endif /* !RC_INVOKED */
@@ -135,12 +144,22 @@ typedef struct {
 
 #define WCMD_ENDLOCAL 36
 #define WCMD_SETLOCAL 37
+#define WCMD_PUSHD  38
+#define WCMD_POPD   39
 
 /* Must be last in list */
-#define WCMD_EXIT   38
+#define WCMD_EXIT   40
 
 /* Some standard messages */
 extern const char nyi[];
 extern const char newline[];
 extern const char version_string[];
 extern const char anykey[];
+
+/* Translated messages */
+#define WCMD_CONFIRM  1001
+#define WCMD_YES      1002
+#define WCMD_NO       1003
+
+/* msdn specified max for Win XP */
+#define MAXSTRING 8192

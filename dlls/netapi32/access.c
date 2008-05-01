@@ -310,10 +310,24 @@ NetUserGetLocalGroups(LPCWSTR servername, LPCWSTR username, DWORD level,
                       DWORD flags, LPBYTE* bufptr, DWORD prefmaxlen,
                       LPDWORD entriesread, LPDWORD totalentries)
 {
+    NET_API_STATUS status;
+
     FIXME("(%s, %s, %d, %08x, %p %d, %p, %p) stub!\n",
           debugstr_w(servername), debugstr_w(username), level, flags, bufptr,
           prefmaxlen, entriesread, totalentries);
-    return NERR_InternalError;
+
+    status = NETAPI_ValidateServername(servername);
+    if (status != NERR_Success)
+        return status;
+
+    if (!NETAPI_IsKnownUser(username))
+        return NERR_UserNotFound;
+
+    if (bufptr) *bufptr = NULL;
+    if (entriesread) *entriesread = 0;
+    if (totalentries) *totalentries = 0;
+
+    return NERR_Success;
 }
 
 /************************************************************
@@ -686,4 +700,26 @@ NET_API_STATUS WINAPI NetUserModalsGet(
     }
 
     return NERR_Success;
+}
+
+/******************************************************************************
+ *                NetUserChangePassword  (NETAPI32.@)
+ * PARAMS
+ *  domainname  [I] Optional. Domain on which the user resides or the logon
+ *                  domain of the current user if NULL.
+ *  username    [I] Optional. Username to change the password for or the name
+ *                  of the current user if NULL.
+ *  oldpassword [I] The user's current password.
+ *  newpassword [I] The password that the user will be changed to using.
+ *
+ * RETURNS
+ *  Success: NERR_Success.
+ *  Failure: NERR_* failure code or win error code.
+ *
+ */
+NET_API_STATUS WINAPI NetUserChangePassword(LPCWSTR domainname, LPCWSTR username,
+    LPCWSTR oldpassword, LPCWSTR newpassword)
+{
+    FIXME("(%s, %s, ..., ...)\n", debugstr_w(domainname), debugstr_w(username));
+    return NERR_InternalError;
 }

@@ -1856,7 +1856,7 @@ static void pdb_convert_symbol_file(const PDB_SYMBOLS* symbols,
     }
 }
 
-static BOOL CALLBACK pdb_match(char* file, void* user)
+static BOOL CALLBACK pdb_match(const char* file, void* user)
 {
     /* accept first file that exists */
     HANDLE h = CreateFileA(file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -2139,7 +2139,7 @@ static BOOL pdb_process_internal(const struct process* pcs,
 
     /* Open and map() .PDB file */
     if ((hFile = open_pdb_file(pcs, pdb_lookup)) == NULL ||
-        ((hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
+        ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
         ((image = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) == NULL))
     {
         WARN("Unable to open .PDB file: %s\n", pdb_lookup->filename);
@@ -2248,7 +2248,9 @@ static BOOL pdb_process_file(const struct process* pcs,
         else
             msc_dbg->module->module.PdbSig70 = pdb_lookup->u.ds.guid;
         msc_dbg->module->module.PdbAge = pdb_lookup->age;
-        strcpy(msc_dbg->module->module.LoadedPdbName, pdb_lookup->filename);
+        MultiByteToWideChar(CP_ACP, 0, pdb_lookup->filename, -1,
+                            msc_dbg->module->module.LoadedPdbName,
+                            sizeof(msc_dbg->module->module.LoadedPdbName) / sizeof(WCHAR));
         /* FIXME: we could have a finer grain here */
         msc_dbg->module->module.LineNumbers = TRUE;
         msc_dbg->module->module.GlobalSymbols = TRUE;
@@ -2265,9 +2267,9 @@ BOOL pdb_fetch_file_info(struct pdb_lookup* pdb_lookup)
     char*               image = NULL;
     BOOL                ret = TRUE;
 
-    if ((hFile = CreateFileA(pdb_lookup->filename, GENERIC_READ, FILE_SHARE_READ, NULL, 
+    if ((hFile = CreateFileA(pdb_lookup->filename, GENERIC_READ, FILE_SHARE_READ, NULL,
                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE ||
-        ((hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
+        ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
         ((image = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) == NULL))
     {
         WARN("Unable to open .PDB file: %s\n", pdb_lookup->filename);
@@ -2417,7 +2419,7 @@ static BOOL codeview_process_info(const struct process* pcs,
     }
     default:
         ERR("Unknown CODEVIEW signature %.4s in module %s\n",
-            (const char*)signature, msc_dbg->module->module.ModuleName);
+            (const char*)signature, msc_dbg->module->module_name);
         break;
     }
     if (ret)

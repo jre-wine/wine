@@ -216,6 +216,7 @@ ALL_MAKEFILES = \
 	dlls/dnsapi/tests/Makefile \
 	dlls/dplay/Makefile \
 	dlls/dplayx/Makefile \
+	dlls/dplayx/tests/Makefile \
 	dlls/dpnet/Makefile \
 	dlls/dpnhpast/Makefile \
 	dlls/dsound/Makefile \
@@ -335,11 +336,13 @@ ALL_MAKEFILES = \
 	dlls/rsaenh/Makefile \
 	dlls/rsaenh/tests/Makefile \
 	dlls/sane.ds/Makefile \
+	dlls/schannel/Makefile \
 	dlls/secur32/Makefile \
 	dlls/secur32/tests/Makefile \
 	dlls/security/Makefile \
 	dlls/sensapi/Makefile \
 	dlls/serialui/Makefile \
+	dlls/serialui/tests/Makefile \
 	dlls/setupapi/Makefile \
 	dlls/setupapi/tests/Makefile \
 	dlls/sfc/Makefile \
@@ -400,6 +403,7 @@ ALL_MAKEFILES = \
 	dlls/wineps.drv/Makefile \
 	dlls/winequartz.drv/Makefile \
 	dlls/winex11.drv/Makefile \
+	dlls/wing32/Makefile \
 	dlls/wininet/Makefile \
 	dlls/wininet/tests/Makefile \
 	dlls/winmm/Makefile \
@@ -547,6 +551,7 @@ dlls/dnsapi/Makefile: dlls/dnsapi/Makefile.in dlls/Makedll.rules
 dlls/dnsapi/tests/Makefile: dlls/dnsapi/tests/Makefile.in dlls/Maketest.rules
 dlls/dplay/Makefile: dlls/dplay/Makefile.in dlls/Makedll.rules
 dlls/dplayx/Makefile: dlls/dplayx/Makefile.in dlls/Makedll.rules
+dlls/dplayx/tests/Makefile: dlls/dplayx/tests/Makefile.in dlls/Maketest.rules
 dlls/dpnet/Makefile: dlls/dpnet/Makefile.in dlls/Makedll.rules
 dlls/dpnhpast/Makefile: dlls/dpnhpast/Makefile.in dlls/Makedll.rules
 dlls/dsound/Makefile: dlls/dsound/Makefile.in dlls/Makedll.rules
@@ -666,11 +671,13 @@ dlls/rsabase/tests/Makefile: dlls/rsabase/tests/Makefile.in dlls/Maketest.rules
 dlls/rsaenh/Makefile: dlls/rsaenh/Makefile.in dlls/Makedll.rules
 dlls/rsaenh/tests/Makefile: dlls/rsaenh/tests/Makefile.in dlls/Maketest.rules
 dlls/sane.ds/Makefile: dlls/sane.ds/Makefile.in dlls/Makedll.rules
+dlls/schannel/Makefile: dlls/schannel/Makefile.in dlls/Makedll.rules
 dlls/secur32/Makefile: dlls/secur32/Makefile.in dlls/Makedll.rules
 dlls/secur32/tests/Makefile: dlls/secur32/tests/Makefile.in dlls/Maketest.rules
 dlls/security/Makefile: dlls/security/Makefile.in dlls/Makedll.rules
 dlls/sensapi/Makefile: dlls/sensapi/Makefile.in dlls/Makedll.rules
 dlls/serialui/Makefile: dlls/serialui/Makefile.in dlls/Makedll.rules
+dlls/serialui/tests/Makefile: dlls/serialui/tests/Makefile.in dlls/Maketest.rules
 dlls/setupapi/Makefile: dlls/setupapi/Makefile.in dlls/Makedll.rules
 dlls/setupapi/tests/Makefile: dlls/setupapi/tests/Makefile.in dlls/Maketest.rules
 dlls/sfc/Makefile: dlls/sfc/Makefile.in dlls/Makedll.rules
@@ -731,6 +738,7 @@ dlls/wineoss.drv/Makefile: dlls/wineoss.drv/Makefile.in dlls/Makedll.rules
 dlls/wineps.drv/Makefile: dlls/wineps.drv/Makefile.in dlls/Makedll.rules
 dlls/winequartz.drv/Makefile: dlls/winequartz.drv/Makefile.in dlls/Makedll.rules
 dlls/winex11.drv/Makefile: dlls/winex11.drv/Makefile.in dlls/Makedll.rules
+dlls/wing32/Makefile: dlls/wing32/Makefile.in dlls/Makedll.rules
 dlls/wininet/Makefile: dlls/wininet/Makefile.in dlls/Makedll.rules
 dlls/wininet/tests/Makefile: dlls/wininet/tests/Makefile.in dlls/Maketest.rules
 dlls/winmm/Makefile: dlls/winmm/Makefile.in dlls/Makedll.rules

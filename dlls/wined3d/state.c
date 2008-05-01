@@ -79,9 +79,9 @@ static void state_fillmode(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
 }
 
 static void state_lighting(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    BOOL normals;
+    BOOL transformed;
 
-    /* Lighting is only enabled if Vertex normals are passed by the application,
+    /* Lighting is not enabled if transformed vertices are drawn
      * but lighting does not affect the stream sources, so it is not grouped for performance reasons.
      * This state reads the decoded vertex decl, so if it is dirty don't do anything. The
      * vertex declaration appplying function calls this function for updating
@@ -91,10 +91,11 @@ static void state_lighting(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
         return;
     }
 
-    normals = stateblock->wineD3DDevice->strided_streams.u.s.normal.lpData != NULL ||
-              stateblock->wineD3DDevice->strided_streams.u.s.normal.VBO != 0;
+    transformed = ((stateblock->wineD3DDevice->strided_streams.u.s.position.lpData != NULL ||
+                    stateblock->wineD3DDevice->strided_streams.u.s.position.VBO != 0) &&
+                    stateblock->wineD3DDevice->strided_streams.u.s.position_transformed) ? TRUE : FALSE;
 
-    if (stateblock->renderState[WINED3DRS_LIGHTING] && normals) {
+    if (stateblock->renderState[WINED3DRS_LIGHTING] && !transformed) {
         glEnable(GL_LIGHTING);
         checkGLcall("glEnable GL_LIGHTING");
     } else {
@@ -387,6 +388,22 @@ static void state_clipping(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
     DWORD enable  = 0xFFFFFFFF;
     DWORD disable = 0x00000000;
 
+    if(stateblock->vertexShader) {
+        /* The spec says that opengl clipping planes are disabled when using shaders. Direct3D planes aren't,
+         * so that is an issue. The MacOS ATI driver keeps clipping planes activated with shaders in some
+         * contitions I got sick of tracking down. The shader state handler disables all clip planes because
+         * of that - don't do anything here and keep them disabled
+         */
+        if(stateblock->renderState[WINED3DRS_CLIPPLANEENABLE]) {
+            static BOOL warned = FALSE;
+            if(!warned) {
+                FIXME("Clipping not supported with vertex shaders\n");
+                warned = TRUE;
+            }
+        }
+        return;
+    }
+
     /* TODO: Keep track of previously enabled clipplanes to avoid unneccessary resetting
      * of already set values
      */
@@ -665,6 +682,7 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
         /* No fog? Disable it, and we're done :-) */
         glDisable(GL_FOG);
         checkGLcall("glDisable GL_FOG");
+        return;
     }
 
     tmpvalue.d = stateblock->renderState[WINED3DRS_FOGSTART];
@@ -677,8 +695,10 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
        ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->usesFog) {
         glFogi(GL_FOG_MODE, GL_LINEAR);
         checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR)");
-        fogstart = 1.0;
-        fogend = 0.0;
+        if (stateblock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE) {
+            fogstart = 1.0;
+            fogend = 0.0;
+        }
         context->last_was_foggy_shader = TRUE;
     }
     /* DX 7 sdk: "If both render states(vertex and table fog) are set to valid modes,
@@ -2030,6 +2050,29 @@ static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
     }
 }
 
+static void clipplane(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    UINT index = state - STATE_CLIPPLANE(0);
+
+    if(isStateDirty(context, STATE_TRANSFORM(WINED3DTS_VIEW)) || index > GL_LIMITS(clipplanes)) {
+        return;
+    }
+
+    /* Clip Plane settings are affected by the model view in OpenGL, the View transform in direct3d */
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadMatrixf((float *) &stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+
+    TRACE("Clipplane [%f,%f,%f,%f]\n",
+          stateblock->clipplane[index][0],
+          stateblock->clipplane[index][1],
+          stateblock->clipplane[index][2],
+          stateblock->clipplane[index][3]);
+    glClipPlane(GL_CLIP_PLANE0 + index, stateblock->clipplane[index]);
+    checkGLcall("glClipPlane");
+
+    glPopMatrix();
+}
+
 static void transform_view(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     unsigned int k;
 
@@ -2056,10 +2099,11 @@ static void transform_view(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
         checkGLcall("glLightfv dirn");
     }
 
-    /* Reset Clipping Planes if clipping is enabled. TODO: Call clipplane apply func */
+    /* Reset Clipping Planes  */
     for (k = 0; k < GL_LIMITS(clipplanes); k++) {
-        glClipPlane(GL_CLIP_PLANE0 + k, stateblock->clipplane[k]);
-        checkGLcall("glClipPlane");
+        if(!isStateDirty(context, STATE_CLIPPLANE(k))) {
+            clipplane(STATE_CLIPPLANE(k), stateblock, context);
+        }
     }
 
     if(context->last_was_rhw) {
@@ -2395,8 +2439,10 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
 #endif
 
         } else {
-            /* TODO: support blends in fixupVertices */
-            FIXME("unsupported blending in openGl\n");
+            /* TODO: support blends in drawStridedSlow
+             * No need to write a FIXME here, this is done after the general vertex decl decoding
+             */
+            WARN("unsupported blending in openGl\n");
         }
     } else {
         if (GL_SUPPORT(ARB_VERTEX_BLEND)) {
@@ -2784,8 +2830,11 @@ static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVer
 /* Generate some fixme's if unsupported functionality is being used */
 #define BUFFER_OR_DATA(_attribute) dataLocations->u.s._attribute.lpData
     /* TODO: Either support missing functionality in fixupVertices or by creating a shader to replace the pipeline. */
-    if (!useVertexShaderFunction && (BUFFER_OR_DATA(blendMatrixIndices) || BUFFER_OR_DATA(blendWeights))) {
-        FIXME("Blending data is only valid with vertex shaders %p %p\n",dataLocations->u.s.blendWeights.lpData,dataLocations->u.s.blendWeights.lpData);
+    if (!useVertexShaderFunction &&
+        stateblock->renderState[WINED3DRS_VERTEXBLEND] &&
+        (BUFFER_OR_DATA(blendMatrixIndices) || BUFFER_OR_DATA(blendWeights))) {
+        FIXME("Vertex Blending is not implemented yet %p %p\n",dataLocations->u.s.blendWeights.lpData,dataLocations->u.s.blendWeights.lpData);
+        /* TODO: Implement it using GL_ARB_vertex_blend or software emulation in drawStridedSlow */
     }
     if (!useVertexShaderFunction && (BUFFER_OR_DATA(position2) || BUFFER_OR_DATA(normal2))) {
         FIXME("Tweening is only valid with vertex shaders\n");
@@ -2833,7 +2882,7 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         updateFog = TRUE;
     }
 
-    /* Reapply lighting if it is not sheduled for reapplication already */
+    /* Reapply lighting if it is not scheduled for reapplication already */
     if(!isStateDirty(context, STATE_RENDER(WINED3DRS_LIGHTING))) {
         state_lighting(STATE_RENDER(WINED3DRS_LIGHTING), stateblock, context);
     }
@@ -2891,11 +2940,32 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         if(!isStateDirty(context, STATE_RENDER(WINED3DRS_COLORVERTEX))) {
             state_colormat(STATE_RENDER(WINED3DRS_COLORVERTEX), stateblock, context);
         }
+
+        if(context->last_was_vshader && !isStateDirty(context, STATE_RENDER(WINED3DRS_CLIPPLANEENABLE))) {
+            state_clipping(STATE_RENDER(WINED3DRS_CLIPPLANEENABLE), stateblock, context);
+        }
     } else {
         /* We compile the shader here because we need the vertex declaration
          * in order to determine if we need to do any swizzling for D3DCOLOR
          * registers. If the shader is already compiled this call will do nothing. */
         IWineD3DVertexShader_CompileShader(stateblock->vertexShader);
+
+        if(!context->last_was_vshader) {
+            int i;
+            static BOOL warned = FALSE;
+            /* Disable all clip planes to get defined results on all drivers. See comment in the
+             * state_clipping state handler
+             */
+            for(i = 0; i < GL_LIMITS(clipplanes); i++) {
+                glDisable(GL_CLIP_PLANE0 + i);
+                checkGLcall("glDisable(GL_CLIP_PLANE0 + i)");
+            }
+
+            if(!warned && stateblock->renderState[WINED3DRS_CLIPPLANEENABLE]) {
+                FIXME("Clipping not supported with vertex shaders\n");
+                warned = TRUE;
+            }
+        }
     }
 
     /* Vertex and pixel shaders are applied together for now, so let the last dirty state do the
@@ -2975,21 +3045,16 @@ static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContex
         glLightfv(GL_LIGHT0 + Index, GL_AMBIENT, colRGBA);
         checkGLcall("glLightfv");
 
-        /* Attenuation - Are these right? guessing... */
-        glLightf(GL_LIGHT0 + Index, GL_CONSTANT_ATTENUATION,  lightInfo->OriginalParms.Attenuation0);
-        checkGLcall("glLightf");
-        glLightf(GL_LIGHT0 + Index, GL_LINEAR_ATTENUATION,    lightInfo->OriginalParms.Attenuation1);
-        checkGLcall("glLightf");
-
         if ((lightInfo->OriginalParms.Range *lightInfo->OriginalParms.Range) >= FLT_MIN) {
             quad_att = 1.4/(lightInfo->OriginalParms.Range *lightInfo->OriginalParms.Range);
         } else {
             quad_att = 0; /*  0 or  MAX?  (0 seems to be ok) */
         }
 
-        if (quad_att < lightInfo->OriginalParms.Attenuation2) quad_att = lightInfo->OriginalParms.Attenuation2;
-        glLightf(GL_LIGHT0 + Index, GL_QUADRATIC_ATTENUATION, quad_att);
-        checkGLcall("glLightf");
+        /* Do not assign attenuation values for lights that do not use them. D3D apps are free to pass any junk,
+         * but gl drivers use them and may crash due to bad Attenuation values. Need for Speed most wanted sets
+         * Attenuation0 to NaN and crashes in the gl lib
+         */
 
         switch (lightInfo->OriginalParms.Type) {
             case WINED3DLIGHT_POINT:
@@ -2997,6 +3062,14 @@ static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContex
                 glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->lightPosn[0]);
                 checkGLcall("glLightfv");
                 glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
+                checkGLcall("glLightf");
+                /* Attenuation - Are these right? guessing... */
+                glLightf(GL_LIGHT0 + Index, GL_CONSTANT_ATTENUATION,  lightInfo->OriginalParms.Attenuation0);
+                checkGLcall("glLightf");
+                glLightf(GL_LIGHT0 + Index, GL_LINEAR_ATTENUATION,    lightInfo->OriginalParms.Attenuation1);
+                checkGLcall("glLightf");
+                if (quad_att < lightInfo->OriginalParms.Attenuation2) quad_att = lightInfo->OriginalParms.Attenuation2;
+                glLightf(GL_LIGHT0 + Index, GL_QUADRATIC_ATTENUATION, quad_att);
                 checkGLcall("glLightf");
                 /* FIXME: Range */
                 break;
@@ -3011,6 +3084,14 @@ static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContex
                 glLightf(GL_LIGHT0 + Index, GL_SPOT_EXPONENT, lightInfo->exponent);
                 checkGLcall("glLightf");
                 glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
+                checkGLcall("glLightf");
+                /* Attenuation - Are these right? guessing... */
+                glLightf(GL_LIGHT0 + Index, GL_CONSTANT_ATTENUATION,  lightInfo->OriginalParms.Attenuation0);
+                checkGLcall("glLightf");
+                glLightf(GL_LIGHT0 + Index, GL_LINEAR_ATTENUATION,    lightInfo->OriginalParms.Attenuation1);
+                checkGLcall("glLightf");
+                if (quad_att < lightInfo->OriginalParms.Attenuation2) quad_att = lightInfo->OriginalParms.Attenuation2;
+                glLightf(GL_LIGHT0 + Index, GL_QUADRATIC_ATTENUATION, quad_att);
                 checkGLcall("glLightf");
                 /* FIXME: Range */
                 break;
@@ -3037,6 +3118,34 @@ static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContex
     }
 
     return;
+}
+
+static void scissorrect(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    IWineD3DSwapChainImpl *swapchain = (IWineD3DSwapChainImpl *) stateblock->wineD3DDevice->swapchains[0];
+    RECT *pRect = &stateblock->scissorRect;
+    RECT windowRect;
+    UINT winHeight;
+
+    GetClientRect(swapchain->win_handle, &windowRect);
+    /* Warning: glScissor uses window coordinates, not viewport coordinates, so our viewport correction does not apply
+     * Warning2: Even in windowed mode the coords are relative to the window, not the screen
+     */
+    winHeight = windowRect.bottom - windowRect.top;
+    TRACE("(%p) Setting new Scissor Rect to %d:%d-%d:%d\n", stateblock->wineD3DDevice, pRect->left, pRect->bottom - winHeight,
+          pRect->right - pRect->left, pRect->bottom - pRect->top);
+    glScissor(pRect->left, winHeight - pRect->bottom, pRect->right - pRect->left, pRect->bottom - pRect->top);
+    checkGLcall("glScissor");
+}
+
+static void indexbuffer(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    if(GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT)) {
+        if(stateblock->streamIsUP || stateblock->pIndexData == NULL ) {
+            GL_EXTCALL(glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, 0));
+        } else {
+            IWineD3DIndexBufferImpl *ib = (IWineD3DIndexBufferImpl *) stateblock->pIndexData;
+            GL_EXTCALL(glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, ib->vbo));
+        }
+    }
 }
 
 const struct StateEntry StateTable[] =
@@ -4054,6 +4163,7 @@ const struct StateEntry StateTable[] =
     { /*511, WINED3DTS_WORLDMATRIX(255)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)),        transform_worldex   },
       /* Various Vertex states follow */
     { /*   , STATE_STREAMSRC                        */      STATE_VDECL,                                        vertexdeclaration   },
+    { /*   , STATE_INDEXBUFFER                      */      STATE_INDEXBUFFER,                                  indexbuffer         },
     { /*   , STATE_VDECL                            */      STATE_VDECL,                                        vertexdeclaration   },
     { /*   , STATE_VSHADER                          */      STATE_VDECL,                                        vertexdeclaration   },
     { /*   , STATE_VIEWPORT                         */      STATE_VIEWPORT,                                     viewport            },
@@ -4068,4 +4178,39 @@ const struct StateEntry StateTable[] =
     { /*   , STATE_ACTIVELIGHT(5)                   */      STATE_ACTIVELIGHT(5),                               light               },
     { /*   , STATE_ACTIVELIGHT(6)                   */      STATE_ACTIVELIGHT(6),                               light               },
     { /*   , STATE_ACTIVELIGHT(7)                   */      STATE_ACTIVELIGHT(7),                               light               },
+
+    { /* Scissor rect                               */      STATE_SCISSORRECT,                                  scissorrect         },
+      /* Clip planes */
+    { /* STATE_CLIPPLANE(0)                         */      STATE_CLIPPLANE(0),                                 clipplane           },
+    { /* STATE_CLIPPLANE(1)                         */      STATE_CLIPPLANE(1),                                 clipplane           },
+    { /* STATE_CLIPPLANE(2)                         */      STATE_CLIPPLANE(2),                                 clipplane           },
+    { /* STATE_CLIPPLANE(3)                         */      STATE_CLIPPLANE(3),                                 clipplane           },
+    { /* STATE_CLIPPLANE(4)                         */      STATE_CLIPPLANE(4),                                 clipplane           },
+    { /* STATE_CLIPPLANE(5)                         */      STATE_CLIPPLANE(5),                                 clipplane           },
+    { /* STATE_CLIPPLANE(6)                         */      STATE_CLIPPLANE(6),                                 clipplane           },
+    { /* STATE_CLIPPLANE(7)                         */      STATE_CLIPPLANE(7),                                 clipplane           },
+    { /* STATE_CLIPPLANE(8)                         */      STATE_CLIPPLANE(8),                                 clipplane           },
+    { /* STATE_CLIPPLANE(9)                         */      STATE_CLIPPLANE(9),                                 clipplane           },
+    { /* STATE_CLIPPLANE(10)                        */      STATE_CLIPPLANE(10),                                clipplane           },
+    { /* STATE_CLIPPLANE(11)                        */      STATE_CLIPPLANE(11),                                clipplane           },
+    { /* STATE_CLIPPLANE(12)                        */      STATE_CLIPPLANE(12),                                clipplane           },
+    { /* STATE_CLIPPLANE(13)                        */      STATE_CLIPPLANE(13),                                clipplane           },
+    { /* STATE_CLIPPLANE(14)                        */      STATE_CLIPPLANE(14),                                clipplane           },
+    { /* STATE_CLIPPLANE(15)                        */      STATE_CLIPPLANE(15),                                clipplane           },
+    { /* STATE_CLIPPLANE(16)                        */      STATE_CLIPPLANE(16),                                clipplane           },
+    { /* STATE_CLIPPLANE(17)                        */      STATE_CLIPPLANE(17),                                clipplane           },
+    { /* STATE_CLIPPLANE(18)                        */      STATE_CLIPPLANE(18),                                clipplane           },
+    { /* STATE_CLIPPLANE(19)                        */      STATE_CLIPPLANE(19),                                clipplane           },
+    { /* STATE_CLIPPLANE(20)                        */      STATE_CLIPPLANE(20),                                clipplane           },
+    { /* STATE_CLIPPLANE(21)                        */      STATE_CLIPPLANE(21),                                clipplane           },
+    { /* STATE_CLIPPLANE(22)                        */      STATE_CLIPPLANE(22),                                clipplane           },
+    { /* STATE_CLIPPLANE(23)                        */      STATE_CLIPPLANE(23),                                clipplane           },
+    { /* STATE_CLIPPLANE(24)                        */      STATE_CLIPPLANE(24),                                clipplane           },
+    { /* STATE_CLIPPLANE(25)                        */      STATE_CLIPPLANE(25),                                clipplane           },
+    { /* STATE_CLIPPLANE(26)                        */      STATE_CLIPPLANE(26),                                clipplane           },
+    { /* STATE_CLIPPLANE(27)                        */      STATE_CLIPPLANE(27),                                clipplane           },
+    { /* STATE_CLIPPLANE(28)                        */      STATE_CLIPPLANE(28),                                clipplane           },
+    { /* STATE_CLIPPLANE(29)                        */      STATE_CLIPPLANE(29),                                clipplane           },
+    { /* STATE_CLIPPLANE(30)                        */      STATE_CLIPPLANE(30),                                clipplane           },
+    { /* STATE_CLIPPLANE(31)                        */      STATE_CLIPPLANE(31),                                clipplane           },
 };

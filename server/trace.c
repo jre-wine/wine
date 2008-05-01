@@ -2267,7 +2267,7 @@ static void dump_send_hardware_message_request( const struct send_hardware_messa
 
 static void dump_get_message_request( const struct get_message_request *req )
 {
-    fprintf( stderr, " flags=%d,", req->flags );
+    fprintf( stderr, " flags=%08x,", req->flags );
     fprintf( stderr, " get_win=%p,", req->get_win );
     fprintf( stderr, " get_first=%08x,", req->get_first );
     fprintf( stderr, " get_last=%08x,", req->get_last );
@@ -3443,6 +3443,16 @@ static void dump_get_object_info_reply( const struct get_object_info_reply *req 
     fprintf( stderr, " ref_count=%08x", req->ref_count );
 }
 
+static void dump_get_token_impersonation_level_request( const struct get_token_impersonation_level_request *req )
+{
+    fprintf( stderr, " handle=%p", req->handle );
+}
+
+static void dump_get_token_impersonation_level_reply( const struct get_token_impersonation_level_reply *req )
+{
+    fprintf( stderr, " impersonation_level=%d", req->impersonation_level );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_get_new_process_info_request,
@@ -3660,6 +3670,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_open_symlink_request,
     (dump_func)dump_query_symlink_request,
     (dump_func)dump_get_object_info_request,
+    (dump_func)dump_get_token_impersonation_level_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -3879,6 +3890,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_open_symlink_reply,
     (dump_func)dump_query_symlink_reply,
     (dump_func)dump_get_object_info_reply,
+    (dump_func)dump_get_token_impersonation_level_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] = {
@@ -4098,6 +4110,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "open_symlink",
     "query_symlink",
     "get_object_info",
+    "get_token_impersonation_level",
 };
 
 static const struct
@@ -4111,9 +4124,11 @@ static const struct
     { "ALERTED",                     STATUS_ALERTED },
     { "ALIAS_EXISTS",                STATUS_ALIAS_EXISTS },
     { "BAD_DEVICE_TYPE",             STATUS_BAD_DEVICE_TYPE },
+    { "BAD_IMPERSONATION_LEVEL",     STATUS_BAD_IMPERSONATION_LEVEL },
     { "BUFFER_OVERFLOW",             STATUS_BUFFER_OVERFLOW },
     { "BUFFER_TOO_SMALL",            STATUS_BUFFER_TOO_SMALL },
     { "CANCELLED",                   STATUS_CANCELLED },
+    { "CANT_OPEN_ANONYMOUS",         STATUS_CANT_OPEN_ANONYMOUS },
     { "CHILD_MUST_BE_VOLATILE",      STATUS_CHILD_MUST_BE_VOLATILE },
     { "DEVICE_BUSY",                 STATUS_DEVICE_BUSY },
     { "DIRECTORY_NOT_EMPTY",         STATUS_DIRECTORY_NOT_EMPTY },

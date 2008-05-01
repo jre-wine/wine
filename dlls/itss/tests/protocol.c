@@ -68,10 +68,32 @@ DEFINE_EXPECT(ReportResult);
 static HRESULT expect_hrResult;
 static IInternetProtocol *read_protocol = NULL;
 
+static const WCHAR blank_url1[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url2[] = {'m','S','-','i','T','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url3[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
+    't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url4[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url5[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','\\','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url6[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','%','6','2','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR blank_url7[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
+    't','e','s','t','.','c','h','m',':',':','\\','b','l','a','n','k','.','h','t','m','l',0};
+
+
 static enum {
     ITS_PROTOCOL,
     MK_PROTOCOL
 } test_protocol;
+
+static const WCHAR cache_file1[] =
+    {'t','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR cache_file2[] =
+    {'t','e','s','t','.','c','h','m',':',':','\\','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR *cache_file = cache_file1;
 
 static HRESULT WINAPI ProtocolSink_QueryInterface(IInternetProtocolSink *iface, REFIID riid, void **ppv)
 {
@@ -103,8 +125,6 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
 {
     static const WCHAR blank_html[] = {'b','l','a','n','k','.','h','t','m','l',0};
     static const WCHAR text_html[] = {'t','e','x','t','/','h','t','m','l',0};
-    static const WCHAR cache_file[] =
-        {'t','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
 
     switch(ulStatusCode) {
     case BINDSTATUS_BEGINDOWNLOADDATA:
@@ -389,21 +409,123 @@ static void test_protocol_url(IClassFactory *factory, LPCWSTR url)
     read_protocol = NULL;
 }
 
+static const WCHAR rel_url1[] =
+    {'t','e','s','t','.','h','t','m','l',0};
+static const WCHAR rel_url2[] =
+    {'t','e','s','t','.','c','h','m',':',':','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR rel_url3[] =
+    {'/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR rel_url4[] =
+    {'t','e',':','t','.','h','t','m','l',0};
+static const WCHAR rel_url5[] =
+    {'d','i','r','/','t','e','s','t','.','h','t','m','l',0};
+
+static const WCHAR base_url1[] = {'i','t','s',':',
+    't','e','s','t',':','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR base_url2[] = {'i','t','s',':','t','e','s','t','.','c','h','m',
+    ':',':','/','d','i','r','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR base_url3[] = {'m','s','-','i','t','s',':','t','e','s','t','.','c','h','m',
+    ':',':','/','d','i','r','/','b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR base_url4[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
+    't','e','s','t','.','c','h','m',':',':','/','d','i','r','/',
+    'b','l','a','n','k','.','h','t','m','l',0};
+static const WCHAR base_url5[] = {'x','x','x',':','t','e','s','t','.','c','h','m',
+    ':',':','/','d','i','r','/','b','l','a','n','k','.','h','t','m','l',0};
+
+static const WCHAR combined_url1[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url2[] = {'i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','d','i','r','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url3[] = {'i','t','s',':',
+    't','e','s','t',':','.','c','h','m',':',':','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url4[] = {'i','t','s',':','t','e','s','t','.','c','h','m',
+    ':',':','b','l','a','n','k','.','h','t','m','l','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url5[] = {'m','s','-','i','t','s',':',
+    't','e','s','t','.','c','h','m',':',':','/','d','i','r','/','t','e','s','t','.','h','t','m','l',0};
+static const WCHAR combined_url6[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
+    't','e','s','t','.','c','h','m',':',':','/','d','i','r','/','t','e','s','t','.','h','t','m','l',0};
+
+static const struct {
+    LPCWSTR base_url;
+    LPCWSTR rel_url;
+    DWORD flags;
+    HRESULT hres;
+    LPCWSTR combined_url;
+} combine_tests[] = {
+    {blank_url1, blank_url1, 0, STG_E_INVALIDNAME, NULL},
+    {blank_url2, blank_url2, 0, STG_E_INVALIDNAME, NULL},
+    {blank_url1, rel_url1, 0, S_OK, combined_url1},
+    {blank_url1, rel_url2, 0, STG_E_INVALIDNAME, NULL},
+    {blank_url1, rel_url3, 0, S_OK, combined_url1},
+    {blank_url1, rel_url4, 0, STG_E_INVALIDNAME, NULL},
+    {blank_url1, rel_url3, URL_ESCAPE_SPACES_ONLY|URL_DONT_ESCAPE_EXTRA_INFO, S_OK, combined_url1},
+    {blank_url1, rel_url5, 0, S_OK, combined_url2},
+    {rel_url1, rel_url2, 0, 0x80041001, NULL},
+    {base_url1, rel_url1, 0, S_OK, combined_url3},
+    {base_url2, rel_url1, 0, S_OK, combined_url2},
+    {blank_url4, rel_url1, 0, S_OK, combined_url4},
+    {base_url3, rel_url1, 0, S_OK, combined_url5},
+    {base_url4, rel_url1, 0, S_OK, combined_url6},
+    {base_url5, rel_url1, 0, INET_E_USE_DEFAULT_PROTOCOLHANDLER, NULL},
+    {base_url2, rel_url3, 0, S_OK, combined_url1},
+};
+
+static void test_its_protocol_info(IInternetProtocol *protocol)
+{
+    IInternetProtocolInfo *info;
+    WCHAR buf[1024];
+    DWORD size, i;
+    HRESULT hres;
+
+    hres = IInternetProtocol_QueryInterface(protocol, &IID_IInternetProtocolInfo, (void**)&info);
+    ok(hres == S_OK, "Could not get IInternetProtocolInfo interface: %08x\n", hres);
+    if(FAILED(hres))
+        return;
+
+    for(i = PARSE_CANONICALIZE; i <= PARSE_UNESCAPE; i++) {
+        if(i != PARSE_CANONICALIZE && i != PARSE_SECURITY_URL) {
+            hres = IInternetProtocolInfo_ParseUrl(info, blank_url1, i, 0, buf,
+                    sizeof(buf)/sizeof(buf[0]), &size, 0);
+            ok(hres == INET_E_DEFAULT_ACTION,
+               "[%d] failed: %08x, expected INET_E_DEFAULT_ACTION\n", i, hres);
+        }
+    }
+
+    for(i=0; i < sizeof(combine_tests)/sizeof(combine_tests[0]); i++) {
+        size = 0xdeadbeef;
+        memset(buf, 0xfe, sizeof(buf));
+        hres = IInternetProtocolInfo_CombineUrl(info, combine_tests[i].base_url,
+                combine_tests[i].rel_url, combine_tests[i].flags, buf,
+                sizeof(buf)/sizeof(WCHAR), &size, 0);
+        ok(hres == combine_tests[i].hres, "[%d] CombineUrl returned %08x, expected %08x\n",
+           i, hres, combine_tests[i].hres);
+        ok(size == (combine_tests[i].combined_url ? lstrlenW(combine_tests[i].combined_url)+1
+           : 0xdeadbeef), "[%d] unexpected size=%d\n", i, size);
+        if(combine_tests[i].combined_url)
+            ok(!lstrcmpW(combine_tests[i].combined_url, buf), "[%d] unexpected result\n", i);
+        else
+            ok(buf[0] == 0xfefe, "buf changed\n");
+    }
+
+    size = 0xdeadbeef;
+    memset(buf, 0xfe, sizeof(buf));
+    hres = IInternetProtocolInfo_CombineUrl(info, blank_url1, rel_url1, 0, buf,
+            1, &size, 0);
+    ok(hres == E_OUTOFMEMORY, "CombineUrl failed: %08x\n", hres);
+    ok(size == sizeof(combined_url1)/sizeof(WCHAR), "size=%d\n", size);
+    ok(buf[0] == 0xfefe, "buf changed\n");
+
+    IInternetProtocolInfo_Release(info);
+}
+
 static void test_its_protocol(void)
 {
+    IInternetProtocolInfo *info;
     IClassFactory *factory;
     IUnknown *unk;
     ULONG ref;
     HRESULT hres;
 
-    static const WCHAR blank_url1[] = {'i','t','s',':',
-        't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-    static const WCHAR blank_url2[] = {'m','S','-','i','T','s',':',
-         't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-    static const WCHAR blank_url3[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
-         't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-    static const WCHAR blank_url4[] = {'i','t','s',':',
-        't','e','s','t','.','c','h','m',':',':','b','l','a','n','k','.','h','t','m','l',0};
     static const WCHAR wrong_url1[] =
         {'i','t','s',':','t','e','s','t','.','c','h','m',':',':','/','b','l','a','n','.','h','t','m','l',0};
     static const WCHAR wrong_url2[] =
@@ -422,6 +544,9 @@ static void test_its_protocol(void)
     if(!SUCCEEDED(hres))
         return;
 
+    hres = IUnknown_QueryInterface(unk, &IID_IInternetProtocolInfo, (void**)&info);
+    ok(hres == E_NOINTERFACE, "Could not get IInternetProtocolInfo: %08x\n", hres);
+
     hres = IUnknown_QueryInterface(unk, &IID_IClassFactory, (void**)&factory);
     ok(hres == S_OK, "Could not get IClassFactory interface\n");
     if(SUCCEEDED(hres)) {
@@ -430,6 +555,8 @@ static void test_its_protocol(void)
         hres = IClassFactory_CreateInstance(factory, NULL, &IID_IInternetProtocol, (void**)&protocol);
         ok(hres == S_OK, "Could not get IInternetProtocol: %08x\n", hres);
         if(SUCCEEDED(hres)) {
+            test_its_protocol_info(protocol);
+
             test_protocol_fail(protocol, wrong_url1, STG_E_FILENOTFOUND);
             test_protocol_fail(protocol, wrong_url2, STG_E_FILENOTFOUND);
             test_protocol_fail(protocol, wrong_url3, STG_E_FILENOTFOUND);
@@ -449,6 +576,8 @@ static void test_its_protocol(void)
             test_protocol_url(factory, blank_url2);
             test_protocol_url(factory, blank_url3);
             test_protocol_url(factory, blank_url4);
+            test_protocol_url(factory, blank_url5);
+            test_protocol_url(factory, blank_url6);
         }
 
         IClassFactory_Release(factory);
@@ -462,9 +591,6 @@ static void test_mk_protocol(void)
     IClassFactory *cf;
     HRESULT hres;
 
-    static const WCHAR blank_url[] = {'m','k',':','@','M','S','I','T','S','t','o','r','e',':',
-         't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
-
     test_protocol = MK_PROTOCOL;
 
     hres = CoGetClassObject(&CLSID_MkProtocol, CLSCTX_INPROC_SERVER, NULL, &IID_IClassFactory,
@@ -473,7 +599,10 @@ static void test_mk_protocol(void)
     if(!SUCCEEDED(hres))
         return;
 
-    test_protocol_url(cf, blank_url);
+    cache_file = cache_file1;
+    test_protocol_url(cf, blank_url3);
+    cache_file = cache_file2;
+    test_protocol_url(cf, blank_url7);
 
     IClassFactory_Release(cf);
 }

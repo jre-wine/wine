@@ -934,7 +934,7 @@ static WCHAR *get_familyname(FT_Face ft_face)
 
 #define ADDFONT_EXTERNAL_FONT 0x01
 #define ADDFONT_FORCE_BITMAP  0x02
-static BOOL AddFontFileToList(const char *file, char *fake_family, DWORD flags)
+static BOOL AddFontFileToList(const char *file, char *fake_family, const WCHAR *target_family, DWORD flags)
 {
     FT_Face ft_face;
     TT_OS2 *pOS2;
@@ -963,7 +963,7 @@ static BOOL AddFontFileToList(const char *file, char *fake_family, DWORD flags)
             for(cursor = mac_list; *cursor; cursor++)
             {
                 had_one = TRUE;
-                AddFontFileToList(*cursor, NULL, flags);
+                AddFontFileToList(*cursor, NULL, NULL, flags);
                 HeapFree(GetProcessHeap(), 0, *cursor);
             }
             HeapFree(GetProcessHeap(), 0, mac_list);
@@ -1008,6 +1008,19 @@ static BOOL AddFontFileToList(const char *file, char *fake_family, DWORD flags)
             TRACE("Font file %s lacks either a family or style name\n", debugstr_a(file));
             pFT_Done_Face(ft_face);
             return FALSE;
+        }
+
+        if (target_family)
+        {
+            localised_family = get_familyname(ft_face);
+            if (localised_family && lstrcmpW(localised_family,target_family)!=0)
+            {
+                TRACE("Skipping Index %i: Incorrect Family name for replacement\n",(INT)face_index);
+                HeapFree(GetProcessHeap(), 0, localised_family);
+                num_faces = ft_face->num_faces;
+                continue;
+            }
+            HeapFree(GetProcessHeap(), 0, localised_family);
         }
 
         if(!family_name)
@@ -1224,43 +1237,42 @@ static void LoadReplaceList(void)
 {
     HKEY hkey;
     DWORD valuelen, datalen, i = 0, type, dlen, vlen;
-    LPSTR value;
+    LPWSTR value;
     LPVOID data;
     Family *family;
     Face *face;
     struct list *family_elem_ptr, *face_elem_ptr;
-    WCHAR old_nameW[200];
+    CHAR familyA[400];
 
     /* @@ Wine registry key: HKCU\Software\Wine\Fonts\Replacements */
     if(RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Fonts\\Replacements", &hkey) == ERROR_SUCCESS)
     {
-        RegQueryInfoKeyA(hkey, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        RegQueryInfoKeyW(hkey, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 			 &valuelen, &datalen, NULL, NULL);
 
 	valuelen++; /* returned value doesn't include room for '\0' */
-	value = HeapAlloc(GetProcessHeap(), 0, valuelen * sizeof(CHAR));
+	value = HeapAlloc(GetProcessHeap(), 0, valuelen * sizeof(WCHAR));
 	data = HeapAlloc(GetProcessHeap(), 0, datalen);
 
 	dlen = datalen;
 	vlen = valuelen;
-	while(RegEnumValueA(hkey, i++, value, &vlen, NULL, &type, data,
+	while(RegEnumValueW(hkey, i++, value, &vlen, NULL, &type, data,
 			    &dlen) == ERROR_SUCCESS) {
-	    TRACE("Got %s=%s\n", debugstr_a(value), debugstr_a(data));
+	    TRACE("Got %s=%s\n", debugstr_w(value), debugstr_w(data));
             /* "NewName"="Oldname" */
-            if(!MultiByteToWideChar(CP_ACP, 0, data, -1, old_nameW, sizeof(old_nameW)/sizeof(WCHAR)))
-                break;
+            WideCharToMultiByte(CP_ACP, 0, value, -1, familyA, sizeof(familyA), NULL, NULL);
 
             /* Find the old family and hence all of the font files
                in that family */
             LIST_FOR_EACH(family_elem_ptr, &font_list) {
-                family = LIST_ENTRY(family_elem_ptr, Family, entry); 
-                if(!strcmpiW(family->FamilyName, old_nameW)) {                
+                family = LIST_ENTRY(family_elem_ptr, Family, entry);
+                if(!strcmpiW(family->FamilyName, data)) {
                     LIST_FOR_EACH(face_elem_ptr, &family->faces) {
                         face = LIST_ENTRY(face_elem_ptr, Face, entry);
                         TRACE("mapping %s %s to %s\n", debugstr_w(family->FamilyName),
-                              debugstr_w(face->StyleName), value);
+                              debugstr_w(face->StyleName), familyA);
                         /* Now add a new entry with the new family name */
-                        AddFontFileToList(face->file, value, ADDFONT_FORCE_BITMAP | (face->external ? ADDFONT_EXTERNAL_FONT : 0));
+                        AddFontFileToList(face->file, familyA, family->FamilyName, ADDFONT_FORCE_BITMAP | (face->external ? ADDFONT_EXTERNAL_FONT : 0));
                     }
                     break;
                 }
@@ -1439,7 +1451,7 @@ static BOOL ReadFontDir(const char *dirname, BOOL external_fonts)
 	if(S_ISDIR(statbuf.st_mode))
 	    ReadFontDir(path, external_fonts);
 	else
-	    AddFontFileToList(path, NULL, external_fonts ? ADDFONT_EXTERNAL_FONT : 0);
+	    AddFontFileToList(path, NULL, NULL, external_fonts ? ADDFONT_EXTERNAL_FONT : 0);
     }
     closedir(dir);
     return TRUE;
@@ -1507,7 +1519,7 @@ LOAD_FUNCPTR(FcPatternGetString);
         if(len < 4) continue;
         ext = &file[ len - 3 ];
         if(strcasecmp(ext, "pfa") && strcasecmp(ext, "pfb"))
-            AddFontFileToList(file, NULL, ADDFONT_EXTERNAL_FONT);
+            AddFontFileToList(file, NULL, NULL,  ADDFONT_EXTERNAL_FONT);
     }
     pFcFontSetDestroy(fontset);
     pFcObjectSetDestroy(os);
@@ -1538,7 +1550,7 @@ static BOOL load_font_from_data_dir(LPCWSTR file)
 
         WideCharToMultiByte(CP_UNIXCP, 0, file, -1, unix_name + strlen(unix_name), len, NULL, NULL);
 
-        ret = AddFontFileToList(unix_name, NULL, ADDFONT_FORCE_BITMAP);
+        ret = AddFontFileToList(unix_name, NULL, NULL, ADDFONT_FORCE_BITMAP);
         HeapFree(GetProcessHeap(), 0, unix_name);
     }
     return ret;
@@ -1564,7 +1576,7 @@ static void load_system_fonts(void)
 
                 sprintfW(pathW, fmtW, windowsdir, data);
                 if((unixname = wine_get_unix_file_name(pathW))) {
-                    added = AddFontFileToList(unixname, NULL, ADDFONT_FORCE_BITMAP);
+                    added = AddFontFileToList(unixname, NULL, NULL, ADDFONT_FORCE_BITMAP);
                     HeapFree(GetProcessHeap(), 0, unixname);
                 }
                 if (!added)
@@ -1698,7 +1710,7 @@ INT WineEngAddFontResourceEx(LPCWSTR file, DWORD flags, PVOID pdv)
 
         if((unixname = wine_get_unix_file_name(file)))
         {
-            AddFontFileToList(unixname, NULL, ADDFONT_FORCE_BITMAP);
+            AddFontFileToList(unixname, NULL, NULL, ADDFONT_FORCE_BITMAP);
             HeapFree(GetProcessHeap(), 0, unixname);
         }
     }
@@ -2021,7 +2033,7 @@ BOOL WineEngInit(void)
                 {
                     if((unixname = wine_get_unix_file_name((LPWSTR)data)))
                     {
-                        AddFontFileToList(unixname, NULL, ADDFONT_FORCE_BITMAP);
+                        AddFontFileToList(unixname, NULL, NULL, ADDFONT_FORCE_BITMAP);
                         HeapFree(GetProcessHeap(), 0, unixname);
                     }
                 }
@@ -2034,7 +2046,7 @@ BOOL WineEngInit(void)
                     sprintfW(pathW, fmtW, windowsdir, data);
                     if((unixname = wine_get_unix_file_name(pathW)))
                     {
-                        added = AddFontFileToList(unixname, NULL, ADDFONT_FORCE_BITMAP);
+                        added = AddFontFileToList(unixname, NULL, NULL, ADDFONT_FORCE_BITMAP);
                         HeapFree(GetProcessHeap(), 0, unixname);
                     }
                     if (!added)
@@ -4386,6 +4398,91 @@ BOOL WineEngGetLinkedHFont(DC *dc, WCHAR c, HFONT *new_hfont, UINT *glyph)
     return ret;
 }
     
+/* Retrieve a list of supported Unicode ranges for a given font.
+ * Can be called with NULL gs to calculate the buffer size. Returns
+ * the number of ranges found.
+ */
+static DWORD get_font_unicode_ranges(FT_Face face, GLYPHSET *gs)
+{
+    DWORD num_ranges = 0;
+
+    if (face->charmap->encoding == FT_ENCODING_UNICODE && pFT_Get_First_Char)
+    {
+        FT_UInt glyph_code;
+        FT_ULong char_code, char_code_prev;
+
+        glyph_code = 0;
+        char_code_prev = char_code = pFT_Get_First_Char(face, &glyph_code);
+
+        TRACE("face encoding FT_ENCODING_UNICODE, number of glyphs %ld, first glyph %u, first char %04lx\n",
+               face->num_glyphs, glyph_code, char_code);
+
+        if (!glyph_code) return 0;
+
+        if (gs)
+        {
+            gs->ranges[0].wcLow = (USHORT)char_code;
+            gs->ranges[0].cGlyphs = 0;
+            gs->cGlyphsSupported = 0;
+        }
+
+        num_ranges = 1;
+        while (glyph_code)
+        {
+            if (char_code < char_code_prev)
+            {
+                ERR("expected increasing char code from FT_Get_Next_Char\n");
+                return 0;
+            }
+            if (char_code - char_code_prev > 1)
+            {
+                num_ranges++;
+                if (gs)
+                {
+                    gs->ranges[num_ranges - 1].wcLow = (USHORT)char_code;
+                    gs->ranges[num_ranges - 1].cGlyphs = 1;
+                    gs->cGlyphsSupported++;
+                }
+            }
+            else if (gs)
+            {
+                gs->ranges[num_ranges - 1].cGlyphs++;
+                gs->cGlyphsSupported++;
+            }
+            char_code_prev = char_code;
+            char_code = pFT_Get_Next_Char(face, char_code, &glyph_code);
+        }
+    }
+    else
+        FIXME("encoding %u not supported\n", face->charmap->encoding);
+
+    return num_ranges;
+}
+
+DWORD WineEngGetFontUnicodeRanges(HDC hdc, LPGLYPHSET glyphset)
+{
+    DWORD size = 0;
+    DC *dc = DC_GetDCPtr(hdc);
+
+    TRACE("(%p, %p)\n", hdc, glyphset);
+
+    if (!dc) return 0;
+
+    if (dc->gdiFont)
+    {
+        DWORD num_ranges = get_font_unicode_ranges(dc->gdiFont->ft_face, glyphset);
+
+        size = sizeof(GLYPHSET) + sizeof(WCRANGE) * (num_ranges - 1);
+        if (glyphset)
+        {
+            glyphset->cbThis = size;
+            glyphset->cRanges = num_ranges;
+        }
+    }
+
+    GDI_ReleaseObj(hdc);
+    return size;
+}
 
 /*************************************************************
  *     FontIsLinked
@@ -4799,6 +4896,12 @@ UINT WineEngGetTextCharsetInfo(GdiFont *font, LPFONTSIGNATURE fs, DWORD flags)
 BOOL WineEngGetLinkedHFont(DC *dc, WCHAR c, HFONT *new_hfont, UINT *glyph)
 {
     return FALSE;
+}
+
+DWORD WineEngGetFontUnicodeRanges(HDC hdc, LPGLYPHSET glyphset)
+{
+    FIXME("(%p, %p): stub\n", hdc, glyphset);
+    return 0;
 }
 
 BOOL WINAPI FontIsLinked(HDC hdc)

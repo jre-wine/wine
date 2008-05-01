@@ -65,8 +65,24 @@ static struct list xcv_handles = LIST_INIT( xcv_handles );
 
 /* ############################### */
 
+static const WCHAR cmd_ConfigureLPTPortCommandOKW[] = {'C','o','n','f','i','g','u','r','e',
+                                    'L','P','T','P','o','r','t',
+                                    'C','o','m','m','a','n','d','O','K',0};
+
+static const WCHAR cmd_GetDefaultCommConfigW[] = {'G','e','t',
+                                    'D','e','f','a','u','l','t',
+                                    'C','o','m','m','C','o','n','f','i','g',0};
+
+static const WCHAR cmd_GetTransmissionRetryTimeoutW[] = {'G','e','t',
+                                    'T','r','a','n','s','m','i','s','s','i','o','n',
+                                    'R','e','t','r','y','T','i','m','e','o','u','t',0};
+
 static const WCHAR cmd_MonitorUIW[] = {'M','o','n','i','t','o','r','U','I',0};
 static const WCHAR cmd_PortIsValidW[] = {'P','o','r','t','I','s','V','a','l','i','d',0};
+static const WCHAR cmd_SetDefaultCommConfigW[] = {'S','e','t',
+                                    'D','e','f','a','u','l','t',
+                                    'C','o','m','m','C','o','n','f','i','g',0};
+
 static const WCHAR dllnameuiW[] = {'l','o','c','a','l','u','i','.','d','l','l',0};
 
 static const WCHAR portname_LPT[]  = {'L','P','T',0};
@@ -75,11 +91,20 @@ static const WCHAR portname_FILE[] = {'F','I','L','E',':',0};
 static const WCHAR portname_CUPS[] = {'C','U','P','S',':',0};
 static const WCHAR portname_LPR[]  = {'L','P','R',':',0};
 
+static const WCHAR TransmissionRetryTimeoutW[] = {'T','r','a','n','s','m','i','s','s','i','o','n',
+                                    'R','e','t','r','y','T','i','m','e','o','u','t',0};
+
 static const WCHAR WinNT_CV_PortsW[] = {'S','o','f','t','w','a','r','e','\\',
                                         'M','i','c','r','o','s','o','f','t','\\',
                                         'W','i','n','d','o','w','s',' ','N','T','\\',
                                         'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
                                         'P','o','r','t','s',0};
+
+static const WCHAR WinNT_CV_WindowsW[] = {'S','o','f','t','w','a','r','e','\\',
+                                        'M','i','c','r','o','s','o','f','t','\\',
+                                        'W','i','n','d','o','w','s',' ','N','T','\\',
+                                        'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+                                        'W','i','n','d','o','w','s',0};
 
 /******************************************************************
  * display the Dialog "Nothing to configure"
@@ -424,10 +449,52 @@ BOOL WINAPI localmon_XcvClosePort(HANDLE hXcv)
 DWORD WINAPI localmon_XcvDataPort(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInputData, DWORD cbInputData,
                 PBYTE pOutputData, DWORD cbOutputData, PDWORD pcbOutputNeeded)
 {
+    WCHAR   buffer[16];     /* buffer for a decimal number */
+    LPWSTR  ptr;
     DWORD   res;
+    DWORD   needed;
+    HKEY    hroot;
 
     TRACE("(%p, %s, %p, %d, %p, %d, %p)\n", hXcv, debugstr_w(pszDataName),
           pInputData, cbInputData, pOutputData, cbOutputData, pcbOutputNeeded);
+
+    if (!lstrcmpW(pszDataName, cmd_ConfigureLPTPortCommandOKW)) {
+        TRACE("InputData (%d): %s\n", cbInputData, debugstr_w( (LPWSTR) pInputData));
+        res = RegCreateKeyW(HKEY_LOCAL_MACHINE, WinNT_CV_WindowsW, &hroot);
+        if (res == ERROR_SUCCESS) {
+            res = RegSetValueExW(hroot, TransmissionRetryTimeoutW, 0, REG_SZ, pInputData, cbInputData);
+            RegCloseKey(hroot);
+        }
+        return res;
+    }
+
+    if (!lstrcmpW(pszDataName, cmd_GetDefaultCommConfigW)) {
+        TRACE("InputData (%d): %s\n", cbInputData, debugstr_w( (LPWSTR) pInputData));
+        *pcbOutputNeeded = cbOutputData;
+        res = GetDefaultCommConfigW((LPWSTR) pInputData, (LPCOMMCONFIG) pOutputData, pcbOutputNeeded);
+        TRACE("got %u with %u\n", res, GetLastError() );
+        return res ? ERROR_SUCCESS : GetLastError();
+    }
+
+    if (!lstrcmpW(pszDataName, cmd_GetTransmissionRetryTimeoutW)) {
+        * pcbOutputNeeded = sizeof(DWORD);
+        if (cbOutputData >= sizeof(DWORD)) {
+            /* the w2k resource kit documented a default of 90, but that's wrong */
+            *((LPDWORD) pOutputData) = 45;
+
+            res = RegOpenKeyW(HKEY_LOCAL_MACHINE, WinNT_CV_WindowsW, &hroot);
+            if (res == ERROR_SUCCESS) {
+                needed = sizeof(buffer) - sizeof(WCHAR);
+                res = RegQueryValueExW(hroot, TransmissionRetryTimeoutW, NULL, NULL, (LPBYTE) buffer, &needed);
+                if ((res == ERROR_SUCCESS) && (buffer[0])) {
+                    *((LPDWORD) pOutputData) = strtoulW(buffer, NULL, 0);
+                }
+                RegCloseKey(hroot);
+            }
+            return ERROR_SUCCESS;
+        }
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
 
 
     if (!lstrcmpW(pszDataName, cmd_MonitorUIW)) {
@@ -448,6 +515,17 @@ DWORD WINAPI localmon_XcvDataPort(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInput
 
         /* ERROR_ACCESS_DENIED, ERROR_PATH_NOT_FOUND ore something else */
         return GetLastError();
+    }
+
+    if (!lstrcmpW(pszDataName, cmd_SetDefaultCommConfigW)) {
+        /* get the portname from the Handle */
+        ptr =  strchrW(((xcv_t *)hXcv)->nameW, ' ');
+        ptr++;  /* skip the space */
+        lstrcpynW(buffer, ptr, sizeof(buffer)/sizeof(WCHAR));
+        if (buffer[0]) buffer[lstrlenW(buffer)-1] = '\0';  /* remove the ':' */
+        res = SetDefaultCommConfigW(buffer, (LPCOMMCONFIG) pInputData, cbInputData);
+        TRACE("got %u with %u\n", res, GetLastError() );
+        return res ? ERROR_SUCCESS : GetLastError();
     }
 
     FIXME("command not supported: %s\n", debugstr_w(pszDataName));

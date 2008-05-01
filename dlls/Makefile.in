@@ -149,6 +149,7 @@ BASEDIRS = \
 	rsabase \
 	rsaenh \
 	sane.ds \
+	schannel \
 	secur32 \
 	security \
 	sensapi \
@@ -197,6 +198,7 @@ BASEDIRS = \
 	winenas.drv \
 	wineoss.drv \
 	wineps.drv \
+	wing32 \
 	wininet \
 	winmm \
 	winnls32 \
@@ -232,6 +234,7 @@ TESTSUBDIRS = \
 	ddraw/tests \
 	dinput/tests \
 	dnsapi/tests \
+	dplayx/tests \
 	dsound/tests \
 	gdi32/tests \
 	hlink/tests \
@@ -262,6 +265,7 @@ TESTSUBDIRS = \
 	rsabase/tests \
 	rsaenh/tests \
 	secur32/tests \
+	serialui/tests \
 	setupapi/tests \
 	shdocvw/tests \
 	shell32/tests \

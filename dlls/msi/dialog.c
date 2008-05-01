@@ -2448,6 +2448,8 @@ static void msi_dialog_vcl_add_columns( msi_dialog *dialog, msi_control *control
     static const WCHAR zero[] = {'0',0};
     static const WCHAR negative[] = {'-',0};
 
+    if (!text) return;
+
     while ((begin = strchrW( begin, '{' )) && count < 5)
     {
         if (!(end = strchrW( begin, '}' )))
@@ -3428,6 +3430,9 @@ void msi_dialog_destroy( msi_dialog *dialog )
 
     if( dialog->hwnd )
         DestroyWindow( dialog->hwnd );
+
+    /* unsubscribe events */
+    ControlEvent_CleanupDialogSubscriptions(dialog->package, dialog->name);
 
     /* destroy the list of controls */
     while( !list_empty( &dialog->controls ) )

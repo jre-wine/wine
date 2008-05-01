@@ -67,6 +67,8 @@ static INT_PTR WINAPI WCUSER_OptionDlgProc(HWND hDlg, UINT msg, WPARAM wParam, L
 	di->hDlg = hDlg;
 	SetWindowLongPtr(hDlg, DWLP_USER, (LONG_PTR)di);
 
+	SendMessage(GetDlgItem(hDlg,IDC_OPT_HIST_SIZE_UD), UDM_SETRANGE, 0, MAKELPARAM (500, 0));
+
 	if (di->config.cursor_size <= 25)	idc = IDC_OPT_CURSOR_SMALL;
 	else if (di->config.cursor_size <= 50)	idc = IDC_OPT_CURSOR_MEDIUM;
 	else				        idc = IDC_OPT_CURSOR_LARGE;
@@ -613,10 +615,10 @@ static INT_PTR WINAPI WCUSER_ConfigDlgProc(HWND hDlg, UINT msg, WPARAM wParam, L
         SetDlgItemInt(hDlg, IDC_CNF_WIN_WIDTH,  di->config.win_width,  FALSE);
         SetDlgItemInt(hDlg, IDC_CNF_WIN_HEIGHT, di->config.win_height, FALSE);
 
-        SendMessage(GetDlgItem(hDlg,IDC_CNF_WIN_HEIGHT_UD), UDM_SETRANGE, (WPARAM) 0, MAKELONG (nMaxUD, 0));
-        SendMessage(GetDlgItem(hDlg,IDC_CNF_WIN_WIDTH_UD), UDM_SETRANGE, (WPARAM) 0, MAKELONG (nMaxUD, 0));
-        SendMessage(GetDlgItem(hDlg,IDC_CNF_SB_HEIGHT_UD), UDM_SETRANGE, (WPARAM) 0, MAKELONG (nMaxUD, 0));
-        SendMessage(GetDlgItem(hDlg,IDC_CNF_SB_WIDTH_UD), UDM_SETRANGE, (WPARAM) 0, MAKELONG (nMaxUD, 0));
+        SendMessage(GetDlgItem(hDlg,IDC_CNF_WIN_HEIGHT_UD), UDM_SETRANGE, 0, MAKELPARAM (nMaxUD, 0));
+        SendMessage(GetDlgItem(hDlg,IDC_CNF_WIN_WIDTH_UD), UDM_SETRANGE, 0, MAKELPARAM (nMaxUD, 0));
+        SendMessage(GetDlgItem(hDlg,IDC_CNF_SB_HEIGHT_UD), UDM_SETRANGE, 0, MAKELPARAM (nMaxUD, 0));
+        SendMessage(GetDlgItem(hDlg,IDC_CNF_SB_WIDTH_UD), UDM_SETRANGE, 0, MAKELPARAM (nMaxUD, 0));
 
         SendDlgItemMessage(hDlg, IDC_CNF_CLOSE_EXIT, BM_SETCHECK,
                            (di->config.exit_on_die) ? BST_CHECKED : BST_UNCHECKED, 0L);

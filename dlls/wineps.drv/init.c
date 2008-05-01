@@ -53,7 +53,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 static void *cupshandle = NULL;
 #endif
 
-static PSDRV_DEVMODEA DefaultDevmode =
+static const PSDRV_DEVMODEA DefaultDevmode =
 {
   { /* dmPublic */
 /* dmDeviceName */	"Wine PostScript Driver",
@@ -109,7 +109,7 @@ HINSTANCE PSDRV_hInstance = 0;
 HANDLE PSDRV_Heap = 0;
 
 static HFONT PSDRV_DefaultFont = 0;
-static LOGFONTA DefaultLogFont = {
+static const LOGFONTA DefaultLogFont = {
     100, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, 0, 0,
     DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, ""
 };
@@ -430,7 +430,7 @@ INT PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
     case VERTRES:
         return physDev->vertRes;
     case BITSPIXEL:
-        return physDev->pi->ppd->ColorDevice ? 8 : 1;
+        return (physDev->pi->ppd->ColorDevice != CD_False) ? 8 : 1;
     case PLANES:
         return 1;
     case NUMBRUSHES:
@@ -442,7 +442,7 @@ INT PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
     case NUMFONTS:
         return 39;
     case NUMCOLORS:
-        return (physDev->pi->ppd->ColorDevice ? 256 : -1);
+        return (physDev->pi->ppd->ColorDevice != CD_False) ? 256 : -1;
     case PDEVICESIZE:
         return sizeof(PSDRV_PDEVICE);
     case CURVECAPS:

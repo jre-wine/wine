@@ -32,10 +32,12 @@ BEGIN
     BEGIN
         MENUITEM "&Undo\tCtrl+Z",               ID_EDIT_UNDO
         MENUITEM "&Redo\tCtrl+Y",               ID_EDIT_REDO
-        MENUITEM "&Select all\tCtrl+A",         ID_EDIT_SELECTALL
         MENUITEM SEPARATOR
         MENUITEM "Cu&t\tCtrl+X",                ID_EDIT_CUT
         MENUITEM "&Copy\tCtrl+C",               ID_EDIT_COPY
+        MENUITEM "&Paste\tCtrl+V",              ID_EDIT_PASTE
+        MENUITEM "&Clear\tDEL",                 ID_EDIT_CLEAR
+        MENUITEM "&Select all\tCtrl+A",         ID_EDIT_SELECTALL
         MENUITEM SEPARATOR
         MENUITEM "Read-&only",                  ID_EDIT_READONLY
         MENUITEM "&Modified",                   ID_EDIT_MODIFIED
@@ -63,4 +65,11 @@ BEGIN
             MENUITEM "&Right\tCtrl+R",        ID_ALIGN_RIGHT
         END
     END
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    STRING_RICHTEXT_FILES_RTF,  "Rich text format (*.rtf)"
+    STRING_TEXT_FILES_TXT,      "Text files (*.txt)"
+    STRING_ALL_FILES,           "All documents (*.*)"
 END
