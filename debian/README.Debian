@@ -27,13 +27,14 @@ space on; thus, it is a general theme in Debian to split up big
 packages like this. Make sure you install the ones you need.
 
 Also note that Wine for Debian is set up to use the winelauncher
-wrapper by default. This is both for convenience (it asks you to
-run winecfg), and because I've installed some Wine components
-that users aren't supposed to run directly into /usr/lib/wine
-instead of /usr/bin, and the script is needed to tell Wine
-where to find them. Also, it warns you if Wine is invoked from
-your mail reader or web browser, to help you avoid trojans,
-viruses, and worms.
+wrapper by default (/usr/bin/wine is a shell script that starts
+the real Wine binary, which is in /usr/lib/wine). This is both
+for convenience (it asks you to run winecfg), and because I've
+installed some Wine components that users aren't supposed to run
+directly into /usr/lib/wine instead of /usr/bin, and the script
+is needed to tell Wine where to find them. Also, it warns you if
+Wine is invoked from your mail reader or web browser, to help you
+avoid trojans, viruses, and worms.
 
 The libwine-gl split was requested in Debian bug #304815.
 The libwine-print/libwine-sane split was requested in #148479.

@@ -6,8 +6,8 @@ Description: Moving /usr/share/wine/drivec to /var/lib/wine/drivec
  /var/lib/wine. Your /etc/wine.conf should be updated automatically, but if
  you have a .winerc or have written scripts that depend on the old
  location, you must update these yourself.
-Description-ca.UTF-8: Mouré /usr/share/wine/drivec a /var/lib/wine/drivec
- L'anterior localització per defecte de Drive C en /usr/share/wine viola la Jerarquia estàndard del sistema de fitxers (FHS) i serà mogut a /var/lib/wine. El vostre /etc/wine.conf serà actualitzat automàticament, però si teniu un .winerc o heu escrit scripts que depenguin de l'antiga localització, els haureu de posar al dia vosaltres mateixos.
+Description-ca.UTF-8: S'està movent /usr/share/wine/drivec a /var/lib/wine/drivec
+ L'anterior ubicació predeterminada de la unitat «C» a /usr/share/wine viola la Jerarquia estàndard del sistema de fitxers (FHS), i és per això que es mourà a /var/lib/wine. El vostre /etc/wine.conf s'actualitzarà automàticament, però si teniu un .winerc o heu escrit scripts que depenguin de l'antiga ubicació, els haureu de posar al dia vosaltres mateixos.
 Description-cs.UTF-8: Přesunuji /usr/share/wine/drivec do /var/lib/wine/drivec
  Předchozí implicitní umístění disku C v /usr/share/wine porušuje Filesystem Hierarchy Standard a je tedy přesunuto do /var/lib/wine. Váš /etc/wine.conf se aktualizuje automaticky, ale pokud máte vlastní .winerc nebo pokud jste si napsali skripty, které závisí na staré cestě, budete je muset upravit sami.
 Description-da.UTF-8: Flytter /usr/share/wine/drivec til /var/lib/wine/drivec

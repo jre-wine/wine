@@ -10,8 +10,8 @@ Description: Old wine.conf detected, remove it?
  convert it). If you remove the /etc/wine.conf file, then winesetup will
  launch automatically for users that don't have a config file, instead of
  requiring the users to do any of the above themselves.
-Description-ca.UTF-8: S'ha detectat un /etc/wine.conf antic. L'esborro?
- Wine ja no carrega el /etc/wine.conf per defecte. De manera els usuaris que no tinguin un fitxer ~/.winerc (o un ~/.wine/config) no podran executar el Wine a menys de que configurin un fitxer ~/.wine/config. Això pot fer-se fàcilment amb la utilitat winesetup, que es troba en el paquet winesetuptk (o també, cada usuari pot copiar l'antic /etc/wine.conf en ~/.winerc i deixar que el wine el converteixi). Si esborreu el fitxer /etc/wine.conf, el winesetup s'executarà automàticament per als usuaris que no tinguin un fitxer de configuració, en comptes de requerir als usuaris que facin res del descrit anteriorment.
+Description-ca.UTF-8: S'ha detectat un /etc/wine.conf antic. Voleu esborrar-lo?
+ Wine ja no carrega el /etc/wine.conf per defecte. Els usuaris que no tinguin un fitxer ~/.winerc (o un ~/.wine/config) no podran executar el Wine a menys que configurin un fitxer ~/.wine/config. Això pot fer-se fàcilment amb la utilitat winesetup, que es troba al paquet winesetuptk (o altrament, cada usuari pot copiar l'antic /etc/wine.conf a ~/.winerc i deixar que el wine el converteixi). Si esborreu el fitxer /etc/wine.conf, winesetup s'executarà automàticament per als usuaris que no tinguin un fitxer de configuració, en comptes de requerir als usuaris que facin res del descrit anteriorment.
 Description-cs.UTF-8: Nalezen starý wine.conf. Odstranit?
  Wine se již implicitně nesnaží načít /etc/wine.conf. To znamená, že uživatelé, kteří nemají soubor ~/.winerc (nebo ~/.wine/config), nebudou moci wine spustit, dokud soubor nevytvoří. Toho mohou dosáhnout tak, že si spustí nástroj winesetup z balíčku winesetuptk, nebo že si zkopírují starý /etc/wine.conf do ~/.winerc a nechají wine, aby jej převedl do nového formátu. Pokud soubor /etc/wine.conf odstraníte, tak se winesetup spustí automaticky každému uživateli, který ještě nemá konfigurační soubor (a tím uživatele zbavíte starostí popsaných na předchozích řádcích).
 Description-da.UTF-8: Fandt gammel wine.conf. Skal den fjernes?
@@ -46,6 +46,7 @@ Description-vi.UTF-8: Mới phát hiện tập tin cấu hình <wine.conf> cũ: 
 Template: wine/install_type
 Type: select
 Choices: Autodetect, Existing-Windows, No-Windows, Skip
+Choices-ca.UTF-8: Detecció automàtica, Windows ja existent, Sense Windows, Ometre
 Choices-cs.UTF-8: Rozpoznat, Stávající-Windows, Bez-Windows, Přeskočit
 Choices-da.UTF-8: Automatisk søgning, Eksisterende windows, Ikke windows, Spring over
 Choices-de.UTF-8: Automatische Erkennung, Vorhandenes Windows, Kein Windows, Abbrechen
@@ -68,7 +69,7 @@ Description: What kind of Wine configuration do you want?
  don't want to use it), Wine can also run completely Microsoft-free. Choose
  the setup most appropriate for you.
 Description-ca.UTF-8: Quin tipus de configuració del Wine desitgeu?
- Wine pot usar una instal·lació ja existent del Windows, si aquesta és accessible (preferiblement amb permisos d'escriptura), però si no fos així (o no desitgeu usar-la), el Wine també pot executar-se perfectament lliure de Microsoft. Escolliu la configuració que us sigui més apropiada.
+ Wine pot utilitzar una instal·lació ja existent del Windows, si aquesta és accessible (preferiblement amb permisos d'escriptura), però si no fos així (o no desitgeu utilitzar-la), Wine també pot executar-se perfectament lliure de Microsoft. Escolliu la configuració que us sigui més apropiada.
 Description-cs.UTF-8: Jakým způsobem chcete Wine používat?
  Wine umí využít stávající instalaci Windows (nejlépe připojenou v režimu i pro zápis), ale pokud žádnou nemáte, nebo ji nechcete použít, umí Wine běžet úplně samostatně. Zvolte si pro vás nejvhodnější nastavení.
 Description-da.UTF-8: Hvilken slags Wine-opsætning ønsker du?

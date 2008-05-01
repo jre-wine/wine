@@ -1,3 +1,23 @@
+wine (0.9.31-1) unstable; urgency=low
+
+  * New upstream release 0.9.31.
+    - Many Direct3D fixes and performance improvements.
+    - Several new comctl32 test cases.
+    - IDL compiler improvements.
+    - More OLE32 marshalling fixes.
+    - Lots of bug fixes.
+  * This version was released Feb 16, 2007.
+  * Updated README.Debian to explain how winelauncher is set up,
+    in case anyone actually needs to know (they shouldn't, but
+    someone misinterpreted my note that says that the package is
+    using winelauncher as some kind of instruction for the *user*
+    to use it, so maybe this helps). Closes: #409556.
+  * The wine package now suggests antivirus packages. Closes: #411761.
+  * Catalan debconf translation update. Closes: #412306.
+  * Added uninstaller.desktop to wine-utils. Closes: #412315.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 17 Mar 2007 14:18:31 -0400
+
 wine (0.9.30-1) unstable; urgency=low
 
   * New upstream release 0.9.30.

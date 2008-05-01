@@ -177,6 +177,7 @@ ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	install tools/fnt2bdf debian/wine-utils/usr/bin
 	install tools/font_convert.sh debian/wine-utils/usr/bin
 	cp tools/winedump/README debian/wine-utils/usr/share/doc/wine-utils/README.winedump
+	cp debian/uninstaller.desktop debian/wine-utils/usr/share/applications/uninstaller.desktop
 	cp debian/winecfg.desktop debian/wine-utils/usr/share/applications/winecfg.desktop
 
 	# split up libwine
