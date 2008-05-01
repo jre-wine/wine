@@ -1,3 +1,17 @@
+wine (0.9.34-1) unstable; urgency=low
+
+  * New upstream release 0.9.34.
+    - Support for Xcursor.
+    - A range of fixes for various installers.
+    - New builtin xcopy tool.
+    - The usual assortment of Direct3D fixes.
+    - Lots of bug fixes.
+  * This version was released Mar 30, 2007.
+    I've been busy, will try to catch up at some point...
+  * Added libxcursor-dev to Build-Depends.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 15 Jun 2007 03:48:29 -0400
+
 wine (0.9.33-1) unstable; urgency=low
 
   * New upstream release 0.9.33.
