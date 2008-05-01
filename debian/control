@@ -29,7 +29,7 @@ Package: wine
 Architecture: all
 Depends: wine-bin (= ${Source-Version}), wine-utils (= ${Source-Version}),
  libwine-alsa (= ${Source-Version}) | libwine-oss (= ${Source-Version}) | libwine-esd (= ${Source-Version}) | libwine-jack (= ${Source-Version}) | libwine-nas (= ${Source-Version}),
- libwine-capi (= ${Source-Version}), libwine-cms (= ${Source-Version}), libwine-gl (= ${Source-Version}), libwine-gphoto2 (= ${Source-Version}), libwine-ldap (= ${Source-Version}), libwine-print (= ${Source-Version}), libwine-sane (= ${Source-Version}), libwine-twain (= ${Source-Version})
+ libwine-capi (= ${Source-Version}), libwine-cms (= ${Source-Version}), libwine-gl (= ${Source-Version}), libwine-gphoto2 (= ${Source-Version}), libwine-ldap (= ${Source-Version}), libwine-print (= ${Source-Version}), libwine-sane (= ${Source-Version})
 Recommends: msttcorefonts
 Suggests: wine-doc, binfmt-support, avscan | klamav | clamav
 Description: Windows API Implementation (standard suite)
@@ -44,7 +44,7 @@ Package: wine-bin
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Depends: ${debconf-depends}, libwine (= ${Source-Version}), xbase-clients (>= 4.0) | xcontrib
 Conflicts: binfmt-support (<< 1.1.2)
-Replaces: libwine (<< 0.0.20010216), wine-utils (<< 0.9.29), wine (<< 0.9.31-2)
+Replaces: libwine (<< 0.0.20010216), wine-utils (<< 0.9.29), wine (<< 0.9.35)
 Description: Windows API Implementation (Binary Loader)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.

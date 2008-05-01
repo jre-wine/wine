@@ -1,3 +1,12 @@
+wine (0.9.35-2) unstable; urgency=low
+
+  * Updated the "Replaces: wine" in the wine-bin package.
+    Closes: #434153.
+  * Removed the libwine-twain transitional package from the
+    wine metapackage. Closes: #434142.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 22 Jul 2007 15:58:13 -0400
+
 wine (0.9.35-1) unstable; urgency=low
 
   * New upstream release 0.9.35. Closes: #420680.
