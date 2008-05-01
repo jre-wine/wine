@@ -114,7 +114,7 @@ UINT MSI_OpenDatabaseW(LPCWSTR szDBPath, LPCWSTR szPersist, MSIDATABASE **pdb)
         if( r == ERROR_SUCCESS )
         {
             IStorage_SetClass( stg, &CLSID_MsiDatabase );
-            r = init_string_table( stg );
+            r = msi_init_string_table( stg );
         }
         created = TRUE;
     }
@@ -188,7 +188,7 @@ UINT MSI_OpenDatabaseW(LPCWSTR szDBPath, LPCWSTR szPersist, MSIDATABASE **pdb)
     list_init( &db->tables );
     list_init( &db->transforms );
 
-    db->strings = load_string_table( stg );
+    db->strings = msi_load_string_table( stg );
     if( !db->strings )
         goto end;
 
@@ -423,7 +423,7 @@ static LPWSTR msi_build_createsql_postlude(LPWSTR *primary_keys, DWORD num_keys)
     DWORD size, key_size, i;
 
     static const WCHAR key_fmt[] = {'`','%','s','`',',',' ',0};
-    static const WCHAR postlude_fmt[] = {'P','R','I','M','A','R','Y',' ','K','E','Y',' ','%','s',')',' ','H','O','L','D',0};
+    static const WCHAR postlude_fmt[] = {'P','R','I','M','A','R','Y',' ','K','E','Y',' ','%','s',')',0};
 
     for (i = 0, size = 1; i < num_keys; i++)
         size += lstrlenW(key_fmt) + lstrlenW(primary_keys[i]) - 2;

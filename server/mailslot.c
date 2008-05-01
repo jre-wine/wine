@@ -58,7 +58,7 @@ struct mailslot
     struct fd          *fd;
     int                 write_fd;
     unsigned int        max_msgsize;
-    int                 read_timeout;
+    timeout_t           read_timeout;
     struct list         writers;
 };
 
@@ -96,6 +96,7 @@ static const struct fd_ops mailslot_fd_ops =
     default_poll_event,         /* poll_event */
     no_flush,                   /* flush */
     mailslot_get_fd_type,       /* get_fd_type */
+    default_fd_ioctl,           /* ioctl */
     mailslot_queue_async,       /* queue_async */
     default_fd_reselect_async,  /* reselect_async */
     default_fd_cancel_async     /* cancel_async */
@@ -142,6 +143,7 @@ static const struct fd_ops mail_writer_fd_ops =
     default_poll_event,          /* poll_event */
     no_flush,                    /* flush */
     mail_writer_get_fd_type,     /* get_fd_type */
+    default_fd_ioctl,            /* ioctl */
     default_fd_queue_async,      /* queue_async */
     default_fd_reselect_async,   /* reselect_async */
     default_fd_cancel_async      /* cancel_async */
@@ -187,6 +189,7 @@ static const struct fd_ops mailslot_device_fd_ops =
     default_poll_event,             /* poll_event */
     no_flush,                       /* flush */
     mailslot_device_get_fd_type,    /* get_fd_type */
+    default_fd_ioctl,               /* ioctl */
     default_fd_queue_async,         /* queue_async */
     default_fd_reselect_async,      /* reselect_async */
     default_fd_cancel_async         /* cancel_async */
@@ -211,8 +214,8 @@ static void mailslot_dump( struct object *obj, int verbose )
     struct mailslot *mailslot = (struct mailslot *) obj;
 
     assert( obj->ops == &mailslot_ops );
-    fprintf( stderr, "Mailslot max_msgsize=%d read_timeout=%d\n",
-             mailslot->max_msgsize, mailslot->read_timeout );
+    fprintf( stderr, "Mailslot max_msgsize=%d read_timeout=%s\n",
+             mailslot->max_msgsize, get_timeout_str(mailslot->read_timeout) );
 }
 
 static enum server_fd_type mailslot_get_fd_type( struct fd *fd )
@@ -296,12 +299,8 @@ static void mailslot_queue_async( struct fd *fd, const async_data_t *data, int t
 
     if ((async = fd_queue_async( fd, data, type, count )))
     {
-        if (mailslot->read_timeout != -1)
-        {
-            struct timeval when = current_time;
-            add_timeout( &when, max(1,mailslot->read_timeout) );
-            async_set_timeout( async, &when, STATUS_IO_TIMEOUT );
-        }
+        async_set_timeout( async, mailslot->read_timeout ? mailslot->read_timeout : -1,
+                           STATUS_IO_TIMEOUT );
         release_object( async );
         set_error( STATUS_PENDING );
     }
@@ -372,7 +371,7 @@ void create_mailslot_device( struct directory *root, const struct unicode_str *n
 
 static struct mailslot *create_mailslot( struct directory *root,
                                          const struct unicode_str *name, unsigned int attr,
-                                         int max_msgsize, int read_timeout )
+                                         int max_msgsize, timeout_t read_timeout )
 {
     struct object *obj;
     struct unicode_str new_name;

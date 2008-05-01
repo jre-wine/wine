@@ -930,7 +930,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVolumeTexture(IWineD3DDevice *ifa
     {
         HRESULT hr;
         /* Create the volume */
-        hr = D3DCB_CreateVolume(This->parent, parent, Width, Height, Depth, Format, Pool, Usage,
+        hr = D3DCB_CreateVolume(This->parent, parent, tmpW, tmpH, tmpD, Format, Pool, Usage,
                                 (IWineD3DVolume **)&object->volumes[i], pSharedHandle);
 
         if(FAILED(hr)) {
@@ -1577,6 +1577,147 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclaration(IWineD3DDevice*
     return hr;
 }
 
+static size_t ConvertFvfToDeclaration(DWORD fvf, WINED3DVERTEXELEMENT** ppVertexElements) {
+
+    unsigned int idx, idx2;
+    unsigned int offset;
+    BOOL has_pos = (fvf & WINED3DFVF_POSITION_MASK) != 0;
+    BOOL has_blend = (fvf & WINED3DFVF_XYZB5) > WINED3DFVF_XYZRHW;
+    BOOL has_blend_idx = has_blend &&
+       (((fvf & WINED3DFVF_XYZB5) == WINED3DFVF_XYZB5) ||
+        (fvf & WINED3DFVF_LASTBETA_D3DCOLOR) ||
+        (fvf & WINED3DFVF_LASTBETA_UBYTE4));
+    BOOL has_normal = (fvf & WINED3DFVF_NORMAL) != 0;
+    BOOL has_psize = (fvf & WINED3DFVF_PSIZE) != 0;
+    BOOL has_diffuse = (fvf & WINED3DFVF_DIFFUSE) != 0;
+    BOOL has_specular = (fvf & WINED3DFVF_SPECULAR) !=0;
+
+    DWORD num_textures = (fvf & WINED3DFVF_TEXCOUNT_MASK) >> WINED3DFVF_TEXCOUNT_SHIFT;
+    DWORD texcoords = (fvf & 0x00FF0000) >> 16;
+
+    WINED3DVERTEXELEMENT end_element = WINED3DDECL_END();
+    WINED3DVERTEXELEMENT *elements = NULL;
+
+    unsigned int size;
+    DWORD num_blends = 1 + (((fvf & WINED3DFVF_XYZB5) - WINED3DFVF_XYZB1) >> 1);
+    if (has_blend_idx) num_blends--;
+
+    /* Compute declaration size */
+    size = has_pos + (has_blend && num_blends > 0) + has_blend_idx + has_normal +
+           has_psize + has_diffuse + has_specular + num_textures + 1;
+
+    /* convert the declaration */
+    elements = HeapAlloc(GetProcessHeap(), 0, size * sizeof(WINED3DVERTEXELEMENT));
+    if (!elements)
+        return 0;
+
+    memcpy(&elements[size-1], &end_element, sizeof(WINED3DVERTEXELEMENT));
+    idx = 0;
+    if (has_pos) {
+        if (!has_blend && (fvf & WINED3DFVF_XYZRHW)) {
+            elements[idx].Type = WINED3DDECLTYPE_FLOAT4;
+            elements[idx].Usage = WINED3DDECLUSAGE_POSITIONT;
+        }
+        else {
+            elements[idx].Type = WINED3DDECLTYPE_FLOAT3;
+            elements[idx].Usage = WINED3DDECLUSAGE_POSITION;
+        }
+        elements[idx].UsageIndex = 0;
+        idx++;
+    }
+    if (has_blend && (num_blends > 0)) {
+        if (((fvf & WINED3DFVF_XYZB5) == WINED3DFVF_XYZB2) && (fvf & WINED3DFVF_LASTBETA_D3DCOLOR))
+            elements[idx].Type = WINED3DDECLTYPE_D3DCOLOR;
+        else
+            elements[idx].Type = WINED3DDECLTYPE_FLOAT1 + num_blends - 1;
+        elements[idx].Usage = WINED3DDECLUSAGE_BLENDWEIGHT;
+        elements[idx].UsageIndex = 0;
+        idx++;
+    }
+    if (has_blend_idx) {
+        if (fvf & WINED3DFVF_LASTBETA_UBYTE4 ||
+            (((fvf & WINED3DFVF_XYZB5) == WINED3DFVF_XYZB2) && (fvf & WINED3DFVF_LASTBETA_D3DCOLOR)))
+            elements[idx].Type = WINED3DDECLTYPE_UBYTE4;
+        else if (fvf & WINED3DFVF_LASTBETA_D3DCOLOR)
+            elements[idx].Type = WINED3DDECLTYPE_D3DCOLOR;
+        else
+            elements[idx].Type = WINED3DDECLTYPE_FLOAT1;
+        elements[idx].Usage = WINED3DDECLUSAGE_BLENDINDICES;
+        elements[idx].UsageIndex = 0;
+        idx++;
+    }
+    if (has_normal) {
+        elements[idx].Type = WINED3DDECLTYPE_FLOAT3;
+        elements[idx].Usage = WINED3DDECLUSAGE_NORMAL;
+        elements[idx].UsageIndex = 0;
+        idx++;
+    }
+    if (has_psize) {
+        elements[idx].Type = WINED3DDECLTYPE_FLOAT1;
+        elements[idx].Usage = WINED3DDECLUSAGE_PSIZE;
+        elements[idx].UsageIndex = 0;
+        idx++;
+    }
+    if (has_diffuse) {
+        elements[idx].Type = WINED3DDECLTYPE_D3DCOLOR;
+        elements[idx].Usage = WINED3DDECLUSAGE_COLOR;
+        elements[idx].UsageIndex = 0;
+        idx++;
+    }
+    if (has_specular) {
+        elements[idx].Type = WINED3DDECLTYPE_D3DCOLOR;
+        elements[idx].Usage = WINED3DDECLUSAGE_COLOR;
+        elements[idx].UsageIndex = 1;
+        idx++;
+    }
+    for (idx2 = 0; idx2 < num_textures; idx2++) {
+        unsigned int numcoords = (texcoords >> (idx2*2)) & 0x03;
+        switch (numcoords) {
+            case WINED3DFVF_TEXTUREFORMAT1:
+                elements[idx].Type = WINED3DDECLTYPE_FLOAT1;
+                break;
+            case WINED3DFVF_TEXTUREFORMAT2:
+                elements[idx].Type = WINED3DDECLTYPE_FLOAT2;
+                break;
+            case WINED3DFVF_TEXTUREFORMAT3:
+                elements[idx].Type = WINED3DDECLTYPE_FLOAT3;
+                break;
+            case WINED3DFVF_TEXTUREFORMAT4:
+                elements[idx].Type = WINED3DDECLTYPE_FLOAT4;
+                break;
+        }
+        elements[idx].Usage = WINED3DDECLUSAGE_TEXCOORD;
+        elements[idx].UsageIndex = idx2;
+        idx++;
+    }
+
+    /* Now compute offsets, and initialize the rest of the fields */
+    for (idx = 0, offset = 0; idx < size-1; idx++) {
+        elements[idx].Stream = 0;
+        elements[idx].Method = WINED3DDECLMETHOD_DEFAULT;
+        elements[idx].Offset = offset;
+        offset += WINED3D_ATR_SIZE(elements[idx].Type) * WINED3D_ATR_TYPESIZE(elements[idx].Type);
+    }
+
+    *ppVertexElements = elements;
+    return size;
+}
+
+static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclarationFromFVF(IWineD3DDevice* iface, IWineD3DVertexDeclaration** ppVertexDeclaration, IUnknown *Parent, DWORD Fvf) {
+    WINED3DVERTEXELEMENT* elements = NULL;
+    size_t size;
+    DWORD hr;
+
+    size = ConvertFvfToDeclaration(Fvf, &elements);
+    if (size == 0) return WINED3DERR_OUTOFVIDEOMEMORY;
+
+    hr = IWineD3DDevice_CreateVertexDeclaration(iface, ppVertexDeclaration, Parent, elements, size);
+    HeapFree(GetProcessHeap(), 0, elements);
+    if (hr != S_OK) return hr;
+
+    return WINED3D_OK;
+}
+
 /* http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/graphics/programmingguide/programmable/vertexshaders/vscreate.asp */
 static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexShader(IWineD3DDevice *iface, IWineD3DVertexDeclaration *vertex_declaration, CONST DWORD *pFunction, IWineD3DVertexShader **ppVertexShader, IUnknown *parent) {
     IWineD3DDeviceImpl       *This = (IWineD3DDeviceImpl *)iface;
@@ -1916,7 +2057,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetDisplayMode(IWineD3DDevice *iface, U
             ret = ChangeDisplaySettingsExW(NULL, &devmode, NULL, CDS_FULLSCREEN, NULL) != DISP_CHANGE_SUCCESSFUL;
         }
         if(ret != DISP_CHANGE_SUCCESSFUL) {
-            return DDERR_INVALIDMODE;
+            return WINED3DERR_NOTAVAILABLE;
         }
     }
 
@@ -3348,7 +3489,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetPixelShaderConstantF(
 
 #define copy_and_next(dest, src, size) memcpy(dest, src, size); dest += (size)
 static HRESULT
-process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIndex, DWORD dwCount, WineDirect3DVertexStridedData *lpStrideData, DWORD SrcFVF, IWineD3DVertexBufferImpl *dest, DWORD dwFlags) {
+process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIndex, DWORD dwCount, WineDirect3DVertexStridedData *lpStrideData, IWineD3DVertexBufferImpl *dest, DWORD dwFlags) {
     char *dest_ptr, *dest_conv = NULL, *dest_conv_addr = NULL;
     unsigned int i;
     DWORD DestFVF = dest->fvf;
@@ -3357,11 +3498,11 @@ process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIndex, DWORD dwCo
     BOOL doClip;
     int numTextures;
 
-    if (SrcFVF & WINED3DFVF_NORMAL) {
+    if (lpStrideData->u.s.normal.lpData) {
         WARN(" lighting state not saved yet... Some strange stuff may happen !\n");
     }
 
-    if ( (SrcFVF & WINED3DFVF_POSITION_MASK) != WINED3DFVF_XYZ) {
+    if (lpStrideData->u.s.position.lpData == NULL) {
         ERR("Source has no position mask\n");
         return WINED3DERR_INVALIDCALL;
     }
@@ -3696,15 +3837,14 @@ process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIndex, DWORD dwCo
 }
 #undef copy_and_next
 
-static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, UINT SrcStartIndex, UINT DestIndex, UINT VertexCount, IWineD3DVertexBuffer* pDestBuffer, IWineD3DVertexBuffer* pVertexDecl, DWORD Flags) {
+static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, UINT SrcStartIndex, UINT DestIndex, UINT VertexCount, IWineD3DVertexBuffer* pDestBuffer, IWineD3DVertexDeclaration* pVertexDecl, DWORD Flags) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    IWineD3DVertexBufferImpl *SrcImpl = (IWineD3DVertexBufferImpl *) pVertexDecl;
     WineDirect3DVertexStridedData strided;
+    BOOL vbo = FALSE;
     TRACE("(%p)->(%d,%d,%d,%p,%p,%d\n", This, SrcStartIndex, DestIndex, VertexCount, pDestBuffer, pVertexDecl, Flags);
 
-    if (!SrcImpl) {
-        WARN("NULL source vertex buffer\n");
-        return WINED3DERR_INVALIDCALL;
+    if(pVertexDecl) {
+        ERR("Output vertex declaration not implemented yet\n");
     }
 
     /* Need any context to write to the vbo. In a non-multithreaded environment a context is there anyway,
@@ -3716,50 +3856,42 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
         LEAVE_GL();
     }
 
-    /* We don't need the source vbo because this buffer is only used as
-     * a source for ProcessVertices. Avoid wasting resources by converting the
-     * buffer and loading the VBO
-     */
-    if(SrcImpl->vbo) {
-        TRACE("Releasing the source vbo, it won't be needed\n");
-
-        if(!SrcImpl->resource.allocatedMemory) {
-            /* Rescue the data from the buffer */
-            void *src;
-            SrcImpl->resource.allocatedMemory = HeapAlloc(GetProcessHeap(), 0, SrcImpl->resource.size);
-            if(!SrcImpl->resource.allocatedMemory) {
-                ERR("Out of memory\n");
-                return E_OUTOFMEMORY;
-            }
-
-            ENTER_GL();
-            GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, SrcImpl->vbo));
-            checkGLcall("glBindBufferARB");
-
-            src = GL_EXTCALL(glMapBufferARB(GL_ARRAY_BUFFER_ARB, GL_READ_ONLY_ARB));
-            if(src) {
-                memcpy(SrcImpl->resource.allocatedMemory, src, SrcImpl->resource.size);
-            }
-
-            GL_EXTCALL(glUnmapBufferARB(GL_ARRAY_BUFFER_ARB));
-            checkGLcall("glUnmapBufferARB");
-        } else {
-            ENTER_GL();
-        }
-
-        GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, 0));
-        checkGLcall("glBindBufferARB");
-        GL_EXTCALL(glDeleteBuffersARB(1, &SrcImpl->vbo));
-        checkGLcall("glDeleteBuffersARB");
-        LEAVE_GL();
-
-        SrcImpl->vbo = 0;
+    memset(&strided, 0, sizeof(strided));
+    if(This->stateBlock->vertexDecl) {
+        primitiveDeclarationConvertToStridedData(iface, FALSE, &strided, &vbo);
+    } else {
+        primitiveConvertToStridedData(iface, &strided, &vbo);
     }
 
-    memset(&strided, 0, sizeof(strided));
-    primitiveConvertFVFtoOffset(SrcImpl->fvf, get_flexible_vertex_size(SrcImpl->fvf), SrcImpl->resource.allocatedMemory + get_flexible_vertex_size(SrcImpl->fvf) * SrcStartIndex, &strided, 0, 0);
+    if(vbo || SrcStartIndex) {
+        unsigned int i;
+        /* ProcessVertices can't convert FROM a vbo, and vertex buffers used to source into ProcesVerticse are
+         * unlikely to ever be used for drawing. Release vbos in those buffers and fix up the strided structure
+         *
+         * Also get the start index in, but only loop over all elements if there's something to add at all.
+         */
+        for(i=0; i < 16; i++) {
+            if(strided.u.input[i].VBO) {
+                IWineD3DVertexBufferImpl *vb = (IWineD3DVertexBufferImpl *) This->stateBlock->streamSource[strided.u.input[i].streamNo];
 
-    return process_vertices_strided(This, DestIndex, VertexCount, &strided, SrcImpl->fvf, (IWineD3DVertexBufferImpl *) pDestBuffer, Flags);
+                /* The vertex buffer is supposed to have a system memory copy */
+                strided.u.input[i].VBO = 0;
+                strided.u.input[i].lpData = (BYTE *) ((unsigned long) strided.u.input[i].lpData + (unsigned long) vb->resource.allocatedMemory);
+                ENTER_GL();
+                GL_EXTCALL(glDeleteBuffersARB(1, &vb->vbo));
+                vb->vbo = 0;
+                LEAVE_GL();
+
+                /* To be safe. An app could technically draw, then call ProcessVertices, then draw again without ever changing the stream sources */
+                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_STREAMSRC);
+            }
+            if(strided.u.input[i].lpData) {
+                strided.u.input[i].lpData += strided.u.input[i].dwStride * SrcStartIndex;
+            }
+        }
+    }
+
+    return process_vertices_strided(This, DestIndex, VertexCount, &strided, (IWineD3DVertexBufferImpl *) pDestBuffer, Flags);
 }
 
 /*****
@@ -3773,6 +3905,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTextureStageState(IWineD3DDevice *if
     /* FIXME: Handle 3d textures? What if TSS value set before set texture? Need to reapply all values? */
 
     TRACE("(%p) : Stage=%d, Type=%s(%d), Value=%d\n", This, Stage, debug_d3dtexturestate(Type), Type, Value);
+
+    if (Stage >= MAX_TEXTURES) {
+        WARN("Attempting to set stage %u which is higher than the max stage %u, ignoring\n", Stage, MAX_TEXTURES - 1);
+        return WINED3D_OK;
+    }
 
     This->updateStateBlock->changed.textureState[Stage][Type] = TRUE;
     This->updateStateBlock->set.textureState[Stage][Type]     = TRUE;
@@ -4969,10 +5106,109 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DeletePatch(IWineD3DDevice *iface, UINT
     return WINED3D_OK;
 }
 
+static IWineD3DSwapChain *get_swapchain(IWineD3DSurface *target) {
+    HRESULT hr;
+    IWineD3DSwapChain *swapchain;
+
+    hr = IWineD3DSurface_GetContainer(target, &IID_IWineD3DSwapChain, (void **)&swapchain);
+    if (SUCCEEDED(hr)) {
+        IWineD3DSwapChain_Release((IUnknown *)swapchain);
+        return swapchain;
+    }
+
+    return NULL;
+}
+
+static void bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+
+    if (!*fbo) {
+        GL_EXTCALL(glGenFramebuffersEXT(1, fbo));
+        checkGLcall("glGenFramebuffersEXT()");
+    }
+    GL_EXTCALL(glBindFramebufferEXT(target, *fbo));
+    checkGLcall("glBindFramebuffer()");
+}
+
+static void attach_surface_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, DWORD idx, IWineD3DSurface *surface) {
+    const IWineD3DSurfaceImpl *surface_impl = (IWineD3DSurfaceImpl *)surface;
+    GLenum texttarget, target;
+    GLint old_binding;
+
+    texttarget = surface_impl->glDescription.target;
+    target = texttarget == GL_TEXTURE_2D ? GL_TEXTURE_2D : GL_TEXTURE_CUBE_MAP_ARB;
+    glGetIntegerv(texttarget == GL_TEXTURE_2D ? GL_TEXTURE_BINDING_2D : GL_TEXTURE_BINDING_CUBE_MAP_ARB, &old_binding);
+
+    IWineD3DSurface_PreLoad(surface);
+
+    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(target, old_binding);
+
+    GL_EXTCALL(glFramebufferTexture2DEXT(fbo_target, GL_COLOR_ATTACHMENT0_EXT + idx, texttarget, surface_impl->glDescription.textureName, 0));
+
+    checkGLcall("attach_surface_fbo");
+}
+
+static void color_fill_fbo(IWineD3DDevice *iface, IWineD3DSurface *surface, CONST WINED3DRECT *rect, WINED3DCOLOR color) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
+    IWineD3DSwapChain *swapchain;
+
+    swapchain = get_swapchain(surface);
+    if (swapchain) {
+        GLenum buffer;
+
+        TRACE("Surface %p is onscreen\n", surface);
+
+        GL_EXTCALL(glBindFramebufferEXT(GL_DRAW_FRAMEBUFFER_EXT, 0));
+        buffer = surface_get_gl_buffer(surface, swapchain);
+        glDrawBuffer(buffer);
+        checkGLcall("glDrawBuffer()");
+    } else {
+        TRACE("Surface %p is offscreen\n", surface);
+        bind_fbo(iface, GL_DRAW_FRAMEBUFFER_EXT, &This->dst_fbo);
+        attach_surface_fbo(This, GL_DRAW_FRAMEBUFFER_EXT, 0, surface);
+    }
+
+    if (rect) {
+        glEnable(GL_SCISSOR_TEST);
+        if(!swapchain) {
+            glScissor(rect->x1, rect->y1, rect->x2 - rect->x1, rect->y2 - rect->y1);
+        } else {
+            glScissor(rect->x1, ((IWineD3DSurfaceImpl *)surface)->currentDesc.Height - rect->y2,
+                    rect->x2 - rect->x1, rect->y2 - rect->y1);
+        }
+        checkGLcall("glScissor");
+    } else {
+        glDisable(GL_SCISSOR_TEST);
+    }
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_SCISSORTESTENABLE));
+
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_COLORWRITEENABLE));
+
+    glClearColor(D3DCOLOR_R(color), D3DCOLOR_G(color), D3DCOLOR_B(color), D3DCOLOR_A(color));
+    glClear(GL_COLOR_BUFFER_BIT);
+    checkGLcall("glClear");
+
+    if (This->render_offscreen) {
+        bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->fbo);
+    } else {
+        GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
+        checkGLcall("glBindFramebuffer()");
+    }
+
+    if (swapchain && surface == ((IWineD3DSwapChainImpl *)swapchain)->frontBuffer
+            && ((IWineD3DSwapChainImpl *)swapchain)->backBuffer) {
+        glDrawBuffer(GL_BACK);
+        checkGLcall("glDrawBuffer()");
+    }
+}
+
 static HRESULT WINAPI IWineD3DDeviceImpl_ColorFill(IWineD3DDevice *iface, IWineD3DSurface *pSurface, CONST WINED3DRECT* pRect, WINED3DCOLOR color) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
     IWineD3DSurfaceImpl *surface = (IWineD3DSurfaceImpl *) pSurface;
-    DDBLTFX BltFx;
+    WINEDDBLTFX BltFx;
     TRACE("(%p) Colour fill Surface: %p rect: %p color: %d\n", This, pSurface, pRect, color);
 
     if (surface->resource.pool != WINED3DPOOL_DEFAULT && surface->resource.pool != WINED3DPOOL_SYSTEMMEM) {
@@ -4980,11 +5216,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ColorFill(IWineD3DDevice *iface, IWineD
         return WINED3DERR_INVALIDCALL;
     }
 
-    /* Just forward this to the DirectDraw blitting engine */
-    memset(&BltFx, 0, sizeof(BltFx));
-    BltFx.dwSize = sizeof(BltFx);
-    BltFx.u5.dwFillColor = color;
-    return IWineD3DSurface_Blt(pSurface, (RECT *) pRect, NULL, NULL, DDBLT_COLORFILL, &BltFx, WINED3DTEXF_NONE);
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+        color_fill_fbo(iface, pSurface, pRect, color);
+        return WINED3D_OK;
+    } else {
+        /* Just forward this to the DirectDraw blitting engine */
+        memset(&BltFx, 0, sizeof(BltFx));
+        BltFx.dwSize = sizeof(BltFx);
+        BltFx.u5.dwFillColor = color;
+        return IWineD3DSurface_Blt(pSurface, (RECT *) pRect, NULL, NULL, WINEDDBLT_COLORFILL, &BltFx, WINED3DTEXF_NONE);
+    }
 }
 
 /* rendertarget and deptth stencil functions */
@@ -5103,17 +5344,6 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetDepthStencilSurface(IWineD3DDevice
     return WINED3D_OK;
 }
 
-static void bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo) {
-    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-
-    if (!*fbo) {
-        GL_EXTCALL(glGenFramebuffersEXT(1, fbo));
-        checkGLcall("glGenFramebuffersEXT()");
-    }
-    GL_EXTCALL(glBindFramebufferEXT(target, *fbo));
-    checkGLcall("glBindFramebuffer()");
-}
-
 /* TODO: Handle stencil attachments */
 static void set_depth_stencil_fbo(IWineD3DDevice *iface, IWineD3DSurface *depth_stencil) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
@@ -5149,26 +5379,6 @@ static void set_depth_stencil_fbo(IWineD3DDevice *iface, IWineD3DSurface *depth_
     }
 }
 
-static void attach_surface_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, DWORD idx, IWineD3DSurface *surface) {
-    const IWineD3DSurfaceImpl *surface_impl = (IWineD3DSurfaceImpl *)surface;
-    GLenum texttarget, target;
-    GLint old_binding;
-
-    texttarget = surface_impl->glDescription.target;
-    target = texttarget == GL_TEXTURE_2D ? GL_TEXTURE_2D : GL_TEXTURE_CUBE_MAP_ARB;
-    glGetIntegerv(texttarget == GL_TEXTURE_2D ? GL_TEXTURE_BINDING_2D : GL_TEXTURE_BINDING_CUBE_MAP_ARB, &old_binding);
-
-    IWineD3DSurface_PreLoad(surface);
-
-    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(target, old_binding);
-
-    GL_EXTCALL(glFramebufferTexture2DEXT(fbo_target, GL_COLOR_ATTACHMENT0_EXT + idx, texttarget, surface_impl->glDescription.textureName, 0));
-
-    checkGLcall("attach_surface_fbo");
-}
-
 static void set_render_target_fbo(IWineD3DDevice *iface, DWORD idx, IWineD3DSurface *render_target) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     IWineD3DSurfaceImpl *rtimpl = (IWineD3DSurfaceImpl *)render_target;
@@ -5191,9 +5401,29 @@ static void check_fbo_status(IWineD3DDevice *iface) {
     GLenum status;
 
     status = GL_EXTCALL(glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT));
-    switch(status) {
-        case GL_FRAMEBUFFER_COMPLETE_EXT: TRACE("FBO complete.\n"); break;
-        default: FIXME("FBO status %#x.\n", status); break;
+    if (status == GL_FRAMEBUFFER_COMPLETE_EXT) {
+        TRACE("FBO complete\n");
+    } else {
+        FIXME("FBO status %s (%#x)\n", debug_fbostatus(status), status);
+
+        /* Dump the FBO attachments */
+        if (status == GL_FRAMEBUFFER_UNSUPPORTED_EXT) {
+            IWineD3DSurfaceImpl *attachment;
+            int i;
+
+            for (i = 0; i < GL_LIMITS(buffers); ++i) {
+                attachment = (IWineD3DSurfaceImpl *)This->fbo_color_attachments[i];
+                if (attachment) {
+                    FIXME("\tColor attachment %d: (%p) %s %ux%u\n", i, attachment, debug_d3dformat(attachment->resource.format),
+                            attachment->pow2Width, attachment->pow2Height);
+                }
+            }
+            attachment = (IWineD3DSurfaceImpl *)This->fbo_depth_attachment;
+            if (attachment) {
+                FIXME("\tDepth attachment: (%p) %s %ux%u\n", attachment, debug_d3dformat(attachment->resource.format),
+                        attachment->pow2Width, attachment->pow2Height);
+            }
+        }
     }
 }
 
@@ -5244,6 +5474,9 @@ void apply_fbo_state(IWineD3DDevice *iface) {
         if (GL_SUPPORT(ARB_DRAW_BUFFERS)) {
             GL_EXTCALL(glDrawBuffersARB(GL_LIMITS(buffers), This->draw_buffers));
             checkGLcall("glDrawBuffers()");
+        } else {
+            glDrawBuffer(This->draw_buffers[0]);
+            checkGLcall("glDrawBuffer()");
         }
     } else {
         GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
@@ -5252,23 +5485,11 @@ void apply_fbo_state(IWineD3DDevice *iface) {
     check_fbo_status(iface);
 }
 
-static BOOL is_onscreen(IWineD3DSurface *target) {
-    HRESULT hr;
-    void *tmp;
-
-    hr = IWineD3DSurface_GetContainer(target, &IID_IWineD3DSwapChain, &tmp);
-    if (SUCCEEDED(hr)) {
-        IWineD3DSwapChain_Release((IUnknown *)tmp);
-        return TRUE;
-    }
-
-    return FALSE;
-}
-
 void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, const WINED3DRECT *src_rect,
         IWineD3DSurface *dst_surface, const WINED3DRECT *dst_rect, const WINED3DTEXTUREFILTERTYPE filter, BOOL flip) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     GLbitfield mask = GL_COLOR_BUFFER_BIT; /* TODO: Support blitting depth/stencil surfaces */
+    IWineD3DSwapChain *src_swapchain, *dst_swapchain;
     GLenum gl_filter;
 
     TRACE("(%p) : src_surface %p, src_rect %p, dst_surface %p, dst_rect %p, filter %s (0x%08x), flip %u\n",
@@ -5293,25 +5514,45 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, const
     }
 
     /* Attach src surface to src fbo */
-    if (is_onscreen(src_surface)) {
+    src_swapchain = get_swapchain(src_surface);
+    if (src_swapchain) {
+        GLenum buffer;
+
         TRACE("Source surface %p is onscreen\n", src_surface);
+
         GL_EXTCALL(glBindFramebufferEXT(GL_READ_FRAMEBUFFER_EXT, 0));
+        buffer = surface_get_gl_buffer(src_surface, src_swapchain);
+        glReadBuffer(buffer);
+        checkGLcall("glReadBuffer()");
+
         flip = !flip;
     } else {
         TRACE("Source surface %p is offscreen\n", src_surface);
         bind_fbo(iface, GL_READ_FRAMEBUFFER_EXT, &This->src_fbo);
         attach_surface_fbo(This, GL_READ_FRAMEBUFFER_EXT, 0, src_surface);
+        glReadBuffer(GL_COLOR_ATTACHMENT0_EXT);
+        checkGLcall("glReadBuffer()");
     }
 
     /* Attach dst surface to dst fbo */
-    if (is_onscreen(dst_surface)) {
+    dst_swapchain = get_swapchain(dst_surface);
+    if (dst_swapchain) {
+        GLenum buffer;
+
         TRACE("Destination surface %p is onscreen\n", dst_surface);
+
         GL_EXTCALL(glBindFramebufferEXT(GL_DRAW_FRAMEBUFFER_EXT, 0));
+        buffer = surface_get_gl_buffer(dst_surface, dst_swapchain);
+        glDrawBuffer(buffer);
+        checkGLcall("glDrawBuffer()");
+
         flip = !flip;
     } else {
         TRACE("Destination surface %p is offscreen\n", dst_surface);
         bind_fbo(iface, GL_DRAW_FRAMEBUFFER_EXT, &This->dst_fbo);
         attach_surface_fbo(This, GL_DRAW_FRAMEBUFFER_EXT, 0, dst_surface);
+        glDrawBuffer(GL_COLOR_ATTACHMENT0_EXT);
+        checkGLcall("glDrawBuffer()");
     }
 
     if (flip) {
@@ -5327,6 +5568,13 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, const
     } else {
         GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
         checkGLcall("glBindFramebuffer()");
+    }
+
+    /* If we switched from GL_BACK to GL_FRONT above, we need to switch back here */
+    if (dst_swapchain && dst_surface == ((IWineD3DSwapChainImpl *)dst_swapchain)->frontBuffer
+            && ((IWineD3DSwapChainImpl *)dst_swapchain)->backBuffer) {
+        glDrawBuffer(GL_BACK);
+        checkGLcall("glDrawBuffer()");
     }
 }
 
@@ -5486,6 +5734,12 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
                 memcpy(&mem[width * bpp * i], &bits[rect.Pitch * i], width * bpp);
             IWineD3DSurface_UnlockRect(pCursorBitmap);
             ENTER_GL();
+
+            if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
+                glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE);
+                checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE)");
+            }
+
             /* Make sure that a proper texture unit is selected */
             if (GL_SUPPORT(ARB_MULTITEXTURE)) {
                 GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
@@ -5501,6 +5755,12 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
             glTexImage2D(GL_TEXTURE_2D, 0, intfmt, width, height, 0, format, type, mem);
             HeapFree(GetProcessHeap(), 0, mem);
             checkGLcall("glTexImage2D");
+
+            if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
+                glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE);
+                checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE)");
+            }
+
             LEAVE_GL();
         }
         else
@@ -5807,9 +6067,6 @@ static void WINAPI IWineD3DDeviceImpl_AddResource(IWineD3DDevice *iface, IWineD3
     ResourceList* resourceList;
 
     TRACE("(%p) : resource %p\n", This, resource);
-#if 0
-    EnterCriticalSection(&resourceStoreCriticalSection);
-#endif
     /* add a new texture to the frot of the linked list */
     resourceList = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ResourceList));
     resourceList->resource = resource;
@@ -5820,9 +6077,6 @@ static void WINAPI IWineD3DDeviceImpl_AddResource(IWineD3DDevice *iface, IWineD3
     This->resources = resourceList;
     TRACE("Added resource %p with element %p pointing to %p\n", resource, resourceList, resourceList->next);
 
-#if 0
-    LeaveCriticalSection(&resourceStoreCriticalSection);
-#endif
     return;
 }
 
@@ -5833,9 +6087,6 @@ static void WINAPI IWineD3DDeviceImpl_RemoveResource(IWineD3DDevice *iface, IWin
     
     TRACE("(%p) : resource %p\n", This, resource);
 
-#if 0
-    EnterCriticalSection(&resourceStoreCriticalSection);
-#endif
     resourceList = This->resources;
 
     while (resourceList != NULL) {
@@ -5846,9 +6097,6 @@ static void WINAPI IWineD3DDeviceImpl_RemoveResource(IWineD3DDevice *iface, IWin
 
     if (resourceList == NULL) {
         FIXME("Attempted to remove resource %p that hasn't been stored\n", resource);
-#if 0
-        LeaveCriticalSection(&resourceStoreCriticalSection);
-#endif
         return;
     } else {
             TRACE("Found resource  %p with element %p pointing to %p (previous %p)\n", resourceList->resource, resourceList, resourceList->next, previousResourceList);
@@ -5860,9 +6108,6 @@ static void WINAPI IWineD3DDeviceImpl_RemoveResource(IWineD3DDevice *iface, IWin
         This->resources = resourceList->next;
     }
 
-#if 0
-    LeaveCriticalSection(&resourceStoreCriticalSection);
-#endif
     return;
 }
 
@@ -5996,6 +6241,7 @@ const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl =
     IWineD3DDeviceImpl_CreateQuery,
     IWineD3DDeviceImpl_CreateAdditionalSwapChain,
     IWineD3DDeviceImpl_CreateVertexDeclaration,
+    IWineD3DDeviceImpl_CreateVertexDeclarationFromFVF,
     IWineD3DDeviceImpl_CreateVertexShader,
     IWineD3DDeviceImpl_CreatePixelShader,
     IWineD3DDeviceImpl_CreatePalette,

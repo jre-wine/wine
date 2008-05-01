@@ -68,7 +68,7 @@ static const PixelFormatDesc formats[] = {
     {WINED3DFMT_A1R5G5B5    ,0x00008000 ,0x00007c00 ,0x000003e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5_A1             ,GL_BGRA            ,GL_UNSIGNED_SHORT_1_5_5_5_REV  },
     {WINED3DFMT_A4R4G4B4    ,0x0000f000 ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,FALSE      ,GL_RGBA4               ,GL_BGRA            ,GL_UNSIGNED_SHORT_4_4_4_4_REV  },
     {WINED3DFMT_R3G3B2      ,0x0        ,0x000000e0 ,0x0000001c ,0x00000003 ,1      ,FALSE      ,GL_R3_G3_B2            ,GL_RGB             ,GL_UNSIGNED_BYTE_2_3_3_REV     },
-    {WINED3DFMT_A8          ,0x000000ff ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_ALPHA8              ,GL_ALPHA           ,GL_ALPHA                       },
+    {WINED3DFMT_A8          ,0x000000ff ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_ALPHA8              ,GL_ALPHA           ,GL_UNSIGNED_BYTE               },
     {WINED3DFMT_A8R3G3B2    ,0x0000ff00 ,0x000000e0 ,0x0000001c ,0x00000003 ,2      ,FALSE      ,0                      ,0                  ,0                              },
     {WINED3DFMT_X4R4G4B4    ,0x0        ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,FALSE      ,GL_RGB4                ,GL_BGRA            ,GL_UNSIGNED_SHORT_4_4_4_4_REV  },
     {WINED3DFMT_A2B10G10R10 ,0xb0000000 ,0x000003ff ,0x000ffc00 ,0x3ff00000 ,4      ,FALSE      ,GL_RGB                 ,GL_RGBA            ,GL_UNSIGNED_INT_2_10_10_10_REV },
@@ -694,6 +694,42 @@ const char* debug_d3dpool(WINED3DPOOL Pool) {
     FIXME("Unrecognized %u WINED3DPOOL!\n", Pool);
     return "unrecognized";
   }
+}
+
+const char *debug_fbostatus(GLenum status) {
+    switch(status) {
+#define FBOSTATUS_TO_STR(u) case u: return #u
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_COMPLETE_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_FORMATS_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_UNSUPPORTED_EXT);
+#undef FBOSTATUS_TO_STR
+        default:
+            FIXME("Unrecognied FBO status 0x%08x\n", status);
+            return "unrecognized";
+    }
+}
+
+const char *debug_glerror(GLenum error) {
+    switch(error) {
+#define GLERROR_TO_STR(u) case u: return #u
+        GLERROR_TO_STR(GL_NO_ERROR);
+        GLERROR_TO_STR(GL_INVALID_ENUM);
+        GLERROR_TO_STR(GL_INVALID_VALUE);
+        GLERROR_TO_STR(GL_INVALID_OPERATION);
+        GLERROR_TO_STR(GL_STACK_OVERFLOW);
+        GLERROR_TO_STR(GL_STACK_UNDERFLOW);
+        GLERROR_TO_STR(GL_OUT_OF_MEMORY);
+        GLERROR_TO_STR(GL_INVALID_FRAMEBUFFER_OPERATION_EXT);
+#undef GLERROR_TO_STR
+        default:
+            FIXME("Unrecognied GL error 0x%08x\n", error);
+            return "unrecognized";
+    }
 }
 
 /*****************************************************************************

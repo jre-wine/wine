@@ -480,6 +480,8 @@ static const char* testfiles[]=
     "%s\\test file.shl",
     "%s\\test file.shlfoo",
     "%s\\test file.sfe",
+    "%s\\masked file.shlexec",
+    "%s\\masked",
     NULL
 };
 
@@ -517,6 +519,11 @@ static filename_tests_t filename_tests[]=
     {"QuotedLowerL", "%s\\test file.shlexec",   0x0, 33},
     {"QuotedUpperL", "%s\\test file.shlexec",   0x0, 33},
 
+    /* Test file masked due to space */
+    {NULL,           "%s\\masked file.shlexec",   0x1, 33},
+    /* Test if quoting prevents the masking */
+    {NULL,           "%s\\masked file.shlexec",   0x40, 33},
+
     {NULL, NULL, 0}
 };
 
@@ -551,7 +558,16 @@ static void test_filename(void)
                 c++;
             }
         }
-        rc=shell_execute(test->verb, filename, NULL, NULL);
+        if ((test->todo & 0x40)==0)
+        {
+            rc=shell_execute(test->verb, filename, NULL, NULL);
+        }
+        else
+        {
+            char quoted[MAX_PATH + 2];
+            sprintf(quoted, "\"%s\"", filename);
+            rc=shell_execute(test->verb, quoted, NULL, NULL);
+        }
         if (rc > 32)
             rc=33;
         if ((test->todo & 0x1)==0)

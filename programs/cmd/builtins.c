@@ -239,24 +239,32 @@ void WCMD_create_dir (void) {
  *         non-hidden files
  */
 
-void WCMD_delete (char *command) {
+BOOL WCMD_delete (char *command, BOOL expectDir) {
 
     int   argno         = 0;
     int   argsProcessed = 0;
     char *argN          = command;
+    BOOL  foundAny      = FALSE;
+
+    /* If not recursing, clear error flag */
+    if (expectDir) errorlevel = 0;
 
     /* Loop through all args */
     while (argN) {
       char *thisArg = WCMD_parameter (command, argno++, &argN);
+      char argCopy[MAX_PATH];
+
       if (argN && argN[0] != '/') {
 
         WIN32_FIND_DATA fd;
         HANDLE hff;
         char fpath[MAX_PATH];
         char *p;
+        BOOL handleParm = TRUE;
+        BOOL found = FALSE;
 
-
-        WINE_TRACE("del: Processing arg %s (quals:%s)\n", thisArg, quals);
+        strcpy(argCopy, thisArg);
+        WINE_TRACE("del: Processing arg %s (quals:%s)\n", argCopy, quals);
         argsProcessed++;
 
         /* If filename part of parameter is * or *.*, prompt unless
@@ -269,7 +277,7 @@ void WCMD_delete (char *command) {
           char ext[MAX_PATH];
 
           /* Convert path into actual directory spec */
-          GetFullPathName (thisArg, sizeof(fpath), fpath, NULL);
+          GetFullPathName (argCopy, sizeof(fpath), fpath, NULL);
           WCMD_splitpath(fpath, drive, dir, fname, ext);
 
           /* Only prompt for * and *.*, not *a, a*, *.a* etc */
@@ -277,6 +285,9 @@ void WCMD_delete (char *command) {
               (*ext == 0x00 || (strcmp(ext, ".*") == 0))) {
             BOOL  ok;
             char  question[MAXSTRING];
+
+            /* Note: Flag as found, to avoid file not found message */
+            found = TRUE;
 
             /* Ask for confirmation */
             sprintf(question, "%s, ", fpath);
@@ -287,25 +298,28 @@ void WCMD_delete (char *command) {
           }
         }
 
-        hff = FindFirstFile (thisArg, &fd);
+        /* First, try to delete in the current directory */
+        hff = FindFirstFile (argCopy, &fd);
         if (hff == INVALID_HANDLE_VALUE) {
-          WCMD_output ("%s :File Not Found\n", thisArg);
-          continue;
+          handleParm = FALSE;
+        } else {
+          found = TRUE;
         }
+
         /* Support del <dirname> by just deleting all files dirname\* */
-        if ((strchr(thisArg,'*') == NULL) && (strchr(thisArg,'?') == NULL)
+        if (handleParm && (strchr(argCopy,'*') == NULL) && (strchr(argCopy,'?') == NULL)
 		&& (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
           char modifiedParm[MAX_PATH];
-          strcpy(modifiedParm, thisArg);
+          strcpy(modifiedParm, argCopy);
           strcat(modifiedParm, "\\*");
           FindClose(hff);
-          WCMD_delete(modifiedParm);
-          continue;
+          found = TRUE;
+          WCMD_delete(modifiedParm, FALSE);
 
-        } else {
+        } else if (handleParm) {
 
           /* Build the filename to delete as <supplied directory>\<findfirst filename> */
-          strcpy (fpath, thisArg);
+          strcpy (fpath, argCopy);
           do {
             p = strrchr (fpath, '\\');
             if (p != NULL) {
@@ -399,14 +413,100 @@ void WCMD_delete (char *command) {
           } while (FindNextFile(hff, &fd) != 0);
           FindClose (hff);
         }
+
+        /* Now recurse into all subdirectories handling the paramater in the same way */
+        if (strstr (quals, "/S") != NULL) {
+
+          char thisDir[MAX_PATH];
+          int cPos;
+
+          char drive[10];
+          char dir[MAX_PATH];
+          char fname[MAX_PATH];
+          char ext[MAX_PATH];
+
+          /* Convert path into actual directory spec */
+          GetFullPathName (argCopy, sizeof(thisDir), thisDir, NULL);
+          WCMD_splitpath(thisDir, drive, dir, fname, ext);
+
+          strcpy(thisDir, drive);
+          strcat(thisDir, dir);
+          cPos = strlen(thisDir);
+
+          WINE_TRACE("Searching recursively in '%s'\n", thisDir);
+
+          /* Append '*' to the directory */
+          thisDir[cPos] = '*';
+          thisDir[cPos+1] = 0x00;
+
+          hff = FindFirstFile (thisDir, &fd);
+
+          /* Remove residual '*' */
+          thisDir[cPos] = 0x00;
+
+          if (hff != INVALID_HANDLE_VALUE) {
+            DIRECTORY_STACK *allDirs = NULL;
+            DIRECTORY_STACK *lastEntry = NULL;
+
+            do {
+              if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                  (strcmp(fd.cFileName, "..") != 0) &&
+                  (strcmp(fd.cFileName, ".") != 0)) {
+
+                DIRECTORY_STACK *nextDir;
+                char subParm[MAX_PATH];
+
+                /* Work out search parameter in sub dir */
+                strcpy (subParm, thisDir);
+                strcat (subParm, fd.cFileName);
+                strcat (subParm, "\\");
+                strcat (subParm, fname);
+                strcat (subParm, ext);
+                WINE_TRACE("Recursive, Adding to search list '%s'\n", subParm);
+
+                /* Allocate memory, add to list */
+                nextDir = (DIRECTORY_STACK *) HeapAlloc(GetProcessHeap(),0,sizeof(DIRECTORY_STACK));
+                if (allDirs == NULL) allDirs = nextDir;
+                if (lastEntry != NULL) lastEntry->next = nextDir;
+                lastEntry = nextDir;
+                nextDir->next = NULL;
+                nextDir->dirName = HeapAlloc(GetProcessHeap(),0,(strlen(subParm)+1));
+                strcpy(nextDir->dirName, subParm);
+              }
+            } while (FindNextFile(hff, &fd) != 0);
+            FindClose (hff);
+
+            /* Go through each subdir doing the delete */
+            while (allDirs != NULL) {
+              DIRECTORY_STACK *tempDir;
+
+              tempDir = allDirs->next;
+              found |= WCMD_delete (allDirs->dirName, FALSE);
+
+              HeapFree(GetProcessHeap(),0,allDirs->dirName);
+              HeapFree(GetProcessHeap(),0,allDirs);
+              allDirs = tempDir;
+            }
+          }
+        }
+        /* Keep running total to see if any found, and if not recursing
+           issue error message                                         */
+        if (expectDir) {
+          if (!found) {
+            errorlevel = 1;
+            WCMD_output ("%s : File Not Found\n", argCopy);
+          }
+        }
+        foundAny |= found;
       }
     }
 
     /* Handle no valid args */
     if (argsProcessed == 0) {
       WCMD_output ("Argument missing\n");
-      return;
     }
+
+    return foundAny;
 }
 
 /****************************************************************************
@@ -1685,6 +1785,115 @@ void WCMD_type (char *command) {
       }
       CloseHandle (h);
     }
+  }
+}
+
+/****************************************************************************
+ * WCMD_more
+ *
+ * Output either a file or stdin to screen in pages
+ */
+
+void WCMD_more (char *command) {
+
+  int   argno         = 0;
+  char *argN          = command;
+  BOOL  useinput      = FALSE;
+  char  moreStr[100];
+  char  moreStrPage[100];
+  char  buffer[512];
+  DWORD count;
+
+  /* Prefix the NLS more with '-- ', then load the text */
+  errorlevel = 0;
+  strcpy(moreStr, "-- ");
+  LoadString (hinst, WCMD_MORESTR, &moreStr[3], sizeof(moreStr)-3);
+
+  if (param1[0] == 0x00) {
+
+    /* Wine implements pipes via temporary files, and hence stdin is
+       effectively reading from the file. This means the prompts for
+       more are satistied by the next line from the input (file). To
+       avoid this, ensure stdin is to the console                    */
+    HANDLE hstdin  = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE hConIn = CreateFile("CONIN$", GENERIC_READ | GENERIC_WRITE,
+                         FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL, 0);
+    SetStdHandle(STD_INPUT_HANDLE, hConIn);
+
+    /* Warning: No easy way of ending the stream (ctrl+z on windows) so
+       once you get in this bit unless due to a pipe, its going to end badly...  */
+    useinput = TRUE;
+    sprintf(moreStrPage, "%s --\n", moreStr);
+
+    WCMD_enter_paged_mode(moreStrPage);
+    while (ReadFile (hstdin, buffer, sizeof(buffer)-1, &count, NULL)) {
+      if (count == 0) break;	/* ReadFile reports success on EOF! */
+      buffer[count] = 0;
+      WCMD_output_asis (buffer);
+    }
+    WCMD_leave_paged_mode();
+
+    /* Restore stdin to what it was */
+    SetStdHandle(STD_INPUT_HANDLE, hstdin);
+    CloseHandle(hConIn);
+
+    return;
+  } else {
+    BOOL needsPause = FALSE;
+
+    /* Loop through all args */
+    WCMD_enter_paged_mode(moreStrPage);
+
+    while (argN) {
+      char *thisArg = WCMD_parameter (command, argno++, &argN);
+      HANDLE h;
+
+      if (!argN) break;
+
+      if (needsPause) {
+
+        /* Wait */
+        sprintf(moreStrPage, "%s (100%%) --\n", moreStr);
+        WCMD_leave_paged_mode();
+        WCMD_output_asis(moreStrPage);
+        ReadFile (GetStdHandle(STD_INPUT_HANDLE), buffer, sizeof(buffer), &count, NULL);
+        WCMD_enter_paged_mode(moreStrPage);
+      }
+
+
+      WINE_TRACE("more: Processing arg '%s'\n", thisArg);
+      h = CreateFile (thisArg, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL, NULL);
+      if (h == INVALID_HANDLE_VALUE) {
+        WCMD_print_error ();
+        WCMD_output ("%s :Failed\n", thisArg);
+        errorlevel = 1;
+      } else {
+        ULONG64 curPos  = 0;
+        ULONG64 fileLen = 0;
+        WIN32_FILE_ATTRIBUTE_DATA   fileInfo;
+
+        /* Get the file size */
+        GetFileAttributesEx(thisArg, GetFileExInfoStandard, (void*)&fileInfo);
+        fileLen = (((ULONG64)fileInfo.nFileSizeHigh) << 32) + fileInfo.nFileSizeLow;
+
+        needsPause = TRUE;
+        while (ReadFile (h, buffer, sizeof(buffer), &count, NULL)) {
+          if (count == 0) break;	/* ReadFile reports success on EOF! */
+          buffer[count] = 0;
+          curPos += count;
+
+          /* Update % count (would be used in WCMD_output_asis as prompt) */
+          sprintf(moreStrPage, "%s (%2.2d%%) --\n", moreStr, (int) min(99, (curPos * 100)/fileLen));
+
+          WCMD_output_asis (buffer);
+        }
+        CloseHandle (h);
+      }
+    }
+
+    WCMD_leave_paged_mode();
   }
 }
 

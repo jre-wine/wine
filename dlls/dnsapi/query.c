@@ -65,6 +65,17 @@ static CRITICAL_SECTION resolver_cs = { &resolver_cs_debug, -1, 0, 0, 0, 0 };
 #define LOCK_RESOLVER()     do { EnterCriticalSection( &resolver_cs ); } while (0)
 #define UNLOCK_RESOLVER()   do { LeaveCriticalSection( &resolver_cs ); } while (0)
 
+static int resolver_initialised;
+
+/* call res_init() just once because of a bug in Mac OSX 10.4 */
+static void initialise_resolver( void )
+{
+    if (!resolver_initialised)
+    {
+        res_init();
+        resolver_initialised = 1;
+    }
+}
 
 static const char *dns_section_to_str( ns_sect section )
 {
@@ -188,7 +199,7 @@ static char *dns_str_from_rdata( const unsigned char *rdata )
     return str;
 }
 
-static unsigned int dns_get_record_size( ns_rr *rr )
+static unsigned int dns_get_record_size( const ns_rr *rr )
 {
     const unsigned char *pos = rr->rdata;
     unsigned int num = 0, size = sizeof(DNS_RECORDA);
@@ -239,7 +250,7 @@ static unsigned int dns_get_record_size( ns_rr *rr )
     return size;
 }
 
-static DNS_STATUS dns_copy_rdata( ns_msg msg, ns_rr *rr, DNS_RECORDA *r, WORD *dlen )
+static DNS_STATUS dns_copy_rdata( ns_msg msg, const ns_rr *rr, DNS_RECORDA *r, WORD *dlen )
 {
     DNS_STATUS ret = ERROR_SUCCESS;
     const unsigned char *pos = rr->rdata;
@@ -549,7 +560,7 @@ exit:
 /*  The resolver lock must be held and res_init() must have been
  *  called before calling these three functions.
  */
-static DNS_STATUS dns_set_serverlist( PIP4_ARRAY addrs )
+static DNS_STATUS dns_set_serverlist( const IP4_ARRAY *addrs )
 {
     unsigned int i;
 
@@ -699,7 +710,7 @@ DNS_STATUS WINAPI DnsQuery_UTF8( PCSTR name, WORD type, DWORD options, PIP4_ARRA
 
     LOCK_RESOLVER();
 
-    res_init();
+    initialise_resolver();
     _res.options |= dns_map_options( options );
 
     if (servers && (ret = dns_set_serverlist( servers )))
@@ -817,7 +828,7 @@ DNS_STATUS WINAPI DnsQueryConfig( DNS_CONFIG_TYPE config, DWORD flag, PWSTR adap
 #ifdef HAVE_RESOLV
         LOCK_RESOLVER();
 
-        res_init();
+        initialise_resolver();
         ret = dns_get_serverlist( buffer, len );
 
         UNLOCK_RESOLVER();

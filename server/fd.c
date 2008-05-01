@@ -77,6 +77,7 @@
 #include "request.h"
 
 #include "winternl.h"
+#include "winioctl.h"
 
 #if defined(HAVE_SYS_EPOLL_H) && defined(HAVE_EPOLL_CREATE)
 # include <sys/epoll.h>
@@ -169,9 +170,9 @@ struct fd
     unsigned int         options;     /* file options (FILE_DELETE_ON_CLOSE, FILE_SYNCHRONOUS...) */
     unsigned int         sharing;     /* file sharing mode */
     int                  unix_fd;     /* unix file descriptor */
+    unsigned int         no_fd_status;/* status to return when unix_fd is -1 */
     int                  signaled :1; /* is the fd signaled? */
     int                  fs_locks :1; /* can we use filesystem locks for this fd? */
-    int                  unmounted :1;/* has the device been unmounted? */
     int                  poll_index;  /* index of fd in poll array */
     struct async_queue  *read_q;      /* async readers of this fd */
     struct async_queue  *write_q;     /* async writers of this fd */
@@ -321,23 +322,30 @@ static file_pos_t max_unix_offset = OFF_T_MAX;
 struct timeout_user
 {
     struct list           entry;      /* entry in sorted timeout list */
-    struct timeval        when;       /* timeout expiry (absolute time) */
+    timeout_t             when;       /* timeout expiry (absolute time) */
     timeout_callback      callback;   /* callback function */
     void                 *private;    /* callback private data */
 };
 
 static struct list timeout_list = LIST_INIT(timeout_list);   /* sorted timeouts list */
-struct timeval current_time;
+timeout_t current_time;
+
+static inline void set_current_time(void)
+{
+    static const timeout_t ticks_1601_to_1970 = (timeout_t)86400 * (369 * 365 + 89) * TICKS_PER_SEC;
+    struct timeval now;
+    gettimeofday( &now, NULL );
+    current_time = (timeout_t)now.tv_sec * TICKS_PER_SEC + now.tv_usec * 10 + ticks_1601_to_1970;
+}
 
 /* add a timeout user */
-struct timeout_user *add_timeout_user( const struct timeval *when, timeout_callback func,
-                                       void *private )
+struct timeout_user *add_timeout_user( timeout_t when, timeout_callback func, void *private )
 {
     struct timeout_user *user;
     struct list *ptr;
 
     if (!(user = mem_alloc( sizeof(*user) ))) return NULL;
-    user->when     = *when;
+    user->when     = (when > 0) ? when : current_time - when;
     user->callback = func;
     user->private  = private;
 
@@ -346,7 +354,7 @@ struct timeout_user *add_timeout_user( const struct timeval *when, timeout_callb
     LIST_FOR_EACH( ptr, &timeout_list )
     {
         struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
-        if (!time_before( &timeout->when, when )) break;
+        if (timeout->when >= user->when) break;
     }
     list_add_before( ptr, &user->entry );
     return user;
@@ -359,19 +367,39 @@ void remove_timeout_user( struct timeout_user *user )
     free( user );
 }
 
-/* add a timeout in milliseconds to an absolute time */
-void add_timeout( struct timeval *when, int timeout )
+/* return a text description of a timeout for debugging purposes */
+const char *get_timeout_str( timeout_t timeout )
 {
-    if (timeout)
+    static char buffer[64];
+    long secs, nsecs;
+
+    if (!timeout) return "0";
+    if (timeout == TIMEOUT_INFINITE) return "infinite";
+
+    if (timeout < 0)  /* relative */
     {
-        long sec = timeout / 1000;
-        if ((when->tv_usec += (timeout - 1000*sec) * 1000) >= 1000000)
-        {
-            when->tv_usec -= 1000000;
-            when->tv_sec++;
-        }
-        when->tv_sec += sec;
+        secs = -timeout / TICKS_PER_SEC;
+        nsecs = -timeout % TICKS_PER_SEC;
+        sprintf( buffer, "+%ld.%07ld", secs, nsecs );
     }
+    else  /* absolute */
+    {
+        secs = (timeout - current_time) / TICKS_PER_SEC;
+        nsecs = (timeout - current_time) % TICKS_PER_SEC;
+        if (nsecs < 0)
+        {
+            nsecs += TICKS_PER_SEC;
+            secs--;
+        }
+        if (secs >= 0)
+            sprintf( buffer, "%x%08x (+%ld.%07ld)",
+                     (unsigned int)(timeout >> 32), (unsigned int)timeout, secs, nsecs );
+        else
+            sprintf( buffer, "%x%08x (-%ld.%07ld)",
+                     (unsigned int)(timeout >> 32), (unsigned int)timeout,
+                     -(secs + 1), TICKS_PER_SEC - nsecs );
+    }
+    return buffer;
 }
 
 
@@ -466,7 +494,7 @@ static inline void main_loop_epoll(void)
         if (epoll_fd == -1) break;  /* an error occurred with epoll */
 
         ret = epoll_wait( epoll_fd, events, sizeof(events)/sizeof(events[0]), timeout );
-        gettimeofday( &current_time, NULL );
+        set_current_time();
 
         /* put the events into the pollfd array first, like poll does */
         for (i = 0; i < ret; i++)
@@ -572,7 +600,7 @@ static inline void main_loop_epoll(void)
         }
         else ret = kevent( kqueue_fd, NULL, 0, events, sizeof(events)/sizeof(events[0]), NULL );
 
-        gettimeofday( &current_time, NULL );
+        set_current_time();
 
         /* put the events into the pollfd array first, like poll does */
         for (i = 0; i < ret; i++)
@@ -678,7 +706,7 @@ static int get_next_timeout(void)
         {
             struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
 
-            if (!time_before( &current_time, &timeout->when ))
+            if (timeout->when <= current_time)
             {
                 list_remove( &timeout->entry );
                 list_add_tail( &expired_list, &timeout->entry );
@@ -699,8 +727,7 @@ static int get_next_timeout(void)
         if ((ptr = list_head( &timeout_list )) != NULL)
         {
             struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
-            int diff = (timeout->when.tv_sec - current_time.tv_sec) * 1000
-                     + (timeout->when.tv_usec - current_time.tv_usec + 999) / 1000;
+            int diff = (timeout->when - current_time + 9999) / 10000;
             if (diff < 0) diff = 0;
             return diff;
         }
@@ -713,7 +740,8 @@ void main_loop(void)
 {
     int i, ret, timeout;
 
-    gettimeofday( &current_time, NULL );
+    set_current_time();
+    server_start_time = current_time;
 
     main_loop_epoll();
     /* fall through to normal poll loop */
@@ -725,7 +753,7 @@ void main_loop(void)
         if (!active_users) break;  /* last user removed by a timeout */
 
         ret = poll( pollfd, nb_users, timeout );
-        gettimeofday( &current_time, NULL );
+        set_current_time();
 
         if (ret > 0)
         {
@@ -1340,7 +1368,7 @@ static inline void unmount_fd( struct fd *fd )
     if (fd->unix_fd != -1) close( fd->unix_fd );
 
     fd->unix_fd = -1;
-    fd->unmounted = 1;
+    fd->no_fd_status = STATUS_VOLUME_DISMOUNTED;
     fd->closed->unix_fd = -1;
     fd->closed->unlink[0] = 0;
 
@@ -1365,7 +1393,6 @@ static struct fd *alloc_fd_object(void)
     fd->unix_fd    = -1;
     fd->signaled   = 1;
     fd->fs_locks   = 1;
-    fd->unmounted  = 0;
     fd->poll_index = -1;
     fd->read_q     = NULL;
     fd->write_q    = NULL;
@@ -1397,14 +1424,20 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     fd->unix_fd    = -1;
     fd->signaled   = 0;
     fd->fs_locks   = 0;
-    fd->unmounted  = 0;
     fd->poll_index = -1;
     fd->read_q     = NULL;
     fd->write_q    = NULL;
     fd->wait_q     = NULL;
+    fd->no_fd_status = STATUS_BAD_DEVICE_TYPE;
     list_init( &fd->inode_entry );
     list_init( &fd->locks );
     return fd;
+}
+
+/* set the status to return when the fd has no associated unix fd */
+void set_no_fd_status( struct fd *fd, unsigned int status )
+{
+    fd->no_fd_status = status;
 }
 
 /* check if the desired access is possible without violating */
@@ -1604,11 +1637,7 @@ unsigned int get_fd_options( struct fd *fd )
 /* retrieve the unix fd for an object */
 int get_unix_fd( struct fd *fd )
 {
-    if (fd->unix_fd == -1)
-    {
-        if (fd->unmounted) set_error( STATUS_VOLUME_DISMOUNTED );
-        else set_error( STATUS_BAD_DEVICE_TYPE );
-    }
+    if (fd->unix_fd == -1) set_error( fd->no_fd_status );
     return fd->unix_fd;
 }
 
@@ -1706,15 +1735,16 @@ struct async *fd_queue_async( struct fd *fd, const async_data_t *data, int type,
         queue = fd->wait_q;
         break;
     default:
+        queue = NULL;
         assert(0);
     }
 
-    if ((async = create_async( current, queue, data )))
+    if ((async = create_async( current, queue, data )) && type != ASYNC_TYPE_WAIT)
     {
         if (!fd->inode)
             set_fd_events( fd, fd->fd_ops->get_poll_events( fd ) );
         else  /* regular files are always ready for read and write */
-            if (type != ASYNC_TYPE_WAIT) async_wake_up( queue, STATUS_ALERTED );
+            async_wake_up( queue, STATUS_ALERTED );
     }
     return async;
 }
@@ -1826,6 +1856,21 @@ static void unmount_device( struct fd *device_fd )
     release_object( device );
 }
 
+/* default ioctl() routine */
+void default_fd_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async,
+                       const void *data, data_size_t size )
+{
+    switch(code)
+    {
+    case FSCTL_DISMOUNT_VOLUME:
+        unmount_device( fd );
+        break;
+    default:
+        set_error( STATUS_NOT_SUPPORTED );
+        break;
+    }
+}
+
 /* same as get_handle_obj but retrieve the struct fd associated to the object */
 static struct fd *get_handle_fd_obj( struct process *process, obj_handle_t handle,
                                      unsigned int access )
@@ -1889,31 +1934,28 @@ DECL_HANDLER(get_handle_fd)
 
     if ((fd = get_handle_fd_obj( current->process, req->handle, 0 )))
     {
-        reply->type = fd->fd_ops->get_fd_type( fd );
-        if (reply->type != FD_TYPE_INVALID)
+        int unix_fd = get_unix_fd( fd );
+        if (unix_fd != -1)
         {
-            int unix_fd = get_unix_fd( fd );
-            if (unix_fd != -1)
-            {
-                send_client_fd( current->process, unix_fd, req->handle );
-                reply->removable = is_fd_removable(fd);
-                reply->options = fd->options;
-                reply->access = get_handle_access( current->process, req->handle );
-            }
+            send_client_fd( current->process, unix_fd, req->handle );
+            reply->type = fd->fd_ops->get_fd_type( fd );
+            reply->removable = is_fd_removable(fd);
+            reply->options = fd->options;
+            reply->access = get_handle_access( current->process, req->handle );
         }
-        else set_error( STATUS_OBJECT_TYPE_MISMATCH );
         release_object( fd );
     }
 }
 
-/* get ready to unmount a Unix device */
-DECL_HANDLER(unmount_device)
+/* perform an ioctl on a file */
+DECL_HANDLER(ioctl)
 {
-    struct fd *fd;
+    unsigned int access = (req->code >> 14) & (FILE_READ_DATA|FILE_WRITE_DATA);
+    struct fd *fd = get_handle_fd_obj( current->process, req->handle, access );
 
-    if ((fd = get_handle_fd_obj( current->process, req->handle, 0 )))
+    if (fd)
     {
-        unmount_device( fd );
+        fd->fd_ops->ioctl( fd, req->code, &req->async, get_req_data(), get_req_data_size() );
         release_object( fd );
     }
 }
@@ -1939,7 +1981,7 @@ DECL_HANDLER(register_async)
 
     if ((fd = get_handle_fd_obj( current->process, req->handle, access )))
     {
-        fd->fd_ops->queue_async( fd, &req->async, req->type, req->count );
+        if (get_unix_fd( fd ) != -1) fd->fd_ops->queue_async( fd, &req->async, req->type, req->count );
         release_object( fd );
     }
 }
@@ -1948,15 +1990,10 @@ DECL_HANDLER(register_async)
 DECL_HANDLER(cancel_async)
 {
     struct fd *fd = get_handle_fd_obj( current->process, req->handle, 0 );
+
     if (fd)
     {
-        /* Note: we don't kill the queued APC_ASYNC_IO on this thread because
-         * NtCancelIoFile() will force the pending APC to be run. Since, 
-         * Windows only guarantees that the current thread will have no async 
-         * operation on the current fd when NtCancelIoFile returns, this shall
-         * do the work.
-         */
-        fd->fd_ops->cancel_async( fd );
+        if (get_unix_fd( fd ) != -1) fd->fd_ops->cancel_async( fd );
         release_object( fd );
-    }        
+    }
 }

@@ -1117,6 +1117,7 @@ static UINT     WINAPI IWineD3DImpl_GetAdapterModeCount(IWineD3D *iface, UINT Ad
                 switch (Format)
                 {
                     case WINED3DFMT_UNKNOWN:
+                        /* This is for D3D8, do not enumerate P8 here */
                         if (DevModeW.dmBitsPerPel == 32 ||
                             DevModeW.dmBitsPerPel == 16) i++;
                         break;
@@ -1125,6 +1126,9 @@ static UINT     WINAPI IWineD3DImpl_GetAdapterModeCount(IWineD3D *iface, UINT Ad
                         break;
                     case WINED3DFMT_R5G6B5:
                         if (DevModeW.dmBitsPerPel == 16) i++;
+                        break;
+                    case WINED3DFMT_P8:
+                        if (DevModeW.dmBitsPerPel == 8) i++;
                         break;
                     default:
                         /* Skip other modes as they do not match the requested format */
@@ -1169,6 +1173,7 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
             switch (Format)
             {
                 case WINED3DFMT_UNKNOWN:
+                    /* This is D3D8. Do not enumerate P8 here */
                     if (DevModeW.dmBitsPerPel == 32 ||
                         DevModeW.dmBitsPerPel == 16) i++;
                     break;
@@ -1177,6 +1182,9 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
                     break;
                 case WINED3DFMT_R5G6B5:
                     if (DevModeW.dmBitsPerPel == 16) i++;
+                    break;
+                case WINED3DFMT_P8:
+                    if (DevModeW.dmBitsPerPel == 8) i++;
                     break;
                 default:
                     /* Modes that don't match what we support can get an early-out */
@@ -1203,6 +1211,9 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
             {
                 switch (DevModeW.dmBitsPerPel)
                 {
+                    case 8:
+                        pMode->Format = WINED3DFMT_P8;
+                        break;
                     case 16:
                         pMode->Format = WINED3DFMT_R5G6B5;
                         break;
@@ -1315,38 +1326,20 @@ static HRESULT WINAPI IWineD3DImpl_GetAdapterIdentifier(IWineD3D *iface, UINT Ad
             isGLInfoValid = IWineD3DImpl_FillGLCaps(iface, IWineD3DImpl_GetAdapterDisplay(iface, Adapter));
         }
 
-        /* If it worked, return the information requested */
-        if (isGLInfoValid) {
-          TRACE_(d3d_caps)("device/Vendor Name and Version detection using FillGLCaps\n");
-          strcpy(pIdentifier->Driver, "Display");
-          strcpy(pIdentifier->Description, "Direct3D HAL");
+        /* Return the information requested */
+        TRACE_(d3d_caps)("device/Vendor Name and Version detection using FillGLCaps\n");
+        strcpy(pIdentifier->Driver, "Display");
+        strcpy(pIdentifier->Description, "Direct3D HAL");
 
-          /* Note dx8 doesn't supply a DeviceName */
-          if (NULL != pIdentifier->DeviceName) strcpy(pIdentifier->DeviceName, "\\\\.\\DISPLAY"); /* FIXME: May depend on desktop? */
-          /* Current Windows drivers have versions like 6.14.... (some older have an earlier version) */
-          pIdentifier->DriverVersion->u.HighPart = MAKEDWORD_VERSION(6, 14);
-          pIdentifier->DriverVersion->u.LowPart = This->gl_info.gl_driver_version;
-          *(pIdentifier->VendorId) = This->gl_info.gl_vendor;
-          *(pIdentifier->DeviceId) = This->gl_info.gl_card;
-          *(pIdentifier->SubSysId) = 0;
-          *(pIdentifier->Revision) = 0;
-
-        } else {
-
-          /* If it failed, return dummy values from an NVidia driver */
-          WARN_(d3d_caps)("Cannot get GLCaps for device/Vendor Name and Version detection using FillGLCaps, currently using NVIDIA identifiers\n");
-          strcpy(pIdentifier->Driver, "Display");
-          strcpy(pIdentifier->Description, "Direct3D HAL");
-          if (NULL != pIdentifier->DeviceName) strcpy(pIdentifier->DeviceName, "\\\\.\\DISPLAY"); /* FIXME: May depend on desktop? */
-          /* Current Windows Nvidia drivers have versions like e.g. 6.14.10.5672 */
-          pIdentifier->DriverVersion->u.HighPart = MAKEDWORD_VERSION(6, 14);
-          /* 71.74 is a current Linux Nvidia driver version */
-          pIdentifier->DriverVersion->u.LowPart = MAKEDWORD_VERSION(10, (71*100+74));
-          *(pIdentifier->VendorId) = VENDOR_NVIDIA;
-          *(pIdentifier->DeviceId) = CARD_NVIDIA_GEFORCE4_TI4200;
-          *(pIdentifier->SubSysId) = 0;
-          *(pIdentifier->Revision) = 0;
-        }
+        /* Note dx8 doesn't supply a DeviceName */
+        if (NULL != pIdentifier->DeviceName) strcpy(pIdentifier->DeviceName, "\\\\.\\DISPLAY"); /* FIXME: May depend on desktop? */
+        /* Current Windows drivers have versions like 6.14.... (some older have an earlier version) */
+        pIdentifier->DriverVersion->u.HighPart = MAKEDWORD_VERSION(6, 14);
+        pIdentifier->DriverVersion->u.LowPart = This->gl_info.gl_driver_version;
+        *(pIdentifier->VendorId) = This->gl_info.gl_vendor;
+        *(pIdentifier->DeviceId) = This->gl_info.gl_card;
+        *(pIdentifier->SubSysId) = 0;
+        *(pIdentifier->Revision) = 0;
 
         /*FIXME: memcpy(&pIdentifier->DeviceIdentifier, ??, sizeof(??GUID)); */
         if (Flags & WINED3DENUM_NO_WHQL_LEVEL) {
@@ -1825,7 +1818,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          *
          * With Shader Model 3.0 capable cards Instancing 'just works' in Windows.
          */
-        case MAKEFOURCC('I','N','S','T'):
+        case WINEMAKEFOURCC('I','N','S','T'):
             TRACE("ATI Instancing check hack\n");
             if(GL_SUPPORT(ARB_VERTEX_PROGRAM) || GL_SUPPORT(ARB_VERTEX_SHADER)) {
                 TRACE_(d3d_caps)("[OK]\n");

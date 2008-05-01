@@ -430,13 +430,16 @@ static NTSTATUS get_io_timeouts( HANDLE handle, enum server_fd_type type, ULONG 
             {
                 req->handle = handle;
                 req->flags = 0;
-                if (!(status = wine_server_call( req ))) timeouts->total = reply->read_timeout;
+                if (!(status = wine_server_call( req )) &&
+                    reply->read_timeout != TIMEOUT_INFINITE)
+                    timeouts->total = reply->read_timeout / -10000;
             }
             SERVER_END_REQ;
         }
         break;
     case FD_TYPE_SOCKET:
     case FD_TYPE_PIPE:
+    case FD_TYPE_CHAR:
         if (is_read) timeouts->interval = 0;  /* return as soon as we got something */
         break;
     default:
@@ -489,6 +492,7 @@ static NTSTATUS get_io_avail_mode( HANDLE handle, enum server_fd_type type, BOOL
     case FD_TYPE_MAILSLOT:
     case FD_TYPE_SOCKET:
     case FD_TYPE_PIPE:
+    case FD_TYPE_CHAR:
         *avail_mode = TRUE;
         break;
     default:
@@ -913,6 +917,48 @@ done:
     return status;
 }
 
+
+/* callback for ioctl async I/O completion */
+static NTSTATUS ioctl_completion( void *arg, IO_STATUS_BLOCK *io, NTSTATUS status )
+{
+    io->u.Status = status;
+    return status;
+}
+
+/* do a ioctl call through the server */
+static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
+                                   PIO_APC_ROUTINE apc, PVOID apc_context,
+                                   IO_STATUS_BLOCK *io, ULONG code,
+                                   PVOID in_buffer, ULONG in_size,
+                                   PVOID out_buffer, ULONG out_size )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( ioctl )
+    {
+        req->handle         = handle;
+        req->code           = code;
+        req->async.callback = ioctl_completion;
+        req->async.iosb     = io;
+        req->async.arg      = NULL;
+        req->async.apc      = apc;
+        req->async.apc_arg  = apc_context;
+        req->async.event    = event;
+        wine_server_add_data( req, in_buffer, in_size );
+        wine_server_set_reply( req, out_buffer, out_size );
+        if (!(status = wine_server_call( req )))
+            io->Information = wine_server_reply_size( reply );
+    }
+    SERVER_END_REQ;
+
+    if (status == STATUS_NOT_SUPPORTED)
+        FIXME("Unsupported ioctl %x (device=%x access=%x func=%x method=%x)\n",
+              code, code >> 16, (code >> 14) & 3, (code >> 2) & 0xfff, code & 3);
+
+    return status;
+}
+
+
 /**************************************************************************
  *		NtDeviceIoControlFile			[NTDLL.@]
  *		ZwDeviceIoControlFile			[NTDLL.@]
@@ -942,6 +988,7 @@ NTSTATUS WINAPI NtDeviceIoControlFile(HANDLE handle, HANDLE event,
                                       PVOID out_buffer, ULONG out_size)
 {
     ULONG device = (code >> 16);
+    NTSTATUS status;
 
     TRACE("(%p,%p,%p,%p,%p,0x%08x,%p,0x%08x,%p,0x%08x)\n",
           handle, event, apc, apc_context, io, code,
@@ -954,35 +1001,26 @@ NTSTATUS WINAPI NtDeviceIoControlFile(HANDLE handle, HANDLE event,
     case FILE_DEVICE_DVD:
     case FILE_DEVICE_CONTROLLER:
     case FILE_DEVICE_MASS_STORAGE:
-        io->u.Status = CDROM_DeviceIoControl(handle, event, apc, apc_context, io, code,
-                                             in_buffer, in_size, out_buffer, out_size);
+        status = CDROM_DeviceIoControl(handle, event, apc, apc_context, io, code,
+                                       in_buffer, in_size, out_buffer, out_size);
         break;
     case FILE_DEVICE_SERIAL_PORT:
-        io->u.Status = COMM_DeviceIoControl(handle, event, apc, apc_context, io, code,
-                                            in_buffer, in_size, out_buffer, out_size);
+        status = COMM_DeviceIoControl(handle, event, apc, apc_context, io, code,
+                                      in_buffer, in_size, out_buffer, out_size);
         break;
     case FILE_DEVICE_TAPE:
-        io->u.Status = TAPE_DeviceIoControl(handle, event, apc, apc_context, io, code,
-                                            in_buffer, in_size, out_buffer, out_size);
+        status = TAPE_DeviceIoControl(handle, event, apc, apc_context, io, code,
+                                      in_buffer, in_size, out_buffer, out_size);
         break;
     default:
-        FIXME("Unsupported ioctl %x (device=%x access=%x func=%x method=%x)\n",
-              code, device, (code >> 14) & 3, (code >> 2) & 0xfff, code & 3);
-        io->u.Status = STATUS_NOT_SUPPORTED;
+        status = server_ioctl_file( handle, event, apc, apc_context, io, code,
+                                    in_buffer, in_size, out_buffer, out_size );
         break;
     }
-    return io->u.Status;
-}
-
-/***********************************************************************
- *           pipe_completion_wait   (Internal)
- */
-static NTSTATUS pipe_completion_wait(void *arg, PIO_STATUS_BLOCK iosb, NTSTATUS status)
-{
-    TRACE("for %p, status=%08x\n", iosb, status);
-    iosb->u.Status = status;
+    if (status != STATUS_PENDING) io->u.Status = status;
     return status;
 }
+
 
 /**************************************************************************
  *              NtFsControlFile                 [NTDLL.@]
@@ -1021,65 +1059,24 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
     switch(code)
     {
     case FSCTL_DISMOUNT_VOLUME:
-        status = DIR_unmount_device( handle );
+        status = server_ioctl_file( handle, event, apc, apc_context, io, code,
+                                    in_buffer, in_size, out_buffer, out_size );
+        if (!status) status = DIR_unmount_device( handle );
         break;
 
     case FSCTL_PIPE_LISTEN:
-        {
-            HANDLE internal_event = 0;
-
-            if(!event && !apc)
-            {
-                status = NtCreateEvent(&internal_event, EVENT_ALL_ACCESS, NULL, FALSE, FALSE);
-                if (status != STATUS_SUCCESS) break;
-            }
-            SERVER_START_REQ(connect_named_pipe)
-            {
-                req->handle  = handle;
-                req->async.callback = pipe_completion_wait;
-                req->async.iosb     = io;
-                req->async.arg      = NULL;
-                req->async.apc      = apc;
-                req->async.apc_arg  = apc_context;
-                req->async.event    = event ? event : internal_event;
-                status = wine_server_call(req);
-            }
-            SERVER_END_REQ;
-
-            if (internal_event && status == STATUS_PENDING)
-            {
-                while (NtWaitForSingleObject(internal_event, TRUE, NULL) == STATUS_USER_APC) /*nothing*/ ;
-                status = io->u.Status;
-            }
-            if (internal_event) NtClose(internal_event);
-        }
-        break;
-
     case FSCTL_PIPE_WAIT:
         {
             HANDLE internal_event = 0;
-            FILE_PIPE_WAIT_FOR_BUFFER *buff = in_buffer;
 
             if(!event && !apc)
             {
                 status = NtCreateEvent(&internal_event, EVENT_ALL_ACCESS, NULL, FALSE, FALSE);
                 if (status != STATUS_SUCCESS) break;
+                event = internal_event;
             }
-            SERVER_START_REQ(wait_named_pipe)
-            {
-                req->handle = handle;
-                req->timeout = buff->TimeoutSpecified ? buff->Timeout.QuadPart / -10000L
-                               : NMPWAIT_USE_DEFAULT_WAIT;
-                req->async.callback = pipe_completion_wait;
-                req->async.iosb     = io;
-                req->async.arg      = NULL;
-                req->async.apc      = apc;
-                req->async.apc_arg  = apc_context;
-                req->async.event    = event ? event : internal_event;
-                wine_server_add_data( req, buff->Name, buff->NameLength );
-                status = wine_server_call( req );
-            }
-            SERVER_END_REQ;
+            status = server_ioctl_file( handle, event, apc, apc_context, io, code,
+                                        in_buffer, in_size, out_buffer, out_size );
 
             if (internal_event && status == STATUS_PENDING)
             {
@@ -1149,17 +1146,13 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
         break;
 
     case FSCTL_PIPE_DISCONNECT:
-        SERVER_START_REQ(disconnect_named_pipe)
+        status = server_ioctl_file( handle, event, apc, apc_context, io, code,
+                                    in_buffer, in_size, out_buffer, out_size );
+        if (!status)
         {
-            req->handle = handle;
-            status = wine_server_call(req);
-            if (!status)
-            {
-                int fd = server_remove_fd_from_cache( handle );
-                if (fd != -1) close( fd );
-            }
+            int fd = server_remove_fd_from_cache( handle );
+            if (fd != -1) close( fd );
         }
-        SERVER_END_REQ;
         break;
 
     case FSCTL_LOCK_VOLUME:
@@ -1170,9 +1163,8 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
         break;
 
     default:
-        FIXME("Unsupported fsctl %x (device=%x access=%x func=%x method=%x)\n",
-              code, code >> 16, (code >> 14) & 3, (code >> 2) & 0xfff, code & 3);
-        status = STATUS_NOT_SUPPORTED;
+        status = server_ioctl_file( handle, event, apc, apc_context, io, code,
+                                    in_buffer, in_size, out_buffer, out_size );
         break;
     }
 
@@ -1427,7 +1419,7 @@ NTSTATUS WINAPI NtQueryInformationFile( HANDLE hFile, PIO_STATUS_BLOCK io,
                     info->MailslotQuota = 0;
                     info->NextMessageSize = 0;
                     info->MessagesAvailable = 0;
-                    info->ReadTimeout.QuadPart = reply->read_timeout * -10000;
+                    info->ReadTimeout.QuadPart = reply->read_timeout;
                 }
             }
             SERVER_END_REQ;
@@ -1620,7 +1612,7 @@ NTSTATUS WINAPI NtSetInformationFile(HANDLE handle, PIO_STATUS_BLOCK io,
             {
                 req->handle = handle;
                 req->flags = MAILSLOT_SET_READ_TIMEOUT;
-                req->read_timeout = info->ReadTimeout.QuadPart / -10000;
+                req->read_timeout = info->ReadTimeout.QuadPart;
                 io->u.Status = wine_server_call( req );
             }
             SERVER_END_REQ;
@@ -2146,8 +2138,8 @@ NTSTATUS WINAPI NtCreateNamedPipeFile( PHANDLE handle, ULONG access,
           options, pipe_type, read_mode, completion_mode, max_inst, inbound_quota,
           outbound_quota, timeout);
 
-    /* assume we only get relative timeout, and storable in a DWORD as ms */
-    if (timeout->QuadPart > 0 || (timeout->QuadPart / -10000) >> 32)
+    /* assume we only get relative timeout */
+    if (timeout->QuadPart > 0)
         FIXME("Wrong time %s\n", wine_dbgstr_longlong(timeout->QuadPart));
 
     SERVER_START_REQ( create_named_pipe )
@@ -2163,7 +2155,7 @@ NTSTATUS WINAPI NtCreateNamedPipeFile( PHANDLE handle, ULONG access,
         req->maxinstances = max_inst;
         req->outsize = outbound_quota;
         req->insize  = inbound_quota;
-        req->timeout = timeout->QuadPart / -10000;
+        req->timeout = timeout->QuadPart;
         wine_server_add_data( req, attr->ObjectName->Buffer,
                               attr->ObjectName->Length );
         status = wine_server_call( req );
@@ -2266,7 +2258,7 @@ NTSTATUS WINAPI NtCreateMailslotFile(PHANDLE pHandle, ULONG DesiredAccess,
         req->attributes = attr->Attributes;
         req->rootdir = attr->RootDirectory;
         req->max_msgsize = MaxMessageSize;
-        req->read_timeout = (timeout.QuadPart <= 0) ? timeout.QuadPart / -10000 : -1;
+        req->read_timeout = timeout.QuadPart;
         wine_server_add_data( req, attr->ObjectName->Buffer,
                               attr->ObjectName->Length );
         ret = wine_server_call( req );

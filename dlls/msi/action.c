@@ -584,6 +584,30 @@ static UINT msi_apply_transforms( MSIPACKAGE *package )
     return r;
 }
 
+BOOL ui_sequence_exists( MSIPACKAGE *package )
+{
+    MSIQUERY *view;
+    UINT rc;
+
+    static const WCHAR ExecSeqQuery [] =
+        {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
+         '`','I','n','s','t','a','l','l',
+         'U','I','S','e','q','u','e','n','c','e','`',
+         ' ','W','H','E','R','E',' ',
+         '`','S','e','q','u','e','n','c','e','`',' ',
+         '>',' ','0',' ','O','R','D','E','R',' ','B','Y',' ',
+         '`','S','e','q','u','e','n','c','e','`',0};
+
+    rc = MSI_DatabaseOpenViewW(package->db, ExecSeqQuery, &view);
+    if (rc == ERROR_SUCCESS)
+    {
+        msiobj_release(&view->hdr);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 /****************************************************
  * TOP level entry points 
  *****************************************************/
@@ -592,7 +616,7 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
                          LPCWSTR szCommandLine )
 {
     UINT rc;
-    BOOL ui = FALSE;
+    BOOL ui = FALSE, ui_exists;
     static const WCHAR szUILevel[] = {'U','I','L','e','v','e','l',0};
     static const WCHAR szAction[] = {'A','C','T','I','O','N',0};
     static const WCHAR szInstall[] = {'I','N','S','T','A','L','L',0};
@@ -647,10 +671,11 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
         package->script->InWhatSequence |= SEQUENCE_UI;
         rc = ACTION_ProcessUISequence(package);
         ui = TRUE;
-        if (rc == ERROR_SUCCESS)
+        ui_exists = ui_sequence_exists(package);
+        if (rc == ERROR_SUCCESS || !ui_exists)
         {
             package->script->InWhatSequence |= SEQUENCE_EXEC;
-            rc = ACTION_ProcessExecSequence(package,TRUE);
+            rc = ACTION_ProcessExecSequence(package,ui_exists);
         }
     }
     else
@@ -3473,8 +3498,8 @@ static UINT ITERATE_SelfRegModules(MSIRECORD *row, LPVOID param)
     uipath = strdupW( file->TargetPath );
     p = strrchrW(uipath,'\\');
     if (p)
-        p[1]=0;
-    MSI_RecordSetStringW( uirow, 1, &p[2] );
+        p[0]=0;
+    MSI_RecordSetStringW( uirow, 1, &p[1] );
     MSI_RecordSetStringW( uirow, 2, uipath);
     ui_actiondata( package, szSelfRegModules, uirow);
     msiobj_release( &uirow->hdr );
@@ -3654,14 +3679,15 @@ static UINT msi_make_package_local( MSIPACKAGE *package, HKEY hkey )
 
     msiFilePath = msi_dup_property( package, szOriginalDatabase );
     r = CopyFileW( msiFilePath, packagefile, FALSE);
-    msi_free( msiFilePath );
 
     if (!r)
     {
         ERR("Unable to copy package (%s -> %s) (error %d)\n",
             debugstr_w(msiFilePath), debugstr_w(packagefile), GetLastError());
+        msi_free( msiFilePath );
         return ERROR_FUNCTION_FAILED;
     }
+    msi_free( msiFilePath );
 
     /* FIXME: maybe set this key in ACTION_RegisterProduct instead */
     msi_reg_set_val_str( hkey, INSTALLPROPERTY_LOCALPACKAGEW, packagefile );
@@ -4397,20 +4423,140 @@ static UINT ITERATE_InstallODBCDriver( MSIRECORD *rec, LPVOID param )
     return r;
 }
 
+static UINT ITERATE_InstallODBCTranslator( MSIRECORD *rec, LPVOID param )
+{
+    MSIPACKAGE *package = (MSIPACKAGE*)param;
+    LPWSTR translator, translator_path, ptr;
+    WCHAR outpath[MAX_PATH];
+    MSIFILE *translator_file, *setup_file;
+    LPCWSTR desc;
+    DWORD len, usage;
+    UINT r = ERROR_SUCCESS;
+
+    static const WCHAR translator_fmt[] = {
+        'T','r','a','n','s','l','a','t','o','r','=','%','s',0};
+    static const WCHAR setup_fmt[] = {
+        'S','e','t','u','p','=','%','s',0};
+
+    desc = MSI_RecordGetString(rec, 3);
+
+    translator_file = msi_find_file(package, MSI_RecordGetString(rec, 4));
+    setup_file = msi_find_file(package, MSI_RecordGetString(rec, 5));
+
+    if (!translator_file || !setup_file)
+    {
+        ERR("ODBC Translator entry not found!\n");
+        return ERROR_FUNCTION_FAILED;
+    }
+
+    len = lstrlenW(desc) + lstrlenW(translator_fmt) + lstrlenW(translator_file->FileName) +
+          lstrlenW(setup_fmt) + lstrlenW(setup_file->FileName) + 1;
+    translator = msi_alloc(len * sizeof(WCHAR));
+    if (!translator)
+        return ERROR_OUTOFMEMORY;
+
+    ptr = translator;
+    lstrcpyW(ptr, desc);
+    ptr += lstrlenW(ptr) + 1;
+
+    sprintfW(ptr, translator_fmt, translator_file->FileName);
+    ptr += lstrlenW(ptr) + 1;
+
+    sprintfW(ptr, setup_fmt, setup_file->FileName);
+    ptr += lstrlenW(ptr) + 1;
+    *ptr = '\0';
+
+    translator_path = strdupW(translator_file->TargetPath);
+    ptr = strrchrW(translator_path, '\\');
+    if (ptr) *ptr = '\0';
+
+    if (!SQLInstallTranslatorExW(translator, translator_path, outpath, MAX_PATH,
+                                 NULL, ODBC_INSTALL_COMPLETE, &usage))
+    {
+        ERR("Failed to install SQL translator!\n");
+        r = ERROR_FUNCTION_FAILED;
+    }
+
+    msi_free(translator);
+    msi_free(translator_path);
+
+    return r;
+}
+
+static UINT ITERATE_InstallODBCDataSource( MSIRECORD *rec, LPVOID param )
+{
+    LPWSTR attrs;
+    LPCWSTR desc, driver;
+    WORD request = ODBC_ADD_SYS_DSN;
+    INT registration;
+    DWORD len;
+    UINT r = ERROR_SUCCESS;
+
+    static const WCHAR attrs_fmt[] = {
+        'D','S','N','=','%','s',0 };
+
+    desc = MSI_RecordGetString(rec, 3);
+    driver = MSI_RecordGetString(rec, 4);
+    registration = MSI_RecordGetInteger(rec, 5);
+
+    if (registration == msidbODBCDataSourceRegistrationPerMachine) request = ODBC_ADD_SYS_DSN;
+    else if (registration == msidbODBCDataSourceRegistrationPerUser) request = ODBC_ADD_DSN;
+
+    len = lstrlenW(attrs_fmt) + lstrlenW(desc) + 1 + 1;
+    attrs = msi_alloc(len * sizeof(WCHAR));
+    if (!attrs)
+        return ERROR_OUTOFMEMORY;
+
+    sprintfW(attrs, attrs_fmt, desc);
+    attrs[len - 1] = '\0';
+
+    if (!SQLConfigDataSourceW(NULL, request, driver, attrs))
+    {
+        ERR("Failed to install SQL data source!\n");
+        r = ERROR_FUNCTION_FAILED;
+    }
+
+    msi_free(attrs);
+
+    return r;
+}
+
 static UINT ACTION_InstallODBC( MSIPACKAGE *package )
 {
     UINT rc;
     MSIQUERY *view;
 
-    static const WCHAR query[] = {
+    static const WCHAR driver_query[] = {
         'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
         'O','D','B','C','D','r','i','v','e','r',0 };
 
-    rc = MSI_DatabaseOpenViewW(package->db, query, &view);
+    static const WCHAR translator_query[] = {
+        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
+        'O','D','B','C','T','r','a','n','s','l','a','t','o','r',0 };
+
+    static const WCHAR source_query[] = {
+        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
+        'O','D','B','C','D','a','t','a','S','o','u','r','c','e',0 };
+
+    rc = MSI_DatabaseOpenViewW(package->db, driver_query, &view);
     if (rc != ERROR_SUCCESS)
         return ERROR_SUCCESS;
 
     rc = MSI_IterateRecords(view, NULL, ITERATE_InstallODBCDriver, package);
+    msiobj_release(&view->hdr);
+
+    rc = MSI_DatabaseOpenViewW(package->db, translator_query, &view);
+    if (rc != ERROR_SUCCESS)
+        return ERROR_SUCCESS;
+
+    rc = MSI_IterateRecords(view, NULL, ITERATE_InstallODBCTranslator, package);
+    msiobj_release(&view->hdr);
+
+    rc = MSI_DatabaseOpenViewW(package->db, source_query, &view);
+    if (rc != ERROR_SUCCESS)
+        return ERROR_SUCCESS;
+
+    rc = MSI_IterateRecords(view, NULL, ITERATE_InstallODBCDataSource, package);
     msiobj_release(&view->hdr);
 
     return rc;

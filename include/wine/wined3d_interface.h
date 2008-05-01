@@ -28,9 +28,11 @@
 # error You must include config.h to use this header
 #endif
 
-#if !defined( __WINE_DDRAW_H)
-#error You must include ddraw.h to use this header
-#endif
+#define COM_NO_WINDOWS_H
+#include <objbase.h>
+
+/* Stupid DDraw Struct references surfaces */
+struct IWineD3DSurface;
 
 #include "wined3d_types.h"
 /*****************************************************************
@@ -71,6 +73,12 @@
 #define WINED3DERR_INVALIDCALL                      MAKE_WINED3DHRESULT(2156)
 #define WINED3DERR_DRIVERINVALIDCALL                MAKE_WINED3DHRESULT(2157)
 #define WINED3DERR_WASSTILLDRAWING                  MAKE_WINED3DHRESULT(540)
+#define WINEDDERR_NOTAOVERLAYSURFACE                MAKE_WINED3DHRESULT(580)
+#define WINEDDERR_NODC                              MAKE_WINED3DHRESULT(586)
+#define WINEDDERR_DCALREADYCREATED                  MAKE_WINED3DHRESULT(620)
+#define WINEDDERR_NOTFLIPPABLE                      MAKE_WINED3DHRESULT(582)
+#define WINEDDERR_SURFACEBUSY                       MAKE_WINED3DHRESULT(430)
+#define WINEDDERR_INVALIDRECT                       MAKE_WINED3DHRESULT(150)
 #define WINED3DOK_NOAUTOGEN                         MAKE_WINED3DSTATUS(2159)
 
  /*****************************************************************************
@@ -89,7 +97,6 @@ struct IWineD3DTexture;
 struct IWineD3DCubeTexture;
 struct IWineD3DVolumeTexture;
 struct IWineD3DStateBlock;
-struct IWineD3DSurface;
 struct IWineD3DVolume;
 struct IWineD3DVertexDeclaration;
 struct IWineD3DBaseShader;
@@ -350,6 +357,7 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
     STDMETHOD(CreateQuery)(THIS_ WINED3DQUERYTYPE Type, struct IWineD3DQuery **ppQuery, IUnknown *pParent);
     STDMETHOD(CreateAdditionalSwapChain)(THIS_ WINED3DPRESENT_PARAMETERS *pPresentationParameters, struct IWineD3DSwapChain **pSwapChain, IUnknown *pParent, D3DCB_CREATERENDERTARGETFN pFn, D3DCB_CREATEDEPTHSTENCILSURFACEFN pFn2);
     STDMETHOD(CreateVertexDeclaration)(THIS_ struct IWineD3DVertexDeclaration** ppDecl, IUnknown* pParent, const WINED3DVERTEXELEMENT *elements, size_t element_count) PURE;
+    STDMETHOD(CreateVertexDeclarationFromFVF)(THIS_ struct IWineD3DVertexDeclaration** ppDecl, IUnknown* pParent, DWORD Fvf) PURE;
     STDMETHOD(CreateVertexShader)(THIS_ struct IWineD3DVertexDeclaration *vertex_declaration, CONST DWORD* pFunction, struct IWineD3DVertexShader** ppShader, IUnknown *pParent) PURE;
     STDMETHOD(CreatePixelShader)(THIS_ CONST DWORD* pFunction, struct IWineD3DPixelShader** ppShader, IUnknown *pParent) PURE;
     STDMETHOD_(HRESULT,CreatePalette)(THIS_ DWORD Flags, PALETTEENTRY *PalEnt, struct IWineD3DPalette **Palette, IUnknown *Parent);
@@ -444,7 +452,7 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
     STDMETHOD(GetViewport)(THIS_ WINED3DVIEWPORT * pViewport) PURE;
     STDMETHOD(MultiplyTransform)(THIS_ WINED3DTRANSFORMSTATETYPE  State, CONST WINED3DMATRIX * pMatrix) PURE;
     STDMETHOD(ValidateDevice)(THIS_ DWORD* pNumPasses) PURE;
-    STDMETHOD(ProcessVertices)(THIS_ UINT SrcStartIndex, UINT DestIndex, UINT VertexCount, struct IWineD3DVertexBuffer* pDestBuffer, struct IWineD3DVertexBuffer* pVertexDecl, DWORD Flags) PURE;
+    STDMETHOD(ProcessVertices)(THIS_ UINT SrcStartIndex, UINT DestIndex, UINT VertexCount, struct IWineD3DVertexBuffer* pDestBuffer, struct IWineD3DVertexDeclaration* pVertexDecl, DWORD Flags) PURE;
     STDMETHOD(BeginStateBlock)(THIS) PURE;
     STDMETHOD(EndStateBlock)(THIS_ struct IWineD3DStateBlock** ppStateBlock) PURE;
     STDMETHOD(BeginScene)(THIS) PURE;
@@ -487,6 +495,7 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
 #define IWineD3DDevice_CreateQuery(p,a,b,c)                     (p)->lpVtbl->CreateQuery(p,a,b,c)
 #define IWineD3DDevice_CreateAdditionalSwapChain(p,a,b,c,d,e)   (p)->lpVtbl->CreateAdditionalSwapChain(p,a,b,c,d,e)
 #define IWineD3DDevice_CreateVertexDeclaration(p,a,b,c,d)       (p)->lpVtbl->CreateVertexDeclaration(p,a,b,c,d)
+#define IWineD3DDevice_CreateVertexDeclarationFromFVF(p,a,b,c)  (p)->lpVtbl->CreateVertexDeclarationFromFVF(p,a,b,c)
 #define IWineD3DDevice_CreateVertexShader(p,a,b,c,d)            (p)->lpVtbl->CreateVertexShader(p,a,b,c,d)
 #define IWineD3DDevice_CreatePixelShader(p,a,b,c)               (p)->lpVtbl->CreatePixelShader(p,a,b,c)
 #define IWineD3DDevice_CreatePalette(p, a, b, c, d)             (p)->lpVtbl->CreatePalette(p, a, b, c, d)
@@ -1093,7 +1102,7 @@ DECLARE_INTERFACE_(IWineD3DSurface,IWineD3DResource)
     STDMETHOD(GetDC)(THIS_ HDC *pHdc) PURE;
     STDMETHOD(ReleaseDC)(THIS_ HDC hdc) PURE;
     STDMETHOD(Flip)(THIS_ IWineD3DSurface *Override, DWORD FLAGS) PURE;
-    STDMETHOD(Blt)(THIS_ RECT *DestRect, IWineD3DSurface *SrcSurface, RECT *SrcRect, DWORD Flags, DDBLTFX *DDBltFx, WINED3DTEXTUREFILTERTYPE Filter) PURE;
+    STDMETHOD(Blt)(THIS_ RECT *DestRect, IWineD3DSurface *SrcSurface, RECT *SrcRect, DWORD Flags, WINEDDBLTFX *DDBltFx, WINED3DTEXTUREFILTERTYPE Filter) PURE;
     STDMETHOD(GetBltStatus)(THIS_ DWORD Flags) PURE;
     STDMETHOD(GetFlipStatus)(THIS_ DWORD Flags) PURE;
     STDMETHOD(IsLost)(THIS) PURE;
@@ -1102,7 +1111,7 @@ DECLARE_INTERFACE_(IWineD3DSurface,IWineD3DResource)
     STDMETHOD(GetPalette)(THIS_ struct IWineD3DPalette **Palette) PURE;
     STDMETHOD(SetPalette)(THIS_ struct IWineD3DPalette *Palette) PURE;
     STDMETHOD(RealizePalette)(THIS) PURE;
-    STDMETHOD(SetColorKey)(THIS_ DWORD Flags, DDCOLORKEY *CKey) PURE;
+    STDMETHOD(SetColorKey)(THIS_ DWORD Flags, WINEDDCOLORKEY *CKey) PURE;
     STDMETHOD_(DWORD,GetPitch)(THIS) PURE;
     STDMETHOD(SetMem)(THIS_ void *mem) PURE;
     STDMETHOD(SetOverlayPosition)(THIS_ LONG X, LONG Y) PURE;
@@ -1202,7 +1211,7 @@ DECLARE_INTERFACE_(IWineD3DVolume,IWineD3DResource)
     STDMETHOD(UnlockBox)(THIS) PURE;
     STDMETHOD(AddDirtyBox)(THIS_ CONST WINED3DBOX* pDirtyBox) PURE;
     STDMETHOD(CleanDirtyBox)(THIS) PURE;
-    STDMETHOD(LoadTexture)(THIS_ UINT gl_level) PURE;
+    STDMETHOD(LoadTexture)(THIS_ int gl_level) PURE;
     STDMETHOD(SetContainer)(THIS_ IWineD3DBase *container) PURE;
 };
 #undef INTERFACE

@@ -213,19 +213,19 @@ HRESULT WINAPI AtlInternalQueryInterface(void* this, const _ATL_INTMAP_ENTRY* pE
 {
     int i = 0;
     HRESULT rc = E_NOINTERFACE;
-    TRACE("(%p, %p, %p, %p)\n",this, pEntries, iid, ppvObject);
+    TRACE("(%p, %p, %s, %p)\n",this, pEntries, debugstr_guid(iid), ppvObject);
 
     if (IsEqualGUID(iid,&IID_IUnknown))
     {
         TRACE("Returning IUnknown\n");
-        *ppvObject = this;
-        IUnknown_AddRef((IUnknown*)this);
+        *ppvObject = ((LPSTR)this+pEntries[0].dw);
+        IUnknown_AddRef((IUnknown*)*ppvObject);
         return S_OK;
     }
 
     while (pEntries[i].pFunc != 0)
     {
-        TRACE("Trying entry %i (%p %i %p)\n",i,pEntries[i].piid,
+        TRACE("Trying entry %i (%s %i %p)\n",i,debugstr_guid(pEntries[i].piid),
               pEntries[i].dw, pEntries[i].pFunc);
 
         if (pEntries[i].piid && IsEqualGUID(iid,pEntries[i].piid))
@@ -340,6 +340,7 @@ HRESULT WINAPI AtlModuleGetClassObject(_ATL_MODULEW *pm, REFCLSID rclsid,
                                        REFIID riid, LPVOID *ppv)
 {
     int i;
+    HRESULT hres = CLASS_E_CLASSNOTAVAILABLE;
 
     TRACE("%p %s %s %p\n", pm, debugstr_guid(rclsid), debugstr_guid(riid), ppv);
 
@@ -354,13 +355,21 @@ HRESULT WINAPI AtlModuleGetClassObject(_ATL_MODULEW *pm, REFCLSID rclsid,
 
             TRACE("found object %i\n", i);
             if (obj->pfnGetClassObject)
-                return obj->pfnGetClassObject(obj->pfnCreateInstance, riid, ppv);
+            {
+                if (!obj->pCF)
+                    hres = obj->pfnGetClassObject(obj->pfnCreateInstance,
+                                                  &IID_IUnknown,
+                                                  (void **)&obj->pCF);
+                if (obj->pCF)
+                    hres = IUnknown_QueryInterface(obj->pCF, riid, ppv);
+                break;
+            }
         }
     }
 
     WARN("no class object found for %s\n", debugstr_guid(rclsid));
 
-    return E_FAIL;
+    return hres;
 }
 
 /***********************************************************************

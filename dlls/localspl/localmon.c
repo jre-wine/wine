@@ -65,6 +65,7 @@ static struct list xcv_handles = LIST_INIT( xcv_handles );
 
 /* ############################### */
 
+static const WCHAR cmd_AddPortW[] = {'A','d','d','P','o','r','t',0};
 static const WCHAR cmd_DeletePortW[] = {'D','e','l','e','t','e','P','o','r','t',0};
 static const WCHAR cmd_ConfigureLPTPortCommandOKW[] = {'C','o','n','f','i','g','u','r','e',
                                     'L','P','T','P','o','r','t',
@@ -85,6 +86,7 @@ static const WCHAR cmd_SetDefaultCommConfigW[] = {'S','e','t',
                                     'C','o','m','m','C','o','n','f','i','g',0};
 
 static const WCHAR dllnameuiW[] = {'l','o','c','a','l','u','i','.','d','l','l',0};
+static const WCHAR emptyW[] = {0};
 
 static const WCHAR portname_LPT[]  = {'L','P','T',0};
 static const WCHAR portname_COM[]  = {'C','O','M',0};
@@ -107,22 +109,43 @@ static const WCHAR WinNT_CV_WindowsW[] = {'S','o','f','t','w','a','r','e','\\',
                                         'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
                                         'W','i','n','d','o','w','s',0};
 
+
 /******************************************************************
- * display the Dialog "Nothing to configure"
- * 
+ * does_port_exist (internal)
+ *
+ * returns TRUE, when the Port already exists
+ *
  */
-
-static void dlg_nothingtoconfig(HWND hWnd)
+static BOOL does_port_exist(LPCWSTR myname)
 {
-    WCHAR res_PortW[IDS_LOCALPORT_MAXLEN];
-    WCHAR res_nothingW[IDS_NOTHINGTOCONFIG_MAXLEN];
 
-    res_PortW[0] = '\0';
-    res_nothingW[0] = '\0';
-    LoadStringW(LOCALSPL_hInstance, IDS_LOCALPORT, res_PortW, IDS_LOCALPORT_MAXLEN);  
-    LoadStringW(LOCALSPL_hInstance, IDS_NOTHINGTOCONFIG, res_nothingW, IDS_NOTHINGTOCONFIG_MAXLEN);  
+    LPPORT_INFO_1W  pi;
+    DWORD   needed = 0;
+    DWORD   returned;
+    DWORD   id;
 
-    MessageBoxW(hWnd, res_nothingW, res_PortW, MB_OK | MB_ICONINFORMATION);
+    TRACE("(%s)\n", debugstr_w(myname));
+
+    id = EnumPortsW(NULL, 1, NULL, 0, &needed, &returned);
+    pi = spl_alloc(needed);
+    returned = 0;
+    if (pi)
+        id = EnumPortsW(NULL, 1, (LPBYTE) pi, needed, &needed, &returned);
+
+    if (id && returned > 0) {
+        /* we got a number of valid names. */
+        for (id = 0; id < returned; id++)
+        {
+            if (lstrcmpiW(myname, pi[id].pName) == 0) {
+                TRACE("(%u) found %s\n", id, debugstr_w(pi[id].pName));
+                spl_free(pi);
+                return TRUE;
+            }
+        }
+    }
+
+    spl_free(pi);
+    return FALSE;
 }
 
 /******************************************************************
@@ -278,63 +301,6 @@ static DWORD get_type_from_name(LPCWSTR name)
 }
 
 /*****************************************************
- *   localmon_ConfigurePortW [exported through MONITOREX]
- *
- * Display the Configuration-Dialog for a specific Port
- *
- * PARAMS
- *  pName     [I] Servername or NULL (local Computer)
- *  hWnd      [I] Handle to parent Window for the Dialog-Box
- *  pPortName [I] Name of the Port, that should be configured
- *
- * RETURNS
- *  Success: TRUE
- *  Failure: FALSE
- *
- */
-BOOL WINAPI localmon_ConfigurePortW(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
-{
-    TRACE("(%s, %p, %s)\n", debugstr_w(pName), hWnd, debugstr_w(pPortName));
-    /* ToDo: Dialogs by Portname ("LPTx:", "COMx:") */
-
-    dlg_nothingtoconfig(hWnd);
-    return ROUTER_SUCCESS;
-}
-
-/*****************************************************
- *   localmon_DeletePortW [exported through MONITOREX]
- *
- * Delete a specific Port
- *
- * PARAMS
- *  pName     [I] Servername or NULL (local Computer)
- *  hWnd      [I] Handle to parent Window
- *  pPortName [I] Name of the Port, that should be deleted
- *
- * RETURNS
- *  Success: TRUE
- *  Failure: FALSE
- *
- */
-BOOL WINAPI localmon_DeletePortW(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
-{
-    DWORD   res;
-    HKEY    hroot;
-
-    TRACE("(%s, %p, %s)\n", debugstr_w(pName), hWnd, debugstr_w(pPortName));
-
-    if ((!pPortName) || (!pPortName[0])) return FALSE;
-
-    res = RegOpenKeyW(HKEY_LOCAL_MACHINE, WinNT_CV_PortsW, &hroot);
-    if (res == ERROR_SUCCESS) {
-        res = RegDeleteValueW(hroot, pPortName);
-        RegCloseKey(hroot);
-    }
-    TRACE("=> %d\n", (res == ERROR_SUCCESS));
-    return (res == ERROR_SUCCESS);
-}
-
-/*****************************************************
  *   localmon_EnumPortsW [exported through MONITOREX]
  *
  * Enumerate all local Ports
@@ -459,8 +425,22 @@ DWORD WINAPI localmon_XcvDataPort(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInput
     TRACE("(%p, %s, %p, %d, %p, %d, %p)\n", hXcv, debugstr_w(pszDataName),
           pInputData, cbInputData, pOutputData, cbOutputData, pcbOutputNeeded);
 
-    /* Native localspl.dll crashes on w2k and xp, when XcvDataPort is called
-       with "AddPort" as command. We do not need to implement this */
+    if (!lstrcmpW(pszDataName, cmd_AddPortW)) {
+        TRACE("InputData (%d): %s\n", cbInputData, debugstr_w( (LPWSTR) pInputData));
+        res = RegOpenKeyW(HKEY_LOCAL_MACHINE, WinNT_CV_PortsW, &hroot);
+        if (res == ERROR_SUCCESS) {
+            if (does_port_exist((LPWSTR) pInputData)) {
+                RegCloseKey(hroot);
+                return ERROR_ALREADY_EXISTS;
+            }
+            res = RegSetValueExW(hroot, (LPWSTR) pInputData, 0, REG_SZ, (const BYTE *) emptyW, sizeof(emptyW));
+            RegCloseKey(hroot);
+            SetLastError(ERROR_SUCCESS);
+            return res;
+        }
+        return res;
+    }
+
 
     if (!lstrcmpW(pszDataName, cmd_ConfigureLPTPortCommandOKW)) {
         TRACE("InputData (%d): %s\n", cbInputData, debugstr_w( (LPWSTR) pInputData));
@@ -630,8 +610,8 @@ LPMONITOREX WINAPI InitializePrintMonitor(LPWSTR regroot)
             NULL,       /* localmon_ClosePortW */
             NULL,       /* localmon_AddPortW */
             NULL,       /* localmon_AddPortExW */
-            localmon_ConfigurePortW,
-            localmon_DeletePortW,
+            NULL,       /* Use ConfigurePortUI in localui.dll */
+            NULL,       /* Use DeletePortUI in localui.dll */
             NULL,       /* localmon_GetPrinterDataFromPort */
             NULL,       /* localmon_SetPortTimeOuts */
             localmon_XcvOpenPort,

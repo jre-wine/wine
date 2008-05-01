@@ -152,7 +152,6 @@ DECL_HANDLER(get_handle_fd);
 DECL_HANDLER(flush_file);
 DECL_HANDLER(lock_file);
 DECL_HANDLER(unlock_file);
-DECL_HANDLER(unmount_device);
 DECL_HANDLER(create_socket);
 DECL_HANDLER(accept_socket);
 DECL_HANDLER(set_socket_event);
@@ -245,10 +244,8 @@ DECL_HANDLER(get_serial_info);
 DECL_HANDLER(set_serial_info);
 DECL_HANDLER(register_async);
 DECL_HANDLER(cancel_async);
+DECL_HANDLER(ioctl);
 DECL_HANDLER(create_named_pipe);
-DECL_HANDLER(connect_named_pipe);
-DECL_HANDLER(wait_named_pipe);
-DECL_HANDLER(disconnect_named_pipe);
 DECL_HANDLER(get_named_pipe_info);
 DECL_HANDLER(create_window);
 DECL_HANDLER(destroy_window);
@@ -375,7 +372,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_flush_file,
     (req_handler)req_lock_file,
     (req_handler)req_unlock_file,
-    (req_handler)req_unmount_device,
     (req_handler)req_create_socket,
     (req_handler)req_accept_socket,
     (req_handler)req_set_socket_event,
@@ -468,10 +464,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_serial_info,
     (req_handler)req_register_async,
     (req_handler)req_cancel_async,
+    (req_handler)req_ioctl,
     (req_handler)req_create_named_pipe,
-    (req_handler)req_connect_named_pipe,
-    (req_handler)req_wait_named_pipe,
-    (req_handler)req_disconnect_named_pipe,
     (req_handler)req_get_named_pipe_info,
     (req_handler)req_create_window,
     (req_handler)req_destroy_window,

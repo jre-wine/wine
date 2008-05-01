@@ -1000,7 +1000,7 @@ case $host_os in
     if test "$ac_cv_header_CoreAudio_CoreAudio_h" = "yes" -a "$ac_cv_header_AudioUnit_AudioUnit_h" = "yes"
     then
         dnl CoreServices needed by AudioUnit
-        AC_SUBST(COREAUDIO,"-framework CoreAudio -framework AudioUnit -framework CoreServices")
+        AC_SUBST(COREAUDIO,"-framework CoreAudio -framework AudioUnit -framework CoreServices -framework AudioToolbox -framework CoreMIDI")
     fi
     case $host_cpu in
       *powerpc*)
@@ -1162,7 +1162,6 @@ AC_CHECK_FUNCS(\
 	asctime_r \
 	chsize \
 	clone \
-	connect \
 	dlopen \
 	epoll_create \
 	ffs \
@@ -1174,22 +1173,13 @@ AC_CHECK_FUNCS(\
 	ftruncate \
 	futimes \
 	futimesat \
-	getaddrinfo \
 	getdirentries \
-	gethostbyname \
-	getnameinfo \
-	getnetbyname \
 	getopt_long \
 	getpagesize \
-	getprotobyname \
-	getprotobynumber \
 	getpwuid \
-	getservbyport \
 	gettid \
 	gettimeofday \
 	getuid \
-	inet_aton \
-	inet_network \
 	kqueue \
 	lstat \
 	memmove \
@@ -1204,7 +1194,6 @@ AC_CHECK_FUNCS(\
 	rfork \
 	sched_yield \
 	select \
-	sendmsg \
 	setrlimit \
 	settimeofday \
 	sigaltstack \
@@ -1239,22 +1228,25 @@ then
 fi
 
 dnl Check for -lnsl for Solaris
-if test "$ac_cv_func_gethostbyname" = no
-then
-    AC_CHECK_LIB(nsl,gethostbyname)
-fi
+AC_SEARCH_LIBS(gethostbyname, nsl)
 
 dnl Check for -lsocket for Solaris
-if test "$ac_cv_func_connect" = no
-then
-    AC_CHECK_LIB(socket,connect)
-fi
+AC_SEARCH_LIBS(connect, socket)
 
 dnl Check for -lresolv for Solaris
-if test "$ac_cv_func_inet_aton" = no
-then
-    AC_CHECK_LIB(resolv,inet_aton)
-fi
+AC_SEARCH_LIBS(inet_aton, resolv)
+
+dnl **** Check for functions which may rely on -lsocket on Solaris.
+AC_CHECK_FUNCS(\
+	getaddrinfo \
+	getnameinfo \
+	getnetbyname \
+	getprotobyname \
+	getprotobynumber \
+	getservbyport \
+	inet_network \
+	sendmsg \
+)
 
 dnl **** Check for types ****
 
@@ -1501,6 +1493,7 @@ AC_CONFIG_FILES([dlls/Maketest.rules])
 AC_CONFIG_FILES([programs/Makeprog.rules])
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([dlls/Makefile])
+AC_CONFIG_FILES([dlls/acledit/Makefile])
 AC_CONFIG_FILES([dlls/activeds/Makefile])
 AC_CONFIG_FILES([dlls/advapi32/Makefile])
 AC_CONFIG_FILES([dlls/advapi32/tests/Makefile])
@@ -1538,6 +1531,7 @@ AC_CONFIG_FILES([dlls/d3d9/Makefile])
 AC_CONFIG_FILES([dlls/d3d9/tests/Makefile])
 AC_CONFIG_FILES([dlls/d3dim/Makefile])
 AC_CONFIG_FILES([dlls/d3drm/Makefile])
+AC_CONFIG_FILES([dlls/d3drm/tests/Makefile])
 AC_CONFIG_FILES([dlls/d3dx8/Makefile])
 AC_CONFIG_FILES([dlls/d3dxof/Makefile])
 AC_CONFIG_FILES([dlls/dbghelp/Makefile])
@@ -1686,6 +1680,7 @@ AC_CONFIG_FILES([dlls/rsaenh/Makefile])
 AC_CONFIG_FILES([dlls/rsaenh/tests/Makefile])
 AC_CONFIG_FILES([dlls/sane.ds/Makefile])
 AC_CONFIG_FILES([dlls/schannel/Makefile])
+AC_CONFIG_FILES([dlls/schannel/tests/Makefile])
 AC_CONFIG_FILES([dlls/secur32/Makefile])
 AC_CONFIG_FILES([dlls/secur32/tests/Makefile])
 AC_CONFIG_FILES([dlls/security/Makefile])
@@ -1712,6 +1707,7 @@ AC_CONFIG_FILES([dlls/stdole32.tlb/Makefile])
 AC_CONFIG_FILES([dlls/sti/Makefile])
 AC_CONFIG_FILES([dlls/strmiids/Makefile])
 AC_CONFIG_FILES([dlls/svrapi/Makefile])
+AC_CONFIG_FILES([dlls/sxs/Makefile])
 AC_CONFIG_FILES([dlls/tapi32/Makefile])
 AC_CONFIG_FILES([dlls/twain_32/Makefile])
 AC_CONFIG_FILES([dlls/unicows/Makefile])

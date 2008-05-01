@@ -62,7 +62,7 @@ typedef struct service_data_t
         LPHANDLER_FUNCTION_EX handler_ex;
     } handler;
     LPVOID context;
-    SERVICE_STATUS status;
+    SERVICE_STATUS_PROCESS status;
     HANDLE thread;
     BOOL unicode : 1;
     BOOL extended : 1; /* uses handler_ex instead of handler? */
@@ -499,7 +499,7 @@ static BOOL service_handle_get_status(HANDLE pipe, const service_data *service)
 /******************************************************************************
  * service_get_status
  */
-static BOOL service_get_status(HANDLE pipe, LPSERVICE_STATUS status)
+static BOOL service_get_status(HANDLE pipe, LPSERVICE_STATUS_PROCESS status)
 {
     DWORD cmd[2], count = 0;
     BOOL r;
@@ -1436,7 +1436,7 @@ BOOL WINAPI StartServiceA( SC_HANDLE hService, DWORD dwNumServiceArgs,
 /******************************************************************************
  * service_start_process    [INTERNAL]
  */
-static DWORD service_start_process(struct sc_service *hsvc)
+static DWORD service_start_process(struct sc_service *hsvc, LPDWORD ppid)
 {
     static const WCHAR _ImagePathW[] = {'I','m','a','g','e','P','a','t','h',0};
     PROCESS_INFORMATION pi;
@@ -1470,6 +1470,8 @@ static DWORD service_start_process(struct sc_service *hsvc)
     r = CreateProcessW(NULL, path, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     if (r)
     {
+        if (ppid) *ppid = pi.dwProcessId;
+
         handles[1] = pi.hProcess;
         ret = WaitForMultipleObjectsEx(2, handles, FALSE, 30000, FALSE);
         if(ret != WAIT_OBJECT_0)
@@ -1521,6 +1523,7 @@ BOOL WINAPI StartServiceW(SC_HANDLE hService, DWORD dwNumServiceArgs,
 {
     struct sc_service *hsvc;
     BOOL r = FALSE;
+    DWORD pid;
     SC_LOCK hLock;
     HANDLE handle = INVALID_HANDLE_VALUE;
 
@@ -1541,7 +1544,7 @@ BOOL WINAPI StartServiceW(SC_HANDLE hService, DWORD dwNumServiceArgs,
     if (handle==INVALID_HANDLE_VALUE)
     {
         /* start the service process */
-        if (service_start_process(hsvc))
+        if (service_start_process(hsvc, &pid))
             handle = service_open_pipe(hsvc->name);
     }
 
@@ -1566,54 +1569,24 @@ BOOL WINAPI StartServiceW(SC_HANDLE hService, DWORD dwNumServiceArgs,
  * QueryServiceStatus [ADVAPI32.@]
  *
  * PARAMS
- *   hService        []
- *   lpservicestatus []
+ *   hService        [I] Handle to service to get information about
+ *   lpservicestatus [O] buffer to receive the status information for the service
  *
  */
 BOOL WINAPI QueryServiceStatus(SC_HANDLE hService,
                                LPSERVICE_STATUS lpservicestatus)
 {
-    struct sc_service *hsvc;
-    DWORD size, type, val;
-    HANDLE pipe;
-    LONG r;
+    SERVICE_STATUS_PROCESS SvcStatusData;
+    BOOL ret;
 
     TRACE("%p %p\n", hService, lpservicestatus);
 
-    hsvc = sc_handle_get_handle_data(hService, SC_HTYPE_SERVICE);
-    if (!hsvc)
-    {
-        SetLastError( ERROR_INVALID_HANDLE );
-        return FALSE;
-    }
-
-    pipe = service_open_pipe(hsvc->name);
-    if (pipe != INVALID_HANDLE_VALUE)
-    {
-        r = service_get_status(pipe, lpservicestatus);
-        CloseHandle(pipe);
-        if (r)
-            return TRUE;
-    }
-
-    TRACE("Failed to read service status\n");
-
-    /* read the service type from the registry */
-    size = sizeof(val);
-    r = RegQueryValueExA(hsvc->hkey, "Type", NULL, &type, (LPBYTE)&val, &size);
-    if(r!=ERROR_SUCCESS || type!=REG_DWORD)
-        val = 0;
-
-    lpservicestatus->dwServiceType = val;
-    lpservicestatus->dwCurrentState            = SERVICE_STOPPED;  /* stopped */
-    lpservicestatus->dwControlsAccepted        = 0;
-    lpservicestatus->dwWin32ExitCode           = ERROR_SERVICE_NEVER_STARTED;
-    lpservicestatus->dwServiceSpecificExitCode = 0;
-    lpservicestatus->dwCheckPoint              = 0;
-    lpservicestatus->dwWaitHint                = 0;
-
-    return TRUE;
+    ret = QueryServiceStatusEx(hService, SC_STATUS_PROCESS_INFO, (LPBYTE)&SvcStatusData,
+                                sizeof(SERVICE_STATUS_PROCESS), NULL);
+    if (ret) memcpy(lpservicestatus, &SvcStatusData, sizeof(SERVICE_STATUS)) ;
+    return ret;
 }
+
 
 /******************************************************************************
  * QueryServiceStatusEx [ADVAPI32.@]
@@ -1635,9 +1608,69 @@ BOOL WINAPI QueryServiceStatusEx(SC_HANDLE hService, SC_STATUS_TYPE InfoLevel,
                         LPBYTE lpBuffer, DWORD cbBufSize,
                         LPDWORD pcbBytesNeeded)
 {
-    FIXME("stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    struct sc_service *hsvc;
+    DWORD size, type, val;
+    HANDLE pipe;
+    LONG r;
+    LPSERVICE_STATUS_PROCESS pSvcStatusData;
+
+    TRACE("%p %d %p %d %p\n", hService, InfoLevel, lpBuffer, cbBufSize, pcbBytesNeeded);
+
+    if (InfoLevel != SC_STATUS_PROCESS_INFO)
+    {
+        SetLastError( ERROR_INVALID_LEVEL);
+        return FALSE;
+    }
+
+    pSvcStatusData = (LPSERVICE_STATUS_PROCESS) lpBuffer;
+    if (pSvcStatusData == NULL)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (cbBufSize < sizeof(SERVICE_STATUS_PROCESS))
+    {
+        if( pcbBytesNeeded != NULL)
+            *pcbBytesNeeded = sizeof(SERVICE_STATUS_PROCESS);
+
+        SetLastError( ERROR_INSUFFICIENT_BUFFER);
+        return FALSE;
+    }
+
+    hsvc = sc_handle_get_handle_data(hService, SC_HTYPE_SERVICE);
+    if (!hsvc)
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
+
+    pipe = service_open_pipe(hsvc->name);
+    if (pipe != INVALID_HANDLE_VALUE)
+    {
+        r = service_get_status(pipe, pSvcStatusData);
+        CloseHandle(pipe);
+        if (r)
+            return TRUE;
+    }
+
+    TRACE("Failed to read service status\n");
+
+    /* read the service type from the registry */
+    size = sizeof(val);
+    r = RegQueryValueExA(hsvc->hkey, "Type", NULL, &type, (LPBYTE)&val, &size);
+    if (r != ERROR_SUCCESS || type != REG_DWORD)
+        val = 0;
+
+    pSvcStatusData->dwServiceType = val;
+    pSvcStatusData->dwCurrentState            = SERVICE_STOPPED;  /* stopped */
+    pSvcStatusData->dwControlsAccepted        = 0;
+    pSvcStatusData->dwWin32ExitCode           = ERROR_SERVICE_NEVER_STARTED;
+    pSvcStatusData->dwServiceSpecificExitCode = 0;
+    pSvcStatusData->dwCheckPoint              = 0;
+    pSvcStatusData->dwWaitHint                = 0;
+
+    return TRUE;
 }
 
 /******************************************************************************
@@ -1878,6 +1911,36 @@ EnumServicesStatusW( SC_HANDLE hSCManager, DWORD dwServiceType,
     FIXME("%p type=%x state=%x %p %x %p %p %p\n", hSCManager,
           dwServiceType, dwServiceState, lpServices, cbBufSize,
           pcbBytesNeeded, lpServicesReturned,  lpResumeHandle);
+    SetLastError (ERROR_ACCESS_DENIED);
+    return FALSE;
+}
+
+/******************************************************************************
+ * EnumServicesStatusExA [ADVAPI32.@]
+ */
+BOOL WINAPI
+EnumServicesStatusExA(SC_HANDLE hSCManager, SC_ENUM_TYPE InfoLevel, DWORD dwServiceType,
+                      DWORD dwServiceState, LPBYTE lpServices, DWORD cbBufSize, LPDWORD pcbBytesNeeded,
+                      LPDWORD lpServicesReturned, LPDWORD lpResumeHandle, LPCSTR pszGroupName)
+{
+    FIXME("%p level=%d type=%x state=%x %p %x %p %p %p %s\n", hSCManager, InfoLevel,
+          dwServiceType, dwServiceState, lpServices, cbBufSize,
+          pcbBytesNeeded, lpServicesReturned,  lpResumeHandle, debugstr_a(pszGroupName));
+    SetLastError (ERROR_ACCESS_DENIED);
+    return FALSE;
+}
+
+/******************************************************************************
+ * EnumServicesStatusExW [ADVAPI32.@]
+ */
+BOOL WINAPI
+EnumServicesStatusExW(SC_HANDLE hSCManager, SC_ENUM_TYPE InfoLevel, DWORD dwServiceType,
+                      DWORD dwServiceState, LPBYTE lpServices, DWORD cbBufSize, LPDWORD pcbBytesNeeded,
+                      LPDWORD lpServicesReturned, LPDWORD lpResumeHandle, LPCWSTR pszGroupName)
+{
+    FIXME("%p level=%d type=%x state=%x %p %x %p %p %p %s\n", hSCManager, InfoLevel,
+          dwServiceType, dwServiceState, lpServices, cbBufSize,
+          pcbBytesNeeded, lpServicesReturned,  lpResumeHandle, debugstr_w(pszGroupName));
     SetLastError (ERROR_ACCESS_DENIED);
     return FALSE;
 }

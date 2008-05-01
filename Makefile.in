@@ -157,6 +157,7 @@ ALL_MAKEFILES = \
 	dlls/Maketest.rules \
 	programs/Makeprog.rules \
 	dlls/Makefile \
+	dlls/acledit/Makefile \
 	dlls/activeds/Makefile \
 	dlls/advapi32/Makefile \
 	dlls/advapi32/tests/Makefile \
@@ -194,6 +195,7 @@ ALL_MAKEFILES = \
 	dlls/d3d9/tests/Makefile \
 	dlls/d3dim/Makefile \
 	dlls/d3drm/Makefile \
+	dlls/d3drm/tests/Makefile \
 	dlls/d3dx8/Makefile \
 	dlls/d3dxof/Makefile \
 	dlls/dbghelp/Makefile \
@@ -342,6 +344,7 @@ ALL_MAKEFILES = \
 	dlls/rsaenh/tests/Makefile \
 	dlls/sane.ds/Makefile \
 	dlls/schannel/Makefile \
+	dlls/schannel/tests/Makefile \
 	dlls/secur32/Makefile \
 	dlls/secur32/tests/Makefile \
 	dlls/security/Makefile \
@@ -368,6 +371,7 @@ ALL_MAKEFILES = \
 	dlls/sti/Makefile \
 	dlls/strmiids/Makefile \
 	dlls/svrapi/Makefile \
+	dlls/sxs/Makefile \
 	dlls/tapi32/Makefile \
 	dlls/twain_32/Makefile \
 	dlls/unicows/Makefile \
@@ -498,6 +502,7 @@ dlls/Maketest.rules: dlls/Maketest.rules.in Make.rules
 programs/Makeprog.rules: programs/Makeprog.rules.in Make.rules
 Makefile: Makefile.in Make.rules
 dlls/Makefile: dlls/Makefile.in Make.rules
+dlls/acledit/Makefile: dlls/acledit/Makefile.in dlls/Makedll.rules
 dlls/activeds/Makefile: dlls/activeds/Makefile.in dlls/Makedll.rules
 dlls/advapi32/Makefile: dlls/advapi32/Makefile.in dlls/Makedll.rules
 dlls/advapi32/tests/Makefile: dlls/advapi32/tests/Makefile.in dlls/Maketest.rules
@@ -535,6 +540,7 @@ dlls/d3d9/Makefile: dlls/d3d9/Makefile.in dlls/Makedll.rules
 dlls/d3d9/tests/Makefile: dlls/d3d9/tests/Makefile.in dlls/Maketest.rules
 dlls/d3dim/Makefile: dlls/d3dim/Makefile.in dlls/Makedll.rules
 dlls/d3drm/Makefile: dlls/d3drm/Makefile.in dlls/Makedll.rules
+dlls/d3drm/tests/Makefile: dlls/d3drm/tests/Makefile.in dlls/Maketest.rules
 dlls/d3dx8/Makefile: dlls/d3dx8/Makefile.in dlls/Makedll.rules
 dlls/d3dxof/Makefile: dlls/d3dxof/Makefile.in dlls/Makedll.rules
 dlls/dbghelp/Makefile: dlls/dbghelp/Makefile.in dlls/Makedll.rules
@@ -683,6 +689,7 @@ dlls/rsaenh/Makefile: dlls/rsaenh/Makefile.in dlls/Makedll.rules
 dlls/rsaenh/tests/Makefile: dlls/rsaenh/tests/Makefile.in dlls/Maketest.rules
 dlls/sane.ds/Makefile: dlls/sane.ds/Makefile.in dlls/Makedll.rules
 dlls/schannel/Makefile: dlls/schannel/Makefile.in dlls/Makedll.rules
+dlls/schannel/tests/Makefile: dlls/schannel/tests/Makefile.in dlls/Maketest.rules
 dlls/secur32/Makefile: dlls/secur32/Makefile.in dlls/Makedll.rules
 dlls/secur32/tests/Makefile: dlls/secur32/tests/Makefile.in dlls/Maketest.rules
 dlls/security/Makefile: dlls/security/Makefile.in dlls/Makedll.rules
@@ -709,6 +716,7 @@ dlls/stdole32.tlb/Makefile: dlls/stdole32.tlb/Makefile.in dlls/Makedll.rules
 dlls/sti/Makefile: dlls/sti/Makefile.in dlls/Makedll.rules
 dlls/strmiids/Makefile: dlls/strmiids/Makefile.in dlls/Makeimplib.rules
 dlls/svrapi/Makefile: dlls/svrapi/Makefile.in dlls/Makedll.rules
+dlls/sxs/Makefile: dlls/sxs/Makefile.in dlls/Makedll.rules
 dlls/tapi32/Makefile: dlls/tapi32/Makefile.in dlls/Makedll.rules
 dlls/twain_32/Makefile: dlls/twain_32/Makefile.in dlls/Makedll.rules
 dlls/unicows/Makefile: dlls/unicows/Makefile.in dlls/Makedll.rules

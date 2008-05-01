@@ -145,7 +145,7 @@ typedef struct tagMSIVIEWOPS
     /*
      * Inserts a new row into the database from the records contents
      */
-    UINT (*insert_row)( struct tagMSIVIEW *, MSIRECORD * );
+    UINT (*insert_row)( struct tagMSIVIEW *, MSIRECORD *, BOOL temporary );
 
     /*
      * execute - loads the underlying data into memory so it can be read
@@ -207,8 +207,6 @@ struct tagMSIVIEW
 struct msi_dialog_tag;
 typedef struct msi_dialog_tag msi_dialog;
 
-#define PROPERTY_HASH_SIZE 67
-
 typedef struct tagMSIPACKAGE
 {
     MSIOBJECTHDR hdr;
@@ -242,8 +240,6 @@ typedef struct tagMSIPACKAGE
     float center_y;
 
     UINT WordCount;
-
-    struct list props[PROPERTY_HASH_SIZE];
 
     struct list subscriptions;
 } MSIPACKAGE;
@@ -540,34 +536,39 @@ extern void msi_free_handle_table(void);
 
 extern void free_cached_tables( MSIDATABASE *db );
 extern void msi_free_transforms( MSIDATABASE *db );
-extern string_table *load_string_table( IStorage *stg );
 extern UINT MSI_CommitTables( MSIDATABASE *db );
-extern HRESULT init_string_table( IStorage *stg );
 
 
 /* string table functions */
-extern BOOL msi_addstring( string_table *st, UINT string_no, const CHAR *data, int len, UINT refcount );
-extern BOOL msi_addstringW( string_table *st, UINT string_no, const WCHAR *data, int len, UINT refcount );
+enum StringPersistence
+{
+    StringPersistent = 0,
+    StringNonPersistent = 1
+};
+
+extern BOOL msi_addstringW( string_table *st, UINT string_no, const WCHAR *data, int len, UINT refcount, enum StringPersistence persistence );
 extern UINT msi_id2stringW( string_table *st, UINT string_no, LPWSTR buffer, UINT *sz );
 extern UINT msi_id2stringA( string_table *st, UINT string_no, LPSTR buffer, UINT *sz );
 
 extern UINT msi_string2idW( string_table *st, LPCWSTR buffer, UINT *id );
 extern UINT msi_string2idA( string_table *st, LPCSTR str, UINT *id );
-extern string_table *msi_init_stringtable( int entries, UINT codepage );
 extern VOID msi_destroy_stringtable( string_table *st );
-extern UINT msi_string_count( string_table *st );
-extern UINT msi_id_refcount( string_table *st, UINT i );
-extern UINT msi_string_totalsize( string_table *st, UINT *datasize, UINT *poolsize );
 extern UINT msi_strcmp( string_table *st, UINT lval, UINT rval, UINT *res );
 extern const WCHAR *msi_string_lookup_id( string_table *st, UINT id );
-extern UINT msi_string_get_codepage( string_table *st );
+extern HRESULT msi_init_string_table( IStorage *stg );
+extern string_table *msi_load_string_table( IStorage *stg );
+extern UINT msi_save_string_table( string_table *st, IStorage *storage );
 
 
-extern BOOL TABLE_Exists( MSIDATABASE *db, LPWSTR name );
+extern BOOL TABLE_Exists( MSIDATABASE *db, LPCWSTR name );
 extern MSICONDITION MSI_DatabaseIsTablePersistent( MSIDATABASE *db, LPCWSTR table );
 
 extern UINT read_raw_stream_data( MSIDATABASE*, LPCWSTR stname,
+                                  USHORT **pdata, UINT *psz );
+extern UINT read_stream_data( IStorage *stg, LPCWSTR stname,
                               USHORT **pdata, UINT *psz );
+extern UINT write_stream_data( IStorage *stg, LPCWSTR stname,
+                               LPVOID data, UINT sz, BOOL bTable );
 
 /* transform functions */
 extern UINT msi_table_apply_transform( MSIDATABASE *db, IStorage *stg );
@@ -596,8 +597,7 @@ extern UINT MSI_RecordGetStringA( MSIRECORD *, unsigned int, LPSTR, DWORD *);
 extern int MSI_RecordGetInteger( MSIRECORD *, unsigned int );
 extern UINT MSI_RecordReadStream( MSIRECORD *, unsigned int, char *, DWORD *);
 extern unsigned int MSI_RecordGetFieldCount( MSIRECORD *rec );
-extern UINT MSI_RecordSetStreamW( MSIRECORD *, unsigned int, LPCWSTR );
-extern UINT MSI_RecordSetStreamA( MSIRECORD *, unsigned int, LPCSTR );
+extern UINT MSI_RecordSetStream( MSIRECORD *, unsigned int, IStream * );
 extern UINT MSI_RecordDataSize( MSIRECORD *, unsigned int );
 extern UINT MSI_RecordStreamToFile( MSIRECORD *, unsigned int, LPCWSTR );
 extern UINT MSI_RecordCopyField( MSIRECORD *, unsigned int, MSIRECORD *, unsigned int );
@@ -606,6 +606,8 @@ extern UINT MSI_RecordCopyField( MSIRECORD *, unsigned int, MSIRECORD *, unsigne
 extern UINT get_raw_stream( MSIHANDLE hdb, LPCWSTR stname, IStream **stm );
 extern UINT db_get_raw_stream( MSIDATABASE *db, LPCWSTR stname, IStream **stm );
 extern void enum_stream_names( IStorage *stg );
+extern BOOL decode_streamname(LPWSTR in, LPWSTR out);
+extern LPWSTR encode_streamname(BOOL bTable, LPCWSTR in);
 
 /* database internals */
 extern UINT MSI_OpenDatabaseW( LPCWSTR, LPCWSTR, MSIDATABASE ** );
@@ -623,6 +625,7 @@ extern UINT MSI_ViewExecute( MSIQUERY*, MSIRECORD * );
 extern UINT MSI_ViewFetch( MSIQUERY*, MSIRECORD ** );
 extern UINT MSI_ViewClose( MSIQUERY* );
 extern UINT MSI_ViewGetColumnInfo(MSIQUERY *, MSICOLINFO, MSIRECORD **);
+extern UINT MSI_ViewModify( MSIQUERY *, MSIMODIFY, MSIRECORD * );
 extern UINT VIEW_find_column( MSIVIEW *, LPCWSTR, UINT * );
 
 

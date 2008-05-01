@@ -21,6 +21,7 @@ typedef unsigned short atom_t;
 typedef unsigned int process_id_t;
 typedef unsigned int thread_id_t;
 typedef unsigned int data_size_t;
+typedef unsigned int ioctl_code_t;
 
 struct request_header
 {
@@ -133,11 +134,8 @@ struct wake_up_reply
 };
 
 
-typedef struct
-{
-    int            sec;
-    int            usec;
-} abs_time_t;
+typedef __int64 timeout_t;
+#define TIMEOUT_INFINITE (((timeout_t)0x7fffffff) << 32 | 0xffffffff)
 
 
 typedef struct
@@ -257,7 +255,7 @@ typedef union
     {
         enum apc_type   type;
         void (__stdcall *func)(void*, unsigned int, unsigned int);
-        abs_time_t       time;
+        timeout_t        time;
         void            *arg;
     } timer;
     struct
@@ -540,7 +538,7 @@ struct init_thread_reply
     process_id_t pid;
     thread_id_t  tid;
     data_size_t  info_size;
-    abs_time_t   server_start;
+    timeout_t    server_start;
     int          version;
 };
 
@@ -589,8 +587,8 @@ struct get_process_info_reply
     int          priority;
     int          affinity;
     void*        peb;
-    abs_time_t   start_time;
-    abs_time_t   end_time;
+    timeout_t    start_time;
+    timeout_t    end_time;
 };
 
 
@@ -627,8 +625,8 @@ struct get_thread_info_reply
     int          exit_code;
     int          priority;
     int          affinity;
-    abs_time_t   creation_time;
-    abs_time_t   exit_time;
+    timeout_t    creation_time;
+    timeout_t    exit_time;
     int          last;
 };
 
@@ -856,17 +854,17 @@ struct select_request
     int          flags;
     void*        cookie;
     obj_handle_t signal;
-    abs_time_t   timeout;
+    timeout_t    timeout;
     /* VARARG(handles,handles); */
 };
 struct select_reply
 {
     struct reply_header __header;
+    timeout_t    timeout;
 };
 #define SELECT_ALL           1
 #define SELECT_ALERTABLE     2
 #define SELECT_INTERRUPTIBLE 4
-#define SELECT_TIMEOUT       8
 
 
 
@@ -1085,6 +1083,7 @@ enum server_fd_type
     FD_TYPE_SERIAL,
     FD_TYPE_PIPE,
     FD_TYPE_MAILSLOT,
+    FD_TYPE_CHAR,
     FD_TYPE_DEVICE,
     FD_TYPE_NB_TYPES
 };
@@ -1134,18 +1133,6 @@ struct unlock_file_request
     unsigned int count_high;
 };
 struct unlock_file_reply
-{
-    struct reply_header __header;
-};
-
-
-
-struct unmount_device_request
-{
-    struct request_header __header;
-    obj_handle_t handle;
-};
-struct unmount_device_reply
 {
     struct reply_header __header;
 };
@@ -2193,7 +2180,7 @@ struct set_timer_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    abs_time_t   expire;
+    timeout_t    expire;
     int          period;
     void*        callback;
     void*        arg;
@@ -2225,7 +2212,7 @@ struct get_timer_info_request
 struct get_timer_info_reply
 {
     struct reply_header __header;
-    abs_time_t   when;
+    timeout_t    when;
     int          signaled;
 };
 
@@ -2454,7 +2441,7 @@ struct send_message_request
     unsigned int    msg;
     unsigned long   wparam;
     unsigned long   lparam;
-    int             timeout;
+    timeout_t       timeout;
     /* VARARG(data,message_data); */
 };
 struct send_message_reply
@@ -2679,6 +2666,22 @@ struct cancel_async_reply
 
 
 
+struct ioctl_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    ioctl_code_t   code;
+    async_data_t   async;
+    /* VARARG(in_data,bytes); */
+};
+struct ioctl_reply
+{
+    struct reply_header __header;
+    /* VARARG(out_data,bytes); */
+};
+
+
+
 struct create_named_pipe_request
 {
     struct request_header __header;
@@ -2690,7 +2693,7 @@ struct create_named_pipe_request
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
-    unsigned int   timeout;
+    timeout_t      timeout;
     /* VARARG(name,unicode_str); */
 };
 struct create_named_pipe_reply
@@ -2704,45 +2707,6 @@ struct create_named_pipe_reply
 #define NAMED_PIPE_MESSAGE_STREAM_READ  0x0002
 #define NAMED_PIPE_NONBLOCKING_MODE     0x0004
 #define NAMED_PIPE_SERVER_END           0x8000
-
-
-struct connect_named_pipe_request
-{
-    struct request_header __header;
-    obj_handle_t   handle;
-    async_data_t   async;
-};
-struct connect_named_pipe_reply
-{
-    struct reply_header __header;
-};
-
-
-
-struct wait_named_pipe_request
-{
-    struct request_header __header;
-    obj_handle_t   handle;
-    async_data_t   async;
-    unsigned int   timeout;
-    /* VARARG(name,unicode_str); */
-};
-struct wait_named_pipe_reply
-{
-    struct reply_header __header;
-};
-
-
-
-struct disconnect_named_pipe_request
-{
-    struct request_header __header;
-    obj_handle_t   handle;
-};
-struct disconnect_named_pipe_reply
-{
-    struct reply_header __header;
-};
 
 
 struct get_named_pipe_info_request
@@ -3861,7 +3825,7 @@ struct create_mailslot_request
     unsigned int   attributes;
     obj_handle_t   rootdir;
     unsigned int   max_msgsize;
-    int            read_timeout;
+    timeout_t      read_timeout;
     /* VARARG(name,unicode_str); */
 };
 struct create_mailslot_reply
@@ -3877,13 +3841,13 @@ struct set_mailslot_info_request
     struct request_header __header;
     obj_handle_t   handle;
     unsigned int   flags;
-    int            read_timeout;
+    timeout_t      read_timeout;
 };
 struct set_mailslot_info_reply
 {
     struct reply_header __header;
     unsigned int   max_msgsize;
-    int            read_timeout;
+    timeout_t      read_timeout;
 };
 #define MAILSLOT_SET_READ_TIMEOUT  1
 
@@ -4048,7 +4012,6 @@ enum request
     REQ_flush_file,
     REQ_lock_file,
     REQ_unlock_file,
-    REQ_unmount_device,
     REQ_create_socket,
     REQ_accept_socket,
     REQ_set_socket_event,
@@ -4141,10 +4104,8 @@ enum request
     REQ_set_serial_info,
     REQ_register_async,
     REQ_cancel_async,
+    REQ_ioctl,
     REQ_create_named_pipe,
-    REQ_connect_named_pipe,
-    REQ_wait_named_pipe,
-    REQ_disconnect_named_pipe,
     REQ_get_named_pipe_info,
     REQ_create_window,
     REQ_destroy_window,
@@ -4272,7 +4233,6 @@ union generic_request
     struct flush_file_request flush_file_request;
     struct lock_file_request lock_file_request;
     struct unlock_file_request unlock_file_request;
-    struct unmount_device_request unmount_device_request;
     struct create_socket_request create_socket_request;
     struct accept_socket_request accept_socket_request;
     struct set_socket_event_request set_socket_event_request;
@@ -4365,10 +4325,8 @@ union generic_request
     struct set_serial_info_request set_serial_info_request;
     struct register_async_request register_async_request;
     struct cancel_async_request cancel_async_request;
+    struct ioctl_request ioctl_request;
     struct create_named_pipe_request create_named_pipe_request;
-    struct connect_named_pipe_request connect_named_pipe_request;
-    struct wait_named_pipe_request wait_named_pipe_request;
-    struct disconnect_named_pipe_request disconnect_named_pipe_request;
     struct get_named_pipe_info_request get_named_pipe_info_request;
     struct create_window_request create_window_request;
     struct destroy_window_request destroy_window_request;
@@ -4494,7 +4452,6 @@ union generic_reply
     struct flush_file_reply flush_file_reply;
     struct lock_file_reply lock_file_reply;
     struct unlock_file_reply unlock_file_reply;
-    struct unmount_device_reply unmount_device_reply;
     struct create_socket_reply create_socket_reply;
     struct accept_socket_reply accept_socket_reply;
     struct set_socket_event_reply set_socket_event_reply;
@@ -4587,10 +4544,8 @@ union generic_reply
     struct set_serial_info_reply set_serial_info_reply;
     struct register_async_reply register_async_reply;
     struct cancel_async_reply cancel_async_reply;
+    struct ioctl_reply ioctl_reply;
     struct create_named_pipe_reply create_named_pipe_reply;
-    struct connect_named_pipe_reply connect_named_pipe_reply;
-    struct wait_named_pipe_reply wait_named_pipe_reply;
-    struct disconnect_named_pipe_reply disconnect_named_pipe_reply;
     struct get_named_pipe_info_reply get_named_pipe_info_reply;
     struct create_window_reply create_window_reply;
     struct destroy_window_reply destroy_window_reply;
@@ -4671,6 +4626,6 @@ union generic_reply
     struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 292
+#define SERVER_PROTOCOL_VERSION 299
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

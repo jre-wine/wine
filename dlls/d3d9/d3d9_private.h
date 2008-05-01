@@ -36,7 +36,6 @@
 #include "wine/unicode.h"
 
 #include "d3d9.h"
-#include "ddraw.h"
 #include "wine/wined3d_interface.h"
 
 /* ===========================================================================
@@ -179,10 +178,8 @@ typedef struct IDirect3DDevice9Impl
     /* Avoids recursion with nested ReleaseRef to 0 */
     BOOL                          inDestruction;
 
-    /* A vertex declaration was converted from setFVF.
-     * Keep track of it, so it can be properly freed
-     */
-    IDirect3DVertexDeclaration9  *convertedDecl;
+    IDirect3DVertexDeclaration9  **convertedDecls;
+    unsigned int                 numConvertedDecls, declArraySize;
 
 } IDirect3DDevice9Impl;
 
@@ -486,10 +483,13 @@ typedef struct IDirect3DVertexDeclaration9Impl {
 
   /* IDirect3DVertexDeclaration9 fields */
   IWineD3DVertexDeclaration *wineD3DVertexDeclaration;
-  
+  DWORD convFVF;
+
   /* Parent reference */
   LPDIRECT3DDEVICE9 parentDevice;
 } IDirect3DVertexDeclaration9Impl;
+
+void IDirect3DVertexDeclaration9Impl_Destroy(LPDIRECT3DVERTEXDECLARATION9 iface);
 
 /* ---------------------- */
 /* IDirect3DVertexShader9 */

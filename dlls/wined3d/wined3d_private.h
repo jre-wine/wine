@@ -38,7 +38,6 @@
 #include "wine/unicode.h"
 
 #include "wined3d_private_types.h"
-#include "ddraw.h"
 #include "wine/wined3d_interface.h"
 #include "wine/wined3d_caps.h"
 #include "wine/wined3d_gl.h"
@@ -273,8 +272,8 @@ extern int num_lock;
        TRACE("%s call ok %s / %d\n", A, __FILE__, __LINE__);    \
                                                                 \
     } else do {                                                 \
-       FIXME(">>>>>>>>>>>>>>>>> %#x from %s @ %s / %d\n",       \
-        err, A, __FILE__, __LINE__);                            \
+        FIXME(">>>>>>>>>>>>>>>>> %s (%#x) from %s @ %s / %d\n", \
+            debug_glerror(err), err, A, __FILE__, __LINE__);    \
        err = glGetError();                                      \
     } while (err != GL_NO_ERROR);                               \
 } 
@@ -358,8 +357,8 @@ extern const float identity[16];
        VTRACE(("%s call ok %s / %d\n", A, __FILE__, __LINE__)); \
                                                                 \
     } else do {                                                 \
-       FIXME(">>>>>>>>>>>>>>>>> %#x from %s @ %s / %d\n",       \
-                err, A, __FILE__, __LINE__);                    \
+        FIXME(">>>>>>>>>>>>>>>>> %s (%#x) from %s @ %s / %d\n", \
+            debug_glerror(err), err, A, __FILE__, __LINE__);    \
        err = glGetError();                                      \
     } while (err != GL_NO_ERROR);                               \
 }
@@ -1056,13 +1055,13 @@ struct IWineD3DSurfaceImpl
     HDC                       hDC;
 
     /* Color keys for DDraw */
-    DDCOLORKEY                DestBltCKey;
-    DDCOLORKEY                DestOverlayCKey;
-    DDCOLORKEY                SrcOverlayCKey;
-    DDCOLORKEY                SrcBltCKey;
+    WINEDDCOLORKEY            DestBltCKey;
+    WINEDDCOLORKEY            DestOverlayCKey;
+    WINEDDCOLORKEY            SrcOverlayCKey;
+    WINEDDCOLORKEY            SrcBltCKey;
     DWORD                     CKeyFlags;
 
-    DDCOLORKEY                glCKey;
+    WINEDDCOLORKEY            glCKey;
 
     struct list               renderbuffers;
     renderbuffer_entry_t      *current_renderbuffer;
@@ -1093,7 +1092,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_Restore(IWineD3DSurface *iface);
 HRESULT WINAPI IWineD3DSurfaceImpl_SetPixelFormat(IWineD3DSurface *iface, WINED3DFORMAT Format, BYTE *Surface, DWORD Size);
 HRESULT WINAPI IWineD3DSurfaceImpl_GetPalette(IWineD3DSurface *iface, IWineD3DPalette **Pal);
 HRESULT WINAPI IWineD3DSurfaceImpl_SetPalette(IWineD3DSurface *iface, IWineD3DPalette *Pal);
-HRESULT WINAPI IWineD3DSurfaceImpl_SetColorKey(IWineD3DSurface *iface, DWORD Flags, DDCOLORKEY *CKey);
+HRESULT WINAPI IWineD3DSurfaceImpl_SetColorKey(IWineD3DSurface *iface, DWORD Flags, WINEDDCOLORKEY *CKey);
 HRESULT WINAPI IWineD3DSurfaceImpl_CleanDirtyRect(IWineD3DSurface *iface);
 extern HRESULT WINAPI IWineD3DSurfaceImpl_AddDirtyRect(IWineD3DSurface *iface, CONST RECT* pDirtyRect);
 HRESULT WINAPI IWineD3DSurfaceImpl_SetContainer(IWineD3DSurface *iface, IWineD3DBase *container);
@@ -1101,7 +1100,7 @@ void WINAPI IWineD3DSurfaceImpl_SetGlTextureDesc(IWineD3DSurface *iface, UINT te
 void WINAPI IWineD3DSurfaceImpl_GetGlDesc(IWineD3DSurface *iface, glDescriptor **glDescription);
 const void *WINAPI IWineD3DSurfaceImpl_GetData(IWineD3DSurface *iface);
 HRESULT WINAPI IWineD3DSurfaceImpl_SetFormat(IWineD3DSurface *iface, WINED3DFORMAT format);
-HRESULT WINAPI IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface, RECT *DestRect, IWineD3DSurface *SrcSurface, RECT *SrcRect, DWORD Flags, DDBLTFX *DDBltFx, WINED3DTEXTUREFILTERTYPE Filter);
+HRESULT WINAPI IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface, RECT *DestRect, IWineD3DSurface *SrcSurface, RECT *SrcRect, DWORD Flags, WINEDDBLTFX *DDBltFx, WINED3DTEXTUREFILTERTYPE Filter);
 HRESULT WINAPI IWineGDISurfaceImpl_BltFast(IWineD3DSurface *iface, DWORD dstx, DWORD dsty, IWineD3DSurface *Source, RECT *rsrc, DWORD trans);
 HRESULT WINAPI IWineD3DSurfaceImpl_SetPalette(IWineD3DSurface *iface, IWineD3DPalette *Pal);
 HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC);
@@ -1132,6 +1131,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
 #define SFLAG_USERPTR     0x00004000 /* The application allocated the memory for this surface */
 #define SFLAG_GLCKEY      0x00008000 /* The gl texture was created with a color key */
 #define SFLAG_CLIENT      0x00010000 /* GL_APPLE_client_storage is used on that texture */
+#define SFLAG_ALLOCATED   0x00020000 /* A gl texture is allocated for this surface */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_OVERSIZE: Not all data can be kept in GL
@@ -1403,6 +1403,8 @@ const char* debug_d3dtexturefiltertype(WINED3DTEXTUREFILTERTYPE filter_type);
 const char* debug_d3dtexturestate(DWORD state);
 const char* debug_d3dtstype(WINED3DTRANSFORMSTATETYPE tstype);
 const char* debug_d3dpool(WINED3DPOOL pool);
+const char *debug_fbostatus(GLenum status);
+const char *debug_glerror(GLenum error);
 
 /* Routines for GL <-> D3D values */
 GLenum StencilOp(DWORD op);
@@ -1412,6 +1414,7 @@ void   set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DT
 void   set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords);
 
 void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int width, unsigned int height);
+GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchain);
 
 int D3DFmtMakeGlCfg(WINED3DFORMAT BackBufferFormat, WINED3DFORMAT StencilBufferFormat, int *attribs, int* nAttribs, BOOL alternate);
 
@@ -1891,7 +1894,6 @@ typedef struct IWineD3DVertexShaderImpl {
     /* IWineD3DVertexShaderImpl */
     IUnknown                    *parent;
 
-    char                        usesFog;
     DWORD                       usage;
 
     /* Vertex shader input and output semantics */

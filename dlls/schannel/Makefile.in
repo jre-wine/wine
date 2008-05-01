@@ -6,7 +6,9 @@ MODULE    = schannel.dll
 IMPORTS   = secur32 kernel32
 
 C_SRCS = \
-	schannel_main.c
+	lsamode.c \
+	schannel_main.c \
+	usermode.c
 
 @MAKE_DLL_RULES@
 

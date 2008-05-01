@@ -246,6 +246,14 @@ IDirectDrawImpl_AddRef(IDirectDraw7 *iface)
 void
 IDirectDrawImpl_Destroy(IDirectDrawImpl *This)
 {
+    int i;
+
+    for(i = 0; i < This->numConvertedDecls; i++)
+    {
+        IWineD3DVertexDeclaration_Release(This->decls[i].decl);
+    }
+    HeapFree(GetProcessHeap(), 0, This->decls);
+
     /* Clear the cooplevel to restore window and display mode */
     IDirectDraw7_SetCooperativeLevel(ICOM_INTERFACE(This, IDirectDraw7),
                                         NULL,
@@ -557,6 +565,7 @@ IDirectDrawImpl_SetDisplayMode(IDirectDraw7 *iface,
 {
     ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
     WINED3DDISPLAYMODE Mode;
+    HRESULT hr;
     TRACE("(%p)->(%d,%d,%d,%d,%x: Relay!\n", This, Width, Height, BPP, RefreshRate, Flags);
 
     if( !Width || !Height )
@@ -593,10 +602,14 @@ IDirectDrawImpl_SetDisplayMode(IDirectDraw7 *iface,
      */
 
     /* TODO: Lose the primary surface */
-    return IWineD3DDevice_SetDisplayMode(This->wineD3DDevice,
-                                         0, /* First swapchain */
-                                         &Mode);
-
+    hr = IWineD3DDevice_SetDisplayMode(This->wineD3DDevice,
+                                       0, /* First swapchain */
+                                       &Mode);
+    switch(hr)
+    {
+        case WINED3DERR_NOTAVAILABLE:       return DDERR_INVALIDMODE;
+        default:                            return hr;
+    };
 }
 
 /*****************************************************************************
@@ -1166,10 +1179,30 @@ IDirectDrawImpl_EnumDisplayModes(IDirectDraw7 *iface,
                                  LPDDENUMMODESCALLBACK2 cb)
 {
     ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, iface);
-    unsigned int modenum = 0;
+    unsigned int modenum, fmt;
     WINED3DFORMAT pixelformat = WINED3DFMT_UNKNOWN;
     WINED3DDISPLAYMODE mode;
     DDSURFACEDESC2 callback_sd;
+
+    WINED3DFORMAT checkFormatList[] =
+    {
+        WINED3DFMT_R8G8B8,
+        WINED3DFMT_A8R8G8B8,
+        WINED3DFMT_X8R8G8B8,
+        WINED3DFMT_R5G6B5,
+        WINED3DFMT_X1R5G5B5,
+        WINED3DFMT_A1R5G5B5,
+        WINED3DFMT_A4R4G4B4,
+        WINED3DFMT_R3G3B2,
+        WINED3DFMT_A8R3G3B2,
+        WINED3DFMT_X4R4G4B4,
+        WINED3DFMT_A2B10G10R10,
+        WINED3DFMT_A8B8G8R8,
+        WINED3DFMT_X8B8G8R8,
+        WINED3DFMT_A2R10G10B10,
+        WINED3DFMT_A8P8,
+        WINED3DFMT_P8
+    };
 
     TRACE("(%p)->(%p,%p,%p): Relay\n", This, DDSD, Context, cb);
 
@@ -1182,41 +1215,52 @@ IDirectDrawImpl_EnumDisplayModes(IDirectDraw7 *iface,
             pixelformat = PixelFormat_DD2WineD3D(&DDSD->u4.ddpfPixelFormat);
     }
 
-    while(IWineD3D_EnumAdapterModes(This->wineD3D,
-                                    WINED3DADAPTER_DEFAULT,
-                                    pixelformat,
-                                    modenum++,
-                                    &mode) == WINED3D_OK) {
-        if(DDSD)
+    for(fmt = 0; fmt < (sizeof(checkFormatList) / sizeof(checkFormatList[0])); fmt++)
+    {
+        if(pixelformat != WINED3DFMT_UNKNOWN && checkFormatList[fmt] != pixelformat)
         {
-            if(DDSD->dwFlags & DDSD_WIDTH && mode.Width != DDSD->dwWidth) continue;
-            if(DDSD->dwFlags & DDSD_HEIGHT && mode.Height != DDSD->dwHeight) continue;
+            continue;
         }
 
-        memset(&callback_sd, 0, sizeof(callback_sd));
-        callback_sd.dwSize = sizeof(callback_sd);
-        callback_sd.u4.ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT);
-
-        callback_sd.dwFlags = DDSD_HEIGHT|DDSD_WIDTH|DDSD_PIXELFORMAT|DDSD_PITCH;
-        if(Flags & DDEDM_REFRESHRATES)
+        modenum = 0;
+        while(IWineD3D_EnumAdapterModes(This->wineD3D,
+                                        WINED3DADAPTER_DEFAULT,
+                                        checkFormatList[fmt],
+                                        modenum++,
+                                        &mode) == WINED3D_OK)
         {
-            callback_sd.dwFlags |= DDSD_REFRESHRATE;
-            callback_sd.u2.dwRefreshRate = mode.RefreshRate;
-        }
+            if(DDSD)
+            {
+                if(DDSD->dwFlags & DDSD_WIDTH && mode.Width != DDSD->dwWidth) continue;
+                if(DDSD->dwFlags & DDSD_HEIGHT && mode.Height != DDSD->dwHeight) continue;
+            }
 
-        callback_sd.dwWidth = mode.Width;
-        callback_sd.dwHeight = mode.Height;
+            memset(&callback_sd, 0, sizeof(callback_sd));
+            callback_sd.dwSize = sizeof(callback_sd);
+            callback_sd.u4.ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT);
 
-        PixelFormat_WineD3DtoDD(&callback_sd.u4.ddpfPixelFormat, mode.Format);
+            callback_sd.dwFlags = DDSD_HEIGHT|DDSD_WIDTH|DDSD_PIXELFORMAT|DDSD_PITCH;
+            if(Flags & DDEDM_REFRESHRATES)
+            {
+                callback_sd.dwFlags |= DDSD_REFRESHRATE;
+                callback_sd.u2.dwRefreshRate = mode.RefreshRate;
+            }
 
-        TRACE("Enumerating %dx%d@%d\n", callback_sd.dwWidth, callback_sd.dwHeight, callback_sd.u4.ddpfPixelFormat.u1.dwRGBBitCount);
+            callback_sd.dwWidth = mode.Width;
+            callback_sd.dwHeight = mode.Height;
 
-        if(cb(&callback_sd, Context) == DDENUMRET_CANCEL)
-        {
-            TRACE("Application asked to terminate the enumeration\n");
-            return DD_OK;
+            PixelFormat_WineD3DtoDD(&callback_sd.u4.ddpfPixelFormat, mode.Format);
+
+            TRACE("Enumerating %dx%d@%d\n", callback_sd.dwWidth, callback_sd.dwHeight, callback_sd.u4.ddpfPixelFormat.u1.dwRGBBitCount);
+
+            if(cb(&callback_sd, Context) == DDENUMRET_CANCEL)
+            {
+                TRACE("Application asked to terminate the enumeration\n");
+                return DD_OK;
+            }
         }
     }
+
     TRACE("End of enumeration\n");
     return DD_OK;
 }
@@ -1554,12 +1598,20 @@ D3D7CB_CreateSurface(IUnknown *device,
 {
     ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, device);
     IDirectDrawSurfaceImpl *surf = This->tex_root;
-    int i;
+    int i = 0;
     TRACE("(%p) call back. surf=%p\n", device, surf);
 
     /* Find the wanted mipmap. There are enough mipmaps in the chain */
-    for(i = 0; i < level; i++)
-        surf = surf->next_complex;
+    while(i < level)
+    {
+        IDirectDrawSurface7 *attached;
+        IDirectDrawSurface7_GetAttachedSurface(ICOM_INTERFACE(surf, IDirectDrawSurface7),
+                                               &This->tex_root->surface_desc.ddsCaps,
+                                               &attached);
+        surf = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, attached);
+        IDirectDrawSurface7_Release(attached);
+        i++;
+    }
 
     /* Return the surface */
     *Surface = surf->WineD3DSurface;
@@ -1864,25 +1916,25 @@ IDirectDrawImpl_CreateNewSurface(IDirectDrawImpl *This,
     {
         IWineD3DSurface_SetColorKey((*ppSurf)->WineD3DSurface,
                                     DDCKEY_DESTOVERLAY,
-                                    &pDDSD->u3.ddckCKDestOverlay);
+                                    (WINEDDCOLORKEY *) &pDDSD->u3.ddckCKDestOverlay);
     }
     if(pDDSD->dwFlags & DDSD_CKDESTBLT)
     {
         IWineD3DSurface_SetColorKey((*ppSurf)->WineD3DSurface,
                                     DDCKEY_DESTBLT,
-                                    &pDDSD->ddckCKDestBlt);
+                                    (WINEDDCOLORKEY *) &pDDSD->ddckCKDestBlt);
     }
     if(pDDSD->dwFlags & DDSD_CKSRCOVERLAY)
     {
         IWineD3DSurface_SetColorKey((*ppSurf)->WineD3DSurface,
                                     DDCKEY_SRCOVERLAY,
-                                    &pDDSD->ddckCKSrcOverlay);
+                                    (WINEDDCOLORKEY *) &pDDSD->ddckCKSrcOverlay);
     }
     if(pDDSD->dwFlags & DDSD_CKSRCBLT)
     {
         IWineD3DSurface_SetColorKey((*ppSurf)->WineD3DSurface,
                                     DDCKEY_SRCBLT,
-                                    &pDDSD->ddckCKSrcBlt);
+                                    (WINEDDCOLORKEY *) &pDDSD->ddckCKSrcBlt);
     }
     if ( pDDSD->dwFlags & DDSD_LPSURFACE)
     {
@@ -2530,6 +2582,28 @@ IDirectDrawImpl_EnumSurfaces(IDirectDraw7 *iface,
     return DD_OK;
 }
 
+static HRESULT WINAPI
+findRenderTarget(IDirectDrawSurface7 *surface,
+                 DDSURFACEDESC2 *desc,
+                 void *ctx)
+{
+    IDirectDrawSurfaceImpl *surf = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, surface);
+    IDirectDrawSurfaceImpl **target = (IDirectDrawSurfaceImpl **) ctx;
+
+    if(!surf->isRenderTarget) {
+        *target = surf;
+        IDirectDrawSurface7_Release(surface);
+        return DDENUMRET_CANCEL;
+    }
+
+    /* Recurse into the surface tree */
+    IDirectDrawSurface7_EnumAttachedSurfaces(surface, ctx, findRenderTarget);
+
+    IDirectDrawSurface7_Release(surface);
+    if(*target) return DDENUMRET_CANCEL;
+    else return DDENUMRET_OK; /* Continue with the next neighbor surface */
+}
+
 /*****************************************************************************
  * D3D7CB_CreateRenderTarget
  *
@@ -2562,25 +2636,29 @@ D3D7CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior,
                           HANDLE* pSharedHandle)
 {
     ICOM_THIS_FROM(IDirectDrawImpl, IDirectDraw7, device);
-    IDirectDrawSurfaceImpl *d3dSurface = (IDirectDrawSurfaceImpl *) This->d3d_target->first_complex;
+    IDirectDrawSurfaceImpl *d3dSurface = This->d3d_target->first_complex, *target = NULL;
     TRACE("(%p) call back\n", device);
 
-    /* Loop through the complex chain and try to find unused primary surfaces */
-    while(d3dSurface->isRenderTarget)
+    if(d3dSurface->isRenderTarget)
     {
-        d3dSurface = d3dSurface->next_complex;
-        if(!d3dSurface) break;
+        IDirectDrawSurface7_EnumAttachedSurfaces(ICOM_INTERFACE(d3dSurface, IDirectDrawSurface7),
+                                                 &target, findRenderTarget);
     }
-    if(!d3dSurface)
+    else
     {
-        d3dSurface = This->d3d_target;
+        target = d3dSurface;
+    }
+
+    if(!target)
+    {
+        target = This->d3d_target;
         ERR(" (%p) : No DirectDrawSurface found to create the back buffer. Using the front buffer as back buffer. Uncertain consequences\n", This);
     }
 
     /* TODO: Return failure if the dimensions do not match, but this shouldn't happen */
 
-    *ppSurface = d3dSurface->WineD3DSurface;
-    d3dSurface->isRenderTarget = TRUE;
+    *ppSurface = target->WineD3DSurface;
+    target->isRenderTarget = TRUE;
     TRACE("Returning wineD3DSurface %p, it belongs to surface %p\n", *ppSurface, d3dSurface);
     return D3D_OK;
 }
@@ -2978,3 +3056,78 @@ const IDirectDraw7Vtbl IDirectDraw7_Vtbl =
     IDirectDrawImpl_StartModeTest,
     IDirectDrawImpl_EvaluateMode
 };
+
+/*****************************************************************************
+ * IDirectDrawImpl_FindDecl
+ *
+ * Finds the WineD3D vertex declaration for a specific fvf, and creates one
+ * if none was found.
+ *
+ * This function is in ddraw.c and the DDraw object space because D3D7
+ * vertex buffers are created using the IDirect3D interface to the ddraw
+ * object, so they can be valid accross D3D devices(theoretically. The ddraw
+ * object also owns the wined3d device
+ *
+ * Parameters:
+ *  This: Device
+ *  fvf: Fvf to find the decl for
+ *
+ * Returns:
+ *  NULL in case of an error, the IWineD3DVertexDeclaration interface for the
+ *  fvf otherwise.
+ *
+ *****************************************************************************/
+IWineD3DVertexDeclaration *
+IDirectDrawImpl_FindDecl(IDirectDrawImpl *This,
+                         DWORD fvf)
+{
+    HRESULT hr;
+    IWineD3DVertexDeclaration* pDecl = NULL;
+    int p, low, high; /* deliberately signed */
+    struct FvfToDecl *convertedDecls = This->decls;
+
+    TRACE("Searching for declaration for fvf %08x... ", fvf);
+
+    low = 0;
+    high = This->numConvertedDecls - 1;
+    while(low <= high) {
+        p = (low + high) >> 1;
+        TRACE("%d ", p);
+        if(convertedDecls[p].fvf == fvf) {
+            TRACE("found %p\n", convertedDecls[p].decl);
+            return convertedDecls[p].decl;
+        } else if(convertedDecls[p].fvf < fvf) {
+            low = p + 1;
+        } else {
+            high = p - 1;
+        }
+    }
+    TRACE("not found. Creating and inserting at position %d.\n", low);
+
+    hr = IWineD3DDevice_CreateVertexDeclarationFromFVF(This->wineD3DDevice,
+                                                       &pDecl,
+                                                       (IUnknown *) ICOM_INTERFACE(This, IDirectDraw7),
+                                                       fvf);
+    if (hr != S_OK) return NULL;
+
+    if(This->declArraySize == This->numConvertedDecls) {
+        int grow = max(This->declArraySize / 2, 8);
+        convertedDecls = HeapReAlloc(GetProcessHeap(), 0, convertedDecls,
+                                     sizeof(convertedDecls[0]) * (This->numConvertedDecls + grow));
+        if(!convertedDecls) {
+            /* This will destroy it */
+            IWineD3DVertexDeclaration_Release(pDecl);
+            return NULL;
+        }
+        This->decls = convertedDecls;
+        This->declArraySize += grow;
+    }
+
+    memmove(convertedDecls + low + 1, convertedDecls + low, sizeof(convertedDecls[0]) * (This->numConvertedDecls - low));
+    convertedDecls[low].decl = pDecl;
+    convertedDecls[low].fvf = fvf;
+    This->numConvertedDecls++;
+
+    TRACE("Returning %p. %d decls in array\n", pDecl, This->numConvertedDecls);
+    return pDecl;
+}

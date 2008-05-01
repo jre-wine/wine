@@ -16,6 +16,7 @@ EXTRADIRS = @GLU32FILES@ @OPENGLFILES@ @QUARTZFILES@ @XFILES@
 # Subdir list
 
 BASEDIRS = \
+	acledit \
 	activeds \
 	advapi32 \
 	advpack \
@@ -170,6 +171,7 @@ BASEDIRS = \
 	stdole32.tlb \
 	sti \
 	svrapi \
+	sxs \
 	tapi32 \
 	twain_32 \
 	unicows \
@@ -232,6 +234,7 @@ TESTSUBDIRS = \
 	crypt32/tests \
 	d3d8/tests \
 	d3d9/tests \
+	d3drm/tests \
 	ddraw/tests \
 	dinput/tests \
 	dnsapi/tests \
@@ -266,6 +269,7 @@ TESTSUBDIRS = \
 	rpcrt4/tests \
 	rsabase/tests \
 	rsaenh/tests \
+	schannel/tests \
 	secur32/tests \
 	serialui/tests \
 	setupapi/tests \
@@ -551,6 +555,7 @@ IMPORT_LIBS = \
 	shfolder/libshfolder.$(IMPLIBEXT) \
 	shlwapi/libshlwapi.$(IMPLIBEXT) \
 	snmpapi/libsnmpapi.$(IMPLIBEXT) \
+	spoolss/libspoolss.$(IMPLIBEXT) \
 	sti/libsti.$(IMPLIBEXT) \
 	tapi32/libtapi32.$(IMPLIBEXT) \
 	unicows/libunicows.$(IMPLIBEXT) \
@@ -867,6 +872,9 @@ shlwapi/libshlwapi.$(IMPLIBEXT): shlwapi/shlwapi.spec $(WINEBUILD)
 
 snmpapi/libsnmpapi.$(IMPLIBEXT): snmpapi/snmpapi.spec $(WINEBUILD)
 	@cd snmpapi && $(MAKE) libsnmpapi.$(IMPLIBEXT)
+
+spoolss/libspoolss.$(IMPLIBEXT): spoolss/spoolss.spec $(WINEBUILD)
+	@cd spoolss && $(MAKE) libspoolss.$(IMPLIBEXT)
 
 sti/libsti.$(IMPLIBEXT): sti/sti.spec $(WINEBUILD)
 	@cd sti && $(MAKE) libsti.$(IMPLIBEXT)

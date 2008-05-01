@@ -1114,7 +1114,7 @@ HANDLE WINAPI CreateNamedPipeW( LPCWSTR name, DWORD dwOpenMode,
     HANDLE handle;
     UNICODE_STRING nt_name;
     OBJECT_ATTRIBUTES attr;
-    DWORD options;
+    DWORD access, options;
     BOOLEAN pipe_type, read_mode, non_block;
     NTSTATUS status;
     IO_STATUS_BLOCK iosb;
@@ -1144,13 +1144,27 @@ HANDLE WINAPI CreateNamedPipeW( LPCWSTR name, DWORD dwOpenMode,
     attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
     attr.SecurityQualityOfService = NULL;
 
-    options = 0;
+    switch(dwOpenMode & 3)
+    {
+    case PIPE_ACCESS_INBOUND:
+        options = FILE_PIPE_INBOUND;
+        access  = GENERIC_READ;
+        break;
+    case PIPE_ACCESS_OUTBOUND:
+        options = FILE_PIPE_OUTBOUND;
+        access  = GENERIC_WRITE;
+        break;
+    case PIPE_ACCESS_DUPLEX:
+        options = FILE_PIPE_FULL_DUPLEX;
+        access  = GENERIC_READ | GENERIC_WRITE;
+        break;
+    default:
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return INVALID_HANDLE_VALUE;
+    }
+    access |= SYNCHRONIZE;
     if (dwOpenMode & FILE_FLAG_WRITE_THROUGH) options |= FILE_WRITE_THROUGH;
     if (!(dwOpenMode & FILE_FLAG_OVERLAPPED)) options |= FILE_SYNCHRONOUS_IO_ALERT;
-    if ((dwOpenMode & PIPE_ACCESS_DUPLEX) == PIPE_ACCESS_DUPLEX)
-        options |= FILE_PIPE_FULL_DUPLEX;
-    else if (dwOpenMode & PIPE_ACCESS_INBOUND) options |= FILE_PIPE_INBOUND;
-    else if (dwOpenMode & PIPE_ACCESS_OUTBOUND) options |= FILE_PIPE_OUTBOUND;
     pipe_type = (dwPipeMode & PIPE_TYPE_MESSAGE) ? TRUE : FALSE;
     read_mode = (dwPipeMode & PIPE_READMODE_MESSAGE) ? TRUE : FALSE;
     non_block = (dwPipeMode & PIPE_NOWAIT) ? TRUE : FALSE;
@@ -1159,9 +1173,9 @@ HANDLE WINAPI CreateNamedPipeW( LPCWSTR name, DWORD dwOpenMode,
     timeout.QuadPart = (ULONGLONG)nDefaultTimeOut * -10000;
 
     SetLastError(0);
-        
-    status = NtCreateNamedPipeFile(&handle, GENERIC_READ|GENERIC_WRITE, &attr, &iosb,
-                                   0, FILE_OVERWRITE_IF, options, pipe_type,
+
+    status = NtCreateNamedPipeFile(&handle, access, &attr, &iosb, 0,
+                                   FILE_OVERWRITE_IF, options, pipe_type,
                                    read_mode, non_block, nMaxInstances,
                                    nInBufferSize, nOutBufferSize, &timeout);
 
@@ -1287,7 +1301,10 @@ BOOL WINAPI WaitNamedPipeW (LPCWSTR name, DWORD nTimeOut)
     }
 
     pipe_wait->TimeoutSpecified = !(nTimeOut == NMPWAIT_USE_DEFAULT_WAIT);
-    pipe_wait->Timeout.QuadPart = (ULONGLONG)nTimeOut * -10000;
+    if (nTimeOut == NMPWAIT_WAIT_FOREVER)
+        pipe_wait->Timeout.QuadPart = ((ULONGLONG)0x7fffffff << 32) | 0xffffffff;
+    else
+        pipe_wait->Timeout.QuadPart = (ULONGLONG)nTimeOut * -10000;
     pipe_wait->NameLength = nt_name.Length - sizeof(leadin);
     memcpy(pipe_wait->Name, nt_name.Buffer + sizeof(leadin)/sizeof(WCHAR),
            pipe_wait->NameLength);
@@ -1757,8 +1774,12 @@ BOOL WINAPI GetMailslotInfo( HANDLE hMailslot, LPDWORD lpMaxMessageSize,
     if( lpMessageCount )
         *lpMessageCount = info.MessagesAvailable;
     if( lpReadTimeout )
-        *lpReadTimeout = info.ReadTimeout.QuadPart / -10000;
-
+    {
+        if (info.ReadTimeout.QuadPart == (((LONGLONG)0x7fffffff << 32) | 0xffffffff))
+            *lpReadTimeout = MAILSLOT_WAIT_FOREVER;
+        else
+            *lpReadTimeout = info.ReadTimeout.QuadPart / -10000;
+    }
     return TRUE;
 }
 
@@ -1784,7 +1805,10 @@ BOOL WINAPI SetMailslotInfo( HANDLE hMailslot, DWORD dwReadTimeout)
 
     TRACE("%p %d\n", hMailslot, dwReadTimeout);
 
-    info.ReadTimeout.QuadPart = dwReadTimeout * -10000;
+    if (dwReadTimeout != MAILSLOT_WAIT_FOREVER)
+        info.ReadTimeout.QuadPart = (ULONGLONG)dwReadTimeout * -10000;
+    else
+        info.ReadTimeout.QuadPart = ((LONGLONG)0x7fffffff << 32) | 0xffffffff;
     status = NtSetInformationFile( hMailslot, &iosb, &info, sizeof info,
                                    FileMailslotSetInformation );
     if( status != STATUS_SUCCESS )
