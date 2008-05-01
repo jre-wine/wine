@@ -87,6 +87,7 @@ BASEDIRS = \
 	itss \
 	kernel32 \
 	localspl \
+	localui \
 	lz32 \
 	mapi32 \
 	mciavi32 \
@@ -188,7 +189,6 @@ BASEDIRS = \
 	vwin32.vxd \
 	w32skrnl \
 	winealsa.drv \
-	winearts.drv \
 	wineaudioio.drv \
 	winecoreaudio.drv \
 	winedos \
@@ -244,6 +244,7 @@ TESTSUBDIRS = \
 	itss/tests \
 	kernel32/tests \
 	localspl/tests \
+	localui/tests \
 	lz32/tests \
 	mapi32/tests \
 	mlang/tests \

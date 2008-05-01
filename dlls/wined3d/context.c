@@ -352,6 +352,14 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     glPixelStorei(GL_UNPACK_ALIGNMENT, SURFACE_ALIGNMENT);
     checkGLcall("glPixelStorei(GL_UNPACK_ALIGNMENT, SURFACE_ALIGNMENT);");
 
+    if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
+        /* Most textures will use client storage if supported. Exceptions are non-native power of 2 textures
+         * and textures in DIB sections(due to the memory protection).
+         */
+        glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE);
+        checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE)");
+    }
+
     if(oldDrawable && oldCtx) {
         glXMakeCurrent(display, oldDrawable, oldCtx);
     }
@@ -623,9 +631,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
              * rendering. No context change is needed in that case
              */
 
-            if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && oldRenderOffscreen) {
-                set_render_target_fbo((IWineD3DDevice *) This, 0, target);
-            } else if(wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER) {
+            if (wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER) {
                 if(((IWineD3DSwapChainImpl *) swapchain)->backBuffer) {
                     glDrawBuffer(GL_BACK);
                     checkGLcall("glDrawBuffer(GL_BACK)");
@@ -657,7 +663,6 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
                          */
                         context = ((IWineD3DSwapChainImpl *) This->swapchains[0])->context[0];
                     }
-                    set_render_target_fbo((IWineD3DDevice *) This, 0, target);
                     break;
 
                 case ORM_PBUFFER:
@@ -702,6 +707,13 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
                     glDrawBuffer(This->offscreenBuffer);
                     checkGLcall("glDrawBuffer(This->offscreenBuffer)");
                     break;
+            }
+
+            if (wined3d_settings.offscreen_rendering_mode != ORM_FBO) {
+                /* Make sure we have a OpenGL texture name so the PreLoad() used to read the buffer
+                 * back when we are done won't mark us dirty.
+                 */
+                IWineD3DSurface_PreLoad(target);
             }
 
             if(!oldRenderOffscreen) {

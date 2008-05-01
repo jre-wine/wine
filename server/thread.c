@@ -129,10 +129,11 @@ static const struct fd_ops thread_fd_ops =
 {
     NULL,                       /* get_poll_events */
     thread_poll_event,          /* poll_event */
-    no_flush,                   /* flush */
-    no_get_file_info,           /* get_file_info */
-    no_queue_async,             /* queue_async */
-    no_cancel_async             /* cancel_async */
+    NULL,                       /* flush */
+    NULL,                       /* get_fd_type */
+    NULL,                       /* queue_async */
+    NULL,                       /* reselect_async */
+    NULL                        /* cancel_async */
 };
 
 static struct list thread_list = LIST_INIT(thread_list);
@@ -205,7 +206,7 @@ struct thread *create_thread( int fd, struct process *process )
         release_object( thread );
         return NULL;
     }
-    if (!(thread->request_fd = create_anonymous_fd( &thread_fd_ops, fd, &thread->obj )))
+    if (!(thread->request_fd = create_anonymous_fd( &thread_fd_ops, fd, &thread->obj, 0 )))
     {
         release_object( thread );
         return NULL;
@@ -992,7 +993,7 @@ DECL_HANDLER(init_thread)
 
     if (reply_fd == -1 || fcntl( reply_fd, F_SETFL, O_NONBLOCK ) == -1) goto error;
 
-    current->reply_fd = create_anonymous_fd( &thread_fd_ops, reply_fd, &current->obj );
+    current->reply_fd = create_anonymous_fd( &thread_fd_ops, reply_fd, &current->obj, 0 );
     reply_fd = -1;
     if (!current->reply_fd) goto error;
 
@@ -1001,7 +1002,7 @@ DECL_HANDLER(init_thread)
         set_error( STATUS_TOO_MANY_OPENED_FILES );  /* most likely reason */
         return;
     }
-    if (!(current->wait_fd  = create_anonymous_fd( &thread_fd_ops, wait_fd, &current->obj )))
+    if (!(current->wait_fd  = create_anonymous_fd( &thread_fd_ops, wait_fd, &current->obj, 0 )))
         return;
 
     if (!is_valid_address(req->teb) || !is_valid_address(req->peb) || !is_valid_address(req->ldt_copy))

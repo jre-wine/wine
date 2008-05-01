@@ -679,6 +679,9 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
             } else if (strcmp(ThisExtn, "GL_EXT_framebuffer_object") == 0) {
                 TRACE_(d3d_caps)(" FOUND: EXT Frame Buffer Object support\n");
                 gl_info->supported[EXT_FRAMEBUFFER_OBJECT] = TRUE;
+            } else if (strcmp(ThisExtn, "GL_EXT_framebuffer_blit") == 0) {
+                TRACE_(d3d_caps)(" FOUND: EXT Frame Buffer Blit support\n");
+                gl_info->supported[EXT_FRAMEBUFFER_BLIT] = TRUE;
             } else if (strcmp(ThisExtn, "GL_EXT_blend_minmax") == 0) {
                 TRACE_(d3d_caps)(" FOUND: EXT Blend minmax support\n");
                 gl_info->supported[EXT_BLEND_MINMAX] = TRUE;
@@ -812,6 +815,8 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
                  */
                 gl_info->supported[NV_FENCE] = FALSE;
                 gl_info->supported[APPLE_FENCE] = TRUE;
+            } else if (strstr(ThisExtn, "GL_APPLE_client_storage")) {
+                gl_info->supported[APPLE_CLIENT_STORAGE] = TRUE;
             }
 
             if (*GL_Extensions == ' ') GL_Extensions++;
@@ -1667,14 +1672,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                 return WINED3D_OK;
             case WINED3DFMT_R16F:
             case WINED3DFMT_A16B16G16R16F:
-                if (!GL_SUPPORT(ARB_HALF_FLOAT_PIXEL)) {
-                    TRACE_(d3d_caps)("[FAILED]\n");
-                    return WINED3DERR_NOTAVAILABLE;
-                }
-                /* Fall through, support not fully determined yet. */
-            case WINED3DFMT_R32F:
-            case WINED3DFMT_A32B32G32R32F:
-                if (!GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
+                if (!GL_SUPPORT(ARB_HALF_FLOAT_PIXEL) || !GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
                     TRACE_(d3d_caps)("[FAILED]\n");
                     return WINED3DERR_NOTAVAILABLE;
                 }
@@ -1697,6 +1695,23 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
           return WINED3D_OK;
         default:
             break; /* Avoid compiler warnings */
+        }
+    }
+
+    if (GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
+
+        BOOL half_pixel_support = GL_SUPPORT(ARB_HALF_FLOAT_PIXEL);
+
+        switch (CheckFormat) {
+            case WINED3DFMT_R16F:
+            case WINED3DFMT_A16B16G16R16F:
+                if (!half_pixel_support) break;
+            case WINED3DFMT_R32F:
+            case WINED3DFMT_A32B32G32R32F:
+                TRACE_(d3d_caps)("[OK]\n");
+                return WINED3D_OK;
+            default:
+                break; /* Avoid compiler warnings */
         }
     }
 
@@ -1882,7 +1897,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     *pCaps->Caps2                   = WINED3DCAPS2_CANRENDERWINDOWED |
                                       WINED3DCAPS2_FULLSCREENGAMMA |
                                       WINED3DCAPS2_DYNAMICTEXTURES;
-    *pCaps->Caps3                   = 0;
+    *pCaps->Caps3                   = WINED3DCAPS3_ALPHA_FULLSCREEN_FLIP_OR_DISCARD;
     *pCaps->PresentationIntervals   = WINED3DPRESENT_INTERVAL_IMMEDIATE;
 
     *pCaps->CursorCaps              = 0;
@@ -2310,7 +2325,10 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
         *pCaps->NumSimultaneousRTs = GL_LIMITS(buffers);
 
             
-        *pCaps->StretchRectFilterCaps             = 0;
+        *pCaps->StretchRectFilterCaps             = WINED3DPTFILTERCAPS_MINFPOINT  |
+                                                    WINED3DPTFILTERCAPS_MAGFPOINT  |
+                                                    WINED3DPTFILTERCAPS_MINFLINEAR |
+                                                    WINED3DPTFILTERCAPS_MAGFLINEAR;
         *pCaps->VertexTextureFilterCaps           = 0;
         
         if(*pCaps->VertexShaderVersion == WINED3DVS_VERSION(3,0)) {
@@ -2489,7 +2507,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
         return temp_result;
 
     object->render_targets = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
-
+    object->fbo_color_attachments = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
     object->draw_buffers = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(GLenum) * GL_LIMITS(buffers));
 
     /* set the state of the device to valid */

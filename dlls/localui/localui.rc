@@ -1,6 +1,7 @@
-/* Definition for aRts drivers : wine multimedia system
+/*
+ * Top level resource file for localui
  *
- * Copyright 2002 Chris Morgan<cmorgan@alum.wpi.edu>
+ * Copyright 2007 Detlef Riekenberg
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -15,20 +16,22 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ *
  */
 
-#ifndef __WINE_ARTS_H
-#define __WINE_ARTS_H
+#include "windef.h"
+#include "winbase.h"
+#include "winver.h"
 
-#ifndef __WINE_CONFIG_H
-# error You must include config.h to use this header
-#endif
 
-#ifdef HAVE_SYS_ERRNO_H
-#include <sys/errno.h>
-#endif
+#define WINE_FILENAME_STR "localui.dll"
+#define WINE_FILEDESCRIPTION_STR "User Interface for the Local Monitor"
 
-extern LONG ARTS_WaveInit(void);
-extern LONG ARTS_WaveClose(void);
+/* Same Version as WinXP_sp2 */
+#define WINE_FILEVERSION      5,1,2600,2180
+#define WINE_FILEVERSION_STR "5.1.2600.2180"
 
-#endif  /* __WINE_ARTS_H */
+#define WINE_PRODUCTVERSION      5,1,2600,2180
+#define WINE_PRODUCTVERSION_STR "5.1.2600.2180"
+
+#include "wine/wine_common_ver.rc"

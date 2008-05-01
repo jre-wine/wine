@@ -24,6 +24,7 @@
 #include "object.h"
 
 struct fd;
+struct async_queue;
 
 typedef unsigned __int64 file_pos_t;
 
@@ -37,9 +38,11 @@ struct fd_ops
     /* flush the object buffers */
     void (*flush)(struct fd *, struct event **);
     /* get file information */
-    enum server_fd_type (*get_file_info)(struct fd *fd, int *flags);
+    enum server_fd_type (*get_fd_type)(struct fd *fd);
     /* queue an async operation */
     void (*queue_async)(struct fd *, const async_data_t *data, int type, int count);
+    /* selected events for async i/o need an update */
+    void (*reselect_async)( struct fd *, struct async_queue *queue );
     /* cancel an async operation */
     void (*cancel_async)(struct fd *);
 };
@@ -50,9 +53,10 @@ extern struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct obje
 extern struct fd *open_fd( const char *name, int flags, mode_t *mode, unsigned int access,
                            unsigned int sharing, unsigned int options );
 extern struct fd *create_anonymous_fd( const struct fd_ops *fd_user_ops,
-                                       int unix_fd, struct object *user );
+                                       int unix_fd, struct object *user, unsigned int options );
 extern void *get_fd_user( struct fd *fd );
 extern void set_fd_user( struct fd *fd, const struct fd_ops *ops, struct object *user );
+extern unsigned int get_fd_options( struct fd *fd );
 extern int get_unix_fd( struct fd *fd );
 extern int is_same_file_fd( struct fd *fd1, struct fd *fd2 );
 extern int is_fd_removable( struct fd *fd );
@@ -62,20 +66,18 @@ extern int check_fd_events( struct fd *fd, int events );
 extern void set_fd_events( struct fd *fd, int events );
 extern obj_handle_t lock_fd( struct fd *fd, file_pos_t offset, file_pos_t count, int shared, int wait );
 extern void unlock_fd( struct fd *fd, file_pos_t offset, file_pos_t count );
+extern void set_fd_signaled( struct fd *fd, int signaled );
 
-extern int default_fd_add_queue( struct object *obj, struct wait_queue_entry *entry );
-extern void default_fd_remove_queue( struct object *obj, struct wait_queue_entry *entry );
 extern int default_fd_signaled( struct object *obj, struct thread *thread );
 extern int default_fd_get_poll_events( struct fd *fd );
 extern void default_poll_event( struct fd *fd, int event );
-extern void fd_queue_async_timeout( struct fd *fd, const async_data_t *data, int type,
-                                    int count, const struct timeval *timeout );
+extern struct async *fd_queue_async( struct fd *fd, const async_data_t *data, int type, int count );
+extern void fd_async_wake_up( struct fd *fd, int type, unsigned int status );
+extern void fd_reselect_async( struct fd *fd, struct async_queue *queue );
 extern void default_fd_queue_async( struct fd *fd, const async_data_t *data, int type, int count );
+extern void default_fd_reselect_async( struct fd *fd, struct async_queue *queue );
 extern void default_fd_cancel_async( struct fd *fd );
 extern void no_flush( struct fd *fd, struct event **event );
-extern enum server_fd_type no_get_file_info( struct fd *fd, int *flags );
-extern void no_queue_async( struct fd *fd, const async_data_t *data, int type, int count);
-extern void no_cancel_async( struct fd *fd );
 extern void main_loop(void);
 extern void remove_process_locks( struct process *process );
 
@@ -119,14 +121,18 @@ extern struct object *create_dir_obj( struct fd *fd );
 /* serial port functions */
 
 extern int is_serial_fd( struct fd *fd );
-extern struct object *create_serial( struct fd *fd, unsigned int options );
+extern struct object *create_serial( struct fd *fd );
 
 /* async I/O functions */
-extern struct async *create_async( struct thread *thread, const struct timeval *timeout,
-                                   struct list *queue, const async_data_t *data );
+extern struct async_queue *create_async_queue( struct fd *fd );
+extern void free_async_queue( struct async_queue *queue );
+extern struct async *create_async( struct thread *thread, struct async_queue *queue,
+                                   const async_data_t *data );
+extern void async_set_timeout( struct async *async, const struct timeval *timeout,
+                               unsigned int status );
 extern void async_set_result( struct object *obj, unsigned int status );
-extern void async_terminate_head( struct list *queue, unsigned int status );
-extern void async_terminate_queue( struct list *queue, unsigned int status );
+extern int async_waiting( struct async_queue *queue );
+extern void async_wake_up( struct async_queue *queue, unsigned int status );
 
 /* access rights that require Unix read permission */
 #define FILE_UNIX_READ_ACCESS (FILE_READ_DATA|FILE_READ_ATTRIBUTES|FILE_READ_EA)

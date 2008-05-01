@@ -2,6 +2,7 @@
  * Miscellaneous tests
  *
  * Copyright 2007 James Hawkins
+ * Copyright 2007 Hans Leidekker
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -40,6 +41,8 @@ static CHAR CURR_DIR[MAX_PATH];
  *  - SourceInfFileName should be <= MAX_PATH
  *  - copy styles
  */
+
+static BOOL (WINAPI *pSetupGetFileCompressionInfoExA)(PCSTR, PSTR, DWORD, PDWORD, PDWORD, PDWORD, PUINT);
 
 static void append_str(char **str, const char *data)
 {
@@ -247,9 +250,293 @@ static void test_SetupCopyOEMInf(void)
     ok(!file_exists(path), "Expected source inf to not exist\n");
 }
 
+static void create_source_file(LPSTR filename, const BYTE *data, DWORD size)
+{
+    HANDLE handle;
+    DWORD written;
+
+    handle = CreateFileA(filename, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    WriteFile(handle, data, size, &written, NULL);
+    CloseHandle(handle);
+}
+
+static BOOL compare_file_data(LPSTR file, const BYTE *data, DWORD size)
+{
+    DWORD read;
+    HANDLE handle;
+    BOOL ret = FALSE;
+    LPBYTE buffer;
+
+    handle = CreateFileA(file, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    buffer = HeapAlloc(GetProcessHeap(), 0, size);
+    if (buffer)
+    {
+        ReadFile(handle, buffer, size, &read, NULL);
+        if (read == size && !memcmp(data, buffer, size)) ret = TRUE;
+        HeapFree(GetProcessHeap(), 0, buffer);
+    }
+    CloseHandle(handle);
+    return ret;
+}
+
+static const BYTE uncompressed[] = {
+    'u','n','c','o','m','p','r','e','s','s','e','d','\r','\n'
+};
+static const BYTE comp_lzx[] = {
+    0x53, 0x5a, 0x44, 0x44, 0x88, 0xf0, 0x27, 0x33, 0x41, 0x00, 0x0e, 0x00, 0x00, 0x00, 0xff, 0x00,
+    0x00, 0x75, 0x6e, 0x63, 0x6f, 0x6d, 0x70, 0x3f, 0x72, 0x65, 0x73, 0x73, 0x65, 0x64
+};
+static const BYTE comp_zip[] = {
+    0x50, 0x4b, 0x03, 0x04, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0xbd, 0xae, 0x81, 0x36, 0x75, 0x11,
+    0x2c, 0x1b, 0x0e, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x04, 0x00, 0x15, 0x00, 0x77, 0x69,
+    0x6e, 0x65, 0x55, 0x54, 0x09, 0x00, 0x03, 0xd6, 0x0d, 0x10, 0x46, 0xfd, 0x0d, 0x10, 0x46, 0x55,
+    0x78, 0x04, 0x00, 0xe8, 0x03, 0xe8, 0x03, 0x00, 0x00, 0x75, 0x6e, 0x63, 0x6f, 0x6d, 0x70, 0x72,
+    0x65, 0x73, 0x73, 0x65, 0x64, 0x50, 0x4b, 0x01, 0x02, 0x17, 0x03, 0x0a, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0xbd, 0xae, 0x81, 0x36, 0x75, 0x11, 0x2c, 0x1b, 0x0e, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00,
+    0x00, 0x04, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xa4, 0x81, 0x00,
+    0x00, 0x00, 0x00, 0x77, 0x69, 0x6e, 0x65, 0x55, 0x54, 0x05, 0x00, 0x03, 0xd6, 0x0d, 0x10, 0x46,
+    0x55, 0x78, 0x00, 0x00, 0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+    0x3f, 0x00, 0x00, 0x00, 0x45, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+static const BYTE comp_cab_lzx[] = {
+    0x4d, 0x53, 0x43, 0x46, 0x00, 0x00, 0x00, 0x00, 0x6b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x2c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00, 0x01, 0x00, 0x03, 0x0f, 0x0e, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x84, 0x36, 0x86, 0x72, 0x20, 0x00, 0x77, 0x69, 0x6e, 0x65,
+    0x00, 0x19, 0xd0, 0x1a, 0xe3, 0x22, 0x00, 0x0e, 0x00, 0x5b, 0x80, 0x80, 0x8d, 0x00, 0x30, 0xe0,
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x75, 0x6e, 0x63,
+    0x6f, 0x6d, 0x70, 0x72, 0x65, 0x73, 0x73, 0x65, 0x64, 0x0d, 0x0a
+};
+static const BYTE comp_cab_zip[] =  {
+    0x4d, 0x53, 0x43, 0x46, 0x00, 0x00, 0x00, 0x00, 0x5b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x2c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x0e, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81, 0x36, 0x2f, 0xa5, 0x20, 0x00, 0x77, 0x69, 0x6e, 0x65,
+    0x00, 0x7c, 0x80, 0x26, 0x2b, 0x12, 0x00, 0x0e, 0x00, 0x43, 0x4b, 0x2b, 0xcd, 0x4b, 0xce, 0xcf,
+    0x2d, 0x28, 0x4a, 0x2d, 0x2e, 0x4e, 0x4d, 0xe1, 0xe5, 0x02, 0x00
+};
+
+static void test_SetupGetFileCompressionInfo(void)
+{
+    DWORD ret, source_size, target_size;
+    char source[MAX_PATH], temp[MAX_PATH], *name;
+    UINT type;
+
+    GetTempPathA(sizeof(temp), temp);
+    GetTempFileNameA(temp, "fci", 0, source);
+
+    create_source_file(source, uncompressed, sizeof(uncompressed));
+
+    ret = SetupGetFileCompressionInfoA(NULL, NULL, NULL, NULL, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "SetupGetFileCompressionInfo failed unexpectedly\n");
+
+    ret = SetupGetFileCompressionInfoA(source, NULL, NULL, NULL, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "SetupGetFileCompressionInfo failed unexpectedly\n");
+
+    ret = SetupGetFileCompressionInfoA(source, &name, NULL, NULL, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "SetupGetFileCompressionInfo failed unexpectedly\n");
+
+    ret = SetupGetFileCompressionInfoA(source, &name, &source_size, NULL, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "SetupGetFileCompressionInfo failed unexpectedly\n");
+
+    ret = SetupGetFileCompressionInfoA(source, &name, &source_size, &target_size, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "SetupGetFileCompressionInfo failed unexpectedly\n");
+
+    name = NULL;
+    source_size = target_size = 0;
+    type = 5;
+
+    ret = SetupGetFileCompressionInfoA(source, &name, &source_size, &target_size, &type);
+    ok(!ret, "SetupGetFileCompressionInfo failed unexpectedly\n");
+    ok(name && !lstrcmpA(name, source), "got %s, expected %s\n", name, source);
+    ok(source_size == sizeof(uncompressed), "got %d\n", source_size);
+    ok(target_size == sizeof(uncompressed), "got %d\n", target_size);
+    ok(type == FILE_COMPRESSION_NONE, "got %d, expected FILE_COMPRESSION_NONE\n", type);
+
+    DeleteFileA(source);
+}
+
+static void test_SetupGetFileCompressionInfoEx(void)
+{
+    BOOL ret;
+    DWORD required_len, source_size, target_size;
+    char source[MAX_PATH], temp[MAX_PATH], name[MAX_PATH];
+    UINT type;
+
+    GetTempPathA(sizeof(temp), temp);
+    GetTempFileNameA(temp, "doc", 0, source);
+
+    ret = pSetupGetFileCompressionInfoExA(NULL, NULL, 0, NULL, NULL, NULL, NULL);
+    ok(!ret, "SetupGetFileCompressionInfoEx succeeded unexpectedly\n");
+
+    ret = pSetupGetFileCompressionInfoExA(source, NULL, 0, NULL, NULL, NULL, NULL);
+    ok(!ret, "SetupGetFileCompressionInfoEx succeeded unexpectedly\n");
+
+    ret = pSetupGetFileCompressionInfoExA(source, NULL, 0, &required_len, NULL, NULL, NULL);
+    ok(!ret, "SetupGetFileCompressionInfoEx succeeded unexpectedly\n");
+    ok(required_len == lstrlenA(source) + 1, "got %d, expected %d\n", required_len, lstrlenA(source) + 1);
+
+    create_source_file(source, comp_lzx, sizeof(comp_lzx));
+
+    ret = pSetupGetFileCompressionInfoExA(source, name, sizeof(name), &required_len, &source_size, &target_size, &type);
+    ok(ret, "SetupGetFileCompressionInfoEx failed unexpectedly: %d\n", ret);
+    ok(!lstrcmpA(name, source), "got %s, expected %s\n", name, source);
+    ok(required_len == lstrlenA(source) + 1, "got %d, expected %d\n", required_len, lstrlenA(source) + 1);
+    ok(source_size == sizeof(comp_lzx), "got %d\n", source_size);
+    ok(target_size == sizeof(uncompressed), "got %d\n", target_size);
+    ok(type == FILE_COMPRESSION_WINLZA, "got %d, expected FILE_COMPRESSION_WINLZA\n", type);
+    DeleteFileA(source);
+
+    create_source_file(source, comp_zip, sizeof(comp_zip));
+
+    ret = pSetupGetFileCompressionInfoExA(source, name, sizeof(name), &required_len, &source_size, &target_size, &type);
+    ok(ret, "SetupGetFileCompressionInfoEx failed unexpectedly: %d\n", ret);
+    ok(!lstrcmpA(name, source), "got %s, expected %s\n", name, source);
+    ok(required_len == lstrlenA(source) + 1, "got %d, expected %d\n", required_len, lstrlenA(source) + 1);
+    ok(source_size == sizeof(comp_zip), "got %d\n", source_size);
+    ok(target_size == sizeof(comp_zip), "got %d\n", target_size);
+    ok(type == FILE_COMPRESSION_NONE, "got %d, expected FILE_COMPRESSION_NONE\n", type);
+    DeleteFileA(source);
+
+    create_source_file(source, comp_cab_lzx, sizeof(comp_cab_lzx));
+
+    ret = pSetupGetFileCompressionInfoExA(source, name, sizeof(name), &required_len, &source_size, &target_size, &type);
+    ok(ret, "SetupGetFileCompressionInfoEx failed unexpectedly: %d\n", ret);
+    ok(!lstrcmpA(name, source), "got %s, expected %s\n", name, source);
+    ok(required_len == lstrlenA(source) + 1, "got %d, expected %d\n", required_len, lstrlenA(source) + 1);
+    ok(source_size == sizeof(comp_cab_lzx), "got %d\n", source_size);
+    ok(target_size == sizeof(uncompressed), "got %d\n", target_size);
+    ok(type == FILE_COMPRESSION_MSZIP, "got %d, expected FILE_COMPRESSION_MSZIP\n", type);
+    DeleteFileA(source);
+
+    create_source_file(source, comp_cab_zip, sizeof(comp_cab_zip));
+
+    ret = pSetupGetFileCompressionInfoExA(source, name, sizeof(name), &required_len, &source_size, &target_size, &type);
+    ok(ret, "SetupGetFileCompressionInfoEx failed unexpectedly: %d\n", ret);
+    ok(!lstrcmpA(name, source), "got %s, expected %s\n", name, source);
+    ok(required_len == lstrlenA(source) + 1, "got %d, expected %d\n", required_len, lstrlenA(source) + 1);
+    ok(source_size == sizeof(comp_cab_zip), "got %d\n", source_size);
+    ok(target_size == sizeof(uncompressed), "got %d\n", target_size);
+    ok(type == FILE_COMPRESSION_MSZIP, "got %d, expected FILE_COMPRESSION_MSZIP\n", type);
+    DeleteFileA(source);
+}
+
+static void test_SetupDecompressOrCopyFile(void)
+{
+    DWORD ret;
+    char source[MAX_PATH], target[MAX_PATH], temp[MAX_PATH], *p;
+    UINT type;
+
+    GetTempPathA(sizeof(temp), temp);
+    GetTempFileNameA(temp, "doc", 0, source);
+    GetTempFileNameA(temp, "doc", 0, target);
+
+    /* parameter tests */
+
+    create_source_file(source, uncompressed, sizeof(uncompressed));
+
+    ret = SetupDecompressOrCopyFileA(NULL, NULL, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "SetupDecompressOrCopyFile failed unexpectedly\n");
+
+    type = FILE_COMPRESSION_NONE;
+    ret = SetupDecompressOrCopyFileA(NULL, target, &type);
+    ok(ret == ERROR_INVALID_PARAMETER, "SetupDecompressOrCopyFile failed unexpectedly\n");
+
+    ret = SetupDecompressOrCopyFileA(source, NULL, &type);
+    ok(ret == ERROR_INVALID_PARAMETER, "SetupDecompressOrCopyFile failed unexpectedly\n");
+
+    type = 5; /* try an invalid compression type */
+    ret = SetupDecompressOrCopyFileA(source, target, &type);
+    ok(ret == ERROR_INVALID_PARAMETER, "SetupDecompressOrCopyFile failed unexpectedly\n");
+
+    DeleteFileA(target);
+
+    /* no compression tests */
+
+    ret = SetupDecompressOrCopyFileA(source, target, NULL);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+    ok(compare_file_data(target, uncompressed, sizeof(uncompressed)), "incorrect target file\n");
+
+    /* try overwriting existing file */
+    ret = SetupDecompressOrCopyFileA(source, target, NULL);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+    DeleteFileA(target);
+
+    type = FILE_COMPRESSION_NONE;
+    ret = SetupDecompressOrCopyFileA(source, target, &type);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+    ok(compare_file_data(target, uncompressed, sizeof(uncompressed)), "incorrect target file\n");
+    DeleteFileA(target);
+
+    type = FILE_COMPRESSION_WINLZA;
+    ret = SetupDecompressOrCopyFileA(source, target, &type);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+    ok(compare_file_data(target, uncompressed, sizeof(uncompressed)), "incorrect target file\n");
+    DeleteFileA(target);
+
+    /* lz compression tests */
+
+    create_source_file(source, comp_lzx, sizeof(comp_lzx));
+
+    ret = SetupDecompressOrCopyFileA(source, target, NULL);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+    DeleteFileA(target);
+
+    /* zip compression tests */
+
+    create_source_file(source, comp_zip, sizeof(comp_zip));
+
+    ret = SetupDecompressOrCopyFileA(source, target, NULL);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+    ok(compare_file_data(target, comp_zip, sizeof(comp_zip)), "incorrect target file\n");
+    DeleteFileA(target);
+
+    /* cabinet compression tests */
+
+    create_source_file(source, comp_cab_zip, sizeof(comp_cab_zip));
+
+    p = strrchr(target, '\\');
+    lstrcpyA(p + 1, "wine");
+
+    ret = SetupDecompressOrCopyFileA(source, target, NULL);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+    ok(compare_file_data(target, uncompressed, sizeof(uncompressed)), "incorrect target file\n");
+
+    /* try overwriting existing file */
+    ret = SetupDecompressOrCopyFileA(source, target, NULL);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+
+    /* try zip compression */
+    type = FILE_COMPRESSION_MSZIP;
+    ret = SetupDecompressOrCopyFileA(source, target, &type);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+    ok(compare_file_data(target, uncompressed, sizeof(uncompressed)), "incorrect target file\n");
+
+    /* try no compression */
+    type = FILE_COMPRESSION_NONE;
+    ret = SetupDecompressOrCopyFileA(source, target, &type);
+    ok(!ret, "SetupDecompressOrCopyFile failed unexpectedly: %d\n", ret);
+    ok(compare_file_data(target, comp_cab_zip, sizeof(comp_cab_zip)), "incorrect target file\n");
+
+    DeleteFileA(target);
+    DeleteFileA(source);
+}
+
 START_TEST(misc)
 {
+    HMODULE hsetupapi = GetModuleHandle("setupapi.dll");
+
+    pSetupGetFileCompressionInfoExA = (void*)GetProcAddress(hsetupapi, "SetupGetFileCompressionInfoExA");
+
     GetCurrentDirectoryA(MAX_PATH, CURR_DIR);
 
     test_SetupCopyOEMInf();
+    test_SetupGetFileCompressionInfo();
+
+    if (pSetupGetFileCompressionInfoExA)
+        test_SetupGetFileCompressionInfoEx();
+    else
+        skip("SetupGetFileCompressionInfoExA is not available\n");
+
+    test_SetupDecompressOrCopyFile();
 }

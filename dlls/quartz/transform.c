@@ -57,42 +57,10 @@ static const IPinVtbl TransformFilter_OutputPin_Vtbl;
 static HRESULT TransformFilter_Sample(LPVOID iface, IMediaSample * pSample)
 {
     TransformFilterImpl *This = (TransformFilterImpl *)iface;
-    LPBYTE pbSrcStream = NULL;
-    long cbSrcStream = 0;
-    REFERENCE_TIME tStart, tStop;
-    HRESULT hr;
 
     TRACE("%p %p\n", iface, pSample);
 
-    hr = IMediaSample_GetPointer(pSample, &pbSrcStream);
-    if (FAILED(hr))
-    {
-        ERR("Cannot get pointer to sample data (%x)\n", hr);
-	return hr;
-    }
-
-    hr = IMediaSample_GetTime(pSample, &tStart, &tStop);
-    if (FAILED(hr))
-        ERR("Cannot get sample time (%x)\n", hr);
-
-    cbSrcStream = IMediaSample_GetActualDataLength(pSample);
-
-    TRACE("Sample data ptr = %p, size = %ld\n", pbSrcStream, cbSrcStream);
-
-#if 0 /* For debugging purpose */
-    {
-        int i;
-        for(i = 0; i < cbSrcStream; i++)
-        {
-	    if ((i!=0) && !(i%16))
-                TRACE("\n");
-            TRACE("%02x ", pbSrcStream[i]);
-        }
-        TRACE("\n");
-    }
-#endif
-
-    return This->pFuncsTable->pfnProcessSampleData(This, pbSrcStream, cbSrcStream);
+    return This->pFuncsTable->pfnProcessSampleData(This, pSample);
 }
 
 static HRESULT TransformFilter_Input_QueryAccept(LPVOID iface, const AM_MEDIA_TYPE * pmt)
@@ -101,7 +69,11 @@ static HRESULT TransformFilter_Input_QueryAccept(LPVOID iface, const AM_MEDIA_TY
     TRACE("%p\n", iface);
     dump_AM_MEDIA_TYPE(pmt);
 
-    return This->pFuncsTable->pfnConnectInput(This, pmt);
+    if (This->pFuncsTable->pfnQueryConnect)
+        return This->pFuncsTable->pfnQueryConnect(This, pmt);
+    /* Assume OK if there's no query method (the connection will fail if
+       needed) */
+    return S_OK;
 }
 
 
@@ -293,8 +265,6 @@ static ULONG WINAPI TransformFilter_Release(IBaseFilter * iface)
 
         CoTaskMemFree(This->ppPins);
         This->lpVtbl = NULL;
-
-	This->pFuncsTable->pfnCleanup(This);
 
         This->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->csFilter);
@@ -535,14 +505,48 @@ static HRESULT WINAPI TransformFilter_InputPin_EndOfStream(IPin * iface)
     return hr;
 }
 
+static HRESULT WINAPI TransformFilter_InputPin_ReceiveConnection(IPin * iface, IPin * pReceivePin, const AM_MEDIA_TYPE * pmt)
+{
+    InputPin* This = (InputPin*) iface;
+    TransformFilterImpl* pTransform;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p, %p)\n", iface, pReceivePin, pmt);
+
+    pTransform = (TransformFilterImpl*)This->pin.pinInfo.pFilter;
+
+    hr = pTransform->pFuncsTable->pfnConnectInput(pTransform, pmt);
+    if (SUCCEEDED(hr))
+    {
+        hr = InputPin_ReceiveConnection(iface, pReceivePin, pmt);
+        if (FAILED(hr))
+            pTransform->pFuncsTable->pfnCleanup(pTransform);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI TransformFilter_InputPin_Disconnect(IPin * iface)
+{
+    InputPin* This = (InputPin*) iface;
+    TransformFilterImpl* pTransform;
+
+    TRACE("(%p)->()\n", iface);
+
+    pTransform = (TransformFilterImpl*)This->pin.pinInfo.pFilter;
+    pTransform->pFuncsTable->pfnCleanup(pTransform);
+
+    return IPinImpl_Disconnect(iface);
+}
+
 static const IPinVtbl TransformFilter_InputPin_Vtbl = 
 {
     InputPin_QueryInterface,
     IPinImpl_AddRef,
     InputPin_Release,
     InputPin_Connect,
-    InputPin_ReceiveConnection,
-    IPinImpl_Disconnect,
+    TransformFilter_InputPin_ReceiveConnection,
+    TransformFilter_InputPin_Disconnect,
     IPinImpl_ConnectedTo,
     IPinImpl_ConnectionMediaType,
     IPinImpl_QueryPinInfo,
@@ -570,32 +574,14 @@ static HRESULT WINAPI TransformFilter_Output_EnumMediaTypes(IPin * iface, IEnumM
     return IEnumMediaTypesImpl_Construct(&emd, ppEnum);
 }
 
-static HRESULT WINAPI TransformFilter_Output_Disconnect(IPin * iface)
-{
-    OutputPin* This = (OutputPin*)iface;
-    HRESULT hr;
-    TransformFilterImpl* pTransformFilter = (TransformFilterImpl*)This->pin.pinInfo.pFilter;
-
-    TRACE("(%p/%p)->()\n", This, iface);
-
-    hr = OutputPin_Disconnect(iface);
-
-    if (hr == S_OK)
-    {
-	pTransformFilter->pFuncsTable->pfnCleanup(pTransformFilter);
-    }
-
-    return hr;
-}
-
-static const IPinVtbl TransformFilter_OutputPin_Vtbl = 
+static const IPinVtbl TransformFilter_OutputPin_Vtbl =
 {
     OutputPin_QueryInterface,
     IPinImpl_AddRef,
     OutputPin_Release,
     OutputPin_Connect,
     OutputPin_ReceiveConnection,
-    TransformFilter_Output_Disconnect,
+    OutputPin_Disconnect,
     IPinImpl_ConnectedTo,
     IPinImpl_ConnectionMediaType,
     IPinImpl_QueryPinInfo,

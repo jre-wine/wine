@@ -60,7 +60,7 @@ static inline Parser_OutputPin *impl_from_IMediaSeeking( IMediaSeeking *iface )
 }
 
 
-HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMPLE fnProcessSample, PFN_QUERY_ACCEPT fnQueryAccept, PFN_PRE_CONNECT fnPreConnect)
+HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMPLE fnProcessSample, PFN_QUERY_ACCEPT fnQueryAccept, PFN_PRE_CONNECT fnPreConnect, PFN_CLEANUP fnCleanup)
 {
     HRESULT hr;
     PIN_INFO piInput;
@@ -74,6 +74,7 @@ HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMP
     pParser->csFilter.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ParserImpl.csFilter");
     pParser->state = State_Stopped;
     pParser->pClock = NULL;
+    pParser->fnCleanup = fnCleanup;
     ZeroMemory(&pParser->filterInfo, sizeof(FILTER_INFO));
 
     pParser->cStreams = 0;
@@ -186,6 +187,9 @@ static ULONG WINAPI Parser_Release(IBaseFilter * iface)
     if (!refCount)
     {
         ULONG i;
+
+        if (This->fnCleanup)
+            This->fnCleanup(This);
 
         if (This->pClock)
             IReferenceClock_Release(This->pClock);
@@ -762,13 +766,32 @@ static HRESULT WINAPI Parser_InputPin_Disconnect(IPin * iface)
     return hr;
 }
 
+HRESULT WINAPI Parser_PullPin_ReceiveConnection(IPin * iface, IPin * pReceivePin, const AM_MEDIA_TYPE * pmt)
+{
+    HRESULT hr;
+
+    TRACE("()\n");
+
+    hr = PullPin_ReceiveConnection(iface, pReceivePin, pmt);
+    if (FAILED(hr))
+    {
+        IPinImpl *This = (IPinImpl *)iface;
+
+        EnterCriticalSection(This->pCritSec);
+        Parser_RemoveOutputPins((ParserImpl *)This->pinInfo.pFilter);
+        LeaveCriticalSection(This->pCritSec);
+    }
+
+    return hr;
+}
+
 static const IPinVtbl Parser_InputPin_Vtbl =
 {
     PullPin_QueryInterface,
     IPinImpl_AddRef,
     PullPin_Release,
     OutputPin_Connect,
-    PullPin_ReceiveConnection,
+    Parser_PullPin_ReceiveConnection,
     Parser_InputPin_Disconnect,
     IPinImpl_ConnectedTo,
     IPinImpl_ConnectionMediaType,

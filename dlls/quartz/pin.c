@@ -34,8 +34,8 @@ static const IPinVtbl OutputPin_Vtbl;
 static const IMemInputPinVtbl MemInputPin_Vtbl;
 static const IPinVtbl PullPin_Vtbl;
 
-#define ALIGNDOWN(value,boundary) ((value) & ~(boundary-1))
-#define ALIGNUP(value,boundary) (ALIGNDOWN(value - 1, boundary) + boundary)
+#define ALIGNDOWN(value,boundary) ((value)/(boundary)*(boundary))
+#define ALIGNUP(value,boundary) (ALIGNDOWN((value)+(boundary)-1, (boundary)))
 
 static inline InputPin *impl_from_IMemInputPin( IMemInputPin *iface )
 {
@@ -913,7 +913,10 @@ HRESULT OutputPin_SendSample(OutputPin * This, IMediaSample * pSample)
          * then it causes some problems (most notably with the native Video
          * Renderer) if we are re-entered for whatever reason */
         hr = IMemInputPin_Receive(pMemConnected, pSample);
-        IBaseFilter_Release(pinInfo.pFilter);
+
+        /* If the filter's destroyed, tell upstream to stop sending data */
+        if(IBaseFilter_Release(pinInfo.pFilter) == 0 && SUCCEEDED(hr))
+            hr = S_FALSE;
     }
     if (pMemConnected)
         IMemInputPin_Release(pMemConnected);
@@ -1154,8 +1157,6 @@ ULONG WINAPI PullPin_Release(IPin * iface)
 
     if (!refCount)
     {
-        if (This->hThread)
-            PullPin_StopProcessing(This);
         if(This->pAlloc)
             IMemAllocator_Release(This->pAlloc);
         if(This->pReader)
@@ -1179,7 +1180,6 @@ static void CALLBACK PullPin_Thread_Process(ULONG_PTR iface)
     HRESULT hr;
 
     ALLOCATOR_PROPERTIES allocProps;
-    PIN_INFO pinInfo;
 
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
     
@@ -1198,10 +1198,9 @@ static void CALLBACK PullPin_Thread_Process(ULONG_PTR iface)
          * so that one sample is processed while one sample is fetched. However,
          * it is harder to debug so for the moment it will stay as it is */
         IMediaSample * pSample = NULL;
+        REFERENCE_TIME rtSampleStart;
         REFERENCE_TIME rtSampleStop;
         DWORD_PTR dwUser;
-
-        pinInfo.pFilter = NULL;
 
         TRACE("Process sample\n");
 
@@ -1209,10 +1208,11 @@ static void CALLBACK PullPin_Thread_Process(ULONG_PTR iface)
 
         if (SUCCEEDED(hr))
         {
-            rtSampleStop = This->rtCurrent + MEDIATIME_FROM_BYTES(IMediaSample_GetSize(pSample));
+            rtSampleStart = This->rtCurrent;
+            rtSampleStop = rtSampleStart + MEDIATIME_FROM_BYTES(IMediaSample_GetSize(pSample));
             if (rtSampleStop > This->rtStop)
                 rtSampleStop = MEDIATIME_FROM_BYTES(ALIGNUP(BYTES_FROM_MEDIATIME(This->rtStop), allocProps.cbAlign));
-            hr = IMediaSample_SetTime(pSample, &This->rtCurrent, &rtSampleStop);
+            hr = IMediaSample_SetTime(pSample, &rtSampleStart, &rtSampleStop);
             This->rtCurrent = rtSampleStop;
         }
 
@@ -1223,15 +1223,18 @@ static void CALLBACK PullPin_Thread_Process(ULONG_PTR iface)
             hr = IAsyncReader_WaitForNext(This->pReader, 10000, &pSample, &dwUser);
 
         if (SUCCEEDED(hr))
-            hr = IPin_QueryPinInfo((IPin*)&This->pin, &pinInfo);
+        {
+            rtSampleStop = rtSampleStart + MEDIATIME_FROM_BYTES(IMediaSample_GetActualDataLength(pSample));
+            if (rtSampleStop > This->rtStop)
+                rtSampleStop = MEDIATIME_FROM_BYTES(ALIGNUP(BYTES_FROM_MEDIATIME(This->rtStop), allocProps.cbAlign));
+            hr = IMediaSample_SetTime(pSample, &rtSampleStart, &rtSampleStop);
+        }
 
         if (SUCCEEDED(hr))
             hr = This->fnSampleProc(This->pin.pUserData, pSample);
         else
             ERR("Processing error: %x\n", hr);
 
-        if (pinInfo.pFilter)
-            IBaseFilter_Release(pinInfo.pFilter);
         if (pSample)
             IMediaSample_Release(pSample);
     }
@@ -1260,6 +1263,8 @@ static void CALLBACK PullPin_Thread_Stop(ULONG_PTR iface)
 
     SetEvent(This->hEventStateChanged);
 
+    IBaseFilter_Release(This->pin.pinInfo.pFilter);
+
     ExitThread(0);
 }
 
@@ -1279,9 +1284,16 @@ HRESULT PullPin_InitProcessing(PullPin * This)
             DWORD dwThreadId;
             assert(!This->hThread);
         
+            /* AddRef the filter to make sure it and it's pins will be around
+             * as long as the thread */
+            IBaseFilter_AddRef(This->pin.pinInfo.pFilter);
+
             This->hThread = CreateThread(NULL, 0, PullPin_Thread_Main, NULL, 0, &dwThreadId);
             if (!This->hThread)
+            {
                 hr = HRESULT_FROM_WIN32(GetLastError());
+                IBaseFilter_Release(This->pin.pinInfo.pFilter);
+            }
 
             if (SUCCEEDED(hr))
                 hr = IMemAllocator_Commit(This->pAlloc);
@@ -1303,7 +1315,7 @@ HRESULT PullPin_StartProcessing(PullPin * This)
         assert(This->hThread);
         
         ResetEvent(This->hEventStateChanged);
-        
+
         if (!QueueUserAPC(PullPin_Thread_Process, This->hThread, (ULONG_PTR)This))
             return HRESULT_FROM_WIN32(GetLastError());
     }

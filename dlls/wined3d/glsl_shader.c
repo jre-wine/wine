@@ -703,11 +703,8 @@ static void shader_glsl_get_register_name(
 static DWORD shader_glsl_get_write_mask(const DWORD param, char *write_mask) {
     char *ptr = write_mask;
     DWORD mask = param & WINED3DSP_WRITEMASK_ALL;
-    DWORD reg_type = shader_get_regtype(param);
 
-    /* gl_FogFragCoord, gl_PointSize and gl_FragDepth are floats, fixup the write mask. */
-    if (((reg_type == WINED3DSPR_RASTOUT) && ((param & WINED3DSP_REGNUM_MASK) != 0))
-            || reg_type == WINED3DSPR_DEPTHOUT) {
+    if (shader_is_scalar(param)) {
         mask = WINED3DSP_WRITEMASK_0;
     } else {
         *ptr++ = '.';
@@ -741,12 +738,14 @@ static void shader_glsl_get_swizzle(const DWORD param, BOOL fixup, DWORD mask, c
     const char *swizzle_chars = fixup ? "zyxw" : "xyzw";
     char *ptr = swizzle_str;
 
-    *ptr++ = '.';
-    /* swizzle bits fields: wwzzyyxx */
-    if (mask & WINED3DSP_WRITEMASK_0) *ptr++ = swizzle_chars[swizzle & 0x03];
-    if (mask & WINED3DSP_WRITEMASK_1) *ptr++ = swizzle_chars[(swizzle >> 2) & 0x03];
-    if (mask & WINED3DSP_WRITEMASK_2) *ptr++ = swizzle_chars[(swizzle >> 4) & 0x03];
-    if (mask & WINED3DSP_WRITEMASK_3) *ptr++ = swizzle_chars[(swizzle >> 6) & 0x03];
+    if (!shader_is_scalar(param)) {
+        *ptr++ = '.';
+        /* swizzle bits fields: wwzzyyxx */
+        if (mask & WINED3DSP_WRITEMASK_0) *ptr++ = swizzle_chars[swizzle & 0x03];
+        if (mask & WINED3DSP_WRITEMASK_1) *ptr++ = swizzle_chars[(swizzle >> 2) & 0x03];
+        if (mask & WINED3DSP_WRITEMASK_2) *ptr++ = swizzle_chars[(swizzle >> 4) & 0x03];
+        if (mask & WINED3DSP_WRITEMASK_3) *ptr++ = swizzle_chars[(swizzle >> 6) & 0x03];
+    }
 
     *ptr = '\0';
 }
@@ -784,16 +783,24 @@ static DWORD shader_glsl_add_dst_param(SHADER_OPCODE_ARG* arg, const DWORD param
 }
 
 /* Append the destination part of the instruction to the buffer, return the effective write mask */
-static DWORD shader_glsl_append_dst(SHADER_BUFFER *buffer, SHADER_OPCODE_ARG *arg) {
+static DWORD shader_glsl_append_dst_ext(SHADER_BUFFER *buffer, SHADER_OPCODE_ARG *arg, const DWORD param) {
     glsl_dst_param_t dst_param;
     DWORD mask;
     int shift;
 
-    shift = (arg->dst & WINED3DSP_DSTSHIFT_MASK) >> WINED3DSP_DSTSHIFT_SHIFT;
-    mask = shader_glsl_add_dst_param(arg, arg->dst, arg->dst_addr, &dst_param);
-    shader_addline(buffer, "%s%s = %s(", dst_param.reg_name, dst_param.mask_str, shift_glsl_tab[shift]);
+    mask = shader_glsl_add_dst_param(arg, param, arg->dst_addr, &dst_param);
+
+    if(mask) {
+        shift = (param & WINED3DSP_DSTSHIFT_MASK) >> WINED3DSP_DSTSHIFT_SHIFT;
+        shader_addline(buffer, "%s%s = %s(", dst_param.reg_name, dst_param.mask_str, shift_glsl_tab[shift]);
+    }
 
     return mask;
+}
+
+/* Append the destination part of the instruction to the buffer, return the effective write mask */
+static DWORD shader_glsl_append_dst(SHADER_BUFFER *buffer, SHADER_OPCODE_ARG *arg) {
+    return shader_glsl_append_dst_ext(buffer, arg, arg->dst);
 }
 
 /** Process GLSL instruction modifiers */
@@ -1115,26 +1122,32 @@ void shader_glsl_cmp(SHADER_OPCODE_ARG* arg) {
     glsl_src_param_t src0_param;
     glsl_src_param_t src1_param;
     glsl_src_param_t src2_param;
-    DWORD write_mask;
-    size_t mask_size;
+    DWORD write_mask, cmp_channel = 0;
+    unsigned int i, j;
 
-    write_mask = shader_glsl_append_dst(arg->buffer, arg);
-    mask_size = shader_glsl_get_write_mask_size(write_mask);
+    /* Cycle through all source0 channels */
+    for (i=0; i<4; i++) {
+        write_mask = 0;
+        /* Find the destination channels which use the current source0 channel */
+        for (j=0; j<4; j++) {
+            if ( ((arg->src[0] >> (WINED3DSP_SWIZZLE_SHIFT + 2*j)) & 0x3) == i ) {
+                write_mask |= WINED3DSP_WRITEMASK_0 << j;
+                cmp_channel = WINED3DSP_WRITEMASK_0 << j;
+            }
+        }
+        write_mask = shader_glsl_append_dst_ext(arg->buffer, arg, arg->dst & (~WINED3DSP_SWIZZLE_MASK | write_mask));
+        if (!write_mask) continue;
 
-    shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], write_mask, &src0_param);
-    shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], write_mask, &src1_param);
-    shader_glsl_add_src_param(arg, arg->src[2], arg->src_addr[2], write_mask, &src2_param);
+        shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], cmp_channel, &src0_param);
+        shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], write_mask, &src1_param);
+        shader_glsl_add_src_param(arg, arg->src[2], arg->src_addr[2], write_mask, &src2_param);
 
-    if (mask_size > 1) {
-        shader_addline(arg->buffer, "mix(%s, %s, vec%d(lessThan(%s, vec%d(0.0)))));\n",
-                src1_param.param_str, src2_param.param_str, mask_size, src0_param.param_str, mask_size);
-    } else {
         shader_addline(arg->buffer, "%s >= 0.0 ? %s : %s);\n",
                 src0_param.param_str, src1_param.param_str, src2_param.param_str);
     }
 }
 
-/** Process the CND opcode in GLSL (dst = (src0 < 0.5) ? src1 : src2) */
+/** Process the CND opcode in GLSL (dst = (src0 > 0.5) ? src1 : src2) */
 /* For ps 1.1-1.3, only a single component of src0 is used. For ps 1.4
  * the compare is done per component of src0. */
 void shader_glsl_cnd(SHADER_OPCODE_ARG* arg) {
@@ -1142,27 +1155,36 @@ void shader_glsl_cnd(SHADER_OPCODE_ARG* arg) {
     glsl_src_param_t src0_param;
     glsl_src_param_t src1_param;
     glsl_src_param_t src2_param;
-    DWORD write_mask;
-    size_t mask_size;
-
-    write_mask = shader_glsl_append_dst(arg->buffer, arg);
+    DWORD write_mask, cmp_channel = 0;
+    unsigned int i, j;
 
     if (shader->baseShader.hex_version < WINED3DPS_VERSION(1, 4)) {
-        mask_size = 1;
+        write_mask = shader_glsl_append_dst(arg->buffer, arg);
         shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], WINED3DSP_WRITEMASK_0, &src0_param);
-    } else {
-        mask_size = shader_glsl_get_write_mask_size(write_mask);
-        shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], write_mask, &src0_param);
+        shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], write_mask, &src1_param);
+        shader_glsl_add_src_param(arg, arg->src[2], arg->src_addr[2], write_mask, &src2_param);
+        shader_addline(arg->buffer, "%s > 0.5 ? %s : %s);\n",
+                src0_param.param_str, src1_param.param_str, src2_param.param_str);
+        return;
     }
+    /* Cycle through all source0 channels */
+    for (i=0; i<4; i++) {
+        write_mask = 0;
+        /* Find the destination channels which use the current source0 channel */
+        for (j=0; j<4; j++) {
+            if ( ((arg->src[0] >> (WINED3DSP_SWIZZLE_SHIFT + 2*j)) & 0x3) == i ) {
+                write_mask |= WINED3DSP_WRITEMASK_0 << j;
+                cmp_channel = WINED3DSP_WRITEMASK_0 << j;
+            }
+        }
+        write_mask = shader_glsl_append_dst_ext(arg->buffer, arg, arg->dst & (~WINED3DSP_SWIZZLE_MASK | write_mask));
+        if (!write_mask) continue;
 
-    shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], write_mask, &src1_param);
-    shader_glsl_add_src_param(arg, arg->src[2], arg->src_addr[2], write_mask, &src2_param);
+        shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], cmp_channel, &src0_param);
+        shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], write_mask, &src1_param);
+        shader_glsl_add_src_param(arg, arg->src[2], arg->src_addr[2], write_mask, &src2_param);
 
-    if (mask_size > 1) {
-        shader_addline(arg->buffer, "mix(%s, %s, vec%d(lessThan(%s, vec%d(0.5)))));\n",
-                src2_param.param_str, src1_param.param_str, mask_size, src0_param.param_str, mask_size);
-    } else {
-        shader_addline(arg->buffer, "%s < 0.5 ? %s : %s);\n",
+        shader_addline(arg->buffer, "%s > 0.5 ? %s : %s);\n",
                 src0_param.param_str, src1_param.param_str, src2_param.param_str);
     }
 }

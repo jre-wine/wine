@@ -147,7 +147,6 @@ extern void OLEClipbrd_Initialize(void);
  * These are the prototypes of the utility methods used for OLE Drag n Drop
  */
 static void            OLEDD_Initialize(void);
-static void            OLEDD_UnInitialize(void);
 static DropTargetNode* OLEDD_FindDropTarget(
                          HWND hwndOfTarget);
 static void            OLEDD_FreeDropTarget(DropTargetNode*);
@@ -254,11 +253,6 @@ void WINAPI OleUninitialize(void)
     OLEClipbrd_UnInitialize();
 
     /*
-     * Drag and Drop
-     */
-    OLEDD_UnInitialize();
-
-    /*
      * OLE shared menu
      */
     OLEMenu_UnInitialize();
@@ -289,9 +283,21 @@ HRESULT WINAPI RegisterDragDrop(
 
   TRACE("(%p,%p)\n", hwnd, pDropTarget);
 
+  if (!COM_CurrentApt())
+  {
+    ERR("COM not initialized\n");
+    return CO_E_NOTINITIALIZED;
+  }
+
   if (!pDropTarget)
     return E_INVALIDARG;
-  
+
+  if (!IsWindow(hwnd))
+  {
+    ERR("invalid hwnd %p\n", hwnd);
+    return DRAGDROP_E_INVALIDHWND;
+  }
+
   /*
    * First, check if the window is already registered.
    */
@@ -331,6 +337,12 @@ HRESULT WINAPI RevokeDragDrop(
   DropTargetNode* dropTargetInfo;
 
   TRACE("(%p)\n", hwnd);
+
+  if (!IsWindow(hwnd))
+  {
+    ERR("invalid hwnd %p\n", hwnd);
+    return DRAGDROP_E_INVALIDHWND;
+  }
 
   /*
    * First, check if the window is already registered.
@@ -1897,7 +1909,7 @@ static void OLEDD_FreeDropTarget(DropTargetNode *dropTargetInfo)
  *
  * Releases the OLE drag and drop data structures.
  */
-static void OLEDD_UnInitialize(void)
+void OLEDD_UnInitialize(void)
 {
   /*
    * Simply empty the list.

@@ -74,7 +74,7 @@ struct pipe_server
     struct named_pipe   *pipe;
     struct timeout_user *flush_poll;
     struct event        *event;
-    struct list          wait_q;     /* only a single one can be queued */
+    struct async_queue  *wait_q;     /* only a single one can be queued */
     unsigned int         options;    /* pipe options */
 };
 
@@ -96,7 +96,7 @@ struct named_pipe
     unsigned int        timeout;
     unsigned int        instances;
     struct list         servers;     /* list of servers using this pipe */
-    struct list         waiters;     /* list of clients waiting to connect */
+    struct async_queue *waiters;     /* list of clients waiting to connect */
 };
 
 struct named_pipe_device
@@ -137,14 +137,14 @@ static void pipe_server_dump( struct object *obj, int verbose );
 static struct fd *pipe_server_get_fd( struct object *obj );
 static void pipe_server_destroy( struct object *obj);
 static void pipe_server_flush( struct fd *fd, struct event **event );
-static enum server_fd_type pipe_server_get_info( struct fd *fd, int *flags );
+static enum server_fd_type pipe_server_get_fd_type( struct fd *fd );
 
 static const struct object_ops pipe_server_ops =
 {
     sizeof(struct pipe_server),   /* size */
     pipe_server_dump,             /* dump */
-    default_fd_add_queue,         /* add_queue */
-    default_fd_remove_queue,      /* remove_queue */
+    add_queue,                    /* add_queue */
+    remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
@@ -158,11 +158,12 @@ static const struct object_ops pipe_server_ops =
 
 static const struct fd_ops pipe_server_fd_ops =
 {
-    default_fd_get_poll_events,     /* get_poll_events */
+    default_fd_get_poll_events,   /* get_poll_events */
     default_poll_event,           /* poll_event */
     pipe_server_flush,            /* flush */
-    pipe_server_get_info,         /* get_file_info */
+    pipe_server_get_fd_type,      /* get_fd_type */
     default_fd_queue_async,       /* queue_async */
+    default_fd_reselect_async,    /* reselect_async */
     default_fd_cancel_async,      /* cancel_async */
 };
 
@@ -171,14 +172,14 @@ static void pipe_client_dump( struct object *obj, int verbose );
 static struct fd *pipe_client_get_fd( struct object *obj );
 static void pipe_client_destroy( struct object *obj );
 static void pipe_client_flush( struct fd *fd, struct event **event );
-static enum server_fd_type pipe_client_get_info( struct fd *fd, int *flags );
+static enum server_fd_type pipe_client_get_fd_type( struct fd *fd );
 
 static const struct object_ops pipe_client_ops =
 {
     sizeof(struct pipe_client),   /* size */
     pipe_client_dump,             /* dump */
-    default_fd_add_queue,         /* add_queue */
-    default_fd_remove_queue,      /* remove_queue */
+    add_queue,                    /* add_queue */
+    remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
@@ -195,8 +196,9 @@ static const struct fd_ops pipe_client_fd_ops =
     default_fd_get_poll_events,   /* get_poll_events */
     default_poll_event,           /* poll_event */
     pipe_client_flush,            /* flush */
-    pipe_client_get_info,         /* get_file_info */
+    pipe_client_get_fd_type,      /* get_fd_type */
     default_fd_queue_async,       /* queue_async */
+    default_fd_reselect_async,    /* reselect_async */
     default_fd_cancel_async       /* cancel_async */
 };
 
@@ -207,7 +209,7 @@ static struct object *named_pipe_device_lookup_name( struct object *obj,
 static struct object *named_pipe_device_open_file( struct object *obj, unsigned int access,
                                                    unsigned int sharing, unsigned int options );
 static void named_pipe_device_destroy( struct object *obj );
-static enum server_fd_type named_pipe_device_get_file_info( struct fd *fd, int *flags );
+static enum server_fd_type named_pipe_device_get_fd_type( struct fd *fd );
 
 static const struct object_ops named_pipe_device_ops =
 {
@@ -231,8 +233,9 @@ static const struct fd_ops named_pipe_device_fd_ops =
     default_fd_get_poll_events,       /* get_poll_events */
     default_poll_event,               /* poll_event */
     no_flush,                         /* flush */
-    named_pipe_device_get_file_info,  /* get_file_info */
+    named_pipe_device_get_fd_type,    /* get_fd_type */
     default_fd_queue_async,           /* queue_async */
+    default_fd_reselect_async,        /* reselect_async */
     default_fd_cancel_async           /* cancel_async */
 };
 
@@ -274,7 +277,7 @@ static void named_pipe_destroy( struct object *obj)
 
     assert( list_empty( &pipe->servers ) );
     assert( !pipe->instances );
-    async_terminate_queue( &pipe->waiters, STATUS_HANDLES_CLOSED );
+    free_async_queue( pipe->waiters );
 }
 
 static struct fd *pipe_client_get_fd( struct object *obj )
@@ -335,6 +338,7 @@ static void do_disconnect( struct pipe_server *server )
         server->client->fd = NULL;
     }
     assert( server->fd );
+    shutdown( get_unix_fd( server->fd ), SHUT_RDWR );
     release_object( server->fd );
     server->fd = NULL;
 }
@@ -366,7 +370,7 @@ static void pipe_server_destroy( struct object *obj)
         server->client = NULL;
     }
 
-    async_terminate_head( &server->wait_q, STATUS_HANDLES_CLOSED );
+    free_async_queue( server->wait_q );
 
     assert( server->pipe->instances );
     server->pipe->instances--;
@@ -452,9 +456,8 @@ static void named_pipe_device_destroy( struct object *obj )
     free( device->pipes );
 }
 
-static enum server_fd_type named_pipe_device_get_file_info( struct fd *fd, int *flags )
+static enum server_fd_type named_pipe_device_get_fd_type( struct fd *fd )
 {
-    *flags = 0;
     return FD_TYPE_DEVICE;
 }
 
@@ -551,21 +554,13 @@ static inline int is_overlapped( unsigned int options )
     return !(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT));
 }
 
-static enum server_fd_type pipe_server_get_info( struct fd *fd, int *flags )
+static enum server_fd_type pipe_server_get_fd_type( struct fd *fd )
 {
-    struct pipe_server *server = get_fd_user( fd );
-
-    *flags = FD_FLAG_AVAILABLE;
-    if (is_overlapped( server->options )) *flags |= FD_FLAG_OVERLAPPED;
     return FD_TYPE_PIPE;
 }
 
-static enum server_fd_type pipe_client_get_info( struct fd *fd, int *flags )
+static enum server_fd_type pipe_client_get_fd_type( struct fd *fd )
 {
-    struct pipe_client *client = get_fd_user( fd );
-
-    *flags = FD_FLAG_AVAILABLE;
-    if (is_overlapped( client->flags )) *flags |= FD_FLAG_OVERLAPPED;
     return FD_TYPE_PIPE;
 }
 
@@ -634,7 +629,7 @@ static struct pipe_server *create_pipe_server( struct named_pipe *pipe, unsigned
     server->client = NULL;
     server->flush_poll = NULL;
     server->options = options;
-    list_init( &server->wait_q );
+    server->wait_q = create_async_queue( NULL );
 
     list_add_head( &pipe->servers, &server->entry );
     grab_object( pipe );
@@ -711,15 +706,12 @@ static struct object *named_pipe_open_file( struct object *obj, unsigned int acc
                 setsockopt( fds[1], SOL_SOCKET, SO_SNDBUF, &pipe->outsize, sizeof(pipe->outsize) );
             }
 
-            client->fd = create_anonymous_fd( &pipe_client_fd_ops,
-                                            fds[1], &client->obj );
-            server->fd = create_anonymous_fd( &pipe_server_fd_ops,
-                                            fds[0], &server->obj );
+            client->fd = create_anonymous_fd( &pipe_client_fd_ops, fds[1], &client->obj, options );
+            server->fd = create_anonymous_fd( &pipe_server_fd_ops, fds[0], &server->obj, server->options );
             if (client->fd && server->fd && res != 1)
             {
                 if (server->state == ps_wait_open)
-                    async_terminate_head( &server->wait_q, STATUS_SUCCESS );
-                assert( list_empty( &server->wait_q ) );
+                    async_wake_up( server->wait_q, STATUS_SUCCESS );
                 server->state = ps_connected_server;
                 server->client = client;
                 client->server = server;
@@ -753,8 +745,8 @@ DECL_HANDLER(create_named_pipe)
     {
         /* initialize it if it didn't already exist */
         pipe->instances = 0;
+        pipe->waiters = NULL;
         list_init( &pipe->servers );
-        list_init( &pipe->waiters );
         pipe->insize = req->insize;
         pipe->outsize = req->outsize;
         pipe->maxinstances = req->maxinstances;
@@ -794,6 +786,7 @@ DECL_HANDLER(create_named_pipe)
 DECL_HANDLER(connect_named_pipe)
 {
     struct pipe_server *server;
+    struct async *async;
 
     server = get_pipe_server_obj(current->process, req->handle, 0);
     if (!server)
@@ -805,9 +798,12 @@ DECL_HANDLER(connect_named_pipe)
     case ps_wait_connect:
         assert( !server->fd );
         server->state = ps_wait_open;
-        create_async( current, NULL, &server->wait_q, &req->async );
-        async_terminate_queue( &server->pipe->waiters, STATUS_SUCCESS );
-        set_error( STATUS_PENDING );
+        if ((async = create_async( current, server->wait_q, &req->async )))
+        {
+            if (server->pipe->waiters) async_wake_up( server->pipe->waiters, STATUS_SUCCESS );
+            release_object( async );
+            set_error( STATUS_PENDING );
+        }
         break;
     case ps_connected_server:
         assert( server->fd );
@@ -849,18 +845,25 @@ DECL_HANDLER(wait_named_pipe)
     server = find_available_server( pipe );
     if (!server)
     {
-        if (req->timeout == NMPWAIT_WAIT_FOREVER)
+        struct async *async;
+
+        if (!pipe->waiters && !(pipe->waiters = create_async_queue( NULL )))
         {
-            if (create_async( current, NULL, &pipe->waiters, &req->async ))
-                set_error( STATUS_PENDING );
+            release_object( pipe );
+            return;
         }
-        else
+
+        if ((async = create_async( current, pipe->waiters, &req->async )))
         {
-            struct timeval when = current_time;
-            if (req->timeout == NMPWAIT_USE_DEFAULT_WAIT) add_timeout( &when, pipe->timeout );
-            else add_timeout( &when, req->timeout );
-            if (create_async( current, &when, &pipe->waiters, &req->async ))
-                set_error( STATUS_PENDING );
+            if (req->timeout != NMPWAIT_WAIT_FOREVER)
+            {
+                struct timeval when = current_time;
+                if (req->timeout == NMPWAIT_USE_DEFAULT_WAIT) add_timeout( &when, pipe->timeout );
+                else add_timeout( &when, req->timeout );
+                async_set_timeout( async, &when, STATUS_TIMEOUT );
+            }
+            release_object( async );
+            set_error( STATUS_PENDING );
         }
     }
     else release_object( server );

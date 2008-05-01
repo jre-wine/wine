@@ -257,8 +257,8 @@
 @ stdcall SetupCopyOEMInfW(wstr wstr long long ptr long ptr ptr)
 @ stdcall SetupCreateDiskSpaceListA(ptr long long)
 @ stdcall SetupCreateDiskSpaceListW(ptr long long)
-@ stub SetupDecompressOrCopyFileA
-@ stub SetupDecompressOrCopyFileW
+@ stdcall SetupDecompressOrCopyFileA(str str ptr)
+@ stdcall SetupDecompressOrCopyFileW(wstr wstr ptr)
 @ stub SetupDefaultQueueCallback
 @ stdcall SetupDefaultQueueCallbackA(ptr long long long)
 @ stdcall SetupDefaultQueueCallbackW(ptr long long long)
@@ -395,8 +395,10 @@
 @ stub SetupGetBackupInformationW
 @ stdcall SetupGetBinaryField(ptr long ptr long ptr)
 @ stdcall SetupGetFieldCount(ptr)
-@ stub SetupGetFileCompressionInfoA
-@ stub SetupGetFileCompressionInfoW
+@ stdcall SetupGetFileCompressionInfoA(str ptr ptr ptr ptr)
+@ stdcall SetupGetFileCompressionInfoExA(str ptr long ptr ptr ptr ptr)
+@ stdcall SetupGetFileCompressionInfoExW(wstr ptr long ptr ptr ptr ptr)
+@ stdcall SetupGetFileCompressionInfoW(wstr ptr ptr ptr ptr)
 @ stdcall SetupGetFileQueueCount(long long ptr)
 @ stdcall SetupGetFileQueueFlags(long ptr)
 @ stub SetupGetInfFileListA

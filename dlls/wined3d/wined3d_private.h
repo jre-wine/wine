@@ -534,7 +534,7 @@ typedef enum ContextUsage {
 void ActivateContext(IWineD3DDeviceImpl *device, IWineD3DSurface *target, ContextUsage usage);
 WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, Display *display, Window win);
 void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context);
-void set_render_target_fbo(IWineD3DDevice *iface, DWORD idx, IWineD3DSurface *render_target);
+void apply_fbo_state(IWineD3DDevice *iface);
 
 /* Routine to fill gl caps for swapchains and IWineD3D */
 BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display);
@@ -657,6 +657,8 @@ struct IWineD3DDeviceImpl
     /* Render Target Support */
     IWineD3DSurface       **render_targets;
     IWineD3DSurface        *depthStencilBuffer;
+    IWineD3DSurface       **fbo_color_attachments;
+    IWineD3DSurface        *fbo_depth_attachment;
 
     IWineD3DSurface        *stencilBufferTarget;
 
@@ -672,6 +674,8 @@ struct IWineD3DDeviceImpl
     BOOL                    render_offscreen;
     WINED3D_DEPTHCOPYSTATE  depth_copy_state;
     GLuint                  fbo;
+    GLuint                  src_fbo;
+    GLuint                  dst_fbo;
     GLenum                  *draw_buffers;
 
     /* Cursor management */
@@ -1001,6 +1005,13 @@ typedef struct wineD3DSurface_DIB {
     BOOL client_memory;
 } wineD3DSurface_DIB;
 
+typedef struct {
+    struct list entry;
+    GLuint id;
+    UINT width;
+    UINT height;
+} renderbuffer_entry_t;
+
 /*****************************************************************************
  * IWineD3DSurface implementation structure
  */
@@ -1052,6 +1063,9 @@ struct IWineD3DSurfaceImpl
     DWORD                     CKeyFlags;
 
     DDCOLORKEY                glCKey;
+
+    struct list               renderbuffers;
+    renderbuffer_entry_t      *current_renderbuffer;
 };
 
 extern const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl;
@@ -1087,7 +1101,7 @@ void WINAPI IWineD3DSurfaceImpl_SetGlTextureDesc(IWineD3DSurface *iface, UINT te
 void WINAPI IWineD3DSurfaceImpl_GetGlDesc(IWineD3DSurface *iface, glDescriptor **glDescription);
 const void *WINAPI IWineD3DSurfaceImpl_GetData(IWineD3DSurface *iface);
 HRESULT WINAPI IWineD3DSurfaceImpl_SetFormat(IWineD3DSurface *iface, WINED3DFORMAT format);
-HRESULT WINAPI IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface, RECT *DestRect, IWineD3DSurface *SrcSurface, RECT *SrcRect, DWORD Flags, DDBLTFX *DDBltFx);
+HRESULT WINAPI IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface, RECT *DestRect, IWineD3DSurface *SrcSurface, RECT *SrcRect, DWORD Flags, DDBLTFX *DDBltFx, WINED3DTEXTUREFILTERTYPE Filter);
 HRESULT WINAPI IWineGDISurfaceImpl_BltFast(IWineD3DSurface *iface, DWORD dstx, DWORD dsty, IWineD3DSurface *Source, RECT *rsrc, DWORD trans);
 HRESULT WINAPI IWineD3DSurfaceImpl_SetPalette(IWineD3DSurface *iface, IWineD3DPalette *Pal);
 HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC);
@@ -1117,6 +1131,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
 #define SFLAG_LOST        0x00002000 /* Surface lost flag for DDraw */
 #define SFLAG_USERPTR     0x00004000 /* The application allocated the memory for this surface */
 #define SFLAG_GLCKEY      0x00008000 /* The gl texture was created with a color key */
+#define SFLAG_CLIENT      0x00010000 /* GL_APPLE_client_storage is used on that texture */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_OVERSIZE: Not all data can be kept in GL
@@ -1125,6 +1140,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
  * SFLAG_LOCKED: The app requires access to the surface data
  * SFLAG_DYNLOCK: Avoid freeing the data for performance
  * SFLAG_DYNCHANGE: Same reason as DYNLOCK
+ * SFLAG_CLIENT: OpenGL uses our memory as backup
  */
 #define SFLAG_DONOTFREE  (SFLAG_OVERSIZE   | \
                           SFLAG_CONVERTED  | \
@@ -1132,7 +1148,8 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
                           SFLAG_LOCKED     | \
                           SFLAG_DYNLOCK    | \
                           SFLAG_DYNCHANGE  | \
-                          SFLAG_USERPTR)
+                          SFLAG_USERPTR    | \
+                          SFLAG_CLIENT)
 
 BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]);
 
@@ -1382,6 +1399,7 @@ const char* debug_d3ddeclusage(BYTE usage);
 const char* debug_d3dprimitivetype(WINED3DPRIMITIVETYPE PrimitiveType);
 const char* debug_d3drenderstate(DWORD state);
 const char* debug_d3dsamplerstate(DWORD state);
+const char* debug_d3dtexturefiltertype(WINED3DTEXTUREFILTERTYPE filter_type);
 const char* debug_d3dtexturestate(DWORD state);
 const char* debug_d3dtstype(WINED3DTRANSFORMSTATETYPE tstype);
 const char* debug_d3dpool(WINED3DPOOL pool);
@@ -1392,6 +1410,8 @@ GLenum CompareFunc(DWORD func);
 void   set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3);
 void   set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3, INT texture_idx);
 void   set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords);
+
+void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int width, unsigned int height);
 
 int D3DFmtMakeGlCfg(WINED3DFORMAT BackBufferFormat, WINED3DFORMAT StencilBufferFormat, int *attribs, int* nAttribs, BOOL alternate);
 
@@ -1827,6 +1847,30 @@ static inline BOOL shader_is_comment(DWORD token) {
     return WINED3DSIO_COMMENT == (token & WINED3DSI_OPCODE_MASK);
 }
 
+/* TODO: vFace (ps_3_0) */
+static inline BOOL shader_is_scalar(DWORD param) {
+    DWORD reg_type = shader_get_regtype(param);
+
+    switch (reg_type) {
+        case WINED3DSPR_RASTOUT:
+            if ((param & WINED3DSP_REGNUM_MASK) != 0) {
+                /* oFog & oPts */
+                return TRUE;
+            }
+            /* oPos */
+            return FALSE;
+
+        case WINED3DSPR_DEPTHOUT:   /* oDepth */
+        case WINED3DSPR_CONSTBOOL:  /* b# */
+        case WINED3DSPR_LOOP:       /* aL */
+        case WINED3DSPR_PREDICATE:  /* p0 */
+            return TRUE;
+
+        default:
+            return FALSE;
+    }
+}
+
 /* Internally used shader constants. Applications can use constants 0 to GL_LIMITS(vshader_constantsF) - 1,
  * so upload them above that
  */
@@ -1950,5 +1994,8 @@ static inline BOOL use_ps(IWineD3DDeviceImpl *device) {
             && device->stateBlock->pixelShader
             && ((IWineD3DPixelShaderImpl *)device->stateBlock->pixelShader)->baseShader.function);
 }
+
+void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, const WINED3DRECT *src_rect,
+        IWineD3DSurface *dst_surface, const WINED3DRECT *dst_rect, WINED3DTEXTUREFILTERTYPE filter, BOOL flip);
 
 #endif

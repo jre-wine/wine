@@ -1778,12 +1778,12 @@ static BOOL PATH_WidenPath(DC *dc)
 
     pPath = &dc->path;
 
-    PATH_FlattenPath(pPath);
-
-    if(pPath->state != PATH_Closed) {
-       ERR("Path Closed\n");
+    if(pPath->state == PATH_Open) {
+       SetLastError(ERROR_CAN_NOT_COMPLETE);
        return FALSE;
     }
+
+    PATH_FlattenPath(pPath);
 
     size = GetObjectW( dc->hPen, 0, NULL );
     if (!size) return FALSE;
@@ -1794,6 +1794,11 @@ static BOOL PATH_WidenPath(DC *dc)
     /* FIXME: add support for user style pens */
     penWidth = elp->elpWidth;
     HeapFree( GetProcessHeap(), 0, elp );
+
+    /* pen width must be strictly higher than 1 */
+    if(penWidth == 1) {
+        return TRUE;
+    }
 
     /* FIXME : If extPen, use the shape on corners */
     penWidthIn = penWidth / 2;

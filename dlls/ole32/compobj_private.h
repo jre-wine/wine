@@ -45,6 +45,9 @@ DEFINE_OLEGUID( CLSID_DfMarshal, 0x0000030b, 0, 0 );
 DEFINE_OLEGUID( CLSID_PSFactoryBuffer, 0x00000320, 0, 0 );
 DEFINE_OLEGUID( CLSID_InProcFreeMarshaler, 0x0000033a, 0, 0 );
 
+/* signal to stub manager that this is a rem unknown object */
+#define MSHLFLAGSP_REMUNKNOWN   0x80000000
+
 /* Thread-safety Annotation Legend:
  *
  * RO    - The value is read only. It never changes after creation, so no
@@ -154,6 +157,7 @@ struct apartment
   BOOL remunk_exported;    /* has the IRemUnknown interface for this apartment been created yet? (CS cs) */
   LONG remoting_started;   /* has the RPC system been started for this apartment? (LOCK) */
   struct list psclsids;    /* list of registered PS CLSIDs (CS cs) */
+  struct list loaded_dlls; /* list of dlls loaded by this apartment (CS cs) */
 
   /* FIXME: OID's should be given out by RPCSS */
   OID oidc;                /* object ID counter, starts at 1, zero is invalid OID (CS cs) */
@@ -238,9 +242,8 @@ HRESULT WINAPI RunningObjectTableImpl_Initialize(void);
 /* This function uninitialize the Running Object Table */
 HRESULT WINAPI RunningObjectTableImpl_UnInitialize(void);
 
-/* This function decomposes a String path to a String Table containing all the elements ("\" or "subDirectory" or "Directory" or "FileName") of the path */
-int FileMonikerImpl_DecomposePath(LPCOLESTR str, LPOLESTR** stringTable);
-
+/* Drag and drop */
+void OLEDD_UnInitialize(void);
 
 /* Apartment Functions */
 

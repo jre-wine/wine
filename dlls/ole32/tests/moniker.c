@@ -765,7 +765,7 @@ static void test_MkParseDisplayName(void)
     static const WCHAR wszDisplayName[] = {'c','l','s','i','d',':',
         '2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-','A','2','D','8','-','0','8','0','0','2','B','3','0','3','0','9','D',':',0};
     static const WCHAR wszDisplayNameClsid[] = {'c','l','s','i','d',':',0};
-    static const WCHAR wszNonExistantProgId[] = {'N','o','n','E','x','i','s','t','a','n','t','P','r','o','g','I','d',':',0};
+    static const WCHAR wszNonExistentProgId[] = {'N','o','n','E','x','i','s','t','e','n','t','P','r','o','g','I','d',':',0};
     static const WCHAR wszDisplayNameRunning[] = {'W','i','n','e','T','e','s','t','R','u','n','n','i','n','g',0};
     static const WCHAR wszDisplayNameProgId1[] = {'S','t','d','F','o','n','t',':',0};
     static const WCHAR wszDisplayNameProgId2[] = {'@','S','t','d','F','o','n','t',0};
@@ -776,7 +776,7 @@ static void test_MkParseDisplayName(void)
     hr = CreateBindCtx(0, &pbc);
     ok_ole_success(hr, CreateBindCtx);
 
-    hr = MkParseDisplayName(pbc, wszNonExistantProgId, &eaten, &pmk);
+    hr = MkParseDisplayName(pbc, wszNonExistentProgId, &eaten, &pmk);
     ok(hr == MK_E_CANTOPENFILE, "MkParseDisplayName should have failed with MK_E_CANTOPENFILE instead of 0x%08x\n", hr);
 
     /* no special handling of "clsid:" without the string form of the clsid
@@ -1596,7 +1596,7 @@ static void test_bind_context(void)
     IUnknown *param_obj;
     ULONG refs;
     static const WCHAR wszParamName[] = {'G','e','m','m','a',0};
-    static const WCHAR wszNonExistant[] = {'N','o','n','E','x','i','s','t','a','n','t',0};
+    static const WCHAR wszNonExistent[] = {'N','o','n','E','x','i','s','t','e','n','t',0};
 
     hr = CreateBindCtx(0, NULL);
     ok(hr == E_INVALIDARG, "CreateBindCtx with NULL ppbc should have returned E_INVALIDARG instead of 0x%08x\n", hr);
@@ -1647,12 +1647,12 @@ static void test_bind_context(void)
     ok_ole_success(hr, "IBindCtx_GetObjectParam");
     IUnknown_Release(param_obj);
 
-    hr = IBindCtx_GetObjectParam(pBindCtx, (WCHAR *)wszNonExistant, &param_obj);
-    ok(hr == E_FAIL, "IBindCtx_GetObjectParam with non-existing key should have failed with E_FAIL instead of 0x%08x\n", hr);
-    ok(param_obj == NULL, "IBindCtx_GetObjectParam with non-existing key should have set output parameter to NULL instead of %p\n", param_obj);
+    hr = IBindCtx_GetObjectParam(pBindCtx, (WCHAR *)wszNonExistent, &param_obj);
+    ok(hr == E_FAIL, "IBindCtx_GetObjectParam with nonexistent key should have failed with E_FAIL instead of 0x%08x\n", hr);
+    ok(param_obj == NULL, "IBindCtx_GetObjectParam with nonexistent key should have set output parameter to NULL instead of %p\n", param_obj);
 
-    hr = IBindCtx_RevokeObjectParam(pBindCtx, (WCHAR *)wszNonExistant);
-    ok(hr == E_FAIL, "IBindCtx_RevokeObjectParam with non-existing key should have failed with E_FAIL instead of 0x%08x\n", hr);
+    hr = IBindCtx_RevokeObjectParam(pBindCtx, (WCHAR *)wszNonExistent);
+    ok(hr == E_FAIL, "IBindCtx_RevokeObjectParam with nonexistent key should have failed with E_FAIL instead of 0x%08x\n", hr);
 
     hr = IBindCtx_EnumObjectParam(pBindCtx, &pEnumString);
     ok(hr == E_NOTIMPL, "IBindCtx_EnumObjectParam should have returned E_NOTIMPL instead of 0x%08x\n", hr);

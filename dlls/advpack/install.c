@@ -30,6 +30,7 @@
 #include "winnls.h"
 #include "setupapi.h"
 #include "advpub.h"
+#include "ole2.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
 #include "advpack_private.h"
@@ -58,7 +59,7 @@ typedef struct _ADVInfo
     BOOL need_reboot;
 } ADVInfo;
 
-typedef HRESULT (*iterate_fields_func)(HINF hinf, PCWSTR field, void *arg);
+typedef HRESULT (*iterate_fields_func)(HINF hinf, PCWSTR field, const void *arg);
 
 /* Advanced INF commands */
 static const WCHAR CheckAdminRights[] = {
@@ -75,7 +76,7 @@ static const WCHAR RunPostSetupCommands[] = {
 };
 
 /* Advanced INF callbacks */
-static HRESULT del_dirs_callback(HINF hinf, PCWSTR field, void *arg)
+static HRESULT del_dirs_callback(HINF hinf, PCWSTR field, const void *arg)
 {
     INFCONTEXT context;
     HRESULT hr = S_OK;
@@ -98,7 +99,7 @@ static HRESULT del_dirs_callback(HINF hinf, PCWSTR field, void *arg)
     return hr;
 }
 
-static HRESULT per_user_install_callback(HINF hinf, PCWSTR field, void *arg)
+static HRESULT per_user_install_callback(HINF hinf, PCWSTR field, const void *arg)
 {
     PERUSERSECTIONW per_user;
     INFCONTEXT context;
@@ -141,7 +142,7 @@ static HRESULT per_user_install_callback(HINF hinf, PCWSTR field, void *arg)
     return SetPerUserSecValuesW(&per_user);
 }
 
-static HRESULT register_ocxs_callback(HINF hinf, PCWSTR field, void *arg)
+static HRESULT register_ocxs_callback(HINF hinf, PCWSTR field, const void *arg)
 {
     HMODULE hm;
     INFCONTEXT context;
@@ -159,21 +160,29 @@ static HRESULT register_ocxs_callback(HINF hinf, PCWSTR field, void *arg)
             continue;
 
         hm = LoadLibraryExW(buffer, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-        if (!hm)
-            continue;
+        if (hm)
+        {
+            if (do_ocx_reg(hm, TRUE))
+                hr = E_FAIL;
 
-        if (do_ocx_reg(hm, TRUE))
+            FreeLibrary(hm);
+        }
+        else
             hr = E_FAIL;
 
-        FreeLibrary(hm);
+        if (FAILED(hr))
+        {
+            /* FIXME: display a message box */
+            break;
+        }
     }
 
     return hr;
 }
 
-static HRESULT run_setup_commands_callback(HINF hinf, PCWSTR field, void *arg)
+static HRESULT run_setup_commands_callback(HINF hinf, PCWSTR field, const void *arg)
 {
-    ADVInfo *info = (ADVInfo *)arg;
+    const ADVInfo *info = (const ADVInfo *)arg;
     INFCONTEXT context;
     HRESULT hr = S_OK;
     DWORD size;
@@ -282,7 +291,7 @@ static HRESULT iterate_section_fields(HINF hinf, PCWSTR section, PCWSTR key,
     return hr;
 }
 
-static HRESULT check_admin_rights(ADVInfo *info)
+static HRESULT check_admin_rights(const ADVInfo *info)
 {
     INT check;
     INFCONTEXT context;
@@ -302,7 +311,7 @@ static HRESULT check_admin_rights(ADVInfo *info)
 }
 
 /* performs a setupapi-level install of the INF file */
-static HRESULT spapi_install(ADVInfo *info)
+static HRESULT spapi_install(const ADVInfo *info)
 {
     BOOL ret;
     HRESULT res;
@@ -350,8 +359,10 @@ static HRESULT adv_install(ADVInfo *info)
     if (hr != S_OK)
         return hr;
 
+    OleInitialize(NULL);
     hr = iterate_section_fields(info->hinf, info->install_sec,
                                 RegisterOCXs, register_ocxs_callback, NULL);
+    OleUninitialize();
     if (hr != S_OK)
         return hr;
 
@@ -500,7 +511,7 @@ static HRESULT install_init(LPCWSTR inf_filename, LPCWSTR install_sec,
 }
 
 /* release the install instance information */
-static void install_release(ADVInfo *info)
+static void install_release(const ADVInfo *info)
 {
     if (info->hinf && info->hinf != INVALID_HANDLE_VALUE)
         SetupCloseInfFile(info->hinf);

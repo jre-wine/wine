@@ -526,6 +526,7 @@ static UINT load_media_info(MSIPACKAGE *package, MSIFILE *file, struct media_inf
         return ERROR_FUNCTION_FAILED;
     }
 
+    mi->is_extracted = FALSE;
     mi->disk_id = MSI_RecordGetInteger(row, 1);
     mi->last_sequence = MSI_RecordGetInteger(row, 2);
     msi_free(mi->disk_prompt);
@@ -761,6 +762,7 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
 
         if (!file->IsCompressed)
         {
+            msi_file_update_ui(package, file, szInstallFiles);
             rc = copy_install_file(file);
             if (rc != ERROR_SUCCESS)
             {

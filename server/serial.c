@@ -61,18 +61,14 @@ static struct fd *serial_get_fd( struct object *obj );
 static unsigned int serial_map_access( struct object *obj, unsigned int access );
 static void serial_destroy(struct object *obj);
 
-static int serial_get_poll_events( struct fd *fd );
-static void serial_poll_event( struct fd *fd, int event );
-static enum server_fd_type serial_get_info( struct fd *fd, int *flags );
+static enum server_fd_type serial_get_fd_type( struct fd *fd );
 static void serial_flush( struct fd *fd, struct event **event );
 static void serial_queue_async( struct fd *fd, const async_data_t *data, int type, int count );
-static void serial_cancel_async( struct fd *fd );
 
 struct serial
 {
     struct object       obj;
     struct fd          *fd;
-    unsigned int        options;
 
     /* timeout values */
     unsigned int        readinterval;
@@ -85,10 +81,6 @@ struct serial
 
     struct termios      original;
 
-    struct list         read_q;
-    struct list         write_q;
-    struct list         wait_q;
-
     /* FIXME: add dcb, comm status, handler module, sharing */
 };
 
@@ -96,8 +88,8 @@ static const struct object_ops serial_ops =
 {
     sizeof(struct serial),        /* size */
     serial_dump,                  /* dump */
-    default_fd_add_queue,         /* add_queue */
-    default_fd_remove_queue,      /* remove_queue */
+    add_queue,                    /* add_queue */
+    remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
@@ -111,12 +103,13 @@ static const struct object_ops serial_ops =
 
 static const struct fd_ops serial_fd_ops =
 {
-    serial_get_poll_events,       /* get_poll_events */
-    serial_poll_event,            /* poll_event */
+    default_fd_get_poll_events,   /* get_poll_events */
+    default_poll_event,           /* poll_event */
     serial_flush,                 /* flush */
-    serial_get_info,              /* get_file_info */
+    serial_get_fd_type,           /* get_file_info */
     serial_queue_async,           /* queue_async */
-    serial_cancel_async           /* cancel_async */
+    default_fd_reselect_async,    /* reselect_async */
+    default_fd_cancel_async       /* cancel_async */
 };
 
 /* check if the given fd is a serial port */
@@ -128,27 +121,18 @@ int is_serial_fd( struct fd *fd )
 }
 
 /* create a serial object for a given fd */
-struct object *create_serial( struct fd *fd, unsigned int options )
+struct object *create_serial( struct fd *fd )
 {
     struct serial *serial;
-    int unix_fd = get_unix_fd( fd );
-
-    /* set the fd back to blocking if necessary */
-    if (options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT))
-        fcntl( unix_fd, F_SETFL, 0 );
 
     if (!(serial = alloc_object( &serial_ops ))) return NULL;
 
-    serial->options      = options;
     serial->readinterval = 0;
     serial->readmult     = 0;
     serial->readconst    = 0;
     serial->writemult    = 0;
     serial->writeconst   = 0;
     serial->eventmask    = 0;
-    list_init( &serial->read_q );
-    list_init( &serial->write_q );
-    list_init( &serial->wait_q );
     serial->fd = (struct fd *)grab_object( fd );
     set_fd_user( fd, &serial_fd_ops, &serial->obj );
     return &serial->obj;
@@ -172,11 +156,7 @@ static unsigned int serial_map_access( struct object *obj, unsigned int access )
 static void serial_destroy( struct object *obj)
 {
     struct serial *serial = (struct serial *)obj;
-
-    async_terminate_queue( &serial->read_q, STATUS_CANCELLED );
-    async_terminate_queue( &serial->write_q, STATUS_CANCELLED );
-    async_terminate_queue( &serial->wait_q, STATUS_CANCELLED );
-    if (serial->fd) release_object( serial->fd );
+    release_object( serial->fd );
 }
 
 static void serial_dump( struct object *obj, int verbose )
@@ -191,110 +171,40 @@ static struct serial *get_serial_obj( struct process *process, obj_handle_t hand
     return (struct serial *)get_handle_obj( process, handle, access, &serial_ops );
 }
 
-static int serial_get_poll_events( struct fd *fd )
+static enum server_fd_type serial_get_fd_type( struct fd *fd )
 {
-    struct serial *serial = get_fd_user( fd );
-    int events = 0;
-    assert( serial->obj.ops == &serial_ops );
-
-    if (!list_empty( &serial->read_q ))  events |= POLLIN;
-    if (!list_empty( &serial->write_q )) events |= POLLOUT;
-    if (!list_empty( &serial->wait_q ))  events |= POLLIN;
-
-    /* fprintf(stderr,"poll events are %04x\n",events); */
-
-    return events;
-}
-
-static enum server_fd_type serial_get_info( struct fd *fd, int *flags )
-{
-    struct serial *serial = get_fd_user( fd );
-    assert( serial->obj.ops == &serial_ops );
-
-    *flags = 0;
-    if (!(serial->options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT)))
-        *flags |= FD_FLAG_OVERLAPPED;
-    else if (!(serial->readinterval == MAXDWORD &&
-               serial->readmult == 0 && serial->readconst == 0))
-        *flags |= FD_FLAG_TIMEOUT;
-    if (serial->readinterval == MAXDWORD &&
-        serial->readmult == 0 && serial->readconst == 0)
-        *flags |= FD_FLAG_AVAILABLE;
-
     return FD_TYPE_SERIAL;
-}
-
-static void serial_poll_event(struct fd *fd, int event)
-{
-    struct serial *serial = get_fd_user( fd );
-
-    /* fprintf(stderr,"Poll event %02x\n",event); */
-
-    if (!list_empty( &serial->read_q ) && (POLLIN & event) )
-        async_terminate_head( &serial->read_q, STATUS_ALERTED );
-
-    if (!list_empty( &serial->write_q ) && (POLLOUT & event) )
-        async_terminate_head( &serial->write_q, STATUS_ALERTED );
-
-    if (!list_empty( &serial->wait_q ) && (POLLIN & event) )
-        async_terminate_head( &serial->wait_q, STATUS_ALERTED );
-
-    set_fd_events( fd, serial_get_poll_events(fd) );
 }
 
 static void serial_queue_async( struct fd *fd, const async_data_t *data, int type, int count )
 {
     struct serial *serial = get_fd_user( fd );
-    struct list *queue;
-    struct timeval when = current_time;
-    int timeout;
-    int events;
+    int timeout = 0;
+    struct async *async;
 
     assert(serial->obj.ops == &serial_ops);
 
     switch (type)
     {
     case ASYNC_TYPE_READ:
-        queue = &serial->read_q;
         timeout = serial->readconst + serial->readmult*count;
         break;
-    case ASYNC_TYPE_WAIT:
-        queue = &serial->wait_q;
-        timeout = 0;
-        break;
     case ASYNC_TYPE_WRITE:
-        queue = &serial->write_q;
         timeout = serial->writeconst + serial->writemult*count;
         break;
-    default:
-        set_error(STATUS_INVALID_PARAMETER);
-        return;
     }
 
-    add_timeout( &when, timeout );
-    if (!create_async( current, timeout ? &when : NULL, queue, data )) return;
-    set_error( STATUS_PENDING );
-
-    /* Check if the new pending request can be served immediately */
-    events = check_fd_events( fd, serial_get_poll_events( fd ) );
-    if (events)
+    if ((async = fd_queue_async( fd, data, type, count )))
     {
-        /* serial_poll_event() calls set_select_events() */
-        serial_poll_event( fd, events );
-        return;
+        if (timeout)
+        {
+            struct timeval when = current_time;
+            add_timeout( &when, timeout );
+            async_set_timeout( async, &when, STATUS_TIMEOUT );
+        }
+        release_object( async );
+        set_error( STATUS_PENDING );
     }
-
-    set_fd_events( fd, serial_get_poll_events( fd ) );
-}
-
-static void serial_cancel_async( struct fd *fd )
-{
-    struct serial *serial = get_fd_user( fd );
-    assert(serial->obj.ops == &serial_ops);
-
-    async_terminate_queue( &serial->read_q, STATUS_CANCELLED );
-    async_terminate_queue( &serial->write_q, STATUS_CANCELLED );
-    async_terminate_queue( &serial->wait_q, STATUS_CANCELLED );
 }
 
 static void serial_flush( struct fd *fd, struct event **event )
@@ -347,7 +257,7 @@ DECL_HANDLER(set_serial_info)
             serial->eventmask = req->eventmask;
             if (!serial->eventmask)
             {
-                async_terminate_queue( &serial->wait_q, STATUS_SUCCESS );
+                fd_async_wake_up( serial->fd, ASYNC_TYPE_WAIT, STATUS_SUCCESS );
             }
         }
 

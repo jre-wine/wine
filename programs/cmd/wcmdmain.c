@@ -34,7 +34,7 @@ const char * const inbuilt[] = {"ATTRIB", "CALL", "CD", "CHDIR", "CLS", "COPY", 
 		"DATE", "DEL", "DIR", "ECHO", "ERASE", "FOR", "GOTO",
 		"HELP", "IF", "LABEL", "MD", "MKDIR", "MOVE", "PATH", "PAUSE",
 		"PROMPT", "REM", "REN", "RENAME", "RD", "RMDIR", "SET", "SHIFT",
-                "TIME", "TITLE", "TYPE", "VERIFY", "VER", "VOL", 
+                "TIME", "TITLE", "TYPE", "VERIFY", "VER", "VOL",
                 "ENDLOCAL", "SETLOCAL", "PUSHD", "POPD", "ASSOC", "COLOR", "FTYPE",
                 "EXIT" };
 
@@ -622,7 +622,7 @@ void WCMD_process_command (char *command)
         WCMD_delete (p);
         break;
       case WCMD_DIR:
-        WCMD_directory ();
+        WCMD_directory (p);
         break;
       case WCMD_ECHO:
         WCMD_echo(&whichcmd[count]);
@@ -814,6 +814,7 @@ void WCMD_run_program (char *command, int called) {
   BOOL  extensionsupplied = FALSE;
   BOOL  launched = FALSE;
   BOOL  status;
+  BOOL  assumeInternal = FALSE;
   DWORD len;
 
 
@@ -836,8 +837,8 @@ void WCMD_run_program (char *command, int called) {
     /* Convert eg. ..\fred to include a directory by removing file part */
     GetFullPathName(param1, sizeof(pathtosearch), pathtosearch, NULL);
     lastSlash = strrchr(pathtosearch, '\\');
+    if (lastSlash && strchr(lastSlash, '.') != NULL) extensionsupplied = TRUE;
     if (lastSlash) *lastSlash = 0x00;
-    if (strchr(lastSlash, '.') != NULL) extensionsupplied = TRUE;
     strcpy(stemofsearch, lastSlash+1);
   }
 
@@ -849,6 +850,7 @@ void WCMD_run_program (char *command, int called) {
 
   /* Loop through the search path, dir by dir */
   pathposn = pathtosearch;
+  WINE_TRACE("Searching in '%s' for '%s'\n", pathtosearch, stemofsearch);
   while (!launched && pathposn) {
 
     char  thisDir[MAX_PATH] = "";
@@ -877,8 +879,11 @@ void WCMD_run_program (char *command, int called) {
     strcat(thisDir, stemofsearch);
     pos = &thisDir[strlen(thisDir)]; /* Pos = end of name */
 
-    if (GetFileAttributes(thisDir) != INVALID_FILE_ATTRIBUTES) {
-      found = TRUE;
+    /* 1. If extension supplied, see if that file exists */
+    if (extensionsupplied) {
+      if (GetFileAttributes(thisDir) != INVALID_FILE_ATTRIBUTES) {
+        found = TRUE;
+      }
     }
 
     /* 2. Any .* matches? */
@@ -914,8 +919,20 @@ void WCMD_run_program (char *command, int called) {
       }
     }
 
+   /* Internal programs won't be picked up by this search, so even
+      though not found, try one last createprocess and wait for it
+      to complete.
+      Note: Ideally we could tell between a console app (wait) and a
+      windows app, but the API's for it fail in this case           */
+    if (!found && pathposn == NULL) {
+        WINE_TRACE("ASSUMING INTERNAL\n");
+        assumeInternal = TRUE;
+    } else {
+        WINE_TRACE("Found as %s\n", thisDir);
+    }
+
     /* Once found, launch it */
-    if (found) {
+    if (found || assumeInternal) {
       STARTUPINFO st;
       PROCESS_INFORMATION pe;
       SHFILEINFO psfi;
@@ -935,7 +952,7 @@ void WCMD_run_program (char *command, int called) {
 
         /* thisDir contains the file to be launched, but with what?
            eg. a.exe will require a.exe to be launched, a.html may be iexplore */
-        hinst = FindExecutable (param1, NULL, temp);
+        hinst = FindExecutable (thisDir, NULL, temp);
         if ((INT_PTR)hinst < 32)
           console = 0;
         else
@@ -945,9 +962,10 @@ void WCMD_run_program (char *command, int called) {
         st.cb = sizeof(STARTUPINFO);
         init_msvcrt_io_block(&st);
 
-        /* Launch the process and if a CUI wait on it to complete */
-        status = CreateProcess (thisDir, command, NULL, NULL, TRUE,
-                                0, NULL, NULL, &st, &pe);
+        /* Launch the process and if a CUI wait on it to complete
+           Note: Launching internal wine processes cannot specify a full path to exe */
+        status = CreateProcess (assumeInternal?NULL : thisDir,
+                                command, NULL, NULL, TRUE, 0, NULL, NULL, &st, &pe);
         if ((opt_c || opt_k) && !opt_s && !status
             && GetLastError()==ERROR_FILE_NOT_FOUND && command[0]=='\"') {
           /* strip first and last quote characters and try again */
@@ -963,10 +981,10 @@ void WCMD_run_program (char *command, int called) {
           errorlevel = 9009;
           return;
         }
-        if (!console) errorlevel = 0;
+        if (!assumeInternal && !console) errorlevel = 0;
         else
         {
-            if (!HIWORD(console)) WaitForSingleObject (pe.hProcess, INFINITE);
+            if (assumeInternal || !HIWORD(console)) WaitForSingleObject (pe.hProcess, INFINITE);
             GetExitCodeProcess (pe.hProcess, &errorlevel);
             if (errorlevel == STILL_ACTIVE) errorlevel = 0;
         }
@@ -1227,7 +1245,7 @@ void WCMD_output_asis (const char *message) {
   if (paged_mode) {
     do {
       if ((ptr = strchr(message, '\n')) != NULL) ptr++;
-      WriteFile (GetStdHandle(STD_OUTPUT_HANDLE), message, 
+      WriteFile (GetStdHandle(STD_OUTPUT_HANDLE), message,
                  (ptr) ? ptr - message : lstrlen(message), &count, NULL);
       if (ptr) {
         if (++line_count >= max_height - 1) {

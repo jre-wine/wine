@@ -1274,15 +1274,15 @@ static void dump_alloc_file_handle_reply( const struct alloc_file_handle_reply *
 
 static void dump_get_handle_fd_request( const struct get_handle_fd_request *req )
 {
-    fprintf( stderr, " handle=%p,", req->handle );
-    fprintf( stderr, " access=%08x,", req->access );
-    fprintf( stderr, " cached=%d", req->cached );
+    fprintf( stderr, " handle=%p", req->handle );
 }
 
 static void dump_get_handle_fd_reply( const struct get_handle_fd_reply *req )
 {
     fprintf( stderr, " type=%d,", req->type );
-    fprintf( stderr, " flags=%d", req->flags );
+    fprintf( stderr, " removable=%d,", req->removable );
+    fprintf( stderr, " access=%08x,", req->access );
+    fprintf( stderr, " options=%08x", req->options );
 }
 
 static void dump_flush_file_request( const struct flush_file_request *req )
@@ -2210,6 +2210,11 @@ static void dump_get_msg_queue_request( const struct get_msg_queue_request *req 
 }
 
 static void dump_get_msg_queue_reply( const struct get_msg_queue_reply *req )
+{
+    fprintf( stderr, " handle=%p", req->handle );
+}
+
+static void dump_set_queue_fd_request( const struct set_queue_fd_request *req )
 {
     fprintf( stderr, " handle=%p", req->handle );
 }
@@ -3568,6 +3573,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_empty_atom_table_request,
     (dump_func)dump_init_atom_table_request,
     (dump_func)dump_get_msg_queue_request,
+    (dump_func)dump_set_queue_fd_request,
     (dump_func)dump_set_queue_mask_request,
     (dump_func)dump_get_queue_status_request,
     (dump_func)dump_get_process_idle_event_request,
@@ -3787,6 +3793,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)0,
     (dump_func)dump_init_atom_table_reply,
     (dump_func)dump_get_msg_queue_reply,
+    (dump_func)0,
     (dump_func)dump_set_queue_mask_reply,
     (dump_func)dump_get_queue_status_reply,
     (dump_func)dump_get_process_idle_event_reply,
@@ -4006,6 +4013,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "empty_atom_table",
     "init_atom_table",
     "get_msg_queue",
+    "set_queue_fd",
     "set_queue_mask",
     "get_queue_status",
     "get_process_idle_event",
@@ -4112,12 +4120,14 @@ static const struct
     unsigned int value;
 } status_names[] =
 {
+    { "ABANDONED_WAIT_0",            STATUS_ABANDONED_WAIT_0 },
     { "ACCESS_DENIED",               STATUS_ACCESS_DENIED },
     { "ACCESS_VIOLATION",            STATUS_ACCESS_VIOLATION },
     { "ALERTED",                     STATUS_ALERTED },
     { "ALIAS_EXISTS",                STATUS_ALIAS_EXISTS },
     { "BAD_DEVICE_TYPE",             STATUS_BAD_DEVICE_TYPE },
     { "BAD_IMPERSONATION_LEVEL",     STATUS_BAD_IMPERSONATION_LEVEL },
+    { "BREAKPOINT",                  STATUS_BREAKPOINT },
     { "BUFFER_OVERFLOW",             STATUS_BUFFER_OVERFLOW },
     { "BUFFER_TOO_SMALL",            STATUS_BUFFER_TOO_SMALL },
     { "CANCELLED",                   STATUS_CANCELLED },
@@ -4135,6 +4145,7 @@ static const struct
     { "ERROR_INVALID_WINDOW_HANDLE", 0xc0010000 | ERROR_INVALID_WINDOW_HANDLE },
     { "FILE_IS_A_DIRECTORY",         STATUS_FILE_IS_A_DIRECTORY },
     { "FILE_LOCK_CONFLICT",          STATUS_FILE_LOCK_CONFLICT },
+    { "GENERIC_NOT_MAPPED",          STATUS_GENERIC_NOT_MAPPED },
     { "HANDLES_CLOSED",              STATUS_HANDLES_CLOSED },
     { "HANDLE_NOT_CLOSABLE",         STATUS_HANDLE_NOT_CLOSABLE },
     { "ILLEGAL_FUNCTION",            STATUS_ILLEGAL_FUNCTION },
@@ -4143,12 +4154,14 @@ static const struct
     { "INVALID_FILE_FOR_SECTION",    STATUS_INVALID_FILE_FOR_SECTION },
     { "INVALID_HANDLE",              STATUS_INVALID_HANDLE },
     { "INVALID_PARAMETER",           STATUS_INVALID_PARAMETER },
+    { "INVALID_SECURITY_DESCR",      STATUS_INVALID_SECURITY_DESCR },
     { "IO_TIMEOUT",                  STATUS_IO_TIMEOUT },
     { "KEY_DELETED",                 STATUS_KEY_DELETED },
     { "MAPPED_FILE_SIZE_ZERO",       STATUS_MAPPED_FILE_SIZE_ZERO },
     { "MEDIA_WRITE_PROTECTED",       STATUS_MEDIA_WRITE_PROTECTED },
     { "MUTANT_NOT_OWNED",            STATUS_MUTANT_NOT_OWNED },
     { "NAME_TOO_LONG",               STATUS_NAME_TOO_LONG },
+    { "NOTIFY_ENUM_DIR",             STATUS_NOTIFY_ENUM_DIR },
     { "NOT_ALL_ASSIGNED",            STATUS_NOT_ALL_ASSIGNED },
     { "NOT_A_DIRECTORY",             STATUS_NOT_A_DIRECTORY },
     { "NOT_IMPLEMENTED",             STATUS_NOT_IMPLEMENTED },
@@ -4185,6 +4198,7 @@ static const struct
     { "TIMEOUT",                     STATUS_TIMEOUT },
     { "TOO_MANY_OPENED_FILES",       STATUS_TOO_MANY_OPENED_FILES },
     { "UNSUCCESSFUL",                STATUS_UNSUCCESSFUL },
+    { "USER_APC",                    STATUS_USER_APC },
     { "VOLUME_DISMOUNTED",           STATUS_VOLUME_DISMOUNTED },
     { "WAS_LOCKED",                  STATUS_WAS_LOCKED },
     { NULL, 0 }

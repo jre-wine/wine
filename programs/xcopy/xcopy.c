@@ -19,6 +19,17 @@
  */
 
 /*
+ * FIXME:
+ * This should now support all options listed in the xcopy help from
+ * windows XP except:
+ *  /Z - Copy from network drives in restartable mode
+ *  /X - Copy file audit settings (sets /O)
+ *  /O - Copy file ownership + ACL info
+ *  /G - Copy encrypted files to unencrypted destination
+ *  /V - Verifies files
+ */
+
+/*
  * Notes:
  * Apparently, valid return codes are:
  *   0 - OK
@@ -32,47 +43,36 @@
 #include <stdio.h>
 #include <windows.h>
 #include <wine/debug.h>
-
-/* Local #defines */
-#define RC_OK         0
-#define RC_NOFILES    1
-#define RC_CTRLC      2
-#define RC_INITERROR  4
-#define RC_WRITEERROR 5
-
-#define OPT_ASSUMEDIR    0x00000001
-#define OPT_RECURSIVE    0x00000002
-#define OPT_EMPTYDIR     0x00000004
-#define OPT_QUIET        0x00000008
-#define OPT_FULL         0x00000010
-#define OPT_SIMULATE     0x00000020
-#define OPT_PAUSE        0x00000040
-#define OPT_NOCOPY       0x00000080
-#define OPT_NOPROMPT     0x00000100
-#define OPT_SHORTNAME    0x00000200
-#define OPT_MUSTEXIST    0x00000400
-#define OPT_REPLACEREAD  0x00000800
-#define OPT_COPYHIDSYS   0x00001000
-#define OPT_IGNOREERRORS 0x00002000
-#define OPT_SRCPROMPT    0x00004000
-#define OPT_ARCHIVEONLY  0x00008000
-#define OPT_REMOVEARCH   0x00010000
-
-#define MAXSTRING 8192
+#include "xcopy.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xcopy);
 
 /* Prototypes */
-static int XCOPY_ProcessSourceParm(WCHAR *suppliedsource, WCHAR *stem, WCHAR *spec);
+static int XCOPY_ProcessSourceParm(WCHAR *suppliedsource, WCHAR *stem,
+                                   WCHAR *spec, DWORD flags);
 static int XCOPY_ProcessDestParm(WCHAR *supplieddestination, WCHAR *stem,
                                  WCHAR *spec, WCHAR *srcspec, DWORD flags);
 static int XCOPY_DoCopy(WCHAR *srcstem, WCHAR *srcspec,
                         WCHAR *deststem, WCHAR *destspec,
                         DWORD flags);
 static BOOL XCOPY_CreateDirectory(const WCHAR* path);
+static BOOL XCOPY_ProcessExcludeList(WCHAR* parms);
+static BOOL XCOPY_ProcessExcludeFile(WCHAR* filename, WCHAR* endOfName);
+static WCHAR *XCOPY_LoadMessage(UINT id);
+static void XCOPY_FailMessage(DWORD err);
+
+/* Typedefs */
+typedef struct _EXCLUDELIST
+{
+  struct _EXCLUDELIST *next;
+  WCHAR               *name;
+} EXCLUDELIST;
+
 
 /* Global variables */
 static ULONG filesCopied           = 0;              /* Number of files copied  */
+static EXCLUDELIST *excludeList    = NULL;           /* Excluded strings list   */
+static FILETIME dateRange;                           /* Date range to copy after*/
 static const WCHAR wchr_slash[]   = {'\\', 0};
 static const WCHAR wchr_star[]    = {'*', 0};
 static const WCHAR wchr_dot[]     = {'.', 0};
@@ -107,6 +107,7 @@ int main (int argc, char *argv[])
     const WCHAR PROMPTSTR1[]  = {'/', 'Y', 0};
     const WCHAR PROMPTSTR2[]  = {'/', 'y', 0};
     const WCHAR COPYCMD[]  = {'C', 'O', 'P', 'Y', 'C', 'M', 'D', 0};
+    const WCHAR EXCLUDE[]  = {'E', 'X', 'C', 'L', 'U', 'D', 'E', ':', 0};
 
     /*
      * Parse the command line
@@ -117,7 +118,7 @@ int main (int argc, char *argv[])
 
     /* Confirm at least one parameter */
     if (argc < 2) {
-        printf("Invalid number of parameters - Use xcopy /? for help\n");
+        wprintf(XCOPY_LoadMessage(STRING_INVPARMS));
         return RC_INITERROR;
     }
 
@@ -128,6 +129,13 @@ int main (int argc, char *argv[])
             flags |= OPT_NOPROMPT;
         }
     }
+
+    /* FIXME: On UNIX, files starting with a '.' are treated as hidden under
+       wine, but on windows these can be normal files. At least one installer
+       uses files such as .packlist and (validly) expects them to be copied.
+       Under wine, if we do not copy hidden files by default then they get
+       lose                                                                   */
+    flags |= OPT_COPYHIDSYS;
 
     /* Skip first arg, which is the program name */
     argvW++;
@@ -144,7 +152,7 @@ int main (int argc, char *argv[])
             } else if (supplieddestination[0] == 0x00) {
                 lstrcpyW(supplieddestination, *argvW);
             } else {
-                printf("Invalid number of parameters - Use xcopy /? for help\n");
+                wprintf(XCOPY_LoadMessage(STRING_INVPARMS));
                 return RC_INITERROR;
             }
         } else {
@@ -155,7 +163,6 @@ int main (int argc, char *argv[])
             switch (toupper(argvW[0][1])) {
             case 'I': flags |= OPT_ASSUMEDIR;     break;
             case 'S': flags |= OPT_RECURSIVE;     break;
-            case 'E': flags |= OPT_EMPTYDIR;      break;
             case 'Q': flags |= OPT_QUIET;         break;
             case 'F': flags |= OPT_FULL;          break;
             case 'L': flags |= OPT_SIMULATE;      break;
@@ -171,10 +178,76 @@ int main (int argc, char *argv[])
             case 'A': flags |= OPT_ARCHIVEONLY;   break;
             case 'M': flags |= OPT_ARCHIVEONLY |
                                OPT_REMOVEARCH;    break;
+
+            /* E can be /E or /EXCLUDE */
+            case 'E': if (CompareString (LOCALE_USER_DEFAULT,
+                                         NORM_IGNORECASE | SORT_STRINGSORT,
+                                         &argvW[0][1], 8,
+                                         EXCLUDE, -1) == 2) {
+                        if (XCOPY_ProcessExcludeList(&argvW[0][9])) {
+                          XCOPY_FailMessage(ERROR_INVALID_PARAMETER);
+                          return RC_INITERROR;
+                        } else flags |= OPT_EXCLUDELIST;
+                      } else flags |= OPT_EMPTYDIR | OPT_RECURSIVE;
+                      break;
+
+            /* D can be /D or /D: */
+            case 'D': if ((argvW[0][2])==':' && isdigit(argvW[0][3])) {
+                          SYSTEMTIME st;
+                          WCHAR     *pos = &argvW[0][3];
+                          BOOL       isError = FALSE;
+                          memset(&st, 0x00, sizeof(st));
+
+                          /* Parse the arg : Month */
+                          st.wMonth = _wtol(pos);
+                          while (*pos && isdigit(*pos)) pos++;
+                          if (*pos++ != '-') isError = TRUE;
+
+                          /* Parse the arg : Day */
+                          if (!isError) {
+                              st.wDay = _wtol(pos);
+                              while (*pos && isdigit(*pos)) pos++;
+                              if (*pos++ != '-') isError = TRUE;
+                          }
+
+                          /* Parse the arg : Day */
+                          if (!isError) {
+                              st.wYear = _wtol(pos);
+                              if (st.wYear < 100) st.wYear+=2000;
+                          }
+
+                          if (!isError && SystemTimeToFileTime(&st, &dateRange)) {
+                              SYSTEMTIME st;
+                              WCHAR datestring[32], timestring[32];
+
+                              flags |= OPT_DATERANGE;
+
+                              /* Debug info: */
+                              FileTimeToSystemTime (&dateRange, &st);
+                              GetDateFormat (0, DATE_SHORTDATE, &st, NULL, datestring,
+                                          sizeof(datestring));
+                              GetTimeFormat (0, TIME_NOSECONDS, &st,
+                                          NULL, timestring, sizeof(timestring));
+
+                              WINE_TRACE("Date being used is: %s %s\n",
+                                         wine_dbgstr_w(datestring), wine_dbgstr_w(timestring));
+                          } else {
+                              XCOPY_FailMessage(ERROR_INVALID_PARAMETER);
+                              return RC_INITERROR;
+                          }
+                      } else {
+                          flags |= OPT_DATENEWER;
+                      }
+                      break;
+
             case '-': if (toupper(argvW[0][2])=='Y')
                           flags &= ~OPT_NOPROMPT; break;
+            case '?': wprintf(XCOPY_LoadMessage(STRING_HELP));
+                      return RC_OK;
             default:
-              WINE_FIXME("Unhandled parameter '%s'\n", wine_dbgstr_w(*argvW));
+                WINE_TRACE("Unhandled parameter '%s'\n", wine_dbgstr_w(*argvW));
+                wprintf(XCOPY_LoadMessage(STRING_INVPARM), *argvW);
+                return RC_INITERROR;
             }
         }
         argvW++;
@@ -190,7 +263,7 @@ int main (int argc, char *argv[])
     WINE_TRACE("Destination : '%s'\n", wine_dbgstr_w(supplieddestination));
 
     /* Extract required information from source specification */
-    rc = XCOPY_ProcessSourceParm(suppliedsource, sourcestem, sourcespec);
+    rc = XCOPY_ProcessSourceParm(suppliedsource, sourcestem, sourcespec, flags);
 
     /* Extract required information from destination specification */
     rc = XCOPY_ProcessDestParm(supplieddestination, destinationstem,
@@ -208,7 +281,7 @@ int main (int argc, char *argv[])
         DWORD count;
         char pausestr[10];
 
-        printf("Press <enter> to begin copying\n");
+        wprintf(XCOPY_LoadMessage(STRING_PAUSE));
         ReadFile (GetStdHandle(STD_INPUT_HANDLE), pausestr, sizeof(pausestr),
                   &count, NULL);
     }
@@ -218,11 +291,19 @@ int main (int argc, char *argv[])
                 destinationstem, destinationspec,
                 flags);
 
+    /* Clear up exclude list allocated memory */
+    while (excludeList) {
+        EXCLUDELIST *pos = excludeList;
+        excludeList = excludeList -> next;
+        HeapFree(GetProcessHeap(), 0, pos->name);
+        HeapFree(GetProcessHeap(), 0, pos);
+    }
+
     /* Finished - print trailer and exit */
     if (flags & OPT_SIMULATE) {
-        printf("%d file(s) would be copied\n", filesCopied);
+        wprintf(XCOPY_LoadMessage(STRING_SIMCOPY), filesCopied);
     } else if (!(flags & OPT_NOCOPY)) {
-        printf("%d file(s) copied\n", filesCopied);
+        wprintf(XCOPY_LoadMessage(STRING_COPY), filesCopied);
     }
     if (rc == RC_OK && filesCopied == 0) rc = RC_NOFILES;
     return rc;
@@ -234,11 +315,13 @@ int main (int argc, char *argv[])
    XCOPY_ProcessSourceParm - Takes the supplied source parameter, and
      converts it into a stem and a filespec
    ========================================================================= */
-static int XCOPY_ProcessSourceParm(WCHAR *suppliedsource, WCHAR *stem, WCHAR *spec)
+static int XCOPY_ProcessSourceParm(WCHAR *suppliedsource, WCHAR *stem,
+                                   WCHAR *spec, DWORD flags)
 {
     WCHAR             actualsource[MAX_PATH];
     WCHAR            *starPos;
     WCHAR            *questPos;
+    DWORD             attribs;
 
     /*
      * Validate the source, expanding to full path ensuring it exists
@@ -248,62 +331,79 @@ static int XCOPY_ProcessSourceParm(WCHAR *suppliedsource, WCHAR *stem, WCHAR *sp
         return RC_INITERROR;
     }
 
+    /* If full names required, convert to using the full path */
+    if (flags & OPT_FULL) {
+        lstrcpyW(suppliedsource, actualsource);
+    }
+
     /*
      * Work out the stem of the source
      */
 
-    /* If no wildcard were supplied then the source is either a single
-       file or a directory - in which case thats the stem of the search,
-       otherwise split off the wildcards and use the higher level as the
-       stem                                                              */
-    lstrcpyW(stem, actualsource);
-    starPos = wcschr(stem, '*');
-    questPos = wcschr(stem, '?');
+    /* If a directory is supplied, use that as-is (either fully or
+          partially qualified)
+       If a filename is supplied + a directory or drive path, use that
+          as-is
+       Otherwise
+          If no directory or path specified, add eg. C:
+          stem is Drive/Directory is bit up to last \ (or first :)
+          spec is bit after that                                         */
+
+    starPos = wcschr(suppliedsource, '*');
+    questPos = wcschr(suppliedsource, '?');
     if (starPos || questPos) {
+        attribs = 0x00;  /* Ensures skips invalid or directory check below */
+    } else {
+        attribs = GetFileAttributes(actualsource);
+    }
+
+    if (attribs == INVALID_FILE_ATTRIBUTES) {
+        XCOPY_FailMessage(GetLastError());
+        return RC_INITERROR;
+
+    /* Directory:
+         stem should be exactly as supplied plus a '\', unless it was
+          eg. C: in which case no slash required */
+    } else if (attribs & FILE_ATTRIBUTE_DIRECTORY) {
+        WCHAR lastChar;
+
+        WINE_TRACE("Directory supplied\n");
+        lstrcpyW(stem, suppliedsource);
+        lastChar = stem[lstrlenW(stem)-1];
+        if (lastChar != '\\' && lastChar != ':') {
+            lstrcatW(stem, wchr_slash);
+        }
+        lstrcpyW(spec, wchr_star);
+
+    /* File or wildcard search:
+         stem should be:
+           Up to and including last slash if directory path supplied
+           If c:filename supplied, just the c:
+           Otherwise stem should be the current drive letter + ':' */
+    } else {
         WCHAR *lastDir;
 
-        if (starPos) *starPos = 0x00;
-        if (questPos) *questPos = 0x00;
+        WINE_TRACE("Filename supplied\n");
+        lastDir   = wcsrchr(suppliedsource, '\\');
 
-        lastDir = wcsrchr(stem, '\\');
-        if (lastDir) *(lastDir+1) = 0x00;
-        else {
-            WINE_FIXME("Unexpected syntax error in source parameter\n");
-            return RC_INITERROR;
-        }
-        lstrcpyW(spec, actualsource + (lastDir - stem)+1);
-    } else {
-
-        DWORD attribs = GetFileAttributes(actualsource);
-
-        if (attribs == INVALID_FILE_ATTRIBUTES) {
-            LPWSTR lpMsgBuf;
-            DWORD lastError = GetLastError();
-            int status;
-            status = FormatMessage (FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                                    FORMAT_MESSAGE_FROM_SYSTEM,
-                                    NULL, lastError, 0, (LPWSTR) &lpMsgBuf, 0, NULL);
-            printf("%S\n", lpMsgBuf);
-            return RC_INITERROR;
-
-        /* Directory: */
-        } else if (attribs & FILE_ATTRIBUTE_DIRECTORY) {
-            lstrcatW(stem, wchr_slash);
-            lstrcpyW(spec, wchr_star);
-
-        /* File: */
+        if (lastDir) {
+            lstrcpyW(stem, suppliedsource);
+            stem[(lastDir-suppliedsource) + 1] = 0x00;
+            lstrcpyW(spec, (lastDir+1));
+        } else if (suppliedsource[1] == ':') {
+            lstrcpyW(stem, suppliedsource);
+            stem[2] = 0x00;
+            lstrcpyW(spec, suppliedsource+2);
         } else {
-            WCHAR drive[MAX_PATH];
-            WCHAR dir[MAX_PATH];
-            WCHAR fname[MAX_PATH];
-            WCHAR ext[MAX_PATH];
-            _wsplitpath(actualsource, drive, dir, fname, ext);
-            lstrcpyW(stem, drive);
-            lstrcatW(stem, dir);
-            lstrcpyW(spec, fname);
-            lstrcatW(spec, ext);
+            WCHAR curdir[MAXSTRING];
+            GetCurrentDirectory (sizeof(curdir), curdir);
+            stem[0] = curdir[0];
+            stem[1] = curdir[1];
+            stem[2] = 0x00;
+            lstrcpyW(spec, suppliedsource);
         }
     }
+
     return RC_OK;
 }
 
@@ -340,11 +440,15 @@ static int XCOPY_ProcessDestParm(WCHAR *supplieddestination, WCHAR *stem, WCHAR 
         } else {
             DWORD count;
             char  answer[10] = "";
+            WCHAR fileChar[2];
+            WCHAR dirChar[2];
 
-            while (answer[0] != 'F' && answer[0] != 'D') {
-                printf("Is %S a filename or directory\n"
-                       "on the target?\n"
-                       "(F - File, D - Directory)\n", supplieddestination);
+            /* Read the F and D characters from the resource file */
+            wcscpy(fileChar, XCOPY_LoadMessage(STRING_FILE_CHAR));
+            wcscpy(dirChar, XCOPY_LoadMessage(STRING_DIR_CHAR));
+
+            while (answer[0] != fileChar[0] && answer[0] != dirChar[0]) {
+                wprintf(XCOPY_LoadMessage(STRING_QISDIR), supplieddestination);
 
                 ReadFile(GetStdHandle(STD_INPUT_HANDLE), answer, sizeof(answer), &count, NULL);
                 WINE_TRACE("User answer %c\n", answer[0]);
@@ -352,7 +456,7 @@ static int XCOPY_ProcessDestParm(WCHAR *supplieddestination, WCHAR *stem, WCHAR 
                 answer[0] = toupper(answer[0]);
             }
 
-            if (answer[0] == 'D') {
+            if (answer[0] == dirChar[0]) {
                 isDir = TRUE;
             } else {
                 isDir = FALSE;
@@ -406,9 +510,6 @@ static int XCOPY_DoCopy(WCHAR *srcstem, WCHAR *srcspec,
     BOOL            copiedFile = FALSE;
     DWORD           destAttribs, srcAttribs;
     BOOL            skipFile;
-    LPVOID          lpMsgBuf;
-    DWORD           error_code;
-    int             status;
 
     /* Allocate some working memory on heap to minimize footprint */
     finddata = HeapAlloc(GetProcessHeap(), 0, sizeof(WIN32_FIND_DATA));
@@ -474,46 +575,109 @@ static int XCOPY_DoCopy(WCHAR *srcstem, WCHAR *srcspec,
                 skipFile = TRUE;
             }
 
+            /* See if file exists */
+            destAttribs = GetFileAttributesW(copyTo);
+            WINE_TRACE("Dest attribs: %d\n", srcAttribs);
+
+            /* Check date ranges if a destination file already exists */
+            if (!skipFile && (flags & OPT_DATERANGE) &&
+                (CompareFileTime(&finddata->ftLastWriteTime, &dateRange) < 0)) {
+                WINE_TRACE("Skipping file as modified date too old\n");
+                skipFile = TRUE;
+            }
+
+            /* If just /D supplied, only overwrite if src newer than dest */
+            if (!skipFile && (flags & OPT_DATENEWER) &&
+               (destAttribs != INVALID_FILE_ATTRIBUTES)) {
+                HANDLE h = CreateFile(copyTo, GENERIC_READ, FILE_SHARE_READ,
+                                      NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                      NULL);
+                if (h != INVALID_HANDLE_VALUE) {
+                    FILETIME writeTime;
+                    GetFileTime(h, NULL, NULL, &writeTime);
+
+                    if (CompareFileTime(&finddata->ftLastWriteTime, &writeTime) <= 0) {
+                        WINE_TRACE("Skipping file as dest newer or same date\n");
+                        skipFile = TRUE;
+                    }
+                    CloseHandle(h);
+                }
+            }
+
+            /* See if exclude list provided. Note since filenames are case
+               insensitive, need to uppercase the filename before doing
+               strstr                                                     */
+            if (!skipFile && (flags & OPT_EXCLUDELIST)) {
+                EXCLUDELIST *pos = excludeList;
+                WCHAR copyFromUpper[MAX_PATH];
+
+                /* Uppercase source filename */
+                lstrcpyW(copyFromUpper, copyFrom);
+                CharUpperBuff(copyFromUpper, lstrlenW(copyFromUpper));
+
+                /* Loop through testing each exclude line */
+                while (pos) {
+                    if (wcsstr(copyFromUpper, pos->name) != NULL) {
+                        WINE_TRACE("Skipping file as matches exclude '%s'\n",
+                                   wine_dbgstr_w(pos->name));
+                        skipFile = TRUE;
+                        pos = NULL;
+                    } else {
+                        pos = pos->next;
+                    }
+                }
+            }
+
             /* Prompt each file if necessary */
             if (!skipFile && (flags & OPT_SRCPROMPT)) {
                 DWORD count;
                 char  answer[10];
                 BOOL  answered = FALSE;
+                WCHAR yesChar[2];
+                WCHAR noChar[2];
+
+                /* Read the Y and N characters from the resource file */
+                wcscpy(yesChar, XCOPY_LoadMessage(STRING_YES_CHAR));
+                wcscpy(noChar, XCOPY_LoadMessage(STRING_NO_CHAR));
 
                 while (!answered) {
-                    printf("%S? (Yes|No)\n", copyFrom);
+                    wprintf(XCOPY_LoadMessage(STRING_SRCPROMPT), copyFrom);
                     ReadFile (GetStdHandle(STD_INPUT_HANDLE), answer, sizeof(answer),
                               &count, NULL);
 
                     answered = TRUE;
-                    if (toupper(answer[0]) == 'N')
+                    if (toupper(answer[0]) == noChar[0])
                         skipFile = TRUE;
-                    else if (toupper(answer[0]) != 'Y')
+                    else if (toupper(answer[0]) != yesChar[0])
                         answered = FALSE;
                 }
             }
-
-            /* See if file exists */
-            destAttribs = GetFileAttributesW(copyTo);
-            WINE_TRACE("Dest attribs: %d\n", srcAttribs);
 
             if (!skipFile &&
                 destAttribs != INVALID_FILE_ATTRIBUTES && !(flags & OPT_NOPROMPT)) {
                 DWORD count;
                 char  answer[10];
                 BOOL  answered = FALSE;
+                WCHAR yesChar[2];
+                WCHAR allChar[2];
+                WCHAR noChar[2];
+
+                /* Read the A,Y and N characters from the resource file */
+                wcscpy(yesChar, XCOPY_LoadMessage(STRING_YES_CHAR));
+                wcscpy(allChar, XCOPY_LoadMessage(STRING_ALL_CHAR));
+                wcscpy(noChar, XCOPY_LoadMessage(STRING_NO_CHAR));
 
                 while (!answered) {
-                    printf("Overwrite %S? (Yes|No|All)\n", copyTo);
+                    wprintf(XCOPY_LoadMessage(STRING_OVERWRITE), copyTo);
                     ReadFile (GetStdHandle(STD_INPUT_HANDLE), answer, sizeof(answer),
                               &count, NULL);
 
                     answered = TRUE;
-                    if (toupper(answer[0]) == 'A')
+                    if (toupper(answer[0]) == allChar[0])
                         flags |= OPT_NOPROMPT;
-                    else if (toupper(answer[0]) == 'N')
+                    else if (toupper(answer[0]) == noChar[0])
                         skipFile = TRUE;
-                    else if (toupper(answer[0]) != 'Y')
+                    else if (toupper(answer[0]) != yesChar[0])
                         answered = FALSE;
                 }
             }
@@ -544,21 +708,12 @@ static int XCOPY_DoCopy(WCHAR *srcstem, WCHAR *srcspec,
                 if (flags & OPT_SIMULATE || flags & OPT_NOCOPY) {
                     /* Skip copy */
                 } else if (CopyFile(copyFrom, copyTo, FALSE) == 0) {
-                    printf("Copying of '%S' to '%S' failed with r/c %d\n",
-                           copyFrom, copyTo, GetLastError());
 
-                    error_code = GetLastError ();
-                    status = FormatMessage (FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                                            FORMAT_MESSAGE_FROM_SYSTEM,
-                                            NULL, error_code, 0,
-                                            (LPTSTR) &lpMsgBuf, 0, NULL);
-                    if (!status) {
-                        WINE_FIXME("FIXME: Cannot display message for error %d, status %d\n",
-                                   error_code, GetLastError());
-                    } else {
-                        printf("%S\n", lpMsgBuf);
-                        LocalFree ((HLOCAL)lpMsgBuf);
-                    }
+                    DWORD error = GetLastError();
+                    wprintf(XCOPY_LoadMessage(STRING_COPYFAIL),
+                           copyFrom, copyTo, error);
+                    XCOPY_FailMessage(error);
+
                     if (flags & OPT_IGNOREERRORS) {
                         skipFile = TRUE;
                     } else {
@@ -679,4 +834,131 @@ static BOOL XCOPY_CreateDirectory(const WCHAR* path)
     }
     HeapFree(GetProcessHeap(),0,new_path);
     return ret;
+}
+
+/* =========================================================================
+ * Process the /EXCLUDE: file list, building up a list of substrings to
+ * avoid copying
+ * Returns TRUE on any failure
+ * ========================================================================= */
+static BOOL XCOPY_ProcessExcludeList(WCHAR* parms) {
+
+    WCHAR *filenameStart = parms;
+
+    WINE_TRACE("/EXCLUDE parms: '%s'\n", wine_dbgstr_w(parms));
+    excludeList = NULL;
+
+    while (*parms && *parms != ' ' && *parms != '/') {
+
+        /* If found '+' then process the file found so far */
+        if (*parms == '+') {
+            if (XCOPY_ProcessExcludeFile(filenameStart, parms)) {
+                return TRUE;
+            }
+            filenameStart = parms+1;
+        }
+        parms++;
+    }
+
+    if (filenameStart != parms) {
+        if (XCOPY_ProcessExcludeFile(filenameStart, parms)) {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+/* =========================================================================
+ * Process a single file from the /EXCLUDE: file list, building up a list
+ * of substrings to avoid copying
+ * Returns TRUE on any failure
+ * ========================================================================= */
+static BOOL XCOPY_ProcessExcludeFile(WCHAR* filename, WCHAR* endOfName) {
+
+    WCHAR   endChar = *endOfName;
+    WCHAR   buffer[MAXSTRING];
+    FILE   *inFile  = NULL;
+    const WCHAR readTextMode[]  = {'r', 't', 0};
+
+    /* Null terminate the filename (temporarily updates the filename hence
+         parms not const)                                                 */
+    *endOfName = 0x00;
+
+    /* Open the file */
+    inFile = _wfopen(filename, readTextMode);
+    if (inFile == NULL) {
+        wprintf(XCOPY_LoadMessage(STRING_OPENFAIL), filename);
+        *endOfName = endChar;
+        return TRUE;
+    }
+
+    /* Process line by line */
+    while (fgetws(buffer, sizeof(buffer), inFile) != NULL) {
+        EXCLUDELIST *thisEntry;
+        int length = lstrlenW(buffer);
+
+        /* Strip CRLF */
+        buffer[length-1] = 0x00;
+
+        /* If more than CRLF */
+        if (length > 1) {
+          thisEntry = HeapAlloc(GetProcessHeap(), 0, sizeof(EXCLUDELIST));
+          thisEntry->next = excludeList;
+          excludeList = thisEntry;
+          thisEntry->name = HeapAlloc(GetProcessHeap(), 0,
+                                      (length * sizeof(WCHAR))+1);
+          lstrcpyW(thisEntry->name, buffer);
+          CharUpperBuff(thisEntry->name, length);
+          WINE_TRACE("Read line : '%s'\n", wine_dbgstr_w(thisEntry->name));
+        }
+    }
+
+    /* See if EOF or error occurred */
+    if (!feof(inFile)) {
+        wprintf(XCOPY_LoadMessage(STRING_READFAIL), filename);
+        *endOfName = endChar;
+        return TRUE;
+    }
+
+    /* Revert the input string to original form, and cleanup + return */
+    *endOfName = endChar;
+    fclose(inFile);
+    return FALSE;
+}
+
+/* =========================================================================
+ * Load a string from the resource file, handling any error
+ * Returns string retrieved from resource file
+ * ========================================================================= */
+static WCHAR *XCOPY_LoadMessage(UINT id) {
+    static WCHAR msg[2048];
+    const WCHAR failedMsg[]  = {'F', 'a', 'i', 'l', 'e', 'd', '!', 0};
+
+    if (!LoadString(GetModuleHandle(NULL), id, msg, sizeof(msg))) {
+       WINE_FIXME("LoadString failed with %d\n", GetLastError());
+       lstrcpyW(msg, failedMsg);
+    }
+    return msg;
+}
+
+/* =========================================================================
+ * Load a string for a system error and writes it to the screen
+ * Returns string retrieved from resource file
+ * ========================================================================= */
+static void XCOPY_FailMessage(DWORD err) {
+    LPWSTR lpMsgBuf;
+    int status;
+
+    status = FormatMessage (FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                            FORMAT_MESSAGE_FROM_SYSTEM,
+                            NULL, err, 0,
+                            (LPTSTR) &lpMsgBuf, 0, NULL);
+    if (!status) {
+      WINE_FIXME("FIXME: Cannot display message for error %d, status %d\n",
+                 err, GetLastError());
+    } else {
+      printf("%S\n", lpMsgBuf);
+      LocalFree ((HLOCAL)lpMsgBuf);
+    }
 }

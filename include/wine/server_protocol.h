@@ -263,7 +263,7 @@ typedef union
     struct
     {
         enum apc_type    type;
-        void (__stdcall *func)(void*, void*, unsigned int);
+        unsigned int   (*func)(void*, void*, unsigned int);
         void            *user;
         void            *sb;
         unsigned int     status;
@@ -1067,14 +1067,14 @@ struct get_handle_fd_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    unsigned int access;
-    int          cached;
 };
 struct get_handle_fd_reply
 {
     struct reply_header __header;
     int          type;
-    int          flags;
+    int          removable;
+    unsigned int access;
+    unsigned int options;
 };
 enum server_fd_type
 {
@@ -1088,13 +1088,7 @@ enum server_fd_type
     FD_TYPE_DEVICE,
     FD_TYPE_NB_TYPES
 };
-#define FD_FLAG_OVERLAPPED         0x01
-#define FD_FLAG_TIMEOUT            0x02
-#define FD_FLAG_RECV_SHUTDOWN      0x04
-#define FD_FLAG_SEND_SHUTDOWN      0x08
-#define FD_FLAG_AVAILABLE          0x10 /* in overlap read/write operation,
-                                         * only handle available data (don't wait) */
-#define FD_FLAG_REMOVABLE          0x20
+
 
 
 struct flush_file_request
@@ -2391,6 +2385,18 @@ struct get_msg_queue_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+};
+
+
+
+struct set_queue_fd_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct set_queue_fd_reply
+{
+    struct reply_header __header;
 };
 
 
@@ -4118,6 +4124,7 @@ enum request
     REQ_empty_atom_table,
     REQ_init_atom_table,
     REQ_get_msg_queue,
+    REQ_set_queue_fd,
     REQ_set_queue_mask,
     REQ_get_queue_status,
     REQ_get_process_idle_event,
@@ -4341,6 +4348,7 @@ union generic_request
     struct empty_atom_table_request empty_atom_table_request;
     struct init_atom_table_request init_atom_table_request;
     struct get_msg_queue_request get_msg_queue_request;
+    struct set_queue_fd_request set_queue_fd_request;
     struct set_queue_mask_request set_queue_mask_request;
     struct get_queue_status_request get_queue_status_request;
     struct get_process_idle_event_request get_process_idle_event_request;
@@ -4562,6 +4570,7 @@ union generic_reply
     struct empty_atom_table_reply empty_atom_table_reply;
     struct init_atom_table_reply init_atom_table_reply;
     struct get_msg_queue_reply get_msg_queue_reply;
+    struct set_queue_fd_reply set_queue_fd_reply;
     struct set_queue_mask_reply set_queue_mask_reply;
     struct get_queue_status_reply get_queue_status_reply;
     struct get_process_idle_event_reply get_process_idle_event_reply;
@@ -4662,6 +4671,6 @@ union generic_reply
     struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 289
+#define SERVER_PROTOCOL_VERSION 292
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

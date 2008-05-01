@@ -106,10 +106,11 @@ static const struct fd_ops master_socket_fd_ops =
 {
     NULL,                          /* get_poll_events */
     master_socket_poll_event,      /* poll_event */
-    no_flush,                      /* flush */
-    no_get_file_info,              /* get_file_info */
-    no_queue_async,                /* queue_async */
-    no_cancel_async                /* cancel_async */
+    NULL,                          /* flush */
+    NULL,                          /* get_fd_type */
+    NULL,                          /* queue_async */
+    NULL,                          /* reselect_async */
+    NULL                           /* cancel_async */
 };
 
 
@@ -725,7 +726,7 @@ static void acquire_lock(void)
     if (listen( fd, 5 ) == -1) fatal_perror( "listen" );
 
     if (!(master_socket = alloc_object( &master_socket_ops )) ||
-        !(master_socket->fd = create_anonymous_fd( &master_socket_fd_ops, fd, &master_socket->obj )))
+        !(master_socket->fd = create_anonymous_fd( &master_socket_fd_ops, fd, &master_socket->obj, 0 )))
         fatal_error( "out of memory\n" );
     master_socket->timeout = NULL;
     set_fd_events( master_socket->fd, POLLIN );

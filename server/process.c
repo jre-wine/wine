@@ -84,10 +84,11 @@ static const struct fd_ops process_fd_ops =
 {
     NULL,                        /* get_poll_events */
     process_poll_event,          /* poll_event */
-    no_flush,                    /* flush */
-    no_get_file_info,            /* get_file_info */
-    no_queue_async,              /* queue_async */
-    no_cancel_async              /* cancel async */
+    NULL,                        /* flush */
+    NULL,                        /* get_fd_type */
+    NULL,                        /* queue_async */
+    NULL,                        /* reselect_async */
+    NULL                         /* cancel async */
 };
 
 /* process startup info */
@@ -301,7 +302,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
         close( fd );
         goto error;
     }
-    if (!(process->msg_fd = create_anonymous_fd( &process_fd_ops, fd, &process->obj ))) goto error;
+    if (!(process->msg_fd = create_anonymous_fd( &process_fd_ops, fd, &process->obj, 0 ))) goto error;
 
     /* create the handle table */
     if (!parent_thread) process->handles = alloc_handle_table( process, 0 );

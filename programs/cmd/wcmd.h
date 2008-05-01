@@ -36,7 +36,7 @@ void WCMD_color (void);
 void WCMD_copy (void);
 void WCMD_create_dir (void);
 void WCMD_delete (char *);
-void WCMD_directory (void);
+void WCMD_directory (char *);
 void WCMD_echo (const char *);
 void WCMD_endlocal (void);
 void WCMD_enter_paged_mode(void);
@@ -179,6 +179,7 @@ extern const char anykey[];
 #define WCMD_NO       1003
 #define WCMD_NOASSOC  1004
 #define WCMD_NOFTYPE  1005
+#define WCMD_OVERWRITE 1006
 
 /* msdn specified max for Win XP */
 #define MAXSTRING 8192

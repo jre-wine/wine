@@ -131,6 +131,29 @@ BOOL CALLBACK validate_file(PCWSTR name, void* user)
     return FALSE; /* get the first file we find !! */
 }
 
+static BOOL is_pe_module_embedded(struct tgt_process_minidump_data* data,
+                                  MINIDUMP_MODULE* pe_mm)
+{
+    ULONG                       size;
+    MINIDUMP_DIRECTORY*         dir;
+    MINIDUMP_MODULE_LIST*       mml;
+
+    if (MiniDumpReadDumpStream(data->mapping, Wine_ElfModuleListStream, &dir,
+                               (void**)&mml, &size))
+    {
+        MINIDUMP_MODULE*        mm;
+        unsigned                i;
+
+        for (i = 0, mm = &mml->Modules[0]; i < mml->NumberOfModules; i++, mm++)
+        {
+            if (mm->BaseOfImage <= pe_mm->BaseOfImage &&
+                mm->BaseOfImage + mm->SizeOfImage >= pe_mm->BaseOfImage + pe_mm->SizeOfImage)
+                return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
 {
     ULONG                       size;
@@ -166,7 +189,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             mm = &mml->Modules[0];
             mds = (MINIDUMP_STRING*)((char*)data->mapping + mm->ModuleNameRva);
             len = WideCharToMultiByte(CP_ACP, 0, mds->Buffer,
-                                      mds->Length / sizeof(WCHAR), 
+                                      mds->Length / sizeof(WCHAR),
                                       exec_name, sizeof(exec_name) - 1, NULL, NULL);
             exec_name[len] = 0;
             for (ptr = exec_name + len - 1; ptr >= exec_name; ptr--)
@@ -189,32 +212,33 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
         dbg_printf("WineDbg starting on minidump on pid %04x\n", pid);
         switch (msi->ProcessorArchitecture)
         {
-        case PROCESSOR_ARCHITECTURE_UNKNOWN: 
+        case PROCESSOR_ARCHITECTURE_UNKNOWN:
             str = "Unknown";
             break;
         case PROCESSOR_ARCHITECTURE_INTEL:
             strcpy(tmp, "Intel ");
             switch (msi->ProcessorLevel)
             {
-            case 3: str = "80386"; break;
-            case 4: str = "80486"; break;
-            case 5: str = "Pentium"; break;
-            case 6: str = "Pentium Pro/II"; break;
+            case  3: str = "80386"; break;
+            case  4: str = "80486"; break;
+            case  5: str = "Pentium"; break;
+            case  6: str = "Pentium Pro/II or AMD Athlon"; break;
+            case 15: str = "Pentium 4 or AMD Athlon64"; break;
             default: str = "???"; break;
             }
             strcat(tmp, str);
             if (msi->ProcessorLevel == 3 || msi->ProcessorLevel == 4)
             {
                 if (HIWORD(msi->ProcessorRevision) == 0xFF)
-                    sprintf(tmp + strlen(tmp), "-%c%d",
+                    sprintf(tmp + strlen(tmp), " (%c%d)",
                             'A' + HIBYTE(LOWORD(msi->ProcessorRevision)),
                             LOBYTE(LOWORD(msi->ProcessorRevision)));
                 else
-                    sprintf(tmp + strlen(tmp), "-%c%d",
+                    sprintf(tmp + strlen(tmp), " (%c%d)",
                             'A' + HIWORD(msi->ProcessorRevision),
                             LOWORD(msi->ProcessorRevision));
             }
-            else sprintf(tmp + strlen(tmp), "-%d.%d",
+            else sprintf(tmp + strlen(tmp), " (%d.%d)",
                          HIWORD(msi->ProcessorRevision),
                          LOWORD(msi->ProcessorRevision));
             str = tmp;
@@ -233,7 +257,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             break;
         }
         dbg_printf("  %s was running on #%d %s CPU%s",
-                   exec_name, msi->u.s.NumberOfProcessors, str, 
+                   exec_name, msi->u.s.NumberOfProcessors, str,
                    msi->u.s.NumberOfProcessors < 2 ? "" : "s");
         switch (msi->MajorVersion)
         {
@@ -309,14 +333,24 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
     }
     if (MiniDumpReadDumpStream(data->mapping, ModuleListStream, &dir, &stream, &size))
     {
+        WCHAR   buffer[MAX_PATH];
+
         mml = (MINIDUMP_MODULE_LIST*)stream;
         for (i = 0, mm = &mml->Modules[0]; i < mml->NumberOfModules; i++, mm++)
         {
             mds = (MINIDUMP_STRING*)((char*)data->mapping + mm->ModuleNameRva);
             memcpy(nameW, mds->Buffer, mds->Length);
             nameW[mds->Length / sizeof(WCHAR)] = 0;
-            SymLoadModuleExW(hProc, NULL, nameW, NULL, mm->BaseOfImage, mm->SizeOfImage,
-                             NULL, 0);
+            if (SymFindFileInPathW(hProc, NULL, nameW, (void*)(DWORD_PTR)mm->TimeDateStamp,
+                                   mm->SizeOfImage, 0, SSRVOPT_DWORD, buffer, validate_file, NULL))
+                SymLoadModuleExW(hProc, NULL, buffer, NULL, mm->BaseOfImage, mm->SizeOfImage,
+                                 NULL, 0);
+            else if (is_pe_module_embedded(data, mm))
+                SymLoadModuleExW(hProc, NULL, nameW, NULL, mm->BaseOfImage, mm->SizeOfImage,
+                                 NULL, 0);
+            else
+                SymLoadModuleExW(hProc, NULL, nameW, NULL, mm->BaseOfImage, mm->SizeOfImage,
+                                 NULL, SLMFLAG_VIRTUAL);
         }
     }
     if (MiniDumpReadDumpStream(data->mapping, ExceptionStream, &dir, &stream, &size))

@@ -62,8 +62,7 @@ static ULONG WINAPI IDirect3DDevice9Impl_Release(LPDIRECT3DDEVICE9 iface) {
 
     if (ref == 0) {
       This->inDestruction = TRUE;
-      if (This->convertedDecl != NULL)
-          IUnknown_Release(This->convertedDecl);
+      IDirect3DDevice9_SetVertexDeclaration(iface, NULL);
       IWineD3DDevice_Uninit3D(This->WineD3DDevice, D3D9CB_DestroyDepthStencilSurface, D3D9CB_DestroySwapChain);
       IWineD3DDevice_Release(This->WineD3DDevice);
       HeapFree(GetProcessHeap(), 0, This);
@@ -163,7 +162,7 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_SetCursorProperties(LPDIRECT3DDEVIC
 static void     WINAPI  IDirect3DDevice9Impl_SetCursorPosition(LPDIRECT3DDEVICE9 iface, int XScreenSpace, int YScreenSpace, DWORD Flags) {
     IDirect3DDevice9Impl *This = (IDirect3DDevice9Impl *)iface;
     TRACE("(%p) Relay\n", This);
-    return IWineD3DDevice_SetCursorPosition(This->WineD3DDevice, XScreenSpace, YScreenSpace, Flags);
+    IWineD3DDevice_SetCursorPosition(This->WineD3DDevice, XScreenSpace, YScreenSpace, Flags);
 }
 
 static BOOL     WINAPI  IDirect3DDevice9Impl_ShowCursor(LPDIRECT3DDEVICE9 iface, BOOL bShow) {
@@ -256,7 +255,7 @@ static void WINAPI IDirect3DDevice9Impl_SetGammaRamp(LPDIRECT3DDEVICE9 iface, UI
     TRACE("(%p) Relay\n", This);
    
     /* Note: D3DGAMMARAMP is compatible with WINED3DGAMMARAMP */ 
-    return IWineD3DDevice_SetGammaRamp(This->WineD3DDevice, iSwapChain, Flags, (CONST WINED3DGAMMARAMP *)pRamp);
+    IWineD3DDevice_SetGammaRamp(This->WineD3DDevice, iSwapChain, Flags, (CONST WINED3DGAMMARAMP *)pRamp);
 }
 
 static void WINAPI IDirect3DDevice9Impl_GetGammaRamp(LPDIRECT3DDEVICE9 iface, UINT iSwapChain, D3DGAMMARAMP* pRamp) {    
@@ -264,7 +263,7 @@ static void WINAPI IDirect3DDevice9Impl_GetGammaRamp(LPDIRECT3DDEVICE9 iface, UI
     TRACE("(%p) Relay\n", This);
     
     /* Note: D3DGAMMARAMP is compatible with WINED3DGAMMARAMP */
-    return IWineD3DDevice_GetGammaRamp(This->WineD3DDevice, iSwapChain, (WINED3DGAMMARAMP *) pRamp);
+    IWineD3DDevice_GetGammaRamp(This->WineD3DDevice, iSwapChain, (WINED3DGAMMARAMP *) pRamp);
 }
 
 
@@ -383,8 +382,7 @@ static HRESULT  WINAPI  IDirect3DDevice9Impl_StretchRect(LPDIRECT3DDEVICE9 iface
     IDirect3DSurface9Impl *dst = (IDirect3DSurface9Impl *) pDestSurface;
 
     TRACE("(%p)->(%p,%p,%p,%p,%d)\n" , This, src, pSourceRect, dst, pDestRect, Filter);
-    if(Filter != D3DTEXF_NONE) ERR("Texture filters not supported yet\n");
-    return IWineD3DSurface_Blt(dst->wineD3DSurface, (RECT *) pDestRect, src->wineD3DSurface, (RECT *) pSourceRect, 0, NULL);
+    return IWineD3DSurface_Blt(dst->wineD3DSurface, (RECT *) pDestRect, src->wineD3DSurface, (RECT *) pSourceRect, 0, NULL, Filter);
 }
 
 static HRESULT  WINAPI  IDirect3DDevice9Impl_ColorFill(LPDIRECT3DDEVICE9 iface, IDirect3DSurface9* pSurface, CONST RECT* pRect, D3DCOLOR color) {
@@ -785,14 +783,14 @@ HRESULT  WINAPI  IDirect3DDevice9Impl_SetFVF(LPDIRECT3DDEVICE9 iface, DWORD FVF)
 
          hr = IDirect3DDevice9Impl_CreateVertexDeclaration(iface, elements, &pDecl);
          if (hr != S_OK) goto exit;
-             
+
          hr = IDirect3DDevice9Impl_SetVertexDeclaration(iface, pDecl);
          if (hr != S_OK) goto exit;
          This->convertedDecl = pDecl;
-         pDecl = NULL;
 
          exit:
          HeapFree(GetProcessHeap(), 0, elements);
+         /* If allocated and set correctly, this will reduce the refcount to 0, but not destroy the declaration */
          if (pDecl) IUnknown_Release(pDecl);
          if (hr != S_OK) return hr;
     }

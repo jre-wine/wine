@@ -449,8 +449,8 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
 
     unsigned int               textureNo    = 0;
     unsigned int               texture_idx  = 0;
-    const short               *pIdxBufS     = NULL;
-    const long                *pIdxBufL     = NULL;
+    const WORD                *pIdxBufS     = NULL;
+    const DWORD               *pIdxBufL     = NULL;
     LONG                       vx_index;
     float x  = 0.0f, y  = 0.0f, z = 0.0f;  /* x,y,z coordinates          */
     float rhw = 0.0f;                      /* rhw                        */
@@ -458,7 +458,7 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
     DWORD specularColor = 0;               /* Specular Color             */
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     UINT *streamOffset = This->stateBlock->streamOffset;
-    LONG                       SkipnStrides = startVertex + This->stateBlock->loadBaseVertexIndex;
+    DWORD                      SkipnStrides = startVertex + This->stateBlock->loadBaseVertexIndex;
 
     BYTE *texCoords[WINED3DDP_MAXTEXCOORD];
     BYTE *diffuse = NULL, *specular = NULL, *normal = NULL, *position = NULL;
@@ -475,8 +475,8 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
             idxData = ((IWineD3DIndexBufferImpl *) This->stateBlock->pIndexData)->resource.allocatedMemory;
         }
 
-        if (idxSize == 2) pIdxBufS = (const short *) idxData;
-        else pIdxBufL = (const long *) idxData;
+        if (idxSize == 2) pIdxBufS = (const WORD *) idxData;
+        else pIdxBufL = (const DWORD *) idxData;
     }
 
     /* Adding the stream offset once is cheaper than doing it every iteration. Do not modify the strided data, it is a pointer
@@ -756,16 +756,6 @@ static void drawStridedSlow(IWineD3DDevice *iface, WineDirect3DVertexStridedData
     checkGLcall("glEnd and previous calls");
 }
 
-static void check_fbo_status(IWineD3DDevice *iface) {
-    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-
-    GLenum status = GL_EXTCALL(glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT));
-    switch(status) {
-        case GL_FRAMEBUFFER_COMPLETE_EXT: TRACE("FBO complete.\n"); break;
-        default: TRACE("FBO status %#x.\n", status); break;
-    }
-}
-
 static void depth_blt(IWineD3DDevice *iface, GLuint texture) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     GLint old_binding = 0;
@@ -775,6 +765,7 @@ static void depth_blt(IWineD3DDevice *iface, GLuint texture) {
     glDisable(GL_CULL_FACE);
     glDisable(GL_BLEND);
     glDisable(GL_ALPHA_TEST);
+    glDisable(GL_SCISSOR_TEST);
     glDisable(GL_STENCIL_TEST);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_ALWAYS);
@@ -813,6 +804,11 @@ static void depth_copy(IWineD3DDevice *iface) {
 
     /* TODO: Make this work for modes other than FBO */
     if (wined3d_settings.offscreen_rendering_mode != ORM_FBO) return;
+
+    if (depth_stencil->current_renderbuffer) {
+        FIXME("Not supported with fixed up depth stencil\n");
+        return;
+    }
 
     if (This->render_offscreen) {
         static GLuint tmp_texture = 0;
@@ -1184,11 +1180,11 @@ void drawPrimitive(IWineD3DDevice *iface,
     /* Ok, we will be updating the screen from here onwards so grab the lock */
     ENTER_GL();
 
-    ActivateContext(This, This->render_targets[0], CTXUSAGE_DRAWPRIM);
-
-    if (TRACE_ON(d3d_draw) && wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
-        check_fbo_status(iface);
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+        apply_fbo_state(iface);
     }
+
+    ActivateContext(This, This->render_targets[0], CTXUSAGE_DRAWPRIM);
 
     if (This->depth_copy_state == WINED3D_DCS_COPY) {
         depth_copy(iface);

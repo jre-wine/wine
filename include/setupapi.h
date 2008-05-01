@@ -298,8 +298,8 @@ typedef struct _CABINET_INFO_W {
   USHORT CabinetNumber;
 } CABINET_INFO_W, *PCABINET_INFO_W;
 
-DECL_WINELIB_SETUPAPI_TYPE_AW(CABINET_INFO);
-DECL_WINELIB_SETUPAPI_TYPE_AW(PCABINET_INFO);
+DECL_WINELIB_SETUPAPI_TYPE_AW(CABINET_INFO)
+DECL_WINELIB_SETUPAPI_TYPE_AW(PCABINET_INFO)
 
 typedef struct _SP_INF_INFORMATION {
     DWORD InfStyle;
@@ -701,6 +701,11 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PFILEPATHS)
 #define SRCINFO_TAGFILE        2
 #define SRCINFO_DESCRIPTION    3
 
+#define FILE_COMPRESSION_NONE       0
+#define FILE_COMPRESSION_WINLZA     1
+#define FILE_COMPRESSION_MSZIP      2
+#define FILE_COMPRESSION_NTCAB      3
+
 LONG     WINAPI AddTagToGroupOrderList(PCWSTR lpGroupName, DWORD dwUnknown2, DWORD dwUnknown3);
 DWORD    WINAPI CaptureAndConvertAnsiArg(PCSTR lpSrc, PWSTR *lpDst);
 DWORD    WINAPI CaptureStringArg(PCWSTR lpSrc, PWSTR *lpDst);
@@ -731,6 +736,9 @@ UINT     WINAPI SetupCopyErrorW( HWND, PCWSTR, PCWSTR, PCWSTR, PCWSTR, PCWSTR, U
 BOOL     WINAPI SetupCopyOEMInfA( PCSTR, PCSTR, DWORD, DWORD, PSTR, DWORD, PDWORD, PSTR * );
 BOOL     WINAPI SetupCopyOEMInfW( PCWSTR, PCWSTR, DWORD, DWORD, PWSTR, DWORD, PDWORD, PWSTR * );
 #define         SetupCopyOEMInf WINELIB_NAME_AW(SetupCopyOEMInf)
+DWORD    WINAPI SetupDecompressOrCopyFileA( PCSTR, PCSTR, PUINT );
+DWORD    WINAPI SetupDecompressOrCopyFileW( PCWSTR, PCWSTR, PUINT );
+#define         SetupDecompressOrCopyFile WINELIB_NAME_AW(SetupDecompressOrCopyFile)
 UINT     WINAPI SetupDefaultQueueCallbackA( PVOID, UINT, UINT_PTR, UINT_PTR );
 UINT     WINAPI SetupDefaultQueueCallbackW( PVOID, UINT, UINT_PTR, UINT_PTR );
 #define         SetupDefaultQueueCallback WINELIB_NAME_AW(SetupDefaultQueueCallback)
@@ -811,6 +819,12 @@ BOOL     WINAPI SetupFindNextMatchLineW( PINFCONTEXT context_in, PCWSTR key, PIN
 #define         SetupFindNextMatchLine WINELIB_NAME_AW(SetupFindNextMatchLine)
 BOOL     WINAPI SetupGetBinaryField( PINFCONTEXT context, DWORD index, BYTE *buffer, DWORD size, LPDWORD required );
 DWORD    WINAPI SetupGetFieldCount( PINFCONTEXT context );
+DWORD    WINAPI SetupGetFileCompressionInfoA(PCSTR, PSTR *, PDWORD, PDWORD, PUINT);
+DWORD    WINAPI SetupGetFileCompressionInfoW(PCWSTR, PWSTR *, PDWORD, PDWORD, PUINT);
+#define         SetupGetFileCompressionInfo WINELIB_NAME_AW(SetupGetFileCompressionInfo)
+BOOL     WINAPI SetupGetFileCompressionInfoExA(PCSTR, PSTR, DWORD, PDWORD, PDWORD, PDWORD, PUINT);
+BOOL     WINAPI SetupGetFileCompressionInfoExW(PCWSTR, PWSTR, DWORD, PDWORD, PDWORD, PDWORD, PUINT);
+#define         SetupGetFileCompressionInfoEx WINELIB_NAME_AW(SetupGetFileCompressionInfoEx)
 BOOL     WINAPI SetupGetFileQueueCount( HSPFILEQ, UINT, PUINT );
 BOOL     WINAPI SetupGetFileQueueFlags( HSPFILEQ, PDWORD );
 BOOL     WINAPI SetupGetInfInformationA( LPCVOID, DWORD, PSP_INF_INFORMATION, DWORD, PDWORD);

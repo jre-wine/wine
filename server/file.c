@@ -58,7 +58,6 @@ struct file
     struct object       obj;        /* object header */
     struct fd          *fd;         /* file descriptor for this file */
     unsigned int        access;     /* file access (FILE_READ_DATA etc.) */
-    unsigned int        options;    /* file options (FILE_DELETE_ON_CLOSE, FILE_SYNCHRONOUS...) */
 };
 
 static unsigned int generic_file_map_access( unsigned int access );
@@ -70,14 +69,14 @@ static void file_destroy( struct object *obj );
 
 static int file_get_poll_events( struct fd *fd );
 static void file_flush( struct fd *fd, struct event **event );
-static enum server_fd_type file_get_info( struct fd *fd, int *flags );
+static enum server_fd_type file_get_fd_type( struct fd *fd );
 
 static const struct object_ops file_ops =
 {
     sizeof(struct file),          /* size */
     file_dump,                    /* dump */
-    default_fd_add_queue,         /* add_queue */
-    default_fd_remove_queue,      /* remove_queue */
+    add_queue,                    /* add_queue */
+    remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
@@ -94,14 +93,15 @@ static const struct fd_ops file_fd_ops =
     file_get_poll_events,         /* get_poll_events */
     default_poll_event,           /* poll_event */
     file_flush,                   /* flush */
-    file_get_info,                /* get_file_info */
+    file_get_fd_type,             /* get_fd_type */
     default_fd_queue_async,       /* queue_async */
+    default_fd_reselect_async,    /* reselect_async */
     default_fd_cancel_async       /* cancel_async */
 };
 
 static inline int is_overlapped( const struct file *file )
 {
-    return !(file->options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT));
+    return !(get_fd_options( file->fd ) & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT));
 }
 
 /* create a file from a file descriptor */
@@ -112,9 +112,9 @@ static struct file *create_file_for_fd( int fd, unsigned int access, unsigned in
 
     if ((file = alloc_object( &file_ops )))
     {
-        file->access     = file_map_access( &file->obj, access );
-        file->options    = FILE_SYNCHRONOUS_IO_NONALERT;
-        if (!(file->fd = create_anonymous_fd( &file_fd_ops, fd, &file->obj )))
+        file->access = file_map_access( &file->obj, access );
+        if (!(file->fd = create_anonymous_fd( &file_fd_ops, fd, &file->obj,
+                                              FILE_SYNCHRONOUS_IO_NONALERT )))
         {
             release_object( file );
             return NULL;
@@ -123,13 +123,12 @@ static struct file *create_file_for_fd( int fd, unsigned int access, unsigned in
     return file;
 }
 
-static struct object *create_file_obj( struct fd *fd, unsigned int access, unsigned int options )
+static struct object *create_file_obj( struct fd *fd, unsigned int access )
 {
     struct file *file = alloc_object( &file_ops );
 
     if (!file) return NULL;
     file->access  = access;
-    file->options = options;
     file->fd      = fd;
     grab_object( fd );
     set_fd_user( fd, &file_fd_ops, &file->obj );
@@ -176,9 +175,9 @@ static struct object *create_file( const char *nameptr, data_size_t len, unsigne
     if (S_ISDIR(mode))
         obj = create_dir_obj( fd );
     else if (S_ISCHR(mode) && is_serial_fd( fd ))
-        obj = create_serial( fd, options );
+        obj = create_serial( fd );
     else
-        obj = create_file_obj( fd, access, options );
+        obj = create_file_obj( fd, access );
 
     release_object( fd );
 
@@ -214,7 +213,7 @@ static void file_dump( struct object *obj, int verbose )
 {
     struct file *file = (struct file *)obj;
     assert( obj->ops == &file_ops );
-    fprintf( stderr, "File fd=%p options=%08x\n", file->fd, file->options );
+    fprintf( stderr, "File fd=%p\n", file->fd );
 }
 
 static int file_get_poll_events( struct fd *fd )
@@ -233,12 +232,8 @@ static void file_flush( struct fd *fd, struct event **event )
     if (unix_fd != -1 && fsync( unix_fd ) == -1) file_set_error();
 }
 
-static enum server_fd_type file_get_info( struct fd *fd, int *flags )
+static enum server_fd_type file_get_fd_type( struct fd *fd )
 {
-    struct file *file = get_fd_user( fd );
-
-    *flags = 0;
-    if (is_overlapped( file )) *flags |= FD_FLAG_OVERLAPPED;
     return FD_TYPE_FILE;
 }
 

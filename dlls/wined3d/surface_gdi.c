@@ -491,7 +491,8 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
                         IWineD3DSurface *SrcSurface,
                         RECT *SrcRect,
                         DWORD Flags,
-                        DDBLTFX *DDBltFx)
+                        DDBLTFX *DDBltFx,
+                        WINED3DTEXTUREFILTERTYPE Filter)
 {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *) iface;
     IWineD3DSurfaceImpl *Src = (IWineD3DSurfaceImpl *) SrcSurface;
@@ -526,6 +527,11 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
     {
         WARN(" Surface is busy, returning DDERR_SURFACEBUSY\n");
         return DDERR_SURFACEBUSY;
+    }
+
+    if(Filter != WINED3DTEXF_NONE) {
+        /* Can happen when d3d9 apps do a StretchRect call which isn't handled in gl */
+        FIXME("Filters not supported in software blit\n");
     }
 
     if (Src == This)
@@ -726,10 +732,6 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
 
     if (Flags & DDBLT_WAIT)
     {
-        static BOOL displayed = FALSE;
-        if (!displayed)
-            FIXME("Can't handle DDBLT_WAIT flag right now.\n");
-        displayed = TRUE;
         Flags &= ~DDBLT_WAIT;
     }
     if (Flags & DDBLT_ASYNC)

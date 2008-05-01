@@ -82,10 +82,11 @@ static const struct fd_ops handler_fd_ops =
 {
     NULL,                     /* get_poll_events */
     handler_poll_event,       /* poll_event */
-    no_flush,                 /* flush */
-    no_get_file_info,         /* get_file_info */
-    no_queue_async,           /* queue_async */
-    no_cancel_async           /* cancel_async */
+    NULL,                     /* flush */
+    NULL,                     /* get_fd_type */
+    NULL,                     /* queue_async */
+    NULL,                     /* reselect_async */
+    NULL                      /* cancel_async */
 };
 
 static struct handler *handler_sighup;
@@ -113,7 +114,7 @@ static struct handler *create_handler( signal_callback callback )
     handler->pending    = 0;
     handler->callback   = callback;
 
-    if (!(handler->fd = create_anonymous_fd( &handler_fd_ops, fd[0], &handler->obj )))
+    if (!(handler->fd = create_anonymous_fd( &handler_fd_ops, fd[0], &handler->obj, 0 )))
     {
         release_object( handler );
         return NULL;

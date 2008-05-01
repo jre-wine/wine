@@ -715,23 +715,22 @@ void WCMD_if (char *p) {
  * WCMD_move
  *
  * Move a file, directory tree or wildcarded set of files.
- * FIXME: Needs input and output files to be fully specified.
  */
 
 void WCMD_move (void) {
 
-  int status;
-  char outpath[MAX_PATH], inpath[MAX_PATH], *infile;
+  int             status;
   WIN32_FIND_DATA fd;
-  HANDLE hff;
+  HANDLE          hff;
+  char            input[MAX_PATH];
+  char            output[MAX_PATH];
+  char            drive[10];
+  char            dir[MAX_PATH];
+  char            fname[MAX_PATH];
+  char            ext[MAX_PATH];
 
   if (param1[0] == 0x00) {
     WCMD_output ("Argument missing\n");
-    return;
-  }
-
-  if ((strchr(param1,'*') != NULL) || (strchr(param1,'%') != NULL)) {
-    WCMD_output ("Wildcards not yet supported\n");
     return;
   }
 
@@ -741,21 +740,108 @@ void WCMD_move (void) {
   }
 
   /* If 2nd parm is directory, then use original filename */
-  GetFullPathName (param2, sizeof(outpath), outpath, NULL);
-  if (outpath[strlen(outpath) - 1] == '\\')
-      outpath[strlen(outpath) - 1] = '\0';
-  hff = FindFirstFile (outpath, &fd);
-  if (hff != INVALID_HANDLE_VALUE) {
-    if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-      GetFullPathName (param1, sizeof(inpath), inpath, &infile);
-      strcat (outpath, "\\");
-      strcat (outpath, infile);
-    }
-    FindClose (hff);
-  }
+  /* Convert partial path to full path */
+  GetFullPathName (param1, sizeof(input), input, NULL);
+  GetFullPathName (param2, sizeof(output), output, NULL);
+  WINE_TRACE("Move from '%s'('%s') to '%s'\n", input, param1, output);
 
-  status = MoveFile (param1, outpath);
-  if (!status) WCMD_print_error ();
+  /* Split into components */
+  WCMD_splitpath(input, drive, dir, fname, ext);
+
+  hff = FindFirstFile (input, &fd);
+  while (hff != INVALID_HANDLE_VALUE) {
+    char  dest[MAX_PATH];
+    char  src[MAX_PATH];
+    DWORD attribs;
+
+    WINE_TRACE("Processing file '%s'\n", fd.cFileName);
+
+    /* Build src & dest name */
+    strcpy(src, drive);
+    strcat(src, dir);
+
+    /* See if dest is an existing directory */
+    attribs = GetFileAttributes(output);
+    if (attribs != INVALID_FILE_ATTRIBUTES &&
+       (attribs & FILE_ATTRIBUTE_DIRECTORY)) {
+      strcpy(dest, output);
+      strcat(dest, "\\");
+      strcat(dest, fd.cFileName);
+    } else {
+      strcpy(dest, output);
+    }
+
+    strcat(src, fd.cFileName);
+
+    WINE_TRACE("Source '%s'\n", src);
+    WINE_TRACE("Dest   '%s'\n", dest);
+
+    /* Check if file is read only, otherwise move it */
+    attribs = GetFileAttributesA(src);
+    if ((attribs != INVALID_FILE_ATTRIBUTES) &&
+        (attribs & FILE_ATTRIBUTE_READONLY)) {
+      SetLastError(ERROR_ACCESS_DENIED);
+      status = 0;
+    } else {
+      BOOL ok = TRUE;
+
+      /* If destination exists, prompt unless /Y supplied */
+      if (GetFileAttributesA(dest) != INVALID_FILE_ATTRIBUTES) {
+        BOOL force = FALSE;
+        char copycmd[MAXSTRING];
+        int len;
+
+        /* /-Y has the highest priority, then /Y and finally the COPYCMD env. variable */
+        if (strstr (quals, "/-Y"))
+          force = FALSE;
+        else if (strstr (quals, "/Y"))
+          force = TRUE;
+        else {
+          len = GetEnvironmentVariable ("COPYCMD", copycmd, sizeof(copycmd));
+          force = (len && len < sizeof(copycmd) && ! lstrcmpi (copycmd, "/Y"));
+        }
+
+        /* Prompt if overwriting */
+        if (!force) {
+          char  question[MAXSTRING];
+          char  overwrite[MAXSTRING];
+
+          LoadString (hinst, WCMD_OVERWRITE, overwrite, sizeof(overwrite));
+
+          /* Ask for confirmation */
+          sprintf(question, "%s %s? ", overwrite, dest);
+          ok = WCMD_ask_confirm(question, TRUE);
+
+          /* So delete the destination prior to the move */
+          if (ok) {
+            if (!DeleteFile (dest)) {
+              WCMD_print_error ();
+              errorlevel = 1;
+              ok = FALSE;
+            }
+          }
+        }
+      }
+
+      if (ok) {
+        status = MoveFile (src, dest);
+      } else {
+        status = 1; /* Anything other than 0 to prevent error msg below */
+      }
+    }
+
+    if (!status) {
+      WCMD_print_error ();
+      errorlevel = 1;
+    }
+
+    /* Step on to next match */
+    if (FindNextFile(hff, &fd) == 0) {
+      FindClose(hff);
+      hff = INVALID_HANDLE_VALUE;
+      break;
+    }
+  }
 }
 
 /****************************************************************************
@@ -838,23 +924,111 @@ void WCMD_remove_dir (char *command) {
  * WCMD_rename
  *
  * Rename a file.
- * FIXME: Needs input and output files to be fully specified.
  */
 
 void WCMD_rename (void) {
 
-  int status;
+  int             status;
+  HANDLE          hff;
+  WIN32_FIND_DATA fd;
+  char            input[MAX_PATH];
+  char           *dotDst = NULL;
+  char            drive[10];
+  char            dir[MAX_PATH];
+  char            fname[MAX_PATH];
+  char            ext[MAX_PATH];
+  DWORD           attribs;
 
+  errorlevel = 0;
+
+  /* Must be at least two args */
   if (param1[0] == 0x00 || param2[0] == 0x00) {
     WCMD_output ("Argument missing\n");
+    errorlevel = 1;
     return;
   }
-  if ((strchr(param1,'*') != NULL) || (strchr(param1,'%') != NULL)) {
-    WCMD_output ("Wildcards not yet supported\n");
-    return;
+
+  /* Destination cannot contain a drive letter or directory separator */
+  if ((strchr(param1,':') != NULL) || (strchr(param1,'\\') != NULL)) {
+      SetLastError(ERROR_INVALID_PARAMETER);
+      WCMD_print_error();
+      errorlevel = 1;
+      return;
   }
-  status = MoveFile (param1, param2);
-  if (!status) WCMD_print_error ();
+
+  /* Convert partial path to full path */
+  GetFullPathName (param1, sizeof(input), input, NULL);
+  WINE_TRACE("Rename from '%s'('%s') to '%s'\n", input, param1, param2);
+  dotDst = strchr(param2, '.');
+
+  /* Split into components */
+  WCMD_splitpath(input, drive, dir, fname, ext);
+
+  hff = FindFirstFile (input, &fd);
+  while (hff != INVALID_HANDLE_VALUE) {
+    char  dest[MAX_PATH];
+    char  src[MAX_PATH];
+    char *dotSrc = NULL;
+    int   dirLen;
+
+    WINE_TRACE("Processing file '%s'\n", fd.cFileName);
+
+    /* FIXME: If dest name or extension is *, replace with filename/ext
+       part otherwise use supplied name. This supports:
+          ren *.fred *.jim
+          ren jim.* fred.* etc
+       However, windows has a more complex algorithum supporting eg
+          ?'s and *'s mid name                                         */
+    dotSrc = strchr(fd.cFileName, '.');
+
+    /* Build src & dest name */
+    strcpy(src, drive);
+    strcat(src, dir);
+    strcpy(dest, src);
+    dirLen = strlen(src);
+    strcat(src, fd.cFileName);
+
+    /* Build name */
+    if (param2[0] == '*') {
+      strcat(dest, fd.cFileName);
+      if (dotSrc) dest[dirLen + (dotSrc - fd.cFileName)] = 0x00;
+    } else {
+      strcat(dest, param2);
+      if (dotDst) dest[dirLen + (dotDst - param2)] = 0x00;
+    }
+
+    /* Build Extension */
+    if (dotDst && (*(dotDst+1)=='*')) {
+      if (dotSrc) strcat(dest, dotSrc);
+    } else if (dotDst) {
+      if (dotDst) strcat(dest, dotDst);
+    }
+
+    WINE_TRACE("Source '%s'\n", src);
+    WINE_TRACE("Dest   '%s'\n", dest);
+
+    /* Check if file is read only, otherwise move it */
+    attribs = GetFileAttributesA(src);
+    if ((attribs != INVALID_FILE_ATTRIBUTES) &&
+        (attribs & FILE_ATTRIBUTE_READONLY)) {
+      SetLastError(ERROR_ACCESS_DENIED);
+      status = 0;
+    } else {
+      status = MoveFile (src, dest);
+    }
+
+    if (!status) {
+      WCMD_print_error ();
+      errorlevel = 1;
+    }
+
+    /* Step on to next match */
+    if (FindNextFile(hff, &fd) == 0) {
+      FindClose(hff);
+      hff = INVALID_HANDLE_VALUE;
+      break;
+    }
+  }
 }
 
 /*****************************************************************************

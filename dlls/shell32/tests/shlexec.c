@@ -347,15 +347,15 @@ static void doChild(int argc, char** argv)
         return;
 
     /* Arguments */
-    childPrintf(hFile, "[Arguments]\n");
+    childPrintf(hFile, "[Arguments]\r\n");
     if (winetest_debug > 2)
         trace("argcA=%d\n", argc);
-    childPrintf(hFile, "argcA=%d\n", argc);
+    childPrintf(hFile, "argcA=%d\r\n", argc);
     for (i = 0; i < argc; i++)
     {
         if (winetest_debug > 2)
             trace("argvA%d=%s\n", i, argv[i]);
-        childPrintf(hFile, "argvA%d=%s\n", i, encodeA(argv[i]));
+        childPrintf(hFile, "argvA%d=%s\r\n", i, encodeA(argv[i]));
     }
     CloseHandle(hFile);
 
@@ -697,12 +697,12 @@ static void test_find_executable(void)
 
     strcpy(command, "your word");
     rc=(int)FindExecutableA(NULL, NULL, command);
-    ok(rc == SE_ERR_FNF || rc > 32, "FindExecutable(NULL) returned %d\n", rc);
+    ok(rc == SE_ERR_FNF || rc > 32 /* nt4 */, "FindExecutable(NULL) returned %d\n", rc);
     ok(strcmp(command, "your word") != 0, "FindExecutable(NULL) returned command=[%s]\n", command);
 
     strcpy(command, "your word");
     rc=(int)FindExecutableA(tmpdir, NULL, command);
-    todo_wine ok(rc == SE_ERR_FNF || rc > 32, "FindExecutable(NULL) returned %d\n", rc);
+    ok(rc == SE_ERR_NOASSOC /* >= win2000 */ || rc > 32 /* win98, nt4 */, "FindExecutable(NULL) returned %d\n", rc);
     ok(strcmp(command, "your word") != 0, "FindExecutable(NULL) returned command=[%s]\n", command);
 
     sprintf(filename, "%s\\test file.sfe", tmpdir);
@@ -723,7 +723,7 @@ static void test_find_executable(void)
 
     sprintf(filename, "%s\\test file.shl", tmpdir);
     rc=(int)FindExecutableA(filename, NULL, command);
-    ok(rc > 32, "FindExecutable(%s) returned %d\n", filename, rc);
+    ok(rc == SE_ERR_FNF /* NT4 */ || rc > 32, "FindExecutable(%s) returned %d\n", filename, rc);
 
     sprintf(filename, "%s\\test file.shlfoo", tmpdir);
     rc=(int)FindExecutableA(filename, NULL, command);
@@ -759,6 +759,8 @@ static void test_find_executable(void)
                 c++;
             }
         }
+        /* Win98 does not '\0'-terminate command! */
+        memset(command, '\0', sizeof(command));
         rc=(int)FindExecutableA(filename, NULL, command);
         if (rc > 32)
             rc=33;
@@ -772,14 +774,18 @@ static void test_find_executable(void)
         }
         if (rc > 32)
         {
+            int equal;
+            equal=strcmp(command, argv0) == 0 ||
+                /* NT4 returns an extra 0x8 character! */
+                (strlen(command) == strlen(argv0)+1 && strncmp(command, argv0, strlen(argv0)) == 0);
             if ((test->todo & 0x20)==0)
             {
-                ok(strcmp(command, argv0) == 0, "FindExecutable(%s) returned command='%s' instead of '%s'\n",
+                ok(equal, "FindExecutable(%s) returned command='%s' instead of '%s'\n",
                    filename, command, argv0);
             }
             else todo_wine
             {
-                ok(strcmp(command, argv0) == 0, "FindExecutable(%s) returned command='%s' instead of '%s'\n",
+                ok(equal, "FindExecutable(%s) returned command='%s' instead of '%s'\n",
                    filename, command, argv0);
             }
         }

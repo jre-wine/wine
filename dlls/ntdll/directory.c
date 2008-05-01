@@ -2169,7 +2169,7 @@ struct read_changes_info
     ULONG BufferSize;
 };
 
-static void WINAPI read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, ULONG status )
+static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS status )
 {
     struct read_changes_info *info = user;
     char path[PATH_MAX];
@@ -2178,15 +2178,6 @@ static void WINAPI read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, ULONG st
 
     TRACE("%p %p %08x\n", info, iosb, status);
 
-    /*
-     * FIXME: race me!
-     *
-     * hEvent/hDir is set before the output buffer and iosb is updated.
-     * Since the thread that called NtNotifyChangeDirectoryFile is usually
-     * waiting, we'll be safe since we're called in that thread's context.
-     * If a different thread is waiting on our hEvent/hDir we're going to be
-     * in trouble...
-     */
     SERVER_START_REQ( read_change )
     {
         req->handle = info->FileHandle;
@@ -2231,6 +2222,7 @@ static void WINAPI read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, ULONG st
     iosb->Information = len;
 
     RtlFreeHeap( GetProcessHeap(), 0, info );
+    return ret;
 }
 
 #define FILE_NOTIFY_ALL        (  \
