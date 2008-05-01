@@ -1,3 +1,15 @@
+wine (0.9.26-1) unstable; urgency=low
+
+  * New upstream release 0.9.26.
+    - Better support for Unix locale settings.
+    - Improved X11 keyboard support.
+    - Various MSI fixes.
+    - Winecfg improvements.
+    - Lots of bug fixes.
+  * This version was released Nov 24, 2006.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Tue, 26 Dec 2006 15:54:01 -0500
+
 wine (0.9.25-1) unstable; urgency=low
 
   * New upstream release 0.9.25.
