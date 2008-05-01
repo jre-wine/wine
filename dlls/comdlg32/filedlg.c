@@ -186,7 +186,7 @@ static const char LookInInfosStr[] = "LookInInfos"; /* LOOKIN combo box property
 static LRESULT FILEDLG95_FillControls(HWND hwnd, WPARAM wParam, LPARAM lParam);
 static LRESULT FILEDLG95_OnWMCommand(HWND hwnd, WPARAM wParam, LPARAM lParam);
 static LRESULT FILEDLG95_OnWMGetIShellBrowser(HWND hwnd);
-       BOOL    FILEDLG95_OnOpen(HWND hwnd);
+static BOOL    FILEDLG95_OnOpen(HWND hwnd);
 static LRESULT FILEDLG95_InitControls(HWND hwnd);
 static void    FILEDLG95_Clean(HWND hwnd);
 
@@ -227,7 +227,7 @@ static LPITEMIDLIST GetPidlFromName(IShellFolder *psf,LPWSTR lpcstrFileName);
 static void *MemAlloc(UINT size);
 static void MemFree(void *mem);
 
-INT_PTR CALLBACK FileOpenDlgProc95(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+static INT_PTR CALLBACK FileOpenDlgProc95(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT SendCustomDlgNotificationMessage(HWND hwndParentDlg, UINT uCode);
 static INT_PTR FILEDLG95_HandleCustomDialogMessages(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 static BOOL FILEDLG95_OnOpenMultipleFiles(HWND hwnd, LPWSTR lpstrFileList, UINT nFileCount, UINT sizeUsed);

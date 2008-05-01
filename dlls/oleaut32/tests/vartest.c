@@ -316,10 +316,8 @@ static void test_VariantClear(void)
   LONG i4;
   IUnknown *punk;
 
-#if 0
   /* Crashes: Native does not test input for NULL, so neither does Wine */
-  hres = VariantClear(NULL);
-#endif
+  if (0) hres = VariantClear(NULL);
 
   /* Only the type field is set, to VT_EMPTY */
   V_VT(&v) = VT_UI4;
@@ -2261,12 +2259,12 @@ static void test_VarMod(void)
 	case VT_BOOL:
 	case VT_DATE:
 	case VT_CY:
+	case VT_DECIMAL:
 	  hexpected = S_OK;
 	  break;
 	case VT_ERROR:
 	case VT_VARIANT:
 	case VT_UNKNOWN:
-	case VT_DECIMAL:
 	case VT_RECORD:
 	  lValid = FALSE;
 	  break;
@@ -2296,13 +2294,13 @@ static void test_VarMod(void)
 	case VT_R8:
 	case VT_BOOL:
 	case VT_DATE:
+	case VT_DECIMAL:
 	case VT_CY:
 	  hexpected = S_OK;
 	  break;
 	case VT_ERROR:
 	case VT_VARIANT:
 	case VT_UNKNOWN:
-	case VT_DECIMAL:
 	case VT_RECORD:
 	  rValid = FALSE;
 	  break;
@@ -2341,18 +2339,18 @@ static void test_VarMod(void)
       } else if((l == VT_NULL) && (r == VT_RECORD))
       {
 	hexpected = DISP_E_TYPEMISMATCH;
-      } else if((l == VT_NULL) && (r == VT_DECIMAL))
+      } else if((l == VT_I8) && (r == VT_DECIMAL))
       {
-	hexpected = E_INVALIDARG;
+	hexpected = S_OK;
+      } else if((l == VT_DECIMAL) && (r == VT_I8))
+      {
+	hexpected = S_OK;
       } else if((l == VT_UNKNOWN) || ((r == VT_UNKNOWN) && lFound && lValid))
       {
 	hexpected = DISP_E_TYPEMISMATCH;
       } else if((l == VT_NULL) && rFound)
       {
 	hexpected = S_OK;
-      } else if((l == VT_DECIMAL) || ((r == VT_DECIMAL) && lFound && lValid))
-      {
-	hexpected = E_INVALIDARG;
       } else if(l == VT_RECORD)
       {
 	hexpected = DISP_E_TYPEMISMATCH;
@@ -2399,8 +2397,16 @@ static void test_VarMod(void)
 	V_R8(&v1) = 100;
       else if(l == VT_UI8)
 	V_UI8(&v1) = 100;
+      else if(l == VT_I8)
+	V_I8(&v1) = 100;
       else if(l == VT_DATE)
 	V_DATE(&v1) = 1000;
+      else if (l == VT_DECIMAL)
+      {
+	V_DECIMAL(&v1).Hi32 = 0;
+	U1(V_DECIMAL(&v1)).Lo64 = 100;
+	U(V_DECIMAL(&v1)).signscale = 0;
+      }
       else
 	V_I4(&v1) = 10000;
 
@@ -2412,8 +2418,16 @@ static void test_VarMod(void)
 	V_R8(&v2) = 100;
       else if(r == VT_UI8)
 	V_UI8(&v2) = 100;
+      else if(r == VT_I8)
+	V_I8(&v2) = 100;
       else if(r == VT_DATE)
 	V_DATE(&v2) = 1000;
+      else if (r == VT_DECIMAL)
+      {
+	V_DECIMAL(&v2).Hi32 = 0;
+	U1(V_DECIMAL(&v2)).Lo64 = 100;
+	U(V_DECIMAL(&v2)).signscale = 0;
+      }
       else
 	V_I4(&v2) = 10000;
 
@@ -2478,7 +2492,6 @@ static void test_VarMod(void)
      "VarMod: expected 0x%x,%d,%d, got 0x%X,%d,%d\n", S_OK, VT_I4, 0, hres, V_VT(&vDst), V_I4(&vDst));
 
   /* some decimals */
-  todo_wine {
   V_VT(&v1) = VT_DECIMAL;
   V_VT(&v2) = VT_DECIMAL;
   VarDecFromI4(100, &V_DECIMAL(&v1));
@@ -2494,7 +2507,6 @@ static void test_VarMod(void)
   hres = pVarMod(&v1,&v2,&vDst);
   ok(hres == S_OK && V_VT(&vDst) == VT_I4 && V_I4(&vDst) == 0,
      "VarMod: expected 0x%x,%d,%d, got 0x%X,%d,%d\n", S_OK, VT_I4, 0, hres, V_VT(&vDst), V_I4(&vDst));
-  }
 
   VARMOD2(UINT,I4,100,10,I4,0,S_OK);
 
@@ -5170,7 +5182,7 @@ static void test_VarCat(void)
     hres = VarCat(&left,&right,&result);
     ok(hres == S_OK, "VarCat failed with error 0x%08x\n", hres);
     ok(VarCmp(&result,&expected,lcid,0) == VARCMP_EQ,
-        "VarCat: VT_INT concat with VT_BOOL (TRUE) returned inncorrect result\n");
+        "VarCat: VT_INT concat with VT_BOOL (TRUE) returned incorrect result\n");
 
     VariantClear(&left);
     VariantClear(&right);
@@ -5350,9 +5362,9 @@ static void test_VarAnd(void)
                 V_VT(&right) = rightvt | ExtraFlags[i];
                 V_VT(&result) = VT_EMPTY;
                 resvt = VT_EMPTY;
-                if (leftvt == VT_BSTR)
+                if ((leftvt | ExtraFlags[i]) == VT_BSTR)
                     V_BSTR(&left) = true_str;
-                if (rightvt == VT_BSTR)
+                if ((rightvt | ExtraFlags[i]) == VT_BSTR)
                     V_BSTR(&right) = true_str;
 
                 /* Native VarAnd always returns a error when using any extra
@@ -6300,20 +6312,26 @@ static void test_VarPow(void)
                     bFail = TRUE;
 
                 /* Determine return type */
-                else if (leftvt == VT_NULL || rightvt == VT_NULL)
+                else if ((leftvt == VT_NULL || rightvt == VT_NULL) &&
+                         ((leftvt != VT_I8 && leftvt != VT_UI8 &&
+                           rightvt != VT_I8 && rightvt != VT_UI8) || HAVE_OLEAUT32_I8))
                     resvt = VT_NULL;
                 else if ((leftvt == VT_EMPTY || leftvt == VT_I2 ||
                     leftvt == VT_I4 || leftvt == VT_R4 ||
                     leftvt == VT_R8 || leftvt == VT_CY ||
                     leftvt == VT_DATE || leftvt == VT_BSTR ||
                     leftvt == VT_BOOL || leftvt == VT_DECIMAL ||
-                    (leftvt >= VT_I1 && leftvt <= VT_UINT)) &&
+                    (leftvt >= VT_I1 && leftvt <= VT_UI4) ||
+                    (HAVE_OLEAUT32_I8 && (leftvt == VT_I8 || leftvt == VT_UI8)) ||
+                    leftvt == VT_INT || leftvt == VT_UINT) &&
                     (rightvt == VT_EMPTY || rightvt == VT_I2 ||
                     rightvt == VT_I4 || rightvt == VT_R4 ||
                     rightvt == VT_R8 || rightvt == VT_CY ||
                     rightvt == VT_DATE || rightvt == VT_BSTR ||
                     rightvt == VT_BOOL || rightvt == VT_DECIMAL ||
-                    (rightvt >= VT_I1 && rightvt <= VT_UINT)))
+                    (rightvt >= VT_I1 && rightvt <= VT_UI4) ||
+                    (HAVE_OLEAUT32_I8 && (rightvt == VT_I8 || rightvt == VT_UI8)) ||
+                    rightvt == VT_INT || rightvt == VT_UINT))
                     resvt = VT_R8;
                 else
                     bFail = TRUE;
@@ -6349,8 +6367,11 @@ static void test_VarPow(void)
     VARPOW(EMPTY,0,UI1,3,R8,0.0);
     VARPOW(EMPTY,0,UI2,3,R8,0.0);
     VARPOW(EMPTY,0,UI4,3,R8,0.0);
-    VARPOW(EMPTY,0,I8,3,R8,0.0);
-    VARPOW(EMPTY,0,UI8,3,R8,0.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(EMPTY,0,I8,3,R8,0.0);
+        VARPOW(EMPTY,0,UI8,3,R8,0.0);
+    }
     VARPOW(EMPTY,0,INT,3,R8,0.0);
     VARPOW(EMPTY,0,UINT,3,R8,0.0);
     VARPOW(NULL,0,EMPTY,0,NULL,0);
@@ -6366,8 +6387,11 @@ static void test_VarPow(void)
     VARPOW(NULL,0,UI1,3,NULL,0);
     VARPOW(NULL,0,UI2,3,NULL,0);
     VARPOW(NULL,0,UI4,3,NULL,0);
-    VARPOW(NULL,0,I8,3,NULL,0);
-    VARPOW(NULL,0,UI8,3,NULL,0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(NULL,0,I8,3,NULL,0);
+        VARPOW(NULL,0,UI8,3,NULL,0);
+    }
     VARPOW(NULL,0,INT,3,NULL,0);
     VARPOW(NULL,0,UINT,3,NULL,0);
     VARPOW(I2,2,EMPTY,0,R8,1.0);
@@ -6383,8 +6407,11 @@ static void test_VarPow(void)
     VARPOW(I2,2,UI1,3,R8,8.0);
     VARPOW(I2,2,UI2,3,R8,8.0);
     VARPOW(I2,2,UI4,3,R8,8.0);
-    VARPOW(I2,2,I8,3,R8,8.0);
-    VARPOW(I2,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(I2,2,I8,3,R8,8.0);
+        VARPOW(I2,2,UI8,3,R8,8.0);
+    }
     VARPOW(I2,2,INT,3,R8,8.0);
     VARPOW(I2,2,UINT,3,R8,8.0);
     VARPOW(I4,2,EMPTY,0,R8,1.0);
@@ -6400,8 +6427,11 @@ static void test_VarPow(void)
     VARPOW(I4,2,UI1,3,R8,8.0);
     VARPOW(I4,2,UI2,3,R8,8.0);
     VARPOW(I4,2,UI4,3,R8,8.0);
-    VARPOW(I4,2,I8,3,R8,8.0);
-    VARPOW(I4,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(I4,2,I8,3,R8,8.0);
+        VARPOW(I4,2,UI8,3,R8,8.0);
+    }
     VARPOW(I4,2,INT,3,R8,8.0);
     VARPOW(I4,2,UINT,3,R8,8.0);
     VARPOW(R4,2,EMPTY,0,R8,1.0);
@@ -6417,8 +6447,11 @@ static void test_VarPow(void)
     VARPOW(R4,2,UI1,3,R8,8.0);
     VARPOW(R4,2,UI2,3,R8,8.0);
     VARPOW(R4,2,UI4,3,R8,8.0);
-    VARPOW(R4,2,I8,3,R8,8.0);
-    VARPOW(R4,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(R4,2,I8,3,R8,8.0);
+        VARPOW(R4,2,UI8,3,R8,8.0);
+    }
     VARPOW(R4,2,INT,3,R8,8.0);
     VARPOW(R4,2,UINT,3,R8,8.0);
     VARPOW(R8,2,EMPTY,0,R8,1.0);
@@ -6434,8 +6467,11 @@ static void test_VarPow(void)
     VARPOW(R8,2,UI1,3,R8,8.0);
     VARPOW(R8,2,UI2,3,R8,8.0);
     VARPOW(R8,2,UI4,3,R8,8.0);
-    VARPOW(R8,2,I8,3,R8,8.0);
-    VARPOW(R8,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(R8,2,I8,3,R8,8.0);
+        VARPOW(R8,2,UI8,3,R8,8.0);
+    }
     VARPOW(R8,2,INT,3,R8,8.0);
     VARPOW(R8,2,UINT,3,R8,8.0);
     VARPOW(DATE,2,EMPTY,0,R8,1.0);
@@ -6451,8 +6487,11 @@ static void test_VarPow(void)
     VARPOW(DATE,2,UI1,3,R8,8.0);
     VARPOW(DATE,2,UI2,3,R8,8.0);
     VARPOW(DATE,2,UI4,3,R8,8.0);
-    VARPOW(DATE,2,I8,3,R8,8.0);
-    VARPOW(DATE,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(DATE,2,I8,3,R8,8.0);
+        VARPOW(DATE,2,UI8,3,R8,8.0);
+    }
     VARPOW(DATE,2,INT,3,R8,8.0);
     VARPOW(DATE,2,UINT,3,R8,8.0);
     VARPOW(BSTR,num2_str,EMPTY,0,R8,1.0);
@@ -6468,8 +6507,11 @@ static void test_VarPow(void)
     VARPOW(BSTR,num2_str,UI1,3,R8,8.0);
     VARPOW(BSTR,num2_str,UI2,3,R8,8.0);
     VARPOW(BSTR,num2_str,UI4,3,R8,8.0);
-    VARPOW(BSTR,num2_str,I8,3,R8,8.0);
-    VARPOW(BSTR,num2_str,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(BSTR,num2_str,I8,3,R8,8.0);
+        VARPOW(BSTR,num2_str,UI8,3,R8,8.0);
+    }
     VARPOW(BSTR,num2_str,INT,3,R8,8.0);
     VARPOW(BSTR,num2_str,UINT,3,R8,8.0);
     VARPOW(BOOL,VARIANT_TRUE,EMPTY,0,R8,1.0);
@@ -6485,8 +6527,11 @@ static void test_VarPow(void)
     VARPOW(BOOL,VARIANT_TRUE,UI1,3,R8,-1.0);
     VARPOW(BOOL,VARIANT_TRUE,UI2,3,R8,-1.0);
     VARPOW(BOOL,VARIANT_TRUE,UI4,3,R8,-1.0);
-    VARPOW(BOOL,VARIANT_TRUE,I8,3,R8,-1.0);
-    VARPOW(BOOL,VARIANT_TRUE,UI8,3,R8,-1.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(BOOL,VARIANT_TRUE,I8,3,R8,-1.0);
+        VARPOW(BOOL,VARIANT_TRUE,UI8,3,R8,-1.0);
+    }
     VARPOW(BOOL,VARIANT_TRUE,INT,3,R8,-1.0);
     VARPOW(BOOL,VARIANT_TRUE,UINT,3,R8,-1.0);
     VARPOW(I1,2,EMPTY,0,R8,1.0);
@@ -6502,8 +6547,11 @@ static void test_VarPow(void)
     VARPOW(I1,2,UI1,3,R8,8.0);
     VARPOW(I1,2,UI2,3,R8,8.0);
     VARPOW(I1,2,UI4,3,R8,8.0);
-    VARPOW(I1,2,I8,3,R8,8.0);
-    VARPOW(I1,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(I1,2,I8,3,R8,8.0);
+        VARPOW(I1,2,UI8,3,R8,8.0);
+    }
     VARPOW(I1,2,INT,3,R8,8.0);
     VARPOW(I1,2,UINT,3,R8,8.0);
     VARPOW(UI1,2,EMPTY,0,R8,1.0);
@@ -6519,8 +6567,11 @@ static void test_VarPow(void)
     VARPOW(UI1,2,UI1,3,R8,8.0);
     VARPOW(UI1,2,UI2,3,R8,8.0);
     VARPOW(UI1,2,UI4,3,R8,8.0);
-    VARPOW(UI1,2,I8,3,R8,8.0);
-    VARPOW(UI1,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(UI1,2,I8,3,R8,8.0);
+        VARPOW(UI1,2,UI8,3,R8,8.0);
+    }
     VARPOW(UI1,2,INT,3,R8,8.0);
     VARPOW(UI1,2,UINT,3,R8,8.0);
     VARPOW(UI2,2,EMPTY,0,R8,1.0);
@@ -6536,8 +6587,11 @@ static void test_VarPow(void)
     VARPOW(UI2,2,UI1,3,R8,8.0);
     VARPOW(UI2,2,UI2,3,R8,8.0);
     VARPOW(UI2,2,UI4,3,R8,8.0);
-    VARPOW(UI2,2,I8,3,R8,8.0);
-    VARPOW(UI2,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(UI2,2,I8,3,R8,8.0);
+        VARPOW(UI2,2,UI8,3,R8,8.0);
+    }
     VARPOW(UI2,2,INT,3,R8,8.0);
     VARPOW(UI2,2,UINT,3,R8,8.0);
     VARPOW(UI4,2,EMPTY,0,R8,1.0);
@@ -6553,43 +6607,49 @@ static void test_VarPow(void)
     VARPOW(UI4,2,UI1,3,R8,8.0);
     VARPOW(UI4,2,UI2,3,R8,8.0);
     VARPOW(UI4,2,UI4,3,R8,8.0);
-    VARPOW(UI4,2,I8,3,R8,8.0);
-    VARPOW(UI4,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(UI4,2,I8,3,R8,8.0);
+        VARPOW(UI4,2,UI8,3,R8,8.0);
+    }
     VARPOW(UI4,2,INT,3,R8,8.0);
     VARPOW(UI4,2,UINT,3,R8,8.0);
-    VARPOW(I8,2,EMPTY,0,R8,1.0);
-    VARPOW(I8,2,NULL,0,NULL,0);
-    VARPOW(I8,2,I2,3,R8,8.0);
-    VARPOW(I8,2,I4,3,R8,8.0);
-    VARPOW(I8,2,R4,3.0,R8,8.0);
-    VARPOW(I8,2,R8,3.0,R8,8.0);
-    VARPOW(I8,2,DATE,3,R8,8.0);
-    VARPOW(I8,2,BSTR,num3_str,R8,8.0);
-    VARPOW(I8,2,BOOL,VARIANT_FALSE,R8,1.0);
-    VARPOW(I8,2,I1,3,R8,8.0);
-    VARPOW(I8,2,UI1,3,R8,8.0);
-    VARPOW(I8,2,UI2,3,R8,8.0);
-    VARPOW(I8,2,UI4,3,R8,8.0);
-    VARPOW(I8,2,I8,3,R8,8.0);
-    VARPOW(I8,2,UI8,3,R8,8.0);
-    VARPOW(I8,2,INT,3,R8,8.0);
-    VARPOW(I8,2,UINT,3,R8,8.0);
-    VARPOW(UI8,2,EMPTY,0,R8,1.0);
-    VARPOW(UI8,2,NULL,0,NULL,0);
-    VARPOW(UI8,2,I2,3,R8,8.0);
-    VARPOW(UI8,2,I4,3,R8,8.0);
-    VARPOW(UI8,2,R4,3.0,R8,8.0);
-    VARPOW(UI8,2,R8,3.0,R8,8.0);
-    VARPOW(UI8,2,DATE,3,R8,8.0);
-    VARPOW(UI8,2,BSTR,num3_str,R8,8.0);
-    VARPOW(UI8,2,I1,3,R8,8.0);
-    VARPOW(UI8,2,UI1,3,R8,8.0);
-    VARPOW(UI8,2,UI2,3,R8,8.0);
-    VARPOW(UI8,2,UI4,3,R8,8.0);
-    VARPOW(UI8,2,I8,3,R8,8.0);
-    VARPOW(UI8,2,UI8,3,R8,8.0);
-    VARPOW(UI8,2,INT,3,R8,8.0);
-    VARPOW(UI8,2,UINT,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(I8,2,EMPTY,0,R8,1.0);
+        VARPOW(I8,2,NULL,0,NULL,0);
+        VARPOW(I8,2,I2,3,R8,8.0);
+        VARPOW(I8,2,I4,3,R8,8.0);
+        VARPOW(I8,2,R4,3.0,R8,8.0);
+        VARPOW(I8,2,R8,3.0,R8,8.0);
+        VARPOW(I8,2,DATE,3,R8,8.0);
+        VARPOW(I8,2,BSTR,num3_str,R8,8.0);
+        VARPOW(I8,2,BOOL,VARIANT_FALSE,R8,1.0);
+        VARPOW(I8,2,I1,3,R8,8.0);
+        VARPOW(I8,2,UI1,3,R8,8.0);
+        VARPOW(I8,2,UI2,3,R8,8.0);
+        VARPOW(I8,2,UI4,3,R8,8.0);
+        VARPOW(I8,2,I8,3,R8,8.0);
+        VARPOW(I8,2,UI8,3,R8,8.0);
+        VARPOW(I8,2,INT,3,R8,8.0);
+        VARPOW(I8,2,UINT,3,R8,8.0);
+        VARPOW(UI8,2,EMPTY,0,R8,1.0);
+        VARPOW(UI8,2,NULL,0,NULL,0);
+        VARPOW(UI8,2,I2,3,R8,8.0);
+        VARPOW(UI8,2,I4,3,R8,8.0);
+        VARPOW(UI8,2,R4,3.0,R8,8.0);
+        VARPOW(UI8,2,R8,3.0,R8,8.0);
+        VARPOW(UI8,2,DATE,3,R8,8.0);
+        VARPOW(UI8,2,BSTR,num3_str,R8,8.0);
+        VARPOW(UI8,2,I1,3,R8,8.0);
+        VARPOW(UI8,2,UI1,3,R8,8.0);
+        VARPOW(UI8,2,UI2,3,R8,8.0);
+        VARPOW(UI8,2,UI4,3,R8,8.0);
+        VARPOW(UI8,2,I8,3,R8,8.0);
+        VARPOW(UI8,2,UI8,3,R8,8.0);
+        VARPOW(UI8,2,INT,3,R8,8.0);
+        VARPOW(UI8,2,UINT,3,R8,8.0);
+    }
     VARPOW(INT,2,EMPTY,0,R8,1.0);
     VARPOW(INT,2,NULL,0,NULL,0);
     VARPOW(INT,2,I2,3,R8,8.0);
@@ -6603,8 +6663,11 @@ static void test_VarPow(void)
     VARPOW(INT,2,UI1,3,R8,8.0);
     VARPOW(INT,2,UI2,3,R8,8.0);
     VARPOW(INT,2,UI4,3,R8,8.0);
-    VARPOW(INT,2,I8,3,R8,8.0);
-    VARPOW(INT,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(INT,2,I8,3,R8,8.0);
+        VARPOW(INT,2,UI8,3,R8,8.0);
+    }
     VARPOW(INT,2,INT,3,R8,8.0);
     VARPOW(INT,2,UINT,3,R8,8.0);
     VARPOW(UINT,2,EMPTY,0,R8,1.0);
@@ -6620,8 +6683,11 @@ static void test_VarPow(void)
     VARPOW(UINT,2,UI1,3,R8,8.0);
     VARPOW(UINT,2,UI2,3,R8,8.0);
     VARPOW(UINT,2,UI4,3,R8,8.0);
-    VARPOW(UINT,2,I8,3,R8,8.0);
-    VARPOW(UINT,2,UI8,3,R8,8.0);
+    if (HAVE_OLEAUT32_I8)
+    {
+        VARPOW(UINT,2,I8,3,R8,8.0);
+        VARPOW(UINT,2,UI8,3,R8,8.0);
+    }
     VARPOW(UINT,2,INT,3,R8,8.0);
     VARPOW(UINT,2,UINT,3,R8,8.0);
 

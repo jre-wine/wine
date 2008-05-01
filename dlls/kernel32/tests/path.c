@@ -942,13 +942,13 @@ static void test_GetLongPathNameW(void)
     SetLastError(0xdeadbeef); 
     length = pGetLongPathNameW(NULL,NULL,0);
     ok(0==length,"GetLongPathNameW returned %d but expected 0\n",length);
-    ok(GetLastError()==ERROR_INVALID_PARAMETER,"GetLastError returned %x but expected ERROR_INVALID_PARAMETER\n",GetLastError());
+    ok(GetLastError()==ERROR_INVALID_PARAMETER,"GetLastError returned %d but expected ERROR_INVALID_PARAMETER\n",GetLastError());
 
     SetLastError(0xdeadbeef); 
     empty[0]=0;
     length = pGetLongPathNameW(empty,NULL,0);
     ok(0==length,"GetLongPathNameW returned %d but expected 0\n",length);
-    ok(GetLastError()==ERROR_PATH_NOT_FOUND,"GetLastError returned %x but expected ERROR_PATH_NOT_FOUND\n",GetLastError());
+    ok(GetLastError()==ERROR_PATH_NOT_FOUND,"GetLastError returned %d but expected ERROR_PATH_NOT_FOUND\n",GetLastError());
     }
 }
 
@@ -961,20 +961,19 @@ static void test_GetSystemDirectory(void)
     SetLastError(0xdeadbeef);
     res = GetSystemDirectory(NULL, 0);
     /* res includes the terminating Zero */
-    ok(res > 0, "returned %d with 0x%x (expected '>0')\n", res, GetLastError());
+    ok(res > 0, "returned %d with %d (expected '>0')\n", res, GetLastError());
 
     total = res;
-#if 0
-    /* this test crash on XP */
-    res = GetSystemDirectory(NULL, total);
-#endif
+
+    /* this crashes on XP */
+    if (0) res = GetSystemDirectory(NULL, total);
 
     SetLastError(0xdeadbeef);
     res = GetSystemDirectory(NULL, total-1);
     /* 95+NT: total (includes the terminating Zero)
        98+ME: 0 with ERROR_INVALID_PARAMETER */
     ok( (res == total) || (!res && (GetLastError() == ERROR_INVALID_PARAMETER)),
-        "returned %d with 0x%x (expected '%d' or: '0' with " \
+        "returned %d with %d (expected '%d' or: '0' with "
         "ERROR_INVALID_PARAMETER)\n", res, GetLastError(), total);
 
     if (total > MAX_PATH) return;
@@ -984,7 +983,7 @@ static void test_GetSystemDirectory(void)
     res = GetSystemDirectory(buffer, total);
     /* res does not include the terminating Zero */
     ok( (res == (total-1)) && (buffer[0]),
-        "returned %d with 0x%x and '%s' (expected '%d' and a string)\n",
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
         res, GetLastError(), buffer, total-1);
 
     buffer[0] = '\0';
@@ -992,7 +991,7 @@ static void test_GetSystemDirectory(void)
     res = GetSystemDirectory(buffer, total + 1);
     /* res does not include the terminating Zero */
     ok( (res == (total-1)) && (buffer[0]),
-        "returned %d with 0x%x and '%s' (expected '%d' and a string)\n",
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
         res, GetLastError(), buffer, total-1);
 
     memset(buffer, '#', total + 1);
@@ -1000,7 +999,7 @@ static void test_GetSystemDirectory(void)
     SetLastError(0xdeadbeef);
     res = GetSystemDirectory(buffer, total-1);
     /* res includes the terminating Zero) */
-    ok( res == total, "returned %d with 0x%x and '%s' (expected '%d')\n",
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
         res, GetLastError(), buffer, total);
 
     memset(buffer, '#', total + 1);
@@ -1008,7 +1007,7 @@ static void test_GetSystemDirectory(void)
     SetLastError(0xdeadbeef);
     res = GetSystemDirectory(buffer, total-2);
     /* res includes the terminating Zero) */
-    ok( res == total, "returned %d with 0x%x and '%s' (expected '%d')\n",
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
         res, GetLastError(), buffer, total);
 }
 
@@ -1021,20 +1020,18 @@ static void test_GetWindowsDirectory(void)
     SetLastError(0xdeadbeef);
     res = GetWindowsDirectory(NULL, 0);
     /* res includes the terminating Zero */
-    ok(res > 0, "returned %d with 0x%x (expected '>0')\n", res, GetLastError());
+    ok(res > 0, "returned %d with %d (expected '>0')\n", res, GetLastError());
 
     total = res;
-#if 0
-    /* this test crash on XP */
-    res = GetWindowsDirectory(NULL, total);
-#endif
+    /* this crashes on XP */
+    if (0) res = GetWindowsDirectory(NULL, total);
 
     SetLastError(0xdeadbeef);
     res = GetWindowsDirectory(NULL, total-1);
     /* 95+NT: total (includes the terminating Zero)
        98+ME: 0 with ERROR_INVALID_PARAMETER */
     ok( (res == total) || (!res && (GetLastError() == ERROR_INVALID_PARAMETER)),
-        "returned %d with 0x%x (expected '%d' or: '0' with " \
+        "returned %d with %d (expected '%d' or: '0' with "
         "ERROR_INVALID_PARAMETER)\n", res, GetLastError(), total);
 
     if (total > MAX_PATH) return;
@@ -1044,7 +1041,7 @@ static void test_GetWindowsDirectory(void)
     res = GetWindowsDirectory(buffer, total);
     /* res does not include the terminating Zero */
     ok( (res == (total-1)) && (buffer[0]),
-        "returned %d with 0x%x and '%s' (expected '%d' and a string)\n",
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
         res, GetLastError(), buffer, total-1);
 
     buffer[0] = '\0';
@@ -1052,7 +1049,7 @@ static void test_GetWindowsDirectory(void)
     res = GetWindowsDirectory(buffer, total + 1);
     /* res does not include the terminating Zero */
     ok( (res == (total-1)) && (buffer[0]),
-        "returned %d with 0x%x and '%s' (expected '%d' and a string)\n",
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
         res, GetLastError(), buffer, total-1);
 
     memset(buffer, '#', total + 1);
@@ -1060,7 +1057,7 @@ static void test_GetWindowsDirectory(void)
     SetLastError(0xdeadbeef);
     res = GetWindowsDirectory(buffer, total-1);
     /* res includes the terminating Zero) */
-    ok( res == total, "returned %d with 0x%x and '%s' (expected '%d')\n",
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
         res, GetLastError(), buffer, total);
 
     memset(buffer, '#', total + 1);
@@ -1068,7 +1065,7 @@ static void test_GetWindowsDirectory(void)
     SetLastError(0xdeadbeef);
     res = GetWindowsDirectory(buffer, total-2);
     /* res includes the terminating Zero) */
-    ok( res == total, "returned %d with 0x%x and '%s' (expected '%d')\n",
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
         res, GetLastError(), buffer, total);
 }
 

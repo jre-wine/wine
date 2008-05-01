@@ -232,31 +232,6 @@ static ULONG  WINAPI IWineD3DStateBlockImpl_Release(IWineD3DStateBlock *iface) {
         if (This->blockType == WINED3DSBT_INIT) {
             int counter;
             FIXME("Releasing primary stateblock\n");
-            /* Free any streams still bound */
-            for (counter = 0 ; counter < MAX_STREAMS ; counter++) {
-                if (This->streamSource[counter] != NULL) {
-                    IWineD3DVertexBuffer_Release(This->streamSource[counter]);
-                    This->streamSource[counter] = NULL;
-                }
-            }
-
-            /* free any index data */
-            if (This->pIndexData) {
-                IWineD3DIndexBuffer_Release(This->pIndexData);
-                This->pIndexData = NULL;
-            }
-
-            if (NULL != This->pixelShader) {
-                IWineD3DPixelShader_Release(This->pixelShader);
-            }
-
-            if (NULL != This->vertexShader) {
-                IWineD3DVertexShader_Release(This->vertexShader);
-            }
-
-            if (NULL != This->vertexDecl) {
-                IWineD3DVertexDeclaration_Release(This->vertexDecl);
-            }
 
             /* NOTE: according to MSDN: The application is responsible for making sure the texture references are cleared down */
             for (counter = 0; counter < GL_LIMITS(sampler_stages); counter++) {
@@ -341,13 +316,6 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
         if (This->vertexShader != targetStateBlock->vertexShader) {
             TRACE("Updating vertex shader from %p to %p\n", This->vertexShader, targetStateBlock->vertexShader);
 
-            if (targetStateBlock->vertexShader) {
-                IWineD3DVertexShader_AddRef(targetStateBlock->vertexShader);
-            }
-            if (This->vertexShader) {
-                IWineD3DVertexShader_Release(This->vertexShader);
-            }
-
             This->vertexShader = targetStateBlock->vertexShader;
         }
 
@@ -429,13 +397,6 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
         if (This->pixelShader != targetStateBlock->pixelShader) {
             TRACE("Updating pixel shader from %p to %p\n", This->pixelShader, targetStateBlock->pixelShader);
 
-            if (targetStateBlock->pixelShader) {
-                IWineD3DPixelShader_AddRef(targetStateBlock->pixelShader);
-            }
-            if (This->pixelShader) {
-                IWineD3DPixelShader_Release(This->pixelShader);
-            }
-
             This->pixelShader = targetStateBlock->pixelShader;
         }
 
@@ -501,13 +462,6 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
 
         if(This->set.vertexDecl && This->vertexDecl != targetStateBlock->vertexDecl){
             TRACE("Updating vertex declaration from %p to %p\n", This->vertexDecl, targetStateBlock->vertexDecl);
-
-            if (targetStateBlock->vertexDecl) {
-                IWineD3DVertexDeclaration_AddRef(targetStateBlock->vertexDecl);
-            }
-            if (This->vertexDecl) {
-                IWineD3DVertexDeclaration_Release(This->vertexDecl);
-            }
 
             This->vertexDecl = targetStateBlock->vertexDecl;
         }
@@ -1069,10 +1023,6 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
 
         glTexImage1D(GL_TEXTURE_1D, 0, GL_LUMINANCE, 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &white);
         checkGLcall("glTexImage1D");
-#if 1   /* TODO: move the setting texture states off to basetexture */
-        /* Reapply all the texture state information to this texture */
-        IWineD3DDevice_SetupTextureStates(device, i, i, REAPPLY_ALL);
-#endif
     }
 
     LEAVE_GL();

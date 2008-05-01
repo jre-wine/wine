@@ -2,6 +2,7 @@
  * Tests for usp10 dll
  *
  * Copyright 2006 Jeff Latimer
+ * Copyright 2006 Hans Leidekker
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -312,20 +313,11 @@ static void test_ScriptGetCMap(HDC hdc, unsigned short pwOutGlyphs[256])
 
 }
 
-static void test_ScriptGetFontProperties(void)
+static void test_ScriptGetFontProperties(HDC hdc)
 {
     HRESULT         hr;
-    HDC             hdc;
-    HWND            hwnd;
     SCRIPT_CACHE    psc,old_psc;
     SCRIPT_FONTPROPERTIES sfp;
-
-    /* Only do the bare minumum to get a valid hdc */
-    hwnd = CreateWindowExA(0, "static", "", WS_POPUP, 0,0,100,100,0, 0, 0, NULL);
-    assert(hwnd != 0);
-
-    hdc = GetDC(hwnd);
-    ok( hdc != NULL, "HDC failed to be created %p\n", hdc);
 
     /* Some sanity checks for ScriptGetFontProperties */
 
@@ -382,17 +374,11 @@ static void test_ScriptGetFontProperties(void)
     ok( psc == old_psc, "Expected psc not to be changed, was %p is now %p\n", old_psc, psc);
     ScriptFreeCache(&psc);
     ok( psc == NULL, "Expected psc to be NULL, got %p\n", psc);
-
-    /* Cleanup */
-    ReleaseDC(hwnd, hdc);
-    DestroyWindow(hwnd);
 }
 
-static void test_ScriptTextOut(void)
+static void test_ScriptTextOut(HDC hdc)
 {
     HRESULT         hr;
-    HWND            hwnd;
-    HDC             hdc;
 
     int             cInChars;
     int             cMaxItems;
@@ -416,17 +402,6 @@ static void test_ScriptTextOut(void)
     BOOL            fTrailing = FALSE;
     SCRIPT_LOGATTR  *psla;
     SCRIPT_LOGATTR  sla[256];
-
-    /* We need a valid HDC to drive a lot of Script functions which requires the following    *
-     * to set up for the tests.                                                               */
-    hwnd = CreateWindowExA(0, "static", "", WS_POPUP, 0,0,100,100,
-                           0, 0, 0, NULL);
-    assert(hwnd != 0);
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
-
-    hdc = GetDC(hwnd);                                      /* We now have a hdc             */
-    ok( hdc != NULL, "HDC failed to be created %p\n", hdc);
 
     /* This is a valid test that will cause parsing to take place                             */
     cInChars = 5;
@@ -518,8 +493,6 @@ static void test_ScriptTextOut(void)
             ok( psc == NULL, "Expected psc to be NULL, got %p\n", psc);
         }
     }
-    ReleaseDC(hwnd, hdc);
-    DestroyWindow(hwnd);
 }
 
 static void test_ScriptXtoX(void)
@@ -631,23 +604,21 @@ static void test_ScriptXtoX(void)
 
 }
 
-static void test_ScriptString(void)
+static void test_ScriptString(HDC hdc)
 {
 /*******************************************************************************************
  *
  * This set of tests are for the string functions of uniscribe.  The ScriptStringAnalyse
- * function allocates memory pointed to by the SCRIPT_STRING_ANALYSIS ssa pointer.  This 
- * memory if freed by ScriptStringFree.  There needs to be a valid hdc for this this as 
- * ScriptStrinAnalyse calls ScriptSItemize, ScriptShape and ScriptPlace which require it.
+ * function allocates memory pointed to by the SCRIPT_STRING_ANALYSIS ssa pointer.  This
+ * memory if freed by ScriptStringFree.  There needs to be a valid hdc for this as
+ * ScriptStringAnalyse calls ScriptSItemize, ScriptShape and ScriptPlace which require it.
  *
  */
 
     HRESULT         hr;
-    HWND            hwnd;
-    HDC             hdc = 0;
     WCHAR           teststr[] = {'T','e','s','t','1',' ','a','2','b','3', '\0'};
-    int             String = (sizeof(teststr)/sizeof(WCHAR))-1;
-    int             Glyphs = String * 2 + 16;
+    int             len = (sizeof(teststr) / sizeof(WCHAR)) - 1;
+    int             Glyphs = len * 2 + 16;
     int             Charset;
     DWORD           Flags = SSA_GLYPHS;
     int             ReqWidth = 100;
@@ -662,61 +633,51 @@ static void test_ScriptString(void)
     int             Y = 100;
     UINT            Options = 0; 
     const RECT      rc = {0, 50, 100, 100}; 
-    int             MinSel = 0; 
+    int             MinSel = 0;
     int             MaxSel = 0;
     BOOL            Disabled = FALSE;
+    const int      *clip_len;
+    UINT           *order, i;
 
-    LOGFONTA        lf;
-    HFONT           zfont;
 
-    /* We need a valid HDC to drive a lot of Script functions which requires the following    *
-     * to set up for the tests.                                                               */
-    hwnd = CreateWindowExA(0, "static", "", WS_POPUP, 0,0,100,100,
-                           0, 0, 0, NULL);
-    assert(hwnd != 0);
-
-    hdc = GetDC(hwnd);                                      /* We now have a hdc             */
-    ok( hdc != NULL, "HDC failed to be created %p\n", hdc);
-
-    lstrcpyA(lf.lfFaceName, "Symbol");
-    lf.lfHeight = 10;
-    lf.lfItalic = 0;
-    lf.lfEscapement = 0;
-    lf.lfOrientation = 0;
-    lf.lfUnderline = 0;
-    lf.lfStrikeOut = 0;
-    lf.lfWeight = 300;
-    lf.lfWidth = 10;
-
-    zfont = (HFONT) SelectObject(hdc, CreateFontIndirectA(&lf));
- 
     Charset = -1;     /* this flag indicates unicode input */
-    /* Test without hdc to get E_INVALIDARG */
-    hr = ScriptStringAnalyse( NULL, teststr, String, Glyphs, Charset, Flags,
+    /* Test without hdc to get E_PENDING */
+    hr = ScriptStringAnalyse( NULL, teststr, len, Glyphs, Charset, Flags,
                              ReqWidth, &Control, &State, Dx, &Tabdef,
                              &InClass, &ssa);
     ok(hr == E_PENDING, "ScriptStringAnalyse Stub should return E_PENDING not %08x\n", hr);
 
     /* test with hdc, this should be a valid test  */
-    hr = ScriptStringAnalyse( hdc, teststr, String, Glyphs, Charset, Flags,
+    hr = ScriptStringAnalyse( hdc, teststr, len, Glyphs, Charset, Flags,
                               ReqWidth, &Control, &State, Dx, &Tabdef,
                               &InClass, &ssa);
     ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
 
     /* test makes sure that a call with a valid pssa still works */
-    hr = ScriptStringAnalyse( hdc, teststr, String, Glyphs, Charset, Flags,
+    hr = ScriptStringAnalyse( hdc, teststr, len, Glyphs, Charset, Flags,
                               ReqWidth, &Control, &State, Dx, &Tabdef,
                               &InClass, &ssa);
     ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
     ok(ssa != NULL, "ScriptStringAnalyse pssa should not be NULL\n");
 
-    if  (hr == 0)
+    if (hr == S_OK)
     {
         hr = ScriptStringOut(ssa, X, Y, Options, &rc, MinSel, MaxSel, Disabled);
-        todo_wine ok(hr == S_OK, "ScriptStringOut should return S_OK not %08x\n", hr);
-        hr = ScriptStringFree(&ssa);
-        ok(hr == S_OK, "ScriptStringFree should return S_OK not %08x\n", hr);
+        ok(hr == S_OK, "ScriptStringOut should return S_OK not %08x\n", hr);
     }
+
+     clip_len = ScriptString_pcOutChars(ssa);
+     ok(*clip_len == len, "ScriptString_pcOutChars failed, got %d, expected %d\n", *clip_len, len);
+
+     order = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, *clip_len * sizeof(UINT));
+     hr = ScriptStringGetOrder(ssa, order);
+     ok(hr == S_OK, "ScriptStringGetOrder failed, got %08x, expected S_OK\n", hr);
+
+     for (i = 0; i < *clip_len; i++) ok(order[i] == i, "%d: got %d expected %d\n", i, order[i], i);
+     HeapFree(GetProcessHeap(), 0, order);
+
+     hr = ScriptStringFree(&ssa);
+     ok(hr == S_OK, "ScriptStringFree should return S_OK not %08x\n", hr);
 }
 
 static void test_ScriptStringXtoCP_CPtoX(HDC hdc)
@@ -897,7 +858,7 @@ static void test_ScriptCacheGetHeight(HDC hdc)
 {
     HRESULT hr;
     SCRIPT_CACHE sc = NULL;
-    long height;
+    LONG height;
 
     hr = ScriptCacheGetHeight(NULL, NULL, NULL);
     ok(hr == E_INVALIDARG, "expected E_INVALIDARG, got 0x%08x\n", hr);
@@ -1255,6 +1216,25 @@ static void test_digit_substitution(void)
     }
 }
 
+static void test_ScriptGetProperties(void)
+{
+    const SCRIPT_PROPERTIES **props;
+    HRESULT hr;
+    int num;
+
+    hr = ScriptGetProperties(NULL, NULL);
+    ok(hr == E_INVALIDARG, "ScriptGetProperties succeeded\n");
+
+    hr = ScriptGetProperties(NULL, &num);
+    ok(hr == S_OK, "ScriptGetProperties failed: 0x%08x\n", hr);
+
+    hr = ScriptGetProperties(&props, NULL);
+    ok(hr == S_OK, "ScriptGetProperties failed: 0x%08x\n", hr);
+
+    hr = ScriptGetProperties(&props, &num);
+    ok(hr == S_OK, "ScriptGetProperties failed: 0x%08x\n", hr);
+}
+
 START_TEST(usp10)
 {
     HWND            hwnd;
@@ -1278,14 +1258,15 @@ START_TEST(usp10)
     test_ScriptCacheGetHeight(hdc);
     test_ScriptGetGlyphABCWidth(hdc);
 
-    test_ScriptGetFontProperties();
-    test_ScriptTextOut();
+    test_ScriptGetFontProperties(hdc);
+    test_ScriptTextOut(hdc);
     test_ScriptXtoX();
-    test_ScriptString();
+    test_ScriptString(hdc);
     test_ScriptStringXtoCP_CPtoX(hdc);
 
     test_ScriptLayout();
     test_digit_substitution();
+    test_ScriptGetProperties();
 
     ReleaseDC(hwnd, hdc);
     DestroyWindow(hwnd);

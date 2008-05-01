@@ -206,105 +206,49 @@ static const char * const shift_tab[] = {
     "coefdiv.x"  /* 15 (d2)   */
 };
 
-static void pshader_get_write_mask(const DWORD output_reg, char *write_mask) {
-    *write_mask = 0;
-    if ((output_reg & WINED3DSP_WRITEMASK_ALL) != WINED3DSP_WRITEMASK_ALL) {
-        strcat(write_mask, ".");
-        if (output_reg & WINED3DSP_WRITEMASK_0) strcat(write_mask, "r");
-        if (output_reg & WINED3DSP_WRITEMASK_1) strcat(write_mask, "g");
-        if (output_reg & WINED3DSP_WRITEMASK_2) strcat(write_mask, "b");
-        if (output_reg & WINED3DSP_WRITEMASK_3) strcat(write_mask, "a");
-    }
-}
+static void shader_arb_get_write_mask(const DWORD param, char *write_mask) {
+    char *ptr = write_mask;
 
-/* TODO: merge with pixel shader */
-static void vshader_program_add_output_param_swizzle(const DWORD param, int is_color, char *hwLine) {
-    /** operand output */
     if ((param & WINED3DSP_WRITEMASK_ALL) != WINED3DSP_WRITEMASK_ALL) {
-      strcat(hwLine, ".");
-      if (param & WINED3DSP_WRITEMASK_0) { strcat(hwLine, "x"); }
-      if (param & WINED3DSP_WRITEMASK_1) { strcat(hwLine, "y"); }
-      if (param & WINED3DSP_WRITEMASK_2) { strcat(hwLine, "z"); }
-      if (param & WINED3DSP_WRITEMASK_3) { strcat(hwLine, "w"); }
+        *ptr++ = '.';
+        if (param & WINED3DSP_WRITEMASK_0) *ptr++ = 'x';
+        if (param & WINED3DSP_WRITEMASK_1) *ptr++ = 'y';
+        if (param & WINED3DSP_WRITEMASK_2) *ptr++ = 'z';
+        if (param & WINED3DSP_WRITEMASK_3) *ptr++ = 'w';
     }
+
+    *ptr = '\0';
 }
 
-static void pshader_get_input_register_swizzle(const DWORD instr, char *swzstring) {
-    static const char swizzle_reg_chars[] = "rgba";
-    DWORD swizzle = (instr & WINED3DSP_SWIZZLE_MASK) >> WINED3DSP_SWIZZLE_SHIFT;
+static void shader_arb_get_swizzle(const DWORD param, BOOL fixup, char *swizzle_str) {
+    /* For registers of type WINED3DDECLTYPE_D3DCOLOR, data is stored as "bgra",
+     * but addressed as "rgba". To fix this we need to swap the register's x
+     * and z components. */
+    const char *swizzle_chars = fixup ? "zyxw" : "xyzw";
+    char *ptr = swizzle_str;
+
+    /* swizzle bits fields: wwzzyyxx */
+    DWORD swizzle = (param & WINED3DSP_SWIZZLE_MASK) >> WINED3DSP_SWIZZLE_SHIFT;
     DWORD swizzle_x = swizzle & 0x03;
     DWORD swizzle_y = (swizzle >> 2) & 0x03;
     DWORD swizzle_z = (swizzle >> 4) & 0x03;
     DWORD swizzle_w = (swizzle >> 6) & 0x03;
-    /**
-     * swizzle bits fields:
-     *  WWZZYYXX
-     */
-    *swzstring = 0;
-    if ((WINED3DSP_NOSWIZZLE >> WINED3DSP_SWIZZLE_SHIFT) != swizzle) {
-        if (swizzle_x == swizzle_y &&
-        swizzle_x == swizzle_z &&
-        swizzle_x == swizzle_w) {
-            sprintf(swzstring, ".%c", swizzle_reg_chars[swizzle_x]);
+
+    /* If the swizzle is the default swizzle (ie, "xyzw"), we don't need to
+     * generate a swizzle string. Unless we need to our own swizzling. */
+    if ((WINED3DSP_NOSWIZZLE >> WINED3DSP_SWIZZLE_SHIFT) != swizzle || fixup) {
+        *ptr++ = '.';
+        if (swizzle_x == swizzle_y && swizzle_x == swizzle_z && swizzle_x == swizzle_w) {
+            *ptr++ = swizzle_chars[swizzle_x];
         } else {
-            sprintf(swzstring, ".%c%c%c%c",
-                swizzle_reg_chars[swizzle_x],
-                swizzle_reg_chars[swizzle_y],
-                swizzle_reg_chars[swizzle_z],
-                swizzle_reg_chars[swizzle_w]);
+            *ptr++ = swizzle_chars[swizzle_x];
+            *ptr++ = swizzle_chars[swizzle_y];
+            *ptr++ = swizzle_chars[swizzle_z];
+            *ptr++ = swizzle_chars[swizzle_w];
         }
     }
-}
 
-/* TODO: merge with pixel shader */
-static void vshader_program_add_input_param_swizzle(const DWORD param, int is_color, char *hwLine) {
-    static const char swizzle_reg_chars_color_fix[] = "zyxw";
-    static const char swizzle_reg_chars[] = "xyzw";
-    const char* swizzle_regs = NULL;
-    char  tmpReg[255];
-
-    /** operand input */
-    DWORD swizzle = (param & WINED3DVS_SWIZZLE_MASK) >> WINED3DVS_SWIZZLE_SHIFT;
-    DWORD swizzle_x = swizzle & 0x03;
-    DWORD swizzle_y = (swizzle >> 2) & 0x03;
-    DWORD swizzle_z = (swizzle >> 4) & 0x03;
-    DWORD swizzle_w = (swizzle >> 6) & 0x03;
-
-    if (is_color) {
-      swizzle_regs = swizzle_reg_chars_color_fix;
-    } else {
-      swizzle_regs = swizzle_reg_chars;
-    }
-
-    /**
-     * swizzle bits fields:
-     *  WWZZYYXX
-     */
-    if ((WINED3DVS_NOSWIZZLE >> WINED3DVS_SWIZZLE_SHIFT) == swizzle) {
-      if (is_color) {
-        sprintf(tmpReg, ".%c%c%c%c",
-                swizzle_regs[swizzle_x],
-                swizzle_regs[swizzle_y],
-                swizzle_regs[swizzle_z],
-                swizzle_regs[swizzle_w]);
-        strcat(hwLine, tmpReg);
-      }
-      return ;
-    }
-    if (swizzle_x == swizzle_y &&
-        swizzle_x == swizzle_z &&
-        swizzle_x == swizzle_w)
-    {
-      sprintf(tmpReg, ".%c", swizzle_regs[swizzle_x]);
-      strcat(hwLine, tmpReg);
-    } else {
-      sprintf(tmpReg, ".%c%c%c%c",
-              swizzle_regs[swizzle_x],
-              swizzle_regs[swizzle_y],
-              swizzle_regs[swizzle_z],
-              swizzle_regs[swizzle_w]);
-      strcat(hwLine, tmpReg);
-    }
+    *ptr = '\0';
 }
 
 static void pshader_get_register_name(
@@ -417,9 +361,13 @@ static void vshader_program_add_param(SHADER_OPCODE_ARG *arg, const DWORD param,
   }
 
   if (!is_input) {
-    vshader_program_add_output_param_swizzle(param, is_color, hwLine);
+    char write_mask[6];
+    shader_arb_get_write_mask(param, write_mask);
+    strcat(hwLine, write_mask);
   } else {
-    vshader_program_add_input_param_swizzle(param, is_color, hwLine);
+    char swizzle[6];
+    shader_arb_get_swizzle(param, is_color, swizzle);
+    strcat(hwLine, swizzle);
   }
 }
 
@@ -477,7 +425,7 @@ static void pshader_gen_input_modifier_line (
 
     /* Get register name */
     pshader_get_register_name(instr, regstr);
-    pshader_get_input_register_swizzle(instr, swzstr);
+    shader_arb_get_swizzle(instr, FALSE, swzstr);
 
     switch (instr & WINED3DSP_SRCMOD_MASK) {
     case WINED3DSPSM_NONE:
@@ -550,7 +498,7 @@ void pshader_hw_cnd(SHADER_OPCODE_ARG* arg) {
 
     /* Handle output register */
     pshader_get_register_name(arg->dst, dst_name);
-    pshader_get_write_mask(arg->dst, dst_wmask);
+    shader_arb_get_write_mask(arg->dst, dst_wmask);
     strcat(dst_name, dst_wmask);
 
     /* Generate input register names (with modifiers) */
@@ -573,7 +521,7 @@ void pshader_hw_cmp(SHADER_OPCODE_ARG* arg) {
 
     /* Handle output register */
     pshader_get_register_name(arg->dst, dst_name);
-    pshader_get_write_mask(arg->dst, dst_wmask);
+    shader_arb_get_write_mask(arg->dst, dst_wmask);
     strcat(dst_name, dst_wmask);
 
     /* Generate input register names (with modifiers) */
@@ -633,7 +581,7 @@ void pshader_hw_map2gl(SHADER_OPCODE_ARG* arg) {
           /* Handle output register */
           pshader_get_register_name(dst, output_rname);
           strcpy(operands[0], output_rname);
-          pshader_get_write_mask(dst, output_wmask);
+          shader_arb_get_write_mask(dst, output_wmask);
           strcat(operands[0], output_wmask);
 
           if (saturate && (shift == 0))
@@ -697,7 +645,7 @@ void pshader_hw_texcoord(SHADER_OPCODE_ARG* arg) {
     DWORD hex_version = This->baseShader.hex_version;
 
     char tmp[20];
-    pshader_get_write_mask(dst, tmp);
+    shader_arb_get_write_mask(dst, tmp);
     if (hex_version != WINED3DPS_VERSION(1,4)) {
         DWORD reg = dst & WINED3DSP_REGNUM_MASK;
         shader_addline(buffer, "MOV_SAT T%u%s, fragment.texcoord[%u];\n", reg, tmp, reg);
@@ -996,8 +944,11 @@ static void shader_arb_select(IWineD3DDevice *iface, BOOL usePS, BOOL useVS) {
         /* Enable OpenGL vertex programs */
         glEnable(GL_VERTEX_PROGRAM_ARB);
         checkGLcall("glEnable(GL_VERTEX_PROGRAM_ARB);");
-        TRACE_(d3d_shader)("(%p) : Bound vertex program %u and enabled GL_VERTEX_PROGRAM_ARB\n",
+        TRACE("(%p) : Bound vertex program %u and enabled GL_VERTEX_PROGRAM_ARB\n",
             This, ((IWineD3DVertexShaderImpl *)This->stateBlock->vertexShader)->baseShader.prgId);
+    } else if(GL_SUPPORT(GL_VERTEX_PROGRAM_ARB)) {
+        glDisable(GL_VERTEX_PROGRAM_ARB);
+        checkGLcall("glDisable(GL_VERTEX_PROGRAM_ARB)");
     }
 
     if (usePS) {
@@ -1011,8 +962,11 @@ static void shader_arb_select(IWineD3DDevice *iface, BOOL usePS, BOOL useVS) {
         /* Enable OpenGL fragment programs */
         glEnable(GL_FRAGMENT_PROGRAM_ARB);
         checkGLcall("glEnable(GL_FRAGMENT_PROGRAM_ARB);");
-        TRACE_(d3d_shader)("(%p) : Bound fragment program %u and enabled GL_FRAGMENT_PROGRAM_ARB\n",
+        TRACE("(%p) : Bound fragment program %u and enabled GL_FRAGMENT_PROGRAM_ARB\n",
             This, ((IWineD3DPixelShaderImpl *)This->stateBlock->pixelShader)->baseShader.prgId);
+    } else if(GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
+        glDisable(GL_FRAGMENT_PROGRAM_ARB);
+        checkGLcall("glDisable(GL_FRAGMENT_PROGRAM_ARB)");
     }
 }
 

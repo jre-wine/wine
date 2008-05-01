@@ -131,6 +131,15 @@ void dump_unicode_str( const WCHAR *str, int len )
     printf( "\"" );
 }
 
+char* guid_to_string(const GUID* guid, char* str, size_t sz)
+{
+    snprintf(str, sz, "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
+             guid->Data1, guid->Data2, guid->Data3,
+             guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
+             guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
+    return str;
+}
+
 const void*	PRD(unsigned long prd, unsigned long len)
 {
     return (prd + len > dump_total_len) ? NULL : (const char*)dump_base + prd;
@@ -151,7 +160,7 @@ static const struct dumper
 }
 dumpers[] =
 {
-    {SIG_DOS,           get_kind_exec,  NULL},
+    {SIG_DOS,           get_kind_exec,  dos_dump},
     {SIG_PE,            get_kind_exec,  pe_dump},
     {SIG_DBG,           get_kind_dbg,   dbg_dump},
     {SIG_PDB,           get_kind_pdb,   pdb_dump},
@@ -160,7 +169,7 @@ dumpers[] =
     {SIG_COFFLIB,       get_kind_lib,   lib_dump},
     {SIG_MDMP,          get_kind_mdmp,  mdmp_dump},
     {SIG_LNK,           get_kind_lnk,   lnk_dump},
-    {SIG_EMF,           get_kind_emf,    emf_dump},
+    {SIG_EMF,           get_kind_emf,   emf_dump},
     {SIG_UNKNOWN,       NULL,           NULL} /* sentinel */
 };
 

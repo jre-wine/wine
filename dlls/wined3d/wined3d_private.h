@@ -248,8 +248,8 @@ extern int num_lock;
        TRACE("%s call ok %s / %d\n", A, __FILE__, __LINE__);    \
                                                                 \
     } else do {                                                 \
-       FIXME(">>>>>>>>>>>>>>>>> %x from %s @ %s / %d\n",        \
-		err, A, __FILE__, __LINE__);                    \
+       FIXME(">>>>>>>>>>>>>>>>> %#x from %s @ %s / %d\n",       \
+        err, A, __FILE__, __LINE__);                            \
        err = glGetError();                                      \
     } while (err != GL_NO_ERROR);                               \
 } 
@@ -332,7 +332,7 @@ extern const float identity[16];
        VTRACE(("%s call ok %s / %d\n", A, __FILE__, __LINE__)); \
                                                                 \
     } else do {                                                 \
-       FIXME(">>>>>>>>>>>>>>>>> %x from %s @ %s / %d\n",        \
+       FIXME(">>>>>>>>>>>>>>>>> %#x from %s @ %s / %d\n",       \
                 err, A, __FILE__, __LINE__);                    \
        err = glGetError();                                      \
     } while (err != GL_NO_ERROR);                               \
@@ -382,16 +382,14 @@ void drawPrimitive(IWineD3DDevice *iface,
                     long  StartIdx,
                     short idxBytes,
                     const void *idxData,
-                    int   minIndex,
-                    WineDirect3DVertexStridedData *DrawPrimStrideData);
+                    int   minIndex);
 
-void primitiveConvertToStridedData(IWineD3DDevice *iface, WineDirect3DVertexStridedData *strided, LONG BaseVertexIndex, BOOL *fixup);
+void primitiveConvertToStridedData(IWineD3DDevice *iface, WineDirect3DVertexStridedData *strided, BOOL *fixup);
 
 void primitiveDeclarationConvertToStridedData(
      IWineD3DDevice *iface,
      BOOL useVertexShaderFunction,
      WineDirect3DVertexStridedData *strided,
-     LONG BaseVertexIndex, 
      BOOL *fixup);
 
 void primitiveConvertFVFtoOffset(DWORD thisFVF,
@@ -423,7 +421,27 @@ typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock);
 #define STATE_PIXELSHADER (STATE_SAMPLER(MAX_SAMPLERS - 1) + 1)
 #define STATE_IS_PIXELSHADER(a) ((a) == STATE_PIXELSHADER)
 
-#define STATE_HIGHEST (STATE_PIXELSHADER)
+#define STATE_TRANSFORM(a) (STATE_PIXELSHADER + (a))
+#define STATE_IS_TRANSFORM(a) ((a) >= STATE_TRANSFORM(1) && (a) <= STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)))
+
+#define STATE_STREAMSRC (STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)) + 1)
+#define STATE_IS_STREAMSRC(a) ((a) == STATE_STREAMSRC)
+
+#define STATE_VDECL (STATE_STREAMSRC + 1)
+#define STATE_IS_VDECL(a) ((a) == STATE_VDECL)
+
+#define STATE_VSHADER (STATE_VDECL + 1)
+#define STATE_IS_VSHADER(a) ((a) == STATE_VSHADER)
+
+#define STATE_VIEWPORT (STATE_VSHADER + 1)
+#define STATE_IS_VIEWPORT(a) ((a) == STATE_VIEWPORT)
+
+#define STATE_VERTEXSHADERCONSTANT (STATE_VIEWPORT + 1)
+#define STATE_PIXELSHADERCONSTANT (STATE_VERTEXSHADERCONSTANT + 1)
+#define STATE_IS_VERTEXSHADERCONSTANT(a) ((a) == STATE_VERTEXSHADERCONSTANT)
+#define STATE_IS_PIXELSHADERCONSTANT(a) ((a) == STATE_PIXELSHADERCONSTANT)
+
+#define STATE_HIGHEST (STATE_PIXELSHADERCONSTANT)
 
 struct StateEntry
 {
@@ -550,29 +568,28 @@ typedef struct IWineD3DDeviceImpl
     const shader_backend_t *shader_backend;
 
     /* Optimization */
-    BOOL                    modelview_valid;
-    BOOL                    proj_valid;
     BOOL                    view_ident;        /* true iff view matrix is identity                */
     BOOL                    last_was_rhw;      /* true iff last draw_primitive was in xyzrhw mode */
-    BOOL                    viewport_changed;  /* Was the viewport changed since the last draw?   */
     GLenum                  tracking_parm;     /* Which source is tracking current colour         */
     LONG                    tracking_color;    /* used iff GL_COLOR_MATERIAL was enabled          */
 #define                         DISABLED_TRACKING  0  /* Disabled                                 */
 #define                         IS_TRACKING        1  /* tracking_parm is tracking diffuse color  */
 #define                         NEEDS_TRACKING     2  /* Tracking needs to be enabled when needed */
 #define                         NEEDS_DISABLE      3  /* Tracking needs to be disabled when needed*/
-    UINT                    srcBlend;
-    UINT                    dstBlend;
-    UINT                    alphafunc;
     BOOL                    texture_shader_active;  /* TODO: Confirm use is correct */
     BOOL                    last_was_notclipped;
     BOOL                    untransformed;
     BOOL                    last_was_pshader;
+    BOOL                    last_was_vshader;
+    BOOL                    last_was_foggy_shader;
+    BOOL                    namedArraysLoaded, numberedArraysLoaded;
+    BOOL                    lastWasPow2Texture[MAX_TEXTURES];
 
     /* State block related */
     BOOL                    isRecordingState;
     IWineD3DStateBlockImpl *stateBlock;
     IWineD3DStateBlockImpl *updateStateBlock;
+    BOOL                   isInDraw;
 
     /* Internal use fields  */
     WINED3DDEVICE_CREATION_PARAMETERS createParms;
@@ -656,6 +673,11 @@ typedef struct IWineD3DDeviceImpl
     DWORD                     texUnitMap[MAX_SAMPLERS];
     BOOL                      oneToOneTexUnitMap;
 
+    /* Stream source management */
+    WineDirect3DVertexStridedData strided_streams;
+    WineDirect3DVertexStridedData *up_strided;
+    BOOL                      useDrawStridedSlow;
+
 } IWineD3DDeviceImpl;
 
 extern const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl;
@@ -685,8 +707,6 @@ typedef struct PrivateData
 
     DWORD size;
 } PrivateData;
-
-void d3ddevice_set_ortho(IWineD3DDeviceImpl *This);
 
 /*****************************************************************************
  * IWineD3DResource implementation structure
@@ -1181,7 +1201,8 @@ struct IWineD3DStateBlockImpl
 
     /* Indices */
     IWineD3DIndexBuffer*      pIndexData;
-    UINT                      baseVertexIndex; /* Note: only used for d3d8 */
+    UINT                      baseVertexIndex;
+    UINT                      loadBaseVertexIndex; /* non-indexed drawing needs 0 here, indexed baseVertexIndex */
 
     /* Transform */
     WINED3DMATRIX             transforms[HIGHEST_TRANSFORMSTATE + 1];
@@ -1581,7 +1602,6 @@ extern void vshader_hw_map2gl(SHADER_OPCODE_ARG* arg);
 extern void vshader_hw_mnxn(SHADER_OPCODE_ARG* arg);
 
 /* GLSL helper functions */
-extern void set_glsl_shader_program(IWineD3DDevice *iface);
 extern void shader_glsl_add_instruction_modifiers(SHADER_OPCODE_ARG *arg);
 extern void shader_glsl_load_constants(
     IWineD3DDevice* device,

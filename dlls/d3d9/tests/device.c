@@ -455,12 +455,22 @@ static void test_refcount(void)
     CHECK_CALL( hr, "CreateVertexBuffer", pDevice, ++refcount );
     if(pVertexBuffer)
     {
+        IDirect3DVertexBuffer9 *pVBuf = (void*)~0;
+        UINT offset = ~0;
+        UINT stride = ~0;
+
         tmp = get_refcount( (IUnknown *)pVertexBuffer );
 
         hr = IDirect3DDevice9_SetStreamSource(pDevice, 0, pVertexBuffer, 0, 3 * sizeof(float));
         CHECK_CALL( hr, "SetStreamSource", pVertexBuffer, tmp);
         hr = IDirect3DDevice9_SetStreamSource(pDevice, 0, NULL, 0, 0);
         CHECK_CALL( hr, "SetStreamSource", pVertexBuffer, tmp);
+
+        hr = IDirect3DDevice9_GetStreamSource(pDevice, 0, &pVBuf, &offset, &stride);
+        ok(SUCCEEDED(hr), "GetStreamSource did not succeed with NULL stream!\n");
+        ok(pVBuf==NULL, "pVBuf not NULL (%p)!\n", pVBuf);
+        ok(stride==3*sizeof(float), "stride not 3 floats (got %u)!\n", stride);
+        ok(offset==0, "offset not 0 (got %u)!\n", offset);
     }
     /* Shaders */
     hr = IDirect3DDevice9_CreateVertexDeclaration( pDevice, decl, &pVertexDeclaration );
@@ -725,8 +735,12 @@ static void test_reset(void)
 
     hr = IDirect3D9_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D9Device (%s)\n", DXGetErrorString9(hr));
-    if (FAILED(hr)) goto cleanup;
+
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D9_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     width = GetSystemMetrics(SM_CXSCREEN);
     height = GetSystemMetrics(SM_CYSCREEN);

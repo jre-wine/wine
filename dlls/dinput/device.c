@@ -294,6 +294,12 @@ void release_DataFormat(DataFormat * format)
     format->user_df = NULL;
 }
 
+inline LPDIOBJECTDATAFORMAT dataformat_to_odf(LPCDIDATAFORMAT df, int idx)
+{
+    if (idx < 0 || idx >= df->dwNumObjs) return NULL;
+    return (LPDIOBJECTDATAFORMAT)((LPBYTE)df->rgodf + idx * df->dwObjSize);
+}
+
 /* Make all instances sequential */
 static void calculate_ids(LPDIDATAFORMAT df)
 {
@@ -487,7 +493,7 @@ int offset_to_object(LPCDIDATAFORMAT df, int offset)
     int i;
 
     for (i = 0; i < df->dwNumObjs; i++)
-        if (df->rgodf[i].dwOfs == offset)
+        if (dataformat_to_odf(df, i)->dwOfs == offset)
             return i;
 
     return -1;
@@ -497,11 +503,19 @@ static int id_to_object(LPCDIDATAFORMAT df, int id)
 {
     int i;
 
+    id &= 0x00ffffff;
     for (i = 0; i < df->dwNumObjs; i++)
-        if ((df->rgodf[i].dwType & 0x00ffffff) == (id & 0x00ffffff))
+        if ((dataformat_to_odf(df, i)->dwType & 0x00ffffff) == id)
             return i;
 
     return -1;
+}
+
+int id_to_offset(DataFormat *df, int id)
+{
+    int obj = id_to_object(df->wine_df, id);
+
+    return obj >= 0 && df->offsets ? df->offsets[obj] : -1;
 }
 
 int find_property(LPCDIDATAFORMAT df, LPCDIPROPHEADER ph)
@@ -577,6 +591,8 @@ void queue_event(LPDIRECTINPUTDEVICE8A iface, int ofs, DWORD data, DWORD time, D
     This->data_queue[This->queue_head].dwTimeStamp = time;
     This->data_queue[This->queue_head].dwSequence  = seq;
     This->queue_head = next_pos;
+    /* Send event if asked */
+    if (This->hEvent) SetEvent(This->hEvent);
 }
 
 /******************************************************************************
@@ -794,35 +810,63 @@ ULONG WINAPI IDirectInputDevice2AImpl_AddRef(
     return InterlockedIncrement(&(This->ref));
 }
 
-HRESULT WINAPI IDirectInputDevice2AImpl_EnumObjects(
-	LPDIRECTINPUTDEVICE8A iface,
-	LPDIENUMDEVICEOBJECTSCALLBACKA lpCallback,
-	LPVOID lpvRef,
-	DWORD dwFlags)
+HRESULT WINAPI IDirectInputDevice2AImpl_EnumObjects(LPDIRECTINPUTDEVICE8A iface,
+        LPDIENUMDEVICEOBJECTSCALLBACKA lpCallback, LPVOID lpvRef, DWORD dwFlags)
 {
-    FIXME("(this=%p,%p,%p,%08x): stub!\n", iface, lpCallback, lpvRef, dwFlags);
-    if (TRACE_ON(dinput)) {
-	DPRINTF("  - flags = ");
-	_dump_EnumObjects_flags(dwFlags);
-	DPRINTF("\n");
+    IDirectInputDevice2AImpl *This = (IDirectInputDevice2AImpl *)iface;
+    DIDEVICEOBJECTINSTANCEA ddoi;
+    int i;
+
+    TRACE("(%p) %p,%p flags:%08x)\n", iface, lpCallback, lpvRef, dwFlags);
+    TRACE("  - flags = ");
+    _dump_EnumObjects_flags(dwFlags);
+    TRACE("\n");
+
+    /* Only the fields till dwFFMaxForce are relevant */
+    memset(&ddoi, 0, sizeof(ddoi));
+    ddoi.dwSize = FIELD_OFFSET(DIDEVICEOBJECTINSTANCEA, dwFFMaxForce);
+
+    for (i = 0; i < This->data_format.wine_df->dwNumObjs; i++)
+    {
+        LPDIOBJECTDATAFORMAT odf = dataformat_to_odf(This->data_format.wine_df, i);
+
+        if (dwFlags != DIDFT_ALL && !(dwFlags & DIEFT_GETTYPE(odf->dwType))) continue;
+        if (IDirectInputDevice_GetObjectInfo(iface, &ddoi, odf->dwType, DIPH_BYID) != DI_OK)
+            continue;
+
+	if (lpCallback(&ddoi, lpvRef) != DIENUM_CONTINUE) break;
     }
-    
+
     return DI_OK;
 }
 
-HRESULT WINAPI IDirectInputDevice2WImpl_EnumObjects(
-	LPDIRECTINPUTDEVICE8W iface,
-	LPDIENUMDEVICEOBJECTSCALLBACKW lpCallback,
-	LPVOID lpvRef,
-	DWORD dwFlags)
+HRESULT WINAPI IDirectInputDevice2WImpl_EnumObjects(LPDIRECTINPUTDEVICE8W iface,
+        LPDIENUMDEVICEOBJECTSCALLBACKW lpCallback, LPVOID lpvRef, DWORD dwFlags)
 {
-    FIXME("(this=%p,%p,%p,%08x): stub!\n", iface, lpCallback, lpvRef, dwFlags);
-    if (TRACE_ON(dinput)) {
-	DPRINTF("  - flags = ");
-	_dump_EnumObjects_flags(dwFlags);
-	DPRINTF("\n");
+    IDirectInputDevice2AImpl *This = (IDirectInputDevice2AImpl *)iface;
+    DIDEVICEOBJECTINSTANCEW ddoi;
+    int i;
+
+    TRACE("(%p) %p,%p flags:%08x)\n", iface, lpCallback, lpvRef, dwFlags);
+    TRACE("  - flags = ");
+    _dump_EnumObjects_flags(dwFlags);
+    TRACE("\n");
+
+    /* Only the fields till dwFFMaxForce are relevant */
+    memset(&ddoi, 0, sizeof(ddoi));
+    ddoi.dwSize = FIELD_OFFSET(DIDEVICEOBJECTINSTANCEW, dwFFMaxForce);
+
+    for (i = 0; i < This->data_format.wine_df->dwNumObjs; i++)
+    {
+        LPDIOBJECTDATAFORMAT odf = dataformat_to_odf(This->data_format.wine_df, i);
+
+        if (dwFlags != DIDFT_ALL && !(dwFlags & DIEFT_GETTYPE(odf->dwType))) continue;
+        if (IDirectInputDevice_GetObjectInfo(iface, &ddoi, odf->dwType, DIPH_BYID) != DI_OK)
+            continue;
+
+	if (lpCallback(&ddoi, lpvRef) != DIENUM_CONTINUE) break;
     }
-    
+
     return DI_OK;
 }
 
@@ -884,6 +928,7 @@ HRESULT WINAPI IDirectInputDevice2AImpl_SetProperty(
             if (pdiph->dwHow == DIPH_DEVICE && pdiph->dwObj) return DIERR_INVALIDPARAM;
             if (This->acquired) return DIERR_ACQUIRED;
             if (pdiph->dwHow != DIPH_DEVICE) return DIERR_UNSUPPORTED;
+            if (!This->data_format.user_df) return DI_OK;
 
             TRACE("Axis mode: %s\n", pd->dwData == DIPROPAXISMODE_ABS ? "absolute" :
                                                                         "relative");
@@ -929,10 +974,29 @@ HRESULT WINAPI IDirectInputDevice2AImpl_GetObjectInfo(
 	DWORD dwObj,
 	DWORD dwHow)
 {
-    FIXME("(this=%p,%p,%d,0x%08x): stub!\n",
-	  iface, pdidoi, dwObj, dwHow);
-    
-    return DI_OK;
+    DIDEVICEOBJECTINSTANCEW didoiW;
+    HRESULT res;
+
+    if (!pdidoi ||
+        (pdidoi->dwSize != sizeof(DIDEVICEOBJECTINSTANCEA) &&
+         pdidoi->dwSize != sizeof(DIDEVICEOBJECTINSTANCE_DX3A)))
+        return DIERR_INVALIDPARAM;
+
+    didoiW.dwSize = sizeof(didoiW);
+    res = IDirectInputDevice2WImpl_GetObjectInfo((LPDIRECTINPUTDEVICE8W)iface, &didoiW, dwObj, dwHow);
+    if (res == DI_OK)
+    {
+        DWORD dwSize = pdidoi->dwSize;
+
+        memset(pdidoi, 0, pdidoi->dwSize);
+        pdidoi->dwSize   = dwSize;
+        pdidoi->guidType = didoiW.guidType;
+        pdidoi->dwOfs    = didoiW.dwOfs;
+        pdidoi->dwType   = didoiW.dwType;
+        pdidoi->dwFlags  = didoiW.dwFlags;
+    }
+
+    return res;
 }
 
 HRESULT WINAPI IDirectInputDevice2WImpl_GetObjectInfo(
@@ -941,9 +1005,49 @@ HRESULT WINAPI IDirectInputDevice2WImpl_GetObjectInfo(
 	DWORD dwObj,
 	DWORD dwHow)
 {
-    FIXME("(this=%p,%p,%d,0x%08x): stub!\n",
-	  iface, pdidoi, dwObj, dwHow);
-    
+    IDirectInputDevice2AImpl *This = (IDirectInputDevice2AImpl *)iface;
+    DWORD dwSize = pdidoi->dwSize;
+    LPDIOBJECTDATAFORMAT odf;
+    int idx = -1;
+
+    TRACE("(%p) %d(0x%08x) -> %p\n", This, dwHow, dwObj, pdidoi);
+
+    if (!pdidoi ||
+        (pdidoi->dwSize != sizeof(DIDEVICEOBJECTINSTANCEW) &&
+         pdidoi->dwSize != sizeof(DIDEVICEOBJECTINSTANCE_DX3W)))
+        return DIERR_INVALIDPARAM;
+
+    switch (dwHow)
+    {
+    case DIPH_BYOFFSET:
+        if (!This->data_format.offsets) break;
+        for (idx = This->data_format.wine_df->dwNumObjs - 1; idx >= 0; idx--)
+            if (This->data_format.offsets[idx] == dwObj) break;
+        break;
+    case DIPH_BYID:
+        dwObj &= 0x00ffffff;
+        for (idx = This->data_format.wine_df->dwNumObjs - 1; idx >= 0; idx--)
+            if ((dataformat_to_odf(This->data_format.wine_df, idx)->dwType & 0x00ffffff) == dwObj)
+                break;
+        break;
+
+    case DIPH_BYUSAGE:
+        FIXME("dwHow = DIPH_BYUSAGE not implemented\n");
+        break;
+    default:
+        WARN("invalid parameter: dwHow = %08x\n", dwHow);
+        return DIERR_INVALIDPARAM;
+    }
+    if (idx < 0) return DIERR_OBJECTNOTFOUND;
+
+    odf = dataformat_to_odf(This->data_format.wine_df, idx);
+    memset(pdidoi, 0, pdidoi->dwSize);
+    pdidoi->dwSize   = dwSize;
+    if (odf->pguid) pdidoi->guidType = *odf->pguid;
+    pdidoi->dwOfs    = This->data_format.offsets ? This->data_format.offsets[idx] : odf->dwOfs;
+    pdidoi->dwType   = odf->dwType;
+    pdidoi->dwFlags  = odf->dwFlags;
+
     return DI_OK;
 }
 

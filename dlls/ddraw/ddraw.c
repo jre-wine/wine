@@ -1169,7 +1169,7 @@ IDirectDrawImpl_TestCooperativeLevel(IDirectDraw7 *iface)
 
         case WINED3DERR_DRIVERINTERNALERROR:
         default:
-            ERR("(%p) Unexpected return value %08x from wineD3D, " \
+            ERR("(%p) Unexpected return value %08x from wineD3D, "
                 " returning DD_OK\n", This, hr);
     }
 
@@ -1825,6 +1825,10 @@ IDirectDrawImpl_CreateNewSurface(IDirectDrawImpl *This,
     if(pDDSD->ddsCaps.dwCaps & DDSCAPS_SYSTEMMEMORY)
     {
         Pool = WINED3DPOOL_SYSTEMMEM;
+    }
+    else if(pDDSD->ddsCaps.dwCaps2 & DDSCAPS2_TEXTUREMANAGE)
+    {
+        Pool = WINED3DPOOL_MANAGED;
     }
 
     Format = PixelFormat_DD2WineD3D(&pDDSD->u4.ddpfPixelFormat);

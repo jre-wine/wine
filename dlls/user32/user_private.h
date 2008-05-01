@@ -120,6 +120,7 @@ typedef struct tagUSER_DRIVER {
     void   (*pSetCursor)(struct tagCURSORICONINFO *);
     BOOL   (*pGetCursorPos)(LPPOINT);
     BOOL   (*pSetCursorPos)(INT,INT);
+    BOOL   (*pClipCursor)(LPCRECT);
     /* screen saver functions */
     BOOL   (*pGetScreenSaveActive)(void);
     void   (*pSetScreenSaveActive)(BOOL);
@@ -239,6 +240,7 @@ extern BOOL USER_SetWindowPos( WINDOWPOS * winpos );
 #define SPY_RESULT_DEFWND16       0x0004
 #define SPY_RESULT_DEFWND         0x0005
 
+extern const char *SPY_GetClassLongOffsetName( INT offset );
 extern const char *SPY_GetMsgName( UINT msg, HWND hWnd );
 extern const char *SPY_GetVKeyName(WPARAM wParam);
 extern void SPY_EnterMessage( INT iFlag, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam );

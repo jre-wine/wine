@@ -578,8 +578,9 @@ struct IDirect3DVertexBufferImpl
     ICOM_VFIELD_MULTI(IDirect3DVertexBuffer);
     LONG                 ref;
 
-    /*** WineD3D link ***/
+    /*** WineD3D and ddraw links ***/
     IWineD3DVertexBuffer *wineD3DVertexBuffer;
+    IDirectDrawImpl *ddraw;
 
     /*** Storage for D3D7 specific things ***/
     DWORD                Caps;
@@ -631,7 +632,6 @@ typedef struct
 } member_info;
 
 /* Structure copy */
-#define DDRAW_dump_flags(flags,names,num_names) DDRAW_dump_flags_(flags, names, num_names, 1)
 #define ME(x,f,e) { x, #x, (void (*)(const void *))(f), offsetof(STRUCT, e) }
 
 #define DD_STRUCT_COPY_BYSIZE(to,from)                  \

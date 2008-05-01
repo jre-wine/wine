@@ -49,6 +49,15 @@ then
   WIN16_INSTALL=""
 fi
 
+dnl check for out of tree build with unclean source tree
+case "$srcdir" in
+ .) ;;
+ *) if test -f "$srcdir/Makefile" -o -f "$srcdir/include/config.h"; then
+      AC_MSG_ERROR([you are building out of the source tree, but the source tree contains object files.
+You need to run 'make distclean' in the source tree first.])
+    fi ;;
+esac
+
 dnl **** Check for some programs ****
 
 AC_PROG_MAKE_SET
@@ -188,6 +197,7 @@ AC_CHECK_HEADERS(\
 	linux/param.h \
 	linux/serial.h \
 	linux/ucdrom.h \
+	mach/mach.h \
 	mach/machine.h \
 	machine/cpu.h \
 	machine/limits.h \
@@ -982,6 +992,7 @@ case $host_os in
   cygwin*|mingw32*)
     AC_CHECK_TOOL(DLLTOOL,dlltool,false)
     AC_CHECK_TOOL(DLLWRAP,dllwrap,false)
+    AC_CHECK_TOOL(MINGWAR,ar,false)
     if test "$DLLWRAP" = "false"; then
       LIBEXT="a"
     else
@@ -1088,9 +1099,10 @@ case $host_os in
     AC_SUBST(CROSSTEST,"")
     if test "$cross_compiling" = "no"
     then
-      AC_CHECK_PROGS(CROSSCC,i586-mingw32msvc-gcc i386-mingw32msvc-gcc i386-mingw32-gcc mingw32-gcc mingw-gcc,false)
-      AC_CHECK_PROGS(DLLTOOL,i586-mingw32msvc-dlltool i386-mingw32msvc-dlltool i386-mingw32-dlltool mingw32-dlltool mingw-dlltool,false)
-      AC_CHECK_PROGS(CROSSWINDRES,i586-mingw32msvc-windres i386-mingw32msvc-windres i386-mingw32-windres mingw32-windres mingw-windres,false)
+      WINE_CHECK_MINGW_PROG(CROSSCC,gcc,false)
+      WINE_CHECK_MINGW_PROG(DLLTOOL,dlltool,false)
+      WINE_CHECK_MINGW_PROG(CROSSWINDRES,windres,false)
+      WINE_CHECK_MINGW_PROG(MINGWAR,ar,false)
       if test "$CROSSCC" != "false"; then CROSSTEST="\$(CROSSTEST)"; fi
     fi
     ;;
@@ -1598,6 +1610,7 @@ dlls/inseng/Makefile
 dlls/iphlpapi/Makefile
 dlls/iphlpapi/tests/Makefile
 dlls/itss/Makefile
+dlls/itss/tests/Makefile
 dlls/kernel32/Makefile
 dlls/kernel32/tests/Makefile
 dlls/localspl/Makefile
@@ -1736,6 +1749,7 @@ dlls/w32skrnl/Makefile
 dlls/winecrt0/Makefile
 dlls/wined3d/Makefile
 dlls/winedos/Makefile
+dlls/winejoystick.drv/Makefile
 dlls/winemp3.acm/Makefile
 dlls/wineps.drv/Makefile
 dlls/winequartz.drv/Makefile
@@ -1743,7 +1757,6 @@ dlls/winex11.drv/Makefile
 dlls/wininet/Makefile
 dlls/wininet/tests/Makefile
 dlls/winmm/Makefile
-dlls/winmm/joystick/Makefile
 dlls/winmm/tests/Makefile
 dlls/winmm/winealsa/Makefile
 dlls/winmm/winearts/Makefile

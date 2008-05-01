@@ -40,10 +40,15 @@
 
 #include "wine/list.h"
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 #include "compobj_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
+
+/* see MSDN docs for IROTData::GetComparisonData, which states what this
+ * constant is (http://msdn2.microsoft.com/en-us/library/ms693773.aspx) */
+#define MAX_COMPARISON_DATA 2048
 
 /* define the structure of the running object table elements */
 struct rot_entry
@@ -139,24 +144,75 @@ static HRESULT get_moniker_comparison_data(IMoniker *pMoniker, MInterfacePointer
 {
     HRESULT hr;
     IROTData *pROTData = NULL;
-    ULONG size = 0;
     hr = IMoniker_QueryInterface(pMoniker, &IID_IROTData, (void *)&pROTData);
-    if (hr != S_OK)
+    if (SUCCEEDED(hr))
     {
-        ERR("Failed to query moniker for IROTData interface, hr = 0x%08x\n", hr);
-        return hr;
+        ULONG size = MAX_COMPARISON_DATA;
+        *moniker_data = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(MInterfacePointer, abData[size]));
+        hr = IROTData_GetComparisonData(pROTData, (*moniker_data)->abData, size, &size);
+        if (hr != S_OK)
+        {
+            ERR("Failed to copy comparison data into buffer, hr = 0x%08x\n", hr);
+            HeapFree(GetProcessHeap(), 0, *moniker_data);
+            return hr;
+        }
+        (*moniker_data)->ulCntData = size;
     }
-    IROTData_GetComparisonData(pROTData, NULL, 0, &size);
-    *moniker_data = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(MInterfacePointer, abData[size]));
-    (*moniker_data)->ulCntData = size;
-    hr = IROTData_GetComparisonData(pROTData, (*moniker_data)->abData, size, &size);
-    if (hr != S_OK)
+    else
     {
-        ERR("Failed to copy comparison data into buffer, hr = 0x%08x\n", hr);
-        HeapFree(GetProcessHeap(), 0, *moniker_data);
-        return hr;
+        IBindCtx *pbc;
+        LPOLESTR pszDisplayName;
+        CLSID clsid;
+        int len;
+
+        TRACE("generating comparison data from display name\n");
+
+        hr = CreateBindCtx(0, &pbc);
+        if (FAILED(hr))
+            return hr;
+        hr = IMoniker_GetDisplayName(pMoniker, pbc, NULL, &pszDisplayName);
+        IBindCtx_Release(pbc);
+        if (FAILED(hr))
+            return hr;
+        hr = IMoniker_GetClassID(pMoniker, &clsid);
+        if (FAILED(hr))
+        {
+            CoTaskMemFree(pszDisplayName);
+            return hr;
+        }
+
+        len = strlenW(pszDisplayName);
+        *moniker_data = HeapAlloc(GetProcessHeap(), 0,
+            FIELD_OFFSET(MInterfacePointer, abData[sizeof(CLSID) + (len+1)*sizeof(WCHAR)]));
+        if (!*moniker_data)
+        {
+            CoTaskMemFree(pszDisplayName);
+            return E_OUTOFMEMORY;
+        }
+        (*moniker_data)->ulCntData = sizeof(CLSID) + (len+1)*sizeof(WCHAR);
+
+        memcpy(&(*moniker_data)->abData[0], &clsid, sizeof(clsid));
+        memcpy(&(*moniker_data)->abData[sizeof(clsid)], pszDisplayName, (len+1)*sizeof(WCHAR));
     }
     return S_OK;
+}
+
+static HRESULT reduce_moniker(IMoniker *pmk, IBindCtx *pbc, IMoniker **pmkReduced)
+{
+    IBindCtx *pbcNew = NULL;
+    HRESULT hr;
+    if (!pbc)
+    {
+        hr = CreateBindCtx(0, &pbcNew);
+        if (FAILED(hr))
+            return hr;
+        pbc = pbcNew;
+    }
+    hr = IMoniker_Reduce(pmk, pbc, MKRREDUCE_ALL, NULL, pmkReduced);
+    if (FAILED(hr))
+        ERR("reducing moniker failed with error 0x%08x\n", hr);
+    if (pbcNew) IBindCtx_Release(pbcNew);
+    return hr;
 }
 
 /***********************************************************************
@@ -279,18 +335,13 @@ RunningObjectTableImpl_Register(IRunningObjectTable* iface, DWORD grfFlags,
     HRESULT hr = S_OK;
     IStream *pStream = NULL;
     DWORD mshlflags;
+    IBindCtx *pbc;
 
     TRACE("(%p,%d,%p,%p,%p)\n",This,grfFlags,punkObject,pmkObjectName,pdwRegister);
 
-    /*
-     * there's only two types of register : strong and or weak registration
-     * (only one must be passed on parameter)
-     */
-    if ( ( (grfFlags & ROTFLAGS_REGISTRATIONKEEPSALIVE) || !(grfFlags & ROTFLAGS_ALLOWANYCLIENT)) &&
-         (!(grfFlags & ROTFLAGS_REGISTRATIONKEEPSALIVE) ||  (grfFlags & ROTFLAGS_ALLOWANYCLIENT)) &&
-         (grfFlags) )
+    if (grfFlags & ~(ROTFLAGS_REGISTRATIONKEEPSALIVE|ROTFLAGS_ALLOWANYCLIENT))
     {
-        ERR("Invalid combination of ROTFLAGS: %x\n", grfFlags);
+        ERR("Invalid grfFlags: 0x%08x\n", grfFlags & ~(ROTFLAGS_REGISTRATIONKEEPSALIVE|ROTFLAGS_ALLOWANYCLIENT));
         return E_INVALIDARG;
     }
 
@@ -300,8 +351,6 @@ RunningObjectTableImpl_Register(IRunningObjectTable* iface, DWORD grfFlags,
     rot_entry = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*rot_entry));
     if (!rot_entry)
         return E_OUTOFMEMORY;
-
-    CoFileTimeNow(&rot_entry->last_modified);
 
     /* marshal object */
     hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
@@ -335,10 +384,36 @@ RunningObjectTableImpl_Register(IRunningObjectTable* iface, DWORD grfFlags,
         return hr;
     }
 
-    hr = get_moniker_comparison_data(pmkObjectName, &rot_entry->moniker_data);
+    hr = CreateBindCtx(0, &pbc);
+    if (FAILED(hr))
+    {
+        rot_entry_delete(rot_entry);
+        return hr;
+    }
+
+    hr = reduce_moniker(pmkObjectName, pbc, &pmkObjectName);
+    if (FAILED(hr))
+    {
+        rot_entry_delete(rot_entry);
+        IBindCtx_Release(pbc);
+        return hr;
+    }
+
+    hr = IMoniker_GetTimeOfLastChange(pmkObjectName, pbc, NULL,
+                                      &rot_entry->last_modified);
+    IBindCtx_Release(pbc);
+    if (FAILED(hr))
+    {
+        CoFileTimeNow(&rot_entry->last_modified);
+        hr = S_OK;
+    }
+
+    hr = get_moniker_comparison_data(pmkObjectName,
+                                     &rot_entry->moniker_data);
     if (hr != S_OK)
     {
         rot_entry_delete(rot_entry);
+        IMoniker_Release(pmkObjectName);
         return hr;
     }
 
@@ -346,10 +421,12 @@ RunningObjectTableImpl_Register(IRunningObjectTable* iface, DWORD grfFlags,
     if (hr != S_OK)
     {
         rot_entry_delete(rot_entry);
+        IMoniker_Release(pmkObjectName);
         return hr;
     }
     /* marshal moniker */
-    hr = CoMarshalInterface(pStream, &IID_IMoniker, (IUnknown *)pmkObjectName, MSHCTX_LOCAL | MSHCTX_NOSHAREDMEM, NULL, MSHLFLAGS_TABLESTRONG);
+    hr = CoMarshalInterface(pStream, &IID_IMoniker, (IUnknown *)pmkObjectName,
+                            MSHCTX_LOCAL | MSHCTX_NOSHAREDMEM, NULL, MSHLFLAGS_TABLESTRONG);
     /* FIXME: a cleaner way would be to create an IStream class that writes
      * directly to an MInterfacePointer */
     if (hr == S_OK)
@@ -367,6 +444,7 @@ RunningObjectTableImpl_Register(IRunningObjectTable* iface, DWORD grfFlags,
         }
     }
     IStream_Release(pStream);
+    IMoniker_Release(pmkObjectName);
     if (hr != S_OK)
     {
         rot_entry_delete(rot_entry);
@@ -439,7 +517,11 @@ RunningObjectTableImpl_IsRunning( IRunningObjectTable* iface, IMoniker *pmkObjec
 
     TRACE("(%p,%p)\n",This,pmkObjectName);
 
+    hr = reduce_moniker(pmkObjectName, NULL, &pmkObjectName);
+    if (FAILED(hr))
+        return hr;
     hr = get_moniker_comparison_data(pmkObjectName, &moniker_data);
+    IMoniker_Release(pmkObjectName);
     if (hr != S_OK)
         return hr;
 
@@ -486,7 +568,11 @@ RunningObjectTableImpl_GetObject( IRunningObjectTable* iface,
 
     *ppunkObject = NULL;
 
+    hr = reduce_moniker(pmkObjectName, NULL, &pmkObjectName);
+    if (FAILED(hr))
+        return hr;
     hr = get_moniker_comparison_data(pmkObjectName, &moniker_data);
+    IMoniker_Release(pmkObjectName);
     if (hr != S_OK)
         return hr;
 
@@ -575,7 +661,11 @@ RunningObjectTableImpl_GetTimeOfLastChange(IRunningObjectTable* iface,
     if (pmkObjectName==NULL || pfiletime==NULL)
         return E_INVALIDARG;
 
+    hr = reduce_moniker(pmkObjectName, NULL, &pmkObjectName);
+    if (FAILED(hr))
+        return hr;
     hr = get_moniker_comparison_data(pmkObjectName, &moniker_data);
+    IMoniker_Release(pmkObjectName);
     if (hr != S_OK)
         return hr;
 

@@ -1398,7 +1398,7 @@ DWORD WINAPI SHQueryValueExA( HKEY hKey, LPCSTR lpszValue,
     if ((!pvData) || (dwRet == ERROR_MORE_DATA) )
     {
       char cNull = '\0';
-      nBytesToAlloc = (!pvData || (dwRet == ERROR_MORE_DATA)) ? dwUnExpDataLen : *pcbData;
+      nBytesToAlloc = dwUnExpDataLen;
 
       szData = (LPSTR) LocalAlloc(LMEM_ZEROINIT, nBytesToAlloc);
       RegQueryValueExA (hKey, lpszValue, lpReserved, NULL, (LPBYTE)szData, &nBytesToAlloc);
@@ -1459,7 +1459,7 @@ DWORD WINAPI SHQueryValueExW(HKEY hKey, LPCWSTR lpszValue,
     if ((!pvData) || (dwRet == ERROR_MORE_DATA) )
     {
       WCHAR cNull = '\0';
-      nBytesToAlloc = (!pvData || (dwRet == ERROR_MORE_DATA)) ? dwUnExpDataLen : *pcbData;
+      nBytesToAlloc = dwUnExpDataLen;
 
       szData = (LPWSTR) LocalAlloc(LMEM_ZEROINIT, nBytesToAlloc);
       RegQueryValueExW (hKey, lpszValue, lpReserved, NULL, (LPBYTE)szData, &nBytesToAlloc);

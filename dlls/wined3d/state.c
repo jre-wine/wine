@@ -26,6 +26,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+WINE_DECLARE_DEBUG_CHANNEL(d3d_shader);
 
 #define GLINFO_LOCATION ((IWineD3DImpl *)(stateblock->wineD3DDevice->wineD3D))->gl_info
 
@@ -72,12 +73,22 @@ static void state_fillmode(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 }
 
 static void state_lighting(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    BOOL normals;
 
-    /* TODO: Lighting is only enabled if Vertex normals are passed by the application,
-     * so merge the lighting render state with the vertex declaration once it is available
+    /* Lighting is only enabled if Vertex normals are passed by the application,
+     * but lighting does not affect the stream sources, so it is not grouped for performance reasons.
+     * This state reads the decoded vertex decl, so if it is dirty don't do anything. The
+     * vertex declaration appplying function calls this function for updating
      */
 
-    if (stateblock->renderState[WINED3DRS_LIGHTING]) {
+	if(isStateDirty(stateblock->wineD3DDevice, STATE_VDECL)) {
+		return;
+	}
+
+    normals = stateblock->wineD3DDevice->strided_streams.u.s.normal.lpData != NULL ||
+              stateblock->wineD3DDevice->strided_streams.u.s.normal.VBO != 0;
+
+    if (stateblock->renderState[WINED3DRS_LIGHTING] && normals) {
         glEnable(GL_LIGHTING);
         checkGLcall("glEnable GL_LIGHTING");
     } else {
@@ -208,14 +219,11 @@ static void state_ambient(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     int srcBlend = GL_ZERO;
     int dstBlend = GL_ZERO;
-    float col[4];
 
     /* GL_LINE_SMOOTH needs GL_BLEND to work, according to the red book, and special blending params */
-    /* TODO: Is enabling blending really affected by the blendfactor??? */
     if (stateblock->renderState[WINED3DRS_ALPHABLENDENABLE]      ||
         stateblock->renderState[WINED3DRS_EDGEANTIALIAS]         ||
-        stateblock->renderState[WINED3DRS_ANTIALIASEDLINEENABLE] ||
-        stateblock->renderState[WINED3DRS_BLENDFACTOR] != 0xFFFFFFFF) {
+        stateblock->renderState[WINED3DRS_ANTIALIASEDLINEENABLE]) {
         glEnable(GL_BLEND);
         checkGLcall("glEnable GL_BLEND");
     } else {
@@ -299,10 +307,10 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     TRACE("glBlendFunc src=%x, dst=%x\n", srcBlend, dstBlend);
     glBlendFunc(srcBlend, dstBlend);
     checkGLcall("glBlendFunc");
+}
 
-    /* TODO: Remove when state management done */
-    stateblock->wineD3DDevice->dstBlend = dstBlend;
-    stateblock->wineD3DDevice->srcBlend = srcBlend;
+static void state_blendfactor(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    float col[4];
 
     TRACE("Setting BlendFactor to %d\n", stateblock->renderState[WINED3DRS_BLENDFACTOR]);
     D3DCOLORTOGLFLOAT4(stateblock->renderState[WINED3DRS_BLENDFACTOR], col);
@@ -349,7 +357,6 @@ static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         glParm = CompareFunc(stateblock->renderState[WINED3DRS_ALPHAFUNC]);
     }
     if(glParm) {
-        stateblock->wineD3DDevice->alphafunc = glParm; /* Remove when state management done */
         glAlphaFunc(glParm, ref);
         checkGLcall("glAlphaFunc");
     }
@@ -645,7 +652,6 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     tmpvalue.d = stateblock->renderState[WINED3DRS_FOGEND];
     fogend = tmpvalue.f;
 
-#if 0
     /* Activate when vertex shaders are in the state table */
     if(stateblock->vertexShader && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.function &&
        ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->usesFog) {
@@ -655,17 +661,14 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         fogend = 0.0;
         stateblock->wineD3DDevice->last_was_foggy_shader = TRUE;
     }
-#endif
-
     /* DX 7 sdk: "If both render states(vertex and table fog) are set to valid modes,
      * the system will apply only pixel(=table) fog effects."
      */
-    /* else */ if(stateblock->renderState[WINED3DRS_FOGTABLEMODE] == D3DFOG_NONE) {
+	else if(stateblock->renderState[WINED3DRS_FOGTABLEMODE] == D3DFOG_NONE) {
         glHint(GL_FOG_HINT, GL_FASTEST);
         checkGLcall("glHint(GL_FOG_HINT, GL_FASTEST)");
-#if 0
         stateblock->wineD3DDevice->last_was_foggy_shader = FALSE;
-#endif
+
         switch (stateblock->renderState[WINED3DRS_FOGVERTEXMODE]) {
             /* Processed vertices have their fog factor stored in the specular value. Fall too the none case.
              * If we are drawing untransformed vertices atm, d3ddevice_set_ortho will update the fog
@@ -726,9 +729,8 @@ static void state_fog(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     } else {
         glHint(GL_FOG_HINT, GL_NICEST);
         checkGLcall("glHint(GL_FOG_HINT, GL_NICEST)");
-#if 0
         stateblock->wineD3DDevice->last_was_foggy_shader = FALSE;
-#endif
+
         switch (stateblock->renderState[WINED3DRS_FOGTABLEMODE]) {
             case D3DFOG_EXP:
                 glFogi(GL_FOG_MODE, GL_EXP);
@@ -918,7 +920,12 @@ static void state_psizemin(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         float f;
     } tmpvalue;
 
-    if (GL_SUPPORT(EXT_POINT_PARAMETERS)) {
+    if(GL_SUPPORT(ARB_POINT_PARAMETERS)) {
+        tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MIN];
+        GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MIN_ARB, tmpvalue.f);
+        checkGLcall("glPointParameterfARB(...");
+    }
+    else if(GL_SUPPORT(EXT_POINT_PARAMETERS)) {
         tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MIN];
         GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MIN_EXT, tmpvalue.f);
         checkGLcall("glPointParameterfEXT(...);");
@@ -933,7 +940,12 @@ static void state_psizemax(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         float f;
     } tmpvalue;
 
-    if (GL_SUPPORT(EXT_POINT_PARAMETERS)) {
+    if(GL_SUPPORT(ARB_POINT_PARAMETERS)) {
+        tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MAX];
+        GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MAX_ARB, tmpvalue.f);
+        checkGLcall("glPointParameterfARB(...");
+    }
+    else if(GL_SUPPORT(EXT_POINT_PARAMETERS)) {
         tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MAX];
         GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MAX_EXT, tmpvalue.f);
         checkGLcall("glPointParameterfEXT(...);");
@@ -1037,26 +1049,36 @@ static void state_lastpixel(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 }
 
 static void state_pointsprite(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    unsigned int i;
+    int val;
+
     /* TODO: NV_POINT_SPRITE */
     if (!GL_SUPPORT(ARB_POINT_SPRITE)) {
         TRACE("Point sprites not supported\n");
         return;
     }
 
-    /*
-     * Point sprites are always enabled. Value controls texture coordinate
-     * replacement mode. Must be set true for point sprites to use
-     * textures.
-     */
-    glEnable(GL_POINT_SPRITE_ARB);
-    checkGLcall("glEnable(GL_POINT_SPRITE_ARB)");
-
     if (stateblock->renderState[WINED3DRS_POINTSPRITEENABLE]) {
-        glTexEnvf(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, TRUE);
-        checkGLcall("glTexEnvf(GL_POINT_SPRITE, GL_COORD_REPLACE, TRUE)");
+        val = GL_TRUE;
     } else {
-        glTexEnvf(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, FALSE);
-        checkGLcall("glTexEnvf(GL_POINT_SPRITE, GL_COORD_REPLACE, FALSE)");
+        val = GL_FALSE;
+    }
+
+    for (i = 0; i < GL_LIMITS(texture_stages); i++) {
+        /* Note the WINED3DRS value applies to all textures, but GL has one
+         * per texture, so apply it now ready to be used!
+         */
+        if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
+            checkGLcall("glActiveTextureARB");
+        } else if (i==1) {
+            FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
+            break;
+        }
+
+        glTexEnvi(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, val);
+        checkGLcall((val?"glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_TRUE)":
+                         "glTexEnvi(GL_POINT_SPRITE, GL_COORD_REPLACE, GL_FALSE)"));
     }
 }
 
@@ -1351,6 +1373,7 @@ static void activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock)
 
 static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
+    DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
 
     TRACE("Setting color op for stage %d\n", stage);
 
@@ -1360,21 +1383,23 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         return;
     }
 
-    if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        /* TODO: register combiners! */
-        if(stage != stateblock->wineD3DDevice->texUnitMap[stage]) ERR("Foo: %d is %d!\n", stage, stateblock->wineD3DDevice->texUnitMap[stage]);
-        if(stateblock->wineD3DDevice->texUnitMap[stage] >= GL_LIMITS(sampler_stages)) {
-            if(stateblock->textureState[stage][WINED3DTSS_COLOROP] != WINED3DTOP_DISABLE &&
-              stateblock->textureState[stage][WINED3DTSS_COLOROP] != 0) {
-                FIXME("Attempt to enable unsupported stage!\n");
+    if (stage != mapped_stage) WARN("Using non 1:1 mapping: %d -> %d!\n", stage, mapped_stage);
+
+    if (mapped_stage != -1) {
+        if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+            if (mapped_stage >= GL_LIMITS(sampler_stages)) {
+                if (stateblock->textureState[stage][WINED3DTSS_COLOROP] != WINED3DTOP_DISABLE &&
+                        stateblock->textureState[stage][WINED3DTSS_COLOROP] != 0) {
+                    FIXME("Attempt to enable unsupported stage!\n");
+                }
+                return;
             }
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
+            checkGLcall("glActiveTextureARB");
+        } else if (stage > 0) {
+            WARN("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
             return;
         }
-        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stateblock->wineD3DDevice->texUnitMap[stage]));
-        checkGLcall("glActiveTextureARB");
-    } else if (stage > 0) {
-        WARN("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
-        return;
     }
 
     if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
@@ -1387,20 +1412,22 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
     if(stage >= stateblock->lowest_disabled_stage) {
         TRACE("Stage disabled\n");
-        /* Disable everything here */
-        glDisable(GL_TEXTURE_1D);
-        checkGLcall("glDisable(GL_TEXTURE_1D)");
-        glDisable(GL_TEXTURE_2D);
-        checkGLcall("glDisable(GL_TEXTURE_2D)");
-        glDisable(GL_TEXTURE_3D);
-        checkGLcall("glDisable(GL_TEXTURE_3D)");
-        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+        if (mapped_stage != -1) {
+            /* Disable everything here */
+            glDisable(GL_TEXTURE_1D);
+            checkGLcall("glDisable(GL_TEXTURE_1D)");
+            glDisable(GL_TEXTURE_2D);
+            checkGLcall("glDisable(GL_TEXTURE_2D)");
+            glDisable(GL_TEXTURE_3D);
+            checkGLcall("glDisable(GL_TEXTURE_3D)");
+            glDisable(GL_TEXTURE_CUBE_MAP_ARB);
+            checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
+        }
         /* All done */
         return;
     }
 
-    activate_dimensions(stage, stateblock);
+    if (mapped_stage != -1) activate_dimensions(stage, stateblock);
 
     /* Set the texture combiners */
     if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
@@ -1409,7 +1436,7 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                          stateblock->textureState[stage][WINED3DTSS_COLORARG1],
                          stateblock->textureState[stage][WINED3DTSS_COLORARG2],
                          stateblock->textureState[stage][WINED3DTSS_COLORARG0],
-                         stateblock->wineD3DDevice->texUnitMap[stage]);
+                         mapped_stage);
     } else {
         set_tex_op((IWineD3DDevice *)stateblock->wineD3DDevice, FALSE, stage,
                     stateblock->textureState[stage][WINED3DTSS_COLOROP],
@@ -1421,24 +1448,26 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 
 static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
+    DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
 
     TRACE("Setting alpha op for stage %d\n", stage);
     /* Do not care for enabled / disabled stages, just assign the settigns. colorop disables / enables required stuff */
-    if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        /* TODO: register combiners! */
-        if(stage >= GL_LIMITS(sampler_stages)) {
-            if(stateblock->textureState[stage][WINED3DTSS_COLOROP] != WINED3DTOP_DISABLE &&
-              stateblock->textureState[stage][WINED3DTSS_COLOROP] != 0) {
-                FIXME("Attempt to enable unsupported stage!\n");
+    if (mapped_stage != -1) {
+        if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+            if (stage >= GL_LIMITS(sampler_stages)) {
+                if (stateblock->textureState[stage][WINED3DTSS_COLOROP] != WINED3DTOP_DISABLE &&
+                        stateblock->textureState[stage][WINED3DTSS_COLOROP] != 0) {
+                    FIXME("Attempt to enable unsupported stage!\n");
+                }
+                return;
             }
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
+            checkGLcall("glActiveTextureARB");
+        } else if (stage > 0) {
+            /* We can't do anything here */
+            WARN("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
             return;
         }
-        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stateblock->wineD3DDevice->texUnitMap[stage]));
-        checkGLcall("glActiveTextureARB");
-    } else if (stage > 0) {
-        /* We can't do anything here */
-        WARN("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
-        return;
     }
 
     TRACE("Setting alpha op for stage %d\n", stage);
@@ -1448,7 +1477,7 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
                          stateblock->textureState[stage][WINED3DTSS_ALPHAARG1],
                          stateblock->textureState[stage][WINED3DTSS_ALPHAARG2],
                          stateblock->textureState[stage][WINED3DTSS_ALPHAARG0],
-                         stateblock->wineD3DDevice->texUnitMap[stage]);
+                         mapped_stage);
     } else {
         set_tex_op((IWineD3DDevice *)stateblock->wineD3DDevice, TRUE, stage, stateblock->textureState[stage][WINED3DTSS_ALPHAOP],
                     stateblock->textureState[stage][WINED3DTSS_ALPHAARG1],
@@ -1457,15 +1486,43 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 }
 
-static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock) {
-    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
+static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    DWORD texUnit = state - STATE_TRANSFORM(WINED3DTS_TEXTURE0);
 
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        /* TODO: register combiners! */
+        if(texUnit >= GL_LIMITS(sampler_stages)) {
+            return;
+        }
+        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stateblock->wineD3DDevice->texUnitMap[texUnit]));
+        checkGLcall("glActiveTextureARB");
+    } else if (texUnit > 0) {
+        /* We can't do anything here */
+        WARN("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
+        return;
+    }
+
+    set_texture_matrix((float *)&stateblock->transforms[WINED3DTS_TEXTURE0 + texUnit].u.m[0][0],
+                        stateblock->textureState[texUnit][WINED3DTSS_TEXTURETRANSFORMFLAGS],
+                        (stateblock->textureState[texUnit][WINED3DTSS_TEXCOORDINDEX] & 0xFFFF0000) != WINED3DTSS_TCI_PASSTHRU);
+
+}
+
+static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVertexStridedData *sd);
+
+static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
+    DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
+
+    if (mapped_stage == -1) {
+        TRACE("No texture unit mapped to stage %d. Skipping texture coordinates.\n", stage);
+        return;
+    }
+
+    if (GL_SUPPORT(ARB_MULTITEXTURE)) {
         if(stage >= GL_LIMITS(sampler_stages)) {
             return;
         }
-        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stateblock->wineD3DDevice->texUnitMap[stage]));
+        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
         checkGLcall("glActiveTextureARB");
     } else if (stage > 0) {
         /* We can't do anything here */
@@ -1614,6 +1671,20 @@ static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         FIXME("Unhandled WINED3DTSS_TEXCOORDINDEX %x\n", stateblock->textureState[stage][WINED3DTSS_TEXCOORDINDEX]);
         break;
     }
+
+    /* Update the texture matrix */
+    if(!isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stage))) {
+        transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stage), stateblock);
+    }
+
+    if(!isStateDirty(stateblock->wineD3DDevice, STATE_VDECL) && stateblock->wineD3DDevice->namedArraysLoaded) {
+        /* Reload the arrays if we are using fixed function arrays to reflect the selected coord input
+         * source. Call loadVertexData directly because there is no need to reparse the vertex declaration
+         * and do all the things linked to it
+         * TODO: Tidy that up to reload only the arrays of the changed unit
+         */
+        loadVertexData(stateblock, &stateblock->wineD3DDevice->strided_streams);
+    }
 }
 
 static void tex_bumpenvlscale(DWORD state, IWineD3DStateBlockImpl *stateblock) {
@@ -1652,17 +1723,27 @@ static void tex_resultarg(DWORD state, IWineD3DStateBlockImpl *stateblock) {
 
 static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     DWORD sampler = state - STATE_SAMPLER(0);
+    DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[sampler];
+    union {
+        float f;
+        DWORD d;
+    } tmpvalue;
 
     TRACE("Sampler: %d\n", sampler);
     /* Enabling and disabling texture dimensions is done by texture stage state / pixel shader setup, this function
      * only has to bind textures and set the per texture states
      */
+
+    if (mapped_stage == -1) {
+        TRACE("No sampler mapped to stage %d. Returning.\n", sampler);
+        return;
+    }
+
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        /* TODO: register combiners! */
         if(sampler >= GL_LIMITS(sampler_stages)) {
             return;
         }
-        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + stateblock->wineD3DDevice->texUnitMap[sampler]));
+        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
         checkGLcall("glActiveTextureARB");
     } else if (sampler > 0) {
         /* We can't do anything here */
@@ -1671,9 +1752,40 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock) {
     }
 
     if(stateblock->textures[sampler]) {
+        BOOL texIsPow2 = FALSE;
+
+        /* The fixed function np2 texture emulation uses the texture matrix to fix up the coordinates
+         * IWineD3DBaseTexture::ApplyStateChanges multiplies the set matrix with a fixup matrix. Before the
+         * scaling is reapplied or removed, the texture matrix has to be reapplied
+         */
+        if(wined3d_settings.nonpower2_mode != NP2_NATIVE && sampler < MAX_TEXTURES) {
+            if(stateblock->textureDimensions[sampler] == GL_TEXTURE_2D) {
+                if(((IWineD3DTextureImpl *) stateblock->textures[sampler])->pow2scalingFactorX != 1.0 ||
+                   ((IWineD3DTextureImpl *) stateblock->textures[sampler])->pow2scalingFactorY != 1.0 ) {
+                    texIsPow2 = TRUE;
+                }
+            } else if(stateblock->textureDimensions[sampler] == GL_TEXTURE_CUBE_MAP_ARB) {
+                if(((IWineD3DCubeTextureImpl *) stateblock->textures[sampler])->pow2scalingFactor != 1.0) {
+                    texIsPow2 = TRUE;
+                }
+            }
+
+            if(texIsPow2 || stateblock->wineD3DDevice->lastWasPow2Texture[sampler]) {
+                transform_texture(STATE_TRANSFORM(WINED3DTS_TEXTURE0 + stateblock->wineD3DDevice->texUnitMap[sampler]), stateblock);
+                stateblock->wineD3DDevice->lastWasPow2Texture[sampler] = texIsPow2;
+            }
+        }
+
         IWineD3DBaseTexture_PreLoad((IWineD3DBaseTexture *) stateblock->textures[sampler]);
-        IWineD3DDevice_SetupTextureStates((IWineD3DDevice *)stateblock->wineD3DDevice, sampler, sampler, REAPPLY_ALPHAOP);
         IWineD3DBaseTexture_ApplyStateChanges(stateblock->textures[sampler], stateblock->textureState[sampler], stateblock->samplerState[sampler]);
+
+        if (GL_SUPPORT(EXT_TEXTURE_LOD_BIAS)) {
+            tmpvalue.d = stateblock->samplerState[sampler][WINED3DSAMP_MIPMAPLODBIAS];
+            glTexEnvf(GL_TEXTURE_FILTER_CONTROL_EXT,
+                      GL_TEXTURE_LOD_BIAS_EXT,
+                      tmpvalue.f);
+            checkGLcall("glTexEnvi GL_TEXTURE_LOD_BIAS_EXT ...");
+        }
 
         if (stateblock->wineD3DDevice->ps_selected_mode != SHADER_NONE && stateblock->pixelShader &&
             ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.function) {
@@ -1690,7 +1802,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock) {
             activate_dimensions(sampler, stateblock);
 
             if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && sampler == 0) {
-                /* If color keying is enabled update the alpha test, it depends on the existance
+                /* If color keying is enabled update the alpha test, it depends on the existence
                  * of a color key in stage 0
                  */
                 state_alpha(WINED3DRS_COLORKEYENABLE, stateblock);
@@ -1706,6 +1818,22 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         glBindTexture(GL_TEXTURE_1D, stateblock->wineD3DDevice->dummyTextureName[sampler]);
         checkGLcall("glBindTexture(GL_TEXTURE_1D, stateblock->wineD3DDevice->dummyTextureName[sampler])");
     }
+}
+
+static void shaderconstant(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+
+    /* Vertex and pixel shader states will call a shader upload, don't do anything as long one of them
+     * has an update pending
+     */
+    if(isStateDirty(device, STATE_VDECL) ||
+       isStateDirty(device, STATE_PIXELSHADER)) {
+       return;
+    }
+    
+    device->shader_backend->shader_load_constants((IWineD3DDevice *) device,
+        stateblock->pixelShader && ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.function,
+        stateblock->vertexShader && ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.function);
 }
 
 static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock) {
@@ -1731,16 +1859,16 @@ static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         /* Compile and bind the shader */
         IWineD3DPixelShader_CompileShader(stateblock->pixelShader);
 
-#if 0
-        /* Can't do that here right now, because glsl shaders depend on having both pixel and vertex shader
-         * setup at the same time. The shader_select call will be done by drawprim until vertex shaders are
-         * moved to the state table too
-         */
-        stateblock->wineD3DDevice->shader_backend->shader_select(
-                (IWineD3DDevice *) stateblock->wineD3DDevice,
-                TRUE,
-                !stateblock->vertexShader ? FALSE : ((IWineD3DVertexShaderImpl *) stateblock->vertexShader)->baseShader.function != NULL);
-#endif
+        if(!isStateDirty(stateblock->wineD3DDevice, StateTable[STATE_VSHADER].representative)) {
+            stateblock->wineD3DDevice->shader_backend->shader_select(
+                    (IWineD3DDevice *) stateblock->wineD3DDevice,
+                    TRUE,
+                    !stateblock->vertexShader ? FALSE : ((IWineD3DVertexShaderImpl *) stateblock->vertexShader)->baseShader.function != NULL);
+            
+            if(!isStateDirty(stateblock->wineD3DDevice, STATE_VERTEXSHADERCONSTANT)) {
+                shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock);
+            }
+        }
         stateblock->wineD3DDevice->last_was_pshader = TRUE;
     } else {
         /* Disabled the pixel shader - color ops weren't applied
@@ -1753,13 +1881,850 @@ static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock) {
         }
         stateblock->wineD3DDevice->last_was_pshader = FALSE;
 
-#if 0
-        stateblock->wineD3DDevice->shader_backend->shader_select(
-                (IWineD3DDevice *) stateblock->wineD3DDevice,
-                FALSE,
-                !stateblock->vertexShader ? FALSE : ((IWineD3DVertexShaderImpl *) stateblock->vertexShader)->baseShader.function != NULL);
-#endif
+        if(!isStateDirty(stateblock->wineD3DDevice, StateTable[STATE_VSHADER].representative)) {
+            stateblock->wineD3DDevice->shader_backend->shader_select(
+                    (IWineD3DDevice *) stateblock->wineD3DDevice,
+                    FALSE,
+                    !stateblock->vertexShader ? FALSE : ((IWineD3DVertexShaderImpl *) stateblock->vertexShader)->baseShader.function != NULL);
+
+            if(!isStateDirty(stateblock->wineD3DDevice, STATE_VERTEXSHADERCONSTANT)) {
+                shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock);
+            }
+        }
     }
+}
+
+static void transform_world(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    /* This function is called by transform_view below if the view matrix was changed too
+     *
+     * Deliberately no check if the vertex declaration is dirty because the vdecl state
+     * does not always update the world matrix, only on a switch between transformed
+     * and untrannsformed draws. It *may* happen that the world matrix is set 2 times during one
+     * draw, but that should be rather rare and cheaper in total.
+     */
+    glMatrixMode(GL_MODELVIEW);
+    checkGLcall("glMatrixMode");
+
+    if(stateblock->wineD3DDevice->last_was_rhw) {
+        glLoadIdentity();
+        checkGLcall("glLoadIdentity()");
+    } else {
+        /* In the general case, the view matrix is the identity matrix */
+        if (stateblock->wineD3DDevice->view_ident) {
+            glLoadMatrixf((float *) &stateblock->transforms[WINED3DTS_WORLDMATRIX(0)].u.m[0][0]);
+            checkGLcall("glLoadMatrixf");
+        } else {
+            glLoadMatrixf((float *) &stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+            checkGLcall("glLoadMatrixf");
+            glMultMatrixf((float *) &stateblock->transforms[WINED3DTS_WORLDMATRIX(0)].u.m[0][0]);
+            checkGLcall("glMultMatrixf");
+        }
+    }
+}
+
+static void transform_view(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    unsigned int k;
+
+    /* If we are changing the View matrix, reset the light and clipping planes to the new view
+     * NOTE: We have to reset the positions even if the light/plane is not currently
+     *       enabled, since the call to enable it will not reset the position.
+     * NOTE2: Apparently texture transforms do NOT need reapplying
+     */
+
+    PLIGHTINFOEL *lightChain = NULL;
+
+    glMatrixMode(GL_MODELVIEW);
+    checkGLcall("glMatrixMode(GL_MODELVIEW)");
+    glLoadMatrixf((float *)(float *) &stateblock->transforms[WINED3DTS_VIEW].u.m[0][0]);
+    checkGLcall("glLoadMatrixf(...)");
+
+    /* Reset lights. TODO: Call light apply func */
+    lightChain = stateblock->lights;
+    while (lightChain && lightChain->glIndex != -1) {
+        glLightfv(GL_LIGHT0 + lightChain->glIndex, GL_POSITION, lightChain->lightPosn);
+        checkGLcall("glLightfv posn");
+        glLightfv(GL_LIGHT0 + lightChain->glIndex, GL_SPOT_DIRECTION, lightChain->lightDirn);
+        checkGLcall("glLightfv dirn");
+        lightChain = lightChain->next;
+    }
+
+    /* Reset Clipping Planes if clipping is enabled. TODO: Call clipplane apply func */
+    for (k = 0; k < GL_LIMITS(clipplanes); k++) {
+        glClipPlane(GL_CLIP_PLANE0 + k, stateblock->clipplane[k]);
+        checkGLcall("glClipPlane");
+    }
+
+    if(stateblock->wineD3DDevice->last_was_rhw) {
+        glLoadIdentity();
+        checkGLcall("glLoadIdentity()");
+        /* No need to update the world matrix, the identity is fine */
+        return;
+    }
+
+    /* Call the world matrix state, this will apply the combined WORLD + VIEW matrix
+     * No need to do it here if the state is scheduled for update.
+     */
+    if(!isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)))) {
+        transform_world(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), stateblock);
+    }
+}
+
+static void transform_worldex(DWORD state, IWineD3DStateBlockImpl *stateBlock) {
+	WARN("World matrix 1 - 255 not supported yet\n");
+}
+
+static const GLfloat invymat[16] = {
+    1.0f, 0.0f, 0.0f, 0.0f,
+    0.0f, -1.0f, 0.0f, 0.0f,
+    0.0f, 0.0f, 1.0f, 0.0f,
+    0.0f, 0.0f, 0.0f, 1.0f};
+
+static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    glMatrixMode(GL_PROJECTION);
+    checkGLcall("glMatrixMode(GL_PROJECTION)");
+    glLoadIdentity();
+    checkGLcall("glLoadIdentity");
+
+    if(stateblock->wineD3DDevice->last_was_rhw) {
+        double X, Y, height, width, minZ, maxZ;
+
+        X      = stateblock->viewport.X;
+        Y      = stateblock->viewport.Y;
+        height = stateblock->viewport.Height;
+        width  = stateblock->viewport.Width;
+        minZ   = stateblock->viewport.MinZ;
+        maxZ   = stateblock->viewport.MaxZ;
+
+        if(!stateblock->wineD3DDevice->untransformed) {
+            /* Transformed vertices are supposed to bypass the whole transform pipeline including
+             * frustum clipping. This can't be done in opengl, so this code adjusts the Z range to
+             * suppress depth clipping. This can be done because it is an orthogonal projection and
+             * the Z coordinate does not affect the size of the primitives
+             */
+            TRACE("Calling glOrtho with %f, %f, %f, %f\n", width, height, -minZ, -maxZ);
+            glOrtho(X, X + width, Y + height, Y, -minZ, -maxZ);
+        } else {
+            /* If the app mixes transformed and untransformed primitives we can't use the coordinate system
+             * trick above because this would mess up transformed and untransformed Z order. Pass the z position
+             * unmodified to opengl.
+             *
+             * If the app depends on mixed types and disabled clipping we're out of luck without a pipeline
+             * replacement shader.
+             */
+            TRACE("Calling glOrtho with %f, %f, %f, %f\n", width, height, 1.0, -1.0);
+            glOrtho(X, X + width, Y + height, Y, 1.0, -1.0);
+        }
+        checkGLcall("glOrtho");
+
+        /* Window Coord 0 is the middle of the first pixel, so translate by 3/8 pixels */
+        glTranslatef(0.375, 0.375, 0);
+        checkGLcall("glTranslatef(0.375, 0.375, 0)");
+        /* D3D texture coordinates are flipped compared to OpenGL ones, so
+         * render everything upside down when rendering offscreen. */
+        if (stateblock->wineD3DDevice->render_offscreen) {
+            glMultMatrixf(invymat);
+            checkGLcall("glMultMatrixf(invymat)");
+        }
+    } else {
+        /* The rule is that the window coordinate 0 does not correspond to the
+            beginning of the first pixel, but the center of the first pixel.
+            As a consequence if you want to correctly draw one line exactly from
+            the left to the right end of the viewport (with all matrices set to
+            be identity), the x coords of both ends of the line would be not
+            -1 and 1 respectively but (-1-1/viewport_widh) and (1-1/viewport_width)
+            instead.                                                               */
+        glTranslatef(0.9 / stateblock->viewport.Width, -0.9 / stateblock->viewport.Height, 0);
+        checkGLcall("glTranslatef (0.9 / width, -0.9 / height, 0)");
+
+        /* D3D texture coordinates are flipped compared to OpenGL ones, so
+            * render everything upside down when rendering offscreen. */
+        if (stateblock->wineD3DDevice->render_offscreen) {
+            glMultMatrixf(invymat);
+            checkGLcall("glMultMatrixf(invymat)");
+        }
+        glMultMatrixf((float *) &stateblock->transforms[WINED3DTS_PROJECTION].u.m[0][0]);
+        checkGLcall("glLoadMatrixf");
+    }
+}
+
+/* This should match any arrays loaded in loadVertexData.
+ * stateblock impl is required for GL_SUPPORT
+ * TODO: Only load / unload arrays if we have to.
+ */
+static inline void unloadVertexData(IWineD3DStateBlockImpl *stateblock) {
+    int texture_idx;
+
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_COLOR_ARRAY);
+    if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
+        glDisableClientState(GL_SECONDARY_COLOR_ARRAY_EXT);
+    }
+    for (texture_idx = 0; texture_idx < GL_LIMITS(textures); ++texture_idx) {
+        GL_EXTCALL(glClientActiveTextureARB(GL_TEXTURE0_ARB + texture_idx));
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    }
+}
+
+/* This should match any arrays loaded in loadNumberedArrays
+ * TODO: Only load / unload arrays if we have to.
+ */
+static inline void unloadNumberedArrays(IWineD3DStateBlockImpl *stateblock) {
+    /* disable any attribs (this is the same for both GLSL and ARB modes) */
+    GLint maxAttribs;
+    int i;
+
+    /* Leave all the attribs disabled */
+    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS_ARB, &maxAttribs);
+    /* MESA does not support it right not */
+    if (glGetError() != GL_NO_ERROR)
+        maxAttribs = 16;
+    for (i = 0; i < maxAttribs; ++i) {
+        GL_EXTCALL(glDisableVertexAttribArrayARB(i));
+        checkGLcall("glDisableVertexAttribArrayARB(reg);");
+    }
+}
+
+static inline void loadNumberedArrays(IWineD3DStateBlockImpl *stateblock, WineDirect3DVertexStridedData *strided) {
+    GLint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? -1 : 0;
+    int i;
+
+    for (i = 0; i < MAX_ATTRIBS; i++) {
+
+        if (!strided->u.input[i].lpData && !strided->u.input[i].VBO)
+            continue;
+
+        TRACE_(d3d_shader)("Loading array %u [VBO=%u]\n", i, strided->u.input[i].VBO);
+
+        if(curVBO != strided->u.input[i].VBO) {
+            GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, strided->u.input[i].VBO));
+            checkGLcall("glBindBufferARB");
+            curVBO = strided->u.input[i].VBO;
+        }
+        GL_EXTCALL(glVertexAttribPointerARB(i,
+                        WINED3D_ATR_SIZE(strided->u.input[i].dwType),
+                        WINED3D_ATR_GLTYPE(strided->u.input[i].dwType),
+                        WINED3D_ATR_NORMALIZED(strided->u.input[i].dwType),
+                        strided->u.input[i].dwStride,
+                        strided->u.input[i].lpData + stateblock->loadBaseVertexIndex * strided->u.input[i].dwStride));
+        GL_EXTCALL(glEnableVertexAttribArrayARB(i));
+   }
+}
+
+/* Used from 2 different functions, and too big to justify making it inlined */
+static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVertexStridedData *sd) {
+    unsigned int textureNo   = 0;
+    unsigned int texture_idx = 0;
+    GLint curVBO = GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) ? -1 : 0;
+
+    TRACE("Using fast vertex array code\n");
+    /* Blend Data ---------------------------------------------- */
+    if( (sd->u.s.blendWeights.lpData) || (sd->u.s.blendWeights.VBO) ||
+        (sd->u.s.blendMatrixIndices.lpData) || (sd->u.s.blendMatrixIndices.VBO) ) {
+
+
+        if (GL_SUPPORT(ARB_VERTEX_BLEND)) {
+
+#if 1
+            glEnableClientState(GL_WEIGHT_ARRAY_ARB);
+            checkGLcall("glEnableClientState(GL_WEIGHT_ARRAY_ARB)");
+#endif
+
+            TRACE("Blend %d %p %d\n", WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType),
+                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride, sd->u.s.blendWeights.dwStride);
+            /* FIXME("TODO\n");*/
+            /* Note dwType == float3 or float4 == 2 or 3 */
+
+#if 0
+            /* with this on, the normals appear to be being modified,
+               but the vertices aren't being translated as they should be
+               Maybe the world matrix aren't being setup properly? */
+            glVertexBlendARB(WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType) + 1);
+#endif
+
+
+            VTRACE(("glWeightPointerARB(%d, GL_FLOAT, %d, %p)\n",
+                WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType) ,
+                sd->u.s.blendWeights.dwStride,
+                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride));
+
+            if(curVBO != sd->u.s.blendWeights.VBO) {
+                GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, sd->u.s.blendWeights.VBO));
+                checkGLcall("glBindBufferARB");
+                curVBO = sd->u.s.blendWeights.VBO;
+            }
+
+            GL_EXTCALL(glWeightPointerARB)(
+                WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType),
+                WINED3D_ATR_GLTYPE(sd->u.s.blendWeights.dwType),
+                sd->u.s.blendWeights.dwStride,
+                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride);
+
+            checkGLcall("glWeightPointerARB");
+
+            if((sd->u.s.blendMatrixIndices.lpData) || (sd->u.s.blendMatrixIndices.VBO)){
+                static BOOL showfixme = TRUE;
+                if(showfixme){
+                    FIXME("blendMatrixIndices support\n");
+                    showfixme = FALSE;
+                }
+            }
+
+        } else if (GL_SUPPORT(EXT_VERTEX_WEIGHTING)) {
+            /* FIXME("TODO\n");*/
+#if 0
+
+            GL_EXTCALL(glVertexWeightPointerEXT)(
+                WINED3D_ATR_SIZE(sd->u.s.blendWeights.dwType),
+                WINED3D_ATR_GLTYPE(sd->u.s.blendWeights.dwType),
+                sd->u.s.blendWeights.dwStride,
+                sd->u.s.blendWeights.lpData + stateblock->loadBaseVertexIndex * sd->u.s.blendWeights.dwStride);
+            checkGLcall("glVertexWeightPointerEXT(numBlends, ...)");
+            glEnableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT);
+            checkGLcall("glEnableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT)");
+#endif
+
+        } else {
+            /* TODO: support blends in fixupVertices */
+            FIXME("unsupported blending in openGl\n");
+        }
+    } else {
+        if (GL_SUPPORT(ARB_VERTEX_BLEND)) {
+#if 0    /* TODO: Vertex blending */
+            glDisable(GL_VERTEX_BLEND_ARB);
+#endif
+            TRACE("ARB_VERTEX_BLEND\n");
+        } else if (GL_SUPPORT(EXT_VERTEX_WEIGHTING)) {
+            TRACE(" EXT_VERTEX_WEIGHTING\n");
+            glDisableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT);
+            checkGLcall("glDisableClientState(GL_VERTEX_WEIGHT_ARRAY_EXT)");
+
+        }
+    }
+
+#if 0 /* FOG  ----------------------------------------------*/
+    if (sd->u.s.fog.lpData || sd->u.s.fog.VBO) {
+        /* TODO: fog*/
+    if (GL_SUPPORT(EXT_FOG_COORD) {
+             glEnableClientState(GL_FOG_COORDINATE_EXT);
+            (GL_EXTCALL)(FogCoordPointerEXT)(
+                WINED3D_ATR_GLTYPE(sd->u.s.fog.dwType),
+                sd->u.s.fog.dwStride,
+                sd->u.s.fog.lpData + stateblock->loadBaseVertexIndex * sd->u.s.fog.dwStride);
+        } else {
+            /* don't bother falling back to 'slow' as we don't support software FOG yet. */
+            /* FIXME: fixme once */
+            TRACE("Hardware support for FOG is not avaiable, FOG disabled.\n");
+        }
+    } else {
+        if (GL_SUPPRT(EXT_FOR_COORD) {
+             /* make sure fog is disabled */
+             glDisableClientState(GL_FOG_COORDINATE_EXT);
+        }
+    }
+#endif
+
+#if 0 /* tangents  ----------------------------------------------*/
+    if (sd->u.s.tangent.lpData || sd->u.s.tangent.VBO ||
+        sd->u.s.binormal.lpData || sd->u.s.binormal.VBO) {
+        /* TODO: tangents*/
+        if (GL_SUPPORT(EXT_COORDINATE_FRAME) {
+            if (sd->u.s.tangent.lpData || sd->u.s.tangent.VBO) {
+                glEnable(GL_TANGENT_ARRAY_EXT);
+                (GL_EXTCALL)(TangentPointerEXT)(
+                    WINED3D_ATR_GLTYPE(sd->u.s.tangent.dwType),
+                    sd->u.s.tangent.dwStride,
+                    sd->u.s.tangent.lpData + stateblock->loadBaseVertexIndex * sd->u.s.tangent.dwStride);
+            } else {
+                    glDisable(GL_TANGENT_ARRAY_EXT);
+            }
+            if (sd->u.s.binormal.lpData || sd->u.s.binormal.VBO) {
+                    glEnable(GL_BINORMAL_ARRAY_EXT);
+                    (GL_EXTCALL)(BinormalPointerEXT)(
+                        WINED3D_ATR_GLTYPE(sd->u.s.binormal.dwType),
+                        sd->u.s.binormal.dwStride,
+                        sd->u.s.binormal.lpData + stateblock->loadBaseVertexIndex * sd->u.s.binormal.dwStride);
+            } else{
+                    glDisable(GL_BINORMAL_ARRAY_EXT);
+            }
+
+        } else {
+            /* don't bother falling back to 'slow' as we don't support software tangents and binormals yet . */
+            /* FIXME: fixme once */
+            TRACE("Hardware support for tangents and binormals is not avaiable, tangents and binormals disabled.\n");
+        }
+    } else {
+        if (GL_SUPPORT(EXT_COORDINATE_FRAME) {
+             /* make sure fog is disabled */
+             glDisable(GL_TANGENT_ARRAY_EXT);
+             glDisable(GL_BINORMAL_ARRAY_EXT);
+        }
+    }
+#endif
+
+    /* Point Size ----------------------------------------------*/
+    if (sd->u.s.pSize.lpData || sd->u.s.pSize.VBO) {
+
+        /* no such functionality in the fixed function GL pipeline */
+        TRACE("Cannot change ptSize here in openGl\n");
+        /* TODO: Implement this function in using shaders if they are available */
+
+    }
+
+    /* Vertex Pointers -----------------------------------------*/
+    if (sd->u.s.position.lpData != NULL || sd->u.s.position.VBO != 0) {
+        /* Note dwType == float3 or float4 == 2 or 3 */
+        VTRACE(("glVertexPointer(%d, GL_FLOAT, %d, %p)\n",
+                sd->u.s.position.dwStride,
+                sd->u.s.position.dwType + 1,
+                sd->u.s.position.lpData));
+
+        if(curVBO != sd->u.s.position.VBO) {
+            GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, sd->u.s.position.VBO));
+            checkGLcall("glBindBufferARB");
+            curVBO = sd->u.s.position.VBO;
+        }
+
+        /* min(WINED3D_ATR_SIZE(position),3) to Disable RHW mode as 'w' coord
+           handling for rhw mode should not impact screen position whereas in GL it does.
+           This may  result in very slightly distored textures in rhw mode, but
+           a very minimal different. There's always the other option of
+           fixing the view matrix to prevent w from having any effect
+
+           This only applies to user pointer sources, in VBOs the vertices are fixed up
+         */
+        if(sd->u.s.position.VBO == 0) {
+            glVertexPointer(3 /* min(WINED3D_ATR_SIZE(sd->u.s.position.dwType),3) */,
+                WINED3D_ATR_GLTYPE(sd->u.s.position.dwType),
+                sd->u.s.position.dwStride, sd->u.s.position.lpData + stateblock->loadBaseVertexIndex * sd->u.s.position.dwStride);
+        } else {
+            glVertexPointer(
+                WINED3D_ATR_SIZE(sd->u.s.position.dwType),
+                WINED3D_ATR_GLTYPE(sd->u.s.position.dwType),
+                sd->u.s.position.dwStride, sd->u.s.position.lpData + stateblock->loadBaseVertexIndex * sd->u.s.position.dwStride);
+        }
+        checkGLcall("glVertexPointer(...)");
+        glEnableClientState(GL_VERTEX_ARRAY);
+        checkGLcall("glEnableClientState(GL_VERTEX_ARRAY)");
+
+    } else {
+        glDisableClientState(GL_VERTEX_ARRAY);
+        checkGLcall("glDisableClientState(GL_VERTEX_ARRAY)");
+    }
+
+    /* Normals -------------------------------------------------*/
+    if (sd->u.s.normal.lpData || sd->u.s.normal.VBO) {
+        /* Note dwType == float3 or float4 == 2 or 3 */
+        VTRACE(("glNormalPointer(GL_FLOAT, %d, %p)\n",
+                sd->u.s.normal.dwStride,
+                sd->u.s.normal.lpData));
+        if(curVBO != sd->u.s.normal.VBO) {
+            GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, sd->u.s.normal.VBO));
+            checkGLcall("glBindBufferARB");
+            curVBO = sd->u.s.normal.VBO;
+        }
+        glNormalPointer(
+            WINED3D_ATR_GLTYPE(sd->u.s.normal.dwType),
+            sd->u.s.normal.dwStride,
+            sd->u.s.normal.lpData + stateblock->loadBaseVertexIndex * sd->u.s.normal.dwStride);
+        checkGLcall("glNormalPointer(...)");
+        glEnableClientState(GL_NORMAL_ARRAY);
+        checkGLcall("glEnableClientState(GL_NORMAL_ARRAY)");
+
+    } else {
+        glDisableClientState(GL_NORMAL_ARRAY);
+        checkGLcall("glDisableClientState(GL_NORMAL_ARRAY)");
+        glNormal3f(0, 0, 1);
+        checkGLcall("glNormal3f(0, 0, 1)");
+    }
+
+    /* Diffuse Colour --------------------------------------------*/
+    /*  WARNING: Data here MUST be in RGBA format, so cannot      */
+    /*     go directly into fast mode from app pgm, because       */
+    /*     directx requires data in BGRA format.                  */
+    /* currently fixupVertices swizels the format, but this isn't */
+    /* very practical when using VBOS                             */
+    /* NOTE: Unless we write a vertex shader to swizel the colour */
+    /* , or the user doesn't care and wants the speed advantage   */
+
+    if (sd->u.s.diffuse.lpData || sd->u.s.diffuse.VBO) {
+        /* Note dwType == float3 or float4 == 2 or 3 */
+        VTRACE(("glColorPointer(4, GL_UNSIGNED_BYTE, %d, %p)\n",
+                sd->u.s.diffuse.dwStride,
+                sd->u.s.diffuse.lpData));
+
+        if(curVBO != sd->u.s.diffuse.VBO) {
+            GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, sd->u.s.diffuse.VBO));
+            checkGLcall("glBindBufferARB");
+            curVBO = sd->u.s.diffuse.VBO;
+        }
+        glColorPointer(4, GL_UNSIGNED_BYTE,
+                       sd->u.s.diffuse.dwStride,
+                       sd->u.s.diffuse.lpData + stateblock->loadBaseVertexIndex * sd->u.s.diffuse.dwStride);
+        checkGLcall("glColorPointer(4, GL_UNSIGNED_BYTE, ...)");
+        glEnableClientState(GL_COLOR_ARRAY);
+        checkGLcall("glEnableClientState(GL_COLOR_ARRAY)");
+
+    } else {
+        glDisableClientState(GL_COLOR_ARRAY);
+        checkGLcall("glDisableClientState(GL_COLOR_ARRAY)");
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        checkGLcall("glColor4f(1, 1, 1, 1)");
+    }
+
+    /* Specular Colour ------------------------------------------*/
+    if (sd->u.s.specular.lpData || sd->u.s.specular.VBO) {
+        TRACE("setting specular colour\n");
+        /* Note dwType == float3 or float4 == 2 or 3 */
+        VTRACE(("glSecondaryColorPointer(4, GL_UNSIGNED_BYTE, %d, %p)\n",
+                sd->u.s.specular.dwStride,
+                sd->u.s.specular.lpData));
+        if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
+            if(curVBO != sd->u.s.specular.VBO) {
+                GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, sd->u.s.specular.VBO));
+                checkGLcall("glBindBufferARB");
+                curVBO = sd->u.s.specular.VBO;
+            }
+            GL_EXTCALL(glSecondaryColorPointerEXT)(4, GL_UNSIGNED_BYTE,
+                                                   sd->u.s.specular.dwStride,
+                                                   sd->u.s.specular.lpData + stateblock->loadBaseVertexIndex * sd->u.s.specular.dwStride);
+            vcheckGLcall("glSecondaryColorPointerEXT(4, GL_UNSIGNED_BYTE, ...)");
+            glEnableClientState(GL_SECONDARY_COLOR_ARRAY_EXT);
+            vcheckGLcall("glEnableClientState(GL_SECONDARY_COLOR_ARRAY_EXT)");
+        } else {
+
+        /* Missing specular color is not critical, no warnings */
+        VTRACE(("Specular colour is not supported in this GL implementation\n"));
+        }
+
+    } else {
+        if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
+
+            glDisableClientState(GL_SECONDARY_COLOR_ARRAY_EXT);
+            checkGLcall("glDisableClientState(GL_SECONDARY_COLOR_ARRAY_EXT)");
+            GL_EXTCALL(glSecondaryColor3fEXT)(0, 0, 0);
+            checkGLcall("glSecondaryColor3fEXT(0, 0, 0)");
+        } else {
+
+            /* Missing specular color is not critical, no warnings */
+            VTRACE(("Specular colour is not supported in this GL implementation\n"));
+        }
+    }
+
+    /* Texture coords -------------------------------------------*/
+
+    for (textureNo = 0, texture_idx = 0; textureNo < GL_LIMITS(texture_stages); ++textureNo) {
+        /* The code below uses glClientActiveTexture and glMultiTexCoord* which are all part of the GL_ARB_multitexture extension. */
+        /* Abort if we don't support the extension. */
+        if (!GL_SUPPORT(ARB_MULTITEXTURE)) {
+            FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
+            continue;
+        }
+
+        if (/*!GL_SUPPORT(NV_REGISTER_COMBINERS) || stateblock->textures[textureNo]*/ TRUE) {
+            /* Select the correct texture stage */
+            GL_EXTCALL(glClientActiveTextureARB(GL_TEXTURE0_ARB + texture_idx));
+        }
+
+        if (stateblock->textures[textureNo] != NULL) {
+            int coordIdx = stateblock->textureState[textureNo][WINED3DTSS_TEXCOORDINDEX];
+
+            if (coordIdx >= MAX_TEXTURES) {
+                VTRACE(("tex: %d - Skip tex coords, as being system generated\n", textureNo));
+                glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+                GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + texture_idx, 0, 0, 0, 1));
+
+            } else if (sd->u.s.texCoords[coordIdx].lpData == NULL && sd->u.s.texCoords[coordIdx].VBO == 0) {
+                VTRACE(("Bound texture but no texture coordinates supplied, so skipping\n"));
+                glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+                GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + texture_idx, 0, 0, 0, 1));
+
+            } else {
+                TRACE("Setting up texture %u, idx %d, cordindx %u, data %p\n",
+                      textureNo, texture_idx, coordIdx, sd->u.s.texCoords[coordIdx].lpData);
+                if(curVBO != sd->u.s.texCoords[coordIdx].VBO) {
+                    GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, sd->u.s.texCoords[coordIdx].VBO));
+                    checkGLcall("glBindBufferARB");
+                    curVBO = sd->u.s.texCoords[coordIdx].VBO;
+                }
+                /* The coords to supply depend completely on the fvf / vertex shader */
+                glTexCoordPointer(
+                    WINED3D_ATR_SIZE(sd->u.s.texCoords[coordIdx].dwType),
+                    WINED3D_ATR_GLTYPE(sd->u.s.texCoords[coordIdx].dwType),
+                    sd->u.s.texCoords[coordIdx].dwStride,
+                    sd->u.s.texCoords[coordIdx].lpData + stateblock->loadBaseVertexIndex * sd->u.s.texCoords[coordIdx].dwStride);
+                glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+            }
+        } else if (!GL_SUPPORT(NV_REGISTER_COMBINERS)) {
+            glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+            GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + textureNo, 0, 0, 0, 1));
+        }
+        if (/*!GL_SUPPORT(NV_REGISTER_COMBINERS) || stateblock->textures[textureNo]*/ TRUE) ++texture_idx;
+    }
+    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
+        for (textureNo = texture_idx; textureNo < GL_LIMITS(textures); ++textureNo) {
+            GL_EXTCALL(glClientActiveTextureARB(GL_TEXTURE0_ARB + textureNo));
+            glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+            GL_EXTCALL(glMultiTexCoord4fARB(GL_TEXTURE0_ARB + textureNo, 0, 0, 0, 1));
+        }
+    }
+}
+
+inline void drawPrimitiveTraceDataLocations(
+    WineDirect3DVertexStridedData *dataLocations) {
+
+    /* Dump out what parts we have supplied */
+    TRACE("Strided Data:\n");
+    TRACE_STRIDED((dataLocations), position);
+    TRACE_STRIDED((dataLocations), blendWeights);
+    TRACE_STRIDED((dataLocations), blendMatrixIndices);
+    TRACE_STRIDED((dataLocations), normal);
+    TRACE_STRIDED((dataLocations), pSize);
+    TRACE_STRIDED((dataLocations), diffuse);
+    TRACE_STRIDED((dataLocations), specular);
+    TRACE_STRIDED((dataLocations), texCoords[0]);
+    TRACE_STRIDED((dataLocations), texCoords[1]);
+    TRACE_STRIDED((dataLocations), texCoords[2]);
+    TRACE_STRIDED((dataLocations), texCoords[3]);
+    TRACE_STRIDED((dataLocations), texCoords[4]);
+    TRACE_STRIDED((dataLocations), texCoords[5]);
+    TRACE_STRIDED((dataLocations), texCoords[6]);
+    TRACE_STRIDED((dataLocations), texCoords[7]);
+    TRACE_STRIDED((dataLocations), position2);
+    TRACE_STRIDED((dataLocations), normal2);
+    TRACE_STRIDED((dataLocations), tangent);
+    TRACE_STRIDED((dataLocations), binormal);
+    TRACE_STRIDED((dataLocations), tessFactor);
+    TRACE_STRIDED((dataLocations), fog);
+    TRACE_STRIDED((dataLocations), depth);
+    TRACE_STRIDED((dataLocations), sample);
+
+    return;
+}
+
+/* Helper for vertexdeclaration() */
+static inline void handleStreams(IWineD3DStateBlockImpl *stateblock, BOOL useVertexShaderFunction) {
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+    BOOL fixup = FALSE;
+    WineDirect3DVertexStridedData *dataLocations = &device->strided_streams;
+
+    if(device->up_strided) {
+        /* Note: this is a ddraw fixed-function code path */
+        TRACE("================ Strided Input ===================\n");
+        memcpy(dataLocations, device->up_strided, sizeof(*dataLocations));
+
+        if(TRACE_ON(d3d)) {
+            drawPrimitiveTraceDataLocations(dataLocations);
+        }
+    } else if (stateblock->vertexDecl || stateblock->vertexShader) {
+        /* Note: This is a fixed function or shader codepath.
+         * This means it must handle both types of strided data.
+         * Shaders must go through here to zero the strided data, even if they
+         * don't set any declaration at all
+         */
+        TRACE("================ Vertex Declaration  ===================\n");
+        memset(dataLocations, 0, sizeof(*dataLocations));
+
+        if (stateblock->vertexDecl != NULL ||
+            ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->vertexDeclaration != NULL) {
+
+            primitiveDeclarationConvertToStridedData((IWineD3DDevice *) device, useVertexShaderFunction,
+                dataLocations, &fixup);
+        }
+    } else {
+        /* Note: This codepath is not reachable from d3d9 (see fvf->decl9 conversion)
+         * It is reachable through d3d8, but only for fixed-function.
+         * It will not work properly for shaders.
+         */
+        TRACE("================ FVF ===================\n");
+        memset(dataLocations, 0, sizeof(*dataLocations));
+        primitiveConvertToStridedData((IWineD3DDevice *) device, dataLocations,
+									   &fixup);
+        if(TRACE_ON(d3d)) {
+            drawPrimitiveTraceDataLocations(dataLocations);
+        }
+     }
+
+    /* Unload the old arrays before loading the new ones to get old junk out */
+    if(device->numberedArraysLoaded) {
+        unloadNumberedArrays(stateblock);
+        device->numberedArraysLoaded = FALSE;
+    }
+    if(device->namedArraysLoaded) {
+        unloadVertexData(stateblock);
+        device->namedArraysLoaded = FALSE;
+    }
+
+    if(useVertexShaderFunction) {
+        TRACE("Loading numbered arrays\n");
+        loadNumberedArrays(stateblock, dataLocations);
+        device->useDrawStridedSlow = FALSE;
+        device->numberedArraysLoaded = TRUE;
+    } else if (fixup ||
+               (dataLocations->u.s.pSize.lpData == NULL &&
+                dataLocations->u.s.diffuse.lpData == NULL &&
+                dataLocations->u.s.specular.lpData == NULL)) {
+        /* Load the vertex data using named arrays */
+        TRACE("Loading vertex data\n");
+        loadVertexData(stateblock, dataLocations);
+        device->useDrawStridedSlow = FALSE;
+        device->namedArraysLoaded = TRUE;
+    } else {
+        TRACE("Not loading vertex data\n");
+        device->useDrawStridedSlow = TRUE;
+    }
+
+/* Generate some fixme's if unsupported functionality is being used */
+#define BUFFER_OR_DATA(_attribute) dataLocations->u.s._attribute.lpData
+    /* TODO: Either support missing functionality in fixupVertices or by creating a shader to replace the pipeline. */
+    if (!useVertexShaderFunction && (BUFFER_OR_DATA(blendMatrixIndices) || BUFFER_OR_DATA(blendWeights))) {
+        FIXME("Blending data is only valid with vertex shaders %p %p\n",dataLocations->u.s.blendWeights.lpData,dataLocations->u.s.blendWeights.lpData);
+    }
+    if (!useVertexShaderFunction && (BUFFER_OR_DATA(position2) || BUFFER_OR_DATA(normal2))) {
+        FIXME("Tweening is only valid with vertex shaders\n");
+    }
+    if (!useVertexShaderFunction && (BUFFER_OR_DATA(tangent) || BUFFER_OR_DATA(binormal))) {
+        FIXME("Tangent and binormal bump mapping is only valid with vertex shaders\n");
+    }
+    if (!useVertexShaderFunction && (BUFFER_OR_DATA(tessFactor) || BUFFER_OR_DATA(fog) || BUFFER_OR_DATA(depth) || BUFFER_OR_DATA(sample))) {
+        FIXME("Extended attributes are only valid with vertex shaders\n");
+    }
+#undef BUFFER_OR_DATA
+}
+
+static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    BOOL useVertexShaderFunction = FALSE, updateFog = FALSE;
+    BOOL transformed;
+    /* Some stuff is in the device until we have per context tracking */
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+    BOOL wasrhw = device->last_was_rhw;
+
+    /* Shaders can be implemented using ARB_PROGRAM, GLSL, or software -
+     * here simply check whether a shader was set, or the user disabled shaders
+     */
+    if (device->vs_selected_mode != SHADER_NONE && stateblock->vertexShader &&
+       ((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->baseShader.function != NULL) {
+        useVertexShaderFunction = TRUE;
+
+        if(((IWineD3DVertexShaderImpl *)stateblock->vertexShader)->usesFog != device->last_was_foggy_shader) {
+            updateFog = TRUE;
+        }
+    } else if(device->last_was_foggy_shader) {
+        updateFog = TRUE;
+    }
+
+    handleStreams(stateblock, useVertexShaderFunction);
+
+    /* Do I have to use ? TRUE : FALSE ? Or can I rely on 15==15 beeing equal to TRUE(=1)? */
+    transformed = ((device->strided_streams.u.s.position.lpData != NULL ||
+                    device->strided_streams.u.s.position.VBO != 0) &&
+                    device->strided_streams.u.s.position_transformed) ? TRUE : FALSE;
+
+    if(transformed != device->last_was_rhw && !useVertexShaderFunction) {
+        updateFog = TRUE;
+    }
+
+    /* Reapply lighting if it is not sheduled for reapplication already */
+    if(!isStateDirty(device, STATE_RENDER(WINED3DRS_LIGHTING))) {
+        state_lighting(STATE_RENDER(WINED3DRS_LIGHTING), stateblock);
+    }
+
+    if (!useVertexShaderFunction && transformed) {
+        stateblock->wineD3DDevice->last_was_rhw = TRUE;
+    } else {
+
+        /* Untransformed, so relies on the view and projection matrices */
+        device->last_was_rhw = FALSE;
+        /* This turns off the Z scale trick to 'disable' viewport frustum clipping in rhw mode*/
+        device->untransformed = TRUE;
+
+        /* Todo for sw shaders: Vertex Shader output is already transformed, so set up identity matrices
+         * Not needed as long as only hw shaders are supported
+         */
+
+        /* This sets the shader output position correction constants.
+         * TODO: Move to the viewport state
+         */
+        if (useVertexShaderFunction) {
+            device->posFixup[1] = device->render_offscreen ? -1.0 : 1.0;
+        }
+    }
+
+    /* Don't have to apply the matrices when vertex shaders are used. When vshaders are turned
+     * off this function will be called again anyway to make sure they're properly set
+     */
+    if(!useVertexShaderFunction) {
+        /* TODO: Move this mainly to the viewport state and only apply when the vp has changed
+         * or transformed / untransformed was switched
+         */
+       if(wasrhw != device->last_was_rhw &&
+          !isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_PROJECTION)) &&
+          !isStateDirty(stateblock->wineD3DDevice, STATE_VIEWPORT)) {
+            transform_projection(STATE_TRANSFORM(WINED3DTS_PROJECTION), stateblock);
+        }
+        /* World matrix needs reapplication here only if we're switching between rhw and non-rhw
+         * mode.
+         *
+         * If a vertex shader is used, the world matrix changed and then vertex shader unbound
+         * this check will fail and the matrix not applied again. This is OK because a simple
+         * world matrix change reapplies the matrix - These checks here are only to satisfy the
+         * needs of the vertex declaration.
+         *
+         * World and view matrix go into the same gl matrix, so only apply them when neither is
+         * dirty
+         */
+        if(transformed != wasrhw &&
+           !isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0))) &&
+           !isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(WINED3DTS_VIEW))) {
+            transform_world(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), stateblock);
+        }
+    } else {
+        /* We compile the shader here because we need the vertex declaration
+         * in order to determine if we need to do any swizzling for D3DCOLOR
+         * registers. If the shader is already compiled this call will do nothing. */
+        IWineD3DVertexShader_CompileShader(stateblock->vertexShader);
+    }
+
+    if(useVertexShaderFunction || device->last_was_vshader) {
+        BOOL usePixelShaderFunction = device->ps_selected_mode != SHADER_NONE && 
+                                      stateblock->pixelShader &&
+                                      ((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.function;
+
+        /* Vertex and pixel shaders are applied together for now, so let the last dirty state do the
+         * application
+         */
+        if(!isStateDirty(device, STATE_PIXELSHADER)) {
+            device->shader_backend->shader_select((IWineD3DDevice *) device, usePixelShaderFunction, useVertexShaderFunction);
+
+            if(!isStateDirty(stateblock->wineD3DDevice, STATE_VERTEXSHADERCONSTANT) && (useVertexShaderFunction || usePixelShaderFunction)) {
+                shaderconstant(STATE_VERTEXSHADERCONSTANT, stateblock);
+            }
+        }
+        device->last_was_vshader = useVertexShaderFunction;
+    }
+
+    if(updateFog) {
+        state_fog(STATE_RENDER(WINED3DRS_FOGENABLE), stateblock);
+    }
+}
+
+static void viewport(DWORD state, IWineD3DStateBlockImpl *stateblock) {
+    glDepthRange(stateblock->viewport.MinZ, stateblock->viewport.MaxZ);
+    checkGLcall("glDepthRange");
+    /* Note: GL requires lower left, DirectX supplies upper left */
+    /* TODO: replace usage of renderTarget with context management */
+    glViewport(stateblock->viewport.X,
+               (((IWineD3DSurfaceImpl *)stateblock->wineD3DDevice->render_targets[0])->currentDesc.Height - (stateblock->viewport.Y + stateblock->viewport.Height)),
+               stateblock->viewport.Width, stateblock->viewport.Height);
+
+    checkGLcall("glViewport");
+
+    stateblock->wineD3DDevice->posFixup[2] = 0.9 / stateblock->viewport.Width;
+    stateblock->wineD3DDevice->posFixup[3] = -0.9 / stateblock->viewport.Height;
+    if(!isStateDirty(stateblock->wineD3DDevice, STATE_TRANSFORM(D3DTS_PROJECTION))) {
+        transform_projection(STATE_TRANSFORM(D3DTS_PROJECTION), stateblock);
+    }
+
 }
 
 const struct StateEntry StateTable[] =
@@ -1903,7 +2868,7 @@ const struct StateEntry StateTable[] =
     { /*134, WINED3DRS_WRAP6                        */      STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          },
     { /*135, WINED3DRS_WRAP7                        */      STATE_RENDER(WINED3DRS_WRAP0),                      state_wrap          },
     { /*136, WINED3DRS_CLIPPING                     */      STATE_RENDER(WINED3DRS_CLIPPING),                   state_clipping      },
-    { /*137, WINED3DRS_LIGHTING                     */      STATE_RENDER(WINED3DRS_LIGHTING) /* Vertex decl! */,state_lighting      },
+    { /*137, WINED3DRS_LIGHTING                     */      STATE_RENDER(WINED3DRS_LIGHTING),                   state_lighting      },
     { /*138, WINED3DRS_EXTENTS                      */      STATE_RENDER(WINED3DRS_EXTENTS),                    state_extents       },
     { /*139, WINED3DRS_AMBIENT                      */      STATE_RENDER(WINED3DRS_AMBIENT),                    state_ambient       },
     { /*140, WINED3DRS_FOGVERTEXMODE                */      STATE_RENDER(WINED3DRS_FOGENABLE),                  state_fog           },
@@ -1961,7 +2926,7 @@ const struct StateEntry StateTable[] =
     { /*190, WINED3DRS_COLORWRITEENABLE1            */      STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    },
     { /*191, WINED3DRS_COLORWRITEENABLE2            */      STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    },
     { /*192, WINED3DRS_COLORWRITEENABLE3            */      STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    },
-    { /*193, WINED3DRS_BLENDFACTOR                  */      STATE_RENDER(WINED3DRS_ALPHABLENDENABLE),           state_blend         },
+    { /*193, WINED3DRS_BLENDFACTOR                  */      STATE_RENDER(WINED3DRS_BLENDFACTOR),                state_blendfactor   },
     { /*194, WINED3DRS_SRGBWRITEENABLE              */      STATE_RENDER(WINED3DRS_SRGBWRITEENABLE),            state_srgbwrite     },
     { /*195, WINED3DRS_DEPTHBIAS                    */      STATE_RENDER(WINED3DRS_DEPTHBIAS),                  state_depthbias     },
     { /*196, undefined                              */      0,                                                  state_undefined     },
@@ -2002,7 +2967,7 @@ const struct StateEntry StateTable[] =
     { /*0, 21, WINED3DTSS_MAXANISOTROPY             */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*0, 22, WINED3DTSS_BUMPENVLSCALE             */      STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   },
     { /*0, 23, WINED3DTSS_BUMPENVLOFFSET            */      STATE_TEXTURESTAGE(0, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  },
-    { /*0, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      0 /* for now, later stream sources */,              state_nogl          },
+    { /*0, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      STATE_TRANSFORM(WINED3DTS_TEXTURE0),                transform_texture   },
     { /*0, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*0, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*0, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         },
@@ -2035,7 +3000,7 @@ const struct StateEntry StateTable[] =
     { /*1, 21, WINED3DTSS_MAXANISOTROPY             */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*1, 22, WINED3DTSS_BUMPENVLSCALE             */      STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   },
     { /*1, 23, WINED3DTSS_BUMPENVLOFFSET            */      STATE_TEXTURESTAGE(1, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  },
-    { /*1, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      0 /* for now, later stream sources */,              state_nogl          },
+    { /*1, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      STATE_TRANSFORM(WINED3DTS_TEXTURE1),                transform_texture   },
     { /*1, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*1, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*1, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         },
@@ -2068,7 +3033,7 @@ const struct StateEntry StateTable[] =
     { /*2, 21, WINED3DTSS_MAXANISOTROPY             */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*2, 22, WINED3DTSS_BUMPENVLSCALE             */      STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   },
     { /*2, 23, WINED3DTSS_BUMPENVLOFFSET            */      STATE_TEXTURESTAGE(2, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  },
-    { /*2, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      0 /* for now, later stream sources */,              state_nogl          },
+    { /*2, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      STATE_TRANSFORM(WINED3DTS_TEXTURE2),                transform_texture   },
     { /*2, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*2, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*2, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         },
@@ -2101,7 +3066,7 @@ const struct StateEntry StateTable[] =
     { /*3, 21, WINED3DTSS_MAXANISOTROPY             */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*3, 22, WINED3DTSS_BUMPENVLSCALE             */      STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   },
     { /*3, 23, WINED3DTSS_BUMPENVLOFFSET            */      STATE_TEXTURESTAGE(3, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  },
-    { /*3, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      0 /* for now, later stream sources */,              state_nogl          },
+    { /*3, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      STATE_TRANSFORM(WINED3DTS_TEXTURE3),                transform_texture   },
     { /*3, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*3, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*3, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         },
@@ -2134,7 +3099,7 @@ const struct StateEntry StateTable[] =
     { /*4, 21, WINED3DTSS_MAXANISOTROPY             */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*4, 22, WINED3DTSS_BUMPENVLSCALE             */      STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   },
     { /*4, 23, WINED3DTSS_BUMPENVLOFFSET            */      STATE_TEXTURESTAGE(4, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  },
-    { /*4, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      0 /* for now, later stream sources */,              state_nogl          },
+    { /*4, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      STATE_TRANSFORM(WINED3DTS_TEXTURE4),                transform_texture   },
     { /*4, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*4, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*4, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         },
@@ -2167,7 +3132,7 @@ const struct StateEntry StateTable[] =
     { /*5, 21, WINED3DTSS_MAXANISOTROPY             */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*5, 22, WINED3DTSS_BUMPENVLSCALE             */      STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   },
     { /*5, 23, WINED3DTSS_BUMPENVLOFFSET            */      STATE_TEXTURESTAGE(5, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  },
-    { /*5, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      0 /* for now, later stream sources */,              state_nogl          },
+    { /*5, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      STATE_TRANSFORM(WINED3DTS_TEXTURE5),                transform_texture   },
     { /*5, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*5, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*5, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         },
@@ -2200,7 +3165,7 @@ const struct StateEntry StateTable[] =
     { /*6, 21, WINED3DTSS_MAXANISOTROPY             */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*6, 22, WINED3DTSS_BUMPENVLSCALE             */      STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   },
     { /*6, 23, WINED3DTSS_BUMPENVLOFFSET            */      STATE_TEXTURESTAGE(6, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  },
-    { /*6, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      0 /* for now, later stream sources */,              state_nogl          },
+    { /*6, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      STATE_TRANSFORM(WINED3DTS_TEXTURE6),                transform_texture   },
     { /*6, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*6, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*6, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         },
@@ -2233,7 +3198,7 @@ const struct StateEntry StateTable[] =
     { /*7, 21, WINED3DTSS_MAXANISOTROPY             */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*7, 22, WINED3DTSS_BUMPENVLSCALE             */      STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLSCALE),    tex_bumpenvlscale   },
     { /*7, 23, WINED3DTSS_BUMPENVLOFFSET            */      STATE_TEXTURESTAGE(7, WINED3DTSS_BUMPENVLOFFSET),   tex_bumpenvloffset  },
-    { /*7, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      0 /* for now, later stream sources */,              state_nogl          },
+    { /*7, 24, WINED3DTSS_TEXTURETRANSFORMFLAGS     */      STATE_TRANSFORM(WINED3DTS_TEXTURE7),                transform_texture   },
     { /*7, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*7, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*7, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         },
@@ -2261,4 +3226,525 @@ const struct StateEntry StateTable[] =
     { /*15, Sampler 15                              */      STATE_SAMPLER(15),                                  sampler             },
     /* Pixel shader */
     { /*  , Pixel Shader                            */      STATE_PIXELSHADER,                                  pixelshader         },
+      /* Transform states follow                    */
+    { /*  1, undefined                              */      0,                                                  state_undefined     },
+    { /*  2, WINED3DTS_VIEW                         */      STATE_TRANSFORM(WINED3DTS_VIEW),                    transform_view      },
+    { /*  3, WINED3DTS_PROJECTION                   */      STATE_TRANSFORM(WINED3DTS_PROJECTION),              transform_projection},
+    { /*  4, undefined                              */      0,                                                  state_undefined     },
+    { /*  5, undefined                              */      0,                                                  state_undefined     },
+    { /*  6, undefined                              */      0,                                                  state_undefined     },
+    { /*  7, undefined                              */      0,                                                  state_undefined     },
+    { /*  8, undefined                              */      0,                                                  state_undefined     },
+    { /*  9, undefined                              */      0,                                                  state_undefined     },
+    { /* 10, undefined                              */      0,                                                  state_undefined     },
+    { /* 11, undefined                              */      0,                                                  state_undefined     },
+    { /* 12, undefined                              */      0,                                                  state_undefined     },
+    { /* 13, undefined                              */      0,                                                  state_undefined     },
+    { /* 14, undefined                              */      0,                                                  state_undefined     },
+    { /* 15, undefined                              */      0,                                                  state_undefined     },
+    { /* 16, WINED3DTS_TEXTURE0                     */      STATE_TRANSFORM(WINED3DTS_TEXTURE0),                transform_texture   },
+    { /* 17, WINED3DTS_TEXTURE1                     */      STATE_TRANSFORM(WINED3DTS_TEXTURE1),                transform_texture   },
+    { /* 18, WINED3DTS_TEXTURE2                     */      STATE_TRANSFORM(WINED3DTS_TEXTURE2),                transform_texture   },
+    { /* 19, WINED3DTS_TEXTURE3                     */      STATE_TRANSFORM(WINED3DTS_TEXTURE3),                transform_texture   },
+    { /* 20, WINED3DTS_TEXTURE4                     */      STATE_TRANSFORM(WINED3DTS_TEXTURE4),                transform_texture   },
+    { /* 21, WINED3DTS_TEXTURE5                     */      STATE_TRANSFORM(WINED3DTS_TEXTURE5),                transform_texture   },
+    { /* 22, WINED3DTS_TEXTURE6                     */      STATE_TRANSFORM(WINED3DTS_TEXTURE6),                transform_texture   },
+    { /* 23, WINED3DTS_TEXTURE7                     */      STATE_TRANSFORM(WINED3DTS_TEXTURE7),                transform_texture   },
+      /* A huge gap between TEXTURE7 and WORLDMATRIX(0) :-( But entries are needed to catch then if a broken app sets them */
+    { /* 24, undefined                              */      0,                                                  state_undefined     },
+    { /* 25, undefined                              */      0,                                                  state_undefined     },
+    { /* 26, undefined                              */      0,                                                  state_undefined     },
+    { /* 27, undefined                              */      0,                                                  state_undefined     },
+    { /* 28, undefined                              */      0,                                                  state_undefined     },
+    { /* 29, undefined                              */      0,                                                  state_undefined     },
+    { /* 30, undefined                              */      0,                                                  state_undefined     },
+    { /* 31, undefined                              */      0,                                                  state_undefined     },
+    { /* 32, undefined                              */      0,                                                  state_undefined     },
+    { /* 33, undefined                              */      0,                                                  state_undefined     },
+    { /* 34, undefined                              */      0,                                                  state_undefined     },
+    { /* 35, undefined                              */      0,                                                  state_undefined     },
+    { /* 36, undefined                              */      0,                                                  state_undefined     },
+    { /* 37, undefined                              */      0,                                                  state_undefined     },
+    { /* 38, undefined                              */      0,                                                  state_undefined     },
+    { /* 39, undefined                              */      0,                                                  state_undefined     },
+    { /* 40, undefined                              */      0,                                                  state_undefined     },
+    { /* 41, undefined                              */      0,                                                  state_undefined     },
+    { /* 42, undefined                              */      0,                                                  state_undefined     },
+    { /* 43, undefined                              */      0,                                                  state_undefined     },
+    { /* 44, undefined                              */      0,                                                  state_undefined     },
+    { /* 45, undefined                              */      0,                                                  state_undefined     },
+    { /* 46, undefined                              */      0,                                                  state_undefined     },
+    { /* 47, undefined                              */      0,                                                  state_undefined     },
+    { /* 48, undefined                              */      0,                                                  state_undefined     },
+    { /* 49, undefined                              */      0,                                                  state_undefined     },
+    { /* 50, undefined                              */      0,                                                  state_undefined     },
+    { /* 51, undefined                              */      0,                                                  state_undefined     },
+    { /* 52, undefined                              */      0,                                                  state_undefined     },
+    { /* 53, undefined                              */      0,                                                  state_undefined     },
+    { /* 54, undefined                              */      0,                                                  state_undefined     },
+    { /* 55, undefined                              */      0,                                                  state_undefined     },
+    { /* 56, undefined                              */      0,                                                  state_undefined     },
+    { /* 57, undefined                              */      0,                                                  state_undefined     },
+    { /* 58, undefined                              */      0,                                                  state_undefined     },
+    { /* 59, undefined                              */      0,                                                  state_undefined     },
+    { /* 60, undefined                              */      0,                                                  state_undefined     },
+    { /* 61, undefined                              */      0,                                                  state_undefined     },
+    { /* 62, undefined                              */      0,                                                  state_undefined     },
+    { /* 63, undefined                              */      0,                                                  state_undefined     },
+    { /* 64, undefined                              */      0,                                                  state_undefined     },
+    { /* 65, undefined                              */      0,                                                  state_undefined     },
+    { /* 66, undefined                              */      0,                                                  state_undefined     },
+    { /* 67, undefined                              */      0,                                                  state_undefined     },
+    { /* 68, undefined                              */      0,                                                  state_undefined     },
+    { /* 69, undefined                              */      0,                                                  state_undefined     },
+    { /* 70, undefined                              */      0,                                                  state_undefined     },
+    { /* 71, undefined                              */      0,                                                  state_undefined     },
+    { /* 72, undefined                              */      0,                                                  state_undefined     },
+    { /* 73, undefined                              */      0,                                                  state_undefined     },
+    { /* 74, undefined                              */      0,                                                  state_undefined     },
+    { /* 75, undefined                              */      0,                                                  state_undefined     },
+    { /* 76, undefined                              */      0,                                                  state_undefined     },
+    { /* 77, undefined                              */      0,                                                  state_undefined     },
+    { /* 78, undefined                              */      0,                                                  state_undefined     },
+    { /* 79, undefined                              */      0,                                                  state_undefined     },
+    { /* 80, undefined                              */      0,                                                  state_undefined     },
+    { /* 81, undefined                              */      0,                                                  state_undefined     },
+    { /* 82, undefined                              */      0,                                                  state_undefined     },
+    { /* 83, undefined                              */      0,                                                  state_undefined     },
+    { /* 84, undefined                              */      0,                                                  state_undefined     },
+    { /* 85, undefined                              */      0,                                                  state_undefined     },
+    { /* 86, undefined                              */      0,                                                  state_undefined     },
+    { /* 87, undefined                              */      0,                                                  state_undefined     },
+    { /* 88, undefined                              */      0,                                                  state_undefined     },
+    { /* 89, undefined                              */      0,                                                  state_undefined     },
+    { /* 90, undefined                              */      0,                                                  state_undefined     },
+    { /* 91, undefined                              */      0,                                                  state_undefined     },
+    { /* 92, undefined                              */      0,                                                  state_undefined     },
+    { /* 93, undefined                              */      0,                                                  state_undefined     },
+    { /* 94, undefined                              */      0,                                                  state_undefined     },
+    { /* 95, undefined                              */      0,                                                  state_undefined     },
+    { /* 96, undefined                              */      0,                                                  state_undefined     },
+    { /* 97, undefined                              */      0,                                                  state_undefined     },
+    { /* 98, undefined                              */      0,                                                  state_undefined     },
+    { /* 99, undefined                              */      0,                                                  state_undefined     },
+    { /*100, undefined                              */      0,                                                  state_undefined     },
+    { /*101, undefined                              */      0,                                                  state_undefined     },
+    { /*102, undefined                              */      0,                                                  state_undefined     },
+    { /*103, undefined                              */      0,                                                  state_undefined     },
+    { /*104, undefined                              */      0,                                                  state_undefined     },
+    { /*105, undefined                              */      0,                                                  state_undefined     },
+    { /*106, undefined                              */      0,                                                  state_undefined     },
+    { /*107, undefined                              */      0,                                                  state_undefined     },
+    { /*108, undefined                              */      0,                                                  state_undefined     },
+    { /*109, undefined                              */      0,                                                  state_undefined     },
+    { /*110, undefined                              */      0,                                                  state_undefined     },
+    { /*111, undefined                              */      0,                                                  state_undefined     },
+    { /*112, undefined                              */      0,                                                  state_undefined     },
+    { /*113, undefined                              */      0,                                                  state_undefined     },
+    { /*114, undefined                              */      0,                                                  state_undefined     },
+    { /*115, undefined                              */      0,                                                  state_undefined     },
+    { /*116, undefined                              */      0,                                                  state_undefined     },
+    { /*117, undefined                              */      0,                                                  state_undefined     },
+    { /*118, undefined                              */      0,                                                  state_undefined     },
+    { /*119, undefined                              */      0,                                                  state_undefined     },
+    { /*120, undefined                              */      0,                                                  state_undefined     },
+    { /*121, undefined                              */      0,                                                  state_undefined     },
+    { /*122, undefined                              */      0,                                                  state_undefined     },
+    { /*123, undefined                              */      0,                                                  state_undefined     },
+    { /*124, undefined                              */      0,                                                  state_undefined     },
+    { /*125, undefined                              */      0,                                                  state_undefined     },
+    { /*126, undefined                              */      0,                                                  state_undefined     },
+    { /*127, undefined                              */      0,                                                  state_undefined     },
+    { /*128, undefined                              */      0,                                                  state_undefined     },
+    { /*129, undefined                              */      0,                                                  state_undefined     },
+    { /*130, undefined                              */      0,                                                  state_undefined     },
+    { /*131, undefined                              */      0,                                                  state_undefined     },
+    { /*132, undefined                              */      0,                                                  state_undefined     },
+    { /*133, undefined                              */      0,                                                  state_undefined     },
+    { /*134, undefined                              */      0,                                                  state_undefined     },
+    { /*135, undefined                              */      0,                                                  state_undefined     },
+    { /*136, undefined                              */      0,                                                  state_undefined     },
+    { /*137, undefined                              */      0,                                                  state_undefined     },
+    { /*138, undefined                              */      0,                                                  state_undefined     },
+    { /*139, undefined                              */      0,                                                  state_undefined     },
+    { /*140, undefined                              */      0,                                                  state_undefined     },
+    { /*141, undefined                              */      0,                                                  state_undefined     },
+    { /*142, undefined                              */      0,                                                  state_undefined     },
+    { /*143, undefined                              */      0,                                                  state_undefined     },
+    { /*144, undefined                              */      0,                                                  state_undefined     },
+    { /*145, undefined                              */      0,                                                  state_undefined     },
+    { /*146, undefined                              */      0,                                                  state_undefined     },
+    { /*147, undefined                              */      0,                                                  state_undefined     },
+    { /*148, undefined                              */      0,                                                  state_undefined     },
+    { /*149, undefined                              */      0,                                                  state_undefined     },
+    { /*150, undefined                              */      0,                                                  state_undefined     },
+    { /*151, undefined                              */      0,                                                  state_undefined     },
+    { /*152, undefined                              */      0,                                                  state_undefined     },
+    { /*153, undefined                              */      0,                                                  state_undefined     },
+    { /*154, undefined                              */      0,                                                  state_undefined     },
+    { /*155, undefined                              */      0,                                                  state_undefined     },
+    { /*156, undefined                              */      0,                                                  state_undefined     },
+    { /*157, undefined                              */      0,                                                  state_undefined     },
+    { /*158, undefined                              */      0,                                                  state_undefined     },
+    { /*159, undefined                              */      0,                                                  state_undefined     },
+    { /*160, undefined                              */      0,                                                  state_undefined     },
+    { /*161, undefined                              */      0,                                                  state_undefined     },
+    { /*162, undefined                              */      0,                                                  state_undefined     },
+    { /*163, undefined                              */      0,                                                  state_undefined     },
+    { /*164, undefined                              */      0,                                                  state_undefined     },
+    { /*165, undefined                              */      0,                                                  state_undefined     },
+    { /*166, undefined                              */      0,                                                  state_undefined     },
+    { /*167, undefined                              */      0,                                                  state_undefined     },
+    { /*168, undefined                              */      0,                                                  state_undefined     },
+    { /*169, undefined                              */      0,                                                  state_undefined     },
+    { /*170, undefined                              */      0,                                                  state_undefined     },
+    { /*171, undefined                              */      0,                                                  state_undefined     },
+    { /*172, undefined                              */      0,                                                  state_undefined     },
+    { /*173, undefined                              */      0,                                                  state_undefined     },
+    { /*174, undefined                              */      0,                                                  state_undefined     },
+    { /*175, undefined                              */      0,                                                  state_undefined     },
+    { /*176, undefined                              */      0,                                                  state_undefined     },
+    { /*177, undefined                              */      0,                                                  state_undefined     },
+    { /*178, undefined                              */      0,                                                  state_undefined     },
+    { /*179, undefined                              */      0,                                                  state_undefined     },
+    { /*180, undefined                              */      0,                                                  state_undefined     },
+    { /*181, undefined                              */      0,                                                  state_undefined     },
+    { /*182, undefined                              */      0,                                                  state_undefined     },
+    { /*183, undefined                              */      0,                                                  state_undefined     },
+    { /*184, undefined                              */      0,                                                  state_undefined     },
+    { /*185, undefined                              */      0,                                                  state_undefined     },
+    { /*186, undefined                              */      0,                                                  state_undefined     },
+    { /*187, undefined                              */      0,                                                  state_undefined     },
+    { /*188, undefined                              */      0,                                                  state_undefined     },
+    { /*189, undefined                              */      0,                                                  state_undefined     },
+    { /*190, undefined                              */      0,                                                  state_undefined     },
+    { /*191, undefined                              */      0,                                                  state_undefined     },
+    { /*192, undefined                              */      0,                                                  state_undefined     },
+    { /*193, undefined                              */      0,                                                  state_undefined     },
+    { /*194, undefined                              */      0,                                                  state_undefined     },
+    { /*195, undefined                              */      0,                                                  state_undefined     },
+    { /*196, undefined                              */      0,                                                  state_undefined     },
+    { /*197, undefined                              */      0,                                                  state_undefined     },
+    { /*198, undefined                              */      0,                                                  state_undefined     },
+    { /*199, undefined                              */      0,                                                  state_undefined     },
+    { /*200, undefined                              */      0,                                                  state_undefined     },
+    { /*201, undefined                              */      0,                                                  state_undefined     },
+    { /*202, undefined                              */      0,                                                  state_undefined     },
+    { /*203, undefined                              */      0,                                                  state_undefined     },
+    { /*204, undefined                              */      0,                                                  state_undefined     },
+    { /*205, undefined                              */      0,                                                  state_undefined     },
+    { /*206, undefined                              */      0,                                                  state_undefined     },
+    { /*207, undefined                              */      0,                                                  state_undefined     },
+    { /*208, undefined                              */      0,                                                  state_undefined     },
+    { /*209, undefined                              */      0,                                                  state_undefined     },
+    { /*210, undefined                              */      0,                                                  state_undefined     },
+    { /*211, undefined                              */      0,                                                  state_undefined     },
+    { /*212, undefined                              */      0,                                                  state_undefined     },
+    { /*213, undefined                              */      0,                                                  state_undefined     },
+    { /*214, undefined                              */      0,                                                  state_undefined     },
+    { /*215, undefined                              */      0,                                                  state_undefined     },
+    { /*216, undefined                              */      0,                                                  state_undefined     },
+    { /*217, undefined                              */      0,                                                  state_undefined     },
+    { /*218, undefined                              */      0,                                                  state_undefined     },
+    { /*219, undefined                              */      0,                                                  state_undefined     },
+    { /*220, undefined                              */      0,                                                  state_undefined     },
+    { /*221, undefined                              */      0,                                                  state_undefined     },
+    { /*222, undefined                              */      0,                                                  state_undefined     },
+    { /*223, undefined                              */      0,                                                  state_undefined     },
+    { /*224, undefined                              */      0,                                                  state_undefined     },
+    { /*225, undefined                              */      0,                                                  state_undefined     },
+    { /*226, undefined                              */      0,                                                  state_undefined     },
+    { /*227, undefined                              */      0,                                                  state_undefined     },
+    { /*228, undefined                              */      0,                                                  state_undefined     },
+    { /*229, undefined                              */      0,                                                  state_undefined     },
+    { /*230, undefined                              */      0,                                                  state_undefined     },
+    { /*231, undefined                              */      0,                                                  state_undefined     },
+    { /*232, undefined                              */      0,                                                  state_undefined     },
+    { /*233, undefined                              */      0,                                                  state_undefined     },
+    { /*234, undefined                              */      0,                                                  state_undefined     },
+    { /*235, undefined                              */      0,                                                  state_undefined     },
+    { /*236, undefined                              */      0,                                                  state_undefined     },
+    { /*237, undefined                              */      0,                                                  state_undefined     },
+    { /*238, undefined                              */      0,                                                  state_undefined     },
+    { /*239, undefined                              */      0,                                                  state_undefined     },
+    { /*240, undefined                              */      0,                                                  state_undefined     },
+    { /*241, undefined                              */      0,                                                  state_undefined     },
+    { /*242, undefined                              */      0,                                                  state_undefined     },
+    { /*243, undefined                              */      0,                                                  state_undefined     },
+    { /*244, undefined                              */      0,                                                  state_undefined     },
+    { /*245, undefined                              */      0,                                                  state_undefined     },
+    { /*246, undefined                              */      0,                                                  state_undefined     },
+    { /*247, undefined                              */      0,                                                  state_undefined     },
+    { /*248, undefined                              */      0,                                                  state_undefined     },
+    { /*249, undefined                              */      0,                                                  state_undefined     },
+    { /*250, undefined                              */      0,                                                  state_undefined     },
+    { /*251, undefined                              */      0,                                                  state_undefined     },
+    { /*252, undefined                              */      0,                                                  state_undefined     },
+    { /*253, undefined                              */      0,                                                  state_undefined     },
+    { /*254, undefined                              */      0,                                                  state_undefined     },
+    { /*255, undefined                              */      0,                                                  state_undefined     },
+      /* End huge gap */
+    { /*256, WINED3DTS_WORLDMATRIX(0)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)),          transform_world     },
+    { /*257, WINED3DTS_WORLDMATRIX(1)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(1)),          transform_worldex   },
+    { /*258, WINED3DTS_WORLDMATRIX(2)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(2)),          transform_worldex   },
+    { /*259, WINED3DTS_WORLDMATRIX(3)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(3)),          transform_worldex   },
+    { /*260, WINED3DTS_WORLDMATRIX(4)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(4)),          transform_worldex   },
+    { /*261, WINED3DTS_WORLDMATRIX(5)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(5)),          transform_worldex   },
+    { /*262, WINED3DTS_WORLDMATRIX(6)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(6)),          transform_worldex   },
+    { /*263, WINED3DTS_WORLDMATRIX(7)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(7)),          transform_worldex   },
+    { /*264, WINED3DTS_WORLDMATRIX(8)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(8)),          transform_worldex   },
+    { /*265, WINED3DTS_WORLDMATRIX(9)               */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(9)),          transform_worldex   },
+    { /*266, WINED3DTS_WORLDMATRIX(10)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(10)),         transform_worldex   },
+    { /*267, WINED3DTS_WORLDMATRIX(11)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(11)),         transform_worldex   },
+    { /*268, WINED3DTS_WORLDMATRIX(12)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(12)),         transform_worldex   },
+    { /*269, WINED3DTS_WORLDMATRIX(13)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(13)),         transform_worldex   },
+    { /*270, WINED3DTS_WORLDMATRIX(14)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(14)),         transform_worldex   },
+    { /*271, WINED3DTS_WORLDMATRIX(15)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(15)),         transform_worldex   },
+    { /*272, WINED3DTS_WORLDMATRIX(16)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(16)),         transform_worldex   },
+    { /*273, WINED3DTS_WORLDMATRIX(17)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(17)),         transform_worldex   },
+    { /*274, WINED3DTS_WORLDMATRIX(18)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(18)),         transform_worldex   },
+    { /*275, WINED3DTS_WORLDMATRIX(19)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(19)),         transform_worldex   },
+    { /*276, WINED3DTS_WORLDMATRIX(20)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(20)),         transform_worldex   },
+    { /*277, WINED3DTS_WORLDMATRIX(21)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(21)),         transform_worldex   },
+    { /*278, WINED3DTS_WORLDMATRIX(22)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(22)),         transform_worldex   },
+    { /*279, WINED3DTS_WORLDMATRIX(23)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(23)),         transform_worldex   },
+    { /*280, WINED3DTS_WORLDMATRIX(24)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(24)),         transform_worldex   },
+    { /*281, WINED3DTS_WORLDMATRIX(25)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(25)),         transform_worldex   },
+    { /*282, WINED3DTS_WORLDMATRIX(26)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(26)),         transform_worldex   },
+    { /*283, WINED3DTS_WORLDMATRIX(27)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(27)),         transform_worldex   },
+    { /*284, WINED3DTS_WORLDMATRIX(28)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(28)),         transform_worldex   },
+    { /*285, WINED3DTS_WORLDMATRIX(29)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(29)),         transform_worldex   },
+    { /*286, WINED3DTS_WORLDMATRIX(30)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(30)),         transform_worldex   },
+    { /*287, WINED3DTS_WORLDMATRIX(31)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(31)),         transform_worldex   },
+    { /*288, WINED3DTS_WORLDMATRIX(32)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(32)),         transform_worldex   },
+    { /*289, WINED3DTS_WORLDMATRIX(33)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(33)),         transform_worldex   },
+    { /*290, WINED3DTS_WORLDMATRIX(34)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(34)),         transform_worldex   },
+    { /*291, WINED3DTS_WORLDMATRIX(35)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(35)),         transform_worldex   },
+    { /*292, WINED3DTS_WORLDMATRIX(36)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(36)),         transform_worldex   },
+    { /*293, WINED3DTS_WORLDMATRIX(37)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(37)),         transform_worldex   },
+    { /*294, WINED3DTS_WORLDMATRIX(38)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(38)),         transform_worldex   },
+    { /*295, WINED3DTS_WORLDMATRIX(39)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(39)),         transform_worldex   },
+    { /*296, WINED3DTS_WORLDMATRIX(40)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(40)),         transform_worldex   },
+    { /*297, WINED3DTS_WORLDMATRIX(41)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(41)),         transform_worldex   },
+    { /*298, WINED3DTS_WORLDMATRIX(42)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(42)),         transform_worldex   },
+    { /*299, WINED3DTS_WORLDMATRIX(43)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(43)),         transform_worldex   },
+    { /*300, WINED3DTS_WORLDMATRIX(44)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(44)),         transform_worldex   },
+    { /*301, WINED3DTS_WORLDMATRIX(45)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(45)),         transform_worldex   },
+    { /*302, WINED3DTS_WORLDMATRIX(46)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(46)),         transform_worldex   },
+    { /*303, WINED3DTS_WORLDMATRIX(47)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(47)),         transform_worldex   },
+    { /*304, WINED3DTS_WORLDMATRIX(48)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(48)),         transform_worldex   },
+    { /*305, WINED3DTS_WORLDMATRIX(49)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(49)),         transform_worldex   },
+    { /*306, WINED3DTS_WORLDMATRIX(50)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(50)),         transform_worldex   },
+    { /*307, WINED3DTS_WORLDMATRIX(51)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(51)),         transform_worldex   },
+    { /*308, WINED3DTS_WORLDMATRIX(52)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(52)),         transform_worldex   },
+    { /*309, WINED3DTS_WORLDMATRIX(53)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(53)),         transform_worldex   },
+    { /*310, WINED3DTS_WORLDMATRIX(54)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(54)),         transform_worldex   },
+    { /*311, WINED3DTS_WORLDMATRIX(55)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(55)),         transform_worldex   },
+    { /*312, WINED3DTS_WORLDMATRIX(56)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(56)),         transform_worldex   },
+    { /*313, WINED3DTS_WORLDMATRIX(57)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(57)),         transform_worldex   },
+    { /*314, WINED3DTS_WORLDMATRIX(58)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(58)),         transform_worldex   },
+    { /*315, WINED3DTS_WORLDMATRIX(59)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(59)),         transform_worldex   },
+    { /*316, WINED3DTS_WORLDMATRIX(60)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(60)),         transform_worldex   },
+    { /*317, WINED3DTS_WORLDMATRIX(61)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(61)),         transform_worldex   },
+    { /*318, WINED3DTS_WORLDMATRIX(62)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(62)),         transform_worldex   },
+    { /*319, WINED3DTS_WORLDMATRIX(63)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(63)),         transform_worldex   },
+    { /*320, WINED3DTS_WORLDMATRIX(64)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(64)),         transform_worldex   },
+    { /*321, WINED3DTS_WORLDMATRIX(65)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(65)),         transform_worldex   },
+    { /*322, WINED3DTS_WORLDMATRIX(66)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(66)),         transform_worldex   },
+    { /*323, WINED3DTS_WORLDMATRIX(67)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(67)),         transform_worldex   },
+    { /*324, WINED3DTS_WORLDMATRIX(68)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(68)),         transform_worldex   },
+    { /*325, WINED3DTS_WORLDMATRIX(68)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(69)),         transform_worldex   },
+    { /*326, WINED3DTS_WORLDMATRIX(70)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(70)),         transform_worldex   },
+    { /*327, WINED3DTS_WORLDMATRIX(71)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(71)),         transform_worldex   },
+    { /*328, WINED3DTS_WORLDMATRIX(72)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(72)),         transform_worldex   },
+    { /*329, WINED3DTS_WORLDMATRIX(73)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(73)),         transform_worldex   },
+    { /*330, WINED3DTS_WORLDMATRIX(74)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(74)),         transform_worldex   },
+    { /*331, WINED3DTS_WORLDMATRIX(75)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(75)),         transform_worldex   },
+    { /*332, WINED3DTS_WORLDMATRIX(76)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(76)),         transform_worldex   },
+    { /*333, WINED3DTS_WORLDMATRIX(77)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(77)),         transform_worldex   },
+    { /*334, WINED3DTS_WORLDMATRIX(78)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(78)),         transform_worldex   },
+    { /*335, WINED3DTS_WORLDMATRIX(79)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(79)),         transform_worldex   },
+    { /*336, WINED3DTS_WORLDMATRIX(80)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(80)),         transform_worldex   },
+    { /*337, WINED3DTS_WORLDMATRIX(81)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(81)),         transform_worldex   },
+    { /*338, WINED3DTS_WORLDMATRIX(82)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(82)),         transform_worldex   },
+    { /*339, WINED3DTS_WORLDMATRIX(83)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(83)),         transform_worldex   },
+    { /*340, WINED3DTS_WORLDMATRIX(84)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(84)),         transform_worldex   },
+    { /*341, WINED3DTS_WORLDMATRIX(85)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(85)),         transform_worldex   },
+    { /*341, WINED3DTS_WORLDMATRIX(86)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(86)),         transform_worldex   },
+    { /*343, WINED3DTS_WORLDMATRIX(87)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(87)),         transform_worldex   },
+    { /*344, WINED3DTS_WORLDMATRIX(88)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(88)),         transform_worldex   },
+    { /*345, WINED3DTS_WORLDMATRIX(89)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(89)),         transform_worldex   },
+    { /*346, WINED3DTS_WORLDMATRIX(90)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(90)),         transform_worldex   },
+    { /*347, WINED3DTS_WORLDMATRIX(91)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(91)),         transform_worldex   },
+    { /*348, WINED3DTS_WORLDMATRIX(92)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(92)),         transform_worldex   },
+    { /*349, WINED3DTS_WORLDMATRIX(93)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(93)),         transform_worldex   },
+    { /*350, WINED3DTS_WORLDMATRIX(94)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(94)),         transform_worldex   },
+    { /*351, WINED3DTS_WORLDMATRIX(95)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(95)),         transform_worldex   },
+    { /*352, WINED3DTS_WORLDMATRIX(96)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(96)),         transform_worldex   },
+    { /*353, WINED3DTS_WORLDMATRIX(97)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(97)),         transform_worldex   },
+    { /*354, WINED3DTS_WORLDMATRIX(98)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(98)),         transform_worldex   },
+    { /*355, WINED3DTS_WORLDMATRIX(99)              */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(99)),         transform_worldex   },
+    { /*356, WINED3DTS_WORLDMATRIX(100)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(100)),        transform_worldex   },
+    { /*357, WINED3DTS_WORLDMATRIX(101)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(101)),        transform_worldex   },
+    { /*358, WINED3DTS_WORLDMATRIX(102)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(102)),        transform_worldex   },
+    { /*359, WINED3DTS_WORLDMATRIX(103)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(103)),        transform_worldex   },
+    { /*360, WINED3DTS_WORLDMATRIX(104)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(104)),        transform_worldex   },
+    { /*361, WINED3DTS_WORLDMATRIX(105)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(105)),        transform_worldex   },
+    { /*362, WINED3DTS_WORLDMATRIX(106)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(106)),        transform_worldex   },
+    { /*363, WINED3DTS_WORLDMATRIX(107)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(107)),        transform_worldex   },
+    { /*364, WINED3DTS_WORLDMATRIX(108)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(108)),        transform_worldex   },
+    { /*365, WINED3DTS_WORLDMATRIX(109)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(109)),        transform_worldex   },
+    { /*366, WINED3DTS_WORLDMATRIX(110)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(110)),        transform_worldex   },
+    { /*367, WINED3DTS_WORLDMATRIX(111)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(111)),        transform_worldex   },
+    { /*368, WINED3DTS_WORLDMATRIX(112)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(112)),        transform_worldex   },
+    { /*369, WINED3DTS_WORLDMATRIX(113)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(113)),        transform_worldex   },
+    { /*370, WINED3DTS_WORLDMATRIX(114)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(114)),        transform_worldex   },
+    { /*371, WINED3DTS_WORLDMATRIX(115)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(115)),        transform_worldex   },
+    { /*372, WINED3DTS_WORLDMATRIX(116)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(116)),        transform_worldex   },
+    { /*373, WINED3DTS_WORLDMATRIX(117)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(117)),        transform_worldex   },
+    { /*374, WINED3DTS_WORLDMATRIX(118)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(118)),        transform_worldex   },
+    { /*375, WINED3DTS_WORLDMATRIX(119)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(119)),        transform_worldex   },
+    { /*376, WINED3DTS_WORLDMATRIX(120)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(120)),        transform_worldex   },
+    { /*377, WINED3DTS_WORLDMATRIX(121)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(121)),        transform_worldex   },
+    { /*378, WINED3DTS_WORLDMATRIX(122)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(122)),        transform_worldex   },
+    { /*379, WINED3DTS_WORLDMATRIX(123)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(123)),        transform_worldex   },
+    { /*380, WINED3DTS_WORLDMATRIX(124)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(124)),        transform_worldex   },
+    { /*381, WINED3DTS_WORLDMATRIX(125)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(125)),        transform_worldex   },
+    { /*382, WINED3DTS_WORLDMATRIX(126)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(126)),        transform_worldex   },
+    { /*383, WINED3DTS_WORLDMATRIX(127)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(127)),        transform_worldex   },
+    { /*384, WINED3DTS_WORLDMATRIX(128)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(128)),        transform_worldex   },
+    { /*385, WINED3DTS_WORLDMATRIX(129)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(129)),        transform_worldex   },
+    { /*386, WINED3DTS_WORLDMATRIX(130)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(130)),        transform_worldex   },
+    { /*387, WINED3DTS_WORLDMATRIX(131)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(131)),        transform_worldex   },
+    { /*388, WINED3DTS_WORLDMATRIX(132)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(132)),        transform_worldex   },
+    { /*389, WINED3DTS_WORLDMATRIX(133)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(133)),        transform_worldex   },
+    { /*390, WINED3DTS_WORLDMATRIX(134)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(134)),        transform_worldex   },
+    { /*391, WINED3DTS_WORLDMATRIX(135)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(135)),        transform_worldex   },
+    { /*392, WINED3DTS_WORLDMATRIX(136)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(136)),        transform_worldex   },
+    { /*393, WINED3DTS_WORLDMATRIX(137)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(137)),        transform_worldex   },
+    { /*394, WINED3DTS_WORLDMATRIX(138)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(138)),        transform_worldex   },
+    { /*395, WINED3DTS_WORLDMATRIX(139)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(139)),        transform_worldex   },
+    { /*396, WINED3DTS_WORLDMATRIX(140)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(140)),        transform_worldex   },
+    { /*397, WINED3DTS_WORLDMATRIX(141)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(141)),        transform_worldex   },
+    { /*398, WINED3DTS_WORLDMATRIX(142)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(142)),        transform_worldex   },
+    { /*399, WINED3DTS_WORLDMATRIX(143)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(143)),        transform_worldex   },
+    { /*400, WINED3DTS_WORLDMATRIX(144)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(144)),        transform_worldex   },
+    { /*401, WINED3DTS_WORLDMATRIX(145)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(145)),        transform_worldex   },
+    { /*402, WINED3DTS_WORLDMATRIX(146)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(146)),        transform_worldex   },
+    { /*403, WINED3DTS_WORLDMATRIX(147)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(147)),        transform_worldex   },
+    { /*404, WINED3DTS_WORLDMATRIX(148)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(148)),        transform_worldex   },
+    { /*405, WINED3DTS_WORLDMATRIX(149)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(149)),        transform_worldex   },
+    { /*406, WINED3DTS_WORLDMATRIX(150)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(150)),        transform_worldex   },
+    { /*407, WINED3DTS_WORLDMATRIX(151)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(151)),        transform_worldex   },
+    { /*408, WINED3DTS_WORLDMATRIX(152)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(152)),        transform_worldex   },
+    { /*409, WINED3DTS_WORLDMATRIX(153)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(153)),        transform_worldex   },
+    { /*410, WINED3DTS_WORLDMATRIX(154)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(154)),        transform_worldex   },
+    { /*411, WINED3DTS_WORLDMATRIX(155)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(155)),        transform_worldex   },
+    { /*412, WINED3DTS_WORLDMATRIX(156)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(156)),        transform_worldex   },
+    { /*413, WINED3DTS_WORLDMATRIX(157)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(157)),        transform_worldex   },
+    { /*414, WINED3DTS_WORLDMATRIX(158)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(158)),        transform_worldex   },
+    { /*415, WINED3DTS_WORLDMATRIX(159)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(159)),        transform_worldex   },
+    { /*416, WINED3DTS_WORLDMATRIX(160)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(160)),        transform_worldex   },
+    { /*417, WINED3DTS_WORLDMATRIX(161)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(161)),        transform_worldex   },
+    { /*418, WINED3DTS_WORLDMATRIX(162)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(162)),        transform_worldex   },
+    { /*419, WINED3DTS_WORLDMATRIX(163)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(163)),        transform_worldex   },
+    { /*420, WINED3DTS_WORLDMATRIX(164)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(164)),        transform_worldex   },
+    { /*421, WINED3DTS_WORLDMATRIX(165)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(165)),        transform_worldex   },
+    { /*422, WINED3DTS_WORLDMATRIX(166)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(166)),        transform_worldex   },
+    { /*423, WINED3DTS_WORLDMATRIX(167)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(167)),        transform_worldex   },
+    { /*424, WINED3DTS_WORLDMATRIX(168)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(168)),        transform_worldex   },
+    { /*425, WINED3DTS_WORLDMATRIX(168)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(169)),        transform_worldex   },
+    { /*426, WINED3DTS_WORLDMATRIX(170)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(170)),        transform_worldex   },
+    { /*427, WINED3DTS_WORLDMATRIX(171)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(171)),        transform_worldex   },
+    { /*428, WINED3DTS_WORLDMATRIX(172)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(172)),        transform_worldex   },
+    { /*429, WINED3DTS_WORLDMATRIX(173)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(173)),        transform_worldex   },
+    { /*430, WINED3DTS_WORLDMATRIX(174)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(174)),        transform_worldex   },
+    { /*431, WINED3DTS_WORLDMATRIX(175)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(175)),        transform_worldex   },
+    { /*432, WINED3DTS_WORLDMATRIX(176)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(176)),        transform_worldex   },
+    { /*433, WINED3DTS_WORLDMATRIX(177)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(177)),        transform_worldex   },
+    { /*434, WINED3DTS_WORLDMATRIX(178)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(178)),        transform_worldex   },
+    { /*435, WINED3DTS_WORLDMATRIX(179)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(179)),        transform_worldex   },
+    { /*436, WINED3DTS_WORLDMATRIX(180)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(180)),        transform_worldex   },
+    { /*437, WINED3DTS_WORLDMATRIX(181)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(181)),        transform_worldex   },
+    { /*438, WINED3DTS_WORLDMATRIX(182)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(182)),        transform_worldex   },
+    { /*439, WINED3DTS_WORLDMATRIX(183)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(183)),        transform_worldex   },
+    { /*440, WINED3DTS_WORLDMATRIX(184)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(184)),        transform_worldex   },
+    { /*441, WINED3DTS_WORLDMATRIX(185)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(185)),        transform_worldex   },
+    { /*441, WINED3DTS_WORLDMATRIX(186)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(186)),        transform_worldex   },
+    { /*443, WINED3DTS_WORLDMATRIX(187)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(187)),        transform_worldex   },
+    { /*444, WINED3DTS_WORLDMATRIX(188)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(188)),        transform_worldex   },
+    { /*445, WINED3DTS_WORLDMATRIX(189)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(189)),        transform_worldex   },
+    { /*446, WINED3DTS_WORLDMATRIX(190)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(190)),        transform_worldex   },
+    { /*447, WINED3DTS_WORLDMATRIX(191)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(191)),        transform_worldex   },
+    { /*448, WINED3DTS_WORLDMATRIX(192)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(192)),        transform_worldex   },
+    { /*449, WINED3DTS_WORLDMATRIX(193)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(193)),        transform_worldex   },
+    { /*450, WINED3DTS_WORLDMATRIX(194)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(194)),        transform_worldex   },
+    { /*451, WINED3DTS_WORLDMATRIX(195)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(195)),        transform_worldex   },
+    { /*452, WINED3DTS_WORLDMATRIX(196)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(196)),        transform_worldex   },
+    { /*453, WINED3DTS_WORLDMATRIX(197)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(197)),        transform_worldex   },
+    { /*454, WINED3DTS_WORLDMATRIX(198)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(198)),        transform_worldex   },
+    { /*455, WINED3DTS_WORLDMATRIX(199)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(199)),        transform_worldex   },
+    { /*356, WINED3DTS_WORLDMATRIX(200)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(200)),        transform_worldex   },
+    { /*457, WINED3DTS_WORLDMATRIX(201)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(201)),        transform_worldex   },
+    { /*458, WINED3DTS_WORLDMATRIX(202)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(202)),        transform_worldex   },
+    { /*459, WINED3DTS_WORLDMATRIX(203)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(203)),        transform_worldex   },
+    { /*460, WINED3DTS_WORLDMATRIX(204)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(204)),        transform_worldex   },
+    { /*461, WINED3DTS_WORLDMATRIX(205)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(205)),        transform_worldex   },
+    { /*462, WINED3DTS_WORLDMATRIX(206)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(206)),        transform_worldex   },
+    { /*463, WINED3DTS_WORLDMATRIX(207)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(207)),        transform_worldex   },
+    { /*464, WINED3DTS_WORLDMATRIX(208)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(208)),        transform_worldex   },
+    { /*465, WINED3DTS_WORLDMATRIX(209)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(209)),        transform_worldex   },
+    { /*466, WINED3DTS_WORLDMATRIX(210)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(210)),        transform_worldex   },
+    { /*467, WINED3DTS_WORLDMATRIX(211)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(211)),        transform_worldex   },
+    { /*468, WINED3DTS_WORLDMATRIX(212)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(212)),        transform_worldex   },
+    { /*469, WINED3DTS_WORLDMATRIX(213)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(213)),        transform_worldex   },
+    { /*470, WINED3DTS_WORLDMATRIX(214)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(214)),        transform_worldex   },
+    { /*471, WINED3DTS_WORLDMATRIX(215)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(215)),        transform_worldex   },
+    { /*472, WINED3DTS_WORLDMATRIX(216)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(216)),        transform_worldex   },
+    { /*473, WINED3DTS_WORLDMATRIX(217)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(217)),        transform_worldex   },
+    { /*474, WINED3DTS_WORLDMATRIX(218)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(218)),        transform_worldex   },
+    { /*475, WINED3DTS_WORLDMATRIX(219)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(219)),        transform_worldex   },
+    { /*476, WINED3DTS_WORLDMATRIX(220)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(220)),        transform_worldex   },
+    { /*477, WINED3DTS_WORLDMATRIX(221)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(221)),        transform_worldex   },
+    { /*478, WINED3DTS_WORLDMATRIX(222)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(222)),        transform_worldex   },
+    { /*479, WINED3DTS_WORLDMATRIX(223)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(223)),        transform_worldex   },
+    { /*480, WINED3DTS_WORLDMATRIX(224)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(224)),        transform_worldex   },
+    { /*481, WINED3DTS_WORLDMATRIX(225)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(225)),        transform_worldex   },
+    { /*482, WINED3DTS_WORLDMATRIX(226)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(226)),        transform_worldex   },
+    { /*483, WINED3DTS_WORLDMATRIX(227)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(227)),        transform_worldex   },
+    { /*484, WINED3DTS_WORLDMATRIX(228)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(228)),        transform_worldex   },
+    { /*485, WINED3DTS_WORLDMATRIX(229)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(229)),        transform_worldex   },
+    { /*486, WINED3DTS_WORLDMATRIX(230)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(230)),        transform_worldex   },
+    { /*487, WINED3DTS_WORLDMATRIX(231)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(231)),        transform_worldex   },
+    { /*488, WINED3DTS_WORLDMATRIX(232)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(232)),        transform_worldex   },
+    { /*489, WINED3DTS_WORLDMATRIX(233)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(233)),        transform_worldex   },
+    { /*490, WINED3DTS_WORLDMATRIX(234)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(234)),        transform_worldex   },
+    { /*491, WINED3DTS_WORLDMATRIX(235)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(235)),        transform_worldex   },
+    { /*492, WINED3DTS_WORLDMATRIX(236)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(236)),        transform_worldex   },
+    { /*493, WINED3DTS_WORLDMATRIX(237)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(237)),        transform_worldex   },
+    { /*494, WINED3DTS_WORLDMATRIX(238)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(238)),        transform_worldex   },
+    { /*495, WINED3DTS_WORLDMATRIX(239)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(239)),        transform_worldex   },
+    { /*496, WINED3DTS_WORLDMATRIX(240)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(240)),        transform_worldex   },
+    { /*497, WINED3DTS_WORLDMATRIX(241)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(241)),        transform_worldex   },
+    { /*498, WINED3DTS_WORLDMATRIX(242)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(242)),        transform_worldex   },
+    { /*499, WINED3DTS_WORLDMATRIX(243)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(243)),        transform_worldex   },
+    { /*500, WINED3DTS_WORLDMATRIX(244)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(244)),        transform_worldex   },
+    { /*501, WINED3DTS_WORLDMATRIX(245)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(245)),        transform_worldex   },
+    { /*502, WINED3DTS_WORLDMATRIX(246)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(246)),        transform_worldex   },
+    { /*503, WINED3DTS_WORLDMATRIX(247)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(247)),        transform_worldex   },
+    { /*504, WINED3DTS_WORLDMATRIX(248)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(248)),        transform_worldex   },
+    { /*505, WINED3DTS_WORLDMATRIX(249)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(249)),        transform_worldex   },
+    { /*506, WINED3DTS_WORLDMATRIX(250)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(250)),        transform_worldex   },
+    { /*507, WINED3DTS_WORLDMATRIX(251)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(251)),        transform_worldex   },
+    { /*508, WINED3DTS_WORLDMATRIX(252)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(252)),        transform_worldex   },
+    { /*509, WINED3DTS_WORLDMATRIX(253)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(253)),        transform_worldex   },
+    { /*510, WINED3DTS_WORLDMATRIX(254)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(254)),        transform_worldex   },
+    { /*511, WINED3DTS_WORLDMATRIX(255)             */      STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(255)),        transform_worldex   },
+      /* Various Vertex states follow */
+    { /*   , STATE_STREAMSRC                        */      STATE_VDECL,                                        vertexdeclaration   },
+    { /*   , STATE_VDECL                            */      STATE_VDECL,                                        vertexdeclaration   },
+    { /*   , STATE_VSHADER                          */      STATE_VDECL,                                        vertexdeclaration   },
+    { /*   , STATE_VIEWPORT                         */      STATE_VIEWPORT,                                     viewport            },
+    { /*   , STATE_VERTEXSHADERCONSTANT             */      STATE_VERTEXSHADERCONSTANT,                         shaderconstant      },
+    { /*   , STATE_PIXELSHADERCONSTANT              */      STATE_VERTEXSHADERCONSTANT,                         shaderconstant      },
 };

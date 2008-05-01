@@ -633,8 +633,15 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
                 This->Flags |= SFLAG_ACTIVELOCK; /* When this flag is set to true, loading the surface again won't free THis->resource.allocatedMemory */
                 /* TODO: make activeLock a bit more intelligent, maybe implement a method to purge the texture memory. */
 
-                /* Make sure that the texture is loaded */
-                IWineD3DSurface_PreLoad(iface); /* Make sure there is a texture to bind! */
+                /* Make sure that a proper texture unit is selected, bind the texture and dirtify the sampler to restore the texture on the next draw */
+                if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+                    ENTER_GL();
+                    GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
+                    checkGLcall("glActiveTextureARB");
+                    LEAVE_GL();
+                }
+                IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(0));
+                IWineD3DSurface_PreLoad(iface);
 
                 surface_download_data(This);
             }
@@ -1141,7 +1148,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
         IWineD3DSwapChainImpl *implSwapChain;
         IWineD3DDevice_GetSwapChain((IWineD3DDevice *)myDevice, 0, (IWineD3DSwapChain **)&implSwapChain);
 
-        if (backbuf || iface ==  implSwapChain->frontBuffer || iface == myDevice->render_targets[0]) {
+        if ((backbuf || iface ==  implSwapChain->frontBuffer || iface == myDevice->render_targets[0]) && wined3d_settings.rendertargetlock_mode != RTL_DISABLE) {
             int tex;
 
             ENTER_GL();
@@ -1149,7 +1156,12 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
             /* glDrawPixels transforms the raster position as though it was a vertex -
                we want to draw at screen position 0,0 - Set up ortho (rhw) mode as
                per drawprim (and leave set - it will sort itself out due to last_was_rhw */
-            d3ddevice_set_ortho(This->resource.wineD3DDevice);
+            myDevice->last_was_rhw = TRUE;
+            /* Apply the projection and world matrices, it sets up orthogonal projection due to last_was_rhw */
+            StateTable[STATE_TRANSFORM(WINED3DTS_PROJECTION)].apply(STATE_TRANSFORM(WINED3DTS_PROJECTION), myDevice->stateBlock);
+            StateTable[STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0))].apply(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), myDevice->stateBlock);
+            /* Will reapply the projection matrix too */
+            IWineD3DDeviceImpl_MarkStateDirty(myDevice, STATE_VDECL);
 
             if (iface ==  implSwapChain->frontBuffer) {
                 glDrawBuffer(GL_FRONT);
@@ -1221,7 +1233,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
             /** restore clean dirty state */
             IWineD3DSurface_CleanDirtyRect(iface);
 
-        } else {
+        } else if(wined3d_settings.rendertargetlock_mode != RTL_DISABLE) {
             FIXME("unsupported unlocking to Rendering surface surf@%p usage(%s)\n", This, debug_d3dusage(This->resource.usage));
         }
         IWineD3DSwapChain_Release((IWineD3DSwapChain *)implSwapChain);
@@ -1370,7 +1382,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
                 break;
         }
 
-        ddc = CreateDCA("DISPLAY", NULL, NULL, NULL);
+        ddc = GetDC(0);
         if (ddc == 0) {
             HeapFree(GetProcessHeap(), 0, b_info);
             return HRESULT_FROM_WIN32(GetLastError());
@@ -1378,7 +1390,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
 
         TRACE("Creating a DIB section with size %dx%dx%d, size=%d\n", b_info->bmiHeader.biWidth, b_info->bmiHeader.biHeight, b_info->bmiHeader.biBitCount, b_info->bmiHeader.biSizeImage);
         This->dib.DIBsection = CreateDIBSection(ddc, b_info, usage, &This->dib.bitmap_data, 0 /* Handle */, 0 /* Offset */);
-        DeleteDC(ddc);
+        ReleaseDC(0, ddc);
 
         if (!This->dib.DIBsection) {
             ERR("CreateDIBSection failed!\n");
@@ -2472,7 +2484,12 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
 
             /* Draw a textured quad
              */
-            d3ddevice_set_ortho(This->resource.wineD3DDevice);
+            myDevice->last_was_rhw = TRUE;
+            /* Apply the projection matrix, it sets up orthogonal projection due to last_was_rhw */
+            StateTable[STATE_TRANSFORM(WINED3DTS_PROJECTION)].apply(STATE_TRANSFORM(WINED3DTS_PROJECTION), myDevice->stateBlock);
+            StateTable[STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0))].apply(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), myDevice->stateBlock);
+            /* That will reapply the projection matrix too */
+            IWineD3DDeviceImpl_MarkStateDirty(myDevice, STATE_VDECL);
 
             glBegin(GL_QUADS);
 

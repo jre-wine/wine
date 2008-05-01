@@ -66,7 +66,7 @@ void shader_glsl_load_psamplers(
            snprintf(sampler_name, sizeof(sampler_name), "Psampler%d", i);
            name_loc = GL_EXTCALL(glGetUniformLocationARB(programId, sampler_name));
            if (name_loc != -1) {
-               TRACE_(d3d_shader)("Loading %s for texture %d\n", sampler_name, i);
+               TRACE("Loading %s for texture %d\n", sampler_name, i);
                GL_EXTCALL(glUniform1iARB(name_loc, i));
                checkGLcall("glUniform1iARB");
            }
@@ -718,69 +718,50 @@ static void shader_glsl_get_register_name(
     strcat(regstr, tmpStr);
 }
 
-/* Writes the GLSL writemask for the destination register */
-static void shader_glsl_get_output_register_swizzle(
-    const DWORD param,
-    char *write_mask) {
-   
-    *write_mask = 0;
+/* Get the GLSL write mask for the destination register */
+static void shader_glsl_get_write_mask(const DWORD param, char *write_mask) {
+    char *ptr = write_mask;
+
     if ((param & WINED3DSP_WRITEMASK_ALL) != WINED3DSP_WRITEMASK_ALL) {
-        strcat(write_mask, ".");
-        if (param & WINED3DSP_WRITEMASK_0) strcat(write_mask, "x");
-        if (param & WINED3DSP_WRITEMASK_1) strcat(write_mask, "y");
-        if (param & WINED3DSP_WRITEMASK_2) strcat(write_mask, "z");
-        if (param & WINED3DSP_WRITEMASK_3) strcat(write_mask, "w");
+        *ptr++ = '.';
+        if (param & WINED3DSP_WRITEMASK_0) *ptr++ = 'x';
+        if (param & WINED3DSP_WRITEMASK_1) *ptr++ = 'y';
+        if (param & WINED3DSP_WRITEMASK_2) *ptr++ = 'z';
+        if (param & WINED3DSP_WRITEMASK_3) *ptr++ = 'w';
     }
+
+    *ptr = '\0';
 }
 
-static void shader_glsl_get_input_register_swizzle(
-    const DWORD param,
-    BOOL is_color,
-    char *reg_mask) {
-    
-    const char swizzle_reg_chars_color_fix[] = "zyxw";
-    const char swizzle_reg_chars[] = "xyzw";
-    const char* swizzle_regs = NULL;
-   
-    /** operand input */
-    DWORD swizzle = (param & WINED3DVS_SWIZZLE_MASK) >> WINED3DVS_SWIZZLE_SHIFT;
+static void shader_glsl_get_swizzle(const DWORD param, BOOL fixup, char *swizzle_str) {
+    /* For registers of type WINED3DDECLTYPE_D3DCOLOR, data is stored as "bgra",
+     * but addressed as "rgba". To fix this we need to swap the register's x
+     * and z components. */
+    const char *swizzle_chars = fixup ? "zyxw" : "xyzw";
+    char *ptr = swizzle_str;
+
+    /* swizzle bits fields: wwzzyyxx */
+    DWORD swizzle = (param & WINED3DSP_SWIZZLE_MASK) >> WINED3DSP_SWIZZLE_SHIFT;
     DWORD swizzle_x = swizzle & 0x03;
     DWORD swizzle_y = (swizzle >> 2) & 0x03;
     DWORD swizzle_z = (swizzle >> 4) & 0x03;
     DWORD swizzle_w = (swizzle >> 6) & 0x03;
 
-    if (is_color) {
-      swizzle_regs = swizzle_reg_chars_color_fix;
-    } else {
-      swizzle_regs = swizzle_reg_chars;
+    /* If the swizzle is the default swizzle (ie, "xyzw"), we don't need to
+     * generate a swizzle string. Unless we need to our own swizzling. */
+    if ((WINED3DSP_NOSWIZZLE >> WINED3DSP_SWIZZLE_SHIFT) != swizzle || fixup) {
+        *ptr++ = '.';
+        if (swizzle_x == swizzle_y && swizzle_x == swizzle_z && swizzle_x == swizzle_w) {
+            *ptr++ = swizzle_chars[swizzle_x];
+        } else {
+            *ptr++ = swizzle_chars[swizzle_x];
+            *ptr++ = swizzle_chars[swizzle_y];
+            *ptr++ = swizzle_chars[swizzle_z];
+            *ptr++ = swizzle_chars[swizzle_w];
+        }
     }
 
-    /**
-     * swizzle bits fields:
-     *  WWZZYYXX
-     */
-    if ((WINED3DVS_NOSWIZZLE >> WINED3DVS_SWIZZLE_SHIFT) == swizzle) {
-      if (is_color) {
-	    sprintf(reg_mask, ".%c%c%c%c",
-		swizzle_regs[swizzle_x],
-		swizzle_regs[swizzle_y],
-		swizzle_regs[swizzle_z],
-		swizzle_regs[swizzle_w]);
-      }
-      return ;
-    }
-    if (swizzle_x == swizzle_y &&
-	swizzle_x == swizzle_z &&
-	swizzle_x == swizzle_w)
-    {
-      sprintf(reg_mask, ".%c", swizzle_regs[swizzle_x]);
-    } else {
-      sprintf(reg_mask, ".%c%c%c%c",
-	      swizzle_regs[swizzle_x],
-	      swizzle_regs[swizzle_y],
-	      swizzle_regs[swizzle_z],
-	      swizzle_regs[swizzle_w]);
-    }
+    *ptr = '\0';
 }
 
 /** From a given parameter token, generate the corresponding GLSL string.
@@ -801,10 +782,10 @@ static void shader_glsl_add_param(
     shader_glsl_get_register_name(param, addr_token, reg_name, &is_color, arg);
     
     if (is_input) {
-        shader_glsl_get_input_register_swizzle(param, is_color, reg_mask);
+        shader_glsl_get_swizzle(param, is_color, reg_mask);
         shader_glsl_gen_modifier(param, reg_name, reg_mask, out_str);
     } else {
-        shader_glsl_get_output_register_swizzle(param, reg_mask);
+        shader_glsl_get_write_mask(param, reg_mask);
         sprintf(out_str, "%s%s", reg_name, reg_mask);
     }
 }
@@ -862,13 +843,13 @@ static void shader_glsl_sample(SHADER_OPCODE_ARG* arg, DWORD sampler_idx, const 
         /* Note that there's no such thing as a projected cube texture. */
         switch(sampler_type) {
             case WINED3DSTT_2D:
-                shader_addline(buffer, "%s = texture2DProj(%cshader%u, %s);\n", dst_str, sampler_prefix, sampler_idx, coord_reg);
+                shader_addline(buffer, "%s = texture2DProj(%csampler%u, %s);\n", dst_str, sampler_prefix, sampler_idx, coord_reg);
                 break;
             case WINED3DSTT_VOLUME:
-                shader_addline(buffer, "%s = texture3DProj(%cshader%u, %s);\n", dst_str, sampler_prefix, sampler_idx, coord_reg);
+                shader_addline(buffer, "%s = texture3DProj(%csampler%u, %s);\n", dst_str, sampler_prefix, sampler_idx, coord_reg);
                 break;
             default:
-                shader_addline(buffer, "%s = unrecognized_stype(%cshader%u, %s);\n", dst_str, sampler_prefix, sampler_idx, coord_reg);
+                shader_addline(buffer, "%s = unrecognized_stype(%csampler%u, %s);\n", dst_str, sampler_prefix, sampler_idx, coord_reg);
                 FIXME("Unrecognized sampler type: %#x;\n", sampler_type);
                 break;
         }
@@ -1788,7 +1769,7 @@ void pshader_glsl_input_pack(
        if (!usage_token) continue;
        usage = (usage_token & WINED3DSP_DCL_USAGE_MASK) >> WINED3DSP_DCL_USAGE_SHIFT;
        usage_idx = (usage_token & WINED3DSP_DCL_USAGEINDEX_MASK) >> WINED3DSP_DCL_USAGEINDEX_SHIFT;
-       shader_glsl_get_output_register_swizzle(register_token, reg_mask);
+       shader_glsl_get_write_mask(register_token, reg_mask);
 
        switch(usage) {
 
@@ -1843,7 +1824,7 @@ void vshader_glsl_output_unpack(
 
        usage = (usage_token & WINED3DSP_DCL_USAGE_MASK) >> WINED3DSP_DCL_USAGE_SHIFT;
        usage_idx = (usage_token & WINED3DSP_DCL_USAGEINDEX_MASK) >> WINED3DSP_DCL_USAGEINDEX_SHIFT;
-       shader_glsl_get_output_register_swizzle(register_token, reg_mask);
+       shader_glsl_get_write_mask(register_token, reg_mask);
 
        switch(usage) {
 
@@ -1877,6 +1858,123 @@ void vshader_glsl_output_unpack(
                shader_addline(buffer, "unsupported_output%s = OUT%u%s;\n", reg_mask, i, reg_mask);
        }
     }
+}
+
+/** Attach a GLSL pixel or vertex shader object to the shader program */
+static void attach_glsl_shader(IWineD3DDevice *iface, IWineD3DBaseShader* shader) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    WineD3D_GL_Info *gl_info = &((IWineD3DImpl *)(This->wineD3D))->gl_info;
+    GLhandleARB shaderObj = ((IWineD3DBaseShaderImpl*)shader)->baseShader.prgId;
+    if (This->stateBlock->glsl_program && shaderObj != 0) {
+        TRACE("Attaching GLSL shader object %u to program %u\n", shaderObj, This->stateBlock->glsl_program->programId);
+        GL_EXTCALL(glAttachObjectARB(This->stateBlock->glsl_program->programId, shaderObj));
+        checkGLcall("glAttachObjectARB");
+    }
+}
+
+/** Sets the GLSL program ID for the given pixel and vertex shader combination.
+ * It sets the programId on the current StateBlock (because it should be called
+ * inside of the DrawPrimitive() part of the render loop).
+ *
+ * If a program for the given combination does not exist, create one, and store
+ * the program in the list.  If it creates a program, it will link the given
+ * objects, too.
+ *
+ * We keep the shader programs around on a list because linking
+ * shader objects together is an expensive operation.  It's much
+ * faster to loop through a list of pre-compiled & linked programs
+ * each time that the application sets a new pixel or vertex shader
+ * than it is to re-link them together at that time.
+ *
+ * The list will be deleted in IWineD3DDevice::Release().
+ */
+static void set_glsl_shader_program(IWineD3DDevice *iface) {
+    IWineD3DDeviceImpl *This               = (IWineD3DDeviceImpl *)iface;
+    WineD3D_GL_Info *gl_info               = &((IWineD3DImpl *)(This->wineD3D))->gl_info;
+    IWineD3DPixelShader  *pshader          = This->stateBlock->pixelShader;
+    IWineD3DVertexShader *vshader          = This->stateBlock->vertexShader;
+    struct glsl_shader_prog_link *curLink  = NULL;
+    struct glsl_shader_prog_link *newLink  = NULL;
+    struct list *ptr                       = NULL;
+    GLhandleARB programId                  = 0;
+    int i;
+    char glsl_name[8];
+
+    ptr = list_head( &This->glsl_shader_progs );
+    while (ptr) {
+        /* At least one program exists - see if it matches our ps/vs combination */
+        curLink = LIST_ENTRY( ptr, struct glsl_shader_prog_link, entry );
+        if (vshader == curLink->vertexShader && pshader == curLink->pixelShader) {
+            /* Existing Program found, use it */
+            TRACE("Found existing program (%u) for this vertex/pixel shader combination\n",
+                   curLink->programId);
+            This->stateBlock->glsl_program = curLink;
+            return;
+        }
+        /* This isn't the entry we need - try the next one */
+        ptr = list_next( &This->glsl_shader_progs, ptr );
+    }
+
+    /* If we get to this point, then no matching program exists, so we create one */
+    programId = GL_EXTCALL(glCreateProgramObjectARB());
+    TRACE("Created new GLSL shader program %u\n", programId);
+
+    /* Allocate a new link for the list of programs */
+    newLink = HeapAlloc(GetProcessHeap(), 0, sizeof(struct glsl_shader_prog_link));
+    newLink->programId    = programId;
+    This->stateBlock->glsl_program = newLink;
+
+    /* Attach GLSL vshader */
+    if (NULL != vshader && This->vs_selected_mode == SHADER_GLSL) {
+        int i;
+        int max_attribs = 16;   /* TODO: Will this always be the case? It is at the moment... */
+        char tmp_name[10];
+
+        TRACE("Attaching vertex shader to GLSL program\n");
+        attach_glsl_shader(iface, (IWineD3DBaseShader*)vshader);
+
+        /* Bind vertex attributes to a corresponding index number to match
+         * the same index numbers as ARB_vertex_programs (makes loading
+         * vertex attributes simpler).  With this method, we can use the
+         * exact same code to load the attributes later for both ARB and
+         * GLSL shaders.
+         *
+         * We have to do this here because we need to know the Program ID
+         * in order to make the bindings work, and it has to be done prior
+         * to linking the GLSL program. */
+        for (i = 0; i < max_attribs; ++i) {
+             snprintf(tmp_name, sizeof(tmp_name), "attrib%i", i);
+             GL_EXTCALL(glBindAttribLocationARB(programId, i, tmp_name));
+        }
+        checkGLcall("glBindAttribLocationARB");
+        newLink->vertexShader = vshader;
+    }
+
+    /* Attach GLSL pshader */
+    if (NULL != pshader && This->ps_selected_mode == SHADER_GLSL) {
+        TRACE("Attaching pixel shader to GLSL program\n");
+        attach_glsl_shader(iface, (IWineD3DBaseShader*)pshader);
+        newLink->pixelShader = pshader;
+    }
+
+    /* Link the program */
+    TRACE("Linking GLSL shader program %u\n", programId);
+    GL_EXTCALL(glLinkProgramARB(programId));
+    print_glsl_info_log(&GLINFO_LOCATION, programId);
+    list_add_head( &This->glsl_shader_progs, &newLink->entry);
+
+    newLink->vuniformF_locations = HeapAlloc(GetProcessHeap(), 0, sizeof(GLhandleARB) * GL_LIMITS(vshader_constantsF));
+    for (i = 0; i < GL_LIMITS(vshader_constantsF); ++i) {
+        snprintf(glsl_name, sizeof(glsl_name), "VC[%i]", i);
+        newLink->vuniformF_locations[i] = GL_EXTCALL(glGetUniformLocationARB(programId, glsl_name));
+    }
+    newLink->puniformF_locations = HeapAlloc(GetProcessHeap(), 0, sizeof(GLhandleARB) * GL_LIMITS(pshader_constantsF));
+    for (i = 0; i < GL_LIMITS(pshader_constantsF); ++i) {
+        snprintf(glsl_name, sizeof(glsl_name), "PC[%i]", i);
+        newLink->puniformF_locations[i] = GL_EXTCALL(glGetUniformLocationARB(programId, glsl_name));
+    }
+
+    return;
 }
 
 static GLhandleARB create_glsl_blt_shader(WineD3D_GL_Info *gl_info) {

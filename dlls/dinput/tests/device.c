@@ -59,8 +59,8 @@ static const DIDATAFORMAT data_format = {
 static BOOL CALLBACK enum_callback(LPCDIDEVICEOBJECTINSTANCE oi, LPVOID info)
 {
     if (winetest_debug > 1)
-        trace(" Type:%4x Ofs:%2x Name:%s Flags:%08x\n",
-              oi->dwType, oi->dwOfs, oi->tszName, oi->dwFlags);
+        trace(" Type:%4x Ofs:%3d Flags:%08x Name:%s\n",
+              oi->dwType, oi->dwOfs, oi->dwFlags, oi->tszName);
     (*(int*)info)++;
     return DIENUM_CONTINUE;
 }
@@ -104,7 +104,7 @@ static void test_object_info(LPDIRECTINPUTDEVICE device, HWND hwnd)
         hr = IDirectInputDevice_SetProperty(device, DIPROP_AXISMODE, &dp.diph);
         ok(hr == DI_OK, "SetProperty() failed: %s\n", DXGetErrorString8(hr));
 
-        /* Can not change mode while acquired */
+        /* Cannot change mode while acquired */
         hr = IDirectInputDevice_Acquire(device);
         ok(hr == DI_OK, "Acquire() failed: %s\n", DXGetErrorString8(hr));
         hr = IDirectInputDevice_SetProperty(device, DIPROP_AXISMODE, &dp.diph);

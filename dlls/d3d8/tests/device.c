@@ -120,8 +120,11 @@ static void test_mipmap_levels(void)
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
-    if (FAILED(hr)) goto cleanup;
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     check_mipmap_levels(pDevice, 32, 32, 6);
     check_mipmap_levels(pDevice, 256, 1, 9);
@@ -162,8 +165,11 @@ static void test_swapchain(void)
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
-    if (FAILED(hr)) goto cleanup;
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     /* Check if the back buffer count was modified */
     ok(d3dpp.BackBufferCount == 1, "The back buffer count in the presentparams struct is %d\n", d3dpp.BackBufferCount);
@@ -315,8 +321,11 @@ static void test_refcount(void)
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
-    if (FAILED(hr)) goto cleanup;
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     refcount = get_refcount( (IUnknown *)pDevice );
     ok(refcount == 1, "Invalid device RefCount %d\n", refcount);
@@ -407,13 +416,22 @@ static void test_refcount(void)
     CHECK_CALL( hr, "CreateVertexBuffer", pDevice, ++refcount );
     if(pVertexBuffer)
     {
+        IDirect3DVertexBuffer8 *pVBuf = (void*)~0;
+        UINT stride = ~0;
+
         tmp = get_refcount( (IUnknown *)pVertexBuffer );
 
         hr = IDirect3DDevice8_SetStreamSource(pDevice, 0, pVertexBuffer, 3 * sizeof(float));
         CHECK_CALL( hr, "SetStreamSource", pVertexBuffer, tmp);
         hr = IDirect3DDevice8_SetStreamSource(pDevice, 0, NULL, 0);
         CHECK_CALL( hr, "SetStreamSource", pVertexBuffer, tmp);
+
+        hr = IDirect3DDevice8_GetStreamSource(pDevice, 0, &pVBuf, &stride);
+        ok(SUCCEEDED(hr), "GetStreamSource did not succeed with NULL stream!\n");
+        ok(pVBuf==NULL, "pVBuf not NULL (%p)!\n", pVBuf);
+        ok(stride==3*sizeof(float), "stride not 3 floats (got %u)!\n", stride);
     }
+
     /* Shaders */
     hr = IDirect3DDevice8_CreateVertexShader( pDevice, decl, simple_vs, &dVertexShader, 0 );
     CHECK_CALL( hr, "CreateVertexShader", pDevice, refcount );
@@ -598,8 +616,11 @@ static void test_cursor(void)
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
-    if (FAILED(hr)) goto cleanup;
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     IDirect3DDevice8_CreateImageSurface(pDevice, 32, 32, D3DFMT_A8R8G8B8, &cursor);
     ok(cursor != NULL, "IDirect3DDevice8_CreateOffscreenPlainSurface failed with %08x\n", hr);
@@ -674,8 +695,11 @@ static void test_states(void)
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
-    if (FAILED(hr)) goto cleanup;
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     hr = IDirect3DDevice8_SetRenderState(pDevice, D3DRS_ZVISIBLE, TRUE);
     ok(hr == D3D_OK, "IDirect3DDevice8_SetRenderState(D3DRS_ZVISIBLE, TRUE) returned %s\n", DXGetErrorString8(hr));
@@ -686,6 +710,26 @@ cleanup:
     if(pD3d) IDirect3D8_Release(pD3d);
     if(pDevice) IDirect3D8_Release(pDevice);
 }
+
+static void test_shader_versions(void)
+{
+    HRESULT                      hr;
+    IDirect3D8                  *pD3d               = NULL;
+    D3DCAPS8                     d3dcaps;
+
+    pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
+    if (pD3d != NULL) {
+        hr = IDirect3D8_GetDeviceCaps(pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &d3dcaps);
+        ok(SUCCEEDED(hr), "Failed to get D3D8 caps (%s)\n", DXGetErrorString8(hr));
+        if (SUCCEEDED(hr)) {
+            ok(d3dcaps.VertexShaderVersion <= D3DVS_VERSION(1,1), "Unexpected VertexShaderVersion (%#x > %#x)\n", d3dcaps.VertexShaderVersion, D3DVS_VERSION(1,1));
+            ok(d3dcaps.PixelShaderVersion <= D3DPS_VERSION(1,4), "Unexpected PixelShaderVersion (%#x > %#x)\n", d3dcaps.PixelShaderVersion, D3DPS_VERSION(1,4));
+        }
+        IDirect3D8_Release(pD3d);
+    }
+}
+
 
 /* Test adapter display modes */
 static void test_display_modes(void)
@@ -724,6 +768,7 @@ START_TEST(device)
     if (pDirect3DCreate8)
     {
         test_display_modes();
+        test_shader_versions();
         test_swapchain();
         test_refcount();
         test_mipmap_levels();

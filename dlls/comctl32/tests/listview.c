@@ -63,6 +63,7 @@ static void test_images(void)
     item.iItem = 0;
     item.iSubItem = 1;
     item.iImage = 0;
+    item.pszText = 0;
     r = SendMessage(hwnd, LVM_INSERTITEM, 0, (LPARAM) &item);
     ok(r == -1, "should fail\n");
 
@@ -232,6 +233,116 @@ static void test_checkboxes(void)
     DestroyWindow(hwnd);
 }
 
+static void test_items(void)
+{
+    const LPARAM lparamTest = 0x42;
+    HWND hwnd, hwndparent = 0;
+    LVITEMA item;
+    LVCOLUMNA column;
+    DWORD r;
+    static CHAR text[]  = "Text";
+
+    hwnd = CreateWindowEx(0, "SysListView32", "foo", LVS_REPORT,
+                10, 10, 100, 200, hwndparent, NULL, NULL, NULL);
+    ok(hwnd != NULL, "failed to create listview window\n");
+
+    /*
+     * Test setting/getting item params
+     */
+
+    /* Set up two columns */
+    column.mask = LVCF_SUBITEM;
+    column.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_INSERTCOLUMNA, 0, (LPARAM)&column);
+    ok(r == 0, "ret %d\n", r);
+    column.iSubItem = 1;
+    r = SendMessage(hwnd, LVM_INSERTCOLUMNA, 1, (LPARAM)&column);
+    ok(r == 1, "ret %d\n", r);
+
+    /* Insert an item with just a param */
+    memset (&item, 0xaa, sizeof (item));
+    item.mask = LVIF_PARAM;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    item.lParam = lparamTest;
+    r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM) &item);
+    ok(r == 0, "ret %d\n", r);
+
+    /* Test getting of the param */
+    memset (&item, 0xaa, sizeof (item));
+    item.mask = LVIF_PARAM;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    ok(item.lParam == lparamTest, "got lParam %lx, expected %lx\n", item.lParam, lparamTest);
+
+    /* Set up a subitem */
+    memset (&item, 0xaa, sizeof (item));
+    item.mask = LVIF_TEXT;
+    item.iItem = 0;
+    item.iSubItem = 1;
+    item.pszText = text;
+    r = SendMessage(hwnd, LVM_SETITEMA, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+
+    /* Query param from subitem: returns main item param */
+    memset (&item, 0xaa, sizeof (item));
+    item.mask = LVIF_PARAM;
+    item.iItem = 0;
+    item.iSubItem = 1;
+    r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    ok(item.lParam == lparamTest, "got lParam %lx, expected %lx\n", item.lParam, lparamTest);
+
+    /* Set up param on first subitem: no effect */
+    memset (&item, 0xaa, sizeof (item));
+    item.mask = LVIF_PARAM;
+    item.iItem = 0;
+    item.iSubItem = 1;
+    item.lParam = lparamTest+1;
+    r = SendMessage(hwnd, LVM_SETITEMA, 0, (LPARAM) &item);
+    ok(r == 0, "ret %d\n", r);
+
+    /* Query param from subitem again: should still return main item param */
+    memset (&item, 0xaa, sizeof (item));
+    item.mask = LVIF_PARAM;
+    item.iItem = 0;
+    item.iSubItem = 1;
+    r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    ok(item.lParam == lparamTest, "got lParam %lx, expected %lx\n", item.lParam, lparamTest);
+
+    /**** Some tests of state highlighting ****/
+    memset (&item, 0xaa, sizeof (item));
+    item.mask = LVIF_STATE;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    item.state = LVIS_SELECTED;
+    item.stateMask = LVIS_SELECTED | LVIS_DROPHILITED;
+    r = SendMessage(hwnd, LVM_SETITEM, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    item.iSubItem = 1;
+    item.state = LVIS_DROPHILITED;
+    r = SendMessage(hwnd, LVM_SETITEM, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+
+    memset (&item, 0xaa, sizeof (item));
+    item.mask = LVIF_STATE;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    item.stateMask = -1;
+    r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    ok(item.state == LVIS_SELECTED, "got state %x, expected %x\n", item.state, LVIS_SELECTED);
+    item.iSubItem = 1;
+    r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    todo_wine ok(item.state == LVIS_DROPHILITED, "got state %x, expected %x\n", item.state, LVIS_DROPHILITED);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     INITCOMMONCONTROLSEX icc;
@@ -242,4 +353,5 @@ START_TEST(listview)
 
     test_images();
     test_checkboxes();
+    test_items();
 }

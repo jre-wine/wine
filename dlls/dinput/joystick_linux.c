@@ -484,7 +484,7 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
     hr = create_DataFormat(&c_dfDIJoystick2, &newDevice->base.data_format);
     if (hr != DI_OK) goto FAILED;
 
-    IDirectInputDevice_AddRef((LPDIRECTINPUTDEVICE8A)newDevice->dinput);
+    IDirectInput_AddRef((LPDIRECTINPUTDEVICE8A)newDevice->dinput);
 
     newDevice->devcaps.dwSize = sizeof(newDevice->devcaps);
     newDevice->devcaps.dwFlags = DIDC_ATTACHED;
@@ -613,8 +613,8 @@ static ULONG WINAPI JoystickAImpl_Release(LPDIRECTINPUTDEVICE8A iface)
     release_DataFormat(&This->base.data_format);
 
     This->base.crit.DebugInfo->Spare[0] = 0;
+    IDirectInput_Release((LPDIRECTINPUTDEVICE8A)This->dinput);
     DeleteCriticalSection(&This->base.crit);
-    IDirectInputDevice_Release((LPDIRECTINPUTDEVICE8A)This->dinput);
 
     HeapFree(GetProcessHeap(),0,This);
     return 0;
@@ -1214,11 +1214,11 @@ static HRESULT WINAPI JoystickAImpl_GetProperty(
 /******************************************************************************
   *     GetObjectInfo : get object info
   */
-HRESULT WINAPI JoystickAImpl_GetObjectInfo(
-        LPDIRECTINPUTDEVICE8A iface,
-        LPDIDEVICEOBJECTINSTANCEA pdidoi,
-        DWORD dwObj,
-        DWORD dwHow)
+static HRESULT WINAPI JoystickAImpl_GetObjectInfo(
+    LPDIRECTINPUTDEVICE8A iface,
+    LPDIDEVICEOBJECTINSTANCEA pdidoi,
+    DWORD dwObj,
+    DWORD dwHow)
 {
     JoystickImpl *This = (JoystickImpl *)iface;
     DIDEVICEOBJECTINSTANCEA didoiA;
@@ -1302,7 +1302,7 @@ HRESULT WINAPI JoystickAImpl_GetObjectInfo(
 /******************************************************************************
   *     GetDeviceInfo : get information about a device's identity
   */
-HRESULT WINAPI JoystickAImpl_GetDeviceInfo(
+static HRESULT WINAPI JoystickAImpl_GetDeviceInfo(
     LPDIRECTINPUTDEVICE8A iface,
     LPDIDEVICEINSTANCEA pdidi)
 {
@@ -1342,7 +1342,7 @@ HRESULT WINAPI JoystickAImpl_GetDeviceInfo(
 /******************************************************************************
   *     GetDeviceInfo : get information about a device's identity
   */
-HRESULT WINAPI JoystickWImpl_GetDeviceInfo(
+static HRESULT WINAPI JoystickWImpl_GetDeviceInfo(
     LPDIRECTINPUTDEVICE8W iface,
     LPDIDEVICEINSTANCEW pdidi)
 {

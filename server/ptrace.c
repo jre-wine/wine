@@ -45,6 +45,8 @@
 #include "process.h"
 #include "thread.h"
 
+#ifdef USE_PTRACE
+
 #ifndef PTRACE_CONT
 #define PTRACE_CONT PT_CONTINUE
 #endif
@@ -144,7 +146,12 @@ void sigchld_callback(void)
     for (;;)
     {
         if (!(pid = wait4_wrapper( -1, &status, WUNTRACED | WNOHANG, NULL ))) break;
-        if (pid != -1) handle_child_status( get_thread_from_pid(pid), pid, status, -1 );
+        if (pid != -1)
+        {
+            struct thread *thread = get_thread_from_tid( pid );
+            if (!thread) thread = get_thread_from_pid( pid );
+            handle_child_status( thread, pid, status, -1 );
+        }
         else break;
     }
 }
@@ -216,6 +223,23 @@ static inline int tkill( int tgid, int pid, int sig )
     if (ret >= 0) return ret;
     errno = -ret;
     return -1;
+}
+
+/* initialize the process tracing mechanism */
+void init_tracing_mechanism(void)
+{
+    /* no initialization needed for ptrace */
+}
+
+/* initialize the per-process tracing mechanism */
+void init_process_tracing( struct process *process )
+{
+    /* ptrace setup is done on-demand */
+}
+
+/* terminate the per-process tracing mechanism */
+void finish_process_tracing( struct process *process )
+{
 }
 
 /* send a Unix signal to a specific thread */
@@ -631,3 +655,5 @@ void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned
 }
 
 #endif  /* linux || __FreeBSD__ */
+
+#endif  /* USE_PTRACE */
