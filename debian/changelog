@@ -1,3 +1,15 @@
+wine (0.9.38-1) unstable; urgency=low
+
+  * New upstream release 0.9.38.
+    - Beginnings of support for copy protection kernel drivers.
+    - More MSI automation support.
+    - Many 64-bit compilation fixes.
+    - A number of OLE fixes.
+    - Lots of bug fixes.
+  * This version was released Jun 1, 2007.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 06 Aug 2007 06:05:15 -0400
+
 wine (0.9.37-1) unstable; urgency=low
 
   * New upstream release 0.9.37.
