@@ -47,6 +47,8 @@ static const IID IID_IWineTest =
     {0xa1, 0xa2, 0x5d, 0x5a, 0x36, 0x54, 0xd3, 0xbd}
 }; /* 5201163f-8164-4fd0-a1a2-5d5a3654d3bd */
 
+#define EXTENTID_WineTest IID_IWineTest
+
 static void test_cocreateinstance_proxy(void)
 {
     IUnknown *pProxy;
@@ -1290,13 +1292,12 @@ static void test_message_filter(void)
     ok_more_than_one_lock();
 
     hr = IClassFactory_CreateInstance(cf, NULL, &IID_IUnknown, (LPVOID*)&proxy);
-    todo_wine { ok(hr == RPC_E_CALL_REJECTED, "Call should have returned RPC_E_CALL_REJECTED, but return 0x%08x instead\n", hr); }
+    ok(hr == RPC_E_CALL_REJECTED, "Call should have returned RPC_E_CALL_REJECTED, but return 0x%08x instead\n", hr);
     if (proxy) IUnknown_Release(proxy);
     proxy = NULL;
 
     hr = CoRegisterMessageFilter(&MessageFilter, &prev_filter);
     ok_ole_success(hr, CoRegisterMessageFilter);
-    if (prev_filter) IMessageFilter_Release(prev_filter);
 
     hr = IClassFactory_CreateInstance(cf, NULL, &IID_IUnknown, (LPVOID*)&proxy);
     ok_ole_success(hr, IClassFactory_CreateInstance);
@@ -1308,6 +1309,9 @@ static void test_message_filter(void)
     ok_no_locks();
 
     end_host_object(tid, thread);
+
+    hr = CoRegisterMessageFilter(prev_filter, NULL);
+    ok_ole_success(hr, CoRegisterMessageFilter);
 }
 
 /* test failure case of trying to unmarshal from bad stream */
@@ -1456,9 +1460,11 @@ static void test_proxybuffer(REFIID riid)
     ok(refs == 1, "Ref count of outer unknown should have been 1 instead of %d\n", refs);
 
     refs = IPSFactoryBuffer_Release(psfb);
-#if 0 /* not reliable on native. maybe it leaks references! */
-    ok(refs == 0, "Ref-count leak of %ld on IPSFactoryBuffer\n", refs);
-#endif
+    if (0)
+    {
+    /* not reliable on native. maybe it leaks references! */
+    ok(refs == 0, "Ref-count leak of %d on IPSFactoryBuffer\n", refs);
+    }
 
     refs = IUnknown_Release((IUnknown *)lpvtbl);
     ok(refs == 0, "Ref-count leak of %d on IRpcProxyBuffer\n", refs);
@@ -1487,9 +1493,11 @@ static void test_stubbuffer(REFIID riid)
     ok_ole_success(hr, IPSFactoryBuffer_CreateStub);
 
     refs = IPSFactoryBuffer_Release(psfb);
-#if 0 /* not reliable on native. maybe it leaks references */
-    ok(refs == 0, "Ref-count leak of %ld on IPSFactoryBuffer\n", refs);
-#endif
+    if (0)
+    {
+    /* not reliable on native. maybe it leaks references */
+    ok(refs == 0, "Ref-count leak of %d on IPSFactoryBuffer\n", refs);
+    }
 
     ok_more_than_one_lock();
 
@@ -1608,6 +1616,38 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
         return 0;
     }
+    case WM_USER+2:
+    {
+        HRESULT hr;
+        IStream *pStream = NULL;
+        IClassFactory *proxy = NULL;
+        IUnknown *object;
+        DWORD tid;
+        HANDLE thread;
+
+        hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
+        ok_ole_success(hr, CreateStreamOnHGlobal);
+        tid = start_host_object(pStream, &IID_IClassFactory, (IUnknown*)&Test_ClassFactory, MSHLFLAGS_NORMAL, &thread);
+
+        IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
+        hr = CoUnmarshalInterface(pStream, &IID_IClassFactory, (void **)&proxy);
+        ok_ole_success(hr, CoReleaseMarshalData);
+        IStream_Release(pStream);
+
+        /* shows that COM calls executed during the processing of sent
+         * messages should fail */
+        hr = IClassFactory_CreateInstance(proxy, NULL, &IID_IUnknown, (void **)&object);
+        ok(hr == RPC_E_CANTCALLOUT_ININPUTSYNCCALL,
+           "COM call during processing of sent message should return RPC_E_CANTCALLOUT_ININPUTSYNCCALL instead of 0x%08x\n", hr);
+
+        IClassFactory_Release(proxy);
+
+        end_host_object(tid, thread);
+
+        PostQuitMessage(0);
+
+        return 0;
+    }
     default:
         return DefWindowProc(hwnd, msg, wparam, lparam);
     }
@@ -1628,6 +1668,71 @@ static void test_message_reentrancy(void)
 
     /* start message re-entrancy test */
     PostMessage(hwnd_app, WM_USER, 0, 0);
+
+    while (GetMessage(&msg, NULL, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+}
+
+static HRESULT WINAPI TestMsg_IClassFactory_CreateInstance(
+    LPCLASSFACTORY iface,
+    LPUNKNOWN pUnkOuter,
+    REFIID riid,
+    LPVOID *ppvObj)
+{
+    *ppvObj = NULL;
+    SendMessage(hwnd_app, WM_USER+2, 0, 0);
+    return S_OK;
+}
+
+static IClassFactoryVtbl TestMsgClassFactory_Vtbl =
+{
+    Test_IClassFactory_QueryInterface,
+    Test_IClassFactory_AddRef,
+    Test_IClassFactory_Release,
+    TestMsg_IClassFactory_CreateInstance,
+    Test_IClassFactory_LockServer
+};
+
+IClassFactory TestMsg_ClassFactory = { &TestMsgClassFactory_Vtbl };
+
+static void test_call_from_message(void)
+{
+    MSG msg;
+    IStream *pStream;
+    HRESULT hr;
+    IClassFactory *proxy;
+    DWORD tid;
+    HANDLE thread;
+    IUnknown *object;
+
+    hwnd_app = CreateWindow("WineCOMTest", NULL, 0, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, NULL, 0);
+    ok(hwnd_app != NULL, "Window creation failed\n");
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
+    ok_ole_success(hr, CreateStreamOnHGlobal);
+    tid = start_host_object(pStream, &IID_IClassFactory, (IUnknown*)&TestMsg_ClassFactory, MSHLFLAGS_NORMAL, &thread);
+
+    ok_more_than_one_lock();
+
+    IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
+    hr = CoUnmarshalInterface(pStream, &IID_IClassFactory, (void **)&proxy);
+    ok_ole_success(hr, CoReleaseMarshalData);
+    IStream_Release(pStream);
+
+    ok_more_than_one_lock();
+
+    /* start message re-entrancy test */
+    hr = IClassFactory_CreateInstance(proxy, NULL, &IID_IUnknown, (void **)&object);
+    ok_ole_success(hr, IClassFactory_CreateInstance);
+
+    IClassFactory_Release(proxy);
+
+    ok_no_locks();
+
+    end_host_object(tid, thread);
 
     while (GetMessage(&msg, NULL, 0, 0))
     {
@@ -1732,11 +1837,12 @@ static void test_freethreadedmarshaler(void)
 
 /* native doesn't allow us to unmarshal or release the stream data,
  * presumably because it wants us to call CoMarshalInterface instead */
-#if 0
+    if (0)
+    {
     /* local normal marshaling */
 
     IStream_Seek(pStream, llZero, STREAM_SEEK_SET, NULL);
-    hr = IMarshal_MarshalInterface(pFTMarshal, pStream, IID_IClassFactory, (IUnknown*)&Test_ClassFactory, MSHCTX_LOCAL, NULL, MSHLFLAGS_NORMAL);
+    hr = IMarshal_MarshalInterface(pFTMarshal, pStream, &IID_IClassFactory, (IUnknown*)&Test_ClassFactory, MSHCTX_LOCAL, NULL, MSHLFLAGS_NORMAL);
     ok_ole_success(hr, IMarshal_MarshalInterface);
 
     ok_more_than_one_lock();
@@ -1748,7 +1854,7 @@ static void test_freethreadedmarshaler(void)
     ok_ole_success(hr, IMarshal_ReleaseMarshalData);
 
     ok_no_locks();
-#endif
+    }
 
     /* inproc table-strong marshaling */
 
@@ -2030,6 +2136,9 @@ static DWORD CALLBACK get_global_interface_proc(LPVOID pv)
 	CoInitialize(NULL);
 	hr = IGlobalInterfaceTable_GetInterfaceFromGlobal(params->git, params->cookie, &IID_IClassFactory, (void **)&cf);
 	ok_ole_success(hr, IGlobalInterfaceTable_GetInterfaceFromGlobal);
+
+	IGlobalInterfaceTable_Release(params->git);
+
 	CoUninitialize();
 
 	return hr;
@@ -2069,188 +2178,228 @@ static void test_globalinterfacetable(void)
 	CloseHandle(thread);
 }
 
-static const char cf_marshaled[] =
+static void test_CoGetInterfaceAndReleaseStream(void)
 {
-    0x9, 0x0, 0x0, 0x0,
-    0x0, 0x0, 0x0, 0x0,
-    0x9, 0x0, 0x0, 0x0,
-    'M', 0x0, 'y', 0x0,
-    'F', 0x0, 'o', 0x0,
-    'r', 0x0, 'm', 0x0,
-    'a', 0x0, 't', 0x0,
-    0x0, 0x0
+    HRESULT hr;
+    IUnknown *pUnk;
+
+    hr = CoGetInterfaceAndReleaseStream(NULL, &IID_IUnknown, (void**)&pUnk);
+    ok(hr == E_INVALIDARG, "hr %08x\n", hr);
+}
+
+static const char *debugstr_iid(REFIID riid)
+{
+    static char name[256];
+    HKEY hkeyInterface;
+    WCHAR bufferW[39];
+    char buffer[39];
+    LONG name_size = sizeof(name);
+    StringFromGUID2(riid, bufferW, sizeof(bufferW)/sizeof(bufferW[0]));
+    WideCharToMultiByte(CP_ACP, 0, bufferW, sizeof(bufferW)/sizeof(bufferW[0]), buffer, sizeof(buffer), NULL, NULL);
+    if (RegOpenKeyEx(HKEY_CLASSES_ROOT, "Interface", 0, KEY_QUERY_VALUE, &hkeyInterface) != ERROR_SUCCESS)
+    {
+        memcpy(name, buffer, sizeof(buffer));
+        goto done;
+    }
+    if (RegQueryValue(hkeyInterface, buffer, name, &name_size) != ERROR_SUCCESS)
+    {
+        memcpy(name, buffer, sizeof(buffer));
+        goto done;
+    }
+    RegCloseKey(hkeyInterface);
+done:
+    return name;
+}
+
+static HRESULT WINAPI TestChannelHook_QueryInterface(IChannelHook *iface, REFIID riid, void **ppv)
+{
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IChannelHook))
+    {
+        *ppv = iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI TestChannelHook_AddRef(IChannelHook *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI TestChannelHook_Release(IChannelHook *iface)
+{
+    return 1;
+}
+
+static void WINAPI TestChannelHook_ClientGetSize(
+    IChannelHook *iface,
+    REFGUID uExtent,
+    REFIID  riid,
+    ULONG  *pDataSize )
+{
+    SChannelHookCallInfo *info = (SChannelHookCallInfo *)riid;
+    trace("TestChannelHook_ClientGetBuffer\n");
+    trace("\t%s method %d\n", debugstr_iid(riid), info->iMethod);
+    trace("\tcid: %s\n", debugstr_iid(&info->uCausality));
+    ok(info->cbSize == sizeof(*info), "info->cbSize was %d instead of %d\n", info->cbSize, (int)sizeof(*info));
+    todo_wine {
+    ok(info->dwServerPid == GetCurrentProcessId(), "info->dwServerPid was 0x%x instead of 0x%x\n", info->dwServerPid, GetCurrentProcessId());
+    }
+    ok(!info->pObject, "info->pObject should be NULL\n");
+    ok(IsEqualGUID(uExtent, &EXTENTID_WineTest), "uExtent wasn't correct\n");
+
+    *pDataSize = 1;
+}
+
+static void WINAPI TestChannelHook_ClientFillBuffer(
+    IChannelHook *iface,
+    REFGUID uExtent,
+    REFIID  riid,
+    ULONG  *pDataSize,
+    void   *pDataBuffer )
+{
+    SChannelHookCallInfo *info = (SChannelHookCallInfo *)riid;
+    trace("TestChannelHook_ClientFillBuffer\n");
+    ok(info->cbSize == sizeof(*info), "info->cbSize was %d instead of %d\n", info->cbSize, (int)sizeof(*info));
+    todo_wine {
+    ok(info->dwServerPid == GetCurrentProcessId(), "info->dwServerPid was 0x%x instead of 0x%x\n", info->dwServerPid, GetCurrentProcessId());
+    }
+    ok(!info->pObject, "info->pObject should be NULL\n");
+    ok(IsEqualGUID(uExtent, &EXTENTID_WineTest), "uExtent wasn't correct\n");
+
+    *(unsigned char *)pDataBuffer = 0xcc;
+    *pDataSize = 1;
+}
+
+static void WINAPI TestChannelHook_ClientNotify(
+    IChannelHook *iface,
+    REFGUID uExtent,
+    REFIID  riid,
+    ULONG   cbDataSize,
+    void   *pDataBuffer,
+    DWORD   lDataRep,
+    HRESULT hrFault )
+{
+    SChannelHookCallInfo *info = (SChannelHookCallInfo *)riid;
+    trace("TestChannelHook_ClientNotify hrFault = 0x%08x\n", hrFault);
+    ok(info->cbSize == sizeof(*info), "info->cbSize was %d instead of %d\n", info->cbSize, (int)sizeof(*info));
+    todo_wine {
+    ok(info->dwServerPid == GetCurrentProcessId(), "info->dwServerPid was 0x%x instead of 0x%x\n", info->dwServerPid, GetCurrentProcessId());
+    ok(info->pObject != NULL, "info->pObject shouldn't be NULL\n");
+    }
+    ok(IsEqualGUID(uExtent, &EXTENTID_WineTest), "uExtent wasn't correct\n");
+}
+
+static void WINAPI TestChannelHook_ServerNotify(
+    IChannelHook *iface,
+    REFGUID uExtent,
+    REFIID  riid,
+    ULONG   cbDataSize,
+    void   *pDataBuffer,
+    DWORD   lDataRep )
+{
+    SChannelHookCallInfo *info = (SChannelHookCallInfo *)riid;
+    trace("TestChannelHook_ServerNotify\n");
+    ok(info->cbSize == sizeof(*info), "info->cbSize was %d instead of %d\n", info->cbSize, (int)sizeof(*info));
+    ok(info->dwServerPid == GetCurrentProcessId(), "info->dwServerPid was 0x%x instead of 0x%x\n", info->dwServerPid, GetCurrentProcessId());
+    ok(info->pObject != NULL, "info->pObject shouldn't be NULL\n");
+    ok(cbDataSize == 1, "cbDataSize should have been 1 instead of %d\n", cbDataSize);
+    ok(*(unsigned char *)pDataBuffer == 0xcc, "pDataBuffer should have contained 0xcc instead of 0x%x\n", *(unsigned char *)pDataBuffer);
+    ok(IsEqualGUID(uExtent, &EXTENTID_WineTest), "uExtent wasn't correct\n");
+}
+
+static void WINAPI TestChannelHook_ServerGetSize(
+    IChannelHook *iface,
+    REFGUID uExtent,
+    REFIID  riid,
+    HRESULT hrFault,
+    ULONG  *pDataSize )
+{
+    SChannelHookCallInfo *info = (SChannelHookCallInfo *)riid;
+    trace("TestChannelHook_ServerGetSize\n");
+    trace("\t%s method %d\n", debugstr_iid(riid), info->iMethod);
+    ok(info->cbSize == sizeof(*info), "info->cbSize was %d instead of %d\n", info->cbSize, (int)sizeof(*info));
+    ok(info->dwServerPid == GetCurrentProcessId(), "info->dwServerPid was 0x%x instead of 0x%x\n", info->dwServerPid, GetCurrentProcessId());
+    ok(info->pObject != NULL, "info->pObject shouldn't be NULL\n");
+    ok(IsEqualGUID(uExtent, &EXTENTID_WineTest), "uExtent wasn't correct\n");
+    if (hrFault != S_OK)
+        trace("\thrFault = 0x%08x\n", hrFault);
+
+    *pDataSize = 0;
+}
+
+static void WINAPI TestChannelHook_ServerFillBuffer(
+    IChannelHook *iface,
+    REFGUID uExtent,
+    REFIID  riid,
+    ULONG  *pDataSize,
+    void   *pDataBuffer,
+    HRESULT hrFault )
+{
+    trace("TestChannelHook_ServerFillBuffer\n");
+    ok(0, "TestChannelHook_ServerFillBuffer shouldn't be called\n");
+}
+
+static const IChannelHookVtbl TestChannelHookVtbl =
+{
+    TestChannelHook_QueryInterface,
+    TestChannelHook_AddRef,
+    TestChannelHook_Release,
+    TestChannelHook_ClientGetSize,
+    TestChannelHook_ClientFillBuffer,
+    TestChannelHook_ClientNotify,
+    TestChannelHook_ServerNotify,
+    TestChannelHook_ServerGetSize,
+    TestChannelHook_ServerFillBuffer,
 };
 
-static void test_marshal_CLIPFORMAT(void)
+static IChannelHook TestChannelHook = { &TestChannelHookVtbl };
+
+static void test_channel_hook(void)
 {
-    unsigned char *buffer;
-    ULONG size;
-    ULONG flags = MAKELONG(MSHCTX_DIFFERENTMACHINE, NDR_LOCAL_DATA_REPRESENTATION);
-    wireCLIPFORMAT wirecf;
-    CLIPFORMAT cf = RegisterClipboardFormatA("MyFormat");
-    CLIPFORMAT cf2;
+    IStream *pStream = NULL;
+    IClassFactory *cf = NULL;
+    DWORD tid;
+    IUnknown *proxy = NULL;
+    HANDLE thread;
+    HRESULT hr;
 
-    size = CLIPFORMAT_UserSize(&flags, 0, &cf);
-    ok(size == sizeof(*wirecf) + sizeof(cf_marshaled), "Wrong size %d\n", size);
+    hr = CoRegisterChannelHook(&EXTENTID_WineTest, &TestChannelHook);
+    ok_ole_success(hr, CoRegisterChannelHook);
 
-    buffer = HeapAlloc(GetProcessHeap(), 0, size);
-    CLIPFORMAT_UserMarshal(&flags, buffer, &cf);
-    wirecf = (wireCLIPFORMAT)buffer;
-    ok(wirecf->fContext == WDT_REMOTE_CALL, "Context should be WDT_REMOTE_CALL instead of 0x%08lx\n", wirecf->fContext);
-    ok(wirecf->u.dwValue == cf, "Marshaled value should be 0x%04x instead of 0x%04x\n", cf, wirecf->u.dwValue);
-    ok(!memcmp(wirecf+1, cf_marshaled, sizeof(cf_marshaled)), "Marshaled data differs\n");
+    hr = CoRegisterMessageFilter(&MessageFilter, NULL);
+    ok_ole_success(hr, CoRegisterMessageFilter);
 
-    CLIPFORMAT_UserUnmarshal(&flags, buffer, &cf2);
-    ok(cf == cf2, "Didn't unmarshal properly\n");
-    HeapFree(GetProcessHeap(), 0, buffer);
+    cLocks = 0;
 
-    CLIPFORMAT_UserFree(&flags, &cf2);
-}
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
+    ok_ole_success(hr, CreateStreamOnHGlobal);
+    tid = start_host_object2(pStream, &IID_IClassFactory, (IUnknown*)&Test_ClassFactory, MSHLFLAGS_NORMAL, &MessageFilter, &thread);
 
-static void test_marshal_HWND(void)
-{
-    unsigned char *buffer;
-    ULONG size;
-    ULONG flags = MAKELONG(MSHCTX_LOCAL, NDR_LOCAL_DATA_REPRESENTATION);
-    HWND hwnd = GetDesktopWindow();
-    HWND hwnd2;
-    wireHWND wirehwnd;
+    ok_more_than_one_lock();
 
-    size = HWND_UserSize(&flags, 0, &hwnd);
-    ok(size == sizeof(*wirehwnd), "Wrong size %d\n", size);
+    IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
+    hr = CoUnmarshalInterface(pStream, &IID_IClassFactory, (void **)&cf);
+    ok_ole_success(hr, CoUnmarshalInterface);
+    IStream_Release(pStream);
 
-    buffer = HeapAlloc(GetProcessHeap(), 0, size);
-    HWND_UserMarshal(&flags, buffer, &hwnd);
-    wirehwnd = (wireHWND)buffer;
-    ok(wirehwnd->fContext == WDT_INPROC_CALL, "Context should be WDT_INPROC_CALL instead of 0x%08lx\n", wirehwnd->fContext);
-    ok(wirehwnd->u.hInproc == (LONG_PTR)hwnd, "Marshaled value should be %p instead of %p\n", hwnd, (HANDLE)wirehwnd->u.hRemote);
+    ok_more_than_one_lock();
 
-    HWND_UserUnmarshal(&flags, buffer, &hwnd2);
-    ok(hwnd == hwnd2, "Didn't unmarshal properly\n");
-    HeapFree(GetProcessHeap(), 0, buffer);
+    hr = IClassFactory_CreateInstance(cf, NULL, &IID_IUnknown, (LPVOID*)&proxy);
+    ok_ole_success(hr, IClassFactory_CreateInstance);
+    IUnknown_Release(proxy);
 
-    HWND_UserFree(&flags, &hwnd2);
-}
+    IClassFactory_Release(cf);
 
-static void test_marshal_HGLOBAL(void)
-{
-    unsigned char *buffer;
-    ULONG size;
-    ULONG flags = MAKELONG(MSHCTX_LOCAL, NDR_LOCAL_DATA_REPRESENTATION);
-    HGLOBAL hglobal;
-    HGLOBAL hglobal2;
-    unsigned char *wirehglobal;
-    int i;
+    ok_no_locks();
 
-    hglobal = NULL;
-    flags = MAKELONG(MSHCTX_LOCAL, NDR_LOCAL_DATA_REPRESENTATION);
-    size = HGLOBAL_UserSize(&flags, 0, &hglobal);
-    /* native is poorly programmed and allocates 4 bytes more than it needs to
-     * here - Wine doesn't have to emulate that */
-    ok((size == 8) || (size == 12), "Size should be 12, instead of %d\n", size);
-    buffer = HeapAlloc(GetProcessHeap(), 0, size);
-    HGLOBAL_UserMarshal(&flags, buffer, &hglobal);
-    wirehglobal = buffer;
-    ok(*(ULONG *)wirehglobal == WDT_REMOTE_CALL, "Context should be WDT_REMOTE_CALL instead of 0x%08x\n", *(ULONG *)wirehglobal);
-    wirehglobal += sizeof(ULONG);
-    ok(*(ULONG *)wirehglobal == (ULONG)hglobal, "buffer+4 should be HGLOBAL\n");
-    HGLOBAL_UserUnmarshal(&flags, buffer, &hglobal2);
-    ok(hglobal2 == hglobal, "Didn't unmarshal properly\n");
-    HeapFree(GetProcessHeap(), 0, buffer);
-    HGLOBAL_UserFree(&flags, &hglobal2);
+    end_host_object(tid, thread);
 
-    hglobal = GlobalAlloc(0, 4);
-    buffer = GlobalLock(hglobal);
-    for (i = 0; i < 4; i++)
-        buffer[i] = i;
-    GlobalUnlock(hglobal);
-    flags = MAKELONG(MSHCTX_LOCAL, NDR_LOCAL_DATA_REPRESENTATION);
-    size = HGLOBAL_UserSize(&flags, 0, &hglobal);
-    /* native is poorly programmed and allocates 4 bytes more than it needs to
-     * here - Wine doesn't have to emulate that */
-    ok((size == 24) || (size == 28), "Size should be 24 or 28, instead of %d\n", size);
-    buffer = HeapAlloc(GetProcessHeap(), 0, size);
-    HGLOBAL_UserMarshal(&flags, buffer, &hglobal);
-    wirehglobal = buffer;
-    ok(*(ULONG *)wirehglobal == WDT_REMOTE_CALL, "Context should be WDT_REMOTE_CALL instead of 0x%08x\n", *(ULONG *)wirehglobal);
-    wirehglobal += sizeof(ULONG);
-    ok(*(ULONG *)wirehglobal == (ULONG)hglobal, "buffer+0x4 should be HGLOBAL\n");
-    wirehglobal += sizeof(ULONG);
-    ok(*(ULONG *)wirehglobal == 4, "buffer+0x8 should be size of HGLOBAL\n");
-    wirehglobal += sizeof(ULONG);
-    ok(*(ULONG *)wirehglobal == (ULONG)hglobal, "buffer+0xc should be HGLOBAL\n");
-    wirehglobal += sizeof(ULONG);
-    ok(*(ULONG *)wirehglobal == 4, "buffer+0x10 should be size of HGLOBAL\n");
-    wirehglobal += sizeof(ULONG);
-    for (i = 0; i < 4; i++)
-        ok(wirehglobal[i] == i, "buffer+0x%x should be %d\n", 0x10 + i, i);
-    HGLOBAL_UserUnmarshal(&flags, buffer, &hglobal2);
-    ok(hglobal2 != NULL, "Didn't unmarshal properly\n");
-    HeapFree(GetProcessHeap(), 0, buffer);
-    HGLOBAL_UserFree(&flags, &hglobal2);
-    GlobalFree(hglobal);
-}
-
-static HENHMETAFILE create_emf(void)
-{
-    RECT rect = {0, 0, 100, 100};
-    HDC hdc = CreateEnhMetaFile(NULL, NULL, &rect, "HENHMETAFILE Marshaling Test\0Test\0\0");
-    ExtTextOut(hdc, 0, 0, ETO_OPAQUE, NULL, "Test String", strlen("Test String"), NULL);
-    return CloseEnhMetaFile(hdc);
-}
-
-static void test_marshal_HENHMETAFILE(void)
-{
-    unsigned char *buffer;
-    ULONG size;
-    ULONG flags = MAKELONG(MSHCTX_DIFFERENTMACHINE, NDR_LOCAL_DATA_REPRESENTATION);
-    HENHMETAFILE hemf;
-    HENHMETAFILE hemf2 = NULL;
-    unsigned char *wirehemf;
-
-    hemf = create_emf();
-
-    size = HENHMETAFILE_UserSize(&flags, 0, &hemf);
-    ok(size > 20, "size should be at least 20 bytes, not %d\n", size);
-    buffer = HeapAlloc(GetProcessHeap(), 0, size);
-    HENHMETAFILE_UserMarshal(&flags, buffer, &hemf);
-    wirehemf = buffer;
-    ok(*(DWORD *)wirehemf == WDT_REMOTE_CALL, "wirestgm + 0x0 should be WDT_REMOTE_CALL instead of 0x%08x\n", *(DWORD *)wirehemf);
-    wirehemf += sizeof(DWORD);
-    ok(*(DWORD *)wirehemf == (DWORD)(DWORD_PTR)hemf, "wirestgm + 0x4 should be hemf instead of 0x%08x\n", *(DWORD *)wirehemf);
-    wirehemf += sizeof(DWORD);
-    ok(*(DWORD *)wirehemf == (size - 0x10), "wirestgm + 0x8 should be size - 0x10 instead of 0x%08x\n", *(DWORD *)wirehemf);
-    wirehemf += sizeof(DWORD);
-    ok(*(DWORD *)wirehemf == (size - 0x10), "wirestgm + 0xc should be size - 0x10 instead of 0x%08x\n", *(DWORD *)wirehemf);
-    wirehemf += sizeof(DWORD);
-    ok(*(DWORD *)wirehemf == EMR_HEADER, "wirestgm + 0x10 should be EMR_HEADER instead of %d\n", *(DWORD *)wirehemf);
-    wirehemf += sizeof(DWORD);
-    /* ... rest of data not tested - refer to tests for GetEnhMetaFileBits
-     * at this point */
-
-    HENHMETAFILE_UserUnmarshal(&flags, buffer, &hemf2);
-    ok(hemf2 != NULL, "HENHMETAFILE didn't unmarshal\n");
-    HeapFree(GetProcessHeap(), 0, buffer);
-    HENHMETAFILE_UserFree(&flags, &hemf2);
-    DeleteEnhMetaFile(hemf);
-
-    /* test NULL emf */
-    hemf = NULL;
-
-    size = HENHMETAFILE_UserSize(&flags, 0, &hemf);
-    ok(size == 8, "size should be 8 bytes, not %d\n", size);
-    buffer = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, size);
-    HENHMETAFILE_UserMarshal(&flags, buffer, &hemf);
-    wirehemf = buffer;
-    ok(*(DWORD *)wirehemf == WDT_REMOTE_CALL, "wirestgm + 0x0 should be WDT_REMOTE_CALL instead of 0x%08x\n", *(DWORD *)wirehemf);
-    wirehemf += sizeof(DWORD);
-    ok(*(DWORD *)wirehemf == (DWORD)(DWORD_PTR)hemf, "wirestgm + 0x4 should be hemf instead of 0x%08x\n", *(DWORD *)wirehemf);
-    wirehemf += sizeof(DWORD);
-
-    HENHMETAFILE_UserUnmarshal(&flags, buffer, &hemf2);
-    ok(hemf2 == NULL, "NULL HENHMETAFILE didn't unmarshal\n");
-    HeapFree(GetProcessHeap(), 0, buffer);
-    HENHMETAFILE_UserFree(&flags, &hemf2);
+    hr = CoRegisterMessageFilter(NULL, NULL);
+    ok_ole_success(hr, CoRegisterMessageFilter);
 }
 
 START_TEST(marshal)
@@ -2299,6 +2448,7 @@ START_TEST(marshal)
     test_stubbuffer(&IID_IClassFactory);
     test_proxybuffer(&IID_IClassFactory);
     test_message_reentrancy();
+    test_call_from_message();
     test_WM_QUIT_handling();
     test_freethreadedmarshaler();
 
@@ -2308,10 +2458,10 @@ START_TEST(marshal)
     test_ROT();
     test_globalinterfacetable();
 
-    test_marshal_CLIPFORMAT();
-    test_marshal_HWND();
-    test_marshal_HGLOBAL();
-    test_marshal_HENHMETAFILE();
+    test_CoGetInterfaceAndReleaseStream();
+
+    /* must be last test as channel hooks can't be unregistered */
+    test_channel_hook();
 
     CoUninitialize();
     return;

@@ -207,12 +207,9 @@ BOOL SHELL_DeleteDirectoryW(HWND hwnd, LPCWSTR pszDir, BOOL bShowUI)
 	{
 	  do
 	  {
-	    LPWSTR lp = wfd.cAlternateFileName;
-	    if (!lp[0])
-	      lp = wfd.cFileName;
-	    if (IsDotDir(lp))
+	    if (IsDotDir(wfd.cFileName))
 	      continue;
-	    PathCombineW(szTemp, pszDir, lp);
+	    PathCombineW(szTemp, pszDir, wfd.cFileName);
 	    if (FILE_ATTRIBUTE_DIRECTORY & wfd.dwFileAttributes)
 	      ret = SHELL_DeleteDirectoryW(hwnd, szTemp, FALSE);
 	    else
@@ -826,6 +823,8 @@ static void parse_wildcard_files(FILE_LIST *flList, LPWSTR szFile, LPDWORD pdwLi
     FILE_ENTRY *file;
     LPWSTR szFullPath;
     BOOL res;
+
+    if (hFile == INVALID_HANDLE_VALUE) return;
 
     for (res = TRUE; res; res = FindNextFileW(hFile, &wfd))
     {

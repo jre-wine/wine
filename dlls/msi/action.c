@@ -35,6 +35,7 @@ http://msdn.microsoft.com/library/default.asp?url=/library/en-us/msi/setup/stand
 #include "winerror.h"
 #include "winreg.h"
 #include "winsvc.h"
+#include "odbcinst.h"
 #include "wine/debug.h"
 #include "msidefs.h"
 #include "msipriv.h"
@@ -240,7 +241,7 @@ struct _actions {
     STANDARDACTIONHANDLER handler;
 };
 
-static struct _actions StandardActions[];
+static const struct _actions StandardActions[];
 
 
 /********************************************************
@@ -1439,6 +1440,89 @@ static UINT load_all_files(MSIPACKAGE *package)
     return ERROR_SUCCESS;
 }
 
+static UINT load_folder( MSIRECORD *row, LPVOID param )
+{
+    MSIPACKAGE *package = param;
+    static const WCHAR szDot[] = { '.',0 };
+    static WCHAR szEmpty[] = { 0 };
+    LPWSTR p, tgt_short, tgt_long, src_short, src_long;
+    MSIFOLDER *folder;
+
+    folder = msi_alloc_zero( sizeof (MSIFOLDER) );
+    if (!folder)
+        return ERROR_NOT_ENOUGH_MEMORY;
+
+    folder->Directory = msi_dup_record_field( row, 1 );
+
+    TRACE("%s\n", debugstr_w(folder->Directory));
+
+    p = msi_dup_record_field(row, 3);
+
+    /* split src and target dir */
+    tgt_short = p;
+    src_short = folder_split_path( p, ':' );
+
+    /* split the long and short paths */
+    tgt_long = folder_split_path( tgt_short, '|' );
+    src_long = folder_split_path( src_short, '|' );
+
+    /* check for no-op dirs */
+    if (!lstrcmpW(szDot, tgt_short))
+        tgt_short = szEmpty;
+    if (!lstrcmpW(szDot, src_short))
+        src_short = szEmpty;
+
+    if (!tgt_long)
+        tgt_long = tgt_short;
+
+    if (!src_short) {
+        src_short = tgt_short;
+        src_long = tgt_long;
+    }
+
+    if (!src_long)
+        src_long = src_short;
+
+    /* FIXME: use the target short path too */
+    folder->TargetDefault = strdupW(tgt_long);
+    folder->SourceShortPath = strdupW(src_short);
+    folder->SourceLongPath = strdupW(src_long);
+    msi_free(p);
+
+    TRACE("TargetDefault = %s\n",debugstr_w( folder->TargetDefault ));
+    TRACE("SourceLong = %s\n", debugstr_w( folder->SourceLongPath ));
+    TRACE("SourceShort = %s\n", debugstr_w( folder->SourceShortPath ));
+
+    folder->Parent = msi_dup_record_field( row, 2 );
+
+    folder->Property = msi_dup_property( package, folder->Directory );
+
+    list_add_tail( &package->folders, &folder->entry );
+
+    TRACE("returning %p\n", folder);
+
+    return ERROR_SUCCESS;
+}
+
+static UINT load_all_folders( MSIPACKAGE *package )
+{
+    static const WCHAR query[] = {
+        'S','E','L','E','C','T',' ','*',' ','F','R', 'O','M',' ',
+         '`','D','i','r','e','c','t','o','r','y','`',0 };
+    MSIQUERY *view;
+    UINT r;
+
+    if (!list_empty(&package->folders))
+        return ERROR_SUCCESS;
+
+    r = MSI_DatabaseOpenViewW( package->db, query, &view );
+    if (r != ERROR_SUCCESS)
+        return r;
+
+    r = MSI_IterateRecords(view, NULL, load_folder, package);
+    msiobj_release(&view->hdr);
+    return r;
+}
 
 /*
  * I am not doing any of the costing functionality yet.
@@ -1468,6 +1552,7 @@ static UINT ACTION_CostInitialize(MSIPACKAGE *package)
     load_all_components( package );
     load_all_features( package );
     load_all_files( package );
+    load_all_folders( package );
 
     return ERROR_SUCCESS;
 }
@@ -1502,98 +1587,6 @@ static UINT execute_script(MSIPACKAGE *package, UINT script )
 static UINT ACTION_FileCost(MSIPACKAGE *package)
 {
     return ERROR_SUCCESS;
-}
-
-static MSIFOLDER *load_folder( MSIPACKAGE *package, LPCWSTR dir )
-{
-    static const WCHAR Query[] =
-        {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
-         '`','D','i','r','e','c', 't','o','r','y','`',' ',
-         'W','H','E','R','E',' ', '`', 'D','i','r','e','c','t', 'o','r','y','`',
-         ' ','=',' ','\'','%','s','\'',
-         0};
-    static const WCHAR szDot[] = { '.',0 };
-    static WCHAR szEmpty[] = { 0 };
-    LPWSTR p, tgt_short, tgt_long, src_short, src_long;
-    LPCWSTR parent;
-    MSIRECORD *row;
-    MSIFOLDER *folder;
-
-    TRACE("Looking for dir %s\n",debugstr_w(dir));
-
-    folder = get_loaded_folder( package, dir );
-    if (folder)
-        return folder;
-
-    TRACE("Working to load %s\n",debugstr_w(dir));
-
-    folder = msi_alloc_zero( sizeof (MSIFOLDER) );
-    if (!folder)
-        return NULL;
-
-    folder->Directory = strdupW(dir);
-
-    row = MSI_QueryGetRecord(package->db, Query, dir);
-    if (!row)
-        return NULL;
-
-    p = msi_dup_record_field(row, 3);
-
-    /* split src and target dir */
-    tgt_short = p;
-    src_short = folder_split_path( p, ':' );
-
-    /* split the long and short paths */
-    tgt_long = folder_split_path( tgt_short, '|' );
-    src_long = folder_split_path( src_short, '|' );
-
-    /* check for no-op dirs */
-    if (!lstrcmpW(szDot, tgt_short))
-        tgt_short = szEmpty;
-    if (!lstrcmpW(szDot, src_short))
-        src_short = szEmpty;
-
-    if (!tgt_long)
-        tgt_long = tgt_short;
-	
-    if (!src_short) {
-        src_short = tgt_short;
-        src_long = tgt_long;
-    }
-    
-    if (!src_long)
-        src_long = src_short;
-
-    /* FIXME: use the target short path too */
-    folder->TargetDefault = strdupW(tgt_long);
-    folder->SourceShortPath = strdupW(src_short);
-    folder->SourceLongPath = strdupW(src_long);
-    msi_free(p);
-
-    TRACE("TargetDefault = %s\n",debugstr_w( folder->TargetDefault ));
-    TRACE("SourceLong = %s\n", debugstr_w( folder->SourceLongPath ));
-    TRACE("SourceShort = %s\n", debugstr_w( folder->SourceShortPath ));
-
-    parent = MSI_RecordGetString(row, 2);
-    if (parent) 
-    {
-        folder->Parent = load_folder( package, parent );
-        if ( folder->Parent )
-            TRACE("loaded parent %p %s\n", folder->Parent,
-                  debugstr_w(folder->Parent->Directory));
-        else
-            ERR("failed to load parent folder %s\n", debugstr_w(parent));
-    }
-
-    folder->Property = msi_dup_property( package, dir );
-
-    msiobj_release(&row->hdr);
-
-    list_add_tail( &package->folders, &folder->entry );
-
-    TRACE("%s returning %p\n",debugstr_w(dir),folder);
-
-    return folder;
 }
 
 static void ACTION_GetComponentInstallStates(MSIPACKAGE *package)
@@ -1643,7 +1636,7 @@ static void ACTION_UpdateFeatureInstallStates(MSIPACKAGE *package)
                 if (res == comp->Installed)
                     continue;
 
-                if (res != INSTALLSTATE_DEFAULT || res != INSTALLSTATE_LOCAL ||
+                if (res != INSTALLSTATE_DEFAULT && res != INSTALLSTATE_LOCAL &&
                     res != INSTALLSTATE_SOURCE)
                 {
                     res = INSTALLSTATE_INCOMPLETE;
@@ -1793,7 +1786,19 @@ UINT MSI_SetFeatureStates(MSIPACKAGE *package)
         ComponentList *cl;
 
         TRACE("Examining Feature %s (Installed %i, Action %i)\n",
-            debugstr_w(feature->Feature), feature->Installed, feature->Action);
+              debugstr_w(feature->Feature), feature->Installed, feature->Action);
+
+        /* features with components that have compressed files are made local */
+        LIST_FOR_EACH_ENTRY( cl, &feature->Components, ComponentList, entry )
+        {
+            if (cl->component->Enabled &&
+                cl->component->ForceLocalState &&
+                feature->Action == INSTALLSTATE_SOURCE)
+            {
+                msi_feature_set_state( feature, INSTALLSTATE_LOCAL );
+                break;
+            }
+        }
 
         LIST_FOR_EACH_ENTRY( cl, &feature->Components, ComponentList, entry )
         {
@@ -1802,49 +1807,69 @@ UINT MSI_SetFeatureStates(MSIPACKAGE *package)
             if (!component->Enabled)
                 continue;
 
-            if (component->Attributes & msidbComponentAttributesOptional)
-                msi_component_set_state( component, INSTALLSTATE_DEFAULT );
-            else
+            switch (feature->Action)
             {
-                if (component->Attributes & msidbComponentAttributesSourceOnly)
-                    msi_component_set_state( component, INSTALLSTATE_SOURCE );
+            case INSTALLSTATE_ADVERTISED:
+                component->hasAdvertiseFeature = 1;
+                break;
+            case INSTALLSTATE_SOURCE:
+                component->hasSourceFeature = 1;
+                break;
+            case INSTALLSTATE_LOCAL:
+                component->hasLocalFeature = 1;
+                break;
+            case INSTALLSTATE_DEFAULT:
+                if (feature->Attributes & msidbFeatureAttributesFavorAdvertise)
+                    component->hasAdvertiseFeature = 1;
+                else if (feature->Attributes & msidbFeatureAttributesFavorSource)
+                    component->hasSourceFeature = 1;
                 else
-                    msi_component_set_state( component, INSTALLSTATE_LOCAL );
+                    component->hasLocalFeature = 1;
+                break;
+            default:
+                break;
             }
-
-            if (component->ForceLocalState)
-                msi_component_set_state( component, INSTALLSTATE_LOCAL );
-
-            if (feature->Attributes == msidbFeatureAttributesFavorLocal)
-            {
-                if (!(component->Attributes & msidbComponentAttributesSourceOnly))
-                    msi_component_set_state( component, INSTALLSTATE_LOCAL );
-            }
-            else if (feature->Attributes == msidbFeatureAttributesFavorSource)
-            {
-                if ((component->Action == INSTALLSTATE_UNKNOWN) ||
-                    (component->Action == INSTALLSTATE_ABSENT) ||
-                    (component->Action == INSTALLSTATE_ADVERTISED) ||
-                    (component->Action == INSTALLSTATE_DEFAULT))
-                    msi_component_set_state( component, INSTALLSTATE_SOURCE );
-            }
-            else if (feature->ActionRequest == INSTALLSTATE_ADVERTISED)
-            {
-                if ((component->Action == INSTALLSTATE_UNKNOWN) ||
-                    (component->Action == INSTALLSTATE_ABSENT))
-                    msi_component_set_state( component, INSTALLSTATE_ADVERTISED );
-            }
-            else if (feature->ActionRequest == INSTALLSTATE_ABSENT)
-            {
-                if (component->Action == INSTALLSTATE_UNKNOWN)
-                    msi_component_set_state( component, INSTALLSTATE_ABSENT );
-            }
-            else if (feature->ActionRequest == INSTALLSTATE_UNKNOWN)
-                msi_component_set_state( component, INSTALLSTATE_UNKNOWN );
-
-            if (component->ForceLocalState && feature->Action == INSTALLSTATE_SOURCE)
-                msi_feature_set_state( feature, INSTALLSTATE_LOCAL );
         }
+    }
+
+    LIST_FOR_EACH_ENTRY( component, &package->components, MSICOMPONENT, entry )
+    {
+        /* if the component isn't enabled, leave it alone */
+        if (!component->Enabled)
+            continue;
+
+        /* check if it's local or source */
+        if (!(component->Attributes & msidbComponentAttributesOptional) &&
+             (component->hasLocalFeature || component->hasSourceFeature))
+        {
+            if ((component->Attributes & msidbComponentAttributesSourceOnly) &&
+                 !component->ForceLocalState)
+                msi_component_set_state( component, INSTALLSTATE_SOURCE );
+            else
+                msi_component_set_state( component, INSTALLSTATE_LOCAL );
+            continue;
+        }
+
+        /* if any feature is local, the component must be local too */
+        if (component->hasLocalFeature)
+        {
+            msi_component_set_state( component, INSTALLSTATE_LOCAL );
+            continue;
+        }
+
+        if (component->hasSourceFeature)
+        {
+            msi_component_set_state( component, INSTALLSTATE_SOURCE );
+            continue;
+        }
+
+        if (component->hasAdvertiseFeature)
+        {
+            msi_component_set_state( component, INSTALLSTATE_ADVERTISED );
+            continue;
+        }
+
+        TRACE("nobody wants component %s\n", debugstr_w(component->Component));
     }
 
     LIST_FOR_EACH_ENTRY( component, &package->components, MSICOMPONENT, entry )
@@ -1873,7 +1898,6 @@ static UINT ITERATE_CostFinalizeDirectories(MSIRECORD *row, LPVOID param)
 
     /* This helper function now does ALL the work */
     TRACE("Dir %s ...\n",debugstr_w(name));
-    load_folder(package,name);
     path = resolve_folder(package,name,FALSE,TRUE,NULL);
     TRACE("resolves to %s\n",debugstr_w(path));
     msi_free(path);
@@ -2705,7 +2729,7 @@ static UINT ACTION_ProcessComponents(MSIPACKAGE *package)
             continue;
 
         squash_guid(comp->ComponentId,squished_cc);
-           
+
         msi_free(comp->FullKeypath);
         comp->FullKeypath = resolve_keypath( package, comp );
 
@@ -2743,14 +2767,6 @@ static UINT ACTION_ProcessComponents(MSIPACKAGE *package)
             }
 
             RegCloseKey(hkey2);
-
-            /* UI stuff */
-            uirow = MSI_CreateRecord(3);
-            MSI_RecordSetStringW(uirow,1,package->ProductCode);
-            MSI_RecordSetStringW(uirow,2,comp->ComponentId);
-            MSI_RecordSetStringW(uirow,3,comp->FullKeypath);
-            ui_actiondata(package,szProcessComponents,uirow);
-            msiobj_release( &uirow->hdr );
         }
         else if (ACTION_VerifyComponentForAction( comp, INSTALLSTATE_ABSENT))
         {
@@ -2768,14 +2784,16 @@ static UINT ACTION_ProcessComponents(MSIPACKAGE *package)
             if (res == ERROR_NO_MORE_ITEMS)
                 RegDeleteKeyW(hkey,squished_cc);
 
-            /* UI stuff */
-            uirow = MSI_CreateRecord(2);
-            MSI_RecordSetStringW(uirow,1,package->ProductCode);
-            MSI_RecordSetStringW(uirow,2,comp->ComponentId);
-            ui_actiondata(package,szProcessComponents,uirow);
-            msiobj_release( &uirow->hdr );
         }
-    } 
+
+        /* UI stuff */
+        uirow = MSI_CreateRecord(3);
+        MSI_RecordSetStringW(uirow,1,package->ProductCode);
+        MSI_RecordSetStringW(uirow,2,comp->ComponentId);
+        MSI_RecordSetStringW(uirow,3,comp->FullKeypath);
+        ui_actiondata(package,szProcessComponents,uirow);
+        msiobj_release( &uirow->hdr );
+    }
     RegCloseKey(hkey);
     return rc;
 }
@@ -3788,7 +3806,7 @@ static UINT ACTION_InstallFinalize(MSIPACKAGE *package)
 {
     UINT rc;
 
-    /* turn off scheduleing */
+    /* turn off scheduling */
     package->script->CurrentlyScripting= FALSE;
 
     /* first do the same as an InstallExecute */
@@ -3851,31 +3869,40 @@ static UINT ACTION_ForceReboot(MSIPACKAGE *package)
     return ERROR_INSTALL_SUSPEND;
 }
 
+UINT msi_set_sourcedir_props(MSIPACKAGE *package)
+{
+    LPWSTR p, source;
+    DWORD len;
+
+    p = strrchrW( package->PackagePath, '\\' );
+    if (!p)
+        return ERROR_SUCCESS;
+
+    len = p - package->PackagePath + 2;
+    source = msi_alloc( len * sizeof(WCHAR) );
+    lstrcpynW( source, package->PackagePath, len );
+
+    MSI_SetPropertyW( package, cszSourceDir, source );
+    MSI_SetPropertyW( package, cszSOURCEDIR, source );
+
+    msi_free( source );
+
+    return ERROR_SUCCESS;
+}
+
 static UINT ACTION_ResolveSource(MSIPACKAGE* package)
 {
-    DWORD attrib, len;
-    LPWSTR ptr, source;
+    DWORD attrib;
     UINT rc;
-    
+
     /*
-     * we are currently doing what should be done here in the top level Install
-     * however for Adminastrative and uninstalls this step will be needed
+     * We are currently doing what should be done here in the top level Install
+     * however for Administrative and uninstalls this step will be needed
      */
     if (!package->PackagePath)
         return ERROR_SUCCESS;
 
-    ptr = strrchrW(package->PackagePath, '\\');
-    if (!ptr)
-        return ERROR_SUCCESS;
-
-    len = ptr - package->PackagePath + 2;
-    source = msi_alloc(len * sizeof(WCHAR));
-    lstrcpynW(source,  package->PackagePath, len);
-
-    MSI_SetPropertyW(package, cszSourceDir, source);
-    MSI_SetPropertyW(package, cszSOURCEDIR, source);
-
-    msi_free(source);
+    msi_set_sourcedir_props(package);
 
     attrib = GetFileAttributesW(package->PackagePath);
     if (attrib == INVALID_FILE_ATTRIBUTES)
@@ -4165,6 +4192,230 @@ static UINT ACTION_InstallServices( MSIPACKAGE *package )
     return rc;
 }
 
+/* converts arg1[~]arg2[~]arg3 to a list of ptrs to the strings */
+static LPCWSTR *msi_service_args_to_vector(LPCWSTR name, LPWSTR args, DWORD *numargs)
+{
+    LPCWSTR *vector;
+    LPWSTR p, q;
+    DWORD sep_len;
+
+    static const WCHAR separator[] = {'[','~',']',0};
+
+    *numargs = 0;
+    sep_len = sizeof(separator) / sizeof(WCHAR) - 1;
+
+    if (!args)
+        return NULL;
+
+    vector = msi_alloc(sizeof(LPWSTR));
+    if (!vector)
+        return NULL;
+
+    p = args;
+    do
+    {
+        (*numargs)++;
+        vector[*numargs - 1] = p;
+
+        if ((q = strstrW(p, separator)))
+        {
+            *q = '\0';
+
+            vector = msi_realloc(vector, (*numargs + 1) * sizeof(LPWSTR));
+            if (!vector)
+                return NULL;
+
+            p = q + sep_len;
+        }
+    } while (q);
+
+    return vector;
+}
+
+static MSICOMPONENT *msi_find_component( MSIPACKAGE *package, LPCWSTR component )
+{
+    MSICOMPONENT *comp;
+
+    LIST_FOR_EACH_ENTRY(comp, &package->components, MSICOMPONENT, entry)
+    {
+        if (!lstrcmpW(comp->Component, component))
+            return comp;
+    }
+
+    return NULL;
+}
+
+static UINT ITERATE_StartService(MSIRECORD *rec, LPVOID param)
+{
+    MSIPACKAGE *package = (MSIPACKAGE *)param;
+    MSICOMPONENT *comp;
+    SC_HANDLE scm, service = NULL;
+    LPCWSTR name, *vector = NULL;
+    LPWSTR args;
+    DWORD event, numargs;
+    UINT r = ERROR_FUNCTION_FAILED;
+
+    comp = msi_find_component(package, MSI_RecordGetString(rec, 6));
+    if (!comp || comp->Action == INSTALLSTATE_UNKNOWN || comp->Action == INSTALLSTATE_ABSENT)
+        return ERROR_SUCCESS;
+
+    name = MSI_RecordGetString(rec, 2);
+    event = MSI_RecordGetInteger(rec, 3);
+    args = strdupW(MSI_RecordGetString(rec, 4));
+
+    if (!(event & msidbServiceControlEventStart))
+        return ERROR_SUCCESS;
+
+    scm = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
+    if (!scm)
+    {
+        ERR("Failed to open the service control manager\n");
+        goto done;
+    }
+
+    service = OpenServiceW(scm, name, SERVICE_START);
+    if (!service)
+    {
+        ERR("Failed to open service '%s'\n", debugstr_w(name));
+        goto done;
+    }
+
+    vector = msi_service_args_to_vector(name, args, &numargs);
+
+    if (!StartServiceW(service, numargs, vector))
+    {
+        ERR("Failed to start service '%s'\n", debugstr_w(name));
+        goto done;
+    }
+
+    r = ERROR_SUCCESS;
+
+done:
+    CloseServiceHandle(service);
+    CloseServiceHandle(scm);
+
+    msi_free(args);
+    msi_free(vector);
+    return r;
+}
+
+static UINT ACTION_StartServices( MSIPACKAGE *package )
+{
+    UINT rc;
+    MSIQUERY *view;
+
+    static const WCHAR query[] = {
+        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
+        'S','e','r','v','i','c','e','C','o','n','t','r','o','l',0 };
+
+    rc = MSI_DatabaseOpenViewW(package->db, query, &view);
+    if (rc != ERROR_SUCCESS)
+        return ERROR_SUCCESS;
+
+    rc = MSI_IterateRecords(view, NULL, ITERATE_StartService, package);
+    msiobj_release(&view->hdr);
+
+    return rc;
+}
+
+static MSIFILE *msi_find_file( MSIPACKAGE *package, LPCWSTR filename )
+{
+    MSIFILE *file;
+
+    LIST_FOR_EACH_ENTRY(file, &package->files, MSIFILE, entry)
+    {
+        if (!lstrcmpW(file->File, filename))
+            return file;
+    }
+
+    return NULL;
+}
+
+static UINT ITERATE_InstallODBCDriver( MSIRECORD *rec, LPVOID param )
+{
+    MSIPACKAGE *package = (MSIPACKAGE*)param;
+    LPWSTR driver, driver_path, ptr;
+    WCHAR outpath[MAX_PATH];
+    MSIFILE *driver_file, *setup_file;
+    LPCWSTR desc;
+    DWORD len, usage;
+    UINT r = ERROR_SUCCESS;
+
+    static const WCHAR driver_fmt[] = {
+        'D','r','i','v','e','r','=','%','s',0};
+    static const WCHAR setup_fmt[] = {
+        'S','e','t','u','p','=','%','s',0};
+    static const WCHAR usage_fmt[] = {
+        'F','i','l','e','U','s','a','g','e','=','1',0};
+
+    desc = MSI_RecordGetString(rec, 3);
+
+    driver_file = msi_find_file(package, MSI_RecordGetString(rec, 4));
+    setup_file = msi_find_file(package, MSI_RecordGetString(rec, 5));
+
+    if (!driver_file || !setup_file)
+    {
+        ERR("ODBC Driver entry not found!\n");
+        return ERROR_FUNCTION_FAILED;
+    }
+
+    len = lstrlenW(desc) + lstrlenW(driver_fmt) + lstrlenW(driver_file->FileName) +
+          lstrlenW(setup_fmt) + lstrlenW(setup_file->FileName) +
+          lstrlenW(usage_fmt) + 1;
+    driver = msi_alloc(len * sizeof(WCHAR));
+    if (!driver)
+        return ERROR_OUTOFMEMORY;
+
+    ptr = driver;
+    lstrcpyW(ptr, desc);
+    ptr += lstrlenW(ptr) + 1;
+
+    sprintfW(ptr, driver_fmt, driver_file->FileName);
+    ptr += lstrlenW(ptr) + 1;
+
+    sprintfW(ptr, setup_fmt, setup_file->FileName);
+    ptr += lstrlenW(ptr) + 1;
+
+    lstrcpyW(ptr, usage_fmt);
+    ptr += lstrlenW(ptr) + 1;
+    *ptr = '\0';
+
+    driver_path = strdupW(driver_file->TargetPath);
+    ptr = strrchrW(driver_path, '\\');
+    if (ptr) *ptr = '\0';
+
+    if (!SQLInstallDriverExW(driver, driver_path, outpath, MAX_PATH,
+                             NULL, ODBC_INSTALL_COMPLETE, &usage))
+    {
+        ERR("Failed to install SQL driver!\n");
+        r = ERROR_FUNCTION_FAILED;
+    }
+
+    msi_free(driver);
+    msi_free(driver_path);
+
+    return r;
+}
+
+static UINT ACTION_InstallODBC( MSIPACKAGE *package )
+{
+    UINT rc;
+    MSIQUERY *view;
+
+    static const WCHAR query[] = {
+        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
+        'O','D','B','C','D','r','i','v','e','r',0 };
+
+    rc = MSI_DatabaseOpenViewW(package->db, query, &view);
+    if (rc != ERROR_SUCCESS)
+        return ERROR_SUCCESS;
+
+    rc = MSI_IterateRecords(view, NULL, ITERATE_InstallODBCDriver, package);
+    msiobj_release(&view->hdr);
+
+    return rc;
+}
+
 static UINT msi_unimplemented_action_stub( MSIPACKAGE *package,
                                            LPCSTR action, LPCWSTR table )
 {
@@ -4239,13 +4490,6 @@ static UINT ACTION_SelfUnregModules( MSIPACKAGE *package )
     return msi_unimplemented_action_stub( package, "SelfUnregModules", table );
 }
 
-static UINT ACTION_StartServices( MSIPACKAGE *package )
-{
-    static const WCHAR table[] = {
-        'S','e','r','v','i','c','e','C','o','n','t','r','o','l',0 };
-    return msi_unimplemented_action_stub( package, "StartServices", table );
-}
-
 static UINT ACTION_StopServices( MSIPACKAGE *package )
 {
     static const WCHAR table[] = {
@@ -4318,7 +4562,7 @@ static UINT ACTION_UnregisterComPlus( MSIPACKAGE *package )
     return msi_unimplemented_action_stub( package, "UnregisterComPlus", table );
 }
 
-static struct _actions StandardActions[] = {
+static const struct _actions StandardActions[] = {
     { szAllocateRegistrySpace, ACTION_AllocateRegistrySpace },
     { szAppSearch, ACTION_AppSearch },
     { szBindImage, ACTION_BindImage },
@@ -4348,7 +4592,7 @@ static struct _actions StandardActions[] = {
     { szMoveFiles, ACTION_MoveFiles },
     { szMsiPublishAssemblies, ACTION_MsiPublishAssemblies },
     { szMsiUnpublishAssemblies, ACTION_MsiUnpublishAssemblies },
-    { szInstallODBC, NULL},
+    { szInstallODBC, ACTION_InstallODBC },
     { szInstallServices, ACTION_InstallServices },
     { szPatchFiles, ACTION_PatchFiles },
     { szProcessComponents, ACTION_ProcessComponents },

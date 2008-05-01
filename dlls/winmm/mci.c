@@ -304,14 +304,14 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
             if (dwParam1 & MCI_OPEN_TYPE)
             {
                 if (dwParam1 & MCI_OPEN_TYPE_ID)
-                    mci_openW->lpstrDeviceType = (LPWSTR)mci_openA->lpstrDeviceType;
+                    mci_openW->lpstrDeviceType = (LPCWSTR)mci_openA->lpstrDeviceType;
                 else
                     mci_openW->lpstrDeviceType = MCI_strdupAtoW(mci_openA->lpstrDeviceType);
             }
             if (dwParam1 & MCI_OPEN_ELEMENT)
             {
                 if (dwParam1 & MCI_OPEN_ELEMENT_ID)
-                    mci_openW->lpstrElementName = (LPWSTR)mci_openA->lpstrElementName;
+                    mci_openW->lpstrElementName = (LPCWSTR)mci_openA->lpstrElementName;
                 else
                     mci_openW->lpstrElementName = MCI_strdupAtoW(mci_openA->lpstrElementName);
             }
@@ -980,8 +980,8 @@ static	LPCWSTR		MCI_FindCommand(UINT uTbl, LPCWSTR verb)
  */
 static	DWORD		MCI_GetReturnType(LPCWSTR lpCmd)
 {
-    lpCmd = (LPCWSTR)((BYTE*)(lpCmd + strlenW(lpCmd) + 1) + sizeof(DWORD) + sizeof(WORD));
-    if (*lpCmd == '\0' && *(const WORD*)((BYTE*)(lpCmd + 1) + sizeof(DWORD)) == MCI_RETURN) {
+    lpCmd = (LPCWSTR)((const BYTE*)(lpCmd + strlenW(lpCmd) + 1) + sizeof(DWORD) + sizeof(WORD));
+    if (*lpCmd == '\0' && *(const WORD*)((const BYTE*)(lpCmd + 1) + sizeof(DWORD)) == MCI_RETURN) {
 	return *(const DWORD*)(lpCmd + 1);
     }
     return 0L;
@@ -1257,7 +1257,6 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
     DWORD		retType;
     LPCWSTR		lpCmd = 0;
     LPWSTR		devAlias = NULL;
-    BOOL		bAutoOpen = FALSE;
     static const WCHAR  wszNew[] = {'n','e','w',0};
     static const WCHAR  wszSAliasS[] = {' ','a','l','i','a','s',' ',0};
     static const WCHAR wszTypeS[] = {'t','y','p','e',' ',0};
@@ -1420,10 +1419,6 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
     if ((dwRet = MCI_ParseOptArgs(data, offset, lpCmd, args, &dwFlags)))
 	goto errCleanUp;
 
-    if (bAutoOpen && (dwFlags & MCI_NOTIFY)) {
-	dwRet = MCIERR_NOTIFY_ON_AUTO_OPEN;
-	goto errCleanUp;
-    }
     /* FIXME: the command should get it's own notification window set up and
      * ask for device closing while processing the notification mechanism
      */

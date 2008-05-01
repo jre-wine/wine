@@ -694,8 +694,25 @@ static HRESULT WINAPI domdoc_createElement(
     BSTR tagname,
     IXMLDOMElement** element )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlNodePtr xmlnode;
+    domdoc *This = impl_from_IXMLDOMDocument( iface );
+    xmlChar *xml_name;
+    IUnknown *elem_unk;
+    HRESULT hr;
+
+    TRACE("%p->(%s,%p)\n", iface, debugstr_w(tagname), element);
+
+    xml_name = xmlChar_from_wchar((WCHAR*)tagname);
+    xmlnode = xmlNewDocNode(get_doc(This), NULL, xml_name, NULL);
+
+    TRACE("created xmlptr %p\n", xmlnode);
+    elem_unk = create_element(xmlnode, NULL);
+    HeapFree(GetProcessHeap(), 0, xml_name);
+
+    hr = IUnknown_QueryInterface(elem_unk, &IID_IXMLDOMElement, (void **)element);
+    IUnknown_Release(elem_unk);
+    TRACE("returning %p\n", *element);
+    return hr;
 }
 
 
@@ -744,8 +761,28 @@ static HRESULT WINAPI domdoc_createProcessingInstruction(
     BSTR data,
     IXMLDOMProcessingInstruction** pi )
 {
-    FIXME("\n");
+#ifdef HAVE_XMLNEWDOCPI
+    xmlNodePtr xmlnode;
+    domdoc *This = impl_from_IXMLDOMDocument( iface );
+    xmlChar *xml_target, *xml_content;
+
+    TRACE("%p->(%s %s %p)\n", iface, debugstr_w(target), debugstr_w(data), pi);
+
+    xml_target = xmlChar_from_wchar((WCHAR*)target);
+    xml_content = xmlChar_from_wchar((WCHAR*)data);
+
+    xmlnode = xmlNewDocPI(get_doc(This), xml_target, xml_content);
+    TRACE("created xmlptr %p\n", xmlnode);
+    *pi = (IXMLDOMProcessingInstruction*)create_pi(xmlnode);
+
+    HeapFree(GetProcessHeap(), 0, xml_content);
+    HeapFree(GetProcessHeap(), 0, xml_target);
+
+    return S_OK;
+#else
+    FIXME("Libxml 2.6.15 or greater required.\n");
     return E_NOTIMPL;
+#endif
 }
 
 

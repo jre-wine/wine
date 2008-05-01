@@ -295,8 +295,15 @@ HRESULT shader_get_registers_used(
             if (WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) == 1 && 
                 (WINED3DSIO_TEX == curOpcode->opcode ||
                  WINED3DSIO_TEXBEM == curOpcode->opcode ||
+                 WINED3DSIO_TEXBEML == curOpcode->opcode ||
+                 WINED3DSIO_TEXDP3TEX == curOpcode->opcode ||
                  WINED3DSIO_TEXM3x2TEX == curOpcode->opcode ||
-                 WINED3DSIO_TEXM3x3TEX == curOpcode->opcode)) {
+                 WINED3DSIO_TEXM3x3SPEC == curOpcode->opcode ||
+                 WINED3DSIO_TEXM3x3TEX == curOpcode->opcode ||
+                 WINED3DSIO_TEXM3x3VSPEC == curOpcode->opcode ||
+                 WINED3DSIO_TEXREG2AR == curOpcode->opcode ||
+                 WINED3DSIO_TEXREG2GB == curOpcode->opcode ||
+                 WINED3DSIO_TEXREG2RGB == curOpcode->opcode)) {
 
                 /* Fake sampler usage, only set reserved bit and ttype */
                 DWORD sampler_code = *pToken & WINED3DSP_REGNUM_MASK;
@@ -319,7 +326,7 @@ HRESULT shader_get_registers_used(
                             reg_maps->samplers[sampler_code] = (0x1 << 31) | WINED3DSTT_VOLUME;
                             break;
 
-                        case GLTEXTURECUBEMAP:
+                        case GL_TEXTURE_CUBE_MAP_ARB:
                             reg_maps->samplers[sampler_code] = (0x1 << 31) | WINED3DSTT_CUBE;
                             break;
 
@@ -328,23 +335,6 @@ HRESULT shader_get_registers_used(
                             reg_maps->samplers[sampler_code] = (0x1 << 31) | WINED3DSTT_2D;
                     }
                 }
-
-            } else if (WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) == 1 &&
-                (WINED3DSIO_TEXM3x3SPEC == curOpcode->opcode ||
-                 WINED3DSIO_TEXM3x3VSPEC == curOpcode->opcode)) {
-
-                /* 3D sampler usage, only set reserved bit and ttype
-                 * FIXME: This could be either Cube or Volume, but we wouldn't know unless
-                 * we waited to generate the shader until the textures were all bound.
-                 * For now, use Cube textures because they are more common. */
-                DWORD sampler_code = *pToken & WINED3DSP_REGNUM_MASK;
-                reg_maps->samplers[sampler_code] = (0x1 << 31) | WINED3DSTT_CUBE;
-            } else if (WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) == 1 &&
-                (WINED3DSIO_TEXDP3TEX == curOpcode->opcode)) {
-                
-                /* 1D Sampler usage */
-                DWORD sampler_code = *pToken & WINED3DSP_REGNUM_MASK;
-                reg_maps->samplers[sampler_code] = (0x1 << 31) | WINED3DSTT_1D;
             }
 
             /* This will loop over all the registers and try to
@@ -502,7 +492,7 @@ void shader_dump_param(
     int input) {
 
     IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*) iface;
-    static const char* rastout_reg_names[] = { "oPos", "oFog", "oPts" };
+    static const char * const rastout_reg_names[] = { "oPos", "oFog", "oPts" };
     char swizzle_reg_chars[4];
 
     DWORD reg = param & WINED3DSP_REGNUM_MASK;
@@ -701,7 +691,7 @@ void shader_generate_main(
             if (shader_is_comment(*pToken)) {
                 DWORD comment_len = (*pToken & WINED3DSI_COMMENTSIZE_MASK) >> WINED3DSI_COMMENTSIZE_SHIFT;
                 ++pToken;
-                TRACE("#%s\n", (char*)pToken);
+                TRACE("#%s\n", (const char*)pToken);
                 pToken += comment_len;
                 continue;
             }
@@ -834,7 +824,7 @@ void shader_trace_init(
             if (shader_is_comment(*pToken)) { /** comment */
                 DWORD comment_len = (*pToken & WINED3DSI_COMMENTSIZE_MASK) >> WINED3DSI_COMMENTSIZE_SHIFT;
                 ++pToken;
-                TRACE("//%s\n", (char*)pToken);
+                TRACE("//%s\n", (const char*)pToken);
                 pToken += comment_len;
                 len += comment_len + 1;
                 continue;
@@ -868,10 +858,10 @@ void shader_trace_init(
                         unsigned int offset = shader_get_float_offset(*pToken);
 
                         TRACE("def c%u = %f, %f, %f, %f", offset,
-                            *(float *)(pToken + 1),
-                            *(float *)(pToken + 2),
-                            *(float *)(pToken + 3),
-                            *(float *)(pToken + 4));
+                            *(const float *)(pToken + 1),
+                            *(const float *)(pToken + 2),
+                            *(const float *)(pToken + 3),
+                            *(const float *)(pToken + 4));
 
                         pToken += 5;
                         len += 5;
@@ -977,3 +967,15 @@ void shader_delete_constant_list(
         HeapFree(GetProcessHeap(), 0, constant);
     }
 }
+
+static void shader_none_select(IWineD3DDevice *iface, BOOL usePS, BOOL useVS) {}
+static void shader_none_select_depth_blt(IWineD3DDevice *iface) {}
+static void shader_none_load_constants(IWineD3DDevice *iface, char usePS, char useVS) {}
+static void shader_none_cleanup(BOOL usePS, BOOL useVS) {}
+
+const shader_backend_t none_shader_backend = {
+    &shader_none_select,
+    &shader_none_select_depth_blt,
+    &shader_none_load_constants,
+    &shader_none_cleanup
+};

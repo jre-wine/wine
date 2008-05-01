@@ -197,6 +197,8 @@ typedef struct
     WININET_NETCONNECTION netConnection;
     LPWSTR lpszVersion;
     LPWSTR lpszStatusText;
+    DWORD dwContentLength; /* total number of bytes to be read */
+    DWORD dwContentRead; /* bytes of the content read so far */
     HTTPHEADERW *pCustHeaders;
     DWORD nCustHeaders;
 } WININETHTTPREQW, *LPWININETHTTPREQW;
@@ -246,26 +248,6 @@ typedef struct
     DWORD size;
     LPFILEPROPERTIESW lpafp;
 } WININETFTPFINDNEXTW, *LPWININETFTPFINDNEXTW;
-
-typedef enum
-{
-    FTPPUTFILEW,
-    FTPSETCURRENTDIRECTORYW,
-    FTPCREATEDIRECTORYW,
-    FTPFINDFIRSTFILEW,
-    FTPGETCURRENTDIRECTORYW,
-    FTPOPENFILEW,
-    FTPGETFILEW,
-    FTPDELETEFILEW,
-    FTPREMOVEDIRECTORYW,
-    FTPRENAMEFILEW,
-    FTPFINDNEXTW,
-    HTTPSENDREQUESTW,
-    HTTPOPENREQUESTW,
-    SENDCALLBACK,
-    INTERNETOPENURLW,
-    INTERNETREADFILEEXA,
-} ASYNC_FUNC;
 
 struct WORKREQ_FTPPUTFILEW
 {
@@ -338,17 +320,6 @@ struct WORKREQ_FTPFINDNEXTW
     LPWIN32_FIND_DATAW lpFindFileData;
 };
 
-struct WORKREQ_HTTPOPENREQUESTW
-{
-    LPWSTR lpszVerb;
-    LPWSTR lpszObjectName;
-    LPWSTR lpszVersion;
-    LPWSTR lpszReferrer;
-    LPCWSTR *lpszAcceptTypes;
-    DWORD  dwFlags;
-    DWORD  dwContext;
-};
-
 struct WORKREQ_HTTPSENDREQUESTW
 {
     LPWSTR lpszHeader;
@@ -384,7 +355,7 @@ struct WORKREQ_INTERNETREADFILEEXA
 
 typedef struct WORKREQ
 {
-    ASYNC_FUNC asyncall;
+    void (*asyncproc)(struct WORKREQ*);
     WININETHANDLEHEADER *hdr;
 
     union {
@@ -399,15 +370,11 @@ typedef struct WORKREQ
         struct WORKREQ_FTPREMOVEDIRECTORYW      FtpRemoveDirectoryW;
         struct WORKREQ_FTPRENAMEFILEW           FtpRenameFileW;
         struct WORKREQ_FTPFINDNEXTW             FtpFindNextW;
-        struct WORKREQ_HTTPOPENREQUESTW         HttpOpenRequestW;
         struct WORKREQ_HTTPSENDREQUESTW         HttpSendRequestW;
         struct WORKREQ_SENDCALLBACK             SendCallback;
 	struct WORKREQ_INTERNETOPENURLW         InternetOpenUrlW;
         struct WORKREQ_INTERNETREADFILEEXA      InternetReadFileExA;
     } u;
-
-    struct WORKREQ *next;
-    struct WORKREQ *prev;
 
 } WORKREQUEST, *LPWORKREQUEST;
 
@@ -437,6 +404,9 @@ DWORD INTERNET_GetLastError(void);
 BOOL INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest);
 LPSTR INTERNET_GetResponseBuffer(void);
 LPSTR INTERNET_GetNextLine(INT nSocket, LPDWORD dwLen);
+BOOL INTERNET_ReadFile(LPWININETHANDLEHEADER lpwh, LPVOID lpBuffer,
+                       DWORD dwNumOfBytesToRead, LPDWORD pdwNumOfBytesRead,
+                       BOOL bWait, BOOL bSendCompletionStatus);
 
 BOOLAPI FTP_FtpPutFileW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszLocalFile,
     LPCWSTR lpszNewRemoteFile, DWORD dwFlags, DWORD dwContext);
@@ -464,6 +434,7 @@ INTERNETAPI HINTERNET WINAPI HTTP_HttpOpenRequestW(LPWININETHTTPSESSIONW lpwhs,
 	LPCWSTR lpszVerb, LPCWSTR lpszObjectName, LPCWSTR lpszVersion,
 	LPCWSTR lpszReferrer , LPCWSTR *lpszAcceptTypes,
 	DWORD dwFlags, DWORD dwContext);
+BOOL HTTP_FinishedReading(LPWININETHTTPREQW lpwhr);
 
 VOID SendAsyncCallback(LPWININETHANDLEHEADER hdr, DWORD dwContext,
                        DWORD dwInternetStatus, LPVOID lpvStatusInfo,

@@ -90,16 +90,16 @@ static const PixelFormatDesc formats[] = {
     {WINED3DFMT_W11V11U10   ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
     {WINED3DFMT_A2W10V10U10 ,0xb0000000 ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
     /* Depth stencil formats */
-    {WINED3DFMT_D16_LOCKABLE,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_SHORT              },
-    {WINED3DFMT_D32         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_INT                },
-    {WINED3DFMT_D15S1       ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_SHORT              },
-    {WINED3DFMT_D24S8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_INT                },
-    {WINED3DFMT_D24X8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_INT                },
-    {WINED3DFMT_D24X4S4     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_INT                },
-    {WINED3DFMT_D16         ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_SHORT              },
+    {WINED3DFMT_D16_LOCKABLE,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_SHORT              },
+    {WINED3DFMT_D32         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT32_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT                },
+    {WINED3DFMT_D15S1       ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_SHORT              },
+    {WINED3DFMT_D24S8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT                },
+    {WINED3DFMT_D24X8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT                },
+    {WINED3DFMT_D24X4S4     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT                },
+    {WINED3DFMT_D16         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_SHORT              },
     {WINED3DFMT_L16         ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_LUMINANCE16_EXT     ,GL_LUMINANCE       ,GL_UNSIGNED_SHORT              },
-    {WINED3DFMT_D32F_LOCKABLE,0x0       ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_D24FS8      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
+    {WINED3DFMT_D32F_LOCKABLE,0x0       ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT32_ARB,GL_DEPTH_COMPONENT,GL_FLOAT                       },
+    {WINED3DFMT_D24FS8      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_FLOAT                       },
     /* Is this a vertex buffer? */
     {WINED3DFMT_VERTEXDATA  ,0x0        ,0x0        ,0x0        ,0x0        ,0      ,FALSE      ,0                      ,0                  ,0                              },
     {WINED3DFMT_INDEX16     ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                      ,0                  ,0                              },
@@ -433,6 +433,38 @@ const char* debug_d3drenderstate(DWORD state) {
     D3DSTATE_TO_STR(WINED3DRS_STENCILMASK               );
     D3DSTATE_TO_STR(WINED3DRS_STENCILWRITEMASK          );
     D3DSTATE_TO_STR(WINED3DRS_TEXTUREFACTOR             );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN00          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN01          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN02          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN03          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN04          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN05          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN06          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN07          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN08          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN09          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN10          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN11          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN12          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN13          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN14          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN15          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN16          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN17          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN18          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN19          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN20          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN21          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN22          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN23          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN24          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN25          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN26          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN27          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN28          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN29          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN30          );
+    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN31          );
     D3DSTATE_TO_STR(WINED3DRS_WRAP0                     );
     D3DSTATE_TO_STR(WINED3DRS_WRAP1                     );
     D3DSTATE_TO_STR(WINED3DRS_WRAP2                     );
@@ -2450,7 +2482,7 @@ WINED3DFORMAT pixelformat_for_depth(DWORD depth) {
     }
 }
 
-void multiply_matrix(WINED3DMATRIX *dest, WINED3DMATRIX *src1, WINED3DMATRIX *src2) {
+void multiply_matrix(WINED3DMATRIX *dest, const WINED3DMATRIX *src1, const WINED3DMATRIX *src2) {
     WINED3DMATRIX temp;
 
     /* Now do the multiplication 'by hand'.

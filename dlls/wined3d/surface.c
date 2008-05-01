@@ -337,29 +337,6 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetParent(IWineD3DSurface *iface, IUnknown **
    IWineD3DSurface IWineD3DSurface parts follow
    ****************************************************** */
 
-HRESULT WINAPI IWineD3DSurfaceImpl_GetContainerParent(IWineD3DSurface* iface, IUnknown **ppContainerParent) {
-    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
-
-    TRACE("(%p) : ppContainerParent %p)\n", This, ppContainerParent);
-
-    if (!ppContainerParent) {
-        ERR("(%p) : Called without a valid ppContainerParent.\n", This);
-    }
-
-    if (This->container) {
-        IWineD3DBase_GetParent(This->container, ppContainerParent);
-        if (!ppContainerParent) {
-            /* WineD3D objects should always have a parent */
-            ERR("(%p) : GetParent returned NULL\n", This);
-        }
-        IUnknown_Release(*ppContainerParent); /* GetParent adds a reference; we want just the pointer */
-    } else {
-        *ppContainerParent = NULL;
-    }
-
-    return WINED3D_OK;
-}
-
 HRESULT WINAPI IWineD3DSurfaceImpl_GetContainer(IWineD3DSurface* iface, REFIID riid, void** ppContainer) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     IWineD3DBase *container = 0;
@@ -568,7 +545,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
     if (This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
         IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain);
 
-        if (swapchain != NULL ||  iface == myDevice->renderTarget || iface == myDevice->depthStencilBuffer) {
+        if (swapchain != NULL ||  iface == myDevice->render_targets[0] || iface == myDevice->depthStencilBuffer) {
             if(swapchain != NULL) {
                 int i;
                 for(i = 0; i < swapchain->presentParms.BackBufferCount; i++) {
@@ -582,7 +559,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
                 TRACE("(%p, backBuffer) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
             } else if (swapchain != NULL && iface ==  swapchain->frontBuffer) {
                 TRACE("(%p, frontBuffer) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
-            } else if (iface == myDevice->renderTarget) {
+            } else if (iface == myDevice->render_targets[0]) {
                 TRACE("(%p, renderTarget) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
             } else if (iface == myDevice->depthStencilBuffer) {
                 TRACE("(%p, stencilBuffer) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
@@ -656,8 +633,15 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
                 This->Flags |= SFLAG_ACTIVELOCK; /* When this flag is set to true, loading the surface again won't free THis->resource.allocatedMemory */
                 /* TODO: make activeLock a bit more intelligent, maybe implement a method to purge the texture memory. */
 
-                /* Make sure that the texture is loaded */
-                IWineD3DSurface_PreLoad(iface); /* Make sure there is a texture to bind! */
+                /* Make sure that a proper texture unit is selected, bind the texture and dirtify the sampler to restore the texture on the next draw */
+                if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+                    ENTER_GL();
+                    GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
+                    checkGLcall("glActiveTextureARB");
+                    LEAVE_GL();
+                }
+                IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(0));
+                IWineD3DSurface_PreLoad(iface);
 
                 surface_download_data(This);
             }
@@ -712,15 +696,15 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
                 if not, we need to switch contexts and then switchback at the end.
             */
             IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain);
-            IWineD3DSurface_GetContainer(myDevice->renderTarget, &IID_IWineD3DSwapChain, (void **)&targetSwapChain);
+            IWineD3DSurface_GetContainer(myDevice->render_targets[0], &IID_IWineD3DSwapChain, (void **)&targetSwapChain);
 
             /* NOTE: In a shared context environment the renderTarget will use the same context as the implicit swapchain (we're not in a shared environment yet! */
-            if ((swapchain == targetSwapChain && targetSwapChain != NULL) || iface == myDevice->renderTarget) {
+            if ((swapchain == targetSwapChain && targetSwapChain != NULL) || iface == myDevice->render_targets[0]) {
                     if (swapchain && iface == swapchain->frontBuffer) {
                         TRACE("locking front\n");
                         glReadBuffer(GL_FRONT);
                     }
-                    else if (iface == myDevice->renderTarget || backbuf) {
+                    else if (iface == myDevice->render_targets[0] || backbuf) {
                         TRACE("locking back buffer\n");
                         glReadBuffer(GL_BACK);
                     } else if (iface == myDevice->depthStencilBuffer) {
@@ -1125,7 +1109,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
                 buffername = "frontBuffer";
         } else if (iface == myDevice->depthStencilBuffer) {
                 buffername = "depthStencilBuffer";
-        } else if (iface == myDevice->renderTarget) {
+        } else if (iface == myDevice->render_targets[0]) {
                 buffername = "renderTarget";
         }
     }
@@ -1142,10 +1126,17 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
     }
 
     if (0 == This->resource.usage) { /* classic surface */
-        /**
-         * nothing to do
-         * waiting to reload the surface via IDirect3DDevice8::UpdateTexture
+        IWineD3DBaseTextureImpl *impl;
+        /* Check if the texture is bound, if yes dirtify the sampler to force a re-upload of the texture
+         * Can't load the texture here because PreLoad may destroy and recreate the gl texture, so sampler
+         * states need resetting
          */
+        if(IWineD3DSurface_GetContainer(iface, &IID_IWineD3DBaseTexture, (void **)&impl) == WINED3D_OK) {
+            if(impl->baseTexture.bindCount) {
+                IWineD3DDeviceImpl_MarkStateDirty(myDevice, STATE_SAMPLER(impl->baseTexture.sampler));
+            }
+            IWineD3DBaseTexture_Release((IWineD3DBaseTexture *) impl);
+        }
     } else if (WINED3DUSAGE_RENDERTARGET & This->resource.usage) { /* render surfaces */
 
         /****************************
@@ -1157,7 +1148,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
         IWineD3DSwapChainImpl *implSwapChain;
         IWineD3DDevice_GetSwapChain((IWineD3DDevice *)myDevice, 0, (IWineD3DSwapChain **)&implSwapChain);
 
-        if (backbuf || iface ==  implSwapChain->frontBuffer || iface == myDevice->renderTarget) {
+        if ((backbuf || iface ==  implSwapChain->frontBuffer || iface == myDevice->render_targets[0]) && wined3d_settings.rendertargetlock_mode != RTL_DISABLE) {
             int tex;
 
             ENTER_GL();
@@ -1165,12 +1156,17 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
             /* glDrawPixels transforms the raster position as though it was a vertex -
                we want to draw at screen position 0,0 - Set up ortho (rhw) mode as
                per drawprim (and leave set - it will sort itself out due to last_was_rhw */
-            d3ddevice_set_ortho(This->resource.wineD3DDevice);
+            myDevice->last_was_rhw = TRUE;
+            /* Apply the projection and world matrices, it sets up orthogonal projection due to last_was_rhw */
+            StateTable[STATE_TRANSFORM(WINED3DTS_PROJECTION)].apply(STATE_TRANSFORM(WINED3DTS_PROJECTION), myDevice->stateBlock);
+            StateTable[STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0))].apply(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), myDevice->stateBlock);
+            /* Will reapply the projection matrix too */
+            IWineD3DDeviceImpl_MarkStateDirty(myDevice, STATE_VDECL);
 
             if (iface ==  implSwapChain->frontBuffer) {
                 glDrawBuffer(GL_FRONT);
                 checkGLcall("glDrawBuffer GL_FRONT");
-            } else if (backbuf || iface == myDevice->renderTarget) {
+            } else if (backbuf || iface == myDevice->render_targets[0]) {
                 glDrawBuffer(GL_BACK);
                 checkGLcall("glDrawBuffer GL_BACK");
             }
@@ -1181,6 +1177,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
                     GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + tex));
                     checkGLcall("glActiveTextureARB");
                 }
+                IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(tex));
                 glDisable(GL_TEXTURE_2D);
                 checkGLcall("glDisable GL_TEXTURE_2D");
                 glDisable(GL_TEXTURE_1D);
@@ -1191,6 +1188,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
                 GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
                 checkGLcall("glActiveTextureARB");
             }
+            IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(0));
 
             /* And back buffers are not blended. Disable the depth test, 
                that helps performance */
@@ -1235,7 +1233,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
             /** restore clean dirty state */
             IWineD3DSurface_CleanDirtyRect(iface);
 
-        } else {
+        } else if(wined3d_settings.rendertargetlock_mode != RTL_DISABLE) {
             FIXME("unsupported unlocking to Rendering surface surf@%p usage(%s)\n", This, debug_d3dusage(This->resource.usage));
         }
         IWineD3DSwapChain_Release((IWineD3DSwapChain *)implSwapChain);
@@ -1384,7 +1382,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
                 break;
         }
 
-        ddc = CreateDCA("DISPLAY", NULL, NULL, NULL);
+        ddc = GetDC(0);
         if (ddc == 0) {
             HeapFree(GetProcessHeap(), 0, b_info);
             return HRESULT_FROM_WIN32(GetLastError());
@@ -1392,7 +1390,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
 
         TRACE("Creating a DIB section with size %dx%dx%d, size=%d\n", b_info->bmiHeader.biWidth, b_info->bmiHeader.biHeight, b_info->bmiHeader.biBitCount, b_info->bmiHeader.biSizeImage);
         This->dib.DIBsection = CreateDIBSection(ddc, b_info, usage, &This->dib.bitmap_data, 0 /* Handle */, 0 /* Offset */);
-        DeleteDC(ddc);
+        ReleaseDC(0, ddc);
 
         if (!This->dib.DIBsection) {
             ERR("CreateDIBSection failed!\n");
@@ -2417,6 +2415,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
 
             /* Unbind the old texture */
             glBindTexture(GL_TEXTURE_2D, 0);
+            IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_SAMPLER(0));
 
             if (GL_SUPPORT(ARB_MULTITEXTURE)) {
             /* We use texture unit 0 for blts */
@@ -2485,7 +2484,12 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
 
             /* Draw a textured quad
              */
-            d3ddevice_set_ortho(This->resource.wineD3DDevice);
+            myDevice->last_was_rhw = TRUE;
+            /* Apply the projection matrix, it sets up orthogonal projection due to last_was_rhw */
+            StateTable[STATE_TRANSFORM(WINED3DTS_PROJECTION)].apply(STATE_TRANSFORM(WINED3DTS_PROJECTION), myDevice->stateBlock);
+            StateTable[STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0))].apply(STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), myDevice->stateBlock);
+            /* That will reapply the projection matrix too */
+            IWineD3DDeviceImpl_MarkStateDirty(myDevice, STATE_VDECL);
 
             glBegin(GL_QUADS);
 
@@ -3023,10 +3027,10 @@ DWORD WINAPI IWineD3DSurfaceImpl_GetPitch(IWineD3DSurface *iface) {
          where each block is 4x4 pixels, 8 bytes (dxt1) and 16 bytes (dxt2/3/4/5)
           ie pitch = (width/4) * bytes per block                                  */
     if (This->resource.format == WINED3DFMT_DXT1) /* DXT1 is 8 bytes per block */
-        ret = (This->currentDesc.Width >> 2) << 3;
+        ret = ((This->currentDesc.Width + 3) >> 2) << 3;
     else if (This->resource.format == WINED3DFMT_DXT2 || This->resource.format == WINED3DFMT_DXT3 ||
              This->resource.format == WINED3DFMT_DXT4 || This->resource.format == WINED3DFMT_DXT5) /* DXT2/3/4/5 is 16 bytes per block */
-        ret = (This->currentDesc.Width >> 2) << 4;
+        ret = ((This->currentDesc.Width + 3) >> 2) << 4;
     else {
         if (NP2_REPACK == wined3d_settings.nonpower2_mode || This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
             /* Front and back buffers are always lockes/unlocked on currentDesc.Width */
@@ -3115,7 +3119,6 @@ const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl =
     IWineD3DSurfaceImpl_PreLoad,
     IWineD3DSurfaceImpl_GetType,
     /* IWineD3DSurface */
-    IWineD3DSurfaceImpl_GetContainerParent,
     IWineD3DSurfaceImpl_GetContainer,
     IWineD3DSurfaceImpl_GetDesc,
     IWineD3DSurfaceImpl_LockRect,

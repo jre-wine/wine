@@ -34,9 +34,7 @@ typedef REFIID nsIIDRef;
 typedef nsIIDRef nsCIDRef;
 
 typedef void** nsQIResult;
-typedef LPCSTR nscstring;
 typedef WCHAR PRUnichar;
-typedef LPCWSTR nscwstring;
 typedef ULONG PRUint32;
 typedef LONG PRInt32;
 typedef WORD PRUint16;
@@ -69,6 +67,7 @@ interface nsIWebBrowserChrome;
 interface nsILoadGroup;
 interface nsIDOMNode;
 interface nsIDOMDocument;
+interface nsIDOMEvent;
 
 interface IMoniker;
 
@@ -88,7 +87,6 @@ typedef nsISupports nsISHistory;
 typedef nsISupports nsISimpleEnumerator;
 typedef nsISupports nsIWidget;
 typedef nsISupports nsIProtocolHandler;
-typedef nsISupports nsIDOMEventTarget;
 typedef nsISupports nsIDOMAbstractView;
 typedef nsISupports nsIHttpHeaderVisitor;
 typedef nsISupports nsIDOMBarProp;
@@ -107,9 +105,11 @@ typedef nsISupports nsIDOMEntityReference;
 typedef nsISupports nsIDOMHTMLFormElement;
 typedef nsISupports nsIDOMHTMLOptionsCollection;
 typedef nsISupports nsIDOMHTMLCollection;
-typedef nsISupports nsIDOMRange;
 typedef nsISupports nsIEditor;
 typedef nsISupports nsIWebProgressListener;
+typedef nsISupports nsIDOMCSSValue;
+typedef nsISupports nsIDOMCSSRule;
+typedef nsISupports nsIPrintSession;
 
 [
     object,
@@ -118,9 +118,9 @@ typedef nsISupports nsIWebProgressListener;
 interface nsIServiceManager : nsISupports
 {
     nsresult GetService(nsCIDRef aClass, nsIIDRef aIID, void **result);
-    nsresult GetServiceByContactID(nscstring aContactID, nsIIDRef aIID, void **result);
+    nsresult GetServiceByContactID(const char *aContactID, nsIIDRef aIID, void **result);
     nsresult IsServiceInstantiated(nsCIDRef aClass, nsIIDRef aIID, BOOL *_retval);
-    nsresult IsServiceInstantiatedByContractID(nscstring aContractID, nsIIDRef aIID, BOOL *_retval);
+    nsresult IsServiceInstantiatedByContractID(const char *aContractID, nsIIDRef aIID, BOOL *_retval);
 }
 
 [
@@ -139,7 +139,7 @@ interface nsIFactory : nsISupports
 ]
 interface nsIObserver : nsISupports
 {
-    nsresult Observe(nsISupports *aSubject, nscstring aTopic, nscwstring aData);
+    nsresult Observe(nsISupports *aSubject, const char *aTopic, const PRUnichar *aData);
 }
 
 [
@@ -149,10 +149,10 @@ interface nsIObserver : nsISupports
 interface nsIComponentManager : nsISupports
 {
     nsresult GetClassObject(nsCIDRef aClass, nsIIDRef aIID, nsQIResult result);
-    nsresult GetClassObjectByContractID(nscstring aContractID, nsIIDRef aIID, nsQIResult result);
+    nsresult GetClassObjectByContractID(const char *aContractID, nsIIDRef aIID, nsQIResult result);
     nsresult CreateInstance(nsCIDRef aClass, nsISupports *aDelegate, nsIIDRef aIID,
             nsQIResult result);
-    nsresult CreateInstanceByContractID(nscstring aContractID, nsISupports *aDelegate,
+    nsresult CreateInstanceByContractID(const char *aContractID, nsISupports *aDelegate,
             nsIIDRef aIID, nsQIResult result);
 }
 
@@ -377,6 +377,25 @@ interface nsIUploadChannel : nsISupports
 
 [
     object,
+    uuid(a6cf90be-15b3-11d2-932e-00805f8add32)
+]
+interface nsIDOMCSSStyleDeclaration : nsISupports
+{
+    nsresult GetCssText(nsAString *aCssText);
+    nsresult SetCssText(const nsAString *aCssText);
+    nsresult GetPropertyValue(const nsAString *propertyName, nsAString *_retval);
+    nsresult GetPropertyCSSValue(const nsAString *propertyName, nsIDOMCSSValue **_retval);
+    nsresult RemoveProperty(const nsAString *propertyName, nsAString *_retval);
+    nsresult GetPropertyPriority(const nsAString *propertyName, nsAString *_retval);
+    nsresult SetProperty(const nsAString *propertyName, const nsAString *value,
+                         const nsAString *priority);
+    nsresult GetLength(PRUint32 *aLength);
+    nsresult Item(PRUint32 index, nsAString *_retval);
+    nsresult GetParentRule(nsIDOMCSSRule **aParentRule);
+}
+
+[
+    object,
     uuid(a6cf907d-15b3-11d2-932e-00805f8add32)
 ]
 interface nsIDOMNodeList : nsISupports
@@ -460,6 +479,15 @@ interface nsIDOMElement : nsIDOMNode
     nsresult HasAttribute(const nsAString *name, PRBool *_retval);
     nsresult HasAttributeNS(const nsAString *namespaceURI, const nsAString *localName,
                             PRBool *_retval);
+}
+
+[
+    object,
+    uuid(99715845-95fc-4a56-aa53-214b65c26e22)
+]
+interface nsIDOMElementCSSInlineStyle : nsISupports
+{
+    nsresult GetStyle(nsIDOMCSSStyleDeclaration **aStyle);
 }
 
 cpp_quote("#undef GetClassName");
@@ -585,6 +613,38 @@ interface nsIDOMHTMLDocument : nsIDOMDocument
     nsresult Write(const nsAString *text);
     nsresult Writeln(const nsAString *text);
     nsresult GetElementsByName(const nsAString *elementName, nsIDOMNodeList **_retval);
+}
+
+[
+    object,
+    uuid(a6cf90ce-15b3-11d2-932e-00805f8add32)
+]
+interface nsIDOMRange : nsISupports
+{
+    nsresult GetStartContainer(nsIDOMNode **aStartContainer);
+    nsresult GetStartOffset(PRInt32 *aStartOffset);
+    nsresult GetEndContainer(nsIDOMNode **aEndContainer);
+    nsresult GetEndOffset(PRInt32 *aEndOffset);
+    nsresult GetCollapsed(PRBool *aCollapsed);
+    nsresult GetCommonAncestorContainer(nsIDOMNode **aCommonAncestorContainer);
+    nsresult SetStart(nsIDOMNode *refNode, PRInt32 offset);
+    nsresult SetEnd(nsIDOMNode *refNode, PRInt32 offset);
+    nsresult SetStartBefore(nsIDOMNode *refNode);
+    nsresult SetStartAfter(nsIDOMNode *refNode);
+    nsresult SetEndBefore(nsIDOMNode *refNode);
+    nsresult SetEndAfter(nsIDOMNode *refNode);
+    nsresult Collapse(PRBool toStart);
+    nsresult SelectNode(nsIDOMNode *refNode);
+    nsresult SelectNodeContents(nsIDOMNode *refNode);
+    nsresult CompareBoundaryPoints(PRUint16 how, nsIDOMRange *sourceRange, PRInt16 *_retval);
+    nsresult DeleteContents();
+    nsresult ExtractContents(nsIDOMDocumentFragment **_retval);
+    nsresult CloneContents(nsIDOMDocumentFragment **_retval);
+    nsresult InsertNode(nsIDOMNode *newNode);
+    nsresult SurroundContents(nsIDOMNode *newParent);
+    nsresult CloneRange(nsIDOMRange **_retval);
+    nsresult ToString(nsAString *_retval);
+    nsresult Detach();
 }
 
 [
@@ -883,6 +943,145 @@ interface nsIWebNavigation : nsISupports
 
 [
     object,
+    uuid(f1094df6-ce0e-42c9-9847-2f663172c38d)
+]
+interface nsIPrintSettings : nsISupports
+{
+    typedef struct {} nsMargin;
+
+    nsresult SetPrintOptions(PRInt32 aType, PRBool aTurnOnOff);
+    nsresult GetPrintOptions(PRInt32 aType, PRBool *_retval);
+    nsresult GetPrintOptionsBits(PRInt32 *_retval);
+    nsresult GetPageSizeInTwips(PRInt32 *aWidth, PRInt32 *aHeight);
+    nsresult Clone(nsIPrintSettings **_retval);
+    nsresult Assign(nsIPrintSettings *aPS);
+    nsresult GetPrintSession(nsIPrintSession **aPrintSession);
+    nsresult SetPrintSession(nsIPrintSession *aPrintSession);
+    nsresult GetStartPageRange(PRInt32 *aStartPageRange);
+    nsresult SetStartPageRange(PRInt32 aStartPageRange);
+    nsresult GetEndPageRange(PRInt32 *aEndPageRange);
+    nsresult SetEndPageRange(PRInt32 aEndPageRange);
+    nsresult GetMarginTop(double *aMarginTop);
+    nsresult SetMarginTop(double aMarginTop);
+    nsresult GetMarginLeft(double *aMarginLeft);
+    nsresult SetMarginLeft(double aMarginLeft);
+    nsresult GetMarginBottom(double *aMarginBottom);
+    nsresult SetMarginBottom(double aMarginBottom);
+    nsresult GetMarginRight(double *aMarginRight);
+    nsresult SetMarginRight(double aMarginRight);
+    nsresult GetScaling(double *aScaling);
+    nsresult SetScaling(double aScaling);
+    nsresult GetPrintBGColors(PRBool *aPrintBGColors);
+    nsresult SetPrintBGColors(PRBool aPrintBGColors);
+    nsresult GetPrintBGImages(PRBool *aPrintBGImages);
+    nsresult SetPrintBGImages(PRBool aPrintBGImages);
+    nsresult GetPrintRange(PRInt16 *aPrintRange);
+    nsresult SetPrintRange(PRInt16 aPrintRange);
+    nsresult GetTitle(PRUnichar **aTitle);
+    nsresult SetTitle(const PRUnichar *aTitle);
+    nsresult GetDocURL(PRUnichar **aDocURL);
+    nsresult SetDocURL(const PRUnichar *aDocURL);
+    nsresult GetHeaderStrLeft(PRUnichar **aHeaderStrLeft);
+    nsresult SetHeaderStrLeft(const PRUnichar *aHeaderStrLeft);
+    nsresult GetHeaderStrCenter(PRUnichar **aHeaderStrCenter);
+    nsresult SetHeaderStrCenter(const PRUnichar *aHeaderStrCenter);
+    nsresult GetHeaderStrRight(PRUnichar **aHeaderStrRight);
+    nsresult SetHeaderStrRight(const PRUnichar *aHeaderStrRight);
+    nsresult GetFooterStrLeft(PRUnichar **aFooterStrLeft);
+    nsresult SetFooterStrLeft(const PRUnichar *aFooterStrLeft);
+    nsresult GetFooterStrCenter(PRUnichar **aFooterStrCenter);
+    nsresult SetFooterStrCenter(const PRUnichar *aFooterStrCenter);
+    nsresult GetFooterStrRight(PRUnichar **aFooterStrRight);
+    nsresult SetFooterStrRight(const PRUnichar *aFooterStrRight);
+    nsresult GetHowToEnableFrameUI(PRInt16 *aHowToEnableFrameUI);
+    nsresult SetHowToEnableFrameUI(PRInt16 aHowToEnableFrameUI);
+    nsresult GetIsCancelled(PRBool *aIsCancelled);
+    nsresult SetIsCancelled(PRBool aIsCancelled);
+    nsresult GetPrintFrameTypeUsage(PRInt16 *aPrintFrameTypeUsage);
+    nsresult SetPrintFrameTypeUsage(PRInt16 aPrintFrameTypeUsage);
+    nsresult GetPrintFrameType(PRInt16 *aPrintFrameType);
+    nsresult SetPrintFrameType(PRInt16 aPrintFrameType);
+    nsresult GetPrintSilent(PRBool *aPrintSilent);
+    nsresult SetPrintSilent(PRBool aPrintSilent);
+    nsresult GetShrinkToFit(PRBool *aShrinkToFit);
+    nsresult SetShrinkToFit(PRBool aShrinkToFit);
+    nsresult GetShowPrintProgress(PRBool *aShowPrintProgress);
+    nsresult SetShowPrintProgress(PRBool aShowPrintProgress);
+    nsresult GetPaperName(PRUnichar **aPaperName);
+    nsresult SetPaperName(const PRUnichar *aPaperName);
+    nsresult GetPaperSizeType(PRInt16 *aPaperSizeType);
+    nsresult SetPaperSizeType(PRInt16 aPaperSizeType);
+    nsresult GetPaperData(PRInt16 *aPaperData);
+    nsresult SetPaperData(PRInt16 aPaperData);
+    nsresult GetPaperWidth(double *aPaperWidth);
+    nsresult SetPaperWidth(double aPaperWidth);
+    nsresult GetPaperHeight(double *aPaperHeight);
+    nsresult SetPaperHeight(double aPaperHeight);
+    nsresult GetPaperSizeUnit(PRInt16 *aPaperSizeUnit);
+    nsresult SetPaperSizeUnit(PRInt16 aPaperSizeUnit);
+    nsresult GetPlexName(PRUnichar **aPlexName);
+    nsresult SetPlexName(const PRUnichar *aPlexName);
+    nsresult GetColorspace(PRUnichar **aColorspace);
+    nsresult SetColorspace(const PRUnichar *aColorspace);
+    nsresult GetResolutionName(PRUnichar **aResolutionName);
+    nsresult SetResolutionName(const PRUnichar aResolutionName);
+    nsresult GetDownloadFonts(PRBool *aDownloadFonts);
+    nsresult SetDownloadFonts(PRBool aDownloadFonts);
+    nsresult GetPrintReversed(PRBool *aPrintReversed);
+    nsresult SetPrintReversed(PRBool aPrintReversed);
+    nsresult GetPrintInColor(PRBool *aPrintInColor);
+    nsresult SetPrintInColor(PRBool aPrintInColor);
+    nsresult GetPaperSize(PRInt32 *aPaperSize);
+    nsresult SetPaperSize(PRInt32 aPaperSize);
+    nsresult GetOrientation(PRInt32 *aOrientation);
+    nsresult SetOrientation(PRInt32 aOrientation);
+    nsresult GetPrintCommand(PRUnichar **aPrintCommand);
+    nsresult SetPrintCommand(const PRUnichar *aPrintCommand);
+    nsresult GetNumCopies(PRInt32 *aNumCopies);
+    nsresult SetNumCopies(PRInt32 aNumCopies);
+    nsresult GetPrinterName(PRUnichar **aPrinterName);
+    nsresult SetPrinterName(const PRUnichar *aPrinterName);
+    nsresult GetPrintToFile(PRBool *aPrintToFile);
+    nsresult SetPrintToFile(PRBool aPrintToFile);
+    nsresult GetToFileName(PRUnichar **aToFileName);
+    nsresult SetToFileName(const PRUnichar *aToFileName);
+    nsresult GetPrintPageDelay(PRInt32 *aPrintPageDelay);
+    nsresult SetPrintPageDelay(PRInt32 aPrintPageDelay);
+    nsresult GetIsInitializedFromPrinter(PRBool *aIsInitializedFromPrinter);
+    nsresult SetIsInitializedFromPrinter(PRBool aIsInitializedFromPrinter);
+    nsresult GetIsInitializedFromPrefs(PRBool *aIsInitializedFromPrefs);
+    nsresult SetIsInitializedFromPrefs(PRBool aIsInitializedFromPrefs);
+    nsresult SetMarginInTwips(nsMargin *aMargin);
+    nsresult GetMarginInTwips(nsMargin *aMargin);
+}
+
+[
+    object,
+    uuid(9a7ca4b0-fbba-11d4-a869-00105a183419)
+]
+interface nsIWebBrowserPrint : nsISupports
+{
+    nsresult GetGlobalPrintSettings(nsIPrintSettings **aGlobalPrintSettings);
+    nsresult GetCurrentPrintSettings(nsIPrintSettings **aCurrentPrintSettings);
+    nsresult GetCurrentChildDOMWindow(nsIDOMWindow **aCurrentChildDOMWindow);
+    nsresult GetDoingPrint(PRBool *aDoingPrint);
+    nsresult GetDoingPrintPreview(PRBool *aDoingPrintPreview);
+    nsresult GetIsFramesetDocument(PRBool *aIsFramesetDocument);
+    nsresult GetIsFramesetFrameSelected(PRBool *aIsFramesetFrameSelected);
+    nsresult GetIsIFrameSelected(PRBool *aIsIFrameSelected);
+    nsresult GetIsRangeSelection(PRBool *aIsRangeSelection);
+    nsresult GetPrintPreviewNumPages(PRInt32 *aPrintPreviewNumPages);
+    nsresult Print(nsIPrintSettings *aThePrintSettings, nsIWebProgressListener *aWPListener);
+    nsresult PrintPreview(nsIPrintSettings *aThePrintSettings, nsIDOMWindow *aChildDOMWin,
+                          nsIWebProgressListener *aWPListener);
+    nsresult PrintPreviewNavigate(PRInt16 aNavType, PRInt32 aPageNum);
+    nsresult Cancel();
+    nsresult EnumerateDocumentNames(PRUint32 *aCount, PRUnichar ***aResult);
+    nsresult ExitPrintPreview();
+}
+
+[
+    object,
     uuid(c8c0a080-0868-11d3-915f-d9d889d48e3c)
 ]
 interface nsIFile : nsISupports
@@ -988,6 +1187,26 @@ interface nsIWebBrowserChrome : nsISupports
 
 [
     object,
+    uuid(df31c120-ded6-11d1-bd85-00805f8ae3f4)
+]
+interface nsIDOMEventListener : nsISupports
+{
+    nsresult HandleEvent(nsIDOMEvent *event);
+}
+
+[
+    object,
+    uuid(1c773b30-d1cf-11d2-bd95-00805f8ae3f4)
+]
+interface nsIDOMEventTarget : nsISupports
+{
+    nsresult AddEventListener(const nsAString *type, nsIDOMEventListener *listener, PRBool useCapture);
+    nsresult RemoveEventListener(const nsAString *type, nsIDOMEventListener *listener, PRBool useCapture);
+    nsresult DispatchEvent(nsIDOMEvent *evt, PRBool *_retval);
+}
+
+[
+    object,
     uuid(a66b7b80-ff46-bd97-0080-5f8ae38add32)
 ]
 interface nsIDOMEvent : nsISupports
@@ -1054,6 +1273,24 @@ interface nsIDOMMouseEvent : nsIDOMUIEvent
             PRInt32 clientXArg, PRInt32 clientYArg, PRBool ctrlKeyArg, PRBool altKeyArg,
             PRBool shiftKeyArg, PRBool metaKeyArg, PRUint16 buttonArg,
             nsIDOMEventTarget *relatedTargetArg);
+}
+
+[
+    object,
+    uuid(028e0e6e-8b01-11d3-aae7-0010838a3123)
+]
+interface nsIDOMKeyEvent : nsIDOMUIEvent
+{
+    nsresult GetCharCode(PRUint32 *aCharCode);
+    nsresult GetKeyCode(PRUint32 *aKeyCode);
+    nsresult GetAltKey(PRBool *aAltKey);
+    nsresult GetCtrlKey(PRBool *aCtrlKey);
+    nsresult GetShiftKey(PRBool *aShiftKey);
+    nsresult GetMetaKey(PRBool *aMetaKey);
+    nsresult InitKeyEvent(const nsAString *typeArg, PRBool canBubbleArg,
+            PRBool cancelableArg, nsIDOMAbstractView *viewArg, PRBool ctrlKeyArg,
+            PRBool altKeyArg, PRBool shiftKeyArg, PRBool metaKeyArg, PRUint32 keyCodeArg,
+            PRUint32 charCodeArg);
 }
 
 [
@@ -1294,4 +1531,6 @@ interface nsIWineURI : nsIURI
     nsresult SetNSContainer(NSContainer *aNSContainer);
     nsresult GetMoniker(IMoniker **aMoniker);
     nsresult SetMoniker(IMoniker *aMoniker);
+    nsresult GetIsDocumentURI(PRBool *aIsDocumentURI);
+    nsresult SetIsDocumentURI(PRBool aIsDocumentURI);
 }

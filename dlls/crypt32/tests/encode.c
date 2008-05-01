@@ -199,7 +199,7 @@ static void test_decodeInt(DWORD dwEncoding)
     static const BYTE bigInt[] = { 2, 5, 0xff, 0xfe, 0xff, 0xfe, 0xff };
     static const BYTE testStr[] = { 0x16, 4, 't', 'e', 's', 't' };
     static const BYTE longForm[] = { 2, 0x81, 0x01, 0x01 };
-    /* static const BYTE bigBogus[] = { 0x02, 0x84, 0x01, 0xff, 0xff, 0xf9 }; */
+    static const BYTE bigBogus[] = { 0x02, 0x84, 0x01, 0xff, 0xff, 0xf9 };
     BYTE *buf = NULL;
     DWORD bufSize = 0;
     int i;
@@ -234,12 +234,12 @@ static void test_decodeInt(DWORD dwEncoding)
         /* When the output buffer is NULL, this always succeeds */
         SetLastError(0xdeadbeef);
         ret = CryptDecodeObjectEx(dwEncoding, X509_INTEGER,
-         (BYTE *)ints[i].encoded, ints[i].encoded[1] + 2, 0, NULL, NULL,
+         ints[i].encoded, ints[i].encoded[1] + 2, 0, NULL, NULL,
          &bufSize);
         ok(ret && GetLastError() == NOERROR,
          "Expected success and NOERROR, got %d\n", GetLastError());
         ret = CryptDecodeObjectEx(dwEncoding, X509_INTEGER,
-         (BYTE *)ints[i].encoded, ints[i].encoded[1] + 2,
+         ints[i].encoded, ints[i].encoded[1] + 2,
          CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &bufSize);
         ok(ret, "CryptDecodeObjectEx failed: %d\n", GetLastError());
         ok(bufSize == sizeof(int), "Wrong size %d\n", bufSize);
@@ -254,12 +254,12 @@ static void test_decodeInt(DWORD dwEncoding)
     for (i = 0; i < sizeof(bigInts) / sizeof(bigInts[0]); i++)
     {
         ret = CryptDecodeObjectEx(dwEncoding, X509_MULTI_BYTE_INTEGER,
-         (BYTE *)bigInts[i].encoded, bigInts[i].encoded[1] + 2, 0, NULL, NULL,
+         bigInts[i].encoded, bigInts[i].encoded[1] + 2, 0, NULL, NULL,
          &bufSize);
         ok(ret && GetLastError() == NOERROR,
          "Expected success and NOERROR, got %d\n", GetLastError());
         ret = CryptDecodeObjectEx(dwEncoding, X509_MULTI_BYTE_INTEGER,
-         (BYTE *)bigInts[i].encoded, bigInts[i].encoded[1] + 2,
+         bigInts[i].encoded, bigInts[i].encoded[1] + 2,
          CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &bufSize);
         ok(ret, "CryptDecodeObjectEx failed: %d\n", GetLastError());
         ok(bufSize >= sizeof(CRYPT_INTEGER_BLOB), "Wrong size %d\n", bufSize);
@@ -279,12 +279,12 @@ static void test_decodeInt(DWORD dwEncoding)
     for (i = 0; i < sizeof(bigUInts) / sizeof(bigUInts[0]); i++)
     {
         ret = CryptDecodeObjectEx(dwEncoding, X509_MULTI_BYTE_UINT,
-         (BYTE *)bigUInts[i].encoded, bigUInts[i].encoded[1] + 2, 0, NULL, NULL,
+         bigUInts[i].encoded, bigUInts[i].encoded[1] + 2, 0, NULL, NULL,
          &bufSize);
         ok(ret && GetLastError() == NOERROR,
          "Expected success and NOERROR, got %d\n", GetLastError());
         ret = CryptDecodeObjectEx(dwEncoding, X509_MULTI_BYTE_UINT,
-         (BYTE *)bigUInts[i].encoded, bigUInts[i].encoded[1] + 2,
+         bigUInts[i].encoded, bigUInts[i].encoded[1] + 2,
          CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &bufSize);
         ok(ret, "CryptDecodeObjectEx failed: %d\n", GetLastError());
         ok(bufSize >= sizeof(CRYPT_INTEGER_BLOB), "Wrong size %d\n", bufSize);
@@ -324,12 +324,14 @@ static void test_decodeInt(DWORD dwEncoding)
     /* This will try to decode the buffer and overflow it, check that it's
      * caught.
      */
-#if 0  /* a large buffer isn't guaranteed to crash, it depends on memory allocation order */
+    if (0)
+    {
+    /* a large buffer isn't guaranteed to crash, it depends on memory allocation order */
     ret = CryptDecodeObjectEx(dwEncoding, X509_MULTI_BYTE_INTEGER, bigBogus,
      0x01ffffff, CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &bufSize);
     ok(!ret && GetLastError() == STATUS_ACCESS_VIOLATION,
      "Expected STATUS_ACCESS_VIOLATION, got %08x\n", GetLastError());
-#endif
+    }
 }
 
 static const BYTE bin18[] = {0x0a,0x01,0x01};

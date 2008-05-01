@@ -1287,6 +1287,10 @@ typedef struct
 #define GGO_GRAY8_BITMAP    6
 #define GGO_GLYPH_INDEX     0x80
 
+#ifdef __WINESRC__
+#define WINE_GGO_GRAY16_BITMAP 0x7f
+#endif
+
 typedef struct
 {
     WORD    fract;
@@ -1409,6 +1413,10 @@ typedef struct
 
 #define TT_AVAILABLE        0x0001
 #define TT_ENABLED          0x0002
+
+#ifdef __WINESRC__
+#define WINE_TT_HINTER_ENABLED 0x8000
+#endif
 
 #define TT_PRIM_LINE    1
 #define TT_PRIM_QSPLINE 2
@@ -3415,6 +3423,7 @@ BOOL        WINAPI GetCharWidth32A(HDC,UINT,UINT,LPINT);
 BOOL        WINAPI GetCharWidth32W(HDC,UINT,UINT,LPINT);
 #define     GetCharWidth32 WINELIB_NAME_AW(GetCharWidth32)
 BOOL        WINAPI GetCharWidthA(HDC,UINT,UINT,LPINT);
+BOOL        WINAPI GetCharWidthI(HDC,UINT,UINT,LPWORD,LPINT);
 BOOL        WINAPI GetCharWidthW(HDC,UINT,UINT,LPINT);
 #define     GetCharWidth WINELIB_NAME_AW(GetCharWidth)
 BOOL        WINAPI GetCharWidthFloatA(HDC,UINT,UINT,PFLOAT);
@@ -3444,6 +3453,7 @@ UINT      WINAPI GetEnhMetaFileHeader(HENHMETAFILE,UINT,LPENHMETAHEADER);
 UINT      WINAPI GetEnhMetaFilePaletteEntries(HENHMETAFILE,UINT,LPPALETTEENTRY);
 DWORD     WINAPI GetFontData(HDC,DWORD,DWORD,LPVOID,DWORD);
 DWORD     WINAPI GetFontLanguageInfo(HDC);
+DWORD     WINAPI GetFontUnicodeRanges(HDC,LPGLYPHSET);
 DWORD     WINAPI GetGlyphIndicesA(HDC,LPCSTR,INT,LPWORD,DWORD);
 DWORD     WINAPI GetGlyphIndicesW(HDC,LPCWSTR,INT,LPWORD,DWORD);
 #define   GetGlyphIndices WINELIB_NAME_AW(GetGlyphIndices)

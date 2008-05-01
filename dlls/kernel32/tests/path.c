@@ -1,7 +1,8 @@
 /*
- * Unit test suite for Get*PathNamesA and (Get|Set)CurrentDirectoryA.
+ * Unit test suite for various Path and Directory Functions
  *
  * Copyright 2002 Geoffrey Hausheer
+ * Copyright 2006 Detlef Riekenberg
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -935,19 +936,137 @@ static void test_GetLongPathNameW(void)
     DWORD length; 
     WCHAR empty[MAX_PATH];
 
-    SetLastError(0xdeadbeef); 
-    length = pGetLongPathNameW(NULL,NULL,0);
+    /* Not present in all windows versions */
     if(pGetLongPathNameW) 
     {
+    SetLastError(0xdeadbeef); 
+    length = pGetLongPathNameW(NULL,NULL,0);
     ok(0==length,"GetLongPathNameW returned %d but expected 0\n",length);
-    ok(GetLastError()==ERROR_INVALID_PARAMETER,"GetLastError returned %x but expected ERROR_INVALID_PARAMETER\n",GetLastError());
+    ok(GetLastError()==ERROR_INVALID_PARAMETER,"GetLastError returned %d but expected ERROR_INVALID_PARAMETER\n",GetLastError());
 
     SetLastError(0xdeadbeef); 
     empty[0]=0;
     length = pGetLongPathNameW(empty,NULL,0);
     ok(0==length,"GetLongPathNameW returned %d but expected 0\n",length);
-    ok(GetLastError()==ERROR_PATH_NOT_FOUND,"GetLastError returned %x but expected ERROR_PATH_NOT_FOUND\n",GetLastError());
+    ok(GetLastError()==ERROR_PATH_NOT_FOUND,"GetLastError returned %d but expected ERROR_PATH_NOT_FOUND\n",GetLastError());
     }
+}
+
+static void test_GetSystemDirectory(void)
+{
+    CHAR    buffer[MAX_PATH + 4];
+    DWORD   res;
+    DWORD   total;
+
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(NULL, 0);
+    /* res includes the terminating Zero */
+    ok(res > 0, "returned %d with %d (expected '>0')\n", res, GetLastError());
+
+    total = res;
+
+    /* this crashes on XP */
+    if (0) res = GetSystemDirectory(NULL, total);
+
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(NULL, total-1);
+    /* 95+NT: total (includes the terminating Zero)
+       98+ME: 0 with ERROR_INVALID_PARAMETER */
+    ok( (res == total) || (!res && (GetLastError() == ERROR_INVALID_PARAMETER)),
+        "returned %d with %d (expected '%d' or: '0' with "
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError(), total);
+
+    if (total > MAX_PATH) return;
+
+    buffer[0] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(buffer, total);
+    /* res does not include the terminating Zero */
+    ok( (res == (total-1)) && (buffer[0]),
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
+        res, GetLastError(), buffer, total-1);
+
+    buffer[0] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(buffer, total + 1);
+    /* res does not include the terminating Zero */
+    ok( (res == (total-1)) && (buffer[0]),
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
+        res, GetLastError(), buffer, total-1);
+
+    memset(buffer, '#', total + 1);
+    buffer[total + 2] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(buffer, total-1);
+    /* res includes the terminating Zero) */
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
+        res, GetLastError(), buffer, total);
+
+    memset(buffer, '#', total + 1);
+    buffer[total + 2] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(buffer, total-2);
+    /* res includes the terminating Zero) */
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
+        res, GetLastError(), buffer, total);
+}
+
+static void test_GetWindowsDirectory(void)
+{
+    CHAR    buffer[MAX_PATH + 4];
+    DWORD   res;
+    DWORD   total;
+
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(NULL, 0);
+    /* res includes the terminating Zero */
+    ok(res > 0, "returned %d with %d (expected '>0')\n", res, GetLastError());
+
+    total = res;
+    /* this crashes on XP */
+    if (0) res = GetWindowsDirectory(NULL, total);
+
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(NULL, total-1);
+    /* 95+NT: total (includes the terminating Zero)
+       98+ME: 0 with ERROR_INVALID_PARAMETER */
+    ok( (res == total) || (!res && (GetLastError() == ERROR_INVALID_PARAMETER)),
+        "returned %d with %d (expected '%d' or: '0' with "
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError(), total);
+
+    if (total > MAX_PATH) return;
+
+    buffer[0] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(buffer, total);
+    /* res does not include the terminating Zero */
+    ok( (res == (total-1)) && (buffer[0]),
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
+        res, GetLastError(), buffer, total-1);
+
+    buffer[0] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(buffer, total + 1);
+    /* res does not include the terminating Zero */
+    ok( (res == (total-1)) && (buffer[0]),
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
+        res, GetLastError(), buffer, total-1);
+
+    memset(buffer, '#', total + 1);
+    buffer[total + 2] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(buffer, total-1);
+    /* res includes the terminating Zero) */
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
+        res, GetLastError(), buffer, total);
+
+    memset(buffer, '#', total + 1);
+    buffer[total + 2] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(buffer, total-2);
+    /* res includes the terminating Zero) */
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
+        res, GetLastError(), buffer, total);
 }
 
 START_TEST(path)
@@ -963,4 +1082,6 @@ START_TEST(path)
     test_CleanupPathA(origdir,curdir);
     test_GetTempPath();
     test_GetLongPathNameW();
+    test_GetSystemDirectory();
+    test_GetWindowsDirectory();
 }

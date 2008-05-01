@@ -232,7 +232,7 @@ static NTSTATUS TAPE_GetMediaParams( int fd, TAPE_GET_MEDIA_PARAMETERS *data )
 #endif
     data->PartitionCount = 1;
 #ifdef HAVE_STRUCT_MTGET_MT_GSTAT
-    data->WriteProtected = GMT_WR_PROT(get.mt_gstat);
+    data->WriteProtected = (GMT_WR_PROT(get.mt_gstat) != 0);
 #else
     data->WriteProtected = 0;
 #endif
@@ -524,7 +524,7 @@ NTSTATUS TAPE_DeviceIoControl( HANDLE device, HANDLE event,
 
     io_status->Information = 0;
 
-    if ((status = server_get_unix_fd( device, 0, &fd, &needs_close, NULL )))
+    if ((status = server_get_unix_fd( device, 0, &fd, &needs_close, NULL, NULL )))
         goto error;
 
     switch (io_control)

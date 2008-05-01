@@ -55,7 +55,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 
 #define ATLVer1Size 100
 
-HRESULT WINAPI AtlModuleInit(_ATL_MODULEA* pM, _ATL_OBJMAP_ENTRYA* p, HINSTANCE h)
+HRESULT WINAPI AtlModuleInit(_ATL_MODULEW* pM, _ATL_OBJMAP_ENTRYW* p, HINSTANCE h)
 {
     INT i;
     UINT size;
@@ -63,12 +63,12 @@ HRESULT WINAPI AtlModuleInit(_ATL_MODULEA* pM, _ATL_OBJMAP_ENTRYA* p, HINSTANCE 
     FIXME("SEMI-STUB (%p %p %p)\n",pM,p,h);
 
     size = pM->cbSize;
-    if  (size != sizeof(_ATL_MODULEA) && size != ATLVer1Size)
+    if  (size != sizeof(_ATL_MODULEW) && size != ATLVer1Size)
     {
         FIXME("Unknown structure version (size %i)\n",size);
         return E_INVALIDARG;
     }
-    
+
     memset(pM,0,pM->cbSize);
     pM->cbSize = size;
     pM->m_hInst = h;
@@ -97,14 +97,31 @@ HRESULT WINAPI AtlModuleInit(_ATL_MODULEA* pM, _ATL_OBJMAP_ENTRYA* p, HINSTANCE 
     return S_OK;
 }
 
-HRESULT WINAPI AtlModuleLoadTypeLib(_ATL_MODULEA *pM, LPCOLESTR lpszIndex, 
+HRESULT WINAPI AtlModuleLoadTypeLib(_ATL_MODULEW *pM, LPCOLESTR lpszIndex,
                                     BSTR *pbstrPath, ITypeLib **ppTypeLib)
 {
-    FIXME("(%p, %s, %p, %p): stub\n", pM, debugstr_w(lpszIndex), pbstrPath, ppTypeLib);
-    return E_FAIL;
+    HRESULT hRes;
+    OLECHAR path[MAX_PATH+8]; /* leave some space for index */
+
+    TRACE("(%p, %s, %p, %p)\n", pM, debugstr_w(lpszIndex), pbstrPath, ppTypeLib);
+
+    if (!pM)
+        return E_INVALIDARG;
+
+    GetModuleFileNameW(pM->m_hInstTypeLib, path, MAX_PATH);
+    if (lpszIndex)
+        lstrcatW(path, lpszIndex);
+
+    hRes = LoadTypeLib(path, ppTypeLib);
+    if (FAILED(hRes))
+        return hRes;
+
+    *pbstrPath = SysAllocString(path);
+
+    return S_OK;
 }
 
-HRESULT WINAPI AtlModuleTerm(_ATL_MODULEA* pM)
+HRESULT WINAPI AtlModuleTerm(_ATL_MODULEW* pM)
 {
     _ATL_TERMFUNC_ELEM *iter = pM->m_pTermFuncs, *tmp;
 
@@ -138,7 +155,7 @@ HRESULT WINAPI AtlModuleAddTermFunc(_ATL_MODULEW *pM, _ATL_TERMFUNC *pFunc, DWOR
     return S_OK;
 }
 
-HRESULT WINAPI AtlModuleRegisterClassObjects(_ATL_MODULEA *pM, DWORD dwClsContext,
+HRESULT WINAPI AtlModuleRegisterClassObjects(_ATL_MODULEW *pM, DWORD dwClsContext,
                                              DWORD dwFlags)
 {
     HRESULT hRes = S_OK;
@@ -152,7 +169,7 @@ HRESULT WINAPI AtlModuleRegisterClassObjects(_ATL_MODULEA *pM, DWORD dwClsContex
     while(pM->m_pObjMap[i].pclsid != NULL)
     {
         IUnknown* pUnknown;
-        _ATL_OBJMAP_ENTRYA *obj = &(pM->m_pObjMap[i]);
+        _ATL_OBJMAP_ENTRYW *obj = &(pM->m_pObjMap[i]);
         HRESULT rc;
 
         TRACE("Registering object %i\n",i);
@@ -174,7 +191,7 @@ HRESULT WINAPI AtlModuleRegisterClassObjects(_ATL_MODULEA *pM, DWORD dwClsContex
    return hRes;
 }
 
-HRESULT WINAPI AtlModuleUnregisterServerEx(_ATL_MODULEA* pM, BOOL bUnRegTypeLib, const CLSID* pCLSID)
+HRESULT WINAPI AtlModuleUnregisterServerEx(_ATL_MODULEW* pM, BOOL bUnRegTypeLib, const CLSID* pCLSID)
 {
     FIXME("(%p, %i, %p) stub\n", pM, bUnRegTypeLib, pCLSID);
     return S_OK;
@@ -238,9 +255,36 @@ HRESULT WINAPI AtlInternalQueryInterface(LPVOID this, const _ATL_INTMAP_ENTRY* p
  *           AtlModuleRegisterServer         [ATL.@]
  *
  */
-HRESULT WINAPI AtlModuleRegisterServer(_ATL_MODULEW* pM, BOOL bRegTypeLib, const CLSID* clsid) 
+HRESULT WINAPI AtlModuleRegisterServer(_ATL_MODULEW* pM, BOOL bRegTypeLib, const CLSID* clsid)
 {
-    FIXME("%p %d %s\n", pM, bRegTypeLib, debugstr_guid(clsid));
+    int i;
+    HRESULT hRes;
+
+    TRACE("%p %d %s\n", pM, bRegTypeLib, debugstr_guid(clsid));
+
+    if (pM == NULL)
+        return E_INVALIDARG;
+
+    for (i = 0; pM->m_pObjMap[i].pclsid != NULL; i++) /* register CLSIDs */
+    {
+        if (!clsid || IsEqualCLSID(pM->m_pObjMap[i].pclsid, clsid))
+        {
+            const _ATL_OBJMAP_ENTRYW *obj = &pM->m_pObjMap[i];
+
+            TRACE("Registering clsid %s\n", debugstr_guid(obj->pclsid));
+            hRes = obj->pfnUpdateRegistry(TRUE); /* register */
+            if (FAILED(hRes))
+                return hRes;
+        }
+    }
+
+    if (bRegTypeLib)
+    {
+        hRes = AtlModuleRegisterTypeLib(pM, NULL);
+        if (FAILED(hRes))
+            return hRes;
+    }
+
     return S_OK;
 }
 
@@ -324,8 +368,25 @@ HRESULT WINAPI AtlModuleGetClassObject(_ATL_MODULEW *pm, REFCLSID rclsid,
  */
 HRESULT WINAPI AtlModuleRegisterTypeLib(_ATL_MODULEW *pm, LPCOLESTR lpszIndex)
 {
-    FIXME("%p %s\n", pm, debugstr_w(lpszIndex));
-    return E_FAIL;
+    HRESULT hRes;
+    BSTR path;
+    ITypeLib *typelib;
+
+    TRACE("%p %s\n", pm, debugstr_w(lpszIndex));
+
+    if (!pm)
+        return E_INVALIDARG;
+
+    hRes = AtlModuleLoadTypeLib(pm, lpszIndex, &path, &typelib);
+
+    if (SUCCEEDED(hRes))
+    {
+        hRes = RegisterTypeLib(typelib, path, NULL); /* FIXME: pass help directory */
+        ITypeLib_Release(typelib);
+        SysFreeString(path);
+    }
+
+    return hRes;
 }
 
 /***********************************************************************
@@ -362,7 +423,7 @@ HRESULT WINAPI AtlModuleUnregisterServer(_ATL_MODULEW *pm, const CLSID *clsid)
  *
  *  If the class name is NULL then it a class with a name of "ATLxxxxxxxx" is
  *  registered, where the x's represent an unique value.
- *  
+ *
  */
 ATOM WINAPI AtlModuleRegisterWndClassInfoW(_ATL_MODULEW *pm, _ATL_WNDCLASSINFOW *wci, WNDPROC *pProc)
 {
@@ -432,8 +493,8 @@ void WINAPI AtlModuleAddCreateWndData(_ATL_MODULEW *pM, _AtlCreateWndData *pData
  *
  *  NOTE: I failed to find any good description of this function.
  *        Tests show that this function extracts one of _AtlCreateWndData
- *        records from the current thread from a list 
- *        
+ *        records from the current thread from a list
+ *
  */
 LPVOID WINAPI AtlModuleExtractCreateWndData(_ATL_MODULEW *pM)
 {

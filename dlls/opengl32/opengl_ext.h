@@ -62,7 +62,4 @@ extern void *extension_funcs[];
 extern const OpenGL_extension extension_registry[];
 extern const int extension_registry_size;
 
-const GLubyte* internal_glGetString(GLenum name);
-void internal_glGetIntegerv(GLenum pname, GLint* params);
-
 #endif /* __DLLS_OPENGL32_OPENGL_EXT_H */

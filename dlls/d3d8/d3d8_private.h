@@ -177,8 +177,8 @@ struct IDirect3DDevice8Impl
     shader_handle                *shader_handles;
     shader_handle                *free_shader_handles;
 
-/* FIXME: Move *baseVertexIndex somewhere sensible like wined3d */
-    UINT                          baseVertexIndex;
+    /* Avoids recursion with nested ReleaseRef to 0 */
+    BOOL                          inDestruction;
 };
 
 /* ---------------- */
@@ -196,6 +196,12 @@ struct IDirect3DVolume8Impl
 
     /* IDirect3DVolume8 fields */
     IWineD3DVolume             *wineD3DVolume;
+
+    /* The volume container */
+    IUnknown                    *container;
+
+    /* If set forward refcounting to this object */
+    IUnknown                    *forwardReference;
 };
 
 /* ------------------- */
@@ -246,6 +252,15 @@ struct IDirect3DSurface8Impl
 
     /* Parent reference */
     LPDIRECT3DDEVICE8                  parentDevice;
+
+    /* The surface container */
+    IUnknown                    *container;
+
+    /* If set forward refcounting to this object */
+    IUnknown                    *forwardReference;
+
+    /* Flags an implicit surface */
+    BOOL                        isImplicit;
 };
 
 /* ------------------ */
@@ -569,26 +584,36 @@ typedef struct IDirect3DPixelShader8Impl {
  * Internals functions
  *
  * to see how not defined it here
- */ 
- 
+ */
+
 /* Callbacks */
-extern HRESULT WINAPI D3D8CB_CreateSurface(IUnknown *device, UINT Width, UINT Height, 
+extern HRESULT WINAPI D3D8CB_CreateSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, DWORD Usage, WINED3DPOOL Pool, UINT Level,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
 
-extern HRESULT WINAPI D3D8CB_CreateVolume(IUnknown  *pDevice, UINT Width, UINT Height, UINT Depth, 
+extern HRESULT WINAPI D3D8CB_CreateVolume(IUnknown  *pDevice, IUnknown *pSuperior, UINT Width, UINT Height, UINT Depth,
                                           WINED3DFORMAT  Format, WINED3DPOOL Pool, DWORD Usage,
-                                          IWineD3DVolume **ppVolume, 
+                                          IWineD3DVolume **ppVolume,
                                           HANDLE   * pSharedHandle);
 
-extern HRESULT WINAPI D3D8CB_CreateDepthStencilSurface(IUnknown *device, UINT Width, UINT Height,
+extern HRESULT WINAPI D3D8CB_CreateDepthStencilSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
                                          DWORD MultisampleQuality, BOOL Discard,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
 
-extern HRESULT WINAPI D3D8CB_CreateRenderTarget(IUnknown *device, UINT Width, UINT Height,
+extern HRESULT WINAPI D3D8CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
-                                         DWORD MultisampleQuality, BOOL Lockable, 
+                                         DWORD MultisampleQuality, BOOL Lockable,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
+
+extern ULONG WINAPI D3D8CB_DestroySwapChain (IWineD3DSwapChain *pSwapChain);
+
+extern ULONG WINAPI D3D8CB_DestroyDepthStencilSurface (IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3D8CB_DestroyRenderTarget (IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3D8CB_DestroySurface(IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3D8CB_DestroyVolume(IWineD3DVolume *pVolume);
 
 #endif /* __WINE_D3DX8_PRIVATE_H */

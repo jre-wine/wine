@@ -186,7 +186,7 @@ void memory_examine(const struct dbg_lvalue *lvalue, int count, char format)
                 memory_report_invalid_addr(linear);
                 break;
             }
-            dbg_printf("{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\n",
+            dbg_printf("{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\n",
                        guid.Data1, guid.Data2, guid.Data3,
                        guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
                        guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
@@ -221,7 +221,7 @@ void memory_examine(const struct dbg_lvalue *lvalue, int count, char format)
 #define DO_DUMP(_t,_l,_f) DO_DUMP2(_t,_l,_f,_v)
 
     case 'x': DO_DUMP(int, 4, " %8.8x");
-    case 'd': DO_DUMP(unsigned int, 4, " %10d");
+    case 'd': DO_DUMP(unsigned int, 4, " %4.4d");
     case 'w': DO_DUMP(unsigned short, 8, " %04x");
     case 'c': DO_DUMP2(char, 32, " %c", (_v < 0x20) ? ' ' : _v);
     case 'b': DO_DUMP2(char, 16, " %02x", (_v) & 0xff);
@@ -360,7 +360,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
                 dbg_printf("'%c'", (char)val_int);
             break;
         default:
-            WINE_FIXME("Unsupported basetype %lu\n", bt);
+            WINE_FIXME("Unsupported basetype %u\n", bt);
             break;
         }
         break;
@@ -394,7 +394,6 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         break;
     case SymTagArrayType:
     case SymTagUDT:
-        assert(lvalue->cookie == DLV_TARGET);
         if (!memory_read_value(lvalue, sizeof(val_ptr), &val_ptr)) return;
         dbg_printf("%p", val_ptr);
         break;
@@ -402,7 +401,6 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         {
             BOOL        ok = FALSE;
 
-            assert(lvalue->cookie == DLV_TARGET);
             /* FIXME: it depends on underlying type for enums 
              * (not supported yet in dbghelp)
              * Assuming 4 as for an int
@@ -456,7 +454,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         }
         break;
     default:
-        WINE_FIXME("Unsupported tag %lu\n", tag);
+        WINE_FIXME("Unsupported tag %u\n", tag);
         break;
     }
 }
@@ -468,7 +466,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
  */
 void print_basic(const struct dbg_lvalue* lvalue, int count, char format)
 {
-    long int    res;
+    LONGLONG res;
 
     if (lvalue->type.id == dbg_itype_none)
     {
@@ -476,21 +474,18 @@ void print_basic(const struct dbg_lvalue* lvalue, int count, char format)
         return;
     }
 
-    res = types_extract_as_integer(lvalue);
+    res = types_extract_as_longlong(lvalue);
 
     /* FIXME: this implies i386 byte ordering */
     switch (format)
     {
     case 'x':
-        if (lvalue->addr.Mode == AddrMode1616 || 
-            lvalue->addr.Mode == AddrModeReal)
-            dbg_printf("0x%04lx", res);
-        else
-            dbg_printf("0x%08lx", res);
+        dbg_printf("0x%x", (DWORD)(ULONG64)res);
         break;
 
     case 'd':
-        dbg_printf("%ld\n", res);
+        dbg_print_longlong(res, TRUE);
+        dbg_printf("\n");
         break;
 
     case 'c':
@@ -513,7 +508,10 @@ void print_basic(const struct dbg_lvalue* lvalue, int count, char format)
         dbg_printf("Format specifier '%c' is meaningless in 'print' command\n", format);
     case 0:
         if (lvalue->type.id == dbg_itype_segptr)
-            dbg_printf("%ld", res);
+        {
+            dbg_print_longlong(res, TRUE);
+            dbg_printf("\n");
+        }
         else 
             print_typed_basic(lvalue);
         break;
@@ -570,7 +568,7 @@ void print_address(const ADDRESS64* addr, BOOLEAN with_line)
 
         il.SizeOfStruct = sizeof(il);
         if (SymGetLineFromAddr(dbg_curr_process->handle, (DWORD_PTR)lin, &disp, &il))
-            dbg_printf(" [%s:%lu]", il.FileName, il.LineNumber);
+            dbg_printf(" [%s:%u]", il.FileName, il.LineNumber);
         im.SizeOfStruct = sizeof(im);
         if (SymGetModuleInfo(dbg_curr_process->handle, (DWORD_PTR)lin, &im))
             dbg_printf(" in %s", im.ModuleName);
@@ -620,20 +618,44 @@ BOOL memory_get_register(DWORD regno, DWORD** value, char* buffer, int len)
 {
     const struct dbg_internal_var*  div;
 
-    if (dbg_curr_thread->curr_frame != 0)
+    /* negative register values are wine's dbghelp hacks
+     * see dlls/dbghelp/dbghelp_internal.h for the details      
+     */
+    switch (regno)
     {
-        if (buffer) snprintf(buffer, len, "<register not in topmost frame>");
+    case -1:
+        if (buffer) snprintf(buffer, len, "<internal error>");
+        return FALSE;
+    case -2:
+        if (buffer) snprintf(buffer, len, "<couldn't compute location>");
+        return FALSE;
+    case -3:
+        if (buffer) snprintf(buffer, len, "<is not available>");
+        return FALSE;
+    case -4:
+        if (buffer) snprintf(buffer, len, "<couldn't read memory>");
         return FALSE;
     }
+
     for (div = dbg_context_vars; div->name; div++)
     {
         if (div->val == regno)
         {
-            *value = div->pval;
+            if (dbg_curr_thread->curr_frame != 0)
+            {
+                if (!stack_get_register_current_frame(regno, value))
+                {
+                    if (buffer) snprintf(buffer, len, "<register %s not in topmost frame>", div->name);
+                    return FALSE;
+                }
+            }
+            else
+                *value = div->pval;
+
             snprintf(buffer, len, div->name);
             return TRUE;
         }
     }
-    if (buffer) snprintf(buffer, len, "<unknown register %lu>", regno);
+    if (buffer) snprintf(buffer, len, "<unknown register %u>", regno);
     return FALSE;
 }

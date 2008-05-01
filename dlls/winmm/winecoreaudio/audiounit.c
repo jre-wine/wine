@@ -33,6 +33,13 @@ extern OSStatus CoreAudio_woAudioUnitIOProc(void *inRefCon,
 				UInt32 inNumberFrames, 
 				AudioBufferList *ioData);
 
+extern OSStatus CoreAudio_wiAudioUnitIOProc(void *inRefCon,
+				AudioUnitRenderActionFlags *ioActionFlags,
+				const AudioTimeStamp *inTimeStamp,
+				UInt32 inBusNumber,
+				UInt32 inNumberFrames,
+				AudioBufferList *ioData);
+
 int AudioUnit_CreateDefaultAudioUnit(void *wwo, AudioUnit *au)
 {
     OSStatus err;
@@ -121,4 +128,188 @@ int AudioUnit_GetVolume(AudioUnit au, float *left, float *right)
     *right = *left;
     return 1;
 }
+
+
+/* FIXME: implement sample rate conversion on input */
+int AudioUnit_GetInputDeviceSampleRate(void)
+{
+    AudioDeviceID               defaultInputDevice;
+    UInt32                      param;
+    Float64                     sampleRate;
+    OSStatus                    err;
+
+    param = sizeof(defaultInputDevice);
+    err = AudioHardwareGetProperty(kAudioHardwarePropertyDefaultInputDevice, &param, &defaultInputDevice);
+    if (err != noErr || defaultInputDevice == kAudioDeviceUnknown)
+    {
+        ERR("Couldn't get the default audio input device ID: %08lx\n", err);
+        return 0;
+    }
+
+    param = sizeof(sampleRate);
+    err = AudioDeviceGetProperty(defaultInputDevice, 0, 1, kAudioDevicePropertyNominalSampleRate, &param, &sampleRate);
+    if (err != noErr)
+    {
+        ERR("Couldn't get the device sample rate: %08lx\n", err);
+        return 0;
+    }
+
+    return sampleRate;
+}
+
+
+int AudioUnit_CreateInputUnit(void* wwi, AudioUnit* out_au,
+        WORD nChannels, DWORD nSamplesPerSec, WORD wBitsPerSample,
+        UInt32* outFrameCount)
+{
+    OSStatus                    err = noErr;
+    ComponentDescription        description;
+    Component                   component;
+    AudioUnit                   au;
+    UInt32                      param;
+    AURenderCallbackStruct      callback;
+    AudioDeviceID               defaultInputDevice;
+    AudioStreamBasicDescription desiredFormat;
+
+
+    if (!outFrameCount)
+    {
+        ERR("Invalid parameter\n");
+        return 0;
+    }
+
+    /* Open the AudioOutputUnit */
+    description.componentType           = kAudioUnitType_Output;
+    description.componentSubType        = kAudioUnitSubType_HALOutput;
+    description.componentManufacturer   = kAudioUnitManufacturer_Apple;
+    description.componentFlags          = 0;
+    description.componentFlagsMask      = 0;
+
+    component = FindNextComponent(NULL, &description);
+    if (!component)
+    {
+        ERR("FindNextComponent(kAudioUnitSubType_HALOutput) failed\n");
+        return 0;
+    }
+
+    err = OpenAComponent(component, &au);
+    if (err != noErr || au == NULL)
+    {
+        ERR("OpenAComponent failed: %08lx\n", err);
+        return 0;
+    }
+
+    /* Configure the AudioOutputUnit */
+    /* The AUHAL has two buses (AKA elements).  Bus 0 is output from the app
+     * to the device.  Bus 1 is input from the device to the app.  Each bus
+     * has two ends (AKA scopes).  Data goes from the input scope to the
+     * output scope.  The terminology is somewhat confusing because the terms
+     * "input" and "output" have two meanings.  Here's a summary:
+     *
+     *      Bus 0, input scope: refers to the source of data to be output as sound
+     *      Bus 0, output scope: refers to the actual sound output device
+     *      Bus 1, input scope: refers to the actual sound input device
+     *      Bus 1, output scope: refers to the destination of data received by the input device
+     */
+
+    /* Enable input on the AUHAL */
+    param = 1;
+    err = AudioUnitSetProperty(au, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &param, sizeof(param));
+    if (err != noErr)
+    {
+        ERR("Couldn't enable input on AUHAL: %08lx\n", err);
+        goto error;
+    }
+
+    /* Disable Output on the AUHAL */
+    param = 0;
+    err = AudioUnitSetProperty(au, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &param, sizeof(param));
+    if (err != noErr)
+    {
+        ERR("Couldn't disable output on AUHAL: %08lx\n", err);
+        goto error;
+    }
+
+    /* Find the default input device */
+    param = sizeof(defaultInputDevice);
+    err = AudioHardwareGetProperty(kAudioHardwarePropertyDefaultInputDevice, &param, &defaultInputDevice);
+    if (err != noErr || defaultInputDevice == kAudioDeviceUnknown)
+    {
+        ERR("Couldn't get the default audio device ID: %08lx\n", err);
+        goto error;
+    }
+
+    /* Set the current device to the default input device. */
+    err = AudioUnitSetProperty(au, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &defaultInputDevice, sizeof(defaultInputDevice));
+    if (err != noErr)
+    {
+        ERR("Couldn't set current device of AUHAL to default input device: %08lx\n", err);
+        goto error;
+    }
+
+    /* Setup render callback */
+    /* This will be called when the AUHAL has input data.  However, it won't
+     * be passed the data itself.  The callback will have to all AudioUnitRender. */
+    callback.inputProc = CoreAudio_wiAudioUnitIOProc;
+    callback.inputProcRefCon = wwi;
+    err = AudioUnitSetProperty(au, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 0, &callback, sizeof(callback));
+    if (err != noErr)
+    {
+        ERR("Couldn't set input callback of AUHAL: %08lx\n", err);
+        goto error;
+    }
+
+    /* Setup the desired data format. */
+    /* FIXME: implement sample rate conversion on input.  We shouldn't set
+     * the mSampleRate of this to the desired sample rate.  We need to query
+     * the input device and use that.  If they don't match, we need to set up
+     * an AUConverter to do the sample rate conversion on a separate thread. */
+    desiredFormat.mFormatID         = kAudioFormatLinearPCM;
+    desiredFormat.mFormatFlags      = kLinearPCMFormatFlagIsPacked;
+    if (wBitsPerSample != 8)
+        desiredFormat.mFormatFlags |= kLinearPCMFormatFlagIsSignedInteger;
+    desiredFormat.mSampleRate       = nSamplesPerSec;
+    desiredFormat.mChannelsPerFrame = nChannels;
+    desiredFormat.mFramesPerPacket  = 1;
+    desiredFormat.mBitsPerChannel   = wBitsPerSample;
+    desiredFormat.mBytesPerFrame    = desiredFormat.mBitsPerChannel * desiredFormat.mChannelsPerFrame / 8;
+    desiredFormat.mBytesPerPacket   = desiredFormat.mBytesPerFrame * desiredFormat.mFramesPerPacket;
+
+    /* Set the AudioOutputUnit output data format */
+    err = AudioUnitSetProperty(au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &desiredFormat, sizeof(desiredFormat));
+    if (err != noErr)
+    {
+        ERR("Couldn't set desired input format of AUHAL: %08lx\n", err);
+        goto error;
+    }
+
+    /* Get the number of frames in the IO buffer(s) */
+    param = sizeof(*outFrameCount);
+    err = AudioUnitGetProperty(au, kAudioDevicePropertyBufferFrameSize, kAudioUnitScope_Global, 0, outFrameCount, &param);
+    if (err != noErr)
+    {
+        ERR("Failed to get audio sample size: %08lx\n", err);
+        goto error;
+    }
+
+    TRACE("Frame count: %lu\n", *outFrameCount);
+
+    /* Initialize the AU */
+    err = AudioUnitInitialize(au);
+    if (err != noErr)
+    {
+        ERR("Failed to initialize AU: %08lx\n", err);
+        goto error;
+    }
+
+    *out_au = au;
+
+    return 1;
+
+error:
+    if (au)
+        CloseComponent(au);
+    return 0;
+}
+
 #endif

@@ -454,7 +454,8 @@ static HRESULT WINAPI Moniker_BindToStorage(IMoniker *iface, IBindCtx *pbc, IMon
     ok(bindinfo.dwBindVerb == 0, "bindinfo.dwBindVerb=%d\n", bindinfo.dwBindVerb);
     ok(bindinfo.szCustomVerb == 0, "bindinfo.szCustomVerb=%p\n", bindinfo.szCustomVerb);
     ok(bindinfo.cbstgmedData == 0, "bindinfo.cbstgmedData=%d\n", bindinfo.cbstgmedData);
-    ok(bindinfo.dwOptions == 0x80000, "bindinfo.dwOptions=%x\n", bindinfo.dwOptions);
+    ok(bindinfo.dwOptions == 0x80000 || bindinfo.dwOptions == 0x4080000,
+       "bindinfo.dwOptions=%x\n", bindinfo.dwOptions);
     ok(bindinfo.dwOptionsFlags == 0, "bindinfo.dwOptionsFlags=%d\n", bindinfo.dwOptionsFlags);
     /* TODO: test dwCodePage */
     /* TODO: test securityAttributes */
@@ -2048,6 +2049,11 @@ static void test_MSHTML_QueryStatus(IUnknown *unk, DWORD cmdf)
     test_QueryStatus(unk, &CGID_MSHTML, IDM_JUSTIFYRIGHT, cmdf);
     test_QueryStatus(unk, &CGID_MSHTML, IDM_ITALIC, cmdf);
     test_QueryStatus(unk, &CGID_MSHTML, IDM_UNDERLINE, cmdf);
+    test_QueryStatus(unk, &CGID_MSHTML, IDM_HORIZONTALLINE, cmdf);
+    test_QueryStatus(unk, &CGID_MSHTML, IDM_ORDERLIST, cmdf);
+    test_QueryStatus(unk, &CGID_MSHTML, IDM_UNORDERLIST, cmdf);
+    test_QueryStatus(unk, &CGID_MSHTML, IDM_INDENT, cmdf);
+    test_QueryStatus(unk, &CGID_MSHTML, IDM_OUTDENT, cmdf);
 }
 
 static void test_OleCommandTarget(IUnknown *unk)

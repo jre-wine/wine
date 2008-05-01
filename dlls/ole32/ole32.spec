@@ -52,7 +52,7 @@
 @ stdcall CoQueryClientBlanket(ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall CoQueryProxyBlanket(ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stub CoQueryReleaseObject
-@ stub CoRegisterChannelHook
+@ stdcall CoRegisterChannelHook(ptr ptr)
 @ stdcall CoRegisterClassObject(ptr ptr long long ptr)
 @ stdcall CoRegisterMallocSpy (ptr)
 @ stdcall CoRegisterMessageFilter(ptr ptr)
@@ -135,14 +135,14 @@
 @ stdcall HMENU_UserMarshal(ptr ptr ptr)
 @ stdcall HMENU_UserSize(ptr long ptr)
 @ stdcall HMENU_UserUnmarshal(ptr ptr ptr)
-@ stub HMETAFILEPICT_UserFree
-@ stub HMETAFILEPICT_UserMarshal
-@ stub HMETAFILEPICT_UserSize
-@ stub HMETAFILEPICT_UserUnmarshal
-@ stub HMETAFILE_UserFree
-@ stub HMETAFILE_UserMarshal
-@ stub HMETAFILE_UserSize
-@ stub HMETAFILE_UserUnmarshal
+@ stdcall HMETAFILEPICT_UserFree(ptr ptr)
+@ stdcall HMETAFILEPICT_UserMarshal(ptr ptr ptr)
+@ stdcall HMETAFILEPICT_UserSize(ptr long ptr)
+@ stdcall HMETAFILEPICT_UserUnmarshal(ptr ptr ptr)
+@ stdcall HMETAFILE_UserFree(ptr ptr)
+@ stdcall HMETAFILE_UserMarshal(ptr ptr ptr)
+@ stdcall HMETAFILE_UserSize(ptr long ptr)
+@ stdcall HMETAFILE_UserUnmarshal(ptr ptr ptr)
 @ stdcall HPALETTE_UserFree(ptr ptr)
 @ stdcall HPALETTE_UserMarshal(ptr ptr ptr)
 @ stdcall HPALETTE_UserSize(ptr long ptr)

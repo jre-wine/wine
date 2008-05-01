@@ -32,13 +32,11 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "wownt32.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(font);
-WINE_DECLARE_DEBUG_CHANNEL(gdi);
 
   /* Device -> World size conversion */
 
@@ -3001,8 +2999,8 @@ BOOL WINAPI GetCharABCWidthsFloatW( HDC hdc, UINT first, UINT last, LPABCFLOAT a
 BOOL WINAPI GetCharWidthFloatA(HDC hdc, UINT iFirstChar,
 		                    UINT iLastChar, PFLOAT pxBuffer)
 {
-       FIXME_(gdi)("GetCharWidthFloatA, stub\n");
-       return 0;
+    FIXME("%p, %u, %u, %p: stub!\n", hdc, iFirstChar, iLastChar, pxBuffer);
+    return 0;
 }
 
 /*************************************************************************
@@ -3011,8 +3009,8 @@ BOOL WINAPI GetCharWidthFloatA(HDC hdc, UINT iFirstChar,
 BOOL WINAPI GetCharWidthFloatW(HDC hdc, UINT iFirstChar,
 		                    UINT iLastChar, PFLOAT pxBuffer)
 {
-       FIXME_(gdi)("GetCharWidthFloatW, stub\n");
-       return 0;
+    FIXME("%p, %u, %u, %p: stub!\n", hdc, iFirstChar, iLastChar, pxBuffer);
+    return 0;
 }
 
 
@@ -3188,11 +3186,44 @@ BOOL WINAPI EnableEUDC(BOOL fEnableEUDC)
 
 /***********************************************************************
  *           GetCharWidthI    (GDI32.@)
+ *
+ * Retrieve widths of characters.
+ *
+ * PARAMS
+ *  hdc    [I] Handle to a device context.
+ *  first  [I] First glyph in range to query.
+ *  count  [I] Number of glyph indices to query.
+ *  glyphs [I] Array of glyphs to query.
+ *  buffer [O] Buffer to receive character widths.
+ *
+ * NOTES
+ *  Only works with TrueType fonts.
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
  */
-BOOL WINAPI GetCharWidthI(HDC hdc, UINT giFirst, UINT cgi, LPWORD pgi, LPINT lpBuffer)
+BOOL WINAPI GetCharWidthI(HDC hdc, UINT first, UINT count, LPWORD glyphs, LPINT buffer)
 {
-    FIXME("(%p, %d, %d, %p, %p): stub\n", hdc, giFirst, cgi, pgi, lpBuffer);
-    return FALSE;
+    ABC *abc;
+    unsigned int i;
+
+    TRACE("(%p, %d, %d, %p, %p)\n", hdc, first, count, glyphs, buffer);
+
+    if (!(abc = HeapAlloc(GetProcessHeap(), 0, count * sizeof(ABC))))
+        return FALSE;
+
+    if (!GetCharABCWidthsI(hdc, first, count, glyphs, abc))
+    {
+        HeapFree(GetProcessHeap(), 0, abc);
+        return FALSE;
+    }
+
+    for (i = 0; i < count; i++)
+        buffer[i] = abc->abcA + abc->abcB + abc->abcC;
+
+    HeapFree(GetProcessHeap(), 0, abc);
+    return TRUE;
 }
 
 /***********************************************************************

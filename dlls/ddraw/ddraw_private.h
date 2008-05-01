@@ -75,6 +75,11 @@ typedef struct IDirect3DExecuteBufferImpl IDirect3DExecuteBufferImpl;
 typedef struct IDirect3DVertexBufferImpl  IDirect3DVertexBufferImpl;
 typedef struct IParentImpl                IParentImpl;
 
+/* Callbacks for implicit object destruction */
+extern ULONG WINAPI D3D7CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain);
+
+extern ULONG WINAPI D3D7CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface);
+
 /*****************************************************************************
  * IDirectDraw implementation structure
  *****************************************************************************/
@@ -84,6 +89,7 @@ struct IDirectDrawImpl
     /* IUnknown fields */
     ICOM_VFIELD_MULTI(IDirectDraw7);
     ICOM_VFIELD_MULTI(IDirectDraw4);
+    ICOM_VFIELD_MULTI(IDirectDraw3);
     ICOM_VFIELD_MULTI(IDirectDraw2);
     ICOM_VFIELD_MULTI(IDirectDraw);
     ICOM_VFIELD_MULTI(IDirect3D7);
@@ -92,7 +98,7 @@ struct IDirectDrawImpl
     ICOM_VFIELD_MULTI(IDirect3D);
 
     /* See comment in IDirectDraw::AddRef */
-    LONG                    ref7, ref4, ref2, ref1, numIfaces;
+    LONG                    ref7, ref4, ref2, ref3, ref1, numIfaces;
 
     /* WineD3D linkage */
     IWineD3D                *wineD3D;
@@ -151,6 +157,7 @@ struct IDirectDrawImpl
 /* Declare the VTables. They can be found ddraw.c */
 const IDirectDraw7Vtbl IDirectDraw7_Vtbl;
 const IDirectDraw4Vtbl IDirectDraw4_Vtbl;
+const IDirectDraw3Vtbl IDirectDraw3_Vtbl;
 const IDirectDraw2Vtbl IDirectDraw2_Vtbl;
 const IDirectDrawVtbl  IDirectDraw1_Vtbl;
 
@@ -571,8 +578,9 @@ struct IDirect3DVertexBufferImpl
     ICOM_VFIELD_MULTI(IDirect3DVertexBuffer);
     LONG                 ref;
 
-    /*** WineD3D link ***/
+    /*** WineD3D and ddraw links ***/
     IWineD3DVertexBuffer *wineD3DVertexBuffer;
+    IDirectDrawImpl *ddraw;
 
     /*** Storage for D3D7 specific things ***/
     DWORD                Caps;
@@ -624,7 +632,6 @@ typedef struct
 } member_info;
 
 /* Structure copy */
-#define DDRAW_dump_flags(flags,names,num_names) DDRAW_dump_flags_(flags, names, num_names, 1)
 #define ME(x,f,e) { x, #x, (void (*)(const void *))(f), offsetof(STRUCT, e) }
 
 #define DD_STRUCT_COPY_BYSIZE(to,from)                  \

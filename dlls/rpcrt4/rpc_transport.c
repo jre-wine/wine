@@ -115,16 +115,16 @@ static RPC_STATUS rpcrt4_conn_listen_pipe(RpcConnection_np *npc)
   if (ConnectNamedPipe(npc->pipe, &npc->ovl))
     return RPC_S_OK;
 
-  WARN("Couldn't ConnectNamedPipe (error was %d)\n", GetLastError());
   if (GetLastError() == ERROR_PIPE_CONNECTED) {
     SetEvent(npc->ovl.hEvent);
     return RPC_S_OK;
   }
   if (GetLastError() == ERROR_IO_PENDING) {
-    /* FIXME: looks like we need to GetOverlappedResult here? */
+    /* will be completed in rpcrt4_protseq_np_wait_for_new_connection */
     return RPC_S_OK;
   }
   npc->listening = FALSE;
+  WARN("Couldn't ConnectNamedPipe (error was %d)\n", GetLastError());
   return RPC_S_OUT_OF_RESOURCES;
 }
 
@@ -193,7 +193,7 @@ static RPC_STATUS rpcrt4_conn_open_pipe(RpcConnection *Connection, LPCSTR pname,
 static RPC_STATUS rpcrt4_ncalrpc_open(RpcConnection* Connection)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  static LPCSTR prefix = "\\\\.\\pipe\\lrpc\\";
+  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
   RPC_STATUS r;
   LPSTR pname;
 
@@ -213,7 +213,7 @@ static RPC_STATUS rpcrt4_ncalrpc_open(RpcConnection* Connection)
 
 static RPC_STATUS rpcrt4_protseq_ncalrpc_open_endpoint(RpcServerProtseq* protseq, LPSTR endpoint)
 {
-  static LPCSTR prefix = "\\\\.\\pipe\\lrpc\\";
+  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
   RPC_STATUS r;
   LPSTR pname;
   RpcConnection *Connection;
@@ -241,7 +241,7 @@ static RPC_STATUS rpcrt4_protseq_ncalrpc_open_endpoint(RpcServerProtseq* protseq
 static RPC_STATUS rpcrt4_ncacn_np_open(RpcConnection* Connection)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  static LPCSTR prefix = "\\\\.";
+  static const char prefix[] = "\\\\.";
   RPC_STATUS r;
   LPSTR pname;
 
@@ -260,7 +260,7 @@ static RPC_STATUS rpcrt4_ncacn_np_open(RpcConnection* Connection)
 
 static RPC_STATUS rpcrt4_protseq_ncacn_np_open_endpoint(RpcServerProtseq *protseq, LPSTR endpoint)
 {
-  static LPCSTR prefix = "\\\\.";
+  static const char prefix[] = "\\\\.";
   RPC_STATUS r;
   LPSTR pname;
   RpcConnection *Connection;
@@ -295,7 +295,7 @@ static RPC_STATUS rpcrt4_ncacn_np_handoff(RpcConnection *old_conn, RpcConnection
 {
   RPC_STATUS status;
   LPSTR pname;
-  static LPCSTR prefix = "\\\\.";
+  static const char prefix[] = "\\\\.";
 
   rpcrt4_conn_np_handoff((RpcConnection_np *)old_conn, (RpcConnection_np *)new_conn);
 
@@ -311,7 +311,7 @@ static RPC_STATUS rpcrt4_ncalrpc_handoff(RpcConnection *old_conn, RpcConnection 
 {
   RPC_STATUS status;
   LPSTR pname;
-  static LPCSTR prefix = "\\\\.\\pipe\\lrpc\\";
+  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
 
   TRACE("%s\n", old_conn->Endpoint);
 
@@ -1280,6 +1280,11 @@ RPC_STATUS RPCRT4_OpenClientConnection(RpcConnection* Connection)
 RPC_STATUS RPCRT4_CloseConnection(RpcConnection* Connection)
 {
   TRACE("(Connection == ^%p)\n", Connection);
+  if (SecIsValidHandle(&Connection->ctx))
+  {
+    DeleteSecurityContext(&Connection->ctx);
+    SecInvalidateHandle(&Connection->ctx);
+  }
   rpcrt4_conn_close(Connection);
   return RPC_S_OK;
 }
@@ -1293,7 +1298,10 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
 
   ops = rpcrt4_get_conn_protseq_ops(Protseq);
   if (!ops)
+  {
+    FIXME("not supported for protseq %s\n", Protseq);
     return RPC_S_PROTSEQ_NOT_SUPPORTED;
+  }
 
   NewConnection = ops->alloc();
   NewConnection->Next = NULL;
@@ -1306,7 +1314,7 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
   memset(&NewConnection->ActiveInterface, 0, sizeof(NewConnection->ActiveInterface));
   NewConnection->NextCallId = 1;
 
-  memset(&NewConnection->ctx, 0, sizeof(NewConnection->ctx));
+  SecInvalidateHandle(&NewConnection->ctx);
   if (AuthInfo) RpcAuthInfo_AddRef(AuthInfo);
   NewConnection->AuthInfo = AuthInfo;
   list_init(&NewConnection->conn_pool_entry);

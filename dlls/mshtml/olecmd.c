@@ -34,8 +34,10 @@
 #include "mshtmcid.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 #include "mshtml_private.h"
+#include "resource.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
@@ -45,6 +47,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 #define NSCMD_FONTCOLOR "cmd_fontColor"
 #define NSCMD_ALIGN "cmd_align"
 #define NSCMD_FONTFACE "cmd_fontFace"
+#define NSCMD_INDENT "cmd_indent"
+#define NSCMD_OUTDENT "cmd_outdent"
+#define NSCMD_INSERTHR "cmd_insertHR"
+#define NSCMD_UL "cmd_ul"
+#define NSCMD_OL "cmd_ol"
 
 #define NSSTATE_ATTRIBUTE "state_attribute"
 #define NSSTATE_ALL "state_all"
@@ -89,10 +96,213 @@ static HRESULT exec_save_copy_as(HTMLDocument *This, DWORD nCmdexecopt, VARIANT 
     return E_NOTIMPL;
 }
 
+static nsresult set_head_text(nsIPrintSettings *settings, LPCWSTR template, BOOL head, int pos)
+{
+    if(head) {
+        switch(pos) {
+        case 0:
+            return nsIPrintSettings_SetHeaderStrLeft(settings, template);
+        case 1:
+            return nsIPrintSettings_SetHeaderStrRight(settings, template);
+        case 2:
+            return nsIPrintSettings_SetHeaderStrCenter(settings, template);
+        }
+    }else {
+        switch(pos) {
+        case 0:
+            return nsIPrintSettings_SetFooterStrLeft(settings, template);
+        case 1:
+            return nsIPrintSettings_SetFooterStrRight(settings, template);
+        case 2:
+            return nsIPrintSettings_SetFooterStrCenter(settings, template);
+        }
+    }
+
+    return NS_OK;
+}
+
+static void set_print_template(nsIPrintSettings *settings, LPCWSTR template, BOOL head)
+{
+    PRUnichar nstemplate[200]; /* FIXME: Use dynamic allocation */
+    PRUnichar *p = nstemplate;
+    LPCWSTR ptr=template;
+    int pos=0;
+
+    while(*ptr) {
+        if(*ptr != '&') {
+            *p++ = *ptr++;
+            continue;
+        }
+
+        switch(*++ptr) {
+        case '&':
+            *p++ = '&';
+            *p++ = '&';
+            ptr++;
+            break;
+        case 'b': /* change align */
+            ptr++;
+            *p = 0;
+            set_head_text(settings, nstemplate, head, pos);
+            p = nstemplate;
+            pos++;
+            break;
+        case 'd': { /* short date */
+            SYSTEMTIME systime;
+            GetLocalTime(&systime);
+            GetDateFormatW(LOCALE_SYSTEM_DEFAULT, 0, &systime, NULL, p,
+                    sizeof(nstemplate)-(p-nstemplate)*sizeof(WCHAR));
+            p += strlenW(p);
+            ptr++;
+            break;
+        }
+        case 'p': /* page number */
+            *p++ = '&';
+            *p++ = 'P';
+            ptr++;
+            break;
+        case 'P': /* page count */
+            *p++ = '?'; /* FIXME */
+            ptr++;
+            break;
+        case 'u':
+            *p++ = '&';
+            *p++ = 'U';
+            ptr++;
+            break;
+        case 'w':
+            /* FIXME: set window title */
+            ptr++;
+            break;
+        default:
+            *p++ = '&';
+            *p++ = *ptr++;
+        }
+    }
+
+    *p = 0;
+    set_head_text(settings, nstemplate, head, pos);
+
+    while(++pos < 3)
+        set_head_text(settings, p, head, pos);
+}
+
+static void set_default_templates(nsIPrintSettings *settings)
+{
+    WCHAR buf[64];
+
+    static const PRUnichar empty[] = {0};
+
+    nsIPrintSettings_SetHeaderStrLeft(settings, empty);
+    nsIPrintSettings_SetHeaderStrRight(settings, empty);
+    nsIPrintSettings_SetHeaderStrCenter(settings, empty);
+    nsIPrintSettings_SetFooterStrLeft(settings, empty);
+    nsIPrintSettings_SetFooterStrRight(settings, empty);
+    nsIPrintSettings_SetFooterStrCenter(settings, empty);
+
+    if(LoadStringW(get_shdoclc(), IDS_PRINT_HEADER_TEMPLATE, buf,
+                   sizeof(buf)/sizeof(WCHAR)))
+        set_print_template(settings, buf, TRUE);
+
+
+    if(LoadStringW(get_shdoclc(), IDS_PRINT_FOOTER_TEMPLATE, buf,
+                   sizeof(buf)/sizeof(WCHAR)))
+        set_print_template(settings, buf, FALSE);
+
+}
+
 static HRESULT exec_print(HTMLDocument *This, DWORD nCmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
 {
-    FIXME("(%p)->(%d %p %p)\n", This, nCmdexecopt, pvaIn, pvaOut);
-    return E_NOTIMPL;
+    nsIInterfaceRequestor *iface_req;
+    nsIWebBrowserPrint *nsprint;
+    nsIPrintSettings *settings;
+    nsresult nsres;
+
+    TRACE("(%p)->(%d %p %p)\n", This, nCmdexecopt, pvaIn, pvaOut);
+
+    if(pvaOut)
+        FIXME("unsupported pvaOut\n");
+
+    if(!This->nscontainer)
+        return S_OK;
+
+    nsres = nsIWebBrowser_QueryInterface(This->nscontainer->webbrowser,
+            &IID_nsIInterfaceRequestor, (void**)&iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIInterfaceRequestor: %08x\n", nsres);
+        return S_OK;
+    }
+
+    nsres = nsIInterfaceRequestor_GetInterface(iface_req, &IID_nsIWebBrowserPrint,
+            (void**)&nsprint);
+    nsIInterfaceRequestor_Release(iface_req);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIWebBrowserPrint: %08x\n", nsres);
+        return S_OK;
+    }
+
+    nsres = nsIWebBrowserPrint_GetGlobalPrintSettings(nsprint, &settings);
+    if(NS_FAILED(nsres))
+        ERR("GetCurrentPrintSettings failed: %08x\n", nsres);
+
+    set_default_templates(settings);
+
+    if(pvaIn) {
+        switch(V_VT(pvaIn)) {
+        case VT_BYREF|VT_ARRAY: {
+            VARIANT *opts;
+            DWORD opts_cnt;
+
+            if(V_ARRAY(pvaIn)->cDims != 1)
+                WARN("cDims = %d\n", V_ARRAY(pvaIn)->cDims);
+
+            SafeArrayAccessData(V_ARRAY(pvaIn), (void**)&opts);
+            opts_cnt = V_ARRAY(pvaIn)->rgsabound[0].cElements;
+
+            if(opts_cnt >= 1) {
+                switch(V_VT(opts)) {
+                case VT_BSTR:
+                    TRACE("setting footer %s\n", debugstr_w(V_BSTR(opts)));
+                    set_print_template(settings, V_BSTR(opts), TRUE);
+                    break;
+                case VT_NULL:
+                    break;
+                default:
+                    WARN("V_VT(opts) = %d\n", V_VT(opts));
+                }
+            }
+
+            if(opts_cnt >= 2) {
+                switch(V_VT(opts+1)) {
+                case VT_BSTR:
+                    TRACE("setting footer %s\n", debugstr_w(V_BSTR(opts+1)));
+                    set_print_template(settings, V_BSTR(opts+1), FALSE);
+                    break;
+                case VT_NULL:
+                    break;
+                default:
+                    WARN("V_VT(opts) = %d\n", V_VT(opts+1));
+                }
+            }
+
+            if(opts_cnt >= 3)
+                FIXME("Unsupported opts_cnt %d\n", opts_cnt);
+
+            SafeArrayUnaccessData(V_ARRAY(pvaIn));
+            break;
+        }
+        default:
+            FIXME("unsupported vt %x\n", V_VT(pvaIn));
+        }
+    }
+
+    nsres = nsIWebBrowserPrint_Print(nsprint, settings, NULL);
+    if(NS_FAILED(nsres))
+        ERR("Print failed: %08x\n", nsres);
+
+    nsIWebBrowserPrint_Release(nsprint);
+
+    return S_OK;
 }
 
 static HRESULT exec_print_preview(HTMLDocument *This, DWORD nCmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
@@ -459,8 +669,43 @@ static HRESULT exec_forecolor(HTMLDocument *This, VARIANT *in, VARIANT *out)
 
 static HRESULT exec_fontsize(HTMLDocument *This, VARIANT *in, VARIANT *out)
 {
-    FIXME("(%p)->(%p %p)\n", This, in, out);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p %p)\n", This, in, out);
+
+    if(out) {
+        WCHAR val[10] = {0};
+
+        switch(V_VT(out)) {
+        case VT_I4:
+            get_font_size(This, val);
+            V_I4(out) = strtolW(val, NULL, 10);
+            break;
+        case VT_BSTR:
+            get_font_size(This, val);
+            V_BSTR(out) = SysAllocString(val);
+            break;
+        default:
+            FIXME("unsupported vt %d\n", V_VT(out));
+        }
+    }
+
+    if(in) {
+        switch(V_VT(in)) {
+        case VT_I4: {
+            WCHAR size[10];
+            static const WCHAR format[] = {'%','d',0};
+            wsprintfW(size, format, V_I4(in));
+            set_font_size(This, size);
+            break;
+        }
+        case VT_BSTR:
+            set_font_size(This, V_BSTR(in));
+            break;
+        default:
+            FIXME("unsupported vt %d\n", V_VT(out));
+        }
+    }
+
+    return S_OK;
 }
 
 static HRESULT exec_bold(HTMLDocument *This)
@@ -616,6 +861,56 @@ static HRESULT exec_baselinefont3(HTMLDocument *This)
     return S_OK;
 }
 
+static HRESULT exec_horizontalline(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_INSERTHR, NULL);
+
+    return S_OK;
+}
+
+static HRESULT exec_orderlist(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_OL, NULL);
+
+    return S_OK;
+}
+
+static HRESULT exec_unorderlist(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_UL, NULL);
+
+    return S_OK;
+}
+
+static HRESULT exec_indent(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_INDENT, NULL);
+
+    return S_OK;
+}
+
+static HRESULT exec_outdent(HTMLDocument *This)
+{
+    TRACE("(%p)\n", This);
+
+    if(This->nscontainer)
+        do_ns_command(This->nscontainer, NSCMD_OUTDENT, NULL);
+
+    return S_OK;
+}
+
 static const struct {
     OLECMDF cmdf;
     HRESULT (*func)(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
@@ -746,6 +1041,10 @@ static HRESULT WINAPI OleCommandTarget_QueryStatus(IOleCommandTarget *iface, con
                 TRACE("CGID_MSHTML: IDM_FONTSIZE\n");
                 prgCmds[i].cmdf = query_edit_status(This, NULL);
                 break;
+            case IDM_PRINT:
+                FIXME("CGID_MSHTML: IDM_PRINT\n");
+                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                break;
             case IDM_PASTE:
                 FIXME("CGID_MSHTML: IDM_PASTE\n");
                 prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
@@ -779,24 +1078,24 @@ static HRESULT WINAPI OleCommandTarget_QueryStatus(IOleCommandTarget *iface, con
                 prgCmds[i].cmdf = query_edit_status(This, NSCMD_UNDERLINE);
                 break;
             case IDM_HORIZONTALLINE:
-                FIXME("CGID_MSHTML: IDM_HORIZONTALLINE\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_HORIZONTALLINE\n");
+                prgCmds[i].cmdf = query_edit_status(This, NULL);
                 break;
             case IDM_ORDERLIST:
-                FIXME("CGID_MSHTML: IDM_ORDERLIST\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_ORDERLIST\n");
+                prgCmds[i].cmdf = query_edit_status(This, NSCMD_OL);
                 break;
             case IDM_UNORDERLIST:
-                FIXME("CGID_MSHTML: IDM_UNORDERLIST\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_HORIZONTALLINE\n");
+                prgCmds[i].cmdf = query_edit_status(This, NSCMD_UL);
                 break;
             case IDM_INDENT:
-                FIXME("CGID_MSHTML: IDM_INDENT\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_INDENT\n");
+                prgCmds[i].cmdf = query_edit_status(This, NULL);
                 break;
             case IDM_OUTDENT:
-                FIXME("CGID_MSHTML: IDM_OUTDENT\n");
-                prgCmds[i].cmdf = OLECMDF_SUPPORTED|OLECMDF_ENABLED;
+                TRACE("CGID_MSHTML: IDM_OUTDENT\n");
+                prgCmds[i].cmdf = query_edit_status(This, NULL);
                 break;
             case IDM_BLOCKDIRLTR:
                 FIXME("CGID_MSHTML: IDM_BLOCKDIRLTR\n");
@@ -849,6 +1148,8 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             return exec_fontname(This, pvaIn, pvaOut);
         case IDM_FONTSIZE:
             return exec_fontsize(This, pvaIn, pvaOut);
+        case IDM_PRINT:
+            return exec_print(This, nCmdexecopt, pvaIn, pvaOut);
         case IDM_BOLD:
             if(pvaIn || pvaOut)
                 FIXME("unsupported arguments\n");
@@ -885,6 +1186,26 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             return exec_editmode(This);
         case IDM_BASELINEFONT3:
             return exec_baselinefont3(This);
+        case IDM_HORIZONTALLINE:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_horizontalline(This);
+        case IDM_ORDERLIST:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_orderlist(This);
+        case IDM_UNORDERLIST:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_unorderlist(This);
+        case IDM_INDENT:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_indent(This);
+        case IDM_OUTDENT:
+            if(pvaIn || pvaOut)
+                FIXME("unsupported arguments\n");
+            return exec_outdent(This);
         default:
             FIXME("unsupported nCmdID %d of CGID_MSHTML group\n", nCmdID);
             return OLECMDERR_E_NOTSUPPORTED;

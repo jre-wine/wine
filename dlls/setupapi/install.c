@@ -113,7 +113,7 @@ static BOOL copy_files_callback( HINF hinf, PCWSTR field, void *arg )
     struct files_callback_info *info = arg;
 
     if (field[0] == '@')  /* special case: copy single file */
-        SetupQueueDefaultCopyW( info->queue, info->layout, info->src_root, NULL, field, info->copy_flags );
+        SetupQueueDefaultCopyW( info->queue, info->layout, info->src_root, NULL, field+1, info->copy_flags );
     else
         SetupQueueCopySectionW( info->queue, info->src_root, info->layout, hinf, field, info->copy_flags );
     return TRUE;
@@ -995,7 +995,7 @@ void WINAPI InstallHinfSectionW( HWND hwnd, HINSTANCE handle, LPCWSTR cmdline, I
 #ifdef __i386__
     static const WCHAR nt_platformW[] = {'.','n','t','x','8','6',0};
 #elif defined(__x86_64)
-    static const WCHAR nt_platformW[] = {'.','n','t','i','a','6','4',0};
+    static const WCHAR nt_platformW[] = {'.','n','t','a','m','d','6','4',0};
 #else  /* FIXME: other platforms */
     static const WCHAR nt_platformW[] = {'.','n','t',0};
 #endif

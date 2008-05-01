@@ -328,13 +328,18 @@ static FARPROC find_forwarded_export( HMODULE module, const char *forward )
     DWORD exp_size;
     WINE_MODREF *wm;
     WCHAR mod_name[32];
-    const char *end = strchr(forward, '.');
+    const char *end = strrchr(forward, '.');
     FARPROC proc = NULL;
 
     if (!end) return NULL;
-    if ((end - forward) * sizeof(WCHAR) >= sizeof(mod_name) - sizeof(dllW)) return NULL;
+    if ((end - forward) * sizeof(WCHAR) >= sizeof(mod_name)) return NULL;
     ascii_to_unicode( mod_name, forward, end - forward );
-    memcpy( mod_name + (end - forward), dllW, sizeof(dllW) );
+    mod_name[end - forward] = 0;
+    if (!strchrW( mod_name, '.' ))
+    {
+        if ((end - forward) * sizeof(WCHAR) >= sizeof(mod_name) - sizeof(dllW)) return NULL;
+        memcpy( mod_name + (end - forward), dllW, sizeof(dllW) );
+    }
 
     if (!(wm = find_basename_module( mod_name )))
     {
@@ -676,6 +681,12 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     /* wait until init is called for inserting into this list */
     wm->ldr.InInitializationOrderModuleList.Flink = NULL;
     wm->ldr.InInitializationOrderModuleList.Blink = NULL;
+
+    if (!(nt->OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_NX_COMPAT))
+    {
+        WARN( "disabling no-exec because of %s\n", debugstr_w(wm->ldr.BaseDllName.Buffer) );
+        VIRTUAL_SetForceExec( TRUE );
+    }
     return wm;
 }
 
@@ -1542,7 +1553,11 @@ static NTSTATUS load_builtin_dll( LPCWSTR load_path, LPCWSTR path, HANDLE file,
         }
     }
 
-    if (info.status != STATUS_SUCCESS) return info.status;
+    if (info.status != STATUS_SUCCESS)
+    {
+        wine_dll_unload( handle );
+        return info.status;
+    }
 
     if (!info.wm)
     {
@@ -1563,6 +1578,7 @@ static NTSTATUS load_builtin_dll( LPCWSTR load_path, LPCWSTR path, HANDLE file,
                 break;
             }
         }
+        wine_dll_unload( handle );  /* release the libdl refcount */
         if (!info.wm) return STATUS_INVALID_IMAGE_FORMAT;
         if (info.wm->ldr.LoadCount != -1) info.wm->ldr.LoadCount++;
     }

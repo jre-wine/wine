@@ -38,6 +38,8 @@
 
 static struct _TEB * (WINAPI *pNtCurrentTeb)(void);
 static NTSTATUS  (WINAPI *pNtGetContextThread)(HANDLE,CONTEXT*);
+static NTSTATUS  (WINAPI *pNtSetContextThread)(HANDLE,CONTEXT*);
+static void *code_mem;
 
 /* Test various instruction combinations that cause a protection fault on the i386,
  * and check what the resulting exception looks like.
@@ -162,6 +164,26 @@ static const struct exception
 
 static int got_exception;
 
+static void run_exception_test(const void *handler, const void* context,
+                               const void *code, unsigned int code_size)
+{
+    struct {
+        EXCEPTION_REGISTRATION_RECORD frame;
+        const void *context;
+    } exc_frame;
+    void (*func)(void) = code_mem;
+
+    exc_frame.frame.Handler = handler;
+    exc_frame.frame.Prev = pNtCurrentTeb()->Tib.ExceptionList;
+    exc_frame.context = context;
+
+    memcpy(code_mem, code, code_size);
+
+    pNtCurrentTeb()->Tib.ExceptionList = &exc_frame.frame;
+    func();
+    pNtCurrentTeb()->Tib.ExceptionList = exc_frame.frame.Prev;
+}
+
 static DWORD handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
                       CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
@@ -174,9 +196,9 @@ static DWORD handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *fram
 
     ok( rec->ExceptionCode == except->status,
         "%u: Wrong exception code %x/%x\n", entry, rec->ExceptionCode, except->status );
-    ok( rec->ExceptionAddress == except->code + except->offset,
+    ok( rec->ExceptionAddress == (char*)code_mem + except->offset,
         "%u: Wrong exception address %p/%p\n", entry,
-        rec->ExceptionAddress, except->code + except->offset );
+        rec->ExceptionAddress, (char*)code_mem + except->offset );
 
     ok( rec->NumberParameters == except->nb_params,
         "%u: Wrong number of parameters %u/%u\n", entry, rec->NumberParameters, except->nb_params );
@@ -186,7 +208,7 @@ static DWORD handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *fram
             entry, i, rec->ExceptionInformation[i], except->params[i] );
 
     /* don't handle exception if it's not the address we expected */
-    if (rec->ExceptionAddress != except->code + except->offset) return ExceptionContinueSearch;
+    if (rec->ExceptionAddress != (char*)code_mem + except->offset) return ExceptionContinueSearch;
 
     context->Eip += except->length;
     return ExceptionContinueExecution;
@@ -195,28 +217,12 @@ static DWORD handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *fram
 static void test_prot_fault(void)
 {
     unsigned int i;
-    struct
-    {
-        EXCEPTION_REGISTRATION_RECORD frame;
-        const struct exception       *except;
-    } exc_frame;
 
-    pNtCurrentTeb = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtCurrentTeb" );
-    if (!pNtCurrentTeb)
-    {
-        trace( "NtCurrentTeb not found, skipping tests\n" );
-        return;
-    }
-
-    exc_frame.frame.Handler = handler;
-    exc_frame.frame.Prev = pNtCurrentTeb()->Tib.ExceptionList;
-    pNtCurrentTeb()->Tib.ExceptionList = &exc_frame.frame;
     for (i = 0; i < sizeof(exceptions)/sizeof(exceptions[0]); i++)
     {
-        void (*func)(void) = (void *)exceptions[i].code;
-        exc_frame.except = &exceptions[i];
         got_exception = 0;
-        func();
+        run_exception_test(handler, &exceptions[i], &exceptions[i].code,
+                           sizeof(exceptions[i].code));
         if (!i && !got_exception)
         {
             trace( "No exception, assuming win9x, no point in testing further\n" );
@@ -225,9 +231,9 @@ static void test_prot_fault(void)
         ok( got_exception == (exceptions[i].status != 0),
             "%u: bad exception count %d\n", i, got_exception );
     }
-    pNtCurrentTeb()->Tib.ExceptionList = exc_frame.frame.Prev;
 }
 
+/* test handling of debug registers */
 static DWORD dreg_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
                       CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
@@ -241,58 +247,32 @@ static DWORD dreg_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD 
     return ExceptionContinueExecution;
 }
 
-static BYTE code[5] = {
+static const BYTE segfault_code[5] = {
 	0x31, 0xc0, /* xor    %eax,%eax */
 	0x8f, 0x00, /* popl   (%eax) - cause exception */
         0xc3        /* ret */
 };
 
-static void test_debug_regs(void)
-{
-    CONTEXT ctx;
-    NTSTATUS res;
-    struct
-    {
-        EXCEPTION_REGISTRATION_RECORD frame;
-    } exc_frame;
-    void (*func)(void) = (void*)code;
-
-    pNtCurrentTeb = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtCurrentTeb" );
-    if (!pNtCurrentTeb)
-    {
-        trace( "NtCurrentTeb not found, skipping tests\n" );
-        return;
-    }
-    pNtGetContextThread = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtGetContextThread" );
-    if (!pNtGetContextThread)
-    {
-        trace( "NtGetContextThread not found, skipping tests\n" );
-        return;
-    }
-
-    exc_frame.frame.Handler = dreg_handler;
-    exc_frame.frame.Prev = pNtCurrentTeb()->Tib.ExceptionList;
-    pNtCurrentTeb()->Tib.ExceptionList = &exc_frame.frame;
-    func();
-    pNtCurrentTeb()->Tib.ExceptionList = exc_frame.frame.Prev;
-    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
-    res = pNtGetContextThread(GetCurrentThread(), &ctx);
-    ok (res == STATUS_SUCCESS,"NtGetContextThread failed with %x\n", res);
-    ok(ctx.Dr0 == 0x42424242,"failed to set debugregister 0 to 0x42424242, got %x\n", ctx.Dr0);
-    ok(ctx.Dr7 == 0x155,"failed to set debugregister 7 to 0x155, got %x\n", ctx.Dr7);
-}
-
 /* test the single step exception behaviour */
-static int gotsinglesteps = 0;
 static DWORD single_step_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
                                   CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
-    gotsinglesteps++;
+    got_exception++;
     ok (!(context->EFlags & 0x100), "eflags has single stepping bit set\n");
+
+    if( got_exception < 3)
+        context->EFlags |= 0x100;  /* single step until popf instruction */
+    else {
+        /* show that the last single step exception on the popf instruction
+         * (which removed the TF bit), still is a EXCEPTION_SINGLE_STEP exception */
+        ok( rec->ExceptionCode == EXCEPTION_SINGLE_STEP,
+            "exception is not EXCEPTION_SINGLE_STEP: %x\n", rec->ExceptionCode);
+    }
+
     return ExceptionContinueExecution;
 }
 
-static BYTE single_stepcode[] = {
+static const BYTE single_stepcode[] = {
     0x9c,		/* pushf */
     0x58,		/* pop   %eax */
     0x0d,0,1,0,0,	/* or    $0x100,%eax */
@@ -304,28 +284,8 @@ static BYTE single_stepcode[] = {
     0xc3
 };
 
-static void test_single_step(void)
-{
-    struct {
-        EXCEPTION_REGISTRATION_RECORD frame;
-    } exc_frame;
-    void (*func)(void) = (void *)single_stepcode;
-
-    pNtCurrentTeb = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtCurrentTeb" );
-    if (!pNtCurrentTeb) {
-        trace( "NtCurrentTeb not found, skipping tests\n" );
-        return;
-    }
-    exc_frame.frame.Handler = single_step_handler;
-    exc_frame.frame.Prev = pNtCurrentTeb()->Tib.ExceptionList;
-    pNtCurrentTeb()->Tib.ExceptionList = &exc_frame.frame;
-    func();
-    ok(gotsinglesteps == 1, "expected 1 single step exceptions, got %d\n", gotsinglesteps);
-    pNtCurrentTeb()->Tib.ExceptionList = exc_frame.frame.Prev;
-}
-
 /* Test the alignment check (AC) flag handling. */
-static BYTE align_check_code[] = {
+static const BYTE align_check_code[] = {
     0x55,                  	/* push   %ebp */
     0x89,0xe5,             	/* mov    %esp,%ebp */
     0x9c,                  	/* pushf   */
@@ -333,8 +293,8 @@ static BYTE align_check_code[] = {
     0x0d,0,0,4,0,       	/* or     $0x40000,%eax */
     0x50,                  	/* push   %eax */
     0x9d,                  	/* popf    */
-    0x8b,0x45,8,           	/* mov    0x8(%ebp),%eax */
-    0xc7,0x40,1,42,0,0,0, 	/* movl   $42,0x1(%eax) */
+    0x89,0xe0,                  /* mov %esp, %eax */
+    0x8b,0x40,0x1,              /* mov 0x1(%eax), %eax - cause exception */
     0x9c,                  	/* pushf   */
     0x58,                  	/* pop    %eax */
     0x35,0,0,4,0,       	/* xor    $0x40000,%eax */
@@ -344,36 +304,122 @@ static BYTE align_check_code[] = {
     0xc3,                  	/* ret     */
 };
 
-static int gotalignfaults = 0;
 static DWORD align_check_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
                                   CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
     ok (!(context->EFlags & 0x40000), "eflags has AC bit set\n");
-    gotalignfaults++;
+    got_exception++;
     return ExceptionContinueExecution;
 }
 
-static void test_align_faults(void)
+/* test single stepping over hardware breakpoint */
+static DWORD bpx_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
+                          CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
-    int twoints[2];
-    struct {
-        EXCEPTION_REGISTRATION_RECORD frame;
-    } exc_frame;
-    void (*func1)(int*) = (void *)align_check_code;
+    got_exception++;
+    ok( rec->ExceptionCode == EXCEPTION_SINGLE_STEP,
+        "wrong exception code: %x\n", rec->ExceptionCode);
 
-    pNtCurrentTeb = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtCurrentTeb" );
-    if (!pNtCurrentTeb) {
-        trace( "NtCurrentTeb not found, skipping tests\n" );
+    if(got_exception == 1) {
+        /* hw bp exception on first nop */
+        ok( context->Eip == (DWORD)code_mem, "eip is wrong:  %x instead of %x\n",
+                                             context->Eip, (DWORD)code_mem);
+        ok( (context->Dr6 & 0xf) == 1, "B0 flag is not set in Dr6\n");
+        ok( !(context->Dr6 & 0x4000), "BS flag is set in Dr6\n");
+        context->Dr0 = context->Dr0 + 1;  /* set hw bp again on next instruction */
+        context->EFlags |= 0x100;       /* enable single stepping */
+    } else if(  got_exception == 2) {
+        /* single step exception on second nop */
+        ok( context->Eip == (DWORD)code_mem + 1, "eip is wrong: %x instead of %x\n",
+                                                 context->Eip, (DWORD)code_mem + 1);
+        todo_wine{ ok( (context->Dr6 & 0x4000), "BS flag is not set in Dr6\n"); };
+        ok( (context->Dr6 & 0xf) == 0, "B0...3 flags in Dr6 shouldn't be set\n");
+        context->EFlags |= 0x100;
+    } else if( got_exception == 3) {
+        /* hw bp exception on second nop */
+        ok( context->Eip == (DWORD)code_mem + 1, "eip is wrong: %x instead of %x\n",
+                                                 context->Eip, (DWORD)code_mem + 1);
+        todo_wine{ ok( (context->Dr6 & 0xf) == 1, "B0 flag is not set in Dr6\n"); };
+        ok( !(context->Dr6 & 0x4000), "BS flag is set in Dr6\n");
+        context->Dr0 = 0;       /* clear breakpoint */
+        context->EFlags |= 0x100;
+    } else {
+        /* single step exception on ret */
+        ok( context->Eip == (DWORD)code_mem + 2, "eip is wrong: %x instead of %x\n",
+                                                 context->Eip, (DWORD)code_mem + 2);
+        ok( (context->Dr6 & 0xf) == 0, "B0...3 flags in Dr6 shouldn't be set\n");
+        todo_wine{ ok( (context->Dr6 & 0x4000), "BS flag is not set in Dr6\n"); };
+    }
+
+    context->Dr6 = 0;  /* clear status register */
+    return ExceptionContinueExecution;
+}
+
+static const BYTE dummy_code[] = { 0x90, 0x90, 0xc3 };  /* nop, nop, ret */
+
+/* test int3 handling */
+static DWORD int3_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
+                           CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
+{
+    ok( rec->ExceptionAddress == code_mem, "exception address not at: %p, but at %p\n",
+                                           code_mem,  rec->ExceptionAddress);
+    todo_wine {
+        ok( context->Eip == (DWORD)code_mem, "eip not at: %p, but at %#x\n", code_mem, context->Eip);
+    }
+    if(context->Eip == (DWORD)code_mem) context->Eip++; /* skip breakpoint */
+
+    return ExceptionContinueExecution;
+}
+
+static const BYTE int3_code[] = { 0xCC, 0xc3 };  /* int 3, ret */
+
+
+static void test_exceptions(void)
+{
+    CONTEXT ctx;
+    NTSTATUS res;
+
+    pNtGetContextThread = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtGetContextThread" );
+    pNtSetContextThread = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtSetContextThread" );
+    if (!pNtGetContextThread || !pNtSetContextThread)
+    {
+        trace( "NtGetContextThread/NtSetContextThread not found, skipping tests\n" );
         return;
     }
-    exc_frame.frame.Handler = align_check_handler;
-    exc_frame.frame.Prev = pNtCurrentTeb()->Tib.ExceptionList;
-    pNtCurrentTeb()->Tib.ExceptionList = &exc_frame.frame;
 
-    gotalignfaults=0;
-    func1(twoints);
-    ok(gotalignfaults == 0, "got %d alignment faults, expected 0\n", gotalignfaults);
-    pNtCurrentTeb()->Tib.ExceptionList = exc_frame.frame.Prev;
+    /* test handling of debug registers */
+    run_exception_test(dreg_handler, NULL, &segfault_code, sizeof(segfault_code));
+
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    res = pNtGetContextThread(GetCurrentThread(), &ctx);
+    ok (res == STATUS_SUCCESS,"NtGetContextThread failed with %x\n", res);
+    ok(ctx.Dr0 == 0x42424242,"failed to set debugregister 0 to 0x42424242, got %x\n", ctx.Dr0);
+    ok(ctx.Dr7 == 0x155,"failed to set debugregister 7 to 0x155, got %x\n", ctx.Dr7);
+
+    /* test single stepping behavior */
+    got_exception = 0;
+    run_exception_test(single_step_handler, NULL, &single_stepcode, sizeof(single_stepcode));
+    ok(got_exception == 3, "expected 3 single step exceptions, got %d\n", got_exception);
+
+    /* test alignment exceptions */
+    got_exception = 0;
+    run_exception_test(align_check_handler, NULL, align_check_code, sizeof(align_check_code));
+    ok(got_exception == 0, "got %d alignment faults, expected 0\n", got_exception);
+
+    /* test single stepping over hardware breakpoint */
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.Dr0 = (DWORD) code_mem;  /* set hw bp on first nop */
+    ctx.Dr7 = 3;
+    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+    res = pNtSetContextThread( GetCurrentThread(), &ctx);
+    ok( res == STATUS_SUCCESS, "NtSetContextThread faild with %x\n", res);
+
+    got_exception = 0;
+    run_exception_test(bpx_handler, NULL, dummy_code, sizeof(dummy_code));
+    ok( got_exception == 4,"expected 4 exceptions, got %d\n", got_exception);
+
+    /* test int3 handling */
+    run_exception_test(int3_handler, NULL, int3_code, sizeof(int3_code));
 }
 
 #endif  /* __i386__ */
@@ -381,9 +427,22 @@ static void test_align_faults(void)
 START_TEST(exception)
 {
 #ifdef __i386__
+    pNtCurrentTeb = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtCurrentTeb" );
+    if (!pNtCurrentTeb)
+    {
+        trace( "NtCurrentTeb not found, skipping tests\n" );
+        return;
+    }
+
+    /* 1024 byte should be sufficient */
+    code_mem = VirtualAlloc(NULL, 1024, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    if(!code_mem) {
+        trace("VirtualAlloc failed\n");
+        return;
+    }
     test_prot_fault();
-    test_debug_regs();
-    test_single_step();
-    test_align_faults();
+    test_exceptions();
+
+    VirtualFree(code_mem, 1024, MEM_RELEASE);
 #endif
 }

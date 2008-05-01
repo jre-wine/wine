@@ -109,7 +109,7 @@ static int shell_execute(LPCSTR operation, LPCSTR file, LPCSTR parameters, LPCST
     rc=(int)ShellExecute(NULL, operation, file, parameters, directory,
                          SW_SHOWNORMAL);
 
-    if (rc>=32)
+    if (rc > 32)
     {
         int wait_rc;
         wait_rc=WaitForSingleObject(hEvent, 5000);
@@ -119,7 +119,7 @@ static int shell_execute(LPCSTR operation, LPCSTR file, LPCSTR parameters, LPCST
      * functions know about it
      */
     WritePrivateProfileStringA(NULL, NULL, NULL, child_file);
-    if (rc>=32)
+    if (rc > 32)
         dump_child();
 
     return rc;
@@ -164,10 +164,10 @@ static int shell_execute_ex(DWORD mask, LPCSTR operation, LPCSTR file,
     SetLastError(0xcafebabe);
     success=ShellExecuteEx(&sei);
     rc=(int)sei.hInstApp;
-    ok((success && rc >= 32) || (!success && rc < 32),
+    ok((success && rc > 32) || (!success && rc <= 32),
        "%s rc=%d and hInstApp=%d is not allowed\n", shell_call, success, rc);
 
-    if (rc>=32)
+    if (rc > 32)
     {
         int wait_rc;
         if (sei.hProcess!=NULL)
@@ -182,7 +182,7 @@ static int shell_execute_ex(DWORD mask, LPCSTR operation, LPCSTR file,
      * functions know about it
      */
     WritePrivateProfileStringA(NULL, NULL, NULL, child_file);
-    if (rc>=32)
+    if (rc > 32)
         dump_child();
 
     return rc;
@@ -230,7 +230,7 @@ static void delete_test_association(const char* extension)
 }
 
 static void create_test_verb(const char* extension, const char* verb,
-                             const char* cmdtail)
+                             int rawcmd, const char* cmdtail)
 {
     HKEY hkey_shell, hkey_verb, hkey_cmd;
     char shell[MAX_PATH];
@@ -248,12 +248,19 @@ static void create_test_verb(const char* extension, const char* verb,
                       NULL, &hkey_cmd, NULL);
     assert(rc==ERROR_SUCCESS);
 
-    cmd=malloc(strlen(argv0)+10+strlen(child_file)+2+strlen(cmdtail)+1);
-    sprintf(cmd,"%s shlexec \"%s\" %s", argv0, child_file, cmdtail);
-    rc=RegSetValueEx(hkey_cmd, NULL, 0, REG_SZ, (LPBYTE) cmd, strlen(cmd)+1);
-    assert(rc==ERROR_SUCCESS);
+    if (rawcmd)
+    {
+        rc=RegSetValueEx(hkey_cmd, NULL, 0, REG_SZ, (LPBYTE)cmdtail, strlen(cmdtail)+1);
+    }
+    else
+    {
+        cmd=malloc(strlen(argv0)+10+strlen(child_file)+2+strlen(cmdtail)+1);
+        sprintf(cmd,"%s shlexec \"%s\" %s", argv0, child_file, cmdtail);
+        rc=RegSetValueEx(hkey_cmd, NULL, 0, REG_SZ, (LPBYTE)cmd, strlen(cmd)+1);
+        assert(rc==ERROR_SUCCESS);
+        free(cmd);
+    }
 
-    free(cmd);
     CloseHandle(hkey_shell);
     CloseHandle(hkey_verb);
     CloseHandle(hkey_cmd);
@@ -470,6 +477,9 @@ static const char* testfiles[]=
     "%s\\test file.shlexec.noassoc",
     "%s\\test_shortcut_shlexec.lnk",
     "%s\\test_shortcut_exe.lnk",
+    "%s\\test file.shl",
+    "%s\\test file.shlfoo",
+    "%s\\test file.sfe",
     NULL
 };
 
@@ -477,47 +487,47 @@ typedef struct
 {
     const char* verb;
     const char* basename;
-    int rc;
     int todo;
+    int rc;
 } filename_tests_t;
 
 static filename_tests_t filename_tests[]=
 {
     /* Test bad / nonexistent filenames */
-    {NULL,           "%s\\nonexistent.shlexec", ERROR_FILE_NOT_FOUND, 0x1},
-    {NULL,           "%s\\nonexistent.noassoc", ERROR_FILE_NOT_FOUND, 0x1},
+    {NULL,           "%s\\nonexistent.shlexec", 0x11, SE_ERR_FNF},
+    {NULL,           "%s\\nonexistent.noassoc", 0x11, SE_ERR_FNF},
 
     /* Standard tests */
-    {NULL,           "%s\\test file.shlexec",   0, 0x0},
-    {NULL,           "%s\\test file.shlexec.",  0, 0x0},
-    {NULL,           "%s\\%%nasty%% $file.shlexec", 0, 0x0},
-    {NULL,           "%s/test file.shlexec",    0, 0x0},
+    {NULL,           "%s\\test file.shlexec",   0x0, 33},
+    {NULL,           "%s\\test file.shlexec.",  0x0, 33},
+    {NULL,           "%s\\%%nasty%% $file.shlexec", 0x0, 33},
+    {NULL,           "%s/test file.shlexec",    0x0, 33},
 
     /* Test filenames with no association */
-    {NULL,           "%s\\test file.noassoc",   SE_ERR_NOASSOC, 0x0},
+    {NULL,           "%s\\test file.noassoc",   0x0,  SE_ERR_NOASSOC},
 
     /* Test double extensions */
-    {NULL,           "%s\\test file.noassoc.shlexec", 0, 0},
-    {NULL,           "%s\\test file.shlexec.noassoc", SE_ERR_NOASSOC, 0x0},
+    {NULL,           "%s\\test file.noassoc.shlexec", 0x0, 33},
+    {NULL,           "%s\\test file.shlexec.noassoc", 0x0, SE_ERR_NOASSOC},
 
     /* Test alternate verbs */
-    {"LowerL",       "%s\\nonexistent.shlexec", ERROR_FILE_NOT_FOUND, 0x1},
-    {"LowerL",       "%s\\test file.noassoc",   SE_ERR_NOASSOC, 0x0},
+    {"LowerL",       "%s\\nonexistent.shlexec", 0x11, SE_ERR_FNF},
+    {"LowerL",       "%s\\test file.noassoc",   0x0,  SE_ERR_NOASSOC},
 
-    {"QuotedLowerL", "%s\\test file.shlexec",   0, 0x0},
-    {"QuotedUpperL", "%s\\test file.shlexec",   0, 0x0},
+    {"QuotedLowerL", "%s\\test file.shlexec",   0x0, 33},
+    {"QuotedUpperL", "%s\\test file.shlexec",   0x0, 33},
 
-    {NULL, NULL, 0, 0}
+    {NULL, NULL, 0}
 };
 
 static filename_tests_t noquotes_tests[]=
 {
     /* Test unquoted '%1' thingies */
-    {"NoQuotes",     "%s\\test file.shlexec",   0, 0xa},
-    {"LowerL",       "%s\\test file.shlexec",   0, 0x0},
-    {"UpperL",       "%s\\test file.shlexec",   0, 0x0},
+    {"NoQuotes",     "%s\\test file.shlexec",   0xa, 33},
+    {"LowerL",       "%s\\test file.shlexec",   0xa, 33},
+    {"UpperL",       "%s\\test file.shlexec",   0xa, 33},
 
-    {NULL, NULL, 0, 0}
+    {NULL, NULL, 0}
 };
 
 static void test_filename(void)
@@ -542,8 +552,8 @@ static void test_filename(void)
             }
         }
         rc=shell_execute(test->verb, filename, NULL, NULL);
-        if (rc>=32)
-            rc=0;
+        if (rc > 32)
+            rc=33;
         if ((test->todo & 0x1)==0)
         {
             ok(rc==test->rc, "%s failed: rc=%d err=%d\n", shell_call,
@@ -554,7 +564,7 @@ static void test_filename(void)
             ok(rc==test->rc, "%s failed: rc=%d err=%d\n", shell_call,
                rc, GetLastError());
         }
-        if (rc==0)
+        if (rc == 33)
         {
             const char* verb;
             if ((test->todo & 0x2)==0)
@@ -591,8 +601,8 @@ static void test_filename(void)
     {
         sprintf(filename, test->basename, tmpdir);
         rc=shell_execute(test->verb, filename, NULL, NULL);
-        if (rc>=32)
-            rc=0;
+        if (rc > 32)
+            rc=33;
         if ((test->todo & 0x1)==0)
         {
             ok(rc==test->rc, "%s failed: rc=%d err=%d\n", shell_call,
@@ -664,7 +674,7 @@ static void test_filename(void)
          */
         sprintf(filename, "\"%s\\test file.shlexec\"", tmpdir);
         rc=shell_execute(NULL, filename, NULL, NULL);
-        ok(rc>=32, "%s failed: rc=%d err=%d\n", shell_call, rc,
+        ok(rc > 32, "%s failed: rc=%d err=%d\n", shell_call, rc,
            GetLastError());
         okChildInt("argcA", 5);
         okChildString("argvA3", "Open");
@@ -673,21 +683,125 @@ static void test_filename(void)
     }
 }
 
+static void test_find_executable(void)
+{
+    char filename[MAX_PATH];
+    char command[MAX_PATH];
+    const filename_tests_t* test;
+    int rc;
+
+    create_test_association(".sfe");
+    create_test_verb(".sfe", "Open", 1, "%1");
+
+    /* Don't test FindExecutable(..., NULL), it always crashes */
+
+    strcpy(command, "your word");
+    rc=(int)FindExecutableA(NULL, NULL, command);
+    ok(rc == SE_ERR_FNF || rc > 32, "FindExecutable(NULL) returned %d\n", rc);
+    ok(strcmp(command, "your word") != 0, "FindExecutable(NULL) returned command=[%s]\n", command);
+
+    strcpy(command, "your word");
+    rc=(int)FindExecutableA(tmpdir, NULL, command);
+    todo_wine ok(rc == SE_ERR_FNF || rc > 32, "FindExecutable(NULL) returned %d\n", rc);
+    ok(strcmp(command, "your word") != 0, "FindExecutable(NULL) returned command=[%s]\n", command);
+
+    sprintf(filename, "%s\\test file.sfe", tmpdir);
+    rc=(int)FindExecutableA(filename, NULL, command);
+    ok(rc > 32, "FindExecutable(%s) returned %d\n", filename, rc);
+    /* Depending on the platform, command could be '%1' or 'test file.sfe' */
+
+    rc=(int)FindExecutableA("test file.sfe", tmpdir, command);
+    ok(rc > 32, "FindExecutable(%s) returned %d\n", filename, rc);
+
+    rc=(int)FindExecutableA("test file.sfe", NULL, command);
+    todo_wine ok(rc == SE_ERR_FNF, "FindExecutable(%s) returned %d\n", filename, rc);
+
+    delete_test_association(".sfe");
+
+    create_test_association(".shl");
+    create_test_verb(".shl", "Open", 0, "Open");
+
+    sprintf(filename, "%s\\test file.shl", tmpdir);
+    rc=(int)FindExecutableA(filename, NULL, command);
+    ok(rc > 32, "FindExecutable(%s) returned %d\n", filename, rc);
+
+    sprintf(filename, "%s\\test file.shlfoo", tmpdir);
+    rc=(int)FindExecutableA(filename, NULL, command);
+
+    delete_test_association(".shl");
+
+    if (rc > 32)
+    {
+        /* On Windows XP and 2003 FindExecutable() is completely broken.
+         * Probably what it does is convert the filename to 8.3 format,
+         * which as a side effect converts the '.shlfoo' extension to '.shl',
+         * and then tries to find an association for '.shl'. This means it
+         * will normally fail on most extensions with more than 3 characters,
+         * like '.mpeg', etc.
+         * Also it means we cannot do any other test.
+         */
+        trace("FindExecutable() is broken -> skipping 4+ character extension tests\n");
+        return;
+    }
+
+    test=filename_tests;
+    while (test->basename)
+    {
+        sprintf(filename, test->basename, tmpdir);
+        if (strchr(filename, '/'))
+        {
+            char* c;
+            c=filename;
+            while (*c)
+            {
+                if (*c=='\\')
+                    *c='/';
+                c++;
+            }
+        }
+        rc=(int)FindExecutableA(filename, NULL, command);
+        if (rc > 32)
+            rc=33;
+        if ((test->todo & 0x10)==0)
+        {
+            ok(rc==test->rc, "FindExecutable(%s) failed: rc=%d\n", filename, rc);
+        }
+        else todo_wine
+        {
+            ok(rc==test->rc, "FindExecutable(%s) failed: rc=%d\n", filename, rc);
+        }
+        if (rc > 32)
+        {
+            if ((test->todo & 0x20)==0)
+            {
+                ok(strcmp(command, argv0) == 0, "FindExecutable(%s) returned command='%s' instead of '%s'\n",
+                   filename, command, argv0);
+            }
+            else todo_wine
+            {
+                ok(strcmp(command, argv0) == 0, "FindExecutable(%s) returned command='%s' instead of '%s'\n",
+                   filename, command, argv0);
+            }
+        }
+        test++;
+    }
+}
+
 
 static filename_tests_t lnk_tests[]=
 {
     /* Pass bad / nonexistent filenames as a parameter */
-    {NULL, "%s\\nonexistent.shlexec", 0, 0xa},
-    {NULL, "%s\\nonexistent.noassoc", 0, 0xa},
+    {NULL, "%s\\nonexistent.shlexec",    0xa, 33},
+    {NULL, "%s\\nonexistent.noassoc",    0xa, 33},
 
     /* Pass regular paths as a parameter */
-    {NULL, "%s\\test file.shlexec",   0, 0xa},
-    {NULL, "%s/%%nasty%% $file.shlexec", 0, 0xa},
+    {NULL, "%s\\test file.shlexec",      0xa, 33},
+    {NULL, "%s/%%nasty%% $file.shlexec", 0xa, 33},
 
     /* Pass filenames with no association as a parameter */
-    {NULL, "%s\\test file.noassoc",   0, 0xa},
+    {NULL, "%s\\test file.noassoc",      0xa, 33},
 
-    {NULL, NULL, 0, 0}
+    {NULL, NULL, 0}
 };
 
 static void test_lnks(void)
@@ -699,7 +813,7 @@ static void test_lnks(void)
 
     sprintf(filename, "%s\\test_shortcut_shlexec.lnk", tmpdir);
     rc=shell_execute_ex(SEE_MASK_NOZONECHECKS, NULL, filename, NULL, NULL);
-    ok(rc>=32, "%s failed: rc=%d err=%d\n", shell_call, rc,
+    ok(rc > 32, "%s failed: rc=%d err=%d\n", shell_call, rc,
        GetLastError());
     okChildInt("argcA", 5);
     okChildString("argvA3", "Open");
@@ -708,7 +822,7 @@ static void test_lnks(void)
 
     sprintf(filename, "%s\\test_shortcut_exe.lnk", tmpdir);
     rc=shell_execute_ex(SEE_MASK_NOZONECHECKS, NULL, filename, NULL, NULL);
-    ok(rc>=32, "%s failed: rc=%d err=%d\n", shell_call, rc,
+    ok(rc > 32, "%s failed: rc=%d err=%d\n", shell_call, rc,
        GetLastError());
     okChildInt("argcA", 4);
     okChildString("argvA3", "Lnk");
@@ -728,7 +842,7 @@ static void test_lnks(void)
             c++;
         }
         rc=shell_execute_ex(SEE_MASK_NOZONECHECKS, NULL, filename, NULL, NULL);
-        ok(rc>=32, "%s failed: rc=%d err=%d\n", shell_call, rc,
+        ok(rc > 32, "%s failed: rc=%d err=%d\n", shell_call, rc,
            GetLastError());
         okChildInt("argcA", 4);
         okChildString("argvA3", "Lnk");
@@ -743,8 +857,8 @@ static void test_lnks(void)
         strcat(params,"\"");
         rc=shell_execute_ex(SEE_MASK_NOZONECHECKS, NULL, filename, params,
                             NULL);
-        if (rc>=32)
-            rc=0;
+        if (rc > 32)
+            rc=33;
         if ((test->todo & 0x1)==0)
         {
             ok(rc==test->rc, "%s failed: rc=%d err=%d\n", shell_call,
@@ -799,7 +913,7 @@ static void test_exes(void)
     /* We need NOZONECHECKS on Win2003 to block a dialog */
     rc=shell_execute_ex(SEE_MASK_NOZONECHECKS, NULL, argv0, params,
                         NULL);
-    ok(rc>=32, "%s returned %d\n", shell_call, rc);
+    ok(rc > 32, "%s returned %d\n", shell_call, rc);
     okChildInt("argcA", 4);
     okChildString("argvA3", "Exec");
 
@@ -830,7 +944,7 @@ static void test_exes_long(void)
     /* We need NOZONECHECKS on Win2003 to block a dialog */
     rc=shell_execute_ex(SEE_MASK_NOZONECHECKS, NULL, argv0, params,
                         NULL);
-    ok(rc>=32, "%s returned %d\n", shell_call, rc);
+    ok(rc > 32, "%s returned %d\n", shell_call, rc);
     okChildInt("argcA", 4);
     okChildString("argvA3", longparam);
 
@@ -939,12 +1053,12 @@ static void init_test(void)
 
     /* Create a basic association suitable for most tests */
     create_test_association(".shlexec");
-    create_test_verb(".shlexec", "Open", "Open \"%1\"");
-    create_test_verb(".shlexec", "NoQuotes", "NoQuotes %1");
-    create_test_verb(".shlexec", "LowerL", "LowerL %l");
-    create_test_verb(".shlexec", "QuotedLowerL", "QuotedLowerL \"%l\"");
-    create_test_verb(".shlexec", "UpperL", "UpperL %L");
-    create_test_verb(".shlexec", "QuotedUpperL", "QuotedUpperL \"%L\"");
+    create_test_verb(".shlexec", "Open", 0, "Open \"%1\"");
+    create_test_verb(".shlexec", "NoQuotes", 0, "NoQuotes %1");
+    create_test_verb(".shlexec", "LowerL", 0, "LowerL %l");
+    create_test_verb(".shlexec", "QuotedLowerL", 0, "QuotedLowerL \"%l\"");
+    create_test_verb(".shlexec", "UpperL", 0, "UpperL %L");
+    create_test_verb(".shlexec", "QuotedUpperL", 0, "QuotedUpperL \"%L\"");
 }
 
 static void cleanup_test(void)
@@ -983,6 +1097,7 @@ START_TEST(shlexec)
     init_test();
 
     test_filename();
+    test_find_executable();
     test_lnks();
     test_exes();
     test_exes_long();

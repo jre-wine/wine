@@ -16,7 +16,6 @@ AC_ARG_ENABLE(win16, AC_HELP_STRING([--disable-win16],[do not include Win16 supp
 AC_ARG_ENABLE(win64, AC_HELP_STRING([--enable-win64], [build a Win64 emulator on AMD64 (won't run Win32 binaries)]))
 
 AC_ARG_WITH(opengl,    AC_HELP_STRING([--without-opengl],[do not use OpenGL]))
-AC_ARG_WITH(curses,    AC_HELP_STRING([--without-curses],[do not use curses]))
 AC_ARG_WITH(wine-tools,AC_HELP_STRING([--with-wine-tools=<dir>],[use Wine tools from directory <dir>]))
 
 AC_CANONICAL_HOST
@@ -49,6 +48,15 @@ then
   WIN16_FILES=""
   WIN16_INSTALL=""
 fi
+
+dnl check for out of tree build with unclean source tree
+case "$srcdir" in
+ .) ;;
+ *) if test -f "$srcdir/Makefile" -o -f "$srcdir/include/config.h"; then
+      AC_MSG_ERROR([you are building out of the source tree, but the source tree contains object files.
+You need to run 'make distclean' in the source tree first.])
+    fi ;;
+esac
 
 dnl **** Check for some programs ****
 
@@ -189,6 +197,7 @@ AC_CHECK_HEADERS(\
 	linux/param.h \
 	linux/serial.h \
 	linux/ucdrom.h \
+	mach/mach.h \
 	mach/machine.h \
 	machine/cpu.h \
 	machine/limits.h \
@@ -440,12 +449,6 @@ then
 			     $OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS
 		)
 	     fi
-
-             dnl Check for glut32 library.
-             AC_CHECK_LIB(glut,glutMainLoop,
-                       [AC_SUBST(GLUT_LIBS,"-lglut -lXmu -lXi")
-                        AC_SUBST(GLUT32FILES,'$(GLUT32FILES)')],,
-                        $OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXmu -lXi -lX11 $X_EXTRA_LIBS)
          else
              wine_cv_opengl_headers_found="no"
 	 fi
@@ -486,6 +489,8 @@ then
              XML2INCL="$ac_xml_cflags"],,$ac_xml_libs)
          AC_CHECK_LIB(xml2, xmlReadMemory,
             [AC_DEFINE(HAVE_XMLREADMEMORY,1,[Define if libxml2 has the xmlReadMemory function])],,$ac_xml_libs)
+         AC_CHECK_LIB(xml2, xmlNewDocPI,
+            [AC_DEFINE(HAVE_XMLNEWDOCPI,1,[Define if libxml2 has the xmlNewDocPI function])],,$ac_xml_libs)
         ])
     CPPFLAGS="$ac_save_CPPFLAGS"
     ac_xslt_libs="`$PKG_CONFIG --libs libxslt 2>/dev/null`"
@@ -524,25 +529,17 @@ fi
 
 dnl **** Check which curses lib to use ***
 CURSESLIBS=""
-if test "x$with_curses" != "xno"
+if test "$ac_cv_header_ncurses_h" = "yes"
 then
-    if test "$ac_cv_header_ncurses_h" = "yes"
-    then
-        AC_CHECK_LIB(ncurses,waddch,
-            [AC_DEFINE(HAVE_LIBNCURSES, 1, [Define if you have the ncurses library (-lncurses)])
-             CURSESLIBS="-lncurses"])
-    elif test "$ac_cv_header_curses_h" = "yes"
-    then
-        AC_CHECK_LIB(curses,waddch,
-            [AC_DEFINE(HAVE_LIBCURSES, 1, [Define if you have the curses library (-lcurses)])
-             CURSESLIBS="-lcurses"])
-    fi
-    ac_save_LIBS="$LIBS"
-    LIBS="$LIBS $CURSESLIBS"
-    AC_CHECK_FUNCS(mousemask)
-    LIBS="$ac_save_LIBS"
+    AC_CHECK_LIB(ncurses,waddch,[CURSESLIBS="-lncurses"])
+elif test "$ac_cv_header_curses_h" = "yes"
+then
+    AC_CHECK_LIB(curses,waddch,[CURSESLIBS="-lcurses"])
 fi
-AC_SUBST(CURSESLIBS)
+ac_save_LIBS="$LIBS"
+LIBS="$LIBS $CURSESLIBS"
+AC_CHECK_FUNCS(mousemask)
+LIBS="$ac_save_LIBS"
 
 dnl **** Check for SANE ****
 AC_CHECK_PROG(sane_devel,sane-config,sane-config,no)
@@ -995,6 +992,7 @@ case $host_os in
   cygwin*|mingw32*)
     AC_CHECK_TOOL(DLLTOOL,dlltool,false)
     AC_CHECK_TOOL(DLLWRAP,dllwrap,false)
+    AC_CHECK_TOOL(MINGWAR,ar,false)
     if test "$DLLWRAP" = "false"; then
       LIBEXT="a"
     else
@@ -1036,6 +1034,7 @@ case $host_os in
     dnl Enable quartz driver on Mac OS X
     if test "$ac_cv_header_Carbon_Carbon_h" = "yes"
     then
+        AC_SUBST(CARBONLIB,"-framework Carbon")
         QUARTZFILES='$(QUARTZFILES)'
     fi
     ;;
@@ -1100,9 +1099,10 @@ case $host_os in
     AC_SUBST(CROSSTEST,"")
     if test "$cross_compiling" = "no"
     then
-      AC_CHECK_PROGS(CROSSCC,i586-mingw32msvc-gcc i386-mingw32msvc-gcc i386-mingw32-gcc mingw32-gcc mingw-gcc,false)
-      AC_CHECK_PROGS(DLLTOOL,i586-mingw32msvc-dlltool i386-mingw32msvc-dlltool i386-mingw32-dlltool mingw32-dlltool mingw-dlltool,false)
-      AC_CHECK_PROGS(CROSSWINDRES,i586-mingw32msvc-windres i386-mingw32msvc-windres i386-mingw32-windres mingw32-windres mingw-windres,false)
+      WINE_CHECK_MINGW_PROG(CROSSCC,gcc,false)
+      WINE_CHECK_MINGW_PROG(DLLTOOL,dlltool,false)
+      WINE_CHECK_MINGW_PROG(CROSSWINDRES,windres,false)
+      WINE_CHECK_MINGW_PROG(MINGWAR,ar,false)
       if test "$CROSSCC" != "false"; then CROSSTEST="\$(CROSSTEST)"; fi
     fi
     ;;
@@ -1197,6 +1197,7 @@ AC_CHECK_FUNCS(\
 	futimes \
 	futimesat \
 	getaddrinfo \
+	getdirentries \
 	gethostbyname \
 	getnameinfo \
 	getnetbyname \
@@ -1237,6 +1238,7 @@ AC_CHECK_FUNCS(\
 	strcasecmp \
 	strerror \
 	strncasecmp \
+	strtold \
 	tcgetattr \
 	timegm \
 	usleep \
@@ -1494,7 +1496,7 @@ AC_CONFIG_COMMANDS([include/stamp-h], [echo timestamp > include/stamp-h])
 WINE_CONFIG_EXTRA_DIR(dlls/gdi32/enhmfdrv)
 WINE_CONFIG_EXTRA_DIR(dlls/gdi32/mfdrv)
 WINE_CONFIG_EXTRA_DIR(dlls/kernel32/nls)
-WINE_CONFIG_EXTRA_DIR(dlls/user/resources)
+WINE_CONFIG_EXTRA_DIR(dlls/user32/resources)
 WINE_CONFIG_EXTRA_DIR(dlls/wineps.drv/data)
 WINE_CONFIG_EXTRA_DIR(include/wine)
 
@@ -1561,6 +1563,7 @@ dlls/dbghelp/Makefile
 dlls/dciman32/Makefile
 dlls/ddraw/Makefile
 dlls/ddraw/tests/Makefile
+dlls/ddrawex/Makefile
 dlls/devenum/Makefile
 dlls/dinput/Makefile
 dlls/dinput/tests/Makefile
@@ -1590,7 +1593,6 @@ dlls/dxguid/Makefile
 dlls/gdi32/Makefile
 dlls/gdi32/tests/Makefile
 dlls/glu32/Makefile
-dlls/glut32/Makefile
 dlls/gphoto2.ds/Makefile
 dlls/hhctrl.ocx/Makefile
 dlls/hid/Makefile
@@ -1608,6 +1610,7 @@ dlls/inseng/Makefile
 dlls/iphlpapi/Makefile
 dlls/iphlpapi/tests/Makefile
 dlls/itss/Makefile
+dlls/itss/tests/Makefile
 dlls/kernel32/Makefile
 dlls/kernel32/tests/Makefile
 dlls/localspl/Makefile
@@ -1704,6 +1707,7 @@ dlls/serialui/Makefile
 dlls/setupapi/Makefile
 dlls/setupapi/tests/Makefile
 dlls/sfc/Makefile
+dlls/shdoclc/Makefile
 dlls/shdocvw/Makefile
 dlls/shdocvw/tests/Makefile
 dlls/shell32/Makefile
@@ -1724,8 +1728,8 @@ dlls/unicows/Makefile
 dlls/url/Makefile
 dlls/urlmon/Makefile
 dlls/urlmon/tests/Makefile
-dlls/user/Makefile
-dlls/user/tests/Makefile
+dlls/user32/Makefile
+dlls/user32/tests/Makefile
 dlls/userenv/Makefile
 dlls/usp10/Makefile
 dlls/usp10/tests/Makefile
@@ -1745,6 +1749,7 @@ dlls/w32skrnl/Makefile
 dlls/winecrt0/Makefile
 dlls/wined3d/Makefile
 dlls/winedos/Makefile
+dlls/winejoystick.drv/Makefile
 dlls/winemp3.acm/Makefile
 dlls/wineps.drv/Makefile
 dlls/winequartz.drv/Makefile
@@ -1752,7 +1757,6 @@ dlls/winex11.drv/Makefile
 dlls/wininet/Makefile
 dlls/wininet/tests/Makefile
 dlls/winmm/Makefile
-dlls/winmm/joystick/Makefile
 dlls/winmm/tests/Makefile
 dlls/winmm/winealsa/Makefile
 dlls/winmm/winearts/Makefile

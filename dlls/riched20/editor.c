@@ -597,7 +597,7 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
 {
   RTF_Info parser;
   ME_Style *style;
-  int from, to, to2, nUndoMode;
+  int from, to, to2;
   ME_UndoItem *pUI;
   int nEventMask = editor->nEventMask;
   ME_InStream inStream;
@@ -621,9 +621,6 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
     /* FIXME restore default paragraph formatting ! */
   }
   
-  nUndoMode = editor->nUndoMode;
-  editor->nUndoMode = umIgnore;
-
   inStream.editstream = stream;
   inStream.editstream->dwError = 0;
   inStream.dwSize = 0;
@@ -675,16 +672,19 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
       SendMessageA(editor->hWnd, EM_SETSEL, 0, 0);
   }
   
-  editor->nUndoMode = nUndoMode;
   if (format & SFF_SELECTION)
   {
-    pUI = ME_AddUndoItem(editor, diUndoDeleteRun, NULL);
-    TRACE("from %d to %d\n", from, to);
-    if (pUI && from < to)
+    if(from < to) /* selection overwritten is non-empty */
     {
-      pUI->nStart = from;
-      pUI->nLen = to-from;
+      pUI = ME_AddUndoItem(editor, diUndoDeleteRun, NULL);
+      TRACE("from %d to %d\n", from, to);
+      if (pUI)
+      {
+        pUI->nStart = from;
+        pUI->nLen = to-from;
+      }
     }
+    /* even if we didn't add an undo, we need to commit the ones added earlier */
     ME_CommitUndo(editor);
   }
   else
@@ -1465,8 +1465,20 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   case WM_GETDLGCODE:
   {
     UINT code = DLGC_WANTCHARS|DLGC_WANTARROWS;
-    if (GetWindowLongW(hWnd, GWL_STYLE)&ES_WANTRETURN)
-      code |= 0; /* FIXME what can we do here ? ask for messages and censor them ? */
+    if(lParam && (((LPMSG)lParam)->message == WM_KEYDOWN))
+    {
+      int vk = (int)((LPMSG)lParam)->wParam;
+      /* if style says we want return key */
+      if((vk == VK_RETURN) && (GetWindowLongW(hWnd, GWL_STYLE) & ES_WANTRETURN))
+      {
+        code |= DLGC_WANTMESSAGE;
+      }
+      /* we always handle ctrl-tab */
+      if((vk == VK_TAB) && (GetKeyState(VK_CONTROL) & 0x8000))
+      {
+        code |= DLGC_WANTMESSAGE;
+      }
+    }
     return code;
   }
   case WM_NCCREATE:
@@ -1603,30 +1615,17 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   }
   case EM_EXSETSEL:
   {
-    int start, end;
+    int end;
     CHARRANGE range = *(CHARRANGE *)lParam;
 
     TRACE("EM_EXSETSEL (%d,%d)\n", range.cpMin, range.cpMax);
 
-    /* if cpMin < 0, then selection is deselected and caret moved to end of
-     * the current selection  */
-    if (range.cpMin < 0)
-    {
-        ME_GetSelection(editor, &start, &end);
-        range.cpMin = end;
-        range.cpMax = end;
-    }  
-    else if (range.cpMax > ME_GetTextLength(editor) +1)
-    {
-      range.cpMax = ME_GetTextLength(editor) + 1;
-    }
-
     ME_InvalidateSelection(editor);
-    ME_SetSelection(editor, range.cpMin, range.cpMax);
+    end = ME_SetSelection(editor, range.cpMin, range.cpMax);
     ME_InvalidateSelection(editor);
     ME_SendSelChange(editor);
-    
-    return range.cpMax;
+
+    return end;
   }
   case EM_SHOWSCROLLBAR:
   {
@@ -1735,7 +1734,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     }
     ME_CommitUndo(editor);
     if (bRepaint)
-      ME_UpdateRepaint(editor);
+      ME_RewrapRepaint(editor);
     return 0;
   }
   case EM_GETCHARFORMAT:
@@ -1756,7 +1755,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   }
   case EM_SETPARAFORMAT:
     ME_SetSelectionParaFormat(editor, (PARAFORMAT2 *)lParam);
-    ME_UpdateRepaint(editor);
+    ME_RewrapRepaint(editor);
     ME_CommitUndo(editor);
     return 0;
   case EM_GETPARAFORMAT:
@@ -1869,7 +1868,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 
     ME_CommitUndo(editor);
     if (bRepaint)
-      ME_UpdateRepaint(editor);
+      ME_RewrapRepaint(editor);
     return 0;
   }
   case WM_SETTEXT:
@@ -2184,7 +2183,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   }
   case EM_EXLIMITTEXT:
   {
-    if (wParam != 0 || lParam < 0)
+    if ((int)lParam < 0)
      return 0;
     if (lParam == 0)
       editor->nTextLimit = 65536;

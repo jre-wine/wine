@@ -19,8 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include <windows.h>
 
 #include <stdio.h>
@@ -38,7 +36,7 @@
 static HRESULT (WINAPI *pDirectSoundCaptureCreate)(LPCGUID,LPDIRECTSOUNDCAPTURE*,LPUNKNOWN)=NULL;
 static HRESULT (WINAPI *pDirectSoundCaptureEnumerateA)(LPDSENUMCALLBACKA,LPVOID)=NULL;
 
-const char * get_format_str(WORD format)
+static const char * get_format_str(WORD format)
 {
     static char msg[32];
 #define WAVE_FORMAT(f) case f: return #f
@@ -127,7 +125,7 @@ static void IDirectSoundCapture_test(LPDIRECTSOUNDCAPTURE dsco,
         IDirectSoundCapture_Release(dsc);
 
     if (initialized == FALSE) {
-        /* try unitialized object */
+        /* try uninitialized object */
         rc=IDirectSoundCapture_GetCaps(dsco,0);
         ok(rc==DSERR_UNINITIALIZED||rc==E_INVALIDARG,
            "IDirectSoundCapture_GetCaps(NULL) should have returned "

@@ -134,7 +134,7 @@ static void pipe_server_dump( struct object *obj, int verbose );
 static struct fd *pipe_server_get_fd( struct object *obj );
 static void pipe_server_destroy( struct object *obj);
 static int pipe_server_flush( struct fd *fd, struct event **event );
-static int pipe_server_get_info( struct fd *fd );
+static enum server_fd_type pipe_server_get_info( struct fd *fd, int *flags );
 
 static const struct object_ops pipe_server_ops =
 {
@@ -167,7 +167,7 @@ static void pipe_client_dump( struct object *obj, int verbose );
 static struct fd *pipe_client_get_fd( struct object *obj );
 static void pipe_client_destroy( struct object *obj );
 static int pipe_client_flush( struct fd *fd, struct event **event );
-static int pipe_client_get_info( struct fd *fd );
+static enum server_fd_type pipe_client_get_info( struct fd *fd, int *flags );
 
 static const struct object_ops pipe_client_ops =
 {
@@ -200,7 +200,7 @@ static struct fd *named_pipe_device_get_fd( struct object *obj );
 static struct object *named_pipe_device_lookup_name( struct object *obj,
     struct unicode_str *name, unsigned int attr );
 static void named_pipe_device_destroy( struct object *obj );
-static int named_pipe_device_get_file_info( struct fd *fd );
+static enum server_fd_type named_pipe_device_get_file_info( struct fd *fd, int *flags );
 
 static const struct object_ops named_pipe_device_ops =
 {
@@ -438,9 +438,10 @@ static void named_pipe_device_destroy( struct object *obj )
     free( device->pipes );
 }
 
-static int named_pipe_device_get_file_info( struct fd *fd )
+static enum server_fd_type named_pipe_device_get_file_info( struct fd *fd, int *flags )
 {
-    return 0;
+    *flags = 0;
+    return FD_TYPE_DEVICE;
 }
 
 void create_named_pipe_device( struct directory *root, const struct unicode_str *name )
@@ -545,24 +546,22 @@ static inline int is_overlapped( unsigned int options )
     return !(options & (FILE_SYNCHRONOUS_IO_ALERT | FILE_SYNCHRONOUS_IO_NONALERT));
 }
 
-static int pipe_server_get_info( struct fd *fd )
+static enum server_fd_type pipe_server_get_info( struct fd *fd, int *flags )
 {
     struct pipe_server *server = get_fd_user( fd );
-    int flags = FD_FLAG_AVAILABLE;
- 
-    if (is_overlapped( server->options )) flags |= FD_FLAG_OVERLAPPED;
 
-    return flags;
+    *flags = FD_FLAG_AVAILABLE;
+    if (is_overlapped( server->options )) *flags |= FD_FLAG_OVERLAPPED;
+    return FD_TYPE_PIPE;
 }
 
-static int pipe_client_get_info( struct fd *fd )
+static enum server_fd_type pipe_client_get_info( struct fd *fd, int *flags )
 {
     struct pipe_client *client = get_fd_user( fd );
-    int flags = FD_FLAG_AVAILABLE;
 
-    if (is_overlapped( client->flags )) flags |= FD_FLAG_OVERLAPPED;
-
-    return flags;
+    *flags = FD_FLAG_AVAILABLE;
+    if (is_overlapped( client->flags )) *flags |= FD_FLAG_OVERLAPPED;
+    return FD_TYPE_PIPE;
 }
 
 static struct named_pipe *create_named_pipe( struct directory *root, const struct unicode_str *name,
@@ -858,9 +857,16 @@ DECL_HANDLER(wait_named_pipe)
     server = find_server( pipe, ps_wait_open );
     if (server)
     {
+        apc_call_t data;
+
         /* there's already a server waiting for a client to connect */
-        thread_queue_apc( current, NULL, req->func, APC_ASYNC_IO,
-                          1, req->event, NULL, (void *)STATUS_SUCCESS );
+        memset( &data, 0, sizeof(data) );
+        data.type            = APC_ASYNC_IO;
+        data.async_io.func   = req->func;
+        data.async_io.user   = req->event;
+        data.async_io.sb     = NULL;
+        data.async_io.status = STATUS_SUCCESS;
+        thread_queue_apc( current, NULL, &data );
         release_object( server );
     }
     else

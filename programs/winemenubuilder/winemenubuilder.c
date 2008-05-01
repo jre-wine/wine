@@ -278,7 +278,7 @@ static BOOL extract_icon32(LPCWSTR szFileName, int nIndex, const char *szXPMFile
     hModule = LoadLibraryExW(szFileName, 0, LOAD_LIBRARY_AS_DATAFILE);
     if (!hModule)
     {
-        WINE_ERR("LoadLibraryExW (%s) failed, error %d\n",
+        WINE_WARN("LoadLibraryExW (%s) failed, error %d\n",
                  wine_dbgstr_w(szFileName), GetLastError());
         return FALSE;
     }
@@ -327,7 +327,7 @@ static BOOL extract_icon32(LPCWSTR szFileName, int nIndex, const char *szXPMFile
     }
     else
     {
-        WINE_ERR("found no icon\n");
+        WINE_WARN("found no icon\n");
         FreeLibrary(hModule);
         return FALSE;
     }
@@ -363,7 +363,7 @@ static int ExtractFromICO(LPCWSTR szFileName, const char *szXPMFileName)
     FILE *fICOFile;
     ICONDIR iconDir;
     ICONDIRENTRY *pIconDirEntry;
-    int nMax = 0;
+    int nMax = 0, nMaxBits = 0;
     int nIndex = 0;
     void *pIcon;
     int i;
@@ -379,7 +379,7 @@ static int ExtractFromICO(LPCWSTR szFileName, const char *szXPMFileName)
     if (fread(&iconDir, sizeof (ICONDIR), 1, fICOFile) != 1 ||
         (iconDir.idReserved != 0) || (iconDir.idType != 1))
     {
-        WINE_ERR("Invalid ico file format\n");
+        WINE_WARN("Invalid ico file format\n");
         goto error2;
     }
 
@@ -389,10 +389,12 @@ static int ExtractFromICO(LPCWSTR szFileName, const char *szXPMFileName)
         goto error3;
 
     for (i = 0; i < iconDir.idCount; i++)
-        if ((pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth) > nMax)
+        if (pIconDirEntry[i].wBitCount <= 8 && pIconDirEntry[i].wBitCount >= nMaxBits &&
+            (pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth) >= nMax)
         {
             nIndex = i;
             nMax = pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth;
+            nMaxBits = pIconDirEntry[i].wBitCount;
         }
     if ((pIcon = HeapAlloc(GetProcessHeap(), 0, pIconDirEntry[nIndex].dwBytesInRes)) == NULL)
         goto error3;
@@ -897,6 +899,8 @@ static HRESULT get_cmdline( IShellLinkW *sl, LPWSTR szPath, DWORD pathSize,
 
 static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bAgain )
 {
+    static const WCHAR startW[] = {'\\','c','o','m','m','a','n','d',
+                                   '\\','s','t','a','r','t','.','e','x','e',0};
     char *link_name = NULL, *icon_name = NULL, *work_dir = NULL;
     char *escaped_path = NULL, *escaped_args = NULL, *escaped_description = NULL;
     WCHAR szDescription[INFOTIPSIZE], szPath[MAX_PATH], szWorkDir[MAX_PATH];
@@ -960,7 +964,8 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bAgain )
             WINE_WARN("Unable to extract icon, deferring.\n");
             goto cleanup;
         }
-        WINE_ERR("failed to extract icon.\n");
+        WINE_ERR("failed to extract icon from %s\n",
+                 wine_dbgstr_w( szIconPath[0] ? szIconPath : szPath ));
     }
 
     /* check the path */
@@ -970,9 +975,28 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bAgain )
         WCHAR *p;
 
         /* check for .exe extension */
-        if (!(p = strrchrW( szPath, '.' ))) return FALSE;
-        if (strchrW( p, '\\' ) || strchrW( p, '/' )) return FALSE;
-        if (lstrcmpiW( p, exeW )) return FALSE;
+        if (!(p = strrchrW( szPath, '.' )) ||
+            strchrW( p, '\\' ) || strchrW( p, '/' ) ||
+            lstrcmpiW( p, exeW ))
+        {
+            /* Not .exe - use 'start.exe' to launch this file */
+            p = szArgs + lstrlenW(szPath) + 2;
+            if (szArgs[0])
+            {
+                p[0] = ' ';
+                memmove( p+1, szArgs, min( (lstrlenW(szArgs) + 1) * sizeof(szArgs[0]),
+                                           sizeof(szArgs) - (p + 1 - szArgs) * sizeof(szArgs[0]) ) );
+            }
+            else
+                p[0] = 0;
+
+            szArgs[0] = '"';
+            lstrcpyW(szArgs + 1, szPath);
+            p[-1] = '"';
+
+            GetWindowsDirectoryW(szPath, MAX_PATH);
+            lstrcatW(szPath, startW);
+        }
 
         /* convert app working dir */
         if (szWorkDir[0])
@@ -980,10 +1004,6 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bAgain )
     }
     else
     {
-        static const WCHAR startW[] = {
-            '\\','c','o','m','m','a','n','d',
-            '\\','s','t','a','r','t','.','e','x','e',0};
-
         /* if there's no path... try run the link itself */
         lstrcpynW(szArgs, link, MAX_PATH);
         GetWindowsDirectoryW(szPath, MAX_PATH);

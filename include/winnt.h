@@ -22,6 +22,7 @@
 #define _WINNT_
 
 #include <basetsd.h>
+#include <guiddef.h>
 
 #ifndef RC_INVOKED
 #include <ctype.h>
@@ -318,7 +319,7 @@ typedef VOID           *PVOID64;
 typedef BYTE            BOOLEAN,    *PBOOLEAN;
 typedef char            CHAR,       *PCHAR;
 typedef short           SHORT,      *PSHORT;
-#if defined(_MSC_VER) || (defined(WINE_NO_LONG_AS_INT) && !defined(_WIN64))
+#ifdef _MSC_VER
 typedef long            LONG,       *PLONG;
 #else
 typedef int             LONG,       *PLONG;
@@ -604,6 +605,7 @@ typedef struct _SINGLE_LIST_ENTRY {
 #define HEAP_DISABLE_COALESCE_ON_FREE   0x00000080
 #define HEAP_CREATE_ALIGN_16            0x00010000
 #define HEAP_CREATE_ENABLE_TRACING      0x00020000
+#define HEAP_CREATE_ENABLE_EXECUTE      0x00040000
 
 /* This flag allows it to create heaps shared by all processes under win95,
    FIXME: correct name */
@@ -2198,6 +2200,9 @@ typedef struct _IMAGE_VXD_HEADER {
 #define	IMAGE_SUBSYSTEM_XBOX			14
 
 /* DLL Characteristics */
+#define IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE          0x0040
+#define IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY       0x0080
+#define IMAGE_DLLCHARACTERISTICS_NX_COMPAT             0x0100
 #define IMAGE_DLLCHARACTERISTICS_NO_ISOLATION          0x0200
 #define IMAGE_DLLCHARACTERISTICS_NO_SEH                0x0400
 #define IMAGE_DLLCHARACTERISTICS_NO_BIND               0x0800
@@ -2592,6 +2597,7 @@ typedef struct _IMAGE_IMPORT_BY_NAME {
 	BYTE	Name[1];
 } IMAGE_IMPORT_BY_NAME,*PIMAGE_IMPORT_BY_NAME;
 
+#include <pshpack8.h>
 /* Import thunk */
 typedef struct _IMAGE_THUNK_DATA64 {
 	union {
@@ -2601,6 +2607,7 @@ typedef struct _IMAGE_THUNK_DATA64 {
 		ULONGLONG AddressOfData;
 	} u1;
 } IMAGE_THUNK_DATA64,*PIMAGE_THUNK_DATA64;
+#include <poppack.h>
 
 typedef struct _IMAGE_THUNK_DATA32 {
 	union {
@@ -2842,6 +2849,25 @@ typedef struct _IMAGE_RELOCATION
 #define IMAGE_REL_IA64_RESERVED_16	0x0016
 #define IMAGE_REL_IA64_ADDEND		0x001F
 
+/* AMD64 relocation types */
+#define IMAGE_REL_AMD64_ABSOLUTE        0x0000
+#define IMAGE_REL_AMD64_ADDR64          0x0001
+#define IMAGE_REL_AMD64_ADDR32          0x0002
+#define IMAGE_REL_AMD64_ADDR32NB        0x0003
+#define IMAGE_REL_AMD64_REL32           0x0004
+#define IMAGE_REL_AMD64_REL32_1         0x0005
+#define IMAGE_REL_AMD64_REL32_2         0x0006
+#define IMAGE_REL_AMD64_REL32_3         0x0007
+#define IMAGE_REL_AMD64_REL32_4         0x0008
+#define IMAGE_REL_AMD64_REL32_5         0x0009
+#define IMAGE_REL_AMD64_SECTION         0x000A
+#define IMAGE_REL_AMD64_SECREL          0x000B
+#define IMAGE_REL_AMD64_SECREL7         0x000C
+#define IMAGE_REL_AMD64_TOKEN           0x000D
+#define IMAGE_REL_AMD64_SREL32          0x000E
+#define IMAGE_REL_AMD64_PAIR            0x000F
+#define IMAGE_REL_AMD64_SSPAN32         0x0010
+
 /* archive format */
 
 #define IMAGE_ARCHIVE_START_SIZE             8
@@ -2863,6 +2889,52 @@ typedef struct _IMAGE_ARCHIVE_MEMBER_HEADER
 } IMAGE_ARCHIVE_MEMBER_HEADER, *PIMAGE_ARCHIVE_MEMBER_HEADER;
 
 #define IMAGE_SIZEOF_ARCHIVE_MEMBER_HDR 60
+
+typedef struct _IMPORT_OBJECT_HEADER
+{
+    WORD     Sig1;
+    WORD     Sig2;
+    WORD     Version;
+    WORD     Machine;
+    DWORD    TimeDateStamp;
+    DWORD    SizeOfData;
+    union
+    {
+        WORD Ordinal;
+        WORD Hint;
+    } DUMMYUNIONNAME;
+    WORD     Type : 2;
+    WORD     NameType : 3;
+    WORD     Reserved : 11;
+} IMPORT_OBJECT_HEADER;
+
+#define IMPORT_OBJECT_HDR_SIG2  0xffff
+
+typedef enum IMPORT_OBJECT_TYPE
+{
+    IMPORT_OBJECT_CODE = 0,
+    IMPORT_OBJECT_DATA = 1,
+    IMPORT_OBJECT_CONST = 2
+} IMPORT_OBJECT_TYPE;
+
+typedef enum IMPORT_OBJECT_NAME_TYPE
+{
+    IMPORT_OBJECT_ORDINAL = 0,
+    IMPORT_OBJECT_NAME = 1,
+    IMPORT_OBJECT_NAME_NO_PREFIX = 2,
+    IMPORT_OBJECT_NAME_UNDECORATE = 3
+} IMPORT_OBJECT_NAME_TYPE;
+
+typedef struct _ANON_OBJECT_HEADER
+{
+    WORD     Sig1;
+    WORD     Sig2;
+    WORD     Version;
+    WORD     Machine;
+    DWORD    TimeDateStamp;
+    CLSID    ClassID;
+    DWORD    SizeOfData;
+} ANON_OBJECT_HEADER;
 
 /*
  * Resource directory stuff
@@ -2987,6 +3059,57 @@ typedef struct _IMAGE_DEBUG_DIRECTORY {
 #define IMAGE_DEBUG_TYPE_OMAP_FROM_SRC  8
 #define IMAGE_DEBUG_TYPE_BORLAND        9
 #define IMAGE_DEBUG_TYPE_RESERVED10    10
+
+typedef enum ReplacesCorHdrNumericDefines
+{
+    COMIMAGE_FLAGS_ILONLY           = 0x00000001,
+    COMIMAGE_FLAGS_32BITREQUIRED    = 0x00000002,
+    COMIMAGE_FLAGS_IL_LIBRARY       = 0x00000004,
+    COMIMAGE_FLAGS_STRONGNAMESIGNED = 0x00000008,
+    COMIMAGE_FLAGS_TRACKDEBUGDATA   = 0x00010000,
+
+    COR_VERSION_MAJOR_V2       = 2,
+    COR_VERSION_MAJOR          = COR_VERSION_MAJOR_V2,
+    COR_VERSION_MINOR          = 0,
+    COR_DELETED_NAME_LENGTH    = 8,
+    COR_VTABLEGAP_NAME_LENGTH  = 8,
+
+    NATIVE_TYPE_MAX_CB = 1,
+    COR_ILMETHOD_SECT_SMALL_MAX_DATASIZE = 0xff,
+
+    IMAGE_COR_MIH_METHODRVA  = 0x01,
+    IMAGE_COR_MIH_EHRVA      = 0x02,
+    IMAGE_COR_MIH_BASICBLOCK = 0x08,
+
+    COR_VTABLE_32BIT             = 0x01,
+    COR_VTABLE_64BIT             = 0x02,
+    COR_VTABLE_FROM_UNMANAGED    = 0x04,
+    COR_VTABLE_CALL_MOST_DERIVED = 0x10,
+
+    IMAGE_COR_EATJ_THUNK_SIZE = 32,
+
+    MAX_CLASS_NAME   = 1024,
+    MAX_PACKAGE_NAME = 1024,
+} ReplacesCorHdrNumericDefines;
+
+typedef struct IMAGE_COR20_HEADER
+{
+    DWORD cb;
+    WORD  MajorRuntimeVersion;
+    WORD  MinorRuntimeVersion;
+
+    IMAGE_DATA_DIRECTORY MetaData;
+    DWORD Flags;
+    DWORD EntryPointToken;
+
+    IMAGE_DATA_DIRECTORY Resources;
+    IMAGE_DATA_DIRECTORY StrongNameSignature;
+    IMAGE_DATA_DIRECTORY CodeManagerTable;
+    IMAGE_DATA_DIRECTORY VTableFixups;
+    IMAGE_DATA_DIRECTORY ExportAddressTableJumps;
+    IMAGE_DATA_DIRECTORY ManagedNativeHeader;
+
+} IMAGE_COR20_HEADER, *PIMAGE_COR20_HEADER;
 
 typedef struct _IMAGE_COFF_SYMBOLS_HEADER {
   DWORD NumberOfSymbols;

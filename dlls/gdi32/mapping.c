@@ -18,7 +18,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "gdi.h"
+#include <stdarg.h>
+
+#include "windef.h"
+#include "winbase.h"
+#include "wingdi.h"
 #include "wownt32.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
@@ -31,7 +35,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdi);
  *
  * Fix viewport extensions for isotropic mode.
  */
-void MAPPING_FixIsotropic( DC * dc )
+static void MAPPING_FixIsotropic( DC * dc )
 {
     double xdim = fabs((double)dc->vportExtX * GetDeviceCaps( dc->hSelf, HORZSIZE ) /
                   (GetDeviceCaps( dc->hSelf, HORZRES ) * dc->wndExtX));

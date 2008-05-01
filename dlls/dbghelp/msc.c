@@ -56,7 +56,7 @@
 #include "wine/debug.h"
 #include "excpt.h"
 #include "dbghelp_private.h"
-#include "mscvpdb.h"
+#include "wine/mscvpdb.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_msc);
 
@@ -1239,6 +1239,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
     struct symt*                        symt;
     const char*                         name;
     struct symt_compiland*              compiland = NULL;
+    struct location                     loc;
 
     /*
      * Loop over the different types of records and whenever we
@@ -1337,8 +1338,11 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
                                           codeview_get_type(sym->proc_v1.proctype, FALSE));
             codeview_add_func_linenum(msc_dbg->module, curr_func, flt, 
                                       sym->proc_v1.offset, sym->proc_v1.proc_len);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, sym->proc_v1.debug_start, NULL);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, sym->proc_v1.debug_end, NULL);
+            loc.kind = loc_absolute;
+            loc.offset = sym->proc_v1.debug_start;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
+            loc.offset = sym->proc_v1.debug_end;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
 	    break;
 	case S_GPROC_V2:
 	case S_LPROC_V2:
@@ -1351,8 +1355,11 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
                                           codeview_get_type(sym->proc_v2.proctype, FALSE));
             codeview_add_func_linenum(msc_dbg->module, curr_func, flt, 
                                       sym->proc_v2.offset, sym->proc_v2.proc_len);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, sym->proc_v2.debug_start, NULL);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, sym->proc_v2.debug_end, NULL);
+            loc.kind = loc_absolute;
+            loc.offset = sym->proc_v2.debug_start;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
+            loc.offset = sym->proc_v2.debug_end;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
 	    break;
 	case S_GPROC_V3:
 	case S_LPROC_V3:
@@ -1365,43 +1372,61 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
                                           codeview_get_type(sym->proc_v3.proctype, FALSE));
             codeview_add_func_linenum(msc_dbg->module, curr_func, flt, 
                                       sym->proc_v3.offset, sym->proc_v3.proc_len);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, sym->proc_v3.debug_start, NULL);
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, sym->proc_v3.debug_end, NULL);
+            loc.kind = loc_absolute;
+            loc.offset = sym->proc_v3.debug_start;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
+            loc.offset = sym->proc_v3.debug_end;
+            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
 	    break;
         /*
          * Function parameters and stack variables.
          */
 	case S_BPREL_V1:
+            loc.kind = loc_regrel;
+            loc.reg = 0; /* FIXME */
+            loc.offset = sym->stack_v1.offset;
             symt_add_func_local(msc_dbg->module, curr_func, 
                                 sym->stack_v1.offset > 0 ? DataIsParam : DataIsLocal, 
-                                0, TRUE, sym->stack_v1.offset, block,
+                                &loc, block,
                                 codeview_get_type(sym->stack_v1.symtype, FALSE),
                                 terminate_string(&sym->stack_v1.p_name));
             break;
 	case S_BPREL_V2:
+            loc.kind = loc_regrel;
+            loc.reg = 0; /* FIXME */
+            loc.offset = sym->stack_v2.offset;
             symt_add_func_local(msc_dbg->module, curr_func, 
                                 sym->stack_v2.offset > 0 ? DataIsParam : DataIsLocal, 
-                                0, TRUE, sym->stack_v2.offset, block,
+                                &loc, block,
                                 codeview_get_type(sym->stack_v2.symtype, FALSE),
                                 terminate_string(&sym->stack_v2.p_name));
             break;
 	case S_BPREL_V3:
+            loc.kind = loc_regrel;
+            loc.reg = 0; /* FIXME */
+            loc.offset = sym->stack_v3.offset;
             symt_add_func_local(msc_dbg->module, curr_func, 
                                 sym->stack_v3.offset > 0 ? DataIsParam : DataIsLocal, 
-                                0, TRUE, sym->stack_v3.offset, block,
+                                &loc, block,
                                 codeview_get_type(sym->stack_v3.symtype, FALSE),
                                 sym->stack_v3.name);
             break;
 
         case S_REGISTER_V1:
+            loc.kind = loc_register;
+            loc.reg = sym->register_v1.reg;
+            loc.offset = 0;
             symt_add_func_local(msc_dbg->module, curr_func, 
-                                DataIsLocal, sym->register_v1.reg, FALSE, 0,
+                                DataIsLocal, &loc,
                                 block, codeview_get_type(sym->register_v1.type, FALSE),
                                 terminate_string(&sym->register_v1.p_name));
             break;
         case S_REGISTER_V2:
+            loc.kind = loc_register;
+            loc.reg = sym->register_v2.reg;
+            loc.offset = 0;
             symt_add_func_local(msc_dbg->module, curr_func, 
-                                DataIsLocal, sym->register_v2.reg, FALSE, 0,
+                                DataIsLocal, &loc,
                                 block, codeview_get_type(sym->register_v2.type, FALSE),
                                 terminate_string(&sym->register_v2.p_name));
             break;
@@ -1429,16 +1454,16 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
             }
             break;
 
-        case S_COMPILE_V1:
-            TRACE("S-Compile-V1 %x %s\n", 
-                  sym->compile_v1.unknown, terminate_string(&sym->compile_v1.p_name));
+        case S_COMPILAND_V1:
+            TRACE("S-Compiland-V1 %x %s\n",
+                  sym->compiland_v1.unknown, terminate_string(&sym->compiland_v1.p_name));
             break;
 
-        case S_COMPILE_V2:
-            TRACE("S-Compile-V2 %s\n", terminate_string(&sym->compile_v2.p_name));
+        case S_COMPILAND_V2:
+            TRACE("S-Compiland-V2 %s\n", terminate_string(&sym->compiland_v2.p_name));
             if (TRACE_ON(dbghelp_msc))
             {
-                const char* ptr1 = sym->compile_v2.p_name.name + sym->compile_v2.p_name.namelen;
+                const char* ptr1 = sym->compiland_v2.p_name.name + sym->compiland_v2.p_name.namelen;
                 const char* ptr2;
                 while (*ptr1)
                 {
@@ -1448,11 +1473,11 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
                 }
             }
             break;
-        case S_COMPILE_V3:
-            TRACE("S-Compile-V3 %s\n", sym->compile_v3.name);
+        case S_COMPILAND_V3:
+            TRACE("S-Compiland-V3 %s\n", sym->compiland_v3.name);
             if (TRACE_ON(dbghelp_msc))
             {
-                const char* ptr1 = sym->compile_v3.name + strlen(sym->compile_v3.name);
+                const char* ptr1 = sym->compiland_v3.name + strlen(sym->compiland_v3.name);
                 const char* ptr2;
                 while (*ptr1)
                 {
@@ -1465,7 +1490,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
 
         case S_OBJNAME_V1:
             TRACE("S-ObjName %s\n", terminate_string(&sym->objname_v1.p_name));
-            compiland = symt_new_compiland(msc_dbg->module, 
+            compiland = symt_new_compiland(msc_dbg->module, 0 /* FIXME */,
                                            source_new(msc_dbg->module, NULL,
                                                       terminate_string(&sym->objname_v1.p_name)));
             break;
@@ -1473,8 +1498,9 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
         case S_LABEL_V1:
             if (curr_func)
             {
-                symt_add_function_point(msc_dbg->module, curr_func, SymTagLabel, 
-                                        codeview_get_address(msc_dbg, sym->label_v1.segment, sym->label_v1.offset) - curr_func->address,
+                loc.kind = loc_absolute;
+                loc.offset = codeview_get_address(msc_dbg, sym->label_v1.segment, sym->label_v1.offset) - curr_func->address;
+                symt_add_function_point(msc_dbg->module, curr_func, SymTagLabel, &loc,
                                         terminate_string(&sym->label_v1.p_name));
             }
             else
@@ -1484,9 +1510,10 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
         case S_LABEL_V3:
             if (curr_func)
             {
+                loc.kind = loc_absolute;
+                loc.offset = codeview_get_address(msc_dbg, sym->label_v3.segment, sym->label_v3.offset) - curr_func->address;
                 symt_add_function_point(msc_dbg->module, curr_func, SymTagLabel, 
-                                        codeview_get_address(msc_dbg, sym->label_v3.segment, sym->label_v3.offset) - curr_func->address,
-                                        sym->label_v3.name);
+                                        &loc, sym->label_v3.name);
             }
             else
                 FIXME("No current function for label %s\n", sym->label_v3.name);
@@ -1494,58 +1521,54 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
 
         case S_CONSTANT_V1:
             {
-                int                     val, vlen;
+                int                     vlen;
                 const struct p_string*  name;
-                const char*             x;
                 struct symt*            se;
+                VARIANT                 v;
 
-                vlen = numeric_leaf(&val, &sym->constant_v1.cvalue);
+                v.n1.n2.vt = VT_I4;
+                vlen = numeric_leaf(&v.n1.n2.n3.intVal, &sym->constant_v1.cvalue);
                 name = (const struct p_string*)((const char*)&sym->constant_v1.cvalue + vlen);
                 se = codeview_get_type(sym->constant_v1.type, FALSE);
-                if (!se) x = "---";
-                else if (se->tag == SymTagEnum) x = ((struct symt_enum*)se)->name;
-                else x = "###";
-                    
-                TRACE("S-Constant-V1 %u %s %x (%s)\n", 
-                      val, terminate_string(name), sym->constant_v1.type, x);
-                /* FIXME: we should add this as a constant value */
+
+                TRACE("S-Constant-V1 %u %s %x\n",
+                      v.n1.n2.n3.intVal, terminate_string(name), sym->constant_v1.type);
+                symt_new_constant(msc_dbg->module, compiland, terminate_string(name),
+                                  se, &v);
             }
             break;
         case S_CONSTANT_V2:
             {
-                int                     val, vlen;
+                int                     vlen;
                 const struct p_string*  name;
-                const char*             x;
                 struct symt*            se;
+                VARIANT                 v;
 
-                vlen = numeric_leaf(&val, &sym->constant_v2.cvalue);
+                v.n1.n2.vt = VT_I4;
+                vlen = numeric_leaf(&v.n1.n2.n3.intVal, &sym->constant_v2.cvalue);
                 name = (const struct p_string*)((const char*)&sym->constant_v2.cvalue + vlen);
                 se = codeview_get_type(sym->constant_v2.type, FALSE);
-                if (!se) x = "---";
-                else if (se->tag == SymTagEnum) x = ((struct symt_enum*)se)->name;
-                else x = "###";
-                    
-                TRACE("S-Constant-V2 %u %s %x (%s)\n", 
-                      val, terminate_string(name), sym->constant_v2.type, x);
-                /* FIXME: we should add this as a constant value */
+
+                TRACE("S-Constant-V2 %u %s %x\n",
+                      v.n1.n2.n3.intVal, terminate_string(name), sym->constant_v2.type);
+                symt_new_constant(msc_dbg->module, compiland, terminate_string(name),
+                                  se, &v);
             }
             break;
         case S_CONSTANT_V3:
             {
-                int                     val, vlen;
+                int                     vlen;
                 const char*             name;
-                const char*             x;
                 struct symt*            se;
+                VARIANT                 v;
 
-                vlen = numeric_leaf(&val, &sym->constant_v3.cvalue);
+                v.n1.n2.vt = VT_I4;
+                vlen = numeric_leaf(&v.n1.n2.n3.intVal, &sym->constant_v3.cvalue);
                 name = (const char*)&sym->constant_v3.cvalue + vlen;
                 se = codeview_get_type(sym->constant_v3.type, FALSE);
-                if (!se) x = "---";
-                else if (se->tag == SymTagEnum) x = ((struct symt_enum*)se)->name;
-                else x = "###";
-                    
-                TRACE("S-Constant-V3 %u %s %x (%s)\n", 
-                      val, name, sym->constant_v3.type, x);
+
+                TRACE("S-Constant-V3 %u %s %x\n",
+                      v.n1.n2.n3.intVal, name, sym->constant_v3.type);
                 /* FIXME: we should add this as a constant value */
             }
             break;
@@ -1595,7 +1618,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
             length += (*name + 1 + 3) & ~3;
             break;
 
-        case S_PUB_DATA_V3:
+        case S_PUB_V3:
             if (!(dbghelp_options & SYMOPT_NO_PUBLICS))
             {
                 symt_new_public(msc_dbg->module, compiland,
@@ -1621,6 +1644,10 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
         case S_SSEARCH_V1:
             TRACE("Start search: seg=0x%x at offset 0x%08x\n",
                   sym->ssearch_v1.segment, sym->ssearch_v1.offset);
+            break;
+
+        case S_ALIGN_V1:
+            TRACE("S-Align V1\n");
             break;
 
         default:
@@ -1701,7 +1728,7 @@ static void* pdb_read_ds_file(const struct PDB_DS_HEADER* pdb,
 
     if (toc->file_size[file_nr] == 0 || toc->file_size[file_nr] == 0xFFFFFFFF)
     {
-        FIXME(">>> requesting NULL stream (%lu)\n", file_nr);
+        FIXME(">>> requesting NULL stream (%u)\n", file_nr);
         return NULL;
     }
     block_list = &toc->file_size[toc->num_files];
@@ -1898,7 +1925,7 @@ static void pdb_process_types(const struct msc_debug_info* msc_dbg,
         case 19990903:
             break;
         default:
-            ERR("-Unknown type info version %ld\n", types.version);
+            ERR("-Unknown type info version %d\n", types.version);
         }
 
         ctp.module = msc_dbg->module;
@@ -1962,7 +1989,7 @@ static BOOL pdb_init(struct pdb_lookup* pdb_lookup, const char* image, BOOL do_f
         case 19970604:      /* VC 6.0 */
             break;
         default:
-            ERR("-Unknown root block version %ld\n", root->Version);
+            ERR("-Unknown root block version %d\n", root->Version);
         }
         if (do_fill)
         {
@@ -1974,7 +2001,7 @@ static BOOL pdb_init(struct pdb_lookup* pdb_lookup, const char* image, BOOL do_f
                  pdb_lookup->u.jg.timestamp != root->TimeDateStamp ||
                  pdb_lookup->age != root->Age)
             ret = FALSE;
-        TRACE("found JG/%c for %s: age=%lx timestamp=%lx\n",
+        TRACE("found JG/%c for %s: age=%x timestamp=%x\n",
               do_fill ? 'f' : '-', pdb_lookup->filename, root->Age,
               root->TimeDateStamp);
         pdb_free(root);
@@ -1999,7 +2026,7 @@ static BOOL pdb_init(struct pdb_lookup* pdb_lookup, const char* image, BOOL do_f
         case 20000404:
             break;
         default:
-            ERR("-Unknown root block version %ld\n", root->Version);
+            ERR("-Unknown root block version %d\n", root->Version);
         }
         if (do_fill)
         {
@@ -2011,7 +2038,7 @@ static BOOL pdb_init(struct pdb_lookup* pdb_lookup, const char* image, BOOL do_f
                  memcmp(&pdb_lookup->u.ds.guid, &root->guid, sizeof(GUID)) ||
                  pdb_lookup->age != root->Age)
             ret = FALSE;
-        TRACE("found DS/%c for %s: age=%lx guid=%s\n",
+        TRACE("found DS/%c for %s: age=%x guid=%s\n",
               do_fill ? 'f' : '-', pdb_lookup->filename, root->Age,
               debugstr_guid(&root->guid));
         pdb_free(root);
@@ -2084,7 +2111,7 @@ static void pdb_process_symbol_imports(const struct process* pcs,
                 imp_pdb_lookup.kind = PDB_JG;
                 imp_pdb_lookup.u.jg.timestamp = imp->TimeDateStamp;
                 imp_pdb_lookup.age = imp->Age;
-                TRACE("got for %s: age=%lu ts=%lx\n",
+                TRACE("got for %s: age=%u ts=%x\n",
                       imp->filename, imp->Age, imp->TimeDateStamp);
                 pdb_process_internal(pcs, msc_dbg, &imp_pdb_lookup, i);
             }
@@ -2137,7 +2164,7 @@ static BOOL pdb_process_internal(const struct process* pcs,
         case 19990903:
             break;
         default:
-            ERR("-Unknown symbol info version %ld %08lx\n", 
+            ERR("-Unknown symbol info version %d %08x\n",
                 symbols.version, symbols.version);
         }
 
@@ -2272,34 +2299,35 @@ BOOL pdb_fetch_file_info(struct pdb_lookup* pdb_lookup)
 static BOOL codeview_process_info(const struct process* pcs, 
                                   const struct msc_debug_info* msc_dbg)
 {
-    const CODEVIEW_HEADER_NBxx* cv = (const CODEVIEW_HEADER_NBxx*)msc_dbg->root;
+    const DWORD*                signature = (const DWORD*)msc_dbg->root;
     BOOL                        ret = FALSE;
     struct pdb_lookup           pdb_lookup;
 
-    TRACE("Processing signature %.4s\n", (const char*)&cv->dwSignature);
+    TRACE("Processing signature %.4s\n", (const char*)signature);
 
-    switch (cv->dwSignature)
+    switch (*signature)
     {
     case CODEVIEW_NB09_SIG:
     case CODEVIEW_NB11_SIG:
     {
-        const CV_DIRECTORY_HEADER*      hdr = (const CV_DIRECTORY_HEADER*)(msc_dbg->root + cv->lfoDirectory);
-        const CV_DIRECTORY_ENTRY*       ent;
-        const CV_DIRECTORY_ENTRY*       prev;
-        const CV_DIRECTORY_ENTRY*       next;
+        const OMFSignature*     cv = (const OMFSignature*)msc_dbg->root;
+        const OMFDirHeader*     hdr = (const OMFDirHeader*)(msc_dbg->root + cv->filepos);
+        const OMFDirEntry*      ent;
+        const OMFDirEntry*      prev;
+        const OMFDirEntry*      next;
         unsigned int                    i;
 
         codeview_init_basic_types(msc_dbg->module);
 
         for (i = 0; i < hdr->cDir; i++)
         {
-            ent = (const CV_DIRECTORY_ENTRY*)((const BYTE*)hdr + hdr->cbDirHeader + i * hdr->cbDirEntry);
-            if (ent->subsection == sstGlobalTypes)
+            ent = (const OMFDirEntry*)((const BYTE*)hdr + hdr->cbDirHeader + i * hdr->cbDirEntry);
+            if (ent->SubSection == sstGlobalTypes)
             {
-                const CV_ENTRY_GLOBAL_TYPES*    types;
+                const OMFGlobalTypes*           types;
                 struct codeview_type_parse      ctp;
 
-                types = (const CV_ENTRY_GLOBAL_TYPES*)(msc_dbg->root + ent->lfo);
+                types = (const OMFGlobalTypes*)(msc_dbg->root + ent->lfo);
                 ctp.module = msc_dbg->module;
                 ctp.offset = (const DWORD*)(types + 1);
                 ctp.num    = types->cTypes;
@@ -2314,15 +2342,15 @@ static BOOL codeview_process_info(const struct process* pcs,
             }
         }
 
-        ent = (const CV_DIRECTORY_ENTRY*)((const BYTE*)hdr + hdr->cbDirHeader);
+        ent = (const OMFDirEntry*)((const BYTE*)hdr + hdr->cbDirHeader);
         for (i = 0; i < hdr->cDir; i++, ent = next)
         {
             next = (i == hdr->cDir-1) ? NULL :
-                   (const CV_DIRECTORY_ENTRY*)((const BYTE*)ent + hdr->cbDirEntry);
+                   (const OMFDirEntry*)((const BYTE*)ent + hdr->cbDirEntry);
             prev = (i == 0) ? NULL :
-                   (const CV_DIRECTORY_ENTRY*)((const BYTE*)ent - hdr->cbDirEntry);
+                   (const OMFDirEntry*)((const BYTE*)ent - hdr->cbDirEntry);
 
-            if (ent->subsection == sstAlignSym)
+            if (ent->SubSection == sstAlignSym)
             {
                 /*
                  * Check the next and previous entry.  If either is a
@@ -2334,13 +2362,13 @@ static BOOL codeview_process_info(const struct process* pcs,
                 struct codeview_linetab*        linetab = NULL;
 
                 if (next && next->iMod == ent->iMod && 
-                    next->subsection == sstSrcModule)
+                    next->SubSection == sstSrcModule)
                     linetab = codeview_snarf_linetab(msc_dbg->module, 
                                                      msc_dbg->root + next->lfo, next->cb, 
                                                      TRUE);
 
                 if (prev && prev->iMod == ent->iMod &&
-                    prev->subsection == sstSrcModule)
+                    prev->SubSection == sstSrcModule)
                     linetab = codeview_snarf_linetab(msc_dbg->module, 
                                                      msc_dbg->root + prev->lfo, prev->cb, 
                                                      TRUE);
@@ -2364,7 +2392,7 @@ static BOOL codeview_process_info(const struct process* pcs,
 
     case CODEVIEW_NB10_SIG:
     {
-        const CODEVIEW_PDB_DATA* pdb = (const CODEVIEW_PDB_DATA*)(cv + 1);
+        const CODEVIEW_PDB_DATA* pdb = (const CODEVIEW_PDB_DATA*)msc_dbg->root;
         pdb_lookup.filename = pdb->name;
         pdb_lookup.kind = PDB_JG;
         pdb_lookup.u.jg.timestamp = pdb->timestamp;
@@ -2375,9 +2403,9 @@ static BOOL codeview_process_info(const struct process* pcs,
     }
     case CODEVIEW_RSDS_SIG:
     {
-        const CODEVIEW_HEADER_RSDS* rsds = (const CODEVIEW_HEADER_RSDS*)msc_dbg->root;
+        const OMFSignatureRSDS* rsds = (const OMFSignatureRSDS*)msc_dbg->root;
 
-        TRACE("Got RSDS type of PDB file: guid=%s unk=%08lx name=%s\n",
+        TRACE("Got RSDS type of PDB file: guid=%s unk=%08x name=%s\n",
               wine_dbgstr_guid(&rsds->guid), rsds->unknown, rsds->name);
         pdb_lookup.filename = rsds->name;
         pdb_lookup.kind = PDB_DS;
@@ -2388,14 +2416,14 @@ static BOOL codeview_process_info(const struct process* pcs,
         break;
     }
     default:
-        ERR("Unknown CODEVIEW signature %08lX in module %s\n",
-            cv->dwSignature, msc_dbg->module->module.ModuleName);
+        ERR("Unknown CODEVIEW signature %.4s in module %s\n",
+            (const char*)signature, msc_dbg->module->module.ModuleName);
         break;
     }
     if (ret)
     {
-        msc_dbg->module->module.CVSig = cv->dwSignature;
-        memcpy(msc_dbg->module->module.CVData, cv,
+        msc_dbg->module->module.CVSig = *signature;
+        memcpy(msc_dbg->module->module.CVData, msc_dbg->root,
                sizeof(msc_dbg->module->module.CVData));
     }
     return ret;

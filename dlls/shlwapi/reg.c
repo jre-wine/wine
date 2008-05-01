@@ -33,16 +33,16 @@
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
 /* Key/Value names for MIME content types */
-static const char *lpszContentTypeA = "Content Type";
+static const char lpszContentTypeA[] = "Content Type";
 static const WCHAR lpszContentTypeW[] = { 'C','o','n','t','e','n','t',' ','T','y','p','e','\0'};
 
-static const char *szMimeDbContentA = "MIME\\Database\\Content Type\\";
+static const char szMimeDbContentA[] = "MIME\\Database\\Content Type\\";
 static const WCHAR szMimeDbContentW[] = { 'M', 'I', 'M','E','\\',
   'D','a','t','a','b','a','s','e','\\','C','o','n','t','e','n','t',
   ' ','T','y','p','e','\\', 0 };
 static const DWORD dwLenMimeDbContent = 27; /* strlen of szMimeDbContentA/W */
 
-static const char *szExtensionA = "Extension";
+static const char szExtensionA[] = "Extension";
 static const WCHAR szExtensionW[] = { 'E', 'x', 't','e','n','s','i','o','n','\0' };
 
 /* internal structure of what the HUSKEY points to */
@@ -1398,7 +1398,7 @@ DWORD WINAPI SHQueryValueExA( HKEY hKey, LPCSTR lpszValue,
     if ((!pvData) || (dwRet == ERROR_MORE_DATA) )
     {
       char cNull = '\0';
-      nBytesToAlloc = (!pvData || (dwRet == ERROR_MORE_DATA)) ? dwUnExpDataLen : *pcbData;
+      nBytesToAlloc = dwUnExpDataLen;
 
       szData = (LPSTR) LocalAlloc(LMEM_ZEROINIT, nBytesToAlloc);
       RegQueryValueExA (hKey, lpszValue, lpReserved, NULL, (LPBYTE)szData, &nBytesToAlloc);
@@ -1459,7 +1459,7 @@ DWORD WINAPI SHQueryValueExW(HKEY hKey, LPCWSTR lpszValue,
     if ((!pvData) || (dwRet == ERROR_MORE_DATA) )
     {
       WCHAR cNull = '\0';
-      nBytesToAlloc = (!pvData || (dwRet == ERROR_MORE_DATA)) ? dwUnExpDataLen : *pcbData;
+      nBytesToAlloc = dwUnExpDataLen;
 
       szData = (LPWSTR) LocalAlloc(LMEM_ZEROINIT, nBytesToAlloc);
       RegQueryValueExW (hKey, lpszValue, lpReserved, NULL, (LPBYTE)szData, &nBytesToAlloc);
@@ -1491,6 +1491,9 @@ DWORD WINAPI SHQueryValueExW(HKEY hKey, LPCWSTR lpszValue,
  *
  * Delete a registry key and any sub keys/values present
  *
+ * This function forwards to the unicode version directly, to avoid
+ * handling subkeys that are not representable in ASCII.
+ *
  * PARAMS
  *   hKey       [I] Handle to registry key
  *   lpszSubKey [I] Name of sub key to delete
@@ -1502,48 +1505,10 @@ DWORD WINAPI SHQueryValueExW(HKEY hKey, LPCWSTR lpszValue,
  */
 DWORD WINAPI SHDeleteKeyA(HKEY hKey, LPCSTR lpszSubKey)
 {
-  DWORD dwRet, dwMaxSubkeyLen = 0, dwSize;
-  CHAR szNameBuf[MAX_PATH], *lpszName = szNameBuf;
-  HKEY hSubKey = 0;
+  WCHAR subkeyW[MAX_PATH];
 
-  TRACE("(hkey=%p,%s)\n", hKey, debugstr_a(lpszSubKey));
-
-  dwRet = RegOpenKeyExA(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
-  if(!dwRet)
-  {
-    /* Find the maximum subkey length so that we can allocate a buffer */
-    dwRet = RegQueryInfoKeyA(hSubKey, NULL, NULL, NULL, NULL,
-                             &dwMaxSubkeyLen, NULL, NULL, NULL, NULL, NULL, NULL);
-    if(!dwRet)
-    {
-      dwMaxSubkeyLen++;
-      if (dwMaxSubkeyLen > sizeof(szNameBuf))
-        /* Name too big: alloc a buffer for it */
-        lpszName = HeapAlloc(GetProcessHeap(), 0, dwMaxSubkeyLen*sizeof(CHAR));
-
-      if(!lpszName)
-        dwRet = ERROR_NOT_ENOUGH_MEMORY;
-      else
-      {
-        while (dwRet == ERROR_SUCCESS)
-        {
-          dwSize = dwMaxSubkeyLen;
-          dwRet = RegEnumKeyExA(hSubKey, 0, lpszName, &dwSize, NULL, NULL, NULL, NULL);
-          if (dwRet == ERROR_SUCCESS || dwRet == ERROR_MORE_DATA)
-            dwRet = SHDeleteKeyA(hSubKey, lpszName);
-        }
-        if (dwRet == ERROR_NO_MORE_ITEMS)
-          dwRet = ERROR_SUCCESS;
-        if (lpszName != szNameBuf)
-          HeapFree(GetProcessHeap(), 0, lpszName); /* Free buffer if allocated */
-      }
-    }
-
-    RegCloseKey(hSubKey);
-    if(!dwRet)
-      dwRet = RegDeleteKeyA(hKey, lpszSubKey);
-  }
-  return dwRet;
+  MultiByteToWideChar (CP_ACP, 0, lpszSubKey, -1, subkeyW, sizeof(subkeyW)/sizeof(WCHAR));
+  return SHDeleteKeyW(hKey, subkeyW);
 }
 
 /*************************************************************************

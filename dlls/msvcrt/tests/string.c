@@ -75,7 +75,7 @@ static void test_swab( void ) {
     ok(memcmp(to,expected3,testsize) == 0, "Testing small size %d returned '%*.*s'\n", testsize, testsize, testsize, to);
 }
 
-void test_ismbblead(void)
+static void test_ismbblead(void)
 {
     unsigned int s = '\354';
 
@@ -99,6 +99,24 @@ static void test_mbsspn( void)
     ok( ret==0, "_mbsspn returns %d should be 0\n", ret);
 }
 
+static void test_mbsspnp( void)
+{
+    unsigned char str1[]="cabernet";
+    unsigned char str2[]="shiraz";
+    unsigned char set[]="abc";
+    unsigned char empty[]="";
+    unsigned char full[]="abcenrt";
+    unsigned char* ret;
+    ret=_mbsspnp( str1, set);
+    ok( ret[0]=='e', "_mbsspnp returns %c should be e\n", ret[0]);
+    ret=_mbsspnp( str2, set);
+    ok( ret[0]=='s', "_mbsspnp returns %c should be s\n", ret[0]);
+    ret=_mbsspnp( str1, empty);
+    ok( ret[0]=='c', "_mbsspnp returns %c should be c\n", ret[0]);
+    ret=_mbsspnp( str1, full);
+    ok( ret==NULL, "_mbsspnp returns %p should be NULL\n", ret);
+}
+
 static void test_strdup(void)
 {
    char *str;
@@ -111,8 +129,12 @@ START_TEST(string)
 {
     void *mem;
     static const char xilstring[]="c:/xilinx";
-    int nLen=strlen(xilstring);
-    HMODULE hMsvcrt = LoadLibraryA("msvcrt.dll");
+    int nLen;
+    HMODULE hMsvcrt;
+
+    hMsvcrt = GetModuleHandleA("msvcrt.dll");
+    if (!hMsvcrt)
+        hMsvcrt = GetModuleHandleA("msvcrtd.dll");
     ok(hMsvcrt != 0, "LoadLibraryA failed\n");
     SET(pmemcpy,"memcpy");
     SET(pmemcmp,"memcmp");
@@ -122,6 +144,7 @@ START_TEST(string)
     mem = malloc(100);
     ok(mem != NULL, "memory not allocated for size 0\n");
     strcpy((char*)mem,xilstring);
+    nLen=strlen(xilstring);
     pmemcpy((char*)mem+5, mem,nLen+1);
     ok(pmemcmp((char*)mem+5,xilstring, nLen) == 0, 
        "Got result %s\n",(char*)mem+5);
@@ -133,6 +156,7 @@ START_TEST(string)
     test_ismbblead();
    /* test _mbsspn */
     test_mbsspn();
+    test_mbsspnp();
    /* test _strdup */
     test_strdup();
 }

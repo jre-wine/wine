@@ -71,16 +71,13 @@ inline static Display *get_display( HDC hdc )
     return display;
 }
 
-/* TODO: setup some flags in the regestry to enable, disable pbuffer support */
-/* enable pbuffer support for offscreen textures */
-BOOL pbuffer_support     = FALSE;
 /* allocate one pbuffer per surface */
 BOOL pbuffer_per_surface = FALSE;
 
 /* static function declarations */
 static void WINAPI IWineD3DDeviceImpl_AddResource(IWineD3DDevice *iface, IWineD3DResource *resource);
 
-static void WINAPI IWineD3DDeviceImpl_ApplyTextureUnitState(IWineD3DDevice *iface, DWORD Stage, WINED3DTEXTURESTAGESTATETYPE Type);
+static void set_depth_stencil_fbo(IWineD3DDevice *iface, IWineD3DSurface *depth_stencil);
 
 /* helper macros */
 #define D3DMEMCHECK(object, ppResult) if(NULL == object) { *ppResult = NULL; WARN("Out of memory\n"); return WINED3DERR_OUTOFVIDEOMEMORY;}
@@ -252,123 +249,6 @@ static void setup_light(IWineD3DDevice *iface, LONG Index, PLIGHTINFOEL *lightIn
  * GLSL helper functions follow
  **********************************************************/
 
-/** Attach a GLSL pixel or vertex shader object to the shader program */
-static void attach_glsl_shader(IWineD3DDevice *iface, IWineD3DBaseShader* shader) {
-
-    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    GLhandleARB shaderObj = ((IWineD3DBaseShaderImpl*)shader)->baseShader.prgId;
-    if (This->stateBlock->glsl_program && shaderObj != 0) {
-        TRACE_(d3d_shader)("Attaching GLSL shader object %u to program %u\n", shaderObj, This->stateBlock->glsl_program->programId);
-        GL_EXTCALL(glAttachObjectARB(This->stateBlock->glsl_program->programId, shaderObj));
-        checkGLcall("glAttachObjectARB");
-    }
-}
-
-/** Sets the GLSL program ID for the given pixel and vertex shader combination.
- * It sets the programId on the current StateBlock (because it should be called
- * inside of the DrawPrimitive() part of the render loop).
- *
- * If a program for the given combination does not exist, create one, and store
- * the program in the list.  If it creates a program, it will link the given 
- * objects, too.
- * 
- * We keep the shader programs around on a list because linking
- * shader objects together is an expensive operation.  It's much
- * faster to loop through a list of pre-compiled & linked programs
- * each time that the application sets a new pixel or vertex shader
- * than it is to re-link them together at that time.
- *
- * The list will be deleted in IWineD3DDevice::Release().
- */
-void set_glsl_shader_program(IWineD3DDevice *iface) {
-
-    IWineD3DDeviceImpl *This               = (IWineD3DDeviceImpl *)iface;
-    IWineD3DPixelShader  *pshader          = This->stateBlock->pixelShader;
-    IWineD3DVertexShader *vshader          = This->stateBlock->vertexShader;
-    struct glsl_shader_prog_link *curLink  = NULL;
-    struct glsl_shader_prog_link *newLink  = NULL;
-    struct list *ptr                       = NULL;
-    GLhandleARB programId                  = 0;
-    int i;
-    char glsl_name[8];
-    
-    ptr = list_head( &This->glsl_shader_progs );
-    while (ptr) {
-        /* At least one program exists - see if it matches our ps/vs combination */
-        curLink = LIST_ENTRY( ptr, struct glsl_shader_prog_link, entry );
-        if (vshader == curLink->vertexShader && pshader == curLink->pixelShader) {
-            /* Existing Program found, use it */
-            TRACE_(d3d_shader)("Found existing program (%u) for this vertex/pixel shader combination\n", 
-                   curLink->programId);
-            This->stateBlock->glsl_program = curLink;
-            return;
-        }
-        /* This isn't the entry we need - try the next one */
-        ptr = list_next( &This->glsl_shader_progs, ptr );
-    }
-
-    /* If we get to this point, then no matching program exists, so we create one */
-    programId = GL_EXTCALL(glCreateProgramObjectARB());
-    TRACE_(d3d_shader)("Created new GLSL shader program %u\n", programId);
-
-    /* Allocate a new link for the list of programs */
-    newLink = HeapAlloc(GetProcessHeap(), 0, sizeof(struct glsl_shader_prog_link));
-    newLink->programId    = programId;
-    This->stateBlock->glsl_program = newLink;
-   
-    /* Attach GLSL vshader */ 
-    if (NULL != vshader && This->vs_selected_mode == SHADER_GLSL) {
-        int i;
-        int max_attribs = 16;   /* TODO: Will this always be the case? It is at the moment... */
-        char tmp_name[10];
-    
-        TRACE("Attaching vertex shader to GLSL program\n");    
-        attach_glsl_shader(iface, (IWineD3DBaseShader*)vshader);
-        
-        /* Bind vertex attributes to a corresponding index number to match
-         * the same index numbers as ARB_vertex_programs (makes loading
-         * vertex attributes simpler).  With this method, we can use the
-         * exact same code to load the attributes later for both ARB and 
-         * GLSL shaders.
-         * 
-         * We have to do this here because we need to know the Program ID
-         * in order to make the bindings work, and it has to be done prior
-         * to linking the GLSL program. */
-        for (i = 0; i < max_attribs; ++i) {
-             snprintf(tmp_name, sizeof(tmp_name), "attrib%i", i);
-             GL_EXTCALL(glBindAttribLocationARB(programId, i, tmp_name));
-        }
-        checkGLcall("glBindAttribLocationARB");
-        newLink->vertexShader = vshader;
-    }
-    
-    /* Attach GLSL pshader */
-    if (NULL != pshader && This->ps_selected_mode == SHADER_GLSL) {
-        TRACE("Attaching pixel shader to GLSL program\n");
-        attach_glsl_shader(iface, (IWineD3DBaseShader*)pshader);
-        newLink->pixelShader = pshader;
-    }    
-
-    /* Link the program */
-    TRACE_(d3d_shader)("Linking GLSL shader program %u\n", programId);
-    GL_EXTCALL(glLinkProgramARB(programId));
-    print_glsl_info_log(&GLINFO_LOCATION, programId);
-    list_add_head( &This->glsl_shader_progs, &newLink->entry);
-
-    newLink->vuniformF_locations = HeapAlloc(GetProcessHeap(), 0, sizeof(GLhandleARB) * GL_LIMITS(vshader_constantsF));
-    for (i = 0; i < GL_LIMITS(vshader_constantsF); ++i) {
-        snprintf(glsl_name, sizeof(glsl_name), "VC[%i]", i);
-        newLink->vuniformF_locations[i] = GL_EXTCALL(glGetUniformLocationARB(programId, glsl_name));
-    }
-    newLink->puniformF_locations = HeapAlloc(GetProcessHeap(), 0, sizeof(GLhandleARB) * GL_LIMITS(pshader_constantsF));
-    for (i = 0; i < GL_LIMITS(pshader_constantsF); ++i) {
-        snprintf(glsl_name, sizeof(glsl_name), "PC[%i]", i);
-        newLink->puniformF_locations[i] = GL_EXTCALL(glGetUniformLocationARB(programId, glsl_name));
-    }
-
-    return;
-}
-
 /** Detach the GLSL pixel or vertex shader object from the shader program */
 static void detach_glsl_shader(IWineD3DDevice *iface, GLhandleARB shaderObj, GLhandleARB programId) {
 
@@ -435,105 +315,6 @@ static void delete_glsl_shader_list(IWineD3DDevice* iface) {
     }
 }
 
-
-/* Apply the current values to the specified texture stage */
-static void WINAPI IWineD3DDeviceImpl_SetupTextureStates(IWineD3DDevice *iface, DWORD Sampler, DWORD texture_idx, DWORD Flags) {
-    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    float col[4];
-
-    union {
-        float f;
-        DWORD d;
-    } tmpvalue;
-
-    /* In addition, IDirect3DDevice9::SetSamplerState will now be used for filtering, tiling,
-    clamping, MIPLOD, etc. This will work for up to 16 samplers.
-    */
-   
-    if (Sampler >= GL_LIMITS(sampler_stages)) {
-        FIXME("Trying to set the state of more samplers %d than are supported %d by this openGL implementation\n", Sampler, GL_LIMITS(sampler_stages));
-        return;
-    }
-    VTRACE(("Activating appropriate texture state %d\n", Sampler));
-    if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-        ENTER_GL();
-        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + texture_idx));
-        checkGLcall("glActiveTextureARB");
-        LEAVE_GL();
-        /* Could we use bindTexture and then apply the states instead of GLACTIVETEXTURE */
-    } else if (Sampler > 0) {
-        FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
-        return;
-    }
-
-    /* TODO: change this to a lookup table
-        LOOKUP_TEXTURE_STATES lists all texture states that should be applied.
-        LOOKUP_CONTEXT_SATES list all context applicable states that can be applied
-        etc.... it's a lot cleaner, quicker and possibly easier to maintain than running a switch and setting a skip flag...
-        especially when there are a number of groups of states. */
-
-    TRACE("-----------------------> Updating the texture at Sampler %d to have new texture state information\n", Sampler);
-
-    /* The list of states not to apply is a big as the list of states to apply, so it makes sense to produce an inclusive list  */
-#define APPLY_STATE(_state)     IWineD3DDeviceImpl_ApplyTextureUnitState(iface, Sampler, _state)
-/* these are the only two supported states that need to be applied */
-    APPLY_STATE(WINED3DTSS_TEXCOORDINDEX);
-    APPLY_STATE(WINED3DTSS_TEXTURETRANSFORMFLAGS);
-#if 0 /* not supported at the moment */
-    APPLY_STATE(WINED3DTSS_BUMPENVMAT00);
-    APPLY_STATE(WINED3DTSS_BUMPENVMAT01);
-    APPLY_STATE(WINED3DTSS_BUMPENVMAT10);
-    APPLY_STATE(WINED3DTSS_BUMPENVMAT11);
-    APPLY_STATE(WINED3DTSS_BUMPENVLSCALE);
-    APPLY_STATE(WINED3DTSS_BUMPENVLOFFSET);
-    APPLY_STATE(WINED3DTSS_RESULTARG);
-    APPLY_STATE(WINED3DTSS_CONSTANT);
-#endif
-    /* a quick sanity check in case someone forgot to update this function */
-    if (WINED3D_HIGHEST_TEXTURE_STATE > WINED3DTSS_CONSTANT) {
-        FIXME("(%p) : There are more texture states than expected, update device.c to match\n", This);
-    }
-#undef APPLY_STATE
-
-    /* apply any sampler states that always need applying */
-    if (GL_SUPPORT(EXT_TEXTURE_LOD_BIAS)) {
-        tmpvalue.d = This->stateBlock->samplerState[Sampler][WINED3DSAMP_MIPMAPLODBIAS];
-        glTexEnvf(GL_TEXTURE_FILTER_CONTROL_EXT,
-                GL_TEXTURE_LOD_BIAS_EXT,
-                tmpvalue.f);
-        checkGLcall("glTexEnvi GL_TEXTURE_LOD_BIAS_EXT ...");
-    }
-
-    D3DCOLORTOGLFLOAT4(This->stateBlock->renderState[WINED3DRS_TEXTUREFACTOR], col);
-    glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, &col[0]);
-    checkGLcall("glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, color);");
-
-    /* TODO: NV_POINT_SPRITE */
-    if (GL_SUPPORT(ARB_POINT_SPRITE)) {
-        if (This->stateBlock->renderState[WINED3DRS_POINTSPRITEENABLE]) {
-           /* Doesn't work with GL_POINT_SMOOTH on on my ATI 9600, but then ATI drivers are buggered! */
-           glDisable(GL_POINT_SMOOTH);
-
-           /* Centre the texture on the vertex */
-           VTRACE(("glTexEnvf( GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, GL_TRUE)\n"));
-           glTexEnvf( GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, GL_TRUE);
-
-           VTRACE(("glTexEnvf( GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, GL_TRUE)\n"));
-           glTexEnvf( GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, GL_TRUE);
-           checkGLcall("glTexEnvf(...)");
-           VTRACE(("glEnable( GL_POINT_SPRITE_ARB )\n"));
-           glEnable( GL_POINT_SPRITE_ARB );
-           checkGLcall("glEnable(...)");
-        } else {
-           VTRACE(("glDisable( GL_POINT_SPRITE_ARB )\n"));
-           glDisable( GL_POINT_SPRITE_ARB );
-           checkGLcall("glEnable(...)");
-        }
-    }
-
-    TRACE("-----------------------> Updated the texture at Sampler %d to have new texture state information\n", Sampler);
-}
-
 /**********************************************************
  * IUnknown parts follows
  **********************************************************/
@@ -569,6 +350,14 @@ static ULONG WINAPI IWineD3DDeviceImpl_Release(IWineD3DDevice *iface) {
     TRACE("(%p) : Releasing from %d\n", This, refCount + 1);
 
     if (!refCount) {
+        if (This->fbo) {
+            GL_EXTCALL(glDeleteFramebuffersEXT(1, &This->fbo));
+        }
+
+        HeapFree(GetProcessHeap(), 0, This->render_targets);
+
+        HeapFree(GetProcessHeap(), 0, This->draw_buffers);
+
         /* TODO: Clean up all the surfaces and textures! */
         /* NOTE: You must release the parent if the object was created via a callback
         ** ***************************/
@@ -1197,7 +986,7 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface, U
     for (i = 0; i < object->baseTexture.levels; i++)
     {
         /* use the callback to create the texture surface */
-        hr = D3DCB_CreateSurface(This->parent, tmpW, tmpH, Format, Usage, Pool, i, &object->surfaces[i],NULL);
+        hr = D3DCB_CreateSurface(This->parent, parent, tmpW, tmpH, Format, Usage, Pool, i, &object->surfaces[i],NULL);
         if (hr!= WINED3D_OK || ( (IWineD3DSurfaceImpl *) object->surfaces[i])->Flags & SFLAG_OVERSIZE) {
             FIXME("Failed to create surface  %p\n", object);
             /* clean up */
@@ -1274,7 +1063,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVolumeTexture(IWineD3DDevice *ifa
     for (i = 0; i < object->baseTexture.levels; i++)
     {
         /* Create the volume */
-        D3DCB_CreateVolume(This->parent, Width, Height, Depth, Format, Pool, Usage,
+        D3DCB_CreateVolume(This->parent, parent, Width, Height, Depth, Format, Pool, Usage,
                            (IWineD3DVolume **)&object->volumes[i], pSharedHandle);
 
         /* Set its container to this object */
@@ -1376,7 +1165,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
         /* Create the 6 faces */
         for (j = 0; j < 6; j++) {
 
-            hr=D3DCB_CreateSurface(This->parent, tmpW, tmpW, Format, Usage, Pool,
+            hr=D3DCB_CreateSurface(This->parent, parent, tmpW, tmpW, Format, Usage, Pool,
                                    i /* Level */, &object->surfaces[j][i],pSharedHandle);
 
             if(hr!= WINED3D_OK) {
@@ -1535,6 +1324,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         WARN("Failed to get a valid XVisuial ID for the window %p\n", object->win_handle);
         return WINED3DERR_NOTAVAILABLE;
     }
+
+    object->orig_width = GetSystemMetrics(SM_CXSCREEN);
+    object->orig_height = GetSystemMetrics(SM_CYSCREEN);
+
     /**
     * Create an opengl context for the display visual
     *  NOTE: the visual is chosen as the window is created and the glcontext cannot
@@ -1644,11 +1437,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         DEVMODEW devmode;
         HDC      hdc;
         int      bpp = 0;
+        RECT     clip_rc;
 
         /* Get info on the current display setup */
-        hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
+        hdc = GetDC(0);
         bpp = GetDeviceCaps(hdc, BITSPIXEL);
-        DeleteDC(hdc);
+        ReleaseDC(0, hdc);
 
         /* Change the display settings */
         memset(&devmode, 0, sizeof(DEVMODEW));
@@ -1669,6 +1463,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         This->ddraw_width = devmode.dmPelsWidth;
         This->ddraw_height = devmode.dmPelsHeight;
         This->ddraw_format = *(pPresentationParameters->BackBufferFormat);
+
+        /* And finally clip mouse to our screen */
+        SetRect(&clip_rc, 0, 0, devmode.dmPelsWidth, devmode.dmPelsHeight);
+        ClipCursor(&clip_rc);
     }
 
 
@@ -1699,7 +1497,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
    *******************/
 
     /* Put the correct figures in the presentation parameters */
-    TRACE("Coppying accross presentaion paraneters\n");
+    TRACE("Copying across presentation parameters\n");
     object->presentParms.BackBufferWidth                = *(pPresentationParameters->BackBufferWidth);
     object->presentParms.BackBufferHeight               = *(pPresentationParameters->BackBufferHeight);
     object->presentParms.BackBufferFormat               = *(pPresentationParameters->BackBufferFormat);
@@ -1722,6 +1520,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
 
     TRACE("calling rendertarget CB\n");
     hr = D3DCB_CreateRenderTarget((IUnknown *) This->parent,
+                             parent,
                              object->presentParms.BackBufferWidth,
                              object->presentParms.BackBufferHeight,
                              object->presentParms.BackBufferFormat,
@@ -1755,6 +1554,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         for(i = 0; i < object->presentParms.BackBufferCount; i++) {
             TRACE("calling rendertarget CB\n");
             hr = D3DCB_CreateRenderTarget((IUnknown *) This->parent,
+                                    parent,
                                     object->presentParms.BackBufferWidth,
                                     object->presentParms.BackBufferHeight,
                                     object->presentParms.BackBufferFormat,
@@ -1791,6 +1591,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         TRACE("Creating depth stencil buffer\n");
         if (This->depthStencilBuffer == NULL ) {
             hr = D3DCB_CreateDepthStencil((IUnknown *) This->parent,
+                                    parent,
                                     object->presentParms.BackBufferWidth,
                                     object->presentParms.BackBufferHeight,
                                     object->presentParms.AutoDepthStencilFormat,
@@ -2058,11 +1859,18 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreatePalette(IWineD3DDevice *iface, DW
 static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPRESENT_PARAMETERS* pPresentationParameters, D3DCB_CREATEADDITIONALSWAPCHAIN D3DCB_CreateAdditionalSwapChain) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
     IWineD3DSwapChainImpl *swapchain;
+    DWORD state;
 
     TRACE("(%p)->(%p,%p)\n", This, pPresentationParameters, D3DCB_CreateAdditionalSwapChain);
     if(This->d3d_initialized) return WINED3DERR_INVALIDCALL;
 
     /* TODO: Test if OpenGL is compiled in and loaded */
+
+    /* Initialize the texture unit mapping to a 1:1 mapping */
+    for(state = 0; state < MAX_SAMPLERS; state++) {
+        This->texUnitMap[state] = state;
+    }
+    This->oneToOneTexUnitMap = TRUE;
 
     /* Setup the implicit swapchain */
     TRACE("Creating implicit swapchain\n");
@@ -2082,15 +1890,18 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
 
     if(swapchain->backBuffer && swapchain->backBuffer[0]) {
         TRACE("Setting rendertarget to %p\n", swapchain->backBuffer);
-        This->renderTarget = swapchain->backBuffer[0];
+        This->render_targets[0] = swapchain->backBuffer[0];
     }
     else {
         TRACE("Setting rendertarget to %p\n", swapchain->frontBuffer);
-        This->renderTarget = swapchain->frontBuffer;
+        This->render_targets[0] = swapchain->frontBuffer;
     }
-    IWineD3DSurface_AddRef(This->renderTarget);
+    IWineD3DSurface_AddRef(This->render_targets[0]);
     /* Depth Stencil support */
     This->stencilBufferTarget = This->depthStencilBuffer;
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+        set_depth_stencil_fbo(iface, This->depthStencilBuffer);
+    }
     if (NULL != This->stencilBufferTarget) {
         IWineD3DSurface_AddRef(This->stencilBufferTarget);
     }
@@ -2125,8 +1936,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     }
 
     /* Initialize the current view state */
-    This->modelview_valid = 1;
-    This->proj_valid = 0;
     This->view_ident = 1;
     This->last_was_rhw = 0;
     glGetIntegerv(GL_MAX_LIGHTS, &This->maxConcurrentLights);
@@ -2135,15 +1944,22 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     /* Clear the screen */
     IWineD3DDevice_Clear((IWineD3DDevice *) This, 0, NULL, WINED3DCLEAR_STENCIL|WINED3DCLEAR_ZBUFFER|WINED3DCLEAR_TARGET, 0x00, 1.0, 0);
 
+    /* Mark all states dirty. The Setters will not mark a state dirty when the new value is equal to the old value
+     * This might create a problem in 2 situations:
+     * ->The D3D default value is 0, but the opengl default value is something else
+     * ->D3D7 unintialized D3D and reinitializes it. This way the context is destroyed, be the stateblock unchanged
+     */
+    for(state = 0; state <= STATE_HIGHEST; state++) {
+        IWineD3DDeviceImpl_MarkStateDirty(This, state);
+    }
+
     This->d3d_initialized = TRUE;
     return WINED3D_OK;
 }
 
-static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface) {
+static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_DESTROYSURFACEFN D3DCB_DestroyDepthStencilSurface, D3DCB_DESTROYSWAPCHAINFN D3DCB_DestroySwapChain) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
     int sampler;
-    IUnknown* stencilBufferParent;
-    IUnknown* swapChainParent;
     uint i;
     TRACE("(%p)\n", This);
 
@@ -2169,28 +1985,23 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface) {
     }
     This->stencilBufferTarget = NULL;
 
-    TRACE("Releasing the render target at %p\n", This->renderTarget);
-    if(IWineD3DSurface_Release(This->renderTarget) >0){
+    TRACE("Releasing the render target at %p\n", This->render_targets[0]);
+    if(IWineD3DSurface_Release(This->render_targets[0]) >0){
           /* This check is a bit silly, itshould be in swapchain_release FIXME("(%p) Something's still holding the renderTarget\n",This); */
     }
     TRACE("Setting rendertarget to NULL\n");
-    This->renderTarget = NULL;
+    This->render_targets[0] = NULL;
 
     if (This->depthStencilBuffer) {
-        IWineD3DSurface_GetParent(This->depthStencilBuffer, &stencilBufferParent);
-        IUnknown_Release(stencilBufferParent);          /* once for the get parent */
-        if(IUnknown_Release(stencilBufferParent)  >0){  /* the second time for when it was created */
-            FIXME("(%p) Something's still holding the depthStencilBuffer\n",This);
+        if(D3DCB_DestroyDepthStencilSurface(This->depthStencilBuffer) > 0) {
+            FIXME("(%p) Something's still holding the depthStencilBuffer\n", This);
         }
         This->depthStencilBuffer = NULL;
     }
 
     for(i=0; i < This->NumberOfSwapChains; i++) {
         TRACE("Releasing the implicit swapchain %d\n", i);
-        /* Swapchain 0 is special because it's created in startup with a hanging parent, so we have to release its parent now */
-        IWineD3DSwapChain_GetParent(This->swapchains[i], &swapChainParent);
-        IUnknown_Release(swapChainParent);           /* once for the get parent */
-        if (IUnknown_Release(swapChainParent)  > 0) {  /* the second time for when it was created */
+        if (D3DCB_DestroySwapChain(This->swapchains[i])  > 0) {
             FIXME("(%p) Something's still holding the implicit swapchain\n", This);
         }
     }
@@ -2244,6 +2055,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetDisplayMode(IWineD3DDevice *iface, U
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     LONG ret;
     const PixelFormatDesc *formatDesc  = getFormatDescEntry(pMode->Format);
+    RECT clip_rc;
 
     TRACE("(%p)->(%d,%p) Mode=%dx%dx@%d, %s\n", This, iSwapChain, pMode, pMode->Width, pMode->Height, pMode->RefreshRate, debug_d3dformat(pMode->Format));
 
@@ -2294,6 +2106,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetDisplayMode(IWineD3DDevice *iface, U
     if(This->ddraw_window)
       MoveWindow(This->ddraw_window, 0, 0, pMode->Width, pMode->Height, TRUE);
 
+    /* And finally clip mouse to our screen */
+    SetRect(&clip_rc, 0, 0, pMode->Width, pMode->Height);
+    ClipCursor(&clip_rc);
+
     return WINED3D_OK;
 }
 
@@ -2333,15 +2149,20 @@ static UINT WINAPI IWineD3DDeviceImpl_GetAvailableTextureMem(IWineD3DDevice *ifa
  *****/
 static HRESULT WINAPI IWineD3DDeviceImpl_SetFVF(IWineD3DDevice *iface, DWORD fvf) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    HRESULT hr = WINED3D_OK;
 
     /* Update the current state block */
-    This->updateStateBlock->fvf              = fvf;
     This->updateStateBlock->changed.fvf      = TRUE;
     This->updateStateBlock->set.fvf          = TRUE;
 
+    if(This->updateStateBlock->fvf == fvf) {
+        TRACE("Application is setting the old fvf over, nothing to do\n");
+        return WINED3D_OK;
+    }
+
+    This->updateStateBlock->fvf              = fvf;
     TRACE("(%p) : FVF Shader FVF set to %x\n", This, fvf);
-    return hr;
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VDECL);
+    return WINED3D_OK;
 }
 
 
@@ -2390,9 +2211,20 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetStreamSource(IWineD3DDevice *iface, 
 
     This->updateStateBlock->changed.streamSource[StreamNumber] = TRUE;
     This->updateStateBlock->set.streamSource[StreamNumber]     = TRUE;
-    This->updateStateBlock->streamStride[StreamNumber]         = Stride;
+
+    if(oldSrc == pStreamData &&
+       This->updateStateBlock->streamStride[StreamNumber] == Stride &&
+       This->updateStateBlock->streamOffset[StreamNumber] == OffsetInBytes &&
+       This->updateStateBlock->streamFlags[StreamNumber] == streamFlags) {
+       TRACE("Application is setting the old values over, nothing to do\n");
+       return WINED3D_OK;
+    }
+
     This->updateStateBlock->streamSource[StreamNumber]         = pStreamData;
-    This->updateStateBlock->streamOffset[StreamNumber]         = OffsetInBytes;
+    if (pStreamData) {
+        This->updateStateBlock->streamStride[StreamNumber]     = Stride;
+        This->updateStateBlock->streamOffset[StreamNumber]     = OffsetInBytes;
+    }
     This->updateStateBlock->streamFlags[StreamNumber]          = streamFlags;
 
     /* Handle recording of state blocks */
@@ -2416,12 +2248,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetStreamSource(IWineD3DDevice *iface, 
         }
         vbImpl->stream = StreamNumber;
         vbImpl->Flags |= VBFLAG_STREAM;
-        IWineD3DVertexBuffer_AddRef(pStreamData);
     }
     if (oldSrc != NULL) {
         ((IWineD3DVertexBufferImpl *) oldSrc)->Flags &= ~VBFLAG_STREAM;
-        IWineD3DVertexBuffer_Release(oldSrc);
     }
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_STREAMSRC);
 
     return WINED3D_OK;
 }
@@ -2456,12 +2288,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetStreamSource(IWineD3DDevice *iface, 
         *pOffset = This->stateBlock->streamOffset[StreamNumber];
     }
 
-     if (*pStream == NULL) {
-        FIXME("Attempting to get an empty stream %d, returning WINED3DERR_INVALIDCALL\n", StreamNumber);
-        return  WINED3DERR_INVALIDCALL;
+    if (*pStream != NULL) {
+        IWineD3DVertexBuffer_AddRef(*pStream); /* We have created a new reference to the VB */
     }
-
-    IWineD3DVertexBuffer_AddRef(*pStream); /* We have created a new reference to the VB */
     return WINED3D_OK;
 }
 
@@ -2545,68 +2374,12 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetTransform(IWineD3DDevice *iface, W
      */
 
     /* Capture the times we can just ignore the change for now */
-    if (d3dts == WINED3DTS_WORLDMATRIX(0)) {
-        This->modelview_valid = FALSE;
-        return WINED3D_OK;
-
-    } else if (d3dts == WINED3DTS_PROJECTION) {
-        This->proj_valid = FALSE;
-        return WINED3D_OK;
-
-    } else if (d3dts >= WINED3DTS_WORLDMATRIX(1) && d3dts <= WINED3DTS_WORLDMATRIX(255)) {
-        /* Indexed Vertex Blending Matrices 256 -> 511  */
-        /* Use arb_vertex_blend or NV_VERTEX_WEIGHTING? */
-        FIXME("WINED3DTS_WORLDMATRIX(1..255) not handled\n");
-        return WINED3D_OK;
-    }
-
-    /* Now we really are going to have to change a matrix */
-    ENTER_GL();
-
-    if (d3dts >= WINED3DTS_TEXTURE0 && d3dts <= WINED3DTS_TEXTURE7) { /* handle texture matrices */
-        /* This is now set with the texture unit states, it may be a good idea to flag the change though! */
-    } else if (d3dts == WINED3DTS_VIEW) { /* handle the VIEW matrice */
-        unsigned int k;
-
-        /* If we are changing the View matrix, reset the light and clipping planes to the new view
-         * NOTE: We have to reset the positions even if the light/plane is not currently
-         *       enabled, since the call to enable it will not reset the position.
-         * NOTE2: Apparently texture transforms do NOT need reapplying
-         */
-
-        PLIGHTINFOEL *lightChain = NULL;
-        This->modelview_valid = FALSE;
+    if (d3dts == WINED3DTS_VIEW) { /* handle the VIEW matrice */
         This->view_ident = !memcmp(lpmatrix, identity, 16 * sizeof(float));
-
-        glMatrixMode(GL_MODELVIEW);
-        checkGLcall("glMatrixMode(GL_MODELVIEW)");
-        glPushMatrix();
-        glLoadMatrixf((float *)lpmatrix);
-        checkGLcall("glLoadMatrixf(...)");
-
-        /* Reset lights */
-        lightChain = This->stateBlock->lights;
-        while (lightChain && lightChain->glIndex != -1) {
-            glLightfv(GL_LIGHT0 + lightChain->glIndex, GL_POSITION, lightChain->lightPosn);
-            checkGLcall("glLightfv posn");
-            glLightfv(GL_LIGHT0 + lightChain->glIndex, GL_SPOT_DIRECTION, lightChain->lightDirn);
-            checkGLcall("glLightfv dirn");
-            lightChain = lightChain->next;
-        }
-
-        /* Reset Clipping Planes if clipping is enabled */
-        for (k = 0; k < GL_LIMITS(clipplanes); k++) {
-            glClipPlane(GL_CLIP_PLANE0 + k, This->stateBlock->clipplane[k]);
-            checkGLcall("glClipPlane");
-        }
-        glPopMatrix();
-
-    } else { /* What was requested!?? */
-        WARN("invalid matrix specified: %i\n", d3dts);
+        /* Handled by the state manager */
     }
 
-    /* Release lock, all done */
-    LEAVE_GL();
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TRANSFORM(d3dts));
     return WINED3D_OK;
 
 }
@@ -2636,7 +2409,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_MultiplyTransform(IWineD3DDevice *iface
         FIXME("Unhandled transform state!!\n");
     }
 
-    multiply_matrix(&temp, mat, (WINED3DMATRIX *) pMatrix);
+    multiply_matrix(&temp, mat, (const WINED3DMATRIX *) pMatrix);
 
     /* Apply change via set transform - will reapply to eg. lights this way */
     return IWineD3DDeviceImpl_SetTransform(iface, State, &temp);
@@ -3210,6 +2983,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetIndices(IWineD3DDevice *iface, IWine
                                              UINT BaseVertexIndex) {
     IWineD3DDeviceImpl  *This = (IWineD3DDeviceImpl *)iface;
     IWineD3DIndexBuffer *oldIdxs;
+    UINT oldBaseIndex = This->updateStateBlock->baseVertexIndex;
 
     TRACE("(%p) : Setting to %p, base %d\n", This, pIndexData, BaseVertexIndex);
     oldIdxs = This->updateStateBlock->pIndexData;
@@ -3225,11 +2999,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetIndices(IWineD3DDevice *iface, IWine
         return WINED3D_OK;
     }
 
-    if (NULL != pIndexData) {
-        IWineD3DIndexBuffer_AddRef(pIndexData);
-    }
-    if (NULL != oldIdxs) {
-        IWineD3DIndexBuffer_Release(oldIdxs);
+    /* So far only the base vertex index is tracked */
+    if(BaseVertexIndex != oldBaseIndex) {
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_STREAMSRC);
     }
     return WINED3D_OK;
 }
@@ -3252,6 +3024,26 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetIndices(IWineD3DDevice *iface, IWine
     return WINED3D_OK;
 }
 
+/* Method to offer d3d9 a simple way to set the base vertex index without messing with the index buffer */
+static HRESULT WINAPI IWineD3DDeviceImpl_SetBasevertexIndex(IWineD3DDevice *iface, UINT BaseIndex) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    TRACE("(%p)->(%d)\n", This, BaseIndex);
+
+    if(This->updateStateBlock->baseVertexIndex == BaseIndex) {
+        TRACE("Application is setting the old value over, nothing to do\n");
+        return WINED3D_OK;
+    }
+
+    This->updateStateBlock->baseVertexIndex = BaseIndex;
+
+    if (This->isRecordingState) {
+        TRACE("Recording... not performing anything\n");
+        return WINED3D_OK;
+    }
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_STREAMSRC);
+    return WINED3D_OK;
+}
+
 /*****
  * Get / Set Viewports
  *****/
@@ -3268,25 +3060,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetViewport(IWineD3DDevice *iface, CONS
         TRACE("Recording... not performing anything\n");
         return WINED3D_OK;
     }
-    This->viewport_changed = TRUE;
-
-    ENTER_GL();
 
     TRACE("(%p) : x=%d, y=%d, wid=%d, hei=%d, minz=%f, maxz=%f\n", This,
           pViewport->X, pViewport->Y, pViewport->Width, pViewport->Height, pViewport->MinZ, pViewport->MaxZ);
 
-    glDepthRange(pViewport->MinZ, pViewport->MaxZ);
-    checkGLcall("glDepthRange");
-    /* Note: GL requires lower left, DirectX supplies upper left */
-    /* TODO: replace usage of renderTarget with context management */
-    glViewport(pViewport->X,
-               (((IWineD3DSurfaceImpl *)This->renderTarget)->currentDesc.Height - (pViewport->Y + pViewport->Height)),
-               pViewport->Width, pViewport->Height);
-
-    checkGLcall("glViewport");
-
-    LEAVE_GL();
-
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VIEWPORT);
     return WINED3D_OK;
 
 }
@@ -3298,109 +3076,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetViewport(IWineD3DDevice *iface, WINE
     return WINED3D_OK;
 }
 
-static void renderstate_stencil_twosided(
-        IWineD3DDeviceImpl *This,
-        GLint face,
-        GLint func,
-        GLint ref,
-        GLuint mask,
-        GLint stencilFail,
-        GLint depthFail,
-        GLint stencilPass ) {
-#if 0 /* Don't use OpenGL 2.0 calls for now */
-            if(GL_EXTCALL(glStencilFuncSeparate) && GL_EXTCALL(glStencilOpSeparate)) {
-                GL_EXTCALL(glStencilFuncSeparate(face, func, ref, mask));
-                checkGLcall("glStencilFuncSeparate(...)");
-                GL_EXTCALL(glStencilOpSeparate(face, stencilFail, depthFail, stencilPass));
-                checkGLcall("glStencilOpSeparate(...)");
-            }
-            else
-#endif
-            if(GL_SUPPORT(EXT_STENCIL_TWO_SIDE)) {
-                glEnable(GL_STENCIL_TEST_TWO_SIDE_EXT);
-                checkGLcall("glEnable(GL_STENCIL_TEST_TWO_SIDE_EXT)");
-                GL_EXTCALL(glActiveStencilFaceEXT(face));
-                checkGLcall("glActiveStencilFaceEXT(...)");
-                glStencilFunc(func, ref, mask);
-                checkGLcall("glStencilFunc(...)");
-                glStencilOp(stencilFail, depthFail, stencilPass);
-                checkGLcall("glStencilOp(...)");
-            } else if(GL_SUPPORT(ATI_SEPARATE_STENCIL)) {
-                GL_EXTCALL(glStencilFuncSeparateATI(face, func, ref, mask));
-                checkGLcall("glStencilFuncSeparateATI(...)");
-                GL_EXTCALL(glStencilOpSeparateATI(face, stencilFail, depthFail, stencilPass));
-                checkGLcall("glStencilOpSeparateATI(...)");
-            } else {
-                ERR("Separate (two sided) stencil not supported on this version of opengl. Caps weren't honored?\n");
-            }
-}
-
-static void renderstate_stencil(IWineD3DDeviceImpl *This, WINED3DRENDERSTATETYPE State, DWORD Value) {
-    DWORD onesided_enable = FALSE;
-    DWORD twosided_enable = FALSE;
-    GLint func = GL_ALWAYS;
-    GLint func_ccw = GL_ALWAYS;
-    GLint ref = 0;
-    GLuint mask = 0;
-    GLint stencilFail = GL_KEEP;
-    GLint depthFail = GL_KEEP;
-    GLint stencilPass = GL_KEEP;
-    GLint stencilFail_ccw = GL_KEEP;
-    GLint depthFail_ccw = GL_KEEP;
-    GLint stencilPass_ccw = GL_KEEP;
-
-    if( This->stateBlock->set.renderState[WINED3DRS_STENCILENABLE] )
-        onesided_enable = This->stateBlock->renderState[WINED3DRS_STENCILENABLE];
-    if( This->stateBlock->set.renderState[WINED3DRS_TWOSIDEDSTENCILMODE] )
-        twosided_enable = This->stateBlock->renderState[WINED3DRS_TWOSIDEDSTENCILMODE];
-    if( This->stateBlock->set.renderState[WINED3DRS_STENCILFUNC] )
-        if( !( func = CompareFunc(This->stateBlock->renderState[WINED3DRS_STENCILFUNC]) ) )
-            func = GL_ALWAYS;
-    if( This->stateBlock->set.renderState[WINED3DRS_CCW_STENCILFUNC] )
-        if( !( func_ccw = CompareFunc(This->stateBlock->renderState[WINED3DRS_CCW_STENCILFUNC]) ) )
-            func = GL_ALWAYS;
-    if( This->stateBlock->set.renderState[WINED3DRS_STENCILREF] )
-        ref = This->stateBlock->renderState[WINED3DRS_STENCILREF];
-    if( This->stateBlock->set.renderState[WINED3DRS_STENCILMASK] )
-        mask = This->stateBlock->renderState[WINED3DRS_STENCILMASK];
-    if( This->stateBlock->set.renderState[WINED3DRS_STENCILFAIL] )
-        stencilFail = StencilOp(This->stateBlock->renderState[WINED3DRS_STENCILFAIL]);
-    if( This->stateBlock->set.renderState[WINED3DRS_STENCILZFAIL] )
-        depthFail = StencilOp(This->stateBlock->renderState[WINED3DRS_STENCILZFAIL]);
-    if( This->stateBlock->set.renderState[WINED3DRS_STENCILPASS] )
-        stencilPass = StencilOp(This->stateBlock->renderState[WINED3DRS_STENCILPASS]);
-    if( This->stateBlock->set.renderState[WINED3DRS_CCW_STENCILFAIL] )
-        stencilFail_ccw = StencilOp(This->stateBlock->renderState[WINED3DRS_CCW_STENCILFAIL]);
-    if( This->stateBlock->set.renderState[WINED3DRS_CCW_STENCILZFAIL] )
-        depthFail_ccw = StencilOp(This->stateBlock->renderState[WINED3DRS_CCW_STENCILZFAIL]);
-    if( This->stateBlock->set.renderState[WINED3DRS_CCW_STENCILPASS] )
-        stencilPass_ccw = StencilOp(This->stateBlock->renderState[WINED3DRS_CCW_STENCILPASS]);
-
-    TRACE("(onesided %d, twosided %d, ref %x, mask %x,  \
-        GL_FRONT: func: %x, fail %x, zfail %x, zpass %x  \
-        GL_BACK: func: %x, fail %x, zfail %x, zpass %x )\n",
-            onesided_enable, twosided_enable, ref, mask,
-            func, stencilFail, depthFail, stencilPass,
-            func_ccw, stencilFail_ccw, depthFail_ccw, stencilPass_ccw);
-
-    if (twosided_enable) {
-        renderstate_stencil_twosided(This, GL_FRONT, func, ref, mask, stencilFail, depthFail, stencilPass);
-        renderstate_stencil_twosided(This, GL_BACK, func_ccw, ref, mask, stencilFail_ccw, depthFail_ccw, stencilPass_ccw);
-    } else {
-        if (onesided_enable) {
-            glEnable(GL_STENCIL_TEST);
-            checkGLcall("glEnable GL_STENCIL_TEST");
-            glStencilFunc(func, ref, mask);
-            checkGLcall("glStencilFunc(...)");
-            glStencilOp(stencilFail, depthFail, stencilPass);
-            checkGLcall("glStencilOp(...)");
-        } else {
-            glDisable(GL_STENCIL_TEST);
-            checkGLcall("glDisable GL_STENCIL_TEST");
-        }
-    }
-}
-
 /*****
  * Get / Set Render States
  * TODO: Verify against dx9 definitions
@@ -3408,15 +3083,10 @@ static void renderstate_stencil(IWineD3DDeviceImpl *This, WINED3DRENDERSTATETYPE
 static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderState(IWineD3DDevice *iface, WINED3DRENDERSTATETYPE State, DWORD Value) {
 
     IWineD3DDeviceImpl  *This     = (IWineD3DDeviceImpl *)iface;
-    DWORD                OldValue = This->stateBlock->renderState[State];
-
-    /* Simple way of referring to either a DWORD or a 4 byte float */
-    union {
-        DWORD d;
-        float f;
-    } tmpvalue;
+    DWORD oldValue = This->stateBlock->renderState[State];
 
     TRACE("(%p)->state = %s(%d), value = %d\n", This, debug_d3drenderstate(State), State, Value);
+
     This->updateStateBlock->changed.renderState[State] = TRUE;
     This->updateStateBlock->set.renderState[State] = TRUE;
     This->updateStateBlock->renderState[State] = Value;
@@ -3427,1164 +3097,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderState(IWineD3DDevice *iface, W
         return WINED3D_OK;
     }
 
-    ENTER_GL();
-
-    switch (State) {
-    case WINED3DRS_FILLMODE                  :
-        switch ((WINED3DFILLMODE) Value) {
-        case WINED3DFILL_POINT               : glPolygonMode(GL_FRONT_AND_BACK, GL_POINT); break;
-        case WINED3DFILL_WIREFRAME           : glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); break;
-        case WINED3DFILL_SOLID               : glPolygonMode(GL_FRONT_AND_BACK, GL_FILL); break;
-        default:
-            FIXME("Unrecognized WINED3DRS_FILLMODE value %d\n", Value);
-        }
-        checkGLcall("glPolygonMode (fillmode)");
-        break;
-
-    case WINED3DRS_LIGHTING                  :
-        if (Value) {
-            glEnable(GL_LIGHTING);
-            checkGLcall("glEnable GL_LIGHTING");
-        } else {
-            glDisable(GL_LIGHTING);
-            checkGLcall("glDisable GL_LIGHTING");
-        }
-        break;
-
-    case WINED3DRS_ZENABLE                   :
-        switch ((WINED3DZBUFFERTYPE) Value) {
-        case WINED3DZB_FALSE:
-            glDisable(GL_DEPTH_TEST);
-            checkGLcall("glDisable GL_DEPTH_TEST");
-            break;
-        case WINED3DZB_TRUE:
-            glEnable(GL_DEPTH_TEST);
-            checkGLcall("glEnable GL_DEPTH_TEST");
-            break;
-        case WINED3DZB_USEW:
-            glEnable(GL_DEPTH_TEST);
-            checkGLcall("glEnable GL_DEPTH_TEST");
-            FIXME("W buffer is not well handled\n");
-            break;
-        default:
-            FIXME("Unrecognized WINED3DZBUFFERTYPE value %d\n", Value);
-        }
-        break;
-
-    case WINED3DRS_CULLMODE                  :
-
-        /* If we are culling "back faces with clockwise vertices" then
-           set front faces to be counter clockwise and enable culling
-           of back faces                                               */
-        switch ((WINED3DCULL) Value) {
-        case WINED3DCULL_NONE:
-            glDisable(GL_CULL_FACE);
-            checkGLcall("glDisable GL_CULL_FACE");
-            break;
-        case WINED3DCULL_CW:
-            glEnable(GL_CULL_FACE);
-            checkGLcall("glEnable GL_CULL_FACE");
-            if (This->renderUpsideDown) {
-                glFrontFace(GL_CW);
-                checkGLcall("glFrontFace GL_CW");
-            } else {
-                glFrontFace(GL_CCW);
-                checkGLcall("glFrontFace GL_CCW");
-            }
-            glCullFace(GL_BACK);
-            break;
-        case WINED3DCULL_CCW:
-            glEnable(GL_CULL_FACE);
-            checkGLcall("glEnable GL_CULL_FACE");
-            if (This->renderUpsideDown) {
-                glFrontFace(GL_CCW);
-                checkGLcall("glFrontFace GL_CCW");
-            } else {
-                glFrontFace(GL_CW);
-                checkGLcall("glFrontFace GL_CW");
-            }
-            glCullFace(GL_BACK);
-            break;
-        default:
-            FIXME("Unrecognized/Unhandled WINED3DCULL value %d\n", Value);
-        }
-        break;
-
-    case WINED3DRS_SHADEMODE                 :
-        switch ((WINED3DSHADEMODE) Value) {
-        case WINED3DSHADE_FLAT:
-            glShadeModel(GL_FLAT);
-            checkGLcall("glShadeModel");
-            break;
-        case WINED3DSHADE_GOURAUD:
-            glShadeModel(GL_SMOOTH);
-            checkGLcall("glShadeModel");
-            break;
-        case WINED3DSHADE_PHONG:
-            FIXME("WINED3DSHADE_PHONG isn't supported\n");
-            break;
-        default:
-            FIXME("Unrecognized/Unhandled WINED3DSHADEMODE value %d\n", Value);
-        }
-        break;
-
-    case WINED3DRS_DITHERENABLE              :
-        if (Value) {
-            glEnable(GL_DITHER);
-            checkGLcall("glEnable GL_DITHER");
-        } else {
-            glDisable(GL_DITHER);
-            checkGLcall("glDisable GL_DITHER");
-        }
-        break;
-
-    case WINED3DRS_ZWRITEENABLE              :
-        if (Value) {
-            glDepthMask(1);
-            checkGLcall("glDepthMask");
-        } else {
-            glDepthMask(0);
-            checkGLcall("glDepthMask");
-        }
-        break;
-
-    case WINED3DRS_ZFUNC                     :
-        {
-            int glParm = CompareFunc(Value);
-
-            if(glParm) {
-                glDepthFunc(glParm);
-                checkGLcall("glDepthFunc");
-            }
-        }
-        break;
-
-    case WINED3DRS_AMBIENT                   :
-        {
-            float col[4];
-            D3DCOLORTOGLFLOAT4(Value, col);
-            TRACE("Setting ambient to (%f,%f,%f,%f)\n", col[0], col[1], col[2], col[3]);
-            glLightModelfv(GL_LIGHT_MODEL_AMBIENT, col);
-            checkGLcall("glLightModel for MODEL_AMBIENT");
-
-        }
-        break;
-
-    case WINED3DRS_ALPHABLENDENABLE          :
-        if (Value) {
-            glEnable(GL_BLEND);
-            checkGLcall("glEnable GL_BLEND");
-        } else {
-            glDisable(GL_BLEND);
-            checkGLcall("glDisable GL_BLEND");
-        };
-        break;
-
-    case WINED3DRS_SRCBLEND                  :
-    case WINED3DRS_DESTBLEND                 :
-        {
-            int newVal = GL_ZERO;
-            switch (Value) {
-            case WINED3DBLEND_ZERO               : newVal = GL_ZERO;  break;
-            case WINED3DBLEND_ONE                : newVal = GL_ONE;  break;
-            case WINED3DBLEND_SRCCOLOR           : newVal = GL_SRC_COLOR;  break;
-            case WINED3DBLEND_INVSRCCOLOR        : newVal = GL_ONE_MINUS_SRC_COLOR;  break;
-            case WINED3DBLEND_SRCALPHA           : newVal = GL_SRC_ALPHA;  break;
-            case WINED3DBLEND_INVSRCALPHA        : newVal = GL_ONE_MINUS_SRC_ALPHA;  break;
-            case WINED3DBLEND_DESTALPHA          : newVal = GL_DST_ALPHA;  break;
-            case WINED3DBLEND_INVDESTALPHA       : newVal = GL_ONE_MINUS_DST_ALPHA;  break;
-            case WINED3DBLEND_DESTCOLOR          : newVal = GL_DST_COLOR;  break;
-            case WINED3DBLEND_INVDESTCOLOR       : newVal = GL_ONE_MINUS_DST_COLOR;  break;
-            case WINED3DBLEND_SRCALPHASAT        : newVal = GL_SRC_ALPHA_SATURATE;  break;
-
-            case WINED3DBLEND_BOTHSRCALPHA       : newVal = GL_SRC_ALPHA;
-                This->srcBlend = newVal;
-                This->dstBlend = newVal;
-                break;
-
-            case WINED3DBLEND_BOTHINVSRCALPHA    : newVal = GL_ONE_MINUS_SRC_ALPHA;
-                This->srcBlend = newVal;
-                This->dstBlend = newVal;
-                break;
-            case WINED3DBLEND_BLENDFACTOR        : newVal = GL_CONSTANT_COLOR;   break;
-            case WINED3DBLEND_INVBLENDFACTOR     : newVal = GL_ONE_MINUS_CONSTANT_COLOR;  break;
-            default:
-                FIXME("Unrecognized src/dest blend value %d (%d)\n", Value, State);
-            }
-
-            if (State == WINED3DRS_SRCBLEND) This->srcBlend = newVal;
-            if (State == WINED3DRS_DESTBLEND) This->dstBlend = newVal;
-            TRACE("glBlendFunc src=%x, dst=%x\n", This->srcBlend, This->dstBlend);
-            glBlendFunc(This->srcBlend, This->dstBlend);
-
-            checkGLcall("glBlendFunc");
-        }
-        break;
-
-    case WINED3DRS_ALPHATESTENABLE           :
-    case WINED3DRS_ALPHAFUNC                 :
-    case WINED3DRS_ALPHAREF                  :
-    case WINED3DRS_COLORKEYENABLE            :
-        {
-            int glParm = 0;
-            float ref;
-            BOOL enable_ckey = FALSE;
-
-            IWineD3DSurfaceImpl *surf;
-
-            /* Find out if the texture on the first stage has a ckey set */
-            if(This->stateBlock->textures[0]) {
-                surf = (IWineD3DSurfaceImpl *) ((IWineD3DTextureImpl *)This->stateBlock->textures[0])->surfaces[0];
-                if(surf->CKeyFlags & DDSD_CKSRCBLT) enable_ckey = TRUE;
-            }
-
-            if (This->stateBlock->renderState[WINED3DRS_ALPHATESTENABLE] ||
-                (This->stateBlock->renderState[WINED3DRS_COLORKEYENABLE] && enable_ckey)) {
-                glEnable(GL_ALPHA_TEST);
-                checkGLcall("glEnable GL_ALPHA_TEST");
-            } else {
-                glDisable(GL_ALPHA_TEST);
-                checkGLcall("glDisable GL_ALPHA_TEST");
-                /* Alpha test is disabled, don't bother setting the params - it will happen on the next
-                 * enable call
-                 */
-                 break;
-            }
-
-            if(This->stateBlock->renderState[WINED3DRS_COLORKEYENABLE] && enable_ckey) {
-                glParm = GL_NOTEQUAL;
-                ref = 0.0;
-            } else {
-                ref = ((float) This->stateBlock->renderState[WINED3DRS_ALPHAREF]) / 255.0f;
-                glParm = CompareFunc(This->stateBlock->renderState[WINED3DRS_ALPHAFUNC]);
-            }
-            if(glParm) {
-                This->alphafunc = glParm;
-                glAlphaFunc(glParm, ref);
-                checkGLcall("glAlphaFunc");
-            }
-        }
-        break;
-
-    case WINED3DRS_CLIPPLANEENABLE           :
-    case WINED3DRS_CLIPPING                  :
-        {
-            /* Ensure we only do the changed clip planes */
-            DWORD enable  = 0xFFFFFFFF;
-            DWORD disable = 0x00000000;
-
-            /* If enabling / disabling all */
-            if (State == WINED3DRS_CLIPPING) {
-                if (Value) {
-                    enable  = This->stateBlock->renderState[WINED3DRS_CLIPPLANEENABLE];
-                    disable = 0x00;
-                } else {
-                    disable = This->stateBlock->renderState[WINED3DRS_CLIPPLANEENABLE];
-                    enable  = 0x00;
-                }
-            } else {
-                enable =   Value & ~OldValue;
-                disable = ~Value &  OldValue;
-            }
-
-            if (enable & WINED3DCLIPPLANE0)  { glEnable(GL_CLIP_PLANE0);  checkGLcall("glEnable(clip plane 0)"); }
-            if (enable & WINED3DCLIPPLANE1)  { glEnable(GL_CLIP_PLANE1);  checkGLcall("glEnable(clip plane 1)"); }
-            if (enable & WINED3DCLIPPLANE2)  { glEnable(GL_CLIP_PLANE2);  checkGLcall("glEnable(clip plane 2)"); }
-            if (enable & WINED3DCLIPPLANE3)  { glEnable(GL_CLIP_PLANE3);  checkGLcall("glEnable(clip plane 3)"); }
-            if (enable & WINED3DCLIPPLANE4)  { glEnable(GL_CLIP_PLANE4);  checkGLcall("glEnable(clip plane 4)"); }
-            if (enable & WINED3DCLIPPLANE5)  { glEnable(GL_CLIP_PLANE5);  checkGLcall("glEnable(clip plane 5)"); }
-
-            if (disable & WINED3DCLIPPLANE0) { glDisable(GL_CLIP_PLANE0); checkGLcall("glDisable(clip plane 0)"); }
-            if (disable & WINED3DCLIPPLANE1) { glDisable(GL_CLIP_PLANE1); checkGLcall("glDisable(clip plane 1)"); }
-            if (disable & WINED3DCLIPPLANE2) { glDisable(GL_CLIP_PLANE2); checkGLcall("glDisable(clip plane 2)"); }
-            if (disable & WINED3DCLIPPLANE3) { glDisable(GL_CLIP_PLANE3); checkGLcall("glDisable(clip plane 3)"); }
-            if (disable & WINED3DCLIPPLANE4) { glDisable(GL_CLIP_PLANE4); checkGLcall("glDisable(clip plane 4)"); }
-            if (disable & WINED3DCLIPPLANE5) { glDisable(GL_CLIP_PLANE5); checkGLcall("glDisable(clip plane 5)"); }
-
-            /** update clipping status */
-            if (enable) {
-              This->stateBlock->clip_status.ClipUnion = 0;
-              This->stateBlock->clip_status.ClipIntersection = 0xFFFFFFFF;
-            } else {
-              This->stateBlock->clip_status.ClipUnion = 0;
-              This->stateBlock->clip_status.ClipIntersection = 0;
-            }
-        }
-        break;
-
-    case WINED3DRS_BLENDOP                   :
-        {
-            int glParm = GL_FUNC_ADD;
-
-            switch ((WINED3DBLENDOP) Value) {
-            case WINED3DBLENDOP_ADD              : glParm = GL_FUNC_ADD;              break;
-            case WINED3DBLENDOP_SUBTRACT         : glParm = GL_FUNC_SUBTRACT;         break;
-            case WINED3DBLENDOP_REVSUBTRACT      : glParm = GL_FUNC_REVERSE_SUBTRACT; break;
-            case WINED3DBLENDOP_MIN              : glParm = GL_MIN;                   break;
-            case WINED3DBLENDOP_MAX              : glParm = GL_MAX;                   break;
-            default:
-                FIXME("Unrecognized/Unhandled WINED3DBLENDOP value %d\n", Value);
-            }
-
-            if(GL_SUPPORT(EXT_BLEND_MINMAX)) {
-                TRACE("glBlendEquation(%x)\n", glParm);
-                GL_EXTCALL(glBlendEquation(glParm));
-                checkGLcall("glBlendEquation");
-            } else {
-                WARN("Unsupported in local OpenGL implementation: glBlendEquation\n");
-            }
-        }
-        break;
-
-    case WINED3DRS_TEXTUREFACTOR             :
-        {
-            unsigned int i;
-
-            /* Note the texture color applies to all textures whereas
-               GL_TEXTURE_ENV_COLOR applies to active only */
-            float col[4];
-            D3DCOLORTOGLFLOAT4(Value, col);
-
-            if (!GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-                /* And now the default texture color as well */
-                for (i = 0; i < GL_LIMITS(texture_stages); i++) {
-                    /* Note the WINED3DRS value applies to all textures, but GL has one
-                       per texture, so apply it now ready to be used!               */
-                    if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
-                        checkGLcall("glActiveTextureARB");
-                    } else if (i>0) {
-                        FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
-                    }
-
-                    glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, &col[0]);
-                    checkGLcall("glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, color);");
-                }
-            }
-        }
-        break;
-
-    case WINED3DRS_SPECULARENABLE            :
-        {
-            /* Originally this used glLightModeli(GL_LIGHT_MODEL_COLOR_CONTROL,GL_SEPARATE_SPECULAR_COLOR)
-               and (GL_LIGHT_MODEL_COLOR_CONTROL,GL_SINGLE_COLOR) to swap between enabled/disabled
-               specular color. This is wrong:
-               Separate specular color means the specular colour is maintained separately, whereas
-               single color means it is merged in. However in both cases they are being used to
-               some extent.
-               To disable specular color, set it explicitly to black and turn off GL_COLOR_SUM_EXT
-               NOTE: If not supported don't give FIXMEs the impact is really minimal and very few people are
-                  running 1.4 yet!
-             */
-            /*
-             * If register combiners are enabled, enabling / disabling GL_COLOR_SUM has no effect.
-             * Instead, we need to setup the FinalCombiner properly.
-             *
-             * The default setup for the FinalCombiner is:
-             *
-             * <variable>       <input>                             <mapping>               <usage>
-             * GL_VARIABLE_A_NV GL_FOG,                             GL_UNSIGNED_IDENTITY_NV GL_ALPHA
-             * GL_VARIABLE_B_NV GL_SPARE0_PLUS_SECONDARY_COLOR_NV   GL_UNSIGNED_IDENTITY_NV GL_RGB
-             * GL_VARIABLE_C_NV GL_FOG                              GL_UNSIGNED_IDENTITY_NV GL_RGB
-             * GL_VARIABLE_D_NV GL_ZERO                             GL_UNSIGNED_IDENTITY_NV GL_RGB
-             * GL_VARIABLE_E_NV GL_ZERO                             GL_UNSIGNED_IDENTITY_NV GL_RGB
-             * GL_VARIABLE_F_NV GL_ZERO                             GL_UNSIGNED_IDENTITY_NV GL_RGB
-             * GL_VARIABLE_G_NV GL_SPARE0_NV                        GL_UNSIGNED_IDENTITY_NV GL_ALPHA
-             *
-             * That's pretty much fine as it is, except for variable B, which needs to take
-             * either GL_SPARE0_PLUS_SECONDARY_COLOR_NV or GL_SPARE0_NV, depending on
-             * whether WINED3DRS_SPECULARENABLE is enabled or not.
-             */
-
-              if (Value) {
-                glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (float*) &This->updateStateBlock->material.Specular);
-                checkGLcall("glMaterialfv");
-                if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
-                  glEnable(GL_COLOR_SUM_EXT);
-                } else {
-                  TRACE("Specular colors cannot be enabled in this version of opengl\n");
-                }
-                checkGLcall("glEnable(GL_COLOR_SUM)");
-
-                if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-                    GL_EXTCALL(glFinalCombinerInputNV(GL_VARIABLE_B_NV, GL_SPARE0_PLUS_SECONDARY_COLOR_NV, GL_UNSIGNED_IDENTITY_NV, GL_RGB));
-                    checkGLcall("glFinalCombinerInputNV()");
-                }
-              } else {
-                float black[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-
-                /* for the case of enabled lighting: */
-                glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, &black[0]);
-                checkGLcall("glMaterialfv");
-
-                /* for the case of disabled lighting: */
-                if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
-                  glDisable(GL_COLOR_SUM_EXT);
-                } else {
-                  TRACE("Specular colors cannot be disabled in this version of opengl\n");
-                }
-                checkGLcall("glDisable(GL_COLOR_SUM)");
-
-                if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-                    GL_EXTCALL(glFinalCombinerInputNV(GL_VARIABLE_B_NV, GL_SPARE0_NV, GL_UNSIGNED_IDENTITY_NV, GL_RGB));
-                    checkGLcall("glFinalCombinerInputNV()");
-                }
-              }
-        }
-        break;
-
-    case WINED3DRS_STENCILENABLE :
-    case WINED3DRS_TWOSIDEDSTENCILMODE :
-    case WINED3DRS_STENCILFUNC :
-    case WINED3DRS_CCW_STENCILFUNC :
-    case WINED3DRS_STENCILREF :
-    case WINED3DRS_STENCILMASK :
-    case WINED3DRS_STENCILFAIL :
-    case WINED3DRS_STENCILZFAIL :
-    case WINED3DRS_STENCILPASS :
-    case WINED3DRS_CCW_STENCILFAIL :
-    case WINED3DRS_CCW_STENCILZFAIL :
-    case WINED3DRS_CCW_STENCILPASS :
-        renderstate_stencil(This, State, Value);
-        break;
-    case WINED3DRS_STENCILWRITEMASK          :
-        {
-            glStencilMask(Value);
-            TRACE("glStencilMask(%u)\n", Value);
-            checkGLcall("glStencilMask");
-        }
-        break;
-
-    case WINED3DRS_FOGENABLE                 :
-        {
-          if (Value) {
-               glEnable(GL_FOG);
-               checkGLcall("glEnable GL_FOG");
-            } else {
-               glDisable(GL_FOG);
-               checkGLcall("glDisable GL_FOG");
-            }
-        }
-        break;
-
-    case WINED3DRS_RANGEFOGENABLE            :
-        {
-            if (Value) {
-              TRACE("Enabled RANGEFOG\n");
-            } else {
-              TRACE("Disabled RANGEFOG\n");
-            }
-        }
-        break;
-
-    case WINED3DRS_FOGCOLOR                  :
-        {
-            float col[4];
-            D3DCOLORTOGLFLOAT4(Value, col);
-            /* Set the default alpha blend color */
-            glFogfv(GL_FOG_COLOR, &col[0]);
-            checkGLcall("glFog GL_FOG_COLOR");
-        }
-        break;
-
-    case WINED3DRS_FOGTABLEMODE              :
-    case WINED3DRS_FOGVERTEXMODE             :
-        {
-          /* DX 7 sdk: "If both render states(vertex and table fog) are set to valid modes, the system will apply only pixel(=table) fog effects." */
-          if(This->stateBlock->renderState[WINED3DRS_FOGTABLEMODE] == WINED3DFOG_NONE) {
-              glHint(GL_FOG_HINT, GL_FASTEST);
-              checkGLcall("glHint(GL_FOG_HINT, GL_FASTEST)");
-              switch (This->stateBlock->renderState[WINED3DRS_FOGVERTEXMODE]) {
-                  /* Processed vertices have their fog factor stored in the specular value. Fall too the none case.
-                   * If we are drawing untransformed vertices atm, d3ddevice_set_ortho will update the fog
-                   */
-                  case WINED3DFOG_EXP:  {
-                      if(!This->last_was_rhw) {
-                          glFogi(GL_FOG_MODE, GL_EXP);
-                          checkGLcall("glFogi(GL_FOG_MODE, GL_EXP");
-                          if(GL_SUPPORT(EXT_FOG_COORD)) {
-                              glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT);
-                              checkGLcall("glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT");
-                              IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGSTART, This->stateBlock->renderState[WINED3DRS_FOGSTART]);
-                              IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGEND, This->stateBlock->renderState[WINED3DRS_FOGEND]);
-                          }
-                          break;
-                      }
-                  }
-                  case WINED3DFOG_EXP2: {
-                      if(!This->last_was_rhw) {
-                          glFogi(GL_FOG_MODE, GL_EXP2);
-                          checkGLcall("glFogi(GL_FOG_MODE, GL_EXP2");
-                          if(GL_SUPPORT(EXT_FOG_COORD)) {
-                              glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT);
-                              checkGLcall("glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT");
-                              IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGSTART, This->stateBlock->renderState[WINED3DRS_FOGSTART]);
-                              IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGEND, This->stateBlock->renderState[WINED3DRS_FOGEND]);
-                          }
-                          break;
-                      }
-                  }
-                  case WINED3DFOG_LINEAR: {
-                      if(!This->last_was_rhw) {
-                          glFogi(GL_FOG_MODE, GL_LINEAR);
-                          checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR");
-                          if(GL_SUPPORT(EXT_FOG_COORD)) {
-                              glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT);
-                              checkGLcall("glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT");
-                              IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGSTART, This->stateBlock->renderState[WINED3DRS_FOGSTART]);
-                              IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGEND, This->stateBlock->renderState[WINED3DRS_FOGEND]);
-                          }
-                          break;
-                      }
-                  }
-                  case WINED3DFOG_NONE: {
-                      /* Both are none? According to msdn the alpha channel of the specular
-                       * color contains a fog factor. Set it in drawStridedSlow.
-                       * Same happens with Vertexfog on transformed vertices
-                       */
-                      if(GL_SUPPORT(EXT_FOG_COORD)) {
-                          glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FOG_COORDINATE_EXT);
-                          checkGLcall("glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FOG_COORDINATE_EXT)\n");
-                          glFogi(GL_FOG_MODE, GL_LINEAR);
-                          checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR)");
-                          glFogf(GL_FOG_START, (float) 0xff);
-                          checkGLcall("glFogfv GL_FOG_START");
-                          glFogf(GL_FOG_END, 0.0);
-                          checkGLcall("glFogfv GL_FOG_END");
-                      } else {
-                          /* Disable GL fog, handle this in software in drawStridedSlow */
-                          glDisable(GL_FOG);
-                          checkGLcall("glDisable(GL_FOG)");
-                      }
-                  break;
-                  }
-                  default: FIXME("Unexpected WINED3DRS_FOGVERTEXMODE %d\n", This->stateBlock->renderState[WINED3DRS_FOGVERTEXMODE]);
-              }
-          } else {
-              glHint(GL_FOG_HINT, GL_NICEST);
-              checkGLcall("glHint(GL_FOG_HINT, GL_NICEST)");
-              switch (This->stateBlock->renderState[WINED3DRS_FOGTABLEMODE]) {
-                  case WINED3DFOG_EXP:
-                                      glFogi(GL_FOG_MODE, GL_EXP);
-                                      checkGLcall("glFogi(GL_FOG_MODE, GL_EXP");
-                                      if(GL_SUPPORT(EXT_FOG_COORD)) {
-                                          glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT);
-                                          checkGLcall("glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT");
-                                          IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGSTART, This->stateBlock->renderState[WINED3DRS_FOGSTART]);
-                                          IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGEND, This->stateBlock->renderState[WINED3DRS_FOGEND]);
-                                      }
-                                      break;
-                  case WINED3DFOG_EXP2:
-                                      glFogi(GL_FOG_MODE, GL_EXP2);
-                                      checkGLcall("glFogi(GL_FOG_MODE, GL_EXP2");
-                                      if(GL_SUPPORT(EXT_FOG_COORD)) {
-                                          glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT);
-                                          checkGLcall("glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT");
-                                          IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGSTART, This->stateBlock->renderState[WINED3DRS_FOGSTART]);
-                                          IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGEND, This->stateBlock->renderState[WINED3DRS_FOGEND]);
-                                      }
-                                      break;
-                  case WINED3DFOG_LINEAR:
-                                      glFogi(GL_FOG_MODE, GL_LINEAR);
-                                      checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR");
-                                      if(GL_SUPPORT(EXT_FOG_COORD)) {
-                                          glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT);
-                                          checkGLcall("glFogi(GL_FOG_COORDINATE_SOURCE_EXT, GL_FRAGMENT_DEPTH_EXT");
-                                          IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGSTART, This->stateBlock->renderState[WINED3DRS_FOGSTART]);
-                                          IWineD3DDevice_SetRenderState(iface, WINED3DRS_FOGEND, This->stateBlock->renderState[WINED3DRS_FOGEND]);
-                                      }
-                                      break;
-                  case WINED3DFOG_NONE:
-                  default:            /* Won't happen */
-                                      FIXME("Unexpected WINED3DRS_FOGTABLEMODE %d\n", This->stateBlock->renderState[WINED3DRS_FOGTABLEMODE]);
-              }
-          }
-          if (GL_SUPPORT(NV_FOG_DISTANCE)) {
-            glFogi(GL_FOG_DISTANCE_MODE_NV, GL_EYE_PLANE_ABSOLUTE_NV);
-          }
-        }
-        break;
-
-    case WINED3DRS_FOGSTART                  :
-        {
-            tmpvalue.d = Value;
-            glFogfv(GL_FOG_START, &tmpvalue.f);
-            checkGLcall("glFogf(GL_FOG_START, (float) Value)");
-            TRACE("Fog Start == %f\n", tmpvalue.f);
-        }
-        break;
-
-    case WINED3DRS_FOGEND                    :
-        {
-            tmpvalue.d = Value;
-            glFogfv(GL_FOG_END, &tmpvalue.f);
-            checkGLcall("glFogf(GL_FOG_END, (float) Value)");
-            TRACE("Fog End == %f\n", tmpvalue.f);
-        }
-        break;
-
-    case WINED3DRS_FOGDENSITY                :
-        {
-            tmpvalue.d = Value;
-            glFogfv(GL_FOG_DENSITY, &tmpvalue.f);
-            checkGLcall("glFogf(GL_FOG_DENSITY, (float) Value)");
-        }
-        break;
-
-    case WINED3DRS_VERTEXBLEND               :
-        {
-          This->updateStateBlock->vertex_blend = (WINED3DVERTEXBLENDFLAGS) Value;
-          TRACE("Vertex Blending state to %d\n",  Value);
-        }
-        break;
-
-    case WINED3DRS_TWEENFACTOR               :
-        {
-          tmpvalue.d = Value;
-          This->updateStateBlock->tween_factor = tmpvalue.f;
-          TRACE("Vertex Blending Tween Factor to %f\n", This->updateStateBlock->tween_factor);
-        }
-        break;
-
-    case WINED3DRS_INDEXEDVERTEXBLENDENABLE  :
-        {
-          TRACE("Indexed Vertex Blend Enable to %u\n", (BOOL) Value);
-        }
-        break;
-
-    case WINED3DRS_COLORVERTEX               :
-    case WINED3DRS_DIFFUSEMATERIALSOURCE     :
-    case WINED3DRS_SPECULARMATERIALSOURCE    :
-    case WINED3DRS_AMBIENTMATERIALSOURCE     :
-    case WINED3DRS_EMISSIVEMATERIALSOURCE    :
-        {
-            GLenum Parm = GL_AMBIENT_AND_DIFFUSE;
-
-            if (This->stateBlock->renderState[WINED3DRS_COLORVERTEX]) {
-                TRACE("diff %d, amb %d, emis %d, spec %d\n",
-                      This->stateBlock->renderState[WINED3DRS_DIFFUSEMATERIALSOURCE],
-                      This->stateBlock->renderState[WINED3DRS_AMBIENTMATERIALSOURCE],
-                      This->stateBlock->renderState[WINED3DRS_EMISSIVEMATERIALSOURCE],
-                      This->stateBlock->renderState[WINED3DRS_SPECULARMATERIALSOURCE]);
-
-                if (This->stateBlock->renderState[WINED3DRS_DIFFUSEMATERIALSOURCE] == WINED3DMCS_COLOR1) {
-                    if (This->stateBlock->renderState[WINED3DRS_AMBIENTMATERIALSOURCE] == WINED3DMCS_COLOR1) {
-                        Parm = GL_AMBIENT_AND_DIFFUSE;
-                    } else {
-                        Parm = GL_DIFFUSE;
-                    }
-                } else if (This->stateBlock->renderState[WINED3DRS_AMBIENTMATERIALSOURCE] == WINED3DMCS_COLOR1) {
-                    Parm = GL_AMBIENT;
-                } else if (This->stateBlock->renderState[WINED3DRS_EMISSIVEMATERIALSOURCE] == WINED3DMCS_COLOR1) {
-                    Parm = GL_EMISSION;
-                } else if (This->stateBlock->renderState[WINED3DRS_SPECULARMATERIALSOURCE] == WINED3DMCS_COLOR1) {
-                    Parm = GL_SPECULAR;
-                } else {
-                    Parm = -1;
-                }
-
-                if (Parm == -1) {
-                    if (This->tracking_color != DISABLED_TRACKING) This->tracking_color = NEEDS_DISABLE;
-                } else {
-                    This->tracking_color = NEEDS_TRACKING;
-                    This->tracking_parm  = Parm;
-                }
-
-            } else {
-                if (This->tracking_color != DISABLED_TRACKING) This->tracking_color = NEEDS_DISABLE;
-            }
-        }
-        break;
-
-    case WINED3DRS_LINEPATTERN               :
-        {
-            union {
-                DWORD                 d;
-                WINED3DLINEPATTERN    lp;
-            } tmppattern;
-            tmppattern.d = Value;
-
-            TRACE("Line pattern: repeat %d bits %x\n", tmppattern.lp.wRepeatFactor, tmppattern.lp.wLinePattern);
-
-            if (tmppattern.lp.wRepeatFactor) {
-                glLineStipple(tmppattern.lp.wRepeatFactor, tmppattern.lp.wLinePattern);
-                checkGLcall("glLineStipple(repeat, linepattern)");
-                glEnable(GL_LINE_STIPPLE);
-                checkGLcall("glEnable(GL_LINE_STIPPLE);");
-            } else {
-                glDisable(GL_LINE_STIPPLE);
-                checkGLcall("glDisable(GL_LINE_STIPPLE);");
-            }
-        }
-        break;
-
-    case WINED3DRS_ZBIAS                     : /* D3D8 only */
-        {
-            if (Value) {
-                tmpvalue.d = Value;
-                TRACE("ZBias value %f\n", tmpvalue.f);
-                glPolygonOffset(0, -tmpvalue.f);
-                checkGLcall("glPolygonOffset(0, -Value)");
-                glEnable(GL_POLYGON_OFFSET_FILL);
-                checkGLcall("glEnable(GL_POLYGON_OFFSET_FILL);");
-                glEnable(GL_POLYGON_OFFSET_LINE);
-                checkGLcall("glEnable(GL_POLYGON_OFFSET_LINE);");
-                glEnable(GL_POLYGON_OFFSET_POINT);
-                checkGLcall("glEnable(GL_POLYGON_OFFSET_POINT);");
-            } else {
-                glDisable(GL_POLYGON_OFFSET_FILL);
-                checkGLcall("glDisable(GL_POLYGON_OFFSET_FILL);");
-                glDisable(GL_POLYGON_OFFSET_LINE);
-                checkGLcall("glDisable(GL_POLYGON_OFFSET_LINE);");
-                glDisable(GL_POLYGON_OFFSET_POINT);
-                checkGLcall("glDisable(GL_POLYGON_OFFSET_POINT);");
-            }
-        }
-        break;
-
-    case WINED3DRS_NORMALIZENORMALS          :
-        if (Value) {
-            glEnable(GL_NORMALIZE);
-            checkGLcall("glEnable(GL_NORMALIZE);");
-        } else {
-            glDisable(GL_NORMALIZE);
-            checkGLcall("glDisable(GL_NORMALIZE);");
-        }
-        break;
-
-    case WINED3DRS_POINTSIZE                 :
-        /* FIXME: check that pointSize isn't outside glGetFloatv( GL_POINT_SIZE_MAX_ARB, &maxSize ); or -ve */
-        tmpvalue.d = Value;
-        TRACE("Set point size to %f\n", tmpvalue.f);
-        glPointSize(tmpvalue.f);
-        checkGLcall("glPointSize(...);");
-        break;
-
-    case WINED3DRS_POINTSIZE_MIN             :
-        if (GL_SUPPORT(EXT_POINT_PARAMETERS)) {
-          tmpvalue.d = Value;
-          GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MIN_EXT, tmpvalue.f);
-          checkGLcall("glPointParameterfEXT(...);");
-        } else {
-          FIXME("WINED3DRS_POINTSIZE_MIN not supported on this opengl\n");
-        }
-        break;
-
-    case WINED3DRS_POINTSIZE_MAX             :
-        if (GL_SUPPORT(EXT_POINT_PARAMETERS)) {
-          tmpvalue.d = Value;
-          GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MAX_EXT, tmpvalue.f);
-          checkGLcall("glPointParameterfEXT(...);");
-        } else {
-          FIXME("WINED3DRS_POINTSIZE_MAX not supported on this opengl\n");
-        }
-        break;
-
-    case WINED3DRS_POINTSCALE_A              :
-    case WINED3DRS_POINTSCALE_B              :
-    case WINED3DRS_POINTSCALE_C              :
-    case WINED3DRS_POINTSCALEENABLE          :
-    {
-        /*
-         * POINTSCALEENABLE controls how point size value is treated. If set to
-         * true, the point size is scaled with respect to height of viewport.
-         * When set to false point size is in pixels.
-         *
-         * http://msdn.microsoft.com/library/en-us/directx9_c/point_sprites.asp
-         */
-
-        /* Default values */
-        GLfloat att[3] = {1.0f, 0.0f, 0.0f};
-
-        /*
-         * Minimum valid point size for OpenGL is 1.0f. For Direct3D it is 0.0f.
-         * This means that OpenGL will clamp really small point sizes to 1.0f.
-         * To correct for this we need to multiply by the scale factor when sizes
-         * are less than 1.0f. scale_factor =  1.0f / point_size.
-         */
-        GLfloat pointSize = *((float*)&This->stateBlock->renderState[WINED3DRS_POINTSIZE]);
-        if(pointSize > 0.0f) {
-            GLfloat scaleFactor;
-
-            if(pointSize < 1.0f) {
-                scaleFactor = pointSize * pointSize;
-            } else {
-                scaleFactor = 1.0f;
-            }
-
-            if(This->stateBlock->renderState[WINED3DRS_POINTSCALEENABLE]) {
-                att[0] = *((float*)&This->stateBlock->renderState[WINED3DRS_POINTSCALE_A]) /
-                    (This->stateBlock->viewport.Height * This->stateBlock->viewport.Height * scaleFactor);
-                att[1] = *((float*)&This->stateBlock->renderState[WINED3DRS_POINTSCALE_B]) /
-                    (This->stateBlock->viewport.Height * This->stateBlock->viewport.Height * scaleFactor);
-                att[2] = *((float*)&This->stateBlock->renderState[WINED3DRS_POINTSCALE_C]) /
-                    (This->stateBlock->viewport.Height * This->stateBlock->viewport.Height * scaleFactor);
-            }
-        }
-
-        if(GL_SUPPORT(ARB_POINT_PARAMETERS)) {
-            GL_EXTCALL(glPointParameterfvARB)(GL_POINT_DISTANCE_ATTENUATION_ARB, att);
-            checkGLcall("glPointParameterfvARB(GL_DISTANCE_ATTENUATION_ARB, ...");
-        }
-        else if(GL_SUPPORT(EXT_POINT_PARAMETERS)) {
-            GL_EXTCALL(glPointParameterfvEXT)(GL_DISTANCE_ATTENUATION_EXT, att);
-            checkGLcall("glPointParameterfvEXT(GL_DISTANCE_ATTENUATION_EXT, ...");
-        } else {
-            TRACE("POINT_PARAMETERS not supported in this version of opengl\n");
-        }
-	break;
+    /* Compared here and not before the assignment to allow proper stateblock recording */
+    if(Value == oldValue) {
+        TRACE("Application is setting the old value over, nothing to do\n");
+    } else {
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(State));
     }
-    case WINED3DRS_COLORWRITEENABLE          :
-      {
-        TRACE("Color mask: r(%d) g(%d) b(%d) a(%d)\n",
-              Value & WINED3DCOLORWRITEENABLE_RED   ? 1 : 0,
-              Value & WINED3DCOLORWRITEENABLE_GREEN ? 1 : 0,
-              Value & WINED3DCOLORWRITEENABLE_BLUE  ? 1 : 0,
-              Value & WINED3DCOLORWRITEENABLE_ALPHA ? 1 : 0);
-        glColorMask(Value & WINED3DCOLORWRITEENABLE_RED   ? GL_TRUE : GL_FALSE,
-                    Value & WINED3DCOLORWRITEENABLE_GREEN ? GL_TRUE : GL_FALSE,
-                    Value & WINED3DCOLORWRITEENABLE_BLUE  ? GL_TRUE : GL_FALSE,
-                    Value & WINED3DCOLORWRITEENABLE_ALPHA ? GL_TRUE : GL_FALSE);
-        checkGLcall("glColorMask(...)");
-      }
-      break;
-
-    case WINED3DRS_LOCALVIEWER               :
-      {
-        GLint state = (Value) ? 1 : 0;
-        TRACE("Local Viewer Enable to %ul\n", (BOOL) Value);
-        glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, state);
-      }
-      break;
-
-    case WINED3DRS_LASTPIXEL                 :
-      {
-        if (Value) {
-          TRACE("Last Pixel Drawing Enabled\n");
-        } else {
-          FIXME("Last Pixel Drawing Disabled, not handled yet\n");
-        }
-      }
-      break;
-
-    case WINED3DRS_SOFTWAREVERTEXPROCESSING  :
-      {
-        if (Value) {
-          TRACE("Software Processing Enabled\n");
-        } else {
-          TRACE("Software Processing Disabled\n");
-        }
-      }
-      break;
-
-      /** not supported */
-    case WINED3DRS_ZVISIBLE                  :
-      {
-        LEAVE_GL();
-        return WINED3DERR_INVALIDCALL;
-      }
-    case WINED3DRS_POINTSPRITEENABLE         :
-    {
-        /* TODO: NV_POINT_SPRITE */
-        if (!GL_SUPPORT(ARB_POINT_SPRITE)) {
-            TRACE("Point sprites not supported\n");
-            break;
-        }
-
-        /*
-         * Point sprites are always enabled. Value controls texture coordinate
-         * replacement mode. Must be set true for point sprites to use
-         * textures.
-         */
-        glEnable(GL_POINT_SPRITE_ARB);
-        checkGLcall("glEnable(GL_POINT_SPRITE_ARB)");
-
-        if (Value) {
-            glTexEnvf(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, TRUE);
-            checkGLcall("glTexEnvf(GL_POINT_SPRITE, GL_COORD_REPLACE, TRUE)");
-        } else {
-            glTexEnvf(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, FALSE);
-            checkGLcall("glTexEnvf(GL_POINT_SPRITE, GL_COORD_REPLACE, FALSE)");
-        }
-        break;
-    }
-    case WINED3DRS_EDGEANTIALIAS             :
-    {
-        if(Value) {
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glEnable(GL_BLEND);
-            checkGLcall("glEnable(GL_BLEND)");
-            glEnable(GL_LINE_SMOOTH);
-            checkGLcall("glEnable(GL_LINE_SMOOTH)");
-        } else {
-            if(!This->stateBlock->renderState[WINED3DRS_ALPHABLENDENABLE]) {
-                glDisable(GL_BLEND);
-                checkGLcall("glDisable(GL_BLEND)");
-            }
-            glDisable(GL_LINE_SMOOTH);
-            checkGLcall("glDisable(GL_LINE_SMOOTH)");
-        }
-        break;
-    }
-    case WINED3DRS_WRAP0                     :
-    case WINED3DRS_WRAP1                     :
-    case WINED3DRS_WRAP2                     :
-    case WINED3DRS_WRAP3                     :
-    case WINED3DRS_WRAP4                     :
-    case WINED3DRS_WRAP5                     :
-    case WINED3DRS_WRAP6                     :
-    case WINED3DRS_WRAP7                     :
-    case WINED3DRS_WRAP8                     :
-    case WINED3DRS_WRAP9                     :
-    case WINED3DRS_WRAP10                    :
-    case WINED3DRS_WRAP11                    :
-    case WINED3DRS_WRAP12                    :
-    case WINED3DRS_WRAP13                    :
-    case WINED3DRS_WRAP14                    :
-    case WINED3DRS_WRAP15                    :
-    /**
-    http://www.cosc.brocku.ca/Offerings/3P98/course/lectures/texture/
-    http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/graphics/programmingguide/FixedFunction/Textures/texturewrapping.asp
-    http://www.gamedev.net/reference/programming/features/rendererdll3/page2.asp
-    Descussion that ways to turn on WRAPing to solve an opengl conversion problem.
-    http://www.flipcode.org/cgi-bin/fcmsg.cgi?thread_show=10248
-
-    so far as I can tell, wrapping and texture-coordinate generate go hand in hand,
-    */
-    {
-        if(Value) {
-            ERR("(%p)->(%s,%d) Texture wraping not yet supported\n",This, debug_d3drenderstate(State), Value);
-        }
-        break;
-    }
-
-    case WINED3DRS_MULTISAMPLEANTIALIAS      :
-    {
-        if( GL_SUPPORT(ARB_MULTISAMPLE) ) {
-            if(Value) {
-                glEnable(GL_MULTISAMPLE_ARB);
-                checkGLcall("glEnable(GL_MULTISAMPLE_ARB)");
-            } else {
-                glDisable(GL_MULTISAMPLE_ARB);
-                checkGLcall("glDisable(GL_MULTISAMPLE_ARB)");
-            }
-        } else {
-            if(Value) {
-                ERR("Multisample antialiasing not supported by gl\n");
-            }
-        }
-        break;
-    }
-
-    case WINED3DRS_SCISSORTESTENABLE :
-    {
-        if(Value) {
-            glEnable(GL_SCISSOR_TEST);
-            checkGLcall("glEnable(GL_SCISSOR_TEST)");
-        } else {
-            glDisable(GL_SCISSOR_TEST);
-            checkGLcall("glDisable(GL_SCISSOR_TEST)");
-        }
-        break;
-    }
-    case WINED3DRS_SLOPESCALEDEPTHBIAS :
-    {
-        if(Value) {
-            tmpvalue.d = Value;
-            glEnable(GL_POLYGON_OFFSET_FILL);
-            checkGLcall("glEnable(GL_POLYGON_OFFSET_FILL)");
-            glPolygonOffset(tmpvalue.f, *((float*)&This->stateBlock->renderState[WINED3DRS_DEPTHBIAS]));
-            checkGLcall("glPolygonOffset(...)");
-        } else {
-            glDisable(GL_POLYGON_OFFSET_FILL);
-            checkGLcall("glDisable(GL_POLYGON_OFFSET_FILL)");
-        }
-        break;
-    }
-    case WINED3DRS_ANTIALIASEDLINEENABLE :
-    {
-        if(Value) {
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glEnable(GL_BLEND);
-            checkGLcall("glEnable(GL_BLEND)");
-            glEnable(GL_LINE_SMOOTH);
-            checkGLcall("glEnable(GL_LINE_SMOOTH)");
-        } else {
-            glDisable(GL_BLEND);
-            checkGLcall("glDisable(GL_BLEND)");
-            glDisable(GL_LINE_SMOOTH);
-            checkGLcall("glDisable(GL_LINE_SMOOTH)");
-        }
-        break;
-    }
-    case WINED3DRS_DEPTHBIAS :
-    {
-        if(Value) {
-            tmpvalue.d = Value;
-            glEnable(GL_POLYGON_OFFSET_FILL);
-            checkGLcall("glEnable(GL_POLYGON_OFFSET_FILL)");
-            glPolygonOffset(*((float*)&This->stateBlock->renderState[WINED3DRS_SLOPESCALEDEPTHBIAS]), tmpvalue.f);
-            checkGLcall("glPolygonOffset(...)");
-        } else {
-            glDisable(GL_POLYGON_OFFSET_FILL);
-            checkGLcall("glDisable(GL_POLYGON_OFFSET_FILL)");
-        }
-        break;
-    }
-
-    case WINED3DRS_TEXTUREPERSPECTIVE    :
-    {
-        if (Value)
-            glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);
-        else
-            glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_FASTEST);
-        break;
-    }
-
-    case WINED3DRS_STIPPLEDALPHA    :
-    {
-        if (Value)
-            ERR(" Stippled Alpha not supported yet.\n");
-        break;
-    }
-    case WINED3DRS_ANTIALIAS :
-    {
-        if (Value)
-            ERR(" Antialias not supported yet.\n");
-        break;
-    }
-
-    case WINED3DRS_MULTISAMPLEMASK :
-    {
-        if(0xFFFFFFFF != Value)
-            ERR("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_PATCHEDGESTYLE :
-    {
-        if(WINED3DPATCHEDGE_DISCRETE != Value)
-            ERR("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_PATCHSEGMENTS :
-    {
-        /* available in d3d8 but in d3d9 it was replaced by IDirect3DDevice9::SetNPatchMode */
-        tmpvalue.f = 1.0f;
-        if(tmpvalue.d != Value)
-            ERR("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_DEBUGMONITORTOKEN :
-    {
-        /* Only useful for "debug builds". */
-        if(0xbaadcafe != Value) {
-            /* MSDN says the default is D3DDMT_ENABLE but our tests confirm 0xbaadcafe is the default. */
-            /* MSDN says anything other than D3DDMT_ENABLE or DISABLE does not change the state,
-             * but our tests disagree.
-             * We do not claim to implement a debugging lib, so do not write an ERR
-             */
-            WARN("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        }
-        break;
-    }
-
-    case WINED3DRS_POSITIONDEGREE :
-    {
-        if(WINED3DDEGREE_CUBIC != Value)
-            ERR("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_NORMALDEGREE :
-    {
-        if(WINED3DDEGREE_LINEAR != Value)
-            ERR("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_MINTESSELLATIONLEVEL :
-    case WINED3DRS_MAXTESSELLATIONLEVEL :
-    case WINED3DRS_ADAPTIVETESS_X :
-    case WINED3DRS_ADAPTIVETESS_Y :
-    case WINED3DRS_ADAPTIVETESS_Z :
-    case WINED3DRS_ADAPTIVETESS_W :
-    {
-        if(This->stateBlock->renderState[WINED3DRS_ENABLEADAPTIVETESSELLATION])
-            FIXME("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        else
-            TRACE("(%p)->(%s,%d): recording state but WINED3DRS_ENABLEADAPTIVETESSELLATION is not enabled\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_ENABLEADAPTIVETESSELLATION:
-    {
-        if(Value)
-            ERR("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_COLORWRITEENABLE1         :
-    case WINED3DRS_COLORWRITEENABLE2         :
-    case WINED3DRS_COLORWRITEENABLE3         :
-    {
-        /* depends on WINED3DRS_COLORWRITEENABLE. */
-        if(0x0000000F != Value)
-            ERR("(%p)->(%s,%d) not yet implemented. Missing of cap D3DPMISCCAPS_INDEPENDENTWRITEMASKS wasn't honored?\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_BLENDFACTOR               :
-    {
-        float col[4];
-
-        TRACE("Setting BlendFactor to %d\n", Value);
-
-        D3DCOLORTOGLFLOAT4(Value, col);
-        if (0xFFFFFFFF != Value) {
-            glEnable(GL_BLEND);
-            checkGLcall("glEnable(GL_BLEND)");
-        }
-        else {
-           glDisable(GL_BLEND);
-           checkGLcall("glDisable(GL_BLEND)");
-        }
-        glBlendColor (col[0],col[1],col[2],col[3]);
-        break;
-    }
-
-    case WINED3DRS_SRGBWRITEENABLE           :
-    {
-        if(Value)
-            ERR("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_SEPARATEALPHABLENDENABLE  :
-    {
-        if(Value)
-            ERR("(%p)->(%s,%d) not yet implemented. Missing of cap D3DPMISCCAPS_SEPARATEALPHABLEND wasn't honored?\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    case WINED3DRS_SRCBLENDALPHA             :
-    case WINED3DRS_DESTBLENDALPHA            :
-    case WINED3DRS_BLENDOPALPHA              :
-    {
-        if(This->stateBlock->renderState[WINED3DRS_SEPARATEALPHABLENDENABLE])
-            FIXME("(%p)->(%s,%d) not yet implemented\n", This, debug_d3drenderstate(State), Value);
-        else
-            TRACE("(%p)->(%s,%d): recording state but WINED3DRS_SEPARATEALPHABLENDENABLE is not enabled\n", This, debug_d3drenderstate(State), Value);
-        break;
-    }
-
-    default:
-        FIXME("(%p)->(%s,%d) unknown state\n", This, debug_d3drenderstate(State), Value);
-    }
-
-    LEAVE_GL();
 
     return WINED3D_OK;
 }
@@ -4603,6 +3121,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetRenderState(IWineD3DDevice *iface, W
 
 static HRESULT WINAPI IWineD3DDeviceImpl_SetSamplerState(IWineD3DDevice *iface, DWORD Sampler, WINED3DSAMPLERSTATETYPE Type, DWORD Value) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    DWORD oldValue = This->stateBlock->samplerState[Sampler][Type];
+
     /**
     * SetSampler is designed to allow for more than the standard up to 8 textures
     *  and Geforce has stopped supporting more than 6 standard textures in openGL.
@@ -4617,7 +3137,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetSamplerState(IWineD3DDevice *iface, 
     * GL_MAX_TEXTURE_COORDS_ARB.
     * Ok GForce say it's ok to use glTexParameter/glGetTexParameter(...).
      ******************/
-    /** NOTE: States are appled in IWineD3DBaseTextre ApplyStateChanges and IWineD3DDevice SetupTextureStates**/
+    /** NOTE: States are applied in IWineD3DBaseTextre ApplyStateChanges the sampler state handler**/
     if(Sampler >  GL_LIMITS(sampler_stages) || Sampler < 0 || Type > WINED3D_HIGHEST_SAMPLER_STATE || Type < 0) {
          FIXME("sampler %d type %s(%u) is out of range [max_samplers=%d, highest_state=%d]\n",
             Sampler, debug_d3dsamplerstate(Type), Type, GL_LIMITS(sampler_stages), WINED3D_HIGHEST_SAMPLER_STATE);
@@ -4635,6 +3155,13 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetSamplerState(IWineD3DDevice *iface, 
         TRACE("Recording... not performing anything\n");
         return WINED3D_OK;
     }
+
+    if(oldValue == Value) {
+        TRACE("Application is setting the old value over, nothing to do\n");
+        return WINED3D_OK;
+    }
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(Sampler));
 
     return WINED3D_OK;
 }
@@ -4696,14 +3223,14 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetVertexDeclaration(IWineD3DDevice* if
 
     if (This->isRecordingState) {
         TRACE("Recording... not performing anything\n");
+        return WINED3D_OK;
+    } else if(pDecl == oldDecl) {
+        /* Checked after the assignment to allow proper stateblock recording */
+        TRACE("Application is setting the old declaration over, nothing to do\n");
+        return WINED3D_OK;
     }
 
-    if (NULL != pDecl) {
-        IWineD3DVertexDeclaration_AddRef(pDecl);
-    }
-    if (NULL != oldDecl) {
-        IWineD3DVertexDeclaration_Release(oldDecl);
-    }
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VDECL);
     return WINED3D_OK;
 }
 
@@ -4727,19 +3254,17 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetVertexShader(IWineD3DDevice *iface, 
 
     if (This->isRecordingState) {
         TRACE("Recording... not performing anything\n");
-    }
-
-    if (NULL != pShader) {
-        IWineD3DVertexShader_AddRef(pShader);
-    }
-    if (NULL != oldShader) {
-        IWineD3DVertexShader_Release(oldShader);
+        return WINED3D_OK;
+    } else if(oldShader == pShader) {
+        /* Checked here to allow proper stateblock recording */
+        TRACE("App is setting the old shader over, nothing to do\n");
+        return WINED3D_OK;
     }
 
     TRACE("(%p) : setting pShader(%p)\n", This, pShader);
-    /**
-     * TODO: merge HAL shaders context switching from prototype
-     */
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VSHADER);
+
     return WINED3D_OK;
 }
 
@@ -4780,6 +3305,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetVertexShaderConstantB(
         This->updateStateBlock->changed.vertexShaderConstantsB[i] = TRUE;
         This->updateStateBlock->set.vertexShaderConstantsB[i]     = TRUE;
     }
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VERTEXSHADERCONSTANT);
 
     return WINED3D_OK;
 }
@@ -4827,6 +3354,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetVertexShaderConstantI(
         This->updateStateBlock->changed.vertexShaderConstantsI[i] = TRUE;
         This->updateStateBlock->set.vertexShaderConstantsI[i]     = TRUE;
     }
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VERTEXSHADERCONSTANT);
 
     return WINED3D_OK;
 }
@@ -4880,6 +3409,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetVertexShaderConstantF(
         This->updateStateBlock->changed.vertexShaderConstantsF[i] = TRUE;
     }
 
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VERTEXSHADERCONSTANT);
+
     return WINED3D_OK;
 }
 
@@ -4902,6 +3433,83 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetVertexShaderConstantF(
     return WINED3D_OK;
 }
 
+static inline void markTextureStagesDirty(IWineD3DDeviceImpl *This, DWORD stage) {
+    DWORD i;
+    for(i = 0; i < WINED3D_HIGHEST_TEXTURE_STATE; i++) {
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TEXTURESTAGE(stage, i));
+    }
+}
+
+static void IWineD3DDeviceImpl_FindTexUnitMap(IWineD3DDeviceImpl *This) {
+    DWORD i, tex;
+    /* This code can assume that GL_NV_register_combiners are supported, otherwise
+     * it is never called.
+     *
+     * Rules are:
+     * -> Pixel shaders need a 1:1 map. In theory the shader input could be mapped too, but
+     * that would be really messy and require shader recompilation
+     * -> When the mapping of a stage is changed, sampler and ALL texture stage states have
+     * to be reset. Because of that try to work with a 1:1 mapping as much as possible
+     * -> Whith a 1:1 mapping oneToOneTexUnitMap is set to avoid checking MAX_SAMPLERS array
+     * entries to make pixel shaders cheaper. MAX_SAMPLERS will be 128 in dx10
+     */
+    if(This->stateBlock->pixelShader || This->stateBlock->lowest_disabled_stage <= GL_LIMITS(textures)) {
+        if(This->oneToOneTexUnitMap) {
+            TRACE("Not touching 1:1 map\n");
+            return;
+        }
+        TRACE("Restoring 1:1 texture unit mapping\n");
+        /* Restore a 1:1 mapping */
+        for(i = 0; i < MAX_SAMPLERS; i++) {
+            if(This->texUnitMap[i] != i) {
+                This->texUnitMap[i] = i;
+                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(i));
+                markTextureStagesDirty(This, i);
+            }
+        }
+        This->oneToOneTexUnitMap = TRUE;
+        return;
+    } else {
+        /* No pixel shader, and we do not have enough texture units available. Try to skip NULL textures
+         * First, see if we can succeed at all
+         */
+        tex = 0;
+        for(i = 0; i < This->stateBlock->lowest_disabled_stage; i++) {
+            if(This->stateBlock->textures[i] == NULL) tex++;
+        }
+
+        if(GL_LIMITS(textures) + tex < This->stateBlock->lowest_disabled_stage) {
+            FIXME("Too many bound textures to support the combiner settings\n");
+            return;
+        }
+
+        /* Now work out the mapping */
+        tex = 0;
+        This->oneToOneTexUnitMap = FALSE;
+        WARN("Non 1:1 mapping UNTESTED!\n");
+        for(i = 0; i < This->stateBlock->lowest_disabled_stage; i++) {
+            /* Skip NULL textures */
+            if (!This->stateBlock->textures[i]) {
+                /* Map to -1, so the check below doesn't fail if a non-NULL
+                 * texture is set on this stage */
+                TRACE("Mapping texture stage %d to -1\n", i);
+                This->texUnitMap[i] = -1;
+
+                continue;
+            }
+
+            TRACE("Mapping texture stage %d to unit %d\n", i, tex);
+            if(This->texUnitMap[i] != tex) {
+                This->texUnitMap[i] = tex;
+                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(i));
+                markTextureStagesDirty(This, i);
+            }
+
+            ++tex;
+        }
+    }
+}
+
 static HRESULT WINAPI IWineD3DDeviceImpl_SetPixelShader(IWineD3DDevice *iface, IWineD3DPixelShader *pShader) {
     IWineD3DDeviceImpl *This        = (IWineD3DDeviceImpl *)iface;
     IWineD3DPixelShader *oldShader  = This->updateStateBlock->pixelShader;
@@ -4914,17 +3522,24 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetPixelShader(IWineD3DDevice *iface, I
         TRACE("Recording... not performing anything\n");
     }
 
-    if (NULL != pShader) {
-        IWineD3DPixelShader_AddRef(pShader);
+    if (This->isRecordingState) {
+        TRACE("Recording... not performing anything\n");
+        return WINED3D_OK;
     }
-    if (NULL != oldShader) {
-        IWineD3DPixelShader_Release(oldShader);
+
+    if(pShader == oldShader) {
+        TRACE("App is setting the old pixel shader over, nothing to do\n");
+        return WINED3D_OK;
     }
 
     TRACE("(%p) : setting pShader(%p)\n", This, pShader);
-    /**
-     * TODO: merge HAL shaders context switching from prototype
-     */
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_PIXELSHADER);
+
+    /* Rebuild the texture unit mapping if nvrc's are supported */
+    if(GL_SUPPORT(NV_REGISTER_COMBINERS)) {
+        IWineD3DDeviceImpl_FindTexUnitMap(This);
+    }
+
     return WINED3D_OK;
 }
 
@@ -4967,6 +3582,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetPixelShaderConstantB(
         This->updateStateBlock->changed.pixelShaderConstantsB[i] = TRUE;
         This->updateStateBlock->set.pixelShaderConstantsB[i]     = TRUE;
     }
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_PIXELSHADERCONSTANT);
 
     return WINED3D_OK;
 }
@@ -5014,6 +3631,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetPixelShaderConstantI(
         This->updateStateBlock->changed.pixelShaderConstantsI[i] = TRUE;
         This->updateStateBlock->set.pixelShaderConstantsI[i]     = TRUE;
     }
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_PIXELSHADERCONSTANT);
 
     return WINED3D_OK;
 }
@@ -5066,6 +3685,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetPixelShaderConstantF(
         }
         This->updateStateBlock->changed.pixelShaderConstantsF[i] = TRUE;
     }
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_PIXELSHADERCONSTANT);
 
     return WINED3D_OK;
 }
@@ -5187,22 +3808,22 @@ process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIndex, DWORD dwCo
                                  &world_mat);
 
     TRACE("View mat:\n");
-    TRACE("%f %f %f %f\n", view_mat.u.s._11, view_mat.u.s._12, view_mat.u.s._13, view_mat.u.s._14); \
-    TRACE("%f %f %f %f\n", view_mat.u.s._21, view_mat.u.s._22, view_mat.u.s._23, view_mat.u.s._24); \
-    TRACE("%f %f %f %f\n", view_mat.u.s._31, view_mat.u.s._32, view_mat.u.s._33, view_mat.u.s._34); \
-    TRACE("%f %f %f %f\n", view_mat.u.s._41, view_mat.u.s._42, view_mat.u.s._43, view_mat.u.s._44); \
+    TRACE("%f %f %f %f\n", view_mat.u.s._11, view_mat.u.s._12, view_mat.u.s._13, view_mat.u.s._14);
+    TRACE("%f %f %f %f\n", view_mat.u.s._21, view_mat.u.s._22, view_mat.u.s._23, view_mat.u.s._24);
+    TRACE("%f %f %f %f\n", view_mat.u.s._31, view_mat.u.s._32, view_mat.u.s._33, view_mat.u.s._34);
+    TRACE("%f %f %f %f\n", view_mat.u.s._41, view_mat.u.s._42, view_mat.u.s._43, view_mat.u.s._44);
 
     TRACE("Proj mat:\n");
-    TRACE("%f %f %f %f\n", proj_mat.u.s._11, proj_mat.u.s._12, proj_mat.u.s._13, proj_mat.u.s._14); \
-    TRACE("%f %f %f %f\n", proj_mat.u.s._21, proj_mat.u.s._22, proj_mat.u.s._23, proj_mat.u.s._24); \
-    TRACE("%f %f %f %f\n", proj_mat.u.s._31, proj_mat.u.s._32, proj_mat.u.s._33, proj_mat.u.s._34); \
-    TRACE("%f %f %f %f\n", proj_mat.u.s._41, proj_mat.u.s._42, proj_mat.u.s._43, proj_mat.u.s._44); \
+    TRACE("%f %f %f %f\n", proj_mat.u.s._11, proj_mat.u.s._12, proj_mat.u.s._13, proj_mat.u.s._14);
+    TRACE("%f %f %f %f\n", proj_mat.u.s._21, proj_mat.u.s._22, proj_mat.u.s._23, proj_mat.u.s._24);
+    TRACE("%f %f %f %f\n", proj_mat.u.s._31, proj_mat.u.s._32, proj_mat.u.s._33, proj_mat.u.s._34);
+    TRACE("%f %f %f %f\n", proj_mat.u.s._41, proj_mat.u.s._42, proj_mat.u.s._43, proj_mat.u.s._44);
 
     TRACE("World mat:\n");
-    TRACE("%f %f %f %f\n", world_mat.u.s._11, world_mat.u.s._12, world_mat.u.s._13, world_mat.u.s._14); \
-    TRACE("%f %f %f %f\n", world_mat.u.s._21, world_mat.u.s._22, world_mat.u.s._23, world_mat.u.s._24); \
-    TRACE("%f %f %f %f\n", world_mat.u.s._31, world_mat.u.s._32, world_mat.u.s._33, world_mat.u.s._34); \
-    TRACE("%f %f %f %f\n", world_mat.u.s._41, world_mat.u.s._42, world_mat.u.s._43, world_mat.u.s._44); \
+    TRACE("%f %f %f %f\n", world_mat.u.s._11, world_mat.u.s._12, world_mat.u.s._13, world_mat.u.s._14);
+    TRACE("%f %f %f %f\n", world_mat.u.s._21, world_mat.u.s._22, world_mat.u.s._23, world_mat.u.s._24);
+    TRACE("%f %f %f %f\n", world_mat.u.s._31, world_mat.u.s._32, world_mat.u.s._33, world_mat.u.s._34);
+    TRACE("%f %f %f %f\n", world_mat.u.s._41, world_mat.u.s._42, world_mat.u.s._43, world_mat.u.s._44);
 
     /* Get the viewport */
     IWineD3DDevice_GetViewport( (IWineD3DDevice *) This, &vp);
@@ -5452,7 +4073,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
      * buffer and loading the VBO
      */
     if(SrcImpl->vbo) {
-        TRACE("Releaseing the source vbo, it won't be needed\n");
+        TRACE("Releasing the source vbo, it won't be needed\n");
 
         if(!SrcImpl->resource.allocatedMemory) {
             /* Rescue the data from the buffer */
@@ -5494,229 +4115,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
 }
 
 /*****
- * Apply / Get / Set Texture Stage States
- * TODO: Verify against dx9 definitions
- *****/
-
-/* NOTE: It's expected that this function is going to be called lots of times with the same stage active, so make it the callers responsibility to GLACTIVETEXTURE(Stage) for better state management. Set the correct Texture unit active before calling ApplyTextureStageState */
-static void WINAPI IWineD3DDeviceImpl_ApplyTextureUnitState(IWineD3DDevice *iface, DWORD Stage, WINED3DTEXTURESTAGESTATETYPE Type) {
-    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    DWORD Value = This->updateStateBlock->textureState[Stage][Type];
-    /* FIXME: Handle 3d textures? What if TSS value set before set texture? Need to reapply all values? */
-
-    TRACE("(%p) : Stage=%d, Type=%s(%d), Value=%d\n", This, Stage, debug_d3dtexturestate(Type), Type, Value);
-
-    /* Check that the stage is within limits  */
-    if (Stage >= GL_LIMITS(texture_stages) || Stage < 0) {
-        TRACE("Attempt to access invalid texture rejected\n");
-        return;
-    }
-
-    ENTER_GL();
-
-    switch (Type) {
-    case WINED3DTSS_ALPHAOP               :
-    case WINED3DTSS_COLOROP               :
-        /* nothing to do as moved to drawprim for now */
-        break;
-    case WINED3DTSS_ADDRESSW              :
-#if 0 /* I'm not sure what D3D does about ADDRESSW appearing twice */
-            if (Value < minLookup[WINELOOKUP_WARPPARAM] || Value > maxLookup[WINELOOKUP_WARPPARAM]) {
-                FIXME("Unrecognized or unsupported WINED3DTADDRESS_* value %d, state %d\n", Value, Type);
-
-            } else {
-                GLint wrapParm = stateLookup[WINELOOKUP_WARPPARAM][Value - minLookup[WINELOOKUP_WARPPARAM]];
-                TRACE("Setting WRAP_R to %d for %x\n", wrapParm, This->stateBlock->textureDimensions[Stage]);
-                glTexParameteri(This->stateBlock->textureDimensions[Stage], GL_TEXTURE_WRAP_R, wrapParm);
-                checkGLcall("glTexParameteri(..., GL_TEXTURE_WRAP_R, wrapParm)");
-            }
-#endif
-    case WINED3DTSS_TEXCOORDINDEX         :
-        {
-            /* Values 0-7 are indexes into the FVF tex coords - See comments in DrawPrimitive */
-
-            /* FIXME: From MSDN: The WINED3DTSS_TCI_* flags are mutually exclusive. If you include
-                  one flag, you can still specify an index value, which the system uses to
-                  determine the texture wrapping mode.
-                  eg. SetTextureStageState( 0, WINED3DTSS_TEXCOORDINDEX, WINED3DTSS_TCI_CAMERASPACEPOSITION | 1 );
-                  means use the vertex position (camera-space) as the input texture coordinates
-                  for this texture stage, and the wrap mode set in the WINED3DRS_WRAP1 render
-                  state. We do not (yet) support the WINED3DRENDERSTATE_WRAPx values, nor tie them up
-                  to the TEXCOORDINDEX value */
-
-            /**
-             * Be careful the value of the mask 0xF0000 come from d3d8types.h infos
-             */
-            switch (Value & 0xFFFF0000) {
-            case WINED3DTSS_TCI_PASSTHRU:
-                /*Use the specified texture coordinates contained within the vertex format. This value resolves to zero.*/
-                glDisable(GL_TEXTURE_GEN_S);
-                glDisable(GL_TEXTURE_GEN_T);
-                glDisable(GL_TEXTURE_GEN_R);
-                glDisable(GL_TEXTURE_GEN_Q);
-                checkGLcall("glDisable(GL_TEXTURE_GEN_S,T,R,Q)");
-                break;
-
-            case WINED3DTSS_TCI_CAMERASPACEPOSITION:
-                /* CameraSpacePosition means use the vertex position, transformed to camera space,
-                    as the input texture coordinates for this stage's texture transformation. This
-                    equates roughly to EYE_LINEAR                                                  */
-                {
-                    float s_plane[] = { 1.0, 0.0, 0.0, 0.0 };
-                    float t_plane[] = { 0.0, 1.0, 0.0, 0.0 };
-                    float r_plane[] = { 0.0, 0.0, 1.0, 0.0 };
-                    float q_plane[] = { 0.0, 0.0, 0.0, 1.0 };
-                    TRACE("WINED3DTSS_TCI_CAMERASPACEPOSITION - Set eye plane\n");
-    
-                    glMatrixMode(GL_MODELVIEW);
-                    glPushMatrix();
-                    glLoadIdentity();
-                    glTexGenfv(GL_S, GL_EYE_PLANE, s_plane);
-                    glTexGenfv(GL_T, GL_EYE_PLANE, t_plane);
-                    glTexGenfv(GL_R, GL_EYE_PLANE, r_plane);
-                    glTexGenfv(GL_Q, GL_EYE_PLANE, q_plane);
-                    glPopMatrix();
-    
-                    TRACE("WINED3DTSS_TCI_CAMERASPACEPOSITION - Set GL_TEXTURE_GEN_x and GL_x, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR\n");
-                    glEnable(GL_TEXTURE_GEN_S);
-                    checkGLcall("glEnable(GL_TEXTURE_GEN_S);");
-                    glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
-                    checkGLcall("glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR)");
-                    glEnable(GL_TEXTURE_GEN_T);
-                    checkGLcall("glEnable(GL_TEXTURE_GEN_T);");
-                    glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
-                    checkGLcall("glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR)");
-                    glEnable(GL_TEXTURE_GEN_R);
-                    checkGLcall("glEnable(GL_TEXTURE_GEN_R);");
-                    glTexGeni(GL_R, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR);
-                    checkGLcall("glTexGeni(GL_R, GL_TEXTURE_GEN_MODE, GL_EYE_LINEAR)");
-                }
-                break;
-
-            case WINED3DTSS_TCI_CAMERASPACENORMAL:
-                {
-                    if (GL_SUPPORT(NV_TEXGEN_REFLECTION)) {
-                        float s_plane[] = { 1.0, 0.0, 0.0, 0.0 };
-                        float t_plane[] = { 0.0, 1.0, 0.0, 0.0 };
-                        float r_plane[] = { 0.0, 0.0, 1.0, 0.0 };
-                        float q_plane[] = { 0.0, 0.0, 0.0, 1.0 };
-                        TRACE("WINED3DTSS_TCI_CAMERASPACENORMAL - Set eye plane\n");
-        
-                        glMatrixMode(GL_MODELVIEW);
-                        glPushMatrix();
-                        glLoadIdentity();
-                        glTexGenfv(GL_S, GL_EYE_PLANE, s_plane);
-                        glTexGenfv(GL_T, GL_EYE_PLANE, t_plane);
-                        glTexGenfv(GL_R, GL_EYE_PLANE, r_plane);
-                        glTexGenfv(GL_Q, GL_EYE_PLANE, q_plane);
-                        glPopMatrix();
-        
-                        glEnable(GL_TEXTURE_GEN_S);
-                        checkGLcall("glEnable(GL_TEXTURE_GEN_S);");
-                        glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_NORMAL_MAP_NV);
-                        checkGLcall("glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_NORMAL_MAP_NV)");
-                        glEnable(GL_TEXTURE_GEN_T);
-                        checkGLcall("glEnable(GL_TEXTURE_GEN_T);");
-                        glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_NORMAL_MAP_NV);
-                        checkGLcall("glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_NORMAL_MAP_NV)");
-                        glEnable(GL_TEXTURE_GEN_R);
-                        checkGLcall("glEnable(GL_TEXTURE_GEN_R);");
-                        glTexGeni(GL_R, GL_TEXTURE_GEN_MODE, GL_NORMAL_MAP_NV);
-                        checkGLcall("glTexGeni(GL_R, GL_TEXTURE_GEN_MODE, GL_NORMAL_MAP_NV)");
-                    }
-                }
-                break;
-
-            case WINED3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR:
-                {
-                    if (GL_SUPPORT(NV_TEXGEN_REFLECTION)) {
-                    float s_plane[] = { 1.0, 0.0, 0.0, 0.0 };
-                    float t_plane[] = { 0.0, 1.0, 0.0, 0.0 };
-                    float r_plane[] = { 0.0, 0.0, 1.0, 0.0 };
-                    float q_plane[] = { 0.0, 0.0, 0.0, 1.0 };
-                    TRACE("WINED3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR - Set eye plane\n");
-    
-                    glMatrixMode(GL_MODELVIEW);
-                    glPushMatrix();
-                    glLoadIdentity();
-                    glTexGenfv(GL_S, GL_EYE_PLANE, s_plane);
-                    glTexGenfv(GL_T, GL_EYE_PLANE, t_plane);
-                    glTexGenfv(GL_R, GL_EYE_PLANE, r_plane);
-                    glTexGenfv(GL_Q, GL_EYE_PLANE, q_plane);
-                    glPopMatrix();
-    
-                    glEnable(GL_TEXTURE_GEN_S);
-                    checkGLcall("glEnable(GL_TEXTURE_GEN_S);");
-                    glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_REFLECTION_MAP_NV);
-                    checkGLcall("glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_REFLECTION_MAP_NV)");
-                    glEnable(GL_TEXTURE_GEN_T);
-                    checkGLcall("glEnable(GL_TEXTURE_GEN_T);");
-                    glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_REFLECTION_MAP_NV);
-                    checkGLcall("glTexGeni(GL_T, GL_TEXTURE_GEN_MODE, GL_REFLECTION_MAP_NV)");
-                    glEnable(GL_TEXTURE_GEN_R);
-                    checkGLcall("glEnable(GL_TEXTURE_GEN_R);");
-                    glTexGeni(GL_R, GL_TEXTURE_GEN_MODE, GL_REFLECTION_MAP_NV);
-                    checkGLcall("glTexGeni(GL_R, GL_TEXTURE_GEN_MODE, GL_REFLECTION_MAP_NV)");
-                    }
-                }
-                break;
-
-            /* Unhandled types: */
-            default:
-                /* Todo: */
-                /* ? disable GL_TEXTURE_GEN_n ? */
-                glDisable(GL_TEXTURE_GEN_S);
-                glDisable(GL_TEXTURE_GEN_T);
-                glDisable(GL_TEXTURE_GEN_R);
-                glDisable(GL_TEXTURE_GEN_Q);
-                FIXME("Unhandled WINED3DTSS_TEXCOORDINDEX %x\n", Value);
-                break;
-            }
-        }
-        break;
-
-        /* Unhandled */
-    case WINED3DTSS_TEXTURETRANSFORMFLAGS :
-        set_texture_matrix((float *)&This->stateBlock->transforms[WINED3DTS_TEXTURE0 + Stage].u.m[0][0], Value, (This->stateBlock->textureState[Stage][WINED3DTSS_TEXCOORDINDEX] & 0xFFFF0000) != WINED3DTSS_TCI_PASSTHRU);
-        break;
-
-    case WINED3DTSS_BUMPENVMAT00          :
-    case WINED3DTSS_BUMPENVMAT01          :
-        TRACE("BUMPENVMAT0%u Stage=%d, Type=%d, Value =%d\n", Type - WINED3DTSS_BUMPENVMAT00, Stage, Type, Value);
-        break;
-    case WINED3DTSS_BUMPENVMAT10          :
-    case WINED3DTSS_BUMPENVMAT11          :
-        TRACE("BUMPENVMAT1%u Stage=%d, Type=%d, Value =%d\n", Type - WINED3DTSS_BUMPENVMAT10, Stage, Type, Value);
-        break;
-
-    case WINED3DTSS_BUMPENVLSCALE         :
-      TRACE("BUMPENVLSCALE Stage=%d, Type=%d, Value =%d\n", Stage, Type, Value);
-      break;
-
-    case WINED3DTSS_BUMPENVLOFFSET        :
-      TRACE("BUMPENVLOFFSET Stage=%d, Type=%d, Value =%d\n", Stage, Type, Value);
-      break;
-
-    case WINED3DTSS_RESULTARG             :
-      TRACE("RESULTARG Still a stub, Stage=%d, Type=%d, Value =%d\n", Stage, Type, Value);
-      break;
-
-    default:
-        /* Put back later: FIXME("(%p) : stub, Stage=%d, Type=%d, Value =%d\n", This, Stage, Type, Value); */
-        TRACE("Still a stub, Stage=%d, Type=%d, Value =%d\n", Stage, Type, Value);
-    }
-
-    LEAVE_GL();
-
-    return;
-}
-
-/*****
  * Get / Set Texture Stage States
  * TODO: Verify against dx9 definitions
  *****/
 static HRESULT WINAPI IWineD3DDeviceImpl_SetTextureStageState(IWineD3DDevice *iface, DWORD Stage, WINED3DTEXTURESTAGESTATETYPE Type, DWORD Value) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    DWORD oldValue = This->updateStateBlock->textureState[Stage][Type];
 
     /* FIXME: Handle 3d textures? What if TSS value set before set texture? Need to reapply all values? */
 
@@ -5732,6 +4136,72 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTextureStageState(IWineD3DDevice *if
     This->updateStateBlock->set.textureState[Stage][Type]     = TRUE;
     This->updateStateBlock->textureState[Stage][Type]         = Value;
 
+    if (This->isRecordingState) {
+        TRACE("Recording... not performing anything\n");
+        return WINED3D_OK;
+    }
+
+    /* Checked after the assignments to allow proper stateblock recording */
+    if(oldValue == Value) {
+        TRACE("App is setting the old value over, nothing to do\n");
+        return WINED3D_OK;
+    }
+
+    if(Stage > This->stateBlock->lowest_disabled_stage &&
+       StateTable[STATE_TEXTURESTAGE(0, Type)].representative == STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP)) {
+        /* Colorop change above lowest disabled stage? That won't change anything in the gl setup
+         * Changes in other states are important on disabled stages too
+         */
+        return WINED3D_OK;
+    }
+
+    if(Type == WINED3DTSS_COLOROP) {
+        int i;
+
+        if(Value == WINED3DTOP_DISABLE && oldValue != WINED3DTOP_DISABLE) {
+            /* Previously enabled stage disabled now. Make sure to dirtify all enabled stages above Stage,
+             * they have to be disabled
+             *
+             * The current stage is dirtified below.
+             */
+            for(i = Stage + 1; i < This->stateBlock->lowest_disabled_stage; i++) {
+                TRACE("Additionally dirtifying stage %d\n", i);
+                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP));
+            }
+            This->stateBlock->lowest_disabled_stage = Stage;
+            TRACE("New lowest disabled: %d\n", Stage);
+        } else if(Value != WINED3DTOP_DISABLE && oldValue == WINED3DTOP_DISABLE) {
+            /* Previously disabled stage enabled. Stages above it may need enabling
+             * stage must be lowest_disabled_stage here, if it's bigger success is returned above,
+             * and stages below the lowest disabled stage can't be enabled(because they are enabled already).
+             *
+             * Again stage Stage doesn't need to be dirtified here, it is handled below.
+             */
+
+            for(i = Stage + 1; i < GL_LIMITS(texture_stages); i++) {
+                if(This->updateStateBlock->textureState[i][WINED3DTSS_COLOROP] == WINED3DTOP_DISABLE) {
+                    break;
+                }
+                TRACE("Additionally dirtifying stage %d due to enable\n", i);
+                IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP));
+            }
+            This->stateBlock->lowest_disabled_stage = i;
+            TRACE("New lowest disabled: %d\n", i);
+        }
+        if(GL_SUPPORT(NV_REGISTER_COMBINERS) && !This->stateBlock->pixelShader) {
+            /* TODO: Built a stage -> texture unit mapping for register combiners */
+        }
+    }
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TEXTURESTAGE(Stage, Type));
+
+    /* Rebuild the stage -> gl texture unit mapping if register combiners are supported
+     * If there is a pixel shader there will be a 1:1 mapping, no need to touch it. SetPixelShader
+     * will call FindTexUnitMap too.
+     */
+    if(GL_SUPPORT(NV_REGISTER_COMBINERS) && !This->stateBlock->pixelShader) {
+        IWineD3DDeviceImpl_FindTexUnitMap(This);
+    }
     return WINED3D_OK;
 }
 
@@ -5773,9 +4243,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTexture(IWineD3DDevice *iface, DWORD
             WARN("(%p) Attempt to set scratch texture rejected\n", pTexture);
             return WINED3DERR_INVALIDCALL;
         }
+        This->stateBlock->textureDimensions[Stage] = IWineD3DBaseTexture_GetTextureDimensions(pTexture);
     }
 
-    oldTexture = This->updateStateBlock->textures[Stage];
     TRACE("GL_LIMITS %d\n",GL_LIMITS(sampler_stages));
     TRACE("(%p) : oldtexture(%p)\n", This,oldTexture);
 
@@ -5790,31 +4260,66 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTexture(IWineD3DDevice *iface, DWORD
         return WINED3D_OK;
     }
 
+    if(oldTexture == pTexture) {
+        TRACE("App is setting the same texture again, nothing to do\n");
+        return WINED3D_OK;
+    }
+
     /** NOTE: MSDN says that setTexture increases the reference count,
     * and the the application nust set the texture back to null (or have a leaky application),
     * This means we should pass the refcount up to the parent
      *******************************/
     if (NULL != This->updateStateBlock->textures[Stage]) {
+        IWineD3DBaseTextureImpl *new = (IWineD3DBaseTextureImpl *) This->updateStateBlock->textures[Stage];
+        ULONG bindCount = InterlockedIncrement(&new->baseTexture.bindCount);
+
         IWineD3DBaseTexture_AddRef(This->updateStateBlock->textures[Stage]);
+        if(oldTexture == NULL && Stage < MAX_TEXTURES) {
+            /* The source arguments for color and alpha ops have different meanings when a NULL texture is bound,
+             * so the COLOROP and ALPHAOP have to be dirtified.
+             */
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TEXTURESTAGE(Stage, WINED3DTSS_COLOROP));
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TEXTURESTAGE(Stage, WINED3DTSS_ALPHAOP));
+        }
+        if(bindCount == 1) {
+            new->baseTexture.sampler = Stage;
+        }
+        /* More than one assignment? Doesn't matter, we only need one gl texture unit to use for uploading */
+
     }
 
     if (NULL != oldTexture) {
+        IWineD3DBaseTextureImpl *old = (IWineD3DBaseTextureImpl *) oldTexture;
+        LONG bindCount = InterlockedDecrement(&old->baseTexture.bindCount);
+
         IWineD3DBaseTexture_Release(oldTexture);
+        if(pTexture == NULL && Stage < MAX_TEXTURES) {
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TEXTURESTAGE(Stage, WINED3DTSS_COLOROP));
+            IWineD3DDeviceImpl_MarkStateDirty(This, STATE_TEXTURESTAGE(Stage, WINED3DTSS_ALPHAOP));
+        }
+
+        if(bindCount && old->baseTexture.sampler == Stage) {
+            int i;
+            /* Have to do a search for the other sampler(s) where the texture is bound to
+             * Shouldn't happen as long as apps bind a texture only to one stage
+             */
+            TRACE("Searcing for other sampler / stage id where the texture is bound to\n");
+            for(i = 0; i < GL_LIMITS(sampler_stages); i++) {
+                if(This->updateStateBlock->textures[i] == oldTexture) {
+                    old->baseTexture.sampler = i;
+                    break;
+                }
+            }
+        }
     }
 
-    /* Reset color keying */
-    if(Stage == 0 && This->stateBlock->renderState[WINED3DRS_COLORKEYENABLE]) {
-        BOOL enable_ckey = FALSE;
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(Stage));
 
-        if(pTexture) {
-            IWineD3DSurfaceImpl *surf = (IWineD3DSurfaceImpl *) ((IWineD3DTextureImpl *)pTexture)->surfaces[0];
-            if(surf->CKeyFlags & DDSD_CKSRCBLT) enable_ckey = TRUE;
-        }
-
-        if(enable_ckey) {
-            glAlphaFunc(GL_NOTEQUAL, 0.0);
-            checkGLcall("glAlphaFunc");
-        }
+    /* Verify the texture unit mapping(and rebuild it if needed) if we use nvrcs and no
+     * pixel shader is used
+     */
+    if(GL_SUPPORT(NV_REGISTER_COMBINERS) && !This->stateBlock->pixelShader) {
+        IWineD3DDeviceImpl_FindTexUnitMap(This);
     }
 
     return WINED3D_OK;
@@ -5988,21 +4493,22 @@ static HRESULT WINAPI IWineD3DDeviceImpl_EndScene(IWineD3DDevice *iface) {
     checkGLcall("glFlush");
 
     TRACE("End Scene\n");
-    if(This->renderTarget != NULL) {
+    /* If we're using FBOs this isn't needed */
+    if (wined3d_settings.offscreen_rendering_mode != ORM_FBO && This->render_targets[0] != NULL) {
 
         /* If the container of the rendertarget is a texture then we need to save the data from the pbuffer */
         IUnknown *targetContainer = NULL;
-        if (WINED3D_OK == IWineD3DSurface_GetContainer(This->renderTarget, &IID_IWineD3DBaseTexture, (void **)&targetContainer)
-            || WINED3D_OK == IWineD3DSurface_GetContainer(This->renderTarget, &IID_IWineD3DDevice, (void **)&targetContainer)) {
-            TRACE("(%p) : Texture rendertarget %p\n", This ,This->renderTarget);
+        if (WINED3D_OK == IWineD3DSurface_GetContainer(This->render_targets[0], &IID_IWineD3DBaseTexture, (void **)&targetContainer)
+            || WINED3D_OK == IWineD3DSurface_GetContainer(This->render_targets[0], &IID_IWineD3DDevice, (void **)&targetContainer)) {
+            TRACE("(%p) : Texture rendertarget %p\n", This ,This->render_targets[0]);
             /** always dirtify for now. we must find a better way to see that surface have been modified
             (Modifications should will only occur via draw-primitive, but we do need better locking
             switching to render-to-texture should remove the overhead though.
             */
-            IWineD3DSurface_SetPBufferState(This->renderTarget, TRUE /* inPBuffer */, FALSE /* inTexture */);
-            IWineD3DSurface_AddDirtyRect(This->renderTarget, NULL);
-            IWineD3DSurface_PreLoad(This->renderTarget);
-            IWineD3DSurface_SetPBufferState(This->renderTarget, FALSE /* inPBuffer */, FALSE /* inTexture */);
+            IWineD3DSurface_SetPBufferState(This->render_targets[0], TRUE /* inPBuffer */, FALSE /* inTexture */);
+            IWineD3DSurface_AddDirtyRect(This->render_targets[0], NULL);
+            IWineD3DSurface_PreLoad(This->render_targets[0]);
+            IWineD3DSurface_SetPBufferState(This->render_targets[0], FALSE /* inPBuffer */, FALSE /* inTexture */);
             IUnknown_Release(targetContainer);
         }
     }
@@ -6100,14 +4606,14 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
             /* Note gl uses lower left, width/height */
             TRACE("(%p) %p Rect=(%d,%d)->(%d,%d) glRect=(%d,%d), len=%d, hei=%d\n", This, curRect,
                   curRect->x1, curRect->y1, curRect->x2, curRect->y2,
-                  curRect->x1, (((IWineD3DSurfaceImpl *)This->renderTarget)->currentDesc.Height - curRect->y2),
+                  curRect->x1, (((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height - curRect->y2),
                   curRect->x2 - curRect->x1, curRect->y2 - curRect->y1);
-            glScissor(curRect->x1, (((IWineD3DSurfaceImpl *)This->renderTarget)->currentDesc.Height - curRect->y2),
+            glScissor(curRect->x1, (((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height - curRect->y2),
                       curRect->x2 - curRect->x1, curRect->y2 - curRect->y1);
             checkGLcall("glScissor");
         } else {
             glScissor(This->stateBlock->viewport.X,
-                      (((IWineD3DSurfaceImpl *)This->renderTarget)->currentDesc.Height - 
+                      (((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height -
                       (This->stateBlock->viewport.Y + This->stateBlock->viewport.Height)),
                       This->stateBlock->viewport.Width,
                       This->stateBlock->viewport.Height);
@@ -6161,18 +4667,21 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawPrimitive(IWineD3DDevice *iface, WI
     TRACE("(%p) : Type=(%d,%s), Start=%d, Count=%d\n", This, PrimitiveType,
                                debug_d3dprimitivetype(PrimitiveType),
                                StartVertex, PrimitiveCount);
+
+    if(This->stateBlock->loadBaseVertexIndex != 0) {
+        This->stateBlock->loadBaseVertexIndex = 0;
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_STREAMSRC);
+    }
+    /* Account for the loading offset due to index buffers. Instead of reloading all sources correct it with the startvertex parameter */
     drawPrimitive(iface, PrimitiveType, PrimitiveCount, StartVertex, 0/* NumVertices */, -1 /* indxStart */,
-                  0 /* indxSize */, NULL /* indxData */, 0 /* minIndex */, NULL);
-
-
+                  0 /* indxSize */, NULL /* indxData */, 0 /* minIndex */);
     return WINED3D_OK;
 }
 
 /* TODO: baseVIndex needs to be provided from This->stateBlock->baseVertexIndex when called from d3d8 */
 static HRESULT  WINAPI  IWineD3DDeviceImpl_DrawIndexedPrimitive(IWineD3DDevice *iface,
                                                            WINED3DPRIMITIVETYPE PrimitiveType,
-                                                           INT baseVIndex, UINT minIndex,
-                                                           UINT NumVertices, UINT startIndex, UINT primCount) {
+                                                           UINT minIndex, UINT NumVertices, UINT startIndex, UINT primCount) {
 
     IWineD3DDeviceImpl  *This = (IWineD3DDeviceImpl *)iface;
     UINT                 idxStride = 2;
@@ -6182,9 +4691,9 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_DrawIndexedPrimitive(IWineD3DDevice *
     pIB = This->stateBlock->pIndexData;
     This->stateBlock->streamIsUP = FALSE;
 
-    TRACE("(%p) : Type=(%d,%s), min=%d, CountV=%d, startIdx=%d, baseVidx=%d, countP=%d\n", This,
+    TRACE("(%p) : Type=(%d,%s), min=%d, CountV=%d, startIdx=%d, countP=%d\n", This,
           PrimitiveType, debug_d3dprimitivetype(PrimitiveType),
-          minIndex, NumVertices, startIndex, baseVIndex, primCount);
+          minIndex, NumVertices, startIndex, primCount);
 
     IWineD3DIndexBuffer_GetDesc(pIB, &IdxBufDsc);
     if (IdxBufDsc.Format == WINED3DFMT_INDEX16) {
@@ -6193,8 +4702,13 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_DrawIndexedPrimitive(IWineD3DDevice *
         idxStride = 4;
     }
 
-    drawPrimitive(iface, PrimitiveType, primCount, baseVIndex, NumVertices, startIndex,
-                   idxStride, ((IWineD3DIndexBufferImpl *) pIB)->resource.allocatedMemory, minIndex, NULL);
+    if(This->stateBlock->loadBaseVertexIndex != This->stateBlock->baseVertexIndex) {
+        This->stateBlock->loadBaseVertexIndex = This->stateBlock->baseVertexIndex;
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_STREAMSRC);
+    }
+
+    drawPrimitive(iface, PrimitiveType, primCount, 0, NumVertices, startIndex,
+                   idxStride, ((IWineD3DIndexBufferImpl *) pIB)->resource.allocatedMemory, minIndex);
 
     return WINED3D_OK;
 }
@@ -6208,24 +4722,25 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawPrimitiveUP(IWineD3DDevice *iface, 
              debug_d3dprimitivetype(PrimitiveType),
              PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
 
-    /* release the stream source */
-    if (This->stateBlock->streamSource[0] != NULL) {
-        IWineD3DVertexBuffer_Release(This->stateBlock->streamSource[0]);
-    }
-
     /* Note in the following, it's not this type, but that's the purpose of streamIsUP */
     This->stateBlock->streamSource[0] = (IWineD3DVertexBuffer *)pVertexStreamZeroData;
     This->stateBlock->streamStride[0] = VertexStreamZeroStride;
     This->stateBlock->streamIsUP = TRUE;
+    This->stateBlock->loadBaseVertexIndex = 0;
+
+    /* TODO: Only mark dirty if drawing from a different UP address */
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_STREAMSRC);
 
     drawPrimitive(iface, PrimitiveType, PrimitiveCount, 0 /* start vertex */, 0  /* NumVertices */,
-                  0 /* indxStart*/, 0 /* indxSize*/, NULL /* indxData */, 0 /* indxMin */, NULL);
+                  0 /* indxStart*/, 0 /* indxSize*/, NULL /* indxData */, 0 /* indxMin */);
 
     /* MSDN specifies stream zero settings must be set to NULL */
     This->stateBlock->streamStride[0] = 0;
     This->stateBlock->streamSource[0] = NULL;
 
-    /*stream zero settings set to null at end, as per the msdn */
+    /* stream zero settings set to null at end, as per the msdn. No need to mark dirty here, the app has to set
+     * the new stream sources or use UP drawing again
+     */
     return WINED3D_OK;
 }
 
@@ -6248,32 +4763,42 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawIndexedPrimitiveUP(IWineD3DDevice *
         idxStride = 4;
     }
 
-    /* release the stream and index data */
-    if (This->stateBlock->streamSource[0] != NULL) {
-        IWineD3DVertexBuffer_Release(This->stateBlock->streamSource[0]);
-    }
-    if (This->stateBlock->pIndexData) {
-        IWineD3DIndexBuffer_Release(This->stateBlock->pIndexData);
-    }
-
     /* Note in the following, it's not this type, but that's the purpose of streamIsUP */
     This->stateBlock->streamSource[0] = (IWineD3DVertexBuffer *)pVertexStreamZeroData;
     This->stateBlock->streamIsUP = TRUE;
     This->stateBlock->streamStride[0] = VertexStreamZeroStride;
 
-    drawPrimitive(iface, PrimitiveType, PrimitiveCount, 0 /* vertexStart */, NumVertices, 0 /* indxStart */, idxStride, pIndexData, MinVertexIndex, NULL);
+    /* Set to 0 as per msdn. Do it now due to the stream source loading during drawPrimitive */
+    This->stateBlock->baseVertexIndex = 0;
+    This->stateBlock->loadBaseVertexIndex = 0;
+    /* Mark the state dirty until we have nicer tracking of the stream source pointers */
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VDECL);
+
+    drawPrimitive(iface, PrimitiveType, PrimitiveCount, 0 /* vertexStart */, NumVertices, 0 /* indxStart */, idxStride, pIndexData, MinVertexIndex);
 
     /* MSDN specifies stream zero settings and index buffer must be set to NULL */
     This->stateBlock->streamSource[0] = NULL;
     This->stateBlock->streamStride[0] = 0;
     This->stateBlock->pIndexData = NULL;
+    /* No need to mark the stream source state dirty here. Either the app calls UP drawing again, or it has to call
+     * SetStreamSource to specify a vertex buffer
+     */
 
     return WINED3D_OK;
 }
 
 static HRESULT WINAPI IWineD3DDeviceImpl_DrawPrimitiveStrided (IWineD3DDevice *iface, WINED3DPRIMITIVETYPE PrimitiveType, UINT PrimitiveCount, WineDirect3DVertexStridedData *DrawPrimStrideData) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
 
-    drawPrimitive(iface, PrimitiveType, PrimitiveCount, 0, 0, 0, 0, NULL, 0, DrawPrimStrideData);
+    /* Mark the state dirty until we have nicer tracking
+     * its fine to change baseVertexIndex because that call is only called by ddraw which does not need
+     * that value.
+     */
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VDECL);
+    This->stateBlock->baseVertexIndex = 0;
+    This->up_strided = DrawPrimStrideData;
+    drawPrimitive(iface, PrimitiveType, PrimitiveCount, 0, 0, 0, 0, NULL, 0);
+    This->up_strided = NULL;
     return WINED3D_OK;
 }
  /* Yet another way to update a texture, some apps use this to load default textures instead of using surface/texture lock/unlock */
@@ -6437,11 +4962,11 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetRenderTargetData(IWineD3DDevice *i
     IWineD3DSurface_GetContainer(pRenderTarget, &IID_IWineD3DSwapChain, (void **)&container);
     ENTER_GL();
     /* TODO: opengl Context switching for swapchains etc... */
-    if (NULL != container  || pRenderTarget == This->renderTarget || pRenderTarget == This->depthStencilBuffer) {
+    if (NULL != container  || pRenderTarget == This->render_targets[0] || pRenderTarget == This->depthStencilBuffer) {
         if (NULL != container  && (pRenderTarget == container->backBuffer[0])) {
             glReadBuffer(GL_BACK);
             vcheckGLcall("glReadBuffer(GL_BACK)");
-        } else if ((NULL != container  && (pRenderTarget == container->frontBuffer)) || (pRenderTarget == This->renderTarget)) {
+        } else if ((NULL != container  && (pRenderTarget == container->frontBuffer)) || (pRenderTarget == This->render_targets[0])) {
             glReadBuffer(GL_FRONT);
             vcheckGLcall("glReadBuffer(GL_FRONT)");
         } else if (pRenderTarget == This->depthStencilBuffer) {
@@ -6735,7 +5260,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
         int j;
 
         /* hopefully using pointer addtion will be quicker than using a point + j * rowoffset */
-        unsigned char* data =((unsigned char *)IWineD3DSurface_GetData(pSourceSurface)) + offset;
+        const unsigned char* data =((const unsigned char *)IWineD3DSurface_GetData(pSourceSurface)) + offset;
 
         for(j = destTop ; j < (srcHeight + destTop) ; j++){
 
@@ -6761,7 +5286,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
             WINED3DFMT_DXT5 == destFormat) {
             if (GL_SUPPORT(EXT_TEXTURE_COMPRESSION_S3TC)) {
                 if (destSurfaceHeight != srcHeight || destSurfaceWidth != srcWidth) {
-                    /* FIXME: The easy way to do this is lock the destination, and copy the bits accross */
+                    /* FIXME: The easy way to do this is to lock the destination, and copy the bits across */
                     FIXME("Updating part of a compressed texture is not supported at the moment\n");
                 } if (destFormat != srcFormat) {
                     FIXME("Updating mixed format compressed texture is not curretly support\n");
@@ -6885,11 +5410,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ColorFill(IWineD3DDevice *iface, IWineD
 static HRESULT  WINAPI  IWineD3DDeviceImpl_GetRenderTarget(IWineD3DDevice* iface,DWORD RenderTargetIndex, IWineD3DSurface **ppRenderTarget) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
 
-    /* FIXME: Implelent RenderTargetIndex >0 */
-    if(RenderTargetIndex > 0)
-        FIXME("(%p) : RenderTargetIndex %d >0 not currently supported\n", This, RenderTargetIndex);
+    if (RenderTargetIndex >= GL_LIMITS(buffers)) {
+        ERR("(%p) : Only %d render targets are supported.\n", This, GL_LIMITS(buffers));
+        return WINED3DERR_INVALIDCALL;
+    }
 
-    *ppRenderTarget = This->renderTarget;
+    *ppRenderTarget = This->render_targets[RenderTargetIndex];
     TRACE("(%p) : RenderTarget %d Index returning %p\n", This, RenderTargetIndex, *ppRenderTarget);
     /* Note inc ref on returned surface */
     if(*ppRenderTarget != NULL)
@@ -6992,6 +5518,100 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetDepthStencilSurface(IWineD3DDevice
     return WINED3D_OK;
 }
 
+static void bind_fbo(IWineD3DDevice *iface) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+
+    if (!This->fbo) {
+        GL_EXTCALL(glGenFramebuffersEXT(1, &This->fbo));
+        checkGLcall("glGenFramebuffersEXT()");
+    }
+    GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, This->fbo));
+    checkGLcall("glBindFramebuffer()");
+}
+
+/* TODO: Handle stencil attachments */
+static void set_depth_stencil_fbo(IWineD3DDevice *iface, IWineD3DSurface *depth_stencil) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    IWineD3DSurfaceImpl *depth_stencil_impl = (IWineD3DSurfaceImpl *)depth_stencil;
+
+    This->depth_copy_state = WINED3D_DCS_NO_COPY;
+
+    bind_fbo(iface);
+
+    if (depth_stencil_impl) {
+        GLenum texttarget, target;
+        GLint old_binding = 0;
+
+        IWineD3DSurface_PreLoad(depth_stencil);
+        texttarget = depth_stencil_impl->glDescription.target;
+        target = texttarget == GL_TEXTURE_2D ? GL_TEXTURE_2D : GL_TEXTURE_CUBE_MAP_ARB;
+
+        glGetIntegerv(texttarget == GL_TEXTURE_2D ? GL_TEXTURE_BINDING_2D : GL_TEXTURE_BINDING_CUBE_MAP_ARB, &old_binding);
+        glBindTexture(target, depth_stencil_impl->glDescription.textureName);
+        glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(target, GL_DEPTH_TEXTURE_MODE_ARB, GL_LUMINANCE);
+        glBindTexture(target, old_binding);
+
+        GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, texttarget, depth_stencil_impl->glDescription.textureName, 0));
+        checkGLcall("glFramebufferTexture2DEXT()");
+    } else {
+        GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_TEXTURE_2D, 0, 0));
+        checkGLcall("glFramebufferTexture2DEXT()");
+    }
+
+    if (!This->render_offscreen) {
+        GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
+        checkGLcall("glBindFramebuffer()");
+    }
+}
+
+static void set_render_target_fbo(IWineD3DDevice *iface, DWORD idx, IWineD3DSurface *render_target) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    IWineD3DSurfaceImpl *rtimpl = (IWineD3DSurfaceImpl *)render_target;
+
+    if (idx >= GL_LIMITS(buffers)) {
+        ERR("%p : Trying to set render target %d, but only %d supported\n", This, idx, GL_LIMITS(buffers));
+    }
+
+    bind_fbo(iface);
+
+    if (rtimpl) {
+        GLenum texttarget, target;
+        GLint old_binding = 0;
+
+        IWineD3DSurface_PreLoad(render_target);
+        texttarget = rtimpl->glDescription.target;
+        target = texttarget == GL_TEXTURE_2D ? GL_TEXTURE_2D : GL_TEXTURE_CUBE_MAP_ARB;
+
+        glGetIntegerv(texttarget == GL_TEXTURE_2D ? GL_TEXTURE_BINDING_2D : GL_TEXTURE_BINDING_CUBE_MAP_ARB, &old_binding);
+        glBindTexture(target, rtimpl->glDescription.textureName);
+        glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glBindTexture(target, old_binding);
+
+        GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT + idx, texttarget, rtimpl->glDescription.textureName, 0));
+        checkGLcall("glFramebufferTexture2DEXT()");
+
+        This->draw_buffers[idx] = GL_COLOR_ATTACHMENT0_EXT + idx;
+    } else {
+        GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT + idx, GL_TEXTURE_2D, 0, 0));
+        checkGLcall("glFramebufferTexture2DEXT()");
+
+        This->draw_buffers[idx] = GL_NONE;
+    }
+
+    if (GL_SUPPORT(ARB_DRAW_BUFFERS)) {
+        GL_EXTCALL(glDrawBuffersARB(GL_LIMITS(buffers), This->draw_buffers));
+        checkGLcall("glDrawBuffers()");
+    }
+
+    if (!This->render_offscreen) {
+        GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
+        checkGLcall("glBindFramebuffer()");
+    }
+}
+
 /* internal static helper functions */
 static HRESULT WINAPI IWineD3DDeviceImpl_ActiveRender(IWineD3DDevice* iface,
                                                 IWineD3DSurface *RenderSurface);
@@ -7001,10 +5621,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderTarget(IWineD3DDevice *iface, 
     HRESULT  hr = WINED3D_OK;
     WINED3DVIEWPORT viewport;
 
-    TRACE("(%p) Swapping rendertarget\n",This);
-    if (RenderTargetIndex > 0) {
-        FIXME("(%p) Render targets other than the first are not supported\n",This);
-        RenderTargetIndex = 0;
+    TRACE("(%p) : Setting rendertarget %d to %p\n", This, RenderTargetIndex, pRenderTarget);
+
+    if (RenderTargetIndex >= GL_LIMITS(buffers)) {
+        ERR("(%p) : Only %d render targets are supported.\n", This, GL_LIMITS(buffers));
+        return WINED3DERR_INVALIDCALL;
     }
 
     /* MSDN says that null disables the render target
@@ -7019,7 +5640,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderTarget(IWineD3DDevice *iface, 
         return WINED3DERR_INVALIDCALL;
     }
     /* TODO: replace Impl* usage with interface usage */
-    if (!((IWineD3DSurfaceImpl *)pRenderTarget)->resource.usage & WINED3DUSAGE_RENDERTARGET) {
+    if (pRenderTarget && !((IWineD3DSurfaceImpl *)pRenderTarget)->resource.usage & WINED3DUSAGE_RENDERTARGET) {
         FIXME("(%p)Trying to set the render target to a surface(%p) that wasn't created with a usage of WINED3DUSAGE_RENDERTARGET\n",This ,pRenderTarget);
         return WINED3DERR_INVALIDCALL;
     }
@@ -7027,7 +5648,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderTarget(IWineD3DDevice *iface, 
      *        builds, but I think wine counts as a 'debug' build for now.
       ******************************/
     /* If we are trying to set what we already have, don't bother */
-    if (pRenderTarget == This->renderTarget) {
+    if (pRenderTarget == This->render_targets[RenderTargetIndex]) {
         TRACE("Trying to do a NOP SetRenderTarget operation\n");
     } else {
         /* Otherwise, set the render target up */
@@ -7042,14 +5663,27 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderTarget(IWineD3DDevice *iface, 
         A shared context implementation will share all buffers between all rendertargets (including swapchains),
         implementations that use separate pbuffers for different swapchains or rendertargets will have to duplicate the
         stencil buffer and incure an extra memory overhead */
-        hr = IWineD3DDeviceImpl_ActiveRender(iface, pRenderTarget);
+        if (RenderTargetIndex == 0) {
+            hr = IWineD3DDeviceImpl_ActiveRender(iface, pRenderTarget);
+        } else {
+            hr = WINED3D_OK;
+        }
+
+        /* Replace the render target */
+        if (This->render_targets[RenderTargetIndex]) IWineD3DSurface_Release(This->render_targets[RenderTargetIndex]);
+        This->render_targets[RenderTargetIndex] = pRenderTarget;
+        if (pRenderTarget) IWineD3DSurface_AddRef(pRenderTarget);
+
+        if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+            set_render_target_fbo(iface, RenderTargetIndex, pRenderTarget);
+        }
     }
 
     if (SUCCEEDED(hr)) {
         /* Finally, reset the viewport as the MSDN states. */
         /* TODO: Replace impl usage */
-        viewport.Height = ((IWineD3DSurfaceImpl *)This->renderTarget)->currentDesc.Height;
-        viewport.Width  = ((IWineD3DSurfaceImpl *)This->renderTarget)->currentDesc.Width;
+        viewport.Height = ((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height;
+        viewport.Width  = ((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Width;
         viewport.X      = 0;
         viewport.Y      = 0;
         viewport.MaxZ   = 1.0f;
@@ -7089,6 +5723,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetDepthStencilSurface(IWineD3DDevice *
         /** TODO: glEnable/glDisable on depth/stencil    depending on
          *   pNewZStencil is NULL and the depth/stencil is enabled in d3d
           **********************************************************/
+        if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+            set_depth_stencil_fbo(iface, pNewZStencil);
+        }
     }
 
     return hr;
@@ -7184,6 +5821,7 @@ static void device_reapply_stateblock(IWineD3DDeviceImpl* This) {
 
     BOOL oldRecording;  
     IWineD3DStateBlockImpl *oldUpdateStateBlock;
+    DWORD i;
 
     /* Disable recording */
     oldUpdateStateBlock = This->updateStateBlock;
@@ -7194,19 +5832,37 @@ static void device_reapply_stateblock(IWineD3DDeviceImpl* This) {
     /* Reapply the state block */ 
     IWineD3DStateBlock_Apply((IWineD3DStateBlock *)This->stateBlock);
 
+    /* Temporaryily mark all render states dirty to force reapplication
+     * until the context management for is integrated with the state management
+     * The same for the pixel shader, vertex declaration and vertex shader
+     * Sampler states and texture stage states are marked
+     * dirty my StateBlock::Apply already.
+     */
+    for(i = 1; i < WINEHIGHEST_RENDER_STATE; i++) {
+        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(i));
+    }
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_PIXELSHADER);
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VDECL);
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VSHADER);
+
     /* Restore recording */
     This->isRecordingState = oldRecording;
     This->updateStateBlock = oldUpdateStateBlock;
 }
 
-/* Set the device to render to a texture, or not.
- * This involves changing renderUpsideDown */
-
+/* Set offscreen rendering. When rendering offscreen the surface will be
+ * rendered upside down to compensate for the fact that D3D texture coordinates
+ * are flipped compared to GL texture coordinates. The cullmode is affected by
+ * this, so it must be updated. To update the cullmode stateblock recording has
+ * to be temporarily disabled. The new state management code will hopefully
+ * make this unnecessary */
 static void device_render_to_texture(IWineD3DDeviceImpl* This, BOOL isTexture) {
 
-    DWORD cullMode;
     BOOL oldRecording;
     IWineD3DStateBlockImpl *oldUpdateStateBlock;
+
+    /* Nothing to update, return. */
+    if (This->render_offscreen == isTexture) return;
 
     /* Disable recording */
     oldUpdateStateBlock = This->updateStateBlock;
@@ -7214,13 +5870,13 @@ static void device_render_to_texture(IWineD3DDeviceImpl* This, BOOL isTexture) {
     This->isRecordingState = FALSE;
     This->updateStateBlock = This->stateBlock;
 
-    /* Set upside-down rendering, and update the cull mode */
-    /* The surface must be rendered upside down to cancel the flip produced by glCopyTexImage */
-    This->renderUpsideDown = isTexture;
+    This->render_offscreen = isTexture;
+    if (This->depth_copy_state != WINED3D_DCS_NO_COPY) {
+        This->depth_copy_state = WINED3D_DCS_COPY;
+    }
     This->last_was_rhw = FALSE;
-    This->proj_valid = FALSE;
-    IWineD3DDevice_GetRenderState((IWineD3DDevice*) This, WINED3DRS_CULLMODE, &cullMode);
-    IWineD3DDevice_SetRenderState((IWineD3DDevice*) This, WINED3DRS_CULLMODE, cullMode);
+    /* Viewport state will reapply the projection matrix for now */
+    IWineD3DDeviceImpl_MarkStateDirty(This, WINED3DRS_CULLMODE);
 
     /* Restore recording */
     This->isRecordingState = oldRecording;
@@ -7359,7 +6015,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ActiveRender(IWineD3DDevice* iface,
      * Fallback to device implicit swapchain if the current render target doesn't have one */
     IWineD3DDevice_GetSwapChain(iface, 0, &implicitSwapchain);
     IWineD3DSurface_GetContainer(RenderSurface, &IID_IWineD3DSwapChain, (void**) &renderSurfaceSwapchain);
-    IWineD3DSurface_GetContainer(This->renderTarget, &IID_IWineD3DSwapChain, (void **)&currentSwapchain);
+    IWineD3DSurface_GetContainer(This->render_targets[0], &IID_IWineD3DSwapChain, (void **)&currentSwapchain);
     if (currentSwapchain == NULL)
         IWineD3DDevice_GetSwapChain(iface, 0, &currentSwapchain);
 
@@ -7378,7 +6034,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ActiveRender(IWineD3DDevice* iface,
         /* We also need to make sure that the lights &co are also in the context of the swapchains */
         /* FIXME: If the render target gets sent to the frontBuffer, should we be presenting it raw? */
         TRACE("making swapchain active\n");
-        if (RenderSurface != This->renderTarget) {
+        if (RenderSurface != This->render_targets[0]) {
             BOOL backbuf = FALSE;
             int i;
 
@@ -7413,7 +6069,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ActiveRender(IWineD3DDevice* iface,
 
     /* Offscreen rendering: PBuffers (currently disabled).
      * Also note that this path is never reached if FBOs are supported */
-    } else if (pbuffer_support &&
+    } else if (wined3d_settings.offscreen_rendering_mode == ORM_PBUFFER &&
                (cfgs = device_find_fbconfigs(This, implicitSwapchainImpl, RenderSurface)) != NULL) {
 
         /** ********************************************************************
@@ -7501,15 +6157,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ActiveRender(IWineD3DDevice* iface,
             implicitSwapchainImpl->render_ctx = newContext->context;
         }
     } else {
-        /* Same context, but update renderUpsideDown and cull mode */
+        /* Same context, but update render_offscreen and cull mode */
         device_render_to_texture(This, TRUE);
-    }
-
-    /* Replace the render target */
-    if (This->renderTarget != RenderSurface) {
-        IWineD3DSurface_Release(This->renderTarget);
-        This->renderTarget = RenderSurface;
-        IWineD3DSurface_AddRef(RenderSurface);
     }
 
     if (cfgs != NULL)                   XFree(cfgs);
@@ -7631,14 +6280,152 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_EvictManagedResources(IWineD3DDevice*
     return WINED3D_OK;
 }
 
+void updateSurfaceDesc(IWineD3DSurfaceImpl *surface, WINED3DPRESENT_PARAMETERS* pPresentationParameters) {
+    /* Reallocate proper memory for the front and back buffer and adjust their sizes */
+    if(surface->Flags & SFLAG_DIBSECTION) {
+        /* Release the DC */
+        SelectObject(surface->hDC, surface->dib.holdbitmap);
+        DeleteDC(surface->hDC);
+        /* Release the DIB section */
+        DeleteObject(surface->dib.DIBsection);
+        surface->dib.bitmap_data = NULL;
+        surface->resource.allocatedMemory = NULL;
+        surface->Flags &= ~SFLAG_DIBSECTION;
+    }
+    surface->currentDesc.Width = *pPresentationParameters->BackBufferWidth;
+    surface->currentDesc.Height = *pPresentationParameters->BackBufferHeight;
+    if (wined3d_settings.nonpower2_mode == NP2_NATIVE) {
+        surface->pow2Width = *pPresentationParameters->BackBufferWidth;
+        surface->pow2Height = *pPresentationParameters->BackBufferHeight;
+    } else {
+        surface->pow2Width = surface->pow2Height = 1;
+        while (surface->pow2Width < *pPresentationParameters->BackBufferWidth) surface->pow2Width <<= 1;
+        while (surface->pow2Height < *pPresentationParameters->BackBufferHeight) surface->pow2Height <<= 1;
+    }
+    if(surface->glDescription.textureName) {
+        ENTER_GL();
+        glDeleteTextures(1, &surface->glDescription.textureName);
+        LEAVE_GL();
+        surface->glDescription.textureName = 0;
+    }
+    if(surface->pow2Width != *pPresentationParameters->BackBufferWidth ||
+       surface->pow2Height != *pPresentationParameters->BackBufferHeight) {
+        surface->Flags |= SFLAG_NONPOW2;
+    } else  {
+        surface->Flags &= ~SFLAG_NONPOW2;
+    }
+    HeapFree(GetProcessHeap(), 0, surface->resource.allocatedMemory);
+    surface->resource.size = IWineD3DSurface_GetPitch((IWineD3DSurface *) surface) * surface->pow2Width;
+}
+
 static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRESENT_PARAMETERS* pPresentationParameters) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
-    /** FIXME: Resource trascking needs to be done.
-    * in effect this pulls all non only default
-    * textures out of video memory and deletes all glTextures (glDeleteTextures)
-    * and should clear down the context and set it up according to pPresentationParameters
-     ***********************************************************/
-    FIXME("(%p) : stub\n", This);
+    IWineD3DSwapChainImpl *swapchain;
+    HRESULT hr;
+    BOOL DisplayModeChanged = FALSE;
+    WINED3DDISPLAYMODE mode;
+    TRACE("(%p)\n", This);
+
+    hr = IWineD3DDevice_GetSwapChain(iface, 0, (IWineD3DSwapChain **) &swapchain);
+    if(FAILED(hr)) {
+        ERR("Failed to get the first implicit swapchain\n");
+        return hr;
+    }
+
+    /* Is it necessary to recreate the gl context? Actually every setting can be changed
+     * on an existing gl context, so there's no real need for recreation.
+     *
+     * TODO: Figure out how Reset influences resources in D3DPOOL_DEFAULT, D3DPOOL_SYSTEMMEMORY and D3DPOOL_MANAGED
+     *
+     * TODO: Figure out what happens to explicit swapchains, or if we have more than one implicit swapchain
+     */
+    TRACE("New params:\n");
+    TRACE("BackBufferWidth = %d\n", *pPresentationParameters->BackBufferWidth);
+    TRACE("BackBufferHeight = %d\n", *pPresentationParameters->BackBufferHeight);
+    TRACE("BackBufferFormat = %s\n", debug_d3dformat(*pPresentationParameters->BackBufferFormat));
+    TRACE("BackBufferCount = %d\n", *pPresentationParameters->BackBufferCount);
+    TRACE("MultiSampleType = %d\n", *pPresentationParameters->MultiSampleType);
+    TRACE("MultiSampleQuality = %d\n", *pPresentationParameters->MultiSampleQuality);
+    TRACE("SwapEffect = %d\n", *pPresentationParameters->SwapEffect);
+    TRACE("hDeviceWindow = %p\n", *pPresentationParameters->hDeviceWindow);
+    TRACE("Windowed = %s\n", *pPresentationParameters->Windowed ? "true" : "false");
+    TRACE("EnableAutoDepthStencil = %s\n", *pPresentationParameters->EnableAutoDepthStencil ? "true" : "false");
+    TRACE("Flags = %08x\n", *pPresentationParameters->Flags);
+    TRACE("FullScreen_RefreshRateInHz = %d\n", *pPresentationParameters->FullScreen_RefreshRateInHz);
+    TRACE("PresentationInterval = %d\n", *pPresentationParameters->PresentationInterval);
+
+    /* No special treatment of these parameters. Just store them */
+    swapchain->presentParms.SwapEffect = *pPresentationParameters->SwapEffect;
+    swapchain->presentParms.Flags = *pPresentationParameters->Flags;
+    swapchain->presentParms.PresentationInterval = *pPresentationParameters->PresentationInterval;
+    swapchain->presentParms.FullScreen_RefreshRateInHz = *pPresentationParameters->FullScreen_RefreshRateInHz;
+
+    /* What to do about these? */
+    if(*pPresentationParameters->BackBufferCount != 0 &&
+        *pPresentationParameters->BackBufferCount != swapchain->presentParms.BackBufferCount) {
+        ERR("Cannot change the back buffer count yet\n");
+    }
+    if(*pPresentationParameters->BackBufferFormat != WINED3DFMT_UNKNOWN &&
+        *pPresentationParameters->BackBufferFormat != swapchain->presentParms.BackBufferFormat) {
+        ERR("Cannot change the back buffer format yet\n");
+    }
+    if(*pPresentationParameters->hDeviceWindow != NULL &&
+        *pPresentationParameters->hDeviceWindow != swapchain->presentParms.hDeviceWindow) {
+        ERR("Cannot change the device window yet\n");
+    }
+    if(*pPresentationParameters->EnableAutoDepthStencil != swapchain->presentParms.EnableAutoDepthStencil) {
+        ERR("What do do about a changed auto depth stencil parameter?\n");
+    }
+
+    if(*pPresentationParameters->Windowed) {
+        mode.Width = swapchain->orig_width;
+        mode.Height = swapchain->orig_height;
+        mode.RefreshRate = 0;
+        mode.Format = swapchain->presentParms.BackBufferFormat;
+    } else {
+        mode.Width = *pPresentationParameters->BackBufferWidth;
+        mode.Height = *pPresentationParameters->BackBufferHeight;
+        mode.RefreshRate = *pPresentationParameters->FullScreen_RefreshRateInHz;
+        mode.Format = swapchain->presentParms.BackBufferFormat;
+    }
+
+    /* Should Width == 800 && Height == 0 set 800x600? */
+    if(*pPresentationParameters->BackBufferWidth != 0 && *pPresentationParameters->BackBufferHeight != 0 &&
+       (*pPresentationParameters->BackBufferWidth != swapchain->presentParms.BackBufferWidth ||
+        *pPresentationParameters->BackBufferHeight != swapchain->presentParms.BackBufferHeight))
+    {
+        WINED3DVIEWPORT vp;
+        int i;
+
+        vp.X = 0;
+        vp.Y = 0;
+        vp.Width = *pPresentationParameters->BackBufferWidth;
+        vp.Height = *pPresentationParameters->BackBufferHeight;
+        vp.MinZ = 0;
+        vp.MaxZ = 1;
+
+        if(!*pPresentationParameters->Windowed) {
+            DisplayModeChanged = TRUE;
+        }
+        swapchain->presentParms.BackBufferWidth = *pPresentationParameters->BackBufferWidth;
+        swapchain->presentParms.BackBufferHeight = *pPresentationParameters->BackBufferHeight;
+
+        updateSurfaceDesc((IWineD3DSurfaceImpl *)swapchain->frontBuffer, pPresentationParameters);
+        for(i = 0; i < swapchain->presentParms.BackBufferCount; i++) {
+            updateSurfaceDesc((IWineD3DSurfaceImpl *)swapchain->backBuffer[i], pPresentationParameters);
+        }
+
+        /* Now set the new viewport */
+        IWineD3DDevice_SetViewport(iface, &vp);
+    }
+
+    if((*pPresentationParameters->Windowed && !swapchain->presentParms.Windowed) ||
+       (swapchain->presentParms.Windowed && !*pPresentationParameters->Windowed) ||
+        DisplayModeChanged) {
+        IWineD3DDevice_SetDisplayMode(iface, 0, &mode);
+    }
+
+    IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
     return WINED3D_OK;
 }
 
@@ -7913,6 +6700,7 @@ const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl =
     IWineD3DDeviceImpl_GetGammaRamp,
     IWineD3DDeviceImpl_SetIndices,
     IWineD3DDeviceImpl_GetIndices,
+    IWineD3DDeviceImpl_SetBasevertexIndex,
     IWineD3DDeviceImpl_SetLight,
     IWineD3DDeviceImpl_GetLight,
     IWineD3DDeviceImpl_SetLightEnable,
@@ -7990,8 +6778,6 @@ const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl =
     IWineD3DDeviceImpl_StretchRect,
     IWineD3DDeviceImpl_GetRenderTargetData,
     IWineD3DDeviceImpl_GetFrontBufferData,
-    /*** Internal use IWineD3DDevice methods ***/
-    IWineD3DDeviceImpl_SetupTextureStates,
     /*** object tracking ***/
     IWineD3DDeviceImpl_ResourceReleased
 };
@@ -8113,3 +6899,16 @@ const DWORD SavedVertexStates_T[NUM_SAVEDVERTEXSTATES_T] = {
 const DWORD SavedVertexStates_S[NUM_SAVEDVERTEXSTATES_S] = {
     WINED3DSAMP_DMAPOFFSET
 };
+
+void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state) {
+    DWORD rep = StateTable[state].representative;
+    DWORD idx;
+    BYTE shift;
+
+    if(!rep || isStateDirty(This, rep)) return;
+
+    This->dirtyArray[This->numDirtyEntries++] = rep;
+    idx = rep >> 5;
+    shift = rep & 0x1f;
+    This->isStateDirty[idx] |= (1 << shift);
+}

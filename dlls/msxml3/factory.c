@@ -26,7 +26,13 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
+#include "msxml.h"
+#include "xmldom.h"
 #include "msxml2.h"
+
+/* undef the #define in msxml2 so that we can access the v.2 version
+   independent CLSID as well as the v.3 one. */
+#undef CLSID_DOMDocument
 
 #include "wine/debug.h"
 
@@ -135,7 +141,9 @@ HRESULT WINAPI DllGetClassObject( REFCLSID rclsid, REFIID iid, LPVOID *ppv )
 
     TRACE("%s %s %p\n", debugstr_guid(rclsid), debugstr_guid(iid), ppv );
 
-    if( IsEqualGUID( rclsid, &CLSID_DOMDocument ) )
+    if( IsEqualGUID( rclsid, &CLSID_DOMDocument ) ||   /* Version indep. v 2.x */
+        IsEqualGUID( rclsid, &CLSID_DOMDocument2 ) ||  /* Version indep. v 3.0 */
+        IsEqualGUID( rclsid, &CLSID_DOMDocument30 ) )  /* Version dep.   v 3.0 */
         cf = (IClassFactory*) &domdoccf.lpVtbl;
 
     if ( !cf )

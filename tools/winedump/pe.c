@@ -44,11 +44,10 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winedump.h"
-#include "pe.h"
 
 static const IMAGE_NT_HEADERS32*        PE_nt_headers;
 
-static	const char* get_machine_str(DWORD mach)
+const char *get_machine_str(int mach)
 {
     switch (mach)
     {
@@ -87,18 +86,22 @@ static const void*	RVA(unsigned long rva, unsigned long len)
     return NULL;
 }
 
-static const IMAGE_NT_HEADERS32 *get_nt_header( const void *pmt )
+static const IMAGE_NT_HEADERS32 *get_nt_header( void )
 {
-    const IMAGE_DOS_HEADER *dos = pmt;
-    return (const IMAGE_NT_HEADERS32 *)((const BYTE *)dos + dos->e_lfanew);
+    const IMAGE_DOS_HEADER *dos;
+    dos = PRD(0, sizeof(*dos));
+    if (!dos) return NULL;
+    return PRD(dos->e_lfanew, sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER));
 }
 
-static int is_fake_dll( const void *base )
+static int is_fake_dll( void )
 {
     static const char fakedll_signature[] = "Wine placeholder DLL";
-    const IMAGE_DOS_HEADER *dos = base;
+    const IMAGE_DOS_HEADER *dos;
 
-    if (dos->e_lfanew >= sizeof(*dos) + sizeof(fakedll_signature) &&
+    dos = PRD(0, sizeof(*dos) + sizeof(fakedll_signature));
+
+    if (dos && dos->e_lfanew >= sizeof(*dos) + sizeof(fakedll_signature) &&
         !memcmp( dos + 1, fakedll_signature, sizeof(fakedll_signature) )) return TRUE;
     return FALSE;
 }
@@ -136,7 +139,7 @@ static const char * const DirectoryNames[16] = {
     "EXPORT",		"IMPORT",	"RESOURCE", 	"EXCEPTION",
     "SECURITY", 	"BASERELOC", 	"DEBUG", 	"ARCHITECTURE",
     "GLOBALPTR", 	"TLS", 		"LOAD_CONFIG",	"Bound IAT",
-    "IAT", 		"Delay IAT",	"COM Descript", ""
+    "IAT", 		"Delay IAT",	"CLR Header", ""
 };
 
 static const char *get_magic_type(WORD magic)
@@ -196,6 +199,9 @@ static inline void print_dllflags(const char *title, WORD value)
 {
     printf("  %-34s 0x%X\n", title, value);
 #define X(f,s) if (value & f) printf("    %s\n", s)
+    X(IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE,          "DYNAMIC_BASE");
+    X(IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY,       "FORCE_INTEGRITY");
+    X(IMAGE_DLLCHARACTERISTICS_NX_COMPAT,             "NX_COMPAT");
     X(IMAGE_DLLCHARACTERISTICS_NO_ISOLATION,          "NO_ISOLATION");
     X(IMAGE_DLLCHARACTERISTICS_NO_SEH,                "NO_SEH");
     X(IMAGE_DLLCHARACTERISTICS_NO_BIND,               "NO_BIND");
@@ -211,14 +217,22 @@ static inline void print_datadirectory(DWORD n, const IMAGE_DATA_DIRECTORY *dire
 
     for (i = 0; i < n && i < 16; i++)
     {
-        printf("  %-12s rva: 0x%-8X  size: %8u\n",
+        printf("  %-12s rva: 0x%-8x  size: 0x%-8x\n",
                DirectoryNames[i], directory[i].VirtualAddress,
                directory[i].Size);
     }
 }
 
-static void dump_optional_header32(const IMAGE_OPTIONAL_HEADER32 *optionalHeader)
+static void dump_optional_header32(const IMAGE_OPTIONAL_HEADER32 *image_oh, UINT header_size)
 {
+    IMAGE_OPTIONAL_HEADER32 oh;
+    const IMAGE_OPTIONAL_HEADER32 *optionalHeader;
+
+    /* in case optional header is missing or partial */
+    memset(&oh, 0, sizeof(oh));
+    memcpy(&oh, image_oh, min(header_size, sizeof(oh)));
+    optionalHeader = &oh;
+
     print_word("Magic", optionalHeader->Magic);
     print_ver("linker version",
               optionalHeader->MajorLinkerVersion, optionalHeader->MinorLinkerVersion);
@@ -251,10 +265,19 @@ static void dump_optional_header32(const IMAGE_OPTIONAL_HEADER32 *optionalHeader
     print_dword("RVAs & sizes", optionalHeader->NumberOfRvaAndSizes);
     printf("\n");
     print_datadirectory(optionalHeader->NumberOfRvaAndSizes, optionalHeader->DataDirectory);
+    printf("\n");
 }
 
-static void dump_optional_header64(const IMAGE_OPTIONAL_HEADER64 *optionalHeader)
+static void dump_optional_header64(const IMAGE_OPTIONAL_HEADER64 *image_oh, UINT header_size)
 {
+    IMAGE_OPTIONAL_HEADER64 oh;
+    const IMAGE_OPTIONAL_HEADER64 *optionalHeader;
+
+    /* in case optional header is missing or partial */
+    memset(&oh, 0, sizeof(oh));
+    memcpy(&oh, image_oh, min(header_size, sizeof(oh)));
+    optionalHeader = &oh;
+
     print_word("Magic", optionalHeader->Magic);
     print_ver("linker version",
               optionalHeader->MajorLinkerVersion, optionalHeader->MinorLinkerVersion);
@@ -286,14 +309,29 @@ static void dump_optional_header64(const IMAGE_OPTIONAL_HEADER64 *optionalHeader
     print_dword("RVAs & sizes", optionalHeader->NumberOfRvaAndSizes);
     printf("\n");
     print_datadirectory(optionalHeader->NumberOfRvaAndSizes, optionalHeader->DataDirectory);
+    printf("\n");
 }
 
-static	void	dump_pe_header(void)
+void dump_optional_header(const IMAGE_OPTIONAL_HEADER32 *optionalHeader, UINT header_size)
 {
-    const IMAGE_FILE_HEADER     *fileHeader;
+    printf("Optional Header (%s)\n", get_magic_type(optionalHeader->Magic));
 
+    switch(optionalHeader->Magic) {
+        case IMAGE_NT_OPTIONAL_HDR32_MAGIC:
+            dump_optional_header32(optionalHeader, header_size);
+            break;
+        case IMAGE_NT_OPTIONAL_HDR64_MAGIC:
+            dump_optional_header64((const IMAGE_OPTIONAL_HEADER64 *)optionalHeader, header_size);
+            break;
+        default:
+            printf("  Unknown optional header magic: 0x%-4X\n", optionalHeader->Magic);
+            break;
+    }
+}
+
+void dump_file_header(const IMAGE_FILE_HEADER *fileHeader)
+{
     printf("File Header\n");
-    fileHeader = &PE_nt_headers->FileHeader;
 
     printf("  Machine:                      %04X (%s)\n",
 	   fileHeader->Machine, get_machine_str(fileHeader->Machine));
@@ -324,43 +362,27 @@ static	void	dump_pe_header(void)
     X(IMAGE_FILE_BYTES_REVERSED_HI, 	"BYTES_REVERSED_HI");
 #undef X
     printf("\n");
-
-    /* hope we have the right size */
-    printf("Optional Header (%s)\n", get_magic_type(PE_nt_headers->OptionalHeader.Magic));
-    switch(PE_nt_headers->OptionalHeader.Magic) {
-        case IMAGE_NT_OPTIONAL_HDR32_MAGIC:
-            dump_optional_header32((const IMAGE_OPTIONAL_HEADER32*)&PE_nt_headers->OptionalHeader);
-            break;
-        case IMAGE_NT_OPTIONAL_HDR64_MAGIC:
-            dump_optional_header64((const IMAGE_OPTIONAL_HEADER64*)&PE_nt_headers->OptionalHeader);
-            break;
-        default:
-            printf("  Unknown header magic: 0x%-4X\n", PE_nt_headers->OptionalHeader.Magic);
-            break;
-    }
-    printf("\n");
 }
 
-static	void	dump_sections(const void* addr, unsigned num_sect)
+static	void	dump_pe_header(void)
 {
-    const IMAGE_SECTION_HEADER*	sectHead = addr;
-    unsigned			i;
+    dump_file_header(&PE_nt_headers->FileHeader);
+    dump_optional_header((const IMAGE_OPTIONAL_HEADER32*)&PE_nt_headers->OptionalHeader, PE_nt_headers->FileHeader.SizeOfOptionalHeader);
+}
 
-    printf("Section Table\n");
-    for (i = 0; i < num_sect; i++, sectHead++)
-    {
-	printf("  %02d %-8.8s   VirtSize: %-8u  VirtAddr:  %-8u 0x%08x\n",
-	       i + 1, sectHead->Name, sectHead->Misc.VirtualSize, sectHead->VirtualAddress,
-	       sectHead->VirtualAddress);
-	printf("    raw data offs: %-8u raw data size: %-8u\n",
+void dump_section(const IMAGE_SECTION_HEADER *sectHead)
+{
+	printf("  %-8.8s   VirtSize: 0x%08x  VirtAddr:  0x%08x\n",
+               sectHead->Name, sectHead->Misc.VirtualSize, sectHead->VirtualAddress);
+	printf("    raw data offs:   0x%08x  raw data size: 0x%08x\n",
 	       sectHead->PointerToRawData, sectHead->SizeOfRawData);
-	printf("    relocation offs: %-8u  relocations:   %-8u\n",
+	printf("    relocation offs: 0x%08x  relocations:   0x%08x\n",
 	       sectHead->PointerToRelocations, sectHead->NumberOfRelocations);
 	printf("    line # offs:     %-8u  line #'s:      %-8u\n",
 	       sectHead->PointerToLinenumbers, sectHead->NumberOfLinenumbers);
 	printf("    characteristics: 0x%08x\n", sectHead->Characteristics);
-	printf("      ");
-#define X(b,s)	if (sectHead->Characteristics & b) printf(s "  ")
+	printf("    ");
+#define X(b,s)	if (sectHead->Characteristics & b) printf("  " s)
 /* #define IMAGE_SCN_TYPE_REG			0x00000000 - Reserved */
 /* #define IMAGE_SCN_TYPE_DSECT			0x00000001 - Reserved */
 /* #define IMAGE_SCN_TYPE_NOLOAD		0x00000002 - Reserved */
@@ -388,14 +410,25 @@ static	void	dump_sections(const void* addr, unsigned num_sect)
 	X(IMAGE_SCN_MEM_LOCKED, 		"MEM_LOCKED");
 	X(IMAGE_SCN_MEM_PRELOAD, 		"MEM_PRELOAD");
 
-	X(IMAGE_SCN_ALIGN_1BYTES, 		"ALIGN_1BYTES");
-	X(IMAGE_SCN_ALIGN_2BYTES, 		"ALIGN_2BYTES");
-	X(IMAGE_SCN_ALIGN_4BYTES, 		"ALIGN_4BYTES");
-	X(IMAGE_SCN_ALIGN_8BYTES, 		"ALIGN_8BYTES");
-	X(IMAGE_SCN_ALIGN_16BYTES, 		"ALIGN_16BYTES");
-	X(IMAGE_SCN_ALIGN_32BYTES, 		"ALIGN_32BYTES");
-	X(IMAGE_SCN_ALIGN_64BYTES, 		"ALIGN_64BYTES");
-/* 						0x00800000 - Unused */
+        switch (sectHead->Characteristics & IMAGE_SCN_ALIGN_MASK)
+        {
+#define X2(b,s)	case b: printf("  " s); break
+        X2(IMAGE_SCN_ALIGN_1BYTES, 		"ALIGN_1BYTES");
+        X2(IMAGE_SCN_ALIGN_2BYTES, 		"ALIGN_2BYTES");
+        X2(IMAGE_SCN_ALIGN_4BYTES, 		"ALIGN_4BYTES");
+        X2(IMAGE_SCN_ALIGN_8BYTES, 		"ALIGN_8BYTES");
+        X2(IMAGE_SCN_ALIGN_16BYTES, 		"ALIGN_16BYTES");
+        X2(IMAGE_SCN_ALIGN_32BYTES, 		"ALIGN_32BYTES");
+        X2(IMAGE_SCN_ALIGN_64BYTES, 		"ALIGN_64BYTES");
+        X2(IMAGE_SCN_ALIGN_128BYTES, 		"ALIGN_128BYTES");
+        X2(IMAGE_SCN_ALIGN_256BYTES, 		"ALIGN_256BYTES");
+        X2(IMAGE_SCN_ALIGN_512BYTES, 		"ALIGN_512BYTES");
+        X2(IMAGE_SCN_ALIGN_1024BYTES, 		"ALIGN_1024BYTES");
+        X2(IMAGE_SCN_ALIGN_2048BYTES, 		"ALIGN_2048BYTES");
+        X2(IMAGE_SCN_ALIGN_4096BYTES, 		"ALIGN_4096BYTES");
+        X2(IMAGE_SCN_ALIGN_8192BYTES, 		"ALIGN_8192BYTES");
+#undef X2
+        }
 
 	X(IMAGE_SCN_LNK_NRELOC_OVFL, 		"LNK_NRELOC_OVFL");
 
@@ -408,8 +441,24 @@ static	void	dump_sections(const void* addr, unsigned num_sect)
 	X(IMAGE_SCN_MEM_WRITE, 			"MEM_WRITE");
 #undef X
 	printf("\n\n");
+}
+
+static void dump_sections(const void *base, const void* addr, unsigned num_sect)
+{
+    const IMAGE_SECTION_HEADER*	sectHead = addr;
+    unsigned			i;
+
+    printf("Section Table\n");
+    for (i = 0; i < num_sect; i++, sectHead++)
+    {
+        dump_section(sectHead);
+
+        if (globals.do_dump_rawdata)
+        {
+            dump_data((const unsigned char *)base + sectHead->PointerToRawData, sectHead->SizeOfRawData, "    " );
+            printf("\n");
+        }
     }
-    printf("\n");
 }
 
 static	void	dump_dir_exported_functions(void)
@@ -483,7 +532,12 @@ static	void	dump_dir_exported_functions(void)
         printf("\n");
     }
     pFunc = RVA(exportDir->AddressOfFunctions, exportDir->NumberOfFunctions * sizeof(DWORD));
-    if (!pFunc) {printf("Can't grab functions' address table\n"); return;}
+    if (!pFunc)
+    {
+        printf("Can't grab functions' address table\n");
+        free(map);
+        return;
+    }
     for (i = 0; i < exportDir->NumberOfFunctions; i++)
     {
 	if (pFunc[i] && !(map[i / 32] & (1 << (i % 32))))
@@ -514,7 +568,7 @@ static void dump_image_thunk_data64(const IMAGE_THUNK_DATA64 *il)
     }
 }
 
-static void dump_image_thunk_data32(const IMAGE_THUNK_DATA32 *il)
+static void dump_image_thunk_data32(const IMAGE_THUNK_DATA32 *il, int offset)
 {
     const IMAGE_IMPORT_BY_NAME* iibn;
     for (; il->u1.Ordinal; il++)
@@ -523,7 +577,7 @@ static void dump_image_thunk_data32(const IMAGE_THUNK_DATA32 *il)
             printf("  %4u  <by ordinal>\n", IMAGE_ORDINAL32(il->u1.Ordinal));
         else
         {
-            iibn = RVA((DWORD)il->u1.AddressOfData, sizeof(DWORD));
+            iibn = RVA((DWORD)il->u1.AddressOfData - offset, sizeof(DWORD));
             if (!iibn)
                 printf("Can't grab import by name info, skipping to next ordinal\n");
             else
@@ -559,7 +613,7 @@ static	void	dump_dir_imported_functions(void)
 
 	printf("  offset %08lx %s\n", Offset(importDesc), (const char*)RVA(importDesc->Name, sizeof(DWORD)));
 	printf("  Hint/Name Table: %08X\n", (DWORD)importDesc->u.OriginalFirstThunk);
-	printf("  TimeDataStamp:   %08X (%s)\n",
+	printf("  TimeDateStamp:   %08X (%s)\n",
 	       importDesc->TimeDateStamp, get_time_str(importDesc->TimeDateStamp));
 	printf("  ForwarderChain:  %08X\n", importDesc->ForwarderChain);
 	printf("  First thunk RVA: %08X\n", (DWORD)importDesc->FirstThunk);
@@ -577,7 +631,7 @@ static	void	dump_dir_imported_functions(void)
             if(PE_nt_headers->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
                 dump_image_thunk_data64((const IMAGE_THUNK_DATA64*)il);
             else
-                dump_image_thunk_data32(il);
+                dump_image_thunk_data32(il, 0);
             printf("\n");
         }
 	importDesc++;
@@ -616,20 +670,20 @@ static void dump_dir_delay_imported_functions(void)
 
     for (;;)
     {
-        BOOL                            use_rva = importDesc->grAttrs & 1;
         const IMAGE_THUNK_DATA32*       il;
+        int                             offset = (importDesc->grAttrs & 1) ? 0 : PE_nt_headers->OptionalHeader.ImageBase;
 
         if (!importDesc->szName || !importDesc->pIAT || !importDesc->pINT) break;
 
         printf("  grAttrs %08x offset %08lx %s\n", importDesc->grAttrs, Offset(importDesc),
-               use_rva ? (const char *)RVA(importDesc->szName, sizeof(DWORD)) : (char *)importDesc->szName);
+               (const char *)RVA(importDesc->szName - offset, sizeof(DWORD)));
         printf("  Hint/Name Table: %08x\n", importDesc->pINT);
-        printf("  TimeDataStamp:   %08X (%s)\n",
+        printf("  TimeDateStamp:   %08X (%s)\n",
                importDesc->dwTimeStamp, get_time_str(importDesc->dwTimeStamp));
 
         printf("  Ordn  Name\n");
 
-        il = use_rva ? (const IMAGE_THUNK_DATA32 *)RVA(importDesc->pINT, sizeof(DWORD)) : (const IMAGE_THUNK_DATA32 *)importDesc->pINT;
+        il = (const IMAGE_THUNK_DATA32 *)RVA(importDesc->pINT - offset, sizeof(DWORD));
 
         if (!il)
             printf("Can't grab thunk data, going to next imported DLL\n");
@@ -638,7 +692,7 @@ static void dump_dir_delay_imported_functions(void)
             if (PE_nt_headers->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
                 dump_image_thunk_data64((const IMAGE_THUNK_DATA64 *)il);
             else
-                dump_image_thunk_data32(il);
+                dump_image_thunk_data32(il, offset);
             printf("\n");
         }
         importDesc++;
@@ -737,6 +791,47 @@ static void	dump_dir_debug(void)
     printf("\n");
 }
 
+static inline void print_clrflags(const char *title, WORD value)
+{
+    printf("  %-34s 0x%X\n", title, value);
+#define X(f,s) if (value & f) printf("    %s\n", s)
+    X(COMIMAGE_FLAGS_ILONLY,           "ILONLY");
+    X(COMIMAGE_FLAGS_32BITREQUIRED,    "32BITREQUIRED");
+    X(COMIMAGE_FLAGS_IL_LIBRARY,       "IL_LIBRARY");
+    X(COMIMAGE_FLAGS_STRONGNAMESIGNED, "STRONGNAMESIGNED");
+    X(COMIMAGE_FLAGS_TRACKDEBUGDATA,   "TRACKDEBUGDATA");
+#undef X
+}
+
+static inline void print_clrdirectory(const char *title, const IMAGE_DATA_DIRECTORY *dir)
+{
+    printf("  %-23s rva: 0x%-8x  size: 0x%-8x\n", title, dir->VirtualAddress, dir->Size);
+}
+
+static void dump_dir_clr_header(void)
+{
+    unsigned int size = 0;
+    const IMAGE_COR20_HEADER *dir = get_dir_and_size(IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR, &size);
+
+    if (!dir) return;
+
+    printf( "CLR Header\n" );
+    print_dword( "Header Size", dir->cb );
+    print_ver( "Required runtime version", dir->MajorRuntimeVersion, dir->MinorRuntimeVersion );
+    print_clrflags( "Flags", dir->Flags );
+    print_dword( "EntryPointToken", dir->EntryPointToken );
+    printf("\n");
+    printf( "CLR Data Directory\n" );
+    print_clrdirectory( "MetaData", &dir->MetaData );
+    print_clrdirectory( "Resources", &dir->Resources );
+    print_clrdirectory( "StrongNameSignature", &dir->StrongNameSignature );
+    print_clrdirectory( "CodeManagerTable", &dir->CodeManagerTable );
+    print_clrdirectory( "VTableFixups", &dir->VTableFixups );
+    print_clrdirectory( "ExportAddressTableJumps", &dir->ExportAddressTableJumps );
+    print_clrdirectory( "ManagedNativeHeader", &dir->ManagedNativeHeader );
+    printf("\n");
+}
+
 static void dump_dir_tls(void)
 {
     IMAGE_TLS_DIRECTORY64 dir;
@@ -778,7 +873,18 @@ static void dump_dir_tls(void)
     printf(" }\n\n");
 }
 
-void	dump_separate_dbg(void)
+enum FileSig get_kind_dbg(void)
+{
+    const WORD*                pw;
+
+    pw = PRD(0, sizeof(WORD));
+    if (!pw) {printf("Can't get main signature, aborting\n"); return 0;}
+
+    if (*pw == 0x4944 /* "DI" */) return SIG_DBG;
+    return SIG_UNKNOWN;
+}
+
+void	dbg_dump(void)
 {
     const IMAGE_SEPARATE_DEBUG_HEADER*  separateDebugHead;
     unsigned			        nb_dbg;
@@ -807,7 +913,7 @@ void	dump_separate_dbg(void)
 	     separateDebugHead->NumberOfSections * sizeof(IMAGE_SECTION_HEADER)))
     {printf("Can't get the sections, aborting\n"); return;}
 
-    dump_sections(separateDebugHead + 1, separateDebugHead->NumberOfSections);
+    dump_sections(separateDebugHead, separateDebugHead + 1, separateDebugHead->NumberOfSections);
 
     nb_dbg = separateDebugHead->DebugDirectorySize / sizeof(IMAGE_DEBUG_DIRECTORY);
     debugDir = PRD(sizeof(IMAGE_SEPARATE_DEBUG_HEADER) +
@@ -827,7 +933,7 @@ void	dump_separate_dbg(void)
 
 static const char *get_resource_type( unsigned int id )
 {
-    static const char *types[] =
+    static const char * const types[] =
     {
         NULL,
         "CURSOR",
@@ -1105,18 +1211,44 @@ static void dump_debug(void)
         dump_stabs(stabs, szstabs, stabstr, szstr);
 }
 
-void pe_dump(const void* pmt)
+enum FileSig get_kind_exec(void)
+{
+    const WORD*                pw;
+    const DWORD*               pdw;
+    const IMAGE_DOS_HEADER*    dh;
+
+    pw = PRD(0, sizeof(WORD));
+    if (!pw) {printf("Can't get main signature, aborting\n"); return 0;}
+
+    if (*pw != IMAGE_DOS_SIGNATURE) return SIG_UNKNOWN;
+
+    if ((dh = PRD(0, sizeof(IMAGE_DOS_HEADER))))
+    {
+        /* the signature is the first DWORD */
+        pdw = PRD(dh->e_lfanew, sizeof(DWORD));
+        if (pdw)
+        {
+            if (*pdw == IMAGE_NT_SIGNATURE)                     return SIG_PE;
+            if (*(const WORD *)pdw == IMAGE_OS2_SIGNATURE)      return SIG_NE;
+            if (*(const WORD *)pdw == IMAGE_VXD_SIGNATURE)      return SIG_LE;
+            return SIG_DOS;
+        }
+    }
+    return 0;
+}
+
+void pe_dump(void)
 {
     int	all = (globals.dumpsect != NULL) && strcmp(globals.dumpsect, "ALL") == 0;
 
-    PE_nt_headers = get_nt_header(pmt);
-    if (is_fake_dll(pmt)) printf( "*** This is a Wine fake DLL ***\n\n" );
+    PE_nt_headers = get_nt_header();
+    if (is_fake_dll()) printf( "*** This is a Wine fake DLL ***\n\n" );
 
     if (globals.do_dumpheader)
     {
 	dump_pe_header();
 	/* FIXME: should check ptr */
-	dump_sections((const char*)PE_nt_headers + sizeof(DWORD) +
+	dump_sections(PRD(0, 1), (const char*)PE_nt_headers + sizeof(DWORD) +
 		      sizeof(IMAGE_FILE_HEADER) + PE_nt_headers->FileHeader.SizeOfOptionalHeader,
 		      PE_nt_headers->FileHeader.NumberOfSections);
     }
@@ -1141,6 +1273,8 @@ void pe_dump(const void* pmt)
 	    dump_dir_resource();
 	if (all || !strcmp(globals.dumpsect, "tls"))
 	    dump_dir_tls();
+	if (all || !strcmp(globals.dumpsect, "clr"))
+	    dump_dir_clr_header();
 #if 0
 	/* FIXME: not implemented yet */
 	if (all || !strcmp(globals.dumpsect, "reloc"))
@@ -1185,7 +1319,7 @@ static void dll_close (void)
 }
 */
 
-static	void	do_grab_sym( enum FileSig sig, const void* pmt )
+static	void	do_grab_sym( void )
 {
     const IMAGE_EXPORT_DIRECTORY*exportDir;
     unsigned			i, j;
@@ -1195,7 +1329,7 @@ static	void	do_grab_sym( enum FileSig sig, const void* pmt )
     const char*			ptr;
     DWORD*			map;
 
-    PE_nt_headers = get_nt_header(pmt);
+    PE_nt_headers = get_nt_header();
     if (!(exportDir = get_dir(IMAGE_FILE_EXPORT_DIRECTORY))) return;
 
     pName = RVA(exportDir->AddressOfNames, exportDir->NumberOfNames * sizeof(DWORD));

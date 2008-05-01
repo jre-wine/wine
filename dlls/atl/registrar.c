@@ -38,13 +38,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(atl);
 
-LONG dll_count = 0;
+static LONG dll_count;
 
 /**************************************************************
  * ATLRegistrar implementation
  */
 
-static struct {
+static const struct {
     WCHAR name[22];
     HKEY  key;
 } root_keys[] = {

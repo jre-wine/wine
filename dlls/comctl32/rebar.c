@@ -295,7 +295,7 @@ static LRESULT REBAR_NotifyFormat(REBAR_INFO *infoPtr, WPARAM wParam, LPARAM lPa
 static UINT mindragx = 0;
 static UINT mindragy = 0;
 
-static const char *band_stylename[] = {
+static const char * const band_stylename[] = {
     "RBBS_BREAK",              /* 0001 */
     "RBBS_FIXEDSIZE",          /* 0002 */
     "RBBS_CHILDEDGE",          /* 0004 */
@@ -307,7 +307,7 @@ static const char *band_stylename[] = {
     "RBBS_NOGRIPPER",          /* 0100 */
     NULL };
 
-static const char *band_maskname[] = {
+static const char * const band_maskname[] = {
     "RBBIM_STYLE",         /*    0x00000001 */
     "RBBIM_COLORS",        /*    0x00000002 */
     "RBBIM_TEXT",          /*    0x00000004 */
@@ -1960,16 +1960,16 @@ REBAR_ValidateBand (REBAR_INFO *infoPtr, REBAR_BAND *lpBand)
     lpBand->hcx = 0;
     lpBand->hcy = 0;
 
-    /* Data comming in from users into the cx... and cy... fields  */
+    /* Data coming in from users into the cx... and cy... fields   */
     /* may be bad, just garbage, because the user never clears     */
     /* the fields. RB_{SET|INSERT}BAND{A|W} just passes the data   */
     /* along if the fields exist in the input area. Here we must   */
     /* determine if the data is valid. I have no idea how MS does  */
     /* the validation, but it does because the RB_GETBANDINFO      */
     /* returns a 0 when I know the sample program passed in an     */
-    /* address. Here I will use the algorithim that if the value   */
+    /* address. Here I will use the algorithm that if the value    */
     /* is greater than 65535 then it is bad and replace it with    */
-    /* a zero. Feel free to improve the algorithim.  -  GA 12/2000 */
+    /* a zero. Feel free to improve the algorithm.  -  GA 12/2000  */
     if (lpBand->cxMinChild > 65535) lpBand->cxMinChild = 0;
     if (lpBand->cyMinChild > 65535) lpBand->cyMinChild = 0;
     if (lpBand->cx         > 65535) lpBand->cx         = 0;

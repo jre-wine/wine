@@ -33,16 +33,16 @@ typedef struct tagEXPECTEDNOTIFY
 
 typedef LRESULT (*CUSTOMDRAWPROC)(int n, NMCUSTOMDRAW *nm);
 
-CUSTOMDRAWPROC g_CustomDrawProc;
-int g_CustomDrawCount;
-DRAWITEMSTRUCT g_DrawItem;
-BOOL g_DrawItemReceived;
+static CUSTOMDRAWPROC g_CustomDrawProc;
+static int g_CustomDrawCount;
+static DRAWITEMSTRUCT g_DrawItem;
+static BOOL g_DrawItemReceived;
 
-EXPECTEDNOTIFY expectedNotify[10];
-INT nExpectedNotify = 0;
-INT nReceivedNotify = 0;
-INT unexpectedNotify[10];
-INT nUnexpectedNotify = 0;
+static EXPECTEDNOTIFY expectedNotify[10];
+static INT nExpectedNotify = 0;
+static INT nReceivedNotify = 0;
+static INT unexpectedNotify[10];
+static INT nUnexpectedNotify = 0;
 
 static HWND hHeaderParentWnd;
 static HWND hWndHeader;
@@ -145,7 +145,7 @@ static void addReadDelItem(HWND hdex, HDITEMA *phdiCreate, int maskRead, HDITEMA
     ZeroMemory(phdiRead, sizeof(HDITEMA));
     phdiRead->mask = maskRead;
     ok(SendMessage(hdex, HDM_GETITEMA, (WPARAM)0, (LPARAM)phdiRead)!=0, "Getting item data failed\n");
-    ok(SendMessage(hdex, HDM_DELETEITEM, (WPARAM)0, (LPARAM)0)!=0, "Deleteing item failed\n");
+    ok(SendMessage(hdex, HDM_DELETEITEM, (WPARAM)0, (LPARAM)0)!=0, "Deleting item failed\n");
 }
 
 static HWND create_header_control (void)
@@ -611,7 +611,7 @@ static void run_customdraw_scenario(CUSTOMDRAWPROC proc)
     g_CustomDrawProc = NULL;
 }
 
-void test_customdraw()
+static void test_customdraw(void)
 {
     int i;
     HDITEM item;
@@ -735,7 +735,7 @@ static void test_header_order (void)
     DestroyWindow(hWndHeader);
 }
 
-LRESULT CALLBACK HeaderTestWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+static LRESULT CALLBACK HeaderTestWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     DRAWITEMSTRUCT *di;
     switch(msg) {

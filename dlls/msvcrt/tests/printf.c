@@ -187,6 +187,18 @@ static void test_sprintf( void )
     r = sprintf(buffer,format,(LONGLONG)100);
     ok(!strcmp(buffer,"+00100  ") && r==8,"#-+ 08.5I64d failed: '%s'\n", buffer);
 
+    format = "%.80I64d";
+    r = sprintf(buffer,format,(LONGLONG)1);
+    ok(r==80,"%s format failed\n", format);
+
+    format = "% .80I64d";
+    r = sprintf(buffer,format,(LONGLONG)1);
+    ok(r==81,"%s format failed\n", format);
+
+    format = "% .80d";
+    r = sprintf(buffer,format,1);
+    ok(r==81,"%s format failed\n", format);
+
     format = "%lld";
     r = sprintf(buffer,format,((ULONGLONG)0xffffffff)*0xffffffff);
     ok(!strcmp(buffer, "1"), "Problem with \"ll\" interpretation\n");
@@ -492,7 +504,8 @@ static void test_fwprintf( void )
     const char *string="not a wide string";
     todo_wine
       {
-        ok(fwprintf(fopen("nul","r+"),(wchar_t *)string) == -1,"Non-wide string should not be printed by fwprintf\n");
+        ok(fwprintf(fopen("nul","r+"),(const wchar_t *)string) == -1,
+           "Non-wide string should not be printed by fwprintf\n");
       }
 }
 

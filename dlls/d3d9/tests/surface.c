@@ -17,6 +17,7 @@
  */
 #define COBJMACROS
 #include <d3d9.h>
+#include <dxerr9.h>
 #include "wine/test.h"
 
 static HWND create_window(void)
@@ -53,7 +54,12 @@ static IDirect3DDevice9 *init_d3d9(HMODULE d3d9_handle)
 
     hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
             NULL, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
-    ok(SUCCEEDED(hr), "IDirect3D_CreateDevice returned %#x\n", hr);
+
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D9_CreateDevice returned %#x\n", hr);
+        return NULL;
+    }
 
     return device_ptr;
 }
@@ -117,6 +123,7 @@ static void test_surface_alignment(IDirect3DDevice9 *device_ptr)
 {
     IDirect3DSurface9 *surface_ptr = 0;
     HRESULT hr;
+    int i;
 
     /* Test a sysmem surface as those aren't affected by the hardware's np2 restrictions */
     hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device_ptr, 5, 5, D3DFMT_R5G6B5, D3DPOOL_SYSTEMMEM, &surface_ptr, 0);
@@ -128,14 +135,40 @@ static void test_surface_alignment(IDirect3DDevice9 *device_ptr)
         hr = IDirect3DSurface9_LockRect(surface_ptr, &lockedRect, NULL, 0);
         ok(hr == D3D_OK, "IDirect3DSurface9_LockRect returned %08x\n", hr);
         ok(!(lockedRect.Pitch & 3), "Surface pitch %d is not 32-bit aligned\n", lockedRect.Pitch);
-#if 0
         /* Some applications also depend on the exact pitch, rather than just
          * the alignment. However, this test will fail or succeed depending
          * on the NP2 mode we're using. */
-        ok(lockedRect.Pitch == 12, "Got pitch %d, expected 12\n", lockedRect.Pitch);
-#endif
+        if (0) ok(lockedRect.Pitch == 12, "Got pitch %d, expected 12\n", lockedRect.Pitch);
         hr = IDirect3DSurface9_UnlockRect(surface_ptr);
         IDirect3DSurface9_Release(surface_ptr);
+    }
+
+    for (i = 0; i < 5; i++)
+    {
+        IDirect3DTexture9 *pTexture;
+        int j, pitch;
+
+        hr = IDirect3DDevice9_CreateTexture(device_ptr, 64, 64, 0, 0, MAKEFOURCC('D', 'X', 'T', '1'+i),
+                                            D3DPOOL_MANAGED, &pTexture, NULL);
+        ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateTexture: %s\n", DXGetErrorString9(hr));
+        if (FAILED(hr)) continue;
+
+        for (j = IDirect3DBaseTexture9_GetLevelCount(pTexture) - 1; j >= 0; j--)
+        {
+            D3DLOCKED_RECT rc;
+            D3DSURFACE_DESC descr;
+
+            IDirect3DTexture9_GetLevelDesc(pTexture, j, &descr);
+            hr = IDirect3DTexture9_LockRect(pTexture, j, &rc, NULL, 0);
+            ok(SUCCEEDED(hr), "IDirect3DTexture9_LockRect: %s\n", DXGetErrorString9(hr));
+            IDirect3DTexture9_UnlockRect(pTexture, j);
+
+            pitch = ((descr.Width + 3) >> 2) << 3;
+            if (i > 0) pitch <<= 1;
+            ok(rc.Pitch == pitch, "Wrong pitch for DXT%d lvl[%d (%dx%d)]: expected %d got %d\n",
+               i + 1, j, descr.Width, descr.Height, pitch, rc.Pitch);
+        }
+        IUnknown_Release( pTexture );
     }
 }
 

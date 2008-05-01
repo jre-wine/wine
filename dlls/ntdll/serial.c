@@ -595,13 +595,13 @@ static NTSTATUS set_handflow(int fd, const SERIAL_HANDFLOW* shf)
     if (shf->ControlHandShake & SERIAL_DTR_HANDSHAKE)
     {
         WARN("DSR/DTR flow control not supported\n");
-    } else if (shf->ControlHandShake & SERIAL_DTR_CONTROL)
+    } else if (!(shf->ControlHandShake & SERIAL_DTR_CONTROL))
         whack_modem(fd, ~TIOCM_DTR, 0);
-    else    
+    else
         whack_modem(fd, 0, TIOCM_DTR);
 #endif
 #ifdef TIOCM_RTS
-    if (!(shf->ControlHandShake & SERIAL_DSR_HANDSHAKE))
+    if (!(shf->ControlHandShake & SERIAL_CTS_HANDSHAKE))
     {
         if ((shf->FlowReplace & (SERIAL_RTS_CONTROL|SERIAL_RTS_HANDSHAKE)) == 0)
             whack_modem(fd, ~TIOCM_RTS, 0);
@@ -982,7 +982,7 @@ static DWORD CALLBACK wait_for_event(LPVOID arg)
     async_commio *commio = (async_commio*) arg;
     int fd, needs_close;
 
-    if (!server_get_unix_fd( commio->hDevice, FILE_READ_DATA | FILE_WRITE_DATA, &fd, &needs_close, NULL ))
+    if (!server_get_unix_fd( commio->hDevice, FILE_READ_DATA | FILE_WRITE_DATA, &fd, &needs_close, NULL, NULL ))
     {
         serial_irq_info new_irq_info;
         DWORD new_mstat, new_evtmask;
@@ -1130,7 +1130,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     piosb->Information = 0;
 
     if (dwIoControlCode != IOCTL_SERIAL_GET_TIMEOUTS)
-        if ((status = server_get_unix_fd( hDevice, access, &fd, &needs_close, NULL )))
+        if ((status = server_get_unix_fd( hDevice, access, &fd, &needs_close, NULL, NULL )))
             goto error;
 
     switch (dwIoControlCode)

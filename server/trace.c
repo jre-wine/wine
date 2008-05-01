@@ -43,6 +43,8 @@
 static const void *cur_data;
 static data_size_t cur_size;
 
+static const char *get_status_name( unsigned int status );
+
 /* utility functions */
 
 inline static void remove_data( data_size_t size )
@@ -94,6 +96,34 @@ static void dump_char_info( const char_info_t *info )
     fprintf( stderr, "{'" );
     dump_strW( &info->ch, 1, stderr, "\'\'" );
     fprintf( stderr, "',%04x}", info->attr );
+}
+
+static void dump_apc_call( const apc_call_t *call )
+{
+    fputc( '{', stderr );
+    switch(call->type)
+    {
+    case APC_NONE:
+        fprintf( stderr, "APC_NONE" );
+        break;
+    case APC_USER:
+        fprintf( stderr, "APC_USER,args={%lx,%lx,%lx}",
+                 call->user.args[0], call->user.args[1], call->user.args[2] );
+        break;
+    case APC_TIMER:
+        fprintf( stderr, "APC_TIMER,time=" );
+        dump_abs_time( &call->timer.time );
+        fprintf( stderr, ",arg=%p", call->timer.arg );
+        break;
+    case APC_ASYNC_IO:
+        fprintf( stderr, "APC_ASYNC_IO,user=%p,sb=%p,status=%s",
+                 call->async_io.user, call->async_io.sb, get_status_name(call->async_io.status) );
+        break;
+    default:
+        fprintf( stderr, "type=%u", call->type );
+        break;
+    }
+    fputc( '}', stderr );
 }
 
 static void dump_context( const CONTEXT *context )
@@ -845,25 +875,21 @@ static void dump_unload_dll_request( const struct unload_dll_request *req )
 static void dump_queue_apc_request( const struct queue_apc_request *req )
 {
     fprintf( stderr, " handle=%p,", req->handle );
-    fprintf( stderr, " user=%d,", req->user );
-    fprintf( stderr, " func=%p,", req->func );
-    fprintf( stderr, " arg1=%p,", req->arg1 );
-    fprintf( stderr, " arg2=%p,", req->arg2 );
-    fprintf( stderr, " arg3=%p", req->arg3 );
+    fprintf( stderr, " call=" );
+    dump_apc_call( &req->call );
 }
 
 static void dump_get_apc_request( const struct get_apc_request *req )
 {
-    fprintf( stderr, " alertable=%d", req->alertable );
+    fprintf( stderr, " alertable=%d,", req->alertable );
+    fprintf( stderr, " prev=%p", req->prev );
 }
 
 static void dump_get_apc_reply( const struct get_apc_reply *req )
 {
-    fprintf( stderr, " func=%p,", req->func );
-    fprintf( stderr, " type=%d,", req->type );
-    fprintf( stderr, " arg1=%p,", req->arg1 );
-    fprintf( stderr, " arg2=%p,", req->arg2 );
-    fprintf( stderr, " arg3=%p", req->arg3 );
+    fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " call=" );
+    dump_apc_call( &req->call );
 }
 
 static void dump_close_handle_request( const struct close_handle_request *req )
@@ -1104,6 +1130,7 @@ static void dump_get_handle_fd_request( const struct get_handle_fd_request *req 
 
 static void dump_get_handle_fd_reply( const struct get_handle_fd_reply *req )
 {
+    fprintf( stderr, " type=%d,", req->type );
     fprintf( stderr, " flags=%d", req->flags );
 }
 
@@ -2520,10 +2547,12 @@ static void dump_get_visible_region_request( const struct get_visible_region_req
 static void dump_get_visible_region_reply( const struct get_visible_region_reply *req )
 {
     fprintf( stderr, " top_win=%p,", req->top_win );
-    fprintf( stderr, " top_org_x=%d,", req->top_org_x );
-    fprintf( stderr, " top_org_y=%d,", req->top_org_y );
-    fprintf( stderr, " win_org_x=%d,", req->win_org_x );
-    fprintf( stderr, " win_org_y=%d,", req->win_org_y );
+    fprintf( stderr, " top_rect=" );
+    dump_rectangle( &req->top_rect );
+    fprintf( stderr, "," );
+    fprintf( stderr, " win_rect=" );
+    dump_rectangle( &req->win_rect );
+    fprintf( stderr, "," );
     fprintf( stderr, " total_size=%u,", req->total_size );
     fprintf( stderr, " region=" );
     dump_varargs_rectangles( cur_size );
@@ -3916,10 +3945,12 @@ static const struct
 {
     { "ACCESS_DENIED",               STATUS_ACCESS_DENIED },
     { "ACCESS_VIOLATION",            STATUS_ACCESS_VIOLATION },
+    { "ALERTED",                     STATUS_ALERTED },
     { "ALIAS_EXISTS",                STATUS_ALIAS_EXISTS },
     { "BAD_DEVICE_TYPE",             STATUS_BAD_DEVICE_TYPE },
     { "BUFFER_OVERFLOW",             STATUS_BUFFER_OVERFLOW },
     { "BUFFER_TOO_SMALL",            STATUS_BUFFER_TOO_SMALL },
+    { "CANCELLED",                   STATUS_CANCELLED },
     { "CHILD_MUST_BE_VOLATILE",      STATUS_CHILD_MUST_BE_VOLATILE },
     { "DEVICE_BUSY",                 STATUS_DEVICE_BUSY },
     { "DIRECTORY_NOT_EMPTY",         STATUS_DIRECTORY_NOT_EMPTY },
@@ -3931,9 +3962,9 @@ static const struct
     { "ERROR_CLIPBOARD_NOT_OPEN",    0xc0010000 | ERROR_CLIPBOARD_NOT_OPEN },
     { "ERROR_INVALID_INDEX",         0xc0010000 | ERROR_INVALID_INDEX },
     { "ERROR_INVALID_WINDOW_HANDLE", 0xc0010000 | ERROR_INVALID_WINDOW_HANDLE },
-    { "ERROR_SEEK",                  0xc0010000 | ERROR_SEEK },
     { "FILE_IS_A_DIRECTORY",         STATUS_FILE_IS_A_DIRECTORY },
     { "FILE_LOCK_CONFLICT",          STATUS_FILE_LOCK_CONFLICT },
+    { "HANDLES_CLOSED",              STATUS_HANDLES_CLOSED },
     { "HANDLE_NOT_CLOSABLE",         STATUS_HANDLE_NOT_CLOSABLE },
     { "INSTANCE_NOT_AVAILABLE",      STATUS_INSTANCE_NOT_AVAILABLE },
     { "INVALID_CID",                 STATUS_INVALID_CID },

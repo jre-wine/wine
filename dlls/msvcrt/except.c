@@ -68,7 +68,7 @@ typedef struct _MSVCRT_EXCEPTION_FRAME
 #if defined(__GNUC__) && defined(__i386__)
 inline static void call_finally_block( void *code_block, void *base_ptr )
 {
-    __asm__ __volatile__ ("movl %1,%%ebp; call *%%eax" \
+    __asm__ __volatile__ ("movl %1,%%ebp; call *%%eax"
                           : : "a" (code_block), "g" (base_ptr));
 }
 
@@ -259,7 +259,7 @@ int CDECL _abnormal_termination(void)
 
 #ifdef __i386__
 #define MSVCRT_JMP_MAGIC 0x56433230 /* ID value for new jump structure */
-typedef void (*MSVCRT_unwind_function)(const void*);
+typedef void (__stdcall *MSVCRT_unwind_function)(const struct MSVCRT___JUMP_BUFFER *);
 
 /* define an entrypoint for setjmp/setjmp3 that stores the registers in the jmp buf */
 /* and then jumps to the C backend function */

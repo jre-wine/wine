@@ -927,10 +927,8 @@ static void test_formatrecord(void)
     sz = sizeof buffer;
     r = MsiFormatRecord(0, hrec, buffer, &sz);
     ok( r == ERROR_SUCCESS, "format failed\n");
-    todo_wine{
     ok( sz == 6, "size wrong\n");
     ok( 0 == strcmp(buffer,"123456"), "wrong output (%s)\n",buffer);
-    }
 
     r = MsiRecordSetString(hrec, 0, "[~]");
     sz = sizeof buffer;
@@ -1627,6 +1625,15 @@ static void test_formatrecord(void)
         ok( sz == 2, "size wrong(%i)\n",sz);
         ok( 0 == strcmp(buffer,"}}"), "wrong output (%s)\n",buffer);
     }
+
+    sz = sizeof buffer;
+    MsiRecordSetInteger(hrec, 1, 100);
+    MsiRecordSetInteger(hrec, 2, -100);
+    MsiRecordSetString(hrec, 0, "[1] [2]");
+    r = MsiFormatRecord(0, hrec, buffer, &sz);
+    ok( r == ERROR_SUCCESS, "format failed\n");
+    ok( sz == 8, "size wrong(%i)\n",sz);
+    ok( 0 == strcmp(buffer,"100 -100"), "wrong output (%s)\n",buffer);
 
     MsiCloseHandle( hrec );
 }

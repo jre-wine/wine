@@ -342,7 +342,7 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
 {
     STARTUPINFOW  startup;
     PROCESS_INFORMATION info;
-    UINT_PTR retval = 31;
+    UINT_PTR retval = SE_ERR_NOASSOC;
     UINT gcdret = 0;
     WCHAR curdir[MAX_PATH];
 
@@ -490,16 +490,16 @@ end:
     return found;
 }
 
-static UINT SHELL_FindExecutableByOperation(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpOperation, LPWSTR key, LPWSTR filetype, LPWSTR command, LONG commandlen)
+static UINT SHELL_FindExecutableByOperation(LPCWSTR lpOperation, LPWSTR key, LPWSTR filetype, LPWSTR command, LONG commandlen)
 {
     static const WCHAR wCommand[] = {'\\','c','o','m','m','a','n','d',0};
     HKEY hkeyClass;
     WCHAR verb[MAX_PATH];
 
     if (RegOpenKeyExW(HKEY_CLASSES_ROOT, filetype, 0, 0x02000000, &hkeyClass))
-        return 31; /* default - 'No association was found' */
+        return SE_ERR_NOASSOC;
     if (!HCR_GetDefaultVerbW(hkeyClass, lpOperation, verb, sizeof(verb)))
-        return 31; /* default - 'No association was found' */
+        return SE_ERR_NOASSOC;
     RegCloseKey(hkeyClass);
 
     /* Looking for ...buffer\shell\<verb>\command */
@@ -543,7 +543,7 @@ static UINT SHELL_FindExecutableByOperation(LPCWSTR lpPath, LPCWSTR lpFile, LPCW
 	return 33; /* FIXME see SHELL_FindExecutable() */
     }
 
-    return 31;	/* default - 'No association was found' */
+    return SE_ERR_NOASSOC;
 }
 
 /*************************************************************************
@@ -571,23 +571,26 @@ UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpOperation,
     LONG  filetypelen = sizeof(filetype); /* length of above */
     WCHAR command[1024];     /* command from registry */
     WCHAR wBuffer[256];      /* Used to GetProfileString */
-    UINT  retval = 31;       /* default - 'No association was found' */
+    UINT  retval = SE_ERR_NOASSOC;
     WCHAR *tok;              /* token pointer */
     WCHAR xlpFile[256];      /* result of SearchPath */
     DWORD attribs;           /* file attributes */
 
     TRACE("%s\n", (lpFile != NULL) ? debugstr_w(lpFile) : "-");
 
+    if (!lpResult)
+        return ERROR_INVALID_PARAMETER;
+
     xlpFile[0] = '\0';
     lpResult[0] = '\0'; /* Start off with an empty return string */
     if (key) *key = '\0';
 
     /* trap NULL parameters on entry */
-    if ((lpFile == NULL) || (lpResult == NULL))
+    if (!lpFile)
     {
         WARN("(lpFile=%s,lpResult=%s): NULL parameter\n",
              debugstr_w(lpFile), debugstr_w(lpResult));
-        return 2; /* File not found. Close enough, I guess. */
+        return ERROR_FILE_NOT_FOUND; /* File not found. Close enough, I guess. */
     }
 
     if (SHELL_TryAppPathW( lpFile, lpResult, env ))
@@ -619,8 +622,8 @@ UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpOperation,
 
         if (extension == NULL || extension[1]==0)
         {
-            WARN("Returning 31 - No association\n");
-            return 31; /* no association */
+            WARN("Returning SE_ERR_NOASSOC\n");
+            return SE_ERR_NOASSOC;
         }
 
         /* Three places to check: */
@@ -684,7 +687,7 @@ UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpOperation,
     {
         /* pass the operation string to SHELL_FindExecutableByOperation() */
         filetype[filetypelen] = '\0';
-        retval = SHELL_FindExecutableByOperation(lpPath, lpFile, lpOperation, key, filetype, command, sizeof(command));
+        retval = SHELL_FindExecutableByOperation(lpOperation, key, filetype, command, sizeof(command));
 
 	if (retval > 32)
 	{
@@ -704,6 +707,16 @@ UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpOperation,
 		}
 		*p = '\0';
 	    }
+            else
+            {
+                /* Truncate on first space, like Windows:
+                 * http://support.microsoft.com/?scid=kb%3Ben-us%3B140724
+                 */
+		WCHAR *p = lpResult;
+		while (*p != ' ' && *p != '\0')
+                    p++;
+                *p='\0';
+            }
 	}
     }
     else /* Check win.ini */
@@ -777,7 +790,7 @@ static unsigned dde_connect(WCHAR* key, const WCHAR* start, WCHAR* ddeexec,
     HSZ         hszApp, hszTopic;
     HCONV       hConv;
     HDDEDATA    hDdeData;
-    unsigned    ret = 31;
+    unsigned    ret = SE_ERR_NOASSOC;
     BOOL unicode = !(GetVersion() & 0x80000000);
 
     strcpyW(endkey, wApplication);
@@ -817,7 +830,7 @@ static unsigned dde_connect(WCHAR* key, const WCHAR* start, WCHAR* ddeexec,
         static const WCHAR wIfexec[] = {'\\','i','f','e','x','e','c',0};
         TRACE("Launching '%s'\n", debugstr_w(start));
         ret = execfunc(start, env, TRUE, psei, psei_out);
-        if (ret < 32)
+        if (ret <= 32)
         {
             TRACE("Couldn't launch\n");
             goto error;
@@ -882,7 +895,7 @@ static UINT_PTR execute_from_key(LPWSTR key, LPCWSTR lpFile, WCHAR *env, LPCWSTR
 {
     WCHAR cmd[256];
     LONG cmdlen = sizeof(cmd);
-    UINT_PTR retval = 31;
+    UINT_PTR retval = SE_ERR_NOASSOC;
 
     TRACE("%s %s %s %s %s\n", debugstr_w(key), debugstr_w(lpFile), debugstr_w(env),
            debugstr_w(szCommandline), debugstr_w(executable_name));
@@ -968,23 +981,40 @@ HINSTANCE WINAPI FindExecutableA(LPCSTR lpFile, LPCSTR lpDirectory, LPSTR lpResu
 
 /*************************************************************************
  * FindExecutableW			[SHELL32.@]
+ *
+ * This function returns the executable associated with the specified file
+ * for the default verb.
+ *
+ * PARAMS
+ *  lpFile   [I] The file to find the association for. This must refer to
+ *               an existing file otherwise FindExecutable fails and returns
+ *               SE_ERR_FNF.
+ *  lpResult [O] Points to a buffer into which the executable path is
+ *               copied. This parameter must not be NULL otherwise
+ *               FindExecutable() segfaults. The buffer must be of size at
+ *               least MAX_PATH characters.
+ *
+ * RETURNS
+ *  A value greater than 32 on success, less than or equal to 32 otherwise.
+ *  See the SE_ERR_* constants.
+ *
+ * NOTES
+ *  On Windows XP and 2003, FindExecutable() seems to first convert the
+ *  filename into 8.3 format, thus taking into account only the first three
+ *  characters of the extension, and expects to find an association for those.
+ *  However other Windows versions behave sanely.
  */
 HINSTANCE WINAPI FindExecutableW(LPCWSTR lpFile, LPCWSTR lpDirectory, LPWSTR lpResult)
 {
-    UINT_PTR retval = 31;    /* default - 'No association was found' */
+    UINT_PTR retval = SE_ERR_NOASSOC;
     WCHAR old_dir[1024];
 
     TRACE("File %s, Dir %s\n",
           (lpFile != NULL ? debugstr_w(lpFile) : "-"), (lpDirectory != NULL ? debugstr_w(lpDirectory) : "-"));
 
     lpResult[0] = '\0'; /* Start off with an empty return string */
-
-    /* trap NULL parameters on entry */
-    if ((lpFile == NULL) || (lpResult == NULL))
-    {
-        /* FIXME - should throw a warning, perhaps! */
-	return (HINSTANCE)2; /* File not found. Close enough, I guess. */
-    }
+    if (lpFile == NULL)
+	return (HINSTANCE)SE_ERR_FNF;
 
     if (lpDirectory)
     {
@@ -1281,7 +1311,7 @@ BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
     WCHAR *env;
     WCHAR lpstrProtocol[256];
     LPCWSTR lpFile;
-    UINT_PTR retval = 31;
+    UINT_PTR retval = SE_ERR_NOASSOC;
     WCHAR wcmd[1024];
     WCHAR buffer[MAX_PATH];
     BOOL done;

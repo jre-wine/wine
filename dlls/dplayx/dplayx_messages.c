@@ -153,7 +153,7 @@ end_of_thread:
   return 0;
 }
 
-/* DP messageing stuff */
+/* DP messaging stuff */
 static HANDLE DP_MSG_BuildAndLinkReplyStruct( IDirectPlay2Impl* This,
                                               LPDP_MSG_REPLY_STRUCT_LIST lpReplyStructList,
                                               WORD wReplyCommandId );
@@ -437,7 +437,7 @@ void DP_MSG_ReplyReceived( IDirectPlay2AImpl* This, WORD wCommandId,
    * avoid problems.
    */
   EnterCriticalSection( &This->unk->DP_lock );
-    DPQ_REMOVE_ENTRY( This->dp2->replysExpected, replysExpected, replyExpected.wExpectedReply,\
+    DPQ_REMOVE_ENTRY( This->dp2->replysExpected, replysExpected, replyExpected.wExpectedReply,
                      ==, wCommandId, lpReplyList );
   LeaveCriticalSection( &This->unk->DP_lock );
 

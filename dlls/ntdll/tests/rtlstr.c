@@ -246,12 +246,12 @@ static void test_RtlInitUnicodeStringEx(void)
     uni.MaximumLength = 12345;
     uni.Buffer = (void *) 0xdeadbeef;
     pRtlInitUnicodeString(&uni, teststring2);
-    ok(uni.Length == 33920,
+    ok(uni.Length == 33920 /* <= Win2000 */ || uni.Length == 65532 /* >= Win XP */,
        "pRtlInitUnicodeString(&uni, 0) sets Length to %u, expected %u\n",
-       uni.Length, 33920);
-    ok(uni.MaximumLength == 33922,
+       uni.Length, 65532);
+    ok(uni.MaximumLength == 33922 /* <= Win2000 */ || uni.MaximumLength == 65534 /* >= Win XP */,
        "pRtlInitUnicodeString(&uni, 0) sets MaximumLength to %u, expected %u\n",
-       uni.MaximumLength, 33922);
+       uni.MaximumLength, 65534);
     ok(uni.Buffer == teststring2,
        "pRtlInitUnicodeString(&uni, 0) sets Buffer to %p, expected %p\n",
        uni.Buffer, teststring2);
@@ -1684,14 +1684,14 @@ static void test_RtlGUIDFromString(void)
   UNICODE_STRING str;
   NTSTATUS ret;
 
-  str.Length = str.MaximumLength = (sizeof(szGuid) - 1) / sizeof(WCHAR);
+  str.Length = str.MaximumLength = sizeof(szGuid) - sizeof(WCHAR);
   str.Buffer = (LPWSTR)szGuid;
 
   ret = pRtlGUIDFromString(&str, &guid);
   ok(ret == 0, "expected ret=0, got 0x%0x\n", ret);
   ok(memcmp(&guid, &IID_Endianess, sizeof(guid)) == 0, "Endianess broken\n");
 
-  str.Length = str.MaximumLength = (sizeof(szGuid2) - 1) / sizeof(WCHAR);
+  str.Length = str.MaximumLength = sizeof(szGuid2) - sizeof(WCHAR);
   str.Buffer = (LPWSTR)szGuid2;
 
   ret = pRtlGUIDFromString(&str, &guid);
@@ -1708,7 +1708,7 @@ static void test_RtlStringFromGUID(void)
 
   ret = pRtlStringFromGUID(&IID_Endianess, &str);
   ok(ret == 0, "expected ret=0, got 0x%0x\n", ret);
-  ok(str.Buffer && !lstrcmpW(str.Buffer, szGuid), "Endianess broken\n");
+  ok(str.Buffer && !lstrcmpiW(str.Buffer, szGuid), "Endianess broken\n");
 }
 
 START_TEST(rtlstr)

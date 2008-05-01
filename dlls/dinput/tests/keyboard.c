@@ -19,8 +19,6 @@
 #define DIRECTINPUT_VERSION 0x0700
 
 #define COBJMACROS
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include <windows.h>
 
 #include <math.h>
@@ -86,12 +84,18 @@ static void acquire_tests(LPDIRECTINPUT pDI, HWND hwnd)
     ok(hr == DIERR_NOTACQUIRED, "IDirectInputDevice_GetDeviceState(10,) should have failed: %s\n", DXGetErrorString8(hr));
     hr = IDirectInputDevice_GetDeviceState(pKeyboard, sizeof(kbd_state), kbd_state);
     ok(hr == DIERR_NOTACQUIRED, "IDirectInputDevice_GetDeviceState() should have failed: %s\n", DXGetErrorString8(hr));
+    hr = IDirectInputDevice_Unacquire(pKeyboard);
+    ok(hr == S_FALSE, "IDirectInputDevice_Unacquire() should have failed: %s\n", DXGetErrorString8(hr));
     hr = IDirectInputDevice_Acquire(pKeyboard);
     ok(SUCCEEDED(hr), "IDirectInputDevice_Acquire() failed: %s\n", DXGetErrorString8(hr));
+    hr = IDirectInputDevice_Acquire(pKeyboard);
+    ok(hr == S_FALSE, "IDirectInputDevice_Acquire() should have failed: %s\n", DXGetErrorString8(hr));
     hr = IDirectInputDevice_GetDeviceState(pKeyboard, 10, kbd_state);
     ok(hr == DIERR_INVALIDPARAM, "IDirectInputDevice_GetDeviceState(10,) should have failed: %s\n", DXGetErrorString8(hr));
     hr = IDirectInputDevice_GetDeviceState(pKeyboard, sizeof(kbd_state), kbd_state);
     ok(SUCCEEDED(hr), "IDirectInputDevice_GetDeviceState() failed: %s\n", DXGetErrorString8(hr));
+
+    if (pKeyboard) IUnknown_Release(pKeyboard);
 }
 
 static const HRESULT SetCoop_null_window[16] =  {

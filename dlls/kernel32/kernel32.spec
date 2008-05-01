@@ -649,8 +649,8 @@
 @ stdcall GetVersionExW(ptr)
 @ stdcall GetVolumeInformationA(str ptr long ptr ptr ptr ptr long)
 @ stdcall GetVolumeInformationW(wstr ptr long ptr ptr ptr ptr long)
-@ stub GetVolumeNameForVolumeMountPointA
-@ stdcall GetVolumeNameForVolumeMountPointW(wstr long long)
+@ stdcall GetVolumeNameForVolumeMountPointA(str ptr long)
+@ stdcall GetVolumeNameForVolumeMountPointW(wstr ptr long)
 @ stdcall GetVolumePathNameA(str ptr long)
 @ stdcall GetVolumePathNameW(wstr ptr long)
 # @ stub GetVolumePathNamesForVolumeNameA
@@ -795,8 +795,8 @@
 @ stdcall MoveFileExA(str str long)
 @ stdcall MoveFileExW(wstr wstr long)
 @ stdcall MoveFileW(wstr wstr)
-# @ stub MoveFileWithProgressA
-# @ stub MoveFileWithProgressW
+@ stdcall MoveFileWithProgressA(str str ptr ptr long)
+@ stdcall MoveFileWithProgressW(wstr wstr ptr ptr long)
 @ stdcall MulDiv(long long long)
 @ stdcall MultiByteToWideChar(long long str long ptr long)
 # @ stub NlsConvertIntegerToString
@@ -1024,7 +1024,7 @@
 @ stdcall SetSystemTimeAdjustment(long long)
 @ stdcall SetTapeParameters(ptr long ptr)
 @ stdcall SetTapePosition(ptr long long long long long)
-@ stub SetTermsrvAppInstallMode
+@ stdcall SetTermsrvAppInstallMode(long)
 @ stdcall SetThreadAffinityMask(long long)
 @ stdcall SetThreadContext(long ptr)
 @ stdcall SetThreadExecutionState(long)
@@ -1057,7 +1057,7 @@
 @ stub TerminateJobObject
 @ stdcall TerminateProcess(long long)
 @ stdcall TerminateThread(long long)
-@ stub TermsrvAppInstallMode
+@ stdcall TermsrvAppInstallMode()
 @ stdcall Thread32First(long ptr)
 @ stdcall Thread32Next(long ptr)
 @ stdcall ThunkConnect32(ptr str str str ptr ptr)

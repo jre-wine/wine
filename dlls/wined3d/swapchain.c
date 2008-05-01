@@ -88,41 +88,7 @@ static ULONG WINAPI IWineD3DSwapChainImpl_Release(IWineD3DSwapChain *iface) {
     refCount = InterlockedDecrement(&This->ref);
     TRACE("(%p) : ReleaseRef to %d\n", This, refCount);
     if (refCount == 0) {
-        IUnknown* bufferParent;
-
-        /* release the ref to the front and back buffer parents */
-        if(This->frontBuffer) {
-            IWineD3DSurface_SetContainer(This->frontBuffer, 0);
-            IWineD3DSurface_GetParent(This->frontBuffer, &bufferParent);
-            IUnknown_Release(bufferParent); /* once for the get parent */
-            if(IUnknown_Release(bufferParent) > 0){
-                FIXME("(%p) Something's still holding the front buffer\n",This);
-            }
-        }
-
-        if(This->backBuffer) {
-            int i;
-            for(i = 0; i < This->presentParms.BackBufferCount; i++) {
-                IWineD3DSurface_SetContainer(This->backBuffer[i], 0);
-                IWineD3DSurface_GetParent(This->backBuffer[i], &bufferParent);
-                IUnknown_Release(bufferParent); /* once for the get parent */
-                if(IUnknown_Release(bufferParent) > 0){
-                    FIXME("(%p) Something's still holding the back buffer\n",This);
-                }
-            }
-        }
-
-        /* Clean up the context */
-        /* check that we are the current context first */
-        if(glXGetCurrentContext() == This->glCtx){
-            glXMakeCurrent(This->display, None, NULL);
-        }
-        glXDestroyContext(This->display, This->glCtx);
-        /* IUnknown_Release(This->parent); This should only apply to the primary swapchain,
-         all others are created by the caller, so releasing the parent should cause
-         the child to be released, not the other way around!
-         */
-        HeapFree(GetProcessHeap(), 0, This);
+        IWineD3DSwapChain_Destroy(iface, D3DCB_DefaultDestroySurface);
     }
     return refCount;
 }
@@ -136,6 +102,40 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_GetParent(IWineD3DSwapChain *iface, 
 }
 
 /*IWineD3DSwapChain parts follow: */
+static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface, D3DCB_DESTROYSURFACEFN D3DCB_DestroyRenderTarget) {
+    IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
+
+    /* release the ref to the front and back buffer parents */
+    if(This->frontBuffer) {
+        IWineD3DSurface_SetContainer(This->frontBuffer, 0);
+        if(D3DCB_DestroyRenderTarget(This->frontBuffer) > 0) {
+            FIXME("(%p) Something's still holding the front buffer\n",This);
+        }
+    }
+
+    if(This->backBuffer) {
+        int i;
+        for(i = 0; i < This->presentParms.BackBufferCount; i++) {
+            IWineD3DSurface_SetContainer(This->backBuffer[i], 0);
+            if(D3DCB_DestroyRenderTarget(This->backBuffer[i]) > 0) {
+                FIXME("(%p) Something's still holding the back buffer\n",This);
+            }
+        }
+    }
+
+    /* Clean up the context */
+    /* check that we are the current context first */
+    if(glXGetCurrentContext() == This->glCtx){
+        glXMakeCurrent(This->display, None, NULL);
+    }
+    glXDestroyContext(This->display, This->glCtx);
+    /* IUnknown_Release(This->parent); This should only apply to the primary swapchain,
+        all others are created by the caller, so releasing the parent should cause
+        the child to be released, not the other way around!
+        */
+    HeapFree(GetProcessHeap(), 0, This);
+}
+
 static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion, DWORD dwFlags) {
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
 
@@ -279,7 +279,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
                 checkGLcall("glLightModeli(GL_LIGHT_MODEL_COLOR_CONTROL, GL_SEPARATE_SPECULAR_COLOR);");
 
                 /* If this swapchain is currently the active context then make this swapchain active */
-                if(IWineD3DSurface_GetContainer(This->wineD3DDevice->renderTarget, &IID_IWineD3DSwapChain, (void **)&tmp) == WINED3D_OK){
+                if(IWineD3DSurface_GetContainer(This->wineD3DDevice->render_targets[0], &IID_IWineD3DSwapChain, (void **)&tmp) == WINED3D_OK){
                     if(tmp != (IUnknown *)This){
                         glXMakeCurrent(This->display, currentDrawable, currentContext);
                         checkGLcall("glXMakeCurrent");
@@ -489,9 +489,9 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_GetDisplayMode(IWineD3DSwapChain *if
     pMode->Height       = GetSystemMetrics(SM_CYSCREEN);
     pMode->RefreshRate  = 85; /* FIXME: How to identify? */
 
-    hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
+    hdc = GetDC(0);
     bpp = GetDeviceCaps(hdc, BITSPIXEL);
-    DeleteDC(hdc);
+    ReleaseDC(0, hdc);
 
     switch (bpp) {
     case  8: pMode->Format       = WINED3DFMT_R8G8B8; break;
@@ -564,7 +564,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_GetGammaRamp(IWineD3DSwapChain *ifac
 }
 
 
-IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl =
+const IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl =
 {
     /* IUnknown */
     IWineD3DSwapChainImpl_QueryInterface,
@@ -572,6 +572,7 @@ IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl =
     IWineD3DSwapChainImpl_Release,
     /* IWineD3DSwapChain */
     IWineD3DSwapChainImpl_GetParent,
+    IWineD3DSwapChainImpl_Destroy,
     IWineD3DSwapChainImpl_GetDevice,
     IWineD3DSwapChainImpl_Present,
     IWineD3DSwapChainImpl_GetFrontBufferData,

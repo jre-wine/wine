@@ -117,6 +117,11 @@ IDirectDrawImpl_QueryInterface(IDirectDraw7 *iface,
         *obj = ICOM_INTERFACE(This, IDirectDraw4);
         TRACE("(%p) Returning IDirectDraw4 interface at %p\n", This, *obj);
     }
+    else if ( IsEqualGUID( &IID_IDirectDraw3, refiid ) )
+    {
+        *obj = ICOM_INTERFACE(This, IDirectDraw3);
+        TRACE("(%p) Returning IDirectDraw3 interface at %p\n", This, *obj);
+    }
     else if ( IsEqualGUID( &IID_IDirectDraw2, refiid ) )
     {
         *obj = ICOM_INTERFACE(This, IDirectDraw2);
@@ -1164,7 +1169,7 @@ IDirectDrawImpl_TestCooperativeLevel(IDirectDraw7 *iface)
 
         case WINED3DERR_DRIVERINTERNALERROR:
         default:
-            ERR("(%p) Unexpected return value %08x from wineD3D, " \
+            ERR("(%p) Unexpected return value %08x from wineD3D, "
                 " returning DD_OK\n", This, hr);
     }
 
@@ -1621,7 +1626,7 @@ IDirectDrawImpl_RecreateAllSurfaces(IDirectDrawImpl *This)
         /* Should happen almost never */
         FIXME("(%p) Switching to non-opengl surfaces with d3d started. Is this a bug?\n", This);
         /* Shutdown d3d */
-        IWineD3DDevice_Uninit3D(This->wineD3DDevice);
+        IWineD3DDevice_Uninit3D(This->wineD3DDevice, D3D7CB_DestroyDepthStencilSurface, D3D7CB_DestroySwapChain);
     }
     /* Contrary: D3D starting is handled by the caller, because it knows the render target */
 
@@ -1656,6 +1661,7 @@ IDirectDrawImpl_RecreateAllSurfaces(IDirectDrawImpl *This)
  *****************************************************************************/
 static HRESULT WINAPI
 D3D7CB_CreateSurface(IUnknown *device,
+                     IUnknown *pSuperior,
                      UINT Width, UINT Height,
                      WINED3DFORMAT Format,
                      DWORD Usage, WINED3DPOOL Pool, UINT level,
@@ -1676,6 +1682,24 @@ D3D7CB_CreateSurface(IUnknown *device,
 
     TRACE("Returning wineD3DSurface %p, it belongs to surface %p\n", *Surface, surf);
     return D3D_OK;
+}
+
+ULONG WINAPI D3D7CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain) {
+    IUnknown* swapChainParent;
+    TRACE("(%p) call back\n", pSwapChain);
+
+    IWineD3DSwapChain_GetParent(pSwapChain, &swapChainParent);
+    IUnknown_Release(swapChainParent);
+    return IUnknown_Release(swapChainParent);
+}
+
+ULONG WINAPI D3D7CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface) {
+    IUnknown* surfaceParent;
+    TRACE("(%p) call back\n", pSurface);
+
+    IWineD3DSurface_GetParent(pSurface, (IUnknown **) &surfaceParent);
+    IUnknown_Release(surfaceParent);
+    return IUnknown_Release(surfaceParent);
 }
 
 /*****************************************************************************
@@ -1801,6 +1825,10 @@ IDirectDrawImpl_CreateNewSurface(IDirectDrawImpl *This,
     if(pDDSD->ddsCaps.dwCaps & DDSCAPS_SYSTEMMEMORY)
     {
         Pool = WINED3DPOOL_SYSTEMMEM;
+    }
+    else if(pDDSD->ddsCaps.dwCaps2 & DDSCAPS2_TEXTUREMANAGE)
+    {
+        Pool = WINED3DPOOL_MANAGED;
     }
 
     Format = PixelFormat_DD2WineD3D(&pDDSD->u4.ddpfPixelFormat);
@@ -2640,7 +2668,8 @@ IDirectDrawImpl_EnumSurfaces(IDirectDraw7 *iface,
  *
  *****************************************************************************/
 static HRESULT WINAPI
-D3D7CB_CreateRenderTarget(IUnknown *device, UINT Width, UINT Height,
+D3D7CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior,
+                          UINT Width, UINT Height,
                           WINED3DFORMAT Format,
                           WINED3DMULTISAMPLE_TYPE MultiSample,
                           DWORD MultisampleQuality,
@@ -2674,6 +2703,7 @@ D3D7CB_CreateRenderTarget(IUnknown *device, UINT Width, UINT Height,
 
 static HRESULT WINAPI
 D3D7CB_CreateDepthStencilSurface(IUnknown *device,
+                                 IUnknown *pSuperior,
                                  UINT Width,
                                  UINT Height,
                                  WINED3DFORMAT Format,

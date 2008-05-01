@@ -123,9 +123,9 @@ typedef struct
     HDC           hdc;
     GC            gc;          /* X Window GC */
     Drawable      drawable;
-    POINT         org;          /* DC origin relative to drawable */
-    POINT         drawable_org; /* Origin of drawable relative to screen */
-    HRGN          region;       /* Device region (visible region & clip region) */
+    RECT          dc_rect;       /* DC rectangle relative to drawable */
+    RECT          drawable_rect; /* Drawable rectangle relative to screen */
+    HRGN          region;        /* Device region (visible region & clip region) */
     X_PHYSFONT    font;
     X_PHYSPEN     pen;
     X_PHYSBRUSH   brush;
@@ -480,8 +480,8 @@ struct x11drv_escape_set_drawable
     enum x11drv_escape_codes code;         /* escape code (X11DRV_SET_DRAWABLE) */
     Drawable                 drawable;     /* X drawable */
     int                      mode;         /* ClipByChildren or IncludeInferiors */
-    POINT                    org;          /* origin of DC relative to drawable */
-    POINT                    drawable_org; /* origin of drawable relative to screen */
+    RECT                     dc_rect;      /* DC rectangle relative to drawable */
+    RECT                     drawable_rect;/* Drawable rectangle relative to screen */
 };
 
 struct x11drv_escape_set_dce
@@ -526,6 +526,7 @@ extern unsigned int screen_height;
 extern unsigned int screen_depth;
 extern RECT virtual_screen_rect;
 extern unsigned int text_caps;
+extern int dxgrab;
 extern int use_xkb;
 extern int use_take_focus;
 extern int use_primary_selection;
@@ -666,6 +667,7 @@ extern int X11DRV_AcquireClipboard(HWND hWndClipWindow);
 extern void X11DRV_ResetSelectionOwner(void);
 extern void X11DRV_SetFocus( HWND hwnd );
 extern Cursor X11DRV_GetCursor( Display *display, struct tagCURSORICONINFO *ptr );
+extern BOOL X11DRV_ClipCursor( LPCRECT clip );
 extern void X11DRV_InitKeyboard(void);
 extern void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWORD time,
                                         DWORD dwExtraInfo, UINT injected_flags );
@@ -683,7 +685,7 @@ extern void X11DRV_sync_window_style( Display *display, struct x11drv_win_data *
 extern void X11DRV_sync_window_position( Display *display, struct x11drv_win_data *data,
                                          UINT swp_flags, const RECT *new_client_rect,
                                          const RECT *new_whole_rect );
-extern BOOL X11DRV_set_window_pos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
+extern BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
                                    const RECT *rectClient, UINT swp_flags, const RECT *validRects );
 extern void X11DRV_set_wm_hints( Display *display, struct x11drv_win_data *data );
 extern void xinerama_init(void);

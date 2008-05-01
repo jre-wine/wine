@@ -70,6 +70,10 @@ static const UINT button_up_flags[NB_BUTTONS] =
 };
 
 POINT cursor_pos;
+static DWORD last_time_modified;
+static RECT cursor_clip; /* Cursor clipping rect */
+
+BOOL X11DRV_SetCursorPos( INT x, INT y );
 
 /***********************************************************************
  *		get_coords
@@ -86,6 +90,18 @@ static inline void get_coords( HWND hwnd, int x, int y, POINT *pt )
     pt->y = y + data->whole_rect.top;
 }
 
+/***********************************************************************
+ *		clip_point_to_rect
+ *
+ * Clip point to the provided rectangle
+ */
+static inline void clip_point_to_rect( LPCRECT rect, LPPOINT pt )
+{
+    if      (pt->x <  rect->left)   pt->x = rect->left;
+    else if (pt->x >= rect->right)  pt->x = rect->right - 1;
+    if      (pt->y <  rect->top)    pt->y = rect->top;
+    else if (pt->y >= rect->bottom) pt->y = rect->bottom - 1;
+}
 
 /***********************************************************************
  *		update_button_state
@@ -97,20 +113,7 @@ static inline void update_button_state( unsigned int state )
     key_state_table[VK_LBUTTON] = (state & Button1Mask ? 0x80 : 0);
     key_state_table[VK_MBUTTON] = (state & Button2Mask ? 0x80 : 0);
     key_state_table[VK_RBUTTON] = (state & Button3Mask ? 0x80 : 0);
-    key_state_table[VK_XBUTTON1]= (state & Button6Mask ? 0x80 : 0);
-    key_state_table[VK_XBUTTON2]= (state & Button7Mask ? 0x80 : 0);
-}
-
-
-/***********************************************************************
- *		update_key_state
- *
- * Update the key state with what X provides us
- */
-static inline void update_key_state( unsigned int state )
-{
-    key_state_table[VK_SHIFT]   = (state & ShiftMask   ? 0x80 : 0);
-    key_state_table[VK_CONTROL] = (state & ControlMask ? 0x80 : 0);
+    /* X-buttons are not reported from XQueryPointer */
 }
 
 
@@ -129,7 +132,6 @@ static void update_mouse_state( HWND hwnd, Window window, int x, int y, unsigned
         y += virtual_screen_rect.top;
     }
     get_coords( hwnd, x, y, pt );
-    update_key_state( state );
 
     /* update the cursor */
 
@@ -202,6 +204,7 @@ static void queue_raw_mouse_message( UINT message, HWND hwnd, DWORD x, DWORD y,
     hook.time        = time;
     hook.dwExtraInfo = extra_info;
 
+    last_time_modified = GetTickCount();
     if (HOOK_CallHooks( WH_MOUSE_LL, HC_ACTION, message, (LPARAM)&hook, TRUE )) return;
 
     SERVER_START_REQ( send_hardware_message )
@@ -230,7 +233,7 @@ void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
 {
     POINT pt;
 
-    if (flags & MOUSEEVENTF_ABSOLUTE)
+    if (flags & MOUSEEVENTF_MOVE && flags & MOUSEEVENTF_ABSOLUTE)
     {
         if (injected_flags & LLMHF_INJECTED)
         {
@@ -241,10 +244,10 @@ void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
         {
             pt.x = x;
             pt.y = y;
+            wine_tsx11_lock();
+            if (cursor_pos.x == x && cursor_pos.y == y) flags &= ~MOUSEEVENTF_MOVE;
+            wine_tsx11_unlock();
         }
-        wine_tsx11_lock();
-        cursor_pos = pt;
-        wine_tsx11_unlock();
     }
     else if (flags & MOUSEEVENTF_MOVE)
     {
@@ -267,13 +270,6 @@ void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
         wine_tsx11_lock();
         pt.x = cursor_pos.x + (long)x * xMult;
         pt.y = cursor_pos.y + (long)y * yMult;
-
-        /* Clip to the current screen size */
-        if (pt.x < 0) pt.x = 0;
-        else if (pt.x >= screen_width) pt.x = screen_width - 1;
-        if (pt.y < 0) pt.y = 0;
-        else if (pt.y >= screen_height) pt.y = screen_height - 1;
-        cursor_pos = pt;
         wine_tsx11_unlock();
     }
     else
@@ -290,10 +286,13 @@ void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
         if ((injected_flags & LLMHF_INJECTED) &&
             ((flags & MOUSEEVENTF_ABSOLUTE) || x || y))  /* we have to actually move the cursor */
         {
-            TRACE( "warping to (%d,%d)\n", pt.x, pt.y );
+            X11DRV_SetCursorPos( pt.x, pt.y );
+        }
+        else
+        {
             wine_tsx11_lock();
-            XWarpPointer( thread_display(), root_window, root_window, 0, 0, 0, 0,
-                          pt.x - virtual_screen_rect.left, pt.y - virtual_screen_rect.top );
+            clip_point_to_rect( &cursor_clip, &pt);
+            cursor_pos = pt;
             wine_tsx11_unlock();
         }
     }
@@ -692,15 +691,25 @@ void X11DRV_SetCursor( CURSORICONINFO *lpCursor )
 BOOL X11DRV_SetCursorPos( INT x, INT y )
 {
     Display *display = thread_display();
+    POINT pt;
 
     TRACE( "warping to (%d,%d)\n", x, y );
 
     wine_tsx11_lock();
+    if (cursor_pos.x == x && cursor_pos.y == y)
+    {
+        wine_tsx11_unlock();
+        /* We still need to generate WM_MOUSEMOVE */
+        queue_raw_mouse_message( WM_MOUSEMOVE, NULL, x, y, 0, GetCurrentTime(), 0, 0 );
+        return TRUE;
+    }
+
+    pt.x = x; pt.y = y;
+    clip_point_to_rect( &cursor_clip, &pt);
     XWarpPointer( display, root_window, root_window, 0, 0, 0, 0,
-                  x - virtual_screen_rect.left, y - virtual_screen_rect.top );
+                  pt.x - virtual_screen_rect.left, pt.y - virtual_screen_rect.top );
     XFlush( display ); /* avoids bad mouse lag in games that do their own mouse warping */
-    cursor_pos.x = x;
-    cursor_pos.y = y;
+    cursor_pos = pt;
     wine_tsx11_unlock();
     return TRUE;
 }
@@ -716,10 +725,10 @@ BOOL X11DRV_GetCursorPos(LPPOINT pos)
     unsigned int xstate;
 
     wine_tsx11_lock();
-    if (XQueryPointer( display, root_window, &root, &child,
+    if ((GetTickCount() - last_time_modified > 100) &&
+        XQueryPointer( display, root_window, &root, &child,
                        &rootX, &rootY, &winX, &winY, &xstate ))
     {
-        update_key_state( xstate );
         update_button_state( xstate );
         winX += virtual_screen_rect.left;
         winY += virtual_screen_rect.top;
@@ -729,6 +738,20 @@ BOOL X11DRV_GetCursorPos(LPPOINT pos)
     }
     *pos = cursor_pos;
     wine_tsx11_unlock();
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *		ClipCursor (X11DRV.@)
+ *
+ * Set the cursor clipping rectangle.
+ */
+BOOL X11DRV_ClipCursor( LPCRECT clip )
+{
+    if (!IntersectRect( &cursor_clip, &virtual_screen_rect, clip ))
+        cursor_clip = virtual_screen_rect;
+
     return TRUE;
 }
 
@@ -763,7 +786,7 @@ void X11DRV_ButtonPress( HWND hwnd, XEvent *xev )
 
     update_mouse_state( hwnd, event->window, event->x, event->y, event->state, &pt );
 
-    X11DRV_send_mouse_input( hwnd, button_down_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE,
+    X11DRV_send_mouse_input( hwnd, button_down_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
                              pt.x, pt.y, wData, EVENT_x11_time_to_win32_time(event->time), 0, 0 );
 }
 
@@ -793,7 +816,7 @@ void X11DRV_ButtonRelease( HWND hwnd, XEvent *xev )
 
     update_mouse_state( hwnd, event->window, event->x, event->y, event->state, &pt );
 
-    X11DRV_send_mouse_input( hwnd, button_up_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE,
+    X11DRV_send_mouse_input( hwnd, button_up_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
                              pt.x, pt.y, wData, EVENT_x11_time_to_win32_time(event->time), 0, 0 );
 }
 

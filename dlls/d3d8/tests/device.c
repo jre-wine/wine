@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 Vitaliy Margolen
+ * Copyright (C) 2006 Chris Robinson
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -60,6 +61,13 @@ static int get_refcount(IUnknown *object)
         ok(count == rc_new, "Invalid refcount. Expected %d got %d\n", rc_new, count); \
     }
 
+#define CHECK_ADDREF_REFCOUNT(obj,rc) \
+    { \
+        int rc_new = rc; \
+        int count = IUnknown_AddRef( (IUnknown *)obj ); \
+        ok(count == rc_new, "Invalid refcount. Expected %d got %d\n", rc_new, count); \
+    }
+
 #define CHECK_SURFACE_CONTAINER(obj,iid,expected) \
     { \
         void *container_ptr = (void *)0x1337c0d3; \
@@ -112,8 +120,11 @@ static void test_mipmap_levels(void)
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
-    if (FAILED(hr)) goto cleanup;
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     check_mipmap_levels(pDevice, 32, 32, 6);
     check_mipmap_levels(pDevice, 256, 1, 9);
@@ -154,8 +165,11 @@ static void test_swapchain(void)
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
-    if (FAILED(hr)) goto cleanup;
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     /* Check if the back buffer count was modified */
     ok(d3dpp.BackBufferCount == 1, "The back buffer count in the presentparams struct is %d\n", d3dpp.BackBufferCount);
@@ -254,9 +268,12 @@ static void test_refcount(void)
     IDirect3DCubeTexture8       *pCubeTexture       = NULL;
     IDirect3DTexture8           *pTexture           = NULL;
     IDirect3DVolumeTexture8     *pVolumeTexture     = NULL;
+    IDirect3DVolume8            *pVolumeLevel       = NULL;
     IDirect3DSurface8           *pStencilSurface    = NULL;
     IDirect3DSurface8           *pImageSurface      = NULL;
     IDirect3DSurface8           *pRenderTarget      = NULL;
+    IDirect3DSurface8           *pRenderTarget2     = NULL;
+    IDirect3DSurface8           *pRenderTarget3     = NULL;
     IDirect3DSurface8           *pTextureLevel      = NULL;
     IDirect3DSurface8           *pBackBuffer        = NULL;
     DWORD                       dStateBlock         = -1;
@@ -304,8 +321,11 @@ static void test_refcount(void)
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
-    if (FAILED(hr)) goto cleanup;
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     refcount = get_refcount( (IUnknown *)pDevice );
     ok(refcount == 1, "Invalid device RefCount %d\n", refcount);
@@ -315,43 +335,69 @@ static void test_refcount(void)
      *   - the container is the device
      *   - they hold a refernce to the device
      *   - they are created with a refcount of 0 (Get/Release returns orignial refcount)
+     *   - they are not freed if refcount reaches 0.
+     *   - the refcount is not forwarded to the container.
      */
     hr = IDirect3DDevice8_GetRenderTarget(pDevice, &pRenderTarget);
-    todo_wine CHECK_CALL( hr, "GetRenderTarget", pDevice, ++refcount);
+    CHECK_CALL( hr, "GetRenderTarget", pDevice, ++refcount);
     if(pRenderTarget)
     {
-        todo_wine CHECK_SURFACE_CONTAINER( pRenderTarget, IID_IDirect3DDevice8, pDevice);
-        todo_wine CHECK_REFCOUNT( pRenderTarget, 1);
+        CHECK_SURFACE_CONTAINER( pRenderTarget, IID_IDirect3DDevice8, pDevice);
+        CHECK_REFCOUNT( pRenderTarget, 1);
+
+        CHECK_ADDREF_REFCOUNT(pRenderTarget, 2);
+        CHECK_REFCOUNT(pDevice, refcount);
+        CHECK_RELEASE_REFCOUNT(pRenderTarget, 1);
+        CHECK_REFCOUNT(pDevice, refcount);
+
         hr = IDirect3DDevice8_GetRenderTarget(pDevice, &pRenderTarget);
-        todo_wine CHECK_CALL( hr, "GetRenderTarget", pDevice, refcount);
-        todo_wine CHECK_REFCOUNT( pRenderTarget, 2);
-        todo_wine CHECK_RELEASE_REFCOUNT( pRenderTarget, 1);
-        todo_wine CHECK_RELEASE_REFCOUNT( pRenderTarget, 0);
-        pRenderTarget = NULL;
+        CHECK_CALL( hr, "GetRenderTarget", pDevice, refcount);
+        CHECK_REFCOUNT( pRenderTarget, 2);
+        CHECK_RELEASE_REFCOUNT( pRenderTarget, 1);
+        CHECK_RELEASE_REFCOUNT( pRenderTarget, 0);
+        CHECK_REFCOUNT( pDevice, --refcount);
+
+        /* The render target is released with the device, so AddRef with refcount=0 is fine here. */
+        CHECK_ADDREF_REFCOUNT(pRenderTarget, 1);
+        CHECK_REFCOUNT(pDevice, ++refcount);
+        CHECK_RELEASE_REFCOUNT(pRenderTarget, 0);
+        CHECK_REFCOUNT(pDevice, --refcount);
+    }
+
+    /* Render target and back buffer are identical. */
+    hr = IDirect3DDevice8_GetBackBuffer(pDevice, 0, 0, &pBackBuffer);
+    CHECK_CALL( hr, "GetBackBuffer", pDevice, ++refcount);
+    if(pBackBuffer)
+    {
+        CHECK_RELEASE_REFCOUNT(pBackBuffer, 0);
+        ok(pRenderTarget == pBackBuffer, "RenderTarget=%p and BackBuffer=%p should be the same.\n",
+           pRenderTarget, pBackBuffer);
+        pBackBuffer = NULL;
     }
     CHECK_REFCOUNT( pDevice, --refcount);
 
     hr = IDirect3DDevice8_GetDepthStencilSurface(pDevice, &pStencilSurface);
-    todo_wine CHECK_CALL( hr, "GetDepthStencilSurface", pDevice, ++refcount);
+    CHECK_CALL( hr, "GetDepthStencilSurface", pDevice, ++refcount);
     if(pStencilSurface)
     {
         CHECK_SURFACE_CONTAINER( pStencilSurface, IID_IDirect3DDevice8, pDevice);
-        todo_wine CHECK_REFCOUNT( pStencilSurface, 1);
-        todo_wine CHECK_RELEASE_REFCOUNT( pStencilSurface, 0);
+        CHECK_REFCOUNT( pStencilSurface, 1);
+
+        CHECK_ADDREF_REFCOUNT(pStencilSurface, 2);
+        CHECK_REFCOUNT(pDevice, refcount);
+        CHECK_RELEASE_REFCOUNT(pStencilSurface, 1);
+        CHECK_REFCOUNT(pDevice, refcount);
+
+        CHECK_RELEASE_REFCOUNT( pStencilSurface, 0);
+        CHECK_REFCOUNT( pDevice, --refcount);
+
+        /* The stencil surface is released with the device, so AddRef with refcount=0 is fine here. */
+        CHECK_ADDREF_REFCOUNT(pStencilSurface, 1);
+        CHECK_REFCOUNT(pDevice, ++refcount);
+        CHECK_RELEASE_REFCOUNT(pStencilSurface, 0);
+        CHECK_REFCOUNT(pDevice, --refcount);
         pStencilSurface = NULL;
     }
-    CHECK_REFCOUNT( pDevice, --refcount);
-
-    hr = IDirect3DDevice8_GetBackBuffer(pDevice, 0, 0, &pBackBuffer);
-    todo_wine CHECK_CALL( hr, "GetBackBuffer", pDevice, ++refcount);
-    if(pBackBuffer)
-    {
-        todo_wine CHECK_SURFACE_CONTAINER( pBackBuffer, IID_IDirect3DDevice8, pDevice);
-        todo_wine CHECK_REFCOUNT( pBackBuffer, 1);
-        todo_wine CHECK_RELEASE_REFCOUNT( pBackBuffer, 0);
-        pBackBuffer = NULL;
-    }
-    CHECK_REFCOUNT( pDevice, --refcount);
 
     /* Buffers */
     hr = IDirect3DDevice8_CreateIndexBuffer( pDevice, 16, 0, D3DFMT_INDEX32, D3DPOOL_DEFAULT, &pIndexBuffer );
@@ -370,13 +416,22 @@ static void test_refcount(void)
     CHECK_CALL( hr, "CreateVertexBuffer", pDevice, ++refcount );
     if(pVertexBuffer)
     {
+        IDirect3DVertexBuffer8 *pVBuf = (void*)~0;
+        UINT stride = ~0;
+
         tmp = get_refcount( (IUnknown *)pVertexBuffer );
 
         hr = IDirect3DDevice8_SetStreamSource(pDevice, 0, pVertexBuffer, 3 * sizeof(float));
         CHECK_CALL( hr, "SetStreamSource", pVertexBuffer, tmp);
         hr = IDirect3DDevice8_SetStreamSource(pDevice, 0, NULL, 0);
         CHECK_CALL( hr, "SetStreamSource", pVertexBuffer, tmp);
+
+        hr = IDirect3DDevice8_GetStreamSource(pDevice, 0, &pVBuf, &stride);
+        ok(SUCCEEDED(hr), "GetStreamSource did not succeed with NULL stream!\n");
+        ok(pVBuf==NULL, "pVBuf not NULL (%p)!\n", pVBuf);
+        ok(stride==3*sizeof(float), "stride not 3 floats (got %u)!\n", stride);
     }
+
     /* Shaders */
     hr = IDirect3DDevice8_CreateVertexShader( pDevice, decl, simple_vs, &dVertexShader, 0 );
     CHECK_CALL( hr, "CreateVertexShader", pDevice, refcount );
@@ -399,19 +454,54 @@ static void test_refcount(void)
         hr = IDirect3DTexture8_GetSurfaceLevel( pTexture, 1, &pTextureLevel );
         CHECK_CALL( hr, "GetSurfaceLevel", pDevice, refcount );
         /* But should increment texture's refcount */
-        CHECK_CALL( hr, "GetSurfaceLevel", pTexture, tmp+1 );
+        CHECK_REFCOUNT( pTexture, tmp+1 );
+        /* Because the texture and surface refcount are identical */
+        if (pTextureLevel)
+        {
+            CHECK_REFCOUNT        ( pTextureLevel, tmp+1 );
+            CHECK_ADDREF_REFCOUNT ( pTextureLevel, tmp+2 );
+            CHECK_REFCOUNT        ( pTexture     , tmp+2 );
+            CHECK_RELEASE_REFCOUNT( pTextureLevel, tmp+1 );
+            CHECK_REFCOUNT        ( pTexture     , tmp+1 );
+            CHECK_RELEASE_REFCOUNT( pTexture     , tmp   );
+            CHECK_REFCOUNT        ( pTextureLevel, tmp   );
+        }
     }
     hr = IDirect3DDevice8_CreateCubeTexture( pDevice, 32, 0, 0, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &pCubeTexture );
     CHECK_CALL( hr, "CreateCubeTexture", pDevice, ++refcount );
     hr = IDirect3DDevice8_CreateVolumeTexture( pDevice, 32, 32, 2, 0, 0, D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, &pVolumeTexture );
     CHECK_CALL( hr, "CreateVolumeTexture", pDevice, ++refcount );
+    if (pVolumeTexture)
+    {
+        tmp = get_refcount( (IUnknown *)pVolumeTexture );
+
+        /* This should not increment device refcount */
+        hr = IDirect3DVolumeTexture8_GetVolumeLevel(pVolumeTexture, 0, &pVolumeLevel);
+        CHECK_CALL( hr, "GetVolumeLevel", pDevice, refcount );
+        /* But should increment volume texture's refcount */
+        CHECK_REFCOUNT( pVolumeTexture, tmp+1 );
+        /* Because the volume texture and volume refcount are identical */
+        if (pVolumeLevel)
+        {
+            CHECK_REFCOUNT        ( pVolumeLevel  , tmp+1 );
+            CHECK_ADDREF_REFCOUNT ( pVolumeLevel  , tmp+2 );
+            CHECK_REFCOUNT        ( pVolumeTexture, tmp+2 );
+            CHECK_RELEASE_REFCOUNT( pVolumeLevel  , tmp+1 );
+            CHECK_REFCOUNT        ( pVolumeTexture, tmp+1 );
+            CHECK_RELEASE_REFCOUNT( pVolumeTexture, tmp   );
+            CHECK_REFCOUNT        ( pVolumeLevel  , tmp   );
+        }
+    }
     /* Surfaces */
     hr = IDirect3DDevice8_CreateDepthStencilSurface( pDevice, 32, 32, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, &pStencilSurface );
     CHECK_CALL( hr, "CreateDepthStencilSurface", pDevice, ++refcount );
+    CHECK_REFCOUNT( pStencilSurface, 1);
     hr = IDirect3DDevice8_CreateImageSurface( pDevice, 32, 32, D3DFMT_X8R8G8B8, &pImageSurface );
     CHECK_CALL( hr, "CreateImageSurface", pDevice, ++refcount );
-    hr = IDirect3DDevice8_CreateRenderTarget( pDevice, 32, 32, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, TRUE, &pRenderTarget );
+    CHECK_REFCOUNT( pImageSurface, 1);
+    hr = IDirect3DDevice8_CreateRenderTarget( pDevice, 32, 32, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, TRUE, &pRenderTarget3 );
     CHECK_CALL( hr, "CreateRenderTarget", pDevice, ++refcount );
+    CHECK_REFCOUNT( pRenderTarget3, 1);
     /* Misc */
     hr = IDirect3DDevice8_CreateStateBlock( pDevice, D3DSBT_ALL, &dStateBlock );
     CHECK_CALL( hr, "CreateStateBlock", pDevice, refcount );
@@ -421,17 +511,23 @@ static void test_refcount(void)
     {
         /* check implicit back buffer */
         hr = IDirect3DSwapChain8_GetBackBuffer(pSwapChain, 0, 0, &pBackBuffer);
-        todo_wine CHECK_CALL( hr, "GetBackBuffer", pDevice, ++refcount);
-        todo_wine CHECK_REFCOUNT( pSwapChain, 1);
+        CHECK_CALL( hr, "GetBackBuffer", pDevice, ++refcount);
+        CHECK_REFCOUNT( pSwapChain, 1);
         if(pBackBuffer)
         {
-            todo_wine CHECK_SURFACE_CONTAINER( pBackBuffer, IID_IDirect3DDevice8, pDevice);
-            todo_wine CHECK_REFCOUNT( pBackBuffer, 1);
-            todo_wine CHECK_RELEASE_REFCOUNT( pBackBuffer, 0);
+            CHECK_SURFACE_CONTAINER( pBackBuffer, IID_IDirect3DDevice8, pDevice);
+            CHECK_REFCOUNT( pBackBuffer, 1);
+            CHECK_RELEASE_REFCOUNT( pBackBuffer, 0);
+            CHECK_REFCOUNT( pDevice, --refcount);
+
+            /* The back buffer is released with the swapchain, so AddRef with refcount=0 is fine here. */
+            CHECK_ADDREF_REFCOUNT(pBackBuffer, 1);
+            CHECK_REFCOUNT(pDevice, ++refcount);
+            CHECK_RELEASE_REFCOUNT(pBackBuffer, 0);
+            CHECK_REFCOUNT(pDevice, --refcount);
             pBackBuffer = NULL;
         }
         CHECK_REFCOUNT( pSwapChain, 1);
-        CHECK_REFCOUNT( pDevice, --refcount);
     }
 
     if(pVertexBuffer)
@@ -448,6 +544,20 @@ static void test_refcount(void)
         ok(hr == D3D_OK, "IDirect3DVertexBuffer8::Unlock failed with %08x\n", hr);
     }
 
+    /* The implicit render target is not freed if refcount reaches 0.
+     * Otherwise GetRenderTarget would re-allocate it and the pointer would change.*/
+    hr = IDirect3DDevice8_GetRenderTarget(pDevice, &pRenderTarget2);
+    CHECK_CALL( hr, "GetRenderTarget", pDevice, ++refcount);
+    if(pRenderTarget2)
+    {
+        CHECK_RELEASE_REFCOUNT(pRenderTarget2, 0);
+        ok(pRenderTarget == pRenderTarget2, "RenderTarget=%p and RenderTarget2=%p should be the same.\n",
+           pRenderTarget, pRenderTarget2);
+        CHECK_REFCOUNT( pDevice, --refcount);
+        pRenderTarget2 = NULL;
+    }
+    pRenderTarget = NULL;
+
 cleanup:
     CHECK_RELEASE(pDevice,              pDevice, --refcount);
 
@@ -458,15 +568,13 @@ cleanup:
     if (dVertexShader != -1)  IDirect3DDevice8_DeleteVertexShader( pDevice, dVertexShader );
     if (dPixelShader != -1)   IDirect3DDevice8_DeletePixelShader( pDevice, dPixelShader );
     /* Textures */
-    /* pTextureLevel is holding a reference to the pTexture */
-    CHECK_RELEASE(pTexture,             pDevice,   refcount);
-    CHECK_RELEASE(pTextureLevel,        pDevice, --refcount);
+    CHECK_RELEASE(pTexture,             pDevice, --refcount);
     CHECK_RELEASE(pCubeTexture,         pDevice, --refcount);
     CHECK_RELEASE(pVolumeTexture,       pDevice, --refcount);
     /* Surfaces */
     CHECK_RELEASE(pStencilSurface,      pDevice, --refcount);
     CHECK_RELEASE(pImageSurface,        pDevice, --refcount);
-    CHECK_RELEASE(pRenderTarget,        pDevice, --refcount);
+    CHECK_RELEASE(pRenderTarget3,       pDevice, --refcount);
     /* Misc */
     if (dStateBlock != -1)    IDirect3DDevice8_DeleteStateBlock( pDevice, dStateBlock );
     /* This will destroy device - cannot check the refcount here */
@@ -508,8 +616,11 @@ static void test_cursor(void)
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(SUCCEEDED(hr), "Failed to create IDirect3D8Device (%s)\n", DXGetErrorString8(hr));
-    if (FAILED(hr)) goto cleanup;
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
 
     IDirect3DDevice8_CreateImageSurface(pDevice, 32, 32, D3DFMT_A8R8G8B8, &cursor);
     ok(cursor != NULL, "IDirect3DDevice8_CreateOffscreenPlainSurface failed with %08x\n", hr);
@@ -559,6 +670,96 @@ cleanup:
     if(pDevice) IDirect3D8_Release(pDevice);
 }
 
+static void test_states(void)
+{
+    HRESULT                      hr;
+    HWND                         hwnd               = NULL;
+    IDirect3D8                  *pD3d               = NULL;
+    IDirect3DDevice8            *pDevice            = NULL;
+    D3DPRESENT_PARAMETERS        d3dpp;
+    D3DDISPLAYMODE               d3ddm;
+
+    pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!pD3d || !hwnd) goto cleanup;
+
+    IDirect3D8_GetAdapterDisplayMode( pD3d, D3DADAPTER_DEFAULT, &d3ddm );
+    ZeroMemory( &d3dpp, sizeof(d3dpp) );
+    d3dpp.Windowed         = TRUE;
+    d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferWidth  = 640;
+    d3dpp.BackBufferHeight  = 480;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+
+    hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
+                                  D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
+
+    hr = IDirect3DDevice8_SetRenderState(pDevice, D3DRS_ZVISIBLE, TRUE);
+    ok(hr == D3D_OK, "IDirect3DDevice8_SetRenderState(D3DRS_ZVISIBLE, TRUE) returned %s\n", DXGetErrorString8(hr));
+    hr = IDirect3DDevice8_SetRenderState(pDevice, D3DRS_ZVISIBLE, FALSE);
+    ok(hr == D3D_OK, "IDirect3DDevice8_SetRenderState(D3DRS_ZVISIBLE, FALSE) returned %s\n", DXGetErrorString8(hr));
+
+cleanup:
+    if(pD3d) IDirect3D8_Release(pD3d);
+    if(pDevice) IDirect3D8_Release(pDevice);
+}
+
+static void test_shader_versions(void)
+{
+    HRESULT                      hr;
+    IDirect3D8                  *pD3d               = NULL;
+    D3DCAPS8                     d3dcaps;
+
+    pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
+    if (pD3d != NULL) {
+        hr = IDirect3D8_GetDeviceCaps(pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &d3dcaps);
+        ok(SUCCEEDED(hr), "Failed to get D3D8 caps (%s)\n", DXGetErrorString8(hr));
+        if (SUCCEEDED(hr)) {
+            ok(d3dcaps.VertexShaderVersion <= D3DVS_VERSION(1,1), "Unexpected VertexShaderVersion (%#x > %#x)\n", d3dcaps.VertexShaderVersion, D3DVS_VERSION(1,1));
+            ok(d3dcaps.PixelShaderVersion <= D3DPS_VERSION(1,4), "Unexpected PixelShaderVersion (%#x > %#x)\n", d3dcaps.PixelShaderVersion, D3DPS_VERSION(1,4));
+        }
+        IDirect3D8_Release(pD3d);
+    }
+}
+
+
+/* Test adapter display modes */
+static void test_display_modes(void)
+{
+    UINT max_modes, i;
+    D3DDISPLAYMODE dmode;
+    HRESULT res;
+    IDirect3D8 *pD3d;
+
+    pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
+    if(!pD3d) return;
+
+    max_modes = IDirect3D8_GetAdapterModeCount(pD3d, D3DADAPTER_DEFAULT);
+    ok(max_modes > 0, "GetAdapterModeCount(D3DADAPTER_DEFAULT) returned 0!\n");
+
+    for(i=0; i<max_modes;i++) {
+        res = IDirect3D8_EnumAdapterModes(pD3d, D3DADAPTER_DEFAULT, i, &dmode);
+        ok(res==D3D_OK, "EnumAdapterModes returned %s for mode %u!\n", DXGetErrorString8(res), i);
+        if(res != D3D_OK)
+            continue;
+
+        ok(dmode.Format==D3DFMT_X8R8G8B8 || dmode.Format==D3DFMT_R5G6B5,
+           "Unexpected display mode returned for mode %u: %#x\n", i , dmode.Format);
+    }
+
+    IDirect3D8_Release(pD3d);
+}
+
+
 START_TEST(device)
 {
     HMODULE d3d8_handle = LoadLibraryA( "d3d8.dll" );
@@ -566,9 +767,12 @@ START_TEST(device)
     pDirect3DCreate8 = (void *)GetProcAddress( d3d8_handle, "Direct3DCreate8" );
     if (pDirect3DCreate8)
     {
+        test_display_modes();
+        test_shader_versions();
         test_swapchain();
         test_refcount();
         test_mipmap_levels();
         test_cursor();
+        test_states();
     }
 }

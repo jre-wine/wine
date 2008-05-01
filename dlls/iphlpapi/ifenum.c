@@ -22,7 +22,7 @@
  * interface:
  * - a specific IOCTL (Linux)
  * - looking in the ARP cache (at least Solaris)
- * - using the sysctl interface (FreeBSD and MacOSX)
+ * - using the sysctl interface (FreeBSD and Mac OS X)
  * Solaris and some others have SIOCGENADDR, but I haven't gotten that to work
  * on the Solaris boxes at SourceForge's compile farm, whereas SIOCGARP does.
  */
@@ -690,7 +690,7 @@ static DWORD enumIPAddresses(PDWORD pcAddresses, struct ifconf *ifc)
       ifc->ifc_buf = HeapAlloc(GetProcessHeap(), 0, ifc->ifc_len);
       ioctlRet = ioctl(fd, SIOCGIFCONF, ifc);
     } while (ioctlRet == 0 &&
-     ifc->ifc_len == (sizeof(struct ifreq) * guessedNumAddresses));
+     ifc->ifc_len > (sizeof(struct ifreq) * (guessedNumAddresses - 2)));
 
     if (ioctlRet == 0) {
       ifPtr = ifc->ifc_buf;

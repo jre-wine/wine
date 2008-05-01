@@ -209,6 +209,34 @@ struct token_groups
 
 };
 
+enum apc_type { APC_NONE, APC_USER, APC_TIMER, APC_ASYNC_IO };
+
+typedef union
+{
+    enum apc_type type;
+    struct
+    {
+        enum apc_type    type;
+        void (__stdcall *func)(unsigned long,unsigned long,unsigned long);
+        unsigned long    args[3];
+    } user;
+    struct
+    {
+        enum apc_type   type;
+        void (__stdcall *func)(void*, unsigned int, unsigned int);
+        abs_time_t       time;
+        void            *arg;
+    } timer;
+    struct
+    {
+        enum apc_type    type;
+        void (__stdcall *func)(void*, void*, unsigned int);
+        void            *user;
+        void            *sb;
+        unsigned int     status;
+    } async_io;
+} apc_call_t;
+
 
 
 
@@ -512,11 +540,7 @@ struct queue_apc_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    int          user;
-    void*        func;
-    void*        arg1;
-    void*        arg2;
-    void*        arg3;
+    apc_call_t   call;
 };
 struct queue_apc_reply
 {
@@ -529,17 +553,14 @@ struct get_apc_request
 {
     struct request_header __header;
     int          alertable;
+    obj_handle_t prev;
 };
 struct get_apc_reply
 {
     struct reply_header __header;
-    void*        func;
-    int          type;
-    void*        arg1;
-    void*        arg2;
-    void*        arg3;
+    obj_handle_t handle;
+    apc_call_t   call;
 };
-enum apc_type { APC_NONE, APC_USER, APC_TIMER, APC_ASYNC_IO };
 
 
 
@@ -844,7 +865,20 @@ struct get_handle_fd_request
 struct get_handle_fd_reply
 {
     struct reply_header __header;
+    int          type;
     int          flags;
+};
+enum server_fd_type
+{
+    FD_TYPE_INVALID,
+    FD_TYPE_FILE,
+    FD_TYPE_DIR,
+    FD_TYPE_SOCKET,
+    FD_TYPE_SERIAL,
+    FD_TYPE_PIPE,
+    FD_TYPE_MAILSLOT,
+    FD_TYPE_DEVICE,
+    FD_TYPE_NB_TYPES
 };
 #define FD_FLAG_OVERLAPPED         0x01
 #define FD_FLAG_TIMEOUT            0x02
@@ -2815,10 +2849,8 @@ struct get_visible_region_reply
 {
     struct reply_header __header;
     user_handle_t  top_win;
-    int            top_org_x;
-    int            top_org_y;
-    int            win_org_x;
-    int            win_org_y;
+    rectangle_t    top_rect;
+    rectangle_t    win_rect;
     data_size_t    total_size;
     /* VARARG(region,rectangles); */
 };
@@ -4404,6 +4436,6 @@ union generic_reply
     struct query_symlink_reply query_symlink_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 259
+#define SERVER_PROTOCOL_VERSION 263
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

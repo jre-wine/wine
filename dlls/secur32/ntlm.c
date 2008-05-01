@@ -34,7 +34,9 @@
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 
 #define NTLM_MAX_BUF 1904
-
+#define MIN_NTLM_AUTH_MAJOR_VERSION 3
+#define MIN_NTLM_AUTH_MINOR_VERSION 0
+#define MIN_NTLM_AUTH_MICRO_VERSION 24
 
 static CHAR ntlm_auth[] = "ntlm_auth";
 
@@ -443,29 +445,41 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         }
         lstrcpyA(want_flags, "SF");
         if(fContextReq & ISC_REQ_CONFIDENTIALITY)
-            lstrcatA(want_flags, " NTLMSSP_FEATURE_SEAL");
-        if(fContextReq & ISC_REQ_CONNECTION)
         {
-            /* This is default, so we'll enable it */
-            ctxt_attr |= ISC_RET_CONNECTION;
-            /* Work around a bug in ntlm_auth that sets the
-             * NTLMSSP_FEATURE_SIGN flag for this want flag, which
-             * breaks RPC. */
-            if(0)
-                lstrcatA(want_flags, " NTLMSSP_FEATURE_SESSION_KEY");
+            char *ptr;
+            if((ptr = strstr(want_flags, "NTLMSSP_FEATURE_SEAL")) == NULL)
+                lstrcatA(want_flags, " NTLMSSP_FEATURE_SEAL");
         }
+        if(fContextReq & ISC_REQ_CONNECTION)
+            ctxt_attr |= ISC_RET_CONNECTION;
         if(fContextReq & ISC_REQ_EXTENDED_ERROR)
-            FIXME("ISC_REQ_EXTENDED_ERROR\n");
+            ctxt_attr |= ISC_RET_EXTENDED_ERROR;
         if(fContextReq & ISC_REQ_INTEGRITY)
-            lstrcatA(want_flags, " NTLMSSP_FEATURE_SIGN");
+        {
+            char *ptr;
+            if((ptr = strstr(want_flags, "NTLMSSP_FEATURE_SIGN")) == NULL)
+                lstrcatA(want_flags, " NTLMSSP_FEATURE_SIGN");
+        }
         if(fContextReq & ISC_REQ_MUTUAL_AUTH)
-            FIXME("ISC_REQ_MUTUAL_AUTH\n");
+            ctxt_attr |= ISC_RET_MUTUAL_AUTH;
         if(fContextReq & ISC_REQ_REPLAY_DETECT)
-            FIXME("ISC_REQ_REPLAY_DETECT\n");
+        {
+            char *ptr;
+            if((ptr = strstr(want_flags, "NTLMSSP_FEATURE_SIGN")) == NULL)
+                lstrcatA(want_flags, " NTLMSSP_FEATURE_SIGN");
+        }
         if(fContextReq & ISC_REQ_SEQUENCE_DETECT)
-            FIXME("ISC_REQ_SEQUENCE_DETECT\n");
+        {
+            char *ptr;
+            if((ptr = strstr(want_flags, "NTLMSSP_FEATURE_SIGN")) == NULL)
+                lstrcatA(want_flags, " NTLMSSP_FEATURE_SIGN");
+        }
         if(fContextReq & ISC_REQ_STREAM)
             FIXME("ISC_REQ_STREAM\n");
+        if(fContextReq & ISC_REQ_USE_DCE_STYLE)
+            ctxt_attr |= ISC_RET_USED_DCE_STYLE;
+        if(fContextReq & ISC_REQ_DELEGATE)
+            ctxt_attr |= ISC_RET_DELEGATE;
 
         /* If no password is given, try to use cached credentials. Fall back to an empty
          * password if this failed. */
@@ -512,7 +526,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
                     != SEC_E_OK)
                 goto isc_end;
             if(!strncmp(buffer, "BH", 2))
-                TRACE("Helper doesn't understand new command set\n");
+                ERR("Helper doesn't understand new command set. Expect more things to fail.\n");
         }
 
         lstrcpynA(buffer, "YR", max_len-1);
@@ -639,7 +653,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
         if(buffer_len < 3)
         {
-            TRACE("No flags negotiated, or helper does not support GF command\n");
+            TRACE("No flags negotiated.\n");
             helper->neg_flags = 0l;
         }
         else
@@ -656,7 +670,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
         if(strncmp(buffer, "BH", 2) == 0)
         {
-            TRACE("Helper does not understand command or no key negotiated.\n");
+            TRACE("No key negotiated.\n");
             helper->valid_session_key = FALSE;
             helper->session_key = HeapAlloc(GetProcessHeap(), 0, 16);
             /*Generate the dummy session key = MD4(MD4(password))*/
@@ -1620,7 +1634,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_DecryptMessage(PCtxtHandle phContext,
     return ret;
 }
 
-static SecurityFunctionTableA ntlmTableA = {
+static const SecurityFunctionTableA ntlmTableA = {
     1,
     NULL,   /* EnumerateSecurityPackagesA */
     ntlm_QueryCredentialsAttributesA,   /* QueryCredentialsAttributesA */
@@ -1651,7 +1665,7 @@ static SecurityFunctionTableA ntlmTableA = {
     NULL,   /* SetContextAttributesA */
 };
 
-static SecurityFunctionTableW ntlmTableW = {
+static const SecurityFunctionTableW ntlmTableW = {
     1,
     NULL,   /* EnumerateSecurityPackagesW */
     ntlm_QueryCredentialsAttributesW,   /* QueryCredentialsAttributesW */
@@ -1739,12 +1753,15 @@ void SECUR32_initNTLMSP(void)
     {
         /* Cheat and allocate a helper anyway, so cleanup later will work. */
         helper = HeapAlloc(GetProcessHeap(),0, sizeof(PNegoHelper));
-        helper->version = -1;
+        helper->major = helper->minor = helper->micro = -1;
     }
     else
         check_version(helper);
 
-    if(helper->version > 2)
+    if( (helper->major >  MIN_NTLM_AUTH_MAJOR_VERSION) ||
+        (helper->major  = MIN_NTLM_AUTH_MAJOR_VERSION  &&
+         helper->minor >= MIN_NTLM_AUTH_MINOR_VERSION  &&
+         helper->micro >= MIN_NTLM_AUTH_MICRO_VERSION) )
     {
         SecureProvider *provider = SECUR32_addProvider(&ntlmTableA, &ntlmTableW, NULL);
         SECUR32_addPackages(provider, 1L, &infoA, &infoW);
@@ -1752,8 +1769,11 @@ void SECUR32_initNTLMSP(void)
     else
     {
         ERR("%s was not found or is outdated. "
-            "Make sure that ntlm_auth >= 3.x is in your path.\n",
-            ntlm_auth);
+            "Make sure that ntlm_auth >= %d.%d.%d is in your path.\n",
+            ntlm_auth,
+	    MIN_NTLM_AUTH_MAJOR_VERSION,
+	    MIN_NTLM_AUTH_MINOR_VERSION,
+	    MIN_NTLM_AUTH_MICRO_VERSION);
     }
     cleanup_helper(helper);
 }

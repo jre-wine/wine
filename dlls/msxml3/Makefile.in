@@ -19,8 +19,10 @@ C_SRCS = \
 	nodelist.c \
 	nodemap.c \
 	parseerror.c \
+	pi.c \
 	regsvr.c \
-	text.c
+	text.c \
+	uuid.c
 
 RC_SRCS = version.rc
 

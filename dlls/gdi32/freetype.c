@@ -29,10 +29,51 @@
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
+#ifdef HAVE_SYS_MMAN_H
+# include <sys/mman.h>
+#endif
 #include <string.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <assert.h>
+
+#ifdef HAVE_CARBON_CARBON_H
+#define LoadResource __carbon_LoadResource
+#define CompareString __carbon_CompareString
+#define GetCurrentThread __carbon_GetCurrentThread
+#define GetCurrentProcess __carbon_GetCurrentProcess
+#define AnimatePalette __carbon_AnimatePalette
+#define EqualRgn __carbon_EqualRgn
+#define FillRgn __carbon_FillRgn
+#define FrameRgn __carbon_FrameRgn
+#define GetPixel __carbon_GetPixel
+#define InvertRgn __carbon_InvertRgn
+#define LineTo __carbon_LineTo
+#define OffsetRgn __carbon_OffsetRgn
+#define PaintRgn __carbon_PaintRgn
+#define Polygon __carbon_Polygon
+#define ResizePalette __carbon_ResizePalette
+#define SetRectRgn __carbon_SetRectRgn
+#include <Carbon/Carbon.h>
+#undef LoadResource
+#undef CompareString
+#undef GetCurrentThread
+#undef _CDECL
+#undef DPRINTF
+#undef GetCurrentProcess
+#undef AnimatePalette
+#undef EqualRgn
+#undef FillRgn
+#undef FrameRgn
+#undef GetPixel
+#undef InvertRgn
+#undef LineTo
+#undef OffsetRgn
+#undef PaintRgn
+#undef Polygon
+#undef ResizePalette
+#undef SetRectRgn
+#endif /* HAVE_CARBON_CARBON_H */
 
 #include "windef.h"
 #include "winbase.h"
@@ -40,7 +81,6 @@
 #include "winerror.h"
 #include "winreg.h"
 #include "wingdi.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -126,6 +166,7 @@ MAKE_FUNCPTR(FT_Load_Glyph);
 MAKE_FUNCPTR(FT_Matrix_Multiply);
 MAKE_FUNCPTR(FT_MulFix);
 MAKE_FUNCPTR(FT_New_Face);
+MAKE_FUNCPTR(FT_New_Memory_Face);
 MAKE_FUNCPTR(FT_Outline_Get_Bitmap);
 MAKE_FUNCPTR(FT_Outline_Transform);
 MAKE_FUNCPTR(FT_Outline_Translate);
@@ -152,6 +193,7 @@ MAKE_FUNCPTR(FcObjectSetCreate);
 MAKE_FUNCPTR(FcObjectSetDestroy);
 MAKE_FUNCPTR(FcPatternCreate);
 MAKE_FUNCPTR(FcPatternDestroy);
+MAKE_FUNCPTR(FcPatternGetBool);
 MAKE_FUNCPTR(FcPatternGetString);
 #ifndef SONAME_LIBFONTCONFIG
 #define SONAME_LIBFONTCONFIG "libfontconfig.so"
@@ -254,6 +296,7 @@ typedef struct {
 struct tagGdiFont {
     struct list entry;
     FT_Face ft_face;
+    struct font_mapping *mapping;
     LPWSTR name;
     int charset;
     int codepage;
@@ -296,16 +339,10 @@ static struct list font_subst_list = LIST_INIT(font_subst_list);
 
 static struct list font_list = LIST_INIT(font_list);
 
-static const WCHAR defSerif[] = {'T','i','m','e','s',' ','N','e','w',' ',
-			   'R','o','m','a','n','\0'};
+static const WCHAR defSerif[] = {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n','\0'};
 static const WCHAR defSans[] = {'M','S',' ','S','a','n','s',' ','S','e','r','i','f','\0'};
 static const WCHAR defFixed[] = {'C','o','u','r','i','e','r',' ','N','e','w','\0'};
 
-static const WCHAR defSystem[] = {'S','y','s','t','e','m','\0'};
-static const WCHAR SystemW[] = {'S','y','s','t','e','m','\0'};
-static const WCHAR MSSansSerifW[] = {'M','S',' ','S','a','n','s',' ',
-			       'S','e','r','i','f','\0'};
-static const WCHAR HelvW[] = {'H','e','l','v','\0'};
 static const WCHAR RegularW[] = {'R','e','g','u','l','a','r','\0'};
 
 static const WCHAR fontsW[] = {'\\','F','o','n','t','s','\0'};
@@ -386,6 +423,18 @@ typedef struct tagFontSubst {
     NameCs to;
 } FontSubst;
 
+struct font_mapping
+{
+    struct list entry;
+    int         refcount;
+    dev_t       dev;
+    ino_t       ino;
+    void       *data;
+    size_t      size;
+};
+
+static struct list mappings_list = LIST_INIT( mappings_list );
+
 static BOOL have_installed_roman_font = FALSE; /* CreateFontInstance will fail if this is still FALSE */
 
 static const WCHAR font_mutex_nameW[] = {'_','_','W','I','N','E','_','F','O','N','T','_','M','U','T','E','X','_','_','\0'};
@@ -421,6 +470,204 @@ static const WCHAR font_mutex_nameW[] = {'_','_','W','I','N','E','_','F','O','N'
  * cga40woa.fon=cga40850.fon
  */
 
+#ifdef HAVE_CARBON_CARBON_H
+static char *find_cache_dir(void)
+{
+    FSRef ref;
+    OSErr err;
+    static char cached_path[MAX_PATH];
+    static const char *wine = "/Wine", *fonts = "/Fonts";
+
+    if(*cached_path) return cached_path;
+
+    err = FSFindFolder(kUserDomain, kCachedDataFolderType, kCreateFolder, &ref);
+    if(err != noErr)
+    {
+        WARN("can't create cached data folder\n");
+        return NULL;
+    }
+    err = FSRefMakePath(&ref, (unsigned char*)cached_path, sizeof(cached_path));
+    if(err != noErr)
+    {
+        WARN("can't create cached data path\n");
+        *cached_path = '\0';
+        return NULL;
+    }
+    if(strlen(cached_path) + strlen(wine) + strlen(fonts) + 1 > sizeof(cached_path))
+    {
+        ERR("Could not create full path\n");
+        *cached_path = '\0';
+        return NULL;
+    }
+    strcat(cached_path, wine);
+
+    if(mkdir(cached_path, 0700) == -1 && errno != EEXIST)
+    {
+        WARN("Couldn't mkdir %s\n", cached_path);
+        *cached_path = '\0';
+        return NULL;
+    }
+    strcat(cached_path, fonts);
+    if(mkdir(cached_path, 0700) == -1 && errno != EEXIST)
+    {
+        WARN("Couldn't mkdir %s\n", cached_path);
+        *cached_path = '\0';
+        return NULL;
+    }
+    return cached_path;
+}
+
+/******************************************************************
+ *            expand_mac_font
+ *
+ * Extracts individual TrueType font files from a Mac suitcase font
+ * and saves them into the user's caches directory (see
+ * find_cache_dir()).
+ * Returns a NULL terminated array of filenames.
+ *
+ * We do this because they are apps that try to read ttf files
+ * themselves and they don't like Mac suitcase files.
+ */
+static char **expand_mac_font(const char *path)
+{
+    FSRef ref;
+    SInt16 res_ref;
+    OSStatus s;
+    unsigned int idx;
+    const char *out_dir;
+    const char *filename;
+    int output_len;
+    struct {
+        char **array;
+        unsigned int size, max_size;
+    } ret;
+
+    TRACE("path %s\n", path);
+
+    s = FSPathMakeRef((unsigned char*)path, &ref, FALSE);
+    if(s != noErr)
+    {
+        WARN("failed to get ref\n");
+        return NULL;
+    }
+
+    s = FSOpenResourceFile(&ref, 0, NULL, fsRdPerm, &res_ref);
+    if(s != noErr)
+    {
+        TRACE("no data fork, so trying resource fork\n");
+        res_ref = FSOpenResFile(&ref, fsRdPerm);
+        if(res_ref == -1)
+        {
+            TRACE("unable to open resource fork\n");
+            return NULL;
+        }
+    }
+
+    ret.size = 0;
+    ret.max_size = 10;
+    ret.array = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ret.max_size * sizeof(*ret.array));
+    if(!ret.array)
+    {
+        CloseResFile(res_ref);
+        return NULL;
+    }
+
+    out_dir = find_cache_dir();
+
+    filename = strrchr(path, '/');
+    if(!filename) filename = path;
+    else filename++;
+
+    /* output filename has the form out_dir/filename_%04x.ttf */
+    output_len = strlen(out_dir) + 1 + strlen(filename) + 5 + 5;
+
+    UseResFile(res_ref);
+    idx = 1;
+    while(1)
+    {
+        FamRec *fam_rec;
+        unsigned short *num_faces_ptr, num_faces, face;
+        AsscEntry *assoc;
+        Handle fond;
+
+        fond = Get1IndResource('FOND', idx);
+        if(!fond) break;
+        TRACE("got fond resource %d\n", idx);
+        HLock(fond);
+
+        fam_rec = *(FamRec**)fond;
+        num_faces_ptr = (unsigned short *)(fam_rec + 1);
+        num_faces = GET_BE_WORD(*num_faces_ptr);
+        num_faces++;
+        assoc = (AsscEntry*)(num_faces_ptr + 1);
+        TRACE("num faces %04x\n", num_faces);
+        for(face = 0; face < num_faces; face++, assoc++)
+        {
+            Handle sfnt;
+            unsigned short size, font_id;
+            char *output;
+
+            size = GET_BE_WORD(assoc->fontSize);
+            font_id = GET_BE_WORD(assoc->fontID);
+            if(size != 0)
+            {
+                TRACE("skipping id %04x because it's not scalable (fixed size %d)\n", font_id, size);
+                continue;
+            }
+
+            TRACE("trying to load sfnt id %04x\n", font_id);
+            sfnt = GetResource('sfnt', font_id);
+            if(!sfnt)
+            {
+                TRACE("can't get sfnt resource %04x\n", font_id);
+                continue;
+            }
+
+            output = HeapAlloc(GetProcessHeap(), 0, output_len);
+            if(output)
+            {
+                int fd;
+
+                sprintf(output, "%s/%s_%04x.ttf", out_dir, filename, font_id);
+
+                fd = open(output, O_CREAT | O_EXCL | O_WRONLY, 0600);
+                if(fd != -1 || errno == EEXIST)
+                {
+                    if(fd != -1)
+                    {
+                        unsigned char *sfnt_data;
+
+                        HLock(sfnt);
+                        sfnt_data = *(unsigned char**)sfnt;
+                        write(fd, sfnt_data, GetHandleSize(sfnt));
+                        HUnlock(sfnt);
+                        close(fd);
+                    }
+                    if(ret.size >= ret.max_size - 1) /* Always want the last element to be NULL */
+                    {
+                        ret.max_size *= 2;
+                        ret.array = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ret.array, ret.max_size * sizeof(*ret.array));
+                    }
+                    ret.array[ret.size++] = output;
+                }
+                else
+                {
+                    WARN("unable to create %s\n", output);
+                    HeapFree(GetProcessHeap(), 0, output);
+                }
+            }
+            ReleaseResource(sfnt);
+        }
+        HUnlock(fond);
+        ReleaseResource(fond);
+        idx++;
+    }
+    CloseResFile(res_ref);
+
+    return ret.array;
+}
+
+#endif /* HAVE_CARBON_CARBON_H */
 
 static inline BOOL is_win9x(void)
 {
@@ -704,6 +951,27 @@ static BOOL AddFontFileToList(const char *file, char *fake_family, DWORD flags)
 #endif
     int i, bitmap_num, internal_leading;
     FONTSIGNATURE fs;
+
+#ifdef HAVE_CARBON_CARBON_H
+    if(!fake_family)
+    {
+        char **mac_list = expand_mac_font(file);
+        if(mac_list)
+        {
+            BOOL had_one = FALSE;
+            char **cursor;
+            for(cursor = mac_list; *cursor; cursor++)
+            {
+                had_one = TRUE;
+                AddFontFileToList(*cursor, NULL, flags);
+                HeapFree(GetProcessHeap(), 0, *cursor);
+            }
+            HeapFree(GetProcessHeap(), 0, mac_list);
+            if(had_one)
+                return TRUE;
+        }
+    }
+#endif /* HAVE_CARBON_CARBON_H */
 
     do {
         char *family_name = fake_family;
@@ -1205,6 +1473,7 @@ LOAD_FUNCPTR(FcObjectSetCreate);
 LOAD_FUNCPTR(FcObjectSetDestroy);
 LOAD_FUNCPTR(FcPatternCreate);
 LOAD_FUNCPTR(FcPatternDestroy);
+LOAD_FUNCPTR(FcPatternGetBool);
 LOAD_FUNCPTR(FcPatternGetString);
 #undef LOAD_FUNCPTR
 
@@ -1214,20 +1483,30 @@ LOAD_FUNCPTR(FcPatternGetString);
     pat = pFcPatternCreate();
     os = pFcObjectSetCreate();
     pFcObjectSetAdd(os, FC_FILE);
+    pFcObjectSetAdd(os, FC_SCALABLE);
     fontset = pFcFontList(config, pat, os);
     if(!fontset) return;
     for(i = 0; i < fontset->nfont; i++) {
+        FcBool scalable;
+
         if(pFcPatternGetString(fontset->fonts[i], FC_FILE, 0, (FcChar8**)&file) != FcResultMatch)
             continue;
         TRACE("fontconfig: %s\n", file);
 
         /* We're just interested in OT/TT fonts for now, so this hack just
-           picks up the standard extensions to save time loading every other
-           font */
+           picks up the scalable fonts without extensions .pf[ab] to save time
+           loading every other font */
+
+        if(pFcPatternGetBool(fontset->fonts[i], FC_SCALABLE, 0, &scalable) == FcResultMatch && !scalable)
+        {
+            TRACE("not scalable\n");
+            continue;
+        }
+
         len = strlen( file );
         if(len < 4) continue;
         ext = &file[ len - 3 ];
-        if(!strcasecmp(ext, "ttf") || !strcasecmp(ext, "ttc") || !strcasecmp(ext, "otf"))
+        if(strcasecmp(ext, "pfa") && strcasecmp(ext, "pfb"))
             AddFontFileToList(file, NULL, ADDFONT_EXTERNAL_FONT);
     }
     pFcFontSetDestroy(fontset);
@@ -1542,35 +1821,34 @@ static void add_font_list(HKEY hkey, const struct nls_update_font_list *fl)
 
 static void update_font_info(void)
 {
-    char buf[80];
+    char buf[40], cpbuf[40];
     DWORD len, type;
     HKEY hkey = 0;
     UINT i, ansi_cp = 0, oem_cp = 0;
-    LCID lcid = GetUserDefaultLCID();
 
-    if (RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Fonts", &hkey) != ERROR_SUCCESS)
+    if (RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\Wine\\Fonts", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &hkey, NULL) != ERROR_SUCCESS)
         return;
 
+    GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IDEFAULTANSICODEPAGE|LOCALE_RETURN_NUMBER|LOCALE_NOUSEROVERRIDE,
+                   (WCHAR *)&ansi_cp, sizeof(ansi_cp)/sizeof(WCHAR));
+    GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IDEFAULTCODEPAGE|LOCALE_RETURN_NUMBER|LOCALE_NOUSEROVERRIDE,
+                   (WCHAR *)&oem_cp, sizeof(oem_cp)/sizeof(WCHAR));
+    sprintf( cpbuf, "%u,%u", ansi_cp, oem_cp );
+
     len = sizeof(buf);
-    if (RegQueryValueExA(hkey, "Locale", 0, &type, (BYTE *)buf, &len) == ERROR_SUCCESS && type == REG_SZ)
+    if (RegQueryValueExA(hkey, "Codepages", 0, &type, (BYTE *)buf, &len) == ERROR_SUCCESS && type == REG_SZ)
     {
-        if (strtoul(buf, NULL, 16 ) == lcid)  /* already set correctly */
+        if (!strcmp( buf, cpbuf ))  /* already set correctly */
         {
             RegCloseKey(hkey);
             return;
         }
-        TRACE("updating registry, locale changed %s -> %08x\n", debugstr_a(buf), lcid);
+        TRACE("updating registry, codepages changed %s -> %u,%u\n", buf, ansi_cp, oem_cp);
     }
-    else TRACE("updating registry, locale changed none -> %08x\n", lcid);
+    else TRACE("updating registry, codepages changed none -> %u,%u\n", ansi_cp, oem_cp);
 
-    sprintf(buf, "%08x", lcid);
-    RegSetValueExA(hkey, "Locale", 0, REG_SZ, (const BYTE *)buf, strlen(buf)+1);
+    RegSetValueExA(hkey, "Codepages", 0, REG_SZ, (const BYTE *)cpbuf, strlen(cpbuf)+1);
     RegCloseKey(hkey);
-
-    GetLocaleInfoW(lcid, LOCALE_IDEFAULTANSICODEPAGE|LOCALE_RETURN_NUMBER|LOCALE_NOUSEROVERRIDE,
-                   (WCHAR *)&ansi_cp, sizeof(ansi_cp)/sizeof(WCHAR));
-    GetLocaleInfoW(lcid, LOCALE_IDEFAULTCODEPAGE|LOCALE_RETURN_NUMBER|LOCALE_NOUSEROVERRIDE,
-                   (WCHAR *)&oem_cp, sizeof(oem_cp)/sizeof(WCHAR));
 
     for (i = 0; i < sizeof(nls_update_font_list)/sizeof(nls_update_font_list[0]); i++)
     {
@@ -1596,7 +1874,7 @@ static void update_font_info(void)
             return;
         }
     }
-    FIXME("there is no font defaults for lcid %04x/ansi_cp %u\n", lcid, ansi_cp);
+    FIXME("there is no font defaults for codepages %u,%u\n", ansi_cp, oem_cp);
 }
 
 /*************************************************************
@@ -1645,6 +1923,7 @@ BOOL WineEngInit(void)
     LOAD_FUNCPTR(FT_Matrix_Multiply)
     LOAD_FUNCPTR(FT_MulFix)
     LOAD_FUNCPTR(FT_New_Face)
+    LOAD_FUNCPTR(FT_New_Memory_Face)
     LOAD_FUNCPTR(FT_Outline_Get_Bitmap)
     LOAD_FUNCPTR(FT_Outline_Transform)
     LOAD_FUNCPTR(FT_Outline_Translate)
@@ -1868,6 +2147,59 @@ static LONG calc_ppem_for_height(FT_Face ft_face, LONG height)
     return ppem;
 }
 
+static struct font_mapping *map_font( const char *name )
+{
+#ifndef __APPLE__  /* Mac OS fonts use resource forks, we can't simply mmap them */
+    struct font_mapping *mapping;
+    struct stat st;
+    int fd;
+
+    if ((fd = open( name, O_RDONLY )) == -1) return NULL;
+    if (fstat( fd, &st ) == -1) goto error;
+
+    LIST_FOR_EACH_ENTRY( mapping, &mappings_list, struct font_mapping, entry )
+    {
+        if (mapping->dev == st.st_dev && mapping->ino == st.st_ino)
+        {
+            mapping->refcount++;
+            close( fd );
+            return mapping;
+        }
+    }
+    if (!(mapping = HeapAlloc( GetProcessHeap(), 0, sizeof(*mapping) )))
+        goto error;
+
+    mapping->data = mmap( NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
+    close( fd );
+
+    if (mapping->data == MAP_FAILED)
+    {
+        HeapFree( GetProcessHeap(), 0, mapping );
+        return NULL;
+    }
+    mapping->refcount = 1;
+    mapping->dev = st.st_dev;
+    mapping->ino = st.st_ino;
+    mapping->size = st.st_size;
+    list_add_tail( &mappings_list, &mapping->entry );
+    return mapping;
+
+error:
+    close( fd );
+#endif
+    return NULL;
+}
+
+static void unmap_font( struct font_mapping *mapping )
+{
+    if (!--mapping->refcount)
+    {
+        list_remove( &mapping->entry );
+        munmap( mapping->data, mapping->size );
+        HeapFree( GetProcessHeap(), 0, mapping );
+    }
+}
+
 static LONG load_VDMX(GdiFont*, LONG);
 
 static FT_Face OpenFontFile(GdiFont *font, char *file, FT_Long face_index, LONG width, LONG height)
@@ -1876,7 +2208,12 @@ static FT_Face OpenFontFile(GdiFont *font, char *file, FT_Long face_index, LONG 
     FT_Face ft_face;
 
     TRACE("%s, %ld, %d x %d\n", debugstr_a(file), face_index, width, height);
-    err = pFT_New_Face(library, file, face_index, &ft_face);
+
+    if ((font->mapping = map_font( file )))
+        err = pFT_New_Memory_Face(library, font->mapping->data, font->mapping->size, face_index, &ft_face);
+    else
+        err = pFT_New_Face(library, file, face_index, &ft_face);
+
     if(err) {
         ERR("FT_New_Face rets %d\n", err);
 	return 0;
@@ -1974,6 +2311,7 @@ static void free_font(GdiFont *font)
     }
 
     if (font->ft_face) pFT_Done_Face(font->ft_face);
+    if (font->mapping) unmap_font( font->mapping );
     HeapFree(GetProcessHeap(), 0, font->kern_pairs);
     HeapFree(GetProcessHeap(), 0, font->potm);
     HeapFree(GetProcessHeap(), 0, font->name);

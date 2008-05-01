@@ -61,7 +61,7 @@ struct protseq_ops
 
 typedef struct _RpcServerInterface
 {
-  struct _RpcServerInterface* Next;
+  struct list entry;
   RPC_SERVER_INTERFACE* If;
   UUID MgrTypeUuid;
   RPC_MGR_EPV* MgrEpv;
@@ -69,6 +69,10 @@ typedef struct _RpcServerInterface
   UINT MaxCalls;
   UINT MaxRpcSize;
   RPC_IF_CALLBACK_FN* IfCallbackFn;
+  LONG CurrentCalls; /* number of calls currently executing */
+  /* set when unregistering interface to let the caller of
+   * RpcServerUnregisterIf* know that all calls have finished */
+  HANDLE CallsCompletedEvent;
 } RpcServerInterface;
 
 void RPCRT4_new_client(RpcConnection* conn);

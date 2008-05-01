@@ -107,7 +107,7 @@ static OleMenuHookItem *hook_list;
  * This is the lock count on the OLE library. It is controlled by the
  * OLEInitialize/OLEUninitialize methods.
  */
-static ULONG OLE_moduleLockCount = 0;
+static LONG OLE_moduleLockCount = 0;
 
 /*
  * Name of our registered window class.
@@ -203,7 +203,8 @@ HRESULT WINAPI OleInitialize(LPVOID reserved)
    *     Object linking and Embedding
    *     In-place activation
    */
-  if (OLE_moduleLockCount==0)
+  if (!COM_CurrentInfo()->ole_inits++ &&
+      InterlockedIncrement(&OLE_moduleLockCount) == 1)
   {
     /*
      * Initialize the libraries.
@@ -226,11 +227,6 @@ HRESULT WINAPI OleInitialize(LPVOID reserved)
     OLEMenu_Initialize();
   }
 
-  /*
-   * Then, we increase the lock count on the OLE module.
-   */
-  OLE_moduleLockCount++;
-
   return hr;
 }
 
@@ -243,14 +239,9 @@ void WINAPI OleUninitialize(void)
   TRACE("()\n");
 
   /*
-   * Decrease the lock count on the OLE module.
-   */
-  OLE_moduleLockCount--;
-
-  /*
    * If we hit the bottom of the lock stack, free the libraries.
    */
-  if (OLE_moduleLockCount==0)
+  if (!--COM_CurrentInfo()->ole_inits && !InterlockedDecrement(&OLE_moduleLockCount))
   {
     /*
      * Actually free the libraries.
@@ -2399,7 +2390,7 @@ HRESULT WINAPI OleCreate(
         }
     }
 
-    if (FAILED(hres))
+    if (FAILED(hres) && pUnk)
     {
         IUnknown_Release(pUnk);
         pUnk = NULL;
@@ -2562,15 +2553,7 @@ BSTR WINAPI PropSysAllocString(LPCOLESTR str)
      */
     newBuffer++;
 
-    /*
-     * Copy the information in the buffer.
-     * Since it is valid to pass a NULL pointer here, we'll initialize the
-     * buffer to nul if it is the case.
-     */
-    if (str != 0)
-      memcpy(newBuffer, str, bufferSize);
-    else
-      memset(newBuffer, 0, bufferSize);
+    memcpy(newBuffer, str, bufferSize);
 
     /*
      * Make sure that there is a nul character at the end of the

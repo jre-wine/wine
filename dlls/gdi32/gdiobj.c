@@ -32,7 +32,6 @@
 #include "winerror.h"
 #include "winternl.h"
 
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -75,13 +74,6 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
       0, 0, { (DWORD_PTR)(__FILE__ ": GDI_level") }
 };
 static SYSLEVEL GDI_level = { { &critsect_debug, -1, 0, 0, 0, 0 }, 3 };
-
-inline static BOOL get_bool(char *buffer)
-{
-    return (buffer[0] == 'y' || buffer[0] == 'Y' ||
-            buffer[0] == 't' || buffer[0] == 'T' ||
-            buffer[0] == '1');
-}
 
 
 /****************************************************************************

@@ -176,6 +176,15 @@ static HRESULT  WINAPI  IDirect3D8Impl_GetDeviceCaps(LPDIRECT3D8 iface, UINT Ada
     D3D8CAPSTOWINECAPS(pCaps, pWineCaps)
     hrc = IWineD3D_GetDeviceCaps(This->WineD3D, Adapter, DeviceType, pWineCaps);
     HeapFree(GetProcessHeap(), 0, pWineCaps);
+
+    /* D3D8 doesn't support SM 2.0 or higher, so clamp to 1.x */
+    if(pCaps->PixelShaderVersion > D3DPS_VERSION(1,4)){
+        pCaps->PixelShaderVersion = D3DPS_VERSION(1,4);
+    }
+    if(pCaps->VertexShaderVersion > D3DVS_VERSION(1,1)){
+        pCaps->VertexShaderVersion = D3DVS_VERSION(1,1);
+    }
+
     TRACE("(%p) returning %p\n", This, pCaps);
     return hrc;
 }
@@ -186,9 +195,9 @@ static HMONITOR WINAPI  IDirect3D8Impl_GetAdapterMonitor(LPDIRECT3D8 iface, UINT
 }
 
 /* Internal function called back during the CreateDevice to create a render target */
-HRESULT WINAPI D3D8CB_CreateRenderTarget(IUnknown *device, UINT Width, UINT Height, 
-                                         WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample, 
-                                         DWORD MultisampleQuality, BOOL Lockable, 
+HRESULT WINAPI D3D8CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
+                                         WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
+                                         DWORD MultisampleQuality, BOOL Lockable,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle) {
     HRESULT res = D3D_OK;
     IDirect3DSurface8Impl *d3dSurface = NULL;
@@ -200,12 +209,24 @@ HRESULT WINAPI D3D8CB_CreateRenderTarget(IUnknown *device, UINT Width, UINT Heig
 
     if (SUCCEEDED(res)) {
         *ppSurface = d3dSurface->wineD3DSurface;
-        IUnknown_Release(d3dSurface->parentDevice);
-        d3dSurface->parentDevice = NULL;
+        d3dSurface->container = device;
+        d3dSurface->isImplicit = TRUE;
+        /* Implicit surfaces are created with an refcount of 0 */
+        IUnknown_Release((IUnknown *)d3dSurface);
     } else {
         *ppSurface = NULL;
     }
     return res;
+}
+
+ULONG WINAPI D3D8CB_DestroyRenderTarget(IWineD3DSurface *pSurface) {
+    IDirect3DSurface8Impl* surfaceParent;
+    TRACE("(%p) call back\n", pSurface);
+
+    IWineD3DSurface_GetParent(pSurface, (IUnknown **) &surfaceParent);
+    surfaceParent->isImplicit = FALSE;
+    /* Surface had refcount of 0 GetParent addrefed to 1, so 1 Release is enough */
+    return IDirect3DSurface8_Release((IDirect3DSurface8*) surfaceParent);
 }
 
 /* Callback for creating the inplicite swapchain when the device is created */
@@ -266,8 +287,17 @@ static HRESULT WINAPI D3D8CB_CreateAdditionalSwapChain(IUnknown *device,
    return res;
 }
 
+ULONG WINAPI D3D8CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain) {
+    IUnknown* swapChainParent;
+    TRACE("(%p) call back\n", pSwapChain);
+
+    IWineD3DSwapChain_GetParent(pSwapChain, &swapChainParent);
+    IUnknown_Release(swapChainParent);
+    return IUnknown_Release(swapChainParent);
+}
+
 /* Internal function called back during the CreateDevice to create a render target */
-HRESULT WINAPI D3D8CB_CreateDepthStencilSurface(IUnknown *device, UINT Width, UINT Height,
+HRESULT WINAPI D3D8CB_CreateDepthStencilSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
                                          DWORD MultisampleQuality, BOOL Discard,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle) {
@@ -279,10 +309,22 @@ HRESULT WINAPI D3D8CB_CreateDepthStencilSurface(IUnknown *device, UINT Width, UI
                                          (D3DFORMAT)Format, MultiSample, (IDirect3DSurface8 **)&d3dSurface);
     if (SUCCEEDED(res)) {
         *ppSurface = d3dSurface->wineD3DSurface;
-        IUnknown_Release(d3dSurface->parentDevice);
-        d3dSurface->parentDevice = NULL;
+        d3dSurface->container = device;
+        d3dSurface->isImplicit = TRUE;
+        /* Implicit surfaces are created with an refcount of 0 */
+        IUnknown_Release((IUnknown *)d3dSurface);
     }
     return res;
+}
+
+ULONG WINAPI D3D8CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface) {
+    IDirect3DSurface8Impl* surfaceParent;
+    TRACE("(%p) call back\n", pSurface);
+
+    IWineD3DSurface_GetParent(pSurface, (IUnknown **) &surfaceParent);
+    surfaceParent->isImplicit = FALSE;
+    /* Surface had refcount of 0 GetParent addrefed to 1, so 1 Release is enough */
+    return IDirect3DSurface8_Release((IDirect3DSurface8*) surfaceParent);
 }
 
 static HRESULT WINAPI IDirect3D8Impl_CreateDevice(LPDIRECT3D8 iface, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow,

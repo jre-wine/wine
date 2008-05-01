@@ -162,6 +162,7 @@ static ULONG WINAPI HTMLDocument_Release(IHTMLDocument2 *iface)
         if(This->hwnd)
             DestroyWindow(This->hwnd);
 
+        IHTMLWindow2_Release(HTMLWINDOW2(This->window));
         release_nodes(This);
 
         HTMLDocument_ConnectionPoints_Destroy(This);
@@ -920,8 +921,13 @@ static HRESULT WINAPI HTMLDocument_elementFromPoint(IHTMLDocument2 *iface, long 
 
 static HRESULT WINAPI HTMLDocument_get_parentWindow(IHTMLDocument2 *iface, IHTMLWindow2 **p)
 {
-    FIXME("(%p)->(%p)\n", iface, p);
-    return E_NOTIMPL;
+    HTMLDocument *This = HTMLDOC_THIS(iface);
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    *p = HTMLWINDOW2(This->window);
+    IHTMLWindow2_AddRef(*p);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_get_styleSheets(IHTMLDocument2 *iface,
@@ -964,8 +970,12 @@ static HRESULT WINAPI HTMLDocument_toString(IHTMLDocument2 *iface, BSTR *String)
 static HRESULT WINAPI HTMLDocument_createStyleSheet(IHTMLDocument2 *iface, BSTR bstrHref,
                                             long lIndex, IHTMLStyleSheet **ppnewStyleSheet)
 {
-    FIXME("(%p)->(%s %ld %p)\n", iface, debugstr_w(bstrHref), lIndex, ppnewStyleSheet);
-    return E_NOTIMPL;
+    HTMLDocument *This = HTMLDOC_THIS(iface);
+
+    FIXME("(%p)->(%s %ld %p) semi-stub\n", This, debugstr_w(bstrHref), lIndex, ppnewStyleSheet);
+
+    *ppnewStyleSheet = HTMLStyleSheet_Create();
+    return S_OK;
 }
 
 static const IHTMLDocument2Vtbl HTMLDocumentVtbl = {
@@ -1120,6 +1130,7 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
     HTMLDocument_ConnectionPoints_Init(ret);
 
     ret->nscontainer = NSContainer_Create(ret, NULL);
+    ret->window = HTMLWindow_Create(ret);
 
     get_thread_hwnd();
 

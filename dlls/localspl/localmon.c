@@ -49,6 +49,24 @@ static const WCHAR WinNT_CV_PortsW[] = {'S','o','f','t','w','a','r','e','\\',
                                         'P','o','r','t','s',0};
 
 /******************************************************************
+ * display the Dialog "Nothing to configure"
+ * 
+ */
+
+static void dlg_nothingtoconfig(HWND hWnd)
+{
+    WCHAR res_PortW[IDS_LOCALPORT_MAXLEN];
+    WCHAR res_nothingW[IDS_NOTHINGTOCONFIG_MAXLEN];
+
+    res_PortW[0] = '\0';
+    res_nothingW[0] = '\0';
+    LoadStringW(LOCALSPL_hInstance, IDS_LOCALPORT, res_PortW, IDS_LOCALPORT_MAXLEN);  
+    LoadStringW(LOCALSPL_hInstance, IDS_NOTHINGTOCONFIG, res_nothingW, IDS_NOTHINGTOCONFIG_MAXLEN);  
+
+    MessageBoxW(hWnd, res_nothingW, res_PortW, MB_OK | MB_ICONINFORMATION);
+}
+
+/******************************************************************
  * enumerate the local Ports from the Registry (internal)  
  *
  * See localmon_EnumPortsW.
@@ -65,8 +83,8 @@ static DWORD get_ports_from_reg(DWORD level, LPBYTE pPorts, DWORD cbBuf, LPDWORD
     LPWSTR  ptr;
     LPPORT_INFO_2W out;
     WCHAR   portname[MAX_PATH];
-    WCHAR   res_PortW[32];
-    WCHAR   res_MonitorW[32];
+    WCHAR   res_PortW[IDS_LOCALPORT_MAXLEN];
+    WCHAR   res_MonitorW[IDS_LOCALMONITOR_MAXLEN];
     INT     reslen_PortW;
     INT     reslen_MonitorW;
     DWORD   len;
@@ -95,8 +113,8 @@ static DWORD get_ports_from_reg(DWORD level, LPBYTE pPorts, DWORD cbBuf, LPDWORD
     }
 
     /* "+1" for '\0' */
-    reslen_MonitorW = LoadStringW(LOCALSPL_hInstance, IDS_LOCALMONITOR, res_MonitorW, 32) + 1;  
-    reslen_PortW = LoadStringW(LOCALSPL_hInstance, IDS_LOCALPORT, res_PortW, 32) + 1;  
+    reslen_MonitorW = LoadStringW(LOCALSPL_hInstance, IDS_LOCALMONITOR, res_MonitorW, IDS_LOCALMONITOR_MAXLEN) + 1;  
+    reslen_PortW = LoadStringW(LOCALSPL_hInstance, IDS_LOCALPORT, res_PortW, IDS_LOCALPORT_MAXLEN) + 1;  
 
     res = RegOpenKeyW(HKEY_LOCAL_MACHINE, WinNT_CV_PortsW, &hroot);
     if (res == ERROR_SUCCESS) {
@@ -152,6 +170,63 @@ getports_cleanup:
     *lpreturned = numentries;
     TRACE("need %d byte for %d entries (%d)\n", needed, numentries, GetLastError());
     return needed;
+}
+
+/*****************************************************
+ *   localmon_ConfigurePortW [exported through MONITOREX]
+ *
+ * Display the Configuration-Dialog for a specific Port
+ *
+ * PARAMS
+ *  pName     [I] Servername or NULL (local Computer)
+ *  hWnd      [I] Handle to parent Window for the Dialog-Box
+ *  pPortName [I] Name of the Port, that should be configured
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ */
+BOOL WINAPI localmon_ConfigurePortW(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
+{
+    TRACE("(%s, %p, %s)\n", debugstr_w(pName), hWnd, debugstr_w(pPortName));
+    /* ToDo: Dialogs by Portname ("LPTx:", "COMx:") */
+
+    dlg_nothingtoconfig(hWnd);
+    return ROUTER_SUCCESS;
+}
+
+/*****************************************************
+ *   localmon_DeletePortW [exported through MONITOREX]
+ *
+ * Delete a specific Port
+ *
+ * PARAMS
+ *  pName     [I] Servername or NULL (local Computer)
+ *  hWnd      [I] Handle to parent Window
+ *  pPortName [I] Name of the Port, that should be deleted
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ */
+BOOL WINAPI localmon_DeletePortW(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
+{
+    DWORD   res;
+    HKEY    hroot;
+
+    TRACE("(%s, %p, %s)\n", debugstr_w(pName), hWnd, debugstr_w(pPortName));
+
+    if ((!pPortName) || (!pPortName[0])) return FALSE;
+
+    res = RegOpenKeyW(HKEY_LOCAL_MACHINE, WinNT_CV_PortsW, &hroot);
+    if (res == ERROR_SUCCESS) {
+        res = RegDeleteValueW(hroot, pPortName);
+        RegCloseKey(hroot);
+    }
+    TRACE("=> %d\n", (res == ERROR_SUCCESS));
+    return (res == ERROR_SUCCESS);
 }
 
 /*****************************************************
@@ -238,7 +313,18 @@ LPMONITOREX WINAPI InitializePrintMonitor(LPWSTR regroot)
     {
         sizeof(MONITOREX) - sizeof(DWORD),
         {
-            localmon_EnumPortsW
+            localmon_EnumPortsW,
+            NULL,       /* localmon_OpenPortW */ 
+            NULL,       /* localmon_OpenPortExW */ 
+            NULL,       /* localmon_StartDocPortW */
+            NULL,       /* localmon_WritePortW */
+            NULL,       /* localmon_ReadPortW */
+            NULL,       /* localmon_EndDocPortW */
+            NULL,       /* localmon_ClosePortW */
+            NULL,       /* localmon_AddPortW */
+            NULL,       /* localmon_AddPortExW */
+            localmon_ConfigurePortW,
+            localmon_DeletePortW
         }
     };
 

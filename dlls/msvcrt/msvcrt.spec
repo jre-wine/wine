@@ -76,7 +76,7 @@
 @ cdecl _Strftime(str long str ptr ptr)
 @ cdecl _XcptFilter(long ptr)
 @ cdecl -i386 -norelay __CxxFrameHandler(ptr ptr ptr ptr)
-@ stub __CxxLongjmpUnwind #(ptr) stdcall
+@ stdcall -i386 __CxxLongjmpUnwind(ptr)
 @ cdecl __RTCastToVoid(ptr) MSVCRT___RTCastToVoid
 @ cdecl __RTDynamicCast(ptr long ptr ptr long) MSVCRT___RTDynamicCast
 @ cdecl __RTtypeid(ptr) MSVCRT___RTtypeid
@@ -166,7 +166,7 @@
 @ cdecl _assert(str str long) MSVCRT__assert
 @ stub _atodbl #(ptr str)
 @ cdecl -ret64 _atoi64(str) ntdll._atoi64
-@ stub _atoldbl #(ptr str)
+@ cdecl _atoldbl(ptr str) MSVCRT__atoldbl
 @ cdecl _beep(long long)
 @ cdecl _beginthread (ptr long ptr)
 @ cdecl _beginthreadex (ptr long ptr ptr long ptr)
@@ -242,6 +242,7 @@
 @ cdecl _fputwchar(long)
 @ cdecl _fsopen(str str long) MSVCRT__fsopen
 @ cdecl _fstat(long ptr) MSVCRT__fstat
+@ stub _fstat64
 @ cdecl _fstati64(long ptr) MSVCRT__fstati64
 @ cdecl _ftime(ptr)
 @ cdecl -ret64 _ftol() ntdll._ftol
@@ -385,7 +386,7 @@
 @ cdecl _mbsrev(str)
 @ cdecl _mbsset(str long)
 @ cdecl _mbsspn(str str)
-@ stub _mbsspnp #(str str)
+@ cdecl _mbsspnp(str str)
 @ cdecl _mbsstr(str str)
 @ cdecl _mbstok(str str)
 @ cdecl _mbstrlen(str)
@@ -449,6 +450,7 @@
 @ cdecl _spawnvpe(long str ptr ptr)
 @ cdecl _splitpath(str ptr ptr ptr ptr) ntdll._splitpath
 @ cdecl _stat(str ptr) MSVCRT__stat
+@ stub _stat64 
 @ cdecl _stati64(str ptr) MSVCRT__stati64
 @ cdecl _statusfp()
 @ cdecl _strcmpi(str str) ntdll._strcmpi
@@ -738,7 +740,7 @@
 @ cdecl vfprintf(ptr str long) MSVCRT_vfprintf
 @ cdecl vfwprintf(ptr wstr long) MSVCRT_vfwprintf
 @ cdecl vprintf(str long) MSVCRT_vprintf
-@ cdecl vsprintf(ptr str ptr) ntdll.vsprintf
+@ cdecl vsprintf(ptr str ptr) MSVCRT_vsprintf
 @ cdecl vswprintf(ptr wstr long) MSVCRT_vswprintf
 @ cdecl vwprintf(wstr long) MSVCRT_vwprintf
 @ cdecl wcscat(wstr wstr) ntdll.wcscat

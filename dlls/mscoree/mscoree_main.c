@@ -24,6 +24,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
+#include "winreg.h"
 #include "ole2.h"
 
 #include "wine/debug.h"
@@ -74,10 +75,97 @@ BOOL WINAPI _CorDllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     return TRUE;
 }
 
+static LPWSTR get_mono_exe()
+{
+    static const WCHAR mono_exe[] = {'b','i','n','\\','m','o','n','o','.','e','x','e',' ',0};
+    static const WCHAR mono_key[] = {'S','o','f','t','w','a','r','e','\\','N','o','v','e','l','l','\\','M','o','n','o',0};
+    static const WCHAR defaul_clr[] = {'D','e','f','a','u','l','t','C','L','R',0};
+    static const WCHAR install_root[] = {'S','d','k','I','n','s','t','a','l','l','R','o','o','t',0};
+    static const WCHAR slash[] = {'\\',0};
+
+    WCHAR version[64], version_key[MAX_PATH], root[MAX_PATH], *ret;
+    DWORD len, size;
+    HKEY key;
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, mono_key, 0, KEY_READ, &key))
+        return NULL;
+
+    len = sizeof(version);
+    if (RegQueryValueExW(key, defaul_clr, 0, NULL, (LPBYTE)version, &len))
+    {
+        RegCloseKey(key);
+        return NULL;
+    }
+    RegCloseKey(key);
+
+    lstrcpyW(version_key, mono_key);
+    lstrcatW(version_key, slash);
+    lstrcatW(version_key, version);
+
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, version_key, 0, KEY_READ, &key))
+        return NULL;
+
+    len = sizeof(root);
+    if (RegQueryValueExW(key, install_root, 0, NULL, (LPBYTE)root, &len))
+    {
+        RegCloseKey(key);
+        return NULL;
+    }
+    RegCloseKey(key);
+
+    size = len + sizeof(slash) + sizeof(mono_exe);
+    if (!(ret = HeapAlloc(GetProcessHeap(), 0, size))) return NULL;
+
+    lstrcpyW(ret, root);
+    lstrcatW(ret, slash);
+    lstrcatW(ret, mono_exe);
+
+    return ret;
+}
+
 int WINAPI _CorExeMain(void)
 {
-    FIXME("Directly running .NET applications not supported.\n");
-    return -1;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    WCHAR *mono_exe, *cmd_line;
+    DWORD size, exit_code;
+
+    if (!(mono_exe = get_mono_exe()))
+    {
+        MESSAGE("install the Windows version of Mono to run .NET executables\n");
+        return -1;
+    }
+
+    size = (lstrlenW(mono_exe) + lstrlenW(GetCommandLineW()) + 1) * sizeof(WCHAR);
+    if (!(cmd_line = HeapAlloc(GetProcessHeap(), 0, size)))
+    {
+        HeapFree(GetProcessHeap(), 0, mono_exe);
+        return -1;
+    }
+
+    lstrcpyW(cmd_line, mono_exe);
+    HeapFree(GetProcessHeap(), 0, mono_exe);
+    lstrcatW(cmd_line, GetCommandLineW());
+
+    TRACE("new command line: %s\n", debugstr_w(cmd_line));
+
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    if (!CreateProcessW(NULL, cmd_line, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi))
+    {
+        HeapFree(GetProcessHeap(), 0, cmd_line);
+        return -1;
+    }
+    HeapFree(GetProcessHeap(), 0, cmd_line);
+
+    /* wait for the process to exit */
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    return (int)exit_code;
 }
 
 int WINAPI _CorExeMain2(PBYTE ptrMemory, DWORD cntMemory, LPCWSTR imageName, LPCWSTR loaderName, LPCWSTR cmdLine)
@@ -85,6 +173,12 @@ int WINAPI _CorExeMain2(PBYTE ptrMemory, DWORD cntMemory, LPCWSTR imageName, LPC
     TRACE("(%p, %u, %s, %s, %s)\n", ptrMemory, cntMemory, debugstr_w(imageName), debugstr_w(loaderName), debugstr_w(cmdLine));
     FIXME("Directly running .NET applications not supported.\n");
     return -1;
+}
+
+void WINAPI CorExitProcess(int exitCode)
+{
+    FIXME("(%x) stub\n", exitCode);
+    ExitProcess(exitCode);
 }
 
 void WINAPI _CorImageUnloading(LPCVOID* imageBase)
@@ -96,6 +190,18 @@ DWORD _CorValidateImage(LPCVOID* imageBase, LPCWSTR imageName)
 {
     TRACE("(%p, %s): stub\n", imageBase, debugstr_w(imageName));
     return E_FAIL;
+}
+
+HRESULT WINAPI GetCORSystemDirectory(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
+{
+    FIXME("(%p, %d, %p): stub!\n", pbuffer, cchBuffer, dwLength);
+
+    if (!dwLength)
+        return E_POINTER;
+
+    *dwLength = 0;
+
+    return S_OK;
 }
 
 HRESULT WINAPI GetCORVersion(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
@@ -118,10 +224,21 @@ HRESULT WINAPI GetCORVersion(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
     return S_OK;
 }
 
+HRESULT WINAPI GetRequestedRuntimeInfo(LPCWSTR pExe, LPCWSTR pwszVersion, LPCWSTR pConfigurationFile,
+    DWORD startupFlags, DWORD runtimeInfoFlags, LPWSTR pDirectory, DWORD dwDirectory, DWORD *dwDirectoryLength,
+    LPWSTR pVersion, DWORD cchBuffer, DWORD *dwlength)
+{
+    FIXME("(%s, %s, %s, 0x%08x, 0x%08x, %p, 0x%08x, %p, %p, 0x%08x, %p) stub\n", debugstr_w(pExe),
+          debugstr_w(pwszVersion), debugstr_w(pConfigurationFile), startupFlags, runtimeInfoFlags, pDirectory,
+          dwDirectory, dwDirectoryLength, pVersion, cchBuffer, dwlength);
+    return GetCORVersion(pVersion, cchBuffer, dwlength);
+}
+
 HRESULT WINAPI LoadLibraryShim( LPCWSTR szDllName, LPCWSTR szVersion, LPVOID pvReserved, HMODULE * phModDll)
 {
-    *phModDll = LoadLibraryW(szDllName);
     FIXME("(%p %s, %p, %p, %p): semi-stub\n", szDllName, debugstr_w(szDllName), szVersion, pvReserved, phModDll);
+
+    if (phModDll) *phModDll = LoadLibraryW(szDllName);
     return S_OK;
 }
 

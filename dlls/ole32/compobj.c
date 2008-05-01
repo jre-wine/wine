@@ -34,11 +34,8 @@
  *   - Implement the OXID resolver so we don't need magic endpoint names for
  *     clients and servers to meet up
  *
- *   - Call IMessageFilter functions.
- *
  *   - Make all ole interface marshaling use NDR to be wire compatible with
  *     native DCOM
- *   - Use & interpret ORPCTHIS & ORPCTHAT.
  *
  */
 
@@ -1001,7 +998,7 @@ HRESULT WINE_StringFromCLSID(
 	const CLSID *id,	/* [in] GUID to be converted */
 	LPSTR idstr		/* [out] pointer to buffer to contain converted guid */
 ) {
-  static const char *hex = "0123456789ABCDEF";
+  static const char hex[] = "0123456789ABCDEF";
   char *s;
   int	i;
 
@@ -2107,6 +2104,34 @@ HRESULT WINAPI GetClassFile(LPCOLESTR filePathName,CLSID *pclsid)
 
 /***********************************************************************
  *           CoCreateInstance [OLE32.@]
+ *
+ * Creates an instance of the specified class.
+ *
+ * PARAMS
+ *  rclsid       [I] Class ID to create an instance of.
+ *  pUnkOuter    [I] Optional outer unknown to allow aggregation with another object.
+ *  dwClsContext [I] Flags to restrict the location of the created instance.
+ *  iid          [I] The ID of the interface of the instance to return.
+ *  ppv          [O] On returns, contains a pointer to the specified interface of the instance.
+ *
+ * RETURNS
+ *  Success: S_OK
+ *  Failure: HRESULT code.
+ *
+ * NOTES
+ *  The dwClsContext parameter can be one or more of the following:
+ *| CLSCTX_INPROC_SERVER - Use an in-process server, such as from a DLL.
+ *| CLSCTX_INPROC_HANDLER - Use an in-process object which handles certain functions for an object running in another process.
+ *| CLSCTX_LOCAL_SERVER - Connect to an object running in another process.
+ *| CLSCTX_REMOTE_SERVER - Connect to an object running on another machine.
+ *
+ * Aggregation is the concept of deferring the IUnknown of an object to another
+ * object. This allows a separate object to behave as though it was part of
+ * the object and to allow this the pUnkOuter parameter can be set. Note that
+ * not all objects support having an outer of unknown.
+ *
+ * SEE ALSO
+ *  CoGetClassObject()
  */
 HRESULT WINAPI CoCreateInstance(
 	REFCLSID rclsid,
@@ -2671,9 +2696,9 @@ HRESULT WINAPI CoRegisterMessageFilter(
     apt = COM_CurrentApt();
 
     /* can't set a message filter in a multi-threaded apartment */
-    if (apt->multi_threaded)
+    if (!apt || apt->multi_threaded)
     {
-        ERR("can't set message filter in MTA\n");
+        WARN("can't set message filter in MTA or uninitialized apt\n");
         return CO_E_NOT_SUPPORTED;
     }
 
@@ -2691,9 +2716,6 @@ HRESULT WINAPI CoRegisterMessageFilter(
         *lplpMessageFilter = lpOldMessageFilter;
     else if (lpOldMessageFilter)
         IMessageFilter_Release(lpOldMessageFilter);
-
-    if (lpMessageFilter)
-        FIXME("message filter has been registered, but will not be used\n");
 
     return S_OK;
 }
@@ -3163,6 +3185,34 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD dwFlags, DWORD dwTimeout,
             {
                 MSG msg;
 
+                /* call message filter */
+
+                if (COM_CurrentApt()->filter)
+                {
+                    PENDINGTYPE pendingtype =
+                        COM_CurrentInfo()->pending_call_count_server ?
+                            PENDINGTYPE_NESTED : PENDINGTYPE_TOPLEVEL;
+                    DWORD be_handled = IMessageFilter_MessagePending(
+                        COM_CurrentApt()->filter, 0 /* FIXME */,
+                        now - start_time, pendingtype);
+                    TRACE("IMessageFilter_MessagePending returned %d\n", be_handled);
+                    switch (be_handled)
+                    {
+                    case PENDINGMSG_CANCELCALL:
+                        WARN("call canceled\n");
+                        hr = RPC_E_CALL_CANCELED;
+                        break;
+                    case PENDINGMSG_WAITNOPROCESS:
+                    case PENDINGMSG_WAITDEFPROCESS:
+                    default:
+                        /* FIXME: MSDN is very vague about the difference
+                         * between WAITNOPROCESS and WAITDEFPROCESS - there
+                         * appears to be none, so it is possibly a left-over
+                         * from the 16-bit world. */
+                        break;
+                    }
+                }
+
                 /* note: using "if" here instead of "while" might seem less
                  * efficient, but only if we are optimising for quick delivery
                  * of pending messages, rather than quick completion of the
@@ -3269,6 +3319,26 @@ HRESULT WINAPI CoGetObject(LPCWSTR pszName, BIND_OPTS *pBindOptions,
 }
 
 /***********************************************************************
+ *           CoRegisterChannelHook [OLE32.@]
+ *
+ * Registers a process-wide hook that is called during ORPC calls.
+ *
+ * PARAMS
+ *  guidExtension [I] GUID of the channel hook to register.
+ *  pChannelHook  [I] Channel hook object to register.
+ *
+ * RETURNS
+ *  Success: S_OK.
+ *  Failure: HRESULT code.
+ */
+HRESULT WINAPI CoRegisterChannelHook(REFGUID guidExtension, IChannelHook *pChannelHook)
+{
+    TRACE("(%s, %p)\n", debugstr_guid(guidExtension), pChannelHook);
+
+    return RPC_RegisterChannelHook(guidExtension, pChannelHook);
+}
+
+/***********************************************************************
  *		DllMain (OLE32.@)
  */
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
@@ -3285,6 +3355,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
     case DLL_PROCESS_DETACH:
         if (TRACE_ON(ole)) CoRevokeMallocSpy();
         COMPOBJ_UninitProcess();
+        RPC_UnregisterAllChannelHooks();
         OLE32_hInstance = 0;
 	break;
 

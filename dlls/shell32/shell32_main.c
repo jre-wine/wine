@@ -120,7 +120,7 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
         return argv;
     }
 
-    /* to get a writeable copy */
+    /* to get a writable copy */
     argc=0;
     bcount=0;
     in_quotes=0;
@@ -356,7 +356,15 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
          (flags & (SHGFI_ATTRIBUTES|SHGFI_EXETYPE|SHGFI_PIDL)))
         return FALSE;
 
-    /* windows initializes this values regardless of the flags */
+    if ( (flags & SHGFI_USEFILEATTRIBUTES) &&
+         (flags & (SHGFI_ICONLOCATION | SHGFI_ICON | SHGFI_SYSICONINDEX)) )
+    {
+        FIXME("This combination of flags is not supported yet\n");
+        /* And it would cause a crash, so return false instead */
+        return FALSE;
+    }
+
+    /* windows initializes these values regardless of the flags */
     if (psfi != NULL)
     {
         psfi->szDisplayName[0] = '\0';
@@ -1076,6 +1084,14 @@ void WINAPI FreeIconList( DWORD dw )
     FIXME("%x: stub\n",dw);
 }
 
+/*************************************************************************
+ * SHLoadNonloadedIconOverlayIdentifiers (SHELL32.@)
+ */
+HRESULT SHLoadNonloadedIconOverlayIdentifiers( VOID )
+{
+    FIXME("stub\n");
+    return S_OK;
+}
 
 /***********************************************************************
  * DllGetVersion [SHELL32.@]

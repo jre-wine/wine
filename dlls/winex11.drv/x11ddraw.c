@@ -20,6 +20,7 @@
 
 #include "config.h"
 
+#include <stdarg.h>
 #include <string.h>
 #include <X11/Xlib.h>
 
@@ -28,7 +29,8 @@
 #include "x11drv.h"
 
 #include "windef.h"
-#include "gdi.h"
+#include "winbase.h"
+#include "wingdi.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
@@ -43,8 +45,6 @@ typedef struct _X11DRIVERINFO {
 typedef struct _X11DEVICE {
   LPX11DRIVERINFO	lpInfo;
 } X11DEVICE,*LPX11DEVICE;
-
-extern int dxgrab;
 
 static LPDDRAWI_DDRAWSURFACE_LCL X11DRV_DD_Primary;
 static LPDDRAWI_DDRAWSURFACE_GBL X11DRV_DD_PrimaryGbl;

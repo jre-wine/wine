@@ -164,7 +164,6 @@ inline BOOL WINAPI IWineD3DVertexBufferImpl_FindDecl(IWineD3DVertexBufferImpl *T
 {
     WineDirect3DVertexStridedData strided;
     IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-    BOOL ret;
 
     memset(&strided, 0, sizeof(strided));
     /* There are certain vertex data types that need to be fixed up. The Vertex Buffers FVF doesn't
@@ -184,46 +183,25 @@ inline BOOL WINAPI IWineD3DVertexBufferImpl_FindDecl(IWineD3DVertexBufferImpl *T
      * -> New semantics that have to be converted appear
      * -> The position of semantics that have to be converted changes
      * -> The stride of the vertex changed AND there is stuff that needs conversion
-     * -> (If a vertex buffer is bound and in use assume that nothing that needs conversion is there)
+     * -> (If a vertex shader is bound and in use assume that nothing that needs conversion is there)
      *
      * Return values:
      *  TRUE: Reload is needed
      *  FALSE: otherwise
      */
 
-    if(device->stateBlock->vertexShader != NULL && wined3d_settings.vs_mode != VS_NONE 
-       &&((IWineD3DVertexShaderImpl *)device->stateBlock->vertexShader)->baseShader.function != NULL
-       && GL_SUPPORT(ARB_VERTEX_PROGRAM)) {
-        /* Case 1: Vertex Shader: No conversion */
-        TRACE("Vertex Shader, no conversion needed\n");
-    } else if(device->stateBlock->vertexDecl || device->stateBlock->vertexShader) {
-        /* Case 2: Vertex Declaration */
-        TRACE("Using vertex declaration\n");
-
-        This->Flags |= VBFLAG_LOAD;
-        primitiveDeclarationConvertToStridedData((IWineD3DDevice *) device,
-                FALSE,
-                &strided,
-                0,
-                &ret /* buffer contains fixed data, ignored here */);
-        This->Flags &= ~VBFLAG_LOAD;
-
+    if(device->stateBlock->vertexShader && ((IWineD3DVertexShaderImpl *) device->stateBlock->vertexShader)->baseShader.function) {
+        /* Assume no conversion */
+        memset(&strided, 0, sizeof(strided));
     } else {
-        /* Case 3: FVF */
-        if(!(This->Flags & VBFLAG_STREAM) ) {
-            TRACE("No vertex decl used and buffer is not bound to a stream\n");
-            /* No reload needed */
-            return FALSE;
-        } else {
-            This->Flags |= VBFLAG_LOAD;
-            primitiveConvertFVFtoOffset(device->stateBlock->fvf,
-                                        device->stateBlock->streamStride[This->stream],
-                                        NULL,
-                                        &strided,
-                                        This->vbo);
-            This->Flags &= ~VBFLAG_LOAD;
-            /* Data can only come from this buffer */
-        }
+        /* we need a copy because we modify some params */
+        memcpy(&strided, &device->strided_streams, sizeof(strided));
+
+        /* Filter out data that does not come from this VBO */
+        if(strided.u.s.position.VBO != This->vbo)    memset(&strided.u.s.position, 0, sizeof(strided.u.s.position));
+        if(strided.u.s.diffuse.VBO != This->vbo)     memset(&strided.u.s.diffuse, 0, sizeof(strided.u.s.diffuse));
+        if(strided.u.s.specular.VBO != This->vbo)    memset(&strided.u.s.specular, 0, sizeof(strided.u.s.specular));
+        if(strided.u.s.position2.VBO != This->vbo)   memset(&strided.u.s.position2, 0, sizeof(strided.u.s.position2));
     }
 
     /* Filter out data that does not come from this VBO */
@@ -280,7 +258,20 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
         return; /* Not doing any conversion */
     }
 
-    declChanged = IWineD3DVertexBufferImpl_FindDecl(This);
+    /* Reading the declaration makes only sense if the stateblock is finalized and the buffer bound to a stream */
+    if(This->resource.wineD3DDevice->isInDraw && This->Flags & VBFLAG_STREAM) {
+        declChanged = IWineD3DVertexBufferImpl_FindDecl(This);
+    } else if(This->Flags & VBFLAG_HASDESC) {
+        /* Reuse the declaration stored in the buffer. It will most likely not change, and if it does
+         * the stream source state handler will call PreLoad again and the change will be cought
+         */
+    } else {
+        /* Cannot get a declaration, and no declaration is stored in the buffer. It is pointless to preload
+         * now. When the buffer is used, PreLoad will be called by the stream source state handler and a valid
+         * declaration for the buffer can be found
+         */
+        return;
+    }
 
     /* If applications change the declaration over and over, reconverting all the time is a huge
      * performance hit. So count the declaration changes and release the VBO if there are too much
@@ -298,6 +289,14 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
                 checkGLcall("glDeleteBuffersARB");
                 LEAVE_GL();
                 This->vbo = 0;
+
+                /* The stream source state handler might have read the memory of the vertex buffer already
+                 * and got the memory in the vbo which is not valid any longer. Dirtify the stream source
+                 * to force a reload. This happens only once per changed vertexbuffer and should occur rather
+                 * rarely
+                 */
+                IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_STREAMSRC);
+
                 return;
             }
             /* Otherwise do not bother to release the VBO. If we're doing direct locking now,
@@ -439,7 +438,7 @@ static HRESULT  WINAPI IWineD3DVertexBufferImpl_Lock(IWineD3DVertexBuffer *iface
         if(SizeToLock)
             This->dirtyend = OffsetToLock + SizeToLock;
         else
-            This->dirtyend = OffsetToLock + This->resource.size;
+            This->dirtyend = This->resource.size;
     }
 
     if(This->resource.allocatedMemory) {
@@ -492,8 +491,6 @@ HRESULT  WINAPI IWineD3DVertexBufferImpl_Unlock(IWineD3DVertexBuffer *iface) {
         GL_EXTCALL(glUnmapBufferARB(GL_ARRAY_BUFFER_ARB));
         checkGLcall("glUnmapBufferARB");
         LEAVE_GL();
-    } else if(This->Flags & VBFLAG_HASDESC){
-        IWineD3DVertexBufferImpl_PreLoad(iface);
     }
     return WINED3D_OK;
 }

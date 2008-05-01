@@ -48,7 +48,6 @@
 #include "winreg.h"
 #include "wownt32.h"
 #include "wine/debug.h"
-#include "gdi.h"
 #include "gdi_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(print);
@@ -440,7 +439,7 @@ typedef struct PRINTJOB
 #define MAX_PRINT_JOBS 1
 #define SP_OK 1
 
-PPRINTJOB gPrintJobsTable[MAX_PRINT_JOBS];
+static PPRINTJOB gPrintJobsTable[MAX_PRINT_JOBS];
 
 
 static PPRINTJOB FindPrintJobFromHandle(HANDLE16 hHandle)

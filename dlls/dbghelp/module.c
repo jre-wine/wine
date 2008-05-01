@@ -34,11 +34,11 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
-static const char* ext[] = {".acm", ".dll", ".drv", ".exe", ".ocx", ".vxd", NULL};
+static const char * const ext[] = {".acm", ".dll", ".drv", ".exe", ".ocx", ".vxd", NULL};
 
 static int match_ext(const char* ptr, size_t len)
 {
-    const char**e;
+    const char * const *e;
     size_t      l;
 
     for (e = ext; *e; e++)
@@ -244,13 +244,13 @@ struct module* module_get_containee(const struct process* pcs,
  *   container (and also force the ELF container's debug info loading if deferred)
  * - otherwise return the module itself if it has some debug info
  */
-BOOL module_get_debug(const struct process* pcs, struct module_pair* pair)
+BOOL module_get_debug(struct module_pair* pair)
 {
     IMAGEHLP_DEFERRED_SYMBOL_LOAD64     idsl64;
 
     if (!pair->requested) return FALSE;
     /* for a PE builtin, always get info from container */
-    if (!(pair->effective = module_get_container(pcs, pair->requested)))
+    if (!(pair->effective = module_get_container(pair->pcs, pair->requested)))
         pair->effective = pair->requested;
     /* if deferred, force loading */
     if (pair->effective->module.SymType == SymDeferred)
@@ -272,9 +272,9 @@ BOOL module_get_debug(const struct process* pcs, struct module_pair* pair)
             idsl64.Reparse = FALSE;
             idsl64.hFile = INVALID_HANDLE_VALUE;
 
-            pcs_callback(pcs, CBA_DEFERRED_SYMBOL_LOAD_START, &idsl64);
-            ret = pe_load_debug_info(pcs, pair->effective);
-            pcs_callback(pcs,
+            pcs_callback(pair->pcs, CBA_DEFERRED_SYMBOL_LOAD_START, &idsl64);
+            ret = pe_load_debug_info(pair->pcs, pair->effective);
+            pcs_callback(pair->pcs,
                          ret ? CBA_DEFERRED_SYMBOL_LOAD_COMPLETE : CBA_DEFERRED_SYMBOL_LOAD_FAILURE,
                          &idsl64);
             break;
@@ -284,7 +284,7 @@ BOOL module_get_debug(const struct process* pcs, struct module_pair* pair)
         }
         if (!ret) pair->effective->module.SymType = SymNone;
         assert(pair->effective->module.SymType != SymDeferred);
-        module_compute_num_syms(pair->effective);
+        pair->effective->module.NumSyms = pair->effective->ht_symbols.num_elts;
     }
     return pair->effective->module.SymType != SymNone;
 }
@@ -372,18 +372,6 @@ enum module_type module_get_type_by_name(const char* name)
     return DMT_PE;
 }
 
-int module_compute_num_syms(struct module* module)
-{
-    struct hash_table_iter      hti;
-    void*                       ptr;
-
-    module->module.NumSyms = 0;
-    hash_table_iter_init(&module->ht_symbols, &hti, NULL);
-    while ((ptr = hash_table_iter_up(&hti)))
-         module->module.NumSyms++;
-    return module->module.NumSyms;
-}
-
 /***********************************************************************
  *			SymLoadModule (DBGHELP.@)
  */
@@ -393,8 +381,8 @@ DWORD WINAPI SymLoadModule(HANDLE hProcess, HANDLE hFile, const char* ImageName,
     struct process*     pcs;
     struct module*	module = NULL;
 
-    TRACE("(%p %p %s %s %08lx %08lx)\n", 
-          hProcess, hFile, debugstr_a(ImageName), debugstr_a(ModuleName), 
+    TRACE("(%p %p %s %s %08x %08x)\n",
+          hProcess, hFile, debugstr_a(ImageName), debugstr_a(ModuleName),
           BaseOfDll, SizeOfDll);
 
     pcs = process_find_by_handle(hProcess);
@@ -429,7 +417,7 @@ DWORD WINAPI SymLoadModule(HANDLE hProcess, HANDLE hFile, const char* ImageName,
         WARN("Couldn't locate %s\n", ImageName);
         return 0;
     }
-    module_compute_num_syms(module);
+    module->module.NumSyms = module->ht_symbols.num_elts;
 done:
     /* by default pe_load_module fills module.ModuleName from a derivation 
      * of ImageName. Overwrite it, if we have better information
@@ -448,8 +436,8 @@ DWORD64 WINAPI  SymLoadModuleEx(HANDLE hProcess, HANDLE hFile, PCSTR ImageName,
                                 PCSTR ModuleName, DWORD64 BaseOfDll, DWORD DllSize,
                                 PMODLOAD_DATA Data, DWORD Flags)
 {
-    TRACE("(%p %p %s %s %s %08lx %p %08lx)\n", 
-          hProcess, hFile, debugstr_a(ImageName), debugstr_a(ModuleName), 
+    TRACE("(%p %p %s %s %s %08x %p %08x)\n",
+          hProcess, hFile, debugstr_a(ImageName), debugstr_a(ModuleName),
           wine_dbgstr_longlong(BaseOfDll), DllSize, Data, Flags);
 
     if (Data)
@@ -471,7 +459,7 @@ DWORD64 WINAPI  SymLoadModuleEx(HANDLE hProcess, HANDLE hFile, PCSTR ImageName,
         return TRUE;
     }
     if (Flags & ~(SLMFLAG_VIRTUAL))
-        FIXME("Unsupported Flags %08lx for %s\n", Flags, ImageName);
+        FIXME("Unsupported Flags %08x for %s\n", Flags, ImageName);
 
     return SymLoadModule(hProcess, hFile, ImageName, ModuleName, (DWORD)BaseOfDll, DllSize);
 }
@@ -532,6 +520,7 @@ BOOL module_remove(struct process* pcs, struct module* module)
     hash_table_destroy(&module->ht_types);
     HeapFree(GetProcessHeap(), 0, (char*)module->sources);
     HeapFree(GetProcessHeap(), 0, module->addr_sorttab);
+    HeapFree(GetProcessHeap(), 0, module->dwarf2_info);
     pool_destroy(&module->pool);
     /* native dbghelp doesn't invoke registered callback(,CBA_SYMBOLS_UNLOADED,) here
      * so do we
@@ -631,12 +620,12 @@ BOOL  WINAPI SymEnumerateModules64(HANDLE hProcess,
 }
 
 /******************************************************************
- *		EnumerateLoadedModules (DBGHELP.@)
+ *		EnumerateLoadedModules64 (DBGHELP.@)
  *
  */
-BOOL  WINAPI EnumerateLoadedModules(HANDLE hProcess,
-                                    PENUMLOADED_MODULES_CALLBACK EnumLoadedModulesCallback,
-                                    PVOID UserContext)
+BOOL  WINAPI EnumerateLoadedModules64(HANDLE hProcess,
+                                      PENUMLOADED_MODULES_CALLBACK64 EnumLoadedModulesCallback,
+                                      PVOID UserContext)
 {
     HMODULE*    hMods;
     char        base[256], mod[256];
@@ -660,12 +649,74 @@ BOOL  WINAPI EnumerateLoadedModules(HANDLE hProcess,
             !GetModuleBaseNameA(hProcess, hMods[i], base, sizeof(base)))
             continue;
         module_fill_module(base, mod, sizeof(mod));
-        EnumLoadedModulesCallback(mod, (DWORD)mi.lpBaseOfDll, mi.SizeOfImage, 
+        EnumLoadedModulesCallback(mod, (DWORD_PTR)mi.lpBaseOfDll, mi.SizeOfImage,
                                   UserContext);
     }
     HeapFree(GetProcessHeap(), 0, hMods);
 
     return sz != 0 && i == sz;
+}
+
+/******************************************************************
+ *		EnumerateLoadedModules (DBGHELP.@)
+ *
+ */
+struct enum_load_mod64_32
+{
+    PENUMLOADED_MODULES_CALLBACK        cb;
+    PVOID                               user;
+};
+
+static BOOL CALLBACK enum_load_mod64_32(PSTR name, DWORD64 base, ULONG size,
+                                        PVOID user)
+{
+    struct enum_load_mod64_32*  x = user;
+    return x->cb(name, (DWORD)base, size, x->user);
+}
+
+BOOL  WINAPI EnumerateLoadedModules(HANDLE hProcess,
+                                    PENUMLOADED_MODULES_CALLBACK EnumLoadedModulesCallback,
+                                    PVOID UserContext)
+{
+    struct enum_load_mod64_32   x;
+
+    x.cb = EnumLoadedModulesCallback;
+    x.user = UserContext;
+
+    return EnumerateLoadedModules64(hProcess, enum_load_mod64_32, &x);
+}
+
+/******************************************************************
+ *		EnumerateLoadedModulesW64 (DBGHELP.@)
+ *
+ */
+struct enum_load_mod64_W64
+{
+    PENUMLOADED_MODULES_CALLBACKW64     cb;
+    PVOID                               user;
+    WCHAR                               module[MAX_PATH];
+};
+
+static BOOL CALLBACK enum_load_mod64_W64(PSTR name, DWORD64 base, ULONG size,
+                                         PVOID user)
+{
+    struct enum_load_mod64_W64* x = user;
+
+    MultiByteToWideChar(CP_ACP, 0, name, -1,
+                        x->module, sizeof(x->module) / sizeof(WCHAR));
+    return x->cb(x->module, base, size, x->user);
+}
+
+BOOL  WINAPI EnumerateLoadedModulesW64(HANDLE hProcess,
+                                       PENUMLOADED_MODULES_CALLBACKW64 EnumLoadedModulesCallback,
+                                       PVOID UserContext)
+{
+    struct enum_load_mod64_W64  x;
+
+    x.cb = EnumLoadedModulesCallback;
+    x.user = UserContext;
+
+    return EnumerateLoadedModules64(hProcess, enum_load_mod64_W64, &x);
 }
 
 /******************************************************************

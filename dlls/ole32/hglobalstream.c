@@ -49,7 +49,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(storage);
 /****************************************************************************
  * HGLOBALStreamImpl definition.
  *
- * This class imlements the IStream inteface and represents a stream
+ * This class implements the IStream interface and represents a stream
  * supported by an HGLOBAL pointer.
  */
 struct HGLOBALStreamImpl
@@ -148,11 +148,9 @@ static HRESULT WINAPI HGLOBALStreamImpl_QueryInterface(
   /*
    * Compare the riid with the interface IDs implemented by this object.
    */
-  if (memcmp(&IID_IUnknown, riid, sizeof(IID_IUnknown)) == 0)
-  {
-    *ppvObject = (IStream*)This;
-  }
-  else if (memcmp(&IID_IStream, riid, sizeof(IID_IStream)) == 0)
+  if (IsEqualIID(&IID_IUnknown, riid) ||
+      IsEqualIID(&IID_ISequentialStream, riid) ||
+      IsEqualIID(&IID_IStream, riid))
   {
     *ppvObject = (IStream*)This;
   }
@@ -426,7 +424,7 @@ static HRESULT WINAPI HGLOBALStreamImpl_SetSize(
   supportHandle = GlobalReAlloc(This->supportHandle, libNewSize.u.LowPart, 0);
 
   if (supportHandle == 0)
-    return STG_E_MEDIUMFULL;
+    return E_OUTOFMEMORY;
 
   This->supportHandle = supportHandle;
   This->streamSize.u.LowPart = libNewSize.u.LowPart;

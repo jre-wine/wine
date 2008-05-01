@@ -1283,8 +1283,15 @@ struct async
 /* destroys the server side of it */
 static void async_terminate( struct async *async, int status )
 {
-    thread_queue_apc( async->thread, NULL, async->apc, APC_ASYNC_IO,
-                      1, async->user, async->sb, (void *)status );
+    apc_call_t data;
+
+    memset( &data, 0, sizeof(data) );
+    data.type            = APC_ASYNC_IO;
+    data.async_io.func   = async->apc;
+    data.async_io.user   = async->user;
+    data.async_io.sb     = async->sb;
+    data.async_io.status = status;
+    thread_queue_apc( async->thread, NULL, &data );
 
     if (async->timeout) remove_timeout_user( async->timeout );
     async->timeout = NULL;
@@ -1774,9 +1781,10 @@ void fd_queue_async_timeout( struct fd *fd, void *apc, void *user, void *io_sb, 
                              const struct timeval *timeout )
 {
     struct list *queue;
-    int events;
+    int events, flags;
 
-    if (!(fd->fd_ops->get_file_info( fd ) & (FD_FLAG_OVERLAPPED|FD_FLAG_TIMEOUT)))
+    fd->fd_ops->get_file_info( fd, &flags );
+    if (!(flags & (FD_FLAG_OVERLAPPED|FD_FLAG_TIMEOUT)))
     {
         set_error( STATUS_INVALID_HANDLE );
         return;
@@ -1824,10 +1832,10 @@ int no_flush( struct fd *fd, struct event **event )
 }
 
 /* default get_file_info() routine */
-int no_get_file_info( struct fd *fd )
+enum server_fd_type no_get_file_info( struct fd *fd, int *flags )
 {
-    set_error( STATUS_OBJECT_TYPE_MISMATCH );
-    return 0;
+    *flags = 0;
+    return FD_TYPE_INVALID;
 }
 
 /* default queue_async() routine */
@@ -1955,13 +1963,17 @@ DECL_HANDLER(get_handle_fd)
 
     if ((fd = get_handle_fd_obj( current->process, req->handle, req->access )))
     {
-        if (!req->cached)
+        reply->type = fd->fd_ops->get_file_info( fd, &reply->flags );
+        if (reply->type != FD_TYPE_INVALID)
         {
-            int unix_fd = get_unix_fd( fd );
-            if (unix_fd != -1) send_client_fd( current->process, unix_fd, req->handle );
+            if (fd->inode && fd->inode->device->removable) reply->flags |= FD_FLAG_REMOVABLE;
+            if (!req->cached)
+            {
+                int unix_fd = get_unix_fd( fd );
+                if (unix_fd != -1) send_client_fd( current->process, unix_fd, req->handle );
+            }
         }
-        reply->flags = fd->fd_ops->get_file_info( fd );
-        if (fd->inode && fd->inode->device->removable) reply->flags |= FD_FLAG_REMOVABLE;
+        else set_error( STATUS_OBJECT_TYPE_MISMATCH );
         release_object( fd );
     }
 }

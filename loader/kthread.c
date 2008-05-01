@@ -237,8 +237,7 @@ static int create_thread( struct wine_pthread_thread_info *info )
 {
     if (!info->stack_base)
     {
-        info->stack_base = wine_anon_mmap( NULL, info->stack_size,
-                                           PROT_READ | PROT_WRITE | PROT_EXEC, 0 );
+        info->stack_base = wine_anon_mmap( NULL, info->stack_size, PROT_READ | PROT_WRITE, 0 );
         if (info->stack_base == (void *)-1) return -1;
     }
 #ifdef HAVE_CLONE
@@ -904,6 +903,14 @@ void __pthread_initialize(void)
     if (!done)
     {
         done = 1;
+        /* check for exported epoll_create to detect glibc versions that we cannot support */
+        if (wine_dlsym( RTLD_DEFAULT, "epoll_create", NULL, 0 ))
+        {
+            static const char warning[] =
+                "wine: glibc >= 2.3 without NPTL or TLS is not a supported combination.\n"
+                "      It will most likely crash. Please upgrade to a glibc with NPTL support.\n";
+            write( 2, warning, sizeof(warning)-1 );
+        }
         libc_fork = wine_dlsym( RTLD_NEXT, "fork", NULL, 0 );
         libc_sigaction = wine_dlsym( RTLD_NEXT, "sigaction", NULL, 0 );
         libc_uselocale = wine_dlsym( RTLD_DEFAULT, "uselocale", NULL, 0 );

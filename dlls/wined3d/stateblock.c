@@ -167,8 +167,6 @@ void stateblock_copy(
     Dest->viewport = This->viewport;
     Dest->material = This->material;
     Dest->pixelShader = This->pixelShader;
-    Dest->vertex_blend = This->vertex_blend;
-    Dest->tween_factor = This->tween_factor;
     Dest->glsl_program = This->glsl_program;
 
     /* Fixed size arrays */
@@ -234,31 +232,6 @@ static ULONG  WINAPI IWineD3DStateBlockImpl_Release(IWineD3DStateBlock *iface) {
         if (This->blockType == WINED3DSBT_INIT) {
             int counter;
             FIXME("Releasing primary stateblock\n");
-            /* Free any streams still bound */
-            for (counter = 0 ; counter < MAX_STREAMS ; counter++) {
-                if (This->streamSource[counter] != NULL) {
-                    IWineD3DVertexBuffer_Release(This->streamSource[counter]);
-                    This->streamSource[counter] = NULL;
-                }
-            }
-
-            /* free any index data */
-            if (This->pIndexData) {
-                IWineD3DIndexBuffer_Release(This->pIndexData);
-                This->pIndexData = NULL;
-            }
-
-            if (NULL != This->pixelShader) {
-                IWineD3DPixelShader_Release(This->pixelShader);
-            }
-
-            if (NULL != This->vertexShader) {
-                IWineD3DVertexShader_Release(This->vertexShader);
-            }
-
-            if (NULL != This->vertexDecl) {
-                IWineD3DVertexDeclaration_Release(This->vertexDecl);
-            }
 
             /* NOTE: according to MSDN: The application is responsible for making sure the texture references are cleared down */
             for (counter = 0; counter < GL_LIMITS(sampler_stages); counter++) {
@@ -343,13 +316,6 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
         if (This->vertexShader != targetStateBlock->vertexShader) {
             TRACE("Updating vertex shader from %p to %p\n", This->vertexShader, targetStateBlock->vertexShader);
 
-            if (targetStateBlock->vertexShader) {
-                IWineD3DVertexShader_AddRef(targetStateBlock->vertexShader);
-            }
-            if (This->vertexShader) {
-                IWineD3DVertexShader_Release(This->vertexShader);
-            }
-
             This->vertexShader = targetStateBlock->vertexShader;
         }
 
@@ -431,13 +397,6 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
         if (This->pixelShader != targetStateBlock->pixelShader) {
             TRACE("Updating pixel shader from %p to %p\n", This->pixelShader, targetStateBlock->pixelShader);
 
-            if (targetStateBlock->pixelShader) {
-                IWineD3DPixelShader_AddRef(targetStateBlock->pixelShader);
-            }
-            if (This->pixelShader) {
-                IWineD3DPixelShader_Release(This->pixelShader);
-            }
-
             This->pixelShader = targetStateBlock->pixelShader;
         }
 
@@ -503,13 +462,6 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
 
         if(This->set.vertexDecl && This->vertexDecl != targetStateBlock->vertexDecl){
             TRACE("Updating vertex declaration from %p to %p\n", This->vertexDecl, targetStateBlock->vertexDecl);
-
-            if (targetStateBlock->vertexDecl) {
-                IWineD3DVertexDeclaration_AddRef(targetStateBlock->vertexDecl);
-            }
-            if (This->vertexDecl) {
-                IWineD3DVertexDeclaration_Release(This->vertexDecl);
-            }
 
             This->vertexDecl = targetStateBlock->vertexDecl;
         }
@@ -739,6 +691,8 @@ should really perform a delta so that only the changes get updated*/
                     ((IWineD3DDeviceImpl *)pDevice)->stateBlock->textureState[j][i]         = This->textureState[j][i];
                     ((IWineD3DDeviceImpl *)pDevice)->stateBlock->set.textureState[j][i]     = TRUE;
                     ((IWineD3DDeviceImpl *)pDevice)->stateBlock->changed.textureState[j][i] = TRUE;
+                    /* TODO: Record a display list to apply all gl states. For now apply by brute force */
+                    IWineD3DDeviceImpl_MarkStateDirty((IWineD3DDeviceImpl *)pDevice, STATE_TEXTURESTAGE(j, i));
                 }
             }
         }
@@ -756,7 +710,8 @@ should really perform a delta so that only the changes get updated*/
                     ((IWineD3DDeviceImpl *)pDevice)->stateBlock->changed.samplerState[j][i] = TRUE;
                 }
             }
-
+            /* SetTexture catches nop changes, so the above call does not assure that the sampler is updated */
+            IWineD3DDeviceImpl_MarkStateDirty((IWineD3DDeviceImpl *)pDevice, STATE_SAMPLER(j));
         }
 
     } else if (This->blockType == WINED3DSBT_PIXELSTATE) {
@@ -770,6 +725,7 @@ should really perform a delta so that only the changes get updated*/
         for (j = 0; j < GL_LIMITS(texture_stages); j++) {
             for (i = 0; i < NUM_SAVEDPIXELSTATES_T; i++) {
                 ((IWineD3DDeviceImpl *)pDevice)->stateBlock->textureState[j][SavedPixelStates_T[i]] = This->textureState[j][SavedPixelStates_T[i]];
+                IWineD3DDeviceImpl_MarkStateDirty((IWineD3DDeviceImpl *)pDevice, STATE_TEXTURESTAGE(j, SavedPixelStates_T[i]));
             }
         }
 
@@ -789,6 +745,7 @@ should really perform a delta so that only the changes get updated*/
         for (j = 0; j < GL_LIMITS(texture_stages); j++) {
             for (i = 0; i < NUM_SAVEDVERTEXSTATES_T; i++) {
                 ((IWineD3DDeviceImpl *)pDevice)->stateBlock->textureState[j][SavedVertexStates_T[i]] = This->textureState[j][SavedVertexStates_T[i]];
+                IWineD3DDeviceImpl_MarkStateDirty((IWineD3DDeviceImpl *)pDevice, STATE_TEXTURESTAGE(j, SavedVertexStates_T[i]));
             }
         }
 
@@ -803,6 +760,13 @@ should really perform a delta so that only the changes get updated*/
         FIXME("Unrecognized state block type %d\n", This->blockType);
     }
     stateblock_savedstates_copy(iface, &((IWineD3DDeviceImpl*)pDevice)->stateBlock->changed, &This->changed);
+    ((IWineD3DDeviceImpl *)pDevice)->stateBlock->lowest_disabled_stage = MAX_TEXTURES - 1;
+    for(j = 0; j < MAX_TEXTURES - 1; j++) {
+        if(((IWineD3DDeviceImpl *)pDevice)->stateBlock->textureState[j][D3DTSS_COLOROP] == WINED3DTOP_DISABLE) {
+            ((IWineD3DDeviceImpl *)pDevice)->stateBlock->lowest_disabled_stage = j;
+            break;
+        }
+    }
     TRACE("(%p) : Applied state block %p ------------------^\n", This, pDevice);
 
     return WINED3D_OK;
@@ -1004,6 +968,7 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
         This->textureState[i][WINED3DTSS_ALPHAARG0             ] = WINED3DTA_CURRENT;
         This->textureState[i][WINED3DTSS_RESULTARG             ] = WINED3DTA_CURRENT;
     }
+    This->lowest_disabled_stage = 1;
 
         /* Sampler states*/
     for (i = 0 ; i <  GL_LIMITS(sampler_stages); i++) {
@@ -1028,45 +993,40 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
        bound. We emulate this by creating dummy textures and binding them to each
        texture stage, but disable all stages by default. Hence if a stage is enabled
        then the default texture will kick in until replaced by a SetTexture call     */
-    if (!GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        ENTER_GL();
+    ENTER_GL();
 
-        for (i = 0; i < GL_LIMITS(texture_stages); i++) {
-            GLubyte white = 255;
+    for (i = 0; i < GL_LIMITS(texture_stages); i++) {
+        GLubyte white = 255;
 
-            /* Note this avoids calling settexture, so pretend it has been called */
-            This->set.textures[i]     = TRUE;
-            This->changed.textures[i] = TRUE;
-            This->textures[i]         = NULL;
+        /* Note this avoids calling settexture, so pretend it has been called */
+        This->set.textures[i]     = TRUE;
+        This->changed.textures[i] = TRUE;
+        This->textures[i]         = NULL;
 
-            /* Make appropriate texture active */
-            if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
-                checkGLcall("glActiveTextureARB");
-            } else if (i > 0) {
-                FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
-            }
-
-            /* Generate an opengl texture name */
-            glGenTextures(1, &ThisDevice->dummyTextureName[i]);
-            checkGLcall("glGenTextures");
-            TRACE("Dummy Texture %d given name %d\n", i, ThisDevice->dummyTextureName[i]);
-
-            /* Generate a dummy 1d texture */
-            This->textureDimensions[i] = GL_TEXTURE_1D;
-            glBindTexture(GL_TEXTURE_1D, ThisDevice->dummyTextureName[i]);
-            checkGLcall("glBindTexture");
-
-            glTexImage1D(GL_TEXTURE_1D, 0, GL_LUMINANCE, 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &white);
-            checkGLcall("glTexImage1D");
-#if 1   /* TODO: move the setting texture states off to basetexture */
-            /* Reapply all the texture state information to this texture */
-            IWineD3DDevice_SetupTextureStates(device, i, i, REAPPLY_ALL);
-#endif
+        /* Make appropriate texture active */
+        if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
+            checkGLcall("glActiveTextureARB");
+        } else if (i > 0) {
+            FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
         }
 
-        LEAVE_GL();
+        /* Generate an opengl texture name */
+        glGenTextures(1, &ThisDevice->dummyTextureName[i]);
+        checkGLcall("glGenTextures");
+        TRACE("Dummy Texture %d given name %d\n", i, ThisDevice->dummyTextureName[i]);
+
+        /* Generate a dummy 1d texture */
+        This->textureDimensions[i] = GL_TEXTURE_1D;
+        glBindTexture(GL_TEXTURE_1D, ThisDevice->dummyTextureName[i]);
+        checkGLcall("glBindTexture");
+
+        glTexImage1D(GL_TEXTURE_1D, 0, GL_LUMINANCE, 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &white);
+        checkGLcall("glTexImage1D");
     }
+
+    LEAVE_GL();
+
 
     /* Defaulting palettes - Note these are device wide but reinitialized here for convenience*/
     for (i = 0; i < MAX_PALETTES; ++i) {

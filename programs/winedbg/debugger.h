@@ -132,7 +132,7 @@ struct dbg_breakpoint
                         xpoint_type : 2,
                         refcount : 13,
                         skipcount : 16;
-    DWORD               info;
+    unsigned long       info;
     struct              /* only used for watchpoints */
     {
         BYTE		len : 2;
@@ -176,6 +176,10 @@ struct dbg_thread
     {
         ADDRESS64               addr_pc;
         ADDRESS64               addr_frame;
+        ADDRESS64               addr_stack;
+        DWORD                   linear_pc;
+        DWORD                   linear_frame;
+        DWORD                   linear_stack;
     }*                          frames;
     int                         num_frames;
     int                         curr_frame;
@@ -275,7 +279,8 @@ extern void             break_delete_xpoint(int num);
 extern void             break_delete_xpoints_from_module(unsigned long base);
 extern void             break_enable_xpoint(int num, BOOL enable);
 extern void             break_info(void);
-extern BOOL             break_should_continue(ADDRESS64* addr, DWORD code, int* count, BOOL* is_break);
+extern void             break_adjust_pc(ADDRESS64* addr, DWORD code, BOOL* is_break);
+extern BOOL             break_should_continue(ADDRESS64* addr, DWORD code);
 extern void             break_suspend_execution(void);
 extern void             break_restart_execution(int count);
 extern int              break_add_condition(int bpnum, struct expr* exp);
@@ -320,7 +325,7 @@ extern int              expr_print(const struct expr* exp);
   /* info.c */
 extern void             print_help(void);
 extern void             info_help(void);
-extern void             info_win32_module(DWORD mod);
+extern void             info_win32_module(DWORD64 mod);
 extern void             info_win32_class(HWND hWnd, const char* clsName);
 extern void             info_win32_window(HWND hWnd, BOOL detailed);
 extern void             info_win32_processes(void);
@@ -361,6 +366,7 @@ extern void             stack_info(void);
 extern void             stack_backtrace(DWORD threadID);
 extern BOOL             stack_set_frame(int newframe);
 extern BOOL             stack_get_current_frame(IMAGEHLP_STACK_FRAME* ihsf);
+extern BOOL             stack_get_register_current_frame(unsigned regno, DWORD** pval);
 extern unsigned         stack_fetch_frames(void);
 extern BOOL             stack_get_current_symbol(SYMBOL_INFO* sym);
 
@@ -370,6 +376,7 @@ extern void             symbol_read_symtable(const char* filename, unsigned long
 extern enum dbg_line_status symbol_get_function_line_status(const ADDRESS64* addr);
 extern BOOL             symbol_get_line(const char* filename, const char* func, IMAGEHLP_LINE* ret);
 extern void             symbol_info(const char* str);
+extern void             symbol_print_local(const SYMBOL_INFO* sym, ULONG base, BOOL detailed);
 extern int              symbol_info_locals(void);
 extern BOOL             symbol_is_local(const char* name);
 
@@ -386,11 +393,15 @@ extern BOOL             dbg_attach_debuggee(DWORD pid, BOOL cofe);
 extern void             minidump_write(const char*, const EXCEPTION_RECORD*);
 extern enum dbg_start   minidump_reload(int argc, char* argv[]);
 
+  /* tgt_module.c */
+extern enum dbg_start   tgt_module_load(const char* name, BOOL keep);
+
   /* types.c */
 extern void             print_value(const struct dbg_lvalue* addr, char format, int level);
 extern int              types_print_type(const struct dbg_type*, BOOL details);
 extern int              print_types(void);
 extern long int         types_extract_as_integer(const struct dbg_lvalue*);
+extern LONGLONG         types_extract_as_longlong(const struct dbg_lvalue*);
 extern void             types_extract_as_address(const struct dbg_lvalue*, ADDRESS64*);
 extern BOOL             types_deref(const struct dbg_lvalue* value, struct dbg_lvalue* result);
 extern BOOL             types_udt_find_element(struct dbg_lvalue* value, const char* name, long int* tmpbuf);

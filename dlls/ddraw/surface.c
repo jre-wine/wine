@@ -311,7 +311,7 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
             IWineD3DDevice_SetIndices(ddraw->wineD3DDevice, NULL, 0);
             IWineD3DDevice_SetDepthStencilSurface(ddraw->wineD3DDevice, NULL);
 
-            if(IWineD3DDevice_Uninit3D(ddraw->wineD3DDevice) != D3D_OK)
+            if(IWineD3DDevice_Uninit3D(ddraw->wineD3DDevice, D3D7CB_DestroyDepthStencilSurface, D3D7CB_DestroySwapChain) != D3D_OK)
             {
                 /* Not good */
                 ERR("(%p) Failed to uninit 3D\n", This);
@@ -1291,8 +1291,8 @@ IDirectDrawSurfaceImpl_GetColorKey(IDirectDrawSurface7 *iface,
     /* There is a DDERR_NOCOLORKEY error, but how do we know if a color key
      * isn't there? That's like saying that an int isn't there. (Which MS
      * has done in other docs.) */
-
     ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
+    TRACE("(%p)->(%08x,%p)\n", This, Flags, CKey);
 
     if(!CKey)
         return DDERR_INVALIDPARAMS;
@@ -2037,6 +2037,58 @@ IDirectDrawSurfaceImpl_SetColorKey(IDirectDrawSurface7 *iface,
     HRESULT hr;
     TRACE("(%p)->(%x,%p)\n", This, Flags, CKey);
 
+    if (CKey)
+    {
+        switch (Flags & ~DDCKEY_COLORSPACE)
+        {
+        case DDCKEY_DESTBLT:
+            This->surface_desc.ddckCKDestBlt = *CKey;
+            This->surface_desc.dwFlags |= DDSD_CKDESTBLT;
+            break;
+
+        case DDCKEY_DESTOVERLAY:
+            This->surface_desc.u3.ddckCKDestOverlay = *CKey;
+            This->surface_desc.dwFlags |= DDSD_CKDESTOVERLAY;
+            break;
+
+        case DDCKEY_SRCOVERLAY:
+            This->surface_desc.ddckCKSrcOverlay = *CKey;
+            This->surface_desc.dwFlags |= DDSD_CKSRCOVERLAY;
+            break;
+
+        case DDCKEY_SRCBLT:
+            This->surface_desc.ddckCKSrcBlt = *CKey;
+            This->surface_desc.dwFlags |= DDSD_CKSRCBLT;
+            break;
+
+        default:
+            return DDERR_INVALIDPARAMS;
+        }
+    }
+    else
+    {
+        switch (Flags & ~DDCKEY_COLORSPACE)
+        {
+        case DDCKEY_DESTBLT:
+            This->surface_desc.dwFlags &= ~DDSD_CKDESTBLT;
+            break;
+
+        case DDCKEY_DESTOVERLAY:
+            This->surface_desc.dwFlags &= ~DDSD_CKDESTOVERLAY;
+            break;
+
+        case DDCKEY_SRCOVERLAY:
+            This->surface_desc.dwFlags &= ~DDSD_CKSRCOVERLAY;
+            break;
+
+        case DDCKEY_SRCBLT:
+            This->surface_desc.dwFlags &= ~DDSD_CKSRCBLT;
+            break;
+
+        default:
+            return DDERR_INVALIDPARAMS;
+        }
+    }
     for(surf = This->first_complex; surf; surf = surf->next_complex)
     {
         hr = IWineD3DSurface_SetColorKey(surf->WineD3DSurface,

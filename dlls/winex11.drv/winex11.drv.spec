@@ -59,6 +59,7 @@
 @ cdecl SetTextColor(ptr long) X11DRV_SetTextColor
 @ cdecl StretchBlt(ptr long long long long ptr long long long long long) X11DRV_StretchBlt
 @ cdecl SwapBuffers(ptr) X11DRV_SwapBuffers
+@ cdecl UnrealizePalette(long) X11DRV_UnrealizePalette
 
 # USER driver
 
@@ -78,6 +79,7 @@
 @ cdecl SetCursor(ptr) X11DRV_SetCursor
 @ cdecl GetCursorPos(ptr) X11DRV_GetCursorPos
 @ cdecl SetCursorPos(long long) X11DRV_SetCursorPos
+@ cdecl ClipCursor(ptr) X11DRV_ClipCursor
 @ cdecl GetScreenSaveActive() X11DRV_GetScreenSaveActive
 @ cdecl SetScreenSaveActive(long) X11DRV_SetScreenSaveActive
 @ cdecl ChangeDisplaySettingsEx(ptr ptr long long long) X11DRV_ChangeDisplaySettingsEx
@@ -102,9 +104,9 @@
 @ cdecl ScrollDC(long long long ptr ptr long ptr) X11DRV_ScrollDC
 @ cdecl SetClipboardData(long long long long) X11DRV_SetClipboardData
 @ cdecl SetFocus(long) X11DRV_SetFocus
-@ cdecl SetParent(long long) X11DRV_SetParent
+@ cdecl SetParent(long long long) X11DRV_SetParent
 @ cdecl SetWindowIcon(long long long) X11DRV_SetWindowIcon
-@ cdecl SetWindowPos(ptr) X11DRV_SetWindowPos
+@ cdecl SetWindowPos(long long ptr ptr long ptr) X11DRV_SetWindowPos
 @ cdecl SetWindowRgn(long long long) X11DRV_SetWindowRgn
 @ cdecl SetWindowStyle(ptr long) X11DRV_SetWindowStyle
 @ cdecl SetWindowText(long wstr) X11DRV_SetWindowText

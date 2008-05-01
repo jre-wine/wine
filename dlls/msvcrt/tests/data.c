@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "msvcrt.h"
 #include "wine/test.h"
 #include <stdarg.h>
 #include <stdlib.h>
@@ -33,26 +32,29 @@
 #include <errno.h>
 
 typedef void (*_INITTERMFUN)(void);
-extern unsigned int CDECL _initterm(_INITTERMFUN *start,_INITTERMFUN *end);
+static unsigned int (*p_initterm)(_INITTERMFUN *start, _INITTERMFUN *end);
 
 static int callbacked;
 
-void initcallback(void)
+static void initcallback(void)
 {
    callbacked++;
 }
 
 #define initterm_test(start, end, expected) \
     callbacked = 0; \
-    rc = _initterm(start, end); \
+    rc = p_initterm(start, end); \
     ok(expected == rc, "_initterm: return result mismatch: got %i, expected %i\n", rc, expected); \
     ok(expected == callbacked,"_initterm: callbacks count mismatch: got %i, expected %i\n", callbacked, expected);
 
-void test_initterm(void)
+static void test_initterm(void)
 {
     int i;
     int rc;
     static _INITTERMFUN callbacks[4];
+
+    if (!p_initterm)
+        return;
 
     for (i = 0; i < 4; i++)
     {
@@ -69,5 +71,11 @@ void test_initterm(void)
 
 START_TEST(data)
 {
+    HMODULE hmsvcrt;
+    hmsvcrt = GetModuleHandleA("msvcrt.dll");
+    if (!hmsvcrt)
+        hmsvcrt = GetModuleHandleA("msvcrtd.dll");
+    if (hmsvcrt)
+        p_initterm=(void*)GetProcAddress(hmsvcrt, "_initterm");
     test_initterm();
 }

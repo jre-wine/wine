@@ -118,9 +118,12 @@
 #define IDI_SHELL_PRINTER           17
 #define IDI_SHELL_MY_NETWORK_PLACES 18
 #define IDI_SHELL_COMPUTERS_NEAR_ME 19
+#define IDI_SHELL_FOLDER_SMALL_XP   20
 #define IDI_SHELL_SEARCH            23
 #define IDI_SHELL_HELP              24
+#define IDI_SHELL_FOLDER_OPEN_LARGE 29
 #define IDI_SHELL_SHORTCUT          30
+#define IDI_SHELL_FOLDER_OPEN_SMALL 31
 #define IDI_SHELL_EMPTY_RECYCLE_BIN 32
 #define IDI_SHELL_FULL_RECYCLE_BIN  33
 #define IDI_SHELL_DESKTOP           35
@@ -138,6 +141,7 @@ FIXME: Need to add them, but for now just let them use the same: searching.avi
 */
 #define IDR_AVI_SEARCH             150
 #define IDR_AVI_SEARCHING          151
+#define IDR_AVI_FINDCOMPUTER       152
 #define IDR_AVI_FILEMOVE           160
 #define IDR_AVI_FILECOPY           161
 

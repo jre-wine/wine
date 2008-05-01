@@ -63,7 +63,6 @@ BEGIN
     GROUPBOX        " Vinduinnstillinger ",IDC_STATIC,8,25,244,180
 
     CONTROL	    "Tillat DirectX-programmer å hindre musen fra å forlate vinduet",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,35,230,8
-    CONTROL	    "Aktiver dobbelt hurtigminne for skrivebordet",IDC_DOUBLE_BUFFER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,45,230,8
     LTEXT 	    "Hvis vinduer kontrolleres av din standardvindusbehandler, får de vanlige rammer, og respekterer det virtuelle skrivebordet ditt og vises i vinduslisten.\n\nHvis de er ukontrollerte er de koblet fra vindusbehandleren. Dette betyr at de ikke integreres like godt med skrivebordet ditt, men emuleringen blir mer presis sånn at noen programmer virker bedre.",
     		    IDC_STATIC,15,58,228,80
     CONTROL	    "Tillat vindusbehandleren å kontrollere vinduene",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,132,230,8
@@ -177,15 +176,23 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Appearance ",IDC_STATIC,8,4,244,106
-    LTEXT           "Tema:",IDC_STATIC,15,16,230,8
-    COMBOBOX        IDC_THEME_THEMECOMBO,15,24,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Installer tema . . .",IDC_THEME_INSTALL,152,38,93,14
-    LTEXT           "Farge:",IDC_THEME_COLORTEXT,15,54,230,8
-    COMBOBOX        IDC_THEME_COLORCOMBO,15,62,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Størrelse:",IDC_THEME_SIZETEXT,15,80,230,8
-    COMBOBOX        IDC_THEME_SIZECOMBO,15,88,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Tema:",IDC_STATIC,15,16,130,8
+    COMBOBOX        IDC_THEME_THEMECOMBO,15,24,130,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Installer tema . . .",IDC_THEME_INSTALL,152,23,93,14
+    LTEXT           "Farge:",IDC_THEME_COLORTEXT,15,40,112,8
+    COMBOBOX        IDC_THEME_COLORCOMBO,15,48,112,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Størrelse:",IDC_THEME_SIZETEXT,135,40,110,8
+    COMBOBOX        IDC_THEME_SIZECOMBO,135,48,110,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Element:",IDC_STATIC,15,64,112,8
+    COMBOBOX        IDC_SYSPARAM_COMBO,15,74,112,120,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP | CBS_SORT
+    LTEXT           "Farge:",IDC_SYSPARAM_COLOR_TEXT,135,64,25,8,WS_DISABLED
+    PUSHBUTTON      "",IDC_SYSPARAM_COLOR,135,74,25,13,WS_DISABLED | BS_OWNERDRAW
+    LTEXT           "Størrelse:",IDC_SYSPARAM_SIZE_TEXT,166,64,30,8,WS_DISABLED
+    EDITTEXT        IDC_SYSPARAM_SIZE,166,74,23,13,ES_AUTOHSCROLL | WS_TABSTOP | WS_DISABLED
+    CONTROL         "",IDC_SYSPARAM_SIZE_UD,UPDOWN_CLASS,UDS_SETBUDDYINT | WS_DISABLED,187,74,15,13
+    PUSHBUTTON      "Skrift",IDC_SYSPARAM_FONT,208,74,37,13,WS_DISABLED
     GROUPBOX        " Skallkatalog ",IDC_STATIC,8,114,244,100
-    CONTROL         "Listview",IDC_LIST_SFPATHS,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
+    CONTROL         "Listevisning",IDC_LIST_SFPATHS,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                      LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,126,230,64
     CONTROL         "Pek til:",IDC_LINK_SFPATH,"Button",BS_AUTOCHECKBOX|WS_TABSTOP|WS_DISABLED,15,195,50,13
     EDITTEXT         IDC_EDIT_SFPATH,65,195,145,13,ES_AUTOHSCROLL|WS_TABSTOP|WS_DISABLED
@@ -276,4 +283,24 @@ BEGIN
     IDS_DEVICES_MIXER           "Mikserenheter"
     IDS_UNAVAILABLE_DRIVER      "Fant driver i registeret som ikke er tilgjengelig.\n\nFjerne «%s» fra registeret?"
     IDS_WARNING                 "Advarsel"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    IDC_SYSPARAMS_BUTTON            "Styrer bakgrunnen"
+    IDC_SYSPARAMS_BUTTON_TEXT       "Styrer tekst"
+    IDC_SYSPARAMS_DESKTOP           "Skrivebord"
+    IDC_SYSPARAMS_MENU              "Menybakgrunn"
+    IDC_SYSPARAMS_MENU_TEXT         "Menytekst"
+    IDC_SYSPARAMS_SCROLLBAR         "Rullefelt"
+    IDC_SYSPARAMS_SELECTION         "Bakgrunn for merking"
+    IDC_SYSPARAMS_SELECTION_TEXT    "Merket tekst"
+    IDC_SYSPARAMS_TOOLTIP           "Bakgrunn for verktøytips"
+    IDC_SYSPARAMS_TOOLTIP_TEXT      "Tekst i verktøytips"
+    IDC_SYSPARAMS_WINDOW            "Vindubakgrunn"
+    IDC_SYSPARAMS_WINDOW_TEXT       "Vinduteksts"
+    IDC_SYSPARAMS_ACTIVE_TITLE      "Aktiv tittellinje"
+    IDC_SYSPARAMS_ACTIVE_TITLE_TEXT "Aktiv titteltekst"
+    IDC_SYSPARAMS_INACTIVE_TITLE    "Inaktiv tittellinje"
+    IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "Inaktiv titteltekst"
 END

@@ -288,7 +288,7 @@ IDirect3DDeviceImpl_7_Release(IDirect3DDevice7 *iface)
         IParent *IndexBufferParent;
         DWORD i;
 
-        /* Free the index buffer */
+        /* Free the index buffer. */
         IWineD3DDevice_SetIndices(This->wineD3DDevice,
                                   NULL,
                                   0);
@@ -299,6 +299,11 @@ IDirect3DDeviceImpl_7_Release(IDirect3DDevice7 *iface)
         {
             ERR(" (%p) Something is still holding the index buffer parent %p\n", This, IndexBufferParent);
         }
+
+        /* There is no need to unset the vertex buffer here, IWineD3DDevice_Uninit3D will do that when
+         * destroying the primary stateblock. If a vertex buffer is destroyed while it is bound
+         * IDirect3DVertexBuffer::Release will unset it.
+         */
 
         /* Restore the render targets */
         if(This->OffScreenTarget)
@@ -808,7 +813,7 @@ static HRESULT WINAPI
 Thunk_IDirect3DDeviceImpl_1_AddViewport(IDirect3DDevice *iface,
                                         IDirect3DViewport *Direct3DViewport)
 {
-    ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice2, iface);
+    ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice, iface);
     IDirect3DViewportImpl *vp = ICOM_OBJECT(IDirect3DViewportImpl, IDirect3DViewport3, Direct3DViewport);
     TRACE_(ddraw_thunk)("(%p)->(%p) thunking to IDirect3DDevice3 interface.\n", This, vp);
     return IDirect3DDevice3_AddViewport(ICOM_INTERFACE(This, IDirect3DDevice3),
@@ -871,10 +876,10 @@ Thunk_IDirect3DDeviceImpl_2_DeleteViewport(IDirect3DDevice2 *iface,
 
 static HRESULT WINAPI
 Thunk_IDirect3DDeviceImpl_1_DeleteViewport(IDirect3DDevice *iface,
-                                           IDirect3DViewport *Direct3DViewport2)
+                                           IDirect3DViewport *Direct3DViewport)
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice, iface);
-    IDirect3DViewportImpl *vp = ICOM_OBJECT(IDirect3DViewportImpl, IDirect3DViewport3, Direct3DViewport2);
+    IDirect3DViewportImpl *vp = ICOM_OBJECT(IDirect3DViewportImpl, IDirect3DViewport3, Direct3DViewport);
     TRACE_(ddraw_thunk)("(%p)->(%p) thunking to IDirect3DDevice3 interface.\n", This, vp);
     return IDirect3DDevice3_DeleteViewport(ICOM_INTERFACE(This, IDirect3DDevice3),
                                            ICOM_INTERFACE(vp, IDirect3DViewport3));
@@ -2366,35 +2371,35 @@ IDirect3DDeviceImpl_7_SetRenderState(IDirect3DDevice7 *iface,
             switch ( (D3DTEXTUREBLEND) Value)
             {
                 case D3DTBLEND_MODULATE:
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLORARG1, WINED3DTA_TEXTURE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAARG1, WINED3DTA_TEXTURE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLORARG2, WINED3DTA_CURRENT);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLOROP, WINED3DTOP_MODULATE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAOP, WINED3DTOP_SELECTARG1);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLORARG1, WINED3DTA_TEXTURE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAARG1, WINED3DTA_TEXTURE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLORARG2, WINED3DTA_CURRENT);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLOROP, WINED3DTOP_MODULATE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAOP, WINED3DTOP_SELECTARG1);
                     break;
 
                 case D3DTBLEND_MODULATEALPHA:
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLORARG1, WINED3DTA_TEXTURE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAARG1, WINED3DTA_TEXTURE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLORARG2, WINED3DTA_CURRENT);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAARG2, WINED3DTA_CURRENT);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLOROP, WINED3DTOP_MODULATE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAOP, WINED3DTOP_MODULATE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLORARG1, WINED3DTA_TEXTURE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAARG1, WINED3DTA_TEXTURE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLORARG2, WINED3DTA_CURRENT);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAARG2, WINED3DTA_CURRENT);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLOROP, WINED3DTOP_MODULATE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAOP, WINED3DTOP_MODULATE);
                     break;
 
                 case D3DTBLEND_DECAL:
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLORARG1, WINED3DTA_TEXTURE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAARG1, WINED3DTA_TEXTURE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLOROP, WINED3DTOP_SELECTARG1);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAOP, WINED3DTOP_SELECTARG1);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLORARG1, WINED3DTA_TEXTURE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAARG1, WINED3DTA_TEXTURE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLOROP, WINED3DTOP_SELECTARG1);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAOP, WINED3DTOP_SELECTARG1);
                     break;
 
                 case D3DTBLEND_DECALALPHA:
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLORARG1, WINED3DTA_TEXTURE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAARG1, WINED3DTA_TEXTURE);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAARG2, WINED3DTA_CURRENT);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_COLOROP, WINED3DTOP_SELECTARG1);
-                    IWineD3DDevice_SetTextureStageState(iface, 0, WINED3DTSS_ALPHAOP, WINED3DTOP_MODULATE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLORARG1, WINED3DTA_TEXTURE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAARG1, WINED3DTA_TEXTURE);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAARG2, WINED3DTA_CURRENT);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_COLOROP, WINED3DTOP_SELECTARG1);
+                    IWineD3DDevice_SetTextureStageState(This->wineD3DDevice, 0, WINED3DTSS_ALPHAOP, WINED3DTOP_MODULATE);
                     break;
 
                 default:
@@ -3697,7 +3702,7 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
     /* Set the index stream */
     hr = IWineD3DDevice_SetIndices(This->wineD3DDevice,
                                    This->indexbuffer,
-                                   0);
+                                   StartVertex);
 
     /* Set the vertex stream source */
     hr = IWineD3DDevice_SetStreamSource(This->wineD3DDevice,
@@ -3714,7 +3719,6 @@ IDirect3DDeviceImpl_7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
 
     hr = IWineD3DDevice_DrawIndexedPrimitive(This->wineD3DDevice,
                                              PrimitiveType,
-                                             StartVertex,
                                              0 /* minIndex */,
                                              NumVertices,
                                              0 /* StartIndex */,

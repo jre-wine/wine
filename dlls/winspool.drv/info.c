@@ -6,7 +6,7 @@
  * Copyright 1999 Klaas van Gend
  * Copyright 1999, 2000 Huw D M Davies
  * Copyright 2001 Marcus Meissner
- * Copyright 2005, 2006 Detlef Riekenberg
+ * Copyright 2005, 2006, 2007 Detlef Riekenberg
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -58,7 +58,6 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/list.h"
-#include "heap.h"
 #include "winnls.h"
 
 #include "ddk/winsplp.h"
@@ -116,6 +115,9 @@ typedef struct {
 
 typedef struct {
     LPWSTR name;
+    LPWSTR printername;
+    monitor_t *pm;
+    HANDLE hXcv;
     jobqueue_t *queue;
     started_doc_t *doc;
 } opened_printer_t;
@@ -139,6 +141,7 @@ typedef struct {
 /* ############################### */
 
 static struct list monitor_handles = LIST_INIT( monitor_handles );
+static monitor_t * pm_localport;
 
 static opened_printer_t **printer_handles;
 static int nb_printer_handles;
@@ -171,7 +174,7 @@ static const WCHAR PrintersW[] = {'S','y','s','t','e','m','\\',
                                   'P','r','i','n','t','\\',
                                   'P','r','i','n','t','e','r','s',0};
 
-static       WCHAR LocalPortW[] = {'L','o','c','a','l',' ','P','o','r','t',0};
+static const WCHAR LocalPortW[] = {'L','o','c','a','l',' ','P','o','r','t',0};
 
 static const WCHAR user_default_reg_key[] = { 'S','o','f','t','w','a','r','e','\\',
                                               'M','i','c','r','o','s','o','f','t','\\',
@@ -233,6 +236,8 @@ static const WCHAR deviceW[]  = {'d','e','v','i','c','e',0};
 static const WCHAR devicesW[] = {'d','e','v','i','c','e','s',0};
 static const WCHAR windowsW[] = {'w','i','n','d','o','w','s',0};
 static const WCHAR emptyStringW[] = {0};
+static const WCHAR XcvMonitorW[] = {',','X','c','v','M','o','n','i','t','o','r',' ',0};
+static const WCHAR XcvPortW[] = {',','X','c','v','P','o','r','t',' ',0};
 
 static const WCHAR May_Delete_Value[] = {'W','i','n','e','M','a','y','D','e','l','e','t','e','M','e',0};
 
@@ -332,6 +337,18 @@ static LPWSTR strdupW(LPCWSTR p)
     return ret;
 }
 
+static LPSTR strdupWtoA( LPCWSTR str )
+{
+    LPSTR ret;
+    INT len;
+
+    if (!str) return NULL;
+    len = WideCharToMultiByte( CP_ACP, 0, str, -1, NULL, 0, NULL, NULL );
+    ret = HeapAlloc( GetProcessHeap(), 0, len );
+    if(ret) WideCharToMultiByte( CP_ACP, 0, str, -1, ret, len, NULL, NULL );
+    return ret;
+}
+
 /* Returns the number of bytes in an ansi \0\0 terminated string (multi_sz).
    The result includes all \0s (specifically the last two). */
 static int multi_sz_lenA(const char *str)
@@ -372,7 +389,7 @@ WINSPOOL_SetDefaultPrinter(const char *devname, const char *name,BOOL force) {
     }
 }
 
-BOOL add_printer_driver(const char *name)
+static BOOL add_printer_driver(char *name)
 {
     DRIVER_INFO_3A di3a;
 
@@ -876,6 +893,28 @@ static DWORD get_local_monitors(DWORD level, LPBYTE pMonitors, DWORD cbBuf, LPDW
 }
 
 /******************************************************************
+ * monitor_flush [internal]
+ *
+ * flush the cached PORT_INFO_2W - data
+ */
+
+void monitor_flush(monitor_t * pm)
+{
+    if (!pm) return;
+
+    EnterCriticalSection(&monitor_handles_cs);
+
+    TRACE("%p (%s) cache: %p (%d, %d)\n", pm, debugstr_w(pm->name), pm->cache, pm->pi1_needed, pm->pi2_needed);
+
+    HeapFree(GetProcessHeap(), 0, pm->cache);
+    pm->cache = NULL;
+    pm->pi1_needed = 0;
+    pm->pi2_needed = 0;
+    pm->returned = 0;
+    LeaveCriticalSection(&monitor_handles_cs);
+}
+
+/******************************************************************
  * monitor_unload [internal]
  *
  * release a printmonitor and unload it from memory, when needed
@@ -929,7 +968,7 @@ static void monitor_unloadall(void)
  * On failure, SetLastError() is called and NULL is returned
  */
 
-static monitor_t * monitor_load(LPWSTR name, LPWSTR dllname)
+static monitor_t * monitor_load(LPCWSTR name, LPWSTR dllname)
 {
     LPMONITOR2  (WINAPI *pInitializePrintMonitor2) (PMONITORINIT, LPHANDLE);
     PMONITORUI  (WINAPI *pInitializePrintMonitorUI)(VOID);
@@ -1064,6 +1103,10 @@ static monitor_t * monitor_load(LPWSTR name, LPWSTR dllname)
         }
     }
 cleanup:
+    if ((pm_localport ==  NULL) && (pm != NULL) && (lstrcmpW(pm->name, LocalPortW) == 0)) {
+        pm->refcount++;
+        pm_localport = pm;
+    }
     LeaveCriticalSection(&monitor_handles_cs);
     if (driver != dllname) HeapFree(GetProcessHeap(), 0, driver);
     HeapFree(GetProcessHeap(), 0, regroot);
@@ -1115,7 +1158,7 @@ static DWORD monitor_loadall(void)
  * On failure, NULL is returned
  */
 
-static monitor_t * monitor_load_by_port(LPWSTR portname)
+static monitor_t * monitor_load_by_port(LPCWSTR portname)
 {
     HKEY    hroot;
     HKEY    hport;
@@ -1259,6 +1302,68 @@ static DWORD get_ports_from_all_monitors(DWORD level, LPBYTE pPorts, DWORD cbBuf
 }
 
 /******************************************************************
+ * get_servername_from_name  (internal)
+ *
+ * for an external server, a copy of the serverpart from the full name is returned
+ *
+ */
+static LPWSTR get_servername_from_name(LPCWSTR name)
+{
+    LPWSTR  server;
+    LPWSTR  ptr;
+    WCHAR   buffer[MAX_PATH];
+    DWORD   len;
+
+    if (name == NULL) return NULL;
+    if ((name[0] != '\\') || (name[1] != '\\')) return NULL;
+
+    server = strdupW(&name[2]);     /* skip over both backslash */
+    if (server == NULL) return NULL;
+
+    /* strip '\' and the printername */
+    ptr = strchrW(server, '\\');
+    if (ptr) ptr[0] = '\0';
+
+    TRACE("found %s\n", debugstr_w(server));
+
+    len = sizeof(buffer)/sizeof(buffer[0]);
+    if (GetComputerNameW(buffer, &len)) {
+        if (lstrcmpW(buffer, server) == 0) {
+            /* The requested Servername is our computername */
+            HeapFree(GetProcessHeap(), 0, server);
+            return NULL;
+        }
+    }
+    return server;
+}
+
+/******************************************************************
+ * get_basename_from_name  (internal)
+ *
+ * skip over the serverpart from the full name
+ *
+ */
+static LPCWSTR get_basename_from_name(LPCWSTR name)
+{
+    if (name == NULL)  return NULL;
+    if ((name[0] == '\\') && (name[1] == '\\')) {
+        /* skip over the servername and search for the following '\'  */
+        name = strchrW(&name[2], '\\');
+        if ((name) && (name[1])) {
+            /* found a seperator ('\') followed by a name:
+               skip over the seperator and return the rest */
+            name++;
+        }
+        else
+        {
+            /* no basename present (we found only a servername) */
+            return NULL;
+        }
+    }
+    return name;
+}
+
+/******************************************************************
  *  get_opened_printer_entry
  *  Get the first place empty in the opened printer table
  *
@@ -1270,6 +1375,28 @@ static HANDLE get_opened_printer_entry(LPCWSTR name, LPPRINTER_DEFAULTSW pDefaul
     UINT_PTR handle = nb_printer_handles, i;
     jobqueue_t *queue = NULL;
     opened_printer_t *printer = NULL;
+    LPWSTR  servername;
+    LPCWSTR printername;
+    HKEY    hkeyPrinters;
+    HKEY    hkeyPrinter;
+    DWORD   len;
+
+    servername = get_servername_from_name(name);
+    if (servername) {
+        FIXME("server %s not supported\n", debugstr_w(servername));
+        HeapFree(GetProcessHeap(), 0, servername);
+        SetLastError(ERROR_INVALID_PRINTER_NAME);
+        return NULL;
+    }
+
+    printername = get_basename_from_name(name);
+    if (name != printername) TRACE("converted %s to %s\n", debugstr_w(name), debugstr_w(printername));
+
+    /* an empty printername is invalid */
+    if (printername && (!printername[0])) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
 
     EnterCriticalSection(&printer_handles_cs);
 
@@ -1312,13 +1439,76 @@ static HANDLE get_opened_printer_entry(LPCWSTR name, LPPRINTER_DEFAULTSW pDefaul
         goto end;
     }
 
-    if(name) {
-        printer->name = HeapAlloc(GetProcessHeap(), 0, (strlenW(name) + 1) * sizeof(WCHAR));
-        if (!printer->name) {
-            handle = 0;
-            goto end;
+
+    /* clone the base name. This is NULL for the printserver */
+    printer->printername = strdupW(printername);
+
+    /* clone the full name */
+    printer->name = strdupW(name);
+    if (name && (!printer->name)) {
+        handle = 0;
+        goto end;
+    }
+
+    if (printername) {
+        len = sizeof(XcvMonitorW)/sizeof(WCHAR) - 1;
+        if (strncmpW(printername, XcvMonitorW, len) == 0) {
+            /* OpenPrinter(",XcvMonitor " detected */
+            TRACE(",XcvMonitor: %s\n", debugstr_w(&printername[len]));
+            printer->pm = monitor_load(&printername[len], NULL);
+            if (printer->pm == NULL) {
+                SetLastError(ERROR_INVALID_PARAMETER);
+                handle = 0;
+                goto end;
+            }
         }
-        strcpyW(printer->name, name);
+        else
+        {
+            len = sizeof(XcvPortW)/sizeof(WCHAR) - 1;
+            if (strncmpW( printername, XcvPortW, len) == 0) {
+                /* OpenPrinter(",XcvPort " detected */
+                TRACE(",XcvPort: %s\n", debugstr_w(&printername[len]));
+                printer->pm = monitor_load_by_port(&printername[len]);
+                if (printer->pm == NULL) {
+                    SetLastError(ERROR_INVALID_PARAMETER);
+                    handle = 0;
+                    goto end;
+                }
+            }
+        }
+
+        if (printer->pm) {
+            if ((printer->pm->monitor) && (printer->pm->monitor->pfnXcvOpenPort)) {
+                printer->pm->monitor->pfnXcvOpenPort(&printername[len], pDefault->DesiredAccess, &printer->hXcv);
+            }
+            if (printer->hXcv == NULL) {
+                SetLastError(ERROR_INVALID_PARAMETER);
+                handle = 0;
+                goto end;
+            }
+        }
+        else
+        {
+            /* Does the Printer exist? */
+            if (RegCreateKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters) != ERROR_SUCCESS) {
+                ERR("Can't create Printers key\n");
+                handle = 0;
+                goto end;
+            }
+            if (RegOpenKeyW(hkeyPrinters, printername, &hkeyPrinter) != ERROR_SUCCESS) {
+                WARN("Printer not found in Registry: '%s'\n", debugstr_w(printername));
+                RegCloseKey(hkeyPrinters);
+                SetLastError(ERROR_INVALID_PRINTER_NAME);
+                handle = 0;
+                goto end;
+            }
+            RegCloseKey(hkeyPrinter);
+            RegCloseKey(hkeyPrinters);
+        }
+    }
+    else
+    {
+        TRACE("using the local printserver\n");
     }
 
     if(queue)
@@ -1340,7 +1530,10 @@ static HANDLE get_opened_printer_entry(LPCWSTR name, LPPRINTER_DEFAULTSW pDefaul
 end:
     LeaveCriticalSection(&printer_handles_cs);
     if (!handle && printer) {
-        /* Something Failed: Free the Buffers */
+        /* Something failed: Free all resources */
+        if (printer->hXcv) printer->pm->monitor->pfnXcvClosePort(printer->hXcv);
+        monitor_unload(printer->pm);
+        HeapFree(GetProcessHeap(), 0, printer->printername);
         HeapFree(GetProcessHeap(), 0, printer->name);
         if (!queue) HeapFree(GetProcessHeap(), 0, printer->queue);
         HeapFree(GetProcessHeap(), 0, printer);
@@ -1589,8 +1782,8 @@ INT WINAPI DeviceCapabilitiesW(LPCWSTR pDevice, LPCWSTR pPort,
 			       const DEVMODEW *pDevMode)
 {
     LPDEVMODEA dmA = DEVMODEdupWtoA(GetProcessHeap(), pDevMode);
-    LPSTR pDeviceA = HEAP_strdupWtoA(GetProcessHeap(),0,pDevice);
-    LPSTR pPortA = HEAP_strdupWtoA(GetProcessHeap(),0,pPort);
+    LPSTR pDeviceA = strdupWtoA(pDevice);
+    LPSTR pPortA = strdupWtoA(pPort);
     INT ret;
 
     if(pOutput && (fwCapability == DC_BINNAMES ||
@@ -1653,7 +1846,7 @@ LONG WINAPI DocumentPropertiesA(HWND hWnd,HANDLE hPrinter,
                 SetLastError(ERROR_INVALID_HANDLE);
 		return -1;
 	}
-	lpName = HEAP_strdupWtoA(GetProcessHeap(),0,lpNameW);
+	lpName = strdupWtoA(lpNameW);
     }
 
     if (!GDI_CallExtDeviceMode16)
@@ -1685,7 +1878,7 @@ LONG WINAPI DocumentPropertiesW(HWND hWnd, HANDLE hPrinter,
 				LPDEVMODEW pDevModeInput, DWORD fMode)
 {
 
-    LPSTR pDeviceNameA = HEAP_strdupWtoA(GetProcessHeap(),0,pDeviceName);
+    LPSTR pDeviceNameA = strdupWtoA(pDeviceName);
     LPDEVMODEA pDevModeInputA = DEVMODEdupWtoA(GetProcessHeap(),pDevModeInput);
     LPDEVMODEA pDevModeOutputA = NULL;
     LONG ret;
@@ -1767,15 +1960,11 @@ BOOL WINAPI OpenPrinterA(LPSTR lpPrinterName,HANDLE *phPrinter,
  *
  * BUGS
  *|  Printer-Object not supported
- *|  XcvMonitor not supported
- *|  XcvPort not supported
  *|  pDefaults is ignored
  *
  */
 BOOL WINAPI OpenPrinterW(LPWSTR lpPrinterName,HANDLE *phPrinter, LPPRINTER_DEFAULTSW pDefault)
 {
-    HKEY hkeyPrinters = NULL;
-    HKEY hkeyPrinter = NULL;
 
     TRACE("(%s, %p, %p)\n", debugstr_w(lpPrinterName), phPrinter, pDefault);
     if (pDefault) {
@@ -1783,25 +1972,6 @@ BOOL WINAPI OpenPrinterW(LPWSTR lpPrinterName,HANDLE *phPrinter, LPPRINTER_DEFAU
         debugstr_w(pDefault->pDatatype), pDefault->pDevMode, pDefault->DesiredAccess);
     }
 
-    if(lpPrinterName != NULL)
-    {
-        /* Check any Printer exists */
-        if(RegCreateKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters) != ERROR_SUCCESS) {
-            ERR("Can't create Printers key\n");
-            SetLastError(ERROR_FILE_NOT_FOUND);
-            return FALSE;
-        }
-        if((lpPrinterName[0] == '\0') ||        /* explicitly exclude "" */
-           (RegOpenKeyW(hkeyPrinters, lpPrinterName, &hkeyPrinter) != ERROR_SUCCESS)) {
-
-            WARN("Printer not found in Registry: '%s'\n", debugstr_w(lpPrinterName));
-            RegCloseKey(hkeyPrinters);
-            SetLastError(ERROR_INVALID_PRINTER_NAME);
-            return FALSE;
-        }
-        RegCloseKey(hkeyPrinter);
-        RegCloseKey(hkeyPrinters);
-    }
     if(!phPrinter) {
         /* NT: FALSE with ERROR_INVALID_PARAMETER, 9x: TRUE */
         SetLastError(ERROR_INVALID_PARAMETER);
@@ -1810,6 +1980,7 @@ BOOL WINAPI OpenPrinterW(LPWSTR lpPrinterName,HANDLE *phPrinter, LPPRINTER_DEFAU
 
     /* Get the unique handle of the printer or Printserver */
     *phPrinter = get_opened_printer_entry(lpPrinterName, pDefault);
+    TRACE("returning %d with 0x%x and %p\n", *phPrinter != NULL, GetLastError(), *phPrinter);
     return (*phPrinter != 0);
 }
 
@@ -2114,13 +2285,33 @@ BOOL WINAPI DeleteMonitorW (LPWSTR pName, LPWSTR pEnvironment, LPWSTR pMonitorNa
  * See DeletePortW.
  *
  */
-BOOL WINAPI
-DeletePortA (LPSTR pName, HWND hWnd, LPSTR pPortName)
+BOOL WINAPI DeletePortA (LPSTR pName, HWND hWnd, LPSTR pPortName)
 {
-    FIXME("(%s,%p,%s):stub\n",debugstr_a(pName),hWnd,
-          debugstr_a(pPortName));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    LPWSTR  nameW = NULL;
+    LPWSTR  portW = NULL;
+    INT     len;
+    DWORD   res;
+
+    TRACE("(%s, %p, %s)\n", debugstr_a(pName), hWnd, debugstr_a(pPortName));
+
+    /* convert servername to unicode */
+    if (pName) {
+        len = MultiByteToWideChar(CP_ACP, 0, pName, -1, NULL, 0);
+        nameW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pName, -1, nameW, len);
+    }
+
+    /* convert portname to unicode */
+    if (pPortName) {
+        len = MultiByteToWideChar(CP_ACP, 0, pPortName, -1, NULL, 0);
+        portW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pPortName, -1, portW, len);
+    }
+
+    res = DeletePortW(nameW, hWnd, portW);
+    HeapFree(GetProcessHeap(), 0, nameW);
+    HeapFree(GetProcessHeap(), 0, portW);
+    return res;
 }
 
 /******************************************************************
@@ -2137,17 +2328,48 @@ DeletePortA (LPSTR pName, HWND hWnd, LPSTR pPortName)
  *  Success: TRUE
  *  Failure: FALSE
  *
- * BUGS
- *  only a Stub
- *
  */
-BOOL WINAPI
-DeletePortW (LPWSTR pName, HWND hWnd, LPWSTR pPortName)
+BOOL WINAPI DeletePortW (LPWSTR pName, HWND hWnd, LPWSTR pPortName)
 {
-    FIXME("(%s,%p,%s):stub\n",debugstr_w(pName),hWnd,
-          debugstr_w(pPortName));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    monitor_t * pm;
+    DWORD   res = ROUTER_UNKNOWN;
+
+    TRACE("(%s, %p, %s)\n", debugstr_w(pName), hWnd, debugstr_w(pPortName));
+
+    if (pName && pName[0]) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!pPortName) {
+        SetLastError(RPC_X_NULL_REF_POINTER);
+        return FALSE;
+    }
+
+    /* an empty Portname is Invalid */
+    if (!pPortName[0]) goto cleanup;
+
+    pm = monitor_load_by_port(pPortName);
+    if (pm && pm->monitor) {
+        if (pm->monitor->pfnDeletePort != NULL) {
+            TRACE("Using %s for %s:\n", debugstr_w(pm->name), debugstr_w(pPortName));
+            res = pm->monitor->pfnDeletePort(pName, hWnd, pPortName);
+            TRACE("got %d with %d\n", res, GetLastError());
+        }
+        else if (pm->monitor->pfnXcvOpenPort)
+        {
+            FIXME("XcvOpenPort not implemented (dwMonitorSize: %d)\n", pm->dwMonitorSize);
+        }
+        /* invalidate cached PORT_INFO_2W */
+        if (res == ROUTER_SUCCESS) monitor_flush(pm);
+    }
+    monitor_unload(pm);
+
+cleanup:
+    /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
+    if (res == ROUTER_UNKNOWN) SetLastError(ERROR_NOT_SUPPORTED);
+    TRACE("returning %d with %d\n", (res == ROUTER_SUCCESS), GetLastError());
+    return (res == ROUTER_SUCCESS);
 }
 
 /******************************************************************************
@@ -2699,6 +2921,9 @@ BOOL WINAPI ClosePrinter(HANDLE hPrinter)
             }
             HeapFree(GetProcessHeap(), 0, printer->queue);
         }
+        if (printer->hXcv) printer->pm->monitor->pfnXcvClosePort(printer->hXcv);
+        monitor_unload(printer->pm);
+        HeapFree(GetProcessHeap(), 0, printer->printername);
         HeapFree(GetProcessHeap(), 0, printer->name);
         HeapFree(GetProcessHeap(), 0, printer);
         printer_handles[i - 1] = NULL;
@@ -3228,7 +3453,7 @@ static BOOL WINSPOOL_GetStringFromReg(HKEY hkey, LPCWSTR ValueName, LPBYTE ptr,
     if(unicode)
         ret = RegQueryValueExW(hkey, ValueName, 0, &type, ptr, &sz);
     else {
-        LPSTR ValueNameA = HEAP_strdupWtoA(GetProcessHeap(),0,ValueName);
+        LPSTR ValueNameA = strdupWtoA(ValueName);
         ret = RegQueryValueExA(hkey, ValueNameA, 0, &type, ptr, &sz);
 	HeapFree(GetProcessHeap(),0,ValueNameA);
     }
@@ -3950,13 +4175,14 @@ BOOL WINAPI EnumPrintersA(DWORD dwType, LPSTR lpszName,
 			  DWORD cbBuf, LPDWORD lpdwNeeded,
 			  LPDWORD lpdwReturned)
 {
-    BOOL ret;
+    BOOL ret, unicode = FALSE;
     UNICODE_STRING lpszNameW;
     PWSTR pwstrNameW;
-    
+
     pwstrNameW = asciitounicode(&lpszNameW,lpszName);
+    if(!cbBuf) unicode = TRUE; /* return a buffer that's big enough for the unicode version */
     ret = WINSPOOL_EnumPrinters(dwType, pwstrNameW, dwLevel, lpbPrinters, cbBuf,
-				lpdwNeeded, lpdwReturned, FALSE);
+				lpdwNeeded, lpdwReturned, unicode);
     RtlFreeUnicodeString(&lpszNameW);
     return ret;
 }
@@ -5670,8 +5896,28 @@ BOOL WINAPI AbortPrinter( HANDLE hPrinter )
  */
 BOOL WINAPI AddPortA(LPSTR pName, HWND hWnd, LPSTR pMonitorName)
 {
-    FIXME("(%s, %p, %s), stub!\n",debugstr_a(pName),hWnd,debugstr_a(pMonitorName));
-    return FALSE;
+    LPWSTR  nameW = NULL;
+    LPWSTR  monitorW = NULL;
+    DWORD   len;
+    BOOL    res;
+
+    TRACE("(%s, %p, %s)\n",debugstr_a(pName), hWnd, debugstr_a(pMonitorName));
+
+    if (pName) {
+        len = MultiByteToWideChar(CP_ACP, 0, pName, -1, NULL, 0);
+        nameW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pName, -1, nameW, len);
+    }
+
+    if (pMonitorName) {
+        len = MultiByteToWideChar(CP_ACP, 0, pMonitorName, -1, NULL, 0);
+        monitorW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pMonitorName, -1, monitorW, len);
+    }
+    res = AddPortW(nameW, hWnd, monitorW);
+    HeapFree(GetProcessHeap(), 0, nameW);
+    HeapFree(GetProcessHeap(), 0, monitorW);
+    return res;
 }
 
 /******************************************************************************
@@ -5688,14 +5934,47 @@ BOOL WINAPI AddPortA(LPSTR pName, HWND hWnd, LPSTR pMonitorName)
  *  Success: TRUE
  *  Failure: FALSE
  *
- * BUGS
- *  only a Stub
- *
  */
 BOOL WINAPI AddPortW(LPWSTR pName, HWND hWnd, LPWSTR pMonitorName)
 {
-    FIXME("(%s, %p, %s), stub!\n",debugstr_w(pName),hWnd,debugstr_w(pMonitorName));
-    return FALSE;
+    monitor_t * pm;
+    DWORD   res = ROUTER_UNKNOWN;
+
+    TRACE("(%s, %p, %s)\n", debugstr_w(pName), hWnd, debugstr_w(pMonitorName));
+
+    if (pName && pName[0]) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!pMonitorName) {
+        SetLastError(RPC_X_NULL_REF_POINTER);
+        return FALSE;
+    }
+
+    /* an empty Monitorname is Invalid */
+    if (!pMonitorName[0]) goto cleanup;
+
+    pm = monitor_load(pMonitorName, NULL);
+    if (pm && pm->monitor) {
+        if (pm->monitor->pfnAddPort != NULL) {
+            res = pm->monitor->pfnAddPort(pName, hWnd, pMonitorName);
+            TRACE("got %d with %d\n", res, GetLastError());
+        }
+        else if (pm->monitor->pfnXcvOpenPort != NULL)
+        {
+            FIXME("XcvOpenPort not implemented (dwMonitorSize: %d)\n", pm->dwMonitorSize);
+        }
+        /* invalidate cached PORT_INFO_2W */
+        if (res == ROUTER_SUCCESS) monitor_flush(pm);
+    }
+    monitor_unload(pm);
+
+cleanup:
+    /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
+    if (res == ROUTER_UNKNOWN) SetLastError(ERROR_NOT_SUPPORTED);
+    TRACE("returning %d with %d\n", (res == ROUTER_SUCCESS), GetLastError());
+    return (res == ROUTER_SUCCESS);
 }
 
 /******************************************************************************
@@ -6261,17 +6540,57 @@ emW_cleanup:
 /******************************************************************************
  *		XcvDataW (WINSPOOL.@)
  *
- * Notes:
- *  There doesn't seem to be an A version...
+ * Execute commands in the Printmonitor DLL
+ *
+ * PARAMS
+ *  hXcv            [i] Handle from OpenPrinter (with XcvMonitor or XcvPort)
+ *  pszDataName     [i] Name of the command to execute
+ *  pInputData      [i] Buffer for extra Input Data (needed only for some commands)
+ *  cbInputData     [i] Size in Bytes of Buffer at pInputData
+ *  pOutputData     [o] Buffer to receive additional Data (needed only for some commands)
+ *  cbOutputData    [i] Size in Bytes of Buffer at pOutputData
+ *  pcbOutputNeeded [o] PTR to receive the minimal Size in Bytes of the Buffer at pOutputData
+ *  pdwStatus       [o] PTR to receive the win32 error code from the Printmonitor DLL
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ * NOTES
+ *  Returning "TRUE" does mean, that the Printmonitor DLL was called successful.
+ *  The execution of the command can still fail (check pdwStatus for ERROR_SUCCESS).
+ *
+ *  Minimal List of commands, that a Printmonitor DLL should support:
+ *
+ *| "MonitorUI" : Return the Name of the Userinterface-DLL as WSTR in pOutputData
+ *| "AddPort"   : Add a Port
+ *| "DeletePort": Delete a Port
+ *
+ *  Many Printmonitors support additional commands. Examples for localspl.dll:
+ *  "GetDefaultCommConfig", "SetDefaultCommConfig",
+ *  "GetTransmissionRetryTimeout", "ConfigureLPTPortCommandOK"
+ *
  */
 BOOL WINAPI XcvDataW( HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInputData,
     DWORD cbInputData, PBYTE pOutputData, DWORD cbOutputData,
     PDWORD pcbOutputNeeded, PDWORD pdwStatus)
 {
-    FIXME("%p %s %p %d %p %d %p %p\n", hXcv, debugstr_w(pszDataName), 
+    opened_printer_t *printer;
+
+    TRACE("(%p, %s, %p, %d, %p, %d, %p, %p)\n", hXcv, debugstr_w(pszDataName),
           pInputData, cbInputData, pOutputData,
           cbOutputData, pcbOutputNeeded, pdwStatus);
-    return FALSE;
+
+    printer = get_opened_printer(hXcv);
+    if (!printer || (!printer->hXcv)) {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    *pdwStatus = printer->pm->monitor->pfnXcvDataPort(printer->hXcv, pszDataName,
+            pInputData, cbInputData, pOutputData, cbOutputData, pcbOutputNeeded);
+
+    return TRUE;
 }
 
 /*****************************************************************************

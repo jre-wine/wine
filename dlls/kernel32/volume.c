@@ -222,7 +222,7 @@ static UINT get_registry_drive_type( const WCHAR *root )
 static DWORD VOLUME_FindCdRomDataBestVoldesc( HANDLE handle )
 {
     BYTE cur_vd_type, max_vd_type = 0;
-    BYTE buffer[16];
+    BYTE buffer[0x800];
     DWORD size, offs, best_offs = 0, extra_offs = 0;
 
     for (offs = 0x8000; offs <= 0x9800; offs += 0x800)
@@ -748,14 +748,47 @@ BOOL WINAPI SetVolumeLabelA(LPCSTR root, LPCSTR volname)
 
 
 /***********************************************************************
- *           GetVolumeNameForVolumeMountPointW   (KERNEL32.@)
+ *           GetVolumeNameForVolumeMountPointA   (KERNEL32.@)
  */
-BOOL WINAPI GetVolumeNameForVolumeMountPointW(LPCWSTR str, LPWSTR dst, DWORD size)
+BOOL WINAPI GetVolumeNameForVolumeMountPointA( LPCSTR path, LPSTR volume, DWORD size )
 {
-    FIXME("(%s, %p, %x): stub\n", debugstr_w(str), dst, size);
-    return 0;
+    BOOL ret;
+    WCHAR volumeW[50], *pathW = NULL;
+    DWORD len = min( sizeof(volumeW) / sizeof(WCHAR), size );
+
+    TRACE("(%s, %p, %x)\n", debugstr_a(path), volume, size);
+
+    if (!path || !(pathW = FILE_name_AtoW( path, TRUE )))
+        return FALSE;
+
+    if ((ret = GetVolumeNameForVolumeMountPointW( pathW, volumeW, len )))
+        FILE_name_WtoA( volumeW, -1, volume, len );
+
+    HeapFree( GetProcessHeap(), 0, pathW );
+    return ret;
 }
 
+/***********************************************************************
+ *           GetVolumeNameForVolumeMountPointW   (KERNEL32.@)
+ */
+BOOL WINAPI GetVolumeNameForVolumeMountPointW( LPCWSTR path, LPWSTR volume, DWORD size )
+{
+    BOOL ret = FALSE;
+    static const WCHAR fmt[] =
+        { '\\','\\','?','\\','V','o','l','u','m','e','{','%','0','2','x','}','\\',0 };
+
+    TRACE("(%s, %p, %x)\n", debugstr_w(path), volume, size);
+
+    if (!path || !path[0]) return FALSE;
+
+    if (size >= sizeof(fmt) / sizeof(WCHAR))
+    {
+        /* FIXME: will break when we support volume mounts */
+        sprintfW( volume, fmt, tolowerW( path[0] ) - 'a' );
+        ret = TRUE;
+    }
+    return ret;
+}
 
 /***********************************************************************
  *           DefineDosDeviceW       (KERNEL32.@)

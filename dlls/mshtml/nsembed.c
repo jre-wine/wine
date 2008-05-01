@@ -422,7 +422,12 @@ void nsACString_Init(nsACString *str, const char *data)
 {
     NS_CStringContainerInit(str);
     if(data)
-        NS_CStringSetData(str, data, PR_UINT32_MAX);
+        nsACString_SetData(str, data);
+}
+
+void nsACString_SetData(nsACString *str, const char *data)
+{
+    NS_CStringSetData(str, data, PR_UINT32_MAX);
 }
 
 PRUint32 nsACString_GetData(const nsACString *str, const char **data, PRBool *termited)
@@ -530,6 +535,7 @@ static void nsnode_to_nsstring_rec(nsIContentSerializer *serializer, nsIDOMNode 
         nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMDocument, (void**)&nsdoc);
         nsIContentSerializer_AppendDocumentStart(serializer, nsdoc, str);
         nsIDOMDocument_Release(nsdoc);
+        break;
     }
     default:
         FIXME("Unhandled type %u\n", type);
@@ -639,6 +645,9 @@ static nsresult NSAPI nsWebBrowserChrome_QueryInterface(nsIWebBrowserChrome *ifa
     }else if(IsEqualGUID(&IID_nsITooltipListener, riid)) {
         TRACE("(%p)->(IID_nsITooltipListener %p)\n", This, result);
         *result = NSTOOLTIP(This);
+    }else if(IsEqualGUID(&IID_nsIDOMEventListener, riid)) {
+        TRACE("(%p)->(IID_nsIDOMEventListener %p)\n", This, result);
+        *result = NSEVENTLIST(This);
     }else if(IsEqualGUID(&IID_nsIInterfaceRequestor, riid)) {
         TRACE("(%p)->(IID_nsIInterfaceRequestor %p)\n", This, result);
         *result = NSIFACEREQ(This);
@@ -922,6 +931,7 @@ static nsresult NSAPI nsURIContentListener_OnStartURIOpen(nsIURIContentListener 
     }
 
     nsIWineURI_SetNSContainer(wine_uri, This);
+    nsIWineURI_SetIsDocumentURI(wine_uri, TRUE);
 
     if(This->bscallback && This->bscallback->mon) {
         LPWSTR url = NULL;
@@ -1226,6 +1236,48 @@ static const nsITooltipListenerVtbl nsTooltipListenerVtbl = {
     nsTooltipListener_OnHideTooltip
 };
 
+#define NSEVENTLIST_THIS(iface) DEFINE_THIS(NSContainer, DOMEventListener, iface)
+
+static nsresult NSAPI nsDOMEventListener_QueryInterface(nsIDOMEventListener *iface,
+                                                        nsIIDRef riid, nsQIResult result)
+{
+    NSContainer *This = NSEVENTLIST_THIS(iface);
+    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+}
+
+static nsrefcnt NSAPI nsDOMEventListener_AddRef(nsIDOMEventListener *iface)
+{
+    NSContainer *This = NSEVENTLIST_THIS(iface);
+    return nsIWebBrowserChrome_AddRef(NSWBCHROME(This));
+}
+
+static nsrefcnt NSAPI nsDOMEventListener_Release(nsIDOMEventListener *iface)
+{
+    NSContainer *This = NSEVENTLIST_THIS(iface);
+    return nsIWebBrowserChrome_Release(NSWBCHROME(This));
+}
+
+static nsresult NSAPI nsDOMEventListener_HandleEvent(nsIDOMEventListener *iface, nsIDOMEvent *event)
+{
+    NSContainer *This = NSEVENTLIST_THIS(iface);
+
+    TRACE("(%p)->(%p)\n", This, event);
+
+    if(This->doc->usermode == EDITMODE)
+        handle_edit_event(This->doc, event);
+
+    return NS_OK;
+}
+
+#undef NSEVENTLIST_THIS
+
+static const nsIDOMEventListenerVtbl nsDOMEventListenerVtbl = {
+    nsDOMEventListener_QueryInterface,
+    nsDOMEventListener_AddRef,
+    nsDOMEventListener_Release,
+    nsDOMEventListener_HandleEvent
+};
+
 #define NSIFACEREQ_THIS(iface) DEFINE_THIS(NSContainer, InterfaceRequestor, iface)
 
 static nsresult NSAPI nsInterfaceRequestor_QueryInterface(nsIInterfaceRequestor *iface,
@@ -1351,6 +1403,7 @@ const nsISupportsWeakReferenceVtbl nsSupportsWeakReferenceVtbl = {
 
 NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
 {
+    nsIDOMWindow *dom_window;
     nsIWebBrowserSetup *wbsetup;
     NSContainer *ret;
     nsresult nsres;
@@ -1368,7 +1421,7 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
     ret->lpInterfaceRequestorVtbl    = &nsInterfaceRequestorVtbl;
     ret->lpWeakReferenceVtbl         = &nsWeakReferenceVtbl;
     ret->lpSupportsWeakReferenceVtbl = &nsSupportsWeakReferenceVtbl;
-
+    ret->lpDOMEventListenerVtbl      = &nsDOMEventListenerVtbl;
 
     ret->doc = doc;
     ret->ref = 1;
@@ -1436,6 +1489,28 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
     nsres = nsIWebBrowser_SetParentURIContentListener(ret->webbrowser, NSURICL(ret));
     if(NS_FAILED(nsres))
         ERR("SetParentURIContentListener failed: %08x\n", nsres);
+
+    nsres = nsIWebBrowser_GetContentDOMWindow(ret->webbrowser, &dom_window);
+    if(NS_SUCCEEDED(nsres)) {
+        nsIDOMEventTarget *target;
+        nsres = nsIDOMWindow_QueryInterface(dom_window, &IID_nsIDOMEventTarget, (void**)&target);
+        nsIDOMWindow_Release(dom_window);
+        if(NS_SUCCEEDED(nsres)) {
+            nsAString keypress_str;
+            static const PRUnichar wsz_keypress[] = {'k','e','y','p','r','e','s','s',0};
+            nsAString_Init(&keypress_str, wsz_keypress);
+            nsres = nsIDOMEventTarget_AddEventListener(target, &keypress_str, NSEVENTLIST(ret), TRUE);
+            nsAString_Finish(&keypress_str);
+            nsIDOMEventTarget_Release(target);
+            if(NS_FAILED(nsres))
+                ERR("AddEventTarget failed: %08x\n", nsres);
+        }else {
+            ERR("Could not get nsIDOMEventTarget interface: %08x\n", nsres);
+        }
+    }else {
+        ERR("GetContentDOMWindow failed: %08x\n", nsres);
+    }
+
 
     return ret;
 }

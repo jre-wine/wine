@@ -209,7 +209,7 @@ HRESULT WINAPI DllCanUnloadNow()
 #define OUR_GUID_ENTRY(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
     { { l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } } , #name },
 
-static struct {
+static const struct {
 	const GUID	riid;
 	const char 	*name;
 } InterfaceDesc[] =
@@ -269,6 +269,9 @@ LONG WINAPI DBToAmpFactor(LONG db)
     return 100;
 }
 
+/***********************************************************************
+ *              AMGetErrorTextA (QUARTZ.@)
+ */
 DWORD WINAPI AMGetErrorTextA(HRESULT hr, char *buffer, DWORD maxlen)
 {
     int len;
@@ -284,6 +287,9 @@ DWORD WINAPI AMGetErrorTextA(HRESULT hr, char *buffer, DWORD maxlen)
     return len;
 }
 
+/***********************************************************************
+ *              AMGetErrorTextW (QUARTZ.@)
+ */
 DWORD WINAPI AMGetErrorTextW(HRESULT hr, WCHAR *buffer, DWORD maxlen)
 {
     int len;

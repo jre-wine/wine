@@ -1010,8 +1010,12 @@ TREEVIEW_AllocateItem(TREEVIEW_INFO *infoPtr)
     if (!newItem)
 	return NULL;
 
-    newItem->iImage = -1;
-    newItem->iSelectedImage = -1;
+    /* I_IMAGENONE would make more sense but this is neither what is
+     * documented (MSDN doesn't specify) nor what Windows actually does
+     * (it sets it to zero)... and I can so imagine an application using
+     * inc/dec to toggle the images. */
+    newItem->iImage = 0;
+    newItem->iSelectedImage = 0;
 
     if (DPA_InsertPtr(infoPtr->items, INT_MAX, newItem) == -1)
     {
@@ -4823,7 +4827,6 @@ TREEVIEW_MouseWheel(TREEVIEW_INFO *infoPtr, WPARAM wParam)
 static LRESULT
 TREEVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
 {
-    static const WCHAR szDisplayW[] = { 'D','I','S','P','L','A','Y','\0' };
     RECT rcClient;
     TREEVIEW_INFO *infoPtr;
     LOGFONTW lf;
@@ -4931,7 +4934,7 @@ TREEVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
 	infoPtr->himlState =
 	    ImageList_Create(16, 16, ILC_COLOR | ILC_MASK, 3, 0);
 
-	hdcScreen = CreateDCW(szDisplayW, NULL, NULL, NULL);
+	hdcScreen = GetDC(0);
 
 	/* Create a coloured bitmap compatible with the screen depth
 	   because checkboxes are not black&white */
@@ -4959,7 +4962,7 @@ TREEVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
 
 	DeleteObject(hbm);
 	DeleteDC(hdc);
-	DeleteDC(hdcScreen);
+	ReleaseDC(0, hdcScreen);
 
 	infoPtr->stateImageWidth = 16;
 	infoPtr->stateImageHeight = 16;

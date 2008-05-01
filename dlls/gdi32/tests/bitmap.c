@@ -729,9 +729,9 @@ static void test_dibsections(void)
 
     DeleteDC(hdcmem);
     ReleaseDC(0, hdc);
-}    
+}
 
-void test_mono_dibsection(void)
+static void test_mono_dibsection(void)
 {
     HDC hdc, memdc;
     HBITMAP old_bm, mono_ds;
@@ -1107,10 +1107,10 @@ static void test_GetDIBits_selected_DIB(UINT bpp)
             break;
         }
     }
-    todo_wine
-    {
-        ok(equalContents, "GetDIBits with DIB selected in DC: Invalid DIB bits\n");
-    }
+    if (bpp != 1)
+        ok(equalContents, "GetDIBits with %d bpp DIB selected in DC: Invalid DIB bits\n",bpp);
+    else
+        todo_wine ok(equalContents, "GetDIBits with %d bpp DIB selected in DC: Invalid DIB bits\n",bpp);
 
     HeapFree(GetProcessHeap(), 0, bits2);
     DeleteDC(dc);

@@ -70,7 +70,7 @@ static void file_destroy( struct object *obj );
 
 static int file_get_poll_events( struct fd *fd );
 static int file_flush( struct fd *fd, struct event **event );
-static int file_get_info( struct fd *fd );
+static enum server_fd_type file_get_info( struct fd *fd, int *flags );
 
 static const struct object_ops file_ops =
 {
@@ -238,12 +238,13 @@ static int file_flush( struct fd *fd, struct event **event )
     return ret;
 }
 
-static int file_get_info( struct fd *fd )
+static enum server_fd_type file_get_info( struct fd *fd, int *flags )
 {
     struct file *file = get_fd_user( fd );
 
-    if (is_overlapped( file )) return FD_FLAG_OVERLAPPED;
-    else return 0;
+    *flags = 0;
+    if (is_overlapped( file )) *flags |= FD_FLAG_OVERLAPPED;
+    return FD_TYPE_FILE;
 }
 
 static struct fd *file_get_fd( struct object *obj )
@@ -294,7 +295,7 @@ void file_set_error(void)
     case EMFILE:    set_error( STATUS_TOO_MANY_OPENED_FILES ); break;
     case EEXIST:    set_error( STATUS_OBJECT_NAME_COLLISION ); break;
     case EINVAL:    set_error( STATUS_INVALID_PARAMETER ); break;
-    case ESPIPE:    set_win32_error( ERROR_SEEK ); break;
+    case ESPIPE:    set_error( STATUS_ILLEGAL_FUNCTION ); break;
     case ENOTEMPTY: set_error( STATUS_DIRECTORY_NOT_EMPTY ); break;
     case EIO:       set_error( STATUS_ACCESS_VIOLATION ); break;
     case ENOTDIR:   set_error( STATUS_NOT_A_DIRECTORY ); break;
