@@ -881,7 +881,7 @@ NTSTATUS WINAPI NtWriteFile(HANDLE hFile, HANDLE hEvent,
             timeout = get_next_io_timeout( &timeouts, total );
 
             pfd.fd = unix_handle;
-            pfd.events = POLLIN;
+            pfd.events = POLLOUT;
 
             if (!timeout || !(ret = poll( &pfd, 1, timeout )))
             {
@@ -918,10 +918,35 @@ done:
 }
 
 
+struct async_ioctl
+{
+    HANDLE handle;   /* handle to the device */
+    void  *buffer;   /* buffer for output */
+    ULONG  size;     /* size of buffer */
+};
+
 /* callback for ioctl async I/O completion */
 static NTSTATUS ioctl_completion( void *arg, IO_STATUS_BLOCK *io, NTSTATUS status )
 {
-    io->u.Status = status;
+    struct async_ioctl *async = arg;
+
+    if (status == STATUS_ALERTED)
+    {
+        SERVER_START_REQ( get_ioctl_result )
+        {
+            req->handle   = async->handle;
+            req->user_arg = async;
+            wine_server_set_reply( req, async->buffer, async->size );
+            if (!(status = wine_server_call( req )))
+                io->Information = wine_server_reply_size( reply );
+        }
+        SERVER_END_REQ;
+    }
+    if (status != STATUS_PENDING)
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, async );
+        io->u.Status = status;
+    }
     return status;
 }
 
@@ -932,7 +957,16 @@ static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
                                    PVOID in_buffer, ULONG in_size,
                                    PVOID out_buffer, ULONG out_size )
 {
+    struct async_ioctl *async;
     NTSTATUS status;
+    HANDLE wait_handle;
+    ULONG options;
+
+    if (!(async = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*async) )))
+        return STATUS_NO_MEMORY;
+    async->handle = handle;
+    async->buffer = out_buffer;
+    async->size   = out_size;
 
     SERVER_START_REQ( ioctl )
     {
@@ -940,7 +974,7 @@ static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
         req->code           = code;
         req->async.callback = ioctl_completion;
         req->async.iosb     = io;
-        req->async.arg      = NULL;
+        req->async.arg      = async;
         req->async.apc      = apc;
         req->async.apc_arg  = apc_context;
         req->async.event    = event;
@@ -948,12 +982,23 @@ static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
         wine_server_set_reply( req, out_buffer, out_size );
         if (!(status = wine_server_call( req )))
             io->Information = wine_server_reply_size( reply );
+        wait_handle = reply->wait;
+        options     = reply->options;
     }
     SERVER_END_REQ;
 
     if (status == STATUS_NOT_SUPPORTED)
         FIXME("Unsupported ioctl %x (device=%x access=%x func=%x method=%x)\n",
               code, code >> 16, (code >> 14) & 3, (code >> 2) & 0xfff, code & 3);
+
+    if (status != STATUS_PENDING) RtlFreeHeap( GetProcessHeap(), 0, async );
+
+    if (wait_handle)
+    {
+        NtWaitForSingleObject( wait_handle, (options & FILE_SYNCHRONOUS_IO_ALERT), NULL );
+        status = io->u.Status;
+        NtClose( wait_handle );
+    }
 
     return status;
 }
@@ -1064,29 +1109,6 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
         if (!status) status = DIR_unmount_device( handle );
         break;
 
-    case FSCTL_PIPE_LISTEN:
-    case FSCTL_PIPE_WAIT:
-        {
-            HANDLE internal_event = 0;
-
-            if(!event && !apc)
-            {
-                status = NtCreateEvent(&internal_event, EVENT_ALL_ACCESS, NULL, FALSE, FALSE);
-                if (status != STATUS_SUCCESS) break;
-                event = internal_event;
-            }
-            status = server_ioctl_file( handle, event, apc, apc_context, io, code,
-                                        in_buffer, in_size, out_buffer, out_size );
-
-            if (internal_event && status == STATUS_PENDING)
-            {
-                while (NtWaitForSingleObject(internal_event, TRUE, NULL) == STATUS_USER_APC) /*nothing*/ ;
-                status = io->u.Status;
-            }
-            if (internal_event) NtClose(internal_event);
-        }
-        break;
-
     case FSCTL_PIPE_PEEK:
         {
             FILE_PIPE_PEEK_BUFFER *buffer = out_buffer;
@@ -1162,6 +1184,8 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
         status = STATUS_SUCCESS;
         break;
 
+    case FSCTL_PIPE_LISTEN:
+    case FSCTL_PIPE_WAIT:
     default:
         status = server_ioctl_file( handle, event, apc, apc_context, io, code,
                                     in_buffer, in_size, out_buffer, out_size );

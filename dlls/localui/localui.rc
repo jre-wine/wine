@@ -21,6 +21,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winuser.h"
 #include "winver.h"
 #include "localui.h"
 
@@ -37,4 +38,5 @@
 #include "wine/wine_common_ver.rc"
 
 
+#include "ui_De.rc"
 #include "ui_En.rc"

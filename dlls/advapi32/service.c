@@ -3,6 +3,7 @@
  *
  * Copyright 1995 Sven Verdoolaege
  * Copyright 2005 Mike McCormack
+ * Copyright 2007 Rolf Kalbermatter
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -53,6 +54,7 @@ typedef struct service_start_info_t
 #define WINESERV_STARTINFO   1
 #define WINESERV_GETSTATUS   2
 #define WINESERV_SENDCONTROL 3
+#define WINESERV_SETPID      4
 
 typedef struct service_data_t
 {
@@ -520,6 +522,41 @@ static BOOL service_get_status(HANDLE pipe, LPSERVICE_STATUS_PROCESS status)
 }
 
 /******************************************************************************
+ * service_handle_set_processID
+ */
+static BOOL service_handle_set_processID(HANDLE pipe, service_data *service, DWORD dwProcessId)
+{
+    DWORD count, ret = ERROR_SUCCESS;
+
+    TRACE("received control %d\n", dwProcessId);
+	service->status.dwProcessId = dwProcessId;
+    return WriteFile(pipe, &ret, sizeof ret , &count, NULL);
+}
+
+/******************************************************************************
+ * service_set_processID
+ */
+static BOOL service_set_processID(HANDLE pipe, DWORD dwprocessId, LPDWORD dwResult)
+{
+    DWORD cmd[2], count = 0;
+    BOOL r;
+
+    cmd[0] = WINESERV_SETPID;
+    cmd[1] = dwprocessId;
+    r = WriteFile( pipe, cmd, sizeof cmd, &count, NULL );
+    if (!r || count != sizeof cmd)
+    {
+        ERR("service protocol error - failed to write pipe!\n");
+        return r;
+    }
+    r = ReadFile( pipe, dwResult, sizeof *dwResult, &count, NULL );
+    if (!r || count != sizeof *dwResult)
+        ERR("service protocol error - failed to read pipe "
+            "r = %d  count = %d!\n", r, count);
+    return r;
+}
+
+/******************************************************************************
  * service_send_control
  */
 static BOOL service_send_control(HANDLE pipe, DWORD dwControl, DWORD *result)
@@ -703,6 +740,9 @@ static DWORD WINAPI service_control_dispatcher(LPVOID arg)
             break;
         case WINESERV_SENDCONTROL:
             service_handle_control(pipe, service, req[1]);
+            break;
+        case WINESERV_SETPID:
+            service_handle_set_processID(pipe, service, req[1]);
             break;
         default:
             ERR("received invalid command %d length %d\n", req[0], req[1]);
@@ -1523,7 +1563,7 @@ BOOL WINAPI StartServiceW(SC_HANDLE hService, DWORD dwNumServiceArgs,
 {
     struct sc_service *hsvc;
     BOOL r = FALSE;
-    DWORD pid;
+    DWORD dwResult, dwProcessId = 0;
     SC_LOCK hLock;
     HANDLE handle = INVALID_HANDLE_VALUE;
 
@@ -1544,15 +1584,21 @@ BOOL WINAPI StartServiceW(SC_HANDLE hService, DWORD dwNumServiceArgs,
     if (handle==INVALID_HANDLE_VALUE)
     {
         /* start the service process */
-        if (service_start_process(hsvc, &pid))
+        if (service_start_process(hsvc, &dwProcessId))
             handle = service_open_pipe(hsvc->name);
     }
 
     if (handle != INVALID_HANDLE_VALUE)
     {
-        service_send_start_message(handle, lpServiceArgVectors, dwNumServiceArgs);
+        r = service_send_start_message(handle, lpServiceArgVectors, dwNumServiceArgs);
         CloseHandle(handle);
-        r = TRUE;
+    }
+
+    handle = service_open_pipe(hsvc->name);
+    if (handle != INVALID_HANDLE_VALUE)
+    {
+        service_set_processID(handle, dwProcessId, &dwResult);
+        CloseHandle(handle);
     }
 
     UnlockServiceDatabase( hLock );
@@ -1995,9 +2041,36 @@ BOOL WINAPI QueryServiceLockStatusW( SC_HANDLE hSCManager,
 BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
   LPSTR lpDisplayName, LPDWORD lpcchBuffer)
 {
-    FIXME("%p %s %p %p\n", hSCManager,
+    struct sc_manager *hscm;
+    DWORD type, size;
+    LONG ret;
+
+    TRACE("%p %s %p %p\n", hSCManager,
           debugstr_a(lpServiceName), lpDisplayName, lpcchBuffer);
-    return FALSE;
+
+    hscm = sc_handle_get_handle_data(hSCManager, SC_HTYPE_MANAGER);
+    if (!hscm)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    size = *lpcchBuffer;
+    ret = RegGetValueA(hscm->hkey, lpServiceName, "DisplayName", RRF_RT_REG_SZ, &type, lpDisplayName, &size);
+    if (ret)
+    {
+        if (lpDisplayName && *lpcchBuffer) *lpDisplayName = 0;
+
+        if (ret == ERROR_MORE_DATA)
+        {
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
+            *lpcchBuffer = size - 1;
+        }
+        else
+            SetLastError(ret);
+        return FALSE;
+    }
+    return TRUE;
 }
 
 /******************************************************************************
@@ -2006,9 +2079,36 @@ BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
 BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
   LPWSTR lpDisplayName, LPDWORD lpcchBuffer)
 {
-    FIXME("%p %s %p %p\n", hSCManager,
+    struct sc_manager *hscm;
+    DWORD type, size;
+    LONG ret;
+
+    TRACE("%p %s %p %p\n", hSCManager,
           debugstr_w(lpServiceName), lpDisplayName, lpcchBuffer);
-    return FALSE;
+
+    hscm = sc_handle_get_handle_data(hSCManager, SC_HTYPE_MANAGER);
+    if (!hscm)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    size = *lpcchBuffer * sizeof(WCHAR);
+    ret = RegGetValueW(hscm->hkey, lpServiceName, szDisplayName, RRF_RT_REG_SZ, &type, lpDisplayName, &size);
+    if (ret)
+    {
+        if (lpDisplayName && *lpcchBuffer) *lpDisplayName = 0;
+
+        if (ret == ERROR_MORE_DATA)
+        {
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
+            *lpcchBuffer = (size / sizeof(WCHAR)) - 1;
+        }
+        else
+            SetLastError(ret);
+        return FALSE;
+    }
+    return TRUE;
 }
 
 /******************************************************************************

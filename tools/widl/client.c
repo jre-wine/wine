@@ -88,6 +88,9 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
     const var_t *var;
     int method_count = 0;
 
+    if (!implicit_handle)
+        print_client("static RPC_BINDING_HANDLE %s__MIDL_AutoBindHandle;\n\n", iface->name);
+
     if (iface->funcs) LIST_FOR_EACH_ENTRY( func, iface->funcs, const func_t, entry )
     {
         const var_t *def = func->def;
@@ -113,7 +116,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
             }
         }
 
-        write_type(client, def->type, def, def->tname);
+        write_type(client, def->type);
         fprintf(client, " ");
         write_prefix_name(client, prefix_client, def);
         fprintf(client, "(\n");
@@ -130,10 +133,10 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
         indent++;
 
         /* declare return value '_RetVal' */
-        if (!is_void(def->type, NULL))
+        if (!is_void(def->type))
         {
             print_client("");
-            write_type(client, def->type, def, def->tname);
+            write_type(client, def->type);
             fprintf(client, " _RetVal;\n");
         }
 
@@ -223,7 +226,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
         write_remoting_arguments(client, indent, func, type_offset, PASS_OUT, PHASE_UNMARSHAL);
 
         /* unmarshal return value */
-        if (!is_void(def->type, NULL))
+        if (!is_void(def->type))
             print_phase_basetype(client, indent, PHASE_UNMARSHAL, PASS_RETURN, def, "_RetVal");
 
         /* update proc_offset */
@@ -232,7 +235,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
             LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
                 *proc_offset += get_size_procformatstring_var(var);
         }
-        if (!is_void(def->type, NULL))
+        if (!is_void(def->type))
             *proc_offset += get_size_procformatstring_var(def);
         else
             *proc_offset += 2; /* FC_END and FC_PAD */
@@ -254,7 +257,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
 
 
         /* emit return code */
-        if (!is_void(def->type, NULL))
+        if (!is_void(def->type))
         {
             fprintf(client, "\n");
             print_client("return _RetVal;\n");
@@ -266,13 +269,6 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
 
         method_count++;
     }
-}
-
-
-static void write_bindinghandledecl(type_t *iface)
-{
-    print_client("static RPC_BINDING_HANDLE %s__MIDL_AutoBindHandle;\n", iface->name);
-    fprintf(client, "\n");
 }
 
 
@@ -433,8 +429,6 @@ void write_client(ifref_list_t *ifaces)
     
             write_clientinterfacedecl(iface->iface);
             write_stubdescdecl(iface->iface);
-            write_bindinghandledecl(iface->iface);
-    
             write_function_stubs(iface->iface, &proc_offset, &type_offset);
 
             print_client("#if !defined(__RPC_WIN32__)\n");

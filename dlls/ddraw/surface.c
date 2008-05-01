@@ -36,11 +36,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "wingdi.h"
 #include "wine/exception.h"
-#include "excpt.h"
 
 #include "ddraw.h"
 #include "d3d.h"
@@ -266,6 +264,8 @@ static void IDirectDrawSurfaceImpl_Destroy(IDirectDrawSurfaceImpl *This)
  * capabilities of the WineD3DDevice are uninitialized, which causes the
  * swapchain to be released.
  *
+ * When a complex sublevel falls to ref zero, then this is ignored.
+ *
  * Returns:
  *  The new refcount
  *
@@ -284,11 +284,12 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
         IDirectDrawSurfaceImpl *surf;
         IDirectDrawImpl *ddraw;
         IUnknown *ifaceToRelease = This->ifaceToRelease;
+        int i;
 
         /* Complex attached surfaces are destroyed implicitely when the root is released */
-        if(This->first_complex != This)
+        if(!This->is_complex_root)
         {
-            WARN("(%p) Attempt to destroy a surface that is attached to a complex root %p\n", This, This->first_complex);
+            WARN("(%p) Attempt to destroy a surface that is not a complex root\n", This);
             return ref;
         }
         ddraw = This->ddraw;
@@ -300,7 +301,7 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
          */
         if(This->wineD3DTexture)
         {
-            IWineD3DTexture_Release(This->wineD3DTexture);
+            IWineD3DBaseTexture_Release(This->wineD3DTexture);
         }
         /* If it's the RenderTarget, destroy the d3ddevice */
         else if( (ddraw->d3d_initialized) && (This == ddraw->d3d_target))
@@ -345,17 +346,33 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
              * The same applies for textures without an
              * IWineD3DTexture object attached
              */
-            surf = This;
-            while(surf)
-            {
-                IParent *Parent;
+            IParent *Parent;
 
-                IWineD3DSurface_GetParent(surf->WineD3DSurface,
-                                          (IUnknown **) &Parent);
-                IParent_Release(Parent);  /* For the getParent */
-                IParent_Release(Parent);  /* To release it */
-                surf = surf->next_complex;
+            for(i = 0; i < MAX_COMPLEX_ATTACHED; i++)
+            {
+                if(This->complex_array[i])
+                {
+                    /* Only the topmost level can have more than 1 surfaces in the complex
+                     * attachment array(Cube texture roots), for all others there is only
+                     * one
+                     */
+                    surf = This->complex_array[i];
+                    while(surf)
+                    {
+                        IWineD3DSurface_GetParent(surf->WineD3DSurface,
+                                                  (IUnknown **) &Parent);
+                        IParent_Release(Parent);  /* For the getParent */
+                        IParent_Release(Parent);  /* To release it */
+                        surf = surf->complex_array[0];
+                    }
+                }
             }
+
+            /* Now the top-level surface */
+            IWineD3DSurface_GetParent(This->WineD3DSurface,
+                                      (IUnknown **) &Parent);
+            IParent_Release(Parent);  /* For the getParent */
+            IParent_Release(Parent);  /* To release it */
         }
 
         /* The refcount test shows that the palette is detached when the surface is destroyed */
@@ -363,15 +380,26 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
                                                       NULL);
 
         /* Loop through all complex attached surfaces,
-         * and destroy them
+         * and destroy them.
+         *
+         * Yet again, only the root can have more than one complexly attached surface, all the others
+         * have a total of one;
          */
-        while( (surf = This->next_complex) )
+        for(i = 0; i < MAX_COMPLEX_ATTACHED; i++)
         {
-            This->next_complex = surf->next_complex;  /* Unchain it from the complex listing */
-            IDirectDrawSurfaceImpl_Destroy(surf);     /* Destroy it */
+            if(!This->complex_array[i]) break;
+
+            surf = This->complex_array[i];
+            This->complex_array[i] = NULL;
+            while(surf)
+            {
+                IDirectDrawSurfaceImpl *destroy = surf;
+                surf = surf->complex_array[0];              /* Iterate through the "tree" */
+                IDirectDrawSurfaceImpl_Destroy(destroy);    /* Destroy it */
+            }
         }
 
-        /* Destroy the surface.
+        /* Destroy the root surface.
          */
         IDirectDrawSurfaceImpl_Destroy(This);
 
@@ -388,13 +416,14 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
  * Returns an attached surface with the requested caps. Surface attachment
  * and complex surfaces are not clearly described by the MSDN or sdk,
  * so this method is tricky and likely to contain problems.
- * This implementation searches the complex chain first, then the
- * attachment chain, and then it checks if the caps match to itself.
+ * This implementation searches the complex list first, then the
+ * attachment chain.
  *
  * The chains are searched from This down to the last surface in the chain,
  * not from the first element in the chain. The first surface found is
  * returned. The MSDN says that this method fails if more than one surface
- * matches the caps, but apparently this is incorrect.
+ * matches the caps, but it is not sure if that is right. The attachment
+ * structure may not even allow two matching surfaces.
  *
  * The found surface is AddRef-ed before it is returned.
  *
@@ -416,6 +445,7 @@ IDirectDrawSurfaceImpl_GetAttachedSurface(IDirectDrawSurface7 *iface,
     ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
     IDirectDrawSurfaceImpl *surf;
     DDSCAPS2 our_caps;
+    int i;
 
     TRACE("(%p)->(%p,%p)\n", This, Caps, Surface);
 
@@ -431,11 +461,11 @@ IDirectDrawSurfaceImpl_GetAttachedSurface(IDirectDrawSurface7 *iface,
 
     TRACE("(%p): Looking for caps: %x,%x,%x,%x\n", This, our_caps.dwCaps, our_caps.dwCaps2, our_caps.dwCaps3, our_caps.dwCaps4); /* FIXME: Better debugging */
 
-    /* First, look at the complex chain */
-    surf = This;
-
-    while( (surf = surf->next_complex) )
+    for(i = 0; i < MAX_COMPLEX_ATTACHED; i++)
     {
+        surf = This->complex_array[i];
+        if(!surf) break;
+
         if (TRACE_ON(ddraw))
         {
             TRACE("Surface: (%p) caps: %x,%x,%x,%x\n", surf,
@@ -451,8 +481,7 @@ IDirectDrawSurfaceImpl_GetAttachedSurface(IDirectDrawSurface7 *iface,
             /* MSDN: "This method fails if more than one surface is attached
              * that matches the capabilities requested."
              *
-             * The mipmap demo of the DirectX7 sdk shows what to do here:
-             * apparently apps expect the first found surface to be returned.
+             * Not sure how to test this.
              */
 
             TRACE("(%p): Returning surface %p\n", This, surf);
@@ -480,35 +509,12 @@ IDirectDrawSurfaceImpl_GetAttachedSurface(IDirectDrawSurface7 *iface,
         if (((surf->surface_desc.ddsCaps.dwCaps & our_caps.dwCaps) == our_caps.dwCaps) &&
             ((surf->surface_desc.ddsCaps.dwCaps2 & our_caps.dwCaps2) == our_caps.dwCaps2)) {
 
-            /* MSDN: "This method fails if more than one surface is attached
-             * that matches the capabilities requested."
-             *
-             * The mipmap demo of the DirectX7 sdk shows what to do here:
-             * apparently apps expect the first found surface to be returned.
-             */
-
             TRACE("(%p): Returning surface %p\n", This, surf);
             *Surface = ICOM_INTERFACE(surf, IDirectDrawSurface7);
             IDirectDrawSurface7_AddRef(*Surface);
             return DD_OK;
         }
     }
-
-    /* Is this valid? */
-#if 0
-    if (((This->surface_desc.ddsCaps.dwCaps & our_caps.dwCaps) == our_caps.dwCaps) &&
-        ((This->surface_desc.ddsCaps.dwCaps2 & our_caps.dwCaps2) == our_caps.dwCaps2) && 
-        This == This->first_complex)
-    {
-
-        TRACE("(%p): Returning surface %p\n", This, This);
-        *Surface = ICOM_INTERFACE(This, IDirectDrawSurface7);
-        IDirectDrawSurface7_AddRef(*Surface);
-        return DD_OK;
-    }
-#endif
-
-    /* What to do here? Continue with the surface root?? */
 
     TRACE("(%p) Didn't find a valid surface\n", This);
     return DDERR_NOTFOUND;
@@ -543,6 +549,20 @@ IDirectDrawSurfaceImpl_Lock(IDirectDrawSurface7 *iface,
     HRESULT hr;
     TRACE("(%p)->(%p,%p,%x,%p)\n", This, Rect, DDSD, Flags, h);
 
+    if (Rect)
+    {
+        if ((Rect->left < 0)
+                || (Rect->top < 0)
+                || (Rect->left > Rect->right)
+                || (Rect->top > Rect->bottom)
+                || (Rect->right > This->surface_desc.dwWidth)
+                || (Rect->bottom > This->surface_desc.dwHeight))
+        {
+            WARN("Trying to lock an invalid rectangle, returning DDERR_INVALIDPARAMS\n");
+            return DDERR_INVALIDPARAMS;
+        }
+    }
+
     if(!DDSD)
         return DDERR_INVALIDPARAMS;
 
@@ -565,18 +585,18 @@ IDirectDrawSurfaceImpl_Lock(IDirectDrawSurface7 *iface,
         DDSD->dwSize = sizeof(DDSURFACEDESC2);
     }
 
-    DD_STRUCT_COPY_BYSIZE(DDSD,&(This->surface_desc));
     hr = IWineD3DSurface_LockRect(This->WineD3DSurface,
                                   &LockedRect,
                                   Rect,
                                   Flags);
     if(hr != D3D_OK) return hr;
 
-    /* Override the memory area and the pitch */
-    DDSD->dwFlags |= DDSD_LPSURFACE;
-    DDSD->lpSurface = LockedRect.pBits;
-    DDSD->dwFlags |= DDSD_PITCH;
-    DDSD->u1.lPitch = LockedRect.Pitch;
+    /* Override the memory area. The pitch should be set already. Strangely windows
+     * does not set the LPSURFACE flag on locked surfaces !?!.
+     * DDSD->dwFlags |= DDSD_LPSURFACE;
+     */
+    This->surface_desc.lpSurface = LockedRect.pBits;
+    DD_STRUCT_COPY_BYSIZE(DDSD,&(This->surface_desc));
 
     TRACE("locked surface returning description :\n");
     if (TRACE_ON(ddraw)) DDRAW_dump_surface_desc(DDSD);
@@ -602,9 +622,15 @@ IDirectDrawSurfaceImpl_Unlock(IDirectDrawSurface7 *iface,
                               RECT *pRect)
 {
     ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
+    HRESULT hr;
     TRACE("(%p)->(%p)\n", This, pRect);
 
-    return IWineD3DSurface_UnlockRect(This->WineD3DSurface);
+    hr = IWineD3DSurface_UnlockRect(This->WineD3DSurface);
+    if(SUCCEEDED(hr))
+    {
+        This->surface_desc.lpSurface = NULL;
+    }
+    return hr;
 }
 
 /*****************************************************************************
@@ -725,7 +751,7 @@ IDirectDrawSurfaceImpl_Blt(IDirectDrawSurface7 *iface,
                              SrcRect,
                              Flags,
                              (WINEDDBLTFX *) DDBltFx,
-                             WINED3DTEXF_NONE);
+                             WINED3DTEXF_POINT);
     switch(hr)
     {
         case WINED3DERR_NOTAVAILABLE:       return DDERR_UNSUPPORTED;
@@ -737,9 +763,12 @@ IDirectDrawSurfaceImpl_Blt(IDirectDrawSurface7 *iface,
 /*****************************************************************************
  * IDirectDrawSurface7::AddAttachedSurface
  *
- * Attaches a surface to another surface. Surface attachments are
- * incorrectly described in the SDK and the MSDN, and this method
- * is prone to bugs. The surface that is attached is AddRef-ed.
+ * Attaches a surface to another surface. How the surface attachments work
+ * is not totally understood yet, and this method is prone to problems.
+ * he surface that is attached is AddRef-ed.
+ *
+ * Tests with complex surfaces suggest that the surface attachments form a
+ * tree, but no method to test this has been found yet.
  *
  * The attachment list consists of a first surface (first_attached) and
  * for each surface a pointer to the next attached surface (next_attached).
@@ -747,22 +776,25 @@ IDirectDrawSurfaceImpl_Blt(IDirectDrawSurface7 *iface,
  * first_attached points to the surface itself. A surface that has
  * no successors in the chain has next_attached set to NULL.
  *
- * Newly attached surfaces are attached right after the root surface. The
- * complex chains are handled separately in a similar chain, with
- * first_complex and next_complex. If a surface is attached to a complex
- * surface compound, it's attached to the surface that the app requested,
- * not the complex root. See GetAttachedSurface for a description
- * how surfaces are found.
+ * Newly attached surfaces are attached right after the root surface.
+ * If a surface is attached to a complex surface compound, it's attached to
+ * the surface that the app requested, not the complex root. See
+ * GetAttachedSurface for a description how surfaces are found.
  *
  * This is how the current implementation works, and it was coded by looking
  * at the needs of the applications.
  *
- * So far only Z-Buffer attachments are tested, but there's no code yet
- * to activate them. Mipmaps could be tricky to activate in WineD3D.
- * Back buffers should work in 2D mode, but they are not tested.
- * Rendering to the primary surface and switching between that and
- * double buffering is not yet implemented in WineD3D, so for 3D it might
- * have unexpected results.
+ * So far only Z-Buffer attachments are tested, and they are activated in
+ * WineD3D. Mipmaps could be tricky to activate in WineD3D.
+ * Back buffers should work in 2D mode, but they are not tested(They can be
+ * attached in older iface versions). Rendering to the front buffer and
+ * switching between that and double buffering is not yet implemented in
+ * WineD3D, so for 3D it might have unexpected results.
+ *
+ * IDirectDrawSurfaceImpl_AddAttachedSurface is the real thing,
+ * IDirectDrawSurface7Impl_AddAttachedSurface is a wrapper around it that
+ * performs additional checks. Version 7 of this interface is much more restrictive
+ * than its predecessors.
  *
  * Params:
  *  Attach: Surface to attach to iface
@@ -772,37 +804,24 @@ IDirectDrawSurfaceImpl_Blt(IDirectDrawSurface7 *iface,
  *  DDERR_CANNOTATTACHSURFACE if the surface can't be attached for some reason
  *
  *****************************************************************************/
-static HRESULT WINAPI
-IDirectDrawSurfaceImpl_AddAttachedSurface(IDirectDrawSurface7 *iface,
-                                          IDirectDrawSurface7 *Attach)
+HRESULT WINAPI
+IDirectDrawSurfaceImpl_AddAttachedSurface(IDirectDrawSurfaceImpl *This,
+                                          IDirectDrawSurfaceImpl *Surf)
 {
-    ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
-    IDirectDrawSurfaceImpl *Surf = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, Attach);
     TRACE("(%p)->(%p)\n", This, Surf);
-
-    /* Should I make sure to add it to the first complex surface? */
 
     if(Surf == This)
         return DDERR_CANNOTATTACHSURFACE; /* unchecked */
-
-    /* TODO MSDN: "You can attach only z-buffer surfaces with this method."
-     * But apparently backbuffers and mipmaps can be attached too. */
-
-    /* Set MIPMAPSUBLEVEL if this seems to be one */
-    if (This->surface_desc.ddsCaps.dwCaps &
-        Surf->surface_desc.ddsCaps.dwCaps & DDSCAPS_MIPMAP)
-    {
-        Surf->surface_desc.ddsCaps.dwCaps2 |= DDSCAPS2_MIPMAPSUBLEVEL;
-        /* FIXME: we should probably also add to dwMipMapCount of this
-          * and all parent surfaces (update create_texture if you do) */
-    }
 
     /* Check if the surface is already attached somewhere */
     if( (Surf->next_attached != NULL) ||
         (Surf->first_attached != Surf) )
     {
-         ERR("(%p) The Surface %p is already attached somewhere else: next_attached = %p, first_attached = %p, can't handle by now\n", This, Surf, Surf->next_attached, Surf->first_attached);
-        return DDERR_CANNOTATTACHSURFACE;
+        /* TODO: Test for the structure of the manual attachment. Is it a chain or a list?
+         * What happens if one surface is attached to 2 different surfaces?
+         */
+        FIXME("(%p) The Surface %p is already attached somewhere else: next_attached = %p, first_attached = %p, can't handle by now\n", This, Surf, Surf->next_attached, Surf->first_attached);
+        return DDERR_SURFACEALREADYATTACHED;
     }
 
     /* This inserts the new surface at the 2nd position in the chain, right after the root surface */
@@ -810,21 +829,38 @@ IDirectDrawSurfaceImpl_AddAttachedSurface(IDirectDrawSurface7 *iface,
     Surf->first_attached = This->first_attached;
     This->next_attached = Surf;
 
-    /* Check if we attach a back buffer to the primary */
-    if(Surf->surface_desc.ddsCaps.dwCaps & DDSCAPS_ZBUFFER &&
-       This->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE)
+    /* Check if the WineD3D depth stencil needs updating */
+    if(This->ddraw->d3ddevice)
     {
-        IWineD3DDevice_SetDepthStencilSurface(This->ddraw->wineD3DDevice,
-                                              Surf->WineD3DSurface);
+        IDirect3DDeviceImpl_UpdateDepthStencil(This->ddraw->d3ddevice);
     }
 
     /* MSDN: 
      * "This method increments the reference count of the surface being attached."
      */
-    IDirectDrawSurface7_AddRef(Attach);
+    IDirectDrawSurface7_AddRef(ICOM_INTERFACE(Surf, IDirectDrawSurface7));
     return DD_OK;
 }
 
+static HRESULT WINAPI
+IDirectDrawSurface7Impl_AddAttachedSurface(IDirectDrawSurface7 *iface,
+                                           IDirectDrawSurface7 *Attach)
+{
+    ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
+    IDirectDrawSurfaceImpl *Surf = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, Attach);
+
+    /* Version 7 of this interface seems to refuse everything except z buffers, as per msdn */
+    if(!(Surf->surface_desc.ddsCaps.dwCaps & DDSCAPS_ZBUFFER))
+    {
+
+        WARN("Application tries to attach a non Z buffer surface. caps %08x\n",
+              Surf->surface_desc.ddsCaps.dwCaps);
+        return DDERR_CANNOTATTACHSURFACE;
+    }
+
+    return IDirectDrawSurfaceImpl_AddAttachedSurface(This,
+                                                     Surf);
+}
 /*****************************************************************************
  * IDirectDrawSurface7::DeleteAttachedSurface
  *
@@ -851,7 +887,7 @@ IDirectDrawSurfaceImpl_DeleteAttachedSurface(IDirectDrawSurface7 *iface,
     TRACE("(%p)->(%08x,%p)\n", This, Flags, Surf);
 
     if (!Surf || (Surf->first_attached != This) || (Surf == This) )
-        return DDERR_SURFACENOTATTACHED; /* unchecked */
+        return DDERR_CANNOTDETACHSURFACE;
 
     /* Remove MIPMAPSUBLEVEL if this seemed to be one */
     if (This->surface_desc.ddsCaps.dwCaps &
@@ -877,12 +913,10 @@ IDirectDrawSurfaceImpl_DeleteAttachedSurface(IDirectDrawSurface7 *iface,
     Surf->next_attached = NULL;
     Surf->first_attached = Surf;
 
-    /* Check if we attach a back buffer to the primary */
-    if(Surf->surface_desc.ddsCaps.dwCaps & DDSCAPS_ZBUFFER &&
-       This->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE)
+    /* Check if the WineD3D depth stencil needs updating */
+    if(This->ddraw->d3ddevice)
     {
-        IWineD3DDevice_SetDepthStencilSurface(This->ddraw->wineD3DDevice,
-                                              NULL);
+        IDirect3DDeviceImpl_UpdateDepthStencil(This->ddraw->d3ddevice);
     }
 
     IDirectDrawSurface7_Release(Attach);
@@ -1071,13 +1105,19 @@ IDirectDrawSurfaceImpl_SetPrivateData(IDirectDrawSurface7 *iface,
                                       DWORD Flags)
 {
     ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
+    HRESULT hr;
     TRACE("(%p)->(%s,%p,%d,%x): Relay\n", This, debugstr_guid(tag), Data, Size, Flags);
 
-    return IWineD3DSurface_SetPrivateData(This->WineD3DSurface,
-                                          tag,
-                                          Data,
-                                          Size,
-                                          Flags);
+    hr = IWineD3DSurface_SetPrivateData(This->WineD3DSurface,
+                                        tag,
+                                        Data,
+                                        Size,
+                                        Flags);
+    switch(hr)
+    {
+        case WINED3DERR_INVALIDCALL:        return DDERR_INVALIDPARAMS;
+        default:                            return hr;
+    }
 }
 
 /*****************************************************************************
@@ -1222,6 +1262,7 @@ IDirectDrawSurfaceImpl_EnumAttachedSurfaces(IDirectDrawSurface7 *iface,
     ICOM_THIS_FROM(IDirectDrawSurfaceImpl, IDirectDrawSurface7, iface);
     IDirectDrawSurfaceImpl *surf;
     DDSURFACEDESC2 desc;
+    int i;
 
     /* Attached surfaces aren't handled in WineD3D */
     TRACE("(%p)->(%p,%p)\n",This,context,cb);
@@ -1229,8 +1270,11 @@ IDirectDrawSurfaceImpl_EnumAttachedSurfaces(IDirectDrawSurface7 *iface,
     if(!cb)
         return DDERR_INVALIDPARAMS;
 
-    for (surf = This->next_complex; surf != NULL; surf = surf->next_complex)
+    for(i = 0; i < MAX_COMPLEX_ATTACHED; i++)
     {
+        surf = This->complex_array[i];
+        if(!surf) break;
+
         IDirectDrawSurface7_AddRef(ICOM_INTERFACE(surf, IDirectDrawSurface7));
         desc = surf->surface_desc;
         /* check: != DDENUMRET_OK or == DDENUMRET_CANCEL? */
@@ -1796,8 +1840,8 @@ IDirectDrawSurfaceImpl_SetLOD(IDirectDrawSurface7 *iface,
         return DDERR_INVALIDOBJECT;
     }
 
-    return IWineD3DTexture_SetLOD(This->wineD3DTexture,
-                                  MaxLOD);
+    return IWineD3DBaseTexture_SetLOD(This->wineD3DTexture,
+                                      MaxLOD);
 }
 
 /*****************************************************************************
@@ -1827,7 +1871,7 @@ IDirectDrawSurfaceImpl_GetLOD(IDirectDrawSurface7 *iface,
     if (!(This->surface_desc.ddsCaps.dwCaps2 & DDSCAPS2_TEXTUREMANAGE))
         return DDERR_INVALIDOBJECT;
 
-    *MaxLOD = IWineD3DTexture_GetLOD(This->wineD3DTexture);
+    *MaxLOD = IWineD3DBaseTexture_GetLOD(This->wineD3DTexture);
     return DD_OK;
 }
 
@@ -1937,7 +1981,7 @@ IDirectDrawSurfaceImpl_SetClipper(IDirectDrawSurface7 *iface,
     if(oldClipper)
         IDirectDrawClipper_Release(ICOM_INTERFACE(oldClipper, IDirectDrawClipper));
 
-    return DD_OK;
+    return IWineD3DSurface_SetClipper(This->WineD3DSurface, This->clipper->wineD3DClipper);
 }
 
 /*****************************************************************************
@@ -1969,12 +2013,6 @@ IDirectDrawSurfaceImpl_SetSurfaceDesc(IDirectDrawSurface7 *iface,
     if(!DDSD)
         return DDERR_INVALIDPARAMS;
 
-    if (DDSD->dwFlags & DDSD_LPSURFACE && DDSD->lpSurface)
-    {
-        ERR("Setting the surface memory isn't supported yet\n");
-        return DDERR_INVALIDPARAMS;
-
-    }
     if (DDSD->dwFlags & DDSD_PIXELFORMAT)
     {
         newFormat = PixelFormat_DD2WineD3D(&DDSD->u4.ddpfPixelFormat);
@@ -2015,14 +2053,19 @@ IDirectDrawSurfaceImpl_SetSurfaceDesc(IDirectDrawSurface7 *iface,
                                     DDCKEY_SRCBLT,
                                     (WINEDDCOLORKEY *) &DDSD->ddckCKSrcBlt);
     }
-    if (DDSD->dwFlags & DDSD_LPSURFACE)
+    if (DDSD->dwFlags & DDSD_LPSURFACE && DDSD->lpSurface)
     {
         hr = IWineD3DSurface_SetMem(This->WineD3DSurface, DDSD->lpSurface);
         if(hr != WINED3D_OK)
         {
             /* No need for a trace here, wined3d does that for us */
-            return hr;
+            switch(hr)
+            {
+                case WINED3DERR_INVALIDCALL:        return DDERR_INVALIDPARAMS;
+                default:                            break; /* Go on */
+            }
         }
+
     }
 
     This->surface_desc = *DDSD;
@@ -2238,13 +2281,31 @@ IDirectDrawSurfaceImpl_SetPalette(IDirectDrawSurface7 *iface,
     /* Release the old palette */
     if(oldPal) IDirectDrawPalette_Release(oldPal);
 
-    /* If this is a front buffer, also update the back buffers */
+    /* If this is a front buffer, also update the back buffers
+     * TODO: How do things work for palettized cube textures?
+     */
     if(This->surface_desc.ddsCaps.dwCaps & DDSCAPS_FRONTBUFFER)
     {
-        for(surf = This->next_complex; surf != NULL; surf = surf->next_complex)
+        /* For primary surfaces the tree is just a list, so the simpler scheme fits too */
+        DDSCAPS2 caps2 = { DDSCAPS_PRIMARYSURFACE, 0, 0, 0 };
+
+        surf = This;
+        while(1)
         {
-            IDirectDrawSurface7_SetPalette(ICOM_INTERFACE(surf, IDirectDrawSurface7),
+            IDirectDrawSurface7 *attach;
+            HRESULT hr;
+            hr = IDirectDrawSurface7_GetAttachedSurface(ICOM_INTERFACE(surf, IDirectDrawSurface7),
+                                                        &caps2, &attach);
+            if(hr != DD_OK)
+            {
+                break;
+            }
+
+            TRACE("Setting palette on %p\n", attach);
+            IDirectDrawSurface7_SetPalette(attach,
                                            Pal);
+            surf = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, attach);
+            IDirectDrawSurface7_Release(attach);
         }
     }
 
@@ -2262,7 +2323,7 @@ const IDirectDrawSurface7Vtbl IDirectDrawSurface7_Vtbl =
     IDirectDrawSurfaceImpl_AddRef,
     IDirectDrawSurfaceImpl_Release,
     /*** IDirectDrawSurface ***/
-    IDirectDrawSurfaceImpl_AddAttachedSurface,
+    IDirectDrawSurface7Impl_AddAttachedSurface,
     IDirectDrawSurfaceImpl_AddOverlayDirtyRect,
     IDirectDrawSurfaceImpl_Blt,
     IDirectDrawSurfaceImpl_BltBatch,

@@ -27,7 +27,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "rpcnterr.h"
 #include "winreg.h"
 #include "winternl.h"
 #include "winioctl.h"
@@ -1750,7 +1749,7 @@ GetFileSecurityW( LPCWSTR lpFileName,
     NTSTATUS status;
 
     hfile = CreateFileW( lpFileName, GENERIC_READ, FILE_SHARE_READ,
-                         NULL, OPEN_EXISTING, 0, 0 );
+                         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0 );
     if ( hfile == INVALID_HANDLE_VALUE )
         return FALSE;
 
@@ -2865,7 +2864,8 @@ DWORD WINAPI SetEntriesInAclA( ULONG count, PEXPLICIT_ACCESSA pEntries,
                                PACL OldAcl, PACL* NewAcl )
 {
     FIXME("%d %p %p %p\n",count,pEntries,OldAcl,NewAcl);
-    return ERROR_CALL_NOT_IMPLEMENTED;
+    *NewAcl = NULL;
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************

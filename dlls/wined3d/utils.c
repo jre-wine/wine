@@ -866,7 +866,6 @@ void set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEX
 
 
     /* This is called by a state handler which has the gl lock held and a context for the thread */
-
     switch(op)
     {
         case WINED3DTOP_DISABLE:
@@ -1129,6 +1128,23 @@ void set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEX
             GL_EXTCALL(glCombinerOutputNV(target, portion, GL_DISCARD_NV, GL_DISCARD_NV,
                     GL_SPARE0_NV, GL_NONE, GL_NONE, GL_FALSE, GL_FALSE, GL_FALSE));
             break;
+
+        case WINED3DTOP_BUMPENVMAPLUMINANCE:
+        case WINED3DTOP_BUMPENVMAP:
+            if(GL_SUPPORT(NV_TEXTURE_SHADER)) {
+                /* The bump map stage itself isn't exciting, just read the texture. But tell the next stage to
+                 * perform bump mapping and source from the current stage. Pretty much a SELECTARG2.
+                 * ARG2 is passed through unmodified(apps will most likely use D3DTA_CURRENT for arg2, arg1
+                 * (which will most likely be D3DTA_TEXTURE) is available as a texture shader input for the next stage
+                 */
+                GL_EXTCALL(glCombinerInputNV(target, portion, GL_VARIABLE_A_NV,
+                        tex_op_args.input[1], tex_op_args.mapping[1], tex_op_args.component_usage[1]));
+                GL_EXTCALL(glCombinerInputNV(target, portion, GL_VARIABLE_B_NV,
+                        GL_ZERO, GL_UNSIGNED_INVERT_NV, portion));
+                GL_EXTCALL(glCombinerOutputNV(target, portion, GL_SPARE0_NV, GL_DISCARD_NV,
+                        GL_DISCARD_NV, GL_NONE, GL_NONE, GL_FALSE, GL_FALSE, GL_FALSE));
+                break;
+            }
 
         default:
             FIXME("Unhandled WINED3DTOP: stage %d, is_alpha %d, op %s (%#x), arg1 %#x, arg2 %#x, arg3 %#x, texture_idx %d\n",
@@ -1727,6 +1743,7 @@ void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP
             }
 
           case WINED3DTOP_BUMPENVMAPLUMINANCE:
+                FIXME("Implement bump environment mapping in GL_NV_texture_env_combine4 path\n");
 
           default:
             Handled = FALSE;
@@ -2168,6 +2185,46 @@ void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP
                 } else
                   Handled = FALSE;
                 break;
+        case WINED3DTOP_BUMPENVMAPLUMINANCE:
+                if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+                    /* Some apps use BUMPENVMAPLUMINANCE instead of D3DTOP_BUMPENVMAP, although
+                     * they check for the non-luminance cap flag. Well, give them what they asked
+                     * for :-)
+                     */
+                    WARN("Application uses WINED3DTOP_BUMPENVMAPLUMINANCE\n");
+                } else {
+                    Handled = FALSE;
+                    break;
+                }
+                /* Fall through */
+        case WINED3DTOP_BUMPENVMAP:
+                if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+                    TRACE("Using ati bumpmap on stage %d, target %d\n", Stage, Stage + 1);
+                    glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_BUMP_ENVMAP_ATI);
+                    checkGLcall("glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_BUMP_ENVMAP_ATI)");
+                    glTexEnvi(GL_TEXTURE_ENV, GL_BUMP_TARGET_ATI, GL_TEXTURE0_ARB + Stage + 1);
+                    checkGLcall("glTexEnvi(GL_TEXTURE_ENV, GL_BUMP_TARGET_ATI, GL_TEXTURE0_ARB + Stage + 1)");
+                    glTexEnvi(GL_TEXTURE_ENV, src0_target, src3);
+                    checkGLcall("GL_TEXTURE_ENV, src0_target, src3");
+                    glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr3);
+                    checkGLcall("GL_TEXTURE_ENV, opr0_target, opr3");
+                    glTexEnvi(GL_TEXTURE_ENV, src1_target, src1);
+                    checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                    glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr1);
+                    checkGLcall("GL_TEXTURE_ENV, opr1_target, opr1");
+                    glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                    checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                    glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                    checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+
+                    Handled = TRUE;
+                    break;
+                } else if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                    /* Technically texture shader support without register combiners is possible, but not expected to occur
+                     * on real world cards, so for now a fixme should be enough
+                     */
+                    FIXME("Implement bump mapping with GL_NV_texture_shader in non register combiner path\n");
+                }
         default:
                 Handled = FALSE;
         }
@@ -2488,9 +2545,14 @@ DWORD get_flexible_vertex_size(DWORD d3dvtVertexType) {
     if (d3dvtVertexType & WINED3DFVF_SPECULAR) size += sizeof(DWORD);
     if (d3dvtVertexType & WINED3DFVF_PSIZE) size += sizeof(DWORD);
     switch (d3dvtVertexType & WINED3DFVF_POSITION_MASK) {
-        case WINED3DFVF_XYZ: size += 3 * sizeof(float); break;
+        case WINED3DFVF_XYZ:    size += 3 * sizeof(float); break;
         case WINED3DFVF_XYZRHW: size += 4 * sizeof(float); break;
-        default: TRACE(" matrix weighting not handled yet...\n");
+        case WINED3DFVF_XYZB1:  size += 4 * sizeof(float); break;
+        case WINED3DFVF_XYZB2:  size += 5 * sizeof(float); break;
+        case WINED3DFVF_XYZB3:  size += 6 * sizeof(float); break;
+        case WINED3DFVF_XYZB4:  size += 7 * sizeof(float); break;
+        case WINED3DFVF_XYZB5:  size += 8 * sizeof(float); break;
+        default: ERR("Unexpected position mask\n");
     }
     for (i = 0; i < numTextures; i++) {
         size += GET_TEXCOORD_SIZE_FROM_FVF(d3dvtVertexType, i) * sizeof(float);

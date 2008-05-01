@@ -1,5 +1,5 @@
 /*
- * Wine Midi driver for MacOSX
+ * Wine Midi driver for Mac OS X
  *
  * Copyright 2006 Emmanuel Maillard
  *
@@ -26,6 +26,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(midi);
 
 #ifdef HAVE_COREAUDIO_COREAUDIO_H
 #include <CoreMIDI/CoreMIDI.h>
+#include <mach/mach_time.h>
 
 #include "coremidi.h"
 
@@ -63,7 +64,7 @@ void MIDIIn_ReadProc(const MIDIPacketList *pktlist, void *refCon, void *connRefC
 
     MIDIPacket *packet = (MIDIPacket *)pktlist->packet;
     for (i = 0; i < pktlist->numPackets; ++i) {
-        msg.devID = *((UInt16 *)refCon);
+        msg.devID = *((UInt16 *)connRefCon);
         msg.length = packet->length;
         memcpy(msg.data, packet->data, sizeof(packet->data));
 
@@ -71,5 +72,17 @@ void MIDIIn_ReadProc(const MIDIPacketList *pktlist, void *refCon, void *connRefC
 
         packet = MIDIPacketNext(packet);
     }
+}
+
+void MIDIOut_Send(MIDIPortRef port, MIDIEndpointRef dest, UInt8 *buffer, unsigned length)
+{
+    Byte packetBuff[512];
+    MIDIPacketList *packetList = (MIDIPacketList *)packetBuff;
+
+    MIDIPacket *packet = MIDIPacketListInit(packetList);
+
+    packet = MIDIPacketListAdd(packetList, sizeof(packetBuff), packet, mach_absolute_time(), length, buffer);
+    if (packet)
+        MIDISend(port, dest, packetList);
 }
 #endif /* HAVE_COREAUDIO_COREAUDIO_H */

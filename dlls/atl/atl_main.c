@@ -208,6 +208,18 @@ IUnknown* WINAPI AtlComPtrAssign(IUnknown** pp, IUnknown *p)
     return p;
 }
 
+IUnknown* WINAPI AtlComQIPtrAssign(IUnknown** pp, IUnknown *p, REFIID riid)
+{
+    IUnknown *new_p = NULL;
+
+    TRACE("(%p %p %s)\n", pp, p, debugstr_guid(riid));
+
+    if (p) IUnknown_QueryInterface(p, riid, (void **)&new_p);
+    if (*pp) IUnknown_Release(*pp);
+    *pp = new_p;
+    return new_p;
+}
+
 
 HRESULT WINAPI AtlInternalQueryInterface(void* this, const _ATL_INTMAP_ENTRY* pEntries,  REFIID iid, void** ppvObject)
 {
@@ -521,4 +533,33 @@ void* WINAPI AtlModuleExtractCreateWndData(_ATL_MODULEW *pM)
         }
     }
     return NULL;
+}
+
+/* FIXME: should be in a header file */
+typedef struct ATL_PROPMAP_ENTRY
+{
+    LPCOLESTR szDesc;
+    DISPID dispid;
+    const CLSID* pclsidPropPage;
+    const IID* piidDispatch;
+    DWORD dwOffsetData;
+    DWORD dwSizeData;
+    VARTYPE vt;
+} ATL_PROPMAP_ENTRY;
+
+HRESULT WINAPI AtlIPersistStreamInit_Load( LPSTREAM pStm, ATL_PROPMAP_ENTRY *pMap,
+                                           void *pThis, IUnknown *pUnk)
+{
+    FIXME("(%p, %p, %p, %p)\n", pStm, pMap, pThis, pUnk);
+
+    return S_OK;
+}
+
+HRESULT WINAPI AtlIPersistStreamInit_Save(LPSTREAM pStm, BOOL fClearDirty,
+                                          ATL_PROPMAP_ENTRY *pMap, void *pThis,
+                                          IUnknown *pUnk)
+{
+    FIXME("(%p, %d, %p, %p, %p)\n", pStm, fClearDirty, pMap, pThis, pUnk);
+
+    return S_OK;
 }

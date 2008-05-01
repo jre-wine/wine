@@ -347,11 +347,12 @@ void nsnode_to_nsstring(nsIDOMNode*,nsAString*);
 
 BSCallback *create_bscallback(IMoniker*);
 HRESULT start_binding(BSCallback*);
+HRESULT load_stream(BSCallback*,IStream*);
 void set_document_bscallback(HTMLDocument*,BSCallback*);
 
 IHlink *Hlink_Create(void);
 IHTMLSelectionObject *HTMLSelectionObject_Create(nsISelection*);
-IHTMLTxtRange *HTMLTxtRange_Create(nsISelection*);
+IHTMLTxtRange *HTMLTxtRange_Create(nsIDOMRange*);
 IHTMLStyle *HTMLStyle_Create(nsIDOMCSSStyleDeclaration*);
 IHTMLStyleSheet *HTMLStyleSheet_Create(void);
 

@@ -720,17 +720,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
     } else {
         TRACE("Lock Rect (%p) = l %d, t %d, r %d, b %d\n", pRect, pRect->left, pRect->top, pRect->right, pRect->bottom);
 
-        if ((pRect->top < 0) ||
-             (pRect->left < 0) ||
-             (pRect->left >= pRect->right) ||
-             (pRect->top >= pRect->bottom) ||
-             (pRect->right > This->currentDesc.Width) ||
-             (pRect->bottom > This->currentDesc.Height))
-        {
-            WARN(" Invalid values in pRect !!!\n");
-            return WINED3DERR_INVALIDCALL;
-        }
-
         /* DXTn textures are based on compressed blocks of 4x4 pixels, each
          * 16 bytes large (8 bytes in case of DXT1). Because of that Pitch has
          * slightly different meaning compared to regular textures. For DXTn
@@ -1673,6 +1662,8 @@ HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UIN
                           one often used by application to prevent the nice purple borders when bi-linear
                           filtering is on */
                         table[i][3] = 0x00;
+                    } else if(pal->Flags & WINEDDPCAPS_ALPHA) {
+                        table[i][3] = pal->palents[i].peFlags;
                     } else {
                         table[i][3] = 0xFF;
                     }
@@ -1818,6 +1809,8 @@ static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES conve
                    one often used by application to prevent the nice purple borders when bi-linear
                    filtering is on */
                 table[i][3] = 0x00;
+            } else if(pal->Flags & WINEDDPCAPS_ALPHA) {
+                table[i][3] = pal->palents[i].peFlags;
             } else {
                 table[i][3] = 0xFF;
             }
@@ -2372,10 +2365,10 @@ static inline void fb_copy_to_texture_direct(IWineD3DSurfaceImpl *This, IWineD3D
     if( (xrel - 1.0 < -eps) || (xrel - 1.0 > eps)) {
         FIXME("Doing a pixel by pixel copy from the framebuffer to a texture, expect major performance issues\n");
 
-        if(Filter != WINED3DTEXF_NONE) {
+        if(Filter != WINED3DTEXF_NONE && Filter != WINED3DTEXF_POINT) {
             ERR("Texture filtering not supported in direct blit\n");
         }
-    } else if((Filter != WINED3DTEXF_NONE) && ((yrel - 1.0 < -eps) || (yrel - 1.0 > eps))) {
+    } else if((Filter != WINED3DTEXF_NONE && Filter != WINED3DTEXF_POINT) && ((yrel - 1.0 < -eps) || (yrel - 1.0 > eps))) {
         ERR("Texture filtering not supported in direct blit\n");
     }
 
@@ -2616,7 +2609,6 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
     IWineD3DDeviceImpl *myDevice = This->resource.wineD3DDevice;
     IWineD3DSwapChainImpl *srcSwapchain = NULL, *dstSwapchain = NULL;
     IWineD3DSurfaceImpl *Src = (IWineD3DSurfaceImpl *) SrcSurface;
-    BOOL SrcOK = TRUE;
 
     TRACE("(%p)->(%p,%p,%p,%08x,%p)\n", This, DestRect, SrcSurface, SrcRect, Flags, DDBltFx);
 
@@ -2655,58 +2647,102 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
     }
 
     /* The only case where both surfaces on a swapchain are supported is a back buffer -> front buffer blit on the same swapchain */
-    if(dstSwapchain && dstSwapchain == srcSwapchain) {
+    if(dstSwapchain && dstSwapchain == srcSwapchain && dstSwapchain->backBuffer &&
+       ((IWineD3DSurface *) This == dstSwapchain->frontBuffer) && SrcSurface == dstSwapchain->backBuffer[0]) {
         /* Half-life does a Blt from the back buffer to the front buffer,
          * Full surface size, no flags... Use present instead
+         *
+         * This path will only be entered for d3d7 and ddraw apps, because d3d8/9 offer no way to blit TO the front buffer
          */
 
         /* Check rects - IWineD3DDevice_Present doesn't handle them */
-        if( SrcRect ) {
-            if( (SrcRect->left == 0) && (SrcRect->top == 0) &&
-                (SrcRect->right == Src->currentDesc.Width) && (SrcRect->bottom == Src->currentDesc.Height) ) {
-                SrcOK = TRUE;
-            }
-        } else {
-            SrcOK = TRUE;
-        }
-
-        /* Check the Destination rect and the surface sizes */
-        if(SrcOK &&
-           (rect.x1 == 0) && (rect.y1 == 0) &&
-           (rect.x2 ==  This->currentDesc.Width) && (rect.y2 == This->currentDesc.Height) &&
-           (This->currentDesc.Width == Src->currentDesc.Width) &&
-           (This->currentDesc.Height == Src->currentDesc.Height)) {
-            /* These flags are unimportant for the flag check, remove them */
-
-            if((Flags & ~(WINEDDBLT_DONOTWAIT | WINEDDBLT_WAIT)) == 0) {
-                if( dstSwapchain->backBuffer && ((IWineD3DSurface *) This == dstSwapchain->frontBuffer) &&
-                    SrcSurface == dstSwapchain->backBuffer[0] ) {
-
-                    WINED3DSWAPEFFECT orig_swap = dstSwapchain->presentParms.SwapEffect;
-
-                    /* The idea behind this is that a glReadPixels and a glDrawPixels call
-                     * take very long, while a flip is fast.
-                     * This applies to Half-Life, which does such Blts every time it finished
-                     * a frame, and to Prince of Persia 3D, which uses this to draw at least the main
-                     * menu. This is also used by all apps when they do windowed rendering
-                     *
-                     * The problem is that flipping is not really the same as copying. After a
-                     * Blt the front buffer is a copy of the back buffer, and the back buffer is
-                     * untouched. Therefore it's necessary to override the swap effect
-                     * and to set it back after the flip.
-                     */
-
-                    dstSwapchain->presentParms.SwapEffect = WINED3DSWAPEFFECT_COPY;
-
-                    TRACE("Full screen back buffer -> front buffer blt, performing a flip instead\n");
-                    IWineD3DDevice_Present((IWineD3DDevice *) This->resource.wineD3DDevice,
-                                            NULL, NULL, 0, NULL);
-
-                    dstSwapchain->presentParms.SwapEffect = orig_swap;
-
-                    return WINED3D_OK;
+        while(1)
+        {
+            RECT mySrcRect;
+            TRACE("Looking if a Present can be done...\n");
+            /* Source Rectangle must be full surface */
+            if( SrcRect ) {
+                if(SrcRect->left != 0 || SrcRect->top != 0 ||
+                   SrcRect->right != Src->currentDesc.Width || SrcRect->bottom != Src->currentDesc.Height) {
+                    TRACE("No, Source rectangle doesn't match\n");
+                    break;
                 }
             }
+            mySrcRect.left = 0;
+            mySrcRect.top = 0;
+            mySrcRect.right = Src->currentDesc.Width;
+            mySrcRect.bottom = Src->currentDesc.Height;
+
+            /* No stretching may occur */
+            if(mySrcRect.right != rect.x2 - rect.x1 ||
+               mySrcRect.bottom != rect.y2 - rect.y1) {
+                TRACE("No, stretching is done\n");
+                break;
+            }
+
+            /* Destination must be full surface or match the clipping rectangle */
+            if(This->clipper && ((IWineD3DClipperImpl *) This->clipper)->hWnd)
+            {
+                RECT cliprect;
+                POINT pos[2];
+                GetClientRect(((IWineD3DClipperImpl *) This->clipper)->hWnd, &cliprect);
+                pos[0].x = rect.x1;
+                pos[0].y = rect.y1;
+                pos[1].x = rect.x2;
+                pos[1].y = rect.y2;
+                MapWindowPoints(GetDesktopWindow(), ((IWineD3DClipperImpl *) This->clipper)->hWnd,
+                                pos, 2);
+
+                if(pos[0].x != cliprect.left  || pos[0].y != cliprect.top   ||
+                   pos[1].x != cliprect.right || pos[1].y != cliprect.bottom)
+                {
+                    TRACE("No, dest rectangle doesn't match(clipper)\n");
+                    TRACE("Clip rect at (%d,%d)-(%d,%d)\n", cliprect.left, cliprect.top, cliprect.right, cliprect.bottom);
+                    TRACE("Blt dest: (%d,%d)-(%d,%d)\n", rect.x1, rect.y1, rect.x2, rect.y2);
+                    break;
+                }
+            }
+            else
+            {
+                if(rect.x1 != 0 || rect.y1 != 0 ||
+                   rect.x2 != This->currentDesc.Width || rect.y2 != This->currentDesc.Height) {
+                    TRACE("No, dest rectangle doesn't match(surface size)\n");
+                    break;
+                }
+            }
+
+            TRACE("Yes\n");
+
+            /* These flags are unimportant for the flag check, remove them */
+            if((Flags & ~(WINEDDBLT_DONOTWAIT | WINEDDBLT_WAIT)) == 0) {
+                WINED3DSWAPEFFECT orig_swap = dstSwapchain->presentParms.SwapEffect;
+
+                /* The idea behind this is that a glReadPixels and a glDrawPixels call
+                    * take very long, while a flip is fast.
+                    * This applies to Half-Life, which does such Blts every time it finished
+                    * a frame, and to Prince of Persia 3D, which uses this to draw at least the main
+                    * menu. This is also used by all apps when they do windowed rendering
+                    *
+                    * The problem is that flipping is not really the same as copying. After a
+                    * Blt the front buffer is a copy of the back buffer, and the back buffer is
+                    * untouched. Therefore it's necessary to override the swap effect
+                    * and to set it back after the flip.
+                    *
+                    * Windowed Direct3D < 7 apps do the same. The D3D7 sdk demso are nice
+                    * testcases.
+                    */
+
+                dstSwapchain->presentParms.SwapEffect = WINED3DSWAPEFFECT_COPY;
+
+                TRACE("Full screen back buffer -> front buffer blt, performing a flip instead\n");
+                IWineD3DDevice_Present((IWineD3DDevice *) This->resource.wineD3DDevice,
+                                        NULL, NULL, 0, NULL);
+
+                dstSwapchain->presentParms.SwapEffect = orig_swap;
+
+                return WINED3D_OK;
+            }
+            break;
         }
 
         TRACE("Unsupported blit between buffers on the same swapchain\n");
@@ -3050,6 +3086,26 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
     return WINED3DERR_INVALIDCALL;
 }
 
+static HRESULT WINAPI IWineD3DSurfaceImpl_BltZ(IWineD3DSurfaceImpl *This, RECT *DestRect, IWineD3DSurface *SrcSurface, RECT *SrcRect, DWORD Flags, WINEDDBLTFX *DDBltFx)
+{
+    IWineD3DDeviceImpl *myDevice = This->resource.wineD3DDevice;
+
+    if (Flags & WINEDDBLT_DEPTHFILL) {
+        return IWineD3DDevice_Clear((IWineD3DDevice *) myDevice,
+                                    DestRect == NULL ? 0 : 1,
+                                    (WINED3DRECT *) DestRect,
+                                    WINED3DCLEAR_ZBUFFER,
+                                    0x00000000,
+                                    (float) DDBltFx->u5.dwFillDepth / (float) MAXDWORD,
+                                    0x00000000);
+
+        return WINED3D_OK;
+    }
+
+    FIXME("(%p): Unsupp depthstencil blit\n", This);
+    return WINED3DERR_INVALIDCALL;
+}
+
 static HRESULT WINAPI IWineD3DSurfaceImpl_Blt(IWineD3DSurface *iface, RECT *DestRect, IWineD3DSurface *SrcSurface, RECT *SrcRect, DWORD Flags, WINEDDBLTFX *DDBltFx, WINED3DTEXTUREFILTERTYPE Filter) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     IWineD3DSurfaceImpl *Src = (IWineD3DSurfaceImpl *) SrcSurface;
@@ -3058,11 +3114,14 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_Blt(IWineD3DSurface *iface, RECT *Dest
     TRACE("(%p): Usage is %s\n", This, debug_d3dusage(This->resource.usage));
 
     /* Accessing the depth stencil is supposed to fail between a BeginScene and EndScene pair */
-    if(myDevice->inScene &&
-       (iface == myDevice->stencilBufferTarget ||
-       (SrcSurface && SrcSurface == myDevice->stencilBufferTarget))) {
-        TRACE("Attempt to access the depth stencil surface in a BeginScene / EndScene pair, returning WINED3DERR_INVALIDCALL\n");
-        return WINED3DERR_INVALIDCALL;
+    if(iface == myDevice->stencilBufferTarget || (SrcSurface && SrcSurface == myDevice->stencilBufferTarget)) {
+        if(myDevice->inScene) {
+            TRACE("Attempt to access the depth stencil surface in a BeginScene / EndScene pair, returning WINED3DERR_INVALIDCALL\n");
+            return WINED3DERR_INVALIDCALL;
+        } else if(IWineD3DSurfaceImpl_BltZ(This, DestRect, SrcSurface, SrcRect, Flags, DDBltFx) == WINED3D_OK) {
+            TRACE("Z Blit override handled the blit\n");
+            return WINED3D_OK;
+        }
     }
 
     /* Special cases for RenderTargets */
@@ -3171,7 +3230,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_BltFast(IWineD3DSurface *iface, DWORD dstx, D
         if(trans & WINEDDBLTFAST_DONOTWAIT)
             Flags |= WINEDDBLT_DONOTWAIT;
 
-        if(IWineD3DSurfaceImpl_BltOverride(This, &DstRect, Source, &SrcRect, Flags, NULL, WINED3DTEXF_NONE) == WINED3D_OK) return WINED3D_OK;
+        if(IWineD3DSurfaceImpl_BltOverride(This, &DstRect, Source, &SrcRect, Flags, NULL, WINED3DTEXF_POINT) == WINED3D_OK) return WINED3D_OK;
     }
 
 
@@ -3430,6 +3489,27 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
     return WINED3D_OK;
 }
 
+HRESULT WINAPI IWineD3DSurfaceImpl_SetClipper(IWineD3DSurface *iface, IWineD3DClipper *clipper)
+{
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *) iface;
+    TRACE("(%p)->(%p)\n", This, clipper);
+
+    This->clipper = clipper;
+    return WINED3D_OK;
+}
+
+HRESULT WINAPI IWineD3DSurfaceImpl_GetClipper(IWineD3DSurface *iface, IWineD3DClipper **clipper)
+{
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *) iface;
+    TRACE("(%p)->(%p)\n", This, clipper);
+
+    *clipper = This->clipper;
+    if(*clipper) {
+        IWineD3DClipper_AddRef(*clipper);
+    }
+    return WINED3D_OK;
+}
+
 const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl =
 {
     /* IUnknown */
@@ -3470,6 +3550,8 @@ const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl =
     IWineD3DSurfaceImpl_GetOverlayPosition,
     IWineD3DSurfaceImpl_UpdateOverlayZOrder,
     IWineD3DSurfaceImpl_UpdateOverlay,
+    IWineD3DSurfaceImpl_SetClipper,
+    IWineD3DSurfaceImpl_GetClipper,
     /* Internal use: */
     IWineD3DSurfaceImpl_AddDirtyRect,
     IWineD3DSurfaceImpl_LoadTexture,

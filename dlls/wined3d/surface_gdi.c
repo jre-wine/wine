@@ -68,6 +68,13 @@ x11_copy_to_screen(IWineD3DSurfaceImpl *This,
             TRACE(" copying rect (%d,%d)->(%d,%d), offset (%d,%d)\n",
             rc->left, rc->top, rc->right, rc->bottom, offset.x, offset.y);
         }
+
+        /* Front buffer coordinates are screen coordinates. Map them to the destination
+         * window if not fullscreened
+         */
+        if(!This->resource.wineD3DDevice->ddraw_fullscreen) {
+            ClientToScreen(hDisplayWnd, &offset);
+        }
 #if 0
         /* FIXME: this doesn't work... if users really want to run
         * X in 8bpp, then we need to call directly into display.drv
@@ -88,7 +95,7 @@ x11_copy_to_screen(IWineD3DSurfaceImpl *This,
         if (This->clipper)
         {
             RECT xrc;
-            HWND hwnd = This->clipper->hWnd;
+            HWND hwnd = ((IWineD3DClipperImpl *) This->clipper)->hWnd;
             if (hwnd && GetClientRect(hwnd,&xrc))
             {
                 OffsetRect(&xrc,offset.x,offset.y);
@@ -208,17 +215,6 @@ IWineGDISurfaceImpl_LockRect(IWineD3DSurface *iface,
     {
         TRACE("Lock Rect (%p) = l %d, t %d, r %d, b %d\n",
               pRect, pRect->left, pRect->top, pRect->right, pRect->bottom);
-
-        if ((pRect->top < 0) ||
-             (pRect->left < 0) ||
-             (pRect->left >= pRect->right) ||
-             (pRect->top >= pRect->bottom) ||
-             (pRect->right > This->currentDesc.Width) ||
-             (pRect->bottom > This->currentDesc.Height))
-        {
-            WARN(" Invalid values in pRect !!!\n");
-            return WINED3DERR_INVALIDCALL;
-        }
 
         if (This->resource.format == WINED3DFMT_DXT1)
         {
@@ -529,7 +525,7 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
         return WINEDDERR_SURFACEBUSY;
     }
 
-    if(Filter != WINED3DTEXF_NONE) {
+    if(Filter != WINED3DTEXF_NONE && Filter != WINED3DTEXF_POINT) {
         /* Can happen when d3d9 apps do a StretchRect call which isn't handled in gl */
         FIXME("Filters not supported in software blit\n");
     }
@@ -566,8 +562,7 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
             ret = WINED3DERR_WRONGTEXTUREFORMAT;
             goto release;
         }
-        TRACE("Fourcc->Fourcc copy)\n");
-        memcpy(dlock.pBits, slock.pBits, This->currentDesc.Height * dlock.Pitch);
+        memcpy(dlock.pBits, slock.pBits, This->resource.size);
         goto release;
     }
 
@@ -1601,6 +1596,8 @@ const IWineD3DSurfaceVtbl IWineGDISurface_Vtbl =
     IWineD3DSurfaceImpl_GetOverlayPosition,
     IWineD3DSurfaceImpl_UpdateOverlayZOrder,
     IWineD3DSurfaceImpl_UpdateOverlay,
+    IWineD3DSurfaceImpl_SetClipper,
+    IWineD3DSurfaceImpl_GetClipper,
     /* Internal use: */
     IWineD3DSurfaceImpl_AddDirtyRect,
     IWineGDISurfaceImpl_LoadTexture,

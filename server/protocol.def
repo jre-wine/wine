@@ -1104,6 +1104,8 @@ struct console_renderer_event
     int          history_mode;  /* whether we duplicate lines in history */
     int          history_size;  /* number of lines in history */
     int          edition_mode;  /* index to the edition mode flavors */
+    int          input_cp;      /* console input codepage */
+    int          output_cp;     /* console output codepage */
     VARARG(title,unicode_str);  /* console title */
 @END
 #define SET_CONSOLE_INPUT_INFO_ACTIVE_SB        0x01
@@ -1111,6 +1113,8 @@ struct console_renderer_event
 #define SET_CONSOLE_INPUT_INFO_HISTORY_MODE     0x04
 #define SET_CONSOLE_INPUT_INFO_HISTORY_SIZE     0x08
 #define SET_CONSOLE_INPUT_INFO_EDITION_MODE     0x10
+#define SET_CONSOLE_INPUT_INFO_INPUT_CODEPAGE   0x20
+#define SET_CONSOLE_INPUT_INFO_OUTPUT_CODEPAGE  0x40
 
 
 /* Get info about a console (input only) */
@@ -1121,6 +1125,8 @@ struct console_renderer_event
     int          history_size;  /* number of lines in history */
     int          history_index; /* number of used lines in history */
     int          edition_mode;  /* index to the edition mode flavors */
+    int          input_cp;      /* console input codepage */
+    int          output_cp;     /* console output codepage */
     VARARG(title,unicode_str);  /* console title */
 @END
 
@@ -1972,6 +1978,17 @@ enum message_type
     ioctl_code_t   code;          /* ioctl code */
     async_data_t   async;         /* async I/O parameters */
     VARARG(in_data,bytes);        /* ioctl input data */
+@REPLY
+    obj_handle_t   wait;          /* handle to wait on for blocking ioctl */
+    unsigned int   options;       /* device open options */
+    VARARG(out_data,bytes);       /* ioctl output data */
+@END
+
+
+/* Retrieve results of an async ioctl */
+@REQ(get_ioctl_result)
+    obj_handle_t   handle;        /* handle to the device */
+    void*          user_arg;      /* user arg used to identify the request */
 @REPLY
     VARARG(out_data,bytes);       /* ioctl output data */
 @END
@@ -2851,4 +2868,48 @@ enum message_type
 @REQ(allocate_locally_unique_id)
 @REPLY
     luid_t         luid;
+@END
+
+
+/* Create a device manager */
+@REQ(create_device_manager)
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+@REPLY
+    obj_handle_t handle;          /* handle to the device */
+@END
+
+
+/* Create a device */
+@REQ(create_device)
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+    obj_handle_t rootdir;         /* root directory */
+    obj_handle_t manager;         /* device manager */
+    void*        user_ptr;        /* opaque ptr for use by client */
+    VARARG(name,unicode_str);     /* object name */
+@REPLY
+    obj_handle_t handle;          /* handle to the device */
+@END
+
+
+/* Delete a device */
+@REQ(delete_device)
+    obj_handle_t handle;          /* handle to the device */
+@END
+
+
+/* Retrieve the next pending device ioctl request */
+@REQ(get_next_device_request)
+    obj_handle_t manager;         /* handle to the device manager */
+    obj_handle_t prev;            /* handle to the previous ioctl */
+    unsigned int status;          /* status of the previous ioctl */
+    VARARG(prev_data,bytes);      /* output data of the previous ioctl */
+@REPLY
+    obj_handle_t next;            /* handle to the next ioctl */
+    ioctl_code_t code;            /* ioctl code */
+    void*        user_ptr;        /* opaque ptr for the device */
+    data_size_t  in_size;         /* total needed input size */
+    data_size_t  out_size;        /* needed output size */
+    VARARG(next_data,bytes);      /* input data of the next ioctl */
 @END

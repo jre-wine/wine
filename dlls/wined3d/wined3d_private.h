@@ -303,7 +303,8 @@ do {                                                                            
 
 /* Trace vector and strided data information */
 #define TRACE_VECTOR(name) TRACE( #name "=(%f, %f, %f, %f)\n", name.x, name.y, name.z, name.w);
-#define TRACE_STRIDED(sd,name) TRACE( #name "=(data:%p, stride:%d, type:%d)\n", sd->u.s.name.lpData, sd->u.s.name.dwStride, sd->u.s.name.dwType);
+#define TRACE_STRIDED(sd,name) TRACE( #name "=(data:%p, stride:%d, type:%d, vbo %d, stream %u)\n", \
+        sd->u.s.name.lpData, sd->u.s.name.dwStride, sd->u.s.name.dwType, sd->u.s.name.VBO, sd->u.s.name.streamNo);
 
 /* Defines used for optimizations */
 
@@ -516,6 +517,7 @@ struct WineD3DContext {
     BOOL                    lastWasPow2Texture[MAX_TEXTURES];
     GLenum                  tracking_parm;     /* Which source is tracking current colour         */
     BOOL                    last_was_blit, last_was_ckey;
+    char                    texShaderBumpMap;
 
     /* The actual opengl context */
     GLXContext              glCtx;
@@ -636,6 +638,7 @@ struct IWineD3DDeviceImpl
     /* To store */
     BOOL                    view_ident;        /* true iff view matrix is identity                */
     BOOL                    untransformed;
+    BOOL                    vertexBlendUsed;   /* To avoid needless setting of the blend matrices */
 
     /* State block related */
     BOOL                    isRecordingState;
@@ -739,11 +742,10 @@ static inline BOOL isStateDirty(WineD3DContext *context, DWORD state) {
     return context->isStateDirty[idx] & (1 << shift);
 }
 
-/* Support for IWineD3DResource ::Set/Get/FreePrivateData. I don't think
- * anybody uses it for much so a good implementation is optional. */
+/* Support for IWineD3DResource ::Set/Get/FreePrivateData. */
 typedef struct PrivateData
 {
-    struct PrivateData* next;
+    struct list entry;
 
     GUID tag;
     DWORD flags; /* DDSPD_* */
@@ -775,7 +777,7 @@ typedef struct IWineD3DResourceClass
     DWORD                   usage;
     WINED3DFORMAT           format;
     BYTE                   *allocatedMemory;
-    PrivateData            *privateData;
+    struct list             privateData;
 
 } IWineD3DResourceClass;
 
@@ -873,8 +875,6 @@ typedef struct IWineD3DBaseTextureClass
 {
     UINT                    levels;
     BOOL                    dirty;
-    WINED3DFORMAT           format;
-    DWORD                   usage;
     UINT                    textureName;
     UINT                    LOD;
     WINED3DTEXTUREFILTERTYPE filterType;
@@ -1012,6 +1012,19 @@ typedef struct {
 } renderbuffer_entry_t;
 
 /*****************************************************************************
+ * IWineD3DClipp implementation structure
+ */
+typedef struct IWineD3DClipperImpl
+{
+    const IWineD3DClipperVtbl *lpVtbl;
+    LONG ref;
+
+    IUnknown *Parent;
+    HWND hWnd;
+} IWineD3DClipperImpl;
+
+
+/*****************************************************************************
  * IWineD3DSurface implementation structure
  */
 struct IWineD3DSurfaceImpl
@@ -1065,6 +1078,9 @@ struct IWineD3DSurfaceImpl
 
     struct list               renderbuffers;
     renderbuffer_entry_t      *current_renderbuffer;
+
+    /* DirectDraw clippers */
+    IWineD3DClipper           *clipper;
 };
 
 extern const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl;
@@ -1112,6 +1128,8 @@ HRESULT WINAPI IWineD3DSurfaceImpl_SetOverlayPosition(IWineD3DSurface *iface, LO
 HRESULT WINAPI IWineD3DSurfaceImpl_GetOverlayPosition(IWineD3DSurface *iface, LONG *X, LONG *Y);
 HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlayZOrder(IWineD3DSurface *iface, DWORD Flags, IWineD3DSurface *Ref);
 HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *SrcRect, IWineD3DSurface *DstSurface, RECT *DstRect, DWORD Flags, WINEDDOVERLAYFX *FX);
+HRESULT WINAPI IWineD3DSurfaceImpl_SetClipper(IWineD3DSurface *iface, IWineD3DClipper *clipper);
+HRESULT WINAPI IWineD3DSurfaceImpl_GetClipper(IWineD3DSurface *iface, IWineD3DClipper **clipper);
 
 /* Surface flags: */
 #define SFLAG_OVERSIZE    0x00000001 /* Surface is bigger than gl size, blts only */
@@ -1707,6 +1725,7 @@ extern void shader_glsl_rep(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_call(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_callnz(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_label(SHADER_OPCODE_ARG* arg);
+extern void shader_glsl_pow(SHADER_OPCODE_ARG* arg);
 
 /** GLSL Pixel Shader Prototypes */
 extern void pshader_glsl_tex(SHADER_OPCODE_ARG* arg);
@@ -1997,7 +2016,7 @@ static inline BOOL use_ps(IWineD3DDeviceImpl *device) {
             && ((IWineD3DPixelShaderImpl *)device->stateBlock->pixelShader)->baseShader.function);
 }
 
-void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, const WINED3DRECT *src_rect,
-        IWineD3DSurface *dst_surface, const WINED3DRECT *dst_rect, WINED3DTEXTUREFILTERTYPE filter, BOOL flip);
+void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED3DRECT *src_rect,
+        IWineD3DSurface *dst_surface, WINED3DRECT *dst_rect, WINED3DTEXTUREFILTERTYPE filter, BOOL flip);
 
 #endif

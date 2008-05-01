@@ -355,6 +355,33 @@ static const CHAR ci2_file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersio
                                    "File\tFile\n"
                                    "augustus\taugustus\taugustus\t500\t\t\t8192\t1";
 
+static const CHAR spf_custom_action_dat[] = "Action\tType\tSource\tTarget\tISComments\n"
+                                            "s72\ti2\tS64\tS0\tS255\n"
+                                            "CustomAction\tAction\n"
+                                            "SetFolderProp\t51\tMSITESTDIR\t[ProgramFilesFolder]\\msitest\\added\t\n";
+
+static const CHAR spf_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
+                                               "s72\tS255\tI2\n"
+                                               "InstallExecuteSequence\tAction\n"
+                                               "CostFinalize\t\t1000\n"
+                                               "CostInitialize\t\t800\n"
+                                               "FileCost\t\t900\n"
+                                               "SetFolderProp\t\t950\n"
+                                               "InstallFiles\t\t4000\n"
+                                               "InstallServices\t\t5000\n"
+                                               "InstallFinalize\t\t6600\n"
+                                               "InstallInitialize\t\t1500\n"
+                                               "InstallValidate\t\t1400\n"
+                                               "LaunchConditions\t\t100";
+
+static const CHAR spf_install_ui_seq_dat[] = "Action\tCondition\tSequence\n"
+                                             "s72\tS255\tI2\n"
+                                             "InstallUISequence\tAction\n"
+                                             "CostInitialize\t\t800\n"
+                                             "FileCost\t\t900\n"
+                                             "CostFinalize\t\t1000\n"
+                                             "ExecuteAction\t\t1100\n";
+
 typedef struct _msi_table
 {
     const CHAR *filename;
@@ -513,6 +540,20 @@ static const msi_table ci2_tables[] =
     ADD_TABLE(install_exec_seq),
     ADD_TABLE(rof_media),
     ADD_TABLE(property),
+};
+
+static const msi_table spf_tables[] =
+{
+    ADD_TABLE(ci_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(rof_feature),
+    ADD_TABLE(rof_feature_comp),
+    ADD_TABLE(rof_file),
+    ADD_TABLE(spf_install_exec_seq),
+    ADD_TABLE(rof_media),
+    ADD_TABLE(property),
+    ADD_TABLE(spf_custom_action),
+    ADD_TABLE(spf_install_ui_seq),
 };
 
 /* cabinet definitions */
@@ -1100,7 +1141,7 @@ static void create_cc_test_files(void)
 static void delete_cab_files(void)
 {
     SHFILEOPSTRUCT shfl;
-    CHAR path[MAX_PATH];
+    CHAR path[MAX_PATH+10];
 
     lstrcpyA(path, CURR_DIR);
     lstrcatA(path, "\\*.cab");
@@ -1108,7 +1149,7 @@ static void delete_cab_files(void)
 
     shfl.hwnd = NULL;
     shfl.wFunc = FO_DELETE;
-    shfl.pFrom = (LPCSTR)path;
+    shfl.pFrom = path;
     shfl.pTo = NULL;
     shfl.fFlags = FOF_FILESONLY | FOF_NOCONFIRMATION | FOF_NORECURSION | FOF_SILENT;
 
@@ -1365,7 +1406,10 @@ static void test_setdirproperty(void)
     ok(delete_pf("Common Files\\msitest\\maximus", TRUE), "File not installed\n");
     ok(delete_pf("Common Files\\msitest", FALSE), "File not installed\n");
 
+    /* Delete the files in the temp (current) folder */
     DeleteFile(msifile);
+    DeleteFile("msitest\\maximus");
+    RemoveDirectory("msitest");
 }
 
 static void test_cabisextracted(void)
@@ -1394,8 +1438,14 @@ static void test_cabisextracted(void)
     ok(delete_pf("msitest\\gaius", TRUE), "File not installed\n");
     ok(delete_pf("msitest", FALSE), "File not installed\n");
 
+    /* Delete the files in the temp (current) folder */
     delete_cab_files();
     DeleteFile(msifile);
+    DeleteFile("maximus");
+    DeleteFile("augustus");
+    DeleteFile("caesar");
+    DeleteFile("msitest\\gaius");
+    RemoveDirectory("msitest");
 }
 
 static void test_concurrentinstall(void)
@@ -1422,7 +1472,36 @@ static void test_concurrentinstall(void)
     ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
     ok(delete_pf("msitest", FALSE), "File not installed\n");
 
+    /* Delete the files in the temp (current) folder */
     DeleteFile(msifile);
+    DeleteFile(path);
+    DeleteFile("msitest\\msitest\\augustus");
+    DeleteFile("msitest\\maximus");
+    RemoveDirectory("msitest\\msitest");
+    RemoveDirectory("msitest");
+}
+
+static void test_setpropertyfolder(void)
+{
+    UINT r;
+
+    CreateDirectoryA("msitest", NULL);
+    create_file("msitest\\maximus", 500);
+
+    create_database(msifile, spf_tables, sizeof(spf_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_FULL, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\added\\maximus", TRUE), "File not installed\n");
+    ok(delete_pf("msitest\\added", FALSE), "File not installed\n");
+    ok(delete_pf("msitest", FALSE), "File not installed\n");
+
+    /* Delete the files in the temp (current) folder */
+    DeleteFile(msifile);
+    DeleteFile("msitest\\maximus");
+    RemoveDirectory("msitest");
 }
 
 START_TEST(install)
@@ -1454,6 +1533,7 @@ START_TEST(install)
     test_setdirproperty();
     test_cabisextracted();
     test_concurrentinstall();
+    test_setpropertyfolder();
 
     SetCurrentDirectoryA(prev_path);
 }

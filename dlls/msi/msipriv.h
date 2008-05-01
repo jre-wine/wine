@@ -791,6 +791,14 @@ extern VOID ControlEvent_SubscribeToEvent(MSIPACKAGE *package, msi_dialog *dialo
 extern VOID ControlEvent_UnSubscribeToEvent( MSIPACKAGE *package, LPCWSTR event,
                                       LPCWSTR control, LPCWSTR attribute );
 
+/* OLE automation */
+extern HRESULT create_msiserver(IUnknown *pOuter, LPVOID *ppObj);
+extern HRESULT create_session(MSIHANDLE msiHandle, IDispatch *pInstaller, IDispatch **pDispatch);
+extern HRESULT load_type_info(IDispatch *iface, ITypeInfo **pptinfo, REFIID clsid, LCID lcid);
+
+/* Scripting */
+extern DWORD call_script(MSIHANDLE hPackage, INT type, LPCWSTR script, LPCWSTR function, LPCWSTR action);
+
 /* User Interface messages from the actions */
 extern void ui_progress(MSIPACKAGE *, int, int, int, int);
 extern void ui_actiondata(MSIPACKAGE *, LPCWSTR, MSIRECORD *);

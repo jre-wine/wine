@@ -39,6 +39,7 @@ typedef struct _expr_t expr_t;
 typedef struct _type_t type_t;
 typedef struct _typeref_t typeref_t;
 typedef struct _var_t var_t;
+typedef struct _pident_t pident_t;
 typedef struct _func_t func_t;
 typedef struct _ifref_t ifref_t;
 typedef struct _typelib_entry_t typelib_entry_t;
@@ -51,6 +52,7 @@ typedef struct list str_list_t;
 typedef struct list func_list_t;
 typedef struct list expr_list_t;
 typedef struct list var_list_t;
+typedef struct list pident_list_t;
 typedef struct list ifref_list_t;
 typedef struct list array_dims_t;
 
@@ -186,7 +188,7 @@ struct _expr_t {
     long lval;
     const char *sval;
     const expr_t *ext;
-    const typeref_t *tref;
+    type_t *tref;
   } u;
   const expr_t *ext2;
   int is_const;
@@ -205,26 +207,27 @@ struct _type_t {
   var_list_t *fields;             /* interfaces, structures and enumerations */
   ifref_list_t *ifaces;           /* coclasses */
   type_t *orig;                   /* dup'd types */
+  unsigned int typestring_offset;
   int ignore, is_const, sign;
   int defined, written, user_types_registered;
   int typelib_idx;
 };
 
-struct _typeref_t {
-  char *name;
-  type_t *ref;
-  int uniq;
-};
-
 struct _var_t {
   char *name;
-  int ptr_level;
   array_dims_t *array;
   type_t *type;
   var_list_t *args;  /* for function pointers */
-  const char *tname;
   attr_list_t *attrs;
   expr_t *eval;
+
+  /* parser-internal */
+  struct list entry;
+};
+
+struct _pident_t {
+  var_t *var;
+  int ptr_level;
 
   /* parser-internal */
   struct list entry;

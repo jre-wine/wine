@@ -212,19 +212,6 @@ unsigned short get_type_vt(type_t *t)
   return 0;
 }
 
-unsigned short get_var_vt(var_t *v)
-{
-  unsigned short vt;
-
-  chat("get_var_vt: %p tname %s\n", v, v->tname);
-  if (v->tname) {
-    vt = builtin_vt(v->tname);
-    if (vt) return vt;
-  }
-
-  return get_type_vt(v->type);
-}
-
 void start_typelib(char *name, attr_list_t *attrs)
 {
     in_typelib++;

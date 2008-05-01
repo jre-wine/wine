@@ -26,8 +26,6 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "dbghelp_private.h"
-#include "winnls.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "psapi.h"
 #include "wine/debug.h"
@@ -476,7 +474,7 @@ static  void    dump_modules(struct dump_context* dc, BOOL dump_elf)
             mdModule.TimeDateStamp = dc->module[i].timestamp;
             mdModule.ModuleNameRva = dc->rva;
             ms->Length -= sizeof(WCHAR);
-            append(dc, ms, sizeof(ULONG) + ms->Length);
+            append(dc, ms, sizeof(ULONG) + ms->Length + sizeof(WCHAR));
             memset(&mdModule.VersionInfo, 0, sizeof(mdModule.VersionInfo)); /* FIXME */
             mdModule.CvRecord.DataSize = 0; /* FIXME */
             mdModule.CvRecord.Rva = 0; /* FIXME */

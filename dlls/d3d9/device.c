@@ -827,7 +827,7 @@ IDirect3DVertexDeclaration9 *getConvertedDecl(IDirect3DDevice9Impl *This, DWORD 
     convertedDecls[low] = pDecl;
     This->numConvertedDecls++;
 
-    /* Will prevent the decl from beeing destroyed */
+    /* Will prevent the decl from being destroyed */
     ((IDirect3DVertexDeclaration9Impl *) pDecl)->convFVF = fvf;
     IDirect3DVertexDeclaration9_Release(pDecl); /* Does not destroy now */
 
@@ -1085,7 +1085,8 @@ const IDirect3DDevice9Vtbl Direct3DDevice9_Vtbl =
 /* Internal function called back during the CreateDevice to create a render target  */
 HRESULT WINAPI D3D9CB_CreateSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, DWORD Usage, WINED3DPOOL Pool, UINT Level,
-                                         IWineD3DSurface** ppSurface, HANDLE* pSharedHandle) {
+                                         WINED3DCUBEMAP_FACES Face,IWineD3DSurface** ppSurface,
+                                         HANDLE* pSharedHandle) {
 
     HRESULT res = D3D_OK;
     IDirect3DSurface9Impl *d3dSurface = NULL;

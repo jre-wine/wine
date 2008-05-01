@@ -126,8 +126,16 @@ static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown
 
 static HRESULT WINAPI ClassFactory_LockServer(IClassFactory *iface, BOOL fLock)
 {
-    FIXME("(%p, %s) - not implemented\n", iface, (fLock ? "TRUE" : "FALSE"));
-    return E_NOTIMPL;
+    ClassFactory *This = (ClassFactory *)iface;
+
+    TRACE("(%p)->(%x)\n", This, fLock);
+
+    if(fLock)
+        InterlockedIncrement(&BROWSEUI_refCount);
+    else
+        InterlockedDecrement(&BROWSEUI_refCount);
+
+    return S_OK;
 }
 
 static const IClassFactoryVtbl ClassFactoryVtbl = {

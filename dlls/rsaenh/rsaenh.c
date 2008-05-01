@@ -7,7 +7,7 @@
  * Copyright 2004, 2005 Michael Jung
  *
  * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public 
+ * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
  * version 2.1 of the License, or (at your option) any later version.
  *
@@ -1050,7 +1050,8 @@ static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, PVTa
     KEYCONTAINER *pKeyContainer;
     HCRYPTPROV hKeyContainer;
     DATA_BLOB blobIn, blobOut;
-    
+    HCRYPTKEY hCryptKey;
+
     sprintf(szRSABase, RSAENH_REGKEY, pszContainerName);
 
     if (dwFlags & CRYPT_MACHINE_KEYSET) {
@@ -1089,8 +1090,9 @@ static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, PVTa
                     if (CryptUnprotectData(&blobIn, NULL, NULL, NULL, NULL, 
                          (dwFlags & CRYPT_MACHINE_KEYSET) ? CRYPTPROTECT_LOCAL_MACHINE : 0, &blobOut))
                     {
-                        RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
-                                           &pKeyContainer->hKeyExchangeKeyPair);
+                        if(RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
+                                           &hCryptKey))
+                            pKeyContainer->hKeyExchangeKeyPair = hCryptKey;
                         HeapFree(GetProcessHeap(), 0, blobOut.pbData);
                     }
                 }
@@ -1113,8 +1115,9 @@ static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, PVTa
                     if (CryptUnprotectData(&blobIn, NULL, NULL, NULL, NULL, 
                          (dwFlags & CRYPT_MACHINE_KEYSET) ? CRYPTPROTECT_LOCAL_MACHINE : 0, &blobOut))
                     {
-                        RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
-                                           &pKeyContainer->hSignatureKeyPair);
+                        if(RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
+                                           &hCryptKey))
+                            pKeyContainer->hSignatureKeyPair = hCryptKey;
                         HeapFree(GetProcessHeap(), 0, blobOut.pbData);
                     }
                 }
@@ -1473,7 +1476,12 @@ BOOL WINAPI RSAENH_CPAcquireContext(HCRYPTPROV *phProv, LPSTR pszContainer,
                 SetLastError(NTE_BAD_KEYSET_PARAM);
                 return FALSE;
             } else {
-                if (!RegDeleteKeyA(HKEY_CURRENT_USER, szRegKey)) {
+                HKEY hRootKey;
+                if (dwFlags & CRYPT_MACHINE_KEYSET)
+                    hRootKey = HKEY_LOCAL_MACHINE;
+                else
+                    hRootKey = HKEY_CURRENT_USER;
+                if (!RegDeleteKeyA(hRootKey, szRegKey)) {
                     SetLastError(ERROR_SUCCESS);
                     return TRUE;
                 } else {
@@ -2899,12 +2907,29 @@ BOOL WINAPI RSAENH_CPGetProvParam(HCRYPTPROV hProv, DWORD dwParam, BYTE *pbData,
     switch (dwParam) 
     {
         case PP_CONTAINER:
+        case PP_UNIQUE_CONTAINER:/* MSDN says we can return the same value as PP_CONTAINER */
             return copy_param(pbData, pdwDataLen, (CONST BYTE*)pKeyContainer->szName, 
                               strlen(pKeyContainer->szName)+1);
 
         case PP_NAME:
             return copy_param(pbData, pdwDataLen, (CONST BYTE*)pKeyContainer->szProvName, 
                               strlen(pKeyContainer->szProvName)+1);
+
+        case PP_PROVTYPE:
+            dwTemp = PROV_RSA_FULL;
+            return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwTemp, sizeof(dwTemp));
+
+        case PP_KEYSPEC:
+            dwTemp = AT_SIGNATURE | AT_KEYEXCHANGE;
+            return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwTemp, sizeof(dwTemp));
+
+        case PP_KEYSET_TYPE:
+            dwTemp = pKeyContainer->dwFlags & CRYPT_MACHINE_KEYSET;
+            return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwTemp, sizeof(dwTemp));
+
+        case PP_KEYSTORAGE:
+            dwTemp = CRYPT_SEC_DESCR;
+            return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwTemp, sizeof(dwTemp));
 
         case PP_SIG_KEYSIZE_INC:
         case PP_KEYX_KEYSIZE_INC:

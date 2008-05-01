@@ -593,18 +593,19 @@ dnl **** Check for the ICU library ****
 if test "$ac_cv_header_unicode_ubidi_h" = "yes"
 then
     saved_libs="$LIBS"
-    for i in ${ICU_LIB_DIR-/usr/lib}/libsicu ${ICU_LIB_DIR-/usr/lib}/libicu
-    do
-        TEST_ICUUC_LIB="${ICUUC_LIB-${i}uc.a}"
-        TEST_ICUDATA_LIB="${ICUDATA_LIB-${i}data.a}"
-        AC_MSG_CHECKING(whether can link with ICU libraries $TEST_ICUUC_LIB and $TEST_ICUDATA_LIB)
-        LIBS="$saved_libs $TEST_ICUUC_LIB $TEST_ICUDATA_LIB -lstdc++ -lgcc_s"
-    	AC_TRY_LINK([#include <unicode/ubidi.h>],[ubidi_open()],
-                    [AC_DEFINE(HAVE_ICU,1,[Define to 1 if the ICU libraries are installed])
-            	     AC_SUBST(ICULIBS,"$TEST_ICUUC_LIB $TEST_ICUDATA_LIB -lstdc++ -lgcc_s")
-                     AC_MSG_RESULT(yes)],
-                    [AC_MSG_RESULT(no)])
-    done
+    icu_libs="-lsicuuc -lsicudata -lstdc++ -lgcc_s"
+    if test -n "$ICU_LIB_DIR"
+    then
+        icu_libs="-L$ICU_LIB_DIR $icu_libs"
+    fi
+    AC_MSG_CHECKING(whether can link with ICU libraries)
+    LIBS="$saved_libs $icu_libs"
+    AC_TRY_RUN([#include <unicode/ubidi.h>
+main () { ubidi_open(); return 0; }],
+		[AC_DEFINE(HAVE_ICU,1,[Define to 1 if the ICU libraries are installed])
+                 AC_SUBST(ICULIBS,"$icu_libs")
+                 AC_MSG_RESULT(yes)],
+                [AC_MSG_RESULT(no)],[AC_MSG_RESULT(no)])
     LIBS="$saved_libs"
 fi
 
@@ -902,18 +903,6 @@ int main(void) {
   fi
 fi
 
-AC_SUBST(EXECSTACK,"")
-saved_LDFLAGS="$LDFLAGS"
-LDFLAGS="$LDFLAGS -z execstack"
-AC_CACHE_CHECK([for -z execstack], ac_cv_z_execstack,
-   AC_TRY_LINK([],[int main(void) {return 0;}],
-               ac_cv_z_execstack=yes,ac_cv_z_execstack=no))
-if test $ac_cv_z_execstack
-then
-  EXECSTACK="-z execstack"
-fi
-LDFLAGS="$saved_LDFLAGS"
-
 dnl **** Check how to define a function in assembly code ****
 
 AC_CACHE_CHECK([how to define a function in assembly code], ac_cv_asm_func_def,
@@ -1041,6 +1030,11 @@ case $host_os in
 
       WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                       [AC_SUBST(LDEXECFLAGS,["-Wl,--export-dynamic"])])
+
+      WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
+                      [LIBWINE_LDFLAGS="-Wl,--rpath,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"],
+          [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
+                           [LIBWINE_LDFLAGS="-Wl,-R,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"])])
 
       case $host_cpu in
         *i[[3456789]]86* | x86_64)
@@ -1785,6 +1779,7 @@ AC_CONFIG_FILES([programs/hh/Makefile])
 AC_CONFIG_FILES([programs/icinfo/Makefile])
 AC_CONFIG_FILES([programs/iexplore/Makefile])
 AC_CONFIG_FILES([programs/msiexec/Makefile])
+AC_CONFIG_FILES([programs/net/Makefile])
 AC_CONFIG_FILES([programs/notepad/Makefile])
 AC_CONFIG_FILES([programs/oleview/Makefile])
 AC_CONFIG_FILES([programs/progman/Makefile])

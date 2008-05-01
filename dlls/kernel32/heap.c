@@ -60,7 +60,6 @@
 #include "winerror.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "excpt.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
 
@@ -287,7 +286,7 @@ LPVOID WINAPI HeapReAlloc( HANDLE heap, DWORD flags, LPVOID ptr, SIZE_T size )
     return RtlReAllocateHeap( heap, flags, ptr, size );
 }
 
-SIZE_T WINAPI HeapSize( HANDLE heap, DWORD flags, LPVOID ptr )
+SIZE_T WINAPI HeapSize( HANDLE heap, DWORD flags, LPCVOID ptr )
 {
     return RtlSizeHeap( heap, flags, ptr );
 }

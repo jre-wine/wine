@@ -1378,6 +1378,8 @@ struct set_console_input_info_request
     int          history_mode;
     int          history_size;
     int          edition_mode;
+    int          input_cp;
+    int          output_cp;
     /* VARARG(title,unicode_str); */
 };
 struct set_console_input_info_reply
@@ -1389,6 +1391,8 @@ struct set_console_input_info_reply
 #define SET_CONSOLE_INPUT_INFO_HISTORY_MODE     0x04
 #define SET_CONSOLE_INPUT_INFO_HISTORY_SIZE     0x08
 #define SET_CONSOLE_INPUT_INFO_EDITION_MODE     0x10
+#define SET_CONSOLE_INPUT_INFO_INPUT_CODEPAGE   0x20
+#define SET_CONSOLE_INPUT_INFO_OUTPUT_CODEPAGE  0x40
 
 
 
@@ -1404,6 +1408,8 @@ struct get_console_input_info_reply
     int          history_size;
     int          history_index;
     int          edition_mode;
+    int          input_cp;
+    int          output_cp;
     /* VARARG(title,unicode_str); */
 };
 
@@ -2675,6 +2681,22 @@ struct ioctl_request
     /* VARARG(in_data,bytes); */
 };
 struct ioctl_reply
+{
+    struct reply_header __header;
+    obj_handle_t   wait;
+    unsigned int   options;
+    /* VARARG(out_data,bytes); */
+};
+
+
+
+struct get_ioctl_result_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    void*          user_arg;
+};
+struct get_ioctl_result_reply
 {
     struct reply_header __header;
     /* VARARG(out_data,bytes); */
@@ -3968,6 +3990,71 @@ struct allocate_locally_unique_id_reply
 };
 
 
+
+struct create_device_manager_request
+{
+    struct request_header __header;
+    unsigned int access;
+    unsigned int attributes;
+};
+struct create_device_manager_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+};
+
+
+
+struct create_device_request
+{
+    struct request_header __header;
+    unsigned int access;
+    unsigned int attributes;
+    obj_handle_t rootdir;
+    obj_handle_t manager;
+    void*        user_ptr;
+    /* VARARG(name,unicode_str); */
+};
+struct create_device_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+};
+
+
+
+struct delete_device_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct delete_device_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct get_next_device_request_request
+{
+    struct request_header __header;
+    obj_handle_t manager;
+    obj_handle_t prev;
+    unsigned int status;
+    /* VARARG(prev_data,bytes); */
+};
+struct get_next_device_request_reply
+{
+    struct reply_header __header;
+    obj_handle_t next;
+    ioctl_code_t code;
+    void*        user_ptr;
+    data_size_t  in_size;
+    data_size_t  out_size;
+    /* VARARG(next_data,bytes); */
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -4105,6 +4192,7 @@ enum request
     REQ_register_async,
     REQ_cancel_async,
     REQ_ioctl,
+    REQ_get_ioctl_result,
     REQ_create_named_pipe,
     REQ_get_named_pipe_info,
     REQ_create_window,
@@ -4184,6 +4272,10 @@ enum request
     REQ_get_object_info,
     REQ_get_token_impersonation_level,
     REQ_allocate_locally_unique_id,
+    REQ_create_device_manager,
+    REQ_create_device,
+    REQ_delete_device,
+    REQ_get_next_device_request,
     REQ_NB_REQUESTS
 };
 
@@ -4326,6 +4418,7 @@ union generic_request
     struct register_async_request register_async_request;
     struct cancel_async_request cancel_async_request;
     struct ioctl_request ioctl_request;
+    struct get_ioctl_result_request get_ioctl_result_request;
     struct create_named_pipe_request create_named_pipe_request;
     struct get_named_pipe_info_request get_named_pipe_info_request;
     struct create_window_request create_window_request;
@@ -4405,6 +4498,10 @@ union generic_request
     struct get_object_info_request get_object_info_request;
     struct get_token_impersonation_level_request get_token_impersonation_level_request;
     struct allocate_locally_unique_id_request allocate_locally_unique_id_request;
+    struct create_device_manager_request create_device_manager_request;
+    struct create_device_request create_device_request;
+    struct delete_device_request delete_device_request;
+    struct get_next_device_request_request get_next_device_request_request;
 };
 union generic_reply
 {
@@ -4545,6 +4642,7 @@ union generic_reply
     struct register_async_reply register_async_reply;
     struct cancel_async_reply cancel_async_reply;
     struct ioctl_reply ioctl_reply;
+    struct get_ioctl_result_reply get_ioctl_result_reply;
     struct create_named_pipe_reply create_named_pipe_reply;
     struct get_named_pipe_info_reply get_named_pipe_info_reply;
     struct create_window_reply create_window_reply;
@@ -4624,8 +4722,12 @@ union generic_reply
     struct get_object_info_reply get_object_info_reply;
     struct get_token_impersonation_level_reply get_token_impersonation_level_reply;
     struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
+    struct create_device_manager_reply create_device_manager_reply;
+    struct create_device_reply create_device_reply;
+    struct delete_device_reply delete_device_reply;
+    struct get_next_device_request_reply get_next_device_request_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 299
+#define SERVER_PROTOCOL_VERSION 304
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

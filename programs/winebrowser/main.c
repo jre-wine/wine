@@ -45,6 +45,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(winebrowser);
 
 typedef LPSTR (*wine_get_unix_file_name_t)(LPCWSTR unixname);
 
@@ -61,8 +64,8 @@ static int launch_app( char *candidates, const char *argv1 )
         argv_new[1] = argv1;
         argv_new[2] = NULL;
 
-        fprintf( stderr, "Considering: %s\n", app );
-        fprintf( stderr, "argv[1]: %s\n", argv1 );
+        WINE_TRACE( "Considering: %s\n", app );
+        WINE_TRACE( "argv[1]: %s\n", argv1 );
 
         spawnvp( _P_OVERLAY, app, argv_new );  /* only returns on error */
         app = strtok( NULL, "," );  /* grab the next app */
@@ -83,22 +86,13 @@ static int open_http_url( const char *url )
 
     length = sizeof(browsers);
     /* @@ Wine registry key: HKCU\Software\Wine\WineBrowser */
-    if  (RegCreateKeyEx( HKEY_CURRENT_USER, "Software\\Wine\\WineBrowser", 0, NULL,
-                         REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &key, NULL))
+    if  (!(r = RegOpenKey( HKEY_CURRENT_USER, "Software\\Wine\\WineBrowser", &key )))
     {
-        fprintf( stderr, "winebrowser: cannot create config key\n" );
-        return 1;
+        r = RegQueryValueExA( key, "Browsers", 0, &type, (LPBYTE)browsers, &length );
+        RegCloseKey( key );
     }
-
-    r = RegQueryValueExA( key, "Browsers", 0, &type, (LPBYTE)browsers, &length );
     if (r != ERROR_SUCCESS)
-    {
-        /* set value to the default */
-        RegSetValueExA( key, "Browsers", 0, REG_SZ, (const BYTE *)defaultbrowsers,
-                        lstrlen( defaultbrowsers ) + 1 );
         strcpy( browsers, defaultbrowsers );
-    }
-    RegCloseKey( key );
 
     return launch_app( browsers, url );
 }
@@ -115,22 +109,13 @@ static int open_mailto_url( const char *url )
 
     length = sizeof(mailers);
     /* @@ Wine registry key: HKCU\Software\Wine\WineBrowser */
-    if (RegCreateKeyEx( HKEY_CURRENT_USER, "Software\\Wine\\WineBrowser", 0, NULL,
-                        REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &key, NULL ))
+    if (!(r = RegOpenKey( HKEY_CURRENT_USER, "Software\\Wine\\WineBrowser", &key )))
     {
-        fprintf( stderr, "winebrowser: cannot create config key\n" );
-        return 1;
+        r = RegQueryValueExA( key, "Mailers", 0, &type, (LPBYTE)mailers, &length );
+        RegCloseKey( key );
     }
-
-    r = RegQueryValueExA( key, "Mailers", 0, &type, (LPBYTE)mailers, &length );
     if (r != ERROR_SUCCESS)
-    {
-        /* set value to the default */
-        RegSetValueExA( key, "Mailers", 0, REG_SZ, (const BYTE *)defaultmailers,
-                        lstrlen( defaultmailers ) + 1 );
         strcpy( mailers, defaultmailers );
-    }
-    RegCloseKey( key );
 
     return launch_app( mailers, url );
 }
@@ -191,8 +176,7 @@ int main(int argc, char *argv[])
 
     if (wine_get_unix_file_name_ptr == NULL)
     {
-        fprintf( stderr,
-            "winebrowser: cannot get the address of 'wine_get_unix_file_name'\n" );
+        WINE_ERR( "cannot get the address of 'wine_get_unix_file_name'\n" );
     }
     else
     {

@@ -39,11 +39,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "wingdi.h"
 #include "wine/exception.h"
-#include "excpt.h"
 
 #include "ddraw.h"
 #include "d3d.h"
@@ -308,6 +306,17 @@ IDirect3DDeviceImpl_7_Release(IDirect3DDevice7 *iface)
         /* Restore the render targets */
         if(This->OffScreenTarget)
         {
+            WINED3DVIEWPORT vp;
+
+            vp.X = 0;
+            vp.Y = 0;
+            vp.Width = This->ddraw->d3d_target->surface_desc.dwWidth;
+            vp.Height = This->ddraw->d3d_target->surface_desc.dwHeight;
+            vp.MinZ = 0.0;
+            vp.MaxZ = 1.0;
+            IWineD3DDevice_SetViewport(This->wineD3DDevice,
+                                       &vp);
+
             /* Set the device up to render to the front buffer since the back buffer will
              * vanish soon.
              */
@@ -379,11 +388,13 @@ IDirect3DDeviceImpl_7_Release(IDirect3DDevice7 *iface)
 
         HeapFree(GetProcessHeap(), 0, This->Handles);
 
+        TRACE("Releasing target %p %p\n", This->target, This->ddraw->d3d_target);
         /* Release the render target and the WineD3D render target
          * (See IDirect3D7::CreateDevice for more comments on this)
          */
         IDirectDrawSurface7_Release(ICOM_INTERFACE(This->target, IDirectDrawSurface7));
         IDirectDrawSurface7_Release(ICOM_INTERFACE(This->ddraw->d3d_target,IDirectDrawSurface7));
+        TRACE("Target release done\n");
 
         This->ddraw->d3ddevice = NULL;
 
@@ -391,6 +402,7 @@ IDirect3DDeviceImpl_7_Release(IDirect3DDevice7 *iface)
         HeapFree(GetProcessHeap(), 0, This);
     }
 
+    TRACE("Done\n");
     return ref;
 }
 
@@ -1107,6 +1119,16 @@ IDirect3DDeviceImpl_7_EnumTextureFormats(IDirect3DDevice7 *iface,
         WINED3DFMT_DXT5,
     };
 
+    WINED3DFORMAT BumpFormatList[] = {
+        WINED3DFMT_V8U8,
+        WINED3DFMT_L6V5U5,
+        WINED3DFMT_X8L8V8U8,
+        WINED3DFMT_Q8W8V8U8,
+        WINED3DFMT_V16U16,
+        WINED3DFMT_W11V11U10,
+        WINED3DFMT_A2W10V10U10
+    };
+
     TRACE("(%p)->(%p,%p): Relay\n", This, Callback, Arg);
 
     if(!Callback)
@@ -1130,6 +1152,33 @@ IDirect3DDeviceImpl_7_EnumTextureFormats(IDirect3DDevice7 *iface,
             PixelFormat_WineD3DtoDD(&pformat, FormatList[i]);
 
             TRACE("Enumerating WineD3DFormat %d\n", FormatList[i]);
+            hr = Callback(&pformat, Arg);
+            if(hr != DDENUMRET_OK)
+            {
+                TRACE("Format enumeration cancelled by application\n");
+                return D3D_OK;
+            }
+        }
+    }
+
+    for(i = 0; i < sizeof(BumpFormatList) / sizeof(WINED3DFORMAT); i++)
+    {
+        hr = IWineD3D_CheckDeviceFormat(This->ddraw->wineD3D,
+                                        0 /* Adapter */,
+                                        0 /* DeviceType */,
+                                        0 /* AdapterFormat */,
+                                        WINED3DUSAGE_QUERY_LEGACYBUMPMAP,
+                                        0 /* ResourceType */,
+                                        BumpFormatList[i]);
+        if(hr == D3D_OK)
+        {
+            DDPIXELFORMAT pformat;
+
+            memset(&pformat, 0, sizeof(pformat));
+            pformat.dwSize = sizeof(pformat);
+            PixelFormat_WineD3DtoDD(&pformat, BumpFormatList[i]);
+
+            TRACE("Enumerating WineD3DFormat %d\n", BumpFormatList[i]);
             hr = Callback(&pformat, Arg);
             if(hr != DDENUMRET_OK)
             {
@@ -1741,13 +1790,23 @@ IDirect3DDeviceImpl_7_SetRenderTarget(IDirect3DDevice7 *iface,
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice7, iface);
     IDirectDrawSurfaceImpl *Target = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, NewTarget);
+    HRESULT hr;
     TRACE("(%p)->(%p,%08x): Relay\n", This, NewTarget, Flags);
 
     /* Flags: Not used */
 
-    return IWineD3DDevice_SetRenderTarget(This->wineD3DDevice,
-                                          0,
-                                          Target ? Target->WineD3DSurface : NULL);
+    hr = IWineD3DDevice_SetRenderTarget(This->wineD3DDevice,
+                                        0,
+                                        Target ? Target->WineD3DSurface : NULL);
+    if(hr != D3D_OK)
+    {
+        return hr;
+    }
+    IDirectDrawSurface7_AddRef(NewTarget);
+    IDirectDrawSurface7_Release(ICOM_INTERFACE(This->target, IDirectDrawSurface7));
+    This->target = Target;
+    IDirect3DDeviceImpl_UpdateDepthStencil(This);
+    return D3D_OK;
 }
 
 static HRESULT WINAPI
@@ -2294,7 +2353,7 @@ IDirect3DDeviceImpl_7_SetRenderState(IDirect3DDevice7 *iface,
                 IDirectDrawSurfaceImpl *surf = (IDirectDrawSurfaceImpl *) This->Handles[Value - 1].ptr;
                 return IWineD3DDevice_SetTexture(This->wineD3DDevice,
                                                  0,
-                                                 (IWineD3DBaseTexture *) surf->wineD3DTexture);
+                                                 surf->wineD3DTexture);
             }
         }
 
@@ -2710,18 +2769,14 @@ IDirect3DDeviceImpl_7_SetTransform(IDirect3DDevice7 *iface,
     if(!Matrix)
         return DDERR_INVALIDPARAMS;
 
-    /* D3DTRANSFORMSTATE_WORLD doesn't exist in WineD3D,
-     * use D3DTS_WORLDMATRIX(0) instead
-     * D3DTS_WORLDMATRIX(index) is (D3DTRANSFORMSTATETYPE)(index + 256)
-     */
-    if(TransformStateType == D3DTRANSFORMSTATE_WORLD)
-        type = (D3DTRANSFORMSTATETYPE)(0 + 256);
-
-    /* FIXME:
-       Unhandled: D3DTRANSFORMSTATE_WORLD1
-       Unhandled: D3DTRANSFORMSTATE_WORLD2
-       Unhandled: D3DTRANSFORMSTATE_WORLD3
-     */
+    switch(TransformStateType)
+    {
+        case D3DTRANSFORMSTATE_WORLD :  type = WINED3DTS_WORLDMATRIX(0); break;
+        case D3DTRANSFORMSTATE_WORLD1:  type = WINED3DTS_WORLDMATRIX(1); break;
+        case D3DTRANSFORMSTATE_WORLD2:  type = WINED3DTS_WORLDMATRIX(2); break;
+        case D3DTRANSFORMSTATE_WORLD3:  type = WINED3DTS_WORLDMATRIX(3); break;
+        default:                        type = TransformStateType;
+    }
 
     /* Note: D3DMATRIX is compatible with WINED3DMATRIX */
     return IWineD3DDevice_SetTransform(This->wineD3DDevice,
@@ -2782,18 +2837,14 @@ IDirect3DDeviceImpl_7_GetTransform(IDirect3DDevice7 *iface,
     if(!Matrix)
         return DDERR_INVALIDPARAMS;
 
-    /* D3DTRANSFORMSTATE_WORLD doesn't exist in WineD3D,
-     * use D3DTS_WORLDMATRIX(0) instead
-     * D3DTS_WORLDMATRIX(index) is (D3DTRANSFORMSTATETYPE)(index + 256)
-     */
-    if(TransformStateType == D3DTRANSFORMSTATE_WORLD)
-        type = (D3DTRANSFORMSTATETYPE)(0 + 256);
-
-    /* FIXME:
-       Unhandled: D3DTRANSFORMSTATE_WORLD1
-       Unhandled: D3DTRANSFORMSTATE_WORLD2
-       Unhandled: D3DTRANSFORMSTATE_WORLD3
-     */
+    switch(TransformStateType)
+    {
+        case D3DTRANSFORMSTATE_WORLD :  type = WINED3DTS_WORLDMATRIX(0); break;
+        case D3DTRANSFORMSTATE_WORLD1:  type = WINED3DTS_WORLDMATRIX(1); break;
+        case D3DTRANSFORMSTATE_WORLD2:  type = WINED3DTS_WORLDMATRIX(2); break;
+        case D3DTRANSFORMSTATE_WORLD3:  type = WINED3DTS_WORLDMATRIX(3); break;
+        default:                        type = TransformStateType;
+    }
 
     /* Note: D3DMATRIX is compatible with WINED3DMATRIX */
     return IWineD3DDevice_GetTransform(This->wineD3DDevice, type, (WINED3DMATRIX*) Matrix);
@@ -2847,24 +2898,21 @@ IDirect3DDeviceImpl_7_MultiplyTransform(IDirect3DDevice7 *iface,
                                         D3DMATRIX *D3DMatrix)
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice7, iface);
+    D3DTRANSFORMSTATETYPE type;
     TRACE("(%p)->(%08x,%p): Relay\n", This, TransformStateType, D3DMatrix);
 
-    /* D3DTRANSFORMSTATE_WORLD doesn't exist in WineD3D,
-     * use D3DTS_WORLDMATRIX(0) instead
-     * D3DTS_WORLDMATRIX(index) is (D3DTRANSFORMSTATETYPE)(index + 256)
-     */
-    if(TransformStateType == D3DTRANSFORMSTATE_WORLD)
-        TransformStateType = (D3DTRANSFORMSTATETYPE)(0 + 256);
-
-    /* FIXME:
-       Unhandled: D3DTRANSFORMSTATE_WORLD1
-       Unhandled: D3DTRANSFORMSTATE_WORLD2
-       Unhandled: D3DTRANSFORMSTATE_WORLD3
-     */
+    switch(TransformStateType)
+    {
+        case D3DTRANSFORMSTATE_WORLD :  type = WINED3DTS_WORLDMATRIX(0); break;
+        case D3DTRANSFORMSTATE_WORLD1:  type = WINED3DTS_WORLDMATRIX(1); break;
+        case D3DTRANSFORMSTATE_WORLD2:  type = WINED3DTS_WORLDMATRIX(2); break;
+        case D3DTRANSFORMSTATE_WORLD3:  type = WINED3DTS_WORLDMATRIX(3); break;
+        default:                        type = TransformStateType;
+    }
 
     /* Note: D3DMATRIX is compatible with WINED3DMATRIX */
     return IWineD3DDevice_MultiplyTransform(This->wineD3DDevice,
-                                            TransformStateType,
+                                            type,
                                             (WINED3DMATRIX*) D3DMatrix);
 }
 
@@ -3945,7 +3993,7 @@ IDirect3DDeviceImpl_7_SetTexture(IDirect3DDevice7 *iface,
     /* Texture may be NULL here */
     return IWineD3DDevice_SetTexture(This->wineD3DDevice,
                                      Stage,
-                                     surf ? (IWineD3DBaseTexture * ) surf->wineD3DTexture : NULL);
+                                     surf ? surf->wineD3DTexture : NULL);
 }
 
 static HRESULT WINAPI
@@ -4021,12 +4069,28 @@ IDirect3DDeviceImpl_7_GetTextureStageState(IDirect3DDevice7 *iface,
                                                   Stage,
                                                   WINED3DSAMP_MINFILTER,
                                                   State);
-        /* Same for MAGFILTER */
+        /* Magfilter has slightly different values */
         case D3DTSS_MAGFILTER:
-            return IWineD3DDevice_GetSamplerState(This->wineD3DDevice,
-                                                  Stage,
-                                                  WINED3DSAMP_MAGFILTER,
-                                                  State);
+        {
+            HRESULT hr;
+            WINED3DTEXTUREFILTERTYPE wined3dfilter;
+            hr = IWineD3DDevice_GetSamplerState(This->wineD3DDevice,
+                                                Stage,
+                                                WINED3DSAMP_MAGFILTER,
+                                                &wined3dfilter);
+            switch(wined3dfilter)
+            {
+                case WINED3DTEXF_POINT:             *State = D3DTFG_POINT;          break;
+                case WINED3DTEXF_LINEAR:            *State = D3DTFG_LINEAR;         break;
+                case WINED3DTEXF_ANISOTROPIC:       *State = D3DTFG_ANISOTROPIC;    break;
+                case WINED3DTEXF_FLATCUBIC:         *State = D3DTFG_FLATCUBIC;      break;
+                case WINED3DTEXF_GAUSSIANCUBIC:     *State = D3DTFG_GAUSSIANCUBIC;  break;
+                default:
+                    ERR("Unexpected wined3d mag filter value %d\n", wined3dfilter);
+                    *State = D3DTFG_POINT;
+            }
+            return hr;
+        }
 
         case D3DTSS_ADDRESS:
         case D3DTSS_ADDRESSU:
@@ -4115,12 +4179,26 @@ IDirect3DDeviceImpl_7_SetTextureStageState(IDirect3DDevice7 *iface,
                                                   Stage,
                                                   WINED3DSAMP_MINFILTER,
                                                   State);
-        /* Same for MAGFILTER */
+        /* Magfilter has slightly different values */
         case D3DTSS_MAGFILTER:
+        {
+            WINED3DTEXTUREFILTERTYPE wined3dfilter;
+            switch((D3DTEXTUREMAGFILTER) State)
+            {
+                case D3DTFG_POINT:          wined3dfilter = WINED3DTEXF_POINT;          break;
+                case D3DTFG_LINEAR:         wined3dfilter = WINED3DTEXF_LINEAR;         break;
+                case D3DTFG_FLATCUBIC:      wined3dfilter = WINED3DTEXF_FLATCUBIC;      break;
+                case D3DTFG_GAUSSIANCUBIC:  wined3dfilter = WINED3DTEXF_GAUSSIANCUBIC;  break;
+                case D3DTFG_ANISOTROPIC:    wined3dfilter = WINED3DTEXF_ANISOTROPIC;    break;
+                default:
+                    ERR("Unexpected d3d7 mag filter type %d\n", State);
+                    wined3dfilter = WINED3DTEXF_POINT;
+            }
             return IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
                                                   Stage,
                                                   WINED3DSAMP_MAGFILTER,
-                                                  State);
+                                                  wined3dfilter);
+        }
 
         case D3DTSS_ADDRESS:
                    IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
@@ -5133,4 +5211,41 @@ IDirect3DDeviceImpl_CreateHandle(IDirect3DDeviceImpl *This)
 
     TRACE("Returning %d\n", This->numHandles);
     return This->numHandles;
+}
+
+/*****************************************************************************
+ * IDirect3DDeviceImpl_UpdateDepthStencil
+ *
+ * Checks the current render target for attached depth stencils and sets the
+ * WineD3D depth stencil accordingly.
+ *
+ * Returns:
+ *  The depth stencil state to set if creating the device
+ *
+ *****************************************************************************/
+WINED3DZBUFFERTYPE
+IDirect3DDeviceImpl_UpdateDepthStencil(IDirect3DDeviceImpl *This)
+{
+    IDirectDrawSurface7 *depthStencil = NULL;
+    IDirectDrawSurfaceImpl *dsi;
+    static DDSCAPS2 depthcaps = { DDSCAPS_ZBUFFER, 0, 0, 0 };
+
+    IDirectDrawSurface7_GetAttachedSurface(ICOM_INTERFACE(This->target, IDirectDrawSurface7),
+                                           &depthcaps,
+                                           &depthStencil);
+    if(!depthStencil)
+    {
+        TRACE("Setting wined3d depth stencil to NULL\n");
+        IWineD3DDevice_SetDepthStencilSurface(This->wineD3DDevice,
+                                              NULL);
+        return WINED3DZB_FALSE;
+    }
+
+    dsi = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, depthStencil);
+    TRACE("Setting wined3d depth stencil to %p (wined3d %p)\n", dsi, dsi->WineD3DSurface);
+    IWineD3DDevice_SetDepthStencilSurface(This->wineD3DDevice,
+                                          dsi->WineD3DSurface);
+
+    IDirectDrawSurface7_Release(depthStencil);
+    return WINED3DZB_TRUE;
 }

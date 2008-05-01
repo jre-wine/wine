@@ -36,11 +36,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "wingdi.h"
 #include "wine/exception.h"
-#include "excpt.h"
 #include "winreg.h"
 
 #include "ddraw.h"
@@ -174,7 +172,10 @@ DDRAW_Create(const GUID *guid,
     {
         hWineD3D = LoadLibraryA("wined3d");
         if (hWineD3D)
+        {
             pWineDirect3DCreate = (fnWineDirect3DCreate) GetProcAddress(hWineD3D, "WineDirect3DCreate");
+            pWineDirect3DCreateClipper = (fnWineDirect3DCreateClipper) GetProcAddress(hWineD3D, "WineDirect3DCreateClipper");
+        }
     }
 
     if (!hWineD3D)
@@ -785,7 +786,7 @@ DestroyCallback(IDirectDrawSurface7 *surf,
      * part of a complex compound. They will get released when destroying
      * the root
      */
-    if( (Impl->first_complex != Impl) || (Impl->first_attached != Impl) )
+    if( (!Impl->is_complex_root) || (Impl->first_attached != Impl) )
         return DDENUMRET_OK;
     /* Skip our depth stencil surface, it will be released with the render target */
     if( Impl == ddraw->DepthStencilBuffer)

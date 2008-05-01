@@ -1,5 +1,5 @@
 /*
- * Wine Midi driver for MacOSX
+ * Wine Midi driver for Mac OS X
  *
  * Copyright 2006 Emmanuel Maillard
  *
@@ -75,6 +75,8 @@ typedef struct {
 extern MIDIClientRef CoreMIDI_CreateClient(CFStringRef name);
 extern void CoreMIDI_GetObjectName(MIDIObjectRef obj, char *name, int size);
 extern void MIDIIn_ReadProc(const MIDIPacketList *pktlist, void *refCon, void *connRefCon);
+
+extern void MIDIOut_Send(MIDIPortRef port, MIDIEndpointRef dest, UInt8 *buffer, unsigned length);
 
 /* midi.c */
 void MIDIIn_SendMessage(MIDIMessage msg);

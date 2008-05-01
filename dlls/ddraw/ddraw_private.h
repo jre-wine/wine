@@ -227,13 +227,23 @@ struct IDirectDrawSurfaceImpl
     /* Connections to other Objects */
     IDirectDrawImpl         *ddraw;
     IWineD3DSurface         *WineD3DSurface;
-    IWineD3DTexture         *wineD3DTexture;
+    IWineD3DBaseTexture     *wineD3DTexture;
 
     /* This implementation handles attaching surfaces to other surfaces */
     IDirectDrawSurfaceImpl  *next_attached;
     IDirectDrawSurfaceImpl  *first_attached;
-    IDirectDrawSurfaceImpl  *next_complex;
-    IDirectDrawSurfaceImpl  *first_complex;
+
+    /* Complex surfaces are organized in a tree, although the tree is degenerated to a list in most cases.
+     * In mipmap and primary surfaces each level has only one attachment, which is the next surface level.
+     * Only the cube texture root has 6 surfaces attached, which then have a normal mipmap chain attached
+     * to them. So hardcode the array to 6, a dynamic array or a list would be an overkill.
+     */
+#define MAX_COMPLEX_ATTACHED 6
+    IDirectDrawSurfaceImpl  *complex_array[MAX_COMPLEX_ATTACHED];
+    /* You can't traverse the tree upwards. Only a flag for Surface::Release because its needed there,
+     * but no pointer to prevent temptations to traverse it in the wrong direction.
+     */
+    BOOL                    is_complex_root;
 
     /* Surface description, for GetAttachedSurface */
     DDSURFACEDESC2          surface_desc;
@@ -261,6 +271,8 @@ const IDirectDrawSurface3Vtbl IDirectDrawSurface3_Vtbl;
 const IDirectDrawGammaControlVtbl IDirectDrawGammaControl_Vtbl;
 const IDirect3DTexture2Vtbl IDirect3DTexture2_Vtbl;
 const IDirect3DTextureVtbl IDirect3DTexture1_Vtbl;
+
+HRESULT WINAPI IDirectDrawSurfaceImpl_AddAttachedSurface(IDirectDrawSurfaceImpl *This, IDirectDrawSurfaceImpl *Surf);
 
 /* Get the number of bytes per pixel for a given surface */
 #define PFGET_BPP(pf) (pf.dwFlags&DDPF_PALETTEINDEXED8?1:((pf.dwRGBBitCount+7)/8))
@@ -350,6 +362,7 @@ const GUID IID_D3DDEVICE_WineD3D;
 /* Helper functions */
 HRESULT IDirect3DImpl_GetCaps(IWineD3D *WineD3D, D3DDEVICEDESC *Desc123, D3DDEVICEDESC7 *Desc7);
 DWORD IDirect3DDeviceImpl_CreateHandle(IDirect3DDeviceImpl *This);
+WINED3DZBUFFERTYPE IDirect3DDeviceImpl_UpdateDepthStencil(IDirect3DDeviceImpl *This);
 
 /* Structures */
 struct EnumTextureFormatsCBS
@@ -387,15 +400,14 @@ struct IDirectDrawClipperImpl
     ICOM_VFIELD_MULTI(IDirectDrawClipper);
     LONG ref;
 
-    /* IDirectDrawClipper fields */
-    HWND hWnd;
-
-    IDirectDrawImpl* ddraw_owner;
-    struct IDirectDrawClipperImpl* prev_ddraw;
-    struct IDirectDrawClipperImpl* next_ddraw;
+    IWineD3DClipper           *wineD3DClipper;
+    IDirectDrawImpl           *ddraw_owner;
 };
 
 const IDirectDrawClipperVtbl IDirectDrawClipper_Vtbl;
+
+typedef IWineD3DClipper* (WINAPI *fnWineDirect3DCreateClipper)(IUnknown *);
+fnWineDirect3DCreateClipper pWineDirect3DCreateClipper;
 
 /*****************************************************************************
  * IDirectDrawPalette implementation structure

@@ -1466,6 +1466,8 @@ static void dump_set_console_input_info_request( const struct set_console_input_
     fprintf( stderr, " history_mode=%d,", req->history_mode );
     fprintf( stderr, " history_size=%d,", req->history_size );
     fprintf( stderr, " edition_mode=%d,", req->edition_mode );
+    fprintf( stderr, " input_cp=%d,", req->input_cp );
+    fprintf( stderr, " output_cp=%d,", req->output_cp );
     fprintf( stderr, " title=" );
     dump_varargs_unicode_str( cur_size );
 }
@@ -1481,6 +1483,8 @@ static void dump_get_console_input_info_reply( const struct get_console_input_in
     fprintf( stderr, " history_size=%d,", req->history_size );
     fprintf( stderr, " history_index=%d,", req->history_index );
     fprintf( stderr, " edition_mode=%d,", req->edition_mode );
+    fprintf( stderr, " input_cp=%d,", req->input_cp );
+    fprintf( stderr, " output_cp=%d,", req->output_cp );
     fprintf( stderr, " title=" );
     dump_varargs_unicode_str( cur_size );
 }
@@ -2417,6 +2421,20 @@ static void dump_ioctl_request( const struct ioctl_request *req )
 }
 
 static void dump_ioctl_reply( const struct ioctl_reply *req )
+{
+    fprintf( stderr, " wait=%p,", req->wait );
+    fprintf( stderr, " options=%08x,", req->options );
+    fprintf( stderr, " out_data=" );
+    dump_varargs_bytes( cur_size );
+}
+
+static void dump_get_ioctl_result_request( const struct get_ioctl_result_request *req )
+{
+    fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " user_arg=%p", req->user_arg );
+}
+
+static void dump_get_ioctl_result_reply( const struct get_ioctl_result_reply *req )
 {
     fprintf( stderr, " out_data=" );
     dump_varargs_bytes( cur_size );
@@ -3458,6 +3476,60 @@ static void dump_allocate_locally_unique_id_reply( const struct allocate_locally
     dump_luid( &req->luid );
 }
 
+static void dump_create_device_manager_request( const struct create_device_manager_request *req )
+{
+    fprintf( stderr, " access=%08x,", req->access );
+    fprintf( stderr, " attributes=%08x", req->attributes );
+}
+
+static void dump_create_device_manager_reply( const struct create_device_manager_reply *req )
+{
+    fprintf( stderr, " handle=%p", req->handle );
+}
+
+static void dump_create_device_request( const struct create_device_request *req )
+{
+    fprintf( stderr, " access=%08x,", req->access );
+    fprintf( stderr, " attributes=%08x,", req->attributes );
+    fprintf( stderr, " rootdir=%p,", req->rootdir );
+    fprintf( stderr, " manager=%p,", req->manager );
+    fprintf( stderr, " user_ptr=%p,", req->user_ptr );
+    fprintf( stderr, " name=" );
+    dump_varargs_unicode_str( cur_size );
+}
+
+static void dump_create_device_reply( const struct create_device_reply *req )
+{
+    fprintf( stderr, " handle=%p", req->handle );
+}
+
+static void dump_delete_device_request( const struct delete_device_request *req )
+{
+    fprintf( stderr, " handle=%p", req->handle );
+}
+
+static void dump_get_next_device_request_request( const struct get_next_device_request_request *req )
+{
+    fprintf( stderr, " manager=%p,", req->manager );
+    fprintf( stderr, " prev=%p,", req->prev );
+    fprintf( stderr, " status=%08x,", req->status );
+    fprintf( stderr, " prev_data=" );
+    dump_varargs_bytes( cur_size );
+}
+
+static void dump_get_next_device_request_reply( const struct get_next_device_request_reply *req )
+{
+    fprintf( stderr, " next=%p,", req->next );
+    fprintf( stderr, " code=" );
+    dump_ioctl_code( &req->code );
+    fprintf( stderr, "," );
+    fprintf( stderr, " user_ptr=%p,", req->user_ptr );
+    fprintf( stderr, " in_size=%u,", req->in_size );
+    fprintf( stderr, " out_size=%u,", req->out_size );
+    fprintf( stderr, " next_data=" );
+    dump_varargs_bytes( cur_size );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_get_new_process_info_request,
@@ -3594,6 +3666,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_register_async_request,
     (dump_func)dump_cancel_async_request,
     (dump_func)dump_ioctl_request,
+    (dump_func)dump_get_ioctl_result_request,
     (dump_func)dump_create_named_pipe_request,
     (dump_func)dump_get_named_pipe_info_request,
     (dump_func)dump_create_window_request,
@@ -3673,6 +3746,10 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_object_info_request,
     (dump_func)dump_get_token_impersonation_level_request,
     (dump_func)dump_allocate_locally_unique_id_request,
+    (dump_func)dump_create_device_manager_request,
+    (dump_func)dump_create_device_request,
+    (dump_func)dump_delete_device_request,
+    (dump_func)dump_get_next_device_request_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -3811,6 +3888,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)0,
     (dump_func)0,
     (dump_func)dump_ioctl_reply,
+    (dump_func)dump_get_ioctl_result_reply,
     (dump_func)dump_create_named_pipe_reply,
     (dump_func)dump_get_named_pipe_info_reply,
     (dump_func)dump_create_window_reply,
@@ -3890,6 +3968,10 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_object_info_reply,
     (dump_func)dump_get_token_impersonation_level_reply,
     (dump_func)dump_allocate_locally_unique_id_reply,
+    (dump_func)dump_create_device_manager_reply,
+    (dump_func)dump_create_device_reply,
+    (dump_func)0,
+    (dump_func)dump_get_next_device_request_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] = {
@@ -4028,6 +4110,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "register_async",
     "cancel_async",
     "ioctl",
+    "get_ioctl_result",
     "create_named_pipe",
     "get_named_pipe_info",
     "create_window",
@@ -4107,6 +4190,10 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_object_info",
     "get_token_impersonation_level",
     "allocate_locally_unique_id",
+    "create_device_manager",
+    "create_device",
+    "delete_device",
+    "get_next_device_request",
 };
 
 static const struct
@@ -4138,6 +4225,7 @@ static const struct
     { "ERROR_CLIPBOARD_NOT_OPEN",    0xc0010000 | ERROR_CLIPBOARD_NOT_OPEN },
     { "ERROR_INVALID_INDEX",         0xc0010000 | ERROR_INVALID_INDEX },
     { "ERROR_INVALID_WINDOW_HANDLE", 0xc0010000 | ERROR_INVALID_WINDOW_HANDLE },
+    { "FILE_DELETED",                STATUS_FILE_DELETED },
     { "FILE_IS_A_DIRECTORY",         STATUS_FILE_IS_A_DIRECTORY },
     { "FILE_LOCK_CONFLICT",          STATUS_FILE_LOCK_CONFLICT },
     { "GENERIC_NOT_MAPPED",          STATUS_GENERIC_NOT_MAPPED },

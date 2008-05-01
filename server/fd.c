@@ -1409,7 +1409,7 @@ static struct fd *alloc_fd_object(void)
 }
 
 /* allocate a pseudo fd object, for objects that need to behave like files but don't have a unix fd */
-struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *user )
+struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *user, unsigned int options )
 {
     struct fd *fd = alloc_object( &fd_ops );
 
@@ -1420,6 +1420,7 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     fd->inode      = NULL;
     fd->closed     = NULL;
     fd->access     = 0;
+    fd->options    = options;
     fd->sharing    = 0;
     fd->unix_fd    = -1;
     fd->signaled   = 0;
@@ -1857,17 +1858,17 @@ static void unmount_device( struct fd *device_fd )
 }
 
 /* default ioctl() routine */
-void default_fd_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async,
-                       const void *data, data_size_t size )
+obj_handle_t default_fd_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async,
+                               const void *data, data_size_t size )
 {
     switch(code)
     {
     case FSCTL_DISMOUNT_VOLUME:
         unmount_device( fd );
-        break;
+        return 0;
     default:
         set_error( STATUS_NOT_SUPPORTED );
-        break;
+        return 0;
     }
 }
 
@@ -1955,7 +1956,9 @@ DECL_HANDLER(ioctl)
 
     if (fd)
     {
-        fd->fd_ops->ioctl( fd, req->code, &req->async, get_req_data(), get_req_data_size() );
+        reply->wait = fd->fd_ops->ioctl( fd, req->code, &req->async,
+                                         get_req_data(), get_req_data_size() );
+        reply->options = fd->options;
         release_object( fd );
     }
 }

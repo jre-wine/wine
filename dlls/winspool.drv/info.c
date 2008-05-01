@@ -1419,7 +1419,7 @@ static HANDLE get_opened_printer_entry(LPCWSTR name, LPPRINTER_DEFAULTSW pDefaul
             TRACE(",XcvMonitor: %s\n", debugstr_w(&printername[len]));
             printer->pm = monitor_load(&printername[len], NULL);
             if (printer->pm == NULL) {
-                SetLastError(ERROR_INVALID_PARAMETER);
+                SetLastError(ERROR_UNKNOWN_PORT);
                 handle = 0;
                 goto end;
             }
@@ -1432,7 +1432,7 @@ static HANDLE get_opened_printer_entry(LPCWSTR name, LPPRINTER_DEFAULTSW pDefaul
                 TRACE(",XcvPort: %s\n", debugstr_w(&printername[len]));
                 printer->pm = monitor_load_by_port(&printername[len]);
                 if (printer->pm == NULL) {
-                    SetLastError(ERROR_INVALID_PARAMETER);
+                    SetLastError(ERROR_UNKNOWN_PORT);
                     handle = 0;
                     goto end;
                 }
@@ -1441,7 +1441,9 @@ static HANDLE get_opened_printer_entry(LPCWSTR name, LPPRINTER_DEFAULTSW pDefaul
 
         if (printer->pm) {
             if ((printer->pm->monitor) && (printer->pm->monitor->pfnXcvOpenPort)) {
-                printer->pm->monitor->pfnXcvOpenPort(&printername[len], pDefault->DesiredAccess, &printer->hXcv);
+                printer->pm->monitor->pfnXcvOpenPort(&printername[len],
+                                                    pDefault ? pDefault->DesiredAccess : 0,
+                                                    &printer->hXcv);
             }
             if (printer->hXcv == NULL) {
                 SetLastError(ERROR_INVALID_PARAMETER);

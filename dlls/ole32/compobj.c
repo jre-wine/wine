@@ -76,9 +76,9 @@ HINSTANCE OLE32_hInstance = 0; /* FIXME: make static ... */
  * TODO: Most of these things will have to be made thread-safe.
  */
 
-static HRESULT COM_GetRegisteredClassObject(REFCLSID rclsid, DWORD dwClsContext, LPUNKNOWN*  ppUnk);
-static void COM_RevokeAllClasses(void);
-static HRESULT get_inproc_class_object(HKEY hkeydll, REFCLSID rclsid, REFIID riid, void **ppv);
+static HRESULT COM_GetRegisteredClassObject(struct apartment *apt, REFCLSID rclsid, DWORD dwClsContext, LPUNKNOWN*  ppUnk);
+static void COM_RevokeAllClasses(struct apartment *apt);
+static HRESULT get_inproc_class_object(APARTMENT *apt, HKEY hkeydll, REFCLSID rclsid, REFIID riid, void **ppv);
 
 static APARTMENT *MTA; /* protected by csApartment */
 static APARTMENT *MainApartment; /* the first STA apartment */
@@ -121,6 +121,7 @@ typedef struct tagRegisteredClass
 {
   struct list entry;
   CLSID     classIdentifier;
+  OXID      apartment_id;
   LPUNKNOWN classObject;
   DWORD     runContext;
   DWORD     connectFlags;
@@ -360,6 +361,9 @@ DWORD apartment_release(struct apartment *apt)
         struct list *cursor, *cursor2;
 
         TRACE("destroying apartment %p, oxid %s\n", apt, wine_dbgstr_longlong(apt->oxid));
+
+        /* Release the references to the registered class objects */
+        COM_RevokeAllClasses(apt);
 
         /* no locking is needed for this apartment, because no other thread
          * can access it at this point */
@@ -954,9 +958,6 @@ void WINAPI CoUninitialize(void)
     TRACE("() - Releasing the COM libraries\n");
 
     RunningObjectTableImpl_UnInitialize();
-
-    /* Release the references to the registered class objects */
-    COM_RevokeAllClasses();
 
     /* This will free the loaded COM Dlls  */
     CoFreeAllLibraries();
@@ -1582,6 +1583,7 @@ HRESULT WINAPI CoRegisterPSClsid(REFIID riid, REFCLSID rclsid)
  *                 reference count on this object.
  */
 static HRESULT COM_GetRegisteredClassObject(
+        struct apartment *apt,
 	REFCLSID    rclsid,
 	DWORD       dwClsContext,
 	LPUNKNOWN*  ppUnk)
@@ -1601,7 +1603,8 @@ static HRESULT COM_GetRegisteredClassObject(
     /*
      * Check if we have a match on the class ID and context.
      */
-    if ((dwClsContext & curClass->runContext) &&
+    if ((apt->oxid == curClass->apartment_id) &&
+        (dwClsContext & curClass->runContext) &&
         IsEqualGUID(&(curClass->classIdentifier), rclsid))
     {
       /*
@@ -1643,6 +1646,11 @@ static HRESULT COM_GetRegisteredClassObject(
  * SEE ALSO
  *   CoRevokeClassObject, CoGetClassObject
  *
+ * NOTES
+ *  In-process objects are only registered for the current apartment.
+ *  CoGetClassObject() and CoCreateInstance() will not return objects registered
+ *  in other apartments.
+ *
  * BUGS
  *  MSDN claims that multiple interface registrations are legal, but we
  *  can't do that with our current implementation.
@@ -1657,6 +1665,7 @@ HRESULT WINAPI CoRegisterClassObject(
   RegisteredClass* newClass;
   LPUNKNOWN        foundObject;
   HRESULT          hr;
+  APARTMENT *apt;
 
   TRACE("(%s,%p,0x%08x,0x%08x,%p)\n",
 	debugstr_guid(rclsid),pUnk,dwClsContext,flags,lpdwRegister);
@@ -1664,7 +1673,8 @@ HRESULT WINAPI CoRegisterClassObject(
   if ( (lpdwRegister==0) || (pUnk==0) )
     return E_INVALIDARG;
 
-  if (!COM_CurrentApt())
+  apt = COM_CurrentApt();
+  if (!apt)
   {
       ERR("COM was not initialized\n");
       return CO_E_NOTINITIALIZED;
@@ -1681,7 +1691,7 @@ HRESULT WINAPI CoRegisterClassObject(
    * First, check if the class is already registered.
    * If it is, this should cause an error.
    */
-  hr = COM_GetRegisteredClassObject(rclsid, dwClsContext, &foundObject);
+  hr = COM_GetRegisteredClassObject(apt, rclsid, dwClsContext, &foundObject);
   if (hr == S_OK) {
     if (flags & REGCLS_MULTIPLEUSE) {
       if (dwClsContext & CLSCTX_LOCAL_SERVER)
@@ -1699,6 +1709,7 @@ HRESULT WINAPI CoRegisterClassObject(
     return E_OUTOFMEMORY;
 
   newClass->classIdentifier = *rclsid;
+  newClass->apartment_id    = apt->oxid;
   newClass->runContext      = dwClsContext;
   newClass->connectFlags    = flags;
   newClass->pMarshaledData  = NULL;
@@ -1724,28 +1735,18 @@ HRESULT WINAPI CoRegisterClassObject(
   *lpdwRegister = newClass->dwCookie;
 
   if (dwClsContext & CLSCTX_LOCAL_SERVER) {
-      IClassFactory *classfac;
-
-      hr = IUnknown_QueryInterface(newClass->classObject, &IID_IClassFactory,
-                                   (LPVOID*)&classfac);
-      if (hr) return hr;
-
       hr = CreateStreamOnHGlobal(0, TRUE, &newClass->pMarshaledData);
       if (hr) {
           FIXME("Failed to create stream on hglobal, %x\n", hr);
-          IUnknown_Release(classfac);
           return hr;
       }
       hr = CoMarshalInterface(newClass->pMarshaledData, &IID_IClassFactory,
-                              (LPVOID)classfac, MSHCTX_LOCAL, NULL,
+                              newClass->classObject, MSHCTX_LOCAL, NULL,
                               MSHLFLAGS_TABLESTRONG);
       if (hr) {
           FIXME("CoMarshalInterface failed, %x!\n",hr);
-          IUnknown_Release(classfac);
           return hr;
       }
-
-      IUnknown_Release(classfac);
 
       hr = RPC_StartLocalServer(&newClass->classIdentifier,
                                 newClass->pMarshaledData,
@@ -1753,6 +1754,44 @@ HRESULT WINAPI CoRegisterClassObject(
                                 &newClass->RpcRegistration);
   }
   return S_OK;
+}
+
+static void COM_RevokeRegisteredClassObject(RegisteredClass *curClass)
+{
+    list_remove(&curClass->entry);
+
+    if (curClass->runContext & CLSCTX_LOCAL_SERVER)
+        RPC_StopLocalServer(curClass->RpcRegistration);
+
+    /*
+     * Release the reference to the class object.
+     */
+    IUnknown_Release(curClass->classObject);
+
+    if (curClass->pMarshaledData)
+    {
+        LARGE_INTEGER zero;
+        memset(&zero, 0, sizeof(zero));
+        IStream_Seek(curClass->pMarshaledData, zero, STREAM_SEEK_SET, NULL);
+        CoReleaseMarshalData(curClass->pMarshaledData);
+    }
+
+    HeapFree(GetProcessHeap(), 0, curClass);
+}
+
+static void COM_RevokeAllClasses(struct apartment *apt)
+{
+  RegisteredClass *curClass, *cursor;
+
+  EnterCriticalSection( &csRegisteredClassList );
+
+  LIST_FOR_EACH_ENTRY_SAFE(curClass, cursor, &RegisteredClassList, RegisteredClass, entry)
+  {
+    if (curClass->apartment_id == apt->oxid)
+      COM_RevokeRegisteredClassObject(curClass);
+  }
+
+  LeaveCriticalSection( &csRegisteredClassList );
 }
 
 /***********************************************************************
@@ -1767,6 +1806,10 @@ HRESULT WINAPI CoRegisterClassObject(
  *  Success: S_OK.
  *  Failure: HRESULT code.
  *
+ * NOTES
+ *  Must be called from the same apartment that called CoRegisterClassObject(),
+ *  otherwise it will fail with RPC_E_WRONG_THREAD.
+ *
  * SEE ALSO
  *  CoRegisterClassObject
  */
@@ -1775,8 +1818,16 @@ HRESULT WINAPI CoRevokeClassObject(
 {
   HRESULT hr = E_INVALIDARG;
   RegisteredClass *curClass;
+  APARTMENT *apt;
 
   TRACE("(%08x)\n",dwRegister);
+
+  apt = COM_CurrentApt();
+  if (!apt)
+  {
+    ERR("COM was not initialized\n");
+    return CO_E_NOTINITIALIZED;
+  }
 
   EnterCriticalSection( &csRegisteredClassList );
 
@@ -1787,30 +1838,17 @@ HRESULT WINAPI CoRevokeClassObject(
      */
     if (curClass->dwCookie == dwRegister)
     {
-      list_remove(&curClass->entry);
-
-      if (curClass->runContext & CLSCTX_LOCAL_SERVER)
-        RPC_StopLocalServer(curClass->RpcRegistration);
-
-      /*
-       * Release the reference to the class object.
-       */
-      IUnknown_Release(curClass->classObject);
-
-      if (curClass->pMarshaledData)
+      if (curClass->apartment_id == apt->oxid)
       {
-        LARGE_INTEGER zero;
-        memset(&zero, 0, sizeof(zero));
-        IStream_Seek(curClass->pMarshaledData, zero, STREAM_SEEK_SET, NULL);
-        CoReleaseMarshalData(curClass->pMarshaledData);
+          COM_RevokeRegisteredClassObject(curClass);
+          hr = S_OK;
       }
-
-      /*
-       * Free the memory used by the chain node.
-       */
-      HeapFree(GetProcessHeap(), 0, curClass);
-
-      hr = S_OK;
+      else
+      {
+          ERR("called from wrong apartment, should be called from %s\n",
+              wine_dbgstr_longlong(curClass->apartment_id));
+          hr = RPC_E_WRONG_THREAD;
+      }
       break;
     }
   }
@@ -1858,7 +1896,8 @@ static void get_threading_model(HKEY key, LPWSTR value, DWORD len)
         value[0] = '\0';
 }
 
-static HRESULT get_inproc_class_object(HKEY hkeydll, REFCLSID rclsid, REFIID riid, void **ppv)
+static HRESULT get_inproc_class_object(APARTMENT *apt, HKEY hkeydll,
+                                       REFCLSID rclsid, REFIID riid, void **ppv)
 {
     static const WCHAR wszApartment[] = {'A','p','a','r','t','m','e','n','t',0};
     static const WCHAR wszFree[] = {'F','r','e','e',0};
@@ -1866,7 +1905,6 @@ static HRESULT get_inproc_class_object(HKEY hkeydll, REFCLSID rclsid, REFIID rii
     WCHAR dllpath[MAX_PATH+1];
     WCHAR threading_model[10 /* strlenW(L"apartment")+1 */];
     HRESULT hr;
-    APARTMENT *apt = COM_CurrentApt();
 
     get_threading_model(hkeydll, threading_model, ARRAYSIZE(threading_model));
     /* "Apartment" */
@@ -1982,6 +2020,7 @@ HRESULT WINAPI CoGetClassObject(
 {
     LPUNKNOWN	regClassObject;
     HRESULT	hres = E_UNEXPECTED;
+    APARTMENT  *apt;
 
     TRACE("\n\tCLSID:\t%s,\n\tIID:\t%s\n", debugstr_guid(rclsid), debugstr_guid(iid));
 
@@ -1990,7 +2029,8 @@ HRESULT WINAPI CoGetClassObject(
 
     *ppv = NULL;
 
-    if (!COM_CurrentApt())
+    apt = COM_CurrentApt();
+    if (!apt)
     {
         ERR("apartment not initialised\n");
         return CO_E_NOTINITIALIZED;
@@ -2005,7 +2045,8 @@ HRESULT WINAPI CoGetClassObject(
      * First, try and see if we can't match the class ID with one of the
      * registered classes.
      */
-    if (S_OK == COM_GetRegisteredClassObject(rclsid, dwClsContext, &regClassObject))
+    if (S_OK == COM_GetRegisteredClassObject(apt, rclsid, dwClsContext,
+                                             &regClassObject))
     {
       /* Get the required interface from the retrieved pointer. */
       hres = IUnknown_QueryInterface(regClassObject, iid, ppv);
@@ -2034,13 +2075,16 @@ HRESULT WINAPI CoGetClassObject(
         {
             if (hres == REGDB_E_CLASSNOTREG)
                 ERR("class %s not registered\n", debugstr_guid(rclsid));
-            else
+            else if (hres == REGDB_E_KEYMISSING)
+            {
                 WARN("class %s not registered as in-proc server\n", debugstr_guid(rclsid));
+                hres = REGDB_E_CLASSNOTREG;
+            }
         }
 
         if (SUCCEEDED(hres))
         {
-            hres = get_inproc_class_object(hkey, rclsid, iid, ppv);
+            hres = get_inproc_class_object(apt, hkey, rclsid, iid, ppv);
             RegCloseKey(hkey);
         }
 
@@ -2061,13 +2105,16 @@ HRESULT WINAPI CoGetClassObject(
         {
             if (hres == REGDB_E_CLASSNOTREG)
                 ERR("class %s not registered\n", debugstr_guid(rclsid));
-            else
+            else if (hres == REGDB_E_KEYMISSING)
+            {
                 WARN("class %s not registered in-proc handler\n", debugstr_guid(rclsid));
+                hres = REGDB_E_CLASSNOTREG;
+            }
         }
 
         if (SUCCEEDED(hres))
         {
-            hres = get_inproc_class_object(hkey, rclsid, iid, ppv);
+            hres = get_inproc_class_object(apt, hkey, rclsid, iid, ppv);
             RegCloseKey(hkey);
         }
 
@@ -2386,20 +2433,6 @@ HRESULT WINAPI CoFileTimeNow( FILETIME *lpFileTime )
 {
     GetSystemTimeAsFileTime( lpFileTime );
     return S_OK;
-}
-
-static void COM_RevokeAllClasses(void)
-{
-  EnterCriticalSection( &csRegisteredClassList );
-
-  while (list_head(&RegisteredClassList))
-  {
-    RegisteredClass *curClass = LIST_ENTRY(list_head(&RegisteredClassList),
-                                           RegisteredClass, entry);
-    CoRevokeClassObject(curClass->dwCookie);
-  }
-
-  LeaveCriticalSection( &csRegisteredClassList );
 }
 
 /******************************************************************************

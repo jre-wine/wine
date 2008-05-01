@@ -60,6 +60,12 @@ static const IID IID_IWineTest =
     0x4fd0,
     {0xa1, 0xa2, 0x5d, 0x5a, 0x36, 0x54, 0xd3, 0xbd}
 }; /* 5201163f-8164-4fd0-a1a2-5d5a3654d3bd */
+static const CLSID CLSID_WineOOPTest = {
+    0x5201163f,
+    0x8164,
+    0x4fd0,
+    {0xa1, 0xa2, 0x5d, 0x5a, 0x36, 0x54, 0xd3, 0xbd}
+}; /* 5201163f-8164-4fd0-a1a2-5d5a3654d3bd */
 
 static LONG cLocks;
 
@@ -643,14 +649,9 @@ static void test_CoMarshalInterThreadInterfaceInStream(void)
 
 static void test_CoRegisterClassObject(void)
 {
-    static const CLSID CLSID_WineOOPTest = {
-        0x5201163f,
-        0x8164,
-        0x4fd0,
-        {0xa1, 0xa2, 0x5d, 0x5a, 0x36, 0x54, 0xd3, 0xbd}
-    }; /* 5201163f-8164-4fd0-a1a2-5d5a3654d3bd */
     DWORD cookie;
     HRESULT hr;
+    IClassFactory *pcf;
 
     pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
@@ -696,6 +697,192 @@ static void test_CoRegisterClassObject(void)
     hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
                                CLSCTX_INPROC_SERVER|CLSCTX_LOCAL_SERVER, REGCLS_SINGLEUSE, &cookie);
     ok_ole_success(hr, "CoRegisterClassObject");
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    /* test whether registered class becomes invalid when apartment is destroyed */
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER, REGCLS_SINGLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+
+    CoUninitialize();
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoGetClassObject(&CLSID_WineOOPTest, CLSCTX_INPROC_SERVER, NULL,
+                          &IID_IClassFactory, (void **)&pcf);
+    ok(hr == REGDB_E_CLASSNOTREG, "object registered in an apartment shouldn't accessible after it is destroyed\n");
+
+    /* crashes with at least win9x DCOM! */
+    if (0)
+        hr = CoRevokeClassObject(cookie);
+
+    CoUninitialize();
+}
+
+static HRESULT get_class_object(CLSCTX clsctx)
+{
+    HRESULT hr;
+    IClassFactory *pcf;
+
+    hr = CoGetClassObject(&CLSID_WineOOPTest, clsctx, NULL, &IID_IClassFactory,
+                          (void **)&pcf);
+
+    if (SUCCEEDED(hr))
+        IClassFactory_Release(pcf);
+
+    return hr;
+}
+
+static DWORD CALLBACK get_class_object_thread(LPVOID pv)
+{
+    CLSCTX clsctx = (CLSCTX)(DWORD_PTR)pv;
+    HRESULT hr;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = get_class_object(clsctx);
+
+    CoUninitialize();
+
+    return hr;
+}
+
+static DWORD CALLBACK get_class_object_proxy_thread(LPVOID pv)
+{
+    CLSCTX clsctx = (CLSCTX)(DWORD_PTR)pv;
+    HRESULT hr;
+    IClassFactory *pcf;
+    IMultiQI *pMQI;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoGetClassObject(&CLSID_WineOOPTest, clsctx, NULL, &IID_IClassFactory,
+                          (void **)&pcf);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = IClassFactory_QueryInterface(pcf, &IID_IMultiQI, (void **)&pMQI);
+        if (SUCCEEDED(hr))
+            IMultiQI_Release(pMQI);
+        IClassFactory_Release(pcf);
+    }
+
+    CoUninitialize();
+
+    return hr;
+}
+
+static DWORD CALLBACK register_class_object_thread(LPVOID pv)
+{
+    HRESULT hr;
+    DWORD cookie;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER, REGCLS_SINGLEUSE, &cookie);
+
+    CoUninitialize();
+
+    return hr;
+}
+
+static DWORD CALLBACK revoke_class_object_thread(LPVOID pv)
+{
+    DWORD cookie = (DWORD_PTR)pv;
+    HRESULT hr;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    hr = CoRevokeClassObject(cookie);
+
+    CoUninitialize();
+
+    return hr;
+}
+
+static void test_registered_object_thread_affinity(void)
+{
+    HRESULT hr;
+    DWORD cookie;
+    HANDLE thread;
+    DWORD tid;
+    DWORD exitcode;
+
+    pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    /* CLSCTX_INPROC_SERVER */
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_INPROC_SERVER, REGCLS_SINGLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+
+    thread = CreateThread(NULL, 0, get_class_object_thread, (LPVOID)CLSCTX_INPROC_SERVER, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    WaitForSingleObject(thread, INFINITE);
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == REGDB_E_CLASSNOTREG, "CoGetClassObject on inproc object "
+       "registered in different thread should return REGDB_E_CLASSNOTREG "
+       "instead of 0x%08x\n", hr);
+
+    hr = get_class_object(CLSCTX_INPROC_SERVER);
+    ok(hr == S_OK, "CoGetClassObject on inproc object registered in same "
+       "thread should return S_OK instead of 0x%08x\n", hr);
+
+    thread = CreateThread(NULL, 0, register_class_object_thread, NULL, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    WaitForSingleObject(thread, INFINITE);
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == S_OK, "CoRegisterClassObject with same CLSID but in different thread should return S_OK instead of 0x%08x\n", hr);
+
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    /* CLSCTX_LOCAL_SERVER */
+
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
+                               CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+
+    thread = CreateThread(NULL, 0, get_class_object_proxy_thread, (LPVOID)CLSCTX_LOCAL_SERVER, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    while (MsgWaitForMultipleObjects(1, &thread, FALSE, INFINITE, QS_ALLINPUT) == WAIT_OBJECT_0 + 1)
+    {
+        MSG msg;
+        while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+    }
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == S_OK, "CoGetClassObject on local server object "
+       "registered in different thread should return S_OK "
+       "instead of 0x%08x\n", hr);
+
+    hr = get_class_object(CLSCTX_LOCAL_SERVER);
+    ok(hr == S_OK, "CoGetClassObject on local server object registered in same "
+       "thread should return S_OK instead of 0x%08x\n", hr);
+
+    thread = CreateThread(NULL, 0, revoke_class_object_thread, (LPVOID)cookie, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    WaitForSingleObject(thread, INFINITE);
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == RPC_E_WRONG_THREAD, "CoRevokeClassObject called from different "
+       "thread to where registered should return RPC_E_WRONG_THREAD instead of 0x%08x\n", hr);
+
+    thread = CreateThread(NULL, 0, register_class_object_thread, NULL, 0, &tid);
+    ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
+    WaitForSingleObject(thread, INFINITE);
+    GetExitCodeThread(thread, &exitcode);
+    hr = exitcode;
+    ok(hr == S_OK, "CoRegisterClassObject with same CLSID but in different "
+        "thread should return S_OK instead of 0x%08x\n", hr);
+
     hr = CoRevokeClassObject(cookie);
     ok_ole_success(hr, "CoRevokeClassObject");
 
@@ -775,5 +962,6 @@ START_TEST(compobj)
     test_CoMarshalInterface();
     test_CoMarshalInterThreadInterfaceInStream();
     test_CoRegisterClassObject();
+    test_registered_object_thread_affinity();
     test_CoFreeUnusedLibraries();
 }

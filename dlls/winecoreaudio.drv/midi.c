@@ -1,5 +1,5 @@
 /*
- * Sample MIDI Wine Driver for MacOSX (based on OSS midi driver)
+ * Sample MIDI Wine Driver for Mac OS X (based on OSS midi driver)
  *
  * Copyright 1994 	Martin Ayotte
  * Copyright 1998 	Luiz Otavio L. Zorzella (init procedures)
@@ -59,14 +59,16 @@ typedef struct tagMIDIDestination {
     AUGraph graph;
     AudioUnit synth;
 
-    MIDIPortRef port;
+    MIDIEndpointRef dest;
+
     MIDIOUTCAPSW caps;
     MIDIOPENDESC midiDesc;
     WORD wFlags;
 } MIDIDestination;
 
 typedef struct tagMIDISource {
-    MIDIPortRef port;
+    MIDIEndpointRef source;
+
     WORD wDevID;
     int state; /* 0 is no recording started, 1 in recording, bit 2 set if in sys exclusive recording */
     MIDIINCAPSW caps;
@@ -80,6 +82,9 @@ static CRITICAL_SECTION midiInLock; /* Critical section for MIDI In */
 static CFStringRef MIDIInThreadPortName = NULL;
 
 static DWORD WINAPI MIDIIn_MessageThread(LPVOID p);
+
+static MIDIPortRef MIDIInPort = NULL;
+static MIDIPortRef MIDIOutPort = NULL;
 
 #define MAX_MIDI_SYNTHS 1
 
@@ -123,23 +128,28 @@ LONG CoreAudio_MIDIInit(void)
         InitializeCriticalSection(&midiInLock);
         MIDIInThreadPortName = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("MIDIInThreadPortName.%u"), getpid());
         CreateThread(NULL, 0, MIDIIn_MessageThread, NULL, 0, NULL);
+
+        name = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("WineInputPort.%u"), getpid());
+        MIDIInputPortCreate(wineMIDIClient, name, MIDIIn_ReadProc, NULL, &MIDIInPort);
+        CFRelease(name);
+    }
+    if (numDest > 0)
+    {
+        name = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("WineOutputPort.%u"), getpid());
+        MIDIOutputPortCreate(wineMIDIClient, name, &MIDIOutPort);
+        CFRelease(name);
     }
 
     /* initialize sources */
     for (i = 0; i < MIDIIn_NumDevs; i++)
     {
-        MIDIEndpointRef endpoint = MIDIGetSource(i);
-
         sources[i].wDevID = i;
+        sources[i].source = MIDIGetSource(i);
 
-        CoreMIDI_GetObjectName(endpoint, szPname, sizeof(szPname));
+        CoreMIDI_GetObjectName(sources[i].source, szPname, sizeof(szPname));
         MultiByteToWideChar(CP_ACP, 0, szPname, -1, sources[i].caps.szPname, sizeof(sources[i].caps.szPname)/sizeof(WCHAR));
 
-        name = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("WineInputPort.%d.%u"), i, getpid());
-        MIDIInputPortCreate(wineMIDIClient, name, MIDIIn_ReadProc, &sources[i].wDevID, &sources[i].port);
-        CFRelease(name);
-
-        MIDIPortConnectSource(sources[i].port, endpoint, NULL);
+        MIDIPortConnectSource(MIDIInPort, sources[i].source, &sources[i].wDevID);
 
         sources[i].state = 0;
         /* FIXME */
@@ -168,14 +178,10 @@ LONG CoreAudio_MIDIInit(void)
     /* initialise available destinations */
     for (i = MAX_MIDI_SYNTHS; i < numDest + MAX_MIDI_SYNTHS; i++)
     {
-        MIDIEndpointRef endpoint = MIDIGetDestination(i - MAX_MIDI_SYNTHS);
+        destinations[i].dest = MIDIGetDestination(i - MAX_MIDI_SYNTHS);
 
-        CoreMIDI_GetObjectName(endpoint, szPname, sizeof(szPname));
+        CoreMIDI_GetObjectName(destinations[i].dest, szPname, sizeof(szPname));
         MultiByteToWideChar(CP_ACP, 0, szPname, -1, destinations[i].caps.szPname, sizeof(destinations[i].caps.szPname)/sizeof(WCHAR));
-
-        name = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("WineOutputPort.%d.%u"), i, getpid());
-        MIDIOutputPortCreate(wineMIDIClient, name, &destinations[i].port);
-        CFRelease(name);
 
         destinations[i].caps.wTechnology = MOD_MIDIPORT;
         destinations[i].caps.wChannelMask = 0xFFFF;
@@ -297,10 +303,6 @@ static DWORD MIDIOut_Open(WORD wDevID, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
             return MMSYSERR_ERROR;
         }
     }
-    else
-    {
-        FIXME("MOD_MIDIPORT\n");
-    }
     dest->wFlags = HIWORD(dwFlags & CALLBACK_TYPEMASK);
     dest->midiDesc = *lpDesc;
 
@@ -320,8 +322,6 @@ static DWORD MIDIOut_Close(WORD wDevID)
 
     if (destinations[wDevID].caps.wTechnology == MOD_SYNTH)
         SynthUnit_Close(destinations[wDevID].graph);
-    else
-        FIXME("MOD_MIDIPORT\n");
 
     destinations[wDevID].graph = 0;
     destinations[wDevID].synth = 0;
@@ -338,10 +338,7 @@ static DWORD MIDIOut_Close(WORD wDevID)
 static DWORD MIDIOut_Data(WORD wDevID, DWORD dwParam)
 {
     WORD evt = LOBYTE(LOWORD(dwParam));
-    WORD d1  = HIBYTE(LOWORD(dwParam));
-    WORD d2  = LOBYTE(HIWORD(dwParam));
     UInt8 chn = (evt & 0x0F);
-    OSStatus err = noErr;
 
     TRACE("wDevID=%d dwParam=%08X\n", wDevID, dwParam);
 
@@ -350,10 +347,12 @@ static DWORD MIDIOut_Data(WORD wDevID, DWORD dwParam)
 	return MMSYSERR_BADDEVICEID;
     }
 
-    TRACE("evt=%08x d1=%04x d2=%04x (evt & 0xF0)=%04x chn=%d\n", evt, d1, d2, (evt & 0xF0), chn);
-
     if (destinations[wDevID].caps.wTechnology == MOD_SYNTH)
     {
+        WORD d1  = HIBYTE(LOWORD(dwParam));
+        WORD d2  = LOBYTE(HIWORD(dwParam));
+        OSStatus err = noErr;
+
         err = MusicDeviceMIDIEvent(destinations[wDevID].synth, (evt & 0xF0) | chn, d1, d2, 0);
         if (err != noErr)
         {
@@ -361,7 +360,15 @@ static DWORD MIDIOut_Data(WORD wDevID, DWORD dwParam)
             return MMSYSERR_ERROR;
         }
     }
-    else FIXME("MOD_MIDIPORT\n");
+    else
+    {
+        UInt8 buffer[3];
+        buffer[0] = (evt & 0xF0) | chn;
+        buffer[1] = HIBYTE(LOWORD(dwParam));
+        buffer[2] = LOBYTE(HIWORD(dwParam));
+
+        MIDIOut_Send(MIDIOutPort, destinations[wDevID].dest, buffer, 3);
+    }
 
     return MMSYSERR_NOERROR;
 }
@@ -842,7 +849,8 @@ static CFDataRef MIDIIn_MessageHandler(CFMessagePortRef local, SInt32 msgid, CFD
 {
     MIDIMessage *msg = NULL;
     int i = 0;
-    FIXME("\n");
+    MIDISource *src = NULL;
+    DWORD sendData = 0;
 
     switch (msgid)
     {
@@ -853,11 +861,49 @@ static CFDataRef MIDIIn_MessageHandler(CFMessagePortRef local, SInt32 msgid, CFD
                 TRACE("%02X ", msg->data[i]);
             }
             TRACE("\n");
+            src = &sources[msg->devID];
+            if (src->state < 1)
+            {
+                TRACE("input not started, thrown away\n");
+                goto done;
+            }
+            /* FIXME skipping SysEx */
+            if (msg->data[0] == 0xF0)
+            {
+                FIXME("Starting System Exclusive\n");
+                src->state |= 2;
+            }
+            if (src->state & 2)
+            {
+                for (i = 0; i < msg->length; ++i)
+                {
+                    if (msg->data[i] == 0xF7)
+                    {
+                        FIXME("Ending System Exclusive\n");
+                        src->state &= ~2;
+                    }
+                }
+                goto done;
+            }
+            EnterCriticalSection(&midiInLock);
+            if (msg->length == 3)
+            {
+                sendData = (msg->data[2] << 16) |
+                            (msg->data[1] <<  8) |
+                            (msg->data[0] <<  0);
+            }
+            if (msg->length == 2)
+            {
+                sendData = (msg->data[1] <<  8) | (msg->data[0] <<  0);
+            }
+            MIDI_NotifyClient(msg->devID, MIM_DATA, sendData, GetTickCount() - src->startTime);
+            LeaveCriticalSection(&midiInLock);
             break;
         default:
             CFRunLoopStop(CFRunLoopGetCurrent());
             break;
     }
+done:
     return NULL;
 }
 
