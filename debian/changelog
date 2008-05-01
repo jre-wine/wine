@@ -1,3 +1,16 @@
+wine (0.9.33-1) unstable; urgency=low
+
+  * New upstream release 0.9.33.
+    - Many Direct3D fixes and performance improvements.
+    - More comctl32 tests and some bug fixes.
+    - Compatibility improvements in cmd.exe.
+    - Still more fixes to builtin OLE.
+    - Support for process control on Solaris.
+    - Lots of bug fixes.
+  * This version was released Mar 16, 2007.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 23 May 2007 14:52:13 -0400
+
 wine (0.9.32-1) unstable; urgency=low
 
   * New upstream release 0.9.32.
