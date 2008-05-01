@@ -1,3 +1,16 @@
+wine (0.9.36-1) unstable; urgency=low
+
+  * New upstream release 0.9.36.
+    - Midi support in the CoreAudio driver.
+    - Mixer support in the Alsa driver.
+    - A lot of MSI fixes.
+    - Implementation for most D3DRM functions.
+    - The usual assortment of Direct3D fixes.
+    - Lots of bug fixes.
+  * This version was released Apr 27, 2007.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 23 Jul 2007 00:56:46 -0400
+
 wine (0.9.35-2) unstable; urgency=low
 
   * Updated the "Replaces: wine" in the wine-bin package.
