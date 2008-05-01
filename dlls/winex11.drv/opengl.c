@@ -124,6 +124,12 @@ struct WineGLInfo {
     char wglExtensions[4096];
 };
 
+typedef struct wine_glpixelformat {
+    int iPixelFormat;
+    int fbconfig;
+    int fmt_index;
+} WineGLPixelFormat;
+
 static Wine_GLContext *context_list;
 static struct WineGLInfo WineGLInfo = { 0 };
 static int use_render_texture_emulation = 0;
@@ -133,6 +139,10 @@ static int swap_interval = 1;
 #define MAX_EXTENSIONS 16
 static const WineGLExtension *WineGLExtensionList[MAX_EXTENSIONS];
 static int WineGLExtensionListSize;
+
+#define MAX_GLPIXELFORMATS 32
+static WineGLPixelFormat WineGLPixelFormatList[MAX_GLPIXELFORMATS];
+static int WineGLPixelFormatListSize = 0;
 
 static void X11DRV_WineGL_LoadExtensions(void);
 
@@ -234,6 +244,10 @@ static BOOL  (*pglXReleaseTexImageARB)(Display *dpy, GLXPbuffer pbuffer, int buf
 static BOOL  (*pglXDrawableAttribARB)(Display *dpy, GLXDrawable draw, const int *attribList);
 static int   (*pglXSwapIntervalSGI)(int);
 
+/* NV GLX Extension */
+static void* (*pglXAllocateMemoryNV)(GLsizei size, GLfloat readfreq, GLfloat writefreq, GLfloat priority);
+static void  (*pglXFreeMemoryNV)(GLvoid *pointer);
+
 /* Standard OpenGL */
 MAKE_FUNCPTR(glBindTexture)
 MAKE_FUNCPTR(glBitmap)
@@ -332,7 +346,7 @@ static BOOL has_opengl(void)
         return FALSE;
     }
 
-#define LOAD_FUNCPTR(f) if((p##f = (void*)pglXGetProcAddressARB((unsigned char*)#f)) == NULL) goto sym_not_found;
+#define LOAD_FUNCPTR(f) if((p##f = (void*)pglXGetProcAddressARB((const unsigned char*)#f)) == NULL) goto sym_not_found;
 /* GLX 1.0 */
 LOAD_FUNCPTR(glXChooseVisual)
 LOAD_FUNCPTR(glXCreateContext)
@@ -372,6 +386,15 @@ LOAD_FUNCPTR(glGetIntegerv)
 LOAD_FUNCPTR(glGetString)
 LOAD_FUNCPTR(glNewList)
 LOAD_FUNCPTR(glPixelStorei)
+#undef LOAD_FUNCPTR
+
+/* It doesn't matter if these fail. They'll only be used if the driver reports
+   the associated extension is available (and if a driver reports the extension
+   is available but fails to provide the functions, it's quite broken) */
+#define LOAD_FUNCPTR(f) p##f = (void*)pglXGetProcAddressARB((const unsigned char*)#f);
+/* NV GLX Extension */
+LOAD_FUNCPTR(glXAllocateMemoryNV)
+LOAD_FUNCPTR(glXFreeMemoryNV)
 #undef LOAD_FUNCPTR
 
     if(!X11DRV_WineGL_InitOpenglInfo()) {
@@ -657,14 +680,18 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
 
     case WGL_SUPPORT_GDI_ARB:
       pop = iWGLAttr[++cur];
-      PUSH2(oGLXAttr, GLX_X_RENDERABLE, pop);
-      TRACE("pAttr[%d] = GLX_RENDERABLE: %d\n", cur, pop);
+      /* We only support a limited number of formats which are all renderable by X (similar to GDI).
+       * Ignore this attribute to prevent us from not finding a match due to the limited
+       * amount of formats supported right now. This option could be matched to GLX_X_RENDERABLE
+       * but the issue is that when a program asks for no GDI support, there's no format we can return
+       * as all our supported formats are renderable by X.
+       */
+      TRACE("pAttr[%d] = WGL_SUPPORT_GDI_ARB: %d\n", cur, pop);
       break;
 
     case WGL_DRAW_TO_BITMAP_ARB:
       pop = iWGLAttr[++cur];
-      PUSH2(oGLXAttr, GLX_X_RENDERABLE, pop);
-      TRACE("pAttr[%d] = GLX_RENDERABLE: %d\n", cur, pop);
+      TRACE("pAttr[%d] = WGL_DRAW_TO_BITMAP_ARB: %d\n", cur, pop);
       if (pop) {
         PUSH2(oGLXAttr, GLX_DRAWABLE_TYPE, GLX_PIXMAP_BIT);
         TRACE("pAttr[%d] = GLX_DRAWABLE_TYPE: GLX_PIXMAP_BIT\n", cur);
@@ -681,8 +708,6 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
 
     case WGL_DRAW_TO_PBUFFER_ARB:
       pop = iWGLAttr[++cur];
-      PUSH2(oGLXAttr, GLX_X_RENDERABLE, pop);
-      TRACE("pAttr[%d] = GLX_RENDERABLE: %d\n", cur, pop);
       if (pop) {
         PUSH2(oGLXAttr, GLX_DRAWABLE_TYPE, GLX_PBUFFER_BIT);
         TRACE("pAttr[%d] = GLX_DRAWABLE_TYPE: GLX_PBUFFER_BIT\n", cur);
@@ -785,6 +810,69 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
   return nAttribs;
 }
 
+BOOL get_fbconfig_from_visualid(Display *display, Visual *visual, int *fmt_id, int *fmt_index)
+{
+    GLXFBConfig* cfgs = NULL;
+    int i;
+    int nCfgs;
+    int tmp_fmt_id;
+    int tmp_vis_id;
+    VisualID visualid;
+
+    if(!display || !display) {
+        ERR("Invalid display or visual\n");
+    }
+    visualid = XVisualIDFromVisual(visual);
+
+    /* Get a list of all available framebuffer configurations */
+    cfgs = pglXGetFBConfigs(display, DefaultScreen(display), &nCfgs);
+    if (NULL == cfgs || 0 == nCfgs) {
+        ERR("glXChooseFBConfig returns NULL\n");
+        if(cfgs != NULL) XFree(cfgs);
+            return 0;
+    }
+
+    /* Find the requested offscreen format and count the number of offscreen formats */
+    for(i=0; i<nCfgs; i++) {
+        pglXGetFBConfigAttrib(display, cfgs[i], GLX_VISUAL_ID, &tmp_vis_id);
+        pglXGetFBConfigAttrib(display, cfgs[i], GLX_FBCONFIG_ID, &tmp_fmt_id);
+
+        /* We are looking up the GLX index of our main visual and have found it :) */
+        if(visualid == tmp_vis_id) {
+            TRACE("Found FBCONFIG_ID 0x%x at index %d for VISUAL_ID 0x%x\n", tmp_fmt_id, i, tmp_vis_id);
+            XFree(cfgs);
+            *fmt_id = tmp_fmt_id;
+            *fmt_index = i;
+            return TRUE;
+        }
+    }
+
+    ERR("No fbconfig found for Wine's main visual (0x%lx), expect problems!\n", visualid);
+    XFree(cfgs);
+    return FALSE;
+}
+
+static BOOL init_formats(Display *display, int screen, Visual *visual)
+{
+    int fmt_id, fmt_index;
+
+    /* Locate the fbconfig correspondig to our main visual */
+    if(!get_fbconfig_from_visualid(display, visual, &fmt_id, &fmt_index)) {
+        ERR("Can't get the FBCONFIG_ID for the main visual, expect problems!\n");
+        return FALSE;
+    }
+
+    /* Put Wine's internal format at the first index */
+    WineGLPixelFormatList[0].iPixelFormat = 1;
+    WineGLPixelFormatList[0].fbconfig = fmt_id;
+    WineGLPixelFormatList[0].fmt_index = fmt_index;
+    WineGLPixelFormatListSize = 1;
+
+    /* In the future test for compatible formats here */
+
+    return TRUE;
+}
+
 /* GLX can advertise dozens of different pixelformats including offscreen and onscreen ones.
  * In our WGL implementation we only support a subset of these formats namely the format of
  * Wine's main visual and offscreen formats (if they are available).
@@ -793,61 +881,45 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
  */
 static BOOL ConvertPixelFormatWGLtoGLX(Display *display, int iPixelFormat, int *fmt_index, int *fmt_count)
 {
-  int res = FALSE;
-  int i = 0;
-  GLXFBConfig* cfgs = NULL;
-  int nCfgs = 0;
-  int tmp_fmt_id = 0;
-  int tmp_vis_id = 0;
-  int nFormats = 1; /* Start at 1 as we always have a main visual */
-  VisualID visualid = 0;
+    int ret;
 
-  /* Request to look up the format of the main visual when iPixelFormat = 1 */
-  if(iPixelFormat == 1) visualid = XVisualIDFromVisual(visual);
+    /* Init the list of pixel formats when we need it */
+    if(!WineGLPixelFormatListSize)
+        init_formats(display, DefaultScreen(display), visual);
 
-  /* As mentioned in various parts of the code only the format of the main visual can be used for onscreen rendering.
-   * Next to this format there are also so called offscreen rendering formats (used for pbuffers) which can be supported
-   * because they don't need a visual. Below we use glXGetFBConfigs instead of glXChooseFBConfig to enumerate the fb configurations
-   * bas this call lists both types of formats instead of only onscreen ones. */
-  cfgs = pglXGetFBConfigs(display, DefaultScreen(display), &nCfgs);
-  if (NULL == cfgs || 0 == nCfgs) {
-    ERR("glXChooseFBConfig returns NULL\n");
-    if(cfgs != NULL) XFree(cfgs);
-    return FALSE;
-  }
-
-  /* Find the requested offscreen format and count the number of offscreen formats */
-  for(i=0; i<nCfgs; i++) {
-    pglXGetFBConfigAttrib(display, cfgs[i], GLX_VISUAL_ID, &tmp_vis_id);
-    pglXGetFBConfigAttrib(display, cfgs[i], GLX_FBCONFIG_ID, &tmp_fmt_id);
-
-    /* We are looking up the GLX index of our main visual and have found it :) */
-    if(iPixelFormat == 1 && visualid == tmp_vis_id) {
-      *fmt_index = i;
-      TRACE("Found FBCONFIG_ID 0x%x at index %d for VISUAL_ID 0x%x\n", tmp_fmt_id, *fmt_index, tmp_vis_id);
-      res = TRUE;
+    if((iPixelFormat <= 0) || (iPixelFormat > WineGLPixelFormatListSize)) {
+        ERR("invalid iPixelFormat %d\n", iPixelFormat);
+        ret = FALSE;
+        *fmt_index = -1;
     }
-    /* We found an offscreen rendering format :) */
-    else if(tmp_vis_id == 0) {
-      nFormats++;
-      TRACE("Checking offscreen format FBCONFIG_ID 0x%x at index %d\n", tmp_fmt_id, i);
-
-      if(iPixelFormat == nFormats) {
-        *fmt_index = i;
-        TRACE("Found offscreen format FBCONFIG_ID 0x%x corresponding to iPixelFormat %d at GLX index %d\n", tmp_fmt_id, iPixelFormat, i);
-        res = TRUE;
-      }
+    else {
+        ret = TRUE;
+        *fmt_index = WineGLPixelFormatList[iPixelFormat-1].fmt_index;
     }
-  }
-  *fmt_count = nFormats;
-  TRACE("Number of offscreen formats: %d; returning index: %d\n", *fmt_count, *fmt_index);
 
-  if(cfgs != NULL) XFree(cfgs);
+    *fmt_count = WineGLPixelFormatListSize;
+    TRACE("Returning fmt_index=%d, fmt_count=%d for iPixelFormat=%d\n", *fmt_index, *fmt_count, iPixelFormat);
 
-  if(res == FALSE && iPixelFormat == 1)
-    ERR("Can't find a matching FBCONFIG_ID for VISUAL_ID 0x%lx!\n", visualid);
+    return ret;
+}
 
-  return res;
+/* Search our internal pixelformat list for the WGL format corresponding to the given fbconfig */
+static int ConvertPixelFormatGLXtoWGL(Display *display, int fbconfig)
+{
+    int i;
+
+    /* Init the list of pixel formats when we need it */
+    if(!WineGLPixelFormatListSize)
+        init_formats(display, DefaultScreen(display), visual);
+
+    for(i=0; i<WineGLPixelFormatListSize; i++) {
+        if(WineGLPixelFormatList[i].fbconfig == fbconfig) {
+            TRACE("Returning iPixelFormat %d for fbconfig 0x%x\n", WineGLPixelFormatList[i].iPixelFormat, fbconfig);
+            return WineGLPixelFormatList[i].iPixelFormat;
+        }
+    }
+    TRACE("No compatible format found for FBCONFIG_ID=0x%x\n", fbconfig);
+    return 0;
 }
 
 /**
@@ -1353,7 +1425,7 @@ PROC X11DRV_wglGetProcAddress(LPCSTR lpszProc)
     /* Check the table of WGL extensions to see if we need to return a WGL extension
      * or a function pointer to a native OpenGL function. */
     if(strncmp(lpszProc, "wgl", 3) != 0) {
-        return pglXGetProcAddressARB((GLubyte*)lpszProc);
+        return pglXGetProcAddressARB((const GLubyte*)lpszProc);
     } else {
         TRACE("('%s'):%*s", lpszProc, padding, " ");
         for (i = 0; i < WineGLExtensionListSize; ++i) {
@@ -1397,28 +1469,17 @@ BOOL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
         Wine_GLContext *ctx = (Wine_GLContext *) hglrc;
         Drawable drawable = physDev->drawable;
         if (ctx->ctx == NULL) {
-            int draw_vis_id, ctx_vis_id;
-            VisualID visualid = (VisualID)GetPropA( GetDesktopWindow(), "__wine_x11_visual_id" );
-            TRACE(" Wine desktop VISUAL_ID is 0x%x\n", (unsigned int) visualid);
-            draw_vis_id = describeDrawable(ctx, drawable);
-            ctx_vis_id = describeContext(ctx);
-
-            if (-1 == draw_vis_id || (draw_vis_id == visualid && draw_vis_id != ctx_vis_id)) {
-                /**
-                * Inherits from root window so reuse desktop visual
-                */
-                XVisualInfo template;
-                XVisualInfo *vis;
-                int num;
-                template.visualid = visualid;
-                vis = XGetVisualInfo(ctx->display, VisualIDMask, &template, &num);
-
-                TRACE(" Creating GLX Context\n");
-                ctx->ctx = pglXCreateContext(ctx->display, vis, NULL, type == OBJ_MEMDC ? False : True);
-            } else {
-                TRACE(" Creating GLX Context\n");
-                ctx->ctx = pglXCreateContext(ctx->display, ctx->vis, NULL, type == OBJ_MEMDC ? False : True);
+            /* The describe lines below are for debugging purposes only */
+            if (TRACE_ON(wgl)) {
+                describeDrawable(ctx, drawable);
+                describeContext(ctx);
             }
+
+            /* Create a GLX context using the same visual as chosen earlier in wglCreateContext.
+             * We are certain that the drawable and context are compatible as we only allow compatible formats.
+             */
+            TRACE(" Creating GLX Context\n");
+            ctx->ctx = pglXCreateContext(ctx->display, ctx->vis, NULL, type == OBJ_MEMDC ? False : True);
             TRACE(" created a delayed OpenGL context (%p)\n", ctx->ctx);
         }
         TRACE(" make current for dis %p, drawable %p, ctx %p\n", ctx->display, (void*) drawable, ctx->ctx);
@@ -2102,11 +2163,6 @@ static GLboolean WINAPI X11DRV_wglChoosePixelFormatARB(HDC hdc, const int *piAtt
     int gl_test = 0;
     int attribs[256];
     int nAttribs = 0;
-    GLboolean res = FALSE;
-
-    /* We need the visualid to check if the format is suitable */
-    VisualID visualid = XVisualIDFromVisual(visual);
-
     GLXFBConfig* cfgs = NULL;
     int nCfgs = 0;
     UINT it;
@@ -2114,12 +2170,9 @@ static GLboolean WINAPI X11DRV_wglChoosePixelFormatARB(HDC hdc, const int *piAtt
 
     GLXFBConfig* cfgs_fmt = NULL;
     int nCfgs_fmt = 0;
-    UINT it_fmt;
-    int tmp_fmt_id;
-    int tmp_vis_id;
 
+    int fmt = 0;
     int pfmt_it = 0;
-    int offscreen_index = 1; /* Start at one because we always have a main visual at iPixelFormat=1 */
 
     TRACE("(%p, %p, %p, %d, %p, %p): hackish\n", hdc, piAttribIList, pfAttribFList, nMaxFormats, piFormats, nNumFormats);
     if (NULL != pfAttribFList) {
@@ -2157,62 +2210,14 @@ static GLboolean WINAPI X11DRV_wglChoosePixelFormatARB(HDC hdc, const int *piAtt
             continue;
         }
 
-        gl_test = pglXGetFBConfigAttrib(gdi_display, cfgs[it], GLX_VISUAL_ID, &tmp_vis_id);
-        if (gl_test) {
-            ERR("Failed to retrieve VISUAL_ID from GLXFBConfig, expect problems.\n");
+        /* Search for the format in our list of compatible formats */
+        fmt = ConvertPixelFormatGLXtoWGL(gdi_display, fmt_id);
+        if(!fmt)
             continue;
-        }
 
-        /* When the visualid of the GLXFBConfig matches the one of the main visual we have found our
-        * only supported onscreen rendering format. This format has a WGL index of 1. */
-        if(tmp_vis_id == visualid) {
-            piFormats[pfmt_it] = 1;
-            ++pfmt_it;
-            res = GL_TRUE;
-            TRACE("Found compatible GLXFBConfig 0x%x with WGL index 1\n", fmt_id);
-            continue;
-        }
-        /* Only continue with this loop for offscreen rendering formats (visualid = 0) */
-        else if(tmp_vis_id != 0) {
-            TRACE("Discarded GLXFBConfig %0x with VisualID %x because the visualid is not the same as our main visual (%lx)\n", fmt_id, tmp_vis_id, visualid);
-            continue;
-        }
-
-        /* Find the index of the found format in the whole format table */
-        for (it_fmt = 0; it_fmt < nCfgs_fmt; ++it_fmt) {
-            gl_test = pglXGetFBConfigAttrib(gdi_display, cfgs_fmt[it_fmt], GLX_FBCONFIG_ID, &tmp_fmt_id);
-            if (gl_test) {
-                ERR("Failed to retrieve FBCONFIG_ID from GLXFBConfig, expect problems.\n");
-                continue;
-            }
-            gl_test = pglXGetFBConfigAttrib(gdi_display, cfgs_fmt[it_fmt], GLX_VISUAL_ID, &tmp_vis_id);
-            if (gl_test) {
-                ERR("Failed to retrieve VISUAL_ID from GLXFBConfig, expect problems.\n");
-                continue;
-            }
-            /* The format of Wine's main visual is stored at index 1 of our WGL format table.
-            * At higher indices we store offscreen rendering formats (visualid=0). Below we calculate
-            * the index of the offscreen format. We do this by counting the number of offscreen formats
-            * which we see until we reach our target format. */ 
-            if(tmp_vis_id == 0)
-                offscreen_index++;
-
-            /* We have found the format in the table (note the format is offscreen) */
-            if (fmt_id == tmp_fmt_id) {
-                int tmp;
-
-                piFormats[pfmt_it] = offscreen_index + 1; /* Add 1 to get a one-based index */ 
-                ++pfmt_it;
-                pglXGetFBConfigAttrib(gdi_display, cfgs_fmt[it_fmt], GLX_ALPHA_SIZE, &tmp);
-                TRACE("ALPHA_SIZE of FBCONFIG_ID(%d/%d) found as '%d'\n", it_fmt + 1, nCfgs_fmt, tmp);
-                break;
-            }
-        }
-        if (it_fmt == nCfgs_fmt) {
-            ERR("Failed to get valid fmt for %d. Try next.\n", it);
-            continue;
-        }
-        TRACE("at %d/%d found FBCONFIG_ID(%d/%d)\n", it + 1, nCfgs, piFormats[it], nCfgs_fmt);
+        piFormats[pfmt_it] = fmt;
+        TRACE("at %d/%d found FBCONFIG_ID 0x%x (%d/%d)\n", it + 1, nCfgs, fmt_id, piFormats[pfmt_it], nCfgs_fmt);
+        pfmt_it++;
     }
 
     *nNumFormats = pfmt_it;
@@ -2220,17 +2225,6 @@ static GLboolean WINAPI X11DRV_wglChoosePixelFormatARB(HDC hdc, const int *piAtt
     XFree(cfgs);
     XFree(cfgs_fmt);
     return GL_TRUE;
-}
-
-/**
- * X11DRV_wglGetPixelFormatAttribfvARB
- *
- * WGL_ARB_pixel_format: wglGetPixelFormatAttribfvARB
- */
-static GLboolean WINAPI X11DRV_wglGetPixelFormatAttribfvARB(HDC hdc, int iPixelFormat, int iLayerPlane, UINT nAttributes, const int *piAttributes, FLOAT *pfValues)
-{
-    FIXME("(%p, %d, %d, %d, %p, %p): stub\n", hdc, iPixelFormat, iLayerPlane, nAttributes, piAttributes, pfValues);
-    return GL_FALSE;
 }
 
 /**
@@ -2267,7 +2261,7 @@ static GLboolean WINAPI X11DRV_wglGetPixelFormatAttribivARB(HDC hdc, int iPixelF
     * We don't have to fail yet as a program can specify an invaled iPixelFormat (lets say 0) if it wants to query
     * the number of supported WGL formats. Whether the iPixelFormat is valid is handled in the for-loop below. */
     if(!ConvertPixelFormatWGLtoGLX(gdi_display, iPixelFormat, &fmt_index, &nWGLFormats)) {
-        ERR("Unable to convert iPixelFormat %d to a GLX one, expect problems!\n", iPixelFormat);
+        WARN("Unable to convert iPixelFormat %d to a GLX one!\n", iPixelFormat);
     }
 
     for (i = 0; i < nAttributes; ++i) {
@@ -2404,13 +2398,17 @@ static GLboolean WINAPI X11DRV_wglGetPixelFormatAttribivARB(HDC hdc, int iPixelF
             case WGL_AUX_BUFFERS_ARB:
                 curGLXAttr = GLX_AUX_BUFFERS;
                 break;
-
             case WGL_SUPPORT_GDI_ARB:
             case WGL_DRAW_TO_WINDOW_ARB:
             case WGL_DRAW_TO_BITMAP_ARB:
+                /* We only supported a limited number of formats right now which are all renderable by X 'GLX_X_RENDERABLE' */
+                piValues[i] = GL_TRUE;
+                continue;
             case WGL_DRAW_TO_PBUFFER_ARB:
-                curGLXAttr = GLX_X_RENDERABLE;
-                break;
+                hTest = pglXGetFBConfigAttrib(gdi_display, curCfg, GLX_DRAWABLE_TYPE, &tmp);
+                if (hTest) goto get_error;
+                    piValues[i] = (tmp & GLX_PBUFFER_BIT) ? GL_TRUE : GL_FALSE;
+                continue;
 
             case WGL_PBUFFER_LARGEST_ARB:
                 curGLXAttr = GLX_LARGEST_PBUFFER;
@@ -2450,6 +2448,40 @@ pix_error:
     ERR("(%p): unexpected iPixelFormat(%d) vs nFormats(%d), returns FALSE\n", hdc, iPixelFormat, nCfgs);
     XFree(cfgs);
     return GL_FALSE;
+}
+
+/**
+ * X11DRV_wglGetPixelFormatAttribfvARB
+ *
+ * WGL_ARB_pixel_format: wglGetPixelFormatAttribfvARB
+ */
+static GLboolean WINAPI X11DRV_wglGetPixelFormatAttribfvARB(HDC hdc, int iPixelFormat, int iLayerPlane, UINT nAttributes, const int *piAttributes, FLOAT *pfValues)
+{
+    int *attr;
+    int ret;
+    int i;
+
+    TRACE("(%p, %d, %d, %d, %p, %p)\n", hdc, iPixelFormat, iLayerPlane, nAttributes, piAttributes, pfValues);
+
+    /* Allocate a temporary array to store integer values */
+    attr = HeapAlloc(GetProcessHeap(), 0, nAttributes * sizeof(int));
+    if (!attr) {
+        ERR("couldn't allocate %d array\n", nAttributes);
+        return GL_FALSE;
+    }
+
+    /* Piggy-back on wglGetPixelFormatAttribivARB */
+    ret = X11DRV_wglGetPixelFormatAttribivARB(hdc, iPixelFormat, iLayerPlane, nAttributes, piAttributes, attr);
+    if (ret) {
+        /* Convert integer values to float. Should also check for attributes
+           that can give decimal values here */
+        for (i=0; i<nAttributes;i++) {
+            pfValues[i] = attr[i];
+        }
+    }
+
+    HeapFree(GetProcessHeap(), 0, attr);
+    return ret;
 }
 
 /**
@@ -2588,6 +2620,32 @@ static BOOL WINAPI X11DRV_wglSwapIntervalEXT(int interval) {
 }
 
 /**
+ * X11DRV_wglAllocateMemoryNV
+ *
+ * WGL_NV_vertex_array_range: wglAllocateMemoryNV
+ */
+static void* WINAPI X11DRV_wglAllocateMemoryNV(GLsizei size, GLfloat readfreq, GLfloat writefreq, GLfloat priority) {
+    TRACE("(%d, %f, %f, %f)\n", size, readfreq, writefreq, priority );
+    if (pglXAllocateMemoryNV == NULL)
+        return NULL;
+
+    return pglXAllocateMemoryNV(size, readfreq, writefreq, priority);
+}
+
+/**
+ * X11DRV_wglFreeMemoryNV
+ *
+ * WGL_NV_vertex_array_range: wglFreeMemoryNV
+ */
+static void WINAPI X11DRV_wglFreeMemoryNV(GLvoid* pointer) {
+    TRACE("(%p)\n", pointer);
+    if (pglXFreeMemoryNV == NULL)
+        return;
+
+    pglXFreeMemoryNV(pointer);
+}
+
+/**
  * glxRequireVersion (internal)
  *
  * Check if the supported GLX version matches requiredVersion.
@@ -2708,6 +2766,14 @@ static const WineGLExtension WGL_EXT_swap_control =
   }
 };
 
+static const WineGLExtension WGL_NV_vertex_array_range =
+{
+  "WGL_NV_vertex_array_range",
+  {
+    { "wglAllocateMemoryNV", X11DRV_wglAllocateMemoryNV },
+    { "wglFreeMemoryNV", X11DRV_wglFreeMemoryNV },
+  }
+};
 
 /**
  * X11DRV_WineGL_LoadExtensions
@@ -2744,6 +2810,10 @@ static void X11DRV_WineGL_LoadExtensions(void)
 
     if (glxRequireExtension("GLX_SGI_swap_control"))
         register_extension(&WGL_EXT_swap_control);
+
+    /* The OpenGL extension GL_NV_vertex_array_range adds wgl/glX functions which aren't exported as 'real' wgl/glX extensions. */
+    if(strstr(WineGLInfo.glExtensions, "GL_NV_vertex_array_range") != NULL)
+        register_extension(&WGL_NV_vertex_array_range);
 }
 
 

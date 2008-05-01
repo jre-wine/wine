@@ -12,7 +12,7 @@
 @ stub AddPrinterDriverW
 @ stub AddPrinterExW
 @ stub AddPrinterW
-@ stub AllocSplStr
+@ stdcall AllocSplStr(wstr)
 @ stub AppendPrinterNotifyInfoData
 @ stub BuildOtherNamesFromMachineName
 @ stub CallDrvDevModeConversion
@@ -40,14 +40,14 @@
 @ stub DeletePrinterKeyW
 @ stdcall DllAllocSplMem(long)
 @ stdcall DllFreeSplMem(ptr)
-@ stub DllFreeSplStr
+@ stdcall DllFreeSplStr(wstr)
 @ stub EndDocPrinter
 @ stub EndPagePrinter
 @ stub EnumFormsW
 @ stub EnumJobsW
 @ stub EnumMonitorsW
 @ stub EnumPerMachineConnectionsW
-@ stub EnumPortsW
+@ stdcall EnumPortsW(wstr long ptr ptr ptr ptr) winspool.drv.EnumPortsW
 @ stub EnumPrintProcessorDatatypesW
 @ stub EnumPrintProcessorsW
 @ stub EnumPrinterDataExW

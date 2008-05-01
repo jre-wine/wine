@@ -516,20 +516,20 @@ int WINAPI __WSAFDIsSet(SOCKET,WS(fd_set)*);
 
 #ifdef WORDS_BIGENDIAN
 
-#define htonl(l) ((WS(u_long))(l))
-#define htons(s) ((WS(u_short))(s))
-#define ntohl(l) ((WS(u_long))(l))
-#define ntohs(s) ((WS(u_short))(s))
+#define htonl(l) ((u_long)(l))
+#define htons(s) ((u_short)(s))
+#define ntohl(l) ((u_long)(l))
+#define ntohs(s) ((u_short)(s))
 
 #else  /* WORDS_BIGENDIAN */
 
-inline static WS(u_short) __wine_ushort_swap(WS(u_short) s)
+inline static u_short __wine_ushort_swap(u_short s)
 {
     return (s >> 8) | (s << 8);
 }
-inline static WS(u_long) __wine_ulong_swap(WS(u_long) l)
+inline static u_long __wine_ulong_swap(u_long l)
 {
-    return ((WS(u_long))__wine_ushort_swap((WS(u_short))l) << 16) | __wine_ushort_swap((WS(u_short))(l >> 16));
+    return ((u_long)__wine_ushort_swap((u_short)l) << 16) | __wine_ushort_swap((u_short)(l >> 16));
 }
 #define htonl(l) __wine_ulong_swap(l)
 #define htons(s) __wine_ushort_swap(s)
@@ -663,6 +663,7 @@ typedef struct WS(WSAData)
 #define SO_DEBUG                   0x0001
 #define SO_ACCEPTCONN              0x0002
 #define SO_REUSEADDR               0x0004
+#define SO_EXCLUSIVEADDRUSE        ((u_int)(~SO_REUSEADDR))
 #define SO_KEEPALIVE               0x0008
 #define SO_DONTROUTE               0x0010
 #define SO_BROADCAST               0x0020
@@ -696,6 +697,7 @@ typedef struct WS(WSAData)
 #define WS_SO_DEBUG                0x0001
 #define WS_SO_ACCEPTCONN           0x0002
 #define WS_SO_REUSEADDR            0x0004
+#define WS_SO_EXCLUSIVEADDRUSE     ((WS_u_int)(~WS_SO_REUSEADDR))
 #define WS_SO_KEEPALIVE            0x0008
 #define WS_SO_DONTROUTE            0x0010
 #define WS_SO_BROADCAST            0x0020

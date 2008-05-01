@@ -19,10 +19,13 @@
  */
 
 #include <stdarg.h>
+#include <assert.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "wine/test.h"
+
+#define ALIGN_SIZE(size, alignment) (((size) + (alignment - 1)) & ~((alignment - 1)))
 
 static const struct
 {
@@ -36,7 +39,7 @@ static const struct
 
 static IMAGE_NT_HEADERS nt_header =
 {
-    IMAGE_NT_SIGNATURE,
+    IMAGE_NT_SIGNATURE, /* Signature */
 #ifdef __i386__
     { IMAGE_FILE_MACHINE_I386, /* Machine */
 #else
@@ -101,49 +104,92 @@ START_TEST(loader)
 {
     static const struct test_data
     {
-        WORD size_of_optional_header;
+        WORD number_of_sections, size_of_optional_header;
         DWORD section_alignment, file_alignment;
         DWORD size_of_image, size_of_headers;
         DWORD error; /* 0 means LoadLibrary should succeed */
     } td[] =
     {
-        { 0, 0, 0, 0, 0,
+        { 1, 0, 0, 0, 0, 0,
           ERROR_BAD_EXE_FORMAT
         },
-        { sizeof(IMAGE_OPTIONAL_HEADER), 0x1000, 0x1000,
+        { 1, sizeof(IMAGE_OPTIONAL_HEADER), 0x1000, 0x1000,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER) + 0xe00,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER),
           ERROR_BAD_EXE_FORMAT /* XP doesn't like too small image size */
         },
-        { sizeof(IMAGE_OPTIONAL_HEADER), 0x1000, 0x1000,
+        { 1, sizeof(IMAGE_OPTIONAL_HEADER), 0x1000, 0x1000,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER) + 0x1000,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER),
           ERROR_SUCCESS
         },
-        { sizeof(IMAGE_OPTIONAL_HEADER), 0x200, 0x200,
+        { 1, sizeof(IMAGE_OPTIONAL_HEADER), 0x1000, 0x1000,
+          0x1f00,
+          0x1000,
+          ERROR_SUCCESS
+        },
+        { 1, sizeof(IMAGE_OPTIONAL_HEADER), 0x200, 0x200,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER) + 0x1000,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER),
           ERROR_SUCCESS
         },
-        { sizeof(IMAGE_OPTIONAL_HEADER), 0x200, 0x1000,
+        { 1, sizeof(IMAGE_OPTIONAL_HEADER), 0x200, 0x1000,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER) + 0x1000,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER),
           ERROR_BAD_EXE_FORMAT /* XP doesn't like aligments */
         },
-        { sizeof(IMAGE_OPTIONAL_HEADER), 0x1000, 0x200,
+        { 1, sizeof(IMAGE_OPTIONAL_HEADER), 0x1000, 0x200,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER) + 0x1000,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER),
           ERROR_SUCCESS
         },
-        { sizeof(IMAGE_OPTIONAL_HEADER), 0x1000, 0x200,
+        { 1, sizeof(IMAGE_OPTIONAL_HEADER), 0x1000, 0x200,
           sizeof(dos_header) + sizeof(nt_header) + sizeof(IMAGE_SECTION_HEADER) + 0x1000,
           0x200,
           ERROR_SUCCESS
+        },
+        /* Mandatory are all fields up to SizeOfHeaders, everything else
+         * is really optional (at least that's true for XP).
+         */
+        { 1, FIELD_OFFSET(IMAGE_OPTIONAL_HEADER, CheckSum), 0x200, 0x200,
+          sizeof(dos_header) + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + FIELD_OFFSET(IMAGE_OPTIONAL_HEADER, CheckSum) + sizeof(IMAGE_SECTION_HEADER) + 0x10,
+          sizeof(dos_header) + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + FIELD_OFFSET(IMAGE_OPTIONAL_HEADER, CheckSum) + sizeof(IMAGE_SECTION_HEADER),
+          ERROR_SUCCESS
+        },
+        { 0, FIELD_OFFSET(IMAGE_OPTIONAL_HEADER, CheckSum), 0x200, 0x200,
+          0xd0, /* beyond of the end of file */
+          0xc0, /* beyond of the end of file */
+          ERROR_SUCCESS
+        },
+        { 0, FIELD_OFFSET(IMAGE_OPTIONAL_HEADER, CheckSum), 0x200, 0x200,
+          0x1000,
+          0,
+          ERROR_SUCCESS
+        },
+        { 0, FIELD_OFFSET(IMAGE_OPTIONAL_HEADER, CheckSum), 0x200, 0x200,
+          1,
+          0,
+          ERROR_SUCCESS
+        },
+        { 0, FIELD_OFFSET(IMAGE_OPTIONAL_HEADER, CheckSum), 4, 4,
+          1,
+          0,
+          ERROR_SUCCESS
+        },
+        { 0, FIELD_OFFSET(IMAGE_OPTIONAL_HEADER, CheckSum), 1, 1,
+          1,
+          0,
+          ERROR_SUCCESS
+        },
+        { 0, FIELD_OFFSET(IMAGE_OPTIONAL_HEADER, CheckSum), 0x200, 0x200,
+          0,
+          0,
+          ERROR_BAD_EXE_FORMAT /* image size == 0 -> failure */
         }
     };
     static const char filler[0x1000];
     int i;
-    DWORD dummy;
+    DWORD dummy, file_size, file_align;
     HANDLE hfile, hlib;
     SYSTEM_INFO si;
     char temp_path[MAX_PATH];
@@ -156,10 +202,11 @@ START_TEST(loader)
     SetErrorMode(SEM_FAILCRITICALERRORS);
 
     GetTempPath(MAX_PATH, temp_path);
-    GetTempFileName(temp_path, "ldr", 0, dll_name);
 
     for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
     {
+        GetTempFileName(temp_path, "ldr", 0, dll_name);
+
         /*trace("creating %s\n", dll_name);*/
         hfile = CreateFileA(dll_name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
         if (hfile == INVALID_HANDLE_VALUE)
@@ -172,25 +219,59 @@ START_TEST(loader)
         ok(WriteFile(hfile, &dos_header, sizeof(dos_header), &dummy, NULL),
            "WriteFile error %d\n", GetLastError());
 
+        nt_header.FileHeader.NumberOfSections = td[i].number_of_sections;
         nt_header.FileHeader.SizeOfOptionalHeader = td[i].size_of_optional_header;
 
         nt_header.OptionalHeader.SectionAlignment = td[i].section_alignment;
         nt_header.OptionalHeader.FileAlignment = td[i].file_alignment;
-        nt_header.OptionalHeader.SizeOfImage =td[i].size_of_image;
+        nt_header.OptionalHeader.SizeOfImage = td[i].size_of_image;
         nt_header.OptionalHeader.SizeOfHeaders = td[i].size_of_headers;
         SetLastError(0xdeadbeef);
-        ok(WriteFile(hfile, &nt_header, sizeof(nt_header), &dummy, NULL),
+        ok(WriteFile(hfile, &nt_header, sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER), &dummy, NULL),
            "WriteFile error %d\n", GetLastError());
 
-        section.VirtualAddress = nt_header.OptionalHeader.SectionAlignment;
-        section.PointerToRawData = nt_header.OptionalHeader.FileAlignment;
-        SetLastError(0xdeadbeef);
-        ok(WriteFile(hfile, &section, sizeof(section), &dummy, NULL),
-           "WriteFile error %d\n", GetLastError());
+        if (nt_header.FileHeader.SizeOfOptionalHeader)
+        {
+            assert(nt_header.FileHeader.SizeOfOptionalHeader <= sizeof(IMAGE_OPTIONAL_HEADER));
 
-        SetLastError(0xdeadbeef);
-        ok(WriteFile(hfile, filler, sizeof(filler), &dummy, NULL),
-           "WriteFile error %d\n", GetLastError());
+            SetLastError(0xdeadbeef);
+            ok(WriteFile(hfile, &nt_header.OptionalHeader, nt_header.FileHeader.SizeOfOptionalHeader, &dummy, NULL),
+               "WriteFile error %d\n", GetLastError());
+        }
+
+        assert(nt_header.FileHeader.NumberOfSections <= 1);
+        if (nt_header.FileHeader.NumberOfSections)
+        {
+            if (nt_header.OptionalHeader.SectionAlignment == si.dwPageSize)
+            {
+                section.VirtualAddress = nt_header.OptionalHeader.SectionAlignment;
+                section.PointerToRawData = nt_header.OptionalHeader.FileAlignment;
+                SetLastError(0xdeadbeef);
+                ok(WriteFile(hfile, &section, sizeof(section), &dummy, NULL),
+                   "WriteFile error %d\n", GetLastError());
+
+                file_size = GetFileSize(hfile, NULL);
+
+                file_align = ALIGN_SIZE(file_size, nt_header.OptionalHeader.FileAlignment) - file_size;
+                SetLastError(0xdeadbeef);
+                ok(WriteFile(hfile, filler, file_align, &dummy, NULL),
+                   "WriteFile error %d\n", GetLastError());
+            }
+            else
+            {
+                section.VirtualAddress = nt_header.OptionalHeader.SizeOfHeaders;
+                section.PointerToRawData = nt_header.OptionalHeader.SizeOfHeaders;
+                SetLastError(0xdeadbeef);
+                ok(WriteFile(hfile, &section, sizeof(section), &dummy, NULL),
+                   "WriteFile error %d\n", GetLastError());
+            }
+
+            /* section data */
+            SetLastError(0xdeadbeef);
+            ok(WriteFile(hfile, filler, 0x10, &dummy, NULL),
+               "WriteFile error %d\n", GetLastError());
+        }
+
         CloseHandle(hfile);
 
         SetLastError(0xdeadbeef);
@@ -207,7 +288,8 @@ START_TEST(loader)
             ok(info.BaseAddress == hlib, "%d: %p != %p\n", i, info.BaseAddress, hlib);
             ok(info.AllocationBase == hlib, "%d: %p != %p\n", i, info.AllocationBase, hlib);
             ok(info.AllocationProtect == PAGE_EXECUTE_WRITECOPY, "%d: %x != PAGE_EXECUTE_WRITECOPY\n", i, info.AllocationProtect);
-            ok(info.RegionSize == 0x2000, "%d: %lx != 0x2000\n", i, info.RegionSize);
+            ok(info.RegionSize == ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, si.dwPageSize), "%d: got %lx != expected %x\n",
+               i, info.RegionSize, ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, si.dwPageSize));
             ok(info.State == MEM_COMMIT, "%d: %x != MEM_COMMIT\n", i, info.State);
             if (nt_header.OptionalHeader.SectionAlignment != si.dwPageSize)
                 ok(info.Protect == PAGE_EXECUTE_WRITECOPY, "%d: %x != PAGE_EXECUTE_WRITECOPY\n", i, info.Protect);
@@ -221,17 +303,14 @@ START_TEST(loader)
             if (nt_header.OptionalHeader.SectionAlignment == si.dwPageSize ||
                 nt_header.OptionalHeader.SectionAlignment == nt_header.OptionalHeader.FileAlignment)
             {
-                ok(info.BaseAddress == (char *)hlib + 0x2000, "%d: %p != %p\n", i, info.BaseAddress, (char *)hlib + 0x2000);
-todo_wine {
+                ok(info.BaseAddress == (char *)hlib + ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, si.dwPageSize), "%d: %p != %p\n",
+                   i, info.BaseAddress, (char *)hlib + ALIGN_SIZE(nt_header.OptionalHeader.SizeOfImage, si.dwPageSize));
                 ok(info.AllocationBase == 0, "%d: %p != 0\n", i, info.AllocationBase);
-}
                 ok(info.AllocationProtect == 0, "%d: %x != 0\n", i, info.AllocationProtect);
                 /*ok(info.RegionSize == not_practical_value, "%d: %lx != not_practical_value\n", i, info.RegionSize);*/
                 ok(info.State == MEM_FREE, "%d: %x != MEM_FREE\n", i, info.State);
                 ok(info.Type == 0, "%d: %x != 0\n", i, info.Type);
-todo_wine {
                 ok(info.Protect == PAGE_NOACCESS, "%d: %x != PAGE_NOACCESS\n", i, info.Protect);
-}
             }
             else
             {
@@ -249,8 +328,19 @@ todo_wine {
             ok(FreeLibrary(hlib), "FreeLibrary error %d\n", GetLastError());
         }
         else
+        {   /* LoadLibrary has failed */
+            ok(!hlib, "%d: LoadLibrary should fail\n", i);
+
+            if (GetLastError() == ERROR_GEN_FAILURE) /* Win9x, broken behaviour */
+            {
+                trace("skipping the loader test on Win9x\n");
+                DeleteFile(dll_name);
+                return;
+            }
+
             ok(td[i].error == GetLastError(), "%d: expected error %d, got %d\n",
                i, td[i].error, GetLastError());
+        }
 
         SetLastError(0xdeadbeef);
         ok(DeleteFile(dll_name), "DeleteFile error %d\n", GetLastError());

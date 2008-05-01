@@ -4160,7 +4160,7 @@ HRESULT WINAPI VarDecFromR4(FLOAT fltIn, DECIMAL* pDecOut)
   WCHAR buff[256];
 
   sprintfW( buff, szFloatFormatW, fltIn );
-  return VarDecFromStr(buff, LOCALE_EN_US, 0, pDecOut);
+  return VarDecFromStr(buff, LOCALE_EN_US, LOCALE_NOUSEROVERRIDE, pDecOut);
 }
 
 /************************************************************************
@@ -4180,7 +4180,7 @@ HRESULT WINAPI VarDecFromR8(double dblIn, DECIMAL* pDecOut)
   WCHAR buff[256];
 
   sprintfW( buff, szDoubleFormatW, dblIn );
-  return VarDecFromStr(buff, LOCALE_EN_US, 0, pDecOut);
+  return VarDecFromStr(buff, LOCALE_EN_US, LOCALE_NOUSEROVERRIDE, pDecOut);
 }
 
 /************************************************************************
@@ -6070,7 +6070,8 @@ static BSTR VARIANT_BstrReplaceDecimal(WCHAR * buff, LCID lcid, ULONG dwFlags)
      the need to replace the decimal separator, and if so, will prepare an
      appropriate NUMBERFMTW structure to do the job via GetNumberFormatW().
    */
-  GetLocaleInfoW(lcid, LOCALE_SDECIMAL, lpDecimalSep, sizeof(lpDecimalSep) / sizeof(WCHAR));
+  GetLocaleInfoW(lcid, LOCALE_SDECIMAL | (dwFlags & LOCALE_NOUSEROVERRIDE),
+                 lpDecimalSep, sizeof(lpDecimalSep) / sizeof(WCHAR));
   if (lpDecimalSep[0] == '.' && lpDecimalSep[1] == '\0')
   {
     /* locale is compatible with English - return original string */
@@ -6095,8 +6096,7 @@ static BSTR VARIANT_BstrReplaceDecimal(WCHAR * buff, LCID lcid, ULONG dwFlags)
     if (p) minFormat.NumDigits = strlenW(p + 1);
 
     numbuff[0] = '\0';
-    if (!GetNumberFormatW(lcid, dwFlags & LOCALE_NOUSEROVERRIDE,
-                   buff, &minFormat, numbuff, sizeof(numbuff) / sizeof(WCHAR)))
+    if (!GetNumberFormatW(lcid, 0, buff, &minFormat, numbuff, sizeof(numbuff) / sizeof(WCHAR)))
     {
       WARN("GetNumberFormatW() failed, returning raw number string instead\n");
       bstrOut = SysAllocString(buff);
@@ -6630,10 +6630,12 @@ HRESULT WINAPI VarBstrCat(BSTR pbstrLeft, BSTR pbstrRight, BSTR *pbstrOut)
  * NOTES
  *  VARCMP_NULL is NOT returned if either string is NULL unlike MSDN
  *  states. A NULL BSTR pointer is equivalent to an empty string.
+ *  If LCID is equal to 0, a byte by byte comparison is performed.
  */
 HRESULT WINAPI VarBstrCmp(BSTR pbstrLeft, BSTR pbstrRight, LCID lcid, DWORD dwFlags)
 {
     HRESULT hres;
+    int ret;
 
     TRACE("%s,%s,%d,%08x\n",
      debugstr_wn(pbstrLeft, SysStringLen(pbstrLeft)),
@@ -6648,10 +6650,28 @@ HRESULT WINAPI VarBstrCmp(BSTR pbstrLeft, BSTR pbstrRight, LCID lcid, DWORD dwFl
     else if (!pbstrRight || !*pbstrRight)
         return VARCMP_GT;
 
-    hres = CompareStringW(lcid, dwFlags, pbstrLeft, SysStringLen(pbstrLeft),
-            pbstrRight, SysStringLen(pbstrRight)) - 1;
-    TRACE("%d\n", hres);
-    return hres;
+    if (lcid == 0)
+    {
+      unsigned int lenLeft = SysStringByteLen(pbstrLeft);
+      unsigned int lenRight = SysStringByteLen(pbstrRight);
+      ret = memcmp(pbstrLeft, pbstrRight, min(lenLeft, lenRight));
+      if (ret < 0)
+        return VARCMP_LT;
+      if (ret > 0)
+        return VARCMP_GT;
+      if (lenLeft < lenRight)
+        return VARCMP_LT;
+      if (lenLeft > lenRight)
+        return VARCMP_GT;
+      return VARCMP_EQ;
+    }
+    else
+    {
+      hres = CompareStringW(lcid, dwFlags, pbstrLeft, SysStringLen(pbstrLeft),
+              pbstrRight, SysStringLen(pbstrRight)) - 1;
+      TRACE("%d\n", hres);
+      return hres;
+    }
 }
 
 /*

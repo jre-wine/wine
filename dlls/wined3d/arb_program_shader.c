@@ -423,6 +423,44 @@ static void vshader_program_add_param(SHADER_OPCODE_ARG *arg, const DWORD param,
   }
 }
 
+static void shader_hw_sample(SHADER_OPCODE_ARG* arg, DWORD sampler_idx, const char *dst_str, const char *coord_reg) {
+    IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
+    IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
+
+    SHADER_BUFFER* buffer = arg->buffer;
+    DWORD sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
+    const char *tex_type;
+
+    switch(sampler_type) {
+        case WINED3DSTT_1D:
+            tex_type = "1D";
+            break;
+
+        case WINED3DSTT_2D:
+            tex_type = "2D";
+            break;
+
+        case WINED3DSTT_VOLUME:
+            tex_type = "3D";
+            break;
+
+        case WINED3DSTT_CUBE:
+            tex_type = "CUBE";
+            break;
+
+        default:
+            ERR("Unexpected texture type %d\n", sampler_type);
+            tex_type = "";
+    }
+
+    if (deviceImpl->stateBlock->textureState[sampler_idx][WINED3DTSS_TEXTURETRANSFORMFLAGS] & WINED3DTTFF_PROJECTED) {
+        shader_addline(buffer, "TXP %s, %s, texture[%u], %s;\n", dst_str, coord_reg, sampler_idx, tex_type);
+    } else {
+        shader_addline(buffer, "TEX %s, %s, texture[%u], %s;\n", dst_str, coord_reg, sampler_idx, tex_type);
+    }
+}
+
+
 static void pshader_gen_input_modifier_line (
     SHADER_BUFFER* buffer,
     const DWORD instr,
@@ -618,7 +656,6 @@ void pshader_hw_map2gl(SHADER_OPCODE_ARG* arg) {
 void pshader_hw_tex(SHADER_OPCODE_ARG* arg) {
 
     IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
-    IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
 
     DWORD dst = arg->dst;
     DWORD* src = arg->src;
@@ -627,10 +664,8 @@ void pshader_hw_tex(SHADER_OPCODE_ARG* arg) {
 
     char reg_dest[40];
     char reg_coord[40];
-    const char *tex_type;
     DWORD reg_dest_code;
     DWORD reg_sampler_code;
-    DWORD sampler_type;
 
     /* All versions have a destination register */
     reg_dest_code = dst & WINED3DSP_REGNUM_MASK;
@@ -650,36 +685,7 @@ void pshader_hw_tex(SHADER_OPCODE_ARG* arg) {
   else
      reg_sampler_code = src[1] & WINED3DSP_REGNUM_MASK;
 
-  sampler_type = arg->reg_maps->samplers[reg_sampler_code] & WINED3DSP_TEXTURETYPE_MASK;
-  switch(sampler_type) {
-     case WINED3DSTT_1D:
-         tex_type = "1D";
-         break;
-
-     case WINED3DSTT_2D:
-         tex_type = "2D";
-         break;
-
-     case WINED3DSTT_VOLUME:
-         tex_type = "3D";
-         break;
-
-     case WINED3DSTT_CUBE:
-         tex_type = "CUBE";
-         break;
-
-     default:
-         ERR("Unexpected texture type %d\n", sampler_type);
-         tex_type = "2D";
-  }
-
-  if (deviceImpl->stateBlock->textureState[reg_sampler_code][WINED3DTSS_TEXTURETRANSFORMFLAGS] & WINED3DTTFF_PROJECTED) {
-      shader_addline(buffer, "TXP %s, %s, texture[%u], %s;\n",
-          reg_dest, reg_coord, reg_sampler_code, tex_type);
-  } else {
-      shader_addline(buffer, "TEX %s, %s, texture[%u], %s;\n",
-                     reg_dest, reg_coord, reg_sampler_code, tex_type);
-  }
+  shader_hw_sample(arg, reg_sampler_code, reg_dest, reg_coord);
 }
 
 void pshader_hw_texcoord(SHADER_OPCODE_ARG* arg) {
@@ -708,9 +714,12 @@ void pshader_hw_texreg2ar(SHADER_OPCODE_ARG* arg) {
 
      DWORD reg1 = arg->dst & WINED3DSP_REGNUM_MASK;
      DWORD reg2 = arg->src[0] & WINED3DSP_REGNUM_MASK;
+     char dst_str[8];
+
+     sprintf(dst_str, "T%u", reg1);
      shader_addline(buffer, "MOV TMP.r, T%u.a;\n", reg2);
      shader_addline(buffer, "MOV TMP.g, T%u.r;\n", reg2);
-     shader_addline(buffer, "TEX T%u, TMP, texture[%u], 2D;\n", reg1, reg1);
+     shader_hw_sample(arg, reg1, dst_str, "TMP");
 }
 
 void pshader_hw_texreg2gb(SHADER_OPCODE_ARG* arg) {
@@ -719,9 +728,12 @@ void pshader_hw_texreg2gb(SHADER_OPCODE_ARG* arg) {
 
      DWORD reg1 = arg->dst & WINED3DSP_REGNUM_MASK;
      DWORD reg2 = arg->src[0] & WINED3DSP_REGNUM_MASK;
+     char dst_str[8];
+
+     sprintf(dst_str, "T%u", reg1);
      shader_addline(buffer, "MOV TMP.r, T%u.g;\n", reg2);
      shader_addline(buffer, "MOV TMP.g, T%u.b;\n", reg2);
-     shader_addline(buffer, "TEX T%u, TMP, texture[%u], 2D;\n", reg1, reg1);
+     shader_hw_sample(arg, reg1, dst_str, "TMP");
 }
 
 void pshader_hw_texbem(SHADER_OPCODE_ARG* arg) {
@@ -729,10 +741,12 @@ void pshader_hw_texbem(SHADER_OPCODE_ARG* arg) {
      SHADER_BUFFER* buffer = arg->buffer;
      DWORD reg1 = arg->dst  & WINED3DSP_REGNUM_MASK;
      DWORD reg2 = arg->src[0] & WINED3DSP_REGNUM_MASK;
+     char dst_str[8];
 
      /* FIXME: Should apply the BUMPMAPENV matrix */
+     sprintf(dst_str, "T%u", reg1);
      shader_addline(buffer, "ADD TMP.rg, fragment.texcoord[%u], T%u;\n", reg1, reg2);
-     shader_addline(buffer, "TEX T%u, TMP, texture[%u], 2D;\n", reg1, reg1);
+     shader_hw_sample(arg, reg1, dst_str, "TMP");
 }
 
 void pshader_hw_texm3x2pad(SHADER_OPCODE_ARG* arg) {
@@ -749,11 +763,13 @@ void pshader_hw_texm3x2tex(SHADER_OPCODE_ARG* arg) {
 
     DWORD reg = arg->dst & WINED3DSP_REGNUM_MASK;
     SHADER_BUFFER* buffer = arg->buffer;
+    char dst_str[8];
     char src0_name[50];
 
+    sprintf(dst_str, "T%u", reg);
     pshader_gen_input_modifier_line(buffer, arg->src[0], 0, src0_name);
     shader_addline(buffer, "DP3 TMP.y, T%u, %s;\n", reg, src0_name);
-    shader_addline(buffer, "TEX T%u, TMP, texture[%u], 2D;\n", reg, reg);
+    shader_hw_sample(arg, reg, dst_str, "TMP");
 }
 
 void pshader_hw_texm3x3pad(SHADER_OPCODE_ARG* arg) {
@@ -775,13 +791,15 @@ void pshader_hw_texm3x3tex(SHADER_OPCODE_ARG* arg) {
     DWORD reg = arg->dst & WINED3DSP_REGNUM_MASK;
     SHADER_BUFFER* buffer = arg->buffer;
     SHADER_PARSE_STATE* current_state = &This->baseShader.parse_state;
+    char dst_str[8];
     char src0_name[50];
 
     pshader_gen_input_modifier_line(buffer, arg->src[0], 0, src0_name);
     shader_addline(buffer, "DP3 TMP.z, T%u, %s;\n", reg, src0_name);
 
-    /* Cubemap textures will be more used than 3D ones. */
-    shader_addline(buffer, "TEX T%u, TMP, texture[%u], CUBE;\n", reg, reg);
+    /* Sample the texture using the calculated coordinates */
+    sprintf(dst_str, "T%u", reg);
+    shader_hw_sample(arg, reg, dst_str, "TMP");
     current_state->current_row = 0;
 }
 
@@ -791,6 +809,7 @@ void pshader_hw_texm3x3vspec(SHADER_OPCODE_ARG* arg) {
     DWORD reg = arg->dst & WINED3DSP_REGNUM_MASK;
     SHADER_BUFFER* buffer = arg->buffer;
     SHADER_PARSE_STATE* current_state = &This->baseShader.parse_state;
+    char dst_str[8];
     char src0_name[50];
 
     pshader_gen_input_modifier_line(buffer, arg->src[0], 0, src0_name);
@@ -806,8 +825,9 @@ void pshader_hw_texm3x3vspec(SHADER_OPCODE_ARG* arg) {
     shader_addline(buffer, "MUL TMP, TMP.w, TMP;\n");
     shader_addline(buffer, "MAD TMP, coefmul.x, TMP, -TMP2;\n");
 
-    /* Cubemap textures will be more used than 3D ones. */
-    shader_addline(buffer, "TEX T%u, TMP, texture[%u], CUBE;\n", reg, reg);
+    /* Sample the texture using the calculated coordinates */
+    sprintf(dst_str, "T%u", reg);
+    shader_hw_sample(arg, reg, dst_str, "TMP");
     current_state->current_row = 0;
 }
 
@@ -818,6 +838,7 @@ void pshader_hw_texm3x3spec(SHADER_OPCODE_ARG* arg) {
     DWORD reg3 = arg->src[1] & WINED3DSP_REGNUM_MASK;
     SHADER_PARSE_STATE* current_state = &This->baseShader.parse_state;
     SHADER_BUFFER* buffer = arg->buffer;
+    char dst_str[8];
     char src0_name[50];
 
     pshader_gen_input_modifier_line(buffer, arg->src[0], 0, src0_name);
@@ -828,8 +849,9 @@ void pshader_hw_texm3x3spec(SHADER_OPCODE_ARG* arg) {
     shader_addline(buffer, "MUL TMP, TMP.w, TMP;\n");
     shader_addline(buffer, "MAD TMP, coefmul.x, TMP, -C[%u];\n", reg3);
 
-    /* Cubemap textures will be more used than 3D ones. */
-    shader_addline(buffer, "TEX T%u, TMP, texture[%u], CUBE;\n", reg, reg);
+    /* Sample the texture using the calculated coordinates */
+    sprintf(dst_str, "T%u", reg);
+    shader_hw_sample(arg, reg, dst_str, "TMP");
     current_state->current_row = 0;
 }
 
@@ -910,3 +932,113 @@ void vshader_hw_map2gl(SHADER_OPCODE_ARG* arg) {
     }
    shader_addline(buffer, "%s;\n", tmpLine);
 }
+
+static GLuint create_arb_blt_vertex_program(WineD3D_GL_Info *gl_info) {
+    GLuint program_id = 0;
+    const char *blt_vprogram =
+        "!!ARBvp1.0\n"
+        "PARAM c[1] = { { 1, 0.5 } };\n"
+        "MOV result.position, vertex.position;\n"
+        "MOV result.color, c[0].x;\n"
+        "MAD result.texcoord[0].y, -vertex.position, c[0], c[0];\n"
+        "MAD result.texcoord[0].x, vertex.position, c[0].y, c[0].y;\n"
+        "END\n";
+
+    GL_EXTCALL(glGenProgramsARB(1, &program_id));
+    GL_EXTCALL(glBindProgramARB(GL_VERTEX_PROGRAM_ARB, program_id));
+    GL_EXTCALL(glProgramStringARB(GL_VERTEX_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB, strlen(blt_vprogram), blt_vprogram));
+
+    if (glGetError() == GL_INVALID_OPERATION) {
+        GLint pos;
+        glGetIntegerv(GL_PROGRAM_ERROR_POSITION_ARB, &pos);
+        FIXME("Vertex program error at position %d: %s\n", pos,
+            debugstr_a((const char *)glGetString(GL_PROGRAM_ERROR_STRING_ARB)));
+    }
+
+    return program_id;
+}
+
+static GLuint create_arb_blt_fragment_program(WineD3D_GL_Info *gl_info) {
+    GLuint program_id = 0;
+    const char *blt_fprogram =
+        "!!ARBfp1.0\n"
+        "TEMP R0;\n"
+        "TEX R0.x, fragment.texcoord[0], texture[0], 2D;\n"
+        "MOV result.depth.z, R0.x;\n"
+        "END\n";
+
+    GL_EXTCALL(glGenProgramsARB(1, &program_id));
+    GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, program_id));
+    GL_EXTCALL(glProgramStringARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB, strlen(blt_fprogram), blt_fprogram));
+
+    if (glGetError() == GL_INVALID_OPERATION) {
+        GLint pos;
+        glGetIntegerv(GL_PROGRAM_ERROR_POSITION_ARB, &pos);
+        FIXME("Fragment program error at position %d: %s\n", pos,
+            debugstr_a((const char *)glGetString(GL_PROGRAM_ERROR_STRING_ARB)));
+    }
+
+    return program_id;
+}
+
+static void shader_arb_select(IWineD3DDevice *iface, BOOL usePS, BOOL useVS) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    WineD3D_GL_Info *gl_info = &((IWineD3DImpl *)(This->wineD3D))->gl_info;
+
+    if (useVS) {
+        TRACE("Using vertex shader\n");
+
+        /* Bind the vertex program */
+        GL_EXTCALL(glBindProgramARB(GL_VERTEX_PROGRAM_ARB,
+            ((IWineD3DVertexShaderImpl *)This->stateBlock->vertexShader)->baseShader.prgId));
+        checkGLcall("glBindProgramARB(GL_VERTEX_PROGRAM_ARB, vertexShader->prgId);");
+
+        /* Enable OpenGL vertex programs */
+        glEnable(GL_VERTEX_PROGRAM_ARB);
+        checkGLcall("glEnable(GL_VERTEX_PROGRAM_ARB);");
+        TRACE_(d3d_shader)("(%p) : Bound vertex program %u and enabled GL_VERTEX_PROGRAM_ARB\n",
+            This, ((IWineD3DVertexShaderImpl *)This->stateBlock->vertexShader)->baseShader.prgId);
+    }
+
+    if (usePS) {
+        TRACE("Using pixel shader\n");
+
+        /* Bind the fragment program */
+        GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB,
+            ((IWineD3DPixelShaderImpl *)This->stateBlock->pixelShader)->baseShader.prgId));
+        checkGLcall("glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, pixelShader->prgId);");
+
+        /* Enable OpenGL fragment programs */
+        glEnable(GL_FRAGMENT_PROGRAM_ARB);
+        checkGLcall("glEnable(GL_FRAGMENT_PROGRAM_ARB);");
+        TRACE_(d3d_shader)("(%p) : Bound fragment program %u and enabled GL_FRAGMENT_PROGRAM_ARB\n",
+            This, ((IWineD3DPixelShaderImpl *)This->stateBlock->pixelShader)->baseShader.prgId);
+    }
+}
+
+static void shader_arb_select_depth_blt(IWineD3DDevice *iface) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    WineD3D_GL_Info *gl_info = &((IWineD3DImpl *)(This->wineD3D))->gl_info;
+    static GLuint vprogram_id = 0;
+    static GLuint fprogram_id = 0;
+
+    if (!vprogram_id) vprogram_id = create_arb_blt_vertex_program(gl_info);
+    GL_EXTCALL(glBindProgramARB(GL_VERTEX_PROGRAM_ARB, vprogram_id));
+    glEnable(GL_VERTEX_PROGRAM_ARB);
+
+    if (!fprogram_id) fprogram_id = create_arb_blt_fragment_program(gl_info);
+    GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, fprogram_id));
+    glEnable(GL_FRAGMENT_PROGRAM_ARB);
+}
+
+static void shader_arb_cleanup(BOOL usePS, BOOL useVS) {
+    if (useVS) glDisable(GL_VERTEX_PROGRAM_ARB);
+    if (usePS) glDisable(GL_FRAGMENT_PROGRAM_ARB);
+}
+
+const shader_backend_t arb_program_shader_backend = {
+    &shader_arb_select,
+    &shader_arb_select_depth_blt,
+    &shader_arb_load_constants,
+    &shader_arb_cleanup
+};

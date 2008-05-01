@@ -327,6 +327,46 @@ static void test_AddMonitor(void)
 
 /* ########################### */
 
+static void test_AddPort(void)
+{
+    DWORD   res;
+
+    SetLastError(0xdeadbeef);
+    res = AddPortA(NULL, 0, NULL);
+    RETURN_ON_DEACTIVATED_SPOOLER(res)
+    /* NT: RPC_X_NULL_REF_POINTER, 9x: ERROR_INVALID_PARAMETER */
+    ok( !res && ((GetLastError() == RPC_X_NULL_REF_POINTER) || 
+                 (GetLastError() == ERROR_INVALID_PARAMETER)),
+        "returned %d with %d (expected '0' with ERROR_NOT_SUPPORTED or " \
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError());
+
+
+    SetLastError(0xdeadbeef);
+    res = AddPortA(NULL, 0, empty);
+    /* Allowed only for (Printer-)Administrators */
+    if (!res && (GetLastError() == ERROR_ACCESS_DENIED)) {
+        trace("skip tests (ACCESS_DENIED)\n");
+        return;
+    }
+    /* XP: ERROR_NOT_SUPPORTED, NT351 and 9x: ERROR_INVALID_PARAMETER */
+    ok( !res && ((GetLastError() == ERROR_NOT_SUPPORTED) || 
+                 (GetLastError() == ERROR_INVALID_PARAMETER)),
+        "returned %d with %d (expected '0' with ERROR_NOT_SUPPORTED or " \
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError());
+
+
+    SetLastError(0xdeadbeef);
+    res = AddPortA(NULL, 0, does_not_exist);
+    /* XP: ERROR_NOT_SUPPORTED, NT351 and 9x: ERROR_INVALID_PARAMETER */
+    ok( !res && ((GetLastError() == ERROR_NOT_SUPPORTED) || 
+                 (GetLastError() == ERROR_INVALID_PARAMETER)),
+        "returned %d with %d (expected '0' with ERROR_NOT_SUPPORTED or " \
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError());
+
+}
+
+/* ########################### */
+
 static void test_ConfigurePort(void)
 {
     DWORD   res;
@@ -472,7 +512,41 @@ static void test_DeleteMonitor(void)
     DeleteMonitorA(NULL, entry->env, winetest_monitor);
 }
 
-/* ######## */
+/* ########################### */
+
+static void test_DeletePort(void)
+{
+    DWORD   res;
+
+    SetLastError(0xdeadbeef);
+    res = DeletePortA(NULL, 0, NULL);
+    RETURN_ON_DEACTIVATED_SPOOLER(res)
+
+    SetLastError(0xdeadbeef);
+    res = DeletePortA(NULL, 0, empty);
+    /* Allowed only for (Printer-)Administrators */
+    if (!res && (GetLastError() == ERROR_ACCESS_DENIED)) {
+        trace("skip tests (ACCESS_DENIED)\n");
+        return;
+    }
+    /* XP: ERROR_NOT_SUPPORTED, NT351 and 9x: ERROR_INVALID_PARAMETER */
+    ok( !res && ((GetLastError() == ERROR_NOT_SUPPORTED) || 
+                 (GetLastError() == ERROR_INVALID_PARAMETER)),
+        "returned %d with %d (expected '0' with ERROR_NOT_SUPPORTED or " \
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError());
+
+
+    SetLastError(0xdeadbeef);
+    res = DeletePortA(NULL, 0, does_not_exist);
+    /* XP: ERROR_NOT_SUPPORTED, NT351 and 9x: ERROR_INVALID_PARAMETER */
+    ok( !res && ((GetLastError() == ERROR_NOT_SUPPORTED) || 
+                 (GetLastError() == ERROR_INVALID_PARAMETER)),
+        "returned %d with %d (expected '0' with ERROR_NOT_SUPPORTED or " \
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError());
+
+}
+
+/* ########################### */
 
 static void test_EnumForms(LPSTR pName)
 {
@@ -1564,6 +1638,28 @@ static void test_DocumentProperties(void)
     ok(ret, "ClosePrinter error %d\n", GetLastError());
 }
 
+static void test_EnumPrinters(void)
+{
+    DWORD neededA, neededW, num;
+    DWORD ret;
+
+    SetLastError(0xdeadbeef);
+    ret = EnumPrintersA(PRINTER_ENUM_LOCAL, NULL, 2, NULL, 0, &neededA, &num);
+    ok(ret == 0, "ret %d\n", ret);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "gle %d\n", GetLastError());
+    ok(num == 0, "num %d\n", num);
+
+    SetLastError(0xdeadbeef);
+    EnumPrintersW(PRINTER_ENUM_LOCAL, NULL, 2, NULL, 0, &neededW, &num);
+    ok(ret == 0, "ret %d\n", ret);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "gle %d\n", GetLastError());
+    ok(num == 0, "num %d\n", num);
+
+    /* Outlook2003 relies on the buffer size returned by EnumPrintersA being big enough
+       to hold the buffer returned by EnumPrintersW */
+    ok(neededA == neededW, "neededA %d neededW %d\n", neededA, neededW);
+}
+
 START_TEST(info)
 {
     LPSTR   default_printer;
@@ -1575,8 +1671,10 @@ START_TEST(info)
     default_printer = find_default_printer();
 
     test_AddMonitor();
+    test_AddPort();
     test_ConfigurePort();
     test_DeleteMonitor();
+    test_DeletePort();
     test_DocumentProperties();
     test_EnumForms(NULL);
     if (default_printer) test_EnumForms(default_printer);
@@ -1588,4 +1686,6 @@ START_TEST(info)
     test_OpenPrinter();
     test_GetPrinterDriver();
     test_SetDefaultPrinter();
+
+    test_EnumPrinters();
 }

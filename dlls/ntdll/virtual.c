@@ -143,6 +143,7 @@ static void *user_space_limit = USER_SPACE_LIMIT;
 static void *preload_reserve_start;
 static void *preload_reserve_end;
 static int use_locks;
+static int force_exec_prot;  /* whether to force PROT_EXEC on all PROT_READ mmaps */
 
 
 /***********************************************************************
@@ -158,6 +159,26 @@ static const char *VIRTUAL_GetProtStr( BYTE prot )
     buffer[4] = (prot & VPROT_EXEC) ? 'x' : '-';
     buffer[5] = 0;
     return buffer;
+}
+
+
+/***********************************************************************
+ *           VIRTUAL_GetUnixProt
+ *
+ * Convert page protections to protection for mmap/mprotect.
+ */
+static int VIRTUAL_GetUnixProt( BYTE vprot )
+{
+    int prot = 0;
+    if ((vprot & VPROT_COMMITTED) && !(vprot & VPROT_GUARD))
+    {
+        if (vprot & VPROT_READ) prot |= PROT_READ;
+        if (vprot & VPROT_WRITE) prot |= PROT_WRITE;
+        if (vprot & VPROT_WRITECOPY) prot |= PROT_WRITE;
+        if (vprot & VPROT_EXEC) prot |= PROT_EXEC;
+    }
+    if (!prot) prot = PROT_NONE;
+    return prot;
 }
 
 
@@ -391,6 +412,7 @@ static NTSTATUS create_view( struct file_view **view_ret, void *base, size_t siz
 {
     struct file_view *view;
     struct list *ptr;
+    int unix_prot = VIRTUAL_GetUnixProt( vprot );
 
     assert( !((UINT_PTR)base & page_mask) );
     assert( !(size & page_mask) );
@@ -446,27 +468,13 @@ static NTSTATUS create_view( struct file_view **view_ret, void *base, size_t siz
 
     *view_ret = view;
     VIRTUAL_DEBUG_DUMP_VIEW( view );
-    return STATUS_SUCCESS;
-}
 
-
-/***********************************************************************
- *           VIRTUAL_GetUnixProt
- *
- * Convert page protections to protection for mmap/mprotect.
- */
-static int VIRTUAL_GetUnixProt( BYTE vprot )
-{
-    int prot = 0;
-    if ((vprot & VPROT_COMMITTED) && !(vprot & VPROT_GUARD))
+    if (force_exec_prot && (unix_prot & PROT_READ) && !(unix_prot & PROT_EXEC))
     {
-        if (vprot & VPROT_READ) prot |= PROT_READ;
-        if (vprot & VPROT_WRITE) prot |= PROT_WRITE;
-        if (vprot & VPROT_WRITECOPY) prot |= PROT_WRITE;
-        if (vprot & VPROT_EXEC) prot |= PROT_EXEC;
+        TRACE( "forcing exec permission on %p-%p\n", base, (char *)base + size - 1 );
+        mprotect( base, size, unix_prot | PROT_EXEC );
     }
-    if (!prot) prot = PROT_NONE;
-    return prot;
+    return STATUS_SUCCESS;
 }
 
 
@@ -555,12 +563,22 @@ static BOOL VIRTUAL_SetProt( FILE_VIEW *view, /* [in] Pointer to view */
                              size_t size,     /* [in] Size in bytes */
                              BYTE vprot )     /* [in] Protections to use */
 {
+    int unix_prot = VIRTUAL_GetUnixProt(vprot);
+
     TRACE("%p-%p %s\n",
           base, (char *)base + size - 1, VIRTUAL_GetProtStr( vprot ) );
 
-    if (mprotect( base, size, VIRTUAL_GetUnixProt(vprot) ))
-        return FALSE;  /* FIXME: last error */
+    if (force_exec_prot && (unix_prot & PROT_READ) && !(unix_prot & PROT_EXEC))
+    {
+        TRACE( "forcing exec permission on %p-%p\n", base, (char *)base + size - 1 );
+        if (!mprotect( base, size, unix_prot | PROT_EXEC )) goto done;
+        /* exec + write may legitimately fail, in that case fall back to write only */
+        if (!(unix_prot & PROT_WRITE)) return FALSE;
+    }
 
+    if (mprotect( base, size, unix_prot )) return FALSE;  /* FIXME: last error */
+
+done:
     memset( view->prot + (((char *)base - (char *)view->base) >> page_shift),
             vprot, size >> page_shift );
     VIRTUAL_DEBUG_DUMP_VIEW( view );
@@ -1003,6 +1021,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
                                 removable ) != STATUS_SUCCESS) goto error;
 
         /* check that all sections are loaded at the right offset */
+        if (nt->OptionalHeader.FileAlignment != nt->OptionalHeader.SectionAlignment) goto error;
         for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
         {
             if (sec[i].VirtualAddress != sec[i].PointerToRawData)
@@ -1285,6 +1304,61 @@ BOOL VIRTUAL_HasMapping( LPCVOID addr )
 
 
 /***********************************************************************
+ *           VIRTUAL_SetForceExec
+ *
+ * Whether to force exec prot on all views.
+ */
+void VIRTUAL_SetForceExec( BOOL enable )
+{
+    struct file_view *view;
+
+    RtlEnterCriticalSection( &csVirtual );
+    if (!force_exec_prot != !enable)  /* change all existing views */
+    {
+        force_exec_prot = enable;
+
+        LIST_FOR_EACH_ENTRY( view, &views_list, struct file_view, entry )
+        {
+            UINT i, count;
+            int unix_prot;
+            char *addr = view->base;
+            BYTE prot = view->prot[0];
+
+            for (count = i = 1; i < view->size >> page_shift; i++, count++)
+            {
+                if (view->prot[i] == prot) continue;
+                unix_prot = VIRTUAL_GetUnixProt( prot );
+                if ((unix_prot & PROT_READ) && !(unix_prot & PROT_EXEC))
+                {
+                    TRACE( "%s exec prot for %p-%p\n",
+                           force_exec_prot ? "enabling" : "disabling",
+                           addr, addr + (count << page_shift) - 1 );
+                    mprotect( addr, count << page_shift,
+                              unix_prot | (force_exec_prot ? PROT_EXEC : 0) );
+                }
+                addr += (count << page_shift);
+                prot = view->prot[i];
+                count = 0;
+            }
+            if (count)
+            {
+                unix_prot = VIRTUAL_GetUnixProt( prot );
+                if ((unix_prot & PROT_READ) && !(unix_prot & PROT_EXEC))
+                {
+                    TRACE( "%s exec prot for %p-%p\n",
+                           force_exec_prot ? "enabling" : "disabling",
+                           addr, addr + (count << page_shift) - 1 );
+                    mprotect( addr, count << page_shift,
+                              unix_prot | (force_exec_prot ? PROT_EXEC : 0) );
+                }
+            }
+        }
+    }
+    RtlLeaveCriticalSection( &csVirtual );
+}
+
+
+/***********************************************************************
  *           VIRTUAL_UseLargeAddressSpace
  *
  * Increase the address space size for apps that support it.
@@ -1429,6 +1503,9 @@ NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *si
 
     size = ROUND_SIZE( addr, size );
     base = ROUND_ADDR( addr, page_mask );
+
+    /* avoid freeing the DOS area when a broken app passes a NULL pointer */
+    if (!base && !(type & MEM_SYSTEM)) return STATUS_INVALID_PARAMETER;
 
     RtlEnterCriticalSection(&csVirtual);
 
@@ -1634,7 +1711,8 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
     if (!view)
     {
         info->State             = MEM_FREE;
-        info->Protect           = 0;
+        info->Protect           = PAGE_NOACCESS;
+        info->AllocationBase    = 0;
         info->AllocationProtect = 0;
         info->Type              = 0;
     }
@@ -1643,6 +1721,7 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
         BYTE vprot = view->prot[(base - alloc_base) >> page_shift];
         info->State = (vprot & VPROT_COMMITTED) ? MEM_COMMIT : MEM_RESERVE;
         info->Protect = VIRTUAL_GetWin32Prot( vprot );
+        info->AllocationBase = alloc_base;
         info->AllocationProtect = VIRTUAL_GetWin32Prot( view->protect );
         if (view->protect & VPROT_IMAGE) info->Type = MEM_IMAGE;
         else if (view->flags & VFLAG_VALLOC) info->Type = MEM_PRIVATE;
@@ -1652,8 +1731,7 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
     }
     RtlLeaveCriticalSection(&csVirtual);
 
-    info->BaseAddress    = (LPVOID)base;
-    info->AllocationBase = (LPVOID)alloc_base;
+    info->BaseAddress    = base;
     info->RegionSize     = size - (base - alloc_base);
     if (res_len) *res_len = sizeof(*info);
     return STATUS_SUCCESS;

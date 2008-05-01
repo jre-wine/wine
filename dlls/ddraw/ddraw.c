@@ -1212,6 +1212,9 @@ IDirectDrawImpl_GetGDISurface(IDirectDraw7 *iface,
         return DDERR_NOTFOUND;
     }
 
+    /* GetBackBuffer AddRef()ed the surface, release it */
+    IWineD3DSurface_Release(Surf);
+
     IWineD3DSurface_GetParent(Surf,
                               (IUnknown **) &ddsurf);
     IDirectDrawSurface7_Release(ddsurf);  /* For the GetParent */
@@ -1618,7 +1621,7 @@ IDirectDrawImpl_RecreateAllSurfaces(IDirectDrawImpl *This)
         /* Should happen almost never */
         FIXME("(%p) Switching to non-opengl surfaces with d3d started. Is this a bug?\n", This);
         /* Shutdown d3d */
-        IWineD3DDevice_Uninit3D(This->wineD3DDevice);
+        IWineD3DDevice_Uninit3D(This->wineD3DDevice, D3D7CB_DestroyDepthStencilSurface);
     }
     /* Contrary: D3D starting is handled by the caller, because it knows the render target */
 
@@ -1653,6 +1656,7 @@ IDirectDrawImpl_RecreateAllSurfaces(IDirectDrawImpl *This)
  *****************************************************************************/
 static HRESULT WINAPI
 D3D7CB_CreateSurface(IUnknown *device,
+                     IUnknown *pSuperior,
                      UINT Width, UINT Height,
                      WINED3DFORMAT Format,
                      DWORD Usage, WINED3DPOOL Pool, UINT level,
@@ -1673,6 +1677,15 @@ D3D7CB_CreateSurface(IUnknown *device,
 
     TRACE("Returning wineD3DSurface %p, it belongs to surface %p\n", *Surface, surf);
     return D3D_OK;
+}
+
+ULONG WINAPI D3D7CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface) {
+    IUnknown* surfaceParent;
+    TRACE("(%p) call back\n", pSurface);
+
+    IWineD3DSurface_GetParent(pSurface, (IUnknown **) &surfaceParent);
+    IUnknown_Release(surfaceParent);
+    return IUnknown_Release(surfaceParent);
 }
 
 /*****************************************************************************
@@ -2637,7 +2650,8 @@ IDirectDrawImpl_EnumSurfaces(IDirectDraw7 *iface,
  *
  *****************************************************************************/
 static HRESULT WINAPI
-D3D7CB_CreateRenderTarget(IUnknown *device, UINT Width, UINT Height,
+D3D7CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior,
+                          UINT Width, UINT Height,
                           WINED3DFORMAT Format,
                           WINED3DMULTISAMPLE_TYPE MultiSample,
                           DWORD MultisampleQuality,
@@ -2671,6 +2685,7 @@ D3D7CB_CreateRenderTarget(IUnknown *device, UINT Width, UINT Height,
 
 static HRESULT WINAPI
 D3D7CB_CreateDepthStencilSurface(IUnknown *device,
+                                 IUnknown *pSuperior,
                                  UINT Width,
                                  UINT Height,
                                  WINED3DFORMAT Format,

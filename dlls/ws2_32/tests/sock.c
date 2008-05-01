@@ -1399,15 +1399,170 @@ static void test_select(void)
     ok ( (thread_handle != NULL), "CreateThread failed unexpectedly: %d\n", GetLastError());
 
     WaitForSingleObject (server_ready, INFINITE);
-    Sleep(2000);
+    Sleep(200);
     ret = closesocket(fdRead);
     ok ( (ret == 0), "closesocket failed unexpectedly: %d\n", ret);
 
-    WaitForSingleObject (thread_handle, TEST_TIMEOUT * 1000);
-    todo_wine {
+    WaitForSingleObject (thread_handle, 1000);
     ok ( (thread_params.ReadKilled), "closesocket did not wakeup select\n");
+
+}
+
+static DWORD WINAPI AcceptKillThread(select_thread_params *par)
+{
+    struct sockaddr_in address;
+    int len = sizeof(address);
+    SOCKET client_socket;
+
+    SetEvent(server_ready);
+    client_socket = accept(par->s, (struct sockaddr*) &address, &len);
+    if (client_socket != INVALID_SOCKET)
+        closesocket(client_socket);
+    par->ReadKilled = (client_socket == INVALID_SOCKET);
+    return 0;
+}
+
+static void test_accept(void)
+{
+    int ret;
+    SOCKET server_socket = INVALID_SOCKET;
+    struct sockaddr_in address;
+    select_thread_params thread_params;
+    HANDLE thread_handle = NULL;
+
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket == INVALID_SOCKET)
+    {
+        trace("error creating server socket: %d\n", WSAGetLastError());
+        goto done;
     }
 
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    ret = bind(server_socket, (struct sockaddr*) &address, sizeof(address));
+    if (ret != 0)
+    {
+        trace("error binding server socket: %d\n", WSAGetLastError());
+        goto done;
+    }
+
+    ret = listen(server_socket, 1);
+    if (ret != 0)
+    {
+        trace("error making server socket listen: %d\n", WSAGetLastError());
+        goto done;
+    }
+
+    server_ready = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (server_ready == INVALID_HANDLE_VALUE)
+    {
+        trace("error creating event: %d\n", GetLastError());
+        goto done;
+    }
+
+    thread_params.s = server_socket;
+    thread_params.ReadKilled = FALSE;
+    thread_handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE) AcceptKillThread,
+        &thread_params, 0, NULL);
+    if (thread_handle == NULL)
+    {
+        trace("error creating thread: %d\n", GetLastError());
+        goto done;
+    }
+
+    WaitForSingleObject(server_ready, INFINITE);
+    Sleep(200);
+    ret = closesocket(server_socket);
+    if (ret != 0)
+    {
+        trace("closesocket failed: %d\n", WSAGetLastError());
+        goto done;
+    }
+
+    WaitForSingleObject(thread_handle, 1000);
+    ok(thread_params.ReadKilled, "closesocket did not wakeup accept\n");
+
+done:
+    if (thread_handle != NULL)
+        CloseHandle(thread_handle);
+    if (server_ready != INVALID_HANDLE_VALUE)
+        CloseHandle(server_ready);
+    if (server_socket != INVALID_SOCKET)
+        closesocket(server_socket);
+}
+
+static void test_extendedSocketOptions()
+{
+    WSADATA wsa;
+    SOCKET sock;
+    struct sockaddr_in sa;
+    int sa_len = sizeof(struct sockaddr_in);
+    int optval, optlen = sizeof(int), ret;
+    BOOL bool_opt_val;
+    LINGER linger_val;
+
+    if(WSAStartup(MAKEWORD(2,0), &wsa)){
+        trace("Winsock failed: 0x%08x. Aborting test\n", WSAGetLastError());
+        return;
+    }
+
+    memset(&sa, 0, sa_len);
+
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons(0);
+    sa.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP)) < 0){
+        trace("Creating the socket failed: 0x%08x\n", WSAGetLastError());
+        WSACleanup();
+        return;
+    }
+
+    if(bind(sock, (struct sockaddr *) &sa, sa_len) < 0){
+        trace("Failed to bind socket: 0x%08x\n", WSAGetLastError());
+        closesocket(sock);
+        WSACleanup();
+        return;
+    }
+
+    ret = getsockopt(sock, SOL_SOCKET, SO_MAX_MSG_SIZE, (char *)&optval, &optlen);
+
+    ok(ret == 0, "getsockopt failed to query SO_MAX_MSG_SIZE, return value is 0x%08x\n", ret);
+    ok(optval == 65507, "SO_MAX_MSG_SIZE reported %d, expected 65507\n", optval);
+
+    optlen = sizeof(LINGER);
+    ret = getsockopt(sock, SOL_SOCKET, SO_LINGER, (char *)&linger_val, &optlen);
+    todo_wine{
+    ok(ret == SOCKET_ERROR, "getsockopt should fail for UDP sockets but return value is 0x%08x\n", ret);
+    }
+
+    closesocket(sock);
+
+    if((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP)) < 0){
+        trace("Creating the socket failed: 0x%08x\n", WSAGetLastError());
+        WSACleanup();
+        return;
+    }
+
+    if(bind(sock, (struct sockaddr *) &sa, sa_len) < 0){
+        trace("Failed to bind socket: 0x%08x\n", WSAGetLastError());
+        closesocket(sock);
+        WSACleanup();
+        return;
+    }
+
+    ret = getsockopt(sock, SOL_SOCKET, SO_LINGER, (char *)&linger_val, &optlen);
+    ok(ret == 0, "getsockopt failed to query SO_LINGER, return value is 0x%08x\n", ret);
+
+    optlen = sizeof(BOOL);
+    ret = getsockopt(sock, SOL_SOCKET, SO_DONTLINGER, (char *)&bool_opt_val, &optlen);
+    ok(ret == 0, "getsockopt failed to query SO_DONTLINGER, return value is 0x%08x\n", ret);
+    ok((linger_val.l_onoff && !bool_opt_val) || (!linger_val.l_onoff && bool_opt_val),
+            "Return value of SO_DONTLINGER is %d, but SO_LINGER returned l_onoff == %d.\n",
+            bool_opt_val, linger_val.l_onoff);
+
+    closesocket(sock);
+    WSACleanup();
 }
 
 /**************** Main program  ***************/
@@ -1419,6 +1574,7 @@ START_TEST( sock )
 
     test_set_getsockopt();
     test_so_reuseaddr();
+    test_extendedSocketOptions();
 
     for (i = 0; i < NUM_TESTS; i++)
     {
@@ -1438,6 +1594,7 @@ START_TEST( sock )
     test_WSAStringToAddressW();
 
     test_select();
-    
+    test_accept();
+
     Exit();
 }

@@ -82,6 +82,7 @@ struct hash_table_elt
 
 struct hash_table
 {
+    unsigned                    num_elts;
     unsigned                    num_buckets;
     struct hash_table_elt**     buckets;
 };
@@ -113,6 +114,27 @@ extern unsigned dbghelp_options;
 /* some more Wine extensions */
 #define SYMOPT_WINE_WITH_ELF_MODULES 0x40000000
 
+enum location_kind {loc_error,          /* reg is the error code */
+                    loc_absolute,       /* offset is the location */
+                    loc_register,       /* reg is the location */
+                    loc_regrel,         /* [reg+offset] is the location */
+                    loc_user,           /* value is debug information dependent,
+                                           reg & offset can be used ad libidem */
+};
+
+enum location_error {loc_err_internal = -1,     /* internal while computing */
+                     loc_err_too_complex = -2,  /* couldn't compute location (even at runtime) */
+                     loc_err_out_of_scope = -3, /* variable isn't available at current address */
+                     loc_err_cant_read = -4,    /* couldn't read memory at given address */
+};
+
+struct location
+{
+    unsigned            kind : 8,
+                        reg;
+    unsigned long       offset;
+};
+
 struct symt
 {
     enum SymTagEnum             tag;
@@ -137,6 +159,7 @@ struct symt_block
 struct symt_compiland
 {
     struct symt                 symt;
+    unsigned long               address;
     unsigned                    source;
     struct vector               vchildren;      /* global variables & functions */
 };
@@ -150,15 +173,25 @@ struct symt_data
     struct symt*                type;
     union                                       /* depends on kind */
     {
-        unsigned long           address;        /* DataIs{Global, FileStatic} */
+        /* DataIs{Global, FileStatic}:
+         *      loc.kind is loc_absolute
+         *      loc.offset is address
+         * DataIs{Local,Param}:
+         *      with loc.kind
+         *              loc_absolute    not supported
+         *              loc_register    location is in register loc.reg
+         *              loc_regrel      location is at address loc.reg + loc.offset
+         *              >= loc_user     ask debug info provider for resolution
+         */
+        struct location         var;
+        /* DataIs{Member} (all values are in bits, not bytes) */
         struct
         {
-            long                        offset; /* DataIs{Member,Local,Param} in bits */
-            unsigned long               length; /* DataIs{Member} in bits */
-            unsigned long               reg_rel : 1, /* DataIs{Local}: 0 in register, 1 deref */
-                                        reg_id; /* DataIs{Local} (0 if frame relative) */
-        } s;
-        VARIANT                 value;          /* DataIsConstant */
+            long                        offset;
+            unsigned long               length;
+        } member;
+        /* DataIsConstant */
+        VARIANT                 value;
     } u;
 };
 
@@ -178,7 +211,7 @@ struct symt_function_point
 {
     struct symt                 symt;           /* either SymTagFunctionDebugStart, SymTagFunctionDebugEnd, SymTagLabel */
     struct symt_function*       parent;
-    unsigned long               offset;
+    struct location             loc;
     const char*                 name;           /* for labels */
 };
 
@@ -273,6 +306,8 @@ enum module_type
     DMT_PDB,            /* PDB file */
 };
 
+struct process;
+
 struct module
 {
     IMAGEHLP_MODULE64           module;
@@ -280,14 +315,20 @@ struct module
     enum module_type		type : 16;
     unsigned short              is_virtual : 1;
     struct elf_module_info*	elf_info;
+    struct dwarf2_module_info_s*dwarf2_info;
     
     /* memory allocation pool */
     struct pool                 pool;
 
-    /* symbol tables */
+    /* symbols & symbol tables */
     int                         sortlist_valid;
+    unsigned                    num_sorttab;    /* number of symbols with addresses */
     struct symt_ht**            addr_sorttab;
     struct hash_table           ht_symbols;
+    void                        (*loc_compute)(struct process* pcs,
+                                               const struct module* module,
+                                               const struct symt_function* func,
+                                               struct location* loc);
 
     /* types */
     struct hash_table           ht_types;
@@ -333,6 +374,7 @@ struct line_info
 
 struct module_pair
 {
+    struct process*             pcs;
     struct module*              requested; /* in:  to module_get_debug() */
     struct module*              effective; /* out: module with debug info */
 };
@@ -367,6 +409,7 @@ extern BOOL         pcs_callback(const struct process* pcs, ULONG action, void* 
 extern void*        fetch_buffer(struct process* pcs, unsigned size);
 
 /* elf_module.c */
+#define ELF_NO_MAP      ((const void*)0xffffffff)
 typedef BOOL (*elf_enum_modules_cb)(const char*, unsigned long addr, void* user);
 extern BOOL         elf_enum_modules(HANDLE hProc, elf_enum_modules_cb, void*);
 extern BOOL         elf_fetch_file_info(const char* name, DWORD* base, DWORD* size, DWORD* checksum);
@@ -381,14 +424,13 @@ extern int          elf_is_in_thunk_area(unsigned long addr, const struct elf_th
 extern DWORD WINAPI addr_to_linear(HANDLE hProcess, HANDLE hThread, ADDRESS* addr);
 
 /* module.c */
-extern int          module_compute_num_syms(struct module* module);
 extern struct module*
                     module_find_by_addr(const struct process* pcs, unsigned long addr,
                                         enum module_type type);
 extern struct module*
                     module_find_by_name(const struct process* pcs, 
                                         const char* name, enum module_type type);
-extern BOOL         module_get_debug(const struct process* pcs, struct module_pair*);
+extern BOOL         module_get_debug(struct module_pair*);
 extern struct module*
                     module_new(struct process* pcs, const char* name, 
                                enum module_type type, BOOL virtual,
@@ -438,14 +480,17 @@ extern BOOL         dwarf2_parse(struct module* module, unsigned long load_offse
 				 const unsigned char* debug, unsigned int debug_size, 
 				 const unsigned char* abbrev, unsigned int abbrev_size, 
 				 const unsigned char* str, unsigned int str_size,
-                                 const unsigned char* line, unsigned int line_size);
+                                 const unsigned char* line, unsigned int line_size,
+                                 const unsigned char* loclist, unsigned int loclist_size);
 
 /* symbol.c */
 extern const char*  symt_get_name(const struct symt* sym);
 extern int          symt_cmp_addr(const void* p1, const void* p2);
-extern int          symt_find_nearest(struct module* module, DWORD addr);
+extern struct symt_ht*
+                    symt_find_nearest(struct module* module, DWORD addr);
 extern struct symt_compiland*
-                    symt_new_compiland(struct module* module, unsigned src_idx);
+                    symt_new_compiland(struct module* module, unsigned long address,
+                                       unsigned src_idx);
 extern struct symt_public*
                     symt_new_public(struct module* module, 
                                     struct symt_compiland* parent, 
@@ -473,7 +518,7 @@ extern void         symt_add_func_line(struct module* module,
 extern struct symt_data*
                     symt_add_func_local(struct module* module, 
                                         struct symt_function* func, 
-                                        enum DataKind dt, BOOL regrel, int regno, long offset,
+                                        enum DataKind dt, const struct location* loc,
                                         struct symt_block* block,
                                         struct symt* type, const char* name);
 extern struct symt_block*
@@ -489,7 +534,8 @@ extern struct symt_function_point*
                     symt_add_function_point(struct module* module, 
                                             struct symt_function* func,
                                             enum SymTagEnum point, 
-                                            unsigned offset, const char* name);
+                                            const struct location* loc,
+                                            const char* name);
 extern BOOL         symt_fill_func_line_info(struct module* module,
                                              struct symt_function* func, 
                                              DWORD addr, IMAGEHLP_LINE* line);
@@ -499,6 +545,11 @@ extern struct symt_thunk*
                                    struct symt_compiland* parent,
                                    const char* name, THUNK_ORDINAL ord,
                                    unsigned long addr, unsigned long size);
+extern struct symt_data*
+                    symt_new_constant(struct module* module,
+                                      struct symt_compiland* parent,
+                                      const char* name, struct symt* type,
+                                      const VARIANT* v);
 
 /* type.c */
 extern void         symt_init_basic(struct module* module);

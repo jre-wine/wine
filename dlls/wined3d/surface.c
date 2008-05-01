@@ -750,6 +750,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
                     notInContext = TRUE;
                     /* TODO: check the contexts, to see if were shared with the current context */
                 }
+                IWineD3DSwapChain_Release((IWineD3DSwapChain *)implSwapChain);
             }
             if (swapchain != NULL)       IWineD3DSwapChain_Release((IWineD3DSwapChain *)swapchain);
             if (targetSwapChain != NULL) IWineD3DSwapChain_Release((IWineD3DSwapChain *)targetSwapChain);
@@ -1237,6 +1238,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
         } else {
             FIXME("unsupported unlocking to Rendering surface surf@%p usage(%s)\n", This, debug_d3dusage(This->resource.usage));
         }
+        IWineD3DSwapChain_Release((IWineD3DSwapChain *)implSwapChain);
 
     } else if (WINED3DUSAGE_DEPTHSTENCIL & This->resource.usage) { /* stencil surfaces */
 
@@ -2702,6 +2704,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
 
         TRACE("Calling GetSwapChain with mydevice = %p\n", myDevice);
         IWineD3DDevice_GetSwapChain((IWineD3DDevice *)myDevice, 0, (IWineD3DSwapChain **)&implSwapChain);
+        IWineD3DSwapChain_Release( (IWineD3DSwapChain *) implSwapChain );
         if(implSwapChain->backBuffer && This == (IWineD3DSurfaceImpl*) implSwapChain->backBuffer[0]) {
             glDrawBuffer(GL_BACK);
             checkGLcall("glDrawBuffer(GL_BACK)");
@@ -3020,10 +3023,10 @@ DWORD WINAPI IWineD3DSurfaceImpl_GetPitch(IWineD3DSurface *iface) {
          where each block is 4x4 pixels, 8 bytes (dxt1) and 16 bytes (dxt2/3/4/5)
           ie pitch = (width/4) * bytes per block                                  */
     if (This->resource.format == WINED3DFMT_DXT1) /* DXT1 is 8 bytes per block */
-        ret = (This->currentDesc.Width >> 2) << 3;
+        ret = ((This->currentDesc.Width + 3) >> 2) << 3;
     else if (This->resource.format == WINED3DFMT_DXT2 || This->resource.format == WINED3DFMT_DXT3 ||
              This->resource.format == WINED3DFMT_DXT4 || This->resource.format == WINED3DFMT_DXT5) /* DXT2/3/4/5 is 16 bytes per block */
-        ret = (This->currentDesc.Width >> 2) << 4;
+        ret = ((This->currentDesc.Width + 3) >> 2) << 4;
     else {
         if (NP2_REPACK == wined3d_settings.nonpower2_mode || This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
             /* Front and back buffers are always lockes/unlocked on currentDesc.Width */

@@ -41,6 +41,7 @@
 #include "wine/unicode.h"
 #include "objbase.h"
 #include "msidefs.h"
+#include "sddl.h"
 
 #include "msipriv.h"
 
@@ -60,45 +61,33 @@ static void MSI_FreePackage( MSIOBJECTHDR *arg)
     msi_free_properties( package );
 }
 
+static UINT iterate_clone_props(MSIRECORD *row, LPVOID param)
+{
+    MSIPACKAGE *package = param;
+    LPCWSTR name, value;
+
+    name = MSI_RecordGetString( row, 1 );
+    value = MSI_RecordGetString( row, 2 );
+    MSI_SetPropertyW( package, name, value );
+
+    return ERROR_SUCCESS;
+}
+
 static UINT clone_properties( MSIPACKAGE *package )
 {
-    MSIQUERY * view = NULL;
-    UINT rc;
     static const WCHAR Query[] = {
-       'S','E','L','E','C','T',' ','*',' ',
-       'F','R','O','M',' ','`','P','r','o','p','e','r','t','y','`',0};
+        'S','E','L','E','C','T',' ','*',' ',
+        'F','R','O','M',' ','`','P','r','o','p','e','r','t','y','`',0};
+    MSIQUERY *view = NULL;
+    UINT r;
 
-    /* clone the existing properties */
-    rc = MSI_DatabaseOpenViewW( package->db, Query, &view );
-    if (rc != ERROR_SUCCESS)
-        return rc;
-
-    rc = MSI_ViewExecute(view, 0);
-    if (rc != ERROR_SUCCESS)
+    r = MSI_OpenQuery( package->db, &view, Query );
+    if (r == ERROR_SUCCESS)
     {
-        MSI_ViewClose(view);
+        r = MSI_IterateRecords( view, NULL, iterate_clone_props, package );
         msiobj_release(&view->hdr);
-        return rc;
     }
-    while (1)
-    {
-        MSIRECORD * row;
-        LPCWSTR name, value;
-
-        rc = MSI_ViewFetch(view,&row);
-        if (rc != ERROR_SUCCESS)
-            break;
-
-        name = MSI_RecordGetString( row, 1 );
-        value = MSI_RecordGetString( row, 2 );
-        MSI_SetPropertyW( package, name, value );
-
-        msiobj_release( &row->hdr );
-    }
-    MSI_ViewClose(view);
-    msiobj_release(&view->hdr);
-
-    return rc;
+    return r;
 }
 
 /*
@@ -121,6 +110,56 @@ static UINT set_installed_prop( MSIPACKAGE *package )
         RegCloseKey( hkey );
         MSI_SetPropertyW( package, szInstalled, val );
     }
+
+    return r;
+}
+
+static UINT set_user_sid_prop( MSIPACKAGE *package )
+{
+    SID_NAME_USE use;
+    LPWSTR user_name;
+    LPWSTR sid_str = NULL, dom = NULL;
+    DWORD size, dom_size;
+    PSID psid = NULL;
+    UINT r = ERROR_FUNCTION_FAILED;
+
+    static const WCHAR user_sid[] = {'U','s','e','r','S','I','D',0};
+
+    size = 0;
+    GetUserNameW( NULL, &size );
+
+    user_name = msi_alloc( (size + 1) * sizeof(WCHAR) );
+    if (!user_name)
+        return ERROR_OUTOFMEMORY;
+
+    if (!GetUserNameW( user_name, &size ))
+        goto done;
+
+    size = 0;
+    dom_size = 0;
+    LookupAccountNameW( NULL, user_name, NULL, &size, NULL, &dom_size, &use );
+
+    psid = msi_alloc( size );
+    dom = msi_alloc( dom_size );
+    if (!psid || !dom)
+    {
+        r = ERROR_OUTOFMEMORY;
+        goto done;
+    }
+
+    if (!LookupAccountNameW( NULL, user_name, psid, &size, dom, &dom_size, &use ))
+        goto done;
+
+    if (!ConvertSidToStringSidW( psid, &sid_str ))
+        goto done;
+
+    r = MSI_SetPropertyW( package, user_sid, sid_str );
+
+done:
+    LocalFree( sid_str );
+    msi_free( dom );
+    msi_free( psid );
+    msi_free( user_name );
 
     return r;
 }
@@ -390,6 +429,9 @@ static VOID set_installer_properties(MSIPACKAGE *package)
         MSI_SetPropertyW( package, szCOMPANYNAME, company );
         msi_free( company );
     }
+
+    if ( set_user_sid_prop( package ) != ERROR_SUCCESS)
+        ERR("Failed to set the UserSID property\n");
 
     msi_free( check );
     CloseHandle( hkey );

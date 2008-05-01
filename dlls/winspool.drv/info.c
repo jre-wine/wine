@@ -138,6 +138,7 @@ typedef struct {
 /* ############################### */
 
 static struct list monitor_handles = LIST_INIT( monitor_handles );
+static monitor_t * pm_localport;
 
 static opened_printer_t **printer_handles;
 static int nb_printer_handles;
@@ -170,7 +171,7 @@ static const WCHAR PrintersW[] = {'S','y','s','t','e','m','\\',
                                   'P','r','i','n','t','\\',
                                   'P','r','i','n','t','e','r','s',0};
 
-static       WCHAR LocalPortW[] = {'L','o','c','a','l',' ','P','o','r','t',0};
+static const WCHAR LocalPortW[] = {'L','o','c','a','l',' ','P','o','r','t',0};
 
 static const WCHAR user_default_reg_key[] = { 'S','o','f','t','w','a','r','e','\\',
                                               'M','i','c','r','o','s','o','f','t','\\',
@@ -887,6 +888,28 @@ static DWORD get_local_monitors(DWORD level, LPBYTE pMonitors, DWORD cbBuf, LPDW
 }
 
 /******************************************************************
+ * monitor_flush [internal]
+ *
+ * flush the cached PORT_INFO_2W - data
+ */
+
+void monitor_flush(monitor_t * pm)
+{
+    if (!pm) return;
+
+    EnterCriticalSection(&monitor_handles_cs);
+
+    TRACE("%p (%s) cache: %p (%d, %d)\n", pm, debugstr_w(pm->name), pm->cache, pm->pi1_needed, pm->pi2_needed);
+
+    HeapFree(GetProcessHeap(), 0, pm->cache);
+    pm->cache = NULL;
+    pm->pi1_needed = 0;
+    pm->pi2_needed = 0;
+    pm->returned = 0;
+    LeaveCriticalSection(&monitor_handles_cs);
+}
+
+/******************************************************************
  * monitor_unload [internal]
  *
  * release a printmonitor and unload it from memory, when needed
@@ -940,7 +963,7 @@ static void monitor_unloadall(void)
  * On failure, SetLastError() is called and NULL is returned
  */
 
-static monitor_t * monitor_load(LPWSTR name, LPWSTR dllname)
+static monitor_t * monitor_load(LPCWSTR name, LPWSTR dllname)
 {
     LPMONITOR2  (WINAPI *pInitializePrintMonitor2) (PMONITORINIT, LPHANDLE);
     PMONITORUI  (WINAPI *pInitializePrintMonitorUI)(VOID);
@@ -1075,6 +1098,10 @@ static monitor_t * monitor_load(LPWSTR name, LPWSTR dllname)
         }
     }
 cleanup:
+    if ((pm_localport ==  NULL) && (pm != NULL) && (lstrcmpW(pm->name, LocalPortW) == 0)) {
+        pm->refcount++;
+        pm_localport = pm;
+    }
     LeaveCriticalSection(&monitor_handles_cs);
     if (driver != dllname) HeapFree(GetProcessHeap(), 0, driver);
     HeapFree(GetProcessHeap(), 0, regroot);
@@ -2125,13 +2152,33 @@ BOOL WINAPI DeleteMonitorW (LPWSTR pName, LPWSTR pEnvironment, LPWSTR pMonitorNa
  * See DeletePortW.
  *
  */
-BOOL WINAPI
-DeletePortA (LPSTR pName, HWND hWnd, LPSTR pPortName)
+BOOL WINAPI DeletePortA (LPSTR pName, HWND hWnd, LPSTR pPortName)
 {
-    FIXME("(%s,%p,%s):stub\n",debugstr_a(pName),hWnd,
-          debugstr_a(pPortName));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    LPWSTR  nameW = NULL;
+    LPWSTR  portW = NULL;
+    INT     len;
+    DWORD   res;
+
+    TRACE("(%s, %p, %s)\n", debugstr_a(pName), hWnd, debugstr_a(pPortName));
+
+    /* convert servername to unicode */
+    if (pName) {
+        len = MultiByteToWideChar(CP_ACP, 0, pName, -1, NULL, 0);
+        nameW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pName, -1, nameW, len);
+    }
+
+    /* convert portname to unicode */
+    if (pPortName) {
+        len = MultiByteToWideChar(CP_ACP, 0, pPortName, -1, NULL, 0);
+        portW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pPortName, -1, portW, len);
+    }
+
+    res = DeletePortW(nameW, hWnd, portW);
+    HeapFree(GetProcessHeap(), 0, nameW);
+    HeapFree(GetProcessHeap(), 0, portW);
+    return res;
 }
 
 /******************************************************************
@@ -2148,17 +2195,48 @@ DeletePortA (LPSTR pName, HWND hWnd, LPSTR pPortName)
  *  Success: TRUE
  *  Failure: FALSE
  *
- * BUGS
- *  only a Stub
- *
  */
-BOOL WINAPI
-DeletePortW (LPWSTR pName, HWND hWnd, LPWSTR pPortName)
+BOOL WINAPI DeletePortW (LPWSTR pName, HWND hWnd, LPWSTR pPortName)
 {
-    FIXME("(%s,%p,%s):stub\n",debugstr_w(pName),hWnd,
-          debugstr_w(pPortName));
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    monitor_t * pm;
+    DWORD   res = ROUTER_UNKNOWN;
+
+    TRACE("(%s, %p, %s)\n", debugstr_w(pName), hWnd, debugstr_w(pPortName));
+
+    if (pName && pName[0]) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!pPortName) {
+        SetLastError(RPC_X_NULL_REF_POINTER);
+        return FALSE;
+    }
+
+    /* an empty Portname is Invalid */
+    if (!pPortName[0]) goto cleanup;
+
+    pm = monitor_load_by_port(pPortName);
+    if (pm && pm->monitor) {
+        if (pm->monitor->pfnDeletePort != NULL) {
+            TRACE("Using %s for %s:\n", debugstr_w(pm->name), debugstr_w(pPortName));
+            res = pm->monitor->pfnDeletePort(pName, hWnd, pPortName);
+            TRACE("got %d with %d\n", res, GetLastError());
+        }
+        else if (pm->monitor->pfnXcvOpenPort)
+        {
+            FIXME("XcvOpenPort not implemented (dwMonitorSize: %d)\n", pm->dwMonitorSize);
+        }
+        /* invalidate cached PORT_INFO_2W */
+        if (res == ROUTER_SUCCESS) monitor_flush(pm);
+    }
+    monitor_unload(pm);
+
+cleanup:
+    /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
+    if (res == ROUTER_UNKNOWN) SetLastError(ERROR_NOT_SUPPORTED);
+    TRACE("returning %d with %d\n", (res == ROUTER_SUCCESS), GetLastError());
+    return (res == ROUTER_SUCCESS);
 }
 
 /******************************************************************************
@@ -3961,13 +4039,14 @@ BOOL WINAPI EnumPrintersA(DWORD dwType, LPSTR lpszName,
 			  DWORD cbBuf, LPDWORD lpdwNeeded,
 			  LPDWORD lpdwReturned)
 {
-    BOOL ret;
+    BOOL ret, unicode = FALSE;
     UNICODE_STRING lpszNameW;
     PWSTR pwstrNameW;
-    
+
     pwstrNameW = asciitounicode(&lpszNameW,lpszName);
+    if(!cbBuf) unicode = TRUE; /* return a buffer that's big enough for the unicode version */
     ret = WINSPOOL_EnumPrinters(dwType, pwstrNameW, dwLevel, lpbPrinters, cbBuf,
-				lpdwNeeded, lpdwReturned, FALSE);
+				lpdwNeeded, lpdwReturned, unicode);
     RtlFreeUnicodeString(&lpszNameW);
     return ret;
 }
@@ -5681,8 +5760,28 @@ BOOL WINAPI AbortPrinter( HANDLE hPrinter )
  */
 BOOL WINAPI AddPortA(LPSTR pName, HWND hWnd, LPSTR pMonitorName)
 {
-    FIXME("(%s, %p, %s), stub!\n",debugstr_a(pName),hWnd,debugstr_a(pMonitorName));
-    return FALSE;
+    LPWSTR  nameW = NULL;
+    LPWSTR  monitorW = NULL;
+    DWORD   len;
+    BOOL    res;
+
+    TRACE("(%s, %p, %s)\n",debugstr_a(pName), hWnd, debugstr_a(pMonitorName));
+
+    if (pName) {
+        len = MultiByteToWideChar(CP_ACP, 0, pName, -1, NULL, 0);
+        nameW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pName, -1, nameW, len);
+    }
+
+    if (pMonitorName) {
+        len = MultiByteToWideChar(CP_ACP, 0, pMonitorName, -1, NULL, 0);
+        monitorW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pMonitorName, -1, monitorW, len);
+    }
+    res = AddPortW(nameW, hWnd, monitorW);
+    HeapFree(GetProcessHeap(), 0, nameW);
+    HeapFree(GetProcessHeap(), 0, monitorW);
+    return res;
 }
 
 /******************************************************************************
@@ -5699,14 +5798,47 @@ BOOL WINAPI AddPortA(LPSTR pName, HWND hWnd, LPSTR pMonitorName)
  *  Success: TRUE
  *  Failure: FALSE
  *
- * BUGS
- *  only a Stub
- *
  */
 BOOL WINAPI AddPortW(LPWSTR pName, HWND hWnd, LPWSTR pMonitorName)
 {
-    FIXME("(%s, %p, %s), stub!\n",debugstr_w(pName),hWnd,debugstr_w(pMonitorName));
-    return FALSE;
+    monitor_t * pm;
+    DWORD   res = ROUTER_UNKNOWN;
+
+    TRACE("(%s, %p, %s)\n", debugstr_w(pName), hWnd, debugstr_w(pMonitorName));
+
+    if (pName && pName[0]) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!pMonitorName) {
+        SetLastError(RPC_X_NULL_REF_POINTER);
+        return FALSE;
+    }
+
+    /* an empty Monitorname is Invalid */
+    if (!pMonitorName[0]) goto cleanup;
+
+    pm = monitor_load(pMonitorName, NULL);
+    if (pm && pm->monitor) {
+        if (pm->monitor->pfnAddPort != NULL) {
+            res = pm->monitor->pfnAddPort(pName, hWnd, pMonitorName);
+            TRACE("got %d with %d\n", res, GetLastError());
+        }
+        else if (pm->monitor->pfnXcvOpenPort != NULL)
+        {
+            FIXME("XcvOpenPort not implemented (dwMonitorSize: %d)\n", pm->dwMonitorSize);
+        }
+        /* invalidate cached PORT_INFO_2W */
+        if (res == ROUTER_SUCCESS) monitor_flush(pm);
+    }
+    monitor_unload(pm);
+
+cleanup:
+    /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
+    if (res == ROUTER_UNKNOWN) SetLastError(ERROR_NOT_SUPPORTED);
+    TRACE("returning %d with %d\n", (res == ROUTER_SUCCESS), GetLastError());
+    return (res == ROUTER_SUCCESS);
 }
 
 /******************************************************************************

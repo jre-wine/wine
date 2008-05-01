@@ -176,7 +176,7 @@ static HMONITOR WINAPI IDirect3D9Impl_GetAdapterMonitor(LPDIRECT3D9 iface, UINT 
 }
 
 /* Internal function called back during the CreateDevice to create a render target */
-HRESULT WINAPI D3D9CB_CreateRenderTarget(IUnknown *device, UINT Width, UINT Height,
+HRESULT WINAPI D3D9CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
                                          DWORD MultisampleQuality, BOOL Lockable,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle) {
@@ -250,7 +250,7 @@ HRESULT WINAPI D3D9CB_CreateAdditionalSwapChain(IUnknown *device,
 }
 
 /* Internal function called back during the CreateDevice to create a render target */
-HRESULT WINAPI D3D9CB_CreateDepthStencilSurface(IUnknown *device, UINT Width, UINT Height, 
+HRESULT WINAPI D3D9CB_CreateDepthStencilSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
                                          DWORD MultisampleQuality, BOOL Discard,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle) {
@@ -269,6 +269,14 @@ HRESULT WINAPI D3D9CB_CreateDepthStencilSurface(IUnknown *device, UINT Width, UI
     return res;
 }
 
+ULONG WINAPI D3D9CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface) {
+    IDirect3DSurface9Impl* surfaceParent;
+    TRACE("(%p) call back\n", pSurface);
+
+    IWineD3DSurface_GetParent(pSurface, (IUnknown **) &surfaceParent);
+    IDirect3DSurface9_Release((IDirect3DSurface9*) surfaceParent);
+    return IDirect3DSurface9_Release((IDirect3DSurface9*) surfaceParent);
+}
 
 HRESULT  WINAPI  IDirect3D9Impl_CreateDevice(LPDIRECT3D9 iface, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow,
                                             DWORD BehaviourFlags, D3DPRESENT_PARAMETERS* pPresentationParameters,

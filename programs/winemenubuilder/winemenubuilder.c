@@ -278,7 +278,7 @@ static BOOL extract_icon32(LPCWSTR szFileName, int nIndex, const char *szXPMFile
     hModule = LoadLibraryExW(szFileName, 0, LOAD_LIBRARY_AS_DATAFILE);
     if (!hModule)
     {
-        WINE_ERR("LoadLibraryExW (%s) failed, error %d\n",
+        WINE_WARN("LoadLibraryExW (%s) failed, error %d\n",
                  wine_dbgstr_w(szFileName), GetLastError());
         return FALSE;
     }
@@ -327,7 +327,7 @@ static BOOL extract_icon32(LPCWSTR szFileName, int nIndex, const char *szXPMFile
     }
     else
     {
-        WINE_ERR("found no icon\n");
+        WINE_WARN("found no icon\n");
         FreeLibrary(hModule);
         return FALSE;
     }
@@ -363,7 +363,7 @@ static int ExtractFromICO(LPCWSTR szFileName, const char *szXPMFileName)
     FILE *fICOFile;
     ICONDIR iconDir;
     ICONDIRENTRY *pIconDirEntry;
-    int nMax = 0;
+    int nMax = 0, nMaxBits = 0;
     int nIndex = 0;
     void *pIcon;
     int i;
@@ -379,7 +379,7 @@ static int ExtractFromICO(LPCWSTR szFileName, const char *szXPMFileName)
     if (fread(&iconDir, sizeof (ICONDIR), 1, fICOFile) != 1 ||
         (iconDir.idReserved != 0) || (iconDir.idType != 1))
     {
-        WINE_ERR("Invalid ico file format\n");
+        WINE_WARN("Invalid ico file format\n");
         goto error2;
     }
 
@@ -389,10 +389,12 @@ static int ExtractFromICO(LPCWSTR szFileName, const char *szXPMFileName)
         goto error3;
 
     for (i = 0; i < iconDir.idCount; i++)
-        if ((pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth) > nMax)
+        if (pIconDirEntry[i].wBitCount <= 8 && pIconDirEntry[i].wBitCount >= nMaxBits &&
+            (pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth) >= nMax)
         {
             nIndex = i;
             nMax = pIconDirEntry[i].bHeight * pIconDirEntry[i].bWidth;
+            nMaxBits = pIconDirEntry[i].wBitCount;
         }
     if ((pIcon = HeapAlloc(GetProcessHeap(), 0, pIconDirEntry[nIndex].dwBytesInRes)) == NULL)
         goto error3;
@@ -962,7 +964,8 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bAgain )
             WINE_WARN("Unable to extract icon, deferring.\n");
             goto cleanup;
         }
-        WINE_ERR("failed to extract icon.\n");
+        WINE_ERR("failed to extract icon from %s\n",
+                 wine_dbgstr_w( szIconPath[0] ? szIconPath : szPath ));
     }
 
     /* check the path */

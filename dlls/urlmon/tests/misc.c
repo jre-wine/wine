@@ -339,6 +339,14 @@ static const WCHAR mimeImageXPng[] = {'i','m','a','g','e','/','x','-','p','n','g
 static const WCHAR mimeImageTiff[] = {'i','m','a','g','e','/','t','i','f','f',0};
 static const WCHAR mimeVideoAvi[] = {'v','i','d','e','o','/','a','v','i',0};
 static const WCHAR mimeVideoMpeg[] = {'v','i','d','e','o','/','m','p','e','g',0};
+static const WCHAR mimeAppXCompressed[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+                                    'x','-','c','o','m','p','r','e','s','s','e','d',0};
+static const WCHAR mimeAppXZip[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+                                    'x','-','z','i','p','-','c','o','m','p','r','e','s','s','e','d',0};
+static const WCHAR mimeAppXGzip[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+                                    'x','-','g','z','i','p','-','c','o','m','p','r','e','s','s','e','d',0};
+static const WCHAR mimeAppJava[] = {'a','p','p','l','i','c','a','t','i','o','n','/','j','a','v','a',0};
+static const WCHAR mimeAppPdf[] = {'a','p','p','l','i','c','a','t','i','o','n','/','p','d','f',0};
 
 static const struct {
     LPCWSTR url;
@@ -407,6 +415,19 @@ static BYTE data51[] = {0x00,0x00,0x01,0xba,0xff};
 static BYTE data52[] = {0x00,0x00,0x01,0xb8,0xff};
 static BYTE data53[] = {0x00,0x00,0x01,0xba};
 static BYTE data54[] = {0x00,0x00,0x01,0xba,'<','h','t','m','l','>'};
+static BYTE data55[] = {0x1f,0x8b,'x'};
+static BYTE data56[] = {0x1f};
+static BYTE data57[] = {0x1f,0x8b,'<','h','t','m','l','>','t','e','s','t',0};
+static BYTE data58[] = {0x1f,0x8b};
+static BYTE data59[] = {0x50,0x4b,'x'};
+static BYTE data60[] = {0x50,0x4b};
+static BYTE data61[] = {0x50,0x4b,'<','h','t','m','l','>',0};
+static BYTE data62[] = {0xca,0xfe,0xba,0xbe,'x'};
+static BYTE data63[] = {0xca,0xfe,0xba,0xbe};
+static BYTE data64[] = {0xca,0xfe,0xba,0xbe,'<','h','t','m','l','>',0};
+static BYTE data65[] = {0x25,0x50,0x44,0x46,'x'};
+static BYTE data66[] = {0x25,0x50,0x44,0x46};
+static BYTE data67[] = {0x25,0x50,0x44,0x46,'x','<','h','t','m','l','>'};
 
 static const struct {
     BYTE *data;
@@ -466,7 +487,20 @@ static const struct {
     {data51, sizeof(data51), mimeVideoMpeg},
     {data52, sizeof(data52), mimeAppOctetStream},
     {data53, sizeof(data53), mimeAppOctetStream},
-    {data54, sizeof(data54), mimeTextHtml}
+    {data54, sizeof(data54), mimeTextHtml},
+    {data55, sizeof(data55), mimeAppXGzip},
+    {data56, sizeof(data56), mimeTextPlain},
+    {data57, sizeof(data57), mimeTextHtml},
+    {data58, sizeof(data58), mimeAppOctetStream},
+    {data59, sizeof(data59), mimeAppXZip},
+    {data60, sizeof(data60), mimeTextPlain},
+    {data61, sizeof(data61), mimeTextHtml},
+    {data62, sizeof(data62), mimeAppJava},
+    {data63, sizeof(data63), mimeTextPlain},
+    {data64, sizeof(data64), mimeTextHtml},
+    {data65, sizeof(data65), mimeAppPdf},
+    {data66, sizeof(data66), mimeTextPlain},
+    {data67, sizeof(data67), mimeTextHtml}
 };
 
 static void test_FindMimeFromData(void)

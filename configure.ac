@@ -440,12 +440,6 @@ then
 			     $OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS
 		)
 	     fi
-
-             dnl Check for glut32 library.
-             AC_CHECK_LIB(glut,glutMainLoop,
-                       [AC_SUBST(GLUT_LIBS,"-lglut -lXmu -lXi")
-                        AC_SUBST(GLUT32FILES,'$(GLUT32FILES)')],,
-                        $OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXmu -lXi -lX11 $X_EXTRA_LIBS)
          else
              wine_cv_opengl_headers_found="no"
 	 fi
@@ -486,6 +480,8 @@ then
              XML2INCL="$ac_xml_cflags"],,$ac_xml_libs)
          AC_CHECK_LIB(xml2, xmlReadMemory,
             [AC_DEFINE(HAVE_XMLREADMEMORY,1,[Define if libxml2 has the xmlReadMemory function])],,$ac_xml_libs)
+         AC_CHECK_LIB(xml2, xmlNewDocPI,
+            [AC_DEFINE(HAVE_XMLNEWDOCPI,1,[Define if libxml2 has the xmlNewDocPI function])],,$ac_xml_libs)
         ])
     CPPFLAGS="$ac_save_CPPFLAGS"
     ac_xslt_libs="`$PKG_CONFIG --libs libxslt 2>/dev/null`"
@@ -1591,7 +1587,6 @@ dlls/dxguid/Makefile
 dlls/gdi32/Makefile
 dlls/gdi32/tests/Makefile
 dlls/glu32/Makefile
-dlls/glut32/Makefile
 dlls/gphoto2.ds/Makefile
 dlls/hhctrl.ocx/Makefile
 dlls/hid/Makefile

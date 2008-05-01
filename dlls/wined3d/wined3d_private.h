@@ -172,6 +172,19 @@ typedef struct wined3d_settings_s {
 
 extern wined3d_settings_t wined3d_settings;
 
+/* Shader backends */
+
+typedef struct {
+    void (*shader_select)(IWineD3DDevice *iface, BOOL usePS, BOOL useVS);
+    void (*shader_select_depth_blt)(IWineD3DDevice *iface);
+    void (*shader_load_constants)(IWineD3DDevice *iface, char usePS, char useVS);
+    void (*shader_cleanup)(BOOL usePS, BOOL useVS);
+} shader_backend_t;
+
+extern const shader_backend_t glsl_shader_backend;
+extern const shader_backend_t arb_program_shader_backend;
+extern const shader_backend_t none_shader_backend;
+
 /* X11 locking */
 
 extern void (*wine_tsx11_lock_ptr)(void);
@@ -394,6 +407,21 @@ DWORD get_flexible_vertex_size(DWORD d3dvtVertexType);
 #define GET_TEXCOORD_SIZE_FROM_FVF(d3dvtVertexType, tex_num) \
     (((((d3dvtVertexType) >> (16 + (2 * (tex_num)))) + 1) & 0x03) + 1)
 
+/* Routines and structures related to state management */
+typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock);
+
+#define STATE_RENDER(a) (a)
+#define STATE_IS_RENDER(a) ((a) >= STATE_RENDER(1) && (a) <= STATE_RENDER(WINEHIGHEST_RENDER_STATE))
+
+struct StateEntry
+{
+    DWORD           representative;
+    APPLYSTATEFUNC  apply;
+};
+
+/* Global state table */
+extern const struct StateEntry StateTable[];
+
 /* Routine to fill gl caps for swapchains and IWineD3D */
 BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display);
 
@@ -402,6 +430,11 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display);
 #define WINE_D3D7_CAPABLE(gl_info) (gl_info->supported[ARB_TEXTURE_COMPRESSION] && gl_info->supported[ARB_TEXTURE_CUBE_MAP] && gl_info->supported[ARB_TEXTURE_ENV_DOT3])
 #define WINE_D3D8_CAPABLE(gl_info) WINE_D3D7_CAPABLE(gl_info) && (gl_info->supported[ARB_MULTISAMPLE] && gl_info->supported[ARB_TEXTURE_BORDER_CLAMP])
 #define WINE_D3D9_CAPABLE(gl_info) WINE_D3D8_CAPABLE(gl_info) && (gl_info->supported[ARB_FRAGMENT_PROGRAM] && gl_info->supported[ARB_VERTEX_SHADER])
+
+/* Default callbacks for implicit object destruction */
+extern ULONG WINAPI D3DCB_DefaultDestroySurface(IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3DCB_DefaultDestroyVolume(IWineD3DVolume *pSurface);
 
 /*****************************************************************************
  * Internal representation of a light
@@ -502,6 +535,7 @@ typedef struct IWineD3DDeviceImpl
     /* Selected capabilities */
     int vs_selected_mode;
     int ps_selected_mode;
+    const shader_backend_t *shader_backend;
 
     /* Optimization */
     BOOL                    modelview_valid;
@@ -1272,7 +1306,7 @@ void   set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords)
 int D3DFmtMakeGlCfg(WINED3DFORMAT BackBufferFormat, WINED3DFORMAT StencilBufferFormat, int *attribs, int* nAttribs, BOOL alternate);
 
 /* Math utils */
-void multiply_matrix(WINED3DMATRIX *dest, WINED3DMATRIX *src1, WINED3DMATRIX *src2);
+void multiply_matrix(WINED3DMATRIX *dest, const WINED3DMATRIX *src1, const WINED3DMATRIX *src2);
 
 /*****************************************************************************
  * To enable calling of inherited functions, requires prototypes 

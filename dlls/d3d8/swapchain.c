@@ -56,7 +56,7 @@ static ULONG WINAPI IDirect3DSwapChain8Impl_Release(LPDIRECT3DSWAPCHAIN8 iface) 
     TRACE("(%p) : ReleaseRef to %d\n", This, ref);
 
     if (ref == 0) {
-        IWineD3DSwapChain_Release(This->wineD3DSwapChain);
+        IWineD3DSwapChain_Destroy(This->wineD3DSwapChain, D3D8CB_DestroyRenderTarget);
         if (This->parentDevice) IUnknown_Release(This->parentDevice);
         HeapFree(GetProcessHeap(), 0, This);
     }
@@ -80,6 +80,7 @@ static HRESULT WINAPI IDirect3DSwapChain8Impl_GetBackBuffer(LPDIRECT3DSWAPCHAIN8
     hrc = IWineD3DSwapChain_GetBackBuffer(This->wineD3DSwapChain, iBackBuffer, (WINED3DBACKBUFFER_TYPE )Type, &mySurface);
     if (hrc == D3D_OK && NULL != mySurface) {
        IWineD3DSurface_GetParent(mySurface, (IUnknown **)ppBackBuffer);
+       IWineD3DSurface_Release(mySurface);
     }
     return hrc;
 }

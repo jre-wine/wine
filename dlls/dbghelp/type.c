@@ -213,28 +213,30 @@ BOOL symt_add_udt_element(struct module* module, struct symt_udt* udt_type,
     assert(udt_type->symt.tag == SymTagUDT);
 
     TRACE_(dbghelp_symt)("Adding %s to UDT %s\n", name, udt_type->hash_elt.name);
-    p = NULL;
-    while ((p = vector_iter_up(&udt_type->vchildren, p)))
+    if (name)
     {
-        m = (struct symt_data*)*p;
-        assert(m);
-        assert(m->symt.tag == SymTagData);
-        if (m->hash_elt.name[0] == name[0] && strcmp(m->hash_elt.name, name) == 0)
-            return TRUE;
+        p = NULL;
+        while ((p = vector_iter_up(&udt_type->vchildren, p)))
+        {
+            m = (struct symt_data*)*p;
+            assert(m);
+            assert(m->symt.tag == SymTagData);
+            if (strcmp(m->hash_elt.name, name) == 0)
+                return TRUE;
+        }
     }
 
     if ((m = pool_alloc(&module->pool, sizeof(*m))) == NULL) return FALSE;
     memset(m, 0, sizeof(*m));
     m->symt.tag      = SymTagData;
-    m->hash_elt.name = pool_strdup(&module->pool, name);
+    m->hash_elt.name = name ? pool_strdup(&module->pool, name) : "";
     m->hash_elt.next = NULL;
 
-    m->kind          = DataIsMember;
-    m->container     = &udt_type->symt;
-    m->type          = elt_type;
-    m->u.s.offset    = offset;
-    m->u.s.length    = ((offset & 7) || (size & 7)) ? size : 0;
-    m->u.s.reg_id    = 0;
+    m->kind            = DataIsMember;
+    m->container       = &udt_type->symt;
+    m->type            = elt_type;
+    m->u.member.offset = offset;
+    m->u.member.length = ((offset & 7) || (size & 7)) ? size : 0;
     p = vector_add(&udt_type->vchildren, &module->pool);
     *p = &m->symt;
 
@@ -372,7 +374,6 @@ BOOL WINAPI SymEnumTypes(HANDLE hProcess, ULONG64 BaseOfDll,
                          PSYM_ENUMERATESYMBOLS_CALLBACK EnumSymbolsCallback,
                          PVOID UserContext)
 {
-    struct process*     pcs;
     struct module_pair  pair;
     char                buffer[sizeof(SYMBOL_INFO) + 256];
     SYMBOL_INFO*        sym_info = (SYMBOL_INFO*)buffer;
@@ -385,9 +386,9 @@ BOOL WINAPI SymEnumTypes(HANDLE hProcess, ULONG64 BaseOfDll,
           hProcess, wine_dbgstr_longlong(BaseOfDll), EnumSymbolsCallback,
           UserContext);
 
-    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
-    pair.requested = module_find_by_addr(pcs, BaseOfDll, DMT_UNKNOWN);
-    if (!module_get_debug(pcs, &pair)) return FALSE;
+    if (!(pair.pcs = process_find_by_handle(hProcess))) return FALSE;
+    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll, DMT_UNKNOWN);
+    if (!module_get_debug(&pair)) return FALSE;
 
     sym_info->SizeOfStruct = sizeof(SYMBOL_INFO);
     sym_info->MaxNameLen = sizeof(buffer) - sizeof(SYMBOL_INFO);
@@ -471,7 +472,7 @@ BOOL symt_get_info(const struct symt* type, IMAGEHLP_SYMBOL_TYPE_INFO req,
             {
             case DataIsGlobal:
             case DataIsFileStatic:
-                X(ULONG64) = ((const struct symt_data*)type)->u.address;
+                X(ULONG64) = ((const struct symt_data*)type)->u.var.offset;
                 break;
             default: return FALSE;
             }
@@ -486,10 +487,13 @@ BOOL symt_get_info(const struct symt* type, IMAGEHLP_SYMBOL_TYPE_INFO req,
         case SymTagFuncDebugEnd:
         case SymTagLabel:
             X(ULONG64) = ((const struct symt_function_point*)type)->parent->address + 
-                ((const struct symt_function_point*)type)->offset;
+                ((const struct symt_function_point*)type)->loc.offset;
             break;
         case SymTagThunk:
             X(ULONG64) = ((const struct symt_thunk*)type)->address;
+            break;
+        case SymTagCompiland:
+            X(ULONG64) = ((const struct symt_compiland*)type)->address;
             break;
         default:
             FIXME("Unsupported sym-tag %s for get-address\n", 
@@ -513,11 +517,11 @@ BOOL symt_get_info(const struct symt* type, IMAGEHLP_SYMBOL_TYPE_INFO req,
         break;
 
     case TI_GET_BITPOSITION:
-        if (type->tag != SymTagData || 
-            ((const struct symt_data*)type)->kind != DataIsMember ||
-            ((const struct symt_data*)type)->u.s.length == 0)
-            return FALSE;
-        X(DWORD) = ((const struct symt_data*)type)->u.s.offset & 7;
+        if (type->tag == SymTagData &&
+            ((const struct symt_data*)type)->kind == DataIsMember &&
+            ((const struct symt_data*)type)->u.member.length != 0)
+            X(DWORD) = ((const struct symt_data*)type)->u.member.offset & 7;
+        else return FALSE;
         break;
 
     case TI_GET_CHILDRENCOUNT:
@@ -593,9 +597,9 @@ BOOL symt_get_info(const struct symt* type, IMAGEHLP_SYMBOL_TYPE_INFO req,
             break;
         case SymTagData:
             if (((const struct symt_data*)type)->kind != DataIsMember ||
-                !((const struct symt_data*)type)->u.s.length)
+                !((const struct symt_data*)type)->u.member.length)
                 return FALSE;
-            X(DWORD64) = ((const struct symt_data*)type)->u.s.length;
+            X(DWORD64) = ((const struct symt_data*)type)->u.member.length;
             break;
         case SymTagArrayType:   
             if (!symt_get_info(((const struct symt_array*)type)->base_type, 
@@ -666,8 +670,10 @@ BOOL symt_get_info(const struct symt* type, IMAGEHLP_SYMBOL_TYPE_INFO req,
             {
             case DataIsParam:
             case DataIsLocal:
+                X(ULONG) = ((const struct symt_data*)type)->u.var.offset; 
+                break;
             case DataIsMember:
-                X(ULONG) = ((const struct symt_data*)type)->u.s.offset >> 3; 
+                X(ULONG) = ((const struct symt_data*)type)->u.member.offset >> 3; 
                 break;
             default:
                 FIXME("Unknown kind (%u) for get-offset\n",     
@@ -787,13 +793,13 @@ BOOL WINAPI SymGetTypeInfo(HANDLE hProcess, DWORD64 ModBase,
                            ULONG TypeId, IMAGEHLP_SYMBOL_TYPE_INFO GetType,
                            PVOID pInfo)
 {
-    struct process*     pcs = process_find_by_handle(hProcess);
     struct module_pair  pair;
 
-    if (!pcs) return FALSE;
+    pair.pcs = process_find_by_handle(hProcess);
+    if (!pair.pcs) return FALSE;
 
-    pair.requested = module_find_by_addr(pcs, ModBase, DMT_UNKNOWN);
-    if (!module_get_debug(pcs, &pair))
+    pair.requested = module_find_by_addr(pair.pcs, ModBase, DMT_UNKNOWN);
+    if (!module_get_debug(&pair))
     {
         FIXME("Someone didn't properly set ModBase (%s)\n", wine_dbgstr_longlong(ModBase));
         return FALSE;

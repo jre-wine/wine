@@ -97,20 +97,7 @@ static inline void update_button_state( unsigned int state )
     key_state_table[VK_LBUTTON] = (state & Button1Mask ? 0x80 : 0);
     key_state_table[VK_MBUTTON] = (state & Button2Mask ? 0x80 : 0);
     key_state_table[VK_RBUTTON] = (state & Button3Mask ? 0x80 : 0);
-    key_state_table[VK_XBUTTON1]= (state & Button6Mask ? 0x80 : 0);
-    key_state_table[VK_XBUTTON2]= (state & Button7Mask ? 0x80 : 0);
-}
-
-
-/***********************************************************************
- *		update_key_state
- *
- * Update the key state with what X provides us
- */
-static inline void update_key_state( unsigned int state )
-{
-    key_state_table[VK_SHIFT]   = (state & ShiftMask   ? 0x80 : 0);
-    key_state_table[VK_CONTROL] = (state & ControlMask ? 0x80 : 0);
+    /* X-buttons are not reported from XQueryPointer */
 }
 
 
@@ -129,7 +116,6 @@ static void update_mouse_state( HWND hwnd, Window window, int x, int y, unsigned
         y += virtual_screen_rect.top;
     }
     get_coords( hwnd, x, y, pt );
-    update_key_state( state );
 
     /* update the cursor */
 
@@ -719,7 +705,6 @@ BOOL X11DRV_GetCursorPos(LPPOINT pos)
     if (XQueryPointer( display, root_window, &root, &child,
                        &rootX, &rootY, &winX, &winY, &xstate ))
     {
-        update_key_state( xstate );
         update_button_state( xstate );
         winX += virtual_screen_rect.left;
         winY += virtual_screen_rect.top;

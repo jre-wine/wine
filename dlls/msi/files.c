@@ -355,8 +355,12 @@ static INT_PTR cabinet_notify(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
                               NULL, CREATE_ALWAYS, attrs, NULL );
         if ( handle == INVALID_HANDLE_VALUE )
         {
-            ERR("failed to create %s (error %d)\n",
-                debugstr_w( f->TargetPath ), GetLastError() );
+            if ( GetFileAttributesW( f->TargetPath ) != INVALID_FILE_ATTRIBUTES )
+                f->state = msifs_installed;
+            else
+                ERR("failed to create %s (error %d)\n",
+                    debugstr_w( f->TargetPath ), GetLastError() );
+
             return 0;
         }
 
@@ -479,6 +483,9 @@ static UINT download_remote_cabinet(MSIPACKAGE *package, struct media_info *mi)
 
     *(ptr + 1) = '\0';
     ptr = strrchrW(mi->source, '\\');
+    if (!ptr)
+        ptr = mi->source;
+
     src = msi_realloc(src, (lstrlenW(src) + lstrlenW(ptr)) * sizeof(WCHAR));
     if (!src)
         return ERROR_OUTOFMEMORY;

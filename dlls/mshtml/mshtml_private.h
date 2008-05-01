@@ -52,6 +52,15 @@ typedef struct HTMLDOMNode HTMLDOMNode;
 typedef struct ConnectionPoint ConnectionPoint;
 typedef struct BSCallback BSCallback;
 
+typedef struct {
+    const IHTMLWindow2Vtbl *lpHTMLWindow2Vtbl;
+
+    LONG ref;
+
+    HTMLDocument *doc;
+    nsIDOMWindow *nswindow;
+} HTMLWindow;
+
 typedef enum {
     UNKNOWN_USERMODE,
     BROWSEMODE,
@@ -80,6 +89,7 @@ struct HTMLDocument {
     LONG ref;
 
     NSContainer *nscontainer;
+    HTMLWindow *window;
 
     IOleClientSite *client;
     IDocHostUIHandler *hostui;
@@ -117,6 +127,7 @@ struct NSContainer {
     const nsIInterfaceRequestorVtbl     *lpInterfaceRequestorVtbl;
     const nsIWeakReferenceVtbl          *lpWeakReferenceVtbl;
     const nsISupportsWeakReferenceVtbl  *lpSupportsWeakReferenceVtbl;
+    const nsIDOMEventListenerVtbl       *lpDOMEventListenerVtbl;
 
     nsIWebBrowser *webbrowser;
     nsIWebNavigation *navigation;
@@ -225,6 +236,8 @@ typedef struct {
     HTMLElement *element;
 } HTMLTextContainer;
 
+#define HTMLWINDOW2(x)   ((IHTMLWindow2*)                 &(x)->lpHTMLWindow2Vtbl)
+
 #define HTMLDOC(x)       ((IHTMLDocument2*)               &(x)->lpHTMLDocument2Vtbl)
 #define HTMLDOC3(x)      ((IHTMLDocument3*)               &(x)->lpHTMLDocument3Vtbl)
 #define PERSIST(x)       ((IPersist*)                     &(x)->lpPersistFileVtbl)
@@ -253,6 +266,7 @@ typedef struct {
 #define NSEMBWNDS(x)     ((nsIEmbeddingSiteWindow*)       &(x)->lpEmbeddingSiteWindowVtbl)
 #define NSIFACEREQ(x)    ((nsIInterfaceRequestor*)        &(x)->lpInterfaceRequestorVtbl)
 #define NSTOOLTIP(x)     ((nsITooltipListener*)           &(x)->lpTooltipListenerVtbl)
+#define NSEVENTLIST(x)   ((nsIDOMEventListener*)          &(x)->lpDOMEventListenerVtbl)
 #define NSWEAKREF(x)     ((nsIWeakReference*)             &(x)->lpWeakReferenceVtbl)
 #define NSSUPWEAKREF(x)  ((nsISupportsWeakReference*)     &(x)->lpSupportsWeakReferenceVtbl)
 
@@ -274,6 +288,9 @@ typedef struct {
 
 HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**);
 HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
+
+HTMLWindow *HTMLWindow_Create(HTMLDocument*);
+HTMLWindow *nswindow_to_window(nsIDOMWindow*);
 
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
 void HTMLDocument_Persist_Init(HTMLDocument*);
@@ -351,6 +368,8 @@ void release_nodes(HTMLDocument*);
 void install_wine_gecko(void);
 
 /* editor */
+void handle_edit_event(HTMLDocument*,nsIDOMEvent*);
+
 void get_font_size(HTMLDocument*,WCHAR*);
 void set_font_size(HTMLDocument*,LPCWSTR);
 
