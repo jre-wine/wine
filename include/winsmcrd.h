@@ -1,7 +1,5 @@
 /*
- * DOS interrupt 20h handler (TERMINATE PROGRAM)
- *
- * Copyright 1997 Andreas Mohr
+ * Winscard definitions
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,22 +16,22 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "dosexe.h"
-#include "wine/debug.h"
+#ifndef __WINE_WINSMCRD_H
+#define __WINE_WINSMCRD_H
 
-WINE_DEFAULT_DEBUG_CHANNEL(int);
+#define SCARD_PROTOCOL_UNDEFINED        0x00000000
+#define SCARD_PROTOCOL_OPTIMAL          0x00000000
+#define SCARD_PROTOCOL_T0               0x00000001
+#define SCARD_PROTOCOL_T1               0x00000002
+#define SCARD_PROTOCOL_RAW              0x00010000
+#define SCARD_PROTOCOL_DEFAULT          0x80000000
+#define SCARD_PROTOCOL_Tx               (SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1)
 
-/**********************************************************************
- *	    DOSVM_Int20Handler (WINEDOS16.132)
- *
- * Handler for int 20h.
- */
-void WINAPI DOSVM_Int20Handler( CONTEXT86 *context )
+typedef struct _SCARD_IO_REQUEST
 {
-    if (DOSVM_IsWin16())
-        ExitThread( 0 );
-    else if(ISV86(context))
-        MZ_Exit( context, TRUE, 0 );
-    else
-        ERR( "Called from DOS protected mode\n" );
-}
+    DWORD dwProtocol;
+    DWORD cbPciLength;
+} SCARD_IO_REQUEST, *PSCARD_IO_REQUEST, *LPSCARD_IO_REQUEST;
+typedef const SCARD_IO_REQUEST *LPCSCARD_IO_REQUEST;
+
+#endif  /* __WINE_WINSMCRD_H */

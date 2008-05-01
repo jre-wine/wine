@@ -1200,12 +1200,13 @@ static type_t *make_type(unsigned char type, type_t *ref)
   t->fields = NULL;
   t->ifaces = NULL;
   t->typestring_offset = 0;
-  t->ignore = parse_only;
+  t->ignore = (parse_only != 0);
   t->is_const = FALSE;
   t->sign = 0;
   t->defined = FALSE;
   t->written = FALSE;
   t->user_types_registered = FALSE;
+  t->tfswrite = FALSE;
   t->typelib_idx = -1;
   return t;
 }
@@ -1260,6 +1261,7 @@ static var_t *make_var(char *name)
   v->attrs = NULL;
   v->array = NULL;
   v->eval = NULL;
+  v->corrdesc = 0;
   return v;
 }
 
@@ -1620,7 +1622,12 @@ static int get_struct_type(var_list_t *fields)
   }
 
   if( has_variance )
-    return RPC_FC_CVSTRUCT;
+  {
+    if ( has_conformance )
+      return RPC_FC_CVSTRUCT;
+    else
+      return RPC_FC_BOGUS_STRUCT;
+  }
   if( has_conformance && has_pointer )
     return RPC_FC_CPSTRUCT;
   if( has_conformance )

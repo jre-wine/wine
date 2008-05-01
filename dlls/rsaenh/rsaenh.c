@@ -33,7 +33,6 @@
 #include "winbase.h"
 #include "winreg.h"
 #include "wincrypt.h"
-#include "lmcons.h"
 #include "handle.h"
 #include "implglue.h"
 #include "objbase.h"
@@ -3608,6 +3607,21 @@ BOOL WINAPI RSAENH_CPVerifySignature(HCRYPTPROV hProv, HCRYPTHASH hHash, CONST B
                        (OBJECTHDR**)&pCryptKey))
     {
         SetLastError(NTE_BAD_KEY);
+        return FALSE;
+    }
+
+    /* in Microsoft implementation, the signature length is checked before
+     * the signature pointer.
+     */
+    if (dwSigLen != pCryptKey->dwKeyLen)
+    {
+        SetLastError(NTE_BAD_SIGNATURE);
+        return FALSE;
+    }
+
+    if (!hHash || !pbSignature)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
 

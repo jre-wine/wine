@@ -1584,7 +1584,7 @@ void WINAPI SHPropagateMessage(HWND hWnd, UINT uiMsgId, WPARAM wParam, LPARAM lP
 {
   enumWndData data;
 
-  TRACE("(%p,%u,%d,%ld,%d)\n", hWnd, uiMsgId, wParam, lParam, bSend);
+  TRACE("(%p,%u,%ld,%ld,%d)\n", hWnd, uiMsgId, wParam, lParam, bSend);
 
   if(hWnd)
   {
@@ -4220,6 +4220,32 @@ BOOL WINAPI SHQueueUserWorkItem(LPTHREAD_START_ROUTINE pfnCallback,
         FIXME("Unsupported arguments\n");
 
     return QueueUserWorkItem(pfnCallback, pContext, 0);
+}
+
+/***********************************************************************
+ *		SHSetTimerQueueTimer (SHLWAPI.263)
+ */
+HANDLE WINAPI SHSetTimerQueueTimer(HANDLE hQueue,
+        WAITORTIMERCALLBACK pfnCallback, LPVOID pContext, DWORD dwDueTime,
+        DWORD dwPeriod, LPCSTR lpszLibrary, DWORD dwFlags)
+{
+    HANDLE hNewTimer;
+
+    /* SHSetTimerQueueTimer flags -> CreateTimerQueueTimer flags */
+    if (dwFlags & TPS_LONGEXECTIME) {
+        dwFlags &= ~TPS_LONGEXECTIME;
+        dwFlags |= WT_EXECUTELONGFUNCTION;
+    }
+    if (dwFlags & TPS_EXECUTEIO) {
+        dwFlags &= ~TPS_EXECUTEIO;
+        dwFlags |= WT_EXECUTEINIOTHREAD;
+    }
+
+    if (!CreateTimerQueueTimer(&hNewTimer, hQueue, pfnCallback, pContext,
+                               dwDueTime, dwPeriod, dwFlags))
+        return NULL;
+
+    return hNewTimer;
 }
 
 /***********************************************************************

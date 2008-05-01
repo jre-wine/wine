@@ -25,7 +25,6 @@
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "winioctl.h"
 #include "wine/server.h"
 
 #define MAX_NT_PATH_LENGTH 277
@@ -81,8 +80,8 @@ extern UNICODE_STRING system_dir;
 
 /* redefine these to make sure we don't reference kernel symbols */
 #define GetProcessHeap()       (NtCurrentTeb()->Peb->ProcessHeap)
-#define GetCurrentProcessId()  ((DWORD)NtCurrentTeb()->ClientId.UniqueProcess)
-#define GetCurrentThreadId()   ((DWORD)NtCurrentTeb()->ClientId.UniqueThread)
+#define GetCurrentProcessId()  (HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess))
+#define GetCurrentThreadId()   (HandleToULong(NtCurrentTeb()->ClientId.UniqueThread))
 
 /* Device IO */
 extern NTSTATUS CDROM_DeviceIoControl(HANDLE hDevice, 
@@ -117,6 +116,7 @@ extern NTSTATUS DIR_get_unix_cwd( char **cwd );
 extern NTSTATUS VIRTUAL_HandleFault(LPCVOID addr);
 extern void VIRTUAL_SetForceExec( BOOL enable );
 extern void VIRTUAL_UseLargeAddressSpace(void);
+extern struct _KUSER_SHARED_DATA *user_shared_data;
 
 /* code pages */
 extern int ntdll_umbstowcs(DWORD flags, const char* src, int srclen, WCHAR* dst, int dstlen);

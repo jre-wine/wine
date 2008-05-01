@@ -239,6 +239,7 @@ dlls/gdi32/tests/gdi32_crosstest.exe
 dlls/gdi32/tests/testlist.c
 dlls/gdi32/version.res
 dlls/gdi32/version16.res
+dlls/gdiplus/libgdiplus.def
 dlls/glu32/libglu32.def
 dlls/gphoto2.ds/rsrc.res
 dlls/hhctrl.ocx/hhctrl.res
@@ -378,6 +379,7 @@ dlls/ntdll/tests/ntdll_crosstest.exe
 dlls/ntdll/tests/testlist.c
 dlls/ntdll/version.res
 dlls/ntdsapi/libntdsapi.def
+dlls/ntoskrnl.exe/libntoskrnl.exe.def
 dlls/objsel/objsel.res
 dlls/odbc32/libodbc32.def
 dlls/odbccp32/libodbccp32.def
@@ -651,6 +653,8 @@ dlls/winmm/tests/winmm_crosstest.exe
 dlls/winmm/winmm_res.res
 dlls/winnls.dll16
 dlls/winnls32/libwinnls32.def
+dlls/winscard/libwinscard.def
+dlls/winscard/rsrc.res
 dlls/winsock.dll16
 dlls/winspool.drv/libwinspool.def
 dlls/winspool.drv/tests/*.ok
@@ -692,6 +696,7 @@ include/exdisp.h
 include/hlink.h
 include/htiframe.h
 include/iads.h
+include/icftypes.h
 include/indexsrv.h
 include/mediaobj.h
 include/mimeinfo.h
@@ -701,6 +706,7 @@ include/mshtmhst.h
 include/mshtml.h
 include/msxml.h
 include/msxml2.h
+include/netfw.h
 include/oaidl.h
 include/objidl.h
 include/objsafe.h
@@ -806,6 +812,7 @@ programs/winedbg/dbg.tab.h
 programs/winedbg/debug.yy.c
 programs/winedbg/winedbg
 programs/winedbg/winedbg.man
+programs/winedevice/winedevice
 programs/winefile/drivebar.bmp
 programs/winefile/images.bmp
 programs/winefile/rsrc.res
@@ -895,6 +902,7 @@ programs/winver/winver
 programs/wordpad/rsrc.res
 programs/wordpad/toolbar.bmp
 programs/wordpad/wordpad
+programs/wordpad/wordpad.ico
 programs/xcopy/rsrc.res
 programs/xcopy/xcopy
 server/wineserver

@@ -40,10 +40,13 @@
 #include "wine/pthread.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
+#include "ddk/wdm.h"
 #include "wine/exception.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(thread);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
+
+struct _KUSER_SHARED_DATA *user_shared_data = NULL;
 
 /* info passed to a starting thread */
 struct startup_info
@@ -225,6 +228,7 @@ HANDLE thread_init(void)
     void *addr;
     SIZE_T size, info_size;
     HANDLE exe_file = 0;
+    LARGE_INTEGER now;
     struct ntdll_thread_data *thread_data;
     struct ntdll_thread_regs *thread_regs;
     struct wine_pthread_thread_info thread_info;
@@ -236,7 +240,8 @@ HANDLE thread_init(void)
 
     addr = (void *)0x7ffe0000;
     size = 0x10000;
-    NtAllocateVirtualMemory( NtCurrentProcess(), &addr, 0, &size, MEM_RESERVE, PAGE_READONLY );
+    NtAllocateVirtualMemory( NtCurrentProcess(), &addr, 0, &size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE );
+    user_shared_data = addr;
 
     /* allocate and initialize the PEB */
 
@@ -324,6 +329,15 @@ HANDLE thread_init(void)
 
     /* initialize LDT locking */
     wine_ldt_init_locking( ldt_lock, ldt_unlock );
+
+    /* initialize time values in user_shared_data */
+    NtQuerySystemTime( &now );
+    user_shared_data->SystemTime.LowPart = now.u.LowPart;
+    user_shared_data->SystemTime.High1Time = user_shared_data->SystemTime.High2Time = now.u.HighPart;
+    user_shared_data->u.TickCountQuad = (now.QuadPart - server_start_time) / 10000;
+    user_shared_data->u.TickCount.High2Time = user_shared_data->u.TickCount.High1Time;
+    user_shared_data->TickCountLowDeprecated = user_shared_data->u.TickCount.LowPart;
+    user_shared_data->TickCountMultiplier = 1 << 24;
 
     return exe_file;
 }
@@ -508,7 +522,7 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
 
         if (result.create_thread.status == STATUS_SUCCESS)
         {
-            if (id) id->UniqueThread = (HANDLE)result.create_thread.tid;
+            if (id) id->UniqueThread = ULongToHandle(result.create_thread.tid);
             if (handle_ptr) *handle_ptr = result.create_thread.handle;
             else NtClose( result.create_thread.handle );
         }
@@ -553,8 +567,8 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
     info->pthread_info.teb_size = size;
     if ((status = init_teb( teb ))) goto error;
 
-    teb->ClientId.UniqueProcess = (HANDLE)GetCurrentProcessId();
-    teb->ClientId.UniqueThread  = (HANDLE)tid;
+    teb->ClientId.UniqueProcess = ULongToHandle(GetCurrentProcessId());
+    teb->ClientId.UniqueThread  = ULongToHandle(tid);
 
     thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
     thread_regs = (struct ntdll_thread_regs *)teb->SpareBytes1;
@@ -595,7 +609,7 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
     }
     pthread_functions.sigprocmask( SIG_SETMASK, &sigset, NULL );
 
-    if (id) id->UniqueThread = (HANDLE)tid;
+    if (id) id->UniqueThread = ULongToHandle(tid);
     if (handle_ptr) *handle_ptr = handle;
     else NtClose( handle );
 
@@ -636,7 +650,7 @@ NTSTATUS WINAPI NtOpenThread( HANDLE *handle, ACCESS_MASK access,
 
     SERVER_START_REQ( open_thread )
     {
-        req->tid        = (thread_id_t)id->UniqueThread;
+        req->tid        = HandleToULong(id->UniqueThread);
         req->access     = access;
         req->attributes = attr ? attr->Attributes : 0;
         ret = wine_server_call( req );
@@ -1159,8 +1173,8 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
                 {
                     info.ExitStatus             = reply->exit_code;
                     info.TebBaseAddress         = reply->teb;
-                    info.ClientId.UniqueProcess = (HANDLE)reply->pid;
-                    info.ClientId.UniqueThread  = (HANDLE)reply->tid;
+                    info.ClientId.UniqueProcess = ULongToHandle(reply->pid);
+                    info.ClientId.UniqueThread  = ULongToHandle(reply->tid);
                     info.AffinityMask           = reply->affinity;
                     info.Priority               = reply->priority;
                     info.BasePriority           = reply->priority;  /* FIXME */

@@ -29,6 +29,7 @@
 #include "oleauto.h"
 #include "ocidl.h"
 #include "shlwapi.h"
+#include "tmarshal.h"
 
 #define ok_ole_success(hr, func) ok(hr == S_OK, #func " failed with error 0x%08x\n", hr)
 
@@ -343,18 +344,21 @@ static void test_CreateDispTypeInfo(void)
 
     hr = ITypeInfo_GetRefTypeOfImplType(pTypeInfo, 0, &href);
     ok(hr == S_OK, "hr %08x\n", hr);
-    todo_wine {
     ok(href == 0, "href = 0x%x\n", href);
-    }
     hr = ITypeInfo_GetRefTypeInfo(pTypeInfo, href, &pTI2);
     ok(hr == S_OK, "hr %08x\n", hr);
     hr = ITypeInfo_GetTypeAttr(pTI2, &pTypeAttr);
     ok(hr == S_OK, "hr %08x\n", hr);
     ok(pTypeAttr->typekind == TKIND_INTERFACE, "typekind %0x\n", pTypeAttr->typekind);
+    ok(pTypeAttr->cFuncs == 4, "cFuncs %d\n", pTypeAttr->cFuncs);
+    ok(IsEqualGUID(&pTypeAttr->guid, &GUID_NULL), "guid {%08x-...}\n", pTypeAttr->guid.Data1);
+    ok(pTypeAttr->wTypeFlags == 0, "typeflags %08x\n", pTypeAttr->wTypeFlags);
+
     ITypeInfo_ReleaseTypeAttr(pTI2, pTypeAttr);
 
     hr = ITypeInfo_GetFuncDesc(pTI2, 0, &pFuncDesc);
     ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFuncDesc->memid == 0x123, "memid %x\n", pFuncDesc->memid);
     ok(pFuncDesc->funckind == FUNC_VIRTUAL, "funckind %d\n", pFuncDesc->funckind);
     ok(pFuncDesc->invkind == methdata[0].wFlags, "invkind %d\n", pFuncDesc->invkind);
     ok(pFuncDesc->callconv == methdata[0].cc, "callconv %d\n", pFuncDesc->callconv);
@@ -575,6 +579,253 @@ static void test_QueryPathOfRegTypeLib(void)
     do_typelib_reg_key(&uid, 0, 0, NULL, 1);
 }
 
+static void test_inheritance(void)
+{
+    HRESULT hr;
+    ITypeLib *pTL;
+    ITypeInfo *pTI, *pTI_p;
+    TYPEATTR *pTA;
+    HREFTYPE href;
+    FUNCDESC *pFD;
+    WCHAR path[MAX_PATH];
+    static const WCHAR tl_path[] = {'.','\\','m','i','d','l','_','t','m','a','r','s','h','a','l','.','t','l','b',0};
+
+    BOOL use_midl_tlb = 0;
+
+    GetModuleFileNameW(NULL, path, MAX_PATH);
+
+    if(use_midl_tlb)
+        memcpy(path, tl_path, sizeof(tl_path));
+
+    hr = LoadTypeLib(path, &pTL);
+    if(FAILED(hr)) return;
+
+
+    /* ItestIF3 is a syntax 2 dispinterface */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &DIID_ItestIF3, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == TYPEFLAG_FDISPATCHABLE, "typeflags %x\n", pTA->wTypeFlags);
+if(use_midl_tlb) {
+    ok(pTA->cFuncs == 6, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+
+    /* Should have six methods */
+    hr = ITypeInfo_GetFuncDesc(pTI, 6, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 5, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x60020000, "memid %08x\n", pFD->memid);
+    ok(pFD->oVft == 20, "oVft %d\n", pFD->oVft);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+
+    /* ItestIF4 is a syntax 1 dispinterface */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &DIID_ItestIF4, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == TYPEFLAG_FDISPATCHABLE, "typeflags %x\n", pTA->wTypeFlags);
+    ok(pTA->cFuncs == 1, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+    hr = ITypeInfo_GetFuncDesc(pTI, 1, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 0, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x1c, "memid %08x\n", pFD->memid);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+    ITypeInfo_Release(pTI);
+
+
+    /* ItestIF5 is dual with inherited ifaces which derive from IUnknown but not IDispatch */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &IID_ItestIF5, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+if(use_midl_tlb) {
+    ok(pTA->wTypeFlags == TYPEFLAG_FDUAL, "typeflags %x\n", pTA->wTypeFlags);
+ }
+    ok(pTA->cFuncs == 8, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+if(use_midl_tlb) {
+    hr = ITypeInfo_GetFuncDesc(pTI, 6, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x1234, "memid %08x\n", pFD->memid);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+    /* ItestIF7 is dual with inherited ifaces which derive from Dispatch */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &IID_ItestIF7, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == (TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FDUAL), "typeflags %x\n", pTA->wTypeFlags);
+    ok(pTA->cFuncs == 10, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+
+    hr = ITypeInfo_GetFuncDesc(pTI, 9, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x1236, "memid %08x\n", pFD->memid);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+    ITypeInfo_Release(pTI);
+
+    /* ItestIF10 is a syntax 2 dispinterface which doesn't derive from IUnknown */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &DIID_ItestIF10, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == TYPEFLAG_FDISPATCHABLE, "typeflags %x\n", pTA->wTypeFlags);
+if(use_midl_tlb) {
+    ok(pTA->cFuncs == 3, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, -1, &href);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+
+    /* Should have three methods */
+    hr = ITypeInfo_GetFuncDesc(pTI, 3, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 2, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x60010000, "memid %08x\n", pFD->memid);
+    ok(pFD->oVft == 8, "oVft %d\n", pFD->oVft);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+    /* ItestIF11 is a syntax 2 dispinterface which derives from IDispatch */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &DIID_ItestIF11, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_DISPATCH, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 28, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == TYPEFLAG_FDISPATCHABLE, "typeflags %x\n", pTA->wTypeFlags);
+if(use_midl_tlb) {
+    ok(pTA->cFuncs == 10, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    hr = ITypeInfo_GetRefTypeOfImplType(pTI, 0, &href);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetRefTypeInfo(pTI, href, &pTI_p);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(pTI_p, &pTA);
+    ok(IsEqualGUID(&pTA->guid, &IID_IDispatch), "guid {%08x-....\n", pTA->guid.Data1);
+    ITypeInfo_ReleaseTypeAttr(pTI_p, pTA);
+    ITypeInfo_Release(pTI_p);
+
+    /* Should have ten methods */
+    hr = ITypeInfo_GetFuncDesc(pTI, 10, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 9, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x1236, "memid %08x\n", pFD->memid);
+    ok(pFD->oVft == 36, "oVft %d\n", pFD->oVft);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+
+    /* ItestIF2 is an interface which derives from IUnknown */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTL, &IID_ItestIF2, &pTI);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(pTI, &pTA);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pTA->typekind == TKIND_INTERFACE, "kind %04x\n", pTA->typekind);
+    ok(pTA->cbSizeVft == 24, "sizevft %d\n", pTA->cbSizeVft);
+    ok(pTA->wTypeFlags == 0, "typeflags %x\n", pTA->wTypeFlags);
+if(use_midl_tlb) {
+    ok(pTA->cFuncs == 1, "cfuncs %d\n", pTA->cFuncs);
+    ok(pTA->cImplTypes == 1, "cimpltypes %d\n", pTA->cImplTypes);
+    ITypeInfo_ReleaseTypeAttr(pTI, pTA);
+
+    /* Should have one method */
+    hr = ITypeInfo_GetFuncDesc(pTI, 1, &pFD);
+    ok(hr == TYPE_E_ELEMENTNOTFOUND, "hr %08x\n", hr);
+    hr = ITypeInfo_GetFuncDesc(pTI, 0, &pFD);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(pFD->memid == 0x60020000, "memid %08x\n", pFD->memid);
+    ok(pFD->oVft == 20, "oVft %d\n", pFD->oVft);
+    ITypeInfo_ReleaseFuncDesc(pTI, pFD);
+}
+    ITypeInfo_Release(pTI);
+
+    ITypeLib_Release(pTL);
+
+    return;
+}
+
 START_TEST(typelib)
 {
     ref_count_test(wszStdOle2);
@@ -582,4 +833,5 @@ START_TEST(typelib)
     test_CreateDispTypeInfo();
     test_TypeInfo();
     test_QueryPathOfRegTypeLib();
+    test_inheritance();
 }

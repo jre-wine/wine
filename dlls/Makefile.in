@@ -72,7 +72,9 @@ BASEDIRS = \
 	dswave \
 	dxdiagn \
 	gdi32 \
+	gdiplus \
 	gphoto2.ds \
+	hal \
 	hhctrl.ocx \
 	hid \
 	hlink \
@@ -128,6 +130,7 @@ BASEDIRS = \
 	newdev \
 	ntdll \
 	ntdsapi \
+	ntoskrnl.exe \
 	objsel \
 	odbc32 \
 	odbccp32 \
@@ -205,6 +208,7 @@ BASEDIRS = \
 	wininet \
 	winmm \
 	winnls32 \
+	winscard \
 	winspool.drv \
 	wintab32 \
 	wintrust \
@@ -496,6 +500,7 @@ IMPORT_LIBS = \
 	dpnet/libdpnet.$(IMPLIBEXT) \
 	dsound/libdsound.$(IMPLIBEXT) \
 	gdi32/libgdi32.$(IMPLIBEXT) \
+	gdiplus/libgdiplus.$(IMPLIBEXT) \
 	glu32/libglu32.$(IMPLIBEXT) \
 	hid/libhid.$(IMPLIBEXT) \
 	hlink/libhlink.$(IMPLIBEXT) \
@@ -526,6 +531,7 @@ IMPORT_LIBS = \
 	newdev/libnewdev.$(IMPLIBEXT) \
 	ntdll/libntdll.$(IMPLIBEXT) \
 	ntdsapi/libntdsapi.$(IMPLIBEXT) \
+	ntoskrnl.exe/libntoskrnl.exe.$(IMPLIBEXT) \
 	odbc32/libodbc32.$(IMPLIBEXT) \
 	odbccp32/libodbccp32.$(IMPLIBEXT) \
 	ole32/libole32.$(IMPLIBEXT) \
@@ -571,6 +577,7 @@ IMPORT_LIBS = \
 	wininet/libwininet.$(IMPLIBEXT) \
 	winmm/libwinmm.$(IMPLIBEXT) \
 	winnls32/libwinnls32.$(IMPLIBEXT) \
+	winscard/libwinscard.$(IMPLIBEXT) \
 	winspool.drv/libwinspool.$(IMPLIBEXT) \
 	wintab32/libwintab32.$(IMPLIBEXT) \
 	wintrust/libwintrust.$(IMPLIBEXT) \
@@ -696,6 +703,9 @@ dsound/libdsound.$(IMPLIBEXT): dsound/dsound.spec $(WINEBUILD)
 gdi32/libgdi32.$(IMPLIBEXT): gdi32/gdi32.spec $(WINEBUILD)
 	@cd gdi32 && $(MAKE) libgdi32.$(IMPLIBEXT)
 
+gdiplus/libgdiplus.$(IMPLIBEXT): gdiplus/gdiplus.spec $(WINEBUILD)
+	@cd gdiplus && $(MAKE) libgdiplus.$(IMPLIBEXT)
+
 glu32/libglu32.$(IMPLIBEXT): glu32/glu32.spec $(WINEBUILD)
 	@cd glu32 && $(MAKE) libglu32.$(IMPLIBEXT)
 
@@ -785,6 +795,9 @@ ntdll/libntdll.$(IMPLIBEXT): ntdll/ntdll.spec $(WINEBUILD)
 
 ntdsapi/libntdsapi.$(IMPLIBEXT): ntdsapi/ntdsapi.spec $(WINEBUILD)
 	@cd ntdsapi && $(MAKE) libntdsapi.$(IMPLIBEXT)
+
+ntoskrnl.exe/libntoskrnl.exe.$(IMPLIBEXT): ntoskrnl.exe/ntoskrnl.exe.spec $(WINEBUILD)
+	@cd ntoskrnl.exe && $(MAKE) libntoskrnl.exe.$(IMPLIBEXT)
 
 odbc32/libodbc32.$(IMPLIBEXT): odbc32/odbc32.spec $(WINEBUILD)
 	@cd odbc32 && $(MAKE) libodbc32.$(IMPLIBEXT)
@@ -920,6 +933,9 @@ winmm/libwinmm.$(IMPLIBEXT): winmm/winmm.spec $(WINEBUILD)
 
 winnls32/libwinnls32.$(IMPLIBEXT): winnls32/winnls32.spec $(WINEBUILD)
 	@cd winnls32 && $(MAKE) libwinnls32.$(IMPLIBEXT)
+
+winscard/libwinscard.$(IMPLIBEXT): winscard/winscard.spec $(WINEBUILD)
+	@cd winscard && $(MAKE) libwinscard.$(IMPLIBEXT)
 
 winspool.drv/libwinspool.$(IMPLIBEXT): winspool.drv/winspool.drv.spec $(WINEBUILD)
 	@cd winspool.drv && $(MAKE) libwinspool.$(IMPLIBEXT)

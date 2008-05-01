@@ -90,7 +90,7 @@ typedef struct tagARENA_FREE
 #define HEAP_MIN_SHRINK_SIZE  (HEAP_MIN_DATA_SIZE+sizeof(ARENA_FREE))
 
 /* Max size of the blocks on the free lists */
-static const DWORD HEAP_freeListSizes[] =
+static const SIZE_T HEAP_freeListSizes[] =
 {
     0x10, 0x20, 0x30, 0x40, 0x60, 0x80, 0x100, 0x200, 0x400, 0x1000, ~0UL
 };
@@ -236,7 +236,7 @@ static void HEAP_Dump( HEAP *heap )
 
     DPRINTF( "\nFree lists:\n Block   Stat   Size    Id\n" );
     for (i = 0; i < HEAP_NB_FREE_LISTS; i++)
-        DPRINTF( "%p free %08x prev=%p next=%p\n",
+        DPRINTF( "%p free %08lx prev=%p next=%p\n",
                  &heap->freeList[i].arena, HEAP_freeListSizes[i],
                  LIST_ENTRY( heap->freeList[i].arena.entry.prev, ARENA_FREE, entry ),
                  LIST_ENTRY( heap->freeList[i].arena.entry.next, ARENA_FREE, entry ));
@@ -735,6 +735,7 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
 {
     SUBHEAP *subheap;
     struct list *ptr;
+    SIZE_T total_size;
     FREE_LIST_ENTRY *pEntry = heap->freeList + get_freelist_index( size + sizeof(ARENA_INUSE) );
 
     /* Find a suitable free list, and in it find a block large enough */
@@ -766,13 +767,15 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
      * So just one heap struct, one first free arena which will eventually
      * get used, and a second free arena that might get assigned all remaining
      * free space in HEAP_ShrinkBlock() */
-    size += ROUND_SIZE(sizeof(SUBHEAP)) + sizeof(ARENA_INUSE) + sizeof(ARENA_FREE);
-    if (!(subheap = HEAP_CreateSubHeap( heap, NULL, heap->flags, size,
-                                        max( HEAP_DEF_SIZE, size ) )))
+    total_size = size + ROUND_SIZE(sizeof(SUBHEAP)) + sizeof(ARENA_INUSE) + sizeof(ARENA_FREE);
+    if (total_size < size) return NULL;  /* overflow */
+
+    if (!(subheap = HEAP_CreateSubHeap( heap, NULL, heap->flags, total_size,
+                                        max( HEAP_DEF_SIZE, total_size ) )))
         return NULL;
 
     TRACE("created new sub-heap %p of %08lx bytes for heap %p\n",
-            subheap, size, heap );
+            subheap, total_size, heap );
 
     *ppSubHeap = subheap;
     return (ARENA_FREE *)(subheap + 1);
@@ -1178,6 +1181,11 @@ PVOID WINAPI RtlAllocateHeap( HANDLE heap, ULONG flags, SIZE_T size )
     flags &= HEAP_GENERATE_EXCEPTIONS | HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY;
     flags |= heapPtr->flags;
     rounded_size = ROUND_SIZE(size);
+    if (rounded_size < size)  /* overflow */
+    {
+        if (flags & HEAP_GENERATE_EXCEPTIONS) RtlRaiseStatus( STATUS_NO_MEMORY );
+        return NULL;
+    }
     if (rounded_size < HEAP_MIN_DATA_SIZE) rounded_size = HEAP_MIN_DATA_SIZE;
 
     if (!(flags & HEAP_NO_SERIALIZE)) RtlEnterCriticalSection( &heapPtr->critSection );
@@ -1320,6 +1328,12 @@ PVOID WINAPI RtlReAllocateHeap( HANDLE heap, ULONG flags, PVOID ptr, SIZE_T size
              HEAP_REALLOC_IN_PLACE_ONLY;
     flags |= heapPtr->flags;
     rounded_size = ROUND_SIZE(size);
+    if (rounded_size < size)  /* overflow */
+    {
+        if (flags & HEAP_GENERATE_EXCEPTIONS) RtlRaiseStatus( STATUS_NO_MEMORY );
+        RtlSetLastWin32ErrorAndNtStatusFromNtStatus( STATUS_NO_MEMORY );
+        return NULL;
+    }
     if (rounded_size < HEAP_MIN_DATA_SIZE) rounded_size = HEAP_MIN_DATA_SIZE;
 
     if (!(flags & HEAP_NO_SERIALIZE)) RtlEnterCriticalSection( &heapPtr->critSection );

@@ -23,6 +23,7 @@
 #include "wine/port.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
 
@@ -147,6 +148,7 @@ extern DWORD EXC_CallHandler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_R
 void wait_suspend( CONTEXT *context )
 {
     LARGE_INTEGER timeout;
+    int saved_errno = errno;
 
     /* store the context we got at suspend time */
     SERVER_START_REQ( set_thread_context )
@@ -173,6 +175,8 @@ void wait_suspend( CONTEXT *context )
         wine_server_call( req );
     }
     SERVER_END_REQ;
+
+    errno = saved_errno;
 }
 
 
@@ -335,6 +339,11 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
         status = send_debug_event( rec, TRUE, context );
         if (status == DBG_CONTINUE || status == DBG_EXCEPTION_HANDLED)
             return STATUS_SUCCESS;
+
+#ifdef __i386__
+        /* fix up instruction pointer in context for EXCEPTION_BREAKPOINT */
+        if (rec->ExceptionCode == EXCEPTION_BREAKPOINT) context->Eip--;
+#endif
 
         if (call_vectored_handlers( rec, context ) == EXCEPTION_CONTINUE_EXECUTION)
             return STATUS_SUCCESS;

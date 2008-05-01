@@ -29,7 +29,6 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winerror.h"
 #include "dde.h"
 #include "ddeml.h"
 #include "win.h"
@@ -801,7 +800,7 @@ static	WDML_QUEUE_STATE WDML_ServerHandleExecute(WDML_CONV* pConv, WDML_XACT* pX
     case DDE_FNOTPROCESSED:
 	break;
     }
-    WDML_PostAck(pConv, WDML_SERVER_SIDE, 0, fBusy, fAck, (UINT)pXAct->hMem, 0, 0);
+    WDML_PostAck(pConv, WDML_SERVER_SIDE, 0, fBusy, fAck, (UINT_PTR)pXAct->hMem, 0, 0);
 
     return WDML_QS_HANDLED;
 }
@@ -980,7 +979,7 @@ static LRESULT CALLBACK WDML_ServerConvProc(HWND hwndServer, UINT iMsg, WPARAM w
     WDML_CONV*		pConv;
     WDML_XACT*		pXAct = NULL;
 
-    TRACE("%p %04x %08x %08lx\n", hwndServer, iMsg, wParam , lParam);
+    TRACE("%p %04x %08lx %08lx\n", hwndServer, iMsg, wParam, lParam);
 
     if (iMsg == WM_DESTROY)
     {

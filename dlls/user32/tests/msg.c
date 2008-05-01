@@ -39,6 +39,7 @@
 /* undocumented SWP flags - from SDK 3.1 */
 #define SWP_NOCLIENTSIZE	0x0800
 #define SWP_NOCLIENTMOVE	0x1000
+#define SWP_STATECHANGED	0x8000
 
 #define SW_NORMALNA	        0xCC    /* undoc. flag in MinMaximize */
 
@@ -1404,13 +1405,13 @@ static void ok_sequence_(const struct message *expected, const char *context, in
 		    todo_wine {
                         failcount ++;
                         ok_( file, line) (FALSE,
-			    "%s: in msg 0x%04x expecting wParam 0x%x got 0x%x\n",
+			    "%s: in msg 0x%04x expecting wParam 0x%lx got 0x%lx\n",
 			    context, expected->message, expected->wParam, actual->wParam);
 		    }
 		}
 		else
 		ok_( file, line) (expected->wParam == actual->wParam,
-		     "%s: in msg 0x%04x expecting wParam 0x%x got 0x%x\n",
+		     "%s: in msg 0x%04x expecting wParam 0x%lx got 0x%lx\n",
 		     context, expected->message, expected->wParam, actual->wParam);
 	    }
 	    if (expected->flags & lparam)
@@ -2510,7 +2511,7 @@ static LRESULT WINAPI mdi_client_hook_proc(HWND hwnd, UINT message, WPARAM wPara
         message != WM_GETICON &&
         message != WM_DEVICECHANGE)
     {
-        trace("mdi client: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+        trace("mdi client: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
         switch (message)
         {
@@ -2562,7 +2563,7 @@ static LRESULT WINAPI mdi_child_wnd_proc(HWND hwnd, UINT message, WPARAM wParam,
         message != WM_GETICON &&
         message != WM_DEVICECHANGE)
     {
-        trace("mdi child: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+        trace("mdi child: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
         switch (message)
         {
@@ -2632,7 +2633,7 @@ static LRESULT WINAPI mdi_frame_wnd_proc(HWND hwnd, UINT message, WPARAM wParam,
         message != WM_GETICON &&
         message != WM_DEVICECHANGE)
     {
-        trace("mdi frame: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+        trace("mdi frame: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
         switch (message)
         {
@@ -3197,7 +3198,7 @@ static INT_PTR CALLBACK TestModalDlgProcA(HWND hwnd, UINT message, WPARAM wParam
 {
     struct message msg;
 
-    trace("dialog: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("dialog: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     /* explicitly ignore WM_GETICON message */
     if (message == WM_GETICON) return 0;
@@ -4328,7 +4329,7 @@ static LRESULT CALLBACK button_hook_proc(HWND hwnd, UINT message, WPARAM wParam,
     LRESULT ret;
     struct message msg;
 
-    trace("button: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("button: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     /* explicitly ignore WM_GETICON message */
     if (message == WM_GETICON) return 0;
@@ -4468,7 +4469,7 @@ static LRESULT CALLBACK static_hook_proc(HWND hwnd, UINT message, WPARAM wParam,
     LRESULT ret;
     struct message msg;
 
-    trace("static: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("static: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     /* explicitly ignore WM_GETICON message */
     if (message == WM_GETICON) return 0;
@@ -5543,7 +5544,7 @@ static void pump_msg_loop(HWND hwnd, HACCEL hAccel)
     {
         struct message log_msg;
 
-        trace("accel: %p, %04x, %08x, %08lx\n", msg.hwnd, msg.message, msg.wParam, msg.lParam);
+        trace("accel: %p, %04x, %08lx, %08lx\n", msg.hwnd, msg.message, msg.wParam, msg.lParam);
 
         /* ignore some unwanted messages */
         if (msg.message == WM_MOUSEMOVE ||
@@ -5768,7 +5769,7 @@ static LRESULT MsgCheckProc (BOOL unicode, HWND hwnd, UINT message,
     LRESULT ret;
     struct message msg;
 
-    trace("%p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("%p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     /* explicitly ignore WM_GETICON message */
     if (message == WM_GETICON) return 0;
@@ -5779,7 +5780,7 @@ static LRESULT MsgCheckProc (BOOL unicode, HWND hwnd, UINT message,
 	{
 	    LONG style = GetWindowLongA(hwnd, GWL_STYLE);
 	    ok((BOOL)wParam == !(style & WS_DISABLED),
-		"wrong WS_DISABLED state: %d != %d\n", wParam, !(style & WS_DISABLED));
+		"wrong WS_DISABLED state: %ld != %d\n", wParam, !(style & WS_DISABLED));
 	    break;
 	}
 
@@ -5924,7 +5925,7 @@ static LRESULT WINAPI PopupMsgCheckProcA(HWND hwnd, UINT message, WPARAM wParam,
     LRESULT ret;
     struct message msg;
 
-    trace("popup: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("popup: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     /* explicitly ignore WM_GETICON message */
     if (message == WM_GETICON) return 0;
@@ -5956,7 +5957,7 @@ static LRESULT WINAPI ParentMsgCheckProcA(HWND hwnd, UINT message, WPARAM wParam
     LRESULT ret;
     struct message msg;
 
-    trace("parent: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("parent: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     /* explicitly ignore WM_GETICON message */
     if (message == WM_GETICON) return 0;
@@ -6039,7 +6040,7 @@ static LRESULT WINAPI TestDlgProcA(HWND hwnd, UINT message, WPARAM wParam, LPARA
     LRESULT ret;
     struct message msg;
 
-    trace("dialog: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("dialog: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     /* explicitly ignore WM_GETICON message */
     if (message == WM_GETICON) return 0;
@@ -6148,10 +6149,10 @@ static LRESULT WINAPI ShowWindowProcA(HWND hwnd, UINT message, WPARAM wParam, LP
     case WM_KILLFOCUS:
 #endif
     case WM_SHOWWINDOW:
-        trace("WM_SHOWWINDOW %d\n", wParam);
+        trace("WM_SHOWWINDOW %ld\n", wParam);
         break;
     case WM_SIZE:
-        trace("WM_SIZE %d\n", wParam);
+        trace("WM_SIZE %ld\n", wParam);
         break;
     case WM_MOVE:
         trace("WM_MOVE\n");
@@ -6267,7 +6268,7 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
     HWND hwnd;
     char buf[256];
 
-    trace("CBT: %d (%s), %08x, %08lx\n", nCode, code_name, wParam, lParam);
+    trace("CBT: %d (%s), %08lx, %08lx\n", nCode, code_name, wParam, lParam);
 
     ok(cbt_hook_thread_id == GetCurrentThreadId(), "we didn't ask for events from other threads\n");
 
@@ -6567,7 +6568,7 @@ struct timer_info
     DWORD id;
 };
 
-static VOID CALLBACK tfunc(HWND hwnd, UINT uMsg, UINT id, DWORD dwTime)
+static VOID CALLBACK tfunc(HWND hwnd, UINT uMsg, UINT_PTR id, DWORD dwTime)
 {
 }
 
@@ -6728,7 +6729,7 @@ static LRESULT CALLBACK cbt_global_hook_proc(int nCode, WPARAM wParam, LPARAM lP
     HWND hwnd;
     char buf[256];
 
-    trace("CBT_2: %d, %08x, %08lx\n", nCode, wParam, lParam);
+    trace("CBT_2: %d, %08lx, %08lx\n", nCode, wParam, lParam);
 
     if (nCode == HCBT_SYSCOMMAND)
     {
@@ -7687,7 +7688,7 @@ static LRESULT CALLBACK edit_hook_proc(HWND hwnd, UINT message, WPARAM wParam, L
     LRESULT ret;
     struct message msg;
 
-    trace("edit: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("edit: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     /* explicitly ignore WM_GETICON message */
     if (message == WM_GETICON) return 0;
@@ -7992,7 +7993,7 @@ static void test_PeekMessage(void)
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE | PM_QS_POSTMESSAGE);
     ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
-       "got %d and %04x wParam %08x instead of TRUE and WM_CHAR wParam 'z'\n",
+       "got %d and %04x wParam %08lx instead of TRUE and WM_CHAR wParam 'z'\n",
        ret, msg.message, msg.wParam);
     ok_sequence(WmEmptySeq, "WmEmptySeq", FALSE);
 
@@ -8050,7 +8051,7 @@ static void test_PeekMessage(void)
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, WM_CHAR, WM_CHAR, PM_REMOVE);
     ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
-       "got %d and %04x wParam %08x instead of TRUE and WM_CHAR wParam 'z'\n",
+       "got %d and %04x wParam %08lx instead of TRUE and WM_CHAR wParam 'z'\n",
        ret, msg.message, msg.wParam);
     ok_sequence(WmUser, "WmUser", FALSE);
 
@@ -8100,7 +8101,7 @@ static void test_PeekMessage(void)
     else /* workaround for a missing QS_RAWINPUT support */
         ret = PeekMessageA(&msg, 0, WM_KEYDOWN, WM_KEYDOWN, PM_REMOVE);
     ok(ret && msg.message == WM_KEYDOWN && msg.wParam == 'N',
-       "got %d and %04x wParam %08x instead of TRUE and WM_KEYDOWN wParam 'N'\n",
+       "got %d and %04x wParam %08lx instead of TRUE and WM_KEYDOWN wParam 'N'\n",
        ret, msg.message, msg.wParam);
     ok_sequence(WmKeyDownSkippedSeq, "WmKeyDownSkippedSeq", FALSE);
 
@@ -8114,7 +8115,7 @@ static void test_PeekMessage(void)
     else /* workaround for a missing QS_RAWINPUT support */
         ret = PeekMessageA(&msg, 0, WM_KEYUP, WM_KEYUP, PM_REMOVE);
     ok(ret && msg.message == WM_KEYUP && msg.wParam == 'N',
-       "got %d and %04x wParam %08x instead of TRUE and WM_KEYUP wParam 'N'\n",
+       "got %d and %04x wParam %08lx instead of TRUE and WM_KEYUP wParam 'N'\n",
        ret, msg.message, msg.wParam);
     ok_sequence(WmKeyUpSkippedSeq, "WmKeyUpSkippedSeq", FALSE);
 
@@ -8136,7 +8137,7 @@ static void test_PeekMessage(void)
     msg.message = 0;
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE);
     ok(ret && msg.message == WM_CHAR && msg.wParam == 'z',
-       "got %d and %04x wParam %08x instead of TRUE and WM_CHAR wParam 'z'\n",
+       "got %d and %04x wParam %08lx instead of TRUE and WM_CHAR wParam 'z'\n",
        ret, msg.message, msg.wParam);
     ok_sequence(WmEmptySeq, "WmEmptySeq", FALSE);
 
@@ -8184,7 +8185,7 @@ static void test_PeekMessage(void)
     ret = PeekMessageA(&msg, 0, 0, 0, PM_REMOVE);
     ok(ret && msg.message == WM_QUIT,
        "got %d and %04x instead of TRUE and WM_QUIT\n", ret, msg.message);
-    ok(msg.wParam == 0x1234abcd, "got wParam %08x instead of 0x1234abcd\n", msg.wParam);
+    ok(msg.wParam == 0x1234abcd, "got wParam %08lx instead of 0x1234abcd\n", msg.wParam);
     ok(msg.lParam == 0, "got lParam %08lx instead of 0\n", msg.lParam);
     ok_sequence(WmEmptySeq, "WmEmptySeq", FALSE);
 
@@ -8230,7 +8231,7 @@ static void test_quit_message(void)
     ret = PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE);
     ok(ret, "PeekMessage failed with error %d\n", GetLastError());
     ok(msg.message == WM_QUIT, "Received message 0x%04x instead of WM_QUIT\n", msg.message);
-    ok(msg.wParam == 0xbeef, "wParam was 0x%x instead of 0xbeef\n", msg.wParam);
+    ok(msg.wParam == 0xbeef, "wParam was 0x%lx instead of 0xbeef\n", msg.wParam);
 
     ret = PostThreadMessage(GetCurrentThreadId(), WM_USER, 0, 0);
     ok(ret, "PostMessage failed with error %d\n", GetLastError());
@@ -8243,7 +8244,7 @@ static void test_quit_message(void)
     ret = GetMessage(&msg, NULL, 0, 0);
     ok(!ret, "GetMessage return %d with error %d instead of FALSE\n", ret, GetLastError());
     ok(msg.message == WM_QUIT, "Received message 0x%04x instead of WM_QUIT\n", msg.message);
-    ok(msg.wParam == 0xbeef, "wParam was 0x%x instead of 0xbeef\n", msg.wParam);
+    ok(msg.wParam == 0xbeef, "wParam was 0x%lx instead of 0xbeef\n", msg.wParam);
 
     ret = PeekMessage(&msg, NULL, 0, 0, PM_REMOVE);
     ok( !ret || msg.message != WM_QUIT, "Received WM_QUIT again\n" );
@@ -8254,7 +8255,7 @@ static void test_quit_message(void)
     ret = PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE);
     ok(ret, "PeekMessage failed with error %d\n", GetLastError());
     ok(msg.message == WM_QUIT, "Received message 0x%04x instead of WM_QUIT\n", msg.message);
-    ok(msg.wParam == 0xdead, "wParam was 0x%x instead of 0xdead\n", msg.wParam);
+    ok(msg.wParam == 0xdead, "wParam was 0x%lx instead of 0xdead\n", msg.wParam);
 
     ret = PostThreadMessage(GetCurrentThreadId(), WM_USER, 0, 0);
     ok(ret, "PostMessage failed with error %d\n", GetLastError());
@@ -8263,7 +8264,7 @@ static void test_quit_message(void)
     ret = GetMessage(&msg, NULL, 0, 0);
     ok(!ret, "GetMessage return %d with error %d instead of FALSE\n", ret, GetLastError());
     ok(msg.message == WM_QUIT, "Received message 0x%04x instead of WM_QUIT\n", msg.message);
-    ok(msg.wParam == 0xdead, "wParam was 0x%x instead of 0xdead\n", msg.wParam);
+    ok(msg.wParam == 0xdead, "wParam was 0x%lx instead of 0xdead\n", msg.wParam);
 
     ret = GetMessage(&msg, NULL, 0, 0);
     ok(ret > 0, "GetMessage failed with error %d\n", GetLastError());
@@ -8880,7 +8881,7 @@ static INT_PTR WINAPI test_dlg_proc(HWND hwnd, UINT message, WPARAM wParam, LPAR
 {
     struct message msg;
 
-    trace("dialog: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("dialog: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     switch (message)
     {
@@ -9094,6 +9095,38 @@ static void test_nullCallback(void)
     DestroyWindow(hwnd);
 }
 
+static const struct message SetForegroundWindowSeq[] =
+{
+    { WM_NCACTIVATE, sent|wparam, 0 },
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_ACTIVATE, sent|wparam, 0 },
+    { WM_ACTIVATEAPP, sent|wparam, 0 },
+    { WM_KILLFOCUS, sent },
+    { 0 }
+};
+
+static void test_SetForegroundWindow(void)
+{
+    HWND hwnd;
+
+    hwnd = CreateWindowExA(0, "TestWindowClass", "Test SetForegroundWindow",
+                           WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                           100, 100, 200, 200, 0, 0, 0, NULL);
+    ok (hwnd != 0, "Failed to create overlapped window\n");
+    flush_sequence();
+
+    trace("SetForegroundWindow( 0 )\n");
+    SetForegroundWindow( 0 );
+    ok_sequence(WmEmptySeq, "SetForegroundWindow( 0 ) away from foreground top level window", FALSE);
+    trace("SetForegroundWindow( GetDesktopWindow() )\n");
+    SetForegroundWindow( GetDesktopWindow() );
+    ok_sequence(SetForegroundWindowSeq, "SetForegroundWindow( desktop ) away from "
+                                        "foreground top level window", TRUE);
+    trace("done\n");
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(msg)
 {
     BOOL ret;
@@ -9165,6 +9198,7 @@ START_TEST(msg)
     test_sys_menu();
     test_dialog_messages();
     test_nullCallback();
+    test_SetForegroundWindow();
 
     UnhookWindowsHookEx(hCBT_hook);
     if (pUnhookWinEvent)

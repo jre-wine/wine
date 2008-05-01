@@ -368,6 +368,10 @@ typedef NTSTATUS (NTAPI SpExportSecurityContextFn)(LSA_SEC_HANDLE, ULONG,
 typedef NTSTATUS (NTAPI SpImportSecurityContextFn)(PSecBuffer, HANDLE,
  PLSA_SEC_HANDLE);
 
+#ifdef WINE_NO_UNICODE_MACROS
+#undef SetContextAttributes
+#endif
+
 /* dispatch tables of LSA-mode functions implemented by SSP/AP */
 typedef struct SECPKG_FUNCTION_TABLE {
     PLSA_AP_INITIALIZE_PACKAGE InitializePackage;
@@ -398,19 +402,12 @@ typedef struct SECPKG_FUNCTION_TABLE {
     SpAddCredentialsFn *SpAddCredentials;
     SpSetExtendedInformationFn *SetExtendedInformation;
     /* Packages with version SECPKG_INTERFACE_VERSION end here */
-    SpSetContextAttributesFn *SpSetContextAttributes;
+    SpSetContextAttributesFn *SetContextAttributes;
     /* Packages with version SECPKG_INTERFACE_VERSION_2 end here */
     SpSetCredentialsAttributesFn *SetCredentialsAttributes;
     /* Packages with version SECPKG_INTERFACE_VERSION_3 end here */
 } SECPKG_FUNCTION_TABLE,
  *PSECPKG_FUNCTION_TABLE;
-
-/* Helper macros to find the size of SECPKG_FUNCTION_TABLE */
-#define SECPKG_FUNCTION_TABLE_SIZE_1 offsetof(SECPKG_FUNCTION_TABLE, \
-    SpSetContextAttributes)
-#define SECPKG_FUNCTION_TABLE_SIZE_2 offsetof(SECPKG_FUNCTION_TABLE, \
-    SetCredentialsAttributes)
-#define SECPKG_FUNCTION_TABLE_SIZE_3 sizeof(SECPKG_FUNCTION_TABLE)
 
 /* dispatch tables of user-mode functions implemented by SSP/AP */
 typedef struct SECPKG_USER_FUNCTION_TABLE {

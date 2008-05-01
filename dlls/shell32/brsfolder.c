@@ -29,7 +29,6 @@
 
 #include "wine/debug.h"
 #include "undocshell.h"
-#include "shlguid.h"
 #include "pidl.h"
 #include "shell32_main.h"
 #include "shellapi.h"
@@ -655,7 +654,7 @@ static INT_PTR CALLBACK BrsFolderDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
 {
     browse_info *info;
 
-    TRACE("hwnd=%p msg=%04x 0x%08x 0x%08lx\n", hWnd,  msg, wParam, lParam );
+    TRACE("hwnd=%p msg=%04x 0x%08lx 0x%08lx\n", hWnd, msg, wParam, lParam );
 
     if (msg == WM_INITDIALOG)
         return BrsFolder_OnCreate( hWnd, (browse_info*) lParam );

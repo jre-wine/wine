@@ -39,7 +39,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "msvcrt.h"
 
@@ -1693,8 +1692,16 @@ static int read_i(int fd, void *buf, unsigned int count)
     }
     else
     {
-        TRACE(":failed-last error (%d)\n",GetLastError());
-        return -1;
+        if (GetLastError() == ERROR_BROKEN_PIPE)
+        {
+            TRACE(":end-of-pipe\n");
+            return 0;
+        }
+        else
+        {
+            TRACE(":failed-last error (%d)\n",GetLastError());
+            return -1;
+        }
     }
 
   if (count > 4)

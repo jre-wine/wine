@@ -300,9 +300,9 @@ typedef struct tagMSICOMPONENT
     LPWSTR FullKeypath;
     LPWSTR AdvertiseString;
 
-    int hasAdvertiseFeature:1;
-    int hasLocalFeature:1;
-    int hasSourceFeature:1;
+    unsigned int hasAdvertiseFeature:1;
+    unsigned int hasLocalFeature:1;
+    unsigned int hasSourceFeature:1;
 } MSICOMPONENT;
 
 typedef struct tagComponentList
@@ -580,6 +580,7 @@ extern void append_storage_to_db( MSIDATABASE *db, IStorage *stg );
 extern UINT MSI_InstallPackage( MSIPACKAGE *, LPCWSTR, LPCWSTR );
 extern void ACTION_free_package_structures( MSIPACKAGE* );
 extern UINT ACTION_DialogBox( MSIPACKAGE*, LPCWSTR);
+extern UINT ACTION_ForceReboot(MSIPACKAGE *package);
 extern UINT MSI_Sequence( MSIPACKAGE *package, LPCWSTR szTable, INT iSequenceMode );
 extern UINT MSI_SetFeatureStates( MSIPACKAGE *package );
 
@@ -725,7 +726,7 @@ extern HINSTANCE msi_hInstance;
 /* action related functions */
 extern UINT ACTION_PerformAction(MSIPACKAGE *package, const WCHAR *action, BOOL force);
 extern UINT ACTION_PerformUIAction(MSIPACKAGE *package, const WCHAR *action);
-extern void ACTION_FinishCustomActions( MSIPACKAGE* package);
+extern void ACTION_FinishCustomActions( const MSIPACKAGE* package);
 extern UINT ACTION_CustomAction(MSIPACKAGE *package,const WCHAR *action, BOOL execute);
 
 static inline void msi_feature_set_state( MSIFEATURE *feature, INSTALLSTATE state )

@@ -158,7 +158,7 @@ static BOOL CertContext_GetHashProp(void *context, DWORD dwPropId,
 {
     BOOL ret = CryptHashCertificate(0, algID, 0, toHash, toHashLen, pvData,
      pcbData);
-    if (ret)
+    if (ret && pvData)
     {
         CRYPT_DATA_BLOB blob = { *pcbData, pvData };
 
@@ -185,20 +185,17 @@ static BOOL WINAPI CertContext_GetProperty(void *context, DWORD dwPropId,
     if (ret)
     {
         if (!pvData)
-        {
             *pcbData = blob.cbData;
-            ret = TRUE;
-        }
         else if (*pcbData < blob.cbData)
         {
             SetLastError(ERROR_MORE_DATA);
             *pcbData = blob.cbData;
+            ret = FALSE;
         }
         else
         {
             memcpy(pvData, blob.pbData, blob.cbData);
             *pcbData = blob.cbData;
-            ret = TRUE;
         }
     }
     else
@@ -299,8 +296,11 @@ BOOL WINAPI CertGetCertificateContextProperty(PCCERT_CONTEXT pCertContext,
         }
         else
         {
-            *(DWORD *)pvData =
-             CertStore_GetAccessState(pCertContext->hCertStore);
+            if (pCertContext->hCertStore)
+                ret = CertGetStoreProperty(pCertContext->hCertStore, dwPropId,
+                 pvData, pcbData);
+            else
+                *(DWORD *)pvData = 0;
             ret = TRUE;
         }
         break;
@@ -320,10 +320,7 @@ BOOL WINAPI CertGetCertificateContextProperty(PCCERT_CONTEXT pCertContext,
         if (ret)
         {
             if (!pvData)
-            {
                 *pcbData = sizeof(HCRYPTPROV);
-                ret = TRUE;
-            }
             else if (*pcbData < sizeof(HCRYPTPROV))
             {
                 SetLastError(ERROR_MORE_DATA);
@@ -331,10 +328,7 @@ BOOL WINAPI CertGetCertificateContextProperty(PCCERT_CONTEXT pCertContext,
                 ret = FALSE;
             }
             else
-            {
                 *(HCRYPTPROV *)pvData = keyContext.hCryptProv;
-                ret = TRUE;
-            }
         }
         break;
     }
@@ -2274,4 +2268,16 @@ PCCERT_CONTEXT WINAPI CertCreateSelfSignCertificate(HCRYPTPROV hProv,
     if (releaseContext)
         CryptReleaseContext(hProv, 0);
     return context;
+}
+
+BOOL WINAPI CertGetCertificateChain(HCERTCHAINENGINE hChainEngine,
+    PCCERT_CONTEXT pCertContext, LPFILETIME pTime, HCERTSTORE hAdditionalStore,
+    PCERT_CHAIN_PARA pChainPara, DWORD dwFlags, LPVOID pvReserved,
+    PCCERT_CHAIN_CONTEXT* ppChainContext)
+{
+    FIXME(" %p %p %p %p %p 0x%08X %p %p - stub\n",hChainEngine, pCertContext,
+     pTime, hAdditionalStore, pChainPara, dwFlags, pvReserved, ppChainContext);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

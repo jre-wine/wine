@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "server_defines.h"
+
 typedef struct tag_vector
 {
   int x;
@@ -47,6 +49,24 @@ interface IServer
     double *pd;
   } ptypes_t;
 
+  typedef struct
+  {
+    vector_t *pu;
+    vector_t **pv;
+  } pvectors_t;
+
+  typedef struct
+  {
+    [switch_is(s)] union
+    {
+      [case(SUN_I)] int i;
+      [case(SUN_F1, SUN_F2)] float f;
+      [case(SUN_PI)] int *pi;
+    } u;
+
+    int s;
+  } sun_t;
+
   int int_return(void);
   int square(int x);
   int sum(int x, int y);
@@ -60,5 +80,33 @@ interface IServer
   int sum_fixed_array(int a[5]);
   int pints_sum(pints_t *pints);
   double ptypes_sum(ptypes_t *ptypes);
+  int dot_pvectors(pvectors_t *pvectors);
+
+  /* don't use this anywhere except in sp_t */
+  typedef struct
+  {
+    int x;
+  } sp_inner_t;
+
+  typedef struct
+  {
+    int x;
+    sp_inner_t *s;
+  } sp_t;
+
+  int sum_sp(sp_t *sp);
+  double square_sun(sun_t *su);
+
+  typedef struct test_list
+  {
+    int t;
+    [switch_is(t)] union
+    {
+      [case(TL_NULL)] int x;  /* end of list */
+      [case(TL_LIST)] struct test_list *tail;
+    } u;
+  } test_list_t;
+
+  int test_list_length(test_list_t *ls);
   void stop(void);
 }

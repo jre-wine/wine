@@ -110,12 +110,14 @@ struct sc_manager       /* service control manager handle */
 {
     struct sc_handle hdr;
     HKEY   hkey;   /* handle to services database in the registry */
+    DWORD  dwAccess;
 };
 
 struct sc_service       /* service handle */
 {
     struct sc_handle hdr;
     HKEY   hkey;          /* handle to service entry in the registry (under hkey) */
+    DWORD  dwAccess;
     struct sc_manager *scm;  /* pointer to SCM handle */
     WCHAR  name[1];
 };
@@ -1055,6 +1057,7 @@ SC_HANDLE WINAPI OpenSCManagerW( LPCWSTR lpMachineName, LPCWSTR lpDatabaseName,
     if (r!=ERROR_SUCCESS)
         goto error;
 
+    manager->dwAccess = dwDesiredAccess;
     TRACE("returning %p\n", manager);
 
     return (SC_HANDLE) &manager->hdr;
@@ -1233,6 +1236,7 @@ SC_HANDLE WINAPI OpenServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         return NULL;
     strcpyW( hsvc->name, lpServiceName );
     hsvc->hkey = hKey;
+    hsvc->dwAccess = dwDesiredAccess;
 
     /* add reference to SCM handle */
     hscm->hdr.ref_count++;
@@ -1482,26 +1486,43 @@ static DWORD service_start_process(struct sc_service *hsvc, LPDWORD ppid)
     PROCESS_INFORMATION pi;
     STARTUPINFOW si;
     LPWSTR path = NULL, str;
-    DWORD type, size, ret;
+    DWORD type, size, ret, svc_type;
     HANDLE handles[2];
     BOOL r;
 
-    /* read the executable path from memory */
-    size = 0;
-    ret = RegQueryValueExW(hsvc->hkey, _ImagePathW, NULL, &type, NULL, &size);
-    if (ret!=ERROR_SUCCESS)
-        return FALSE;
-    str = HeapAlloc(GetProcessHeap(),0,size);
-    ret = RegQueryValueExW(hsvc->hkey, _ImagePathW, NULL, &type, (LPBYTE)str, &size);
-    if (ret==ERROR_SUCCESS)
+    size = sizeof(svc_type);
+    if (RegQueryValueExW(hsvc->hkey, szType, NULL, &type, (LPBYTE)&svc_type, &size) || type != REG_DWORD)
+        svc_type = 0;
+
+    if (svc_type == SERVICE_KERNEL_DRIVER)
     {
-        size = ExpandEnvironmentStringsW(str,NULL,0);
-        path = HeapAlloc(GetProcessHeap(),0,size*sizeof(WCHAR));
-        ExpandEnvironmentStringsW(str,path,size);
+        static const WCHAR winedeviceW[] = {'\\','w','i','n','e','d','e','v','i','c','e','.','e','x','e',' ',0};
+        DWORD len = GetSystemDirectoryW( NULL, 0 ) + sizeof(winedeviceW)/sizeof(WCHAR) + strlenW(hsvc->name);
+
+        if (!(path = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return FALSE;
+        GetSystemDirectoryW( path, len );
+        lstrcatW( path, winedeviceW );
+        lstrcatW( path, hsvc->name );
     }
-    HeapFree(GetProcessHeap(),0,str);
-    if (!path)
-        return FALSE;
+    else
+    {
+        /* read the executable path from the registry */
+        size = 0;
+        ret = RegQueryValueExW(hsvc->hkey, _ImagePathW, NULL, &type, NULL, &size);
+        if (ret!=ERROR_SUCCESS)
+            return FALSE;
+        str = HeapAlloc(GetProcessHeap(),0,size);
+        ret = RegQueryValueExW(hsvc->hkey, _ImagePathW, NULL, &type, (LPBYTE)str, &size);
+        if (ret==ERROR_SUCCESS)
+        {
+            size = ExpandEnvironmentStringsW(str,NULL,0);
+            path = HeapAlloc(GetProcessHeap(),0,size*sizeof(WCHAR));
+            ExpandEnvironmentStringsW(str,path,size);
+        }
+        HeapFree(GetProcessHeap(),0,str);
+        if (!path)
+            return FALSE;
+    }
 
     /* wait for the process to start and set an event or terminate */
     handles[0] = service_get_event_handle( hsvc->name );
@@ -2048,6 +2069,12 @@ BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
     TRACE("%p %s %p %p\n", hSCManager,
           debugstr_a(lpServiceName), lpDisplayName, lpcchBuffer);
 
+    if (!lpServiceName)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
     hscm = sc_handle_get_handle_data(hSCManager, SC_HTYPE_MANAGER);
     if (!hscm)
     {
@@ -2057,6 +2084,9 @@ BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
 
     size = *lpcchBuffer;
     ret = RegGetValueA(hscm->hkey, lpServiceName, "DisplayName", RRF_RT_REG_SZ, &type, lpDisplayName, &size);
+    if (!ret && !lpDisplayName && size)
+        ret = ERROR_MORE_DATA;
+
     if (ret)
     {
         if (lpDisplayName && *lpcchBuffer) *lpDisplayName = 0;
@@ -2086,6 +2116,12 @@ BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     TRACE("%p %s %p %p\n", hSCManager,
           debugstr_w(lpServiceName), lpDisplayName, lpcchBuffer);
 
+    if (!lpServiceName)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
     hscm = sc_handle_get_handle_data(hSCManager, SC_HTYPE_MANAGER);
     if (!hscm)
     {
@@ -2095,6 +2131,9 @@ BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
 
     size = *lpcchBuffer * sizeof(WCHAR);
     ret = RegGetValueW(hscm->hkey, lpServiceName, szDisplayName, RRF_RT_REG_SZ, &type, lpDisplayName, &size);
+    if (!ret && !lpDisplayName && size)
+        ret = ERROR_MORE_DATA;
+
     if (ret)
     {
         if (lpDisplayName && *lpcchBuffer) *lpDisplayName = 0;

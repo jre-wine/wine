@@ -166,6 +166,7 @@ typedef struct
     LPWSTR  lpszHostName; /* the final destination of the request */
     LPWSTR  lpszServerName; /* the name of the server we directly connect to */
     LPWSTR  lpszUserName;
+    LPWSTR  lpszPassword;
     INTERNET_PORT nHostPort; /* the final destination port of the request */
     INTERNET_PORT nServerPort; /* the port of the server we directly connect to */
     struct sockaddr_in socketAddress;
@@ -184,6 +185,8 @@ typedef struct
 } HTTPHEADERW, *LPHTTPHEADERW;
 
 
+struct HttpAuthInfo;
+
 typedef struct
 {
     WININETHANDLEHEADER hdr;
@@ -198,6 +201,7 @@ typedef struct
     DWORD dwContentRead; /* bytes of the content read so far */
     HTTPHEADERW *pCustHeaders;
     DWORD nCustHeaders;
+    struct HttpAuthInfo *pAuthInfo;
 } WININETHTTPREQW, *LPWININETHTTPREQW;
 
 
@@ -455,6 +459,7 @@ BOOL NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len,
 		int *sent /* out */);
 BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int flags,
 		int *recvd /* out */);
+BOOL NETCON_query_data_available(WININET_NETCONNECTION *connection, DWORD *available);
 BOOL NETCON_getNextLine(WININET_NETCONNECTION *connection, LPSTR lpszBuffer, LPDWORD dwBuffer);
 LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection);
 BOOL NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value);

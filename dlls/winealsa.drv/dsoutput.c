@@ -50,7 +50,6 @@
 #include "wingdi.h"
 #include "winerror.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "mmddk.h"
 
 #include "alsa.h"
@@ -420,11 +419,6 @@ static HRESULT WINAPI IDsDriverBufferImpl_GetPosition(PIDSDRIVERBUFFER iface,
     snd_pcm_state_t     state;
 
     if (wwo->hw_params == NULL || wwo->pcm == NULL) return DSERR_GENERIC;
-
-#if 0 /* Shouldn't be needed */
-    /* we need to track down buffer underruns */
-    DSDB_CheckXRUN(This);
-#endif
 
     state = snd_pcm_state(wwo->pcm);
     if (state == SND_PCM_STATE_RUNNING)

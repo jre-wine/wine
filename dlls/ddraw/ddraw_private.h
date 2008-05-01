@@ -80,6 +80,9 @@ extern ULONG WINAPI D3D7CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain);
 
 extern ULONG WINAPI D3D7CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface);
 
+/* Global critical section */
+extern CRITICAL_SECTION ddraw_cs;
+
 /*****************************************************************************
  * IDirectDraw implementation structure
  *****************************************************************************/
@@ -199,9 +202,6 @@ IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
 IWineD3DVertexDeclaration *
 IDirectDrawImpl_FindDecl(IDirectDrawImpl *This,
                          DWORD fvf);
-
-void
-remove_ddraw_object(IDirectDrawImpl *ddraw);
 
 /* The default surface type */
 extern WINED3DSURFTYPE DefaultSurfaceType;

@@ -22,7 +22,6 @@
 #include <stdarg.h>
 
 #include "windef.h"
-#include "winbase.h"
 #include "wingdi.h"
 #include "wine/winuser16.h"
 #include "winuser.h"
@@ -1429,7 +1428,7 @@ INT WINAPI FillRect( HDC hdc, const RECT *rect, HBRUSH hbrush )
 {
     HBRUSH prevBrush;
 
-    if (hbrush <= (HBRUSH) (COLOR_MAX + 1)) hbrush = GetSysColorBrush( (INT) hbrush - 1 );
+    if (hbrush <= (HBRUSH) (COLOR_MAX + 1)) hbrush = GetSysColorBrush( HandleToULong(hbrush) - 1 );
 
     if (!(prevBrush = SelectObject( hdc, hbrush ))) return 0;
     PatBlt( hdc, rect->left, rect->top,

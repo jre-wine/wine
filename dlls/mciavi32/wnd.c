@@ -29,7 +29,7 @@ static const WCHAR mciaviW[] = {'M','C','I','A','V','I',0};
 
 static LRESULT WINAPI MCIAVI_WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    TRACE("hwnd=%p msg=%x wparam=%x lparam=%lx\n", hWnd, uMsg, wParam, lParam);
+    TRACE("hwnd=%p msg=%x wparam=%lx lparam=%lx\n", hWnd, uMsg, wParam, lParam);
 
     switch (uMsg) {
     case WM_CREATE:
@@ -137,9 +137,9 @@ BOOL    MCIAVI_CreateWindow(WINE_MCIAVI* wma, DWORD dwFlags, LPMCI_DGV_OPEN_PARM
                               dwStyle, rc.left, rc.top,
                               rc.right, rc.bottom,
                               hParent, 0, MCIAVI_hInstance,
-                              (LPVOID)wma->wDevID);
+                              ULongToPtr(wma->wDevID));
     wma->hWndPaint = wma->hWnd;
-    return (BOOL)wma->hWnd;
+    return wma->hWnd != 0;
 }
 
 /***************************************************************************

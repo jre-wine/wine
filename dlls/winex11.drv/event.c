@@ -40,7 +40,6 @@
 #include "shlobj.h"  /* DROPFILES */
 
 #include "win.h"
-#include "winreg.h"
 #include "x11drv.h"
 #include "shellapi.h"
 #include "wine/debug.h"
@@ -937,7 +936,7 @@ LRESULT X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
     case WM_X11DRV_DELETE_WINDOW:
         return SendMessageW( hwnd, WM_SYSCOMMAND, SC_CLOSE, 0 );
     default:
-        FIXME( "got window msg %x hwnd %p wp %x lp %lx\n", msg, hwnd, wp, lp );
+        FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp );
         return 0;
     }
 }

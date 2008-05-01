@@ -576,7 +576,7 @@ NTSTATUS WINAPI NtReadFile(HANDLE hFile, HANDLE hEvent,
                 if (total)
                     status = STATUS_SUCCESS;
                 else
-                    status = (type == FD_TYPE_FILE) ? STATUS_END_OF_FILE : STATUS_PIPE_BROKEN;
+                    status = (type == FD_TYPE_FILE || type == FD_TYPE_CHAR) ? STATUS_END_OF_FILE : STATUS_PIPE_BROKEN;
                 goto done;
             }
         }
@@ -1449,9 +1449,10 @@ NTSTATUS WINAPI NtQueryInformationFile( HANDLE hFile, PIO_STATUS_BLOCK io,
             SERVER_END_REQ;
             if (!io->u.Status)
             {
+                char *tmpbuf;
                 ULONG size = info->MaximumMessageSize ? info->MaximumMessageSize : 0x10000;
-                char *tmpbuf = RtlAllocateHeap( GetProcessHeap(), 0, size );
-                if (tmpbuf)
+                if (size > 0x10000) size = 0x10000;
+                if ((tmpbuf = RtlAllocateHeap( GetProcessHeap(), 0, size )))
                 {
                     int fd, needs_close;
                     if (!server_get_unix_fd( hFile, FILE_READ_DATA, &fd, &needs_close, NULL, NULL ))

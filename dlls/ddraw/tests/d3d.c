@@ -85,6 +85,8 @@ static BOOL CreateDirect3D(void)
     ddsd.dwHeight = 256;
     rc = IDirectDraw7_CreateSurface(lpDD, &ddsd, &lpDDS, NULL);
     ok(rc==DD_OK, "CreateSurface returned: %x\n", rc);
+    if (!SUCCEEDED(rc))
+	return FALSE;
 
     rc = IDirect3D7_CreateDevice(lpD3D, &IID_IDirect3DTnLHalDevice, lpDDS,
         &lpD3DDevice);
@@ -140,6 +142,8 @@ static void LightTest(void)
     D3DLIGHT7 light;
     D3DLIGHT7 defaultlight;
     BOOL bEnabled = FALSE;
+    float one = 1.0f;
+    float zero= 0.0f;
 
     /* Set a few lights with funky indices. */
     memset(&light, 0, sizeof(light));
@@ -254,7 +258,7 @@ static void LightTest(void)
     U3(light.dcvDiffuse).b = 1.f;
     U3(light.dvDirection).z = 1.f;
 
-    light.dvAttenuation0 = -1.0 / 0.0; /* -INFINITY */
+    light.dvAttenuation0 = -one / zero; /* -INFINITY */
     rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
     ok(rc==DDERR_INVALIDPARAMS, "SetLight returned: %x\n", rc);
 
@@ -270,11 +274,11 @@ static void LightTest(void)
     rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
     ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
 
-    light.dvAttenuation0 = 1.0 / 0.0; /* +INFINITY */
+    light.dvAttenuation0 = one / zero; /* +INFINITY */
     rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
     ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
 
-    light.dvAttenuation0 = 0.0 / 0.0; /* NaN */
+    light.dvAttenuation0 = zero / zero; /* NaN */
     rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
     ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
 

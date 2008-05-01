@@ -370,6 +370,26 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleA(
     return ret;
 }
 
+/*************************************************************************
+ *             ntlm_GetTokenBufferIndex
+ * Calculates the index of the secbuffer with BufferType == SECBUFFER_TOKEN
+ * Returns index if found or -1 if not found.
+ */
+static int ntlm_GetTokenBufferIndex(PSecBufferDesc pMessage)
+{
+    UINT i;
+
+    TRACE("%p\n", pMessage);
+
+    for( i = 0; i < pMessage->cBuffers; ++i )
+    {
+        if(pMessage->pBuffers[i].BufferType == SECBUFFER_TOKEN)
+            return i;
+    }
+
+    return -1;
+}
+
 /***********************************************************************
  *              InitializeSecurityContextW
  */
@@ -385,23 +405,11 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
     char* buffer, *want_flags = NULL;
     PBYTE bin;
     int buffer_len, bin_len, max_len = NTLM_MAX_BUF;
+    int token_idx;
 
     TRACE("%p %p %s %d %d %d %p %d %p %p %p %p\n", phCredential, phContext,
      debugstr_w(pszTargetName), fContextReq, Reserved1, TargetDataRep, pInput,
      Reserved1, phNewContext, pOutput, pfContextAttr, ptsExpiry);
-
-    if(!phCredential)
-        return SEC_E_INVALID_HANDLE;
-
-    /* As the server side of sspi never calls this, make sure that
-     * the handler is a client handler.
-     */
-    helper = (PNegoHelper)phCredential->dwLower;
-    if(helper->mode != NTLM_CLIENT)
-    {
-        TRACE("Helper mode = %d\n", helper->mode);
-        return SEC_E_INVALID_HANDLE;
-    }
 
     /****************************************
      * When communicating with the client, there can be the
@@ -432,6 +440,20 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
     if((phContext == NULL) && (pInput == NULL))
     {
         TRACE("First time in ISC()\n");
+
+        if(!phCredential)
+            return SEC_E_INVALID_HANDLE;
+
+        /* As the server side of sspi never calls this, make sure that
+         * the handler is a client handler.
+         */
+        helper = (PNegoHelper)phCredential->dwLower;
+        if(helper->mode != NTLM_CLIENT)
+        {
+            TRACE("Helper mode = %d\n", helper->mode);
+            return SEC_E_INVALID_HANDLE;
+        }
+
         /* Allocate space for a maximal string of 
          * "SF NTLMSSP_FEATURE_SIGN NTLMSSP_FEATURE_SEAL
          * NTLMSSP_FEATURE_SESSION_KEY"
@@ -548,35 +570,54 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
         /* put the decoded client blob into the out buffer */
 
+        phNewContext->dwUpper = ctxt_attr;
+        phNewContext->dwLower = (ULONG_PTR)helper;
+
         ret = SEC_I_CONTINUE_NEEDED;
     }
     else
     {
+        int input_token_idx;
+
         /* handle second call here */
         /* encode server data to base64 */
-        if (!pInput || !pInput->cBuffers)
+        if (!pInput || ((input_token_idx = ntlm_GetTokenBufferIndex(pInput)) == -1))
         {
-            ret = SEC_E_INCOMPLETE_MESSAGE;
+            ret = SEC_E_INVALID_TOKEN;
             goto isc_end;
         }
 
-        if (!pInput->pBuffers[0].pvBuffer)
+        if(!phContext)
+            return SEC_E_INVALID_HANDLE;
+
+        /* As the server side of sspi never calls this, make sure that
+         * the handler is a client handler.
+         */
+        helper = (PNegoHelper)phContext->dwLower;
+        if(helper->mode != NTLM_CLIENT)
+        {
+            TRACE("Helper mode = %d\n", helper->mode);
+            return SEC_E_INVALID_HANDLE;
+        }
+
+        if (!pInput->pBuffers[input_token_idx].pvBuffer)
         {
             ret = SEC_E_INTERNAL_ERROR;
             goto isc_end;
         }
 
-        if(pInput->pBuffers[0].cbBuffer > max_len)
+        if(pInput->pBuffers[input_token_idx].cbBuffer > max_len)
         {
-            TRACE("pInput->pBuffers[0].cbBuffer is: %ld\n",
-                    pInput->pBuffers[0].cbBuffer);
+            TRACE("pInput->pBuffers[%d].cbBuffer is: %ld\n",
+                    input_token_idx,
+                    pInput->pBuffers[input_token_idx].cbBuffer);
             ret = SEC_E_INVALID_TOKEN;
             goto isc_end;
         }
         else
-            bin_len = pInput->pBuffers[0].cbBuffer;
+            bin_len = pInput->pBuffers[input_token_idx].cbBuffer;
 
-        memcpy(bin, pInput->pBuffers[0].pvBuffer, bin_len);
+        memcpy(bin, pInput->pBuffers[input_token_idx].pvBuffer, bin_len);
 
         lstrcpynA(buffer, "TT ", max_len-1);
 
@@ -615,33 +656,34 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
     /* put the decoded client blob into the out buffer */
 
-    if (fContextReq & ISC_REQ_ALLOCATE_MEMORY)
+    if (!pOutput || ((token_idx = ntlm_GetTokenBufferIndex(pOutput)) == -1))
     {
-        if (pOutput)
-        {
-            pOutput->cBuffers = 1;
-            pOutput->pBuffers[0].pvBuffer = SECUR32_ALLOC(bin_len);
-            pOutput->pBuffers[0].cbBuffer = bin_len;
-        }
+        TRACE("no SECBUFFER_TOKEN buffer could be found\n");
+        ret = SEC_E_BUFFER_TOO_SMALL;
+        goto isc_end;
     }
 
-    if (!pOutput || !pOutput->cBuffers || pOutput->pBuffers[0].cbBuffer < bin_len)
+    if (fContextReq & ISC_REQ_ALLOCATE_MEMORY)
+    {
+        pOutput->pBuffers[token_idx].pvBuffer = SECUR32_ALLOC(bin_len);
+        pOutput->pBuffers[token_idx].cbBuffer = bin_len;
+    }
+    else if (pOutput->pBuffers[token_idx].cbBuffer < bin_len)
     {
         TRACE("out buffer is NULL or has not enough space\n");
         ret = SEC_E_BUFFER_TOO_SMALL;
         goto isc_end;
     }
 
-    if (!pOutput->pBuffers[0].pvBuffer)
+    if (!pOutput->pBuffers[token_idx].pvBuffer)
     {
         TRACE("out buffer is NULL\n");
         ret = SEC_E_INTERNAL_ERROR;
         goto isc_end;
     }
 
-    pOutput->pBuffers[0].cbBuffer = bin_len;
-    pOutput->pBuffers[0].BufferType = SECBUFFER_DATA;
-    memcpy(pOutput->pBuffers[0].pvBuffer, bin, bin_len);
+    pOutput->pBuffers[token_idx].cbBuffer = bin_len;
+    memcpy(pOutput->pBuffers[token_idx].pvBuffer, bin, bin_len);
 
     if(ret == SEC_E_OK)
     {
@@ -752,34 +794,27 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextA(
  PSecBufferDesc pOutput, ULONG *pfContextAttr, PTimeStamp ptsExpiry)
 {
     SECURITY_STATUS ret;
+    SEC_WCHAR *target = NULL;
 
     TRACE("%p %p %s %d %d %d %p %d %p %p %p %p\n", phCredential, phContext,
      debugstr_a(pszTargetName), fContextReq, Reserved1, TargetDataRep, pInput,
      Reserved1, phNewContext, pOutput, pfContextAttr, ptsExpiry);
-    
-    if (phCredential)
+
+    if(pszTargetName != NULL)
     {
-        SEC_WCHAR *target = NULL;
-        if(pszTargetName != NULL)
-        {
-            int target_size = MultiByteToWideChar(CP_ACP, 0, pszTargetName, 
-                strlen(pszTargetName)+1, NULL, 0);
-            target = HeapAlloc(GetProcessHeap(), 0, target_size * 
-                    sizeof(SEC_WCHAR));
-            MultiByteToWideChar(CP_ACP, 0, pszTargetName, strlen(pszTargetName)+1,
-                target, target_size);
-        }
-        
-        ret = ntlm_InitializeSecurityContextW(phCredential, phContext, target, 
-                fContextReq, Reserved1, TargetDataRep, pInput, Reserved2,
-                phNewContext, pOutput, pfContextAttr, ptsExpiry);
-        
-        HeapFree(GetProcessHeap(), 0, target);
+        int target_size = MultiByteToWideChar(CP_ACP, 0, pszTargetName,
+            strlen(pszTargetName)+1, NULL, 0);
+        target = HeapAlloc(GetProcessHeap(), 0, target_size *
+                sizeof(SEC_WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pszTargetName, strlen(pszTargetName)+1,
+            target, target_size);
     }
-    else
-    {
-        ret = SEC_E_INVALID_HANDLE;
-    }
+
+    ret = ntlm_InitializeSecurityContextW(phCredential, phContext, target,
+            fContextReq, Reserved1, TargetDataRep, pInput, Reserved2,
+            phNewContext, pOutput, pfContextAttr, ptsExpiry);
+
+    HeapFree(GetProcessHeap(), 0, target);
     return ret;
 }
 
@@ -1226,26 +1261,6 @@ static SECURITY_STATUS SEC_ENTRY ntlm_RevertSecurityContext(PCtxtHandle phContex
         ret = SEC_E_INVALID_HANDLE;
     }
     return ret;
-}
-
-/*************************************************************************
- *             ntlm_GetTokenBufferIndex
- * Calculates the index of the secbuffer with BufferType == SECBUFFER_TOKEN
- * Returns index if found or -1 if not found.
- */
-static int ntlm_GetTokenBufferIndex(PSecBufferDesc pMessage)
-{
-    UINT i;
-
-    TRACE("%p\n", pMessage);
-
-    for( i = 0; i < pMessage->cBuffers; ++i )
-    {
-        if(pMessage->pBuffers[i].BufferType == SECBUFFER_TOKEN)
-            return i;
-    }
-
-    return -1;
 }
 
 /***********************************************************************

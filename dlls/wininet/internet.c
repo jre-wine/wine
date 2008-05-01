@@ -60,7 +60,6 @@
 #include "shlwapi.h"
 
 #include "wine/exception.h"
-#include "excpt.h"
 
 #include "internet.h"
 #include "resource.h"
@@ -1044,6 +1043,13 @@ BOOL WINAPI InternetCrackUrlA(LPCSTR lpszUrl, DWORD dwUrlLength, DWORD dwFlags,
   WCHAR* lpwszUrl;
 
   TRACE("(%s %u %x %p)\n", debugstr_a(lpszUrl), dwUrlLength, dwFlags, lpUrlComponents);
+
+  if (!lpszUrl || !*lpszUrl)
+  {
+      INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
+      return FALSE;
+  }
+
   if(dwUrlLength<=0)
       dwUrlLength=-1;
   nLength=MultiByteToWideChar(CP_ACP,0,lpszUrl,dwUrlLength,NULL,0);
@@ -1718,7 +1724,7 @@ BOOL INTERNET_ReadFile(LPWININETHANDLEHEADER lpwh, LPVOID lpBuffer,
             {
                 lpwhr->dwContentRead += bytes_read;
                 *pdwNumOfBytesRead = bytes_read;
-                if (!bytes_read)
+                if (!bytes_read && (lpwhr->dwContentRead == lpwhr->dwContentLength))
                     retval = HTTP_FinishedReading(lpwhr);
                 else
                     retval = TRUE;
@@ -1849,26 +1855,32 @@ BOOL WINAPI InternetReadFileExA(HINTERNET hFile, LPINTERNET_BUFFERSA lpBuffersOu
         return FALSE;
     }
 
-    /* FIXME: native only does it asynchronously if the amount of data
-     * requested isn't available. See NtReadFile. */
     /* FIXME: IRF_ASYNC may not be the right thing to test here;
-     * hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC is probably better, but
-     * we should implement the above first */
+     * hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC is probably better */
     if (dwFlags & IRF_ASYNC)
     {
-        WORKREQUEST workRequest;
-        struct WORKREQ_INTERNETREADFILEEXA *req;
+        DWORD dwDataAvailable = 0;
 
-        workRequest.asyncproc = AsyncInternetReadFileExProc;
-        workRequest.hdr = WININET_AddRef( lpwh );
-        req = &workRequest.u.InternetReadFileExA;
-        req->lpBuffersOut = lpBuffersOut;
+        if (lpwh->htype == WH_HHTTPREQ)
+            NETCON_query_data_available(&((LPWININETHTTPREQW)lpwh)->netConnection,
+                                        &dwDataAvailable);
 
-        retval = INTERNET_AsyncCall(&workRequest);
-        if (!retval) return FALSE;
+        if (!dwDataAvailable)
+        {
+            WORKREQUEST workRequest;
+            struct WORKREQ_INTERNETREADFILEEXA *req;
 
-        INTERNET_SetLastError(ERROR_IO_PENDING);
-        return FALSE;
+            workRequest.asyncproc = AsyncInternetReadFileExProc;
+            workRequest.hdr = WININET_AddRef( lpwh );
+            req = &workRequest.u.InternetReadFileExA;
+            req->lpBuffersOut = lpBuffersOut;
+
+            retval = INTERNET_AsyncCall(&workRequest);
+            if (!retval) return FALSE;
+
+            INTERNET_SetLastError(ERROR_IO_PENDING);
+            return FALSE;
+        }
     }
 
     retval = INTERNET_ReadFile(lpwh, lpBuffersOut->lpvBuffer,
@@ -3252,15 +3264,24 @@ BOOL WINAPI InternetQueryDataAvailable( HINTERNET hFile,
     switch (lpwhr->hdr.htype)
     {
     case WH_HHTTPREQ:
-        if (!NETCON_recv(&lpwhr->netConnection, buffer,
+        if (NETCON_query_data_available(&lpwhr->netConnection,
+                                        lpdwNumberOfBytesAvailble))
+        {
+            if (!*lpdwNumberOfBytesAvailble &&
+                !NETCON_recv(&lpwhr->netConnection, buffer,
                          min(sizeof(buffer), lpwhr->dwContentLength - lpwhr->dwContentRead),
                          MSG_PEEK, (int *)lpdwNumberOfBytesAvailble))
+            {
+                INTERNET_SetLastError(ERROR_NO_MORE_FILES);
+                retval = FALSE;
+            }
+            retval = TRUE;
+        }
+        else
         {
             INTERNET_SetLastError(ERROR_NO_MORE_FILES);
             retval = FALSE;
         }
-        else
-            retval = TRUE;
         break;
 
     default:

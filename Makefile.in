@@ -233,8 +233,10 @@ ALL_MAKEFILES = \
 	dlls/dxguid/Makefile \
 	dlls/gdi32/Makefile \
 	dlls/gdi32/tests/Makefile \
+	dlls/gdiplus/Makefile \
 	dlls/glu32/Makefile \
 	dlls/gphoto2.ds/Makefile \
+	dlls/hal/Makefile \
 	dlls/hhctrl.ocx/Makefile \
 	dlls/hid/Makefile \
 	dlls/hlink/Makefile \
@@ -309,6 +311,7 @@ ALL_MAKEFILES = \
 	dlls/ntdll/Makefile \
 	dlls/ntdll/tests/Makefile \
 	dlls/ntdsapi/Makefile \
+	dlls/ntoskrnl.exe/Makefile \
 	dlls/objsel/Makefile \
 	dlls/odbc32/Makefile \
 	dlls/odbccp32/Makefile \
@@ -417,6 +420,7 @@ ALL_MAKEFILES = \
 	dlls/winmm/Makefile \
 	dlls/winmm/tests/Makefile \
 	dlls/winnls32/Makefile \
+	dlls/winscard/Makefile \
 	dlls/winspool.drv/Makefile \
 	dlls/winspool.drv/tests/Makefile \
 	dlls/wintab32/Makefile \
@@ -467,6 +471,7 @@ ALL_MAKEFILES = \
 	programs/winecfg/Makefile \
 	programs/wineconsole/Makefile \
 	programs/winedbg/Makefile \
+	programs/winedevice/Makefile \
 	programs/winefile/Makefile \
 	programs/winemenubuilder/Makefile \
 	programs/winemine/Makefile \
@@ -579,8 +584,10 @@ dlls/dxerr9/Makefile: dlls/dxerr9/Makefile.in dlls/Makeimplib.rules
 dlls/dxguid/Makefile: dlls/dxguid/Makefile.in dlls/Makeimplib.rules
 dlls/gdi32/Makefile: dlls/gdi32/Makefile.in dlls/Makedll.rules
 dlls/gdi32/tests/Makefile: dlls/gdi32/tests/Makefile.in dlls/Maketest.rules
+dlls/gdiplus/Makefile: dlls/gdiplus/Makefile.in dlls/Makedll.rules
 dlls/glu32/Makefile: dlls/glu32/Makefile.in dlls/Makedll.rules
 dlls/gphoto2.ds/Makefile: dlls/gphoto2.ds/Makefile.in dlls/Makedll.rules
+dlls/hal/Makefile: dlls/hal/Makefile.in dlls/Makedll.rules
 dlls/hhctrl.ocx/Makefile: dlls/hhctrl.ocx/Makefile.in dlls/Makedll.rules
 dlls/hid/Makefile: dlls/hid/Makefile.in dlls/Makedll.rules
 dlls/hlink/Makefile: dlls/hlink/Makefile.in dlls/Makedll.rules
@@ -655,6 +662,7 @@ dlls/newdev/Makefile: dlls/newdev/Makefile.in dlls/Makedll.rules
 dlls/ntdll/Makefile: dlls/ntdll/Makefile.in dlls/Makedll.rules
 dlls/ntdll/tests/Makefile: dlls/ntdll/tests/Makefile.in dlls/Maketest.rules
 dlls/ntdsapi/Makefile: dlls/ntdsapi/Makefile.in dlls/Makedll.rules
+dlls/ntoskrnl.exe/Makefile: dlls/ntoskrnl.exe/Makefile.in dlls/Makedll.rules
 dlls/objsel/Makefile: dlls/objsel/Makefile.in dlls/Makedll.rules
 dlls/odbc32/Makefile: dlls/odbc32/Makefile.in dlls/Makedll.rules
 dlls/odbccp32/Makefile: dlls/odbccp32/Makefile.in dlls/Makedll.rules
@@ -763,6 +771,7 @@ dlls/wininet/tests/Makefile: dlls/wininet/tests/Makefile.in dlls/Maketest.rules
 dlls/winmm/Makefile: dlls/winmm/Makefile.in dlls/Makedll.rules
 dlls/winmm/tests/Makefile: dlls/winmm/tests/Makefile.in dlls/Maketest.rules
 dlls/winnls32/Makefile: dlls/winnls32/Makefile.in dlls/Makedll.rules
+dlls/winscard/Makefile: dlls/winscard/Makefile.in dlls/Makedll.rules
 dlls/winspool.drv/Makefile: dlls/winspool.drv/Makefile.in dlls/Makedll.rules
 dlls/winspool.drv/tests/Makefile: dlls/winspool.drv/tests/Makefile.in dlls/Maketest.rules
 dlls/wintab32/Makefile: dlls/wintab32/Makefile.in dlls/Makedll.rules
@@ -813,6 +822,7 @@ programs/winebrowser/Makefile: programs/winebrowser/Makefile.in programs/Makepro
 programs/winecfg/Makefile: programs/winecfg/Makefile.in programs/Makeprog.rules
 programs/wineconsole/Makefile: programs/wineconsole/Makefile.in programs/Makeprog.rules
 programs/winedbg/Makefile: programs/winedbg/Makefile.in programs/Makeprog.rules
+programs/winedevice/Makefile: programs/winedevice/Makefile.in programs/Makeprog.rules
 programs/winefile/Makefile: programs/winefile/Makefile.in programs/Makeprog.rules
 programs/winemenubuilder/Makefile: programs/winemenubuilder/Makefile.in programs/Makeprog.rules
 programs/winemine/Makefile: programs/winemine/Makefile.in programs/Makeprog.rules

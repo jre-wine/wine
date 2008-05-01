@@ -615,6 +615,9 @@ static UINT ready_media(MSIPACKAGE *package, MSIFILE *file, struct media_info *m
         if (type == DRIVE_CDROM || type == DRIVE_REMOVABLE)
             found = source_matches_volume(mi, source_dir);
 
+        if (!found)
+            found = GetFileAttributesW(mi->cabinet) != INVALID_FILE_ATTRIBUTES;
+
         msi_free(source_dir);
     }
 
@@ -898,6 +901,8 @@ static UINT ITERATE_DuplicateFiles(MSIRECORD *row, LPVOID param)
 
     TRACE("Duplicating file %s to %s\n",debugstr_w(file->TargetPath),
                     debugstr_w(dest)); 
+
+    CreateDirectoryW(dest_path, NULL);
 
     if (strcmpW(file->TargetPath,dest))
         rc = !CopyFileW(file->TargetPath,dest,TRUE);

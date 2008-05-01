@@ -729,7 +729,7 @@ typedef struct _THREAD_BASIC_INFORMATION
     NTSTATUS  ExitStatus;
     PVOID     TebBaseAddress;
     CLIENT_ID ClientId;
-    ULONG     AffinityMask;
+    ULONG_PTR AffinityMask;
     LONG      Priority;
     LONG      BasePriority;
 } THREAD_BASIC_INFORMATION, *PTHREAD_BASIC_INFORMATION;
@@ -958,12 +958,12 @@ typedef struct _OBJECT_BASIC_INFORMATION {
 
 typedef struct _PROCESS_BASIC_INFORMATION {
 #ifdef __WINESRC__
-    DWORD ExitStatus;
-    DWORD PebBaseAddress;
-    DWORD AffinityMask;
-    DWORD BasePriority;
-    ULONG UniqueProcessId;
-    ULONG InheritedFromUniqueProcessId;
+    DWORD_PTR ExitStatus;
+    PPEB PebBaseAddress;
+    DWORD_PTR AffinityMask;
+    DWORD_PTR BasePriority;
+    ULONG_PTR UniqueProcessId;
+    ULONG_PTR InheritedFromUniqueProcessId;
 #else
     PVOID Reserved1;
     PPEB PebBaseAddress;
@@ -1731,9 +1731,10 @@ NTSTATUS WINAPIV DbgPrint(LPCSTR fmt, ...);
 NTSTATUS WINAPIV DbgPrintEx(ULONG iComponentId, ULONG Level, LPCSTR fmt, ...);
 
 NTSTATUS  WINAPI LdrAccessResource(HMODULE,const IMAGE_RESOURCE_DATA_ENTRY*,void**,PULONG);
+NTSTATUS  WINAPI LdrAddRefDll(ULONG,HMODULE);
 NTSTATUS  WINAPI LdrFindResourceDirectory_U(HMODULE,const LDR_RESOURCE_INFO*,ULONG,const IMAGE_RESOURCE_DIRECTORY**);
 NTSTATUS  WINAPI LdrFindResource_U(HMODULE,const LDR_RESOURCE_INFO*,ULONG,const IMAGE_RESOURCE_DATA_ENTRY**);
-NTSTATUS  WINAPI LdrGetDllHandle(ULONG, ULONG, const UNICODE_STRING*, HMODULE*);
+NTSTATUS  WINAPI LdrGetDllHandle(LPCWSTR, ULONG, const UNICODE_STRING*, HMODULE*);
 NTSTATUS  WINAPI LdrGetProcedureAddress(HMODULE, const ANSI_STRING*, ULONG, void**);
 void      WINAPI LdrInitializeThunk(ULONG,ULONG,ULONG,ULONG);
 NTSTATUS  WINAPI LdrLoadDll(LPCWSTR, DWORD, const UNICODE_STRING*, HMODULE*);
@@ -2239,6 +2240,7 @@ BOOLEAN   WINAPI RtlValidateHeap(HANDLE,ULONG,LPCVOID);
 NTSTATUS  WINAPI RtlVerifyVersionInfo(const RTL_OSVERSIONINFOEXW*,DWORD,DWORDLONG);
 
 NTSTATUS  WINAPI RtlWalkHeap(HANDLE,PVOID);
+NTSTATUS  WINAPI RtlWriteRegistryValue(ULONG,PCWSTR,PCWSTR,ULONG,PVOID,ULONG);
 
 NTSTATUS  WINAPI RtlpNtCreateKey(PHANDLE,ACCESS_MASK,const OBJECT_ATTRIBUTES*,ULONG,const UNICODE_STRING*,ULONG,PULONG);
 NTSTATUS  WINAPI RtlpWaitForCriticalSection(RTL_CRITICAL_SECTION *);

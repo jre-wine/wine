@@ -402,12 +402,12 @@ struct subclass_info
 
 static LRESULT WINAPI header_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    struct subclass_info *info = (struct subclass_info *)GetWindowLongA(hwnd, GWL_USERDATA);
+    struct subclass_info *info = (struct subclass_info *)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
     static long defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
 
-    trace("header: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("header: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
     msg.message = message;
     msg.flags = sent|wparam|lparam;
     if (defwndproc_counter) msg.flags |= defwinproc;
@@ -438,7 +438,7 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
         message != WM_DEVICECHANGE)
 
     {
-        trace("parent: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+        trace("parent: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
         msg.message = message;
         msg.flags = sent|wparam|lparam;
@@ -533,9 +533,9 @@ static HWND create_custom_header_control(HWND hParent, BOOL preloadHeaderItems)
     SetWindowPos(childHandle, winpos.hwndInsertAfter, winpos.x, winpos.y,
                  winpos.cx, winpos.cy, 0);
 
-    info->oldproc = (WNDPROC)SetWindowLongA(childHandle, GWL_WNDPROC,
-                                    (LONG)header_subclass_proc);
-    SetWindowLongA(childHandle, GWL_USERDATA, (LONG)info);
+    info->oldproc = (WNDPROC)SetWindowLongPtrA(childHandle, GWLP_WNDPROC,
+                                               (LONG_PTR)header_subclass_proc);
+    SetWindowLongPtrA(childHandle, GWLP_USERDATA, (LONG_PTR)info);
     return childHandle;
 }
 

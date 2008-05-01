@@ -226,7 +226,7 @@ static void do_debug_print_menuitem(const char *prefix, MENUITEM * mp,
     TRACE("%s ", prefix);
     if (mp) {
         UINT flags = mp->fType;
-        TRACE( "{ ID=0x%x", mp->wID);
+        TRACE( "{ ID=0x%lx", mp->wID);
         if ( mp->hSubMenu)
             TRACE( ", Sub=%p", mp->hSubMenu);
         if (flags) {
@@ -994,7 +994,7 @@ static void MENU_CalcItemSize( HDC hdc, MENUITEM *lpitem, HWND hwndOwner,
         } else
             lpitem->rect.bottom += mis.itemHeight;
 
-        TRACE("id=%04x size=%dx%d\n",
+        TRACE("id=%04lx size=%dx%d\n",
                 lpitem->wID, lpitem->rect.right-lpitem->rect.left,
                 lpitem->rect.bottom-lpitem->rect.top);
         return;
@@ -2032,6 +2032,8 @@ static BOOL MENU_SetItemData( MENUITEM *item, UINT flags, UINT_PTR id,
         item->text = NULL;
     }
 
+    if (flags & MF_SEPARATOR) flags |= MF_GRAYED | MF_DISABLED;
+
     if (flags & MF_OWNERDRAW)
         item->dwItemData = (DWORD_PTR)str;
     else
@@ -2446,7 +2448,7 @@ static INT MENU_ExecFocusedItem( MTRACKER* pmt, HMENU hMenu, UINT wFlags )
 
     item = &menu->items[menu->FocusedItem];
 
-    TRACE("hMenu %p wID %08x hSubMenu %p fType %04x\n", hMenu, item->wID, item->hSubMenu, item->fType);
+    TRACE("hMenu %p wID %08lx hSubMenu %p fType %04x\n", hMenu, item->wID, item->hSubMenu, item->fType);
 
     if (!(item->fType & MF_POPUP))
     {
@@ -3404,7 +3406,7 @@ BOOL WINAPI TrackPopupMenuEx( HMENU hMenu, UINT wFlags, INT x, INT y,
  */
 static LRESULT WINAPI PopupMenuWndProc( HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam )
 {
-    TRACE("hwnd=%p msg=0x%04x wp=0x%04x lp=0x%08lx\n", hwnd, message, wParam, lParam);
+    TRACE("hwnd=%p msg=0x%04x wp=0x%04lx lp=0x%08lx\n", hwnd, message, wParam, lParam);
 
     switch(message)
     {
@@ -3714,9 +3716,9 @@ BOOL WINAPI InsertMenuW( HMENU hMenu, UINT pos, UINT flags,
     MENUITEM *item;
 
     if (IS_STRING_ITEM(flags) && str)
-        TRACE("hMenu %p, pos %d, flags %08x, id %04x, str %s\n",
+        TRACE("hMenu %p, pos %d, flags %08x, id %04lx, str %s\n",
               hMenu, pos, flags, id, debugstr_w(str) );
-    else TRACE("hMenu %p, pos %d, flags %08x, id %04x, str %p (not a string)\n",
+    else TRACE("hMenu %p, pos %d, flags %08x, id %04lx, str %p (not a string)\n",
                hMenu, pos, flags, id, str );
 
     if (!(item = MENU_InsertItem( hMenu, pos, flags ))) return FALSE;
@@ -3726,9 +3728,6 @@ BOOL WINAPI InsertMenuW( HMENU hMenu, UINT pos, UINT flags,
         RemoveMenu( hMenu, pos, flags );
         return FALSE;
     }
-
-    if (flags & MF_POPUP)  /* Set the MF_POPUP flag on the popup-menu */
-	(MENU_GetMenu((HMENU)id))->wFlags |= MF_POPUP;
 
     item->hCheckBit = item->hUnCheckBit = 0;
     return TRUE;
@@ -3838,9 +3837,9 @@ BOOL WINAPI ModifyMenuW( HMENU hMenu, UINT pos, UINT flags,
     MENUITEM *item;
 
     if (IS_STRING_ITEM(flags))
-        TRACE("%p %d %04x %04x %s\n", hMenu, pos, flags, id, debugstr_w(str) );
+        TRACE("%p %d %04x %04lx %s\n", hMenu, pos, flags, id, debugstr_w(str) );
     else
-        TRACE("%p %d %04x %04x %p\n", hMenu, pos, flags, id, str );
+        TRACE("%p %d %04x %04lx %p\n", hMenu, pos, flags, id, str );
 
     if (!(item = MENU_FindItem( &hMenu, &pos, flags ))) return FALSE;
     MENU_GetMenu(hMenu)->Height = 0; /* force size recalculate */
@@ -4246,7 +4245,7 @@ HMENU16 WINAPI LoadMenu16( HINSTANCE16 instance, LPCSTR name )
     HGLOBAL16 handle;
     HMENU16 hMenu;
 
-    if (HIWORD(name) && name[0] == '#') name = (LPCSTR)atoi( name + 1 );
+    if (HIWORD(name) && name[0] == '#') name = ULongToPtr(atoi( name + 1 ));
     if (!name) return 0;
 
     instance = GetExePtr( instance );
@@ -4817,34 +4816,49 @@ BOOL WINAPI CheckMenuRadioItem(HMENU hMenu,
 				   UINT first, UINT last, UINT check,
 				   UINT bypos)
 {
-     MENUITEM *mifirst, *milast, *micheck;
-     HMENU mfirst = hMenu, mlast = hMenu, mcheck = hMenu;
+    BOOL done = FALSE;
+    UINT i;
+    MENUITEM *mi_first = NULL, *mi_check;
+    HMENU m_first, m_check;
 
-     TRACE("%p: %d-%d, check %d, bypos=%d\n", hMenu, first, last, check, bypos);
+    TRACE("%p: %u-%u, check %u, flags %04x\n", hMenu, first, last, check, bypos);
 
-     mifirst = MENU_FindItem (&mfirst, &first, bypos);
-     milast = MENU_FindItem (&mlast, &last, bypos);
-     micheck = MENU_FindItem (&mcheck, &check, bypos);
+    for (i = first; i <= last; i++)
+    {
+        UINT pos = i;
 
-     if (mifirst == NULL || milast == NULL || micheck == NULL ||
-	 mifirst > milast || mfirst != mlast || mfirst != mcheck ||
-	 micheck > milast || micheck < mifirst)
-	  return FALSE;
+        if (!mi_first)
+        {
+            m_first = hMenu;
+            mi_first = MENU_FindItem(&m_first, &pos, bypos);
+            if (!mi_first) continue;
+            mi_check = mi_first;
+            m_check = m_first;
+        }
+        else
+        {
+            m_check = hMenu;
+            mi_check = MENU_FindItem(&m_check, &pos, bypos);
+            if (!mi_check) continue;
+        }
 
-     while (mifirst <= milast)
-     {
-	  if (mifirst == micheck)
-	  {
-	       mifirst->fType |= MFT_RADIOCHECK;
-	       mifirst->fState |= MFS_CHECKED;
-	  } else {
-	       mifirst->fType &= ~MFT_RADIOCHECK;
-	       mifirst->fState &= ~MFS_CHECKED;
-	  }
-	  mifirst++;
-     }
+        if (m_first != m_check) continue;
+        if (mi_check->fType == MFT_SEPARATOR) continue;
 
-     return TRUE;
+        if (i == check)
+        {
+            mi_check->fType |= MFT_RADIOCHECK;
+            mi_check->fState |= MFS_CHECKED;
+            done = TRUE;
+        }
+        else
+        {
+            /* MSDN is wrong, Windows does not remove MFT_RADIOCHECK */
+            mi_check->fState &= ~MFS_CHECKED;
+        }
+    }
+
+    return done;
 }
 
 
@@ -5036,7 +5050,7 @@ static BOOL translate_accelerator( HWND hWnd, UINT message, WPARAM wParam, LPARA
     {
         if ( !(fVirt & FVIRTKEY) && (mask & FALT) == (fVirt & FALT) )
         {
-            TRACE_(accel)("found accel for WM_CHAR: ('%c')\n", wParam & 0xff);
+            TRACE_(accel)("found accel for WM_CHAR: ('%c')\n", LOWORD(wParam) & 0xff);
             goto found;
         }
     }
@@ -5044,7 +5058,7 @@ static BOOL translate_accelerator( HWND hWnd, UINT message, WPARAM wParam, LPARA
     {
         if(fVirt & FVIRTKEY)
         {
-            TRACE_(accel)("found accel for virt_key %04x (scan %04x)\n",
+            TRACE_(accel)("found accel for virt_key %04lx (scan %04x)\n",
                           wParam, 0xff & HIWORD(lParam));
 
             if(mask == (fVirt & (FSHIFT | FCONTROL | FALT))) goto found;
@@ -5056,7 +5070,7 @@ static BOOL translate_accelerator( HWND hWnd, UINT message, WPARAM wParam, LPARA
             {
                 if ((fVirt & FALT) && (lParam & 0x20000000))
                 {                              /* ^^ ALT pressed */
-                    TRACE_(accel)("found accel for Alt-%c\n", wParam & 0xff);
+                    TRACE_(accel)("found accel for Alt-%c\n", LOWORD(wParam) & 0xff);
                     goto found;
                 }
             }
@@ -5219,7 +5233,7 @@ INT WINAPI TranslateAcceleratorA( HWND hWnd, HACCEL hAccel, LPMSG msg )
         return 0;
     }
 
-    TRACE_(accel)("hAccel %p, hWnd %p, msg->hwnd %p, msg->message %04x, wParam %08x, lParam %08lx\n",
+    TRACE_(accel)("hAccel %p, hWnd %p, msg->hwnd %p, msg->message %04x, wParam %08lx, lParam %08lx\n",
                   hAccel,hWnd,msg->hwnd,msg->message,msg->wParam,msg->lParam);
     i = 0;
     do
@@ -5261,7 +5275,7 @@ INT WINAPI TranslateAcceleratorW( HWND hWnd, HACCEL hAccel, LPMSG msg )
         return 0;
     }
 
-    TRACE_(accel)("hAccel %p, hWnd %p, msg->hwnd %p, msg->message %04x, wParam %08x, lParam %08lx\n",
+    TRACE_(accel)("hAccel %p, hWnd %p, msg->hwnd %p, msg->message %04x, wParam %08lx, lParam %08lx\n",
                   hAccel,hWnd,msg->hwnd,msg->message,msg->wParam,msg->lParam);
     i = 0;
     do

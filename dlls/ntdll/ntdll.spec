@@ -50,7 +50,7 @@
 @ stub KiUserExceptionDispatcher
 # @ stub LdrAccessOutOfProcessResource
 @ stdcall LdrAccessResource(long ptr ptr ptr)
-# @ stub LdrAddRefDll
+@ stdcall LdrAddRefDll(long ptr)
 # @ stub LdrAlternateResourcesEnabled
 # @ stub LdrCreateOutOfProcessImage
 # @ stub LdrDestroyOutOfProcessImage
@@ -63,7 +63,7 @@
 # @ stub LdrFindResourceEx_U
 @ stdcall LdrFindResource_U(long ptr long ptr)
 @ stub LdrFlushAlternateResourceModules
-@ stdcall LdrGetDllHandle(long long ptr ptr)
+@ stdcall LdrGetDllHandle(wstr long ptr ptr)
 # @ stub LdrGetDllHandleEx
 @ stdcall LdrGetProcedureAddress(ptr ptr long ptr)
 # @ stub LdrHotPatchRoutine
@@ -910,7 +910,7 @@
 @ stub RtlWalkFrameChain
 @ stdcall RtlWalkHeap(long ptr)
 @ stub RtlWriteMemoryStream
-@ stub RtlWriteRegistryValue
+@ stdcall RtlWriteRegistryValue(long ptr ptr long ptr long)
 @ stub RtlZeroHeap
 @ stdcall RtlZeroMemory(ptr long)
 # @ stub RtlZombifyActivationContext

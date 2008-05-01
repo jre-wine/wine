@@ -378,7 +378,7 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
         message != WM_GETICON &&
         message != WM_DEVICECHANGE)
     {
-        trace("parent: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+        trace("parent: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
         msg.message = message;
         msg.flags = sent|wparam|lparam;
@@ -441,12 +441,12 @@ static HWND create_parent_window(void)
 
 static LRESULT WINAPI monthcal_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    struct subclass_info *info = (struct subclass_info *)GetWindowLongA(hwnd, GWL_USERDATA);
+    struct subclass_info *info = (struct subclass_info *)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
     static long defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
 
-    trace("monthcal: %p, %04x, %08x, %08lx\n", hwnd, message, wParam, lParam);
+    trace("monthcal: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
     msg.message = message;
     msg.flags = sent|wparam|lparam;
@@ -487,9 +487,9 @@ static HWND create_monthcal_control(DWORD style, HWND parent_window)
         return NULL;
     }
 
-    info->oldproc = (WNDPROC)SetWindowLongA(hwnd, GWL_WNDPROC,
-                                            (LONG)monthcal_subclass_proc);
-    SetWindowLongA(hwnd, GWL_USERDATA, (LONG)info);
+    info->oldproc = (WNDPROC)SetWindowLongPtrA(hwnd, GWLP_WNDPROC,
+                                            (LONG_PTR)monthcal_subclass_proc);
+    SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)info);
 
     return hwnd;
 }

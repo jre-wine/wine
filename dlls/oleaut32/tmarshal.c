@@ -40,7 +40,6 @@
 #include "winnls.h"
 #include "winreg.h"
 #include "winuser.h"
-#include "excpt.h"
 
 #include "ole2.h"
 #include "propidl.h" /* for LPSAFEARRAY_User* functions */
@@ -321,49 +320,49 @@ _get_typeinfo_for_iid(REFIID riid, ITypeInfo**ti) {
     return hres;
 }
 
-/* Determine nr of functions. Since we use the toplevel interface and all
- * inherited ones have lower numbers, we are ok to not to descent into
- * the inheritance tree I think.
+/*
+ * Determine the number of functions including all inherited functions.
+ * Note for non-dual dispinterfaces we simply return the size of IDispatch.
  */
-static int _nroffuncs(ITypeInfo *tinfo) {
-    int 	n, i, j;
-    const FUNCDESC *fdesc;
-    HRESULT	hres;
+static HRESULT num_of_funcs(ITypeInfo *tinfo, unsigned int *num)
+{
+    HRESULT hres;
     TYPEATTR *attr;
     ITypeInfo *tinfo2;
 
-    n=0;
+    *num = 0;
     hres = ITypeInfo_GetTypeAttr(tinfo, &attr);
     if (hres) {
         ERR("GetTypeAttr failed with %x\n",hres);
         return hres;
     }
-    /* look in inherited ifaces. */
-    for (j=0;j<attr->cImplTypes;j++) {
+
+    if(attr->typekind == TKIND_DISPATCH && (attr->wTypeFlags & TYPEFLAG_FDUAL))
+    {
         HREFTYPE href;
-        hres = ITypeInfo_GetRefTypeOfImplType(tinfo, j, &href);
-        if (hres) {
-            ERR("Did not find a reftype for interface offset %d?\n",j);
-            break;
+        hres = ITypeInfo_GetRefTypeOfImplType(tinfo, -1, &href);
+        if(FAILED(hres))
+        {
+            ERR("Unable to get interface href from dual dispinterface\n");
+            goto end;
         }
         hres = ITypeInfo_GetRefTypeInfo(tinfo, href, &tinfo2);
-        if (hres) {
-            ERR("Did not find a typeinfo for reftype %d?\n",href);
-            continue;
+        if(FAILED(hres))
+        {
+            ERR("Unable to get interface from dual dispinterface\n");
+            goto end;
         }
-        n += _nroffuncs(tinfo2);
+        hres = num_of_funcs(tinfo2, num);
         ITypeInfo_Release(tinfo2);
     }
-    ITypeInfo_ReleaseTypeAttr(tinfo, attr);
-    i = 0;
-    while (1) {
-	hres = ITypeInfoImpl_GetInternalFuncDesc(tinfo,i,&fdesc);
-	if (hres)
-	    return n;
-	n++;
-	i++;
+    else
+    {
+        *num = attr->cbSizeVft / 4;
     }
-    /*NOTREACHED*/
+
+ end:
+    ITypeInfo_ReleaseTypeAttr(tinfo, attr);
+    return hres;
 }
 
 #ifdef __i386__
@@ -1216,6 +1215,37 @@ static HRESULT get_funcdesc(ITypeInfo *tinfo, int iMethod, ITypeInfo **tactual, 
         ERR("GetTypeAttr failed with %x\n",hr);
         return hr;
     }
+
+    if(attr->typekind == TKIND_DISPATCH)
+    {
+        if(attr->wTypeFlags & TYPEFLAG_FDUAL)
+        {
+            HREFTYPE href;
+            ITypeInfo *tinfo2;
+
+            hr = ITypeInfo_GetRefTypeOfImplType(tinfo, -1, &href);
+            if(FAILED(hr))
+            {
+                ERR("Cannot get interface href from dual dispinterface\n");
+                ITypeInfo_ReleaseTypeAttr(tinfo, attr);
+                return hr;
+            }
+            hr = ITypeInfo_GetRefTypeInfo(tinfo, href, &tinfo2);
+            if(FAILED(hr))
+            {
+                ERR("Cannot get interface from dual dispinterface\n");
+                ITypeInfo_ReleaseTypeAttr(tinfo, attr);
+                return hr;
+            }
+            hr = get_funcdesc(tinfo2, iMethod, tactual, fdesc, iname, fname, num);
+            ITypeInfo_Release(tinfo2);
+            ITypeInfo_ReleaseTypeAttr(tinfo, attr);
+            return hr;
+        }
+        ERR("Shouldn't be called with a non-dual dispinterface\n");
+        return E_FAIL;
+    }
+
     impl_types = attr->cImplTypes;
     ITypeInfo_ReleaseTypeAttr(tinfo, attr);
 
@@ -1641,6 +1671,58 @@ static inline HRESULT get_facbuf_for_iid(REFIID riid, IPSFactoryBuffer **facbuf)
                              &IID_IPSFactoryBuffer, (LPVOID*)facbuf);
 }
 
+static HRESULT init_proxy_entry_point(TMProxyImpl *proxy, unsigned int num)
+{
+    int j;
+    /* nrofargs without This */
+    int nrofargs;
+    ITypeInfo *tinfo2;
+    TMAsmProxy	*xasm = proxy->asmstubs + num;
+    HRESULT hres;
+    const FUNCDESC *fdesc;
+
+    hres = get_funcdesc(proxy->tinfo, num, &tinfo2, &fdesc, NULL, NULL, NULL);
+    if (hres) {
+        ERR("GetFuncDesc %x should not fail here.\n",hres);
+        return hres;
+    }
+    ITypeInfo_Release(tinfo2);
+    /* some args take more than 4 byte on the stack */
+    nrofargs = 0;
+    for (j=0;j<fdesc->cParams;j++)
+        nrofargs += _argsize(fdesc->lprgelemdescParam[j].tdesc.vt);
+
+#ifdef __i386__
+    if (fdesc->callconv != CC_STDCALL) {
+        ERR("calling convention is not stdcall????\n");
+        return E_FAIL;
+    }
+/* popl %eax	-	return ptr
+ * pushl <nr>
+ * pushl %eax
+ * call xCall
+ * lret <nr> (+4)
+ *
+ *
+ * arg3 arg2 arg1 <method> <returnptr>
+ */
+    xasm->popleax       = 0x58;
+    xasm->pushlval      = 0x6a;
+    xasm->nr            = num;
+    xasm->pushleax      = 0x50;
+    xasm->lcall         = 0xe8; /* relative jump */
+    xasm->xcall         = (DWORD)xCall;
+    xasm->xcall        -= (DWORD)&(xasm->lret);
+    xasm->lret          = 0xc2;
+    xasm->bytestopop    = (nrofargs+2)*4; /* pop args, This, iMethod */
+    proxy->lpvtbl[num]  = xasm;
+#else
+    FIXME("not implemented on non i386\n");
+    return E_FAIL;
+#endif
+    return S_OK;
+}
+
 static HRESULT WINAPI
 PSFacBuf_CreateProxy(
     LPPSFACTORYBUFFER iface, IUnknown* pUnkOuter, REFIID riid,
@@ -1648,10 +1730,10 @@ PSFacBuf_CreateProxy(
 {
     HRESULT	hres;
     ITypeInfo	*tinfo;
-    int		i, nroffuncs;
-    const FUNCDESC *fdesc;
+    unsigned int i, nroffuncs;
     TMProxyImpl	*proxy;
     TYPEATTR	*typeattr;
+    BOOL        defer_to_dispatch = FALSE;
 
     TRACE("(...%s...)\n",debugstr_guid(riid));
     hres = _get_typeinfo_for_iid(riid,&tinfo);
@@ -1659,7 +1741,14 @@ PSFacBuf_CreateProxy(
 	ERR("No typeinfo for %s?\n",debugstr_guid(riid));
 	return hres;
     }
-    nroffuncs = _nroffuncs(tinfo);
+
+    hres = num_of_funcs(tinfo, &nroffuncs);
+    if (FAILED(hres)) {
+        ERR("Cannot get number of functions for typeinfo %s\n",debugstr_guid(riid));
+        ITypeInfo_Release(tinfo);
+        return hres;
+    }
+
     proxy = CoTaskMemAlloc(sizeof(TMProxyImpl));
     if (!proxy) return E_OUTOFMEMORY;
 
@@ -1685,67 +1774,6 @@ PSFacBuf_CreateProxy(
     proxy->crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": TMProxyImpl.crit");
 
     proxy->lpvtbl = HeapAlloc(GetProcessHeap(),0,sizeof(LPBYTE)*nroffuncs);
-    for (i=0;i<nroffuncs;i++) {
-	TMAsmProxy	*xasm = proxy->asmstubs+i;
-
-	switch (i) {
-	case 0:
-		proxy->lpvtbl[i] = ProxyIUnknown_QueryInterface;
-		break;
-	case 1:
-		proxy->lpvtbl[i] = ProxyIUnknown_AddRef;
-		break;
-	case 2:
-		proxy->lpvtbl[i] = ProxyIUnknown_Release;
-		break;
-	default: {
-		int j;
-		/* nrofargs without This */
-		int nrofargs;
-                ITypeInfo *tinfo2;
-		hres = get_funcdesc(tinfo,i,&tinfo2,&fdesc,NULL,NULL,NULL);
-		if (hres) {
-		    ERR("GetFuncDesc %x should not fail here.\n",hres);
-		    return hres;
-		}
-                ITypeInfo_Release(tinfo2);
-		/* some args take more than 4 byte on the stack */
-		nrofargs = 0;
-		for (j=0;j<fdesc->cParams;j++)
-		    nrofargs += _argsize(fdesc->lprgelemdescParam[j].tdesc.vt);
-
-#ifdef __i386__
-		if (fdesc->callconv != CC_STDCALL) {
-		    ERR("calling convention is not stdcall????\n");
-		    return E_FAIL;
-		}
-/* popl %eax	-	return ptr
- * pushl <nr>
- * pushl %eax
- * call xCall
- * lret <nr> (+4)
- *
- *
- * arg3 arg2 arg1 <method> <returnptr>
- */
-		xasm->popleax	= 0x58;
-		xasm->pushlval	= 0x6a;
-		xasm->nr	= i;
-		xasm->pushleax	= 0x50;
-		xasm->lcall	= 0xe8;	/* relative jump */
-		xasm->xcall	= (DWORD)xCall;
-		xasm->xcall     -= (DWORD)&(xasm->lret);
-		xasm->lret	= 0xc2;
-		xasm->bytestopop= (nrofargs+2)*4; /* pop args, This, iMethod */
-		proxy->lpvtbl[i] = xasm;
-		break;
-#else
-                FIXME("not implemented on non i386\n");
-                return E_FAIL;
-#endif
-	    }
-	}
-    }
 
     /* if we derive from IDispatch then defer to its proxy for its methods */
     hres = ITypeInfo_GetTypeAttr(tinfo, &typeattr);
@@ -1769,13 +1797,59 @@ PSFacBuf_CreateProxy(
             }
             if (hres == S_OK)
             {
-                proxy->lpvtbl[3] = ProxyIDispatch_GetTypeInfoCount;
-                proxy->lpvtbl[4] = ProxyIDispatch_GetTypeInfo;
-                proxy->lpvtbl[5] = ProxyIDispatch_GetIDsOfNames;
-                proxy->lpvtbl[6] = ProxyIDispatch_Invoke;
+                defer_to_dispatch = TRUE;
             }
         }
         ITypeInfo_ReleaseTypeAttr(tinfo, typeattr);
+    }
+
+    for (i=0;i<nroffuncs;i++) {
+	switch (i) {
+	case 0:
+		proxy->lpvtbl[i] = ProxyIUnknown_QueryInterface;
+		break;
+	case 1:
+		proxy->lpvtbl[i] = ProxyIUnknown_AddRef;
+		break;
+	case 2:
+		proxy->lpvtbl[i] = ProxyIUnknown_Release;
+		break;
+        case 3:
+                if(!defer_to_dispatch)
+                {
+                    hres = init_proxy_entry_point(proxy, i);
+                    if(FAILED(hres)) return hres;
+                }
+                else proxy->lpvtbl[3] = ProxyIDispatch_GetTypeInfoCount;
+                break;
+        case 4:
+                if(!defer_to_dispatch)
+                {
+                    hres = init_proxy_entry_point(proxy, i);
+                    if(FAILED(hres)) return hres;
+                }
+                else proxy->lpvtbl[4] = ProxyIDispatch_GetTypeInfo;
+                break;
+        case 5:
+                if(!defer_to_dispatch)
+                {
+                    hres = init_proxy_entry_point(proxy, i);
+                    if(FAILED(hres)) return hres;
+                }
+                else proxy->lpvtbl[5] = ProxyIDispatch_GetIDsOfNames;
+                break;
+        case 6:
+                if(!defer_to_dispatch)
+                {
+                    hres = init_proxy_entry_point(proxy, i);
+                    if(FAILED(hres)) return hres;
+                }
+                else proxy->lpvtbl[6] = ProxyIDispatch_Invoke;
+                break;
+	default:
+                hres = init_proxy_entry_point(proxy, i);
+                if(FAILED(hres)) return hres;
+	}
     }
 
     if (hres == S_OK)

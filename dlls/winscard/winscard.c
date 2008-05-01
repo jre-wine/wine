@@ -1,7 +1,5 @@
 /*
- * BIOS interrupt 17h handler
- *
- * Copyright 1998 Carl van Schaik
+ * Copyright 2007 Mounir IDRASSI  (mounir.idrassi@idrix.fr, for IDRIX)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,38 +16,37 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
 #include <stdarg.h>
-#include <stdlib.h>
-
 #include "windef.h"
 #include "winbase.h"
-#include "dosexe.h"
 #include "wine/debug.h"
+#include <winscard.h>
 
-WINE_DEFAULT_DEBUG_CHANNEL(int);
+WINE_DEFAULT_DEBUG_CHANNEL(winscard);
 
-/**********************************************************************
- *          DOSVM_Int17Handler (WINEDOS16.123)
- *
- * Handler for int 17h (printer - output character).
- */
-void WINAPI DOSVM_Int17Handler( CONTEXT86 *context )
+static HMODULE WINSCARD_hModule;
+
+const SCARD_IO_REQUEST g_rgSCardT0Pci = { SCARD_PROTOCOL_T0, 8 };
+const SCARD_IO_REQUEST g_rgSCardT1Pci = { SCARD_PROTOCOL_T1, 8 };
+const SCARD_IO_REQUEST g_rgSCardRawPci = { SCARD_PROTOCOL_RAW, 8 };
+
+
+BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    switch( AH_reg(context) )
+    TRACE("%p,%x,%p\n", hinstDLL, fdwReason, lpvReserved);
+
+    switch (fdwReason)
     {
-       case 0x00:/* Send character*/
-	    FIXME("Send character not supported yet\n");
-	    SET_AH( context, 0x00 );/*Timeout*/
-	    break;
-	case 0x01:		/* PRINTER - INITIALIZE */
-	    FIXME("Initialize Printer - Not Supported\n");
-	    SET_AH( context, 0x30 ); /* selected | out of paper */
+        case DLL_PROCESS_ATTACH:
+        {
+            DisableThreadLibraryCalls(hinstDLL);
+            WINSCARD_hModule = hinstDLL;
             break;
-	case 0x02:		/* PRINTER - GET STATUS */
-	    FIXME("Get Printer Status - Not Supported\n");
+        }
+        case DLL_PROCESS_DETACH:
             break;
-	default:
-	    SET_AH( context, 0 ); /* time out */
-	    INT_BARF( context, 0x17 );
     }
+
+    return TRUE;
 }

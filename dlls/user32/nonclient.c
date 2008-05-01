@@ -26,11 +26,9 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "wine/winuser16.h"
-#include "wownt32.h"
 #include "win.h"
 #include "user_private.h"
 #include "controls.h"
-#include "shellapi.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
@@ -1541,7 +1539,7 @@ LRESULT NC_HandleNCLButtonDblClk( HWND hwnd, WPARAM wParam, LPARAM lParam )
  */
 LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
 {
-    TRACE("hwnd %p WM_SYSCOMMAND %x %lx\n", hwnd, wParam, lParam );
+    TRACE("hwnd %p WM_SYSCOMMAND %lx %lx\n", hwnd, wParam, lParam );
 
     if (!IsWindowEnabled( hwnd )) return 0;
 
@@ -1623,7 +1621,7 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
     case SC_ARRANGE:
     case SC_NEXTWINDOW:
     case SC_PREVWINDOW:
-        FIXME("unimplemented WM_SYSCOMMAND %04x!\n", wParam);
+        FIXME("unimplemented WM_SYSCOMMAND %04lx!\n", wParam);
         break;
     }
     return 0;

@@ -2,6 +2,7 @@
  * Unit tests for menus
  *
  * Copyright 2005 Robert Shearman
+ * Copyright 2007 Dmitry Timoshkov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,7 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdlib.h>
+#define _WIN32_WINNT 0x0501
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -1872,6 +1874,201 @@ static void test_menu_hilitemenuitem( void )
     DestroyMenu(hMenu);
 }
 
+static void check_menu_items(HMENU hmenu, UINT checked_cmd, UINT checked_type,
+                             UINT checked_state)
+{
+    UINT i, count;
+
+    count = GetMenuItemCount(hmenu);
+
+    for (i = 0; i < count; i++)
+    {
+        BOOL ret;
+        MENUITEMINFO mii;
+
+        memset(&mii, 0, sizeof(mii));
+        mii.cbSize = sizeof(mii);
+        mii.fMask  = MIIM_FTYPE | MIIM_STATE | MIIM_ID | MIIM_SUBMENU;
+        ret = GetMenuItemInfo(hmenu, i, TRUE, &mii);
+        ok(ret, "GetMenuItemInfo(%u) failed\n", i);
+#if 0
+        trace("item #%u: fType %04x, fState %04x, wID %u, hSubMenu %p\n",
+               i, mii.fType, mii.fState, mii.wID, mii.hSubMenu);
+#endif
+        if (mii.hSubMenu)
+        {
+            ok((HMENU)mii.wID == mii.hSubMenu, "id %u: wID should be equal to hSubMenu\n", checked_cmd);
+            check_menu_items(mii.hSubMenu, checked_cmd, checked_type, checked_state);
+        }
+        else
+        {
+            if (mii.wID == checked_cmd)
+            {
+                ok(mii.fType == checked_type, "id %u: expected fType %04x, got %04x\n", checked_cmd, checked_type, mii.fType);
+                ok(mii.fState == checked_state, "id %u: expected fState %04x, got %04x\n", checked_cmd, checked_state, mii.fState);
+                ok(mii.wID != 0, "id %u: not expected wID 0\n", checked_cmd);
+            }
+            else
+            {
+                ok(mii.fType != MFT_RADIOCHECK, "id %u: not expected fType MFT_RADIOCHECK on cmd %u\n", checked_cmd, mii.wID);
+
+                if (mii.fType == MFT_SEPARATOR)
+                {
+                    ok(mii.fState == MFS_GRAYED, "id %u: expected fState MFS_GRAYED, got %04x\n", checked_cmd, mii.fState);
+                    ok(mii.wID == 0, "id %u: expected wID 0, got %u\n", checked_cmd, mii.wID);
+                }
+                else
+                {
+                    ok(mii.fState == 0, "id %u: expected fState 0, got %04x\n", checked_cmd, mii.fState);
+                    ok(mii.wID != 0, "id %u: not expected wID 0\n", checked_cmd);
+                }
+            }
+        }
+    }
+}
+
+static void clear_ftype_and_state(HMENU hmenu, UINT id, UINT flags)
+{
+    BOOL ret;
+    MENUITEMINFO mii;
+
+    memset(&mii, 0, sizeof(mii));
+    mii.cbSize = sizeof(mii);
+    mii.fMask  = MIIM_FTYPE | MIIM_STATE;
+    ret = SetMenuItemInfo(hmenu, id, (flags & MF_BYPOSITION) != 0, &mii);
+    ok(ret, "SetMenuItemInfo(%u) failed\n", id);
+}
+
+static void test_CheckMenuRadioItem(void)
+{
+    BOOL ret;
+    HMENU hmenu;
+
+    hmenu = LoadMenu(GetModuleHandle(0), MAKEINTRESOURCE(1));
+    assert(hmenu != 0);
+
+    check_menu_items(hmenu, -1, 0, 0);
+
+    ret = CheckMenuRadioItem(hmenu, 100, 100, 100, MF_BYCOMMAND);
+    ok(ret, "CheckMenuRadioItem failed\n");
+    check_menu_items(hmenu, 100, MFT_RADIOCHECK, MFS_CHECKED);
+
+    /* MSDN is wrong, Windows does not remove MFT_RADIOCHECK */
+    ret = CheckMenuRadioItem(hmenu, 100, 100, -1, MF_BYCOMMAND);
+    ok(!ret, "CheckMenuRadioItem should return FALSE\n");
+    check_menu_items(hmenu, 100, MFT_RADIOCHECK, 0);
+
+    /* clear check */
+    clear_ftype_and_state(hmenu, 100, MF_BYCOMMAND);
+    check_menu_items(hmenu, -1, 0, 0);
+
+    /* first and checked items are on different menus */
+    ret = CheckMenuRadioItem(hmenu, 0, 300, 202, MF_BYCOMMAND);
+    ok(!ret, "CheckMenuRadioItem should return FALSE\n");
+    check_menu_items(hmenu, -1, 0, 0);
+
+    ret = CheckMenuRadioItem(hmenu, 200, 300, 202, MF_BYCOMMAND);
+    ok(ret, "CheckMenuRadioItem failed\n");
+    check_menu_items(hmenu, 202, MFT_RADIOCHECK, MFS_CHECKED);
+
+    /* MSDN is wrong, Windows does not remove MFT_RADIOCHECK */
+    ret = CheckMenuRadioItem(hmenu, 202, 202, -1, MF_BYCOMMAND);
+    ok(!ret, "CheckMenuRadioItem should return FALSE\n");
+    check_menu_items(hmenu, 202, MFT_RADIOCHECK, 0);
+
+    /* clear check */
+    clear_ftype_and_state(hmenu, 202, MF_BYCOMMAND);
+    check_menu_items(hmenu, -1, 0, 0);
+
+    /* just for fun, try to check separator */
+    ret = CheckMenuRadioItem(hmenu, 0, 300, 0, MF_BYCOMMAND);
+    ok(!ret, "CheckMenuRadioItem should return FALSE\n");
+    check_menu_items(hmenu, -1, 0, 0);
+}
+
+static void test_menu_resource_layout(void)
+{
+    static const struct
+    {
+        MENUITEMTEMPLATEHEADER mith;
+        WORD data[14];
+    } menu_template =
+    {
+        { 0, 0 }, /* versionNumber, offset */
+        {
+            /* mtOption, mtID, mtString[] '\0' terminated */
+            MF_STRING, 1, 'F', 0,
+            MF_STRING, 2, 0,
+            MF_SEPARATOR, 3, 0,
+            /* MF_SEPARATOR, 4, 'S', 0, FIXME: Wine ignores 'S' */
+            MF_STRING|MF_GRAYED|MF_END, 5, 'E', 0
+        }
+    };
+    static const struct
+    {
+        UINT type, state, id;
+        const char *str;
+    } menu_data[] =
+    {
+        { MF_STRING, MF_ENABLED, 1, "F" },
+        { MF_SEPARATOR, MF_GRAYED|MF_DISABLED, 2, "" },
+        { MF_SEPARATOR, MF_GRAYED|MF_DISABLED, 3, "" },
+        /*{ MF_SEPARATOR, MF_GRAYED|MF_DISABLED, 4, "S" }, FIXME: Wine ignores 'S'*/
+        { MF_STRING, MF_GRAYED, 5, "E" },
+        { MF_SEPARATOR, MF_GRAYED|MF_DISABLED, 6, "" },
+        { MF_STRING, MF_ENABLED, 7, "" },
+        { MF_SEPARATOR, MF_GRAYED|MF_DISABLED, 8, "" }
+    };
+    HMENU hmenu;
+    UINT count, i;
+    BOOL ret;
+
+    hmenu = LoadMenuIndirect(&menu_template);
+    ok(hmenu != 0, "LoadMenuIndirect error %u\n", GetLastError());
+
+    ret = AppendMenu(hmenu, MF_STRING, 6, NULL);
+    ok(ret, "AppendMenu failed\n");
+    ret = AppendMenu(hmenu, MF_STRING, 7, "\0");
+    ok(ret, "AppendMenu failed\n");
+    ret = AppendMenu(hmenu, MF_SEPARATOR, 8, "separator");
+    ok(ret, "AppendMenu failed\n");
+
+    count = GetMenuItemCount(hmenu);
+    ok(count == sizeof(menu_data)/sizeof(menu_data[0]),
+       "expected %u menu items, got %u\n",
+       (UINT)(sizeof(menu_data)/sizeof(menu_data[0])), count);
+
+    for (i = 0; i < count; i++)
+    {
+        char buf[20];
+        MENUITEMINFO mii;
+
+        memset(&mii, 0, sizeof(mii));
+        mii.cbSize = sizeof(mii);
+        mii.dwTypeData = buf;
+        mii.cch = sizeof(buf);
+        mii.fMask  = MIIM_FTYPE | MIIM_STATE | MIIM_ID | MIIM_STRING;
+        ret = GetMenuItemInfo(hmenu, i, TRUE, &mii);
+        ok(ret, "GetMenuItemInfo(%u) failed\n", i);
+#if 0
+        trace("item #%u: fType %04x, fState %04x, wID %u, dwTypeData %s\n",
+               i, mii.fType, mii.fState, mii.wID, (LPCSTR)mii.dwTypeData);
+#endif
+        ok(mii.fType == menu_data[i].type,
+           "%u: expected fType %04x, got %04x\n", i, menu_data[i].type, mii.fType);
+        ok(mii.fState == menu_data[i].state,
+           "%u: expected fState %04x, got %04x\n", i, menu_data[i].state, mii.fState);
+        ok(mii.wID == menu_data[i].id,
+           "%u: expected wID %04x, got %04x\n", i, menu_data[i].id, mii.wID);
+        ok(mii.cch == strlen(menu_data[i].str),
+           "%u: expected cch %u, got %u\n", i, (UINT)strlen(menu_data[i].str), mii.cch);
+        ok(!strcmp((LPCSTR)mii.dwTypeData, menu_data[i].str),
+           "%u: expected dwTypeData %s, got %s\n", i, menu_data[i].str, (LPCSTR)mii.dwTypeData);
+    }
+
+    DestroyMenu(hmenu);
+}
+
 START_TEST(menu)
 {
     pSetMenuInfo =
@@ -1890,4 +2087,6 @@ START_TEST(menu)
     test_menu_input();
     test_menu_flags();
     test_menu_hilitemenuitem();
+    test_CheckMenuRadioItem();
+    test_menu_resource_layout();
 }

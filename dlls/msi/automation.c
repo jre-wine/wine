@@ -80,13 +80,31 @@ interface AutomationObject {
 };
 
 /*
+ * ListEnumerator - IEnumVARIANT implementation for MSI automation lists.
+ */
+
+typedef interface ListEnumerator ListEnumerator;
+
+interface ListEnumerator {
+    /* VTables */
+    const IEnumVARIANTVtbl *lpVtbl;
+
+    /* Object reference count */
+    LONG ref;
+
+    /* Current position and pointer to AutomationObject that stores actual data */
+    ULONG ulPos;
+    AutomationObject *pObj;
+};
+
+/*
  * Structures for additional data required by specific automation objects
  */
 
 typedef struct {
-    int iCount;
-    LPWSTR *pszStrings;
-} StringListData;
+    ULONG ulCount;
+    VARIANT *pVars;
+} ListData;
 
 typedef struct {
     /* The parent Installer object */
@@ -96,6 +114,7 @@ typedef struct {
 /* VTables */
 static const struct IDispatchVtbl AutomationObject_Vtbl;
 static const struct IProvideMultipleClassInfoVtbl AutomationObject_IProvideMultipleClassInfo_Vtbl;
+static const struct IEnumVARIANTVtbl ListEnumerator_Vtbl;
 
 /* Load type info so we don't have to process GetIDsOfNames */
 HRESULT load_type_info(IDispatch *iface, ITypeInfo **pptinfo, REFIID clsid, LCID lcid)
@@ -110,19 +129,19 @@ HRESULT load_type_info(IDispatch *iface, ITypeInfo **pptinfo, REFIID clsid, LCID
     /* Load registered type library */
     hr = LoadRegTypeLib(&LIBID_WindowsInstaller, 1, 0, lcid, &pLib);
     if (FAILED(hr)) {
-	hr = LoadTypeLib(szMsiServer, &pLib);
-	if (FAILED(hr)) {
-	    ERR("Could not load msiserver.tlb\n");
-	    return hr;
-	}
+        hr = LoadTypeLib(szMsiServer, &pLib);
+        if (FAILED(hr)) {
+            ERR("Could not load msiserver.tlb\n");
+            return hr;
+        }
     }
 
     /* Get type information for object */
     hr = ITypeLib_GetTypeInfoOfGuid(pLib, clsid, &pInfo);
     ITypeLib_Release(pLib);
     if (FAILED(hr)) {
-	ERR("Could not load ITypeInfo for %s\n", debugstr_guid(clsid));
-	return hr;
+        ERR("Could not load ITypeInfo for %s\n", debugstr_guid(clsid));
+        return hr;
     }
     *pptinfo = pInfo;
     return S_OK;
@@ -131,8 +150,8 @@ HRESULT load_type_info(IDispatch *iface, ITypeInfo **pptinfo, REFIID clsid, LCID
 /* Create the automation object, placing the result in the pointer ppObj. The automation object is created
  * with the appropriate clsid and invocation function. */
 HRESULT create_automation_object(MSIHANDLE msiHandle, IUnknown *pUnkOuter, LPVOID *ppObj, REFIID clsid,
-	    HRESULT (STDMETHODCALLTYPE *funcInvoke)(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,
-						    VARIANT*,EXCEPINFO*,UINT*),
+            HRESULT (STDMETHODCALLTYPE *funcInvoke)(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,
+                                                    VARIANT*,EXCEPINFO*,UINT*),
                                  void (STDMETHODCALLTYPE *funcFree)(AutomationObject*),
                                  SIZE_T sizetPrivateData)
 {
@@ -142,7 +161,7 @@ HRESULT create_automation_object(MSIHANDLE msiHandle, IUnknown *pUnkOuter, LPVOI
     TRACE("(%ld,%p,%p,%s,%p,%p,%ld)\n", (unsigned long)msiHandle, pUnkOuter, ppObj, debugstr_guid(clsid), funcInvoke, funcFree, sizetPrivateData);
 
     if( pUnkOuter )
-	return CLASS_E_NOAGGREGATION;
+        return CLASS_E_NOAGGREGATION;
 
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(AutomationObject)+sizetPrivateData);
 
@@ -161,12 +180,37 @@ HRESULT create_automation_object(MSIHANDLE msiHandle, IUnknown *pUnkOuter, LPVOI
     object->iTypeInfo = NULL;
     hr = load_type_info((IDispatch *)object, &object->iTypeInfo, clsid, 0x0);
     if (FAILED(hr)) {
-	HeapFree(GetProcessHeap(), 0, object);
-	return hr;
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
     }
 
     *ppObj = object;
 
+    return S_OK;
+}
+
+/* Create a list enumerator, placing the result in the pointer ppObj.  */
+HRESULT create_list_enumerator(IUnknown *pUnkOuter, LPVOID *ppObj, AutomationObject *pObj, ULONG ulPos)
+{
+    ListEnumerator *object;
+
+    TRACE("(%p,%p,%p,%uld)\n", pUnkOuter, ppObj, pObj, ulPos);
+
+    if( pUnkOuter )
+        return CLASS_E_NOAGGREGATION;
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ListEnumerator));
+
+    /* Set all the VTable references */
+    object->lpVtbl = &ListEnumerator_Vtbl;
+    object->ref = 1;
+
+    /* Store data that was passed */
+    object->ulPos = ulPos;
+    object->pObj = pObj;
+    if (pObj) IDispatch_AddRef((IDispatch *)pObj);
+
+    *ppObj = object;
     return S_OK;
 }
 
@@ -206,8 +250,8 @@ static HRESULT WINAPI AutomationObject_QueryInterface(IDispatch* iface, REFIID r
         *ppvObject = &This->lpvtblIProvideMultipleClassInfo;
     else
     {
-	TRACE("() : asking for unsupported interface %s\n",debugstr_guid(riid));
-	return E_NOINTERFACE;
+        TRACE("() : asking for unsupported interface %s\n",debugstr_guid(riid));
+        return E_NOINTERFACE;
     }
 
     /*
@@ -238,7 +282,7 @@ static ULONG WINAPI AutomationObject_Release(IDispatch* iface)
     if (!ref)
     {
         if (This->funcFree) This->funcFree(This);
-	MsiCloseHandle(This->msiHandle);
+        MsiCloseHandle(This->msiHandle);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -322,14 +366,14 @@ static HRESULT WINAPI AutomationObject_Invoke(
 
     if (!IsEqualIID(riid, &IID_NULL))
     {
-	ERR("riid was %s instead of IID_NULL\n", debugstr_guid(riid));
-	return DISP_E_UNKNOWNNAME;
+        ERR("riid was %s instead of IID_NULL\n", debugstr_guid(riid));
+        return DISP_E_UNKNOWNNAME;
     }
 
     if (wFlags & DISPATCH_PROPERTYGET && !pVarResult)
     {
-	ERR("NULL pVarResult not allowed when DISPATCH_PROPERTYGET specified\n");
-	return DISP_E_PARAMNOTOPTIONAL;
+        ERR("NULL pVarResult not allowed when DISPATCH_PROPERTYGET specified\n");
+        return DISP_E_PARAMNOTOPTIONAL;
     }
 
     /* This simplifies our individual object invocation functions */
@@ -342,15 +386,15 @@ static HRESULT WINAPI AutomationObject_Invoke(
     /* If we are tracing, we want to see the name of the member we are invoking */
     if (TRACE_ON(msi))
     {
-	ITypeInfo_GetDocumentation(This->iTypeInfo, dispIdMember, &bstrName, NULL, NULL, NULL);
-	TRACE("Method %d, %s\n", dispIdMember, debugstr_w(bstrName));
+        ITypeInfo_GetDocumentation(This->iTypeInfo, dispIdMember, &bstrName, NULL, NULL, NULL);
+        TRACE("Method %d, %s\n", dispIdMember, debugstr_w(bstrName));
     }
 
     hr = This->funcInvoke(This,dispIdMember,riid,lcid,wFlags,pDispParams,pVarResult,pExcepInfo,puArgErr);
 
     if (hr == DISP_E_MEMBERNOTFOUND) {
-	if (bstrName == NULL) ITypeInfo_GetDocumentation(This->iTypeInfo, dispIdMember, &bstrName, NULL, NULL, NULL);
-	FIXME("Method %d, %s wflags %d not implemented, clsid %s\n", dispIdMember, debugstr_w(bstrName), wFlags, debugstr_guid(This->clsid));
+        if (bstrName == NULL) ITypeInfo_GetDocumentation(This->iTypeInfo, dispIdMember, &bstrName, NULL, NULL, NULL);
+        FIXME("Method %d, %s wflags %d not implemented, clsid %s\n", dispIdMember, debugstr_w(bstrName), wFlags, debugstr_guid(This->clsid));
     }
     else if (pExcepInfo &&
              (hr == DISP_E_PARAMNOTFOUND ||
@@ -448,10 +492,10 @@ static HRESULT WINAPI AutomationObject_IProvideMultipleClassInfo_GetGUID(IProvid
     TRACE("(%p/%p)->(%d,%s)\n", iface, This, dwGuidKind, debugstr_guid(pGUID));
 
     if (dwGuidKind != GUIDKIND_DEFAULT_SOURCE_DISP_IID)
-	return E_INVALIDARG;
+        return E_INVALIDARG;
     else {
-	*pGUID = *This->clsid;
-	return S_OK;
+        *pGUID = *This->clsid;
+        return S_OK;
     }
 }
 
@@ -478,19 +522,19 @@ static HRESULT WINAPI AutomationObject_GetInfoOfIndex(IProvideMultipleClassInfo*
     TRACE("(%p/%p)->(%d,%d,%p,%p,%p,%p,%p)\n", iface, This, iti, dwFlags, pptiCoClass, pdwTIFlags, pcdispidReserved, piidPrimary, piidSource);
 
     if (iti != 0)
-	return E_INVALIDARG;
+        return E_INVALIDARG;
 
     if (dwFlags & MULTICLASSINFO_GETTYPEINFO)
         load_type_info((IDispatch *)This, pptiCoClass, This->clsid, 0);
 
     if (dwFlags & MULTICLASSINFO_GETNUMRESERVEDDISPIDS)
     {
-	*pdwTIFlags = 0;
-	*pcdispidReserved = 0;
+        *pdwTIFlags = 0;
+        *pcdispidReserved = 0;
     }
 
     if (dwFlags & MULTICLASSINFO_GETIIDPRIMARY){
-	*piidPrimary = *This->clsid;
+        *piidPrimary = *This->clsid;
     }
 
     if (dwFlags & MULTICLASSINFO_GETIIDSOURCE){
@@ -512,6 +556,148 @@ static const IProvideMultipleClassInfoVtbl AutomationObject_IProvideMultipleClas
 };
 
 /*
+ * ListEnumerator methods
+ */
+
+/*** IUnknown methods ***/
+static HRESULT WINAPI ListEnumerator_QueryInterface(IEnumVARIANT* iface, REFIID riid, void** ppvObject)
+{
+    ListEnumerator *This = (ListEnumerator *)iface;
+
+    TRACE("(%p/%p)->(%s,%p)\n", iface, This, debugstr_guid(riid), ppvObject);
+
+    if (ppvObject == NULL)
+      return E_INVALIDARG;
+
+    *ppvObject = 0;
+
+    if (IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IEnumVARIANT))
+        *ppvObject = This;
+    else
+    {
+        TRACE("() : asking for unsupported interface %s\n",debugstr_guid(riid));
+        return E_NOINTERFACE;
+    }
+
+    IClassFactory_AddRef(iface);
+    return S_OK;
+}
+
+static ULONG WINAPI ListEnumerator_AddRef(IEnumVARIANT* iface)
+{
+    ListEnumerator *This = (ListEnumerator *)iface;
+
+    TRACE("(%p/%p)\n", iface, This);
+
+    return InterlockedIncrement(&This->ref);
+}
+
+static ULONG WINAPI ListEnumerator_Release(IEnumVARIANT* iface)
+{
+    ListEnumerator *This = (ListEnumerator *)iface;
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p/%p)\n", iface, This);
+
+    if (!ref)
+    {
+        if (This->pObj) IDispatch_Release((IDispatch *)This->pObj);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+/* IEnumVARIANT methods */
+
+static HRESULT WINAPI ListEnumerator_Next(IEnumVARIANT* iface, ULONG celt, VARIANT *rgVar, ULONG *pCeltFetched)
+{
+    ListEnumerator *This = (ListEnumerator *)iface;
+    ListData *data = (ListData *)private_data(This->pObj);
+    ULONG idx, local;
+
+    TRACE("(%p,%uld,%p,%p)\n", iface, celt, rgVar, pCeltFetched);
+
+    if (pCeltFetched != NULL)
+        *pCeltFetched = 0;
+
+    if (rgVar == NULL)
+        return S_FALSE;
+
+    for (local = 0; local < celt; local++)
+        VariantInit(&rgVar[local]);
+
+    for (idx = This->ulPos, local = 0; idx < data->ulCount && local < celt; idx++, local++)
+        VariantCopy(&rgVar[local], &data->pVars[idx]);
+
+    if (pCeltFetched != NULL)
+        *pCeltFetched = local;
+    This->ulPos = idx;
+
+    return (local < celt) ? S_FALSE : S_OK;
+}
+
+static HRESULT WINAPI ListEnumerator_Skip(IEnumVARIANT* iface, ULONG celt)
+{
+    ListEnumerator *This = (ListEnumerator *)iface;
+    ListData *data = (ListData *)private_data(This->pObj);
+
+    TRACE("(%p,%uld)\n", iface, celt);
+
+    This->ulPos += celt;
+    if (This->ulPos >= data->ulCount)
+    {
+        This->ulPos = data->ulCount;
+        return S_FALSE;
+    }
+    return S_OK;
+}
+
+static HRESULT WINAPI ListEnumerator_Reset(IEnumVARIANT* iface)
+{
+    ListEnumerator *This = (ListEnumerator *)iface;
+
+    TRACE("(%p)\n", iface);
+
+    This->ulPos = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI ListEnumerator_Clone(IEnumVARIANT* iface, IEnumVARIANT **ppEnum)
+{
+    ListEnumerator *This = (ListEnumerator *)iface;
+    HRESULT hr;
+
+    TRACE("(%p,%p)\n", iface, ppEnum);
+
+    if (ppEnum == NULL)
+        return S_FALSE;
+
+    *ppEnum = NULL;
+    hr = create_list_enumerator(NULL, (LPVOID *)ppEnum, This->pObj, 0);
+    if (FAILED(hr))
+    {
+        if (*ppEnum)
+            IUnknown_Release(*ppEnum);
+        return hr;
+    }
+
+    IUnknown_AddRef(*ppEnum);
+    return S_OK;
+}
+
+static const struct IEnumVARIANTVtbl ListEnumerator_Vtbl =
+{
+    ListEnumerator_QueryInterface,
+    ListEnumerator_AddRef,
+    ListEnumerator_Release,
+    ListEnumerator_Next,
+    ListEnumerator_Skip,
+    ListEnumerator_Reset,
+    ListEnumerator_Clone
+};
+
+/*
  * Individual Object Invocation Functions
  */
 
@@ -519,9 +705,9 @@ static const IProvideMultipleClassInfoVtbl AutomationObject_IProvideMultipleClas
    This function is only for VARIANT type parameters that have several types that cannot be properly discriminated
    using DispGetParam/VariantChangeType. */
 HRESULT WINAPI DispGetParam_CopyOnly(
-	DISPPARAMS *pdispparams, /* [in] Parameter list */
-	UINT        *position,    /* [in] Position of parameter to copy in pdispparams; on return will contain calculated position */
-	VARIANT    *pvarResult)  /* [out] Destination for resulting variant */
+        DISPPARAMS *pdispparams, /* [in] Parameter list */
+        UINT        *position,    /* [in] Position of parameter to copy in pdispparams; on return will contain calculated position */
+        VARIANT    *pvarResult)  /* [out] Destination for resulting variant */
 {
     /* position is counted backwards */
     UINT pos;
@@ -542,6 +728,114 @@ HRESULT WINAPI DispGetParam_CopyOnly(
     *position = pos;
     return VariantCopyInd(pvarResult,
                         &pdispparams->rgvarg[pos]);
+}
+
+static HRESULT WINAPI SummaryInfoImpl_Invoke(
+        AutomationObject* This,
+        DISPID dispIdMember,
+        REFIID riid,
+        LCID lcid,
+        WORD wFlags,
+        DISPPARAMS* pDispParams,
+        VARIANT* pVarResult,
+        EXCEPINFO* pExcepInfo,
+        UINT* puArgErr)
+{
+    UINT ret;
+    VARIANTARG varg0;
+    HRESULT hr;
+
+    VariantInit(&varg0);
+
+    switch (dispIdMember)
+    {
+        case DISPID_SUMMARYINFO_PROPERTY:
+            if (wFlags & DISPATCH_PROPERTYGET)
+            {
+                UINT type;
+                INT value;
+                INT pid;
+
+                static WCHAR szEmpty[] = {0};
+
+                VariantClear(pVarResult);
+
+                hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                pid = V_I4(&varg0);
+
+                if (pid == PID_CODEPAGE || (pid >= PID_PAGECOUNT && pid <= PID_CHARCOUNT) || PID_SECURITY)
+                {
+                    ret = MsiSummaryInfoGetPropertyW(This->msiHandle, pid, &type, &value,
+                                                     NULL, NULL, NULL);
+                    if (ret != ERROR_SUCCESS)
+                        return DISP_E_EXCEPTION;
+
+                    if (pid == PID_CODEPAGE)
+                    {
+                        V_VT(pVarResult) = VT_I2;
+                        V_I2(pVarResult) = value;
+                    }
+                    else
+                    {
+                        V_VT(pVarResult) = VT_I4;
+                        V_I4(pVarResult) = value;
+                    }
+                }
+                else if ((pid >= PID_TITLE && pid <= PID_REVNUMBER) || pid == PID_APPNAME)
+                {
+                    LPWSTR str;
+                    DWORD size = 0;
+
+                    ret = MsiSummaryInfoGetPropertyW(This->msiHandle, pid, &type, NULL,
+                                                     NULL, szEmpty, &size);
+                    if (ret != ERROR_MORE_DATA)
+                        return DISP_E_EXCEPTION;
+
+                    str = msi_alloc(++size * sizeof(WCHAR));
+                    if (!str)
+                        return DISP_E_EXCEPTION;
+
+                    ret = MsiSummaryInfoGetPropertyW(This->msiHandle, pid, &type, NULL,
+                                                     NULL, str, &size);
+                    if (ret != ERROR_SUCCESS)
+                    {
+                        msi_free(str);
+                        return DISP_E_EXCEPTION;
+                    }
+
+                    V_VT(pVarResult) = VT_BSTR;
+                    V_BSTR(pVarResult) = SysAllocString(str);
+                    msi_free(str);
+                }
+                else if (pid >= PID_EDITTIME && pid <= PID_LASTSAVE_DTM)
+                {
+                    FILETIME ft;
+                    SYSTEMTIME st;
+                    DATE date;
+
+                    ret = MsiSummaryInfoGetPropertyW(This->msiHandle, pid, &type, &value,
+                                                     &ft, NULL, NULL);
+                    if (ret != ERROR_SUCCESS)
+                        return DISP_E_EXCEPTION;
+
+                    FileTimeToSystemTime(&ft, &st);
+                    SystemTimeToVariantTime(&st, &date);
+
+                    V_VT(pVarResult) = VT_DATE;
+                    V_DATE(pVarResult) = date;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        default:
+            ERR("Member not found: %d\n", dispIdMember);
+            return DISP_E_MEMBERNOTFOUND;
+    }
+
+    VariantClear(&varg0);
+    return S_OK;
 }
 
 static HRESULT WINAPI RecordImpl_Invoke(
@@ -566,38 +860,64 @@ static HRESULT WINAPI RecordImpl_Invoke(
 
     switch (dispIdMember)
     {
-	case DISPID_RECORD_STRINGDATA:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
+        case DISPID_RECORD_FIELDCOUNT:
+            if (wFlags & DISPATCH_PROPERTYGET) {
+                V_VT(pVarResult) = VT_I4;
+                V_I4(pVarResult) = MsiRecordGetFieldCount(This->msiHandle);
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_RECORD_STRINGDATA:
+            if (wFlags & DISPATCH_PROPERTYGET) {
                 hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 V_VT(pVarResult) = VT_BSTR;
                 V_BSTR(pVarResult) = NULL;
-		ret = MsiRecordGetStringW(This->msiHandle, V_I4(&varg0), NULL, &dwLen);
-                if (ret == ERROR_SUCCESS)
+                if ((ret = MsiRecordGetStringW(This->msiHandle, V_I4(&varg0), NULL, &dwLen)) == ERROR_SUCCESS)
                 {
-                    szString = msi_alloc((++dwLen)*sizeof(WCHAR));
-                    if (szString)
-                    {
-                        if ((ret = MsiRecordGetStringW(This->msiHandle, V_I4(&varg0), szString, &dwLen)) == ERROR_SUCCESS)
-                            V_BSTR(pVarResult) = SysAllocString(szString);
-                        msi_free(szString);
-                    }
+                    if (!(szString = msi_alloc((++dwLen)*sizeof(WCHAR))))
+                        ERR("Out of memory\n");
+                    else if ((ret = MsiRecordGetStringW(This->msiHandle, V_I4(&varg0), szString, &dwLen)) == ERROR_SUCCESS)
+                        V_BSTR(pVarResult) = SysAllocString(szString);
+                    msi_free(szString);
                 }
                 if (ret != ERROR_SUCCESS)
-		    ERR("MsiRecordGetString returned %d\n", ret);
-	    } else if (wFlags & DISPATCH_PROPERTYPUT) {
+                    ERR("MsiRecordGetString returned %d\n", ret);
+            } else if (wFlags & DISPATCH_PROPERTYPUT) {
                 hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 hr = DispGetParam(pDispParams, DISPID_PROPERTYPUT, VT_BSTR, &varg1, puArgErr);
                 if (FAILED(hr)) return hr;
-		if ((ret = MsiRecordSetStringW(This->msiHandle, V_I4(&varg0), V_BSTR(&varg1))) != ERROR_SUCCESS)
+                if ((ret = MsiRecordSetStringW(This->msiHandle, V_I4(&varg0), V_BSTR(&varg1))) != ERROR_SUCCESS)
                 {
                     VariantClear(&varg1);
                     ERR("MsiRecordSetString returned %d\n", ret);
                     return DISP_E_EXCEPTION;
                 }
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_RECORD_INTEGERDATA:
+            if (wFlags & DISPATCH_PROPERTYGET) {
+                hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                V_VT(pVarResult) = VT_I4;
+                V_I4(pVarResult) = MsiRecordGetInteger(This->msiHandle, V_I4(&varg0));
+            } else if (wFlags & DISPATCH_PROPERTYPUT) {
+                hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                hr = DispGetParam(pDispParams, DISPID_PROPERTYPUT, VT_I4, &varg1, puArgErr);
+                if (FAILED(hr)) return hr;
+                if ((ret = MsiRecordSetInteger(This->msiHandle, V_I4(&varg0), V_I4(&varg1))) != ERROR_SUCCESS)
+                {
+                    ERR("MsiRecordSetInteger returned %d\n", ret);
+                    return DISP_E_EXCEPTION;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
          default:
             return DISP_E_MEMBERNOTFOUND;
@@ -609,7 +929,7 @@ static HRESULT WINAPI RecordImpl_Invoke(
     return S_OK;
 }
 
-static HRESULT WINAPI StringListImpl_Invoke(
+static HRESULT WINAPI ListImpl_Invoke(
         AutomationObject* This,
         DISPID dispIdMember,
         REFIID riid,
@@ -620,30 +940,46 @@ static HRESULT WINAPI StringListImpl_Invoke(
         EXCEPINFO* pExcepInfo,
         UINT* puArgErr)
 {
-    StringListData *data = (StringListData *)private_data(This);
+    ListData *data = (ListData *)private_data(This);
     HRESULT hr;
     VARIANTARG varg0;
+    IUnknown *pUnk = NULL;
 
     VariantInit(&varg0);
 
     switch (dispIdMember)
     {
-         case DISPID_STRINGLIST_ITEM:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
+         case DISPID_LIST__NEWENUM:
+             if (wFlags & DISPATCH_METHOD) {
+                 V_VT(pVarResult) = VT_UNKNOWN;
+                 if (SUCCEEDED(hr = create_list_enumerator(NULL, (LPVOID *)&pUnk, This, 0)))
+                 {
+                     IUnknown_AddRef(pUnk);
+                     V_UNKNOWN(pVarResult) = pUnk;
+                 }
+                 else
+                     ERR("Failed to create IEnumVARIANT object, hresult 0x%08x\n", hr);
+             }
+             else return DISP_E_MEMBERNOTFOUND;
+             break;
+
+         case DISPID_LIST_ITEM:
+             if (wFlags & DISPATCH_PROPERTYGET) {
                 hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
-                if (V_I4(&varg0) < 0 || V_I4(&varg0) >= data->iCount)
+                if (V_I4(&varg0) < 0 || V_I4(&varg0) >= data->ulCount)
                     return DISP_E_BADINDEX;
-                V_VT(pVarResult) = VT_BSTR;
-                V_BSTR(pVarResult) = SysAllocString(data->pszStrings[V_I4(&varg0)]);
+                VariantCopy(pVarResult, &data->pVars[V_I4(&varg0)]);
             }
+            else return DISP_E_MEMBERNOTFOUND;
             break;
 
-         case DISPID_STRINGLIST_COUNT:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
+         case DISPID_LIST_COUNT:
+            if (wFlags & DISPATCH_PROPERTYGET) {
                 V_VT(pVarResult) = VT_I4;
-                V_I4(pVarResult) = data->iCount;
-	    }
+                V_I4(pVarResult) = data->ulCount;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
             break;
 
          default:
@@ -655,14 +991,14 @@ static HRESULT WINAPI StringListImpl_Invoke(
     return S_OK;
 }
 
-static void WINAPI StringListImpl_Free(AutomationObject *This)
+static void WINAPI ListImpl_Free(AutomationObject *This)
 {
-    StringListData *data = private_data(This);
-    int idx;
+    ListData *data = private_data(This);
+    ULONG idx;
 
-    for (idx=0; idx<data->iCount; idx++)
-        SysFreeString(data->pszStrings[idx]);
-    HeapFree(GetProcessHeap(), 0, data->pszStrings);
+    for (idx=0; idx<data->ulCount; idx++)
+        VariantClear(&data->pVars[idx]);
+    HeapFree(GetProcessHeap(), 0, data->pVars);
 }
 
 static HRESULT WINAPI ViewImpl_Invoke(
@@ -687,20 +1023,21 @@ static HRESULT WINAPI ViewImpl_Invoke(
 
     switch (dispIdMember)
     {
-	case DISPID_VIEW_EXECUTE:
-	    if (wFlags & DISPATCH_METHOD)
-	    {
+        case DISPID_VIEW_EXECUTE:
+            if (wFlags & DISPATCH_METHOD)
+            {
                 hr = DispGetParam(pDispParams, 0, VT_DISPATCH, &varg0, puArgErr);
                 if (SUCCEEDED(hr) && V_DISPATCH(&varg0) != NULL)
                     MsiViewExecute(This->msiHandle, ((AutomationObject *)V_DISPATCH(&varg0))->msiHandle);
                 else
                     MsiViewExecute(This->msiHandle, 0);
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
-	case DISPID_VIEW_FETCH:
-	    if (wFlags & DISPATCH_METHOD)
-	    {
+        case DISPID_VIEW_FETCH:
+            if (wFlags & DISPATCH_METHOD)
+            {
                 V_VT(pVarResult) = VT_DISPATCH;
                 if ((ret = MsiViewFetch(This->msiHandle, &msiHandle)) == ERROR_SUCCESS)
                 {
@@ -712,22 +1049,42 @@ static HRESULT WINAPI ViewImpl_Invoke(
                     else
                         ERR("Failed to create Record object, hresult 0x%08x\n", hr);
                 }
-		else if (ret == ERROR_NO_MORE_ITEMS)
+                else if (ret == ERROR_NO_MORE_ITEMS)
                     V_DISPATCH(pVarResult) = NULL;
                 else
                 {
                     ERR("MsiViewFetch returned %d\n", ret);
                     return DISP_E_EXCEPTION;
                 }
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
-	case DISPID_VIEW_CLOSE:
-	    if (wFlags & DISPATCH_METHOD)
-	    {
-		MsiViewClose(This->msiHandle);
-	    }
-	    break;
+        case DISPID_VIEW_MODIFY:
+            if (wFlags & DISPATCH_METHOD)
+            {
+                hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                hr = DispGetParam(pDispParams, 1, VT_DISPATCH, &varg1, puArgErr);
+                if (FAILED(hr)) return hr;
+                if (!V_DISPATCH(&varg1)) return DISP_E_EXCEPTION;
+                if ((ret = MsiViewModify(This->msiHandle, V_I4(&varg0), ((AutomationObject *)V_DISPATCH(&varg1))->msiHandle)) != ERROR_SUCCESS)
+                {
+                    VariantClear(&varg1);
+                    ERR("MsiViewModify returned %d\n", ret);
+                    return DISP_E_EXCEPTION;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_VIEW_CLOSE:
+            if (wFlags & DISPATCH_METHOD)
+            {
+                MsiViewClose(This->msiHandle);
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
          default:
             return DISP_E_MEMBERNOTFOUND;
@@ -761,9 +1118,37 @@ static HRESULT WINAPI DatabaseImpl_Invoke(
 
     switch (dispIdMember)
     {
-	case DISPID_DATABASE_OPENVIEW:
-	    if (wFlags & DISPATCH_METHOD)
-	    {
+        case DISPID_DATABASE_SUMMARYINFORMATION:
+            if (wFlags & DISPATCH_METHOD)
+            {
+                hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
+                if (FAILED(hr))
+                    V_I4(&varg0) = 0;
+
+                V_VT(pVarResult) = VT_DISPATCH;
+                if ((ret = MsiGetSummaryInformationW(This->msiHandle, NULL, V_I4(&varg0), &msiHandle)) == ERROR_SUCCESS)
+                {
+                    hr = create_automation_object(msiHandle, NULL, (LPVOID *)&pDispatch, &DIID_SummaryInfo, SummaryInfoImpl_Invoke, NULL, 0);
+                    if (SUCCEEDED(hr))
+                    {
+                        IDispatch_AddRef(pDispatch);
+                        V_DISPATCH(pVarResult) = pDispatch;
+                    }
+                    else
+                        ERR("Failed to create SummaryInfo object: 0x%08x\n", hr);
+                }
+                else
+                {
+                    ERR("MsiGetSummaryInformation returned %d\n", ret);
+                    return DISP_E_EXCEPTION;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_DATABASE_OPENVIEW:
+            if (wFlags & DISPATCH_METHOD)
+            {
                 hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 V_VT(pVarResult) = VT_DISPATCH;
@@ -777,14 +1162,15 @@ static HRESULT WINAPI DatabaseImpl_Invoke(
                     else
                         ERR("Failed to create View object, hresult 0x%08x\n", hr);
                 }
-		else
+                else
                 {
                     VariantClear(&varg0);
                     ERR("MsiDatabaseOpenView returned %d\n", ret);
                     return DISP_E_EXCEPTION;
                 }
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
          default:
             return DISP_E_MEMBERNOTFOUND;
@@ -823,34 +1209,32 @@ static HRESULT WINAPI SessionImpl_Invoke(
 
     switch (dispIdMember)
     {
-	case DISPID_SESSION_INSTALLER:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
+        case DISPID_SESSION_INSTALLER:
+            if (wFlags & DISPATCH_PROPERTYGET) {
                 V_VT(pVarResult) = VT_DISPATCH;
                 IDispatch_AddRef(data->pInstaller);
                 V_DISPATCH(pVarResult) = data->pInstaller;
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
-	case DISPID_SESSION_PROPERTY:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
+        case DISPID_SESSION_PROPERTY:
+            if (wFlags & DISPATCH_PROPERTYGET) {
                 hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 V_VT(pVarResult) = VT_BSTR;
                 V_BSTR(pVarResult) = NULL;
-		ret = MsiGetPropertyW(This->msiHandle, V_BSTR(&varg0), NULL, &dwLen);
-                if (ret == ERROR_SUCCESS)
+                if ((ret = MsiGetPropertyW(This->msiHandle, V_BSTR(&varg0), NULL, &dwLen)) == ERROR_SUCCESS)
                 {
-                    szString = msi_alloc((++dwLen)*sizeof(WCHAR));
-                    if (szString)
-                    {
-                        if ((ret = MsiGetPropertyW(This->msiHandle, V_BSTR(&varg0), szString, &dwLen)) == ERROR_SUCCESS)
-                            V_BSTR(pVarResult) = SysAllocString(szString);
-                        msi_free(szString);
-                    }
+                    if (!(szString = msi_alloc((++dwLen)*sizeof(WCHAR))))
+                        ERR("Out of memory\n");
+                    else if ((ret = MsiGetPropertyW(This->msiHandle, V_BSTR(&varg0), szString, &dwLen)) == ERROR_SUCCESS)
+                        V_BSTR(pVarResult) = SysAllocString(szString);
+                    msi_free(szString);
                 }
                 if (ret != ERROR_SUCCESS)
-		    ERR("MsiGetProperty returned %d\n", ret);
-	    } else if (wFlags & DISPATCH_PROPERTYPUT) {
+                    ERR("MsiGetProperty returned %d\n", ret);
+            } else if (wFlags & DISPATCH_PROPERTYPUT) {
                 hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 hr = DispGetParam(pDispParams, DISPID_PROPERTYPUT, VT_BSTR, &varg1, puArgErr);
@@ -858,47 +1242,50 @@ static HRESULT WINAPI SessionImpl_Invoke(
                     VariantClear(&varg0);
                     return hr;
                 }
-		if ((ret = MsiSetPropertyW(This->msiHandle, V_BSTR(&varg0), V_BSTR(&varg1))) != ERROR_SUCCESS)
+                if ((ret = MsiSetPropertyW(This->msiHandle, V_BSTR(&varg0), V_BSTR(&varg1))) != ERROR_SUCCESS)
                 {
                     VariantClear(&varg0);
                     VariantClear(&varg1);
                     ERR("MsiSetProperty returned %d\n", ret);
                     return DISP_E_EXCEPTION;
                 }
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
-	case DISPID_SESSION_LANGUAGE:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
-		langId = MsiGetLanguage(This->msiHandle);
+        case DISPID_SESSION_LANGUAGE:
+            if (wFlags & DISPATCH_PROPERTYGET) {
+                langId = MsiGetLanguage(This->msiHandle);
                 V_VT(pVarResult) = VT_I4;
                 V_I4(pVarResult) = langId;
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
-	case DISPID_SESSION_MODE:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
+        case DISPID_SESSION_MODE:
+            if (wFlags & DISPATCH_PROPERTYGET) {
                 hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 V_VT(pVarResult) = VT_BOOL;
-		V_BOOL(pVarResult) = MsiGetMode(This->msiHandle, V_I4(&varg0));
-	    } else if (wFlags & DISPATCH_PROPERTYPUT) {
+                V_BOOL(pVarResult) = MsiGetMode(This->msiHandle, V_I4(&varg0));
+            } else if (wFlags & DISPATCH_PROPERTYPUT) {
                 hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 hr = DispGetParam(pDispParams, DISPID_PROPERTYPUT, VT_BOOL, &varg1, puArgErr);
                 if (FAILED(hr)) return hr;
-		if ((ret = MsiSetMode(This->msiHandle, V_I4(&varg0), V_BOOL(&varg1))) != ERROR_SUCCESS)
+                if ((ret = MsiSetMode(This->msiHandle, V_I4(&varg0), V_BOOL(&varg1))) != ERROR_SUCCESS)
                 {
                     ERR("MsiSetMode returned %d\n", ret);
                     return DISP_E_EXCEPTION;
                 }
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
-	case DISPID_SESSION_DATABASE:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
+        case DISPID_SESSION_DATABASE:
+            if (wFlags & DISPATCH_PROPERTYGET) {
                 V_VT(pVarResult) = VT_DISPATCH;
-		if ((msiHandle = MsiGetActiveDatabase(This->msiHandle)))
+                if ((msiHandle = MsiGetActiveDatabase(This->msiHandle)))
                 {
                     if (SUCCEEDED(hr = create_automation_object(msiHandle, NULL, (LPVOID*)&pDispatch, &DIID_Database, DatabaseImpl_Invoke, NULL, 0)))
                     {
@@ -908,13 +1295,14 @@ static HRESULT WINAPI SessionImpl_Invoke(
                     else
                         ERR("Failed to create Database object, hresult 0x%08x\n", hr);
                 }
-		else
+                else
                 {
                     ERR("MsiGetActiveDatabase failed\n");
                     return DISP_E_EXCEPTION;
                 }
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
         case DISPID_SESSION_DOACTION:
             if (wFlags & DISPATCH_METHOD) {
@@ -954,46 +1342,61 @@ static HRESULT WINAPI SessionImpl_Invoke(
                         return DISP_E_EXCEPTION;
                 }
             }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_SESSION_EVALUATECONDITION:
+            if (wFlags & DISPATCH_METHOD) {
+                hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                V_VT(pVarResult) = VT_I4;
+                V_I4(pVarResult) = MsiEvaluateConditionW(This->msiHandle, V_BSTR(&varg0));
+            }
+            else return DISP_E_MEMBERNOTFOUND;
             break;
 
         case DISPID_SESSION_SETINSTALLLEVEL:
-            hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
-            if (FAILED(hr)) return hr;
-            if ((ret = MsiSetInstallLevel(This->msiHandle, V_I4(&varg0))) != ERROR_SUCCESS)
-            {
-                ERR("MsiSetInstallLevel returned %d\n", ret);
-                return DISP_E_EXCEPTION;
+            if (wFlags & DISPATCH_METHOD) {
+                hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                if ((ret = MsiSetInstallLevel(This->msiHandle, V_I4(&varg0))) != ERROR_SUCCESS)
+                {
+                    ERR("MsiSetInstallLevel returned %d\n", ret);
+                    return DISP_E_EXCEPTION;
+                }
             }
+            else return DISP_E_MEMBERNOTFOUND;
             break;
 
-	case DISPID_SESSION_FEATURECURRENTSTATE:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
+        case DISPID_SESSION_FEATURECURRENTSTATE:
+            if (wFlags & DISPATCH_PROPERTYGET) {
                 hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 V_VT(pVarResult) = VT_I4;
-		if ((ret = MsiGetFeatureStateW(This->msiHandle, V_BSTR(&varg0), &iInstalled, &iAction)) == ERROR_SUCCESS)
-		    V_I4(pVarResult) = iInstalled;
-		else
-		{
-		    ERR("MsiGetFeatureState returned %d\n", ret);
+                if ((ret = MsiGetFeatureStateW(This->msiHandle, V_BSTR(&varg0), &iInstalled, &iAction)) == ERROR_SUCCESS)
+                    V_I4(pVarResult) = iInstalled;
+                else
+                {
+                    ERR("MsiGetFeatureState returned %d\n", ret);
                     V_I4(pVarResult) = msiInstallStateUnknown;
-		}
-	    }
-	    break;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
-	case DISPID_SESSION_FEATUREREQUESTSTATE:
-	    if (wFlags & DISPATCH_PROPERTYGET) {
+        case DISPID_SESSION_FEATUREREQUESTSTATE:
+            if (wFlags & DISPATCH_PROPERTYGET) {
                 hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 V_VT(pVarResult) = VT_I4;
-		if ((ret = MsiGetFeatureStateW(This->msiHandle, V_BSTR(&varg0), &iInstalled, &iAction)) == ERROR_SUCCESS)
-		    V_I4(pVarResult) = iAction;
-		else
-		{
-		    ERR("MsiGetFeatureState returned %d\n", ret);
+                if ((ret = MsiGetFeatureStateW(This->msiHandle, V_BSTR(&varg0), &iInstalled, &iAction)) == ERROR_SUCCESS)
+                    V_I4(pVarResult) = iAction;
+                else
+                {
+                    ERR("MsiGetFeatureState returned %d\n", ret);
                     V_I4(pVarResult) = msiInstallStateUnknown;
-		}
-	    } else if (wFlags & DISPATCH_PROPERTYPUT) {
+                }
+            } else if (wFlags & DISPATCH_PROPERTYPUT) {
                 hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 hr = DispGetParam(pDispParams, DISPID_PROPERTYPUT, VT_I4, &varg1, puArgErr);
@@ -1001,14 +1404,15 @@ static HRESULT WINAPI SessionImpl_Invoke(
                     VariantClear(&varg0);
                     return hr;
                 }
-		if ((ret = MsiSetFeatureStateW(This->msiHandle, V_BSTR(&varg0), V_I4(&varg1))) != ERROR_SUCCESS)
+                if ((ret = MsiSetFeatureStateW(This->msiHandle, V_BSTR(&varg0), V_I4(&varg1))) != ERROR_SUCCESS)
                 {
                     VariantClear(&varg0);
                     ERR("MsiSetFeatureState returned %d\n", ret);
                     return DISP_E_EXCEPTION;
                 }
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
          default:
             return DISP_E_MEMBERNOTFOUND;
@@ -1099,6 +1503,8 @@ static HRESULT WINAPI InstallerImpl_Invoke(
     UINT ret;
     VARIANTARG varg0, varg1, varg2;
     HRESULT hr;
+    LPWSTR szString = NULL;
+    DWORD dwSize = 0;
 
     VariantInit(&varg0);
     VariantInit(&varg1);
@@ -1106,9 +1512,34 @@ static HRESULT WINAPI InstallerImpl_Invoke(
 
     switch (dispIdMember)
     {
-	case DISPID_INSTALLER_OPENPACKAGE:
-	    if (wFlags & DISPATCH_METHOD)
-	    {
+        case DISPID_INSTALLER_CREATERECORD:
+            if (wFlags & DISPATCH_METHOD)
+            {
+                hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                V_VT(pVarResult) = VT_DISPATCH;
+                if ((msiHandle = MsiCreateRecord(V_I4(&varg0))))
+                {
+                    if (SUCCEEDED(hr = create_automation_object(msiHandle, NULL, (LPVOID*)&pDispatch, &DIID_Record, RecordImpl_Invoke, NULL, 0)))
+                    {
+                        IDispatch_AddRef(pDispatch);
+                        V_DISPATCH(pVarResult) = pDispatch;
+                    }
+                    else
+                        ERR("Failed to create Record object, hresult 0x%08x\n", hr);
+                }
+                else
+                {
+                    ERR("MsiCreateRecord failed\n");
+                    return DISP_E_EXCEPTION;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_INSTALLER_OPENPACKAGE:
+            if (wFlags & DISPATCH_METHOD)
+            {
                 hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
                 if (FAILED(hr)) return hr;
                 hr = DispGetParam(pDispParams, 1, VT_I4, &varg1, puArgErr);
@@ -1118,7 +1549,7 @@ static HRESULT WINAPI InstallerImpl_Invoke(
                     return hr;
                 }
                 V_VT(pVarResult) = VT_DISPATCH;
-		if ((ret = MsiOpenPackageExW(V_BSTR(&varg0), V_I4(&varg1), &msiHandle)) == ERROR_SUCCESS)
+                if ((ret = MsiOpenPackageExW(V_BSTR(&varg0), V_I4(&varg1), &msiHandle)) == ERROR_SUCCESS)
                 {
                     if (SUCCEEDED(hr = create_session(msiHandle, (IDispatch *)This, &pDispatch)))
                     {
@@ -1128,20 +1559,79 @@ static HRESULT WINAPI InstallerImpl_Invoke(
                     else
                         ERR("Failed to create Session object, hresult 0x%08x\n", hr);
                 }
-		else
+                else
                 {
                     VariantClear(&varg0);
                     ERR("MsiOpenPackageEx returned %d\n", ret);
                     return DISP_E_EXCEPTION;
                 }
-	    }
-	    break;
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_INSTALLER_OPENDATABASE:
+            if (wFlags & DISPATCH_METHOD)
+            {
+                hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+
+                hr = DispGetParam(pDispParams, 1, VT_BSTR, &varg1, puArgErr);
+                if (FAILED(hr))
+                {
+                    VariantClear(&varg0);
+                    return hr;
+                }
+
+                V_VT(pVarResult) = VT_DISPATCH;
+                if ((ret = MsiOpenDatabaseW(V_BSTR(&varg0), V_BSTR(&varg1), &msiHandle)) == ERROR_SUCCESS)
+                {
+                    hr = create_automation_object(msiHandle, NULL, (LPVOID *)&pDispatch,
+                                                  &DIID_Database, DatabaseImpl_Invoke, NULL, 0);
+                    if (SUCCEEDED(hr))
+                    {
+                        IDispatch_AddRef(pDispatch);
+                        V_DISPATCH(pVarResult) = pDispatch;
+                    }
+                    else
+                        ERR("Failed to create Database object: 0x%08x\n", hr);
+                }
+                else
+                {
+                    VariantClear(&varg0);
+                    VariantClear(&varg1);
+                    ERR("MsiOpenDatabase returned %d\n", ret);
+                    return DISP_E_EXCEPTION;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_INSTALLER_INSTALLPRODUCT:
+            if (wFlags & DISPATCH_METHOD)
+            {
+                hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                hr = DispGetParam(pDispParams, 1, VT_BSTR, &varg1, puArgErr);
+                if (FAILED(hr))
+                {
+                    VariantClear(&varg0);
+                    return hr;
+                }
+                if ((ret = MsiInstallProductW(V_BSTR(&varg0), V_BSTR(&varg1))) != ERROR_SUCCESS)
+                {
+                    VariantClear(&varg1);
+                    VariantClear(&varg0);
+                    ERR("MsiInstallProduct returned %d\n", ret);
+                    return DISP_E_EXCEPTION;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
 
         case DISPID_INSTALLER_REGISTRYVALUE:
             if (wFlags & DISPATCH_METHOD) {
                 HKEY hkey;
-                LPWSTR szString = NULL;
-                DWORD dwSize = 0, dwType;
+                DWORD dwType;
                 UINT posValue = 2;    /* Save valuePos so we can save puArgErr if we are unable to do our type conversions */
 
                 hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
@@ -1224,6 +1714,7 @@ static HRESULT WINAPI InstallerImpl_Invoke(
                 msi_free(szString);
                 RegCloseKey(hkey);
             }
+            else return DISP_E_MEMBERNOTFOUND;
             break;
 
         case DISPID_INSTALLER_PRODUCTSTATE:
@@ -1233,49 +1724,132 @@ static HRESULT WINAPI InstallerImpl_Invoke(
                 V_VT(pVarResult) = VT_I4;
                 V_I4(pVarResult) = MsiQueryProductStateW(V_BSTR(&varg0));
             }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_INSTALLER_PRODUCTINFO:
+            if (wFlags & DISPATCH_PROPERTYGET) {
+                hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                hr = DispGetParam(pDispParams, 1, VT_BSTR, &varg1, puArgErr);
+                if (FAILED(hr))
+                {
+                    VariantClear(&varg0);
+                    return hr;
+                }
+                V_VT(pVarResult) = VT_BSTR;
+                V_BSTR(pVarResult) = NULL;
+                if ((ret = MsiGetProductInfoW(V_BSTR(&varg0), V_BSTR(&varg1), NULL, &dwSize)) == ERROR_SUCCESS)
+                {
+                    if (!(szString = msi_alloc((++dwSize)*sizeof(WCHAR))))
+                        ERR("Out of memory\n");
+                    else if ((ret = MsiGetProductInfoW(V_BSTR(&varg0), V_BSTR(&varg1), szString, &dwSize)) == ERROR_SUCCESS)
+                        V_BSTR(pVarResult) = SysAllocString(szString);
+                    msi_free(szString);
+                }
+                if (ret != ERROR_SUCCESS)
+                {
+                    ERR("MsiGetProductInfo returned %d\n", ret);
+                    VariantClear(&varg1);
+                    VariantClear(&varg0);
+                    return DISP_E_EXCEPTION;
+                }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
             break;
 
         case DISPID_INSTALLER_PRODUCTS:
             if (wFlags & DISPATCH_PROPERTYGET)
             {
-                StringListData *sldata = NULL;
-                int idx = 0;
+                ListData *ldata = NULL;
+                ULONG idx = 0;
                 WCHAR szProductBuf[GUID_SIZE];
 
                 /* Find number of products */
-                do {
-                    ret = MsiEnumProductsW(idx, szProductBuf);
-                    if (ret == ERROR_SUCCESS) idx++;
-                } while (ret == ERROR_SUCCESS && ret != ERROR_NO_MORE_ITEMS);
-
-                if (ret != ERROR_SUCCESS && ret != ERROR_NO_MORE_ITEMS)
+                while ((ret = MsiEnumProductsW(idx, szProductBuf)) == ERROR_SUCCESS) idx++;
+                if (ret != ERROR_NO_MORE_ITEMS)
                 {
                     ERR("MsiEnumProducts returned %d\n", ret);
                     return DISP_E_EXCEPTION;
                 }
 
                 V_VT(pVarResult) = VT_DISPATCH;
-                if (SUCCEEDED(hr = create_automation_object(0, NULL, (LPVOID*)&pDispatch, &DIID_StringList, StringListImpl_Invoke, StringListImpl_Free, sizeof(StringListData))))
+                if (SUCCEEDED(hr = create_automation_object(0, NULL, (LPVOID*)&pDispatch, &DIID_StringList, ListImpl_Invoke, ListImpl_Free, sizeof(ListData))))
                 {
                     IDispatch_AddRef(pDispatch);
                     V_DISPATCH(pVarResult) = pDispatch;
 
                     /* Save product strings */
-                    sldata = (StringListData *)private_data((AutomationObject *)pDispatch);
-                    sldata->iCount = idx;
-                    sldata->pszStrings = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(LPWSTR)*sldata->iCount);
-                    for (idx = 0; idx < sldata->iCount; idx++)
+                    ldata = (ListData *)private_data((AutomationObject *)pDispatch);
+                    if (!(ldata->pVars = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(VARIANT)*idx)))
+                        ERR("Out of memory\n");
+                    else
                     {
-                        ret = MsiEnumProductsW(idx, szProductBuf);
-                        sldata->pszStrings[idx] = SysAllocString(szProductBuf);
+                        ldata->ulCount = idx;
+                        for (idx = 0; idx < ldata->ulCount; idx++)
+                        {
+                            ret = MsiEnumProductsW(idx, szProductBuf);
+                            VariantInit(&ldata->pVars[idx]);
+                            V_VT(&ldata->pVars[idx]) = VT_BSTR;
+                            V_BSTR(&ldata->pVars[idx]) = SysAllocString(szProductBuf);
+                        }
                     }
                 }
                 else
                     ERR("Failed to create StringList object, hresult 0x%08x\n", hr);
             }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_INSTALLER_RELATEDPRODUCTS:
+            if (wFlags & DISPATCH_PROPERTYGET)
+            {
+                ListData *ldata = NULL;
+                ULONG idx = 0;
+                WCHAR szProductBuf[GUID_SIZE];
+
+                hr = DispGetParam(pDispParams, 0, VT_BSTR, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+
+                /* Find number of related products */
+                while ((ret = MsiEnumRelatedProductsW(V_BSTR(&varg0), 0, idx, szProductBuf)) == ERROR_SUCCESS) idx++;
+                if (ret != ERROR_NO_MORE_ITEMS)
+                {
+                    VariantClear(&varg0);
+                    ERR("MsiEnumRelatedProducts returned %d\n", ret);
+                    return DISP_E_EXCEPTION;
+                }
+
+                V_VT(pVarResult) = VT_DISPATCH;
+                if (SUCCEEDED(hr = create_automation_object(0, NULL, (LPVOID*)&pDispatch, &DIID_StringList, ListImpl_Invoke, ListImpl_Free, sizeof(ListData))))
+                {
+                    IDispatch_AddRef(pDispatch);
+                    V_DISPATCH(pVarResult) = pDispatch;
+
+                    /* Save product strings */
+                    ldata = (ListData *)private_data((AutomationObject *)pDispatch);
+                    if (!(ldata->pVars = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(VARIANT)*idx)))
+                        ERR("Out of memory\n");
+                    else
+                    {
+                        ldata->ulCount = idx;
+                        for (idx = 0; idx < ldata->ulCount; idx++)
+                        {
+                            ret = MsiEnumRelatedProductsW(V_BSTR(&varg0), 0, idx, szProductBuf);
+                            VariantInit(&ldata->pVars[idx]);
+                            V_VT(&ldata->pVars[idx]) = VT_BSTR;
+                            V_BSTR(&ldata->pVars[idx]) = SysAllocString(szProductBuf);
+                        }
+                    }
+                }
+                else
+                    ERR("Failed to create StringList object, hresult 0x%08x\n", hr);
+            }
+            else return DISP_E_MEMBERNOTFOUND;
             break;
 
          default:
+            ERR("Member not found: %d\n", dispIdMember);
             return DISP_E_MEMBERNOTFOUND;
     }
 

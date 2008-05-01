@@ -44,8 +44,6 @@ struct pool /* poor's man */
 void     pool_init(struct pool* a, unsigned arena_size);
 void     pool_destroy(struct pool* a);
 void*    pool_alloc(struct pool* a, unsigned len);
-/* void*    pool_realloc(struct pool* a, void* p,
-   unsigned old_size, unsigned new_size); */
 char*    pool_strdup(struct pool* a, const char* str);
 
 struct vector
@@ -55,15 +53,13 @@ struct vector
     unsigned    shift;
     unsigned    num_elts;
     unsigned    num_buckets;
+    unsigned    buckets_allocated;
 };
 
 void     vector_init(struct vector* v, unsigned elt_sz, unsigned bucket_sz);
 unsigned vector_length(const struct vector* v);
 void*    vector_at(const struct vector* v, unsigned pos);
 void*    vector_add(struct vector* v, struct pool* pool);
-/*void     vector_pool_normalize(struct vector* v, struct pool* pool); */
-void*    vector_iter_up(const struct vector* v, const void* elt);
-void*    vector_iter_down(const struct vector* v, const void* elt);
 
 struct sparse_array
 {
@@ -87,6 +83,7 @@ struct hash_table
     unsigned                    num_elts;
     unsigned                    num_buckets;
     struct hash_table_elt**     buckets;
+    struct pool*                pool;
 };
 
 void     hash_table_init(struct pool* pool, struct hash_table* ht,

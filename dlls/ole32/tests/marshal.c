@@ -78,7 +78,6 @@ static void test_cocreateinstance_proxy(void)
     hr = CoCreateInstance(&CLSID_ShellDesktop, NULL, CLSCTX_INPROC, &IID_IUnknown, (void **)&pProxy);
     ok_ole_success(hr, CoCreateInstance);
     hr = IUnknown_QueryInterface(pProxy, &IID_IMultiQI, (void **)&pMQI);
-    todo_wine
     ok(hr == S_OK, "created object is not a proxy, so was created in the wrong apartment\n");
     if (hr == S_OK)
         IMultiQI_Release(pMQI);
@@ -242,7 +241,6 @@ static DWORD CALLBACK host_object_proc(LPVOID p)
     {
         if (msg.hwnd == NULL && msg.message == RELEASEMARSHALDATA)
         {
-            trace("releasing marshal data\n");
             CoReleaseMarshalData(data->stream);
             SetEvent((HANDLE)msg.lParam);
         }
@@ -524,14 +522,6 @@ static void test_proxy_marshal_and_unmarshal(void)
 
     ok_more_than_one_lock();
 
-    /* now the proxies should be as follows:
-     *  pProxy2 -> &Test_ClassFactory
-     * they should NOT be as follows:
-     *  pProxy -> &Test_ClassFactory
-     *  pProxy2 -> pProxy
-     * the above can only really be tested by looking in +ole traces
-     */
-
     IUnknown_Release(pProxy2);
 
     /* unmarshal all of the proxies to check that the object stub still exists */
@@ -608,6 +598,112 @@ static void test_proxy_marshal_and_unmarshal2(void)
     ok_no_locks();
 
     end_host_object(tid, thread);
+}
+
+/* tests success case of an interthread marshal and then table-weak-marshaling the proxy */
+static void test_proxy_marshal_and_unmarshal_weak(void)
+{
+    HRESULT hr;
+    IStream *pStream = NULL;
+    IUnknown *pProxy = NULL;
+    IUnknown *pProxy2 = NULL;
+    DWORD tid;
+    HANDLE thread;
+
+    cLocks = 0;
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
+    ok_ole_success(hr, CreateStreamOnHGlobal);
+    tid = start_host_object(pStream, &IID_IClassFactory, (IUnknown*)&Test_ClassFactory, MSHLFLAGS_NORMAL, &thread);
+
+    ok_more_than_one_lock();
+
+    IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
+    hr = CoUnmarshalInterface(pStream, &IID_IClassFactory, (void **)&pProxy);
+    ok_ole_success(hr, CoUnmarshalInterface);
+
+    ok_more_than_one_lock();
+
+    IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
+    /* marshal the proxy */
+    hr = CoMarshalInterface(pStream, &IID_IClassFactory, pProxy, MSHCTX_INPROC, NULL, MSHLFLAGS_TABLEWEAK);
+    ok_ole_success(hr, CoMarshalInterface);
+
+    ok_more_than_one_lock();
+
+    /* release the original proxy to test that we successfully keep the
+     * original object alive */
+    IUnknown_Release(pProxy);
+
+    IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
+    hr = CoUnmarshalInterface(pStream, &IID_IClassFactory, (void **)&pProxy2);
+    todo_wine
+    ok(hr == CO_E_OBJNOTREG, "CoUnmarshalInterface should return CO_E_OBJNOTREG instead of 0x%08x\n", hr);
+
+    ok_no_locks();
+
+    IStream_Release(pStream);
+
+    end_host_object(tid, thread);
+}
+
+/* tests success case of an interthread marshal and then table-strong-marshaling the proxy */
+static void test_proxy_marshal_and_unmarshal_strong(void)
+{
+    HRESULT hr;
+    IStream *pStream = NULL;
+    IUnknown *pProxy = NULL;
+    IUnknown *pProxy2 = NULL;
+    DWORD tid;
+    HANDLE thread;
+
+    cLocks = 0;
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
+    ok_ole_success(hr, CreateStreamOnHGlobal);
+    tid = start_host_object(pStream, &IID_IClassFactory, (IUnknown*)&Test_ClassFactory, MSHLFLAGS_NORMAL, &thread);
+
+    ok_more_than_one_lock();
+
+    IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
+    hr = CoUnmarshalInterface(pStream, &IID_IClassFactory, (void **)&pProxy);
+    ok_ole_success(hr, CoUnmarshalInterface);
+
+    ok_more_than_one_lock();
+
+    IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
+    /* marshal the proxy */
+    hr = CoMarshalInterface(pStream, &IID_IClassFactory, pProxy, MSHCTX_INPROC, NULL, MSHLFLAGS_TABLESTRONG);
+    ok(hr == S_OK /* WinNT */ || hr == E_INVALIDARG /* Win9x */,
+        "CoMarshalInterface should have return S_OK or E_INVALIDARG instead of 0x%08x\n", hr);
+    if (FAILED(hr))
+    {
+        IUnknown_Release(pProxy);
+        goto end;
+    }
+
+    ok_more_than_one_lock();
+
+    /* release the original proxy to test that we successfully keep the
+     * original object alive */
+    IUnknown_Release(pProxy);
+
+    IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
+    hr = CoUnmarshalInterface(pStream, &IID_IClassFactory, (void **)&pProxy2);
+    ok_ole_success(hr, CoUnmarshalInterface);
+
+    ok_more_than_one_lock();
+
+    IUnknown_Release(pProxy2);
+
+    ok_more_than_one_lock();
+
+end:
+    IStream_Release(pStream);
+
+    end_host_object(tid, thread);
+
+    ok_no_locks();
 }
 
 /* tests that stubs are released when the containing apartment is destroyed */
@@ -1178,6 +1274,24 @@ static DWORD CALLBACK bad_thread_proc(LPVOID p)
     HRESULT hr;
     IUnknown * proxy = NULL;
 
+    hr = IClassFactory_CreateInstance(cf, NULL, &IID_IUnknown, (LPVOID*)&proxy);
+    todo_wine
+    ok(hr == CO_E_NOTINITIALIZED,
+       "COM should have failed with CO_E_NOTINITIALIZED on using proxy without apartment, but instead returned 0x%08x\n",
+       hr);
+
+    hr = IClassFactory_QueryInterface(cf, &IID_IMultiQI, (LPVOID *)&proxy);
+    /* Win9x returns S_OK, whilst NT returns RPC_E_WRONG_THREAD */
+    trace("call to proxy's QueryInterface for local interface without apartment returned 0x%08x\n", hr);
+    if (SUCCEEDED(hr))
+        IUnknown_Release(proxy);
+
+    hr = IClassFactory_QueryInterface(cf, &IID_IStream, (LPVOID *)&proxy);
+    /* Win9x returns E_NOINTERFACE, whilst NT returns RPC_E_WRONG_THREAD */
+    trace("call to proxy's QueryInterface without apartment returned 0x%08x\n", hr);
+    if (SUCCEEDED(hr))
+        IUnknown_Release(proxy);
+
     pCoInitializeEx(NULL, COINIT_MULTITHREADED);
 
     hr = IClassFactory_CreateInstance(cf, NULL, &IID_IUnknown, (LPVOID*)&proxy);
@@ -1185,6 +1299,19 @@ static DWORD CALLBACK bad_thread_proc(LPVOID p)
     ok(hr == RPC_E_WRONG_THREAD,
         "COM should have failed with RPC_E_WRONG_THREAD on using proxy from wrong apartment, but instead returned 0x%08x\n",
         hr);
+
+    hr = IClassFactory_QueryInterface(cf, &IID_IStream, (LPVOID *)&proxy);
+    /* Win9x returns E_NOINTERFACE, whilst NT returns RPC_E_WRONG_THREAD */
+    trace("call to proxy's QueryInterface from wrong apartment returned 0x%08x\n", hr);
+
+    /* this statement causes Win9x DCOM to crash during CoUninitialize of
+     * other apartment, so don't test this on Win9x (signified by NT-only
+     * export of CoRegisterSurrogateEx) */
+    if (GetProcAddress(GetModuleHandle("ole32"), "CoRegisterSurrogateEx"))
+        /* now be really bad and release the proxy from the wrong apartment */
+        IUnknown_Release(cf);
+    else
+        skip("skipping test for releasing proxy from wrong apartment that will succeed, but cause a crash during CoUninitialize\n");
 
     CoUninitialize();
 
@@ -1216,13 +1343,18 @@ static void test_proxy_used_in_wrong_thread(void)
 
     ok_more_than_one_lock();
 
+    /* do a call that will fail, but result in IRemUnknown being used by the proxy */
+    IClassFactory_QueryInterface(pProxy, &IID_IStream, (LPVOID *)&pStream);
+
     /* create a thread that we can misbehave in */
     thread = CreateThread(NULL, 0, bad_thread_proc, (LPVOID)pProxy, 0, &tid2);
 
     WaitForSingleObject(thread, INFINITE);
     CloseHandle(thread);
 
-    IUnknown_Release(pProxy);
+    /* do release statement on Win9x that we should have done above */
+    if (!GetProcAddress(GetModuleHandle("ole32"), "CoRegisterSurrogateEx"))
+        IUnknown_Release(pProxy);
 
     ok_no_locks();
 
@@ -2456,10 +2588,11 @@ static DWORD CALLBACK get_global_interface_proc(LPVOID pv)
 		hr);
 
 	CoInitialize(NULL);
+
 	hr = IGlobalInterfaceTable_GetInterfaceFromGlobal(params->git, params->cookie, &IID_IClassFactory, (void **)&cf);
 	ok_ole_success(hr, IGlobalInterfaceTable_GetInterfaceFromGlobal);
 
-	IGlobalInterfaceTable_Release(params->git);
+	IClassFactory_Release(cf);
 
 	CoUninitialize();
 
@@ -2475,12 +2608,18 @@ static void test_globalinterfacetable(void)
 	DWORD tid;
 	struct git_params params;
 	DWORD ret;
+        IUnknown *object;
+
+        trace("test_globalinterfacetable\n");
+	cLocks = 0;
 
 	hr = CoCreateInstance(&CLSID_StdGlobalInterfaceTable, NULL, CLSCTX_INPROC_SERVER, &IID_IGlobalInterfaceTable, (void **)&git);
 	ok_ole_success(hr, CoCreateInstance);
 
 	hr = IGlobalInterfaceTable_RegisterInterfaceInGlobal(git, (IUnknown *)&Test_ClassFactory, &IID_IClassFactory, &cookie);
 	ok_ole_success(hr, IGlobalInterfaceTable_RegisterInterfaceInGlobal);
+
+	ok_more_than_one_lock();
 
 	params.cookie = cookie;
 	params.git = git;
@@ -2498,6 +2637,23 @@ static void test_globalinterfacetable(void)
 	}
 
 	CloseHandle(thread);
+
+	/* test getting interface from global with different iid */
+	hr = IGlobalInterfaceTable_GetInterfaceFromGlobal(git, cookie, &IID_IUnknown, (void **)&object);
+	ok_ole_success(hr, IGlobalInterfaceTable_GetInterfaceFromGlobal);
+	IUnknown_Release(object);
+
+	/* test getting interface from global with same iid */
+	hr = IGlobalInterfaceTable_GetInterfaceFromGlobal(git, cookie, &IID_IClassFactory, (void **)&object);
+	ok_ole_success(hr, IGlobalInterfaceTable_GetInterfaceFromGlobal);
+	IUnknown_Release(object);
+
+	hr = IGlobalInterfaceTable_RevokeInterfaceFromGlobal(git, cookie);
+	ok_ole_success(hr, IGlobalInterfaceTable_RevokeInterfaceFromGlobal);
+
+	ok_no_locks();
+
+	IGlobalInterfaceTable_Release(git);
 }
 
 static const char *debugstr_iid(REFIID riid)
@@ -2751,6 +2907,8 @@ START_TEST(marshal)
     test_interthread_marshal_and_unmarshal();
     test_proxy_marshal_and_unmarshal();
     test_proxy_marshal_and_unmarshal2();
+    test_proxy_marshal_and_unmarshal_weak();
+    test_proxy_marshal_and_unmarshal_strong();
     test_marshal_stub_apartment_shutdown();
     test_marshal_proxy_apartment_shutdown();
     test_marshal_proxy_mta_apartment_shutdown();

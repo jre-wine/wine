@@ -21,8 +21,10 @@
 #include <windows.h>
 #include "wine/test.h"
 #include "server.h"
+#include "server_defines.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #define PORT "4114"
 #define PIPE "\\pipe\\wine_rpcrt4_test"
@@ -126,6 +128,40 @@ s_ptypes_sum(ptypes_t *pt)
   return *pt->pc + *pt->ps + *pt->pl + *pt->pf + *pt->pd;
 }
 
+int
+s_dot_pvectors(pvectors_t *p)
+{
+  return p->pu->x * (*p->pv)->x + p->pu->y * (*p->pv)->y + p->pu->z * (*p->pv)->z;
+}
+
+int
+s_sum_sp(sp_t *sp)
+{
+  return sp->x + sp->s->x;
+}
+
+double
+s_square_sun(sun_t *su)
+{
+  switch (su->s)
+  {
+  case SUN_I: return su->u.i * su->u.i;
+  case SUN_F1:
+  case SUN_F2: return su->u.f * su->u.f;
+  case SUN_PI: return (*su->u.pi) * (*su->u.pi);
+  default:
+    return 0.0;
+  }
+}
+
+int
+s_test_list_length(test_list_t *list)
+{
+  return (list->t == TL_LIST
+          ? 1 + s_test_list_length(list->u.tail)
+          : 0);
+}
+
 void
 s_stop(void)
 {
@@ -167,6 +203,10 @@ basic_tests(void)
   static char string[] = "I am a string";
   static int f[5] = {1, 3, 0, -2, -4};
   static vector_t a = {1, 3, 7};
+  static vector_t vec1 = {4, -2, 1}, vec2 = {-5, 2, 3}, *pvec2 = &vec2;
+  static pvectors_t pvecs = {&vec1, &pvec2};
+  static sp_inner_t spi = {42};
+  static sp_t sp = {-13, &spi};
   pints_t pints;
   ptypes_t ptypes;
   int i1, i2, i3, *pi2, *pi3, **ppi3;
@@ -231,7 +271,68 @@ basic_tests(void)
   ptypes.pd = &u;
   ok(ptypes_sum(&ptypes) == 33.0, "RPC ptypes_sum\n");
 
+  ok(dot_pvectors(&pvecs) == -21, "RPC dot_pvectors\n");
   ok(sum_fixed_array(f) == -2, "RPC sum_fixed_array\n");
+  ok(sum_sp(&sp) == 29, "RPC sum_sp\n");
+}
+
+static void
+union_tests(void)
+{
+  sun_t su;
+  int i;
+
+  su.s = SUN_I;
+  su.u.i = 9;
+  ok(square_sun(&su) == 81.0, "RPC square_sun\n");
+
+  su.s = SUN_F1;
+  su.u.f = 5.0;
+  ok(square_sun(&su) == 25.0, "RPC square_sun\n");
+
+  su.s = SUN_F2;
+  su.u.f = -2.0;
+  ok(square_sun(&su) == 4.0, "RPC square_sun\n");
+
+  su.s = SUN_PI;
+  su.u.pi = &i;
+  i = 11;
+  ok(square_sun(&su) == 121.0, "RPC square_sun\n");
+}
+
+static test_list_t *
+null_list(void)
+{
+  test_list_t *n = HeapAlloc(GetProcessHeap(), 0, sizeof *n);
+  n->t = TL_NULL;
+  return n;
+}
+
+static test_list_t *
+make_list(test_list_t *tail)
+{
+  test_list_t *n = HeapAlloc(GetProcessHeap(), 0, sizeof *n);
+  n->t = TL_LIST;
+  n->u.tail = tail;
+  return n;
+}
+
+static void
+free_list(test_list_t *list)
+{
+  if (list->t == TL_LIST)
+    free_list(list->u.tail);
+  HeapFree(GetProcessHeap(), 0, list);
+}
+
+static void
+pointer_tests(void)
+{
+  test_list_t *list = make_list(make_list(make_list(null_list())));
+
+  ok(test_list_length(list) == 3, "RPC test_list_length\n");
+
+  free_list(list);
 }
 
 static void
@@ -248,6 +349,8 @@ client(const char *test)
     ok(RPC_S_OK == RpcBindingFromStringBinding(binding, &IServer_IfHandle), "RpcBindingFromStringBinding\n");
 
     basic_tests();
+    union_tests();
+    pointer_tests();
 
     ok(RPC_S_OK == RpcStringFree(&binding), "RpcStringFree\n");
     ok(RPC_S_OK == RpcBindingFree(&IServer_IfHandle), "RpcBindingFree\n");
@@ -263,6 +366,8 @@ client(const char *test)
     ok(RPC_S_OK == RpcBindingFromStringBinding(binding, &IServer_IfHandle), "RpcBindingFromStringBinding\n");
 
     basic_tests();
+    union_tests();
+    pointer_tests();
     stop();
 
     ok(RPC_S_OK == RpcStringFree(&binding), "RpcStringFree\n");

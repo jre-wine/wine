@@ -1,7 +1,7 @@
 /*
- * NetBIOS interrupt handling
+ * Constants shared between server.c and server.idl
  *
- * Copyright 1995 Alexandre Julliard, Alex Korobka
+ * Copyright (C) Google 2007 (Dan Hipschman)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,22 +18,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "dosexe.h"
-#include "wine/debug.h"
+/* sun_t case values */
+#define SUN_I 10
+#define SUN_F1 -2
+#define SUN_F2 7
+#define SUN_PI 399
 
-WINE_DEFAULT_DEBUG_CHANNEL(int);
-
-
-/***********************************************************************
- *           DOSVM_Int5cHandler (WINEDOS16.192)
- *
- * Called from NetBIOSCall16.
- */
-void WINAPI DOSVM_Int5cHandler( CONTEXT86 *context )
-{
-    BYTE* ptr;
-    ptr = MapSL( MAKESEGPTR(context->SegEs,BX_reg(context)) );
-    FIXME("(%p): command code %02x (ignored)\n",context, *ptr);
-    *(ptr+0x01) = 0xFB; /* NetBIOS emulator not found */
-    SET_AL( context, 0xFB );
-}
+/* test_list_t case values */
+#define TL_NULL 0
+#define TL_LIST 1

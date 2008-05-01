@@ -30,7 +30,6 @@
 #include "windef.h"
 #include "wingdi.h"
 #include "pidl.h"
-#include "shlguid.h"
 #include "undocshell.h"
 #include "shlobj.h"
 
@@ -461,7 +460,7 @@ static HRESULT WINAPI ISvItemCm_fnGetCommandString(
 
 	HRESULT  hr = E_INVALIDARG;
 
-	TRACE("(%p)->(idcom=%x flags=%x %p name=%p len=%x)\n",This, idCommand, uFlags, lpReserved, lpszName, uMaxNameLen);
+	TRACE("(%p)->(idcom=%lx flags=%x %p name=%p len=%x)\n",This, idCommand, uFlags, lpReserved, lpszName, uMaxNameLen);
 
 	switch(uFlags)
 	{
@@ -514,7 +513,7 @@ static HRESULT WINAPI ISvItemCm_fnHandleMenuMsg(
 {
 	ItemCmImpl *This = (ItemCmImpl *)iface;
 
-	TRACE("(%p)->(msg=%x wp=%x lp=%lx)\n",This, uMsg, wParam, lParam);
+	TRACE("(%p)->(msg=%x wp=%lx lp=%lx)\n",This, uMsg, wParam, lParam);
 
 	return E_NOTIMPL;
 }

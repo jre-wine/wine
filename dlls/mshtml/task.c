@@ -66,7 +66,7 @@ static task_t *pop_task(void)
     return task;
 }
 
-void remove_doc_tasks(HTMLDocument *doc)
+void remove_doc_tasks(const HTMLDocument *doc)
 {
     thread_data_t *thread_data = get_thread_data(FALSE);
     task_t *iter, *tmp;
@@ -260,7 +260,7 @@ static LRESULT WINAPI hidden_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     }
 
     if(msg > WM_USER)
-        FIXME("(%p %d %x %lx)\n", hwnd, msg, wParam, lParam);
+        FIXME("(%p %d %lx %lx)\n", hwnd, msg, wParam, lParam);
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }

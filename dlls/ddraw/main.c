@@ -59,15 +59,14 @@ WINED3DSURFTYPE DefaultSurfaceType = SURFACE_UNKNOWN;
 /* DDraw list and critical section */
 static struct list global_ddraw_list = LIST_INIT(global_ddraw_list);
 
-static CRITICAL_SECTION ddraw_list_cs;
-static CRITICAL_SECTION_DEBUG ddraw_list_cs_debug =
+static CRITICAL_SECTION_DEBUG ddraw_cs_debug =
 {
-    0, 0, &ddraw_list_cs,
-    { &ddraw_list_cs_debug.ProcessLocksList, 
-    &ddraw_list_cs_debug.ProcessLocksList },
-    0, 0, { (DWORD_PTR)(__FILE__ ": ddraw_list_cs") }
+    0, 0, &ddraw_cs,
+    { &ddraw_cs_debug.ProcessLocksList,
+    &ddraw_cs_debug.ProcessLocksList },
+    0, 0, { (DWORD_PTR)(__FILE__ ": ddraw_cs") }
 };
-static CRITICAL_SECTION ddraw_list_cs = { &ddraw_list_cs_debug, -1, 0, 0, 0, 0 };
+CRITICAL_SECTION ddraw_cs = { &ddraw_cs_debug, -1, 0, 0, 0, 0 };
 
 /***********************************************************************
  *
@@ -318,10 +317,7 @@ DDRAW_Create(const GUID *guid,
 #undef FX_CAPS
 
     list_init(&This->surface_list);
-
-    EnterCriticalSection(&ddraw_list_cs);
     list_add_head(&global_ddraw_list, &This->ddraw_list_entry);
-    LeaveCriticalSection(&ddraw_list_cs);
 
     This->decls = HeapAlloc(GetProcessHeap(), 0, 0);
     if(!This->decls)
@@ -359,9 +355,13 @@ DirectDrawCreate(GUID *GUID,
                  IDirectDraw **DD,
                  IUnknown *UnkOuter)
 {
+    HRESULT hr;
     TRACE("(%s,%p,%p)\n", debugstr_guid(GUID), DD, UnkOuter);
 
-    return DDRAW_Create(GUID, (void **) DD, UnkOuter, &IID_IDirectDraw);
+    EnterCriticalSection(&ddraw_cs);
+    hr = DDRAW_Create(GUID, (void **) DD, UnkOuter, &IID_IDirectDraw);
+    LeaveCriticalSection(&ddraw_cs);
+    return hr;
 }
 
 /***********************************************************************
@@ -379,12 +379,16 @@ DirectDrawCreateEx(GUID *GUID,
                    REFIID iid,
                    IUnknown *UnkOuter)
 {
+    HRESULT hr;
     TRACE("(%s,%p,%s,%p)\n", debugstr_guid(GUID), DD, debugstr_guid(iid), UnkOuter);
 
     if (!IsEqualGUID(iid, &IID_IDirectDraw7))
         return DDERR_INVALIDPARAMS;
 
-    return DDRAW_Create(GUID, DD, UnkOuter, iid);
+    EnterCriticalSection(&ddraw_cs);
+    hr = DDRAW_Create(GUID, DD, UnkOuter, iid);
+    LeaveCriticalSection(&ddraw_cs);
+    return hr;
 }
 
 /***********************************************************************
@@ -514,7 +518,9 @@ CF_CreateDirectDraw(IUnknown* UnkOuter, REFIID iid,
 
     TRACE("(%p,%s,%p)\n", UnkOuter, debugstr_guid(iid), obj);
 
+    EnterCriticalSection(&ddraw_cs);
     hr = DDRAW_Create(NULL, obj, UnkOuter, iid);
+    LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
 
@@ -539,11 +545,18 @@ CF_CreateDirectDrawClipper(IUnknown* UnkOuter, REFIID riid,
     HRESULT hr;
     IDirectDrawClipper *Clip;
 
+    EnterCriticalSection(&ddraw_cs);
     hr = DirectDrawCreateClipper(0, &Clip, UnkOuter);
-    if (hr != DD_OK) return hr;
+    if (hr != DD_OK)
+    {
+        LeaveCriticalSection(&ddraw_cs);
+        return hr;
+    }
 
     hr = IDirectDrawClipper_QueryInterface(Clip, riid, obj);
     IDirectDrawClipper_Release(Clip);
+
+    LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
 
@@ -752,8 +765,14 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
  */
 HRESULT WINAPI DllCanUnloadNow(void)
 {
+    HRESULT hr;
     FIXME("(void): stub\n");
-    return S_FALSE;
+
+    EnterCriticalSection(&ddraw_cs);
+    hr = S_FALSE;
+    LeaveCriticalSection(&ddraw_cs);
+
+    return hr;
 }
 
 /*******************************************************************************
@@ -943,12 +962,4 @@ DllMain(HINSTANCE hInstDLL,
     }
 
     return TRUE;
-}
-
-void
-remove_ddraw_object(IDirectDrawImpl *ddraw)
-{
-    EnterCriticalSection(&ddraw_list_cs);
-    list_remove(&ddraw->ddraw_list_entry);
-    LeaveCriticalSection(&ddraw_list_cs);
 }

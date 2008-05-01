@@ -124,7 +124,7 @@ static BOOL check_execution_scheduling_options(MSIPACKAGE *package, LPCWSTR acti
 /* stores the CustomActionData before the action:
  *     [CustomActionData]Action
  */
-static LPWSTR msi_get_deferred_action(LPCWSTR action, LPWSTR actiondata)
+static LPWSTR msi_get_deferred_action(LPCWSTR action, LPCWSTR actiondata)
 {
     LPWSTR deferred;
     DWORD len;
@@ -389,7 +389,7 @@ static UINT custom_get_process_return( HANDLE process )
     return ERROR_SUCCESS;
 }
 
-static UINT custom_get_thread_return( HANDLE thread )
+static UINT custom_get_thread_return( MSIPACKAGE *package, HANDLE thread )
 {
     DWORD rc = 0;
 
@@ -403,6 +403,9 @@ static UINT custom_get_thread_return( HANDLE thread )
     case ERROR_INSTALL_FAILURE:
         return rc;
     case ERROR_NO_MORE_ITEMS:
+        return ERROR_SUCCESS;
+    case ERROR_INSTALL_SUSPEND:
+        ACTION_ForceReboot( package );
         return ERROR_SUCCESS;
     default:
         ERR("Invalid Return Code %d\n",rc);
@@ -475,7 +478,7 @@ static UINT wait_thread_handle( msi_custom_action_info *info )
         msi_dialog_check_messages( info->handle );
 
         if (!(info->type & msidbCustomActionTypeContinue))
-            rc = custom_get_thread_return( info->handle );
+            rc = custom_get_thread_return( info->package, info->handle );
 
         free_custom_action_data( info );
     }
@@ -509,6 +512,40 @@ static msi_custom_action_info *find_action_by_guid( const GUID *guid )
         return NULL;
 
     return info;
+}
+
+static void handle_msi_break( LPCWSTR target )
+{
+    LPWSTR msg;
+    WCHAR val[MAX_PATH];
+
+    static const WCHAR MsiBreak[] = { 'M','s','i','B','r','e','a','k',0 };
+    static const WCHAR WindowsInstaller[] = {
+        'W','i','n','d','o','w','s',' ','I','n','s','t','a','l','l','e','r',0
+    };
+
+    static const WCHAR format[] = {
+        'T','o',' ','d','e','b','u','g',' ','y','o','u','r',' ',
+        'c','u','s','t','o','m',' ','a','c','t','i','o','n',',',' ',
+        'a','t','t','a','c','h',' ','y','o','u','r',' ','d','e','b','u','g','g','e','r',' ',
+        't','o',' ','p','r','o','c','e','s','s',' ','%','i',' ','(','0','x','%','X',')',' ',
+        'a','n','d',' ','p','r','e','s','s',' ','O','K',0
+    };
+
+    if( !GetEnvironmentVariableW( MsiBreak, val, MAX_PATH ))
+        return;
+
+    if( lstrcmpiW( val, target ))
+        return;
+
+    msg = msi_alloc( (lstrlenW(format) + 10) * sizeof(WCHAR) );
+    if (!msg)
+        return;
+
+    wsprintfW( msg, format, GetCurrentProcessId(), GetCurrentProcessId());
+    MessageBoxW( NULL, msg, WindowsInstaller, MB_OK);
+    msi_free(msg);
+    DebugBreak();
 }
 
 static DWORD WINAPI ACTION_CallDllFunction( const GUID *guid )
@@ -545,6 +582,7 @@ static DWORD WINAPI ACTION_CallDllFunction( const GUID *guid )
         if (hPackage)
         {
             TRACE("calling %s\n", debugstr_w( info->target ) );
+            handle_msi_break( info->target );
             r = fn( hPackage );
             MsiCloseHandle( hPackage );
         }
@@ -978,7 +1016,7 @@ static UINT HANDLE_CustomType34(MSIPACKAGE *package, LPCWSTR source,
     return wait_process_handle(package, type, info.hProcess, action);
 }
 
-static DWORD WINAPI ACTION_CallScript( const LPGUID guid )
+static DWORD WINAPI ACTION_CallScript( const GUID *guid )
 {
     msi_custom_action_info *info;
     MSIHANDLE hPackage;
@@ -1197,7 +1235,7 @@ static UINT HANDLE_CustomType53_54(MSIPACKAGE *package, LPCWSTR source,
     return wait_thread_handle( info );
 }
 
-void ACTION_FinishCustomActions(MSIPACKAGE* package)
+void ACTION_FinishCustomActions(const MSIPACKAGE* package)
 {
     struct list *item;
     HANDLE *wait_handles;

@@ -1240,7 +1240,7 @@ INT WINAPI GetLocaleInfoW( LCID lcid, LCTYPE lctype, LPWSTR buffer, INT len )
         lang_id = MAKELANGID(PRIMARYLANGID(lang_id), SUBLANG_DEFAULT);
 
     if (!(hrsrc = FindResourceExW( kernel32_handle, (LPWSTR)RT_STRING,
-                                   (LPCWSTR)((lctype >> 4) + 1), lang_id )))
+                                   ULongToPtr((lctype >> 4) + 1), lang_id )))
     {
         SetLastError( ERROR_INVALID_FLAGS );  /* no such lctype */
         return 0;
@@ -1764,7 +1764,6 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
 {
     const union cptable *table;
     int ret;
-    static int once;
 
     if (!src || (!dst && dstlen))
     {
@@ -1773,12 +1772,6 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
     }
 
     if (srclen < 0) srclen = strlen(src) + 1;
-
-    if (!once && (flags & MB_USEGLYPHCHARS))
-    {
-        once = 1;
-        FIXME("MB_USEGLYPHCHARS not supported\n");
-    }
 
     switch(page)
     {

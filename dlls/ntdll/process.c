@@ -144,7 +144,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                         if ((ret = wine_server_call( req )) == STATUS_SUCCESS)
                         {
                             pbi.ExitStatus = reply->exit_code;
-                            pbi.PebBaseAddress = (DWORD)reply->peb;
+                            pbi.PebBaseAddress = reply->peb;
                             pbi.AffinityMask = reply->affinity;
                             pbi.BasePriority = reply->priority;
                             pbi.UniqueProcessId = reply->pid;
@@ -386,7 +386,7 @@ NTSTATUS  WINAPI NtOpenProcess(PHANDLE handle, ACCESS_MASK access,
 
     SERVER_START_REQ( open_process )
     {
-        req->pid        = (process_id_t)cid->UniqueProcess;
+        req->pid        = HandleToULong(cid->UniqueProcess);
         req->access     = access;
         req->attributes = attr ? attr->Attributes : 0;
         status = wine_server_call( req );

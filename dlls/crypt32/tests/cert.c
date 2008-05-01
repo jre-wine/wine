@@ -134,6 +134,7 @@ static void testAddCert(void)
     HCERTSTORE store;
     HCERTSTORE collection;
     PCCERT_CONTEXT context;
+    PCCERT_CONTEXT copyContext;
     BOOL ret;
 
     store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
@@ -274,6 +275,15 @@ static void testAddCert(void)
              CERT_STORE_ADD_REPLACE_EXISTING, NULL);
             ok(ret, "CertAddCertificateContextToStore failed: %08x\n",
              GetLastError());
+            /* use the existing certificate and ask for a copy of the context*/
+            copyContext = NULL;
+            ret = CertAddCertificateContextToStore(collection, context,
+             CERT_STORE_ADD_USE_EXISTING, &copyContext);
+            ok(ret, "CertAddCertificateContextToStore failed: %08x\n",
+             GetLastError());
+            ok(copyContext != NULL, "Expected on output a non NULL copyContext\n");
+            if (copyContext)
+                CertFreeCertificateContext(copyContext);
             /* but adding a new certificate isn't allowed. */
             ret = CertAddCertificateContextToStore(collection, context,
              CERT_STORE_ADD_ALWAYS, NULL);
@@ -294,18 +304,25 @@ static void checkHash(const BYTE *data, DWORD dataLen, ALG_ID algID,
     BYTE hash[20] = { 0 }, hashProperty[20];
     BOOL ret;
     DWORD size;
+    DWORD dwSizeWithNull;
 
     memset(hash, 0, sizeof(hash));
     memset(hashProperty, 0, sizeof(hashProperty));
     size = sizeof(hash);
     ret = CryptHashCertificate(0, algID, 0, data, dataLen, hash, &size);
     ok(ret, "CryptHashCertificate failed: %08x\n", GetLastError());
+    ret = CertGetCertificateContextProperty(context, propID, NULL,
+     &dwSizeWithNull);
+    ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+     GetLastError());
     ret = CertGetCertificateContextProperty(context, propID, hashProperty,
      &size);
     ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
      GetLastError());
     ok(!memcmp(hash, hashProperty, size), "Unexpected hash for property %d\n",
      propID);
+    ok(size == dwSizeWithNull, "Unexpected length of hash for property: received %d instead of %d\n",
+     dwSizeWithNull,size);
 }
 
 static WCHAR cspNameW[] = { 'W','i','n','e','C','r','y','p','t','T','e','m','p',0 };

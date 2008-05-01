@@ -92,7 +92,7 @@ HANDLE WINAPI CreateRemoteThread( HANDLE hProcess, SECURITY_ATTRIBUTES *sa, SIZE
                                   (PRTL_THREAD_START_ROUTINE)start, param, &handle, &client_id );
     if (status == STATUS_SUCCESS)
     {
-        if (id) *id = (DWORD)client_id.UniqueThread;
+        if (id) *id = HandleToULong(client_id.UniqueThread);
         if (sa && (sa->nLength >= sizeof(*sa)) && sa->bInheritHandle)
             SetHandleInformation( handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT );
         if (!(flags & CREATE_SUSPENDED))
@@ -133,7 +133,7 @@ HANDLE WINAPI OpenThread( DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwTh
     attr.SecurityQualityOfService = NULL;
 
     cid.UniqueProcess = 0; /* FIXME */
-    cid.UniqueThread = (HANDLE)dwThreadId;
+    cid.UniqueThread = ULongToHandle(dwThreadId);
     status = NtOpenThread( &handle, dwDesiredAccess, &attr, &cid );
     if (status)
     {
@@ -392,7 +392,7 @@ BOOL WINAPI SetThreadPriorityBoost(
 /**********************************************************************
  *           SetThreadAffinityMask   (KERNEL32.@)
  */
-DWORD WINAPI SetThreadAffinityMask( HANDLE hThread, DWORD dwThreadAffinityMask )
+DWORD_PTR WINAPI SetThreadAffinityMask( HANDLE hThread, DWORD_PTR dwThreadAffinityMask )
 {
     NTSTATUS                    status;
     THREAD_BASIC_INFORMATION    tbi;
@@ -621,7 +621,7 @@ DWORD WINAPI GetLastError(void)
  */
 DWORD WINAPI GetCurrentProcessId(void)
 {
-    return (DWORD)NtCurrentTeb()->ClientId.UniqueProcess;
+    return HandleToULong(NtCurrentTeb()->ClientId.UniqueProcess);
 }
 
 /***********************************************************************
@@ -635,7 +635,7 @@ DWORD WINAPI GetCurrentProcessId(void)
  */
 DWORD WINAPI GetCurrentThreadId(void)
 {
-    return (DWORD)NtCurrentTeb()->ClientId.UniqueThread;
+    return HandleToULong(NtCurrentTeb()->ClientId.UniqueThread);
 }
 
 #endif  /* __i386__ */

@@ -520,6 +520,59 @@ static struct token *create_token( unsigned primary, const SID *user,
     return token;
 }
 
+struct token *token_duplicate( struct token *src_token, unsigned primary,
+                               SECURITY_IMPERSONATION_LEVEL impersonation_level )
+{
+    const luid_t *modified_id =
+        primary || (impersonation_level == src_token->impersonation_level) ?
+            &src_token->modified_id : NULL;
+    struct token *token = NULL;
+    struct privilege *privilege;
+    struct group *group;
+
+    if ((impersonation_level < SecurityAnonymous) ||
+        (impersonation_level > SecurityDelegation))
+    {
+        set_error( STATUS_BAD_IMPERSONATION_LEVEL );
+        return NULL;
+    }
+
+    if (primary || (impersonation_level <= src_token->impersonation_level))
+        token = create_token( primary, src_token->user, NULL, 0,
+                              NULL, 0, src_token->default_dacl,
+                              src_token->source, modified_id,
+                              impersonation_level );
+    else set_error( STATUS_BAD_IMPERSONATION_LEVEL );
+
+    if (!token) return token;
+
+    /* copy groups */
+    LIST_FOR_EACH_ENTRY( group, &src_token->groups, struct group, entry )
+    {
+        size_t size = FIELD_OFFSET( struct group, sid.SubAuthority[group->sid.SubAuthorityCount] );
+        struct group *newgroup = mem_alloc( size );
+        if (!newgroup)
+        {
+            release_object( token );
+            return NULL;
+        }
+        memcpy( newgroup, group, size );
+        list_add_tail( &token->groups, &newgroup->entry );
+    }
+    token->primary_group = src_token->primary_group;
+    assert( token->primary_group );
+
+    /* copy privileges */
+    LIST_FOR_EACH_ENTRY( privilege, &src_token->privileges, struct privilege, entry )
+        if (!privilege_add( token, &privilege->luid, privilege->enabled ))
+        {
+            release_object( token );
+            return NULL;
+        }
+
+    return token;
+}
+
 static ACL *create_default_dacl( const SID *user )
 {
     ACCESS_ALLOWED_ACE *aaa;
@@ -575,8 +628,11 @@ struct token *token_create_admin( void )
     static const SID_IDENTIFIER_AUTHORITY nt_authority = { SECURITY_NT_AUTHORITY };
     static const unsigned int alias_admins_subauth[] = { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS };
     static const unsigned int alias_users_subauth[] = { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_USERS };
+    /* on Windows, this value changes every time the user logs on */
+    static const unsigned int logon_subauth[] = { SECURITY_LOGON_IDS_RID, 0, 1 /* FIXME: should be randomly generated when tokens are inherited by new processes */ };
     PSID alias_admins_sid;
     PSID alias_users_sid;
+    PSID logon_sid;
     /* note: should be the owner specified in the token */
     ACL *default_dacl = create_default_dacl( &interactive_sid );
 
@@ -584,8 +640,10 @@ struct token *token_create_admin( void )
                                            alias_admins_subauth );
     alias_users_sid = security_sid_alloc( &nt_authority, sizeof(alias_users_subauth)/sizeof(alias_users_subauth[0]),
                                           alias_users_subauth );
+    logon_sid = security_sid_alloc( &nt_authority, sizeof(logon_subauth)/sizeof(logon_subauth[0]),
+                                    logon_subauth );
 
-    if (alias_admins_sid && alias_users_sid && default_dacl)
+    if (alias_admins_sid && alias_users_sid && logon_sid && default_dacl)
     {
         const LUID_AND_ATTRIBUTES admin_privs[] =
         {
@@ -620,6 +678,7 @@ struct token *token_create_admin( void )
             { security_authenticated_user_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY },
             { alias_admins_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY|SE_GROUP_OWNER },
             { alias_users_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY },
+            { logon_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY|SE_GROUP_LOGON_ID },
         };
         static const TOKEN_SOURCE admin_source = {"SeMgr", {0, 0}};
         /* note: we just set the user sid to be the interactive builtin sid -
@@ -632,6 +691,7 @@ struct token *token_create_admin( void )
         assert( token->primary_group );
     }
 
+    free( logon_sid );
     free( alias_admins_sid );
     free( alias_users_sid );
     free( default_dacl );
@@ -1163,58 +1223,14 @@ DECL_HANDLER(duplicate_token)
 {
     struct token *src_token;
 
-    if ((req->impersonation_level < SecurityAnonymous) ||
-        (req->impersonation_level > SecurityDelegation))
-    {
-        set_error( STATUS_BAD_IMPERSONATION_LEVEL );
-        return;
-    }
-
     if ((src_token = (struct token *)get_handle_obj( current->process, req->handle,
                                                      TOKEN_DUPLICATE,
                                                      &token_ops )))
     {
-        const luid_t *modified_id =
-            req->primary || (req->impersonation_level == src_token->impersonation_level) ?
-                &src_token->modified_id : NULL;
-        struct token *token = NULL;
-
-        if (req->primary || (req->impersonation_level <= src_token->impersonation_level))
-            token = create_token( req->primary, src_token->user, NULL, 0,
-                                  NULL, 0, src_token->default_dacl,
-                                  src_token->source, modified_id,
-                                  req->impersonation_level );
-        else set_error( STATUS_BAD_IMPERSONATION_LEVEL );
-
+        struct token *token = token_duplicate( src_token, req->primary, req->impersonation_level );
         if (token)
         {
-            struct privilege *privilege;
-            struct group *group;
-            unsigned int access;
-
-            /* copy groups */
-            LIST_FOR_EACH_ENTRY( group, &src_token->groups, struct group, entry )
-            {
-                size_t size = FIELD_OFFSET( struct group, sid.SubAuthority[group->sid.SubAuthorityCount] );
-                struct group *newgroup = mem_alloc( size );
-                if (!newgroup)
-                {
-                    release_object( token );
-                    release_object( src_token );
-                    return;
-                }
-                memcpy( newgroup, group, size );
-                list_add_tail( &token->groups, &newgroup->entry );
-            }
-            token->primary_group = src_token->primary_group;
-            assert( token->primary_group );
-
-            /* copy privileges */
-            LIST_FOR_EACH_ENTRY( privilege, &src_token->privileges, struct privilege, entry )
-                privilege_add( token, &privilege->luid, privilege->enabled );
-
-            access = req->access;
-            reply->new_handle = alloc_handle( current->process, token, access, req->attributes);
+            reply->new_handle = alloc_handle( current->process, token, req->access, req->attributes);
             release_object( token );
         }
         release_object( src_token );
