@@ -284,10 +284,17 @@ void select_shader_max_constants(
 
     switch (ps_selected_mode) {
         case SHADER_GLSL:
-            /* Subtract the other potential uniforms from the max available (bools & ints) */
+            /* Subtract the other potential uniforms from the max available (bools & ints).
+             * In theory the texbem instruction may need one more shader constant too. But lets assume
+             * that a sm <= 1.3 shader does not need all the uniforms provided by a glsl-capable card,
+             * and lets not take away a uniform needlessly from all other shaders.
+             */
             gl_info->max_pshader_constantsF = gl_info->ps_glsl_constantsF - MAX_CONST_B - MAX_CONST_I;
             break;
         case SHADER_ARB:
+            /* The arb shader only loads the bump mapping environment matrix into the shader if it finds
+             * a free constant to do that, so no need to reduce the number of available constants.
+             */
             gl_info->max_pshader_constantsF = gl_info->ps_arb_constantsF;
             break;
         case SHADER_SW:
@@ -792,12 +799,6 @@ BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display) {
      * shaders), but 8 texture stages (register combiners). */
     gl_info->max_sampler_stages = max(gl_info->max_samplers, gl_info->max_texture_stages);
 
-    /* We can only use NP2_NATIVE when the hardware supports it. */
-    if (wined3d_settings.nonpower2_mode == NP2_NATIVE && !gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO]) {
-        WARN_(d3d_caps)("GL_ARB_texture_non_power_of_two not supported, falling back to NP2_NONE NPOT mode.\n");
-        wined3d_settings.nonpower2_mode = NP2_NONE;
-    }
-
     /* We can only use ORM_FBO when the hardware supports it. */
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && !gl_info->supported[EXT_FRAMEBUFFER_OBJECT]) {
         WARN_(d3d_caps)("GL_EXT_framebuffer_object not supported, falling back to PBuffer offscreen rendering mode.\n");
@@ -1163,7 +1164,7 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
         if (EnumDisplaySettingsExW(NULL, ModeIdx, &DevModeW, 0)) {
             pMode->Width        = DevModeW.dmPelsWidth;
             pMode->Height       = DevModeW.dmPelsHeight;
-            pMode->RefreshRate  = D3DADAPTER_DEFAULT;
+            pMode->RefreshRate  = WINED3DADAPTER_DEFAULT;
             if (DevModeW.dmFields & DM_DISPLAYFREQUENCY)
                 pMode->RefreshRate = DevModeW.dmDisplayFrequency;
 
@@ -1194,7 +1195,7 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
         if (Mode > 0) return WINED3DERR_INVALIDCALL;
         pMode->Width        = 800;
         pMode->Height       = 600;
-        pMode->RefreshRate  = D3DADAPTER_DEFAULT;
+        pMode->RefreshRate  = WINED3DADAPTER_DEFAULT;
         pMode->Format       = (Format == WINED3DFMT_UNKNOWN) ? WINED3DFMT_X8R8G8B8 : Format;
 #endif
         TRACE_(d3d_caps)("W %d H %d rr %d fmt (%x - %s) bpp %u\n", pMode->Width, pMode->Height,
@@ -1225,7 +1226,7 @@ static HRESULT WINAPI IWineD3DImpl_GetAdapterDisplayMode(IWineD3D *iface, UINT A
         pMode->Width        = DevModeW.dmPelsWidth;
         pMode->Height       = DevModeW.dmPelsHeight;
         bpp                 = DevModeW.dmBitsPerPel;
-        pMode->RefreshRate  = D3DADAPTER_DEFAULT;
+        pMode->RefreshRate  = WINED3DADAPTER_DEFAULT;
         if (DevModeW.dmFields&DM_DISPLAYFREQUENCY)
         {
             pMode->RefreshRate = DevModeW.dmDisplayFrequency;
@@ -1318,7 +1319,7 @@ static HRESULT WINAPI IWineD3DImpl_GetAdapterIdentifier(IWineD3D *iface, UINT Ad
         }
 
         /*FIXME: memcpy(&pIdentifier->DeviceIdentifier, ??, sizeof(??GUID)); */
-        if (Flags & D3DENUM_NO_WHQL_LEVEL) {
+        if (Flags & WINED3DENUM_NO_WHQL_LEVEL) {
             *(pIdentifier->WHQLLevel) = 0;
         } else {
             *(pIdentifier->WHQLLevel) = 1;
@@ -1776,6 +1777,26 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
             TRACE_(d3d_caps)("[FAILED]\n"); /* Enable when implemented */
             return WINED3DERR_NOTAVAILABLE;
 
+        /* ATI instancing hack: Although ATI cards do not support Shader Model 3.0, they support
+         * instancing. To query if the card supports instancing CheckDeviceFormat with the special format
+         * MAKEFOURCC('I','N','S','T') is used. Should a (broken) app check for this provide a proper return value.
+         * We can do instancing with all shader versions, but we need vertex shaders.
+         *
+         * Additionally applications have to set the D3DRS_POINTSIZE render state to MAKEFOURCC('I','N','S','T') once
+         * to enable instancing. WineD3D doesn't need that and just ignores it.
+         *
+         * With Shader Model 3.0 capable cards Instancing 'just works' in Windows.
+         */
+        case MAKEFOURCC('I','N','S','T'):
+            TRACE("ATI Instancing check hack\n");
+            if(GL_SUPPORT(ARB_VERTEX_PROGRAM) || GL_SUPPORT(ARB_VERTEX_SHADER)) {
+                TRACE_(d3d_caps)("[OK]\n");
+                return WINED3D_OK;
+            } else {
+                TRACE_(d3d_caps)("[FAILED]\n");
+                return WINED3DERR_NOTAVAILABLE;
+            }
+
         default:
             break;
     }
@@ -1838,7 +1859,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     *pCaps->Caps2                   = WINED3DCAPS2_CANRENDERWINDOWED |
                                       WINED3DCAPS2_FULLSCREENGAMMA;
     *pCaps->Caps3                   = 0;
-    *pCaps->PresentationIntervals   = D3DPRESENT_INTERVAL_IMMEDIATE;
+    *pCaps->PresentationIntervals   = WINED3DPRESENT_INTERVAL_IMMEDIATE;
 
     *pCaps->CursorCaps              = 0;
 
@@ -1858,29 +1879,29 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                                       WINED3DDEVCAPS_DRAWPRIMITIVES2     |
                                       WINED3DDEVCAPS_DRAWPRIMITIVES2EX;
 
-    *pCaps->PrimitiveMiscCaps       = D3DPMISCCAPS_CULLNONE              |
-                                      D3DPMISCCAPS_CULLCCW               |
-                                      D3DPMISCCAPS_CULLCW                |
-                                      D3DPMISCCAPS_COLORWRITEENABLE      |
-                                      D3DPMISCCAPS_CLIPTLVERTS           |
-                                      D3DPMISCCAPS_CLIPPLANESCALEDPOINTS |
-                                      D3DPMISCCAPS_MASKZ                 |
-                                      D3DPMISCCAPS_BLENDOP;
+    *pCaps->PrimitiveMiscCaps       = WINED3DPMISCCAPS_CULLNONE              |
+                                      WINED3DPMISCCAPS_CULLCCW               |
+                                      WINED3DPMISCCAPS_CULLCW                |
+                                      WINED3DPMISCCAPS_COLORWRITEENABLE      |
+                                      WINED3DPMISCCAPS_CLIPTLVERTS           |
+                                      WINED3DPMISCCAPS_CLIPPLANESCALEDPOINTS |
+                                      WINED3DPMISCCAPS_MASKZ                 |
+                                      WINED3DPMISCCAPS_BLENDOP;
                                     /* TODO:
-                                        D3DPMISCCAPS_NULLREFERENCE
-                                        D3DPMISCCAPS_INDEPENDENTWRITEMASKS
-                                        D3DPMISCCAPS_FOGANDSPECULARALPHA
-                                        D3DPMISCCAPS_SEPARATEALPHABLEND
-                                        D3DPMISCCAPS_MRTINDEPENDENTBITDEPTHS
-                                        D3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING
-                                        D3DPMISCCAPS_FOGVERTEXCLAMPED */
+                                        WINED3DPMISCCAPS_NULLREFERENCE
+                                        WINED3DPMISCCAPS_INDEPENDENTWRITEMASKS
+                                        WINED3DPMISCCAPS_FOGANDSPECULARALPHA
+                                        WINED3DPMISCCAPS_SEPARATEALPHABLEND
+                                        WINED3DPMISCCAPS_MRTINDEPENDENTBITDEPTHS
+                                        WINED3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING
+                                        WINED3DPMISCCAPS_FOGVERTEXCLAMPED */
 
 /* The caps below can be supported but aren't handled yet in utils.c 'd3dta_to_combiner_input', disable them until support is fixed */
 #if 0
     if (GL_SUPPORT(NV_REGISTER_COMBINERS))
-        *pCaps->PrimitiveMiscCaps |=  D3DPMISCCAPS_TSSARGTEMP;
+        *pCaps->PrimitiveMiscCaps |=  WINED3DPMISCCAPS_TSSARGTEMP;
     if (GL_SUPPORT(NV_REGISTER_COMBINERS2))
-        *pCaps->PrimitiveMiscCaps |=  D3DPMISCCAPS_PERSTAGECONSTANT;
+        *pCaps->PrimitiveMiscCaps |=  WINED3DPMISCCAPS_PERSTAGECONSTANT;
 #endif
 
     *pCaps->RasterCaps              = WINED3DPRASTERCAPS_DITHER    |
@@ -1909,53 +1930,53 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
 			   WINED3DPRASTERCAPS_ZBUFFERLESSHSR
 			   WINED3DPRASTERCAPS_WBUFFER */
 
-    *pCaps->ZCmpCaps = D3DPCMPCAPS_ALWAYS       |
-                       D3DPCMPCAPS_EQUAL        |
-                       D3DPCMPCAPS_GREATER      |
-                       D3DPCMPCAPS_GREATEREQUAL |
-                       D3DPCMPCAPS_LESS         |
-                       D3DPCMPCAPS_LESSEQUAL    |
-                       D3DPCMPCAPS_NEVER        |
-                       D3DPCMPCAPS_NOTEQUAL;
+    *pCaps->ZCmpCaps = WINED3DPCMPCAPS_ALWAYS       |
+                       WINED3DPCMPCAPS_EQUAL        |
+                       WINED3DPCMPCAPS_GREATER      |
+                       WINED3DPCMPCAPS_GREATEREQUAL |
+                       WINED3DPCMPCAPS_LESS         |
+                       WINED3DPCMPCAPS_LESSEQUAL    |
+                       WINED3DPCMPCAPS_NEVER        |
+                       WINED3DPCMPCAPS_NOTEQUAL;
 
-    *pCaps->SrcBlendCaps  = D3DPBLENDCAPS_BLENDFACTOR     |
-                            D3DPBLENDCAPS_BOTHINVSRCALPHA |
-                            D3DPBLENDCAPS_BOTHSRCALPHA    |
-                            D3DPBLENDCAPS_DESTALPHA       |
-                            D3DPBLENDCAPS_DESTCOLOR       |
-                            D3DPBLENDCAPS_INVDESTALPHA    |
-                            D3DPBLENDCAPS_INVDESTCOLOR    |
-                            D3DPBLENDCAPS_INVSRCALPHA     |
-                            D3DPBLENDCAPS_INVSRCCOLOR     |
-                            D3DPBLENDCAPS_ONE             |
-                            D3DPBLENDCAPS_SRCALPHA        |
-                            D3DPBLENDCAPS_SRCALPHASAT     |
-                            D3DPBLENDCAPS_SRCCOLOR        |
-                            D3DPBLENDCAPS_ZERO;
-                            
-    *pCaps->DestBlendCaps = D3DPBLENDCAPS_BLENDFACTOR     |
-                            D3DPBLENDCAPS_BOTHINVSRCALPHA |
-                            D3DPBLENDCAPS_BOTHSRCALPHA    |
-                            D3DPBLENDCAPS_DESTALPHA       |
-                            D3DPBLENDCAPS_DESTCOLOR       |
-                            D3DPBLENDCAPS_INVDESTALPHA    |
-                            D3DPBLENDCAPS_INVDESTCOLOR    |
-                            D3DPBLENDCAPS_INVSRCALPHA     |
-                            D3DPBLENDCAPS_INVSRCCOLOR     |
-                            D3DPBLENDCAPS_ONE             |
-                            D3DPBLENDCAPS_SRCALPHA        |
-                            D3DPBLENDCAPS_SRCALPHASAT     |
-                            D3DPBLENDCAPS_SRCCOLOR        |
-                            D3DPBLENDCAPS_ZERO;
+    *pCaps->SrcBlendCaps  = WINED3DPBLENDCAPS_BLENDFACTOR     |
+                            WINED3DPBLENDCAPS_BOTHINVSRCALPHA |
+                            WINED3DPBLENDCAPS_BOTHSRCALPHA    |
+                            WINED3DPBLENDCAPS_DESTALPHA       |
+                            WINED3DPBLENDCAPS_DESTCOLOR       |
+                            WINED3DPBLENDCAPS_INVDESTALPHA    |
+                            WINED3DPBLENDCAPS_INVDESTCOLOR    |
+                            WINED3DPBLENDCAPS_INVSRCALPHA     |
+                            WINED3DPBLENDCAPS_INVSRCCOLOR     |
+                            WINED3DPBLENDCAPS_ONE             |
+                            WINED3DPBLENDCAPS_SRCALPHA        |
+                            WINED3DPBLENDCAPS_SRCALPHASAT     |
+                            WINED3DPBLENDCAPS_SRCCOLOR        |
+                            WINED3DPBLENDCAPS_ZERO;
 
-    *pCaps->AlphaCmpCaps = D3DPCMPCAPS_ALWAYS       |
-                           D3DPCMPCAPS_EQUAL        |
-                           D3DPCMPCAPS_GREATER      |
-                           D3DPCMPCAPS_GREATEREQUAL |
-                           D3DPCMPCAPS_LESS         |
-                           D3DPCMPCAPS_LESSEQUAL    |
-                           D3DPCMPCAPS_NEVER        |
-                           D3DPCMPCAPS_NOTEQUAL;
+    *pCaps->DestBlendCaps = WINED3DPBLENDCAPS_BLENDFACTOR     |
+                            WINED3DPBLENDCAPS_BOTHINVSRCALPHA |
+                            WINED3DPBLENDCAPS_BOTHSRCALPHA    |
+                            WINED3DPBLENDCAPS_DESTALPHA       |
+                            WINED3DPBLENDCAPS_DESTCOLOR       |
+                            WINED3DPBLENDCAPS_INVDESTALPHA    |
+                            WINED3DPBLENDCAPS_INVDESTCOLOR    |
+                            WINED3DPBLENDCAPS_INVSRCALPHA     |
+                            WINED3DPBLENDCAPS_INVSRCCOLOR     |
+                            WINED3DPBLENDCAPS_ONE             |
+                            WINED3DPBLENDCAPS_SRCALPHA        |
+                            WINED3DPBLENDCAPS_SRCALPHASAT     |
+                            WINED3DPBLENDCAPS_SRCCOLOR        |
+                            WINED3DPBLENDCAPS_ZERO;
+
+    *pCaps->AlphaCmpCaps = WINED3DPCMPCAPS_ALWAYS       |
+                           WINED3DPCMPCAPS_EQUAL        |
+                           WINED3DPCMPCAPS_GREATER      |
+                           WINED3DPCMPCAPS_GREATEREQUAL |
+                           WINED3DPCMPCAPS_LESS         |
+                           WINED3DPCMPCAPS_LESSEQUAL    |
+                           WINED3DPCMPCAPS_NEVER        |
+                           WINED3DPCMPCAPS_NOTEQUAL;
 
     *pCaps->ShadeCaps     = WINED3DPSHADECAPS_SPECULARGOURAUDRGB |
                             WINED3DPSHADECAPS_COLORGOURAUDRGB    |
@@ -2042,42 +2063,42 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     } else
         *pCaps->VolumeTextureFilterCaps = 0;
 
-    *pCaps->TextureAddressCaps =  D3DPTADDRESSCAPS_INDEPENDENTUV |
-                                  D3DPTADDRESSCAPS_CLAMP  |
-                                  D3DPTADDRESSCAPS_WRAP;
+    *pCaps->TextureAddressCaps =  WINED3DPTADDRESSCAPS_INDEPENDENTUV |
+                                  WINED3DPTADDRESSCAPS_CLAMP  |
+                                  WINED3DPTADDRESSCAPS_WRAP;
 
     if (GL_SUPPORT(ARB_TEXTURE_BORDER_CLAMP)) {
-        *pCaps->TextureAddressCaps |= D3DPTADDRESSCAPS_BORDER;
+        *pCaps->TextureAddressCaps |= WINED3DPTADDRESSCAPS_BORDER;
     }
     if (GL_SUPPORT(ARB_TEXTURE_MIRRORED_REPEAT)) {
-        *pCaps->TextureAddressCaps |= D3DPTADDRESSCAPS_MIRROR;
+        *pCaps->TextureAddressCaps |= WINED3DPTADDRESSCAPS_MIRROR;
     }
     if (GL_SUPPORT(ATI_TEXTURE_MIRROR_ONCE)) {
-        *pCaps->TextureAddressCaps |= D3DPTADDRESSCAPS_MIRRORONCE;
+        *pCaps->TextureAddressCaps |= WINED3DPTADDRESSCAPS_MIRRORONCE;
     }
 
     if (GL_SUPPORT(EXT_TEXTURE3D)) {
-        *pCaps->VolumeTextureAddressCaps =  D3DPTADDRESSCAPS_INDEPENDENTUV |
-                                            D3DPTADDRESSCAPS_CLAMP  |
-                                            D3DPTADDRESSCAPS_WRAP;
+        *pCaps->VolumeTextureAddressCaps =  WINED3DPTADDRESSCAPS_INDEPENDENTUV |
+                                            WINED3DPTADDRESSCAPS_CLAMP  |
+                                            WINED3DPTADDRESSCAPS_WRAP;
         if (GL_SUPPORT(ARB_TEXTURE_BORDER_CLAMP)) {
-            *pCaps->VolumeTextureAddressCaps |= D3DPTADDRESSCAPS_BORDER;
+            *pCaps->VolumeTextureAddressCaps |= WINED3DPTADDRESSCAPS_BORDER;
         }
         if (GL_SUPPORT(ARB_TEXTURE_MIRRORED_REPEAT)) {
-            *pCaps->VolumeTextureAddressCaps |= D3DPTADDRESSCAPS_MIRROR;
+            *pCaps->VolumeTextureAddressCaps |= WINED3DPTADDRESSCAPS_MIRROR;
         }
         if (GL_SUPPORT(ATI_TEXTURE_MIRROR_ONCE)) {
-            *pCaps->VolumeTextureAddressCaps |= D3DPTADDRESSCAPS_MIRRORONCE;
+            *pCaps->VolumeTextureAddressCaps |= WINED3DPTADDRESSCAPS_MIRRORONCE;
         }
     } else
         *pCaps->VolumeTextureAddressCaps = 0;
 
-    *pCaps->LineCaps = D3DLINECAPS_TEXTURE |
-                       D3DLINECAPS_ZTEST;
+    *pCaps->LineCaps = WINED3DLINECAPS_TEXTURE |
+                       WINED3DLINECAPS_ZTEST;
                       /* FIXME: Add
-			 D3DLINECAPS_BLEND
-			 D3DLINECAPS_ALPHACMP
-			 D3DLINECAPS_FOG */
+                        WINED3DLINECAPS_BLEND
+                        WINED3DLINECAPS_ALPHACMP
+                        WINED3DLINECAPS_FOG */
 
     *pCaps->MaxTextureWidth  = GL_LIMITS(texture_size);
     *pCaps->MaxTextureHeight = GL_LIMITS(texture_size);
@@ -2098,65 +2119,66 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
 
     *pCaps->ExtentsAdjust = 0;
 
-    *pCaps->StencilCaps =  D3DSTENCILCAPS_DECRSAT |
-                           D3DSTENCILCAPS_INCRSAT |
-                           D3DSTENCILCAPS_INVERT  |
-                           D3DSTENCILCAPS_KEEP    |
-                           D3DSTENCILCAPS_REPLACE |
-                           D3DSTENCILCAPS_ZERO;
+    *pCaps->StencilCaps =  WINED3DSTENCILCAPS_DECRSAT |
+                           WINED3DSTENCILCAPS_INCRSAT |
+                           WINED3DSTENCILCAPS_INVERT  |
+                           WINED3DSTENCILCAPS_KEEP    |
+                           WINED3DSTENCILCAPS_REPLACE |
+                           WINED3DSTENCILCAPS_ZERO;
     if (GL_SUPPORT(EXT_STENCIL_WRAP)) {
-      *pCaps->StencilCaps |= D3DSTENCILCAPS_DECR  |
-                             D3DSTENCILCAPS_INCR;
+      *pCaps->StencilCaps |= WINED3DSTENCILCAPS_DECR  |
+                             WINED3DSTENCILCAPS_INCR;
     }
     if ( This->dxVersion > 8 &&
         ( GL_SUPPORT(EXT_STENCIL_TWO_SIDE) ||
             GL_SUPPORT(ATI_SEPARATE_STENCIL) ) ) {
-        *pCaps->StencilCaps |= D3DSTENCILCAPS_TWOSIDED;
+        *pCaps->StencilCaps |= WINED3DSTENCILCAPS_TWOSIDED;
     }
 
-    *pCaps->FVFCaps = D3DFVFCAPS_PSIZE | 0x0008; /* 8 texture coords */
+    *pCaps->FVFCaps = WINED3DFVFCAPS_PSIZE | 0x0008; /* 8 texture coords */
 
-    *pCaps->TextureOpCaps =  D3DTEXOPCAPS_ADD         |
-                             D3DTEXOPCAPS_ADDSIGNED   |
-                             D3DTEXOPCAPS_ADDSIGNED2X |
-                             D3DTEXOPCAPS_MODULATE    |
-                             D3DTEXOPCAPS_MODULATE2X  |
-                             D3DTEXOPCAPS_MODULATE4X  |
-                             D3DTEXOPCAPS_SELECTARG1  |
-                             D3DTEXOPCAPS_SELECTARG2  |
-                             D3DTEXOPCAPS_DISABLE;
+    *pCaps->TextureOpCaps =  WINED3DTEXOPCAPS_ADD         |
+                             WINED3DTEXOPCAPS_ADDSIGNED   |
+                             WINED3DTEXOPCAPS_ADDSIGNED2X |
+                             WINED3DTEXOPCAPS_MODULATE    |
+                             WINED3DTEXOPCAPS_MODULATE2X  |
+                             WINED3DTEXOPCAPS_MODULATE4X  |
+                             WINED3DTEXOPCAPS_SELECTARG1  |
+                             WINED3DTEXOPCAPS_SELECTARG2  |
+                             WINED3DTEXOPCAPS_DISABLE;
 
     if (GL_SUPPORT(ARB_TEXTURE_ENV_COMBINE) ||
         GL_SUPPORT(EXT_TEXTURE_ENV_COMBINE) ||
         GL_SUPPORT(NV_TEXTURE_ENV_COMBINE4)) {
-        *pCaps->TextureOpCaps |= D3DTEXOPCAPS_BLENDDIFFUSEALPHA |
-                                D3DTEXOPCAPS_BLENDTEXTUREALPHA  |
-                                D3DTEXOPCAPS_BLENDFACTORALPHA   |
-                                D3DTEXOPCAPS_BLENDCURRENTALPHA  |
-                                D3DTEXOPCAPS_LERP               |
-                                D3DTEXOPCAPS_SUBTRACT;
+        *pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_BLENDDIFFUSEALPHA |
+                                WINED3DTEXOPCAPS_BLENDTEXTUREALPHA  |
+                                WINED3DTEXOPCAPS_BLENDFACTORALPHA   |
+                                WINED3DTEXOPCAPS_BLENDCURRENTALPHA  |
+                                WINED3DTEXOPCAPS_LERP               |
+                                WINED3DTEXOPCAPS_SUBTRACT;
     }
-    if (GL_SUPPORT(NV_TEXTURE_ENV_COMBINE4)) {
-        *pCaps->TextureOpCaps |= D3DTEXOPCAPS_ADDSMOOTH             |
-                                D3DTEXOPCAPS_MULTIPLYADD            |
-                                D3DTEXOPCAPS_MODULATEALPHA_ADDCOLOR |
-                                D3DTEXOPCAPS_MODULATECOLOR_ADDALPHA |
-                                D3DTEXOPCAPS_BLENDTEXTUREALPHAPM;
+    if (GL_SUPPORT(ATI_TEXTURE_ENV_COMBINE3) ||
+         GL_SUPPORT(NV_TEXTURE_ENV_COMBINE4)) {
+        *pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_ADDSMOOTH             |
+                                WINED3DTEXOPCAPS_MULTIPLYADD            |
+                                WINED3DTEXOPCAPS_MODULATEALPHA_ADDCOLOR |
+                                WINED3DTEXOPCAPS_MODULATECOLOR_ADDALPHA |
+                                WINED3DTEXOPCAPS_BLENDTEXTUREALPHAPM;
     }
     if (GL_SUPPORT(ARB_TEXTURE_ENV_DOT3))
-        *pCaps->TextureOpCaps |= D3DTEXOPCAPS_DOTPRODUCT3;
+        *pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_DOTPRODUCT3;
 
     if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
-        *pCaps->TextureOpCaps |= D3DTEXOPCAPS_MODULATEINVALPHA_ADDCOLOR |
-                                 D3DTEXOPCAPS_MODULATEINVCOLOR_ADDALPHA;
+        *pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_MODULATEINVALPHA_ADDCOLOR |
+                                 WINED3DTEXOPCAPS_MODULATEINVCOLOR_ADDALPHA;
     }
-    
-    
+
+
 #if 0
-    *pCaps->TextureOpCaps |= D3DTEXOPCAPS_BUMPENVMAP;
+    *pCaps->TextureOpCaps |= WINED3DTEXOPCAPS_BUMPENVMAP;
                             /* FIXME: Add
-                            D3DTEXOPCAPS_BUMPENVMAPLUMINANCE 
-                            D3DTEXOPCAPS_PREMODULATE */
+                            WINED3DTEXOPCAPS_BUMPENVMAPLUMINANCE
+                            WINED3DTEXOPCAPS_PREMODULATE */
 #endif
 
     *pCaps->MaxTextureBlendStages   = GL_LIMITS(texture_stages);
@@ -2244,7 +2266,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
        ------------------------------------------------ */
     if (This->dxVersion > 8) {
         /* d3d9.dll sets D3DDEVCAPS2_CAN_STRETCHRECT_FROM_TEXTURES here because StretchRects is implemented in d3d9 */
-        *pCaps->DevCaps2                          = D3DDEVCAPS2_STREAMOFFSET;
+        *pCaps->DevCaps2                          = WINED3DDEVCAPS2_STREAMOFFSET;
         /* TODO: VS3.0 needs at least D3DDEVCAPS2_VERTEXELEMENTSCANSHARESTREAMOFFSET */
         *pCaps->MaxNpatchTessellationLevel        = 0;
         *pCaps->MasterAdapterOrdinal              = 0;
@@ -2258,13 +2280,13 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
              * don't advertise it yet as I'm not sure how we handle it.
              * We might need to add some clamping in the shader engine to
              * support it.
-             * TODO: D3DDTCAPS_USHORT2N, D3DDTCAPS_USHORT4N, D3DDTCAPS_UDEC3, D3DDTCAPS_DEC3N */
-            *pCaps->DeclTypes = D3DDTCAPS_UBYTE4    |
-                                D3DDTCAPS_UBYTE4N   |
-                                D3DDTCAPS_SHORT2N   |
-                                D3DDTCAPS_SHORT4N   |
-                                D3DDTCAPS_FLOAT16_2 |
-                                D3DDTCAPS_FLOAT16_4;
+             * TODO: WINED3DDTCAPS_USHORT2N, WINED3DDTCAPS_USHORT4N, WINED3DDTCAPS_UDEC3, WINED3DDTCAPS_DEC3N */
+            *pCaps->DeclTypes = WINED3DDTCAPS_UBYTE4    |
+                                WINED3DDTCAPS_UBYTE4N   |
+                                WINED3DDTCAPS_SHORT2N   |
+                                WINED3DDTCAPS_SHORT4N   |
+                                WINED3DDTCAPS_FLOAT16_2 |
+                                WINED3DDTCAPS_FLOAT16_4;
 
         } else
             *pCaps->DeclTypes                         = 0;
@@ -2278,16 +2300,16 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
         if(*pCaps->VertexShaderVersion == WINED3DVS_VERSION(3,0)) {
             /* Where possible set the caps based on OpenGL extensions and if they aren't set (in case of software rendering)
                use the VS 3.0 from MSDN or else if there's OpenGL spec use a hardcoded value minimum VS3.0 value. */
-            *pCaps->VS20Caps.Caps                     = D3DVS20CAPS_PREDICATION;
-            *pCaps->VS20Caps.DynamicFlowControlDepth  = D3DVS20_MAX_DYNAMICFLOWCONTROLDEPTH; /* VS 3.0 requires MAX_DYNAMICFLOWCONTROLDEPTH (24) */
+            *pCaps->VS20Caps.Caps                     = WINED3DVS20CAPS_PREDICATION;
+            *pCaps->VS20Caps.DynamicFlowControlDepth  = WINED3DVS20_MAX_DYNAMICFLOWCONTROLDEPTH; /* VS 3.0 requires MAX_DYNAMICFLOWCONTROLDEPTH (24) */
             *pCaps->VS20Caps.NumTemps                 = max(32, This->gl_info.vs_arb_max_temps);
-            *pCaps->VS20Caps.StaticFlowControlDepth   = D3DVS20_MAX_STATICFLOWCONTROLDEPTH ; /* level of nesting in loops / if-statements; VS 3.0 requires MAX (4) */
+            *pCaps->VS20Caps.StaticFlowControlDepth   = WINED3DVS20_MAX_STATICFLOWCONTROLDEPTH ; /* level of nesting in loops / if-statements; VS 3.0 requires MAX (4) */
 
             *pCaps->MaxVShaderInstructionsExecuted    = 65535; /* VS 3.0 needs at least 65535, some cards even use 2^32-1 */
             *pCaps->MaxVertexShader30InstructionSlots = max(512, This->gl_info.vs_arb_max_instructions);
         } else if(*pCaps->VertexShaderVersion == WINED3DVS_VERSION(2,0)) {
             *pCaps->VS20Caps.Caps                     = 0;
-            *pCaps->VS20Caps.DynamicFlowControlDepth  = D3DVS20_MIN_DYNAMICFLOWCONTROLDEPTH;
+            *pCaps->VS20Caps.DynamicFlowControlDepth  = WINED3DVS20_MIN_DYNAMICFLOWCONTROLDEPTH;
             *pCaps->VS20Caps.NumTemps                 = max(12, This->gl_info.vs_arb_max_temps);
             *pCaps->VS20Caps.StaticFlowControlDepth   = 1;    
 
@@ -2308,25 +2330,25 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                use the PS 3.0 from MSDN or else if there's OpenGL spec use a hardcoded value minimum PS 3.0 value. */
             
             /* Caps is more or less undocumented on MSDN but it appears to be used for PS20Caps based on results from R9600/FX5900/Geforce6800 cards from Windows */
-            *pCaps->PS20Caps.Caps                     = D3DPS20CAPS_ARBITRARYSWIZZLE     |
-                                                        D3DPS20CAPS_GRADIENTINSTRUCTIONS |
-                                                        D3DPS20CAPS_PREDICATION          |
-                                                        D3DPS20CAPS_NODEPENDENTREADLIMIT |
-                                                        D3DPS20CAPS_NOTEXINSTRUCTIONLIMIT;
-            *pCaps->PS20Caps.DynamicFlowControlDepth  = D3DPS20_MAX_DYNAMICFLOWCONTROLDEPTH; /* PS 3.0 requires MAX_DYNAMICFLOWCONTROLDEPTH (24) */
+            *pCaps->PS20Caps.Caps                     = WINED3DPS20CAPS_ARBITRARYSWIZZLE     |
+                                                        WINED3DPS20CAPS_GRADIENTINSTRUCTIONS |
+                                                        WINED3DPS20CAPS_PREDICATION          |
+                                                        WINED3DPS20CAPS_NODEPENDENTREADLIMIT |
+                                                        WINED3DPS20CAPS_NOTEXINSTRUCTIONLIMIT;
+            *pCaps->PS20Caps.DynamicFlowControlDepth  = WINED3DPS20_MAX_DYNAMICFLOWCONTROLDEPTH; /* PS 3.0 requires MAX_DYNAMICFLOWCONTROLDEPTH (24) */
             *pCaps->PS20Caps.NumTemps                 = max(32, This->gl_info.ps_arb_max_temps);
-            *pCaps->PS20Caps.StaticFlowControlDepth   = D3DPS20_MAX_STATICFLOWCONTROLDEPTH; /* PS 3.0 requires MAX_STATICFLOWCONTROLDEPTH (4) */
-            *pCaps->PS20Caps.NumInstructionSlots      = D3DPS20_MAX_NUMINSTRUCTIONSLOTS; /* PS 3.0 requires MAX_NUMINSTRUCTIONSLOTS (512) */
+            *pCaps->PS20Caps.StaticFlowControlDepth   = WINED3DPS20_MAX_STATICFLOWCONTROLDEPTH; /* PS 3.0 requires MAX_STATICFLOWCONTROLDEPTH (4) */
+            *pCaps->PS20Caps.NumInstructionSlots      = WINED3DPS20_MAX_NUMINSTRUCTIONSLOTS; /* PS 3.0 requires MAX_NUMINSTRUCTIONSLOTS (512) */
 
             *pCaps->MaxPShaderInstructionsExecuted    = 65535;
-            *pCaps->MaxPixelShader30InstructionSlots  = max(D3DMIN30SHADERINSTRUCTIONS, This->gl_info.ps_arb_max_instructions);
+            *pCaps->MaxPixelShader30InstructionSlots  = max(WINED3DMIN30SHADERINSTRUCTIONS, This->gl_info.ps_arb_max_instructions);
         } else if(*pCaps->PixelShaderVersion == WINED3DPS_VERSION(2,0)) {
             /* Below we assume PS2.0 specs, not extended 2.0a(GeforceFX)/2.0b(Radeon R3xx) ones */
             *pCaps->PS20Caps.Caps                     = 0;
-            *pCaps->PS20Caps.DynamicFlowControlDepth  = 0; /* D3DVS20_MIN_DYNAMICFLOWCONTROLDEPTH = 0 */
+            *pCaps->PS20Caps.DynamicFlowControlDepth  = 0; /* WINED3DVS20_MIN_DYNAMICFLOWCONTROLDEPTH = 0 */
             *pCaps->PS20Caps.NumTemps                 = max(12, This->gl_info.ps_arb_max_temps);
-            *pCaps->PS20Caps.StaticFlowControlDepth   = D3DPS20_MIN_STATICFLOWCONTROLDEPTH; /* Minumum: 1 */
-            *pCaps->PS20Caps.NumInstructionSlots      = D3DPS20_MIN_NUMINSTRUCTIONSLOTS; /* Minimum number (64 ALU + 32 Texture), a GeforceFX uses 512 */
+            *pCaps->PS20Caps.StaticFlowControlDepth   = WINED3DPS20_MIN_STATICFLOWCONTROLDEPTH; /* Minumum: 1 */
+            *pCaps->PS20Caps.NumInstructionSlots      = WINED3DPS20_MIN_NUMINSTRUCTIONSLOTS; /* Minimum number (64 ALU + 32 Texture), a GeforceFX uses 512 */
 
             *pCaps->MaxPShaderInstructionsExecuted    = 512; /* Minimum value, a GeforceFX uses 1024 */
             *pCaps->MaxPixelShader30InstructionSlots  = 0;

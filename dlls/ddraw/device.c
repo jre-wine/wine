@@ -1428,15 +1428,20 @@ IDirect3DDeviceImpl_1_DeleteMatrix(IDirect3DDevice *iface,
  *
  * Returns:
  *  D3D_OK on success, for details see IWineD3DDevice::BeginScene
+ *  D3DERR_SCENE_IN_SCENE if WineD3D returns an error(Only in case of an already
+ *  started scene).
  *
  *****************************************************************************/
 static HRESULT WINAPI
 IDirect3DDeviceImpl_7_BeginScene(IDirect3DDevice7 *iface)
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice7, iface);
+    HRESULT hr;
     TRACE("(%p): Relay\n", This);
 
-    return IWineD3DDevice_BeginScene(This->wineD3DDevice);
+    hr = IWineD3DDevice_BeginScene(This->wineD3DDevice);
+    if(hr == WINED3D_OK) return D3D_OK;
+    else return D3DERR_SCENE_IN_SCENE; /* TODO: Other possible causes of failure */
 }
 
 static HRESULT WINAPI
@@ -1473,16 +1478,20 @@ Thunk_IDirect3DDeviceImpl_1_BeginScene(IDirect3DDevice *iface)
  *
  * Returns:
  *  D3D_OK on success, for details see IWineD3DDevice::EndScene
+ *  D3DERR_SCENE_NOT_IN_SCENE is returned if WineD3D returns an error. It does
+ *  that only if the scene was already ended.
  *
  *****************************************************************************/
 static HRESULT WINAPI
 IDirect3DDeviceImpl_7_EndScene(IDirect3DDevice7 *iface)
 {
     ICOM_THIS_FROM(IDirect3DDeviceImpl, IDirect3DDevice7, iface);
+    HRESULT hr;
     TRACE("(%p): Relay\n", This);
 
-    IWineD3DDevice_EndScene(This->wineD3DDevice);
-    return D3D_OK;
+    hr = IWineD3DDevice_EndScene(This->wineD3DDevice);
+    if(hr == WINED3D_OK) return D3D_OK;
+    else return D3DERR_SCENE_NOT_IN_SCENE;
 }
 
 static HRESULT WINAPI
@@ -2186,28 +2195,15 @@ IDirect3DDeviceImpl_7_GetRenderState(IDirect3DDevice7 *iface,
             return hr;
         }
 
-        case D3DRENDERSTATE_TEXTUREADDRESSU:
-        case D3DRENDERSTATE_TEXTUREADDRESSV:
         case D3DRENDERSTATE_TEXTUREADDRESS:
-        {
-            WINED3DTEXTURESTAGESTATETYPE TexStageStateType;
-
-            if (RenderStateType == D3DRENDERSTATE_TEXTUREADDRESS)
-            {
-                TexStageStateType = WINED3DTSS_ADDRESS;
-            }
-            else if (RenderStateType == D3DRENDERSTATE_TEXTUREADDRESSU)
-            {
-                TexStageStateType = WINED3DTSS_ADDRESSU;
-            }
-            else
-            {
-                TexStageStateType = WINED3DTSS_ADDRESSV;
-            }
-            return IWineD3DDevice_GetTextureStageState(This->wineD3DDevice,
-                                                       0, TexStageStateType,
-                                                       Value);
-        }
+        case D3DRENDERSTATE_TEXTUREADDRESSU:
+            return IWineD3DDevice_GetSamplerState(This->wineD3DDevice,
+                                                  0, WINED3DSAMP_ADDRESSU,
+                                                  Value);
+        case D3DRENDERSTATE_TEXTUREADDRESSV:
+            return IWineD3DDevice_GetSamplerState(This->wineD3DDevice,
+                                                  0, WINED3DSAMP_ADDRESSV,
+                                                  Value);
 
         default:
             /* FIXME: Unhandled: D3DRENDERSTATE_STIPPLEPATTERN00 - 31 */
@@ -2304,9 +2300,11 @@ IDirect3DDeviceImpl_7_SetRenderState(IDirect3DDevice7 *iface,
             switch ((D3DTEXTUREFILTER) Value)
             {
                 case D3DFILTER_NEAREST:
+                case D3DFILTER_LINEARMIPNEAREST:
                     tex_mag = WINED3DTEXF_POINT;
                     break;
                 case D3DFILTER_LINEAR:
+                case D3DFILTER_LINEARMIPLINEAR:
                     tex_mag = WINED3DTEXF_LINEAR;
                     break;
                 default:
@@ -2321,6 +2319,7 @@ IDirect3DDeviceImpl_7_SetRenderState(IDirect3DDevice7 *iface,
         case D3DRENDERSTATE_TEXTUREMIN:
         {
             WINED3DTEXTUREFILTERTYPE tex_min = WINED3DTEXF_NONE;
+            WINED3DTEXTUREFILTERTYPE tex_mip = WINED3DTEXF_NONE;
 
             switch ((D3DTEXTUREFILTER) Value)
             {
@@ -2330,38 +2329,48 @@ IDirect3DDeviceImpl_7_SetRenderState(IDirect3DDevice7 *iface,
                 case D3DFILTER_LINEAR:
                     tex_min = WINED3DTEXF_LINEAR;
                     break;
+                case D3DFILTER_MIPNEAREST:
+                    tex_min = WINED3DTEXF_NONE;
+                    tex_mip = WINED3DTEXF_POINT;
+                    break;
+                case D3DFILTER_MIPLINEAR:
+                    tex_min = WINED3DTEXF_NONE;
+                    tex_mip = WINED3DTEXF_LINEAR;
+                    break;
+                case D3DFILTER_LINEARMIPNEAREST:
+                    tex_min = WINED3DTEXF_POINT;
+                    tex_mip = WINED3DTEXF_LINEAR;
+                    break;
+                case D3DFILTER_LINEARMIPLINEAR:
+                    tex_min = WINED3DTEXF_LINEAR;
+                    tex_mip = WINED3DTEXF_LINEAR;
+                    break;
+
                 default:
-                    ERR("Unhandled texture mag %d !\n",Value);
+                    ERR("Unhandled texture min %d !\n",Value);
             }
 
+                   IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
+                                                  0, WINED3DSAMP_MIPFILTER,
+                                                  tex_mip);
             return IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
                                                   0, WINED3DSAMP_MINFILTER,
                                                   tex_min);
         }
 
-        case D3DRENDERSTATE_TEXTUREADDRESSU:
-        case D3DRENDERSTATE_TEXTUREADDRESSV:
         case D3DRENDERSTATE_TEXTUREADDRESS:
-        {
-            WINED3DTEXTURESTAGESTATETYPE TexStageStateType;
-
-            if (RenderStateType == D3DRENDERSTATE_TEXTUREADDRESS)
-            {
-                TexStageStateType = WINED3DTSS_ADDRESS;
-            }
-            else if (RenderStateType == D3DRENDERSTATE_TEXTUREADDRESSU)
-            {
-                TexStageStateType = WINED3DTSS_ADDRESSU;
-            }
-            else
-            {
-                TexStageStateType = WINED3DTSS_ADDRESSV;
-            }
-
-            return IWineD3DDevice_SetTextureStageState(This->wineD3DDevice,
-                                                       0, TexStageStateType,
-                                                       Value);
-        }
+                   IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
+                                                  0, WINED3DSAMP_ADDRESSV,
+                                                  Value);
+            /* Drop through */
+        case D3DRENDERSTATE_TEXTUREADDRESSU:
+            return IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
+                                                  0, WINED3DSAMP_ADDRESSU,
+                                                  Value);
+        case D3DRENDERSTATE_TEXTUREADDRESSV:
+            return IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
+                                                  0, WINED3DSAMP_ADDRESSV,
+                                                  Value);
 
         case D3DRENDERSTATE_TEXTUREMAPBLEND:
         {
@@ -4011,11 +4020,23 @@ IDirect3DDeviceImpl_7_GetTextureStageState(IDirect3DDevice7 *iface,
                                                   Stage,
                                                   WINED3DSAMP_MAGFILTER,
                                                   State);
+
+        case D3DTSS_ADDRESS:
+        case D3DTSS_ADDRESSU:
+            return IWineD3DDevice_GetSamplerState(This->wineD3DDevice,
+                                                  Stage,
+                                                  WINED3DSAMP_ADDRESSU,
+                                                  State);
+        case D3DTSS_ADDRESSV:
+            return IWineD3DDevice_GetSamplerState(This->wineD3DDevice,
+                                                  Stage,
+                                                  WINED3DSAMP_ADDRESSV,
+                                                  State);
         default:
             return IWineD3DDevice_GetTextureStageState(This->wineD3DDevice,
-                                                    Stage,
-                                                    TexStageStateType,
-                                                    State);
+                                                       Stage,
+                                                       TexStageStateType,
+                                                       State);
     }
 }
 
@@ -4094,12 +4115,28 @@ IDirect3DDeviceImpl_7_SetTextureStageState(IDirect3DDevice7 *iface,
                                                   WINED3DSAMP_MAGFILTER,
                                                   State);
 
+        case D3DTSS_ADDRESS:
+                   IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
+                                                  Stage,
+                                                  WINED3DSAMP_ADDRESSV,
+                                                  State);
+            /* Drop through */
+        case D3DTSS_ADDRESSU:
+            return IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
+                                                  Stage,
+                                                  WINED3DSAMP_ADDRESSU,
+                                                  State);
+        case D3DTSS_ADDRESSV:
+            return IWineD3DDevice_SetSamplerState(This->wineD3DDevice,
+                                                  Stage,
+                                                  WINED3DSAMP_ADDRESSV,
+                                                  State);
         default:
 
             return IWineD3DDevice_SetTextureStageState(This->wineD3DDevice,
-                                                      Stage,
-                                                      TexStageStateType,
-                                                      State);
+                                                       Stage,
+                                                       TexStageStateType,
+                                                       State);
     }
 }
 

@@ -2214,36 +2214,40 @@ static int TLB_ReadTypeLib(LPCWSTR pszFileName, LPWSTR pszPath, UINT cchPath, IT
     int ret = TYPE_E_CANTLOADLIBRARY;
     INT index = 1;
     HINSTANCE hinstDLL;
+    LPWSTR index_str, file = (LPWSTR)pszFileName;
 
     *ppTypeLib = NULL;
 
-    lstrcpynW(pszPath, pszFileName, cchPath);
-
-    /* first try loading as a dll and access the typelib as a resource */
-    hinstDLL = LoadLibraryExW(pszFileName, 0, DONT_RESOLVE_DLL_REFERENCES |
-            LOAD_LIBRARY_AS_DATAFILE | LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (!hinstDLL)
+    index_str = strrchrW(pszFileName, '\\');
+    if(index_str && *++index_str != '\0')
     {
-        /* it may have been specified with resource index appended to the
-         * path, so remove it and try again */
-        const WCHAR *pIndexStr = strrchrW(pszFileName, '\\');
-        if(pIndexStr && pIndexStr != pszFileName && *++pIndexStr != '\0')
+        LPWSTR end_ptr;
+        long idx = strtolW(index_str, &end_ptr, 10);
+        if(*end_ptr == '\0')
         {
-            index = atoiW(pIndexStr);
-            pszPath[pIndexStr - pszFileName - 1] = '\0';
-
-            hinstDLL = LoadLibraryExW(pszPath, 0, DONT_RESOLVE_DLL_REFERENCES |
-                    LOAD_LIBRARY_AS_DATAFILE | LOAD_WITH_ALTERED_SEARCH_PATH);
+            int str_len = index_str - pszFileName - 1;
+            index = idx;
+            file = HeapAlloc(GetProcessHeap(), 0, (str_len + 1) * sizeof(WCHAR));
+            memcpy(file, pszFileName, str_len * sizeof(WCHAR));
+            file[str_len] = 0;
         }
     }
 
-    /* get the path to the specified typelib file */
-    if (!hinstDLL)
+    if(!SearchPathW(NULL, file, NULL, cchPath, pszPath, NULL))
     {
-        /* otherwise, try loading as a regular file */
-        if (!SearchPathW(NULL, pszFileName, NULL, cchPath, pszPath, NULL))
-            return TYPE_E_CANTLOADLIBRARY;
+        if(strchrW(file, '\\'))
+        {
+            lstrcpyW(pszPath, file);
+        }
+        else
+        {
+            int len = GetSystemDirectoryW(pszPath, cchPath);
+            pszPath[len] = '\\';
+            memcpy(pszPath + len + 1, file, (strlenW(file) + 1) * sizeof(WCHAR));
+        }
     }
+
+    if(file != pszFileName) HeapFree(GetProcessHeap(), 0, file);
 
     TRACE_(typelib)("File %s index %d\n", debugstr_w(pszPath), index);
 
@@ -2257,13 +2261,16 @@ static int TLB_ReadTypeLib(LPCWSTR pszFileName, LPWSTR pszPath, UINT cchPath, IT
             *ppTypeLib = (ITypeLib2*)entry;
             ITypeLib_AddRef(*ppTypeLib);
             LeaveCriticalSection(&cache_section);
-            FreeLibrary(hinstDLL);
             return S_OK;
         }
     }
     LeaveCriticalSection(&cache_section);
 
     /* now actually load and parse the typelib */
+
+    hinstDLL = LoadLibraryExW(pszPath, 0, DONT_RESOLVE_DLL_REFERENCES |
+            LOAD_LIBRARY_AS_DATAFILE | LOAD_WITH_ALTERED_SEARCH_PATH);
+
     if (hinstDLL)
     {
         static const WCHAR TYPELIBW[] = {'T','Y','P','E','L','I','B',0};
@@ -5464,8 +5471,24 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
             VARIANTARG **prgpvarg = INVBUF_GET_ARG_PTR_ARRAY(buffer, func_desc->cParams);
             VARIANTARG *rgvarg = INVBUF_GET_ARG_ARRAY(buffer, func_desc->cParams);
             VARTYPE *rgvt = INVBUF_GET_ARG_TYPE_ARRAY(buffer, func_desc->cParams);
+            UINT cNamedArgs = pDispParams->cNamedArgs;
+            DISPID *rgdispidNamedArgs = pDispParams->rgdispidNamedArgs;
 
             hres = S_OK;
+
+            if (func_desc->invkind & (INVOKE_PROPERTYPUT|INVOKE_PROPERTYPUTREF))
+            {
+                if (!cNamedArgs || (rgdispidNamedArgs[0] != DISPID_PROPERTYPUT))
+                {
+                    ERR("first named arg for property put invocation must be DISPID_PROPERTYPUT\n");
+                    hres = DISP_E_PARAMNOTFOUND;
+                    goto func_fail;
+                }
+                /* ignore the DISPID_PROPERTYPUT named argument from now on */
+                cNamedArgs--;
+                rgdispidNamedArgs++;
+            }
+
             for (i = 0; i < func_desc->cParams; i++)
             {
                 TYPEDESC *tdesc = &func_desc->lprgelemdescParam[i].tdesc;
@@ -5478,9 +5501,37 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
             for (i = 0; i < func_desc->cParams; i++)
             {
                 USHORT wParamFlags = func_desc->lprgelemdescParam[i].u.paramdesc.wParamFlags;
+                VARIANTARG *src_arg;
+
+                if (cNamedArgs)
+                {
+                    USHORT j;
+                    src_arg = NULL;
+                    for (j = 0; j < cNamedArgs; j++)
+                        if (rgdispidNamedArgs[j] == i)
+                        {
+                            src_arg = &pDispParams->rgvarg[j];
+                            break;
+                        }
+                }
+                else
+                    src_arg = i < pDispParams->cArgs ? &pDispParams->rgvarg[pDispParams->cArgs - 1 - i] : NULL;
 
                 if (wParamFlags & PARAMFLAG_FRETVAL)
                 {
+                    /* under most conditions the caller is not allowed to
+                     * pass in a dispparam arg in the index of what would be
+                     * the retval parameter. however, there is an exception
+                     * where the extra parameter is used in an extra
+                     * IDispatch::Invoke below */
+                    if ((i < pDispParams->cArgs) &&
+                        ((func_desc->cParams != 1) || !pVarResult ||
+                         !(func_desc->invkind & INVOKE_PROPERTYGET)))
+                    {
+                        hres = DISP_E_BADPARAMCOUNT;
+                        break;
+                    }
+
                     /* note: this check is placed so that if the caller passes
                      * in a VARIANTARG for the retval we just ignore it, like
                      * native does */
@@ -5500,9 +5551,8 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                         break;
                     }
                 }
-                else if (i < pDispParams->cArgs)
+                else if (src_arg)
                 {
-                    VARIANTARG *src_arg = &pDispParams->rgvarg[pDispParams->cArgs - 1 - i];
                     dump_Variant(src_arg);
 
                     if (rgvt[i] == VT_VARIANT)
@@ -5562,11 +5612,20 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                     }
                     else
                     {
-                        VARIANTARG *missing_arg = INVBUF_GET_MISSING_ARG_ARRAY(buffer, func_desc->cParams);
-                        V_VT(arg) = VT_VARIANT | VT_BYREF;
-                        V_VARIANTREF(arg) = &missing_arg[i];
-                        V_VT(V_VARIANTREF(arg)) = VT_ERROR;
-                        V_ERROR(V_VARIANTREF(arg)) = DISP_E_PARAMNOTFOUND;
+                        VARIANTARG *missing_arg;
+                        /* if the function wants a pointer to a variant then
+                         * set that up, otherwise just pass the VT_ERROR in
+                         * the argument by value */
+                        if (rgvt[i] & VT_BYREF)
+                        {
+                            missing_arg = INVBUF_GET_MISSING_ARG_ARRAY(buffer, func_desc->cParams) + i;
+                            V_VT(arg) = VT_VARIANT | VT_BYREF;
+                            V_VARIANTREF(arg) = missing_arg;
+                        }
+                        else
+                            missing_arg = arg;
+                        V_VT(missing_arg) = VT_ERROR;
+                        V_ERROR(missing_arg) = DISP_E_PARAMNOTFOUND;
                     }
                 }
                 else
@@ -5658,7 +5717,56 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
             {
                 WARN("invoked function failed with error 0x%08x\n", V_ERROR(&varresult));
                 hres = DISP_E_EXCEPTION;
-                if (pExcepInfo) pExcepInfo->scode = V_ERROR(&varresult);
+                if (pExcepInfo)
+                {
+                    IErrorInfo *pErrorInfo;
+                    pExcepInfo->scode = V_ERROR(&varresult);
+                    if (GetErrorInfo(0, &pErrorInfo) == S_OK)
+                    {
+                        IErrorInfo_GetDescription(pErrorInfo, &pExcepInfo->bstrDescription);
+                        IErrorInfo_GetHelpFile(pErrorInfo, &pExcepInfo->bstrHelpFile);
+                        IErrorInfo_GetSource(pErrorInfo, &pExcepInfo->bstrSource);
+                        IErrorInfo_GetHelpContext(pErrorInfo, &pExcepInfo->dwHelpContext);
+
+                        IErrorInfo_Release(pErrorInfo);
+                    }
+                }
+            }
+            if (V_VT(&varresult) != VT_ERROR)
+            {
+                TRACE("varresult value: ");
+                dump_Variant(&varresult);
+
+                if (pVarResult)
+                {
+                    VariantClear(pVarResult);
+                    *pVarResult = varresult;
+                }
+                else
+                    VariantClear(&varresult);
+            }
+
+            if (SUCCEEDED(hres) && pVarResult && (func_desc->cParams == 1) &&
+                (wFlags == INVOKE_PROPERTYGET) &&
+                (func_desc->lprgelemdescParam[0].u.paramdesc.wParamFlags & PARAMFLAG_FRETVAL) &&
+                (pDispParams->cArgs != 0))
+            {
+                if (V_VT(pVarResult) == VT_DISPATCH)
+                {
+                    IDispatch *pDispatch = V_DISPATCH(pVarResult);
+                    /* Note: not VariantClear; we still need the dispatch
+                     * pointer to be valid */
+                    VariantInit(pVarResult);
+                    hres = IDispatch_Invoke(pDispatch, DISPID_VALUE, &IID_NULL,
+                        GetSystemDefaultLCID(), INVOKE_PROPERTYGET,
+                        pDispParams, pVarResult, pExcepInfo, pArgErr);
+                    IDispatch_Release(pDispatch);
+                }
+                else
+                {
+                    VariantClear(pVarResult);
+                    hres = DISP_E_NOTACOLLECTION;
+                }
             }
 
 func_fail:

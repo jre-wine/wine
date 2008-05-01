@@ -39,6 +39,9 @@
 static struct _TEB * (WINAPI *pNtCurrentTeb)(void);
 static NTSTATUS  (WINAPI *pNtGetContextThread)(HANDLE,CONTEXT*);
 static NTSTATUS  (WINAPI *pNtSetContextThread)(HANDLE,CONTEXT*);
+static NTSTATUS  (WINAPI *pRtlRaiseException)(EXCEPTION_RECORD *rec);
+static PVOID     (WINAPI *pRtlAddVectoredExceptionHandler)(ULONG first, PVECTORED_EXCEPTION_HANDLER func);
+static ULONG     (WINAPI *pRtlRemoveVectoredExceptionHandler)(PVOID handler);
 static void *code_mem;
 
 /* Test various instruction combinations that cause a protection fault on the i386,
@@ -163,6 +166,7 @@ static const struct exception
 };
 
 static int got_exception;
+static BOOL have_vectored_api;
 
 static void run_exception_test(const void *handler, const void* context,
                                const void *code, unsigned int code_size)
@@ -183,6 +187,125 @@ static void run_exception_test(const void *handler, const void* context,
     func();
     pNtCurrentTeb()->Tib.ExceptionList = exc_frame.frame.Prev;
 }
+
+LONG CALLBACK rtlraiseexception_vectored_handler(EXCEPTION_POINTERS *ExceptionInfo)
+{
+    PCONTEXT context = ExceptionInfo->ContextRecord;
+    PEXCEPTION_RECORD rec = ExceptionInfo->ExceptionRecord;
+    trace("vect. handler %08x addr:%p context.Eip:%x\n", rec->ExceptionCode,
+          rec->ExceptionAddress, context->Eip);
+
+    todo_wine {
+    ok(rec->ExceptionAddress == (char *)code_mem + 0xb, "ExceptionAddress at %p instead of %p\n",
+       rec->ExceptionAddress, (char *)code_mem + 0xb);
+    }
+
+    /* check that context.Eip is fixed up only for EXCEPTION_BREAKPOINT
+     * even if raised by RtlRaiseException
+     */
+    if(rec->ExceptionCode == EXCEPTION_BREAKPOINT)
+    {
+        todo_wine {
+        ok(context->Eip == (DWORD)code_mem + 0xa, "Eip at %x instead of %x\n",
+           context->Eip, (DWORD)code_mem + 0xa);
+        }
+    }
+    else
+    {
+        ok(context->Eip == (DWORD)code_mem + 0xb, "Eip at %x instead of %x\n",
+           context->Eip, (DWORD)code_mem + 0xb);
+    }
+
+    /* test if context change is preserved from vectored handler to stack handlers */
+    context->Eax = 0xf00f00f0;
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static DWORD rtlraiseexception_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
+                      CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
+{
+    trace( "exception: %08x flags:%x addr:%p context: Eip:%x\n",
+           rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, context->Eip );
+
+    todo_wine {
+    ok(rec->ExceptionAddress == (char *)code_mem + 0xb, "ExceptionAddress at %p instead of %p\n",
+       rec->ExceptionAddress, (char *)code_mem + 0xb);
+    }
+
+    /* check that context.Eip is fixed up only for EXCEPTION_BREAKPOINT
+     * even if raised by RtlRaiseException
+     */
+    if(rec->ExceptionCode == EXCEPTION_BREAKPOINT)
+    {
+        todo_wine {
+        ok(context->Eip == (DWORD)code_mem + 0xa, "Eip at %x instead of %x\n",
+           context->Eip, (DWORD)code_mem + 0xa);
+        }
+    }
+    else
+    {
+        ok(context->Eip == (DWORD)code_mem + 0xb, "Eip at %x instead of %x\n",
+           context->Eip, (DWORD)code_mem + 0xb);
+    }
+
+    if(have_vectored_api)
+        ok(context->Eax == 0xf00f00f0, "Eax is %x, should have been set to 0xf00f00f0 in vectored handler\n",
+           context->Eax);
+
+    /* Eip in context is decreased by 1
+     * Increase it again, else execution will continue in the middle of a instruction */
+    if(rec->ExceptionCode == EXCEPTION_BREAKPOINT && (context->Eip == (DWORD)code_mem + 0xa))
+        context->Eip += 1;
+    return ExceptionContinueExecution;
+}
+
+
+static const BYTE call_one_arg_code[] = {
+        0x8b, 0x44, 0x24, 0x08, /* mov 0x8(%esp),%eax */
+        0x50,                   /* push %eax */
+        0x8b, 0x44, 0x24, 0x08, /* mov 0x8(%esp),%eax */
+        0xff, 0xd0,             /* call *%eax */
+        0x90,                   /* nop */
+        0x90,                   /* nop */
+        0x90,                   /* nop */
+        0x90,                   /* nop */
+        0xc3,                   /* ret */
+};
+
+
+static void run_rtlraiseexception_test(DWORD exceptioncode)
+{
+    EXCEPTION_REGISTRATION_RECORD frame;
+    EXCEPTION_RECORD record;
+    PVOID vectored_handler = NULL;
+
+    void (*func)(void* function, EXCEPTION_RECORD* record) = code_mem;
+
+    record.ExceptionCode = exceptioncode;
+    record.ExceptionFlags = 0;
+    record.ExceptionRecord = NULL;
+    record.ExceptionAddress = NULL; /* does not matter, copied return address */
+    record.NumberParameters = 0;
+
+    frame.Handler = rtlraiseexception_handler;
+    frame.Prev = pNtCurrentTeb()->Tib.ExceptionList;
+
+    memcpy(code_mem, call_one_arg_code, sizeof(call_one_arg_code));
+
+    pNtCurrentTeb()->Tib.ExceptionList = &frame;
+    if (have_vectored_api)
+    {
+        vectored_handler = pRtlAddVectoredExceptionHandler(TRUE, &rtlraiseexception_vectored_handler);
+        ok(vectored_handler != 0, "RtlAddVectoredExceptionHandler failed\n");
+    }
+
+    func(pRtlRaiseException, &record);
+
+    if (have_vectored_api)
+        pRtlRemoveVectoredExceptionHandler(vectored_handler);
+    pNtCurrentTeb()->Tib.ExceptionList = frame.Prev;
+}
+
 
 static DWORD handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
                       CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
@@ -391,14 +514,33 @@ static void test_exceptions(void)
 
     pNtGetContextThread = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtGetContextThread" );
     pNtSetContextThread = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "NtSetContextThread" );
+    pRtlRaiseException  = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"), "RtlRaiseException" );
+    pRtlAddVectoredExceptionHandler = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"),
+                                                              "RtlAddVectoredExceptionHandler" );
+    pRtlRemoveVectoredExceptionHandler = (void *)GetProcAddress( GetModuleHandleA("ntdll.dll"),
+                                                                 "RtlRemoveVectoredExceptionHandler" );
+
     if (!pNtGetContextThread || !pNtSetContextThread)
     {
         trace( "NtGetContextThread/NtSetContextThread not found, skipping tests\n" );
         return;
     }
+    if (pRtlAddVectoredExceptionHandler && pRtlRemoveVectoredExceptionHandler)
+        have_vectored_api = TRUE;
+    else
+        skip("RtlAddVectoredExceptionHandler or RtlRemoveVectoredExceptionHandler not found\n");
 
     /* test handling of debug registers */
     run_exception_test(dreg_handler, NULL, &segfault_code, sizeof(segfault_code));
+
+    if (pRtlRaiseException)
+    {
+        run_rtlraiseexception_test(0x12345);
+        run_rtlraiseexception_test(EXCEPTION_BREAKPOINT);
+        run_rtlraiseexception_test(EXCEPTION_INVALID_HANDLE);
+    }
+    else
+        skip( "RtlRaiseException not found\n" );
 
     ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
     res = pNtGetContextThread(GetCurrentThread(), &ctx);

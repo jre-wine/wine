@@ -733,6 +733,7 @@ static void add_structure_typeinfo(msft_typelib_t *typelib, type_t *structure);
 static void add_interface_typeinfo(msft_typelib_t *typelib, type_t *interface);
 static void add_enum_typeinfo(msft_typelib_t *typelib, type_t *enumeration);
 static void add_coclass_typeinfo(msft_typelib_t *typelib, type_t *cls);
+static void add_dispinterface_typeinfo(msft_typelib_t *typelib, type_t *dispinterface);
 
 
 /****************************************************************************
@@ -828,6 +829,7 @@ static int encode_type(
 	break;
 
     case VT_CY:
+    case VT_DATE:
 	*encoded_type = default_type;
 	*width = 8;
 	*alignment = 8;
@@ -973,6 +975,8 @@ static int encode_type(
             case 0:
                 if (type->kind == TKIND_COCLASS)
                     add_coclass_typeinfo(typelib, type);
+                else if (type->kind == TKIND_DISPATCH)
+                    add_dispinterface_typeinfo(typelib, type);
                 else
                     error("encode_type: VT_USERDEFINED - can't yet add typedef's on the fly\n");
                 break;
@@ -1344,25 +1348,6 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int 
         }
     }
 
-    switch(invokekind) {
-    case 0x2: /* INVOKE_PROPERTYGET */
-        if((num_params != 0 && typeinfo->typekind == TKIND_DISPATCH)
-           || (num_params != 1 && typeinfo->typekind == TKIND_INTERFACE)) {
-            error("expecting no args on a propget func\n");
-            return S_FALSE;
-        }
-        break;
-    case 0x4: /* INVOKE_PROPERTYPUT */
-    case 0x8: /* INVOKE_PROPERTYPUTREF */
-        if(num_params != 1) {
-            error("expecting one arg on a propput func\n");
-            return S_FALSE;
-        }
-        break;
-    default:
-        break;
-    }
-
     /* allocate type data space for us */
     typedata_size = 0x18 + extra_attr * sizeof(int) + (num_params * (num_defaults ? 16 : 12));
 
@@ -1542,18 +1527,19 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int 
     if(typeinfo->typekind == TKIND_MODULE)
         namedata[9] |= 0x20;
 
-    if(invokekind != 0x4 /* INVOKE_PROPERTYPUT */ && invokekind != 0x8 /* INVOKE_PROPERTYPUTREF */) { 
-        /* don't give the arg of a [propput*] func a name */
-        if (func->args)
+    if (func->args)
+    {
+        i = 0;
+        LIST_FOR_EACH_ENTRY( arg, func->args, var_t, entry )
         {
-          i = 0;
-          LIST_FOR_EACH_ENTRY( arg, func->args, var_t, entry )
-          {
-            int *paramdata = typedata + 6 + extra_attr + (num_defaults ? num_params : 0) + i * 3;
-            offset = ctl2_alloc_name(typeinfo->typelib, arg->name);
-            paramdata[1] = offset;
+            /* don't give the last arg of a [propput*] func a name */
+            if(i != num_params - 1 || (invokekind != 0x4 /* INVOKE_PROPERTYPUT */ && invokekind != 0x8 /* INVOKE_PROPERTYPUTREF */))
+            {
+                int *paramdata = typedata + 6 + extra_attr + (num_defaults ? num_params : 0) + i * 3;
+                offset = ctl2_alloc_name(typeinfo->typelib, arg->name);
+                paramdata[1] = offset;
+            }
             i++;
-          }
         }
     }
     return S_OK;
@@ -1904,7 +1890,7 @@ static void add_dispatch(msft_typelib_t *typelib)
 }
 
 static void add_dispinterface_typeinfo(msft_typelib_t *typelib, type_t *dispinterface)
-{ 
+{
     int idx = 0;
     const func_t *func;
     var_t *var;

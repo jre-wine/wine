@@ -356,8 +356,8 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
     STDMETHOD(CreateCubeTexture)(THIS_ UINT EdgeLength, UINT Levels, DWORD Usage, WINED3DFORMAT Format, WINED3DPOOL Pool, struct IWineD3DCubeTexture** ppCubeTexture, HANDLE* pSharedHandle, IUnknown *parent, D3DCB_CREATESURFACEFN pFn) PURE;
     STDMETHOD(CreateQuery)(THIS_ WINED3DQUERYTYPE Type, struct IWineD3DQuery **ppQuery, IUnknown *pParent);
     STDMETHOD(CreateAdditionalSwapChain)(THIS_ WINED3DPRESENT_PARAMETERS *pPresentationParameters, struct IWineD3DSwapChain **pSwapChain, IUnknown *pParent, D3DCB_CREATERENDERTARGETFN pFn, D3DCB_CREATEDEPTHSTENCILSURFACEFN pFn2);
-    STDMETHOD(CreateVertexDeclaration)(THIS_ CONST VOID* pDeclaration, struct IWineD3DVertexDeclaration** ppDecl, IUnknown* pParent) PURE;
-    STDMETHOD(CreateVertexShader)(THIS_ CONST DWORD *pDeclaration, CONST DWORD* pFunction, struct IWineD3DVertexShader** ppShader, IUnknown *pParent) PURE;
+    STDMETHOD(CreateVertexDeclaration)(THIS_ struct IWineD3DVertexDeclaration** ppDecl, IUnknown* pParent, const WINED3DVERTEXELEMENT *elements, size_t element_count) PURE;
+    STDMETHOD(CreateVertexShader)(THIS_ struct IWineD3DVertexDeclaration *vertex_declaration, CONST DWORD* pFunction, struct IWineD3DVertexShader** ppShader, IUnknown *pParent) PURE;
     STDMETHOD(CreatePixelShader)(THIS_ CONST DWORD* pFunction, struct IWineD3DPixelShader** ppShader, IUnknown *pParent) PURE;
     STDMETHOD_(HRESULT,CreatePalette)(THIS_ DWORD Flags, PALETTEENTRY *PalEnt, struct IWineD3DPalette **Palette, IUnknown *Parent);
     STDMETHOD(Init3D)(THIS_ WINED3DPRESENT_PARAMETERS* pPresentationParameters, D3DCB_CREATEADDITIONALSWAPCHAIN D3DCB_CreateAdditionalSwapChain);
@@ -469,10 +469,7 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
     STDMETHOD(ColorFill)(THIS_ struct IWineD3DSurface* pSurface, CONST WINED3DRECT* pRect, WINED3DCOLOR color) PURE;
     STDMETHOD(UpdateTexture)(THIS_ struct IWineD3DBaseTexture *pSourceTexture, struct IWineD3DBaseTexture *pDestinationTexture) PURE;
     STDMETHOD(UpdateSurface)(THIS_ struct IWineD3DSurface* pSourceSurface, CONST RECT* pSourceRect, struct IWineD3DSurface* pDestinationSurface, CONST POINT* pDestPoint) PURE;
-    STDMETHOD(GetRenderTargetData)(THIS_ struct IWineD3DSurface* pRenderTarget, struct IWineD3DSurface* pSurface) PURE;
     STDMETHOD(GetFrontBufferData)(THIS_ UINT iSwapChain,struct IWineD3DSurface* pSurface) PURE;
-    STDMETHOD_(void, SetupFullscreenWindow)(THIS_ HWND window) PURE;
-    STDMETHOD_(void, RestoreWindow)(THIS_ HWND window) PURE;
     /*** object tracking ***/
     STDMETHOD_(void, ResourceReleased)(THIS_ struct IWineD3DResource *resource);
 };
@@ -496,7 +493,7 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
 #define IWineD3DDevice_CreateCubeTexture(p,a,b,c,d,e,f,g,h,i)   (p)->lpVtbl->CreateCubeTexture(p,a,b,c,d,e,f,g,h,i)
 #define IWineD3DDevice_CreateQuery(p,a,b,c)                     (p)->lpVtbl->CreateQuery(p,a,b,c)
 #define IWineD3DDevice_CreateAdditionalSwapChain(p,a,b,c,d,e)   (p)->lpVtbl->CreateAdditionalSwapChain(p,a,b,c,d,e)
-#define IWineD3DDevice_CreateVertexDeclaration(p,b,c,d)         (p)->lpVtbl->CreateVertexDeclaration(p,b,c,d)
+#define IWineD3DDevice_CreateVertexDeclaration(p,a,b,c,d)       (p)->lpVtbl->CreateVertexDeclaration(p,a,b,c,d)
 #define IWineD3DDevice_CreateVertexShader(p,a,b,c,d)            (p)->lpVtbl->CreateVertexShader(p,a,b,c,d)
 #define IWineD3DDevice_CreatePixelShader(p,a,b,c)               (p)->lpVtbl->CreatePixelShader(p,a,b,c)
 #define IWineD3DDevice_CreatePalette(p, a, b, c, d)             (p)->lpVtbl->CreatePalette(p, a, b, c, d)
@@ -609,10 +606,7 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
 #define IWineD3DDevice_ColorFill(p,a,b,c)                       (p)->lpVtbl->ColorFill(p,a,b,c)
 #define IWineD3DDevice_UpdateTexture(p,a,b)                     (p)->lpVtbl->UpdateTexture(p,a,b)
 #define IWineD3DDevice_UpdateSurface(p,a,b,c,d)                 (p)->lpVtbl->UpdateSurface(p,a,b,c,d)
-#define IWineD3DDevice_GetRenderTargetData(p,a,b)               (p)->lpVtbl->GetRenderTargetData(p,a,b)
 #define IWineD3DDevice_GetFrontBufferData(p,a,b)                (p)->lpVtbl->GetFrontBufferData(p,a,b)
-#define IWineD3DDevice_SetupFullscreenWindow(p, a)              (p)->lpVtbl->SetupFullscreenWindow(p,a);
-#define IWineD3DDevice_RestoreWindow(p, a)                      (p)->lpVtbl->RestoreWindow(p,a);
 #define IWineD3DDevice_ResourceReleased(p,a)                    (p)->lpVtbl->ResourceReleased(p,a)
 #endif
 
@@ -1265,8 +1259,8 @@ DECLARE_INTERFACE_(IWineD3DVertexDeclaration,IWineD3DBase)
     STDMETHOD(GetParent)(THIS_ IUnknown **pParent) PURE;
     /*** IWineD3DVertexDeclaration methods ***/
     STDMETHOD(GetDevice)(THIS_ IWineD3DDevice **ppDevice) PURE;
-    STDMETHOD(GetDeclaration)(THIS_ VOID *pDecl, DWORD *pSize) PURE;
-    STDMETHOD(SetDeclaration)(THIS_ VOID *pDecl) PURE;
+    STDMETHOD(GetDeclaration)(THIS_ WINED3DVERTEXELEMENT *elements, size_t *elements_count) PURE;
+    STDMETHOD(SetDeclaration)(THIS_ const WINED3DVERTEXELEMENT *elements, size_t element_count) PURE;
 };
 #undef INTERFACE
 
@@ -1280,7 +1274,7 @@ DECLARE_INTERFACE_(IWineD3DVertexDeclaration,IWineD3DBase)
 /*** IWineD3DVertexDeclaration methods ***/
 #define IWineD3DVertexDeclaration_GetDevice(p,a)             (p)->lpVtbl->GetDevice(p,a)
 #define IWineD3DVertexDeclaration_GetDeclaration(p,a,b)      (p)->lpVtbl->GetDeclaration(p,a,b)
-#define IWineD3DVertexDeclaration_SetDeclaration(p,b)        (p)->lpVtbl->SetDeclaration(p,b)
+#define IWineD3DVertexDeclaration_SetDeclaration(p,a,b)      (p)->lpVtbl->SetDeclaration(p,a,b)
 #endif
 
 /*****************************************************************************
@@ -1451,22 +1445,26 @@ DECLARE_INTERFACE_(IWineD3DVertexShader,IWineD3DBaseShader)
     /*** IWineD3DVertexShader methods ***/
     STDMETHOD(GetDevice)(THIS_ IWineD3DDevice** ppDevice) PURE;
     STDMETHOD(GetFunction)(THIS_ VOID *pData, UINT *pSizeOfData) PURE;
+    STDMETHOD_(void, FakeSemantics)(THIS_ struct IWineD3DVertexDeclaration *vertex_declaration) PURE;
+    STDMETHOD(SetLocalConstantsF)(THIS_ UINT start_idx, const float *src_data, UINT count) PURE;
 };
 #undef INTERFACE
 
 #if !defined(__cplusplus) || defined(CINTERFACE)
 /*** IUnknown methods ***/
-#define IWineD3DVertexShader_QueryInterface(p,a,b)     (p)->lpVtbl->QueryInterface(p,a,b)
-#define IWineD3DVertexShader_AddRef(p)                 (p)->lpVtbl->AddRef(p)
-#define IWineD3DVertexShader_Release(p)                (p)->lpVtbl->Release(p)
+#define IWineD3DVertexShader_QueryInterface(p,a,b)          (p)->lpVtbl->QueryInterface(p,a,b)
+#define IWineD3DVertexShader_AddRef(p)                      (p)->lpVtbl->AddRef(p)
+#define IWineD3DVertexShader_Release(p)                     (p)->lpVtbl->Release(p)
 /*** IWineD3DBase methods ***/
-#define IWineD3DVertexShader_GetParent(p,a)            (p)->lpVtbl->GetParent(p,a)
+#define IWineD3DVertexShader_GetParent(p,a)                 (p)->lpVtbl->GetParent(p,a)
 /*** IWineD3DBaseShader methods ***/
-#define IWineD3DVertexShader_SetFunction(p,a)          (p)->lpVtbl->SetFunction(p,a)
-#define IWineD3DVertexShader_CompileShader(p)          (p)->lpVtbl->CompileShader(p)
+#define IWineD3DVertexShader_SetFunction(p,a)               (p)->lpVtbl->SetFunction(p,a)
+#define IWineD3DVertexShader_CompileShader(p)               (p)->lpVtbl->CompileShader(p)
 /*** IWineD3DVertexShader methods ***/
-#define IWineD3DVertexShader_GetDevice(p,a)            (p)->lpVtbl->GetDevice(p,a)
-#define IWineD3DVertexShader_GetFunction(p,a,b)        (p)->lpVtbl->GetFunction(p,a,b)
+#define IWineD3DVertexShader_GetDevice(p,a)                 (p)->lpVtbl->GetDevice(p,a)
+#define IWineD3DVertexShader_GetFunction(p,a,b)             (p)->lpVtbl->GetFunction(p,a,b)
+#define IWineD3DVertexShader_FakeSemantics(p,a)             (p)->lpVtbl->FakeSemantics(p,a)
+#define IWineD3DVertexShader_SetLocalConstantsF(p,a,b,c)    (p)->lpVtbl->SetLocalConstantsF(p,a,b,c)
 #endif
 
 /*****************************************************************************

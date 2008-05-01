@@ -36,7 +36,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 #define NTLM_MAX_BUF 1904
 #define MIN_NTLM_AUTH_MAJOR_VERSION 3
 #define MIN_NTLM_AUTH_MINOR_VERSION 0
-#define MIN_NTLM_AUTH_MICRO_VERSION 24
+#define MIN_NTLM_AUTH_MICRO_VERSION 25
 
 static CHAR ntlm_auth[] = "ntlm_auth";
 
@@ -1760,8 +1760,10 @@ void SECUR32_initNTLMSP(void)
         check_version(helper);
 
     if( (helper->major >  MIN_NTLM_AUTH_MAJOR_VERSION) ||
-        (helper->major  = MIN_NTLM_AUTH_MAJOR_VERSION  &&
-         helper->minor >= MIN_NTLM_AUTH_MINOR_VERSION  &&
+        (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
+         helper->minor >  MIN_NTLM_AUTH_MINOR_VERSION) ||
+        (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
+         helper->minor == MIN_NTLM_AUTH_MINOR_VERSION  &&
          helper->micro >= MIN_NTLM_AUTH_MICRO_VERSION) )
     {
         SecureProvider *provider = SECUR32_addProvider(&ntlmTableA, &ntlmTableW, NULL);

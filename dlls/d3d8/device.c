@@ -241,23 +241,37 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateAdditionalSwapChain(LPDIRECT3DD
     object->lpVtbl = &Direct3DSwapChain8_Vtbl;
 
     /* Allocate an associated WineD3DDevice object */
-    localParameters.BackBufferWidth                = &pPresentationParameters->BackBufferWidth;
-    localParameters.BackBufferHeight               = &pPresentationParameters->BackBufferHeight;
-    localParameters.BackBufferFormat               = (WINED3DFORMAT *)&pPresentationParameters->BackBufferFormat;
-    localParameters.BackBufferCount                = &pPresentationParameters->BackBufferCount;
-    localParameters.MultiSampleType                = (WINED3DMULTISAMPLE_TYPE *) &pPresentationParameters->MultiSampleType;
-    localParameters.MultiSampleQuality             = NULL; /* d3d9 only */
-    localParameters.SwapEffect                     = (WINED3DSWAPEFFECT *) &pPresentationParameters->SwapEffect;
-    localParameters.hDeviceWindow                  = &pPresentationParameters->hDeviceWindow;
-    localParameters.Windowed                       = &pPresentationParameters->Windowed;
-    localParameters.EnableAutoDepthStencil         = &pPresentationParameters->EnableAutoDepthStencil;
-    localParameters.AutoDepthStencilFormat         = (WINED3DFORMAT *)&pPresentationParameters->AutoDepthStencilFormat;
-    localParameters.Flags                          = &pPresentationParameters->Flags;
-    localParameters.FullScreen_RefreshRateInHz     = &pPresentationParameters->FullScreen_RefreshRateInHz;
-    localParameters.PresentationInterval           = &pPresentationParameters->FullScreen_PresentationInterval;
-
+    localParameters.BackBufferWidth                             = pPresentationParameters->BackBufferWidth;
+    localParameters.BackBufferHeight                            = pPresentationParameters->BackBufferHeight;
+    localParameters.BackBufferFormat                            = pPresentationParameters->BackBufferFormat;
+    localParameters.BackBufferCount                             = pPresentationParameters->BackBufferCount;
+    localParameters.MultiSampleType                             = pPresentationParameters->MultiSampleType;
+    localParameters.MultiSampleQuality                          = 0; /* d3d9 only */
+    localParameters.SwapEffect                                  = pPresentationParameters->SwapEffect;
+    localParameters.hDeviceWindow                               = pPresentationParameters->hDeviceWindow;
+    localParameters.Windowed                                    = pPresentationParameters->Windowed;
+    localParameters.EnableAutoDepthStencil                      = pPresentationParameters->EnableAutoDepthStencil;
+    localParameters.AutoDepthStencilFormat                      = pPresentationParameters->AutoDepthStencilFormat;
+    localParameters.Flags                                       = pPresentationParameters->Flags;
+    localParameters.FullScreen_RefreshRateInHz                  = pPresentationParameters->FullScreen_RefreshRateInHz;
+    localParameters.PresentationInterval                        = pPresentationParameters->FullScreen_PresentationInterval;
 
     hrc = IWineD3DDevice_CreateAdditionalSwapChain(This->WineD3DDevice, &localParameters, &object->wineD3DSwapChain, (IUnknown*)object, D3D8CB_CreateRenderTarget, D3D8CB_CreateDepthStencilSurface);
+
+    pPresentationParameters->BackBufferWidth                    = localParameters.BackBufferWidth;
+    pPresentationParameters->BackBufferHeight                   = localParameters.BackBufferHeight;
+    pPresentationParameters->BackBufferFormat                   = localParameters.BackBufferFormat;
+    pPresentationParameters->BackBufferCount                    = localParameters.BackBufferCount;
+    pPresentationParameters->MultiSampleType                    = localParameters.MultiSampleType;
+    pPresentationParameters->SwapEffect                         = localParameters.SwapEffect;
+    pPresentationParameters->hDeviceWindow                      = localParameters.hDeviceWindow;
+    pPresentationParameters->Windowed                           = localParameters.Windowed;
+    pPresentationParameters->EnableAutoDepthStencil             = localParameters.EnableAutoDepthStencil;
+    pPresentationParameters->AutoDepthStencilFormat             = localParameters.AutoDepthStencilFormat;
+    pPresentationParameters->Flags                              = localParameters.Flags;
+    pPresentationParameters->FullScreen_RefreshRateInHz         = localParameters.FullScreen_RefreshRateInHz;
+    pPresentationParameters->FullScreen_PresentationInterval    = localParameters.PresentationInterval;
+
     if (hrc != D3D_OK) {
         FIXME("(%p) call to IWineD3DDevice_CreateAdditionalSwapChain failed\n", This);
         HeapFree(GetProcessHeap(), 0 , object);
@@ -274,23 +288,42 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateAdditionalSwapChain(LPDIRECT3DD
 static HRESULT WINAPI IDirect3DDevice8Impl_Reset(LPDIRECT3DDEVICE8 iface, D3DPRESENT_PARAMETERS* pPresentationParameters) {
     IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
     WINED3DPRESENT_PARAMETERS localParameters;
+    HRESULT hr;
+
     TRACE("(%p) Relay pPresentationParameters(%p)\n", This, pPresentationParameters);
-/* FINDME: FIXME: */
-    localParameters.BackBufferWidth                = &pPresentationParameters->BackBufferWidth;
-    localParameters.BackBufferHeight               = &pPresentationParameters->BackBufferHeight;
-    localParameters.BackBufferFormat               = (WINED3DFORMAT *)&pPresentationParameters->BackBufferFormat;
-    localParameters.BackBufferCount                = &pPresentationParameters->BackBufferCount;
-    localParameters.MultiSampleType                = (WINED3DMULTISAMPLE_TYPE *) &pPresentationParameters->MultiSampleType;
-    localParameters.MultiSampleQuality             = NULL; /* D3d9 only */
-    localParameters.SwapEffect                     = (WINED3DSWAPEFFECT *) &pPresentationParameters->SwapEffect;
-    localParameters.hDeviceWindow                  = &pPresentationParameters->hDeviceWindow;
-    localParameters.Windowed                       = &pPresentationParameters->Windowed;
-    localParameters.EnableAutoDepthStencil         = &pPresentationParameters->EnableAutoDepthStencil;
-    localParameters.AutoDepthStencilFormat         = (WINED3DFORMAT *)&pPresentationParameters->AutoDepthStencilFormat;
-    localParameters.Flags                          = &pPresentationParameters->Flags;
-    localParameters.FullScreen_RefreshRateInHz     = &pPresentationParameters->FullScreen_RefreshRateInHz;
-    localParameters.PresentationInterval           = &pPresentationParameters->FullScreen_PresentationInterval;
-    return IWineD3DDevice_Reset(This->WineD3DDevice, &localParameters);
+
+    localParameters.BackBufferWidth                             = pPresentationParameters->BackBufferWidth;
+    localParameters.BackBufferHeight                            = pPresentationParameters->BackBufferHeight;
+    localParameters.BackBufferFormat                            = pPresentationParameters->BackBufferFormat;
+    localParameters.BackBufferCount                             = pPresentationParameters->BackBufferCount;
+    localParameters.MultiSampleType                             = pPresentationParameters->MultiSampleType;
+    localParameters.MultiSampleQuality                          = 0; /* d3d9 only */
+    localParameters.SwapEffect                                  = pPresentationParameters->SwapEffect;
+    localParameters.hDeviceWindow                               = pPresentationParameters->hDeviceWindow;
+    localParameters.Windowed                                    = pPresentationParameters->Windowed;
+    localParameters.EnableAutoDepthStencil                      = pPresentationParameters->EnableAutoDepthStencil;
+    localParameters.AutoDepthStencilFormat                      = pPresentationParameters->AutoDepthStencilFormat;
+    localParameters.Flags                                       = pPresentationParameters->Flags;
+    localParameters.FullScreen_RefreshRateInHz                  = pPresentationParameters->FullScreen_RefreshRateInHz;
+    localParameters.PresentationInterval                        = pPresentationParameters->FullScreen_PresentationInterval;
+
+    hr = IWineD3DDevice_Reset(This->WineD3DDevice, &localParameters);
+
+    pPresentationParameters->BackBufferWidth                    = localParameters.BackBufferWidth;
+    pPresentationParameters->BackBufferHeight                   = localParameters.BackBufferHeight;
+    pPresentationParameters->BackBufferFormat                   = localParameters.BackBufferFormat;
+    pPresentationParameters->BackBufferCount                    = localParameters.BackBufferCount;
+    pPresentationParameters->MultiSampleType                    = localParameters.MultiSampleType;
+    pPresentationParameters->SwapEffect                         = localParameters.SwapEffect;
+    pPresentationParameters->hDeviceWindow                      = localParameters.hDeviceWindow;
+    pPresentationParameters->Windowed                           = localParameters.Windowed;
+    pPresentationParameters->EnableAutoDepthStencil             = localParameters.EnableAutoDepthStencil;
+    pPresentationParameters->AutoDepthStencilFormat             = localParameters.AutoDepthStencilFormat;
+    pPresentationParameters->Flags                              = localParameters.Flags;
+    pPresentationParameters->FullScreen_RefreshRateInHz         = localParameters.FullScreen_RefreshRateInHz;
+    pPresentationParameters->FullScreen_PresentationInterval    = localParameters.PresentationInterval;
+
+    return hr;
 }
 
 static HRESULT WINAPI IDirect3DDevice8Impl_Present(LPDIRECT3DDEVICE8 iface, CONST RECT* pSourceRect,CONST RECT* pDestRect,HWND hDestWindowOverride,CONST RGNDATA* pDirtyRegion) {
@@ -1162,10 +1195,46 @@ static HRESULT WINAPI IDirect3DDevice8Impl_ProcessVertices(LPDIRECT3DDEVICE8 ifa
     return IWineD3DDevice_ProcessVertices(This->WineD3DDevice,SrcStartIndex, DestIndex, VertexCount, ((IDirect3DVertexBuffer8Impl *)pDestBuffer)->wineD3DVertexBuffer, NULL, Flags);
 }
 
+static HRESULT WINAPI IDirect3DDevice8Impl_CreateVertexDeclaration(IDirect3DDevice8 *iface, CONST DWORD *declaration, IDirect3DVertexDeclaration8 **decl_ptr) {
+    IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
+    IDirect3DVertexDeclaration8Impl *object;
+    WINED3DVERTEXELEMENT *wined3d_elements;
+    size_t wined3d_element_count;
+    HRESULT hr = D3D_OK;
+
+    TRACE("(%p) : declaration %p\n", This, declaration);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object) {
+        ERR("Memory allocation failed\n");
+        *decl_ptr = NULL;
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+
+    object->ref_count = 1;
+    object->lpVtbl = &Direct3DVertexDeclaration8_Vtbl;
+
+    wined3d_element_count = convert_to_wined3d_declaration(declaration, &wined3d_elements);
+    hr = IWineD3DDevice_CreateVertexDeclaration(This->WineD3DDevice, &object->wined3d_vertex_declaration,
+            (IUnknown *)object, wined3d_elements, wined3d_element_count);
+    HeapFree(GetProcessHeap(), 0, wined3d_elements);
+
+    if (FAILED(hr)) {
+        ERR("(%p) : IWineD3DDevice_CreateVertexDeclaration call failed\n", This);
+        HeapFree(GetProcessHeap(), 0, object);
+    } else {
+        *decl_ptr = (IDirect3DVertexDeclaration8 *)object;
+        TRACE("(%p) : Created vertex declaration %p\n", This, object);
+    }
+
+    return hr;
+}
+
 static HRESULT WINAPI IDirect3DDevice8Impl_CreateVertexShader(LPDIRECT3DDEVICE8 iface, CONST DWORD* pDeclaration, CONST DWORD* pFunction, DWORD* ppShader, DWORD Usage) {
     IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
     HRESULT hrc = D3D_OK;
     IDirect3DVertexShader8Impl *object;
+    IWineD3DVertexDeclaration *wined3d_vertex_declaration;
 
     /* Setup a stub object for now */
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
@@ -1178,8 +1247,18 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateVertexShader(LPDIRECT3DDEVICE8 
 
     object->ref = 1;
     object->lpVtbl = &Direct3DVertexShader8_Vtbl;
+
+    hrc = IDirect3DDevice8Impl_CreateVertexDeclaration(iface, pDeclaration, &object->vertex_declaration);
+    if (FAILED(hrc)) {
+        ERR("(%p) : IDirect3DDeviceImpl_CreateVertexDeclaration call failed\n", This);
+        HeapFree(GetProcessHeap(), 0, object);
+        *ppShader = 0;
+        return D3DERR_INVALIDCALL;
+    }
+    wined3d_vertex_declaration = ((IDirect3DVertexDeclaration8Impl *)object->vertex_declaration)->wined3d_vertex_declaration;
+
     /* Usage is missing ..*/
-    hrc = IWineD3DDevice_CreateVertexShader(This->WineD3DDevice, pDeclaration, pFunction, &object->wineD3DVertexShader, (IUnknown *)object);
+    hrc = IWineD3DDevice_CreateVertexShader(This->WineD3DDevice, wined3d_vertex_declaration, pFunction, &object->wineD3DVertexShader, (IUnknown *)object);
 
     if (FAILED(hrc)) {
         /* free up object */
@@ -1197,6 +1276,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateVertexShader(LPDIRECT3DDEVICE8 
             object->handle = handle;
             *handle = object;
             *ppShader = (handle - This->shader_handles) + VS_HIGHESTFIXEDFXF + 1;
+
+            load_local_constants(pDeclaration, object->wineD3DVertexShader);
         }
     }
     TRACE("(%p) : returning %p (handle %#x)\n", This, object, *ppShader);
@@ -1214,6 +1295,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_SetVertexShader(LPDIRECT3DDEVICE8 ifa
         IWineD3DDevice_SetFVF(This->WineD3DDevice, pShader);
 
 	/* Call SetVertexShader with a NULL shader to set the vertexshader in the stateblock to NULL. */
+        IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice, NULL);
         IWineD3DDevice_SetVertexShader(This->WineD3DDevice, NULL);
     } else {
         TRACE("Setting shader\n");
@@ -1222,7 +1304,9 @@ static HRESULT WINAPI IDirect3DDevice8Impl_SetVertexShader(LPDIRECT3DDEVICE8 ifa
             hrc = D3DERR_INVALIDCALL;
         } else {
             IDirect3DVertexShader8Impl *shader = This->shader_handles[pShader - (VS_HIGHESTFIXEDFXF + 1)];
-            hrc =  IWineD3DDevice_SetVertexShader(This->WineD3DDevice, 0 == shader ? NULL : shader->wineD3DVertexShader);
+            IWineD3DDevice_SetVertexDeclaration(This->WineD3DDevice,
+                    shader ? ((IDirect3DVertexDeclaration8Impl *)shader->vertex_declaration)->wined3d_vertex_declaration : NULL);
+            hrc = IWineD3DDevice_SetVertexShader(This->WineD3DDevice, 0 == shader ? NULL : shader->wineD3DVertexShader);
         }
     }
     TRACE("(%p) : returning hr(%u)\n", This, hrc);
@@ -1244,11 +1328,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShader(LPDIRECT3DDEVICE8 ifa
             IWineD3DVertexShader_Release(pShader);
             *ppShader = (d3d8_shader->handle - This->shader_handles) + (VS_HIGHESTFIXEDFXF + 1);
         } else {
-            WARN("(%p) : The shader has been set to NULL\n", This);
-
-            /* TODO: Find out what should be returned, e.g. the FVF */
             *ppShader = 0;
-            hrc = D3DERR_INVALIDCALL;
+            hrc = D3D_OK;
         }
     } else {
         WARN("(%p) : Call to IWineD3DDevice_GetVertexShader failed %u (device %p)\n", This, hrc, This->WineD3DDevice);
@@ -1267,8 +1348,16 @@ static HRESULT  WINAPI  IDirect3DDevice8Impl_DeleteVertexShader(LPDIRECT3DDEVICE
         ERR("(%p) : Trying to delete an invalid handle\n", This);
         return D3DERR_INVALIDCALL;
     } else {
+        IWineD3DVertexShader *cur = NULL;
         shader_handle *handle = &This->shader_handles[pShader - (VS_HIGHESTFIXEDFXF + 1)];
         IDirect3DVertexShader8Impl *shader = *handle;
+
+        IWineD3DDevice_GetVertexShader(This->WineD3DDevice, &cur);
+        if(cur) {
+            if(cur == shader->wineD3DVertexShader) IDirect3DDevice8_SetVertexShader(iface, 0);
+            IWineD3DVertexShader_Release(cur);
+        }
+
         while(IUnknown_Release((IUnknown *)shader));
         free_shader_handle(This, handle);
     }
@@ -1450,8 +1539,16 @@ static HRESULT WINAPI IDirect3DDevice8Impl_DeletePixelShader(LPDIRECT3DDEVICE8 i
         ERR("(%p) : Trying to delete an invalid handle\n", This);
         return D3DERR_INVALIDCALL;
     } else {
+        IWineD3DPixelShader *cur = NULL;
         shader_handle *handle = &This->shader_handles[pShader - (VS_HIGHESTFIXEDFXF + 1)];
         IDirect3DPixelShader8Impl *shader = *handle;
+
+        IWineD3DDevice_GetPixelShader(This->WineD3DDevice, &cur);
+        if(cur) {
+            if(cur == shader->wineD3DPixelShader) IDirect3DDevice8_SetPixelShader(iface, 0);
+            IWineD3DPixelShader_Release(cur);
+        }
+
         while(IUnknown_Release((IUnknown *)shader));
         free_shader_handle(This, handle);
     }

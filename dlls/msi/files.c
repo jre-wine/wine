@@ -64,6 +64,7 @@ struct media_info {
     LPWSTR cabinet;
     LPWSTR volume_label;
     BOOL is_continuous;
+    BOOL is_extracted;
     WCHAR source[MAX_PATH];
 };
 
@@ -76,7 +77,7 @@ static UINT msi_change_media( MSIPACKAGE *package, struct media_info *mi )
     static const WCHAR szUILevel[] = {'U','I','L','e','v','e','l',0};
     static const WCHAR error_prop[] = {'E','r','r','o','r','D','i','a','l','o','g',0};
 
-    if ( msi_get_property_int(package, szUILevel, 0) == INSTALLUILEVEL_NONE && !gUIHandlerA )
+    if ( (msi_get_property_int(package, szUILevel, 0) & INSTALLUILEVEL_MASK) == INSTALLUILEVEL_NONE && !gUIHandlerA )
         return ERROR_SUCCESS;
 
     error = generate_error_string( package, 1302, 1, mi->disk_prompt );
@@ -434,6 +435,9 @@ done:
     msi_free(cabinet);
     msi_free(cab_path);
 
+    if (ret)
+        mi->is_extracted = TRUE;
+
     return ret;
 }
 
@@ -712,10 +716,11 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
 
     LIST_FOR_EACH_ENTRY( file, &package->files, MSIFILE, entry )
     {
-        if (file->state != msifs_missing && file->state != msifs_overwrite)
+        if (file->state != msifs_missing && !mi->is_continuous && file->state != msifs_overwrite)
             continue;
 
-        if (file->Sequence > mi->last_sequence || mi->is_continuous)
+        if (file->Sequence > mi->last_sequence || mi->is_continuous ||
+            (file->IsCompressed && !mi->is_extracted))
         {
             rc = ready_media(package, file, mi);
             if (rc != ERROR_SUCCESS)

@@ -677,8 +677,8 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
 
             USER_Driver->pSetWindowIcon( hwnd, wParam, (HICON)lParam );
 
-            SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOSIZE |
-                         SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+            if( (GetWindowLongW( hwnd, GWL_STYLE ) & WS_CAPTION) == WS_CAPTION )
+                NC_HandleNCPaint( hwnd , (HRGN)1 );  /* Repaint caption */
 
             return (LRESULT)ret;
         }
@@ -772,6 +772,7 @@ LRESULT WINAPI DefWindowProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     switch(msg)
     {
     case WM_NCCREATE:
+        if (lParam)
         {
             CREATESTRUCTA *cs = (CREATESTRUCTA *)lParam;
             /* check for string, as static icons, bitmaps (SS_ICON, SS_BITMAP)
@@ -930,6 +931,7 @@ LRESULT WINAPI DefWindowProcW(
     switch(msg)
     {
     case WM_NCCREATE:
+        if (lParam)
         {
             CREATESTRUCTW *cs = (CREATESTRUCTW *)lParam;
             /* check for string, as static icons, bitmaps (SS_ICON, SS_BITMAP)

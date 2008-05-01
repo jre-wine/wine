@@ -382,6 +382,7 @@ BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
                     X11DRV_set_wm_hints( display, data );
                     wine_tsx11_lock();
                     XMapWindow( display, data->whole_window );
+                    XFlush( display );
                     wine_tsx11_unlock();
                     mapped = TRUE;
                 }
@@ -391,6 +392,7 @@ BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
                     TRACE( "mapping non zero size or off-screen win %p\n", hwnd );
                     wine_tsx11_lock();
                     XMapWindow( display, data->whole_window );
+                    XFlush( display );
                     wine_tsx11_unlock();
                     mapped = TRUE;
                 }
@@ -717,6 +719,9 @@ BOOL X11DRV_ShowWindow( HWND hwnd, INT cmd )
         SendMessageW( hwnd, WM_MOVE, 0, MAKELONG( client.left, client.top ));
     }
     else WIN_ReleasePtr( wndPtr );
+
+    /* if previous state was minimized Windows sets focus to the window */
+    if (style & WS_MINIMIZE) SetFocus( hwnd );
 
     return wasVisible;
 }

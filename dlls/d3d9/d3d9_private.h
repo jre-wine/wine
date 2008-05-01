@@ -179,6 +179,11 @@ typedef struct IDirect3DDevice9Impl
     /* Avoids recursion with nested ReleaseRef to 0 */
     BOOL                          inDestruction;
 
+    /* A vertex declaration was converted from setFVF.
+     * Keep track of it, so it can be properly freed
+     */
+    IDirect3DVertexDeclaration9  *convertedDecl;
+
 } IDirect3DDevice9Impl;
 
 
@@ -475,6 +480,9 @@ typedef struct IDirect3DVertexDeclaration9Impl {
   /* IUnknown fields */
   const IDirect3DVertexDeclaration9Vtbl *lpVtbl;
   LONG    ref;
+
+  D3DVERTEXELEMENT9 *elements;
+  size_t element_count;
 
   /* IDirect3DVertexDeclaration9 fields */
   IWineD3DVertexDeclaration *wineD3DVertexDeclaration;

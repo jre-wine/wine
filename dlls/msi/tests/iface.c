@@ -63,6 +63,8 @@ static void test_msi_dispid(void)
         return;
     }
 
+    todo_wine {
+    ok( get_dispid( disp, "CreateRecord" ) == 1, "dispid wrong\n");
     ok( get_dispid( disp, "OpenPackage" ) == 2, "dispid wrong\n");
     ok( get_dispid( disp, "OpenProduct" ) == 3, "dispid wrong\n");
     ok( get_dispid( disp, "OpenDatabase" ) == 4, "dispid wrong\n");
@@ -118,6 +120,7 @@ static void test_msi_dispid(void)
     ok( get_dispid( disp, "PatchesEx" ) == 55, "dispid wrong\n");
 
     ok( get_dispid( disp, "ExtractPatchXMLData" ) == 57, "dispid wrong\n");
+    }
 
     /* MSDN claims the following functions exist but IDispatch->GetIDsOfNames disagrees */
     if (0)
@@ -166,28 +169,48 @@ static void test_msi_invoke(void)
 
     r = IDispatch_Invoke( installer, dispid, &IID_NULL, 0,
                           DISPATCH_METHOD, &param, &result, NULL, NULL);
-    ok( r == S_OK, "dispatch failed %08x\n", r);
+    todo_wine ok( r == S_OK, "dispatch failed %08x\n", r);
+    if (SUCCEEDED(r))
+    {
+        ok( V_VT(&result) == VT_DISPATCH, "type wrong\n");
 
-    ok( V_VT(&result) == VT_DISPATCH, "type wrong\n");
+        record = V_DISPATCH(&result);
 
-    record = V_DISPATCH(&result);
+        memset( &result, 0, sizeof result );
+        dispid = get_dispid( record, "FieldCount" );
+
+        param.cArgs = 0;
+        param.cNamedArgs = 0;
+        param.rgvarg = &varg;
+        param.rgdispidNamedArgs = &arg;
+
+        r = IDispatch_Invoke( record, dispid, &IID_NULL, 0,
+                              DISPATCH_PROPERTYGET, &param, &result, NULL, NULL );
+        ok( r == S_OK, "dispatch failed %08x\n", r);
+
+        ok( V_VT(&result) == VT_I4, "type wrong\n");
+        ok( V_I4(&result) == 1, "field count wrong\n");
+
+        IDispatch_Release( record );
+    }
+    else
+        skip( "failed to create record\n");
 
     memset( &result, 0, sizeof result );
-    dispid = get_dispid( record, "FieldCount" );
+    dispid = get_dispid( installer, "Version" );
 
     param.cArgs = 0;
     param.cNamedArgs = 0;
     param.rgvarg = &varg;
     param.rgdispidNamedArgs = &arg;
 
-    r = IDispatch_Invoke( record, dispid, &IID_NULL, 0,
+    r = IDispatch_Invoke( installer, dispid, &IID_NULL, 0,
                           DISPATCH_PROPERTYGET, &param, &result, NULL, NULL );
+    todo_wine {
     ok( r == S_OK, "dispatch failed %08x\n", r);
+    ok( V_VT(&result) == VT_BSTR, "type wrong %d\n", V_VT(&result));
+    }
 
-    ok( V_VT(&result) == VT_I4, "type wrong\n");
-    ok( V_I4(&result) == 1, "field count wrong\n");
-
-    IDispatch_Release( record );
     IDispatch_Release( installer );
 }
 

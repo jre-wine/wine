@@ -592,7 +592,7 @@
 @ stdcall RtlFindSetBits(ptr long long)
 @ stdcall RtlFindSetBitsAndClear(ptr long long)
 @ stdcall RtlFindSetRuns(ptr ptr long long)
-@ stub RtlFirstEntrySList
+@ stdcall RtlFirstEntrySList(ptr)
 @ stdcall RtlFirstFreeAce(ptr ptr)
 @ stub RtlFlushPropertySet
 # @ stub RtlFlushSecureMemoryCache
@@ -670,7 +670,7 @@
 @ stub RtlInitializeRXact
 # @ stub RtlInitializeRangeList
 @ stdcall RtlInitializeResource(ptr)
-# @ stub RtlInitializeSListHead
+@ stdcall RtlInitializeSListHead(ptr)
 @ stdcall RtlInitializeSid(ptr ptr long)
 # @ stub RtlInitializeStackTraceDataBase
 @ stub RtlInsertElementGenericTable
@@ -678,10 +678,10 @@
 @ stdcall RtlInt64ToUnicodeString(double long ptr)
 @ stdcall RtlIntegerToChar(long long long ptr)
 @ stdcall RtlIntegerToUnicodeString(long long ptr)
-# @ stub RtlInterlockedFlushSList
-# @ stub RtlInterlockedPopEntrySList
-# @ stub RtlInterlockedPushEntrySList
-# @ stub RtlInterlockedPushListSList
+@ stdcall RtlInterlockedFlushSList(ptr)
+@ stdcall RtlInterlockedPopEntrySList(ptr)
+@ stdcall RtlInterlockedPushEntrySList(ptr ptr)
+@ stdcall RtlInterlockedPushListSList(ptr ptr ptr long)
 # @ stub RtlInvertRangeList
 # @ stub RtlIpv4AddressToStringA
 # @ stub RtlIpv4AddressToStringExA
@@ -763,7 +763,7 @@
 @ stub RtlProtectHeap
 # @ stub RtlPushFrame
 @ stdcall RtlQueryAtomInAtomTable(ptr long ptr ptr ptr ptr)
-@ stub RtlQueryDepthSList
+@ stdcall RtlQueryDepthSList(ptr)
 @ stdcall RtlQueryEnvironmentVariable_U(ptr ptr ptr)
 @ stub RtlQueryHeapInformation
 @ stdcall RtlQueryInformationAcl(ptr ptr long long)
@@ -885,7 +885,7 @@
 # @ stub RtlUnlockBootStatusData
 @ stdcall RtlUnlockHeap(long)
 # @ stub RtlUnlockMemoryStreamRegion
-@ stdcall -register RtlUnwind(ptr ptr ptr long)
+@ stdcall -register RtlUnwind(ptr ptr ptr ptr)
 @ stdcall RtlUpcaseUnicodeChar(long)
 @ stdcall RtlUpcaseUnicodeString(ptr ptr long)
 @ stdcall RtlUpcaseUnicodeStringToAnsiString(ptr ptr long)
@@ -1116,7 +1116,7 @@
 @ stdcall ZwQueryVirtualMemory(long ptr long ptr long ptr) NtQueryVirtualMemory
 @ stdcall ZwQueryVolumeInformationFile(long ptr ptr long long) NtQueryVolumeInformationFile
 # @ stub ZwQueueApcThread
-@ stdcall -register ZwRaiseException(ptr ptr long) NtRaiseException
+@ stdcall ZwRaiseException(ptr ptr long) NtRaiseException
 @ stub ZwRaiseHardError
 @ stdcall ZwReadFile(long long long long long long long long long) NtReadFile
 # @ stub ZwReadFileScatter

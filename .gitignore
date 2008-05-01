@@ -30,6 +30,10 @@ dlls/avicap32/libavicap32.def
 dlls/avifil32/libavifil32.def
 dlls/avifil32/rsrc.res
 dlls/avifile.dll16
+dlls/browseui/tests/*.ok
+dlls/browseui/tests/browseui_crosstest.exe
+dlls/browseui/tests/testlist.c
+dlls/browseui/version.res
 dlls/cabinet/cabinet.res
 dlls/cabinet/libcabinet.def
 dlls/cabinet/tests/*.ok
@@ -316,6 +320,7 @@ dlls/msi/instadvert.bmp
 dlls/msi/instlocal.bmp
 dlls/msi/libmsi.def
 dlls/msi/msi.res
+dlls/msi/msiserver.tlb
 dlls/msi/sql.tab.c
 dlls/msi/sql.tab.h
 dlls/msi/tests/*.ok
@@ -784,6 +789,7 @@ programs/winemine/winemine.ico
 programs/winepath/winepath
 programs/winetest/advapi32_test.exe
 programs/winetest/advpack_test.exe
+programs/winetest/browseui_test.exe
 programs/winetest/cabinet_test.exe
 programs/winetest/comcat_test.exe
 programs/winetest/comctl32_test.exe

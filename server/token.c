@@ -74,15 +74,21 @@ const PSID security_interactive_sid = (PSID)&interactive_sid;
 static const PSID security_authenticated_user_sid = (PSID)&authenticated_user_sid;
 static const PSID security_local_system_sid = (PSID)&local_system_sid;
 
+static LUID prev_luid_value = { 1000, 0 };
+
 struct token
 {
     struct object  obj;             /* object header */
+    LUID           token_id;        /* system-unique id of token */
+    LUID           modified_id;     /* new id allocated every time token is modified */
     struct list    privileges;      /* privileges available to the token */
     struct list    groups;          /* groups that the user of this token belongs to (sid_and_attributes) */
     SID           *user;            /* SID of user this token represents */
+    SID           *primary_group;   /* SID of user's primary group */
     unsigned       primary;         /* is this a primary or impersonation token? */
     ACL           *default_dacl;    /* the default DACL to assign to objects created by this user */
     TOKEN_SOURCE   source;          /* source of the token */
+    SECURITY_IMPERSONATION_LEVEL impersonation_level; /* impersonation level this token is capable of if non-primary token */
 };
 
 struct privilege
@@ -316,7 +322,7 @@ static int sd_is_valid( const struct security_descriptor *sd, data_size_t size )
     if (group)
     {
         size_t needed_size = FIELD_OFFSET(SID, SubAuthority[group->SubAuthorityCount]);
-        if ((sd->owner_len < sizeof(SID)) || (needed_size > sd->owner_len))
+        if ((sd->group_len < sizeof(SID)) || (needed_size > sd->group_len))
             return FALSE;
     }
     offset += sd->group_len;
@@ -351,6 +357,12 @@ static inline void map_generic_mask(unsigned int *mask, const GENERIC_MAPPING *m
 static inline int is_equal_luid( const LUID *luid1, const LUID *luid2 )
 {
     return (luid1->LowPart == luid2->LowPart && luid1->HighPart == luid2->HighPart);
+}
+
+static inline void allocate_luid( LUID *luid )
+{
+    prev_luid_value.LowPart++;
+    *luid = prev_luid_value;
 }
 
 static inline void luid_and_attr_from_privilege( LUID_AND_ATTRIBUTES *out, const struct privilege *in)
@@ -410,21 +422,36 @@ static void token_destroy( struct object *obj )
  *  privs may be NULL if priv_count is 0.
  *  default_dacl may be NULL, indicating that all objects created by the user
  *   are unsecured.
+ *  modified_id may be NULL, indicating that a new modified_id luid should be
+ *   allocated.
  */
 static struct token *create_token( unsigned primary, const SID *user,
                                    const SID_AND_ATTRIBUTES *groups, unsigned int group_count,
                                    const LUID_AND_ATTRIBUTES *privs, unsigned int priv_count,
-                                   const ACL *default_dacl, TOKEN_SOURCE source )
+                                   const ACL *default_dacl, TOKEN_SOURCE source,
+                                   const LUID *modified_id,
+                                   SECURITY_IMPERSONATION_LEVEL impersonation_level )
 {
     struct token *token = alloc_object( &token_ops );
     if (token)
     {
         unsigned int i;
 
+        allocate_luid( &token->token_id );
+        if (modified_id)
+            token->modified_id = *modified_id;
+        else
+            allocate_luid( &token->modified_id );
         list_init( &token->privileges );
         list_init( &token->groups );
         token->primary = primary;
+        /* primary tokens don't have impersonation levels */
+        if (primary)
+            token->impersonation_level = -1;
+        else
+            token->impersonation_level = impersonation_level;
         token->default_dacl = NULL;
+        token->primary_group = NULL;
 
         /* copy user */
         token->user = memdup( user, FIELD_OFFSET(SID, SubAuthority[user->SubAuthorityCount]) );
@@ -450,10 +477,13 @@ static struct token *create_token( unsigned primary, const SID *user,
             group->def = TRUE;
             group->logon = FALSE;
             group->mandatory = (groups[i].Attributes & SE_GROUP_MANDATORY) ? TRUE : FALSE;
-            group->owner = FALSE;
+            group->owner = groups[i].Attributes & SE_GROUP_OWNER ? TRUE : FALSE;
             group->resource = FALSE;
             group->deny_only = FALSE;
             list_add_tail( &token->groups, &group->entry );
+            /* Use first owner capable group as an owner */
+            if (!token->primary_group && group->owner)
+                token->primary_group = &group->sid;
         }
 
         /* copy privileges */
@@ -582,7 +612,7 @@ struct token *token_create_admin( void )
             { security_local_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY },
             { security_interactive_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY },
             { security_authenticated_user_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY },
-            { alias_admins_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY },
+            { alias_admins_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY|SE_GROUP_OWNER },
             { alias_users_sid, SE_GROUP_ENABLED|SE_GROUP_ENABLED_BY_DEFAULT|SE_GROUP_MANDATORY },
         };
         static const TOKEN_SOURCE admin_source = {"SeMgr", {0, 0}};
@@ -591,7 +621,9 @@ struct token *token_create_admin( void )
         token = create_token( TRUE, &interactive_sid,
                             admin_groups, sizeof(admin_groups)/sizeof(admin_groups[0]),
                             admin_privs, sizeof(admin_privs)/sizeof(admin_privs[0]),
-                            default_dacl, admin_source );
+                            default_dacl, admin_source, NULL, -1 );
+        /* we really need a primary group */
+        assert( token->primary_group );
     }
 
     free( alias_admins_sid );
@@ -621,6 +653,9 @@ static unsigned int token_adjust_privileges( struct token *token, const LUID_AND
                                              unsigned int mod_privs_count )
 {
     unsigned int i, modified_count = 0;
+
+    /* mark as modified */
+    allocate_luid( &token->modified_id );
 
     for (i = 0; i < count; i++)
     {
@@ -657,6 +692,10 @@ static unsigned int token_adjust_privileges( struct token *token, const LUID_AND
 static void token_disable_privileges( struct token *token )
 {
     struct privilege *privilege;
+
+    /* mark as modified */
+    allocate_luid( &token->modified_id );
+
     LIST_FOR_EACH_ENTRY( privilege, &token->privileges, struct privilege, entry )
         privilege->enabled = FALSE;
 }
@@ -879,6 +918,93 @@ const ACL *token_get_default_dacl( struct token *token )
     return token->default_dacl;
 }
 
+static void set_object_sd( struct object *obj, const struct security_descriptor *sd,
+                           unsigned int set_info )
+{
+    struct security_descriptor new_sd, *pnew_sd;
+    int present;
+    const SID *owner, *group;
+    const ACL *sacl, *dacl;
+    char *ptr;
+
+    if (!set_info) return;
+
+    new_sd.control = sd->control & ~SE_SELF_RELATIVE;
+
+    owner = sd_get_owner( sd );
+    if (set_info & OWNER_SECURITY_INFORMATION && owner)
+        new_sd.owner_len = sd->owner_len;
+    else
+    {
+        owner = current->process->token->user;
+        new_sd.owner_len = FIELD_OFFSET(SID, SubAuthority[owner->SubAuthorityCount]);
+        new_sd.control |= SE_OWNER_DEFAULTED;
+    }
+
+    group = sd_get_group( sd );
+    if (set_info & GROUP_SECURITY_INFORMATION && group)
+        new_sd.group_len = sd->group_len;
+    else
+    {
+        group = current->process->token->primary_group;
+        new_sd.group_len = FIELD_OFFSET(SID, SubAuthority[group->SubAuthorityCount]);
+        new_sd.control |= SE_GROUP_DEFAULTED;
+    }
+
+    new_sd.control |= SE_SACL_PRESENT;
+    sacl = sd_get_sacl( sd, &present );
+    if (set_info & SACL_SECURITY_INFORMATION && present)
+        new_sd.sacl_len = sd->sacl_len;
+    else
+    {
+        if (obj->sd) sacl = sd_get_sacl( obj->sd, &present );
+
+        if (obj->sd && present)
+            new_sd.sacl_len = obj->sd->sacl_len;
+        else
+        {
+            new_sd.sacl_len = 0;
+            new_sd.control |= SE_SACL_DEFAULTED;
+        }
+    }
+
+    new_sd.control |= SE_DACL_PRESENT;
+    dacl = sd_get_dacl( sd, &present );
+    if (set_info & DACL_SECURITY_INFORMATION && present)
+        new_sd.dacl_len = sd->dacl_len;
+    else
+    {
+        if (obj->sd) dacl = sd_get_dacl( obj->sd, &present );
+
+        if (obj->sd && present)
+            new_sd.dacl_len = obj->sd->dacl_len;
+        else
+        {
+            dacl = token_get_default_dacl( current->process->token );
+            new_sd.dacl_len = dacl->AclSize;
+            new_sd.control |= SE_DACL_DEFAULTED;
+        }
+    }
+
+    ptr = mem_alloc( sizeof(new_sd) + new_sd.owner_len + new_sd.group_len +
+                     new_sd.sacl_len + new_sd.dacl_len );
+    if (!ptr) return;
+    pnew_sd = (struct security_descriptor*)ptr;
+
+    memcpy( ptr, &new_sd, sizeof(new_sd) );
+    ptr += sizeof(new_sd);
+    memcpy( ptr, owner, new_sd.owner_len );
+    ptr += new_sd.owner_len;
+    memcpy( ptr, group, new_sd.group_len );
+    ptr += new_sd.group_len;
+    memcpy( ptr, sacl, new_sd.sacl_len );
+    ptr += new_sd.sacl_len;
+    memcpy( ptr, dacl, new_sd.dacl_len );
+
+    free( obj->sd );
+    obj->sd = pnew_sd;
+}
+
 /* open a security token */
 DECL_HANDLER(open_token)
 {
@@ -888,10 +1014,15 @@ DECL_HANDLER(open_token)
         if (thread)
         {
             if (thread->token)
-                reply->token = alloc_handle( current->process, thread->token, req->access,
-                                             req->attributes );
+            {
+                if (thread->token->impersonation_level <= SecurityAnonymous)
+                    set_error( STATUS_CANT_OPEN_ANONYMOUS );
+                else
+                    reply->token = alloc_handle( current->process, thread->token,
+                                                 req->access, req->attributes );
+            }
             else
-                set_error(STATUS_NO_TOKEN);
+                set_error( STATUS_NO_TOKEN );
             release_object( thread );
         }
     }
@@ -904,7 +1035,7 @@ DECL_HANDLER(open_token)
                 reply->token = alloc_handle( current->process, process->token, req->access,
                                              req->attributes );
             else
-                set_error(STATUS_NO_TOKEN);
+                set_error( STATUS_NO_TOKEN );
             release_object( process );
         }
     }
@@ -995,15 +1126,30 @@ DECL_HANDLER(get_token_privileges)
 DECL_HANDLER(duplicate_token)
 {
     struct token *src_token;
+
+    if ((req->impersonation_level < SecurityAnonymous) ||
+        (req->impersonation_level > SecurityDelegation))
+    {
+        set_error( STATUS_BAD_IMPERSONATION_LEVEL );
+        return;
+    }
+
     if ((src_token = (struct token *)get_handle_obj( current->process, req->handle,
                                                      TOKEN_DUPLICATE,
                                                      &token_ops )))
     {
-        /* FIXME: use req->impersonation_level */
-        struct token *token = create_token( req->primary, src_token->user,
-                                            NULL, 0, NULL, 0,
-                                            src_token->default_dacl,
-                                            src_token->source );
+        const LUID *modified_id =
+            req->primary || (req->impersonation_level == src_token->impersonation_level) ?
+                &src_token->modified_id : NULL;
+        struct token *token = NULL;
+
+        if (req->primary || (req->impersonation_level <= src_token->impersonation_level))
+            token = create_token( req->primary, src_token->user, NULL, 0,
+                                  NULL, 0, src_token->default_dacl,
+                                  src_token->source, modified_id,
+                                  req->impersonation_level );
+        else set_error( STATUS_BAD_IMPERSONATION_LEVEL );
+
         if (token)
         {
             struct privilege *privilege;
@@ -1024,6 +1170,8 @@ DECL_HANDLER(duplicate_token)
                 memcpy( newgroup, group, size );
                 list_add_tail( &token->groups, &newgroup->entry );
             }
+            token->primary_group = src_token->primary_group;
+            assert( token->primary_group );
 
             /* copy privileges */
             LIST_FOR_EACH_ENTRY( privilege, &src_token->privileges, struct privilege, entry )
@@ -1048,7 +1196,10 @@ DECL_HANDLER(check_token_privileges)
                                                  &token_ops )))
     {
         unsigned int count = get_req_data_size() / sizeof(LUID_AND_ATTRIBUTES);
-        if (get_reply_max_size() >= count * sizeof(LUID_AND_ATTRIBUTES))
+
+        if (!token->primary && token->impersonation_level <= SecurityAnonymous)
+            set_error( STATUS_BAD_IMPERSONATION_LEVEL );
+        else if (get_reply_max_size() >= count * sizeof(LUID_AND_ATTRIBUTES))
         {
             LUID_AND_ATTRIBUTES *usedprivs = set_reply_data_size( count * sizeof(*usedprivs) );
             reply->has_privileges = token_check_privileges( token, req->all_required, get_req_data(), count, usedprivs );
@@ -1088,6 +1239,13 @@ DECL_HANDLER(access_check)
         if (token->primary)
         {
             set_error( STATUS_NO_IMPERSONATION_TOKEN );
+            release_object( token );
+            return;
+        }
+        /* anonymous impersonation tokens can't be used */
+        if (token->impersonation_level <= SecurityAnonymous)
+        {
+            set_error( STATUS_BAD_IMPERSONATION_LEVEL );
             release_object( token );
             return;
         }
@@ -1196,4 +1354,31 @@ DECL_HANDLER(get_token_groups)
 
         release_object( token );
     }
+}
+
+DECL_HANDLER(set_security_object)
+{
+    data_size_t sd_size = get_req_data_size();
+    const struct security_descriptor *sd = get_req_data();
+    struct object *obj;
+    unsigned int access = 0;
+
+    if (!sd_is_valid( sd, sd_size ))
+    {
+        set_error( STATUS_ACCESS_VIOLATION );
+        return;
+    }
+
+    if (req->security_info & OWNER_SECURITY_INFORMATION ||
+        req->security_info & GROUP_SECURITY_INFORMATION)
+        access |= WRITE_OWNER;
+    if (req->security_info & SACL_SECURITY_INFORMATION)
+        access |= ACCESS_SYSTEM_SECURITY;
+    if (req->security_info & DACL_SECURITY_INFORMATION)
+        access |= WRITE_DAC;
+
+    if (!(obj = get_handle_obj( current->process, req->handle, access, NULL ))) return;
+
+    set_object_sd( obj, sd, req->security_info );
+    release_object( obj );
 }

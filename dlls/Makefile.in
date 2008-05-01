@@ -23,6 +23,7 @@ BASEDIRS = \
 	atl \
 	avicap32 \
 	avifil32 \
+	browseui \
 	cabinet \
 	capi2032 \
 	cards \
@@ -220,6 +221,7 @@ IMPLIBSUBDIRS = \
 TESTSUBDIRS = \
 	advapi32/tests \
 	advpack/tests \
+	browseui/tests \
 	cabinet/tests \
 	comcat/tests \
 	comctl32/tests \

@@ -236,10 +236,8 @@ HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
     BITMAPOBJ *bmpobj;
     HBITMAP hbitmap;
 
-    if (!bmp || bmp->bmType || bmp->bmPlanes != 1)
+    if (!bmp || bmp->bmType)
     {
-        if (bmp && bmp->bmPlanes != 1)
-            FIXME("planes = %d\n", bmp->bmPlanes);
         SetLastError( ERROR_INVALID_PARAMETER );
         return NULL;
     }
@@ -248,10 +246,7 @@ HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
 
     if (!bm.bmWidth || !bm.bmHeight)
     {
-        bm.bmWidth = bm.bmHeight = 1;
-        bm.bmPlanes = bm.bmBitsPixel = 1;
-        bm.bmWidthBytes = 2;
-        bm.bmBits = NULL;
+        return GetStockObject( DEFAULT_BITMAP );
     }
     else
     {
@@ -260,6 +255,16 @@ HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
         if (bm.bmWidth < 0)
             bm.bmWidth = -bm.bmWidth;
     }
+
+    if (bm.bmPlanes != 1)
+    {
+        FIXME("planes = %d\n", bm.bmPlanes);
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return NULL;
+    }
+
+    /* Windows ignores the provided bm.bmWidthBytes */
+    bm.bmWidthBytes = BITMAP_GetWidthBytes( bm.bmWidth, bm.bmBitsPixel );
 
       /* Create the BITMAPOBJ */
     bmpobj = GDI_AllocObject( sizeof(BITMAPOBJ), BITMAP_MAGIC,

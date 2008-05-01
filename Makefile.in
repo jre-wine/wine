@@ -132,10 +132,10 @@ $(TESTSUBDIRS:%=%/__crosstest__): tools include
 # Misc rules
 
 TAGS etags:
-	find -L $(TOPSRCDIR) -name '*.[ch]' -print | etags -
+	(test -d .git && git-ls-files '*.[chly]' '*.idl' || find -L $(TOPSRCDIR) -name '*.[ch]' -print) | etags -
 
 tags ctags:
-	find -L $(TOPSRCDIR) -name '*.[ch]' -print | ctags --c-types=+px -L -
+	(test -d .git && git-ls-files '*.[chly]' '*.idl' || find -L $(TOPSRCDIR) -name '*.[ch]' -print) | ctags -
 
 manpages htmlpages sgmlpages: dummy
 	@cd documentation && $(MAKE) $@
@@ -164,6 +164,8 @@ ALL_MAKEFILES = \
 	dlls/atl/Makefile \
 	dlls/avicap32/Makefile \
 	dlls/avifil32/Makefile \
+	dlls/browseui/Makefile \
+	dlls/browseui/tests/Makefile \
 	dlls/cabinet/Makefile \
 	dlls/cabinet/tests/Makefile \
 	dlls/capi2032/Makefile \
@@ -493,6 +495,8 @@ dlls/amstream/Makefile: dlls/amstream/Makefile.in dlls/Makedll.rules
 dlls/atl/Makefile: dlls/atl/Makefile.in dlls/Makedll.rules
 dlls/avicap32/Makefile: dlls/avicap32/Makefile.in dlls/Makedll.rules
 dlls/avifil32/Makefile: dlls/avifil32/Makefile.in dlls/Makedll.rules
+dlls/browseui/Makefile: dlls/browseui/Makefile.in dlls/Makedll.rules
+dlls/browseui/tests/Makefile: dlls/browseui/tests/Makefile.in dlls/Maketest.rules
 dlls/cabinet/Makefile: dlls/cabinet/Makefile.in dlls/Makedll.rules
 dlls/cabinet/tests/Makefile: dlls/cabinet/tests/Makefile.in dlls/Maketest.rules
 dlls/capi2032/Makefile: dlls/capi2032/Makefile.in dlls/Makedll.rules

@@ -46,6 +46,8 @@ static HRESULT (WINAPI *pSHBindToParent)(LPCITEMIDLIST, REFIID, LPVOID*, LPCITEM
 static BOOL (WINAPI *pSHGetSpecialFolderPathW)(HWND, LPWSTR, int, BOOL);
 static HRESULT (WINAPI *pStrRetToBufW)(STRRET*,LPCITEMIDLIST,LPWSTR,UINT);
 static LPITEMIDLIST (WINAPI *pILFindLastID)(LPCITEMIDLIST);
+static void (WINAPI *pILFree)(LPITEMIDLIST);
+static BOOL (WINAPI *pILIsEqual)(LPCITEMIDLIST, LPCITEMIDLIST);
 
 static void init_function_pointers(void)
 {
@@ -58,7 +60,8 @@ static void init_function_pointers(void)
         pSHBindToParent = (void*)GetProcAddress(hmod, "SHBindToParent");
         pSHGetSpecialFolderPathW = (void*)GetProcAddress(hmod, "SHGetSpecialFolderPathW");
         pILFindLastID = (void *)GetProcAddress(hmod, (LPCSTR)16);
-
+        pILFree = (void*)GetProcAddress(hmod, (LPSTR)155);
+        pILIsEqual = (void*)GetProcAddress(hmod, (LPSTR)21);
     }
 
     hmod = GetModuleHandleA("shlwapi.dll");
@@ -335,6 +338,7 @@ static void test_GetDisplayName(void)
     HANDLE hTestFile;
     WCHAR wszTestFile[MAX_PATH], wszTestFile2[MAX_PATH], wszTestDir[MAX_PATH];
     char szTestFile[MAX_PATH], szTestDir[MAX_PATH];
+    DWORD attr;
     STRRET strret;
     LPSHELLFOLDER psfDesktop, psfPersonal;
     IUnknown *psfFile;
@@ -361,10 +365,15 @@ static void test_GetDisplayName(void)
 
     PathAddBackslashW(wszTestDir);
     lstrcatW(wszTestDir, wszDirName);
+    /* Use ANSI file functions so this works on Windows 9x */
     WideCharToMultiByte(CP_ACP, 0, wszTestDir, -1, szTestDir, MAX_PATH, 0, 0);
-    result = CreateDirectoryA(szTestDir, NULL);
-    ok(result, "CreateDirectoryA failed! Last error: %u\n", GetLastError());
-    if (!result) return;
+    CreateDirectoryA(szTestDir, NULL);
+    attr=GetFileAttributesA(szTestDir);
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY))
+    {
+        ok(0, "unable to create the '%s' directory\n", szTestDir);
+        return;
+    }
 
     lstrcpyW(wszTestFile, wszTestDir);
     PathAddBackslashW(wszTestFile);
@@ -423,16 +432,16 @@ static void test_GetDisplayName(void)
         hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, wszAbsoluteFilename, 
                 SHGDN_FORPARSING, NULL);
         ok (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED), "SetNameOf succeeded! hr = %08x\n", hr);
-   
-        /* Rename the file back to it's original name. SetNameOf ignores the fact, that the 
+
+        /* Rename the file back to its original name. SetNameOf ignores the fact, that the
          * SHGDN flags specify an absolute path. */
         hr = IShellFolder_SetNameOf(psfPersonal, NULL, pidlNew, wszFileName, SHGDN_FORPARSING, NULL);
         ok (SUCCEEDED(hr), "SetNameOf failed! hr = %08x\n", hr);
 
-        ILFree(pidlNew);
+        pILFree(pidlNew);
         IShellFolder_Release(psfPersonal);
     }
-    
+
     /* Deleting the file and the directory */
     DeleteFileA(szTestFile);
     RemoveDirectoryA(szTestDir);
@@ -1122,17 +1131,17 @@ static void test_FolderShortcut(void) {
     ok (SUCCEEDED(hr), "IPersistFolder3::Initialize failed! hr = %08x\n", hr);
     if (FAILED(hr)) {
         IPersistFolder3_Release(pPersistFolder3);
-        ILFree(pidlWineTestFolder);
+        pILFree(pidlWineTestFolder);
         return;
     }
-    
+
     hr = IPersistFolder3_GetCurFolder(pPersistFolder3, &pidlCurrentFolder);
     ok(SUCCEEDED(hr), "IPersistFolder3_GetCurFolder failed! hr=0x%08x\n", hr);
-    ok(ILIsEqual(pidlCurrentFolder, pidlWineTestFolder), 
+    ok(pILIsEqual(pidlCurrentFolder, pidlWineTestFolder),
         "IPersistFolder3_GetCurFolder should return pidlWineTestFolder!\n");
-    ILFree(pidlCurrentFolder);
-    ILFree(pidlWineTestFolder);
- 
+    pILFree(pidlCurrentFolder);
+    pILFree(pidlWineTestFolder);
+
     hr = IPersistFolder3_QueryInterface(pPersistFolder3, &IID_IShellFolder, (LPVOID*)&pShellFolder);
     IPersistFolder3_Release(pPersistFolder3);
     ok(SUCCEEDED(hr), "IPersistFolder3_QueryInterface(IShellFolder) failed! hr = %08x\n", hr);
@@ -1166,12 +1175,12 @@ static void test_FolderShortcut(void) {
         return;
     }
 
-    hr = IShellFolder_BindToObject(pShellFolder, pidlSubFolder, NULL, &IID_IPersistFolder3, 
+    hr = IShellFolder_BindToObject(pShellFolder, pidlSubFolder, NULL, &IID_IPersistFolder3,
                                    (LPVOID*)&pPersistFolder3);
     IShellFolder_Release(pShellFolder);
-    ILFree(pidlSubFolder);
+    pILFree(pidlSubFolder);
     ok (SUCCEEDED(hr), "IShellFolder::BindToObject failed! hr = %08x\n", hr);
-    if (FAILED(hr)) 
+    if (FAILED(hr))
         return;
 
     /* On windows, we expect CLSID_ShellFSFolder. On wine we relax this constraint
@@ -1242,10 +1251,10 @@ static void test_ITEMIDLIST_format(void) {
         return;
     }
 
-    hr = IShellFolder_BindToObject(psfDesktop, pidlPersonal, NULL, &IID_IShellFolder, 
+    hr = IShellFolder_BindToObject(psfDesktop, pidlPersonal, NULL, &IID_IShellFolder,
         (LPVOID*)&psfPersonal);
     IShellFolder_Release(psfDesktop);
-    ILFree(pidlPersonal);
+    pILFree(pidlPersonal);
     ok(SUCCEEDED(hr), "psfDesktop->BindToObject failed! hr = %08x\n", hr);
     if (FAILED(hr)) return;
 
@@ -1329,7 +1338,7 @@ static void test_ITEMIDLIST_format(void) {
             }
         }
 
-        ILFree(pidlFile);
+        pILFree(pidlFile);
     }
 }
 

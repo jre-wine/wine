@@ -164,7 +164,7 @@ IWineGDISurfaceImpl_LockRect(IWineD3DSurface *iface,
     {
         ERR("(%p) Surface already locked\n", This);
         /* What should I return here? */
-        return D3DERR_INVALIDCALL;
+        return WINED3DERR_INVALIDCALL;
     }
 
     if (!(This->Flags & SFLAG_LOCKABLE))
@@ -217,7 +217,7 @@ IWineGDISurfaceImpl_LockRect(IWineD3DSurface *iface,
              (pRect->bottom > This->currentDesc.Height))
         {
             WARN(" Invalid values in pRect !!!\n");
-            return D3DERR_INVALIDCALL;
+            return WINED3DERR_INVALIDCALL;
         }
 
         if (This->resource.format == WINED3DFMT_DXT1)
@@ -243,7 +243,7 @@ IWineGDISurfaceImpl_LockRect(IWineD3DSurface *iface,
     TRACE("returning memory@%p, pitch(%d)\n", pLockedRect->pBits, pLockedRect->Pitch);
 
     This->Flags |= SFLAG_LOCKED;
-    return D3D_OK;
+    return WINED3D_OK;
 }
 
 /*****************************************************************************
@@ -911,29 +911,33 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
         {
           LONG dstyinc = dlock.Pitch, dstxinc = bpp;
           DWORD keylow = 0xFFFFFFFF, keyhigh = 0, keymask = 0xFFFFFFFF;
+          DWORD destkeylow = 0x0, destkeyhigh = 0xFFFFFFFF, destkeymask = 0xFFFFFFFF;
           if (Flags & (DDBLT_KEYSRC | DDBLT_KEYDEST | DDBLT_KEYSRCOVERRIDE | DDBLT_KEYDESTOVERRIDE))
           {
-
+              /* The color keying flags are checked for correctness in ddraw */
               if (Flags & DDBLT_KEYSRC)
               {
                 keylow  = Src->SrcBltCKey.dwColorSpaceLowValue;
                 keyhigh = Src->SrcBltCKey.dwColorSpaceHighValue;
               }
-              else if (Flags & DDBLT_KEYDEST)
-              {
-                keylow  = This->DestBltCKey.dwColorSpaceLowValue;
-                keyhigh = This->DestBltCKey.dwColorSpaceHighValue;
-              }
-              else if (Flags & DDBLT_KEYSRCOVERRIDE)
+              else  if (Flags & DDBLT_KEYSRCOVERRIDE)
               {
                 keylow  = DDBltFx->ddckSrcColorkey.dwColorSpaceLowValue;
                 keyhigh = DDBltFx->ddckSrcColorkey.dwColorSpaceHighValue;
               }
-              else
+
+              if (Flags & DDBLT_KEYDEST)
               {
-                keylow  = DDBltFx->ddckDestColorkey.dwColorSpaceLowValue;
-                keyhigh = DDBltFx->ddckDestColorkey.dwColorSpaceHighValue;
+                /* Destination color keys are taken from the source surface ! */
+                destkeylow  = Src->DestBltCKey.dwColorSpaceLowValue;
+                destkeyhigh = Src->DestBltCKey.dwColorSpaceHighValue;
               }
+              else if (Flags & DDBLT_KEYDESTOVERRIDE)
+              {
+                destkeylow  = DDBltFx->ddckDestColorkey.dwColorSpaceLowValue;
+                destkeyhigh = DDBltFx->ddckDestColorkey.dwColorSpaceHighValue;
+              }
+
               if(bpp == 1)
               {
                   keymask = 0xff;
@@ -1037,7 +1041,10 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
               dx = d; \
               for (x = sx = 0; x < dstwidth; x++, sx += xinc) { \
                   tmp = s[sx >> 16]; \
-                  if ((tmp & keymask) < keylow || (tmp & keymask) > keyhigh) dx[0] = tmp; \
+                  if (((tmp & keymask) < keylow || (tmp & keymask) > keyhigh) && \
+                      ((dx[0] & destkeymask) >= destkeylow && (dx[0] & destkeymask) <= destkeyhigh)) { \
+                       dx[0] = tmp; \
+                     } \
                   dx = (type*)(((LPBYTE)dx)+dstxinc); \
               } \
               d = (type*)(((LPBYTE)d)+dstyinc); \
@@ -1057,10 +1064,12 @@ IWineGDISurfaceImpl_Blt(IWineD3DSurface *iface,
                     dx = d;
                     for (x = sx = 0; x < dstwidth; x++, sx+= xinc)
                     {
-                        DWORD pixel;
+                        DWORD pixel, dpixel = 0;
                         s = sbuf+3*(sx>>16);
                         pixel = s[0]|(s[1]<<8)|(s[2]<<16);
-                        if ((pixel & keymask) < keylow || (pixel & keymask) > keyhigh)
+                        dpixel = dx[0]|(dx[1]<<8)|(dx[2]<<16);
+                        if (((pixel & keymask) < keylow || (pixel & keymask) > keyhigh) &&
+                            ((dpixel & keymask) >= destkeylow || (dpixel & keymask) <= keyhigh))
                         {
                             dx[0] = (pixel    )&0xff;
                             dx[1] = (pixel>> 8)&0xff;
@@ -1206,7 +1215,7 @@ IWineGDISurfaceImpl_BltFast(IWineD3DSurface *iface,
 
         /* Lock the union of the two rectangles */
         ret = IWineD3DSurface_LockRect(iface, &dlock, &lock_union, 0);
-        if(ret != D3D_OK) goto error;
+        if(ret != WINED3D_OK) goto error;
 
         pitch = dlock.Pitch;
         slock.Pitch = dlock.Pitch;
@@ -1221,9 +1230,9 @@ IWineGDISurfaceImpl_BltFast(IWineD3DSurface *iface,
     else
     {
         ret = IWineD3DSurface_LockRect(Source, &slock, &lock_src, WINED3DLOCK_READONLY);
-        if(ret != D3D_OK) goto error;
+        if(ret != WINED3D_OK) goto error;
         ret = IWineD3DSurface_LockRect(iface, &dlock, &lock_dst, 0);
-        if(ret != D3D_OK) goto error;
+        if(ret != WINED3D_OK) goto error;
 
         sbuf = slock.pBits;
         dbuf = dlock.pBits;
@@ -1368,7 +1377,7 @@ HRESULT WINAPI
 IWineGDISurfaceImpl_LoadTexture(IWineD3DSurface *iface)
 {
     ERR("Unsupported on X11 surfaces\n");
-    return D3DERR_INVALIDCALL;
+    return WINED3DERR_INVALIDCALL;
 }
 
 /*****************************************************************************
@@ -1497,7 +1506,7 @@ const char* filename)
  * avoid confusion in the shared surface code.
  *
  * Returns:
- *  D3D_OK on success
+ *  WINED3D_OK on success
  *  The return values of called methods on failure
  *
  *****************************************************************************/
@@ -1522,7 +1531,6 @@ IWineGDISurfaceImpl_PrivateSetup(IWineD3DSurface *iface)
 
     /* We don't mind the nonpow2 stuff in GDI */
     This->resource.size = IWineD3DSurface_GetPitch(iface) * This->currentDesc.Height;
-    This->pow2Size = This->resource.size;
     This->pow2Width = This->currentDesc.Width;
     This->pow2Height = This->currentDesc.Height;
     This->Flags &= ~SFLAG_NONPOW2;

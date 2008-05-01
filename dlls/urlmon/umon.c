@@ -44,7 +44,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(urlmon);
 
 /* native urlmon.dll uses this key, too */
-static const WCHAR BSCBHolder[] = { '_','B','S','C','B','_','H','o','l','d','e','r','_',0 };
+static WCHAR BSCBHolder[] = { '_','B','S','C','B','_','H','o','l','d','e','r','_',0 };
 
 /*static BOOL registered_wndclass = FALSE;*/
 
@@ -339,7 +339,7 @@ static ULONG WINAPI URLMonikerImpl_AddRef(IMoniker* iface)
     URLMonikerImpl *This = (URLMonikerImpl *)iface;
     ULONG refCount = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(ref before=%u)\n",This, refCount - 1);
+    TRACE("(%p) ref=%u\n",This, refCount);
 
     return refCount;
 }
@@ -352,7 +352,7 @@ static ULONG WINAPI URLMonikerImpl_Release(IMoniker* iface)
     URLMonikerImpl *This = (URLMonikerImpl *)iface;
     ULONG refCount = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(ref before=%u)\n",This, refCount + 1);
+    TRACE("(%p) ref=%u\n",This, refCount);
 
     /* destroy the object if there's no more reference on it */
     if (!refCount) {
@@ -541,7 +541,7 @@ static HRESULT URLMonikerImpl_BindToStorage_hack(LPCWSTR URLName,
         *ppvObject = (void *) bind->pstrCache;
         IStream_AddRef((IStream *) bind->pstrCache);
 
-        hres = IBindCtx_GetObjectParam(pbc, (LPOLESTR)BSCBHolder, (IUnknown**)&bind->pbscb);
+        hres = IBindCtx_GetObjectParam(pbc, BSCBHolder, (IUnknown**)&bind->pbscb);
         if(SUCCEEDED(hres)) {
             TRACE("Got IBindStatusCallback...\n");
 
@@ -1167,7 +1167,6 @@ HRESULT WINAPI CreateURLMoniker(IMoniker *pmkContext, LPCWSTR szURL, IMoniker **
 {
     URLMonikerImpl *obj;
     HRESULT hres;
-    IID iid = IID_IMoniker;
     LPOLESTR lefturl = NULL;
 
     TRACE("(%p, %s, %p)\n", pmkContext, debugstr_w(szURL), ppmk);
@@ -1189,7 +1188,7 @@ HRESULT WINAPI CreateURLMoniker(IMoniker *pmkContext, LPCWSTR szURL, IMoniker **
     hres = URLMonikerImpl_Construct(obj, lefturl, szURL);
     CoTaskMemFree(lefturl);
     if(SUCCEEDED(hres))
-	hres = URLMonikerImpl_QueryInterface((IMoniker*)obj, &iid, (void**)ppmk);
+	hres = URLMonikerImpl_QueryInterface((IMoniker*)obj, &IID_IMoniker, (void**)ppmk);
     else
 	HeapFree(GetProcessHeap(), 0, obj);
     return hres;
@@ -1297,16 +1296,16 @@ HRESULT WINAPI RegisterBindStatusCallback(
     if (pbc == NULL || pbsc == NULL)
         return E_INVALIDARG;
 
-    if (SUCCEEDED(IBindCtx_GetObjectParam(pbc, (LPOLESTR)BSCBHolder, (IUnknown **)&prev)))
+    if (SUCCEEDED(IBindCtx_GetObjectParam(pbc, BSCBHolder, (IUnknown **)&prev)))
     {
-        IBindCtx_RevokeObjectParam(pbc, (LPOLESTR)BSCBHolder);
+        IBindCtx_RevokeObjectParam(pbc, BSCBHolder);
         if (ppbscPrevious)
             *ppbscPrevious = prev;
         else
             IBindStatusCallback_Release(prev);
     }
 
-    return IBindCtx_RegisterObjectParam(pbc, (LPOLESTR)BSCBHolder, (IUnknown *)pbsc);
+    return IBindCtx_RegisterObjectParam(pbc, BSCBHolder, (IUnknown *)pbsc);
 }
 
 /***********************************************************************
@@ -1334,11 +1333,11 @@ HRESULT WINAPI RevokeBindStatusCallback(
     if (pbc == NULL || pbsc == NULL)
         return E_INVALIDARG;
 
-    if (SUCCEEDED(IBindCtx_GetObjectParam(pbc, (LPOLESTR)BSCBHolder, (IUnknown **)&callback)))
+    if (SUCCEEDED(IBindCtx_GetObjectParam(pbc, BSCBHolder, (IUnknown **)&callback)))
     {
         if (callback == pbsc)
         {
-            IBindCtx_RevokeObjectParam(pbc, (LPOLESTR)BSCBHolder);
+            IBindCtx_RevokeObjectParam(pbc, BSCBHolder);
             hr = S_OK;
         }
         IBindStatusCallback_Release(pbsc);
@@ -1606,7 +1605,7 @@ HRESULT WINAPI URLDownloadToCacheFileW(LPUNKNOWN lpUnkCaller, LPCWSTR szURL, LPW
     HRESULT hr;
     LPWSTR ext;
 
-    static const WCHAR header[] = {
+    static WCHAR header[] = {
         'H','T','T','P','/','1','.','0',' ','2','0','0',' ',
         'O','K','\\','r','\\','n','\\','r','\\','n',0
     };
@@ -1632,7 +1631,7 @@ HRESULT WINAPI URLDownloadToCacheFileW(LPUNKNOWN lpUnkCaller, LPCWSTR szURL, LPW
     modified.dwLowDateTime = 0;
 
     if (!CommitUrlCacheEntryW(szURL, cache_path, expire, modified, NORMAL_CACHE_ENTRY,
-                              (LPWSTR)header, sizeof(header), NULL, NULL))
+                              header, sizeof(header), NULL, NULL))
         return E_FAIL;
 
     if (lstrlenW(cache_path) > dwBufLength)

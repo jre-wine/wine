@@ -1485,7 +1485,7 @@ AC_SUBST(DEPENDENCIES,m4_if(m4_version_compare(m4_defn([m4_PACKAGE_VERSION]), [2
 Makefile: dummy\\
 	-\$(MAKEDEP) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)\\
 \\
-\$(ALL_OBJS): \$(IDL_H_SRCS:.idl=.h)\\
+\$(ALL_OBJS): \$(IDL_GEN_HEADERS)\\
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)\\
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)\\
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"],
@@ -1496,7 +1496,7 @@ Makefile: dummy\\
 Makefile: dummy
 	-\$(MAKEDEP) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)
 
-\$(ALL_OBJS): \$(IDL_H_SRCS:.idl=.h)
+\$(ALL_OBJS): \$(IDL_GEN_HEADERS)
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"]))
@@ -1544,6 +1544,8 @@ dlls/amstream/Makefile
 dlls/atl/Makefile
 dlls/avicap32/Makefile
 dlls/avifil32/Makefile
+dlls/browseui/Makefile
+dlls/browseui/tests/Makefile
 dlls/cabinet/Makefile
 dlls/cabinet/tests/Makefile
 dlls/capi2032/Makefile

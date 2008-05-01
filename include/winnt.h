@@ -30,6 +30,11 @@
 #include <string.h>
 #endif
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define NTAPI __stdcall
 
 #if (defined(_M_IX86) || defined(_M_IA64) || defined(_M_AMD64) || defined(__MINGW32__)) && !defined(MIDL_PASS)
@@ -592,6 +597,63 @@ typedef struct _LIST_ENTRY {
 typedef struct _SINGLE_LIST_ENTRY {
   struct _SINGLE_LIST_ENTRY *Next;
 } SINGLE_LIST_ENTRY, *PSINGLE_LIST_ENTRY;
+
+#ifdef _WIN64
+
+typedef struct DECLSPEC_ALIGN(16) _SLIST_ENTRY *PSLIST_ENTRY;
+typedef struct DECLSPEC_ALIGN(16) _SLIST_ENTRY {
+    PSLIST_ENTRY Next;
+} SLIST_ENTRY;
+
+typedef union DECLSPEC_ALIGN(16) _SLIST_HEADER {
+    struct {
+        ULONGLONG Alignment;
+        ULONGLONG Region;
+    } DUMMYSTRUCTNAME;
+    struct {
+        ULONGLONG Depth:16;
+        ULONGLONG Sequence:9;
+        ULONGLONG NextEntry:39;
+        ULONGLONG HeaderType:1;
+        ULONGLONG Init:1;
+        ULONGLONG Reserved:59;
+        ULONGLONG Region:3;
+    } Header8;
+    struct {
+        ULONGLONG Depth:16;
+        ULONGLONG Sequence:48;
+        ULONGLONG HeaderType:1;
+        ULONGLONG Init:1;
+        ULONGLONG Reserved:2;
+        ULONGLONG NextEntry:60;
+    } Header16;
+} SLIST_HEADER, *PSLIST_HEADER;
+
+#else
+
+#undef SLIST_ENTRY /* for Mac OS */
+#define SLIST_ENTRY SINGLE_LIST_ENTRY
+#define _SLIST_ENTRY _SINGLE_LIST_ENTRY
+#define PSLIST_ENTRY PSINGLE_LIST_ENTRY
+
+typedef union _SLIST_HEADER {
+    ULONGLONG Alignment;
+    struct {
+        SLIST_ENTRY Next;
+        WORD Depth;
+        WORD Sequence;
+    } DUMMYSTRUCTNAME;
+} SLIST_HEADER, *PSLIST_HEADER;
+
+#endif
+
+PSLIST_ENTRY WINAPI RtlFirstEntrySList(const SLIST_HEADER*);
+VOID         WINAPI RtlInitializeSListHead(PSLIST_HEADER);
+PSLIST_ENTRY WINAPI RtlInterlockedFlushSList(PSLIST_HEADER);
+PSLIST_ENTRY WINAPI RtlInterlockedPopEntrySList(PSLIST_HEADER);
+PSLIST_ENTRY WINAPI RtlInterlockedPushEntrySList(PSLIST_HEADER, PSLIST_ENTRY);
+WORD         WINAPI RtlQueryDepthSList(PSLIST_HEADER);
+
 
 /* Heap flags */
 
@@ -4735,5 +4797,9 @@ ULONGLONG WINAPI VerSetConditionMask(ULONGLONG,DWORD,BYTE);
 #define	VER_LESS_EQUAL				5
 #define	VER_AND					6
 #define	VER_OR					7
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  /* _WINNT_ */

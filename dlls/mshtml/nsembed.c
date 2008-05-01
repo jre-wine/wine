@@ -321,30 +321,13 @@ static void set_profile(void)
     nsIProfile_Release(profile);
 }
 
-static BOOL load_gecko(void)
+static BOOL init_xpcom(PRUnichar *gre_path)
 {
     nsresult nsres;
     nsIObserver *pStartNotif;
     nsIComponentRegistrar *registrar = NULL;
     nsAString path;
     nsIFile *gre_dir;
-    PRUnichar gre_path[MAX_PATH];
-
-    static BOOL tried_load = FALSE;
-
-    TRACE("()\n");
-
-    if(tried_load)
-        return pCompMgr != NULL;
-    tried_load = TRUE;
-
-    if(!load_wine_gecko(gre_path) && !load_mozctl(gre_path) && !load_mozilla(gre_path)) {
-        install_wine_gecko();
-        if(!load_wine_gecko(gre_path)) {
-            MESSAGE("Could not load Mozilla. HTML rendering will be disabled.\n");
-            return FALSE;
-        }
-    }
 
     nsAString_Init(&path, gre_path);
     nsres = NS_NewLocalFile(&path, FALSE, &gre_dir);
@@ -406,6 +389,49 @@ static BOOL load_gecko(void)
     }
 
     return TRUE;
+}
+
+static CRITICAL_SECTION cs_load_gecko;
+static CRITICAL_SECTION_DEBUG cs_load_gecko_dbg =
+{
+    0, 0, &cs_load_gecko,
+    { &cs_load_gecko_dbg.ProcessLocksList, &cs_load_gecko_dbg.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": load_gecko") }
+};
+static CRITICAL_SECTION cs_load_gecko = { &cs_load_gecko_dbg, -1, 0, 0, 0, 0 };
+
+static BOOL load_gecko(void)
+{
+    PRUnichar gre_path[MAX_PATH];
+    BOOL ret = FALSE;
+
+    static LONG loading_thread;
+
+    TRACE("()\n");
+
+    /* load_gecko may be called recursively */
+    if(loading_thread == GetCurrentThreadId())
+        return pCompMgr != NULL;
+
+    EnterCriticalSection(&cs_load_gecko);
+
+    if(!loading_thread) {
+        loading_thread = GetCurrentThreadId();
+
+        if(load_wine_gecko(gre_path)
+           || load_mozctl(gre_path)
+           || load_mozilla(gre_path)
+           || (install_wine_gecko() && load_wine_gecko(gre_path)))
+            ret = init_xpcom(gre_path);
+        else
+           MESSAGE("Could not load Mozilla. HTML rendering will be disabled.\n");
+    }else {
+        ret = pCompMgr != NULL;
+    }
+
+    LeaveCriticalSection(&cs_load_gecko);
+
+    return ret;
 }
 
 void *nsalloc(size_t size)
@@ -934,20 +960,13 @@ static nsresult NSAPI nsURIContentListener_OnStartURIOpen(nsIURIContentListener 
     nsIWineURI_SetIsDocumentURI(wine_uri, TRUE);
 
     if(This->bscallback && This->bscallback->mon) {
-        LPWSTR url = NULL;
+        LPWSTR wine_url;
         HRESULT hres;
 
-        hres = IMoniker_GetDisplayName(This->bscallback->mon, NULL, 0, &url);
+        hres = IMoniker_GetDisplayName(This->bscallback->mon, NULL, 0, &wine_url);
         if(SUCCEEDED(hres)) {
-            IMoniker *mon = NULL;
-
-            hres = CreateURLMoniker(NULL, url, &mon);
-            if(SUCCEEDED(hres)) {
-                nsIWineURI_SetMoniker(wine_uri, mon);
-                IMoniker_Release(mon);
-            }else {
-                WARN("CreateURLMoniker failed: %08x\n", hres);
-            }
+            nsIWineURI_SetWineURL(wine_uri, wine_url);
+            CoTaskMemFree(wine_url);
         }else {
             WARN("GetDisplayName failed: %08x\n", hres);
         }
@@ -1510,7 +1529,6 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
     }else {
         ERR("GetContentDOMWindow failed: %08x\n", nsres);
     }
-
 
     return ret;
 }

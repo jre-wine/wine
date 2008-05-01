@@ -209,7 +209,7 @@ IUnknown* WINAPI AtlComPtrAssign(IUnknown** pp, IUnknown *p)
 }
 
 
-HRESULT WINAPI AtlInternalQueryInterface(LPVOID this, const _ATL_INTMAP_ENTRY* pEntries,  REFIID iid, LPVOID* ppvObject)
+HRESULT WINAPI AtlInternalQueryInterface(void* this, const _ATL_INTMAP_ENTRY* pEntries,  REFIID iid, void** ppvObject)
 {
     int i = 0;
     HRESULT rc = E_NOINTERFACE;
@@ -421,8 +421,8 @@ HRESULT WINAPI AtlModuleUnregisterServer(_ATL_MODULEW *pm, const CLSID *clsid)
  * NOTES
  *  Can be called multiple times without error, unlike RegisterClassEx().
  *
- *  If the class name is NULL then it a class with a name of "ATLxxxxxxxx" is
- *  registered, where the x's represent an unique value.
+ *  If the class name is NULL, then a class with a name of "ATLxxxxxxxx" is
+ *  registered, where the 'x's represent a unique value.
  *
  */
 ATOM WINAPI AtlModuleRegisterWndClassInfoW(_ATL_MODULEW *pm, _ATL_WNDCLASSINFOW *wci, WNDPROC *pProc)
@@ -478,7 +478,7 @@ void WINAPI AtlPixelToHiMetric(const SIZEL* lpPix, SIZEL* lpHiMetric)
 /***********************************************************************
  *           AtlModuleAddCreateWndData          [ATL.@]
  */
-void WINAPI AtlModuleAddCreateWndData(_ATL_MODULEW *pM, _AtlCreateWndData *pData, LPVOID pvObject)
+void WINAPI AtlModuleAddCreateWndData(_ATL_MODULEW *pM, _AtlCreateWndData *pData, void* pvObject)
 {
     TRACE("(%p, %p, %p)\n", pM, pData, pvObject);
 
@@ -496,7 +496,7 @@ void WINAPI AtlModuleAddCreateWndData(_ATL_MODULEW *pM, _AtlCreateWndData *pData
  *        records from the current thread from a list
  *
  */
-LPVOID WINAPI AtlModuleExtractCreateWndData(_ATL_MODULEW *pM)
+void* WINAPI AtlModuleExtractCreateWndData(_ATL_MODULEW *pM)
 {
     _AtlCreateWndData **ppData;
 

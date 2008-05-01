@@ -105,52 +105,31 @@ void shader_glsl_load_psamplers(
 static void shader_glsl_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL_Info *gl_info,
         unsigned int max_constants, float* constants, GLhandleARB *constant_locations,
         struct list *constant_list) {
+    constant_entry *constant;
     local_constant* lconst;
     GLhandleARB tmp_loc;
     int i;
 
-    if (!constant_list) {
-        if (TRACE_ON(d3d_shader)) {
-            for (i = 0; i < max_constants; ++i) {
-                tmp_loc = constant_locations[i];
-                if (tmp_loc != -1) {
-                    TRACE_(d3d_constants)("Loading constants %i: %f, %f, %f, %f\n", i,
-                            constants[i * 4 + 0], constants[i * 4 + 1],
-                            constants[i * 4 + 2], constants[i * 4 + 3]);
-                }
-            }
-        }
-        for (i = 0; i < max_constants; ++i) {
-            tmp_loc = constant_locations[i];
-            if (tmp_loc != -1) {
-                /* We found this uniform name in the program - go ahead and send the data */
-                GL_EXTCALL(glUniform4fvARB(tmp_loc, 1, constants + (i * 4)));
-            }
-        }
-        checkGLcall("glUniform4fvARB()");
-    } else {
-        constant_entry *constant;
-        if (TRACE_ON(d3d_shader)) {
-            LIST_FOR_EACH_ENTRY(constant, constant_list, constant_entry, entry) {
-                i = constant->idx;
-                tmp_loc = constant_locations[i];
-                if (tmp_loc != -1) {
-                    TRACE_(d3d_constants)("Loading constants %i: %f, %f, %f, %f\n", i,
-                            constants[i * 4 + 0], constants[i * 4 + 1],
-                            constants[i * 4 + 2], constants[i * 4 + 3]);
-                }
-            }
-        }
+    if (TRACE_ON(d3d_shader)) {
         LIST_FOR_EACH_ENTRY(constant, constant_list, constant_entry, entry) {
             i = constant->idx;
             tmp_loc = constant_locations[i];
             if (tmp_loc != -1) {
-                /* We found this uniform name in the program - go ahead and send the data */
-                GL_EXTCALL(glUniform4fvARB(tmp_loc, 1, constants + (i * 4)));
+                TRACE_(d3d_constants)("Loading constants %i: %f, %f, %f, %f\n", i,
+                        constants[i * 4 + 0], constants[i * 4 + 1],
+                        constants[i * 4 + 2], constants[i * 4 + 3]);
             }
         }
-        checkGLcall("glUniform4fvARB()");
     }
+    LIST_FOR_EACH_ENTRY(constant, constant_list, constant_entry, entry) {
+        i = constant->idx;
+        tmp_loc = constant_locations[i];
+        if (tmp_loc != -1) {
+            /* We found this uniform name in the program - go ahead and send the data */
+            GL_EXTCALL(glUniform4fvARB(tmp_loc, 1, constants + (i * 4)));
+        }
+    }
+    checkGLcall("glUniform4fvARB()");
 
     /* Load immediate constants */
     if (TRACE_ON(d3d_shader)) {
@@ -304,7 +283,8 @@ void shader_glsl_load_constants(
     GLhandleARB *constant_locations;
     struct list *constant_list;
     GLhandleARB programId;
-    
+    GLint pos;
+
     if (!stateBlock->glsl_program) {
         /* No GLSL program set - nothing to do. */
         return;
@@ -313,20 +293,10 @@ void shader_glsl_load_constants(
 
     if (useVertexShader) {
         IWineD3DBaseShaderImpl* vshader = (IWineD3DBaseShaderImpl*) stateBlock->vertexShader;
-        IWineD3DVertexShaderImpl* vshader_impl = (IWineD3DVertexShaderImpl*) vshader;
         GLint pos;
-
-        IWineD3DVertexDeclarationImpl* vertexDeclaration =
-            (IWineD3DVertexDeclarationImpl*) vshader_impl->vertexDeclaration;
 
         constant_locations = stateBlock->glsl_program->vuniformF_locations;
         constant_list = &stateBlock->set_vconstantsF;
-
-        if (NULL != vertexDeclaration && NULL != vertexDeclaration->constants) {
-            /* Load DirectX 8 float constants/uniforms for vertex shader */
-            shader_glsl_load_constantsF(vshader, gl_info, GL_LIMITS(vshader_constantsF),
-                    vertexDeclaration->constants, constant_locations, NULL);
-        }
 
         /* Load DirectX 9 float constants/uniforms for vertex shader */
         shader_glsl_load_constantsF(vshader, gl_info, GL_LIMITS(vshader_constantsF),
@@ -367,11 +337,22 @@ void shader_glsl_load_constants(
         shader_glsl_load_constantsI(pshader, gl_info, programId, MAX_CONST_I,
                                     stateBlock->pixelShaderConstantI, 
                                     stateBlock->set.pixelShaderConstantsI);
-        
+
         /* Load DirectX 9 boolean constants/uniforms for pixel shader */
         shader_glsl_load_constantsB(pshader, gl_info, programId, MAX_CONST_B,
                                     stateBlock->pixelShaderConstantB, 
                                     stateBlock->set.pixelShaderConstantsB);
+
+        /* Upload the environment bump map matrix if needed. The needsbumpmat member specifies the texture stage to load the matrix from.
+         * It can't be 0 for a valid texbem instruction.
+         */
+        if(((IWineD3DPixelShaderImpl *) pshader)->needsbumpmat != 0) {
+            float *data = (float *) &stateBlock->textureState[(int) ((IWineD3DPixelShaderImpl *) pshader)->needsbumpmat][WINED3DTSS_BUMPENVMAT00];
+            pos = GL_EXTCALL(glGetUniformLocationARB(programId, "bumpenvmat"));
+            checkGLcall("glGetUniformLocationARB");
+            GL_EXTCALL(glUniform4fvARB(pos, 1, data));
+            checkGLcall("glUniform4fvARB");
+        }
     }
 }
 
@@ -410,6 +391,8 @@ void shader_generate_glsl_declarations(
 
     if(!pshader)
         shader_addline(buffer, "uniform vec4 posFixup;\n");
+    else if(reg_maps->bumpmat)
+        shader_addline(buffer, "uniform vec4 bumpenvmat;\n");
 
     /* Declare texture samplers */ 
     for (i = 0; i < This->baseShader.limits.sampler; i++) {
@@ -914,7 +897,7 @@ void shader_glsl_mov(SHADER_OPCODE_ARG* arg) {
     write_mask = shader_glsl_append_dst(buffer, arg);
     shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], write_mask, &src0_param);
 
-    /* In vs_1_1 WINED3DSIO_MOV can write to the adress register. In later
+    /* In vs_1_1 WINED3DSIO_MOV can write to the address register. In later
      * shader versions WINED3DSIO_MOVA is used for this. */
     if ((WINED3DSHADER_VERSION_MAJOR(shader->baseShader.hex_version) == 1 &&
             !shader_is_pshader_version(shader->baseShader.hex_version) &&
@@ -923,9 +906,9 @@ void shader_glsl_mov(SHADER_OPCODE_ARG* arg) {
         /* We need to *round* to the nearest int here. */
         size_t mask_size = shader_glsl_get_write_mask_size(write_mask);
         if (mask_size > 1) {
-            shader_addline(buffer, "ivec%d(floor(%s + vec%d(0.5))));\n", mask_size, src0_param.param_str, mask_size);
+            shader_addline(buffer, "ivec%d(floor(abs(%s) + vec%d(0.5)) * sign(%s)));\n", mask_size, src0_param.param_str, mask_size, src0_param.param_str);
         } else {
-            shader_addline(buffer, "int(floor(%s + 0.5)));\n", src0_param.param_str);
+            shader_addline(buffer, "int(floor(abs(%s) + 0.5) * sign(%s)));\n", src0_param.param_str, src0_param.param_str);
         }
     } else {
         shader_addline(buffer, "%s);\n", src0_param.param_str);
@@ -1784,15 +1767,50 @@ void pshader_glsl_texm3x3vspec(SHADER_OPCODE_ARG* arg) {
 
 /** Process the WINED3DSIO_TEXBEM instruction in GLSL.
  * Apply a fake bump map transform.
- * FIXME: Should apply the BUMPMAPENV matrix.  For now, just sample the texture */
+ * texbem is pshader <= 1.3 only, this saves a few version checks
+ */
 void pshader_glsl_texbem(SHADER_OPCODE_ARG* arg) {
+    IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
+    IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
+    char dst_swizzle[6];
+    glsl_sample_function_t sample_function;
+    DWORD sampler_type;
+    DWORD sampler_idx;
+    BOOL projected;
+    DWORD mask = 0;
+    DWORD flags;
+    char coord_mask[6];
 
-    DWORD reg1 = arg->dst & WINED3DSP_REGNUM_MASK;
-    DWORD reg2 = arg->src[0] & WINED3DSP_REGNUM_MASK;
+    /* All versions have a destination register */
+    shader_glsl_append_dst(arg->buffer, arg);
 
-    FIXME("Not applying the BUMPMAPENV matrix for pixel shader instruction texbem.\n");
-    shader_addline(arg->buffer, "T%u = texture2D(Psampler%u, gl_TexCoord[%u].xy + T%u.xy);\n",
-            reg1, reg1, reg1, reg2);
+    sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
+    flags = deviceImpl->stateBlock->textureState[sampler_idx][WINED3DTSS_TEXTURETRANSFORMFLAGS];
+
+    /* TODO: Does texbem even support projected textures? half-life 2 uses it */
+    if (flags & WINED3DTTFF_PROJECTED) {
+        projected = TRUE;
+        switch (flags & ~WINED3DTTFF_PROJECTED) {
+            case WINED3DTTFF_COUNT1: FIXME("WINED3DTTFF_PROJECTED with WINED3DTTFF_COUNT1?\n"); break;
+            case WINED3DTTFF_COUNT2: mask = WINED3DSP_WRITEMASK_1; break;
+            case WINED3DTTFF_COUNT3: mask = WINED3DSP_WRITEMASK_2; break;
+            case WINED3DTTFF_COUNT4:
+            case WINED3DTTFF_DISABLE: mask = WINED3DSP_WRITEMASK_3; break;
+        }
+    } else {
+        projected = FALSE;
+    }
+
+    sampler_type = arg->reg_maps->samplers[sampler_idx] & WINED3DSP_TEXTURETYPE_MASK;
+    shader_glsl_get_sample_function(sampler_type, projected, &sample_function);
+    mask |= sample_function.coord_mask;
+
+    shader_glsl_get_write_mask(arg->dst, dst_swizzle);
+
+    shader_glsl_get_write_mask(mask, coord_mask);
+    FIXME("Bump map transform not handled yet\n");
+    shader_addline(arg->buffer, "%s(Psampler%u, T%u%s)%s);\n",
+                   sample_function.name, sampler_idx, sampler_idx, coord_mask, dst_swizzle);
 }
 
 /** Process the WINED3DSIO_TEXREG2AR instruction in GLSL
@@ -1889,7 +1907,7 @@ void pshader_glsl_input_pack(
 
        switch(usage) {
 
-           case D3DDECLUSAGE_COLOR:
+           case WINED3DDECLUSAGE_COLOR:
                if (usage_idx == 0)
                    shader_addline(buffer, "IN%u%s = vec4(gl_Color)%s;\n",
                        i, reg_mask, reg_mask);
@@ -1901,12 +1919,12 @@ void pshader_glsl_input_pack(
                        i, reg_mask, reg_mask);
                break;
 
-           case D3DDECLUSAGE_TEXCOORD:
+           case WINED3DDECLUSAGE_TEXCOORD:
                shader_addline(buffer, "IN%u%s = vec4(gl_TexCoord[%u])%s;\n",
                    i, reg_mask, usage_idx, reg_mask );
                break;
 
-           case D3DDECLUSAGE_FOG:
+           case WINED3DDECLUSAGE_FOG:
                shader_addline(buffer, "IN%u%s = vec4(gl_FogFragCoord)%s;\n",
                    i, reg_mask, reg_mask);
                break;
@@ -1944,7 +1962,7 @@ void vshader_glsl_output_unpack(
 
        switch(usage) {
 
-           case D3DDECLUSAGE_COLOR:
+           case WINED3DDECLUSAGE_COLOR:
                if (usage_idx == 0)
                    shader_addline(buffer, "gl_FrontColor%s = OUT%u%s;\n", reg_mask, i, reg_mask);
                else if (usage_idx == 1)
@@ -1953,20 +1971,20 @@ void vshader_glsl_output_unpack(
                    shader_addline(buffer, "unsupported_color_output%s = OUT%u%s;\n", reg_mask, i, reg_mask);
                break;
 
-           case D3DDECLUSAGE_POSITION:
+           case WINED3DDECLUSAGE_POSITION:
                shader_addline(buffer, "gl_Position%s = OUT%u%s;\n", reg_mask, i, reg_mask);
                break;
- 
-           case D3DDECLUSAGE_TEXCOORD:
+
+           case WINED3DDECLUSAGE_TEXCOORD:
                shader_addline(buffer, "gl_TexCoord[%u]%s = OUT%u%s;\n",
                    usage_idx, reg_mask, i, reg_mask);
                break;
 
-           case WINED3DSHADERDECLUSAGE_PSIZE:
+           case WINED3DDECLUSAGE_PSIZE:
                shader_addline(buffer, "gl_PointSize = OUT%u.x;\n", i);
                break;
 
-           case WINED3DSHADERDECLUSAGE_FOG:
+           case WINED3DDECLUSAGE_FOG:
                shader_addline(buffer, "gl_FogFragCoord%s = OUT%u%s;\n", reg_mask, i, reg_mask);
                break;
 
@@ -2161,8 +2179,10 @@ static void shader_glsl_select_depth_blt(IWineD3DDevice *iface) {
     GL_EXTCALL(glUniform1iARB(loc, 0));
 }
 
-static void shader_glsl_cleanup(BOOL usePS, BOOL useVS) {
-    /* Nothing to do */
+static void shader_glsl_cleanup(IWineD3DDevice *iface) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    WineD3D_GL_Info *gl_info = &((IWineD3DImpl *)(This->wineD3D))->gl_info;
+    GL_EXTCALL(glUseProgramObjectARB(0));
 }
 
 const shader_backend_t glsl_shader_backend = {

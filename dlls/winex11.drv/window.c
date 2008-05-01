@@ -86,10 +86,13 @@ inline static BOOL is_window_managed( HWND hwnd )
     if (style & WS_THICKFRAME) return TRUE;
     /* application windows are managed */
     if (ex_style & WS_EX_APPWINDOW) return TRUE;
-    /* full-screen popup windows are managed */
     if (style & WS_POPUP)
     {
         RECT rect;
+
+        /* popup with sysmenu == caption are managed */
+        if (style & WS_SYSMENU) return TRUE;
+        /* full-screen popup windows are managed */
         GetWindowRect( hwnd, &rect );
         if ((rect.right - rect.left) == screen_width && (rect.bottom - rect.top) == screen_height)
             return TRUE;
@@ -1075,15 +1078,10 @@ BOOL X11DRV_CreateWindow( HWND hwnd, CREATESTRUCTA *cs, BOOL unicode )
     if ((cs->style & WS_THICKFRAME) || !(cs->style & (WS_POPUP | WS_CHILD)))
     {
         POINT maxSize, maxPos, minTrack, maxTrack;
-
+        /* Although Windows sends WM_GETMINMAXINFO at the window creation time,
+         * it doesn't use returned values to set window size.
+         */
         WINPOS_GetMinMaxInfo( hwnd, &maxSize, &maxPos, &minTrack, &maxTrack);
-        if (maxSize.x < cs->cx) cs->cx = maxSize.x;
-        if (maxSize.y < cs->cy) cs->cy = maxSize.y;
-        if (cs->cx < 0) cs->cx = 0;
-        if (cs->cy < 0) cs->cy = 0;
-
-        SetRect( &rect, cs->x, cs->y, cs->x + cs->cx, cs->y + cs->cy );
-        if (!X11DRV_SetWindowPos( hwnd, 0, &rect, &rect, SWP_NOZORDER, NULL )) return FALSE;
     }
 
     /* send WM_NCCREATE */

@@ -1480,6 +1480,11 @@ LRESULT WINAPI DefMDIChildProcW( HWND hwnd, UINT message,
         SendMessageW( client, WM_MDIDESTROY, (WPARAM)hwnd, 0 );
         return 0;
 
+    case WM_SETFOCUS:
+        if (ci->hwndActiveChild != hwnd)
+            MDI_ChildActivate( client, hwnd );
+        break;
+
     case WM_CHILDACTIVATE:
         MDI_ChildActivate( client, hwnd );
         return 0;
@@ -1559,8 +1564,8 @@ LRESULT WINAPI DefMDIChildProcW( HWND hwnd, UINT message,
         {
             HWND switchTo = MDI_GetWindow( ci, hwnd, TRUE, WS_MINIMIZE );
 
-            if( switchTo )
-                SendMessageW( switchTo, WM_CHILDACTIVATE, 0, 0 );
+            if (!switchTo) switchTo = hwnd;
+            SendMessageW( switchTo, WM_CHILDACTIVATE, 0, 0 );
 	}
 
         MDI_PostUpdate(client, ci, SB_BOTH+1);

@@ -242,16 +242,14 @@ static void find_joydevs(void)
             );
 
 #ifdef HAVE_STRUCT_FF_EFFECT_DIRECTION
-        if (!no_ff_check) {
-          if ((!test_bit(joydev.evbits,EV_FF))
-              || (-1==ioctl(fd,EVIOCGBIT(EV_FF,sizeof(joydev.ffbits)),joydev.ffbits)) 
-              || (-1==ioctl(fd,EVIOCGEFFECTS,&joydev.num_effects))
-              || (joydev.num_effects <= 0)) {
-            close(fd);
-          } else {
+        if (!no_ff_check &&
+            test_bit(joydev.evbits, EV_FF) &&
+            ioctl(fd, EVIOCGBIT(EV_FF, sizeof(joydev.ffbits)), joydev.ffbits) != -1 &&
+            ioctl(fd, EVIOCGEFFECTS, &joydev.num_effects) != -1 &&
+            joydev.num_effects > 0)
+        {
 	    TRACE(" ... with force feedback\n");
 	    joydev.has_ff = 1;
-	  }
         }
 #endif
 
@@ -389,8 +387,10 @@ static JoystickImpl *alloc_device(REFGUID rguid, const void *jvt, IDirectInputIm
 
         memcpy(&df->rgodf[idx], &c_dfDIJoystick2.rgodf[i], df->dwObjSize);
         newDevice->axes[i] = idx;
-        newDevice->props[idx].wantmin = newDevice->props[idx].havemin = newDevice->joydev->axes[i][AXIS_ABSMIN];
-        newDevice->props[idx].wantmax = newDevice->props[idx].havemax = newDevice->joydev->axes[i][AXIS_ABSMAX];
+        newDevice->props[idx].havemin = newDevice->joydev->axes[i][AXIS_ABSMIN];
+        newDevice->props[idx].havemax = newDevice->joydev->axes[i][AXIS_ABSMAX];
+        newDevice->props[idx].wantmin = 0;
+        newDevice->props[idx].wantmax = 0xffff;
         newDevice->props[idx].deadzone = 0;
         df->rgodf[idx++].dwType = DIDFT_MAKEINSTANCE(newDevice->numAxes++) | DIDFT_ABSAXIS;
     }
@@ -903,35 +903,43 @@ static HRESULT WINAPI JoystickAImpl_GetProperty(LPDIRECTINPUTDEVICE8A iface,
 						REFGUID rguid,
 						LPDIPROPHEADER pdiph)
 {
-  JoystickImpl *This = (JoystickImpl *)iface;
+    JoystickImpl *This = (JoystickImpl *)iface;
 
-  TRACE("(this=%p,%s,%p)\n",
-	iface, debugstr_guid(rguid), pdiph);
-
-  if (TRACE_ON(dinput))
+    TRACE("(this=%p,%s,%p)\n", iface, debugstr_guid(rguid), pdiph);
     _dump_DIPROPHEADER(pdiph);
 
-  if (!HIWORD(rguid)) {
-    switch (LOWORD(rguid)) {
-    case (DWORD) DIPROP_RANGE: {
-      LPDIPROPRANGE pr = (LPDIPROPRANGE) pdiph;
-      int obj = find_property(&This->base.data_format, pdiph);
+    if (HIWORD(rguid)) return DI_OK;
 
-      if (obj >= 0) {
-	pr->lMin = This->props[obj].havemin;
-	pr->lMax = This->props[obj].havemax;
+    switch (LOWORD(rguid)) {
+    case (DWORD) DIPROP_RANGE:
+    {
+        LPDIPROPRANGE pr = (LPDIPROPRANGE) pdiph;
+        int obj = find_property(&This->base.data_format, pdiph);
+
+        if (obj < 0) return DIERR_OBJECTNOTFOUND;
+
+        pr->lMin = This->props[obj].wantmin;
+        pr->lMax = This->props[obj].wantmax;
 	TRACE("range(%d, %d) obj=%d\n", pr->lMin, pr->lMax, obj);
-      }
-      break;
+        break;
+    }
+    case (DWORD) DIPROP_DEADZONE:
+    {
+        LPDIPROPDWORD pd = (LPDIPROPDWORD)pdiph;
+        int obj = find_property(&This->base.data_format, pdiph);
+
+        if (obj < 0) return DIERR_OBJECTNOTFOUND;
+
+        pd->dwData = This->props[obj].deadzone;
+        TRACE("deadzone(%d) obj=%d\n", pd->dwData, obj);
+        break;
     }
 
     default:
-      return IDirectInputDevice2AImpl_GetProperty(iface, rguid, pdiph);
+        return IDirectInputDevice2AImpl_GetProperty(iface, rguid, pdiph);
     }
-  }
 
-
-  return DI_OK;
+    return DI_OK;
 }
 
 /******************************************************************************

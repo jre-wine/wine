@@ -1261,7 +1261,7 @@ static DWORD get_ports_from_all_monitors(DWORD level, LPBYTE pPorts, DWORD cbBuf
             needed += (level == 1) ? pm->pi1_needed : pm->pi2_needed;
 
             /* fill the buffer, if we have one */
-            if (pPorts && (cbBuf >= needed )) {
+            if (pPorts && (cbBuf >= needed ) && pm->cache) {
                 cacheindex = 0;
                 cache = pm->cache;
                 while (cacheindex < pm->returned) {
@@ -1651,15 +1651,8 @@ void WINSPOOL_LoadSystemPrinters(void)
     done = CUPS_LoadPrinters();
 #endif
 
-    if(!done) { /* If we have any CUPS based printers, skip looking for printcap printers */
-        /* Check for [ppd] section in config file before parsing /etc/printcap */
-        /* @@ Wine registry key: HKCU\Software\Wine\Printing\PPD Files */
-        if (RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Printing\\PPD Files",
-                        &hkey) == ERROR_SUCCESS) {
-            RegCloseKey(hkey);
-            PRINTCAP_LoadPrinters();
-        }
-    }
+    if(!done) /* If we have any CUPS based printers, skip looking for printcap printers */
+        PRINTCAP_LoadPrinters();
 
     /* Now enumerate the list again and delete any printers that a still tagged */
     EnumPrintersA(PRINTER_ENUM_LOCAL, NULL, 5, NULL, 0, &needed, &num);

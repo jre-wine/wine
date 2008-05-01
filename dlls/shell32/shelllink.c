@@ -19,7 +19,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
  * NOTES
- *   Nearly complete informations about the binary formats 
+ *   Nearly complete information about the binary formats
  *   of .lnk files available at http://www.wotsit.org
  *
  *  You can use winedump to examine the contents of a link file:
@@ -139,7 +139,7 @@ typedef struct
 
 	LONG            ref;
 
-	/* data structures according to the informations in the link */
+	/* data structures according to the information in the link */
 	LPITEMIDLIST	pPidl;
 	WORD		wHotKey;
 	SYSTEMTIME	time1;
@@ -2191,8 +2191,9 @@ static HRESULT WINAPI IShellLinkW_fnSetPath(IShellLinkW * iface, LPCWSTR pszFile
             *buffer = '\0';
         else if (!GetFullPathNameW(pszFile, MAX_PATH, buffer, &fname))
 	    return E_FAIL;
-        else if(!PathFileExistsW(buffer))
-            hr = S_FALSE;
+        else if(!PathFileExistsW(buffer) &&
+		!SearchPathW(NULL, pszFile, NULL, MAX_PATH, buffer, NULL))
+	  hr = S_FALSE;
 
         This->pPidl = SHSimpleIDListFromPathW(pszFile);
         ShellLink_GetVolumeInfo(buffer, &This->volume);
@@ -2483,12 +2484,12 @@ ShellLink_QueryContextMenu( IContextMenu* iface, HMENU hmenu, UINT indexMenu,
 static LPWSTR
 shelllink_get_msi_component_path( LPWSTR component )
 {
-    LPWSTR path = NULL;
+    LPWSTR path;
     DWORD r, sz = 0;
 
     r = CommandLineFromMsiDescriptor( component, NULL, &sz );
     if (r != ERROR_SUCCESS)
-         return path;
+         return NULL;
 
     sz++;
     path = HeapAlloc( GetProcessHeap(), 0, sz*sizeof(WCHAR) );

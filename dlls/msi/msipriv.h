@@ -46,6 +46,9 @@
 #define MSIWORDCOUNT_ADMINISTRATIVE     0x0004
 #define MSIWORDCOUNT_PRIVILEGES         0x0008
 
+/* Install UI level mask for AND operation to exclude flags */
+#define INSTALLUILEVEL_MASK             0x0007
+
 #define MSITYPE_IS_BINARY(type) (((type) & ~MSITYPE_NULLABLE) == (MSITYPE_STRING|MSITYPE_VALID))
 
 struct tagMSITABLE;
@@ -521,6 +524,9 @@ typedef struct {
 } awcstring;
 
 UINT msi_strcpy_to_awstring( LPCWSTR str, awstring *awbuf, DWORD *sz );
+
+/* msi server interface */
+extern ITypeLib *get_msi_typelib( LPWSTR *path );
 
 /* handle functions */
 extern void *msihandle2msiinfo(MSIHANDLE handle, UINT type);

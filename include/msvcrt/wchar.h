@@ -43,6 +43,16 @@ typedef unsigned short wchar_t;
 #define _WIN64
 #endif
 
+#ifndef DECLSPEC_ALIGN
+# if defined(_MSC_VER) && (_MSC_VER >= 1300) && !defined(MIDL_PASS)
+#  define DECLSPEC_ALIGN(x) __declspec(align(x))
+# elif defined(__GNUC__)
+#  define DECLSPEC_ALIGN(x) __attribute__((aligned(x)))
+# else
+#  define DECLSPEC_ALIGN(x)
+# endif
+#endif
+
 typedef int mbstate_t;
 
 #ifndef _SIZE_T_DEFINED
@@ -87,6 +97,11 @@ typedef int _off_t;
 #ifndef _TIME_T_DEFINED
 typedef long time_t;
 #define _TIME_T_DEFINED
+#endif
+
+#ifndef _TIME64_T_DEFINED
+#define _TIME64_T_DEFINED
+typedef __int64 __time64_t;
 #endif
 
 #ifndef _TM_DEFINED
@@ -181,10 +196,24 @@ struct _stati64 {
   short          st_uid;
   short          st_gid;
   _dev_t st_rdev;
-  __int64        st_size;
+  __int64 DECLSPEC_ALIGN(8) st_size;
   time_t st_atime;
   time_t st_mtime;
   time_t st_ctime;
+};
+
+struct _stat64 {
+  _dev_t st_dev;
+  _ino_t st_ino;
+  unsigned short st_mode;
+  short          st_nlink;
+  short          st_uid;
+  short          st_gid;
+  _dev_t st_rdev;
+  __int64 DECLSPEC_ALIGN(8) st_size;
+  __time64_t     st_atime;
+  __time64_t     st_mtime;
+  __time64_t     st_ctime;
 };
 #endif /* _STAT_DEFINED */
 
@@ -276,6 +305,7 @@ int         _wsystem(const wchar_t*);
 #define _WSTAT_DEFINED
 int _wstat(const wchar_t*,struct _stat*);
 int _wstati64(const wchar_t*,struct _stati64*);
+int _wstat64(const wchar_t*,struct _stat64*);
 #endif /* _WSTAT_DEFINED */
 
 #ifndef _WSTDIO_DEFINED

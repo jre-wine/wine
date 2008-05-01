@@ -580,12 +580,11 @@ static IStorage MyIStorage = { &MyIStorageTable };
 BOOL WB_EmbedBrowser(WBInfo *pWBInfo, HWND hwndParent)
 {
     IOleClientSiteImpl *iOleClientSiteImpl;
+    IOleInPlaceObject *inplace;
     IOleObject *browserObject;
     IWebBrowser2 *webBrowser2;
     HRESULT hr;
     RECT rc;
-
-    static const WCHAR hostNameW[] = {'H','o','s','t',' ','N','a','m','e',0};
 
     /* clear out struct to keep from accessing invalid ptrs */
     ZeroMemory(pWBInfo, sizeof(WBInfo));
@@ -613,7 +612,6 @@ BOOL WB_EmbedBrowser(WBInfo *pWBInfo, HWND hwndParent)
 
     /* make the browser object accessible to the IOleClientSite implementation */
     iOleClientSiteImpl->pBrowserObject = browserObject;
-    IOleObject_SetHostNames(browserObject, hostNameW, 0);
 
     GetClientRect(hwndParent, &rc);
 
@@ -625,16 +623,16 @@ BOOL WB_EmbedBrowser(WBInfo *pWBInfo, HWND hwndParent)
                            -1, hwndParent, &rc);
     if (FAILED(hr)) goto error;
 
+    hr = IOleObject_QueryInterface(browserObject, &IID_IOleInPlaceObject, (void**)&inplace);
+    if (FAILED(hr)) goto error;
+
+    IOleInPlaceObject_SetObjectRects(inplace, &rc, &rc);
+    IOleInPlaceObject_Release(inplace);
 
     hr = IOleObject_QueryInterface(browserObject, &IID_IWebBrowser2,
                                    (void **)&webBrowser2);
     if (SUCCEEDED(hr))
     {
-        IWebBrowser2_put_Left(webBrowser2, 0);
-        IWebBrowser2_put_Top(webBrowser2, 0);
-        IWebBrowser2_put_Width(webBrowser2, rc.right);
-        IWebBrowser2_put_Height(webBrowser2, rc.bottom);
-
         pWBInfo->pWebBrowser2 = webBrowser2;
         pWBInfo->hwndParent = hwndParent;
 
@@ -668,23 +666,6 @@ void WB_UnEmbedBrowser(WBInfo *pWBInfo)
         IOleClientSite_Release(pWBInfo->pOleClientSite);
         pWBInfo->pOleClientSite = NULL;
     }
-}
-
-BOOL WB_Navigate(WBInfo *pWBInfo, LPCWSTR szUrl)
-{
-    IWebBrowser2 *pWebBrowser2 = pWBInfo->pWebBrowser2;
-    VARIANT myURL;
-
-    if (!pWebBrowser2)
-        return FALSE;
-
-    V_VT(&myURL) = VT_BSTR;
-    V_BSTR(&myURL) = SysAllocString(szUrl);
-
-    IWebBrowser2_Navigate2(pWebBrowser2, &myURL, 0, 0, 0, 0);
-    VariantClear(&myURL);
-
-    return TRUE;
 }
 
 void WB_ResizeBrowser(WBInfo *pWBInfo, DWORD dwWidth, DWORD dwHeight)

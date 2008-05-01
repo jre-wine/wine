@@ -37,10 +37,10 @@
 #include "wine/debug.h"
 #include "wine/unicode.h"
 
-#include "d3d9.h"
 #include "wined3d_private_types.h"
 #include "ddraw.h"
 #include "wine/wined3d_interface.h"
+#include "wine/wined3d_caps.h"
 #include "wine/wined3d_gl.h"
 #include "wine/list.h"
 
@@ -161,8 +161,6 @@ typedef struct wined3d_settings_s {
     we should use it.  However, until it's fully implemented, we'll leave it as a registry
     setting for developers. */
   BOOL glslRequested;
-/* nonpower 2 function */
-  int nonpower2_mode;
   int offscreen_rendering_mode;
   int rendertargetlock_mode;
 /* Memory tracking and object counting */
@@ -177,7 +175,7 @@ typedef struct {
     void (*shader_select)(IWineD3DDevice *iface, BOOL usePS, BOOL useVS);
     void (*shader_select_depth_blt)(IWineD3DDevice *iface);
     void (*shader_load_constants)(IWineD3DDevice *iface, char usePS, char useVS);
-    void (*shader_cleanup)(BOOL usePS, BOOL useVS);
+    void (*shader_cleanup)(IWineD3DDevice *iface);
 } shader_backend_t;
 
 extern const shader_backend_t glsl_shader_backend;
@@ -290,6 +288,7 @@ do {                                                                            
 typedef struct IWineD3DStateBlockImpl IWineD3DStateBlockImpl;
 typedef struct IWineD3DSurfaceImpl    IWineD3DSurfaceImpl;
 typedef struct IWineD3DPaletteImpl    IWineD3DPaletteImpl;
+typedef struct IWineD3DDeviceImpl     IWineD3DDeviceImpl;
 
 /* Tracking */
 
@@ -406,7 +405,8 @@ DWORD get_flexible_vertex_size(DWORD d3dvtVertexType);
     (((((d3dvtVertexType) >> (16 + (2 * (tex_num)))) + 1) & 0x03) + 1)
 
 /* Routines and structures related to state management */
-typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock);
+typedef struct WineD3DContext WineD3DContext;
+typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *ctx);
 
 #define STATE_RENDER(a) (a)
 #define STATE_IS_RENDER(a) ((a) >= STATE_RENDER(1) && (a) <= STATE_RENDER(WINEHIGHEST_RENDER_STATE))
@@ -441,7 +441,10 @@ typedef void (*APPLYSTATEFUNC)(DWORD state, IWineD3DStateBlockImpl *stateblock);
 #define STATE_IS_VERTEXSHADERCONSTANT(a) ((a) == STATE_VERTEXSHADERCONSTANT)
 #define STATE_IS_PIXELSHADERCONSTANT(a) ((a) == STATE_PIXELSHADERCONSTANT)
 
-#define STATE_HIGHEST (STATE_PIXELSHADERCONSTANT)
+#define STATE_ACTIVELIGHT(a) (STATE_PIXELSHADERCONSTANT + (a) + 1)
+#define STATE_IS_ACTIVELIGHT(a) ((a) >= STATE_ACTIVELIGHT(0) && (a) < STATE_PIXELSHADERCONSTANT(MAX_ACTIVE_LIGHTS))
+
+#define STATE_HIGHEST (STATE_ACTIVELIGHT(MAX_ACTIVE_LIGHTS - 1))
 
 struct StateEntry
 {
@@ -451,6 +454,49 @@ struct StateEntry
 
 /* Global state table */
 extern const struct StateEntry StateTable[];
+
+/* The new context manager that should deal with onscreen and offscreen rendering */
+struct WineD3DContext {
+    /* State dirtification
+     * dirtyArray is an array that contains markers for dirty states. numDirtyEntries states are dirty, their numbers are in indices
+     * 0...numDirtyEntries - 1. isStateDirty is a redundant copy of the dirtyArray. Technically only one of them would be needed,
+     * but with the help of both it is easy to find out if a state is dirty(just check the array index), and for applying dirty states
+     * only numDirtyEntries array elements have to be checked, not STATE_HIGHEST states.
+     */
+    DWORD                   dirtyArray[STATE_HIGHEST + 1]; /* Won't get bigger than that, a state is never marked dirty 2 times */
+    DWORD                   numDirtyEntries;
+    DWORD                   isStateDirty[STATE_HIGHEST/32 + 1]; /* Bitmap to find out quickly if a state is dirty */
+
+    IWineD3DSurface         *surface;
+    /* TODO: Thread this ctx belongs to                    */
+
+    /* Stores some inforation about the context state for optimization */
+    BOOL                    last_was_rhw;      /* true iff last draw_primitive was in xyzrhw mode */
+    BOOL                    last_was_pshader;
+    BOOL                    last_was_vshader;
+    BOOL                    last_was_foggy_shader;
+    BOOL                    namedArraysLoaded, numberedArraysLoaded;
+    BOOL                    lastWasPow2Texture[MAX_TEXTURES];
+    GLenum                  tracking_parm;     /* Which source is tracking current colour         */
+    BOOL                    last_was_blit, last_was_ckey;
+
+    /* The actual opengl context */
+    GLXContext              glCtx;
+    Drawable                drawable;
+    Display                 *display;
+    BOOL                    isPBuffer;
+};
+
+typedef enum ContextUsage {
+    CTXUSAGE_RESOURCELOAD       = 1,    /* Only loads textures: No State is applied */
+    CTXUSAGE_DRAWPRIM           = 2,    /* OpenGL states are set up for blitting DirectDraw surfacs */
+    CTXUSAGE_BLIT               = 3,    /* OpenGL states are set up 3D drawing */
+} ContextUsage;
+
+void ActivateContext(IWineD3DDeviceImpl *device, IWineD3DSurface *target, ContextUsage usage);
+WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, Display *display, Window win);
+void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context);
+void set_render_target_fbo(IWineD3DDevice *iface, DWORD idx, IWineD3DSurface *render_target);
 
 /* Routine to fill gl caps for swapchains and IWineD3D */
 BOOL IWineD3DImpl_FillGLCaps(IWineD3D *iface, Display* display);
@@ -474,7 +520,6 @@ struct PLIGHTINFOEL {
     WINED3DLIGHT OriginalParms; /* Note D3D8LIGHT == D3D9LIGHT */
     DWORD        OriginalIndex;
     LONG         glIndex;
-    BOOL         lightEnabled;
     BOOL         changed;
     BOOL         enabledChanged;
 
@@ -484,8 +529,7 @@ struct PLIGHTINFOEL {
     float                         exponent;
     float                         cutoff;
 
-    PLIGHTINFOEL *next;
-    PLIGHTINFOEL *prev;
+    struct list entry;
 };
 
 /* The default light parameters */
@@ -511,32 +555,11 @@ typedef struct IWineD3DImpl
 
 extern const IWineD3DVtbl IWineD3D_Vtbl;
 
-/** Hacked out start of a context manager!! **/
-typedef struct glContext {
-    int Width;
-    int Height;
-    int usedcount;
-    GLXContext context;
-
-    Drawable drawable;
-    IWineD3DSurface *pSurface;
-#if 0 /* TODO: someway to represent the state of the context */
-    IWineD3DStateBlock *pStateBlock;
-#endif
-/* a few other things like format */
-} glContext;
-
 /* TODO: setup some flags in the regestry to enable, disable pbuffer support
 (since it will break quite a few things until contexts are managed properly!) */
 extern BOOL pbuffer_support;
 /* allocate one pbuffer per surface */
 extern BOOL pbuffer_per_surface;
-
-/* Maximum number of contexts/pbuffers to keep in cache,
-set to 100 because ATI's drivers don't support deleting pBuffers properly
-this needs to be migrated to a list and some option availalbe for controle the cache size.
-*/
-#define CONTEXT_CACHE 100
 
 typedef struct ResourceList {
     IWineD3DResource         *resource;
@@ -549,7 +572,7 @@ void dumpResources(ResourceList *resources);
 /*****************************************************************************
  * IWineD3DDevice implementation structure
  */
-typedef struct IWineD3DDeviceImpl
+struct IWineD3DDeviceImpl
 {
     /* IUnknown fields      */
     const IWineD3DDeviceVtbl *lpVtbl;
@@ -571,22 +594,9 @@ typedef struct IWineD3DDeviceImpl
     int ps_selected_mode;
     const shader_backend_t *shader_backend;
 
-    /* Optimization */
+    /* To store */
     BOOL                    view_ident;        /* true iff view matrix is identity                */
-    BOOL                    last_was_rhw;      /* true iff last draw_primitive was in xyzrhw mode */
-    GLenum                  tracking_parm;     /* Which source is tracking current colour         */
-    LONG                    tracking_color;    /* used iff GL_COLOR_MATERIAL was enabled          */
-#define                         DISABLED_TRACKING  0  /* Disabled                                 */
-#define                         IS_TRACKING        1  /* tracking_parm is tracking diffuse color  */
-#define                         NEEDS_TRACKING     2  /* Tracking needs to be enabled when needed */
-#define                         NEEDS_DISABLE      3  /* Tracking needs to be disabled when needed*/
-    BOOL                    last_was_notclipped;
     BOOL                    untransformed;
-    BOOL                    last_was_pshader;
-    BOOL                    last_was_vshader;
-    BOOL                    last_was_foggy_shader;
-    BOOL                    namedArraysLoaded, numberedArraysLoaded;
-    BOOL                    lastWasPow2Texture[MAX_TEXTURES];
 
     /* State block related */
     BOOL                    isRecordingState;
@@ -609,6 +619,10 @@ typedef struct IWineD3DDeviceImpl
     IWineD3DSurface        *depthStencilBuffer;
 
     IWineD3DSurface        *stencilBufferTarget;
+
+    /* Caches to avoid unneeded context changes */
+    IWineD3DSurface        *lastActiveRenderTarget;
+    IWineD3DSwapChain      *lastActiveSwapChain;
 
     /* palettes texture management */
     PALETTEENTRY            palettes[MAX_PALETTES][256];
@@ -639,11 +653,8 @@ typedef struct IWineD3DDeviceImpl
     HRESULT                 state;
     BOOL                    d3d_initialized;
 
-    /* Screen buffer resources */
-    glContext contextCache[CONTEXT_CACHE];
-
-    /* A flag to check if endscene has been called before changing the render tartet */
-    BOOL sceneEnded;
+    /* A flag to check for proper BeginScene / EndScene call pairs */
+    BOOL inScene;
 
     /* process vertex shaders using software or hardware */
     BOOL softwareVertexProcessing;
@@ -662,16 +673,6 @@ typedef struct IWineD3DDeviceImpl
     /* Final position fixup constant */
     float                       posFixup[4];
 
-    /* State dirtification
-     * dirtyArray is an array that contains markers for dirty states. numDirtyEntries states are dirty, their numbers are in indices
-     * 0...numDirtyEntries - 1. isStateDirty is a redundant copy of the dirtyArray. Technically only one of them would be needed,
-     * but with the help of both it is easy to find out if a state is dirty(just check the array index), and for applying dirty states
-     * only numDirtyEntries array elements have to be checked, not STATE_HIGHEST states.
-     */
-    DWORD                   dirtyArray[STATE_HIGHEST + 1]; /* Won't get bigger than that, a state is never marked dirty 2 times */
-    DWORD                   numDirtyEntries;
-    DWORD                   isStateDirty[STATE_HIGHEST/32 + 1]; /* Bitmap to find out quickly if a state is dirty */
-
     /* With register combiners we can skip junk texture stages */
     DWORD                     texUnitMap[MAX_SAMPLERS];
     BOOL                      oneToOneTexUnitMap;
@@ -680,16 +681,23 @@ typedef struct IWineD3DDeviceImpl
     WineDirect3DVertexStridedData strided_streams;
     WineDirect3DVertexStridedData *up_strided;
     BOOL                      useDrawStridedSlow;
+    BOOL                      instancedDraw;
 
-} IWineD3DDeviceImpl;
+    /* Context management */
+    WineD3DContext          **contexts;                  /* Dynamic array containing pointers to context structures */
+    WineD3DContext          *activeContext;              /* Only 0 for now      */
+    UINT                    numContexts;                 /* Always 1 for now    */
+    WineD3DContext          *pbufferContext;             /* The context that has a pbuffer as drawable */
+    DWORD                   pbufferWidth, pbufferHeight; /* Size of the buffer drawable */
+};
 
 extern const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl;
 
 void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state);
-static inline BOOL isStateDirty(IWineD3DDeviceImpl *This, DWORD state) {
+static inline BOOL isStateDirty(WineD3DContext *context, DWORD state) {
     DWORD idx = state >> 5;
     BYTE shift = state & 0x1f;
-    return This->isStateDirty[idx] & (1 << shift);
+    return context->isStateDirty[idx] & (1 << shift);
 }
 
 /* Support for IWineD3DResource ::Set/Get/FreePrivateData. I don't think
@@ -1061,18 +1069,17 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
 #define SFLAG_LOCKABLE    0x00000010 /* Surface can be locked */
 #define SFLAG_DISCARD     0x00000020 /* ??? */
 #define SFLAG_LOCKED      0x00000040 /* Surface is locked atm */
-#define SFLAG_ACTIVELOCK  0x00000080 /* Not locked, but surface memory is needed */
-#define SFLAG_INTEXTURE   0x00000100 /* ??? */
-#define SFLAG_INPBUFFER   0x00000200 /* ??? */
-#define SFLAG_NONPOW2     0x00000400 /* Surface sizes are not a power of 2 */
-#define SFLAG_DYNLOCK     0x00000800 /* Surface is often locked by the app */
-#define SFLAG_DYNCHANGE   0x00001800 /* Surface contents are changed very often, implies DYNLOCK */
-#define SFLAG_DCINUSE     0x00002000 /* Set between GetDC and ReleaseDC calls */
-#define SFLAG_GLDIRTY     0x00004000 /* The opengl texture is more up to date than the surface mem */
-#define SFLAG_LOST        0x00008000 /* Surface lost flag for DDraw */
-#define SFLAG_FORCELOAD   0x00010000 /* To force PreLoading of a scratch cursor */
-#define SFLAG_USERPTR     0x00020000 /* The application allocated the memory for this surface */
-#define SFLAG_GLCKEY      0x00040000 /* The gl texture was created with a color key */
+#define SFLAG_INTEXTURE   0x00000080 /* ??? */
+#define SFLAG_INPBUFFER   0x00000100 /* ??? */
+#define SFLAG_NONPOW2     0x00000200 /* Surface sizes are not a power of 2 */
+#define SFLAG_DYNLOCK     0x00000400 /* Surface is often locked by the app */
+#define SFLAG_DYNCHANGE   0x00000C00 /* Surface contents are changed very often, implies DYNLOCK */
+#define SFLAG_DCINUSE     0x00001000 /* Set between GetDC and ReleaseDC calls */
+#define SFLAG_GLDIRTY     0x00002000 /* The opengl texture is more up to date than the surface mem */
+#define SFLAG_LOST        0x00004000 /* Surface lost flag for DDraw */
+#define SFLAG_FORCELOAD   0x00008000 /* To force PreLoading of a scratch cursor */
+#define SFLAG_USERPTR     0x00010000 /* The application allocated the memory for this surface */
+#define SFLAG_GLCKEY      0x00020000 /* The gl texture was created with a color key */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_OVERSIZE: Not all data can be kept in GL
@@ -1080,7 +1087,6 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
  * SFLAG_DIBSECTION: The dib code manages the memory
  * SFLAG_DIRTY: GL surface isn't up to date
  * SFLAG_LOCKED: The app requires access to the surface data
- * SFLAG_ACTIVELOCK: Some wined3d code needs the memory
  * SFLAG_DYNLOCK: Avoid freeing the data for performance
  * SFLAG_DYNCHANGE: Same reason as DYNLOCK
  */
@@ -1089,7 +1095,6 @@ HRESULT WINAPI IWineD3DSurfaceImpl_UpdateOverlay(IWineD3DSurface *iface, RECT *S
                           SFLAG_DIBSECTION | \
                           SFLAG_DIRTY      | \
                           SFLAG_LOCKED     | \
-                          SFLAG_ACTIVELOCK | \
                           SFLAG_DYNLOCK    | \
                           SFLAG_DYNCHANGE  | \
                           SFLAG_USERPTR)
@@ -1113,19 +1118,8 @@ typedef struct IWineD3DVertexDeclarationImpl {
   DWORD   fvf[MAX_STREAMS];
   DWORD   allFVF;
 
-  /** dx8 compatible Declaration fields */
-  DWORD*  pDeclaration8;
-  DWORD   declaration8Length;
-
-  /** dx9+ */
-  D3DVERTEXELEMENT9 *pDeclaration9;
-  UINT               declaration9NumElements;
-
   WINED3DVERTEXELEMENT  *pDeclarationWine;
   UINT                   declarationWNumElements;
-  
-  float                 *constants;
-  
 } IWineD3DVertexDeclarationImpl;
 
 extern const IWineD3DVertexDeclarationVtbl IWineD3DVertexDeclaration_Vtbl;
@@ -1212,8 +1206,11 @@ struct IWineD3DStateBlockImpl
     /* Transform */
     WINED3DMATRIX             transforms[HIGHEST_TRANSFORMSTATE + 1];
 
-    /* Lights */
-    PLIGHTINFOEL             *lights; /* NOTE: active GL lights must be front of the chain */
+    /* Light hashmap . Collisions are handled using standard wine double linked lists */
+#define LIGHTMAP_SIZE 43 /* Use of a prime number recommended. Set to 1 for a linked list! */
+#define LIGHTMAP_HASHFUNC(x) ((x) % LIGHTMAP_SIZE) /* Primitive and simple function */
+    struct list               lightMap[LIGHTMAP_SIZE]; /* Mashmap containing the lights */
+    PLIGHTINFOEL             *activeLights[MAX_ACTIVE_LIGHTS]; /* Map of opengl lights to d3d lights */
 
     /* Clipping */
     double                    clipplane[MAX_CLIPPLANES][4];
@@ -1318,25 +1315,16 @@ typedef struct IWineD3DSwapChainImpl
     IWineD3DSurface         **backBuffer;
     IWineD3DSurface          *frontBuffer;
     BOOL                      wantsDepthStencilBuffer;
-    D3DPRESENT_PARAMETERS     presentParms;
+    WINED3DPRESENT_PARAMETERS presentParms;
     DWORD                     orig_width, orig_height;
+    WINED3DFORMAT             orig_fmt;
 
     long prev_time, frames;   /* Performance tracking */
 
-    /* TODO: move everything up to drawable off into a context manager
-      and store the 'data' in the contextManagerData interface.
-    IUnknown                  *contextManagerData;
-    */
+    WineD3DContext         *context; /* Later a array for multithreading */
 
     HWND                    win_handle;
     Window                  win;
-    Display                *display;
-
-    GLXContext              glCtx;
-    XVisualInfo            *visInfo;
-    GLXContext              render_ctx;
-    /* This has been left in device for now, but needs moving off into a rendertarget management class and separated out from swapchains and devices. */
-    Drawable                drawable;
 } IWineD3DSwapChainImpl;
 
 extern const IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl;
@@ -1481,6 +1469,7 @@ typedef struct shader_reg_maps {
     /* Sampler usage tokens 
      * Use 0 as default (bit 31 is always 1 on a valid token) */
     DWORD samplers[MAX_SAMPLERS];
+    char bumpmat;
 
     /* Whether or not a loop is used in this shader */
     char loop;
@@ -1611,6 +1600,7 @@ extern void pshader_hw_texm3x3vspec(SHADER_OPCODE_ARG* arg);
 /* ARB vertex shader prototypes */
 extern void vshader_hw_map2gl(SHADER_OPCODE_ARG* arg);
 extern void vshader_hw_mnxn(SHADER_OPCODE_ARG* arg);
+extern void vshader_hw_rsq_rcp(SHADER_OPCODE_ARG* arg);
 
 /* GLSL helper functions */
 extern void shader_glsl_add_instruction_modifiers(SHADER_OPCODE_ARG *arg);
@@ -1818,7 +1808,6 @@ typedef struct IWineD3DVertexShaderImpl {
 
     /* run time datas...  */
     VSHADERDATA                *data;
-    IWineD3DVertexDeclaration  *vertexDeclaration;
 #if 0 /* needs reworking */
     /* run time datas */
     VSHADERINPUTDATA input;
@@ -1847,6 +1836,10 @@ typedef struct IWineD3DPixelShaderImpl {
 
     /* run time data */
     PSHADERDATA                *data;
+
+    /* Some information about the shader behavior */
+    char                        needsbumpmat;
+    UINT                        bumpenvmatconst;
 
 #if 0 /* needs reworking */
     PSHADERINPUTDATA input;

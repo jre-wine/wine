@@ -2991,6 +2991,15 @@ static void test_scrollvalidate( HWND parent)
     CombineRgn( exprgn, exprgn, tmprgn, RGN_OR);
     ok( EqualRgn( exprgn, hrgn), "wrong update region\n");
 
+    SetRect( &rc, 0,40, 100,60);
+    SetRect( &cliprc, 0,0, 100,100);
+    ScrollWindowEx( hwnd1, 0, -25, &rc, &cliprc, hrgn, &rcu, SW_INVALIDATE);
+    SetRectRgn( tmprgn, 0,15,98,35);
+    CombineRgn( exprgn, exprgn, tmprgn, RGN_OR);
+    SetRectRgn( tmprgn, 0, 40, 98, 60);
+    CombineRgn( exprgn, exprgn, tmprgn, RGN_OR);
+    ok( EqualRgn( exprgn, hrgn), "wrong update region in excessive scroll\n");
+
     /* now test ScrollWindowEx with a combination of
      * WS_CLIPCHILDREN style and SW_SCROLLCHILDREN flag */
     /* make hwnd2 the child of hwnd1 */
@@ -3712,6 +3721,8 @@ static void test_CreateWindow(void)
 {
     HWND hwnd, parent;
     HMENU hmenu;
+    RECT rc, rc_minmax;
+    MINMAXINFO minmax;
 
 #define expect_menu(window, menu) \
     SetLastError(0xdeadbeef); \
@@ -3903,6 +3914,49 @@ static void test_CreateWindow(void)
     SetLastError(0xdeadbeef);
     ok(!IsMenu(hmenu), "IsMenu should fail\n");
     ok(GetLastError() == ERROR_INVALID_MENU_HANDLE, "IsMenu set error %d\n", GetLastError());
+
+    /* test child window sizing */
+    SetLastError(0xdeadbeef);
+    parent = CreateWindowEx(0, "static", NULL, WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+                           0, 0, 100, 100, 0, 0, 0, NULL);
+    ok(parent != 0, "CreateWindowEx error %d\n", GetLastError());
+    expect_menu(parent, 0);
+    expect_style(parent, WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPSIBLINGS);
+    expect_ex_style(parent, WS_EX_WINDOWEDGE);
+
+    memset(&minmax, 0, sizeof(minmax));
+    SendMessage(parent, WM_GETMINMAXINFO, 0, (LPARAM)&minmax);
+    SetRect(&rc_minmax, 0, 0, minmax.ptMaxSize.x, minmax.ptMaxSize.y);
+    ok(IsRectEmpty(&rc_minmax), "rc_minmax is not empty\n");
+
+    GetClientRect(parent, &rc);
+    ok(rc_minmax.left >= rc.left && rc_minmax.top >= rc.top &&
+       rc_minmax.right <= rc.right && rc_minmax.bottom <= rc.bottom,
+       "rc_minmax (%d,%d-%d,%d) is not within of parent client rect (%d,%d-%d,%d)\n",
+       rc_minmax.left, rc_minmax.top, rc_minmax.right, rc_minmax.bottom,
+       rc.left, rc.top, rc.right, rc.bottom);
+    InflateRect(&rc, 200, 200);
+    trace("creating child with rect (%d,%d-%d,%d)\n", rc.left, rc.top, rc.right, rc.bottom);
+
+    SetLastError(0xdeadbeef);
+    hwnd = CreateWindowEx(0, "static", NULL, WS_CHILD | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+                          rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+                          parent, (HMENU)1, 0, NULL);
+    ok(hwnd != 0, "CreateWindowEx error %d\n", GetLastError());
+    expect_menu(hwnd, 1);
+    expect_style(hwnd, WS_CHILD | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME);
+    expect_ex_style(hwnd, WS_EX_WINDOWEDGE);
+
+    OffsetRect(&rc, -rc.left, -rc.top);
+
+    GetWindowRect(hwnd, &rc_minmax);
+    OffsetRect(&rc_minmax, -rc_minmax.left, -rc_minmax.top);
+    ok(EqualRect(&rc, &rc_minmax), "rects don't match: (%d,%d-%d,%d) and (%d,%d-%d,%d)\n",
+       rc.left, rc.top, rc.right, rc.bottom,
+       rc_minmax.left, rc_minmax.top, rc_minmax.right, rc_minmax.bottom);
+
+    DestroyWindow(hwnd);
+    DestroyWindow(parent);
 
 #undef expect_menu
 #undef expect_style
@@ -4117,6 +4171,42 @@ void test_gettext(void)
     UnregisterClass( clsname, NULL );
 }
 
+static void test_GetUpdateRect(void)
+{
+    RECT rc1, rc2;
+    HWND hgrandparent, hparent, hchild;
+
+    hgrandparent = CreateWindowA("static", "grandparent", WS_OVERLAPPEDWINDOW,
+                                 0, 0, 100, 100, NULL, NULL, 0, NULL);
+
+    hparent = CreateWindowA("static", "parent", WS_CHILD|WS_VISIBLE,
+                            0, 0, 100, 100, hgrandparent, NULL, 0, NULL);
+
+    hchild = CreateWindowA("static", "child", WS_CHILD|WS_VISIBLE,
+                            10, 10, 30, 30, hparent, NULL, 0, NULL);
+
+    ShowWindow(hgrandparent, SW_SHOW);
+    UpdateWindow(hgrandparent);
+
+    ShowWindow(hchild, SW_HIDE);
+    SetRect(&rc2, 0, 0, 0, 0);
+    GetUpdateRect(hgrandparent, &rc1, FALSE);
+    todo_wine
+    {
+        ok(EqualRect(&rc1, &rc2), "rects do not match (%d,%d,%d,%d) / (%d,%d,%d,%d)\n",
+                rc1.left, rc1.top, rc1.right, rc1.bottom,
+                rc2.left, rc2.top, rc2.right, rc2.bottom);
+    }
+
+    SetRect(&rc2, 10, 10, 40, 40);
+    GetUpdateRect(hparent, &rc1, FALSE);
+    ok(EqualRect(&rc1, &rc2), "rects do not match (%d,%d,%d,%d) / (%d,%d,%d,%d)\n",
+            rc1.left, rc1.top, rc1.right, rc1.bottom,
+            rc2.left, rc2.top, rc2.right, rc2.bottom);
+
+    DestroyWindow(hgrandparent);
+}
+
 START_TEST(win)
 {
     pGetAncestor = (void *)GetProcAddress( GetModuleHandleA("user32.dll"), "GetAncestor" );
@@ -4195,6 +4285,7 @@ START_TEST(win)
     test_SetWindowLong();
     test_ShowWindow();
     test_gettext();
+    test_GetUpdateRect();
 
     /* add the tests above this line */
     UnhookWindowsHookEx(hhook);

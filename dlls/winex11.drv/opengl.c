@@ -292,8 +292,17 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     template.visualid = XVisualIDFromVisual(visual);
     vis = XGetVisualInfo(gdi_display, VisualIDMask, &template, &num);
     if (vis) {
+        WORD old_fs = wine_get_fs();
         /* Create a GLX Context. Without one we can't query GL information */
         ctx = pglXCreateContext(gdi_display, vis, None, GL_TRUE);
+        if (wine_get_fs() != old_fs)
+        {
+            wine_set_fs( old_fs );
+            wine_tsx11_unlock();
+            ERR( "%%fs register corrupted, probably broken ATI driver, disabling OpenGL.\n" );
+            ERR( "You need to set the \"UseFastTls\" option to \"2\" in your X config file.\n" );
+            return FALSE;
+        }
     }
 
     if (ctx) {
@@ -411,7 +420,6 @@ LOAD_FUNCPTR(glXFreeMemoryNV)
 #undef LOAD_FUNCPTR
 
     if(!X11DRV_WineGL_InitOpenglInfo()) {
-        ERR("Intialization of OpenGL info failed, disabling OpenGL!\n");
         wine_dlclose(opengl_handle, NULL, 0);
         opengl_handle = NULL;
         return FALSE;
@@ -1923,7 +1931,7 @@ static HPBUFFERARB WINAPI X11DRV_wglCreatePbufferARB(HDC hdc, int iPixelFormat, 
     GLXFBConfig* cfgs = NULL;
     int nCfgs = 0;
     int attribs[256];
-    unsigned nAttribs = 0;
+    int nAttribs = 0;
     int fmt_index = 0;
 
     TRACE("(%p, %d, %d, %d, %p)\n", hdc, iPixelFormat, iWidth, iHeight, piAttribList);

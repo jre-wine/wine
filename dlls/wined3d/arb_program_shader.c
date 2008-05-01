@@ -54,33 +54,19 @@ static void shader_arb_load_constantsF(IWineD3DBaseShaderImpl* This, WineD3D_GL_
     local_constant* lconst;
     int i;
 
-    if (!constant_list) {
-        if (TRACE_ON(d3d_shader)) {
-            for (i = 0; i < max_constants; ++i) {
-                TRACE_(d3d_constants)("Loading constants %i: %f, %f, %f, %f\n", i,
-                        constants[i * 4 + 0], constants[i * 4 + 1],
-                        constants[i * 4 + 2], constants[i * 4 + 3]);
-            }
-        }
-        for (i = 0; i < max_constants; ++i) {
-            GL_EXTCALL(glProgramEnvParameter4fvARB(target_type, i, constants + (i * 4)));
-        }
-        checkGLcall("glProgramEnvParameter4fvARB()");
-    } else {
-        if (TRACE_ON(d3d_shader)) {
-            LIST_FOR_EACH_ENTRY(constant, constant_list, constant_entry, entry) {
-                i = constant->idx;
-                TRACE_(d3d_constants)("Loading constants %i: %f, %f, %f, %f\n", i,
-                        constants[i * 4 + 0], constants[i * 4 + 1],
-                        constants[i * 4 + 2], constants[i * 4 + 3]);
-            }
-        }
+    if (TRACE_ON(d3d_shader)) {
         LIST_FOR_EACH_ENTRY(constant, constant_list, constant_entry, entry) {
             i = constant->idx;
-            GL_EXTCALL(glProgramEnvParameter4fvARB(target_type, i, constants + (i * 4)));
+            TRACE_(d3d_constants)("Loading constants %i: %f, %f, %f, %f\n", i,
+                    constants[i * 4 + 0], constants[i * 4 + 1],
+                    constants[i * 4 + 2], constants[i * 4 + 3]);
         }
-        checkGLcall("glProgramEnvParameter4fvARB()");
     }
+    LIST_FOR_EACH_ENTRY(constant, constant_list, constant_entry, entry) {
+        i = constant->idx;
+        GL_EXTCALL(glProgramEnvParameter4fvARB(target_type, i, constants + (i * 4)));
+    }
+    checkGLcall("glProgramEnvParameter4fvARB()");
 
     /* Load immediate constants */
     if (TRACE_ON(d3d_shader)) {
@@ -113,16 +99,6 @@ void shader_arb_load_constants(
 
     if (useVertexShader) {
         IWineD3DBaseShaderImpl* vshader = (IWineD3DBaseShaderImpl*) stateBlock->vertexShader;
-        IWineD3DVertexShaderImpl* vshader_impl = (IWineD3DVertexShaderImpl*) stateBlock->vertexShader;
-        IWineD3DVertexDeclarationImpl* vertexDeclaration = 
-            (IWineD3DVertexDeclarationImpl*) vshader_impl->vertexDeclaration;
-
-        if (NULL != vertexDeclaration && NULL != vertexDeclaration->constants) {
-            /* Load DirectX 8 float constants for vertex shader */
-            shader_arb_load_constantsF(vshader, gl_info, GL_VERTEX_PROGRAM_ARB,
-                                       GL_LIMITS(vshader_constantsF),
-                                       vertexDeclaration->constants, NULL);
-        }
 
         /* Load DirectX 9 float constants for vertex shader */
         shader_arb_load_constantsF(vshader, gl_info, GL_VERTEX_PROGRAM_ARB,
@@ -143,6 +119,15 @@ void shader_arb_load_constants(
                                    GL_LIMITS(pshader_constantsF),
                                    stateBlock->pixelShaderConstantF,
                                    &stateBlock->set_pconstantsF);
+        if(((IWineD3DPixelShaderImpl *) pshader)->bumpenvmatconst) {
+            /* needsbumpmat stores the stage number from where to load the matrix. bumpenvmatconst stores the
+             * number of the constant to load the matrix into.
+             * The state manager takes care that this function is always called if the bump env matrix changes
+             */
+            IWineD3DPixelShaderImpl *psi = (IWineD3DPixelShaderImpl *) pshader;
+            float *data = (float *) &stateBlock->textureState[(int) psi->needsbumpmat][WINED3DTSS_BUMPENVMAT00];
+            GL_EXTCALL(glProgramEnvParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, psi->bumpenvmatconst, data));
+        }
     }
 }
 
@@ -181,6 +166,19 @@ void shader_generate_arb_declarations(
     for (i = 0; i < This->baseShader.limits.texcoord; i++) {
         if (reg_maps->texcoord[i])
             shader_addline(buffer, "MOV T%u, fragment.texcoord[%u];\n", i, i);
+    }
+
+    if(reg_maps->bumpmat /* Only  a pshader can use texbem */) {
+        /* If the shader does not use all available constants, use the next free constant to load the bump mapping environment matrix from
+         * the stateblock into the shader. If no constant is available don't load, texbem will then just sample the texture without applying
+         * bump mapping.
+         */
+        if(max_constantsF < GL_LIMITS(pshader_constantsF)) {
+            ((IWineD3DPixelShaderImpl *)This)->bumpenvmatconst = max_constantsF;
+            shader_addline(buffer, "PARAM bumpenvmat = program.env[%d];\n", ((IWineD3DPixelShaderImpl *)This)->bumpenvmatconst);
+        } else {
+            FIXME("No free constant found to load environemnt bump mapping matrix into the shader. texbem instruction will not apply bump mapping\n");
+        }
     }
 
     /* Need to PARAM the environment parameters (constants) so we can use relative addressing */
@@ -686,7 +684,7 @@ void pshader_hw_texreg2gb(SHADER_OPCODE_ARG* arg) {
 }
 
 void pshader_hw_texbem(SHADER_OPCODE_ARG* arg) {
-
+#if 0
      SHADER_BUFFER* buffer = arg->buffer;
      DWORD reg1 = arg->dst  & WINED3DSP_REGNUM_MASK;
      DWORD reg2 = arg->src[0] & WINED3DSP_REGNUM_MASK;
@@ -696,6 +694,35 @@ void pshader_hw_texbem(SHADER_OPCODE_ARG* arg) {
      sprintf(dst_str, "T%u", reg1);
      shader_addline(buffer, "ADD TMP.rg, fragment.texcoord[%u], T%u;\n", reg1, reg2);
      shader_hw_sample(arg, reg1, dst_str, "TMP");
+#endif
+    IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
+
+    DWORD dst = arg->dst;
+    DWORD src = arg->src[0] & WINED3DSP_REGNUM_MASK;
+    SHADER_BUFFER* buffer = arg->buffer;
+
+    char reg_coord[40];
+    DWORD reg_dest_code;
+
+    /* All versions have a destination register */
+    reg_dest_code = dst & WINED3DSP_REGNUM_MASK;
+    /* Can directly use the name because texbem is only valid for <= 1.3 shaders */
+    pshader_get_register_name(dst, reg_coord);
+
+    if(This->bumpenvmatconst) {
+        /*shader_addline(buffer, "MOV T%u, fragment.texcoord[%u];\n", 1, 1); Not needed - done already */
+        shader_addline(buffer, "SWZ TMP2, bumpenvmat, x, z, 0, 0;\n");
+        shader_addline(buffer, "DP3 TMP.r, TMP2, T%u;\n", src);
+        shader_addline(buffer, "SWZ TMP2, bumpenvmat, y, w, 0, 0;\n");
+        shader_addline(buffer, "DP3 TMP.g, TMP2, T%u;\n", src);
+        shader_addline(buffer, "ADD TMP.rg, TMP, %s;\n", reg_coord);
+        /* Not sure about this, but hl2 needs it. It uses a projected texture with texbem and depends on the 4th coordinate */
+        shader_addline(buffer, "MOV TMP.a, %s;\n", reg_coord);
+        shader_hw_sample(arg, reg_dest_code, reg_coord, "TMP");
+    } else {
+        /* Without a bump matrix loaded, just sample with the unmodified coordinates */
+        shader_hw_sample(arg, reg_dest_code, reg_coord, reg_coord);
+    }
 }
 
 void pshader_hw_texm3x2pad(SHADER_OPCODE_ARG* arg) {
@@ -854,6 +881,27 @@ void vshader_hw_mnxn(SHADER_OPCODE_ARG* arg) {
     }
 }
 
+void vshader_hw_rsq_rcp(SHADER_OPCODE_ARG* arg) {
+    CONST SHADER_OPCODE* curOpcode = arg->opcode;
+    SHADER_BUFFER* buffer = arg->buffer;
+    DWORD dst = arg->dst;
+    DWORD src = arg->src[0];
+    DWORD swizzle = (src & WINED3DSP_SWIZZLE_MASK) >> WINED3DSP_SWIZZLE_SHIFT;
+
+    char tmpLine[256];
+
+    strcpy(tmpLine, curOpcode->glname); /* Opcode */
+    vshader_program_add_param(arg, dst, FALSE, tmpLine); /* Destination */
+    strcat(tmpLine, ",");
+    vshader_program_add_param(arg, src, TRUE, tmpLine);
+    if ((WINED3DSP_NOSWIZZLE >> WINED3DSP_SWIZZLE_SHIFT) == swizzle) {
+        /* Dx sdk says .x is used if no swizzle is given */
+        strcat(tmpLine, ".x");
+    }
+
+    shader_addline(buffer, "%s;\n", tmpLine);
+}
+
 /* TODO: merge with pixel shader */
 /* Map the opcode 1-to-1 to the GL code */
 void vshader_hw_map2gl(SHADER_OPCODE_ARG* arg) {
@@ -986,9 +1034,11 @@ static void shader_arb_select_depth_blt(IWineD3DDevice *iface) {
     glEnable(GL_FRAGMENT_PROGRAM_ARB);
 }
 
-static void shader_arb_cleanup(BOOL usePS, BOOL useVS) {
-    if (useVS) glDisable(GL_VERTEX_PROGRAM_ARB);
-    if (usePS) glDisable(GL_FRAGMENT_PROGRAM_ARB);
+static void shader_arb_cleanup(IWineD3DDevice *iface) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    WineD3D_GL_Info *gl_info = &((IWineD3DImpl *)(This->wineD3D))->gl_info;
+    if (GL_SUPPORT(ARB_VERTEX_PROGRAM)) glDisable(GL_VERTEX_PROGRAM_ARB);
+    if (GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) glDisable(GL_FRAGMENT_PROGRAM_ARB);
 }
 
 const shader_backend_t arb_program_shader_backend = {

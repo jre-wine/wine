@@ -659,6 +659,7 @@ static void test_AccessCheck(void)
     ACCESS_MASK Access;
     BOOL AccessStatus;
     HANDLE Token;
+    HANDLE ProcessToken;
     BOOL ret;
     DWORD PrivSetLen;
     PRIVILEGE_SET *PrivSet;
@@ -716,13 +717,13 @@ static void test_AccessCheck(void)
     PrivSet = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, PrivSetLen);
     PrivSet->PrivilegeCount = 16;
 
-    ImpersonateSelf(SecurityImpersonation);
+    res = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE|TOKEN_QUERY, &ProcessToken);
+    ok(res, "OpenProcessToken failed with error %d\n", GetLastError());
 
     pRtlAdjustPrivilege(SE_SECURITY_PRIVILEGE, FALSE, TRUE, &Enabled);
 
-    ret = OpenThreadToken(GetCurrentThread(),
-                          TOKEN_QUERY, TRUE, &Token);
-    ok(ret, "OpenThreadToken failed with error %d\n", GetLastError());
+    res = DuplicateToken(ProcessToken, SecurityIdentification, &Token);
+    ok(res, "DuplicateToken failed with error %d\n", GetLastError());
 
     /* SD without owner/group */
     SetLastError(0xdeadbeef);
@@ -802,7 +803,28 @@ static void test_AccessCheck(void)
         trace("Couldn't get SE_SECURITY_PRIVILEGE (0x%08x), skipping ACCESS_SYSTEM_SECURITY test\n",
             ret);
 
-    RevertToSelf();
+    CloseHandle(Token);
+
+    res = DuplicateToken(ProcessToken, SecurityAnonymous, &Token);
+    ok(res, "DuplicateToken failed with error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = AccessCheck(SecurityDescriptor, Token, MAXIMUM_ALLOWED, &Mapping,
+                      PrivSet, &PrivSetLen, &Access, &AccessStatus);
+    err = GetLastError();
+    ok(!ret && err == ERROR_BAD_IMPERSONATION_LEVEL, "AccessCheck should have failed "
+       "with ERROR_BAD_IMPERSONATION_LEVEL, instead of %d\n", err);
+
+    CloseHandle(Token);
+
+    SetLastError(0xdeadbeef);
+    ret = AccessCheck(SecurityDescriptor, ProcessToken, KEY_READ, &Mapping,
+                      PrivSet, &PrivSetLen, &Access, &AccessStatus);
+    err = GetLastError();
+    ok(!ret && err == ERROR_NO_IMPERSONATION_TOKEN, "AccessCheck should have failed "
+       "with ERROR_NO_IMPERSONATION_TOKEN, instead of %d\n", err);
+
+    CloseHandle(ProcessToken);
 
     if (EveryoneSid)
         FreeSid(EveryoneSid);
@@ -1375,17 +1397,33 @@ static void test_granted_access(HANDLE handle, ACCESS_MASK access, int line)
         "be 0x%08x, instead of 0x%08x\n", access, obj_info.GrantedAccess);
 }
 
+#define CHECK_SET_SECURITY(o,i,e) \
+    do{ \
+        BOOL res; \
+        DWORD err; \
+        SetLastError( 0xdeadbeef ); \
+        res = SetKernelObjectSecurity( o, i, SecurityDescriptor ); \
+        err = GetLastError(); \
+        if (e == ERROR_SUCCESS) \
+            ok(res, "SetKernelObjectSecurity failed with %d\n", err); \
+        else \
+            ok(!res && err == e, "SetKernelObjectSecurity should have failed " \
+               "with %s, instead of %d\n", #e, err); \
+    }while(0)
+
 static void test_process_security(void)
 {
     BOOL res;
+    char owner[32], group[32];
     PSID AdminSid = NULL, UsersSid = NULL;
     PACL Acl = NULL;
     SECURITY_DESCRIPTOR *SecurityDescriptor = NULL;
-    SID_IDENTIFIER_AUTHORITY SIDAuthNT = { SECURITY_NT_AUTHORITY };
     char buffer[MAX_PATH];
     PROCESS_INFORMATION info;
     STARTUPINFOA startup;
     SECURITY_ATTRIBUTES psa;
+    HANDLE token, event;
+    DWORD tmp;
 
     Acl = HeapAlloc(GetProcessHeap(), 0, 256);
     res = InitializeAcl(Acl, 256, ACL_REVISION);
@@ -1396,12 +1434,20 @@ static void test_process_security(void)
     }
     ok(res, "InitializeAcl failed with error %d\n", GetLastError());
 
-    res = AllocateAndInitializeSid( &SIDAuthNT, 2, SECURITY_BUILTIN_DOMAIN_RID,
-                                    DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &AdminSid);
-    ok(res, "AllocateAndInitializeSid failed with error %d\n", GetLastError());
-    res = AllocateAndInitializeSid( &SIDAuthNT, 2, SECURITY_BUILTIN_DOMAIN_RID,
-                                    DOMAIN_ALIAS_RID_USERS, 0, 0, 0, 0, 0, 0, &UsersSid);
-    ok(res, "AllocateAndInitializeSid failed with error %d\n", GetLastError());
+    /* get owner from the token we might be running as a user not admin */
+    res = OpenProcessToken( GetCurrentProcess(), MAXIMUM_ALLOWED, &token );
+    ok(res, "OpenProcessToken failed with error %d\n", GetLastError());
+    if (!res) return;
+
+    res = GetTokenInformation( token, TokenOwner, owner, sizeof(owner), &tmp );
+    ok(res, "GetTokenInformation failed with error %d\n", GetLastError());
+    AdminSid = ((TOKEN_OWNER*)owner)->Owner;
+    res = GetTokenInformation( token, TokenPrimaryGroup, group, sizeof(group), &tmp );
+    ok(res, "GetTokenInformation failed with error %d\n", GetLastError());
+    UsersSid = ((TOKEN_PRIMARY_GROUP*)group)->PrimaryGroup;
+
+    CloseHandle( token );
+    if (!res) return;
 
     res = AddAccessDeniedAce(Acl, ACL_REVISION, PROCESS_VM_READ, AdminSid);
     ok(res, "AddAccessDeniedAce failed with error %d\n", GetLastError());
@@ -1412,14 +1458,24 @@ static void test_process_security(void)
     res = InitializeSecurityDescriptor(SecurityDescriptor, SECURITY_DESCRIPTOR_REVISION);
     ok(res, "InitializeSecurityDescriptor failed with error %d\n", GetLastError());
 
+    event = CreateEvent( NULL, TRUE, TRUE, "test_event" );
+    ok(event != NULL, "CreateEvent %d\n", GetLastError());
+
+    CHECK_SET_SECURITY( event, OWNER_SECURITY_INFORMATION, ERROR_INVALID_SECURITY_DESCR );
+    CHECK_SET_SECURITY( event, GROUP_SECURITY_INFORMATION, ERROR_INVALID_SECURITY_DESCR );
+    CHECK_SET_SECURITY( event, SACL_SECURITY_INFORMATION, ERROR_ACCESS_DENIED );
+    CHECK_SET_SECURITY( event, DACL_SECURITY_INFORMATION, ERROR_SUCCESS );
+
     /* Set owner and group and dacl */
     res = SetSecurityDescriptorOwner(SecurityDescriptor, AdminSid, FALSE);
     ok(res, "SetSecurityDescriptorOwner failed with error %d\n", GetLastError());
-    res = SetSecurityDescriptorGroup(SecurityDescriptor, UsersSid, TRUE);
+    CHECK_SET_SECURITY( event, OWNER_SECURITY_INFORMATION, ERROR_SUCCESS );
+    res = SetSecurityDescriptorGroup(SecurityDescriptor, UsersSid, FALSE);
     ok(res, "SetSecurityDescriptorGroup failed with error %d\n", GetLastError());
+    CHECK_SET_SECURITY( event, GROUP_SECURITY_INFORMATION, ERROR_SUCCESS );
     res = SetSecurityDescriptorDacl(SecurityDescriptor, TRUE, Acl, FALSE);
     ok(res, "SetSecurityDescriptorDacl failed with error %d\n", GetLastError());
-
+    CHECK_SET_SECURITY( event, DACL_SECURITY_INFORMATION, ERROR_SUCCESS );
 
     sprintf(buffer, "%s tests/security.c test", myARGV[0]);
     memset(&startup, 0, sizeof(startup));
@@ -1437,8 +1493,7 @@ static void test_process_security(void)
     TEST_GRANTED_ACCESS( info.hProcess, PROCESS_ALL_ACCESS );
     ok(WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0, "Child process termination\n");
 
-    if (AdminSid) FreeSid(AdminSid);
-    if (UsersSid) FreeSid(UsersSid);
+    CloseHandle( event );
     HeapFree(GetProcessHeap(), 0, Acl);
     HeapFree(GetProcessHeap(), 0, SecurityDescriptor);
 }
@@ -1446,17 +1501,28 @@ static void test_process_security(void)
 static void test_process_security_child(void)
 {
     HANDLE handle, handle1;
+    BOOL ret;
+    DWORD err;
 
     handle = OpenProcess( PROCESS_TERMINATE, FALSE, GetCurrentProcessId() );
     ok(handle != NULL, "OpenProcess(PROCESS_TERMINATE) with err:%d\n", GetLastError());
     TEST_GRANTED_ACCESS( handle, PROCESS_TERMINATE );
 
     ok(DuplicateHandle( GetCurrentProcess(), handle, GetCurrentProcess(),
-                        &handle1, PROCESS_ALL_ACCESS, TRUE, DUPLICATE_SAME_ACCESS),
+                        &handle1, 0, TRUE, DUPLICATE_SAME_ACCESS ),
        "duplicating handle err:%d\n", GetLastError());
-    TEST_GRANTED_ACCESS( handle, PROCESS_TERMINATE );
+    TEST_GRANTED_ACCESS( handle1, PROCESS_TERMINATE );
 
     CloseHandle( handle1 );
+
+    SetLastError( 0xdeadbeef );
+    ret = DuplicateHandle( GetCurrentProcess(), handle, GetCurrentProcess(),
+                           &handle1, PROCESS_ALL_ACCESS, TRUE, 0 );
+    err = GetLastError();
+    todo_wine
+    ok(!ret && err == ERROR_ACCESS_DENIED, "duplicating handle should have failed "
+       "with STATUS_ACCESS_DENIED, instead of err:%d\n", err);
+
     CloseHandle( handle );
 
     /* These two should fail - they are denied by ACL */
@@ -1469,11 +1535,122 @@ static void test_process_security_child(void)
 
     /* Documented privilege elevation */
     ok(DuplicateHandle( GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
-                        &handle, PROCESS_ALL_ACCESS, TRUE, DUPLICATE_SAME_ACCESS),
+                        &handle, 0, TRUE, DUPLICATE_SAME_ACCESS ),
        "duplicating handle err:%d\n", GetLastError());
     TEST_GRANTED_ACCESS( handle, PROCESS_ALL_ACCESS );
 
     CloseHandle( handle );
+
+    /* Same only explicitly asking for all access rights */
+    ok(DuplicateHandle( GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
+                        &handle, PROCESS_ALL_ACCESS, TRUE, 0 ),
+       "duplicating handle err:%d\n", GetLastError());
+    TEST_GRANTED_ACCESS( handle, PROCESS_ALL_ACCESS );
+    ok(DuplicateHandle( GetCurrentProcess(), handle, GetCurrentProcess(),
+                        &handle1, PROCESS_VM_READ, TRUE, 0 ),
+       "duplicating handle err:%d\n", GetLastError());
+    TEST_GRANTED_ACCESS( handle1, PROCESS_VM_READ );
+    CloseHandle( handle1 );
+    CloseHandle( handle );
+}
+
+static void test_impersonation_level(void)
+{
+    HANDLE Token, ProcessToken;
+    HANDLE Token2;
+    DWORD Size;
+    TOKEN_PRIVILEGES *Privileges;
+    TOKEN_USER *User;
+    PRIVILEGE_SET *PrivilegeSet;
+    BOOL AccessGranted;
+    BOOL ret;
+    HKEY hkey;
+    DWORD error;
+
+    ret = ImpersonateSelf(SecurityAnonymous);
+    ok(ret, "ImpersonateSelf(SecurityAnonymous) failed with error %d\n", GetLastError());
+    ret = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY_SOURCE | TOKEN_IMPERSONATE | TOKEN_ADJUST_DEFAULT, TRUE, &Token);
+    ok(!ret, "OpenThreadToken should have failed\n");
+    error = GetLastError();
+    ok(error == ERROR_CANT_OPEN_ANONYMOUS, "OpenThreadToken on anonymous token should have returned ERROR_CANT_OPEN_ANONYMOUS instead of %d\n", error);
+    /* can't perform access check when opening object against an anonymous impersonation token */
+    todo_wine {
+    error = RegOpenKeyEx(HKEY_CURRENT_USER, "Software", 0, KEY_READ, &hkey);
+    ok(error == ERROR_INVALID_HANDLE, "RegOpenKeyEx should have failed with ERROR_INVALID_HANDLE instead of %d\n", error);
+    }
+    RevertToSelf();
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE, &ProcessToken);
+    ok(ret, "OpenProcessToken failed with error %d\n", GetLastError());
+
+    ret = DuplicateTokenEx(ProcessToken,
+        TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_IMPERSONATE, NULL,
+        SecurityAnonymous, TokenImpersonation, &Token);
+    ok(ret, "DuplicateTokenEx failed with error %d\n", GetLastError());
+    /* can't increase the impersonation level */
+    ret = DuplicateToken(Token, SecurityIdentification, &Token2);
+    error = GetLastError();
+    ok(!ret && error == ERROR_BAD_IMPERSONATION_LEVEL,
+        "Duplicating a token and increasing the impersonation level should have failed with ERROR_BAD_IMPERSONATION_LEVEL instead of %d\n", error);
+    /* we can query anything from an anonymous token, including the user */
+    ret = GetTokenInformation(Token, TokenUser, NULL, 0, &Size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_INSUFFICIENT_BUFFER, "GetTokenInformation(TokenUser) should have failed with ERROR_INSUFFICIENT_BUFFER instead of %d\n", error);
+    User = (TOKEN_USER *)HeapAlloc(GetProcessHeap(), 0, Size);
+    ret = GetTokenInformation(Token, TokenUser, User, Size, &Size);
+    ok(ret, "GetTokenInformation(TokenUser) failed with error %d\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, User);
+
+    /* PrivilegeCheck fails with SecurityAnonymous level */
+    ret = GetTokenInformation(Token, TokenPrivileges, NULL, 0, &Size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_INSUFFICIENT_BUFFER, "GetTokenInformation(TokenPrivileges) should have failed with ERROR_INSUFFICIENT_BUFFER instead of %d\n", error);
+    Privileges = (TOKEN_PRIVILEGES *)HeapAlloc(GetProcessHeap(), 0, Size);
+    ret = GetTokenInformation(Token, TokenPrivileges, Privileges, Size, &Size);
+    ok(ret, "GetTokenInformation(TokenPrivileges) failed with error %d\n", GetLastError());
+
+    PrivilegeSet = (PRIVILEGE_SET *)HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(PRIVILEGE_SET, Privilege[Privileges->PrivilegeCount]));
+    PrivilegeSet->PrivilegeCount = Privileges->PrivilegeCount;
+    memcpy(PrivilegeSet->Privilege, Privileges->Privileges, PrivilegeSet->PrivilegeCount * sizeof(PrivilegeSet->Privilege[0]));
+    PrivilegeSet->Control = PRIVILEGE_SET_ALL_NECESSARY;
+    HeapFree(GetProcessHeap(), 0, Privileges);
+
+    ret = PrivilegeCheck(Token, PrivilegeSet, &AccessGranted);
+    error = GetLastError();
+    ok(!ret && error == ERROR_BAD_IMPERSONATION_LEVEL, "PrivilegeCheck for SecurityAnonymous token should have failed with ERROR_BAD_IMPERSONATION_LEVEL instead of %d\n", error);
+
+    CloseHandle(Token);
+
+    ret = ImpersonateSelf(SecurityIdentification);
+    ok(ret, "ImpersonateSelf(SecurityIdentification) failed with error %d\n", GetLastError());
+    ret = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY_SOURCE | TOKEN_IMPERSONATE | TOKEN_ADJUST_DEFAULT, TRUE, &Token);
+    ok(ret, "OpenThreadToken failed with error %d\n", GetLastError());
+
+    /* can't perform access check when opening object against an identification impersonation token */
+    error = RegOpenKeyEx(HKEY_CURRENT_USER, "Software", 0, KEY_READ, &hkey);
+    todo_wine {
+    ok(error == ERROR_INVALID_HANDLE, "RegOpenKeyEx should have failed with ERROR_INVALID_HANDLE instead of %d\n", error);
+    }
+    ret = PrivilegeCheck(Token, PrivilegeSet, &AccessGranted);
+    ok(ret, "PrivilegeCheck for SecurityIdentification failed with error %d\n", GetLastError());
+    CloseHandle(Token);
+    RevertToSelf();
+
+    ret = ImpersonateSelf(SecurityImpersonation);
+    ok(ret, "ImpersonateSelf(SecurityImpersonation) failed with error %d\n", GetLastError());
+    ret = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY_SOURCE | TOKEN_IMPERSONATE | TOKEN_ADJUST_DEFAULT, TRUE, &Token);
+    ok(ret, "OpenThreadToken failed with error %d\n", GetLastError());
+    error = RegOpenKeyEx(HKEY_CURRENT_USER, "Software", 0, KEY_READ, &hkey);
+    ok(error == ERROR_SUCCESS, "RegOpenKeyEx should have succeeded instead of failing with %d\n", error);
+    RegCloseKey(hkey);
+    ret = PrivilegeCheck(Token, PrivilegeSet, &AccessGranted);
+    ok(ret, "PrivilegeCheck for SecurityImpersonation failed with error %d\n", GetLastError());
+    RevertToSelf();
+
+    CloseHandle(Token);
+    CloseHandle(ProcessToken);
+
+    HeapFree(GetProcessHeap(), 0, PrivilegeSet);
 }
 
 START_TEST(security)
@@ -1495,4 +1672,5 @@ START_TEST(security)
     test_LookupAccountSid();
     test_LookupAccountName();
     test_process_security();
+    test_impersonation_level();
 }

@@ -26,8 +26,12 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "winnls.h"
 
 #include "wine/test.h"
+
+DWORD (WINAPI *pGetGlyphIndicesA)(HDC hdc, LPCSTR lpstr, INT count, LPWORD pgi, DWORD flags);
+DWORD (WINAPI *pGetGlyphIndicesW)(HDC hdc, LPCWSTR lpstr, INT count, LPWORD pgi, DWORD flags);
 
 static INT CALLBACK is_font_installed_proc(const LOGFONT *elf, const TEXTMETRIC *ntm, DWORD type, LPARAM lParam)
 {
@@ -432,7 +436,7 @@ static void test_text_extents(void)
     GetTextExtentExPointW(hdc, wt, 1, 1, &fit1, &fit2, &sz1);
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        trace("Skipping remainder of text extents test on a Win9x platform\n");
+        skip("Skipping remainder of text extents test on a Win9x platform\n");
         hfont = SelectObject(hdc, hfont);
         DeleteObject(hfont);
         ReleaseDC(0, hdc);
@@ -615,7 +619,7 @@ static void test_GetKerningPairs(void)
     GetKerningPairsW(hdc, 0, NULL);
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        trace("Skipping the GetKerningPairs test on a Win9x platform\n");
+        skip("Skipping the GetKerningPairs test on a Win9x platform\n");
         ReleaseDC(0, hdc);
         return;
     }
@@ -732,6 +736,358 @@ todo_wine {
     ReleaseDC(0, hdc);
 }
 
+static void test_GetOutlineTextMetrics(void)
+{
+    OUTLINETEXTMETRIC *otm;
+    LOGFONT lf;
+    HFONT hfont, hfont_old;
+    HDC hdc;
+    DWORD ret, otm_size;
+
+    if (!is_font_installed("Arial"))
+    {
+        skip("Arial is not installed\n");
+        return;
+    }
+
+    hdc = GetDC(0);
+
+    memset(&lf, 0, sizeof(lf));
+    strcpy(lf.lfFaceName, "Arial");
+    lf.lfHeight = -13;
+    lf.lfWeight = FW_NORMAL;
+    lf.lfPitchAndFamily = DEFAULT_PITCH;
+    lf.lfQuality = PROOF_QUALITY;
+    hfont = CreateFontIndirect(&lf);
+    assert(hfont != 0);
+
+    hfont_old = SelectObject(hdc, hfont);
+    otm_size = GetOutlineTextMetrics(hdc, 0, NULL);
+    trace("otm buffer size %u (0x%x)\n", otm_size, otm_size);
+
+    otm = HeapAlloc(GetProcessHeap(), 0, otm_size);
+
+    memset(otm, 0xAA, otm_size);
+    SetLastError(0xdeadbeef);
+    otm->otmSize = sizeof(*otm); /* just in case for Win9x compatibility */
+    ret = GetOutlineTextMetrics(hdc, otm->otmSize, otm);
+    ok(ret == 1 /* Win9x */ ||
+       ret == otm->otmSize /* XP*/,
+       "expected %u, got %u, error %d\n", otm->otmSize, ret, GetLastError());
+    if (ret != 1) /* Win9x doesn't care about pointing beyond of the buffer */
+    {
+        ok(otm->otmpFamilyName == NULL, "expected NULL got %p\n", otm->otmpFamilyName);
+        ok(otm->otmpFaceName == NULL, "expected NULL got %p\n", otm->otmpFaceName);
+        ok(otm->otmpStyleName == NULL, "expected NULL got %p\n", otm->otmpStyleName);
+        ok(otm->otmpFullName == NULL, "expected NULL got %p\n", otm->otmpFullName);
+    }
+
+    memset(otm, 0xAA, otm_size);
+    SetLastError(0xdeadbeef);
+    otm->otmSize = otm_size; /* just in case for Win9x compatibility */
+    ret = GetOutlineTextMetrics(hdc, otm->otmSize, otm);
+    ok(ret == 1 /* Win9x */ ||
+       ret == otm->otmSize /* XP*/,
+       "expected %u, got %u, error %d\n", otm->otmSize, ret, GetLastError());
+    if (ret != 1) /* Win9x doesn't care about pointing beyond of the buffer */
+    {
+        ok(otm->otmpFamilyName != NULL, "expected not NULL got %p\n", otm->otmpFamilyName);
+        ok(otm->otmpFaceName != NULL, "expected not NULL got %p\n", otm->otmpFaceName);
+        ok(otm->otmpStyleName != NULL, "expected not NULL got %p\n", otm->otmpStyleName);
+        ok(otm->otmpFullName != NULL, "expected not NULL got %p\n", otm->otmpFullName);
+    }
+
+    /* ask about truncated data */
+    memset(otm, 0xAA, otm_size);
+    SetLastError(0xdeadbeef);
+    otm->otmSize = sizeof(*otm) - sizeof(LPSTR); /* just in case for Win9x compatibility */
+    ret = GetOutlineTextMetrics(hdc, otm->otmSize, otm);
+    ok(ret == 1 /* Win9x */ ||
+       ret == otm->otmSize /* XP*/,
+       "expected %u, got %u, error %d\n", otm->otmSize, ret, GetLastError());
+    if (ret != 1) /* Win9x doesn't care about pointing beyond of the buffer */
+    {
+        ok(otm->otmpFamilyName == NULL, "expected NULL got %p\n", otm->otmpFamilyName);
+        ok(otm->otmpFaceName == NULL, "expected NULL got %p\n", otm->otmpFaceName);
+        ok(otm->otmpStyleName == NULL, "expected NULL got %p\n", otm->otmpStyleName);
+    }
+    ok(otm->otmpFullName == (LPSTR)0xAAAAAAAA, "expected 0xAAAAAAAA got %p\n", otm->otmpFullName);
+
+    HeapFree(GetProcessHeap(), 0, otm);
+
+    SelectObject(hdc, hfont_old);
+    DeleteObject(hfont);
+
+    ReleaseDC(0, hdc);
+}
+
+static BOOL get_glyph_indices(INT charset, UINT code_page, WORD *idx, UINT count, BOOL unicode)
+{
+    HDC hdc;
+    LOGFONTA lf;
+    HFONT hfont, hfont_old;
+    CHARSETINFO csi;
+    FONTSIGNATURE fs;
+    INT cs;
+    DWORD i, ret;
+    char name[64];
+
+    assert(count <= 128);
+
+    memset(&lf, 0, sizeof(lf));
+
+    lf.lfCharSet = charset;
+    lf.lfHeight = 10;
+    lstrcpyA(lf.lfFaceName, "Arial");
+    SetLastError(0xdeadbeef);
+    hfont = CreateFontIndirectA(&lf);
+    ok(hfont != 0, "CreateFontIndirectA error %u\n", GetLastError());
+
+    hdc = GetDC(0);
+    hfont_old = SelectObject(hdc, hfont);
+
+    cs = GetTextCharsetInfo(hdc, &fs, 0);
+    ok(cs == charset, "expected %d, got %d\n", charset, cs);
+
+    SetLastError(0xdeadbeef);
+    ret = GetTextFace(hdc, sizeof(name), name);
+    ok(ret, "GetTextFace error %u\n", GetLastError());
+
+    if (charset == SYMBOL_CHARSET)
+    {
+        ok(strcmp("Arial", name), "face name should NOT be Arial\n");
+        ok(fs.fsCsb[0] & (1 << 31), "symbol encoding should be available\n");
+    }
+    else
+    {
+        ok(!strcmp("Arial", name), "face name should be Arial, not %s\n", name);
+        ok(!(fs.fsCsb[0] & (1 << 31)), "symbol encoding should NOT be available\n");
+    }
+
+    if (!TranslateCharsetInfo((DWORD *)cs, &csi, TCI_SRCCHARSET))
+    {
+        trace("Can't find codepage for charset %d\n", cs);
+        ReleaseDC(0, hdc);
+        return FALSE;
+    }
+    ok(csi.ciACP == code_page, "expected %d, got %d\n", code_page, csi.ciACP);
+
+    if (unicode)
+    {
+        char ansi_buf[128];
+        WCHAR unicode_buf[128];
+
+        for (i = 0; i < count; i++) ansi_buf[i] = (BYTE)(i + 128);
+
+        MultiByteToWideChar(code_page, 0, ansi_buf, count, unicode_buf, count);
+
+        SetLastError(0xdeadbeef);
+        ret = pGetGlyphIndicesW(hdc, unicode_buf, count, idx, 0);
+        ok(ret == count, "GetGlyphIndicesA error %u\n", GetLastError());
+    }
+    else
+    {
+        char ansi_buf[128];
+
+        for (i = 0; i < count; i++) ansi_buf[i] = (BYTE)(i + 128);
+
+        SetLastError(0xdeadbeef);
+        ret = pGetGlyphIndicesA(hdc, ansi_buf, count, idx, 0);
+        ok(ret == count, "GetGlyphIndicesA error %u\n", GetLastError());
+    }
+
+    SelectObject(hdc, hfont_old);
+    DeleteObject(hfont);
+
+    ReleaseDC(0, hdc);
+
+    return TRUE;
+}
+
+static void testJustification(HDC hdc, PSTR str, RECT *clientArea)
+{
+    INT         x, y,
+                breakCount,
+                outputWidth = 0,    /* to test TabbedTextOut() */
+                justifiedWidth = 0, /* to test GetTextExtentExPointW() */
+                areaWidth = clientArea->right - clientArea->left,
+                nErrors = 0, e;
+    BOOL        lastExtent = FALSE;
+    PSTR        pFirstChar, pLastChar;
+    SIZE        size;
+    TEXTMETRICA tm;
+    struct err
+    {
+        char extent[100];
+        int  GetTextExtentExPointWWidth;
+        int  TabbedTextOutWidth;
+    } error[10];
+
+    GetTextMetricsA(hdc, &tm);
+    y = clientArea->top;
+    do {
+        breakCount = 0;
+        while (*str == tm.tmBreakChar) str++; /* skip leading break chars */
+        pFirstChar = str;
+
+        do {
+            pLastChar = str;
+
+            /* if not at the end of the string, ... */
+            if (*str == '\0') break;
+            /* ... add the next word to the current extent */
+            while (*str != '\0' && *str++ != tm.tmBreakChar);
+            breakCount++;
+            SetTextJustification(hdc, 0, 0);
+            GetTextExtentPoint32(hdc, pFirstChar, str - pFirstChar - 1, &size);
+        } while ((int) size.cx < areaWidth);
+
+        /* ignore trailing break chars */
+        breakCount--;
+        while (*(pLastChar - 1) == tm.tmBreakChar)
+        {
+            pLastChar--;
+            breakCount--;
+        }
+
+        if (*str == '\0' || breakCount <= 0) pLastChar = str;
+
+        SetTextJustification(hdc, 0, 0);
+        GetTextExtentPoint32(hdc, pFirstChar, pLastChar - pFirstChar, &size);
+
+        /* do not justify the last extent */
+        if (*str != '\0' && breakCount > 0)
+        {
+            SetTextJustification(hdc, areaWidth - size.cx, breakCount);
+            GetTextExtentPoint32(hdc, pFirstChar, pLastChar - pFirstChar, &size);
+            justifiedWidth = size.cx;
+        }
+        else lastExtent = TRUE;
+
+        x = clientArea->left;
+
+        outputWidth = LOWORD(TabbedTextOut(
+                             hdc, x, y, pFirstChar, pLastChar - pFirstChar,
+                             0, NULL, 0));
+        /* catch errors and report them */
+        if (!lastExtent && ((outputWidth != areaWidth) || (justifiedWidth != areaWidth)))
+        {
+            memset(error[nErrors].extent, 0, 100);
+            memcpy(error[nErrors].extent, pFirstChar, pLastChar - pFirstChar);
+            error[nErrors].TabbedTextOutWidth = outputWidth;
+            error[nErrors].GetTextExtentExPointWWidth = justifiedWidth;
+            nErrors++;
+        }
+
+        y += size.cy;
+        str = pLastChar;
+    } while (*str && y < clientArea->bottom);
+
+    for (e = 0; e < nErrors; e++)
+    {
+        ok(error[e].TabbedTextOutWidth == areaWidth,
+            "The output text (\"%s\") width should be %d, not %d.\n",
+            error[e].extent, areaWidth, error[e].TabbedTextOutWidth);
+        /* The width returned by GetTextExtentPoint32() is exactly the same
+           returned by GetTextExtentExPointW() - see dlls/gdi32/font.c */
+        ok(error[e].GetTextExtentExPointWWidth == areaWidth,
+            "GetTextExtentPointW() for \"%s\" should have returned a width of %d, not %d.\n",
+            error[e].extent, areaWidth, error[e].GetTextExtentExPointWWidth);
+    }
+}
+
+static void test_SetTextJustification(void)
+{
+    HDC hdc;
+    RECT clientArea;
+    LOGFONTA lf;
+    HFONT hfont;
+    HWND hwnd;
+    static char testText[] =
+            "Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do "
+            "eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut "
+            "enim ad minim veniam, quis nostrud exercitation ullamco laboris "
+            "nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in "
+            "reprehenderit in voluptate velit esse cillum dolore eu fugiat "
+            "nulla pariatur. Excepteur sint occaecat cupidatat non proident, "
+            "sunt in culpa qui officia deserunt mollit anim id est laborum.";
+
+    hwnd = CreateWindowExA(0, "static", "", WS_POPUP, 0,0, 400,400, 0, 0, 0, NULL);
+    GetClientRect( hwnd, &clientArea );
+    hdc = GetDC( hwnd );
+
+    memset(&lf, 0, sizeof lf);
+    lf.lfCharSet = ANSI_CHARSET;
+    lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+    lf.lfWeight = FW_DONTCARE;
+    lf.lfHeight = 20;
+    lf.lfQuality = DEFAULT_QUALITY;
+    lstrcpyA(lf.lfFaceName, "Times New Roman");
+    hfont = create_font("Times New Roman", &lf);
+    SelectObject(hdc, hfont);
+
+    testJustification(hdc, testText, &clientArea);
+
+    DeleteObject(hfont);
+    ReleaseDC(hwnd, hdc);
+    DestroyWindow(hwnd);
+}
+
+static void test_font_charset(void)
+{
+    static struct charset_data
+    {
+        INT charset;
+        UINT code_page;
+        WORD font_idxA[128], font_idxW[128];
+    } cd[] =
+    {
+        { ANSI_CHARSET, 1252 },
+        { RUSSIAN_CHARSET, 1251 },
+        { SYMBOL_CHARSET, CP_SYMBOL } /* keep it as the last one */
+    };
+    int i;
+
+    pGetGlyphIndicesA = (void *)GetProcAddress(GetModuleHandle("gdi32.dll"), "GetGlyphIndicesA");
+    pGetGlyphIndicesW = (void *)GetProcAddress(GetModuleHandle("gdi32.dll"), "GetGlyphIndicesW");
+
+    if (!pGetGlyphIndicesA || !pGetGlyphIndicesW)
+    {
+        skip("Skipping the font charset test on a Win9x platform\n");
+        return;
+    }
+
+    if (!is_font_installed("Arial"))
+    {
+        skip("Arial is not installed\n");
+        return;
+    }
+
+    for (i = 0; i < sizeof(cd)/sizeof(cd[0]); i++)
+    {
+        if (cd[i].charset == SYMBOL_CHARSET)
+        {
+            if (!is_font_installed("Symbol") && !is_font_installed("Wingdings"))
+            {
+                skip("Symbol or Wingdings is not installed\n");
+                break;
+            }
+        }
+        get_glyph_indices(cd[i].charset, cd[i].code_page, cd[i].font_idxA, 128, FALSE);
+        get_glyph_indices(cd[i].charset, cd[i].code_page, cd[i].font_idxW, 128, TRUE);
+        ok(!memcmp(cd[i].font_idxA, cd[i].font_idxW, 128*sizeof(WORD)), "%d: indices don't match\n", i);
+    }
+
+    ok(memcmp(cd[0].font_idxW, cd[1].font_idxW, 128*sizeof(WORD)), "0 vs 1: indices shouldn't match\n");
+    if (i > 2)
+    {
+        ok(memcmp(cd[0].font_idxW, cd[2].font_idxW, 128*sizeof(WORD)), "0 vs 2: indices shouldn't match\n");
+        ok(memcmp(cd[1].font_idxW, cd[2].font_idxW, 128*sizeof(WORD)), "1 vs 2: indices shouldn't match\n");
+    }
+    else
+        skip("Symbol or Wingdings is not installed\n");
+}
+
 START_TEST(font)
 {
     test_logfont();
@@ -742,4 +1098,7 @@ START_TEST(font)
     test_text_extents();
     test_GetGlyphIndices();
     test_GetKerningPairs();
+    test_GetOutlineTextMetrics();
+    test_SetTextJustification();
+    test_font_charset();
 }

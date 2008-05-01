@@ -877,95 +877,51 @@ static const struct message WmReparentButtonSeq[] = { /* FIXME: add */
 /* Creation of a custom dialog (32) */
 static const struct message WmCreateCustomDialogSeq[] = {
     { HCBT_CREATEWND, hook },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_GETMINMAXINFO, sent },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_NCCREATE, sent },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_NCCALCSIZE, sent|wparam, 0 },
     { EVENT_OBJECT_REORDER, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_CREATE, sent },
     { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SHOWWINDOW, sent|wparam, 1 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE },
     { EVENT_OBJECT_SHOW, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_ACTIVATE, hook },
     { EVENT_SYSTEM_FOREGROUND, winevent_hook|wparam|lparam, 0, 0 },
 
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
 
     { WM_QUERYNEWPALETTE, sent|wparam|lparam|optional, 0, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
 
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
 
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_NCACTIVATE, sent|wparam, 1 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_GETTEXT, sent|optional|defwinproc },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_GETTEXT, sent|optional|defwinproc },
     { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_ACTIVATE, sent|wparam, 1 },
     { WM_KILLFOCUS, sent|parent },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_IME_SETCONTEXT, sent|parent|wparam|optional, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_IME_SETCONTEXT, sent|wparam|optional, 1 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_IME_NOTIFY, sent|wparam|defwinproc|optional, 2 },
     { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SETFOCUS, sent },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_GETDLGCODE, sent|defwinproc|wparam, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_NCPAINT, sent|wparam, 1 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_GETTEXT, sent|optional|defwinproc },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_GETTEXT, sent|optional|defwinproc },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_ERASEBKGND, sent },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_CTLCOLORDLG, sent|defwinproc },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_GETTEXT, sent|optional },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_GETTEXT, sent|optional },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_NCCALCSIZE, sent|optional },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_NCPAINT, sent|optional },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_GETTEXT, sent|optional|defwinproc },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_GETTEXT, sent|optional|defwinproc },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_ERASEBKGND, sent|optional },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_CTLCOLORDLG, sent|optional|defwinproc },
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SIZE, sent|wparam, SIZE_RESTORED },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_MOVE, sent },
     { 0 }
 };
@@ -993,46 +949,29 @@ static const struct message WmEndCustomDialogSeq[] = {
 };
 /* ShowWindow(SW_SHOW) for a custom dialog (initially invisible) */
 static const struct message WmShowCustomDialogSeq[] = {
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SHOWWINDOW, sent|wparam, 1 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE },
     { EVENT_OBJECT_SHOW, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_ACTIVATE, hook },
     { EVENT_SYSTEM_FOREGROUND, winevent_hook|wparam|lparam, 0, 0 },
 
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_QUERYNEWPALETTE, sent|wparam|lparam|optional, 0, 0 },
 
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOSIZE|SWP_NOMOVE },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_ACTIVATEAPP, sent|wparam|optional, 1 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_NCACTIVATE, sent|wparam, 1 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_ACTIVATE, sent|wparam, 1 },
 
     { WM_KILLFOCUS, sent|parent },
     { WM_IME_SETCONTEXT, sent|parent|wparam|optional, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_IME_SETCONTEXT, sent|wparam|optional, 1 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_IME_NOTIFY, sent|wparam|defwinproc|optional, 2 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SETFOCUS, sent },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_GETDLGCODE, sent|defwinproc|wparam, 0 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_NCPAINT, sent|wparam, 1 },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_ERASEBKGND, sent },
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_CTLCOLORDLG, sent|defwinproc },
-
-    { EVENT_OBJECT_DEFACTIONCHANGE, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
     { 0 }
 };
@@ -1051,6 +990,7 @@ static const struct message WmModalDialogSeq[] = {
     { WM_SETFONT, sent },
     { WM_INITDIALOG, sent },
     { WM_CHANGEUISTATE, sent|optional },
+    { WM_UPDATEUISTATE, sent|optional },
     { WM_SHOWWINDOW, sent },
     { HCBT_ACTIVATE, hook },
     { EVENT_SYSTEM_FOREGROUND, winevent_hook|wparam|lparam, 0, 0 },
@@ -1348,7 +1288,7 @@ static const struct message WmSHOWNATopInvisible[] = {
     { 0 }
 };
 
-static int after_end_dialog;
+static int after_end_dialog, test_def_id;
 static int sequence_cnt, sequence_size;
 static struct message* sequence;
 static int log_all_parent_messages;
@@ -1589,7 +1529,9 @@ static const struct message WmCreateMDIclientSeq[] = {
     { HCBT_CREATEWND, hook },
     { WM_NCCREATE, sent },
     { WM_NCCALCSIZE, sent|wparam, 0 },
+    { EVENT_OBJECT_REORDER, winevent_hook|wparam|lparam|optional, 0, 0 },
     { WM_CREATE, sent },
+    { EVENT_OBJECT_REORDER, winevent_hook|wparam|lparam|optional, 0, 0 },
     { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, 0, 0 },
     { WM_SIZE, sent|wparam, SIZE_RESTORED },
     { WM_MOVE, sent },
@@ -1612,7 +1554,8 @@ static const struct message WmShowMDIclientSeq[] = {
 static const struct message WmHideMDIclientSeq[] = {
     { WM_SHOWWINDOW, sent|wparam, 0 },
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
-    { EVENT_OBJECT_SHOW, winevent_hook|wparam|lparam, 0, 0 },
+    { EVENT_OBJECT_SHOW, winevent_hook|wparam|lparam|optional, 0, 0 }, /* win2000 */
+    { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* XP */
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
     { 0 }
 };
@@ -1676,6 +1619,7 @@ static const struct message WmCreateMDIchildInvisibleParentSeq[] = {
     { WM_GETMINMAXINFO, sent },
     { WM_NCCREATE, sent }, 
     { WM_NCCALCSIZE, sent|wparam, 0 },
+    { EVENT_OBJECT_REORDER, winevent_hook|wparam|lparam|optional, 0, 0 },
     { WM_CREATE, sent },
     { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, 0, 0 },
     { WM_SIZE, sent|wparam, SIZE_RESTORED },
@@ -1801,6 +1745,8 @@ static const struct message WmDestroyMDIchildInvisibleSeq[] = {
     { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
+    /* FIXME: Wine destroys an icon/title window while Windows doesn't */
+    { WM_PARENTNOTIFY, sent|wparam|optional, WM_DESTROY }, /* MDI client */
     { 0 }
 };
 /* CreateWindow for the 1st MDI child window, initially visible and maximized */
@@ -1990,7 +1936,7 @@ static const struct message WmCreateMDIchildVisibleMaxSeq3[] = {
     { WM_SETFOCUS, sent|optional }, /* in MDI client */
     { HCBT_SETFOCUS, hook }, /* in MDI client */
     { WM_IME_SETCONTEXT, sent|wparam|optional, 1 }, /* in MDI client */
-    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
+    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam|optional, OBJID_CLIENT, 0 },
     { WM_SETFOCUS, sent|optional }, /* in MDI client */
     { HCBT_SETFOCUS, hook|optional },
     { WM_KILLFOCUS, sent }, /* in MDI client */
@@ -2379,7 +2325,7 @@ static const struct message WmMaximizeMDIchildInvisibleParentSeq[] = {
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|0x8000 },
     { WM_GETMINMAXINFO, sent|defwinproc },
     { WM_NCCALCSIZE, sent|wparam, 1 },
-    { EVENT_OBJECT_SHOW, winevent_hook|wparam|lparam, 0, 0 },
+    { EVENT_OBJECT_SHOW, winevent_hook|wparam|lparam|optional, 0, 0 }, /* XP doesn't send it */
     { WM_CHILDACTIVATE, sent|wparam|lparam, 0, 0 },
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOREDRAW|0x8000 },
     { WM_MOVE, sent|defwinproc },
@@ -2389,13 +2335,15 @@ static const struct message WmMaximizeMDIchildInvisibleParentSeq[] = {
     { WM_NCCALCSIZE, sent|wparam|defwinproc, 1 },
     { WM_WINDOWPOSCHANGED, sent|wparam|defwinproc, SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOREDRAW|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
     { WM_NCCALCSIZE, sent|wparam|defwinproc|optional, 1 },
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI child XP */
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI client XP */
      /* in MDI frame */
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
     { WM_NCCALCSIZE, sent|wparam, 1 },
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
     { WM_MOVE, sent|defwinproc },
     { WM_SIZE, sent|defwinproc|wparam, SIZE_RESTORED },
-    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI frame */
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI frame win2000 */
      /* in MDI client */
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_NOACTIVATE },
     { WM_NCCALCSIZE, sent|wparam, 1 },
@@ -2407,10 +2355,16 @@ static const struct message WmMaximizeMDIchildInvisibleParentSeq[] = {
     { WM_NCCALCSIZE, sent|wparam|defwinproc, 1 },
     { WM_WINDOWPOSCHANGED, sent|wparam|defwinproc, SWP_NOACTIVATE|SWP_NOMOVE|SWP_NOREDRAW|SWP_NOCLIENTMOVE },
     { WM_SIZE, sent|defwinproc|wparam, SIZE_MAXIMIZED },
-    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI child */
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI child win2000 */
     { WM_NCCALCSIZE, sent|wparam|defwinproc|optional, 1 },
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI child XP */
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI child XP */
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI client XP */
      /* in MDI frame */
     { WM_NCCALCSIZE, sent|wparam|optional, 1 },
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI frame XP */
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI frame XP */
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam|optional, 0, 0 }, /* MDI child XP */
     { 0 }
 };
 /* ShowWindow(SW_MAXIMIZE) for a visible MDI child window */
@@ -2430,7 +2384,7 @@ static const struct message WmMaximizeMDIchildVisibleSeq[] = {
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI child */
     { 0 }
 };
-/* ShowWindow(SW_RESTORE) for a visible MDI child window */
+/* ShowWindow(SW_RESTORE) for a visible maximized MDI child window */
 static const struct message WmRestoreMDIchildVisibleSeq[] = {
     { HCBT_MINMAX, hook|lparam, 0, SW_RESTORE },
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|0x8000 },
@@ -2444,6 +2398,40 @@ static const struct message WmRestoreMDIchildVisibleSeq[] = {
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI frame */
     { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI child */
+    { 0 }
+};
+/* ShowWindow(SW_RESTORE) for a visible minimized MDI child window */
+static const struct message WmRestoreMDIchildVisibleSeq_2[] = {
+    { HCBT_MINMAX, hook|lparam, 0, SW_RESTORE },
+    { WM_QUERYOPEN, sent|wparam|lparam, 0, 0 },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|0x8000 },
+    { WM_NCCALCSIZE, sent|wparam, 1 },
+    { WM_CHILDACTIVATE, sent|wparam|lparam, 0, 0 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOCOPYBITS|SWP_NOCLIENTSIZE|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|defwinproc|wparam, SIZE_RESTORED },
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI child */
+    { EVENT_SYSTEM_MINIMIZEEND, winevent_hook|wparam|lparam, 0, 0 }, /* MDI child */
+    { HCBT_SETFOCUS, hook },
+    { WM_IME_SETCONTEXT, sent|wparam|optional, 1 },
+    { WM_IME_NOTIFY, sent|wparam|defwinproc|optional, 2 },
+    { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
+    { WM_SETFOCUS, sent },
+    { 0 }
+};
+/* ShowWindow(SW_MINIMIZE) for a visible restored MDI child window */
+static const struct message WmMinimizeMDIchildVisibleSeq[] = {
+    { HCBT_MINMAX, hook|lparam, 0, SW_MINIMIZE },
+    { WM_WINDOWPOSCHANGING, sent|wparam, SWP_SHOWWINDOW|SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_NOCOPYBITS|0x8000 },
+    { WM_NCCALCSIZE, sent|wparam, 1 },
+    { WM_WINDOWPOSCHANGED, sent|wparam, SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_NOCOPYBITS|SWP_NOCLIENTSIZE|0x8000 },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|defwinproc|wparam, SIZE_MINIMIZED },
+    { WM_CHILDACTIVATE, sent|wparam|lparam|defwinproc, 0, 0 },
+    { EVENT_OBJECT_LOCATIONCHANGE, winevent_hook|wparam|lparam, 0, 0 }, /* MDI child */
+    { EVENT_SYSTEM_MINIMIZESTART, winevent_hook|wparam|lparam, 0, 0 }, /* MDI child */
+    /* FIXME: Wine creates an icon/title window while Windows doesn't */
+    { WM_PARENTNOTIFY, sent|parent|wparam|optional, WM_CREATE }, /* MDI client */
     { 0 }
 };
 /* ShowWindow(SW_RESTORE) for a not visible MDI child window */
@@ -2875,10 +2863,32 @@ static void test_mdi_messages(void)
     ok(GetFocus() == 0, "wrong focus window %p\n", GetFocus());
 
     ShowWindow(mdi_child2, SW_RESTORE);
-    ok_sequence(WmRestoreMDIchildVisibleSeq, "ShowWindow(SW_RESTORE):MDI child", FALSE);
+    ok_sequence(WmRestoreMDIchildVisibleSeq, "ShowWindow(SW_RESTORE):maximized MDI child", FALSE);
 
     ok(GetActiveWindow() == mdi_frame, "wrong active window %p\n", GetActiveWindow());
     ok(GetFocus() == 0, "wrong focus window %p\n", GetFocus());
+
+    ShowWindow(mdi_child2, SW_MINIMIZE);
+    ok_sequence(WmMinimizeMDIchildVisibleSeq, "ShowWindow(SW_MINIMIZE):MDI child", TRUE);
+
+    ok(GetActiveWindow() == mdi_frame, "wrong active window %p\n", GetActiveWindow());
+    ok(GetFocus() == 0, "wrong focus window %p\n", GetFocus());
+
+    active_child = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, (LPARAM)&zoomed);
+    ok(active_child == mdi_child2, "wrong active MDI child %p\n", active_child);
+    ok(!zoomed, "wrong zoomed state %d\n", zoomed);
+    flush_sequence();
+
+    ShowWindow(mdi_child2, SW_RESTORE);
+    ok_sequence(WmRestoreMDIchildVisibleSeq_2, "ShowWindow(SW_RESTORE):minimized MDI child", TRUE);
+
+    ok(GetActiveWindow() == mdi_frame, "wrong active window %p\n", GetActiveWindow());
+    ok(GetFocus() == mdi_child2, "wrong focus window %p\n", GetFocus());
+
+    active_child = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, (LPARAM)&zoomed);
+    ok(active_child == mdi_child2, "wrong active MDI child %p\n", active_child);
+    ok(!zoomed, "wrong zoomed state %d\n", zoomed);
+    flush_sequence();
 
     SetFocus(0);
     flush_sequence();
@@ -3600,6 +3610,21 @@ static void test_sys_menu(void)
     DestroyWindow(hwnd);
 }
 
+/* For shown WS_OVERLAPPEDWINDOW */
+static const struct message WmSetIcon_1[] = {
+    { WM_SETICON, sent },
+    { 0x00AE, sent|defwinproc|optional }, /* XP */
+    { WM_GETTEXT, sent|defwinproc|optional },
+    { WM_GETTEXT, sent|defwinproc|optional }, /* XP sends a duplicate */
+    { 0 }
+};
+
+/* For WS_POPUP and hidden WS_OVERLAPPEDWINDOW */
+static const struct message WmSetIcon_2[] = {
+    { WM_SETICON, sent },
+    { 0 }
+};
+
 /* test if we receive the right sequence of messages */
 static void test_messages(void)
 {
@@ -3813,12 +3838,18 @@ static void test_messages(void)
     */
 
     flush_sequence();
+
+    test_def_id = 1;
+    SendMessage(hwnd, WM_NULL, 0, 0);
+
+    flush_sequence();
     after_end_dialog = 1;
     EndDialog( hwnd, 0 );
     ok_sequence(WmEndCustomDialogSeq, "EndCustomDialog", FALSE);
 
     DestroyWindow(hwnd);
     after_end_dialog = 0;
+    test_def_id = 0;
 
     hwnd = CreateWindowExA(0, "TestDialogClass", NULL, WS_POPUP,
                            0, 0, 100, 100, 0, 0, GetModuleHandleA(0), NULL);
@@ -3925,6 +3956,44 @@ static void test_messages(void)
 
     DestroyWindow(hchild);
     DestroyWindow(hparent);
+    flush_sequence();
+
+    /* Message sequences for WM_SETICON */
+    trace("testing WM_SETICON\n");
+    hwnd = CreateWindowExA(0, "TestWindowClass", NULL, WS_OVERLAPPEDWINDOW,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 300, 300, 0,
+                           NULL, NULL, 0);
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+    while (PeekMessage( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessage( &msg );
+    flush_sequence();
+    SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)LoadIcon(0, IDI_APPLICATION));
+    ok_sequence(WmSetIcon_1, "WM_SETICON for shown window with caption", FALSE);
+
+    ShowWindow(hwnd, SW_HIDE);
+    while (PeekMessage( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessage( &msg );
+    flush_sequence();
+    SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)LoadIcon(0, IDI_APPLICATION));
+    ok_sequence(WmSetIcon_2, "WM_SETICON for hidden window with caption", FALSE);
+    DestroyWindow(hwnd);
+    flush_sequence();
+
+    hwnd = CreateWindowExA(0, "TestPopupClass", NULL, WS_POPUP,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 300, 300, 0,
+                           NULL, NULL, 0);
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+    while (PeekMessage( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessage( &msg );
+    flush_sequence();
+    SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)LoadIcon(0, IDI_APPLICATION));
+    ok_sequence(WmSetIcon_2, "WM_SETICON for shown window without caption", FALSE);
+
+    ShowWindow(hwnd, SW_HIDE);
+    while (PeekMessage( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessage( &msg );
+    flush_sequence();
+    SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)LoadIcon(0, IDI_APPLICATION));
+    ok_sequence(WmSetIcon_2, "WM_SETICON for hidden window without caption", FALSE);
+    DestroyWindow(hwnd);
     flush_sequence();
 }
 
@@ -4159,6 +4228,14 @@ static const struct message WmLButtonUpSeq[] =
     { WM_CAPTURECHANGED, sent|wparam|defwinproc, 0 },
     { 0 }
 };
+static const struct message WmSetFontButtonSeq[] =
+{
+    { WM_SETFONT, sent },
+    { WM_PAINT, sent },
+    { WM_ERASEBKGND, sent|defwinproc },
+    { WM_CTLCOLORBTN, sent|defwinproc },
+    { 0 }
+};
 
 static WNDPROC old_button_proc;
 
@@ -4239,6 +4316,7 @@ static void test_button_messages(void)
     unsigned int i;
     HWND hwnd;
     DWORD dlg_code;
+    HFONT zfont;
 
     subclass_button();
 
@@ -4278,6 +4356,13 @@ static void test_button_messages(void)
 
     SendMessageA(hwnd, WM_LBUTTONUP, 0, 0);
     ok_sequence(WmLButtonUpSeq, "WM_LBUTTONUP on a button", FALSE);
+
+    flush_sequence();
+    zfont = (HFONT)GetStockObject(SYSTEM_FONT);
+    SendMessageA(hwnd, WM_SETFONT, (WPARAM)zfont, TRUE);
+    UpdateWindow(hwnd);
+    ok_sequence(WmSetFontButtonSeq, "WM_SETFONT on a button", FALSE);
+
     DestroyWindow(hwnd);
 }
 
@@ -5874,12 +5959,15 @@ static LRESULT WINAPI TestDlgProcA(HWND hwnd, UINT message, WPARAM wParam, LPARA
     /* explicitly ignore WM_GETICON message */
     if (message == WM_GETICON) return 0;
 
-    DefDlgProcA(hwnd, DM_SETDEFID, 1, 0);
-    ret = DefDlgProcA(hwnd, DM_GETDEFID, 0, 0);
-    if (after_end_dialog)
-        ok( ret == 0, "DM_GETDEFID should return 0 after EndDialog, got %lx\n", ret );
-    else
-        ok(HIWORD(ret) == DC_HASDEFID, "DM_GETDEFID should return DC_HASDEFID, got %lx\n", ret);
+    if (test_def_id)
+    {
+        DefDlgProcA(hwnd, DM_SETDEFID, 1, 0);
+        ret = DefDlgProcA(hwnd, DM_GETDEFID, 0, 0);
+        if (after_end_dialog)
+            ok( ret == 0, "DM_GETDEFID should return 0 after EndDialog, got %lx\n", ret );
+        else
+            ok(HIWORD(ret) == DC_HASDEFID, "DM_GETDEFID should return DC_HASDEFID, got %lx\n", ret);
+    }
 
     switch (message)
     {
@@ -8693,7 +8781,7 @@ static void test_ShowWindow(void)
 /* 53 */ { SW_HIDE, FALSE, 0, WmEmptySeq, FALSE },
 /* 54 */ { SW_MINIMIZE, FALSE, WS_VISIBLE|WS_MINIMIZE, WmMinimize_3, TRUE },
 /* 55 */ { SW_HIDE, TRUE, WS_MINIMIZE, WmHide_2, FALSE },
-/* 56 */ { SW_SHOWNOACTIVATE, FALSE, WS_VISIBLE, WmShowNoActivate_2, TRUE },
+/* 56 */ { SW_SHOWNOACTIVATE, FALSE, WS_VISIBLE, WmShowNoActivate_2, FALSE },
 /* 57 */ { SW_SHOW, TRUE, WS_VISIBLE, WmEmptySeq, FALSE }
     };
     HWND hwnd;
