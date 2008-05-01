@@ -99,7 +99,7 @@ typedef struct _WNetEnumerator
  */
 static DWORD _findProviderIndexW(LPCWSTR lpProvider);
 
-PWNetProviderTable providerTable;
+static PWNetProviderTable providerTable;
 
 /*
  * Global provider table functions
@@ -819,7 +819,7 @@ DWORD WINAPI WNetEnumResourceA( HANDLE hEnum, LPDWORD lpcCount,
         ret = WN_BAD_POINTER;
     else if (!lpcCount)
         ret = WN_BAD_POINTER;
-    if (!lpBuffer)
+    else if (!lpBuffer)
         ret = WN_BAD_POINTER;
     else if (!lpBufferSize)
         ret = WN_BAD_POINTER;

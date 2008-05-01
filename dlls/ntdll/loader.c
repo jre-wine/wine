@@ -150,7 +150,7 @@ __ASM_GLOBAL_FUNC(call_dll_entry_point,
                   "leal -4(%ebp),%esp\n\t"
                   "popl %ebx\n\t"
                   "popl %ebp\n\t"
-                  "ret" );
+                  "ret" )
 #else /* __i386__ */
 static inline BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module,
                                          UINT reason, void *reserved )
@@ -1438,9 +1438,6 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
 
     nt = RtlImageNtHeader( module );
 
-    /* don't keep the file open if the mapping is from removable media */
-    if (!VIRTUAL_HasMapping( module )) file = 0;
-
     SERVER_START_REQ( load_dll )
     {
         req->handle     = file;
@@ -2142,24 +2139,7 @@ void WINAPI LdrInitializeThunk( ULONG unknown1, ULONG unknown2, ULONG unknown3, 
     RemoveEntryList( &wm->ldr.InLoadOrderModuleList );
     InsertHeadList( &peb->LdrData->InLoadOrderModuleList, &wm->ldr.InLoadOrderModuleList );
 
-    /* Install signal handlers; this cannot be done before, since we cannot
-     * send exceptions to the debugger before the create process event that
-     * is sent by REQ_INIT_PROCESS_DONE.
-     * We do need the handlers in place by the time the request is over, so
-     * we set them up here. If we segfault between here and the server call
-     * something is very wrong... */
-    if (!SIGNAL_Init()) exit(1);
-
-    /* Signal the parent process to continue */
-    SERVER_START_REQ( init_process_done )
-    {
-        req->module = peb->ImageBaseAddress;
-        req->entry  = (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint;
-        req->gui    = (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI);
-        status = wine_server_call( req );
-    }
-    SERVER_END_REQ;
-
+    status = server_init_process_done();
     if (status != STATUS_SUCCESS) goto error;
 
     RtlEnterCriticalSection( &loader_section );

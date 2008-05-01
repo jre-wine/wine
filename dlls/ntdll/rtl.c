@@ -407,7 +407,7 @@ __ASM_GLOBAL_FUNC( _chkstk,
                    "xchgl %esp,%eax\n\t"
                    "movl 0(%eax),%eax\n\t"  /* copy return address from old location */
                    "movl %eax,0(%esp)\n\t"
-                   "ret" );
+                   "ret" )
 #endif
 
 /**************************************************************************
@@ -422,7 +422,7 @@ __ASM_GLOBAL_FUNC( _alloca_probe,
                    "xchgl %esp,%eax\n\t"
                    "movl 0(%eax),%eax\n\t"  /* copy return address from old location */
                    "movl %eax,0(%esp)\n\t"
-                   "ret" );
+                   "ret" )
 #endif
 
 
@@ -627,7 +627,7 @@ ULONGLONG __cdecl RtlUlonglongByteSwap(ULONGLONG i)
 __ASM_GLOBAL_FUNC(NTDLL_RtlUlongByteSwap,
                   "movl %ecx,%eax\n\t"
                   "bswap %eax\n\t"
-                  "ret");
+                  "ret")
 #endif
 
 /*************************************************************************
@@ -642,7 +642,7 @@ __ASM_GLOBAL_FUNC(NTDLL_RtlUlongByteSwap,
 __ASM_GLOBAL_FUNC(NTDLL_RtlUshortByteSwap,
                   "movb %ch,%al\n\t"
                   "movb %cl,%ah\n\t"
-                  "ret");
+                  "ret")
 #endif
 
 
@@ -885,4 +885,40 @@ NTSTATUS WINAPI RtlIpv4AddressToStringExW (PULONG IP, PULONG Port,
     FIXME("(%p,%p,%p,%p): stub\n", IP, Port, Buffer, MaxSize);
 
     return STATUS_SUCCESS;
+}
+
+static DWORD_PTR get_pointer_obfuscator( void )
+{
+    static DWORD_PTR pointer_obfuscator;
+
+    if (!pointer_obfuscator)
+    {
+        ULONG seed = NtGetTickCount();
+        ULONG_PTR rand;
+
+        /* generate a random value for the obfuscator */
+        rand = RtlUniform( &seed );
+
+        /* handle 64bit pointers */
+        rand ^= RtlUniform( &seed ) << ((sizeof (DWORD_PTR) - sizeof (ULONG))*8);
+
+        /* set the high bits so dereferencing obfuscated pointers will (usually) crash */
+        rand |= 0xc0000000 << ((sizeof (DWORD_PTR) - sizeof (ULONG))*8);
+
+        interlocked_cmpxchg_ptr( (void**) &pointer_obfuscator, (void*) rand, NULL );
+    }
+
+    return pointer_obfuscator;
+}
+
+PVOID WINAPI RtlEncodePointer( PVOID ptr )
+{
+    DWORD_PTR ptrval = (DWORD_PTR) ptr;
+    return (PVOID)(ptrval ^ get_pointer_obfuscator());
+}
+
+PVOID WINAPI RtlDecodePointer( PVOID ptr )
+{
+    DWORD_PTR ptrval = (DWORD_PTR) ptr;
+    return (PVOID)(ptrval ^ get_pointer_obfuscator());
 }

@@ -1,15 +1,14 @@
 TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
+TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
-MODULE    = winealsa.drv
-IMPORTS   = winmm user32 advapi32 kernel32 ntdll
-EXTRALIBS = -ldxguid -luuid @ALSALIBS@
+MODULE    = winejack.drv
+IMPORTS   = winmm user32 kernel32
+EXTRALIBS = -ldxguid -luuid
 
 C_SRCS = \
 	audio.c \
-	alsa.c \
-	midi.c
+	jack.c
 
 @MAKE_DLL_RULES@
 

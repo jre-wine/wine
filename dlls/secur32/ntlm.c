@@ -222,8 +222,9 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleW(
                         {
                             helper->pwlen = WideCharToMultiByte(CP_UNIXCP, 
                                 WC_NO_BEST_FIT_CHARS, auth_data->Password, 
-                                auth_data->PasswordLength+1, NULL, 0, NULL, NULL);
-                        
+                                auth_data->PasswordLength+1, NULL, 0, NULL,
+                                NULL) + 1;
+
                             helper->password = HeapAlloc(GetProcessHeap(), 0, 
                                     helper->pwlen);
 
@@ -232,7 +233,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleW(
                                 helper->password, helper->pwlen, NULL, NULL);
                         }
                     }
-           
+
                     phCredential->dwUpper = fCredentialUse;
                     phCredential->dwLower = (ULONG_PTR)helper;
                     TRACE("ACH phCredential->dwUpper: 0x%08lx, dwLower: 0x%08lx\n",
@@ -331,12 +332,12 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleA(
             if(identity->PasswordLength != 0)
             {
                 passwd_sizeW = MultiByteToWideChar(CP_ACP, 0, 
-                    (LPCSTR)identity->Password, identity->PasswordLength+1, 
+                    (LPCSTR)identity->Password, identity->PasswordLength,
                     NULL, 0);
                 passwd = HeapAlloc(GetProcessHeap(), 0, passwd_sizeW
                     * sizeof(SEC_WCHAR));
                 MultiByteToWideChar(CP_ACP, 0, (LPCSTR)identity->Password,
-                    identity->PasswordLength+1, passwd, passwd_sizeW);
+                    identity->PasswordLength, passwd, passwd_sizeW);
             }
             else
             {
@@ -520,7 +521,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
         if(lstrlenA(want_flags) > 2)
         {
-            TRACE("Want flags are '%s'\n", debugstr_a(want_flags));
+            TRACE("Want flags are %s\n", debugstr_a(want_flags));
             lstrcpynA(buffer, want_flags, max_len-1);
             if((ret = run_helper(helper, buffer, max_len, &buffer_len)) 
                     != SEC_E_OK)

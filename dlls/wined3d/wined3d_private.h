@@ -38,7 +38,6 @@
 #include "wine/unicode.h"
 
 #include "d3d9.h"
-#include "d3d9types.h"
 #include "wined3d_private_types.h"
 #include "ddraw.h"
 #include "wine/wined3d_interface.h"
@@ -396,7 +395,8 @@ void primitiveConvertFVFtoOffset(DWORD thisFVF,
                                  DWORD stride,
                                  BYTE *data,
                                  WineDirect3DVertexStridedData *strided,
-                                 GLint streamVBO);
+                                 GLint streamVBO,
+                                 UINT streamNo);
 
 DWORD get_flexible_vertex_size(DWORD d3dvtVertexType);
 
@@ -559,6 +559,10 @@ typedef struct IWineD3DDeviceImpl
     IUnknown               *parent;
     IWineD3D               *wineD3D;
 
+    /* Window styles to restore when switching fullscreen mode */
+    LONG                    style;
+    LONG                    exStyle;
+
     /* X and GL Information */
     GLint                   maxConcurrentLights;
 
@@ -576,7 +580,6 @@ typedef struct IWineD3DDeviceImpl
 #define                         IS_TRACKING        1  /* tracking_parm is tracking diffuse color  */
 #define                         NEEDS_TRACKING     2  /* Tracking needs to be enabled when needed */
 #define                         NEEDS_DISABLE      3  /* Tracking needs to be disabled when needed*/
-    BOOL                    texture_shader_active;  /* TODO: Confirm use is correct */
     BOOL                    last_was_notclipped;
     BOOL                    untransformed;
     BOOL                    last_was_pshader;
@@ -752,7 +755,7 @@ typedef struct IWineD3DVertexBufferImpl
     /* Vertex buffer object support */
     GLuint                    vbo;
     BYTE                      Flags;
-    UINT                      stream;
+    LONG                      bindCount;
 
     UINT                      dirtystart, dirtyend;
     LONG                      lockcount;
@@ -767,9 +770,8 @@ extern const IWineD3DVertexBufferVtbl IWineD3DVertexBuffer_Vtbl;
 #define VBFLAG_LOAD           0x01    /* Data is written from allocatedMemory to the VBO */
 #define VBFLAG_OPTIMIZED      0x02    /* Optimize has been called for the VB */
 #define VBFLAG_DIRTY          0x04    /* Buffer data has been modified */
-#define VBFLAG_STREAM         0x08    /* The vertex buffer is in a stream */
-#define VBFLAG_HASDESC        0x10    /* A vertex description has been found */
-#define VBFLAG_VBOCREATEFAIL  0x20    /* An attempt to create a vbo has failed */
+#define VBFLAG_HASDESC        0x08    /* A vertex description has been found */
+#define VBFLAG_VBOCREATEFAIL  0x10    /* An attempt to create a vbo has failed */
 
 /*****************************************************************************
  * IWineD3DIndexBuffer implementation structure (extends IWineD3DResourceImpl)
@@ -985,6 +987,8 @@ struct IWineD3DSurfaceImpl
 
     RECT                      lockedRect;
     RECT                      dirtyRect;
+    int                       lockCount;
+#define MAXLOCKCOUNT          50 /* After this amount of locks do not free the sysmem copy */
 
     glDescriptor              glDescription;
 
@@ -1155,6 +1159,7 @@ typedef struct SAVEDSTATES {
         BOOL                      vertexShaderConstantsB[MAX_CONST_B];
         BOOL                      vertexShaderConstantsI[MAX_CONST_I];
         BOOL                     *vertexShaderConstantsF;
+        BOOL                      scissorRect;
 } SAVEDSTATES;
 
 typedef struct {
@@ -1243,6 +1248,9 @@ struct IWineD3DStateBlockImpl
 
     /* Current GLSL Shader Program */
     struct glsl_shader_prog_link *glsl_program;
+
+    /* Scissor test rectangle */
+    RECT                      scissorRect;
 };
 
 extern void stateblock_savedstates_set(
@@ -1312,6 +1320,8 @@ typedef struct IWineD3DSwapChainImpl
     BOOL                      wantsDepthStencilBuffer;
     D3DPRESENT_PARAMETERS     presentParms;
     DWORD                     orig_width, orig_height;
+
+    long prev_time, frames;   /* Performance tracking */
 
     /* TODO: move everything up to drawable off into a context manager
       and store the 'data' in the contextManagerData interface.
@@ -1485,6 +1495,7 @@ typedef struct SHADER_BUFFER {
     char* buffer;
     unsigned int bsize;
     unsigned int lineNo;
+    BOOL newline;
 } SHADER_BUFFER;
 
 /* Undocumented opcode controls */
@@ -1609,6 +1620,7 @@ extern void shader_glsl_load_constants(
     char useVertexShader);
 
 /** The following translate DirectX pixel/vertex shader opcodes to GLSL lines */
+extern void shader_glsl_cross(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_map2gl(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_arith(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_mov(SHADER_OPCODE_ARG* arg);

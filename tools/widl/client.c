@@ -59,37 +59,14 @@ static int print_client( const char *format, ... )
 }
 
 
-static void print_message_buffer_size(const func_t *func)
-{
-    unsigned int total_size = 0;
-
-    if (func->args)
-    {
-        const var_t *var = func->args;
-        while (NEXT_LINK(var)) var = NEXT_LINK(var);
-        while (var)
-        {
-            unsigned int alignment;
-
-            total_size += get_required_buffer_size(var, &alignment, PASS_IN);
-            total_size += alignment;
-
-            var = PREV_LINK(var);
-        }
-    }
-    fprintf(client, " %u", total_size);
-}
-
 static void check_pointers(const func_t *func)
 {
-    var_t *var;
+    const var_t *var;
 
     if (!func->args)
         return;
 
-    var = func->args;
-    while (NEXT_LINK(var)) var = NEXT_LINK(var);
-    while (var)
+    LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
     {
         if (is_var_ptr(var) && cant_be_null(var))
         {
@@ -100,21 +77,18 @@ static void check_pointers(const func_t *func)
             indent--;
             print_client("}\n\n");
         }
-
-        var = PREV_LINK(var);
     }
 }
 
 static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsigned int *type_offset)
 {
-    const func_t *func = iface->funcs;
+    const func_t *func;
     const char *implicit_handle = get_attrp(iface->attrs, ATTR_IMPLICIT_HANDLE);
     int explicit_handle = is_attr(iface->attrs, ATTR_EXPLICIT_HANDLE);
-    var_t *var;
+    const var_t *var;
     int method_count = 0;
 
-    while (NEXT_LINK(func)) func = NEXT_LINK(func);
-    while (func)
+    if (iface->funcs) LIST_FOR_EACH_ENTRY( func, iface->funcs, const func_t, entry )
     {
         const var_t *def = func->def;
         const var_t* explicit_handle_var;
@@ -197,11 +171,6 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
             fprintf(client, "\n");
         }
 
-        /* emit the message buffer size */
-        print_client("_StubMsg.BufferLength =");
-        print_message_buffer_size(func);
-        fprintf(client, ";\n");
-
         type_offset_func = *type_offset;
         write_remoting_arguments(client, indent, func, &type_offset_func, PASS_IN, PHASE_BUFFERSIZE);
 
@@ -260,13 +229,8 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
         /* update proc_offset */
         if (func->args)
         {
-            var = func->args;
-            while (NEXT_LINK(var)) var = NEXT_LINK(var);
-            while (var)
-            {
+            LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
                 *proc_offset += get_size_procformatstring_var(var);
-                var = PREV_LINK(var);
-            }
         }
         if (!is_void(def->type, NULL))
             *proc_offset += get_size_procformatstring_var(def);
@@ -301,7 +265,6 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
         fprintf(client, "\n");
 
         method_count++;
-        func = PREV_LINK(func);
     }
 }
 
@@ -424,17 +387,16 @@ static void init_client(void)
 }
 
 
-void write_client(ifref_t *ifaces)
+void write_client(ifref_list_t *ifaces)
 {
     unsigned int proc_offset = 0;
     unsigned int type_offset = 2;
-    ifref_t *iface = ifaces;
+    ifref_t *iface;
 
     if (!do_client)
         return;
-    if (!iface)
+    if (do_everything && !ifaces)
         return;
-    END_OF_LIST(iface);
 
     init_client();
     if (!client)
@@ -442,7 +404,7 @@ void write_client(ifref_t *ifaces)
 
     write_formatstringsdecl(client, indent, ifaces, 0);
 
-    for (; iface; iface = PREV_LINK(iface))
+    if (ifaces) LIST_FOR_EACH_ENTRY( iface, ifaces, ifref_t, entry )
     {
         if (is_object(iface->iface->attrs) || is_local(iface->iface->attrs))
             continue;

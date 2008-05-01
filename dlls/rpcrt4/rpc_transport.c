@@ -162,8 +162,33 @@ static RPC_STATUS rpcrt4_conn_open_pipe(RpcConnection *Connection, LPCSTR pname,
   TRACE("connecting to %s\n", pname);
 
   while (TRUE) {
+    DWORD dwFlags = 0;
+    if (Connection->QOS)
+    {
+        dwFlags = SECURITY_SQOS_PRESENT;
+        switch (Connection->QOS->qos->ImpersonationType)
+        {
+            case RPC_C_IMP_LEVEL_DEFAULT:
+                /* FIXME: what to do here? */
+                break;
+            case RPC_C_IMP_LEVEL_ANONYMOUS:
+                dwFlags |= SECURITY_ANONYMOUS;
+                break;
+            case RPC_C_IMP_LEVEL_IDENTIFY:
+                dwFlags |= SECURITY_IDENTIFICATION;
+                break;
+            case RPC_C_IMP_LEVEL_IMPERSONATE:
+                dwFlags |= SECURITY_IMPERSONATION;
+                break;
+            case RPC_C_IMP_LEVEL_DELEGATE:
+                dwFlags |= SECURITY_DELEGATION;
+                break;
+        }
+        if (Connection->QOS->qos->IdentityTracking == RPC_C_QOS_IDENTIFY_DYNAMIC)
+            dwFlags |= SECURITY_CONTEXT_TRACKING;
+    }
     pipe = CreateFileA(pname, GENERIC_READ|GENERIC_WRITE, 0, NULL,
-                       OPEN_EXISTING, 0, 0);
+                       OPEN_EXISTING, dwFlags, 0);
     if (pipe != INVALID_HANDLE_VALUE) break;
     err = GetLastError();
     if (err == ERROR_PIPE_BUSY) {
@@ -219,7 +244,7 @@ static RPC_STATUS rpcrt4_protseq_ncalrpc_open_endpoint(RpcServerProtseq* protseq
   RpcConnection *Connection;
 
   r = RPCRT4_CreateConnection(&Connection, TRUE, protseq->Protseq, NULL,
-                              endpoint, NULL, NULL, NULL);
+                              endpoint, NULL, NULL, NULL, NULL);
   if (r != RPC_S_OK)
       return r;
 
@@ -266,7 +291,7 @@ static RPC_STATUS rpcrt4_protseq_ncacn_np_open_endpoint(RpcServerProtseq *protse
   RpcConnection *Connection;
 
   r = RPCRT4_CreateConnection(&Connection, TRUE, protseq->Protseq, NULL,
-                              endpoint, NULL, NULL, NULL);
+                              endpoint, NULL, NULL, NULL, NULL);
   if (r != RPC_S_OK)
     return r;
 
@@ -329,21 +354,40 @@ static int rpcrt4_conn_np_read(RpcConnection *Connection,
                         void *buffer, unsigned int count)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  DWORD dwRead = 0;
-  if (!ReadFile(npc->pipe, buffer, count, &dwRead, NULL) &&
-      (GetLastError() != ERROR_MORE_DATA))
-    return -1;
-  return dwRead;
+  char *buf = buffer;
+  BOOL ret = TRUE;
+  unsigned int bytes_left = count;
+
+  while (bytes_left)
+  {
+    DWORD bytes_read;
+    ret = ReadFile(npc->pipe, buf, bytes_left, &bytes_read, NULL);
+    if (!ret || !bytes_read)
+        break;
+    bytes_left -= bytes_read;
+    buf += bytes_read;
+  }
+  return ret ? count : -1;
 }
 
 static int rpcrt4_conn_np_write(RpcConnection *Connection,
                              const void *buffer, unsigned int count)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  DWORD dwWritten = 0;
-  if (!WriteFile(npc->pipe, buffer, count, &dwWritten, NULL))
-    return -1;
-  return dwWritten;
+  const char *buf = buffer;
+  BOOL ret = TRUE;
+  unsigned int bytes_left = count;
+
+  while (bytes_left)
+  {
+    DWORD bytes_written;
+    ret = WriteFile(npc->pipe, buf, count, &bytes_written, NULL);
+    if (!ret || !bytes_written)
+        break;
+    bytes_left -= bytes_written;
+    buf += bytes_written;
+  }
+  return ret ? count : -1;
 }
 
 static int rpcrt4_conn_np_close(RpcConnection *Connection)
@@ -795,7 +839,8 @@ static RPC_STATUS rpcrt4_protseq_ncacn_ip_tcp_open_endpoint(RpcServerProtseq *pr
         }
         create_status = RPCRT4_CreateConnection((RpcConnection **)&tcpc, TRUE,
                                                 protseq->Protseq, NULL,
-                                                endpoint, NULL, NULL, NULL);
+                                                endpoint, NULL, NULL, NULL,
+                                                NULL);
         if (create_status != RPC_S_OK)
         {
             close(sock);
@@ -1291,7 +1336,8 @@ RPC_STATUS RPCRT4_CloseConnection(RpcConnection* Connection)
 
 RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
     LPCSTR Protseq, LPCSTR NetworkAddr, LPCSTR Endpoint,
-    LPCSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcBinding* Binding)
+    LPCWSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcQualityOfService *QOS,
+    RpcBinding* Binding)
 {
   const struct connection_ops *ops;
   RpcConnection* NewConnection;
@@ -1309,6 +1355,7 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
   NewConnection->ops = ops;
   NewConnection->NetworkAddr = RPCRT4_strdupA(NetworkAddr);
   NewConnection->Endpoint = RPCRT4_strdupA(Endpoint);
+  NewConnection->NetworkOptions = RPCRT4_strdupW(NetworkOptions);
   NewConnection->Used = Binding;
   NewConnection->MaxTransmissionSize = RPC_MAX_PACKET_SIZE;
   memset(&NewConnection->ActiveInterface, 0, sizeof(NewConnection->ActiveInterface));
@@ -1317,6 +1364,8 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
   SecInvalidateHandle(&NewConnection->ctx);
   if (AuthInfo) RpcAuthInfo_AddRef(AuthInfo);
   NewConnection->AuthInfo = AuthInfo;
+  if (QOS) RpcQualityOfService_AddRef(QOS);
+  NewConnection->QOS = QOS;
   list_init(&NewConnection->conn_pool_entry);
 
   TRACE("connection: %p\n", NewConnection);
@@ -1327,13 +1376,14 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
 
 RpcConnection *RPCRT4_GetIdleConnection(const RPC_SYNTAX_IDENTIFIER *InterfaceId,
     const RPC_SYNTAX_IDENTIFIER *TransferSyntax, LPCSTR Protseq, LPCSTR NetworkAddr,
-    LPCSTR Endpoint, RpcAuthInfo* AuthInfo)
+    LPCSTR Endpoint, const RpcAuthInfo* AuthInfo, const RpcQualityOfService *QOS)
 {
   RpcConnection *Connection;
   /* try to find a compatible connection from the connection pool */
   EnterCriticalSection(&connection_pool_cs);
   LIST_FOR_EACH_ENTRY(Connection, &connection_pool, RpcConnection, conn_pool_entry)
     if ((Connection->AuthInfo == AuthInfo) &&
+        (Connection->QOS == QOS) &&
         !memcmp(&Connection->ActiveInterface, InterfaceId,
            sizeof(RPC_SYNTAX_IDENTIFIER)) &&
         !strcmp(rpcrt4_conn_get_name(Connection), Protseq) &&
@@ -1367,7 +1417,8 @@ RPC_STATUS RPCRT4_SpawnConnection(RpcConnection** Connection, RpcConnection* Old
                                 rpcrt4_conn_get_name(OldConnection),
                                 OldConnection->NetworkAddr,
                                 OldConnection->Endpoint, NULL,
-                                OldConnection->AuthInfo, NULL);
+                                OldConnection->AuthInfo, OldConnection->QOS,
+                                NULL);
   if (err == RPC_S_OK)
     rpcrt4_conn_handoff(OldConnection, *Connection);
   return err;
@@ -1380,7 +1431,9 @@ RPC_STATUS RPCRT4_DestroyConnection(RpcConnection* Connection)
   RPCRT4_CloseConnection(Connection);
   RPCRT4_strfree(Connection->Endpoint);
   RPCRT4_strfree(Connection->NetworkAddr);
+  HeapFree(GetProcessHeap(), 0, Connection->NetworkOptions);
   if (Connection->AuthInfo) RpcAuthInfo_Release(Connection->AuthInfo);
+  if (Connection->QOS) RpcQualityOfService_Release(Connection->QOS);
   HeapFree(GetProcessHeap(), 0, Connection);
   return RPC_S_OK;
 }

@@ -4489,8 +4489,11 @@ TOOLBAR_SetBitmapSize (HWND hwnd, WPARAM wParam, LPARAM lParam)
     if (wParam != 0)
         FIXME("wParam is %d. Perhaps image list index?\n", wParam);
 
-    if ((LOWORD(lParam) <= 0) || (HIWORD(lParam)<=0))
-        lParam = MAKELPARAM(16, 15);
+    if (LOWORD(lParam) == 0)
+        lParam = MAKELPARAM(1, HIWORD(lParam));
+
+    if (HIWORD(lParam)==0)
+        lParam = MAKELPARAM(LOWORD(lParam), 1);
 
     if (infoPtr->nNumButtons > 0)
         WARN("%d buttons, undoc increase to bitmap size : %d-%d -> %d-%d\n",
@@ -4910,6 +4913,7 @@ TOOLBAR_SetImageList (HWND hwnd, WPARAM wParam, LPARAM lParam)
         infoPtr->nBitmapHeight = 1;
     }
     infoPtr->nVBitmapHeight = infoPtr->nBitmapHeight;
+    TOOLBAR_CalcToolbar(hwnd);
 
     TRACE("hwnd %p, new himl=%p, id = %d, count=%d, bitmap w=%d, h=%d\n",
 	  hwnd, infoPtr->himlDef, id, infoPtr->nNumBitmaps,

@@ -20,11 +20,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
-#include <stdlib.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
@@ -35,10 +31,7 @@
 #include "winuser.h"
 #include "objbase.h"
 #include "ole2.h"
-#include "rpc.h"
 #include "winerror.h"
-#include "winreg.h"
-#include "wtypes.h"
 #include "wine/unicode.h"
 
 #include "compobj_private.h"
@@ -1557,7 +1550,7 @@ HRESULT WINAPI CoMarshalInterface(IStream *pStream, REFIID riid, IUnknown *pUnk,
     dump_MSHLFLAGS(mshlFlags);
     TRACE(")\n");
 
-    if (pUnk == NULL)
+    if (!pUnk || !pStream)
         return E_INVALIDARG;
 
     objref.signature = OBJREF_SIGNATURE;
@@ -1666,6 +1659,9 @@ HRESULT WINAPI CoUnmarshalInterface(IStream *pStream, REFIID riid, LPVOID *ppv)
 
     TRACE("(%p, %s, %p)\n", pStream, debugstr_guid(riid), ppv);
 
+    if (!pStream || !ppv)
+        return E_INVALIDARG;
+
     hr = get_unmarshaler_from_stream(pStream, &pMarshal, &iid);
     if (hr != S_OK)
         return hr;
@@ -1675,16 +1671,13 @@ HRESULT WINAPI CoUnmarshalInterface(IStream *pStream, REFIID riid, LPVOID *ppv)
     if (hr)
         ERR("IMarshal::UnmarshalInterface failed, 0x%08x\n", hr);
 
-    /* IID_NULL means use the interface ID of the marshaled object */
-    if (!IsEqualIID(riid, &IID_NULL))
-        iid = *riid;
-
     if (hr == S_OK)
     {
-        if (!IsEqualIID(riid, &iid))
+        /* IID_NULL means use the interface ID of the marshaled object */
+        if (!IsEqualIID(riid, &IID_NULL) && !IsEqualIID(riid, &iid))
         {
             TRACE("requested interface != marshalled interface, additional QI needed\n");
-            hr = IUnknown_QueryInterface(object, &iid, ppv);
+            hr = IUnknown_QueryInterface(object, riid, ppv);
             if (hr)
                 ERR("Couldn't query for interface %s, hr = 0x%08x\n",
                     debugstr_guid(riid), hr);
@@ -1780,7 +1773,7 @@ HRESULT WINAPI CoMarshalInterThreadInterfaceInStream(
     if (SUCCEEDED(hres))
     {
         memset(&seekto, 0, sizeof(seekto));
-        IStream_Seek(*ppStm, seekto, SEEK_SET, &xpos);
+        IStream_Seek(*ppStm, seekto, STREAM_SEEK_SET, &xpos);
     }
     else
     {

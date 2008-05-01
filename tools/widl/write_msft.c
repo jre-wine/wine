@@ -49,6 +49,7 @@
 #include "typelib.h"
 #include "typelib_struct.h"
 #include "utils.h"
+#include "header.h"
 #include "hash.h"
 
 enum MSFT_segment_index {
@@ -715,7 +716,8 @@ static importinfo_t *find_importinfo(msft_typelib_t *typelib, const char *name)
     if(!name)
         return NULL;
 
-    for(importlib = typelib->typelib->importlibs; importlib; importlib = NEXT_LINK(importlib)) {
+    LIST_FOR_EACH_ENTRY( importlib, &typelib->typelib->importlibs, importlib_t, entry )
+    {
         for(i=0; i < importlib->ntypeinfos; i++) {
             if(!strcmp(name, importlib->importinfos[i].name)) {
                 chat("Found %s in importlib.\n", name);
@@ -1102,15 +1104,11 @@ static int encode_var(
     }
 
     if(var->array) {
-        expr_t *dim = var->array;
-        expr_t *array_save;
-        int num_dims = 1, elements = 1, arrayoffset;
+        expr_t *dim;
+        array_dims_t *array_save;
+        int num_dims = list_count( var->array ), elements = 1, arrayoffset;
         int *arraydata;
 
-        while(NEXT_LINK(dim)) {
-            dim = NEXT_LINK(dim);
-            num_dims++;
-        }
         chat("array with %d dimensions\n", num_dims);
         array_save = var->array;
         var->array = NULL;
@@ -1124,12 +1122,12 @@ static int encode_var(
         arraydata[1] |= ((num_dims * 2 * sizeof(long)) << 16);
 
         arraydata += 2;
-        while(dim) {
+        LIST_FOR_EACH_ENTRY( dim, var->array, expr_t, entry )
+        {
             arraydata[0] = dim->cval;
             arraydata[1] = 0;
             arraydata += 2;
             elements *= dim->cval;
-            dim = PREV_LINK(dim);
         }
 
 	typeoffset = ctl2_alloc_segment(typelib, MSFT_SEG_TYPEDESC, 8, 0);
@@ -1241,14 +1239,14 @@ static HRESULT set_custdata(msft_typelib_t *typelib, REFGUID guid,
     return S_OK;
 }
 
-static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, func_t *func, int index)
+static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, const func_t *func, int index)
 {
     int offset, name_offset;
     int *typedata, typedata_size;
     int i, id, next_idx;
     int decoded_size, extra_attr = 0;
     int num_params = 0, num_defaults = 0;
-    var_t *arg, *last_arg = NULL;
+    var_t *arg;
     char *namedata;
     const attr_t *attr;
     unsigned int funcflags = 0, callconv = 4 /* CC_STDCALL */;
@@ -1272,30 +1270,29 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, func_t *func, int index)
         break;
     }
 
-    for(attr = func->def->attrs; attr; attr = NEXT_LINK(attr)) {
-        if(attr->type == ATTR_LOCAL) {
-            chat("add_func_desc: skipping local function\n");
-            return S_FALSE;
-        }
+    if (is_local( func->def->attrs )) {
+        chat("add_func_desc: skipping local function\n");
+        return S_FALSE;
     }
 
-    for(arg = func->args; arg; arg = NEXT_LINK(arg)) {
-        last_arg = arg;
+    if (func->args)
+      LIST_FOR_EACH_ENTRY( arg, func->args, var_t, entry )
+      {
         num_params++;
-        for(attr = arg->attrs; attr; attr = NEXT_LINK(attr)) {
+        if (arg->attrs) LIST_FOR_EACH_ENTRY( attr, arg->attrs, const attr_t, entry ) {
             if(attr->type == ATTR_DEFAULTVALUE_EXPR || attr->type == ATTR_DEFAULTVALUE_STRING) {
                 num_defaults++;
                 break;
             }
         }
-    }
+      }
 
     chat("add_func_desc: num of params %d\n", num_params);
 
     name_offset = ctl2_alloc_name(typeinfo->typelib, func->def->name);
 
-    for(attr = func->def->attrs; attr; attr = NEXT_LINK(attr)) {
-        expr_t *expr = attr->u.pval; 
+    if (func->def->attrs) LIST_FOR_EACH_ENTRY( attr, func->def->attrs, const attr_t, entry ) {
+        expr_t *expr = attr->u.pval;
         switch(attr->type) {
         case ATTR_ENTRY_ORDINAL:
             extra_attr = max(extra_attr, 3);
@@ -1433,7 +1430,11 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, func_t *func, int index)
         warning("unknown number of optional attrs\n");
     }
 
-    for (arg = last_arg, i = 0; arg; arg = PREV_LINK(arg), i++) {
+    if (func->args)
+    {
+      i = 0;
+      LIST_FOR_EACH_ENTRY( arg, func->args, var_t, entry )
+      {
         const attr_t *attr;
         int paramflags = 0;
         int *paramdata = typedata + 6 + extra_attr + (num_defaults ? num_params : 0) + i * 3;
@@ -1442,7 +1443,7 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, func_t *func, int index)
         if(defaultdata) *defaultdata = -1;
 
 	encode_var(typeinfo->typelib, arg, paramdata, NULL, NULL, &decoded_size);
-        for(attr = arg->attrs; attr; attr = NEXT_LINK(attr)) {
+        if (arg->attrs) LIST_FOR_EACH_ENTRY( attr, arg->attrs, const attr_t, entry ) {
             switch(attr->type) {
             case ATTR_DEFAULTVALUE_EXPR:
               {
@@ -1491,6 +1492,8 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, func_t *func, int index)
 	paramdata[1] = -1;
 	paramdata[2] = paramflags;
 	typedata[3] += decoded_size << 16;
+        i++;
+      }
     }
 
     if(typeinfo->funcs_allocated == 0) {
@@ -1541,10 +1544,16 @@ static HRESULT add_func_desc(msft_typeinfo_t* typeinfo, func_t *func, int index)
 
     if(invokekind != 0x4 /* INVOKE_PROPERTYPUT */ && invokekind != 0x8 /* INVOKE_PROPERTYPUTREF */) { 
         /* don't give the arg of a [propput*] func a name */
-        for (arg = last_arg, i = 0; arg; arg = PREV_LINK(arg), i++) {
+        if (func->args)
+        {
+          i = 0;
+          LIST_FOR_EACH_ENTRY( arg, func->args, var_t, entry )
+          {
             int *paramdata = typedata + 6 + extra_attr + (num_defaults ? num_params : 0) + i * 3;
             offset = ctl2_alloc_name(typeinfo->typelib, arg->name);
             paramdata[1] = offset;
+            i++;
+          }
         }
     }
     return S_OK;
@@ -1568,8 +1577,8 @@ static HRESULT add_var_desc(msft_typeinfo_t *typeinfo, UINT index, var_t* var)
 
     id = 0x40000000 + index;
 
-    for(attr = var->attrs; attr; attr = NEXT_LINK(attr)) {
-        expr_t *expr = attr->u.pval; 
+    if (var->attrs) LIST_FOR_EACH_ENTRY( attr, var->attrs, const attr_t, entry ) {
+        expr_t *expr = attr->u.pval;
         switch(attr->type) {
         case ATTR_HIDDEN:
             varflags |= 0x40; /* VARFLAG_FHIDDEN */
@@ -1727,8 +1736,9 @@ static HRESULT add_impl_type(msft_typeinfo_t *typeinfo, type_t *ref, importinfo_
 }
 
 static msft_typeinfo_t *create_msft_typeinfo(msft_typelib_t *typelib, enum type_kind kind,
-                                             const char *name, const attr_t *attr)
+                                             const char *name, const attr_list_t *attrs)
 {
+    const attr_t *attr;
     msft_typeinfo_t *msft_typeinfo;
     int nameoffset;
     int typeinfo_offset;
@@ -1757,7 +1767,7 @@ static msft_typeinfo_t *create_msft_typeinfo(msft_typelib_t *typelib, enum type_
     if(kind == TKIND_COCLASS)
         typeinfo->flags |= 0x2; /* TYPEFLAG_FCANCREATE */
 
-    for( ; attr; attr = NEXT_LINK(attr)) {
+    if (attrs) LIST_FOR_EACH_ENTRY( attr, attrs, const attr_t, entry ) {
         switch(attr->type) {
         case ATTR_AGGREGATABLE:
             if (kind == TKIND_COCLASS)
@@ -1896,7 +1906,7 @@ static void add_dispatch(msft_typelib_t *typelib)
 static void add_dispinterface_typeinfo(msft_typelib_t *typelib, type_t *dispinterface)
 { 
     int idx = 0;
-    func_t *func;
+    const func_t *func;
     var_t *var;
     msft_typeinfo_t *msft_typeinfo;
 
@@ -1915,49 +1925,37 @@ static void add_dispinterface_typeinfo(msft_typelib_t *typelib, type_t *dispinte
     msft_typeinfo->typeinfo->cImplTypes = 1;
 
     /* count the no of funcs, as the variable indices come after the funcs */
-    if((func = dispinterface->funcs)) {
-        idx++;
-        while(NEXT_LINK(func)) {
-            func = NEXT_LINK(func);
-            idx++;
-        }
-    }
+    if (dispinterface->funcs)
+        LIST_FOR_EACH_ENTRY( func, dispinterface->funcs, const func_t, entry ) idx++;
 
-    if((var = dispinterface->fields)) {
-        while(NEXT_LINK(var)) var = NEXT_LINK(var);
-        while(var) {
-            add_var_desc(msft_typeinfo, idx, var);
-            idx++;
-            var = PREV_LINK(var);
-        }
-    }
+    if (dispinterface->fields)
+        LIST_FOR_EACH_ENTRY( var, dispinterface->fields, var_t, entry )
+            add_var_desc(msft_typeinfo, idx++, var);
 
-    idx = 0;
-    /* the func count above has already left us pointing at the first func */
-    while(func) {
-        if(add_func_desc(msft_typeinfo, func, idx) == S_OK)
-            idx++;
-        func = PREV_LINK(func);
+    if (dispinterface->funcs)
+    {
+        idx = 0;
+        LIST_FOR_EACH_ENTRY( func, dispinterface->funcs, const func_t, entry )
+            if(add_func_desc(msft_typeinfo, func, idx) == S_OK)
+                idx++;
     }
 }
 
 static void add_interface_typeinfo(msft_typelib_t *typelib, type_t *interface)
 {
     int idx = 0;
-    func_t *func;
+    const func_t *func;
     type_t *ref;
     msft_typeinfo_t *msft_typeinfo;
     importinfo_t *ref_importinfo = NULL;
     int num_parents = 0, num_funcs = 0;
-    const attr_t *attr;
     const type_t *derived;
 
     if (-1 < interface->typelib_idx)
         return;
 
-    for(attr = interface->attrs; attr; attr = NEXT_LINK(attr))
-        if(attr->type == ATTR_DISPINTERFACE)
-            return add_dispinterface_typeinfo(typelib, interface);
+    if (is_attr(interface->attrs, ATTR_DISPINTERFACE))
+        return add_dispinterface_typeinfo(typelib, interface);
 
     /* midl adds the parent interface first, unless the parent itself
        has no parent (i.e. it stops before IUnknown). */
@@ -1988,32 +1986,23 @@ static void add_interface_typeinfo(msft_typelib_t *typelib, type_t *interface)
     /* count the number of inherited interfaces and non-local functions */
     for(ref = interface->ref; ref; ref = ref->ref) {
         num_parents++;
-        for(func = ref->funcs; func; func = NEXT_LINK(func)) {
-            const attr_t *attr;
-            for(attr = func->def->attrs; attr; attr = NEXT_LINK(attr))
-                if(attr->type == ATTR_LOCAL)
-                    break;
-            if(!attr)
-                num_funcs++;
-        }
+        if (ref->funcs)
+            LIST_FOR_EACH_ENTRY( func, ref->funcs, const func_t, entry )
+                if (!is_local(func->def->attrs)) num_funcs++;
     }
     msft_typeinfo->typeinfo->datatype2 = num_funcs << 16 | num_parents;
     msft_typeinfo->typeinfo->cbSizeVft = num_funcs * 4;
 
-    if((func = interface->funcs)) {
-        while(NEXT_LINK(func)) func = NEXT_LINK(func);
-        while(func) {
+    if (interface->funcs)
+        LIST_FOR_EACH_ENTRY( func, interface->funcs, const func_t, entry )
             if(add_func_desc(msft_typeinfo, func, idx) == S_OK)
                 idx++;
-            func = PREV_LINK(func);
-        }
-    }
 }
 
 static void add_structure_typeinfo(msft_typelib_t *typelib, type_t *structure)
 {
     int idx = 0;
-    var_t *cur = structure->fields;
+    var_t *cur;
     msft_typeinfo_t *msft_typeinfo;
 
     if (-1 < structure->typelib_idx)
@@ -2023,30 +2012,24 @@ static void add_structure_typeinfo(msft_typelib_t *typelib, type_t *structure)
     msft_typeinfo = create_msft_typeinfo(typelib, TKIND_RECORD, structure->name, structure->attrs);
     msft_typeinfo->typeinfo->size = 0;
 
-    while(NEXT_LINK(cur)) cur = NEXT_LINK(cur);
-    while(cur) {
-        add_var_desc(msft_typeinfo, idx, cur);
-        idx++;
-        cur = PREV_LINK(cur);
-    }
+    if (structure->fields)
+        LIST_FOR_EACH_ENTRY( cur, structure->fields, var_t, entry )
+            add_var_desc(msft_typeinfo, idx++, cur);
 }
 
 static void add_enum_typeinfo(msft_typelib_t *typelib, type_t *enumeration)
 {
     int idx = 0;
-    var_t *cur = enumeration->fields;
+    var_t *cur;
     msft_typeinfo_t *msft_typeinfo;
 
     enumeration->typelib_idx = typelib->typelib_header.nrtypeinfos;
     msft_typeinfo = create_msft_typeinfo(typelib, TKIND_ENUM, enumeration->name, enumeration->attrs);
     msft_typeinfo->typeinfo->size = 0;
 
-    while(NEXT_LINK(cur)) cur = NEXT_LINK(cur);
-    while(cur) {
-        add_var_desc(msft_typeinfo, idx, cur);
-        idx++;
-        cur = PREV_LINK(cur);
-    }
+    if (enumeration->fields)
+        LIST_FOR_EACH_ENTRY( cur, enumeration->fields, var_t, entry )
+            add_var_desc(msft_typeinfo, idx++, cur);
 }
 
 static void add_typedef_typeinfo(msft_typelib_t *typelib, type_t *tdef)
@@ -2079,17 +2062,13 @@ static void add_coclass_typeinfo(msft_typelib_t *typelib, type_t *cls)
     cls->typelib_idx = typelib->typelib_header.nrtypeinfos;
     msft_typeinfo = create_msft_typeinfo(typelib, TKIND_COCLASS, cls->name, cls->attrs);
 
-    if((iref = cls->ifaces)) {
-        num_ifaces++;
-        while(NEXT_LINK(iref)) {
-            iref = NEXT_LINK(iref);
-            num_ifaces++;
-        }
-    }
+    if (cls->ifaces) LIST_FOR_EACH_ENTRY( iref, cls->ifaces, ifref_t, entry ) num_ifaces++;
 
     offset = msft_typeinfo->typeinfo->datatype1 = ctl2_alloc_segment(typelib, MSFT_SEG_REFERENCES,
                                                                      num_ifaces * sizeof(*ref), 0);
-    for(i = 0; i < num_ifaces; i++) {
+
+    i = 0;
+    if (cls->ifaces) LIST_FOR_EACH_ENTRY( iref, cls->ifaces, ifref_t, entry ) {
         if(iref->iface->typelib_idx == -1)
             add_interface_typeinfo(typelib, iref->iface);
         ref = (MSFT_RefRecord*) (typelib->typelib_segment_data[MSFT_SEG_REFERENCES] + offset + i * sizeof(*ref));
@@ -2100,7 +2079,7 @@ static void add_coclass_typeinfo(msft_typelib_t *typelib, type_t *cls)
         if(i < num_ifaces - 1)
             ref->onext = offset + (i + 1) * sizeof(*ref);
 
-        for(attr = iref->attrs; attr; attr = NEXT_LINK(attr)) {
+        if (iref->attrs) LIST_FOR_EACH_ENTRY( attr, iref->attrs, const attr_t, entry ) {
             switch(attr->type) {
             case ATTR_DEFAULT:
                 ref->flags |= 0x1; /* IMPLTYPEFLAG_FDEFAULT */
@@ -2132,7 +2111,7 @@ static void add_coclass_typeinfo(msft_typelib_t *typelib, type_t *cls)
             else if(!first)
                 first = ref;
         }
-        iref = PREV_LINK(iref);
+        i++;
     }
 
     /* If we haven't had a default interface, then set the default flags on the
@@ -2150,7 +2129,7 @@ static void add_coclass_typeinfo(msft_typelib_t *typelib, type_t *cls)
 static void add_module_typeinfo(msft_typelib_t *typelib, type_t *module)
 {
     int idx = 0;
-    func_t *func;
+    const func_t *func;
     msft_typeinfo_t *msft_typeinfo;
 
     if (-1 < module->typelib_idx)
@@ -2160,14 +2139,11 @@ static void add_module_typeinfo(msft_typelib_t *typelib, type_t *module)
     msft_typeinfo = create_msft_typeinfo(typelib, TKIND_MODULE, module->name, module->attrs);
     msft_typeinfo->typeinfo->typekind |= 0x0a00;
 
-    if((func = module->funcs)) {
-        while(NEXT_LINK(func)) func = NEXT_LINK(func);
-        while(func) {
+    if (module->funcs)
+        LIST_FOR_EACH_ENTRY( func, module->funcs, const func_t, entry )
             if(add_func_desc(msft_typeinfo, func, idx) == S_OK)
                 idx++;
-            func = PREV_LINK(func);
-        }
-    }
+
     msft_typeinfo->typeinfo->size = idx;
 }
 
@@ -2217,34 +2193,22 @@ static void set_name(msft_typelib_t *typelib)
 
 static void set_version(msft_typelib_t *typelib)
 {
-    long version = MAKELONG(0,0);
-    const attr_t *attr;
-
-    for(attr = typelib->typelib->attrs; attr; attr = NEXT_LINK(attr)) {
-        if(attr->type == ATTR_VERSION) {
-            version = attr->u.ival;
-        }
-    }
-    typelib->typelib_header.version = version;
-    return;
+    typelib->typelib_header.version = get_attrv( typelib->typelib->attrs, ATTR_VERSION );
 }
 
 static void set_guid(msft_typelib_t *typelib)
 {
     MSFT_GuidEntry guidentry;
     int offset;
-    const attr_t *attr;
+    void *ptr;
     GUID guid = {0,0,0,{0,0,0,0,0,0}};
 
     guidentry.guid = guid;
     guidentry.hreftype = -2;
     guidentry.next_hash = -1;
 
-    for(attr = typelib->typelib->attrs; attr; attr = NEXT_LINK(attr)) {
-        if(attr->type == ATTR_UUID) {
-            guidentry.guid = *(GUID*)(attr->u.pval);
-        }
-    }
+    ptr = get_attrp( typelib->typelib->attrs, ATTR_UUID );
+    if (ptr) guidentry.guid = *(GUID *)ptr;
 
     offset = ctl2_alloc_guid(typelib, &guidentry);
     typelib->typelib_header.posguid = offset;
@@ -2254,71 +2218,55 @@ static void set_guid(msft_typelib_t *typelib)
 
 static void set_doc_string(msft_typelib_t *typelib)
 {
-    const attr_t *attr;
-    int offset;
+    char *str = get_attrp( typelib->typelib->attrs, ATTR_HELPSTRING );
 
-    for(attr = typelib->typelib->attrs; attr; attr = NEXT_LINK(attr)) {
-        if(attr->type == ATTR_HELPSTRING) {
-            offset = ctl2_alloc_string(typelib, attr->u.pval);
-            if (offset == -1) return;
-            typelib->typelib_header.helpstring = offset;
-        }
+    if (str)
+    {
+        int offset = ctl2_alloc_string(typelib, str);
+        if (offset != -1) typelib->typelib_header.helpstring = offset;
     }
-    return;
 }
 
 static void set_help_file_name(msft_typelib_t *typelib)
 {
-    int offset;
-    const attr_t *attr;
-    for(attr = typelib->typelib->attrs; attr; attr = NEXT_LINK(attr)) {
-        if(attr->type == ATTR_HELPFILE) {
-            offset = ctl2_alloc_string(typelib, attr->u.pval);
-            if (offset == -1) return;
+    char *str = get_attrp( typelib->typelib->attrs, ATTR_HELPFILE );
+
+    if (str)
+    {
+        int offset = ctl2_alloc_string(typelib, str);
+        if (offset != -1)
+        {
             typelib->typelib_header.helpfile = offset;
             typelib->typelib_header.varflags |= 0x10;
         }
     }
-    return;
 }
 
 static void set_help_context(msft_typelib_t *typelib)
 {
-    const attr_t *attr;
-    for(attr = typelib->typelib->attrs; attr; attr = NEXT_LINK(attr)) {
-        if(attr->type == ATTR_HELPCONTEXT) {
-            const expr_t *expr = (expr_t *)attr->u.pval;
-            typelib->typelib_header.helpcontext = expr->cval;
-        }
-    }
-    return;
+    const expr_t *expr = get_attrp( typelib->typelib->attrs, ATTR_HELPCONTEXT );
+    if (expr) typelib->typelib_header.helpcontext = expr->cval;
 }
 
 static void set_help_string_dll(msft_typelib_t *typelib)
 {
-    int offset;
-    const attr_t *attr;
-    for(attr = typelib->typelib->attrs; attr; attr = NEXT_LINK(attr)) {
-        if(attr->type == ATTR_HELPSTRINGDLL) {
-            offset = ctl2_alloc_string(typelib, attr->u.pval);
-            if (offset == -1) return;
+    char *str = get_attrp( typelib->typelib->attrs, ATTR_HELPSTRINGDLL );
+
+    if (str)
+    {
+        int offset = ctl2_alloc_string(typelib, str);
+        if (offset != -1)
+        {
             typelib->help_string_dll_offset = offset;
             typelib->typelib_header.varflags |= 0x100;
         }
     }
-    return;
 }
 
 static void set_help_string_context(msft_typelib_t *typelib)
 {
-    const attr_t *attr;
-    for(attr = typelib->typelib->attrs; attr; attr = NEXT_LINK(attr)) {
-        if(attr->type == ATTR_HELPSTRINGCONTEXT) {
-            const expr_t *expr = (expr_t *)attr->u.pval;
-            typelib->typelib_header.helpstringcontext = expr->cval;
-        }
-    }
-    return;
+    const expr_t *expr = get_attrp( typelib->typelib->attrs, ATTR_HELPSTRINGCONTEXT );
+    if (expr) typelib->typelib_header.helpstringcontext = expr->cval;
 }
 
 static void set_lcid(msft_typelib_t *typelib)
@@ -2332,7 +2280,9 @@ static void set_lib_flags(msft_typelib_t *typelib)
     const attr_t *attr;
 
     typelib->typelib_header.flags = 0;
-    for(attr = typelib->typelib->attrs; attr; attr = NEXT_LINK(attr)) {
+    if (!typelib->typelib->attrs) return;
+    LIST_FOR_EACH_ENTRY( attr, typelib->typelib->attrs, const attr_t, entry )
+    {
         switch(attr->type) {
         case ATTR_CONTROL:
             typelib->typelib_header.flags |= 0x02; /* LIBFLAG_FCONTROL */
@@ -2554,10 +2504,7 @@ int create_msft_typelib(typelib_t *typelib)
     set_custdata(msft, &midl_time_guid, VT_UI4, &cur_time, &msft->typelib_header.CustomDataOffset);
     set_custdata(msft, &midl_version_guid, VT_UI4, &version, &msft->typelib_header.CustomDataOffset);
 
-    for(entry = typelib->entry; entry && NEXT_LINK(entry); entry = NEXT_LINK(entry))
-        ;
-
-    for( ; entry; entry = PREV_LINK(entry))
+    LIST_FOR_EACH_ENTRY( entry, &typelib->entries, typelib_entry_t, entry )
         add_entry(msft, entry);
 
     save_all_changes(msft);

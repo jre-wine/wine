@@ -501,7 +501,7 @@ CONST SHADER_OPCODE IWineD3DVertexShaderImpl_shader_ins[] = {
     {WINED3DSIO_LRP,  "lrp",  "LRP", 1, 4, vshader_lrp,  NULL,              shader_glsl_lrp, 0, 0},
     {WINED3DSIO_FRC,  "frc",  "FRC", 1, 2, vshader_frc,  vshader_hw_map2gl, shader_glsl_map2gl, 0, 0},
     {WINED3DSIO_POW,  "pow",  "POW", 1, 3, vshader_pow,  NULL, shader_glsl_map2gl, 0, 0},
-    {WINED3DSIO_CRS,  "crs",  "XPS", 1, 3, vshader_crs,  NULL, shader_glsl_map2gl, 0, 0},
+    {WINED3DSIO_CRS,  "crs",  "XPS", 1, 3, vshader_crs,  NULL, shader_glsl_cross, 0, 0},
     /* TODO: sng can possibly be performed a  s
         RCP tmp, vec
         MUL out, tmp, vec*/
@@ -517,7 +517,7 @@ CONST SHADER_OPCODE IWineD3DVertexShaderImpl_shader_ins[] = {
 
     */
     {WINED3DSIO_NRM,      "nrm",      NULL, 1, 2, vshader_nrm,    NULL, shader_glsl_map2gl, 0, 0},
-    {WINED3DSIO_SINCOS,   "sincos",   NULL, 1, 4, vshader_sincos2, NULL, shader_glsl_sincos, WINED3DVS_VERSION(2,0), WINED3DVS_VERSION(2,0)},
+    {WINED3DSIO_SINCOS,   "sincos",   NULL, 1, 4, vshader_sincos2, NULL, shader_glsl_sincos, WINED3DVS_VERSION(2,0), WINED3DVS_VERSION(2,1)},
     {WINED3DSIO_SINCOS,   "sincos",   NULL, 1, 2, vshader_sincos3, NULL, shader_glsl_sincos, WINED3DVS_VERSION(3,0), -1},
 
     /* Matrix */
@@ -715,6 +715,7 @@ static VOID IWineD3DVertexShaderImpl_GenerateShader(
 #endif
     buffer.bsize = 0;
     buffer.lineNo = 0;
+    buffer.newline = TRUE;
 
     if (This->baseShader.shader_mode == SHADER_GLSL) {
 

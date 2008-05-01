@@ -89,7 +89,7 @@ abs_time_t server_start_time = { 0, 0 };  /* time of server startup */
 
 extern struct wine_pthread_functions pthread_functions;
 
-static sigset_t block_set;  /* signals to block during server calls */
+sigset_t server_block_set;  /* signals to block during server calls */
 static int fd_socket = -1;  /* socket to exchange file descriptors with the server */
 
 static RTL_CRITICAL_SECTION fd_cache_section;
@@ -156,7 +156,7 @@ void server_exit_thread( int status )
     fds[1] = ntdll_get_thread_data()->wait_fd[1];
     fds[2] = ntdll_get_thread_data()->reply_fd;
     fds[3] = ntdll_get_thread_data()->request_fd;
-    pthread_functions.sigprocmask( SIG_BLOCK, &block_set, NULL );
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
 
     size = 0;
     NtFreeVirtualMemory( GetCurrentProcess(), &info.stack_base, &size, MEM_RELEASE | MEM_SYSTEM );
@@ -179,7 +179,7 @@ void server_exit_thread( int status )
  */
 void server_abort_thread( int status )
 {
-    pthread_functions.sigprocmask( SIG_BLOCK, &block_set, NULL );
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
     close( ntdll_get_thread_data()->wait_fd[0] );
     close( ntdll_get_thread_data()->wait_fd[1] );
     close( ntdll_get_thread_data()->reply_fd );
@@ -318,11 +318,31 @@ unsigned int wine_server_call( void *req_ptr )
     struct __server_request_info * const req = req_ptr;
     sigset_t old_set;
 
-    pthread_functions.sigprocmask( SIG_BLOCK, &block_set, &old_set );
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, &old_set );
     send_request( req );
     wait_reply( req );
     pthread_functions.sigprocmask( SIG_SETMASK, &old_set, NULL );
     return req->u.reply.reply_header.error;
+}
+
+
+/***********************************************************************
+ *           server_enter_uninterrupted_section
+ */
+void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset )
+{
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, sigset );
+    RtlEnterCriticalSection( cs );
+}
+
+
+/***********************************************************************
+ *           server_leave_uninterrupted_section
+ */
+void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset )
+{
+    RtlLeaveCriticalSection( cs );
+    pthread_functions.sigprocmask( SIG_SETMASK, sigset, NULL );
 }
 
 
@@ -438,10 +458,8 @@ static int receive_fd( obj_handle_t *handle )
 }
 
 
-inline static unsigned int handle_to_index( obj_handle_t handle )
-{
-    return ((unsigned long)handle >> 2) - 1;
-}
+/***********************************************************************/
+/* fd cache support */
 
 struct fd_cache_entry
 {
@@ -449,8 +467,19 @@ struct fd_cache_entry
     enum server_fd_type type;
 };
 
-static struct fd_cache_entry *fd_cache;
-static unsigned int fd_cache_size;
+#define FD_CACHE_BLOCK_SIZE  (65536 / sizeof(struct fd_cache_entry))
+#define FD_CACHE_ENTRIES     128
+
+static struct fd_cache_entry *fd_cache[FD_CACHE_ENTRIES];
+static struct fd_cache_entry fd_cache_initial_block[FD_CACHE_BLOCK_SIZE];
+
+inline static unsigned int handle_to_index( obj_handle_t handle, unsigned int *entry )
+{
+    unsigned long idx = ((unsigned long)handle >> 2) - 1;
+    *entry = idx / FD_CACHE_BLOCK_SIZE;
+    return idx % FD_CACHE_BLOCK_SIZE;
+}
+
 
 /***********************************************************************
  *           add_fd_to_cache
@@ -459,35 +488,31 @@ static unsigned int fd_cache_size;
  */
 static int add_fd_to_cache( obj_handle_t handle, int fd, enum server_fd_type type )
 {
-    unsigned int idx = handle_to_index( handle );
+    unsigned int entry, idx = handle_to_index( handle, &entry );
+    int prev_fd;
 
-    if (idx >= fd_cache_size)
+    if (entry >= FD_CACHE_ENTRIES)
     {
-        unsigned int i, size = max( 32, fd_cache_size * 2 );
-        struct fd_cache_entry *new_cache;
+        FIXME( "too many allocated handles, not caching %p\n", handle );
+        return 0;
+    }
 
-        if (size <= idx) size = idx + 1;
-        if (fd_cache)
-            new_cache = RtlReAllocateHeap( GetProcessHeap(), 0, fd_cache, size*sizeof(fd_cache[0]) );
+    if (!fd_cache[entry])  /* do we need to allocate a new block of entries? */
+    {
+        if (!entry) fd_cache[0] = fd_cache_initial_block;
         else
-            new_cache = RtlAllocateHeap( GetProcessHeap(), 0, size*sizeof(fd_cache[0]) );
-
-        if (new_cache)
         {
-            for (i = fd_cache_size; i < size; i++) new_cache[i].fd = -1;
-            fd_cache = new_cache;
-            fd_cache_size = size;
+            void *ptr = wine_anon_mmap( NULL, FD_CACHE_BLOCK_SIZE * sizeof(struct fd_cache_entry),
+                                        PROT_READ | PROT_WRITE, 0 );
+            if (ptr == MAP_FAILED) return 0;
+            fd_cache[entry] = ptr;
         }
     }
-    if (idx < fd_cache_size)
-    {
-        assert( fd_cache[idx].fd == -1 );
-        fd_cache[idx].fd   = fd;
-        fd_cache[idx].type = type;
-        TRACE("added %p (%d) type %d to cache\n", handle, fd, type );
-        return 1;
-    }
-    return 0;
+    /* store fd+1 so that 0 can be used as the unset value */
+    prev_fd = interlocked_xchg( &fd_cache[entry][idx].fd, fd + 1 ) - 1;
+    fd_cache[entry][idx].type = type;
+    if (prev_fd != -1) close( prev_fd );
+    return 1;
 }
 
 
@@ -498,13 +523,13 @@ static int add_fd_to_cache( obj_handle_t handle, int fd, enum server_fd_type typ
  */
 static inline int get_cached_fd( obj_handle_t handle, enum server_fd_type *type )
 {
-    unsigned int idx = handle_to_index( handle );
+    unsigned int entry, idx = handle_to_index( handle, &entry );
     int fd = -1;
 
-    if (idx < fd_cache_size)
+    if (entry < FD_CACHE_ENTRIES && fd_cache[entry])
     {
-        fd = fd_cache[idx].fd;
-        if (type) *type = fd_cache[idx].type;
+        fd = fd_cache[entry][idx].fd - 1;
+        if (type) *type = fd_cache[entry][idx].type;
     }
     return fd;
 }
@@ -515,22 +540,12 @@ static inline int get_cached_fd( obj_handle_t handle, enum server_fd_type *type 
  */
 int server_remove_fd_from_cache( obj_handle_t handle )
 {
-    unsigned int idx = handle_to_index( handle );
+    unsigned int entry, idx = handle_to_index( handle, &entry );
     int fd = -1;
 
-    RtlEnterCriticalSection( &fd_cache_section );
-    if (idx < fd_cache_size)
-    {
-        fd = fd_cache[idx].fd;
-        fd_cache[idx].fd = -1;
-    }
-    RtlLeaveCriticalSection( &fd_cache_section );
+    if (entry < FD_CACHE_ENTRIES && fd_cache[entry])
+        fd = interlocked_xchg( &fd_cache[entry][idx].fd, 0 ) - 1;
 
-    if (fd != -1)
-    {
-        close( fd );
-        TRACE("removed %p (%d) from cache\n", handle, fd );
-    }
     return fd;
 }
 
@@ -543,13 +558,14 @@ int server_remove_fd_from_cache( obj_handle_t handle )
 int server_get_unix_fd( obj_handle_t handle, unsigned int access, int *unix_fd,
                         int *needs_close, enum server_fd_type *type, int *flags )
 {
+    sigset_t sigset;
     obj_handle_t fd_handle;
     int ret = 0, removable = 0, fd;
 
     *unix_fd = -1;
     *needs_close = 0;
 
-    RtlEnterCriticalSection( &fd_cache_section );
+    server_enter_uninterrupted_section( &fd_cache_section, &sigset );
 
     fd = get_cached_fd( handle, type );
     if (fd != -1 && !flags) goto done;
@@ -578,7 +594,7 @@ int server_get_unix_fd( obj_handle_t handle, unsigned int access, int *unix_fd,
     SERVER_END_REQ;
 
 done:
-    RtlLeaveCriticalSection( &fd_cache_section );
+    server_leave_uninterrupted_section( &fd_cache_section, &sigset );
     if (!ret) *unix_fd = fd;
     return ret;
 }
@@ -994,14 +1010,15 @@ void server_init_process(void)
     }
 
     /* setup the signal mask */
-    sigemptyset( &block_set );
-    sigaddset( &block_set, SIGALRM );
-    sigaddset( &block_set, SIGIO );
-    sigaddset( &block_set, SIGINT );
-    sigaddset( &block_set, SIGHUP );
-    sigaddset( &block_set, SIGUSR1 );
-    sigaddset( &block_set, SIGUSR2 );
-    sigaddset( &block_set, SIGCHLD );
+    sigemptyset( &server_block_set );
+    sigaddset( &server_block_set, SIGALRM );
+    sigaddset( &server_block_set, SIGIO );
+    sigaddset( &server_block_set, SIGINT );
+    sigaddset( &server_block_set, SIGHUP );
+    sigaddset( &server_block_set, SIGUSR1 );
+    sigaddset( &server_block_set, SIGUSR2 );
+    sigaddset( &server_block_set, SIGCHLD );
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
 
     /* receive the first thread request fd on the main socket */
     ntdll_get_thread_data()->request_fd = receive_fd( &dummy_handle );
@@ -1009,6 +1026,38 @@ void server_init_process(void)
 #ifdef __APPLE__
     send_server_task_port();
 #endif
+}
+
+
+/***********************************************************************
+ *           server_init_process_done
+ */
+NTSTATUS server_init_process_done(void)
+{
+    PEB *peb = NtCurrentTeb()->Peb;
+    IMAGE_NT_HEADERS *nt = RtlImageNtHeader( peb->ImageBaseAddress );
+    NTSTATUS status;
+
+    /* Install signal handlers; this cannot be done earlier, since we cannot
+     * send exceptions to the debugger before the create process event that
+     * is sent by REQ_INIT_PROCESS_DONE.
+     * We do need the handlers in place by the time the request is over, so
+     * we set them up here. If we segfault between here and the server call
+     * something is very wrong... */
+    if (!SIGNAL_Init()) exit(1);
+
+    /* Signal the parent process to continue */
+    SERVER_START_REQ( init_process_done )
+    {
+        req->module = peb->ImageBaseAddress;
+        req->entry  = (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint;
+        req->gui    = (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI);
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    pthread_functions.sigprocmask( SIG_UNBLOCK, &server_block_set, NULL );
+    return status;
 }
 
 

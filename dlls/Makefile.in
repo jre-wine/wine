@@ -32,6 +32,7 @@ BASEDIRS = \
 	comctl32 \
 	comdlg32 \
 	compstui \
+	credui \
 	crtdll \
 	crypt32 \
 	cryptdll \
@@ -153,6 +154,7 @@ BASEDIRS = \
 	serialui \
 	setupapi \
 	sfc \
+	sfc_os \
 	shdoclc \
 	shdocvw \
 	shell32 \
@@ -182,20 +184,20 @@ BASEDIRS = \
 	vtdapi.vxd \
 	vwin32.vxd \
 	w32skrnl \
+	winealsa.drv \
+	winearts.drv \
+	wineaudioio.drv \
+	winecoreaudio.drv \
 	winedos \
+	wineesd.drv \
+	winejack.drv \
 	winejoystick.drv \
 	winemp3.acm \
+	winenas.drv \
+	wineoss.drv \
 	wineps.drv \
 	wininet \
 	winmm \
-	winmm/winealsa \
-	winmm/winearts \
-	winmm/wineaudioio \
-	winmm/winecoreaudio \
-	winmm/wineesd \
-	winmm/winejack \
-	winmm/winenas \
-	winmm/wineoss \
 	winnls32 \
 	winspool.drv \
 	wintab32 \
@@ -248,6 +250,7 @@ TESTSUBDIRS = \
 	msxml3/tests \
 	netapi32/tests \
 	ntdll/tests \
+	odbccp32/tests \
 	ole32/tests \
 	oleaut32/tests \
 	psapi/tests \
@@ -261,6 +264,7 @@ TESTSUBDIRS = \
 	shdocvw/tests \
 	shell32/tests \
 	shlwapi/tests \
+	snmpapi/tests \
 	urlmon/tests \
 	user32/tests \
 	usp10/tests \
@@ -286,9 +290,7 @@ BUILDSUBDIRS   = $(BASEDIRS) $(EXTRADIRS) $(TESTSUBDIRS)
 INSTALLSUBDIRS = $(BASEDIRS) $(EXTRADIRS) $(IMPLIBSUBDIRS)
 DOCSUBDIRS     = $(BASEDIRS) $(EXTRADIRS)
 
-@MAKE_RULES@
-
-# Symbolic links
+# 16-bit dlls
 
 WIN16_FILES = \
 	avifile.dll16 \
@@ -341,52 +343,11 @@ WIN16_FILES = \
 	wintab.dll16 \
 	wprocs.dll16
 
-SYMLINKS_SO = \
-	@WIN16_FILES@ \
-	winealsa.drv.so \
-	winearts.drv.so \
-	wineaudioio.drv.so \
-	winecoreaudio.drv.so \
-	wineesd.drv.so \
-	winejack.drv.so \
-	winenas.drv.so \
-	wineoss.drv.so
+@MAKE_RULES@
 
 # Main target
 
-all: $(BUILDSUBDIRS) symlinks$(DLLEXT)
-
-.PHONY: symlinks symlinks.so implib
-
-symlinks.so: $(SYMLINKS_SO)
-
-symlinks: $(BUILDSUBDIRS)
-
-# Map symlink name to the corresponding library
-
-winealsa.drv.so: winmm/winealsa/winealsa.drv.so
-	$(RM) $@ && $(LN_S) winmm/winealsa/winealsa.drv.so $@
-
-winearts.drv.so: winmm/winearts/winearts.drv.so
-	$(RM) $@ && $(LN_S) winmm/winearts/winearts.drv.so $@
-
-wineaudioio.drv.so: winmm/wineaudioio/wineaudioio.drv.so
-	$(RM) $@ && $(LN_S) winmm/wineaudioio/wineaudioio.drv.so $@
-
-winecoreaudio.drv.so: winmm/winecoreaudio/winecoreaudio.drv.so
-	$(RM) $@ && $(LN_S) winmm/winecoreaudio/winecoreaudio.drv.so $@
-
-wineesd.drv.so: winmm/wineesd/wineesd.drv.so
-	$(RM) $@ && $(LN_S) winmm/wineesd/wineesd.drv.so $@
-
-winejack.drv.so: winmm/winejack/winejack.drv.so
-	$(RM) $@ && $(LN_S) winmm/winejack/winejack.drv.so $@
-
-winenas.drv.so: winmm/winenas/winenas.drv.so
-	$(RM) $@ && $(LN_S) winmm/winenas/winenas.drv.so $@
-
-wineoss.drv.so: winmm/wineoss/wineoss.drv.so
-	$(RM) $@ && $(LN_S) winmm/wineoss/wineoss.drv.so $@
+all: $(BUILDSUBDIRS) @WIN16_FILES@
 
 # Placeholders for 16-bit libraries
 
@@ -576,6 +537,7 @@ IMPORT_LIBS = \
 	serialui/libserialui.$(IMPLIBEXT) \
 	setupapi/libsetupapi.$(IMPLIBEXT) \
 	sfc/libsfc.$(IMPLIBEXT) \
+	sfc_os/libsfc_os.$(IMPLIBEXT) \
 	shdocvw/libshdocvw.$(IMPLIBEXT) \
 	shell32/libshell32.$(IMPLIBEXT) \
 	shfolder/libshfolder.$(IMPLIBEXT) \
@@ -607,6 +569,8 @@ IMPORT_LIBS = \
 	wtsapi32/libwtsapi32.$(IMPLIBEXT)
 
 implib: $(IMPORT_LIBS)
+
+.PHONY: implib
 
 activeds/libactiveds.$(IMPLIBEXT): activeds/activeds.spec $(WINEBUILD)
 	@cd activeds && $(MAKE) libactiveds.$(IMPLIBEXT)
@@ -878,6 +842,9 @@ setupapi/libsetupapi.$(IMPLIBEXT): setupapi/setupapi.spec $(WINEBUILD)
 sfc/libsfc.$(IMPLIBEXT): sfc/sfc.spec $(WINEBUILD)
 	@cd sfc && $(MAKE) libsfc.$(IMPLIBEXT)
 
+sfc_os/libsfc_os.$(IMPLIBEXT): sfc_os/sfc_os.spec $(WINEBUILD)
+	@cd sfc_os && $(MAKE) libsfc_os.$(IMPLIBEXT)
+
 shdocvw/libshdocvw.$(IMPLIBEXT): shdocvw/shdocvw.spec $(WINEBUILD)
 	@cd shdocvw && $(MAKE) libshdocvw.$(IMPLIBEXT)
 
@@ -973,14 +940,6 @@ $(INSTALLSUBDIRS:%=%/__install__) $(INSTALLSUBDIRS:%=%/__install-lib__): $(IMPOR
 
 # Map library name to the corresponding directory
 
-winmm/winealsa/winealsa.drv.so: winmm/winealsa
-winmm/winearts/winearts.drv.so: winmm/winearts
-winmm/wineaudioio/wineaudioio.drv.so: winmm/wineaudioio
-winmm/winecoreaudio/winecoreaudio.drv.so: winmm/winecoreaudio
-winmm/wineesd/wineesd.drv.so: winmm/wineesd
-winmm/winejack/winejack.drv.so: winmm/winejack
-winmm/winenas/winenas.drv.so: winmm/winenas
-winmm/wineoss/wineoss.drv.so: winmm/wineoss
 dxerr8/libdxerr8.a: dxerr8
 dxerr9/libdxerr9.a: dxerr9
 dxguid/libdxguid.a: dxguid

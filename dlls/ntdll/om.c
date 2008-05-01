@@ -63,6 +63,28 @@ NTSTATUS WINAPI NtQueryObject(IN HANDLE handle,
 
     switch (info_class)
     {
+    case ObjectBasicInformation:
+        {
+            POBJECT_BASIC_INFORMATION p = (POBJECT_BASIC_INFORMATION)ptr;
+
+            if (len < sizeof(*p)) return STATUS_INVALID_BUFFER_SIZE;
+
+            SERVER_START_REQ( get_object_info )
+            {
+                req->handle = handle;
+                status = wine_server_call( req );
+                if (status == STATUS_SUCCESS)
+                {
+                    memset( p, 0, sizeof(*p) );
+                    p->GrantedAccess = reply->access;
+                    p->PointerCount = reply->ref_count;
+                    p->HandleCount = 1; /* at least one */
+                    if (used_len) *used_len = sizeof(*p);
+                }
+            }
+            SERVER_END_REQ;
+        }
+        break;
     case ObjectDataInformation:
         {
             OBJECT_DATA_INFORMATION* p = (OBJECT_DATA_INFORMATION*)ptr;
@@ -313,7 +335,13 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source,
         {
             if (dest) *dest = reply->handle;
             if (reply->closed)
-                server_remove_fd_from_cache( source );
+            {
+                if (reply->self)
+                {
+                    int fd = server_remove_fd_from_cache( source );
+                    if (fd != -1) close( fd );
+                }
+            }
             else if (options & DUPLICATE_CLOSE_SOURCE)
                 WARN( "failed to close handle %p in process %p\n", source, source_process );
         }
@@ -337,13 +365,15 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source,
 NTSTATUS WINAPI NtClose( HANDLE Handle )
 {
     NTSTATUS ret;
+    int fd = server_remove_fd_from_cache( Handle );
+
     SERVER_START_REQ( close_handle )
     {
         req->handle = Handle;
         ret = wine_server_call( req );
-        if (!ret) server_remove_fd_from_cache( Handle );
     }
     SERVER_END_REQ;
+    if (fd != -1) close( fd );
     return ret;
 }
 
@@ -554,7 +584,7 @@ NTSTATUS WINAPI NtCreateSymbolicLinkObject(OUT PHANDLE SymbolicLinkHandle,IN ACC
         req->access = DesiredAccess;
         req->attributes = ObjectAttributes ? ObjectAttributes->Attributes : 0;
         req->rootdir = ObjectAttributes ? ObjectAttributes->RootDirectory : 0;
-        if (ObjectAttributes->ObjectName)
+        if (ObjectAttributes && ObjectAttributes->ObjectName)
         {
             req->name_len = ObjectAttributes->ObjectName->Length;
             wine_server_add_data(req, ObjectAttributes->ObjectName->Buffer,

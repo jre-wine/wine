@@ -83,7 +83,7 @@ static void write_stubdesc(void)
   print_proxy( "\n");
 }
 
-static void init_proxy(ifref_t *ifaces)
+static void init_proxy(ifref_list_t *ifaces)
 {
   if (proxy) return;
   if(!(proxy = fopen(proxy_name, "w")))
@@ -94,6 +94,7 @@ static void init_proxy(ifref_t *ifaces)
   print_proxy( "#define __REQUIRED_RPCPROXY_H_VERSION__ 440\n");
   print_proxy( "#endif /* __REDQ_RPCPROXY_H_VERSION__ */\n");
   print_proxy( "\n");
+  print_proxy( "#include \"objbase.h\"\n");
   print_proxy( "#include \"rpcproxy.h\"\n");
   print_proxy( "#ifndef __RPCPROXY_H_VERSION__\n");
   print_proxy( "#error This code needs a newer version of rpcproxy.h\n");
@@ -105,29 +106,31 @@ static void init_proxy(ifref_t *ifaces)
   write_stubdescproto();
 }
 
-static void clear_output_vars( var_t *arg )
+static void clear_output_vars( const var_list_t *args )
 {
-  END_OF_LIST(arg);
-  while (arg) {
+  const var_t *arg;
+
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+  {
     if (is_attr(arg->attrs, ATTR_OUT) && !is_attr(arg->attrs, ATTR_IN)) {
       print_proxy( "if(%s)\n", arg->name );
       indent++;
       print_proxy( "MIDL_memset( %s, 0, sizeof( *%s ));\n", arg->name, arg->name );
       indent--;
     }
-    arg = PREV_LINK(arg);
   }
 }
 
-int is_var_ptr(var_t *v)
+int is_var_ptr(const var_t *v)
 {
   return v->ptr_level || is_ptr(v->type);
 }
 
-int cant_be_null(var_t *v)
+int cant_be_null(const var_t *v)
 {
   /* Search backwards for the most recent pointer attribute.  */
-  const attr_t *attrs = v->attrs;
+  const attr_list_t *attrs = v->attrs;
   const type_t *type = v->type;
 
   if (! attrs && type)
@@ -158,9 +161,9 @@ int cant_be_null(var_t *v)
   return 1;                             /* Default is RPC_FC_RP.  */
 }
 
-static int is_user_derived(var_t *v)
+static int is_user_derived(const var_t *v)
 {
-  const attr_t *attrs = v->attrs;
+  const attr_list_t *attrs = v->attrs;
   const type_t *type = v->type;
 
   if (! attrs && type)
@@ -186,21 +189,23 @@ static int is_user_derived(var_t *v)
   return 0;
 }
 
-static void proxy_check_pointers( var_t *arg )
+static void proxy_check_pointers( const var_list_t *args )
 {
-  END_OF_LIST(arg);
-  while (arg) {
+  const var_t *arg;
+
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+  {
     if (is_var_ptr(arg) && cant_be_null(arg)) {
         print_proxy( "if(!%s)\n", arg->name );
         indent++;
         print_proxy( "RpcRaiseException(RPC_X_NULL_REF_POINTER);\n");
         indent--;
     }
-    arg = PREV_LINK(arg);
   }
 }
 
-static void marshall_size_arg( var_t *arg )
+static void marshall_size_arg( const var_t *arg )
 {
   int index = 0;
   const type_t *type = arg->type;
@@ -288,22 +293,23 @@ static void marshall_size_arg( var_t *arg )
   }
 }
 
-static void proxy_gen_marshall_size( var_t *arg )
+static void proxy_gen_marshall_size( const var_list_t *args )
 {
-  print_proxy( "_StubMsg.BufferLength = 0U;\n" );
+  const var_t *arg;
 
-  END_OF_LIST(arg);
-  while (arg) {
-    if (is_attr(arg->attrs, ATTR_IN)) 
+  print_proxy( "_StubMsg.BufferLength = 0U;\n" );
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+  {
+    if (is_attr(arg->attrs, ATTR_IN))
     {
       marshall_size_arg( arg );
       fprintf(proxy, "\n");
     }
-    arg = PREV_LINK(arg);
   }
 }
 
-static void marshall_copy_arg( var_t *arg )
+static void marshall_copy_arg( const var_t *arg )
 {
   int index = 0;
   type_t *type = arg->type;
@@ -389,34 +395,36 @@ static void marshall_copy_arg( var_t *arg )
   }
 }
 
-static void gen_marshall_copydata( var_t *arg )
+static void gen_marshall_copydata( const var_list_t *args )
 {
-  END_OF_LIST(arg);
-  while (arg) {
-    if (is_attr(arg->attrs, ATTR_IN)) 
+  const var_t *arg;
+
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+  {
+    if (is_attr(arg->attrs, ATTR_IN))
     {
       marshall_copy_arg( arg );
       fprintf(proxy, "\n");
     }
-    arg = PREV_LINK(arg);
   }
 }
 
-static void gen_marshall( var_t *arg )
+static void gen_marshall( const var_list_t *args )
 {
   /* generated code to determine the size of the buffer required */
-  proxy_gen_marshall_size( arg );
+  proxy_gen_marshall_size( args );
 
   /* generated code to allocate the buffer */
   print_proxy( "NdrProxyGetBuffer(This, &_StubMsg);\n" );
 
   /* generated code to copy the args into the buffer */
-  gen_marshall_copydata( arg );
+  gen_marshall_copydata( args );
 
   print_proxy( "\n");
 }
 
-static void unmarshall_copy_arg( var_t *arg )
+static void unmarshall_copy_arg( const var_t *arg )
 {
   int index = 0;
   type_t *type = arg->type;
@@ -500,20 +508,22 @@ static void unmarshall_copy_arg( var_t *arg )
   }
 }
 
-static void gen_unmarshall( var_t *arg )
+static void gen_unmarshall( var_list_t *args )
 {
-  END_OF_LIST(arg);
-  while (arg) {
-    if (is_attr(arg->attrs, ATTR_OUT)) 
+  const var_t *arg;
+
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+  {
+    if (is_attr(arg->attrs, ATTR_OUT))
     {
       unmarshall_copy_arg( arg );
       fprintf(proxy, "\n");
     }
-    arg = PREV_LINK(arg);
   }
 }
 
-static void free_variable( var_t *arg )
+static void free_variable( const var_t *arg )
 {
   var_t *constraint;
   int index = 0; /* FIXME */
@@ -562,20 +572,22 @@ static void free_variable( var_t *arg )
   }
 }
 
-static void proxy_free_variables( var_t *arg )
+static void proxy_free_variables( var_list_t *args )
 {
-  END_OF_LIST(arg);
-  while (arg) {
-    if (is_attr(arg->attrs, ATTR_OUT)) 
+  const var_t *arg;
+
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+  {
+    if (is_attr(arg->attrs, ATTR_OUT))
     {
       free_variable( arg );
       fprintf(proxy, "\n");
     }
-    arg = PREV_LINK(arg);
   }
 }
 
-static void gen_proxy(type_t *iface, func_t *cur, int idx)
+static void gen_proxy(type_t *iface, const func_t *cur, int idx)
 {
   var_t *def = cur->def;
   int has_ret = !is_void(def->type, def);
@@ -669,11 +681,14 @@ static void gen_proxy(type_t *iface, func_t *cur, int idx)
   print_proxy( "\n");
 }
 
-static void stub_write_locals( var_t *arg )
+static void stub_write_locals( var_list_t *args )
 {
   int n = 0;
-  END_OF_LIST(arg);
-  while (arg) {
+  const var_t *arg;
+
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+  {
     int outptr = is_attr(arg->attrs, ATTR_OUT)
                  && ! is_attr(arg->attrs, ATTR_IN);
 
@@ -691,15 +706,17 @@ static void stub_write_locals( var_t *arg )
     fprintf(proxy, " ");
     write_name(proxy, arg);
     fprintf(proxy, ";\n");
-    arg = PREV_LINK(arg);
   }
 }
 
-static void stub_unmarshall( var_t *arg )
+static void stub_unmarshall( const var_list_t *args )
 {
   int n = 0;
-  END_OF_LIST(arg);
-  while (arg) {
+  const var_t *arg;
+
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+  {
     if (is_attr(arg->attrs, ATTR_IN))
     {
       unmarshall_copy_arg( arg );
@@ -725,33 +742,32 @@ static void stub_unmarshall( var_t *arg )
         break;
       }
     }
-    arg = PREV_LINK(arg);
   }
 }
 
-static void stub_gen_marshall_size( var_t *arg )
+static void stub_gen_marshall_size( const var_list_t *args )
 {
+  const var_t *arg;
+
   print_proxy( "_StubMsg.BufferLength = 0U;\n" );
 
-  END_OF_LIST(arg);
-  while (arg) {
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
     if (is_attr(arg->attrs, ATTR_OUT))
       marshall_size_arg( arg );
-    arg = PREV_LINK(arg);
-  }
 }
 
-static void stub_gen_marshall_copydata( var_t *arg )
+static void stub_gen_marshall_copydata( const var_list_t *args )
 {
-  END_OF_LIST(arg);
-  while (arg) {
+  const var_t *arg;
+
+  if (!args) return;
+  LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
     if (is_attr(arg->attrs, ATTR_OUT))
       marshall_copy_arg( arg );
-    arg = PREV_LINK(arg);
-  }
 }
 
-static void stub_genmarshall( var_t *args )
+static void stub_genmarshall( const var_list_t *args )
 {
   /* FIXME: size buffer */
   stub_gen_marshall_size( args );
@@ -761,10 +777,10 @@ static void stub_genmarshall( var_t *args )
   stub_gen_marshall_copydata( args );
 }
 
-static void gen_stub(type_t *iface, func_t *cur, const char *cas)
+static void gen_stub(type_t *iface, const func_t *cur, const char *cas)
 {
   var_t *def = cur->def;
-  var_t *arg;
+  const var_t *arg;
   int has_ret = !is_void(def->type, def);
 
   indent = 0;
@@ -815,14 +831,14 @@ static void gen_stub(type_t *iface, func_t *cur, const char *cas)
   if (cas) fprintf(proxy, "%s_Stub", cas);
   else write_name(proxy, def);
   fprintf(proxy, "(_This");
-  arg = cur->args;
-  if (arg) {
-    END_OF_LIST(arg);
-    while (arg) {
-      fprintf(proxy, ", ");
-      write_name(proxy, arg);
-      arg = PREV_LINK(arg);
-    }
+
+  if (cur->args)
+  {
+      LIST_FOR_EACH_ENTRY( arg, cur->args, const var_t, entry )
+      {
+          fprintf(proxy, ", ");
+          write_name(proxy, arg);
+      }
   }
   fprintf(proxy, ");\n");
   fprintf(proxy, "\n");
@@ -864,13 +880,11 @@ static void gen_stub(type_t *iface, func_t *cur, const char *cas)
 
 static int write_proxy_methods(type_t *iface)
 {
-  func_t *cur = iface->funcs;
+  const func_t *cur;
   int i = 0;
 
-  END_OF_LIST(cur);
-
   if (iface->ref) i = write_proxy_methods(iface->ref);
-  while (cur) {
+  if (iface->funcs) LIST_FOR_EACH_ENTRY( cur, iface->funcs, const func_t, entry ) {
     var_t *def = cur->def;
     if (!is_callas(def->attrs)) {
       if (i) fprintf(proxy, ",\n");
@@ -879,21 +893,19 @@ static int write_proxy_methods(type_t *iface)
       fprintf(proxy, "_Proxy");
       i++;
     }
-    cur = PREV_LINK(cur);
   }
   return i;
 }
 
 static int write_stub_methods(type_t *iface)
 {
-  func_t *cur = iface->funcs;
+  const func_t *cur;
   int i = 0;
-
-  END_OF_LIST(cur);
 
   if (iface->ref) i = write_stub_methods(iface->ref);
   else return i; /* skip IUnknown */
-  while (cur) {
+
+  if (iface->funcs) LIST_FOR_EACH_ENTRY( cur, iface->funcs, const func_t, entry ) {
     var_t *def = cur->def;
     if (!is_local(def->attrs)) {
       if (i) fprintf(proxy,",\n");
@@ -902,7 +914,6 @@ static int write_stub_methods(type_t *iface)
       fprintf(proxy, "_Stub");
       i++;
     }
-    cur = PREV_LINK(cur);
   }
   return i;
 }
@@ -910,28 +921,30 @@ static int write_stub_methods(type_t *iface)
 static void write_proxy(type_t *iface)
 {
   int midx = -1, stubs;
-  func_t *cur = iface->funcs;
+  const func_t *cur;
 
-  if (!cur) return;
-
-  END_OF_LIST(cur);
+  if (!iface->funcs) return;
 
   /* FIXME: check for [oleautomation], shouldn't generate proxies/stubs if specified */
 
   fprintf(proxy, "/*****************************************************************************\n");
   fprintf(proxy, " * %s interface\n", iface->name);
   fprintf(proxy, " */\n");
-  while (cur) {
+  LIST_FOR_EACH_ENTRY( cur, iface->funcs, const func_t, entry )
+  {
     const var_t *def = cur->def;
     if (!is_local(def->attrs)) {
       const var_t *cas = is_callas(def->attrs);
       const char *cname = cas ? cas->name : NULL;
       int idx = cur->idx;
       if (cname) {
-        const func_t *m = iface->funcs;
-        while (m && strcmp(get_name(m->def), cname))
-          m = NEXT_LINK(m);
-        idx = m->idx;
+          const func_t *m;
+          LIST_FOR_EACH_ENTRY( m, iface->funcs, const func_t, entry )
+              if (!strcmp(get_name(m->def), cname))
+              {
+                  idx = m->idx;
+                  break;
+              }
       }
       gen_proxy(iface, cur, idx);
       gen_stub(iface, cur, cname);
@@ -939,7 +952,6 @@ static void write_proxy(type_t *iface)
       else if (midx != idx) parser_error("method index mismatch in write_proxy");
       midx++;
     }
-    cur = PREV_LINK(cur);
   }
 
   /* proxy vtable */
@@ -991,28 +1003,22 @@ static void write_proxy(type_t *iface)
   print_proxy( "\n");
 }
 
-void write_proxies(ifref_t *ifaces)
+void write_proxies(ifref_list_t *ifaces)
 {
-  ifref_t *lcur = ifaces;
   ifref_t *cur;
   char *file_id = proxy_token;
   int c;
 
   if (!do_proxies) return;
-  if (!lcur) return;
-  END_OF_LIST(lcur);
+  if (do_everything && !ifaces) return;
 
   init_proxy(ifaces);
   if(!proxy) return;
 
-  cur = lcur;
-  while (cur) {
-    if (is_object(cur->iface->attrs) && !is_local(cur->iface->attrs))
-      write_proxy(cur->iface);
-    cur = PREV_LINK(cur);
-  }
-
-  if (!proxy) return;
+  if (ifaces)
+      LIST_FOR_EACH_ENTRY( cur, ifaces, ifref_t, entry )
+          if (is_object(cur->iface->attrs) && !is_local(cur->iface->attrs))
+              write_proxy(cur->iface);
 
   write_stubdesc();
 
@@ -1025,39 +1031,34 @@ void write_proxies(ifref_t *ifaces)
 
   fprintf(proxy, "const CInterfaceProxyVtbl* _%s_ProxyVtblList[] =\n", file_id);
   fprintf(proxy, "{\n");
-  cur = lcur;
-  while (cur) {
-    if(cur->iface->ref && cur->iface->funcs &&
-       is_object(cur->iface->attrs) && !is_local(cur->iface->attrs))
-      fprintf(proxy, "    (CInterfaceProxyVtbl*)&_%sProxyVtbl,\n", cur->iface->name);
-    cur = PREV_LINK(cur);
-  }
+  if (ifaces)
+      LIST_FOR_EACH_ENTRY( cur, ifaces, ifref_t, entry )
+          if(cur->iface->ref && cur->iface->funcs &&
+             is_object(cur->iface->attrs) && !is_local(cur->iface->attrs))
+              fprintf(proxy, "    (CInterfaceProxyVtbl*)&_%sProxyVtbl,\n", cur->iface->name);
+
   fprintf(proxy, "    0\n");
   fprintf(proxy, "};\n");
   fprintf(proxy, "\n");
 
   fprintf(proxy, "const CInterfaceStubVtbl* _%s_StubVtblList[] =\n", file_id);
   fprintf(proxy, "{\n");
-  cur = lcur;
-  while (cur) {
-    if(cur->iface->ref && cur->iface->funcs &&
-       is_object(cur->iface->attrs) && !is_local(cur->iface->attrs))
-      fprintf(proxy, "    (CInterfaceStubVtbl*)&_%sStubVtbl,\n", cur->iface->name);
-    cur = PREV_LINK(cur);
-  }
+  if (ifaces)
+      LIST_FOR_EACH_ENTRY( cur, ifaces, ifref_t, entry )
+          if(cur->iface->ref && cur->iface->funcs &&
+             is_object(cur->iface->attrs) && !is_local(cur->iface->attrs))
+              fprintf(proxy, "    (CInterfaceStubVtbl*)&_%sStubVtbl,\n", cur->iface->name);
   fprintf(proxy, "    0\n");
   fprintf(proxy, "};\n");
   fprintf(proxy, "\n");
 
   fprintf(proxy, "PCInterfaceName const _%s_InterfaceNamesList[] =\n", file_id);
   fprintf(proxy, "{\n");
-  cur = lcur;
-  while (cur) {
-    if(cur->iface->ref && cur->iface->funcs &&
-       is_object(cur->iface->attrs) && !is_local(cur->iface->attrs))
-      fprintf(proxy, "    \"%s\",\n", cur->iface->name);
-    cur = PREV_LINK(cur);
-  }
+  if (ifaces)
+      LIST_FOR_EACH_ENTRY( cur, ifaces, ifref_t, entry )
+          if(cur->iface->ref && cur->iface->funcs &&
+             is_object(cur->iface->attrs) && !is_local(cur->iface->attrs))
+              fprintf(proxy, "    \"%s\",\n", cur->iface->name);
   fprintf(proxy, "    0\n");
   fprintf(proxy, "};\n");
   fprintf(proxy, "\n");
@@ -1066,20 +1067,18 @@ void write_proxies(ifref_t *ifaces)
   fprintf(proxy, "\n");
   fprintf(proxy, "int __stdcall _%s_IID_Lookup(const IID* pIID, int* pIndex)\n", file_id);
   fprintf(proxy, "{\n");
-  cur = lcur;
   c = 0;
-  while (cur) {
-    if(cur->iface->ref)
-    {
-      fprintf(proxy, "    if (!_%s_CHECK_IID(%d))\n", file_id, c);
-      fprintf(proxy, "    {\n");
-      fprintf(proxy, "        *pIndex = %d;\n", c);
-      fprintf(proxy, "        return 1;\n");
-      fprintf(proxy, "    }\n");
-      c++;
-    }
-    cur = PREV_LINK(cur);
-  }
+  if (ifaces)
+      LIST_FOR_EACH_ENTRY( cur, ifaces, ifref_t, entry )
+          if(cur->iface->ref)
+          {
+              fprintf(proxy, "    if (!_%s_CHECK_IID(%d))\n", file_id, c);
+              fprintf(proxy, "    {\n");
+              fprintf(proxy, "        *pIndex = %d;\n", c);
+              fprintf(proxy, "        return 1;\n");
+              fprintf(proxy, "    }\n");
+              c++;
+          }
   fprintf(proxy, "    return 0;\n");
   fprintf(proxy, "}\n");
   fprintf(proxy, "\n");

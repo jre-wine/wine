@@ -33,8 +33,9 @@
 
 static HINSTANCE hkernel32;
 static LPVOID (WINAPI *pVirtualAllocEx)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD);
-static LPVOID (WINAPI *pVirtualFreeEx)(HANDLE, LPVOID, SIZE_T, DWORD);
+static BOOL   (WINAPI *pVirtualFreeEx)(HANDLE, LPVOID, SIZE_T, DWORD);
 
+/* ############################### */
 static char     base[MAX_PATH];
 static char     selfname[MAX_PATH];
 static char*    exename;
@@ -1302,8 +1303,11 @@ static void test_OpenProcess(void)
     MEMORY_BASIC_INFORMATION info;
     SIZE_T dummy, read_bytes;
 
-    /* Not implemented in all windows versions */
-    if ((!pVirtualAllocEx) || (!pVirtualFreeEx)) return;
+    /* not exported in all windows versions */
+    if ((!pVirtualAllocEx) || (!pVirtualFreeEx)) {
+        skip("VirtualAllocEx not found\n");
+        return;
+    }
 
     /* without PROCESS_VM_OPERATION */
     hproc = OpenProcess(PROCESS_ALL_ACCESS & ~PROCESS_VM_OPERATION, FALSE, GetCurrentProcessId());
@@ -1311,16 +1315,14 @@ static void test_OpenProcess(void)
 
     SetLastError(0xdeadbeef);
     addr1 = pVirtualAllocEx(hproc, 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
-todo_wine {
     ok(!addr1, "VirtualAllocEx should fail\n");
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {   /* Win9x */
         CloseHandle(hproc);
-        trace("VirtualAllocEx is not implemented, skipping the test\n");
+        skip("VirtualAllocEx not implemented\n");
         return;
     }
     ok(GetLastError() == ERROR_ACCESS_DENIED, "wrong error %d\n", GetLastError());
-}
 
     read_bytes = 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -1334,11 +1336,7 @@ todo_wine {
     ok(hproc != NULL, "OpenProcess error %d\n", GetLastError());
 
     addr1 = pVirtualAllocEx(hproc, 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
-todo_wine {
     ok(addr1 != NULL, "VirtualAllocEx error %d\n", GetLastError());
-}
-    if (addr1 == NULL) /* FIXME: remove once Wine is fixed */
-        addr1 = pVirtualAllocEx(GetCurrentProcess(), 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
 
     /* without PROCESS_QUERY_INFORMATION */
     SetLastError(0xdeadbeef);
@@ -1374,17 +1372,13 @@ todo_wine {
     ok(info.Type == MEM_PRIVATE, "%x != MEM_PRIVATE\n", info.Type);
 
     SetLastError(0xdeadbeef);
-todo_wine {
     ok(!pVirtualFreeEx(hproc, addr1, 0, MEM_RELEASE),
        "VirtualFreeEx without PROCESS_VM_OPERATION rights should fail\n");
     ok(GetLastError() == ERROR_ACCESS_DENIED, "wrong error %d\n", GetLastError());
-}
 
     CloseHandle(hproc);
 
-todo_wine {
     ok(VirtualFree(addr1, 0, MEM_RELEASE), "VirtualFree failed\n");
-}
 }
 
 START_TEST(process)

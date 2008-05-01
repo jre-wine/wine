@@ -77,7 +77,7 @@
   - EM_GETWORDWRAPMODE 1.0asian
   + EM_GETZOOM 3.0
   + EM_HIDESELECTION
-  - EM_LIMITTEXT
+  + EM_LIMITTEXT (Also called EM_SETLIMITTEXT)
   + EM_LINEFROMCHAR
   + EM_LINEINDEX
   + EM_LINELENGTH
@@ -597,8 +597,7 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
 {
   RTF_Info parser;
   ME_Style *style;
-  int from, to, to2;
-  ME_UndoItem *pUI;
+  int from, to, to2, nUndoMode;
   int nEventMask = editor->nEventMask;
   ME_InStream inStream;
 
@@ -620,7 +619,15 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
     ME_ClearTempStyle(editor);
     /* FIXME restore default paragraph formatting ! */
   }
-  
+
+
+  /* Back up undo mode to a local variable */
+  nUndoMode = editor->nUndoMode;
+
+  /* Only create an undo if SFF_SELECTION is set */
+  if (!(format & SFF_SELECTION))
+    editor->nUndoMode = umIgnore;
+
   inStream.editstream = stream;
   inStream.editstream->dwError = 0;
   inStream.dwSize = 0;
@@ -671,28 +678,18 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
     if (!(format & SFF_SELECTION))
       SendMessageA(editor->hWnd, EM_SETSEL, 0, 0);
   }
-  
-  if (format & SFF_SELECTION)
-  {
-    if(from < to) /* selection overwritten is non-empty */
-    {
-      pUI = ME_AddUndoItem(editor, diUndoDeleteRun, NULL);
-      TRACE("from %d to %d\n", from, to);
-      if (pUI)
-      {
-        pUI->nStart = from;
-        pUI->nLen = to-from;
-      }
-    }
-    /* even if we didn't add an undo, we need to commit the ones added earlier */
-    ME_CommitUndo(editor);
-  }
-  else
-  {
-    ME_EmptyUndoStack(editor);
-  }
 
-  ME_ReleaseStyle(style); 
+  /* Restore saved undo mode */
+  editor->nUndoMode = nUndoMode;
+
+  /* even if we didn't add an undo, we need to commit anything on the stack */
+  ME_CommitUndo(editor);
+
+  /* If SFF_SELECTION isn't set, delete any undos from before we started too */
+  if (!(format & SFF_SELECTION))
+    ME_EmptyUndoStack(editor);
+
+  ME_ReleaseStyle(style);
   editor->nEventMask = nEventMask;
   if (editor->bRedraw)
   {
@@ -1440,7 +1437,6 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   UNSUPPORTED_MSG(EM_GETTYPOGRAPHYOPTIONS)
   UNSUPPORTED_MSG(EM_GETUNDONAME)
   UNSUPPORTED_MSG(EM_GETWORDBREAKPROCEX)
-  UNSUPPORTED_MSG(EM_LIMITTEXT) /* also known as EM_SETLIMITTEXT */
   UNSUPPORTED_MSG(EM_PASTESPECIAL)
   UNSUPPORTED_MSG(EM_SELECTIONTYPE)
   UNSUPPORTED_MSG(EM_SETBIDIOPTIONS)
@@ -1639,6 +1635,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     size_t len = wszText ? lstrlenW(wszText) : 0;
     int from, to;
     ME_Style *style;
+    int oldModify = editor->nModifyStep;
     TRACE("EM_SETTEXTEX - %s, flags %d, cp %d\n", debugstr_w(wszText), (int)pStruct->flags, pStruct->codepage);
     if (pStruct->codepage != 1200) {
       FIXME("EM_SETTEXTEX only supports unicode right now!\n"); 
@@ -1659,7 +1656,10 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     }
     ME_CommitUndo(editor);
     if (!(pStruct->flags & ST_KEEPUNDO))
+    {
+      editor->nModifyStep = oldModify;
       ME_EmptyUndoStack(editor);
+    }
     ME_UpdateRepaint(editor);
     return len;
   }
@@ -1690,7 +1690,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
   case EM_SETMODIFY:
   {
     if (wParam)
-      editor->nModifyStep = 0x80000000;
+      editor->nModifyStep = 1;
     else
       editor->nModifyStep = 0;
     
@@ -1732,6 +1732,7 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
       bRepaint = (from != to);
       ME_SetSelectionCharFormat(editor, p);
     }
+    editor->nModifyStep = 1;
     ME_CommitUndo(editor);
     if (bRepaint)
       ME_RewrapRepaint(editor);
@@ -2191,6 +2192,14 @@ LRESULT WINAPI RichEditANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
       editor->nTextLimit = (int) lParam;
     return 0;
   }
+  case EM_LIMITTEXT:
+  {
+    if (wParam == 0)
+      editor->nTextLimit = 65536;
+    else
+      editor->nTextLimit = (int) wParam;
+    return 0;
+  }
   case EM_GETLIMITTEXT:
   {
     return editor->nTextLimit;
@@ -2580,15 +2589,18 @@ void ME_LinkNotify(ME_TextEditor *editor, UINT msg, WPARAM wParam, LPARAM lParam
 {
   int x,y;
   ME_Cursor tmpCursor;
+  int nCharOfs; /* The start of the clicked text. Absolute character offset */
+
   ME_Run *tmpRun;
-  BOOL bNothing;
+
   ENLINK info;
   x = (short)LOWORD(lParam);
   y = (short)HIWORD(lParam);
-  ME_FindPixelPos(editor, x, y, &tmpCursor, &bNothing);
+  nCharOfs = ME_CharFromPos(editor, x, y);
+  ME_CursorFromCharOfs(editor, nCharOfs, &tmpCursor);
   tmpRun = &tmpCursor.pRun->member.run;
-	
-  if ((tmpRun->style->fmt.dwMask & CFM_LINK) 
+
+  if ((tmpRun->style->fmt.dwMask & CFM_LINK)
     && (tmpRun->style->fmt.dwEffects & CFE_LINK))
   { /* The clicked run has CFE_LINK set */
     info.nmhdr.hwndFrom = editor->hWnd;

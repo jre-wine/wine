@@ -1,14 +1,15 @@
 TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
+TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
-MODULE    = wineaudioio.drv
-IMPORTS   = winmm user32 kernel32 ntdll
-EXTRALIBS = -ldxguid -luuid @AUDIOIOLIBS@
+MODULE    = winecoreaudio.drv
+IMPORTS   = winmm user32 kernel32
+EXTRALIBS = $(LIBUUID) @COREAUDIO@
 
 C_SRCS = \
 	audio.c \
-	audioio.c
+	audiounit.c \
+	coreaudio.c
 
 @MAKE_DLL_RULES@
 

@@ -64,6 +64,7 @@
 # endif
 #endif
 
+static attr_list_t *append_attr(attr_list_t *list, attr_t *attr);
 static attr_t *make_attr(enum attr_type type);
 static attr_t *make_attrv(enum attr_type type, unsigned long val);
 static attr_t *make_attrp(enum attr_type type, void *val);
@@ -75,37 +76,42 @@ static expr_t *make_expr1(enum expr_type type, expr_t *expr);
 static expr_t *make_expr2(enum expr_type type, expr_t *exp1, expr_t *exp2);
 static expr_t *make_expr3(enum expr_type type, expr_t *expr1, expr_t *expr2, expr_t *expr3);
 static type_t *make_type(unsigned char type, type_t *ref);
+static expr_list_t *append_expr(expr_list_t *list, expr_t *expr);
+static array_dims_t *append_array(array_dims_t *list, expr_t *expr);
 static typeref_t *make_tref(char *name, type_t *ref);
 static typeref_t *uniq_tref(typeref_t *ref);
 static type_t *type_ref(typeref_t *ref);
-static void set_type(var_t *v, typeref_t *ref, expr_t *arr);
+static void set_type(var_t *v, typeref_t *ref, array_dims_t *arr);
+static ifref_list_t *append_ifref(ifref_list_t *list, ifref_t *iface);
 static ifref_t *make_ifref(type_t *iface);
+static var_list_t *append_var(var_list_t *list, var_t *var);
 static var_t *make_var(char *name);
-static func_t *make_func(var_t *def, var_t *args);
+static func_list_t *append_func(func_list_t *list, func_t *func);
+static func_t *make_func(var_t *def, var_list_t *args);
 static type_t *make_class(char *name);
 static type_t *make_safearray(void);
 static type_t *make_builtin(char *name);
 static type_t *make_int(int sign);
 
 static type_t *reg_type(type_t *type, const char *name, int t);
-static type_t *reg_typedefs(type_t *type, var_t *names, attr_t *attrs);
+static type_t *reg_typedefs(type_t *type, var_list_t *names, attr_list_t *attrs);
 static type_t *find_type(const char *name, int t);
 static type_t *find_type2(char *name, int t);
 static type_t *get_type(unsigned char type, char *name, int t);
 static type_t *get_typev(unsigned char type, var_t *name, int t);
-static int get_struct_type(var_t *fields);
+static int get_struct_type(var_list_t *fields);
 
 static var_t *reg_const(var_t *var);
 static var_t *find_const(char *name, int f);
 
-static void write_libid(const char *name, const attr_t *attr);
+static void write_libid(const char *name, const attr_list_t *attr);
 static void write_clsid(type_t *cls);
 static void write_diid(type_t *iface);
 static void write_iid(type_t *iface);
 
 static int compute_method_indexes(type_t *iface);
 static char *gen_name(void);
-static void process_typedefs(var_t *names);
+static void process_typedefs(var_list_t *names);
 static void check_arg(var_t *arg);
 
 #define tsENUM   1
@@ -115,12 +121,18 @@ static void check_arg(var_t *arg);
 %}
 %union {
 	attr_t *attr;
+	attr_list_t *attr_list;
 	expr_t *expr;
+	expr_list_t *expr_list;
+	array_dims_t *array_dims;
 	type_t *type;
 	typeref_t *tref;
 	var_t *var;
+	var_list_t *var_list;
 	func_t *func;
+	func_list_t *func_list;
 	ifref_t *ifref;
+	ifref_list_t *ifref_list;
 	char *str;
 	UUID *uuid;
 	unsigned int num;
@@ -209,22 +221,24 @@ static void check_arg(var_t *arg);
 %token tVOID
 %token tWCHAR tWIREMARSHAL
 
-%type <attr> m_attributes attributes attrib_list attribute
-%type <expr> m_exprs /* exprs expr_list */ m_expr expr expr_list_const expr_const
-%type <expr> array array_list
+%type <attr> attribute
+%type <attr_list> m_attributes attributes attrib_list
+%type <expr> m_expr expr expr_const
+%type <expr_list> m_exprs /* exprs expr_list */ expr_list_const
+%type <array_dims> array array_list
 %type <type> inherit interface interfacehdr interfacedef interfacedec
 %type <type> dispinterface dispinterfacehdr dispinterfacedef
 %type <type> module modulehdr moduledef
 %type <type> base_type int_std
 %type <type> enumdef structdef uniondef
-%type <ifref> gbl_statements coclass_ints coclass_int
+%type <ifref> coclass_int
+%type <ifref_list> gbl_statements coclass_ints
 %type <tref> type
-%type <var> m_args no_args args arg
-%type <var> fields field s_field cases case enums enum_list enum constdef externdef
-%type <var> m_ident t_ident ident p_ident pident pident_list
-%type <var> dispint_props
-%type <func> funcdef int_statements
-%type <func> dispint_meths
+%type <var> arg field s_field case enum constdef externdef
+%type <var_list> m_args no_args args fields cases enums enum_list pident_list dispint_props
+%type <var> m_ident t_ident ident p_ident pident
+%type <func> funcdef
+%type <func_list> int_statements dispint_meths
 %type <type> coclass coclasshdr coclassdef
 %type <num> pointer_type version
 %type <str> libraryhdr
@@ -248,7 +262,7 @@ input:   gbl_statements                        { write_proxies($1); write_client
 
 gbl_statements:					{ $$ = NULL; }
 	| gbl_statements interfacedec		{ $$ = $1; }
-	| gbl_statements interfacedef		{ $$ = make_ifref($2); LINK($$, $1); }
+	| gbl_statements interfacedef		{ $$ = append_ifref( $1, make_ifref($2) ); }
 	| gbl_statements coclass ';'		{ $$ = $1;
 						  reg_type($2, $2->name, 0);
 						  if (!parse_only && do_header) write_coclass_forward($2);
@@ -277,7 +291,7 @@ imp_statements:					{}
 	;
 
 int_statements:					{ $$ = NULL; }
-	| int_statements funcdef ';'		{ $$ = $2; LINK($$, $1); }
+	| int_statements funcdef ';'		{ $$ = append_func( $1, $2 ); }
 	| int_statements statement		{ $$ = $1; }
 	;
 
@@ -320,8 +334,8 @@ m_args:						{ $$ = NULL; }
 no_args:  tVOID					{ $$ = NULL; }
 	;
 
-args:	  arg					{ check_arg($1); $$ = $1; }
-	| args ',' arg				{ check_arg($3); LINK($3, $1); $$ = $3; }
+args:	  arg					{ check_arg($1); $$ = append_var( NULL, $1 ); }
+	| args ',' arg				{ check_arg($3); $$ = append_var( $1, $3); }
 	| no_args
 	;
 
@@ -348,12 +362,12 @@ arg:	  attributes type pident array		{ $$ = $3;
 
 array:						{ $$ = NULL; }
 	| '[' array_list ']'			{ $$ = $2; }
-	| '[' '*' ']'				{ $$ = make_expr(EXPR_VOID); }
+	| '[' '*' ']'				{ $$ = append_array( NULL, make_expr(EXPR_VOID) ); }
 	;
 
-array_list: m_expr /* size of first dimension is optional */
-	| array_list ',' expr			{ LINK($3, $1); $$ = $3; }
-	| array_list ']' '[' expr		{ LINK($4, $1); $$ = $4; }
+array_list: m_expr /* size of first dimension is optional */ { $$ = append_array( NULL, $1 ); }
+	| array_list ',' expr                   { $$ = append_array( $1, $3 ); }
+	| array_list ']' '[' expr               { $$ = append_array( $1, $4 ); }
 	;
 
 m_attributes:					{ $$ = NULL; }
@@ -367,13 +381,9 @@ attributes:
 						}
 	;
 
-attrib_list: attribute
-	| attrib_list ',' attribute		{ if ($3) { LINK($3, $1); $$ = $3; }
-						  else { $$ = $1; }
-						}
-	| attrib_list ']' '[' attribute		{ if ($4) { LINK($4, $1); $$ = $4; }
-						  else { $$ = $1; }
-						}
+attrib_list: attribute                          { $$ = append_attr( NULL, $1 ); }
+	| attrib_list ',' attribute             { $$ = append_attr( $1, $3 ); }
+	| attrib_list ']' '[' attribute         { $$ = append_attr( $1, $4 ); }
 	;
 
 attribute:					{ $$ = NULL; }
@@ -429,7 +439,9 @@ attribute:					{ $$ = NULL; }
 	| tPROPPUT				{ $$ = make_attr(ATTR_PROPPUT); }
 	| tPROPPUTREF				{ $$ = make_attr(ATTR_PROPPUTREF); }
 	| tPUBLIC				{ $$ = make_attr(ATTR_PUBLIC); }
-	| tRANGE '(' expr_const ',' expr_const ')' { LINK($5, $3); $$ = make_attrp(ATTR_RANGE, $5); }
+	| tRANGE '(' expr_const ',' expr_const ')' { expr_list_t *list = append_expr( NULL, $3 );
+                                                     list = append_expr( list, $5 );
+                                                     $$ = make_attrp(ATTR_RANGE, list); }
 	| tREADONLY				{ $$ = make_attr(ATTR_READONLY); }
 	| tREQUESTEDIT				{ $$ = make_attr(ATTR_REQUESTEDIT); }
 	| tRESTRICTED				{ $$ = make_attr(ATTR_RESTRICTED); }
@@ -453,18 +465,16 @@ callconv:
 	;
 
 cases:						{ $$ = NULL; }
-	| cases case				{ if ($2) { LINK($2, $1); $$ = $2; }
-						  else { $$ = $1; }
-						}
+	| cases case				{ $$ = append_var( $1, $2 ); }
 	;
 
 case:	  tCASE expr ':' field			{ attr_t *a = make_attrp(ATTR_CASE, $2);
 						  $$ = $4; if (!$$) $$ = make_var(NULL);
-						  LINK(a, $$->attrs); $$->attrs = a;
+						  $$->attrs = append_attr( $$->attrs, a );
 						}
 	| tDEFAULT ':' field			{ attr_t *a = make_attr(ATTR_DEFAULT);
 						  $$ = $3; if (!$$) $$ = make_var(NULL);
-						  LINK(a, $$->attrs); $$->attrs = a;
+						  $$->attrs = append_attr( $$->attrs, a );
 						}
 	;
 
@@ -479,12 +489,16 @@ enums:						{ $$ = NULL; }
 	| enum_list
 	;
 
-enum_list: enum					{ if (!$$->eval)
-						    $$->eval = make_exprl(EXPR_NUM, 0 /* default for first enum entry */);
+enum_list: enum					{ if (!$1->eval)
+						    $1->eval = make_exprl(EXPR_NUM, 0 /* default for first enum entry */);
+                                                  $$ = append_var( NULL, $1 );
 						}
-	| enum_list ',' enum			{ LINK($3, $1); $$ = $3;
-						  if (!$$->eval)
-						    $$->eval = make_exprl(EXPR_NUM, $1->eval->cval + 1);
+	| enum_list ',' enum			{ if (!$3->eval)
+                                                  {
+                                                    var_t *last = LIST_ENTRY( list_tail($$), var_t, entry );
+                                                    $3->eval = make_exprl(EXPR_NUM, last->eval->cval + 1);
+                                                  }
+                                                  $$ = append_var( $1, $3 );
 						}
 	;
 
@@ -506,8 +520,8 @@ enumdef: tENUM t_ident '{' enums '}'		{ $$ = get_typev(RPC_FC_ENUM16, $2, tsENUM
 						}
 	;
 
-m_exprs:  m_expr
-	| m_exprs ',' m_expr			{ LINK($3, $1); $$ = $3; }
+m_exprs:  m_expr                                { $$ = append_expr( NULL, $1 ); }
+	| m_exprs ',' m_expr                    { $$ = append_expr( $1, $3 ); }
 	;
 
 /*
@@ -546,8 +560,8 @@ expr:	  aNUM					{ $$ = make_exprl(EXPR_NUM, $1); }
 	| '(' expr ')'				{ $$ = $2; }
 	;
 
-expr_list_const: expr_const
-	| expr_list_const ',' expr_const	{ LINK($3, $1); $$ = $3; }
+expr_list_const: expr_const                     { $$ = append_expr( NULL, $1 ); }
+	| expr_list_const ',' expr_const        { $$ = append_expr( $1, $3 ); }
 	;
 
 expr_const: expr				{ $$ = $1;
@@ -562,9 +576,7 @@ externdef: tEXTERN tCONST type ident		{ $$ = $4;
 	;
 
 fields:						{ $$ = NULL; }
-	| fields field				{ if ($2) { LINK($2, $1); $$ = $2; }
-						  else { $$ = $1; }
-						}
+	| fields field				{ $$ = append_var( $1, $2 ); }
 	;
 
 field:	  s_field ';'				{ $$ = $1; }
@@ -674,7 +686,7 @@ coclassdef: coclasshdr '{' coclass_ints '}'	{ $$ = $1;
 	;
 
 coclass_ints:					{ $$ = NULL; }
-	| coclass_ints coclass_int		{ LINK($2, $1); $$ = $2; }
+	| coclass_ints coclass_int		{ $$ = append_ifref( $1, $2 ); }
 	;
 
 coclass_int:
@@ -689,8 +701,7 @@ dispinterfacehdr: attributes dispinterface	{ attr_t *attrs;
 						  $$ = $2;
 						  if ($$->defined) yyerror("multiple definition error");
 						  attrs = make_attr(ATTR_DISPINTERFACE);
-						  LINK(attrs, $1);
-						  $$->attrs = attrs;
+						  $$->attrs = append_attr( $1, attrs );
 						  $$->ref = find_type("IDispatch", 0);
 						  if (!$$->ref) yyerror("IDispatch is undefined");
 						  $$->defined = TRUE;
@@ -699,11 +710,11 @@ dispinterfacehdr: attributes dispinterface	{ attr_t *attrs;
 	;
 
 dispint_props: tPROPERTIES ':'			{ $$ = NULL; }
-	| dispint_props s_field ';'		{ LINK($2, $1); $$ = $2; }
+	| dispint_props s_field ';'		{ $$ = append_var( $1, $2 ); }
 	;
 
 dispint_meths: tMETHODS ':'			{ $$ = NULL; }
-	| dispint_meths funcdef ';'		{ LINK($2, $1); $$ = $2; }
+	| dispint_meths funcdef ';'		{ $$ = append_func( $1, $2 ); }
 	;
 
 dispinterfacedef: dispinterfacehdr '{'
@@ -792,8 +803,8 @@ pident:	  ident
 	;
 
 pident_list:
-	  pident
-	| pident_list ',' pident		{ LINK($3, $1); $$ = $3; }
+	pident                                  { $$ = append_var( NULL, $1 ); }
+	| pident_list ',' pident                { $$ = append_var( $1, $3 ); }
 	;
 
 pointer_type:
@@ -846,7 +857,8 @@ uniondef: tUNION t_ident '{' fields '}'		{ $$ = get_typev(RPC_FC_NON_ENCAPSULATE
 						  u->type->kind = TKIND_UNION;
 						  u->type->fields = $9;
 						  u->type->defined = TRUE;
-						  LINK(u, $5); $$->fields = u;
+						  $$->fields = append_var( $$->fields, $5 );
+						  $$->fields = append_var( $$->fields, u );
 						  $$->defined = TRUE;
 						}
 	;
@@ -903,12 +915,23 @@ void init_types(void)
   decl_builtin("handle_t", RPC_FC_BIND_PRIMITIVE);
 }
 
+static attr_list_t *append_attr(attr_list_t *list, attr_t *attr)
+{
+    if (!attr) return list;
+    if (!list)
+    {
+        list = xmalloc( sizeof(*list) );
+        list_init( list );
+    }
+    list_add_tail( list, &attr->entry );
+    return list;
+}
+
 static attr_t *make_attr(enum attr_type type)
 {
   attr_t *a = xmalloc(sizeof(attr_t));
   a->type = type;
   a->u.ival = 0;
-  INIT_LINK(a);
   return a;
 }
 
@@ -917,7 +940,6 @@ static attr_t *make_attrv(enum attr_type type, unsigned long val)
   attr_t *a = xmalloc(sizeof(attr_t));
   a->type = type;
   a->u.ival = val;
-  INIT_LINK(a);
   return a;
 }
 
@@ -926,7 +948,6 @@ static attr_t *make_attrp(enum attr_type type, void *val)
   attr_t *a = xmalloc(sizeof(attr_t));
   a->type = type;
   a->u.pval = val;
-  INIT_LINK(a);
   return a;
 }
 
@@ -937,7 +958,6 @@ static expr_t *make_expr(enum expr_type type)
   e->ref = NULL;
   e->u.lval = 0;
   e->is_const = FALSE;
-  INIT_LINK(e);
   return e;
 }
 
@@ -948,7 +968,6 @@ static expr_t *make_exprl(enum expr_type type, long val)
   e->ref = NULL;
   e->u.lval = val;
   e->is_const = FALSE;
-  INIT_LINK(e);
   /* check for numeric constant */
   if (type == EXPR_NUM || type == EXPR_HEXNUM || type == EXPR_TRUEFALSE) {
     /* make sure true/false value is valid */
@@ -967,7 +986,6 @@ static expr_t *make_exprs(enum expr_type type, char *val)
   e->ref = NULL;
   e->u.sval = val;
   e->is_const = FALSE;
-  INIT_LINK(e);
   /* check for predefined constants */
   if (type == EXPR_IDENTIFIER) {
     var_t *c = find_const(val, 0);
@@ -989,7 +1007,6 @@ static expr_t *make_exprt(enum expr_type type, typeref_t *tref, expr_t *expr)
   e->ref = expr;
   e->u.tref = tref;
   e->is_const = FALSE;
-  INIT_LINK(e);
   /* check for cast of constant expression */
   if (type == EXPR_SIZEOF) {
     switch (tref->ref->type) {
@@ -1035,7 +1052,6 @@ static expr_t *make_expr1(enum expr_type type, expr_t *expr)
   e->ref = expr;
   e->u.lval = 0;
   e->is_const = FALSE;
-  INIT_LINK(e);
   /* check for compile-time optimization */
   if (expr->is_const) {
     e->is_const = TRUE;
@@ -1062,7 +1078,6 @@ static expr_t *make_expr2(enum expr_type type, expr_t *expr1, expr_t *expr2)
   e->ref = expr1;
   e->u.ext = expr2;
   e->is_const = FALSE;
-  INIT_LINK(e);
   /* check for compile-time optimization */
   if (expr1->is_const && expr2->is_const) {
     e->is_const = TRUE;
@@ -1108,7 +1123,6 @@ static expr_t *make_expr3(enum expr_type type, expr_t *expr1, expr_t *expr2, exp
   e->u.ext = expr2;
   e->ext2 = expr3;
   e->is_const = FALSE;
-  INIT_LINK(e);
   /* check for compile-time optimization */
   if (expr1->is_const && expr2->is_const && expr3->is_const) {
     e->is_const = TRUE;
@@ -1122,6 +1136,30 @@ static expr_t *make_expr3(enum expr_type type, expr_t *expr1, expr_t *expr2, exp
     }
   }
   return e;
+}
+
+static expr_list_t *append_expr(expr_list_t *list, expr_t *expr)
+{
+    if (!expr) return list;
+    if (!list)
+    {
+        list = xmalloc( sizeof(*list) );
+        list_init( list );
+    }
+    list_add_tail( list, &expr->entry );
+    return list;
+}
+
+static array_dims_t *append_array(array_dims_t *list, expr_t *expr)
+{
+    if (!expr) return list;
+    if (!list)
+    {
+        list = xmalloc( sizeof(*list) );
+        list_init( list );
+    }
+    list_add_tail( list, &expr->entry );
+    return list;
 }
 
 static type_t *make_type(unsigned char type, type_t *ref)
@@ -1143,7 +1181,6 @@ static type_t *make_type(unsigned char type, type_t *ref)
   t->written = FALSE;
   t->user_types_registered = FALSE;
   t->typelib_idx = -1;
-  INIT_LINK(t);
   return t;
 }
 
@@ -1184,7 +1221,7 @@ static type_t *type_ref(typeref_t *ref)
   return t;
 }
 
-static void set_type(var_t *v, typeref_t *ref, expr_t *arr)
+static void set_type(var_t *v, typeref_t *ref, array_dims_t *arr)
 {
   v->type = ref->ref;
   v->tname = ref->name;
@@ -1193,13 +1230,36 @@ static void set_type(var_t *v, typeref_t *ref, expr_t *arr)
   v->array = arr;
 }
 
+static ifref_list_t *append_ifref(ifref_list_t *list, ifref_t *iface)
+{
+    if (!iface) return list;
+    if (!list)
+    {
+        list = xmalloc( sizeof(*list) );
+        list_init( list );
+    }
+    list_add_tail( list, &iface->entry );
+    return list;
+}
+
 static ifref_t *make_ifref(type_t *iface)
 {
   ifref_t *l = xmalloc(sizeof(ifref_t));
   l->iface = iface;
   l->attrs = NULL;
-  INIT_LINK(l);
   return l;
+}
+
+static var_list_t *append_var(var_list_t *list, var_t *var)
+{
+    if (!var) return list;
+    if (!list)
+    {
+        list = xmalloc( sizeof(*list) );
+        list_init( list );
+    }
+    list_add_tail( list, &var->entry );
+    return list;
 }
 
 static var_t *make_var(char *name)
@@ -1213,18 +1273,28 @@ static var_t *make_var(char *name)
   v->attrs = NULL;
   v->array = NULL;
   v->eval = NULL;
-  INIT_LINK(v);
   return v;
 }
 
-static func_t *make_func(var_t *def, var_t *args)
+static func_list_t *append_func(func_list_t *list, func_t *func)
+{
+    if (!func) return list;
+    if (!list)
+    {
+        list = xmalloc( sizeof(*list) );
+        list_init( list );
+    }
+    list_add_tail( list, &func->entry );
+    return list;
+}
+
+static func_t *make_func(var_t *def, var_list_t *args)
 {
   func_t *f = xmalloc(sizeof(func_t));
   f->def = def;
   f->args = args;
   f->ignore = parse_only;
   f->idx = -1;
-  INIT_LINK(f);
   return f;
 }
 
@@ -1233,7 +1303,6 @@ static type_t *make_class(char *name)
   type_t *c = make_type(0, NULL);
   c->name = name;
   c->kind = TKIND_COCLASS;
-  INIT_LINK(c);
   return c;
 }
 
@@ -1285,9 +1354,10 @@ static type_t *reg_type(type_t *type, const char *name, int t)
   return type;
 }
 
-static type_t *reg_typedefs(type_t *type, var_t *names, attr_t *attrs)
+static type_t *reg_typedefs(type_t *type, var_list_t *names, attr_list_t *attrs)
 {
   type_t *ptr = type;
+  const var_t *name;
   int ptrc = 0;
   int is_str = is_attr(attrs, ATTR_STRING);
   unsigned char ptr_type = get_attrv(attrs, ATTR_POINTERTYPE);
@@ -1302,8 +1372,11 @@ static type_t *reg_typedefs(type_t *type, var_t *names, attr_t *attrs)
 
     c = t->type;
     if (c != RPC_FC_CHAR && c != RPC_FC_BYTE && c != RPC_FC_WCHAR)
+    {
+      name = LIST_ENTRY( list_head( names ), const var_t, entry );
       yyerror("'%s': [string] attribute is only valid on 'char', 'byte', or 'wchar_t' pointers and arrays",
-              names->name);
+              name->name);
+    }
   }
 
   /* We must generate names for tagless enum, struct or union.
@@ -1314,19 +1387,15 @@ static type_t *reg_typedefs(type_t *type, var_t *names, attr_t *attrs)
        || type->kind == TKIND_UNION) && ! type->name && ! parse_only)
   {
     if (! is_attr(attrs, ATTR_PUBLIC))
-    {
-      attr_t *new_attrs = make_attr(ATTR_PUBLIC);
-      LINK(new_attrs, attrs);
-      attrs = new_attrs;
-    }
+      attrs = append_attr( attrs, make_attr(ATTR_PUBLIC) );
     type->name = gen_name();
   }
 
-  while (names) {
-    var_t *next = NEXT_LINK(names);
-    if (names->name) {
+  LIST_FOR_EACH_ENTRY( name, names, const var_t, entry )
+  {
+    if (name->name) {
       type_t *cur = ptr;
-      int cptr = names->ptr_level;
+      int cptr = name->ptr_level;
       if (cptr > ptrc) {
         while (cptr > ptrc) {
           cur = ptr = make_type(RPC_FC_RP, cur);
@@ -1338,7 +1407,7 @@ static type_t *reg_typedefs(type_t *type, var_t *names, attr_t *attrs)
           cptr++;
         }
       }
-      cur = alias(cur, names->name);
+      cur = alias(cur, name->name);
       cur->attrs = attrs;
       if (ptr_type)
       {
@@ -1354,7 +1423,6 @@ static type_t *reg_typedefs(type_t *type, var_t *names, attr_t *attrs)
 
       reg_type(cur, cur->name, 0);
     }
-    names = next;
   }
   return type;
 }
@@ -1416,13 +1484,14 @@ static type_t *get_typev(unsigned char type, var_t *name, int t)
   return get_type(type, sname, t);
 }
 
-static int get_struct_type(var_t *field)
+static int get_struct_type(var_list_t *fields)
 {
   int has_pointer = 0;
   int has_conformance = 0;
   int has_variance = 0;
+  var_t *field;
 
-  for (; field; field = NEXT_LINK(field))
+  if (fields) LIST_FOR_EACH_ENTRY( field, fields, var_t, entry )
   {
     type_t *t = field->type;
 
@@ -1441,10 +1510,10 @@ static int get_struct_type(var_t *field)
 
     if (is_array_type(field->attrs, 0, field->array))
     {
-        if (field->array && !field->array->is_const)
+        if (field->array && is_conformant_array(field->array))
         {
             has_conformance = 1;
-            if (PREV_LINK(field))
+            if (list_next( fields, &field->entry ))
                 yyerror("field '%s' deriving from a conformant array must be the last field in the structure",
                         field->name);
         }
@@ -1488,7 +1557,7 @@ static int get_struct_type(var_t *field)
       break;
     case RPC_FC_CARRAY:
       has_conformance = 1;
-      if (PREV_LINK(field))
+      if (list_next( fields, &field->entry ))
           yyerror("field '%s' deriving from a conformant array must be the last field in the structure",
                   field->name);
       break;
@@ -1505,7 +1574,7 @@ static int get_struct_type(var_t *field)
 
     case RPC_FC_CPSTRUCT:
       has_conformance = 1;
-      if (PREV_LINK(field))
+      if (list_next( fields, &field->entry ))
           yyerror("field '%s' deriving from a conformant array must be the last field in the structure",
                   field->name);
       has_pointer = 1;
@@ -1513,7 +1582,7 @@ static int get_struct_type(var_t *field)
 
     case RPC_FC_CSTRUCT:
       has_conformance = 1;
-      if (PREV_LINK(field))
+      if (list_next( fields, &field->entry ))
           yyerror("field '%s' deriving from a conformant array must be the last field in the structure",
                   field->name);
       break;
@@ -1590,7 +1659,7 @@ static var_t *find_const(char *name, int f)
   return cur->var;
 }
 
-static void write_libid(const char *name, const attr_t *attr)
+static void write_libid(const char *name, const attr_list_t *attr)
 {
   const UUID *uuid = get_attrp(attr, ATTR_UUID);
   write_guid(idfile, "LIBID", name, uuid);
@@ -1617,20 +1686,17 @@ static void write_iid(type_t *iface)
 static int compute_method_indexes(type_t *iface)
 {
   int idx;
-  func_t *f = iface->funcs;
+  func_t *f;
 
   if (iface->ref)
     idx = compute_method_indexes(iface->ref);
   else
     idx = 0;
 
-  if (! f)
+  if (!iface->funcs)
     return idx;
 
-  while (NEXT_LINK(f))
-    f = NEXT_LINK(f);
-
-  for ( ; f ; f = PREV_LINK(f))
+  LIST_FOR_EACH_ENTRY( f, iface->funcs, func_t, entry )
     if (! is_callas(f->def->attrs))
       f->idx = idx++;
 
@@ -1662,21 +1728,21 @@ static char *gen_name(void)
   return name;
 }
 
-static void process_typedefs(var_t *names)
+static void process_typedefs(var_list_t *names)
 {
-  END_OF_LIST(names);
-  while (names)
+  var_t *name, *next;
+
+  if (!names) return;
+  LIST_FOR_EACH_ENTRY_SAFE( name, next, names, var_t, entry )
   {
-    var_t *next = PREV_LINK(names);
-    type_t *type = find_type(names->name, 0);
+    type_t *type = find_type(name->name, 0);
 
     if (! parse_only && do_header)
       write_typedef(type);
     if (in_typelib && type->attrs)
       add_typelib_entry(type);
 
-    free(names);
-    names = next;
+    free(name);
   }
 }
 

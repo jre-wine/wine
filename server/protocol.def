@@ -225,7 +225,23 @@ struct token_groups
     /* VARARGS(sids,SID); */
 };
 
-enum apc_type { APC_NONE, APC_USER, APC_TIMER, APC_ASYNC_IO };
+enum apc_type
+{
+    APC_NONE,
+    APC_USER,
+    APC_TIMER,
+    APC_ASYNC_IO,
+    APC_VIRTUAL_ALLOC,
+    APC_VIRTUAL_FREE,
+    APC_VIRTUAL_QUERY,
+    APC_VIRTUAL_PROTECT,
+    APC_VIRTUAL_FLUSH,
+    APC_VIRTUAL_LOCK,
+    APC_VIRTUAL_UNLOCK,
+    APC_MAP_VIEW,
+    APC_UNMAP_VIEW,
+    APC_CREATE_THREAD
+};
 
 typedef union
 {
@@ -251,7 +267,158 @@ typedef union
         void            *sb;       /* status block */
         unsigned int     status;   /* I/O status */
     } async_io;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
+        void            *addr;      /* requested address */
+        unsigned long    size;      /* allocation size */
+        unsigned int     zero_bits; /* allocation alignment */
+        unsigned int     op_type;   /* type of operation */
+        unsigned int     prot;      /* memory protection flags */
+    } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_FREE */
+        void            *addr;      /* requested address */
+        unsigned long    size;      /* allocation size */
+        unsigned int     op_type;   /* type of operation */
+    } virtual_free;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_QUERY */
+        const void      *addr;      /* requested address */
+    } virtual_query;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_PROTECT */
+        void            *addr;      /* requested address */
+        unsigned long    size;      /* requested address */
+        unsigned int     prot;      /* new protection flags */
+    } virtual_protect;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_FLUSH */
+        const void      *addr;      /* requested address */
+        unsigned long    size;      /* requested address */
+    } virtual_flush;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_LOCK */
+        void            *addr;      /* requested address */
+        unsigned long    size;      /* requested address */
+    } virtual_lock;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_UNLOCK */
+        void            *addr;      /* requested address */
+        unsigned long    size;      /* requested address */
+    } virtual_unlock;
+    struct
+    {
+        enum apc_type    type;      /* APC_MAP_VIEW */
+        obj_handle_t     handle;    /* mapping handle */
+        void            *addr;      /* requested address */
+        unsigned long    size;      /* allocation size */
+        unsigned int     offset_low;/* file offset */
+        unsigned int     offset_high;
+        unsigned int     zero_bits; /* allocation alignment */
+        unsigned int     alloc_type;/* allocation type */
+        unsigned int     prot;      /* memory protection flags */
+    } map_view;
+    struct
+    {
+        enum apc_type    type;      /* APC_UNMAP_VIEW */
+        void            *addr;      /* view address */
+    } unmap_view;
+    struct
+    {
+        enum apc_type    type;      /* APC_CREATE_THREAD */
+        void (__stdcall *func)(void*);  /* start function */
+        void            *arg;       /* argument for start function */
+        unsigned long    reserve;   /* reserve size for thread stack */
+        unsigned long    commit;    /* commit size for thread stack */
+        int              suspend;   /* suspended thread? */
+    } create_thread;
 } apc_call_t;
+
+typedef union
+{
+    enum apc_type type;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
+        unsigned int     status;    /* status returned by call */
+        void            *addr;      /* resulting address */
+        unsigned long    size;      /* resulting size */
+    } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_FREE */
+        unsigned int     status;    /* status returned by call */
+        void            *addr;      /* resulting address */
+        unsigned long    size;      /* resulting size */
+    } virtual_free;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_QUERY */
+        unsigned int     status;    /* status returned by call */
+        void            *base;      /* resulting base address */
+        void            *alloc_base;/* resulting allocation base */
+        unsigned long    size;      /* resulting region size */
+        unsigned int     state;     /* resulting region state */
+        unsigned int     prot;      /* resulting region protection */
+        unsigned int     alloc_prot;/* resulting allocation protection */
+        unsigned int     alloc_type;/* resulting region allocation type */
+    } virtual_query;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_PROTECT */
+        unsigned int     status;    /* status returned by call */
+        void            *addr;      /* resulting address */
+        unsigned long    size;      /* resulting size */
+        unsigned int     prot;      /* old protection flags */
+    } virtual_protect;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_FLUSH */
+        unsigned int     status;    /* status returned by call */
+        const void      *addr;      /* resulting address */
+        unsigned long    size;      /* resulting size */
+    } virtual_flush;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_LOCK */
+        unsigned int     status;    /* status returned by call */
+        void            *addr;      /* resulting address */
+        unsigned long    size;      /* resulting size */
+    } virtual_lock;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_UNLOCK */
+        unsigned int     status;    /* status returned by call */
+        void            *addr;      /* resulting address */
+        unsigned long    size;      /* resulting size */
+    } virtual_unlock;
+    struct
+    {
+        enum apc_type    type;      /* APC_MAP_VIEW */
+        unsigned int     status;    /* status returned by call */
+        void            *addr;      /* resulting address */
+        unsigned long    size;      /* resulting size */
+    } map_view;
+    struct
+    {
+        enum apc_type    type;      /* APC_MAP_VIEW */
+        unsigned int     status;    /* status returned by call */
+    } unmap_view;
+    struct
+    {
+        enum apc_type    type;      /* APC_CREATE_THREAD */
+        unsigned int     status;    /* status returned by call */
+        thread_id_t      tid;       /* thread id */
+        obj_handle_t     handle;    /* handle to new thread */
+    } create_thread;
+} apc_result_t;
 
 /****************************************************************/
 /* Request declarations */
@@ -461,10 +628,14 @@ typedef union
 @END
 
 
-/* Queue an APC for a thread */
+/* Queue an APC for a thread or process */
 @REQ(queue_apc)
-    obj_handle_t handle;       /* thread handle */
+    obj_handle_t thread;       /* thread handle */
+    obj_handle_t process;      /* process handle */
     apc_call_t   call;         /* call arguments */
+@REPLY
+    obj_handle_t handle;       /* APC handle */
+    int          self;         /* run APC in caller itself? */
 @END
 
 
@@ -472,9 +643,18 @@ typedef union
 @REQ(get_apc)
     int          alertable;    /* is thread alertable? */
     obj_handle_t prev;         /* handle to previous APC */
+    apc_result_t result;       /* result of previous APC */
 @REPLY
     obj_handle_t handle;       /* handle to APC */
     apc_call_t   call;         /* call arguments */
+@END
+
+
+/* Get the result of an APC call */
+@REQ(get_apc_result)
+    obj_handle_t handle;       /* handle to the APC */
+@REPLY
+    apc_result_t result;       /* result of the APC */
 @END
 
 
@@ -504,6 +684,7 @@ typedef union
     unsigned int options;      /* duplicate options (see below) */
 @REPLY
     obj_handle_t handle;       /* duplicated handle in dst process */
+    int          self;         /* is the source the current process? */
     int          closed;       /* whether the source handle has been closed */
 @END
 #define DUP_HANDLE_CLOSE_SOURCE  DUPLICATE_CLOSE_SOURCE
@@ -1159,6 +1340,7 @@ enum char_info_mode
     int          protect;       /* protection flags */
     int          header_size;   /* header size (for VPROT_IMAGE mapping) */
     void*        base;          /* default base addr (for VPROT_IMAGE mapping) */
+    obj_handle_t mapping;       /* duplicate mapping handle unless removable */
     obj_handle_t shared_file;   /* shared mapping file handle */
     int          shared_size;   /* shared mapping size */
 @END
@@ -2665,4 +2847,13 @@ enum message_type
     obj_handle_t   handle;        /* handle to the symlink */
 @REPLY
     VARARG(target_name,unicode_str); /* target name */
+@END
+
+
+/* Query basic object information */
+@REQ(get_object_info)
+    obj_handle_t   handle;        /* handle to the object */
+@REPLY
+    unsigned int   access;        /* granted access mask */
+    unsigned int   ref_count;     /* object ref count */
 @END

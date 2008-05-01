@@ -76,6 +76,7 @@
 #ifndef CHM_MAX_BLOCKS_CACHED
 #define CHM_MAX_BLOCKS_CACHED 5
 #endif
+#define CHM_PARAM_MAX_BLOCKS_CACHED 0
 
 /*
  * architecture specific defines
@@ -218,12 +219,6 @@ static const WCHAR _CHMU_CONTENT[] = {
         'S','t','o','r','a','g','e','/',
         'M','S','C','o','m','p','r','e','s','s','e','d','/',
         'C','o','n','t','e','n','t',0
-};
-static const WCHAR _CHMU_SPANINFO[] = {
-':',':','D','a','t','a','S','p','a','c','e','/',
-        'S','t','o','r','a','g','e','/',
-        'M','S','C','o','m','p','r','e','s','s','e','d','/',
-        'S','p','a','n','I','n','f','o',
 };
 
 /*
@@ -599,6 +594,79 @@ static Int64 _chm_fetch_bytes(struct chmFile *h,
     return readLen;
 }
 
+/*
+ * set a parameter on the file handle.
+ * valid parameter types:
+ *          CHM_PARAM_MAX_BLOCKS_CACHED:
+ *                 how many decompressed blocks should be cached?  A simple
+ *                 caching scheme is used, wherein the index of the block is
+ *                 used as a hash value, and hash collision results in the
+ *                 invalidation of the previously cached block.
+ */
+static void chm_set_param(struct chmFile *h,
+                          int paramType,
+                          int paramVal)
+{
+    switch (paramType)
+    {
+        case CHM_PARAM_MAX_BLOCKS_CACHED:
+            CHM_ACQUIRE_LOCK(h->cache_mutex);
+            if (paramVal != h->cache_num_blocks)
+            {
+                UChar **newBlocks;
+                Int64 *newIndices;
+                int     i;
+
+                /* allocate new cached blocks */
+                newBlocks = malloc(paramVal * sizeof (UChar *));
+                newIndices = malloc(paramVal * sizeof (UInt64));
+                for (i=0; i<paramVal; i++)
+                {
+                    newBlocks[i] = NULL;
+                    newIndices[i] = 0;
+                }
+
+                /* re-distribute old cached blocks */
+                if (h->cache_blocks)
+                {
+                    for (i=0; i<h->cache_num_blocks; i++)
+                    {
+                        int newSlot = (int)(h->cache_block_indices[i] % paramVal);
+
+                        if (h->cache_blocks[i])
+                        {
+                            /* in case of collision, destroy newcomer */
+                            if (newBlocks[newSlot])
+                            {
+                                free(h->cache_blocks[i]);
+                                h->cache_blocks[i] = NULL;
+                            }
+                            else
+                            {
+                                newBlocks[newSlot] = h->cache_blocks[i];
+                                newIndices[newSlot] =
+                                            h->cache_block_indices[i];
+                            }
+                        }
+                    }
+
+                    free(h->cache_blocks);
+                    free(h->cache_block_indices);
+                }
+
+                /* now, set new values */
+                h->cache_blocks = newBlocks;
+                h->cache_block_indices = newIndices;
+                h->cache_num_blocks = paramVal;
+            }
+            CHM_RELEASE_LOCK(h->cache_mutex);
+            break;
+
+        default:
+            break;
+    }
+}
+
 /* open an ITS archive */
 struct chmFile *chm_openW(const WCHAR *filename)
 {
@@ -681,33 +749,6 @@ struct chmFile *chm_openW(const WCHAR *filename)
 
     /* By default, compression is enabled. */
     newHandle->compression_enabled = 1;
-
-/* Jed, Sun Jun 27: 'span' doesn't seem to be used anywhere?! */
-#if 0
-    /* fetch span */
-    if (CHM_RESOLVE_SUCCESS != chm_resolve_object(newHandle,
-                                                  _CHMU_SPANINFO,
-                                                  &uiSpan)                ||
-        uiSpan.space == CHM_COMPRESSED)
-    {
-        chm_close(newHandle);
-        return NULL;
-    }
-
-    /* N.B.: we've already checked that uiSpan is in the uncompressed section,
-     *       so this should not require attempting to decompress, which may
-     *       rely on having a valid "span"
-     */
-    sremain = 8;
-    sbufpos = sbuffer;
-    if (chm_retrieve_object(newHandle, &uiSpan, sbuffer,
-                            0, sremain) != sremain                        ||
-        !_unmarshal_uint64(&sbufpos, &sremain, &newHandle->span))
-    {
-        chm_close(newHandle);
-        return NULL;
-    }
-#endif
 
     /* prefetch most commonly needed unit infos */
     if (CHM_RESOLVE_SUCCESS != chm_resolve_object(newHandle,
@@ -809,79 +850,6 @@ void chm_close(struct chmFile *h)
         h->cache_block_indices = NULL;
 
         free(h);
-    }
-}
-
-/*
- * set a parameter on the file handle.
- * valid parameter types:
- *          CHM_PARAM_MAX_BLOCKS_CACHED:
- *                 how many decompressed blocks should be cached?  A simple
- *                 caching scheme is used, wherein the index of the block is
- *                 used as a hash value, and hash collision results in the
- *                 invalidation of the previously cached block.
- */
-void chm_set_param(struct chmFile *h,
-                   int paramType,
-                   int paramVal)
-{
-    switch (paramType)
-    {
-        case CHM_PARAM_MAX_BLOCKS_CACHED:
-            CHM_ACQUIRE_LOCK(h->cache_mutex);
-            if (paramVal != h->cache_num_blocks)
-            {
-                UChar **newBlocks;
-                Int64 *newIndices;
-                int     i;
-
-                /* allocate new cached blocks */
-                newBlocks = malloc(paramVal * sizeof (UChar *));
-                newIndices = malloc(paramVal * sizeof (UInt64));
-                for (i=0; i<paramVal; i++)
-                {
-                    newBlocks[i] = NULL;
-                    newIndices[i] = 0;
-                }
-
-                /* re-distribute old cached blocks */
-                if (h->cache_blocks)
-                {
-                    for (i=0; i<h->cache_num_blocks; i++)
-                    {
-                        int newSlot = (int)(h->cache_block_indices[i] % paramVal);
-
-                        if (h->cache_blocks[i])
-                        {
-                            /* in case of collision, destroy newcomer */
-                            if (newBlocks[newSlot])
-                            {
-                                free(h->cache_blocks[i]);
-                                h->cache_blocks[i] = NULL;
-                            }
-                            else
-                            {
-                                newBlocks[newSlot] = h->cache_blocks[i];
-                                newIndices[newSlot] =
-                                            h->cache_block_indices[i];
-                            }
-                        }
-                    }
-
-                    free(h->cache_blocks);
-                    free(h->cache_block_indices);
-                }
-
-                /* now, set new values */
-                h->cache_blocks = newBlocks;
-                h->cache_block_indices = newIndices;
-                h->cache_num_blocks = paramVal;
-            }
-            CHM_RELEASE_LOCK(h->cache_mutex);
-            break;
-
-        default:
-            break;
     }
 }
 

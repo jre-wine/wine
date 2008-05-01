@@ -20,6 +20,9 @@
 
 #include <stdarg.h>
 
+#define NTDDI_WIN2K   0x05000000
+#define NTDDI_VERSION NTDDI_WIN2K /* for some MIDL_STUB_MESSAGE fields */
+
 #include "wine/test.h"
 #include <windef.h>
 #include <winbase.h>
@@ -69,6 +72,42 @@ static const MIDL_STUB_DESC Object_StubDesc =
     0   /* Reserved5 */
     };
 
+
+static void test_ndr_simple_type(void)
+{
+    RPC_MESSAGE RpcMessage;
+    MIDL_STUB_MESSAGE StubMsg;
+    MIDL_STUB_DESC StubDesc;
+    long l, l2 = 0;
+
+    StubDesc = Object_StubDesc;
+    StubDesc.pFormatTypes = NULL;
+
+    NdrClientInitializeNew(
+                           &RpcMessage,
+                           &StubMsg,
+                           &StubDesc,
+                           0);
+
+    StubMsg.BufferLength = 16;
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
+    l = 0xcafebabe;
+    NdrSimpleTypeMarshall(&StubMsg, (unsigned char*)&l, 8 /* FC_LONG */);
+    ok(StubMsg.Buffer == StubMsg.BufferStart + 4, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
+    ok(*(long*)StubMsg.BufferStart == l, "%ld\n", *(long*)StubMsg.BufferStart);
+
+    StubMsg.Buffer = StubMsg.BufferStart + 1;
+    NdrSimpleTypeMarshall(&StubMsg, (unsigned char*)&l, 8 /* FC_LONG */);
+    ok(StubMsg.Buffer == StubMsg.BufferStart + 8, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
+    ok(*(long*)(StubMsg.BufferStart + 4) == l, "%ld\n", *(long*)StubMsg.BufferStart);
+
+    StubMsg.Buffer = StubMsg.BufferStart + 1;
+    NdrSimpleTypeUnmarshall(&StubMsg, (unsigned char*)&l2, 8 /* FC_LONG */);
+    ok(StubMsg.Buffer == StubMsg.BufferStart + 8, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
+    ok(l2 == l, "%ld\n", l2);
+
+    HeapFree(GetProcessHeap(), 0, StubMsg.BufferStart);
+}
 
 static void test_pointer_marshal(const unsigned char *formattypes,
                                  void *memsrc,
@@ -892,8 +931,8 @@ static void test_client_init(void)
     TEST_POINTER_UNSET(VarianceMark);
     ok(stubMsg.Unused == 0xcccccccc, "Unused should have be unset instead of 0x%x\n", stubMsg.Unused);
     TEST_POINTER_UNSET(pContext);
-    TEST_ULONG_UNSET(Reserved51_1);
-    TEST_ULONG_UNSET(Reserved51_2);
+    TEST_POINTER_UNSET(ContextHandleHash);
+    TEST_POINTER_UNSET(pUserMarshalList);
     TEST_ULONG_UNSET(Reserved51_3);
     TEST_ULONG_UNSET(Reserved51_4);
     TEST_ULONG_UNSET(Reserved51_5);
@@ -947,6 +986,7 @@ todo_wine {
 
 START_TEST( ndr_marshall )
 {
+    test_ndr_simple_type();
     test_simple_types();
     test_simple_struct();
     test_fullpointer_xlat();

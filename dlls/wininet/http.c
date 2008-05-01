@@ -665,7 +665,7 @@ BOOL WINAPI HttpEndRequestW(HINTERNET hRequest,
             (dwCode==302 || dwCode==301))
         {
             WCHAR szNewLocation[2048];
-            dwBufferSize=2048;
+            dwBufferSize=sizeof(szNewLocation);
             if(HTTP_HttpQueryInfoW(lpwhr,HTTP_QUERY_LOCATION,szNewLocation,&dwBufferSize,NULL))
             {
 	            static const WCHAR szGET[] = { 'G','E','T', 0 };
@@ -846,22 +846,22 @@ end:
 }
 
 /***********************************************************************
- *  HTTP_DecodeBase64
+ *  HTTP_EncodeBase64
  */
-static UINT HTTP_EncodeBase64( LPCWSTR bin, LPWSTR base64 )
+static UINT HTTP_EncodeBase64( LPCSTR bin, unsigned int len, LPWSTR base64 )
 {
     UINT n = 0, x;
     static LPCSTR HTTP_Base64Enc = 
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-    while( bin[0] )
+    while( len > 0 )
     {
         /* first 6 bits, all from bin[0] */
         base64[n++] = HTTP_Base64Enc[(bin[0] & 0xfc) >> 2];
         x = (bin[0] & 3) << 4;
 
         /* next 6 bits, 2 from bin[0] and 4 from bin[1] */
-        if( !bin[1] )
+        if( len == 1 )
         {
             base64[n++] = HTTP_Base64Enc[x];
             base64[n++] = '=';
@@ -872,7 +872,7 @@ static UINT HTTP_EncodeBase64( LPCWSTR bin, LPWSTR base64 )
         x = ( bin[1] & 0x0f ) << 2;
 
         /* next 6 bits 4 from bin[1] and 2 from bin[2] */
-        if( !bin[2] )
+        if( len == 2 )
         {
             base64[n++] = HTTP_Base64Enc[x];
             base64[n++] = '=';
@@ -883,6 +883,7 @@ static UINT HTTP_EncodeBase64( LPCWSTR bin, LPWSTR base64 )
         /* last 6 bits, all from bin [2] */
         base64[n++] = HTTP_Base64Enc[ bin[2] & 0x3f ];
         bin += 3;
+        len -= 3;
     }
     base64[n] = 0;
     return n;
@@ -896,12 +897,13 @@ static UINT HTTP_EncodeBase64( LPCWSTR bin, LPWSTR base64 )
 static LPWSTR HTTP_EncodeBasicAuth( LPCWSTR username, LPCWSTR password)
 {
     UINT len;
-    LPWSTR in, out;
+    char *in;
+    LPWSTR out;
     static const WCHAR szBasic[] = {'B','a','s','i','c',' ',0};
-    static const WCHAR szColon[] = {':',0};
+    int userlen = WideCharToMultiByte(CP_UTF8, 0, username, lstrlenW(username), NULL, 0, NULL, NULL);
+    int passlen = WideCharToMultiByte(CP_UTF8, 0, password, lstrlenW(password), NULL, 0, NULL, NULL);
 
-    len = lstrlenW( username ) + 1 + lstrlenW ( password ) + 1;
-    in = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR) );
+    in = HeapAlloc( GetProcessHeap(), 0, userlen + 1 + passlen );
     if( !in )
         return NULL;
 
@@ -910,11 +912,11 @@ static LPWSTR HTTP_EncodeBasicAuth( LPCWSTR username, LPCWSTR password)
     out = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR) );
     if( out )
     {
-        lstrcpyW( in, username );
-        lstrcatW( in, szColon );
-        lstrcatW( in, password );
+        WideCharToMultiByte(CP_UTF8, 0, username, -1, in, userlen, NULL, NULL);
+        in[userlen] = ':';
+        WideCharToMultiByte(CP_UTF8, 0, password, -1, &in[userlen+1], passlen, NULL, NULL);
         lstrcpyW( out, szBasic );
-        HTTP_EncodeBase64( in, &out[strlenW(out)] );
+        HTTP_EncodeBase64( in, userlen + 1 + passlen, &out[strlenW(out)] );
     }
     HeapFree( GetProcessHeap(), 0, in );
 
@@ -978,7 +980,7 @@ static BOOL HTTP_DealWithProxy( LPWININETAPPINFOW hIC,
 
     if( !lpwhr->lpszPath )
         lpwhr->lpszPath = szNul;
-    TRACE("server='%s' path='%s'\n",
+    TRACE("server=%s path=%s\n",
           debugstr_w(lpwhs->lpszHostName), debugstr_w(lpwhr->lpszPath));
     /* for constant 15 see above */
     len = strlenW(lpwhs->lpszHostName) + strlenW(lpwhr->lpszPath) + 15;
@@ -1464,7 +1466,7 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
         ((dwInfoLevel & HTTP_QUERY_FLAG_REQUEST_HEADERS) &&
          (~lphttpHdr->wFlags & HDR_ISREQUEST)))
     {
-        SetLastError(ERROR_HTTP_HEADER_NOT_FOUND);
+        INTERNET_SetLastError(ERROR_HTTP_HEADER_NOT_FOUND);
         return bSuccess;
     }
 
@@ -1522,7 +1524,7 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
         *lpdwBufferLength = len - sizeof(WCHAR);
         bSuccess = TRUE;
 
-	TRACE(" returning string : '%s'\n", debugstr_w(lpBuffer));
+	TRACE(" returning string : %s\n", debugstr_w(lpBuffer));
     }
     return bSuccess;
 }
@@ -1754,7 +1756,7 @@ BOOL WINAPI HttpSendRequestExA(HINTERNET hRequest,
             header = HeapAlloc(GetProcessHeap(),0,headerlen*sizeof(WCHAR));
             if (!(BuffersInW.lpcszHeader = header))
             {
-                SetLastError(ERROR_OUTOFMEMORY);
+                INTERNET_SetLastError(ERROR_OUTOFMEMORY);
                 return FALSE;
             }
             BuffersInW.dwHeadersLength = MultiByteToWideChar(CP_ACP, 0,
@@ -1848,7 +1850,7 @@ BOOL WINAPI HttpSendRequestExW(HINTERNET hRequest,
         /*
          * This is from windows.
          */
-        SetLastError(ERROR_IO_PENDING);
+        INTERNET_SetLastError(ERROR_IO_PENDING);
         ret = FALSE;
     }
     else
@@ -1930,7 +1932,7 @@ BOOL WINAPI HttpSendRequestW(HINTERNET hHttpRequest, LPCWSTR lpszHeaders,
         /*
          * This is from windows.
          */
-        SetLastError(ERROR_IO_PENDING);
+        INTERNET_SetLastError(ERROR_IO_PENDING);
         r = FALSE;
     }
     else
@@ -2373,7 +2375,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
             {
                 DWORD dwCode,dwCodeLength=sizeof(DWORD);
                 WCHAR szNewLocation[2048];
-                dwBufferSize=2048;
+                dwBufferSize=sizeof(szNewLocation);
                 if (HTTP_HttpQueryInfoW(lpwhr,HTTP_QUERY_FLAG_NUMBER|HTTP_QUERY_STATUS_CODE,&dwCode,&dwCodeLength,NULL) &&
                     (dwCode==HTTP_STATUS_REDIRECT || dwCode==HTTP_STATUS_MOVED) &&
                     HTTP_HttpQueryInfoW(lpwhr,HTTP_QUERY_LOCATION,szNewLocation,&dwBufferSize,NULL))
@@ -2873,6 +2875,8 @@ static BOOL HTTP_ProcessHeader(LPWININETHTTPREQW lpwhr, LPCWSTR field, LPCWSTR v
 
         return HTTP_InsertCustomHeader(lpwhr, &hdr);
     }
+    /* no value to delete */
+    else return TRUE;
 
     if (dwModifier & HTTP_ADDHDR_FLAG_REQ)
 	    lphttpHdr->wFlags |= HDR_ISREQUEST;
@@ -2986,7 +2990,7 @@ static VOID HTTP_CloseConnection(LPWININETHTTPREQW lpwhr)
 BOOL HTTP_FinishedReading(LPWININETHTTPREQW lpwhr)
 {
     WCHAR szConnectionResponse[20];
-    DWORD dwBufferSize = sizeof(szConnectionResponse)/sizeof(szConnectionResponse[0]);
+    DWORD dwBufferSize = sizeof(szConnectionResponse);
 
     TRACE("\n");
 

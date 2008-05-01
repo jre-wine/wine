@@ -31,6 +31,7 @@
 #include "sddl.h"
 #include "ntsecapi.h"
 #include "lmcons.h"
+#include "winternl.h"
 
 #include "wine/test.h"
 
@@ -59,8 +60,11 @@ typedef NTSTATUS (WINAPI *fnLsaQueryInformationPolicy)(LSA_HANDLE,POLICY_INFORMA
 typedef NTSTATUS (WINAPI *fnLsaClose)(LSA_HANDLE);
 typedef NTSTATUS (WINAPI *fnLsaFreeMemory)(PVOID);
 typedef NTSTATUS (WINAPI *fnLsaOpenPolicy)(PLSA_UNICODE_STRING,PLSA_OBJECT_ATTRIBUTES,ACCESS_MASK,PLSA_HANDLE);
+static NTSTATUS (WINAPI *pNtQueryObject)(HANDLE,OBJECT_INFORMATION_CLASS,PVOID,ULONG,PULONG);
 
 static HMODULE hmod;
+static int     myARGC;
+static char**  myARGV;
 
 fnBuildTrusteeWithSidA   pBuildTrusteeWithSidA;
 fnBuildTrusteeWithNameA  pBuildTrusteeWithNameA;
@@ -85,7 +89,12 @@ struct sidRef
 
 static void init(void)
 {
+    HMODULE hntdll = GetModuleHandleA("ntdll.dll");
+
     hmod = GetModuleHandle("advapi32.dll");
+    myARGC = winetest_get_mainargs( &myARGV );
+
+    pNtQueryObject = (void *)GetProcAddress( hntdll, "NtQueryObject" );
 }
 
 static void test_str_sid(const char *str_sid)
@@ -656,6 +665,7 @@ static void test_AccessCheck(void)
     BOOL res;
     HMODULE NtDllModule;
     BOOLEAN Enabled;
+    DWORD err;
 
     NtDllModule = GetModuleHandle("ntdll.dll");
 
@@ -672,7 +682,7 @@ static void test_AccessCheck(void)
     res = InitializeAcl(Acl, 256, ACL_REVISION);
     if(!res && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        trace("ACLs not implemented - skipping tests\n");
+        skip("ACLs not implemented - skipping tests\n");
         return;
     }
     ok(res, "InitializeAcl failed with error %d\n", GetLastError());
@@ -691,8 +701,8 @@ static void test_AccessCheck(void)
     res = AddAccessAllowedAce(Acl, ACL_REVISION, KEY_READ, EveryoneSid);
     ok(res, "AddAccessAllowedAceEx failed with error %d\n", GetLastError());
 
-    res = AddAccessAllowedAce(Acl, ACL_REVISION, KEY_ALL_ACCESS, AdminSid);
-    ok(res, "AddAccessAllowedAceEx failed with error %d\n", GetLastError());
+    res = AddAccessDeniedAce(Acl, ACL_REVISION, KEY_SET_VALUE, AdminSid);
+    ok(res, "AddAccessDeniedAce failed with error %d\n", GetLastError());
 
     SecurityDescriptor = HeapAlloc(GetProcessHeap(), 0, SECURITY_DESCRIPTOR_MIN_LENGTH);
 
@@ -701,12 +711,6 @@ static void test_AccessCheck(void)
 
     res = SetSecurityDescriptorDacl(SecurityDescriptor, TRUE, Acl, FALSE);
     ok(res, "SetSecurityDescriptorDacl failed with error %d\n", GetLastError());
-
-    res = SetSecurityDescriptorOwner(SecurityDescriptor, AdminSid, FALSE);
-    ok(res, "SetSecurityDescriptorOwner failed with error %d\n", GetLastError());
-
-    res = SetSecurityDescriptorGroup(SecurityDescriptor, UsersSid, TRUE);
-    ok(res, "SetSecurityDescriptorGroup failed with error %d\n", GetLastError());
 
     PrivSetLen = FIELD_OFFSET(PRIVILEGE_SET, Privilege[16]);
     PrivSet = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, PrivSetLen);
@@ -719,6 +723,33 @@ static void test_AccessCheck(void)
     ret = OpenThreadToken(GetCurrentThread(),
                           TOKEN_QUERY, TRUE, &Token);
     ok(ret, "OpenThreadToken failed with error %d\n", GetLastError());
+
+    /* SD without owner/group */
+    SetLastError(0xdeadbeef);
+    Access = AccessStatus = 0xdeadbeef;
+    ret = AccessCheck(SecurityDescriptor, Token, KEY_QUERY_VALUE, &Mapping,
+                      PrivSet, &PrivSetLen, &Access, &AccessStatus);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_SECURITY_DESCR, "AccessCheck should have "
+       "failed with ERROR_INVALID_SECURITY_DESCR, instead of %d\n", err);
+    ok(Access == 0xdeadbeef && AccessStatus == 0xdeadbeef,
+       "Access and/or AccessStatus were changed!\n");
+
+    /* Set owner and group */
+    res = SetSecurityDescriptorOwner(SecurityDescriptor, AdminSid, FALSE);
+    ok(res, "SetSecurityDescriptorOwner failed with error %d\n", GetLastError());
+    res = SetSecurityDescriptorGroup(SecurityDescriptor, UsersSid, TRUE);
+    ok(res, "SetSecurityDescriptorGroup failed with error %d\n", GetLastError());
+
+    /* Generic access mask */
+    SetLastError(0xdeadbeef);
+    ret = AccessCheck(SecurityDescriptor, Token, GENERIC_READ, &Mapping,
+                      PrivSet, &PrivSetLen, &Access, &AccessStatus);
+    err = GetLastError();
+    ok(!ret && err == ERROR_GENERIC_NOT_MAPPED, "AccessCheck should have failed "
+       "with ERROR_GENERIC_NOT_MAPPED, instead of %d\n", err);
+    ok(Access == 0xdeadbeef && AccessStatus == 0xdeadbeef,
+       "Access and/or AccessStatus were changed!\n");
 
     ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
                       PrivSet, &PrivSetLen, &Access, &AccessStatus);
@@ -734,6 +765,16 @@ static void test_AccessCheck(void)
         "AccessCheck failed to grant any access with error %d\n",
         GetLastError());
     trace("AccessCheck with MAXIMUM_ALLOWED got Access 0x%08x\n", Access);
+
+    /* Access denied by SD */
+    SetLastError(0xdeadbeef);
+    ret = AccessCheck(SecurityDescriptor, Token, KEY_WRITE, &Mapping,
+                      PrivSet, &PrivSetLen, &Access, &AccessStatus);
+    ok(ret, "AccessCheck failed with error %d\n", GetLastError());
+    err = GetLastError();
+    ok(!AccessStatus && err == ERROR_ACCESS_DENIED, "AccessCheck should have failed "
+       "with ERROR_ACCESS_DENIED, instead of %d\n", err);
+    ok(!Access, "Should have failed to grant any access, got 0x%08x\n", Access);
 
     SetLastError(0);
     PrivSet->PrivilegeCount = 16;
@@ -1315,10 +1356,136 @@ static void test_LookupAccountName(void)
     HeapFree(GetProcessHeap(), 0, domain);
 }
 
+#define TEST_GRANTED_ACCESS(a,b) test_granted_access(a,b,__LINE__)
+static void test_granted_access(HANDLE handle, ACCESS_MASK access, int line)
+{
+    OBJECT_BASIC_INFORMATION obj_info;
+    NTSTATUS status;
+
+    if (!pNtQueryObject)
+    {
+        skip_(__FILE__, line)("Not NT platform - skipping tests\n");
+        return;
+    }
+
+    status = pNtQueryObject( handle, ObjectBasicInformation, &obj_info,
+                             sizeof(obj_info), NULL );
+    ok_(__FILE__, line)(!status, "NtQueryObject with err: %08x\n", status);
+    ok_(__FILE__, line)(obj_info.GrantedAccess == access, "Gratned access should "
+        "be 0x%08x, instead of 0x%08x\n", access, obj_info.GrantedAccess);
+}
+
+static void test_process_security(void)
+{
+    BOOL res;
+    PSID AdminSid = NULL, UsersSid = NULL;
+    PACL Acl = NULL;
+    SECURITY_DESCRIPTOR *SecurityDescriptor = NULL;
+    SID_IDENTIFIER_AUTHORITY SIDAuthNT = { SECURITY_NT_AUTHORITY };
+    char buffer[MAX_PATH];
+    PROCESS_INFORMATION info;
+    STARTUPINFOA startup;
+    SECURITY_ATTRIBUTES psa;
+
+    Acl = HeapAlloc(GetProcessHeap(), 0, 256);
+    res = InitializeAcl(Acl, 256, ACL_REVISION);
+    if (!res && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("ACLs not implemented - skipping tests\n");
+        return;
+    }
+    ok(res, "InitializeAcl failed with error %d\n", GetLastError());
+
+    res = AllocateAndInitializeSid( &SIDAuthNT, 2, SECURITY_BUILTIN_DOMAIN_RID,
+                                    DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &AdminSid);
+    ok(res, "AllocateAndInitializeSid failed with error %d\n", GetLastError());
+    res = AllocateAndInitializeSid( &SIDAuthNT, 2, SECURITY_BUILTIN_DOMAIN_RID,
+                                    DOMAIN_ALIAS_RID_USERS, 0, 0, 0, 0, 0, 0, &UsersSid);
+    ok(res, "AllocateAndInitializeSid failed with error %d\n", GetLastError());
+
+    res = AddAccessDeniedAce(Acl, ACL_REVISION, PROCESS_VM_READ, AdminSid);
+    ok(res, "AddAccessDeniedAce failed with error %d\n", GetLastError());
+    res = AddAccessAllowedAce(Acl, ACL_REVISION, PROCESS_ALL_ACCESS, AdminSid);
+    ok(res, "AddAccessAllowedAceEx failed with error %d\n", GetLastError());
+
+    SecurityDescriptor = HeapAlloc(GetProcessHeap(), 0, SECURITY_DESCRIPTOR_MIN_LENGTH);
+    res = InitializeSecurityDescriptor(SecurityDescriptor, SECURITY_DESCRIPTOR_REVISION);
+    ok(res, "InitializeSecurityDescriptor failed with error %d\n", GetLastError());
+
+    /* Set owner and group and dacl */
+    res = SetSecurityDescriptorOwner(SecurityDescriptor, AdminSid, FALSE);
+    ok(res, "SetSecurityDescriptorOwner failed with error %d\n", GetLastError());
+    res = SetSecurityDescriptorGroup(SecurityDescriptor, UsersSid, TRUE);
+    ok(res, "SetSecurityDescriptorGroup failed with error %d\n", GetLastError());
+    res = SetSecurityDescriptorDacl(SecurityDescriptor, TRUE, Acl, FALSE);
+    ok(res, "SetSecurityDescriptorDacl failed with error %d\n", GetLastError());
+
+
+    sprintf(buffer, "%s tests/security.c test", myARGV[0]);
+    memset(&startup, 0, sizeof(startup));
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_SHOWNORMAL;
+
+    psa.nLength = sizeof(psa);
+    psa.lpSecurityDescriptor = SecurityDescriptor;
+    psa.bInheritHandle = TRUE;
+
+    /* Doesn't matter what ACL say we should get full access for ourselves */
+    ok(CreateProcessA( NULL, buffer, &psa, NULL, FALSE, 0, NULL, NULL, &startup, &info ),
+        "CreateProcess with err:%d\n", GetLastError());
+    TEST_GRANTED_ACCESS( info.hProcess, PROCESS_ALL_ACCESS );
+    ok(WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0, "Child process termination\n");
+
+    if (AdminSid) FreeSid(AdminSid);
+    if (UsersSid) FreeSid(UsersSid);
+    HeapFree(GetProcessHeap(), 0, Acl);
+    HeapFree(GetProcessHeap(), 0, SecurityDescriptor);
+}
+
+static void test_process_security_child(void)
+{
+    HANDLE handle, handle1;
+
+    handle = OpenProcess( PROCESS_TERMINATE, FALSE, GetCurrentProcessId() );
+    ok(handle != NULL, "OpenProcess(PROCESS_TERMINATE) with err:%d\n", GetLastError());
+    TEST_GRANTED_ACCESS( handle, PROCESS_TERMINATE );
+
+    ok(DuplicateHandle( GetCurrentProcess(), handle, GetCurrentProcess(),
+                        &handle1, PROCESS_ALL_ACCESS, TRUE, DUPLICATE_SAME_ACCESS),
+       "duplicating handle err:%d\n", GetLastError());
+    TEST_GRANTED_ACCESS( handle, PROCESS_TERMINATE );
+
+    CloseHandle( handle1 );
+    CloseHandle( handle );
+
+    /* These two should fail - they are denied by ACL */
+    handle = OpenProcess( PROCESS_VM_READ, FALSE, GetCurrentProcessId() );
+    todo_wine
+    ok(handle == NULL, "OpenProcess(PROCESS_VM_READ) should have failed\n");
+    handle = OpenProcess( PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId() );
+    todo_wine
+    ok(handle == NULL, "OpenProcess(PROCESS_ALL_ACCESS) should have failed\n");
+
+    /* Documented privilege elevation */
+    ok(DuplicateHandle( GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
+                        &handle, PROCESS_ALL_ACCESS, TRUE, DUPLICATE_SAME_ACCESS),
+       "duplicating handle err:%d\n", GetLastError());
+    TEST_GRANTED_ACCESS( handle, PROCESS_ALL_ACCESS );
+
+    CloseHandle( handle );
+}
+
 START_TEST(security)
 {
     init();
     if (!hmod) return;
+
+    if (myARGC >= 3)
+    {
+        test_process_security_child();
+        return;
+    }
     test_sid();
     test_trustee();
     test_luid();
@@ -1327,4 +1494,5 @@ START_TEST(security)
     test_token_attr();
     test_LookupAccountSid();
     test_LookupAccountName();
+    test_process_security();
 }

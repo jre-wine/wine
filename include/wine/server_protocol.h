@@ -209,7 +209,23 @@ struct token_groups
 
 };
 
-enum apc_type { APC_NONE, APC_USER, APC_TIMER, APC_ASYNC_IO };
+enum apc_type
+{
+    APC_NONE,
+    APC_USER,
+    APC_TIMER,
+    APC_ASYNC_IO,
+    APC_VIRTUAL_ALLOC,
+    APC_VIRTUAL_FREE,
+    APC_VIRTUAL_QUERY,
+    APC_VIRTUAL_PROTECT,
+    APC_VIRTUAL_FLUSH,
+    APC_VIRTUAL_LOCK,
+    APC_VIRTUAL_UNLOCK,
+    APC_MAP_VIEW,
+    APC_UNMAP_VIEW,
+    APC_CREATE_THREAD
+};
 
 typedef union
 {
@@ -235,7 +251,158 @@ typedef union
         void            *sb;
         unsigned int     status;
     } async_io;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     zero_bits;
+        unsigned int     op_type;
+        unsigned int     prot;
+    } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     op_type;
+    } virtual_free;
+    struct
+    {
+        enum apc_type    type;
+        const void      *addr;
+    } virtual_query;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     prot;
+    } virtual_protect;
+    struct
+    {
+        enum apc_type    type;
+        const void      *addr;
+        unsigned long    size;
+    } virtual_flush;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+    } virtual_lock;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+    } virtual_unlock;
+    struct
+    {
+        enum apc_type    type;
+        obj_handle_t     handle;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     offset_low;
+        unsigned int     offset_high;
+        unsigned int     zero_bits;
+        unsigned int     alloc_type;
+        unsigned int     prot;
+    } map_view;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+    } unmap_view;
+    struct
+    {
+        enum apc_type    type;
+        void (__stdcall *func)(void*);
+        void            *arg;
+        unsigned long    reserve;
+        unsigned long    commit;
+        int              suspend;
+    } create_thread;
 } apc_call_t;
+
+typedef union
+{
+    enum apc_type type;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } virtual_free;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *base;
+        void            *alloc_base;
+        unsigned long    size;
+        unsigned int     state;
+        unsigned int     prot;
+        unsigned int     alloc_prot;
+        unsigned int     alloc_type;
+    } virtual_query;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     prot;
+    } virtual_protect;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        const void      *addr;
+        unsigned long    size;
+    } virtual_flush;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } virtual_lock;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } virtual_unlock;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } map_view;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+    } unmap_view;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        thread_id_t      tid;
+        obj_handle_t     handle;
+    } create_thread;
+} apc_result_t;
 
 
 
@@ -539,12 +706,15 @@ struct unload_dll_reply
 struct queue_apc_request
 {
     struct request_header __header;
-    obj_handle_t handle;
+    obj_handle_t thread;
+    obj_handle_t process;
     apc_call_t   call;
 };
 struct queue_apc_reply
 {
     struct reply_header __header;
+    obj_handle_t handle;
+    int          self;
 };
 
 
@@ -554,12 +724,26 @@ struct get_apc_request
     struct request_header __header;
     int          alertable;
     obj_handle_t prev;
+    apc_result_t result;
 };
 struct get_apc_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
     apc_call_t   call;
+};
+
+
+
+struct get_apc_result_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_apc_result_reply
+{
+    struct reply_header __header;
+    apc_result_t result;
 };
 
 
@@ -605,6 +789,7 @@ struct dup_handle_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    int          self;
     int          closed;
 };
 #define DUP_HANDLE_CLOSE_SOURCE  DUPLICATE_CLOSE_SOURCE
@@ -1535,6 +1720,7 @@ struct get_mapping_info_reply
     int          protect;
     int          header_size;
     void*        base;
+    obj_handle_t mapping;
     obj_handle_t shared_file;
     int          shared_size;
 };
@@ -3781,6 +3967,20 @@ struct query_symlink_reply
 };
 
 
+
+struct get_object_info_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+};
+struct get_object_info_reply
+{
+    struct reply_header __header;
+    unsigned int   access;
+    unsigned int   ref_count;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -3802,6 +4002,7 @@ enum request
     REQ_unload_dll,
     REQ_queue_apc,
     REQ_get_apc,
+    REQ_get_apc_result,
     REQ_close_handle,
     REQ_set_handle_info,
     REQ_dup_handle,
@@ -3996,6 +4197,7 @@ enum request
     REQ_create_symlink,
     REQ_open_symlink,
     REQ_query_symlink,
+    REQ_get_object_info,
     REQ_NB_REQUESTS
 };
 
@@ -4022,6 +4224,7 @@ union generic_request
     struct unload_dll_request unload_dll_request;
     struct queue_apc_request queue_apc_request;
     struct get_apc_request get_apc_request;
+    struct get_apc_result_request get_apc_result_request;
     struct close_handle_request close_handle_request;
     struct set_handle_info_request set_handle_info_request;
     struct dup_handle_request dup_handle_request;
@@ -4216,6 +4419,7 @@ union generic_request
     struct create_symlink_request create_symlink_request;
     struct open_symlink_request open_symlink_request;
     struct query_symlink_request query_symlink_request;
+    struct get_object_info_request get_object_info_request;
 };
 union generic_reply
 {
@@ -4240,6 +4444,7 @@ union generic_reply
     struct unload_dll_reply unload_dll_reply;
     struct queue_apc_reply queue_apc_reply;
     struct get_apc_reply get_apc_reply;
+    struct get_apc_result_reply get_apc_result_reply;
     struct close_handle_reply close_handle_reply;
     struct set_handle_info_reply set_handle_info_reply;
     struct dup_handle_reply dup_handle_reply;
@@ -4434,8 +4639,9 @@ union generic_reply
     struct create_symlink_reply create_symlink_reply;
     struct open_symlink_reply open_symlink_reply;
     struct query_symlink_reply query_symlink_reply;
+    struct get_object_info_reply get_object_info_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 263
+#define SERVER_PROTOCOL_VERSION 275
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

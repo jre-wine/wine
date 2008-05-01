@@ -399,9 +399,9 @@ unsigned int get_handle_access( struct process *process, obj_handle_t handle )
 {
     struct handle_entry *entry;
 
-    if (get_magic_handle( handle )) return ~0U;  /* magic handles have all access rights */
+    if (get_magic_handle( handle )) return ~RESERVED_ALL;  /* magic handles have all access rights */
     if (!(entry = get_handle( process, handle ))) return 0;
-    return entry->access;
+    return entry->access & ~RESERVED_ALL;
 }
 
 /* find the first inherited handle of the given type */
@@ -459,7 +459,7 @@ obj_handle_t duplicate_handle( struct process *src, obj_handle_t src_handle, str
             access = entry->access;
         else  /* pseudo-handle, give it full access */
         {
-            access = STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL;
+            access = obj->ops->map_access( obj, GENERIC_ALL );
             clear_error();
         }
     }
@@ -536,6 +536,18 @@ DECL_HANDLER(dup_handle)
             reply->closed = close_handle( src, req->src_handle );
             set_error( err );
         }
+        reply->self = (src == current->process);
         release_object( src );
     }
+}
+
+DECL_HANDLER(get_object_info)
+{
+    struct object *obj;
+
+    if (!(obj = get_handle_obj( current->process, req->handle, 0, NULL ))) return;
+
+    reply->access = get_handle_access( current->process, req->handle );
+    reply->ref_count = obj->refcount;
+    release_object( obj );
 }

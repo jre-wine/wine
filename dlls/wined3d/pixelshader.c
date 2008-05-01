@@ -646,7 +646,7 @@ CONST SHADER_OPCODE IWineD3DPixelShaderImpl_shader_ins[] = {
     {WINED3DSIO_CND,  "cnd",  NULL, 1, 4, pshader_cnd, pshader_hw_cnd, shader_glsl_cnd, WINED3DPS_VERSION(1,1), WINED3DPS_VERSION(1,4)},
     {WINED3DSIO_CMP,  "cmp",  NULL, 1, 4, pshader_cmp, pshader_hw_cmp, shader_glsl_cmp, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(3,0)},
     {WINED3DSIO_POW,  "pow",  "POW", 1, 3, pshader_pow,  NULL, shader_glsl_map2gl, 0, 0},
-    {WINED3DSIO_CRS,  "crs",  "XPS", 1, 3, pshader_crs,  NULL, shader_glsl_map2gl, 0, 0},
+    {WINED3DSIO_CRS,  "crs",  "XPS", 1, 3, pshader_crs,  NULL, shader_glsl_cross, 0, 0},
     /* TODO: xyz normalise can be performed as VS_ARB using one temporary register,
         DP3 tmp , vec, vec;
         RSQ tmp, tmp.x;
@@ -658,7 +658,7 @@ CONST SHADER_OPCODE IWineD3DPixelShaderImpl_shader_ins[] = {
 
     */
     {WINED3DSIO_NRM,      "nrm",      NULL, 1, 2, pshader_nrm,     NULL, shader_glsl_map2gl, 0, 0},
-    {WINED3DSIO_SINCOS,   "sincos",   NULL, 1, 4, pshader_sincos2, NULL, shader_glsl_sincos, WINED3DPS_VERSION(2,0), WINED3DPS_VERSION(2,0)},
+    {WINED3DSIO_SINCOS,   "sincos",   NULL, 1, 4, pshader_sincos2, NULL, shader_glsl_sincos, WINED3DPS_VERSION(2,0), WINED3DPS_VERSION(2,1)},
     {WINED3DSIO_SINCOS,   "sincos",   NULL, 1, 2, pshader_sincos3, NULL, shader_glsl_sincos, WINED3DPS_VERSION(3,0), -1},
     /* TODO: dp2add can be made out of multiple instuctions */
     {WINED3DSIO_DP2ADD,   "dp2add",   GLNAME_REQUIRE_GLSL,  1, 4, pshader_dp2add,  NULL, pshader_glsl_dp2add, WINED3DPS_VERSION(2,0), -1},
@@ -832,6 +832,7 @@ inline static VOID IWineD3DPixelShaderImpl_GenerateShader(
 #endif
     buffer.bsize = 0;
     buffer.lineNo = 0;
+    buffer.newline = TRUE;
 
     if (This->baseShader.shader_mode == SHADER_GLSL) {
 

@@ -1557,6 +1557,7 @@ dlls/comctl32/tests/Makefile
 dlls/comdlg32/Makefile
 dlls/comdlg32/tests/Makefile
 dlls/compstui/Makefile
+dlls/credui/Makefile
 dlls/crtdll/Makefile
 dlls/crypt32/Makefile
 dlls/crypt32/tests/Makefile
@@ -1681,6 +1682,7 @@ dlls/ntdsapi/Makefile
 dlls/objsel/Makefile
 dlls/odbc32/Makefile
 dlls/odbccp32/Makefile
+dlls/odbccp32/tests/Makefile
 dlls/ole32/Makefile
 dlls/ole32/tests/Makefile
 dlls/oleacc/Makefile
@@ -1719,6 +1721,7 @@ dlls/serialui/Makefile
 dlls/setupapi/Makefile
 dlls/setupapi/tests/Makefile
 dlls/sfc/Makefile
+dlls/sfc_os/Makefile
 dlls/shdoclc/Makefile
 dlls/shdocvw/Makefile
 dlls/shdocvw/tests/Makefile
@@ -1728,6 +1731,7 @@ dlls/shfolder/Makefile
 dlls/shlwapi/Makefile
 dlls/shlwapi/tests/Makefile
 dlls/snmpapi/Makefile
+dlls/snmpapi/tests/Makefile
 dlls/spoolss/Makefile
 dlls/stdole2.tlb/Makefile
 dlls/stdole32.tlb/Makefile
@@ -1758,11 +1762,19 @@ dlls/vnetbios.vxd/Makefile
 dlls/vtdapi.vxd/Makefile
 dlls/vwin32.vxd/Makefile
 dlls/w32skrnl/Makefile
+dlls/winealsa.drv/Makefile
+dlls/winearts.drv/Makefile
+dlls/wineaudioio.drv/Makefile
+dlls/winecoreaudio.drv/Makefile
 dlls/winecrt0/Makefile
 dlls/wined3d/Makefile
 dlls/winedos/Makefile
+dlls/wineesd.drv/Makefile
+dlls/winejack.drv/Makefile
 dlls/winejoystick.drv/Makefile
 dlls/winemp3.acm/Makefile
+dlls/winenas.drv/Makefile
+dlls/wineoss.drv/Makefile
 dlls/wineps.drv/Makefile
 dlls/winequartz.drv/Makefile
 dlls/winex11.drv/Makefile
@@ -1770,14 +1782,6 @@ dlls/wininet/Makefile
 dlls/wininet/tests/Makefile
 dlls/winmm/Makefile
 dlls/winmm/tests/Makefile
-dlls/winmm/winealsa/Makefile
-dlls/winmm/winearts/Makefile
-dlls/winmm/wineaudioio/Makefile
-dlls/winmm/winecoreaudio/Makefile
-dlls/winmm/wineesd/Makefile
-dlls/winmm/winejack/Makefile
-dlls/winmm/winenas/Makefile
-dlls/winmm/wineoss/Makefile
 dlls/winnls32/Makefile
 dlls/winspool.drv/Makefile
 dlls/winspool.drv/tests/Makefile

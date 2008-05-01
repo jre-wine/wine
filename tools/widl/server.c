@@ -68,117 +68,11 @@ static void write_parameters_init(const func_t *func)
     if (!func->args)
         return;
 
-    var = func->args;
-    while (NEXT_LINK(var)) var = NEXT_LINK(var);
-    while (var)
-    {
+    LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
         if (var->type->type != RPC_FC_BIND_PRIMITIVE)
             print_server("%s = 0;\n", var->name);
 
-        var = PREV_LINK(var);
-    }
     fprintf(server, "\n");
-}
-
-
-static void declare_args(const func_t *func)
-{
-    int in_attr, out_attr;
-    int i = 0;
-    var_t *var;
-
-    if (!func->args)
-        return;
-
-    var = func->args;
-    while (NEXT_LINK(var)) var = NEXT_LINK(var);
-    while (var)
-    {
-        const expr_t *size_is = get_attrp(var->attrs, ATTR_SIZEIS);
-        int has_size = size_is && (size_is->type != EXPR_VOID);
-        int is_string = is_attr(var->attrs, ATTR_STRING);
-
-        in_attr = is_attr(var->attrs, ATTR_IN);
-        out_attr = is_attr(var->attrs, ATTR_OUT);
-        if (!out_attr && !in_attr)
-            in_attr = 1;
-
-        if (!in_attr && !has_size && !is_string)
-        {
-            int indirection;
-            print_server("");
-            write_type(server, var->type, NULL, var->tname);
-            for (indirection = 0; indirection < var->ptr_level - 1; indirection++)
-                fprintf(server, "*");
-            fprintf(server, " _W%u;\n", i++);
-        }
-
-        print_server("");
-        write_type(server, var->type, var, var->tname);
-        fprintf(server, " ");
-        write_name(server, var);
-        write_array(server, var->array, 0);
-        fprintf(server, ";\n");
-
-        var = PREV_LINK(var);
-    }
-}
-
-
-static void assign_out_args(const func_t *func)
-{
-    int in_attr, out_attr;
-    int i = 0, sep = 0;
-    var_t *var;
-    const expr_t *size_is;
-    int has_size;
-
-    if (!func->args)
-        return;
-
-    var = func->args;
-    while (NEXT_LINK(var)) var = NEXT_LINK(var);
-    while (var)
-    {
-        int is_string = is_attr(var->attrs, ATTR_STRING);
-        size_is = get_attrp(var->attrs, ATTR_SIZEIS);
-        has_size = size_is && (size_is->type != EXPR_VOID);
-        in_attr = is_attr(var->attrs, ATTR_IN);
-        out_attr = is_attr(var->attrs, ATTR_OUT);
-        if (!out_attr && !in_attr)
-            in_attr = 1;
-
-        if (!in_attr)
-        {
-            print_server("");
-            write_name(server, var);
-
-            if (has_size)
-            {
-                unsigned int size;
-                type_t *type = var->type;
-
-                fprintf(server, " = NdrAllocate(&_StubMsg, ");
-                write_expr(server, size_is, 1);
-                size = get_type_memsize(type);
-                fprintf(server, " * %u);\n", size);
-            }
-            else if (!is_string)
-            {
-                fprintf(server, " = &_W%u;\n", i);
-                if (var->ptr_level > 1)
-                    print_server("_W%u = 0;\n", i);
-                i++;
-            }
-
-            sep = 1;
-        }
-
-        var = PREV_LINK(var);
-    }
-
-    if (sep)
-        fprintf(server, "\n");
 }
 
 
@@ -186,15 +80,14 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
 {
     char *implicit_handle = get_attrp(iface->attrs, ATTR_IMPLICIT_HANDLE);
     int explicit_handle = is_attr(iface->attrs, ATTR_EXPLICIT_HANDLE);
-    const func_t *func = iface->funcs;
+    const func_t *func;
     const var_t *var;
     const var_t* explicit_handle_var;
 
-    while (NEXT_LINK(func)) func = NEXT_LINK(func);
-    while (func)
+    if (!iface->funcs) return;
+    LIST_FOR_EACH_ENTRY( func, iface->funcs, const func_t, entry )
     {
         const var_t *def = func->def;
-        unsigned long buffer_size = 0;
         unsigned int type_offset_func;
 
         /* check for a defined binding handle */
@@ -228,16 +121,8 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
         fprintf(server, "{\n");
         indent++;
 
-        /* declare return value '_RetVal' */
-        if (!is_void(def->type, NULL))
-        {
-            print_server("");
-            write_type(server, def->type, def, def->tname);
-            fprintf(server, " _RetVal;\n");
-        }
-
         /* Declare arguments */
-        declare_args(func);
+        declare_stub_args(server, indent, func);
 
         print_server("MIDL_STUB_MESSAGE _StubMsg;\n");
         print_server("RPC_STATUS _Status;\n");
@@ -304,7 +189,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
         fprintf(server, "\n");
 
         /* Assign 'out' arguments */
-        assign_out_args(func);
+        assign_stub_out_args(server, indent, func);
 
         /* Call the real server function */
         if (!is_void(def->type, NULL))
@@ -319,9 +204,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
 
             fprintf(server, "(\n");
             indent++;
-            var = func->args;
-            while (NEXT_LINK(var)) var = NEXT_LINK(var);
-            while (var)
+            LIST_FOR_EACH_ENTRY( var, func->args, const var_t, entry )
             {
                 if (first_arg)
                     first_arg = 0;
@@ -329,7 +212,6 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
                     fprintf(server, ",\n");
                 print_server("");
                 write_name(server, var);
-                var = PREV_LINK(var);
             }
             fprintf(server, ");\n");
             indent--;
@@ -339,35 +221,8 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
             fprintf(server, "();\n");
         }
 
-        if (func->args)
-        {
-            const var_t *var = func->args;
-            while (NEXT_LINK(var)) var = NEXT_LINK(var);
-            while (var)
-            {
-                if (is_attr(var->attrs, ATTR_OUT))
-                {
-                    unsigned int alignment;
-                    buffer_size += get_required_buffer_size(var, &alignment, PASS_OUT);
-                    buffer_size += alignment;
-                }
-
-                var = PREV_LINK(var);
-            }
-        }
-
-        if (!is_void(def->type, NULL))
-        {
-            unsigned int alignment;
-            buffer_size += get_required_buffer_size(def, &alignment, PASS_RETURN);
-            buffer_size += alignment;
-        }
-
         if (has_out_arg_or_return(func))
         {
-            fprintf(server, "\n");
-            print_server("_StubMsg.BufferLength = %u;\n", buffer_size);
-
             type_offset_func = *type_offset;
             write_remoting_arguments(server, indent, func, &type_offset_func, PASS_OUT, PHASE_BUFFERSIZE);
 
@@ -415,22 +270,7 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset, unsig
         fprintf(server, "\n");
 
         /* update proc_offset */
-        if (func->args)
-        {
-            var = func->args;
-            while (NEXT_LINK(var)) var = NEXT_LINK(var);
-            while (var)
-            {
-                *proc_offset += get_size_procformatstring_var(var);
-                var = PREV_LINK(var);
-            }
-        }
-        if (!is_void(def->type, NULL))
-            *proc_offset += get_size_procformatstring_var(def);
-        else
-            *proc_offset += 2; /* FC_END and FC_PAD */
-
-        func = PREV_LINK(func);
+        *proc_offset += get_size_procformatstring_func( func );
     }
 }
 
@@ -439,13 +279,13 @@ static void write_dispatchtable(type_t *iface)
 {
     unsigned long ver = get_attrv(iface->attrs, ATTR_VERSION);
     unsigned long method_count = 0;
-    func_t *func = iface->funcs;
+    const func_t *func;
 
     print_server("static RPC_DISPATCH_FUNCTION %s_table[] =\n", iface->name);
     print_server("{\n");
     indent++;
-    while (NEXT_LINK(func)) func = NEXT_LINK(func);
-    while (func)
+
+    if (iface->funcs) LIST_FOR_EACH_ENTRY( func, iface->funcs, const func_t, entry )
     {
         var_t *def = func->def;
 
@@ -454,7 +294,6 @@ static void write_dispatchtable(type_t *iface)
         fprintf(server, ",\n");
 
         method_count++;
-        func = PREV_LINK(func);
     }
     print_server("0\n");
     indent--;
@@ -564,17 +403,16 @@ static void init_server(void)
 }
 
 
-void write_server(ifref_t *ifaces)
+void write_server(ifref_list_t *ifaces)
 {
     unsigned int proc_offset = 0;
     unsigned int type_offset = 2;
-    ifref_t *iface = ifaces;
+    ifref_t *iface;
 
     if (!do_server)
         return;
-    if (!ifaces)
+    if (do_everything && !ifaces)
         return;
-    END_OF_LIST(iface);
 
     init_server();
     if (!server)
@@ -582,7 +420,7 @@ void write_server(ifref_t *ifaces)
 
     write_formatstringsdecl(server, indent, ifaces, 0);
 
-    for (; iface; iface = PREV_LINK(iface))
+    if (ifaces) LIST_FOR_EACH_ENTRY( iface, ifaces, ifref_t, entry )
     {
         if (is_object(iface->iface->attrs) || is_local(iface->iface->attrs))
             continue;

@@ -20,6 +20,7 @@
 #define __WINE_NTDLL_MISC_H
 
 #include <stdarg.h>
+#include <signal.h>
 
 #include "windef.h"
 #include "winnt.h"
@@ -41,6 +42,7 @@ extern void dump_ObjectAttributes (const OBJECT_ATTRIBUTES *ObjectAttributes);
 
 extern void NTDLL_get_server_abstime( abs_time_t *when, const LARGE_INTEGER *timeout );
 extern void NTDLL_from_server_abstime( LARGE_INTEGER *time, const abs_time_t *when );
+extern NTSTATUS NTDLL_queue_process_apc( HANDLE process, const apc_call_t *call, apc_result_t *result );
 extern NTSTATUS NTDLL_wait_for_multiple_objects( UINT count, const HANDLE *handles, UINT flags,
                                                  const LARGE_INTEGER *timeout, HANDLE signal_object );
 
@@ -56,11 +58,15 @@ extern void virtual_init_threading(void);
 /* server support */
 extern abs_time_t server_start_time;
 extern void server_init_process(void);
+extern NTSTATUS server_init_process_done(void);
 extern size_t server_init_thread( int unix_pid, int unix_tid, void *entry_point );
 extern void DECLSPEC_NORETURN server_protocol_error( const char *err, ... );
 extern void DECLSPEC_NORETURN server_protocol_perror( const char *err );
 extern void DECLSPEC_NORETURN server_exit_thread( int status );
 extern void DECLSPEC_NORETURN server_abort_thread( int status );
+extern sigset_t server_block_set;
+extern void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset );
+extern void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset );
 extern int server_remove_fd_from_cache( obj_handle_t handle );
 extern int server_get_unix_fd( obj_handle_t handle, unsigned int access, int *unix_fd,
                                int *needs_close, enum server_fd_type *type, int *flags );
@@ -111,11 +117,8 @@ extern NTSTATUS DIR_get_unix_cwd( char **cwd );
 
 /* virtual memory */
 extern NTSTATUS VIRTUAL_HandleFault(LPCVOID addr);
-extern BOOL VIRTUAL_HasMapping( LPCVOID addr );
 extern void VIRTUAL_SetForceExec( BOOL enable );
 extern void VIRTUAL_UseLargeAddressSpace(void);
-
-extern BOOL is_current_process( HANDLE handle );
 
 /* code pages */
 extern int ntdll_umbstowcs(DWORD flags, const char* src, int srclen, WCHAR* dst, int dstlen);

@@ -1567,11 +1567,9 @@ int CDECL _open_osfhandle(long handle, int oflags)
    * file, so set the write flag. It also only sets MSVCRT__O_TEXT if it wants
    * text - it never sets MSVCRT__O_BINARY.
    */
-  /* FIXME: handle more flags */
-  if (!(oflags & (MSVCRT__O_BINARY | MSVCRT__O_TEXT)) && (*__p__fmode() & MSVCRT__O_BINARY))
+  /* don't let split_oflags() decide the mode if no mode is passed */
+  if (!(oflags & (MSVCRT__O_BINARY | MSVCRT__O_TEXT)))
       oflags |= MSVCRT__O_BINARY;
-  else
-      oflags |= MSVCRT__O_TEXT;
 
   fd = msvcrt_alloc_fd((HANDLE)handle, split_oflags(oflags));
   TRACE(":handle (%ld) fd (%d) flags 0x%08x\n", handle, fd, oflags);
@@ -2752,7 +2750,7 @@ MSVCRT_wchar_t* CDECL MSVCRT__getws(MSVCRT_wchar_t* buf)
     }
     *buf = '\0';
 
-    TRACE("got '%s'\n", debugstr_w(ws));
+    TRACE("got %s\n", debugstr_w(ws));
     return ws;
 }
 

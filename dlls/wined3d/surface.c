@@ -188,9 +188,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_QueryInterface(IWineD3DSurface *iface, REFIID
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     /* Warn ,but be nice about things */
     TRACE("(%p)->(%s,%p)\n", This,debugstr_guid(riid),ppobj);
-    if (riid == NULL) {
-        ERR("Probably FIXME: Calling query interface with NULL riid\n");
-    }
+
     if (IsEqualGUID(riid, &IID_IUnknown)
         || IsEqualGUID(riid, &IID_IWineD3DBase)
         || IsEqualGUID(riid, &IID_IWineD3DResource)
@@ -823,6 +821,19 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
             IWineD3DBaseTexture_Release(pBaseTexture);
         } else {
             TRACE("Surface is standalone, no need to dirty the container\n");
+        }
+    }
+
+    /* Performance optimization: Count how often a surface is locked, if it is locked regularly do not throw away the system memory copy.
+     * This avoids the need to download the surface from opengl all the time. The surface is still downloaded if the opengl texture is
+     * changed
+     */
+    if(!(This->Flags & SFLAG_DYNLOCK)) {
+        This->lockCount++;
+        /* MAXLOCKCOUNT is defined in wined3d_private.h */
+        if(This->lockCount > MAXLOCKCOUNT) {
+            TRACE("Surface is locked regularily, not freeing the system memory copy any more\n");
+            This->Flags |= SFLAG_DYNLOCK;
         }
     }
 

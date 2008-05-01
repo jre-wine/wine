@@ -36,6 +36,7 @@ extern int debuglevel;
 
 extern int win32;
 extern int pedantic;
+extern int do_everything;
 extern int do_header;
 extern int do_typelib;
 extern int do_proxies;
@@ -61,8 +62,8 @@ extern int char_number;
 extern FILE* header;
 extern FILE* idfile;
 
-extern void write_proxies(ifref_t *ifaces);
-extern void write_client(ifref_t *ifaces);
-extern void write_server(ifref_t *ifaces);
+extern void write_proxies(ifref_list_t *ifaces);
+extern void write_client(ifref_list_t *ifaces);
+extern void write_server(ifref_list_t *ifaces);
 
 #endif

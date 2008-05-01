@@ -476,21 +476,19 @@ static HRESULT WINAPI HGLOBALStreamImpl_CopyTo(
     else
       copySize = cb.u.LowPart;
 
-    IStream_Read(iface, tmpBuffer, copySize, &bytesRead);
+    hr = IStream_Read(iface, tmpBuffer, copySize, &bytesRead);
+    if (FAILED(hr))
+        break;
 
     totalBytesRead.u.LowPart += bytesRead;
 
-    IStream_Write(pstm, tmpBuffer, bytesRead, &bytesWritten);
-
-    totalBytesWritten.u.LowPart += bytesWritten;
-
-    /*
-     * Check that read & write operations were successful
-     */
-    if (bytesRead != bytesWritten)
+    if (bytesRead)
     {
-      hr = STG_E_MEDIUMFULL;
-      break;
+        hr = IStream_Write(pstm, tmpBuffer, bytesRead, &bytesWritten);
+        if (FAILED(hr))
+            break;
+
+        totalBytesWritten.u.LowPart += bytesWritten;
     }
 
     if (bytesRead!=copySize)
@@ -653,7 +651,7 @@ static const IStreamVtbl HGLOBALStreamImpl_Vtbl =
  *    fDeleteOnRelease - Flag set to TRUE if the HGLOBAL will be released
  *                       when the IStream object is destroyed.
  */
-HGLOBALStreamImpl* HGLOBALStreamImpl_Construct(
+static HGLOBALStreamImpl* HGLOBALStreamImpl_Construct(
 		HGLOBAL  hGlobal,
 		BOOL     fDeleteOnRelease)
 {

@@ -450,17 +450,6 @@ static void CreateVBO(IWineD3DVertexBufferImpl *object) {
         goto error;
     }
 
-    /* Transformed vertices are horribly inflexible. If the app specifies an
-      * vertex buffer with transformed vertices in default pool without DYNAMIC
-      * usage assume DYNAMIC usage and print a warning. The app will have to update
-      * the vertices regularily for them to be useful
-      */
-    if(((object->fvf & WINED3DFVF_POSITION_MASK) == WINED3DFVF_XYZRHW) &&
-        !(vboUsage & WINED3DUSAGE_DYNAMIC)) {
-        WARN("Application creates a vertex buffer holding transformed vertices which doesn't specify dynamic usage\n");
-        vboUsage |= WINED3DUSAGE_DYNAMIC;
-    }
-
     /* Don't use static, because dx apps tend to update the buffer
       * quite often even if they specify 0 usage
       */
@@ -860,17 +849,17 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     switch(Pool) {
     case WINED3DPOOL_SCRATCH:
         if(!Lockable)
-            FIXME("Create surface called with a pool of SCRATCH and a Lockable of FALSE \
-                which are mutually exclusive, setting lockable to true\n");
+            FIXME("Create surface called with a pool of SCRATCH and a Lockable of FALSE "
+                "which are mutually exclusive, setting lockable to TRUE\n");
                 Lockable = TRUE;
     break;
     case WINED3DPOOL_SYSTEMMEM:
-        if(!Lockable) FIXME("Create surface called with a pool of SYSTEMMEM and a Lockable of FALSE, \
-                                    this is acceptable but unexpected (I can't know how the surface can be usable!)\n");
+        if(!Lockable) FIXME("Create surface called with a pool of SYSTEMMEM and a Lockable of FALSE, "
+                                    "this is acceptable but unexpected (I can't know how the surface can be usable!)\n");
     case WINED3DPOOL_MANAGED:
-        if(Usage == WINED3DUSAGE_DYNAMIC) FIXME("Create surface called with a pool of MANAGED and a \
-                                                Usage of DYNAMIC which are mutually exclusive, not doing \
-                                                anything just telling you.\n");
+        if(Usage == WINED3DUSAGE_DYNAMIC) FIXME("Create surface called with a pool of MANAGED and a "
+                                                "Usage of DYNAMIC which are mutually exclusive, not doing "
+                                                "anything just telling you.\n");
     break;
     case WINED3DPOOL_DEFAULT: /*TODO: Create offscreen plain can cause this check to fail..., find out if it should */
         if(!(Usage & WINED3DUSAGE_DYNAMIC) && !(Usage & WINED3DUSAGE_RENDERTARGET)
@@ -1263,6 +1252,91 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateQuery(IWineD3DDevice *iface, WINE
     return WINED3D_OK;
 }
 
+/*****************************************************************************
+ * IWineD3DDeviceImpl_SetupFullscreenWindow
+ *
+ * Helper function that modifies a HWND's Style and ExStyle for proper
+ * fullscreen use.
+ *
+ * Params:
+ *  iface: Pointer to the IWineD3DDevice interface
+ *  window: Window to setup
+ *
+ *****************************************************************************/
+static void WINAPI IWineD3DDeviceImpl_SetupFullscreenWindow(IWineD3DDevice *iface, HWND window) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+
+    LONG style, exStyle;
+    /* Don't do anything if an original style is stored.
+     * That shouldn't happen
+     */
+    TRACE("(%p): Setting up window %p for exclusive mode\n", This, window);
+    if (This->style && This->exStyle) {
+        ERR("(%p): Want to change the window parameters of HWND %p, but "
+            "another style is stored for restoration afterwards\n", This, window);
+    }
+
+    /* Get the parameters and save them */
+    style = GetWindowLongW(window, GWL_STYLE);
+    exStyle = GetWindowLongW(window, GWL_EXSTYLE);
+    This->style = style;
+    This->exStyle = exStyle;
+
+    /* Filter out window decorations */
+    style &= ~WS_CAPTION;
+    style &= ~WS_THICKFRAME;
+    exStyle &= ~WS_EX_WINDOWEDGE;
+    exStyle &= ~WS_EX_CLIENTEDGE;
+
+    /* Make sure the window is managed, otherwise we won't get keyboard input */
+    style |= WS_POPUP | WS_SYSMENU;
+
+    TRACE("Old style was %08x,%08x, setting to %08x,%08x\n",
+          This->style, This->exStyle, style, exStyle);
+
+    SetWindowLongW(window, GWL_STYLE, style);
+    SetWindowLongW(window, GWL_EXSTYLE, exStyle);
+
+    /* Inform the window about the update. */
+    SetWindowPos(window, HWND_TOP, 0, 0,
+            This->ddraw_width, This->ddraw_height, SWP_FRAMECHANGED);
+}
+
+/*****************************************************************************
+ * IWineD3DDeviceImpl_RestoreWindow
+ *
+ * Helper function that restores a windows' properties when taking it out
+ * of fullscreen mode
+ *
+ * Params:
+ *  iface: Pointer to the IWineD3DDevice interface
+ *  window: Window to setup
+ *
+ *****************************************************************************/
+static void WINAPI IWineD3DDeviceImpl_RestoreWindow(IWineD3DDevice *iface, HWND window) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+
+    /* This could be a DDSCL_NORMAL -> DDSCL_NORMAL
+     * switch, do nothing
+     */
+    if (!This->style && !This->exStyle) return;
+
+    TRACE("(%p): Restoring window settings of window %p to %08x, %08x\n",
+          This, window, This->style, This->exStyle);
+
+    SetWindowLongW(window, GWL_STYLE, This->style);
+    SetWindowLongW(window, GWL_EXSTYLE, This->exStyle);
+
+    /* Delete the old values */
+    This->style = 0;
+    This->exStyle = 0;
+
+    /* Inform the window about the update */
+    SetWindowPos(window, 0 /* InsertAfter, ignored */,
+                 0, 0, 0, 0, /* Pos, Size, ignored */
+                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+}
+
 /* example at http://www.fairyengine.com/articles/dxmultiviews.htm */
 static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevice* iface, WINED3DPRESENT_PARAMETERS*  pPresentationParameters,                                                                   IWineD3DSwapChain** ppSwapChain,
                                                             IUnknown* parent,
@@ -1453,16 +1527,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         MultiByteToWideChar(CP_ACP, 0, "Gamers CG", -1, devmode.dmDeviceName, CCHDEVICENAME);
         ChangeDisplaySettingsExW(devmode.dmDeviceName, &devmode, object->win_handle, CDS_FULLSCREEN, NULL);
 
-        /* Make popup window */
-        SetWindowLongA(object->win_handle, GWL_STYLE, WS_POPUP);
-        SetWindowPos(object->win_handle, HWND_TOP, 0, 0,
-                     *(pPresentationParameters->BackBufferWidth),
-                     *(pPresentationParameters->BackBufferHeight), SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-
         /* For GetDisplayMode */
         This->ddraw_width = devmode.dmPelsWidth;
         This->ddraw_height = devmode.dmPelsHeight;
         This->ddraw_format = *(pPresentationParameters->BackBufferFormat);
+
+        IWineD3DDeviceImpl_SetupFullscreenWindow(iface, object->win_handle);
 
         /* And finally clip mouse to our screen */
         SetRect(&clip_rc, 0, 0, devmode.dmPelsWidth, devmode.dmPelsHeight);
@@ -2243,14 +2313,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetStreamSource(IWineD3DDevice *iface, 
     so for now, just count internally   */
     if (pStreamData != NULL) {
         IWineD3DVertexBufferImpl *vbImpl = (IWineD3DVertexBufferImpl *) pStreamData;
-        if( (vbImpl->Flags & VBFLAG_STREAM) && vbImpl->stream != StreamNumber) {
-            WARN("Assigning a Vertex Buffer to stream %d which is already assigned to stream %d\n", StreamNumber, vbImpl->stream);
-        }
-        vbImpl->stream = StreamNumber;
-        vbImpl->Flags |= VBFLAG_STREAM;
+        InterlockedIncrement(&vbImpl->bindCount);
     }
     if (oldSrc != NULL) {
-        ((IWineD3DVertexBufferImpl *) oldSrc)->Flags &= ~VBFLAG_STREAM;
+        InterlockedDecrement(&((IWineD3DVertexBufferImpl *) oldSrc)->bindCount);
     }
 
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_STREAMSRC);
@@ -3180,6 +3246,15 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetScissorRect(IWineD3DDevice *iface, C
     RECT windowRect;
     UINT winHeight;
 
+    This->updateStateBlock->set.scissorRect = TRUE;
+    This->updateStateBlock->changed.scissorRect = TRUE;
+    memcpy(&This->updateStateBlock->scissorRect, pRect, sizeof(*pRect));
+
+    if(This->isRecordingState) {
+        TRACE("Recording... not performing anything\n");
+        return WINED3D_OK;
+    }
+
     GetClientRect(((IWineD3DSwapChainImpl *)This->swapchains[0])->win_handle, &windowRect);
     /* Warning: glScissor uses window coordinates, not viewport coordinates, so our viewport correction does not apply
     * Warning2: Even in windowed mode the coords are relative to the window, not the screen
@@ -3197,17 +3272,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetScissorRect(IWineD3DDevice *iface, C
 
 static HRESULT WINAPI IWineD3DDeviceImpl_GetScissorRect(IWineD3DDevice *iface, RECT* pRect) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    GLint scissorBox[4];
 
-    ENTER_GL();
-    /** FIXME: Windows uses a top,left origin openGL uses a bottom Right? **/
-    glGetIntegerv(GL_SCISSOR_BOX, scissorBox);
-    pRect->left = scissorBox[0];
-    pRect->top = scissorBox[1];
-    pRect->right = scissorBox[0] + scissorBox[2];
-    pRect->bottom = scissorBox[1] + scissorBox[3];
+    memcpy(pRect, &This->updateStateBlock->scissorRect, sizeof(pRect));
     TRACE("(%p)Returning a Scissor Rect of %d:%d-%d:%d\n", This, pRect->left, pRect->top, pRect->right, pRect->bottom);
-    LEAVE_GL();
     return WINED3D_OK;
 }
 
@@ -4109,7 +4176,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
     }
 
     memset(&strided, 0, sizeof(strided));
-    primitiveConvertFVFtoOffset(SrcImpl->fvf, get_flexible_vertex_size(SrcImpl->fvf), SrcImpl->resource.allocatedMemory + get_flexible_vertex_size(SrcImpl->fvf) * SrcStartIndex, &strided, 0);
+    primitiveConvertFVFtoOffset(SrcImpl->fvf, get_flexible_vertex_size(SrcImpl->fvf), SrcImpl->resource.allocatedMemory + get_flexible_vertex_size(SrcImpl->fvf) * SrcStartIndex, &strided, 0, 0);
 
     return process_vertices_strided(This, DestIndex, VertexCount, &strided, SrcImpl->fvf, (IWineD3DVertexBufferImpl *) pDestBuffer, Flags);
 }
@@ -4929,14 +4996,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_UpdateTexture (IWineD3DDevice *iface, I
     return hr;
 }
 
-static HRESULT  WINAPI  IWineD3DDeviceImpl_StretchRect(IWineD3DDevice *iface, IWineD3DSurface *pSourceSurface,
-                                                CONST RECT* pSourceRect, IWineD3DSurface *pDestinationSurface,
-                                                CONST RECT* pDestRect, WINED3DTEXTUREFILTERTYPE Filter) {
-    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-
-    TRACE("(%p) : stub\n", This);
-    return WINED3D_OK;
-}
 static HRESULT  WINAPI  IWineD3DDeviceImpl_GetRenderTargetData(IWineD3DDevice *iface, IWineD3DSurface *pRenderTarget, IWineD3DSurface *pSurface) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     /** TODO: remove remove casts to IWineD3DSurfaceImpl *
@@ -5169,7 +5228,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
     unsigned int  srcSurfaceWidth, srcSurfaceHeight, destSurfaceWidth, destSurfaceHeight;
     WINED3DFORMAT destFormat, srcFormat;
     UINT          destSize;
-    int destLeft, destTop;
+    int srcLeft, destLeft, destTop;
     WINED3DPOOL       srcPool, destPool;
     int offset    = 0;
     int rowoffset = 0; /* how many bytes to add onto the end of a row to wraparound to the beginning of the next */
@@ -5219,15 +5278,16 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
     /* this needs to be done in lines if the sourceRect != the sourceWidth */
     srcWidth   = pSourceRect ? pSourceRect->right - pSourceRect->left   : srcSurfaceWidth;
     srcHeight  = pSourceRect ? pSourceRect->top   - pSourceRect->bottom : srcSurfaceHeight;
+    srcLeft    = pSourceRect ? pSourceRect->left : 0;
     destLeft   = pDestPoint  ? pDestPoint->x : 0;
     destTop    = pDestPoint  ? pDestPoint->y : 0;
 
 
     /* This function doesn't support compressed textures
     the pitch is just bytesPerPixel * width */
-    if(srcWidth != srcSurfaceWidth  || (pSourceRect != NULL && pSourceRect->left != 0) ){
+    if(srcWidth != srcSurfaceWidth  || srcLeft ){
         rowoffset = (srcSurfaceWidth - srcWidth) * pSrcSurface->bytesPerPixel;
-        offset   += pSourceRect->left * pSrcSurface->bytesPerPixel;
+        offset   += srcLeft * pSrcSurface->bytesPerPixel;
         /* TODO: do we ever get 3bpp?, would a shift and an add be quicker than a mul (well maybe a cycle or two) */
     }
     /* TODO DXT formats */
@@ -6775,9 +6835,10 @@ const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl =
     IWineD3DDeviceImpl_ColorFill,
     IWineD3DDeviceImpl_UpdateTexture,
     IWineD3DDeviceImpl_UpdateSurface,
-    IWineD3DDeviceImpl_StretchRect,
     IWineD3DDeviceImpl_GetRenderTargetData,
     IWineD3DDeviceImpl_GetFrontBufferData,
+    IWineD3DDeviceImpl_SetupFullscreenWindow,
+    IWineD3DDeviceImpl_RestoreWindow,
     /*** object tracking ***/
     IWineD3DDeviceImpl_ResourceReleased
 };

@@ -36,11 +36,44 @@
 #include "localspl_private.h"
 
 #include "wine/debug.h"
+#include "wine/list.h"
+#include "wine/unicode.h"
 
 
 WINE_DEFAULT_DEBUG_CHANNEL(localspl);
 
 /*****************************************************/
+
+static CRITICAL_SECTION xcv_handles_cs;
+static CRITICAL_SECTION_DEBUG xcv_handles_cs_debug =
+{
+    0, 0, &xcv_handles_cs,
+    { &xcv_handles_cs_debug.ProcessLocksList, &xcv_handles_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": xcv_handles_cs") }
+};
+static CRITICAL_SECTION xcv_handles_cs = { &xcv_handles_cs_debug, -1, 0, 0, 0, 0 };
+
+/* ############################### */
+
+typedef struct {
+    struct list entry;
+    ACCESS_MASK GrantedAccess;
+    WCHAR       nameW[1];
+} xcv_t;
+
+static struct list xcv_handles = LIST_INIT( xcv_handles );
+
+/* ############################### */
+
+static const WCHAR cmd_MonitorUIW[] = {'M','o','n','i','t','o','r','U','I',0};
+static const WCHAR cmd_PortIsValidW[] = {'P','o','r','t','I','s','V','a','l','i','d',0};
+static const WCHAR dllnameuiW[] = {'l','o','c','a','l','u','i','.','d','l','l',0};
+
+static const WCHAR portname_LPT[]  = {'L','P','T',0};
+static const WCHAR portname_COM[]  = {'C','O','M',0};
+static const WCHAR portname_FILE[] = {'F','I','L','E',':',0};
+static const WCHAR portname_CUPS[] = {'C','U','P','S',':',0};
+static const WCHAR portname_LPR[]  = {'L','P','R',':',0};
 
 static const WCHAR WinNT_CV_PortsW[] = {'S','o','f','t','w','a','r','e','\\',
                                         'M','i','c','r','o','s','o','f','t','\\',
@@ -173,6 +206,52 @@ getports_cleanup:
 }
 
 /*****************************************************
+ * get_type_from_name (internal)
+ * 
+ */
+
+static DWORD get_type_from_name(LPCWSTR name)
+{
+    HANDLE  hfile;
+
+    if (!strncmpW(name, portname_LPT, sizeof(portname_LPT) / sizeof(WCHAR) -1))
+        return PORT_IS_LPT;
+
+    if (!strncmpW(name, portname_COM, sizeof(portname_COM) / sizeof(WCHAR) -1))
+        return PORT_IS_COM;
+
+    if (!strcmpW(name, portname_FILE))
+        return PORT_IS_FILE;
+
+    if (name[0] == '/')
+        return PORT_IS_UNIXNAME;
+
+    if (name[0] == '|')
+        return PORT_IS_PIPE;
+
+    if (!strncmpW(name, portname_CUPS, sizeof(portname_CUPS) / sizeof(WCHAR) -1))
+        return PORT_IS_CUPS;
+
+    if (!strncmpW(name, portname_LPR, sizeof(portname_LPR) / sizeof(WCHAR) -1))
+        return PORT_IS_LPR;
+
+    /* Must be a file or a directory. Does the file exist ? */
+    hfile = CreateFileW(name, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    TRACE("%p for OPEN_EXISTING on %s\n", hfile, debugstr_w(name));
+    if (hfile == INVALID_HANDLE_VALUE) {
+        /* Can we create the file? */
+        hfile = CreateFileW(name, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, NULL);
+        TRACE("%p for OPEN_ALWAYS\n", hfile);
+    }
+    if (hfile != INVALID_HANDLE_VALUE) {
+        CloseHandle(hfile);
+        return PORT_IS_FILENAME;
+    }
+    /* We can't use the name. use GetLastError() for the reason */
+    return PORT_IS_UNKNOWN;
+}
+
+/*****************************************************
  *   localmon_ConfigurePortW [exported through MONITOREX]
  *
  * Display the Configuration-Dialog for a specific Port
@@ -289,6 +368,134 @@ cleanup:
 }
 
 /*****************************************************
+ * localmon_XcvClosePort [exported through MONITOREX]
+ *
+ * Close a Communication-Channel
+ *
+ * PARAMS
+ *  hXcv  [i] The Handle to close
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ */
+BOOL WINAPI localmon_XcvClosePort(HANDLE hXcv)
+{
+    xcv_t * xcv = (xcv_t *) hXcv;
+
+    TRACE("(%p)\n", xcv);
+    /* No checks are done in Windows */
+    EnterCriticalSection(&xcv_handles_cs);
+    list_remove(&xcv->entry);
+    LeaveCriticalSection(&xcv_handles_cs);
+    spl_free(xcv);
+    return TRUE;
+}
+
+/*****************************************************
+ * localmon_XcvDataPort [exported through MONITOREX]
+ *
+ * Execute command through a Communication-Channel
+ *
+ * PARAMS
+ *  hXcv            [i] The Handle to work with
+ *  pszDataName     [i] Name of the command to execute
+ *  pInputData      [i] Buffer for extra Input Data (needed only for some commands)
+ *  cbInputData     [i] Size in Bytes of Buffer at pInputData
+ *  pOutputData     [o] Buffer to receive additional Data (needed only for some commands)
+ *  cbOutputData    [i] Size in Bytes of Buffer at pOutputData
+ *  pcbOutputNeeded [o] PTR to receive the minimal Size in Bytes of the Buffer at pOutputData
+ *
+ * RETURNS
+ *  Success: ERROR_SUCCESS
+ *  Failure: win32 error code (same value is returned by GetLastError) 
+ *
+ * NOTES
+ *
+ *  Minimal List of commands, that every Printmonitor DLL should support:
+ *
+ *| "MonitorUI" : Return the Name of the Userinterface-DLL as WSTR in pOutputData
+ *| "AddPort"   : Add a Port (Name as WSTR in pInputData)
+ *| "DeletePort": Delete a Port (Name as WSTR in pInputData)
+ *
+ *
+ */
+DWORD WINAPI localmon_XcvDataPort(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInputData, DWORD cbInputData,
+                PBYTE pOutputData, DWORD cbOutputData, PDWORD pcbOutputNeeded)
+{
+    DWORD   res;
+
+    TRACE("(%p, %s, %p, %d, %p, %d, %p)\n", hXcv, debugstr_w(pszDataName),
+          pInputData, cbInputData, pOutputData, cbOutputData, pcbOutputNeeded);
+
+
+    if (!lstrcmpW(pszDataName, cmd_MonitorUIW)) {
+        * pcbOutputNeeded = sizeof(dllnameuiW);
+        if (cbOutputData >= sizeof(dllnameuiW)) {
+            memcpy(pOutputData, dllnameuiW, sizeof(dllnameuiW));
+            return ERROR_SUCCESS;
+        }
+        return ERROR_INSUFFICIENT_BUFFER;
+    }
+
+    if (!lstrcmpW(pszDataName, cmd_PortIsValidW)) {
+        TRACE("InputData (%d): %s\n", cbInputData, debugstr_w( (LPWSTR) pInputData));
+        res = get_type_from_name((LPCWSTR) pInputData);
+        TRACE("detected as %u\n",  res);
+        /* names, that we have recognized, are valid */
+        if (res) return ERROR_SUCCESS;
+
+        /* ERROR_ACCESS_DENIED, ERROR_PATH_NOT_FOUND ore something else */
+        return GetLastError();
+    }
+
+    FIXME("command not supported: %s\n", debugstr_w(pszDataName));
+    return ERROR_INVALID_PARAMETER;
+}
+
+/*****************************************************
+ * localmon_XcvOpenPort [exported through MONITOREX]
+ *
+ * Open a Communication-Channel
+ *
+ * PARAMS
+ *  pName         [i] Name of selected Object
+ *  GrantedAccess [i] Access-Rights to use
+ *  phXcv         [o] The resulting Handle is stored here
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ */
+BOOL WINAPI localmon_XcvOpenPort(LPCWSTR pName, ACCESS_MASK GrantedAccess, PHANDLE phXcv)
+{
+    DWORD   len;
+    xcv_t * xcv;
+
+    TRACE("%s, 0x%x, %p)\n", debugstr_w(pName), GrantedAccess, phXcv);
+    /* No checks for any field is done in Windows */
+    len = (lstrlenW(pName) + 1) * sizeof(WCHAR);
+    xcv = spl_alloc( sizeof(xcv_t) + len);
+    if (xcv) {
+        xcv->GrantedAccess = GrantedAccess;
+        memcpy(&xcv->nameW, pName, len);
+        *phXcv = (HANDLE) xcv;
+        EnterCriticalSection(&xcv_handles_cs);
+        list_add_tail(&xcv_handles, &xcv->entry);
+        LeaveCriticalSection(&xcv_handles_cs);
+        TRACE("=> %p\n", xcv);
+        return TRUE;
+    }
+    else
+    {
+        *phXcv = NULL;
+        return FALSE;
+    }
+}
+
+/*****************************************************
  *      InitializePrintMonitor  (LOCALSPL.@)
  *
  * Initialize the Monitor for the Local Ports
@@ -324,7 +531,12 @@ LPMONITOREX WINAPI InitializePrintMonitor(LPWSTR regroot)
             NULL,       /* localmon_AddPortW */
             NULL,       /* localmon_AddPortExW */
             localmon_ConfigurePortW,
-            localmon_DeletePortW
+            localmon_DeletePortW,
+            NULL,       /* localmon_GetPrinterDataFromPort */
+            NULL,       /* localmon_SetPortTimeOuts */
+            localmon_XcvOpenPort,
+            localmon_XcvDataPort,
+            localmon_XcvClosePort
         }
     };
 

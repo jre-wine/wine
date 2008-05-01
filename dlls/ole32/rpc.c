@@ -23,11 +23,8 @@
 #include "config.h"
 #include "wine/port.h"
 
-#include <stdlib.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
-#include <assert.h>
 
 #define COBJMACROS
 #define NONAMELESSUNION
@@ -42,7 +39,6 @@
 #include "rpc.h"
 #include "winerror.h"
 #include "winreg.h"
-#include "wtypes.h"
 #include "wine/unicode.h"
 
 #include "compobj_private.h"
@@ -704,7 +700,8 @@ static DWORD WINAPI rpc_sendreceive_thread(LPVOID param)
 {
     struct dispatch_params *data = (struct dispatch_params *) param;
 
-    /* FIXME: trap and rethrow RPC exceptions in app thread */
+    /* Note: I_RpcSendReceive doesn't raise exceptions like the higher-level
+     * RPC functions do */
     data->status = I_RpcSendReceive((RPC_MESSAGE *)data->msg);
 
     TRACE("completed with status 0x%lx\n", data->status);
@@ -859,7 +856,7 @@ static HRESULT WINAPI ClientRpcChannelBuffer_SendReceive(LPRPCCHANNELBUFFER ifac
     TRACE("hrFault = 0x%08x\n", hrFault);
 
     /* FIXME: this condition should be
-     * "hr == S_OK && (!hrFault || msg->BufferLength > FIELD_OFFSET(ORPCTHAT, extentions) + 4)"
+     * "hr == S_OK && (!hrFault || msg->BufferLength > FIELD_OFFSET(ORPCTHAT, extensions) + 4)"
      * but we don't currently reset the message length for PostMessage
      * dispatched calls */
     if (hr == S_OK && hrFault == S_OK)

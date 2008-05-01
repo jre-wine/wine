@@ -1479,7 +1479,7 @@ NtAccessCheck(
 {
     NTSTATUS status;
 
-    TRACE("(%p, %p, %08x, %p, %p, %p, %p, %p), stub\n",
+    TRACE("(%p, %p, %08x, %p, %p, %p, %p, %p)\n",
         SecurityDescriptor, ClientToken, DesiredAccess, GenericMapping,
         PrivilegeSet, ReturnLength, GrantedAccess, AccessStatus);
 
@@ -1527,8 +1527,10 @@ NtAccessCheck(
         PrivilegeSet->PrivilegeCount = reply->privileges_len / sizeof(LUID_AND_ATTRIBUTES);
 
         if (status == STATUS_SUCCESS)
+        {
             *AccessStatus = reply->access_status;
-        *GrantedAccess = reply->access_granted;
+            *GrantedAccess = reply->access_granted;
+        }
     }
     SERVER_END_REQ;
 

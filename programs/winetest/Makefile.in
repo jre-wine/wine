@@ -55,6 +55,7 @@ TESTBINS = \
 	msxml3_test.exe \
 	netapi32_test.exe \
 	ntdll_test.exe \
+	odbccp32_test.exe \
 	ole32_test.exe \
 	oleaut32_test.exe \
 	psapi_test.exe \
@@ -68,6 +69,7 @@ TESTBINS = \
 	shdocvw_test.exe \
 	shell32_test.exe \
 	shlwapi_test.exe \
+	snmpapi_test.exe \
 	urlmon_test.exe \
 	user32_test.exe \
 	usp10_test.exe \
@@ -143,6 +145,8 @@ netapi32_test.exe: $(DLLDIR)/netapi32/tests/netapi32_test.exe$(DLLEXT)
 	cp $(DLLDIR)/netapi32/tests/netapi32_test.exe$(DLLEXT) $@ && $(STRIP) $@
 ntdll_test.exe: $(DLLDIR)/ntdll/tests/ntdll_test.exe$(DLLEXT)
 	cp $(DLLDIR)/ntdll/tests/ntdll_test.exe$(DLLEXT) $@ && $(STRIP) $@
+odbccp32_test.exe: $(DLLDIR)/odbccp32/tests/odbccp32_test.exe$(DLLEXT)
+	cp $(DLLDIR)/odbccp32/tests/odbccp32_test.exe$(DLLEXT) $@ && $(STRIP) $@
 ole32_test.exe: $(DLLDIR)/ole32/tests/ole32_test.exe$(DLLEXT)
 	cp $(DLLDIR)/ole32/tests/ole32_test.exe$(DLLEXT) $@ && $(STRIP) $@
 oleaut32_test.exe: $(DLLDIR)/oleaut32/tests/oleaut32_test.exe$(DLLEXT)
@@ -169,6 +173,8 @@ shell32_test.exe: $(DLLDIR)/shell32/tests/shell32_test.exe$(DLLEXT)
 	cp $(DLLDIR)/shell32/tests/shell32_test.exe$(DLLEXT) $@ && $(STRIP) $@
 shlwapi_test.exe: $(DLLDIR)/shlwapi/tests/shlwapi_test.exe$(DLLEXT)
 	cp $(DLLDIR)/shlwapi/tests/shlwapi_test.exe$(DLLEXT) $@ && $(STRIP) $@
+snmpapi_test.exe: $(DLLDIR)/snmpapi/tests/snmpapi_test.exe$(DLLEXT)
+	cp $(DLLDIR)/snmpapi/tests/snmpapi_test.exe$(DLLEXT) $@ && $(STRIP) $@
 urlmon_test.exe: $(DLLDIR)/urlmon/tests/urlmon_test.exe$(DLLEXT)
 	cp $(DLLDIR)/urlmon/tests/urlmon_test.exe$(DLLEXT) $@ && $(STRIP) $@
 user32_test.exe: $(DLLDIR)/user32/tests/user32_test.exe$(DLLEXT)

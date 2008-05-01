@@ -70,13 +70,17 @@ struct thread_apc
 {
     struct object       obj;      /* object header */
     struct list         entry;    /* queue linked list */
+    struct thread      *caller;   /* thread that queued this apc */
     struct object      *owner;    /* object that queued this apc */
     int                 executed; /* has it been executed by the client? */
-    apc_call_t          call;
+    apc_call_t          call;     /* call arguments */
+    apc_result_t        result;   /* call results once executed */
 };
 
 static void dump_thread_apc( struct object *obj, int verbose );
 static int thread_apc_signaled( struct object *obj, struct thread *thread );
+static void thread_apc_destroy( struct object *obj );
+static void clear_apc_queue( struct list *queue );
 
 static const struct object_ops thread_apc_ops =
 {
@@ -91,7 +95,7 @@ static const struct object_ops thread_apc_ops =
     no_map_access,              /* map_access */
     no_lookup_name,             /* lookup_name */
     no_close_handle,            /* close_handle */
-    no_destroy                  /* destroy */
+    thread_apc_destroy          /* destroy */
 };
 
 
@@ -102,7 +106,6 @@ static int thread_signaled( struct object *obj, struct thread *thread );
 static unsigned int thread_map_access( struct object *obj, unsigned int access );
 static void thread_poll_event( struct fd *fd, int event );
 static void destroy_thread( struct object *obj );
-static struct thread_apc *thread_dequeue_apc( struct thread *thread, int system_only );
 
 static const struct object_ops thread_ops =
 {
@@ -227,9 +230,9 @@ static void thread_poll_event( struct fd *fd, int event )
 static void cleanup_thread( struct thread *thread )
 {
     int i;
-    struct thread_apc *apc;
 
-    while ((apc = thread_dequeue_apc( thread, 0 ))) release_object( apc );
+    clear_apc_queue( &thread->system_apc );
+    clear_apc_queue( &thread->user_apc );
     free( thread->req_data );
     free( thread->reply_data );
     if (thread->request_fd) release_object( thread->request_fd );
@@ -309,6 +312,28 @@ static int thread_apc_signaled( struct object *obj, struct thread *thread )
 {
     struct thread_apc *apc = (struct thread_apc *)obj;
     return apc->executed;
+}
+
+static void thread_apc_destroy( struct object *obj )
+{
+    struct thread_apc *apc = (struct thread_apc *)obj;
+    if (apc->caller) release_object( apc->caller );
+}
+
+/* queue an async procedure call */
+static struct thread_apc *create_apc( struct object *owner, const apc_call_t *call_data )
+{
+    struct thread_apc *apc;
+
+    if ((apc = alloc_object( &thread_apc_ops )))
+    {
+        apc->call        = *call_data;
+        apc->caller      = NULL;
+        apc->owner       = owner;
+        apc->executed    = 0;
+        apc->result.type = APC_NONE;
+    }
+    return apc;
 }
 
 /* get a thread pointer from a thread id (and increment the refcount) */
@@ -470,8 +495,13 @@ static int check_wait( struct thread *thread )
     struct thread_wait *wait = thread->wait;
     struct wait_queue_entry *entry = wait->queues;
 
-    /* Suspended threads may not acquire locks */
-    if (thread->process->suspend + thread->suspend > 0) return -1;
+    /* Suspended threads may not acquire locks, but they can run system APCs */
+    if (thread->process->suspend + thread->suspend > 0)
+    {
+        if ((wait->flags & SELECT_INTERRUPTIBLE) && !list_empty( &thread->system_apc ))
+            return STATUS_USER_APC;
+        return -1;
+    }
 
     assert( wait );
     if (wait->flags & SELECT_ALL)
@@ -673,25 +703,68 @@ static inline struct list *get_apc_queue( struct thread *thread, enum apc_type t
     }
 }
 
-/* queue an async procedure call */
-int thread_queue_apc( struct thread *thread, struct object *owner, const apc_call_t *call_data )
+/* queue an existing APC to a given thread */
+static int queue_apc( struct process *process, struct thread *thread, struct thread_apc *apc )
 {
-    struct thread_apc *apc;
-    struct list *queue = get_apc_queue( thread, call_data->type );
+    struct list *queue;
 
-    /* cancel a possible previous APC with the same owner */
-    if (owner) thread_cancel_apc( thread, owner, call_data->type );
-    if (thread->state == TERMINATED) return 0;
+    if (!thread)  /* find a suitable thread inside the process */
+    {
+        struct thread *candidate;
 
-    if (!(apc = alloc_object( &thread_apc_ops ))) return 0;
-    apc->call     = *call_data;
-    apc->owner    = owner;
-    apc->executed = 0;
+        /* first try to find a waiting thread */
+        LIST_FOR_EACH_ENTRY( candidate, &process->thread_list, struct thread, proc_entry )
+        {
+            if (candidate->state == TERMINATED) continue;
+            if (process->suspend || candidate->suspend ||
+                (candidate->wait && (candidate->wait->flags & SELECT_INTERRUPTIBLE)))
+            {
+                thread = candidate;
+                break;
+            }
+        }
+        if (!thread)
+        {
+            /* then use the first one that accepts a signal */
+            LIST_FOR_EACH_ENTRY( candidate, &process->thread_list, struct thread, proc_entry )
+            {
+                if (send_thread_signal( candidate, SIGUSR1 ))
+                {
+                    thread = candidate;
+                    break;
+                }
+            }
+        }
+        if (!thread) return 0;  /* nothing found */
+    }
+    else
+    {
+        if (thread->state == TERMINATED) return 0;
+        /* cancel a possible previous APC with the same owner */
+        if (apc->owner) thread_cancel_apc( thread, apc->owner, apc->call.type );
+    }
+
+    queue = get_apc_queue( thread, apc->call.type );
+    grab_object( apc );
     list_add_tail( queue, &apc->entry );
     if (!list_prev( queue, &apc->entry ))  /* first one */
         wake_thread( thread );
 
     return 1;
+}
+
+/* queue an async procedure call */
+int thread_queue_apc( struct thread *thread, struct object *owner, const apc_call_t *call_data )
+{
+    struct thread_apc *apc;
+    int ret = 0;
+
+    if ((apc = create_apc( owner, call_data )))
+    {
+        ret = queue_apc( NULL, thread, apc );
+        release_object( apc );
+    }
+    return ret;
 }
 
 /* cancel the async procedure call owned by a specific object */
@@ -704,12 +777,14 @@ void thread_cancel_apc( struct thread *thread, struct object *owner, enum apc_ty
     {
         if (apc->owner != owner) continue;
         list_remove( &apc->entry );
+        apc->executed = 1;
+        wake_up( &apc->obj, 0 );
         release_object( apc );
         return;
     }
 }
 
-/* remove the head apc from the queue; the returned pointer must be freed by the caller */
+/* remove the head apc from the queue; the returned object must be released by the caller */
 static struct thread_apc *thread_dequeue_apc( struct thread *thread, int system_only )
 {
     struct thread_apc *apc = NULL;
@@ -722,6 +797,21 @@ static struct thread_apc *thread_dequeue_apc( struct thread *thread, int system_
         list_remove( ptr );
     }
     return apc;
+}
+
+/* clear an APC queue, cancelling all the APCs on it */
+static void clear_apc_queue( struct list *queue )
+{
+    struct list *ptr;
+
+    while ((ptr = list_head( queue )))
+    {
+        struct thread_apc *apc = LIST_ENTRY( ptr, struct thread_apc, entry );
+        list_remove( &apc->entry );
+        apc->executed = 1;
+        wake_up( &apc->obj, 0 );
+        release_object( apc );
+    }
 }
 
 /* add an fd to the inflight list */
@@ -1053,44 +1143,117 @@ DECL_HANDLER(select)
     select_on( count, req->cookie, get_req_data(), req->flags, &req->timeout, req->signal );
 }
 
-/* queue an APC for a thread */
+/* queue an APC for a thread or process */
 DECL_HANDLER(queue_apc)
 {
-    struct thread *thread;
-    if ((thread = get_thread_from_handle( req->handle, THREAD_SET_CONTEXT )))
+    struct thread *thread = NULL;
+    struct process *process = NULL;
+    struct thread_apc *apc;
+
+    if (!(apc = create_apc( NULL, &req->call ))) return;
+
+    switch (apc->call.type)
     {
-        switch( req->call.type )
+    case APC_NONE:
+    case APC_USER:
+        thread = get_thread_from_handle( req->thread, THREAD_SET_CONTEXT );
+        break;
+    case APC_VIRTUAL_ALLOC:
+    case APC_VIRTUAL_FREE:
+    case APC_VIRTUAL_PROTECT:
+    case APC_VIRTUAL_FLUSH:
+    case APC_VIRTUAL_LOCK:
+    case APC_VIRTUAL_UNLOCK:
+    case APC_UNMAP_VIEW:
+        process = get_process_from_handle( req->process, PROCESS_VM_OPERATION );
+        break;
+    case APC_VIRTUAL_QUERY:
+        process = get_process_from_handle( req->process, PROCESS_QUERY_INFORMATION );
+        break;
+    case APC_MAP_VIEW:
+        process = get_process_from_handle( req->process, PROCESS_VM_OPERATION );
+        if (process && process != current->process)
         {
-        case APC_NONE:
-        case APC_USER:
-            thread_queue_apc( thread, NULL, &req->call );
-            break;
-        default:
-            set_error( STATUS_INVALID_PARAMETER );
-            break;
+            /* duplicate the handle into the target process */
+            obj_handle_t handle = duplicate_handle( current->process, apc->call.map_view.handle,
+                                                    process, 0, 0, DUP_HANDLE_SAME_ACCESS );
+            if (handle) apc->call.map_view.handle = handle;
+            else
+            {
+                release_object( process );
+                process = NULL;
+            }
         }
+        break;
+    case APC_CREATE_THREAD:
+        process = get_process_from_handle( req->process, PROCESS_CREATE_THREAD );
+        break;
+    default:
+        set_error( STATUS_INVALID_PARAMETER );
+        break;
+    }
+
+    if (thread)
+    {
+        if (!queue_apc( NULL, thread, apc )) set_error( STATUS_THREAD_IS_TERMINATING );
         release_object( thread );
     }
+    else if (process)
+    {
+        reply->self = (process == current->process);
+        if (!reply->self)
+        {
+            obj_handle_t handle = alloc_handle( current->process, apc, SYNCHRONIZE, 0 );
+            if (handle)
+            {
+                if (queue_apc( process, NULL, apc ))
+                {
+                    apc->caller = (struct thread *)grab_object( current );
+                    reply->handle = handle;
+                }
+                else
+                {
+                    close_handle( current->process, handle );
+                    set_error( STATUS_PROCESS_IS_TERMINATING );
+                }
+            }
+        }
+        release_object( process );
+    }
+
+    release_object( apc );
 }
 
 /* get next APC to call */
 DECL_HANDLER(get_apc)
 {
     struct thread_apc *apc;
+    int system_only = !req->alertable;
 
     if (req->prev)
     {
         if (!(apc = (struct thread_apc *)get_handle_obj( current->process, req->prev,
                                                          0, &thread_apc_ops ))) return;
+        apc->result = req->result;
         apc->executed = 1;
+        if (apc->result.type == APC_CREATE_THREAD)  /* transfer the handle to the caller process */
+        {
+            obj_handle_t handle = duplicate_handle( current->process, apc->result.create_thread.handle,
+                                                    apc->caller->process, 0, 0, DUP_HANDLE_SAME_ACCESS );
+            close_handle( current->process, apc->result.create_thread.handle );
+            apc->result.create_thread.handle = handle;
+            clear_error();  /* ignore errors from the above calls */
+        }
         wake_up( &apc->obj, 0 );
         close_handle( current->process, req->prev );
         release_object( apc );
     }
 
+    if (current->suspend + current->process->suspend > 0) system_only = 1;
+
     for (;;)
     {
-        if (!(apc = thread_dequeue_apc( current, !req->alertable )))
+        if (!(apc = thread_dequeue_apc( current, system_only )))
         {
             /* no more APCs */
             set_error( STATUS_PENDING );
@@ -1100,11 +1263,30 @@ DECL_HANDLER(get_apc)
          * wake up a thread, but since we got here the thread woke up already.
          */
         if (apc->call.type != APC_NONE) break;
+        apc->executed = 1;
+        wake_up( &apc->obj, 0 );
         release_object( apc );
     }
 
     if ((reply->handle = alloc_handle( current->process, apc, SYNCHRONIZE, 0 )))
         reply->call = apc->call;
+    release_object( apc );
+}
+
+/* Get the result of an APC call */
+DECL_HANDLER(get_apc_result)
+{
+    struct thread_apc *apc;
+
+    if (!(apc = (struct thread_apc *)get_handle_obj( current->process, req->handle,
+                                                     0, &thread_apc_ops ))) return;
+    if (!apc->executed) set_error( STATUS_PENDING );
+    else
+    {
+        reply->result = apc->result;
+        /* close the handle directly to avoid an extra round-trip */
+        close_handle( current->process, req->handle );
+    }
     release_object( apc );
 }
 

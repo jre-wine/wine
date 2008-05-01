@@ -120,6 +120,14 @@ typedef struct
     /* At some points, particularly when switching MDI children, active and
      * maximized MDI children may be not the same window, so we need to track
      * them separately.
+     * The only place where we switch to/from maximized state is DefMDIChildProc
+     * WM_SIZE/SIZE_MAXIMIZED handler. We get that notification only after the
+     * ShowWindow(SW_SHOWMAXIMIZED) request, therefore window is guaranteed to
+     * be visible at the time we get the notification, and it's safe to assume
+     * that hwndChildMaximized is always visible.
+     * If the app plays games with WS_VISIBLE, WS_MAXIMIZE or any other window
+     * states it must keep coherency with USER32 on its own. This is true for
+     * Windows as well.
      */
     UINT      nActiveChildren;
     HWND      hwndChildMaximized;
@@ -320,8 +328,8 @@ static LRESULT MDISetMenu( HWND hwnd, HMENU hmenuFrame,
     {
         if (hmenuFrame == ci->hFrameMenu) return (LRESULT)hmenuFrame;
 
-        if (IsZoomed(ci->hwndActiveChild))
-            MDI_RestoreFrameMenu( hwndFrame, ci->hwndActiveChild );
+        if (ci->hwndChildMaximized)
+            MDI_RestoreFrameMenu( hwndFrame, ci->hwndChildMaximized );
     }
 
     if( hmenuWindow && hmenuWindow != ci->hWindowMenu )
@@ -355,8 +363,8 @@ static LRESULT MDISetMenu( HWND hwnd, HMENU hmenuFrame,
             HMENU oldFrameMenu = ci->hFrameMenu;
 
             ci->hFrameMenu = hmenuFrame;
-            if (IsZoomed(ci->hwndActiveChild) && (GetWindowLongW(ci->hwndActiveChild, GWL_STYLE) & WS_VISIBLE))
-                MDI_AugmentFrameMenu( hwndFrame, ci->hwndActiveChild );
+            if (ci->hwndChildMaximized)
+                MDI_AugmentFrameMenu( hwndFrame, ci->hwndChildMaximized );
 
             return (LRESULT)oldFrameMenu;
         }
@@ -369,8 +377,8 @@ static LRESULT MDISetMenu( HWND hwnd, HMENU hmenuFrame,
          * that the "if" to this "else" wouldn't catch the need to
          * augment the frame menu.
          */
-        if( IsZoomed(ci->hwndActiveChild) )
-            MDI_AugmentFrameMenu( hwndFrame, ci->hwndActiveChild );
+        if( ci->hwndChildMaximized )
+            MDI_AugmentFrameMenu( hwndFrame, ci->hwndChildMaximized );
     }
 
     return 0;
@@ -685,8 +693,8 @@ static LONG MDICascade( HWND client, MDICLIENTINFO *ci )
     BOOL has_icons = FALSE;
     int i, total;
 
-    if (IsZoomed(ci->hwndActiveChild))
-        SendMessageW(client, WM_MDIRESTORE, (WPARAM)ci->hwndActiveChild, 0);
+    if (ci->hwndChildMaximized)
+        SendMessageW(client, WM_MDIRESTORE, (WPARAM)ci->hwndChildMaximized, 0);
 
     if (ci->nActiveChildren == 0) return 0;
 
@@ -738,8 +746,8 @@ static void MDITile( HWND client, MDICLIENTINFO *ci, WPARAM wParam )
     int i, total;
     BOOL has_icons = FALSE;
 
-    if (IsZoomed(ci->hwndActiveChild))
-        SendMessageW(client, WM_MDIRESTORE, (WPARAM)ci->hwndActiveChild, 0);
+    if (ci->hwndChildMaximized)
+        SendMessageW(client, WM_MDIRESTORE, (WPARAM)ci->hwndChildMaximized, 0);
 
     if (ci->nActiveChildren == 0) return;
 
@@ -974,7 +982,7 @@ static void MDI_UpdateFrameText( HWND frame, HWND hClient, BOOL repaint, LPCWSTR
 
     if (ci->frameTitle)
     {
-	if (IsZoomed(ci->hwndActiveChild) && IsWindowVisible(ci->hwndActiveChild))
+	if (ci->hwndChildMaximized)
 	{
 	    /* combine frame title and child title if possible */
 
@@ -1115,12 +1123,6 @@ static LRESULT MDIClientWndProc_common( HWND hwnd, UINT message,
                                             hwnd, 0, csA->hOwner,
                                             (LPVOID)csA->lParam);
             }
-
-            if (IsZoomed(ci->hwndActiveChild))
-            {
-                MDI_AugmentFrameMenu(GetParent(hwnd), child);
-                MDI_UpdateFrameText(GetParent(hwnd), hwnd, TRUE, NULL);
-            }
             return (LRESULT)child;
         }
         return 0;
@@ -1226,8 +1228,7 @@ static LRESULT MDIClientWndProc_common( HWND hwnd, UINT message,
         return 0;
 
       case WM_SIZE:
-        if( IsWindow(ci->hwndActiveChild) && IsZoomed(ci->hwndActiveChild) &&
-            (GetWindowLongW(ci->hwndActiveChild, GWL_STYLE) & WS_VISIBLE) )
+        if( ci->hwndChildMaximized )
 	{
 	    RECT	rect;
 
@@ -1236,9 +1237,9 @@ static LRESULT MDIClientWndProc_common( HWND hwnd, UINT message,
 	    rect.right = LOWORD(lParam);
 	    rect.bottom = HIWORD(lParam);
 
-	    AdjustWindowRectEx(&rect, GetWindowLongA(ci->hwndActiveChild, GWL_STYLE),
-                               0, GetWindowLongA(ci->hwndActiveChild, GWL_EXSTYLE) );
-	    MoveWindow(ci->hwndActiveChild, rect.left, rect.top,
+	    AdjustWindowRectEx( &rect, GetWindowLongA(ci->hwndChildMaximized, GWL_STYLE),
+                               0, GetWindowLongA(ci->hwndChildMaximized, GWL_EXSTYLE) );
+	    MoveWindow( ci->hwndChildMaximized, rect.left, rect.top,
 			 rect.right - rect.left, rect.bottom - rect.top, 1);
 	}
 	else
@@ -1487,7 +1488,7 @@ LRESULT WINAPI DefMDIChildProcW( HWND hwnd, UINT message,
         switch( wParam )
         {
         case SC_MOVE:
-            if( ci->hwndActiveChild == hwnd && IsZoomed(ci->hwndActiveChild))
+            if( ci->hwndChildMaximized == hwnd )
                 return 0;
             break;
         case SC_RESTORE:
@@ -1508,15 +1509,16 @@ LRESULT WINAPI DefMDIChildProcW( HWND hwnd, UINT message,
 
     case WM_SHOWWINDOW:
     case WM_SETVISIBLE:
-        if (IsZoomed(ci->hwndActiveChild)) ci->mdiFlags &= ~MDIF_NEEDUPDATE;
+        if (ci->hwndChildMaximized) ci->mdiFlags &= ~MDIF_NEEDUPDATE;
         else MDI_PostUpdate(client, ci, SB_BOTH+1);
         break;
 
     case WM_SIZE:
+        /* This is the only place where we switch to/from maximized state */
         /* do not change */
         TRACE("current active %p, maximized %p\n", ci->hwndActiveChild, ci->hwndChildMaximized);
 
-        if( ci->hwndActiveChild == hwnd && wParam != SIZE_MAXIMIZED )
+        if( ci->hwndChildMaximized == hwnd && wParam != SIZE_MAXIMIZED )
         {
             HWND frame;
 

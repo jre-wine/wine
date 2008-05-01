@@ -392,6 +392,32 @@ static void test_marshal_and_unmarshal_invalid(void)
     end_host_object(tid, thread);
 }
 
+static void test_same_apartment_unmarshal_failure(void)
+{
+    HRESULT hr;
+    IStream *pStream;
+    IUnknown *pProxy;
+    static const LARGE_INTEGER llZero;
+
+    cLocks = 0;
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
+    ok_ole_success(hr, CreateStreamOnHGlobal);
+
+    hr = CoMarshalInterface(pStream, &IID_IUnknown, (IUnknown *)&Test_ClassFactory, MSHCTX_INPROC, NULL, MSHLFLAGS_NORMAL);
+    ok_ole_success(hr, CoMarshalInterface);
+
+    ok_more_than_one_lock();
+
+    hr = IStream_Seek(pStream, llZero, STREAM_SEEK_SET, NULL);
+    ok_ole_success(hr, IStream_Seek);
+
+    hr = CoUnmarshalInterface(pStream, &IID_IParseDisplayName, (void **)&pProxy);
+    ok(hr == E_NOINTERFACE, "CoUnmarshalInterface should have returned E_NOINTERFACE instead of 0x%08x\n", hr);
+
+    ok_no_locks();
+}
+
 /* tests success case of an interthread marshal */
 static void test_interthread_marshal_and_unmarshal(void)
 {
@@ -2088,34 +2114,6 @@ static void test_out_of_process_com(void)
     CloseHandle(heventShutdown);
 }
 
-static void test_ROT(void)
-{
-    static const WCHAR wszFileName[] = {'B','E','2','0','E','2','F','5','-',
-        '1','9','0','3','-','4','A','A','E','-','B','1','A','F','-',
-        '2','0','4','6','E','5','8','6','C','9','2','5',0};
-    HRESULT hr;
-    IMoniker *pMoniker = NULL;
-    IRunningObjectTable *pROT = NULL;
-    DWORD dwCookie;
-
-    cLocks = 0;
-
-    hr = CreateFileMoniker(wszFileName, &pMoniker);
-    ok_ole_success(hr, CreateClassMoniker);
-    hr = GetRunningObjectTable(0, &pROT);
-    ok_ole_success(hr, GetRunningObjectTable);
-    hr = IRunningObjectTable_Register(pROT, 0, (IUnknown*)&Test_ClassFactory, pMoniker, &dwCookie);
-    ok_ole_success(hr, IRunningObjectTable_Register);
-    IMoniker_Release(pMoniker);
-
-    ok_more_than_one_lock();
-
-    hr = IRunningObjectTable_Revoke(pROT, dwCookie);
-    ok_ole_success(hr, IRunningObjectTable_Revoke);
-
-    ok_no_locks();
-}
-
 struct git_params
 {
 	DWORD cookie;
@@ -2176,15 +2174,6 @@ static void test_globalinterfacetable(void)
 	}
 
 	CloseHandle(thread);
-}
-
-static void test_CoGetInterfaceAndReleaseStream(void)
-{
-    HRESULT hr;
-    IUnknown *pUnk;
-
-    hr = CoGetInterfaceAndReleaseStream(NULL, &IID_IUnknown, (void**)&pUnk);
-    ok(hr == E_INVALIDARG, "hr %08x\n", hr);
 }
 
 static const char *debugstr_iid(REFIID riid)
@@ -2425,6 +2414,7 @@ START_TEST(marshal)
     test_normal_marshal_and_release();
     test_normal_marshal_and_unmarshal();
     test_marshal_and_unmarshal_invalid();
+    test_same_apartment_unmarshal_failure();
     test_interthread_marshal_and_unmarshal();
     test_proxy_marshal_and_unmarshal();
     test_proxy_marshal_and_unmarshal2();
@@ -2455,10 +2445,7 @@ START_TEST(marshal)
     /* doesn't pass with Win9x COM DLLs (even though Essential COM says it should) */
     if (0) test_out_of_process_com();
 
-    test_ROT();
     test_globalinterfacetable();
-
-    test_CoGetInterfaceAndReleaseStream();
 
     /* must be last test as channel hooks can't be unregistered */
     test_channel_hook();

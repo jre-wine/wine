@@ -201,6 +201,9 @@ typedef struct {
 #define SNMP_AUTHAPI_INVALID_MSG_TYPE 31
 #define SNMP_AUTHAPI_TRIV_AUTH_FAILED 32
 
+#define SNMPAPI_NOERROR TRUE
+#define SNMPAPI_ERROR   FALSE
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -286,7 +289,7 @@ DWORD WINAPI SnmpSvcGetUptime(void);
 void WINAPI SnmpSvcSetLogLevel(int nLogLevel);
 void WINAPI SnmpSvcSetLogType(int nLogType);
 
-void WINAPI SnmpUtilDbgPrint(int nLogLevel, LPSTR szFormat, ...);
+void WINAPIV SnmpUtilDbgPrint(int nLogLevel, LPSTR szFormat, ...);
 
 #ifdef __cplusplus
 }

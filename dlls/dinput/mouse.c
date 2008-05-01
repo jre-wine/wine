@@ -273,8 +273,8 @@ static ULONG WINAPI SysMouseAImpl_Release(LPDIRECTINPUTDEVICE8A iface)
     HeapFree(GetProcessHeap(), 0, This->base.data_queue);
 
     /* Free data format */
-    HeapFree(GetProcessHeap(), 0, (LPVOID)This->base.data_format.wine_df->rgodf);
-    HeapFree(GetProcessHeap(), 0, (LPVOID)This->base.data_format.wine_df);
+    HeapFree(GetProcessHeap(), 0, This->base.data_format.wine_df->rgodf);
+    HeapFree(GetProcessHeap(), 0, This->base.data_format.wine_df);
     release_DataFormat(&This->base.data_format);
 
     IDirectInput_Release((LPDIRECTINPUTDEVICE8A)This->dinput);
@@ -367,7 +367,7 @@ static LRESULT CALLBACK dinput_mouse_hook( int code, WPARAM wparam, LPARAM lpara
     {
         int i;
 
-        TRACE("msg %x @ (%d %d): (X: %d Y: %d Z: %d\n", wparam, hook->pt.x, hook->pt.y,
+        TRACE("msg %x @ (%d %d): (X: %d Y: %d Z: %d", wparam, hook->pt.x, hook->pt.y,
               This->m_state.lX, This->m_state.lY, This->m_state.lZ);
         for (i = 0; i < 5; i++) TRACE(" B%d: %02x", i, This->m_state.rgbButtons[i]);
         TRACE(")\n");

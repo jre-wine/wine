@@ -2391,7 +2391,7 @@ static SUBITEM_INFO* LISTVIEW_GetSubItemPtr(HDPA hdpaSubItems, INT nSubItem)
 
 /***
  * DESCRIPTION:
- * Caclulates the desired item width.
+ * Calculates the desired item width.
  *
  * PARAMETER(S):
  * [I] infoPtr : valid pointer to the listview structure
@@ -2436,7 +2436,7 @@ static INT LISTVIEW_CalculateItemWidth(LISTVIEW_INFO *infoPtr)
 
 /***
  * DESCRIPTION:
- * Caclulates the desired item height.
+ * Calculates the desired item height.
  *
  * PARAMETER(S):
  * [I] infoPtr : valid pointer to the listview structure
@@ -3749,6 +3749,7 @@ static BOOL LISTVIEW_DrawItem(LISTVIEW_INFO *infoPtr, HDC hdc, INT nItem, INT nS
 
     hOldFont = GetCurrentObject(hdc, OBJ_FONT);
     if (nSubItem > 0) cdmode = infoPtr->cditemmode;
+    if (cdmode & CDRF_SKIPDEFAULT) goto postpaint;
     if (cdmode & CDRF_NOTIFYITEMDRAW)
         cdsubitemmode = notify_customdraw(infoPtr, CDDS_PREPAINT, &nmlvcd);
     if (nSubItem == 0) infoPtr->cditemmode = cdsubitemmode;
@@ -8610,10 +8611,16 @@ static LRESULT LISTVIEW_HeaderNotification(LISTVIEW_INFO *infoPtr, const NMHEADE
 		    /* resizing left-aligned columns leaves most of the left side untouched */
 		    if ((lpColumnInfo->fmt & LVCFMT_JUSTIFYMASK) == LVCFMT_LEFT)
 		    {
-			INT nMaxDirty = infoPtr->nEllipsisWidth + infoPtr->ntmMaxCharWidth + dx;
+			INT nMaxDirty = infoPtr->nEllipsisWidth + infoPtr->ntmMaxCharWidth;
+			if (dx > 0)
+			    nMaxDirty += dx;
 			rcCol.left = max (rcCol.left, rcCol.right - nMaxDirty);
 		    }
-		    
+
+		    /* when shrinking the last column clear the now unused field */
+		    if (lpnmh->iItem == DPA_GetPtrCount(infoPtr->hdpaColumns) - 1 && dx < 0)
+		        rcCol.right -= dx;
+
 		    LISTVIEW_InvalidateRect(infoPtr, &rcCol);
 		}
 	    }

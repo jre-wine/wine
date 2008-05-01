@@ -469,9 +469,10 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
     STDMETHOD(ColorFill)(THIS_ struct IWineD3DSurface* pSurface, CONST WINED3DRECT* pRect, WINED3DCOLOR color) PURE;
     STDMETHOD(UpdateTexture)(THIS_ struct IWineD3DBaseTexture *pSourceTexture, struct IWineD3DBaseTexture *pDestinationTexture) PURE;
     STDMETHOD(UpdateSurface)(THIS_ struct IWineD3DSurface* pSourceSurface, CONST RECT* pSourceRect, struct IWineD3DSurface* pDestinationSurface, CONST POINT* pDestPoint) PURE;
-    STDMETHOD(StretchRect)(THIS_ struct IWineD3DSurface* pSourceSurface, CONST RECT* pSourceRect, struct IWineD3DSurface* pDestinationSurface, CONST RECT* pDestRect, WINED3DTEXTUREFILTERTYPE Filter) PURE;
     STDMETHOD(GetRenderTargetData)(THIS_ struct IWineD3DSurface* pRenderTarget, struct IWineD3DSurface* pSurface) PURE;
     STDMETHOD(GetFrontBufferData)(THIS_ UINT iSwapChain,struct IWineD3DSurface* pSurface) PURE;
+    STDMETHOD_(void, SetupFullscreenWindow)(THIS_ HWND window) PURE;
+    STDMETHOD_(void, RestoreWindow)(THIS_ HWND window) PURE;
     /*** object tracking ***/
     STDMETHOD_(void, ResourceReleased)(THIS_ struct IWineD3DResource *resource);
 };
@@ -608,9 +609,10 @@ DECLARE_INTERFACE_(IWineD3DDevice,IWineD3DBase)
 #define IWineD3DDevice_ColorFill(p,a,b,c)                       (p)->lpVtbl->ColorFill(p,a,b,c)
 #define IWineD3DDevice_UpdateTexture(p,a,b)                     (p)->lpVtbl->UpdateTexture(p,a,b)
 #define IWineD3DDevice_UpdateSurface(p,a,b,c,d)                 (p)->lpVtbl->UpdateSurface(p,a,b,c,d)
-#define IWineD3DDevice_StretchRect(p,a,b,c,d,e)                 (p)->lpVtbl->StretchRect(p,a,b,c,d,e)
 #define IWineD3DDevice_GetRenderTargetData(p,a,b)               (p)->lpVtbl->GetRenderTargetData(p,a,b)
 #define IWineD3DDevice_GetFrontBufferData(p,a,b)                (p)->lpVtbl->GetFrontBufferData(p,a,b)
+#define IWineD3DDevice_SetupFullscreenWindow(p, a)              (p)->lpVtbl->SetupFullscreenWindow(p,a);
+#define IWineD3DDevice_RestoreWindow(p, a)                      (p)->lpVtbl->RestoreWindow(p,a);
 #define IWineD3DDevice_ResourceReleased(p,a)                    (p)->lpVtbl->ResourceReleased(p,a)
 #endif
 
@@ -1449,14 +1451,6 @@ DECLARE_INTERFACE_(IWineD3DVertexShader,IWineD3DBaseShader)
     /*** IWineD3DVertexShader methods ***/
     STDMETHOD(GetDevice)(THIS_ IWineD3DDevice** ppDevice) PURE;
     STDMETHOD(GetFunction)(THIS_ VOID *pData, UINT *pSizeOfData) PURE;
-    STDMETHOD(SetConstantB)(THIS_ UINT StartRegister, CONST BOOL*  pConstantData, UINT BoolCount) PURE;
-    STDMETHOD(SetConstantI)(THIS_ UINT StartRegister, CONST INT*   pConstantData, UINT Vector4iCount) PURE;
-    STDMETHOD(SetConstantF)(THIS_ UINT StartRegister, CONST FLOAT* pConstantData, UINT Vector4fCount) PURE;
-    STDMETHOD(GetConstantB)(THIS_ UINT StartRegister, BOOL*  pConstantData, UINT BoolCount) PURE;
-    STDMETHOD(GetConstantI)(THIS_ UINT StartRegister, INT*   pConstantData, UINT Vector4iCount) PURE;
-    STDMETHOD(GetConstantF)(THIS_ UINT StartRegister, FLOAT* pConstantData, UINT Vector4fCount) PURE;
-    /* Internal Interfaces */
-    STDMETHOD_(DWORD, GetVersion)(THIS) PURE;
 };
 #undef INTERFACE
 
@@ -1473,13 +1467,6 @@ DECLARE_INTERFACE_(IWineD3DVertexShader,IWineD3DBaseShader)
 /*** IWineD3DVertexShader methods ***/
 #define IWineD3DVertexShader_GetDevice(p,a)            (p)->lpVtbl->GetDevice(p,a)
 #define IWineD3DVertexShader_GetFunction(p,a,b)        (p)->lpVtbl->GetFunction(p,a,b)
-#define IWineD3DVertexShader_SetConstantB(p,a,b,c)     (p)->lpVtbl->SetConstantB(p,a,b,c)
-#define IWineD3DVertexShader_SetConstantI(p,a,b,c)     (p)->lpVtbl->SetConstantI(p,a,b,c)
-#define IWineD3DVertexShader_SetConstantF(p,a,b,c)     (p)->lpVtbl->SetConstantF(p,a,b,c)
-#define IWineD3DVertexShader_GetConstantB(p,a,b,c)     (p)->lpVtbl->GetConstantB(p,a,b,c)
-#define IWineD3DVertexShader_GetConstantI(p,a,b,c)     (p)->lpVtbl->GetConstantI(p,a,b,c)
-#define IWineD3DVertexShader_GetConstantF(p,a,b,c)     (p)->lpVtbl->GetConstantF(p,a,b,c)
-#define IWineD3DVertexShader_GetVersion(p)             (p)->lpVtbl->GetVersion(p)
 #endif
 
 /*****************************************************************************

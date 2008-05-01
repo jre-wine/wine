@@ -30,6 +30,7 @@ extern HRESULT ZoneMgrImpl_Construct(IUnknown *pUnkOuter, LPVOID *ppobj);
 extern HRESULT FileProtocol_Construct(IUnknown *pUnkOuter, LPVOID *ppobj);
 extern HRESULT HttpProtocol_Construct(IUnknown *pUnkOuter, LPVOID *ppobj);
 extern HRESULT FtpProtocol_Construct(IUnknown *pUnkOuter, LPVOID *ppobj);
+extern HRESULT MkProtocol_Construct(IUnknown *pUnkOuter, LPVOID *ppobj);
 
 /**********************************************************************
  * Dll lifetime tracking declaration for urlmon.dll
@@ -55,8 +56,10 @@ HRESULT	UMCreateStreamOnCacheFile(LPCWSTR pszURL, DWORD dwSize, LPWSTR pszFileNa
 void	UMCloseCacheFileStream(IUMCacheStream *pstr);
 
 IInternetProtocolInfo *get_protocol_info(LPCWSTR url);
-HRESULT get_protocol_handler(LPCWSTR url, IClassFactory **ret);
+HRESULT get_protocol_handler(LPCWSTR url, CLSID *clsid, IClassFactory **ret);
 
 HRESULT start_binding(LPCWSTR url, IBindCtx *pbc, REFIID riid, void **ppv);
+
+HRESULT create_binding_protocol(LPCWSTR url, IInternetProtocol **protocol);
 
 #endif /* __WINE_URLMON_MAIN_H */

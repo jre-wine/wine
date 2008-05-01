@@ -165,6 +165,13 @@ inline BOOL WINAPI IWineD3DVertexBufferImpl_FindDecl(IWineD3DVertexBufferImpl *T
     WineDirect3DVertexStridedData strided;
     IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
 
+    /* In d3d7 the vertex buffer declaration NEVER changes because it is stored in the d3d7 vertex buffer.
+     * Once we have our declaration there is no need to look it up again.
+     */
+    if(((IWineD3DImpl *)device->wineD3D)->dxVersion == 7 && This->Flags & VBFLAG_HASDESC) {
+        return FALSE;
+    }
+
     memset(&strided, 0, sizeof(strided));
     /* There are certain vertex data types that need to be fixed up. The Vertex Buffers FVF doesn't
      * help finding them, only the vertex declaration or the device FVF can determine that at drawPrim
@@ -259,7 +266,7 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
     }
 
     /* Reading the declaration makes only sense if the stateblock is finalized and the buffer bound to a stream */
-    if(This->resource.wineD3DDevice->isInDraw && This->Flags & VBFLAG_STREAM) {
+    if(This->resource.wineD3DDevice->isInDraw && This->bindCount > 0) {
         declChanged = IWineD3DVertexBufferImpl_FindDecl(This);
     } else if(This->Flags & VBFLAG_HASDESC) {
         /* Reuse the declaration stored in the buffer. It will most likely not change, and if it does
@@ -491,6 +498,8 @@ HRESULT  WINAPI IWineD3DVertexBufferImpl_Unlock(IWineD3DVertexBuffer *iface) {
         GL_EXTCALL(glUnmapBufferARB(GL_ARRAY_BUFFER_ARB));
         checkGLcall("glUnmapBufferARB");
         LEAVE_GL();
+    } else if(This->Flags & VBFLAG_HASDESC){
+        IWineD3DVertexBufferImpl_PreLoad(iface);
     }
     return WINED3D_OK;
 }

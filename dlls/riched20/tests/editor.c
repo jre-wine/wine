@@ -2,6 +2,7 @@
 * Unit test suite for rich edit control
 *
 * Copyright 2006 Google (Thomas Kho)
+* Copyright 2007 Matt Finnicum
 *
 * This library is free software; you can redistribute it and/or
 * modify it under the terms of the GNU Lesser General Public
@@ -22,6 +23,7 @@
 #include <windows.h>
 #include <richedit.h>
 #include <time.h>
+#include <stdio.h>
 
 static HMODULE hmoduleRichEdit;
 
@@ -974,6 +976,45 @@ static void test_EM_SETTEXTEX(void)
   DestroyWindow(hwndRichEdit);
 }
 
+static void test_EM_LIMITTEXT(void)
+{
+  int ret;
+
+  HWND hwndRichEdit = new_richedit(NULL);
+
+  /* The main purpose of this test is to demonstrate that the nonsense in MSDN
+   * about setting the length to -1 for multiline edit controls doesn't happen.
+   */
+
+  /* Don't check default gettextlimit case. That's done in other tests */
+
+  /* Set textlimit to 100 */
+  SendMessage (hwndRichEdit, EM_LIMITTEXT, 100, 0);
+  ret = SendMessage (hwndRichEdit, EM_GETLIMITTEXT, 0, 0);
+  ok (ret == 100,
+      "EM_LIMITTEXT: set to 100, returned: %d, expected: 100\n", ret);
+
+  /* Set textlimit to 0 */
+  SendMessage (hwndRichEdit, EM_LIMITTEXT, 0, 0);
+  ret = SendMessage (hwndRichEdit, EM_GETLIMITTEXT, 0, 0);
+  ok (ret == 65536,
+      "EM_LIMITTEXT: set to 0, returned: %d, expected: 65536\n", ret);
+
+  /* Set textlimit to -1 */
+  SendMessage (hwndRichEdit, EM_LIMITTEXT, -1, 0);
+  ret = SendMessage (hwndRichEdit, EM_GETLIMITTEXT, 0, 0);
+  ok (ret == -1,
+      "EM_LIMITTEXT: set to -1, returned: %d, expected: -1\n", ret);
+
+  /* Set textlimit to -2 */
+  SendMessage (hwndRichEdit, EM_LIMITTEXT, -2, 0);
+  ret = SendMessage (hwndRichEdit, EM_GETLIMITTEXT, 0, 0);
+  ok (ret == -2,
+      "EM_LIMITTEXT: set to -2, returned: %d, expected: -2\n", ret);
+
+  DestroyWindow (hwndRichEdit);
+}
+
 
 static void test_EM_EXLIMITTEXT(void)
 {
@@ -1192,10 +1233,8 @@ static void test_EM_GETMODIFY(void)
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
   SendMessage(hwndRichEdit, WM_SETFONT, (WPARAM)testFont,(LPARAM) MAKELONG((WORD) TRUE, 0));
   result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
-  todo_wine {
   ok (result == 0,
       "EM_GETMODIFY returned non-zero, instead of zero on setting font\n");
-  }
 
   /* setting text should set modify flag */
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
@@ -1207,20 +1246,16 @@ static void test_EM_GETMODIFY(void)
   /* undo previous text doesn't reset modify flag */
   SendMessage(hwndRichEdit, WM_UNDO, 0, 0);
   result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
-  todo_wine {
   ok (result != 0,
       "EM_GETMODIFY returned zero, instead of non-zero on undo after setting text\n");
-  }
   
   /* set text with no flag to keep undo stack should not set modify flag */
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
   setText.flags = 0;
   SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM)TestItem1);
   result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
-  todo_wine {
   ok (result == 0,
       "EM_GETMODIFY returned non-zero, instead of zero when setting text while not keeping undo stack\n");
-  }
   
   /* WM_SETTEXT doesn't modify */
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
@@ -1295,10 +1330,8 @@ static void test_EM_GETMODIFY(void)
   pf2.wAlignment = PFA_RIGHT;
   SendMessage(hwndRichEdit, EM_SETPARAFORMAT, 0, (LPARAM) &pf2);
   result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
-  todo_wine {
   ok (result == 0,
       "EM_GETMODIFY returned zero, instead of non-zero for EM_SETPARAFORMAT\n");
-  }
 
   /* EM_STREAM */
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
@@ -1394,6 +1427,141 @@ static void test_EM_EXSETSEL(void)
     DestroyWindow(hwndRichEdit);
 }
 
+static void test_WM_PASTE(void)
+{
+    int result;
+    char buffer[1024] = {0};
+    const char* text1 = "testing paste\r";
+    const char* text2 = "testing paste\r\rtesting paste";
+    const char* text3 = "testing paste\rpaste\rtesting paste";
+    HWND hwndRichEdit = new_richedit(NULL);
+
+    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text1);
+    SendMessage(hwndRichEdit, EM_SETSEL, 0, 14);
+    SendMessage(hwndRichEdit, WM_CHAR, 3, 0);  /* ctrl-c */
+    SendMessage(hwndRichEdit, EM_SETSEL, 14, 14);
+    SendMessage(hwndRichEdit, WM_CHAR, 22, 0);  /* ctrl-v */
+    SendMessage(hwndRichEdit, WM_CHAR, 26, 0);  /* ctrl-z */
+    SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+    result = strcmp(text1, buffer);
+    ok(result == 0,
+        "test paste: strcmp = %i\n", result);
+
+    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text2);
+    SendMessage(hwndRichEdit, EM_SETSEL, 8, 13);
+    SendMessage(hwndRichEdit, WM_CHAR, 3, 0);  /* ctrl-c */
+    SendMessage(hwndRichEdit, EM_SETSEL, 14, 14);
+    SendMessage(hwndRichEdit, WM_CHAR, 22, 0);  /* ctrl-v */
+    SendMessage(hwndRichEdit, WM_CHAR, 26, 0);  /* ctrl-z */
+    SendMessage(hwndRichEdit, WM_CHAR, 25, 0);  /* ctrl-y */
+    SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+    result = strcmp(buffer,text3);
+    ok(result == 0,
+        "test paste: strcmp = %i\n", result);
+
+    DestroyWindow(hwndRichEdit);
+}
+
+static int nCallbackCount = 0;
+
+static DWORD CALLBACK EditStreamCallback(DWORD_PTR dwCookie, LPBYTE pbBuff,
+				 LONG cb, LONG* pcb)
+{
+  const char text[] = {'t','e','s','t'};
+
+  if (sizeof(text) <= cb)
+  {
+    if ((int)dwCookie != nCallbackCount)
+    {
+      *pcb = 0;
+      return 0;
+    }
+
+    memcpy (pbBuff, text, sizeof(text));
+    *pcb = sizeof(text);
+
+    nCallbackCount++;
+
+    return 0;
+  }
+  else
+    return 1; /* indicates callback failed */
+}
+
+static void test_EM_StreamIn_Undo(void)
+{
+  /* The purpose of this test is to determine when a EM_StreamIn should be
+   * undoable. This is important because WM_PASTE currently uses StreamIn and
+   * pasting should always be undoable but streaming isn't always.
+   *
+   * cases to test:
+   * StreamIn plain text without SFF_SELECTION.
+   * StreamIn plain text with SFF_SELECTION set but a zero-length selection
+   * StreamIn plain text with SFF_SELECTION and a valid, normal selection
+   * StreamIn plain text with SFF_SELECTION and a backwards-selection (from>to)
+   * Feel free to add tests for other text modes or StreamIn things.
+   */
+
+
+  HWND hwndRichEdit = new_richedit(NULL);
+  LRESULT result;
+  EDITSTREAM es;
+  char buffer[1024] = {0};
+  const char randomtext[] = "Some text";
+
+  es.pfnCallback = (EDITSTREAMCALLBACK) EditStreamCallback;
+
+  /* StreamIn, no SFF_SELECTION */
+  es.dwCookie = nCallbackCount;
+  SendMessage(hwndRichEdit,EM_EMPTYUNDOBUFFER, 0,0);
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) randomtext);
+  SendMessage(hwndRichEdit, EM_SETSEL,0,0);
+  SendMessage(hwndRichEdit, EM_STREAMIN, (WPARAM)SF_TEXT, (LPARAM)&es);
+  SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+  result = strcmp (buffer,"test");
+  ok (result  == 0,
+      "EM_STREAMIN: Test 1 set wrong text: Result: %s\n",buffer);
+
+  result = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  ok (result == FALSE,
+      "EM_STREAMIN without SFF_SELECTION wrongly allows undo\n");
+
+  /* StreamIn, SFF_SELECTION, but nothing selected */
+  es.dwCookie = nCallbackCount;
+  SendMessage(hwndRichEdit,EM_EMPTYUNDOBUFFER, 0,0);
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) randomtext);
+  SendMessage(hwndRichEdit, EM_SETSEL,0,0);
+  SendMessage(hwndRichEdit, EM_STREAMIN,
+	      (WPARAM)(SF_TEXT|SFF_SELECTION), (LPARAM)&es);
+  SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+  result = strcmp (buffer,"testSome text");
+  ok (result  == 0,
+      "EM_STREAMIN: Test 2 set wrong text: Result: %s\n",buffer);
+
+  result = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  ok (result == TRUE,
+     "EM_STREAMIN with SFF_SELECTION but no selection set "
+      "should create an undo\n");
+
+  /* StreamIn, SFF_SELECTION, with a selection */
+  es.dwCookie = nCallbackCount;
+  SendMessage(hwndRichEdit,EM_EMPTYUNDOBUFFER, 0,0);
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) randomtext);
+  SendMessage(hwndRichEdit, EM_SETSEL,4,5);
+  SendMessage(hwndRichEdit, EM_STREAMIN,
+	      (WPARAM)(SF_TEXT|SFF_SELECTION), (LPARAM)&es);
+  SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+  result = strcmp (buffer,"Sometesttext");
+  ok (result  == 0,
+      "EM_STREAMIN: Test 2 set wrong text: Result: %s\n",buffer);
+
+  result = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  ok (result == TRUE,
+      "EM_STREAMIN with SFF_SELECTION and selection set "
+      "should create an undo\n");
+
+}
+
 START_TEST( editor )
 {
   MSG msg;
@@ -1415,11 +1583,14 @@ START_TEST( editor )
   test_EM_SETUNDOLIMIT();
   test_ES_PASSWORD();
   test_EM_SETTEXTEX();
+  test_EM_LIMITTEXT();
   test_EM_EXLIMITTEXT();
   test_EM_GETLIMITTEXT();
   test_WM_SETFONT();
   test_EM_GETMODIFY();
   test_EM_EXSETSEL();
+  test_WM_PASTE();
+  test_EM_StreamIn_Undo();
 
   /* Set the environment variable WINETEST_RICHED20 to keep windows
    * responsive and open for 30 seconds. This is useful for debugging.

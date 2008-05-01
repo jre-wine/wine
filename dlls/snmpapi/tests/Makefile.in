@@ -2,15 +2,12 @@ TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ../../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
-MODULE    = winecoreaudio.drv
-IMPORTS   = winmm user32 kernel32
-EXTRALIBS = $(LIBUUID) @COREAUDIO@
+TESTDLL   = snmpapi.dll
+IMPORTS   = snmpapi kernel32
 
-C_SRCS = \
-	audio.c \
-	audiounit.c \
-	coreaudio.c
+CTESTS = \
+	util.c
 
-@MAKE_DLL_RULES@
+@MAKE_TEST_RULES@
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend

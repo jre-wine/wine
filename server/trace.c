@@ -119,8 +119,121 @@ static void dump_apc_call( const apc_call_t *call )
         fprintf( stderr, "APC_ASYNC_IO,user=%p,sb=%p,status=%s",
                  call->async_io.user, call->async_io.sb, get_status_name(call->async_io.status) );
         break;
+    case APC_VIRTUAL_ALLOC:
+        fprintf( stderr, "APC_VIRTUAL_ALLOC,addr=%p,size=%lu,zero_bits=%u,op_type=%x,prot=%x",
+                 call->virtual_alloc.addr, call->virtual_alloc.size,
+                 call->virtual_alloc.zero_bits, call->virtual_alloc.op_type,
+                 call->virtual_alloc.prot );
+        break;
+    case APC_VIRTUAL_FREE:
+        fprintf( stderr, "APC_VIRTUAL_FREE,addr=%p,size=%lu,op_type=%x",
+                 call->virtual_free.addr, call->virtual_free.size,
+                 call->virtual_free.op_type );
+        break;
+    case APC_VIRTUAL_QUERY:
+        fprintf( stderr, "APC_VIRTUAL_QUERY,addr=%p", call->virtual_query.addr );
+        break;
+    case APC_VIRTUAL_PROTECT:
+        fprintf( stderr, "APC_VIRTUAL_PROTECT,addr=%p,size=%lu,prot=%x",
+                 call->virtual_protect.addr, call->virtual_protect.size,
+                 call->virtual_protect.prot );
+        break;
+    case APC_VIRTUAL_FLUSH:
+        fprintf( stderr, "APC_VIRTUAL_FLUSH,addr=%p,size=%lu",
+                 call->virtual_flush.addr, call->virtual_flush.size );
+        break;
+    case APC_VIRTUAL_LOCK:
+        fprintf( stderr, "APC_VIRTUAL_LOCK,addr=%p,size=%lu",
+                 call->virtual_lock.addr, call->virtual_lock.size );
+        break;
+    case APC_VIRTUAL_UNLOCK:
+        fprintf( stderr, "APC_VIRTUAL_UNLOCK,addr=%p,size=%lu",
+                 call->virtual_unlock.addr, call->virtual_unlock.size );
+        break;
+    case APC_MAP_VIEW:
+        fprintf( stderr, "APC_MAP_VIEW,handle=%p,addr=%p,size=%lu,offset=%x%08x,zero_bits=%u,alloc_type=%x,prot=%x",
+                 call->map_view.handle, call->map_view.addr, call->map_view.size,
+                 call->map_view.offset_high, call->map_view.offset_low, call->map_view.zero_bits,
+                 call->map_view.alloc_type, call->map_view.prot );
+        break;
+    case APC_UNMAP_VIEW:
+        fprintf( stderr, "APC_UNMAP_VIEW,addr=%p", call->unmap_view.addr );
+        break;
+    case APC_CREATE_THREAD:
+        fprintf( stderr, "APC_CREATE_THREAD,func=%p,arg=%p,reserve=%lx,commit=%lx,suspend=%u",
+                 call->create_thread.func, call->create_thread.arg,
+                 call->create_thread.reserve, call->create_thread.commit,
+                 call->create_thread.suspend );
+        break;
     default:
         fprintf( stderr, "type=%u", call->type );
+        break;
+    }
+    fputc( '}', stderr );
+}
+
+static void dump_apc_result( const apc_result_t *result )
+{
+    fputc( '{', stderr );
+    switch(result->type)
+    {
+    case APC_NONE:
+        break;
+    case APC_VIRTUAL_ALLOC:
+        fprintf( stderr, "APC_VIRTUAL_ALLOC,status=%s,addr=%p,size=%lu",
+                 get_status_name( result->virtual_alloc.status ),
+                 result->virtual_alloc.addr, result->virtual_alloc.size );
+        break;
+    case APC_VIRTUAL_FREE:
+        fprintf( stderr, "APC_VIRTUAL_FREE,status=%s,addr=%p,size=%lu",
+                 get_status_name( result->virtual_free.status ),
+                 result->virtual_free.addr, result->virtual_free.size );
+        break;
+    case APC_VIRTUAL_QUERY:
+        fprintf( stderr, "APC_VIRTUAL_QUERY,status=%s,base=%p,alloc_base=%p,size=%lu,state=%x,prot=%x,alloc_prot=%x,alloc_type=%x",
+                 get_status_name( result->virtual_query.status ),
+                 result->virtual_query.base, result->virtual_query.alloc_base,
+                 result->virtual_query.size, result->virtual_query.state,
+                 result->virtual_query.prot, result->virtual_query.alloc_prot,
+                 result->virtual_query.alloc_type );
+        break;
+    case APC_VIRTUAL_PROTECT:
+        fprintf( stderr, "APC_VIRTUAL_PROTECT,status=%s,addr=%p,size=%lu,prot=%x",
+                 get_status_name( result->virtual_protect.status ),
+                 result->virtual_protect.addr, result->virtual_protect.size,
+                 result->virtual_protect.prot );
+        break;
+    case APC_VIRTUAL_FLUSH:
+        fprintf( stderr, "APC_VIRTUAL_FLUSH,status=%s,addr=%p,size=%lu",
+                 get_status_name( result->virtual_flush.status ),
+                 result->virtual_flush.addr, result->virtual_flush.size );
+        break;
+    case APC_VIRTUAL_LOCK:
+        fprintf( stderr, "APC_VIRTUAL_LOCK,status=%s,addr=%p,size=%lu",
+                 get_status_name( result->virtual_lock.status ),
+                 result->virtual_lock.addr, result->virtual_lock.size );
+        break;
+    case APC_VIRTUAL_UNLOCK:
+        fprintf( stderr, "APC_VIRTUAL_UNLOCK,status=%s,addr=%p,size=%lu",
+                 get_status_name( result->virtual_unlock.status ),
+                 result->virtual_unlock.addr, result->virtual_unlock.size );
+        break;
+    case APC_MAP_VIEW:
+        fprintf( stderr, "APC_MAP_VIEW,status=%s,addr=%p,size=%lu",
+                 get_status_name( result->map_view.status ),
+                 result->map_view.addr, result->map_view.size );
+        break;
+    case APC_UNMAP_VIEW:
+        fprintf( stderr, "APC_UNMAP_VIEW,status=%s",
+                 get_status_name( result->unmap_view.status ) );
+        break;
+    case APC_CREATE_THREAD:
+        fprintf( stderr, "APC_CREATE_THREAD,status=%s,tid=%04x,handle=%p",
+                 get_status_name( result->create_thread.status ),
+                 result->create_thread.tid, result->create_thread.handle );
+        break;
+    default:
+        fprintf( stderr, "type=%u", result->type );
         break;
     }
     fputc( '}', stderr );
@@ -874,15 +987,24 @@ static void dump_unload_dll_request( const struct unload_dll_request *req )
 
 static void dump_queue_apc_request( const struct queue_apc_request *req )
 {
-    fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " thread=%p,", req->thread );
+    fprintf( stderr, " process=%p,", req->process );
     fprintf( stderr, " call=" );
     dump_apc_call( &req->call );
+}
+
+static void dump_queue_apc_reply( const struct queue_apc_reply *req )
+{
+    fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " self=%d", req->self );
 }
 
 static void dump_get_apc_request( const struct get_apc_request *req )
 {
     fprintf( stderr, " alertable=%d,", req->alertable );
-    fprintf( stderr, " prev=%p", req->prev );
+    fprintf( stderr, " prev=%p,", req->prev );
+    fprintf( stderr, " result=" );
+    dump_apc_result( &req->result );
 }
 
 static void dump_get_apc_reply( const struct get_apc_reply *req )
@@ -890,6 +1012,17 @@ static void dump_get_apc_reply( const struct get_apc_reply *req )
     fprintf( stderr, " handle=%p,", req->handle );
     fprintf( stderr, " call=" );
     dump_apc_call( &req->call );
+}
+
+static void dump_get_apc_result_request( const struct get_apc_result_request *req )
+{
+    fprintf( stderr, " handle=%p", req->handle );
+}
+
+static void dump_get_apc_result_reply( const struct get_apc_result_reply *req )
+{
+    fprintf( stderr, " result=" );
+    dump_apc_result( &req->result );
 }
 
 static void dump_close_handle_request( const struct close_handle_request *req )
@@ -922,6 +1055,7 @@ static void dump_dup_handle_request( const struct dup_handle_request *req )
 static void dump_dup_handle_reply( const struct dup_handle_reply *req )
 {
     fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " self=%d,", req->self );
     fprintf( stderr, " closed=%d", req->closed );
 }
 
@@ -1570,6 +1704,7 @@ static void dump_get_mapping_info_reply( const struct get_mapping_info_reply *re
     fprintf( stderr, " protect=%d,", req->protect );
     fprintf( stderr, " header_size=%d,", req->header_size );
     fprintf( stderr, " base=%p,", req->base );
+    fprintf( stderr, " mapping=%p,", req->mapping );
     fprintf( stderr, " shared_file=%p,", req->shared_file );
     fprintf( stderr, " shared_size=%d", req->shared_size );
 }
@@ -3289,6 +3424,17 @@ static void dump_query_symlink_reply( const struct query_symlink_reply *req )
     dump_varargs_unicode_str( cur_size );
 }
 
+static void dump_get_object_info_request( const struct get_object_info_request *req )
+{
+    fprintf( stderr, " handle=%p", req->handle );
+}
+
+static void dump_get_object_info_reply( const struct get_object_info_reply *req )
+{
+    fprintf( stderr, " access=%08x,", req->access );
+    fprintf( stderr, " ref_count=%08x", req->ref_count );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_get_new_process_info_request,
@@ -3309,6 +3455,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_unload_dll_request,
     (dump_func)dump_queue_apc_request,
     (dump_func)dump_get_apc_request,
+    (dump_func)dump_get_apc_result_request,
     (dump_func)dump_close_handle_request,
     (dump_func)dump_set_handle_info_request,
     (dump_func)dump_dup_handle_request,
@@ -3503,6 +3650,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_create_symlink_request,
     (dump_func)dump_open_symlink_request,
     (dump_func)dump_query_symlink_request,
+    (dump_func)dump_get_object_info_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -3523,8 +3671,9 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_resume_thread_reply,
     (dump_func)0,
     (dump_func)0,
-    (dump_func)0,
+    (dump_func)dump_queue_apc_reply,
     (dump_func)dump_get_apc_reply,
+    (dump_func)dump_get_apc_result_reply,
     (dump_func)0,
     (dump_func)dump_set_handle_info_reply,
     (dump_func)dump_dup_handle_reply,
@@ -3719,6 +3868,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_create_symlink_reply,
     (dump_func)dump_open_symlink_reply,
     (dump_func)dump_query_symlink_reply,
+    (dump_func)dump_get_object_info_reply,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] = {
@@ -3741,6 +3891,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "unload_dll",
     "queue_apc",
     "get_apc",
+    "get_apc_result",
     "close_handle",
     "set_handle_info",
     "dup_handle",
@@ -3935,6 +4086,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "create_symlink",
     "open_symlink",
     "query_symlink",
+    "get_object_info",
 };
 
 static const struct
@@ -3966,6 +4118,7 @@ static const struct
     { "FILE_LOCK_CONFLICT",          STATUS_FILE_LOCK_CONFLICT },
     { "HANDLES_CLOSED",              STATUS_HANDLES_CLOSED },
     { "HANDLE_NOT_CLOSABLE",         STATUS_HANDLE_NOT_CLOSABLE },
+    { "ILLEGAL_FUNCTION",            STATUS_ILLEGAL_FUNCTION },
     { "INSTANCE_NOT_AVAILABLE",      STATUS_INSTANCE_NOT_AVAILABLE },
     { "INVALID_CID",                 STATUS_INVALID_CID },
     { "INVALID_FILE_FOR_SECTION",    STATUS_INVALID_FILE_FOR_SECTION },
@@ -4004,10 +4157,12 @@ static const struct
     { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
     { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
     { "PRIVILEGE_NOT_HELD",          STATUS_PRIVILEGE_NOT_HELD },
+    { "PROCESS_IS_TERMINATING",      STATUS_PROCESS_IS_TERMINATING },
     { "SECTION_TOO_BIG",             STATUS_SECTION_TOO_BIG },
     { "SEMAPHORE_LIMIT_EXCEEDED",    STATUS_SEMAPHORE_LIMIT_EXCEEDED },
     { "SHARING_VIOLATION",           STATUS_SHARING_VIOLATION },
     { "SUSPEND_COUNT_EXCEEDED",      STATUS_SUSPEND_COUNT_EXCEEDED },
+    { "THREAD_IS_TERMINATING",       STATUS_THREAD_IS_TERMINATING },
     { "TIMEOUT",                     STATUS_TIMEOUT },
     { "TOO_MANY_OPENED_FILES",       STATUS_TOO_MANY_OPENED_FILES },
     { "UNSUCCESSFUL",                STATUS_UNSUCCESSFUL },

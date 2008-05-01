@@ -1,15 +1,15 @@
 TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
+TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
-MODULE    = winearts.drv
-IMPORTS   = winmm user32 kernel32 ntdll
-EXTRAINCL = @ARTSINCL@
-EXTRALIBS = @ARTSLIBS@ -ldxguid -luuid
+MODULE    = winenas.drv
+IMPORTS   = winmm user32 kernel32
+EXTRAINCL = @X_CFLAGS@
+EXTRALIBS = -ldxguid -luuid @NASLIBS@
 
 C_SRCS = \
-	arts.c \
-	audio.c
+	audio.c \
+	nas.c
 
 @MAKE_DLL_RULES@
 
