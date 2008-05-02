@@ -12,53 +12,125 @@ else
 CFLAGS=-O2 -g
 endif
 
+CONFIGOPTS = --with-x --enable-opengl
+
 DEB_HOST_GNU_SYSTEM	?= $(shell dpkg-architecture -qDEB_HOST_GNU_SYSTEM)
 DEB_HOST_GNU_CPU	?= $(shell dpkg-architecture -qDEB_HOST_GNU_CPU)
 
-configure: configure-stamp
-configure-stamp:
+# On amd64, build 32-bit package by simply unpacking amd64.tar.lzma.uu
+# if it exists, otherwise build from source using 32-bit compiler.
+
+ifeq ($(DEB_HOST_GNU_CPU), x86_64)
+ifeq ($(DEB_HOST_GNU_SYSTEM), linux-gnu)
+ifneq (,$(wildcard debian/amd64.tar.lzma.uu))
+AMD64_COPY = true
+endif
+endif
+ifeq (,$(AMD64_COPY))
+BUILD_TARGETS = build-arch32
+INSTALL_TARGETS = install-arch32
+CLEAN_TARGETS = clean32
+else
+BUILD_TARGETS =
+INSTALL_TARGETS =
+CLEAN_TARGETS =
+endif
+# Not ready yet: build Win64 version
+#BUILD_TARGETS += build-arch64
+#INSTALL_TARGETS += install-arch64
+#CLEAN_TARGETS += clean64
+#NATIVE_BUILD = build64
+NATIVE_BUILD = build32
+else
+BUILD_TARGETS = build-arch32
+INSTALL_TARGETS = install-arch32
+CLEAN_TARGETS = clean32
+NATIVE_BUILD = build32
+endif
+
+configure32: configure32-stamp
+configure32-stamp:
 	dh_testdir
-ifneq ($(DEB_HOST_GNU_CPU), x86_64)
+	mkdir build32 || true
+	cd build32 && \
 	CFLAGS="$(CFLAGS)" \
-	./configure --with-x --enable-opengl --prefix=/usr \
+	../configure --disable-win64 $(CONFIGOPTS) \
+	--prefix=/usr \
 	--sysconfdir=/etc \
 	--bindir=\$${prefix}/bin \
 	--libdir=\$${prefix}/lib \
 	--mandir=\$${prefix}/share/man \
 	--infodir=\$${prefix}/share/info
-endif
 
-	touch configure-stamp
+	touch configure32-stamp
+
+configure64: configure64-stamp
+configure64-stamp:
+	dh_testdir
+	mkdir build64 || true
+	cd build64 && \
+	CFLAGS="$(CFLAGS)" \
+	./configure --enable-win64 $(CONFIGOPTS) \
+	--prefix=/usr \
+	--sysconfdir=/etc \
+	--bindir=\$${prefix}/bin \
+	--libdir=\$${prefix}/lib \
+	--mandir=\$${prefix}/share/man \
+	--infodir=\$${prefix}/share/info
+
+	touch configure64-stamp
 
 build-indep: build-indep-stamp
-build-indep-stamp: configure-stamp
+build-indep-stamp: $(subst build,configure,$(NATIVE_BUILD))
 	dh_testdir
 
 	touch build-indep-stamp
 
-build-arch: build-arch-stamp
-build-arch-stamp: configure-stamp
+build-arch32: build-arch32-stamp
+build-arch32-stamp: configure32-stamp
 	dh_testdir
 
-ifneq ($(DEB_HOST_GNU_CPU), x86_64)
-	$(MAKE) depend
+	$(MAKE) -C build32 depend
 	# build wine & tools
-	$(MAKE)
+	$(MAKE) -C build32
 	# build winelib programs
-	$(MAKE) -C programs
-endif
+	$(MAKE) -C build32/programs
 
-	touch build-arch-stamp
+	touch build-arch32-stamp
 
-build: build-arch
+build-arch64: build-arch64-stamp
+build-arch64-stamp: configure64-stamp
+	dh_testdir
 
-clean:
+	$(MAKE) -C build64 depend
+	# build wine & tools
+	$(MAKE) -C build64
+	# build winelib programs
+	$(MAKE) -C build64/programs
+
+	touch build-arch64-stamp
+
+build-arch: $(BUILD_TARGETS)
+build: build-indep build-arch
+
+clean32:
 	dh_testdir
 	dh_testroot
-	rm -f build-indep-stamp build-arch-stamp configure-stamp
+	rm -f build-arch32-stamp configure32-stamp
+#	-$(MAKE) -C build32 distclean
+	rm -rf build32
 
-	-$(MAKE) distclean
+clean64:
+	dh_testdir
+	dh_testroot
+	rm -f build-arch64-stamp configure64-stamp
+#	-$(MAKE) -C build64 distclean
+	rm -rf build64
 
+clean: $(CLEAN_TARGETS)
+	dh_testdir
+	dh_testroot
+	rm -f build-indep-stamp
 	dh_clean
 
 install-indep: build-indep
@@ -66,17 +138,14 @@ install-indep: build-indep
 	dh_testroot
 	dh_installdirs -i
 
-install-arch: build-arch
+install-arch32: build-arch32
 	dh_testdir
 	dh_testroot
-	# clean up first in case the package maintainer is experimenting again
-	dh_clean -s -k
 	# create installation directories
 	dh_installdirs -s
 
-ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	# install wine, libwine, and tools
-	$(MAKE) install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
+	$(MAKE) -C build32 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
 	# move the real binaries into /usr/lib/wine,
 	# wrapping them with the winelauncher
 	mv debian/tmp/usr/bin/wine debian/tmp/usr/lib/wine/wine.bin
@@ -86,17 +155,44 @@ ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/lib/wine/wineserver
 	mv debian/tmp/usr/bin/winelauncher debian/tmp/usr/bin/wine
 	# install manpages
-	$(MAKE) -C documentation install prefix=`pwd`/debian/tmp/usr
+	$(MAKE) -C build32/documentation install prefix=`pwd`/debian/tmp/usr
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
 	# install winelib programs
-	$(MAKE) -C programs install prefix=`pwd`/debian/tmp/usr
+	$(MAKE) -C build32/programs install prefix=`pwd`/debian/tmp/usr
 	mkdir -p debian/tmp/usr/share/{mime-info,binfmts}
 	cp debian/mime-info.mime	debian/tmp/usr/share/mime-info/wine.mime
 	cp debian/mime-info.keys	debian/tmp/usr/share/mime-info/wine.keys
 	cp debian/wine.binfmt		debian/tmp/usr/share/binfmts/wine
-endif
 
-install: install-arch
+# I still have to work out how to install 32-bit and 64-bit Wine side by side.
+# This version only works if the 32-bit version isn't installed...
+install-arch64: build-arch64
+	dh_testdir
+	dh_testroot
+	# create installation directories
+	dh_installdirs -s
+
+	# install wine, libwine, and tools
+	$(MAKE) -C build64 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
+	# move the real binaries into /usr/lib/wine,
+	# wrapping them with the winelauncher
+	mv debian/tmp/usr/bin/wine debian/tmp/usr/lib/wine/wine.bin
+	mv debian/tmp/usr/bin/wine-kthread debian/tmp/usr/lib/wine/wine-kthread
+	mv debian/tmp/usr/bin/wine-pthread debian/tmp/usr/lib/wine/wine-pthread
+	mv debian/tmp/usr/bin/wine-preloader debian/tmp/usr/lib/wine/wine-preloader
+	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/lib/wine/wineserver
+	mv debian/tmp/usr/bin/winelauncher debian/tmp/usr/bin/wine
+	# install manpages
+	$(MAKE) -C build64/documentation install prefix=`pwd`/debian/tmp/usr
+	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
+	# install winelib programs
+	$(MAKE) -C build64/programs install prefix=`pwd`/debian/tmp/usr
+	mkdir -p debian/tmp/usr/share/{mime-info,binfmts}
+	cp debian/mime-info.mime	debian/tmp/usr/share/mime-info/wine.mime
+	cp debian/mime-info.keys	debian/tmp/usr/share/mime-info/wine.keys
+	cp debian/wine.binfmt		debian/tmp/usr/share/binfmts/wine
+
+install: $(INSTALL_TARGETS)
 
 # Build architecture-independent files here.
 binary-indep: build-indep install-indep
@@ -113,19 +209,19 @@ binary-indep: build-indep install-indep
 	dh_builddeb -i
 
 # Build architecture-dependent files here.
-binary-arch: build-arch install-arch
+binary-arch: $(INSTALL_TARGETS)
 	dh_testdir
 	dh_testroot
 
-ifneq ($(DEB_HOST_GNU_CPU), x86_64)
+ifeq (,$(AMD64_COPY))
 	# distribute the files in debian/tmp into debian/<packagename>
-	# according to the <packagename>.files files
-	dh_movefiles -s
+	# according to the <packagename>.install files
+	dh_install -s --sourcedir=debian/tmp
 
 	# distribute files we want that weren't in debian/tmp
 	cp dlls/twain_32/README debian/libwine/usr/share/doc/libwine/README.twain
 	# wine-utils
-	install tools/fnt2bdf debian/wine-utils/usr/bin
+	install $(NATIVE_BUILD)/tools/fnt2bdf debian/tmp/usr/bin
 	install tools/font_convert.sh debian/wine-utils/usr/bin
 	cp tools/winedump/README debian/wine-utils/usr/share/doc/wine-utils/README.winedump
 	cp debian/uninstaller.desktop debian/wine-utils/usr/share/applications/uninstaller.desktop
@@ -143,7 +239,11 @@ endif
 	mv debian/libwine/usr/lib/wine/wineesd*  debian/libwine-esd/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/d3d8*     debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/d3d9*     debian/libwine-gl/usr/lib/wine
+	mv debian/libwine/usr/lib/wine/d3d10*    debian/libwine-gl/usr/lib/wine
+	mv debian/libwine/usr/lib/wine/d3dim*    debian/libwine-gl/usr/lib/wine
+	mv debian/libwine/usr/lib/wine/d3drm*    debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/d3dx8*    debian/libwine-gl/usr/lib/wine
+	mv debian/libwine/usr/lib/wine/d3dxof*   debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/glu32*    debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/opengl32* debian/libwine-gl/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/wined3d*  debian/libwine-gl/usr/lib/wine
@@ -189,7 +289,7 @@ endif
 	 echo "jack=, libjack0.50.0-0" >> debian/libwine-jack.substvars) || \
 	true
 
-ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM), x86_64-linux-gnu)
+ifneq (,$(AMD64_COPY))
 	# Using compressed 32-bit build.  Make sure it's the latest one!!
 	uudecode < debian/amd64.tar.lzma.uu | lzma -d | tar -xpf -
 endif
@@ -203,5 +303,6 @@ endif
 	dh_builddeb -s
 
 binary: binary-arch binary-indep
-.PHONY: build-indep build-arch build clean binary-indep binary-arch binary \
-	install-indep install-arch install configure
+.PHONY: configure32 configure64 build-indep build-arch32 build-arch64 build-arch build \
+	clean32 clean64 clean install-indep install-arch32 install-arch64 install \
+	binary-indep binary-arch binary

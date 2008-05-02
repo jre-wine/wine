@@ -1,3 +1,36 @@
+wine (0.9.48-1) unstable; urgency=low
+
+  * New upstream release 0.9.48.
+    - Still more fixes for regression test failures.
+    - Much more complete cryptnet implementation.
+    - WIDL is now able to generate the oleaut32 proxy code.
+    - Lots of bug fixes.
+  * This version was released Oct 26, 2007.
+  * Upgraded debhelper compatibility level from 3 to 4.
+  * Renamed debian/*.files to debian/*.install, and use
+    dh_install instead of dh_movefiles in debian/rules.
+  * Added some ia32 compatibility libraries to Build-Deps, for amd64.
+  * Tweaked debian/rules to build 32-bit Wine and 64-bit Wine
+    in separate directories. This won't do much yet, though;
+    since I haven't yet researched how to actually *install*
+    both versions so they will work together, Win64 support
+    isn't enabled yet.
+  * However, I did set up debian/rules so that if you delete the
+    debian/amd64.tar.lzma.uu file after unpacking the Wine source
+    package, 32-bit Wine will automatically be built from source,
+    using the system's 32-bit cross compiler and libraries.
+    This may result in a Wine package with reduced functionality
+    compared to a natively-built 32-bit Wine, but is an option
+    for whoever may prefer it this way.
+    (If you leave the file there, and you're building on amd64,
+    32-bit Wine will be unpacked from there instead of compiled,
+    which should preserve all the natively-built features.)
+  * Moved the d3d10, d3dim, d3drm, and d3dxof DLLs to libwine-gl.
+  * Added a couple of previously missing Replaces to debian/control
+    while at it.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 10 Dec 2007 02:28:02 +0100
+
 wine (0.9.47-1) unstable; urgency=low
 
   * New upstream release 0.9.47.

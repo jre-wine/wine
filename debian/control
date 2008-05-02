@@ -21,7 +21,9 @@ Build-Depends: debhelper (>= 4.1.16), flex-old | flex (<< 2.5.31), bison,
  libfontconfig1-dev, libssl-dev, libcapi20-dev (>= 1:3.3.0.20041024-2) [!kfreebsd-i386 !kfreebsd-amd64 !hurd-i386],
  libhal-dev, libdbus-1-dev | dbus-1-dev, libgphoto2-2-dev, liblcms1-dev, libldap2-dev,
  libxml2-dev, libxslt1-dev, fontforge, prelink,
- dctrl-tools | grep-dctrl, lzma, sharutils
+ dctrl-tools | grep-dctrl, lzma, sharutils,
+ libc6-dev-i386 [amd64 kfreebsd-amd64], ia32-libs (>= 1.19) [amd64 kfreebsd-amd64],
+ lib32ncurses5-dev [amd64 kfreebsd-amd64], lib32asound2-dev [amd64]
 Standards-Version: 3.6.2
 
 Package: wine
@@ -141,6 +143,7 @@ Package: libwine-gl
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
+Replaces: libwine (<< 0.9.48)
 Description: Windows API Implementation (OpenGL Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -205,6 +208,7 @@ Package: libwine-oss
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
+Replaces: libwine (<< 0.9.35)
 Description: Windows API Implementation (OSS Sound Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -231,6 +235,7 @@ Package: libwine-sane
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
+Replaces: libwine-twain (<< 0.9.13)
 Description: Windows API Implementation (Scanner Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
