@@ -6,9 +6,11 @@ VPATH     = @srcdir@
 MODULE    = advapi32.dll
 IMPORTLIB = libadvapi32.$(IMPLIBEXT)
 IMPORTS   = kernel32 ntdll
+EXTRALIBS = @SECURITYLIB@
 
 C_SRCS = \
 	advapi.c \
+	cred.c \
 	crypt.c \
 	crypt_arc4.c \
 	crypt_des.c \
@@ -21,6 +23,8 @@ C_SRCS = \
 	registry.c \
 	security.c \
 	service.c
+
+RC_SRCS = version.rc
 
 @MAKE_DLL_RULES@
 

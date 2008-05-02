@@ -22,7 +22,7 @@
  * interface:
  * - a specific IOCTL (Linux)
  * - looking in the ARP cache (at least Solaris)
- * - using the sysctl interface (FreeBSD and MacOSX)
+ * - using the sysctl interface (FreeBSD and Mac OS X)
  * Solaris and some others have SIOCGENADDR, but I haven't gotten that to work
  * on the Solaris boxes at SourceForge's compile farm, whereas SIOCGARP does.
  */
@@ -205,12 +205,15 @@ InterfaceIndexTable *getInterfaceIndexTable(void)
 
   if (indexes) {
     struct if_nameindex *p;
+    DWORD size = sizeof(InterfaceIndexTable);
 
     for (p = indexes, numInterfaces = 0; p && p->if_name; p++)
       numInterfaces++;
-    ret = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-     sizeof(InterfaceIndexTable) + (numInterfaces - 1) * sizeof(DWORD));
+    if (numInterfaces > 1)
+      size += (numInterfaces - 1) * sizeof(DWORD);
+    ret = HeapAlloc(GetProcessHeap(), 0, size);
     if (ret) {
+      ret->numIndexes = 0;
       for (p = indexes; p && p->if_name; p++)
         ret->indexes[ret->numIndexes++] = p->if_index;
     }
@@ -232,13 +235,16 @@ InterfaceIndexTable *getNonLoopbackInterfaceIndexTable(void)
 
     if (indexes) {
       struct if_nameindex *p;
+      DWORD size = sizeof(InterfaceIndexTable);
 
       for (p = indexes, numInterfaces = 0; p && p->if_name; p++)
         if (!isLoopbackInterface(fd, p->if_name))
           numInterfaces++;
-      ret = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-       sizeof(InterfaceIndexTable) + (numInterfaces - 1) * sizeof(DWORD));
+      if (numInterfaces > 1)
+        size += (numInterfaces - 1) * sizeof(DWORD);
+      ret = HeapAlloc(GetProcessHeap(), 0, size);
       if (ret) {
+        ret->numIndexes = 0;
         for (p = indexes; p && p->if_name; p++)
           if (!isLoopbackInterface(fd, p->if_name))
             ret->indexes[ret->numIndexes++] = p->if_index;
@@ -673,14 +679,16 @@ static DWORD enumIPAddresses(PDWORD pcAddresses, struct ifconf *ifc)
     int ioctlRet = 0;
     DWORD guessedNumAddresses = 0, numAddresses = 0;
     caddr_t ifPtr;
+    int lastlen;
 
     ret = NO_ERROR;
     ifc->ifc_len = 0;
     ifc->ifc_buf = NULL;
     /* there is no way to know the interface count beforehand,
        so we need to loop again and again upping our max each time
-       until returned < max */
+       until returned is constant across 2 calls */
     do {
+      lastlen = ifc->ifc_len;
       HeapFree(GetProcessHeap(), 0, ifc->ifc_buf);
       if (guessedNumAddresses == 0)
         guessedNumAddresses = INITIAL_INTERFACES_ASSUMED;
@@ -689,13 +697,16 @@ static DWORD enumIPAddresses(PDWORD pcAddresses, struct ifconf *ifc)
       ifc->ifc_len = sizeof(struct ifreq) * guessedNumAddresses;
       ifc->ifc_buf = HeapAlloc(GetProcessHeap(), 0, ifc->ifc_len);
       ioctlRet = ioctl(fd, SIOCGIFCONF, ifc);
-    } while (ioctlRet == 0 &&
-     ifc->ifc_len == (sizeof(struct ifreq) * guessedNumAddresses));
+    } while ((ioctlRet == 0) && (ifc->ifc_len != lastlen));
 
     if (ioctlRet == 0) {
       ifPtr = ifc->ifc_buf;
       while (ifPtr && ifPtr < ifc->ifc_buf + ifc->ifc_len) {
-        numAddresses++;
+        struct ifreq *ifr = (struct ifreq *)ifPtr;
+
+        if (ifr->ifr_addr.sa_family == AF_INET)
+          numAddresses++;
+
         ifPtr += ifreq_len((struct ifreq *)ifPtr);
       }
     }
@@ -739,8 +750,11 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
     ret = enumIPAddresses(&numAddresses, &ifc);
     if (!ret)
     {
-      *ppIpAddrTable = HeapAlloc(heap, flags, sizeof(MIB_IPADDRTABLE) +
-       (numAddresses - 1) * sizeof(MIB_IPADDRROW));
+      DWORD size = sizeof(MIB_IPADDRTABLE);
+
+      if (numAddresses > 1)
+        size += (numAddresses - 1) * sizeof(MIB_IPADDRROW);
+      *ppIpAddrTable = HeapAlloc(heap, flags, size);
       if (*ppIpAddrTable) {
         DWORD i = 0, bcast;
         caddr_t ifPtr;
@@ -750,6 +764,11 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
         ifPtr = ifc.ifc_buf;
         while (!ret && ifPtr && ifPtr < ifc.ifc_buf + ifc.ifc_len) {
           struct ifreq *ifr = (struct ifreq *)ifPtr;
+
+          ifPtr += ifreq_len(ifr);
+
+          if (ifr->ifr_addr.sa_family != AF_INET)
+             continue;
 
           ret = getInterfaceIndexByName(ifr->ifr_name,
            &(*ppIpAddrTable)->table[i].dwIndex);
@@ -769,7 +788,6 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
 
           (*ppIpAddrTable)->table[i].unused1 = 0;
           (*ppIpAddrTable)->table[i].wType = 0;
-          ifPtr += ifreq_len(ifr);
           i++;
         }
       }

@@ -17,12 +17,18 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
- 
+
+#include "config.h"
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#ifdef HAVE_SYS_STAT_H
+# include <sys/stat.h>
+#endif
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif
 #include <errno.h>
  
 #include "windef.h"
@@ -107,7 +113,7 @@ static char *load_path(int path_id)
     
     ret = SHAlloc(strlen(paths[path_id].default_value)+1);
     if (ret != NULL)
-        lstrcpyA(ret, env);
+        lstrcpyA(ret, paths[path_id].default_value);
     return ret;
 }
 
@@ -142,7 +148,7 @@ const char *XDG_GetPath(int path_id)
 }
 
 /******************************************************************************
- * XDG_GetPath    [internal]
+ * XDG_BuildPath    [internal]
  *
  * Build a string with a subpath of one of the XDG standard paths.
  * The root can be one of XDG_DATA_HOME, XDG_CONFIG_HOME and XDG_CACHE_HOME.
@@ -358,8 +364,8 @@ static int dskentry_decode(const char *value, int len, char *output)
  */
 static int url_encode(const char *value, char *output)
 {
-    static const char *unsafechars = "^&`{}|[]'<>\\#%\"+";
-    static const char *hexchars = "0123456789ABCDEF";
+    static const char unsafechars[] = "^&`{}|[]'<>\\#%\"+";
+    static const char hexchars[] = "0123456789ABCDEF";
     int num_written = 0;
     const char *c;
 
@@ -370,8 +376,8 @@ static int url_encode(const char *value, char *output)
             if (output)
             {
                 *(output++) = '%';
-                *(output++) = hexchars[(unsigned)(*c)/16];
-                *(output++) = hexchars[(unsigned)(*c)%16];
+                *(output++) = hexchars[(unsigned char)*c / 16];
+                *(output++) = hexchars[(unsigned char)*c % 16];
             }
             num_written += 3;
         }
@@ -394,7 +400,7 @@ static int decode_url_code(const char *c)
 {
     const char *p1, *p2;
     int v1, v2;
-    static const char *hexchars = "0123456789ABCDEF";
+    static const char hexchars[] = "0123456789ABCDEF";
     if (*c == 0)
         return -1;
 
@@ -502,7 +508,7 @@ struct tagXDG_PARSED_FILE
     PARSED_GROUP *groups;
 };
 
-static BOOL parsed_str_eq(PARSED_STRING *str1, const char *str2)
+static BOOL parsed_str_eq(const PARSED_STRING *str1, const char *str2)
 {
     if (strncmp(str1->str, str2, str1->len) != 0)
         return FALSE;

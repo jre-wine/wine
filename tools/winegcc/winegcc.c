@@ -170,7 +170,7 @@ struct options
 
 static void clean_temp_files(void)
 {
-    int i;
+    unsigned int i;
 
     if (keep_generated) return;
 
@@ -201,7 +201,7 @@ static char* get_temp_file(const char* prefix, const char* suffix)
         free(tmp);
         tmp = strmake("/tmp/%s-XXXXXX%s", prefix, suffix);
         fd = mkstemps( tmp, strlen(suffix) );
-        if (fd == -1) error( "could not create temp file" );
+        if (fd == -1) error( "could not create temp file\n" );
     }
     close( fd );
     strarray_add(tmp_files, tmp);
@@ -233,13 +233,14 @@ static const strarray* get_translator(enum processor processor)
 	    if (!as) as = strarray_fromstring(AS, " ");
 	    return as;
     }
-    error("Unknown processor");
+    error("Unknown processor\n");
 }
 
 static void compile(struct options* opts, const char* lang)
 {
     strarray* comp_args = strarray_alloc();
-    int j, gcc_defs = 0;
+    unsigned int j;
+    int gcc_defs = 0;
 
     switch(opts->processor)
     {
@@ -285,7 +286,7 @@ static void compile(struct options* opts, const char* lang)
 
     if (gcc_defs)
     {
-#ifdef __APPLE__ /* Mac OSX uses 16-byte aligned stack and not a 4-byte one */
+#ifdef __APPLE__ /* Mac OS X uses a 16-byte aligned stack and not a 4-byte one */
 	strarray_add(comp_args, "-D__stdcall=__attribute__((__stdcall__)) __attribute__((__force_align_arg_pointer__))");
 	strarray_add(comp_args, "-D__cdecl=__attribute__((__cdecl__)) __attribute__((__force_align_arg_pointer__))");
 	strarray_add(comp_args, "-D_stdcall=__attribute__((__stdcall__)) __attribute__((__force_align_arg_pointer__))");
@@ -434,7 +435,7 @@ static void build(struct options* opts)
     const char *output_name, *spec_file, *lang;
     const char* winebuild = getenv("WINEBUILD");
     int generate_app_loader = 1;
-    int j;
+    unsigned int j;
 
     /* NOTE: for the files array we'll use the following convention:
      *    -axxx:  xxx is an archive (.a)
@@ -506,12 +507,12 @@ static void build(struct options* opts)
 		case file_def:
 		case file_spec:
 		    if (spec_file)
-			error("Only one spec file can be specified.");
+			error("Only one spec file can be specified\n");
 		    spec_file = file;
 		    break;
 		case file_rc:
 		    /* FIXME: invoke wrc to build it */
-		    error("Can't compile .rc file at the moment: %s", file);
+		    error("Can't compile .rc file at the moment: %s\n", file);
 	            break;
 	    	case file_res:
 		    strarray_add(files, strmake("-r%s", file));
@@ -526,7 +527,7 @@ static void build(struct options* opts)
 		    strarray_add(files, strmake("-s%s", file));
 		    break;
 	    	case file_na:
-		    error("File does not exist: %s", file);
+		    error("File does not exist: %s\n", file);
 		    break;
 	        default:
 		    file = compile_to_object(opts, file, lang);
@@ -540,7 +541,7 @@ static void build(struct options* opts)
 	    lang = file;
     }
     if (opts->shared && !spec_file)
-	error("A spec file is currently needed in shared mode");
+	error("A spec file is currently needed in shared mode\n");
 
     /* add the default libraries, if needed */
     if (!opts->nostdlib && opts->use_msvcrt) add_library(lib_dirs, files, "msvcrt");
@@ -719,11 +720,13 @@ static int is_linker_arg(const char* arg)
 	"-static", "-static-libgcc", "-shared", "-shared-libgcc", "-symbolic",
 	"-framework"
     };
-    int j;
+    unsigned int j;
 
     switch (arg[1]) 
     {
-	case 'l': 
+	case 'R':
+	case 'z':
+	case 'l':
 	case 'u':
 	    return 1;
         case 'W':
@@ -769,7 +772,7 @@ static int is_mingw_arg(const char* arg)
     {
         "-mno-cygwin", "-mwindows", "-mconsole", "-mthreads", "-municode"
     };
-    int j;
+    unsigned int j;
 
     for (j = 0; j < sizeof(mingw_switches)/sizeof(mingw_switches[0]); j++)
 	if (strcmp(mingw_switches[j], arg) == 0) return 1;
@@ -827,7 +830,7 @@ int main(int argc, char **argv)
 		case 'x': case 'o': case 'D': case 'U':
 		case 'I': case 'A': case 'l': case 'u':
 		case 'b': case 'V': case 'G': case 'L':
-		case 'B':
+		case 'B': case 'R': case 'z':
 		    if (argv[i][2]) option_arg = &argv[i][2];
 		    else next_is_arg = 1;
 		    break;
@@ -984,7 +987,7 @@ int main(int argc, char **argv)
 		case 'x':
 		    lang = strmake("-x%s", option_arg);
 		    strarray_add(opts.files, lang);
-		    /* we'll pass these flags ourselves, explicitely */
+		    /* we'll pass these flags ourselves, explicitly */
                     raw_compiler_arg = raw_linker_arg = 0;
 		    break;
                 case '-':
@@ -1017,7 +1020,7 @@ int main(int argc, char **argv)
     }
 
     if (opts.processor == proc_cpp) linking = 0;
-    if (linking == -1) error("Static linking is not supported.");
+    if (linking == -1) error("Static linking is not supported\n");
 
     if (opts.files->size == 0) forward(argc, argv, &opts);
     else if (linking) build(&opts);

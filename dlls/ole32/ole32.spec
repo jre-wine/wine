@@ -20,6 +20,7 @@
 @ stdcall CoFreeAllLibraries()
 @ stdcall CoFreeLibrary(long)
 @ stdcall CoFreeUnusedLibraries()
+@ stdcall CoFreeUnusedLibrariesEx(long long)
 @ stdcall CoGetCallContext(ptr ptr)
 @ stub CoGetCallerTID
 @ stdcall CoGetClassObject(ptr long ptr ptr ptr)
@@ -31,6 +32,7 @@
 @ stdcall CoGetMalloc(long ptr)
 @ stdcall CoGetMarshalSizeMax(ptr ptr ptr long ptr long)
 @ stdcall CoGetObject(wstr ptr ptr ptr)
+@ stdcall CoGetObjectContext(ptr ptr)
 @ stdcall CoGetPSClsid(ptr ptr)
 @ stdcall CoGetStandardMarshal(ptr ptr long ptr long ptr)
 @ stdcall CoGetState(ptr)
@@ -52,12 +54,13 @@
 @ stdcall CoQueryClientBlanket(ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall CoQueryProxyBlanket(ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stub CoQueryReleaseObject
-@ stub CoRegisterChannelHook
+@ stdcall CoRegisterChannelHook(ptr ptr)
 @ stdcall CoRegisterClassObject(ptr ptr long long ptr)
 @ stdcall CoRegisterMallocSpy (ptr)
 @ stdcall CoRegisterMessageFilter(ptr ptr)
 @ stdcall CoRegisterPSClsid(ptr ptr)
 @ stub CoRegisterSurrogate
+@ stub CoRegisterSurrogateEx
 @ stdcall CoReleaseMarshalData(ptr)
 @ stdcall CoReleaseServerProcess()
 @ stdcall CoResumeClassObjects()
@@ -76,6 +79,7 @@
 @ stub CoUnloadingWOW
 @ stdcall CoUnmarshalHresult(ptr ptr)
 @ stdcall CoUnmarshalInterface(ptr ptr ptr)
+@ stdcall CoWaitForMultipleHandles(long long long ptr ptr)
 @ stdcall CreateAntiMoniker(ptr)
 @ stdcall CreateBindCtx(long ptr)
 @ stdcall CreateClassMoniker(ptr ptr)
@@ -135,14 +139,14 @@
 @ stdcall HMENU_UserMarshal(ptr ptr ptr)
 @ stdcall HMENU_UserSize(ptr long ptr)
 @ stdcall HMENU_UserUnmarshal(ptr ptr ptr)
-@ stub HMETAFILEPICT_UserFree
-@ stub HMETAFILEPICT_UserMarshal
-@ stub HMETAFILEPICT_UserSize
-@ stub HMETAFILEPICT_UserUnmarshal
-@ stub HMETAFILE_UserFree
-@ stub HMETAFILE_UserMarshal
-@ stub HMETAFILE_UserSize
-@ stub HMETAFILE_UserUnmarshal
+@ stdcall HMETAFILEPICT_UserFree(ptr ptr)
+@ stdcall HMETAFILEPICT_UserMarshal(ptr ptr ptr)
+@ stdcall HMETAFILEPICT_UserSize(ptr long ptr)
+@ stdcall HMETAFILEPICT_UserUnmarshal(ptr ptr ptr)
+@ stdcall HMETAFILE_UserFree(ptr ptr)
+@ stdcall HMETAFILE_UserMarshal(ptr ptr ptr)
+@ stdcall HMETAFILE_UserSize(ptr long ptr)
+@ stdcall HMETAFILE_UserUnmarshal(ptr ptr ptr)
 @ stdcall HPALETTE_UserFree(ptr ptr)
 @ stdcall HPALETTE_UserMarshal(ptr ptr ptr)
 @ stdcall HPALETTE_UserSize(ptr long ptr)
@@ -263,10 +267,10 @@
 @ stub UtConvertDvtd32toDvtd16
 @ stub UtGetDvtd16Info
 @ stub UtGetDvtd32Info
-@ stub WdtpInterfacePointer_UserFree
-@ stub WdtpInterfacePointer_UserMarshal
-@ stub WdtpInterfacePointer_UserSize
-@ stub WdtpInterfacePointer_UserUnmarshal
+@ stdcall WdtpInterfacePointer_UserFree(ptr)
+@ stdcall WdtpInterfacePointer_UserMarshal(ptr long ptr ptr ptr)
+@ stdcall WdtpInterfacePointer_UserSize(ptr long ptr long ptr)
+@ stdcall WdtpInterfacePointer_UserUnmarshal(ptr ptr ptr ptr)
 @ stdcall WriteClassStg(ptr ptr)
 @ stdcall WriteClassStm(ptr ptr)
 @ stdcall WriteFmtUserTypeStg(ptr long ptr)

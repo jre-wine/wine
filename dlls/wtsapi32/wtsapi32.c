@@ -25,7 +25,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wtsapi);
 
-HMODULE WTSAPI32_hModule = 0;
+static HMODULE WTSAPI32_hModule;
 
 BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
@@ -202,5 +202,23 @@ BOOL WINAPI WTSWaitSystemEvent(HANDLE hServer, DWORD Mask, DWORD* Flags)
 {
     /* FIXME: Forward request to winsta.dll::WinStationWaitSystemEvent */
     FIXME("Stub %p 0x%08x %p\n", hServer, Mask, Flags);
+    return FALSE;
+}
+
+/************************************************************
+ *                WTSRegisterSessionNotification (WTSAPI32.@)
+ */
+BOOL WINAPI WTSRegisterSessionNotification(HWND hWnd, DWORD dwFlags)
+{
+    FIXME("Stub %p 0x%08x\n", hWnd, dwFlags);
+    return FALSE;
+}
+
+/************************************************************
+ *                WTSUnRegisterSessionNotification (WTSAPI32.@)
+ */
+BOOL WINAPI WTSUnRegisterSessionNotification(HWND hWnd)
+{
+    FIXME("Stub %p\n", hWnd);
     return FALSE;
 }

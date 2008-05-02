@@ -22,9 +22,6 @@
 #include "mpg123.h"
 #include "mpglib.h"
 
-/* Global mp .. it's a hack */
-struct mpstr *gmp;
-
 
 BOOL InitMP3(struct mpstr *mp)
 {
@@ -39,6 +36,7 @@ BOOL InitMP3(struct mpstr *mp)
 	mp->fr.single = -1;
 	mp->bsnum = 0;
 	mp->synth_bo = 1;
+	mp->fr.mp = mp;
 
 	if(!init) {
 		init = 1;
@@ -122,10 +120,6 @@ static int read_buf_byte(struct mpstr *mp)
 	while(pos >= mp->tail->size) {
 		remove_buf(mp);
 		pos = mp->tail->pos;
-		if(!mp->tail) {
-			fprintf(stderr,"Fatal error!\n");
-			exit(1);
-		}
 	}
 
 	b = mp->tail->pnt[pos];
@@ -155,8 +149,6 @@ int decodeMP3(struct mpstr *mp,const unsigned char *in,int isize,unsigned char *
 		int osize,int *done)
 {
 	int len;
-
-	gmp = mp;
 
 	if(osize < 4608) {
 		fprintf(stderr,"To less out space\n");
@@ -228,17 +220,17 @@ int decodeMP3(struct mpstr *mp,const unsigned char *in,int isize,unsigned char *
 	return MP3_OK;
 }
 
-int set_pointer(long backstep)
+int set_pointer(struct mpstr *mp, long backstep)
 {
   unsigned char *bsbufold;
-  if(gmp->fsizeold < 0 && backstep > 0) {
+  if(mp->fsizeold < 0 && backstep > 0) {
     fprintf(stderr,"Can't step back %ld!\n",backstep);
     return MP3_ERR;
   }
-  bsbufold = gmp->bsspace[gmp->bsnum] + 512;
+  bsbufold = mp->bsspace[mp->bsnum] + 512;
   wordpointer -= backstep;
   if (backstep)
-    memcpy(wordpointer,bsbufold+gmp->fsizeold-backstep,backstep);
+    memcpy(wordpointer,bsbufold+mp->fsizeold-backstep,backstep);
   bitindex = 0;
   return MP3_OK;
 }

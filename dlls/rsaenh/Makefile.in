@@ -8,6 +8,7 @@ IMPORTLIB = librsaenh.$(IMPLIBEXT)
 IMPORTS   = crypt32 advapi32 kernel32
 
 C_SRCS = \
+	aes.c \
 	des.c \
 	handle.c \
 	implglue.c \
@@ -17,6 +18,8 @@ C_SRCS = \
 	rc4.c \
 	rsa.c \
 	rsaenh.c
+
+RC_SRCS = version.rc
 
 @MAKE_DLL_RULES@
 

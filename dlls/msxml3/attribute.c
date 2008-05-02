@@ -50,11 +50,6 @@ static inline domattr *impl_from_IXMLDOMAttribute( IXMLDOMAttribute *iface )
     return (domattr *)((char*)iface - FIELD_OFFSET(domattr, lpVtbl));
 }
 
-static inline xmlNodePtr get_attribute( domattr *This )
-{
-    return xmlNodePtr_from_domnode( This->node, XML_ATTRIBUTE_NODE );
-}
-
 static HRESULT WINAPI domattr_QueryInterface(
     IXMLDOMAttribute *iface,
     REFIID riid,
@@ -64,18 +59,18 @@ static HRESULT WINAPI domattr_QueryInterface(
     TRACE("%p %s %p\n", This, debugstr_guid(riid), ppvObject);
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMAttribute ) ||
+         IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppvObject = iface;
     }
-    else if ( IsEqualGUID( riid, &IID_IDispatch ) ||
-              IsEqualGUID( riid, &IID_IXMLDOMNode ) )
+    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) )
     {
         return IUnknown_QueryInterface(This->node_unk, riid, ppvObject);
     }
     else
     {
-        FIXME("Unsupported inteferace %s\n", debugstr_guid(riid));
+        FIXME("Unsupported interface %s\n", debugstr_guid(riid));
         return E_NOINTERFACE;
     }
 

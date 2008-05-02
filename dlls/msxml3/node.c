@@ -39,20 +39,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
 #ifdef HAVE_LIBXML2
 
-typedef struct _xmlnode
-{
-    const struct IXMLDOMNodeVtbl *lpVtbl;
-    const struct IUnknownVtbl *lpInternalUnkVtbl;
-    IUnknown *pUnkOuter;
-    LONG ref;
-    xmlNodePtr node;
-} xmlnode;
-
-static inline xmlnode *impl_from_IXMLDOMNode( IXMLDOMNode *iface )
-{
-    return (xmlnode *)((char*)iface - FIELD_OFFSET(xmlnode, lpVtbl));
-}
-
 static inline xmlnode *impl_from_InternalUnknown( IUnknown *iface )
 {
     return (xmlnode *)((char*)iface - FIELD_OFFSET(xmlnode, lpInternalUnkVtbl));
@@ -173,13 +159,27 @@ static HRESULT WINAPI xmlnode_get_nodeName(
 
     switch( This->node->type )
     {
-    case XML_TEXT_NODE:
-        str = (const xmlChar*) "#text";
+    case XML_CDATA_SECTION_NODE:
+        str = (const xmlChar*) "#cdata-section";
         break;
+    case XML_COMMENT_NODE:
+        str = (const xmlChar*) "#comment";
+        break;
+    case XML_DOCUMENT_FRAG_NODE:
+        str = (const xmlChar*) "#document-fragment";
+        break;
+    case XML_TEXT_NODE:
+         str = (const xmlChar*) "#text";
+         break;
     case XML_DOCUMENT_NODE:
-        str = (const xmlChar*) "#document";
-	break;
+         str = (const xmlChar*) "#document";
+	    break;
+	case XML_ATTRIBUTE_NODE:
+	case XML_ELEMENT_NODE:
+	str = This->node->name;
+	    break;
     default:
+        FIXME("nodeName not mapped correctly (%d)\n", This->node->type);
         str = This->node->name;
         break;
     }
@@ -218,6 +218,9 @@ static HRESULT WINAPI xmlnode_get_nodeValue(
     HRESULT r = S_FALSE;
 
     TRACE("%p %p\n", This, value);
+
+    if(!value)
+        return E_INVALIDARG;
 
     V_BSTR(value) = NULL;
     V_VT(value) = VT_NULL;
@@ -311,23 +314,10 @@ static HRESULT WINAPI xmlnode_get_childNodes(
     if ( !childList )
         return E_INVALIDARG;
 
-    switch(This->node->type)
-    {
-    case XML_ELEMENT_NODE:
-        *childList = create_filtered_nodelist( This->node->children, (const xmlChar *)"*", FALSE );
-        break;
+    *childList = create_children_nodelist(This->node);
+    if (*childList == NULL)
+        return E_OUTOFMEMORY;
 
-    case XML_ATTRIBUTE_NODE:
-        *childList = create_filtered_nodelist( This->node->children, (const xmlChar *)"node()", FALSE );
-        break;
-
-    default:
-        FIXME("unhandled node type %d\n", This->node->type);
-        break;
-    }
-
-    if (!*childList)
-        return S_FALSE;
     return S_OK;
 }
 
@@ -344,7 +334,24 @@ static HRESULT WINAPI xmlnode_get_lastChild(
     IXMLDOMNode** lastChild)
 {
     xmlnode *This = impl_from_IXMLDOMNode( iface );
-    return get_node( This, "lastChild", This->node->last, lastChild );
+
+    TRACE("%p\n", This );
+
+    if (!lastChild)
+        return E_INVALIDARG;
+
+    switch( This->node->type )
+    {
+    /* CDATASection, Comment, PI and Text Nodes do not support lastChild */
+    case XML_TEXT_NODE:
+    case XML_CDATA_SECTION_NODE:
+    case XML_PI_NODE:
+    case XML_COMMENT_NODE:
+        *lastChild = NULL;
+        return S_FALSE;
+    default:
+        return get_node( This, "lastChild", This->node->last, lastChild );
+    }
 }
 
 static HRESULT WINAPI xmlnode_get_previousSibling(
@@ -352,7 +359,23 @@ static HRESULT WINAPI xmlnode_get_previousSibling(
     IXMLDOMNode** previousSibling)
 {
     xmlnode *This = impl_from_IXMLDOMNode( iface );
-    return get_node( This, "previous", This->node->prev, previousSibling );
+
+    TRACE("%p\n", This );
+
+    if (!previousSibling)
+        return E_INVALIDARG;
+
+    switch( This->node->type )
+    {
+    /* Attribute, Document and Document Fragment Nodes do not support previousSibling */
+    case XML_DOCUMENT_NODE:
+    case XML_DOCUMENT_FRAG_NODE:
+    case XML_ATTRIBUTE_NODE:
+        *previousSibling = NULL;
+        return S_FALSE;
+    default:
+        return get_node( This, "previous", This->node->prev, previousSibling );
+    }
 }
 
 static HRESULT WINAPI xmlnode_get_nextSibling(
@@ -360,7 +383,23 @@ static HRESULT WINAPI xmlnode_get_nextSibling(
     IXMLDOMNode** nextSibling)
 {
     xmlnode *This = impl_from_IXMLDOMNode( iface );
-    return get_node( This, "next", This->node->next, nextSibling );
+
+    TRACE("%p\n", This );
+
+    if (!nextSibling)
+        return E_INVALIDARG;
+
+    switch( This->node->type )
+    {
+    /* Attribute, Document and Document Fragment Nodes do not support nextSibling */
+    case XML_DOCUMENT_NODE:
+    case XML_DOCUMENT_FRAG_NODE:
+    case XML_ATTRIBUTE_NODE:
+        *nextSibling = NULL;
+        return S_FALSE;
+    default:
+        return get_node( This, "next", This->node->next, nextSibling );
+    }
 }
 
 static HRESULT WINAPI xmlnode_get_attributes(
@@ -369,8 +408,28 @@ static HRESULT WINAPI xmlnode_get_attributes(
 {
     xmlnode *This = impl_from_IXMLDOMNode( iface );
     TRACE("%p\n", This);
-    *attributeMap = create_nodemap( iface );
-    return S_OK;
+
+    if (!attributeMap)
+        return E_INVALIDARG;
+
+    switch( This->node->type )
+    {
+    /* Attribute, CDataSection, Comment, Documents, Documents Fragments,
+       Entity and Text Nodes does not support get_attributes */
+    case XML_ATTRIBUTE_NODE:
+    case XML_CDATA_SECTION_NODE:
+    case XML_COMMENT_NODE:
+    case XML_DOCUMENT_NODE:
+    case XML_DOCUMENT_FRAG_NODE:
+    case XML_ENTITY_NODE:
+    case XML_ENTITY_REF_NODE:
+    case XML_TEXT_NODE:
+        *attributeMap = NULL;
+        return S_FALSE;
+    default:
+        *attributeMap = create_nodemap( iface );
+        return S_OK;
+    }
 }
 
 static HRESULT WINAPI xmlnode_insertBefore(
@@ -386,7 +445,7 @@ static HRESULT WINAPI xmlnode_insertBefore(
 
     TRACE("(%p)->(%p,var,%p)\n",This,newChild,outNewChild);
 
-    if (!(newChild && outNewChild))
+    if (!newChild)
         return E_INVALIDARG;
 
     switch(V_VT(&refChild))
@@ -427,7 +486,9 @@ static HRESULT WINAPI xmlnode_insertBefore(
 
     IXMLDOMNode_Release(new);
     IXMLDOMNode_AddRef(newChild);
-    *outNewChild = newChild;
+    if(outNewChild)
+        *outNewChild = newChild;
+
     TRACE("ret S_OK\n");
     return S_OK;
 }
@@ -490,9 +551,29 @@ static HRESULT WINAPI xmlnode_appendChild(
     IXMLDOMNode** outNewChild)
 {
     xmlnode *This = impl_from_IXMLDOMNode( iface );
+    IXMLDOMNode *pAttr = NULL;
     VARIANT var;
 
     TRACE("(%p)->(%p,%p)\n", This, newChild, outNewChild);
+
+    /* Cannot Append an Attribute node. */
+    IUnknown_QueryInterface(newChild, &IID_IXMLDOMNode, (LPVOID*)&pAttr);
+    if(pAttr)
+    {
+        xmlnode *ThisNew = impl_from_IXMLDOMNode( pAttr );
+
+        if(ThisNew->node->type == XML_ATTRIBUTE_NODE)
+        {
+            if(outNewChild) *outNewChild = NULL;
+
+            IUnknown_Release(pAttr);
+
+            return E_FAIL;
+        }
+
+        IUnknown_Release(pAttr);
+    }
+
     VariantInit(&var);
     return IXMLDOMNode_insertBefore(iface, newChild, var, outNewChild);
 }
@@ -530,16 +611,99 @@ static HRESULT WINAPI xmlnode_cloneNode(
     VARIANT_BOOL deep,
     IXMLDOMNode** cloneRoot)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    xmlNodePtr pClone = NULL;
+    IXMLDOMNode *pNode = NULL;
+
+    TRACE("%p (%d)\n", This, deep);
+
+    if(!cloneRoot)
+        return E_INVALIDARG;
+
+    pClone = xmlCopyNode(This->node, deep ? 1 : 2);
+    if(pClone)
+    {
+        pClone->doc = This->node->doc;
+
+        pNode = create_node(pClone);
+        if(!pNode)
+        {
+            ERR("Copy failed\n");
+            return E_FAIL;
+        }
+
+        *cloneRoot = pNode;
+    }
+    else
+    {
+        ERR("Copy failed\n");
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_get_nodeTypeString(
     IXMLDOMNode *iface,
     BSTR* xmlnodeType)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    const xmlChar *str;
+
+    TRACE("%p\n", This );
+
+    if (!xmlnodeType)
+        return E_INVALIDARG;
+
+    if ( !This->node )
+        return E_FAIL;
+
+    switch( This->node->type )
+    {
+    case XML_ATTRIBUTE_NODE:
+        str = (const xmlChar*) "attribute";
+        break;
+    case XML_CDATA_SECTION_NODE:
+        str = (const xmlChar*) "cdatasection";
+        break;
+    case XML_COMMENT_NODE:
+        str = (const xmlChar*) "comment";
+        break;
+    case XML_DOCUMENT_NODE:
+        str = (const xmlChar*) "document";
+        break;
+    case XML_DOCUMENT_FRAG_NODE:
+        str = (const xmlChar*) "documentfragment";
+        break;
+    case XML_ELEMENT_NODE:
+        str = (const xmlChar*) "element";
+        break;
+    case XML_ENTITY_NODE:
+        str = (const xmlChar*) "entity";
+        break;
+    case XML_ENTITY_REF_NODE:
+        str = (const xmlChar*) "entityreference";
+        break;
+    case XML_NOTATION_NODE:
+        str = (const xmlChar*) "notation";
+        break;
+    case XML_PI_NODE:
+        str = (const xmlChar*) "processinginstruction";
+        break;
+    case XML_TEXT_NODE:
+        str = (const xmlChar*) "text";
+        break;
+    default:
+        FIXME("nodeName not mapped correctly (%d)\n", This->node->type);
+        str = This->node->name;
+        break;
+    }
+
+    *xmlnodeType = bstr_from_xmlChar( str );
+    if (!*xmlnodeType)
+        return S_FALSE;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_get_text(
@@ -566,13 +730,19 @@ static HRESULT WINAPI xmlnode_get_text(
     }
 
     case XML_TEXT_NODE:
+    case XML_CDATA_SECTION_NODE:
+    case XML_PI_NODE:
+    case XML_COMMENT_NODE:
         str = bstr_from_xmlChar( This->node->content );
         break;
 
     default:
         FIXME("Unhandled node type %d\n", This->node->type);
     }
-        
+
+    /* Always return a string. */
+    if (!str) str = SysAllocStringLen( NULL, 0 );
+
     TRACE("%p %s\n", This, debugstr_w(str) );
     *text = str;
  
@@ -583,8 +753,29 @@ static HRESULT WINAPI xmlnode_put_text(
     IXMLDOMNode *iface,
     BSTR text)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    xmlChar *str = NULL;
+
+    TRACE("%p\n", This);
+
+    switch(This->node->type)
+    {
+    case XML_DOCUMENT_NODE:
+        return E_FAIL;
+    default:
+        break;
+    }
+
+    str = xmlChar_from_wchar((WCHAR*)text);
+
+    /* Escape the string. */
+    str = xmlEncodeEntitiesReentrant(This->node->doc, str);
+    str = xmlEncodeSpecialChars(This->node->doc, str);
+
+    xmlNodeSetContent(This->node, str);
+    xmlFree(str);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_get_specified(
@@ -623,8 +814,45 @@ static HRESULT WINAPI xmlnode_get_dataType(
     IXMLDOMNode *iface,
     VARIANT* dataTypeName)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    xmlChar *pVal;
+
+    TRACE("iface %p\n", iface);
+
+    if(!dataTypeName)
+        return E_INVALIDARG;
+
+    /* Attribute, CDATA Section, Comment, Document, Document Fragment,
+        Entity, Notation, PI, and Text Node are non-typed. */
+    V_BSTR(dataTypeName) = NULL;
+    V_VT(dataTypeName) = VT_NULL;
+
+    switch ( This->node->type )
+    {
+    case XML_ELEMENT_NODE:
+        pVal = xmlGetNsProp(This->node, (xmlChar*)"dt",
+                            (xmlChar*)"urn:schemas-microsoft-com:datatypes");
+        if (pVal)
+        {
+            V_VT(dataTypeName) = VT_BSTR;
+            V_BSTR(dataTypeName) = bstr_from_xmlChar( pVal );
+            xmlFree(pVal);
+        }
+        break;
+    case XML_ENTITY_REF_NODE:
+        FIXME("XML_ENTITY_REF_NODE should return a valid value.\n");
+        break;
+    default:
+        TRACE("Type %d returning NULL\n", This->node->type);
+    }
+
+    /* non-typed nodes return S_FALSE */
+    if(V_VT(dataTypeName) == VT_NULL)
+    {
+        return S_FALSE;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_put_dataType(
@@ -639,8 +867,41 @@ static HRESULT WINAPI xmlnode_get_xml(
     IXMLDOMNode *iface,
     BSTR* xmlString)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    xmlBufferPtr pXmlBuf;
+    int nSize;
+
+    TRACE("iface %p\n", iface);
+
+    if(!xmlString)
+        return E_INVALIDARG;
+
+    *xmlString = NULL;
+
+    pXmlBuf = xmlBufferCreate();
+    if(pXmlBuf)
+    {
+        nSize = xmlNodeDump(pXmlBuf, This->node->doc, This->node, 0, 0);
+        if(nSize > 0)
+        {
+            const xmlChar *pContent;
+
+            /* Attribute Nodes return a space infront of their name */
+            pContent = xmlBufferContent(pXmlBuf);
+            if( ((char*)pContent)[0] == ' ')
+                *xmlString = bstr_from_xmlChar(pContent+1);
+            else
+                *xmlString = bstr_from_xmlChar(pContent);
+
+
+            xmlBufferFree(pXmlBuf);
+        }
+    }
+
+    /* Always returns a string. */
+    if(*xmlString == NULL)  *xmlString = SysAllocStringLen( NULL, 0 );
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_transformNode(
@@ -658,21 +919,10 @@ static HRESULT WINAPI xmlnode_selectNodes(
     IXMLDOMNodeList** resultList)
 {
     xmlnode *This = impl_from_IXMLDOMNode( iface );
-    xmlChar *str = NULL;
-    HRESULT r = E_FAIL;
 
     TRACE("%p %s %p\n", This, debugstr_w(queryString), resultList );
 
-    str = xmlChar_from_wchar( queryString );
-    if (!str)
-        return r;
-
-    if( !This->node->children )
-        return S_FALSE;
-
-    *resultList = create_filtered_nodelist( This->node->children, str, FALSE );
-    HeapFree( GetProcessHeap(), 0, str );
-    return S_OK;
+    return queryresult_create( This->node, queryString, resultList );
 }
 
 static HRESULT WINAPI xmlnode_selectSingleNode(
@@ -686,6 +936,7 @@ static HRESULT WINAPI xmlnode_selectSingleNode(
 
     TRACE("%p %s %p\n", This, debugstr_w(queryString), resultNode );
 
+    *resultNode = NULL;
     r = IXMLDOMNode_selectNodes(iface, queryString, &list);
     if(r == S_OK)
     {

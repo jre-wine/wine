@@ -38,10 +38,8 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "excpt.h"
 #include "wine/exception.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -56,7 +54,7 @@ static LANGID user_ui_language, system_ui_language;
  *
  * Check if a module handle is for a LOAD_LIBRARY_AS_DATAFILE module.
  */
-inline static int is_data_file_module( HMODULE hmod )
+static inline int is_data_file_module( HMODULE hmod )
 {
     return (ULONG_PTR)hmod & 1;
 }
@@ -371,7 +369,7 @@ __ASM_GLOBAL_FUNC( LdrAccessResource,
     "call " __ASM_NAME("access_resource") "\n\t"
     "leave\n\t"
     "ret $16"
-);
+)
 #else
 NTSTATUS WINAPI LdrAccessResource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
                                    void **ptr, ULONG *size )

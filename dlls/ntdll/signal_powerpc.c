@@ -103,7 +103,6 @@ typedef struct ucontext SIGCONTEXT;
 # include <sys/ucontext.h>
 
 # include <sys/types.h>
-# include <signal.h>
 typedef siginfo_t siginfo;
 
 typedef struct ucontext SIGCONTEXT;
@@ -167,7 +166,7 @@ static wine_signal_handler handlers[256];
 /***********************************************************************
  *           dispatch_signal
  */
-inline static int dispatch_signal(unsigned int sig)
+static inline int dispatch_signal(unsigned int sig)
 {
     if (handlers[sig] == NULL) return 0;
     return handlers[sig](sig);
@@ -239,7 +238,7 @@ static void restore_context( const CONTEXT *context, SIGCONTEXT *sigcontext )
  *
  * Set the FPU context from a sigcontext.
  */
-inline static void save_fpu( CONTEXT *context, const SIGCONTEXT *sigcontext )
+static inline void save_fpu( CONTEXT *context, const SIGCONTEXT *sigcontext )
 {
 #define C(x)   context->Fpr##x = FLOAT_sig(x,sigcontext)
         C(0); C(1); C(2); C(3); C(4); C(5); C(6); C(7); C(8); C(9); C(10);
@@ -256,7 +255,7 @@ inline static void save_fpu( CONTEXT *context, const SIGCONTEXT *sigcontext )
  *
  * Restore the FPU context to a sigcontext.
  */
-inline static void restore_fpu( CONTEXT *context, const SIGCONTEXT *sigcontext )
+static inline void restore_fpu( CONTEXT *context, const SIGCONTEXT *sigcontext )
 {
 #define C(x)  FLOAT_sig(x,sigcontext) = context->Fpr##x
         C(0); C(1); C(2); C(3); C(4); C(5); C(6); C(7); C(8); C(9); C(10);
@@ -582,11 +581,11 @@ static HANDLER_DEF(abrt_handler)
 
 
 /**********************************************************************
- *		term_handler
+ *		quit_handler
  *
- * Handler for SIGTERM.
+ * Handler for SIGQUIT.
  */
-static HANDLER_DEF(term_handler)
+static HANDLER_DEF(quit_handler)
 {
     server_abort_thread(0);
 }
@@ -630,10 +629,7 @@ static int set_handler( int sig, void (*func)() )
     struct sigaction sig_act;
 
     sig_act.sa_sigaction = func;
-    sigemptyset( &sig_act.sa_mask );
-    sigaddset( &sig_act.sa_mask, SIGINT );
-    sigaddset( &sig_act.sa_mask, SIGALRM );
-
+    sig_act.sa_mask = server_block_set;
     sig_act.sa_flags = SA_RESTART | SA_SIGINFO;
     return sigaction( sig, &sig_act, NULL );
 }
@@ -661,7 +657,7 @@ BOOL SIGNAL_Init(void)
     if (set_handler( SIGSEGV, (void (*)())segv_handler ) == -1) goto error;
     if (set_handler( SIGILL,  (void (*)())segv_handler ) == -1) goto error;
     if (set_handler( SIGABRT, (void (*)())abrt_handler ) == -1) goto error;
-    if (set_handler( SIGTERM, (void (*)())term_handler ) == -1) goto error;
+    if (set_handler( SIGQUIT, (void (*)())quit_handler ) == -1) goto error;
     if (set_handler( SIGUSR1, (void (*)())usr1_handler ) == -1) goto error;
 #ifdef SIGBUS
     if (set_handler( SIGBUS,  (void (*)())segv_handler ) == -1) goto error;

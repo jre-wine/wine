@@ -55,17 +55,17 @@ static int cmp_by_name(const void *a, const void *b)
     return strcmp(((const GLYPHINFO *)a)->name, ((const GLYPHINFO *)b)->name);
 }
 
-inline static void sort_by_UV()
+static inline void sort_by_UV(void)
 {
     qsort(glyphs, num_glyphs, sizeof(GLYPHINFO), cmp_by_UV);
 }
 
-inline static void sort_by_name()
+static inline void sort_by_name(void)
 {
     qsort(glyphs, num_glyphs, sizeof(GLYPHINFO), cmp_by_name);
 }
 
-inline static GLYPHINFO *search_by_name(const char *name)
+static inline GLYPHINFO *search_by_name(const char *name)
 {
     GLYPHINFO	gi;
 
@@ -80,7 +80,7 @@ inline static GLYPHINFO *search_by_name(const char *name)
  *  Use the 'optimal' combination of tabs and spaces to position the cursor
  */
 
-inline static void fcpto(FILE *f, int newpos, int curpos)
+static inline void fcpto(FILE *f, int newpos, int curpos)
 {
     int newtpos = newpos & ~7;
     int curtpos = curpos & ~7;
@@ -99,22 +99,11 @@ inline static void fcpto(FILE *f, int newpos, int curpos)
     }
 }
 
-inline static void cpto(int newpos, int curpos)
-{
-    fcpto(stdout, newpos, curpos);
-}
-
-
 /*
  *  Make main() look "purty"
  */
 
-inline static void double_space(FILE *f)
-{
-    fputc('\n', f);
-}
-
-inline static void triple_space(FILE *f)
+static inline void triple_space(FILE *f)
 {
     fputc('\n', f);  fputc('\n', f);
 }
@@ -124,7 +113,7 @@ inline static void triple_space(FILE *f)
  *  Read the Adobe Glyph List from 'glyphlist.txt'
  */
 
-static void read_agl()
+static void read_agl(void)
 {
     FILE    *f = fopen("glyphlist.txt", "r");
     char    linebuf[256], namebuf[128], commbuf[128];

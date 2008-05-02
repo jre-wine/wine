@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <stdarg.h>
 #include <string.h>
 
@@ -31,6 +33,11 @@
 #include "msxml.h"
 #include "xmldom.h"
 #include "xmldso.h"
+#include "msxml2.h"
+
+/* undef the #define in msxml2 so that we can access the v.2 version
+   independent CLSID as well as the v.3 one. */
+#undef CLSID_DOMDocument
 
 #include "msxml_private.h"
 
@@ -128,9 +135,6 @@ static LONG register_key_defvalueW(HKEY base, WCHAR const *name,
 				   WCHAR const *value);
 static LONG register_key_defvalueA(HKEY base, WCHAR const *name,
 				   char const *value);
-static LONG recursive_delete_key(HKEY key);
-static LONG recursive_delete_keyA(HKEY base, char const *name);
-static LONG recursive_delete_keyW(HKEY base, WCHAR const *name);
 
 /***********************************************************************
  *		register_interfaces
@@ -219,7 +223,8 @@ static HRESULT unregister_interfaces(struct regsvr_interface const *list)
 	WCHAR buf[39];
 
 	StringFromGUID2(list->iid, buf, 39);
-	res = recursive_delete_keyW(interface_key, buf);
+	res = RegDeleteTreeW(interface_key, buf);
+	if (res == ERROR_FILE_NOT_FOUND) res = ERROR_SUCCESS;
     }
 
     RegCloseKey(interface_key);
@@ -340,7 +345,8 @@ static HRESULT unregister_coclasses(struct regsvr_coclass const *list)
 	WCHAR buf[39];
 
 	StringFromGUID2(list->clsid, buf, 39);
-	res = recursive_delete_keyW(coclass_key, buf);
+	res = RegDeleteTreeW(coclass_key, buf);
+	if (res == ERROR_FILE_NOT_FOUND) res = ERROR_SUCCESS;
 	if (res != ERROR_SUCCESS) goto error_close_coclass_key;
     }
 
@@ -396,7 +402,8 @@ static HRESULT unregister_progids(struct progid const *list)
     LONG res = ERROR_SUCCESS;
 
     for (; res == ERROR_SUCCESS && list->name; ++list) {
-	res = recursive_delete_keyA(HKEY_CLASSES_ROOT, list->name);
+	res = RegDeleteTreeA(HKEY_CLASSES_ROOT, list->name);
+	if (res == ERROR_FILE_NOT_FOUND) res = ERROR_SUCCESS;
     }
 
     return res != ERROR_SUCCESS ? HRESULT_FROM_WIN32(res) : S_OK;
@@ -454,70 +461,6 @@ static LONG register_key_defvalueA(
 }
 
 /***********************************************************************
- *		recursive_delete_key
- */
-static LONG recursive_delete_key(HKEY key)
-{
-    LONG res;
-    WCHAR subkey_name[MAX_PATH];
-    DWORD cName;
-    HKEY subkey;
-
-    for (;;) {
-	cName = sizeof(subkey_name) / sizeof(WCHAR);
-	res = RegEnumKeyExW(key, 0, subkey_name, &cName,
-			    NULL, NULL, NULL, NULL);
-	if (res != ERROR_SUCCESS && res != ERROR_MORE_DATA) {
-	    res = ERROR_SUCCESS; /* presumably we're done enumerating */
-	    break;
-	}
-	res = RegOpenKeyExW(key, subkey_name, 0,
-			    KEY_READ | KEY_WRITE, &subkey);
-	if (res == ERROR_FILE_NOT_FOUND) continue;
-	if (res != ERROR_SUCCESS) break;
-
-	res = recursive_delete_key(subkey);
-	RegCloseKey(subkey);
-	if (res != ERROR_SUCCESS) break;
-    }
-
-    if (res == ERROR_SUCCESS) res = RegDeleteKeyW(key, 0);
-    return res;
-}
-
-/***********************************************************************
- *		recursive_delete_keyA
- */
-static LONG recursive_delete_keyA(HKEY base, char const *name)
-{
-    LONG res;
-    HKEY key;
-
-    res = RegOpenKeyExA(base, name, 0, KEY_READ | KEY_WRITE, &key);
-    if (res == ERROR_FILE_NOT_FOUND) return ERROR_SUCCESS;
-    if (res != ERROR_SUCCESS) return res;
-    res = recursive_delete_key(key);
-    RegCloseKey(key);
-    return res;
-}
-
-/***********************************************************************
- *		recursive_delete_keyW
- */
-static LONG recursive_delete_keyW(HKEY base, WCHAR const *name)
-{
-    LONG res;
-    HKEY key;
-
-    res = RegOpenKeyExW(base, name, 0, KEY_READ | KEY_WRITE, &key);
-    if (res == ERROR_FILE_NOT_FOUND) return ERROR_SUCCESS;
-    if (res != ERROR_SUCCESS) return res;
-    res = recursive_delete_key(key);
-    RegCloseKey(key);
-    return res;
-}
-
-/***********************************************************************
  *		coclass list
  */
 static struct regsvr_coclass const coclass_list[] = {
@@ -529,6 +472,22 @@ static struct regsvr_coclass const coclass_list[] = {
 	"Microsoft.XMLDOM",
 	"1.0"
     },
+    {   &CLSID_DOMDocument2,
+        "XML DOM Document",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Msxml2.DOMDocument",
+        "3.0"
+    },
+    {   &CLSID_DOMDocument30,
+        "XML DOM Document 3.0",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Msxml2.DOMDocument",
+        "3.0"
+    },
     {   &CLSID_DOMFreeThreadedDocument,
 	"Free threaded XML DOM Document",
 	NULL,
@@ -537,6 +496,23 @@ static struct regsvr_coclass const coclass_list[] = {
 	"Microsoft.FreeThreadedXMLDOM",
 	"1.0"
     },
+    {   &CLSID_DOMFreeThreadedDocument,
+        "Free threaded XML DOM Document",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Microsoft.FreeThreadedXMLDOM",
+        NULL
+    },
+    {   &CLSID_FreeThreadedDOMDocument,
+        "Free Threaded XML DOM Document",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Microsoft.FreeThreadedXMLDOM.1.0",
+        "1.0"
+     },
+
     {   &CLSID_XMLHTTPRequest,
 	"XML HTTP Request",
 	NULL,
@@ -559,6 +535,22 @@ static struct regsvr_coclass const coclass_list[] = {
 	"msxml3.dll",
 	"Both",
 	"Msxml"
+    },
+    {   &CLSID_XMLSchemaCache,
+	"XML Schema Cache",
+	NULL,
+	"msxml3.dll",
+	"Both",
+	"Msxml2.XMLSchemaCache",
+        "3.0"
+    },
+    {   &CLSID_XMLSchemaCache30,
+	"XML Schema Cache 3.0",
+	NULL,
+	"msxml3.dll",
+	"Both",
+	"Msxml2.XMLSchemaCache",
+        "3.0"
     },
     { NULL }			/* list terminator */
 };
@@ -588,6 +580,16 @@ static struct progid const progid_list[] = {
 	"XML DOM Document",
 	&CLSID_DOMDocument,
 	"Microsoft.XMLDOM.1.0"
+    },
+    {   "Msxml2.DOMDocument",
+        "XML DOM Document",
+        &CLSID_DOMDocument2,
+        "Msxml2.DOMDocument.3.0"
+    },
+    {   "Msxml2.DOMDocument.3.0",
+        "XML DOM Document 3.0",
+        &CLSID_DOMDocument30,
+        NULL
     },
     {   "Microsoft.FreeThreadedXMLDOM",
 	"Free threaded XML DOM Document",
@@ -629,6 +631,17 @@ static struct progid const progid_list[] = {
 	&CLSID_XMLDocument,
 	NULL
     },
+    {   "Msxml2.XMLSchemaCache",
+        "XML Schema Cache",
+        &CLSID_XMLSchemaCache,
+        "Msxml2.XMLSchemaCache.3.0"
+    },
+    {   "Msxml2.XMLSchemaCache.3.0",
+        "XML Schema Cache 3.0",
+        &CLSID_XMLSchemaCache30,
+        NULL
+    },
+
     { NULL }			/* list terminator */
 };
 

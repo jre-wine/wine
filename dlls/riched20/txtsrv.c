@@ -28,7 +28,6 @@
 #include "editor.h"
 #include "ole2.h"
 #include "richole.h"
-#include "winreg.h"
 #include "imm.h"
 #include "textserv.h"
 #include "wine/debug.h"
@@ -78,6 +77,7 @@ HRESULT WINAPI CreateTextServices(IUnknown  * pUnkOuter,
    if (ITextImpl == NULL)
       return E_OUTOFMEMORY;
    InitializeCriticalSection(&ITextImpl->csTxtSrv);
+   ITextImpl->csTxtSrv.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ITextServicesImpl.csTxtSrv");
    ITextImpl->ref = 1;
    ITextHost_AddRef(pITextHost);
    ITextImpl->pMyHost = pITextHost;
@@ -135,6 +135,7 @@ static ULONG WINAPI fnTextSrv_Release(ITextServices *iface)
    if (!ref)
    {
       ITextHost_Release(This->pMyHost);
+      This->csTxtSrv.DebugInfo->Spare[0] = 0;
       DeleteCriticalSection(&This->csTxtSrv);
       CoTaskMemFree(This);
    }
@@ -346,24 +347,24 @@ HRESULT WINAPI fnTextSrv_TxGetCachedSize(ITextServices *iface,
    return E_NOTIMPL;
 }
 
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxSendMessage);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxDraw);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetHScroll);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetVScroll);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxSetCursor);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxQueryHitPoint);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxInplaceActivate);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxInplaceDeactivate);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxUIActivate);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxUIDeactivate);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetText);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxSetText);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetCurrentTargetX);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetBaseLinePos);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetNaturalSize);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetDropTarget);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxPropertyBitsChange);
-DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetCachedSize);
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxSendMessage)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxDraw)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetHScroll)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetVScroll)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxSetCursor)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxQueryHitPoint)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxInplaceActivate)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxInplaceDeactivate)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxUIActivate)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxUIDeactivate)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetText)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxSetText)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetCurrentTargetX)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetBaseLinePos)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetNaturalSize)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetDropTarget)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_OnTxPropertyBitsChange)
+DEFINE_THISCALL_WRAPPER(fnTextSrv_TxGetCachedSize)
 
 static const ITextServicesVtbl textservices_Vtbl =
 {

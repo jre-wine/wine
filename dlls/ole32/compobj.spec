@@ -12,7 +12,7 @@
 12 stub COFREEALLLIBRARIES
 13 pascal CoCreateInstance(ptr ptr long ptr ptr) CoCreateInstance16
 14 stub STRINGFROMIID
-15 pascal CoDisconnectObject(ptr long) CoDisconnectObject
+15 pascal CoDisconnectObject(ptr long) CoDisconnectObject16
 16 stub CORELEASEMARSHALDATA
 17 pascal -ret16 CoFreeUnusedLibraries() CoFreeUnusedLibraries
 18 pascal -ret16 IsEqualGUID(ptr ptr) IsEqualGUID16
@@ -70,7 +70,7 @@
 70 stub _IID_ISTDMARSHALINFO
 71 pascal CoCreateStandardMalloc(long ptr) CoCreateStandardMalloc16
 72 stub _IID_IEXTERNALCONNECTION
-73 stub COCREATEGUID
+73 pascal CoCreateGuid(ptr) CoCreateGuid
 75 stub FNASSERT
 76 pascal StringFromGUID2(ptr ptr word) StringFromGUID2
 77 stub COGETCLASSEXT

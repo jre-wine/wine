@@ -550,7 +550,7 @@ BOOL WINAPI PathYetAnotherMakeUniqueName(
 /*************************************************************************
  * PathFindOnPath	[SHELL32.145]
  */
-BOOL WINAPI PathFindOnPathAW(LPVOID sFile, LPCVOID sOtherDirs)
+BOOL WINAPI PathFindOnPathAW(LPVOID sFile, LPCVOID *sOtherDirs)
 {
 	if (SHELL_OsIsUnicode())
 	  return PathFindOnPathW(sFile, (LPCWSTR *)sOtherDirs);
@@ -784,7 +784,7 @@ static const WCHAR HistoryW[] = {'H','i','s','t','o','r','y','\0'};
 static const WCHAR Local_AppDataW[] = {'L','o','c','a','l',' ','A','p','p','D','a','t','a','\0'};
 static const WCHAR My_MusicW[] = {'M','y',' ','M','u','s','i','c','\0'};
 static const WCHAR My_PicturesW[] = {'M','y',' ','P','i','c','t','u','r','e','s','\0'};
-static const WCHAR My_VideoW[] = {'M','y',' ','V','i','d','e','o','\0'};
+static const WCHAR My_VideoW[] = {'M','y',' ','V','i','d','e','o','s','\0'};
 static const WCHAR NetHoodW[] = {'N','e','t','H','o','o','d','\0'};
 static const WCHAR PersonalW[] = {'P','e','r','s','o','n','a','l','\0'};
 static const WCHAR PrintHoodW[] = {'P','r','i','n','t','H','o','o','d','\0'};
@@ -1734,12 +1734,12 @@ HRESULT WINAPI SHGetFolderPathW(
     ret = SHCreateDirectoryExW(hwndOwner, szBuildPath, NULL);
     if (ret && ret != ERROR_ALREADY_EXISTS)
     {
-        ERR("Failed to create directory '%s'.\n", debugstr_w(szBuildPath));
+        ERR("Failed to create directory %s.\n", debugstr_w(szBuildPath));
         hr = E_FAIL;
         goto end;
     }
 
-    TRACE("Created missing system directory '%s'\n", debugstr_w(szBuildPath));
+    TRACE("Created missing system directory %s\n", debugstr_w(szBuildPath));
 end:
     TRACE("returning 0x%08x (final path is %s)\n", hr, debugstr_w(szBuildPath));
     return hr;
@@ -2040,7 +2040,7 @@ static void _SHCreateSymbolicLinks(void)
             for (i = 0; i < sizeof(aidsMyStuff)/sizeof(aidsMyStuff[0]); i++) {
                 strcpy(szMyStuffTarget, szPersonalTarget);
                 if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])))
-                    mkdir(szMyStuffTarget, S_IRWXU|S_IRWXG|S_IRWXO);
+                    mkdir(szMyStuffTarget, 0777);
             }
         } 
         else
@@ -2061,11 +2061,9 @@ static void _SHCreateSymbolicLinks(void)
         for (i = 0; i < sizeof(aidsMyStuff)/sizeof(aidsMyStuff[0]); i++) {
             strcpy(szMyStuffTarget, szPersonalTarget);
             if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])))
-                mkdir(szMyStuffTarget, S_IRWXU|S_IRWXG|S_IRWXO);
+                mkdir(szMyStuffTarget, 0777);
         }
     }
-
-    HeapFree(GetProcessHeap(), 0, pszPersonal);
 
     /* Create symbolic links for 'My Pictures', 'My Video' and 'My Music'. */
     for (i=0; i < sizeof(aidsMyStuff)/sizeof(aidsMyStuff[0]); i++) {
@@ -2094,7 +2092,12 @@ static void _SHCreateSymbolicLinks(void)
     }
 
     /* Last but not least, the Desktop folder */
-    strcpy(szDesktopTarget, pszHome);
+    if (pszHome)
+        strcpy(szDesktopTarget, pszHome);
+    else
+        strcpy(szDesktopTarget, pszPersonal);
+    HeapFree(GetProcessHeap(), 0, pszPersonal);
+
     if (_SHAppendToUnixPath(szDesktopTarget, DesktopW) &&
         !stat(szDesktopTarget, &statFolder) && S_ISDIR(statFolder.st_mode))
     {

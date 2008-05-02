@@ -21,13 +21,11 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <windef.h>
-#include <winbase.h>
 
-#include "tlhelp32.h"
-#include "wine/test.h"
 #include "windef.h"
 #include "winbase.h"
+#include "tlhelp32.h"
+#include "wine/test.h"
 #include "winuser.h"
 
 static char     selfname[MAX_PATH];
@@ -108,6 +106,7 @@ static void test_process(DWORD curr_pid, DWORD sub_pcs_pid)
     MODULEENTRY32       me;
     unsigned            found = 0;
     int                 num = 0;
+    int			childpos = -1;
 
     hSnapshot = pCreateToolhelp32Snapshot( TH32CS_SNAPPROCESS, 0 );
     ok(hSnapshot != NULL, "Cannot create snapshot\n");
@@ -119,7 +118,7 @@ static void test_process(DWORD curr_pid, DWORD sub_pcs_pid)
         do
         {
             if (pe.th32ProcessID == curr_pid) found++;
-            if (pe.th32ProcessID == sub_pcs_pid) found++;
+            if (pe.th32ProcessID == sub_pcs_pid) { childpos = num; found++; }
             trace("PID=%x %s\n", pe.th32ProcessID, pe.szExeFile);
             num++;
         } while (pProcess32Next( hSnapshot, &pe ));
@@ -140,6 +139,10 @@ static void test_process(DWORD curr_pid, DWORD sub_pcs_pid)
     }
     ok(found == 2, "couldn't find self and/or sub-process in process list\n");
     ok(!num, "mismatch in counting\n");
+
+    /* one broken program does Process32First() and does not expect anything
+     * interesting to be there, especially not the just forked off child */
+    ok (childpos !=0, "child is not expected to be at position 0.\n");
 
     te.dwSize = sizeof(te);
     ok(!pThread32First( hSnapshot, &te ), "shouldn't return a thread\n");
@@ -227,7 +230,8 @@ static void test_module(DWORD pid, const char* expected[], unsigned num_expected
     THREADENTRY32       te;
     MODULEENTRY32       me;
     unsigned            found[32];
-    int                 i, num = 0;
+    unsigned            i;
+    int                 num = 0;
 
     ok(NUM_OF(found) >= num_expected, "Internal: bump found[] size\n");
 
@@ -304,7 +308,11 @@ START_TEST(toolhelp)
     if (!pCreateToolhelp32Snapshot || 
         !pModule32First || !pModule32Next ||
         !pProcess32First || !pProcess32Next ||
-        !pThread32First || !pThread32Next) return;
+        !pThread32First || !pThread32Next)
+    {
+        skip("Needed functions are not available, most likely running on Windows NT\n");
+        return;
+    }
 
     r = init();
     ok(r == 0, "Basic init of sub-process test\n");

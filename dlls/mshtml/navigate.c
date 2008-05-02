@@ -1,5 +1,5 @@
 /*
- * Copyright 2006 Jacek Caban for CodeWeavers
+ * Copyright 2006-2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -28,6 +28,8 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
+#include "hlguids.h"
+#include "shlguid.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -37,6 +39,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 #define CONTENT_LENGTH "Content-Length"
+#define UTF16_STR "utf-16"
 
 #define NSINSTREAM(x) ((nsIInputStream*) &(x)->lpInputStreamVtbl)
 
@@ -85,7 +88,7 @@ static nsrefcnt NSAPI nsInputStream_Release(nsIInputStream *iface)
     TRACE("(%p) ref=%d\n", This, ref);
 
     if(!ref)
-        mshtml_free(This);
+        heap_free(This);
 
     return ref;
 }
@@ -141,12 +144,13 @@ static nsresult NSAPI nsInputStream_ReadSegments(nsIInputStream *iface,
 
     nsres = aWriter(NSINSTREAM(This), aClousure, This->buf, 0, This->buf_size, &written);
     if(NS_FAILED(nsres))
-        FIXME("aWritter failed: %08x\n", nsres);
-    if(written != This->buf_size)
-        FIXME("written != buf_size\n");
+        TRACE("aWritter failed: %08x\n", nsres);
+    else if(written != This->buf_size)
+        FIXME("written %d != buf_size %d\n", written, This->buf_size);
 
     This->buf_size -= written; 
 
+    *_retval = written;
     return nsres;
 }
 
@@ -170,15 +174,90 @@ static const nsIInputStreamVtbl nsInputStreamVtbl = {
     nsInputStream_IsNonBlocking
 };
 
-static nsProtocolStream *create_nsprotocol_stream(IStream *stream)
+static nsProtocolStream *create_nsprotocol_stream(void)
 {
-    nsProtocolStream *ret = mshtml_alloc(sizeof(nsProtocolStream));
+    nsProtocolStream *ret = heap_alloc(sizeof(nsProtocolStream));
 
     ret->lpInputStreamVtbl = &nsInputStreamVtbl;
     ret->ref = 1;
     ret->buf_size = 0;
 
     return ret;
+}
+
+static HRESULT read_stream_data(BSCallback *This, IStream *stream)
+{
+    nsresult nsres;
+    HRESULT hres;
+
+    if(!This->nslistener) {
+        BYTE buf[1024];
+        DWORD read;
+
+        do {
+            read = 0;
+            hres = IStream_Read(stream, buf, sizeof(buf), &read);
+        }while(hres == S_OK && read);
+
+        return S_OK;
+    }
+
+    if(!This->nsstream)
+        This->nsstream = create_nsprotocol_stream();
+
+    do {
+        hres = IStream_Read(stream, This->nsstream->buf, sizeof(This->nsstream->buf),
+                &This->nsstream->buf_size);
+        if(!This->nsstream->buf_size)
+            break;
+
+        if(!This->readed && This->nsstream->buf_size >= 2 && *(WORD*)This->nsstream->buf == 0xfeff) {
+            This->nschannel->charset = heap_alloc(sizeof(UTF16_STR));
+            memcpy(This->nschannel->charset, UTF16_STR, sizeof(UTF16_STR));
+        }
+
+        if(!This->readed) {
+            nsres = nsIStreamListener_OnStartRequest(This->nslistener,
+                    (nsIRequest*)NSCHANNEL(This->nschannel), This->nscontext);
+            if(NS_FAILED(nsres))
+                FIXME("OnStartRequest failed: %08x\n", nsres);
+
+            /* events are reset when a new document URI is loaded, so re-initialise them here */
+            if(This->doc && This->doc->bscallback == This && This->doc->nscontainer)
+                init_nsevents(This->doc->nscontainer);
+        }
+
+        This->readed += This->nsstream->buf_size;
+
+        nsres = nsIStreamListener_OnDataAvailable(This->nslistener,
+                (nsIRequest*)NSCHANNEL(This->nschannel), This->nscontext,
+                NSINSTREAM(This->nsstream), This->readed-This->nsstream->buf_size,
+                This->nsstream->buf_size);
+        if(NS_FAILED(nsres))
+            ERR("OnDataAvailable failed: %08x\n", nsres);
+
+        if(This->nsstream->buf_size)
+            FIXME("buffer is not empty!\n");
+    }while(hres == S_OK);
+
+    return S_OK;
+}
+
+static void add_nsrequest(BSCallback *This)
+{
+    if(This->nschannel && This->nschannel->load_group) {
+        nsresult nsres = nsILoadGroup_AddRequest(This->nschannel->load_group,
+                (nsIRequest*)NSCHANNEL(This->nschannel), This->nscontext);
+
+        if(NS_FAILED(nsres))
+            ERR("AddRequest failed:%08x\n", nsres);
+    }
+}
+
+static void on_stop_nsrequest(BSCallback *This) {
+    if(This->nslistener)
+        nsIStreamListener_OnStopRequest(This->nslistener, (nsIRequest*)NSCHANNEL(This->nschannel),
+                This->nscontext, NS_OK);
 }
 
 #define STATUSCLB_THIS(iface) DEFINE_THIS(BSCallback, BindStatusCallback, iface)
@@ -250,8 +329,9 @@ static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallback *iface)
             IMoniker_Release(This->mon);
         if(This->binding)
             IBinding_Release(This->binding);
-        mshtml_free(This->headers);
-        mshtml_free(This);
+        list_remove(&This->entry);
+        heap_free(This->headers);
+        heap_free(This);
     }
 
     return ref;
@@ -266,6 +346,11 @@ static HRESULT WINAPI BindStatusCallback_OnStartBinding(IBindStatusCallback *ifa
 
     IBinding_AddRef(pbind);
     This->binding = pbind;
+
+    if(This->doc)
+        list_add_head(&This->doc->bindings, &This->entry);
+
+    add_nsrequest(This);
 
     return S_OK;
 }
@@ -298,10 +383,10 @@ static HRESULT WINAPI BindStatusCallback_OnProgress(IBindStatusCallback *iface, 
 
         if(!This->nschannel)
             return S_OK;
-        mshtml_free(This->nschannel->content);
+        heap_free(This->nschannel->content);
 
         len = WideCharToMultiByte(CP_ACP, 0, szStatusText, -1, NULL, 0, NULL, NULL);
-        This->nschannel->content = mshtml_alloc(len*sizeof(WCHAR));
+        This->nschannel->content = heap_alloc(len*sizeof(WCHAR));
         WideCharToMultiByte(CP_ACP, 0, szStatusText, -1, This->nschannel->content, -1, NULL, NULL);
     }
     }
@@ -316,13 +401,14 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
 
     TRACE("(%p)->(%08x %s)\n", This, hresult, debugstr_w(szError));
 
-    IBinding_Release(This->binding);
-    This->binding = NULL;
+    if(This->binding) {
+        IBinding_Release(This->binding);
+        This->binding = NULL;
+    }
+
+    on_stop_nsrequest(This);
 
     if(This->nslistener) {
-        nsIStreamListener_OnStopRequest(This->nslistener, (nsIRequest*)NSCHANNEL(This->nschannel),
-                This->nscontext, NS_OK);
-
         if(This->nschannel->load_group) {
             nsresult nsres;
 
@@ -333,8 +419,13 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
         }
     }
 
-    if(This->doc) {
-        task_t *task = mshtml_alloc(sizeof(task_t));
+    list_remove(&This->entry);
+
+    if(FAILED(hresult))
+        return S_OK;
+
+    if(This->doc && This->doc->bscallback == This && !This->doc->nscontainer) {
+        task_t *task = heap_alloc(sizeof(task_t));
 
         task->doc = This->doc;
         task->task_id = TASK_PARSECOMPLETE;
@@ -342,7 +433,7 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
 
         /*
          * This should be done in the worker thread that parses HTML,
-         * but we don't have such thread (Gecko parses HTML for us).
+         * but we don't have such thread.
          */
         push_task(task);
     }
@@ -384,41 +475,10 @@ static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallback *if
         DWORD grfBSCF, DWORD dwSize, FORMATETC *pformatetc, STGMEDIUM *pstgmed)
 {
     BSCallback *This = STATUSCLB_THIS(iface);
-    nsresult nsres;
-    HRESULT hres;
 
     TRACE("(%p)->(%08x %d %p %p)\n", This, grfBSCF, dwSize, pformatetc, pstgmed);
 
-    if(This->nslistener) {
-        if(!This->nsstream) {
-            This->nsstream = create_nsprotocol_stream(pstgmed->u.pstm);
-
-            nsres = nsIStreamListener_OnStartRequest(This->nslistener,
-                    (nsIRequest*)NSCHANNEL(This->nschannel), This->nscontext);
-            if(NS_FAILED(nsres))
-                FIXME("OnStartRequest failed: %08x\n", nsres);
-        }
-
-        do {
-            hres = IStream_Read(pstgmed->u.pstm, This->nsstream->buf, sizeof(This->nsstream->buf),
-                         &This->nsstream->buf_size);
-            if(!This->nsstream->buf_size)
-                break;
-
-            nsres = nsIStreamListener_OnDataAvailable(This->nslistener,
-                    (nsIRequest*)NSCHANNEL(This->nschannel), This->nscontext,
-                    NSINSTREAM(This->nsstream), This->readed, This->nsstream->buf_size);
-            if(NS_FAILED(nsres))
-                FIXME("OnDataAvailable failed: %08x\n", nsres);
-
-            if(This->nsstream->buf_size)
-                FIXME("buffer is not empty!\n");
-
-            This->readed += This->nsstream->buf_size;
-        }while(hres == S_OK);
-    }
-
-    return S_OK;
+    return read_stream_data(This, pstgmed->u.pstm);
 }
 
 static HRESULT WINAPI BindStatusCallback_OnObjectAvailable(IBindStatusCallback *iface,
@@ -587,8 +647,8 @@ static HRESULT WINAPI BSCServiceProvider_QueryService(IServiceProvider *iface,
         REFGUID guidService, REFIID riid, void **ppv)
 {
     BSCallback *This = SERVPROV_THIS(iface);
-    FIXME("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
+    return E_NOINTERFACE;
 }
 
 #undef SERVPROV_THIS
@@ -602,7 +662,7 @@ static const IServiceProviderVtbl ServiceProviderVtbl = {
 
 BSCallback *create_bscallback(IMoniker *mon)
 {
-    BSCallback *ret = mshtml_alloc(sizeof(BSCallback));
+    BSCallback *ret = heap_alloc(sizeof(BSCallback));
 
     ret->lpBindStatusCallbackVtbl = &BindStatusCallbackVtbl;
     ret->lpServiceProviderVtbl    = &ServiceProviderVtbl;
@@ -620,11 +680,34 @@ BSCallback *create_bscallback(IMoniker *mon)
     ret->binding = NULL;
     ret->doc = NULL;
 
+    list_init(&ret->entry);
+
     if(mon)
         IMoniker_AddRef(mon);
     ret->mon = mon;
 
     return ret;
+}
+
+/* Calls undocumented 84 cmd of CGID_ShellDocView */
+static void call_docview_84(HTMLDocument *doc)
+{
+    IOleCommandTarget *olecmd;
+    VARIANT var;
+    HRESULT hres;
+
+    if(!doc->client)
+        return;
+
+    hres = IOleClientSite_QueryInterface(doc->client, &IID_IOleCommandTarget, (void**)&olecmd);
+    if(FAILED(hres))
+        return;
+
+    VariantInit(&var);
+    hres = IOleCommandTarget_Exec(olecmd, &CGID_ShellDocView, 84, 0, NULL, &var);
+    IOleCommandTarget_Release(olecmd);
+    if(SUCCEEDED(hres) && V_VT(&var) != VT_NULL)
+        FIXME("handle result\n");
 }
 
 static void parse_post_data(nsIInputStream *post_data_stream, LPWSTR *headers_ret,
@@ -667,9 +750,9 @@ static void parse_post_data(nsIInputStream *post_data_stream, LPWSTR *headers_re
         len = MultiByteToWideChar(CP_ACP, 0, ptr2, ptr-ptr2, NULL, 0);
 
         if(headers)
-            headers = mshtml_realloc(headers,(headers_len+len+1)*sizeof(WCHAR));
+            headers = heap_realloc(headers,(headers_len+len+1)*sizeof(WCHAR));
         else
-            headers = mshtml_alloc((len+1)*sizeof(WCHAR));
+            headers = heap_alloc((len+1)*sizeof(WCHAR));
 
         len = MultiByteToWideChar(CP_ACP, 0, ptr2, ptr-ptr2, headers+headers_len, -1);
         headers_len += len;
@@ -704,6 +787,7 @@ void hlink_frame_navigate(HTMLDocument *doc, IHlinkFrame *hlink_frame,
     IBindCtx *bindctx;
     IMoniker *mon;
     IHlink *hlink;
+    HRESULT hr;
 
     callback = create_bscallback(NULL);
 
@@ -714,42 +798,62 @@ void hlink_frame_navigate(HTMLDocument *doc, IHlinkFrame *hlink_frame,
               debugstr_an(callback->post_data, callback->post_data_len));
     }
 
-    CreateAsyncBindCtx(0, STATUSCLB(callback), NULL, &bindctx);
-
-    hlink = Hlink_Create();
-
-    CreateURLMoniker(NULL, uri, &mon);
-    IHlink_SetMonikerReference(hlink, 0, mon, NULL);
-
-    if(hlnf & HLNF_OPENINNEWWINDOW) {
-        static const WCHAR wszBlank[] = {'_','b','l','a','n','k',0};
-        IHlink_SetTargetFrameName(hlink, wszBlank); /* FIXME */
+    hr = CreateAsyncBindCtx(0, STATUSCLB(callback), NULL, &bindctx);
+    if (FAILED(hr)) {
+        IBindStatusCallback_Release(STATUSCLB(callback));
+        return;
     }
 
-    IHlinkFrame_Navigate(hlink_frame, hlnf, bindctx, STATUSCLB(callback), hlink);
+    hr = CoCreateInstance(&CLSID_StdHlink, NULL, CLSCTX_INPROC_SERVER, &IID_IHlink, (LPVOID*)&hlink);
+    if (FAILED(hr)) {
+        IBindCtx_Release(bindctx);
+        IBindStatusCallback_Release(STATUSCLB(callback));
+        return;
+    }
+
+    hr = CreateURLMoniker(NULL, uri, &mon);
+    if (SUCCEEDED(hr)) {
+        IHlink_SetMonikerReference(hlink, 0, mon, NULL);
+
+        if(hlnf & HLNF_OPENINNEWWINDOW) {
+            static const WCHAR wszBlank[] = {'_','b','l','a','n','k',0};
+            IHlink_SetTargetFrameName(hlink, wszBlank); /* FIXME */
+        }
+
+        IHlinkFrame_Navigate(hlink_frame, hlnf, bindctx, STATUSCLB(callback), hlink);
+
+        IMoniker_Release(mon);
+    }
 
     IBindCtx_Release(bindctx);
     IBindStatusCallback_Release(STATUSCLB(callback));
-    IMoniker_Release(mon);
-
 }
 
-HRESULT start_binding(BSCallback *bscallback)
+HRESULT start_binding(HTMLDocument *doc, BSCallback *bscallback, IBindCtx *bctx)
 {
     IStream *str = NULL;
-    IBindCtx *bctx;
     HRESULT hres;
 
-    hres = CreateAsyncBindCtx(0, STATUSCLB(bscallback), NULL, &bctx);
-    if(FAILED(hres)) {
-        WARN("CreateAsyncBindCtx failed: %08x\n", hres);
-        return hres;
+    bscallback->doc = doc;
+    call_docview_84(bscallback->doc);
+
+    if(bctx) {
+        RegisterBindStatusCallback(bctx, STATUSCLB(bscallback), NULL, 0);
+        IBindCtx_AddRef(bctx);
+    }else {
+        hres = CreateAsyncBindCtx(0, STATUSCLB(bscallback), NULL, &bctx);
+        if(FAILED(hres)) {
+            WARN("CreateAsyncBindCtx failed: %08x\n", hres);
+            on_stop_nsrequest(bscallback);
+            return hres;
+        }
     }
 
     hres = IMoniker_BindToStorage(bscallback->mon, bctx, NULL, &IID_IStream, (void**)&str);
     IBindCtx_Release(bctx);
     if(FAILED(hres)) {
         WARN("BindToStorage failed: %08x\n", hres);
+        on_stop_nsrequest(bscallback);
         return hres;
     }
 
@@ -758,16 +862,24 @@ HRESULT start_binding(BSCallback *bscallback)
 
     IMoniker_Release(bscallback->mon);
     bscallback->mon = NULL;
+
     return S_OK;
 }
 
 void set_document_bscallback(HTMLDocument *doc, BSCallback *callback)
 {
+    BSCallback *iter;
+
     if(doc->bscallback) {
         if(doc->bscallback->binding)
             IBinding_Abort(doc->bscallback->binding);
         doc->bscallback->doc = NULL;
         IBindStatusCallback_Release(STATUSCLB(doc->bscallback));
+    }
+
+    LIST_FOR_EACH_ENTRY(iter, &doc->bindings, BSCallback, entry) {
+        iter->doc = NULL;
+        list_remove(&iter->entry);
     }
 
     doc->bscallback = callback;
@@ -776,4 +888,23 @@ void set_document_bscallback(HTMLDocument *doc, BSCallback *callback)
         IBindStatusCallback_AddRef(STATUSCLB(callback));
         callback->doc = doc;
     }
+}
+
+HRESULT load_stream(BSCallback *bscallback, IStream *stream)
+{
+    HRESULT hres;
+
+    const char text_html[] = "text/html";
+
+    add_nsrequest(bscallback);
+
+    if(bscallback->nschannel) {
+        bscallback->nschannel->content = heap_alloc(sizeof(text_html));
+        memcpy(bscallback->nschannel->content, text_html, sizeof(text_html));
+    }
+
+    hres = read_stream_data(bscallback, stream);
+    IBindStatusCallback_OnStopBinding(STATUSCLB(bscallback), hres, ERROR_SUCCESS);
+
+    return hres;
 }

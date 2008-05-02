@@ -388,6 +388,17 @@ static void test_formatrecord(void)
     r = MsiFormatRecord(0, 0, NULL, NULL );
     ok( r == ERROR_INVALID_HANDLE, "wrong error\n");
 
+    hrec = MsiCreateRecord(0);
+    ok( hrec, "failed to create record\n");
+
+    /* format an empty record on a record with no parameters */
+    sz = sizeof(buffer);
+    r = MsiFormatRecordA(0, hrec, buffer, &sz );
+    ok( r == ERROR_SUCCESS, "format failed\n");
+    ok( sz == 0, "size wrong\n");
+
+    MsiCloseHandle( hrec );
+
     hrec = MsiCreateRecord(4);
     ok( hrec, "failed to create record\n");
 
@@ -927,10 +938,8 @@ static void test_formatrecord(void)
     sz = sizeof buffer;
     r = MsiFormatRecord(0, hrec, buffer, &sz);
     ok( r == ERROR_SUCCESS, "format failed\n");
-    todo_wine{
     ok( sz == 6, "size wrong\n");
     ok( 0 == strcmp(buffer,"123456"), "wrong output (%s)\n",buffer);
-    }
 
     r = MsiRecordSetString(hrec, 0, "[~]");
     sz = sizeof buffer;
@@ -1628,6 +1637,51 @@ static void test_formatrecord(void)
         ok( 0 == strcmp(buffer,"}}"), "wrong output (%s)\n",buffer);
     }
 
+    sz = sizeof buffer;
+    MsiRecordSetInteger(hrec, 1, 100);
+    MsiRecordSetInteger(hrec, 2, -100);
+    MsiRecordSetString(hrec, 0, "[1] [2]");
+    r = MsiFormatRecord(0, hrec, buffer, &sz);
+    ok( r == ERROR_SUCCESS, "format failed\n");
+    ok( sz == 8, "size wrong(%i)\n",sz);
+    ok( 0 == strcmp(buffer,"100 -100"), "wrong output (%s)\n",buffer);
+
+    sz = sizeof(buffer);
+    MsiRecordSetString(hrec, 0, "[1] {[noprop] [twoprop]} {abcdef}");
+    MsiRecordSetString(hrec, 1, "one");
+    r = MsiFormatRecord(0, hrec, buffer, &sz);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(sz == 33, "Expected 33, got %d\n",sz);
+    todo_wine
+    {
+        ok(!lstrcmpA(buffer, "one {[noprop] [twoprop]} {abcdef}"),
+           "Expected \"one {[noprop] [twoprop]} {abcdef}\", got \"%s\"\n", buffer);
+    }
+
+    sz = sizeof(buffer);
+    MsiRecordSetString(hrec, 0, "[1] {[noprop] [one]} {abcdef}");
+    MsiRecordSetString(hrec, 1, "one");
+    r = MsiFormatRecord(0, hrec, buffer, &sz);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(sz == 29, "Expected 29, got %d\n",sz);
+    todo_wine
+    {
+        ok(!lstrcmpA(buffer, "one {[noprop] [one]} {abcdef}"),
+           "Expected \"one {[noprop] [one]} {abcdef}\", got \"%s\"\n", buffer);
+    }
+
+    sz = sizeof(buffer);
+    MsiRecordSetString(hrec, 0, "[1] {[one]} {abcdef}");
+    MsiRecordSetString(hrec, 1, "one");
+    r = MsiFormatRecord(0, hrec, buffer, &sz);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(sz == 20, "Expected 20, got %d\n",sz);
+    todo_wine
+    {
+        ok(!lstrcmpA(buffer, "one {[one]} {abcdef}"),
+           "Expected \"one {[one]} {abcdef}\", got \"%s\"\n", buffer);
+    }
+
     MsiCloseHandle( hrec );
 }
 
@@ -1936,11 +1990,8 @@ static void test_formatrecord_package(void)
     MsiRecordSetString(hrec, 0, "{a[one]bc[bad]de[two]f}");
     r = MsiFormatRecord(package, hrec, buffer, &sz);
     ok( r == ERROR_SUCCESS, "format failed\n");
-    todo_wine
-    {
-        ok( sz == 0, "size wrong(%i)\n",sz);
-        ok( 0 == strcmp(buffer,""), "wrong output (%s)\n",buffer);
-    }
+    ok( sz == 0, "size wrong(%i)\n",sz);
+    ok( 0 == strcmp(buffer,""), "wrong output (%s)\n",buffer);
 
     MsiSetProperty(package, "bad", "");
     sz = sizeof buffer;
@@ -1986,6 +2037,42 @@ static void test_formatrecord_package(void)
     {
         ok( sz == 0, "size wrong(%i)\n",sz);
         ok( 0 == strcmp(buffer,""), "wrong output (%s)\n",buffer);
+    }
+
+    sz = sizeof(buffer);
+    MsiRecordSetString(hrec, 0, "[1] {[noprop] [twoprop]} {abcdef}");
+    MsiRecordSetString(hrec, 1, "one");
+    r = MsiFormatRecord(package, hrec, buffer, &sz);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(sz == 13, "Expected 13, got %d\n",sz);
+    todo_wine
+    {
+        ok(!lstrcmpA(buffer, "one  {abcdef}"),
+           "Expected \"one  {abcdef}\", got \"%s\"\n", buffer);
+    }
+
+    sz = sizeof(buffer);
+    MsiRecordSetString(hrec, 0, "[1] {[noprop] [one]} {abcdef}");
+    MsiRecordSetString(hrec, 1, "one");
+    r = MsiFormatRecord(package, hrec, buffer, &sz);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(sz == 13, "Expected 13, got %d\n",sz);
+    todo_wine
+    {
+        ok(!lstrcmpA(buffer, "one  {abcdef}"),
+           "Expected \"one  {abcdef}\", got \"%s\"\n", buffer);
+    }
+
+    sz = sizeof(buffer);
+    MsiRecordSetString(hrec, 0, "[1] {[one]} {abcdef}");
+    MsiRecordSetString(hrec, 1, "one");
+    r = MsiFormatRecord(package, hrec, buffer, &sz);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(sz == 20, "Expected 20, got %d\n",sz);
+    todo_wine
+    {
+        ok(!lstrcmpA(buffer, "one mercury {abcdef}"),
+           "Expected \"one mercury {abcdef}\", got \"%s\"\n", buffer);
     }
 
     MsiCloseHandle(hrec);
@@ -2232,10 +2319,7 @@ static void test_formatrecord_tables(void)
     MsiRecordSetString( hrec, 1, "[$parietal]" );
     r = MsiFormatRecord( hpkg, hrec, buf, &size );
     ok( r == ERROR_SUCCESS, "format record failed: %d\n", r);
-    todo_wine
-    {
-        ok( !lstrcmp( buf, expected ), "Expected '%s', got %s\n", expected, buf);
-    }
+    ok( !lstrcmp( buf, expected ), "Expected '%s', got %s\n", expected, buf);
 
     DeleteFile( "C:\\I am a really long directory\\temporal.txt" );
     RemoveDirectory( "C:\\I am a really long directory" );

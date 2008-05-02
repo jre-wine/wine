@@ -66,8 +66,7 @@ typedef struct tagCFactoryTemplate {
  * CFactoryTemplate
  *
  ****************************************************************************/
-extern HRESULT SetupRegisterServers(const CFactoryTemplate * pList, int num,
-                                    HINSTANCE hinst, BOOL bRegister);
+extern HRESULT SetupRegisterServers(const CFactoryTemplate * pList, int num, BOOL bRegister);
 
 /****************************************************************************
  * SetupInitializeServers
@@ -75,7 +74,7 @@ extern HRESULT SetupRegisterServers(const CFactoryTemplate * pList, int num,
  * This function is table driven using the static members of the
  * CFactoryTemplate class defined in the Dll.
  *
- * It calls the intialize function for any class in CFactoryTemplate with
+ * It calls the initialize function for any class in CFactoryTemplate with
  * one defined.
  *
  ****************************************************************************/

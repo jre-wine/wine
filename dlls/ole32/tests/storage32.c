@@ -31,6 +31,8 @@
 
 DEFINE_GUID( test_stg_cls, 0x88888888, 0x0425, 0x0000, 0,0,0,0,0,0,0,0);
 
+#define ok_ole_success(hr, func) ok(hr == S_OK, func " failed with error 0x%08x\n", hr)
+
 static void test_hglobal_storage_stat(void)
 {
     ILockBytes *ilb = NULL;
@@ -161,6 +163,12 @@ static void test_create_storage_modes(void)
    ok(r == 0, "storage not released\n");
    ok(DeleteFileW(filename), "failed to delete file\n");
 
+   r = StgCreateDocfile( filename, STGM_CREATE | STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
+   ok(r==S_OK, "StgCreateDocfile failed\n");
+   r = IStorage_Release(stg);
+   ok(r == 0, "storage not released\n");
+   ok(DeleteFileW(filename), "failed to delete file\n");
+
    /* test the way excel uses StgCreateDocFile */
    r = StgCreateDocfile( filename, STGM_TRANSACTED|STGM_CREATE|STGM_SHARE_DENY_WRITE|STGM_READWRITE, 0, &stg);
    ok(r==S_OK, "StgCreateDocfile the excel way failed\n");
@@ -230,6 +238,7 @@ static void test_storage_stream(void)
     IStorage *stg = NULL;
     HRESULT r;
     IStream *stm = NULL;
+    IStream *stm2 = NULL;
     ULONG count = 0;
     LARGE_INTEGER pos;
     ULARGE_INTEGER p;
@@ -279,6 +288,9 @@ static void test_storage_stream(void)
     r = IStorage_CreateStream(stg, stmname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
     ok(r==S_OK, "IStorage->CreateStream failed\n");
 
+    r = IStream_Clone(stm, &stm2);
+    ok(r==S_OK, "failed to clone stream\n");
+
     r = IStream_Write(stm, NULL, 0, NULL );
     ok(r==STG_E_INVALIDPOINTER, "IStream->Write wrong error\n");
     r = IStream_Write(stm, "Hello\n", 0, NULL );
@@ -315,8 +327,21 @@ static void test_storage_stream(void)
     ok(count == 0, "read bytes from empty stream\n");
 
     /* wrap up */
+    r = IStream_Release(stm2);
+    ok(r == 0, "wrong ref count\n");
+
+    /* create a stream and write to it */
+    r = IStorage_CreateStream(stg, stmname, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm2 );
+    ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+    r = IStream_Seek(stm, pos, STREAM_SEEK_SET, &p);
+    ok(r==STG_E_REVERTED, "overwritten stream should return STG_E_REVERTED instead of 0x%08x\n", r);
+
+    r = IStream_Release(stm2);
+    ok(r == 0, "wrong ref count\n");
     r = IStream_Release(stm);
     ok(r == 0, "wrong ref count\n");
+
     r = IStorage_Release(stg);
     ok(r == 0, "wrong ref count\n");
     r = DeleteFileW(filename);
@@ -388,12 +413,12 @@ static void test_open_storage(void)
 
     DeleteFileW(filename);
 
-    /* try opening a nonexistent file - it should create it */
+    /* try opening a nonexistent file - it should not create it */
     stgm = STGM_DIRECT | STGM_SHARE_EXCLUSIVE | STGM_READWRITE;
     r = StgOpenStorage( filename, NULL, stgm, NULL, 0, &stg);
-    ok(r==S_OK, "StgOpenStorage failed: 0x%08x\n", r);
+    ok(r!=S_OK, "StgOpenStorage failed: 0x%08x\n", r);
     if (r==S_OK) IStorage_Release(stg);
-    ok(is_existing_file(filename), "StgOpenStorage didn't create a file\n");
+    ok(!is_existing_file(filename), "StgOpenStorage should not create a file\n");
     DeleteFileW(filename);
 
     /* create the file */
@@ -860,10 +885,11 @@ static void test_transact(void)
     static const WCHAR szPrefix[] = { 's','t','g',0 };
     static const WCHAR szDot[] = { '.',0 };
     WCHAR filename[MAX_PATH];
-    IStorage *stg = NULL;
+    IStorage *stg = NULL, *stg2 = NULL;
     HRESULT r;
     IStream *stm = NULL;
     static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
+    static const WCHAR stmname2[] = { 'F','O','O',0 };
 
     if(!GetTempFileNameW(szDot, szPrefix, 0, filename))
         return;
@@ -876,8 +902,27 @@ static void test_transact(void)
     ok(r==S_OK, "StgCreateDocfile failed\n");
 
     /* now create a stream, but don't commit it */
+    r = IStorage_CreateStream(stg, stmname2, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+    ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+    r = IStream_Write(stm, "this is stream 1\n", 16, NULL);
+    ok(r==S_OK, "IStream->Write failed\n");
+
+    r = IStream_Release(stm);
+
+    r = IStorage_Commit(stg, 0);
+    ok(r==S_OK, "IStorage->Commit failed\n");
+
+    /* now create a stream, but don't commit it */
+    stm = NULL;
     r = IStorage_CreateStream(stg, stmname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
     ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+    r = IStream_Write(stm, "this is stream 2\n", 16, NULL);
+    ok(r==S_OK, "IStream->Write failed\n");
+
+    r = IStream_Commit(stm, STGC_ONLYIFCURRENT | STGC_DANGEROUSLYCOMMITMERELYTODISKCACHE);
+    ok(r==S_OK, "IStream->Commit failed\n");
 
     r = IStream_Release(stm);
 
@@ -900,17 +945,58 @@ static void test_transact(void)
     r = IStorage_OpenStream(stg, stmname, NULL, STGM_TRANSACTED|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
     ok(r==STG_E_INVALIDFUNCTION, "IStorage->OpenStream failed %08x\n", r);
 
+    r = IStorage_OpenStorage(stg, stmname, NULL, STGM_TRANSACTED|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg2 );
+    ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream failed %08x\n", r);
+
     todo_wine {
     r = IStorage_OpenStream(stg, stmname, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
     ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream should fail %08x\n", r);
     }
-
     if (stm)
         r = IStream_Release(stm);
+
+    r = IStorage_OpenStorage(stg, stmname2, NULL, STGM_TRANSACTED|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg2 );
+    ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream failed %08x\n", r);
+
+    r = IStorage_OpenStream(stg, stmname2, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
+    ok(r==S_OK, "IStorage->OpenStream should fail %08x\n", r);
+    if (stm)
+        r = IStream_Release(stm);
+
     IStorage_Release(stg);
 
     r = DeleteFileW(filename);
     ok( r == TRUE, "deleted file\n");
+}
+
+static void test_ReadClassStm(void)
+{
+    CLSID clsid;
+    HRESULT hr;
+    IStream *pStream;
+    static const LARGE_INTEGER llZero;
+
+    hr = ReadClassStm(NULL, &clsid);
+    ok(hr == E_INVALIDARG, "ReadClassStm should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
+    ok_ole_success(hr, "CreateStreamOnHGlobal");
+    hr = WriteClassStm(pStream, &test_stg_cls);
+    ok_ole_success(hr, "WriteClassStm");
+
+    hr = ReadClassStm(pStream, NULL);
+    ok(hr == E_INVALIDARG, "ReadClassStm should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    /* test not rewound stream */
+    hr = ReadClassStm(pStream, &clsid);
+    ok(hr == STG_E_READFAULT, "ReadClassStm should have returned STG_E_READFAULT instead of 0x%08x\n", hr);
+    ok(IsEqualCLSID(&clsid, &CLSID_NULL), "clsid should have been zeroed\n");
+
+    hr = IStream_Seek(pStream, llZero, STREAM_SEEK_SET, NULL);
+    ok_ole_success(hr, "IStream_Seek");
+    hr = ReadClassStm(pStream, &clsid);
+    ok_ole_success(hr, "ReadClassStm");
+    ok(IsEqualCLSID(&clsid, &test_stg_cls), "clsid should have been set to CLSID_WineTest\n");
 }
 
 START_TEST(storage32)
@@ -923,4 +1009,5 @@ START_TEST(storage32)
     test_storage_refcount();
     test_streamenum();
     test_transact();
+    test_ReadClassStm();
 }

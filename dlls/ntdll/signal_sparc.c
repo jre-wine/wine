@@ -54,7 +54,7 @@ static wine_signal_handler handlers[256];
 /***********************************************************************
  *           dispatch_signal
  */
-inline static int dispatch_signal(unsigned int sig)
+static inline int dispatch_signal(unsigned int sig)
 {
     if (handlers[sig] == NULL) return 0;
     return handlers[sig](sig);
@@ -389,11 +389,11 @@ static HANDLER_DEF(abrt_handler)
 
 
 /**********************************************************************
- *		term_handler
+ *		quit_handler
  *
- * Handler for SIGTERM.
+ * Handler for SIGQUIT.
  */
-static HANDLER_DEF(term_handler)
+static HANDLER_DEF(quit_handler)
 {
     server_abort_thread(0);
 }
@@ -436,9 +436,8 @@ static int set_handler( int sig, void (*func)() )
 {
     struct sigaction sig_act;
 
-    sig_act.sa_handler = NULL;
     sig_act.sa_sigaction = func;
-    sigemptyset( &sig_act.sa_mask );
+    sig_act.sa_mask = server_block_set;
     sig_act.sa_flags = SA_SIGINFO;
 
     return sigaction( sig, &sig_act, NULL );
@@ -469,7 +468,7 @@ BOOL SIGNAL_Init(void)
     if (set_handler( SIGBUS,  (void (*)())bus_handler  ) == -1) goto error;
     if (set_handler( SIGTRAP, (void (*)())trap_handler ) == -1) goto error;
     if (set_handler( SIGABRT, (void (*)())abrt_handler ) == -1) goto error;
-    if (set_handler( SIGTERM, (void (*)())term_handler ) == -1) goto error;
+    if (set_handler( SIGQUIT, (void (*)())quit_handler ) == -1) goto error;
     if (set_handler( SIGUSR1, (void (*)())usr1_handler ) == -1) goto error;
     /* 'ta 6' tells the kernel to synthesize any unaligned accesses this 
        process makes, instead of just signalling an error and terminating

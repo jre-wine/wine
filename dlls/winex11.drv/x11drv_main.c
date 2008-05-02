@@ -20,6 +20,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #include <fcntl.h>
 #include <stdarg.h>
@@ -43,14 +44,15 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wine/winbase16.h"
 #include "winreg.h"
 
 #include "x11drv.h"
 #include "xvidmode.h"
 #include "xrandr.h"
+#include "xcomposite.h"
 #include "wine/server.h"
 #include "wine/debug.h"
+#include "wine/library.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 WINE_DECLARE_DEBUG_CHANNEL(synchronous);
@@ -68,12 +70,14 @@ Screen *screen;
 Visual *visual;
 unsigned int screen_width;
 unsigned int screen_height;
+unsigned int screen_bpp;
 unsigned int screen_depth;
 RECT virtual_screen_rect;
 Window root_window;
 int dxgrab = 0;
 int usexvidmode = 1;
 int usexrandr = 1;
+int usexcomposite = 1;
 int use_xkb = 1;
 int use_take_focus = 1;
 int use_primary_selection = 0;
@@ -88,8 +92,6 @@ int copy_default_colors = 128;
 int alloc_system_colors = 256;
 DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
 int xrender_error_base = 0;
-
-static BOOL desktop_dbl_buf = TRUE;
 
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
@@ -134,7 +136,10 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_WM_PID",
     "_NET_WM_PING",
     "_NET_WM_STATE",
+    "_NET_WM_STATE_ABOVE",
     "_NET_WM_STATE_FULLSCREEN",
+    "_NET_WM_STATE_SKIP_PAGER",
+    "_NET_WM_STATE_SKIP_TASKBAR",
     "_NET_WM_WINDOW_TYPE",
     "_NET_WM_WINDOW_TYPE_DIALOG",
     "_NET_WM_WINDOW_TYPE_NORMAL",
@@ -160,7 +165,8 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "text/html",
     "text/plain",
     "text/rtf",
-    "text/richtext"
+    "text/richtext",
+    "text/uri-list"
 };
 
 /***********************************************************************
@@ -276,7 +282,7 @@ void wine_tsx11_unlock(void)
  *
  * Get a config key from either the app-specific or the default config
  */
-inline static DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
+static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
                                     char *buffer, DWORD size )
 {
     if (appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE)buffer, &size )) return 0;
@@ -351,9 +357,6 @@ static void setup_options(void)
     if (!get_config_key( hkey, appkey, "ClientSideAntiAliasWithRender", buffer, sizeof(buffer) ))
         client_side_antialias_with_render = IS_OPTION_TRUE( buffer[0] );
 
-    if (!get_config_key( hkey, appkey, "DesktopDoubleBuffered", buffer, sizeof(buffer) ))
-        desktop_dbl_buf = IS_OPTION_TRUE( buffer[0] );
-
     if (!get_config_key( hkey, appkey, "UseXIM", buffer, sizeof(buffer) ))
         use_xim = IS_OPTION_TRUE( buffer[0] );
 
@@ -375,6 +378,66 @@ static void setup_options(void)
     if (hkey) RegCloseKey( hkey );
 }
 
+#ifdef SONAME_LIBXCOMPOSITE
+
+#define MAKE_FUNCPTR(f) typeof(f) * p##f;
+MAKE_FUNCPTR(XCompositeQueryExtension)
+MAKE_FUNCPTR(XCompositeQueryVersion)
+MAKE_FUNCPTR(XCompositeVersion)
+MAKE_FUNCPTR(XCompositeRedirectWindow)
+MAKE_FUNCPTR(XCompositeRedirectSubwindows)
+MAKE_FUNCPTR(XCompositeUnredirectWindow)
+MAKE_FUNCPTR(XCompositeUnredirectSubwindows)
+MAKE_FUNCPTR(XCompositeCreateRegionFromBorderClip)
+MAKE_FUNCPTR(XCompositeNameWindowPixmap)
+#undef MAKE_FUNCPTR
+
+static int xcomp_event_base;
+static int xcomp_error_base;
+
+static void X11DRV_XComposite_Init(void)
+{
+    void *xcomposite_handle = wine_dlopen(SONAME_LIBXCOMPOSITE, RTLD_NOW, NULL, 0);
+    if (!xcomposite_handle)
+    {
+        TRACE("Unable to open %s, XComposite disabled\n", SONAME_LIBXCOMPOSITE);
+        usexcomposite = 0;
+        return;
+    }
+
+#define LOAD_FUNCPTR(f) \
+    if((p##f = wine_dlsym(xcomposite_handle, #f, NULL, 0)) == NULL) \
+        goto sym_not_found;
+    LOAD_FUNCPTR(XCompositeQueryExtension)
+    LOAD_FUNCPTR(XCompositeQueryVersion)
+    LOAD_FUNCPTR(XCompositeVersion)
+    LOAD_FUNCPTR(XCompositeRedirectWindow)
+    LOAD_FUNCPTR(XCompositeRedirectSubwindows)
+    LOAD_FUNCPTR(XCompositeUnredirectWindow)
+    LOAD_FUNCPTR(XCompositeUnredirectSubwindows)
+    LOAD_FUNCPTR(XCompositeCreateRegionFromBorderClip)
+    LOAD_FUNCPTR(XCompositeNameWindowPixmap)
+#undef LOAD_FUNCPTR
+
+    if(!pXCompositeQueryExtension(gdi_display, &xcomp_event_base,
+                                  &xcomp_error_base)) {
+        TRACE("XComposite extension could not be queried; disabled\n");
+        wine_dlclose(xcomposite_handle, NULL, 0);
+        xcomposite_handle = NULL;
+        usexcomposite = 0;
+        return;
+    }
+    TRACE("XComposite is up and running error_base = %d\n", xcomp_error_base);
+    return;
+
+sym_not_found:
+    TRACE("Unable to load function pointers from %s, XComposite disabled\n", SONAME_LIBXCOMPOSITE);
+    wine_dlclose(xcomposite_handle, NULL, 0);
+    xcomposite_handle = NULL;
+    usexcomposite = 0;
+}
+#endif /* defined(SONAME_LIBXCOMPOSITE) */
+
 
 /***********************************************************************
  *           X11DRV process initialisation routine
@@ -383,6 +446,7 @@ static BOOL process_attach(void)
 {
     Display *display;
     XVisualInfo *desktop_vi = NULL;
+    const char *env;
 
     setup_options();
 
@@ -390,7 +454,8 @@ static BOOL process_attach(void)
 
     /* Open display */
 
-    if (!XInitThreads()) ERR( "XInitThreads failed, trouble ahead\n" );
+    if (!(env = getenv("XMODIFIERS")) || !*env)  /* try to avoid the Xlib XIM locking bug */
+        if (!XInitThreads()) ERR( "XInitThreads failed, trouble ahead\n" );
 
     if (!(display = XOpenDisplay( NULL ))) return FALSE;
 
@@ -419,7 +484,7 @@ static BOOL process_attach(void)
     if (!screen_depth) screen_depth = DefaultDepthOfScreen( screen );
 
     /* If OpenGL is available, change the default visual, etc as necessary */
-    if (desktop_dbl_buf && (desktop_vi = X11DRV_setup_opengl_visual( display )))
+    if ((desktop_vi = X11DRV_setup_opengl_visual( display )))
     {
         visual       = desktop_vi->visual;
         screen       = ScreenOfDisplay(display, desktop_vi->screen);
@@ -427,23 +492,52 @@ static BOOL process_attach(void)
         XFree(desktop_vi);
     }
 
+    switch(screen_depth) {
+        case 8:
+            screen_bpp = 8;
+            break;
+
+        case 15:
+            /* In GetDeviceCaps MSDN description explicitly states that
+             * in 15 bpp mode 16 is returned.
+             */
+            /* fall through */
+        case 16:
+            screen_bpp = 16;
+            break;
+
+        case 24:
+            /* This is not necessarily right. X11 always has 24 bits per pixel, but it can run
+             * with 24 bit framebuffers and 32 bit framebuffers. It doesn't make any difference
+             * for windowing, but gl applications can get visuals with alpha channels. So we
+             * should check the framebuffer and/or opengl formats available to find out what the
+             * framebuffer actually does
+             */
+            screen_bpp = 32;
+            break;
+
+        default:
+            FIXME("Unexpected X11 depth %d bpp, what to report to app?\n", screen_depth);
+            screen_bpp = screen_depth;
+    }
+
     XInternAtoms( display, (char **)atom_names, NB_XATOMS - FIRST_XATOM, False, X11DRV_Atoms );
 
     if (TRACE_ON(synchronous)) XSynchronize( display, True );
 
-    screen_width  = WidthOfScreen( screen );
-    screen_height = HeightOfScreen( screen );
-
-    xinerama_init();
+    xinerama_init( WidthOfScreen(screen), HeightOfScreen(screen) );
     X11DRV_Settings_Init();
 
 #ifdef HAVE_LIBXXF86VM
     /* initialize XVidMode */
     X11DRV_XF86VM_Init();
 #endif
-#ifdef HAVE_LIBXRANDR
+#ifdef SONAME_LIBXRANDR
     /* initialize XRandR */
     X11DRV_XRandR_Init();
+#endif
+#ifdef SONAME_LIBXCOMPOSITE
+    X11DRV_XComposite_Init();
 #endif
 
     X11DRV_InitKeyboard();
@@ -463,7 +557,6 @@ static void thread_detach(void)
     if (data)
     {
         X11DRV_ResetSelectionOwner();
-        CloseHandle( data->display_fd );
         wine_tsx11_lock();
         if (data->xim) XCloseIM( data->xim );
         XCloseDisplay( data->display );
@@ -490,6 +583,32 @@ static void process_detach(void)
 
     DeleteCriticalSection( &X11DRV_CritSection );
     TlsFree( thread_data_tls_index );
+}
+
+
+/* store the display fd into the message queue */
+static void set_queue_display_fd( Display *display )
+{
+    HANDLE handle;
+    int ret;
+
+    if (wine_server_fd_to_handle( ConnectionNumber(display), GENERIC_READ | SYNCHRONIZE, 0, &handle ))
+    {
+        MESSAGE( "x11drv: Can't allocate handle for display fd\n" );
+        ExitProcess(1);
+    }
+    SERVER_START_REQ( set_queue_fd )
+    {
+        req->handle = handle;
+        ret = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    if (ret)
+    {
+        MESSAGE( "x11drv: Can't store handle for display fd\n" );
+        ExitProcess(1);
+    }
+    CloseHandle( handle );
 }
 
 
@@ -539,12 +658,7 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     else if (!(data->xim = X11DRV_SetupXIM( data->display, input_style )))
         WARN("Input Method is not available\n");
 
-    if (wine_server_fd_to_handle( ConnectionNumber(data->display), GENERIC_READ | SYNCHRONIZE,
-                                  0, &data->display_fd ))
-    {
-        MESSAGE( "x11drv: Can't allocate handle for display fd\n" );
-        ExitProcess(1);
-    }
+    set_queue_display_fd( data->display );
     data->process_event_count = 0;
     data->cursor = None;
     data->cursor_window = None;

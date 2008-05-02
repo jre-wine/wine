@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 #include "msvcrt.h"
+#include "msvcrt/mbctype.h"
 
 #include "wine/debug.h"
 
@@ -26,9 +27,39 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 /* Index to TLS */
 DWORD msvcrt_tls_index;
 
-static inline BOOL msvcrt_init_tls(void);
-static inline BOOL msvcrt_free_tls(void);
-const char* msvcrt_get_reason(DWORD reason);
+static const char* msvcrt_get_reason(DWORD reason)
+{
+  switch (reason)
+  {
+  case DLL_PROCESS_ATTACH: return "DLL_PROCESS_ATTACH";
+  case DLL_PROCESS_DETACH: return "DLL_PROCESS_DETACH";
+  case DLL_THREAD_ATTACH:  return "DLL_THREAD_ATTACH";
+  case DLL_THREAD_DETACH:  return "DLL_THREAD_DETACH";
+  }
+  return "UNKNOWN";
+}
+
+static inline BOOL msvcrt_init_tls(void)
+{
+  msvcrt_tls_index = TlsAlloc();
+
+  if (msvcrt_tls_index == TLS_OUT_OF_INDEXES)
+  {
+    ERR("TlsAlloc() failed!\n");
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static inline BOOL msvcrt_free_tls(void)
+{
+  if (!TlsFree(msvcrt_tls_index))
+  {
+    ERR("TlsFree() failed!\n");
+    return FALSE;
+  }
+  return TRUE;
+}
 
 /*********************************************************************
  *                  Init
@@ -53,6 +84,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     msvcrt_init_args();
     msvcrt_init_signals();
     MSVCRT_setlocale(0, "C");
+    _setmbcp(_MB_CP_LOCALE);
     TRACE("finished process init\n");
     break;
   case DLL_THREAD_ATTACH:
@@ -83,41 +115,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
   }
   return TRUE;
 }
-
-static inline BOOL msvcrt_init_tls(void)
-{
-  msvcrt_tls_index = TlsAlloc();
-
-  if (msvcrt_tls_index == TLS_OUT_OF_INDEXES)
-  {
-    ERR("TlsAlloc() failed!\n");
-    return FALSE;
-  }
-  return TRUE;
-}
-
-static inline BOOL msvcrt_free_tls(void)
-{
-  if (!TlsFree(msvcrt_tls_index))
-  {
-    ERR("TlsFree() failed!\n");
-    return FALSE;
-  }
-  return TRUE;
-}
-
-const char* msvcrt_get_reason(DWORD reason)
-{
-  switch (reason)
-  {
-  case DLL_PROCESS_ATTACH: return "DLL_PROCESS_ATTACH";
-  case DLL_PROCESS_DETACH: return "DLL_PROCESS_DETACH";
-  case DLL_THREAD_ATTACH:  return "DLL_THREAD_ATTACH";
-  case DLL_THREAD_DETACH:  return "DLL_THREAD_DETACH";
-  }
-  return "UNKNOWN";
-}
-
 
 /*********************************************************************
  *		$I10_OUTPUT (MSVCRT.@)

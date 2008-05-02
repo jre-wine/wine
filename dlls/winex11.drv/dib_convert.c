@@ -40,8 +40,8 @@
  *   of the image. This is always >0.
  * - srcbits
  *   Points to the first byte containing data to be copied. If the source
- *   surface starts are coordinates (x,y) then this is:
- *   image_ptr+x*bytes_pre_pixel+y*bytes_per_line
+ *   surface starts at coordinates (x,y) then this is:
+ *   image_ptr+x*bytes_per_pixel+y*bytes_per_line
  *   (with further adjustments for top-down/bottom-up images)
  * - srclinebytes
  *   This is the number of bytes per line. It may be >0 or <0 depending on
@@ -111,7 +111,7 @@ static void convert_555_reverse(int width, int height,
                         ((srcval >> 10) & 0x001f001f);  /* l */
         }
         if (width&1) {
-            /* And the the odd pixel */
+            /* And then the odd pixel */
             WORD srcval;
             srcval=*((const WORD*)srcpixel);
             *((WORD*)dstpixel)=((srcval << 10) & 0x7c00) | /* h */
@@ -143,7 +143,7 @@ static void convert_555_to_565_asis(int width, int height,
                         ( srcval       & 0x001f001f);  /* l */
         }
         if (width&1) {
-            /* And the the odd pixel */
+            /* And then the odd pixel */
             WORD srcval;
             srcval=*((const WORD*)srcpixel);
             *((WORD*)dstpixel)=((srcval << 1) & 0xffc0) | /* h, g */
@@ -176,7 +176,7 @@ static void convert_555_to_565_reverse(int width, int height,
                         ((srcval << 11) & 0xf800f800);  /* l */
         }
         if (width&1) {
-            /* And the the odd pixel */
+            /* And then the odd pixel */
             WORD srcval;
             srcval=*((const WORD*)srcpixel);
             *((WORD*)dstpixel)=((srcval >> 10) & 0x001f) | /* h */
@@ -380,7 +380,7 @@ static void convert_565_reverse(int width, int height,
                         ((srcval >> 11) & 0x001f001f);  /* l */
         }
         if (width&1) {
-            /* And the the odd pixel */
+            /* And then the odd pixel */
             WORD srcval;
             srcval=*((const WORD*)srcpixel);
             *((WORD*)dstpixel)=((srcval << 11) & 0xf800) | /* h */
@@ -411,7 +411,7 @@ static void convert_565_to_555_asis(int width, int height,
                         ( srcval       & 0x001f001f);  /* l */
         }
         if (width&1) {
-            /* And the the odd pixel */
+            /* And then the odd pixel */
             WORD srcval;
             srcval=*((const WORD*)srcpixel);
             *((WORD*)dstpixel)=((srcval >> 1) & 0x7fe0) | /* h, g */
@@ -442,7 +442,7 @@ static void convert_565_to_555_reverse(int width, int height,
                         ((srcval << 10) & 0x7c007c00);  /* l */
         }
         if (width&1) {
-            /* And the the odd pixel */
+            /* And then the odd pixel */
             WORD srcval;
             srcval=*((const WORD*)srcpixel);
             *((WORD*)dstpixel)=((srcval >> 11) & 0x001f) | /* h */
@@ -829,7 +829,7 @@ static void convert_888_to_0888_asis(int width, int height,
     for (y=0; y<height; y++) {
         srcpixel=srcbits;
         dstpixel=dstbits;
-        /* advance  w1 pixels to make srcpixel 32 bit alignd */
+        /* advance  w1 pixels to make srcpixel 32 bit aligned */
         srcpixel = (const DWORD*)((INT_PTR)srcpixel & ~3);
         srcpixel += w1;
         dstpixel += w1;
@@ -894,7 +894,7 @@ static void convert_888_to_0888_reverse(int width, int height,
     for (y=0; y<height; y++) {
         srcpixel=srcbits;
         dstpixel=dstbits;
-        /* advance w1 pixels to make srcpixel 32 bit alignd */
+        /* advance w1 pixels to make srcpixel 32 bit aligned */
         srcpixel =  (const DWORD*)((INT_PTR)srcpixel & ~3);
         srcpixel += w1;
         dstpixel += w1;

@@ -23,7 +23,6 @@
 
 #include <string.h>
 
-#include "winerror.h"
 #include "wine/winbase16.h"
 #include "wine/server.h"
 #include "wine/debug.h"
@@ -35,7 +34,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(selector);
 #define LDT_SIZE 8192
 
 /* get the number of selectors needed to cover up to the selector limit */
-inline static WORD get_sel_count( WORD sel )
+static inline WORD get_sel_count( WORD sel )
 {
     return (wine_ldt_copy.limit[sel >> __AHSHIFT] >> 16) + 1;
 }
@@ -385,7 +384,7 @@ BOOL16 WINAPI IsBadHugeWritePtr16( SEGPTR ptr, DWORD size )
     if (!sel) return TRUE;
     wine_ldt_get_entry( sel, &entry );
     if (wine_ldt_is_empty( &entry )) return TRUE;
-    /* check for writeable data segment, ignoring expand-down and accessed flags */
+    /* check for writable data segment, ignoring expand-down and accessed flags */
     if ((entry.HighWord.Bits.Type ^ WINE_LDT_FLAGS_DATA) & ~5) return TRUE;
     if (size && (OFFSETOF(ptr) + size - 1 > wine_ldt_get_limit( &entry ))) return TRUE;
     return FALSE;
@@ -483,7 +482,7 @@ SEGPTR WINAPI MapLS( LPCVOID ptr )
 
     if (!HIWORD(ptr)) return (SEGPTR)LOWORD(ptr);
 
-    base = (const char *)ptr - ((unsigned int)ptr & 0x7fff);
+    base = (const char *)ptr - ((ULONG_PTR)ptr & 0x7fff);
     HeapLock( GetProcessHeap() );
     for (entry = first_entry; entry; entry = entry->next)
     {
@@ -566,7 +565,7 @@ LPVOID WINAPI MapSLFix( SEGPTR sptr )
  * Must not change EAX, hence defined as asm function.
  */
 #ifdef __i386__
-__ASM_GLOBAL_FUNC( UnMapSLFixArray, "ret $8" );
+__ASM_GLOBAL_FUNC( UnMapSLFixArray, "ret $8" )
 #endif
 
 
@@ -603,7 +602,7 @@ __ASM_GLOBAL_FUNC( SMapLS,
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("MapLS") "\n\t"
                    "movl %eax,%edx\n"
-                   "1:\tret" );
+                   "1:\tret" )
 
 /***********************************************************************
  *		SUnMapLS (KERNEL32.@)
@@ -613,7 +612,7 @@ __ASM_GLOBAL_FUNC( SUnMapLS,
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("UnMapLS") "\n\t"
                    "popl %eax\n\t"
-                   "ret" );
+                   "ret" )
 
 /***********************************************************************
  *		SMapLS_IP_EBP_8 (KERNEL32.@)
@@ -636,17 +635,17 @@ __ASM_GLOBAL_FUNC( SUnMapLS,
                      "movl " #n "(%ebp),%eax\n\t" \
                      "call " __ASM_NAME("SMapLS") "\n\t" \
                      "movl %edx," #n "(%ebp)\n\t" \
-                     "ret" );
+                     "ret" )
 
-DEFINE_SMapLS(8);
-DEFINE_SMapLS(12);
-DEFINE_SMapLS(16);
-DEFINE_SMapLS(20);
-DEFINE_SMapLS(24);
-DEFINE_SMapLS(28);
-DEFINE_SMapLS(32);
-DEFINE_SMapLS(36);
-DEFINE_SMapLS(40);
+DEFINE_SMapLS(8)
+DEFINE_SMapLS(12)
+DEFINE_SMapLS(16)
+DEFINE_SMapLS(20)
+DEFINE_SMapLS(24)
+DEFINE_SMapLS(28)
+DEFINE_SMapLS(32)
+DEFINE_SMapLS(36)
+DEFINE_SMapLS(40)
 
 
 /***********************************************************************
@@ -670,14 +669,14 @@ DEFINE_SMapLS(40);
                      "popl %eax\n\t" \
                      "ret" )
 
-DEFINE_SUnMapLS(8);
-DEFINE_SUnMapLS(12);
-DEFINE_SUnMapLS(16);
-DEFINE_SUnMapLS(20);
-DEFINE_SUnMapLS(24);
-DEFINE_SUnMapLS(28);
-DEFINE_SUnMapLS(32);
-DEFINE_SUnMapLS(36);
-DEFINE_SUnMapLS(40);
+DEFINE_SUnMapLS(8)
+DEFINE_SUnMapLS(12)
+DEFINE_SUnMapLS(16)
+DEFINE_SUnMapLS(20)
+DEFINE_SUnMapLS(24)
+DEFINE_SUnMapLS(28)
+DEFINE_SUnMapLS(32)
+DEFINE_SUnMapLS(36)
+DEFINE_SUnMapLS(40)
 
 #endif  /* __i386__ */

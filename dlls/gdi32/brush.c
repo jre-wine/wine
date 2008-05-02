@@ -27,7 +27,6 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "wine/wingdi16.h"
-#include "gdi.h"
 #include "wownt32.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
@@ -43,7 +42,7 @@ typedef struct
 
 #define NB_HATCH_STYLES  6
 
-static HGDIOBJ BRUSH_SelectObject( HGDIOBJ handle, void *obj, HDC hdc );
+static HGDIOBJ BRUSH_SelectObject( HGDIOBJ handle, HDC hdc );
 static INT BRUSH_GetObject16( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
 static INT BRUSH_GetObject( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
 static BOOL BRUSH_DeleteObject( HGDIOBJ handle, void *obj );
@@ -58,7 +57,7 @@ static const struct gdi_obj_funcs brush_funcs =
     BRUSH_DeleteObject   /* pDeleteObject */
 };
 
-static HGLOBAL16 dib_copy(BITMAPINFO *info, UINT coloruse)
+static HGLOBAL16 dib_copy(const BITMAPINFO *info, UINT coloruse)
 {
     BITMAPINFO  *newInfo;
     HGLOBAL16   hmem;
@@ -347,7 +346,7 @@ BOOL WINAPI SetBrushOrgEx( HDC hdc, INT x, INT y, LPPOINT oldorg )
     }
     dc->brushOrgX = x;
     dc->brushOrgY = y;
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return TRUE;
 }
 
@@ -369,22 +368,30 @@ BOOL WINAPI FixBrushOrgEx( HDC hdc, INT x, INT y, LPPOINT oldorg )
 /***********************************************************************
  *           BRUSH_SelectObject
  */
-static HGDIOBJ BRUSH_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
+static HGDIOBJ BRUSH_SelectObject( HGDIOBJ handle, HDC hdc )
 {
-    BRUSHOBJ *brush = obj;
-    HGDIOBJ ret;
-    DC *dc = DC_GetDCPtr( hdc );
+    BRUSHOBJ *brush;
+    HGDIOBJ ret = 0;
+    DC *dc = get_dc_ptr( hdc );
 
     if (!dc) return 0;
 
-    if (brush->logbrush.lbStyle == BS_PATTERN)
-        BITMAP_SetOwnerDC( (HBITMAP)brush->logbrush.lbHatch, dc );
+    if ((brush = GDI_GetObjPtr( handle, BRUSH_MAGIC )))
+    {
+        if (brush->logbrush.lbStyle == BS_PATTERN)
+            BITMAP_SetOwnerDC( (HBITMAP)brush->logbrush.lbHatch, dc );
 
-    ret = dc->hBrush;
-    if (dc->funcs->pSelectBrush) handle = dc->funcs->pSelectBrush( dc->physDev, handle );
-    if (handle) dc->hBrush = handle;
-    else ret = 0;
-    GDI_ReleaseObj( hdc );
+        if (dc->funcs->pSelectBrush) handle = dc->funcs->pSelectBrush( dc->physDev, handle );
+        if (handle)
+        {
+            ret = dc->hBrush;
+            dc->hBrush = handle;
+            GDI_inc_ref_count( handle );
+            GDI_dec_ref_count( ret );
+        }
+        GDI_ReleaseObj( handle );
+    }
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -464,7 +471,7 @@ BOOL16 WINAPI SetSolidBrush16(HBRUSH16 hBrush, COLORREF newColor )
     BRUSHOBJ * brushPtr;
     BOOL16 res = FALSE;
 
-    TRACE("(hBrush %04x, newColor %08x)\n", hBrush, (DWORD)newColor);
+    TRACE("(hBrush %04x, newColor %08x)\n", hBrush, newColor);
     if (!(brushPtr = (BRUSHOBJ *) GDI_GetObjPtr( HBRUSH_32(hBrush), BRUSH_MAGIC )))
 	return FALSE;
 

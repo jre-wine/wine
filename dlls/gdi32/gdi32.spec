@@ -21,7 +21,7 @@
 @ stdcall BeginPath(long)
 @ stdcall BitBlt(long long long long long long long long long)
 @ stub ByeByeGDI
-@ stub CancelDC
+@ stdcall CancelDC(long)
 @ stub CheckColorsInGamut
 @ stdcall ChoosePixelFormat(long ptr)
 @ stdcall Chord(long long long long long long long long long)
@@ -178,8 +178,8 @@
 @ stdcall GdiFlush()
 # @ stub GdiFullscreenControl
 @ stdcall GdiGetBatchLimit()
-@ stdcall GdiGetCharDimensions(ptr ptr ptr)
-# @ stub GdiGetCodePage
+@ stdcall GdiGetCharDimensions(long ptr ptr)
+@ stdcall GdiGetCodePage(long)
 # @ stub GdiGetDC
 # @ stub GdiGetDevmodeForPage
 @ stub GdiGetLocalBitmap
@@ -282,14 +282,14 @@
 @ stdcall GetFontUnicodeRanges(ptr ptr)
 @ stdcall GetGlyphIndicesA(long ptr long ptr long)
 @ stdcall GetGlyphIndicesW(long ptr long ptr long)
-@ stub GetGlyphOutline
+@ stdcall GetGlyphOutline(long long long ptr long ptr ptr) GetGlyphOutlineA
 @ stdcall GetGlyphOutlineA(long long long ptr long ptr ptr)
 @ stdcall GetGlyphOutlineW(long long long ptr long ptr ptr)
 @ stub GetGlyphOutlineWow
 @ stdcall GetGraphicsMode(long)
 # @ stub GetHFONT
-@ stdcall GetICMProfileA(long ptr str)
-@ stdcall GetICMProfileW(long ptr wstr)
+@ stdcall GetICMProfileA(long ptr ptr)
+@ stdcall GetICMProfileW(long ptr ptr)
 @ stdcall GetKerningPairs(long long ptr) GetKerningPairsA
 @ stdcall GetKerningPairsA(long long ptr)
 @ stdcall GetKerningPairsW(long long ptr)
@@ -332,7 +332,7 @@
 @ stdcall GetTextCharsetInfo(long ptr long)
 @ stdcall GetTextColor(long)
 @ stdcall GetTextExtentExPointA(long str long long ptr ptr ptr)
-# @ stub GetTextExtentExPointI
+@ stdcall GetTextExtentExPointI(long ptr long long ptr ptr ptr)
 @ stdcall GetTextExtentExPointW(long wstr long long ptr ptr ptr)
 # @ stub GetTextExtentExPointWPri
 @ stdcall GetTextExtentPoint32A(long str long ptr)
@@ -397,7 +397,7 @@
 @ stdcall RectInRegion(long ptr)
 @ stdcall RectVisible(long ptr)
 @ stdcall Rectangle(long long long long long)
-# @ stub RemoveFontMemResourceEx
+@ stdcall RemoveFontMemResourceEx(ptr)
 @ stdcall RemoveFontResourceA(str)
 @ stdcall RemoveFontResourceExA(str long ptr)
 @ stdcall RemoveFontResourceExW(wstr long ptr)
@@ -498,6 +498,7 @@
 ################################################################
 # Wine extensions: OpenGL support
 #
+@ stdcall wglCopyContext(long long long)
 @ stdcall wglCreateContext(long)
 @ stdcall wglDeleteContext(long)
 @ stdcall wglGetCurrentContext()
@@ -528,9 +529,3 @@
 
 # GDI objects
 @ cdecl __wine_make_gdi_object_system(long long)
-
-################################################################
-# Wine dll separation hacks, these will go away, don't use them
-#
-@ cdecl GDI_GetObjPtr(long long)
-@ cdecl GDI_ReleaseObj(long)

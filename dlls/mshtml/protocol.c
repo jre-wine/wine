@@ -102,6 +102,13 @@ static HRESULT WINAPI InternetProtocolInfo_CombineUrl(IInternetProtocolInfo *ifa
     return INET_E_USE_DEFAULT_PROTOCOLHANDLER;
 }
 
+static HRESULT WINAPI InternetProtocolInfo_CompareUrl(IInternetProtocolInfo *iface, LPCWSTR pwzUrl1,
+        LPCWSTR pwzUrl2, DWORD dwCompareFlags)
+{
+    TRACE("%p)->(%s %s %08x)\n", iface, debugstr_w(pwzUrl1), debugstr_w(pwzUrl2), dwCompareFlags);
+    return E_NOTIMPL;
+}
+
 #undef PROTOCOLINFO_THIS
 
 #define CLASSFACTORY_THIS(iface) DEFINE_THIS(ProtocolFactory, ClassFactory, iface)
@@ -206,8 +213,8 @@ static ULONG WINAPI AboutProtocol_Release(IInternetProtocol *iface)
     TRACE("(%p) ref=%x\n", iface, ref);
 
     if(!ref) {
-        mshtml_free(This->data);
-        mshtml_free(This);
+        heap_free(This->data);
+        heap_free(This);
         UNLOCK_MODULE();
     }
 
@@ -244,6 +251,8 @@ static HRESULT WINAPI AboutProtocol_Start(IInternetProtocol *iface, LPCWSTR szUr
     IInternetBindInfo_GetBindInfo(pOIBindInfo, &grfBINDF, &bindinfo);
     ReleaseBindInfo(&bindinfo);
 
+    TRACE("bindf %x\n", grfBINDF);
+
     if(strlenW(szUrl)>=sizeof(wszAbout)/sizeof(WCHAR) && !memcmp(wszAbout, szUrl, sizeof(wszAbout))) {
         text = szUrl + sizeof(wszAbout)/sizeof(WCHAR);
         if(!strcmpW(wszBlank, text))
@@ -252,7 +261,7 @@ static HRESULT WINAPI AboutProtocol_Start(IInternetProtocol *iface, LPCWSTR szUr
 
     This->data_len = sizeof(html_begin)+sizeof(html_end)-sizeof(WCHAR) 
         + (text ? strlenW(text)*sizeof(WCHAR) : 0);
-    This->data = mshtml_alloc(This->data_len);
+    This->data = heap_alloc(This->data_len);
 
     memcpy(This->data, html_begin, sizeof(html_begin));
     if(text)
@@ -322,7 +331,7 @@ static HRESULT WINAPI AboutProtocol_Read(IInternetProtocol *iface, void* pv, ULO
     if(!*pcbRead)
         return S_FALSE;
 
-    memcpy(pv, This->data, *pcbRead);
+    memcpy(pv, This->data+This->cur, *pcbRead);
     This->cur += *pcbRead;
 
     return S_OK;
@@ -380,7 +389,7 @@ static HRESULT WINAPI AboutProtocolFactory_CreateInstance(IClassFactory *iface, 
 
     TRACE("(%p)->(%p %s %p)\n", iface, pUnkOuter, debugstr_guid(riid), ppv);
 
-    ret = mshtml_alloc(sizeof(AboutProtocol));
+    ret = heap_alloc(sizeof(AboutProtocol));
     ret->lpInternetProtocolVtbl = &AboutProtocolVtbl;
     ret->ref = 0;
 
@@ -402,7 +411,7 @@ static HRESULT WINAPI AboutProtocolFactory_CreateInstance(IClassFactory *iface, 
     if(SUCCEEDED(hres))
         LOCK_MODULE();
     else
-        mshtml_free(ret);
+        heap_free(ret);
 
     return hres;
 }
@@ -438,20 +447,47 @@ static HRESULT WINAPI AboutProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, L
     return INET_E_DEFAULT_ACTION;
 }
 
-static HRESULT WINAPI AboutProtocolInfo_CompareUrl(IInternetProtocolInfo *iface, LPCWSTR pwzUrl1,
-        LPCWSTR pwzUrl2, DWORD dwCompareFlags)
-{
-    FIXME("%p)->(%s %s %08x)\n", iface, debugstr_w(pwzUrl1), debugstr_w(pwzUrl2), dwCompareFlags);
-    return E_NOTIMPL;
-}
-
 static HRESULT WINAPI AboutProtocolInfo_QueryInfo(IInternetProtocolInfo *iface, LPCWSTR pwzUrl,
         QUERYOPTION QueryOption, DWORD dwQueryFlags, LPVOID pBuffer, DWORD cbBuffer, DWORD* pcbBuf,
         DWORD dwReserved)
 {
-    FIXME("%p)->(%s %08x %08x %p %d %p %d)\n", iface, debugstr_w(pwzUrl), QueryOption, dwQueryFlags, pBuffer,
-            cbBuffer, pcbBuf, dwReserved);
-    return E_NOTIMPL;
+    TRACE("%p)->(%s %08x %08x %p %d %p %d)\n", iface, debugstr_w(pwzUrl), QueryOption, dwQueryFlags, pBuffer,
+          cbBuffer, pcbBuf, dwReserved);
+
+    switch(QueryOption) {
+    case QUERY_CAN_NAVIGATE:
+        return INET_E_USE_DEFAULT_PROTOCOLHANDLER;
+
+    case QUERY_USES_NETWORK:
+        if(!pBuffer || cbBuffer < sizeof(DWORD))
+            return E_FAIL;
+
+        *(DWORD*)pBuffer = 0;
+        if(pcbBuf)
+            *pcbBuf = sizeof(DWORD);
+
+        break;
+
+    case QUERY_IS_CACHED:
+        FIXME("Unsupported option QUERY_IS_CACHED\n");
+        return E_NOTIMPL;
+    case QUERY_IS_INSTALLEDENTRY:
+        FIXME("Unsupported option QUERY_IS_INSTALLEDENTRY\n");
+        return E_NOTIMPL;
+    case QUERY_IS_CACHED_OR_MAPPED:
+        FIXME("Unsupported option QUERY_IS_CACHED_OR_MAPPED\n");
+        return E_NOTIMPL;
+    case QUERY_IS_SECURE:
+        FIXME("Unsupported option QUERY_IS_SECURE\n");
+        return E_NOTIMPL;
+    case QUERY_IS_SAFE:
+        FIXME("Unsupported option QUERY_IS_SAFE\n");
+        return E_NOTIMPL;
+    default:
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static const IInternetProtocolInfoVtbl AboutProtocolInfoVtbl = {
@@ -460,7 +496,7 @@ static const IInternetProtocolInfoVtbl AboutProtocolInfoVtbl = {
     InternetProtocolInfo_Release,
     AboutProtocolInfo_ParseUrl,
     InternetProtocolInfo_CombineUrl,
-    AboutProtocolInfo_CompareUrl,
+    InternetProtocolInfo_CompareUrl,
     AboutProtocolInfo_QueryInfo
 };
 
@@ -542,8 +578,8 @@ static ULONG WINAPI ResProtocol_Release(IInternetProtocol *iface)
     TRACE("(%p) ref=%x\n", iface, ref);
 
     if(!ref) {
-        mshtml_free(This->data);
-        mshtml_free(This);
+        heap_free(This->data);
+        heap_free(This);
         UNLOCK_MODULE();
     }
 
@@ -573,27 +609,27 @@ static HRESULT WINAPI ResProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     ReleaseBindInfo(&bindinfo);
 
     len = strlenW(szUrl)+16;
-    url = mshtml_alloc(len*sizeof(WCHAR));
+    url = heap_alloc(len*sizeof(WCHAR));
     hres = CoInternetParseUrl(szUrl, PARSE_ENCODE, 0, url, len, &len, 0);
     if(FAILED(hres)) {
         WARN("CoInternetParseUrl failed: %08x\n", hres);
-        mshtml_free(url);
+        heap_free(url);
         IInternetProtocolSink_ReportResult(pOIProtSink, hres, 0, NULL);
         return hres;
     }
 
     if(len < sizeof(wszRes)/sizeof(wszRes[0]) || memcmp(url, wszRes, sizeof(wszRes))) {
         WARN("Wrong protocol of url: %s\n", debugstr_w(url));
-        IInternetProtocolSink_ReportResult(pOIProtSink, MK_E_SYNTAX, 0, NULL);
-        mshtml_free(url);
-        return MK_E_SYNTAX;
+        IInternetProtocolSink_ReportResult(pOIProtSink, E_INVALIDARG, 0, NULL);
+        heap_free(url);
+        return E_INVALIDARG;
     }
 
     url_dll = url + sizeof(wszRes)/sizeof(wszRes[0]);
     if(!(url_file = strrchrW(url_dll, '/'))) {
         WARN("wrong url: %s\n", debugstr_w(url));
         IInternetProtocolSink_ReportResult(pOIProtSink, MK_E_SYNTAX, 0, NULL);
-        mshtml_free(url);
+        heap_free(url);
         return MK_E_SYNTAX;
     }
 
@@ -602,6 +638,7 @@ static HRESULT WINAPI ResProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     if(!hdll) {
         WARN("Could not open dll: %s\n", debugstr_w(url_dll));
         IInternetProtocolSink_ReportResult(pOIProtSink, HRESULT_FROM_WIN32(GetLastError()), 0, NULL);
+        heap_free(url);
         return HRESULT_FROM_WIN32(GetLastError());
     }
 
@@ -616,25 +653,25 @@ static HRESULT WINAPI ResProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
             WARN("Could not find resource\n");
             IInternetProtocolSink_ReportResult(pOIProtSink,
                     HRESULT_FROM_WIN32(GetLastError()), 0, NULL);
-            mshtml_free(url);
+            heap_free(url);
             return HRESULT_FROM_WIN32(GetLastError());
         }
     }
 
     if(This->data) {
         WARN("data already loaded\n");
-        mshtml_free(This->data);
+        heap_free(This->data);
     }
 
     This->data_len = SizeofResource(hdll, src);
-    This->data = mshtml_alloc(This->data_len);
+    This->data = heap_alloc(This->data_len);
     memcpy(This->data, LoadResource(hdll, src), This->data_len);
     This->cur = 0;
 
     FreeLibrary(hdll);
 
     hres = FindMimeFromData(NULL, url_file, NULL, 0, NULL, 0, &mime, 0);
-    mshtml_free(url);
+    heap_free(url);
     if(SUCCEEDED(hres)) {
         IInternetProtocolSink_ReportProgress(pOIProtSink, BINDSTATUS_MIMETYPEAVAILABLE, mime);
         CoTaskMemFree(mime);
@@ -702,7 +739,7 @@ static HRESULT WINAPI ResProtocol_Read(IInternetProtocol *iface, void* pv, ULONG
     if(!*pcbRead)
         return S_FALSE;
 
-    memcpy(pv, This->data, *pcbRead);
+    memcpy(pv, This->data+This->cur, *pcbRead);
     This->cur += *pcbRead;
 
     return S_OK;
@@ -762,7 +799,7 @@ static HRESULT WINAPI ResProtocolFactory_CreateInstance(IClassFactory *iface, IU
 
     TRACE("(%p)->(%p %s %p)\n", iface, pUnkOuter, debugstr_guid(riid), ppv);
 
-    ret = mshtml_alloc(sizeof(ResProtocol));
+    ret = heap_alloc(sizeof(ResProtocol));
     ret->lpInternetProtocolVtbl = &ResProtocolVtbl;
     ret->ref = 0;
     ret->data = NULL;
@@ -783,7 +820,7 @@ static HRESULT WINAPI ResProtocolFactory_CreateInstance(IClassFactory *iface, IU
     if(SUCCEEDED(hres))
         LOCK_MODULE();
     else
-        mshtml_free(ret);
+        heap_free(ret);
 
     return hres;
 }
@@ -803,11 +840,11 @@ static HRESULT WINAPI ResProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, LPC
         static const WCHAR wszRes[] = {'r','e','s',':','/','/'};
 
         if(strlenW(pwzUrl) <= sizeof(wszRes)/sizeof(WCHAR) || memcmp(pwzUrl, wszRes, sizeof(wszRes)))
-            return MK_E_SYNTAX;
+            return E_INVALIDARG;
 
         ptr = strchrW(pwzUrl + sizeof(wszRes)/sizeof(WCHAR), '/');
         if(!ptr)
-            return MK_E_SYNTAX;
+            return E_INVALIDARG;
 
         size = ptr-pwzUrl + sizeof(wszFile)/sizeof(WCHAR) - sizeof(wszRes)/sizeof(WCHAR);
         if(size >= cchResult)
@@ -839,20 +876,34 @@ static HRESULT WINAPI ResProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, LPC
     return INET_E_DEFAULT_ACTION;
 }
 
-static HRESULT WINAPI ResProtocolInfo_CompareUrl(IInternetProtocolInfo *iface, LPCWSTR pwzUrl1,
-        LPCWSTR pwzUrl2, DWORD dwCompareFlags)
-{
-    FIXME("%p)->(%s %s %08x)\n", iface, debugstr_w(pwzUrl1), debugstr_w(pwzUrl2), dwCompareFlags);
-    return E_NOTIMPL;
-}
-
 static HRESULT WINAPI ResProtocolInfo_QueryInfo(IInternetProtocolInfo *iface, LPCWSTR pwzUrl,
         QUERYOPTION QueryOption, DWORD dwQueryFlags, LPVOID pBuffer, DWORD cbBuffer, DWORD* pcbBuf,
         DWORD dwReserved)
 {
-    FIXME("%p)->(%s %08x %08x %p %d %p %d)\n", iface, debugstr_w(pwzUrl), QueryOption, dwQueryFlags, pBuffer,
-            cbBuffer, pcbBuf, dwReserved);
-    return E_NOTIMPL;
+    TRACE("%p)->(%s %08x %08x %p %d %p %d)\n", iface, debugstr_w(pwzUrl), QueryOption, dwQueryFlags, pBuffer,
+          cbBuffer, pcbBuf, dwReserved);
+
+    switch(QueryOption) {
+    case QUERY_USES_NETWORK:
+        if(!pBuffer || cbBuffer < sizeof(DWORD))
+            return E_FAIL;
+
+        *(DWORD*)pBuffer = 0;
+        if(pcbBuf)
+            *pcbBuf = sizeof(DWORD);
+        break;
+
+    case QUERY_IS_SECURE:
+        FIXME("not supporte QUERY_IS_SECURE\n");
+        return E_NOTIMPL;
+    case QUERY_IS_SAFE:
+        FIXME("not supporte QUERY_IS_SAFE\n");
+        return E_NOTIMPL;
+    default:
+        return INET_E_USE_DEFAULT_PROTOCOLHANDLER;
+    }
+
+    return S_OK;
 }
 
 static const IInternetProtocolInfoVtbl ResProtocolInfoVtbl = {
@@ -861,7 +912,7 @@ static const IInternetProtocolInfoVtbl ResProtocolInfoVtbl = {
     InternetProtocolInfo_Release,
     ResProtocolInfo_ParseUrl,
     InternetProtocolInfo_CombineUrl,
-    ResProtocolInfo_CompareUrl,
+    InternetProtocolInfo_CompareUrl,
     ResProtocolInfo_QueryInfo
 };
 

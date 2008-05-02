@@ -35,36 +35,17 @@
 
 #include "wine/winbase16.h"
 #include "wine/library.h"
-#include "wincon.h"
 #include "toolhelp.h"
 #include "kernel_private.h"
 #include "kernel16_private.h"
 #include "console_private.h"
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(process);
 
 extern  int __wine_set_signal_handler(unsigned, int (*)(unsigned));
 
-static CRITICAL_SECTION ldt_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &ldt_section,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": ldt_section") }
-};
-static CRITICAL_SECTION ldt_section = { &critsect_debug, -1, 0, 0, 0, 0 };
-
-/***********************************************************************
- *           locking for LDT routines
- */
-static void ldt_lock(void)
-{
-    RtlEnterCriticalSection( &ldt_section );
-}
-
-static void ldt_unlock(void)
-{
-    RtlLeaveCriticalSection( &ldt_section );
-}
-
+static ULONGLONG server_start_time;
 
 /***********************************************************************
  *           KERNEL thread initialisation routine
@@ -76,6 +57,7 @@ static void thread_attach(void)
     kernel_get_thread_data()->stack_sel = GlobalHandleToSel16( hstack );
     NtCurrentTeb()->WOW32Reserved = (void *)MAKESEGPTR( kernel_get_thread_data()->stack_sel,
                                                         0x10000 - sizeof(STACK16FRAME) );
+    memset( (char *)GlobalLock16(hstack) + 0x10000 - sizeof(STACK16FRAME), 0, sizeof(STACK16FRAME) );
 }
 
 
@@ -92,16 +74,55 @@ static void thread_detach(void)
 
 
 /***********************************************************************
+ *           set_entry_point
+ */
+static void set_entry_point( HMODULE module, const char *name, DWORD rva )
+{
+    IMAGE_EXPORT_DIRECTORY *exports;
+    DWORD exp_size;
+
+    if ((exports = RtlImageDirectoryEntryToData( module, TRUE,
+                                                  IMAGE_DIRECTORY_ENTRY_EXPORT, &exp_size )))
+    {
+        DWORD *functions = (DWORD *)((char *)module + exports->AddressOfFunctions);
+        const WORD *ordinals = (const WORD *)((const char *)module + exports->AddressOfNameOrdinals);
+        const DWORD *names = (const DWORD *)((const char *)module +  exports->AddressOfNames);
+        int min = 0, max = exports->NumberOfNames - 1;
+
+        while (min <= max)
+        {
+            int res, pos = (min + max) / 2;
+            const char *ename = (const char *)module + names[pos];
+            if (!(res = strcmp( ename, name )))
+            {
+                WORD ordinal = ordinals[pos];
+                assert( ordinal < exports->NumberOfFunctions );
+                TRACE( "setting %s at %p to %08x\n", name, &functions[ordinal], rva );
+                functions[ordinal] = rva;
+                return;
+            }
+            if (res > 0) max = pos - 1;
+            else min = pos + 1;
+        }
+    }
+}
+
+
+/***********************************************************************
  *           KERNEL process initialisation routine
  */
-static BOOL process_attach(void)
+static BOOL process_attach( HMODULE module )
 {
     SYSTEM_INFO si;
+    SYSTEM_TIMEOFDAY_INFORMATION ti;
     RTL_USER_PROCESS_PARAMETERS *params = NtCurrentTeb()->Peb->ProcessParameters;
 
     /* FIXME: should probably be done in ntdll */
     GetSystemInfo( &si );
     NtCurrentTeb()->Peb->NumberOfProcessors = si.dwNumberOfProcessors;
+
+    NtQuerySystemInformation( SystemTimeOfDayInformation, &ti, sizeof(ti), NULL );
+    server_start_time = ti.liKeBootTime.QuadPart;
 
     /* Setup registry locale information */
     LOCALE_InitRegistry();
@@ -131,8 +152,13 @@ static BOOL process_attach(void)
     /* copy process information from ntdll */
     ENV_CopyStartupInformation();
 
+    if (!(GetVersion() & 0x80000000))
+    {
+        /* Securom checks for this one when version is NT */
+        set_entry_point( module, "FT_Thunk", 0 );
+    }
 #ifdef __i386__
-    if (GetVersion() & 0x80000000)
+    else
     {
         /* create the shared heap for broken win95 native dlls */
         HeapCreate( HEAP_SHARED, 0, 0 );
@@ -140,9 +166,6 @@ static BOOL process_attach(void)
         RtlAddVectoredExceptionHandler( TRUE, INSTR_vectored_handler );
     }
 #endif
-
-    /* initialize LDT locking */
-    wine_ldt_init_locking( ldt_lock, ldt_unlock );
 
     /* finish the process initialisation for console bits, if needed */
     __wine_set_signal_handler(SIGINT, CONSOLE_HandleCtrlC);
@@ -174,7 +197,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     switch(reason)
     {
     case DLL_PROCESS_ATTACH:
-        return process_attach();
+        return process_attach( hinst );
     case DLL_THREAD_ATTACH:
         thread_attach();
         break;
@@ -219,6 +242,18 @@ INT WINAPI MulDiv( INT nMultiplicand, INT nMultiplier, INT nDivisor)
 }
 
 
+/******************************************************************************
+ *           GetTickCount64       (KERNEL32.@)
+ */
+ULONGLONG WINAPI GetTickCount64(void)
+{
+    LARGE_INTEGER now;
+
+    NtQuerySystemTime( &now );
+    return (now.QuadPart - server_start_time) / 10000;
+}
+
+
 /***********************************************************************
  *           GetTickCount       (KERNEL32.@)
  *
@@ -237,5 +272,5 @@ INT WINAPI MulDiv( INT nMultiplicand, INT nMultiplier, INT nDivisor)
  */
 DWORD WINAPI GetTickCount(void)
 {
-    return NtGetTickCount();
+    return GetTickCount64();
 }

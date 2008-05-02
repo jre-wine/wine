@@ -138,7 +138,7 @@ static DWORD CALLBACK DPL_MSG_ThreadMain( LPVOID lpContext )
   CloseHandle( lpThreadInfo->hSettingRead );
   lpThreadInfo->hSettingRead = 0;
 
-  TRACE( "App created && intialized starting main message reception loop\n" );
+  TRACE( "App created && initialized starting main message reception loop\n" );
 
   for ( ;; )
   {
@@ -153,7 +153,7 @@ end_of_thread:
   return 0;
 }
 
-/* DP messageing stuff */
+/* DP messaging stuff */
 static HANDLE DP_MSG_BuildAndLinkReplyStruct( IDirectPlay2Impl* This,
                                               LPDP_MSG_REPLY_STRUCT_LIST lpReplyStructList,
                                               WORD wReplyCommandId );
@@ -246,7 +246,7 @@ HRESULT DP_MSG_SendRequestPlayerId( IDirectPlay2AImpl* This, DWORD dwFlags,
     /* FIXME: I think that the rest of the message has something to do
      *        with remote data for the player that perhaps I need to setup.
      *        However, with the information that is passed, all that it could
-     *        be used for is a standardized intialization value, which I'm
+     *        be used for is a standardized initialization value, which I'm
      *        guessing we can do without. Unless the message content is the same
      *        for several different messages?
      */
@@ -437,7 +437,7 @@ void DP_MSG_ReplyReceived( IDirectPlay2AImpl* This, WORD wCommandId,
    * avoid problems.
    */
   EnterCriticalSection( &This->unk->DP_lock );
-    DPQ_REMOVE_ENTRY( This->dp2->replysExpected, replysExpected, replyExpected.wExpectedReply,\
+    DPQ_REMOVE_ENTRY( This->dp2->replysExpected, replysExpected, replyExpected.wExpectedReply,
                      ==, wCommandId, lpReplyList );
   LeaveCriticalSection( &This->unk->DP_lock );
 

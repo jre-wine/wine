@@ -4,11 +4,14 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = wintrust.dll
 IMPORTLIB = libwintrust.$(IMPLIBEXT)
-IMPORTS   = crypt32 user32 advapi32 kernel32
+IMPORTS   = crypt32 user32 advapi32 kernel32 ntdll
+DELAYIMPORTS = imagehlp
 
 C_SRCS = \
+	asn.c \
 	crypt.c \
 	register.c \
+	softpub.c \
 	wintrust_main.c
 
 RC_SRCS = \

@@ -55,7 +55,7 @@ static inline WCHAR *strchrW( const WCHAR *str, WCHAR ch )
     return NULL;
 }
 
-inline static int isdigitW( WCHAR wc )
+static inline int isdigitW( WCHAR wc )
 {
     WORD type;
     GetStringTypeW( CT_CTYPE1, &wc, 1, &type );
@@ -87,16 +87,12 @@ static IsValidLanguageGroupFn pIsValidLanguageGroup;
 static void InitFunctionPointers(void)
 {
   hKernel32 = GetModuleHandleA("kernel32");
-
-  if (hKernel32)
-  {
-    pEnumSystemLanguageGroupsA = (void*)GetProcAddress(hKernel32, "EnumSystemLanguageGroupsA");
-    pEnumLanguageGroupLocalesA = (void*)GetProcAddress(hKernel32, "EnumLanguageGroupLocalesA");
-    pFoldStringA = (void*)GetProcAddress(hKernel32, "FoldStringA");
-    pFoldStringW = (void*)GetProcAddress(hKernel32, "FoldStringW");
-    pIsValidLanguageGroup = (void*)GetProcAddress(hKernel32, "IsValidLanguageGroup");
-    pEnumUILanguagesA = (void*)GetProcAddress(hKernel32, "EnumUILanguagesA");
-  }
+  pEnumSystemLanguageGroupsA = (void*)GetProcAddress(hKernel32, "EnumSystemLanguageGroupsA");
+  pEnumLanguageGroupLocalesA = (void*)GetProcAddress(hKernel32, "EnumLanguageGroupLocalesA");
+  pFoldStringA = (void*)GetProcAddress(hKernel32, "FoldStringA");
+  pFoldStringW = (void*)GetProcAddress(hKernel32, "FoldStringW");
+  pIsValidLanguageGroup = (void*)GetProcAddress(hKernel32, "IsValidLanguageGroup");
+  pEnumUILanguagesA = (void*)GetProcAddress(hKernel32, "EnumUILanguagesA");
 }
 
 #define eq(received, expected, label, type) \
@@ -116,8 +112,9 @@ static void InitFunctionPointers(void)
 #define EXPECT_INVALIDFLAGS ok(GetLastError() == ERROR_INVALID_FLAGS || \
   GetLastError() == ERROR_INVALID_PARAMETER, \
  "Expected ERROR_INVALID_FLAGS, got %d\n", GetLastError())
-#define EXPECT_VALID    ok(GetLastError() == 0, \
+#define EXPECT_LASTERROR_0 ok(GetLastError() == 0, \
  "Expected GetLastError() == 0, got %d\n", GetLastError())
+#define EXPECT_VALID ok(ret, "Expected ret != 0, got %d, error %d\n", ret, GetLastError())
 
 #define STRINGSA(x,y) strcpy(input, x); strcpy(Expected, y); SetLastError(0); buffer[0] = '\0'
 #define EXPECT_LENA EXPECT_LEN((int)strlen(Expected)+1)
@@ -169,6 +166,7 @@ static void test_GetTimeFormatA(void)
 
   memset(&curtime, 2, sizeof(SYSTEMTIME));
   STRINGSA("tt HH':'mm'@'ss", ""); /* Invalid time */
+  SetLastError(0xdeadbeef);
   ret = GetTimeFormatA(lcid, TIME_FORCE24HOURFORMAT, &curtime, input, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
@@ -177,10 +175,17 @@ static void test_GetTimeFormatA(void)
   curtime.wSecond = 13;
   curtime.wMilliseconds = 22;
   STRINGSA("tt HH':'mm'@'ss", "AM 08:56@13"); /* Valid time */
+  SetLastError(0xdeadbeef);
   ret = GetTimeFormatA(lcid, TIME_FORCE24HOURFORMAT, &curtime, input, buffer, COUNTOF(buffer));
   EXPECT_VALID; EXPECT_LENA; EXPECT_EQA;
 
+  /* MSDN: LOCALE_NOUSEROVERRIDE can't be specified with a format string */
+  SetLastError(0xdeadbeef);
+  ret = GetTimeFormatA(lcid, NUO|TIME_FORCE24HOURFORMAT, &curtime, input, buffer, COUNTOF(buffer));
+  EXPECT_FLAGS; EXPECT_LEN(0); EXPECT_EQA;
+
   STRINGSA("tt HH':'mm'@'ss", "A"); /* Insufficent buffer */
+  SetLastError(0xdeadbeef);
   ret = GetTimeFormatA(lcid, TIME_FORCE24HOURFORMAT, &curtime, input, buffer, 2);
   EXPECT_BUFFER; EXPECT_LEN(0); EXPECT_EQA;
 
@@ -303,6 +308,7 @@ static void test_GetTimeFormatA(void)
 
   curtime.wHour = 25;
   STRINGSA("'123'tt", ""); /* Invalid time */
+  SetLastError(0xdeadbeef);
   ret = GetTimeFormatA(lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
@@ -322,6 +328,7 @@ static void test_GetDateFormatA(void)
 
   memset(&curtime, 2, sizeof(SYSTEMTIME)); /* Invalid time */
   STRINGSA("ddd',' MMM dd yy","");
+  SetLastError(0xdeadbeef);
   ret = GetDateFormatA(lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
@@ -332,6 +339,12 @@ static void test_GetDateFormatA(void)
   STRINGSA("ddd',' MMM dd yy","Sat, May 04 02"); /* Simple case */
   ret = GetDateFormatA(lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
   EXPECT_VALID; EXPECT_LENA; EXPECT_EQA;
+
+  /* Same as above but with LOCALE_NOUSEROVERRIDE */
+  STRINGSA("ddd',' MMM dd yy",""); /* Simple case */
+  SetLastError(0xdeadbeef);
+  ret = GetDateFormatA(lcid, NUO, &curtime, input, buffer, COUNTOF(buffer));
+  EXPECT_FLAGS; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("ddd',' MMM dd yy","Sat, May 04 02"); /* Format containing "'" */
   ret = GetDateFormatA(lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
@@ -347,6 +360,7 @@ static void test_GetDateFormatA(void)
   EXPECT_VALID; EXPECT_LEN(16); EXPECT_EQA;
 
   STRINGSA("ddd',' MMM dd ''''yy",""); /* Buffer too small */
+  SetLastError(0xdeadbeef);
   ret = GetDateFormatA(lcid, 0, &curtime, input, buffer, 2);
   EXPECT_BUFFER; EXPECT_LEN(0); EXPECT_EQA;
 
@@ -363,12 +377,14 @@ static void test_GetDateFormatA(void)
   /* test for expected DATE_YEARMONTH behavior with null format */
   /* NT4 returns ERROR_INVALID_FLAGS for DATE_YEARMONTH */
   STRINGSA("ddd',' MMM dd ''''yy", ""); /* DATE_YEARMONTH */
+  SetLastError(0xdeadbeef);
   ret = GetDateFormat(lcid, NUO|DATE_YEARMONTH, &curtime, input, buffer, COUNTOF(buffer));
   EXPECT_FLAGS; EXPECT_LEN(0); EXPECT_EQA;
 
   /* Test that using invalid DATE_* flags results in the correct error */
   /* and return values */
   STRINGSA("m/d/y", ""); /* Invalid flags */
+  SetLastError(0xdeadbeef);
   ret = GetDateFormat(lcid, DATE_YEARMONTH|DATE_SHORTDATE|DATE_LONGDATE,
                       &curtime, input, buffer, COUNTOF(buffer));
   EXPECT_FLAGS; EXPECT_LEN(0); EXPECT_EQA;
@@ -389,6 +405,7 @@ static void test_GetDateFormatW(void)
   EXPECT_FLAGS; EXPECT_LEN(0); EXPECT_EQW;
 
   STRINGSW("",""); /* NULL buffer, len > 0 */
+  SetLastError(0xdeadbeef);
   ret = GetDateFormatW (lcid, 0, NULL, input, NULL, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQW;
 
@@ -407,6 +424,34 @@ static void test_GetDateFormatW(void)
   STRINGSW("dddd d MMMM yyyy","Wednesday 23 October 2002"); /* Incorrect DOW and time */
   ret = GetDateFormatW (lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
   EXPECT_VALID; EXPECT_LENW; EXPECT_EQW;
+
+  /* Limit tests */
+
+  curtime.wYear = 1601;
+  curtime.wMonth = 1;
+  curtime.wDay = 1;
+  curtime.wDayOfWeek = 0; /* Irrelevant */
+  curtime.wHour = 0;
+  curtime.wMinute = 0;
+  curtime.wSecond = 0;
+  curtime.wMilliseconds = 0;
+  STRINGSW("dddd d MMMM yyyy","Monday 1 January 1601");
+  SetLastError(0xdeadbeef);
+  ret = GetDateFormatW (lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
+  EXPECT_VALID; EXPECT_LENW; EXPECT_EQW;
+
+  curtime.wYear = 1600;
+  curtime.wMonth = 12;
+  curtime.wDay = 31;
+  curtime.wDayOfWeek = 0; /* Irrelevant */
+  curtime.wHour = 23;
+  curtime.wMinute = 59;
+  curtime.wSecond = 59;
+  curtime.wMilliseconds = 999;
+  STRINGSW("dddd d MMMM yyyy","Friday 31 December 1600");
+  SetLastError(0xdeadbeef);
+  ret = GetDateFormatW (lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
+  EXPECT_INVALID;
 }
 
 
@@ -428,38 +473,47 @@ static void test_GetCurrencyFormatA(void)
   memset(&format, 0, sizeof(format));
 
   STRINGSA("23",""); /* NULL output, length > 0 --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetCurrencyFormatA(lcid, 0, input, NULL, NULL, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("23,53",""); /* Invalid character --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetCurrencyFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("--",""); /* Double '-' --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetCurrencyFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("0-",""); /* Trailing '-' --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetCurrencyFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("0..",""); /* Double '.' --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetCurrencyFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA(" 0.1",""); /* Leading space --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetCurrencyFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("1234","$"); /* Length too small --> Write up to length chars */
+  SetLastError(0xdeadbeef);
   ret = GetCurrencyFormatA(lcid, NUO, input, NULL, buffer, 2);
   EXPECT_BUFFER; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("2353",""); /* Format and flags given --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetCurrencyFormatA(lcid, NUO, input, &format, buffer, COUNTOF(buffer));
   EXPECT_INVALIDFLAGS; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("2353",""); /* Invalid format --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetCurrencyFormatA(lcid, 0, input, &format, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
@@ -625,38 +679,47 @@ static void test_GetNumberFormatA(void)
   memset(&format, 0, sizeof(format));
 
   STRINGSA("23",""); /* NULL output, length > 0 --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetNumberFormatA(lcid, 0, input, NULL, NULL, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("23,53",""); /* Invalid character --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetNumberFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("--",""); /* Double '-' --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetNumberFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("0-",""); /* Trailing '-' --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetNumberFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("0..",""); /* Double '.' --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetNumberFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA(" 0.1",""); /* Leading space --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetNumberFormatA(lcid, 0, input, NULL, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("1234","1"); /* Length too small --> Write up to length chars */
+  SetLastError(0xdeadbeef);
   ret = GetNumberFormatA(lcid, NUO, input, NULL, buffer, 2);
   EXPECT_BUFFER; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("2353",""); /* Format and flags given --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetNumberFormatA(lcid, NUO, input, &format, buffer, COUNTOF(buffer));
   EXPECT_INVALIDFLAGS; EXPECT_LEN(0); EXPECT_EQA;
 
   STRINGSA("2353",""); /* Invalid format --> Error */
+  SetLastError(0xdeadbeef);
   ret = GetNumberFormatA(lcid, 0, input, &format, buffer, COUNTOF(buffer));
   EXPECT_INVALID; EXPECT_LEN(0); EXPECT_EQA;
 
@@ -1340,24 +1403,24 @@ const char *strings[] =
 
 static int compare_string1(const void *e1, const void *e2)
 {
-    const char *s1 = *(const char **)e1;
-    const char *s2 = *(const char **)e2;
+    const char *s1 = *(const char *const *)e1;
+    const char *s2 = *(const char *const *)e2;
 
     return lstrcmpA(s1, s2);
 }
 
 static int compare_string2(const void *e1, const void *e2)
 {
-    const char *s1 = *(const char **)e1;
-    const char *s2 = *(const char **)e2;
+    const char *s1 = *(const char *const *)e1;
+    const char *s2 = *(const char *const *)e2;
 
     return CompareStringA(0, 0, s1, -1, s2, -1) - 2;
 }
 
 static int compare_string3(const void *e1, const void *e2)
 {
-    const char *s1 = *(const char **)e1;
-    const char *s2 = *(const char **)e2;
+    const char *s1 = *(const char *const *)e1;
+    const char *s2 = *(const char *const *)e2;
     char key1[256], key2[256];
 
     LCMapStringA(0, LCMAP_SORTKEY, s1, -1, key1, sizeof(key1));
@@ -1857,8 +1920,15 @@ static void test_FoldStringW(void)
     EXPECT_LEN(2); EXPECT_VALID;
     ok(dst[0] == expected ||
        /* Wine (correctly) uses updated mappings for some Unicode 4.0 chars */
-       (ch >= 0xFA0D && ch <= 0xFA47) ||
-       0xf92c || ch == 0xf979 || ch == 0xf995 || ch == 0xf9e7 || ch == 0xf9f1,
+       /* FIXME: But they should be re-checked */
+       ch == 0xf92c || ch == 0xf979 || ch == 0xf995 || ch == 0xf9e7 ||
+       ch == 0xf9f1 ||
+       (0xfa0c <= ch && ch <= 0xfa6a) ||
+       (0xfa70 <= ch && ch <= 0xfad9) ||
+       ch == 0xfe47 || ch == 0xfe48 || ch == 0xfe68 ||
+       (0xfe70 <= ch && ch <= 0xfe7f) ||
+       ch == 0xff3c || ch == 0xff5f || ch == 0xff60 ||
+       ch == 0xff9e || ch == 0xff9f,
        "MAP_FOLDCZONE: ch %d 0x%04x Expected 0x%04x got 0x%04x\n",
        ch, ch, expected, dst[0]);
   }
@@ -1966,7 +2036,7 @@ static void test_EnumSystemLanguageGroupsA(void)
   /* No flags - defaults to LGRPID_INSTALLED */
   SetLastError(0);
   pEnumSystemLanguageGroupsA(langgrp_procA, 0, 1);
-  EXPECT_VALID;
+  EXPECT_LASTERROR_0;
 
   pEnumSystemLanguageGroupsA(langgrp_procA, LGRPID_INSTALLED, 0);
   pEnumSystemLanguageGroupsA(langgrp_procA, LGRPID_SUPPORTED, 0);
@@ -2183,13 +2253,42 @@ static void test_EnumTimeFormatsA(void)
     ok(!lstrcmpA(date_fmt_buf, buf), "expected \"%s\" got \"%s\"\n", date_fmt_buf, buf);
 }
 
+static void test_GetCPInfo(void)
+{
+    BOOL ret;
+    CPINFO cpinfo;
+
+    SetLastError(0xdeadbeef);
+    ret = GetCPInfo(CP_SYMBOL, &cpinfo);
+    ok(!ret, "GetCPInfo(CP_SYMBOL) should fail\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetCPInfo(CP_UTF7, &cpinfo);
+    ok(ret, "GetCPInfo(CP_UTF7) error %u\n", GetLastError());
+    ok(cpinfo.DefaultChar[0] == 0x3f, "expected 0x3f, got 0x%x\n", cpinfo.DefaultChar[0]);
+    ok(cpinfo.DefaultChar[1] == 0, "expected 0, got 0x%x\n", cpinfo.DefaultChar[1]);
+    ok(cpinfo.LeadByte[0] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[0]);
+    ok(cpinfo.LeadByte[1] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[1]);
+    ok(cpinfo.MaxCharSize == 5, "expected 5, got 0x%x\n", cpinfo.MaxCharSize);
+
+    SetLastError(0xdeadbeef);
+    ret = GetCPInfo(CP_UTF8, &cpinfo);
+    ok(ret, "GetCPInfo(CP_UTF8) error %u\n", GetLastError());
+    ok(cpinfo.DefaultChar[0] == 0x3f, "expected 0x3f, got 0x%x\n", cpinfo.DefaultChar[0]);
+    ok(cpinfo.DefaultChar[1] == 0, "expected 0, got 0x%x\n", cpinfo.DefaultChar[1]);
+    ok(cpinfo.LeadByte[0] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[0]);
+    ok(cpinfo.LeadByte[1] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[1]);
+    ok(cpinfo.MaxCharSize == 4, "expected 5, got 0x%x\n", cpinfo.MaxCharSize);
+}
+
 START_TEST(locale)
 {
   InitFunctionPointers();
 
   test_EnumTimeFormatsA();
   test_EnumDateFormatsA();
-
   test_GetLocaleInfoA();
   test_GetTimeFormatA();
   test_GetDateFormatA();
@@ -2206,7 +2305,7 @@ START_TEST(locale)
   test_EnumLanguageGroupLocalesA();
   test_SetLocaleInfoA();
   test_EnumUILanguageA();
-
+  test_GetCPInfo();
   /* this requires collation table patch to make it MS compatible */
   if (0) test_sorting();
 }

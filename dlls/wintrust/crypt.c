@@ -25,6 +25,7 @@
 #include "wintrust.h"
 #include "mscat.h"
 #include "mssip.h"
+#include "imagehlp.h"
 
 #include "wine/debug.h"
 
@@ -42,15 +43,27 @@ WINE_DEFAULT_DEBUG_CHANNEL(wintrust);
  *
  * RETURNS
  *   Success: TRUE. catAdmin contains the context handle.
- *   Failure: FAIL.
+ *   Failure: FALSE.
  *
  */
 BOOL WINAPI CryptCATAdminAcquireContext(HCATADMIN* catAdmin,
                     const GUID *sysSystem, DWORD dwFlags )
 {
     FIXME("%p %s %x\n", catAdmin, debugstr_guid(sysSystem), dwFlags);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+
+    if (catAdmin) *catAdmin = (HCATADMIN)0xdeadbeef;
+    return TRUE;
+}
+
+/***********************************************************************
+ *             CryptCATAdminAddCatalog (WINTRUST.@)
+ */
+BOOL WINAPI CryptCATAdminAddCatalog(HCATADMIN catAdmin, PWSTR catalogFile,
+                                    PWSTR selectBaseName, DWORD flags)
+{
+    FIXME("%p %s %s %d\n", catAdmin, debugstr_w(catalogFile),
+          debugstr_w(selectBaseName), flags);
+    return TRUE;
 }
 
 /***********************************************************************
@@ -60,8 +73,9 @@ BOOL WINAPI CryptCATAdminCalcHashFromFileHandle(HANDLE hFile, DWORD* pcbHash,
                                                 BYTE* pbHash, DWORD dwFlags )
 {
     FIXME("%p %p %p %x\n", hFile, pcbHash, pbHash, dwFlags);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+
+    if (pbHash && pcbHash) memset(pbHash, 0, *pcbHash);
+    return TRUE;
 }
 
 /***********************************************************************
@@ -74,8 +88,30 @@ HCATINFO WINAPI CryptCATAdminEnumCatalogFromHash(HCATADMIN hCatAdmin,
                                                  HCATINFO* phPrevCatInfo )
 {
     FIXME("%p %p %d %d %p\n", hCatAdmin, pbHash, cbHash, dwFlags, phPrevCatInfo);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return NULL;
+}
+
+/***********************************************************************
+ *      CryptCATAdminReleaseCatalogContext (WINTRUST.@)
+ *
+ * Release a catalog context handle.
+ *
+ * PARAMS
+ *   hCatAdmin [I] Context handle.
+ *   hCatInfo  [I] Catalog handle.
+ *   dwFlags   [I] Reserved.
+ *
+ * RETURNS
+ *   Success: TRUE.
+ *   Failure: FAIL.
+ *
+ */
+BOOL WINAPI CryptCATAdminReleaseCatalogContext(HCATADMIN hCatAdmin,
+                                               HCATINFO hCatInfo,
+                                               DWORD dwFlags)
+{
+    FIXME("%p %p %x\n", hCatAdmin, hCatInfo, dwFlags);
+    return TRUE;
 }
 
 /***********************************************************************
@@ -84,7 +120,7 @@ HCATINFO WINAPI CryptCATAdminEnumCatalogFromHash(HCATADMIN hCatAdmin,
  * Release a catalog administrator context handle.
  *
  * PARAMS
- *   catAdmin  [I] Pointer to the context handle.
+ *   catAdmin  [I] Context handle.
  *   dwFlags   [I] Reserved.
  *
  * RETURNS
@@ -95,8 +131,28 @@ HCATINFO WINAPI CryptCATAdminEnumCatalogFromHash(HCATADMIN hCatAdmin,
 BOOL WINAPI CryptCATAdminReleaseContext(HCATADMIN hCatAdmin, DWORD dwFlags )
 {
     FIXME("%p %x\n", hCatAdmin, dwFlags);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    return TRUE;
+}
+
+/***********************************************************************
+ *      CryptCATAdminRemoveCatalog (WINTRUST.@)
+ *
+ * Remove a catalog file.
+ *
+ * PARAMS
+ *   catAdmin         [I] Context handle.
+ *   pwszCatalogFile  [I] Catalog file.
+ *   dwFlags          [I] Reserved.
+ *
+ * RETURNS
+ *   Success: TRUE.
+ *   Failure: FALSE.
+ *
+ */
+BOOL WINAPI CryptCATAdminRemoveCatalog(HCATADMIN hCatAdmin, LPCWSTR pwszCatalogFile, DWORD dwFlags)
+{
+    FIXME("%p %s %x\n", hCatAdmin, debugstr_w(pwszCatalogFile), dwFlags);
+    return DeleteFileW(pwszCatalogFile);
 }
 
 /***********************************************************************
@@ -145,10 +201,67 @@ BOOL WINAPI CryptSIPCreateIndirectData(SIP_SUBJECTINFO* pSubjectInfo, DWORD* pcb
 BOOL WINAPI CryptSIPGetSignedDataMsg(SIP_SUBJECTINFO* pSubjectInfo, DWORD* pdwEncodingType,
                                        DWORD dwIndex, DWORD* pcbSignedDataMsg, BYTE* pbSignedDataMsg)
 {
-    FIXME("(%p %p %d %p %p) stub\n", pSubjectInfo, pdwEncodingType, dwIndex,
+    BOOL ret;
+    WIN_CERTIFICATE *pCert = NULL;
+
+    TRACE("(%p %p %d %p %p)\n", pSubjectInfo, pdwEncodingType, dwIndex,
           pcbSignedDataMsg, pbSignedDataMsg);
  
-    return FALSE;
+    if (!pbSignedDataMsg)
+    {
+        WIN_CERTIFICATE cert;
+
+        /* app hasn't passed buffer, just get the length */
+        ret = ImageGetCertificateHeader(pSubjectInfo->hFile, dwIndex, &cert);
+        if (ret)
+            *pcbSignedDataMsg = cert.dwLength;
+    }
+    else
+    {
+        DWORD len = 0;
+
+        ret = ImageGetCertificateData(pSubjectInfo->hFile, dwIndex, NULL, &len);
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+            goto error;
+        pCert = HeapAlloc(GetProcessHeap(), 0, len);
+        if (!pCert)
+        {
+            ret = FALSE;
+            goto error;
+        }
+        ret = ImageGetCertificateData(pSubjectInfo->hFile, dwIndex, pCert,
+         &len);
+        if (!ret)
+            goto error;
+        if (*pcbSignedDataMsg < pCert->dwLength)
+        {
+            *pcbSignedDataMsg = pCert->dwLength;
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
+            ret = FALSE;
+        }
+        else
+        {
+            memcpy(pbSignedDataMsg, pCert->bCertificate, pCert->dwLength);
+            switch (pCert->wCertificateType)
+            {
+            case WIN_CERT_TYPE_X509:
+                *pdwEncodingType = X509_ASN_ENCODING;
+                break;
+            case WIN_CERT_TYPE_PKCS_SIGNED_DATA:
+                *pdwEncodingType = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
+                break;
+            default:
+                FIXME("don't know what to do for encoding type %d\n",
+                 pCert->wCertificateType);
+                *pdwEncodingType = 0;
+            }
+        }
+    }
+
+error:
+    HeapFree(GetProcessHeap(), 0, pCert);
+    TRACE("returning %d\n", ret);
+    return ret;
 }
 
 /***********************************************************************

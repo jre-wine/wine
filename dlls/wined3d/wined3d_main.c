@@ -39,57 +39,44 @@ wined3d_settings_t wined3d_settings =
     VS_HW,          /* Hardware by default */
     PS_HW,          /* Hardware by default */
     VBO_HW,         /* Hardware by default */
-    FALSE,          /* Use of GLSL disabled by default */
-    NP2_NATIVE,     /* Use native NPOT textures, when available */
+    TRUE,           /* Use of GLSL enabled by default */
+    ORM_BACKBUFFER, /* Use the backbuffer to do offscreen rendering */
     RTL_AUTO,       /* Automatically determine best locking method */
-    64*1024*1024    /* 64MB texture memory by default */
+    0,              /* The default of memory is set in FillGLCaps */
+    NULL            /* No wine logo by default */
 };
 
-WineD3DGlobalStatistics *wineD3DGlobalStatistics = NULL;
-CRITICAL_SECTION resourceStoreCriticalSection;
-
-long globalChangeGlRam(long glram){
-    /* FIXME: replace this function with object tracking */
-    int result;
-
-    EnterCriticalSection(&resourceStoreCriticalSection); /* this is overkill really, but I suppose it should be thread safe */
-    wineD3DGlobalStatistics->glsurfaceram     += glram;
-    TRACE("Adjusted gl ram by %ld to %d\n", glram, wineD3DGlobalStatistics->glsurfaceram);
-    result = wineD3DGlobalStatistics->glsurfaceram;
-    LeaveCriticalSection(&resourceStoreCriticalSection);
-    return result;
-
-}
-
 IWineD3D* WINAPI WineDirect3DCreate(UINT SDKVersion, UINT dxVersion, IUnknown *parent) {
-    IWineD3DImpl* object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DImpl));
+    IWineD3DImpl* object;
+
+    if (!InitAdapters()) {
+        WARN("Failed to initialize direct3d adapters, Direct3D will not be available\n");
+        if(dxVersion > 7) {
+            ERR("Direct3D%d is not available without opengl\n", dxVersion);
+            return NULL;
+        }
+    }
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DImpl));
     object->lpVtbl = &IWineD3D_Vtbl;
     object->dxVersion = dxVersion;
     object->ref = 1;
     object->parent = parent;
-
-    /* TODO: Move this off to device and possibly x11drv */
-    /* Create a critical section for a dll global data store */
-    InitializeCriticalSectionAndSpinCount(&resourceStoreCriticalSection, 0x80000400);
-
-    /*Create a structure for storing global data in*/
-    if(wineD3DGlobalStatistics == NULL){
-        TRACE("Createing global statistics store\n");
-        wineD3DGlobalStatistics = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wineD3DGlobalStatistics));
-
-    }
-
 
     TRACE("Created WineD3D object @ %p for d3d%d support\n", object, dxVersion);
 
     return (IWineD3D *)object;
 }
 
-inline static DWORD get_config_key(HKEY defkey, HKEY appkey, const char* name, char* buffer, DWORD size)
+static inline DWORD get_config_key(HKEY defkey, HKEY appkey, const char* name, char* buffer, DWORD size)
 {
     if (0 != appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE) buffer, &size )) return 0;
     if (0 != defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE) buffer, &size )) return 0;
     return ERROR_FILE_NOT_FOUND;
+}
+
+static void wined3d_do_nothing(void)
+{
 }
 
 /* At process attach */
@@ -104,7 +91,27 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
        HKEY hkey = 0;
        HKEY appkey = 0;
        DWORD len;
-       wined3d_settings.emulated_textureram = 64*1024*1024;
+       WNDCLASSA wc;
+
+       /* We need our own window class for a fake window which we use to retrieve GL capabilities */
+       /* We might need CS_OWNDC in the future if we notice strange things on Windows.
+        * Various articles/posts about OpenGL problems on Windows recommend this. */
+       wc.style                = CS_HREDRAW | CS_VREDRAW;
+       wc.lpfnWndProc          = DefWindowProcA;
+       wc.cbClsExtra           = 0;
+       wc.cbWndExtra           = 0;
+       wc.hInstance            = hInstDLL;
+       wc.hIcon                = LoadIconA(NULL, (LPCSTR)IDI_WINLOGO);
+       wc.hCursor              = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
+       wc.hbrBackground        = NULL;
+       wc.lpszMenuName         = NULL;
+       wc.lpszClassName        = "WineD3D_OpenGL";
+
+       if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+       {
+           ERR("Failed to register window class 'WineD3D_OpenGL'!\n");
+           return FALSE;
+       }
 
        DisableThreadLibraryCalls(hInstDLL);
 
@@ -113,6 +120,11 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
        {
            wine_tsx11_lock_ptr   = (void *)GetProcAddress( mod, "wine_tsx11_lock" );
            wine_tsx11_unlock_ptr = (void *)GetProcAddress( mod, "wine_tsx11_unlock" );
+       }
+       else /* We are most likely on Windows */
+       {
+           wine_tsx11_lock_ptr   = wined3d_do_nothing;
+           wine_tsx11_unlock_ptr = wined3d_do_nothing;
        }
        /* @@ Wine registry key: HKCU\Software\Wine\Direct3D */
        if ( RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\Direct3D", &hkey ) ) hkey = 0;
@@ -143,11 +155,6 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
                     TRACE("Disable vertex shaders\n");
                     wined3d_settings.vs_mode = VS_NONE;
                 }
-                else if (!strcmp(buffer,"emulation"))
-                {
-                    TRACE("Force SW vertex shaders\n");
-                    wined3d_settings.vs_mode = VS_SW;
-                }
             }
             if ( !get_config_key( hkey, appkey, "PixelShaderMode", buffer, size) )
             {
@@ -177,30 +184,29 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
             }
             if ( !get_config_key( hkey, appkey, "UseGLSL", buffer, size) )
             {
-                if (!strcmp(buffer,"enabled"))
-                {
-                    TRACE("Use of GL Shading Language enabled for systems that support it\n");
-                    wined3d_settings.glslRequested = TRUE;
-                }
-                else
+                if (!strcmp(buffer,"disabled"))
                 {
                     TRACE("Use of GL Shading Language disabled\n");
+                    wined3d_settings.glslRequested = FALSE;
                 }
             }
-            if ( !get_config_key( hkey, appkey, "Nonpower2Mode", buffer, size) )
+            if ( !get_config_key( hkey, appkey, "OffscreenRenderingMode", buffer, size) )
             {
-                if (!strcmp(buffer,"none"))
+                if (!strcmp(buffer,"backbuffer"))
                 {
-                    TRACE("Using default non-power2 textures\n");
-                    wined3d_settings.nonpower2_mode = NP2_NONE;
-
+                    TRACE("Using the backbuffer for offscreen rendering\n");
+                    wined3d_settings.offscreen_rendering_mode = ORM_BACKBUFFER;
                 }
-                else if (!strcmp(buffer,"repack"))
+                else if (!strcmp(buffer,"pbuffer"))
                 {
-                    TRACE("Repacking non-power2 textures\n");
-                    wined3d_settings.nonpower2_mode = NP2_REPACK;
+                    TRACE("Using PBuffers for offscreen rendering\n");
+                    wined3d_settings.offscreen_rendering_mode = ORM_PBUFFER;
                 }
-                /* There will be a couple of other choices for nonpow2, they are: TextureRecrangle and OpenGL 2 */
+                else if (!strcmp(buffer,"fbo"))
+                {
+                    TRACE("Using FBOs for offscreen rendering\n");
+                    wined3d_settings.offscreen_rendering_mode = ORM_FBO;
+                }
             }
             if ( !get_config_key( hkey, appkey, "RenderTargetLockMode", buffer, size) )
             {
@@ -243,6 +249,11 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
                 else
                     ERR("VideoMemorySize is %i but must be >0\n", TmpVideoMemorySize);
             }
+            if ( !get_config_key( hkey, appkey, "WineLogo", buffer, size) )
+            {
+                wined3d_settings.logo = HeapAlloc(GetProcessHeap(), 0, strlen(buffer) + 1);
+                if(wined3d_settings.logo) strcpy(wined3d_settings.logo, buffer);
+            }
        }
        if (wined3d_settings.vs_mode == VS_HW)
            TRACE("Allow HW vertex shaders\n");
@@ -252,8 +263,6 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
            TRACE("Disable Vertex Buffer Hardware support\n");
        if (wined3d_settings.glslRequested)
            TRACE("If supported by your system, GL Shading Language will be used\n");
-       if (wined3d_settings.nonpower2_mode == NP2_REPACK)
-           TRACE("Repacking non-power2 textures\n");
 
        if (appkey) RegCloseKey( appkey );
        if (hkey) RegCloseKey( hkey );

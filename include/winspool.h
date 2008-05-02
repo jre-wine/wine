@@ -273,6 +273,22 @@ extern "C" {
 #define JOB_EXECUTE         (STANDARD_RIGHTS_EXECUTE | JOB_ACCESS_ADMINISTER)
 #define JOB_ALL_ACCESS      (STANDARD_RIGHTS_REQUIRED | JOB_ACCESS_ADMINISTER)
 
+
+/* Flags for printer drivers */
+#define DRIVER_KERNELMODE       0x00000001
+#define DRIVER_USERMODE         0x00000002
+
+#define APD_STRICT_UPGRADE      0x00000001
+#define APD_STRICT_DOWNGRADE    0x00000002
+#define APD_COPY_ALL_FILES      0x00000004
+#define APD_COPY_NEW_FILES      0x00000008
+#define APD_COPY_FROM_DIRECTORY 0x00000010
+
+#define DPD_DELETE_UNUSED_FILES     0x00000001
+#define DPD_DELETE_SPECIFIC_VERSION 0x00000002
+#define DPD_DELETE_ALL_FILES        0x00000004
+
+
 /* TYPES */
 typedef struct _PRINTER_DEFAULTSA {
   LPSTR        pDatatype;
@@ -457,6 +473,68 @@ typedef struct _DRIVER_INFO_6W {
 DECL_WINELIB_TYPE_AW(DRIVER_INFO_6)
 DECL_WINELIB_TYPE_AW(PDRIVER_INFO_6)
 DECL_WINELIB_TYPE_AW(LPDRIVER_INFO_6)
+
+/* DRIVER_INFO_7 is not defined in native winspool.h and not found in the www */
+
+typedef struct _DRIVER_INFO_8A {
+  DWORD     cVersion;
+  LPSTR     pName;
+  LPSTR     pEnvironment;
+  LPSTR     pDriverPath;
+  LPSTR     pDataFile;
+  LPSTR     pConfigFile;
+  LPSTR     pHelpFile;
+  LPSTR     pDependentFiles;
+  LPSTR     pMonitorName;
+  LPSTR     pDefaultDataType;
+  LPSTR     pszzPreviousNames;
+  FILETIME  ftDriverDate;
+  DWORDLONG dwlDriverVersion;
+  LPSTR     pszMfgName;
+  LPSTR     pszOEMUrl;
+  LPSTR     pszHardwareID;
+  LPSTR     pszProvider;
+  LPSTR     pszPrintProcessor;
+  LPSTR     pszVendorSetup;
+  LPSTR     pszzColorProfiles;
+  LPSTR     pszInfPath;
+  DWORD     dwPrinterDriverAttributes;
+  LPSTR     pszzCoreDriverDependencies;
+  FILETIME  ftMinInboxDriverVerDate;
+  DWORDLONG dwlMinInboxDriverVerVersion;
+} DRIVER_INFO_8A, *PDRIVER_INFO_8A, *LPDRIVER_INFO_8A;
+
+typedef struct _DRIVER_INFO_8W {
+  DWORD     cVersion;
+  LPWSTR    pName;
+  LPWSTR    pEnvironment;
+  LPWSTR    pDriverPath;
+  LPWSTR    pDataFile;
+  LPWSTR    pConfigFile;
+  LPWSTR    pHelpFile;
+  LPWSTR    pDependentFiles;
+  LPWSTR    pMonitorName;
+  LPWSTR    pDefaultDataType;
+  LPWSTR    pszzPreviousNames;
+  FILETIME  ftDriverDate;
+  DWORDLONG dwlDriverVersion;
+  LPWSTR    pszMfgName;
+  LPWSTR    pszOEMUrl;
+  LPWSTR    pszHardwareID;
+  LPWSTR    pszProvider;
+  LPWSTR    pszPrintProcessor;
+  LPWSTR    pszVendorSetup;
+  LPWSTR    pszzColorProfiles;
+  LPWSTR    pszInfPath;
+  DWORD     dwPrinterDriverAttributes;
+  LPWSTR    pszzCoreDriverDependencies;
+  FILETIME  ftMinInboxDriverVerDate;
+  DWORDLONG dwlMinInboxDriverVerVersion;
+} DRIVER_INFO_8W, *PDRIVER_INFO_8W, *LPDRIVER_INFO_8W;
+
+DECL_WINELIB_TYPE_AW(DRIVER_INFO_8)
+DECL_WINELIB_TYPE_AW(PDRIVER_INFO_8)
+DECL_WINELIB_TYPE_AW(LPDRIVER_INFO_8)
 
 
 typedef struct _PRINTER_INFO_1A {
@@ -782,6 +860,36 @@ typedef struct _FORM_INFO_1W {
 DECL_WINELIB_TYPE_AW(FORM_INFO_1)
 DECL_WINELIB_TYPE_AW(PFORM_INFO_1)
 DECL_WINELIB_TYPE_AW(LPFORM_INFO_1)
+
+typedef struct _FORM_INFO_2A {
+  DWORD  Flags;
+  LPSTR  pName;
+  SIZEL  Size;
+  RECTL  ImageableArea;
+  LPCSTR pKeyword;
+  DWORD  StringType;
+  LPSTR  pMuiDll;
+  DWORD  dwResourceId;
+  LPSTR  pDisplayName;
+  LANGID wLangId;
+} FORM_INFO_2A, *PFORM_INFO_2A, *LPFORM_INFO_2A;
+
+typedef struct _FORM_INFO_2W {
+  DWORD  Flags;
+  LPWSTR pName;
+  SIZEL  Size;
+  RECTL  ImageableArea;
+  LPCSTR pKeyword;
+  DWORD  StringType;
+  LPWSTR pMuiDll;
+  DWORD  dwResourceId;
+  LPWSTR pDisplayName;
+  LANGID wLangId;
+} FORM_INFO_2W, *PFORM_INFO_2W, *LPFORM_INFO_2W;
+
+DECL_WINELIB_TYPE_AW(FORM_INFO_2)
+DECL_WINELIB_TYPE_AW(PFORM_INFO_2)
+DECL_WINELIB_TYPE_AW(LPFORM_INFO_2)
 
 typedef struct _PRINTPROCESSOR_INFO_1A {
   LPSTR pName;
@@ -1333,10 +1441,8 @@ BOOL WINAPI AddPortA(LPSTR pName, HWND hWnd, LPSTR pMonitorName);
 BOOL WINAPI AddPortW(LPWSTR pName, HWND hWnd, LPWSTR pMonitorName);
 #define AddPort WINELIB_NAME_AW(AddPort)
 
-BOOL WINAPI AddPortExA(HANDLE hMonitor, LPSTR pName, DWORD Level,
-                       LPBYTE lpBuffer, LPSTR lpMonitorName);
-BOOL WINAPI AddPortExW(HANDLE hMonitor, LPWSTR pName, DWORD Level,
-                       LPBYTE lpBuffer, LPWSTR lpMonitorName);
+BOOL WINAPI AddPortExA(LPSTR, DWORD, LPBYTE, LPSTR);
+BOOL WINAPI AddPortExW(LPWSTR, DWORD, LPBYTE, LPWSTR);
 #define AddPortEx WINELIB_NAME_AW(AddPortEx)
 
 BOOL WINAPI ConfigurePortA(LPSTR pName, HWND hWnd, LPSTR pPortName);
@@ -1388,6 +1494,10 @@ LONG WINAPI ExtDeviceMode( HWND hWnd, HANDLE hInst, LPDEVMODEA pDevModeOutput,
 LPSTR WINAPI StartDocDlgA(HANDLE hPrinter, DOCINFOA *doc);
 LPWSTR WINAPI StartDocDlgW(HANDLE hPrinter, DOCINFOW *doc);
 #define StartDocDlg WINELIB_NAME_AW(StartDocDlg)
+
+BOOL WINAPI XcvDataW(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInputData,
+    DWORD cbInputData, PBYTE pOutputData, DWORD cbOutputData,
+    PDWORD pcbOutputNeeded, PDWORD pdwStatus);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -148,7 +148,7 @@
 @ stub AllocateUserPhysicalPages
 @ stdcall AreFileApisANSI()
 @ stdcall AssignProcessToJobObject(ptr ptr)
-# @ stub AttachConsole
+@ stdcall AttachConsole(long)
 @ stdcall BackupRead(ptr ptr long ptr long long ptr)
 @ stdcall BackupSeek(ptr long long ptr ptr ptr)
 @ stdcall BackupWrite(ptr ptr long ptr long long ptr)
@@ -168,7 +168,7 @@
 @ stdcall Beep(long long)
 @ stdcall BeginUpdateResourceA(str long)
 @ stdcall BeginUpdateResourceW(wstr long)
-# @ stub BindIoCompletionCallback
+@ stdcall BindIoCompletionCallback(long ptr long)
 @ stdcall BuildCommDCBA(str ptr)
 @ stdcall BuildCommDCBAndTimeoutsA(str ptr ptr)
 @ stdcall BuildCommDCBAndTimeoutsW(wstr ptr ptr)
@@ -182,7 +182,7 @@
 @ stub ChangeTimerQueueTimer
 # @ stub CheckNameLegalDOS8Dot3A
 # @ stub CheckNameLegalDOS8Dot3W
-# @ stub CheckRemoteDebuggerPresent
+@ stdcall CheckRemoteDebuggerPresent(long ptr)
 @ stdcall ClearCommBreak(long)
 @ stdcall ClearCommError(long ptr ptr)
 @ stdcall CloseConsoleHandle(long)
@@ -208,7 +208,7 @@
 @ stdcall CopyFileExA (str str ptr ptr ptr long)
 @ stdcall CopyFileExW (wstr wstr ptr ptr ptr long)
 @ stdcall CopyFileW(wstr wstr long)
-@ stdcall CopyLZFile(long long)
+@ stdcall CopyLZFile(long long) LZCopy
 @ stdcall CreateActCtxA(ptr)
 @ stdcall CreateActCtxW(ptr)
 @ stdcall CreateConsoleScreenBuffer(long long ptr long ptr)
@@ -263,7 +263,7 @@
 @ stdcall DebugBreak()
 @ stdcall DebugBreakProcess(long)
 @ stdcall DebugSetProcessKillOnExit(long)
-# @ stub DecodePointer ( -> ntdll.RtlDecodePointer)
+@ stdcall DecodePointer(ptr) ntdll.RtlDecodePointer
 # @ stub DecodeSystemPointer ( -> ntdll.RtlDecodeSystemPointer)
 @ stdcall DefineDosDeviceA(long str str)
 @ stdcall DefineDosDeviceW(long wstr wstr)
@@ -288,7 +288,7 @@
 # @ stub DosPathToSessionPathW
 @ stdcall DuplicateConsoleHandle(long long long long)
 @ stdcall DuplicateHandle(long long long ptr long long long)
-# @ stub EncodePointer ( -> ntdll.RtlEncodePointer)
+@ stdcall EncodePointer(ptr) ntdll.RtlEncodePointer
 # @ stub EncodeSystemPointer ( -> ntdll.RtlEncodeSystemPointer)
 @ stdcall EndUpdateResourceA(long long)
 @ stdcall EndUpdateResourceW(long long)
@@ -371,23 +371,23 @@
 @ stdcall FindFirstFileExA(str long ptr long ptr long)
 @ stdcall FindFirstFileExW(wstr long ptr long ptr long)
 @ stdcall FindFirstFileW(wstr ptr)
-@ stub FindFirstVolumeA
-@ stub FindFirstVolumeMountPointA
-@ stub FindFirstVolumeMountPointW
-@ stub FindFirstVolumeW
+@ stdcall FindFirstVolumeA(ptr long)
+@ stdcall FindFirstVolumeMountPointA(str ptr long)
+@ stdcall FindFirstVolumeMountPointW(wstr ptr long)
+@ stdcall FindFirstVolumeW(ptr long)
 @ stdcall FindNextChangeNotification(long)
 @ stdcall FindNextFileA(long ptr)
 @ stdcall FindNextFileW(long ptr)
-@ stub FindNextVolumeA
+@ stdcall FindNextVolumeA(long ptr long)
 @ stub FindNextVolumeMountPointA
 @ stub FindNextVolumeMountPointW
-@ stub FindNextVolumeW
+@ stdcall FindNextVolumeW(long ptr long)
 @ stdcall FindResourceA(long str str)
 @ stdcall FindResourceExA(long str str long)
 @ stdcall FindResourceExW(long wstr wstr long)
 @ stdcall FindResourceW(long wstr wstr)
-@ stub FindVolumeClose
-@ stub FindVolumeMountPointClose
+@ stdcall FindVolumeClose(ptr)
+@ stdcall FindVolumeMountPointClose(ptr)
 @ stdcall FlushConsoleInputBuffer(long)
 @ stdcall FlushFileBuffers(long)
 @ stdcall FlushInstructionCache(long long long)
@@ -457,11 +457,11 @@
 @ stub GetConsoleFontInfo
 @ stub GetConsoleFontSize
 @ stub GetConsoleHardwareState
-@ stub GetConsoleInputExeNameA
-@ stub GetConsoleInputExeNameW
+@ stdcall GetConsoleInputExeNameA(long ptr)
+@ stdcall GetConsoleInputExeNameW(long ptr)
 @ stdcall GetConsoleInputWaitHandle()
-@ stub GetConsoleKeyboardLayoutNameA
-@ stub GetConsoleKeyboardLayoutNameW
+@ stdcall GetConsoleKeyboardLayoutNameA(ptr)
+@ stdcall GetConsoleKeyboardLayoutNameW(ptr)
 @ stdcall GetConsoleMode(long ptr)
 @ stub GetConsoleNlsMode
 @ stdcall GetConsoleOutputCP()
@@ -576,7 +576,7 @@
 @ stdcall GetProcAddress(long str)
 @ stdcall GetProcessAffinityMask(long ptr ptr)
 @ stdcall GetProcessFlags(long)
-# @ stub GetProcessHandleCount
+@ stdcall GetProcessHandleCount(long ptr)
 @ stdcall GetProcessHeap()
 @ stdcall GetProcessHeaps(long ptr)
 @ stdcall GetProcessId(long)
@@ -629,6 +629,7 @@
 @ stdcall GetTempPathA(long ptr)
 @ stdcall GetTempPathW(long ptr)
 @ stdcall GetThreadContext(long ptr)
+@ stdcall GetThreadId(ptr)
 # @ stub GetThreadIOPendingFlag
 @ stdcall GetThreadLocale()
 @ stdcall GetThreadPriority(long)
@@ -636,6 +637,7 @@
 @ stdcall GetThreadSelectorEntry(long long ptr)
 @ stdcall GetThreadTimes(long ptr ptr ptr ptr)
 @ stdcall GetTickCount()
+@ stdcall -ret64 GetTickCount64()
 @ stdcall GetTimeFormatA(long long ptr str ptr long)
 @ stdcall GetTimeFormatW(long long ptr wstr ptr long)
 @ stdcall GetTimeZoneInformation(ptr)
@@ -649,8 +651,8 @@
 @ stdcall GetVersionExW(ptr)
 @ stdcall GetVolumeInformationA(str ptr long ptr ptr ptr ptr long)
 @ stdcall GetVolumeInformationW(wstr ptr long ptr ptr ptr ptr long)
-@ stub GetVolumeNameForVolumeMountPointA
-@ stdcall GetVolumeNameForVolumeMountPointW(wstr long long)
+@ stdcall GetVolumeNameForVolumeMountPointA(str ptr long)
+@ stdcall GetVolumeNameForVolumeMountPointW(wstr ptr long)
 @ stdcall GetVolumePathNameA(str ptr long)
 @ stdcall GetVolumePathNameW(wstr ptr long)
 # @ stub GetVolumePathNamesForVolumeNameA
@@ -706,15 +708,15 @@
 @ stdcall InitAtomTable(long)
 @ stdcall InitializeCriticalSection(ptr)
 @ stdcall InitializeCriticalSectionAndSpinCount(ptr long)
-# @ stub InitializeSListHead ( -> ntdll.RtlInitializeSListHead)
+@ stdcall InitializeSListHead(ptr) ntdll.RtlInitializeSListHead
 @ stdcall InterlockedCompareExchange (ptr long long)
 @ stdcall InterlockedDecrement(ptr)
 @ stdcall InterlockedExchange(ptr long)
 @ stdcall InterlockedExchangeAdd (ptr long )
-# @ stub InterlockedFlushSList ( -> ntdll.RtlInterlockedFlushSList)
+@ stdcall InterlockedFlushSList(ptr) ntdll.RtlInterlockedFlushSList
 @ stdcall InterlockedIncrement(ptr)
-# @ stub InterlockedPopEntrySList ( -> ntdll.RtlInterlockedPopEntrySList)
-# @ stub InterlockedPushEntrySList ( -> ntdll.RtlInterlockedPushEntrySList)
+@ stdcall InterlockedPopEntrySList(ptr) ntdll.RtlInterlockedPopEntrySList
+@ stdcall InterlockedPushEntrySList(ptr ptr) ntdll.RtlInterlockedPushEntrySList
 @ stub InvalidateConsoleDIBits
 @ stdcall InvalidateNLSCache()
 @ stdcall IsBadCodePtr(ptr)
@@ -739,6 +741,7 @@
 @ stdcall IsWow64Process(ptr ptr)
 @ stdcall -i386 -register K32Thk1632Epilog()
 @ stdcall -i386 -register K32Thk1632Prolog()
+@ stdcall LCIDToLocaleName(long ptr long long)
 @ stdcall LCMapStringA(long long str long ptr long)
 @ stdcall LCMapStringW(long long wstr long ptr long)
 @ stdcall LZClose(long)
@@ -770,6 +773,7 @@
 @ stdcall LocalShrink(long long)
 @ stdcall LocalSize(long)
 @ stdcall LocalUnlock(long)
+@ stdcall LocaleNameToLCID(wstr long)
 @ stdcall LockFile(long long long long long)
 @ stdcall LockFileEx(long long long long long ptr)
 @ stdcall LockResource(long)
@@ -795,10 +799,12 @@
 @ stdcall MoveFileExA(str str long)
 @ stdcall MoveFileExW(wstr wstr long)
 @ stdcall MoveFileW(wstr wstr)
-# @ stub MoveFileWithProgressA
-# @ stub MoveFileWithProgressW
+@ stdcall MoveFileWithProgressA(str str ptr ptr long)
+@ stdcall MoveFileWithProgressW(wstr wstr ptr ptr long)
 @ stdcall MulDiv(long long long)
 @ stdcall MultiByteToWideChar(long long str long ptr long)
+@ stdcall NeedCurrentDirectoryForExePathA(str)
+@ stdcall NeedCurrentDirectoryForExePathW(wstr)
 # @ stub NlsConvertIntegerToString
 # @ stub NlsGetCacheUpdateCount
 # @ stub NlsResetProcessLocale
@@ -843,7 +849,7 @@
 @ stdcall PurgeComm(long long)
 @ stdcall -i386 -register QT_Thunk()
 @ stdcall QueryActCtxW(long ptr ptr long ptr long ptr)
-# @ stub QueryDepthSList ( -> ntdll.RtlQueryDepthSList)
+@ stdcall QueryDepthSList(ptr) ntdll.RtlQueryDepthSList
 @ stdcall QueryDosDeviceA(str ptr long)
 @ stdcall QueryDosDeviceW(wstr ptr long)
 @ stub QueryInformationJobObject
@@ -898,7 +904,7 @@
 @ stdcall RequestWakeupLatency(long)
 @ stdcall ResetEvent(long)
 @ stub ResetWriteWatch
-# @ stub RestoreLastError ( -> ntdll.RtlRestoreLastWin32Error)
+@ stdcall RestoreLastError(long) ntdll.RtlRestoreLastWin32Error
 @ stdcall ResumeThread(long)
 # @ stub RtlCaptureContext ( -> ntdll.RtlCaptureContext)
 # @ stub RtlCaptureStackBackTrace ( -> ntdll.RtlCaptureStackBackTrace)
@@ -1024,7 +1030,7 @@
 @ stdcall SetSystemTimeAdjustment(long long)
 @ stdcall SetTapeParameters(ptr long ptr)
 @ stdcall SetTapePosition(ptr long long long long long)
-@ stub SetTermsrvAppInstallMode
+@ stdcall SetTermsrvAppInstallMode(long)
 @ stdcall SetThreadAffinityMask(long long)
 @ stdcall SetThreadContext(long ptr)
 @ stdcall SetThreadExecutionState(long)
@@ -1057,7 +1063,7 @@
 @ stub TerminateJobObject
 @ stdcall TerminateProcess(long long)
 @ stdcall TerminateThread(long long)
-@ stub TermsrvAppInstallMode
+@ stdcall TermsrvAppInstallMode()
 @ stdcall Thread32First(long ptr)
 @ stdcall Thread32Next(long ptr)
 @ stdcall ThunkConnect32(ptr str str str ptr ptr)
@@ -1232,6 +1238,7 @@
 @ cdecl __wine_dll_register_16(ptr str)
 @ cdecl __wine_dll_unregister_16(ptr)
 @ varargs -private __wine_call_from_16_regs()
+@ cdecl __wine_emulate_instruction(ptr ptr)
 
 # Unix files
 @ cdecl wine_get_unix_file_name(wstr)

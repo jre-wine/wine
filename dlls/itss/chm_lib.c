@@ -31,12 +31,21 @@
  ***************************************************************************/
 
 /***************************************************************************
- *                                                                         *
- *   This library is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU Lesser General Public License as        *
- *   published by the Free Software Foundation; either version 2.1 of the  *
- *   License, or (at your option) any later version.                       *
- *                                                                         *
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ *
  ***************************************************************************/
 
 /***************************************************************************
@@ -76,6 +85,7 @@
 #ifndef CHM_MAX_BLOCKS_CACHED
 #define CHM_MAX_BLOCKS_CACHED 5
 #endif
+#define CHM_PARAM_MAX_BLOCKS_CACHED 0
 
 /*
  * architecture specific defines
@@ -218,12 +228,6 @@ static const WCHAR _CHMU_CONTENT[] = {
         'S','t','o','r','a','g','e','/',
         'M','S','C','o','m','p','r','e','s','s','e','d','/',
         'C','o','n','t','e','n','t',0
-};
-static const WCHAR _CHMU_SPANINFO[] = {
-':',':','D','a','t','a','S','p','a','c','e','/',
-        'S','t','o','r','a','g','e','/',
-        'M','S','C','o','m','p','r','e','s','s','e','d','/',
-        'S','p','a','n','I','n','f','o',
 };
 
 /*
@@ -599,6 +603,79 @@ static Int64 _chm_fetch_bytes(struct chmFile *h,
     return readLen;
 }
 
+/*
+ * set a parameter on the file handle.
+ * valid parameter types:
+ *          CHM_PARAM_MAX_BLOCKS_CACHED:
+ *                 how many decompressed blocks should be cached?  A simple
+ *                 caching scheme is used, wherein the index of the block is
+ *                 used as a hash value, and hash collision results in the
+ *                 invalidation of the previously cached block.
+ */
+static void chm_set_param(struct chmFile *h,
+                          int paramType,
+                          int paramVal)
+{
+    switch (paramType)
+    {
+        case CHM_PARAM_MAX_BLOCKS_CACHED:
+            CHM_ACQUIRE_LOCK(h->cache_mutex);
+            if (paramVal != h->cache_num_blocks)
+            {
+                UChar **newBlocks;
+                Int64 *newIndices;
+                int     i;
+
+                /* allocate new cached blocks */
+                newBlocks = HeapAlloc(GetProcessHeap(), 0, paramVal * sizeof (UChar *));
+                newIndices = HeapAlloc(GetProcessHeap(), 0, paramVal * sizeof (UInt64));
+                for (i=0; i<paramVal; i++)
+                {
+                    newBlocks[i] = NULL;
+                    newIndices[i] = 0;
+                }
+
+                /* re-distribute old cached blocks */
+                if (h->cache_blocks)
+                {
+                    for (i=0; i<h->cache_num_blocks; i++)
+                    {
+                        int newSlot = (int)(h->cache_block_indices[i] % paramVal);
+
+                        if (h->cache_blocks[i])
+                        {
+                            /* in case of collision, destroy newcomer */
+                            if (newBlocks[newSlot])
+                            {
+                                HeapFree(GetProcessHeap(), 0, h->cache_blocks[i]);
+                                h->cache_blocks[i] = NULL;
+                            }
+                            else
+                            {
+                                newBlocks[newSlot] = h->cache_blocks[i];
+                                newIndices[newSlot] =
+                                            h->cache_block_indices[i];
+                            }
+                        }
+                    }
+
+                    HeapFree(GetProcessHeap(), 0, h->cache_blocks);
+                    HeapFree(GetProcessHeap(), 0, h->cache_block_indices);
+                }
+
+                /* now, set new values */
+                h->cache_blocks = newBlocks;
+                h->cache_block_indices = newIndices;
+                h->cache_num_blocks = paramVal;
+            }
+            CHM_RELEASE_LOCK(h->cache_mutex);
+            break;
+
+        default:
+            break;
+    }
+}
+
 /* open an ITS archive */
 struct chmFile *chm_openW(const WCHAR *filename)
 {
@@ -615,7 +692,7 @@ struct chmFile *chm_openW(const WCHAR *filename)
     struct chmLzxcControlData   ctlData;
 
     /* allocate handle */
-    newHandle = malloc(sizeof(struct chmFile));
+    newHandle = HeapAlloc(GetProcessHeap(), 0, sizeof(struct chmFile));
     newHandle->fd = CHM_NULL_FD;
     newHandle->lzx_state = NULL;
     newHandle->cache_blocks = NULL;
@@ -631,14 +708,17 @@ struct chmFile *chm_openW(const WCHAR *filename)
                                    FILE_ATTRIBUTE_NORMAL,
                                    NULL)) == CHM_NULL_FD)
     {
-        free(newHandle);
+        HeapFree(GetProcessHeap(), 0, newHandle);
         return NULL;
     }
 
     /* initialize mutexes, if needed */
     InitializeCriticalSection(&newHandle->mutex);
+    newHandle->mutex.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": chmFile.mutex");
     InitializeCriticalSection(&newHandle->lzx_mutex);
+    newHandle->lzx_mutex.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": chmFile.lzx_mutex");
     InitializeCriticalSection(&newHandle->cache_mutex);
+    newHandle->cache_mutex.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": chmFile.cache_mutex");
 
     /* read and verify header */
     sremain = _CHM_ITSF_V3_LEN;
@@ -659,7 +739,7 @@ struct chmFile *chm_openW(const WCHAR *filename)
     sremain = _CHM_ITSP_V1_LEN;
     sbufpos = sbuffer;
     if (_chm_fetch_bytes(newHandle, sbuffer,
-                         (UInt64)itsfHeader.dir_offset, sremain) != sremain       ||
+                         itsfHeader.dir_offset, sremain) != sremain    ||
         !_unmarshal_itsp_header(&sbufpos, &sremain, &itspHeader))
     {
         chm_close(newHandle);
@@ -681,33 +761,6 @@ struct chmFile *chm_openW(const WCHAR *filename)
 
     /* By default, compression is enabled. */
     newHandle->compression_enabled = 1;
-
-/* Jed, Sun Jun 27: 'span' doesn't seem to be used anywhere?! */
-#if 0
-    /* fetch span */
-    if (CHM_RESOLVE_SUCCESS != chm_resolve_object(newHandle,
-                                                  _CHMU_SPANINFO,
-                                                  &uiSpan)                ||
-        uiSpan.space == CHM_COMPRESSED)
-    {
-        chm_close(newHandle);
-        return NULL;
-    }
-
-    /* N.B.: we've already checked that uiSpan is in the uncompressed section,
-     *       so this should not require attempting to decompress, which may
-     *       rely on having a valid "span"
-     */
-    sremain = 8;
-    sbufpos = sbuffer;
-    if (chm_retrieve_object(newHandle, &uiSpan, sbuffer,
-                            0, sremain) != sremain                        ||
-        !_unmarshal_uint64(&sbufpos, &sremain, &newHandle->span))
-    {
-        chm_close(newHandle);
-        return NULL;
-    }
-#endif
 
     /* prefetch most commonly needed unit infos */
     if (CHM_RESOLVE_SUCCESS != chm_resolve_object(newHandle,
@@ -785,8 +838,11 @@ void chm_close(struct chmFile *h)
             CHM_CLOSE_FILE(h->fd);
         h->fd = CHM_NULL_FD;
 
+        h->mutex.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&h->mutex);
+        h->lzx_mutex.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&h->lzx_mutex);
+        h->cache_mutex.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&h->cache_mutex);
 
         if (h->lzx_state)
@@ -798,90 +854,16 @@ void chm_close(struct chmFile *h)
             int i;
             for (i=0; i<h->cache_num_blocks; i++)
             {
-                if (h->cache_blocks[i])
-                    free(h->cache_blocks[i]);
+                HeapFree(GetProcessHeap(), 0, h->cache_blocks[i]);
             }
-            free(h->cache_blocks);
+            HeapFree(GetProcessHeap(), 0, h->cache_blocks);
             h->cache_blocks = NULL;
         }
 
-        free(h->cache_block_indices);
+        HeapFree(GetProcessHeap(), 0, h->cache_block_indices);
         h->cache_block_indices = NULL;
 
-        free(h);
-    }
-}
-
-/*
- * set a parameter on the file handle.
- * valid parameter types:
- *          CHM_PARAM_MAX_BLOCKS_CACHED:
- *                 how many decompressed blocks should be cached?  A simple
- *                 caching scheme is used, wherein the index of the block is
- *                 used as a hash value, and hash collision results in the
- *                 invalidation of the previously cached block.
- */
-void chm_set_param(struct chmFile *h,
-                   int paramType,
-                   int paramVal)
-{
-    switch (paramType)
-    {
-        case CHM_PARAM_MAX_BLOCKS_CACHED:
-            CHM_ACQUIRE_LOCK(h->cache_mutex);
-            if (paramVal != h->cache_num_blocks)
-            {
-                UChar **newBlocks;
-                Int64 *newIndices;
-                int     i;
-
-                /* allocate new cached blocks */
-                newBlocks = malloc(paramVal * sizeof (UChar *));
-                newIndices = malloc(paramVal * sizeof (UInt64));
-                for (i=0; i<paramVal; i++)
-                {
-                    newBlocks[i] = NULL;
-                    newIndices[i] = 0;
-                }
-
-                /* re-distribute old cached blocks */
-                if (h->cache_blocks)
-                {
-                    for (i=0; i<h->cache_num_blocks; i++)
-                    {
-                        int newSlot = (int)(h->cache_block_indices[i] % paramVal);
-
-                        if (h->cache_blocks[i])
-                        {
-                            /* in case of collision, destroy newcomer */
-                            if (newBlocks[newSlot])
-                            {
-                                free(h->cache_blocks[i]);
-                                h->cache_blocks[i] = NULL;
-                            }
-                            else
-                            {
-                                newBlocks[newSlot] = h->cache_blocks[i];
-                                newIndices[newSlot] =
-                                            h->cache_block_indices[i];
-                            }
-                        }
-                    }
-
-                    free(h->cache_blocks);
-                    free(h->cache_block_indices);
-                }
-
-                /* now, set new values */
-                h->cache_blocks = newBlocks;
-                h->cache_block_indices = newIndices;
-                h->cache_num_blocks = paramVal;
-            }
-            CHM_RELEASE_LOCK(h->cache_mutex);
-            break;
-
-        default:
-            break;
+        HeapFree(GetProcessHeap(), 0, h);
     }
 }
 
@@ -1060,7 +1042,7 @@ int chm_resolve_object(struct chmFile *h,
 
         /* try to fetch the index page */
         if (_chm_fetch_bytes(h, page_buf,
-                             (UInt64)h->dir_offset + (UInt64)curPage*h->block_len,
+                             h->dir_offset + (UInt64)curPage*h->block_len,
                              h->block_len) != h->block_len)
 	{
 	    HeapFree(GetProcessHeap(), 0, page_buf);
@@ -1123,10 +1105,10 @@ static int _chm_get_cmpblock_bounds(struct chmFile *h,
         dummy = buffer;
         remain = 8;
         if (_chm_fetch_bytes(h, buffer,
-                             (UInt64)h->data_offset
-                                + (UInt64)h->rt_unit.start
-                                + (UInt64)h->reset_table.table_offset
-                                + (UInt64)block*8,
+                             h->data_offset
+                                + h->rt_unit.start
+                                + h->reset_table.table_offset
+                                + block*8,
                              remain) != remain                            ||
             !_unmarshal_uint64(&dummy, &remain, start))
             return 0;
@@ -1135,10 +1117,10 @@ static int _chm_get_cmpblock_bounds(struct chmFile *h,
         dummy = buffer;
         remain = 8;
         if (_chm_fetch_bytes(h, buffer,
-                         (UInt64)h->data_offset
-                                + (UInt64)h->rt_unit.start
-                                + (UInt64)h->reset_table.table_offset
-                                + (UInt64)block*8 + 8,
+                             h->data_offset
+                                + h->rt_unit.start
+                                + h->reset_table.table_offset
+                                + block*8 + 8,
                          remain) != remain                                ||
             !_unmarshal_int64(&dummy, &remain, len))
             return 0;
@@ -1151,10 +1133,10 @@ static int _chm_get_cmpblock_bounds(struct chmFile *h,
         dummy = buffer;
         remain = 8;
         if (_chm_fetch_bytes(h, buffer,
-                             (UInt64)h->data_offset
-                                + (UInt64)h->rt_unit.start
-                                + (UInt64)h->reset_table.table_offset
-                                + (UInt64)block*8,
+                             h->data_offset
+                                + h->rt_unit.start
+                                + h->reset_table.table_offset
+                                + block*8,
                              remain) != remain                            ||
             !_unmarshal_uint64(&dummy, &remain, start))
             return 0;
@@ -1210,7 +1192,9 @@ static Int64 _chm_decompress_block(struct chmFile *h,
                 indexSlot = (int)((curBlockIdx) % h->cache_num_blocks);
                 h->cache_block_indices[indexSlot] = curBlockIdx;
                 if (! h->cache_blocks[indexSlot])
-                    h->cache_blocks[indexSlot] = malloc( (unsigned int)(h->reset_table.block_len));
+                    h->cache_blocks[indexSlot] =
+                      HeapAlloc(GetProcessHeap(), 0,
+                                (unsigned int)(h->reset_table.block_len));
                 lbuffer = h->cache_blocks[indexSlot];
 
                 /* decompress the previous block */
@@ -1248,7 +1232,8 @@ static Int64 _chm_decompress_block(struct chmFile *h,
     indexSlot = (int)(block % h->cache_num_blocks);
     h->cache_block_indices[indexSlot] = block;
     if (! h->cache_blocks[indexSlot])
-        h->cache_blocks[indexSlot] = malloc( ((unsigned int)h->reset_table.block_len));
+        h->cache_blocks[indexSlot] =
+          HeapAlloc(GetProcessHeap(), 0, ((unsigned int)h->reset_table.block_len));
     lbuffer = h->cache_blocks[indexSlot];
     *ubuffer = lbuffer;
 
@@ -1341,7 +1326,7 @@ LONGINT64 chm_retrieve_object(struct chmFile *h,
         return (Int64)0;
 
     /* starting address must be in correct range */
-    if (addr < 0  ||  addr >= ui->length)
+    if (addr >= ui->length)
         return (Int64)0;
 
     /* clip length */
@@ -1354,7 +1339,7 @@ LONGINT64 chm_retrieve_object(struct chmFile *h,
         /* read data */
         return _chm_fetch_bytes(h,
                                 buf,
-                                (UInt64)h->data_offset + (UInt64)ui->start + (UInt64)addr,
+                                h->data_offset + ui->start + addr,
                                 len);
     }
 
@@ -1397,7 +1382,7 @@ int chm_enumerate(struct chmFile *h,
     Int32 curPage;
 
     /* buffer to hold whatever page we're looking at */
-    UChar *page_buf = HeapAlloc(GetProcessHeap(), 0, (unsigned int)h->block_len);
+    UChar *page_buf = HeapAlloc(GetProcessHeap(), 0, h->block_len);
     struct chmPmglHeader header;
     UChar *end;
     UChar *cur;
@@ -1418,7 +1403,7 @@ int chm_enumerate(struct chmFile *h,
         /* try to fetch the index page */
         if (_chm_fetch_bytes(h,
                              page_buf,
-                             (UInt64)h->dir_offset + (UInt64)curPage*h->block_len,
+                             h->dir_offset + (UInt64)curPage*h->block_len,
                              h->block_len) != h->block_len)
         {
             HeapFree(GetProcessHeap(), 0, page_buf);
@@ -1510,7 +1495,7 @@ int chm_enumerate_dir(struct chmFile *h,
     Int32 curPage;
 
     /* buffer to hold whatever page we're looking at */
-    UChar *page_buf = HeapAlloc(GetProcessHeap(), 0, (unsigned int)h->block_len);
+    UChar *page_buf = HeapAlloc(GetProcessHeap(), 0, h->block_len);
     struct chmPmglHeader header;
     UChar *end;
     UChar *cur;
@@ -1555,7 +1540,7 @@ int chm_enumerate_dir(struct chmFile *h,
         /* try to fetch the index page */
         if (_chm_fetch_bytes(h,
                              page_buf,
-                             (UInt64)h->dir_offset + (UInt64)curPage*h->block_len,
+                             h->dir_offset + (UInt64)curPage*h->block_len,
                              h->block_len) != h->block_len)
         {
             HeapFree(GetProcessHeap(), 0, page_buf);

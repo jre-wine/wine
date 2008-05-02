@@ -23,6 +23,8 @@
 #include "winbase.h"
 #include "winerror.h"
 #include "winuser.h"
+#include "ole2.h"
+#include "oaidl.h"
 
 /* Function ptrs for ordinal calls */
 static HMODULE hShlwapi;
@@ -33,6 +35,7 @@ static HANDLE (WINAPI *pSHAllocShared)(LPCVOID,DWORD,DWORD);
 static LPVOID (WINAPI *pSHLockShared)(HANDLE,DWORD);
 static BOOL   (WINAPI *pSHUnlockShared)(LPVOID);
 static BOOL   (WINAPI *pSHFreeShared)(HANDLE,DWORD);
+static HRESULT(WINAPIV *pSHPackDispParams)(DISPPARAMS*,VARIANTARG*,UINT,...);
 
 static void test_GetAcceptLanguagesA(void)
 {   HRESULT retval;
@@ -47,7 +50,7 @@ static void test_GetAcceptLanguagesA(void)
     SetLastError(ERROR_SUCCESS);
     retval = pGetAcceptLanguagesA( buffer, &buffersize);
     trace("GetAcceptLanguagesA: retval %08x, size %08x, buffer (%s),"
-	" last error %d\n", retval, buffersize, buffer, GetLastError());
+	" last error %u\n", retval, buffersize, buffer, GetLastError());
     if(retval != S_OK) {
 	trace("GetAcceptLanguagesA: skipping tests\n");
 	return;
@@ -56,14 +59,14 @@ static void test_GetAcceptLanguagesA(void)
 	(ERROR_CLASS_DOES_NOT_EXIST == GetLastError()) ||
 	(ERROR_PROC_NOT_FOUND == GetLastError()) ||
 	(ERROR_CALL_NOT_IMPLEMENTED == GetLastError()) ||
-	(ERROR_SUCCESS == GetLastError()), "last error set to %d\n", GetLastError());
+	(ERROR_SUCCESS == GetLastError()), "last error set to %u\n", GetLastError());
     exactsize = strlen(buffer);
 
     SetLastError(ERROR_SUCCESS);
     retval = pGetAcceptLanguagesA( NULL, NULL);
     ok(retval == E_FAIL,
        "function result wrong: got %08x; expected E_FAIL\n", retval);
-    ok(ERROR_SUCCESS == GetLastError(), "last error set to %d\n", GetLastError());
+    ok(ERROR_SUCCESS == GetLastError(), "last error set to %u\n", GetLastError());
 
     buffersize = sizeof(buffer);
     SetLastError(ERROR_SUCCESS);
@@ -72,13 +75,13 @@ static void test_GetAcceptLanguagesA(void)
        "function result wrong: got %08x; expected E_FAIL\n", retval);
     ok(buffersize == sizeof(buffer),
        "buffersize was changed (2nd parameter; not on Win2k)\n");
-    ok(ERROR_SUCCESS == GetLastError(), "last error set to %d\n", GetLastError());
+    ok(ERROR_SUCCESS == GetLastError(), "last error set to %u\n", GetLastError());
 
     SetLastError(ERROR_SUCCESS);
     retval = pGetAcceptLanguagesA( buffer, NULL);
     ok(retval == E_FAIL,
        "function result wrong: got %08x; expected E_FAIL\n", retval);
-    ok(ERROR_SUCCESS == GetLastError(), "last error set to %d\n", GetLastError());
+    ok(ERROR_SUCCESS == GetLastError(), "last error set to %u\n", GetLastError());
 
     buffersize = 0;
     memset(buffer, 0, sizeof(buffer));
@@ -88,7 +91,7 @@ static void test_GetAcceptLanguagesA(void)
        "function result wrong: got %08x; expected E_FAIL\n", retval);
     ok(buffersize == 0,
        "buffersize wrong(changed) got %08x; expected 0 (2nd parameter; not on Win2k)\n", buffersize);
-    ok(ERROR_SUCCESS == GetLastError(), "last error set to %d\n", GetLastError());
+    ok(ERROR_SUCCESS == GetLastError(), "last error set to %u\n", GetLastError());
 
     buffersize = buffersize2 = 1;
     memset(buffer, 0, sizeof(buffer));
@@ -99,29 +102,29 @@ static void test_GetAcceptLanguagesA(void)
             if(buffersize == exactsize) {
             ok( (ERROR_SUCCESS == GetLastError()) || (ERROR_CALL_NOT_IMPLEMENTED == GetLastError()) ||
 		(ERROR_PROC_NOT_FOUND == GetLastError()) || (ERROR_NO_IMPERSONATION_TOKEN == GetLastError()),
-                "last error wrong: got %08x; expected ERROR_SUCCESS(NT4)/ERROR_CALL_NOT_IMPLEMENTED(98/ME)/"
+                "last error wrong: got %u; expected ERROR_SUCCESS(NT4)/ERROR_CALL_NOT_IMPLEMENTED(98/ME)/"
 		"ERROR_PROC_NOT_FOUND(NT4)/ERROR_NO_IMPERSONATION_TOKEN(XP)\n", GetLastError());
             ok(exactsize == strlen(buffer),
                  "buffer content (length) wrong: got %08x, expected %08x\n", lstrlenA(buffer), exactsize);
             } else if((buffersize +1) == buffersize2) {
                 ok(ERROR_SUCCESS == GetLastError(),
-                    "last error wrong: got %08x; expected ERROR_SUCCESS\n", GetLastError());
+                    "last error wrong: got %u; expected ERROR_SUCCESS\n", GetLastError());
                 ok(buffersize == strlen(buffer),
                     "buffer content (length) wrong: got %08x, expected %08x\n", lstrlenA(buffer), buffersize);
             } else
-                ok( 0, "retval %08x, size %08x, buffer (%s), last error %d\n",
+                ok( 0, "retval %08x, size %08x, buffer (%s), last error %u\n",
                     retval, buffersize, buffer, GetLastError());
             break;
 	case E_INVALIDARG:
             ok(buffersize == 0,
                "buffersize wrong: got %08x, expected 0 (2nd parameter;Win2k)\n", buffersize);
             ok(ERROR_INSUFFICIENT_BUFFER == GetLastError(),
-               "last error wrong: got %08x; expected ERROR_INSUFFICIENT_BUFFER\n", GetLastError());
+               "last error wrong: got %u; expected ERROR_INSUFFICIENT_BUFFER\n", GetLastError());
             ok(buffersize2 == strlen(buffer),
                "buffer content (length) wrong: got %08x, expected %08x\n", lstrlenA(buffer), buffersize2);
             break;
         default:
-            ok( 0, "retval %08x, size %08x, buffer (%s), last error %d\n",
+            ok( 0, "retval %08x, size %08x, buffer (%s), last error %u\n",
                 retval, buffersize, buffer, GetLastError());
             break;
     }
@@ -133,25 +136,25 @@ static void test_GetAcceptLanguagesA(void)
     switch(retval) {
 	case 0L:
             ok(ERROR_SUCCESS == GetLastError(),
-                 "last error wrong: got %08x; expected ERROR_SUCCESS\n", GetLastError());
+                 "last error wrong: got %u; expected ERROR_SUCCESS\n", GetLastError());
             if((buffersize == exactsize) /* XP */ ||
                ((buffersize +1)== exactsize) /* 98 */)
                 ok(buffersize == strlen(buffer),
                     "buffer content (length) wrong: got %08x, expected %08x\n", lstrlenA(buffer), buffersize);
             else
-                ok( 0, "retval %08x, size %08x, buffer (%s), last error %d\n",
+                ok( 0, "retval %08x, size %08x, buffer (%s), last error %u\n",
                     retval, buffersize, buffer, GetLastError());
             break;
 	case E_INVALIDARG:
             ok(buffersize == 0,
                "buffersize wrong: got %08x, expected 0 (2nd parameter;Win2k)\n", buffersize);
             ok(ERROR_INSUFFICIENT_BUFFER == GetLastError(),
-               "last error wrong: got %08x; expected ERROR_INSUFFICIENT_BUFFER\n", GetLastError());
+               "last error wrong: got %u; expected ERROR_INSUFFICIENT_BUFFER\n", GetLastError());
             ok(buffersize2 == strlen(buffer),
                "buffer content (length) wrong: got %08x, expected %08x\n", lstrlenA(buffer), buffersize2);
             break;
         default:
-            ok( 0, "retval %08x, size %08x, buffer (%s), last error %d\n",
+            ok( 0, "retval %08x, size %08x, buffer (%s), last error %u\n",
                 retval, buffersize, buffer, GetLastError());
             break;
     }
@@ -208,23 +211,23 @@ static void test_alloc_shared(void)
 
     procid=GetCurrentProcessId();
     hmem=pSHAllocShared(NULL,10,procid);
-    ok(hmem!=NULL,"SHAllocShared(NULL...) failed: %d\n", GetLastError());
+    ok(hmem!=NULL,"SHAllocShared(NULL...) failed: %u\n", GetLastError());
     ret = pSHFreeShared(hmem, procid);
-    ok( ret, "SHFreeShared failed: %d\n", GetLastError());
+    ok( ret, "SHFreeShared failed: %u\n", GetLastError());
 
     val=0x12345678;
     hmem=pSHAllocShared(&val,4,procid);
-    ok(hmem!=NULL,"SHAllocShared(NULL...) failed: %d\n", GetLastError());
+    ok(hmem!=NULL,"SHAllocShared(NULL...) failed: %u\n", GetLastError());
 
     p=(int*)pSHLockShared(hmem,procid);
-    ok(p!=NULL,"SHLockShared failed: %d\n", GetLastError());
+    ok(p!=NULL,"SHLockShared failed: %u\n", GetLastError());
     if (p!=NULL)
         ok(*p==val,"Wrong value in shared memory: %d instead of %d\n",*p,val);
     ret = pSHUnlockShared(p);
-    ok( ret, "SHUnlockShared failed: %d\n", GetLastError());
+    ok( ret, "SHUnlockShared failed: %u\n", GetLastError());
 
     ret = pSHFreeShared(hmem, procid);
-    ok( ret, "SHFreeShared failed: %d\n", GetLastError());
+    ok( ret, "SHFreeShared failed: %u\n", GetLastError());
 }
 
 static void test_fdsa(void)
@@ -377,11 +380,11 @@ static void test_GetShellSecurityDescriptor(void)
         ok(IsValidSecurityDescriptor(psd), "returned value is not valid SD\n");
 
         ok(GetSecurityDescriptorControl(psd, &control, &dwRev),
-                "GetSecurityDescriptorControl failed with error %d\n", GetLastError());
+                "GetSecurityDescriptorControl failed with error %u\n", GetLastError());
         ok(0 == (control & SE_SELF_RELATIVE), "SD should be absolute\n");
 
         ok(GetSecurityDescriptorDacl(psd, &bHasDacl, &pAcl, &bDefaulted), 
-            "GetSecurityDescriptorDacl failed with error %d\n", GetLastError());
+            "GetSecurityDescriptorDacl failed with error %u\n", GetLastError());
 
         ok(bHasDacl, "SD has no DACL\n");
         if (bHasDacl)
@@ -396,27 +399,27 @@ static void test_GetShellSecurityDescriptor(void)
                 ok(IsValidAcl(pAcl), "DACL is not valid\n");
 
                 ok(GetAclInformation(pAcl, &asiSize, sizeof(asiSize), AclSizeInformation),
-                        "GetAclInformation failed with error %d\n", GetLastError());
+                        "GetAclInformation failed with error %u\n", GetLastError());
 
                 ok(asiSize.AceCount == 3, "Incorrect number of ACEs: %d entries\n", asiSize.AceCount);
                 if (asiSize.AceCount == 3)
                 {
                     ACCESS_ALLOWED_ACE *paaa; /* will use for DENIED too */
 
-                    ok(GetAce(pAcl, 0, (LPVOID*)&paaa), "GetAce failed with error %d\n", GetLastError());
+                    ok(GetAce(pAcl, 0, (LPVOID*)&paaa), "GetAce failed with error %u\n", GetLastError());
                     ok(paaa->Header.AceType == ACCESS_ALLOWED_ACE_TYPE, 
                             "Invalid ACE type %d\n", paaa->Header.AceType); 
                     ok(paaa->Header.AceFlags == 0, "Invalid ACE flags %x\n", paaa->Header.AceFlags);
                     ok(paaa->Mask == GENERIC_ALL, "Invalid ACE mask %x\n", paaa->Mask);
 
-                    ok(GetAce(pAcl, 1, (LPVOID*)&paaa), "GetAce failed with error %d\n", GetLastError());
+                    ok(GetAce(pAcl, 1, (LPVOID*)&paaa), "GetAce failed with error %u\n", GetLastError());
                     ok(paaa->Header.AceType == ACCESS_DENIED_ACE_TYPE, 
                             "Invalid ACE type %d\n", paaa->Header.AceType); 
                     /* first one of two ACEs generated from inheritable entry - without inheritance */
                     ok(paaa->Header.AceFlags == 0, "Invalid ACE flags %x\n", paaa->Header.AceFlags);
                     ok(paaa->Mask == GENERIC_WRITE, "Invalid ACE mask %x\n", paaa->Mask);
 
-                    ok(GetAce(pAcl, 2, (LPVOID*)&paaa), "GetAce failed with error %d\n", GetLastError());
+                    ok(GetAce(pAcl, 2, (LPVOID*)&paaa), "GetAce failed with error %u\n", GetLastError());
                     ok(paaa->Header.AceType == ACCESS_DENIED_ACE_TYPE, 
                             "Invalid ACE type %d\n", paaa->Header.AceType); 
                     /* second ACE - with inheritance */
@@ -431,12 +434,56 @@ static void test_GetShellSecurityDescriptor(void)
     }
 }
 
+static void test_SHPackDispParams(void)
+{
+    DISPPARAMS params;
+    VARIANT vars[10];
+    HRESULT hres;
+
+    if(!pSHPackDispParams)
+        skip("SHPackSidpParams not available\n");
+
+    memset(&params, 0xc0, sizeof(params));
+    memset(vars, 0xc0, sizeof(vars));
+    hres = pSHPackDispParams(&params, vars, 1, VT_I4, 0xdeadbeef);
+    ok(hres == S_OK, "SHPackDispParams failed: %08x\n", hres);
+    ok(params.cArgs == 1, "params.cArgs = %d\n", params.cArgs);
+    ok(params.cNamedArgs == 0, "params.cNamedArgs = %d\n", params.cArgs);
+    ok(params.rgdispidNamedArgs == NULL, "params.rgdispidNamedArgs = %p\n", params.rgdispidNamedArgs);
+    ok(params.rgvarg == vars, "params.rgvarg = %p\n", params.rgvarg);
+    ok(V_VT(vars) == VT_I4, "V_VT(var) = %d\n", V_VT(vars));
+    ok(V_DISPATCH(vars) == (void*)0xdeadbeef, "failed\n");
+
+    memset(&params, 0xc0, sizeof(params));
+    hres = pSHPackDispParams(&params, NULL, 0, 0);
+    ok(hres == S_OK, "SHPackDispParams failed: %08x\n", hres);
+    ok(params.cArgs == 0, "params.cArgs = %d\n", params.cArgs);
+    ok(params.cNamedArgs == 0, "params.cNamedArgs = %d\n", params.cArgs);
+    ok(params.rgdispidNamedArgs == NULL, "params.rgdispidNamedArgs = %p\n", params.rgdispidNamedArgs);
+    ok(params.rgvarg == NULL, "params.rgvarg = %p\n", params.rgvarg);
+
+    memset(vars, 0xc0, sizeof(vars));
+    memset(&params, 0xc0, sizeof(params));
+    hres = pSHPackDispParams(&params, vars, 4, VT_BSTR, (void*)0xdeadbeef, VT_EMPTY, 10,
+            VT_I4, 100, VT_DISPATCH, (void*)0xdeadbeef);
+    ok(hres == S_OK, "SHPackDispParams failed: %08x\n", hres);
+    ok(params.cArgs == 4, "params.cArgs = %d\n", params.cArgs);
+    ok(params.cNamedArgs == 0, "params.cNamedArgs = %d\n", params.cArgs);
+    ok(params.rgdispidNamedArgs == NULL, "params.rgdispidNamedArgs = %p\n", params.rgdispidNamedArgs);
+    ok(params.rgvarg == vars, "params.rgvarg = %p\n", params.rgvarg);
+    ok(V_VT(vars) == VT_DISPATCH, "V_VT(vars[0]) = %x\n", V_VT(vars));
+    ok(V_I4(vars) == 0xdeadbeef, "V_I4(vars[0]) = %x\n", V_I4(vars));
+    ok(V_VT(vars+1) == VT_I4, "V_VT(vars[1]) = %d\n", V_VT(vars+1));
+    ok(V_I4(vars+1) == 100, "V_I4(vars[1]) = %x\n", V_I4(vars+1));
+    ok(V_VT(vars+2) == VT_I4, "V_VT(vars[2]) = %d\n", V_VT(vars+2));
+    ok(V_I4(vars+2) == 10, "V_I4(vars[2]) = %x\n", V_I4(vars+2));
+    ok(V_VT(vars+3) == VT_BSTR, "V_VT(vars[3]) = %d\n", V_VT(vars+3));
+    ok(V_BSTR(vars+3) == (void*)0xdeadbeef, "V_BSTR(vars[3]) = %p\n", V_BSTR(vars+3));
+}
+
 START_TEST(ordinal)
 {
-  hShlwapi = LoadLibraryA("shlwapi.dll");
-  ok(hShlwapi != 0, "LoadLibraryA failed\n");
-  if (!hShlwapi)
-    return;
+  hShlwapi = GetModuleHandleA("shlwapi.dll");
 
   pGetAcceptLanguagesA = (void*)GetProcAddress(hShlwapi, (LPSTR)14);
   pSHSearchMapInt = (void*)GetProcAddress(hShlwapi, (LPSTR)198);
@@ -444,12 +491,12 @@ START_TEST(ordinal)
   pSHLockShared=(void*)GetProcAddress(hShlwapi,(char*)8);
   pSHUnlockShared=(void*)GetProcAddress(hShlwapi,(char*)9);
   pSHFreeShared=(void*)GetProcAddress(hShlwapi,(char*)10);
+  pSHPackDispParams=(void*)GetProcAddress(hShlwapi,(char*)282);
 
   test_GetAcceptLanguagesA();
   test_SHSearchMapInt();
   test_alloc_shared();
   test_fdsa();
   test_GetShellSecurityDescriptor();
-
-  FreeLibrary(hShlwapi);
+  test_SHPackDispParams();
 }

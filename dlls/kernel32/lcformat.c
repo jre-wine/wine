@@ -140,7 +140,7 @@ static WCHAR* NLS_GetLocaleString(LCID lcid, DWORD dwFlags)
   TRACE( #type ": %d (%08x)\n", (DWORD)num, (DWORD)num)
 
 #define GET_LOCALE_STRING(str, type) str = NLS_GetLocaleString(lcid, type|dwFlags); \
-  TRACE( #type ": '%s'\n", debugstr_w(str))
+  TRACE( #type ": %s\n", debugstr_w(str))
 
 /**************************************************************************
  * NLS_GetFormats <internal>
@@ -299,6 +299,8 @@ static const NLS_FORMAT_NODE *NLS_GetFormats(LCID lcid, DWORD dwFlags)
  */
 BOOL NLS_IsUnicodeOnlyLcid(LCID lcid)
 {
+  lcid = ConvertDefaultLocale(lcid);
+
   switch (PRIMARYLANGID(lcid))
   {
   case LANG_ARMENIAN:
@@ -327,10 +329,10 @@ BOOL NLS_IsUnicodeOnlyLcid(LCID lcid)
 #define IsTimeFmtChar(p)   (p == 'H'||p == 'h'||p == 'm'||p == 's'||p == 't')
 
 /* Only the following flags can be given if a date/time format is specified */
-#define DATE_FORMAT_FLAGS (DATE_DATEVARSONLY|LOCALE_NOUSEROVERRIDE)
+#define DATE_FORMAT_FLAGS (DATE_DATEVARSONLY)
 #define TIME_FORMAT_FLAGS (TIME_TIMEVARSONLY|TIME_FORCE24HOURFORMAT| \
                            TIME_NOMINUTESORSECONDS|TIME_NOSECONDS| \
-                           TIME_NOTIMEMARKER|LOCALE_NOUSEROVERRIDE)
+                           TIME_NOTIMEMARKER)
 
 /******************************************************************************
  * NLS_GetDateTimeFormatW <internal>
@@ -654,7 +656,7 @@ NLS_GetDateTimeFormatW_InvalidFlags:
   }
   cchWritten++; /* Include terminating NUL */
 
-  TRACE("returning length=%d, ouput='%s'\n", cchWritten, debugstr_w(lpStr));
+  TRACE("returning length=%d, ouput=%s\n", cchWritten, debugstr_w(lpStr));
   return cchWritten;
 
 NLS_GetDateTimeFormatW_Overrun:

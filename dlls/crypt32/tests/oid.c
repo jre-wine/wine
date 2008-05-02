@@ -27,6 +27,10 @@
 
 #include "wine/test.h"
 
+
+static BOOL (WINAPI *pCryptEnumOIDInfo)(DWORD,DWORD,void*,PFN_CRYPT_ENUM_OID_INFO);
+
+
 struct OIDToAlgID
 {
     LPCSTR oid;
@@ -83,6 +87,9 @@ static const struct OIDToAlgID algIDToOID[] = {
  { szOID_OIWSEC_desCBC, CALG_DES },
  { szOID_OIWSEC_sha1, CALG_SHA },
 };
+
+static const WCHAR bogusDll[] = { 'b','o','g','u','s','.','d','l','l',0 };
+static const WCHAR bogus2Dll[] = { 'b','o','g','u','s','2','.','d','l','l',0 };
 
 static void testOIDToAlgID(void)
 {
@@ -264,7 +271,6 @@ static void test_installOIDFunctionAddress(void)
 
 static void test_registerOIDFunction(void)
 {
-    static const WCHAR bogusDll[] = { 'b','o','g','u','s','.','d','l','l',0 };
     BOOL ret;
 
     /* oddly, this succeeds under WinXP; the function name key is merely
@@ -284,8 +290,14 @@ static void test_registerOIDFunction(void)
     ret = CryptRegisterOIDFunction(X509_ASN_ENCODING, "foo",
      "1.2.3.4.5.6.7.8.9.10", NULL, NULL);
     ok(ret, "Expected pseudo-success, got %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
     ret = CryptRegisterOIDFunction(X509_ASN_ENCODING, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
+    {
+        skip("Need admin rights\n");
+        return;
+    }
     ok(ret, "CryptRegisterOIDFunction failed: %d\n", GetLastError());
     ret = CryptUnregisterOIDFunction(X509_ASN_ENCODING, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10");
@@ -315,9 +327,6 @@ static void test_registerOIDFunction(void)
     ok(ret, "CryptUnregisterOIDFunction failed: %d\n", GetLastError());
 }
 
-static const WCHAR bogusDll[] = { 'b','o','g','u','s','.','d','l','l',0 };
-static const WCHAR bogus2Dll[] = { 'b','o','g','u','s','2','.','d','l','l',0 };
-
 static void test_registerDefaultOIDFunction(void)
 {
     static const char fmt[] =
@@ -335,8 +344,14 @@ static void test_registerDefaultOIDFunction(void)
     ret = CryptRegisterDefaultOIDFunction(0, NULL, 0, bogusDll);
      */
     /* Register one at index 0 */
+    SetLastError(0xdeadbeef);
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
      bogusDll);
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
+    {
+        skip("Need admin rights\n");
+        return;
+    }
     ok(ret, "CryptRegisterDefaultOIDFunction failed: %08x\n", GetLastError());
     /* Reregistering should fail */
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
@@ -354,24 +369,26 @@ static void test_registerDefaultOIDFunction(void)
     ok(ret, "CryptRegisterDefaultOIDFunction failed: %08x\n", GetLastError());
     sprintf(buf, fmt, 0, func);
     rc = RegOpenKeyA(HKEY_LOCAL_MACHINE, buf, &key);
-    ok(rc == 0, "Expected key to exist, RegOpenKeyW failed: %ld\n", rc);
+    ok(rc == 0, "Expected key to exist, RegOpenKeyA failed: %ld\n", rc);
     if (rc == 0)
     {
-        static const WCHAR dllW[] = { 'D','l','l',0 };
-        WCHAR dllBuf[MAX_PATH];
+        static const CHAR dllA[] = "Dll";
+        static const CHAR bogusDll_A[] = "bogus.dll";
+        static const CHAR bogus2Dll_A[] = "bogus2.dll";
+        CHAR dllBuf[MAX_PATH];
         DWORD type, size;
-        LPWSTR ptr;
+        LPSTR ptr;
 
         size = sizeof(dllBuf) / sizeof(dllBuf[0]);
-        rc = RegQueryValueExW(key, dllW, NULL, &type, (LPBYTE)dllBuf, &size);
+        rc = RegQueryValueExA(key, dllA, NULL, &type, (LPBYTE)dllBuf, &size);
         ok(rc == 0,
-         "Expected Dll value to exist, RegQueryValueExW failed: %ld\n", rc);
+         "Expected Dll value to exist, RegQueryValueExA failed: %ld\n", rc);
         ok(type == REG_MULTI_SZ, "Expected type REG_MULTI_SZ, got %d\n", type);
         /* bogusDll was registered first, so that should be first */
         ptr = dllBuf;
-        ok(!lstrcmpiW(ptr, bogusDll), "Unexpected dll\n");
-        ptr += lstrlenW(ptr) + 1;
-        ok(!lstrcmpiW(ptr, bogus2Dll), "Unexpected dll\n");
+        ok(!lstrcmpiA(ptr, bogusDll_A), "Unexpected dll\n");
+        ptr += lstrlenA(ptr) + 1;
+        ok(!lstrcmpiA(ptr, bogus2Dll_A), "Unexpected dll\n");
         RegCloseKey(key);
     }
     /* Unregister both of them */
@@ -401,6 +418,47 @@ static void test_registerDefaultOIDFunction(void)
      "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
 }
 
+static void test_getDefaultOIDFunctionAddress(void)
+{
+    BOOL ret;
+    HCRYPTOIDFUNCSET set;
+    void *funcAddr;
+    HCRYPTOIDFUNCADDR hFuncAddr;
+
+    /* Crash
+    ret = CryptGetDefaultOIDFunctionAddress(0, 0, NULL, 0, NULL, NULL);
+    ret = CryptGetDefaultOIDFunctionAddress(0, 0, NULL, 0, &funcAddr, NULL);
+    ret = CryptGetDefaultOIDFunctionAddress(0, 0, NULL, 0, NULL, &hFuncAddr);
+    ret = CryptGetDefaultOIDFunctionAddress(0, 0, NULL, 0, &funcAddr,
+     &hFuncAddr);
+     */
+    set = CryptInitOIDFunctionSet("CertDllOpenStoreProv", 0);
+    ok(set != 0, "CryptInitOIDFunctionSet failed: %d\n", GetLastError());
+    /* This crashes if hFuncAddr is not 0 to begin with */
+    hFuncAddr = 0;
+    ret = CryptGetDefaultOIDFunctionAddress(set, 0, NULL, 0, &funcAddr,
+     &hFuncAddr);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+    /* This fails with the normal encoding too, so built-in functions aren't
+     * returned.
+     */
+    ret = CryptGetDefaultOIDFunctionAddress(set, X509_ASN_ENCODING, NULL, 0,
+     &funcAddr, &hFuncAddr);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+
+    /* Even with a registered dll, this fails (since the dll doesn't exist) */
+    ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
+     bogusDll);
+    ok(ret, "CryptRegisterDefaultOIDFunction failed: %08x\n", GetLastError());
+    ret = CryptGetDefaultOIDFunctionAddress(set, 0, NULL, 0, &funcAddr,
+     &hFuncAddr);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+    CryptUnregisterDefaultOIDFunction(0, "CertDllOpenStoreProv", bogusDll);
+}
+
 static BOOL WINAPI countOidInfo(PCCRYPT_OID_INFO pInfo, void *pvArg)
 {
     (*(DWORD *)pvArg)++;
@@ -417,14 +475,20 @@ static void test_enumOIDInfo(void)
     BOOL ret;
     DWORD count = 0;
 
+    if (!pCryptEnumOIDInfo)
+    {
+        skip("CryptEnumOIDInfo() is not available\n");
+        return;
+    }
+
     /* This crashes
-    ret = CryptEnumOIDInfo(7, 0, NULL, NULL);
+    ret = pCryptEnumOIDInfo(7, 0, NULL, NULL);
      */
 
     /* Silly tests, check that more than one thing is enumerated */
-    ret = CryptEnumOIDInfo(0, 0, &count, countOidInfo);
+    ret = pCryptEnumOIDInfo(0, 0, &count, countOidInfo);
     ok(ret && count > 0, "Expected more than item enumerated\n");
-    ret = CryptEnumOIDInfo(0, 0, NULL, noOidInfo);
+    ret = pCryptEnumOIDInfo(0, 0, NULL, noOidInfo);
     ok(!ret, "Expected FALSE\n");
 }
 
@@ -478,6 +542,9 @@ static void test_findOIDInfo(void)
 
 START_TEST(oid)
 {
+    HMODULE hCrypt32 = GetModuleHandleA("crypt32.dll");
+    pCryptEnumOIDInfo = (void*)GetProcAddress(hCrypt32, "CryptEnumOIDInfo");
+
     testOIDToAlgID();
     testAlgIDToOID();
     test_enumOIDInfo();
@@ -486,4 +553,5 @@ START_TEST(oid)
     test_installOIDFunctionAddress();
     test_registerOIDFunction();
     test_registerDefaultOIDFunction();
+    test_getDefaultOIDFunctionAddress();
 }

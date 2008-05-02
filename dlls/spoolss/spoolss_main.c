@@ -27,6 +27,10 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(spoolss);
 
+/* ################################ */
+
+static HMODULE hwinspool;
+static const WCHAR winspooldrvW[] = {'w','i','n','s','p','o','o','l','.','d','r','v',0};
 
 /******************************************************************
  *
@@ -44,6 +48,47 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         }
     }
     return TRUE;
+}
+
+/******************************************************************
+ *   AllocSplStr   [SPOOLSS.@]
+ *
+ * Create a copy from the String on the Spooler-Heap
+ *
+ * PARAMS
+ *  pwstr [I] PTR to the String to copy
+ *
+ * RETURNS
+ *  Failure: NULL
+ *  Success: PTR to the copied String
+ *
+ */
+LPWSTR WINAPI AllocSplStr(LPCWSTR pwstr)
+{
+    LPWSTR  res = NULL;
+    DWORD   len;
+
+    TRACE("(%s)\n", debugstr_w(pwstr));
+    if (!pwstr) return NULL;
+
+    len = (lstrlenW(pwstr) + 1) * sizeof(WCHAR);
+    res = HeapAlloc(GetProcessHeap(), 0, len);
+    if (res) lstrcpyW(res, pwstr);
+        
+    TRACE("returning %p\n", res);
+    return res;
+}
+
+/******************************************************************
+ *   BuildOtherNamesFromMachineName   [SPOOLSS.@]
+ */
+BOOL WINAPI BuildOtherNamesFromMachineName(LPVOID * ptr1, LPVOID * ptr2)
+{
+    FIXME("(%p, %p) stub\n", ptr1, ptr2);
+
+    *ptr1 = NULL;
+    *ptr2 = NULL;
+    return FALSE;
 }
 
 /******************************************************************
@@ -92,4 +137,114 @@ BOOL WINAPI DllFreeSplMem(LPBYTE memory)
 {
     TRACE("(%p)\n", memory);
     return HeapFree(GetProcessHeap(), 0, memory);
+}
+
+/******************************************************************
+ *   DllFreeSplStr   [SPOOLSS.@]
+ *
+ * Free the allocated Spooler-String
+ *
+ * PARAMS
+ *  pwstr [I] PTR to the WSTR, allocated by AllocSplStr
+ *
+ * RETURNS
+ *  Failure: FALSE
+ *  Success: TRUE
+ *
+ */
+
+BOOL WINAPI DllFreeSplStr(LPWSTR pwstr)
+{
+    TRACE("(%s) PTR: %p\n", debugstr_w(pwstr), pwstr);
+    return HeapFree(GetProcessHeap(), 0, pwstr);
+}
+
+
+/******************************************************************
+ *   ImpersonatePrinterClient   [SPOOLSS.@]
+ */
+BOOL WINAPI ImpersonatePrinterClient(HANDLE hToken)
+{
+    FIXME("(%p) stub\n", hToken);
+    return TRUE;
+}
+
+/******************************************************************
+ *   RevertToPrinterSelf   [SPOOLSS.@]
+ */
+HANDLE WINAPI RevertToPrinterSelf(void)
+{
+    FIXME("() stub\n");
+    return (HANDLE) 0xdead0947;
+}
+
+/******************************************************************
+ *   SplInitializeWinSpoolDrv   [SPOOLSS.@]
+ *
+ * Dynamic load "winspool.drv" and fill an array with some function-pointer
+ *
+ * PARAMS
+ *  table  [I] array of function-pointer to fill
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ * NOTES
+ *  Native "spoolss.dll" from w2k fill the table with 11 Function-Pointer.
+ *  We implement the XP-Version (The table has only 9 Pointer)
+ *
+ */
+BOOL WINAPI SplInitializeWinSpoolDrv(LPVOID * table)
+{
+    DWORD res;
+
+    TRACE("(%p)\n", table);
+
+    hwinspool = LoadLibraryW(winspooldrvW);
+    if (!hwinspool) return FALSE;
+
+    table[0] = (void *) GetProcAddress(hwinspool, "OpenPrinterW");
+    table[1] = (void *) GetProcAddress(hwinspool, "ClosePrinter");
+    table[2] = (void *) GetProcAddress(hwinspool, "SpoolerDevQueryPrintW");
+    table[3] = (void *) GetProcAddress(hwinspool, "SpoolerPrinterEvent");
+    table[4] = (void *) GetProcAddress(hwinspool, "DocumentPropertiesW");
+    table[5] = (void *) GetProcAddress(hwinspool, (LPSTR) 212);  /* LoadPrinterDriver */
+    table[6] = (void *) GetProcAddress(hwinspool, (LPSTR) 213);  /* RefCntLoadDriver */
+    table[7] = (void *) GetProcAddress(hwinspool, (LPSTR) 214);  /* RefCntUnloadDriver */
+    table[8] = (void *) GetProcAddress(hwinspool, (LPSTR) 215);  /* ForceUnloadDriver */
+
+    for (res = 0; res < 9; res++) {
+        if (table[res] == NULL) return FALSE;
+    }
+
+    return TRUE;
+
+}
+
+/******************************************************************
+ *   SplIsUpgrade   [SPOOLSS.@]
+ */
+BOOL WINAPI SplIsUpgrade(void)
+{
+    FIXME("() stub\n");
+    return FALSE;
+}
+
+/******************************************************************
+ *   SpoolerHasInitialized  [SPOOLSS.@]
+ */
+BOOL WINAPI SpoolerHasInitialized(void)
+{
+    FIXME("() stub\n");
+    return TRUE;
+}
+
+/******************************************************************
+ *   SpoolerInit   [SPOOLSS.@]
+ */
+BOOL WINAPI SpoolerInit(void)
+{
+    FIXME("() stub\n");
+    return TRUE;
 }

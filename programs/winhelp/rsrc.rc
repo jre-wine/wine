@@ -19,7 +19,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <windows.h>
+#include <windef.h>
+#include <winuser.h>
+
 #include "winhelp.h"
 #include "winhelp_res.h"
 
@@ -42,7 +44,7 @@
 #include "Ru.rc"
 #include "Si.rc"
 #include "Sk.rc"
-#include "Sw.rc"
+#include "Sv.rc"
 #include "Tr.rc"
 #include "Wa.rc"
 #include "Zh.rc"

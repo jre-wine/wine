@@ -1,7 +1,7 @@
 /*
  *	File dumping utility
  *
- * 	Copyright 2001,2005 Eric Pouech
+ * 	Copyright 2001,2007 Eric Pouech
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -44,7 +44,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winedump.h"
-#include "pe.h"
 
 static void*			dump_base;
 static unsigned long		dump_total_len;
@@ -79,27 +78,39 @@ void dump_data( const unsigned char *ptr, unsigned int size, const char *prefix 
     printf( "\n" );
 }
 
-const char *get_time_str(const unsigned long _t)
+static char* dump_want_n(unsigned sz)
+{
+    static char         buffer[4 * 1024];
+    static unsigned     idx;
+    char*               ret;
+
+    assert(sz < sizeof(buffer));
+    if (idx + sz >= sizeof(buffer)) idx = 0;
+    ret = &buffer[idx];
+    idx += sz;
+    return ret;
+}
+
+const char *get_time_str(unsigned long _t)
 {
     const time_t    t = (const time_t)_t;
     const char      *str = ctime(&t);
     size_t          len;
-    static char     buf[128];
+    char*           buf;
 
-    if (!str) /* not valid time */
-    {
-        strcpy(buf, "not valid time");
-        return buf;
-    }
+    if (!str) return "not valid time";
 
     len = strlen(str);
     /* FIXME: I don't get the same values from MS' pedump running under Wine...
      * I wonder if Wine isn't broken wrt to GMT settings...
      */
     if (len && str[len-1] == '\n') len--;
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy( buf, str, len );
-    buf[len] = 0;
+    buf = dump_want_n(len + 1);
+    if (buf)
+    {
+        memcpy( buf, str, len );
+        buf[len] = 0;
+    }
     return buf;
 }
 
@@ -132,6 +143,75 @@ void dump_unicode_str( const WCHAR *str, int len )
     printf( "\"" );
 }
 
+const char* get_symbol_str(const char* symname)
+{
+    char*       tmp;
+    const char* ret;
+
+    if (!symname) return "(nil)";
+    if (globals.do_demangle)
+    {
+        parsed_symbol   symbol;
+
+        symbol_init(&symbol, symname);
+        if (symbol_demangle(&symbol) == -1)
+            ret = symname;
+        else if (symbol.flags & SYM_DATA)
+        {
+            ret = tmp = dump_want_n(strlen(symbol.arg_text[0]) + 1);
+            if (tmp) strcpy(tmp, symbol.arg_text[0]);
+        }
+        else
+        {
+            unsigned int i, len, start = symbol.flags & SYM_THISCALL ? 1 : 0;
+
+            len = strlen(symbol.return_text) + 3 /* ' __' */ +
+                strlen(symbol_get_call_convention(&symbol)) + 1 /* ' ' */+
+                strlen(symbol.function_name) + 1 /* ')' */;
+            if (!symbol.argc || (symbol.argc == 1 && symbol.flags & SYM_THISCALL))
+                len += 4 /* "void" */;
+            else for (i = start; i < symbol.argc; i++)
+                len += (i > start ? 2 /* ", " */ : 0 /* "" */) + strlen(symbol.arg_text[i]);
+            if (symbol.varargs) len += 5 /* ", ..." */;
+            len += 2; /* ")\0" */
+
+            ret = tmp = dump_want_n(len);
+            if (tmp)
+            {
+                sprintf(tmp, "%s __%s %s(",
+                        symbol.return_text,
+                        symbol_get_call_convention(&symbol),
+                        symbol.function_name);
+                if (!symbol.argc || (symbol.argc == 1 && symbol.flags & SYM_THISCALL))
+                    strcat(tmp, "void");
+                else for (i = start; i < symbol.argc; i++)
+                {
+                    if (i > start) strcat(tmp, ", ");
+                    strcat(tmp, symbol.arg_text[i]);
+                }
+                if (symbol.varargs) strcat(tmp, ", ...");
+                strcat(tmp, ")");
+            }
+        }
+        symbol_clear(&symbol);
+    }
+    else ret = symname;
+    return ret;
+}
+
+const char* get_guid_str(const GUID* guid)
+{
+    char* str;
+
+    str = dump_want_n(39);
+    if (str)
+        sprintf(str, "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
+                guid->Data1, guid->Data2, guid->Data3,
+                guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
+                guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
+    return str;
+}
+
 const void*	PRD(unsigned long prd, unsigned long len)
 {
     return (prd + len > dump_total_len) ? NULL : (const char*)dump_base + prd;
@@ -144,91 +224,33 @@ unsigned long Offset(const void* ptr)
     return (const char *)ptr - (const char *)dump_base;
 }
 
-static	void	do_dump( enum FileSig sig, const void* pmt )
+static const struct dumper
 {
-    if (sig == SIG_NE)
-    {
-        ne_dump( dump_base, dump_total_len );
-        return;
-    }
-
-    if (sig == SIG_LE)
-    {
-        le_dump( dump_base, dump_total_len );
-        return;
-    }
-
-    pe_dump(pmt);
+    enum FileSig        kind;
+    enum FileSig        (*get_kind)(void);
+    file_dumper         dumper; /* default dump tool */
 }
-
-static enum FileSig check_headers(void)
+dumpers[] =
 {
-    const WORD*		pw;
-    const DWORD*		pdw;
-    const IMAGE_DOS_HEADER*	dh;
-    enum FileSig	sig;
-
-    pw = PRD(0, sizeof(WORD));
-    if (!pw) {printf("Can't get main signature, aborting\n"); return 0;}
-
-    switch (*pw)
-    {
-    case IMAGE_DOS_SIGNATURE:
-	sig = SIG_DOS;
-	dh = PRD(0, sizeof(IMAGE_DOS_HEADER));
-	if (dh)
-	{
-	    /* the signature is the first DWORD */
-	    pdw = PRD(dh->e_lfanew, sizeof(DWORD));
-	    if (pdw)
-	    {
-		if (*pdw == IMAGE_NT_SIGNATURE)
-		{
-		    sig = SIG_PE;
-		}
-                else if (*(const WORD *)pdw == IMAGE_OS2_SIGNATURE)
-                {
-                    sig = SIG_NE;
-                }
-		else if (*(const WORD *)pdw == IMAGE_VXD_SIGNATURE)
-		{
-                    sig = SIG_LE;
-		}
-		else
-		{
-		    printf("No PE Signature found\n");
-		}
-	    }
-	    else
-	    {
-		printf("Can't get the extented signature, aborting\n");
-	    }
-	}
-	break;
-    case 0x4944: /* "DI" */
-	sig = SIG_DBG;
-	break;
-    case 0x444D: /* "MD" */
-        pdw = PRD(0, sizeof(DWORD));
-        if (pdw && *pdw == 0x504D444D) /* "MDMP" */
-            sig = SIG_MDMP;
-        else
-            sig = SIG_UNKNOWN;
-        break;
-    default:
-	printf("No known main signature (%.2s/%x), aborting\n", (const char *)pw, *pw);
-	sig = SIG_UNKNOWN;
-    }
-
-    return sig;
-}
+    {SIG_DOS,           get_kind_exec,  dos_dump},
+    {SIG_PE,            get_kind_exec,  pe_dump},
+    {SIG_DBG,           get_kind_dbg,   dbg_dump},
+    {SIG_PDB,           get_kind_pdb,   pdb_dump},
+    {SIG_NE,            get_kind_exec,  ne_dump},
+    {SIG_LE,            get_kind_exec,  le_dump},
+    {SIG_COFFLIB,       get_kind_lib,   lib_dump},
+    {SIG_MDMP,          get_kind_mdmp,  mdmp_dump},
+    {SIG_LNK,           get_kind_lnk,   lnk_dump},
+    {SIG_EMF,           get_kind_emf,   emf_dump},
+    {SIG_UNKNOWN,       NULL,           NULL} /* sentinel */
+};
 
 int dump_analysis(const char *name, file_dumper fn, enum FileSig wanted_sig)
 {
     int			fd;
-    enum FileSig	effective_sig;
     int			ret = 1;
     struct stat		s;
+    const struct dumper *dpr;
 
     setbuf(stdout, NULL);
 
@@ -246,32 +268,18 @@ int dump_analysis(const char *name, file_dumper fn, enum FileSig wanted_sig)
         if ((unsigned long)read( fd, dump_base, dump_total_len ) != dump_total_len) fatal( "Cannot read file" );
     }
 
-    effective_sig = check_headers();
+    printf("Contents of %s: %ld bytes\n\n", name, dump_total_len);
 
-    if (wanted_sig == SIG_UNKNOWN || wanted_sig == effective_sig)
+    for (dpr = dumpers; dpr->kind != SIG_UNKNOWN; dpr++)
     {
-	switch (effective_sig)
-	{
-	case SIG_UNKNOWN: /* shouldn't happen... */
-	    printf("Can't get a recognized file signature, aborting\n");
-	    ret = 0; break;
-	case SIG_PE:
-	case SIG_NE:
-	case SIG_LE:
-	    printf("Contents of \"%s\": %ld bytes\n\n", name, dump_total_len);
-	    (*fn)(effective_sig, dump_base);
-	    break;
-	case SIG_DBG:
-	    dump_separate_dbg();
-	    break;
-	case SIG_DOS:
-	    ret = 0; break;
-        case SIG_MDMP:
-            mdmp_dump();
+        if (dpr->get_kind() == dpr->kind &&
+            (wanted_sig == SIG_UNKNOWN || wanted_sig == dpr->kind))
+        {
+            if (fn) fn(); else dpr->dumper();
             break;
-	}
+        }
     }
-    else
+    if (dpr->kind == SIG_UNKNOWN)
     {
 	printf("Can't get a suitable file signature, aborting\n");
 	ret = 0;
@@ -291,5 +299,5 @@ int dump_analysis(const char *name, file_dumper fn, enum FileSig wanted_sig)
 
 void	dump_file(const char* name)
 {
-    dump_analysis(name, do_dump, SIG_UNKNOWN);
+    dump_analysis(name, NULL, SIG_UNKNOWN);
 }

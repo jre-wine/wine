@@ -40,7 +40,6 @@
 #include "wine/debug.h"
 #include "cderr.h"
 #include "winspool.h"
-#include "winerror.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(commdlg);
 
@@ -56,8 +55,8 @@ typedef struct
 
 /* Internal Functions */
 
-static BOOL PRINTDLG_CreateDevNames16(HGLOBAL16 *hmem, char* DeviceDriverName,
-				      char* DeviceName, char* OutputPort)
+static BOOL PRINTDLG_CreateDevNames16(HGLOBAL16 *hmem, const char* DeviceDriverName,
+				      const char* DeviceName, const char* OutputPort)
 {
     long size;
     char*   pDevNamesSpace;
@@ -149,13 +148,13 @@ static LRESULT PRINTDLG_WMInitDialog16(HWND hDlg, WPARAM wParam, PRINT_PTRA16* p
 
 	    pdm = GlobalLock16(lppd->hDevMode);
 	    if(pdm) {
-		switch (pdm->dmPrintQuality) {
+		switch (pdm->u1.s1.dmPrintQuality) {
 		case DMRES_HIGH		: strcpy(buf,"High");break;
 		case DMRES_MEDIUM	: strcpy(buf,"Medium");break;
 		case DMRES_LOW		: strcpy(buf,"Low");break;
 		case DMRES_DRAFT	: strcpy(buf,"Draft");break;
 		case 0			: strcpy(buf,"Default");break;
-		default			: sprintf(buf,"%ddpi",pdm->dmPrintQuality);break;
+		default			: sprintf(buf,"%ddpi",pdm->u1.s1.dmPrintQuality);break;
 		}
 	        GlobalUnlock16(lppd->hDevMode);
 	    } else
@@ -291,7 +290,7 @@ static BOOL PRINTDLG_CreateDC16(LPPRINTDLG16 lppd)
  *      PRINTDLG_GetDlgTemplate
  *
  */
-static HGLOBAL16 PRINTDLG_GetDlgTemplate16(PRINTDLG16 *lppd)
+static HGLOBAL16 PRINTDLG_GetDlgTemplate16(const PRINTDLG16 *lppd)
 {
     HGLOBAL16 hDlgTmpl, hResInfo;
 
@@ -328,7 +327,7 @@ static HGLOBAL16 PRINTDLG_GetDlgTemplate16(PRINTDLG16 *lppd)
 /***********************************************************************
  *           PrintDlg   (COMMDLG.20)
  *
- *  Displays the the PRINT dialog box, which enables the user to specify
+ *  Displays the PRINT dialog box, which enables the user to specify
  *  specific properties of the print job.
  *
  * RETURNS
@@ -349,7 +348,7 @@ BOOL16 WINAPI PrintDlg16(
 
     if(TRACE_ON(commdlg)) {
         char flagstr[1000] = "";
-	struct pd_flags *pflag = pd_flags;
+	const struct pd_flags *pflag = pd_flags;
 	for( ; pflag->name; pflag++) {
 	    if(lppd->Flags & pflag->flag)
 	        strcat(flagstr, pflag->name);
@@ -391,9 +390,10 @@ BOOL16 WINAPI PrintDlg16(
 	GetPrinterDriverA(hprn, NULL, 3, NULL, 0, &needed);
 	dbuf = HeapAlloc(GetProcessHeap(),0,needed);
 	if (!GetPrinterDriverA(hprn, NULL, 3, (LPBYTE)dbuf, needed, &needed)) {
-            ERR("GetPrinterDriverA failed for %s, le %d, fix your config!\n",
-		    pbuf->pPrinterName,GetLastError());
-            HeapFree(GetProcessHeap(), 0, dbuf);
+	    ERR("GetPrinterDriverA failed for %s, le %d, fix your config!\n",
+	        pbuf->pPrinterName,GetLastError());
+	    HeapFree(GetProcessHeap(), 0, dbuf);
+	    HeapFree(GetProcessHeap(), 0, pbuf);
 	    COMDLG32_SetCommDlgExtendedError(PDERR_RETDEFFAILURE);
 	    return FALSE;
 	}
@@ -507,7 +507,7 @@ BOOL16 WINAPI PrintDlg16(
 	HeapFree(GetProcessHeap(), 0, PrintStructures->lpDevMode);
 	HeapFree(GetProcessHeap(), 0, PrintStructures->lpPrinterInfo);
 	HeapFree(GetProcessHeap(), 0, PrintStructures->lpDriverInfo);
-	HeapFree(GetProcessHeap(), 0, PrintStructures);
+	HeapFree(GetProcessHeap(), 0, ptr16);
     }
     if(bRet && (lppd->Flags & PD_RETURNDC || lppd->Flags & PD_RETURNIC))
         bRet = PRINTDLG_CreateDC16(lppd);

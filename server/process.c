@@ -46,14 +46,16 @@
 #include "process.h"
 #include "thread.h"
 #include "request.h"
-#include "console.h"
 #include "user.h"
 #include "security.h"
 
 /* process structure */
 
 static struct list process_list = LIST_INIT(process_list);
-static int running_processes;
+static int running_processes, user_processes;
+static struct event *shutdown_event;           /* signaled when shutdown starts */
+static struct timeout_user *shutdown_timeout;  /* timeout for server shutdown */
+static int shutdown_stage;  /* current stage in the shutdown process */
 
 /* process operations */
 
@@ -67,6 +69,7 @@ static const struct object_ops process_ops =
 {
     sizeof(struct process),      /* size */
     process_dump,                /* dump */
+    no_get_type,                 /* get_type */
     add_queue,                   /* add_queue */
     remove_queue,                /* remove_queue */
     process_signaled,            /* signaled */
@@ -74,7 +77,10 @@ static const struct object_ops process_ops =
     no_signal,                   /* signal */
     no_get_fd,                   /* get_fd */
     process_map_access,          /* map_access */
+    default_get_sd,              /* get_sd */
+    default_set_sd,              /* set_sd */
     no_lookup_name,              /* lookup_name */
+    no_open_file,                /* open_file */
     no_close_handle,             /* close_handle */
     process_destroy              /* destroy */
 };
@@ -83,10 +89,12 @@ static const struct fd_ops process_fd_ops =
 {
     NULL,                        /* get_poll_events */
     process_poll_event,          /* poll_event */
-    no_flush,                    /* flush */
-    no_get_file_info,            /* get_file_info */
-    no_queue_async,              /* queue_async */
-    no_cancel_async              /* cancel async */
+    NULL,                        /* flush */
+    NULL,                        /* get_fd_type */
+    NULL,                        /* ioctl */
+    NULL,                        /* queue_async */
+    NULL,                        /* reselect_async */
+    NULL                         /* cancel async */
 };
 
 /* process startup info */
@@ -111,6 +119,7 @@ static const struct object_ops startup_info_ops =
 {
     sizeof(struct startup_info),   /* size */
     startup_info_dump,             /* dump */
+    no_get_type,                   /* get_type */
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     startup_info_signaled,         /* signaled */
@@ -118,7 +127,10 @@ static const struct object_ops startup_info_ops =
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
     no_map_access,                 /* map_access */
+    default_get_sd,                /* get_sd */
+    default_set_sd,                /* set_sd */
     no_lookup_name,                /* lookup_name */
+    no_open_file,                  /* open_file */
     no_close_handle,               /* close_handle */
     startup_info_destroy           /* destroy */
 };
@@ -135,6 +147,8 @@ static unsigned int used_ptid_entries;      /* number of entries in use */
 static unsigned int alloc_ptid_entries;     /* number of allocated entries */
 static unsigned int next_free_ptid;         /* next free entry */
 static unsigned int last_free_ptid;         /* last free entry */
+
+static void kill_all_processes(void);
 
 #define PTID_OFFSET 8  /* offset for first ptid value */
 
@@ -217,12 +231,53 @@ static void set_process_startup_state( struct process *process, enum startup_sta
     }
 }
 
+/* callback for server shutdown */
+static void server_shutdown_timeout( void *arg )
+{
+    shutdown_timeout = NULL;
+    if (!running_processes)
+    {
+        close_master_socket( 0 );
+        return;
+    }
+    switch(++shutdown_stage)
+    {
+    case 1:  /* signal system processes to exit */
+        if (debug_level) fprintf( stderr, "wineserver: shutting down\n" );
+        if (shutdown_event) set_event( shutdown_event );
+        shutdown_timeout = add_timeout_user( 2 * -TICKS_PER_SEC, server_shutdown_timeout, NULL );
+        close_master_socket( 4 * -TICKS_PER_SEC );
+        break;
+    case 2:  /* now forcibly kill all processes (but still wait for SIGKILL timeouts) */
+        kill_all_processes();
+        break;
+    }
+}
+
+/* forced shutdown, used for wineserver -k */
+void shutdown_master_socket(void)
+{
+    kill_all_processes();
+    shutdown_stage = 2;
+    if (shutdown_timeout)
+    {
+        remove_timeout_user( shutdown_timeout );
+        shutdown_timeout = NULL;
+    }
+    close_master_socket( 2 * -TICKS_PER_SEC );  /* for SIGKILL timeouts */
+}
+
 /* final cleanup once we are sure a process is really dead */
 static void process_died( struct process *process )
 {
     if (debug_level) fprintf( stderr, "%04x: *process killed*\n", process->id );
+    if (!process->is_system)
+    {
+        if (!--user_processes && !shutdown_stage && master_socket_timeout != TIMEOUT_INFINITE)
+            shutdown_timeout = add_timeout_user( master_socket_timeout, server_shutdown_timeout, NULL );
+    }
     release_object( process );
-    if (!--running_processes) close_master_socket();
+    if (!--running_processes && shutdown_stage) close_master_socket( 0 );
 }
 
 /* callback for process sigkill timeout */
@@ -240,13 +295,9 @@ static void start_sigkill_timer( struct process *process )
 {
     grab_object( process );
     if (process->unix_pid != -1 && process->msg_fd)
-    {
-        struct timeval when = current_time;
-
-        add_timeout( &when, 1000 );
-        process->sigkill_timeout = add_timeout_user( &when, process_sigkill, process );
-    }
-    else process_died( process );
+        process->sigkill_timeout = add_timeout_user( -TICKS_PER_SEC, process_sigkill, process );
+    else
+        process_died( process );
 }
 
 /* create a new process and its main thread */
@@ -271,8 +322,9 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     process->exit_code       = STILL_ACTIVE;
     process->running_threads = 0;
     process->priority        = PROCESS_PRIOCLASS_NORMAL;
-    process->affinity        = 1;
+    process->affinity        = ~0;
     process->suspend         = 0;
+    process->is_system       = 0;
     process->create_flags    = 0;
     process->console         = NULL;
     process->startup_state   = STARTUP_IN_PROGRESS;
@@ -283,33 +335,41 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     process->ldt_copy        = NULL;
     process->winstation      = 0;
     process->desktop         = 0;
-    process->token           = token_create_admin();
+    process->token           = NULL;
+    process->trace_data      = 0;
     list_init( &process->thread_list );
     list_init( &process->locks );
     list_init( &process->classes );
     list_init( &process->dlls );
 
     process->start_time = current_time;
-    process->end_time.tv_sec = process->end_time.tv_usec = 0;
-    list_add_head( &process_list, &process->entry );
+    process->end_time = 0;
+    list_add_tail( &process_list, &process->entry );
 
     if (!(process->id = process->group_id = alloc_ptid( process )))
     {
         close( fd );
         goto error;
     }
-    if (!(process->msg_fd = create_anonymous_fd( &process_fd_ops, fd, &process->obj ))) goto error;
+    if (!(process->msg_fd = create_anonymous_fd( &process_fd_ops, fd, &process->obj, 0 ))) goto error;
 
     /* create the handle table */
-    if (!parent_thread) process->handles = alloc_handle_table( process, 0 );
+    if (!parent_thread)
+    {
+        process->handles = alloc_handle_table( process, 0 );
+        process->token = token_create_admin();
+    }
     else
     {
         struct process *parent = parent_thread->process;
         process->parent = (struct process *)grab_object( parent );
         process->handles = inherit_all ? copy_handle_table( process, parent )
                                        : alloc_handle_table( process, 0 );
+        /* Note: for security reasons, starting a new process does not attempt
+         * to use the current impersonation token for the new process */
+        process->token = token_duplicate( parent->token, TRUE, 0 );
     }
-    if (!process->handles) goto error;
+    if (!process->handles || !process->token) goto error;
 
     /* create the main thread */
     if (pipe( request_pipe ) == -1)
@@ -333,7 +393,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
  error:
     if (process) release_object( process );
     /* if we failed to start our first process, close everything down */
-    if (!running_processes) close_master_socket();
+    if (!running_processes) close_master_socket( 0 );
     return NULL;
 }
 
@@ -343,6 +403,7 @@ data_size_t init_process( struct thread *thread )
     struct process *process = thread->process;
     struct startup_info *info = process->startup_info;
 
+    init_process_tracing( process );
     if (!info) return 0;
     return info->data_size;
 }
@@ -490,7 +551,7 @@ static struct process_dll *process_load_dll( struct process *process, struct fil
             free( dll );
             return NULL;
         }
-        if (file) dll->file = (struct file *)grab_object( file );
+        if (file) dll->file = grab_file_unless_removable( file );
         list_add_tail( &process->dlls, &dll->entry );
     }
     return dll;
@@ -517,7 +578,7 @@ static void terminate_process( struct process *process, struct thread *skip, int
 {
     struct list *ptr;
 
-    if (skip)  /* move it to the end of the list */
+    if (skip && skip->process == process)  /* move it to the end of the list */
     {
         assert( skip->state != TERMINATED );
         list_remove( &skip->proc_entry );
@@ -537,7 +598,7 @@ static void terminate_process( struct process *process, struct thread *skip, int
 }
 
 /* kill all processes */
-void kill_all_processes( struct process *skip, int exit_code )
+static void kill_all_processes(void)
 {
     for (;;)
     {
@@ -545,11 +606,10 @@ void kill_all_processes( struct process *skip, int exit_code )
 
         LIST_FOR_EACH_ENTRY( process, &process_list, struct process, entry )
         {
-            if (process == skip) continue;
             if (process->running_threads) break;
         }
         if (&process->entry == &process_list) break;  /* no process found */
-        terminate_process( process, NULL, exit_code );
+        terminate_process( process, NULL, 1 );
     }
 }
 
@@ -565,7 +625,7 @@ void kill_console_processes( struct thread *renderer, int exit_code )
         {
             if (process == renderer->process) continue;
             if (!process->running_threads) continue;
-            if (process->console && process->console->renderer == renderer) break;
+            if (process->console && console_get_renderer( process->console ) == renderer) break;
         }
         if (&process->entry == &process_list) break;  /* no process found */
         terminate_process( process, NULL, exit_code );
@@ -580,7 +640,7 @@ static void process_killed( struct process *process )
 
     assert( list_empty( &process->thread_list ));
     process->end_time = current_time;
-    close_process_desktop( process );
+    if (!process->is_system) close_process_desktop( process );
     handles = process->handles;
     process->handles = NULL;
     if (handles) release_object( handles );
@@ -599,6 +659,7 @@ static void process_killed( struct process *process )
     destroy_process_classes( process );
     remove_process_locks( process );
     set_process_startup_state( process, STARTUP_ABORTED );
+    finish_process_tracing( process );
     start_sigkill_timer( process );
     wake_up( &process->obj, 0 );
 }
@@ -607,7 +668,18 @@ static void process_killed( struct process *process )
 void add_process_thread( struct process *process, struct thread *thread )
 {
     list_add_tail( &process->thread_list, &thread->proc_entry );
-    if (!process->running_threads++) running_processes++;
+    if (!process->running_threads++)
+    {
+        running_processes++;
+        if (!process->is_system)
+        {
+            if (!user_processes++ && shutdown_timeout)
+            {
+                remove_timeout_user( shutdown_timeout );
+                shutdown_timeout = NULL;
+            }
+        }
+    }
     grab_object( thread );
 }
 
@@ -830,6 +902,12 @@ DECL_HANDLER(new_process)
         close( socket_fd );
         return;
     }
+    if (shutdown_stage)
+    {
+        set_error( STATUS_SHUTDOWN_IN_PROGRESS );
+        close( socket_fd );
+        return;
+    }
 
     /* build the startup info for a new process */
     if (!(info = alloc_object( &startup_info_ops ))) return;
@@ -963,7 +1041,7 @@ DECL_HANDLER(init_process_done)
     generate_startup_debug_events( process, req->entry );
     set_process_startup_state( process, STARTUP_DONE );
 
-    if (req->gui) process->idle_event = create_event( NULL, NULL, 0, 1, 0 );
+    if (req->gui) process->idle_event = create_event( NULL, NULL, 0, 1, 0, NULL );
     if (current->suspend + process->suspend > 0) stop_thread( current );
     if (process->debugger) set_process_debug_flag( process, 1 );
 }
@@ -1006,10 +1084,8 @@ DECL_HANDLER(get_process_info)
         reply->priority         = process->priority;
         reply->affinity         = process->affinity;
         reply->peb              = process->peb;
-        reply->start_time.sec   = process->start_time.tv_sec;
-        reply->start_time.usec  = process->start_time.tv_usec;
-        reply->end_time.sec     = process->end_time.tv_sec;
-        reply->end_time.usec    = process->end_time.tv_usec;
+        reply->start_time       = process->start_time;
+        reply->end_time         = process->end_time;
         release_object( process );
     }
 }
@@ -1022,11 +1098,7 @@ DECL_HANDLER(set_process_info)
     if ((process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
     {
         if (req->mask & SET_PROCESS_INFO_PRIORITY) process->priority = req->priority;
-        if (req->mask & SET_PROCESS_INFO_AFFINITY)
-        {
-            if (req->affinity != 1) set_error( STATUS_INVALID_PARAMETER );
-            else process->affinity = req->affinity;
-        }
+        if (req->mask & SET_PROCESS_INFO_AFFINITY) process->affinity = req->affinity;
         release_object( process );
     }
 }
@@ -1103,16 +1175,25 @@ DECL_HANDLER(get_dll_info)
 
     if ((process = get_process_from_handle( req->handle, PROCESS_QUERY_INFORMATION )))
     {
-        struct process_dll *dll = find_process_dll( process, req->base_address );
+        struct process_dll *dll;
+
+        if (req->base_address)
+            dll = find_process_dll( process, req->base_address );
+        else /* NULL means main module */
+            dll = list_head( &process->dlls ) ?
+                LIST_ENTRY(list_head( &process->dlls ), struct process_dll, entry) : NULL;
 
         if (dll)
         {
             reply->size = dll->size;
             reply->entry_point = NULL; /* FIXME */
+            reply->filename_len = dll->namelen;
             if (dll->filename)
             {
-                data_size_t len = min( dll->namelen, get_reply_max_size() );
-                set_reply_data( dll->filename, len );
+                if (dll->namelen <= get_reply_max_size())
+                    set_reply_data( dll->filename, dll->namelen );
+                else
+                    set_error( STATUS_BUFFER_TOO_SMALL );
             }
         }
         else
@@ -1134,5 +1215,28 @@ DECL_HANDLER(get_process_idle_event)
             reply->event = alloc_handle( current->process, process->idle_event,
                                          EVENT_ALL_ACCESS, 0 );
         release_object( process );
+    }
+}
+
+/* make the current process a system process */
+DECL_HANDLER(make_process_system)
+{
+    struct process *process = current->process;
+
+    if (!shutdown_event)
+    {
+        if (!(shutdown_event = create_event( NULL, NULL, 0, 1, 0, NULL ))) return;
+        make_object_static( (struct object *)shutdown_event );
+    }
+
+    if (!(reply->event = alloc_handle( current->process, shutdown_event, SYNCHRONIZE, 0 )))
+        return;
+
+    if (!process->is_system)
+    {
+        process->is_system = 1;
+        close_process_desktop( process );
+        if (!--user_processes && !shutdown_stage && master_socket_timeout != TIMEOUT_INFINITE)
+            shutdown_timeout = add_timeout_user( master_socket_timeout, server_shutdown_timeout, NULL );
     }
 }

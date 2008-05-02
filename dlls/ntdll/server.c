@@ -85,11 +85,11 @@ struct cmsg_fd
 };
 #endif  /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
 
-abs_time_t server_start_time = { 0, 0 };  /* time of server startup */
+timeout_t server_start_time = 0;  /* time of server startup */
 
 extern struct wine_pthread_functions pthread_functions;
 
-static sigset_t block_set;  /* signals to block during server calls */
+sigset_t server_block_set;  /* signals to block during server calls */
 static int fd_socket = -1;  /* socket to exchange file descriptors with the server */
 
 static RTL_CRITICAL_SECTION fd_cache_section;
@@ -156,7 +156,7 @@ void server_exit_thread( int status )
     fds[1] = ntdll_get_thread_data()->wait_fd[1];
     fds[2] = ntdll_get_thread_data()->reply_fd;
     fds[3] = ntdll_get_thread_data()->request_fd;
-    pthread_functions.sigprocmask( SIG_BLOCK, &block_set, NULL );
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
 
     size = 0;
     NtFreeVirtualMemory( GetCurrentProcess(), &info.stack_base, &size, MEM_RELEASE | MEM_SYSTEM );
@@ -179,7 +179,7 @@ void server_exit_thread( int status )
  */
 void server_abort_thread( int status )
 {
-    pthread_functions.sigprocmask( SIG_BLOCK, &block_set, NULL );
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
     close( ntdll_get_thread_data()->wait_fd[0] );
     close( ntdll_get_thread_data()->wait_fd[1] );
     close( ntdll_get_thread_data()->reply_fd );
@@ -219,7 +219,7 @@ void server_protocol_perror( const char *err )
  *
  * Send a request to the server.
  */
-static void send_request( const struct __server_request_info *req )
+static unsigned int send_request( const struct __server_request_info *req )
 {
     unsigned int i;
     int ret;
@@ -227,7 +227,7 @@ static void send_request( const struct __server_request_info *req )
     if (!req->u.req.request_header.request_size)
     {
         if ((ret = write( ntdll_get_thread_data()->request_fd, &req->u.req,
-                          sizeof(req->u.req) )) == sizeof(req->u.req)) return;
+                          sizeof(req->u.req) )) == sizeof(req->u.req)) return STATUS_SUCCESS;
 
     }
     else
@@ -242,11 +242,12 @@ static void send_request( const struct __server_request_info *req )
             vec[i+1].iov_len = req->data[i].size;
         }
         if ((ret = writev( ntdll_get_thread_data()->request_fd, vec, i+1 )) ==
-            req->u.req.request_header.request_size + sizeof(req->u.req)) return;
+            req->u.req.request_header.request_size + sizeof(req->u.req)) return STATUS_SUCCESS;
     }
 
     if (ret >= 0) server_protocol_error( "partial write %d\n", ret );
     if (errno == EPIPE) server_abort_thread(0);
+    if (errno == EFAULT) return STATUS_ACCESS_VIOLATION;
     server_protocol_perror( "write" );
 }
 
@@ -283,11 +284,12 @@ static void read_reply_data( void *buffer, size_t size )
  *
  * Wait for a reply from the server.
  */
-inline static void wait_reply( struct __server_request_info *req )
+static inline unsigned int wait_reply( struct __server_request_info *req )
 {
     read_reply_data( &req->u.reply, sizeof(req->u.reply) );
     if (req->u.reply.reply_header.reply_size)
         read_reply_data( req->reply_data, req->u.reply.reply_header.reply_size );
+    return req->u.reply.reply_header.error;
 }
 
 
@@ -317,12 +319,33 @@ unsigned int wine_server_call( void *req_ptr )
 {
     struct __server_request_info * const req = req_ptr;
     sigset_t old_set;
+    unsigned int ret;
 
-    pthread_functions.sigprocmask( SIG_BLOCK, &block_set, &old_set );
-    send_request( req );
-    wait_reply( req );
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, &old_set );
+    ret = send_request( req );
+    if (!ret) ret = wait_reply( req );
     pthread_functions.sigprocmask( SIG_SETMASK, &old_set, NULL );
-    return req->u.reply.reply_header.error;
+    return ret;
+}
+
+
+/***********************************************************************
+ *           server_enter_uninterrupted_section
+ */
+void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset )
+{
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, sigset );
+    RtlEnterCriticalSection( cs );
+}
+
+
+/***********************************************************************
+ *           server_leave_uninterrupted_section
+ */
+void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset )
+{
+    RtlLeaveCriticalSection( cs );
+    pthread_functions.sigprocmask( SIG_SETMASK, sigset, NULL );
 }
 
 
@@ -438,49 +461,66 @@ static int receive_fd( obj_handle_t *handle )
 }
 
 
-inline static unsigned int handle_to_index( obj_handle_t handle )
+/***********************************************************************/
+/* fd cache support */
+
+struct fd_cache_entry
 {
-    return ((unsigned long)handle >> 2) - 1;
+    int fd;
+    enum server_fd_type type : 6;
+    unsigned int        access : 2;
+    unsigned int        options : 24;
+};
+
+#define FD_CACHE_BLOCK_SIZE  (65536 / sizeof(struct fd_cache_entry))
+#define FD_CACHE_ENTRIES     128
+
+static struct fd_cache_entry *fd_cache[FD_CACHE_ENTRIES];
+static struct fd_cache_entry fd_cache_initial_block[FD_CACHE_BLOCK_SIZE];
+
+static inline unsigned int handle_to_index( obj_handle_t handle, unsigned int *entry )
+{
+    unsigned long idx = ((unsigned long)handle >> 2) - 1;
+    *entry = idx / FD_CACHE_BLOCK_SIZE;
+    return idx % FD_CACHE_BLOCK_SIZE;
 }
 
-static int *fd_cache;
-static unsigned int fd_cache_size;
 
 /***********************************************************************
  *           add_fd_to_cache
  *
  * Caller must hold fd_cache_section.
  */
-static int add_fd_to_cache( obj_handle_t handle, int fd )
+static int add_fd_to_cache( obj_handle_t handle, int fd, enum server_fd_type type,
+                            unsigned int access, unsigned int options )
 {
-    unsigned int idx = handle_to_index( handle );
+    unsigned int entry, idx = handle_to_index( handle, &entry );
+    int prev_fd;
 
-    if (idx >= fd_cache_size)
+    if (entry >= FD_CACHE_ENTRIES)
     {
-        unsigned int i, size = max( 32, fd_cache_size * 2 );
-        int *new_cache;
+        FIXME( "too many allocated handles, not caching %p\n", handle );
+        return 0;
+    }
 
-        if (size <= idx) size = idx + 1;
-        if (fd_cache)
-            new_cache = RtlReAllocateHeap( GetProcessHeap(), 0, fd_cache, size*sizeof(fd_cache[0]) );
+    if (!fd_cache[entry])  /* do we need to allocate a new block of entries? */
+    {
+        if (!entry) fd_cache[0] = fd_cache_initial_block;
         else
-            new_cache = RtlAllocateHeap( GetProcessHeap(), 0, size*sizeof(fd_cache[0]) );
-
-        if (new_cache)
         {
-            for (i = fd_cache_size; i < size; i++) new_cache[i] = -1;
-            fd_cache = new_cache;
-            fd_cache_size = size;
+            void *ptr = wine_anon_mmap( NULL, FD_CACHE_BLOCK_SIZE * sizeof(struct fd_cache_entry),
+                                        PROT_READ | PROT_WRITE, 0 );
+            if (ptr == MAP_FAILED) return 0;
+            fd_cache[entry] = ptr;
         }
     }
-    if (idx < fd_cache_size)
-    {
-        assert( fd_cache[idx] == -1 );
-        fd_cache[idx] = fd;
-        TRACE("added %p (%d) to cache\n", handle, fd );
-        return 1;
-    }
-    return 0;
+    /* store fd+1 so that 0 can be used as the unset value */
+    prev_fd = interlocked_xchg( &fd_cache[entry][idx].fd, fd + 1 ) - 1;
+    fd_cache[entry][idx].type = type;
+    fd_cache[entry][idx].access = access;
+    fd_cache[entry][idx].options = options;
+    if (prev_fd != -1) close( prev_fd );
+    return 1;
 }
 
 
@@ -489,12 +529,19 @@ static int add_fd_to_cache( obj_handle_t handle, int fd )
  *
  * Caller must hold fd_cache_section.
  */
-static inline int get_cached_fd( obj_handle_t handle )
+static inline int get_cached_fd( obj_handle_t handle, enum server_fd_type *type,
+                                 unsigned int *access, unsigned int *options )
 {
-    unsigned int idx = handle_to_index( handle );
+    unsigned int entry, idx = handle_to_index( handle, &entry );
     int fd = -1;
 
-    if (idx < fd_cache_size) fd = fd_cache[idx];
+    if (entry < FD_CACHE_ENTRIES && fd_cache[entry])
+    {
+        fd = fd_cache[entry][idx].fd - 1;
+        if (type) *type = fd_cache[entry][idx].type;
+        if (access) *access = fd_cache[entry][idx].access;
+        if (options) *options = fd_cache[entry][idx].options;
+    }
     return fd;
 }
 
@@ -504,22 +551,12 @@ static inline int get_cached_fd( obj_handle_t handle )
  */
 int server_remove_fd_from_cache( obj_handle_t handle )
 {
-    unsigned int idx = handle_to_index( handle );
+    unsigned int entry, idx = handle_to_index( handle, &entry );
     int fd = -1;
 
-    RtlEnterCriticalSection( &fd_cache_section );
-    if (idx < fd_cache_size)
-    {
-        fd = fd_cache[idx];
-        fd_cache[idx] = -1;
-    }
-    RtlLeaveCriticalSection( &fd_cache_section );
+    if (entry < FD_CACHE_ENTRIES && fd_cache[entry])
+        fd = interlocked_xchg( &fd_cache[entry][idx].fd, 0 ) - 1;
 
-    if (fd != -1)
-    {
-        close( fd );
-        TRACE("removed %p (%d) from cache\n", handle, fd );
-    }
     return fd;
 }
 
@@ -529,48 +566,50 @@ int server_remove_fd_from_cache( obj_handle_t handle )
  *
  * The returned unix_fd should be closed iff needs_close is non-zero.
  */
-int server_get_unix_fd( obj_handle_t handle, unsigned int access, int *unix_fd,
-                        int *needs_close, int *flags )
+int server_get_unix_fd( obj_handle_t handle, unsigned int wanted_access, int *unix_fd,
+                        int *needs_close, enum server_fd_type *type, unsigned int *options )
 {
+    sigset_t sigset;
     obj_handle_t fd_handle;
-    int ret = 0, removable = 0, fd;
+    int ret = 0, fd;
+    unsigned int access = 0;
 
     *unix_fd = -1;
     *needs_close = 0;
+    wanted_access &= FILE_READ_DATA | FILE_WRITE_DATA;
 
-    RtlEnterCriticalSection( &fd_cache_section );
+    server_enter_uninterrupted_section( &fd_cache_section, &sigset );
 
-    fd = get_cached_fd( handle );
-    if (fd != -1 && !flags) goto done;
+    fd = get_cached_fd( handle, type, &access, options );
+    if (fd != -1) goto done;
 
     SERVER_START_REQ( get_handle_fd )
     {
         req->handle = handle;
-        req->access = access;
-        req->cached = (fd != -1);
         if (!(ret = wine_server_call( req )))
         {
-            removable = reply->flags & FD_FLAG_REMOVABLE;
-            if (flags) *flags = reply->flags;
+            if (type) *type = reply->type;
+            if (options) *options = reply->options;
+            access = reply->access;
+            if ((fd = receive_fd( &fd_handle )) != -1)
+            {
+                assert( fd_handle == handle );
+                *needs_close = (reply->removable ||
+                                !add_fd_to_cache( handle, fd, reply->type,
+                                                  reply->access, reply->options ));
+            }
+            else ret = STATUS_TOO_MANY_OPENED_FILES;
         }
     }
     SERVER_END_REQ;
 
-    if (!ret && fd == -1)
-    {
-        /* it wasn't in the cache, get it from the server */
-        fd = receive_fd( &fd_handle );
-        if (fd == -1)
-        {
-            ret = STATUS_TOO_MANY_OPENED_FILES;
-            goto done;
-        }
-        assert( fd_handle == handle );
-        *needs_close = removable || !add_fd_to_cache( handle, fd );
-    }
-
 done:
-    RtlLeaveCriticalSection( &fd_cache_section );
+    server_leave_uninterrupted_section( &fd_cache_section, &sigset );
+    if (!ret && ((access & wanted_access) != wanted_access))
+    {
+        ret = STATUS_ACCESS_DENIED;
+        if (*needs_close) close( fd );
+    }
     if (!ret) *unix_fd = fd;
     return ret;
 }
@@ -618,14 +657,15 @@ int wine_server_fd_to_handle( int fd, unsigned int access, unsigned int attribut
  *     handle  [I] Wine file handle.
  *     access  [I] Win32 file access rights requested.
  *     unix_fd [O] Address where Unix file descriptor will be stored.
- *     flags   [O] Address where the Unix flags associated with file will be stored. Optional.
+ *     options [O] Address where the file open options will be stored. Optional.
  *
  * RETURNS
  *     NTSTATUS code
  */
-int wine_server_handle_to_fd( obj_handle_t handle, unsigned int access, int *unix_fd, int *flags )
+int wine_server_handle_to_fd( obj_handle_t handle, unsigned int access, int *unix_fd,
+                              unsigned int *options )
 {
-    int needs_close, ret = server_get_unix_fd( handle, access, unix_fd, &needs_close, flags );
+    int needs_close, ret = server_get_unix_fd( handle, access, unix_fd, &needs_close, NULL, options );
 
     if (!ret && !needs_close)
     {
@@ -911,6 +951,49 @@ static void create_config_dir(void)
 }
 
 
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_error.h>
+#include <servers/bootstrap.h>
+
+/* send our task port to the server */
+static void send_server_task_port(void)
+{
+    mach_port_t bootstrap_port, wineserver_port;
+    kern_return_t kret;
+
+    struct {
+        mach_msg_header_t           header;
+        mach_msg_body_t             body;
+        mach_msg_port_descriptor_t  task_port;
+    } msg;
+
+    if (task_get_bootstrap_port(mach_task_self(), &bootstrap_port) != KERN_SUCCESS) return;
+
+    kret = bootstrap_look_up(bootstrap_port, (char*)wine_get_server_dir(), &wineserver_port);
+    if (kret != KERN_SUCCESS)
+        fatal_error( "cannot find the server port: 0x%08x\n", kret );
+
+    mach_port_deallocate(mach_task_self(), bootstrap_port);
+
+    msg.header.msgh_bits        = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0) | MACH_MSGH_BITS_COMPLEX;
+    msg.header.msgh_size        = sizeof(msg);
+    msg.header.msgh_remote_port = wineserver_port;
+    msg.header.msgh_local_port  = MACH_PORT_NULL;
+
+    msg.body.msgh_descriptor_count  = 1;
+    msg.task_port.name              = mach_task_self();
+    msg.task_port.disposition       = MACH_MSG_TYPE_COPY_SEND;
+    msg.task_port.type              = MACH_MSG_PORT_DESCRIPTOR;
+
+    kret = mach_msg_send(&msg.header);
+    if (kret != KERN_SUCCESS)
+        server_protocol_error( "mach_msg_send failed: 0x%08x\n", kret );
+
+    mach_port_deallocate(mach_task_self(), wineserver_port);
+}
+#endif  /* __APPLE__ */
+
 /***********************************************************************
  *           server_init_process
  *
@@ -926,6 +1009,7 @@ void server_init_process(void)
         fd_socket = atoi( env_socket );
         if (fcntl( fd_socket, F_SETFD, 1 ) == -1)
             fatal_perror( "Bad server socket %d", fd_socket );
+        unsetenv( "WINESERVERSOCKET" );
     }
     else
     {
@@ -942,17 +1026,53 @@ void server_init_process(void)
     }
 
     /* setup the signal mask */
-    sigemptyset( &block_set );
-    sigaddset( &block_set, SIGALRM );
-    sigaddset( &block_set, SIGIO );
-    sigaddset( &block_set, SIGINT );
-    sigaddset( &block_set, SIGHUP );
-    sigaddset( &block_set, SIGUSR1 );
-    sigaddset( &block_set, SIGUSR2 );
-    sigaddset( &block_set, SIGCHLD );
+    sigemptyset( &server_block_set );
+    sigaddset( &server_block_set, SIGALRM );
+    sigaddset( &server_block_set, SIGIO );
+    sigaddset( &server_block_set, SIGINT );
+    sigaddset( &server_block_set, SIGHUP );
+    sigaddset( &server_block_set, SIGUSR1 );
+    sigaddset( &server_block_set, SIGUSR2 );
+    sigaddset( &server_block_set, SIGCHLD );
+    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
 
     /* receive the first thread request fd on the main socket */
     ntdll_get_thread_data()->request_fd = receive_fd( &dummy_handle );
+
+#ifdef __APPLE__
+    send_server_task_port();
+#endif
+}
+
+
+/***********************************************************************
+ *           server_init_process_done
+ */
+NTSTATUS server_init_process_done(void)
+{
+    PEB *peb = NtCurrentTeb()->Peb;
+    IMAGE_NT_HEADERS *nt = RtlImageNtHeader( peb->ImageBaseAddress );
+    NTSTATUS status;
+
+    /* Install signal handlers; this cannot be done earlier, since we cannot
+     * send exceptions to the debugger before the create process event that
+     * is sent by REQ_INIT_PROCESS_DONE.
+     * We do need the handlers in place by the time the request is over, so
+     * we set them up here. If we segfault between here and the server call
+     * something is very wrong... */
+    if (!SIGNAL_Init()) exit(1);
+
+    /* Signal the parent process to continue */
+    SERVER_START_REQ( init_process_done )
+    {
+        req->module = peb->ImageBaseAddress;
+        req->entry  = (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint;
+        req->gui    = (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI);
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    return status;
 }
 
 
@@ -1005,8 +1125,8 @@ size_t server_init_thread( int unix_pid, int unix_tid, void *entry_point )
         req->wait_fd     = ntdll_get_thread_data()->wait_fd[1];
         req->debug_level = (TRACE_ON(server) != 0);
         ret = wine_server_call( req );
-        NtCurrentTeb()->ClientId.UniqueProcess = (HANDLE)reply->pid;
-        NtCurrentTeb()->ClientId.UniqueThread  = (HANDLE)reply->tid;
+        NtCurrentTeb()->ClientId.UniqueProcess = ULongToHandle(reply->pid);
+        NtCurrentTeb()->ClientId.UniqueThread  = ULongToHandle(reply->tid);
         info_size         = reply->info_size;
         version           = reply->version;
         server_start_time = reply->server_start;

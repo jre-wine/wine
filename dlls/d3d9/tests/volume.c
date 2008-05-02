@@ -53,7 +53,12 @@ static IDirect3DDevice9 *init_d3d9(HMODULE d3d9_handle)
 
     hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
             NULL, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
-    ok(SUCCEEDED(hr), "IDirect3D_CreateDevice returned %#x\n", hr);
+
+    if(FAILED(hr))
+    {
+        trace("could not create device, IDirect3D9_CreateDevice returned %#x\n", hr);
+        return NULL;
+    }
 
     return device_ptr;
 }
@@ -117,16 +122,24 @@ START_TEST(volume)
 {
     HMODULE d3d9_handle;
     IDirect3DDevice9 *device_ptr;
+    D3DCAPS9 caps;
 
+    memset(&caps, 0, sizeof(caps));
     d3d9_handle = LoadLibraryA("d3d9.dll");
     if (!d3d9_handle)
     {
-        trace("Could not load d3d9.dll, skipping tests\n");
+        skip("Could not load d3d9.dll\n");
         return;
     }
 
     device_ptr = init_d3d9(d3d9_handle);
     if (!device_ptr) return;
+    IDirect3DDevice9_GetDeviceCaps(device_ptr, &caps);
+
+    if(!(caps.TextureCaps & D3DPTEXTURECAPS_VOLUMEMAP)) {
+        skip("No volume texture support\n");
+        return;
+    }
 
     test_volume_get_container(device_ptr);
 }

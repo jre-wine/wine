@@ -36,7 +36,6 @@
 #define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "winerror.h"
 #include "wine/winbase16.h"
@@ -553,7 +552,7 @@ STORAGE_get_small_block(stream_access16 *str,int blocknr,BYTE *sblock) {
  * STORAGE_put_small_block [INTERNAL]
  */
 static BOOL
-STORAGE_put_small_block(stream_access16 *str,int blocknr,BYTE *sblock) {
+STORAGE_put_small_block(stream_access16 *str,int blocknr,const BYTE *sblock) {
 	BYTE				block[BIGSIZE];
 	int				bigblocknr;
 	struct storage_pps_entry	root;
@@ -655,7 +654,7 @@ STORAGE_get_pps_entry(stream_access16*str,int n,struct storage_pps_entry *pstde)
  *		STORAGE_put_pps_entry	[Internal]
  */
 static int
-STORAGE_put_pps_entry(stream_access16*str,int n,struct storage_pps_entry *pstde) {
+STORAGE_put_pps_entry(stream_access16*str,int n,const struct storage_pps_entry *pstde) {
 	int	blocknr;
 	BYTE	block[BIGSIZE];
 	struct storage_pps_entry *stde = (struct storage_pps_entry*)(((LPBYTE)block)+128*(n&3));
@@ -717,24 +716,24 @@ STORAGE_dump_pps_entry(struct storage_pps_entry *stde) {
     WideCharToMultiByte( CP_ACP, 0, stde->pps_rawname, -1, name, sizeof(name), NULL, NULL);
 	if (!stde->pps_sizeofname)
 		return;
-	DPRINTF("name: %s\n",name);
-	DPRINTF("type: %d\n",stde->pps_type);
-	DPRINTF("prev pps: %d\n",stde->pps_prev);
-	DPRINTF("next pps: %d\n",stde->pps_next);
-	DPRINTF("dir pps: %d\n",stde->pps_dir);
-	DPRINTF("guid: %s\n",debugstr_guid(&(stde->pps_guid)));
+	TRACE("name: %s\n",name);
+	TRACE("type: %d\n",stde->pps_type);
+	TRACE("prev pps: %d\n",stde->pps_prev);
+	TRACE("next pps: %d\n",stde->pps_next);
+	TRACE("dir pps: %d\n",stde->pps_dir);
+	TRACE("guid: %s\n",debugstr_guid(&(stde->pps_guid)));
 	if (stde->pps_type !=2) {
 		time_t	t;
                 DWORD dw;
 		RtlTimeToSecondsSince1970((LARGE_INTEGER *)&(stde->pps_ft1),&dw);
                 t = dw;
-		DPRINTF("ts1: %s\n",ctime(&t));
+		TRACE("ts1: %s\n",ctime(&t));
 		RtlTimeToSecondsSince1970((LARGE_INTEGER *)&(stde->pps_ft2),&dw);
                 t = dw;
-		DPRINTF("ts2: %s\n",ctime(&t));
+		TRACE("ts2: %s\n",ctime(&t));
 	}
-	DPRINTF("startblock: %d\n",stde->pps_sb);
-	DPRINTF("size: %d\n",stde->pps_size);
+	TRACE("startblock: %d\n",stde->pps_sb);
+	TRACE("size: %d\n",stde->pps_size);
 }
 
 /******************************************************************************
@@ -2181,9 +2180,12 @@ HRESULT WINAPI StgIsStorageILockBytes16(SEGPTR plkbyt)
 
 /******************************************************************************
  *    StgOpenStorageOnILockBytes    [STORAGE.4]
+ *
+ * PARAMS
+ *  plkbyt  FIXME: Should probably be an ILockBytes16 *.
  */
 HRESULT WINAPI StgOpenStorageOnILockBytes16(
-	SEGPTR /*ILockBytes16 **/plkbyt,
+	SEGPTR plkbyt,
 	IStorage16 *pstgPriority,
 	DWORD grfMode,
 	SNB16 snbExclude,

@@ -2,19 +2,19 @@
  *
  * Copyright (C) 2003-2004 Rok Mandeljc
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Library General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #include "dmime_private.h"
@@ -142,7 +142,7 @@ static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicAudioPath_GetObjectI
 		DMUSIC_CreateDirectMusicGraphImpl (&IID_IDirectMusicGraph, (LPVOID*)&pGraph, NULL);
 		This->pToolGraph = (IDirectMusicGraph*) pGraph;
 	      }
-	      *ppObject = (LPDIRECTMUSICGRAPH) This->pToolGraph; 
+	      *ppObject = This->pToolGraph;
 	      IDirectMusicGraph_AddRef((LPDIRECTMUSICGRAPH) *ppObject);
 	      return S_OK;
 	    }
@@ -158,7 +158,7 @@ static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicAudioPath_GetObjectI
 	case DMUS_PATH_PERFORMANCE:
 	  {
 	    /* TODO check wanted GUID */
-	    *ppObject = (LPDIRECTMUSICPERFORMANCE8) This->pPerf; 
+	    *ppObject = This->pPerf;
 	    IUnknown_AddRef((LPUNKNOWN) *ppObject);
 	    return S_OK;
 	  }
@@ -167,16 +167,16 @@ static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicAudioPath_GetObjectI
 	case DMUS_PATH_PERFORMANCE_GRAPH:
 	  {
 	    IDirectMusicGraph* pPerfoGraph = NULL; 
-	    IDirectMusicPerformance8_GetGraph((LPDIRECTMUSICPERFORMANCE8) This->pPerf, &pPerfoGraph);
+	    IDirectMusicPerformance8_GetGraph(This->pPerf, &pPerfoGraph);
 	    if (NULL == pPerfoGraph) {
 	      IDirectMusicGraphImpl* pGraph = NULL; 
 	      DMUSIC_CreateDirectMusicGraphImpl (&IID_IDirectMusicGraph, (LPVOID*)&pGraph, NULL);			
-	      IDirectMusicPerformance8_SetGraph((LPDIRECTMUSICPERFORMANCE8) This->pPerf, (IDirectMusicGraph*) pGraph);
+	      IDirectMusicPerformance8_SetGraph(This->pPerf, (IDirectMusicGraph*) pGraph);
 	      /* we need release as SetGraph do an AddRef */
 	      IDirectMusicGraph_Release((LPDIRECTMUSICGRAPH) pGraph);
 	      pPerfoGraph = (LPDIRECTMUSICGRAPH) pGraph;
 	    }
-	    *ppObject = (LPDIRECTMUSICGRAPH) pPerfoGraph; 
+	    *ppObject = pPerfoGraph;
 	    return S_OK;
 	  }
 	  break;
@@ -622,7 +622,7 @@ static HRESULT WINAPI IDirectMusicAudioPathImpl_IPersistStream_GetSizeMax (LPPER
 	return E_NOTIMPL;
 }
 
-IPersistStreamVtbl DirectMusicAudioPath_PersistStream_Vtbl = {
+static const IPersistStreamVtbl DirectMusicAudioPath_PersistStream_Vtbl = {
 	IDirectMusicAudioPathImpl_IPersistStream_QueryInterface,
 	IDirectMusicAudioPathImpl_IPersistStream_AddRef,
 	IDirectMusicAudioPathImpl_IPersistStream_Release,

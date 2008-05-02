@@ -3,6 +3,7 @@
  * Glueing the RSAENH specific code to the crypto library
  *
  * Copyright (c) 2004, 2005 Michael Jung
+ * Copyright (c) 2007 Vijay Kiran Kamuju
  *
  * based on code by Mike McCormack and David Hammerton
  *
@@ -42,7 +43,7 @@ VOID WINAPI MD5Update( MD5_CTX *ctx, const unsigned char *buf, unsigned int len 
 VOID WINAPI MD5Final( MD5_CTX *ctx );
 /* Function prototypes copied from dlls/advapi32/crypt_sha.c */
 VOID WINAPI A_SHAInit(PSHA_CTX Context);
-VOID WINAPI A_SHAUpdate(PSHA_CTX Context, PCHAR Buffer, UINT BufferSize);
+VOID WINAPI A_SHAUpdate(PSHA_CTX Context, const unsigned char *Buffer, UINT BufferSize);
 VOID WINAPI A_SHAFinal(PSHA_CTX Context, PULONG Result);
 /* Function prototype copied from dlls/advapi32/crypt.c */
 BOOL WINAPI SystemFunction036(PVOID pbBuffer, ULONG dwLen);
@@ -89,7 +90,7 @@ BOOL update_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext, CONST BYTE *pb
             break;
         
         case CALG_SHA:
-            A_SHAUpdate(&pHashContext->sha, (PCHAR)pbData, dwDataLen);
+            A_SHAUpdate(&pHashContext->sha, pbData, dwDataLen);
             break;
         
         default:
@@ -166,8 +167,8 @@ BOOL free_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext)
     return TRUE;
 }
 
-BOOL setup_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen, DWORD dwSaltLen, 
-                    BYTE *abKeyValue) 
+BOOL setup_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen,
+                    DWORD dwEffectiveKeyLen, DWORD dwSaltLen, BYTE *abKeyValue)
 {
     switch (aiAlgid) 
     {
@@ -178,7 +179,8 @@ BOOL setup_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen, DW
             break;
         
         case CALG_RC2:
-            rc2_setup(abKeyValue, dwKeyLen + dwSaltLen, dwKeyLen << 3, 0, &pKeyContext->rc2);
+            rc2_setup(abKeyValue, dwKeyLen + dwSaltLen, dwEffectiveKeyLen ?
+                      dwEffectiveKeyLen : dwKeyLen << 3, 0, &pKeyContext->rc2);
             break;
         
         case CALG_3DES:
@@ -192,6 +194,19 @@ BOOL setup_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen, DW
         
         case CALG_DES:
             des_setup(abKeyValue, 8, 0, &pKeyContext->des);
+            break;
+
+        case CALG_AES:
+        case CALG_AES_128:
+            aes_setup(abKeyValue, 16, 0, &pKeyContext->aes);
+            break;
+
+        case CALG_AES_192:
+            aes_setup(abKeyValue, 24, 0, &pKeyContext->aes);
+            break;
+
+        case CALG_AES_256:
+            aes_setup(abKeyValue, 32, 0, &pKeyContext->aes);
             break;
     }
 
@@ -208,6 +223,10 @@ BOOL duplicate_key_impl(ALG_ID aiAlgid, CONST KEY_CONTEXT *pSrcKeyContext,
         case CALG_3DES:
         case CALG_3DES_112:
         case CALG_DES:
+        case CALG_AES:
+        case CALG_AES_128:
+        case CALG_AES_192:
+        case CALG_AES_256:
             memcpy(pDestKeyContext, pSrcKeyContext, sizeof(KEY_CONTEXT));
             break;
         case CALG_RSA_KEYX:
@@ -274,6 +293,17 @@ BOOL encrypt_block_impl(ALG_ID aiAlgid, DWORD dwKeySpec, KEY_CONTEXT *pKeyContex
             }
             break;
 
+        case CALG_AES:
+        case CALG_AES_128:
+        case CALG_AES_192:
+        case CALG_AES_256:
+            if (enc) {
+                aes_ecb_encrypt(in, out, &pKeyContext->aes);
+            } else {
+                aes_ecb_decrypt(in, out, &pKeyContext->aes);
+            }
+            break;
+
         case CALG_RSA_KEYX:
         case CALG_RSA_SIGN:
             outlen = inlen = (mp_count_bits(&pKeyContext->rsa.N)+7)/8;
@@ -328,7 +358,7 @@ BOOL gen_rand_impl(BYTE *pbBuffer, DWORD dwLen)
     return SystemFunction036(pbBuffer, dwLen);
 }
 
-BOOL export_public_key_impl(BYTE *pbDest, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen,DWORD *pdwPubExp)
+BOOL export_public_key_impl(BYTE *pbDest, const KEY_CONTEXT *pKeyContext, DWORD dwKeyLen,DWORD *pdwPubExp)
 {
     mp_to_unsigned_bin(&pKeyContext->rsa.N, pbDest);
     reverse_bytes(pbDest, dwKeyLen);
@@ -362,7 +392,7 @@ BOOL import_public_key_impl(CONST BYTE *pbSrc, KEY_CONTEXT *pKeyContext, DWORD d
     return TRUE;    
 }
 
-BOOL export_private_key_impl(BYTE *pbDest, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen, 
+BOOL export_private_key_impl(BYTE *pbDest, const KEY_CONTEXT *pKeyContext, DWORD dwKeyLen,
                              DWORD *pdwPubExp)
 {
     mp_to_unsigned_bin(&pKeyContext->rsa.N, pbDest);

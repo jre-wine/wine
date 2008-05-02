@@ -208,7 +208,7 @@ static const IUnknownVtbl unkvt =
       IUnknown_fnRelease,
 };
 
-static shvheader GenericSFHeader[] = {
+static const shvheader GenericSFHeader[] = {
     {IDS_SHV_COLUMN1, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 15},
     {IDS_SHV_COLUMN2, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10},
     {IDS_SHV_COLUMN3, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10},
@@ -588,7 +588,7 @@ IShellFolder_fnGetAttributesOf (IShellFolder2 * iface, UINT cidl,
         IShellFolder *psfParent = NULL;
         LPCITEMIDLIST rpidl = NULL;
 
-        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (LPVOID*)&psfParent, (LPCITEMIDLIST*)&rpidl);
+        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (LPVOID*)&psfParent, &rpidl);
         if(SUCCEEDED(hr)) {
             SHELL32_GetItemAttributes (psfParent, rpidl, rgfInOut);
             IShellFolder_Release(psfParent);
@@ -712,7 +712,7 @@ static const WCHAR NeverShowExtW[] = { 'N','e','v','e','r','S','h','o','w','E',
  *  TRUE, if the filename's extension should be hidden
  *  FALSE, otherwise.
  */
-BOOL SHELL_FS_HideExtension(LPWSTR szPath)
+BOOL SHELL_FS_HideExtension(LPCWSTR szPath)
 {
     HKEY hKey;
     DWORD dwData;
@@ -771,7 +771,7 @@ IShellFolder_fnGetDisplayNameOf (IShellFolder2 * iface, LPCITEMIDLIST pidl,
                                  DWORD dwFlags, LPSTRRET strRet)
 {
     IGenericSFImpl *This = impl_from_IShellFolder2(iface);
-    WCHAR wszPath[MAX_PATH+1];
+    LPWSTR pszPath;
 
     HRESULT hr = S_OK;
     int len = 0;
@@ -782,12 +782,16 @@ IShellFolder_fnGetDisplayNameOf (IShellFolder2 * iface, LPCITEMIDLIST pidl,
     if (!pidl || !strRet)
         return E_INVALIDARG;
 
+    pszPath = CoTaskMemAlloc((MAX_PATH +1) * sizeof(WCHAR));
+    if (!pszPath)
+        return E_OUTOFMEMORY;
+
     if (_ILIsDesktop(pidl)) { /* empty pidl */
         if ((GET_SHGDN_FOR(dwFlags) & SHGDN_FORPARSING) &&
             (GET_SHGDN_RELATION(dwFlags) != SHGDN_INFOLDER)) 
         {
             if (This->sPathTarget)
-                lstrcpynW(wszPath, This->sPathTarget, MAX_PATH);
+                lstrcpynW(pszPath, This->sPathTarget, MAX_PATH);
         } else {
             /* pidl has to contain exactly one non null SHITEMID */
             hr = E_INVALIDARG;
@@ -797,24 +801,32 @@ IShellFolder_fnGetDisplayNameOf (IShellFolder2 * iface, LPCITEMIDLIST pidl,
             (GET_SHGDN_RELATION(dwFlags) != SHGDN_INFOLDER) && 
             This->sPathTarget) 
         {
-            lstrcpynW(wszPath, This->sPathTarget, MAX_PATH);
-            PathAddBackslashW(wszPath);
-            len = lstrlenW(wszPath);
+            lstrcpynW(pszPath, This->sPathTarget, MAX_PATH);
+            PathAddBackslashW(pszPath);
+            len = lstrlenW(pszPath);
         }
-        _ILSimpleGetTextW(pidl, wszPath + len, MAX_PATH + 1 - len);
-        if (!_ILIsFolder(pidl)) SHELL_FS_ProcessDisplayFilename(wszPath, dwFlags);
+        _ILSimpleGetTextW(pidl, pszPath + len, MAX_PATH + 1 - len);
+        if (!_ILIsFolder(pidl)) SHELL_FS_ProcessDisplayFilename(pszPath, dwFlags);
     } else {
-        hr = SHELL32_GetDisplayNameOfChild(iface, pidl, dwFlags, wszPath, MAX_PATH);
+        hr = SHELL32_GetDisplayNameOfChild(iface, pidl, dwFlags, pszPath, MAX_PATH);
     }
 
     if (SUCCEEDED(hr)) {
-        strRet->uType = STRRET_CSTR;
-        if (!WideCharToMultiByte(CP_ACP, 0, wszPath, -1, strRet->u.cStr, MAX_PATH,
-             NULL, NULL))
-            strRet->u.cStr[0] = '\0';
-    }
+        /* Win9x always returns ANSI strings, NT always returns Unicode strings */
+        if (GetVersion() & 0x80000000) {
+            strRet->uType = STRRET_CSTR;
+            if (!WideCharToMultiByte(CP_ACP, 0, pszPath, -1, strRet->u.cStr, MAX_PATH,
+                 NULL, NULL))
+                strRet->u.cStr[0] = '\0';
+            CoTaskMemFree(pszPath);
+        } else {
+            strRet->uType = STRRET_WSTR;
+            strRet->u.pOleStr = pszPath;
+        }
+    } else
+        CoTaskMemFree(pszPath);
 
-    TRACE ("-- (%p)->(%s)\n", This, strRet->u.cStr);
+    TRACE ("-- (%p)->(%s)\n", This, strRet->uType == STRRET_CSTR ? strRet->u.cStr : debugstr_w(strRet->u.pOleStr));
     return hr;
 }
 
@@ -1068,11 +1080,12 @@ ISFHelper_fnGetUniqueName (ISFHelper * iface, LPWSTR pwszName, UINT uLen)
     IEnumIDList *penum;
     HRESULT hr;
     WCHAR wszText[MAX_PATH];
-    const WCHAR wszNewFolder[] = {'N','e','w',' ','F','o','l','d','e','r',0 };
+    WCHAR wszNewFolder[25];
     const WCHAR wszFormat[] = {'%','s',' ','%','d',0 };
 
     TRACE ("(%p)(%p %u)\n", This, pwszName, uLen);
 
+    LoadStringW(shell32_hInstance, IDS_NEWFOLDER, wszNewFolder,  sizeof(wszNewFolder)/sizeof(WCHAR));
     if (uLen < sizeof(wszNewFolder)/sizeof(WCHAR) + 3)
         return E_POINTER;
 
@@ -1158,7 +1171,7 @@ ISFHelper_fnAddFolder (ISFHelper * iface, HWND hwnd, LPCWSTR pwszName,
  * Builds a list of paths like the one used in SHFileOperation from a table of
  * PIDLs relative to the given base folder
  */
-WCHAR *build_paths_list(LPCWSTR wszBasePath, int cidl, LPCITEMIDLIST *pidls)
+static WCHAR *build_paths_list(LPCWSTR wszBasePath, int cidl, const LPCITEMIDLIST *pidls)
 {
     WCHAR *wszPathsList;
     WCHAR *wszListPos;
@@ -1449,7 +1462,7 @@ IFSFldr_PersistFolder3_InitializeEx (IPersistFolder3 * iface,
     This->pidlRoot = ILClone (pidlRoot);
 
     /*
-     *  the target folder is spezified in csidl OR pidlTargetFolder OR
+     *  the target folder is specified in csidl OR pidlTargetFolder OR
      *  szTargetParsingName
      */
     if (ppfti) {

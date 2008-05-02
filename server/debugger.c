@@ -36,7 +36,6 @@
 #include "process.h"
 #include "thread.h"
 #include "request.h"
-#include "console.h"
 
 enum debug_event_state { EVENT_QUEUED, EVENT_SENT, EVENT_CONTINUED };
 
@@ -70,6 +69,7 @@ static const struct object_ops debug_event_ops =
 {
     sizeof(struct debug_event),    /* size */
     debug_event_dump,              /* dump */
+    no_get_type,                   /* get_type */
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     debug_event_signaled,          /* signaled */
@@ -77,7 +77,10 @@ static const struct object_ops debug_event_ops =
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
     no_map_access,                 /* map_access */
+    default_get_sd,                /* get_sd */
+    default_set_sd,                /* set_sd */
     no_lookup_name,                /* lookup_name */
+    no_open_file,                  /* open_file */
     no_close_handle,               /* close_handle */
     debug_event_destroy            /* destroy */
 };
@@ -90,6 +93,7 @@ static const struct object_ops debug_ctx_ops =
 {
     sizeof(struct debug_ctx),      /* size */
     debug_ctx_dump,                /* dump */
+    no_get_type,                   /* get_type */
     add_queue,                     /* add_queue */
     remove_queue,                  /* remove_queue */
     debug_ctx_signaled,            /* signaled */
@@ -97,7 +101,10 @@ static const struct object_ops debug_ctx_ops =
     no_signal,                     /* signal */
     no_get_fd,                     /* get_fd */
     no_map_access,                 /* map_access */
+    default_get_sd,                /* get_sd */
+    default_set_sd,                /* set_sd */
     no_lookup_name,                /* lookup_name */
+    no_open_file,                  /* open_file */
     no_close_handle,               /* close_handle */
     debug_ctx_destroy              /* destroy */
 };
@@ -424,7 +431,7 @@ static int debugger_attach( struct process *process, struct thread *debugger )
         if (thread->process == process) goto error;
 
     /* don't let a debugger debug its console... won't work */
-    if (debugger->process->console && debugger->process->console->renderer->process == process)
+    if (debugger->process->console && console_get_renderer(debugger->process->console)->process == process)
         goto error;
 
     suspend_process( process );
@@ -450,7 +457,7 @@ static int debugger_attach( struct process *process, struct thread *debugger )
 /* detach a process from a debugger thread (and resume it ?) */
 int debugger_detach( struct process *process, struct thread *debugger )
 {
-    struct debug_event *event;
+    struct debug_event *event, *next;
     struct debug_ctx *debug_ctx;
 
     if (!process->debugger || process->debugger != debugger)
@@ -463,23 +470,18 @@ int debugger_detach( struct process *process, struct thread *debugger )
     /* send continue indication for all events */
     debug_ctx = debugger->debug_ctx;
 
-    /* find the event in the queue
-     * FIXME: could loop on process' threads and look the debug_event field */
-    LIST_FOR_EACH_ENTRY( event, &debug_ctx->event_queue, struct debug_event, entry )
+    /* free all events from this process */
+    LIST_FOR_EACH_ENTRY_SAFE( event, next, &debug_ctx->event_queue, struct debug_event, entry )
     {
-        if (event->state != EVENT_QUEUED) continue;
+        if (event->sender->process != process) continue;
 
-        if (event->sender->process == process)
-        {
-            assert( event->sender->debug_event == event );
-            event->status = DBG_CONTINUE;
-            event->state  = EVENT_CONTINUED;
-            wake_up( &event->obj, 0 );
-            unlink_event( debug_ctx, event );
-            /* from queued debug event */
-            resume_process( process );
-            break;
-        }
+        assert( event->state != EVENT_CONTINUED );
+        event->status = DBG_CONTINUE;
+        event->state  = EVENT_CONTINUED;
+        wake_up( &event->obj, 0 );
+        unlink_event( debug_ctx, event );
+        /* from queued debug event */
+        resume_process( process );
     }
 
     /* remove relationships between process and its debugger */
@@ -546,7 +548,7 @@ void debug_exit_thread( struct thread *thread )
         if (thread->debug_ctx->kill_on_exit)
         {
             /* kill all debugged processes */
-            kill_debugged_processes( thread, thread->exit_code );
+            kill_debugged_processes( thread, STATUS_DEBUGGER_INACTIVE );
         }
         else
         {

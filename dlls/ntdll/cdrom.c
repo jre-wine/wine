@@ -76,11 +76,12 @@
 #endif
 
 #ifdef HAVE_IOKIT_IOKITLIB_H
-# ifndef SENSEBUFLEN
-#  include <IOKit/IOKitLib.h>
-#  include <IOKit/scsi/SCSICmds_REQUEST_SENSE_Defs.h>
-#  define SENSEBUFLEN kSenseDefaultSize
-# endif
+# include <sys/disk.h>
+# include <IOKit/IOKitLib.h>
+# include <IOKit/storage/IOMedia.h>
+# include <IOKit/storage/IOCDMediaBSDClient.h>
+# include <IOKit/scsi/SCSICmds_REQUEST_SENSE_Defs.h>
+# define SENSEBUFLEN kSenseDefaultSize
 #endif
 
 #define NONAMELESSUNION
@@ -302,6 +303,82 @@ static int CDROM_MediaChanged(int dev)
 }
 #endif
 
+
+/******************************************************************
+ *		get_parent_device
+ *
+ * On Mac OS, get the device for the whole disk from a fd that points to a partition.
+ * This is ugly and inefficient, but we have no choice since the partition fd doesn't
+ * support the eject ioctl.
+ */
+#ifdef __APPLE__
+static NTSTATUS get_parent_device( int fd, char *name, size_t len )
+{
+    NTSTATUS status = STATUS_NO_SUCH_FILE;
+    struct stat st;
+    int i;
+    io_service_t service;
+    CFMutableDictionaryRef dict;
+    CFTypeRef val;
+
+    if (fstat( fd, &st ) == -1) return FILE_GetNtStatus();
+    if (!S_ISCHR( st.st_mode )) return STATUS_OBJECT_TYPE_MISMATCH;
+
+    /* create a dictionary with the right major/minor numbers */
+
+    if (!(dict = IOServiceMatching( kIOMediaClass ))) return STATUS_NO_MEMORY;
+
+    i = major( st.st_rdev );
+    val = CFNumberCreate( NULL, kCFNumberIntType, &i );
+    CFDictionaryAddValue( dict, CFSTR( "BSD Major" ), val );
+    CFRelease( val );
+
+    i = minor( st.st_rdev );
+    val = CFNumberCreate( NULL, kCFNumberIntType, &i );
+    CFDictionaryAddValue( dict, CFSTR( "BSD Minor" ), val );
+    CFRelease( val );
+
+    CFDictionaryAddValue( dict, CFSTR("Removable"), kCFBooleanTrue );
+
+    service = IOServiceGetMatchingService( kIOMasterPortDefault, dict );
+
+    /* now look for the parent that has the "Whole" attribute set to TRUE */
+
+    while (service)
+    {
+        io_service_t parent = 0;
+        CFBooleanRef whole;
+        CFStringRef str;
+        int ok;
+
+        if (!IOObjectConformsTo( service, kIOMediaClass ))
+            goto next;
+        if (!(whole = IORegistryEntryCreateCFProperty( service, CFSTR("Whole"), NULL, 0 )))
+            goto next;
+        ok = (whole == kCFBooleanTrue);
+        CFRelease( whole );
+        if (!ok) goto next;
+
+        if ((str = IORegistryEntryCreateCFProperty( service, CFSTR("BSD Name"), NULL, 0 )))
+        {
+            strcpy( name, "/dev/r" );
+            CFStringGetCString( str, name + 6, len - 6, kCFStringEncodingUTF8 );
+            CFRelease( str );
+            status = STATUS_SUCCESS;
+        }
+        IOObjectRelease( service );
+        break;
+
+next:
+        IORegistryEntryGetParentEntry( service, kIOServicePlane, &parent );
+        IOObjectRelease( service );
+        service = parent;
+    }
+    return status;
+}
+#endif
+
+
 /******************************************************************
  *		CDROM_SyncCache                          [internal]
  *
@@ -411,6 +488,33 @@ static NTSTATUS CDROM_SyncCache(int dev, int fd)
         toc->TrackData[i - toc->FirstTrack].Address[2] = toc_buffer.addr.msf.second;
         toc->TrackData[i - toc->FirstTrack].Address[3] = toc_buffer.addr.msf.frame;
     }
+    cdrom_cache[dev].toc_good = 1;
+    return STATUS_SUCCESS;
+
+#elif defined(__APPLE__)
+    int i;
+    dk_cd_read_toc_t hdr;
+    CDROM_TOC *toc = &cdrom_cache[dev].toc;
+    cdrom_cache[dev].toc_good = 0;
+
+    memset( &hdr, 0, sizeof(hdr) );
+    hdr.buffer = toc;
+    hdr.bufferLength = sizeof(*toc);
+    if (ioctl(fd, DKIOCCDREADTOC, &hdr) == -1)
+    {
+        WARN("(%d) -- Error occurred (%s)!\n", dev, strerror(errno));
+        return FILE_GetNtStatus();
+    }
+    for (i = toc->FirstTrack; i <= toc->LastTrack + 1; i++)
+    {
+        /* convert address format */
+        TRACK_DATA *data = &toc->TrackData[i - toc->FirstTrack];
+        DWORD frame = (((DWORD)data->Address[0] << 24) | ((DWORD)data->Address[1] << 16) |
+                       ((DWORD)data->Address[2] << 8) | data->Address[3]);
+        MSF_OF_FRAME( data->Address[1], frame );
+        data->Address[0] = 0;
+    }
+
     cdrom_cache[dev].toc_good = 1;
     return STATUS_SUCCESS;
 #else
@@ -574,7 +678,11 @@ static NTSTATUS CDROM_GetControl(int dev, CDROM_AUDIO_CONTROL* cac)
  */
 static NTSTATUS CDROM_GetDeviceNumber(int dev, STORAGE_DEVICE_NUMBER* devnum)
 {
-    return STATUS_NOT_SUPPORTED;
+    FIXME( "stub\n" );
+    devnum->DeviceType = FILE_DEVICE_DISK;
+    devnum->DeviceNumber = 1;
+    devnum->PartitionNumber = 1;
+    return STATUS_SUCCESS;
 }
 
 /******************************************************************
@@ -628,6 +736,9 @@ static NTSTATUS CDROM_SetTray(int fd, BOOL doEject)
     return CDROM_GetStatusCode((ioctl(fd, CDIOCALLOW, NULL)) ||
                                (ioctl(fd, doEject ? CDIOCEJECT : CDIOCCLOSE, NULL)) ||
                                (ioctl(fd, CDIOCPREVENT, NULL)));
+#elif defined(__APPLE__)
+    if (doEject) return CDROM_GetStatusCode( ioctl( fd, DKIOCEJECT, NULL ) );
+    else return STATUS_NOT_SUPPORTED;
 #else
     return STATUS_NOT_SUPPORTED;
 #endif
@@ -929,9 +1040,17 @@ static NTSTATUS CDROM_Verify(int dev, int fd)
         return STATUS_SUCCESS;
     else
         return STATUS_NO_MEDIA_IN_DEVICE;
-#endif
+#elif defined(__FreeBSD__)
+    int ret;
+    ret = ioctl(fd, CDIOCSTART, NULL);
+    if(ret == 0)
+        return STATUS_SUCCESS;
+    else
+        return STATUS_NO_MEDIA_IN_DEVICE;
+#else
     FIXME("not implemented for non-linux\n");
     return STATUS_NOT_SUPPORTED;
+#endif
 }
 
 /******************************************************************
@@ -1631,7 +1750,7 @@ static NTSTATUS CDROM_GetAddress(int fd, SCSI_ADDRESS* address)
  *
  *
  */
-static NTSTATUS DVD_StartSession(int fd, PDVD_SESSION_ID sid_in, PDVD_SESSION_ID sid_out)
+static NTSTATUS DVD_StartSession(int fd, const DVD_SESSION_ID *sid_in, PDVD_SESSION_ID sid_out)
 {
 #if defined(linux)
     NTSTATUS ret = STATUS_NOT_SUPPORTED;
@@ -1639,7 +1758,7 @@ static NTSTATUS DVD_StartSession(int fd, PDVD_SESSION_ID sid_in, PDVD_SESSION_ID
 
     memset( &auth_info, 0, sizeof( auth_info ) );
     auth_info.type = DVD_LU_SEND_AGID;
-    if (sid_in) auth_info.lsa.agid = *(int*)sid_in; /* ?*/
+    if (sid_in) auth_info.lsa.agid = *(const int*)sid_in; /* ?*/
 
     TRACE("fd 0x%08x\n",fd);
     ret =CDROM_GetStatusCode(ioctl(fd, DVD_AUTH, &auth_info));
@@ -1657,14 +1776,14 @@ static NTSTATUS DVD_StartSession(int fd, PDVD_SESSION_ID sid_in, PDVD_SESSION_ID
  *
  *
  */
-static NTSTATUS DVD_EndSession(int fd, PDVD_SESSION_ID sid)
+static NTSTATUS DVD_EndSession(int fd, const DVD_SESSION_ID *sid)
 {
 #if defined(linux)
     dvd_authinfo auth_info;
 
     memset( &auth_info, 0, sizeof( auth_info ) );
     auth_info.type = DVD_INVALIDATE_AGID;
-    auth_info.lsa.agid = *(int*)sid;
+    auth_info.lsa.agid = *(const int*)sid;
 
     TRACE("\n");
     return CDROM_GetStatusCode(ioctl(fd, DVD_AUTH, &auth_info));
@@ -1680,7 +1799,7 @@ static NTSTATUS DVD_EndSession(int fd, PDVD_SESSION_ID sid)
  *
  *
  */
-static NTSTATUS DVD_SendKey(int fd, PDVD_COPY_PROTECT_KEY key)
+static NTSTATUS DVD_SendKey(int fd, const DVD_COPY_PROTECT_KEY *key)
 {
 #if defined(linux)
     NTSTATUS ret = STATUS_NOT_SUPPORTED;
@@ -1824,7 +1943,7 @@ static NTSTATUS DVD_GetRegion(int dev, PDVD_REGION region)
  *
  *
  */
-static NTSTATUS DVD_ReadStructure(int dev, PDVD_READ_STRUCTURE structure, PDVD_LAYER_DESCRIPTOR layer)
+static NTSTATUS DVD_ReadStructure(int dev, const DVD_READ_STRUCTURE *structure, PDVD_LAYER_DESCRIPTOR layer)
 {
 #ifdef DVD_READ_STRUCT
     dvd_struct s;
@@ -2022,7 +2141,12 @@ NTSTATUS CDROM_DeviceIoControl(HANDLE hDevice,
 
     piosb->Information = 0;
 
-    if ((status = server_get_unix_fd( hDevice, 0, &fd, &needs_close, NULL ))) goto error;
+    if ((status = server_get_unix_fd( hDevice, 0, &fd, &needs_close, NULL, NULL )))
+    {
+        if (status == STATUS_BAD_DEVICE_TYPE) return status;  /* no associated fd */
+        goto error;
+    }
+
     if ((status = CDROM_Open(fd, &dev)))
     {
         if (needs_close) close( fd );
@@ -2059,7 +2183,29 @@ NTSTATUS CDROM_DeviceIoControl(HANDLE hDevice,
 	CDROM_ClearCacheEntry(dev);
         if (lpInBuffer != NULL || nInBufferSize != 0 || lpOutBuffer != NULL || nOutBufferSize != 0)
             status = STATUS_INVALID_PARAMETER;
-        else status = CDROM_SetTray(fd, TRUE);
+        else
+        {
+#ifdef __APPLE__
+            char name[100];
+
+            /* This is ugly as hell, but Mac OS is unable to eject from the device fd,
+             * it wants an fd for the whole device, and it also requires the device fd
+             * to be closed first, so we have to close the handle that the caller gave us.
+             * Also for some reason it wants the fd to be closed before we even open the parent.
+             */
+            if ((status = get_parent_device( fd, name, sizeof(name) ))) break;
+            NtClose( hDevice );
+            if (needs_close) close( fd );
+            TRACE("opening parent %s\n", name );
+            if ((fd = open( name, O_RDONLY )) == -1)
+            {
+                status = FILE_GetNtStatus();
+                break;
+            }
+            needs_close = 1;
+#endif
+            status = CDROM_SetTray(fd, TRUE);
+        }
         break;
 
     case IOCTL_CDROM_MEDIA_REMOVAL:
@@ -2274,12 +2420,8 @@ NTSTATUS CDROM_DeviceIoControl(HANDLE hDevice,
         break;
 
     default:
-        FIXME("Unsupported IOCTL %x (type=%x access=%x func=%x meth=%x)\n", 
-              dwIoControlCode, dwIoControlCode >> 16, (dwIoControlCode >> 14) & 3,
-              (dwIoControlCode >> 2) & 0xFFF, dwIoControlCode & 3);
-        sz = 0;
-        status = STATUS_INVALID_PARAMETER;
-        break;
+        if (needs_close) close( fd );
+        return STATUS_NOT_SUPPORTED;
     }
     if (needs_close) close( fd );
  error:

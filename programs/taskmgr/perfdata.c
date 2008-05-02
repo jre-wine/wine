@@ -124,8 +124,10 @@ void PerfDataRefresh(void)
     /* Get processor time information */
     SysProcessorTimeInfo = (PSYSTEM_PROCESSORTIME_INFO)malloc(sizeof(SYSTEM_PROCESSORTIME_INFO) * SystemBasicInfo.bKeNumberProcessors);
     status = NtQuerySystemInformation(SystemProcessorTimeInformation, SysProcessorTimeInfo, sizeof(SYSTEM_PROCESSORTIME_INFO) * SystemBasicInfo.bKeNumberProcessors, &ulSize);
-    if (status != NO_ERROR)
+    if (status != NO_ERROR) {
+        free(SysProcessorTimeInfo);
         return;
+    }
 
     /* Get handle information
      * We don't know how much data there is so just keep
@@ -330,11 +332,19 @@ ULONG PerfDataGetProcessCount(void)
 
 ULONG PerfDataGetProcessorUsage(void)
 {
+    if( dbIdleTime < 0.0 )
+        return 0;
+    if( dbIdleTime > 100.0 )
+        return 100;
     return (ULONG)dbIdleTime;
 }
 
 ULONG PerfDataGetProcessorSystemUsage(void)
 {
+    if( dbKernelTime < 0.0 )
+        return 0;
+    if( dbKernelTime > 100.0 )
+        return 100;
     return (ULONG)dbKernelTime;
 }
 

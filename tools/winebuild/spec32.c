@@ -51,7 +51,7 @@ static inline int needs_relay( const ORDDEF *odp )
 /* check if dll will output relay thunks */
 int has_relays( DLLSPEC *spec )
 {
-    unsigned int i;
+    int i;
 
     if (target_cpu != CPU_x86) return 0;
 
@@ -70,7 +70,8 @@ int has_relays( DLLSPEC *spec )
  */
 static void output_relay_debug( DLLSPEC *spec )
 {
-    unsigned int i, j, args, flags;
+    int i;
+    unsigned int j, args, flags;
 
     /* first the table of entry point offsets */
 
@@ -357,13 +358,21 @@ void BuildSpec32File( DLLSPEC *spec )
 
     /* Reserve some space for the PE header */
 
-    output( "\t.text\n" );
-    output( "\t.align %d\n", get_alignment(page_size) );
-    output( "__wine_spec_pe_header:\n" );
     if (target_platform == PLATFORM_APPLE)
+    {
+        output( "\t.text\n" );
+        output( "\t.align %d\n", get_alignment(page_size) );
+        output( "__wine_spec_pe_header:\n" );
         output( "\t.space 65536\n" );
+    }
     else
-        output( "\t.skip 65536\n" );
+    {
+        output( "\n\t.section \".init\",\"ax\"\n" );
+        output( "\tjmp 1f\n" );
+        output( "__wine_spec_pe_header:\n" );
+        output( "\t.skip %u\n", 65536 + page_size );
+        output( "1:\n" );
+    }
 
     /* Output the NT header */
 
@@ -426,8 +435,8 @@ void BuildSpec32File( DLLSPEC *spec )
     output( "\t.long 0\n" );              /* CheckSum */
     output( "\t%s 0x%04x\n",              /* Subsystem */
              get_asm_short_keyword(), spec->subsystem );
-    output( "\t%s 0\n",                   /* DllCharacteristics */
-             get_asm_short_keyword() );
+    output( "\t%s 0x%04x\n",              /* DllCharacteristics */
+            get_asm_short_keyword(), spec->dll_characteristics );
     output( "\t%s %u,%u\n",               /* SizeOfStackReserve/Commit */
              get_asm_ptr_keyword(), (spec->stack_size ? spec->stack_size : 1024) * 1024, page_size );
     output( "\t%s %u,%u\n",               /* SizeOfHeapReserve/Commit */
@@ -551,7 +560,7 @@ void BuildDef32File( DLLSPEC *spec )
             assert(0);
         }
         output( " @%d", odp->ordinal );
-        if (!odp->name) output( " NONAME" );
+        if (!odp->name || (odp->flags & FLAG_ORDINAL)) output( " NONAME" );
         if (is_data) output( " DATA" );
         if (odp->flags & FLAG_PRIVATE) output( " PRIVATE" );
         output( "\n" );

@@ -29,11 +29,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "wingdi.h"
 #include "wine/exception.h"
-#include "excpt.h"
 
 #include "ddraw.h"
 #include "d3d.h"
@@ -232,7 +230,7 @@ IDirect3DImpl_1_Initialize(IDirect3D *iface,
  * IDirect3D7::EnumDevices
  *
  * The EnumDevices method for IDirect3D7. It enumerates all supported
- * D3D7 devices. Currently there's only one.
+ * D3D7 devices. Currently the T&L, HAL and RGB devices are enumerated.
  *
  * Params:
  *  Callback: Function to call for each enumerated device
@@ -248,20 +246,36 @@ IDirect3DImpl_7_EnumDevices(IDirect3D7 *iface,
                           void *Context)
 {
     ICOM_THIS_FROM(IDirectDrawImpl, IDirect3D7, iface);
-    char interface_name[] = "WINE Direct3D7 using WineD3D";
-    char device_name[] = "Wine D3D7 device";
+    char interface_name_tnl[] = "WINE Direct3D7 Hardware Transform and Lighting acceleration using WineD3D";
+    char device_name_tnl[] = "Wine D3D7 T&L HAL";
+    char interface_name_hal[] = "WINE Direct3D7 Hardware acceleration using WineD3D";
+    char device_name_hal[] = "Wine D3D7 HAL";
+    char interface_name_rgb[] = "WINE Direct3D7 RGB Software Emulation using WineD3D";
+    char device_name_rgb[] = "Wine D3D7 RGB";
     D3DDEVICEDESC7 ddesc;
     D3DDEVICEDESC oldDesc;
     HRESULT hr;
 
     TRACE("(%p)->(%p,%p)\n", This, Callback, Context);
+    EnterCriticalSection(&ddraw_cs);
 
     TRACE("(%p) Enumerating WineD3D D3Device7 interface\n", This);
     hr = IDirect3DImpl_GetCaps(This->wineD3D, &oldDesc, &ddesc);
-    if(hr != D3D_OK) return hr;
-    Callback(interface_name, device_name, &ddesc, Context);
+    if(hr != D3D_OK)
+    {
+        LeaveCriticalSection(&ddraw_cs);
+        return hr;
+    }
+    Callback(interface_name_tnl, device_name_tnl, &ddesc, Context);
+
+    ddesc.deviceGUID = IID_IDirect3DHALDevice;
+    Callback(interface_name_hal, device_name_hal, &ddesc, Context);
+
+    ddesc.deviceGUID = IID_IDirect3DRGBDevice;
+    Callback(interface_name_rgb, device_name_rgb, &ddesc, Context);
 
     TRACE("(%p) End of enumeration\n", This);
+    LeaveCriticalSection(&ddraw_cs);
     return D3D_OK;
 }
 
@@ -299,9 +313,14 @@ IDirect3DImpl_3_EnumDevices(IDirect3D3 *iface,
     strcpy(device_name,"direct3d");
 
     TRACE("(%p)->(%p,%p)\n", This, Callback, Context);
+    EnterCriticalSection(&ddraw_cs);
 
     hr = IDirect3DImpl_GetCaps(This->wineD3D, &dref, &newDesc);
-    if(hr != D3D_OK) return hr;
+    if(hr != D3D_OK)
+    {
+        LeaveCriticalSection(&ddraw_cs);
+        return hr;
+    }
 
     /* Do I have to enumerate the reference id? Note from old d3d7:
      * "It seems that enumerating the reference IID on Direct3D 1 games
@@ -314,34 +333,48 @@ IDirect3DImpl_3_EnumDevices(IDirect3D3 *iface,
      *
      * Some games(GTA 2) seem to use the second enumerated device, so I have to enumerate
      * at least 2 devices. So enumerate the reference device to have 2 devices.
+     *
+     * Other games(Rollcage) tell emulation and hal device apart by certain flags.
+     * Rollcage expects D3DPTEXTURECAPS_POW2 to be set(yeah, it is a limitation flag),
+     * and it refuses all devices that have the perspective flag set. This way it refuses
+     * the emulation device, and HAL devices never have POW2 unset in d3d7 on windows.
      */
 
     if(This->d3dversion != 1)
     {
-        static CHAR reference_description[] = "Reference Direct3D ID";
+        static CHAR reference_description[] = "RGB Direct3D emulation";
 
         TRACE("(%p) Enumerating WineD3D D3DDevice interface\n", This);
         d1 = dref;
         d2 = dref;
-        hr = Callback( (LPIID) &IID_IDirect3DRefDevice, reference_description, device_name, &d1, &d2, Context);
+        /* The rgb device has the pow2 flag set in the hel caps, but not in the hal caps */
+        d1.dpcLineCaps.dwTextureCaps &= ~(D3DPTEXTURECAPS_POW2 | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PERSPECTIVE);
+        d1.dpcTriCaps.dwTextureCaps &= ~(D3DPTEXTURECAPS_POW2 | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PERSPECTIVE);
+        hr = Callback( (LPIID) &IID_IDirect3DRGBDevice, reference_description, device_name, &d1, &d2, Context);
         if(hr != D3DENUMRET_OK)
         {
             TRACE("Application cancelled the enumeration\n");
+            LeaveCriticalSection(&ddraw_cs);
             return D3D_OK;
         }
     }
 
-    TRACE("(%p) Enumerating WineD3D D3DDevice interface\n", This);
+    TRACE("(%p) Enumerating HAL Direct3D device\n", This);
     d1 = dref;
     d2 = dref;
-    hr = Callback( (LPIID) &IID_D3DDEVICE_WineD3D, wined3d_description, device_name, &d1, &d2, Context);
+    /* The hal device does not have the pow2 flag set in hel, but in hal */
+    d2.dpcLineCaps.dwTextureCaps &= ~(D3DPTEXTURECAPS_POW2 | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PERSPECTIVE);
+    d2.dpcTriCaps.dwTextureCaps &= ~(D3DPTEXTURECAPS_POW2 | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PERSPECTIVE);
+    hr = Callback( (LPIID) &IID_IDirect3DHALDevice, wined3d_description, device_name, &d1, &d2, Context);
     if(hr != D3DENUMRET_OK)
     {
         TRACE("Application cancelled the enumeration\n");
+        LeaveCriticalSection(&ddraw_cs);
         return D3D_OK;
     }
     TRACE("(%p) End of enumeration\n", This);
 
+    LeaveCriticalSection(&ddraw_cs);
     return D3D_OK;
 }
 
@@ -737,10 +770,9 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
     IParentImpl *IndexBufferParent;
     HRESULT hr;
     IDirectDrawSurfaceImpl *target = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, Surface);
-    IDirectDrawSurface7 *depthbuffer = NULL;
-    static DDSCAPS2 depthcaps = { DDSCAPS_ZBUFFER, 0, 0, 0 };
     TRACE("(%p)->(%s,%p,%p)\n", iface, debugstr_guid(refiid), Surface, Device);
 
+    EnterCriticalSection(&ddraw_cs);
     *Device = NULL;
 
     /* Fail device creation if non-opengl surfaces are used */
@@ -751,6 +783,7 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
         /* We only hit this path if a default surface is set in the registry. Incorrect autodetection
          * is caught in CreateSurface or QueryInterface
          */
+        LeaveCriticalSection(&ddraw_cs);
         return DDERR_NO3D;
     }
 
@@ -758,6 +791,7 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
     if(This->d3ddevice)
     {
         FIXME("(%p): Only one Direct3D device per DirectDraw object supported\n", This);
+        LeaveCriticalSection(&ddraw_cs);
         return DDERR_INVALIDPARAMS;
     }
 
@@ -765,6 +799,7 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
     if(!object)
     {
         ERR("Out of memory when allocating a IDirect3DDevice implementation\n");
+        LeaveCriticalSection(&ddraw_cs);
         return DDERR_OUTOFMEMORY;
     }
 
@@ -792,6 +827,7 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
     {
         ERR("Allocating memory for an index buffer parent failed\n");
         HeapFree(GetProcessHeap(), 0, object);
+        LeaveCriticalSection(&ddraw_cs);
         return DDERR_OUTOFMEMORY;
     }
     ICOM_INIT_INTERFACE(IndexBufferParent, IParent, IParent_Vtbl);
@@ -804,7 +840,7 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
      */
     hr = IWineD3DDevice_CreateIndexBuffer(This->wineD3DDevice,
                                           0x40000, /* Length. Don't know how long it should be */
-                                          0, /* Usage */
+                                          WINED3DUSAGE_DYNAMIC, /* Usage */
                                           WINED3DFMT_INDEX16, /* Format. D3D7 uses WORDS */
                                           WINED3DPOOL_DEFAULT,
                                           &object->indexbuffer,
@@ -815,6 +851,7 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
     {
         ERR("Failed to create an index buffer\n");
         HeapFree(GetProcessHeap(), 0, object);
+        LeaveCriticalSection(&ddraw_cs);
         return hr;
     }
     IndexBufferParent->child = (IUnknown *) object->indexbuffer;
@@ -848,12 +885,26 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
     if(!(target->surface_desc.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) &&
        (This->d3d_target != target))
     {
+        WINED3DVIEWPORT vp;
         TRACE("(%p) Using %p as front buffer, %p as back buffer\n", This, This->d3d_target, target);
         hr = IWineD3DDevice_SetFrontBackBuffers(This->wineD3DDevice,
                                                 This->d3d_target->WineD3DSurface,
                                                 target->WineD3DSurface);
         if(hr != D3D_OK)
             ERR("(%p) Error %08x setting the front and back buffer\n", This, hr);
+
+        /* Render to the back buffer */
+        IWineD3DDevice_SetRenderTarget(This->wineD3DDevice, 0,
+                                       target->WineD3DSurface);
+
+        vp.X = 0;
+        vp.Y = 0;
+        vp.Width = target->surface_desc.dwWidth;
+        vp.Height = target->surface_desc.dwHeight;
+        vp.MinZ = 0.0;
+        vp.MaxZ = 1.0;
+        IWineD3DDevice_SetViewport(This->wineD3DDevice,
+                                   &vp);
 
         object->OffScreenTarget = TRUE;
     }
@@ -874,19 +925,10 @@ IDirect3DImpl_7_CreateDevice(IDirect3D7 *iface,
 
     This->d3ddevice = object;
 
-    /* Look for a depth buffer and enable the Z test if one is found */
-    hr = IDirectDrawSurface7_GetAttachedSurface(Surface,
-                                                &depthcaps,
-                                                &depthbuffer);
-    if(depthbuffer)
-    {
-        TRACE("(%p) Depth buffer found, enabling Z test\n", object);
-        IWineD3DDevice_SetRenderState(This->wineD3DDevice,
-                                      WINED3DRS_ZENABLE,
-                                      TRUE);
-        IDirectDrawSurface7_Release(depthbuffer);
-    }
-
+    IWineD3DDevice_SetRenderState(This->wineD3DDevice,
+                                  WINED3DRS_ZENABLE,
+                                  IDirect3DDeviceImpl_UpdateDepthStencil(object));
+    LeaveCriticalSection(&ddraw_cs);
     return D3D_OK;
 }
 
@@ -997,7 +1039,9 @@ IDirect3DImpl_7_CreateVertexBuffer(IDirect3D7 *iface,
     ICOM_INIT_INTERFACE(object, IDirect3DVertexBuffer, IDirect3DVertexBuffer1_Vtbl);
 
     object->Caps = Desc->dwCaps;
+    object->ddraw = This;
 
+    EnterCriticalSection(&ddraw_cs);
     hr = IWineD3DDevice_CreateVertexBuffer(This->wineD3DDevice,
                                            get_flexible_vertex_size(Desc->dwFVF) * Desc->dwNumVertices,
                                            Desc->dwCaps & D3DVBCAPS_WRITEONLY ? WINED3DUSAGE_WRITEONLY : 0,
@@ -1010,16 +1054,30 @@ IDirect3DImpl_7_CreateVertexBuffer(IDirect3D7 *iface,
     {
         ERR("(%p) IWineD3DDevice::CreateVertexBuffer failed with hr=%08x\n", This, hr);
         HeapFree(GetProcessHeap(), 0, object);
+        LeaveCriticalSection(&ddraw_cs);
         if (hr == WINED3DERR_INVALIDCALL)
             return DDERR_INVALIDPARAMS;
         else
             return hr;
     }
 
+    object->wineD3DVertexDeclaration = IDirectDrawImpl_FindDecl(This,
+                                                                Desc->dwFVF);
+    if(!object->wineD3DVertexDeclaration)
+    {
+        ERR("Cannot find the vertex declaration for fvf %08x\n", Desc->dwFVF);
+        IWineD3DVertexBuffer_Release(object->wineD3DVertexBuffer);
+        HeapFree(GetProcessHeap(), 0, object);
+        LeaveCriticalSection(&ddraw_cs);
+        return DDERR_INVALIDPARAMS;
+    }
+    IWineD3DVertexDeclaration_AddRef(object->wineD3DVertexDeclaration);
+
     /* Return the interface */
     *VertexBuffer = ICOM_INTERFACE(object, IDirect3DVertexBuffer7);
 
     TRACE("(%p) Created new vertex buffer implementation at %p, returning interface at %p\n", This, object, *VertexBuffer);
+    LeaveCriticalSection(&ddraw_cs);
     return D3D_OK;
 }
 
@@ -1090,6 +1148,7 @@ IDirect3DImpl_7_EnumZBufferFormats(IDirect3D7 *iface,
     if(!Callback)
         return DDERR_INVALIDPARAMS;
 
+    EnterCriticalSection(&ddraw_cs);
     for(i = 0; i < sizeof(FormatList) / sizeof(WINED3DFORMAT); i++)
     {
         hr = IWineD3D_CheckDeviceFormat(This->wineD3D,
@@ -1112,11 +1171,13 @@ IDirect3DImpl_7_EnumZBufferFormats(IDirect3D7 *iface,
             if(hr != DDENUMRET_OK)
             {
                 TRACE("Format enumeration cancelled by application\n");
+                LeaveCriticalSection(&ddraw_cs);
                 return D3D_OK;
             }
         }
     }
     TRACE("End of enumeration\n");
+    LeaveCriticalSection(&ddraw_cs);
     return D3D_OK;
 }
 
@@ -1289,9 +1350,122 @@ IDirect3DImpl_GetCaps(IWineD3D *WineD3D,
     WCaps.Reserved3 = NULL;
 
     /* Now get the caps */
+    EnterCriticalSection(&ddraw_cs);
     hr = IWineD3D_GetDeviceCaps(WineD3D, 0, WINED3DDEVTYPE_HAL, &WCaps);
-    if(hr != D3D_OK) return hr;
+    LeaveCriticalSection(&ddraw_cs);
+    if(hr != D3D_OK)
+    {
+        return hr;
+    }
 
+    /* Remove all non-d3d7 caps */
+    Desc7->dwDevCaps &= (
+        D3DDEVCAPS_FLOATTLVERTEX         | D3DDEVCAPS_SORTINCREASINGZ          | D3DDEVCAPS_SORTDECREASINGZ          |
+        D3DDEVCAPS_SORTEXACT             | D3DDEVCAPS_EXECUTESYSTEMMEMORY      | D3DDEVCAPS_EXECUTEVIDEOMEMORY       |
+        D3DDEVCAPS_TLVERTEXSYSTEMMEMORY  | D3DDEVCAPS_TLVERTEXVIDEOMEMORY      | D3DDEVCAPS_TEXTURESYSTEMMEMORY      |
+        D3DDEVCAPS_TEXTUREVIDEOMEMORY    | D3DDEVCAPS_DRAWPRIMTLVERTEX         | D3DDEVCAPS_CANRENDERAFTERFLIP       |
+        D3DDEVCAPS_TEXTURENONLOCALVIDMEM | D3DDEVCAPS_DRAWPRIMITIVES2          | D3DDEVCAPS_SEPARATETEXTUREMEMORIES  |
+        D3DDEVCAPS_DRAWPRIMITIVES2EX     | D3DDEVCAPS_HWTRANSFORMANDLIGHT      | D3DDEVCAPS_CANBLTSYSTONONLOCAL      |
+        D3DDEVCAPS_HWRASTERIZATION);
+
+    Desc7->dwStencilCaps &= (
+        D3DSTENCILCAPS_KEEP              | D3DSTENCILCAPS_ZERO                 | D3DSTENCILCAPS_REPLACE              |
+        D3DSTENCILCAPS_INCRSAT           | D3DSTENCILCAPS_DECRSAT              | D3DSTENCILCAPS_INVERT               |
+        D3DSTENCILCAPS_INCR              | D3DSTENCILCAPS_DECR                 | D3DSTENCILCAPS_TWOSIDED);
+
+    /* FVF caps ?*/
+
+    Desc7->dwTextureOpCaps &= (
+        D3DTEXOPCAPS_DISABLE             | D3DTEXOPCAPS_SELECTARG1             | D3DTEXOPCAPS_SELECTARG2             |
+        D3DTEXOPCAPS_MODULATE            | D3DTEXOPCAPS_MODULATE2X             | D3DTEXOPCAPS_MODULATE4X             |
+        D3DTEXOPCAPS_ADD                 | D3DTEXOPCAPS_ADDSIGNED              | D3DTEXOPCAPS_ADDSIGNED2X            |
+        D3DTEXOPCAPS_SUBTRACT            | D3DTEXOPCAPS_ADDSMOOTH              | D3DTEXOPCAPS_BLENDTEXTUREALPHA      |
+        D3DTEXOPCAPS_BLENDFACTORALPHA    | D3DTEXOPCAPS_BLENDTEXTUREALPHAPM    | D3DTEXOPCAPS_BLENDCURRENTALPHA      |
+        D3DTEXOPCAPS_PREMODULATE         | D3DTEXOPCAPS_MODULATEALPHA_ADDCOLOR | D3DTEXOPCAPS_MODULATECOLOR_ADDALPHA |
+        D3DTEXOPCAPS_MODULATEINVALPHA_ADDCOLOR | D3DTEXOPCAPS_MODULATEINVCOLOR_ADDALPHA | D3DTEXOPCAPS_BUMPENVMAP    |
+        D3DTEXOPCAPS_BUMPENVMAPLUMINANCE | D3DTEXOPCAPS_DOTPRODUCT3);
+
+    Desc7->dwVertexProcessingCaps &= (
+        D3DVTXPCAPS_TEXGEN               | D3DVTXPCAPS_MATERIALSOURCE7         | D3DVTXPCAPS_VERTEXFOG               |
+        D3DVTXPCAPS_DIRECTIONALLIGHTS    | D3DVTXPCAPS_POSITIONALLIGHTS        | D3DVTXPCAPS_LOCALVIEWER);
+
+    Desc7->dpcLineCaps.dwMiscCaps &= (
+        D3DPMISCCAPS_MASKPLANES          | D3DPMISCCAPS_MASKZ                  | D3DPMISCCAPS_LINEPATTERNREP         |
+        D3DPMISCCAPS_CONFORMANT          | D3DPMISCCAPS_CULLNONE               | D3DPMISCCAPS_CULLCW                 |
+        D3DPMISCCAPS_CULLCCW);
+
+    Desc7->dpcLineCaps.dwRasterCaps &= (
+        D3DPRASTERCAPS_DITHER            | D3DPRASTERCAPS_ROP2                 | D3DPRASTERCAPS_XOR                  |
+        D3DPRASTERCAPS_PAT               | D3DPRASTERCAPS_ZTEST                | D3DPRASTERCAPS_SUBPIXEL             |
+        D3DPRASTERCAPS_SUBPIXELX         | D3DPRASTERCAPS_FOGVERTEX            | D3DPRASTERCAPS_FOGTABLE             |
+        D3DPRASTERCAPS_STIPPLE           | D3DPRASTERCAPS_ANTIALIASSORTDEPENDENT | D3DPRASTERCAPS_ANTIALIASSORTINDEPENDENT |
+        D3DPRASTERCAPS_ANTIALIASEDGES    | D3DPRASTERCAPS_MIPMAPLODBIAS        | D3DPRASTERCAPS_ZBIAS                |
+        D3DPRASTERCAPS_ZBUFFERLESSHSR    | D3DPRASTERCAPS_FOGRANGE             | D3DPRASTERCAPS_ANISOTROPY           |
+        D3DPRASTERCAPS_WBUFFER           | D3DPRASTERCAPS_TRANSLUCENTSORTINDEPENDENT | D3DPRASTERCAPS_WFOG           |
+        D3DPRASTERCAPS_ZFOG);
+
+    Desc7->dpcLineCaps.dwZCmpCaps &= (
+        D3DPCMPCAPS_NEVER                | D3DPCMPCAPS_LESS                    | D3DPCMPCAPS_EQUAL                   |
+        D3DPCMPCAPS_LESSEQUAL            | D3DPCMPCAPS_GREATER                 | D3DPCMPCAPS_NOTEQUAL                |
+        D3DPCMPCAPS_GREATEREQUAL         | D3DPCMPCAPS_ALWAYS);
+
+    Desc7->dpcLineCaps.dwSrcBlendCaps &= (
+        D3DPBLENDCAPS_ZERO               | D3DPBLENDCAPS_ONE                   | D3DPBLENDCAPS_SRCCOLOR              |
+        D3DPBLENDCAPS_INVSRCCOLOR        | D3DPBLENDCAPS_SRCALPHA              | D3DPBLENDCAPS_INVSRCALPHA           |
+        D3DPBLENDCAPS_DESTALPHA          | D3DPBLENDCAPS_INVDESTALPHA          | D3DPBLENDCAPS_DESTCOLOR             |
+        D3DPBLENDCAPS_INVDESTCOLOR       | D3DPBLENDCAPS_SRCALPHASAT           | D3DPBLENDCAPS_BOTHSRCALPHA          |
+        D3DPBLENDCAPS_BOTHINVSRCALPHA);
+
+    Desc7->dpcLineCaps.dwDestBlendCaps &= (
+        D3DPBLENDCAPS_ZERO               | D3DPBLENDCAPS_ONE                   | D3DPBLENDCAPS_SRCCOLOR              |
+        D3DPBLENDCAPS_INVSRCCOLOR        | D3DPBLENDCAPS_SRCALPHA              | D3DPBLENDCAPS_INVSRCALPHA           |
+        D3DPBLENDCAPS_DESTALPHA          | D3DPBLENDCAPS_INVDESTALPHA          | D3DPBLENDCAPS_DESTCOLOR             |
+        D3DPBLENDCAPS_INVDESTCOLOR       | D3DPBLENDCAPS_SRCALPHASAT           | D3DPBLENDCAPS_BOTHSRCALPHA          |
+        D3DPBLENDCAPS_BOTHINVSRCALPHA);
+
+    Desc7->dpcLineCaps.dwAlphaCmpCaps &= (
+        D3DPCMPCAPS_NEVER                | D3DPCMPCAPS_LESS                    | D3DPCMPCAPS_EQUAL                   |
+        D3DPCMPCAPS_LESSEQUAL            | D3DPCMPCAPS_GREATER                 | D3DPCMPCAPS_NOTEQUAL                |
+        D3DPCMPCAPS_GREATEREQUAL         | D3DPCMPCAPS_ALWAYS);
+
+    Desc7->dpcLineCaps.dwShadeCaps &= (
+        D3DPSHADECAPS_COLORFLATMONO      | D3DPSHADECAPS_COLORFLATRGB          | D3DPSHADECAPS_COLORGOURAUDMONO      |
+        D3DPSHADECAPS_COLORGOURAUDRGB    | D3DPSHADECAPS_COLORPHONGMONO        | D3DPSHADECAPS_COLORPHONGRGB         |
+        D3DPSHADECAPS_SPECULARFLATMONO   | D3DPSHADECAPS_SPECULARFLATRGB       | D3DPSHADECAPS_SPECULARGOURAUDMONO   |
+        D3DPSHADECAPS_SPECULARGOURAUDRGB | D3DPSHADECAPS_SPECULARPHONGMONO     | D3DPSHADECAPS_SPECULARPHONGRGB      |
+        D3DPSHADECAPS_ALPHAFLATBLEND     | D3DPSHADECAPS_ALPHAFLATSTIPPLED     | D3DPSHADECAPS_ALPHAGOURAUDBLEND     |
+        D3DPSHADECAPS_ALPHAGOURAUDSTIPPLED | D3DPSHADECAPS_ALPHAPHONGBLEND     | D3DPSHADECAPS_ALPHAPHONGSTIPPLED    |
+        D3DPSHADECAPS_FOGFLAT            | D3DPSHADECAPS_FOGGOURAUD            | D3DPSHADECAPS_FOGPHONG);
+
+    Desc7->dpcLineCaps.dwTextureCaps &= (
+        D3DPTEXTURECAPS_PERSPECTIVE      | D3DPTEXTURECAPS_POW2                | D3DPTEXTURECAPS_ALPHA               |
+        D3DPTEXTURECAPS_TRANSPARENCY     | D3DPTEXTURECAPS_BORDER              | D3DPTEXTURECAPS_SQUAREONLY          |
+        D3DPTEXTURECAPS_TEXREPEATNOTSCALEDBYSIZE | D3DPTEXTURECAPS_ALPHAPALETTE| D3DPTEXTURECAPS_NONPOW2CONDITIONAL  |
+        D3DPTEXTURECAPS_PROJECTED        | D3DPTEXTURECAPS_CUBEMAP             | D3DPTEXTURECAPS_COLORKEYBLEND);
+
+    Desc7->dpcLineCaps.dwTextureFilterCaps &= (
+        D3DPTFILTERCAPS_NEAREST          | D3DPTFILTERCAPS_LINEAR              | D3DPTFILTERCAPS_MIPNEAREST          |
+        D3DPTFILTERCAPS_MIPLINEAR        | D3DPTFILTERCAPS_LINEARMIPNEAREST    | D3DPTFILTERCAPS_LINEARMIPLINEAR     |
+        D3DPTFILTERCAPS_MINFPOINT        | D3DPTFILTERCAPS_MINFLINEAR          | D3DPTFILTERCAPS_MINFANISOTROPIC     |
+        D3DPTFILTERCAPS_MIPFPOINT        | D3DPTFILTERCAPS_MIPFLINEAR          | D3DPTFILTERCAPS_MAGFPOINT           |
+        D3DPTFILTERCAPS_MAGFLINEAR       | D3DPTFILTERCAPS_MAGFANISOTROPIC     | D3DPTFILTERCAPS_MAGFAFLATCUBIC      |
+        D3DPTFILTERCAPS_MAGFGAUSSIANCUBIC);
+
+    Desc7->dpcLineCaps.dwTextureBlendCaps &= (
+        D3DPTBLENDCAPS_DECAL             | D3DPTBLENDCAPS_MODULATE             | D3DPTBLENDCAPS_DECALALPHA           |
+        D3DPTBLENDCAPS_MODULATEALPHA     | D3DPTBLENDCAPS_DECALMASK            | D3DPTBLENDCAPS_MODULATEMASK         |
+        D3DPTBLENDCAPS_COPY              | D3DPTBLENDCAPS_ADD);
+
+    Desc7->dpcLineCaps.dwTextureAddressCaps &= (
+        D3DPTADDRESSCAPS_WRAP            | D3DPTADDRESSCAPS_MIRROR             | D3DPTADDRESSCAPS_CLAMP              |
+        D3DPTADDRESSCAPS_BORDER          | D3DPTADDRESSCAPS_INDEPENDENTUV);
+
+    if(!(Desc7->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2)) {
+        /* DirectX7 always has the np2 flag set, no matter what the card supports. Some old games(rollcage)
+         * check the caps incorrectly. If wined3d supports nonpow2 textures it also has np2 conditional support
+         */
+        Desc7->dpcLineCaps.dwTextureCaps |= D3DPTEXTURECAPS_POW2 | D3DPTEXTURECAPS_NONPOW2CONDITIONAL;
+    }
     /* Fill the missing members, and do some fixup */
     Desc7->dpcLineCaps.dwSize = sizeof(Desc7->dpcLineCaps);
     Desc7->dpcLineCaps.dwTextureBlendCaps = D3DPTBLENDCAPS_ADD | D3DPTBLENDCAPS_MODULATEMASK |

@@ -23,7 +23,6 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "mmsystem.h"
 #include "vfw.h"
@@ -730,7 +729,7 @@ static HRESULT AVIFILE_OpenCompressor(IAVIStreamImpl *This)
   This->sInfo.dwQuality    = (DWORD)ICQUALITY_DEFAULT;
   SetRectEmpty(&This->sInfo.rcFrame);
 
-  /* convert positions ansd sizes to output format */
+  /* convert positions and sizes to output format */
   CONVERT_STREAM_to_THIS(&This->sInfo.dwStart);
   CONVERT_STREAM_to_THIS(&This->sInfo.dwLength);
   CONVERT_STREAM_to_THIS(&This->sInfo.dwSuggestedBufferSize);

@@ -19,20 +19,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
 #include <stdio.h>
 
-#define COBJMACROS
-
-#include "windef.h"
-#include "winbase.h"
-#include "winuser.h"
-#include "winreg.h"
-#include "wine/debug.h"
-#include "ole2.h"
-#include "wine/unicode.h"
-#include "urlmon.h"
 #include "urlmon_main.h"
+#include "winreg.h"
+
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(urlmon);
 
@@ -67,6 +59,8 @@ static HRESULT map_url_to_zone(LPCWSTR url, DWORD *zone)
                     'Z','o','n','e','M','a','p','\\',
                     'P','r','o','t','o','c','o','l','D','e','f','a','u','l','t','s',0};
     static const WCHAR wszFile[] = {'f','i','l','e',0};
+
+    *zone = -1;
 
     hres = CoInternetParseUrl(url, PARSE_SCHEMA, 0, schema, sizeof(schema)/sizeof(WCHAR), &size, 0);
     if(FAILED(hres))
@@ -171,7 +165,7 @@ static ULONG WINAPI SecManagerImpl_Release(IInternetSecurityManager* iface)
         if(This->custom_manager)
             IInternetSecurityManager_Release(This->custom_manager);
 
-        HeapFree(GetProcessHeap(),0,This);
+        heap_free(This);
 
         URLMON_UnlockModule();
     }
@@ -249,14 +243,16 @@ static HRESULT WINAPI SecManagerImpl_MapUrlToZone(IInternetSecurityManager *ifac
             return hres;
     }
 
-    if(!pwszUrl)
+    if(!pwszUrl) {
+        *pdwZone = -1;
         return E_INVALIDARG;
+    }
 
     if(dwFlags)
         FIXME("not supported flags: %08x\n", dwFlags);
 
     size = (strlenW(pwszUrl)+16) * sizeof(WCHAR);
-    url = HeapAlloc(GetProcessHeap(), 0, size);
+    url = heap_alloc(size);
 
     hres = CoInternetParseUrl(pwszUrl, PARSE_SECURITY_URL, 0, url, size/sizeof(WCHAR), &size, 0);
     if(FAILED(hres))
@@ -264,7 +260,7 @@ static HRESULT WINAPI SecManagerImpl_MapUrlToZone(IInternetSecurityManager *ifac
 
     hres = map_url_to_zone(url, pdwZone);
 
-    HeapFree(GetProcessHeap(), 0, url);
+    heap_free(url);
 
     return hres;
 }
@@ -296,7 +292,7 @@ static HRESULT WINAPI SecManagerImpl_GetSecurityId(IInternetSecurityManager *ifa
         FIXME("dwReserved is not supported\n");
 
     len = strlenW(pwszUrl)+1;
-    buf = HeapAlloc(GetProcessHeap(), 0, (len+16)*sizeof(WCHAR));
+    buf = heap_alloc((len+16)*sizeof(WCHAR));
 
     hres = CoInternetParseUrl(pwszUrl, PARSE_SECURITY_URL, 0, buf, len, &size, 0);
     if(FAILED(hres))
@@ -304,7 +300,7 @@ static HRESULT WINAPI SecManagerImpl_GetSecurityId(IInternetSecurityManager *ifa
 
     hres = map_url_to_zone(buf, &zone);
     if(FAILED(hres)) {
-        HeapFree(GetProcessHeap(), 0, buf);
+        heap_free(buf);
         return hres == 0x80041001 ? E_INVALIDARG : hres;
     }
 
@@ -313,6 +309,8 @@ static HRESULT WINAPI SecManagerImpl_GetSecurityId(IInternetSecurityManager *ifa
             && !memcmp(buf, wszFile, sizeof(wszFile))) {
 
         static const BYTE secidFile[] = {'f','i','l','e',':'};
+
+        heap_free(buf);
 
         if(*pcbSecurityId < sizeof(secidFile)+sizeof(zone))
             return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
@@ -337,11 +335,13 @@ static HRESULT WINAPI SecManagerImpl_GetSecurityId(IInternetSecurityManager *ifa
 
     len = WideCharToMultiByte(CP_ACP, 0, buf, -1, NULL, 0, NULL, NULL)-1;
 
-    if(len+sizeof(DWORD) > *pcbSecurityId)
+    if(len+sizeof(DWORD) > *pcbSecurityId) {
+        heap_free(buf);
         return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+    }
 
     WideCharToMultiByte(CP_ACP, 0, buf, -1, (LPSTR)pbSecurityId, -1, NULL, NULL);
-    HeapFree(GetProcessHeap(), 0, buf);
+    heap_free(buf);
 
     *(DWORD*)(pbSecurityId+len) = zone;
 
@@ -456,7 +456,7 @@ HRESULT SecManagerImpl_Construct(IUnknown *pUnkOuter, LPVOID *ppobj)
     SecManagerImpl *This;
 
     TRACE("(%p,%p)\n",pUnkOuter,ppobj);
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = heap_alloc(sizeof(*This));
 
     /* Initialize the virtual function table. */
     This->lpInternetSecurityManagerVtbl = &VT_SecManagerImpl;
@@ -569,7 +569,7 @@ static ULONG WINAPI ZoneMgrImpl_Release(IInternetZoneManager* iface)
     TRACE("(%p)->(ref before=%u)\n",This, refCount + 1);
 
     if(!refCount) {
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
         URLMON_UnlockModule();
     }
     
@@ -782,7 +782,7 @@ static const IInternetZoneManagerVtbl ZoneMgrImplVtbl = {
 
 HRESULT ZoneMgrImpl_Construct(IUnknown *pUnkOuter, LPVOID *ppobj)
 {
-    ZoneMgrImpl* ret = HeapAlloc(GetProcessHeap(), 0, sizeof(ZoneMgrImpl));
+    ZoneMgrImpl* ret = heap_alloc(sizeof(ZoneMgrImpl));
 
     TRACE("(%p %p)\n", pUnkOuter, ppobj);
     ret->lpVtbl = &ZoneMgrImplVtbl;

@@ -2,6 +2,7 @@
  * Help Viewer Implementation
  *
  * Copyright 2005 James Hawkins
+ * Copyright 2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,23 +19,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
+#include "hhctrl.h"
 
-#include "windef.h"
-#include "winbase.h"
 #include "wingdi.h"
-#include "winuser.h"
-#include "winnls.h"
 #include "commctrl.h"
-#include "htmlhelp.h"
-#include "ole2.h"
-#include "wine/unicode.h"
+#include "wininet.h"
+
+#include "wine/debug.h"
 
 #include "resource.h"
-#include "chm.h"
-#include "webbrowser.h"
 
-static void Help_OnSize(HWND hWnd);
+WINE_DEFAULT_DEBUG_CHANNEL(htmlhelp);
+
+static LRESULT Help_OnSize(HWND hWnd);
 
 /* Window type defaults */
 
@@ -44,33 +41,11 @@ static void Help_OnSize(HWND hWnd);
 #define WINTYPE_DEFAULT_HEIGHT      640
 #define WINTYPE_DEFAULT_NAVWIDTH    250
 
+#define TAB_TOP_PADDING     8
+#define TAB_RIGHT_PADDING   4
+#define TAB_MARGIN  8
+
 static const WCHAR szEmpty[] = {0};
-
-typedef struct tagHHInfo
-{
-    HH_WINTYPEW *pHHWinType;
-    CHMInfo *pCHMInfo;
-    WBInfo *pWBInfo;
-    HINSTANCE hInstance;
-    LPWSTR szCmdLine;
-    HWND hwndTabCtrl;
-    HWND hwndSizeBar;
-    HFONT hFont;
-} HHInfo;
-
-extern HINSTANCE hhctrl_hinstance;
-
-static LPWSTR HH_ANSIToUnicode(LPCSTR ansi)
-{
-    LPWSTR unicode;
-    int count;
-
-    count = MultiByteToWideChar(CP_ACP, 0, ansi, -1, NULL, 0);
-    unicode = HeapAlloc(GetProcessHeap(), 0, count * sizeof(WCHAR));
-    MultiByteToWideChar(CP_ACP, 0, ansi, -1, unicode, count);
-
-    return unicode;
-}
 
 /* Loads a string from the resource file */
 static LPWSTR HH_LoadString(DWORD dwID)
@@ -81,10 +56,77 @@ static LPWSTR HH_LoadString(DWORD dwID)
     iSize = LoadStringW(hhctrl_hinstance, dwID, NULL, 0);
     iSize += 2; /* some strings (tab text) needs double-null termination */
 
-    string = HeapAlloc(GetProcessHeap(), 0, iSize * sizeof(WCHAR));
+    string = heap_alloc(iSize * sizeof(WCHAR));
     LoadStringW(hhctrl_hinstance, dwID, string, iSize);
 
     return string;
+}
+
+static HRESULT navigate_url(HHInfo *info, LPCWSTR surl)
+{
+    VARIANT url;
+    HRESULT hres;
+
+    TRACE("%s\n", debugstr_w(surl));
+
+    V_VT(&url) = VT_BSTR;
+    V_BSTR(&url) = SysAllocString(surl);
+
+    hres = IWebBrowser2_Navigate2(info->web_browser, &url, 0, 0, 0, 0);
+
+    VariantClear(&url);
+
+    if(FAILED(hres))
+        TRACE("Navigation failed: %08x\n", hres);
+
+    return hres;
+}
+
+BOOL NavigateToUrl(HHInfo *info, LPCWSTR surl)
+{
+    ChmPath chm_path;
+    BOOL ret;
+    HRESULT hres;
+
+    hres = navigate_url(info, surl);
+    if(SUCCEEDED(hres))
+        return TRUE;
+
+    SetChmPath(&chm_path, info->pCHMInfo->szFile, surl);
+    ret = NavigateToChm(info, chm_path.chm_file, chm_path.chm_index);
+
+    heap_free(chm_path.chm_file);
+    heap_free(chm_path.chm_index);
+
+    return ret;
+}
+
+BOOL NavigateToChm(HHInfo *info, LPCWSTR file, LPCWSTR index)
+{
+    WCHAR buf[INTERNET_MAX_URL_LENGTH];
+    WCHAR full_path[MAX_PATH];
+    LPWSTR ptr;
+
+    static const WCHAR url_format[] =
+        {'m','k',':','@','M','S','I','T','S','t','o','r','e',':','%','s',':',':','%','s',0};
+
+    TRACE("%p %s %s\n", info, debugstr_w(file), debugstr_w(index));
+
+    if (!info->web_browser)
+        return FALSE;
+
+    if(!GetFullPathNameW(file, sizeof(full_path), full_path, NULL)) {
+        WARN("GetFullPathName failed: %u\n", GetLastError());
+        return FALSE;
+    }
+
+    wsprintfW(buf, url_format, full_path, index);
+
+    /* FIXME: HACK */
+    if((ptr = strchrW(buf, '#')))
+       *ptr = 0;
+
+    return SUCCEEDED(navigate_url(info, buf));
 }
 
 /* Size Bar */
@@ -138,7 +180,7 @@ static void SB_OnLButtonUp(HWND hWnd, WPARAM wParam, LPARAM lParam)
     pt.y = (short)HIWORD(lParam);
 
     /* update the window sizes */
-    pHHInfo->pHHWinType->iNavWidth += pt.x;
+    pHHInfo->WinType.iNavWidth += pt.x;
     Help_OnSize(hWnd);
 
     ReleaseCapture();
@@ -180,10 +222,10 @@ static void HH_RegisterSizeBarClass(HHInfo *pHHInfo)
 
     wcex.cbSize         = sizeof(WNDCLASSEXW);
     wcex.style          = 0;
-    wcex.lpfnWndProc    = (WNDPROC)SizeBar_WndProc;
+    wcex.lpfnWndProc    = SizeBar_WndProc;
     wcex.cbClsExtra     = 0;
     wcex.cbWndExtra     = 0;
-    wcex.hInstance      = pHHInfo->hInstance;
+    wcex.hInstance      = hhctrl_hinstance;
     wcex.hIcon          = LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
     wcex.hCursor        = LoadCursorW(NULL, (LPCWSTR)IDC_SIZEWE);
     wcex.hbrBackground  = (HBRUSH)(COLOR_MENU + 1);
@@ -194,13 +236,13 @@ static void HH_RegisterSizeBarClass(HHInfo *pHHInfo)
     RegisterClassExW(&wcex);
 }
 
-static void SB_GetSizeBarRect(HHInfo *pHHInfo, RECT *rc)
+static void SB_GetSizeBarRect(HHInfo *info, RECT *rc)
 {
     RECT rectWND, rectTB, rectNP;
 
-    GetClientRect(pHHInfo->pHHWinType->hwndHelp, &rectWND);
-    GetClientRect(pHHInfo->pHHWinType->hwndToolBar, &rectTB);
-    GetClientRect(pHHInfo->pHHWinType->hwndNavigation, &rectNP);
+    GetClientRect(info->WinType.hwndHelp, &rectWND);
+    GetClientRect(info->WinType.hwndToolBar, &rectTB);
+    GetClientRect(info->WinType.hwndNavigation, &rectNP);
 
     rc->left = rectNP.right;
     rc->top = rectTB.bottom;
@@ -211,7 +253,7 @@ static void SB_GetSizeBarRect(HHInfo *pHHInfo, RECT *rc)
 static BOOL HH_AddSizeBar(HHInfo *pHHInfo)
 {
     HWND hWnd;
-    HWND hwndParent = pHHInfo->pHHWinType->hwndHelp;
+    HWND hwndParent = pHHInfo->WinType.hwndHelp;
     DWORD dwStyles = WS_CHILDWINDOW | WS_VISIBLE | WS_OVERLAPPED;
     DWORD dwExStyles = WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR;
     RECT rc;
@@ -220,7 +262,7 @@ static BOOL HH_AddSizeBar(HHInfo *pHHInfo)
 
     hWnd = CreateWindowExW(dwExStyles, szSizeBarClass, szEmpty, dwStyles,
                            rc.left, rc.top, rc.right, rc.bottom,
-                           hwndParent, NULL, pHHInfo->hInstance, NULL);
+                           hwndParent, NULL, hhctrl_hinstance, NULL);
     if (!hWnd)
         return FALSE;
 
@@ -237,7 +279,7 @@ static const WCHAR szChildClass[] = {
     'H','H',' ','C','h','i','l','d',0
 };
 
-static void Child_OnPaint(HWND hWnd)
+static LRESULT Child_OnPaint(HWND hWnd)
 {
     PAINTSTRUCT ps;
     HDC hdc;
@@ -265,17 +307,108 @@ static void Child_OnPaint(HWND hWnd)
     }
 
     EndPaint(hWnd, &ps);
+
+    return 0;
+}
+
+static void ResizeTabChild(HHInfo *info, HWND hwnd)
+{
+    RECT rect, tabrc;
+    DWORD cnt;
+
+    GetClientRect(info->WinType.hwndNavigation, &rect);
+    SendMessageW(info->hwndTabCtrl, TCM_GETITEMRECT, 0, (LPARAM)&tabrc);
+    cnt = SendMessageW(info->hwndTabCtrl, TCM_GETROWCOUNT, 0, 0);
+
+    rect.left = TAB_MARGIN;
+    rect.top = TAB_TOP_PADDING + cnt*(tabrc.bottom-tabrc.top) + TAB_MARGIN;
+    rect.right -= TAB_RIGHT_PADDING + TAB_MARGIN;
+    rect.bottom -= TAB_MARGIN;
+
+    SetWindowPos(hwnd, NULL, rect.left, rect.top, rect.right-rect.left,
+                 rect.bottom-rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+static LRESULT Child_OnSize(HWND hwnd)
+{
+    HHInfo *info = (HHInfo*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    RECT rect;
+
+    if(!info || hwnd != info->WinType.hwndNavigation)
+        return 0;
+
+    GetClientRect(hwnd, &rect);
+    SetWindowPos(info->hwndTabCtrl, HWND_TOP, 0, 0,
+                 rect.right - TAB_RIGHT_PADDING,
+                 rect.bottom - TAB_TOP_PADDING, SWP_NOMOVE);
+
+    ResizeTabChild(info, info->tabs[TAB_CONTENTS].hwnd);
+    return 0;
+}
+
+static LRESULT OnTabChange(HWND hwnd)
+{
+    HHInfo *info = (HHInfo*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+
+    TRACE("%p\n", hwnd);
+
+    if (!info)
+        return 0;
+
+    if(info->tabs[info->current_tab].hwnd)
+        ShowWindow(info->tabs[info->current_tab].hwnd, SW_HIDE);
+
+    info->current_tab = SendMessageW(info->hwndTabCtrl, TCM_GETCURSEL, 0, 0);
+
+    if(info->tabs[info->current_tab].hwnd)
+        ShowWindow(info->tabs[info->current_tab].hwnd, SW_SHOW);
+
+    return 0;
+}
+
+static LRESULT OnTopicChange(HWND hwnd, ContentItem *item)
+{
+    HHInfo *info = (HHInfo*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    LPCWSTR chmfile = NULL;
+    ContentItem *iter = item;
+
+    if(!item || !info)
+        return 0;
+
+    TRACE("name %s loal %s\n", debugstr_w(item->name), debugstr_w(item->local));
+
+    while(iter) {
+        if(iter->merge.chm_file) {
+            chmfile = iter->merge.chm_file;
+            break;
+        }
+        iter = iter->parent;
+    }
+
+    NavigateToChm(info, chmfile, item->local);
+    return 0;
 }
 
 static LRESULT CALLBACK Child_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
-        case WM_PAINT:
-            Child_OnPaint(hWnd);
-            break;
-        default:
-            return DefWindowProcW(hWnd, message, wParam, lParam);
+    case WM_PAINT:
+        return Child_OnPaint(hWnd);
+    case WM_SIZE:
+        return Child_OnSize(hWnd);
+    case WM_NOTIFY: {
+        NMHDR *nmhdr = (NMHDR*)lParam;
+        switch(nmhdr->code) {
+        case TCN_SELCHANGE:
+            return OnTabChange(hWnd);
+        case TVN_SELCHANGEDW:
+            return OnTopicChange(hWnd, (ContentItem*)((NMTREEVIEWW *)lParam)->itemNew.lParam);
+        }
+        break;
+    }
+    default:
+        return DefWindowProcW(hWnd, message, wParam, lParam);
     }
 
     return 0;
@@ -287,10 +420,10 @@ static void HH_RegisterChildWndClass(HHInfo *pHHInfo)
 
     wcex.cbSize         = sizeof(WNDCLASSEXW);
     wcex.style          = 0;
-    wcex.lpfnWndProc    = (WNDPROC)Child_WndProc;
+    wcex.lpfnWndProc    = Child_WndProc;
     wcex.cbClsExtra     = 0;
     wcex.cbWndExtra     = 0;
-    wcex.hInstance      = pHHInfo->hInstance;
+    wcex.hInstance      = hhctrl_hinstance;
     wcex.hIcon          = LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
     wcex.hCursor        = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
     wcex.hbrBackground  = (HBRUSH)(COLOR_BTNFACE + 1);
@@ -307,29 +440,24 @@ static void HH_RegisterChildWndClass(HHInfo *pHHInfo)
 
 static void TB_OnClick(HWND hWnd, DWORD dwID)
 {
-    HHInfo *pHHInfo = (HHInfo *)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+    HHInfo *info = (HHInfo *)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
 
     switch (dwID)
     {
         case IDTB_STOP:
-            WB_DoPageAction(pHHInfo->pWBInfo, WB_STOP);
+            DoPageAction(info, WB_STOP);
             break;
         case IDTB_REFRESH:
-            WB_DoPageAction(pHHInfo->pWBInfo, WB_REFRESH);
+            DoPageAction(info, WB_REFRESH);
             break;
         case IDTB_BACK:
-            WB_DoPageAction(pHHInfo->pWBInfo, WB_GOBACK);
+            DoPageAction(info, WB_GOBACK);
             break;
         case IDTB_HOME:
-        {
-            WCHAR szUrl[MAX_PATH];
-
-            CHM_CreateITSUrl(pHHInfo->pCHMInfo, pHHInfo->pHHWinType->pszHome, szUrl);
-            WB_Navigate(pHHInfo->pWBInfo, szUrl);
+            NavigateToChm(info, info->pCHMInfo->szFile, info->WinType.pszHome);
             break;
-        }
         case IDTB_FORWARD:
-            WB_DoPageAction(pHHInfo->pWBInfo, WB_GOFORWARD);
+            DoPageAction(info, WB_GOFORWARD);
             break;
         case IDTB_EXPAND:
         case IDTB_CONTRACT:
@@ -409,15 +537,15 @@ static void TB_AddButtonsFromFlags(TBBUTTON *pButtons, DWORD dwButtonFlags, LPDW
 static BOOL HH_AddToolbar(HHInfo *pHHInfo)
 {
     HWND hToolbar;
-    HWND hwndParent = pHHInfo->pHHWinType->hwndHelp;
+    HWND hwndParent = pHHInfo->WinType.hwndHelp;
     DWORD toolbarFlags;
     TBBUTTON buttons[IDTB_TOC_PREV - IDTB_EXPAND];
     TBADDBITMAP tbAB;
     DWORD dwStyles, dwExStyles;
     DWORD dwNumButtons, dwIndex;
 
-    if (pHHInfo->pHHWinType->fsWinProperties & HHWIN_PARAM_TB_FLAGS)
-        toolbarFlags = pHHInfo->pHHWinType->fsToolBarFlags;
+    if (pHHInfo->WinType.fsWinProperties & HHWIN_PARAM_TB_FLAGS)
+        toolbarFlags = pHHInfo->WinType.fsToolBarFlags;
     else
         toolbarFlags = HHWIN_DEF_BUTTONS;
 
@@ -429,7 +557,7 @@ static BOOL HH_AddToolbar(HHInfo *pHHInfo)
 
     hToolbar = CreateWindowExW(dwExStyles, TOOLBARCLASSNAMEW, NULL, dwStyles,
                                0, 0, 0, 0, hwndParent, NULL,
-                               pHHInfo->hInstance, NULL);
+                               hhctrl_hinstance, NULL);
     if (!hToolbar)
         return FALSE;
 
@@ -449,26 +577,23 @@ static BOOL HH_AddToolbar(HHInfo *pHHInfo)
         szBuf[dwLen + 2] = 0; /* Double-null terminate */
 
         buttons[dwIndex].iString = (DWORD)SendMessageW(hToolbar, TB_ADDSTRINGW, 0, (LPARAM)szBuf);
-        HeapFree(GetProcessHeap(), 0, szBuf);
+        heap_free(szBuf);
     }
 
     SendMessageW(hToolbar, TB_ADDBUTTONSW, dwNumButtons, (LPARAM)&buttons);
     SendMessageW(hToolbar, TB_AUTOSIZE, 0, 0);
     ShowWindow(hToolbar, SW_SHOW);
 
-    pHHInfo->pHHWinType->hwndToolBar = hToolbar;
+    pHHInfo->WinType.hwndToolBar = hToolbar;
     return TRUE;
 }
 
 /* Navigation Pane */
 
-#define TAB_TOP_PADDING     8
-#define TAB_RIGHT_PADDING   4
-
 static void NP_GetNavigationRect(HHInfo *pHHInfo, RECT *rc)
 {
-    HWND hwndParent = pHHInfo->pHHWinType->hwndHelp;
-    HWND hwndToolbar = pHHInfo->pHHWinType->hwndToolBar;
+    HWND hwndParent = pHHInfo->WinType.hwndHelp;
+    HWND hwndToolbar = pHHInfo->WinType.hwndToolBar;
     RECT rectWND, rectTB;
 
     GetClientRect(hwndParent, &rectWND);
@@ -478,81 +603,85 @@ static void NP_GetNavigationRect(HHInfo *pHHInfo, RECT *rc)
     rc->top = rectTB.bottom;
     rc->bottom = rectWND.bottom - rectTB.bottom;
 
-    if (!(pHHInfo->pHHWinType->fsValidMembers & HHWIN_PARAM_NAV_WIDTH) &&
-          pHHInfo->pHHWinType->iNavWidth == 0)
+    if (!(pHHInfo->WinType.fsValidMembers & HHWIN_PARAM_NAV_WIDTH) &&
+          pHHInfo->WinType.iNavWidth == 0)
     {
-        pHHInfo->pHHWinType->iNavWidth = WINTYPE_DEFAULT_NAVWIDTH;
+        pHHInfo->WinType.iNavWidth = WINTYPE_DEFAULT_NAVWIDTH;
     }
 
-    rc->right = pHHInfo->pHHWinType->iNavWidth;
+    rc->right = pHHInfo->WinType.iNavWidth;
 }
 
-static void NP_CreateTab(HINSTANCE hInstance, HWND hwndTabCtrl, DWORD dwStrID, DWORD dwIndex)
+static DWORD NP_CreateTab(HINSTANCE hInstance, HWND hwndTabCtrl, DWORD index)
 {
     TCITEMW tie;
-    LPWSTR tabText = HH_LoadString(dwStrID);
+    LPWSTR tabText = HH_LoadString(index);
+    DWORD ret;
 
     tie.mask = TCIF_TEXT;
     tie.pszText = tabText;
 
-    SendMessageW( hwndTabCtrl, TCM_INSERTITEMW, dwIndex, (LPARAM)&tie );
-    HeapFree(GetProcessHeap(), 0, tabText);
+    ret = SendMessageW( hwndTabCtrl, TCM_INSERTITEMW, index, (LPARAM)&tie );
+
+    heap_free(tabText);
+    return ret;
 }
 
-static BOOL HH_AddNavigationPane(HHInfo *pHHInfo)
+static BOOL HH_AddNavigationPane(HHInfo *info)
 {
     HWND hWnd, hwndTabCtrl;
-    HWND hwndParent = pHHInfo->pHHWinType->hwndHelp;
+    HWND hwndParent = info->WinType.hwndHelp;
     DWORD dwStyles = WS_CHILDWINDOW | WS_VISIBLE;
     DWORD dwExStyles = WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR;
-    DWORD dwIndex = 0;
     RECT rc;
 
-    NP_GetNavigationRect(pHHInfo, &rc);
+    NP_GetNavigationRect(info, &rc);
 
     hWnd = CreateWindowExW(dwExStyles, szChildClass, szEmpty, dwStyles,
                            rc.left, rc.top, rc.right, rc.bottom,
-                           hwndParent, NULL, pHHInfo->hInstance, NULL);
+                           hwndParent, NULL, hhctrl_hinstance, NULL);
     if (!hWnd)
         return FALSE;
+
+    SetWindowLongPtrW(hWnd, GWLP_USERDATA, (LONG_PTR)info);
 
     hwndTabCtrl = CreateWindowExW(dwExStyles, WC_TABCONTROLW, szEmpty, dwStyles,
                                   0, TAB_TOP_PADDING,
                                   rc.right - TAB_RIGHT_PADDING,
                                   rc.bottom - TAB_TOP_PADDING,
-                                  hWnd, NULL, pHHInfo->hInstance, NULL);
+                                  hWnd, NULL, hhctrl_hinstance, NULL);
     if (!hwndTabCtrl)
         return FALSE;
 
-    if (*pHHInfo->pHHWinType->pszToc)
-        NP_CreateTab(pHHInfo->hInstance, hwndTabCtrl, IDS_CONTENTS, dwIndex++);
+    if (*info->WinType.pszToc)
+        info->tabs[TAB_CONTENTS].id = NP_CreateTab(hhctrl_hinstance, hwndTabCtrl, IDS_CONTENTS);
 
-    if (*pHHInfo->pHHWinType->pszIndex)
-        NP_CreateTab(pHHInfo->hInstance, hwndTabCtrl, IDS_INDEX, dwIndex++);
+    if (*info->WinType.pszIndex)
+        info->tabs[TAB_INDEX].id = NP_CreateTab(hhctrl_hinstance, hwndTabCtrl, IDS_INDEX);
 
-    if (pHHInfo->pHHWinType->fsWinProperties & HHWIN_PROP_TAB_SEARCH)
-        NP_CreateTab(pHHInfo->hInstance, hwndTabCtrl, IDS_SEARCH, dwIndex++);
+    if (info->WinType.fsWinProperties & HHWIN_PROP_TAB_SEARCH)
+        info->tabs[TAB_SEARCH].id = NP_CreateTab(hhctrl_hinstance, hwndTabCtrl, IDS_SEARCH);
 
-    if (pHHInfo->pHHWinType->fsWinProperties & HHWIN_PROP_TAB_FAVORITES)
-        NP_CreateTab(pHHInfo->hInstance, hwndTabCtrl, IDS_FAVORITES, dwIndex++);
+    if (info->WinType.fsWinProperties & HHWIN_PROP_TAB_FAVORITES)
+        info->tabs[TAB_FAVORITES].id = NP_CreateTab(hhctrl_hinstance, hwndTabCtrl, IDS_FAVORITES);
 
-    SendMessageW(hwndTabCtrl, WM_SETFONT, (WPARAM)pHHInfo->hFont, TRUE);
+    SendMessageW(hwndTabCtrl, WM_SETFONT, (WPARAM)info->hFont, TRUE);
 
-    pHHInfo->hwndTabCtrl = hwndTabCtrl;
-    pHHInfo->pHHWinType->hwndNavigation = hWnd;
+    info->hwndTabCtrl = hwndTabCtrl;
+    info->WinType.hwndNavigation = hWnd;
     return TRUE;
 }
 
 /* HTML Pane */
 
-static void HP_GetHTMLRect(HHInfo *pHHInfo, RECT *rc)
+static void HP_GetHTMLRect(HHInfo *info, RECT *rc)
 {
     RECT rectTB, rectWND, rectNP, rectSB;
 
-    GetClientRect(pHHInfo->pHHWinType->hwndHelp, &rectWND);
-    GetClientRect(pHHInfo->pHHWinType->hwndToolBar, &rectTB);
-    GetClientRect(pHHInfo->pHHWinType->hwndNavigation, &rectNP);
-    GetClientRect(pHHInfo->hwndSizeBar, &rectSB);
+    GetClientRect(info->WinType.hwndHelp, &rectWND);
+    GetClientRect(info->WinType.hwndToolBar, &rectTB);
+    GetClientRect(info->WinType.hwndNavigation, &rectNP);
+    GetClientRect(info->hwndSizeBar, &rectSB);
 
     rc->left = rectNP.right + rectSB.right;
     rc->top = rectTB.bottom;
@@ -563,7 +692,7 @@ static void HP_GetHTMLRect(HHInfo *pHHInfo, RECT *rc)
 static BOOL HH_AddHTMLPane(HHInfo *pHHInfo)
 {
     HWND hWnd;
-    HWND hwndParent = pHHInfo->pHHWinType->hwndHelp;
+    HWND hwndParent = pHHInfo->WinType.hwndHelp;
     DWORD dwStyles = WS_CHILDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN;
     DWORD dwExStyles = WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR | WS_EX_CLIENTEDGE;
     RECT rc;
@@ -572,11 +701,11 @@ static BOOL HH_AddHTMLPane(HHInfo *pHHInfo)
 
     hWnd = CreateWindowExW(dwExStyles, szChildClass, szEmpty, dwStyles,
                            rc.left, rc.top, rc.right, rc.bottom,
-                           hwndParent, NULL, pHHInfo->hInstance, NULL);
+                           hwndParent, NULL, hhctrl_hinstance, NULL);
     if (!hWnd)
         return FALSE;
 
-    if (!WB_EmbedBrowser(pHHInfo->pWBInfo, hWnd))
+    if (!InitWebBrowser(pHHInfo, hWnd))
         return FALSE;
 
     /* store the pointer to the HH info struct */
@@ -585,77 +714,85 @@ static BOOL HH_AddHTMLPane(HHInfo *pHHInfo)
     ShowWindow(hWnd, SW_SHOW);
     UpdateWindow(hWnd);
 
-    pHHInfo->pHHWinType->hwndHTML = hWnd;
+    pHHInfo->WinType.hwndHTML = hWnd;
+    return TRUE;
+}
+
+static BOOL AddContentTab(HHInfo *info)
+{
+    info->tabs[TAB_CONTENTS].hwnd = CreateWindowExW(WS_EX_CLIENTEDGE, WC_TREEVIEWW,
+           szEmpty, WS_CHILD | WS_BORDER | 0x25, 50, 50, 100, 100,
+           info->WinType.hwndNavigation, NULL, hhctrl_hinstance, NULL);
+    if(!info->tabs[TAB_CONTENTS].hwnd) {
+        ERR("Could not create treeview control\n");
+        return FALSE;
+    }
+
+    ResizeTabChild(info, info->tabs[TAB_CONTENTS].hwnd);
+    ShowWindow(info->tabs[TAB_CONTENTS].hwnd, SW_SHOW);
+
     return TRUE;
 }
 
 /* Viewer Window */
 
-static void Help_OnSize(HWND hWnd)
+static LRESULT Help_OnSize(HWND hWnd)
 {
     HHInfo *pHHInfo = (HHInfo *)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
     DWORD dwSize;
     RECT rc;
 
     if (!pHHInfo)
-        return;
+        return 0;
 
     NP_GetNavigationRect(pHHInfo, &rc);
-    SetWindowPos(pHHInfo->pHHWinType->hwndNavigation, HWND_TOP, 0, 0,
+    SetWindowPos(pHHInfo->WinType.hwndNavigation, HWND_TOP, 0, 0,
                  rc.right, rc.bottom, SWP_NOMOVE);
-
-    GetClientRect(pHHInfo->pHHWinType->hwndNavigation, &rc);
-    SetWindowPos(pHHInfo->hwndTabCtrl, HWND_TOP, 0, 0,
-                 rc.right - TAB_RIGHT_PADDING,
-                 rc.bottom - TAB_TOP_PADDING, SWP_NOMOVE);
 
     SB_GetSizeBarRect(pHHInfo, &rc);
     SetWindowPos(pHHInfo->hwndSizeBar, HWND_TOP, rc.left, rc.top,
                  rc.right, rc.bottom, SWP_SHOWWINDOW);
 
     HP_GetHTMLRect(pHHInfo, &rc);
-    SetWindowPos(pHHInfo->pHHWinType->hwndHTML, HWND_TOP, rc.left, rc.top,
+    SetWindowPos(pHHInfo->WinType.hwndHTML, HWND_TOP, rc.left, rc.top,
                  rc.right, rc.bottom, SWP_SHOWWINDOW);
 
     /* Resize browser window taking the frame size into account */
     dwSize = GetSystemMetrics(SM_CXFRAME);
-    WB_ResizeBrowser(pHHInfo->pWBInfo, rc.right - dwSize, rc.bottom - dwSize);
+    ResizeWebBrowser(pHHInfo, rc.right - dwSize, rc.bottom - dwSize);
+
+    return 0;
 }
 
 static LRESULT CALLBACK Help_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    PAINTSTRUCT ps;
-    HDC hdc;
-
     switch (message)
     {
-        case WM_COMMAND:
-            if (HIWORD(wParam) == BN_CLICKED)
-                TB_OnClick(hWnd, LOWORD(wParam));
-            break;
-        case WM_SIZE:
-            Help_OnSize(hWnd);
-            break;
-        case WM_PAINT:
-            hdc = BeginPaint(hWnd, &ps);
-            EndPaint(hWnd, &ps);
-            break;
-        case WM_DESTROY:
+    case WM_COMMAND:
+        if (HIWORD(wParam) == BN_CLICKED)
+            TB_OnClick(hWnd, LOWORD(wParam));
+        break;
+    case WM_SIZE:
+        return Help_OnSize(hWnd);
+    case WM_CLOSE:
+        ReleaseHelpViewer((HHInfo *)GetWindowLongPtrW(hWnd, GWLP_USERDATA));
+        return 0;
+    case WM_DESTROY:
+        if(hh_process)
             PostQuitMessage(0);
-            break;
+        break;
 
-        default:
-            return DefWindowProcW(hWnd, message, wParam, lParam);
+    default:
+        return DefWindowProcW(hWnd, message, wParam, lParam);
     }
 
     return 0;
 }
 
-static BOOL HH_CreateHelpWindow(HHInfo *pHHInfo)
+static BOOL HH_CreateHelpWindow(HHInfo *info)
 {
     HWND hWnd;
-    HINSTANCE hInstance = pHHInfo->hInstance;
-    RECT winPos = pHHInfo->pHHWinType->rcWindowPos;
+    RECT winPos = info->WinType.rcWindowPos;
     WNDCLASSEXW wcex;
     DWORD dwStyles, dwExStyles;
     DWORD x, y, width, height;
@@ -666,10 +803,10 @@ static BOOL HH_CreateHelpWindow(HHInfo *pHHInfo)
 
     wcex.cbSize         = sizeof(WNDCLASSEXW);
     wcex.style          = CS_HREDRAW | CS_VREDRAW;
-    wcex.lpfnWndProc    = (WNDPROC)Help_WndProc;
+    wcex.lpfnWndProc    = Help_WndProc;
     wcex.cbClsExtra     = 0;
     wcex.cbWndExtra     = 0;
-    wcex.hInstance      = hInstance;
+    wcex.hInstance      = hhctrl_hinstance;
     wcex.hIcon          = LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
     wcex.hCursor        = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
     wcex.hbrBackground  = (HBRUSH)(COLOR_MENU + 1);
@@ -680,19 +817,19 @@ static BOOL HH_CreateHelpWindow(HHInfo *pHHInfo)
     RegisterClassExW(&wcex);
 
     /* Read in window parameters if available */
-    if (pHHInfo->pHHWinType->fsValidMembers & HHWIN_PARAM_STYLES)
-        dwStyles = pHHInfo->pHHWinType->dwStyles;
+    if (info->WinType.fsValidMembers & HHWIN_PARAM_STYLES)
+        dwStyles = info->WinType.dwStyles;
     else
         dwStyles = WS_OVERLAPPEDWINDOW | WS_VISIBLE |
                    WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
 
-    if (pHHInfo->pHHWinType->fsValidMembers & HHWIN_PARAM_EXSTYLES)
-        dwExStyles = pHHInfo->pHHWinType->dwExStyles;
+    if (info->WinType.fsValidMembers & HHWIN_PARAM_EXSTYLES)
+        dwExStyles = info->WinType.dwExStyles;
     else
         dwExStyles = WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_APPWINDOW |
                      WS_EX_WINDOWEDGE | WS_EX_RIGHTSCROLLBAR;
 
-    if (pHHInfo->pHHWinType->fsValidMembers & HHWIN_PARAM_RECT)
+    if (info->WinType.fsValidMembers & HHWIN_PARAM_RECT)
     {
         x = winPos.left;
         y = winPos.top;
@@ -707,8 +844,8 @@ static BOOL HH_CreateHelpWindow(HHInfo *pHHInfo)
         height = WINTYPE_DEFAULT_HEIGHT;
     }
 
-    hWnd = CreateWindowExW(dwExStyles, windowClassW, pHHInfo->pHHWinType->pszCaption,
-                           dwStyles, x, y, width, height, NULL, NULL, hInstance, NULL);
+    hWnd = CreateWindowExW(dwExStyles, windowClassW, info->WinType.pszCaption,
+                           dwStyles, x, y, width, height, NULL, NULL, hhctrl_hinstance, NULL);
     if (!hWnd)
         return FALSE;
 
@@ -716,9 +853,9 @@ static BOOL HH_CreateHelpWindow(HHInfo *pHHInfo)
     UpdateWindow(hWnd);
 
     /* store the pointer to the HH info struct */
-    SetWindowLongPtrW(hWnd, GWLP_USERDATA, (LONG_PTR)pHHInfo);
+    SetWindowLongPtrW(hWnd, GWLP_USERDATA, (LONG_PTR)info);
 
-    pHHInfo->pHHWinType->hwndHelp = hWnd;
+    info->WinType.hwndHelp = hWnd;
     return TRUE;
 }
 
@@ -744,7 +881,7 @@ static void HH_InitRequiredControls(DWORD dwControls)
 }
 
 /* Creates the whole package */
-static BOOL HH_CreateViewer(HHInfo *pHHInfo)
+static BOOL CreateViewer(HHInfo *pHHInfo)
 {
     HH_CreateFont(pHHInfo);
 
@@ -769,105 +906,67 @@ static BOOL HH_CreateViewer(HHInfo *pHHInfo)
     if (!HH_AddHTMLPane(pHHInfo))
         return FALSE;
 
+    if (!AddContentTab(pHHInfo))
+        return FALSE;
+
+    InitContent(pHHInfo);
+
     return TRUE;
 }
 
-static HHInfo *HH_OpenHH(HINSTANCE hInstance, LPWSTR szCmdLine)
+void ReleaseHelpViewer(HHInfo *info)
 {
-    HHInfo *pHHInfo = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(HHInfo));
+    TRACE("(%p)\n", info);
 
-    pHHInfo->pHHWinType = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(HH_WINTYPEW));
-    pHHInfo->pCHMInfo = HeapAlloc(GetProcessHeap(), 0, sizeof(CHMInfo));
-    pHHInfo->pWBInfo = HeapAlloc(GetProcessHeap(), 0, sizeof(WBInfo));
-    pHHInfo->hInstance = hInstance;
-    pHHInfo->szCmdLine = szCmdLine;
-
-    return pHHInfo;
-}
-
-static void HH_Close(HHInfo *pHHInfo)
-{
-    if (!pHHInfo)
+    if (!info)
         return;
 
     /* Free allocated strings */
-    if (pHHInfo->pHHWinType)
-    {
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszType);
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszCaption);
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszToc);
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszIndex);
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszFile);
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszHome);
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszJump1);
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszJump2);
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszUrlJump1);
-        HeapFree(GetProcessHeap(), 0, (LPWSTR)pHHInfo->pHHWinType->pszUrlJump2);
-    }
+    heap_free(info->pszType);
+    heap_free(info->pszCaption);
+    heap_free(info->pszToc);
+    heap_free(info->pszIndex);
+    heap_free(info->pszFile);
+    heap_free(info->pszHome);
+    heap_free(info->pszJump1);
+    heap_free(info->pszJump2);
+    heap_free(info->pszUrlJump1);
+    heap_free(info->pszUrlJump2);
 
-    HeapFree(GetProcessHeap(), 0, pHHInfo->pHHWinType);
-    HeapFree(GetProcessHeap(), 0, pHHInfo->szCmdLine);
+    if (info->pCHMInfo)
+        CloseCHM(info->pCHMInfo);
 
-    if (pHHInfo->pCHMInfo)
-    {
-        CHM_CloseCHM(pHHInfo->pCHMInfo);
-        HeapFree(GetProcessHeap(), 0, pHHInfo->pCHMInfo);
-    }
+    ReleaseWebBrowser(info);
+    ReleaseContent(info);
 
-    if (pHHInfo->pWBInfo)
-    {
-        WB_UnEmbedBrowser(pHHInfo->pWBInfo);
-        HeapFree(GetProcessHeap(), 0, pHHInfo->pWBInfo);
-    }
-}
+    if(info->WinType.hwndHelp)
+        DestroyWindow(info->WinType.hwndHelp);
 
-static void HH_OpenDefaultTopic(HHInfo *pHHInfo)
-{
-    WCHAR url[MAX_PATH];
-    LPCWSTR defTopic = pHHInfo->pHHWinType->pszFile;
-
-    CHM_CreateITSUrl(pHHInfo->pCHMInfo, defTopic, url);
-    WB_Navigate(pHHInfo->pWBInfo, url);
-}
-
-static BOOL HH_OpenCHM(HHInfo *pHHInfo)
-{
-    if (!CHM_OpenCHM(pHHInfo->pCHMInfo, pHHInfo->szCmdLine))
-        return FALSE;
-
-    if (!CHM_LoadWinTypeFromCHM(pHHInfo->pCHMInfo, pHHInfo->pHHWinType))
-        return FALSE;
-
-    return TRUE;
-}
-
-/* FIXME: Check szCmdLine for bad arguments */
-int WINAPI doWinMain(HINSTANCE hInstance, LPSTR szCmdLine)
-{
-    MSG msg;
-    HHInfo *pHHInfo;
-
-    if (FAILED(OleInitialize(NULL)))
-        return -1;
-
-    pHHInfo = HH_OpenHH(hInstance, HH_ANSIToUnicode(szCmdLine));
-    if (!pHHInfo || !HH_OpenCHM(pHHInfo) || !HH_CreateViewer(pHHInfo))
-    {
-        OleUninitialize();
-        return -1;
-    }
-
-    HH_OpenDefaultTopic(pHHInfo);
-    
-    while (GetMessageW(&msg, 0, 0, 0))
-    {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-
-    HH_Close(pHHInfo);
-    HeapFree(GetProcessHeap(), 0, pHHInfo);
+    heap_free(info);
     OleUninitialize();
+}
 
-    return 0;
+HHInfo *CreateHelpViewer(LPCWSTR filename)
+{
+    HHInfo *info = heap_alloc_zero(sizeof(HHInfo));
+
+    OleInitialize(NULL);
+
+    info->pCHMInfo = OpenCHM(filename);
+    if(!info->pCHMInfo) {
+        ReleaseHelpViewer(info);
+        return NULL;
+    }
+
+    if (!LoadWinTypeFromCHM(info)) {
+        ReleaseHelpViewer(info);
+        return NULL;
+    }
+
+    if(!CreateViewer(info)) {
+        ReleaseHelpViewer(info);
+        return NULL;
+    }
+
+    return info;
 }

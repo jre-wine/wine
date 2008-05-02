@@ -394,8 +394,11 @@ static void test_GetColorProfileHeader(void)
         ret = pGetColorProfileHeader( NULL, &header );
         ok( !ret, "GetColorProfileHeader() succeeded (%d)\n", GetLastError() );
 
-        ret = pGetColorProfileHeader( handle, NULL );
-        ok( !ret, "GetColorProfileHeader() succeeded (%d)\n", GetLastError() );
+        if (0) /* Crashes on Vista */
+        {
+            ret = pGetColorProfileHeader( handle, NULL );
+            ok( !ret, "GetColorProfileHeader() succeeded (%d)\n", GetLastError() );
+        }
 
         /* Functional checks */
 
@@ -551,9 +554,9 @@ static void check_registry(void)
     }
 
     res = RegQueryInfoKeyA(hkIcmKey, NULL, NULL, NULL, NULL, NULL, NULL, &dwValCount, NULL, NULL, NULL, NULL);
-    if (!res) 
+    if (res) 
     {
-        trace("RegQueryInfoKeyA() failed\n");
+        trace("RegQueryInfoKeyA() failed : %d\n", res);
         return;
     }
 
@@ -650,7 +653,13 @@ static void test_GetStandardColorSpaceProfileA(void)
         ret = pGetStandardColorSpaceProfileA( NULL, SPACE_RGB, oldprofile, &size );
         ok( ret, "GetStandardColorSpaceProfileA() failed (%d)\n", GetLastError() );
 
+        SetLastError(0xdeadbeef);
         ret = pSetStandardColorSpaceProfileA( NULL, SPACE_RGB, standardprofile );
+        if (!ret && (GetLastError() == ERROR_ACCESS_DENIED))
+        {
+            skip("Not enough rights for SetStandardColorSpaceProfileA\n");
+            return;
+        }
         ok( ret, "SetStandardColorSpaceProfileA() failed (%d)\n", GetLastError() );
 
         size = sizeof(newprofile);
@@ -727,7 +736,13 @@ static void test_GetStandardColorSpaceProfileW(void)
         ret = pGetStandardColorSpaceProfileW( NULL, SPACE_RGB, oldprofile, &size );
         ok( ret, "GetStandardColorSpaceProfileW() failed (%d)\n", GetLastError() );
 
+        SetLastError(0xdeadbeef);
         ret = pSetStandardColorSpaceProfileW( NULL, SPACE_RGB, standardprofileW );
+        if (!ret && (GetLastError() == ERROR_ACCESS_DENIED))
+        {
+            skip("Not enough rights for SetStandardColorSpaceProfileW\n");
+            return;
+        }
         ok( ret, "SetStandardColorSpaceProfileW() failed (%d)\n", GetLastError() );
 
         size = sizeof(newprofile);
@@ -745,13 +760,12 @@ static void test_GetStandardColorSpaceProfileW(void)
 static void test_EnumColorProfilesA(void)
 {
     BOOL ret;
-    DWORD size, number;
+    DWORD total, size, number;
     ENUMTYPEA record;
-    BYTE buffer[MAX_PATH];
+    BYTE *buffer;
 
     /* Parameter checks */
 
-    size = sizeof(buffer);
     memset( &record, 0, sizeof(ENUMTYPEA) );
 
     record.dwSize = sizeof(ENUMTYPEA);
@@ -759,6 +773,12 @@ static void test_EnumColorProfilesA(void)
     record.dwFields |= ET_DATACOLORSPACE;
     record.dwDataColorSpace = SPACE_RGB;
 
+    total = 0;
+    ret = pEnumColorProfilesA( NULL, &record, NULL, &total, &number );
+    ok( !ret, "EnumColorProfilesA() failed (%d)\n", GetLastError() );
+    buffer = HeapAlloc( GetProcessHeap(), 0, total );
+
+    size = total;
     ret = pEnumColorProfilesA( machine, &record, buffer, &size, &number );
     ok( !ret, "EnumColorProfilesA() succeeded (%d)\n", GetLastError() );
 
@@ -783,23 +803,23 @@ static void test_EnumColorProfilesA(void)
 
     if (standardprofile)
     {
-        size = sizeof(buffer);
+        size = total;
 
         ret = pEnumColorProfilesA( NULL, &record, buffer, &size, &number );
         ok( ret, "EnumColorProfilesA() failed (%d)\n", GetLastError() );
     }
+    HeapFree( GetProcessHeap(), 0, buffer );
 }
 
 static void test_EnumColorProfilesW(void)
 {
     BOOL ret;
-    DWORD size, number;
+    DWORD total, size, number;
     ENUMTYPEW record;
-    BYTE buffer[MAX_PATH * sizeof(WCHAR)];
+    BYTE *buffer;
 
     /* Parameter checks */
 
-    size = sizeof(buffer);
     memset( &record, 0, sizeof(ENUMTYPEW) );
 
     record.dwSize = sizeof(ENUMTYPEW);
@@ -807,6 +827,12 @@ static void test_EnumColorProfilesW(void)
     record.dwFields |= ET_DATACOLORSPACE;
     record.dwDataColorSpace = SPACE_RGB;
 
+    total = 0;
+    ret = pEnumColorProfilesW( NULL, &record, NULL, &total, &number );
+    ok( !ret, "EnumColorProfilesW() failed (%d)\n", GetLastError() );
+    buffer = HeapAlloc( GetProcessHeap(), 0, total * sizeof(WCHAR) );
+
+    size = total;
     ret = pEnumColorProfilesW( machineW, &record, buffer, &size, &number );
     ok( !ret, "EnumColorProfilesW() succeeded (%d)\n", GetLastError() );
 
@@ -818,7 +844,7 @@ static void test_EnumColorProfilesW(void)
 
     if (standardprofileW)
     {
-        ret = pEnumColorProfilesW( NULL, &record, buffer, &size, NULL );
+        ret = pEnumColorProfilesW( NULL, &record, buffer, &size, &number );
         ok( ret, "EnumColorProfilesW() failed (%d)\n", GetLastError() );
     }
 
@@ -831,11 +857,12 @@ static void test_EnumColorProfilesW(void)
 
     if (standardprofileW)
     {
-        size = sizeof(buffer);
+        size = total;
 
         ret = pEnumColorProfilesW( NULL, &record, buffer, &size, &number );
         ok( ret, "EnumColorProfilesW() failed (%d)\n", GetLastError() );
     }
+    HeapFree( GetProcessHeap(), 0, buffer );
 }
 
 static void test_InstallColorProfileA(void)
@@ -868,7 +895,13 @@ static void test_InstallColorProfileA(void)
         CHAR slash[] = "\\";
         HANDLE handle;
 
+        SetLastError(0xdeadbeef);
         ret = pInstallColorProfileA( NULL, testprofile );
+        if (!ret && (GetLastError() == ERROR_ACCESS_DENIED))
+        {
+            skip("Not enough rights for InstallColorProfileA\n");
+            return;
+        }
         ok( ret, "InstallColorProfileA() failed (%d)\n", GetLastError() );
 
         ret = pGetColorDirectoryA( NULL, dest, &size );
@@ -919,7 +952,13 @@ static void test_InstallColorProfileW(void)
         WCHAR slash[] = { '\\', 0 };
         HANDLE handle;
 
+        SetLastError(0xdeadbeef);
         ret = pInstallColorProfileW( NULL, testprofileW );
+        if (!ret && (GetLastError() == ERROR_ACCESS_DENIED))
+        {
+            skip("Not enough rights for InstallColorProfileW\n");
+            return;
+        }
         ok( ret, "InstallColorProfileW() failed (%d)\n", GetLastError() );
 
         ret = pGetColorDirectoryW( NULL, dest, &size );
@@ -1234,7 +1273,13 @@ static void test_UninstallColorProfileA(void)
         CHAR slash[] = "\\";
         HANDLE handle;
 
+        SetLastError(0xdeadbeef);
         ret = pInstallColorProfileA( NULL, testprofile );
+        if (!ret && (GetLastError() == ERROR_ACCESS_DENIED))
+        {
+            skip("Not enough rights for InstallColorProfileA\n");
+            return;
+        }
         ok( ret, "InstallColorProfileA() failed (%d)\n", GetLastError() );
 
         ret = pGetColorDirectoryA( NULL, dest, &size );
@@ -1278,7 +1323,13 @@ static void test_UninstallColorProfileW(void)
         HANDLE handle;
         int bytes_copied;
 
+        SetLastError(0xdeadbeef);
         ret = pInstallColorProfileW( NULL, testprofileW );
+        if (!ret && (GetLastError() == ERROR_ACCESS_DENIED))
+        {
+            skip("Not enough rights for InstallColorProfileW\n");
+            return;
+        }
         ok( ret, "InstallColorProfileW() failed (%d)\n", GetLastError() );
 
         ret = pGetColorDirectoryW( NULL, dest, &size );

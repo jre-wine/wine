@@ -96,13 +96,13 @@ typedef struct tagMSFT_SegDir {
 /*1*/MSFT_pSeg pTypeInfoTab; /* each type info get an entry of 0x64 bytes */
                              /* (25 ints) */
 /*2*/MSFT_pSeg pImpInfo;     /* table with info for imported types */
-/*3*/MSFT_pSeg pImpFiles;    /* import libaries */
+/*3*/MSFT_pSeg pImpFiles;    /* import libraries */
 /*4*/MSFT_pSeg pRefTab;      /* References table */
-/*5*/MSFT_pSeg pLibtab;      /* always exists, alway same size (0x80) */
+/*5*/MSFT_pSeg pLibtab;      /* always exists, always same size (0x80) */
                              /* hash table w offsets to guid????? */
 /*6*/MSFT_pSeg pGuidTab;     /* all guids are stored here together with  */
                              /* offset in some table???? */
-/*7*/MSFT_pSeg res07;        /* always created, alway same size (0x200) */
+/*7*/MSFT_pSeg res07;        /* always created, always same size (0x200) */
                              /* purpose largely unknown */
 /*8*/MSFT_pSeg pNametab;     /* name tables */
 /*9*/MSFT_pSeg pStringtab;   /* string table */
@@ -120,10 +120,10 @@ typedef struct tagMSFT_SegDir {
 /* base type info data */
 typedef struct tagMSFT_TypeInfoBase {
 /*000*/ INT   typekind;             /*  it is the TKIND_xxx */
-                                    /* some byte alignment stuf */
+                                    /* some byte alignment stuff */
         INT     memoffset;          /* points past the file, if no elements */
         INT     res2;               /* zero if no element, N*0x40 */
-        INT     res3;               /* -1 if no lement, (N-1)*0x38 */
+        INT     res3;               /* -1 if no element, (N-1)*0x38 */
 /*010*/ INT     res4;               /* always? 3 */
         INT     res5;               /* always? zero */
         INT     cElement;           /* counts elements, HI=cVars, LO=cFuncs */
@@ -149,7 +149,7 @@ typedef struct tagMSFT_TypeInfoBase {
 /*050*/ INT     size;           /* size in bytes, at least for structures */
         /* FIXME: name of this field */
         INT     datatype1;      /* position in type description table */
-                                /* or in base intefaces */
+                                /* or in base interfaces */
                                 /* if coclass: offset in reftable */
                                 /* if interface: reference to inherited if */
                                 /* if module: offset to dllname in name table */
@@ -285,7 +285,7 @@ typedef struct {
 			   lower-middle 8 bits are unknown (flags?),
 			   upper 16 bits are hash code */
 } MSFT_NameIntro;
-/* the custom data table directory has enties like this */
+/* the custom data table directory has entries like this */
 typedef struct {
     INT   GuidOffset;
     INT   DataOffset;
@@ -599,7 +599,6 @@ WORD typeofarray
 HRESULT ITypeInfoImpl_GetInternalFuncDesc( ITypeInfo *iface, UINT index, const FUNCDESC **ppFuncDesc );
 
 extern DWORD _invoke(FARPROC func,CALLCONV callconv, int nrargs, DWORD *args);
-extern void dump_Variant(const VARIANT * pvar);
 
 HRESULT TMARSHAL_DllGetClassObject(REFCLSID rclsid, REFIID iid,LPVOID *ppv);
 

@@ -119,7 +119,8 @@ BOOL WINAPI GetColorDirectoryA( PCSTR machine, PSTR buffer, PDWORD size )
 BOOL WINAPI GetColorDirectoryW( PCWSTR machine, PWSTR buffer, PDWORD size )
 {
     WCHAR colordir[MAX_PATH];
-    static const WCHAR colorsubdir[] = { '\\','c','o','l','o','r',0 };
+    static const WCHAR colorsubdir[] =
+        {'\\','s','p','o','o','l','\\','d','r','i','v','e','r','s','\\','c','o','l','o','r',0};
     DWORD len;
 
     TRACE( "( %p, %p )\n", buffer, size );
@@ -305,7 +306,6 @@ BOOL WINAPI GetColorProfileFromHandle( HPROFILE profile, PBYTE buffer, PDWORD si
  */
 BOOL WINAPI GetColorProfileHeader( HPROFILE profile, PPROFILEHEADER header )
 {
-    BOOL ret = FALSE;
 #ifdef HAVE_LCMS
     icProfile *iccprofile = MSCMS_hprofile2iccprofile( profile );
 
@@ -316,8 +316,9 @@ BOOL WINAPI GetColorProfileHeader( HPROFILE profile, PPROFILEHEADER header )
     MSCMS_get_profile_header( iccprofile, header );
     return TRUE;
 
+#else
+    return FALSE;
 #endif /* HAVE_LCMS */
-    return ret;
 }
 
 /******************************************************************************
@@ -471,7 +472,7 @@ BOOL WINAPI GetStandardColorSpaceProfileW( PCWSTR machine, DWORD id, PWSTR profi
     return TRUE;
 }
 
-static BOOL MSCMS_header_from_file( LPWSTR file, PPROFILEHEADER header )
+static BOOL MSCMS_header_from_file( LPCWSTR file, PPROFILEHEADER header )
 {
     BOOL ret;
     PROFILE profile;
@@ -610,7 +611,7 @@ BOOL WINAPI EnumColorProfilesA( PCSTR machine, PENUMTYPEA record, PBYTE buffer,
                                 PDWORD size, PDWORD number )
 {
     BOOL match, ret = FALSE;
-    char spec[] = "\\*";
+    char spec[] = "\\*.icm";
     char colordir[MAX_PATH], glob[MAX_PATH], **profiles = NULL;
     DWORD i, len = sizeof(colordir), count = 0, totalsize = 0;
     PROFILEHEADER header;
@@ -759,7 +760,7 @@ BOOL WINAPI EnumColorProfilesW( PCWSTR machine, PENUMTYPEW record, PBYTE buffer,
                                 PDWORD size, PDWORD number )
 {
     BOOL match, ret = FALSE;
-    WCHAR spec[] = {'\\','*',0};
+    WCHAR spec[] = {'\\','*','i','c','m',0};
     WCHAR colordir[MAX_PATH], glob[MAX_PATH], **profiles = NULL;
     DWORD i, len = sizeof(colordir), count = 0, totalsize = 0;
     PROFILEHEADER header;
@@ -1065,7 +1066,6 @@ BOOL WINAPI SetColorProfileElement( HPROFILE profile, TAGTYPE type, DWORD offset
  */
 BOOL WINAPI SetColorProfileHeader( HPROFILE profile, PPROFILEHEADER header )
 {
-    BOOL ret = FALSE;
 #ifdef HAVE_LCMS
     icProfile *iccprofile = MSCMS_hprofile2iccprofile( profile );
     DWORD access = MSCMS_hprofile2access( profile );
@@ -1078,8 +1078,9 @@ BOOL WINAPI SetColorProfileHeader( HPROFILE profile, PPROFILEHEADER header )
     MSCMS_set_profile_header( iccprofile, header );
     return TRUE;
 
+#else
+    return FALSE;
 #endif /* HAVE_LCMS */
-    return ret;
 }
 
 /******************************************************************************

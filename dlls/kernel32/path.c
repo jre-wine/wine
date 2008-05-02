@@ -47,7 +47,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(file);
 
 
 /* check if a file name is for an executable file (.exe or .com) */
-inline static BOOL is_executable( const WCHAR *name )
+static inline BOOL is_executable( const WCHAR *name )
 {
     static const WCHAR exeW[] = {'.','e','x','e',0};
     static const WCHAR comW[] = {'.','c','o','m',0};
@@ -577,15 +577,17 @@ DWORD WINAPI GetTempPathW( DWORD count, LPWSTR path )
 {
     static const WCHAR tmp[]  = { 'T', 'M', 'P', 0 };
     static const WCHAR temp[] = { 'T', 'E', 'M', 'P', 0 };
+    static const WCHAR userprofile[] = { 'U','S','E','R','P','R','O','F','I','L','E',0 };
     WCHAR tmp_path[MAX_PATH];
     UINT ret;
 
     TRACE("%u,%p\n", count, path);
 
-    if (!(ret = GetEnvironmentVariableW( tmp, tmp_path, MAX_PATH )))
-        if (!(ret = GetEnvironmentVariableW( temp, tmp_path, MAX_PATH )))
-            if (!(ret = GetCurrentDirectoryW( MAX_PATH, tmp_path )))
-                return 0;
+    if (!(ret = GetEnvironmentVariableW( tmp, tmp_path, MAX_PATH )) &&
+        !(ret = GetEnvironmentVariableW( temp, tmp_path, MAX_PATH )) &&
+        !(ret = GetEnvironmentVariableW( userprofile, tmp_path, MAX_PATH )) &&
+        !(ret = GetWindowsDirectoryW( tmp_path, MAX_PATH )))
+        return 0;
 
     if (ret > MAX_PATH)
     {
@@ -708,7 +710,7 @@ UINT WINAPI GetTempFileNameW( LPCWSTR path, LPCWSTR prefix, UINT unique, LPWSTR 
  * Check if the file name contains a path; helper for SearchPathW.
  * A relative path is not considered a path unless it starts with ./ or ../
  */
-inline static BOOL contains_pathW (LPCWSTR name)
+static inline BOOL contains_pathW (LPCWSTR name)
 {
     if (RtlDetermineDosPathNameType_U( name ) != RELATIVE_PATH) return TRUE;
     if (name[0] != '.') return FALSE;
@@ -879,12 +881,14 @@ BOOL WINAPI CopyFileW( LPCWSTR source, LPCWSTR dest, BOOL fail_if_exists )
                      NULL, OPEN_EXISTING, 0, 0)) == INVALID_HANDLE_VALUE)
     {
         WARN("Unable to open source %s\n", debugstr_w(source));
+        HeapFree( GetProcessHeap(), 0, buffer );
         return FALSE;
     }
 
     if (!GetFileInformationByHandle( h1, &info ))
     {
         WARN("GetFileInformationByHandle returned error for %s\n", debugstr_w(source));
+        HeapFree( GetProcessHeap(), 0, buffer );
         CloseHandle( h1 );
         return FALSE;
     }
@@ -894,6 +898,7 @@ BOOL WINAPI CopyFileW( LPCWSTR source, LPCWSTR dest, BOOL fail_if_exists )
                              info.dwFileAttributes, h1 )) == INVALID_HANDLE_VALUE)
     {
         WARN("Unable to open dest %s\n", debugstr_w(dest));
+        HeapFree( GetProcessHeap(), 0, buffer );
         CloseHandle( h1 );
         return FALSE;
     }
@@ -982,9 +987,11 @@ BOOL WINAPI CopyFileExA(LPCSTR sourceFilename, LPCSTR destFilename,
 
 
 /**************************************************************************
- *           MoveFileExW   (KERNEL32.@)
+ *           MoveFileWithProgressW   (KERNEL32.@)
  */
-BOOL WINAPI MoveFileExW( LPCWSTR source, LPCWSTR dest, DWORD flag )
+BOOL WINAPI MoveFileWithProgressW( LPCWSTR source, LPCWSTR dest,
+                                   LPPROGRESS_ROUTINE fnProgress,
+                                   LPVOID param, DWORD flag )
 {
     FILE_BASIC_INFORMATION info;
     UNICODE_STRING nt_name;
@@ -994,7 +1001,8 @@ BOOL WINAPI MoveFileExW( LPCWSTR source, LPCWSTR dest, DWORD flag )
     HANDLE source_handle = 0, dest_handle;
     ANSI_STRING source_unix, dest_unix;
 
-    TRACE("(%s,%s,%04x)\n", debugstr_w(source), debugstr_w(dest), flag);
+    TRACE("(%s,%s,%p,%p,%04x)\n",
+          debugstr_w(source), debugstr_w(dest), fnProgress, param, flag );
 
     if (flag & MOVEFILE_DELAY_UNTIL_REBOOT)
         return add_boot_rename_entry( source, dest, flag );
@@ -1087,7 +1095,10 @@ BOOL WINAPI MoveFileExW( LPCWSTR source, LPCWSTR dest, DWORD flag )
             NtClose( source_handle );
             RtlFreeAnsiString( &source_unix );
             RtlFreeAnsiString( &dest_unix );
-            return (CopyFileW( source, dest, TRUE ) && DeleteFileW( source ));
+            if (!CopyFileExW( source, dest, fnProgress,
+                              param, NULL, COPY_FILE_FAIL_IF_EXISTS ))
+                return FALSE;
+            return DeleteFileW( source );
         }
         FILE_SetDosError();
         /* if we created the destination, remove it */
@@ -1124,9 +1135,11 @@ error:
 }
 
 /**************************************************************************
- *           MoveFileExA   (KERNEL32.@)
+ *           MoveFileWithProgressA   (KERNEL32.@)
  */
-BOOL WINAPI MoveFileExA( LPCSTR source, LPCSTR dest, DWORD flag )
+BOOL WINAPI MoveFileWithProgressA( LPCSTR source, LPCSTR dest,
+                                   LPPROGRESS_ROUTINE fnProgress,
+                                   LPVOID param, DWORD flag )
 {
     WCHAR *sourceW, *destW;
     BOOL ret;
@@ -1139,9 +1152,25 @@ BOOL WINAPI MoveFileExA( LPCSTR source, LPCSTR dest, DWORD flag )
     else
         destW = NULL;
 
-    ret = MoveFileExW( sourceW, destW, flag );
+    ret = MoveFileWithProgressW( sourceW, destW, fnProgress, param, flag );
     HeapFree( GetProcessHeap(), 0, destW );
     return ret;
+}
+
+/**************************************************************************
+ *           MoveFileExW   (KERNEL32.@)
+ */
+BOOL WINAPI MoveFileExW( LPCWSTR source, LPCWSTR dest, DWORD flag )
+{
+    return MoveFileWithProgressW( source, dest, NULL, NULL, flag );
+}
+
+/**************************************************************************
+ *           MoveFileExA   (KERNEL32.@)
+ */
+BOOL WINAPI MoveFileExA( LPCSTR source, LPCSTR dest, DWORD flag )
+{
+    return MoveFileWithProgressA( source, dest, NULL, NULL, flag );
 }
 
 
@@ -1483,6 +1512,43 @@ UINT WINAPI GetSystemWow64DirectoryA( LPSTR lpBuffer, UINT uSize )
 {
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return 0;
+}
+
+
+/***********************************************************************
+ *           NeedCurrentDirectoryForExePathW   (KERNEL32.@)
+ */
+BOOL WINAPI NeedCurrentDirectoryForExePathW( LPCWSTR name )
+{
+    static const WCHAR env_name[] = {'N','o','D','e','f','a','u','l','t',
+                                     'C','u','r','r','e','n','t',
+                                     'D','i','r','e','c','t','o','r','y',
+                                     'I','n','E','x','e','P','a','t','h',0};
+    WCHAR env_val;
+
+    /* MSDN mentions some 'registry location'. We do not use registry. */
+    FIXME("(%s): partial stub\n", debugstr_w(name));
+
+    if (strchrW(name, '\\'))
+        return TRUE;
+
+    /* Check the existence of the variable, not value */
+    if (!GetEnvironmentVariableW( env_name, &env_val, 1 ))
+        return TRUE;
+
+    return FALSE;
+}
+
+
+/***********************************************************************
+ *           NeedCurrentDirectoryForExePathA   (KERNEL32.@)
+ */
+BOOL WINAPI NeedCurrentDirectoryForExePathA( LPCSTR name )
+{
+    WCHAR *nameW;
+
+    if (!(nameW = FILE_name_AtoW( name, FALSE ))) return TRUE;
+    return NeedCurrentDirectoryForExePathW( nameW );
 }
 
 

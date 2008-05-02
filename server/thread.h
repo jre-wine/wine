@@ -80,12 +80,12 @@ struct thread
     CONTEXT               *suspend_context; /* current context if suspended */
     void                  *teb;           /* TEB address (in client address space) */
     int                    priority;      /* priority level */
-    int                    affinity;      /* affinity mask */
+    unsigned int           affinity;      /* affinity mask */
     int                    suspend;       /* suspend count */
     obj_handle_t           desktop;       /* desktop handle */
     int                    desktop_users; /* number of objects using the thread desktop */
-    struct timeval         creation_time; /* Thread creation time */
-    struct timeval         exit_time;     /* Thread exit time */
+    timeout_t              creation_time; /* Thread creation time */
+    timeout_t              exit_time;     /* Thread exit time */
     struct token          *token;         /* security token associated with this thread */
 };
 
@@ -103,6 +103,7 @@ extern struct thread *current;
 extern struct thread *create_thread( int fd, struct process *process );
 extern struct thread *get_thread_from_id( thread_id_t id );
 extern struct thread *get_thread_from_handle( obj_handle_t handle, unsigned int access );
+extern struct thread *get_thread_from_tid( int tid );
 extern struct thread *get_thread_from_pid( int pid );
 extern void stop_thread( struct thread *thread );
 extern int wake_thread( struct thread *thread );
@@ -111,9 +112,8 @@ extern void remove_queue( struct object *obj, struct wait_queue_entry *entry );
 extern void kill_thread( struct thread *thread, int violent_death );
 extern void break_thread( struct thread *thread );
 extern void wake_up( struct object *obj, int max );
-extern int thread_queue_apc( struct thread *thread, struct object *owner, void *func,
-                             enum apc_type type, int system, void *arg1, void *arg2, void *arg3 );
-extern void thread_cancel_apc( struct thread *thread, struct object *owner, int system );
+extern int thread_queue_apc( struct thread *thread, struct object *owner, const apc_call_t *call_data );
+extern void thread_cancel_apc( struct thread *thread, struct object *owner, enum apc_type type );
 extern int thread_add_inflight_fd( struct thread *thread, int client, int server );
 extern int thread_get_inflight_fd( struct thread *thread, int client );
 extern struct thread_snapshot *thread_snap( int *count );

@@ -103,7 +103,7 @@ struct key_value
 /* the root of the registry tree */
 static struct key *root_key;
 
-static const int save_period = 30000;           /* delay between periodic saves (in ms) */
+static const timeout_t save_period = 30 * -TICKS_PER_SEC;  /* delay between periodic saves */
 static struct timeout_user *save_timeout_user;  /* saving timer */
 
 static void set_periodic_save_timer(void);
@@ -142,6 +142,7 @@ static const struct object_ops key_ops =
 {
     sizeof(struct key),      /* size */
     key_dump,                /* dump */
+    no_get_type,             /* get_type */
     no_add_queue,            /* add_queue */
     NULL,                    /* remove_queue */
     NULL,                    /* signaled */
@@ -149,7 +150,10 @@ static const struct object_ops key_ops =
     no_signal,               /* signal */
     no_get_fd,               /* get_fd */
     key_map_access,          /* map_access */
+    default_get_sd,          /* get_sd */
+    default_set_sd,          /* set_sd */
     no_lookup_name,          /* lookup_name */
+    no_open_file,            /* open_file */
     key_close_handle,        /* close_handle */
     key_destroy              /* destroy */
 };
@@ -163,12 +167,6 @@ static const struct object_ops key_ops =
  * - the modification time optionally follows the key name
  * - REG_EXPAND_SZ and REG_MULTI_SZ are saved as strings instead of hex
  */
-
-static inline char to_hex( char ch )
-{
-    if (isdigit(ch)) return ch - '0';
-    return tolower(ch) - 'a' + 10;
-}
 
 /* dump the full path of a key */
 static void dump_path( const struct key *key, const struct key *base, FILE *f )
@@ -184,7 +182,7 @@ static void dump_path( const struct key *key, const struct key *base, FILE *f )
 /* dump a value to a text file */
 static void dump_value( const struct key_value *value, FILE *f )
 {
-    unsigned int i;
+    unsigned int i, dw;
     int count;
 
     if (value->namelen)
@@ -200,37 +198,37 @@ static void dump_value( const struct key_value *value, FILE *f )
     case REG_SZ:
     case REG_EXPAND_SZ:
     case REG_MULTI_SZ:
-        if (value->type != REG_SZ) fprintf( f, "str(%d):", value->type );
+        /* only output properly terminated strings in string format */
+        if (value->len < sizeof(WCHAR)) break;
+        if (value->len % sizeof(WCHAR)) break;
+        if (((WCHAR *)value->data)[value->len / sizeof(WCHAR) - 1]) break;
+        if (value->type != REG_SZ) fprintf( f, "str(%x):", value->type );
         fputc( '\"', f );
-        if (value->data) dump_strW( (WCHAR *)value->data, value->len / sizeof(WCHAR), f, "\"\"" );
-        fputc( '\"', f );
-        break;
+        dump_strW( (WCHAR *)value->data, value->len / sizeof(WCHAR), f, "\"\"" );
+        fprintf( f, "\"\n" );
+        return;
+
     case REG_DWORD:
-        if (value->len == sizeof(DWORD))
+        if (value->len != sizeof(dw)) break;
+        memcpy( &dw, value->data, sizeof(dw) );
+        fprintf( f, "dword:%08x\n", dw );
+        return;
+    }
+
+    if (value->type == REG_BINARY) count += fprintf( f, "hex:" );
+    else count += fprintf( f, "hex(%x):", value->type );
+    for (i = 0; i < value->len; i++)
+    {
+        count += fprintf( f, "%02x", *((unsigned char *)value->data + i) );
+        if (i < value->len-1)
         {
-            DWORD dw;
-            memcpy( &dw, value->data, sizeof(DWORD) );
-            fprintf( f, "dword:%08x", dw );
-            break;
-        }
-        /* else fall through */
-    default:
-        if (value->type == REG_BINARY) count += fprintf( f, "hex:" );
-        else count += fprintf( f, "hex(%x):", value->type );
-        for (i = 0; i < value->len; i++)
-        {
-            count += fprintf( f, "%02x", *((unsigned char *)value->data + i) );
-            if (i < value->len-1)
+            fputc( ',', f );
+            if (++count > 76)
             {
-                fputc( ',', f );
-                if (++count > 76)
-                {
-                    fprintf( f, "\\\n  " );
-                    count = 2;
-                }
+                fprintf( f, "\\\n  " );
+                count = 2;
             }
         }
-        break;
     }
     fputc( '\n', f );
 }
@@ -331,8 +329,8 @@ static void key_destroy( struct object *obj )
     free( key->class );
     for (i = 0; i <= key->last_value; i++)
     {
-        if (key->values[i].name) free( key->values[i].name );
-        if (key->values[i].data) free( key->values[i].data );
+        free( key->values[i].name );
+        free( key->values[i].data );
     }
     free( key->values );
     for (i = 0; i <= key->last_subkey; i++)
@@ -350,7 +348,7 @@ static void key_destroy( struct object *obj )
 }
 
 /* get the request vararg as registry path */
-inline static void get_req_path( struct unicode_str *str, int skip_root )
+static inline void get_req_path( struct unicode_str *str, int skip_root )
 {
     static const WCHAR root_name[] = { '\\','R','e','g','i','s','t','r','y','\\' };
 
@@ -1072,65 +1070,6 @@ static void file_read_error( const char *err, struct file_load_info *info )
         fprintf( stderr, "<fd>:%d: %s '%s'\n", info->line, err, info->buffer );
 }
 
-/* parse an escaped string back into Unicode */
-/* return the number of chars read from the input, or -1 on output overflow */
-static int parse_strW( WCHAR *dest, data_size_t *len, const char *src, char endchar )
-{
-    data_size_t count = sizeof(WCHAR);  /* for terminating null */
-    const char *p = src;
-    while (*p && *p != endchar)
-    {
-        if (*p != '\\') *dest = (WCHAR)*p++;
-        else
-        {
-            p++;
-            switch(*p)
-            {
-            case 'a': *dest = '\a'; p++; break;
-            case 'b': *dest = '\b'; p++; break;
-            case 'e': *dest = '\e'; p++; break;
-            case 'f': *dest = '\f'; p++; break;
-            case 'n': *dest = '\n'; p++; break;
-            case 'r': *dest = '\r'; p++; break;
-            case 't': *dest = '\t'; p++; break;
-            case 'v': *dest = '\v'; p++; break;
-            case 'x':  /* hex escape */
-                p++;
-                if (!isxdigit(*p)) *dest = 'x';
-                else
-                {
-                    *dest = to_hex(*p++);
-                    if (isxdigit(*p)) *dest = (*dest * 16) + to_hex(*p++);
-                    if (isxdigit(*p)) *dest = (*dest * 16) + to_hex(*p++);
-                    if (isxdigit(*p)) *dest = (*dest * 16) + to_hex(*p++);
-                }
-                break;
-            case '0':
-            case '1':
-            case '2':
-            case '3':
-            case '4':
-            case '5':
-            case '6':
-            case '7':  /* octal escape */
-                *dest = *p++ - '0';
-                if (*p >= '0' && *p <= '7') *dest = (*dest * 8) + (*p++ - '0');
-                if (*p >= '0' && *p <= '7') *dest = (*dest * 8) + (*p++ - '0');
-                break;
-            default:
-                *dest = (WCHAR)*p++;
-                break;
-            }
-        }
-        if ((count += sizeof(WCHAR)) > *len) return -1;  /* dest buffer overflow */
-        dest++;
-    }
-    *dest = 0;
-    if (!*p) return -1;  /* delimiter not found */
-    *len = count;
-    return p + 1 - src;
-}
-
 /* convert a data type tag to a value type */
 static int get_data_type( const char *buffer, int *type, int *parse_type )
 {
@@ -1153,12 +1092,12 @@ static int get_data_type( const char *buffer, int *type, int *parse_type )
 
     for (ptr = data_types; ptr->tag; ptr++)
     {
-        if (memcmp( ptr->tag, buffer, ptr->len )) continue;
+        if (strncmp( ptr->tag, buffer, ptr->len )) continue;
         *parse_type = ptr->parse_type;
         if ((*type = ptr->type) != -1) return ptr->len;
         /* "hex(xx):" is special */
         *type = (int)strtoul( buffer + 4, &end, 16 );
-        if ((end <= buffer) || memcmp( end, "):", 2 )) return 0;
+        if ((end <= buffer) || strncmp( end, "):", 2 )) return 0;
         return end + 2 - buffer;
     }
     return 0;
@@ -1172,10 +1111,11 @@ static struct key *load_key( struct key *base, const char *buffer, int flags,
     WCHAR *p;
     struct unicode_str name;
     int res, modif;
-    data_size_t len = strlen(buffer) * sizeof(WCHAR);
+    data_size_t len;
 
-    if (!get_file_tmp_space( info, len )) return NULL;
+    if (!get_file_tmp_space( info, strlen(buffer) * sizeof(WCHAR) )) return NULL;
 
+    len = info->tmplen;
     if ((res = parse_strW( info->tmp, &len, buffer, ']' )) == -1)
     {
         file_read_error( "Malformed key", info );
@@ -1206,17 +1146,18 @@ static int parse_hex( unsigned char *dest, data_size_t *len, const char *buffer 
 {
     const char *p = buffer;
     data_size_t count = 0;
+    char *end;
+
     while (isxdigit(*p))
     {
-        int val;
-        char buf[3];
-        memcpy( buf, p, 2 );
-        buf[2] = 0;
-        sscanf( buf, "%x", &val );
+        unsigned int val = strtoul( p, &end, 16 );
+        if (end == p || val > 0xff) return -1;
         if (count++ >= *len) return -1;  /* dest buffer overflow */
-        *dest++ = (unsigned char )val;
-        p += 2;
+        *dest++ = val;
+        p = end;
+        while (isspace(*p)) p++;
         if (*p == ',') p++;
+        while (isspace(*p)) p++;
     }
     *len = count;
     return p - buffer;
@@ -1229,10 +1170,10 @@ static struct key_value *parse_value_name( struct key *key, const char *buffer, 
     struct key_value *value;
     struct unicode_str name;
     int index;
-    data_size_t maxlen = strlen(buffer) * sizeof(WCHAR);
 
-    if (!get_file_tmp_space( info, maxlen )) return NULL;
+    if (!get_file_tmp_space( info, strlen(buffer) * sizeof(WCHAR) )) return NULL;
     name.str = info->tmp;
+    name.len = info->tmplen;
     if (buffer[0] == '@')
     {
         name.len = 0;
@@ -1240,10 +1181,10 @@ static struct key_value *parse_value_name( struct key *key, const char *buffer, 
     }
     else
     {
-        int r = parse_strW( info->tmp, &maxlen, buffer + 1, '\"' );
+        int r = parse_strW( info->tmp, &name.len, buffer + 1, '\"' );
         if (r == -1) goto error;
         *len = r + 1; /* for initial quote */
-        name.len = maxlen - sizeof(WCHAR);
+        name.len -= sizeof(WCHAR);  /* terminating null */
     }
     while (isspace(buffer[*len])) (*len)++;
     if (buffer[*len] != '=') goto error;
@@ -1273,8 +1214,8 @@ static int load_value( struct key *key, const char *buffer, struct file_load_inf
     switch(parse_type)
     {
     case REG_SZ:
-        len = strlen(buffer) * sizeof(WCHAR);
-        if (!get_file_tmp_space( info, len )) return 0;
+        if (!get_file_tmp_space( info, strlen(buffer) * sizeof(WCHAR) )) return 0;
+        len = info->tmplen;
         if ((res = parse_strW( info->tmp, &len, buffer, '\"' )) == -1) goto error;
         ptr = info->tmp;
         break;
@@ -1287,7 +1228,7 @@ static int load_value( struct key *key, const char *buffer, struct file_load_inf
         len = 0;
         for (;;)
         {
-            maxlen = 1 + strlen(buffer)/3;  /* 3 chars for one hex byte */
+            maxlen = 1 + strlen(buffer) / 2;  /* at least 2 chars for one hex byte */
             if (!get_file_tmp_space( info, len + maxlen )) return 0;
             if ((res = parse_hex( (unsigned char *)info->tmp + len, &maxlen, buffer )) == -1) goto error;
             len += maxlen;
@@ -1319,6 +1260,11 @@ static int load_value( struct key *key, const char *buffer, struct file_load_inf
 
  error:
     file_read_error( "Malformed value", info );
+    free( value->data );
+    value->data = NULL;
+    value->len  = 0;
+    value->type = REG_NONE;
+    make_dirty( key );
     return 0;
 }
 
@@ -1328,10 +1274,11 @@ static int get_prefix_len( struct key *key, const char *name, struct file_load_i
 {
     WCHAR *p;
     int res;
-    data_size_t len = strlen(name) * sizeof(WCHAR);
+    data_size_t len;
 
-    if (!get_file_tmp_space( info, len )) return 0;
+    if (!get_file_tmp_space( info, strlen(name) * sizeof(WCHAR) )) return 0;
 
+    len = info->tmplen;
     if ((res = parse_strW( info->tmp, &len, name, ']' )) == -1)
     {
         file_read_error( "Malformed key", info );
@@ -1682,11 +1629,8 @@ static void periodic_save( void *arg )
 /* start the periodic save timer */
 static void set_periodic_save_timer(void)
 {
-    struct timeval next = current_time;
-
-    add_timeout( &next, save_period );
     if (save_timeout_user) remove_timeout_user( save_timeout_user );
-    save_timeout_user = add_timeout_user( &next, periodic_save, NULL );
+    save_timeout_user = add_timeout_user( save_period, periodic_save, NULL );
 }
 
 /* save the modified registry branches to disk */
@@ -1713,7 +1657,6 @@ DECL_HANDLER(create_key)
     struct unicode_str name, class;
     unsigned int access = req->access;
 
-    if (access & MAXIMUM_ALLOWED) access = KEY_ALL_ACCESS;  /* FIXME: needs general solution */
     reply->hkey = 0;
 
     if (req->namelen > get_req_data_size())
@@ -1752,7 +1695,6 @@ DECL_HANDLER(open_key)
     struct unicode_str name;
     unsigned int access = req->access;
 
-    if (access & MAXIMUM_ALLOWED) access = KEY_ALL_ACCESS;  /* FIXME: needs general solution */
     reply->hkey = 0;
     /* NOTE: no access rights are required to open the parent key, only the child key */
     if ((parent = get_parent_hkey_obj( req->parent )))

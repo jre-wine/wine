@@ -2,6 +2,7 @@
  * Unit tests for console API
  *
  * Copyright (c) 2003,2004 Eric Pouech
+ * Copyright (c) 2007 Kirill K. Smirnov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,6 +22,9 @@
 #include "wine/test.h"
 #include <windows.h>
 #include <stdio.h>
+
+static BOOL (WINAPI *pGetConsoleInputExeNameA)(DWORD, LPSTR);
+static BOOL (WINAPI *pSetConsoleInputExeNameA)(LPCSTR);
 
 /* DEFAULT_ATTRIB is used for all initial filling of the console.
  * all modifications are made with TEST_ATTRIB so that we could check
@@ -48,6 +52,21 @@
   expect = ReadConsoleOutputAttribute((hCon), &__attr, 1, (c), &__len) == 1 && __len == 1 && __attr == (attr); \
   ok(expect, "At (%d,%d): expecting attr %04x got %04x\n", (c).X, (c).Y, (attr), __attr); \
 } while (0)
+
+static void init_function_pointers(void)
+{
+    HMODULE hKernel32;
+
+#define KERNEL32_GET_PROC(func)                                     \
+    p##func = (void *)GetProcAddress(hKernel32, #func);             \
+    if(!p##func) trace("GetProcAddress(hKernel32, '%s') failed\n", #func);
+
+    hKernel32 = GetModuleHandleA("kernel32.dll");
+    KERNEL32_GET_PROC(GetConsoleInputExeNameA);
+    KERNEL32_GET_PROC(SetConsoleInputExeNameA);
+
+#undef KERNEL32_GET_PROC
+}
 
 /* FIXME: this could be optimized on a speed point of view */
 static void resetContent(HANDLE hCon, COORD sbSize, BOOL content)
@@ -532,9 +551,8 @@ static void testCtrlHandler(void)
     mch_event = CreateEventA(NULL, TRUE, FALSE, NULL);
     mch_count = 0;
     ok(GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0), "Couldn't send ctrl-c event\n");
-#if 0  /* FIXME: it isn't synchronous on wine but it can still happen before we test */
-    todo_wine ok(mch_count == 1, "Event isn't synchronous\n");
-#endif
+    /* FIXME: it isn't synchronous on wine but it can still happen before we test */
+    if (0) ok(mch_count == 1, "Event isn't synchronous\n");
     ok(WaitForSingleObject(mch_event, 3000) == WAIT_OBJECT_0, "event sending didn't work\n");
     CloseHandle(mch_event);
 
@@ -552,11 +570,253 @@ static void testCtrlHandler(void)
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "Bad error %u\n", GetLastError());
 }
 
+/*
+ * Test console screen buffer:
+ * 1) Try to set invalid handle.
+ * 2) Try to set non-console handles.
+ * 3) Use CONOUT$ file as active SB.
+ * 4) Test cursor.
+ * 5) Test output codepage to show it is not a property of SB.
+ * 6) Test switching to old SB if we close all handles to current SB - works
+ * in Windows, TODO in wine.
+ *
+ * What is not tested but should be:
+ * 1) ScreenBufferInfo
+ */
+static void testScreenBuffer(HANDLE hConOut)
+{
+    HANDLE hConOutRW, hConOutRO, hConOutWT;
+    HANDLE hFileOutRW, hFileOutRO, hFileOutWT;
+    HANDLE hConOutNew;
+    char test_str1[] = "Test for SB1";
+    char test_str2[] = "Test for SB2";
+    char test_cp866[] = {0xe2, 0xa5, 0xe1, 0xe2, 0};
+    char test_cp1251[] = {0xf2, 0xe5, 0xf1, 0xf2, 0};
+    WCHAR test_unicode[] = {0x0442, 0x0435, 0x0441, 0x0442, 0};
+    WCHAR str_wbuf[20];
+    char str_buf[20];
+    DWORD len;
+    COORD c;
+    BOOL ret;
+    DWORD oldcp;
+
+    /* In the beginning set output codepage to 866 */
+    oldcp = GetConsoleOutputCP();
+    ok(SetConsoleOutputCP(866), "Cannot set output codepage to 866\n");
+
+    hConOutRW = CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                         CONSOLE_TEXTMODE_BUFFER, NULL);
+    ok(hConOutRW != INVALID_HANDLE_VALUE,
+       "Cannot create a new screen buffer for ReadWrite\n");
+    hConOutRO = CreateConsoleScreenBuffer(GENERIC_READ,
+                         FILE_SHARE_READ, NULL,
+                         CONSOLE_TEXTMODE_BUFFER, NULL);
+    ok(hConOutRO != INVALID_HANDLE_VALUE,
+       "Cannot create a new screen buffer for ReadOnly\n");
+    hConOutWT = CreateConsoleScreenBuffer(GENERIC_WRITE,
+                         FILE_SHARE_WRITE, NULL,
+                         CONSOLE_TEXTMODE_BUFFER, NULL);
+    ok(hConOutWT != INVALID_HANDLE_VALUE,
+       "Cannot create a new screen buffer for WriteOnly\n");
+
+    hFileOutRW = CreateFileA("NUL", GENERIC_READ | GENERIC_WRITE,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                             OPEN_EXISTING, 0, NULL);
+    ok(hFileOutRW != INVALID_HANDLE_VALUE, "Cannot open NUL for ReadWrite\n");
+    hFileOutRO = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ,
+                             NULL, OPEN_EXISTING, 0, NULL);
+    ok(hFileOutRO != INVALID_HANDLE_VALUE, "Cannot open NUL for ReadOnly\n");
+    hFileOutWT = CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_WRITE,
+                             NULL, OPEN_EXISTING, 0, NULL);
+    ok(hFileOutWT != INVALID_HANDLE_VALUE, "Cannot open NUL for WriteOnly\n");
+
+    /* Trying to set invalid handle */
+    SetLastError(0);
+    ok(!SetConsoleActiveScreenBuffer(INVALID_HANDLE_VALUE),
+       "Shouldn't succeed\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE,
+       "GetLastError: expecting %u got %u\n",
+       ERROR_INVALID_HANDLE, GetLastError());
+
+    /* Trying to set non-console handles */
+    SetLastError(0);
+    ok(!SetConsoleActiveScreenBuffer(hFileOutRW), "Shouldn't succeed\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE,
+       "GetLastError: expecting %u got %u\n",
+       ERROR_INVALID_HANDLE, GetLastError());
+
+    SetLastError(0);
+    ok(!SetConsoleActiveScreenBuffer(hFileOutRO), "Shouldn't succeed\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE,
+       "GetLastError: expecting %u got %u\n",
+       ERROR_INVALID_HANDLE, GetLastError());
+
+    SetLastError(0);
+    ok(!SetConsoleActiveScreenBuffer(hFileOutWT), "Shouldn't succeed\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE,
+       "GetLastError: expecting %u got %u\n",
+       ERROR_INVALID_HANDLE, GetLastError());
+
+    CloseHandle(hFileOutRW);
+    CloseHandle(hFileOutRO);
+    CloseHandle(hFileOutWT);
+
+    /* Trying to set SB handles with various access modes */
+    SetLastError(0);
+    ok(!SetConsoleActiveScreenBuffer(hConOutRO), "Shouldn't succeed\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE,
+       "GetLastError: expecting %u got %u\n",
+       ERROR_INVALID_HANDLE, GetLastError());
+
+    ok(SetConsoleActiveScreenBuffer(hConOutWT), "Couldn't set new WriteOnly SB\n");
+
+    ok(SetConsoleActiveScreenBuffer(hConOutRW), "Couldn't set new ReadWrite SB\n");
+
+    CloseHandle(hConOutWT);
+    CloseHandle(hConOutRO);
+
+    /* Now we have two ReadWrite SB, active must be hConOutRW */
+    /* Open current SB via CONOUT$ */
+    hConOutNew = CreateFileA("CONOUT$", GENERIC_READ|GENERIC_WRITE, 0,
+                             NULL, OPEN_EXISTING, 0, 0);
+    ok(hConOutNew != INVALID_HANDLE_VALUE, "CONOUT$ is not opened\n");
+
+
+    /* test cursor */
+    c.X = c.Y = 10;
+    SetConsoleCursorPosition(hConOut, c);
+    c.X = c.Y = 5;
+    SetConsoleCursorPosition(hConOutRW, c);
+    okCURSOR(hConOutNew, c);
+    c.X = c.Y = 10;
+    okCURSOR(hConOut, c);
+
+
+    c.X = c.Y = 0;
+
+    /* Write using hConOutNew... */
+    SetConsoleCursorPosition(hConOutNew, c);
+    ret = WriteConsoleA(hConOutNew, test_str2, lstrlenA(test_str2), &len, NULL);
+    ok (ret && len == lstrlenA(test_str2), "WriteConsoleA failed\n");
+    /* ... and read it back via hConOutRW */
+    ret = ReadConsoleOutputCharacterA(hConOutRW, str_buf, lstrlenA(test_str2), c, &len);
+    ok(ret && len == lstrlenA(test_str2), "ReadConsoleOutputCharacterA failed\n");
+    str_buf[lstrlenA(test_str2)] = 0;
+    ok(!lstrcmpA(str_buf, test_str2), "got '%s' expected '%s'\n", str_buf, test_str2);
+
+
+    /* Now test output codepage handling. Current is 866 as we set earlier. */
+    SetConsoleCursorPosition(hConOutRW, c);
+    ret = WriteConsoleA(hConOutRW, test_cp866, lstrlenA(test_cp866), &len, NULL);
+    ok(ret && len == lstrlenA(test_cp866), "WriteConsoleA failed\n");
+    ret = ReadConsoleOutputCharacterW(hConOutRW, str_wbuf, lstrlenA(test_cp866), c, &len);
+    ok(ret && len == lstrlenA(test_cp866), "ReadConsoleOutputCharacterW failed\n");
+    str_wbuf[lstrlenA(test_cp866)] = 0;
+    ok(!lstrcmpW(str_wbuf, test_unicode), "string does not match the pattern\n");
+
+    /*
+     * cp866 is OK, let's switch to cp1251.
+     * We expect that this codepage will be used in every SB - active and not.
+     */
+    ok(SetConsoleOutputCP(1251), "Cannot set output cp to 1251\n");
+    SetConsoleCursorPosition(hConOutRW, c);
+    ret = WriteConsoleA(hConOutRW, test_cp1251, lstrlenA(test_cp1251), &len, NULL);
+    ok(ret && len == lstrlenA(test_cp1251), "WriteConsoleA failed\n");
+    ret = ReadConsoleOutputCharacterW(hConOutRW, str_wbuf, lstrlenA(test_cp1251), c, &len);
+    ok(ret && len == lstrlenA(test_cp1251), "ReadConsoleOutputCharacterW failed\n");
+    str_wbuf[lstrlenA(test_cp1251)] = 0;
+    ok(!lstrcmpW(str_wbuf, test_unicode), "string does not match the pattern\n");
+
+    /* Check what has happened to hConOut. */
+    SetConsoleCursorPosition(hConOut, c);
+    ret = WriteConsoleA(hConOut, test_cp1251, lstrlenA(test_cp1251), &len, NULL);
+    ok(ret && len == lstrlenA(test_cp1251), "WriteConsoleA failed\n");
+    ret = ReadConsoleOutputCharacterW(hConOut, str_wbuf, lstrlenA(test_cp1251), c, &len);
+    ok(ret && len == lstrlenA(test_cp1251), "ReadConsoleOutputCharacterW failed\n");
+    str_wbuf[lstrlenA(test_cp1251)] = 0;
+    ok(!lstrcmpW(str_wbuf, test_unicode), "string does not match the pattern\n");
+
+    /* Close all handles of current console SB */
+    CloseHandle(hConOutNew);
+    CloseHandle(hConOutRW);
+
+    /* Now active SB should be hConOut */
+    hConOutNew = CreateFileA("CONOUT$", GENERIC_READ|GENERIC_WRITE, 0,
+                             NULL, OPEN_EXISTING, 0, 0);
+    ok(hConOutNew != INVALID_HANDLE_VALUE, "CONOUT$ is not opened\n");
+
+    /* Write using hConOutNew... */
+    SetConsoleCursorPosition(hConOutNew, c);
+    ret = WriteConsoleA(hConOutNew, test_str1, lstrlenA(test_str1), &len, NULL);
+    ok (ret && len == lstrlenA(test_str1), "WriteConsoleA failed\n");
+    /* ... and read it back via hConOut */
+    ret = ReadConsoleOutputCharacterA(hConOut, str_buf, lstrlenA(test_str1), c, &len);
+    ok(ret && len == lstrlenA(test_str1), "ReadConsoleOutputCharacterA failed\n");
+    str_buf[lstrlenA(test_str1)] = 0;
+    todo_wine ok(!lstrcmpA(str_buf, test_str1), "got '%s' expected '%s'\n", str_buf, test_str1);
+    CloseHandle(hConOutNew);
+
+    /* This is not really needed under Windows */
+    SetConsoleActiveScreenBuffer(hConOut);
+
+    /* restore codepage */
+    SetConsoleOutputCP(oldcp);
+}
+
+static void test_GetSetConsoleInputExeName(void)
+{
+    BOOL ret;
+    DWORD error;
+    char buffer[MAX_PATH], module[MAX_PATH], *p;
+    static char input_exe[MAX_PATH] = "winetest.exe";
+
+    SetLastError(0xdeadbeef);
+    ret = pGetConsoleInputExeNameA(0, NULL);
+    error = GetLastError();
+    ok(ret, "GetConsoleInputExeNameA failed\n");
+    ok(error == ERROR_BUFFER_OVERFLOW, "got %u expected ERROR_BUFFER_OVERFLOW\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetConsoleInputExeNameA(0, buffer);
+    error = GetLastError();
+    ok(ret, "GetConsoleInputExeNameA failed\n");
+    ok(error == ERROR_BUFFER_OVERFLOW, "got %u expected ERROR_BUFFER_OVERFLOW\n", error);
+
+    GetModuleFileNameA(GetModuleHandle(NULL), module, sizeof(module));
+    p = strrchr(module, '\\') + 1;
+
+    ret = pGetConsoleInputExeNameA(sizeof(buffer)/sizeof(buffer[0]), buffer);
+    ok(ret, "GetConsoleInputExeNameA failed\n");
+    todo_wine ok(!lstrcmpA(buffer, p), "got %s expected %s\n", buffer, p);
+
+    SetLastError(0xdeadbeef);
+    ret = pSetConsoleInputExeNameA(NULL);
+    error = GetLastError();
+    ok(!ret, "SetConsoleInputExeNameA failed\n");
+    ok(error == ERROR_INVALID_PARAMETER, "got %u expected ERROR_INVALID_PARAMETER\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = pSetConsoleInputExeNameA("");
+    error = GetLastError();
+    ok(!ret, "SetConsoleInputExeNameA failed\n");
+    ok(error == ERROR_INVALID_PARAMETER, "got %u expected ERROR_INVALID_PARAMETER\n", error);
+
+    ret = pSetConsoleInputExeNameA(input_exe);
+    ok(ret, "SetConsoleInputExeNameA failed\n");
+
+    ret = pGetConsoleInputExeNameA(sizeof(buffer)/sizeof(buffer[0]), buffer);
+    ok(ret, "GetConsoleInputExeNameA failed\n");
+    ok(!lstrcmpA(buffer, input_exe), "got %s expected %s\n", buffer, input_exe);
+}
+
 START_TEST(console)
 {
     HANDLE hConIn, hConOut;
     BOOL ret;
     CONSOLE_SCREEN_BUFFER_INFO	sbi;
+
+    init_function_pointers();
 
     /* be sure we have a clean console (and that's our own)
      * FIXME: this will make the test fail (currently) if we don't run
@@ -586,8 +846,16 @@ START_TEST(console)
     /* testBottomScroll(); */
     /* will test all the scrolling operations */
     testScroll(hConOut, sbi.dwSize);
-    /* will test sb creation / modification... */
-    /* testScreenBuffer() */
+    /* will test sb creation / modification / codepage handling */
+    testScreenBuffer(hConOut);
     testCtrlHandler();
     /* still to be done: access rights & access on objects */
+
+    if (!pGetConsoleInputExeNameA || !pSetConsoleInputExeNameA)
+    {
+        skip("GetConsoleInputExeNameA and/or SetConsoleInputExeNameA is not available\n");
+        return;
+    }
+    else
+        test_GetSetConsoleInputExeName();
 }

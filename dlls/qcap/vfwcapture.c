@@ -38,7 +38,6 @@
 #include "pin.h"
 #include "capture.h"
 #include "uuids.h"
-#include "mmreg.h"
 #include "vfwmsgs.h"
 #include "amvideo.h"
 #include "strmif.h"
@@ -112,6 +111,7 @@ IUnknown * WINAPI QCAP_createVFWCaptureFilter(IUnknown *pUnkOuter, HRESULT *phr)
     pVfwCapture->state = State_Stopped;
     pVfwCapture->init = FALSE;
     InitializeCriticalSection(&pVfwCapture->csFilter);
+    pVfwCapture->csFilter.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": VfwCapture.csFilter");
     hr = VfwPin_Construct((IBaseFilter *)&pVfwCapture->lpVtbl,
                    &pVfwCapture->csFilter, &pVfwCapture->pOutputPin);
     if (!SUCCEEDED(hr))
@@ -208,6 +208,7 @@ static ULONG WINAPI VfwCapture_Release(IBaseFilter * iface)
             IPin_Disconnect(This->pOutputPin);
         }
         IPin_Release(This->pOutputPin);
+        This->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->csFilter);
         This->lpVtbl = NULL;
         CoTaskMemFree(This);
@@ -766,6 +767,8 @@ VfwPin_Construct( IBaseFilter * pBaseFilter, LPCRITICAL_SECTION pCritSec,
         *ppPin = (IPin *)(&pPinImpl->pin.pin.lpVtbl);
         return S_OK;
     }
+
+    CoTaskMemFree(pPinImpl);
     return E_FAIL;
 }
 

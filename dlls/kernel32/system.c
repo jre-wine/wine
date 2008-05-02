@@ -24,7 +24,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
 #include "wine/winbase16.h"
 #include "wine/winuser16.h"
 #include "wownt32.h"
@@ -175,7 +174,7 @@ static void call_timer_proc16( WORD timer )
     context.SegGs = wine_get_gs();
     context.SegCs = SELECTOROF( proc );
     context.Eip   = OFFSETOF( proc );
-    context.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + (WORD)&((STACK16FRAME*)0)->bp;
+    context.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + FIELD_OFFSET(STACK16FRAME,bp);
     context.Eax   = timer;
 
     WOWCallback16Ex( 0, WCB16_REGS, 0, NULL, (DWORD *)&context );

@@ -83,9 +83,9 @@ DWORD WINAPI SHCopyKeyA(HKEY,LPCSTR,HKEY,DWORD);
 DWORD WINAPI SHCopyKeyW(HKEY,LPCWSTR,HKEY,DWORD);
 #define SHCopyKey WINELIB_NAME_AW(SHCopyKey)
 
-/* Undocumented registry functions */
-
 HKEY WINAPI  SHRegDuplicateHKey(HKEY);
+
+/* Undocumented registry functions */
 
 DWORD WINAPI SHDeleteOrphanKeyA(HKEY,LPCSTR);
 DWORD WINAPI SHDeleteOrphanKeyW(HKEY,LPCWSTR);
@@ -1040,6 +1040,10 @@ HRESULT WINAPI DllInstall(BOOL,LPCWSTR) DECLSPEC_HIDDEN;
 #define OS_APPLIANCE              0x24
 
 BOOL WINAPI IsOS(DWORD);
+
+/* SHSetTimerQueueTimer definitions */
+#define TPS_EXECUTEIO    0x00000001
+#define TPS_LONGEXECTIME 0x00000008
 
 #include <poppack.h> 
 

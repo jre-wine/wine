@@ -55,37 +55,6 @@ static WCHAR const tmodel_both[] =
 {'B','o','t','h',0};
 
 /*
- * Delete a key and all its subkeys
- */
-HRESULT DeleteEntireSubKey(HKEY hkey, LPWSTR strSubKey)
-{
-    WCHAR buffer[MAX_KEY_LEN];
-    DWORD dw = MAX_KEY_LEN;
-    FILETIME ft;
-    HKEY hk;
-    LONG ret = RegOpenKeyExW(hkey, strSubKey, 0, MAXIMUM_ALLOWED, &hk);
-
-    if (ERROR_SUCCESS == ret)
-    {
-        /* Keep on enumerating the first key and deleting that */
-        for( ; ; )
-        {
-            dw = MAX_KEY_LEN;
-
-            ret = RegEnumKeyExW(hk, 0, buffer, &dw, NULL, NULL, NULL, &ft);
-
-            if (ERROR_SUCCESS == ret)
-                DeleteEntireSubKey(hk, buffer);
-            else
-                break;
-        }
-        RegCloseKey(hk);
-        RegDeleteKeyW(hkey, strSubKey);
-    }
-    return NOERROR;
-}
-
-/*
  * SetupRegisterClass()
  */
 static HRESULT SetupRegisterClass(HKEY clsid, LPCWSTR szCLSID,
@@ -94,7 +63,7 @@ static HRESULT SetupRegisterClass(HKEY clsid, LPCWSTR szCLSID,
                                   LPCWSTR szServerType,
                                   LPCWSTR szThreadingModel)
 {
-    HKEY hkey, hsubkey;
+    HKEY hkey, hsubkey = NULL;
     LONG ret = RegCreateKeyW(clsid, szCLSID, &hkey);
     if (ERROR_SUCCESS != ret)
         return HRESULT_FROM_WIN32(ret);
@@ -252,7 +221,7 @@ static HRESULT SetupRegisterAllClasses(const CFactoryTemplate * pList, int num,
                                         pList->m_Name, szFileName,
                                         ips32_keyname, tmodel_both);
             else
-                hr = DeleteEntireSubKey(hkey, szCLSID);
+                hr = RegDeleteTreeW(hkey, szCLSID);
         }
     }
     RegCloseKey(hkey);
@@ -271,16 +240,12 @@ static HRESULT SetupRegisterAllClasses(const CFactoryTemplate * pList, int num,
  *
  ****************************************************************************/
 HRESULT SetupRegisterServers(const CFactoryTemplate * pList, int num,
-                             HINSTANCE hinst, BOOL bRegister)
+                             BOOL bRegister)
 {
+    static const WCHAR szFileName[] = {'q','c','a','p','.','d','l','l',0};
     HRESULT hr = NOERROR;
-    WCHAR szFileName[MAX_PATH];
     IFilterMapper2 *pIFM2 = NULL;
     IFilterMapper *pIFM = NULL;
-
-    /* Win95 wouldn't support the Unicode version of this API!! */
-    if (!GetModuleFileNameW(hinst, szFileName, MAX_PATH))
-        return HRESULT_FROM_WIN32(GetLastError());
 
     /* first register all server classes, just to make sure */
     if (bRegister)
@@ -348,7 +313,7 @@ HRESULT SetupRegisterServers(const CFactoryTemplate * pList, int num,
  * This function is table driven using the static members of the
  * CFactoryTemplate class defined in the Dll.
  *
- * It calls the intialize function for any class in CFactoryTemplate with
+ * It calls the initialize function for any class in CFactoryTemplate with
  * one defined.
  *
  ****************************************************************************/

@@ -234,9 +234,9 @@ void BiosTick( WORD timer )
  *           DOSMEM_Collapse
  *
  * Helper function for internal use only.
- * Atach all following free blocks to this one, even if this one is not free.
+ * Attach all following free blocks to this one, even if this one is not free.
  */
-void DOSMEM_Collapse( MCB* mcb )
+static void DOSMEM_Collapse( MCB* mcb )
 {
     MCB* next = MCB_NEXT( mcb );
 
@@ -285,7 +285,7 @@ LPVOID DOSMEM_AllocBlock(UINT size, UINT16* pseg)
         if (curr->psp == MCB_PSP_FREE)
         {
             DOSMEM_Collapse( curr );            
-            /* is it large enough (one paragaph for the MCB)? */
+            /* is it large enough (one paragraph for the MCB)? */
             if (curr->size >= size)
             {
                 if (curr->size > size)
@@ -300,7 +300,7 @@ LPVOID DOSMEM_AllocBlock(UINT size, UINT16* pseg)
                 }
                 /* curr is the found block */
                 curr->psp = psp;
-                if( pseg ) *pseg = (((char*)curr) + 16 - (char*)DOSMEM_dosmem) >> 4;
+                if( pseg ) *pseg = (((char*)curr) + 16 - DOSMEM_dosmem) >> 4;
                 return (LPVOID) ((char*)curr + 16);
             }
         }

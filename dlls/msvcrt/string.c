@@ -21,28 +21,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define _ISOC99_SOURCE
+#include "config.h"
+
 #include <stdlib.h>
 #include "msvcrt.h"
+#include "msvcrt/errno.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
-
-/* INTERNAL: MSVCRT_malloc() based strndup */
-char* msvcrt_strndup(const char* buf, unsigned int size)
-{
-  char* ret;
-  unsigned int len = strlen(buf), max_len;
-
-  max_len = size <= len? size : len + 1;
-
-  ret = MSVCRT_malloc(max_len);
-  if (ret)
-  {
-    memcpy(ret,buf,max_len);
-    ret[max_len] = 0;
-  }
-  return ret;
-}
 
 /*********************************************************************
  *		_mbsdup (MSVCRT.@)
@@ -167,6 +154,57 @@ int CDECL MSVCRT_strcoll( const char* str1, const char* str2 )
 }
 
 /*********************************************************************
+ *      strcpy_s (MSVCRT.@)
+ */
+int CDECL MSVCRT_strcpy_s( char* dst, MSVCRT_size_t elem, const char* src )
+{
+    MSVCRT_size_t i;
+    if(!elem) return EINVAL;
+    if(!dst) return EINVAL;
+    if(!src)
+    {
+        dst[0] = '\0';
+        return EINVAL;
+    }
+
+    for(i = 0; i < elem; i++)
+    {
+        if((dst[i] = src[i]) == '\0') return 0;
+    }
+    dst[0] = '\0';
+    return ERANGE;
+}
+
+/*********************************************************************
+ *      strcat_s (MSVCRT.@)
+ */
+int CDECL MSVCRT_strcat_s( char* dst, MSVCRT_size_t elem, const char* src )
+{
+    MSVCRT_size_t i, j;
+    if(!dst) return EINVAL;
+    if(elem == 0) return EINVAL;
+    if(!src)
+    {
+        dst[0] = '\0';
+        return EINVAL;
+    }
+
+    for(i = 0; i < elem; i++)
+    {
+        if(dst[i] == '\0')
+        {
+            for(j = 0; (j + i) < elem; j++)
+            {
+                if((dst[j + i] = src[j]) == '\0') return 0;
+            }
+        }
+    }
+    /* Set the first element to 0, not the first element after the skipped part */
+    dst[0] = '\0';
+    return ERANGE;
+}
+
+/*********************************************************************
  *		strxfrm (MSVCRT.@)
  */
 MSVCRT_size_t CDECL MSVCRT_strxfrm( char *dest, const char *src, MSVCRT_size_t len )
@@ -183,4 +221,33 @@ int CDECL MSVCRT__stricoll( const char* str1, const char* str2 )
   /* FIXME: handle collates */
   TRACE("str1 %s str2 %s\n", debugstr_a(str1), debugstr_a(str2));
   return lstrcmpiA( str1, str2 );
+}
+
+/********************************************************************
+ *		_atoldbl (MSVCRT.@)
+ */
+int CDECL MSVCRT__atoldbl(MSVCRT__LDOUBLE *value, const char *str)
+{
+  /* FIXME needs error checking for huge/small values */
+#ifdef HAVE_STRTOLD
+  TRACE("str %s value %p\n",str,value);
+  value->x = strtold(str,0);
+#else
+  FIXME("stub, str %s value %p\n",str,value);
+#endif
+  return 0;
+}
+
+/********************************************************************
+ *		__STRINGTOLD (MSVCRT.@)
+ */
+int CDECL __STRINGTOLD( MSVCRT__LDOUBLE *value, char **endptr, const char *str, int flags )
+{
+#ifdef HAVE_STRTOLD
+    FIXME("%p %p %s %x partial stub\n", value, endptr, str, flags );
+    value->x = strtold(str,endptr);
+#else
+    FIXME("%p %p %s %x stub\n", value, endptr, str, flags );
+#endif
+    return 0;
 }

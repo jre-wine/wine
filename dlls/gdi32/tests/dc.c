@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define WINVER 0x0501 /* request latest DEVMODE */
+
 #include <assert.h>
 #include <stdio.h>
 
@@ -90,17 +92,17 @@ todo_wine
 }
 
     ret = IntersectClipRect(hdc, 0, 0, 50, 50);
-#if 0  /* XP returns COMPLEXREGION although dump_region reports only 1 rect */
-    ok(ret == SIMPLEREGION, "IntersectClipRect returned %d instead of SIMPLEREGION\n", ret);
-#endif
-    if (ret != SIMPLEREGION)
+    if (ret == COMPLEXREGION)
     {
+        /* XP returns COMPLEXREGION although dump_region reports only 1 rect */
         trace("Windows BUG: IntersectClipRect returned %d instead of SIMPLEREGION\n", ret);
         /* let's make sure that it's a simple region */
         ret = GetClipRgn(hdc, hrgn);
         ok(ret == 1, "GetClipRgn returned %d instead of 1\n", ret);
         dump_region(hrgn);
     }
+    else
+        ok(ret == SIMPLEREGION, "IntersectClipRect returned %d instead of SIMPLEREGION\n", ret);
 
     ret = GetClipBox(hdc, &rc_clip);
     ok(ret == SIMPLEREGION, "GetClipBox returned %d instead of SIMPLEREGION\n", ret);
@@ -173,8 +175,68 @@ static void test_savedc(void)
     DeleteDC(hdc);
 }
 
+static void test_GdiConvertToDevmodeW(void)
+{
+    DEVMODEW * (WINAPI *pGdiConvertToDevmodeW)(const DEVMODEA *);
+    DEVMODEA dmA;
+    DEVMODEW *dmW;
+    BOOL ret;
+
+    pGdiConvertToDevmodeW = (void *)GetProcAddress(GetModuleHandleA("gdi32.dll"), "GdiConvertToDevmodeW");
+    if (!pGdiConvertToDevmodeW)
+    {
+        skip("GdiConvertToDevmodeW is not available on this platform\n");
+        return;
+    }
+
+    ret = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dmA);
+    ok(ret, "EnumDisplaySettingsExA error %u\n", GetLastError());
+    ok(dmA.dmSize >= FIELD_OFFSET(DEVMODEA, dmICMMethod), "dmSize is too small: %04x\n", dmA.dmSize);
+    ok(dmA.dmSize <= sizeof(DEVMODEA), "dmSize is too large: %04x\n", dmA.dmSize);
+
+    dmW = pGdiConvertToDevmodeW(&dmA);
+    ok(dmW->dmSize >= FIELD_OFFSET(DEVMODEW, dmICMMethod), "dmSize is too small: %04x\n", dmW->dmSize);
+    ok(dmW->dmSize <= sizeof(DEVMODEW), "dmSize is too large: %04x\n", dmW->dmSize);
+    HeapFree(GetProcessHeap(), 0, dmW);
+
+    dmA.dmSize = FIELD_OFFSET(DEVMODEA, dmFields) + sizeof(dmA.dmFields);
+    dmW = pGdiConvertToDevmodeW(&dmA);
+    ok(dmW->dmSize == FIELD_OFFSET(DEVMODEW, dmFields) + sizeof(dmW->dmFields),
+       "wrong size %u\n", dmW->dmSize);
+    HeapFree(GetProcessHeap(), 0, dmW);
+
+    dmA.dmICMMethod = DMICMMETHOD_NONE;
+    dmA.dmSize = FIELD_OFFSET(DEVMODEA, dmICMMethod) + sizeof(dmA.dmICMMethod);
+    dmW = pGdiConvertToDevmodeW(&dmA);
+    ok(dmW->dmSize == FIELD_OFFSET(DEVMODEW, dmICMMethod) + sizeof(dmW->dmICMMethod),
+       "wrong size %u\n", dmW->dmSize);
+    ok(dmW->dmICMMethod == DMICMMETHOD_NONE,
+       "expected DMICMMETHOD_NONE, got %u\n", dmW->dmICMMethod);
+    HeapFree(GetProcessHeap(), 0, dmW);
+
+    dmA.dmSize = 1024;
+    dmW = pGdiConvertToDevmodeW(&dmA);
+    ok(dmW->dmSize == FIELD_OFFSET(DEVMODEW, dmPanningHeight) + sizeof(dmW->dmPanningHeight),
+       "wrong size %u\n", dmW->dmSize);
+    HeapFree(GetProcessHeap(), 0, dmW);
+
+    SetLastError(0xdeadbeef);
+    dmA.dmSize = 0;
+    dmW = pGdiConvertToDevmodeW(&dmA);
+    ok(!dmW, "GdiConvertToDevmodeW should fail\n");
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", GetLastError());
+
+    /* this is the minimal dmSize that XP accepts */
+    dmA.dmSize = FIELD_OFFSET(DEVMODEA, dmFields);
+    dmW = pGdiConvertToDevmodeW(&dmA);
+    ok(dmW->dmSize == FIELD_OFFSET(DEVMODEW, dmFields),
+       "expected %04x, got %04x\n", FIELD_OFFSET(DEVMODEW, dmFields), dmW->dmSize);
+    HeapFree(GetProcessHeap(), 0, dmW);
+}
+
 START_TEST(dc)
 {
     test_savedc();
     test_savedc_2();
+    test_GdiConvertToDevmodeW();
 }

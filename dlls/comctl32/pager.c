@@ -93,7 +93,7 @@ typedef struct
 #define REPEAT_DELAY     50
 
 static void
-PAGER_GetButtonRects(PAGER_INFO* infoPtr, RECT* prcTopLeft, RECT* prcBottomRight, BOOL bClientCoords)
+PAGER_GetButtonRects(const PAGER_INFO* infoPtr, RECT* prcTopLeft, RECT* prcBottomRight, BOOL bClientCoords)
 {
     RECT rcWindow;
     GetWindowRect (infoPtr->hwndSelf, &rcWindow);
@@ -299,7 +299,7 @@ PAGER_ForwardMouse (PAGER_INFO* infoPtr, BOOL bFwd)
 }
 
 static inline LRESULT
-PAGER_GetButtonState (PAGER_INFO* infoPtr, INT btn)
+PAGER_GetButtonState (const PAGER_INFO* infoPtr, INT btn)
 {
     LRESULT btnState = PGF_INVISIBLE;
     TRACE("[%p]\n", infoPtr->hwndSelf);
@@ -314,35 +314,35 @@ PAGER_GetButtonState (PAGER_INFO* infoPtr, INT btn)
 
 
 static inline INT
-PAGER_GetPos(PAGER_INFO *infoPtr)
+PAGER_GetPos(const PAGER_INFO *infoPtr)
 {
     TRACE("[%p] returns %d\n", infoPtr->hwndSelf, infoPtr->nPos);
     return infoPtr->nPos;
 }
 
 static inline INT
-PAGER_GetButtonSize(PAGER_INFO *infoPtr)
+PAGER_GetButtonSize(const PAGER_INFO *infoPtr)
 {
     TRACE("[%p] returns %d\n", infoPtr->hwndSelf, infoPtr->nButtonSize);
     return infoPtr->nButtonSize;
 }
 
 static inline INT
-PAGER_GetBorder(PAGER_INFO *infoPtr)
+PAGER_GetBorder(const PAGER_INFO *infoPtr)
 {
     TRACE("[%p] returns %d\n", infoPtr->hwndSelf, infoPtr->nBorder);
     return infoPtr->nBorder;
 }
 
 static inline COLORREF
-PAGER_GetBkColor(PAGER_INFO *infoPtr)
+PAGER_GetBkColor(const PAGER_INFO *infoPtr)
 {
     TRACE("[%p] returns %06x\n", infoPtr->hwndSelf, infoPtr->clrBk);
     return infoPtr->clrBk;
 }
 
 static void
-PAGER_CalcSize (PAGER_INFO *infoPtr, INT* size, BOOL getWidth)
+PAGER_CalcSize (const PAGER_INFO *infoPtr, INT* size, BOOL getWidth)
 {
     NMPGCALCSIZE nmpgcs;
     ZeroMemory (&nmpgcs, sizeof (NMPGCALCSIZE));
@@ -352,8 +352,7 @@ PAGER_CalcSize (PAGER_INFO *infoPtr, INT* size, BOOL getWidth)
     nmpgcs.dwFlag = getWidth ? PGF_CALCWIDTH : PGF_CALCHEIGHT;
     nmpgcs.iWidth = getWidth ? *size : 0;
     nmpgcs.iHeight = getWidth ? 0 : *size;
-    SendMessageW (infoPtr->hwndNotify, WM_NOTIFY,
-                  (WPARAM)nmpgcs.hdr.idFrom, (LPARAM)&nmpgcs);
+    SendMessageW (infoPtr->hwndNotify, WM_NOTIFY, nmpgcs.hdr.idFrom, (LPARAM)&nmpgcs);
 
     *size = getWidth ? nmpgcs.iWidth : nmpgcs.iHeight;
 
@@ -763,8 +762,7 @@ PAGER_Scroll(PAGER_INFO* infoPtr, INT dir)
         }
         nmpgScroll.iScroll -= 2*infoPtr->nButtonSize;
 
-        SendMessageW (infoPtr->hwndNotify, WM_NOTIFY,
-                    (WPARAM)nmpgScroll.hdr.idFrom, (LPARAM)&nmpgScroll);
+        SendMessageW (infoPtr->hwndNotify, WM_NOTIFY, nmpgScroll.hdr.idFrom, (LPARAM)&nmpgScroll);
 
         TRACE("[%p] PGN_SCROLL returns iScroll=%d\n", infoPtr->hwndSelf, nmpgScroll.iScroll);
 
@@ -783,7 +781,7 @@ PAGER_Scroll(PAGER_INFO* infoPtr, INT dir)
 }
 
 static LRESULT
-PAGER_FmtLines(PAGER_INFO *infoPtr)
+PAGER_FmtLines(const PAGER_INFO *infoPtr)
 {
     /* initiate NCCalcSize to resize client wnd and get size */
     SetWindowPos(infoPtr->hwndSelf, 0, 0, 0, 0, 0,
@@ -798,7 +796,7 @@ PAGER_FmtLines(PAGER_INFO *infoPtr)
 }
 
 static LRESULT
-PAGER_Create (HWND hwnd, LPCREATESTRUCTW lpcs)
+PAGER_Create (HWND hwnd, const CREATESTRUCTW *lpcs)
 {
     PAGER_INFO *infoPtr;
 
@@ -898,7 +896,7 @@ PAGER_NCCalcSize(PAGER_INFO* infoPtr, WPARAM wParam, LPRECT lpRect)
 }
 
 static LRESULT
-PAGER_NCPaint (PAGER_INFO* infoPtr, HRGN hRgn)
+PAGER_NCPaint (const PAGER_INFO* infoPtr, HRGN hRgn)
 {
     RECT rcBottomRight, rcTopLeft;
     HDC hdc;
@@ -923,7 +921,7 @@ PAGER_NCPaint (PAGER_INFO* infoPtr, HRGN hRgn)
 }
 
 static INT
-PAGER_HitTest (PAGER_INFO* infoPtr, const POINT * pt)
+PAGER_HitTest (const PAGER_INFO* infoPtr, const POINT * pt)
 {
     RECT clientRect, rcTopLeft, rcBottomRight;
     POINT ptWindow;
@@ -955,7 +953,7 @@ PAGER_HitTest (PAGER_INFO* infoPtr, const POINT * pt)
 }
 
 static LRESULT
-PAGER_NCHitTest (PAGER_INFO* infoPtr, INT x, INT y)
+PAGER_NCHitTest (const PAGER_INFO* infoPtr, INT x, INT y)
 {
     POINT pt;
     INT nHit;
@@ -1076,8 +1074,7 @@ PAGER_MouseMove (PAGER_INFO* infoPtr, INT keys, INT x, INT y)
         	nmhdr.hwndFrom = infoPtr->hwndSelf;
         	nmhdr.idFrom   = GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_ID);
         	nmhdr.code = NM_RELEASEDCAPTURE;
-        	SendMessageW(infoPtr->hwndNotify, WM_NOTIFY,
-                         (WPARAM)nmhdr.idFrom, (LPARAM)&nmhdr);
+		SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, nmhdr.idFrom, (LPARAM)&nmhdr);
         }
         if (IsWindow(infoPtr->hwndSelf))
             KillTimer(infoPtr->hwndSelf, TIMERID1);
@@ -1203,7 +1200,7 @@ PAGER_Timer (PAGER_INFO* infoPtr, INT nTimerId)
 }
 
 static LRESULT
-PAGER_EraseBackground (PAGER_INFO* infoPtr, HDC hdc)
+PAGER_EraseBackground (const PAGER_INFO* infoPtr, HDC hdc)
 {
     POINT pt, ptorig;
     HWND parent;
@@ -1237,11 +1234,11 @@ PAGER_Size (PAGER_INFO* infoPtr, INT type, INT x, INT y)
 
 
 static LRESULT 
-PAGER_StyleChanged(PAGER_INFO *infoPtr, WPARAM wStyleType, LPSTYLESTRUCT lpss)
+PAGER_StyleChanged(PAGER_INFO *infoPtr, WPARAM wStyleType, const STYLESTRUCT *lpss)
 {
     DWORD oldStyle = infoPtr->dwStyle;
 
-    TRACE("(styletype=%x, styleOld=0x%08x, styleNew=0x%08x)\n",
+    TRACE("(styletype=%lx, styleOld=0x%08x, styleNew=0x%08x)\n",
           wStyleType, lpss->styleOld, lpss->styleNew);
 
     if (wStyleType != GWL_STYLE) return 0;

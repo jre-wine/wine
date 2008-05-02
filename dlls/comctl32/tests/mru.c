@@ -68,10 +68,78 @@ static HMODULE hComctl32;
 static HANDLE (WINAPI *pCreateMRUListA)(LPCREATEMRULISTA);
 static void   (WINAPI *pFreeMRUList)(HANDLE);
 static INT    (WINAPI *pAddMRUStringA)(HANDLE,LPCSTR);
+static INT    (WINAPI *pEnumMRUList)(HANDLE,INT,LPVOID,DWORD);
 /*
 static INT    (WINAPI *pFindMRUStringA)(HANDLE,LPCSTR,LPINT);
-static INT    (WINAPI *pEnumMRUList)(HANDLE,INT,LPVOID,DWORD);
 */
+
+
+/* Based on RegDeleteTreeW from dlls/advapi32/registry.c */
+static LSTATUS mru_RegDeleteTreeA(HKEY hKey, LPCSTR lpszSubKey)
+{
+    LONG ret;
+    DWORD dwMaxSubkeyLen, dwMaxValueLen;
+    DWORD dwMaxLen, dwSize;
+    CHAR szNameBuf[MAX_PATH], *lpszName = szNameBuf;
+    HKEY hSubKey = hKey;
+
+    if(lpszSubKey)
+    {
+        ret = RegOpenKeyExA(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
+        if (ret) return ret;
+    }
+
+    /* Get highest length for keys, values */
+    ret = RegQueryInfoKeyA(hSubKey, NULL, NULL, NULL, NULL,
+            &dwMaxSubkeyLen, NULL, NULL, &dwMaxValueLen, NULL, NULL, NULL);
+    if (ret) goto cleanup;
+
+    dwMaxSubkeyLen++;
+    dwMaxValueLen++;
+    dwMaxLen = max(dwMaxSubkeyLen, dwMaxValueLen);
+    if (dwMaxLen > sizeof(szNameBuf)/sizeof(CHAR))
+    {
+        /* Name too big: alloc a buffer for it */
+        if (!(lpszName = HeapAlloc( GetProcessHeap(), 0, dwMaxLen*sizeof(CHAR))))
+        {
+            ret = ERROR_NOT_ENOUGH_MEMORY;
+            goto cleanup;
+        }
+    }
+
+
+    /* Recursively delete all the subkeys */
+    while (TRUE)
+    {
+        dwSize = dwMaxLen;
+        if (RegEnumKeyExA(hSubKey, 0, lpszName, &dwSize, NULL,
+                          NULL, NULL, NULL)) break;
+
+        ret = mru_RegDeleteTreeA(hSubKey, lpszName);
+        if (ret) goto cleanup;
+    }
+
+    if (lpszSubKey)
+        ret = RegDeleteKeyA(hKey, lpszSubKey);
+    else
+        while (TRUE)
+        {
+            dwSize = dwMaxLen;
+            if (RegEnumValueA(hKey, 0, lpszName, &dwSize,
+                  NULL, NULL, NULL, NULL)) break;
+
+            ret = RegDeleteValueA(hKey, lpszName);
+            if (ret) goto cleanup;
+        }
+
+cleanup:
+    /* Free buffer if allocated */
+    if (lpszName != szNameBuf)
+        HeapFree( GetProcessHeap(), 0, lpszName);
+    if(lpszSubKey)
+        RegCloseKey(hSubKey);
+    return ret;
+}
 
 static BOOL create_reg_entries(void)
 {
@@ -91,7 +159,7 @@ static void delete_reg_entries(void)
     if (RegOpenKeyExA(HKEY_CURRENT_USER, REG_TEST_BASEKEYA, 0, KEY_ALL_ACCESS,
                       &hKey))
         return;
-    SHDeleteKeyA(hKey, REG_TEST_BASESUBKEYA);
+    mru_RegDeleteTreeA(hKey, REG_TEST_BASESUBKEYA);
     RegCloseKey(hKey);
 }
 
@@ -162,16 +230,23 @@ static void test_MRUListA(void)
     pCreateMRUListA = (void*)GetProcAddress(hComctl32,(LPCSTR)151);
     pFreeMRUList = (void*)GetProcAddress(hComctl32,(LPCSTR)152);
     pAddMRUStringA = (void*)GetProcAddress(hComctl32,(LPCSTR)153);
-    if (!pCreateMRUListA || !pFreeMRUList || !pAddMRUStringA)
-        return;
+    pEnumMRUList = (void*)GetProcAddress(hComctl32,(LPCSTR)154);
 
-#if 0 /* Create (NULL) - crashes native */
+    if (!pCreateMRUListA || !pFreeMRUList || !pAddMRUStringA || !pEnumMRUList)
+    {
+        skip("MRU entry points not found\n");
+        return;
+    }
+
+    if (0)
+    {
+    /* Create (NULL) - crashes native */
     hMRU = pCreateMRUListA(NULL);
-#endif
+    }
 
     /* Create (size too small) */
     mruA.cbSize = sizeof(mruA) - 2;
-    hMRU = create_mruA(NULL, MRUF_STRING_LIST, cmp_mru_strA);
+    hMRU = create_mruA(NULL, MRUF_STRING_LIST, (PROC)cmp_mru_strA);
     ok (!hMRU && !GetLastError(),
         "CreateMRUListA(too small) expected NULL,0 got %p,%d\n",
         hMRU, GetLastError());
@@ -179,21 +254,21 @@ static void test_MRUListA(void)
 
     /* Create (size too big) */
     mruA.cbSize = sizeof(mruA) + 2;
-    hMRU = create_mruA(NULL, MRUF_STRING_LIST, cmp_mru_strA);
+    hMRU = create_mruA(NULL, MRUF_STRING_LIST, (PROC)cmp_mru_strA);
     ok (!hMRU && !GetLastError(),
         "CreateMRUListA(too big) expected NULL,0 got %p,%d\n",
         hMRU, GetLastError());
     mruA.cbSize = sizeof(mruA);
 
     /* Create (NULL hKey) */
-    hMRU = create_mruA(NULL, MRUF_STRING_LIST, cmp_mru_strA);
+    hMRU = create_mruA(NULL, MRUF_STRING_LIST, (PROC)cmp_mru_strA);
     ok (!hMRU && !GetLastError(),
         "CreateMRUListA(NULL key) expected NULL,0 got %p,%d\n",
         hMRU, GetLastError());
 
     /* Create (NULL name) */
     mruA.lpszSubKey = NULL;
-    hMRU = create_mruA(NULL, MRUF_STRING_LIST, cmp_mru_strA);
+    hMRU = create_mruA(NULL, MRUF_STRING_LIST, (PROC)cmp_mru_strA);
     ok (!hMRU && !GetLastError(),
         "CreateMRUListA(NULL name) expected NULL,0 got %p,%d\n",
         hMRU, GetLastError());
@@ -204,13 +279,14 @@ static void test_MRUListA(void)
        "Couldn't create test key \"%s\"\n", REG_TEST_KEYA);
     if (!hKey)
         return;
-    hMRU = create_mruA(hKey, MRUF_STRING_LIST, cmp_mru_strA);
+    hMRU = create_mruA(hKey, MRUF_STRING_LIST, (PROC)cmp_mru_strA);
     ok(hMRU && !GetLastError(),
        "CreateMRUListA(string) expected non-NULL,0 got %p,%d\n",
        hMRU, GetLastError());
 
     if (hMRU)
     {
+        char buffer[255];
         checks[0] = "Test 1";
         checks[1] = "Test 2";
         checks[2] = "Test 3";
@@ -224,14 +300,15 @@ static void test_MRUListA(void)
            iRet, GetLastError());
 
         /* Add (NULL string) */
-#if 0
+        if (0)
+        {
 	/* Some native versions crash when passed NULL or fail to SetLastError()  */
         SetLastError(0);
         iRet = pAddMRUStringA(hMRU, NULL);
         ok(iRet == 0 && GetLastError() == ERROR_INVALID_PARAMETER,
-           "AddMRUStringA(NULL str) expected 0,ERROR_INVALID_PARAMETER got %d,%ld\n",
+           "AddMRUStringA(NULL str) expected 0,ERROR_INVALID_PARAMETER got %d,%d\n",
            iRet, GetLastError());
-#endif
+        }
 
         /* Add 3 strings. Check the registry is correct after each add */
         SetLastError(0);
@@ -274,6 +351,61 @@ static void test_MRUListA(void)
         checks[0] = checks[3];
         check_reg_entries("abc", checks);
 
+        /* NULL buffer = get list size */
+        iRet = pEnumMRUList(hMRU, 0, NULL, 0);
+        ok(iRet == 3, "EnumMRUList expected %d, got %d\n", LIST_SIZE, iRet);
+
+        /* negative item pos = get list size */
+        iRet = pEnumMRUList(hMRU, -1, NULL, 0);
+        ok(iRet == 3, "EnumMRUList expected %d, got %d\n", LIST_SIZE, iRet);
+
+        /* negative item pos = get list size */
+        iRet = pEnumMRUList(hMRU, -5, NULL, 0);
+        ok(iRet == 3, "EnumMRUList expected %d, got %d\n", LIST_SIZE, iRet);
+
+        /* negative item pos = get list size */
+        iRet = pEnumMRUList(hMRU, -1, buffer, 255);
+        ok(iRet == 3, "EnumMRUList expected %d, got %d\n", LIST_SIZE, iRet);
+
+        /* negative item pos = get list size */
+        iRet = pEnumMRUList(hMRU, -5, buffer, 255);
+        ok(iRet == 3, "EnumMRUList expected %d, got %d\n", LIST_SIZE, iRet);
+
+        /* check entry 0 */
+        buffer[0] = 0;
+        iRet = pEnumMRUList(hMRU, 0, buffer, 255);
+        todo_wine ok(iRet == lstrlen(checks[3]), "EnumMRUList expected %d, got %d\n", lstrlen(checks[3]), iRet);
+        ok(strcmp(buffer, checks[3]) == 0, "EnumMRUList expected %s, got %s\n", checks[3], buffer);
+
+        /* check entry 0 with a too small buffer */
+        buffer[0] = 0;   /* overwritten with 'T' */
+        buffer[1] = 'A'; /* overwritten with 0   */
+        buffer[2] = 'A'; /* unchanged */
+        buffer[3] = 0;   /* unchanged */
+        iRet = pEnumMRUList(hMRU, 0, buffer, 2);
+        todo_wine ok(iRet == lstrlen(checks[3]), "EnumMRUList expected %d, got %d\n", lstrlen(checks[3]), iRet);
+        todo_wine ok(strcmp(buffer, "T") == 0, "EnumMRUList expected %s, got %s\n", "T", buffer);
+        /* make sure space after buffer has old values */
+        ok(buffer[2] == 'A', "EnumMRUList expected %02x, got %02x\n", 'A', buffer[2]);
+
+        /* check entry 1 */
+        buffer[0] = 0;
+        iRet = pEnumMRUList(hMRU, 1, buffer, 255);
+        todo_wine ok(iRet == lstrlen(checks[1]), "EnumMRUList expected %d, got %d\n", lstrlen(checks[1]), iRet);
+        ok(strcmp(buffer, checks[1]) == 0, "EnumMRUList expected %s, got %s\n", checks[1], buffer);
+
+        /* check entry 2 */
+        buffer[0] = 0;
+        iRet = pEnumMRUList(hMRU, 2, buffer, 255);
+        todo_wine ok(iRet == lstrlen(checks[2]), "EnumMRUList expected %d, got %d\n", lstrlen(checks[2]), iRet);
+        ok(strcmp(buffer, checks[2]) == 0, "EnumMRUList expected %s, got %s\n", checks[2], buffer);
+
+        /* check out of bounds entry 3 */
+        strcpy(buffer, "dummy");
+        iRet = pEnumMRUList(hMRU, 3, buffer, 255);
+        ok(iRet == -1, "EnumMRUList expected %d, got %d\n", -1, iRet);
+        ok(strcmp(buffer, "dummy") == 0, "EnumMRUList expected unchanged buffer %s, got %s\n", "dummy", buffer);
+
         /* Finished with this MRU */
         pFreeMRUList(hMRU);
     }
@@ -285,8 +417,6 @@ static void test_MRUListA(void)
 START_TEST(mru)
 {
     hComctl32 = GetModuleHandleA("comctl32.dll");
-    if (!hComctl32)
-        return;
 
     delete_reg_entries();
     if (!create_reg_entries())

@@ -476,7 +476,7 @@ BOOL    MCIAVI_OpenVideo(WINE_MCIAVI* wma)
     }
 
     if (ICSendMessage(wma->hic, ICM_DECOMPRESS_BEGIN,
-		      (DWORD)wma->inbih, (DWORD)wma->outbih) != ICERR_OK) {
+		      (DWORD_PTR)wma->inbih, (DWORD_PTR)wma->outbih) != ICERR_OK) {
 	WARN("Can't begin decompression\n");
 	return FALSE;
     }
@@ -494,7 +494,7 @@ paint_frame:
 static void CALLBACK MCIAVI_waveCallback(HWAVEOUT hwo, UINT uMsg, DWORD_PTR dwInstance,
                                         DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    WINE_MCIAVI *wma = (WINE_MCIAVI *)MCIAVI_mciGetOpenDev(dwInstance);
+    WINE_MCIAVI *wma = MCIAVI_mciGetOpenDev(dwInstance);
 
     if (!wma) return;
 

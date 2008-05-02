@@ -112,7 +112,7 @@ IRichEditOle_fnRelease(IRichEditOle *me)
     if (!ref)
     {
         TRACE ("Destroying %p\n", This);
-        richedit_free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -162,7 +162,7 @@ IRichEditOle_fnGetClipboardData(IRichEditOle *me, CHARRANGE *lpchrg,
     if(!lplpdataobj)
         return E_INVALIDARG;
     if(!lpchrg) {
-        ME_GetSelection(This->editor, (int*)&tmpchrg.cpMin, (int*)&tmpchrg.cpMax);
+        ME_GetSelection(This->editor, &tmpchrg.cpMin, &tmpchrg.cpMax);
         lpchrg = &tmpchrg;
     }
     return ME_GetDataObject(This->editor, lpchrg, lplpdataobj);
@@ -529,7 +529,7 @@ LRESULT CreateIRichEditOle(ME_TextEditor *editor, LPVOID *ppObj)
 {
     IRichEditOleImpl *reo;
 
-    reo = richedit_alloc(sizeof(IRichEditOleImpl));
+    reo = heap_alloc(sizeof(IRichEditOleImpl));
     if (!reo)
         return 0;
 

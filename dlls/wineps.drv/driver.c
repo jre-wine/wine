@@ -35,7 +35,6 @@
 
 #include "winuser.h"
 #include "wownt32.h"
-#include "winspool.h"
 #include "prsht.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
@@ -67,11 +66,11 @@ void PSDRV_MergeDevmodes(PSDRV_DEVMODEA *dm1, PSDRV_DEVMODEA *dm2,
     if(dm2->dmPublic.dmFields & DM_PAPERSIZE) {
         PAGESIZE *page;
 
-	for(page = pi->ppd->PageSizes; page; page = page->next) {
+	LIST_FOR_EACH_ENTRY(page, &pi->ppd->PageSizes, PAGESIZE, entry) {
 	    if(page->WinPage == dm2->dmPublic.u1.s1.dmPaperSize)
 	        break;
 	}
-	if(page) {
+	if(&page->entry != &pi->ppd->PageSizes ) {
 	    dm1->dmPublic.u1.s1.dmPaperSize = dm2->dmPublic.u1.s1.dmPaperSize;
 	    dm1->dmPublic.u1.s1.dmPaperWidth = page->PaperDimension->x *
 								254.0 / 72.0;
@@ -105,35 +104,35 @@ void PSDRV_MergeDevmodes(PSDRV_DEVMODEA *dm1, PSDRV_DEVMODEA *dm2,
     }
 
     if(dm2->dmPublic.dmFields & DM_SCALE) {
-        dm1->dmPublic.dmScale = dm2->dmPublic.dmScale;
-	TRACE("Changing Scale to %d\n", dm2->dmPublic.dmScale);
+        dm1->dmPublic.u1.s1.dmScale = dm2->dmPublic.u1.s1.dmScale;
+	TRACE("Changing Scale to %d\n", dm2->dmPublic.u1.s1.dmScale);
     }
 
     if(dm2->dmPublic.dmFields & DM_COPIES) {
-        dm1->dmPublic.dmCopies = dm2->dmPublic.dmCopies;
-	TRACE("Changing Copies to %d\n", dm2->dmPublic.dmCopies);
+        dm1->dmPublic.u1.s1.dmCopies = dm2->dmPublic.u1.s1.dmCopies;
+	TRACE("Changing Copies to %d\n", dm2->dmPublic.u1.s1.dmCopies);
     }
 
     if(dm2->dmPublic.dmFields & DM_DEFAULTSOURCE) {
         INPUTSLOT *slot;
 
 	for(slot = pi->ppd->InputSlots; slot; slot = slot->next) {
-	    if(slot->WinBin == dm2->dmPublic.dmDefaultSource)
+	    if(slot->WinBin == dm2->dmPublic.u1.s1.dmDefaultSource)
 	        break;
 	}
 	if(slot) {
-	    dm1->dmPublic.dmDefaultSource = dm2->dmPublic.dmDefaultSource;
+	    dm1->dmPublic.u1.s1.dmDefaultSource = dm2->dmPublic.u1.s1.dmDefaultSource;
 	    TRACE("Changing bin to '%s'\n", slot->FullName);
 	} else {
 	  TRACE("Trying to change to unsupported bin %d\n",
-		dm2->dmPublic.dmDefaultSource);
+		dm2->dmPublic.u1.s1.dmDefaultSource);
 	}
     }
 
    if (dm2->dmPublic.dmFields & DM_DEFAULTSOURCE )
-       dm1->dmPublic.dmDefaultSource = dm2->dmPublic.dmDefaultSource;
+       dm1->dmPublic.u1.s1.dmDefaultSource = dm2->dmPublic.u1.s1.dmDefaultSource;
    if (dm2->dmPublic.dmFields & DM_PRINTQUALITY )
-       dm1->dmPublic.dmPrintQuality = dm2->dmPublic.dmPrintQuality;
+       dm1->dmPublic.u1.s1.dmPrintQuality = dm2->dmPublic.u1.s1.dmPrintQuality;
    if (dm2->dmPublic.dmFields & DM_COLOR )
        dm1->dmPublic.dmColor = dm2->dmPublic.dmColor;
    if (dm2->dmPublic.dmFields & DM_DUPLEX && pi->ppd->DefaultDuplex && pi->ppd->DefaultDuplex->WinDuplex != 0)
@@ -153,11 +152,11 @@ void PSDRV_MergeDevmodes(PSDRV_DEVMODEA *dm1, PSDRV_DEVMODEA *dm2,
    if (dm2->dmPublic.dmFields & DM_PELSHEIGHT )
        dm1->dmPublic.dmPelsHeight = dm2->dmPublic.dmPelsHeight;
    if (dm2->dmPublic.dmFields & DM_DISPLAYFLAGS )
-       dm1->dmPublic.dmDisplayFlags = dm2->dmPublic.dmDisplayFlags;
+       dm1->dmPublic.u2.dmDisplayFlags = dm2->dmPublic.u2.dmDisplayFlags;
    if (dm2->dmPublic.dmFields & DM_DISPLAYFREQUENCY )
        dm1->dmPublic.dmDisplayFrequency = dm2->dmPublic.dmDisplayFrequency;
    if (dm2->dmPublic.dmFields & DM_POSITION )
-       dm1->dmPublic.u1.dmPosition = dm2->dmPublic.u1.dmPosition;
+       dm1->dmPublic.u1.s2.dmPosition = dm2->dmPublic.u1.s2.dmPosition;
    if (dm2->dmPublic.dmFields & DM_LOGPIXELS )
        dm1->dmPublic.dmLogPixels = dm2->dmPublic.dmLogPixels;
    if (dm2->dmPublic.dmFields & DM_ICMMETHOD )
@@ -195,8 +194,8 @@ WORD WINAPI PSDRV_AdvancedSetupDialog16(HWND16 hwnd, HANDLE16 hDriver,
  *
  * Dialog proc for 'Paper' propsheet
  */
-INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
-			       lParam)
+static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
+                                           WPARAM wParam, LPARAM lParam)
 {
   PSDRV_DLGINFO *di;
   int i, Cursel = 0;
@@ -208,11 +207,13 @@ INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
     di = (PSDRV_DLGINFO*)((PROPSHEETPAGEA*)lParam)->lParam;
     SetWindowLongPtrW(hwnd, DWLP_USER, (LONG_PTR)di);
 
-    for(ps = di->pi->ppd->PageSizes, i = 0; ps; ps = ps->next, i++) {
+    i = 0;
+    LIST_FOR_EACH_ENTRY(ps, &di->pi->ppd->PageSizes, PAGESIZE, entry) {
       SendDlgItemMessageA(hwnd, IDD_PAPERS, LB_INSERTSTRING, i,
 			  (LPARAM)ps->FullName);
       if(di->pi->Devmode->dmPublic.u1.s1.dmPaperSize == ps->WinPage)
 	Cursel = i;
+      i++;
     }
     SendDlgItemMessageA(hwnd, IDD_PAPERS, LB_SETCURSEL, Cursel, 0);
     
@@ -242,8 +243,11 @@ INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
     case IDD_PAPERS:
       if(HIWORD(wParam) == LBN_SELCHANGE) {
 	Cursel = SendDlgItemMessageA(hwnd, LOWORD(wParam), LB_GETCURSEL, 0, 0);
-	for(i = 0, ps = di->pi->ppd->PageSizes; i < Cursel; i++, ps = ps->next)
-	  ;
+        i = 0;
+	LIST_FOR_EACH_ENTRY(ps, &di->pi->ppd->PageSizes, PAGESIZE, entry) {
+            if(i >= Cursel) break;
+            i++;
+        }
 	TRACE("Setting pagesize to item %d Winpage = %d\n", Cursel,
 	      ps->WinPage);
 	di->dlgdm->dmPublic.u1.s1.dmPaperSize = ps->WinPage;
@@ -442,14 +446,14 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
   DWORD ret;
   pi = PSDRV_FindPrinterInfo(lpszDevice);
 
-  TRACE("Cap=%d. Got PrinterInfo = %p\n", fwCapability, pi);
-
+  TRACE("%s %s %s, %u, %p, %p\n", debugstr_a(lpszDriver), debugstr_a(lpszDevice),
+        debugstr_a(lpszPort), fwCapability, lpszOutput, lpDevMode);
 
   if (!pi) {
-	  ERR("no printerinfo for %s, return 0!\n",lpszDevice);
-	  return 0;
+      ERR("no printer info for %s %s, return 0!\n",
+          debugstr_a(lpszDriver), debugstr_a(lpszDevice));
+      return 0;
   }
-
 
   lpdm = lpDevMode ? lpDevMode : (DEVMODEA *)pi->Devmode;
 
@@ -461,9 +465,13 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
       WORD *wp = (WORD *)lpszOutput;
       int i = 0;
 
-      for(ps = pi->ppd->PageSizes; ps; ps = ps->next, i++)
+      LIST_FOR_EACH_ENTRY(ps, &pi->ppd->PageSizes, PAGESIZE, entry)
+      {
+        TRACE("DC_PAPERS: %u\n", ps->WinPage);
+        i++;
 	if(lpszOutput != NULL)
 	  *wp++ = ps->WinPage;
+      }
       return i;
     }
 
@@ -473,12 +481,16 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
       POINT16 *pt = (POINT16 *)lpszOutput;
       int i = 0;
 
-      for(ps = pi->ppd->PageSizes; ps; ps = ps->next, i++)
+      LIST_FOR_EACH_ENTRY(ps, &pi->ppd->PageSizes, PAGESIZE, entry)
+      {
+        TRACE("DC_PAPERSIZE: %f x %f\n", ps->PaperDimension->x, ps->PaperDimension->y);
+        i++;
 	if(lpszOutput != NULL) {
 	  pt->x = ps->PaperDimension->x * 254.0 / 72.0;
 	  pt->y = ps->PaperDimension->y * 254.0 / 72.0;
 	  pt++;
 	}
+      }
       return i;
     }
 
@@ -488,11 +500,15 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
       char *cp = lpszOutput;
       int i = 0;
 
-      for(ps = pi->ppd->PageSizes; ps; ps = ps->next, i++)
+      LIST_FOR_EACH_ENTRY(ps, &pi->ppd->PageSizes, PAGESIZE, entry)
+      {
+        TRACE("DC_PAPERNAMES: %s\n", debugstr_a(ps->FullName));
+        i++;
 	if(lpszOutput != NULL) {
 	  lstrcpynA(cp, ps->FullName, 64);
 	  cp += 64;
 	}
+      }
       return i;
     }
 
@@ -576,43 +592,33 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
   case DC_MAXEXTENT:
     {
       PAGESIZE *ps;
-      int i;
       POINT ptMax;
       ptMax.x = ptMax.y = 0;
 
-      if(lpszOutput == NULL)
-	return -1;
-
-      i = 0;
-      for(ps = pi->ppd->PageSizes; ps; ps = ps->next, i++) {
+      LIST_FOR_EACH_ENTRY(ps, &pi->ppd->PageSizes, PAGESIZE, entry)
+      {
 	if(ps->PaperDimension->x > ptMax.x)
 	  ptMax.x = ps->PaperDimension->x;
 	if(ps->PaperDimension->y > ptMax.y)
 	  ptMax.y = ps->PaperDimension->y;
       }
-      *((POINT*)lpszOutput) = ptMax;
-      return 1;
+      return MAKELONG(ptMax.x * 254.0 / 72.0, ptMax.y * 254.0 / 72.0 );
     }
 
   case DC_MINEXTENT:
     {
       PAGESIZE *ps;
-      int i;
-      POINT ptMax;
-      ptMax.x = ptMax.y = 0;
+      POINT ptMin;
+      ptMin.x = ptMin.y = -1;
 
-      if(lpszOutput == NULL)
-	return -1;
-
-      i = 0;
-      for(ps = pi->ppd->PageSizes; ps; ps = ps->next, i++) {
-	if(ps->PaperDimension->x > ptMax.x)
-	  ptMax.x = ps->PaperDimension->x;
-	if(ps->PaperDimension->y > ptMax.y)
-	  ptMax.y = ps->PaperDimension->y;
+      LIST_FOR_EACH_ENTRY(ps, &pi->ppd->PageSizes, PAGESIZE, entry)
+      {
+	if(ptMin.x == -1 || ps->PaperDimension->x < ptMin.x)
+	  ptMin.x = ps->PaperDimension->x;
+	if(ptMin.y == -1 || ps->PaperDimension->y < ptMin.y)
+	  ptMin.y = ps->PaperDimension->y;
       }
-      *((POINT*)lpszOutput) = ptMax;
-      return 1;
+      return MAKELONG(ptMin.x * 254.0 / 72.0, ptMin.y * 254.0 / 72.0);
     }
 
   case DC_SIZE:
@@ -632,7 +638,7 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
 
   /* Printer supports colour printing - 1 if yes, 0 if no (Win2k/XP only) */
   case DC_COLORDEVICE:
-    return pi->ppd->ColorDevice;
+    return (pi->ppd->ColorDevice != CD_False) ? TRUE : FALSE;
 
   /* Identification number of the printer manufacturer for use with ICM (Win9x only) */
   case DC_MANUFACTURER:

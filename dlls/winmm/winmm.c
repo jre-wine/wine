@@ -50,7 +50,6 @@
 #include "mmsystem.h"
 #include "winuser.h"
 #include "winnls.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "winemm.h"
 
@@ -65,21 +64,26 @@ void    (WINAPI *pFnRestoreThunkLock)(DWORD);
  *                   G L O B A L   S E T T I N G S
  * ========================================================================*/
 
-WINE_MM_IDATA WINMM_IData;
+HINSTANCE hWinMM32Instance;
+HANDLE psLastEvent;
+HANDLE psStopEvent;
+
+static CRITICAL_SECTION_DEBUG critsect_debug =
+{
+    0, 0, &WINMM_cs,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": WINMM_cs") }
+};
+CRITICAL_SECTION WINMM_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 /**************************************************************************
  * 			WINMM_CreateIData			[internal]
  */
 static	BOOL	WINMM_CreateIData(HINSTANCE hInstDLL)
 {
-    memset( &WINMM_IData, 0, sizeof WINMM_IData );
-
-    WINMM_IData.hWinMM32Instance = hInstDLL;
-    InitializeCriticalSection(&WINMM_IData.cs);
-    WINMM_IData.cs.DebugInfo->Spare[0] = (DWORD_PTR)"WINMM_IData";
-    WINMM_IData.psStopEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-    WINMM_IData.psLastEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-    TRACE("Initialized IData (%p)\n", &WINMM_IData);
+    hWinMM32Instance = hInstDLL;
+    psStopEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    psLastEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
     return TRUE;
 }
 
@@ -92,9 +96,9 @@ static	void WINMM_DeleteIData(void)
 
     /* FIXME: should also free content and resources allocated
      * inside WINMM_IData */
-    CloseHandle(WINMM_IData.psStopEvent);
-    CloseHandle(WINMM_IData.psLastEvent);
-    DeleteCriticalSection(&WINMM_IData.cs);
+    CloseHandle(psStopEvent);
+    CloseHandle(psLastEvent);
+    DeleteCriticalSection(&WINMM_cs);
 }
 
 /******************************************************************
@@ -305,6 +309,16 @@ UINT WINAPI mixerGetDevCapsW(UINT_PTR uDeviceID, LPMIXERCAPSW lpCaps, UINT uSize
     return MMDRV_Message(wmld, MXDM_GETDEVCAPS, (DWORD_PTR)lpCaps, uSize, TRUE);
 }
 
+static void CALLBACK MIXER_WCallback(HMIXEROBJ hmx, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam, DWORD_PTR param2)
+{
+    HWND hWnd = (HWND)dwInstance;
+
+    if (!dwInstance)
+        return;
+
+    PostMessageW(hWnd, uMsg, (WPARAM)hmx, (LPARAM)dwParam);
+}
+
 UINT  MIXER_Open(LPHMIXER lphMix, UINT uDeviceID, DWORD_PTR dwCallback,
                  DWORD_PTR dwInstance, DWORD fdwOpen, BOOL bFrom32)
 {
@@ -316,15 +330,36 @@ UINT  MIXER_Open(LPHMIXER lphMix, UINT uDeviceID, DWORD_PTR dwCallback,
     TRACE("(%p, %d, %08lx, %08lx, %08x)\n",
 	  lphMix, uDeviceID, dwCallback, dwInstance, fdwOpen);
 
+    mod.dwCallback = (DWORD_PTR)MIXER_WCallback;
+    mod.dwInstance = 0;
+
+/* If callback is a function,
+ * dwCallback contains function pointer
+ * dwInstance private data
+ *
+ * if callback is a window
+ * dwCallback contains a window handle
+ */
+    switch (fdwOpen & CALLBACK_TYPEMASK) {
+    default:
+        return MMSYSERR_INVALFLAG;
+
+    case CALLBACK_NULL:
+        break;
+
+    case CALLBACK_WINDOW:
+        mod.dwInstance = dwCallback;
+        if (!IsWindow((HWND)dwCallback))
+            return MMSYSERR_INVALPARAM;
+        break;
+    }
+
     wmld = MMDRV_Alloc(sizeof(WINE_MIXER), MMDRV_MIXER, &hMix, &fdwOpen,
 		       &dwCallback, &dwInstance, bFrom32);
-
     wmld->uDeviceID = uDeviceID;
     mod.hmx = (HMIXEROBJ)hMix;
-    mod.dwCallback = dwCallback;
-    mod.dwInstance = dwInstance;
 
-    dwRet = MMDRV_Open(wmld, MXDM_OPEN, (DWORD)&mod, fdwOpen);
+    dwRet = MMDRV_Open(wmld, MXDM_OPEN, (DWORD)&mod, CALLBACK_FUNCTION);
 
     if (dwRet != MMSYSERR_NOERROR) {
 	MMDRV_Free(hMix, wmld);
@@ -418,7 +453,7 @@ UINT WINAPI mixerGetControlDetailsA(HMIXEROBJ hmix, LPMIXERCONTROLDETAILS lpmcdA
 
     switch (fdwDetails & MIXER_GETCONTROLDETAILSF_QUERYMASK) {
     case MIXER_GETCONTROLDETAILSF_VALUE:
-	/* can savely use A structure as it is, no string inside */
+	/* can safely use A structure as it is, no string inside */
 	ret = mixerGetControlDetailsW(hmix, lpmcdA, fdwDetails);
 	break;
     case MIXER_GETCONTROLDETAILSF_LISTTEXT:
@@ -486,7 +521,7 @@ UINT WINAPI mixerGetLineControlsA(HMIXEROBJ hmix, LPMIXERLINECONTROLSA lpmlcA,
     /* Debugging on Windows shows for MIXER_GETLINECONTROLSF_ONEBYTYPE only,
        the control count is assumed to be 1 - This is relied upon by a game,
        "Dynomite Deluze"                                                    */
-    if (MIXER_GETLINECONTROLSF_ONEBYTYPE == fdwControls) {
+    if (MIXER_GETLINECONTROLSF_ONEBYTYPE == (fdwControls & MIXER_GETLINECONTROLSF_QUERYMASK)) {
         mlcW.cControls = 1;
     } else {
         mlcW.cControls = lpmlcA->cControls;
@@ -501,7 +536,6 @@ UINT WINAPI mixerGetLineControlsA(HMIXEROBJ hmix, LPMIXERLINECONTROLSA lpmlcA,
 	lpmlcA->dwLineID = mlcW.dwLineID;
 	lpmlcA->u.dwControlID = mlcW.u.dwControlID;
 	lpmlcA->u.dwControlType = mlcW.u.dwControlType;
-	lpmlcA->cControls = mlcW.cControls;
 
 	for (i = 0; i < mlcW.cControls; i++) {
 	    lpmlcA->pamxctrl[i].cbStruct = sizeof(MIXERCONTROLA);
@@ -685,7 +719,7 @@ UINT WINAPI auxGetDevCapsW(UINT_PTR uDeviceID, LPAUXCAPSW lpCaps, UINT uSize)
 {
     LPWINE_MLD		wmld;
 
-    TRACE("(%04X, %p, %d) !\n", uDeviceID, lpCaps, uSize);
+    TRACE("(%04lX, %p, %d) !\n", uDeviceID, lpCaps, uSize);
 
     if (lpCaps == NULL)	return MMSYSERR_INVALPARAM;
 
@@ -777,7 +811,7 @@ UINT WINAPI midiOutGetDevCapsW(UINT_PTR uDeviceID, LPMIDIOUTCAPSW lpCaps,
 {
     LPWINE_MLD	wmld;
 
-    TRACE("(%u, %p, %u);\n", uDeviceID, lpCaps, uSize);
+    TRACE("(%lu, %p, %u);\n", uDeviceID, lpCaps, uSize);
 
     if (lpCaps == NULL)	return MMSYSERR_INVALPARAM;
 
@@ -853,12 +887,11 @@ UINT WINAPI midiOutGetErrorTextW(UINT uError, LPWSTR lpText, UINT uSize)
     if (lpText == NULL) ret = MMSYSERR_INVALPARAM;
     else if (uSize == 0) ret = MMSYSERR_NOERROR;
     else if (
-	       /* test has been removed 'coz MMSYSERR_BASE is 0, and gcc did emit
+	       /* test has been removed because MMSYSERR_BASE is 0, and gcc did emit
 		* a warning for the test was always true */
 	       (/*uError >= MMSYSERR_BASE && */ uError <= MMSYSERR_LASTERROR) ||
 	       (uError >= MIDIERR_BASE  && uError <= MIDIERR_LASTERROR)) {
-	if (LoadStringW(WINMM_IData.hWinMM32Instance,
-			uError, lpText, uSize) > 0) {
+	if (LoadStringW(hWinMM32Instance, uError, lpText, uSize) > 0) {
 	    ret = MMSYSERR_NOERROR;
 	}
     }
@@ -1159,7 +1192,7 @@ UINT WINAPI midiInGetDevCapsW(UINT_PTR uDeviceID, LPMIDIINCAPSW lpCaps, UINT uSi
 {
     LPWINE_MLD	wmld;
 
-    TRACE("(%d, %p, %d);\n", uDeviceID, lpCaps, uSize);
+    TRACE("(%ld, %p, %d);\n", uDeviceID, lpCaps, uSize);
 
     if (lpCaps == NULL)	return MMSYSERR_INVALPARAM;
 
@@ -1520,7 +1553,7 @@ static	BOOL	MMSYSTEM_MidiStream_MessageHandler(WINE_MIDIStream* lpMidiStrm, LPWI
 	 */
 	lpMidiHdr = (LPMIDIHDR)msg->lParam;
 	lpData = (LPBYTE)lpMidiHdr->lpData;
-	TRACE("Adding %s lpMidiHdr=%p [lpData=0x%p dwBufferLength=%u/%u dwFlags=0x%08x size=%u]\n",
+	TRACE("Adding %s lpMidiHdr=%p [lpData=0x%p dwBufferLength=%u/%u dwFlags=0x%08x size=%lu]\n",
 	      (lpMidiHdr->dwFlags & MHDR_ISSTRM) ? "stream" : "regular", lpMidiHdr,
 	      lpMidiHdr, lpMidiHdr->dwBufferLength, lpMidiHdr->dwBytesRecorded,
 	      lpMidiHdr->dwFlags, msg->wParam);
@@ -1762,7 +1795,7 @@ MMRESULT MIDI_StreamOpen(HMIDISTRM* lphMidiStrm, LPUINT lpuDeviceID, DWORD cMidi
 	return MMSYSERR_NOMEM;
 
     lpMidiStrm->dwTempo = 500000;
-    lpMidiStrm->dwTimeDiv = 480; 	/* 480 is 120 quater notes per minute *//* FIXME ??*/
+    lpMidiStrm->dwTimeDiv = 480; 	/* 480 is 120 quarter notes per minute *//* FIXME ??*/
     lpMidiStrm->dwPositionMS = 0;
 
     mosm.dwStreamID = (DWORD)lpMidiStrm;
@@ -2117,7 +2150,7 @@ UINT WINAPI waveOutGetDevCapsW(UINT_PTR uDeviceID, LPWAVEOUTCAPSW lpCaps,
 {
     LPWINE_MLD		wmld;
 
-    TRACE("(%u %p %u)!\n", uDeviceID, lpCaps, uSize);
+    TRACE("(%lu %p %u)!\n", uDeviceID, lpCaps, uSize);
 
     if (lpCaps == NULL)	return MMSYSERR_INVALPARAM;
 
@@ -2168,7 +2201,7 @@ UINT WINAPI waveOutGetErrorTextW(UINT uError, LPWSTR lpText, UINT uSize)
 		* a warning for the test was always true */
 	       (/*uError >= MMSYSERR_BASE && */ uError <= MMSYSERR_LASTERROR) ||
 	       (uError >= WAVERR_BASE  && uError <= WAVERR_LASTERROR)) {
-	if (LoadStringW(WINMM_IData.hWinMM32Instance,
+	if (LoadStringW(hWinMM32Instance,
 			uError, lpText, uSize) > 0) {
 	    ret = MMSYSERR_NOERROR;
 	}
@@ -2511,7 +2544,7 @@ UINT WINAPI waveInGetDevCapsW(UINT_PTR uDeviceID, LPWAVEINCAPSW lpCaps, UINT uSi
 {
     LPWINE_MLD		wmld;
 
-    TRACE("(%u %p %u)!\n", uDeviceID, lpCaps, uSize);
+    TRACE("(%lu %p %u)!\n", uDeviceID, lpCaps, uSize);
 
     if (lpCaps == NULL)	return MMSYSERR_INVALPARAM;
 
@@ -2783,7 +2816,7 @@ static DWORD WINAPI mmTaskRun(void* pmt)
 /******************************************************************
  *		mmTaskCreate (WINMM.@)
  */
-MMRESULT WINAPI mmTaskCreate(LPTASKCALLBACK cb, HANDLE* ph, DWORD client)
+UINT     WINAPI mmTaskCreate(LPTASKCALLBACK cb, HANDLE* ph, DWORD_PTR client)
 {
     HANDLE               hThread;
     HANDLE               hEvent = 0;
@@ -2812,7 +2845,7 @@ MMRESULT WINAPI mmTaskCreate(LPTASKCALLBACK cb, HANDLE* ph, DWORD client)
 /******************************************************************
  *		mmTaskBlock (WINMM.@)
  */
-void     WINAPI mmTaskBlock(HANDLE tid)
+VOID     WINAPI mmTaskBlock(DWORD tid)
 {
     MSG		msg;
 
@@ -2826,20 +2859,20 @@ void     WINAPI mmTaskBlock(HANDLE tid)
 /******************************************************************
  *		mmTaskSignal (WINMM.@)
  */
-BOOL     WINAPI mmTaskSignal(HANDLE tid)
+BOOL     WINAPI mmTaskSignal(DWORD tid)
 {
-    return PostThreadMessageW((DWORD)tid, WM_USER, 0, 0);
+    return PostThreadMessageW(tid, WM_USER, 0, 0);
 }
 
 /******************************************************************
  *		mmTaskYield (WINMM.@)
  */
-void     WINAPI mmTaskYield(void) {}
+VOID     WINAPI mmTaskYield(VOID) {}
 
 /******************************************************************
  *		mmGetCurrentTask (WINMM.@)
  */
-HANDLE   WINAPI mmGetCurrentTask(void)
+DWORD    WINAPI mmGetCurrentTask(VOID)
 {
-    return (HANDLE)GetCurrentThreadId();
+    return GetCurrentThreadId();
 }

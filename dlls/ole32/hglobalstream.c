@@ -39,7 +39,6 @@
 #include "objbase.h"
 #include "ole2.h"
 #include "winerror.h"
-#include "winreg.h"
 #include "winternl.h"
 
 #include "wine/debug.h"
@@ -49,7 +48,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(storage);
 /****************************************************************************
  * HGLOBALStreamImpl definition.
  *
- * This class imlements the IStream inteface and represents a stream
+ * This class implements the IStream interface and represents a stream
  * supported by an HGLOBAL pointer.
  */
 struct HGLOBALStreamImpl
@@ -148,11 +147,9 @@ static HRESULT WINAPI HGLOBALStreamImpl_QueryInterface(
   /*
    * Compare the riid with the interface IDs implemented by this object.
    */
-  if (memcmp(&IID_IUnknown, riid, sizeof(IID_IUnknown)) == 0)
-  {
-    *ppvObject = (IStream*)This;
-  }
-  else if (memcmp(&IID_IStream, riid, sizeof(IID_IStream)) == 0)
+  if (IsEqualIID(&IID_IUnknown, riid) ||
+      IsEqualIID(&IID_ISequentialStream, riid) ||
+      IsEqualIID(&IID_IStream, riid))
   {
     *ppvObject = (IStream*)This;
   }
@@ -236,6 +233,12 @@ static HRESULT WINAPI HGLOBALStreamImpl_Read(
    * Lock the buffer in position and copy the data.
    */
   supportBuffer = GlobalLock(This->supportHandle);
+  if (!supportBuffer)
+  {
+      WARN("read from invalid hglobal %p\n", This->supportHandle);
+      *pcbRead = 0;
+      return S_OK;
+  }
 
   memcpy(pv, (char *) supportBuffer+This->currentPosition.u.LowPart, bytesToReadFromBuffer);
 
@@ -296,6 +299,8 @@ static HRESULT WINAPI HGLOBALStreamImpl_Write(
   if (cb == 0)
     goto out;
 
+  *pcbWritten = 0;
+
   newSize.u.HighPart = 0;
   newSize.u.LowPart = This->currentPosition.u.LowPart + cb;
 
@@ -317,6 +322,11 @@ static HRESULT WINAPI HGLOBALStreamImpl_Write(
    * Lock the buffer in position and copy the data.
    */
   supportBuffer = GlobalLock(This->supportHandle);
+  if (!supportBuffer)
+  {
+      WARN("write to invalid hglobal %p\n", This->supportHandle);
+      return S_OK;
+  }
 
   memcpy((char *) supportBuffer+This->currentPosition.u.LowPart, pv, cb);
 
@@ -426,7 +436,7 @@ static HRESULT WINAPI HGLOBALStreamImpl_SetSize(
   supportHandle = GlobalReAlloc(This->supportHandle, libNewSize.u.LowPart, 0);
 
   if (supportHandle == 0)
-    return STG_E_MEDIUMFULL;
+    return E_OUTOFMEMORY;
 
   This->supportHandle = supportHandle;
   This->streamSize.u.LowPart = libNewSize.u.LowPart;
@@ -478,21 +488,19 @@ static HRESULT WINAPI HGLOBALStreamImpl_CopyTo(
     else
       copySize = cb.u.LowPart;
 
-    IStream_Read(iface, tmpBuffer, copySize, &bytesRead);
+    hr = IStream_Read(iface, tmpBuffer, copySize, &bytesRead);
+    if (FAILED(hr))
+        break;
 
     totalBytesRead.u.LowPart += bytesRead;
 
-    IStream_Write(pstm, tmpBuffer, bytesRead, &bytesWritten);
-
-    totalBytesWritten.u.LowPart += bytesWritten;
-
-    /*
-     * Check that read & write operations were successful
-     */
-    if (bytesRead != bytesWritten)
+    if (bytesRead)
     {
-      hr = STG_E_MEDIUMFULL;
-      break;
+        hr = IStream_Write(pstm, tmpBuffer, bytesRead, &bytesWritten);
+        if (FAILED(hr))
+            break;
+
+        totalBytesWritten.u.LowPart += bytesWritten;
     }
 
     if (bytesRead!=copySize)
@@ -655,7 +663,7 @@ static const IStreamVtbl HGLOBALStreamImpl_Vtbl =
  *    fDeleteOnRelease - Flag set to TRUE if the HGLOBAL will be released
  *                       when the IStream object is destroyed.
  */
-HGLOBALStreamImpl* HGLOBALStreamImpl_Construct(
+static HGLOBALStreamImpl* HGLOBALStreamImpl_Construct(
 		HGLOBAL  hGlobal,
 		BOOL     fDeleteOnRelease)
 {
@@ -712,6 +720,9 @@ HRESULT WINAPI CreateStreamOnHGlobal(
 		LPSTREAM* ppstm)
 {
   HGLOBALStreamImpl* newStream;
+
+  if (!ppstm)
+    return E_INVALIDARG;
 
   newStream = HGLOBALStreamImpl_Construct(hGlobal,
 					  fDeleteOnRelease);

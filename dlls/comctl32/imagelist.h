@@ -27,8 +27,6 @@
 #include "winbase.h"
 #include "wingdi.h"
 
-#include "pshpack1.h"
-
 /* the ones with offsets at the end are the same as in Windows */
 struct _IMAGELIST
 {
@@ -41,7 +39,7 @@ struct _IMAGELIST
     DWORD       x4;
     UINT        flags;                  /* 1c: flags */
     COLORREF    clrFg;                  /* 20: foreground color */
-    COLORREF    clrBk;                  /* 24: backgournd color */
+    COLORREF    clrBk;                  /* 24: background color */
 
 
     HBITMAP     hbmImage;               /* 30: images Bitmap */
@@ -60,6 +58,7 @@ struct _IMAGELIST
 #define IMAGELIST_MAGIC 0x53414D58
 
 /* Header used by ImageList_Read() and ImageList_Write() */
+#include "pshpack2.h"
 typedef struct _ILHEAD
 {
     USHORT	usMagic;
@@ -73,6 +72,6 @@ typedef struct _ILHEAD
     WORD	flags;
     SHORT	ovls[4];
 } ILHEAD;
-
 #include "poppack.h"
+
 #endif  /* __WINE_IMAGELIST_H */

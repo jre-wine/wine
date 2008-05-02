@@ -108,9 +108,22 @@ static void flushdisplaymodes(void)
 
 static HRESULT WINAPI enummodescallback(LPDDSURFACEDESC lpddsd, LPVOID lpContext)
 {
-    trace("Width = %i, Height = %i, Refresh Rate = %i\r\n",
+    trace("Width = %i, Height = %i, Refresh Rate = %i, Pitch = %i, flags =%02X\r\n",
         lpddsd->dwWidth, lpddsd->dwHeight,
-        U2(*lpddsd).dwRefreshRate);
+          U2(*lpddsd).dwRefreshRate, U1(*lpddsd).lPitch, lpddsd->dwFlags);
+
+    /* Check that the pitch is valid if applicable */
+    if(lpddsd->dwFlags & DDSD_PITCH)
+    {
+        ok(U1(*lpddsd).lPitch != 0, "EnumDisplayModes callback with bad pitch\n");
+    }
+
+    /* Check that frequency is valid if applicable */
+    if(lpddsd->dwFlags & DDSD_REFRESHRATE)
+    {
+        ok(U2(*lpddsd).dwRefreshRate != 0, "EnumDisplayModes callback with bad refresh rate\n");
+    }
+
     adddisplaymode(lpddsd);
 
     return DDENUMRET_OK;
@@ -146,7 +159,27 @@ static void setdisplaymode(int i)
                 modes[i].dwWidth, modes[i].dwHeight,
                 U1(modes[i].ddpfPixelFormat).dwRGBBitCount);
             ok(DD_OK==rc || DDERR_UNSUPPORTED==rc,"SetDisplayMode returned: %x\n",rc);
-	    if (DD_OK==rc) {
+            if (rc == DD_OK)
+            {
+                RECT r, scrn, virt;
+
+                SetRect(&virt, 0, 0, GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
+                OffsetRect(&virt, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN));
+                SetRect(&scrn, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+                trace("Mode (%dx%d) [%dx%d] (%d %d)x(%d %d)\n", modes[i].dwWidth, modes[i].dwHeight,
+                      scrn.right, scrn.bottom, virt.left, virt.top, virt.right, virt.bottom);
+
+                ok(GetClipCursor(&r), "GetClipCursor() failed\n");
+                /* ddraw sets clip rect here to the screen size, even for
+                   multiple monitors */
+                ok(EqualRect(&r, &scrn), "Invalid clip rect: (%d %d) x (%d %d)\n",
+                   r.left, r.top, r.right, r.bottom);
+
+                ok(ClipCursor(NULL), "ClipCursor() failed\n");
+                ok(GetClipCursor(&r), "GetClipCursor() failed\n");
+                ok(EqualRect(&r, &virt), "Invalid clip rect: (%d %d) x (%d %d)\n",
+                   r.left, r.top, r.right, r.bottom);
+
                 rc = IDirectDraw_RestoreDisplayMode(lpDD);
                 ok(DD_OK==rc,"RestoreDisplayMode returned: %x\n",rc);
             }

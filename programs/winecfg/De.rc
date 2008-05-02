@@ -65,7 +65,6 @@ BEGIN
     GROUPBOX        " Fenstereinstellungen ",IDC_STATIC,8,4,244,180
 
     CONTROL         "DirectX-Anwendungen können Maus einfangen",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,14,230,8
-    CONTROL         "Desktop-Doppelpufferung aktivieren",IDC_DOUBLE_BUFFER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,24,230,8
     LTEXT           "Wenn die Fenster durch deinen Fenstermanager kontrolliert werden, dann werden sie die gleichen Ränder haben, der eingestellte virtuelle Desktop wird respektiert und sie werden in der Fensterliste auftauchen.\nWenn die Fenster nicht kontrolliert werden, werden sie unabhängig vom verwerdeten Fenstermanager sein. Das bedeutet, dass die Fenster sich nicht an den Desktop anpassen werden. Der Vorteil ist, dass dann die Emulation akkurater ist, was einigen Anwendungen hilft, besser zu arbeiten.",
                     IDC_STATIC,15,37,228,80
     CONTROL         "Erlaube dem Fenstermanager die Fenster zu kontrollieren.",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,111,230,8
@@ -85,6 +84,10 @@ BEGIN
     COMBOBOX        IDC_D3D_VSHADER_MODE,140,197,105,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     
     CONTROL         "Pixel Shader aktivieren (wenn von Hardware unterstützt)", IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,212,230,10
+    GROUPBOX        " Screen Resolution ",IDC_STATIC,8,242,244,25
+    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
+    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT           "dpi",IDC_STATIC,235,252,10,8
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -162,7 +165,8 @@ BEGIN
     GROUPBOX        " Treiber Auswahl ",IDC_STATIC,8,4,244,195
     LTEXT           "Wählen Sie einen Sound-Treiber durch ankreuzen des gewünschten Treibers. Ist kein Treiber ausgewählt, wird der Sound deaktiviert. Die Auswahl mehrerer Treiber ist nicht empfohlen. Ein Treiber kann durch Rechtsklicken konfiguriert werden.",IDC_STATIC,15,15,227,35
     CONTROL         "Geräte",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,50,140,140
-    PUSHBUTTON      "Einstellungen",IDC_AUDIO_CONTROL_PANEL,170,50,59,14
+    PUSHBUTTON      "&Test Sound",IDC_AUDIO_TEST,170,50,59,14
+    PUSHBUTTON      "Einstellungen",IDC_AUDIO_CONTROL_PANEL,170,70,59,14
     GROUPBOX        " DirectSound ",IDC_STATIC,8,205,244,60    
     LTEXT           "Hardware-Beschleunigung: ", IDC_STATIC,15,215,90,10
     COMBOBOX        IDC_DSOUND_HW_ACCEL,105,213,140,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
@@ -178,13 +182,21 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
    GROUPBOX        " Darstellung ",IDC_STATIC,8,4,244,106
-   LTEXT           "Motiv:",IDC_STATIC,15,16,230,8
-   COMBOBOX        IDC_THEME_THEMECOMBO,15,24,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-   PUSHBUTTON      "Motiv installieren...",IDC_THEME_INSTALL,152,38,93,14
-   LTEXT           "Farbe:",IDC_THEME_COLORTEXT,15,54,230,8
-   COMBOBOX        IDC_THEME_COLORCOMBO,15,62,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-   LTEXT           "Größe:",IDC_THEME_SIZETEXT,15,80,230,8
-   COMBOBOX        IDC_THEME_SIZECOMBO,15,88,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+   LTEXT           "Motiv:",IDC_STATIC,15,16,130,8
+   COMBOBOX        IDC_THEME_THEMECOMBO,15,24,130,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+   PUSHBUTTON      "Motiv installieren...",IDC_THEME_INSTALL,152,23,93,14
+   LTEXT           "Farbe:",IDC_THEME_COLORTEXT,15,40,112,8
+   COMBOBOX        IDC_THEME_COLORCOMBO,15,48,112,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+   LTEXT           "Größe:",IDC_THEME_SIZETEXT,135,40,110,8
+   COMBOBOX        IDC_THEME_SIZECOMBO,135,48,110,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Element:",IDC_STATIC,15,64,112,8
+    COMBOBOX        IDC_SYSPARAM_COMBO,15,74,112,120,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP | CBS_SORT
+    LTEXT           "Farbe:",IDC_SYSPARAM_COLOR_TEXT,135,64,25,8,WS_DISABLED
+    PUSHBUTTON      "",IDC_SYSPARAM_COLOR,135,74,25,13,WS_DISABLED | BS_OWNERDRAW
+    LTEXT           "Größe:",IDC_SYSPARAM_SIZE_TEXT,166,64,30,8,WS_DISABLED
+    EDITTEXT        IDC_SYSPARAM_SIZE,166,74,23,13,ES_AUTOHSCROLL | WS_TABSTOP | WS_DISABLED
+    CONTROL         "",IDC_SYSPARAM_SIZE_UD,UPDOWN_CLASS,UDS_SETBUDDYINT | WS_DISABLED,187,74,15,13
+    PUSHBUTTON      "Schrift",IDC_SYSPARAM_FONT,208,74,37,13,WS_DISABLED
    GROUPBOX        " Shell-Ordner ",IDC_STATIC,8,114,244,100
    CONTROL         "Listview",IDC_LIST_SFPATHS,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                     LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,126,230,64
@@ -235,7 +247,6 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_SHADER_MODE_HARDWARE    "Hardware"
     IDS_SHADER_MODE_NONE        "Aus"
-    IDS_SHADER_MODE_EMULATION   "Emuliert"
 END
 
 STRINGTABLE DISCARDABLE
@@ -260,7 +271,6 @@ BEGIN
     IDS_ACCEL_BASIC             "Einfach"
     IDS_ACCEL_EMULATION         "Emulation"
     IDS_DRIVER_ALSA             "ALSA-Treiber"
-    IDS_DRIVER_ARTS             "aRts-Treiber"
     IDS_DRIVER_ESOUND           "EsounD-Treiber"
     IDS_DRIVER_OSS              "OSS-Treiber"
     IDS_DRIVER_JACK             "JACK-Treiber"
@@ -277,4 +287,25 @@ BEGIN
     IDS_DEVICES_MIXER           "Mixer-Geräte"
     IDS_UNAVAILABLE_DRIVER      "In der Registry wurde ein Treiber gefunden, der nicht verfügbar ist!\n\nSoll „%s“ aus der Registry entfernt werden?"
     IDS_WARNING                 "Warnung"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    IDC_SYSPARAMS_BUTTON            "Steuerelementhintergrund"
+    IDC_SYSPARAMS_BUTTON_TEXT       "Steuerelementtext"
+    IDC_SYSPARAMS_DESKTOP           "Desktop"
+    IDC_SYSPARAMS_MENU              "Menühintergrund"
+    IDC_SYSPARAMS_MENU_TEXT         "Menütext"
+    IDC_SYSPARAMS_SCROLLBAR         "Bildlaufleiste"
+    IDC_SYSPARAMS_SELECTION         "Auswahlhintergrund"
+    IDC_SYSPARAMS_SELECTION_TEXT    "Auswahltext"
+    IDC_SYSPARAMS_TOOLTIP           "ToolTip-Hintergrund"
+    IDC_SYSPARAMS_TOOLTIP_TEXT      "ToolTip-Text"
+    IDC_SYSPARAMS_WINDOW            "Fensterhintergrund"
+    IDC_SYSPARAMS_WINDOW_TEXT       "Fenstertext"
+    IDC_SYSPARAMS_ACTIVE_TITLE      "Aktive Titelleiste"
+    IDC_SYSPARAMS_ACTIVE_TITLE_TEXT "Aktiver Titelleistentext"
+    IDC_SYSPARAMS_INACTIVE_TITLE    "Inaktive Titelleiste"
+    IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "Inaktiver Titelleistentext"
+    IDC_SYSPARAMS_MSGBOX_TEXT       "Message Box Text"
 END

@@ -7,7 +7,8 @@ MODULE    = msvcrt40.dll
 IMPORTLIB = libmsvcrt40.$(IMPLIBEXT)
 IMPORTS   = msvcrt kernel32
 
-C_SRCS = msvcrt40.c
+C_SRCS = \
+	msvcrt40.c
 
 @MAKE_DLL_RULES@
 

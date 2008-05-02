@@ -53,7 +53,7 @@ struct subscriber {
     LPWSTR attribute;
 };
 
-UINT ControlEvent_HandleControlEvent(MSIPACKAGE *, LPCWSTR, LPCWSTR, msi_dialog*);
+static UINT ControlEvent_HandleControlEvent(MSIPACKAGE *, LPCWSTR, LPCWSTR, msi_dialog*);
 
 /*
  * Create a dialog box and run it if it's modal
@@ -123,7 +123,7 @@ static UINT ControlEvent_EndDialog(MSIPACKAGE* package, LPCWSTR argument,
         package->CurrentInstallState = ERROR_FUNCTION_FAILED;
     }
 
-    ControlEvent_CleanupSubscriptions(package);
+    ControlEvent_CleanupDialogSubscriptions(package, msi_dialog_get_name( dialog ));
     msi_dialog_end_dialog( dialog );
     return ERROR_SUCCESS;
 }
@@ -168,7 +168,7 @@ static UINT ControlEvent_SpawnWaitDialog(MSIPACKAGE* package, LPCWSTR argument,
 static UINT ControlEvent_DoAction(MSIPACKAGE* package, LPCWSTR argument, 
                                   msi_dialog* dialog)
 {
-    ACTION_PerformAction(package,argument,TRUE);
+    ACTION_PerformAction(package,argument,-1,TRUE);
     return ERROR_SUCCESS;
 }
 
@@ -320,6 +320,23 @@ VOID ControlEvent_FireSubscribedEvent( MSIPACKAGE *package, LPCWSTR event,
     }
 }
 
+VOID ControlEvent_CleanupDialogSubscriptions(MSIPACKAGE *package, LPWSTR dialog)
+{
+    struct list *i, *t;
+    struct subscriber *sub;
+
+    LIST_FOR_EACH_SAFE( i, t, &package->subscriptions )
+    {
+        sub = LIST_ENTRY( i, struct subscriber, entry );
+
+        if ( lstrcmpW( msi_dialog_get_name( sub->dialog ), dialog ))
+            continue;
+
+        list_remove( &sub->entry );
+        free_subscriber( sub );
+    }
+}
+
 VOID ControlEvent_CleanupSubscriptions(MSIPACKAGE *package)
 {
     struct list *i, *t;
@@ -389,6 +406,13 @@ static UINT ControlEvent_DirectoryListUp(MSIPACKAGE *package, LPCWSTR argument,
     return msi_dialog_directorylist_up( dialog );
 }
 
+static UINT ControlEvent_ReinstallMode(MSIPACKAGE *package, LPCWSTR argument,
+                                       msi_dialog *dialog)
+{
+    static const WCHAR szReinstallMode[] = {'R','E','I','N','S','T','A','L','L','M','O','D','E',0};
+    return MSI_SetPropertyW( package, szReinstallMode, argument );
+}
+
 static const struct _events Events[] = {
     { "EndDialog",ControlEvent_EndDialog },
     { "NewDialog",ControlEvent_NewDialog },
@@ -403,6 +427,7 @@ static const struct _events Events[] = {
     { "SetInstallLevel",ControlEvent_SetInstallLevel },
     { "DirectoryListUp",ControlEvent_DirectoryListUp },
     { "SelectionBrowse",ControlEvent_SpawnDialog },
+    { "ReinstallMode",ControlEvent_ReinstallMode },
     { NULL,NULL },
 };
 

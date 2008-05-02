@@ -107,7 +107,7 @@ typedef struct
     char           d_name[256];
 } KERNEL_DIRENT64;
 
-static inline int getdents64( int fd, KERNEL_DIRENT64 *de, unsigned int size )
+static inline int getdents64( int fd, char *de, unsigned int size )
 {
     int ret;
     __asm__( "pushl %%ebx; movl %2,%%ebx; int $0x80; popl %%ebx"
@@ -135,6 +135,8 @@ static inline int getdents64( int fd, KERNEL_DIRENT64 *de, unsigned int size )
 
 #define MAX_DIR_ENTRY_LEN 255  /* max length of a directory entry in chars */
 
+static const unsigned int max_dir_info_size = FIELD_OFFSET( FILE_BOTH_DIR_INFORMATION, FileName[MAX_DIR_ENTRY_LEN] );
+
 static int show_dot_files = -1;
 
 /* at some point we may want to allow Winelib apps to set this */
@@ -159,7 +161,7 @@ static inline BOOL is_invalid_dos_char( WCHAR ch )
 }
 
 /* check if the device can be a mounted volume */
-static inline int is_valid_mounted_device( struct stat *st )
+static inline int is_valid_mounted_device( const struct stat *st )
 {
 #if defined(linux) || defined(__sun__)
     return S_ISBLK( st->st_mode );
@@ -225,6 +227,60 @@ static char *get_default_lpt_device( int num )
 
 
 /***********************************************************************
+ *           DIR_get_drives_info
+ *
+ * Retrieve device/inode number for all the drives. Helper for find_drive_root.
+ */
+unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] )
+{
+    static struct drive_info cache[MAX_DOS_DRIVES];
+    static time_t last_update;
+    static unsigned int nb_drives;
+    unsigned int ret;
+    time_t now = time(NULL);
+
+    RtlEnterCriticalSection( &dir_section );
+    if (now != last_update)
+    {
+        const char *config_dir = wine_get_config_dir();
+        char *buffer, *p;
+        struct stat st;
+        unsigned int i;
+
+        if ((buffer = RtlAllocateHeap( GetProcessHeap(), 0,
+                                       strlen(config_dir) + sizeof("/dosdevices/a:") )))
+        {
+            strcpy( buffer, config_dir );
+            strcat( buffer, "/dosdevices/a:" );
+            p = buffer + strlen(buffer) - 2;
+
+            for (i = nb_drives = 0; i < MAX_DOS_DRIVES; i++)
+            {
+                *p = 'a' + i;
+                if (!stat( buffer, &st ))
+                {
+                    cache[i].dev = st.st_dev;
+                    cache[i].ino = st.st_ino;
+                    nb_drives++;
+                }
+                else
+                {
+                    cache[i].dev = 0;
+                    cache[i].ino = 0;
+                }
+            }
+            RtlFreeHeap( GetProcessHeap(), 0, buffer );
+        }
+        last_update = now;
+    }
+    memcpy( info, cache, sizeof(cache) );
+    ret = nb_drives;
+    RtlLeaveCriticalSection( &dir_section );
+    return ret;
+}
+
+
+/***********************************************************************
  *           parse_mount_entries
  *
  * Parse mount entries looking for a given device. Helper for get_default_drive_device.
@@ -234,24 +290,22 @@ static char *get_default_lpt_device( int num )
 #include <sys/vfstab.h>
 static char *parse_vfstab_entries( FILE *f, dev_t dev, ino_t ino)
 {
-
-    struct vfstab vfs_entry;
-    struct vfstab *entry=&vfs_entry;
+    struct vfstab entry;
     struct stat st;
     char *device;
 
-    while (! getvfsent( f, entry ))
+    while (! getvfsent( f, &entry ))
     {
         /* don't even bother stat'ing network mounts, there's no meaningful device anyway */
-        if (!strcmp( entry->vfs_fstype, "nfs" ) ||
-            !strcmp( entry->vfs_fstype, "smbfs" ) ||
-            !strcmp( entry->vfs_fstype, "ncpfs" )) continue;
+        if (!strcmp( entry.vfs_fstype, "nfs" ) ||
+            !strcmp( entry.vfs_fstype, "smbfs" ) ||
+            !strcmp( entry.vfs_fstype, "ncpfs" )) continue;
 
-        if (stat( entry->vfs_mountp, &st ) == -1) continue;
+        if (stat( entry.vfs_mountp, &st ) == -1) continue;
         if (st.st_dev != dev || st.st_ino != ino) continue;
-        if (!strcmp( entry->vfs_fstype, "fd" ))
+        if (!strcmp( entry.vfs_fstype, "fd" ))
         {
-            if ((device = strstr( entry->vfs_mntopts, "dev=" )))
+            if ((device = strstr( entry.vfs_mntopts, "dev=" )))
             {
                 char *p = strchr( device + 4, ',' );
                 if (p) *p = 0;
@@ -259,7 +313,7 @@ static char *parse_vfstab_entries( FILE *f, dev_t dev, ino_t ino)
             }
         }
         else
-            return entry->vfs_special;
+            return entry.vfs_special;
     }
     return NULL;
 }
@@ -333,25 +387,23 @@ static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
 #include <sys/mnttab.h>
 static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
 {
-
-    volatile struct mnttab mntentry;
-    struct mnttab *entry=&mntentry;
+    struct mnttab entry;
     struct stat st;
     char *device;
 
 
-    while (( ! getmntent( f , entry) ))
+    while (( ! getmntent( f, &entry) ))
     {
         /* don't even bother stat'ing network mounts, there's no meaningful device anyway */
-        if (!strcmp( entry->mnt_fstype, "nfs" ) ||
-            !strcmp( entry->mnt_fstype, "smbfs" ) ||
-            !strcmp( entry->mnt_fstype, "ncpfs" )) continue;
+        if (!strcmp( entry.mnt_fstype, "nfs" ) ||
+            !strcmp( entry.mnt_fstype, "smbfs" ) ||
+            !strcmp( entry.mnt_fstype, "ncpfs" )) continue;
 
-        if (stat( entry->mnt_mountp, &st ) == -1) continue;
+        if (stat( entry.mnt_mountp, &st ) == -1) continue;
         if (st.st_dev != dev || st.st_ino != ino) continue;
-        if (!strcmp( entry->mnt_fstype, "fd" ))
+        if (!strcmp( entry.mnt_fstype, "fd" ))
         {
-            if ((device = strstr( entry->mnt_mntopts, "dev=" )))
+            if ((device = strstr( entry.mnt_mntopts, "dev=" )))
             {
                 char *p = strchr( device + 4, ',' );
                 if (p) *p = 0;
@@ -359,7 +411,7 @@ static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
             }
         }
         else
-            return entry->mnt_special;
+            return entry.mnt_special;
     }
     return NULL;
 }
@@ -971,7 +1023,6 @@ static int read_directory_vfat( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG
     size_t len;
     KERNEL_DIRENT *de;
     FILE_BOTH_DIR_INFORMATION *info, *last_info = NULL;
-    static const unsigned int max_dir_info_size = sizeof(*info) + (MAX_DIR_ENTRY_LEN-1) * sizeof(WCHAR);
 
     io->u.Status = STATUS_SUCCESS;
 
@@ -1059,16 +1110,15 @@ static int read_directory_getdents( int fd, IO_STATUS_BLOCK *io, void *buffer, U
 {
     off_t old_pos = 0;
     size_t size = length;
-    int res;
-    char local_buffer[8192];
-    KERNEL_DIRENT64 *data, *de;
+    int res, fake_dot_dot = 1;
+    char *data, local_buffer[8192];
+    KERNEL_DIRENT64 *de;
     FILE_BOTH_DIR_INFORMATION *info, *last_info = NULL;
-    static const unsigned int max_dir_info_size = sizeof(*info) + (MAX_DIR_ENTRY_LEN-1) * sizeof(WCHAR);
 
     if (size <= sizeof(local_buffer) || !(data = RtlAllocateHeap( GetProcessHeap(), 0, size )))
     {
         size = sizeof(local_buffer);
-        data = (KERNEL_DIRENT64 *)local_buffer;
+        data = local_buffer;
     }
 
     if (restart_scan) lseek( fd, 0, SEEK_SET );
@@ -1096,13 +1146,52 @@ static int read_directory_getdents( int fd, IO_STATUS_BLOCK *io, void *buffer, U
         goto done;
     }
 
-    de = data;
+    de = (KERNEL_DIRENT64 *)data;
+
+    if (restart_scan)
+    {
+        /* check if we got . and .. from getdents */
+        if (res > 0)
+        {
+            if (!strcmp( de->d_name, "." ) && res > de->d_reclen)
+            {
+                KERNEL_DIRENT64 *next_de = (KERNEL_DIRENT64 *)(data + de->d_reclen);
+                if (!strcmp( next_de->d_name, ".." )) fake_dot_dot = 0;
+            }
+        }
+        /* make sure we have enough room for both entries */
+        if (fake_dot_dot)
+        {
+            static const ULONG min_info_size = (FIELD_OFFSET(FILE_BOTH_DIR_INFORMATION, FileName[1]) +
+                                                FIELD_OFFSET(FILE_BOTH_DIR_INFORMATION, FileName[2]) + 3) & ~3;
+            if (length < min_info_size || single_entry)
+            {
+                FIXME( "not enough room %u/%u for fake . and .. entries\n", length, single_entry );
+                fake_dot_dot = 0;
+            }
+        }
+
+        if (fake_dot_dot)
+        {
+            if ((info = append_entry( buffer, &io->Information, length, ".", NULL, mask )))
+                last_info = info;
+            if ((info = append_entry( buffer, &io->Information, length, "..", NULL, mask )))
+                last_info = info;
+
+            /* check if we still have enough space for the largest possible entry */
+            if (last_info && io->Information + max_dir_info_size > length)
+            {
+                lseek( fd, 0, SEEK_SET );  /* reset pos to first entry */
+                res = 0;
+            }
+        }
+    }
 
     while (res > 0)
     {
         res -= de->d_reclen;
-        info = append_entry( buffer, &io->Information, length, de->d_name, NULL, mask );
-        if (info)
+        if (!(fake_dot_dot && (!strcmp( de->d_name, "." ) || !strcmp( de->d_name, ".." ))) &&
+            (info = append_entry( buffer, &io->Information, length, de->d_name, NULL, mask )))
         {
             last_info = info;
             if ((char *)info->FileName + info->FileNameLength > (char *)buffer + length)
@@ -1124,7 +1213,7 @@ static int read_directory_getdents( int fd, IO_STATUS_BLOCK *io, void *buffer, U
         else
         {
             res = getdents64( fd, data, size );
-            de = data;
+            de = (KERNEL_DIRENT64 *)data;
         }
     }
 
@@ -1132,10 +1221,177 @@ static int read_directory_getdents( int fd, IO_STATUS_BLOCK *io, void *buffer, U
     else io->u.Status = restart_scan ? STATUS_NO_SUCH_FILE : STATUS_NO_MORE_FILES;
     res = 0;
 done:
-    if ((char *)data != local_buffer) RtlFreeHeap( GetProcessHeap(), 0, data );
+    if (data != local_buffer) RtlFreeHeap( GetProcessHeap(), 0, data );
     return res;
 }
-#endif  /* USE_GETDENTS */
+
+#elif defined HAVE_GETDIRENTRIES
+
+/***********************************************************************
+ *           wine_getdirentries
+ *
+ * Wrapper for the BSD getdirentries system call to fix a bug in the
+ * Mac OS X version.  For some file systems (at least Apple Filing
+ * Protocol a.k.a. AFP), getdirentries resets the file position to 0
+ * when it's about to return 0 (no more entries).  So, a subsequent
+ * getdirentries call starts over at the beginning again, causing an
+ * infinite loop.
+ */
+static inline int wine_getdirentries(int fd, char *buf, int nbytes, long *basep)
+{
+    int res = getdirentries(fd, buf, nbytes, basep);
+#ifdef __APPLE__
+    if (res == 0)
+        lseek(fd, *basep, SEEK_SET);
+#endif
+    return res;
+}
+
+/***********************************************************************
+ *           read_directory_getdirentries
+ *
+ * Read a directory using the BSD getdirentries system call; helper for NtQueryDirectoryFile.
+ */
+static int read_directory_getdirentries( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG length,
+                                         BOOLEAN single_entry, const UNICODE_STRING *mask,
+                                         BOOLEAN restart_scan )
+{
+    long restart_pos;
+    ULONG_PTR restart_info_pos = 0;
+    size_t size, initial_size = length;
+    int res, fake_dot_dot = 1;
+    char *data, local_buffer[8192];
+    struct dirent *de;
+    FILE_BOTH_DIR_INFORMATION *info, *last_info = NULL, *restart_last_info = NULL;
+
+    size = initial_size;
+    data = local_buffer;
+    if (size > sizeof(local_buffer) && !(data = RtlAllocateHeap( GetProcessHeap(), 0, size )))
+    {
+        io->u.Status = STATUS_NO_MEMORY;
+        return io->u.Status;
+    }
+
+    if (restart_scan) lseek( fd, 0, SEEK_SET );
+
+    io->u.Status = STATUS_SUCCESS;
+
+    /* FIXME: should make sure size is larger than filesystem block size */
+    res = wine_getdirentries( fd, data, size, &restart_pos );
+    if (res == -1)
+    {
+        io->u.Status = FILE_GetNtStatus();
+        res = 0;
+        goto done;
+    }
+
+    de = (struct dirent *)data;
+
+    if (restart_scan)
+    {
+        /* check if we got . and .. from getdirentries */
+        if (res > 0)
+        {
+            if (!strcmp( de->d_name, "." ) && res > de->d_reclen)
+            {
+                struct dirent *next_de = (struct dirent *)(data + de->d_reclen);
+                if (!strcmp( next_de->d_name, ".." )) fake_dot_dot = 0;
+            }
+        }
+        /* make sure we have enough room for both entries */
+        if (fake_dot_dot)
+        {
+            static const ULONG min_info_size = (FIELD_OFFSET(FILE_BOTH_DIR_INFORMATION, FileName[1]) +
+                                                FIELD_OFFSET(FILE_BOTH_DIR_INFORMATION, FileName[2]) + 3) & ~3;
+            if (length < min_info_size || single_entry)
+            {
+                FIXME( "not enough room %u/%u for fake . and .. entries\n", length, single_entry );
+                fake_dot_dot = 0;
+            }
+        }
+
+        if (fake_dot_dot)
+        {
+            if ((info = append_entry( buffer, &io->Information, length, ".", NULL, mask )))
+                last_info = info;
+            if ((info = append_entry( buffer, &io->Information, length, "..", NULL, mask )))
+                last_info = info;
+
+            restart_last_info = last_info;
+            restart_info_pos = io->Information;
+
+            /* check if we still have enough space for the largest possible entry */
+            if (last_info && io->Information + max_dir_info_size > length)
+            {
+                lseek( fd, 0, SEEK_SET );  /* reset pos to first entry */
+                res = 0;
+            }
+        }
+    }
+
+    while (res > 0)
+    {
+        res -= de->d_reclen;
+        if (de->d_fileno &&
+            !(fake_dot_dot && (!strcmp( de->d_name, "." ) || !strcmp( de->d_name, ".." ))) &&
+            ((info = append_entry( buffer, &io->Information, length, de->d_name, NULL, mask ))))
+        {
+            last_info = info;
+            if ((char *)info->FileName + info->FileNameLength > (char *)buffer + length)
+            {
+                lseek( fd, (unsigned long)restart_pos, SEEK_SET );
+                if (restart_info_pos)  /* if we have a complete read already, return it */
+                {
+                    io->Information = restart_info_pos;
+                    last_info = restart_last_info;
+                    break;
+                }
+                /* otherwise restart from the start with a smaller size */
+                size = (char *)de - data;
+                if (!size)
+                {
+                    io->u.Status = STATUS_BUFFER_OVERFLOW;
+                    break;
+                }
+                io->Information = 0;
+                last_info = NULL;
+                goto restart;
+            }
+            /* if we have to return but the buffer contains more data, restart with a smaller size */
+            if (res > 0 && (single_entry || io->Information + max_dir_info_size > length))
+            {
+                lseek( fd, (unsigned long)restart_pos, SEEK_SET );
+                size = (char *)de - data;
+                io->Information = restart_info_pos;
+                last_info = restart_last_info;
+                goto restart;
+            }
+        }
+        /* move on to the next entry */
+        if (res > 0)
+        {
+            de = (struct dirent *)((char *)de + de->d_reclen);
+            continue;
+        }
+        if (size < initial_size) break;  /* already restarted once, give up now */
+        size = min( size, length - io->Information );
+        /* if size is too small don't bother to continue */
+        if (size < max_dir_info_size && last_info) break;
+        restart_last_info = last_info;
+        restart_info_pos = io->Information;
+    restart:
+        res = wine_getdirentries( fd, data, size, &restart_pos );
+        de = (struct dirent *)data;
+    }
+
+    if (last_info) last_info->NextEntryOffset = 0;
+    else io->u.Status = restart_scan ? STATUS_NO_SUCH_FILE : STATUS_NO_MORE_FILES;
+    res = 0;
+done:
+    if (data != local_buffer) RtlFreeHeap( GetProcessHeap(), 0, data );
+    return res;
+}
+#endif  /* HAVE_GETDIRENTRIES */
 
 
 /***********************************************************************
@@ -1151,7 +1407,6 @@ static void read_directory_readdir( int fd, IO_STATUS_BLOCK *io, void *buffer, U
     off_t i, old_pos = 0;
     struct dirent *de;
     FILE_BOTH_DIR_INFORMATION *info, *last_info = NULL;
-    static const unsigned int max_dir_info_size = sizeof(*info) + (MAX_DIR_ENTRY_LEN-1) * sizeof(WCHAR);
 
     if (!(dir = opendir( "." )))
     {
@@ -1163,7 +1418,7 @@ static void read_directory_readdir( int fd, IO_STATUS_BLOCK *io, void *buffer, U
     {
         old_pos = lseek( fd, 0, SEEK_CUR );
         /* skip the right number of entries */
-        for (i = 0; i < old_pos; i++)
+        for (i = 0; i < old_pos - 2; i++)
         {
             if (!readdir( dir ))
             {
@@ -1175,10 +1430,22 @@ static void read_directory_readdir( int fd, IO_STATUS_BLOCK *io, void *buffer, U
     }
     io->u.Status = STATUS_SUCCESS;
 
-    while ((de = readdir( dir )))
+    for (;;)
     {
+        if (old_pos == 0)
+            info = append_entry( buffer, &io->Information, length, ".", NULL, mask );
+        else if (old_pos == 1)
+            info = append_entry( buffer, &io->Information, length, "..", NULL, mask );
+        else if ((de = readdir( dir )))
+        {
+            if (strcmp( de->d_name, "." ) && strcmp( de->d_name, ".." ))
+                info = append_entry( buffer, &io->Information, length, de->d_name, NULL, mask );
+            else
+                info = NULL;
+        }
+        else
+            break;
         old_pos++;
-        info = append_entry( buffer, &io->Information, length, de->d_name, NULL, mask );
         if (info)
         {
             last_info = info;
@@ -1305,7 +1572,7 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event,
         return io->u.Status = STATUS_NOT_IMPLEMENTED;
     }
 
-    if ((io->u.Status = server_get_unix_fd( handle, FILE_LIST_DIRECTORY, &fd, &needs_close, NULL )) != STATUS_SUCCESS)
+    if ((io->u.Status = server_get_unix_fd( handle, FILE_LIST_DIRECTORY, &fd, &needs_close, NULL, NULL )) != STATUS_SUCCESS)
         return io->u.Status;
 
     io->Information = 0;
@@ -1314,23 +1581,27 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event,
 
     if (show_dot_files == -1) init_options();
 
-    if ((cwd = open(".", O_RDONLY)) != -1 && fchdir( fd ) != -1)
+    cwd = open( ".", O_RDONLY );
+    if (fchdir( fd ) != -1)
     {
-        if (mask && !mempbrkW( mask->Buffer, wszWildcards, mask->Length / sizeof(WCHAR) ) &&
-            read_directory_stat( fd, io, buffer, length, single_entry, mask, restart_scan ) != -1)
-            goto done;
 #ifdef VFAT_IOCTL_READDIR_BOTH
         if ((read_directory_vfat( fd, io, buffer, length, single_entry, mask, restart_scan )) != -1)
             goto done;
 #endif
+        if (mask && !mempbrkW( mask->Buffer, wszWildcards, mask->Length / sizeof(WCHAR) ) &&
+            read_directory_stat( fd, io, buffer, length, single_entry, mask, restart_scan ) != -1)
+            goto done;
 #ifdef USE_GETDENTS
         if ((read_directory_getdents( fd, io, buffer, length, single_entry, mask, restart_scan )) != -1)
+            goto done;
+#elif defined HAVE_GETDIRENTRIES
+        if ((read_directory_getdirentries( fd, io, buffer, length, single_entry, mask, restart_scan )) != -1)
             goto done;
 #endif
         read_directory_readdir( fd, io, buffer, length, single_entry, mask, restart_scan );
 
     done:
-        if (fchdir( cwd ) == -1) chdir( "/" );
+        if (cwd == -1 || fchdir( cwd ) == -1) chdir( "/" );
     }
     else io->u.Status = FILE_GetNtStatus();
 
@@ -1603,7 +1874,7 @@ static inline int get_dos_prefix_len( const UNICODE_STRING *name )
 NTSTATUS wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
                                     UINT disposition, BOOLEAN check_case )
 {
-    static const WCHAR uncW[] = {'U','N','C','\\'};
+    static const WCHAR unixW[] = {'u','n','i','x'};
     static const WCHAR invalid_charsW[] = { INVALID_NT_CHARS, 0 };
 
     NTSTATUS status = STATUS_SUCCESS;
@@ -1611,71 +1882,87 @@ NTSTATUS wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *un
     const WCHAR *name, *p;
     struct stat st;
     char *unix_name;
-    int pos, ret, name_len, unix_len, used_default;
+    int pos, ret, name_len, unix_len, prefix_len, used_default;
+    WCHAR prefix[MAX_DIR_ENTRY_LEN];
+    BOOLEAN is_unix = FALSE;
 
     name     = nameW->Buffer;
     name_len = nameW->Length / sizeof(WCHAR);
 
     if (!name_len || !IS_SEPARATOR(name[0])) return STATUS_OBJECT_PATH_SYNTAX_BAD;
 
-    if ((pos = get_dos_prefix_len( nameW )))
+    if (!(pos = get_dos_prefix_len( nameW )))
+        return STATUS_BAD_DEVICE_TYPE;  /* no DOS prefix, assume NT native name */
+
+    name += pos;
+    name_len -= pos;
+
+    /* check for sub-directory */
+    for (pos = 0; pos < name_len; pos++)
     {
-        BOOLEAN is_unc = FALSE;
+        if (IS_SEPARATOR(name[pos])) break;
+        if (name[pos] < 32 || strchrW( invalid_charsW, name[pos] ))
+            return STATUS_OBJECT_NAME_INVALID;
+    }
+    if (pos > MAX_DIR_ENTRY_LEN)
+        return STATUS_OBJECT_NAME_INVALID;
 
-        name += pos;
-        name_len -= pos;
+    if (pos == name_len)  /* no subdir, plain DOS device */
+        return get_dos_device( name, name_len, unix_name_ret );
 
-        /* check for UNC prefix */
-        if (name_len > 4 && !memicmpW( name, uncW, 4 ))
-        {
-            name += 3;
-            name_len -= 3;
-            is_unc = TRUE;
-        }
-        else
-        {
-            /* check for a drive letter with path */
-            if (name_len < 3 || !isalphaW(name[0]) || name[1] != ':' || !IS_SEPARATOR(name[2]))
-            {
-                /* not a drive with path, try other DOS devices */
-                return get_dos_device( name, name_len, unix_name_ret );
-            }
-            name += 2;  /* skip drive letter */
-            name_len -= 2;
-        }
+    for (prefix_len = 0; prefix_len < pos; prefix_len++)
+        prefix[prefix_len] = tolowerW(name[prefix_len]);
 
-        /* check for invalid characters */
+    name += prefix_len;
+    name_len -= prefix_len;
+
+    /* check for invalid characters (all chars except 0 are valid for unix) */
+    is_unix = (prefix_len == 4 && !memcmp( prefix, unixW, sizeof(unixW) ));
+    if (is_unix)
+    {
+        for (p = name; p < name + name_len; p++)
+            if (!*p) return STATUS_OBJECT_NAME_INVALID;
+        check_case = TRUE;
+    }
+    else
+    {
         for (p = name; p < name + name_len; p++)
             if (*p < 32 || strchrW( invalid_charsW, *p )) return STATUS_OBJECT_NAME_INVALID;
-
-        unix_len = ntdll_wcstoumbs( 0, name, name_len, NULL, 0, NULL, NULL );
-        unix_len += MAX_DIR_ENTRY_LEN + 3;
-        unix_len += strlen(config_dir) + sizeof("/dosdevices/") + 3;
-        if (!(unix_name = RtlAllocateHeap( GetProcessHeap(), 0, unix_len )))
-            return STATUS_NO_MEMORY;
-        strcpy( unix_name, config_dir );
-        strcat( unix_name, "/dosdevices/" );
-        pos = strlen(unix_name);
-        if (is_unc)
-        {
-            strcpy( unix_name + pos, "unc" );
-            pos += 3;
-        }
-        else
-        {
-            unix_name[pos++] = tolowerW( name[-2] );
-            unix_name[pos++] = ':';
-            unix_name[pos] = 0;
-        }
     }
-    else  /* no DOS prefix, assume NT native name, map directly to Unix */
+
+    unix_len = ntdll_wcstoumbs( 0, prefix, prefix_len, NULL, 0, NULL, NULL );
+    unix_len += ntdll_wcstoumbs( 0, name, name_len, NULL, 0, NULL, NULL );
+    unix_len += MAX_DIR_ENTRY_LEN + 3;
+    unix_len += strlen(config_dir) + sizeof("/dosdevices/");
+    if (!(unix_name = RtlAllocateHeap( GetProcessHeap(), 0, unix_len )))
+        return STATUS_NO_MEMORY;
+    strcpy( unix_name, config_dir );
+    strcat( unix_name, "/dosdevices/" );
+    pos = strlen(unix_name);
+
+    ret = ntdll_wcstoumbs( 0, prefix, prefix_len, unix_name + pos, unix_len - pos - 1,
+                           NULL, &used_default );
+    if (!ret || used_default)
     {
-        if (!name_len || !IS_SEPARATOR(name[0])) return STATUS_OBJECT_NAME_INVALID;
-        unix_len = ntdll_wcstoumbs( 0, name, name_len, NULL, 0, NULL, NULL );
-        unix_len += MAX_DIR_ENTRY_LEN + 3;
-        if (!(unix_name = RtlAllocateHeap( GetProcessHeap(), 0, unix_len )))
-            return STATUS_NO_MEMORY;
-        pos = 0;
+        RtlFreeHeap( GetProcessHeap(), 0, unix_name );
+        return STATUS_OBJECT_NAME_INVALID;
+    }
+    pos += ret;
+
+    /* check if prefix exists (except for DOS drives to avoid extra stat calls) */
+
+    if (prefix_len != 2 || prefix[1] != ':')
+    {
+        unix_name[pos] = 0;
+        if (lstat( unix_name, &st ) == -1 && errno == ENOENT)
+        {
+            if (!is_unix)
+            {
+                RtlFreeHeap( GetProcessHeap(), 0, unix_name );
+                return STATUS_BAD_DEVICE_TYPE;
+            }
+            pos = 0;  /* fall back to unix root */
+        }
     }
 
     /* try a shortcut first */
@@ -1800,12 +2087,21 @@ done:
 BOOLEAN WINAPI RtlDoesFileExists_U(LPCWSTR file_name)
 {
     UNICODE_STRING nt_name;
-    ANSI_STRING unix_name;
+    FILE_BASIC_INFORMATION basic_info;
+    OBJECT_ATTRIBUTES attr;
     BOOLEAN ret;
 
     if (!RtlDosPathNameToNtPathName_U( file_name, &nt_name, NULL, NULL )) return FALSE;
-    ret = (wine_nt_to_unix_file_name( &nt_name, &unix_name, FILE_OPEN, FALSE ) == STATUS_SUCCESS);
-    if (ret) RtlFreeAnsiString( &unix_name );
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nt_name;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    ret = NtQueryAttributesFile(&attr, &basic_info) == STATUS_SUCCESS;
+
     RtlFreeUnicodeString( &nt_name );
     return ret;
 }
@@ -1821,15 +2117,7 @@ NTSTATUS DIR_unmount_device( HANDLE handle )
     NTSTATUS status;
     int unix_fd, needs_close;
 
-    SERVER_START_REQ( unmount_device )
-    {
-        req->handle = handle;
-        status = wine_server_call( req );
-    }
-    SERVER_END_REQ;
-    if (status) return status;
-
-    if (!(status = server_get_unix_fd( handle, 0, &unix_fd, &needs_close, NULL )))
+    if (!(status = server_get_unix_fd( handle, 0, &unix_fd, &needs_close, NULL, NULL )))
     {
         struct stat st;
         char *mount_point = NULL;
@@ -1911,7 +2199,7 @@ NTSTATUS DIR_get_unix_cwd( char **cwd )
         if (status != STATUS_SUCCESS) goto done;
     }
 
-    if ((status = server_get_unix_fd( handle, 0, &unix_fd, &needs_close, NULL )) == STATUS_SUCCESS)
+    if ((status = server_get_unix_fd( handle, 0, &unix_fd, &needs_close, NULL, NULL )) == STATUS_SUCCESS)
     {
         RtlEnterCriticalSection( &dir_section );
 
@@ -1952,31 +2240,27 @@ done:
 struct read_changes_info
 {
     HANDLE FileHandle;
-    HANDLE Event;
-    PIO_APC_ROUTINE ApcRoutine;
-    PVOID ApcContext;
     PVOID Buffer;
     ULONG BufferSize;
+    PIO_APC_ROUTINE apc;
+    void           *apc_arg;
 };
 
-static void WINAPI read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, ULONG status )
+/* callback for ioctl user APC */
+static void WINAPI read_changes_user_apc( void *arg, IO_STATUS_BLOCK *io, ULONG reserved )
+{
+    struct read_changes_info *info = arg;
+    if (info->apc) info->apc( info->apc_arg, io, reserved );
+    RtlFreeHeap( GetProcessHeap(), 0, info );
+}
+
+static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS status, ULONG_PTR *total )
 {
     struct read_changes_info *info = user;
     char path[PATH_MAX];
     NTSTATUS ret = STATUS_SUCCESS;
     int len, action, i;
 
-    TRACE("%p %p %p %08x\n", info, info->ApcContext, iosb, status);
-
-    /*
-     * FIXME: race me!
-     *
-     * hEvent/hDir is set before the output buffer and iosb is updated.
-     * Since the thread that called NtNotifyChangeDirectoryFile is usually
-     * waiting, we'll be safe since we're called in that thread's context.
-     * If a different thread is waiting on our hEvent/hDir we're going to be
-     * in trouble...
-     */
     SERVER_START_REQ( read_change )
     {
         req->handle = info->FileHandle;
@@ -2006,9 +2290,6 @@ static void WINAPI read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, ULONG st
         pfni->Action = action;
         pfni->FileNameLength = len * sizeof (WCHAR);
         pfni->FileName[len] = 0;
-
-        TRACE("action = %d name = %s\n", pfni->Action,
-              debugstr_w(pfni->FileName) );
         len = sizeof (*pfni) - sizeof (DWORD) + pfni->FileNameLength;
     }
     else
@@ -2018,9 +2299,8 @@ static void WINAPI read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, ULONG st
     }
 
     iosb->u.Status = ret;
-    iosb->Information = len;
-
-    RtlFreeHeap( GetProcessHeap(), 0, info );
+    iosb->Information = *total = len;
+    return ret;
 }
 
 #define FILE_NOTIFY_ALL        (  \
@@ -2044,6 +2324,7 @@ NtNotifyChangeDirectoryFile( HANDLE FileHandle, HANDLE Event,
 {
     struct read_changes_info *info;
     NTSTATUS status;
+    ULONG_PTR cvalue = ApcRoutine ? 0 : (ULONG_PTR)ApcContext;
 
     TRACE("%p %p %p %p %p %p %u %u %d\n",
           FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock,
@@ -2055,30 +2336,28 @@ NtNotifyChangeDirectoryFile( HANDLE FileHandle, HANDLE Event,
     if (CompletionFilter == 0 || (CompletionFilter & ~FILE_NOTIFY_ALL))
         return STATUS_INVALID_PARAMETER;
 
-    if (ApcRoutine)
-        FIXME("parameters ignored %p %p\n", ApcRoutine, ApcContext );
-
     info = RtlAllocateHeap( GetProcessHeap(), 0, sizeof *info );
     if (!info)
         return STATUS_NO_MEMORY;
 
     info->FileHandle = FileHandle;
-    info->Event      = Event;
     info->Buffer     = Buffer;
     info->BufferSize = BufferSize;
-    info->ApcRoutine = ApcRoutine;
-    info->ApcContext = ApcContext;
+    info->apc        = ApcRoutine;
+    info->apc_arg    = ApcContext;
 
     SERVER_START_REQ( read_directory_changes )
     {
         req->handle     = FileHandle;
-        req->event      = Event;
         req->filter     = CompletionFilter;
         req->want_data  = (Buffer != NULL);
         req->subtree    = WatchTree;
-        req->io_apc     = read_changes_apc;
-        req->io_sb      = IoStatusBlock;
-        req->io_user    = info;
+        req->async.callback = read_changes_apc;
+        req->async.iosb     = IoStatusBlock;
+        req->async.arg      = info;
+        req->async.apc      = read_changes_user_apc;
+        req->async.event    = Event;
+        req->async.cvalue   = cvalue;
         status = wine_server_call( req );
     }
     SERVER_END_REQ;

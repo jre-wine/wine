@@ -49,6 +49,7 @@
   51 stdcall PathResolve(str long long) PathResolveAW
   52 stdcall -noname PathGetArgs(str) PathGetArgsAW
   53 stdcall DoEnvironmentSubst(long long) DoEnvironmentSubstAW
+  54 stub LogoffWindowsDialog
   55 stdcall -noname PathQuoteSpaces(ptr) PathQuoteSpacesAW
   56 stdcall -noname PathUnquoteSpaces(str) PathUnquoteSpacesAW
   57 stdcall -noname PathGetDriveNumber(str) PathGetDriveNumberAW
@@ -136,6 +137,7 @@
  145 stdcall -noname PathFindOnPath(ptr ptr) PathFindOnPathAW
  146 stdcall -noname RLBuildListOfPaths()
  147 stdcall -noname SHCLSIDFromString(long long) SHCLSIDFromStringAW
+ 148 stdcall -noname SHMapIDListToImageListIndexAsync(ptr ptr ptr long ptr ptr ptr ptr ptr)
  149 stdcall -noname SHFind_InitMenuPopup(long long long long)
 
  151 stdcall -noname SHLoadOLE(long)
@@ -155,7 +157,7 @@
  165 stdcall -noname SHCreateDirectory(long ptr)
  166 stdcall -noname CallCPLEntry16(long long long long long long)
  167 stdcall -noname SHAddFromPropSheetExtArray(long long long)
- 168 stdcall -noname SHCreatePropSheetExtArray(long str long)
+ 168 stdcall -noname SHCreatePropSheetExtArray(long wstr long)
  169 stdcall -noname SHDestroyPropSheetExtArray(long)
  170 stdcall -noname SHReplaceFromPropSheetExtArray(long long long long)
  171 stdcall -noname PathCleanupSpec(ptr ptr)
@@ -169,8 +171,8 @@
  179 stdcall -noname SHGetNewLinkInfoA(str str ptr long long)
  180 stdcall -noname SHGetNewLinkInfoW(wstr wstr ptr long long)
  181 stdcall -noname RegisterShellHook(long long)
- 182 varargs -noname ShellMessageBoxW(long long long str long)
- 183 varargs -noname ShellMessageBoxA(long long long str long)
+ 182 varargs -noname ShellMessageBoxW(long long wstr wstr long)
+ 183 varargs -noname ShellMessageBoxA(long long str str long)
  184 stdcall -noname ArrangeWindows(long long long long long)
  185 stub SHHandleDiskFull
  186 stdcall -noname ILGetDisplayNameEx(ptr ptr ptr long)
@@ -181,7 +183,7 @@
  191 stdcall -noname SHUpdateImageA(str long long long)
  192 stdcall -noname SHUpdateImageW(wstr long long long)
  193 stdcall -noname SHHandleUpdateImage(ptr)
- 194 stub SHCreatePropSheetExtArrayEx
+ 194 stdcall -noname SHCreatePropSheetExtArrayEx(long wstr long ptr)
  195 stdcall -noname SHFree(ptr)
  196 stdcall -noname SHAlloc(long)
  197 stub SHGlobalDefect
@@ -209,6 +211,8 @@
  250 stdcall -noname PathRemoveExtension(ptr) PathRemoveExtensionAW
  251 stdcall -noname PathRemoveArgs(ptr) PathRemoveArgsAW
  256 stdcall @(ptr ptr) SHELL32_256
+ 258 stdcall -noname LinkWindow_RegisterClass()
+ 259 stdcall -noname LinkWindow_UnregisterClass()
 #299 stub Shl1632_ThunkData32
 #300 stub Shl3216_ThunkData32
 
@@ -299,9 +303,9 @@
 @ stub InternalExtractIconListA
 @ stub InternalExtractIconListW
 @ stub OCInstall
-@ stub OpenAs_RunDLL
-@ stub OpenAs_RunDLLA
-@ stub OpenAs_RunDLLW
+@ stdcall OpenAs_RunDLL(long long str long) OpenAs_RunDLLA
+@ stdcall OpenAs_RunDLLA(long long str long)
+@ stdcall OpenAs_RunDLLW(long long wstr long)
 @ stub PrintersGetCommand_RunDLL
 @ stub PrintersGetCommand_RunDLLA
 @ stub PrintersGetCommand_RunDLLW
@@ -361,13 +365,13 @@
 @ stub SHInvokePrinterCommandW
 @ stdcall SHIsFileAvailableOffline(wstr ptr)
 @ stdcall SHLoadInProc(long)
-@ stub SHLoadNonloadedIconOverlayIdentifiers
-@ stub SHPathPrepareForWriteA
-@ stub SHPathPrepareForWriteW
+@ stdcall SHLoadNonloadedIconOverlayIdentifiers()
+@ stdcall SHPathPrepareForWriteA(long ptr str long)
+@ stdcall SHPathPrepareForWriteW(long ptr wstr long)
 @ stdcall SHQueryRecycleBinA(str ptr)
 @ stdcall SHQueryRecycleBinW(wstr ptr)
 @ stdcall SHSetLocalizedName(wstr wstr long)
-@ stub SHUpdateRecycleBinIcon
+@ stdcall SHUpdateRecycleBinIcon()
 @ stdcall SheChangeDirA(str)
 @ stub SheChangeDirExA
 @ stub SheChangeDirExW

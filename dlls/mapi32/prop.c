@@ -665,7 +665,7 @@ VOID WINAPI FreePadrlist(LPADRLIST lpAddrs)
     TRACE("(%p)\n", lpAddrs);
 
     /* Structures are binary compatible; use the same implementation */
-    return FreeProws((LPSRowSet)lpAddrs);
+    FreeProws((LPSRowSet)lpAddrs);
 }
 
 /*************************************************************************
@@ -928,7 +928,7 @@ SCODE WINAPI ScRelocProps(int cValues, LPSPropValue lpProps, LPVOID lpOld,
                           LPVOID lpNew, ULONG *lpCount)
 {
     static const BOOL bBadPtr = TRUE; /* Windows bug - Assumes source is bad */
-    LPSPropValue lpDest = (LPSPropValue)lpProps;
+    LPSPropValue lpDest = lpProps;
     ULONG ulCount = cValues * sizeof(SPropValue);
     ULONG ulLen, i;
     int iter;
@@ -964,7 +964,7 @@ SCODE WINAPI ScRelocProps(int cValues, LPSPropValue lpProps, LPVOID lpOld,
             break;
         case PT_STRING8:
             ulLen = bBadPtr ? 0 : lstrlenA(lpDest->Value.lpszA) + 1u;
-            lpDest->Value.lpszA = (LPSTR)RELOC_PTR(lpDest->Value.lpszA);
+            lpDest->Value.lpszA = RELOC_PTR(lpDest->Value.lpszA);
             if (bBadPtr)
                 ulLen = lstrlenA(lpDest->Value.lpszA) + 1u;
             ulCount += ulLen;
@@ -999,7 +999,7 @@ SCODE WINAPI ScRelocProps(int cValues, LPSPropValue lpProps, LPVOID lpOld,
                     {
                         ULONG ulStrLen = bBadPtr ? 0 : lstrlenA(lpDest->Value.MVszA.lppszA[i]) + 1u;
 
-                        lpDest->Value.MVszA.lppszA[i] = (LPSTR)RELOC_PTR(lpDest->Value.MVszA.lppszA[i]);
+                        lpDest->Value.MVszA.lppszA[i] = RELOC_PTR(lpDest->Value.MVszA.lppszA[i]);
                         if (bBadPtr)
                             ulStrLen = lstrlenA(lpDest->Value.MVszA.lppszA[i]) + 1u;
                         ulCount += ulStrLen;
@@ -1331,7 +1331,7 @@ ULONG WINAPI FBadProp(LPSPropValue lpProp)
         return FBadRglpszW(lpProp->Value.MVszW.lppszW,
                            lpProp->Value.MVszW.cValues);
     case PT_MV_BINARY:
-        return FBadEntryList((LPENTRYLIST)&lpProp->Value.MVbin);
+        return FBadEntryList(&lpProp->Value.MVbin);
     }
     return FALSE;
 }
@@ -1553,6 +1553,7 @@ static inline ULONG WINAPI IMAPIProp_fnRelease(LPMAPIPROP iface)
             This->lpFree(current->value);
             This->lpFree(current);
         }
+        This->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->cs);
         This->lpFree(This);
     }
@@ -2543,6 +2544,7 @@ SCODE WINAPI CreateIProp(LPCIID iid, ALLOCATEBUFFER *lpAlloc,
         lpPropData->ulNumValues = 0;
         list_init(&lpPropData->values);
         InitializeCriticalSection(&lpPropData->cs);
+        lpPropData->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IPropDataImpl.cs");
         *lppPropData = (LPPROPDATA)lpPropData;
     }
     return scode;

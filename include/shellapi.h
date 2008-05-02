@@ -57,17 +57,6 @@ UINT	WINAPI DragQueryFileW(HDROP hDrop, UINT lFile, LPWSTR lpszFile, UINT lLengt
 void	WINAPI DragFinish(HDROP h);
 BOOL	WINAPI DragQueryPoint(HDROP hDrop, POINT *p);
 
-#define NIF_MESSAGE             0x00000001
-#define NIF_ICON                0x00000002
-#define NIF_TIP                 0x00000004
-#define NIF_STATE               0x00000008
-#define NIF_INFO                0x00000010
-#define NIF_GUID                0x00000020
-
-#define NIM_ADD                 0x00000000
-#define NIM_MODIFY              0x00000001
-#define NIM_DELETE              0x00000002
-
 
 
 /******************************************
@@ -276,7 +265,8 @@ HINSTANCE	WINAPI ShellExecuteW(HWND,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR,INT);
 #define SEE_MASK_HOTKEY           0x00000020
 #define SEE_MASK_NOCLOSEPROCESS   0x00000040
 #define SEE_MASK_CONNECTNETDRV    0x00000080
-#define SEE_MASK_FLAG_DDEWAIT     0x00000100
+#define SEE_MASK_NOASYNC          0x00000100
+#define SEE_MASK_FLAG_DDEWAIT     SEE_MASK_NOASYNC
 #define SEE_MASK_DOENVSUBST       0x00000200
 #define SEE_MASK_FLAG_NO_UI       0x00000400
 #define SEE_MASK_UNICODE          0x00004000
@@ -346,6 +336,51 @@ void WINAPI WinExecErrorW(HWND hwnd,INT error, LPCWSTR lpstrFileName, LPCWSTR lp
 /******************************************
  * Tray Notification
  */
+/* notifyicondata.uFlags values*/
+#define NIF_MESSAGE             0x00000001
+#define NIF_ICON                0x00000002
+#define NIF_TIP                 0x00000004
+#define NIF_STATE               0x00000008
+#define NIF_INFO                0x00000010
+#define NIF_GUID                0x00000020
+#define NIF_REALTIME            0x00000040
+#define NIF_SHOWTIP             0x00000080
+
+/* notifyicondata.dwState values */
+#define NIS_HIDDEN              0x00000001
+#define NIS_SHAREDICON          0x00000002
+
+/* notifyicondata.dwInfoFlags values */
+#define NIIF_NONE               0x00000000
+#define NIIF_INFO               0x00000001
+#define NIIF_WARNING            0x00000002
+#define NIIF_ERROR              0x00000003
+#define NIIF_USER               0x00000004
+#define NIIF_ICONMASK           0x0000000f
+#define NIIF_NOSOUND            0x00000010
+#define NIIF_LARGEICON          0x00000020
+
+/* dwMessage values */
+#define NIM_ADD                 0x00000000
+#define NIM_MODIFY              0x00000001
+#define NIM_DELETE              0x00000002
+#define NIM_SETFOCUS            0x00000003
+#define NIM_SETVERSION          0x00000004
+
+#define NOTIFY_VERSION   3     /* supported by Windows 2000 and later */
+#define NOTIFY_VERSION_4 4     /* supported by Windows Vista */
+
+/* callback message lParam values */
+#define NIN_SELECT              (WM_USER+0)
+#define NINF_KEY                1
+#define NIN_KEYSELECT           (NIN_SELECT|NINF_KEY)  /* WM_USER+1 */
+#define NIN_BALOONSHOW          (WM_USER+2)
+#define NIN_BALOONHIDE          (WM_USER+3)
+#define NIN_BALOONTIMEOUT       (WM_USER+4)
+#define NIN_BALOONCLICK         (WM_USER+5)
+#define NIN_POPUPOPEN           (WM_USER+6)
+#define NIN_POPUPCLOSE          (WM_USER+7)
+
 typedef struct _NOTIFYICONDATAA
 {	DWORD cbSize;
 	HWND hWnd;
@@ -363,6 +398,8 @@ typedef struct _NOTIFYICONDATAA
 	} DUMMYUNIONNAME;
 	CHAR szInfoTitle[64];
 	DWORD dwInfoFlags;
+	GUID guidItem;
+	HICON hBalloonIcon;
 } NOTIFYICONDATAA, *PNOTIFYICONDATAA;
 
 typedef struct _NOTIFYICONDATAW
@@ -382,6 +419,8 @@ typedef struct _NOTIFYICONDATAW
 	} DUMMYUNIONNAME;
 	WCHAR szInfoTitle[64];
 	DWORD dwInfoFlags;
+	GUID guidItem;
+	HICON hBalloonIcon;
 } NOTIFYICONDATAW, *PNOTIFYICONDATAW;
 
 DECL_WINELIB_TYPE_AW(NOTIFYICONDATA)
@@ -391,6 +430,19 @@ BOOL WINAPI Shell_NotifyIconA(DWORD dwMessage, PNOTIFYICONDATAA lpData);
 BOOL WINAPI Shell_NotifyIconW(DWORD dwMessage, PNOTIFYICONDATAW lpData);
 
 #define Shell_NotifyIcon WINELIB_NAME_AW(Shell_NotifyIcon)
+
+/* pre IE 5.0 */
+#define NOTIFYICONDATAA_V1_SIZE FIELD_OFFSET(NOTIFYICONDATAA, szTip[64])
+#define NOTIFYICONDATAW_V1_SIZE FIELD_OFFSET(NOTIFYICONDATAW, szTip[64])
+
+/* pre Window XP */
+#define NOTIFYICONDATAA_V2_SIZE FIELD_OFFSET(NOTIFYICONDATAA, guidItem)
+#define NOTIFYICONDATAW_V2_SIZE FIELD_OFFSET(NOTIFYICONDATAW, guidItem)
+
+/* pre Window Vista */
+#define NOTIFYICONDATAA_V3_SIZE FIELD_OFFSET(NOTIFYICONDATAA, hBalloonIcon)
+#define NOTIFYICONDATAW_V3_SIZE FIELD_OFFSET(NOTIFYICONDATAW, hBalloonIcon)
+
 
 /******************************************
  * Links

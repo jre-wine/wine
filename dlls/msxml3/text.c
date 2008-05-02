@@ -59,19 +59,19 @@ static HRESULT WINAPI domtext_QueryInterface(
     TRACE("%p %s %p\n", This, debugstr_guid(riid), ppvObject);
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMText ) ||
+         IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppvObject = iface;
     }
-    else if ( IsEqualGUID( riid, &IID_IDispatch ) ||
-              IsEqualGUID( riid, &IID_IXMLDOMNode ) ||
+    else if ( IsEqualGUID( riid, &IID_IXMLDOMNode ) ||
               IsEqualGUID( riid, &IID_IXMLDOMElement ) )
     {
         return IUnknown_QueryInterface(This->element_unk, riid, ppvObject);
     }
     else
     {
-        FIXME("Unsupported inteferace %s\n", debugstr_guid(riid));
+        FIXME("Unsupported interface %s\n", debugstr_guid(riid));
         return E_NOINTERFACE;
     }
 

@@ -51,7 +51,7 @@ struct dce
 
 static struct list dce_list = LIST_INIT(dce_list);
 
-static BOOL16 CALLBACK dc_hook( HDC16 hDC, WORD code, DWORD data, LPARAM lParam );
+static BOOL CALLBACK dc_hook( HDC hDC, WORD code, DWORD_PTR data, LPARAM lParam );
 
 static CRITICAL_SECTION dce_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -126,10 +126,14 @@ static void update_visible_region( struct dce *dce )
                 vis_rgn = ExtCreateRegion( NULL, size, data );
 
                 top = reply->top_win;
-                escape.org.x = reply->win_org_x - reply->top_org_x;
-                escape.org.y = reply->win_org_y - reply->top_org_y;
-                escape.drawable_org.x = reply->top_org_x;
-                escape.drawable_org.y = reply->top_org_y;
+                escape.dc_rect.left = reply->win_rect.left - reply->top_rect.left;
+                escape.dc_rect.top = reply->win_rect.top - reply->top_rect.top;
+                escape.dc_rect.right = reply->win_rect.right - reply->top_rect.left;
+                escape.dc_rect.bottom = reply->win_rect.bottom - reply->top_rect.top;
+                escape.drawable_rect.left = reply->top_rect.left;
+                escape.drawable_rect.top = reply->top_rect.top;
+                escape.drawable_rect.right = reply->top_rect.right;
+                escape.drawable_rect.bottom = reply->top_rect.bottom;
             }
             else size = reply->total_size;
         }
@@ -144,9 +148,19 @@ static void update_visible_region( struct dce *dce )
 
     if (top == dce->hwnd && ((data = X11DRV_get_win_data( dce->hwnd )) != NULL) &&
          IsIconic( dce->hwnd ) && data->icon_window)
+    {
         escape.drawable = data->icon_window;
+        escape.fbconfig_id = 0;
+        escape.gl_drawable = 0;
+        escape.pixmap = 0;
+    }
     else
+    {
         escape.drawable = X11DRV_get_whole_window( top );
+        escape.fbconfig_id = X11DRV_get_fbconfig_id( dce->hwnd );
+        escape.gl_drawable = X11DRV_get_gl_drawable( dce->hwnd );
+        escape.pixmap = X11DRV_get_gl_pixmap( dce->hwnd );
+    }
 
     escape.code = X11DRV_SET_DRAWABLE;
     escape.mode = IncludeInferiors;
@@ -154,8 +168,8 @@ static void update_visible_region( struct dce *dce )
 
     /* map region to DC coordinates */
     OffsetRgn( vis_rgn,
-               -(escape.drawable_org.x + escape.org.x),
-               -(escape.drawable_org.y + escape.org.y) );
+               -(escape.drawable_rect.left + escape.dc_rect.left),
+               -(escape.drawable_rect.top + escape.dc_rect.top) );
     SelectVisRgn16( HDC_16(dce->hdc), HRGN_16(vis_rgn) );
     DeleteObject( vis_rgn );
 }
@@ -178,8 +192,12 @@ static void release_dce( struct dce *dce )
     escape.code = X11DRV_SET_DRAWABLE;
     escape.drawable = root_window;
     escape.mode = IncludeInferiors;
-    escape.org.x = escape.org.y = 0;
-    escape.drawable_org.x = escape.drawable_org.y = 0;
+    escape.drawable_rect = virtual_screen_rect;
+    SetRect( &escape.dc_rect, 0, 0, virtual_screen_rect.right - virtual_screen_rect.left,
+             virtual_screen_rect.bottom - virtual_screen_rect.top );
+    escape.fbconfig_id = 0;
+    escape.gl_drawable = 0;
+    escape.pixmap = 0;
     ExtEscape( dce->hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
 }
 
@@ -219,7 +237,7 @@ static struct dce *alloc_cache_dce(void)
     SaveDC( dce->hdc );
 
     /* store DCE handle in DC hook data field */
-    SetDCHook( dce->hdc, dc_hook, (DWORD)dce );
+    SetDCHook( dce->hdc, dc_hook, (DWORD_PTR)dce );
 
     dce->hwnd      = 0;
     dce->clip_rgn  = 0;
@@ -285,7 +303,7 @@ void alloc_window_dce( struct x11drv_win_data *data )
 
     /* store DCE handle in DC hook data field */
 
-    SetDCHook( dce->hdc, dc_hook, (DWORD)dce );
+    SetDCHook( dce->hdc, dc_hook, (DWORD_PTR)dce );
 
     dce->hwnd      = data->hwnd;
     dce->clip_rgn  = 0;
@@ -386,7 +404,7 @@ void invalidate_dce( HWND hwnd, const RECT *rect )
 
             /* check if DCE window is within the z-order scope */
 
-            if (hwndScope == dce->hwnd || IsChild( hwndScope, dce->hwnd ))
+            if (hwndScope == dce->hwnd || hwndScope == GetDesktopWindow() || IsChild( hwndScope, dce->hwnd ))
             {
                 if (hwnd != dce->hwnd)
                 {
@@ -588,15 +606,15 @@ INT X11DRV_ReleaseDC( HWND hwnd, HDC hdc, BOOL end_paint )
  *
  * See "Undoc. Windows" for hints (DC, SetDCHook, SetHookFlags)..
  */
-static BOOL16 CALLBACK dc_hook( HDC16 hDC, WORD code, DWORD data, LPARAM lParam )
+static BOOL CALLBACK dc_hook( HDC hDC, WORD code, DWORD_PTR data, LPARAM lParam )
 {
     BOOL retv = TRUE;
     struct dce *dce = (struct dce *)data;
 
-    TRACE("hDC = %04x, %i\n", hDC, code);
+    TRACE("hDC = %p, %u\n", hDC, code);
 
     if (!dce) return 0;
-    assert( HDC_16(dce->hdc) == hDC );
+    assert( dce->hdc == hDC );
 
     switch( code )
     {

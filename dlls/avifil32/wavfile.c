@@ -212,7 +212,7 @@ struct _IAVIFileImpl {
 
 static HRESULT AVIFILE_LoadFile(IAVIFileImpl *This);
 static HRESULT AVIFILE_LoadSunFile(IAVIFileImpl *This);
-static HRESULT AVIFILE_SaveFile(IAVIFileImpl *This);
+static HRESULT AVIFILE_SaveFile(const IAVIFileImpl *This);
 
 HRESULT AVIFILE_CreateWAVFile(REFIID riid, LPVOID *ppv)
 {
@@ -574,7 +574,7 @@ static HRESULT WINAPI IPersistFile_fnLoad(IPersistFile *iface,
   if (This->hmmio != NULL)
     return AVIERR_ERROR; /* No reuse of this object for another file! */
 
-  /* remeber mode and name */
+  /* remember mode and name */
   This->uMode = dwMode;
 
   len = lstrlenW(pszFileName) + 1;
@@ -1248,7 +1248,7 @@ static HRESULT AVIFILE_LoadSunFile(IAVIFileImpl *This)
   return AVIERR_OK;
 }
 
-static HRESULT AVIFILE_SaveFile(IAVIFileImpl *This)
+static HRESULT AVIFILE_SaveFile(const IAVIFileImpl *This)
 {
   MMCKINFO ckRIFF;
   MMCKINFO ck;

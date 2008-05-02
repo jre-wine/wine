@@ -38,10 +38,10 @@ HRESULT DPLAYX_GetConnectionSettingsW ( DWORD dwAppID,
 
 HRESULT DPLAYX_SetConnectionSettingsA ( DWORD dwFlags,
                                         DWORD dwAppID,
-                                        LPDPLCONNECTION lpConn );
+                                        const DPLCONNECTION *lpConn );
 HRESULT DPLAYX_SetConnectionSettingsW ( DWORD dwFlags,
                                         DWORD dwAppID,
-                                        LPDPLCONNECTION lpConn );
+                                        const DPLCONNECTION *lpConn );
 
 BOOL DPLAYX_CreateLobbyApplication( DWORD dwAppID );
 BOOL DPLAYX_DestroyLobbyApplication( DWORD dwAppID );
@@ -51,9 +51,6 @@ BOOL DPLAYX_AnyLobbiesWaitingForConnSettings(void);
 
 BOOL DPLAYX_SetLobbyHandles( DWORD dwAppID,
                              HANDLE hStart, HANDLE hDeath, HANDLE hConnRead );
-BOOL DPLAYX_GetThisLobbyHandles( LPHANDLE lphStart,
-                                 LPHANDLE lphDeath,
-                                 LPHANDLE lphConnRead, BOOL bClearSetHandles );
 
 LPDPSESSIONDESC2 DPLAYX_CopyAndAllocateLocalSession( UINT* index );
 BOOL DPLAYX_CopyLocalSession( UINT* index, LPDPSESSIONDESC2 lpsd );

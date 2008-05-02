@@ -150,7 +150,7 @@ static inline void writejump( const char *symbol, void *dest )
     *(int *)(addr+1) = (unsigned char *)dest - (addr + 5);
     mprotect((void*)((unsigned int)addr & ~(getpagesize()-1)), 5, PROT_READ|PROT_EXEC);
 
-# ifdef HAVE_VALGRIND_MEMCHECK_H
+# ifdef VALGRIND_DISCARD_TRANSLATIONS
     VALGRIND_DISCARD_TRANSLATIONS( addr, 5 );
 # endif
 #endif  /* __GLIBC__ && __i386__ */
@@ -167,7 +167,7 @@ static int next_temp_stack;  /* next temp stack to use */
  *
  * Get a temporary stack address to run the thread exit code on.
  */
-inline static char *get_temp_stack(void)
+static inline char *get_temp_stack(void)
 {
     unsigned int next = interlocked_xchg_add( &next_temp_stack, 1 );
     return temp_stacks[next % NB_TEMP_STACKS] + TEMP_STACK_SIZE;
@@ -237,8 +237,7 @@ static int create_thread( struct wine_pthread_thread_info *info )
 {
     if (!info->stack_base)
     {
-        info->stack_base = wine_anon_mmap( NULL, info->stack_size,
-                                           PROT_READ | PROT_WRITE | PROT_EXEC, 0 );
+        info->stack_base = wine_anon_mmap( NULL, info->stack_size, PROT_READ | PROT_WRITE, 0 );
         if (info->stack_base == (void *)-1) return -1;
     }
 #ifdef HAVE_CLONE
@@ -904,6 +903,14 @@ void __pthread_initialize(void)
     if (!done)
     {
         done = 1;
+        /* check for exported epoll_create to detect glibc versions that we cannot support */
+        if (wine_dlsym( RTLD_DEFAULT, "epoll_create", NULL, 0 ))
+        {
+            static const char warning[] =
+                "wine: glibc >= 2.3 without NPTL or TLS is not a supported combination.\n"
+                "      It will most likely crash. Please upgrade to a glibc with NPTL support.\n";
+            write( 2, warning, sizeof(warning)-1 );
+        }
         libc_fork = wine_dlsym( RTLD_NEXT, "fork", NULL, 0 );
         libc_sigaction = wine_dlsym( RTLD_NEXT, "sigaction", NULL, 0 );
         libc_uselocale = wine_dlsym( RTLD_DEFAULT, "uselocale", NULL, 0 );

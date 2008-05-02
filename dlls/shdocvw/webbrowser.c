@@ -72,6 +72,9 @@ static HRESULT WINAPI WebBrowser_QueryInterface(IWebBrowser2 *iface, REFIID riid
     }else if(IsEqualGUID(&IID_IPersistStorage, riid)) {
         TRACE("(%p)->(IID_IPersistStorage %p)\n", This, ppv);
         *ppv = PERSTORAGE(This);
+    }else if(IsEqualGUID(&IID_IPersistMemory, riid)) {
+        TRACE("(%p)->(IID_IPersistStorage %p)\n", This, ppv);
+        *ppv = PERMEMORY(This);
     }else if(IsEqualGUID (&IID_IPersistStreamInit, riid)) {
         TRACE("(%p)->(IID_IPersistStreamInit %p)\n", This, ppv);
         *ppv = PERSTRINIT(This);
@@ -104,6 +107,12 @@ static HRESULT WINAPI WebBrowser_QueryInterface(IWebBrowser2 *iface, REFIID riid
         return E_NOINTERFACE;
     }else if(IsEqualGUID(&IID_IRunnableObject, riid)) {
         TRACE("(%p)->(IID_IRunnableObject %p) returning NULL\n", This, ppv);
+        return E_NOINTERFACE;
+    }else if(IsEqualGUID(&IID_IPerPropertyBrowsing, riid)) {
+        TRACE("(%p)->(IID_IPerPropertyBrowsing %p) returning NULL\n", This, ppv);
+        return E_NOINTERFACE;
+    }else if(IsEqualGUID(&IID_IOleCache, riid)) {
+        TRACE("(%p)->(IID_IOleCache %p) returning NULL\n", This, ppv);
         return E_NOINTERFACE;
     }
 
@@ -139,7 +148,7 @@ static ULONG WINAPI WebBrowser_Release(IWebBrowser2 *iface)
 
         WebBrowser_OleObject_Destroy(This);
 
-        shdocvw_free(This);
+        heap_free(This);
         SHDOCVW_UnlockModule();
     }
 
@@ -210,8 +219,8 @@ static HRESULT WINAPI WebBrowser_GoForward(IWebBrowser2 *iface)
 static HRESULT WINAPI WebBrowser_GoHome(IWebBrowser2 *iface)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+    TRACE("(%p)\n", This);
+    return go_home(&This->doc_host);
 }
 
 static HRESULT WINAPI WebBrowser_GoSearch(IWebBrowser2 *iface)
@@ -257,8 +266,15 @@ static HRESULT WINAPI WebBrowser_Stop(IWebBrowser2 *iface)
 static HRESULT WINAPI WebBrowser_get_Application(IWebBrowser2 *iface, IDispatch **ppDisp)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, ppDisp);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, ppDisp);
+
+    if(!ppDisp)
+        return E_POINTER;
+
+    *ppDisp = (IDispatch*)WEBBROWSER2(This);
+    IDispatch_AddRef(*ppDisp);
+    return S_OK;
 }
 
 static HRESULT WINAPI WebBrowser_get_Parent(IWebBrowser2 *iface, IDispatch **ppDisp)
@@ -447,8 +463,11 @@ static HRESULT WINAPI WebBrowser_get_Busy(IWebBrowser2 *iface, VARIANT_BOOL *pBo
 static HRESULT WINAPI WebBrowser_Quit(IWebBrowser2 *iface)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    /* It's a InternetExplorer specific method, we have nothing to do here. */
+    return E_FAIL;
 }
 
 static HRESULT WINAPI WebBrowser_ClientToWindow(IWebBrowser2 *iface, int *pcx, int *pcy)
@@ -638,15 +657,31 @@ static HRESULT WINAPI WebBrowser_put_MenuBar(IWebBrowser2 *iface, VARIANT_BOOL V
 static HRESULT WINAPI WebBrowser_get_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL *pbFullScreen)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, pbFullScreen);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, pbFullScreen);
+
+    *pbFullScreen = This->full_screen;
+    return S_OK;
 }
 
 static HRESULT WINAPI WebBrowser_put_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL bFullScreen)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%x)\n", This, bFullScreen);
-    return E_NOTIMPL;
+    VARIANTARG arg;
+    DISPPARAMS dispparams = {&arg, NULL, 1, 0};
+
+    /* In opposition to InternetExplorer, all we should do here is
+     * inform the embedder about the fullscreen change. */
+
+    TRACE("(%p)->(%x)\n", This, bFullScreen);
+
+    This->full_screen = bFullScreen ? VARIANT_TRUE : VARIANT_FALSE;
+
+    V_VT(&arg) = VT_BOOL;
+    V_BOOL(&arg) = bFullScreen;
+    call_sink(This->doc_host.cps.wbe2, DISPID_ONFULLSCREEN, &dispparams);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI WebBrowser_Navigate2(IWebBrowser2 *iface, VARIANT *URL, VARIANT *Flags,
@@ -706,7 +741,7 @@ static HRESULT WINAPI WebBrowser_get_Offline(IWebBrowser2 *iface, VARIANT_BOOL *
 
     TRACE("(%p)->(%p)\n", This, pbOffline);
 
-    *pbOffline = This->offline;
+    *pbOffline = This->doc_host.offline;
     return S_OK;
 }
 
@@ -716,7 +751,7 @@ static HRESULT WINAPI WebBrowser_put_Offline(IWebBrowser2 *iface, VARIANT_BOOL b
 
     TRACE("(%p)->(%x)\n", This, bOffline);
 
-    This->offline = bOffline ? VARIANT_TRUE : VARIANT_FALSE;
+    This->doc_host.offline = bOffline ? VARIANT_TRUE : VARIANT_FALSE;
     return S_OK;
 }
 
@@ -726,7 +761,7 @@ static HRESULT WINAPI WebBrowser_get_Silent(IWebBrowser2 *iface, VARIANT_BOOL *p
 
     TRACE("(%p)->(%p)\n", This, pbSilent);
 
-    *pbSilent = This->silent;
+    *pbSilent = This->doc_host.silent;
     return S_OK;
 }
 
@@ -736,7 +771,7 @@ static HRESULT WINAPI WebBrowser_put_Silent(IWebBrowser2 *iface, VARIANT_BOOL bS
 
     TRACE("(%p)->(%x)\n", This, bSilent);
 
-    This->silent = bSilent ? VARIANT_TRUE : VARIANT_FALSE;
+    This->doc_host.silent = bSilent ? VARIANT_TRUE : VARIANT_FALSE;
     return S_OK;
 }
 
@@ -819,15 +854,29 @@ static HRESULT WINAPI WebBrowser_put_AddressBar(IWebBrowser2 *iface, VARIANT_BOO
 static HRESULT WINAPI WebBrowser_get_Resizable(IWebBrowser2 *iface, VARIANT_BOOL *Value)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, Value);
+
+    TRACE("(%p)->(%p)\n", This, Value);
+
+    /* It's InternetExplorer object's method. We have nothing to do here. */
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI WebBrowser_put_Resizable(IWebBrowser2 *iface, VARIANT_BOOL Value)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%x)\n", This, Value);
-    return E_NOTIMPL;
+    VARIANTARG arg;
+    DISPPARAMS dispparams = {&arg, NULL, 1, 0};
+
+    TRACE("(%p)->(%x)\n", This, Value);
+
+    /* In opposition to InternetExplorer, all we should do here is
+     * inform the embedder about the resizable change. */
+
+    V_VT(&arg) = VT_BOOL;
+    V_BOOL(&arg) = Value;
+    call_sink(This->doc_host.cps.wbe2, DISPID_WINDOWSETRESIZABLE, &dispparams);
+
+    return S_OK;
 }
 
 #undef WEBBROWSER_THIS
@@ -914,7 +963,7 @@ static HRESULT WebBrowser_Create(INT version, IUnknown *pOuter, REFIID riid, voi
 
     TRACE("(%p %s %p) version=%d\n", pOuter, debugstr_guid(riid), ppv, version);
 
-    ret = shdocvw_alloc(sizeof(WebBrowser));
+    ret = heap_alloc(sizeof(WebBrowser));
 
     ret->lpWebBrowser2Vtbl = &WebBrowser2Vtbl;
     ret->ref = 0;
@@ -927,8 +976,7 @@ static HRESULT WebBrowser_Create(INT version, IUnknown *pOuter, REFIID riid, voi
     ret->address_bar = VARIANT_TRUE;
     ret->status_bar = VARIANT_TRUE;
     ret->tool_bar = VARIANT_TRUE;
-    ret->silent = VARIANT_FALSE;
-    ret->offline = VARIANT_FALSE;
+    ret->full_screen = VARIANT_FALSE;
 
     WebBrowser_OleObject_Init(ret);
     WebBrowser_ViewObject_Init(ret);
@@ -940,7 +988,7 @@ static HRESULT WebBrowser_Create(INT version, IUnknown *pOuter, REFIID riid, voi
     if(SUCCEEDED(hres)) {
         SHDOCVW_LockModule();
     }else {
-        shdocvw_free(ret);
+        heap_free(ret);
         return hres;
     }
 

@@ -36,7 +36,7 @@ static BOOL using_root;
 /* window procedure for the desktop window */
 static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 {
-    WINE_TRACE( "got msg %x wp %x lp %lx\n", message, wp, lp );
+    WINE_TRACE( "got msg %04x wp %lx lp %lx\n", message, wp, lp );
 
     switch(message)
     {
@@ -113,6 +113,36 @@ static BOOL get_default_desktop_size( unsigned int *width, unsigned int *height 
     return ret;
 }
 
+static void initialize_display_settings( HWND desktop )
+{
+    static const WCHAR display_device_guid_propW[] = {
+        '_','_','w','i','n','e','_','d','i','s','p','l','a','y','_',
+        'd','e','v','i','c','e','_','g','u','i','d',0 };
+    GUID guid;
+    RPC_CSTR guid_str;
+    ATOM guid_atom;
+    DEVMODEW dmW;
+
+    UuidCreate( &guid );
+    UuidToStringA( &guid, &guid_str );
+    WINE_TRACE( "display guid %s\n", guid_str );
+
+    guid_atom = GlobalAddAtomA( (LPCSTR)guid_str );
+    SetPropW( desktop, display_device_guid_propW, ULongToHandle(guid_atom) );
+
+    RpcStringFreeA( &guid_str );
+
+    /* Store current display mode in the registry */
+    if (EnumDisplaySettingsExW( NULL, ENUM_CURRENT_SETTINGS, &dmW, 0 ))
+    {
+        WINE_TRACE( "Current display mode %ux%u %u bpp %u Hz\n", dmW.dmPelsWidth,
+                    dmW.dmPelsHeight, dmW.dmBitsPerPel, dmW.dmDisplayFrequency );
+        ChangeDisplaySettingsExW( NULL, &dmW, 0,
+                                  CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY,
+                                  NULL );
+    }
+}
+
 /* main desktop management function */
 void manage_desktop( char *arg )
 {
@@ -151,17 +181,14 @@ void manage_desktop( char *arg )
         xwin = create_desktop( "Default", width, height );
     }
 
-    if (!xwin)  /* using the root window */
-    {
-        using_root = TRUE;
-        width = GetSystemMetrics(SM_CXSCREEN);
-        height = GetSystemMetrics(SM_CYSCREEN);
-    }
+    if (!xwin) using_root = TRUE; /* using the root window */
 
     /* create the desktop window */
     hwnd = CreateWindowExW( 0, DESKTOP_CLASS_ATOM, NULL,
                             WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-                            0, 0, width, height, 0, 0, 0, NULL );
+                            GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+                            GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                            0, 0, 0, NULL );
     if (hwnd == GetDesktopWindow())
     {
         SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)desktop_wnd_proc );
@@ -169,6 +196,7 @@ void manage_desktop( char *arg )
         SetWindowTextW( hwnd, desktop_nameW );
         SystemParametersInfoA( SPI_SETDESKPATTERN, -1, NULL, FALSE );
         SetDeskWallPaper( (LPSTR)-1 );
+        initialize_display_settings( hwnd );
         initialize_diskarbitration();
         initialize_hal();
         initialize_systray();

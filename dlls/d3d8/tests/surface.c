@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Henri Verbeet
+ * Copyright 2006-2007 Henri Verbeet
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -56,7 +56,12 @@ static IDirect3DDevice8 *init_d3d8(HMODULE d3d8_handle)
 
     hr = IDirect3D8_CreateDevice(d3d8_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
             NULL, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
-    ok(SUCCEEDED(hr), "IDirect3D_CreateDevice returned %#x\n", hr);
+
+    if(FAILED(hr))
+    {
+        skip("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        return NULL;
+    }
 
     return device_ptr;
 }
@@ -116,6 +121,166 @@ cleanup:
     if (surface_ptr) IDirect3DSurface8_Release(surface_ptr);
 }
 
+static void test_lockrect_invalid(IDirect3DDevice8 *device)
+{
+    IDirect3DSurface8 *surface = 0;
+    D3DLOCKED_RECT locked_rect;
+    unsigned int i;
+    BYTE *base;
+    HRESULT hr;
+
+    const RECT valid[] = {
+        {60, 60, 68, 68},
+        {120, 60, 128, 68},
+        {60, 120, 68, 128},
+    };
+
+    const RECT invalid[] = {
+        {60, 60, 60, 68},       /* 0 height */
+        {60, 60, 68, 60},       /* 0 width */
+        {68, 60, 60, 68},       /* left > right */
+        {60, 68, 68, 60},       /* top > bottom */
+        {-8, 60,  0, 68},       /* left < surface */
+        {60, -8, 68,  0},       /* top < surface */
+        {-16, 60, -8, 68},      /* right < surface */
+        {60, -16, 68, -8},      /* bottom < surface */
+        {60, 60, 136, 68},      /* right > surface */
+        {60, 60, 68, 136},      /* bottom > surface */
+        {136, 60, 144, 68},     /* left > surface */
+        {60, 136, 68, 144},     /* top > surface */
+    };
+
+    hr = IDirect3DDevice8_CreateImageSurface(device, 128, 128, D3DFMT_A8R8G8B8, &surface);
+    ok(SUCCEEDED(hr), "CreateImageSurface failed (0x%08x)\n", hr);
+
+    hr = IDirect3DSurface8_LockRect(surface, &locked_rect, NULL, 0);
+    ok(SUCCEEDED(hr), "LockRect failed (0x%08x)\n", hr);
+
+    base = locked_rect.pBits;
+
+    hr = IDirect3DSurface8_UnlockRect(surface);
+    ok(SUCCEEDED(hr), "UnlockRect failed (0x%08x)\n", hr);
+
+    for (i = 0; i < (sizeof(valid) / sizeof(*valid)); ++i)
+    {
+        unsigned int offset, expected_offset;
+        const RECT *rect = &valid[i];
+
+        locked_rect.pBits = (BYTE *)0xdeadbeef;
+        locked_rect.Pitch = 0xdeadbeef;
+
+        hr = IDirect3DSurface8_LockRect(surface, &locked_rect, rect, 0);
+        ok(SUCCEEDED(hr), "LockRect failed (0x%08x) for rect [%d, %d]->[%d, %d]\n",
+                hr, rect->left, rect->top, rect->right, rect->bottom);
+
+        offset = (BYTE *)locked_rect.pBits - base;
+        expected_offset = rect->top * locked_rect.Pitch + rect->left * 4;
+        ok(offset == expected_offset, "Got offset %u, expected offset %u for rect [%d, %d]->[%d, %d]\n",
+                offset, expected_offset, rect->left, rect->top, rect->right, rect->bottom);
+
+        hr = IDirect3DSurface8_UnlockRect(surface);
+        ok(SUCCEEDED(hr), "UnlockRect failed (0x%08x)\n", hr);
+    }
+
+    for (i = 0; i < (sizeof(invalid) / sizeof(*invalid)); ++i)
+    {
+        const RECT *rect = &invalid[i];
+
+        hr = IDirect3DSurface8_LockRect(surface, &locked_rect, rect, 0);
+        ok(hr == D3DERR_INVALIDCALL, "LockRect returned 0x%08x for rect [%d, %d]->[%d, %d]"
+                ", expected D3DERR_INVALIDCALL (0x%08x)\n", hr, rect->left, rect->top,
+                rect->right, rect->bottom, D3DERR_INVALIDCALL);
+    }
+
+    hr = IDirect3DSurface8_LockRect(surface, &locked_rect, NULL, 0);
+    ok(SUCCEEDED(hr), "LockRect failed (0x%08x) for rect NULL\n", hr);
+    hr = IDirect3DSurface8_LockRect(surface, &locked_rect, NULL, 0);
+    ok(hr == D3DERR_INVALIDCALL, "Double LockRect returned 0x%08x for rect NULL\n", hr);
+    hr = IDirect3DSurface8_UnlockRect(surface);
+    ok(SUCCEEDED(hr), "UnlockRect failed (0x%08x)\n", hr);
+
+    hr = IDirect3DSurface8_LockRect(surface, &locked_rect, &valid[0], 0);
+    ok(hr == D3D_OK, "LockRect failed (0x%08x) for rect [%d, %d]->[%d, %d]"
+            ", expected D3D_OK (0x%08x)\n", hr, valid[0].left, valid[0].top,
+            valid[0].right, valid[0].bottom, D3D_OK);
+    hr = IDirect3DSurface8_LockRect(surface, &locked_rect, &valid[0], 0);
+    ok(hr == D3DERR_INVALIDCALL, "Double LockRect failed (0x%08x) for rect [%d, %d]->[%d, %d]"
+            ", expected D3DERR_INVALIDCALL (0x%08x)\n", hr, valid[0].left, valid[0].top,
+            valid[0].right, valid[0].bottom,D3DERR_INVALIDCALL);
+    hr = IDirect3DSurface8_LockRect(surface, &locked_rect, &valid[1], 0);
+    ok(hr == D3DERR_INVALIDCALL, "Double LockRect failed (0x%08x) for rect [%d, %d]->[%d, %d]"
+            ", expected D3DERR_INVALIDCALL (0x%08x)\n", hr, valid[1].left, valid[1].top,
+            valid[1].right, valid[1].bottom, D3DERR_INVALIDCALL);
+    hr = IDirect3DSurface8_UnlockRect(surface);
+    ok(SUCCEEDED(hr), "UnlockRect failed (0x%08x)\n", hr);
+
+    IDirect3DSurface8_Release(surface);
+}
+
+static unsigned long getref(IUnknown *iface)
+{
+    IUnknown_AddRef(iface);
+    return IUnknown_Release(iface);
+}
+
+static void test_private_data(IDirect3DDevice8 *device)
+{
+    HRESULT hr;
+    IDirect3DSurface8 *surface;
+    ULONG ref, ref2;
+    IUnknown *ptr;
+    DWORD size = sizeof(IUnknown *);
+
+    hr = IDirect3DDevice8_CreateImageSurface(device, 4, 4, D3DFMT_A8R8G8B8, &surface);
+    ok(SUCCEEDED(hr), "CreateImageSurface failed (0x%08x)\n", hr);
+    if(!surface)
+    {
+        return;
+    }
+
+    /* This fails */
+    hr = IDirect3DSurface8_SetPrivateData(surface, &IID_IDirect3DSurface8 /* Abuse this tag */, device, 0, D3DSPD_IUNKNOWN);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DSurface8_SetPrivateData failed with %08x\n", hr);
+    hr = IDirect3DSurface8_SetPrivateData(surface, &IID_IDirect3DSurface8 /* Abuse this tag */, device, 5, D3DSPD_IUNKNOWN);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DSurface8_SetPrivateData failed with %08x\n", hr);
+    hr = IDirect3DSurface8_SetPrivateData(surface, &IID_IDirect3DSurface8 /* Abuse this tag */, device, sizeof(IUnknown *) * 2, D3DSPD_IUNKNOWN);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DSurface8_SetPrivateData failed with %08x\n", hr);
+
+    ref = getref((IUnknown *) device);
+    hr = IDirect3DSurface8_SetPrivateData(surface, &IID_IDirect3DSurface8 /* Abuse this tag */, device, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(hr == D3D_OK, "IDirect3DSurface8_SetPrivateData failed with %08x\n", hr);
+    ref2 = getref((IUnknown *) device);
+    ok(ref2 == ref + 1, "Object reference is %d, expected %d\n", ref2, ref + 1);
+    hr = IDirect3DSurface8_FreePrivateData(surface, &IID_IDirect3DSurface8);
+    ok(hr == D3D_OK, "IDirect3DSurface8_FreePrivateData returned %08x\n", hr);
+    ref2 = getref((IUnknown *) device);
+    ok(ref2 == ref, "Object reference is %d, expected %d\n", ref2, ref);
+
+    hr = IDirect3DSurface8_SetPrivateData(surface, &IID_IDirect3DSurface8, device, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(hr == D3D_OK, "IDirect3DSurface8_SetPrivateData failed with %08x\n", hr);
+    hr = IDirect3DSurface8_SetPrivateData(surface, &IID_IDirect3DSurface8, surface, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(hr == D3D_OK, "IDirect3DSurface8_SetPrivateData failed with %08x\n", hr);
+    ref2 = getref((IUnknown *) device);
+    ok(ref2 == ref, "Object reference is %d, expected %d\n", ref2, ref);
+
+    hr = IDirect3DSurface8_SetPrivateData(surface, &IID_IDirect3DSurface8, device, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(hr == D3D_OK, "IDirect3DSurface8_SetPrivateData failed with %08x\n", hr);
+    hr = IDirect3DSurface8_GetPrivateData(surface, &IID_IDirect3DSurface8, &ptr, &size);
+    ok(hr == D3D_OK, "IDirect3DSurface8_GetPrivateData failed with %08x\n", hr);
+    ref2 = getref((IUnknown *) device);
+    /* Object is NOT beein addrefed */
+    ok(ptr == (IUnknown *) device, "Returned interface pointer is %p, expected %p\n", ptr, device);
+    ok(ref2 == ref + 2, "Object reference is %d, expected %d. ptr at %p, orig at %p\n", ref2, ref + 2, ptr, device);
+    IUnknown_Release(ptr);
+
+    IDirect3DSurface8_Release(surface);
+
+    /* Destroying the surface frees the held reference */
+    ref2 = getref((IUnknown *) device);
+    /* -1 because the surface was released and held a reference before */
+    ok(ref2 == (ref - 1), "Object reference is %d, expected %d\n", ref2, ref - 1);
+}
+
 START_TEST(surface)
 {
     HMODULE d3d8_handle;
@@ -124,7 +289,7 @@ START_TEST(surface)
     d3d8_handle = LoadLibraryA("d3d8.dll");
     if (!d3d8_handle)
     {
-        trace("Could not load d3d8.dll, skipping tests\n");
+        skip("Could not load d3d8.dll\n");
         return;
     }
 
@@ -132,4 +297,6 @@ START_TEST(surface)
     if (!device_ptr) return;
 
     test_surface_get_container(device_ptr);
+    test_lockrect_invalid(device_ptr);
+    test_private_data(device_ptr);
 }

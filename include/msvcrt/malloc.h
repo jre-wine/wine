@@ -34,12 +34,16 @@
 #define _FREEENTRY     0
 #define _USEDENTRY     1
 
-#if !defined(_MSC_VER) && !defined(__int64)
-#define __int64 long long
-#endif
-
 #if defined(__x86_64__) && !defined(_WIN64)
 #define _WIN64
+#endif
+
+#if !defined(_MSC_VER) && !defined(__int64)
+# ifdef _WIN64
+#   define __int64 long
+# else
+#   define __int64 long long
+# endif
 #endif
 
 #ifndef _SIZE_T_DEFINED
@@ -81,6 +85,12 @@ void*       calloc(size_t,size_t);
 void        free(void*);
 void*       malloc(size_t);
 void*       realloc(void*,size_t);
+
+void        _aligned_free(void*);
+void*       _aligned_malloc(size_t,size_t);
+void*       _aligned_offset_malloc(size_t,size_t,size_t);
+void*       _aligned_realloc(void*,size_t,size_t);
+void*       _aligned_offset_realloc(void*,size_t,size_t,size_t);
 
 size_t _get_sbh_threshold(void);
 int _set_sbh_threshold(size_t size);

@@ -30,11 +30,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
-#include "winreg.h"
 #include "ole2.h"
-
-#include "uuids.h"
 
 #include "chm_lib.h"
 #include "itsstor.h"
@@ -44,8 +40,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(itss);
-
-extern LONG dll_count;
 
 /************************************************************************/
 
@@ -128,7 +122,7 @@ static ULONG WINAPI ITSS_IEnumSTATSTG_Release(
             This->first = t;
         }
         HeapFree(GetProcessHeap(), 0, This);
-        InterlockedDecrement(&dll_count);
+        ITSS_UnlockModule();
     }
 
     return ref;
@@ -254,8 +248,8 @@ static IEnumSTATSTG_Impl *ITSS_create_enum( void )
     stgenum->first = NULL;
     stgenum->last = NULL;
     stgenum->current = NULL;
-    InterlockedIncrement(&dll_count);
 
+    ITSS_LockModule();
     TRACE(" -> %p\n", stgenum );
 
     return stgenum;
@@ -298,8 +292,9 @@ static ULONG WINAPI ITSS_IStorageImpl_Release(
 
     if (ref == 0)
     {
+        chm_close(This->chmfile);
         HeapFree(GetProcessHeap(), 0, This);
-        InterlockedDecrement(&dll_count);
+        ITSS_UnlockModule();
     }
 
     return ref;
@@ -330,7 +325,7 @@ static HRESULT WINAPI ITSS_IStorageImpl_OpenStream(
     DWORD len;
     struct chmUnitInfo ui;
     int r;
-    WCHAR *path;
+    WCHAR *path, *p;
 
     TRACE("%p %s %p %u %u %p\n", This, debugstr_w(pwcsName),
           reserved1, grfMode, reserved2, ppstm );
@@ -338,21 +333,32 @@ static HRESULT WINAPI ITSS_IStorageImpl_OpenStream(
     len = strlenW( This->dir ) + strlenW( pwcsName ) + 1;
     path = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR) );
     strcpyW( path, This->dir );
-    if( pwcsName[0] == '/' )
+
+    if( pwcsName[0] == '/' || pwcsName[0] == '\\' )
     {
-        WCHAR *p = &path[strlenW( path ) - 1];
+        p = &path[strlenW( path ) - 1];
         while( ( path <= p ) && ( *p == '/' ) )
             *p-- = 0;
     }
     strcatW( path, pwcsName );
+
+    for(p=path; *p; p++) {
+        if(*p == '\\')
+            *p = '/';
+    }
+
+    if(*--p == '/')
+        *p = 0;
 
     TRACE("Resolving %s\n", debugstr_w(path));
 
     r = chm_resolve_object(This->chmfile, path, &ui);
     HeapFree( GetProcessHeap(), 0, path );
 
-    if( r != CHM_RESOLVE_SUCCESS )
+    if( r != CHM_RESOLVE_SUCCESS ) {
+        WARN("Could not resolve object\n");
         return STG_E_FILENOTFOUND;
+    }
 
     stm = ITSS_create_stream( This, &ui );
     if( !stm )
@@ -574,8 +580,8 @@ static HRESULT ITSS_create_chm_storage(
     strcpyW( stg->dir, dir );
 
     *ppstgOpen = (IStorage*) stg;
-    InterlockedIncrement(&dll_count);
 
+    ITSS_LockModule();
     return S_OK;
 }
 
@@ -638,8 +644,8 @@ static ULONG WINAPI ITSS_IStream_Release(
     if (ref == 0)
     {
         IStorage_Release( (IStorage*) This->stg );
-	HeapFree(GetProcessHeap(), 0, This);
-        InterlockedDecrement(&dll_count);
+        HeapFree(GetProcessHeap(), 0, This);
+        ITSS_UnlockModule();
     }
 
     return ref;
@@ -661,8 +667,8 @@ static HRESULT WINAPI ITSS_IStream_Read(
     This->addr += count;
     if( pcbRead )
         *pcbRead = count;
-    
-    return S_OK;
+
+    return count ? S_OK : S_FALSE;
 }
 
 static HRESULT WINAPI ITSS_IStream_Write(
@@ -825,7 +831,8 @@ static IStream_Impl *ITSS_create_stream(
     memcpy( &stm->ui, ui, sizeof stm->ui );
     stm->stg = stg;
     IStorage_AddRef( (IStorage*) stg );
-    InterlockedIncrement(&dll_count);
+
+    ITSS_LockModule();
 
     TRACE(" -> %p\n", stm );
 

@@ -25,6 +25,10 @@
 # error You must include config.h to use this header
 #endif
 
+#ifdef __WINE_BASETSD_H
+# error You must include port.h before all other headers
+#endif
+
 #define _FILE_OFFSET_BITS 64
 #define _GNU_SOURCE  /* for pread/pwrite */
 #include <fcntl.h>
@@ -49,6 +53,14 @@
 /****************************************************************
  * Type definitions
  */
+
+#if !defined(_MSC_VER) && !defined(__int64)
+#  if defined(__x86_64__) || defined(_WIN64)
+#    define __int64 long
+#  else
+#    define __int64 long long
+#  endif
+#endif
 
 #ifndef HAVE_MODE_T
 typedef int mode_t;
@@ -112,6 +124,10 @@ struct statvfs
 
 #if !defined(HAVE_PCLOSE) && defined(HAVE__PCLOSE)
 #define pclose _pclose
+#endif
+
+#if !defined(HAVE_STRDUP) && defined(HAVE__STRDUP)
+#define strdup _strdup
 #endif
 
 #if !defined(HAVE_SNPRINTF) && defined(HAVE__SNPRINTF)
@@ -264,7 +280,7 @@ int ffs( int x );
 
 #ifndef HAVE_FUTIMES
 struct timeval;
-int futimes(int fd, const struct timeval tv[2]);
+int futimes(int fd, const struct timeval *tv);
 #endif
 
 #ifndef HAVE_GETPAGESIZE
@@ -359,6 +375,7 @@ extern int spawnvp(int mode, const char *cmdname, const char * const argv[]);
 
 extern inline int interlocked_cmpxchg( int *dest, int xchg, int compare );
 extern inline void *interlocked_cmpxchg_ptr( void **dest, void *xchg, void *compare );
+extern __int64 interlocked_cmpxchg64( __int64 *dest, __int64 xchg, __int64 compare );
 extern inline int interlocked_xchg( int *dest, int val );
 extern inline void *interlocked_xchg_ptr( void **dest, void *val );
 extern inline int interlocked_xchg_add( int *dest, int incr );
@@ -407,6 +424,7 @@ extern inline int interlocked_xchg_add( int *dest, int incr )
 
 extern int interlocked_cmpxchg( int *dest, int xchg, int compare );
 extern void *interlocked_cmpxchg_ptr( void **dest, void *xchg, void *compare );
+extern __int64 interlocked_cmpxchg64( __int64 *dest, __int64 xchg, __int64 compare );
 extern int interlocked_xchg( int *dest, int val );
 extern void *interlocked_xchg_ptr( void **dest, void *val );
 extern int interlocked_xchg_add( int *dest, int incr );

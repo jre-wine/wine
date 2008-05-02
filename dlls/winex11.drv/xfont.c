@@ -77,15 +77,15 @@ typedef struct __fontAlias
 
 static fontAlias *aliasTable = NULL;
 
-static const char*	INIFontMetrics = "cachedmetrics.";
-static const char*	INIFontSection = "Software\\Wine\\X11 Driver\\Fonts";
-static const char*	INIAliasSection = "Alias";
-static const char*	INIIgnoreSection = "Ignore";
-static const char*	INIDefault = "Default";
-static const char*	INIDefaultFixed = "DefaultFixed";
-static const char*	INIGlobalMetrics = "FontMetrics";
-static const char*	INIDefaultSerif = "DefaultSerif";
-static const char*	INIDefaultSansSerif = "DefaultSansSerif";
+static const char INIFontMetrics[] = "cachedmetrics.";
+static const char INIFontSection[] = "Software\\Wine\\X11 Driver\\Fonts";
+static const char INIAliasSection[] = "Alias";
+static const char INIIgnoreSection[] = "Ignore";
+static const char INIDefault[] = "Default";
+static const char INIDefaultFixed[] = "DefaultFixed";
+static const char INIGlobalMetrics[] = "FontMetrics";
+static const char INIDefaultSerif[] = "DefaultSerif";
+static const char INIDefaultSansSerif[] = "DefaultSansSerif";
 
 
 /* FIXME - are there any more Latin charsets ? */
@@ -229,39 +229,38 @@ typedef struct __fet
 {
   LPCSTR	 prefix;
   const SuffixCharset* sufch;
-  struct __fet*  next;
+  const struct __fet*  next;
 } fontEncodingTemplate;
 
 /* Note: we can attach additional encoding mappings to the end
  *       of this table at runtime.
  */
-static fontEncodingTemplate __fETTable[] = {
-			{ "ansi",         sufch_ansi,         &__fETTable[1] },
-			{ "ascii",        sufch_ansi,         &__fETTable[2] },
-			{ "iso646.1991",  sufch_iso646,       &__fETTable[3] },
-			{ "iso8859",      sufch_iso8859,      &__fETTable[4] },
-			{ "microsoft",    sufch_microsoft,    &__fETTable[5] },
-			{ "tcvn",         sufch_tcvn,         &__fETTable[6] },
-			{ "tis620.2533",  sufch_tis620,       &__fETTable[7] },
-			{ "viscii1.1",    sufch_viscii,       &__fETTable[8] },
-			{ "windows",      sufch_windows,      &__fETTable[9] },
-			{ "koi8",         sufch_koi8,         &__fETTable[10]},
-			{ "jisx0201.1976",sufch_jisx0201,     &__fETTable[11]},
-			{ "jisc6226.1978",sufch_jisx0208,     &__fETTable[12]},
-			{ "jisx0208.1983",sufch_jisx0208,     &__fETTable[13]},
-			{ "jisx0208.1990",sufch_jisx0208,     &__fETTable[14]},
-			{ "jisx0212.1990",sufch_jisx0212,     &__fETTable[15]},
-			{ "ksc5601.1987", sufch_ksc5601,      &__fETTable[16]},
-			{ "gb2312.1980",  sufch_gb2312,       &__fETTable[17]},
-			{ "big5",	  sufch_big5,         &__fETTable[18]},
-			{ "unicode",      sufch_unicode,      &__fETTable[19]},
-			{ "iso10646",     sufch_iso10646,     &__fETTable[20]},
-			{ "cp",           sufch_windows,      &__fETTable[21]},
-			{ "dec",          sufch_dec,          &__fETTable[22]},
+static const fontEncodingTemplate fETTable[] = {
+			{ "ansi",         sufch_ansi,         &fETTable[1] },
+			{ "ascii",        sufch_ansi,         &fETTable[2] },
+			{ "iso646.1991",  sufch_iso646,       &fETTable[3] },
+			{ "iso8859",      sufch_iso8859,      &fETTable[4] },
+			{ "microsoft",    sufch_microsoft,    &fETTable[5] },
+			{ "tcvn",         sufch_tcvn,         &fETTable[6] },
+			{ "tis620.2533",  sufch_tis620,       &fETTable[7] },
+			{ "viscii1.1",    sufch_viscii,       &fETTable[8] },
+			{ "windows",      sufch_windows,      &fETTable[9] },
+			{ "koi8",         sufch_koi8,         &fETTable[10]},
+			{ "jisx0201.1976",sufch_jisx0201,     &fETTable[11]},
+			{ "jisc6226.1978",sufch_jisx0208,     &fETTable[12]},
+			{ "jisx0208.1983",sufch_jisx0208,     &fETTable[13]},
+			{ "jisx0208.1990",sufch_jisx0208,     &fETTable[14]},
+			{ "jisx0212.1990",sufch_jisx0212,     &fETTable[15]},
+			{ "ksc5601.1987", sufch_ksc5601,      &fETTable[16]},
+			{ "gb2312.1980",  sufch_gb2312,       &fETTable[17]},
+			{ "big5",	  sufch_big5,         &fETTable[18]},
+			{ "unicode",      sufch_unicode,      &fETTable[19]},
+			{ "iso10646",     sufch_iso10646,     &fETTable[20]},
+			{ "cp",           sufch_windows,      &fETTable[21]},
+			{ "dec",          sufch_dec,          &fETTable[22]},
 			/* NULL prefix matches anything so put it last */
 			{   NULL,         sufch_any,          NULL },
 };
-static fontEncodingTemplate* fETTable = __fETTable;
 
 /* a charset database for known facenames */
 struct CharsetBindingInfo
@@ -309,8 +308,8 @@ static const struct CharsetBindingInfo charsetbindings[] =
 	{ "\x82\x6c\x82\x72 \x82\x6f\x96\xbe\x92\xa9",
 			SHIFTJIS_CHARSET }, /* MS P mincho */
 	{ "GulimChe", HANGEUL_CHARSET },
-	{ "MS Song", GB2312_CHARSET },
-	{ "MS Hei", GB2312_CHARSET },
+	{ "\xcb\xce\xcc\xe5", GB2312_CHARSET }, /* SimSun */
+	{ "\xba\xda\xcc\xe5", GB2312_CHARSET }, /* SimHei */
 	{ "\xb7\x73\xb2\xd3\xa9\xfa\xc5\xe9", CHINESEBIG5_CHARSET },/*MS Mingliu*/
 	{ "\xb2\xd3\xa9\xfa\xc5\xe9", CHINESEBIG5_CHARSET },
 
@@ -366,7 +365,7 @@ static int		fontLF = -1, fontMRU = -1;	/* last free, most recently used */
 /***********************************************************************
  *           is_stock_font
  */
-inline static BOOL is_stock_font( HFONT font )
+static inline BOOL is_stock_font( HFONT font )
 {
     int i;
     for (i = OEM_FIXED_FONT; i <= DEFAULT_GUI_FONT; i++)
@@ -401,14 +400,14 @@ static void FONT_LogFontWTo16( const LOGFONTW* font32, LPLOGFONT16 font16 )
 /***********************************************************************
  *           Checksums
  */
-static UINT16   __lfCheckSum( LPLOGFONT16 plf )
+static UINT16   __lfCheckSum( const LOGFONT16 *plf )
 {
     CHAR        font[LF_FACESIZE];
     UINT16      checksum = 0;
-    UINT16 *ptr;
+    const UINT16 *ptr;
     int i;
 
-    ptr = (UINT16 *)plf;
+    ptr = (const UINT16 *)plf;
     for (i = 0; i < 9; i++) checksum ^= *ptr++;
     for (i = 0; i < LF_FACESIZE; i++)
     {
@@ -628,7 +627,7 @@ static void LFD_GetStyle( fontInfo* fi, LPCSTR lpstr, int dec_style_check)
 static int LFD_InitFontInfo( fontInfo* fi, const LFD* lfd, LPCSTR fullname )
 {
    int    	i, j, dec_style_check, scalability;
-   fontEncodingTemplate* boba;
+   const fontEncodingTemplate* boba;
    const char* ridiculous = "font '%s' has ridiculous %s\n";
    const char* lpstr;
 
@@ -759,7 +758,7 @@ static int LFD_InitFontInfo( fontInfo* fi, const LFD* lfd, LPCSTR fullname )
 
    fi->df.dfCharSet = ANSI_CHARSET;
 
-   for( i = 0, boba = fETTable; boba; boba = boba->next, i++ )
+   for( i = 0, boba = &fETTable[0]; boba; boba = boba->next, i++ )
    {
        if (!boba->prefix || !strcasecmp(lpstr, boba->prefix))
        {
@@ -858,6 +857,7 @@ static BOOL LFD_ComposeLFD( const fontObject* fo,
    const char   *any = "*";
    char         h_string[64], resx_string[64], resy_string[64];
    LFD          aLFD;
+   const fontEncodingTemplate* boba = &fETTable[0];
 
 /* Get the worst case over with first */
 
@@ -1002,33 +1002,22 @@ static BOOL LFD_ComposeLFD( const fontObject* fo,
 
 /* encoding */
 
-   if (uRelax <= 5)
-   {
-       fontEncodingTemplate* boba = fETTable;
+   for(i = fo->fi->fi_encoding >> 8; i; i--) boba = boba->next;
+   aLFD.charset_registry = boba->prefix ? boba->prefix : any;
 
-       for(i = fo->fi->fi_encoding >> 8; i; i--) boba = boba->next;
-       aLFD.charset_registry = boba->prefix ? boba->prefix : any;
+   i = fo->fi->fi_encoding & 255;
+   switch( i ) {
+   default:
+       aLFD.charset_encoding = boba->sufch[i].psuffix;
+       break;
 
-       i = fo->fi->fi_encoding & 255;
-       switch( i )
-       {
-       default:
-	   aLFD.charset_encoding = boba->sufch[i].psuffix;
-	   break;
-
-       case 254:
-	   aLFD.charset_encoding = any;
-	   break;
-
-       case 255: /* no suffix - it ends eg "-ascii" */
-	   aLFD.charset_encoding = NULL;
-	   break;
-       }
-   }
-   else
-   {
-       aLFD.charset_registry = any;
+   case 254:
        aLFD.charset_encoding = any;
+       break;
+
+   case 255: /* no suffix - it ends eg "-ascii" */
+       aLFD.charset_encoding = NULL;
+       break;
    }
 
    LFD_UnParse(lpLFD, MAX_LFD_LENGTH, &aLFD);
@@ -1044,7 +1033,7 @@ static BOOL LFD_ComposeLFD( const fontObject* fo,
  * font info		- http://www.microsoft.com/kb/articles/q65/1/23.htm
  * Windows font metrics	- http://www.microsoft.com/kb/articles/q32/6/67.htm
  */
-static void XFONT_GetLeading( const LPIFONTINFO16 pFI, const XFontStruct* x_fs,
+static void XFONT_GetLeading( const IFONTINFO16 *pFI, const XFontStruct* x_fs,
 			      INT16* pIL, INT16* pEL, const XFONTTRANS *XFT )
 {
     unsigned long height;
@@ -2046,13 +2035,10 @@ static int XFONT_BuildMetrics(char** x_pattern, int res, unsigned x_checksum, in
 	if( !fr ) /* add new family */
 	{
 	    n_ff++;
-	    fr = HeapAlloc(GetProcessHeap(), 0, sizeof(fontResource));
+	    fr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(fontResource));
 	    if (fr)
 	    {
-		memset(fr, 0, sizeof(fontResource));
-
-		fr->resource = HeapAlloc(GetProcessHeap(), 0, sizeof(LFD));
-		memset(fr->resource, 0, sizeof(LFD));
+		fr->resource = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(LFD));
 
 		TRACE("family: -%s-%s-\n", lfd.foundry, lfd.family );
 		fr->resource->foundry = HeapAlloc(GetProcessHeap(), 0, strlen(lfd.foundry)+1);
@@ -2215,9 +2201,10 @@ static BOOL XFONT_ReadCachedMetrics( int fd, int res, unsigned x_checksum, int x
 			{
 			   if( offset > length ||
 			       pfi->cptable >= (UINT16)X11DRV_CPTABLE_COUNT ||
-			      (int)(pfi->next) != j++ )
+			       PtrToInt(pfi->next) != j++ )
 			   {
-			       TRACE("error: offset=%ld length=%ld cptable=%d pfi->next=%d j=%d\n",(long)offset,(long)length,pfi->cptable,(int)pfi->next,j-1);
+			       TRACE("error: offset=%ld length=%ld cptable=%d pfi->next=%p j=%d\n",
+                                      (long)offset, (long)length, pfi->cptable, pfi->next, j-1);
 			       goto fail;
 			   }
 
@@ -2346,7 +2333,7 @@ static BOOL XFONT_WriteCachedMetrics( int fd, unsigned x_checksum, int x_count, 
 		    fi = *pfi;
 
 		    fi.df.dfFace = NULL;
-		    fi.next = (fontInfo*)k;	/* loader checks this */
+		    fi.next = IntToPtr(k);	/* loader checks this */
 
 		    j = write( fd, &fi, sizeof(fi) );
 		    k++;
@@ -2738,7 +2725,7 @@ static void XFONT_GrowFreeList(int start, int end)
    }
 }
 
-static fontObject* XFONT_LookupCachedFont( const LPLOGFONT16 plf, UINT16* checksum )
+static fontObject* XFONT_LookupCachedFont( const LOGFONT16 *plf, UINT16* checksum )
 {
     UINT16	cs = __lfCheckSum( plf );
     int		i = fontMRU, prev = -1;
@@ -3028,7 +3015,7 @@ static BOOL XFONT_SetX11Trans( fontObject *pfo )
 /***********************************************************************
  *           X Device Font Objects
  */
-static X_PHYSFONT XFONT_RealizeFont( const LPLOGFONT16 plf,
+static X_PHYSFONT XFONT_RealizeFont( LPLOGFONT16 plf,
 				     LPCSTR* faceMatched, BOOL bSubFont,
 				     WORD internal_charset,
 				     WORD* pcharsetMatched )
@@ -3318,9 +3305,18 @@ BOOL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
     NEWTEXTMETRICEXW	tm;
     fontResource*	pfr = fontList;
     BOOL	  	b, bRet = 0;
+    LOGFONTW lfW;
 
     /* don't enumerate x11 fonts if we're using client side fonts */
     if (physDev->has_gdi_font) return FALSE;
+
+    if (!plf)
+    {
+        lfW.lfCharSet = DEFAULT_CHARSET;
+        lfW.lfPitchAndFamily = 0;
+        lfW.lfFaceName[0] = 0;
+        plf = &lfW;
+    }
 
     if( plf->lfFaceName[0] )
     {

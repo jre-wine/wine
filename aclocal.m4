@@ -30,27 +30,31 @@ AC_DEFUN([WINE_PATH_LDD],[AC_PATH_PROG(LDD,ldd,true,/sbin:/usr/sbin:$PATH)])
 
 dnl **** Extract the soname of a library ****
 dnl
-dnl Usage: WINE_GET_SONAME(LIBRARY, FUNCTION, [OTHER_LIBRARIES])
+dnl Usage: WINE_CHECK_SONAME(library, function, [action-if-found, [action-if-not-found, [other_libraries, [pattern]]]])
 dnl
-AC_DEFUN([WINE_GET_SONAME],
+AC_DEFUN([WINE_CHECK_SONAME],
 [AC_REQUIRE([WINE_PATH_LDD])dnl
 AS_VAR_PUSHDEF([ac_Lib],[ac_cv_lib_soname_$1])dnl
-AC_CACHE_CHECK([for -l$1 soname], ac_Lib,
-[ac_get_soname_save_LIBS=$LIBS
-LIBS="-l$1 $3 $LIBS"
+m4_pushdef([ac_lib_pattern],m4_default([$6],[lib$1]))dnl
+AC_MSG_CHECKING([for -l$1])
+AC_CACHE_VAL(ac_Lib,
+[ac_check_soname_save_LIBS=$LIBS
+LIBS="-l$1 $5 $LIBS"
   AC_LINK_IFELSE([AC_LANG_CALL([], [$2])],
   [case "$LIBEXT" in
-    dylib) AS_VAR_SET(ac_Lib,[`otool -L conftest$ac_exeext | grep lib$1\\.[[0-9A-Za-z.]]*dylib | sed -e "s/^.*\/\(lib$1\.[[0-9A-Za-z.]]*dylib\).*$/\1/"';2,$d'`]) ;;
-    so) AS_VAR_SET(ac_Lib,[`$ac_cv_path_LDD conftest$ac_exeext | grep lib$1\\.so | sed -e "s/^.*\(lib$1\.so[[^	 ]]*\).*$/\1/"';2,$d'`]) ;;
-  esac
-  if test "x$ac_Lib" = "x"
-  then
-     AS_VAR_SET(ac_Lib,"lib$1.$LIBEXT")
-  fi],
-  [AS_VAR_SET(ac_Lib,"lib$1.$LIBEXT")])
-  LIBS=$ac_get_soname_save_LIBS])
-AS_VAR_SET_IF(ac_Lib,[AC_DEFINE_UNQUOTED(AS_TR_CPP(SONAME_LIB$1),["]AS_VAR_GET(ac_Lib)["],
-                        [Define to the soname of the lib$1 library.])])dnl
+    dll) ;;
+    dylib) AS_VAR_SET(ac_Lib,[`otool -L conftest$ac_exeext | grep "ac_lib_pattern\\.[[0-9A-Za-z.]]*dylib" | sed -e "s/^.*\/\(ac_lib_pattern\.[[0-9A-Za-z.]]*dylib\).*$/\1/"';2,$d'`]) ;;
+    *) AS_VAR_SET(ac_Lib,[`$ac_cv_path_LDD conftest$ac_exeext | grep "ac_lib_pattern\\.$LIBEXT" | sed -e "s/^.*\(ac_lib_pattern\.$LIBEXT[[^	 ]]*\).*$/\1/"';2,$d'`]) ;;
+  esac])
+  LIBS=$ac_check_soname_save_LIBS])dnl
+AS_IF([test "x]AS_VAR_GET(ac_Lib)[" = "x"],
+      [AC_MSG_RESULT([not found])
+       $4],
+      [AC_MSG_RESULT(AS_VAR_GET(ac_Lib))
+       AC_DEFINE_UNQUOTED(AS_TR_CPP(SONAME_LIB$1),["]AS_VAR_GET(ac_Lib)["],
+                          [Define to the soname of the lib$1 library.])
+       $3])dnl
+m4_popdef([ac_lib_pattern])dnl
 AS_VAR_POPDEF([ac_Lib])])
 
 dnl **** Link C code with an assembly file ****
@@ -58,8 +62,7 @@ dnl
 dnl Usage: WINE_TRY_ASM_LINK(asm-code,includes,function,[action-if-found,[action-if-not-found]])
 dnl
 AC_DEFUN([WINE_TRY_ASM_LINK],
-[AC_TRY_LINK([void ac_asm(void) { asm([$1]); }
-[$2]],[$3],[$4],[$5])])
+[AC_LINK_IFELSE(AC_LANG_PROGRAM([[$2]],[[asm($1); $3]]),[$4],[$5])])
 
 dnl **** Check if we can link an empty program with special CFLAGS ****
 dnl
@@ -72,7 +75,7 @@ AC_DEFUN([WINE_TRY_CFLAGS],
 AC_CACHE_CHECK([whether the compiler supports $1], ac_var,
 [ac_wine_try_cflags_saved=$CFLAGS
 CFLAGS="$CFLAGS $1"
-AC_TRY_LINK([],[], [AS_VAR_SET(ac_var,yes)], [AS_VAR_SET(ac_var,no)])
+AC_LINK_IFELSE(AC_LANG_PROGRAM(), [AS_VAR_SET(ac_var,yes)], [AS_VAR_SET(ac_var,no)])
 CFLAGS=$ac_wine_try_cflags_saved])
 AS_IF([test AS_VAR_GET(ac_var) = yes],
       [m4_default([$2], [EXTRACFLAGS="$EXTRACFLAGS $1"])], [$3])dnl
@@ -131,9 +134,68 @@ else
 fi
 rm -f conf$$ conf$$.file])
 
+dnl **** Check for a mingw program, trying the various mingw prefixes ****
+dnl
+dnl Usage: WINE_CHECK_MINGW_PROG(variable,prog,[value-if-not-found],[path])
+dnl
+AC_DEFUN([WINE_CHECK_MINGW_PROG],
+[AC_CHECK_PROGS([$1],
+   m4_foreach([ac_wine_prefix],
+              [i586-mingw32msvc, i386-mingw32msvc, i686-mingw32, i586-mingw32, i386-mingw32, mingw32, mingw],
+              [ac_wine_prefix-$2 ]),
+   [$3],[$4])])
+
+
 dnl **** Create nonexistent directories from config.status ****
 dnl
 dnl Usage: WINE_CONFIG_EXTRA_DIR(dirname)
 dnl
 AC_DEFUN([WINE_CONFIG_EXTRA_DIR],
 [AC_CONFIG_COMMANDS([$1],[test -d "$1" || (AC_MSG_NOTICE([creating $1]) && mkdir "$1")])])
+
+dnl **** Add a message to the list displayed at the end ****
+dnl
+dnl Usage: WINE_NOTICE(notice)
+dnl Usage: WINE_NOTICE_WITH(with_flag, test, notice)
+dnl Usage: WINE_WARNING(warning)
+dnl Usage: WINE_WARNING_WITH(with_flag, test, warning)
+dnl Usage: WINE_PRINT_MESSAGES
+dnl
+AC_DEFUN([WINE_NOTICE],[wine_notices="$wine_notices|$1"])
+AC_DEFUN([WINE_WARNING],[wine_warnings="$wine_warnings|$1"])
+
+AC_DEFUN([WINE_NOTICE_WITH],[AS_IF([$2],[case "x$with_$1" in
+  x)   WINE_NOTICE([$3]) ;;
+  xno) ;;
+  *)   AC_MSG_ERROR([$3
+This is an error since --with-$1 was requested.]) ;;
+esac])])
+
+AC_DEFUN([WINE_WARNING_WITH],[AS_IF([$2],[case "x$with_$1" in
+  x)   WINE_WARNING([$3]) ;;
+  xno) ;;
+  *)   AC_MSG_ERROR([$3
+This is an error since --with-$1 was requested.]) ;;
+esac])])
+
+AC_DEFUN([WINE_PRINT_MESSAGES],[ac_save_IFS="$IFS"
+IFS="|"
+if test "x$wine_notices != "x; then
+    echo >&AS_MESSAGE_FD
+    for msg in $wine_notices; do
+        if test -n "$msg"; then
+            AC_MSG_NOTICE([$msg])
+        fi
+    done
+fi
+for msg in $wine_warnings; do
+    if test -n "$msg"; then
+        echo >&2
+        AC_MSG_WARN([$msg])
+    fi
+done
+IFS="$ac_save_IFS"])
+
+dnl Local Variables:
+dnl compile-command: "autoreconf --warnings=all"
+dnl End:

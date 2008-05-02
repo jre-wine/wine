@@ -66,7 +66,7 @@ static inline int monitor_to_index( HMONITOR handle )
 }
 
 
-#ifdef HAVE_LIBXINERAMA
+#ifdef SONAME_LIBXINERAMA
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 
@@ -125,23 +125,23 @@ static int query_screens(void)
     return count;
 }
 
-#else  /* HAVE_LIBXINERAMA */
+#else  /* SONAME_LIBXINERAMA */
 
 static inline int query_screens(void)
 {
     return 0;
 }
 
-#endif  /* HAVE_LIBXINERAMA */
+#endif  /* SONAME_LIBXINERAMA */
 
-void xinerama_init(void)
+void xinerama_init( unsigned int width, unsigned int height )
 {
     MONITORINFOEXW *primary;
     int i;
 
     wine_tsx11_lock();
 
-    SetRect( &virtual_screen_rect, 0, 0, screen_width, screen_height );
+    SetRect( &virtual_screen_rect, 0, 0, width, height );
 
     if (root_window != DefaultRootWindow( gdi_display ) || !query_screens())
     {
@@ -169,6 +169,7 @@ void xinerama_init(void)
            wine_dbgstr_rect(&virtual_screen_rect), screen_width, screen_height );
 
     wine_tsx11_unlock();
+    ClipCursor( NULL );  /* reset the cursor clip rectangle */
 }
 
 

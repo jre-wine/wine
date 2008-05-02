@@ -1080,26 +1080,6 @@ void WINAPI wine_glFeedbackBuffer( GLsizei size, GLenum type, GLfloat* buffer ) 
 }
 
 /***********************************************************************
- *              glFinish (OPENGL32.@)
- */
-void WINAPI wine_glFinish( void ) {
-  TRACE("()\n");
-  ENTER_GL();
-  glFinish( );
-  LEAVE_GL();
-}
-
-/***********************************************************************
- *              glFlush (OPENGL32.@)
- */
-void WINAPI wine_glFlush( void ) {
-  TRACE("()\n");
-  ENTER_GL();
-  glFlush( );
-  LEAVE_GL();
-}
-
-/***********************************************************************
  *              glFogf (OPENGL32.@)
  */
 void WINAPI wine_glFogf( GLenum pname, GLfloat param ) {
@@ -1324,16 +1304,6 @@ void WINAPI wine_glGetHistogramParameteriv( GLenum target, GLenum pname, GLint* 
 }
 
 /***********************************************************************
- *              glGetIntegerv (OPENGL32.@)
- */
-void WINAPI wine_glGetIntegerv( GLenum pname, GLint* params ) {
-  TRACE("(%d, %p)\n", pname, params );
-  ENTER_GL();
-  internal_glGetIntegerv( pname, params );
-  LEAVE_GL();
-}
-
-/***********************************************************************
  *              glGetLightfv (OPENGL32.@)
  */
 void WINAPI wine_glGetLightfv( GLenum light, GLenum pname, GLfloat* params ) {
@@ -1491,18 +1461,6 @@ void WINAPI wine_glGetSeparableFilter( GLenum target, GLenum format, GLenum type
   ENTER_GL();
   glGetSeparableFilter( target, format, type, row, column, span );
   LEAVE_GL();
-}
-
-/***********************************************************************
- *              glGetString (OPENGL32.@)
- */
-const GLubyte * WINAPI wine_glGetString( GLenum name ) {
-  const GLubyte * ret_value;
-  TRACE("(%d)\n", name );
-  ENTER_GL();
-  ret_value = internal_glGetString( name );
-  LEAVE_GL();
-  return ret_value;
 }
 
 /***********************************************************************

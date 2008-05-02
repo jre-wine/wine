@@ -3,12 +3,15 @@ TOPOBJDIR = ../../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 TESTDLL   = quartz.dll
-IMPORTS   = ole32 user32 gdi32 kernel32
-EXTRALIBS = -lstrmiids
+IMPORTS   = ole32 kernel32
+EXTRALIBS = -lstrmiids -luuid
 
 CTESTS = \
 	filtergraph.c \
-	memallocator.c
+	memallocator.c \
+	misc.c \
+	referenceclock.c \
+	videorenderer.c
 
 @MAKE_TEST_RULES@
 

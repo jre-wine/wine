@@ -27,6 +27,7 @@
 #include <string.h>
 #ifdef HAVE_LINUX_INPUT_H
 #  include <linux/input.h>
+#  undef SW_MAX
 #endif
 #include <errno.h>
 #ifdef HAVE_UNISTD_H
@@ -112,12 +113,12 @@ static void _dump_DIEFFECT_flags(DWORD dwFlags)
         };
         for (i = 0; i < (sizeof(flags) / sizeof(flags[0])); i++)
             if (flags[i].mask & dwFlags)
-                DPRINTF("%s ", flags[i].name);
-        DPRINTF("\n");
+                TRACE("%s ", flags[i].name);
+        TRACE("\n");
     }       
 }
 
-static void _dump_DIENVELOPE(LPDIENVELOPE env)
+static void _dump_DIENVELOPE(LPCDIENVELOPE env)
 {
     if (env->dwSize != sizeof(DIENVELOPE)) {
         WARN("Non-standard DIENVELOPE structure size (%d instead of %d).\n",
@@ -127,31 +128,31 @@ static void _dump_DIENVELOPE(LPDIENVELOPE env)
 	  env->dwAttackLevel, env->dwAttackTime, env->dwFadeLevel, env->dwFadeTime);
 } 
 
-static void _dump_DICONSTANTFORCE(LPDICONSTANTFORCE frc)
+static void _dump_DICONSTANTFORCE(LPCDICONSTANTFORCE frc)
 {
     TRACE("Constant force has magnitude %d\n", frc->lMagnitude);
 }
 
-static void _dump_DIPERIODIC(LPDIPERIODIC frc)
+static void _dump_DIPERIODIC(LPCDIPERIODIC frc)
 {
     TRACE("Periodic force has magnitude %d, offset %d, phase %d, period %d\n",
 	  frc->dwMagnitude, frc->lOffset, frc->dwPhase, frc->dwPeriod);
 }
 
-static void _dump_DIRAMPFORCE(LPDIRAMPFORCE frc)
+static void _dump_DIRAMPFORCE(LPCDIRAMPFORCE frc)
 {
     TRACE("Ramp force has start %d, end %d\n",
 	  frc->lStart, frc->lEnd);
 }
 
-static void _dump_DICONDITION(LPDICONDITION frc)
+static void _dump_DICONDITION(LPCDICONDITION frc)
 {
     TRACE("Condition has offset %d, pos/neg coefficients %d and %d, pos/neg saturations %d and %d, deadband %d\n",
 	  frc->lOffset, frc->lPositiveCoefficient, frc->lNegativeCoefficient,
 	  frc->dwPositiveSaturation, frc->dwNegativeSaturation, frc->lDeadBand);
 }
 
-static void _dump_DICUSTOMFORCE(LPDICUSTOMFORCE frc)
+static void _dump_DICUSTOMFORCE(LPCDICUSTOMFORCE frc)
 {
     unsigned int i;
     TRACE("Custom force uses %d channels, sample period %d.  Has %d samples at %p.\n",
@@ -159,11 +160,11 @@ static void _dump_DICUSTOMFORCE(LPDICUSTOMFORCE frc)
     if (frc->cSamples % frc->cChannels != 0)
 	WARN("Custom force has a non-integral samples-per-channel count!\n");
     if (TRACE_ON(dinput)) {
-	DPRINTF("Custom force data (time aligned, axes in order):\n");
+	TRACE("Custom force data (time aligned, axes in order):\n");
 	for (i = 1; i <= frc->cSamples; ++i) {
-	    DPRINTF("%d ", frc->rglForceData[i]);
+	    TRACE("%d ", frc->rglForceData[i]);
 	    if (i % frc->cChannels == 0)
-		DPRINTF("\n");
+		TRACE("\n");
 	}	
     }
 }
@@ -193,8 +194,8 @@ static void _dump_DIEFFECT(LPCDIEFFECT eff, REFGUID guid)
     if (TRACE_ON(dinput)) {
 	TRACE("    ");	
 	for (i = 0; i < eff->cAxes; ++i)
-	    DPRINTF("%d ", eff->rgdwAxes[i]);
-	DPRINTF("\n");
+	    TRACE("%d ", eff->rgdwAxes[i]);
+	TRACE("\n");
     }
     TRACE("  - rglDirection: %p\n", eff->rglDirection);
     TRACE("  - lpEnvelope: %p\n", eff->lpEnvelope);
@@ -539,7 +540,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_SetParameters(
 
     _dump_DIEFFECT(peff, &This->guid);
 
-    if ((dwFlags & !DIEP_NORESTART & !DIEP_NODOWNLOAD & !DIEP_START) == 0) {
+    if ((dwFlags & ~DIEP_NORESTART & ~DIEP_NODOWNLOAD & ~DIEP_START) == 0) {
 	/* set everything */
 	dwFlags = DIEP_AXES | DIEP_DIRECTION | DIEP_DURATION | DIEP_ENVELOPE |
 	    DIEP_GAIN | DIEP_SAMPLEPERIOD | DIEP_STARTDELAY | DIEP_TRIGGERBUTTON |

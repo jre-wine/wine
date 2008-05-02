@@ -27,6 +27,7 @@
 #include <commdlg.h>
 #include <wine/debug.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
 #include "winecfg.h"
 #include "resource.h"
@@ -47,6 +48,7 @@ static const struct
     const char *szProductType;
 } win_versions[] =
 {
+    { "vista",   "Windows Vista",  6,  0, 0x1770,VER_PLATFORM_WIN32_NT, " ", 0, 0, "WinNT"},
     { "win2003", "Windows 2003",   5,  2, 0xECE, VER_PLATFORM_WIN32_NT, "Service Pack 1", 1, 0, "ServerNT"},
     { "winxp",   "Windows XP",     5,  1, 0xA28, VER_PLATFORM_WIN32_NT, "Service Pack 2", 2, 0, "WinNT"},
     { "win2k",   "Windows 2000",   5,  0, 0x893, VER_PLATFORM_WIN32_NT, "Service Pack 4", 4, 0, "WinNT"},
@@ -62,16 +64,50 @@ static const struct
 
 #define NB_VERSIONS (sizeof(win_versions)/sizeof(win_versions[0]))
 
+static const char szKey9x[] = "Software\\Microsoft\\Windows\\CurrentVersion";
+static const char szKeyNT[] = "Software\\Microsoft\\Windows NT\\CurrentVersion";
+
+static int get_registry_version(void)
+{
+    int i, best = -1, platform, major, minor = 0;
+    char *p, *ver;
+
+    if ((ver = get_reg_key( HKEY_LOCAL_MACHINE, szKeyNT, "CurrentVersion", NULL )))
+        platform = VER_PLATFORM_WIN32_NT;
+    else if ((ver = get_reg_key( HKEY_LOCAL_MACHINE, szKey9x, "VersionNumber", NULL )))
+        platform = VER_PLATFORM_WIN32_WINDOWS;
+    else
+        return -1;
+
+    if ((p = strchr( ver, '.' )))
+    {
+        char *str = p;
+        *str++ = 0;
+        if ((p = strchr( str, '.' ))) *p = 0;
+        minor = atoi(str);
+    }
+    major = atoi(ver);
+
+    for (i = 0; i < NB_VERSIONS; i++)
+    {
+        if (win_versions[i].dwPlatformId != platform) continue;
+        if (win_versions[i].dwMajorVersion != major) continue;
+        best = i;
+        if (win_versions[i].dwMinorVersion == minor) return i;
+    }
+    return best;
+}
+
 static void update_comboboxes(HWND dialog)
 {
-    int i;
-
+    int i, ver;
     char *winver;
-  
+
     /* retrieve the registry values */
     winver = get_reg_key(config_key, keypath(""), "Version", "");
+    ver = get_registry_version();
 
-    if (*winver == '\0')
+    if (!winver || !winver[0])
     {
         HeapFree(GetProcessHeap(), 0, winver);
 
@@ -81,7 +117,8 @@ static void update_comboboxes(HWND dialog)
             SendDlgItemMessage (dialog, IDC_WINVER, CB_SETCURSEL, 0, 0);
             return;
         }
-        winver = strdupA("win2k");
+        if (ver != -1) winver = strdupA( win_versions[ver].szVersion );
+        else winver = strdupA("win2k");
     }
     WINE_TRACE("winver is %s\n", winver);
 
@@ -336,22 +373,21 @@ static void on_winver_change(HWND dialog)
 {
     int selection = SendDlgItemMessage(dialog, IDC_WINVER, CB_GETCURSEL, 0, 0);
 
-    if (!selection && current_app)
+    if (current_app)
     {
-        WINE_TRACE("default selected so removing current setting\n");
-        set_reg_key(config_key, keypath(""), "Version", NULL);
+        if (!selection)
+        {
+            WINE_TRACE("default selected so removing current setting\n");
+            set_reg_key(config_key, keypath(""), "Version", NULL);
+        }
+        else
+        {
+            WINE_TRACE("setting Version key to value '%s'\n", win_versions[selection-1].szVersion);
+            set_reg_key(config_key, keypath(""), "Version", win_versions[selection-1].szVersion);
+        }
     }
-    else
+    else /* global version only */
     {
-        if (current_app) selection--;
-        WINE_TRACE("setting Version key to value '%s'\n", win_versions[selection].szVersion);
-        set_reg_key(config_key, keypath(""), "Version", win_versions[selection].szVersion);
-    }
-    /* global version only */
-    if (!current_app)
-    {
-        static const char szKey9x[] = "Software\\Microsoft\\Windows\\CurrentVersion";
-        static const char szKeyNT[] = "Software\\Microsoft\\Windows NT\\CurrentVersion";
         static const char szKeyProdNT[] = "System\\CurrentControlSet\\Control\\ProductOptions";
         static const char szKeyWindNT[] = "System\\CurrentControlSet\\Control\\Windows";
         static const char szKeyEnvNT[]  = "System\\CurrentControlSet\\Control\\Session Manager\\Environment";
@@ -371,6 +407,7 @@ static void on_winver_change(HWND dialog)
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyProdNT, "ProductType", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyWindNT, "CSDVersion", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyEnvNT, "OS", NULL);
+            set_reg_key(config_key, keypath(""), "Version", NULL);
             break;
 
         case VER_PLATFORM_WIN32_NT:
@@ -388,6 +425,7 @@ static void on_winver_change(HWND dialog)
 
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "VersionNumber", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "SubVersionNumber", NULL);
+            set_reg_key(config_key, keypath(""), "Version", NULL);
             break;
 
         case VER_PLATFORM_WIN32s:
@@ -399,6 +437,7 @@ static void on_winver_change(HWND dialog)
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyEnvNT, "OS", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "VersionNumber", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "SubVersionNumber", NULL);
+            set_reg_key(config_key, keypath(""), "Version", win_versions[selection].szVersion);
             break;
         }
     }

@@ -84,13 +84,14 @@ static	DWORD	MCIAVI_drvOpen(LPCWSTR str, LPMCI_OPEN_DRIVER_PARMSW modp)
 	return 0;
 
     InitializeCriticalSection(&wma->cs);
+    wma->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": WINE_MCIAVI.cs");
     wma->ack_event = CreateEventW(NULL, FALSE, FALSE, NULL);
     wma->hStopEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
     wma->wDevID = modp->wDeviceID;
     wma->wCommandTable = mciLoadCommandResource(MCIAVI_hInstance, mciAviWStr, 0);
     modp->wCustomCommandTable = wma->wCommandTable;
     modp->wType = MCI_DEVTYPE_DIGITAL_VIDEO;
-    mciSetDriverData(wma->wDevID, (DWORD)wma);
+    mciSetDriverData(wma->wDevID, (DWORD_PTR)wma);
 
     return modp->wDeviceID;
 }
@@ -121,6 +122,7 @@ static	DWORD	MCIAVI_drvClose(DWORD dwDevID)
         CloseHandle(wma->hStopEvent);
 
         LeaveCriticalSection(&wma->cs);
+        wma->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&wma->cs);
 
 	HeapFree(GetProcessHeap(), 0, wma);
@@ -303,7 +305,7 @@ DWORD MCIAVI_mciClose(UINT wDevID, DWORD dwFlags, LPMCI_GENERIC_PARMS lpParms)
 
     MCIAVI_mciStop(wDevID, MCI_WAIT, NULL);
 
-    wma = (WINE_MCIAVI *)MCIAVI_mciGetOpenDev(wDevID);
+    wma = MCIAVI_mciGetOpenDev(wDevID);
     if (wma == NULL) 	return MCIERR_INVALID_DEVICE_ID;
 
     EnterCriticalSection(&wma->cs);
@@ -400,7 +402,7 @@ static	DWORD	MCIAVI_mciPlay(UINT wDevID, DWORD dwFlags, LPMCI_PLAY_PARMS lpParms
 
     if (lpParms == NULL)	return MCIERR_NULL_PARAMETER_BLOCK;
 
-    wma = (WINE_MCIAVI *)MCIAVI_mciGetOpenDev(wDevID);
+    wma = MCIAVI_mciGetOpenDev(wDevID);
     if (wma == NULL)		return MCIERR_INVALID_DEVICE_ID;
 
     EnterCriticalSection(&wma->cs);

@@ -97,7 +97,7 @@ static int func_cmp( const void *func1, const void *func2 )
 }
 
 /* add a name to a name table */
-inline static void add_name( struct name_table *table, const char *name )
+static inline void add_name( struct name_table *table, const char *name )
 {
     if (table->count == table->size)
     {
@@ -109,7 +109,7 @@ inline static void add_name( struct name_table *table, const char *name )
 }
 
 /* remove a name from a name table */
-inline static void remove_name( struct name_table *table, unsigned int idx )
+static inline void remove_name( struct name_table *table, unsigned int idx )
 {
     assert( idx < table->count );
     free( table->names[idx] );
@@ -119,7 +119,7 @@ inline static void remove_name( struct name_table *table, unsigned int idx )
 }
 
 /* make a name table empty */
-inline static void empty_name_table( struct name_table *table )
+static inline void empty_name_table( struct name_table *table )
 {
     unsigned int i;
 
@@ -128,7 +128,7 @@ inline static void empty_name_table( struct name_table *table )
 }
 
 /* locate a name in a (sorted) list */
-inline static const char *find_name( const char *name, const struct name_table *table )
+static inline const char *find_name( const char *name, const struct name_table *table )
 {
     char **res = NULL;
 
@@ -137,13 +137,13 @@ inline static const char *find_name( const char *name, const struct name_table *
 }
 
 /* sort a name table */
-inline static void sort_names( struct name_table *table )
+static inline void sort_names( struct name_table *table )
 {
     if (table->count) qsort( table->names, table->count, sizeof(*table->names), name_cmp );
 }
 
 /* locate an export in a (sorted) export list */
-inline static ORDDEF *find_export( const char *name, ORDDEF **table, int size )
+static inline ORDDEF *find_export( const char *name, ORDDEF **table, int size )
 {
     ORDDEF func, *odp, **res = NULL;
 
@@ -168,7 +168,7 @@ static void free_imports( struct import *imp )
 /* check whether a given dll is imported in delayed mode */
 static int is_delayed_import( const char *name )
 {
-    int i;
+    unsigned int i;
 
     for (i = 0; i < delayed_imports.count; i++)
     {
@@ -254,19 +254,13 @@ static int read_import_lib( struct import *imp )
         nb_delayed++;
     }
 
-    imp->exports = xmalloc( spec->nb_entry_points * sizeof(*imp->exports) );
-
-    for (i = 0; i < spec->nb_entry_points; i++)
+    if (spec->nb_entry_points)
     {
-        ORDDEF *odp = &spec->entry_points[i];
-
-        if (odp->type != TYPE_STDCALL && odp->type != TYPE_CDECL) continue;
-        if (odp->flags & FLAG_PRIVATE) continue;
-        imp->exports[imp->nb_exports++] = odp;
-    }
-    imp->exports = xrealloc( imp->exports, imp->nb_exports * sizeof(*imp->exports) );
-    if (imp->nb_exports)
+        imp->exports = xmalloc( spec->nb_entry_points * sizeof(*imp->exports) );
+        for (i = 0; i < spec->nb_entry_points; i++)
+            imp->exports[imp->nb_exports++] = &spec->entry_points[i];
         qsort( imp->exports, imp->nb_exports, sizeof(*imp->exports), func_cmp );
+    }
     return 1;
 }
 
@@ -429,6 +423,42 @@ static int check_unused( const struct import* imp, const DLLSPEC *spec )
     return 1;
 }
 
+/* check if a given forward does exist in one of the imported dlls */
+static void check_undefined_forwards( DLLSPEC *spec )
+{
+    char *link_name, *api_name, *dll_name, *p;
+    int i, j;
+
+    for (i = 0; i < spec->nb_entry_points; i++)
+    {
+        ORDDEF *odp = &spec->entry_points[i];
+
+        if (!(odp->flags & FLAG_FORWARD)) continue;
+
+        link_name = xstrdup( odp->link_name );
+        p = strrchr( link_name, '.' );
+        *p = 0;
+        api_name = p + 1;
+        dll_name = get_dll_name( link_name, NULL );
+
+        for (j = 0; j < nb_imports; j++)
+        {
+            struct import *imp = dll_imports[j];
+
+            if (strcasecmp( imp->spec->file_name, dll_name )) continue;
+            if (!find_export( api_name, imp->exports, imp->nb_exports ))
+                warning( "%s:%d: forward '%s' not found in %s\n",
+                         spec->src_name, odp->lineno, odp->link_name, imp->spec->file_name );
+            break;
+        }
+        if (j == nb_imports)
+            warning( "%s:%d: forward '%s' not found in the imported dll list\n",
+                     spec->src_name, odp->lineno, odp->link_name );
+        free( link_name );
+        free( dll_name );
+    }
+}
+
 /* flag the dll exports that link to an undefined symbol */
 static void check_undefined_exports( DLLSPEC *spec )
 {
@@ -468,7 +498,8 @@ static void check_undefined_exports( DLLSPEC *spec )
 static char *create_undef_symbols_file( DLLSPEC *spec )
 {
     char *as_file, *obj_file;
-    unsigned int i;
+    int i;
+    unsigned int j;
     FILE *f;
 
     as_file = get_temp_file_name( output_file_name, ".s" );
@@ -482,8 +513,8 @@ static char *create_undef_symbols_file( DLLSPEC *spec )
         if (odp->flags & FLAG_FORWARD) continue;
         fprintf( f, "\t%s %s\n", get_asm_ptr_keyword(), asm_name(odp->link_name) );
     }
-    for (i = 0; i < extra_ld_symbols.count; i++)
-        fprintf( f, "\t%s %s\n", get_asm_ptr_keyword(), asm_name(extra_ld_symbols.names[i]) );
+    for (j = 0; j < extra_ld_symbols.count; j++)
+        fprintf( f, "\t%s %s\n", get_asm_ptr_keyword(), asm_name(extra_ld_symbols.names[j]) );
     fclose( f );
 
     obj_file = get_temp_file_name( output_file_name, ".o" );
@@ -557,10 +588,12 @@ void read_undef_symbols( DLLSPEC *spec, char **argv )
 /* resolve the imports for a Win32 module */
 int resolve_imports( DLLSPEC *spec )
 {
-    unsigned int i, j, removed;
+    int i;
+    unsigned int j, removed;
     ORDDEF *odp;
 
     sort_names( &ignore_symbols );
+    check_undefined_forwards( spec );
 
     for (i = 0; i < nb_imports; i++)
     {
@@ -572,15 +605,23 @@ int resolve_imports( DLLSPEC *spec )
             odp = find_export( undef_symbols.names[j], imp->exports, imp->nb_exports );
             if (odp)
             {
-                add_import_func( imp, odp );
-                remove_name( &undef_symbols, j-- );
-                removed++;
+                if (odp->flags & FLAG_PRIVATE) continue;
+                if (odp->type != TYPE_STDCALL && odp->type != TYPE_CDECL)
+                    warning( "winebuild: Data export '%s' cannot be imported from %s\n",
+                             odp->link_name, imp->spec->file_name );
+                else
+                {
+                    add_import_func( imp, odp );
+                    remove_name( &undef_symbols, j-- );
+                    removed++;
+                }
             }
         }
-        if (!removed && check_unused( imp, spec ))
+        if (!removed)
         {
             /* the dll is not used, get rid of it */
-            warning( "%s imported but no symbols used\n", imp->spec->file_name );
+            if (check_unused( imp, spec ))
+                warning( "winebuild: %s imported but no symbols used\n", imp->spec->file_name );
             remove_import_dll( i );
             i--;
         }
@@ -1135,14 +1176,14 @@ static void output_external_link_imports( DLLSPEC *spec )
 void output_stubs( DLLSPEC *spec )
 {
     const char *name, *exp_name;
-    int i, pos;
+    int i, count;
 
     if (!has_stubs( spec )) return;
 
     output( "\n/* stub functions */\n\n" );
     output( "\t.text\n" );
 
-    for (i = pos = 0; i < spec->nb_entry_points; i++)
+    for (i = count = 0; i < spec->nb_entry_points; i++)
     {
         ORDDEF *odp = &spec->entry_points[i];
         if (odp->type != TYPE_STUB) continue;
@@ -1152,17 +1193,28 @@ void output_stubs( DLLSPEC *spec )
         output( "\t.align %d\n", get_alignment(4) );
         output( "\t%s\n", func_declaration(name) );
         output( "%s:\n", asm_name(name) );
-        output( "\tsubl $4,%%esp\n" );
 
+        /* flesh out the stub a bit to make safedisc happy */
+        output(" \tnop\n" );
+        output(" \tnop\n" );
+        output(" \tnop\n" );
+        output(" \tnop\n" );
+        output(" \tnop\n" );
+        output(" \tnop\n" );
+        output(" \tnop\n" );
+        output(" \tnop\n" );
+        output(" \tnop\n" );
+
+        output( "\tsubl $4,%%esp\n" );
         if (UsePIC)
         {
             output( "\tcall %s\n", asm_name("__wine_spec_get_pc_thunk_eax") );
             output( "1:" );
             if (exp_name)
             {
-                output( "\tleal .L__wine_stub_strings+%d-1b(%%eax),%%ecx\n", pos );
+                output( "\tleal .L%s_string-1b(%%eax),%%ecx\n", name );
                 output( "\tpushl %%ecx\n" );
-                pos += strlen(exp_name) + 1;
+                count++;
             }
             else
                 output( "\tpushl $%d\n", odp->ordinal );
@@ -1173,8 +1225,8 @@ void output_stubs( DLLSPEC *spec )
         {
             if (exp_name)
             {
-                output( "\tpushl $.L__wine_stub_strings+%d\n", pos );
-                pos += strlen(exp_name) + 1;
+                output( "\tpushl $.L%s_string\n", name );
+                count++;
             }
             else
                 output( "\tpushl $%d\n", odp->ordinal );
@@ -1184,17 +1236,20 @@ void output_stubs( DLLSPEC *spec )
         output_function_size( name );
     }
 
-    if (pos)
+    if (count)
     {
         output( "\t%s\n", get_asm_string_section() );
-        output( ".L__wine_stub_strings:\n" );
         for (i = 0; i < spec->nb_entry_points; i++)
         {
             ORDDEF *odp = &spec->entry_points[i];
             if (odp->type != TYPE_STUB) continue;
             exp_name = odp->name ? odp->name : odp->export_name;
             if (exp_name)
+            {
+                name = get_stub_name( odp, spec );
+                output( ".L%s_string:\n", name );
                 output( "\t%s \"%s\"\n", get_asm_string_keyword(), exp_name );
+            }
         }
     }
 }

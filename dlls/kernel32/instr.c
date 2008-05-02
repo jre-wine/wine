@@ -27,7 +27,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
 #include "wine/winuser16.h"
 #include "excpt.h"
 #include "thread.h"
@@ -45,7 +44,7 @@ WINE_DECLARE_DEBUG_CHANNEL(io);
 #define ADD_LOWORD(dw,val)  ((dw) = ((dw) & 0xffff0000) | LOWORD((DWORD)(dw)+(val)))
 #define ISV86(context)      ((context)->EFlags & 0x00020000)
 
-inline static void add_stack( CONTEXT86 *context, int offset )
+static inline void add_stack( CONTEXT86 *context, int offset )
 {
     if (ISV86(context) || !IS_SELECTOR_32BIT(context->SegSs))
         ADD_LOWORD( context->Esp, offset );
@@ -53,7 +52,7 @@ inline static void add_stack( CONTEXT86 *context, int offset )
         context->Esp += offset;
 }
 
-inline static void *make_ptr( CONTEXT86 *context, DWORD seg, DWORD off, int long_addr )
+static inline void *make_ptr( CONTEXT86 *context, DWORD seg, DWORD off, int long_addr )
 {
     if (ISV86(context)) return (void *)((seg << 4) + LOWORD(off));
     if (wine_ldt_is_system(seg)) return (void *)off;
@@ -61,7 +60,7 @@ inline static void *make_ptr( CONTEXT86 *context, DWORD seg, DWORD off, int long
     return (char *) MapSL( MAKESEGPTR( seg, 0 ) ) + off;
 }
 
-inline static void *get_stack( CONTEXT86 *context )
+static inline void *get_stack( CONTEXT86 *context )
 {
     if (ISV86(context)) return (void *)((context->SegSs << 4) + LOWORD(context->Esp));
     return wine_ldt_get_ptr( context->SegSs, context->Esp );
@@ -77,7 +76,7 @@ struct idtr
 
 static LDT_ENTRY idt[256];
 
-inline static struct idtr get_idtr(void)
+static inline struct idtr get_idtr(void)
 {
     struct idtr ret;
 #if defined(__i386__) && defined(__GNUC__)
@@ -429,12 +428,12 @@ static void INSTR_outport( WORD port, int size, DWORD val, CONTEXT86 *context )
 
 
 /***********************************************************************
- *           INSTR_EmulateInstruction
+ *           __wine_emulate_instruction
  *
  * Emulate a privileged instruction.
  * Returns exception continuation status.
  */
-DWORD INSTR_EmulateInstruction( EXCEPTION_RECORD *rec, CONTEXT86 *context )
+DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context )
 {
     int prefix, segprefix, prefixlen, len, repX, long_op, long_addr;
     BYTE *instr;
@@ -643,10 +642,10 @@ DWORD INSTR_EmulateInstruction( EXCEPTION_RECORD *rec, CONTEXT86 *context )
 	      int seg = outp ? context->SegDs : context->SegEs;  /* FIXME: is this right? */
 
 	      if (outp)
-		/* FIXME: Check segment readable.  */
+		/* FIXME: Check segment is readable.  */
 		(void)0;
 	      else
-		/* FIXME: Check segment writeable.  */
+		/* FIXME: Check segment is writable.  */
 		(void)0;
 
 	      if (repX)
@@ -770,13 +769,12 @@ DWORD INSTR_EmulateInstruction( EXCEPTION_RECORD *rec, CONTEXT86 *context )
             break;  /* Unable to emulate it */
 
         case 0xcd: /* int <XX> */
-            if (wine_ldt_is_system(context->SegCs)) break;  /* don't emulate it in 32-bit code */
             if (!winedos.EmulateInterruptPM) load_winedos();
             if (winedos.EmulateInterruptPM)
             {
                 context->Eip += prefixlen + 2;
-                winedos.EmulateInterruptPM( context, instr[1] );
-                return ExceptionContinueExecution;
+                if (winedos.EmulateInterruptPM( context, instr[1] )) return ExceptionContinueExecution;
+                context->Eip -= prefixlen + 2;  /* restore eip */
             }
             break;  /* Unable to emulate it */
 
@@ -887,7 +885,7 @@ LONG CALLBACK INSTR_vectored_handler( EXCEPTION_POINTERS *ptrs )
         (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
          record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION))
     {
-        if (INSTR_EmulateInstruction( record, context ) == ExceptionContinueExecution)
+        if (__wine_emulate_instruction( record, context ) == ExceptionContinueExecution)
             return EXCEPTION_CONTINUE_EXECUTION;
     }
     return EXCEPTION_CONTINUE_SEARCH;

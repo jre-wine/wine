@@ -24,6 +24,7 @@
 #include "wine/port.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -59,7 +60,6 @@
 #include "winerror.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "excpt.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
 
@@ -77,7 +77,7 @@ static HANDLE systemHeap;   /* globally shared heap */
  *
  * Create the system heap.
  */
-inline static HANDLE HEAP_CreateSystemHeap(void)
+static inline HANDLE HEAP_CreateSystemHeap(void)
 {
     int created;
     void *base;
@@ -107,7 +107,7 @@ inline static HANDLE HEAP_CreateSystemHeap(void)
     {
         /* wait for the heap to be initialized */
         WaitForSingleObject( event, INFINITE );
-        systemHeap = (HANDLE)base;
+        systemHeap = base;
     }
     CloseHandle( map );
     return systemHeap;
@@ -268,6 +268,9 @@ DWORD WINAPI GetProcessHeaps( DWORD count, HANDLE *heaps )
 
 /* These are needed so that we can call the functions from inside kernel itself */
 
+/***********************************************************************
+ *           HeapAlloc    (KERNEL32.@)
+ */
 LPVOID WINAPI HeapAlloc( HANDLE heap, DWORD flags, SIZE_T size )
 {
     return RtlAllocateHeap( heap, flags, size );
@@ -283,7 +286,7 @@ LPVOID WINAPI HeapReAlloc( HANDLE heap, DWORD flags, LPVOID ptr, SIZE_T size )
     return RtlReAllocateHeap( heap, flags, ptr, size );
 }
 
-SIZE_T WINAPI HeapSize( HANDLE heap, DWORD flags, LPVOID ptr )
+SIZE_T WINAPI HeapSize( HANDLE heap, DWORD flags, LPCVOID ptr )
 {
     return RtlSizeHeap( heap, flags, ptr );
 }
@@ -353,15 +356,20 @@ HGLOBAL WINAPI GlobalAlloc(
    else
       hpflags=0;
 
-   TRACE("() flags=%04x\n",  flags );
-
    if((flags & GMEM_MOVEABLE)==0) /* POINTER */
    {
       palloc=HeapAlloc(GetProcessHeap(), hpflags, size);
-      return (HGLOBAL) palloc;
+      TRACE( "(flags=%04x) returning %p\n",  flags, palloc );
+      return palloc;
    }
    else  /* HANDLE */
    {
+      if (size > INT_MAX-HGLOBAL_STORAGE)
+      {
+          SetLastError(ERROR_OUTOFMEMORY);
+          return 0;
+      }
+
       RtlLockHeap(GetProcessHeap());
 
       pintern = HeapAlloc(GetProcessHeap(), 0, sizeof(GLOBAL32_INTERN));
@@ -390,7 +398,10 @@ HGLOBAL WINAPI GlobalAlloc(
       }
 
       RtlUnlockHeap(GetProcessHeap());
-      return pintern ? INTERN_TO_HANDLE(pintern) : 0;
+      if (!pintern) return 0;
+      TRACE( "(flags=%04x) returning handle %p pointer %p\n",
+             flags, INTERN_TO_HANDLE(pintern), pintern->Pointer );
+      return INTERN_TO_HANDLE(pintern);
    }
 }
 
@@ -471,7 +482,7 @@ BOOL WINAPI GlobalUnlock(HGLOBAL hmem)
     PGLOBAL32_INTERN pintern;
     BOOL locked;
 
-    if (ISPOINTER(hmem)) return FALSE;
+    if (ISPOINTER(hmem)) return TRUE;
 
     RtlLockHeap(GetProcessHeap());
     __TRY
@@ -609,10 +620,10 @@ HGLOBAL WINAPI GlobalReAlloc(
          }
          else
          {
-             size = HeapSize(GetProcessHeap(), 0, (LPVOID)hmem);
+             size = HeapSize(GetProcessHeap(), 0, hmem);
              hnew = GlobalAlloc(flags, size);
              palloc = GlobalLock(hnew);
-             memcpy(palloc, (LPVOID)hmem, size);
+             memcpy(palloc, hmem, size);
              GlobalUnlock(hnew);
              GlobalFree(hmem);
          }
@@ -655,7 +666,12 @@ HGLOBAL WINAPI GlobalReAlloc(
             hnew=hmem;
             if(pintern->Pointer)
             {
-               if((palloc = HeapReAlloc(GetProcessHeap(), heap_flags,
+               if(size > INT_MAX-HGLOBAL_STORAGE)
+               {
+                   SetLastError(ERROR_OUTOFMEMORY);
+                   hnew = 0;
+               }
+               else if((palloc = HeapReAlloc(GetProcessHeap(), heap_flags,
                                    (char *) pintern->Pointer-HGLOBAL_STORAGE,
                                    size+HGLOBAL_STORAGE)) == NULL)
                    hnew = 0; /* Block still valid */
@@ -664,7 +680,12 @@ HGLOBAL WINAPI GlobalReAlloc(
             }
             else
             {
-                if((palloc=HeapAlloc(GetProcessHeap(), heap_flags, size+HGLOBAL_STORAGE))
+                if(size > INT_MAX-HGLOBAL_STORAGE)
+                {
+                    SetLastError(ERROR_OUTOFMEMORY);
+                    hnew = 0;
+                }
+                else if((palloc=HeapAlloc(GetProcessHeap(), heap_flags, size+HGLOBAL_STORAGE))
                    == NULL)
                     hnew = 0;
                 else
@@ -722,7 +743,11 @@ HGLOBAL WINAPI GlobalFree(HGLOBAL hmem)
         hreturned = 0;
         if(ISPOINTER(hmem)) /* POINTER */
         {
-            if(!HeapFree(GetProcessHeap(), 0, (LPVOID) hmem)) hmem = 0;
+            if(!HeapFree(GetProcessHeap(), 0, hmem))
+            {
+                SetLastError(ERROR_INVALID_HANDLE);
+                hreturned = hmem;
+            }
         }
         else  /* HANDLE */
         {
@@ -784,11 +809,15 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
    DWORD                retval;
    PGLOBAL32_INTERN     pintern;
 
-   if (!hmem) return 0;
+   if (!((ULONG_PTR)hmem >> 16))
+   {
+       SetLastError(ERROR_INVALID_HANDLE);
+       return 0;
+   }
 
    if(ISPOINTER(hmem))
    {
-      retval=HeapSize(GetProcessHeap(), 0,  (LPVOID) hmem);
+      retval=HeapSize(GetProcessHeap(), 0, hmem);
    }
    else
    {
@@ -926,7 +955,7 @@ HLOCAL WINAPI LocalAlloc(
                 UINT flags, /* [in] Allocation attributes */
                 SIZE_T size /* [in] Number of bytes to allocate */
 ) {
-    return (HLOCAL)GlobalAlloc( flags, size );
+    return GlobalAlloc( flags, size );
 }
 
 
@@ -955,7 +984,7 @@ SIZE_T WINAPI LocalCompact( UINT minfree )
 UINT WINAPI LocalFlags(
               HLOCAL handle /* [in] Handle of memory object */
 ) {
-    return GlobalFlags( (HGLOBAL)handle );
+    return GlobalFlags( handle );
 }
 
 
@@ -975,7 +1004,7 @@ UINT WINAPI LocalFlags(
 HLOCAL WINAPI LocalFree(
                 HLOCAL handle /* [in] Handle of memory object */
 ) {
-    return (HLOCAL)GlobalFree( (HGLOBAL)handle );
+    return GlobalFree( handle );
 }
 
 
@@ -995,7 +1024,7 @@ HLOCAL WINAPI LocalFree(
 HLOCAL WINAPI LocalHandle(
                 LPCVOID ptr /* [in] Address of local memory block */
 ) {
-    return (HLOCAL)GlobalHandle( ptr );
+    return GlobalHandle( ptr );
 }
 
 
@@ -1015,7 +1044,7 @@ HLOCAL WINAPI LocalHandle(
 LPVOID WINAPI LocalLock(
               HLOCAL handle /* [in] Address of local memory object */
 ) {
-    return GlobalLock( (HGLOBAL)handle );
+    return GlobalLock( handle );
 }
 
 
@@ -1037,7 +1066,7 @@ HLOCAL WINAPI LocalReAlloc(
                 SIZE_T size,   /* [in] New size of block */
                 UINT flags     /* [in] How to reallocate object */
 ) {
-    return (HLOCAL)GlobalReAlloc( (HGLOBAL)handle, size, flags );
+    return GlobalReAlloc( handle, size, flags );
 }
 
 
@@ -1066,7 +1095,7 @@ SIZE_T WINAPI LocalShrink( HGLOBAL handle, UINT newsize )
 SIZE_T WINAPI LocalSize(
               HLOCAL handle /* [in] Handle of memory object */
 ) {
-    return GlobalSize( (HGLOBAL)handle );
+    return GlobalSize( handle );
 }
 
 
@@ -1086,7 +1115,7 @@ SIZE_T WINAPI LocalSize(
 BOOL WINAPI LocalUnlock(
               HLOCAL handle /* [in] Handle of memory object */
 ) {
-    return GlobalUnlock( (HGLOBAL)handle );
+    return GlobalUnlock( handle );
 }
 
 
@@ -1130,12 +1159,12 @@ void WINAPI __regs_AllocMappedBuffer(
         buffer[0] = (DWORD)handle;
         buffer[1] = ptr;
 
-        context->Eax = (DWORD) ptr;
+        context->Eax = ptr;
         context->Edi = (DWORD)(buffer + 2);
     }
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( AllocMappedBuffer, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( AllocMappedBuffer, 0, 0 )
 #endif
 
 /**********************************************************************
@@ -1160,7 +1189,7 @@ void WINAPI __regs_FreeMappedBuffer(
     }
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( FreeMappedBuffer, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( FreeMappedBuffer, 0, 0 )
 #endif
 
 /***********************************************************************
@@ -1179,7 +1208,8 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     FILE *f;
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     unsigned long val;
-    int size_sys, mib[2];
+    int mib[2];
+    size_t size_sys;
 #elif defined(__APPLE__)
     unsigned int val;
     int mib[2];
@@ -1190,13 +1220,18 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     int rval;
 #endif
 
+    if (lpmemex->dwLength != sizeof(*lpmemex))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
     if (time(NULL)==cache_lastchecked) {
 	memcpy(lpmemex,&cached_memstatus,sizeof(*lpmemex));
 	return TRUE;
     }
     cache_lastchecked = time(NULL);
 
-    lpmemex->dwLength         = sizeof(*lpmemex);
     lpmemex->dwMemoryLoad     = 0;
     lpmemex->ullTotalPhys     = 16*1024*1024;
     lpmemex->ullAvailPhys     = 16*1024*1024;
@@ -1242,14 +1277,6 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
                 lpmemex->ullAvailPhys += cached*1024;
         }
         fclose( f );
-
-        if (lpmemex->ullTotalPhys)
-        {
-            DWORDLONG TotalPhysical = lpmemex->ullTotalPhys+lpmemex->ullTotalPageFile;
-            DWORDLONG AvailPhysical = lpmemex->ullAvailPhys+lpmemex->ullAvailPageFile;
-            lpmemex->dwMemoryLoad = (TotalPhysical-AvailPhysical)
-                                      / (TotalPhysical / 100);
-        }
     }
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__APPLE__)
     mib[0] = CTL_HW;
@@ -1264,7 +1291,6 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     lpmemex->ullAvailPhys = val;
     lpmemex->ullTotalPageFile = val;
     lpmemex->ullAvailPageFile = val;
-    lpmemex->dwMemoryLoad = lpmemex->ullTotalPhys - lpmemex->ullAvailPhys;
 #elif defined ( sun )
     pagesize=sysconf(_SC_PAGESIZE);
     maxpages=sysconf(_SC_PHYS_PAGES);
@@ -1285,14 +1311,28 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     lpmemex->ullAvailPhys = pagesize*freepages;
     lpmemex->ullTotalPageFile = swapspace;
     lpmemex->ullAvailPageFile = swapfree;
-    lpmemex->dwMemoryLoad =  lpmemex->ullTotalPhys - lpmemex->ullAvailPhys;
 #endif
 
-    /* Project2k refuses to start if it sees less than 1Mb of free swap */
-    if (lpmemex->ullTotalPageFile < lpmemex->ullTotalPhys)
-        lpmemex->ullTotalPageFile = lpmemex->ullTotalPhys;
-    if (lpmemex->ullAvailPageFile < lpmemex->ullAvailPhys)
-        lpmemex->ullAvailPageFile = lpmemex->ullAvailPhys;
+    if (lpmemex->ullTotalPhys)
+    {
+        lpmemex->dwMemoryLoad = (lpmemex->ullTotalPhys-lpmemex->ullAvailPhys)
+                                  / (lpmemex->ullTotalPhys / 100);
+    }
+
+    /* Win98 returns only the swapsize in ullTotalPageFile/ullAvailPageFile,
+       WinXP returns the size of physical memory + swapsize;
+       mimic the behavior of XP.
+       Note: Project2k refuses to start if it sees less than 1Mb of free swap.
+    */
+    lpmemex->ullTotalPageFile += lpmemex->ullTotalPhys;
+    lpmemex->ullAvailPageFile += lpmemex->ullAvailPhys;
+
+    /* Titan Quest refuses to run if TotalPageFile <= ullTotalPhys */
+    if(lpmemex->ullTotalPageFile == lpmemex->ullTotalPhys)
+    {
+        lpmemex->ullTotalPhys -= 1;
+        lpmemex->ullAvailPhys -= 1;
+    }
 
     /* FIXME: should do something for other systems */
     GetSystemInfo(&si);
@@ -1331,10 +1371,12 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 {
     MEMORYSTATUSEX memstatus;
     OSVERSIONINFOW osver;
+    IMAGE_NT_HEADERS *nt = RtlImageNtHeader( GetModuleHandleW(0) );
 
     /* Because GlobalMemoryStatus is identical to GlobalMemoryStatusEX save
        for one extra field in the struct, and the lack of a bug, we simply
        call GlobalMemoryStatusEx and copy the values across. */
+    memstatus.dwLength = sizeof(memstatus);
     GlobalMemoryStatusEx(&memstatus);
 
     lpBuffer->dwLength = sizeof(*lpBuffer);
@@ -1342,7 +1384,6 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 
     /* Windows 2000 and later report -1 when values are greater than 4 Gb.
      * NT reports values modulo 4 Gb.
-     * Values between 2 Gb and 4 Gb are rounded down to 2 Gb.
      */
 
     osver.dwOSVersionInfoSize = sizeof(osver);
@@ -1350,36 +1391,48 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 
     if ( osver.dwMajorVersion >= 5 )
     {
-        lpBuffer->dwTotalPhys = (memstatus.ullTotalPhys > MAXDWORD) ? MAXDWORD :
-                                (memstatus.ullTotalPhys > MAXLONG) ? MAXLONG : memstatus.ullTotalPhys;
-        lpBuffer->dwAvailPhys = (memstatus.ullAvailPhys > MAXDWORD) ? MAXDWORD :
-                                (memstatus.ullAvailPhys > MAXLONG) ? MAXLONG : memstatus.ullAvailPhys; 
-        lpBuffer->dwTotalPageFile = (memstatus.ullTotalPageFile > MAXDWORD) ? MAXDWORD :
-                                    (memstatus.ullTotalPageFile > MAXLONG) ? MAXLONG : memstatus.ullTotalPageFile;
-        lpBuffer->dwAvailPageFile = (memstatus.ullAvailPageFile > MAXDWORD) ? MAXDWORD :
-                                    (memstatus.ullAvailPageFile > MAXLONG) ? MAXLONG : memstatus.ullAvailPageFile;
-        lpBuffer->dwTotalVirtual = (memstatus.ullTotalVirtual > MAXDWORD) ? MAXDWORD :
-                                   (memstatus.ullTotalVirtual > MAXLONG)  ? MAXLONG : memstatus.ullTotalVirtual;
-        lpBuffer->dwAvailVirtual = (memstatus.ullAvailVirtual > MAXDWORD) ? MAXDWORD :
-                                   (memstatus.ullAvailVirtual > MAXLONG) ? MAXLONG : memstatus.ullAvailVirtual;
+        lpBuffer->dwTotalPhys = min( memstatus.ullTotalPhys, MAXDWORD );
+        lpBuffer->dwAvailPhys = min( memstatus.ullAvailPhys, MAXDWORD );
+        lpBuffer->dwTotalPageFile = min( memstatus.ullTotalPageFile, MAXDWORD );
+        lpBuffer->dwAvailPageFile = min( memstatus.ullAvailPageFile, MAXDWORD );
+        lpBuffer->dwTotalVirtual = min( memstatus.ullTotalVirtual, MAXDWORD );
+        lpBuffer->dwAvailVirtual = min( memstatus.ullAvailVirtual, MAXDWORD );
+
     }
     else	/* duplicate NT bug */
     {
-        lpBuffer->dwTotalPhys = (memstatus.ullTotalPhys > MAXDWORD) ? memstatus.ullTotalPhys :
-                                (memstatus.ullTotalPhys > MAXLONG) ? MAXLONG : memstatus.ullTotalPhys;
-        lpBuffer->dwAvailPhys = (memstatus.ullAvailPhys > MAXDWORD) ? memstatus.ullAvailPhys :
-                                (memstatus.ullAvailPhys > MAXLONG) ? MAXLONG : memstatus.ullAvailPhys;
-        lpBuffer->dwTotalPageFile = (memstatus.ullTotalPageFile > MAXDWORD) ? memstatus.ullTotalPageFile : 
-                                    (memstatus.ullTotalPageFile > MAXLONG) ? MAXLONG : memstatus.ullTotalPageFile;
-        lpBuffer->dwAvailPageFile = (memstatus.ullAvailPageFile > MAXDWORD) ? memstatus.ullAvailPageFile : 
-                                    (memstatus.ullAvailPageFile > MAXLONG) ? MAXLONG : memstatus.ullAvailPageFile;
-        lpBuffer->dwTotalVirtual = (memstatus.ullTotalVirtual > MAXDWORD) ? memstatus.ullTotalVirtual : 
-                                   (memstatus.ullTotalVirtual > MAXLONG)  ? MAXLONG : memstatus.ullTotalVirtual;
-        lpBuffer->dwAvailVirtual = (memstatus.ullAvailVirtual > MAXDWORD) ? memstatus.ullAvailVirtual :
-                                   (memstatus.ullAvailVirtual > MAXLONG) ? MAXLONG : memstatus.ullAvailVirtual;
+        lpBuffer->dwTotalPhys = memstatus.ullTotalPhys;
+        lpBuffer->dwAvailPhys = memstatus.ullAvailPhys;
+        lpBuffer->dwTotalPageFile = memstatus.ullTotalPageFile;
+        lpBuffer->dwAvailPageFile = memstatus.ullAvailPageFile;
+        lpBuffer->dwTotalVirtual = memstatus.ullTotalVirtual;
+        lpBuffer->dwAvailVirtual = memstatus.ullAvailVirtual;
+    }
+
+    /* values are limited to 2Gb unless the app has the IMAGE_FILE_LARGE_ADDRESS_AWARE flag */
+    /* page file sizes are not limited (Adobe Illustrator 8 depends on this) */
+    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE))
+    {
+        if (lpBuffer->dwTotalPhys > MAXLONG) lpBuffer->dwTotalPhys = MAXLONG;
+        if (lpBuffer->dwAvailPhys > MAXLONG) lpBuffer->dwAvailPhys = MAXLONG;
+        if (lpBuffer->dwTotalVirtual > MAXLONG) lpBuffer->dwTotalVirtual = MAXLONG;
+        if (lpBuffer->dwAvailVirtual > MAXLONG) lpBuffer->dwAvailVirtual = MAXLONG;
     }
 
     /* work around for broken photoshop 4 installer */
     if ( lpBuffer->dwAvailPhys +  lpBuffer->dwAvailPageFile >= 2U*1024*1024*1024)
          lpBuffer->dwAvailPageFile = 2U*1024*1024*1024 -  lpBuffer->dwAvailPhys - 1;
+
+    /* limit page file size for really old binaries */
+    if (nt->OptionalHeader.MajorSubsystemVersion < 4)
+    {
+        if (lpBuffer->dwTotalPageFile > MAXLONG) lpBuffer->dwTotalPageFile = MAXLONG;
+        if (lpBuffer->dwAvailPageFile > MAXLONG) lpBuffer->dwAvailPageFile = MAXLONG;
+    }
+
+    TRACE("Length %u, MemoryLoad %u, TotalPhys %lx, AvailPhys %lx,"
+          " TotalPageFile %lx, AvailPageFile %lx, TotalVirtual %lx, AvailVirtual %lx\n",
+          lpBuffer->dwLength, lpBuffer->dwMemoryLoad, lpBuffer->dwTotalPhys,
+          lpBuffer->dwAvailPhys, lpBuffer->dwTotalPageFile, lpBuffer->dwAvailPageFile,
+          lpBuffer->dwTotalVirtual, lpBuffer->dwAvailVirtual );
 }
