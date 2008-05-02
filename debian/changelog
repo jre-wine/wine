@@ -1,3 +1,23 @@
+wine (0.9.52-1) unstable; urgency=low
+
+  * New upstream release 0.9.52.
+    - Improved graphics tablet support.
+    - Support for RPC context handles.
+    - Fixes for some longstanding screen depth issues.
+    - Implementation of "My Network Places" shell folder.
+    - Lots of bug fixes.
+  * Add build-dependency alternative for gcc-multilib for backports.
+    Closes: #458011.
+  * No longer build-depend on old flex versions, I think they fixed
+    the incompatibilities with new flex versions a while ago.
+  * Applied tools/c2man.pl patch from Roderich Schupp so that perl 5.10
+    doesn't barf on it. Closes: #457943. (Should probably be propagated
+    upstream, but I'm a little lazy. Someone already submitted a patch
+    to them long ago anyway, not my fault they didn't apply it already.
+    They'll get around to it once they upgrade their distros, I guess...)
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 28 Dec 2007 18:24:31 +0100
+
 wine (0.9.51-2) unstable; urgency=low
 
   * On amd64, Build-Depend on gcc-multilib instead of libc6-dev-i386.
