@@ -1,3 +1,15 @@
+wine (0.9.42-1) unstable; urgency=low
+
+  * New upstream release 0.9.42.
+    - Support for activation contexts and side-by-side assemblies.
+    - Many more gdiplus functions.
+    - More messaging support in crypt32.dll.
+    - Many HTTP protocol handling fixes.
+    - Lots of bug fixes.
+  * This version was released Jul 27, 2007.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 03 Sep 2007 08:32:04 -0400
+
 wine (0.9.41-1) unstable; urgency=low
 
   * New upstream release 0.9.41.
