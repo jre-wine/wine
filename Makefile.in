@@ -68,6 +68,14 @@ INSTALLDIRS = $(DESTDIR)$(datadir)/aclocal
 
 @MAKE_RULES@
 
+$(SRCDIR)/configure: @MAINTAINER_MODE@ configure.ac aclocal.m4
+	cd $(SRCDIR) && autoconf --warnings=all
+
+$(SRCDIR)/include/config.h.in: @MAINTAINER_MODE@ include/stamp-h.in
+$(SRCDIR)/include/stamp-h.in: configure.ac aclocal.m4
+	cd $(SRCDIR) && autoheader --warnings=all
+	@echo timestamp > $@
+
 config.status: configure
 	@./config.status --recheck
 
@@ -119,9 +127,9 @@ RECURSE_TARGETS = \
 	$(TESTSUBDIRS:%=%/__test__) \
 	$(TESTSUBDIRS:%=%/__testclean__)
 
-depend $(RECURSE_TARGETS): $(MAKEDEP) include/config.h
+depend $(RECURSE_TARGETS): $(MAKEDEP)
 
-$(MAKEDEP):
+$(MAKEDEP): include/config.h
 	@cd $(TOOLSDIR)/tools && $(MAKE) makedep
 
 # Test rules
@@ -218,6 +226,7 @@ ALL_MAKEFILES = \
 	dlls/d3dx9_34/Makefile \
 	dlls/d3dx9_35/Makefile \
 	dlls/d3dx9_36/Makefile \
+	dlls/d3dx9_36/tests/Makefile \
 	dlls/d3dxof/Makefile \
 	dlls/dbghelp/Makefile \
 	dlls/dciman32/Makefile \
@@ -256,6 +265,7 @@ ALL_MAKEFILES = \
 	dlls/dxerr9/Makefile \
 	dlls/dxguid/Makefile \
 	dlls/faultrep/Makefile \
+	dlls/fusion/Makefile \
 	dlls/gdi32/Makefile \
 	dlls/gdi32/tests/Makefile \
 	dlls/gdiplus/Makefile \
@@ -288,6 +298,7 @@ ALL_MAKEFILES = \
 	dlls/itircl/Makefile \
 	dlls/itss/Makefile \
 	dlls/itss/tests/Makefile \
+	dlls/jscript/Makefile \
 	dlls/kernel32/Makefile \
 	dlls/kernel32/tests/Makefile \
 	dlls/localspl/Makefile \
@@ -520,6 +531,7 @@ ALL_MAKEFILES = \
 	programs/notepad/Makefile \
 	programs/oleview/Makefile \
 	programs/progman/Makefile \
+	programs/reg/Makefile \
 	programs/regedit/Makefile \
 	programs/regsvr32/Makefile \
 	programs/rpcss/Makefile \
@@ -635,6 +647,7 @@ dlls/d3dx9_33/Makefile: dlls/d3dx9_33/Makefile.in dlls/Makedll.rules
 dlls/d3dx9_34/Makefile: dlls/d3dx9_34/Makefile.in dlls/Makedll.rules
 dlls/d3dx9_35/Makefile: dlls/d3dx9_35/Makefile.in dlls/Makedll.rules
 dlls/d3dx9_36/Makefile: dlls/d3dx9_36/Makefile.in dlls/Makedll.rules
+dlls/d3dx9_36/tests/Makefile: dlls/d3dx9_36/tests/Makefile.in dlls/Maketest.rules
 dlls/d3dxof/Makefile: dlls/d3dxof/Makefile.in dlls/Makedll.rules
 dlls/dbghelp/Makefile: dlls/dbghelp/Makefile.in dlls/Makedll.rules
 dlls/dciman32/Makefile: dlls/dciman32/Makefile.in dlls/Makedll.rules
@@ -673,6 +686,7 @@ dlls/dxerr8/Makefile: dlls/dxerr8/Makefile.in dlls/Makeimplib.rules
 dlls/dxerr9/Makefile: dlls/dxerr9/Makefile.in dlls/Makeimplib.rules
 dlls/dxguid/Makefile: dlls/dxguid/Makefile.in dlls/Makeimplib.rules
 dlls/faultrep/Makefile: dlls/faultrep/Makefile.in dlls/Makedll.rules
+dlls/fusion/Makefile: dlls/fusion/Makefile.in dlls/Makedll.rules
 dlls/gdi32/Makefile: dlls/gdi32/Makefile.in dlls/Makedll.rules
 dlls/gdi32/tests/Makefile: dlls/gdi32/tests/Makefile.in dlls/Maketest.rules
 dlls/gdiplus/Makefile: dlls/gdiplus/Makefile.in dlls/Makedll.rules
@@ -705,6 +719,7 @@ dlls/iphlpapi/tests/Makefile: dlls/iphlpapi/tests/Makefile.in dlls/Maketest.rule
 dlls/itircl/Makefile: dlls/itircl/Makefile.in dlls/Makedll.rules
 dlls/itss/Makefile: dlls/itss/Makefile.in dlls/Makedll.rules
 dlls/itss/tests/Makefile: dlls/itss/tests/Makefile.in dlls/Maketest.rules
+dlls/jscript/Makefile: dlls/jscript/Makefile.in dlls/Makedll.rules
 dlls/kernel32/Makefile: dlls/kernel32/Makefile.in dlls/Makedll.rules
 dlls/kernel32/tests/Makefile: dlls/kernel32/tests/Makefile.in dlls/Maketest.rules
 dlls/localspl/Makefile: dlls/localspl/Makefile.in dlls/Makedll.rules
@@ -937,6 +952,7 @@ programs/net/Makefile: programs/net/Makefile.in programs/Makeprog.rules
 programs/notepad/Makefile: programs/notepad/Makefile.in programs/Makeprog.rules
 programs/oleview/Makefile: programs/oleview/Makefile.in programs/Makeprog.rules
 programs/progman/Makefile: programs/progman/Makefile.in programs/Makeprog.rules
+programs/reg/Makefile: programs/reg/Makefile.in programs/Makeprog.rules
 programs/regedit/Makefile: programs/regedit/Makefile.in programs/Makeprog.rules
 programs/regsvr32/Makefile: programs/regsvr32/Makefile.in programs/Makeprog.rules
 programs/rpcss/Makefile: programs/rpcss/Makefile.in programs/Makeprog.rules

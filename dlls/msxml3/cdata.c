@@ -539,24 +539,146 @@ static HRESULT WINAPI domcdata_substringData(
     IXMLDOMCDATASection *iface,
     long offset, long count, BSTR *p)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domcdata *This = impl_from_IXMLDOMCDATASection( iface );
+    xmlnode *pDOMNode = impl_from_IXMLDOMNode( (IXMLDOMNode*)This->element );
+    xmlChar *pContent;
+    long nLength = 0;
+    HRESULT hr = S_FALSE;
+
+    TRACE("%p\n", iface);
+
+    if(!p)
+        return E_INVALIDARG;
+
+    *p = NULL;
+    if(offset < 0 || count < 0)
+        return E_INVALIDARG;
+
+    if(count == 0)
+        return hr;
+
+    pContent = xmlNodeGetContent(pDOMNode->node);
+    if(pContent)
+    {
+        nLength = xmlStrlen(pContent);
+
+        if( offset < nLength)
+        {
+            BSTR sContent = bstr_from_xmlChar(pContent);
+            if(offset + count > nLength)
+                *p = SysAllocString(&sContent[offset]);
+            else
+                *p = SysAllocStringLen(&sContent[offset], count);
+
+            SysFreeString(sContent);
+            hr = S_OK;
+        }
+
+        xmlFree(pContent);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI domcdata_appendData(
     IXMLDOMCDATASection *iface,
     BSTR p)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domcdata *This = impl_from_IXMLDOMCDATASection( iface );
+    xmlnode *pDOMNode = impl_from_IXMLDOMNode( (IXMLDOMNode*)This->element );
+    xmlChar *pContent;
+    HRESULT hr = S_FALSE;
+
+    TRACE("%p\n", iface);
+
+    /* Nothing to do if NULL or an Empty string passed in. */
+    if(p == NULL || SysStringLen(p) == 0)
+        return S_OK;
+
+    pContent = xmlChar_from_wchar( (WCHAR*)p );
+    if(pContent)
+    {
+        if(xmlTextConcat(pDOMNode->node, pContent, SysStringLen(p) ) == 0)
+            hr = S_OK;
+        else
+        {
+            hr = E_FAIL;
+            xmlFree(pContent);
+        }
+    }
+    else
+        hr = E_FAIL;
+
+    return hr;
 }
 
 static HRESULT WINAPI domcdata_insertData(
     IXMLDOMCDATASection *iface,
     long offset, BSTR p)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domcdata *This = impl_from_IXMLDOMCDATASection( iface );
+    xmlnode *pDOMNode = impl_from_IXMLDOMNode( (IXMLDOMNode*)This->element );
+    xmlChar *pXmlContent;
+    BSTR sNewString;
+    HRESULT hr = S_FALSE;
+    long nLength = 0, nLengthP = 0;
+    xmlChar *str = NULL;
+
+    TRACE("%p\n", This);
+
+    /* If have a NULL or empty string, don't do anything. */
+    if(SysStringLen(p) == 0)
+        return S_OK;
+
+    if(offset < 0)
+    {
+        return E_INVALIDARG;
+    }
+
+    pXmlContent = xmlNodeGetContent(pDOMNode->node);
+    if(pXmlContent)
+    {
+        BSTR sContent = bstr_from_xmlChar( pXmlContent );
+        nLength = SysStringLen(sContent);
+        nLengthP = SysStringLen(p);
+
+        if(nLength < offset)
+        {
+            SysFreeString(sContent);
+            xmlFree(pXmlContent);
+
+            return E_INVALIDARG;
+        }
+
+        sNewString = SysAllocStringLen(NULL, nLength + nLengthP + 1);
+        if(sNewString)
+        {
+            if(offset > 0)
+                memcpy(sNewString, sContent, offset * sizeof(WCHAR));
+
+            memcpy(&sNewString[offset], p, nLengthP * sizeof(WCHAR));
+
+            if(offset+nLengthP < nLength)
+                memcpy(&sNewString[offset+nLengthP], &sContent[offset], (nLength-offset) * sizeof(WCHAR));
+
+            sNewString[nLengthP + nLength] = 0;
+
+            str = xmlChar_from_wchar((WCHAR*)sNewString);
+            if(str)
+            {
+                xmlNodeSetContent(pDOMNode->node, str);
+                hr = S_OK;
+            }
+
+            SysFreeString(sNewString);
+        }
+
+        SysFreeString(sContent);
+
+        xmlFree(pXmlContent);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI domcdata_deleteData(

@@ -27,5 +27,6 @@
 #include "msvidc32_Nl.rc"
 #include "msvidc32_No.rc"
 #include "msvidc32_Pl.rc"
+#include "msvidc32_Ro.rc"
 #include "msvidc32_Sv.rc"
 #include "msvidc32_Tr.rc"

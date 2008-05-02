@@ -65,7 +65,7 @@ static const USER_DRIVER *load_driver(void)
         driver_load_error = GetLastError();
 
     driver = HeapAlloc( GetProcessHeap(), 0, sizeof(*driver) );
-    memcpy( driver, &null_driver, sizeof(*driver) );
+    *driver = null_driver;
 
     if (graphics_driver)
     {
@@ -112,6 +112,7 @@ static const USER_DRIVER *load_driver(void)
         GET_USER_FUNC(MsgWaitForMultipleObjectsEx);
         GET_USER_FUNC(ReleaseDC);
         GET_USER_FUNC(ScrollDC);
+        GET_USER_FUNC(SetCapture);
         GET_USER_FUNC(SetFocus);
         GET_USER_FUNC(SetParent);
         GET_USER_FUNC(SetWindowPos);
@@ -364,6 +365,10 @@ static BOOL nulldrv_ScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const
     return FALSE;
 }
 
+static void nulldrv_SetCapture( HWND hwnd, UINT flags )
+{
+}
+
 static void nulldrv_SetFocus( HWND hwnd )
 {
 }
@@ -395,8 +400,9 @@ static void nulldrv_SetWindowText( HWND hwnd, LPCWSTR text )
 {
 }
 
-static void nulldrv_SysCommandSizeMove( HWND hwnd, WPARAM wparam )
+static BOOL nulldrv_SysCommandSizeMove( HWND hwnd, WPARAM wparam )
 {
+    return FALSE;
 }
 
 static LRESULT nulldrv_WindowMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
@@ -452,6 +458,7 @@ static const USER_DRIVER null_driver =
     nulldrv_MsgWaitForMultipleObjectsEx,
     nulldrv_ReleaseDC,
     nulldrv_ScrollDC,
+    nulldrv_SetCapture,
     nulldrv_SetFocus,
     nulldrv_SetParent,
     nulldrv_SetWindowPos,
@@ -676,6 +683,11 @@ static BOOL loaderdrv_ScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, con
     return load_driver()->pScrollDC( hdc, dx, dy, scroll, clip, hrgn, update );
 }
 
+static void loaderdrv_SetCapture( HWND hwnd, UINT flags )
+{
+    load_driver()->pSetCapture( hwnd, flags );
+}
+
 static void loaderdrv_SetFocus( HWND hwnd )
 {
     load_driver()->pSetFocus( hwnd );
@@ -714,9 +726,9 @@ static void loaderdrv_SetWindowText( HWND hwnd, LPCWSTR text )
     load_driver()->pSetWindowText( hwnd, text );
 }
 
-static void loaderdrv_SysCommandSizeMove( HWND hwnd, WPARAM wparam )
+static BOOL loaderdrv_SysCommandSizeMove( HWND hwnd, WPARAM wparam )
 {
-    load_driver()->pSysCommandSizeMove( hwnd, wparam );
+    return load_driver()->pSysCommandSizeMove( hwnd, wparam );
 }
 
 static LRESULT loaderdrv_WindowMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
@@ -772,6 +784,7 @@ static const USER_DRIVER lazy_load_driver =
     loaderdrv_MsgWaitForMultipleObjectsEx,
     loaderdrv_ReleaseDC,
     loaderdrv_ScrollDC,
+    loaderdrv_SetCapture,
     loaderdrv_SetFocus,
     loaderdrv_SetParent,
     loaderdrv_SetWindowPos,

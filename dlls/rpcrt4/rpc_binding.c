@@ -227,7 +227,7 @@ RPC_STATUS RPCRT4_ResolveBinding(RpcBinding* Binding, LPCSTR Endpoint)
 RPC_STATUS RPCRT4_SetBindingObject(RpcBinding* Binding, const UUID* ObjectUuid)
 {
   TRACE("(*RpcBinding == ^%p, UUID == %s)\n", Binding, debugstr_guid(ObjectUuid)); 
-  if (ObjectUuid) memcpy(&Binding->ObjectUuid, ObjectUuid, sizeof(UUID));
+  if (ObjectUuid) Binding->ObjectUuid = *ObjectUuid;
   else UuidCreateNil(&Binding->ObjectUuid);
   return RPC_S_OK;
 }
@@ -691,10 +691,10 @@ RPC_STATUS WINAPI RpcBindingInqObject( RPC_BINDING_HANDLE Binding, UUID* ObjectU
   RpcBinding* bind = (RpcBinding*)Binding;
 
   TRACE("(%p,%p) = %s\n", Binding, ObjectUuid, debugstr_guid(&bind->ObjectUuid));
-  memcpy(ObjectUuid, &bind->ObjectUuid, sizeof(UUID));
+  *ObjectUuid = bind->ObjectUuid;
   return RPC_S_OK;
 }
-  
+
 /***********************************************************************
  *             RpcBindingSetObject (RPCRT4.@)
  */
@@ -982,9 +982,9 @@ static RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc,
             AuthInfo->nt_identity->Password = RPCRT4_strndupAtoW((const char *)nt_identity->Password, nt_identity->PasswordLength);
         AuthInfo->nt_identity->PasswordLength = nt_identity->PasswordLength;
 
-        if (!AuthInfo->nt_identity->User ||
-            !AuthInfo->nt_identity->Domain ||
-            !AuthInfo->nt_identity->Password)
+        if ((nt_identity->User && !AuthInfo->nt_identity->User) ||
+            (nt_identity->Domain && !AuthInfo->nt_identity->Domain) ||
+            (nt_identity->Password && !AuthInfo->nt_identity->Password))
         {
             HeapFree(GetProcessHeap(), 0, AuthInfo->nt_identity->User);
             HeapFree(GetProcessHeap(), 0, AuthInfo->nt_identity->Domain);
@@ -1572,7 +1572,7 @@ RpcBindingSetAuthInfoExW( RPC_BINDING_HANDLE Binding, RPC_WSTR ServerPrincName, 
     if (r == RPC_S_OK)
     {
       new_auth_info->server_principal_name = RPCRT4_strdupW(ServerPrincName);
-      if (new_auth_info->server_principal_name)
+      if (!ServerPrincName || new_auth_info->server_principal_name)
       {
         if (bind->AuthInfo) RpcAuthInfo_Release(bind->AuthInfo);
         bind->AuthInfo = new_auth_info;

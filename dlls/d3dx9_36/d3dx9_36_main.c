@@ -22,6 +22,7 @@
 
 #include "config.h"
 #include "wine/port.h"
+#include "initguid.h"
 
 #include <stdarg.h>
 
@@ -55,7 +56,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 
 /***********************************************************************
  * D3DXCheckVersion
- * Checks wether we are compiling against the correct d3d and d3dx library.
+ * Checks whether we are compiling against the correct d3d and d3dx library.
  */
 BOOL WINAPI D3DXCheckVersion(UINT d3dsdkvers, UINT d3dxsdkvers)
 {

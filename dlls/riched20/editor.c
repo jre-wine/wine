@@ -114,7 +114,7 @@
   + EM_SETSEL
   + EM_SETSCROLLPOS 3.0
   - EM_SETTABSTOPS 3.0
-  - EM_SETTARGETDEVICE
+  - EM_SETTARGETDEVICE (partial)
   + EM_SETTEXTEX 3.0 (no rich text insertion handling, proper style?)
   - EM_SETTEXTMODE 2.0
   - EM_SETTYPOGRAPHYOPTIONS 3.0
@@ -245,7 +245,6 @@ static const WCHAR RichEdit50W[] = {'R', 'i', 'c', 'h', 'E', 'd', 'i', 't', '5',
 static const WCHAR REListBox20W[] = {'R','E','L','i','s','t','B','o','x','2','0','W', 0};
 static const WCHAR REComboBox20W[] = {'R','E','C','o','m','b','o','B','o','x','2','0','W', 0};
 static HCURSOR hLeft;
-static HCURSOR hBeam;
 
 int me_debug = 0;
 HANDLE me_heap = NULL;
@@ -336,12 +335,13 @@ static void ME_RTFCharAttrHook(RTF_Info *info)
       fmt.dwMask = CFM_BOLD | CFM_ITALIC | CFM_UNDERLINETYPE | CFM_STRIKEOUT | CFM_COLOR | CFM_BACKCOLOR | CFM_SIZE | CFM_WEIGHT;
       fmt.dwEffects = CFE_AUTOCOLOR | CFE_AUTOBACKCOLOR;
       fmt.yHeight = 12*20; /* 12pt */
-      fmt.wWeight = 400;
+      fmt.wWeight = FW_NORMAL;
       fmt.bUnderlineType = CFU_UNDERLINENONE;
       break;
     case rtfBold:
-      fmt.dwMask = CFM_BOLD;
-      fmt.dwEffects = info->rtfParam ? fmt.dwMask : 0;
+      fmt.dwMask = CFM_BOLD | CFM_WEIGHT;
+      fmt.dwEffects = info->rtfParam ? CFE_BOLD : 0;
+      fmt.wWeight = info->rtfParam ? FW_BOLD : FW_NORMAL;
       break;
     case rtfItalic:
       fmt.dwMask = CFM_ITALIC;
@@ -420,7 +420,7 @@ static void ME_RTFCharAttrHook(RTF_Info *info)
           fmt.szFaceName[sizeof(fmt.szFaceName)/sizeof(WCHAR)-1] = '\0';
           fmt.bCharSet = f->rtfFCharSet;
           fmt.dwMask = CFM_FACE | CFM_CHARSET;
-          fmt.bPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+          fmt.bPitchAndFamily = f->rtfFPitch | (f->rtfFFamily << 4);
         }
       }
       break;
@@ -452,10 +452,15 @@ static void ME_RTFParAttrHook(RTF_Info *info)
   switch(info->rtfMinor)
   {
   case rtfParDef: /* restores default paragraph attributes */
-    fmt.dwMask = PFM_ALIGNMENT | PFM_TABSTOPS | PFM_OFFSET | PFM_STARTINDENT;
+    fmt.dwMask = PFM_ALIGNMENT | PFM_BORDER | PFM_LINESPACING | PFM_TABSTOPS | PFM_OFFSET |
+        PFM_RIGHTINDENT | PFM_SPACEAFTER | PFM_SPACEBEFORE | PFM_STARTINDENT;
+    /* TODO: numbering, shading */
     fmt.wAlignment = PFA_LEFT;
     fmt.cTabCount = 0;
-    fmt.dxOffset = fmt.dxStartIndent = 0;
+    fmt.dxOffset = fmt.dxStartIndent = fmt.dxRightIndent = 0;
+    fmt.wBorderWidth = fmt.wBorders = 0;
+    fmt.bLineSpacingRule = 0;
+    fmt.dySpaceBefore = fmt.dySpaceAfter = 0;
     RTFFlushOutputBuffer(info);
     ME_GetParagraph(info->editor->pCursors[0].pRun)->member.para.bTable = FALSE;
     break;
@@ -471,14 +476,16 @@ static void ME_RTFParAttrHook(RTF_Info *info)
   }
   case rtfFirstIndent:
     ME_GetSelectionParaFormat(info->editor, &fmt);
-    fmt.dwMask = PFM_STARTINDENT | PFM_OFFSET;
-    fmt.dxStartIndent += info->rtfParam + fmt.dxOffset;
+    fmt.dwMask |= PFM_STARTINDENT | PFM_OFFSET;
+    fmt.dxStartIndent += info->rtfParam;
     fmt.dxOffset = -info->rtfParam;
     break;
   case rtfLeftIndent:
+    /* we assume rtfLeftIndent is always specified before rtfFirstIndent */
     ME_GetSelectionParaFormat(info->editor, &fmt);
-    fmt.dwMask = PFM_STARTINDENT;
-    fmt.dxStartIndent = -fmt.dxOffset + info->rtfParam;
+    fmt.dwMask |= PFM_STARTINDENT;
+    fmt.dxStartIndent = info->rtfParam;
+    fmt.dxOffset = 0;
     break;
   case rtfRightIndent:
     fmt.dwMask = PFM_RIGHTINDENT;
@@ -641,8 +648,7 @@ static void ME_RTFParAttrHook(RTF_Info *info)
   case rtfBorderWidth:
     ME_GetSelectionParaFormat(info->editor, &fmt);
     /* we assume that borders have been created before (RTF spec) */
-    fmt.wBorders &= ~0x70;
-    fmt.wBorders |= ((info->rtfParam / 15) & 7) << 8;
+    fmt.wBorderWidth |= ((info->rtfParam / 15) & 7) << 8;
     break;
   case rtfBorderSpace:
     ME_GetSelectionParaFormat(info->editor, &fmt);
@@ -692,7 +698,8 @@ static void ME_RTFTblAttrHook(RTF_Info *info)
   }
 }
 
-static BOOL ME_RTFInsertOleObject(RTF_Info *info, HENHMETAFILE h, const SIZEL* sz)
+static BOOL ME_RTFInsertOleObject(RTF_Info *info, HENHMETAFILE hemf, HBITMAP hbmp,
+                                  const SIZEL* sz)
 {
   LPOLEOBJECT         lpObject = NULL;
   LPSTORAGE           lpStorage = NULL;
@@ -705,11 +712,20 @@ static BOOL ME_RTFInsertOleObject(RTF_Info *info, HENHMETAFILE h, const SIZEL* s
   BOOL                ret = FALSE;
   DWORD               conn;
 
-  stgm.tymed = TYMED_ENHMF;
-  stgm.u.hEnhMetaFile = h;
+  if (hemf)
+  {
+      stgm.tymed = TYMED_ENHMF;
+      stgm.u.hEnhMetaFile = hemf;
+      fm.cfFormat = CF_ENHMETAFILE;
+  }
+  else if (hbmp)
+  {
+      stgm.tymed = TYMED_GDI;
+      stgm.u.hBitmap = hbmp;
+      fm.cfFormat = CF_BITMAP;
+  }
   stgm.pUnkForRelease = NULL;
 
-  fm.cfFormat = CF_ENHMETAFILE;
   fm.ptd = NULL;
   fm.dwAspect = DVASPECT_CONTENT;
   fm.lindex = -1;
@@ -769,6 +785,8 @@ static void ME_RTFReadPictGroup(RTF_Info *info)
   BYTE          val;
   METAFILEPICT  mfp;
   HENHMETAFILE  hemf;
+  HBITMAP       hbmp;
+  enum gfxkind {gfx_unknown = 0, gfx_enhmetafile, gfx_metafile, gfx_dib} gfx = gfx_unknown;
 
   RTFGetToken (info);
   if (info->rtfClass == rtfEOF)
@@ -778,6 +796,16 @@ static void ME_RTFReadPictGroup(RTF_Info *info)
   if (RTFCheckMM (info, rtfPictAttr, rtfWinMetafile))
   {
     mfp.mm = info->rtfParam;
+    gfx = gfx_metafile;
+  }
+  else if (RTFCheckMM (info, rtfPictAttr, rtfDevIndBitmap))
+  {
+    if (info->rtfParam != 0) FIXME("dibitmap should be 0 (%d)\n", info->rtfParam);
+    gfx = gfx_dib;
+  }
+  else if (RTFCheckMM (info, rtfPictAttr, rtfEmfBlip))
+  {
+    gfx = gfx_enhmetafile;
   }
   else
   {
@@ -800,9 +828,13 @@ static void ME_RTFReadPictGroup(RTF_Info *info)
       goto skip_group;
     }
     else if (RTFCheckMM (info, rtfPictAttr, rtfPicWid))
-      mfp.xExt = info->rtfParam;
+    {
+      if (gfx == gfx_metafile) mfp.xExt = info->rtfParam;
+    }
     else if (RTFCheckMM (info, rtfPictAttr, rtfPicHt))
-      mfp.yExt = info->rtfParam;
+    {
+      if (gfx == gfx_metafile) mfp.yExt = info->rtfParam;
+    }
     else if (RTFCheckMM (info, rtfPictAttr, rtfPicGoalWid))
       sz.cx = info->rtfParam;
     else if (RTFCheckMM (info, rtfPictAttr, rtfPicGoalHt))
@@ -838,8 +870,35 @@ static void ME_RTFReadPictGroup(RTF_Info *info)
   }
   if (flip) FIXME("wrong hex string\n");
 
-  if ((hemf = SetWinMetaFileBits(bufidx, buffer, NULL, &mfp)))
-    ME_RTFInsertOleObject(info, hemf, &sz);
+  switch (gfx)
+  {
+  case gfx_enhmetafile:
+    if ((hemf = SetEnhMetaFileBits(bufidx, buffer)))
+      ME_RTFInsertOleObject(info, hemf, NULL, &sz);
+    break;
+  case gfx_metafile:
+    if ((hemf = SetWinMetaFileBits(bufidx, buffer, NULL, &mfp)))
+        ME_RTFInsertOleObject(info, hemf, NULL, &sz);
+    break;
+  case gfx_dib:
+    {
+      BITMAPINFO* bi = (BITMAPINFO*)buffer;
+      HDC         hdc = GetDC(0);
+      unsigned    nc = bi->bmiHeader.biClrUsed;
+
+      /* not quite right, especially for bitfields type of compression */
+      if (!nc && bi->bmiHeader.biBitCount <= 8)
+        nc = 1 << bi->bmiHeader.biBitCount;
+      if ((hbmp = CreateDIBitmap(hdc, &bi->bmiHeader,
+                                 CBM_INIT, (char*)(bi + 1) + nc * sizeof(RGBQUAD),
+                                 bi, DIB_RGB_COLORS)))
+          ME_RTFInsertOleObject(info, NULL, hbmp, &sz);
+      ReleaseDC(0, hdc);
+    }
+    break;
+  default:
+    break;
+  }
   HeapFree(GetProcessHeap(), 0, buffer);
   RTFRouteToken (info);	/* feed "}" back to router */
   return;
@@ -898,7 +957,7 @@ static void ME_RTFReadHook(RTF_Info *info) {
       {
         case rtfBeginGroup:
           if (info->stackTop < maxStack) {
-            memcpy(&info->stack[info->stackTop].fmt, &info->style->fmt, sizeof(CHARFORMAT2W));
+            info->stack[info->stackTop].fmt = info->style->fmt;
             info->stack[info->stackTop].codePage = info->codePage;
             info->stack[info->stackTop].unicodeLength = info->unicodeLength;
           }
@@ -1470,12 +1529,15 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
   return FALSE;
 }
 
-static void ME_SetCursor(ME_TextEditor *editor, int x)
+static BOOL ME_SetCursor(ME_TextEditor *editor, int x)
 {
-    if (x < editor->selofs || editor->linesel)
+  if ((GetWindowLongW(editor->hWnd, GWL_STYLE) & ES_SELECTIONBAR) &&
+      (x < editor->selofs || editor->linesel))
+  {
       SetCursor(hLeft);
-    else
-      SetCursor(hBeam);
+      return TRUE;
+  }
+  return FALSE;
 }
 
 static BOOL ME_ShowContextMenu(ME_TextEditor *editor, int x, int y)
@@ -1538,6 +1600,7 @@ ME_TextEditor *ME_MakeEditor(HWND hWnd) {
   ed->nLastSelStart = ed->nLastSelEnd = 0;
   ed->pLastSelStartPara = ed->pLastSelEndPara = ME_FindItemFwd(ed->pBuffer->pFirst, diParagraph);
   ed->bRedraw = TRUE;
+  ed->bWordWrap = FALSE;
   ed->bHideSelection = FALSE;
   ed->nInvalidOfs = -1;
   ed->pfnWordBreak = NULL;
@@ -1650,7 +1713,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
       me_heap = HeapCreate (0, 0x10000, 0);
       if (!ME_RegisterEditorClass(hinstDLL)) return FALSE;
       hLeft = LoadCursorW(hinstDLL, MAKEINTRESOURCEW(OCR_REVERSE));
-      hBeam = LoadCursorW(NULL, MAKEINTRESOURCEW(IDC_IBEAM));
       LookupInit();
       break;
 
@@ -1849,7 +1911,6 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
   UNSUPPORTED_MSG(EM_SETLANGOPTIONS)
   UNSUPPORTED_MSG(EM_SETPALETTE)
   UNSUPPORTED_MSG(EM_SETTABSTOPS)
-  UNSUPPORTED_MSG(EM_SETTARGETDEVICE)
   UNSUPPORTED_MSG(EM_SETTYPOGRAPHYOPTIONS)
   UNSUPPORTED_MSG(EM_SETWORDBREAKPROCEX)
   UNSUPPORTED_MSG(WM_STYLECHANGING)
@@ -2767,7 +2828,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     ME_LButtonDown(editor, (short)LOWORD(lParam), (short)HIWORD(lParam));
     SetCapture(hWnd);
     ME_LinkNotify(editor,msg,wParam,lParam);
-    ME_SetCursor(editor, LOWORD(lParam));
+    if (!ME_SetCursor(editor, LOWORD(lParam))) goto do_default;
     break;
   case WM_MOUSEMOVE:
     if ((editor->nEventMask & ENM_MOUSEEVENTS) &&
@@ -2776,7 +2837,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     if (GetCapture() == hWnd)
       ME_MouseMove(editor, (short)LOWORD(lParam), (short)HIWORD(lParam));
     ME_LinkNotify(editor,msg,wParam,lParam);
-    ME_SetCursor(editor, LOWORD(lParam));
+    if (!ME_SetCursor(editor, LOWORD(lParam))) goto do_default;
     break;
   case WM_LBUTTONUP:
     if (GetCapture() == hWnd)
@@ -2784,9 +2845,14 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     if ((editor->nEventMask & ENM_MOUSEEVENTS) &&
         !ME_FilterEvent(editor, msg, &wParam, &lParam))
       return 0;
-    editor->linesel = 0;
-    ME_SetCursor(editor, LOWORD(lParam));
-    ME_LinkNotify(editor,msg,wParam,lParam);
+    else
+    {
+      BOOL ret;
+      editor->linesel = 0;
+      ret = ME_SetCursor(editor, LOWORD(lParam));
+      ME_LinkNotify(editor,msg,wParam,lParam);
+      if (!ret) goto do_default;
+    }
     break;
   case WM_LBUTTONDBLCLK:
     if ((editor->nEventMask & ENM_MOUSEEVENTS) &&
@@ -2909,7 +2975,10 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
       {
         ME_Style *style = ME_GetInsertStyle(editor, 0);
         ME_SaveTempStyle(editor);
-        ME_InsertTextFromCursor(editor, 0, &wstr, 1, style);
+        if (wstr == '\r' && (GetKeyState(VK_SHIFT) & 0x8000))
+          ME_InsertEndRowFromCursor(editor, 0);
+        else
+          ME_InsertTextFromCursor(editor, 0, &wstr, 1, style);
         ME_ReleaseStyle(style);
         ME_CommitUndo(editor);
       }
@@ -3133,6 +3202,18 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     ME_RewrapRepaint(editor);
     return 0;
   }
+  case EM_SETTARGETDEVICE:
+    if (wParam == 0)
+    {
+        switch (lParam)
+        {
+        case 0: editor->bWordWrap = TRUE; break;
+        case 1: editor->bWordWrap = FALSE; break;
+        default: FIXME("Unknown option to EM_SETTARGETDEVICE(NULL,%ld)\n", lParam);
+        }
+    }
+    else FIXME("Unsupported yet non NULL device in EM_SETTARGETDEVICE\n");
+    break;
   default:
   do_default:
     return DefWindowProcW(hWnd, msg, wParam, lParam);
@@ -3321,7 +3402,7 @@ static BOOL ME_RegisterEditorClass(HINSTANCE hInstance)
   wcW.cbWndExtra = sizeof(ME_TextEditor *);
   wcW.hInstance = NULL; /* hInstance would register DLL-local class */
   wcW.hIcon = NULL;
-  wcW.hCursor = hBeam;
+  wcW.hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(IDC_IBEAM));
   wcW.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
   wcW.lpszMenuName = NULL;
 

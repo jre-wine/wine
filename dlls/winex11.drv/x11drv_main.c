@@ -131,6 +131,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_ICC_PROFILE",
     "_MOTIF_WM_HINTS",
     "_KDE_NET_WM_SYSTEM_TRAY_WINDOW_FOR",
+    "_NET_SUPPORTED",
     "_NET_SYSTEM_TRAY_OPCODE",
     "_NET_SYSTEM_TRAY_S0",
     "_NET_WM_MOVERESIZE",
@@ -616,7 +617,7 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
 {
     struct x11drv_thread_data *data;
 
-    if (!(data = HeapAlloc( GetProcessHeap(), 0, sizeof(*data) )))
+    if (!(data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) )))
     {
         ERR( "could not create data\n" );
         ExitProcess(1);
@@ -650,18 +651,10 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     if (TRACE_ON(synchronous)) XSynchronize( data->display, True );
     wine_tsx11_unlock();
 
-    if (!use_xim)
-        data->xim = NULL;
-    else if (!(data->xim = X11DRV_SetupXIM( data->display, input_style )))
+    if (use_xim && !(data->xim = X11DRV_SetupXIM( data->display, input_style )))
         WARN("Input Method is not available\n");
 
     set_queue_display_fd( data->display );
-    data->process_event_count = 0;
-    data->cursor = None;
-    data->cursor_window = None;
-    data->grab_window = None;
-    data->last_focus = 0;
-    data->selection_wnd = 0;
     TlsSetValue( thread_data_tls_index, data );
     X11DRV_SetCursor( NULL );
     return data;

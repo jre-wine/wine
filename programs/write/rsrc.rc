@@ -22,10 +22,12 @@
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 
+#include "De.rc"
 #include "En.rc"
 #include "Fr.rc"
 #include "Ko.rc"
 #include "Nl.rc"
 #include "No.rc"
 #include "Pl.rc"
+#include "Ro.rc"
 #include "Ru.rc"

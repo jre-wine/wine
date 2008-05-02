@@ -52,12 +52,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 #define MPEG_AUDIO_HEADER 1
 #define MPEG_NO_HEADER 0
 
-
 typedef struct MPEGSplitterImpl
 {
     ParserImpl Parser;
     IMediaSample *pCurrentSample;
     LONGLONG EndOfFile;
+    DWORD dwSampleSize, dwLength;
+    FLOAT fSamplesPerSec;
 } MPEGSplitterImpl;
 
 static int MPEGSplitter_head_check(const BYTE *header)
@@ -169,12 +170,12 @@ static HRESULT MPEGSplitter_process_sample(LPVOID iface, IMediaSample * pSample)
             {
                 REFERENCE_TIME tMPEGStart, tMPEGStop;
 
-                pOutputPin->dwSamplesProcessed = (BYTES_FROM_MEDIATIME(tStart)+used_bytes) / pOutputPin->dwSampleSize;
+                pOutputPin->dwSamplesProcessed = (BYTES_FROM_MEDIATIME(tStart)+used_bytes) / This->dwSampleSize;
 
                 tMPEGStart = (tStart + MEDIATIME_FROM_BYTES(used_bytes-bytes_written)) /
-                             (pOutputPin->fSamplesPerSec*pOutputPin->dwSampleSize);
+                             (This->fSamplesPerSec*This->dwSampleSize);
                 tMPEGStop  = (tStart + MEDIATIME_FROM_BYTES(used_bytes)) /
-                             (pOutputPin->fSamplesPerSec*pOutputPin->dwSampleSize);
+                             (This->fSamplesPerSec*This->dwSampleSize);
 
                 /* If the start of the sample has a valid MPEG header, it's a
                  * sync point */
@@ -219,12 +220,12 @@ static HRESULT MPEGSplitter_process_sample(LPVOID iface, IMediaSample * pSample)
             {
                 REFERENCE_TIME tMPEGStart, tMPEGStop;
 
-                pOutputPin->dwSamplesProcessed = (BYTES_FROM_MEDIATIME(tStart)+used_bytes) / pOutputPin->dwSampleSize;
+                pOutputPin->dwSamplesProcessed = (BYTES_FROM_MEDIATIME(tStart)+used_bytes) / This->dwSampleSize;
 
                 tMPEGStart = (tStart + MEDIATIME_FROM_BYTES(used_bytes-bytes_written)) /
-                             (pOutputPin->fSamplesPerSec*pOutputPin->dwSampleSize);
+                             (This->fSamplesPerSec*This->dwSampleSize);
                 tMPEGStop  = (tStart + MEDIATIME_FROM_BYTES(used_bytes)) /
-                             (pOutputPin->fSamplesPerSec*pOutputPin->dwSampleSize);
+                             (This->fSamplesPerSec*This->dwSampleSize);
 
                 if (MPEGSplitter_head_check(pbDstStream) == MPEG_AUDIO_HEADER)
                     IMediaSample_SetSyncPoint(This->pCurrentSample, TRUE);
@@ -317,9 +318,9 @@ static HRESULT MPEGSplitter_init_audio(MPEGSplitterImpl *This, const BYTE *heade
     ppiOutput->pFilter = (IBaseFilter*)This;
     wsprintfW(ppiOutput->achName, wszAudioStream);
 
-    memcpy(&pamt->formattype, &FORMAT_WaveFormatEx, sizeof(GUID));
-    memcpy(&pamt->majortype, &MEDIATYPE_Audio, sizeof(GUID));
-    memcpy(&pamt->subtype, &MEDIASUBTYPE_MPEG1AudioPayload, sizeof(GUID));
+    pamt->formattype = FORMAT_WaveFormatEx;
+    pamt->majortype = MEDIATYPE_Audio;
+    pamt->subtype = MEDIASUBTYPE_MPEG1AudioPayload;
 
     pamt->lSampleSize = 0;
     pamt->bFixedSizeSamples = TRUE;
@@ -336,7 +337,6 @@ static HRESULT MPEGSplitter_init_audio(MPEGSplitterImpl *This, const BYTE *heade
     mode          =   ((header[3]>>6)&0x3);
     mode_ext      =   ((header[3]>>4)&0x3);
     emphasis      =   ((header[3]>>0)&0x3);
-
 
     pamt->cbFormat = ((layer==3)? sizeof(MPEGLAYER3WAVEFORMAT) :
                                   sizeof(MPEG1WAVEFORMAT));
@@ -431,7 +431,7 @@ static HRESULT MPEGSplitter_pre_connect(IPin *iface, IPin *pConnectPin)
     ALLOCATOR_PROPERTIES props;
     HRESULT hr;
     LONGLONG pos = 0; /* in bytes */
-    BYTE header[4];
+    BYTE header[10];
     int streamtype = 0;
     LONGLONG total, avail;
     AM_MEDIA_TYPE amt;
@@ -440,15 +440,39 @@ static HRESULT MPEGSplitter_pre_connect(IPin *iface, IPin *pConnectPin)
     IAsyncReader_Length(pPin->pReader, &total, &avail);
     This->EndOfFile = total;
 
-    hr = IAsyncReader_SyncRead(pPin->pReader, pos, 4, (LPVOID)&header[0]);
+    hr = IAsyncReader_SyncRead(pPin->pReader, pos, 4, header);
     if (SUCCEEDED(hr))
         pos += 4;
 
+    /* Skip ID3 v2 tag, if any */
+    if (SUCCEEDED(hr) && !strncmp("ID3", (char*)header, 3))
+    do {
+        UINT length;
+        hr = IAsyncReader_SyncRead(pPin->pReader, pos, 6, header + 4);
+        if (FAILED(hr))
+            break;
+        pos += 6;
+        TRACE("Found ID3 v2.%d.%d\n", header[3], header[4]);
+        length  = (header[6] & 0x7F) << 21;
+        length += (header[7] & 0x7F) << 14;
+        length += (header[8] & 0x7F) << 7;
+        length += (header[9] & 0x7F);
+        TRACE("Length: %u\n", length);
+        pos += length;
+
+        /* Read the real header for the mpeg splitter */
+        hr = IAsyncReader_SyncRead(pPin->pReader, pos, 4, header);
+        if (SUCCEEDED(hr))
+            pos += 4;
+        TRACE("%x:%x:%x:%x\n", header[0], header[1], header[2], header[3]);
+    } while (0);
+
     while(SUCCEEDED(hr) && !(streamtype=MPEGSplitter_head_check(header)))
     {
+        TRACE("%x:%x:%x:%x\n", header[0], header[1], header[2], header[3]);
         /* No valid header yet; shift by a byte and check again */
         memcpy(header, header+1, 3);
-        hr = IAsyncReader_SyncRead(pPin->pReader, pos++, 1, (LPVOID)&header[3]);
+        hr = IAsyncReader_SyncRead(pPin->pReader, pos++, 1, header + 3);
     }
     if (FAILED(hr))
         return hr;
@@ -467,12 +491,10 @@ static HRESULT MPEGSplitter_pre_connect(IPin *iface, IPin *pConnectPin)
                 props.cbBuffer = 0x4000 / format->nBlockAlign *
                                  format->nBlockAlign;
                 props.cBuffers = 1;
-
-                hr = Parser_AddPin(&(This->Parser), &piOutput, &props, &amt,
-                                   (float)format->nAvgBytesPerSec /
-                                    (float)format->nBlockAlign,
-                                   format->nBlockAlign,
-                                   total);
+                This->fSamplesPerSec = (float)format->nAvgBytesPerSec / (float)format->nBlockAlign;
+                This->dwSampleSize = format->nBlockAlign;
+                This->dwLength = total;
+                hr = Parser_AddPin(&(This->Parser), &piOutput, &props, &amt);
             }
 
             if (FAILED(hr))

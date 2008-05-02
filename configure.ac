@@ -14,6 +14,8 @@ dnl **** Command-line arguments ****
 
 AC_ARG_ENABLE(win16, AS_HELP_STRING([--disable-win16],[do not include Win16 support]))
 AC_ARG_ENABLE(win64, AS_HELP_STRING([--enable-win64],[build a Win64 emulator on AMD64 (won't run Win32 binaries)]))
+AC_ARG_ENABLE(maintainer-mode, AS_HELP_STRING([--enable-maintainer-mode],[enable maintainer-specific build rules]),
+                               ,[AC_SUBST([MAINTAINER_MODE],[\#])])
 
 AC_ARG_WITH(alsa,      AS_HELP_STRING([--without-alsa],[do not use the Alsa sound support]),
             [if test "x$withval" = "xno"; then ac_cv_header_sys_asoundlib_h=no; ac_cv_header_alsa_asoundlib_h=no; fi])
@@ -186,6 +188,14 @@ AC_SUBST(LINTFLAGS)
 dnl Check for various programs
 AC_CHECK_PROGS(FONTFORGE, fontforge, false)
 AC_CHECK_PROGS(PKG_CONFIG, pkg-config, false)
+AC_CHECK_PROGS(RSVG, rsvg, false)
+AC_CHECK_PROGS(ICOTOOL, icotool, false)
+
+if test "${enable_maintainer_mode+set}" = set
+then
+  if test "$RSVG" = "false"; then WINE_WARNING([rsvg is missing, icons can't be rebuilt.]); fi
+  if test "$ICOTOOL" = "false"; then WINE_WARNING([icotool is missing, icons can't be rebuilt.]); fi
+fi
 
 case $host_cpu in
   *i[[3456789]]86*)
@@ -1727,6 +1737,7 @@ AC_CONFIG_FILES([dlls/d3dx9_33/Makefile])
 AC_CONFIG_FILES([dlls/d3dx9_34/Makefile])
 AC_CONFIG_FILES([dlls/d3dx9_35/Makefile])
 AC_CONFIG_FILES([dlls/d3dx9_36/Makefile])
+AC_CONFIG_FILES([dlls/d3dx9_36/tests/Makefile])
 AC_CONFIG_FILES([dlls/d3dxof/Makefile])
 AC_CONFIG_FILES([dlls/dbghelp/Makefile])
 AC_CONFIG_FILES([dlls/dciman32/Makefile])
@@ -1765,6 +1776,7 @@ AC_CONFIG_FILES([dlls/dxerr8/Makefile])
 AC_CONFIG_FILES([dlls/dxerr9/Makefile])
 AC_CONFIG_FILES([dlls/dxguid/Makefile])
 AC_CONFIG_FILES([dlls/faultrep/Makefile])
+AC_CONFIG_FILES([dlls/fusion/Makefile])
 AC_CONFIG_FILES([dlls/gdi32/Makefile])
 AC_CONFIG_FILES([dlls/gdi32/tests/Makefile])
 AC_CONFIG_FILES([dlls/gdiplus/Makefile])
@@ -1797,6 +1809,7 @@ AC_CONFIG_FILES([dlls/iphlpapi/tests/Makefile])
 AC_CONFIG_FILES([dlls/itircl/Makefile])
 AC_CONFIG_FILES([dlls/itss/Makefile])
 AC_CONFIG_FILES([dlls/itss/tests/Makefile])
+AC_CONFIG_FILES([dlls/jscript/Makefile])
 AC_CONFIG_FILES([dlls/kernel32/Makefile])
 AC_CONFIG_FILES([dlls/kernel32/tests/Makefile])
 AC_CONFIG_FILES([dlls/localspl/Makefile])
@@ -2029,6 +2042,7 @@ AC_CONFIG_FILES([programs/net/Makefile])
 AC_CONFIG_FILES([programs/notepad/Makefile])
 AC_CONFIG_FILES([programs/oleview/Makefile])
 AC_CONFIG_FILES([programs/progman/Makefile])
+AC_CONFIG_FILES([programs/reg/Makefile])
 AC_CONFIG_FILES([programs/regedit/Makefile])
 AC_CONFIG_FILES([programs/regsvr32/Makefile])
 AC_CONFIG_FILES([programs/rpcss/Makefile])

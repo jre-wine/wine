@@ -44,6 +44,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
+typedef struct StreamData
+{
+    DWORD dwSampleSize;
+    FLOAT fSamplesPerSec;
+    DWORD dwLength;
+} StreamData;
+
 typedef struct AVISplitterImpl
 {
     ParserImpl Parser;
@@ -52,6 +59,7 @@ typedef struct AVISplitterImpl
     LONGLONG CurrentChunkOffset; /* in media time */
     LONGLONG EndOfFile;
     AVIMAINHEADER AviHeader;
+    StreamData *streams;
 } AVISplitterImpl;
 
 static HRESULT AVISplitter_NextChunk(LONGLONG * pllCurrentChunkOffset, RIFFCHUNK * pCurrentChunk, const REFERENCE_TIME * tStart, const REFERENCE_TIME * tStop, const BYTE * pbSrcStream, int inner)
@@ -241,6 +249,7 @@ static HRESULT AVISplitter_Sample(LPVOID iface, IMediaSample * pSample)
             if (SUCCEEDED(hr))
             {
                 REFERENCE_TIME tAviStart, tAviStop;
+                StreamData *stream = This->streams + streamId;
 
                 /* FIXME: hack */
                 if (pOutputPin->dwSamplesProcessed == 0)
@@ -250,14 +259,14 @@ static HRESULT AVISplitter_Sample(LPVOID iface, IMediaSample * pSample)
 
                 pOutputPin->dwSamplesProcessed++;
 
-                if (pOutputPin->dwSampleSize)
-                    tAviStart = (LONGLONG)ceil(10000000.0 * (float)(pOutputPin->dwSamplesProcessed - 1) * (float)IMediaSample_GetActualDataLength(This->pCurrentSample) / ((float)pOutputPin->dwSampleSize * pOutputPin->fSamplesPerSec));
+                if (stream->dwSampleSize)
+                    tAviStart = (LONGLONG)ceil(10000000.0 * (float)(pOutputPin->dwSamplesProcessed - 1) * (float)IMediaSample_GetActualDataLength(This->pCurrentSample) / ((float)stream->dwSampleSize * stream->fSamplesPerSec));
                 else
-                    tAviStart = (LONGLONG)ceil(10000000.0 * (float)(pOutputPin->dwSamplesProcessed - 1) / (float)pOutputPin->fSamplesPerSec);
-                if (pOutputPin->dwSampleSize)
-                    tAviStop = (LONGLONG)ceil(10000000.0 * (float)pOutputPin->dwSamplesProcessed * (float)IMediaSample_GetActualDataLength(This->pCurrentSample) / ((float)pOutputPin->dwSampleSize * pOutputPin->fSamplesPerSec));
+                    tAviStart = (LONGLONG)ceil(10000000.0 * (float)(pOutputPin->dwSamplesProcessed - 1) / (float)stream->fSamplesPerSec);
+                if (stream->dwSampleSize)
+                    tAviStop = (LONGLONG)ceil(10000000.0 * (float)pOutputPin->dwSamplesProcessed * (float)IMediaSample_GetActualDataLength(This->pCurrentSample) / ((float)stream->dwSampleSize * stream->fSamplesPerSec));
                 else
-                    tAviStop = (LONGLONG)ceil(10000000.0 * (float)pOutputPin->dwSamplesProcessed / (float)pOutputPin->fSamplesPerSec);
+                    tAviStop = (LONGLONG)ceil(10000000.0 * (float)pOutputPin->dwSamplesProcessed / (float)stream->fSamplesPerSec);
 
                 IMediaSample_SetTime(This->pCurrentSample, &tAviStart, &tAviStop);
 
@@ -337,6 +346,7 @@ static HRESULT AVISplitter_ProcessStreamList(AVISplitterImpl * This, const BYTE 
     DWORD dwLength = 0;
     ALLOCATOR_PROPERTIES props;
     static const WCHAR wszStreamTemplate[] = {'S','t','r','e','a','m',' ','%','0','2','d',0};
+    StreamData *stream;
 
     props.cbAlign = 1;
     props.cbPrefix = 0;
@@ -365,19 +375,19 @@ static HRESULT AVISplitter_ProcessStreamList(AVISplitterImpl * This, const BYTE 
                 switch (pStrHdr->fccType)
                 {
                 case streamtypeVIDEO:
-                    memcpy(&amt.formattype, &FORMAT_VideoInfo, sizeof(GUID));
+                    amt.formattype = FORMAT_VideoInfo;
                     amt.pbFormat = NULL;
                     amt.cbFormat = 0;
                     break;
                 case streamtypeAUDIO:
-                    memcpy(&amt.formattype, &FORMAT_WaveFormatEx, sizeof(GUID));
+                    amt.formattype = FORMAT_WaveFormatEx;
                     break;
                 default:
-                    memcpy(&amt.formattype, &FORMAT_None, sizeof(GUID));
+                    amt.formattype = FORMAT_None;
                 }
-                memcpy(&amt.majortype, &MEDIATYPE_Video, sizeof(GUID));
+                amt.majortype = MEDIATYPE_Video;
                 amt.majortype.Data1 = pStrHdr->fccType;
-                memcpy(&amt.subtype, &MEDIATYPE_Video, sizeof(GUID));
+                amt.subtype = MEDIATYPE_Video;
                 amt.subtype.Data1 = pStrHdr->fccHandler;
                 TRACE("Subtype FCC: %.04s\n", (LPCSTR)&pStrHdr->fccHandler);
                 amt.lSampleSize = pStrHdr->dwSampleSize;
@@ -448,7 +458,7 @@ static HRESULT AVISplitter_ProcessStreamList(AVISplitterImpl * This, const BYTE 
 
     if (IsEqualGUID(&amt.formattype, &FORMAT_WaveFormatEx))
     {
-        memcpy(&amt.subtype, &MEDIATYPE_Video, sizeof(GUID));
+        amt.subtype = MEDIATYPE_Video;
         amt.subtype.Data1 = ((WAVEFORMATEX *)amt.pbFormat)->wFormatTag;
     }
 
@@ -456,8 +466,13 @@ static HRESULT AVISplitter_ProcessStreamList(AVISplitterImpl * This, const BYTE 
     TRACE("fSamplesPerSec = %f\n", (double)fSamplesPerSec);
     TRACE("dwSampleSize = %x\n", dwSampleSize);
     TRACE("dwLength = %x\n", dwLength);
+    This->streams = CoTaskMemRealloc(This->streams, sizeof(StreamData) * (This->Parser.cStreams+1));
+    stream = This->streams + This->Parser.cStreams;
+    stream->fSamplesPerSec = fSamplesPerSec;
+    stream->dwSampleSize = dwSampleSize;
+    stream->dwLength = dwLength; /* TODO: Use this for mediaseeking */
 
-    hr = Parser_AddPin(&(This->Parser), &piOutput, &props, &amt, fSamplesPerSec, dwSampleSize, dwLength);
+    hr = Parser_AddPin(&(This->Parser), &piOutput, &props, &amt);
 
     return hr;
 }
@@ -605,6 +620,7 @@ HRESULT AVISplitter_create(IUnknown * pUnkOuter, LPVOID * ppv)
     This = CoTaskMemAlloc(sizeof(AVISplitterImpl));
 
     This->pCurrentSample = NULL;
+    This->streams = NULL;
 
     hr = Parser_Create(&(This->Parser), &CLSID_AviSplitter, AVISplitter_Sample, AVISplitter_QueryAccept, AVISplitter_InputPin_PreConnect, AVISplitter_Cleanup);
 

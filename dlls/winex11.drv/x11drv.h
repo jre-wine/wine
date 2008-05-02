@@ -499,7 +499,7 @@ struct x11drv_escape_set_drawable
 struct x11drv_thread_data
 {
     Display *display;
-    int      process_event_count;  /* recursion count for event processing */
+    XEvent  *current_event;        /* event currently being processed */
     Cursor   cursor;               /* current cursor */
     Window   cursor_window;        /* current window that contains the cursor */
     Window   grab_window;          /* window that currently grabs the mouse */
@@ -567,6 +567,7 @@ enum x11drv_atoms
     XATOM__ICC_PROFILE,
     XATOM__MOTIF_WM_HINTS,
     XATOM__KDE_NET_WM_SYSTEM_TRAY_WINDOW_FOR,
+    XATOM__NET_SUPPORTED,
     XATOM__NET_SYSTEM_TRAY_OPCODE,
     XATOM__NET_SYSTEM_TRAY_S0,
     XATOM__NET_WM_MOVERESIZE,
@@ -753,9 +754,6 @@ extern void X11DRV_DDHAL_SwitchMode(DWORD dwModeIndex, LPVOID fb_addr, LPVIDMEM 
 
 /* FIXME: private functions imported from user32 */
 extern LRESULT HOOK_CallHooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode );
-extern BOOL WINPOS_ShowIconTitle( HWND hwnd, BOOL bShow );
-extern void WINPOS_GetMinMaxInfo( HWND hwnd, POINT *maxSize, POINT *maxPos, POINT *minTrack,
-                                  POINT *maxTrack );
 extern void WIN_invalidate_dce( HWND hwnd, const RECT *rect );
 
 #endif  /* __WINE_X11DRV_H */

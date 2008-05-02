@@ -25,7 +25,7 @@
 #include "objbase.h"
 
 #define COBJMACROS
-#include "bits.h"
+#include "bits1_5.h"
 
 #include <string.h>
 #include "wine/list.h"
@@ -33,7 +33,7 @@
 /* Background copy job vtbl and related data */
 typedef struct
 {
-    const IBackgroundCopyJobVtbl *lpVtbl;
+    const IBackgroundCopyJob2Vtbl *lpVtbl;
     LONG ref;
     LPWSTR displayName;
     BG_JOB_TYPE type;
@@ -41,6 +41,8 @@ typedef struct
     struct list files;
     BG_JOB_PROGRESS jobProgress;
     BG_JOB_STATE state;
+    /* Protects file list, and progress */
+    CRITICAL_SECTION cs;
     struct list entryFromQmgr;
 } BackgroundCopyJobImpl;
 
@@ -71,14 +73,18 @@ typedef struct
     LONG ref;
     BG_FILE_INFO info;
     BG_FILE_PROGRESS fileProgress;
+    WCHAR tempFileName[MAX_PATH];
     struct list entryFromJob;
+    BackgroundCopyJobImpl *owner;
 } BackgroundCopyFileImpl;
 
 /* Background copy manager vtbl and related data */
 typedef struct
 {
     const IBackgroundCopyManagerVtbl *lpVtbl;
+    /* Protects job list, job states, and jobEvent  */
     CRITICAL_SECTION cs;
+    HANDLE jobEvent;
     struct list jobs;
 } BackgroundCopyManagerImpl;
 
@@ -87,17 +93,23 @@ typedef struct
     const IClassFactoryVtbl *lpVtbl;
 } ClassFactoryImpl;
 
+extern HANDLE stop_event;
 extern ClassFactoryImpl BITS_ClassFactory;
+extern BackgroundCopyManagerImpl globalMgr;
 
 HRESULT BackgroundCopyManagerConstructor(IUnknown *pUnkOuter, LPVOID *ppObj);
 HRESULT BackgroundCopyJobConstructor(LPCWSTR displayName, BG_JOB_TYPE type,
                                      GUID *pJobId, LPVOID *ppObj);
 HRESULT EnumBackgroundCopyJobsConstructor(LPVOID *ppObj,
                                           IBackgroundCopyManager* copyManager);
-HRESULT BackgroundCopyFileConstructor(LPCWSTR remoteName,
-                                      LPCWSTR localName, LPVOID *ppObj);
+HRESULT BackgroundCopyFileConstructor(BackgroundCopyJobImpl *owner,
+                                      LPCWSTR remoteName, LPCWSTR localName,
+                                      LPVOID *ppObj);
 HRESULT EnumBackgroundCopyFilesConstructor(LPVOID *ppObj,
-                                           IBackgroundCopyJob* copyJob);
+                                           IBackgroundCopyJob2 *copyJob);
+DWORD WINAPI fileTransfer(void *param);
+void processJob(BackgroundCopyJobImpl *job);
+BOOL processFile(BackgroundCopyFileImpl *file, BackgroundCopyJobImpl *job);
 
 /* Little helper functions */
 static inline char *
@@ -106,6 +118,21 @@ qmgr_strdup(const char *s)
     size_t n = strlen(s) + 1;
     char *d = HeapAlloc(GetProcessHeap(), 0, n);
     return d ? memcpy(d, s, n) : NULL;
+}
+
+static inline BOOL
+transitionJobState(BackgroundCopyJobImpl *job, BG_JOB_STATE fromState,
+                   BG_JOB_STATE toState)
+{
+    BOOL rv = FALSE;
+    EnterCriticalSection(&globalMgr.cs);
+    if (job->state == fromState)
+    {
+        job->state = toState;
+        rv = TRUE;
+    }
+    LeaveCriticalSection(&globalMgr.cs);
+    return rv;
 }
 
 #endif /* __QMGR_H__ */

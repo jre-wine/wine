@@ -28,14 +28,16 @@
 #include "wine/test.h"
 
 static HMODULE secdll, crypt32dll;
-static SECURITY_STATUS (SEC_ENTRY * pAcquireCredentialsHandleA)(SEC_CHAR*, SEC_CHAR*,
-                            ULONG, PLUID, PVOID, SEC_GET_KEY_FN, PVOID, PCredHandle, PTimeStamp);
+
+static ACQUIRE_CREDENTIALS_HANDLE_FN_A pAcquireCredentialsHandleA;
+static FREE_CREDENTIALS_HANDLE_FN pFreeCredentialsHandle;
+static QUERY_CREDENTIALS_ATTRIBUTES_FN_A pQueryCredentialsAttributesA;
+
 static PCCERT_CONTEXT (WINAPI *pCertCreateCertificateContext)(DWORD,const BYTE*,DWORD);
 static BOOL (WINAPI *pCertFreeCertificateContext)(PCCERT_CONTEXT);
 static BOOL (WINAPI *pCertSetCertificateContextProperty)(PCCERT_CONTEXT,DWORD,DWORD,const void*);
-static SECURITY_STATUS (SEC_ENTRY * pFreeCredentialsHandle)(PCredHandle);
 
-static BOOL (WINAPI * pCryptAcquireContextW)(HCRYPTPROV*, LPCWSTR, LPCWSTR, DWORD, DWORD);
+static BOOL (WINAPI *pCryptAcquireContextW)(HCRYPTPROV*, LPCWSTR, LPCWSTR, DWORD, DWORD);
 static BOOL (WINAPI *pCryptDestroyKey)(HCRYPTKEY);
 static BOOL (WINAPI *pCryptImportKey)(HCRYPTPROV,CONST BYTE*,DWORD,HCRYPTKEY,DWORD,HCRYPTKEY*);
 static BOOL (WINAPI *pCryptReleaseContext)(HCRYPTPROV,ULONG_PTR);
@@ -105,12 +107,13 @@ static const BYTE selfSignedCert[] = {
 
 static void InitFunctionPtrs(void)
 {
-    HMODULE advapi32dll = GetModuleHandleA("advapi32.dll");
+    HMODULE advapi32dll;
 
     crypt32dll = LoadLibraryA("crypt32.dll");
     secdll = LoadLibraryA("secur32.dll");
     if(!secdll)
         secdll = LoadLibraryA("security.dll");
+    advapi32dll = GetModuleHandleA("advapi32.dll");
 
 #define GET_PROC(h, func)  p ## func = (void*)GetProcAddress(h, #func)
 
@@ -118,6 +121,7 @@ static void InitFunctionPtrs(void)
     {
         GET_PROC(secdll, AcquireCredentialsHandleA);
         GET_PROC(secdll, FreeCredentialsHandle);
+        GET_PROC(secdll, QueryCredentialsAttributesA);
     }
 
     GET_PROC(advapi32dll, CryptAcquireContextW);
@@ -127,8 +131,21 @@ static void InitFunctionPtrs(void)
 
     GET_PROC(crypt32dll, CertFreeCertificateContext);
     GET_PROC(crypt32dll, CertSetCertificateContextProperty);
+    GET_PROC(crypt32dll, CertCreateCertificateContext);
 
 #undef GET_PROC
+}
+
+static void test_strength(PCredHandle handle)
+{
+    SecPkgCred_CipherStrengths strength = {-1,-1};
+    SECURITY_STATUS st;
+
+    st = pQueryCredentialsAttributesA(handle, SECPKG_ATTR_CIPHER_STRENGTHS, &strength);
+    ok(st == SEC_E_OK, "QueryCredentialsAttributesA failed: %u\n", GetLastError());
+    ok(strength.dwMinimumCipherStrength, "dwMinimumCipherStrength not changed\n");
+    ok(strength.dwMaximumCipherStrength, "dwMaximumCipherStrength not changed\n");
+    trace("strength %d - %d\n", strength.dwMinimumCipherStrength, strength.dwMaximumCipherStrength);
 }
 
 static void testAcquireSecurityContext(void)
@@ -344,6 +361,7 @@ static void testAcquireSecurityContext(void)
         st = pAcquireCredentialsHandleA(NULL, unisp_name_a, SECPKG_CRED_INBOUND,
          NULL, &schanCred, NULL, NULL, &cred, NULL);
         ok(st == SEC_E_OK, "AcquireCredentialsHandleA failed: %08x\n", st);
+        test_strength(&cred);
         pFreeCredentialsHandle(&cred);
 
         /* How about more than one cert? */

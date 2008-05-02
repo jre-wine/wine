@@ -42,23 +42,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 #define SWP_AGG_NOPOSCHANGE \
     (SWP_NOSIZE | SWP_NOMOVE | SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE | SWP_NOZORDER)
 
-#define SWP_EX_NOCOPY       0x0001
-#define SWP_EX_PAINTSELF    0x0002
-#define SWP_EX_NONCLIENT    0x0004
-
-#define HAS_THICKFRAME(style) \
-    (((style) & WS_THICKFRAME) && \
-     !(((style) & (WS_DLGFRAME|WS_BORDER)) == WS_DLGFRAME))
-
-#define ON_LEFT_BORDER(hit) \
- (((hit) == HTLEFT) || ((hit) == HTTOPLEFT) || ((hit) == HTBOTTOMLEFT))
-#define ON_RIGHT_BORDER(hit) \
- (((hit) == HTRIGHT) || ((hit) == HTTOPRIGHT) || ((hit) == HTBOTTOMRIGHT))
-#define ON_TOP_BORDER(hit) \
- (((hit) == HTTOP) || ((hit) == HTTOPLEFT) || ((hit) == HTTOPRIGHT))
-#define ON_BOTTOM_BORDER(hit) \
- (((hit) == HTBOTTOM) || ((hit) == HTBOTTOMLEFT) || ((hit) == HTBOTTOMRIGHT))
-
 #define _NET_WM_MOVERESIZE_SIZE_TOPLEFT      0
 #define _NET_WM_MOVERESIZE_SIZE_TOP          1
 #define _NET_WM_MOVERESIZE_SIZE_TOPRIGHT     2
@@ -85,7 +68,7 @@ void X11DRV_Expose( HWND hwnd, XEvent *xev )
     XExposeEvent *event = &xev->xexpose;
     RECT rect;
     struct x11drv_win_data *data;
-    int flags = RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN;
+    int flags = RDW_INVALIDATE | RDW_ERASE;
 
     TRACE( "win %p (%lx) %d,%d %dx%d\n",
            hwnd, event->window, event->x, event->y, event->width, event->height );
@@ -106,22 +89,24 @@ void X11DRV_Expose( HWND hwnd, XEvent *xev )
     rect.right  = rect.left + event->width;
     rect.bottom = rect.top + event->height;
 
-    if (event->window == root_window)
-        OffsetRect( &rect, virtual_screen_rect.left, virtual_screen_rect.top );
-
-    SERVER_START_REQ( update_window_zorder )
+    if (event->window != root_window)
     {
-        req->window      = hwnd;
-        req->rect.left   = rect.left;
-        req->rect.top    = rect.top;
-        req->rect.right  = rect.right;
-        req->rect.bottom = rect.bottom;
-        wine_server_call( req );
-    }
-    SERVER_END_REQ;
+        SERVER_START_REQ( update_window_zorder )
+        {
+            req->window      = hwnd;
+            req->rect.left   = rect.left;
+            req->rect.top    = rect.top;
+            req->rect.right  = rect.right;
+            req->rect.bottom = rect.bottom;
+            wine_server_call( req );
+        }
+        SERVER_END_REQ;
 
-    /* make position relative to client area instead of parent */
-    OffsetRect( &rect, -data->client_rect.left, -data->client_rect.top );
+        /* make position relative to client area instead of parent */
+        OffsetRect( &rect, -data->client_rect.left, -data->client_rect.top );
+        flags |= RDW_ALLCHILDREN;
+    }
+
     RedrawWindow( hwnd, &rect, 0, flags );
 }
 
@@ -198,12 +183,16 @@ static void update_net_wm_states( Display *display, struct x11drv_win_data *data
     if (!data->mapped) return;
 
     style = GetWindowLongW( data->hwnd, GWL_STYLE );
-    if (style & WS_MAXIMIZE) new_state |= (1 << NET_WM_STATE_MAXIMIZED);
-
-    if (!(style & WS_MAXIMIZE) &&
-        data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
+    if (data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
         data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height)
-        new_state |= (1 << NET_WM_STATE_FULLSCREEN);
+    {
+        if ((style & WS_MAXIMIZE) && (style & WS_CAPTION) == WS_CAPTION)
+            new_state |= (1 << NET_WM_STATE_MAXIMIZED);
+        else
+            new_state |= (1 << NET_WM_STATE_FULLSCREEN);
+    }
+    else if (style & WS_MAXIMIZE)
+        new_state |= (1 << NET_WM_STATE_MAXIMIZED);
 
     ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
     if (ex_style & WS_EX_TOPMOST)
@@ -343,7 +332,7 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
     data->whole_rect  = *rectWindow;
     data->client_rect = *rectClient;
     X11DRV_window_to_X_rect( data, &data->whole_rect );
-    if (memcmp( &visible_rect, &data->whole_rect, sizeof(RECT) ))
+    if (memcmp( visible_rect, &data->whole_rect, sizeof(RECT) ))
     {
         TRACE( "%p: need to update visible rect %s -> %s\n", hwnd,
                wine_dbgstr_rect(visible_rect), wine_dbgstr_rect(&data->whole_rect) );
@@ -656,161 +645,59 @@ void X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
 
 
 /***********************************************************************
- *           draw_moving_frame
- *
- * Draw the frame used when moving or resizing window.
- *
- * FIXME:  This causes problems in Win95 mode.  (why?)
+ *              is_netwm_supported
  */
-static void draw_moving_frame( HDC hdc, RECT *rect, BOOL thickframe )
+static BOOL is_netwm_supported( Display *display, Atom atom )
 {
-    if (thickframe)
-    {
-        const int width = GetSystemMetrics(SM_CXFRAME);
-        const int height = GetSystemMetrics(SM_CYFRAME);
+    static Atom *net_supported;
+    static int net_supported_count = -1;
+    int i;
 
-        HBRUSH hbrush = SelectObject( hdc, GetStockObject( GRAY_BRUSH ) );
-        PatBlt( hdc, rect->left, rect->top,
-                rect->right - rect->left - width, height, PATINVERT );
-        PatBlt( hdc, rect->left, rect->top + height, width,
-                rect->bottom - rect->top - height, PATINVERT );
-        PatBlt( hdc, rect->left + width, rect->bottom - 1,
-                rect->right - rect->left - width, -height, PATINVERT );
-        PatBlt( hdc, rect->right - 1, rect->top, -width,
-                rect->bottom - rect->top - height, PATINVERT );
-        SelectObject( hdc, hbrush );
+    wine_tsx11_lock();
+    if (net_supported_count == -1)
+    {
+        Atom type;
+        int format;
+        unsigned long count, remaining;
+
+        if (!XGetWindowProperty( display, DefaultRootWindow(display), x11drv_atom(_NET_SUPPORTED), 0,
+                                 ~0UL, False, XA_ATOM, &type, &format, &count,
+                                 &remaining, (unsigned char **)&net_supported ))
+            net_supported_count = count * (format / 8) / sizeof(Atom);
+        else
+            net_supported_count = 0;
     }
-    else DrawFocusRect( hdc, rect );
+    wine_tsx11_unlock();
+
+    for (i = 0; i < net_supported_count; i++)
+        if (net_supported[i] == atom) return TRUE;
+    return FALSE;
 }
 
 
 /***********************************************************************
- *           start_size_move
+ *           SysCommandSizeMove   (X11DRV.@)
  *
- * Initialization of a move or resize, when initiated from a menu choice.
- * Return hit test code for caption or sizing border.
+ * Perform SC_MOVE and SC_SIZE commands.
  */
-static LONG start_size_move( HWND hwnd, WPARAM wParam, POINT *capturePoint, LONG style )
-{
-    LONG hittest = 0;
-    POINT pt;
-    MSG msg;
-    RECT rectWindow;
-
-    GetWindowRect( hwnd, &rectWindow );
-
-    if ((wParam & 0xfff0) == SC_MOVE)
-    {
-        /* Move pointer at the center of the caption */
-        RECT rect = rectWindow;
-        /* Note: to be exactly centered we should take the different types
-         * of border into account, but it shouldn't make more than a few pixels
-         * of difference so let's not bother with that */
-        rect.top += GetSystemMetrics(SM_CYBORDER);
-        if (style & WS_SYSMENU)
-            rect.left += GetSystemMetrics(SM_CXSIZE) + 1;
-        if (style & WS_MINIMIZEBOX)
-            rect.right -= GetSystemMetrics(SM_CXSIZE) + 1;
-        if (style & WS_MAXIMIZEBOX)
-            rect.right -= GetSystemMetrics(SM_CXSIZE) + 1;
-        pt.x = (rect.right + rect.left) / 2;
-        pt.y = rect.top + GetSystemMetrics(SM_CYSIZE)/2;
-        hittest = HTCAPTION;
-        *capturePoint = pt;
-    }
-    else  /* SC_SIZE */
-    {
-        pt.x = pt.y = 0;
-        while(!hittest)
-        {
-            GetMessageW( &msg, 0, WM_KEYFIRST, WM_MOUSELAST );
-            if (CallMsgFilterW( &msg, MSGF_SIZE )) continue;
-
-            switch(msg.message)
-            {
-            case WM_MOUSEMOVE:
-                pt = msg.pt;
-                hittest = SendMessageW( hwnd, WM_NCHITTEST, 0, MAKELONG( pt.x, pt.y ) );
-                if ((hittest < HTLEFT) || (hittest > HTBOTTOMRIGHT)) hittest = 0;
-                break;
-
-            case WM_LBUTTONUP:
-                return 0;
-
-            case WM_KEYDOWN:
-                switch(msg.wParam)
-                {
-                case VK_UP:
-                    hittest = HTTOP;
-                    pt.x =(rectWindow.left+rectWindow.right)/2;
-                    pt.y = rectWindow.top + GetSystemMetrics(SM_CYFRAME) / 2;
-                    break;
-                case VK_DOWN:
-                    hittest = HTBOTTOM;
-                    pt.x =(rectWindow.left+rectWindow.right)/2;
-                    pt.y = rectWindow.bottom - GetSystemMetrics(SM_CYFRAME) / 2;
-                    break;
-                case VK_LEFT:
-                    hittest = HTLEFT;
-                    pt.x = rectWindow.left + GetSystemMetrics(SM_CXFRAME) / 2;
-                    pt.y =(rectWindow.top+rectWindow.bottom)/2;
-                    break;
-                case VK_RIGHT:
-                    hittest = HTRIGHT;
-                    pt.x = rectWindow.right - GetSystemMetrics(SM_CXFRAME) / 2;
-                    pt.y =(rectWindow.top+rectWindow.bottom)/2;
-                    break;
-                case VK_RETURN:
-                case VK_ESCAPE: return 0;
-                }
-            }
-        }
-        *capturePoint = pt;
-    }
-    SetCursorPos( pt.x, pt.y );
-    SendMessageW( hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELONG( hittest, WM_MOUSEMOVE ));
-    return hittest;
-}
-
-
-/***********************************************************************
- *           set_movesize_capture
- */
-static void set_movesize_capture( HWND hwnd )
-{
-    HWND previous = 0;
-
-    SERVER_START_REQ( set_capture_window )
-    {
-        req->handle = hwnd;
-        req->flags  = CAPTURE_MOVESIZE;
-        if (!wine_server_call_err( req ))
-        {
-            previous = reply->previous;
-            hwnd = reply->full_handle;
-        }
-    }
-    SERVER_END_REQ;
-    if (previous && previous != hwnd)
-        SendMessageW( previous, WM_CAPTURECHANGED, 0, (LPARAM)hwnd );
-}
-
-/***********************************************************************
- *           X11DRV_WMMoveResizeWindow
- *
- * Tells the window manager to initiate a move or resize operation.
- *
- * SEE
- *  http://freedesktop.org/Standards/wm-spec/1.3/ar01s04.html
- *  or search for "_NET_WM_MOVERESIZE"
- */
-static BOOL X11DRV_WMMoveResizeWindow( HWND hwnd, int x, int y, WPARAM wparam )
+BOOL X11DRV_SysCommandSizeMove( HWND hwnd, WPARAM wparam )
 {
     WPARAM syscommand = wparam & 0xfff0;
     WPARAM hittest = wparam & 0x0f;
-    int dir;
+    DWORD dwPoint;
+    int x, y, dir;
     XEvent xev;
     Display *display = thread_display();
+    struct x11drv_win_data *data;
+
+    if (!(data = X11DRV_get_win_data( hwnd ))) return FALSE;
+    if (!data->whole_window || !data->managed) return FALSE;
+
+    if (!is_netwm_supported( display, x11drv_atom(_NET_WM_MOVERESIZE) ))
+    {
+        TRACE( "_NET_WM_MOVERESIZE not supported\n" );
+        return FALSE;
+    }
 
     if (syscommand == SC_MOVE)
     {
@@ -836,6 +723,10 @@ static BOOL X11DRV_WMMoveResizeWindow( HWND hwnd, int x, int y, WPARAM wparam )
         }
     }
 
+    dwPoint = GetMessagePos();
+    x = (short)LOWORD(dwPoint);
+    y = (short)HIWORD(dwPoint);
+
     TRACE("hwnd %p, x %d, y %d, dir %d\n", hwnd, x, y, dir);
 
     xev.xclient.type = ClientMessage;
@@ -858,293 +749,4 @@ static BOOL X11DRV_WMMoveResizeWindow( HWND hwnd, int x, int y, WPARAM wparam )
     XSendEvent(display, root_window, False, SubstructureNotifyMask, &xev);
     wine_tsx11_unlock();
     return TRUE;
-}
-
-/***********************************************************************
- *           SysCommandSizeMove   (X11DRV.@)
- *
- * Perform SC_MOVE and SC_SIZE commands.
- */
-void X11DRV_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
-{
-    MSG msg;
-    RECT sizingRect, mouseRect, origRect;
-    HDC hdc;
-    HWND parent;
-    LONG hittest = (LONG)(wParam & 0x0f);
-    WPARAM syscommand = wParam & 0xfff0;
-    HCURSOR hDragCursor = 0, hOldCursor = 0;
-    POINT minTrack, maxTrack;
-    POINT capturePoint, pt;
-    LONG style = GetWindowLongA( hwnd, GWL_STYLE );
-    BOOL    thickframe = HAS_THICKFRAME( style );
-    BOOL    iconic = style & WS_MINIMIZE;
-    BOOL    moved = FALSE;
-    DWORD     dwPoint = GetMessagePos ();
-    BOOL DragFullWindows = TRUE;
-    Window parent_win, grab_win;
-    struct x11drv_thread_data *thread_data = x11drv_thread_data();
-    struct x11drv_win_data *data;
-
-    pt.x = (short)LOWORD(dwPoint);
-    pt.y = (short)HIWORD(dwPoint);
-    capturePoint = pt;
-
-    if (IsZoomed(hwnd) || !IsWindowVisible(hwnd)) return;
-
-    if (!(data = X11DRV_get_win_data( hwnd ))) return;
-
-    TRACE("hwnd %p (%smanaged), command %04lx, hittest %d, pos %d,%d\n",
-          hwnd, data->managed ? "" : "NOT ", syscommand, hittest, pt.x, pt.y);
-
-    /* if we are managed then we let the WM do all the work */
-    if (data->managed && X11DRV_WMMoveResizeWindow( hwnd, pt.x, pt.y, wParam )) return;
-
-    if (syscommand == SC_MOVE)
-    {
-        if (!hittest) hittest = start_size_move( hwnd, wParam, &capturePoint, style );
-        if (!hittest) return;
-    }
-    else  /* SC_SIZE */
-    {
-        if ( hittest && (syscommand != SC_MOUSEMENU) )
-            hittest += (HTLEFT - WMSZ_LEFT);
-        else
-        {
-            set_movesize_capture( hwnd );
-            hittest = start_size_move( hwnd, wParam, &capturePoint, style );
-            if (!hittest)
-            {
-                set_movesize_capture(0);
-                return;
-            }
-        }
-    }
-
-      /* Get min/max info */
-
-    WINPOS_GetMinMaxInfo( hwnd, NULL, NULL, &minTrack, &maxTrack );
-    GetWindowRect( hwnd, &sizingRect );
-    if (style & WS_CHILD)
-    {
-        parent = GetParent(hwnd);
-        /* make sizing rect relative to parent */
-        MapWindowPoints( 0, parent, (POINT*)&sizingRect, 2 );
-        GetClientRect( parent, &mouseRect );
-    }
-    else
-    {
-        parent = 0;
-        mouseRect = virtual_screen_rect;
-    }
-    origRect = sizingRect;
-
-    if (ON_LEFT_BORDER(hittest))
-    {
-        mouseRect.left  = max( mouseRect.left, sizingRect.right-maxTrack.x );
-        mouseRect.right = min( mouseRect.right, sizingRect.right-minTrack.x );
-    }
-    else if (ON_RIGHT_BORDER(hittest))
-    {
-        mouseRect.left  = max( mouseRect.left, sizingRect.left+minTrack.x );
-        mouseRect.right = min( mouseRect.right, sizingRect.left+maxTrack.x );
-    }
-    if (ON_TOP_BORDER(hittest))
-    {
-        mouseRect.top    = max( mouseRect.top, sizingRect.bottom-maxTrack.y );
-        mouseRect.bottom = min( mouseRect.bottom,sizingRect.bottom-minTrack.y);
-    }
-    else if (ON_BOTTOM_BORDER(hittest))
-    {
-        mouseRect.top    = max( mouseRect.top, sizingRect.top+minTrack.y );
-        mouseRect.bottom = min( mouseRect.bottom, sizingRect.top+maxTrack.y );
-    }
-    if (parent) MapWindowPoints( parent, 0, (LPPOINT)&mouseRect, 2 );
-
-    /* Retrieve a default cache DC (without using the window style) */
-    hdc = GetDCEx( parent, 0, DCX_CACHE );
-
-    if( iconic ) /* create a cursor for dragging */
-    {
-        hDragCursor = (HCURSOR)GetClassLongPtrW( hwnd, GCLP_HICON);
-        if( !hDragCursor ) hDragCursor = (HCURSOR)SendMessageW( hwnd, WM_QUERYDRAGICON, 0, 0L);
-        if( !hDragCursor ) iconic = FALSE;
-    }
-
-    /* repaint the window before moving it around */
-    RedrawWindow( hwnd, NULL, 0, RDW_UPDATENOW | RDW_ALLCHILDREN );
-
-    SendMessageW( hwnd, WM_ENTERSIZEMOVE, 0, 0 );
-    set_movesize_capture( hwnd );
-
-    /* we only allow disabling the full window drag for child windows, or in desktop mode */
-    /* otherwise we'd need to grab the server and we want to avoid that */
-    if (parent || (root_window != DefaultRootWindow(gdi_display)))
-        SystemParametersInfoA(SPI_GETDRAGFULLWINDOWS, 0, &DragFullWindows, 0);
-
-    grab_win = X11DRV_get_client_window( GetAncestor(hwnd,GA_ROOT) );
-    parent_win = parent ? X11DRV_get_client_window( GetAncestor(parent,GA_ROOT) ) : root_window;
-
-    wine_tsx11_lock();
-    XGrabPointer( thread_data->display, grab_win, False,
-                  PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
-                  GrabModeAsync, GrabModeAsync, parent_win, None, CurrentTime );
-    wine_tsx11_unlock();
-    thread_data->grab_window = grab_win;
-
-    while(1)
-    {
-        int dx = 0, dy = 0;
-
-        if (!GetMessageW( &msg, 0, 0, 0 )) break;
-        if (CallMsgFilterW( &msg, MSGF_SIZE )) continue;
-
-        /* Exit on button-up, Return, or Esc */
-        if ((msg.message == WM_LBUTTONUP) ||
-            ((msg.message == WM_KEYDOWN) &&
-             ((msg.wParam == VK_RETURN) || (msg.wParam == VK_ESCAPE)))) break;
-
-        if ((msg.message != WM_KEYDOWN) && (msg.message != WM_MOUSEMOVE))
-        {
-            TranslateMessage( &msg );
-            DispatchMessageW( &msg );
-            continue;  /* We are not interested in other messages */
-        }
-
-        pt = msg.pt;
-
-        if (msg.message == WM_KEYDOWN) switch(msg.wParam)
-        {
-        case VK_UP:    pt.y -= 8; break;
-        case VK_DOWN:  pt.y += 8; break;
-        case VK_LEFT:  pt.x -= 8; break;
-        case VK_RIGHT: pt.x += 8; break;
-        }
-
-        pt.x = max( pt.x, mouseRect.left );
-        pt.x = min( pt.x, mouseRect.right );
-        pt.y = max( pt.y, mouseRect.top );
-        pt.y = min( pt.y, mouseRect.bottom );
-
-        dx = pt.x - capturePoint.x;
-        dy = pt.y - capturePoint.y;
-
-        if (dx || dy)
-        {
-            if( !moved )
-            {
-                moved = TRUE;
-
-                if( iconic ) /* ok, no system popup tracking */
-                {
-                    hOldCursor = SetCursor(hDragCursor);
-                    ShowCursor( TRUE );
-                    WINPOS_ShowIconTitle( hwnd, FALSE );
-                }
-                else if(!DragFullWindows)
-                    draw_moving_frame( hdc, &sizingRect, thickframe );
-            }
-
-            if (msg.message == WM_KEYDOWN) SetCursorPos( pt.x, pt.y );
-            else
-            {
-                RECT newRect = sizingRect;
-                WPARAM wpSizingHit = 0;
-
-                if (hittest == HTCAPTION) OffsetRect( &newRect, dx, dy );
-                if (ON_LEFT_BORDER(hittest)) newRect.left += dx;
-                else if (ON_RIGHT_BORDER(hittest)) newRect.right += dx;
-                if (ON_TOP_BORDER(hittest)) newRect.top += dy;
-                else if (ON_BOTTOM_BORDER(hittest)) newRect.bottom += dy;
-                if(!iconic && !DragFullWindows) draw_moving_frame( hdc, &sizingRect, thickframe );
-                capturePoint = pt;
-
-                /* determine the hit location */
-                if (hittest >= HTLEFT && hittest <= HTBOTTOMRIGHT)
-                    wpSizingHit = WMSZ_LEFT + (hittest - HTLEFT);
-                SendMessageW( hwnd, WM_SIZING, wpSizingHit, (LPARAM)&newRect );
-
-                if (!iconic)
-                {
-                    if(!DragFullWindows)
-                        draw_moving_frame( hdc, &newRect, thickframe );
-                    else
-                        SetWindowPos( hwnd, 0, newRect.left, newRect.top,
-                                      newRect.right - newRect.left,
-                                      newRect.bottom - newRect.top,
-                                      ( hittest == HTCAPTION ) ? SWP_NOSIZE : 0 );
-                }
-                sizingRect = newRect;
-            }
-        }
-    }
-
-    set_movesize_capture(0);
-    if( iconic )
-    {
-        if( moved ) /* restore cursors, show icon title later on */
-        {
-            ShowCursor( FALSE );
-            SetCursor( hOldCursor );
-        }
-    }
-    else if (moved && !DragFullWindows)
-    {
-        draw_moving_frame( hdc, &sizingRect, thickframe );
-        /* make sure the moving frame is erased before we move the window */
-        wine_tsx11_lock();
-        XFlush( gdi_display );
-        wine_tsx11_unlock();
-    }
-
-    ReleaseDC( parent, hdc );
-
-    wine_tsx11_lock();
-    XUngrabPointer( thread_data->display, CurrentTime );
-    wine_tsx11_unlock();
-    thread_data->grab_window = None;
-
-    if (HOOK_CallHooks( WH_CBT, HCBT_MOVESIZE, (WPARAM)hwnd, (LPARAM)&sizingRect, TRUE ))
-        moved = FALSE;
-
-    SendMessageW( hwnd, WM_EXITSIZEMOVE, 0, 0 );
-    SendMessageW( hwnd, WM_SETVISIBLE, !IsIconic(hwnd), 0L);
-
-    /* window moved or resized */
-    if (moved)
-    {
-        /* if the moving/resizing isn't canceled call SetWindowPos
-         * with the new position or the new size of the window
-         */
-        if (!((msg.message == WM_KEYDOWN) && (msg.wParam == VK_ESCAPE)) )
-        {
-            /* NOTE: SWP_NOACTIVATE prevents document window activation in Word 6 */
-            if(!DragFullWindows)
-                SetWindowPos( hwnd, 0, sizingRect.left, sizingRect.top,
-                              sizingRect.right - sizingRect.left,
-                              sizingRect.bottom - sizingRect.top,
-                              ( hittest == HTCAPTION ) ? SWP_NOSIZE : 0 );
-        }
-        else
-        { /* restore previous size/position */
-            if(DragFullWindows)
-                SetWindowPos( hwnd, 0, origRect.left, origRect.top,
-                              origRect.right - origRect.left,
-                              origRect.bottom - origRect.top,
-                              ( hittest == HTCAPTION ) ? SWP_NOSIZE : 0 );
-        }
-    }
-
-    if (IsIconic(hwnd))
-    {
-        /* Single click brings up the system menu when iconized */
-
-        if( !moved )
-        {
-            if(style & WS_SYSMENU )
-                SendMessageW( hwnd, WM_SYSCOMMAND,
-                              SC_MOUSEMENU + HTSYSMENU, MAKELONG(pt.x,pt.y));
-        }
-        else WINPOS_ShowIconTitle( hwnd, TRUE );
-    }
 }

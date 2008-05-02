@@ -1532,6 +1532,7 @@ void X11DRV_GetDC( HDC hdc, HWND hwnd, HWND top, const RECT *win_rect,
         escape.fbconfig_id = data ? data->fbconfig_id : (XID)GetPropA( hwnd, fbconfig_id_prop );
         escape.gl_drawable = data ? data->gl_drawable : (Drawable)GetPropA( hwnd, gl_drawable_prop );
         escape.pixmap      = data ? data->pixmap : (Pixmap)GetPropA( hwnd, pixmap_prop );
+        if (flags & DCX_CLIPCHILDREN) escape.mode = ClipByChildren;
     }
 
     escape.dc_rect.left         = win_rect->left - top_rect->left;
@@ -1564,6 +1565,39 @@ void X11DRV_ReleaseDC( HWND hwnd, HDC hdc )
     escape.gl_drawable = 0;
     escape.pixmap = 0;
     ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
+}
+
+
+/***********************************************************************
+ *		SetCapture  (X11DRV.@)
+ */
+void X11DRV_SetCapture( HWND hwnd, UINT flags )
+{
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+
+    if (!(flags & GUI_INMOVESIZE)) return;
+
+    if (hwnd)
+    {
+        Window grab_win = X11DRV_get_client_window( GetAncestor( hwnd, GA_ROOT ) );
+
+        if (!grab_win) return;
+        wine_tsx11_lock();
+        XFlush( gdi_display );
+        XGrabPointer( thread_data->display, grab_win, False,
+                      PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
+                      GrabModeAsync, GrabModeAsync, root_window, None, CurrentTime );
+        wine_tsx11_unlock();
+        thread_data->grab_window = grab_win;
+    }
+    else  /* release capture */
+    {
+        wine_tsx11_lock();
+        XFlush( gdi_display );
+        XUngrabPointer( thread_data->display, CurrentTime );
+        wine_tsx11_unlock();
+        thread_data->grab_window = None;
+    }
 }
 
 

@@ -91,7 +91,7 @@ void ME_PaintContent(ME_TextEditor *editor, HDC hDC, BOOL bOnlyNew, const RECT *
   if (editor->nTotalLength != editor->nLastTotalLength)
     ME_SendRequestResize(editor, FALSE);
   editor->nLastTotalLength = editor->nTotalLength;
-  ME_DestroyContext(&c);
+  ME_DestroyContext(&c, NULL);
 }
 
 void ME_Repaint(ME_TextEditor *editor)
@@ -290,7 +290,7 @@ static void ME_DrawRun(ME_Context *c, int x, int y, ME_DisplayItem *rundi, ME_Pa
 }
 
 static struct {unsigned width_num : 4, width_den : 4, pen_style : 4, dble : 1;} border_details[] = {
-  /* none */            {0, 0, PS_SOLID, FALSE},
+  /* none */            {0, 1, PS_SOLID, FALSE},
   /* 3/4 */             {3, 4, PS_SOLID, FALSE},
   /* 1 1/2 */           {3, 2, PS_SOLID, FALSE},
   /* 2 1/4 */           {9, 4, PS_SOLID, FALSE},

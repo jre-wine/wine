@@ -139,6 +139,7 @@ typedef struct _WININETHANDLEHEADER WININETHANDLEHEADER, *LPWININETHANDLEHEADER;
 typedef struct {
     void (*Destroy)(WININETHANDLEHEADER*);
     void (*CloseConnection)(WININETHANDLEHEADER*);
+    DWORD (*QueryOption)(WININETHANDLEHEADER*,DWORD,void*,DWORD*,BOOL);
     DWORD (*SetOption)(WININETHANDLEHEADER*,DWORD,void*,DWORD);
     DWORD (*ReadFile)(WININETHANDLEHEADER*,void*,DWORD,DWORD*);
     DWORD (*ReadFileExA)(WININETHANDLEHEADER*,INTERNET_BUFFERSA*,DWORD,DWORD_PTR);
@@ -156,7 +157,7 @@ struct _WININETHANDLEHEADER
     DWORD_PTR dwContext;
     DWORD  dwError;
     DWORD  dwInternalFlags;
-    DWORD  dwRefCount;
+    LONG   refs;
     INTERNET_STATUS_CALLBACK lpfnStatusCB;
     struct list entry;
     struct list children;

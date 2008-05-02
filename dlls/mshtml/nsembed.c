@@ -265,9 +265,7 @@ static BOOL load_wine_gecko(PRUnichar *gre_path)
     if(res != ERROR_SUCCESS)
         return FALSE;
 
-    ret = load_wine_gecko_v(gre_path, hkey, GECKO_VERSION, GECKO_VERSION_STRING)
-        || load_wine_gecko_v(gre_path, hkey, "0.0.1", "Wine Gecko 0.0.1\n")
-        || load_wine_gecko_v(gre_path, hkey, NULL, "Wine Gecko 0.0.1\n");
+    ret = load_wine_gecko_v(gre_path, hkey, GECKO_VERSION, GECKO_VERSION_STRING);
 
     RegCloseKey(hkey);
     return ret;
@@ -502,7 +500,12 @@ void nsAString_Init(nsAString *str, const PRUnichar *data)
 {
     NS_StringContainerInit(str);
     if(data)
-        NS_StringSetData(str, data, PR_UINT32_MAX);
+        nsAString_SetData(str, data);
+}
+
+void nsAString_SetData(nsAString *str, const PRUnichar *data)
+{
+    NS_StringSetData(str, data, PR_UINT32_MAX);
 }
 
 PRUint32 nsAString_GetData(const nsAString *str, const PRUnichar **data)

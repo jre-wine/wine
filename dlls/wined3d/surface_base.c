@@ -849,7 +849,7 @@ IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface,
 
     if (DestRect)
     {
-        memcpy(&xdst,DestRect,sizeof(xdst));
+        xdst = *DestRect;
     }
     else
     {
@@ -861,7 +861,7 @@ IWineD3DBaseSurfaceImpl_Blt(IWineD3DSurface *iface,
 
     if (SrcRect)
     {
-        memcpy(&xsrc,SrcRect,sizeof(xsrc));
+        xsrc = *SrcRect;
     }
     else
     {
@@ -1613,13 +1613,28 @@ IWineD3DBaseSurfaceImpl_BltFast(IWineD3DSurface *iface,
     else
     {
         int width = w * bpp;
+        INT sbufpitch, dbufpitch;
+
         TRACE("NO color key copy\n");
+        /* Handle overlapping surfaces */
+        if (sbuf < dbuf)
+        {
+            sbuf += (h - 1) * slock.Pitch;
+            dbuf += (h - 1) * dlock.Pitch;
+            sbufpitch = -slock.Pitch;
+            dbufpitch = -dlock.Pitch;
+        }
+        else
+        {
+            sbufpitch = slock.Pitch;
+            dbufpitch = dlock.Pitch;
+        }
         for (y = 0; y < h; y++)
         {
             /* This is pretty easy, a line for line memcpy */
-            memcpy(dbuf, sbuf, width);
-            sbuf += slock.Pitch;
-            dbuf += dlock.Pitch;
+            memmove(dbuf, sbuf, width);
+            sbuf += sbufpitch;
+            dbuf += dbufpitch;
         }
         TRACE("Copy done\n");
     }

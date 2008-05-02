@@ -122,6 +122,69 @@ static void test_LoadingImages(void)
     expect(InvalidParameter, stat);
 }
 
+static void test_SavingImages(void)
+{
+    GpStatus stat;
+    GpBitmap *bm;
+    UINT n;
+    UINT s;
+    const REAL WIDTH = 10.0, HEIGHT = 20.0;
+    REAL w, h;
+    ImageCodecInfo *codecs;
+    static const WCHAR filename[] = { 'a','.','b','m','p',0 };
+
+    codecs = NULL;
+
+    stat = GdipSaveImageToFile(0, 0, 0, 0);
+    expect(InvalidParameter, stat);
+
+    bm = NULL;
+    stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB, NULL, &bm);
+    expect(Ok, stat);
+    if (!bm)
+        return;
+
+    /* invalid params */
+    stat = GdipSaveImageToFile((GpImage*)bm, 0, 0, 0);
+    expect(InvalidParameter, stat);
+
+    stat = GdipSaveImageToFile((GpImage*)bm, filename, 0, 0);
+    expect(InvalidParameter, stat);
+
+    /* encoder tests should succeed -- already tested */
+    stat = GdipGetImageEncodersSize(&n, &s);
+    if (stat != Ok || n == 0) goto cleanup;
+
+    codecs = GdipAlloc(s);
+    if (!codecs) goto cleanup;
+
+    stat = GdipGetImageEncoders(n, s, codecs);
+    if (stat != Ok) goto cleanup;
+
+    stat = GdipSaveImageToFile((GpImage*)bm, filename, &codecs[0].Clsid, 0);
+    expect(stat, Ok);
+
+    GdipDisposeImage((GpImage*)bm);
+    bm = 0;
+
+    /* re-load and check image stats */
+    stat = GdipLoadImageFromFile(filename, (GpImage**)&bm);
+    expect(stat, Ok);
+    if (stat != Ok) goto cleanup;
+
+    stat = GdipGetImageDimension((GpImage*)bm, &w, &h);
+    if (stat != Ok) goto cleanup;
+
+    ok((fabs(w - WIDTH) < 0.01) && (fabs(h - HEIGHT) < 0.01),
+       "Saved image dimensions are different!\n");
+
+ cleanup:
+    GdipFree(codecs);
+    if (bm)
+        GdipDisposeImage((GpImage*)bm);
+    ok(DeleteFileW(filename), "Delete failed.\n");
+}
+
 static void test_encoders(void)
 {
     GpStatus stat;
@@ -171,6 +234,107 @@ static void test_encoders(void)
     GdipFree(codecs);
 }
 
+static void test_LockBits(void)
+{
+    GpStatus stat;
+    GpBitmap *bm;
+    GpRect rect;
+    BitmapData bd;
+    const REAL WIDTH = 10.0, HEIGHT = 20.0;
+
+    bm = NULL;
+    stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB, NULL, &bm);
+    expect(Ok, stat);
+
+    rect.X = 2;
+    rect.Y = 3;
+    rect.Width = 4;
+    rect.Height = 5;
+
+    /* read-only */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat24bppRGB, &bd);
+    expect(Ok, stat);
+
+    if (stat == Ok) {
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    /* read-only, consecutive */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat24bppRGB, &bd);
+    expect(Ok, stat);
+
+    if (stat == Ok) {
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    stat = GdipDisposeImage((GpImage*)bm);
+    expect(Ok, stat);
+    stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB, NULL, &bm);
+    expect(Ok, stat);
+
+    /* read x2 */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat24bppRGB, &bd);
+    expect(Ok, stat);
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat24bppRGB, &bd);
+    expect(WrongState, stat);
+
+    stat = GdipBitmapUnlockBits(bm, &bd);
+    expect(Ok, stat);
+
+    stat = GdipDisposeImage((GpImage*)bm);
+    expect(Ok, stat);
+    stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB, NULL, &bm);
+    expect(Ok, stat);
+
+    /* write, no modification */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeWrite, PixelFormat24bppRGB, &bd);
+    expect(Ok, stat);
+
+    if (stat == Ok) {
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    /* write, consecutive */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeWrite, PixelFormat24bppRGB, &bd);
+    expect(Ok, stat);
+
+    if (stat == Ok) {
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    stat = GdipDisposeImage((GpImage*)bm);
+    expect(Ok, stat);
+    stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB, NULL, &bm);
+    expect(Ok, stat);
+
+    /* write, modify */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeWrite, PixelFormat24bppRGB, &bd);
+    expect(Ok, stat);
+
+    if (stat == Ok) {
+        if (bd.Scan0)
+            ((char*)bd.Scan0)[2] = 0xff;
+
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    stat = GdipDisposeImage((GpImage*)bm);
+    expect(Ok, stat);
+
+    /* dispose locked */
+    stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB, NULL, &bm);
+    expect(Ok, stat);
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat24bppRGB, &bd);
+    expect(Ok, stat);
+    stat = GdipDisposeImage((GpImage*)bm);
+    expect(Ok, stat);
+}
+
 START_TEST(image)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -186,7 +350,9 @@ START_TEST(image)
     test_Scan0();
     test_GetImageDimension();
     test_LoadingImages();
+    test_SavingImages();
     test_encoders();
+    test_LockBits();
 
     GdiplusShutdown(gdiplusToken);
 }

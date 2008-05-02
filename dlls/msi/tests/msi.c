@@ -304,7 +304,8 @@ static void test_MsiGetFileHash(void)
 
     /* szFilePath is empty */
     r = pMsiGetFileHashA("", 0, &hash);
-    ok(r == ERROR_PATH_NOT_FOUND, "Expected ERROR_PATH_NOT_FOUND, got %d\n", r);
+    ok(r == ERROR_PATH_NOT_FOUND || r == ERROR_BAD_PATHNAME,
+       "Expected ERROR_PATH_NOT_FOUND or ERROR_BAD_PATHNAME, got %d\n", r);
 
     /* szFilePath is nonexistent */
     r = pMsiGetFileHashA(name, 0, &hash);
@@ -2232,6 +2233,10 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "link"), "Expected \"link\", got \"%s\"\n", buf);
     ok(sz == 4, "Expected 4, got %d\n", sz);
+
+    /* pcchBuf is NULL */
+    r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINK, NULL, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* lpValueBuf is NULL */
     sz = MAX_PATH;
