@@ -17,6 +17,8 @@ CONFIGOPTS = --with-x --enable-opengl
 DEB_HOST_GNU_SYSTEM	?= $(shell dpkg-architecture -qDEB_HOST_GNU_SYSTEM)
 DEB_HOST_GNU_CPU	?= $(shell dpkg-architecture -qDEB_HOST_GNU_CPU)
 
+VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
+
 # On amd64, build 32-bit package by simply unpacking amd64.tar.lzma.uu
 # if it exists, otherwise build from source using 32-bit compiler.
 
@@ -262,7 +264,17 @@ endif
 
 	dh_installchangelogs -s ChangeLog
 	dh_link -s
-	dh_strip -s
+
+	# Wine uses many "interesting" linker options,
+	# so objcopy barfs on several Wine binaries.
+	# I'll just have to exclude them here, I guess.
+	# (They're pretty small ones anyway...)
+	dh_strip -s --dbg-package=libwine-dbg \
+	 -Xwine-kthread -Xwine-pthread -Xwine-preloader
+
+	# We don't need symbols for the build tools...
+	rm -rf debian/libwine-dbg/usr/lib/debug/usr/bin
+
 	dh_compress -s
 	dh_fixperms -s
 
@@ -280,11 +292,17 @@ ifneq (,$(DEB_FIXDIFF))
 endif
 endif
 
-	dh_makeshlibs -s
-	dh_installdeb -s
+	# tight libwine dependencies for packages built here
+	dh_makeshlibs -plibwine -n -V "libwine (= $(VERSION))"
+
 	bash debian/gendeps.sh $(patsubst build%,%,$(BUILDS))
-	dh_shlibdeps -s -Llibwine $(patsubst %,-l%/libs/wine,$(BUILDS))
+	dh_shlibdeps -s -Llibwine -ldebian/libwine/usr/lib
 	bash debian/cleandeps.sh
+
+	# relaxed libwine dependencies for everyone else
+	dh_makeshlibs -s
+
+	dh_installdeb -s
 
 	dh_gencontrol -s
 	dh_md5sums -s

@@ -2,7 +2,7 @@ Source: wine
 Section: otherosfs
 Priority: optional
 Maintainer: Ove Kaaven <ovek@arcticnet.no>
-Build-Depends: debhelper (>= 4.1.16), flex | flex-old, bison,
+Build-Depends: debhelper (>= 5), flex | flex-old, bison,
  libx11-dev | xlibs-dev (<< 4.3), libxext-dev | xlibs-dev (<< 4.3),
  libxi-dev | xlibs-dev (<< 4.3), libxrandr-dev | xlibs-dev (<< 4.3),
  libxrender-dev | xlibs-dev (<< 4.3), libxt-dev | xlibs-dev (<< 4.3),
@@ -36,27 +36,33 @@ Depends: wine-bin (= ${binary:Version}), wine-utils (= ${binary:Version}),
  libwine-gl (= ${binary:Version}), libwine-print (= ${binary:Version}), libwine-sane (= ${binary:Version}),
  libwine-cms (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version})
 Suggests: wine-doc, binfmt-support, msttcorefonts, avscan | klamav | clamav
-Description: Windows API Implementation (standard suite)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - standard suite
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This is a dummy package that depends on the standard wine components.
- .
- Wine is often updated.
+ This is a dummy package that depends on the standard Wine components.
 
 Package: wine-bin
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), xbase-clients (>= 4.0) | xcontrib
+Depends: ${shlibs:Depends}, x11-utils | xbase-clients (>= 4.0) | xcontrib
 Conflicts: binfmt-support (<< 1.1.2)
 Replaces: libwine (<< 0.0.20010216), wine-utils (<< 0.9.50), wine (<< 0.9.35)
-Description: Windows API Implementation (Binary Loader)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - binary loader
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains the binary loader program for running Windows
+ This package provides the binary loader program for running Windows
  executables.
+
+Package: libwine-dbg
+Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Section: libdevel
+Depends: libwine (= ${binary:Version})
+Description: Windows API implementation - debugging symbols
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
  .
- Wine is often updated.
+ This package provides debugging symbols.
 
 Package: libwine-dev
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
@@ -65,13 +71,11 @@ Depends: libwine (= ${binary:Version}), libc6-dev
 Replaces: libwine (<< 0.0.20010216)
 Recommends: wine-utils
 Suggests: wine-doc
-Description: Windows API Implementation (Development files)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - development files
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package consists of the C header files.
- .
- Wine is often updated.
+ This package provides the C header files.
 
 Package: libwine
 Section: libs
@@ -81,191 +85,163 @@ Replaces: libwine0.0.971116, wine (<< 0.9.11-1), libwine-twain (<< 0.9.13)
 Conflicts: libwine0.0.971116
 Recommends: libwine-print, libwine-gl
 Suggests: wine-doc
-Description: Windows API Implementation (Library)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - library
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package consists of the library that implements the windows API.
- .
- Wine is often updated.
+ This package provides the library that implements the windows API.
 
 Package: libwine-alsa
 Section: libs
 Architecture: i386 amd64 powerpc sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
-Description: Windows API Implementation (ALSA Sound Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Depends: ${shlibs:Depends}
+Description: Windows API implementation - ALSA sound module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
  This package contains an ALSA sound driver.
- .
- Wine is often updated.
 
 Package: libwine-capi
 Section: libs
 Architecture: i386 amd64 powerpc sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
-Description: Windows API Implementation (ISDN Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Depends: ${shlibs:Depends}
+Description: Windows API implementation - ISDN module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a CAPI interface that allows Windows apps
+ This package contains a CAPI interface that allows Windows applications
  to communicate with ISDN cards supported by capi4linux.
- .
- Wine is often updated.
 
 Package: libwine-cms
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
+Depends: ${shlibs:Depends}
 Replaces: libwine (<< 0.0.20050830)
-Description: Windows API Implementation (Color Management Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - color management module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
  This package contains a Color Management System implementation that
- lets Windows apps calibrate the colors used for display and print.
- .
- Wine is often updated.
+ lets Windows applications calibrate the colors used for display and print.
 
 Package: libwine-esd
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
-Description: Windows API Implementation (EsounD Sound Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Depends: ${shlibs:Depends}
+Description: Windows API implementation - EsounD sound module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
  This package contains an EsounD sound driver.
- .
- Wine is often updated.
 
 Package: libwine-gl
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
+Depends: ${shlibs:Depends}
 Replaces: libwine (<< 0.9.48)
-Description: Windows API Implementation (OpenGL Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - OpenGL module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains the OpenGL and Direct3D modules that allows
- Windows apps to utilize 3D acceleration.
- .
- Wine is often updated.
+ This package contains the OpenGL and Direct3D modules that allow
+ Windows applications to use 3D acceleration.
 
 Package: libwine-gphoto2
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
-Description: Windows API Implementation (Camera Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Depends: ${shlibs:Depends}
+Description: Windows API implementation - camera module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a TWAIN interface that allows Windows apps
+ This package contains a TWAIN interface that allows Windows applications
  to communicate with cameras supported by gphoto2.
- .
- Wine is often updated.
 
 Package: libwine-jack
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
-Description: Windows API Implementation (JACK Sound Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Depends: ${shlibs:Depends}
+Description: Windows API implementation - JACK sound module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
  This package contains a JACK sound driver.
- .
- Wine is often updated.
 
 Package: libwine-ldap
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
-Description: Windows API Implementation (LDAP Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Depends: ${shlibs:Depends}
+Description: Windows API implementation - LDAP module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a module that allows Windows apps to access
+ This package contains a module that allows Windows applications to access
  LDAP directory services.
- .
- Wine is often updated.
 
 Package: libwine-nas
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
+Depends: ${shlibs:Depends}
 Replaces: libwine (<< 0.0.20020710)
-Description: Windows API Implementation (NAS Sound Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - NAS sound module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
  This package contains a Network Audio System sound driver.
- .
- Wine is often updated.
 
 Package: libwine-oss
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
+Depends: ${shlibs:Depends}
 Replaces: libwine (<< 0.9.35)
-Description: Windows API Implementation (OSS Sound Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - OSS sound module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
  This package contains an OSS sound driver.
- .
- Wine is often updated.
 
 Package: libwine-print
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
+Depends: ${shlibs:Depends}
 Replaces: libwine (<< 0.0.20020710)
-Description: Windows API Implementation (Printing Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - printing module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
  This package contains a CUPS-enabled spooler and a PostScript driver,
- allowing Windows apps to print.
- .
- Wine is often updated.
+ allowing Windows applications to print.
 
 Package: libwine-sane
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
+Depends: ${shlibs:Depends}
 Replaces: libwine-twain (<< 0.9.13)
-Description: Windows API Implementation (Scanner Module)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - scanner module
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a TWAIN interface that allows Windows apps
+ This package contains a TWAIN interface that allows Windows applications
  to communicate with scanners supported by SANE.
- .
- Wine is often updated.
 
 Package: libwine-twain
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Depends: libwine-sane
 Suggests: libwine-gphoto2
-Description: Windows API Implementation (empty transitional package)
+Description: Windows API implementation - empty transitional package
  This is a transitional package to help migrate to the new libwine-sane
  and libwine-gphoto2 packages. It can safely be removed.
 
 Package: wine-utils
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), wine-bin
+Depends: ${shlibs:Depends}, wine-bin (= ${binary:Version})
 Replaces: libwine-dev (<< 0.0.20010216)
-Description: Windows API Implementation (Utilities)
- This is a BETA release of Wine, the free MS-Windows API implementation.
+Description: Windows API implementation - utilities
+ Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package consists many of the utilities provided by wine, both 
- for compiling source using winelib and for running wine.  This
+ This package provides many of the Wine utilities, both 
+ for compiling source using winelib and for running Wine. This
  package is not strictly necessary.
- .
- Wine is often updated.
 

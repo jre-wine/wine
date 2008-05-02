@@ -1,3 +1,31 @@
+wine (0.9.52-2) unstable; urgency=low
+
+  * Applied patch to Wine package descriptions from
+    debian-l10n-english team. Closes: #442952.
+  * Create /usr/share/doc/wine-bin instead of /usr/share/doc/wine
+    in the wine-bin package. Closes: #458171.
+  * Make wine-bin depend on x11-utils as an alternative to the obsolete
+    xbase-clients. Closes: #458341.
+  * Upgraded debhelper compatibility level to 5.
+    Also meant I had to remove some /usr/lib/* cruft from debian/*.install,
+    since there aren't many files not in /usr/lib/wine these days...
+  * Changed the -l argument of dh_shlibdeps to point to the "installed"
+    libraries in debian/libwine/usr/lib, rather than pointing into the
+    build tree.
+  * Depend on dh_shlibdeps to generate the correct libwine dependencies
+    instead of specifying them manually in debian/control; this eliminates
+    duplicate dependencies. To get the proper versioned dependencies I want,
+    I call dh_makeshlibs twice, once before dh_shlibdeps (with an
+    exact-versioned dependency), and once after, with a more relaxed
+    dependency, for everyone else that might be using libwine.
+    Closes: #381301.
+  * Created libwine-dbg package, using dh_strip's --dbg-package feature.
+    Since the objcopy used for this barfs on the loader binaries
+    (wine-kthread, wine-pthread), causing dh_strip to abort the build,
+    I have to exclude these binaries from being stripped, unfortunately.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 31 Dec 2007 04:22:29 +0100
+
 wine (0.9.52-1) unstable; urgency=low
 
   * New upstream release 0.9.52.

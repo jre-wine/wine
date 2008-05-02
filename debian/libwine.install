@@ -1,6 +1,4 @@
 debian/tmp/usr/lib/libwine*.so.*
-debian/tmp/usr/lib/lib*.dll.so
-debian/tmp/usr/lib/lib*.drv.so
 debian/tmp/usr/lib/wine/*.dll.so
 debian/tmp/usr/lib/wine/*.drv.so
 debian/tmp/usr/lib/wine/*.acm.so
