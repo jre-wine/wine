@@ -1,3 +1,16 @@
+wine (0.9.47-1) unstable; urgency=low
+
+  * New upstream release 0.9.47.
+    - New scheme for OpenGL support in child windows.
+    - Lots of fixes for regression test failures.
+    - A Tahoma replacement font.
+    - Lots of bug fixes.
+  * This version was released Oct 12, 2007.
+  * The inclusion of Tahoma should fix some font issues.
+    Closes: #454178.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Tue, 04 Dec 2007 16:43:28 +0100
+
 wine (0.9.46-1) unstable; urgency=low
 
   * New upstream release 0.9.46.
