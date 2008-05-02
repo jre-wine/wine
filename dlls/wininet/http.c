@@ -281,7 +281,7 @@ static LPWSTR HTTP_BuildHeaderRequestString( LPWININETHTTPREQW lpwhr, LPCWSTR ve
     req[n++] = path;
     req[n++] = http1_1 ? g_szHttp1_1 : g_szHttp1_0;
 
-    /* Append custom request heades */
+    /* Append custom request headers */
     for (i = 0; i < lpwhr->nCustHeaders; i++)
     {
         if (lpwhr->pCustHeaders[i].wFlags & HDR_ISREQUEST)
@@ -723,7 +723,7 @@ BOOL WINAPI HttpAddRequestHeadersA(HINTERNET hHttpRequest,
 }
 
 /* read any content returned by the server so that the connection can be
- * resued */
+ * reused */
 static void HTTP_DrainContent(LPWININETHTTPREQW lpwhr)
 {
     DWORD bytes_read;
@@ -1413,7 +1413,7 @@ HINTERNET WINAPI HTTP_HttpOpenRequestW(LPWININETHTTPSESSIONW lpwhs,
     }
 
     if (NULL != lpszReferrer && strlenW(lpszReferrer))
-        HTTP_ProcessHeader(lpwhr, HTTP_REFERER, lpszReferrer, HTTP_ADDHDR_FLAG_COALESCE);
+        HTTP_ProcessHeader(lpwhr, HTTP_REFERER, lpszReferrer, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REQ);
 
     if (lpszAcceptTypes)
     {
@@ -1436,22 +1436,7 @@ HINTERNET WINAPI HTTP_HttpOpenRequestW(LPWININETHTTPSESSIONW lpwhs,
     else if (strlenW(lpszVerb))
         lpwhr->lpszVerb = WININET_strdupW(lpszVerb);
 
-    if (NULL != lpszReferrer && strlenW(lpszReferrer))
-    {
-        WCHAR buf[MAXHOSTNAME];
-        URL_COMPONENTSW UrlComponents;
-
-        memset( &UrlComponents, 0, sizeof UrlComponents );
-        UrlComponents.dwStructSize = sizeof UrlComponents;
-        UrlComponents.lpszHostName = buf;
-        UrlComponents.dwHostNameLength = MAXHOSTNAME;
-
-        InternetCrackUrlW(lpszReferrer, 0, 0, &UrlComponents);
-        if (strlenW(UrlComponents.lpszHostName))
-            HTTP_ProcessHeader(lpwhr, szHost, UrlComponents.lpszHostName, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDHDR_FLAG_REQ);
-    }
-    else
-        HTTP_ProcessHeader(lpwhr, szHost, lpwhs->lpszHostName, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE | HTTP_ADDHDR_FLAG_REQ);
+    HTTP_ProcessHeader(lpwhr, szHost, lpwhs->lpszHostName, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REQ);
 
     if (lpwhs->nServerPort == INTERNET_INVALID_PORT_NUMBER)
         lpwhs->nServerPort = (dwFlags & INTERNET_FLAG_SECURE ?
@@ -1783,7 +1768,7 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
     if (index >= 0)
         lphttpHdr = &lpwhr->pCustHeaders[index];
 
-    /* Ensure header satisifies requested attributes */
+    /* Ensure header satisfies requested attributes */
     if (!lphttpHdr ||
         ((dwInfoLevel & HTTP_QUERY_FLAG_REQUEST_HEADERS) &&
          (~lphttpHdr->wFlags & HDR_ISREQUEST)))
@@ -1795,7 +1780,7 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
     if (lpdwIndex)
         (*lpdwIndex)++;
 
-    /* coalesce value to reuqested type */
+    /* coalesce value to requested type */
     if (dwInfoLevel & HTTP_QUERY_FLAG_NUMBER)
     {
 	*(int *)lpBuffer = atoiW(lphttpHdr->lpszValue);

@@ -608,6 +608,51 @@ BOOL ui_sequence_exists( MSIPACKAGE *package )
     return FALSE;
 }
 
+static UINT msi_set_sourcedir_props(MSIPACKAGE *package, BOOL replace)
+{
+    LPWSTR p, db;
+    LPWSTR source, check;
+    DWORD len;
+
+    static const WCHAR szOriginalDatabase[] =
+        {'O','r','i','g','i','n','a','l','D','a','t','a','b','a','s','e',0};
+
+    db = msi_dup_property( package, szOriginalDatabase );
+    if (!db)
+        return ERROR_OUTOFMEMORY;
+
+    p = strrchrW( db, '\\' );
+    if (!p)
+    {
+        p = strrchrW( db, '/' );
+        if (!p)
+        {
+            msi_free(db);
+            return ERROR_SUCCESS;
+        }
+    }
+
+    len = p - db + 2;
+    source = msi_alloc( len * sizeof(WCHAR) );
+    lstrcpynW( source, db, len );
+
+    check = msi_dup_property( package, cszSourceDir );
+    if (!check || replace)
+        MSI_SetPropertyW( package, cszSourceDir, source );
+
+    msi_free( check );
+
+    check = msi_dup_property( package, cszSOURCEDIR );
+    if (!check || replace)
+        MSI_SetPropertyW( package, cszSOURCEDIR, source );
+
+    msi_free( check );
+    msi_free( source );
+    msi_free( db );
+
+    return ERROR_SUCCESS;
+}
+
 /****************************************************
  * TOP level entry points 
  *****************************************************/
@@ -629,7 +674,7 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
 
     if (szPackagePath)   
     {
-        LPWSTR p, check, dir;
+        LPWSTR p, dir;
         LPCWSTR file;
 
         dir = strdupW(szPackagePath);
@@ -658,18 +703,9 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
 
         lstrcpyW(package->PackagePath, dir);
         lstrcatW(package->PackagePath, file);
-
-        check = msi_dup_property( package, cszSourceDir );
-        if (!check)
-            MSI_SetPropertyW(package, cszSourceDir, dir);
-        msi_free(check);
-
-        check = msi_dup_property( package, cszSOURCEDIR );
-        if (!check)
-            MSI_SetPropertyW(package, cszSOURCEDIR, dir);
-
         msi_free(dir);
-        msi_free(check);
+
+        msi_set_sourcedir_props(package, FALSE);
     }
 
     msi_parse_command_line( package, szCommandLine );
@@ -3851,10 +3887,7 @@ static UINT msi_get_local_package_name( LPWSTR path )
 
 static UINT msi_make_package_local( MSIPACKAGE *package, HKEY hkey )
 {
-    static const WCHAR szOriginalDatabase[] =
-        {'O','r','i','g','i','n','a','l','D','a','t','a','b','a','s','e',0};
     WCHAR packagefile[MAX_PATH];
-    LPWSTR msiFilePath;
     HKEY props;
     UINT r;
 
@@ -3864,17 +3897,14 @@ static UINT msi_make_package_local( MSIPACKAGE *package, HKEY hkey )
 
     TRACE("Copying to local package %s\n",debugstr_w(packagefile));
 
-    msiFilePath = msi_dup_property( package, szOriginalDatabase );
-    r = CopyFileW( msiFilePath, packagefile, FALSE);
+    r = CopyFileW( package->db->path, packagefile, FALSE);
 
     if (!r)
     {
         ERR("Unable to copy package (%s -> %s) (error %d)\n",
-            debugstr_w(msiFilePath), debugstr_w(packagefile), GetLastError());
-        msi_free( msiFilePath );
+            debugstr_w(package->db->path), debugstr_w(packagefile), GetLastError());
         return ERROR_FUNCTION_FAILED;
     }
-    msi_free( msiFilePath );
 
     msi_reg_set_val_str( hkey, INSTALLPROPERTY_LOCALPACKAGEW, packagefile );
 
@@ -3948,7 +3978,7 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
         {'P','r','o','d','u','c','t','V','e','r','s','i','o','n',0};
 
     SYSTEMTIME systime;
-    static const WCHAR date_fmt[] = {'%','i','%','i','%','i',0};
+    static const WCHAR date_fmt[] = {'%','i','%','0','2','i','%','0','2','i',0};
     LPWSTR upgrade_code;
     WCHAR szDate[9];
 
@@ -4156,27 +4186,6 @@ UINT ACTION_ForceReboot(MSIPACKAGE *package)
     return ERROR_INSTALL_SUSPEND;
 }
 
-static UINT msi_set_sourcedir_props(MSIPACKAGE *package)
-{
-    LPWSTR p, source;
-    DWORD len;
-
-    p = strrchrW( package->PackagePath, '\\' );
-    if (!p)
-        return ERROR_SUCCESS;
-
-    len = p - package->PackagePath + 2;
-    source = msi_alloc( len * sizeof(WCHAR) );
-    lstrcpynW( source, package->PackagePath, len );
-
-    MSI_SetPropertyW( package, cszSourceDir, source );
-    MSI_SetPropertyW( package, cszSOURCEDIR, source );
-
-    msi_free( source );
-
-    return ERROR_SUCCESS;
-}
-
 static UINT ACTION_ResolveSource(MSIPACKAGE* package)
 {
     DWORD attrib;
@@ -4189,9 +4198,9 @@ static UINT ACTION_ResolveSource(MSIPACKAGE* package)
     if (!package->PackagePath)
         return ERROR_SUCCESS;
 
-    msi_set_sourcedir_props(package);
+    msi_set_sourcedir_props(package, TRUE);
 
-    attrib = GetFileAttributesW(package->PackagePath);
+    attrib = GetFileAttributesW(package->db->path);
     if (attrib == INVALID_FILE_ATTRIBUTES)
     {
         LPWSTR prompt;
@@ -4209,7 +4218,7 @@ static UINT ACTION_ResolveSource(MSIPACKAGE* package)
                     INSTALLPROPERTY_DISKPROMPTW,prompt,&size);
         }
         else
-            prompt = strdupW(package->PackagePath);
+            prompt = strdupW(package->db->path);
 
         msg = generate_error_string(package,1302,1,prompt);
         while(attrib == INVALID_FILE_ATTRIBUTES)
@@ -4220,7 +4229,7 @@ static UINT ACTION_ResolveSource(MSIPACKAGE* package)
                 rc = ERROR_INSTALL_USEREXIT;
                 break;
             }
-            attrib = GetFileAttributesW(package->PackagePath);
+            attrib = GetFileAttributesW(package->db->path);
         }
         msi_free(prompt);
         rc = ERROR_SUCCESS;
@@ -4482,7 +4491,7 @@ static UINT ACTION_InstallServices( MSIPACKAGE *package )
 /* converts arg1[~]arg2[~]arg3 to a list of ptrs to the strings */
 static LPCWSTR *msi_service_args_to_vector(LPWSTR args, DWORD *numargs)
 {
-    LPCWSTR *vector;
+    LPCWSTR *vector, *temp_vector;
     LPWSTR p, q;
     DWORD sep_len;
 
@@ -4508,9 +4517,13 @@ static LPCWSTR *msi_service_args_to_vector(LPWSTR args, DWORD *numargs)
         {
             *q = '\0';
 
-            vector = msi_realloc(vector, (*numargs + 1) * sizeof(LPWSTR));
-            if (!vector)
+            temp_vector = msi_realloc(vector, (*numargs + 1) * sizeof(LPWSTR));
+            if (!temp_vector)
+            {
+                msi_free(vector);
                 return NULL;
+            }
+            vector = temp_vector;
 
             p = q + sep_len;
         }
@@ -4944,7 +4957,7 @@ static UINT ITERATE_WriteEnvironmentString( MSIRECORD *rec, LPVOID param )
     size = 0;
     res = RegQueryValueExW(env, name, NULL, &type, NULL, &size);
     if ((res != ERROR_SUCCESS && res != ERROR_FILE_NOT_FOUND) ||
-        (res == ERROR_SUCCESS && type != REG_SZ))
+        (res == ERROR_SUCCESS && type != REG_SZ && type != REG_EXPAND_SZ))
         goto done;
 
     if (res != ERROR_FILE_NOT_FOUND)

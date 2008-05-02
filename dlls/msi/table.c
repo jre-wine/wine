@@ -105,13 +105,13 @@ static WCHAR szType[]    = { 'T','y','p','e',0 };
  * Do not mark them const.
  */
 static MSICOLUMNINFO _Columns_cols[4] = {
-    { szColumns, 1, szTable,  MSITYPE_VALID | MSITYPE_STRING | MSITYPE_KEY | 64, 0 },
-    { szColumns, 2, szNumber, MSITYPE_VALID | MSITYPE_KEY | 2,     2 },
-    { szColumns, 3, szName,   MSITYPE_VALID | MSITYPE_STRING | 64, 4 },
-    { szColumns, 4, szType,   MSITYPE_VALID | 2,                   6 },
+    { szColumns, 1, szTable,  MSITYPE_VALID | MSITYPE_STRING | MSITYPE_KEY | 64, 0, 0, NULL },
+    { szColumns, 2, szNumber, MSITYPE_VALID | MSITYPE_KEY | 2,     2, 0, NULL },
+    { szColumns, 3, szName,   MSITYPE_VALID | MSITYPE_STRING | 64, 4, 0, NULL },
+    { szColumns, 4, szType,   MSITYPE_VALID | 2,                   6, 0, NULL },
 };
 static MSICOLUMNINFO _Tables_cols[1] = {
-    { szTables,  1, szName,   MSITYPE_VALID | MSITYPE_STRING | 64, 0 },
+    { szTables,  1, szName,   MSITYPE_VALID | MSITYPE_STRING | 64, 0, 0, NULL },
 };
 
 #define MAX_STREAM_NAME 0x1f
@@ -481,7 +481,7 @@ end:
 
 static void free_table( MSITABLE *table )
 {
-    int i;
+    UINT i;
     for( i=0; i<table->row_count; i++ )
         msi_free( table->data[i] );
     msi_free( table->data );
@@ -1050,7 +1050,7 @@ static void msi_update_table_columns( MSIDATABASE *db, LPCWSTR name )
 {
     MSITABLE *table;
     UINT size, offset, old_count;
-    int n;
+    UINT n;
 
     table = find_cached_table( db, name );
     old_count = table->col_count;
@@ -1206,7 +1206,7 @@ static UINT TABLE_fetch_stream( struct tagMSIVIEW *view, UINT row, UINT col, ISt
         return r;
 
     /* check the column value is in range */
-    if (ival < 0 || ival > tv->num_cols || ival == col)
+    if (ival > tv->num_cols || ival == col)
     {
         ERR("bad column ref (%u) for stream\n", ival);
         return ERROR_FUNCTION_FAILED;
@@ -1572,6 +1572,13 @@ static UINT TABLE_delete_row( struct tagMSIVIEW *view, UINT row )
         data = tv->table->nonpersistent_data;
     }
 
+    /* reset the hash tables */
+    for (i = 0; i < tv->num_cols; i++)
+    {
+        msi_free( tv->columns[i].hash_table );
+        tv->columns[i].hash_table = NULL;
+    }
+
     if ( row == num_rows - 1 )
         return ERROR_SUCCESS;
 
@@ -1778,7 +1785,7 @@ static UINT TABLE_find_matching_rows( struct tagMSIVIEW *view, UINT col,
 static UINT TABLE_add_ref(struct tagMSIVIEW *view)
 {
     MSITABLEVIEW *tv = (MSITABLEVIEW*)view;
-    int i;
+    UINT i;
 
     TRACE("%p %d\n", view, tv->table->ref_count);
 
@@ -1829,8 +1836,7 @@ static UINT TABLE_release(struct tagMSIVIEW *view)
 {
     MSITABLEVIEW *tv = (MSITABLEVIEW*)view;
     INT ref = tv->table->ref_count;
-    int i;
-    UINT r;
+    UINT i, r;
 
     TRACE("%p %d\n", view, ref);
 

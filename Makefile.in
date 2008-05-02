@@ -258,6 +258,7 @@ ALL_MAKEFILES = \
 	dlls/imaadp32.acm/Makefile \
 	dlls/imagehlp/Makefile \
 	dlls/imm32/Makefile \
+	dlls/imm32/tests/Makefile \
 	dlls/inetcomm/Makefile \
 	dlls/inetcomm/tests/Makefile \
 	dlls/infosoft/Makefile \
@@ -287,6 +288,7 @@ ALL_MAKEFILES = \
 	dlls/mlang/tests/Makefile \
 	dlls/mmdevldr.vxd/Makefile \
 	dlls/monodebg.vxd/Makefile \
+	dlls/mountmgr.sys/Makefile \
 	dlls/mpr/Makefile \
 	dlls/mprapi/Makefile \
 	dlls/msacm32.drv/Makefile \
@@ -641,6 +643,7 @@ dlls/ifsmgr.vxd/Makefile: dlls/ifsmgr.vxd/Makefile.in dlls/Makedll.rules
 dlls/imaadp32.acm/Makefile: dlls/imaadp32.acm/Makefile.in dlls/Makedll.rules
 dlls/imagehlp/Makefile: dlls/imagehlp/Makefile.in dlls/Makedll.rules
 dlls/imm32/Makefile: dlls/imm32/Makefile.in dlls/Makedll.rules
+dlls/imm32/tests/Makefile: dlls/imm32/tests/Makefile.in dlls/Maketest.rules
 dlls/inetcomm/Makefile: dlls/inetcomm/Makefile.in dlls/Makedll.rules
 dlls/inetcomm/tests/Makefile: dlls/inetcomm/tests/Makefile.in dlls/Maketest.rules
 dlls/infosoft/Makefile: dlls/infosoft/Makefile.in dlls/Makedll.rules
@@ -670,6 +673,7 @@ dlls/mlang/Makefile: dlls/mlang/Makefile.in dlls/Makedll.rules
 dlls/mlang/tests/Makefile: dlls/mlang/tests/Makefile.in dlls/Maketest.rules
 dlls/mmdevldr.vxd/Makefile: dlls/mmdevldr.vxd/Makefile.in dlls/Makedll.rules
 dlls/monodebg.vxd/Makefile: dlls/monodebg.vxd/Makefile.in dlls/Makedll.rules
+dlls/mountmgr.sys/Makefile: dlls/mountmgr.sys/Makefile.in dlls/Makedll.rules
 dlls/mpr/Makefile: dlls/mpr/Makefile.in dlls/Makedll.rules
 dlls/mprapi/Makefile: dlls/mprapi/Makefile.in dlls/Makedll.rules
 dlls/msacm32.drv/Makefile: dlls/msacm32.drv/Makefile.in dlls/Makedll.rules

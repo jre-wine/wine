@@ -19,7 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
  * TODO:
- *  - Non-conformant strings
  *  - String structs
  *  - Byte count pointers
  *  - transmit_as/represent as
@@ -790,29 +789,64 @@ void WINAPI NdrConformantStringBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
 ULONG WINAPI NdrConformantStringMemorySize( PMIDL_STUB_MESSAGE pStubMsg,
   PFORMAT_STRING pFormat )
 {
-  ULONG rslt = 0;
+  ULONG bufsize, memsize, esize, i;
 
-  FIXME("(pStubMsg == ^%p, pFormat == ^%p)\n", pStubMsg, pFormat);
+  TRACE("(pStubMsg == ^%p, pFormat == ^%p)\n", pStubMsg, pFormat);
 
-  assert(pStubMsg && pFormat);
+  ReadConformance(pStubMsg, NULL);
+  ReadVariance(pStubMsg, NULL, pStubMsg->MaxCount);
 
-  if (*pFormat == RPC_FC_C_CSTRING) {
-    rslt = NDR_LOCAL_UINT32_READ(pStubMsg->Buffer); /* maxlen */
+  if (pFormat[1] != RPC_FC_STRING_SIZED && (pStubMsg->MaxCount != pStubMsg->ActualCount))
+  {
+    ERR("buffer size %d must equal memory size %ld for non-sized conformant strings\n",
+        pStubMsg->ActualCount, pStubMsg->MaxCount);
+    RpcRaiseException(RPC_S_INVALID_BOUND);
   }
-  else if (*pFormat == RPC_FC_C_WSTRING) {
-    rslt = NDR_LOCAL_UINT32_READ(pStubMsg->Buffer)*2; /* maxlen */
+  if (pStubMsg->Offset)
+  {
+    ERR("conformant strings can't have Offset (%d)\n", pStubMsg->Offset);
+    RpcRaiseException(RPC_S_INVALID_BOUND);
   }
+
+  if (*pFormat == RPC_FC_C_CSTRING) esize = 1;
+  else if (*pFormat == RPC_FC_C_WSTRING) esize = 2;
   else {
     ERR("Unhandled string type: %#x\n", *pFormat);
     /* FIXME: raise an exception */
+    esize = 0;
   }
 
-  if (pFormat[1] != RPC_FC_PAD) {
-    FIXME("sized string format=%d\n", pFormat[1]);
+  memsize = safe_multiply(esize, pStubMsg->MaxCount);
+  bufsize = safe_multiply(esize, pStubMsg->ActualCount);
+
+  /* strings must always have null terminating bytes */
+  if (bufsize < esize)
+  {
+    ERR("invalid string length of %d\n", pStubMsg->ActualCount);
+    RpcRaiseException(RPC_S_INVALID_BOUND);
   }
 
-  TRACE("  --> %u\n", rslt);
-  return rslt;
+  /* verify the buffer is safe to access */
+  if ((pStubMsg->Buffer + bufsize < pStubMsg->Buffer) ||
+      (pStubMsg->Buffer + bufsize > pStubMsg->BufferEnd))
+  {
+    ERR("bufsize 0x%x exceeded buffer end %p of buffer %p\n", bufsize,
+        pStubMsg->BufferEnd, pStubMsg->Buffer);
+    RpcRaiseException(RPC_X_BAD_STUB_DATA);
+  }
+
+  for (i = bufsize - esize; i < bufsize; i++)
+    if (pStubMsg->Buffer[i] != 0)
+    {
+      ERR("string not null-terminated at byte position %d, data is 0x%x\n",
+        i, pStubMsg->Buffer[i]);
+      RpcRaiseException(RPC_S_INVALID_BOUND);
+    }
+
+  safe_buffer_increment(pStubMsg, bufsize);
+  pStubMsg->MemorySize += memsize;
+
+  return pStubMsg->MemorySize;
 }
 
 /************************************************************************
@@ -917,8 +951,45 @@ unsigned char *  WINAPI NdrNonConformantStringMarshall(PMIDL_STUB_MESSAGE pStubM
                                 unsigned char *pMemory,
                                 PFORMAT_STRING pFormat)
 {
-    FIXME("stub\n");
-    return NULL;
+  ULONG esize, size, maxsize;
+
+  TRACE("(pStubMsg == ^%p, pMemory == ^%p, pFormat == ^%p)\n", pStubMsg, pMemory, pFormat);
+
+  maxsize = *(USHORT *)&pFormat[2];
+
+  if (*pFormat == RPC_FC_CSTRING)
+  {
+    ULONG i;
+    const char *str = (const char *)pMemory;
+    for (i = 0; i < maxsize && *str; i++, str++)
+        ;
+    TRACE("string=%s\n", debugstr_an(str, i));
+    pStubMsg->ActualCount = i + 1;
+    esize = 1;
+  }
+  else if (*pFormat == RPC_FC_WSTRING)
+  {
+    ULONG i;
+    const WCHAR *str = (const WCHAR *)pMemory;
+    for (i = 0; i < maxsize && *str; i++, str++)
+        ;
+    TRACE("string=%s\n", debugstr_wn(str, i));
+    pStubMsg->ActualCount = i + 1;
+    esize = 2;
+  }
+  else
+  {
+    ERR("Unhandled string type: %#x\n", *pFormat);
+    RpcRaiseException(RPC_X_BAD_STUB_DATA);
+  }
+
+  pStubMsg->Offset = 0;
+  WriteVariance(pStubMsg);
+
+  size = safe_multiply(esize, pStubMsg->ActualCount);
+  safe_copy_to_buffer(pStubMsg, pMemory, size); /* the string itself */
+
+  return NULL;
 }
 
 /***********************************************************************
@@ -929,8 +1000,70 @@ unsigned char *  WINAPI NdrNonConformantStringUnmarshall(PMIDL_STUB_MESSAGE pStu
                                 PFORMAT_STRING pFormat,
                                 unsigned char fMustAlloc)
 {
-    FIXME("stub\n");
+  ULONG bufsize, memsize, esize, i, maxsize;
+
+  TRACE("(pStubMsg == ^%p, *pMemory == ^%p, pFormat == ^%p, fMustAlloc == %u)\n",
+    pStubMsg, *ppMemory, pFormat, fMustAlloc);
+
+  maxsize = *(USHORT *)&pFormat[2];
+
+  ReadVariance(pStubMsg, NULL, maxsize);
+  if (pStubMsg->Offset)
+  {
+    ERR("non-conformant strings can't have Offset (%d)\n", pStubMsg->Offset);
+    RpcRaiseException(RPC_S_INVALID_BOUND);
+  }
+
+  if (*pFormat == RPC_FC_CSTRING) esize = 1;
+  else if (*pFormat == RPC_FC_WSTRING) esize = 2;
+  else
+  {
+    ERR("Unhandled string type: %#x\n", *pFormat);
+    RpcRaiseException(RPC_X_BAD_STUB_DATA);
+  }
+
+  memsize = esize * maxsize;
+  bufsize = safe_multiply(esize, pStubMsg->ActualCount);
+
+  if (bufsize < esize)
+  {
+    ERR("invalid string length of %d\n", pStubMsg->ActualCount);
+    RpcRaiseException(RPC_S_INVALID_BOUND);
     return NULL;
+  }
+
+  /* verify the buffer is safe to access */
+  if ((pStubMsg->Buffer + bufsize < pStubMsg->Buffer) ||
+      (pStubMsg->Buffer + bufsize > pStubMsg->BufferEnd))
+  {
+    ERR("bufsize 0x%x exceeded buffer end %p of buffer %p\n", bufsize,
+        pStubMsg->BufferEnd, pStubMsg->Buffer);
+    RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    return NULL;
+  }
+
+  /* strings must always have null terminating bytes */
+  for (i = bufsize - esize; i < bufsize; i++)
+    if (pStubMsg->Buffer[i] != 0)
+    {
+      ERR("string not null-terminated at byte position %d, data is 0x%x\n",
+        i, pStubMsg->Buffer[i]);
+      RpcRaiseException(RPC_S_INVALID_BOUND);
+    }
+
+  if (fMustAlloc || !*ppMemory)
+    *ppMemory = NdrAllocate(pStubMsg, memsize);
+
+  safe_copy_from_buffer(pStubMsg, *ppMemory, bufsize);
+
+  if (*pFormat == RPC_FC_CSTRING) {
+    TRACE("string=%s\n", debugstr_an((char*)*ppMemory, pStubMsg->ActualCount));
+  }
+  else if (*pFormat == RPC_FC_WSTRING) {
+    TRACE("string=%s\n", debugstr_wn((LPWSTR)*ppMemory, pStubMsg->ActualCount));
+  }
+
+  return NULL;
 }
 
 /***********************************************************************
@@ -940,7 +1073,41 @@ void WINAPI NdrNonConformantStringBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
                                 unsigned char *pMemory,
                                 PFORMAT_STRING pFormat)
 {
-    FIXME("stub\n");
+  ULONG esize, maxsize;
+
+  TRACE("(pStubMsg == ^%p, pMemory == ^%p, pFormat == ^%p)\n", pStubMsg, pMemory, pFormat);
+
+  maxsize = *(USHORT *)&pFormat[2];
+
+  SizeVariance(pStubMsg);
+
+  if (*pFormat == RPC_FC_CSTRING)
+  {
+    ULONG i;
+    const char *str = (const char *)pMemory;
+    for (i = 0; i < maxsize && *str; i++, str++)
+        ;
+    TRACE("string=%s\n", debugstr_an(str, i));
+    pStubMsg->ActualCount = i + 1;
+    esize = 1;
+  }
+  else if (*pFormat == RPC_FC_WSTRING)
+  {
+    ULONG i;
+    const WCHAR *str = (const WCHAR *)pMemory;
+    for (i = 0; i < maxsize && *str; i++, str++)
+        ;
+    TRACE("string=%s\n", debugstr_wn(str, i));
+    pStubMsg->ActualCount = i + 1;
+    esize = 2;
+  }
+  else
+  {
+    ERR("Unhandled string type: %#x\n", *pFormat);
+    RpcRaiseException(RPC_X_BAD_STUB_DATA);
+  }
+
+  safe_buffer_length_increment(pStubMsg, safe_multiply(esize, pStubMsg->ActualCount));
 }
 
 /***********************************************************************
@@ -949,8 +1116,59 @@ void WINAPI NdrNonConformantStringBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
 ULONG WINAPI NdrNonConformantStringMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
                                 PFORMAT_STRING pFormat)
 {
-    FIXME("stub\n");
-    return 0;
+  ULONG bufsize, memsize, esize, i, maxsize;
+
+  TRACE("(pStubMsg == ^%p, pFormat == ^%p)\n", pStubMsg, pFormat);
+
+  maxsize = *(USHORT *)&pFormat[2];
+
+  ReadVariance(pStubMsg, NULL, maxsize);
+
+  if (pStubMsg->Offset)
+  {
+    ERR("non-conformant strings can't have Offset (%d)\n", pStubMsg->Offset);
+    RpcRaiseException(RPC_S_INVALID_BOUND);
+  }
+
+  if (*pFormat == RPC_FC_CSTRING) esize = 1;
+  else if (*pFormat == RPC_FC_WSTRING) esize = 2;
+  else
+  {
+    ERR("Unhandled string type: %#x\n", *pFormat);
+    RpcRaiseException(RPC_X_BAD_STUB_DATA);
+  }
+
+  memsize = esize * maxsize;
+  bufsize = safe_multiply(esize, pStubMsg->ActualCount);
+
+  /* strings must always have null terminating bytes */
+  if (bufsize < esize)
+  {
+    ERR("invalid string length of %d\n", pStubMsg->ActualCount);
+    RpcRaiseException(RPC_S_INVALID_BOUND);
+  }
+
+  /* verify the buffer is safe to access */
+  if ((pStubMsg->Buffer + bufsize < pStubMsg->Buffer) ||
+      (pStubMsg->Buffer + bufsize > pStubMsg->BufferEnd))
+  {
+    ERR("bufsize 0x%x exceeded buffer end %p of buffer %p\n", bufsize,
+        pStubMsg->BufferEnd, pStubMsg->Buffer);
+    RpcRaiseException(RPC_X_BAD_STUB_DATA);
+  }
+
+  for (i = bufsize - esize; i < bufsize; i++)
+    if (pStubMsg->Buffer[i] != 0)
+    {
+      ERR("string not null-terminated at byte position %d, data is 0x%x\n",
+        i, pStubMsg->Buffer[i]);
+      RpcRaiseException(RPC_S_INVALID_BOUND);
+    }
+
+  safe_buffer_increment(pStubMsg, bufsize);
+  pStubMsg->MemorySize += memsize;
+
+  return pStubMsg->MemorySize;
 }
 
 static inline void dump_pointer_attr(unsigned char attr)
@@ -6023,7 +6241,8 @@ void WINAPI NdrServerContextMarshall(PMIDL_STUB_MESSAGE pStubMsg,
     }
 
     NDRSContextMarshall2(pStubMsg->RpcMsg->Handle, ContextHandle,
-                         pStubMsg->Buffer, RundownRoutine, NULL, 0);
+                         pStubMsg->Buffer, RundownRoutine, NULL,
+                         RPC_CONTEXT_HANDLE_DEFAULT_FLAGS);
     pStubMsg->Buffer += cbNDRContext;
 }
 
@@ -6045,7 +6264,7 @@ NDR_SCONTEXT WINAPI NdrServerContextUnmarshall(PMIDL_STUB_MESSAGE pStubMsg)
     ContextHandle = NDRSContextUnmarshall2(pStubMsg->RpcMsg->Handle,
                                            pStubMsg->Buffer,
                                            pStubMsg->RpcMsg->DataRepresentation,
-                                           NULL, 0);
+                                           NULL, RPC_CONTEXT_HANDLE_DEFAULT_FLAGS);
     pStubMsg->Buffer += cbNDRContext;
 
     return ContextHandle;
@@ -6061,9 +6280,24 @@ void WINAPI NdrContextHandleSize(PMIDL_STUB_MESSAGE pStubMsg,
 NDR_SCONTEXT WINAPI NdrContextHandleInitialize(PMIDL_STUB_MESSAGE pStubMsg,
                                                PFORMAT_STRING pFormat)
 {
+    RPC_SYNTAX_IDENTIFIER *if_id = NULL;
+    ULONG flags = RPC_CONTEXT_HANDLE_DEFAULT_FLAGS;
+
     TRACE("(%p, %p)\n", pStubMsg, pFormat);
+
+    if (pFormat[1] & NDR_CONTEXT_HANDLE_SERIALIZE)
+        flags |= RPC_CONTEXT_HANDLE_SERIALIZE;
+    if (pFormat[1] & NDR_CONTEXT_HANDLE_NO_SERIALIZE)
+        flags |= RPC_CONTEXT_HANDLE_DONT_SERIALIZE;
+    if (pFormat[1] & NDR_STRICT_CONTEXT_HANDLE)
+    {
+        RPC_SERVER_INTERFACE *sif = pStubMsg->StubDesc->RpcInterfaceInformation;
+        if_id = &sif->InterfaceId;
+    }
+
     return NDRSContextUnmarshall2(pStubMsg->RpcMsg->Handle, NULL,
-                                  pStubMsg->RpcMsg->DataRepresentation, NULL, 0);
+                                  pStubMsg->RpcMsg->DataRepresentation, if_id,
+                                  flags);
 }
 
 void WINAPI NdrServerContextNewMarshall(PMIDL_STUB_MESSAGE pStubMsg,
@@ -6071,6 +6305,9 @@ void WINAPI NdrServerContextNewMarshall(PMIDL_STUB_MESSAGE pStubMsg,
                                         NDR_RUNDOWN RundownRoutine,
                                         PFORMAT_STRING pFormat)
 {
+    RPC_SYNTAX_IDENTIFIER *if_id = NULL;
+    ULONG flags = RPC_CONTEXT_HANDLE_DEFAULT_FLAGS;
+
     TRACE("(%p, %p, %p, %p)\n", pStubMsg, ContextHandle, RundownRoutine, pFormat);
 
     ALIGN_POINTER(pStubMsg->Buffer, 4);
@@ -6082,9 +6319,18 @@ void WINAPI NdrServerContextNewMarshall(PMIDL_STUB_MESSAGE pStubMsg,
         RpcRaiseException(RPC_X_BAD_STUB_DATA);
     }
 
-    /* FIXME: do something with pFormat */
+    if (pFormat[1] & NDR_CONTEXT_HANDLE_SERIALIZE)
+        flags |= RPC_CONTEXT_HANDLE_SERIALIZE;
+    if (pFormat[1] & NDR_CONTEXT_HANDLE_NO_SERIALIZE)
+        flags |= RPC_CONTEXT_HANDLE_DONT_SERIALIZE;
+    if (pFormat[1] & NDR_STRICT_CONTEXT_HANDLE)
+    {
+        RPC_SERVER_INTERFACE *sif = pStubMsg->StubDesc->RpcInterfaceInformation;
+        if_id = &sif->InterfaceId;
+    }
+
     NDRSContextMarshall2(pStubMsg->RpcMsg->Handle, ContextHandle,
-                          pStubMsg->Buffer, RundownRoutine, NULL, 0);
+                          pStubMsg->Buffer, RundownRoutine, if_id, flags);
     pStubMsg->Buffer += cbNDRContext;
 }
 
@@ -6092,6 +6338,8 @@ NDR_SCONTEXT WINAPI NdrServerContextNewUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
                                                   PFORMAT_STRING pFormat)
 {
     NDR_SCONTEXT ContextHandle;
+    RPC_SYNTAX_IDENTIFIER *if_id = NULL;
+    ULONG flags = RPC_CONTEXT_HANDLE_DEFAULT_FLAGS;
 
     TRACE("(%p, %p)\n", pStubMsg, pFormat);
 
@@ -6104,12 +6352,74 @@ NDR_SCONTEXT WINAPI NdrServerContextNewUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
         RpcRaiseException(RPC_X_BAD_STUB_DATA);
     }
 
-    /* FIXME: do something with pFormat */
+    if (pFormat[1] & NDR_CONTEXT_HANDLE_SERIALIZE)
+        flags |= RPC_CONTEXT_HANDLE_SERIALIZE;
+    if (pFormat[1] & NDR_CONTEXT_HANDLE_NO_SERIALIZE)
+        flags |= RPC_CONTEXT_HANDLE_DONT_SERIALIZE;
+    if (pFormat[1] & NDR_STRICT_CONTEXT_HANDLE)
+    {
+        RPC_SERVER_INTERFACE *sif = pStubMsg->StubDesc->RpcInterfaceInformation;
+        if_id = &sif->InterfaceId;
+    }
+
     ContextHandle = NDRSContextUnmarshall2(pStubMsg->RpcMsg->Handle,
                                            pStubMsg->Buffer,
                                            pStubMsg->RpcMsg->DataRepresentation,
-                                           NULL, 0);
+                                           if_id, flags);
     pStubMsg->Buffer += cbNDRContext;
 
     return ContextHandle;
+}
+
+/***********************************************************************
+ *           NdrCorrelationInitialize [RPCRT4.@]
+ *
+ * Initializes correlation validity checking.
+ *
+ * PARAMS
+ *  pStubMsg    [I] MIDL_STUB_MESSAGE used during unmarshalling.
+ *  pMemory     [I] Pointer to memory to use as a cache.
+ *  CacheSize   [I] Size of the memory pointed to by pMemory.
+ *  Flags       [I] Reserved. Set to zero.
+ *
+ * RETURNS
+ *  Nothing.
+ */
+void WINAPI NdrCorrelationInitialize(PMIDL_STUB_MESSAGE pStubMsg, void *pMemory, ULONG CacheSize, ULONG Flags)
+{
+    FIXME("(%p, %p, %d, 0x%x): stub\n", pStubMsg, pMemory, CacheSize, Flags);
+    pStubMsg->fHasNewCorrDesc = TRUE;
+}
+
+/***********************************************************************
+ *           NdrCorrelationPass [RPCRT4.@]
+ *
+ * Performs correlation validity checking.
+ *
+ * PARAMS
+ *  pStubMsg    [I] MIDL_STUB_MESSAGE used during unmarshalling.
+ *
+ * RETURNS
+ *  Nothing.
+ */
+void WINAPI NdrCorrelationPass(PMIDL_STUB_MESSAGE pStubMsg)
+{
+    FIXME("(%p): stub\n", pStubMsg);
+}
+
+/***********************************************************************
+ *           NdrCorrelationFree [RPCRT4.@]
+ *
+ * Frees any resources used while unmarshalling parameters that need
+ * correlation validity checking.
+ *
+ * PARAMS
+ *  pStubMsg    [I] MIDL_STUB_MESSAGE used during unmarshalling.
+ *
+ * RETURNS
+ *  Nothing.
+ */
+void WINAPI NdrCorrelationFree(PMIDL_STUB_MESSAGE pStubMsg)
+{
+    FIXME("(%p): stub\n", pStubMsg);
 }

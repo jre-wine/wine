@@ -97,7 +97,7 @@ static ULONG WINAPI IDirect3DDevice8Impl_Release(LPDIRECT3DDEVICE8 iface) {
     TRACE("(%p) : ReleaseRef to %d\n", This, ref);
 
     if (ref == 0) {
-        int i;
+        unsigned i;
 
         TRACE("Releasing wined3d device %p\n", This->WineD3DDevice);
         EnterCriticalSection(&d3d8_cs);
@@ -635,11 +635,6 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateSurface(LPDIRECT3DDEVICE8 iface
     IDirect3DSurface8Impl *object;
     IDirect3DDevice8Impl  *This = (IDirect3DDevice8Impl *)iface;
     TRACE("(%p) Relay\n", This);
-    if(MultisampleQuality < 0) { 
-        FIXME("MultisampleQuality out of range %d, substituting 0\n", MultisampleQuality);
-        /*FIXME: Find out what windows does with a MultisampleQuality < 0 */
-        MultisampleQuality=0;
-    }
 
     if(MultisampleQuality > 0){
         FIXME("MultisampleQuality set to %d, substituting 0\n" , MultisampleQuality);
@@ -1477,7 +1472,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateVertexDeclaration(IDirect3DDevi
     IDirect3DDevice8Impl *This = (IDirect3DDevice8Impl *)iface;
     IDirect3DVertexDeclaration8Impl *object;
     WINED3DVERTEXELEMENT *wined3d_elements;
-    size_t wined3d_element_count;
+    UINT wined3d_element_count;
     HRESULT hr = D3D_OK;
 
     TRACE("(%p) : declaration %p\n", This, declaration);
@@ -1793,7 +1788,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetVertexShaderFunction(LPDIRECT3DDEV
     }
 
     shader = This->shader_handles[pVertexShader - (VS_HIGHESTFIXEDFXF + 1)];
-    hr = IWineD3DVertexShader_GetFunction(shader->wineD3DVertexShader, pData, (UINT *)pSizeOfData);
+    hr = IWineD3DVertexShader_GetFunction(shader->wineD3DVertexShader, pData, pSizeOfData);
     LeaveCriticalSection(&d3d8_cs);
     return hr;
 }
@@ -2000,7 +1995,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetPixelShaderFunction(LPDIRECT3DDEVI
     }
 
     shader = This->shader_handles[pPixelShader - (VS_HIGHESTFIXEDFXF + 1)];
-    hr = IWineD3DPixelShader_GetFunction(shader->wineD3DPixelShader, pData, (UINT *)pSizeOfData);
+    hr = IWineD3DPixelShader_GetFunction(shader->wineD3DPixelShader, pData, pSizeOfData);
     LeaveCriticalSection(&d3d8_cs);
     return hr;
 }

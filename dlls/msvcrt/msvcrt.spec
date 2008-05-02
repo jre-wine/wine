@@ -208,7 +208,7 @@
 @ cdecl _ecvt(double long ptr ptr)
 @ cdecl _endthread ()
 @ cdecl _endthreadex(long)
-@ extern _environ
+@ extern _environ MSVCRT__environ
 @ cdecl _eof(long)
 @ cdecl _errno() MSVCRT__errno
 @ cdecl _except_handler2(ptr ptr ptr ptr)
@@ -217,10 +217,10 @@
 @ varargs _execle(str str)
 @ varargs _execlp(str str)
 @ varargs _execlpe(str str)
-@ cdecl _execv(str str)
-@ cdecl _execve(str str str) MSVCRT__execve
-@ cdecl _execvp(str str)
-@ cdecl _execvpe(str str str)
+@ cdecl _execv(str ptr)
+@ cdecl _execve(str ptr ptr) MSVCRT__execve
+@ cdecl _execvp(str ptr)
+@ cdecl _execvpe(str ptr ptr)
 @ cdecl _exit(long) MSVCRT__exit
 @ cdecl _expand(ptr long)
 @ cdecl _fcloseall() MSVCRT__fcloseall
@@ -518,14 +518,14 @@
 @ cdecl _wcsupr(wstr) ntdll._wcsupr
 @ cdecl _wctime(ptr) MSVCRT__wctime
 @ extern _wenviron
-@ stub _wexecl #(wstr wstr) varargs
-@ stub _wexecle #(wstr wstr) varargs
-@ stub _wexeclp #(wstr wstr) varargs
-@ stub _wexeclpe #(wstr wstr) varargs
-@ stub _wexecv #(wstr ptr)
-@ stub _wexecve #(wstr ptr ptr)
-@ stub _wexecvp #(wstr ptr)
-@ stub _wexecvpe #(wstr ptr ptr)
+@ varargs _wexecl(wstr wstr)
+@ varargs _wexecle(wstr wstr)
+@ varargs _wexeclp(wstr wstr)
+@ varargs _wexeclpe(wstr wstr)
+@ cdecl _wexecv(wstr ptr)
+@ cdecl _wexecve(wstr ptr ptr)
+@ cdecl _wexecvp(wstr ptr)
+@ cdecl _wexecvpe(wstr ptr ptr)
 @ cdecl _wfdopen(long wstr) MSVCRT__wfdopen
 @ cdecl _wfindfirst(wstr ptr) MSVCRT__wfindfirst
 @ cdecl _wfindfirsti64(wstr ptr) MSVCRT__wfindfirsti64
@@ -556,10 +556,10 @@
 @ cdecl _wsearchenv(wstr wstr ptr)
 @ cdecl _wsetlocale(long wstr) MSVCRT__wsetlocale
 @ varargs _wsopen (wstr long long) MSVCRT__wsopen
-@ stub _wspawnl #(long wstr wstr) varargs
-@ stub _wspawnle #(long wstr wstr) varargs
-@ stub _wspawnlp #(long wstr wstr) varargs
-@ stub _wspawnlpe #(long wstr wstr) varargs
+@ varargs _wspawnl(long wstr wstr)
+@ varargs _wspawnle(long wstr wstr)
+@ varargs _wspawnlp(long wstr wstr)
+@ varargs _wspawnlpe(long wstr wstr)
 @ cdecl _wspawnv(long wstr ptr)
 @ cdecl _wspawnve(long wstr ptr ptr)
 @ cdecl _wspawnvp(long wstr ptr)
@@ -570,7 +570,7 @@
 @ cdecl _wstat64(wstr ptr) MSVCRT__wstat64
 @ cdecl _wstrdate(ptr)
 @ cdecl _wstrtime(ptr)
-@ stub _wsystem #(wstr)
+@ cdecl _wsystem(wstr)
 @ cdecl _wtempnam(wstr wstr)
 @ stub _wtmpnam #(ptr)
 @ cdecl _wtoi(wstr) ntdll._wtoi

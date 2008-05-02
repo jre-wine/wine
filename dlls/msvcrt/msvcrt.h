@@ -119,11 +119,13 @@ void   msvcrt_set_errno(int);
 void   _purecall(void);
 void   _amsg_exit(int errnum);
 
-extern char **_environ;
+extern char **MSVCRT__environ;
 extern MSVCRT_wchar_t **_wenviron;
 
 extern char ** msvcrt_SnapshotOfEnvironmentA(char **);
 extern MSVCRT_wchar_t ** msvcrt_SnapshotOfEnvironmentW(MSVCRT_wchar_t **);
+
+MSVCRT_wchar_t *msvcrt_wstrdupa(const char *);
 
 /* FIXME: This should be declared in new.h but it's not an extern "C" so
  * it would not be much use anyway. Even for Winelib applications.
@@ -621,6 +623,7 @@ MSVCRT_clock_t MSVCRT_clock(void);
 double         MSVCRT_difftime(MSVCRT_time_t time1, MSVCRT_time_t time2);
 MSVCRT_time_t  MSVCRT_time(MSVCRT_time_t*);
 MSVCRT_FILE*   MSVCRT__fdopen(int, const char *);
+MSVCRT_FILE*   MSVCRT__wfdopen(int, const MSVCRT_wchar_t *);
 int            MSVCRT_vsnprintf(char *str, unsigned int len, const char *format, va_list valist);
 int            MSVCRT_vsnwprintf(MSVCRT_wchar_t *str, unsigned int len,
                                  const MSVCRT_wchar_t *format, va_list valist );
@@ -631,6 +634,9 @@ int            MSVCRT__write(int,const void*,unsigned int);
 int            _getch(void);
 int            _ismbstrail(const unsigned char* start, const unsigned char* str);
 MSVCRT_intptr_t _spawnve(int,const char*,const char* const *,const char* const *);
+MSVCRT_intptr_t _spawnvpe(int,const char*,const char* const *,const char* const *);
+MSVCRT_intptr_t _wspawnve(int,const MSVCRT_wchar_t*,const MSVCRT_wchar_t* const *,const MSVCRT_wchar_t* const *);
+MSVCRT_intptr_t _wspawnvpe(int,const MSVCRT_wchar_t*,const MSVCRT_wchar_t* const *,const MSVCRT_wchar_t* const *);
 void           _searchenv(const char*,const char*,char*);
 int            _getdrive(void);
 char*          _strdup(const char*);

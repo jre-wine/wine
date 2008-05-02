@@ -709,11 +709,6 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     *This flag has the same behavior as the constant, D3DPRESENTFLAG_DISCARD_DEPTHSTENCIL, in D3DPRESENTFLAG.
     ***************************/
 
-    if(MultisampleQuality < 0) {
-        FIXME("Invalid multisample level %d\n", MultisampleQuality);
-        return WINED3DERR_INVALIDCALL; /* TODO: Check that this is the case! */
-    }
-
     if(MultisampleQuality > 0) {
         FIXME("MultisampleQuality set to %d, substituting 0\n", MultisampleQuality);
         MultisampleQuality=0;
@@ -1705,7 +1700,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetSwapChain(IWineD3DDevice *iface, U
  * Vertex Declaration
  *****/
 static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclaration(IWineD3DDevice* iface, IWineD3DVertexDeclaration** ppVertexDeclaration,
-        IUnknown *parent, const WINED3DVERTEXELEMENT *elements, size_t element_count) {
+        IUnknown *parent, const WINED3DVERTEXELEMENT *elements, UINT element_count) {
     IWineD3DDeviceImpl            *This   = (IWineD3DDeviceImpl *)iface;
     IWineD3DVertexDeclarationImpl *object = NULL;
     HRESULT hr = WINED3D_OK;
@@ -1724,8 +1719,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclaration(IWineD3DDevice*
     return hr;
 }
 
-static size_t ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the GL info, which has the type table */
-                                      DWORD fvf, WINED3DVERTEXELEMENT** ppVertexElements) {
+static unsigned int ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the GL info, which has the type table */
+                                            DWORD fvf, WINED3DVERTEXELEMENT** ppVertexElements) {
 
     unsigned int idx, idx2;
     unsigned int offset;
@@ -1854,7 +1849,7 @@ static size_t ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the GL in
 static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclarationFromFVF(IWineD3DDevice* iface, IWineD3DVertexDeclaration** ppVertexDeclaration, IUnknown *Parent, DWORD Fvf) {
     WINED3DVERTEXELEMENT* elements = NULL;
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
-    size_t size;
+    unsigned int size;
     DWORD hr;
 
     size = ConvertFvfToDeclaration(This, Fvf, &elements);
@@ -4246,12 +4241,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
         ERR("Output vertex declaration not implemented yet\n");
     }
 
-    /* Need any context to write to the vbo. In a non-multithreaded environment a context is there anyway,
-     * and this call is quite performance critical, so don't call needlessly
-     */
-    if(This->createParms.BehaviorFlags & WINED3DCREATE_MULTITHREADED) {
-        ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
-    }
+    /* Need any context to write to the vbo. */
+    ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
 
     /* ProcessVertices reads from vertex buffers, which have to be assigned. DrawPrimitive and DrawPrimitiveUP
      * control the streamIsUP flag, thus restore it afterwards.
@@ -4741,9 +4732,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_EndScene(IWineD3DDevice *iface) {
         return WINED3DERR_INVALIDCALL;
     }
 
-    if(This->createParms.BehaviorFlags & WINED3DCREATE_MULTITHREADED) {
-        ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
-    }
+    ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
     /* We only have to do this if we need to read the, swapbuffers performs a flush for us */
     ENTER_GL();
     glFlush();
@@ -5337,7 +5326,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetPaletteEntries(IWineD3DDevice *ifa
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     int j;
     TRACE("(%p) : PaletteNumber %u\n", This, PaletteNumber);
-    if ( PaletteNumber < 0 || PaletteNumber >= MAX_PALETTES) {
+    if (PaletteNumber >= MAX_PALETTES) {
         WARN("(%p) : (%u) Out of range 0-%u, returning Invalid Call\n", This, PaletteNumber, MAX_PALETTES);
         return WINED3DERR_INVALIDCALL;
     }
@@ -5355,7 +5344,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetPaletteEntries(IWineD3DDevice *ifa
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     int j;
     TRACE("(%p) : PaletteNumber %u\n", This, PaletteNumber);
-    if ( PaletteNumber < 0 || PaletteNumber >= MAX_PALETTES) {
+    if (PaletteNumber >= MAX_PALETTES) {
         WARN("(%p) : (%u) Out of range 0-%u, returning Invalid Call\n", This, PaletteNumber, MAX_PALETTES);
         return WINED3DERR_INVALIDCALL;
     }
@@ -5372,7 +5361,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetPaletteEntries(IWineD3DDevice *ifa
 static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCurrentTexturePalette(IWineD3DDevice *iface, UINT PaletteNumber) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     TRACE("(%p) : PaletteNumber %u\n", This, PaletteNumber);
-    if ( PaletteNumber < 0 || PaletteNumber >= MAX_PALETTES) {
+    if (PaletteNumber >= MAX_PALETTES) {
         WARN("(%p) : (%u) Out of range 0-%u, returning Invalid Call\n", This, PaletteNumber, MAX_PALETTES);
         return WINED3DERR_INVALIDCALL;
     }
@@ -6324,6 +6313,9 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED
 
         TRACE("Source surface %p is onscreen\n", src_surface);
         ActivateContext(This, src_surface, CTXUSAGE_RESOURCELOAD);
+        /* Make sure the drawable is up to date. In the offscreen case
+         * attach_surface_fbo() implicitly takes care of this. */
+        IWineD3DSurface_LoadLocation(src_surface, SFLAG_INDRAWABLE, NULL);
 
         ENTER_GL();
         GL_EXTCALL(glBindFramebufferEXT(GL_READ_FRAMEBUFFER_EXT, 0));
@@ -6350,6 +6342,9 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED
 
         TRACE("Destination surface %p is onscreen\n", dst_surface);
         ActivateContext(This, dst_surface, CTXUSAGE_RESOURCELOAD);
+        /* Make sure the drawable is up to date. In the offscreen case
+         * attach_surface_fbo() implicitly takes care of this. */
+        IWineD3DSurface_LoadLocation(dst_surface, SFLAG_INDRAWABLE, NULL);
 
         ENTER_GL();
         GL_EXTCALL(glBindFramebufferEXT(GL_DRAW_FRAMEBUFFER_EXT, 0));
@@ -6385,6 +6380,8 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED
                 dst_rect->x1, dst_rect->y1, dst_rect->x2, dst_rect->y2, mask, gl_filter));
         checkGLcall("glBlitFramebuffer()");
     }
+
+    IWineD3DSurface_ModifyLocation(dst_surface, SFLAG_INDRAWABLE, TRUE);
 
     if (This->render_offscreen) {
         bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->fbo);

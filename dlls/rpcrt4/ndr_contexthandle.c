@@ -218,7 +218,8 @@ void WINAPI NDRSContextMarshall(NDR_SCONTEXT SContext,
                                NDR_RUNDOWN userRunDownIn)
 {
     TRACE("(%p %p %p)\n", SContext, pBuff, userRunDownIn);
-    NDRSContextMarshall2(I_RpcGetCurrentCallHandle(), SContext, pBuff, userRunDownIn, NULL, 0);
+    NDRSContextMarshall2(I_RpcGetCurrentCallHandle(), SContext, pBuff,
+                         userRunDownIn, NULL, RPC_CONTEXT_HANDLE_DEFAULT_FLAGS);
 }
 
 /***********************************************************************
@@ -230,7 +231,8 @@ void WINAPI NDRSContextMarshallEx(RPC_BINDING_HANDLE hBinding,
                                   NDR_RUNDOWN userRunDownIn)
 {
     TRACE("(%p %p %p %p)\n", hBinding, SContext, pBuff, userRunDownIn);
-    NDRSContextMarshall2(hBinding, SContext, pBuff, userRunDownIn, NULL, 0);
+    NDRSContextMarshall2(hBinding, SContext, pBuff, userRunDownIn, NULL,
+                         RPC_CONTEXT_HANDLE_DEFAULT_FLAGS);
 }
 
 /***********************************************************************
@@ -252,6 +254,9 @@ void WINAPI NDRSContextMarshall2(RPC_BINDING_HANDLE hBinding,
     if (!binding->server || !binding->Assoc)
         RpcRaiseException(ERROR_INVALID_HANDLE);
 
+    if (Flags & RPC_CONTEXT_HANDLE_FLAGS)
+        FIXME("unimplemented flags: 0x%x\n", Flags & RPC_CONTEXT_HANDLE_FLAGS);
+
     if (SContext->userContext)
     {
         status = RpcServerAssoc_UpdateContextHandle(binding->Assoc, SContext, CtxGuard, userRunDownIn);
@@ -259,20 +264,25 @@ void WINAPI NDRSContextMarshall2(RPC_BINDING_HANDLE hBinding,
             RpcRaiseException(status);
         ndr->attributes = 0;
         RpcContextHandle_GetUuid(SContext, &ndr->uuid);
+
+        RPCRT4_RemoveThreadContextHandle(SContext);
+        RpcServerAssoc_ReleaseContextHandle(binding->Assoc, SContext, TRUE);
     }
     else
     {
         if (!RpcContextHandle_IsGuardCorrect(SContext, CtxGuard))
             RpcRaiseException(ERROR_INVALID_HANDLE);
         memset(ndr, 0, sizeof(*ndr));
+
+        RPCRT4_RemoveThreadContextHandle(SContext);
         /* Note: release the context handle twice in this case to release
          * one ref being kept around for the data and one ref for the
          * unmarshall/marshall sequence */
-        if (!RpcServerAssoc_ReleaseContextHandle(binding->Assoc, SContext, FALSE))
+        if (!RpcServerAssoc_ReleaseContextHandle(binding->Assoc, SContext, TRUE))
             return; /* this is to cope with the case of the data not being valid
                      * before and so not having a further reference */
+        RpcServerAssoc_ReleaseContextHandle(binding->Assoc, SContext, FALSE);
     }
-    RpcServerAssoc_ReleaseContextHandle(binding->Assoc, SContext, TRUE);
 }
 
 /***********************************************************************
@@ -282,7 +292,9 @@ NDR_SCONTEXT WINAPI NDRSContextUnmarshall(void *pBuff,
                                           ULONG DataRepresentation)
 {
     TRACE("(%p %08x)\n", pBuff, DataRepresentation);
-    return NDRSContextUnmarshall2(I_RpcGetCurrentCallHandle(), pBuff, DataRepresentation, NULL, 0);
+    return NDRSContextUnmarshall2(I_RpcGetCurrentCallHandle(), pBuff,
+                                  DataRepresentation, NULL,
+                                  RPC_CONTEXT_HANDLE_DEFAULT_FLAGS);
 }
 
 /***********************************************************************
@@ -293,7 +305,8 @@ NDR_SCONTEXT WINAPI NDRSContextUnmarshallEx(RPC_BINDING_HANDLE hBinding,
                                             ULONG DataRepresentation)
 {
     TRACE("(%p %p %08x)\n", hBinding, pBuff, DataRepresentation);
-    return NDRSContextUnmarshall2(hBinding, pBuff, DataRepresentation, NULL, 0);
+    return NDRSContextUnmarshall2(hBinding, pBuff, DataRepresentation, NULL,
+                                  RPC_CONTEXT_HANDLE_DEFAULT_FLAGS);
 }
 
 /***********************************************************************
@@ -313,6 +326,9 @@ NDR_SCONTEXT WINAPI NDRSContextUnmarshall2(RPC_BINDING_HANDLE hBinding,
 
     if (!binding->server || !binding->Assoc)
         RpcRaiseException(ERROR_INVALID_HANDLE);
+
+    if (Flags & RPC_CONTEXT_HANDLE_FLAGS)
+        FIXME("unimplemented flags: 0x%x\n", Flags & RPC_CONTEXT_HANDLE_FLAGS);
 
     if (!pBuff)
         status = RpcServerAssoc_AllocateContextHandle(binding->Assoc, CtxGuard,
@@ -335,5 +351,6 @@ NDR_SCONTEXT WINAPI NDRSContextUnmarshall2(RPC_BINDING_HANDLE hBinding,
     if (status != RPC_S_OK)
         RpcRaiseException(status);
 
+    RPCRT4_PushThreadContextHandle(SContext);
     return SContext;
 }

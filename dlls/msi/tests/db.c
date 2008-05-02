@@ -3777,6 +3777,73 @@ static void test_update(void)
     ok(r == ERROR_SUCCESS, "MsiViewClose failed\n");
     r = MsiCloseHandle(view);
     ok(r == ERROR_SUCCESS, "MsiCloseHandle failed\n");
+
+    query = "CREATE TABLE `Apple` ( `Banana` CHAR(72) NOT NULL, "
+        "`Orange` CHAR(72),  `Pear` INT PRIMARY KEY `Banana`)";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    query = "INSERT INTO `Apple` ( `Banana`, `Orange`, `Pear` )"
+        "VALUES('one', 'two', 3)";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    query = "INSERT INTO `Apple` ( `Banana`, `Orange`, `Pear` )"
+        "VALUES('three', 'four', 5)";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    query = "INSERT INTO `Apple` ( `Banana`, `Orange`, `Pear` )"
+        "VALUES('six', 'two', 7)";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    rec = MsiCreateRecord(2);
+    MsiRecordSetInteger(rec, 1, 8);
+    MsiRecordSetString(rec, 2, "two");
+
+    query = "UPDATE `Apple` SET `Pear` = ? WHERE `Orange` = ?";
+    r = run_query(hdb, rec, query);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    MsiCloseHandle(rec);
+
+    query = "SELECT `Pear` FROM `Apple` ORDER BY `Orange`";
+    r = MsiDatabaseOpenView(hdb, query, &view);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    r = MsiViewExecute(view, 0);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = MsiViewFetch(view, &rec);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = MsiRecordGetInteger(rec, 1);
+    ok(r == 8, "Expected 8, got %d\n", r);
+
+    MsiCloseHandle(rec);
+
+    r = MsiViewFetch(view, &rec);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = MsiRecordGetInteger(rec, 1);
+    ok(r == 8, "Expected 8, got %d\n", r);
+
+    MsiCloseHandle(rec);
+
+    r = MsiViewFetch(view, &rec);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = MsiRecordGetInteger(rec, 1);
+    ok(r == 5, "Expected 5, got %d\n", r);
+
+    MsiCloseHandle(rec);
+
+    r = MsiViewFetch(view, &rec);
+    ok(r == ERROR_NO_MORE_ITEMS, "Expectd ERROR_NO_MORE_ITEMS, got %d\n", r);
+
+    MsiViewClose(view);
+    MsiCloseHandle(view);
+
     r = MsiDatabaseCommit(hdb);
     ok(r == ERROR_SUCCESS, "MsiDatabaseCommit failed\n");
     r = MsiCloseHandle(hdb);
@@ -4924,6 +4991,68 @@ static void test_viewmodify_delete_temporary(void)
     DeleteFileA(msifile);
 }
 
+static void test_deleterow()
+{
+    MSIHANDLE hdb, hview, hrec;
+    const char *query;
+    char buf[MAX_PATH];
+    UINT r;
+    DWORD size;
+
+    DeleteFile(msifile);
+
+    r = MsiOpenDatabase(msifile, MSIDBOPEN_CREATE, &hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    query = "CREATE TABLE `Table` ( `A` CHAR(72) NOT NULL PRIMARY KEY `A` )";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    query = "INSERT INTO `Table` (`A`) VALUES ('one')";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    query = "INSERT INTO `Table` (`A`) VALUES ('two')";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    query = "DELETE FROM `Table` WHERE `A` = 'one'";
+    r = run_query(hdb, 0, query);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = MsiDatabaseCommit(hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    MsiCloseHandle(hdb);
+
+    r = MsiOpenDatabase(msifile, MSIDBOPEN_READONLY, &hdb);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    query = "SELECT * FROM `Table`";
+    r = MsiDatabaseOpenView(hdb, query, &hview);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    r = MsiViewExecute(hview, 0);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    r = MsiViewFetch(hview, &hrec);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    size = MAX_PATH;
+    r = MsiRecordGetStringA(hrec, 1, buf, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(buf, "two"), "Expected two, got %s\n", buf);
+
+    MsiCloseHandle(hrec);
+
+    r = MsiViewFetch(hview, &hrec);
+    ok(r == ERROR_NO_MORE_ITEMS, "Expected ERROR_NO_MORE_ITEMS, got %d\n", r);
+
+    MsiViewClose(hview);
+    MsiCloseHandle(hview);
+    MsiCloseHandle(hdb);
+    DeleteFileA(msifile);
+}
+
 START_TEST(db)
 {
     test_msidatabase();
@@ -4954,4 +5083,5 @@ START_TEST(db)
     test_defaultdatabase();
     test_order();
     test_viewmodify_delete_temporary();
+    test_deleterow();
 }

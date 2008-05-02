@@ -90,8 +90,9 @@ static int fix_headers(char *buf, DWORD post_len)
 static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
 {
     nsIInputStream *ret = NULL;
+    IUnknown *unk;
     IBindStatusCallback *callback;
-    IHttpNegotiate *http_negotiate;
+    IServiceProvider *service_provider;
     BINDINFO bindinfo;
     DWORD bindf = 0;
     DWORD post_len = 0, headers_len = 0;
@@ -108,19 +109,33 @@ static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
     if(!bctx)
         return NULL;
 
-    hres = IBindCtx_GetObjectParam(bctx, _BSCB_Holder_, (IUnknown**)&callback);
+    hres = IBindCtx_GetObjectParam(bctx, _BSCB_Holder_, &unk);
     if(FAILED(hres))
         return NULL;
 
-    hres = IBindStatusCallback_QueryInterface(callback, &IID_IHttpNegotiate,
-                                              (void**)&http_negotiate);
-    if(SUCCEEDED(hres)) {
-        hres = IHttpNegotiate_BeginningTransaction(http_negotiate, emptystr,
-                                                   emptystr, 0, &headers);
-        IHttpNegotiate_Release(http_negotiate);
+    hres = IUnknown_QueryInterface(unk, &IID_IBindStatusCallback, (void**)&callback);
+    if(FAILED(hres)) {
+        IUnknown_Release(unk);
+        return NULL;
+    }
 
-        if(SUCCEEDED(hres) && headers)
-            headers_len = WideCharToMultiByte(CP_ACP, 0, headers, -1, NULL, 0, NULL, NULL);
+    hres = IUnknown_QueryInterface(unk, &IID_IServiceProvider, (void**)&service_provider);
+    IUnknown_Release(unk);
+    if(SUCCEEDED(hres)) {
+        IHttpNegotiate *http_negotiate;
+
+        hres = IServiceProvider_QueryService(service_provider, &IID_IHttpNegotiate, &IID_IHttpNegotiate,
+                                             (void**)&http_negotiate);
+        if(SUCCEEDED(hres)) {
+            hres = IHttpNegotiate_BeginningTransaction(http_negotiate, emptystr,
+                                                       emptystr, 0, &headers);
+            IHttpNegotiate_Release(http_negotiate);
+
+            if(SUCCEEDED(hres) && headers)
+                headers_len = WideCharToMultiByte(CP_ACP, 0, headers, -1, NULL, 0, NULL, NULL);
+        }
+
+        IServiceProvider_Release(service_provider);
     }
 
     memset(&bindinfo, 0, sizeof(bindinfo));
@@ -140,7 +155,6 @@ static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
 
         if(headers_len) {
             WideCharToMultiByte(CP_ACP, 0, headers, -1, data, -1, NULL, NULL);
-            CoTaskMemFree(headers);
             len = fix_headers(data, post_len);
         }
 
@@ -159,6 +173,7 @@ static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
         ret = create_nsstream(data, len+post_len);
     }
 
+    CoTaskMemFree(headers);
     ReleaseBindInfo(&bindinfo);
     IBindStatusCallback_Release(callback);
 
@@ -502,8 +517,24 @@ static ULONG WINAPI MonikerProp_Release(IMonikerProp *iface)
 static HRESULT WINAPI MonikerProp_PutProperty(IMonikerProp *iface, MONIKERPROPERTY mkp, LPCWSTR val)
 {
     HTMLDocument *This = MONPROP_THIS(iface);
-    FIXME("(%p)->(%d %s)\n", This, mkp, debugstr_w(val));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d %s)\n", This, mkp, debugstr_w(val));
+
+    switch(mkp) {
+    case MIMETYPEPROP:
+        heap_free(This->mime);
+        This->mime = heap_strdupW(val);
+        break;
+
+    case CLASSIDPROP:
+        break;
+
+    default:
+        FIXME("mkp %d\n", mkp);
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
 }
 
 static const IMonikerPropVtbl MonikerPropVtbl = {
@@ -689,18 +720,21 @@ static HRESULT WINAPI PersistStreamInit_Save(IPersistStreamInit *iface, LPSTREAM
     DWORD len, written=0;
     HRESULT hres;
 
-    WARN("(%p)->(%p %x) needs more work\n", This, pStm, fClearDirty);
+    TRACE("(%p)->(%p %x)\n", This, pStm, fClearDirty);
 
     hres = get_doc_string(This, &str, &len);
     if(FAILED(hres))
         return hres;
-
 
     hres = IStream_Write(pStm, str, len, &written);
     if(FAILED(hres))
         FIXME("Write failed: %08x\n", hres);
 
     heap_free(str);
+
+    if(fClearDirty)
+        set_dirty(This, VARIANT_FALSE);
+
     return S_OK;
 }
 
@@ -743,4 +777,5 @@ void HTMLDocument_Persist_Init(HTMLDocument *This)
     This->bscallback = NULL;
     This->mon = NULL;
     This->url = NULL;
+    This->mime = NULL;
 }

@@ -61,7 +61,7 @@ static ULONG WINAPI IDirect3DDevice9Impl_Release(LPDIRECT3DDEVICE9 iface) {
     TRACE("(%p) : ReleaseRef to %d\n", This, ref);
 
     if (ref == 0) {
-      int i;
+      unsigned i;
       This->inDestruction = TRUE;
 
       EnterCriticalSection(&d3d9_cs);
@@ -351,11 +351,6 @@ static HRESULT  WINAPI IDirect3DDevice9Impl_CreateSurface(LPDIRECT3DDEVICE9 ifac
     IDirect3DSurface9Impl *object;
     IDirect3DDevice9Impl  *This = (IDirect3DDevice9Impl *)iface;
     TRACE("(%p) Relay\n", This);
-    if(MultisampleQuality < 0) { 
-        FIXME("MultisampleQuality out of range %d, substituting 0\n", MultisampleQuality);
-    /*FIXME: Find out what windows does with a MultisampleQuality < 0 */
-        MultisampleQuality=0;
-    }
     
     if(MultisampleQuality > 0){
         FIXME("MultisampleQuality set to %d, bstituting 0\n", MultisampleQuality);

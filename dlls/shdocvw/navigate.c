@@ -1,5 +1,5 @@
 /*
- * Copyright 2006 Jacek Caban for CodeWeavers
+ * Copyright 2006-2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -30,11 +30,15 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shdocvw);
 
+static const WCHAR emptyW[] = {0};
+
 typedef struct {
     const IBindStatusCallbackVtbl  *lpBindStatusCallbackVtbl;
     const IHttpNegotiateVtbl       *lpHttpNegotiateVtbl;
 
     LONG ref;
+
+    DocHost *doc_host;
 
     HGLOBAL post_data;
     LPWSTR headers;
@@ -88,6 +92,14 @@ static void dump_BINDINFO(BINDINFO *bi)
             );
 }
 
+static void set_status_text(BindStatusCallback *This, LPCWSTR str)
+{
+    if(!This->doc_host || !This->doc_host->frame)
+        return;
+
+    IOleInPlaceFrame_SetStatusText(This->doc_host->frame, str);
+}
+
 #define BINDSC_THIS(iface) DEFINE_THIS(BindStatusCallback, BindStatusCallback, iface)
 
 static HRESULT WINAPI BindStatusCallback_QueryInterface(IBindStatusCallback *iface,
@@ -135,6 +147,8 @@ static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallback *iface)
     TRACE("(%p) ref=%d\n", This, ref);
 
     if(!ref) {
+        if(This->doc_host)
+            IOleClientSite_Release(CLIENTSITE(This->doc_host));
         if(This->post_data)
             GlobalFree(This->post_data);
         heap_free(This->headers);
@@ -148,8 +162,10 @@ static HRESULT WINAPI BindStatusCallback_OnStartBinding(IBindStatusCallback *ifa
        DWORD dwReserved, IBinding *pbind)
 {
     BindStatusCallback *This = BINDSC_THIS(iface);
-    FIXME("(%p)->(%d %p)\n", This, dwReserved, pbind);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d %p)\n", This, dwReserved, pbind);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI BindStatusCallback_GetPriority(IBindStatusCallback *iface,
@@ -172,8 +188,26 @@ static HRESULT WINAPI BindStatusCallback_OnProgress(IBindStatusCallback *iface,
         ULONG ulProgress, ULONG ulProgressMax, ULONG ulStatusCode, LPCWSTR szStatusText)
 {
     BindStatusCallback *This = BINDSC_THIS(iface);
-    FIXME("(%p)->(%d %d %d %s)\n", This, ulProgress, ulProgressMax, ulStatusCode,
+
+    TRACE("(%p)->(%d %d %d %s)\n", This, ulProgress, ulProgressMax, ulStatusCode,
           debugstr_w(szStatusText));
+
+    switch(ulStatusCode) {
+    case BINDSTATUS_BEGINDOWNLOADDATA:
+        set_status_text(This, szStatusText); /* FIXME: "Start downloading from site: %s" */
+        return S_OK;
+    case BINDSTATUS_ENDDOWNLOADDATA:
+        set_status_text(This, szStatusText); /* FIXME: "Downloading from site: %s" */
+        return S_OK;
+    case BINDSTATUS_CLASSIDAVAILABLE:
+    case BINDSTATUS_MIMETYPEAVAILABLE:
+    case BINDSTATUS_BEGINSYNCOPERATION:
+    case BINDSTATUS_ENDSYNCOPERATION:
+        return S_OK;
+    default:
+        FIXME("status code %u\n", ulStatusCode);
+    }
+
     return E_NOTIMPL;
 }
 
@@ -181,8 +215,17 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
         HRESULT hresult, LPCWSTR szError)
 {
     BindStatusCallback *This = BINDSC_THIS(iface);
-    FIXME("(%p)->(%08x %s)\n", This, hresult, debugstr_w(szError));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%08x %s)\n", This, hresult, debugstr_w(szError));
+
+    set_status_text(This, emptyW);
+
+    if(This->doc_host) {
+        IOleClientSite_Release(CLIENTSITE(This->doc_host));
+        This->doc_host = NULL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallback *iface,
@@ -190,18 +233,16 @@ static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallback *iface,
 {
     BindStatusCallback *This = BINDSC_THIS(iface);
 
-    FIXME("(%p)->(%p %p)\n", This, grfBINDF, pbindinfo);
+    TRACE("(%p)->(%p %p)\n", This, grfBINDF, pbindinfo);
 
-    memset(pbindinfo, 0, sizeof(BINDINFO));
-    pbindinfo->cbSize = sizeof(BINDINFO);
-
-    pbindinfo->cbstgmedData = This->post_data_len;
+    *grfBINDF = BINDF_ASYNCHRONOUS;
 
     if(This->post_data) {
         pbindinfo->dwBindVerb = BINDVERB_POST;
 
         pbindinfo->stgmedData.tymed = TYMED_HGLOBAL;
         pbindinfo->stgmedData.u.hGlobal = This->post_data;
+        pbindinfo->cbstgmedData = This->post_data_len;
         pbindinfo->stgmedData.pUnkForRelease = (IUnknown*)BINDSC(This);
         IBindStatusCallback_AddRef(BINDSC(This));
     }
@@ -217,6 +258,44 @@ static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallback *if
     return E_NOTIMPL;
 }
 
+static HRESULT WINAPI BindStatusCallback_OnObjectAvailable(IBindStatusCallback *iface,
+        REFIID riid, IUnknown *punk)
+{
+    BindStatusCallback *This = BINDSC_THIS(iface);
+    IOleObject *oleobj;
+    HRESULT hres;
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), punk);
+
+    IUnknown_AddRef(punk);
+    This->doc_host->document = punk;
+
+    hres = IUnknown_QueryInterface(punk, &IID_IOleObject, (void**)&oleobj);
+    if(SUCCEEDED(hres)) {
+        CLSID clsid;
+
+        hres = IOleObject_GetUserClassID(oleobj, &clsid);
+        if(SUCCEEDED(hres))
+            TRACE("Got clsid %s\n",
+                  IsEqualGUID(&clsid, &CLSID_HTMLDocument) ? "CLSID_HTMLDocument" : debugstr_guid(&clsid));
+
+        hres = IOleObject_SetClientSite(oleobj, CLIENTSITE(This->doc_host));
+        if(FAILED(hres))
+            FIXME("SetClientSite failed: %08x\n", hres);
+
+        IOleObject_Release(oleobj);
+    }else {
+        FIXME("Could not get IOleObject iface: %08x\n", hres);
+    }
+
+    /* FIXME: Call SetAdvise */
+    /* FIXME: Call Invoke(DISPID_READYSTATE) */
+
+    PostMessageW(This->doc_host->hwnd, WB_WM_NAVIGATE2, 0, 0);
+
+    return S_OK;
+}
+
 #undef BSC_THIS
 
 static const IBindStatusCallbackVtbl BindStatusCallbackVtbl = {
@@ -229,7 +308,8 @@ static const IBindStatusCallbackVtbl BindStatusCallbackVtbl = {
     BindStatusCallback_OnProgress,
     BindStatusCallback_OnStopBinding,
     BindStatusCallback_GetBindInfo,
-    BindStatusCallback_OnDataAvailable
+    BindStatusCallback_OnDataAvailable,
+    BindStatusCallback_OnObjectAvailable
 };
 
 #define HTTPNEG_THIS(iface) DEFINE_THIS(BindStatusCallback, HttpNegotiate, iface)
@@ -290,8 +370,8 @@ static const IHttpNegotiateVtbl HttpNegotiateVtbl = {
     HttpNegotiate_OnResponse
 };
 
-static IBindStatusCallback *create_callback(DocHost *This, PBYTE post_data,
-        ULONG post_data_len, LPWSTR headers, VARIANT_BOOL *cancel)
+static IBindStatusCallback *create_callback(DocHost *doc_host, PBYTE post_data,
+        ULONG post_data_len, LPWSTR headers)
 {
     BindStatusCallback *ret = heap_alloc(sizeof(BindStatusCallback));
 
@@ -302,6 +382,9 @@ static IBindStatusCallback *create_callback(DocHost *This, PBYTE post_data,
     ret->post_data = NULL;
     ret->post_data_len = post_data_len;
     ret->headers = NULL;
+
+    ret->doc_host = doc_host;
+    IOleClientSite_AddRef(CLIENTSITE(doc_host));
 
     if(post_data) {
         ret->post_data = GlobalAlloc(0, post_data_len);
@@ -380,6 +463,7 @@ static void on_before_navigate2(DocHost *This, LPCWSTR url, const BYTE *post_dat
         SafeArrayDestroy(V_ARRAY(&var_post_data));
 }
 
+/* FIXME: urlmon should handle it */
 static BOOL try_application_url(LPCWSTR url)
 {
     SHELLEXECUTEINFOW exec_info;
@@ -413,20 +497,11 @@ static BOOL try_application_url(LPCWSTR url)
     return ShellExecuteExW(&exec_info);
 }
 
-static HRESULT navigate(DocHost *This, IMoniker *mon, IBindCtx *bindctx)
+static HRESULT http_load_hack(DocHost *This, IMoniker *mon, IBindStatusCallback *callback, IBindCtx *bindctx)
 {
-    IOleObject *oleobj;
     IPersistMoniker *persist;
-    VARIANT_BOOL cancel = VARIANT_FALSE;
+    IUnknown *doc;
     HRESULT hres;
-
-    if(cancel) {
-        FIXME("Cancel\n");
-        return S_OK;
-    }
-
-    IBindCtx_RegisterObjectParam(bindctx, (LPOLESTR)SZ_HTML_CLIENTSITE_OBJECTPARAM,
-                                 (IUnknown*)CLIENTSITE(This));
 
     /*
      * FIXME:
@@ -434,82 +509,108 @@ static HRESULT navigate(DocHost *This, IMoniker *mon, IBindCtx *bindctx)
      * This should be fixed when mshtml.dll and urlmon.dll will be good enough.
      */
 
-    if(This->document)
-        deactivate_document(This);
-
     hres = CoCreateInstance(&CLSID_HTMLDocument, NULL,
                             CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
-                            &IID_IUnknown, (void**)&This->document);
+                            &IID_IUnknown, (void**)&doc);
 
     if(FAILED(hres)) {
         ERR("Could not create HTMLDocument: %08x\n", hres);
         return hres;
     }
 
-    hres = IUnknown_QueryInterface(This->document, &IID_IPersistMoniker, (void**)&persist);
-    if(FAILED(hres))
+    hres = IUnknown_QueryInterface(doc, &IID_IPersistMoniker, (void**)&persist);
+    if(FAILED(hres)) {
+        IUnknown_Release(doc);
         return hres;
-
-    if(This->frame)
-        IOleInPlaceFrame_EnableModeless(This->frame, FALSE); /* FIXME */
+    }
 
     hres = IPersistMoniker_Load(persist, FALSE, mon, bindctx, 0);
     IPersistMoniker_Release(persist);
 
-    if(This->frame) {
-        static const WCHAR empty[] = {0};
-
-        IOleInPlaceFrame_SetStatusText(This->frame, empty); /* FIXME */
-        IOleInPlaceFrame_EnableModeless(This->frame, TRUE); /* FIXME */
-    }
-
-    if(FAILED(hres)) {
+    if(SUCCEEDED(hres))
+        hres = IBindStatusCallback_OnObjectAvailable(callback, &IID_IUnknown, doc);
+    else
         WARN("Load failed: %08x\n", hres);
-        return hres;
-    }
 
-    hres = IUnknown_QueryInterface(This->document, &IID_IOleObject, (void**)&oleobj);
-    if(FAILED(hres))
-        return hres;
+    IUnknown_Release(doc);
 
-    hres = IOleObject_SetClientSite(oleobj, CLIENTSITE(This));
-    IOleObject_Release(oleobj);
-
-    PostMessageW(This->hwnd, WB_WM_NAVIGATE2, 0, 0);
-
-    return hres;
-
+    return IBindStatusCallback_OnStopBinding(callback, hres, NULL);
 }
 
-static HRESULT bind_url_to_object(DocHost *This, LPCWSTR url, PBYTE post_data, ULONG post_data_len,
+static HRESULT bind_to_object(DocHost *This, IMoniker *mon, LPCWSTR url, IBindCtx *bindctx,
+                              IBindStatusCallback *callback)
+{
+    WCHAR schema[30];
+    DWORD schema_len;
+    HRESULT hres;
+
+    static const WCHAR httpW[] = {'h','t','t','p',0};
+    static const WCHAR httpsW[] = {'h','t','t','p','s',0};
+    static const WCHAR ftpW[]= {'f','t','p',0};
+
+    IBindCtx_RegisterObjectParam(bindctx, (LPOLESTR)SZ_HTML_CLIENTSITE_OBJECTPARAM,
+                                 (IUnknown*)CLIENTSITE(This));
+
+    if(This->frame)
+        IOleInPlaceFrame_EnableModeless(This->frame, FALSE);
+
+    hres = CoInternetParseUrl(url, PARSE_SCHEMA, 0, schema, sizeof(schema)/sizeof(schema[0]),
+            &schema_len, 0);
+    if(SUCCEEDED(hres) &&
+       (!strcmpW(schema, httpW) || !strcmpW(schema, httpsW) || !strcmpW(schema, ftpW))) {
+        hres = http_load_hack(This, mon, callback, bindctx);
+    }else {
+        IUnknown *unk = NULL;
+
+        hres = IMoniker_BindToObject(mon, bindctx, NULL, &IID_IUnknown, (void**)&unk);
+        if(SUCCEEDED(hres)) {
+            hres = S_OK;
+            if(unk)
+                IUnknown_Release(unk);
+        }else if(try_application_url(This->url)) {
+            hres = S_OK;
+        }else {
+            FIXME("BindToObject failed: %08x\n", hres);
+        }
+    }
+
+    if(This->frame)
+        IOleInPlaceFrame_EnableModeless(This->frame, TRUE);
+
+    return S_OK;
+}
+
+static HRESULT navigate_mon(DocHost *This, IMoniker *mon, PBYTE post_data, ULONG post_data_len,
                      LPWSTR headers)
 {
     IBindStatusCallback *callback;
-    IMoniker *mon;
     IBindCtx *bindctx;
     VARIANT_BOOL cancel = VARIANT_FALSE;
+    LPWSTR url;
     HRESULT hres;
 
-    if(!This->hwnd)
-        create_doc_view_hwnd(This);
+    IMoniker_GetDisplayName(mon, NULL, NULL, &url);
+    TRACE("navigating to %s\n", debugstr_w(url));
 
-    hres = CreateURLMoniker(NULL, url, &mon);
-    if(FAILED(hres)) {
-        WARN("CreateURLMoniker failed: %08x\n", hres);
-        return hres;
+    on_before_navigate2(This, url, post_data, post_data_len, headers, &cancel);
+    if(cancel) {
+        FIXME("Navigation canceled\n");
+        CoTaskMemFree(url);
+        return S_OK;
     }
 
-    IMoniker_GetDisplayName(mon, NULL, NULL, &This->url);
-    TRACE("navigating to %s\n", debugstr_w(This->url));
+    if(This->document)
+        deactivate_document(This);
+    CoTaskMemFree(This->url);
+    This->url = url;
 
-    callback = create_callback(This, post_data, post_data_len, (LPWSTR)headers, &cancel);
+    callback = create_callback(This, post_data, post_data_len, (LPWSTR)headers);
     CreateAsyncBindCtx(0, callback, 0, &bindctx);
+
+    hres = bind_to_object(This, mon, This->url, bindctx, callback);
+
     IBindStatusCallback_Release(callback);
-
-    hres = navigate(This, mon, bindctx);
-
     IBindCtx_Release(bindctx);
-    IMoniker_Release(mon);
 
     return hres;
 }
@@ -517,12 +618,19 @@ static HRESULT bind_url_to_object(DocHost *This, LPCWSTR url, PBYTE post_data, U
 HRESULT navigate_url(DocHost *This, LPCWSTR url, const VARIANT *Flags,
                      const VARIANT *TargetFrameName, VARIANT *PostData, VARIANT *Headers)
 {
+    IMoniker *mon;
     PBYTE post_data = NULL;
     ULONG post_data_len = 0;
     LPWSTR headers = NULL;
     HRESULT hres;
 
     TRACE("navigating to %s\n", debugstr_w(url));
+
+    hres = CreateURLMoniker(NULL, url, &mon);
+    if(FAILED(hres)) {
+        WARN("CreateURLMoniker failed: %08x\n", hres);
+        return hres;
+    }
 
     if((Flags && V_VT(Flags) != VT_EMPTY) 
        || (TargetFrameName && V_VT(TargetFrameName) != VT_EMPTY))
@@ -547,8 +655,12 @@ HRESULT navigate_url(DocHost *This, LPCWSTR url, const VARIANT *Flags,
         TRACE("Headers: %s\n", debugstr_w(headers));
     }
 
-    hres = bind_url_to_object(This, url, post_data, post_data_len, headers);
+    if(!This->hwnd)
+        create_doc_view_hwnd(This);
 
+    hres = navigate_mon(This, mon, post_data, post_data_len, headers);
+
+    IMoniker_Release(mon);
     if(post_data)
         SafeArrayUnaccessData(V_ARRAY(PostData));
 
@@ -559,17 +671,12 @@ static HRESULT navigate_hlink(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
                               IBindStatusCallback *callback)
 {
     IHttpNegotiate *http_negotiate;
-    LPWSTR url = NULL;
     PBYTE post_data = NULL;
     ULONG post_data_len = 0;
     LPWSTR headers = NULL;
-    VARIANT_BOOL cancel = VARIANT_FALSE;
     BINDINFO bindinfo;
     DWORD bindf = 0;
     HRESULT hres;
-
-    IMoniker_GetDisplayName(mon, NULL, NULL, &url);
-    TRACE("navigating to %s\n", debugstr_w(url));
 
     hres = IBindStatusCallback_QueryInterface(callback, &IID_IHttpNegotiate,
                                               (void**)&http_negotiate);
@@ -592,24 +699,12 @@ static HRESULT navigate_hlink(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
             post_data = bindinfo.stgmedData.u.hGlobal;
     }
 
-    on_before_navigate2(This, url, post_data, post_data_len, headers, &cancel);
+    hres = navigate_mon(This, mon, post_data, post_data_len, headers);
 
     CoTaskMemFree(headers);
     ReleaseBindInfo(&bindinfo);
 
-    if(cancel) {
-        FIXME("navigation canceled\n");
-        CoTaskMemFree(url);
-        return S_OK;
-    }
-
-    /* FIXME: We should do it after BindToObject call */
-    if(try_application_url(url))
-        return S_OK;
-
-    This->url = url;
-
-    return navigate(This, mon, bindctx);
+    return hres;
 }
 
 HRESULT go_home(DocHost *This)

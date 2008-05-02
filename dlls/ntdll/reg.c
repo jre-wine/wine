@@ -481,13 +481,29 @@ NTSTATUS WINAPI NtQueryValueKey( HANDLE handle, const UNICODE_STRING *name,
     switch(info_class)
     {
     case KeyValueBasicInformation:
-        fixed_size = (char *)((KEY_VALUE_BASIC_INFORMATION *)info)->Name - (char *)info;
+    {
+        KEY_VALUE_BASIC_INFORMATION *basic_info = info;
+        if (FIELD_OFFSET(KEY_VALUE_BASIC_INFORMATION, Name) < length)
+        {
+            memcpy(basic_info->Name, name->Buffer,
+                   min(length - FIELD_OFFSET(KEY_VALUE_BASIC_INFORMATION, Name), name->Length));
+        }
+        fixed_size = FIELD_OFFSET(KEY_VALUE_BASIC_INFORMATION, Name) + name->Length;
         data_ptr = NULL;
         break;
+    }
     case KeyValueFullInformation:
-        data_ptr = (UCHAR *)((KEY_VALUE_FULL_INFORMATION *)info)->Name;
+    {
+        KEY_VALUE_FULL_INFORMATION *full_info = info;
+        if (FIELD_OFFSET(KEY_VALUE_FULL_INFORMATION, Name) < length)
+        {
+            memcpy(full_info->Name, name->Buffer,
+                   min(length - FIELD_OFFSET(KEY_VALUE_FULL_INFORMATION, Name), name->Length));
+        }
+        data_ptr = (UCHAR *)full_info->Name + name->Length;
         fixed_size = (char *)data_ptr - (char *)info;
         break;
+    }
     case KeyValuePartialInformation:
         data_ptr = ((KEY_VALUE_PARTIAL_INFORMATION *)info)->Data;
         fixed_size = (char *)data_ptr - (char *)info;
@@ -501,12 +517,12 @@ NTSTATUS WINAPI NtQueryValueKey( HANDLE handle, const UNICODE_STRING *name,
     {
         req->hkey = handle;
         wine_server_add_data( req, name->Buffer, name->Length );
-        if (length > fixed_size) wine_server_set_reply( req, data_ptr, length - fixed_size );
+        if (length > fixed_size && data_ptr) wine_server_set_reply( req, data_ptr, length - fixed_size );
         if (!(ret = wine_server_call( req )))
         {
             copy_key_value_info( info_class, info, length, reply->type,
-                                 0, wine_server_reply_size(reply) );
-            *result_len = fixed_size + reply->total;
+                                 name->Length, reply->total );
+            *result_len = fixed_size + (info_class == KeyValueBasicInformation ? 0 : reply->total);
             if (length < *result_len) ret = STATUS_BUFFER_OVERFLOW;
         }
     }
@@ -833,7 +849,7 @@ NTSTATUS WINAPI RtlFormatCurrentUserKeyPath( IN OUT PUNICODE_STRING KeyPath)
                     KeyPath->Buffer = (PWCHAR)((LPBYTE)buf + sizeof(pathW));
                     status = RtlConvertSidToUnicodeString(KeyPath,
                                                           ((TOKEN_USER *)buffer)->User.Sid, FALSE);
-                    KeyPath->Buffer = (PWCHAR)buf;
+                    KeyPath->Buffer = buf;
                     KeyPath->Length += sizeof(pathW);
                     KeyPath->MaximumLength += sizeof(pathW);
                 }

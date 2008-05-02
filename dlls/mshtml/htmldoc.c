@@ -185,6 +185,7 @@ static ULONG WINAPI HTMLDocument_Release(IHTMLDocument2 *iface)
         if(This->window)
             IHTMLWindow2_Release(HTMLWINDOW2(This->window));
 
+        heap_free(This->mime);
         detach_selection(This);
         detach_ranges(This);
         release_nodes(This);
@@ -228,8 +229,24 @@ static HRESULT WINAPI HTMLDocument_Invoke(IHTMLDocument2 *iface, DISPID dispIdMe
                             REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
                             VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-    FIXME("(%p)->(%d %s %d %d %p %p %p %p)\n", iface, dispIdMember, debugstr_guid(riid),
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+    HTMLDocument *This = HTMLDOC_THIS(iface);
+
+    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    switch(dispIdMember) {
+    case DISPID_READYSTATE:
+        if(!(wFlags & DISPATCH_PROPERTYGET))
+            return E_INVALIDARG;
+
+        V_VT(pVarResult) = VT_I4;
+        V_I4(pVarResult) = This->readystate;
+        return S_OK;
+
+    default:
+        FIXME("Unsupported dispid %d\n", dispIdMember);
+    }
+
     return E_NOTIMPL;
 }
 

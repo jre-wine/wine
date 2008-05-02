@@ -38,6 +38,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 static const WCHAR brW[] = {'b','r',0};
+static const WCHAR hrW[] = {'h','r',0};
 
 typedef struct {
     const IHTMLTxtRangeVtbl *lpHTMLTxtRangeVtbl;
@@ -132,7 +133,7 @@ static PRUint16 get_node_type(nsIDOMNode *node)
     return type;
 }
 
-static BOOL is_br_node(nsIDOMNode *node)
+static BOOL is_elem_tag(nsIDOMNode *node, LPCWSTR istag)
 {
     nsIDOMElement *elem;
     nsAString tag_str;
@@ -149,8 +150,31 @@ static BOOL is_br_node(nsIDOMNode *node)
     nsIDOMElement_Release(elem);
     nsAString_GetData(&tag_str, &tag);
 
-    if(!strcmpiW(tag, brW))
-        ret = TRUE;
+    ret = !strcmpiW(tag, istag);
+
+    nsAString_Finish(&tag_str);
+
+    return ret;
+}
+
+static BOOL is_space_elem(nsIDOMNode *node)
+{
+    nsIDOMElement *elem;
+    nsAString tag_str;
+    const PRUnichar *tag;
+    BOOL ret = FALSE;
+    nsresult nsres;
+
+    nsres = nsIDOMNode_QueryInterface(node, &IID_nsIDOMElement, (void**)&elem);
+    if(NS_FAILED(nsres))
+        return FALSE;
+
+    nsAString_Init(&tag_str, NULL);
+    nsIDOMElement_GetTagName(elem, &tag_str);
+    nsIDOMElement_Release(elem);
+    nsAString_GetData(&tag_str, &tag);
+
+    ret = !strcmpiW(tag, brW) || !strcmpiW(tag, hrW);
 
     nsAString_Finish(&tag_str);
 
@@ -242,9 +266,12 @@ static void wstrbuf_append_node(wstrbuf_t *buf, nsIDOMNode *node)
         break;
     }
     case ELEMENT_NODE:
-        if(is_br_node(node)) {
+        if(is_elem_tag(node, brW)) {
             static const WCHAR endlW[] = {'\r','\n'};
             wstrbuf_append_len(buf, endlW, 2);
+        }else if(is_elem_tag(node, hrW)) {
+            static const WCHAR endl2W[] = {'\r','\n','\r','\n'};
+            wstrbuf_append_len(buf, endl2W, 4);
         }
     }
 }
@@ -496,8 +523,12 @@ static void range_to_string(HTMLTxtRange *This, wstrbuf_t *buf)
 
     nsIDOMNode_AddRef(end_pos.node);
 
-    if(start_pos.node != end_pos.node && !is_br_node(end_pos.node))
-        wstrbuf_append_nodetxt(buf, end_pos.p, end_pos.off+1);
+    if(start_pos.node != end_pos.node) {
+        if(end_pos.type == TEXT_NODE)
+            wstrbuf_append_nodetxt(buf, end_pos.p, end_pos.off+1);
+        else
+            wstrbuf_append_node(buf, end_pos.node);
+    }
 
     nsIDOMNode_Release(iter);
     dompos_release(&start_pos);
@@ -520,7 +551,7 @@ static WCHAR get_pos_char(const dompos_t *pos)
     case TEXT_NODE:
         return pos->p[pos->off];
     case ELEMENT_NODE:
-        if(is_br_node(pos->node))
+        if(is_space_elem(pos->node))
             return '\n';
     }
 
@@ -630,7 +661,7 @@ static WCHAR next_char(const dompos_t *pos, dompos_t *new_pos)
             return *p;
 
         case ELEMENT_NODE:
-            if(!is_br_node(iter))
+            if(!is_space_elem(iter))
                 break;
 
             if(cspace)
@@ -714,7 +745,7 @@ static WCHAR prev_char(HTMLTxtRange *This, const dompos_t *pos, dompos_t *new_po
         }
 
         case ELEMENT_NODE:
-            if(!is_br_node(iter))
+            if(!is_space_elem(iter))
                 break;
 
             if(skip_space) {

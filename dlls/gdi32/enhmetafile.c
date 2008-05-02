@@ -1669,11 +1669,13 @@ BOOL WINAPI PlayEnhMetaFileRecord(
         const EMRCREATEDIBPATTERNBRUSHPT *lpCreate = (const EMRCREATEDIBPATTERNBRUSHPT *)mr;
         LPVOID lpPackedStruct;
 
-        /* check that offsets and data are contained within the record */
-        if ( !( (lpCreate->cbBmi>=0) && (lpCreate->cbBits>=0) &&
-                (lpCreate->offBmi>=0) && (lpCreate->offBits>=0) &&
-                ((lpCreate->offBmi +lpCreate->cbBmi ) <= mr->nSize) &&
-                ((lpCreate->offBits+lpCreate->cbBits) <= mr->nSize) ) )
+        /* Check that offsets and data are contained within the record
+         * (including checking for wrap arounds).
+         */
+        if (    lpCreate->offBmi  + lpCreate->cbBmi  > mr->nSize
+             || lpCreate->offBits + lpCreate->cbBits > mr->nSize
+             || lpCreate->offBmi  + lpCreate->cbBmi  < lpCreate->offBmi
+             || lpCreate->offBits + lpCreate->cbBits < lpCreate->offBits )
         {
             ERR("Invalid EMR_CREATEDIBPATTERNBRUSHPT record\n");
             break;
@@ -2545,7 +2547,7 @@ static INT CALLBACK cbEnhPaletteCopy( HDC a,
 
     /* Update the passed data as a return code */
     info->lpPe     = NULL; /* Palettes were copied! */
-    info->cEntries = (UINT)dwNumPalToCopy;
+    info->cEntries = dwNumPalToCopy;
 
     return FALSE; /* That's all we need */
   }
@@ -2576,7 +2578,7 @@ UINT WINAPI GetEnhMetaFilePaletteEntries( HENHMETAFILE hEmf,
   if ( enhHeader->nPalEntries == 0 ) return 0;
 
   /* Is the user requesting the number of palettes? */
-  if ( lpPe == NULL ) return (UINT)enhHeader->nPalEntries;
+  if ( lpPe == NULL ) return enhHeader->nPalEntries;
 
   /* Copy cEntries worth of PALETTEENTRY structs into the buffer */
   infoForCallBack.cEntries = cEntries;

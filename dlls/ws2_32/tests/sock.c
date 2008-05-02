@@ -238,7 +238,7 @@ static char* test_buffer ( char *buf, int chunk_size, int n_chunks )
 
 /*
  * This routine is called when a client / server does not expect any more data,
- * but needs to acknowedge the closing of the connection (by reasing 0 bytes).
+ * but needs to acknowledge the closing of the connection (by reading 0 bytes).
  */
 static void read_zero_bytes ( SOCKET s )
 {
@@ -816,10 +816,10 @@ static void do_test( test_setup *test )
     WaitForSingleObject ( server_ready, INFINITE );
 
     wait = WaitForMultipleObjects ( 1 + n, thread, TRUE, 1000 * TEST_TIMEOUT );
-    ok ( wait >= WAIT_OBJECT_0 && wait <= WAIT_OBJECT_0 + n , 
+    ok ( wait <= WAIT_OBJECT_0 + n ,
          "some threads have not completed: %x\n", wait );
 
-    if ( ! ( wait >= WAIT_OBJECT_0 && wait <= WAIT_OBJECT_0 + n ) )
+    if ( ! ( wait <= WAIT_OBJECT_0 + n ) )
     {
         for (i = 0; i <= n; i++)
         {

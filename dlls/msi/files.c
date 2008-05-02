@@ -500,42 +500,6 @@ static void free_media_info( struct media_info *mi )
     msi_free( mi );
 }
 
-static UINT download_remote_cabinet(MSIPACKAGE *package, struct media_info *mi)
-{
-    WCHAR temppath[MAX_PATH];
-    LPWSTR src, ptr;
-    LPCWSTR cab;
-
-    src = strdupW(package->BaseURL);
-    if (!src)
-        return ERROR_OUTOFMEMORY;
-
-    ptr = strrchrW(src, '/');
-    if (!ptr)
-    {
-        msi_free(src);
-        return ERROR_FUNCTION_FAILED;
-    }
-
-    *(ptr + 1) = '\0';
-    ptr = strrchrW(mi->source, '\\');
-    if (!ptr)
-        ptr = mi->source;
-
-    src = msi_realloc(src, (lstrlenW(src) + lstrlenW(ptr)) * sizeof(WCHAR));
-    if (!src)
-        return ERROR_OUTOFMEMORY;
-
-    lstrcatW(src, ptr + 1);
-
-    temppath[0] = '\0';
-    cab = msi_download_file(src, temppath);
-    lstrcpyW(mi->source, cab);
-
-    msi_free(src);
-    return ERROR_SUCCESS;
-}
-
 static UINT load_media_info(MSIPACKAGE *package, MSIFILE *file, struct media_info *mi)
 {
     MSIRECORD *row;
@@ -573,22 +537,20 @@ static UINT load_media_info(MSIPACKAGE *package, MSIFILE *file, struct media_inf
         mi->first_volume = strdupW(mi->volume_label);
 
     source_dir = msi_dup_property(package, cszSourceDir);
+    lstrcpyW(mi->source, source_dir);
 
-    if (mi->cabinet && mi->cabinet[0] == '#')
+    if (file->IsCompressed && mi->cabinet)
     {
-        r = writeout_cabinet_stream(package, &mi->cabinet[1], mi->source);
-        if (r != ERROR_SUCCESS)
+        if (mi->cabinet[0] == '#')
         {
-            ERR("Failed to extract cabinet stream\n");
-            return ERROR_FUNCTION_FAILED;
+            r = writeout_cabinet_stream(package, &mi->cabinet[1], mi->source);
+            if (r != ERROR_SUCCESS)
+            {
+                ERR("Failed to extract cabinet stream\n");
+                return ERROR_FUNCTION_FAILED;
+            }
         }
-    }
-    else
-    {
-        lstrcpyW(mi->source, source_dir);
-
-
-        if (mi->cabinet)
+        else
             lstrcatW(mi->source, mi->cabinet);
     }
 
@@ -627,7 +589,11 @@ static UINT ready_media(MSIPACKAGE *package, MSIFILE *file, struct media_info *m
         GetFileAttributesW(mi->source) == INVALID_FILE_ATTRIBUTES &&
         package->BaseURL && UrlIsW(package->BaseURL, URLIS_URL))
     {
-        return download_remote_cabinet(package, mi);
+        WCHAR temppath[MAX_PATH];
+
+        msi_download_file(mi->source, temppath);
+        lstrcpyW(mi->source, temppath);
+        return ERROR_SUCCESS;
     }
 
     /* check volume matches, change media if not */
@@ -935,6 +901,7 @@ static UINT ITERATE_DuplicateFiles(MSIRECORD *row, LPVOID param)
     }
 
     dest = build_directory_name(2, dest_path, dest_name);
+    create_full_pathW(dest);
 
     TRACE("Duplicating file %s to %s\n",debugstr_w(file->TargetPath),
                     debugstr_w(dest)); 

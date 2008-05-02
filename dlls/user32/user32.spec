@@ -304,7 +304,7 @@
 @ stdcall GetKeyboardType(long)
 @ stdcall GetLastActivePopup(long)
 @ stdcall GetLastInputInfo(ptr)
-# @ stub GetLayeredWindowAttributes
+@ stdcall GetLayeredWindowAttributes(long ptr ptr ptr)
 # @ stub GetListBoxInfo
 @ stdcall GetMenu(long)
 @ stdcall GetMenuBarInfo(long long long ptr)
@@ -563,7 +563,7 @@
 # @ stub RegisterMessagePumpHook
 @ stub RegisterNetworkCapabilities
 @ stdcall RegisterRawInputDevices(ptr long long)
-@ stub RegisterServicesProcess
+@ stdcall RegisterServicesProcess(long)
 @ stdcall RegisterShellHookWindow (long)
 @ stdcall RegisterSystemThread(long long)
 @ stdcall RegisterTasklist (long)
@@ -639,6 +639,7 @@
 @ stdcall SetMessageQueue(long)
 @ stdcall SetParent(long long)
 @ stdcall SetProcessDefaultLayout(long)
+@ stdcall SetProcessDPIAware()
 @ stdcall SetProcessWindowStation(long)
 @ stdcall SetProgmanWindow (long)
 @ stdcall SetPropA(long str long)

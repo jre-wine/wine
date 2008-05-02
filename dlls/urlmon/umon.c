@@ -473,16 +473,21 @@ static HRESULT WINAPI URLMonikerImpl_BindToObject(IMoniker* iface,
 						  IBindCtx* pbc,
 						  IMoniker* pmkToLeft,
 						  REFIID riid,
-						  VOID** ppvResult)
+						  VOID** ppv)
 {
     URLMonikerImpl *This = (URLMonikerImpl *)iface;
+    IRunningObjectTable *obj_tbl;
+    HRESULT hres;
 
-    *ppvResult=0;
+    TRACE("(%p)->(%p,%p,%s,%p): stub\n", This, pbc, pmkToLeft, debugstr_guid(riid), ppv);
 
-    FIXME("(%p)->(%p,%p,%s,%p): stub\n",This,pbc,pmkToLeft,debugstr_guid(riid),
-	  ppvResult);
+    hres = IBindCtx_GetRunningObjectTable(pbc, &obj_tbl);
+    if(SUCCEEDED(hres)) {
+        FIXME("use running object table\n");
+        IRunningObjectTable_Release(obj_tbl);
+    }
 
-    return E_NOTIMPL;
+    return bind_to_object(iface, This->URLName, pbc, riid, ppv);
 }
 
 /******************************************************************************
@@ -743,7 +748,7 @@ static HRESULT WINAPI URLMonikerImpl_BindToStorage(IMoniker* iface,
 
     TRACE("(%p)->(%p %p %s %p)\n", This, pbc, pmkToLeft, debugstr_guid(riid), ppvObject);
 
-    return start_binding(This->URLName, pbc, riid, ppvObject);
+    return bind_to_storage(This->URLName, pbc, riid, ppvObject);
 }
 
 /******************************************************************************

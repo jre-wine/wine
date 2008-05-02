@@ -427,7 +427,12 @@ BOOL MF_PlayMetaFile( HDC hdc, METAHEADER *mh)
                   mr->rdSize,offset,mh->mtSize*2);
             break;
 	}
+
 	offset += mr->rdSize * 2;
+	if (mr->rdFunction == META_EOF) {
+	    TRACE("Got META_EOF so stopping\n");
+	    break;
+	}
 	PlayMetaFileRecord( hdc, ht, mr, mh->mtNoObjects );
     }
 
@@ -1271,7 +1276,7 @@ static BOOL MF_Play_MetaExtTextOut(HDC hdc, METARECORD *mr)
         {
             dxx = (LPINT16)(sot+(((s1+1)>>1)*2));
             dx = HeapAlloc( GetProcessHeap(), 0, s1*sizeof(INT));
-            if (dx) for (i = 0; i < s1; i++) dx[i] = (SHORT)dxx[i];
+            if (dx) for (i = 0; i < s1; i++) dx[i] = dxx[i];
         }
 	else {
             TRACE("%s  len: %d\n",  sot, mr->rdSize);

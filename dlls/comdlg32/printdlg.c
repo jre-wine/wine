@@ -2701,6 +2701,29 @@ static void PRINTDLG_PS_SetOrientationW(HWND hDlg, PageSetupDataW* pda)
     }
 }
 
+static void PRINTDLG_PS_UpdatePrintDlgW(PageSetupDataW* pda, HWND hDlg)
+{
+    DEVMODEW* dm;
+    DWORD sel;
+
+    dm = GlobalLock(pda->pdlg.hDevMode);
+
+    if(!dm)
+        return;
+
+    if(pda->curdlg.ptPaperSize.y > pda->curdlg.ptPaperSize.x)
+        dm->u1.s1.dmOrientation = DMORIENT_PORTRAIT;
+    else
+        dm->u1.s1.dmOrientation = DMORIENT_LANDSCAPE;
+
+    sel = SendDlgItemMessageW(hDlg, cmb2, CB_GETCURSEL, 0, 0);
+
+    if(sel != CB_ERR)
+        dm->u1.s1.dmPaperSize = SendDlgItemMessageW(hDlg, cmb2, CB_GETITEMDATA, sel, 0);
+
+    GlobalUnlock(pda->pdlg.hDevMode);
+}
+
 static BOOL
 PRINTDLG_PS_ChangePrinterW(HWND hDlg, PageSetupDataW *pda) {
     DEVNAMES	*dn;
@@ -2985,6 +3008,7 @@ PRINTDLG_PS_WMCommandW(
     case psh3: {
 	pda->pdlg.Flags		= 0;
 	pda->pdlg.hwndOwner	= hDlg;
+        PRINTDLG_PS_UpdatePrintDlgW(pda, hDlg);
 	if (PrintDlgW(&(pda->pdlg)))
 	    PRINTDLG_PS_ChangePrinterW(hDlg,pda);
 	return TRUE;

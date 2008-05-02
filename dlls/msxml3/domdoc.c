@@ -345,6 +345,8 @@ static HRESULT WINAPI domdoc_QueryInterface( IXMLDOMDocument2 *iface, REFIID rii
 
     TRACE("%p %s %p\n", This, debugstr_guid( riid ), ppvObject );
 
+    *ppvObject = NULL;
+
     if ( IsEqualGUID( riid, &IID_IUnknown ) ||
          IsEqualGUID( riid, &IID_IXMLDOMDocument ) ||
          IsEqualGUID( riid, &IID_IXMLDOMDocument2 ) )
@@ -359,6 +361,11 @@ static HRESULT WINAPI domdoc_QueryInterface( IXMLDOMDocument2 *iface, REFIID rii
     else if (IsEqualGUID(&IID_IPersistStream, riid))
     {
         *ppvObject = (IPersistStream*)&(This->lpvtblIPersistStream);
+    }
+    else if(IsEqualGUID(&IID_IRunnableObject, riid))
+    {
+        TRACE("IID_IRunnableObject not supported returning NULL\n");
+        return E_NOINTERFACE;
     }
     else
     {
@@ -909,8 +916,29 @@ static HRESULT WINAPI domdoc_createComment(
     BSTR data,
     IXMLDOMComment** comment )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domdoc *This = impl_from_IXMLDOMDocument2( iface );
+    xmlNodePtr xmlnode;
+    xmlChar *xml_content;
+
+    TRACE("%p->(%s %p)\n", iface, debugstr_w(data), comment);
+
+    if(!comment)
+        return E_INVALIDARG;
+
+    *comment = NULL;
+
+    xml_content = xmlChar_from_wchar((WCHAR*)data);
+    xmlnode = xmlNewComment(xml_content);
+    HeapFree(GetProcessHeap(), 0, xml_content);
+
+    if(!xmlnode)
+        return E_FAIL;
+
+    xmlnode->doc = get_doc( This );
+
+    *comment = (IXMLDOMComment*)create_comment(xmlnode);
+
+    return S_OK;
 }
 
 
@@ -937,6 +965,12 @@ static HRESULT WINAPI domdoc_createProcessingInstruction(
 
     TRACE("%p->(%s %s %p)\n", iface, debugstr_w(target), debugstr_w(data), pi);
 
+    if(!pi)
+        return E_INVALIDARG;
+
+    if(!target || lstrlenW(target) == 0)
+        return E_FAIL;
+
     xml_target = xmlChar_from_wchar((WCHAR*)target);
     xml_content = xmlChar_from_wchar((WCHAR*)data);
 
@@ -960,8 +994,29 @@ static HRESULT WINAPI domdoc_createAttribute(
     BSTR name,
     IXMLDOMAttribute** attribute )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domdoc *This = impl_from_IXMLDOMDocument2( iface );
+    xmlNodePtr xmlnode;
+    xmlChar *xml_name;
+
+    TRACE("%p->(%s %p)\n", iface, debugstr_w(name), attribute);
+
+    if(!attribute)
+        return E_INVALIDARG;
+
+    *attribute = NULL;
+
+    xml_name = xmlChar_from_wchar((WCHAR*)name);
+    xmlnode = (xmlNode *)xmlNewProp(NULL, xml_name, NULL);
+    HeapFree(GetProcessHeap(), 0, xml_name);
+
+    if(!xmlnode)
+        return E_FAIL;
+
+    xmlnode->doc = get_doc( This );
+
+    *attribute = (IXMLDOMAttribute*)create_attribute(xmlnode);
+
+    return S_OK;
 }
 
 

@@ -114,7 +114,7 @@ static inline void DUMPPACKET(WTPACKET packet)
 
 static inline void DUMPCONTEXT(LOGCONTEXTW lc)
 {
-    TRACE("context: %s, %x, %x, %x, %x, %x, %x, %x%s, %x%s, %x%s, %x, %x, %i, %i, %i, %i ,%i, %i, %i, %i, %i,%i, %i, %i, %i, %i, %i, %i, %i, %i, %i, %i %i %i",
+    TRACE("context: %s, %x, %x, %x, %x, %x, %x, %x%s, %x%s, %x%s, %x, %x, %i, %i, %i, %i ,%i, %i, %i, %i, %i,%i, %i, %i, %i, %i, %i, %i, %i, %i, %i, %i %i %i\n",
           wine_dbgstr_w(lc.lcName), lc.lcOptions, lc.lcStatus, lc.lcLocks, lc.lcMsgBase,
           lc.lcDevice, lc.lcPktRate, lc.lcPktData, DUMPBITS(lc.lcPktData),
           lc.lcPktMode, DUMPBITS(lc.lcPktMode), lc.lcMoveMask,
@@ -164,21 +164,6 @@ static inline DWORD ScaleForContext(DWORD In, DWORD InOrg, DWORD InExt, DWORD
         return ((In - InOrg) * abs(OutExt) / abs(InExt)) + OutOrg;
     else
         return ((abs(InExt) - (In - InOrg))*abs(OutExt) / abs(InExt)) + OutOrg;
-}
-
-LPOPENCONTEXT FindOpenContext(HWND hwnd)
-{
-    LPOPENCONTEXT ptr;
-
-    EnterCriticalSection(&csTablet);
-    ptr = gOpenContexts;
-    while (ptr)
-    {
-        TRACE("Trying Context %p (%p %p)\n",ptr->handle,hwnd,ptr->hwndOwner);
-        if (ptr->hwndOwner == hwnd) break;
-    }
-    LeaveCriticalSection(&csTablet);
-    return ptr;
 }
 
 LPOPENCONTEXT AddPacketToContextQueue(LPWTPACKET packet, HWND hwnd)
@@ -367,6 +352,8 @@ static VOID TABLET_BlankPacketData(LPOPENCONTEXT context, LPVOID lpPkt, INT n)
 UINT WINAPI WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
 {
     UINT result;
+
+    TRACE("(%d, %d, %p, %d)\n", wCategory, nIndex, lpOutput, bUnicode);
     if (gLoaded == FALSE)
          LoadTablet();
 
@@ -409,7 +396,7 @@ UINT WINAPI WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
                 LOGCONTEXTWtoA(&buf, lpOutput);
         }
 
-        return bUnicode ? sizeof(LOGCONTEXTW) : sizeof(LOGCONTEXTA);
+        result = bUnicode ? sizeof(LOGCONTEXTW) : sizeof(LOGCONTEXTA);
     }
     else if (is_string_field(wCategory, nIndex) && !bUnicode)
     {
@@ -422,6 +409,7 @@ UINT WINAPI WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
     else
         result =  pWTInfoW(wCategory, nIndex, lpOutput);
 
+    TRACE("returns %d\n", result);
     return result;
 }
 

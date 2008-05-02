@@ -113,9 +113,14 @@ static LRESULT WINAPI nsembed_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
          * Gecko grabs focus in edit mode and some apps don't like it.
          * We should somehow prevent grabbing focus.
          */
+
+        TRACE("WM_RESETFOCUS_HACK\n");
+
         if(This->reset_focus) {
             SetFocus(This->reset_focus);
             This->reset_focus = NULL;
+            if(This->doc)
+                This->doc->focus = FALSE;
         }
     }
 
@@ -298,6 +303,15 @@ static void set_lang(nsIPrefBranch *pref)
         ERR("SetCharPref failed: %08x\n", nsres);
 }
 
+static void set_bool_pref(nsIPrefBranch *pref, const char *pref_name, BOOL val)
+{
+    nsresult nsres;
+
+    nsres = nsIPrefBranch_SetBoolPref(pref, pref_name, val);
+    if(NS_FAILED(nsres))
+        ERR("Could not set pref %s\n", debugstr_a(pref_name));
+}
+
 static void set_profile(void)
 {
     nsIPrefBranch *pref;
@@ -335,6 +349,8 @@ static void set_profile(void)
     }
 
     set_lang(pref);
+    set_bool_pref(pref, "security.warn_entering_secure", FALSE);
+    set_bool_pref(pref, "security.warn_submit_insecure", FALSE);
 
     nsIPrefBranch_Release(pref);
 }

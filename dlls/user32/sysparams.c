@@ -2898,7 +2898,7 @@ BOOL WINAPI SetSysColors( INT nChanges, const INT *lpSysColor,
  */
 DWORD WINAPI SetSysColorsTemp( const COLORREF *pPens, const HBRUSH *pBrushes, DWORD n)
 {
-    int i;
+    DWORD i;
 
     if (pPens && pBrushes) /* "set" call */
     {
@@ -3101,4 +3101,14 @@ BOOL WINAPI EnumDisplaySettingsExW(LPCWSTR lpszDeviceName, DWORD iModeNum,
     GetDesktopWindow();
 
     return USER_Driver->pEnumDisplaySettingsEx(lpszDeviceName, iModeNum, lpDevMode, dwFlags);
+}
+
+/***********************************************************************
+ *              SetProcessDPIAware   (USER32.@)
+ */
+BOOL WINAPI SetProcessDPIAware( VOID )
+{
+    FIXME( "stub!\n");
+
+    return TRUE;
 }

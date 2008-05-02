@@ -1068,7 +1068,7 @@ typedef struct _SYSTEM_CPU_INFORMATION {
 #define CPU_FEATURE_PAT    0x00000400   /* Page Attribute Table */
 #define CPU_FEATURE_FXSR   0x00000800   /* FXSAVE and FXSTORE instructions */
 #define CPU_FEATURE_SEP    0x00001000   /* SYSENTER and SYSEXIT instructions */
-#define CPU_FEATURE_SSE    0x00002000   /* SSE extenstions (ext. MMX) */
+#define CPU_FEATURE_SSE    0x00002000   /* SSE extensions (ext. MMX) */
 #define CPU_FEATURE_3DNOW  0x00008000   /* 3DNOW instructions available 
                                            (FIXME: needs to be confirmed) */
 #define CPU_FEATURE_SSE2   0x00010000   /* SSE2 extensions (XMMI64) */
@@ -1479,6 +1479,7 @@ typedef struct _RTL_HANDLE_TABLE
 typedef void (CALLBACK *PNTAPCFUNC)(ULONG_PTR,ULONG_PTR,ULONG_PTR); /* FIXME: not the right name */
 typedef void (CALLBACK *PRTL_THREAD_START_ROUTINE)(LPVOID); /* FIXME: not the right name */
 typedef DWORD (CALLBACK *PRTL_WORK_ITEM_ROUTINE)(LPVOID); /* FIXME: not the right name */
+typedef void (NTAPI *RTL_WAITORTIMERCALLBACKFUNC)(PVOID,BOOLEAN); /* FIXME: not the right name */
 
 
 /* DbgPrintEx default levels */
@@ -2109,6 +2110,8 @@ NTSYSAPI NTSTATUS  WINAPI RtlDeleteRegistryValue(ULONG, PCWSTR, PCWSTR);
 NTSYSAPI void      WINAPI RtlDeleteResource(LPRTL_RWLOCK);
 NTSYSAPI NTSTATUS  WINAPI RtlDeleteSecurityObject(PSECURITY_DESCRIPTOR*);
 NTSYSAPI PRTL_USER_PROCESS_PARAMETERS WINAPI RtlDeNormalizeProcessParams(RTL_USER_PROCESS_PARAMETERS*);
+NTSYSAPI NTSTATUS  WINAPI RtlDeregisterWait(HANDLE);
+NTSYSAPI NTSTATUS  WINAPI RtlDeregisterWaitEx(HANDLE,HANDLE);
 NTSYSAPI NTSTATUS  WINAPI RtlDestroyAtomTable(RTL_ATOM_TABLE);
 NTSYSAPI NTSTATUS  WINAPI RtlDestroyEnvironment(PWSTR);
 NTSYSAPI NTSTATUS  WINAPI RtlDestroyHandleTable(RTL_HANDLE_TABLE *);
@@ -2257,6 +2260,7 @@ NTSYSAPI void      WINAPI RtlRaiseException(PEXCEPTION_RECORD);
 NTSYSAPI void      WINAPI RtlRaiseStatus(NTSTATUS);
 NTSYSAPI ULONG     WINAPI RtlRandom(PULONG);
 NTSYSAPI PVOID     WINAPI RtlReAllocateHeap(HANDLE,ULONG,PVOID,SIZE_T);
+NTSYSAPI NTSTATUS  WINAPI RtlRegisterWait(PHANDLE,HANDLE,RTL_WAITORTIMERCALLBACKFUNC,PVOID,ULONG,ULONG);
 NTSYSAPI void      WINAPI RtlReleaseActivationContext(HANDLE);
 NTSYSAPI void      WINAPI RtlReleasePebLock(void);
 NTSYSAPI void      WINAPI RtlReleaseResource(LPRTL_RWLOCK);

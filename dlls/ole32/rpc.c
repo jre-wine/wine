@@ -118,6 +118,7 @@ struct dispatch_params
     IID                iid; /* ID of interface being called */
     IUnknown          *iface; /* interface being called */
     HANDLE             handle; /* handle that will become signaled when call finishes */
+    BOOL               bypass_rpcrt; /* bypass RPC runtime? */
     RPC_STATUS         status; /* status (out) */
     HRESULT            hr; /* hresult (out) */
 };
@@ -127,8 +128,11 @@ struct message_state
     RPC_BINDING_HANDLE binding_handle;
     ULONG prefix_data_len;
     SChannelHookCallInfo channel_hook_info;
+    BOOL bypass_rpcrt;
 
     /* client only */
+    HWND target_hwnd;
+    DWORD target_tid;
     struct dispatch_params params;
 };
 
@@ -243,8 +247,6 @@ static unsigned char * ChannelHooks_ClientFillBuffer(SChannelHookCallInfo *info,
     }
 
     LeaveCriticalSection(&csChannelHook);
-
-    HeapFree(GetProcessHeap(), 0, data);
 
     return buffer;
 }
@@ -365,8 +367,6 @@ static unsigned char * ChannelHooks_ServerFillBuffer(SChannelHookCallInfo *info,
     }
 
     LeaveCriticalSection(&csChannelHook);
-
-    HeapFree(GetProcessHeap(), 0, data);
 
     return buffer;
 }
@@ -511,7 +511,16 @@ static HRESULT WINAPI ServerRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
             msg->BufferLength += FIELD_OFFSET(WIRE_ORPC_EXTENT, data[0]);
     }
 
-    status = I_RpcGetBuffer(msg);
+    if (message_state->bypass_rpcrt)
+    {
+        msg->Buffer = HeapAlloc(GetProcessHeap(), 0, msg->BufferLength);
+        if (msg->Buffer)
+            status = RPC_S_OK;
+        else
+            status = ERROR_OUTOFMEMORY;
+    }
+    else
+        status = I_RpcGetBuffer(msg);
 
     orpcthat = (ORPCTHAT *)msg->Buffer;
     msg->Buffer = (char *)msg->Buffer + FIELD_OFFSET(ORPCTHAT, extensions);
@@ -550,6 +559,8 @@ static HRESULT WINAPI ServerRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
         }
     }
 
+    HeapFree(GetProcessHeap(), 0, channel_hook_data);
+
     /* store the prefixed data length so that we can restore the real buffer
      * later */
     message_state->prefix_data_len = (char *)msg->Buffer - (char *)orpcthat;
@@ -560,6 +571,24 @@ static HRESULT WINAPI ServerRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
     TRACE("-- %ld\n", status);
 
     return HRESULT_FROM_WIN32(status);
+}
+
+static HANDLE ClientRpcChannelBuffer_GetEventHandle(ClientRpcChannelBuffer *This)
+{
+    HANDLE event = InterlockedExchangePointer(&This->event, NULL);
+
+    /* Note: must be auto-reset event so we can reuse it without a call
+    * to ResetEvent */
+    if (!event) event = CreateEventW(NULL, FALSE, FALSE, NULL);
+
+    return event;
+}
+
+static void ClientRpcChannelBuffer_ReleaseEventHandle(ClientRpcChannelBuffer *This, HANDLE event)
+{
+    if (InterlockedCompareExchangePointer(&This->event, event, NULL))
+        /* already a handle cached in This */
+        CloseHandle(event);
 }
 
 static HRESULT WINAPI ClientRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface, RPCOLEMESSAGE* olemsg, REFIID riid)
@@ -574,6 +603,9 @@ static HRESULT WINAPI ClientRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
     struct channel_hook_buffer_data *channel_hook_data;
     unsigned int channel_hook_count;
     ULONG extension_count;
+    IPID ipid;
+    HRESULT hr;
+    APARTMENT *apt = NULL;
 
     TRACE("(%p)->(%p,%s)\n", This, olemsg, debugstr_guid(riid));
 
@@ -597,12 +629,17 @@ static HRESULT WINAPI ClientRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
     msg->Handle = This->bind;
     msg->RpcInterfaceInformation = cif;
 
+    message_state->prefix_data_len = 0;
+    message_state->binding_handle = This->bind;
+
     message_state->channel_hook_info.iid = *riid;
     message_state->channel_hook_info.cbSize = sizeof(message_state->channel_hook_info);
     message_state->channel_hook_info.uCausality = COM_CurrentCausalityId();
     message_state->channel_hook_info.dwServerPid = This->server_pid;
     message_state->channel_hook_info.iMethod = msg->ProcNum;
     message_state->channel_hook_info.pObject = NULL; /* only present on server-side */
+    message_state->target_hwnd = NULL;
+    message_state->target_tid = 0;
     memset(&message_state->params, 0, sizeof(message_state->params));
 
     extensions_size = ChannelHooks_ClientGetSize(&message_state->channel_hook_info,
@@ -616,10 +653,51 @@ static HRESULT WINAPI ClientRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
             msg->BufferLength += FIELD_OFFSET(WIRE_ORPC_EXTENT, data[0]);
     }
 
-    status = I_RpcGetBuffer(msg);
+    RpcBindingInqObject(message_state->binding_handle, &ipid);
+    hr = ipid_get_dispatch_params(&ipid, &apt, &message_state->params.stub,
+                                  &message_state->params.chan,
+                                  &message_state->params.iid,
+                                  &message_state->params.iface);
+    if (hr == S_OK)
+    {
+        /* stub, chan, iface and iid are unneeded in multi-threaded case as we go
+         * via the RPC runtime */
+        if (apt->multi_threaded)
+        {
+            IRpcStubBuffer_Release(message_state->params.stub);
+            message_state->params.stub = NULL;
+            IRpcChannelBuffer_Release(message_state->params.chan);
+            message_state->params.chan = NULL;
+            message_state->params.iface = NULL;
+        }
+        else
+        {
+            message_state->params.bypass_rpcrt = TRUE;
+            message_state->target_hwnd = apartment_getwindow(apt);
+            message_state->target_tid = apt->tid;
+            /* we assume later on that this being non-NULL is the indicator that
+             * means call directly instead of going through RPC runtime */
+            if (!message_state->target_hwnd)
+                ERR("window for apartment %s is NULL\n", wine_dbgstr_longlong(apt->oxid));
+        }
+    }
+    if (apt) apartment_release(apt);
+    message_state->params.handle = ClientRpcChannelBuffer_GetEventHandle(This);
+    /* Note: message_state->params.msg is initialised in
+     * ClientRpcChannelBuffer_SendReceive */
 
-    message_state->prefix_data_len = 0;
-    message_state->binding_handle = This->bind;
+    /* shortcut the RPC runtime */
+    if (message_state->target_hwnd)
+    {
+        msg->Buffer = HeapAlloc(GetProcessHeap(), 0, msg->BufferLength);
+        if (msg->Buffer)
+            status = RPC_S_OK;
+        else
+            status = ERROR_OUTOFMEMORY;
+    }
+    else
+        status = I_RpcGetBuffer(msg);
+
     msg->Handle = message_state;
 
     if (status == RPC_S_OK)
@@ -671,6 +749,8 @@ static HRESULT WINAPI ClientRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
         msg->BufferLength -= message_state->prefix_data_len;
     }
 
+    HeapFree(GetProcessHeap(), 0, channel_hook_data);
+
     TRACE("-- %ld\n", status);
 
     return HRESULT_FROM_WIN32(status);
@@ -680,24 +760,6 @@ static HRESULT WINAPI ServerRpcChannelBuffer_SendReceive(LPRPCCHANNELBUFFER ifac
 {
     FIXME("stub\n");
     return E_NOTIMPL;
-}
-
-static HANDLE ClientRpcChannelBuffer_GetEventHandle(ClientRpcChannelBuffer *This)
-{
-    HANDLE event = InterlockedExchangePointer(&This->event, NULL);
-
-    /* Note: must be auto-reset event so we can reuse it without a call
-     * to ResetEvent */
-    if (!event) event = CreateEventW(NULL, FALSE, FALSE, NULL);
-
-    return event;
-}
-
-static void ClientRpcChannelBuffer_ReleaseEventHandle(ClientRpcChannelBuffer *This, HANDLE event)
-{
-    if (InterlockedCompareExchangePointer(&This->event, event, NULL))
-        /* already a handle cached in This */
-        CloseHandle(event);
 }
 
 /* this thread runs an outgoing RPC */
@@ -735,8 +797,6 @@ static HRESULT WINAPI ClientRpcChannelBuffer_SendReceive(LPRPCCHANNELBUFFER ifac
     RPC_MESSAGE *msg = (RPC_MESSAGE *)olemsg;
     RPC_STATUS status;
     DWORD index;
-    APARTMENT *apt = NULL;
-    IPID ipid;
     struct message_state *message_state;
     ORPCTHAT orpcthat;
     ORPC_EXTENT_ARRAY orpc_ext_array;
@@ -771,10 +831,6 @@ static HRESULT WINAPI ClientRpcChannelBuffer_SendReceive(LPRPCCHANNELBUFFER ifac
     msg->Buffer = (char *)msg->Buffer - message_state->prefix_data_len;
     msg->BufferLength += message_state->prefix_data_len;
 
-    message_state->params.msg = olemsg;
-    message_state->params.status = RPC_S_OK;
-    message_state->params.hr = S_OK;
-
     /* Note: this is an optimization in the Microsoft OLE runtime that we need
      * to copy, as shown by the test_no_couninitialize_client test. without
      * short-circuiting the RPC runtime in the case below, the test will
@@ -782,25 +838,18 @@ static HRESULT WINAPI ClientRpcChannelBuffer_SendReceive(LPRPCCHANNELBUFFER ifac
      * a thread to process the RPC when this function is called indirectly
      * from DllMain */
 
-    RpcBindingInqObject(message_state->binding_handle, &ipid);
-    hr = ipid_get_dispatch_params(&ipid, &apt, &message_state->params.stub,
-                                  &message_state->params.chan,
-                                  &message_state->params.iid,
-                                  &message_state->params.iface);
-    message_state->params.handle = ClientRpcChannelBuffer_GetEventHandle(This);
-    if ((hr == S_OK) && !apt->multi_threaded)
+    message_state->params.msg = olemsg;
+    if (message_state->params.bypass_rpcrt)
     {
-        TRACE("Calling apartment thread 0x%08x...\n", apt->tid);
+        TRACE("Calling apartment thread 0x%08x...\n", message_state->target_tid);
 
-        if (!PostMessageW(apartment_getwindow(apt), DM_EXECUTERPC, 0,
+        msg->ProcNum &= ~RPC_FLAGS_VALID_BIT;
+
+        if (!PostMessageW(message_state->target_hwnd, DM_EXECUTERPC, 0,
                           (LPARAM)&message_state->params))
         {
             ERR("PostMessage failed with error %u\n", GetLastError());
 
-            IRpcStubBuffer_Release(message_state->params.stub);
-            message_state->params.stub = NULL;
-            IRpcChannelBuffer_Release(message_state->params.chan);
-            message_state->params.chan = NULL;
             /* Note: message_state->params.iface doesn't have a reference and
              * so doesn't need to be released */
 
@@ -809,16 +858,6 @@ static HRESULT WINAPI ClientRpcChannelBuffer_SendReceive(LPRPCCHANNELBUFFER ifac
     }
     else
     {
-        if (hr == S_OK)
-        {
-            /* otherwise, we go via RPC runtime so the stub and channel aren't
-             * needed here */
-            IRpcStubBuffer_Release(message_state->params.stub);
-            message_state->params.stub = NULL;
-            IRpcChannelBuffer_Release(message_state->params.chan);
-            message_state->params.chan = NULL;
-        }
-
         /* we use a separate thread here because we need to be able to
          * pump the message loop in the application thread: if we do not,
          * any windows created by this thread will hang and RPCs that try
@@ -833,7 +872,6 @@ static HRESULT WINAPI ClientRpcChannelBuffer_SendReceive(LPRPCCHANNELBUFFER ifac
         else
             hr = S_OK;
     }
-    if (apt) apartment_release(apt);
 
     if (hr == S_OK)
     {
@@ -923,7 +961,13 @@ static HRESULT WINAPI ServerRpcChannelBuffer_FreeBuffer(LPRPCCHANNELBUFFER iface
     msg->BufferLength += message_state->prefix_data_len;
     message_state->prefix_data_len = 0;
 
-    status = I_RpcFreeBuffer(msg);
+    if (message_state->bypass_rpcrt)
+    {
+        HeapFree(GetProcessHeap(), 0, msg->Buffer);
+        status = RPC_S_OK;
+    }
+    else
+        status = I_RpcFreeBuffer(msg);
 
     msg->Handle = message_state;
 
@@ -946,10 +990,21 @@ static HRESULT WINAPI ClientRpcChannelBuffer_FreeBuffer(LPRPCCHANNELBUFFER iface
     msg->Buffer = (char *)msg->Buffer - message_state->prefix_data_len;
     msg->BufferLength += message_state->prefix_data_len;
 
-    status = I_RpcFreeBuffer(msg);
+    if (message_state->params.bypass_rpcrt)
+    {
+        HeapFree(GetProcessHeap(), 0, msg->Buffer);
+        status = RPC_S_OK;
+    }
+    else
+        status = I_RpcFreeBuffer(msg);
 
     HeapFree(GetProcessHeap(), 0, msg->RpcInterfaceInformation);
     msg->RpcInterfaceInformation = NULL;
+
+    if (message_state->params.stub)
+        IRpcStubBuffer_Release(message_state->params.stub);
+    if (message_state->params.chan)
+        IRpcChannelBuffer_Release(message_state->params.chan);
     HeapFree(GetProcessHeap(), 0, message_state);
 
     TRACE("-- %ld\n", status);
@@ -1265,6 +1320,7 @@ void RPC_ExecuteCall(struct dispatch_params *params)
 
     message_state->prefix_data_len = (char *)msg->Buffer - original_buffer;
     message_state->binding_handle = msg->Handle;
+    message_state->bypass_rpcrt = params->bypass_rpcrt;
 
     message_state->channel_hook_info.iid = params->iid;
     message_state->channel_hook_info.cbSize = sizeof(message_state->channel_hook_info);
@@ -1336,6 +1392,10 @@ void RPC_ExecuteCall(struct dispatch_params *params)
     COM_CurrentInfo()->pending_call_count_server--;
     COM_CurrentInfo()->causality_id = old_causality_id;
 
+    /* the invoke allocated a new buffer, so free the old one */
+    if (message_state->bypass_rpcrt && original_buffer != msg->Buffer)
+        HeapFree(GetProcessHeap(), 0, original_buffer);
+
 exit_reset_state:
     message_state = (struct message_state *)msg->Handle;
     msg->Handle = message_state->binding_handle;
@@ -1344,8 +1404,6 @@ exit_reset_state:
 
 exit:
     HeapFree(GetProcessHeap(), 0, message_state);
-    IRpcStubBuffer_Release(params->stub);
-    IRpcChannelBuffer_Release(params->chan);
     if (params->handle) SetEvent(params->handle);
 }
 
@@ -1381,6 +1439,7 @@ static void __RPC_STUB dispatch_rpc(RPC_MESSAGE *msg)
     params->status = RPC_S_OK;
     params->hr = S_OK;
     params->handle = NULL;
+    params->bypass_rpcrt = FALSE;
 
     /* Note: this is the important difference between STAs and MTAs - we
      * always execute RPCs to STAs in the thread that originally created the
@@ -1418,6 +1477,10 @@ static void __RPC_STUB dispatch_rpc(RPC_MESSAGE *msg)
     }
 
     hr = params->hr;
+    if (params->chan)
+        IRpcChannelBuffer_Release(params->chan);
+    if (params->stub)
+        IRpcStubBuffer_Release(params->stub);
     HeapFree(GetProcessHeap(), 0, params);
 
     apartment_release(apt);
@@ -1760,7 +1823,7 @@ HRESULT RPC_GetLocalClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
     hres = IStream_Write(pStm,marshalbuffer,bufferlen,&res);
     if (hres) goto out;
     seekto.u.LowPart = 0;seekto.u.HighPart = 0;
-    hres = IStream_Seek(pStm,seekto,SEEK_SET,&newpos);
+    hres = IStream_Seek(pStm,seekto,STREAM_SEEK_SET,&newpos);
     
     TRACE("unmarshalling classfactory\n");
     hres = CoUnmarshalInterface(pStm,&IID_IClassFactory,ppv);
@@ -1844,7 +1907,7 @@ static DWORD WINAPI local_server_thread(LPVOID param)
 
         seekto.u.LowPart = 0;
         seekto.u.HighPart = 0;
-        hres = IStream_Seek(pStm,seekto,SEEK_SET,&newpos);
+        hres = IStream_Seek(pStm,seekto,STREAM_SEEK_SET,&newpos);
         if (hres) {
             FIXME("IStream_Seek failed, %x\n",hres);
             CloseHandle(hPipe);

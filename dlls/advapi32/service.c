@@ -455,6 +455,7 @@ static BOOL service_handle_start(HANDLE pipe, service_data *service, DWORD count
     HeapFree(GetProcessHeap(), 0, service->args);
     service->args = args;
     args = NULL;
+    service->status.dwCurrentState = SERVICE_START_PENDING;
     service->thread = CreateThread( NULL, 0, service_thread,
                                     service, 0, NULL );
     SetEvent( service_event );  /* notify the main loop */
@@ -496,7 +497,7 @@ static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
     }
     *p=0;
 
-    r = WriteFile(pipe, ssi, sizeof *ssi + len*sizeof(WCHAR), &count, NULL);
+    r = WriteFile(pipe, ssi, sizeof *ssi + (len-1)*sizeof(WCHAR), &count, NULL);
     if (r)
     {
         r = ReadFile(pipe, &result, sizeof result, &count, NULL);
@@ -1036,26 +1037,29 @@ BOOL WINAPI ControlService( SC_HANDLE hService, DWORD dwControl,
         return FALSE;
     }
 
-    ret = QueryServiceStatus(hService, lpServiceStatus);
-    if (!ret)
+    if (lpServiceStatus)
     {
-        ERR("failed to query service status\n");
-        SetLastError(ERROR_SERVICE_NOT_ACTIVE);
-        return FALSE;
-    }
+        ret = QueryServiceStatus(hService, lpServiceStatus);
+        if (!ret)
+        {
+            ERR("failed to query service status\n");
+            SetLastError(ERROR_SERVICE_NOT_ACTIVE);
+            return FALSE;
+        }
 
-    switch (lpServiceStatus->dwCurrentState)
-    {
-    case SERVICE_STOPPED:
-        SetLastError(ERROR_SERVICE_NOT_ACTIVE);
-        return FALSE;
-    case SERVICE_START_PENDING:
-        if (dwControl==SERVICE_CONTROL_STOP)
-            break;
-        /* fall thru */
-    case SERVICE_STOP_PENDING:
-        SetLastError(ERROR_SERVICE_CANNOT_ACCEPT_CTRL);
-        return FALSE;
+        switch (lpServiceStatus->dwCurrentState)
+        {
+        case SERVICE_STOPPED:
+            SetLastError(ERROR_SERVICE_NOT_ACTIVE);
+            return FALSE;
+        case SERVICE_START_PENDING:
+            if (dwControl==SERVICE_CONTROL_STOP)
+                break;
+            /* fall thru */
+        case SERVICE_STOP_PENDING:
+            SetLastError(ERROR_SERVICE_CANNOT_ACCEPT_CTRL);
+            return FALSE;
+        }
     }
 
     handle = service_open_pipe(hsvc->name);
@@ -1625,6 +1629,7 @@ static BOOL service_wait_for_startup(SC_HANDLE hService)
             break;
         }
         r = FALSE;
+        if (status.dwCurrentState != SERVICE_START_PENDING) break;
         Sleep(100 * i);
     }
     return r;

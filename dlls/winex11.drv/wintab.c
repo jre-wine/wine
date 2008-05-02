@@ -362,6 +362,80 @@ static void trace_axes(XValuatorInfoPtr val)
         TRACE("        Axis %d: [resolution %d|min_value %d|max_value %d]\n", i, axis->resolution, axis->min_value, axis->max_value);
 }
 
+BOOL match_token(const char *haystack, const char *needle)
+{
+    const char *p, *q;
+    for (p = haystack; *p; )
+    {
+        while (*p && isspace(*p))
+            p++;
+        if (! *p)
+            break;
+
+        for (q = needle; *q && *p && tolower(*p) == tolower(*q); q++)
+            p++;
+        if (! *q && (isspace(*p) || !*p))
+            return TRUE;
+
+        while (*p && ! isspace(*p))
+            p++;
+    }
+    return FALSE;
+}
+
+/*    Determining if an X device is a Tablet style device is an imperfect science.
+**  We rely on common conventions around device names as well as the type reported
+**  by Wacom tablets.  This code will likely need to be expanded for alternate tablet types
+*/
+
+#define IS_TABLET_CURSOR(n, t)   (is_wacom((n), (t)) || is_cursor((n), (t)) || is_stylus((n), (t)) || is_eraser((n), (t)) || is_pad((n), (t)))
+
+static BOOL is_wacom(const char *name, const char *type)
+{
+    if (name && match_token(name, "wacom"))
+        return TRUE;
+    if (type && match_token(type, "wacom"))
+        return TRUE;
+    return FALSE;
+}
+
+static BOOL is_cursor(const char *name, const char *type)
+{
+    if (name && match_token(name, "cursor"))
+        return TRUE;
+    if (type && match_token(type, "cursor"))
+        return TRUE;
+    return FALSE;
+}
+
+static BOOL is_stylus(const char *name, const char *type)
+{
+    if (name && match_token(name, "stylus"))
+        return TRUE;
+    if (type && match_token(type, "stylus"))
+        return TRUE;
+    return FALSE;
+}
+
+static BOOL is_eraser(const char *name, const char *type)
+{
+    if (name && match_token(name, "eraser"))
+        return TRUE;
+    if (type && match_token(type, "eraser"))
+        return TRUE;
+    return FALSE;
+}
+
+static BOOL is_pad(const char *name, const char *type)
+{
+    if (name && match_token(name, "pad"))
+        return TRUE;
+    if (type && match_token(type, "pad"))
+        return TRUE;
+    return FALSE;
+}
+
+
 void X11DRV_LoadTabletInfo(HWND hwnddefault)
 {
     const WCHAR SZ_CONTEXT_NAME[] = {'W','i','n','e',' ','T','a','b','l','e','t',' ','C','o','n','t','e','x','t',0};
@@ -385,13 +459,13 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
 
     if (!X11DRV_XInput_Init())
     {
-        ERR("Unable to initialized the XInput library.\n");
+        ERR("Unable to initialize the XInput library.\n");
         return;
     }
 
     hwndTabletDefault = hwnddefault;
 
-    /* Do base initializaion */
+    /* Do base initialization */
     strcpyW(gSysContext.lcName, SZ_CONTEXT_NAME);
     strcpyW(gSysDevice.NAME, SZ_DEVICE_NAME);
 
@@ -436,19 +510,21 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
         wine_tsx11_unlock();
         return;
     }
+    TRACE("XListInputDevices reports %d devices\n", num_devices);
     for (loop=0; loop < num_devices; loop++)
     {
         int class_loop;
+        char *device_type = XGetAtomName(data->display, devices[loop].type);
 
         TRACE("Device %i:  [id %d|name %s|type %s|num_classes %d|use %s]\n",
-                loop, (int) devices[loop].id, devices[loop].name,
-                XGetAtomName(data->display, devices[loop].type),
+                loop, (int) devices[loop].id, devices[loop].name, device_type,
                 devices[loop].num_classes,
                 devices[loop].use == IsXKeyboard ? "IsXKeyboard" :
                     devices[loop].use == IsXPointer ? "IsXPointer" :
                     devices[loop].use == IsXExtensionDevice ? "IsXExtensionDevice" :
                     "Unknown"
                 );
+
         if (devices[loop].use == IsXExtensionDevice)
         {
             LPWTI_CURSORS_INFO cursor;
@@ -462,6 +538,7 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
             {
                 ERR("Input device '%s' name too long - skipping\n", wine_dbgstr_a(target->name));
                 cursor_target--;
+                XFree(device_type);
                 continue;
             }
 
@@ -480,6 +557,7 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
                     TRACE("No buttons, Non Tablet Device\n");
                     pXCloseDevice(data->display, opendevice);
                     cursor_target --;
+                    XFree(device_type);
                     continue;
                 }
 
@@ -494,9 +572,19 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
             {
                 WARN("Unable to open device %s\n",target->name);
                 cursor_target --;
+                XFree(device_type);
                 continue;
             }
             MultiByteToWideChar(CP_UNIXCP, 0, target->name, -1, cursor->NAME, WT_MAX_NAME_LEN);
+
+            if (! IS_TABLET_CURSOR(target->name, device_type))
+            {
+                WARN("Skipping device %d [name %s|type %s]; not apparently a tablet cursor type device\n",
+                        loop, devices[loop].name, device_type);
+                XFree(device_type);
+                cursor_target --;
+                continue;
+            }
 
             cursor->ACTIVE = 1;
             cursor->PKTDATA = PK_TIME | PK_CURSOR | PK_BUTTONS |  PK_X | PK_Y |
@@ -508,9 +596,9 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
             cursor->NPBTNMARKS[0] = 0 ;
             cursor->NPBTNMARKS[1] = 1 ;
             cursor->CAPABILITIES = CRC_MULTIMODE;
-            if (strcasecmp(target->name,"stylus")==0)
+            if (is_stylus(target->name, device_type))
                 cursor->TYPE = CSR_TYPE_PEN;
-            if (strcasecmp(target->name,"eraser")==0)
+            if (is_eraser(target->name, device_type))
                 cursor->TYPE = CSR_TYPE_ERASER;
 
 
@@ -631,11 +719,21 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
                 any = (XAnyClassPtr) ((char*) any + any->length);
             }
         }
+
+        XFree(device_type);
+
     }
     pXFreeDeviceList(devices);
-    gSysDevice.NCSRTYPES = cursor_target+1;
-    gNumCursors = cursor_target+1;
-    Tablet_FixupCursors();
+
+    if (axis_read_complete)
+    {
+        gSysDevice.NCSRTYPES = cursor_target+1;
+        gNumCursors = cursor_target+1;
+        Tablet_FixupCursors();
+    }
+    else
+        WARN("Did not find a valid stylus cursor with >= 5 axes, returning 0 valid devices.\n");
+
     wine_tsx11_unlock();
 }
 

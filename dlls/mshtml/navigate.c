@@ -212,8 +212,8 @@ static HRESULT read_stream_data(BSCallback *This, IStream *stream)
             break;
 
         if(!This->readed && This->nsstream->buf_size >= 2 && *(WORD*)This->nsstream->buf == 0xfeff) {
-                This->nschannel->charset = heap_alloc(sizeof(UTF16_STR));
-                memcpy(This->nschannel->charset, UTF16_STR, sizeof(UTF16_STR));
+            This->nschannel->charset = heap_alloc(sizeof(UTF16_STR));
+            memcpy(This->nschannel->charset, UTF16_STR, sizeof(UTF16_STR));
         }
 
         if(!This->readed) {

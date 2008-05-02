@@ -118,6 +118,8 @@ int wmain (int argc, WCHAR *argvW[])
   char ansiVersion[100];
   CMD_LIST *toExecute = NULL;         /* Commands left to be executed */
 
+  srand(time(NULL));
+
   /* Pre initialize some messages */
   strcpy(ansiVersion, PACKAGE_VERSION);
   MultiByteToWideChar(CP_ACP, 0, ansiVersion, -1, string, 1024);
@@ -377,6 +379,7 @@ int wmain (int argc, WCHAR *argvW[])
                   value = strtoulW(strvalue, NULL, 10);
               }
           }
+          RegCloseKey(key);
       }
 
       if (value == 0 && RegOpenKeyEx(HKEY_LOCAL_MACHINE, regKeyW,
@@ -397,6 +400,7 @@ int wmain (int argc, WCHAR *argvW[])
                   value = strtoulW(strvalue, NULL, 10);
               }
           }
+          RegCloseKey(key);
       }
 
       /* If one found, set the screen to that colour */

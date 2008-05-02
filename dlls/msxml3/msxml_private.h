@@ -63,6 +63,21 @@ extern HRESULT XMLElementCollection_create( IUnknown *pUnkOuter, xmlNodePtr node
 
 extern xmlDocPtr parse_xml(char *ptr, int len);
 
+/* IXMLDOMNode Internal Structure */
+typedef struct _xmlnode
+{
+    const struct IXMLDOMNodeVtbl *lpVtbl;
+    const struct IUnknownVtbl *lpInternalUnkVtbl;
+    IUnknown *pUnkOuter;
+    LONG ref;
+    xmlNodePtr node;
+} xmlnode;
+
+static inline xmlnode *impl_from_IXMLDOMNode( IXMLDOMNode *iface )
+{
+    return (xmlnode *)((char*)iface - FIELD_OFFSET(xmlnode, lpVtbl));
+}
+
 #endif
 
 extern IXMLDOMParseError *create_parseError( LONG code, BSTR url, BSTR reason, BSTR srcText,
