@@ -3,7 +3,7 @@ wine for Debian
 
 Wine is now split up into the following packages:
 
-wine            (core binaries and configuration)
+wine-bin        (core binaries and configuration)
 libwine         (core libraries)
 libwine-print   (printing modules)
 libwine-sane    (scanner access module)
@@ -105,19 +105,3 @@ Wine release 20040309. You should now do something like:
 If this doesn't work, try copying wine.inf to the current directory
 and load it from there, as there are sometimes bugs with using full
 Unix paths in Winelib apps (but which should get fixed eventually).
-
-Update for Wine 20010112
-========================
-wine.conf is no longer recognized as a config file! There's
-currently no global config file at all (though we hope to get
-one again soon). I've removed /etc/wine.conf from the package,
-and it should probably be deleted from your system. If you (or
-your users) still don't have a ~/.wine/config, you can either
-copy the old /etc/wine.conf to ~/.winerc to have Wine convert it
-for you, or you can just delete it and configure wine with the
-winecfg tool instead.
-
-I've also enabled the winelauncher wrapper, so that when you type
-"wine", then you're actually starting the winelauncher. If a
-~/.wine/config doesn't exist (and you've deleted /etc/wine.conf),
-then it'll automatically try to start winesetup.

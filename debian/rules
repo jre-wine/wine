@@ -6,9 +6,6 @@ export SHELL=bash
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
-# This is the debhelper compatability version to use.
-export DH_COMPAT=2
-
 ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
 CFLAGS=-O0 -g
 else
@@ -33,14 +30,14 @@ endif
 
 	touch configure-stamp
 
-build-indep: configure-stamp build-indep-stamp
-build-indep-stamp:
+build-indep: build-indep-stamp
+build-indep-stamp: configure-stamp
 	dh_testdir
 
 	touch build-indep-stamp
 
-build-arch: configure-stamp build-arch-stamp
-build-arch-stamp:
+build-arch: build-arch-stamp
+build-arch-stamp: configure-stamp
 	dh_testdir
 
 ifneq ($(DEB_HOST_GNU_CPU), x86_64)
@@ -124,9 +121,6 @@ ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	# distribute the files in debian/tmp into debian/<packagename>
 	# according to the <packagename>.files files
 	dh_movefiles -s
-	# copy additional files into debian/<packagename>
-	# according to the <packagename>.install files
-	dh_install -s
 
 	# distribute files we want that weren't in debian/tmp
 	cp dlls/twain_32/README debian/libwine/usr/share/doc/libwine/README.twain
@@ -137,6 +131,8 @@ ifneq ($(DEB_HOST_GNU_CPU), x86_64)
 	cp tools/winedump/README debian/wine-utils/usr/share/doc/wine-utils/README.winedump
 	cp debian/uninstaller.desktop debian/wine-utils/usr/share/applications/uninstaller.desktop
 	cp debian/winecfg.desktop debian/wine-utils/usr/share/applications/winecfg.desktop
+	cp debian/wine.desktop debian/wine-bin/usr/share/applications/wine.desktop
+	cp programs/winemenubuilder/wine*.xpm debian/wine-bin/usr/share/pixmaps
 
 	# split up libwine
 ifeq ($(DEB_HOST_GNU_SYSTEM), linux-gnu)

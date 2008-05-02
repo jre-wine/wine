@@ -11,6 +11,7 @@ usr/bin/winecfg
 usr/lib/wine/wineboot.exe.so
 usr/lib/wine/winebrowser.exe.so
 usr/lib/wine/wineconsole.exe.so
+usr/lib/wine/winedevice.exe.so
 usr/lib/wine/eject.exe.so
 usr/lib/wine/winevdm.exe.so
 usr/lib/wine/expand.exe.so

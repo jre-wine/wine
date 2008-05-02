@@ -1,3 +1,52 @@
+wine (0.9.44-1) unstable; urgency=low
+
+  * New upstream release 0.9.44. (Closes: #421510, #433064.)
+    - Better heuristics for making windows managed.
+    - Automatic detection of timezone parameters.
+    - Improvements to the builtin WordPad.
+    - Better signatures support in crypt32.
+    - Still more gdiplus functions.
+    - Lots of bug fixes.
+  * This version was released Aug 24, 2007.
+  * Applied patch to debian/rules for parallelized builds.
+    Closes: #440937.
+  * Adjusted architecture field on libwine-capi to match
+    the list on libwine-alsa.
+  * Made the wine metapackage only depend on libwine-capi
+    on architectures where it's actually built.
+  * Updated the package list in README.Debian since the main
+    binary package was renamed to wine-bin. Also deleted the
+    section about the removal of wine.conf, as that's many
+    years ago.
+  * Upgraded debhelper compatibility level from 2 to 3.
+    (I might go on to 4 when I'm sure that this level works).
+  * Deleted ldconfig from the libwine postinst and postrm
+    scripts, depending on debhelper to autogenerate them
+    instead. Deleted the files since there was nothing
+    left in them.
+  * Deleted wine-bin.install. Install the two files that
+    were listed there directly from debian/rules along with
+    all the other manually-installed files of a similar nature.
+    (This is to make a future transition from dh_movefiles
+    to dh_install easier. The manual install rules could be
+    cleaned up (moved back into .install files) afterwards,
+    but right now I don't want them complicating things.)
+  * Upgraded Standards-Version to 3.6.2
+    (the wineserver is already in /usr/lib/wine, as it
+    should be according to policy).
+  * Fixed the unsubstituted @libdir@ in the wine manpage
+    (should now properly say /usr/lib/wine/wineserver,
+    instead of @libdir@/wine/wineserver).
+  * Installed the net.exe application into wine-utils.
+  * Installed the ntoskrnl.exe DLL into libwine.
+  * Installed the winedevice.exe service into wine.
+  * Building the package on a different computer; seems the
+    hard drive on my regular system is starting to fail
+    and I cannot rule out the possibility that my 0.9.43
+    upload contained partially corrupted binaries.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 09 Sep 2007 13:41:01 -0400
+
 wine (0.9.43-1) unstable; urgency=low
 
   * New upstream release 0.9.43.

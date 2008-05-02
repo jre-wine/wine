@@ -12,6 +12,7 @@ usr/lib/wine/cmd.exe.so
 usr/lib/wine/control.exe.so
 usr/lib/wine/hh.exe.so
 usr/lib/wine/iexplore.exe.so
+usr/lib/wine/net.exe.so
 usr/lib/wine/notepad.exe.so
 usr/lib/wine/oleview.exe.so
 usr/lib/wine/progman.exe.so
