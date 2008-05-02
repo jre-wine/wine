@@ -75,27 +75,39 @@ GpStatus WINGDIPAPI GdipDrawLines(GpGraphics*,GpPen*,GDIPCONST GpPointF*,INT);
 GpStatus WINGDIPAPI GdipDrawPath(GpGraphics*,GpPen*,GpPath*);
 GpStatus WINGDIPAPI GdipDrawPie(GpGraphics*,GpPen*,REAL,REAL,REAL,REAL,REAL,REAL);
 GpStatus WINGDIPAPI GdipDrawRectangleI(GpGraphics*,GpPen*,INT,INT,INT,INT);
+GpStatus WINGDIPAPI GdipDrawRectangles(GpGraphics*,GpPen*,GpRectF*,INT);
+GpStatus WINGDIPAPI GdipDrawString(GpGraphics*,GDIPCONST WCHAR*,INT,
+    GDIPCONST GpFont*,GDIPCONST RectF*, GDIPCONST GpStringFormat*,
+    GDIPCONST GpBrush*);
 GpStatus WINGDIPAPI GdipFillPath(GpGraphics*,GpBrush*,GpPath*);
 GpStatus WINGDIPAPI GdipFillPie(GpGraphics*,GpBrush*,REAL,REAL,REAL,REAL,REAL,REAL);
 GpStatus WINGDIPAPI GdipFillPolygonI(GpGraphics*,GpBrush*,GDIPCONST GpPoint*,INT,
     GpFillMode);
 GpStatus WINGDIPAPI GdipFillRectangle(GpGraphics*,GpBrush*,REAL,REAL,REAL,REAL);
 GpStatus WINGDIPAPI GdipFillRectangleI(GpGraphics*,GpBrush*,INT,INT,INT,INT);
+GpStatus WINGDIPAPI GdipGetCompositingMode(GpGraphics*,CompositingMode*);
 GpStatus WINGDIPAPI GdipGetCompositingQuality(GpGraphics*,CompositingQuality*);
 GpStatus WINGDIPAPI GdipGetInterpolationMode(GpGraphics*,InterpolationMode*);
 GpStatus WINGDIPAPI GdipGetPageScale(GpGraphics*,REAL*);
 GpStatus WINGDIPAPI GdipGetPageUnit(GpGraphics*,GpUnit*);
 GpStatus WINGDIPAPI GdipGetPixelOffsetMode(GpGraphics*,PixelOffsetMode*);
 GpStatus WINGDIPAPI GdipGetSmoothingMode(GpGraphics*,SmoothingMode*);
+GpStatus WINGDIPAPI GdipGetTextRenderingHint(GpGraphics*,TextRenderingHint*);
 GpStatus WINGDIPAPI GdipGetWorldTransform(GpGraphics*,GpMatrix*);
+GpStatus WINGDIPAPI GdipMeasureString(GpGraphics*,GDIPCONST WCHAR*,INT,
+    GDIPCONST GpFont*,GDIPCONST RectF*,GDIPCONST GpStringFormat*,RectF*,INT*,INT*);
 GpStatus WINGDIPAPI GdipRestoreGraphics(GpGraphics*,GraphicsState);
+GpStatus WINGDIPAPI GdipRotateWorldTransform(GpGraphics*,REAL,GpMatrixOrder);
 GpStatus WINGDIPAPI GdipSaveGraphics(GpGraphics*,GraphicsState*);
+GpStatus WINGDIPAPI GdipScaleWorldTransform(GpGraphics*,REAL,REAL,GpMatrixOrder);
+GpStatus WINGDIPAPI GdipSetCompositingMode(GpGraphics*,CompositingMode);
 GpStatus WINGDIPAPI GdipSetCompositingQuality(GpGraphics*,CompositingQuality);
 GpStatus WINGDIPAPI GdipSetInterpolationMode(GpGraphics*,InterpolationMode);
 GpStatus WINGDIPAPI GdipSetPageScale(GpGraphics*,REAL);
 GpStatus WINGDIPAPI GdipSetPageUnit(GpGraphics*,GpUnit);
 GpStatus WINGDIPAPI GdipSetPixelOffsetMode(GpGraphics*,PixelOffsetMode);
 GpStatus WINGDIPAPI GdipSetSmoothingMode(GpGraphics*,SmoothingMode);
+GpStatus WINGDIPAPI GdipSetTextRenderingHint(GpGraphics*,TextRenderingHint);
 GpStatus WINGDIPAPI GdipSetWorldTransform(GpGraphics*,GpMatrix*);
 GpStatus WINGDIPAPI GdipTranslateWorldTransform(GpGraphics*,REAL,REAL,GpMatrixOrder);
 
@@ -117,6 +129,8 @@ GpStatus WINGDIPAPI GdipGetPathGradientPointCount(GpPathGradient*,INT*);
 GpStatus WINGDIPAPI GdipGetPathGradientSurroundColorsWithCount(GpPathGradient*,
     ARGB*,INT*);
 GpStatus WINGDIPAPI GdipGetSolidFillColor(GpSolidFill*,ARGB*);
+GpStatus WINGDIPAPI GdipSetLineBlend(GpLineGradient*,GDIPCONST REAL*,
+    GDIPCONST REAL*,INT);
 GpStatus WINGDIPAPI GdipSetLineGammaCorrection(GpLineGradient*,BOOL);
 GpStatus WINGDIPAPI GdipSetLineSigmaBlend(GpLineGradient*,REAL,REAL);
 GpStatus WINGDIPAPI GdipSetLineWrapMode(GpLineGradient*,GpWrapMode);
@@ -132,9 +146,11 @@ GpStatus WINGDIPAPI GdipSetSolidFillColor(GpSolidFill*,ARGB);
 GpStatus WINGDIPAPI GdipSetTextureTransform(GpTexture *,GDIPCONST GpMatrix*);
 
 GpStatus WINGDIPAPI GdipAddPathArc(GpPath*,REAL,REAL,REAL,REAL,REAL,REAL);
+GpStatus WINGDIPAPI GdipAddPathBezierI(GpPath*,INT,INT,INT,INT,INT,INT,INT,INT);
 GpStatus WINGDIPAPI GdipAddPathBeziers(GpPath*,GDIPCONST GpPointF*,INT);
 GpStatus WINGDIPAPI GdipAddPathEllipse(GpPath*,REAL,REAL,REAL,REAL);
 GpStatus WINGDIPAPI GdipAddPathLine2(GpPath*,GDIPCONST GpPointF*,INT);
+GpStatus WINGDIPAPI GdipAddPathLineI(GpPath*,INT,INT,INT,INT);
 GpStatus WINGDIPAPI GdipAddPathPath(GpPath*,GDIPCONST GpPath*,BOOL);
 GpStatus WINGDIPAPI GdipClonePath(GpPath*,GpPath**);
 GpStatus WINGDIPAPI GdipClosePathFigure(GpPath*);
@@ -230,6 +246,22 @@ GpStatus WINGDIPAPI GdipSetImageAttributesColorMatrix(GpImageAttributes*,
     ColorMatrixFlags);
 GpStatus WINGDIPAPI GdipSetImageAttributesWrapMode(GpImageAttributes*,WrapMode,
     ARGB,BOOL);
+
+GpStatus WINGDIPAPI GdipCreateFontFromLogfontA(HDC,GDIPCONST LOGFONTA*,GpFont**);
+GpStatus WINGDIPAPI GdipCreateFontFromLogfontW(HDC,GDIPCONST LOGFONTW*,GpFont**);
+GpStatus WINGDIPAPI GdipDeleteFont(GpFont*);
+GpStatus WINGDIPAPI GdipGetLogFontW(GpFont*,GpGraphics*,LOGFONTW*);
+
+GpStatus WINGDIPAPI GdipCreateStringFormat(INT,LANGID,GpStringFormat**);
+GpStatus WINGDIPAPI GdipDeleteStringFormat(GpStringFormat*);
+GpStatus WINGDIPAPI GdipGetStringFormatAlign(GpStringFormat*,StringAlignment*);
+GpStatus WINGDIPAPI GdipGetStringFormatHotkeyPrefix(GDIPCONST GpStringFormat*,INT*);
+GpStatus WINGDIPAPI GdipGetStringFormatLineAlign(GpStringFormat*,StringAlignment*);
+GpStatus WINGDIPAPI GdipGetStringFormatTrimming(GpStringFormat*,StringTrimming*);
+GpStatus WINGDIPAPI GdipSetStringFormatAlign(GpStringFormat*,StringAlignment);
+GpStatus WINGDIPAPI GdipSetStringFormatHotkeyPrefix(GpStringFormat*,INT);
+GpStatus WINGDIPAPI GdipSetStringFormatLineAlign(GpStringFormat*,StringAlignment);
+GpStatus WINGDIPAPI GdipSetStringFormatTrimming(GpStringFormat*,StringTrimming);
 
 #ifdef __cplusplus
 }

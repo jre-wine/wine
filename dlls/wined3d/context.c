@@ -119,9 +119,10 @@ static WineD3DContext *AddContextToArray(IWineD3DDeviceImpl *This, HWND win_hand
  *  target: Surface this context will render to
  *  win_handle: handle to the window which we are drawing to
  *  create_pbuffer: tells whether to create a pbuffer or not
+ *  pPresentParameters: contains the pixelformats to use for onscreen rendering
  *
  *****************************************************************************/
-WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, HWND win_handle, BOOL create_pbuffer) {
+WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, HWND win_handle, BOOL create_pbuffer, const WINED3DPRESENT_PARAMETERS *pPresentParms) {
     HDC oldDrawable, hdc;
     HPBUFFERARB pbuffer = NULL;
     HGLRC ctx = NULL, oldCtx;
@@ -207,6 +208,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         short red, green, blue, alpha;
         short colorBits;
         short depthBits, stencilBits;
+        int res;
 
         hdc = GetDC(win_handle);
         if(hdc == NULL) {
@@ -222,18 +224,23 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
         pfd.iPixelType = PFD_TYPE_RGBA;
         pfd.cColorBits = 32;
-        pfd.cDepthBits = 24;
-        pfd.cStencilBits = 8;
+        pfd.cDepthBits = 0;
+        pfd.cStencilBits = 0;
         pfd.iLayerType = PFD_MAIN_PLANE;
 
         /* Try to match the colorBits of the d3d format */
         if(getColorBits(target->resource.format, &red, &green, &blue, &alpha, &colorBits))
             pfd.cColorBits = colorBits;
 
-        /* TODO: get the depth/stencil format from auto depth stencil format */
-        if(getDepthStencilBits(WINED3DFMT_D24S8, &depthBits, &stencilBits)) {
-            pfd.cDepthBits = depthBits;
-            pfd.cStencilBits = stencilBits;
+        /* Retrieve the depth stencil format from the present parameters.
+         * The choice of the proper format can give a nice performance boost
+         * in case of GPU limited programs. */
+        if(pPresentParms->EnableAutoDepthStencil) {
+            TRACE("pPresentParms->EnableAutoDepthStencil=enabled; using AutoDepthStencilFormat=%s\n", debug_d3dformat(pPresentParms->AutoDepthStencilFormat));
+            if(getDepthStencilBits(pPresentParms->AutoDepthStencilFormat, &depthBits, &stencilBits)) {
+                pfd.cDepthBits = depthBits;
+                pfd.cStencilBits = stencilBits;
+            }
         }
 
         iPixelFormat = ChoosePixelFormat(hdc, &pfd);
@@ -243,11 +250,24 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         }
 
         DescribePixelFormat(hdc, iPixelFormat, sizeof(pfd), &pfd);
-        SetPixelFormat(hdc, iPixelFormat, NULL);
+        res = SetPixelFormat(hdc, iPixelFormat, NULL);
+        if(!res) {
+            int oldPixelFormat = GetPixelFormat(hdc);
+
+            if(oldPixelFormat) {
+                /* OpenGL doesn't allow pixel format adjustments. Print an error and continue using the old format.
+                 * There's a big chance that the old format works although with a performance hit and perhaps rendering errors. */
+                ERR("HDC=%p is already set to iPixelFormat=%d and OpenGL doesn't allow changes!\n", hdc, oldPixelFormat);
+            }
+            else {
+                ERR("SetPixelFormat failed on HDC=%p for iPixelFormat=%d\n", hdc, iPixelFormat);
+                return FALSE;
+            }
+        }
     }
 
-    ctx = wglCreateContext(hdc);
-    if(This->numContexts) wglShareLists(This->contexts[0]->glCtx, ctx);
+    ctx = pwglCreateContext(hdc);
+    if(This->numContexts) pwglShareLists(This->contexts[0]->glCtx, ctx);
 
     if(!ctx) {
         ERR("Failed to create a WGL context\n");
@@ -260,7 +280,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     ret = AddContextToArray(This, win_handle, hdc, ctx, pbuffer);
     if(!ret) {
         ERR("Failed to add the newly created context to the context list\n");
-        wglDeleteContext(ctx);
+        pwglDeleteContext(ctx);
         if(create_pbuffer) {
             GL_EXTCALL(wglReleasePbufferDCARB(pbuffer, hdc));
             GL_EXTCALL(wglDestroyPbufferARB(pbuffer));
@@ -274,9 +294,9 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     TRACE("Successfully created new context %p\n", ret);
 
     /* Set up the context defaults */
-    oldCtx  = wglGetCurrentContext();
-    oldDrawable = wglGetCurrentDC();
-    if(wglMakeCurrent(hdc, ctx) == FALSE) {
+    oldCtx  = pwglGetCurrentContext();
+    oldDrawable = pwglGetCurrentDC();
+    if(pwglMakeCurrent(hdc, ctx) == FALSE) {
         ERR("Cannot activate context to set up defaults\n");
         goto out;
     }
@@ -348,7 +368,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     }
 
     if(oldDrawable && oldCtx) {
-        wglMakeCurrent(oldDrawable, oldCtx);
+        pwglMakeCurrent(oldDrawable, oldCtx);
     }
 
 out:
@@ -410,15 +430,15 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
 
     /* check that we are the current context first */
     TRACE("Destroying ctx %p\n", context);
-    if(wglGetCurrentContext() == context->glCtx){
-        wglMakeCurrent(NULL, NULL);
+    if(pwglGetCurrentContext() == context->glCtx){
+        pwglMakeCurrent(NULL, NULL);
     }
 
     if(context->isPBuffer) {
         GL_EXTCALL(wglReleasePbufferDCARB(context->pbuffer, context->hdc));
         GL_EXTCALL(wglDestroyPbufferARB(context->pbuffer));
     } else ReleaseDC(context->win_handle, context->hdc);
-    wglDeleteContext(context->glCtx);
+    pwglDeleteContext(context->glCtx);
 
     RemoveContextFromArray(This, context);
 }
@@ -696,7 +716,7 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
                      */
                     This->pbufferContext = CreateContext(This, targetimpl,
                             ((IWineD3DSwapChainImpl *) This->swapchains[0])->context[0]->win_handle,
-                            TRUE /* pbuffer */);
+                            TRUE /* pbuffer */, &((IWineD3DSwapChainImpl *)This->swapchains[0])->presentParms);
                     This->pbufferWidth = targetimpl->currentDesc.Width;
                     This->pbufferHeight = targetimpl->currentDesc.Height;
                    }
@@ -811,7 +831,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
         BOOL ret;
         TRACE("Switching gl ctx to %p, hdc=%p ctx=%p\n", context, context->hdc, context->glCtx);
         LEAVE_GL();
-        ret = wglMakeCurrent(context->hdc, context->glCtx);
+        ret = pwglMakeCurrent(context->hdc, context->glCtx);
         ENTER_GL();
         if(ret == FALSE) {
             ERR("Failed to activate the new context\n");

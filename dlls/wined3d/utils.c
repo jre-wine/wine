@@ -96,8 +96,8 @@ static const StaticPixelFormatDesc formats[] = {
     {WINED3DFMT_D24S8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,24     ,8          ,FALSE },
     {WINED3DFMT_D24X8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,24     ,0          ,FALSE },
     {WINED3DFMT_D24X4S4     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,24     ,4          ,FALSE },
-    {WINED3DFMT_D16         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,16     ,0          ,FALSE },
-    {WINED3DFMT_L16         ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,0      ,0          ,FALSE },
+    {WINED3DFMT_D16         ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,16     ,0          ,FALSE },
+    {WINED3DFMT_L16         ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,16      ,0          ,FALSE },
     {WINED3DFMT_D32F_LOCKABLE,0x0       ,0x0        ,0x0        ,0x0        ,4      ,32     ,0          ,FALSE },
     {WINED3DFMT_D24FS8      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,24     ,8          ,FALSE },
     /* Is this a vertex buffer? */
@@ -150,14 +150,14 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
     {WINED3DFMT_A8R8G8B8       ,GL_RGBA8                         ,GL_SRGB8_ALPHA8_EXT                    ,GL_BGRA                   ,GL_UNSIGNED_INT_8_8_8_8_REV    },
     {WINED3DFMT_X8R8G8B8       ,GL_RGB8                          ,GL_SRGB8_EXT                           ,GL_BGRA                   ,GL_UNSIGNED_INT_8_8_8_8_REV    },
     {WINED3DFMT_R5G6B5         ,GL_RGB5                          ,GL_RGB5                                ,GL_RGB                    ,GL_UNSIGNED_SHORT_5_6_5        },
-    {WINED3DFMT_X1R5G5B5       ,GL_RGB5_A1                       ,GL_RGB5_A1                             ,GL_BGRA                   ,GL_UNSIGNED_SHORT_1_5_5_5_REV  },
+    {WINED3DFMT_X1R5G5B5       ,GL_RGB5                          ,GL_RGB5_A1                             ,GL_BGRA                   ,GL_UNSIGNED_SHORT_1_5_5_5_REV  },
     {WINED3DFMT_A1R5G5B5       ,GL_RGB5_A1                       ,GL_RGB5_A1                             ,GL_BGRA                   ,GL_UNSIGNED_SHORT_1_5_5_5_REV  },
     {WINED3DFMT_A4R4G4B4       ,GL_RGBA4                         ,GL_SRGB8_ALPHA8_EXT                    ,GL_BGRA                   ,GL_UNSIGNED_SHORT_4_4_4_4_REV  },
-    {WINED3DFMT_R3G3B2         ,GL_R3_G3_B2                      ,GL_R3_G3_B2                            ,GL_RGB                    ,GL_UNSIGNED_BYTE_2_3_3_REV     },
+    {WINED3DFMT_R3G3B2         ,GL_R3_G3_B2                      ,GL_R3_G3_B2                            ,GL_RGB                    ,GL_UNSIGNED_BYTE_3_3_2         },
     {WINED3DFMT_A8             ,GL_ALPHA8                        ,GL_ALPHA8                              ,GL_ALPHA                  ,GL_UNSIGNED_BYTE               },
     {WINED3DFMT_A8R3G3B2       ,0                                ,0                                      ,0                         ,0                              },
     {WINED3DFMT_X4R4G4B4       ,GL_RGB4                          ,GL_RGB4                                ,GL_BGRA                   ,GL_UNSIGNED_SHORT_4_4_4_4_REV  },
-    {WINED3DFMT_A2B10G10R10    ,GL_RGB                           ,GL_RGB                                 ,GL_RGBA                   ,GL_UNSIGNED_INT_2_10_10_10_REV },
+    {WINED3DFMT_A2B10G10R10    ,GL_RGBA                          ,GL_RGBA                                ,GL_RGBA                   ,GL_UNSIGNED_INT_2_10_10_10_REV },
     {WINED3DFMT_A8B8G8R8       ,GL_RGBA8                         ,GL_RGBA8                               ,GL_RGBA                   ,GL_UNSIGNED_INT_8_8_8_8_REV    },
     {WINED3DFMT_X8B8G8R8       ,GL_RGB8                          ,GL_RGB8                                ,GL_RGBA                   ,GL_UNSIGNED_INT_8_8_8_8_REV    },
     {WINED3DFMT_G16R16         ,0                                ,0                                      ,0                         ,0                              },
@@ -2486,8 +2486,16 @@ BOOL getColorBits(WINED3DFORMAT fmt, short *redSize, short *greenSize, short *bl
     TRACE("fmt: %s\n", debug_d3dformat(fmt));
     switch(fmt)
     {
-        case WINED3DFMT_R5G6B5:
         case WINED3DFMT_X8R8G8B8:
+        case WINED3DFMT_R8G8B8:
+        case WINED3DFMT_A8R8G8B8:
+        case WINED3DFMT_A2R10G10B10:
+        case WINED3DFMT_X1R5G5B5:
+        case WINED3DFMT_A1R5G5B5:
+        case WINED3DFMT_R5G6B5:
+        case WINED3DFMT_R3G3B2:
+        case WINED3DFMT_A8P8:
+        case WINED3DFMT_P8:
             break;
         default:
             ERR("Unsupported format: %s\n", debug_d3dformat(fmt));

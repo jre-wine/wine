@@ -142,11 +142,6 @@ static void HTTPPROTOCOL_AllDataRead(HttpProtocol *This)
 
 static void HTTPPROTOCOL_Close(HttpProtocol *This)
 {
-    if (This->protocol_sink)
-    {
-        IInternetProtocolSink_Release(This->protocol_sink);
-        This->protocol_sink = 0;
-    }
     if (This->http_negotiate)
     {
         IHttpNegotiate_Release(This->http_negotiate);
@@ -172,11 +167,6 @@ static void HTTPPROTOCOL_Close(HttpProtocol *This)
         if (This->full_header != wszHeaders)
             HeapFree(GetProcessHeap(), 0, This->full_header);
         This->full_header = 0;
-    }
-    if (This->bind_info.cbSize)
-    {
-        ReleaseBindInfo(&This->bind_info);
-        memset(&This->bind_info, 0, sizeof(This->bind_info));
     }
     This->flags = 0;
 }
@@ -213,6 +203,18 @@ static void CALLBACK HTTPPROTOCOL_InternetStatusCallback(
             IInternetProtocolSink_Switch(This->protocol_sink, &data);
         else
             IInternetProtocol_Continue((IInternetProtocol *)This, &data);
+        return;
+    case INTERNET_STATUS_HANDLE_CLOSING:
+        if (This->protocol_sink)
+        {
+            IInternetProtocolSink_Release(This->protocol_sink);
+            This->protocol_sink = 0;
+        }
+        if (This->bind_info.cbSize)
+        {
+            ReleaseBindInfo(&This->bind_info);
+            memset(&This->bind_info, 0, sizeof(This->bind_info));
+        }
         return;
     default:
         WARN("Unhandled Internet status callback %d\n", dwInternetStatus);
@@ -321,6 +323,9 @@ static HRESULT WINAPI HttpProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
     TRACE("(%p)->(%s %p %p %08x %d)\n", This, debugstr_w(szUrl), pOIProtSink,
             pOIBindInfo, grfPI, dwReserved);
 
+    IInternetProtocolSink_AddRef(pOIProtSink);
+    This->protocol_sink = pOIProtSink;
+
     memset(&This->bind_info, 0, sizeof(This->bind_info));
     This->bind_info.cbSize = sizeof(BINDINFO);
     hres = IInternetBindInfo_GetBindInfo(pOIBindInfo, &This->grfBINDF, &This->bind_info);
@@ -354,7 +359,7 @@ static HRESULT WINAPI HttpProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
         url.nPort = INTERNET_DEFAULT_HTTP_PORT;
 
     if(!(This->grfBINDF & BINDF_FROMURLMON))
-        IInternetProtocolSink_ReportProgress(pOIProtSink, BINDSTATUS_DIRECTBIND, NULL);
+        IInternetProtocolSink_ReportProgress(This->protocol_sink, BINDSTATUS_DIRECTBIND, NULL);
 
     hres = IInternetBindInfo_GetBindString(pOIBindInfo, BINDSTRING_USER_AGENT, &user_agent,
                                            1, &num);
@@ -392,9 +397,6 @@ static HRESULT WINAPI HttpProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
         hres = INET_E_NO_SESSION;
         goto done;
     }
-
-    IInternetProtocolSink_AddRef(pOIProtSink);
-    This->protocol_sink = pOIProtSink;
 
     /* Native does not check for success of next call, so we won't either */
     InternetSetStatusCallbackW(This->internet, HTTPPROTOCOL_InternetStatusCallback);
@@ -434,7 +436,7 @@ static HRESULT WINAPI HttpProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
         goto done;
     }
 
-    hres = IInternetProtocolSink_QueryInterface(pOIProtSink, &IID_IServiceProvider,
+    hres = IInternetProtocolSink_QueryInterface(This->protocol_sink, &IID_IServiceProvider,
                                                 (void **)&service_provider);
     if (hres != S_OK)
     {
@@ -533,7 +535,7 @@ static HRESULT WINAPI HttpProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
 done:
     if (hres != S_OK)
     {
-        IInternetProtocolSink_ReportResult(pOIProtSink, hres, 0, NULL);
+        IInternetProtocolSink_ReportResult(This->protocol_sink, hres, 0, NULL);
         HTTPPROTOCOL_Close(This);
     }
 
@@ -661,20 +663,22 @@ static HRESULT WINAPI HttpProtocol_Continue(IInternetProtocol *iface, PROTOCOLDA
 
     if (pProtocolData->pData >= (LPVOID)BINDSTATUS_DOWNLOADINGDATA)
     {
+        /* InternetQueryDataAvailable may immediately fork and perform its asynchronous
+         * read, so clear the flag _before_ calling so it does not incorrectly get cleared
+         * after the status callback is called */
+        This->flags &= ~FLAG_REQUEST_COMPLETE;
         if (!InternetQueryDataAvailable(This->request, &This->available_bytes, 0, 0))
         {
-            if (GetLastError() == ERROR_IO_PENDING)
+            if (GetLastError() != ERROR_IO_PENDING)
             {
-                This->flags &= ~FLAG_REQUEST_COMPLETE;
-            }
-            else
-            {
+                This->flags |= FLAG_REQUEST_COMPLETE;
                 WARN("InternetQueryDataAvailable failed: %d\n", GetLastError());
                 HTTPPROTOCOL_ReportResult(This, INET_E_DATA_NOT_AVAILABLE);
             }
         }
         else
         {
+            This->flags |= FLAG_REQUEST_COMPLETE;
             HTTPPROTOCOL_ReportData(This);
         }
     }

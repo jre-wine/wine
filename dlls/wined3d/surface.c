@@ -32,26 +32,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_surface);
 #define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
-typedef enum {
-    NO_CONVERSION,
-    CONVERT_PALETTED,
-    CONVERT_PALETTED_CK,
-    CONVERT_CK_565,
-    CONVERT_CK_5551,
-    CONVERT_CK_4444,
-    CONVERT_CK_4444_ARGB,
-    CONVERT_CK_1555,
-    CONVERT_555,
-    CONVERT_CK_RGB24,
-    CONVERT_CK_8888,
-    CONVERT_CK_8888_ARGB,
-    CONVERT_RGB32_888,
-    CONVERT_V8U8,
-    CONVERT_X8L8V8U8,
-    CONVERT_Q8W8V8U8,
-    CONVERT_V16U16
-} CONVERT_TYPES;
-
 HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UINT height, UINT outpitch, CONVERT_TYPES convert, IWineD3DSurfaceImpl *surf);
 
 static void surface_download_data(IWineD3DSurfaceImpl *This) {
@@ -693,6 +673,10 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
 
     TRACE("(%p) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
 
+    if (This->Flags & SFLAG_LOCKED) {
+        WARN("Surface is already locked, returning D3DERR_INVALIDCALL\n");
+        return WINED3DERR_INVALIDCALL;
+    }
     if (!(This->Flags & SFLAG_LOCKABLE)) {
         /* Note: UpdateTextures calls CopyRects which calls this routine to populate the
               texture regions, and since the destination is an unlockable region we need
@@ -1175,7 +1159,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
     }
 
     IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain);
-    if(swapchain || iface == myDevice->render_targets[0]) {
+    if(swapchain || (myDevice->render_targets && iface == myDevice->render_targets[0])) {
         if(wined3d_settings.rendertargetlock_mode == RTL_DISABLE) {
             static BOOL warned = FALSE;
             if(!warned) {
@@ -1472,6 +1456,11 @@ HRESULT WINAPI IWineD3DSurfaceImpl_ReleaseDC(IWineD3DSurface *iface, HDC hDC) {
     if (!(This->Flags & SFLAG_DCINUSE))
         return WINED3DERR_INVALIDCALL;
 
+    if (This->hDC !=hDC) {
+        WARN("Application tries to release an invalid DC(%p), surface dc is %p\n", hDC, This->hDC);
+        return WINED3DERR_INVALIDCALL;
+    }
+
     /* we locked first, so unlock now */
     IWineD3DSurface_UnlockRect(iface);
 
@@ -1484,7 +1473,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_ReleaseDC(IWineD3DSurface *iface, HDC hDC) {
    IWineD3DSurface Internal (No mapping to directx api) parts follow
    ****************************************************** */
 
-static HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_texturing, GLenum *format, GLenum *internal, GLenum *type, CONVERT_TYPES *convert, int *target_bpp, BOOL srgb_mode) {
+HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_texturing, GLenum *format, GLenum *internal, GLenum *type, CONVERT_TYPES *convert, int *target_bpp, BOOL srgb_mode) {
     BOOL colorkey_active = need_alpha_ck && (This->CKeyFlags & WINEDDSD_CKSRCBLT);
     const GlPixelFormatDesc *glDesc;
     getFormatDescEntry(This->resource.format, &GLINFO_LOCATION, &glDesc);
@@ -1613,6 +1602,42 @@ static HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BO
             /* What should I do here about GL_ATI_envmap_bumpmap?
              * Convert it or allow data loss by loading it into a 8 bit / channel texture?
              */
+            break;
+
+        case WINED3DFMT_A4L4:
+            /* A4L4 exists as an internal gl format, but for some reason there is not
+             * format+type combination to load it. Thus convert it to A8L8, then load it
+             * with A4L4 internal, but A8L8 format+type
+             */
+            *convert = CONVERT_A4L4;
+            *format = GL_LUMINANCE_ALPHA;
+            *internal = GL_LUMINANCE4_ALPHA4;
+            *type = GL_UNSIGNED_BYTE;
+            *target_bpp = 2;
+            break;
+
+        case WINED3DFMT_R32F:
+            /* Can be loaded in theory with fmt=GL_RED, type=GL_FLOAT, but this fails. The reason
+             * is that D3D expects the undefined green, blue and alpha channels to return 1.0
+             * when sampling, but OpenGL sets green and blue to 0.0 instead. Thus we have to inject
+             * 1.0 instead.
+             *
+             * The alpha channel defaults to 1.0 in opengl, so nothing has to be done about it.
+             */
+            *convert = CONVERT_R32F;
+            *format = GL_RGB;
+            *internal = GL_RGB32F_ARB;
+            *type = GL_FLOAT;
+            *target_bpp = 12;
+            break;
+
+        case WINED3DFMT_R16F:
+            /* Simmilar to R32F */
+            *convert = CONVERT_R16F;
+            *format = GL_RGB;
+            *internal = GL_RGB16F_ARB;
+            *type = GL_HALF_FLOAT_ARB;
+            *target_bpp = 6;
             break;
 
         default:
@@ -1801,6 +1826,62 @@ HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UIN
             break;
         }
 
+        case CONVERT_A4L4:
+        {
+            unsigned int x, y;
+            unsigned char *Source;
+            unsigned char *Dest;
+            for(y = 0; y < height; y++) {
+                Source = (unsigned char *) (src + y * pitch);
+                Dest = (unsigned char *) (dst + y * outpitch);
+                for (x = 0; x < width; x++ ) {
+                    unsigned char color = (*Source++);
+                    /* A */ Dest[1] = (color & 0xf0) << 0;
+                    /* L */ Dest[0] = (color & 0x0f) << 4;
+                    Dest += 2;
+                }
+            }
+            break;
+        }
+
+        case CONVERT_R32F:
+        {
+            unsigned int x, y;
+            float *Source;
+            float *Dest;
+            for(y = 0; y < height; y++) {
+                Source = (float *) (src + y * pitch);
+                Dest = (float *) (dst + y * outpitch);
+                for (x = 0; x < width; x++ ) {
+                    float color = (*Source++);
+                    Dest[0] = color;
+                    Dest[1] = 1.0;
+                    Dest[2] = 1.0;
+                    Dest += 3;
+                }
+            }
+            break;
+        }
+
+        case CONVERT_R16F:
+        {
+            unsigned int x, y;
+            WORD *Source;
+            WORD *Dest;
+            WORD one = 0x3c00;
+            for(y = 0; y < height; y++) {
+                Source = (WORD *) (src + y * pitch);
+                Dest = (WORD *) (dst + y * outpitch);
+                for (x = 0; x < width; x++ ) {
+                    WORD color = (*Source++);
+                    Dest[0] = color;
+                    Dest[1] = one;
+                    Dest[2] = one;
+                    Dest += 3;
+                }
+            }
+            break;
+        }
         default:
             ERR("Unsupported conversation type %d\n", convert);
     }

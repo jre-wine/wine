@@ -32,19 +32,24 @@
 static BOOL (WINAPI * pCryptVerifyCertificateSignatureEx)
                         (HCRYPTPROV, DWORD, DWORD, void *, DWORD, void *, DWORD, void *);
 
-#define CRYPT_GET_PROC(func)                                       \
-    p ## func = (void *)GetProcAddress(hCrypt32, #func);
+static BOOL (WINAPI * pCryptAcquireContextW)
+                        (HCRYPTPROV *, LPCWSTR, LPCWSTR, DWORD, DWORD);
 
 static void init_function_pointers(void)
 {
-    HMODULE hCrypt32;
+    HMODULE hCrypt32 = GetModuleHandleA("crypt32.dll");
+    HMODULE hAdvapi32 = GetModuleHandleA("advapi32.dll");
 
-    pCryptVerifyCertificateSignatureEx = NULL;
+#define GET_PROC(dll, func) \
+    p ## func = (void *)GetProcAddress(dll, #func); \
+    if(!p ## func) \
+      trace("GetProcAddress(%s) failed\n", #func);
 
-    hCrypt32 = GetModuleHandleA("crypt32.dll");
-    assert(hCrypt32);
+    GET_PROC(hCrypt32, CryptVerifyCertificateSignatureEx)
 
-    CRYPT_GET_PROC(CryptVerifyCertificateSignatureEx);
+    GET_PROC(hAdvapi32, CryptAcquireContextW)
+
+#undef GET_PROC
 }
 
 static BYTE subjectName[] = { 0x30, 0x15, 0x31, 0x13, 0x30, 0x11, 0x06,
@@ -929,7 +934,7 @@ static BYTE iTunesSerialNum[] = {
 static void testFindCert(void)
 {
     HCERTSTORE store;
-    PCCERT_CONTEXT context = NULL;
+    PCCERT_CONTEXT context = NULL, subject;
     BOOL ret;
     CERT_INFO certInfo = { 0 };
     CRYPT_HASH_BLOB blob;
@@ -1067,7 +1072,7 @@ static void testFindCert(void)
     ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
      GetLastError());
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
-     iTunesCert3, sizeof(iTunesCert3), CERT_STORE_ADD_NEW, NULL);
+     iTunesCert3, sizeof(iTunesCert3), CERT_STORE_ADD_NEW, &subject);
     ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
      GetLastError());
 
@@ -1098,6 +1103,18 @@ static void testFindCert(void)
         ok(context == NULL, "Expected one cert only\n");
     }
 
+    context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
+     CERT_FIND_ISSUER_OF, subject, NULL);
+    ok(context != NULL, "Expected an issuer\n");
+    if (context)
+    {
+        PCCERT_CONTEXT none = CertFindCertificateInStore(store,
+         X509_ASN_ENCODING, 0, CERT_FIND_ISSUER_OF, context, NULL);
+
+        ok(!none, "Expected no parent of issuer\n");
+        CertFreeCertificateContext(context);
+    }
+    CertFreeCertificateContext(subject);
     CertCloseStore(store, 0);
 }
 
@@ -1507,9 +1524,9 @@ static void testCertSigs(void)
     DWORD sigSize = sizeof(sig);
 
     /* Just in case a previous run failed, delete this thing */
-    CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
-    ret = CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    ret = pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_NEWKEYSET);
     ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
 
@@ -1518,7 +1535,7 @@ static void testCertSigs(void)
 
     CryptDestroyKey(key);
     CryptReleaseContext(csp, 0);
-    ret = CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    ret = pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
 }
 
@@ -1633,9 +1650,9 @@ static void testCreateSelfSignCert(void)
      */
 
     /* Acquire a CSP */
-    CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
-    ret = CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    ret = pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_NEWKEYSET);
     ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
 
@@ -1690,7 +1707,7 @@ static void testCreateSelfSignCert(void)
     }
 
     CryptReleaseContext(csp, 0);
-    ret = CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    ret = pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
 
     /* do the same test with AT_KEYEXCHANGE  and key info*/
@@ -1738,7 +1755,7 @@ static void testCreateSelfSignCert(void)
         CertFreeCertificateContext(context);
     }
 
-    CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
         CRYPT_DELETEKEYSET);
 }
 
@@ -2347,7 +2364,7 @@ static void testAcquireCertPrivateKey(void)
     keyProvInfo.rgProvParam = NULL;
     keyProvInfo.dwKeySpec = AT_SIGNATURE;
 
-    CryptAcquireContextW(NULL, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    pCryptAcquireContextW(NULL, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
 
     cert = CertCreateCertificateContext(X509_ASN_ENCODING, selfSignedCert,
@@ -2380,7 +2397,7 @@ static void testAcquireCertPrivateKey(void)
     ok(!ret && GetLastError() == CRYPT_E_NO_KEY_PROPERTY,
      "Expected CRYPT_E_NO_KEY_PROPERTY, got %08x\n", GetLastError());
 
-    CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_NEWKEYSET);
     ret = CryptImportKey(csp, privKey, sizeof(privKey), 0, 0, &key);
     ok(ret, "CryptImportKey failed: %08x\n", GetLastError());
@@ -2501,7 +2518,7 @@ static void testAcquireCertPrivateKey(void)
     }
 
     CryptReleaseContext(csp, 0);
-    CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
 
     CertFreeCertificateContext(cert);

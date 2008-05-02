@@ -44,6 +44,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD fdwReason, PVOID pvReserved)
         case DLL_PROCESS_DETACH:
             crypt_oid_free();
             crypt_sip_free();
+            default_chain_engine_free();
             if (hDefProv) CryptReleaseContext(hDefProv, 0);
             break;
     }
@@ -232,17 +233,5 @@ BOOL WINAPI CryptQueryObject(DWORD dwObjectType, const void* pvObject,
            pvObject, dwExpectedContentTypeFlags, dwExpectedFormatTypeFlags,
            dwFlags, pdwMsgAndCertEncodingType, pdwContentType, pdwFormatType,
            phCertStore, phMsg, ppvContext);
-    return FALSE;
-}
-
-BOOL WINAPI CryptVerifyMessageSignature(PCRYPT_VERIFY_MESSAGE_PARA pVerifyPara,
-          DWORD dwSignerIndex, const BYTE* pbSignedBlob, DWORD cbSignedBlob,
-          BYTE* pbDecoded, DWORD* pcbDecoded, PCCERT_CONTEXT* ppSignerCert)
-{
-    FIXME("stub: %p, %d, %p, %d, %p, %p, %p\n",
-        pVerifyPara, dwSignerIndex, pbSignedBlob, cbSignedBlob,
-        pbDecoded, pcbDecoded, ppSignerCert);
-    if (ppSignerCert)
-        *ppSignerCert = NULL;
     return FALSE;
 }

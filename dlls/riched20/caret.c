@@ -47,18 +47,18 @@ int ME_GetTextLength(ME_TextEditor *editor)
 }
 
 
-int ME_GetTextLengthEx(ME_TextEditor *editor, GETTEXTLENGTHEX *how)
+int ME_GetTextLengthEx(ME_TextEditor *editor, const GETTEXTLENGTHEX *how)
 {
   int length;
-  
+
   if (how->flags & GTL_PRECISE && how->flags & GTL_CLOSE)
     return E_INVALIDARG;
   if (how->flags & GTL_NUMCHARS && how->flags & GTL_NUMBYTES)
     return E_INVALIDARG;
   
   length = ME_GetTextLength(editor);
-  
-  if (how->flags & GTL_USECRLF)
+
+  if ((GetWindowLongW(editor->hWnd, GWL_STYLE) & ES_MULTILINE) && (how->flags & GTL_USECRLF))
     length += editor->nParagraphs;
   
   if (how->flags & GTL_NUMBYTES)
@@ -230,7 +230,8 @@ ME_MoveCaret(ME_TextEditor *editor)
 {
   int x, y, height;
 
-  ME_WrapMarkedParagraphs(editor);
+  if (ME_WrapMarkedParagraphs(editor))
+    ME_UpdateScrollBar(editor);
   ME_GetCursorCoordinates(editor, &editor->pCursors[0], &x, &y, &height);
   if(editor->bHaveFocus)
   {
@@ -1148,8 +1149,8 @@ static int ME_GetSelCursor(ME_TextEditor *editor, int dir)
   else
     return 1;
 }
-      
-BOOL ME_UpdateSelection(ME_TextEditor *editor, ME_Cursor *pTempCursor)
+
+BOOL ME_UpdateSelection(ME_TextEditor *editor, const ME_Cursor *pTempCursor)
 {
   ME_Cursor old_anchor = editor->pCursors[1];
   

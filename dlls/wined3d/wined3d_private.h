@@ -518,6 +518,7 @@ struct WineD3DContext {
     GLenum                  untracked_materials[2];
     BOOL                    last_was_blit, last_was_ckey;
     char                    texShaderBumpMap;
+    BOOL                    fog_coord;
 
     /* The actual opengl context */
     HGLRC                   glCtx;
@@ -535,7 +536,7 @@ typedef enum ContextUsage {
 } ContextUsage;
 
 void ActivateContext(IWineD3DDeviceImpl *device, IWineD3DSurface *target, ContextUsage usage);
-WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, HWND win, BOOL create_pbuffer);
+WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, HWND win, BOOL create_pbuffer, const WINED3DPRESENT_PARAMETERS *pPresentParms);
 void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context);
 void apply_fbo_state(IWineD3DDevice *iface);
 
@@ -573,6 +574,13 @@ struct PLIGHTINFOEL {
 /* The default light parameters */
 extern const WINED3DLIGHT WINED3D_default_light;
 
+typedef struct WineD3D_PixelFormat
+{
+    int iPixelFormat; /* WGL pixel format */
+    int redSize, greenSize, blueSize, alphaSize;
+    int depthSize, stencilSize;
+} WineD3D_PixelFormat;
+
 /* The adapter structure */
 typedef struct GLPixelFormatDesc GLPixelFormatDesc;
 struct WineD3DAdapter
@@ -581,7 +589,9 @@ struct WineD3DAdapter
     WineD3D_GL_Info         gl_info;
     const char              *driver;
     const char              *description;
+    WCHAR                   DeviceName[CCHDEVICENAME]; /* DeviceName for use with e.g. ChangeDisplaySettings */
     int                     nCfgs;
+    WineD3D_PixelFormat     *cfgs;
 };
 
 extern BOOL InitAdapters(void);
@@ -901,11 +911,6 @@ typedef enum winetexturestates {
     MAX_WINETEXTURESTATES        = 13,
 } winetexturestates;
 
-typedef struct Wined3dTextureStateMap {
-    CONST int state;
-    int function;
-} Wined3dTextureStateMap;
-
 /*****************************************************************************
  * IWineD3DBaseTexture implementation structure (extends IWineD3DResourceImpl)
  */
@@ -1211,6 +1216,31 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetClipper(IWineD3DSurface *iface, IWineD3DCl
 
 BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]);
 
+typedef enum {
+    NO_CONVERSION,
+    CONVERT_PALETTED,
+    CONVERT_PALETTED_CK,
+    CONVERT_CK_565,
+    CONVERT_CK_5551,
+    CONVERT_CK_4444,
+    CONVERT_CK_4444_ARGB,
+    CONVERT_CK_1555,
+    CONVERT_555,
+    CONVERT_CK_RGB24,
+    CONVERT_CK_8888,
+    CONVERT_CK_8888_ARGB,
+    CONVERT_RGB32_888,
+    CONVERT_V8U8,
+    CONVERT_X8L8V8U8,
+    CONVERT_Q8W8V8U8,
+    CONVERT_V16U16,
+    CONVERT_A4L4,
+    CONVERT_R32F,
+    CONVERT_R16F
+} CONVERT_TYPES;
+
+HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_texturing, GLenum *format, GLenum *internal, GLenum *type, CONVERT_TYPES *convert, int *target_bpp, BOOL srgb_mode);
+
 /*****************************************************************************
  * IWineD3DVertexDeclaration implementation structure
  */
@@ -1270,6 +1300,11 @@ typedef struct {
     DWORD   idx[13];
 } constants_entry;
 
+struct StageState {
+    DWORD stage;
+    DWORD state;
+};
+
 struct IWineD3DStateBlockImpl
 {
     /* IUnknown fields */
@@ -1283,7 +1318,6 @@ struct IWineD3DStateBlockImpl
 
     /* Array indicating whether things have been set or changed */
     SAVEDSTATES               changed;
-    SAVEDSTATES               set;
     struct list               set_vconstantsF;
     struct list               set_pconstantsF;
 
@@ -1357,6 +1391,28 @@ struct IWineD3DStateBlockImpl
 
     /* Scissor test rectangle */
     RECT                      scissorRect;
+
+    /* Contained state management */
+    DWORD                     contained_render_states[WINEHIGHEST_RENDER_STATE + 1];
+    unsigned int              num_contained_render_states;
+    DWORD                     contained_transform_states[HIGHEST_TRANSFORMSTATE + 1];
+    unsigned int              num_contained_transform_states;
+    DWORD                     contained_vs_consts_i[MAX_CONST_I];
+    unsigned int              num_contained_vs_consts_i;
+    DWORD                     contained_vs_consts_b[MAX_CONST_B];
+    unsigned int              num_contained_vs_consts_b;
+    DWORD                     *contained_vs_consts_f;
+    unsigned int              num_contained_vs_consts_f;
+    DWORD                     contained_ps_consts_i[MAX_CONST_I];
+    unsigned int              num_contained_ps_consts_i;
+    DWORD                     contained_ps_consts_b[MAX_CONST_B];
+    unsigned int              num_contained_ps_consts_b;
+    DWORD                     *contained_ps_consts_f;
+    unsigned int              num_contained_ps_consts_f;
+    struct StageState         contained_tss_states[MAX_TEXTURES * (WINED3D_HIGHEST_TEXTURE_STATE)];
+    unsigned int              num_contained_tss_states;
+    struct StageState         contained_sampler_states[MAX_COMBINED_SAMPLERS * WINED3D_HIGHEST_SAMPLER_STATE];
+    unsigned int              num_contained_sampler_states;
 };
 
 extern void stateblock_savedstates_set(
@@ -1404,10 +1460,12 @@ extern const IWineD3DQueryVtbl IWineD3DQuery_Vtbl;
 /* Datastructures for IWineD3DQueryImpl.extendedData */
 typedef struct  WineQueryOcclusionData {
     GLuint  queryId;
+    WineD3DContext *ctx;
 } WineQueryOcclusionData;
 
 typedef struct  WineQueryEventData {
     GLuint  fenceId;
+    WineD3DContext *ctx;
 } WineQueryEventData;
 
 /*****************************************************************************

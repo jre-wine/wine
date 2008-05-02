@@ -1,7 +1,7 @@
 @ stdcall GdipAddPathArc(ptr long long long long long long)
 @ stub GdipAddPathArcI
 @ stub GdipAddPathBezier
-@ stub GdipAddPathBezierI
+@ stdcall GdipAddPathBezierI(ptr long long long long long long long long)
 @ stdcall GdipAddPathBeziers(ptr ptr long)
 @ stub GdipAddPathBeziersI
 @ stub GdipAddPathClosedCurve2
@@ -19,7 +19,7 @@
 @ stdcall GdipAddPathLine2(ptr ptr long)
 @ stub GdipAddPathLine2I
 @ stub GdipAddPathLine
-@ stub GdipAddPathLineI
+@ stdcall GdipAddPathLineI(ptr long long long long)
 @ stdcall GdipAddPathPath(ptr ptr long)
 @ stub GdipAddPathPie
 @ stub GdipAddPathPieI
@@ -87,8 +87,8 @@
 @ stub GdipCreateFont
 @ stub GdipCreateFontFamilyFromName
 @ stub GdipCreateFontFromDC
-@ stub GdipCreateFontFromLogfontA
-@ stub GdipCreateFontFromLogfontW
+@ stdcall GdipCreateFontFromLogfontA(ptr ptr ptr)
+@ stdcall GdipCreateFontFromLogfontW(ptr ptr ptr)
 @ stub GdipCreateFromHDC2
 @ stdcall GdipCreateFromHDC(long ptr)
 @ stdcall GdipCreateFromHWND(long ptr)
@@ -130,7 +130,7 @@
 @ stub GdipCreateRegionRgnData
 @ stdcall GdipCreateSolidFill(long ptr)
 @ stdcall GdipCreateStreamOnFile(ptr long ptr)
-@ stub GdipCreateStringFormat
+@ stdcall GdipCreateStringFormat(long long ptr)
 @ stub GdipCreateTexture2
 @ stub GdipCreateTexture2I
 @ stub GdipCreateTexture
@@ -140,7 +140,7 @@
 @ stub GdipDeleteCachedBitmap
 @ stdcall GdipDeleteCustomLineCap(ptr)
 @ stub GdipDeleteEffect
-@ stub GdipDeleteFont
+@ stdcall GdipDeleteFont(ptr)
 @ stub GdipDeleteFontFamily
 @ stdcall GdipDeleteGraphics(ptr)
 @ stdcall GdipDeleteMatrix(ptr)
@@ -149,7 +149,7 @@
 @ stdcall GdipDeletePen(ptr)
 @ stub GdipDeletePrivateFontCollection
 @ stub GdipDeleteRegion
-@ stub GdipDeleteStringFormat
+@ stdcall GdipDeleteStringFormat(ptr)
 @ stdcall GdipDisposeImage(ptr)
 @ stdcall GdipDisposeImageAttributes(ptr)
 @ stdcall GdipDrawArc(ptr ptr long long long long long long)
@@ -196,9 +196,9 @@
 @ stub GdipDrawPolygonI
 @ stub GdipDrawRectangle
 @ stdcall GdipDrawRectangleI(ptr ptr long long long long)
-@ stub GdipDrawRectangles
+@ stdcall GdipDrawRectangles(ptr ptr ptr long)
 @ stub GdipDrawRectanglesI
-@ stub GdipDrawString
+@ stdcall GdipDrawString(ptr ptr long ptr ptr ptr ptr)
 @ stub GdipEmfToWmfBits
 @ stub GdipEndContainer
 @ stub GdipEnumerateMetafileDestPoint
@@ -247,7 +247,7 @@
 @ stub GdipGetClip
 @ stub GdipGetClipBounds
 @ stub GdipGetClipBoundsI
-@ stub GdipGetCompositingMode
+@ stdcall GdipGetCompositingMode(ptr ptr)
 @ stdcall GdipGetCompositingQuality(ptr ptr)
 @ stub GdipGetCustomLineCapBaseCap
 @ stub GdipGetCustomLineCapBaseInset
@@ -312,7 +312,7 @@
 @ stub GdipGetLineTransform
 @ stub GdipGetLineWrapMode
 @ stub GdipGetLogFontA
-@ stub GdipGetLogFontW
+@ stdcall GdipGetLogFontW(ptr ptr ptr)
 @ stdcall GdipGetMatrixElements(ptr ptr)
 @ stub GdipGetMetafileDownLevelRasterizationLimit
 @ stub GdipGetMetafileHeaderFromEmf
@@ -386,17 +386,17 @@
 @ stub GdipGetRenderingOrigin
 @ stdcall GdipGetSmoothingMode(ptr ptr)
 @ stdcall GdipGetSolidFillColor(ptr ptr)
-@ stub GdipGetStringFormatAlign
+@ stdcall GdipGetStringFormatAlign(ptr ptr)
 @ stub GdipGetStringFormatDigitSubstitution
 @ stub GdipGetStringFormatFlags
-@ stub GdipGetStringFormatHotkeyPrefix
-@ stub GdipGetStringFormatLineAlign
+@ stdcall GdipGetStringFormatHotkeyPrefix(ptr ptr)
+@ stdcall GdipGetStringFormatLineAlign(ptr ptr)
 @ stub GdipGetStringFormatMeasurableCharacterRangeCount
 @ stub GdipGetStringFormatTabStopCount
 @ stub GdipGetStringFormatTabStops
-@ stub GdipGetStringFormatTrimming
+@ stdcall GdipGetStringFormatTrimming(ptr ptr)
 @ stub GdipGetTextContrast
-@ stub GdipGetTextRenderingHint
+@ stdcall GdipGetTextRenderingHint(ptr ptr)
 @ stub GdipGetTextureImage
 @ stub GdipGetTextureTransform
 @ stub GdipGetTextureWrapMode
@@ -441,7 +441,7 @@
 @ stdcall GdipLoadImageFromStreamICM(ptr ptr)
 @ stub GdipMeasureCharacterRanges
 @ stub GdipMeasureDriverString
-@ stub GdipMeasureString
+@ stdcall GdipMeasureString(ptr ptr long ptr ptr ptr ptr ptr ptr)
 @ stub GdipMultiplyLineTransform
 @ stdcall GdipMultiplyMatrix(ptr ptr long)
 @ stub GdipMultiplyPathGradientTransform
@@ -490,7 +490,7 @@
 @ stub GdipRotatePathGradientTransform
 @ stub GdipRotatePenTransform
 @ stub GdipRotateTextureTransform
-@ stub GdipRotateWorldTransform
+@ stdcall GdipRotateWorldTransform(ptr long long)
 @ stub GdipSaveAdd
 @ stub GdipSaveAddImage
 @ stdcall GdipSaveGraphics(ptr ptr)
@@ -501,7 +501,7 @@
 @ stub GdipScalePathGradientTransform
 @ stub GdipScalePenTransform
 @ stub GdipScaleTextureTransform
-@ stub GdipScaleWorldTransform
+@ stdcall GdipScaleWorldTransform(ptr long long long)
 @ stub GdipSetAdjustableArrowCapFillState
 @ stub GdipSetAdjustableArrowCapHeight
 @ stub GdipSetAdjustableArrowCapMiddleInset
@@ -512,7 +512,7 @@
 @ stub GdipSetClipRect
 @ stub GdipSetClipRectI
 @ stub GdipSetClipRegion
-@ stub GdipSetCompositingMode
+@ stdcall GdipSetCompositingMode(ptr long)
 @ stdcall GdipSetCompositingQuality(ptr long)
 @ stub GdipSetCustomLineCapBaseCap
 @ stub GdipSetCustomLineCapBaseInset
@@ -535,7 +535,7 @@
 @ stdcall GdipSetImagePalette(ptr ptr)
 @ stub GdipSetInfinite
 @ stdcall GdipSetInterpolationMode(ptr long)
-@ stub GdipSetLineBlend
+@ stdcall GdipSetLineBlend(ptr ptr ptr long)
 @ stub GdipSetLineColors
 @ stdcall GdipSetLineGammaCorrection(ptr long)
 @ stub GdipSetLineLinearBlend
@@ -585,16 +585,16 @@
 @ stub GdipSetRenderingOrigin
 @ stdcall GdipSetSmoothingMode(ptr long)
 @ stdcall GdipSetSolidFillColor(ptr ptr)
-@ stub GdipSetStringFormatAlign
+@ stdcall GdipSetStringFormatAlign(ptr long)
 @ stub GdipSetStringFormatDigitSubstitution
 @ stub GdipSetStringFormatFlags
-@ stub GdipSetStringFormatHotkeyPrefix
-@ stub GdipSetStringFormatLineAlign
+@ stdcall GdipSetStringFormatHotkeyPrefix(ptr long)
+@ stdcall GdipSetStringFormatLineAlign(ptr long)
 @ stub GdipSetStringFormatMeasurableCharacterRanges
 @ stub GdipSetStringFormatTabStops
-@ stub GdipSetStringFormatTrimming
+@ stdcall GdipSetStringFormatTrimming(ptr long)
 @ stub GdipSetTextContrast
-@ stub GdipSetTextRenderingHint
+@ stdcall GdipSetTextRenderingHint(ptr long)
 @ stdcall GdipSetTextureTransform(ptr ptr)
 @ stub GdipSetTextureWrapMode
 @ stdcall GdipSetWorldTransform(ptr ptr)

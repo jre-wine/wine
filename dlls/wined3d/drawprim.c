@@ -244,13 +244,14 @@ static void drawStridedFast(IWineD3DDevice *iface,UINT numberOfVertices, GLenum 
 #if 1
         glDrawElements(glPrimitiveType, numberOfVertices, idxSize == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
                      (const char *)idxData+(idxSize * startIdx));
+        checkGLcall("glDrawElements");
 #else /* using drawRangeElements may be faster */
 
         glDrawRangeElements(glPrimitiveType, minIndex, minIndex + numberOfVertices - 1, numberOfVertices,
                       idxSize == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
                       (const char *)idxData+(idxSize * startIdx));
-#endif
         checkGLcall("glDrawRangeElements");
+#endif
 
     } else {
 
@@ -760,7 +761,7 @@ static inline void drawStridedInstanced(IWineD3DDevice *iface, WineDirect3DVerte
                     break;
 
                 case WINED3DDECLTYPE_UBYTE4:
-                    GL_EXTCALL(glVertexAttrib4NubvARB(instancedData[j], ptr));
+                    GL_EXTCALL(glVertexAttrib4ubvARB(instancedData[j], ptr));
                     break;
                 case WINED3DDECLTYPE_UBYTE4N:
                 case WINED3DDECLTYPE_D3DCOLOR:
@@ -1049,13 +1050,22 @@ void drawPrimitive(IWineD3DDevice *iface,
         if (numberOfVertices == 0 )
             numberOfVertices = calculatedNumberOfindices;
 
-        if(!This->strided_streams.u.s.position_transformed && !use_vs(This)) {
-            if(This->activeContext->num_untracked_materials &&
-               This->stateBlock->renderState[WINED3DRS_LIGHTING]) {
-                IWineD3DVertexBufferImpl *vb;
-
+        if(!use_vs(This)) {
+            if(!This->strided_streams.u.s.position_transformed && This->activeContext->num_untracked_materials &&
+                This->stateBlock->renderState[WINED3DRS_LIGHTING]) {
                 FIXME("Using software emulation because not all material properties could be tracked\n");
                 emulation = TRUE;
+            }
+            else if(This->activeContext->fog_coord && This->stateBlock->renderState[WINED3DRS_FOGENABLE]) {
+                /* Either write a pipeline replacement shader or convert the specular alpha from unsigned byte
+                 * to a float in the vertex buffer
+                 */
+                FIXME("Using software emulation because manual fog coordinates are provided\n");
+                emulation = TRUE;
+            }
+
+            if(emulation) {
+                IWineD3DVertexBufferImpl *vb;
 
                 strided = &stridedlcl;
                 memcpy(&stridedlcl, &This->strided_streams, sizeof(stridedlcl));

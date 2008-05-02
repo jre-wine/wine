@@ -557,9 +557,77 @@ static void fog_test(IDirect3DDevice9 *device)
         trace("Info: Table fog not supported by this device\n");
     }
 
+    /* Now test the special case fogstart == fogend */
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff0000ff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
+
+    if(IDirect3DDevice9_BeginScene(device) == D3D_OK)
+    {
+        start = 512;
+        end = 512;
+        hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGSTART, *((DWORD *) &start));
+        ok(hr == D3D_OK, "Setting fog start returned %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGEND, *((DWORD *) &end));
+        ok(hr == D3D_OK, "Setting fog start returned %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR);
+        ok( hr == D3D_OK, "SetFVF returned %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR);
+        ok( hr == D3D_OK, "IDirect3DDevice9_SetRenderState %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGTABLEMODE, D3DFOG_NONE);
+        ok( hr == D3D_OK, "Setting fog table mode to D3DFOG_LINEAR returned %s\n", DXGetErrorString9(hr));
+
+        /* Untransformed vertex, z coord = 0.1, fogstart = 512, fogend = 512. Would result in
+         * a completely fog-free primitive because start > zcoord, but because start == end, the primitive
+         * is fully covered by fog. The same happens to the 2nd untransformed quad with z = 1.0.
+         * The third transformed quad remains unfogged because the fogcoords are read from the specular
+         * color and has fixed fogstart and fogend.
+         */
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0 /* MinIndex */, 4 /* NumVerts */,
+                2 /*PrimCount */, Indices, D3DFMT_INDEX16, unstransformed_1,
+                sizeof(unstransformed_1[0]));
+        ok(hr == D3D_OK, "DrawIndexedPrimitiveUP returned %s\n", DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0 /* MinIndex */, 4 /* NumVerts */,
+                2 /*PrimCount */, Indices, D3DFMT_INDEX16, unstransformed_2,
+                sizeof(unstransformed_1[0]));
+        ok(hr == D3D_OK, "DrawIndexedPrimitiveUP returned %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR);
+        ok( hr == D3D_OK, "SetFVF returned %s\n", DXGetErrorString9(hr));
+        /* Transformed, vertex fog != NONE, pixel fog == NONE: Use specular color alpha component */
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0 /* MinIndex */, 4 /* NumVerts */,
+                2 /*PrimCount */, Indices, D3DFMT_INDEX16, transformed_1,
+                sizeof(transformed_1[0]));
+        ok(hr == D3D_OK, "DrawIndexedPrimitiveUP returned %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "EndScene returned %s\n", DXGetErrorString9(hr));
+    }
+    else
+    {
+        ok(FALSE, "BeginScene failed\n");
+    }
+    IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    color = getPixelColor(device, 160, 360);
+    ok(color == 0x0000FF00, "Untransformed vertex with vertex fog and z = 0.1 has color %08x\n", color);
+    color = getPixelColor(device, 160, 120);
+    ok(color == 0x0000FF00, "Untransformed vertex with vertex fog and z = 1.0 has color %08x\n", color);
+    color = getPixelColor(device, 480, 120);
+    ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
+
     /* Turn off the fog master switch to avoid confusing other tests */
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGENABLE, FALSE);
     ok(hr == D3D_OK, "Turning off fog calculations returned %s\n", DXGetErrorString9(hr));
+    start = 0.0;
+    end = 1.0;
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGSTART, *((DWORD *) &start));
+    ok(hr == D3D_OK, "Setting fog start returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGEND, *((DWORD *) &end));
+    ok(hr == D3D_OK, "Setting fog end returned %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGVERTEXMODE, D3DFOG_LINEAR);
+    ok( hr == D3D_OK, "IDirect3DDevice9_SetRenderState %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGTABLEMODE, D3DFOG_LINEAR);
+    ok( hr == D3D_OK, "Setting fog table mode to D3DFOG_LINEAR returned %s\n", DXGetErrorString9(hr));
 }
 
 /* This test verifies the behaviour of cube maps wrt. texture wrapping.
@@ -1479,6 +1547,159 @@ static void maxmip_test(IDirect3DDevice9 *device)
     IDirect3DTexture9_Release(texture);
 }
 
+static void release_buffer_test(IDirect3DDevice9 *device)
+{
+    IDirect3DVertexBuffer9 *vb = NULL;
+    IDirect3DIndexBuffer9 *ib = NULL;
+    HRESULT hr;
+    BYTE *data;
+    long ref;
+
+    static const struct vertex quad[] = {
+        {-1.0,      -1.0,       0.1,        0xffff0000},
+        {-1.0,       1.0,       0.1,        0xffff0000},
+        { 1.0,       1.0,       0.1,        0xffff0000},
+
+        {-1.0,      -1.0,       0.1,        0xff00ff00},
+        {-1.0,       1.0,       0.1,        0xff00ff00},
+        { 1.0,       1.0,       0.1,        0xff00ff00}
+    };
+    short indices[] = {3, 4, 5};
+
+    /* Index and vertex buffers should always be createable */
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(quad), 0, D3DFVF_XYZ | D3DFVF_DIFFUSE,
+                                              D3DPOOL_MANAGED, &vb, NULL);
+    ok(hr == D3D_OK, "CreateVertexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!vb) {
+        skip("Failed to create a vertex buffer\n");
+        return;
+    }
+    hr = IDirect3DDevice9_CreateIndexBuffer(device, sizeof(indices), 0, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ib, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateIndexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!ib) {
+        skip("Failed to create an index buffer\n");
+        return;
+    }
+
+    hr = IDirect3DVertexBuffer9_Lock(vb, 0, sizeof(quad), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, quad, sizeof(quad));
+    hr = IDirect3DVertexBuffer9_Unlock(vb);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DIndexBuffer9_Lock(ib, 0, sizeof(indices), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, indices, sizeof(indices));
+    hr = IDirect3DIndexBuffer9_Unlock(ib);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetIndices(device, ib);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer8_Unlock failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetStreamSource(device, 0, vb, 0, sizeof(quad[0]));
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer8_Unlock failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
+
+    /* Now destroy the bound index buffer and draw again */
+    ref = IDirect3DIndexBuffer9_Release(ib);
+    ok(ref == 0, "Index Buffer reference count is %08ld\n", ref);
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff0000ff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %08x\n", hr);
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %08x\n", hr);
+    if(SUCCEEDED(hr))
+    {
+        /* Deliberately using minvertexindex = 0 and numVertices = 6 to prevent d3d from
+         * making assumptions about the indices or vertices
+         */
+        hr = IDirect3DDevice9_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, 0, 3, 3, 0, 1);
+        ok(hr == D3D_OK, "IDirect3DDevice9_DrawIndexedPrimitive failed with %08x\n", hr);
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %08x\n", hr);
+    }
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %08x\n", hr);
+
+    hr = IDirect3DDevice9_SetIndices(device, NULL);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %08x\n", hr);
+    hr = IDirect3DDevice9_SetStreamSource(device, 0, NULL, 0, 0);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %08x\n", hr);
+
+    /* Index buffer was already destroyed as part of the test */
+    IDirect3DVertexBuffer9_Release(vb);
+}
+
+static void float_texture_test(IDirect3DDevice9 *device)
+{
+    IDirect3D9 *d3d = NULL;
+    HRESULT hr;
+    IDirect3DTexture9 *texture = NULL;
+    D3DLOCKED_RECT lr;
+    float *data;
+    DWORD color;
+    float quad[] = {
+        -1.0,      -1.0,       0.1,     0.0,    0.0,
+        -1.0,       1.0,       0.1,     0.0,    1.0,
+         1.0,      -1.0,       0.1,     1.0,    0.0,
+         1.0,       1.0,       0.1,     1.0,    1.0,
+    };
+
+    memset(&lr, 0, sizeof(lr));
+    IDirect3DDevice9_GetDirect3D(device, &d3d);
+    if(IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, 0,
+                                     D3DRTYPE_TEXTURE, D3DFMT_R32F) != D3D_OK) {
+        skip("D3DFMT_R32F textures not supported\n");
+        goto out;
+    }
+
+    hr = IDirect3DDevice9_CreateTexture(device, 1, 1, 1, 0, D3DFMT_R32F,
+                                        D3DPOOL_MANAGED, &texture, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateTexture failed with %s\n", DXGetErrorString9(hr));
+    if(!texture) {
+        skip("Failed to create R32F texture\n");
+        goto out;
+    }
+
+    hr = IDirect3DTexture9_LockRect(texture, 0, &lr, NULL, 0);
+    ok(hr == D3D_OK, "IDirect3DTexture9_LockRect failed with %s\n", DXGetErrorString9(hr));
+    data = lr.pBits;
+    *data = 0.0;
+    hr = IDirect3DTexture9_UnlockRect(texture, 0);
+    ok(hr == D3D_OK, "IDirect3DTexture9_UnlockRect failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) texture);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %s\n", DXGetErrorString9(hr));
+    if(SUCCEEDED(hr))
+    {
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
+        ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, 5 * sizeof(float));
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %s\n", DXGetErrorString9(hr));
+    }
+    hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+
+    color = getPixelColor(device, 240, 320);
+    ok(color == 0x0000FFFF, "R32F with value 0.0 has color %08x, expected 0x0000FFFF\n", color);
+
+out:
+    if(texture) IDirect3DTexture9_Release(texture);
+    IDirect3D9_Release(d3d);
+}
+
 START_TEST(visual)
 {
     IDirect3DDevice9 *device_ptr;
@@ -1553,6 +1774,8 @@ START_TEST(visual)
         skip("No mipmap support\n");
     }
     offscreen_test(device_ptr);
+    release_buffer_test(device_ptr);
+    float_texture_test(device_ptr);
 
     if (caps.VertexShaderVersion >= D3DVS_VERSION(2, 0))
     {

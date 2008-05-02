@@ -250,19 +250,18 @@ static BOOL WINAPI CertContext_GetProperty(void *context, DWORD dwPropId,
 
             if (ext)
             {
-                CRYPT_DATA_BLOB *value;
+                CRYPT_DATA_BLOB value;
                 DWORD size;
 
                 ret = CryptDecodeObjectEx(X509_ASN_ENCODING,
                  szOID_SUBJECT_KEY_IDENTIFIER, ext->Value.pbData,
-                 ext->Value.cbData, CRYPT_DECODE_ALLOC_FLAG, NULL, &value,
+                 ext->Value.cbData, CRYPT_DECODE_NOCOPY_FLAG, NULL, &value,
                  &size);
                 if (ret)
                 {
-                    ret = CertContext_CopyParam(pvData, pcbData, value->pbData,
-                     value->cbData);
-                    CertContext_SetProperty(context, dwPropId, 0, value);
-                    LocalFree(value);
+                    ret = CertContext_CopyParam(pvData, pcbData, value.pbData,
+                     value.cbData);
+                    CertContext_SetProperty(context, dwPropId, 0, &value);
                 }
             }
             else
@@ -972,6 +971,7 @@ static BOOL compare_cert_by_cert_id(PCCERT_CONTEXT pCertContext, DWORD dwType,
         }
         else
             ret = FALSE;
+        break;
     }
     default:
         ret = FALSE;
@@ -2430,16 +2430,4 @@ PCCERT_CONTEXT WINAPI CertCreateSelfSignCertificate(HCRYPTPROV_OR_NCRYPT_KEY_HAN
     if (releaseContext)
         CryptReleaseContext(hProv, 0);
     return context;
-}
-
-BOOL WINAPI CertGetCertificateChain(HCERTCHAINENGINE hChainEngine,
-    PCCERT_CONTEXT pCertContext, LPFILETIME pTime, HCERTSTORE hAdditionalStore,
-    PCERT_CHAIN_PARA pChainPara, DWORD dwFlags, LPVOID pvReserved,
-    PCCERT_CHAIN_CONTEXT* ppChainContext)
-{
-    FIXME(" %p %p %p %p %p 0x%08X %p %p - stub\n",hChainEngine, pCertContext,
-     pTime, hAdditionalStore, pChainPara, dwFlags, pvReserved, ppChainContext);
-
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
 }

@@ -47,8 +47,7 @@
 
 #define NSAPI WINAPI
 
-#define NS_ELEMENT_NODE   1
-#define NS_DOCUMENT_NODE  9
+#define MSHTML_E_NODOC    0x800a025c
 
 typedef struct HTMLDOMNode HTMLDOMNode;
 typedef struct ConnectionPoint ConnectionPoint;
@@ -112,6 +111,7 @@ struct HTMLDocument {
     const IOleControlVtbl                 *lpOleControlVtbl;
     const IHlinkTargetVtbl                *lpHlinkTargetVtbl;
     const IPersistStreamInitVtbl          *lpPersistStreamInitVtbl;
+    const ICustomDocVtbl                  *lpCustomDocVtbl;
 
     LONG ref;
 
@@ -148,6 +148,9 @@ struct HTMLDocument {
     ConnectionPoint cp_htmldocevents;
     ConnectionPoint cp_htmldocevents2;
     ConnectionPoint cp_propnotif;
+
+    struct list selection_list;
+    struct list range_list;
 
     HTMLDOMNode *nodes;
 };
@@ -305,6 +308,7 @@ typedef struct {
 #define HLNKTARGET(x)    ((IHlinkTarget*)                 &(x)->lpHlinkTargetVtbl)
 #define CONPTCONT(x)     ((IConnectionPointContainer*)    &(x)->lpConnectionPointContainerVtbl)
 #define PERSTRINIT(x)    ((IPersistStreamInit*)           &(x)->lpPersistStreamInitVtbl)
+#define CUSTOMDOC(x)     ((ICustomDoc*)                   &(x)->lpCustomDocVtbl)
 
 #define NSWBCHROME(x)    ((nsIWebBrowserChrome*)          &(x)->lpWebBrowserChromeVtbl)
 #define NSCML(x)         ((nsIContextMenuListener*)       &(x)->lpContextMenuListenerVtbl)
@@ -337,6 +341,7 @@ HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
 
 HTMLWindow *HTMLWindow_Create(HTMLDocument*);
 HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
+void setup_nswindow(HTMLWindow*);
 
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
 void HTMLDocument_Persist_Init(HTMLDocument*);
@@ -386,6 +391,8 @@ void nsAString_Finish(nsAString*);
 
 nsIInputStream *create_nsstream(const char*,PRInt32);
 nsICommandParams *create_nscommand_params(void);
+nsIMutableArray *create_nsarray(void);
+nsIWritableVariant *create_nsvariant(void);
 void nsnode_to_nsstring(nsIDOMNode*,nsAString*);
 nsIController *get_editor_controller(NSContainer*);
 void init_nsevents(NSContainer*);
@@ -396,10 +403,13 @@ HRESULT load_stream(BSCallback*,IStream*);
 void set_document_bscallback(HTMLDocument*,BSCallback*);
 void set_current_mon(HTMLDocument*,IMoniker*);
 
-IHTMLSelectionObject *HTMLSelectionObject_Create(nsISelection*);
-IHTMLTxtRange *HTMLTxtRange_Create(nsIDOMRange*);
+IHTMLSelectionObject *HTMLSelectionObject_Create(HTMLDocument*,nsISelection*);
+IHTMLTxtRange *HTMLTxtRange_Create(HTMLDocument*,nsIDOMRange*);
 IHTMLStyle *HTMLStyle_Create(nsIDOMCSSStyleDeclaration*);
 IHTMLStyleSheet *HTMLStyleSheet_Create(void);
+
+void detach_selection(HTMLDocument*);
+void detach_ranges(HTMLDocument*);
 
 void HTMLElement_Create(HTMLDOMNode*);
 void HTMLBodyElement_Create(HTMLElement*);

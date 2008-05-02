@@ -94,8 +94,7 @@ LONG WINAPI WinVerifyTrust( HWND hwnd, GUID *ActionID, LPVOID ActionData )
 HRESULT WINAPI WinVerifyTrustEx( HWND hwnd, GUID *ActionID,
  WINTRUST_DATA* ActionData )
 {
-    FIXME("%p %s %p\n", hwnd, debugstr_guid(ActionID), ActionData);
-    return S_OK;
+    return WinVerifyTrust(hwnd, ActionID, ActionData);
 }
 
 /***********************************************************************
@@ -105,9 +104,40 @@ CRYPT_PROVIDER_SGNR * WINAPI WTHelperGetProvSignerFromChain(
  CRYPT_PROVIDER_DATA *pProvData, DWORD idxSigner, BOOL fCounterSigner,
  DWORD idxCounterSigner)
 {
-    FIXME("%p %d %d %d\n", pProvData, idxSigner, fCounterSigner,
+    CRYPT_PROVIDER_SGNR *sgnr;
+
+    TRACE("(%p %d %d %d)\n", pProvData, idxSigner, fCounterSigner,
      idxCounterSigner);
-    return NULL;
+
+    if (idxSigner >= pProvData->csSigners || !pProvData->pasSigners)
+        return NULL;
+    sgnr = &pProvData->pasSigners[idxSigner];
+    if (fCounterSigner)
+    {
+        if (idxCounterSigner >= sgnr->csCounterSigners ||
+         !sgnr->pasCounterSigners)
+            return NULL;
+        sgnr = &sgnr->pasCounterSigners[idxCounterSigner];
+    }
+    TRACE("returning %p\n", sgnr);
+    return sgnr;
+}
+
+/***********************************************************************
+ *		WTHelperGetProvCertFromChain (WINTRUST.@)
+ */
+CRYPT_PROVIDER_CERT * WINAPI WTHelperGetProvCertFromChain(
+ CRYPT_PROVIDER_SGNR *pSgnr, DWORD idxCert)
+{
+    CRYPT_PROVIDER_CERT *cert;
+
+    TRACE("(%p %d)\n", pSgnr, idxCert);
+
+    if (idxCert >= pSgnr->csCertChain || !pSgnr->pasCertChain)
+        return NULL;
+    cert = &pSgnr->pasCertChain[idxCert];
+    TRACE("returning %p\n", cert);
+    return cert;
 }
 
 /***********************************************************************
@@ -115,8 +145,8 @@ CRYPT_PROVIDER_SGNR * WINAPI WTHelperGetProvSignerFromChain(
  */
 CRYPT_PROVIDER_DATA * WINAPI WTHelperProvDataFromStateData(HANDLE hStateData)
 {
-    FIXME("%p\n", hStateData);
-    return NULL;
+    TRACE("%p\n", hStateData);
+    return (CRYPT_PROVIDER_DATA *)hStateData;
 }
 
 static const WCHAR Software_Publishing[] = {

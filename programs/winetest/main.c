@@ -62,6 +62,39 @@ static struct rev_info *rev_infos = NULL;
 static const char whitespace[] = " \t\r\n";
 static const char testexe[] = "_test.exe";
 
+static char * get_file_version(char * file_name)
+{
+    static char version[32];
+    DWORD size;
+    DWORD handle;
+
+    size = GetFileVersionInfoSizeA(file_name, &handle);
+    if (size) {
+        char * data = xmalloc(size);
+        if (data) {
+            if (GetFileVersionInfoA(file_name, handle, size, data)) {
+                static char backslash[] = "\\";
+                VS_FIXEDFILEINFO *pFixedVersionInfo;
+                UINT len;
+                if (VerQueryValueA(data, backslash, (LPVOID *)&pFixedVersionInfo, &len)) {
+                    sprintf(version, "%d.%d.%d.%d",
+                            pFixedVersionInfo->dwFileVersionMS >> 16,
+                            pFixedVersionInfo->dwFileVersionMS & 0xffff,
+                            pFixedVersionInfo->dwFileVersionLS >> 16,
+                            pFixedVersionInfo->dwFileVersionLS & 0xffff);
+                } else
+                    sprintf(version, "version not available");
+            } else
+                sprintf(version, "unknown");
+            free(data);
+        } else
+            sprintf(version, "failed");
+    } else
+        sprintf(version, "version not available");
+
+    return version;
+}
+
 static int running_under_wine (void)
 {
     HMODULE module = GetModuleHandleA("ntdll.dll");
@@ -443,12 +476,12 @@ extract_test_proc (HMODULE hModule, LPCTSTR lpszType,
 
     dll = LoadLibraryExA(dllname, NULL, LOAD_LIBRARY_AS_DATAFILE);
     if (!dll) {
-        xprintf ("%s:%s_dll_missing start 0 0\n", dllname, dllname);
-        xprintf ("%s_dll_missing: -1 tests executed (-1 marked as todo, -1 failures), -1 skipped.\n", dllname);
-        xprintf ("%s:%s_dll_missing done (0)\n", dllname, dllname);
+        xprintf ("    %s=dll is missing\n", dllname);
         return TRUE;
     }
     FreeLibrary(dll);
+
+    xprintf ("    %s=%s\n", dllname, get_file_version(dllname));
 
     get_subtests( tempdir, &wine_tests[nr_of_files], lpszName );
     nr_of_tests += wine_tests[nr_of_files].subtest_count;
@@ -526,7 +559,7 @@ run_tests (char *logname)
     }
     xprintf ("Operating system version:\n");
     print_version ();
-    xprintf ("Test output:\n" );
+    xprintf ("Dll info:\n" );
 
     report (R_STATUS, "Counting tests");
     if (!EnumResourceNames (NULL, MAKEINTRESOURCE(TESTRES),
@@ -543,6 +576,8 @@ run_tests (char *logname)
                             extract_test_proc, (LPARAM)tempdir))
         report (R_FATAL, "Can't enumerate test files: %d",
                 GetLastError ());
+
+    xprintf ("Test output:\n" );
 
     report (R_DELTA, 0, "Extracting: Done");
 

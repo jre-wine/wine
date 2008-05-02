@@ -782,7 +782,7 @@ ME_FindItemAtOffset(ME_TextEditor *editor, ME_DIType nItemType, int nOffset, int
 
 
 static int
-ME_FindText(ME_TextEditor *editor, DWORD flags, CHARRANGE *chrg, const WCHAR *text, CHARRANGE *chrgText)
+ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCHAR *text, CHARRANGE *chrgText)
 {
   const int nLen = lstrlenW(text);
   const int nTextLen = ME_GetTextLength(editor);
@@ -1131,6 +1131,7 @@ ME_TextEditor *ME_MakeEditor(HWND hWnd) {
   ed->pCursors[1].pRun = ME_FindItemFwd(ed->pBuffer->pFirst, diRun);
   ed->pCursors[1].nOffset = 0;
   ed->nLastTotalLength = ed->nTotalLength = 0;
+  ed->nHeight = 0;
   ed->nUDArrowX = -1;
   ed->nSequence = 0;
   ed->rgbBackColor = -1;

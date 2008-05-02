@@ -29,12 +29,19 @@ typedef void* HPBUFFERARB;
 static const char* (WINAPI *pwglGetExtensionsStringARB)(HDC);
 static int (WINAPI *pwglReleasePbufferDCARB)(HPBUFFERARB, HDC);
 
+/* WGL_ARB_make_current_read */
+static BOOL (WINAPI *pwglMakeContextCurrentARB)(HDC hdraw, HDC hread, HGLRC hglrc);
+static HDC (WINAPI *pwglGetCurrentReadDCARB)();
+
 /* WGL_ARB_pixel_format */
 #define WGL_COLOR_BITS_ARB 0x2014
 #define WGL_RED_BITS_ARB   0x2015
 #define WGL_GREEN_BITS_ARB 0x2017
 #define WGL_BLUE_BITS_ARB  0x2019
 #define WGL_ALPHA_BITS_ARB 0x201B
+#define WGL_SUPPORT_GDI_ARB   0x200F
+#define WGL_DOUBLE_BUFFER_ARB 0x2011
+
 static BOOL (WINAPI *pwglChoosePixelFormatARB)(HDC, const int *, const FLOAT *, UINT, int *, UINT *);
 static BOOL (WINAPI *pwglGetPixelFormatAttribivARB)(HDC, int, int, UINT, const int *, int *);
 
@@ -47,17 +54,28 @@ static const char* wgl_extensions = NULL;
 
 static void init_functions(void)
 {
+#define GET_PROC(func) \
+    p ## func = (void*)wglGetProcAddress(#func); \
+    if(!p ## func) \
+      trace("wglGetProcAddress(%s) failed\n", #func);
+
     /* WGL_ARB_extensions_string */
-    pwglGetExtensionsStringARB = (void*)wglGetProcAddress("wglGetExtensionsStringARB");
+    GET_PROC(wglGetExtensionsStringARB)
+
+    /* WGL_ARB_make_current_read */
+    GET_PROC(wglMakeContextCurrentARB);
+    GET_PROC(wglGetCurrentReadDCARB);
 
     /* WGL_ARB_pixel_format */
-    pwglChoosePixelFormatARB = (void*)wglGetProcAddress("wglChoosePixelFormatARB");
-    pwglGetPixelFormatAttribivARB = (void*)wglGetProcAddress("wglGetPixelFormatAttribivARB");
+    GET_PROC(wglChoosePixelFormatARB)
+    GET_PROC(wglGetPixelFormatAttribivARB)
 
     /* WGL_ARB_pbuffer */
-    pwglCreatePbufferARB = (void*)wglGetProcAddress("wglCreatePbufferARB");
-    pwglGetPbufferDCARB = (void*)wglGetProcAddress("wglGetPbufferDCARB");
-    pwglReleasePbufferDCARB = (void*)wglGetProcAddress("wglReleasePbufferDCARB");
+    GET_PROC(wglCreatePbufferARB)
+    GET_PROC(wglGetPbufferDCARB)
+    GET_PROC(wglReleasePbufferDCARB)
+
+#undef GET_PROC
 }
 
 static void test_pbuffers(HDC hdc)
@@ -225,6 +243,57 @@ static void test_colorbits(HDC hdc)
                                        iAttribRet[0], iAttribRet[1]);
 }
 
+static void test_gdi_dbuf(HDC hdc)
+{
+    const int iAttribList[] = { WGL_SUPPORT_GDI_ARB, WGL_DOUBLE_BUFFER_ARB };
+    int iAttribRet[sizeof(iAttribList)/sizeof(iAttribList[0])];
+    unsigned int nFormats;
+    int iPixelFormat;
+    int res;
+
+    nFormats = DescribePixelFormat(hdc, 0, 0, NULL);
+    for(iPixelFormat = 1;iPixelFormat <= nFormats;iPixelFormat++)
+    {
+        res = pwglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0,
+                  sizeof(iAttribList)/sizeof(iAttribList[0]), iAttribList,
+                  iAttribRet);
+        ok(res!=FALSE, "wglGetPixelFormatAttribivARB failed for pixel format %d\n", iPixelFormat);
+        if(res == FALSE)
+            continue;
+
+        ok(!(iAttribRet[0] && iAttribRet[1]), "GDI support and double buffering on pixel format %d\n", iPixelFormat);
+    }
+}
+
+static void test_make_current_read(HDC hdc)
+{
+    int res;
+    HDC hread;
+    HGLRC hglrc = wglCreateContext(hdc);
+
+    if(!hglrc)
+    {
+        skip("wglCreateContext failed!\n");
+        return;
+    }
+
+    res = wglMakeCurrent(hdc, hglrc);
+    if(!res)
+    {
+        skip("wglMakeCurrent failed!\n");
+        return;
+    }
+
+    /* Test what wglGetCurrentReadDCARB does for wglMakeCurrent as the spec doesn't mention it */
+    hread = pwglGetCurrentReadDCARB();
+    trace("hread %p, hdc %p\n", hread, hdc);
+    ok(hread == hdc, "wglGetCurrentReadDCARB failed for standard wglMakeCurrent\n");
+
+    pwglMakeContextCurrentARB(hdc, hdc, hglrc);
+    hread = pwglGetCurrentReadDCARB();
+    ok(hread == hdc, "wglGetCurrentReadDCARB failed for wglMakeContextCurrent\n");
+}
+
 START_TEST(opengl)
 {
     HWND hwnd;
@@ -274,9 +343,15 @@ START_TEST(opengl)
 
         test_setpixelformat();
         test_colorbits(hdc);
+        test_gdi_dbuf(hdc);
 
         wgl_extensions = pwglGetExtensionsStringARB(hdc);
         if(wgl_extensions == NULL) skip("Skipping opengl32 tests because this OpenGL implementation doesn't support WGL extensions!\n");
+
+        if(strstr(wgl_extensions, "WGL_ARB_make_current_read"))
+            test_make_current_read(hdc);
+        else
+            trace("WGL_ARB_make_current_read not supported, skipping test\n");
 
         if(strstr(wgl_extensions, "WGL_ARB_pbuffer"))
             test_pbuffers(hdc);

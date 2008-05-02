@@ -18,11 +18,13 @@
 
 #include <stdarg.h>
 #include <math.h>
+#include <limits.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
 #include "wingdi.h"
+#include "wine/unicode.h"
 
 #define COBJMACROS
 #include "objbase.h"
@@ -92,18 +94,23 @@ static INT prepare_dc(GpGraphics *graphics, GpPen *pen)
 
     EndPath(graphics->hdc);
 
-    /* Get an estimate for the amount the pen width is affected by the world
-     * transform. (This is similar to what some of the wine drivers do.) */
-    pt[0].X = 0.0;
-    pt[0].Y = 0.0;
-    pt[1].X = 1.0;
-    pt[1].Y = 1.0;
-    GdipTransformMatrixPoints(graphics->worldtrans, pt, 2);
-    width = sqrt((pt[1].X - pt[0].X) * (pt[1].X - pt[0].X) +
-                 (pt[1].Y - pt[0].Y) * (pt[1].Y - pt[0].Y)) / sqrt(2.0);
+    if(pen->unit == UnitPixel){
+        width = pen->width;
+    }
+    else{
+        /* Get an estimate for the amount the pen width is affected by the world
+         * transform. (This is similar to what some of the wine drivers do.) */
+        pt[0].X = 0.0;
+        pt[0].Y = 0.0;
+        pt[1].X = 1.0;
+        pt[1].Y = 1.0;
+        GdipTransformMatrixPoints(graphics->worldtrans, pt, 2);
+        width = sqrt((pt[1].X - pt[0].X) * (pt[1].X - pt[0].X) +
+                     (pt[1].Y - pt[0].Y) * (pt[1].Y - pt[0].Y)) / sqrt(2.0);
 
-    width *= pen->width * convert_unit(graphics->hdc,
-                          pen->unit == UnitWorld ? graphics->unit : pen->unit);
+        width *= pen->width * convert_unit(graphics->hdc,
+                              pen->unit == UnitWorld ? graphics->unit : pen->unit);
+    }
 
     if(pen->dash == DashStyleCustom){
         numdashes = min(pen->numdashes, MAX_DASHLEN);
@@ -760,6 +767,7 @@ GpStatus WINGDIPAPI GdipCreateFromHDC(HDC hdc, GpGraphics **graphics)
     (*graphics)->compqual = CompositingQualityDefault;
     (*graphics)->interpolation = InterpolationModeDefault;
     (*graphics)->pixeloffset = PixelOffsetModeDefault;
+    (*graphics)->compmode = CompositingModeSourceOver;
     (*graphics)->unit = UnitDisplay;
     (*graphics)->scale = 1.0;
 
@@ -1222,6 +1230,202 @@ GpStatus WINGDIPAPI GdipDrawRectangleI(GpGraphics *graphics, GpPen *pen, INT x,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipDrawRectangles(GpGraphics *graphics, GpPen *pen,
+    GpRectF* rects, INT count)
+{
+    GpPointF *ptf;
+    POINT *pti;
+    INT save_state, i;
+
+    if(!graphics || !pen || !rects || count < 1)
+        return InvalidParameter;
+
+    ptf = GdipAlloc(4 * count * sizeof(GpPointF));
+    pti = GdipAlloc(4 * count * sizeof(POINT));
+
+    if(!ptf || !pti){
+        GdipFree(ptf);
+        GdipFree(pti);
+        return OutOfMemory;
+    }
+
+    for(i = 0; i < count; i++){
+        ptf[4 * i + 3].X = ptf[4 * i].X = rects[i].X;
+        ptf[4 * i + 1].Y = ptf[4 * i].Y = rects[i].Y;
+        ptf[4 * i + 2].X = ptf[4 * i + 1].X = rects[i].X + rects[i].Width;
+        ptf[4 * i + 3].Y = ptf[4 * i + 2].Y = rects[i].Y + rects[i].Height;
+    }
+
+    save_state = prepare_dc(graphics, pen);
+    SelectObject(graphics->hdc, GetStockObject(NULL_BRUSH));
+
+    transform_and_round_points(graphics, pti, ptf, 4 * count);
+
+    for(i = 0; i < count; i++)
+        Polygon(graphics->hdc, &pti[4 * i], 4);
+
+    restore_dc(graphics, save_state);
+
+    GdipFree(ptf);
+    GdipFree(pti);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string,
+    INT length, GDIPCONST GpFont *font, GDIPCONST RectF *rect,
+    GDIPCONST GpStringFormat *format, GDIPCONST GpBrush *brush)
+{
+    HRGN rgn = NULL;
+    HFONT gdifont;
+    LOGFONTW lfw;
+    TEXTMETRICW textmet;
+    GpPointF pt[2], rectcpy[4];
+    POINT corners[4];
+    WCHAR* stringdup;
+    REAL angle, ang_cos, ang_sin, rel_width, rel_height;
+    INT sum = 0, height = 0, fit, fitcpy, save_state, i, j, lret, nwidth,
+        nheight;
+    SIZE size;
+    RECT drawcoord;
+
+    if(!graphics || !string || !font || !brush || !rect)
+        return InvalidParameter;
+
+    if((brush->bt != BrushTypeSolidColor)){
+        FIXME("not implemented for given parameters\n");
+        return NotImplemented;
+    }
+
+    if(format)
+        TRACE("may be ignoring some format flags: attr %x\n", format->attr);
+
+    if(length == -1) length = lstrlenW(string);
+
+    stringdup = GdipAlloc(length * sizeof(WCHAR));
+    if(!stringdup) return OutOfMemory;
+
+    save_state = SaveDC(graphics->hdc);
+    SetBkMode(graphics->hdc, TRANSPARENT);
+    SetTextColor(graphics->hdc, brush->lb.lbColor);
+
+    rectcpy[3].X = rectcpy[0].X = rect->X;
+    rectcpy[1].Y = rectcpy[0].Y = rect->Y;
+    rectcpy[2].X = rectcpy[1].X = rect->X + rect->Width;
+    rectcpy[3].Y = rectcpy[2].Y = rect->Y + rect->Height;
+    transform_and_round_points(graphics, corners, rectcpy, 4);
+
+    if(roundr(rect->Width) == 0 && roundr(rect->Height) == 0){
+        rel_width = rel_height = 1.0;
+        nwidth = nheight = INT_MAX;
+    }
+    else{
+        rel_width = sqrt((corners[1].x - corners[0].x) * (corners[1].x - corners[0].x) +
+                         (corners[1].y - corners[0].y) * (corners[1].y - corners[0].y))
+                         / rect->Width;
+        rel_height = sqrt((corners[2].x - corners[1].x) * (corners[2].x - corners[1].x) +
+                          (corners[2].y - corners[1].y) * (corners[2].y - corners[1].y))
+                          / rect->Height;
+
+        nwidth = roundr(rel_width * rect->Width);
+        nheight = roundr(rel_height * rect->Height);
+        rgn = CreatePolygonRgn(corners, 4, ALTERNATE);
+        SelectClipRgn(graphics->hdc, rgn);
+    }
+
+    /* Use gdi to find the font, then perform transformations on it (height,
+     * width, angle). */
+    SelectObject(graphics->hdc, CreateFontIndirectW(&font->lfw));
+    GetTextMetricsW(graphics->hdc, &textmet);
+    memcpy(&lfw, &font->lfw, sizeof(LOGFONTW));
+
+    lfw.lfHeight = roundr(((REAL)lfw.lfHeight) * rel_height);
+    lfw.lfWidth = roundr(textmet.tmAveCharWidth * rel_width);
+
+    pt[0].X = 0.0;
+    pt[0].Y = 0.0;
+    pt[1].X = 1.0;
+    pt[1].Y = 0.0;
+    GdipTransformMatrixPoints(graphics->worldtrans, pt, 2);
+    angle = gdiplus_atan2((pt[1].Y - pt[0].Y), (pt[1].X - pt[0].X));
+    ang_cos = cos(angle);
+    ang_sin = sin(angle);
+    lfw.lfEscapement = lfw.lfOrientation = -roundr((angle / M_PI) * 1800.0);
+
+    gdifont = CreateFontIndirectW(&lfw);
+    DeleteObject(SelectObject(graphics->hdc, CreateFontIndirectW(&lfw)));
+
+    for(i = 0, j = 0; i < length; i++){
+        if(!isprintW(string[i]) && (string[i] != '\n'))
+            continue;
+
+        stringdup[j] = string[i];
+        j++;
+    }
+
+    stringdup[j] = 0;
+    length = j;
+
+    while(sum < length){
+        drawcoord.left = corners[0].x + roundr(ang_sin * (REAL) height);
+        drawcoord.top = corners[0].y + roundr(ang_cos * (REAL) height);
+
+        GetTextExtentExPointW(graphics->hdc, stringdup + sum, length - sum,
+                              nwidth, &fit, NULL, &size);
+        fitcpy = fit;
+
+        if(fit == 0){
+            DrawTextW(graphics->hdc, stringdup + sum, 1, &drawcoord, DT_NOCLIP |
+                      DT_EXPANDTABS);
+            break;
+        }
+
+        for(lret = 0; lret < fit; lret++)
+            if(*(stringdup + sum + lret) == '\n')
+                break;
+
+        /* Line break code (may look strange, but it imitates windows). */
+        if(lret < fit)
+            fit = lret;    /* this is not an off-by-one error */
+        else if(fit < (length - sum)){
+            if(*(stringdup + sum + fit) == ' ')
+                while(*(stringdup + sum + fit) == ' ')
+                    fit++;
+            else
+                while(*(stringdup + sum + fit - 1) != ' '){
+                    fit--;
+
+                    if(*(stringdup + sum + fit) == '\t')
+                        break;
+
+                    if(fit == 0){
+                        fit = fitcpy;
+                        break;
+                    }
+                }
+        }
+        DrawTextW(graphics->hdc, stringdup + sum, min(length - sum, fit),
+                  &drawcoord, DT_NOCLIP | DT_EXPANDTABS);
+
+        sum += fit + (lret < fitcpy ? 1 : 0);
+        height += size.cy;
+
+        if(height > nheight)
+            break;
+
+        /* Stop if this was a linewrap (but not if it was a linebreak). */
+        if((lret == fitcpy) && format && (format->attr & StringFormatFlagsNoWrap))
+            break;
+    }
+
+    DeleteObject(rgn);
+    DeleteObject(gdifont);
+
+    RestoreDC(graphics->hdc, save_state);
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipFillPath(GpGraphics *graphics, GpBrush *brush, GpPath *path)
 {
     INT save_state;
@@ -1421,6 +1625,18 @@ GpStatus WINGDIPAPI GdipFillRectangleI(GpGraphics *graphics, GpBrush *brush,
     return Ok;
 }
 
+/* FIXME: Compositing mode is not used anywhere except the getter/setter. */
+GpStatus WINGDIPAPI GdipGetCompositingMode(GpGraphics *graphics,
+    CompositingMode *mode)
+{
+    if(!graphics || !mode)
+        return InvalidParameter;
+
+    *mode = graphics->compmode;
+
+    return Ok;
+}
+
 /* FIXME: Compositing quality is not used anywhere except the getter/setter. */
 GpStatus WINGDIPAPI GdipGetCompositingQuality(GpGraphics *graphics,
     CompositingQuality *quality)
@@ -1488,12 +1704,131 @@ GpStatus WINGDIPAPI GdipGetSmoothingMode(GpGraphics *graphics, SmoothingMode *mo
     return Ok;
 }
 
+/* FIXME: Text rendering hint is not used anywhere except the getter/setter. */
+GpStatus WINGDIPAPI GdipGetTextRenderingHint(GpGraphics *graphics,
+    TextRenderingHint *hint)
+{
+    if(!graphics || !hint)
+        return InvalidParameter;
+
+    *hint = graphics->texthint;
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipGetWorldTransform(GpGraphics *graphics, GpMatrix *matrix)
 {
     if(!graphics || !matrix)
         return InvalidParameter;
 
     memcpy(matrix, graphics->worldtrans, sizeof(GpMatrix));
+    return Ok;
+}
+
+/* Find the smallest rectangle that bounds the text when it is printed in rect
+ * according to the format options listed in format. If rect has 0 width and
+ * height, then just find the smallest rectangle that bounds the text when it's
+ * printed at location (rect->X, rect-Y). */
+GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
+    GDIPCONST WCHAR *string, INT length, GDIPCONST GpFont *font,
+    GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format, RectF *bounds,
+    INT *codepointsfitted, INT *linesfilled)
+{
+    HFONT oldfont;
+    WCHAR* stringdup;
+    INT sum = 0, height = 0, fit, fitcpy, max_width = 0, i, j, lret, nwidth,
+        nheight;
+    SIZE size;
+
+    if(!graphics || !string || !font || !rect)
+        return InvalidParameter;
+
+    if(codepointsfitted || linesfilled){
+        FIXME("not implemented for given parameters\n");
+        return NotImplemented;
+    }
+
+    if(format)
+        TRACE("may be ignoring some format flags: attr %x\n", format->attr);
+
+    if(length == -1) length = lstrlenW(string);
+
+    stringdup = GdipAlloc(length * sizeof(WCHAR));
+    if(!stringdup) return OutOfMemory;
+
+    oldfont = SelectObject(graphics->hdc, CreateFontIndirectW(&font->lfw));
+    nwidth = roundr(rect->Width);
+    nheight = roundr(rect->Height);
+
+    if((nwidth == 0) && (nheight == 0))
+        nwidth = nheight = INT_MAX;
+
+    for(i = 0, j = 0; i < length; i++){
+        if(!isprintW(string[i]) && (string[i] != '\n'))
+            continue;
+
+        stringdup[j] = string[i];
+        j++;
+    }
+
+    stringdup[j] = 0;
+    length = j;
+
+    while(sum < length){
+        GetTextExtentExPointW(graphics->hdc, stringdup + sum, length - sum,
+                              nwidth, &fit, NULL, &size);
+        fitcpy = fit;
+
+        if(fit == 0)
+            break;
+
+        for(lret = 0; lret < fit; lret++)
+            if(*(stringdup + sum + lret) == '\n')
+                break;
+
+        /* Line break code (may look strange, but it imitates windows). */
+        if(lret < fit)
+            fit = lret;    /* this is not an off-by-one error */
+        else if(fit < (length - sum)){
+            if(*(stringdup + sum + fit) == ' ')
+                while(*(stringdup + sum + fit) == ' ')
+                    fit++;
+            else
+                while(*(stringdup + sum + fit - 1) != ' '){
+                    fit--;
+
+                    if(*(stringdup + sum + fit) == '\t')
+                        break;
+
+                    if(fit == 0){
+                        fit = fitcpy;
+                        break;
+                    }
+                }
+        }
+
+        GetTextExtentExPointW(graphics->hdc, stringdup + sum, fit,
+                              nwidth, &j, NULL, &size);
+
+        sum += fit + (lret < fitcpy ? 1 : 0);
+        height += size.cy;
+        max_width = max(max_width, size.cx);
+
+        if(height > nheight)
+            break;
+
+        /* Stop if this was a linewrap (but not if it was a linebreak). */
+        if((lret == fitcpy) && format && (format->attr & StringFormatFlagsNoWrap))
+            break;
+    }
+
+    bounds->X = rect->X;
+    bounds->Y = rect->Y;
+    bounds->Width = (REAL)max_width;
+    bounds->Height = (REAL) min(height, nheight);
+
+    DeleteObject(SelectObject(graphics->hdc, oldfont));
+
     return Ok;
 }
 
@@ -1510,6 +1845,15 @@ GpStatus WINGDIPAPI GdipRestoreGraphics(GpGraphics *graphics, GraphicsState stat
     return NotImplemented;
 }
 
+GpStatus WINGDIPAPI GdipRotateWorldTransform(GpGraphics *graphics, REAL angle,
+    GpMatrixOrder order)
+{
+    if(!graphics)
+        return InvalidParameter;
+
+    return GdipRotateMatrix(graphics->worldtrans, angle, order);
+}
+
 GpStatus WINGDIPAPI GdipSaveGraphics(GpGraphics *graphics, GraphicsState *state)
 {
     static int calls;
@@ -1521,6 +1865,26 @@ GpStatus WINGDIPAPI GdipSaveGraphics(GpGraphics *graphics, GraphicsState *state)
         FIXME("graphics state not implemented\n");
 
     return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipScaleWorldTransform(GpGraphics *graphics, REAL sx,
+    REAL sy, GpMatrixOrder order)
+{
+    if(!graphics)
+        return InvalidParameter;
+
+    return GdipScaleMatrix(graphics->worldtrans, sx, sy, order);
+}
+
+GpStatus WINGDIPAPI GdipSetCompositingMode(GpGraphics *graphics,
+    CompositingMode mode)
+{
+    if(!graphics)
+        return InvalidParameter;
+
+    graphics->compmode = mode;
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipSetCompositingQuality(GpGraphics *graphics,
@@ -1582,6 +1946,17 @@ GpStatus WINGDIPAPI GdipSetSmoothingMode(GpGraphics *graphics, SmoothingMode mod
         return InvalidParameter;
 
     graphics->smoothing = mode;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetTextRenderingHint(GpGraphics *graphics,
+    TextRenderingHint hint)
+{
+    if(!graphics)
+        return InvalidParameter;
+
+    graphics->texthint = hint;
 
     return Ok;
 }

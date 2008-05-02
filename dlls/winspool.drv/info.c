@@ -86,6 +86,14 @@ static CRITICAL_SECTION printer_handles_cs = { &printer_handles_cs_debug, -1, 0,
 /* ############################### */
 
 typedef struct {
+    WCHAR   src[MAX_PATH+MAX_PATH];
+    WCHAR   dst[MAX_PATH+MAX_PATH];
+    DWORD   srclen;
+    DWORD   dstlen;
+    DWORD   copyflags;
+} apd_data_t;
+
+typedef struct {
     struct list     entry;
     LPWSTR          name;
     LPWSTR          dllname;
@@ -227,6 +235,7 @@ static const WCHAR PrinterDriverDataW[] = {'P','r','i','n','t','e','r','D','r','
 static const WCHAR ProviderW[] = {'P','r','o','v','i','d','e','r',0};
 static const WCHAR Separator_FileW[] = {'S','e','p','a','r','a','t','o','r',' ','F','i','l','e',0};
 static const WCHAR Share_NameW[] = {'S','h','a','r','e',' ','N','a','m','e',0};
+static const WCHAR VersionW[] = {'V','e','r','s','i','o','n',0};
 static const WCHAR WinPrintW[] = {'W','i','n','P','r','i','n','t',0};
 static const WCHAR deviceW[]  = {'d','e','v','i','c','e',0};
 static const WCHAR devicesW[] = {'d','e','v','i','c','e','s',0};
@@ -343,8 +352,82 @@ static LPSTR strdupWtoA( LPCWSTR str )
     return ret;
 }
 
-/* Returns the number of bytes in an ansi \0\0 terminated string (multi_sz).
-   The result includes all \0s (specifically the last two). */
+/******************************************************************
+ *  apd_copyfile [internal]
+ *
+ * Copy a file from the driverdirectory to the versioned directory
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ */
+static BOOL apd_copyfile(LPWSTR filename, apd_data_t *apd)
+{
+    LPWSTR  ptr;
+    LPWSTR  srcname;
+    DWORD   res;
+
+    apd->src[apd->srclen] = '\0';
+    apd->dst[apd->dstlen] = '\0';
+
+    if (!filename || !filename[0]) {
+        /* nothing to copy */
+        return TRUE;
+    }
+
+    ptr = strrchrW(filename, '\\');
+    if (ptr) {
+        ptr++;
+    }
+    else
+    {
+        ptr = filename;
+    }
+
+    if (apd->copyflags & APD_COPY_FROM_DIRECTORY) {
+        /* we have an absolute Path */
+        srcname = filename;
+    }
+    else
+    {
+        srcname = apd->src;
+        lstrcatW(srcname, ptr);
+    }
+    lstrcatW(apd->dst, ptr);
+
+    TRACE("%s => %s\n", debugstr_w(filename), debugstr_w(apd->dst));
+
+    /* FIXME: handle APD_COPY_NEW_FILES */
+    res = CopyFileW(srcname, apd->dst, FALSE);
+    TRACE("got %u with %u\n", res, GetLastError());
+
+    /* FIXME: install of wineps.drv must be fixed, before we return the real result
+    return res;
+    */
+    return TRUE;
+}
+
+
+/******************************************************************
+ * Return the number of bytes for an multi_sz string.
+ * The result includes all \0s
+ * (specifically the extra \0, that is needed as multi_sz terminator).
+ */
+static int multi_sz_lenW(const WCHAR *str)
+{
+    const WCHAR *ptr = str;
+    if(!str) return 0;
+    do
+    {
+        ptr += lstrlenW(ptr) + 1;
+    } while(*ptr);
+
+    return (ptr - str + 1) * sizeof(WCHAR);
+}
+
+/* ################################ */
+
 static int multi_sz_lenA(const char *str)
 {
     const char *ptr = str;
@@ -387,31 +470,35 @@ static BOOL add_printer_driver(const char *name)
 {
     DRIVER_INFO_3A di3a;
 
-    static char driver_path[]       = "wineps16",
-                data_file[]         = "<datafile?>",
-                config_file[]       = "wineps16",
-                help_file[]         = "<helpfile?>",
-                dep_file[]          = "<dependent files?>\0",
-                monitor_name[]      = "<monitor name?>",
+    static char driver_9x[]         = "wineps16.drv",
+                driver_nt[]         = "wineps.drv",
+                env_9x[]            = "Windows 4.0",
+                env_nt[]            = "Windows NT x86",
+                data_file[]         = "generic.ppd",
                 default_data_type[] = "RAW";
 
-    di3a.cVersion = (GetVersion() & 0x80000000) ? 0 : 3; /* FIXME: add 1, 2 */
+    ZeroMemory(&di3a, sizeof(DRIVER_INFO_3A));
+    di3a.cVersion         = 3;
     di3a.pName            = (char *)name;
-    di3a.pEnvironment     = NULL;      /* NULL means auto */
-    di3a.pDriverPath      = driver_path;
+    di3a.pEnvironment     = env_nt;
+    di3a.pDriverPath      = driver_nt;
     di3a.pDataFile        = data_file;
-    di3a.pConfigFile      = config_file;
-    di3a.pHelpFile        = help_file;
-    di3a.pDependentFiles  = dep_file;
-    di3a.pMonitorName     = monitor_name;
+    di3a.pConfigFile      = driver_nt;
     di3a.pDefaultDataType = default_data_type;
 
-    if (!AddPrinterDriverA(NULL, 3, (LPBYTE)&di3a))
+    if (AddPrinterDriverA(NULL, 3, (LPBYTE)&di3a))
     {
-        ERR("Failed adding driver (%d)\n", GetLastError());
-        return FALSE;
+        di3a.cVersion     = 0;
+        di3a.pEnvironment = env_9x;
+        di3a.pDriverPath  = driver_9x;
+        di3a.pConfigFile  = driver_9x;
+        if (AddPrinterDriverA(NULL, 3, (LPBYTE)&di3a))
+        {
+            return TRUE;
+        }
     }
-    return TRUE;
+    ERR("Failed adding driver %s: %u\n", debugstr_a(di3a.pDriverPath), GetLastError());
+    return FALSE;
 }
 
 #ifdef SONAME_LIBCUPS
@@ -4855,96 +4942,35 @@ BOOL WINAPI GetPrinterDriverDirectoryA(LPSTR pName, LPSTR pEnvironment,
 
 /*****************************************************************************
  *          AddPrinterDriverA  [WINSPOOL.@]
+ *
+ * See AddPrinterDriverW.
+ *
  */
 BOOL WINAPI AddPrinterDriverA(LPSTR pName, DWORD level, LPBYTE pDriverInfo)
 {
-    DRIVER_INFO_3A di3;
-    HKEY hkeyDrivers, hkeyName;
-    static CHAR empty[]    = "",
-                nullnull[] = "\0";
-
-    TRACE("(%s,%d,%p)\n",debugstr_a(pName),level,pDriverInfo);
-
-    if(level != 2 && level != 3) {
-        SetLastError(ERROR_INVALID_LEVEL);
-	return FALSE;
-    }
-    if ((pName) && (pName[0])) {
-        FIXME("pName= %s - unsupported\n", debugstr_a(pName));
-	SetLastError(ERROR_INVALID_PARAMETER);
-	return FALSE;
-    }
-    if(!pDriverInfo) {
-        WARN("pDriverInfo == NULL\n");
-	SetLastError(ERROR_INVALID_PARAMETER);
-	return FALSE;
-    }
-
-    if(level == 3)
-        di3 = *(DRIVER_INFO_3A *)pDriverInfo;
-    else {
-        memset(&di3, 0, sizeof(di3));
-	memcpy(&di3, pDriverInfo, sizeof(DRIVER_INFO_2A));
-    }
-
-    if(!di3.pName || !di3.pDriverPath || !di3.pConfigFile ||
-       !di3.pDataFile) {
-        SetLastError(ERROR_INVALID_PARAMETER);
-	return FALSE;
-    }
-
-    if(!di3.pDefaultDataType) di3.pDefaultDataType = empty;
-    if(!di3.pDependentFiles) di3.pDependentFiles = nullnull;
-    if(!di3.pHelpFile) di3.pHelpFile = empty;
-    if(!di3.pMonitorName) di3.pMonitorName = empty;
-
-    hkeyDrivers = WINSPOOL_OpenDriverReg(di3.pEnvironment, FALSE);
-
-    if(!hkeyDrivers) {
-        ERR("Can't create Drivers key\n");
-	return FALSE;
-    }
-
-    if(level == 2) { /* apparently can't overwrite with level2 */
-        if(RegOpenKeyA(hkeyDrivers, di3.pName, &hkeyName) == ERROR_SUCCESS) {
-	    RegCloseKey(hkeyName);
-	    RegCloseKey(hkeyDrivers);
-	    WARN("Trying to create existing printer driver %s\n", debugstr_a(di3.pName));
-	    SetLastError(ERROR_PRINTER_DRIVER_ALREADY_INSTALLED);
-	    return FALSE;
-	}
-    }
-    if(RegCreateKeyA(hkeyDrivers, di3.pName, &hkeyName) != ERROR_SUCCESS) {
-	RegCloseKey(hkeyDrivers);
-	ERR("Can't create Name key\n");
-	return FALSE;
-    }
-    RegSetValueExA(hkeyName, "Configuration File", 0, REG_SZ, (LPBYTE) di3.pConfigFile,
-		   lstrlenA(di3.pConfigFile) + 1);
-    RegSetValueExA(hkeyName, "Data File", 0, REG_SZ, (LPBYTE) di3.pDataFile, lstrlenA(di3.pDataFile) + 1);
-    RegSetValueExA(hkeyName, "Driver", 0, REG_SZ, (LPBYTE) di3.pDriverPath, lstrlenA(di3.pDriverPath) + 1);
-    RegSetValueExA(hkeyName, "Version", 0, REG_DWORD, (LPBYTE) &di3.cVersion,
-		   sizeof(DWORD));
-    RegSetValueExA(hkeyName, "Datatype", 0, REG_SZ, (LPBYTE) di3.pDefaultDataType, lstrlenA(di3.pDefaultDataType));
-    RegSetValueExA(hkeyName, "Dependent Files", 0, REG_MULTI_SZ,
-                   (LPBYTE) di3.pDependentFiles, multi_sz_lenA(di3.pDependentFiles));
-    RegSetValueExA(hkeyName, "Help File", 0, REG_SZ, (LPBYTE) di3.pHelpFile, lstrlenA(di3.pHelpFile) + 1);
-    RegSetValueExA(hkeyName, "Monitor", 0, REG_SZ, (LPBYTE) di3.pMonitorName, lstrlenA(di3.pMonitorName) + 1);
-    RegCloseKey(hkeyName);
-    RegCloseKey(hkeyDrivers);
-
-    return TRUE;
+    TRACE("(%s, %d, %p)\n", debugstr_a(pName), level, pDriverInfo);
+    return AddPrinterDriverExA(pName, level, pDriverInfo, APD_COPY_NEW_FILES);
 }
 
-/*****************************************************************************
- *          AddPrinterDriverW  [WINSPOOL.@]
+/******************************************************************************
+ *  AddPrinterDriverW (WINSPOOL.@)
+ *
+ * Install a Printer Driver
+ *
+ * PARAMS
+ *  pName           [I] Servername or NULL (local Computer)
+ *  level           [I] Level for the supplied DRIVER_INFO_*W struct
+ *  pDriverInfo     [I] PTR to DRIVER_INFO_*W struct with the Driver Parameter
+ *
+ * RESULTS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
  */
-BOOL WINAPI AddPrinterDriverW(LPWSTR printerName,DWORD level,
-				   LPBYTE pDriverInfo)
+BOOL WINAPI AddPrinterDriverW(LPWSTR pName, DWORD level, LPBYTE pDriverInfo)
 {
-    FIXME("(%s,%d,%p): stub\n",debugstr_w(printerName),
-	  level,pDriverInfo);
-    return FALSE;
+    TRACE("(%s, %d, %p)\n", debugstr_w(pName), level, pDriverInfo);
+    return AddPrinterDriverExW(pName, level, pDriverInfo, APD_COPY_NEW_FILES);
 }
 
 /*****************************************************************************
@@ -6375,27 +6401,325 @@ BOOL WINAPI AddPrinterConnectionW( LPWSTR pName )
 }
 
 /******************************************************************************
- *		AddPrinterDriverExW (WINSPOOL.@)
+ *  AddPrinterDriverExW (WINSPOOL.@)
+ *
+ * Install a Printer Driver with the Option to upgrade / downgrade the Files
+ *
+ * PARAMS
+ *  pName           [I] Servername or NULL (local Computer)
+ *  level           [I] Level for the supplied DRIVER_INFO_*W struct
+ *  pDriverInfo     [I] PTR to DRIVER_INFO_*W struct with the Driver Parameter
+ *  dwFileCopyFlags [I] How to Copy / Upgrade / Downgrade the needed Files
+ *
+ * RESULTS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
  */
-BOOL WINAPI AddPrinterDriverExW( LPWSTR pName, DWORD Level,
-    LPBYTE pDriverInfo, DWORD dwFileCopyFlags)
+BOOL WINAPI AddPrinterDriverExW( LPWSTR pName, DWORD level, LPBYTE pDriverInfo, DWORD dwFileCopyFlags)
 {
-    FIXME("%s %d %p %d\n", debugstr_w(pName),
-           Level, pDriverInfo, dwFileCopyFlags);
-    SetLastError(ERROR_PRINTER_DRIVER_BLOCKED);
-    return FALSE;
+    const printenv_t *env;
+    apd_data_t apd;
+    DRIVER_INFO_8W di;
+    LPWSTR  ptr;
+    HKEY    hroot;
+    HKEY    hdrv;
+    DWORD   disposition;
+    DWORD   len;
+    LONG    lres;
+
+    TRACE("(%s, %d, %p, 0x%x)\n", debugstr_w(pName), level, pDriverInfo, dwFileCopyFlags);
+
+    if (level < 2 || level == 5 || level == 7 || level > 8) {
+        SetLastError(ERROR_INVALID_LEVEL);
+        return FALSE;
+    }
+
+    if (!pDriverInfo) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if ((dwFileCopyFlags & ~APD_COPY_FROM_DIRECTORY) != APD_COPY_ALL_FILES) {
+        FIXME("Flags 0x%x ignored (Fallback to APD_COPY_ALL_FILES)\n", dwFileCopyFlags & ~APD_COPY_FROM_DIRECTORY);
+    }
+
+    ptr = get_servername_from_name(pName);
+    HeapFree(GetProcessHeap(), 0, ptr);
+    if (ptr) {
+        FIXME("not suported for server: %s\n", debugstr_w(pName));
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
+    }
+
+    /* we need to set all entries in the Registry, independent from the Level of
+       DRIVER_INFO, that the caller supplied */
+
+    ZeroMemory(&di, sizeof(di));
+    if (pDriverInfo && (level < (sizeof(di_sizeof) / sizeof(di_sizeof[0])))) {
+        memcpy(&di, pDriverInfo, di_sizeof[level]);
+    }
+
+    /* dump the most used infos */
+    TRACE("%p: .cVersion    : 0x%x/%d\n", pDriverInfo, di.cVersion, di.cVersion);
+    TRACE("%p: .pName       : %s\n", di.pName, debugstr_w(di.pName));
+    TRACE("%p: .pEnvironment: %s\n", di.pEnvironment, debugstr_w(di.pEnvironment));
+    TRACE("%p: .pDriverPath : %s\n", di.pDriverPath, debugstr_w(di.pDriverPath));
+    TRACE("%p: .pDataFile   : %s\n", di.pDataFile, debugstr_w(di.pDataFile));
+    TRACE("%p: .pConfigFile : %s\n", di.pConfigFile, debugstr_w(di.pConfigFile));
+    TRACE("%p: .pHelpFile   : %s\n", di.pHelpFile, debugstr_w(di.pHelpFile));
+    /* dump only the first of the additional Files */
+    TRACE("%p: .pDependentFiles: %s\n", di.pDependentFiles, debugstr_w(di.pDependentFiles));
+
+
+    /* check environment */
+    env = validate_envW(di.pEnvironment);
+    if (env == NULL) return FALSE;        /* ERROR_INVALID_ENVIRONMENT */
+
+    /* fill the copy-data / get the driverdir */
+    len = sizeof(apd.src) - sizeof(Version3_SubdirW) - sizeof(WCHAR);
+    if (!GetPrinterDriverDirectoryW(NULL, (LPWSTR) env->envname, 1,
+                                    (LPBYTE) apd.src, len, &len)) {
+        /* Should never Fail */
+        return FALSE;
+    }
+    memcpy(apd.dst, apd.src, len);
+    lstrcatW(apd.src, backslashW);
+    apd.srclen = lstrlenW(apd.src);
+    lstrcatW(apd.dst, env->versionsubdir);
+    lstrcatW(apd.dst, backslashW);
+    apd.dstlen = lstrlenW(apd.dst);
+    apd.copyflags = dwFileCopyFlags;
+    CreateDirectoryW(apd.src, NULL);
+    CreateDirectoryW(apd.dst, NULL);
+
+    /* Fill the Registry for the Driver */
+    hroot = WINSPOOL_OpenDriverReg(env->envname, TRUE);
+    if(!hroot) {
+        ERR("Can't create Drivers key\n");
+        return FALSE;
+    }
+
+    if ((lres = RegCreateKeyExW(hroot, di.pName, 0, NULL, REG_OPTION_NON_VOLATILE,
+                                KEY_WRITE | KEY_QUERY_VALUE, NULL,
+                                &hdrv, &disposition)) != ERROR_SUCCESS) {
+
+        ERR("can't create driver %s: %u\n", debugstr_w(di.pName), lres);
+        RegCloseKey(hroot);
+        SetLastError(lres);
+        return FALSE;
+    }
+    RegCloseKey(hroot);
+
+    if (disposition == REG_OPENED_EXISTING_KEY) {
+        TRACE("driver %s already installed\n", debugstr_w(di.pName));
+        RegCloseKey(hdrv);
+        SetLastError(ERROR_PRINTER_DRIVER_ALREADY_INSTALLED);
+        return FALSE;
+    }
+
+    /* Verified with the Adobe PS Driver, that w2k does not use di.Version */
+    RegSetValueExW(hdrv, VersionW, 0, REG_DWORD, (LPBYTE) &env->driverversion,
+                   sizeof(DWORD));
+
+    RegSetValueExW(hdrv, DriverW, 0, REG_SZ, (LPBYTE) di.pDriverPath,
+                   (lstrlenW(di.pDriverPath)+1)* sizeof(WCHAR));
+    apd_copyfile(di.pDriverPath, &apd);
+
+    RegSetValueExW(hdrv, Data_FileW, 0, REG_SZ, (LPBYTE) di.pDataFile,
+                   (lstrlenW(di.pDataFile)+1)* sizeof(WCHAR));
+    apd_copyfile(di.pDataFile, &apd);
+
+    RegSetValueExW(hdrv, Configuration_FileW, 0, REG_SZ, (LPBYTE) di.pConfigFile,
+                   (lstrlenW(di.pConfigFile)+1)* sizeof(WCHAR));
+    apd_copyfile(di.pConfigFile, &apd);
+
+    /* settings for level 3 */
+    RegSetValueExW(hdrv, Help_FileW, 0, REG_SZ, (LPBYTE) di.pHelpFile,
+                   di.pHelpFile ? (lstrlenW(di.pHelpFile)+1)* sizeof(WCHAR) : 0);
+    apd_copyfile(di.pHelpFile, &apd);
+
+
+    ptr = di.pDependentFiles;
+    RegSetValueExW(hdrv, Dependent_FilesW, 0, REG_MULTI_SZ, (LPBYTE) di.pDependentFiles,
+                   di.pDependentFiles ? multi_sz_lenW(di.pDependentFiles) : 0);
+    while ((ptr != NULL) && (ptr[0])) {
+        if (apd_copyfile(ptr, &apd)) {
+            ptr += lstrlenW(ptr) + 1;
+        }
+        else
+        {
+            WARN("Failed to copy %s\n", debugstr_w(ptr));
+            ptr = NULL;
+        }
+    }
+
+    /* The language-Monitor was already copied to "%SystemRoot%\system32" */
+    RegSetValueExW(hdrv, MonitorW, 0, REG_SZ, (LPBYTE) di.pMonitorName,
+                   di.pMonitorName ? (lstrlenW(di.pMonitorName)+1)* sizeof(WCHAR) : 0);
+
+    RegSetValueExW(hdrv, DatatypeW, 0, REG_SZ, (LPBYTE) di.pDefaultDataType,
+                   di.pDefaultDataType ? (lstrlenW(di.pDefaultDataType)+1)* sizeof(WCHAR) : 0);
+
+    /* settings for level 4 */
+    RegSetValueExW(hdrv, Previous_NamesW, 0, REG_MULTI_SZ, (LPBYTE) di.pszzPreviousNames,
+                   di.pszzPreviousNames ? multi_sz_lenW(di.pszzPreviousNames) : 0);
+
+    if (level > 5) FIXME("level %u for Driver %s is incomplete\n", level, debugstr_w(di.pName));
+
+
+    RegCloseKey(hdrv);
+    FIXME("### DrvDriverEvent(...,DRIVEREVENT_INITIALIZE) not implemented yet\n");
+
+
+    TRACE("=> TRUE with %u\n", GetLastError());
+    return TRUE;
+
 }
 
 /******************************************************************************
- *		AddPrinterDriverExA (WINSPOOL.@)
+ *  AddPrinterDriverExA (WINSPOOL.@)
+ *
+ * See AddPrinterDriverExW.
+ *
  */
-BOOL WINAPI AddPrinterDriverExA( LPSTR pName, DWORD Level,
-    LPBYTE pDriverInfo, DWORD dwFileCopyFlags)
+BOOL WINAPI AddPrinterDriverExA(LPSTR pName, DWORD Level, LPBYTE pDriverInfo, DWORD dwFileCopyFlags)
 {
-    FIXME("%s %d %p %d\n", debugstr_a(pName),
-           Level, pDriverInfo, dwFileCopyFlags);
-    SetLastError(ERROR_PRINTER_DRIVER_BLOCKED);
-    return FALSE;
+    DRIVER_INFO_8A  *diA;
+    DRIVER_INFO_8W   diW;
+    LPWSTR  nameW = NULL;
+    DWORD   lenA;
+    DWORD   len;
+    DWORD   res = FALSE;
+
+    TRACE("(%s, %d, %p, 0x%x)\n", debugstr_a(pName), Level, pDriverInfo, dwFileCopyFlags);
+
+    diA = (DRIVER_INFO_8A  *) pDriverInfo;
+    ZeroMemory(&diW, sizeof(diW));
+
+    if (Level < 2 || Level == 5 || Level == 7 || Level > 8) {
+        SetLastError(ERROR_INVALID_LEVEL);
+        return FALSE;
+    }
+
+    if (diA == NULL) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    /* convert servername to unicode */
+    if (pName) {
+        len = MultiByteToWideChar(CP_ACP, 0, pName, -1, NULL, 0);
+        nameW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, pName, -1, nameW, len);
+    }
+
+    /* common fields */
+    diW.cVersion = diA->cVersion;
+
+    if (diA->pName) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pName, -1, NULL, 0);
+        diW.pName = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pName, -1, diW.pName, len);
+    }
+
+    if (diA->pEnvironment) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pEnvironment, -1, NULL, 0);
+        diW.pEnvironment = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pEnvironment, -1, diW.pEnvironment, len);
+    }
+
+    if (diA->pDriverPath) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pDriverPath, -1, NULL, 0);
+        diW.pDriverPath = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pDriverPath, -1, diW.pDriverPath, len);
+    }
+
+    if (diA->pDataFile) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pDataFile, -1, NULL, 0);
+        diW.pDataFile = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pDataFile, -1, diW.pDataFile, len);
+    }
+
+    if (diA->pConfigFile) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pConfigFile, -1, NULL, 0);
+        diW.pConfigFile = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pConfigFile, -1, diW.pConfigFile, len);
+    }
+
+    if ((Level > 2) && diA->pDependentFiles) {
+        lenA = multi_sz_lenA(diA->pDependentFiles);
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pDependentFiles, lenA, NULL, 0);
+        diW.pDependentFiles = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pDependentFiles, lenA, diW.pDependentFiles, len);
+    }
+
+    if ((Level > 2) && diA->pMonitorName) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pMonitorName, -1, NULL, 0);
+        diW.pMonitorName = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pMonitorName, -1, diW.pMonitorName, len);
+    }
+
+    if ((Level > 3) && diA->pDefaultDataType) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pDefaultDataType, -1, NULL, 0);
+        diW.pDefaultDataType = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pDefaultDataType, -1, diW.pDefaultDataType, len);
+    }
+
+    if ((Level > 3) && diA->pszzPreviousNames) {
+        lenA = multi_sz_lenA(diA->pszzPreviousNames);
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pszzPreviousNames, lenA, NULL, 0);
+        diW.pszzPreviousNames = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pszzPreviousNames, lenA, diW.pszzPreviousNames, len);
+    }
+
+    if ((Level > 5) && diA->pszMfgName) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pszMfgName, -1, NULL, 0);
+        diW.pszMfgName = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pszMfgName, -1, diW.pszMfgName, len);
+    }
+
+    if ((Level > 5) && diA->pszOEMUrl) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pszOEMUrl, -1, NULL, 0);
+        diW.pszOEMUrl = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pszOEMUrl, -1, diW.pszOEMUrl, len);
+    }
+
+    if ((Level > 5) && diA->pszHardwareID) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pszHardwareID, -1, NULL, 0);
+        diW.pszHardwareID = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pszHardwareID, -1, diW.pszHardwareID, len);
+    }
+
+    if ((Level > 5) && diA->pszProvider) {
+        len = MultiByteToWideChar(CP_ACP, 0, diA->pszProvider, -1, NULL, 0);
+        diW.pszProvider = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, diA->pszProvider, -1, diW.pszProvider, len);
+    }
+
+    if (Level > 7) {
+        FIXME("level %u is incomplete\n", Level);
+    }
+
+    res = AddPrinterDriverExW(nameW, Level, (LPBYTE) &diW, dwFileCopyFlags);
+    TRACE("got %u with %u\n", res, GetLastError());
+    HeapFree(GetProcessHeap(), 0, nameW);
+    HeapFree(GetProcessHeap(), 0, diW.pName);
+    HeapFree(GetProcessHeap(), 0, diW.pEnvironment);
+    HeapFree(GetProcessHeap(), 0, diW.pDriverPath);
+    HeapFree(GetProcessHeap(), 0, diW.pDataFile);
+    HeapFree(GetProcessHeap(), 0, diW.pConfigFile);
+    HeapFree(GetProcessHeap(), 0, diW.pDependentFiles);
+    HeapFree(GetProcessHeap(), 0, diW.pMonitorName);
+    HeapFree(GetProcessHeap(), 0, diW.pDefaultDataType);
+    HeapFree(GetProcessHeap(), 0, diW.pszzPreviousNames);
+    HeapFree(GetProcessHeap(), 0, diW.pszMfgName);
+    HeapFree(GetProcessHeap(), 0, diW.pszOEMUrl);
+    HeapFree(GetProcessHeap(), 0, diW.pszHardwareID);
+    HeapFree(GetProcessHeap(), 0, diW.pszProvider);
+
+    TRACE("=> %u with %u\n", res, GetLastError());
+    return res;
 }
 
 /******************************************************************************

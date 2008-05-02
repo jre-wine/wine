@@ -135,7 +135,7 @@ typedef enum
 struct _WININETHANDLEHEADER;
 typedef struct _WININETHANDLEHEADER WININETHANDLEHEADER, *LPWININETHANDLEHEADER;
 
-typedef void (*WININET_object_destructor)( LPWININETHANDLEHEADER );
+typedef void (*WININET_object_function)( LPWININETHANDLEHEADER );
 
 struct _WININETHANDLEHEADER
 {
@@ -146,7 +146,8 @@ struct _WININETHANDLEHEADER
     DWORD  dwError;
     DWORD  dwInternalFlags;
     DWORD  dwRefCount;
-    WININET_object_destructor destroy;
+    WININET_object_function close_connection;
+    WININET_object_function destroy;
     INTERNET_STATUS_CALLBACK lpfnStatusCB;
 };
 

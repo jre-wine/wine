@@ -45,7 +45,7 @@
 @ stub CertFindSubjectInCTL
 @ stdcall CertFreeCRLContext(ptr)
 @ stdcall CertFreeCTLContext(ptr)
-@ stub CertFreeCertificateChain
+@ stdcall CertFreeCertificateChain(ptr)
 @ stdcall CertFreeCertificateChainEngine(ptr)
 @ stdcall CertFreeCertificateContext(ptr)
 @ stdcall CertGetCRLContextProperty(ptr long ptr ptr)
@@ -122,8 +122,8 @@
 @ stub CryptGetAsyncParam
 @ stdcall CryptGetDefaultOIDDllList(long long ptr ptr)
 @ stdcall CryptGetDefaultOIDFunctionAddress(long long wstr long ptr ptr)
-@ stub CryptGetMessageCertificates
-@ stub CryptGetMessageSignerCount
+@ stdcall CryptGetMessageCertificates(long ptr long ptr long)
+@ stdcall CryptGetMessageSignerCount(long ptr long)
 @ stdcall CryptGetOIDFunctionAddress(long long str long ptr ptr)
 @ stdcall CryptGetOIDFunctionValue(long str str wstr ptr ptr ptr)
 @ stdcall CryptHashCertificate(long long long ptr long ptr ptr)

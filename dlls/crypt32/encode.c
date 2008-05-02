@@ -92,44 +92,6 @@ static BOOL WINAPI CRYPT_AsnEncodeChoiceOfTime(DWORD dwCertEncodingType,
  LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
  PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
 
-BOOL WINAPI CryptEncodeObject(DWORD dwCertEncodingType, LPCSTR lpszStructType,
- const void *pvStructInfo, BYTE *pbEncoded, DWORD *pcbEncoded)
-{
-    static HCRYPTOIDFUNCSET set = NULL;
-    BOOL ret = FALSE;
-    HCRYPTOIDFUNCADDR hFunc;
-    CryptEncodeObjectFunc pCryptEncodeObject;
-
-    TRACE_(crypt)("(0x%08x, %s, %p, %p, %p)\n", dwCertEncodingType,
-     debugstr_a(lpszStructType), pvStructInfo, pbEncoded,
-     pcbEncoded);
-
-    if (!pbEncoded && !pcbEncoded)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    /* Try registered DLL first.. */
-    if (!set)
-        set = CryptInitOIDFunctionSet(CRYPT_OID_ENCODE_OBJECT_FUNC, 0);
-    CryptGetOIDFunctionAddress(set, dwCertEncodingType, lpszStructType, 0,
-     (void **)&pCryptEncodeObject, &hFunc);
-    if (pCryptEncodeObject)
-    {
-        ret = pCryptEncodeObject(dwCertEncodingType, lpszStructType,
-         pvStructInfo, pbEncoded, pcbEncoded);
-        CryptFreeOIDFunctionAddress(hFunc, 0);
-    }
-    else
-    {
-        /* If not, use CryptEncodeObjectEx */
-        ret = CryptEncodeObjectEx(dwCertEncodingType, lpszStructType,
-         pvStructInfo, 0, NULL, pbEncoded, pcbEncoded);
-    }
-    return ret;
-}
-
 BOOL CRYPT_EncodeEnsureSpace(DWORD dwFlags, PCRYPT_ENCODE_PARA pEncodePara,
  BYTE *pbEncoded, DWORD *pcbEncoded, DWORD bytesNeeded)
 {
@@ -2041,6 +2003,45 @@ static BOOL CRYPT_AsnEncodeAltNameEntry(const CERT_ALT_NAME_ENTRY *entry,
     return ret;
 }
 
+static BOOL WINAPI CRYPT_AsnEncodeIntegerSwapBytes(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded)
+{
+    BOOL ret;
+
+    __TRY
+    {
+        const CRYPT_DATA_BLOB *blob = (const CRYPT_DATA_BLOB *)pvStructInfo;
+        CRYPT_DATA_BLOB newBlob = { blob->cbData, NULL };
+
+        ret = TRUE;
+        if (newBlob.cbData)
+        {
+            newBlob.pbData = CryptMemAlloc(newBlob.cbData);
+            if (newBlob.pbData)
+            {
+                DWORD i;
+
+                for (i = 0; i < newBlob.cbData; i++)
+                    newBlob.pbData[newBlob.cbData - i - 1] = blob->pbData[i];
+            }
+            else
+                ret = FALSE;
+        }
+        if (ret)
+            ret = CRYPT_AsnEncodeInteger(dwCertEncodingType, lpszStructType,
+             &newBlob, dwFlags, pEncodePara, pbEncoded, pcbEncoded);
+        CryptMemFree(newBlob.pbData);
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        SetLastError(STATUS_ACCESS_VIOLATION);
+        ret = FALSE;
+    }
+    __ENDTRY
+    return ret;
+}
+
 static BOOL WINAPI CRYPT_AsnEncodeAuthorityKeyId(DWORD dwCertEncodingType,
  LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
  PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded)
@@ -2060,7 +2061,7 @@ static BOOL WINAPI CRYPT_AsnEncodeAuthorityKeyId(DWORD dwCertEncodingType,
         {
             swapped[cSwapped].tag = ASN_CONTEXT | 0;
             swapped[cSwapped].pvStructInfo = &info->KeyId;
-            swapped[cSwapped].encodeFunc = CRYPT_AsnEncodeInteger;
+            swapped[cSwapped].encodeFunc = CRYPT_AsnEncodeIntegerSwapBytes;
             items[cItem].pvStructInfo = &swapped[cSwapped];
             items[cItem].encodeFunc = CRYPT_AsnEncodeSwapTag;
             cSwapped++;
@@ -2193,7 +2194,7 @@ static BOOL WINAPI CRYPT_AsnEncodeAuthorityKeyId2(DWORD dwCertEncodingType,
         {
             swapped[cSwapped].tag = ASN_CONTEXT | 0;
             swapped[cSwapped].pvStructInfo = &info->KeyId;
-            swapped[cSwapped].encodeFunc = CRYPT_AsnEncodeInteger;
+            swapped[cSwapped].encodeFunc = CRYPT_AsnEncodeIntegerSwapBytes;
             items[cItem].pvStructInfo = &swapped[cSwapped];
             items[cItem].encodeFunc = CRYPT_AsnEncodeSwapTag;
             cSwapped++;
@@ -3335,34 +3336,18 @@ BOOL CRYPT_AsnEncodePKCSSignedInfo(CRYPT_SIGNED_INFO *signedInfo, void *pvData,
     return ret;
 }
 
-BOOL WINAPI CryptEncodeObjectEx(DWORD dwCertEncodingType, LPCSTR lpszStructType,
- const void *pvStructInfo, DWORD dwFlags, PCRYPT_ENCODE_PARA pEncodePara,
- void *pvEncoded, DWORD *pcbEncoded)
+static CryptEncodeObjectExFunc CRYPT_GetBuiltinEncoder(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType)
 {
-    static HCRYPTOIDFUNCSET set = NULL;
-    BOOL ret = FALSE;
     CryptEncodeObjectExFunc encodeFunc = NULL;
-    HCRYPTOIDFUNCADDR hFunc = NULL;
 
-    TRACE_(crypt)("(0x%08x, %s, %p, 0x%08x, %p, %p, %p)\n", dwCertEncodingType,
-     debugstr_a(lpszStructType), pvStructInfo, dwFlags, pEncodePara,
-     pvEncoded, pcbEncoded);
-
-    if (!pvEncoded && !pcbEncoded)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
     if ((dwCertEncodingType & CERT_ENCODING_TYPE_MASK) != X509_ASN_ENCODING
      && (dwCertEncodingType & CMSG_ENCODING_TYPE_MASK) != PKCS_7_ASN_ENCODING)
     {
         SetLastError(ERROR_FILE_NOT_FOUND);
-        return FALSE;
+        return NULL;
     }
 
-    SetLastError(NOERROR);
-    if (dwFlags & CRYPT_ENCODE_ALLOC_FLAG && pvEncoded)
-        *(BYTE **)pvEncoded = NULL;
     if (!HIWORD(lpszStructType))
     {
         switch (LOWORD(lpszStructType))
@@ -3461,8 +3446,6 @@ BOOL WINAPI CryptEncodeObjectEx(DWORD dwCertEncodingType, LPCSTR lpszStructType,
         case (WORD)PKCS7_SIGNER_INFO:
             encodeFunc = CRYPT_AsnEncodePKCSSignerInfo;
             break;
-        default:
-            FIXME("%d: unimplemented\n", LOWORD(lpszStructType));
         }
     }
     else if (!strcmp(lpszStructType, szOID_CERT_EXTENSIONS))
@@ -3499,23 +3482,133 @@ BOOL WINAPI CryptEncodeObjectEx(DWORD dwCertEncodingType, LPCSTR lpszStructType,
         encodeFunc = CRYPT_AsnEncodeEnhancedKeyUsage;
     else if (!strcmp(lpszStructType, szOID_ISSUING_DIST_POINT))
         encodeFunc = CRYPT_AsnEncodeIssuingDistPoint;
-    else
+    return encodeFunc;
+}
+
+static CryptEncodeObjectFunc CRYPT_LoadEncoderFunc(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, HCRYPTOIDFUNCADDR *hFunc)
+{
+    static HCRYPTOIDFUNCSET set = NULL;
+    CryptEncodeObjectFunc encodeFunc = NULL;
+
+    if (!set)
+        set = CryptInitOIDFunctionSet(CRYPT_OID_ENCODE_OBJECT_FUNC, 0);
+    CryptGetOIDFunctionAddress(set, dwCertEncodingType, lpszStructType, 0,
+     (void **)&encodeFunc, hFunc);
+    return encodeFunc;
+}
+
+static CryptEncodeObjectExFunc CRYPT_LoadEncoderExFunc(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, HCRYPTOIDFUNCADDR *hFunc)
+{
+    static HCRYPTOIDFUNCSET set = NULL;
+    CryptEncodeObjectExFunc encodeFunc = NULL;
+
+    if (!set)
+        set = CryptInitOIDFunctionSet(CRYPT_OID_ENCODE_OBJECT_EX_FUNC, 0);
+    CryptGetOIDFunctionAddress(set, dwCertEncodingType, lpszStructType, 0,
+     (void **)&encodeFunc, hFunc);
+    return encodeFunc;
+}
+
+BOOL WINAPI CryptEncodeObject(DWORD dwCertEncodingType, LPCSTR lpszStructType,
+ const void *pvStructInfo, BYTE *pbEncoded, DWORD *pcbEncoded)
+{
+    BOOL ret = FALSE;
+    HCRYPTOIDFUNCADDR hFunc = NULL;
+    CryptEncodeObjectFunc pCryptEncodeObject = NULL;
+    CryptEncodeObjectExFunc pCryptEncodeObjectEx = NULL;
+
+    TRACE_(crypt)("(0x%08x, %s, %p, %p, %p)\n", dwCertEncodingType,
+     debugstr_a(lpszStructType), pvStructInfo, pbEncoded,
+     pcbEncoded);
+
+    if (!pbEncoded && !pcbEncoded)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!(pCryptEncodeObjectEx = CRYPT_GetBuiltinEncoder(dwCertEncodingType,
+     lpszStructType)))
+    {
         TRACE_(crypt)("OID %s not found or unimplemented, looking for DLL\n",
          debugstr_a(lpszStructType));
+        pCryptEncodeObject = CRYPT_LoadEncoderFunc(dwCertEncodingType,
+         lpszStructType, &hFunc);
+        if (!pCryptEncodeObject)
+            pCryptEncodeObjectEx = CRYPT_LoadEncoderExFunc(dwCertEncodingType,
+             lpszStructType, &hFunc);
+    }
+    if (pCryptEncodeObject)
+        ret = pCryptEncodeObject(dwCertEncodingType, lpszStructType,
+         pvStructInfo, pbEncoded, pcbEncoded);
+    else if (pCryptEncodeObjectEx)
+        ret = pCryptEncodeObjectEx(dwCertEncodingType, lpszStructType,
+         pvStructInfo, 0, NULL, pbEncoded, pcbEncoded);
+    if (hFunc)
+        CryptFreeOIDFunctionAddress(hFunc, 0);
+    TRACE_(crypt)("returning %d\n", ret);
+    return ret;
+}
+
+BOOL WINAPI CryptEncodeObjectEx(DWORD dwCertEncodingType, LPCSTR lpszStructType,
+ const void *pvStructInfo, DWORD dwFlags, PCRYPT_ENCODE_PARA pEncodePara,
+ void *pvEncoded, DWORD *pcbEncoded)
+{
+    BOOL ret = FALSE;
+    HCRYPTOIDFUNCADDR hFunc = NULL;
+    CryptEncodeObjectExFunc encodeFunc = NULL;
+
+    TRACE_(crypt)("(0x%08x, %s, %p, 0x%08x, %p, %p, %p)\n", dwCertEncodingType,
+     debugstr_a(lpszStructType), pvStructInfo, dwFlags, pEncodePara,
+     pvEncoded, pcbEncoded);
+
+    if (!pvEncoded && !pcbEncoded)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    SetLastError(NOERROR);
+    if (dwFlags & CRYPT_ENCODE_ALLOC_FLAG && pvEncoded)
+        *(BYTE **)pvEncoded = NULL;
+    encodeFunc = CRYPT_GetBuiltinEncoder(dwCertEncodingType, lpszStructType);
     if (!encodeFunc)
     {
-        if (!set)
-            set = CryptInitOIDFunctionSet(CRYPT_OID_ENCODE_OBJECT_EX_FUNC, 0);
-        CryptGetOIDFunctionAddress(set, dwCertEncodingType, lpszStructType, 0,
-         (void **)&encodeFunc, &hFunc);
+        TRACE_(crypt)("OID %s not found or unimplemented, looking for DLL\n",
+         debugstr_a(lpszStructType));
+        encodeFunc = CRYPT_LoadEncoderExFunc(dwCertEncodingType, lpszStructType,
+         &hFunc);
     }
     if (encodeFunc)
         ret = encodeFunc(dwCertEncodingType, lpszStructType, pvStructInfo,
          dwFlags, pEncodePara, pvEncoded, pcbEncoded);
     else
-        SetLastError(ERROR_FILE_NOT_FOUND);
+    {
+        CryptEncodeObjectFunc pCryptEncodeObject =
+         CRYPT_LoadEncoderFunc(dwCertEncodingType, lpszStructType, &hFunc);
+
+        if (pCryptEncodeObject)
+        {
+            if (dwFlags & CRYPT_ENCODE_ALLOC_FLAG)
+            {
+                ret = pCryptEncodeObject(dwCertEncodingType, lpszStructType,
+                 pvStructInfo, NULL, pcbEncoded);
+                if (ret && (ret = CRYPT_EncodeEnsureSpace(dwFlags, pEncodePara,
+                 pvEncoded, pcbEncoded, *pcbEncoded)))
+                    ret = pCryptEncodeObject(dwCertEncodingType,
+                     lpszStructType, pvStructInfo, *(BYTE **)pvEncoded,
+                     pcbEncoded);
+            }
+            else
+                ret = pCryptEncodeObject(dwCertEncodingType, lpszStructType,
+                 pvStructInfo, pvEncoded, pcbEncoded);
+        }
+    }
     if (hFunc)
         CryptFreeOIDFunctionAddress(hFunc, 0);
+    TRACE_(crypt)("returning %d\n", ret);
     return ret;
 }
 
@@ -3534,9 +3627,9 @@ static BOOL WINAPI CRYPT_ExportRsaPublicKeyInfoEx(HCRYPTPROV_OR_NCRYPT_KEY_HANDL
     HCRYPTKEY key;
     static CHAR oid[] = szOID_RSA_RSA;
 
-    TRACE("(%08lx, %d, %08x, %s, %08x, %p, %p, %p)\n", hCryptProv, dwKeySpec,
-     dwCertEncodingType, debugstr_a(pszPublicKeyObjId), dwFlags, pvAuxInfo,
-     pInfo, pcbInfo);
+    TRACE_(crypt)("(%08lx, %d, %08x, %s, %08x, %p, %p, %p)\n", hCryptProv,
+     dwKeySpec, dwCertEncodingType, debugstr_a(pszPublicKeyObjId), dwFlags,
+     pvAuxInfo, pInfo, pcbInfo);
 
     if (!pszPublicKeyObjId)
         pszPublicKeyObjId = oid;
@@ -3655,7 +3748,7 @@ static BOOL WINAPI CRYPT_ImportRsaPublicKeyInfoEx(HCRYPTPROV hCryptProv,
     BOOL ret;
     DWORD pubKeySize = 0;
 
-    TRACE("(%08lx, %d, %p, %d, %08x, %p, %p)\n", hCryptProv,
+    TRACE_(crypt)("(%08lx, %d, %p, %d, %08x, %p, %p)\n", hCryptProv,
      dwCertEncodingType, pInfo, aiKeyAlg, dwFlags, pvAuxInfo, phKey);
 
     ret = CryptDecodeObject(dwCertEncodingType, RSA_CSP_PUBLICKEYBLOB,

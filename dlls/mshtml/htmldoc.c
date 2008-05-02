@@ -113,6 +113,9 @@ static HRESULT WINAPI HTMLDocument_QueryInterface(IHTMLDocument2 *iface, REFIID 
     }else if(IsEqualGUID(&IID_IPersistStreamInit, riid)) {
         TRACE("(%p)->(IID_IPersistStreamInit %p)\n", This, ppvObject);
         *ppvObject = PERSTRINIT(This);
+    }else if(IsEqualGUID(&IID_ICustomDoc, riid)) {
+        TRACE("(%p)->(IID_ICustomDoc %p)\n", This, ppvObject);
+        *ppvObject = CUSTOMDOC(This);
     }else if(IsEqualGUID(&DIID_DispHTMLDocument, riid)) {
         TRACE("(%p)->(DIID_DispHTMLDocument %p)\n", This, ppvObject);
         *ppvObject = HTMLDOC(This);
@@ -169,6 +172,8 @@ static ULONG WINAPI HTMLDocument_Release(IHTMLDocument2 *iface)
         if(This->window)
             IHTMLWindow2_Release(HTMLWINDOW2(This->window));
 
+        detach_selection(This);
+        detach_ranges(This);
         release_nodes(This);
 
         ConnectionPointContainer_Destroy(&This->cp_container);
@@ -373,7 +378,7 @@ static HRESULT WINAPI HTMLDocument_get_selection(IHTMLDocument2 *iface, IHTMLSel
         }
     }
 
-    *p = HTMLSelectionObject_Create(nsselection);
+    *p = HTMLSelectionObject_Create(This, nsselection);
     return S_OK;
 }
 
@@ -1124,6 +1129,9 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
     ret->nodes = NULL;
     ret->readystate = READYSTATE_UNINITIALIZED;
     ret->window = NULL;
+
+    list_init(&ret->selection_list);
+    list_init(&ret->range_list);
 
     hres = IHTMLDocument_QueryInterface(HTMLDOC(ret), riid, ppvObject);
     if(FAILED(hres)) {

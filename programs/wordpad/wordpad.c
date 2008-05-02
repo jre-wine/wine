@@ -32,6 +32,7 @@
 #include <richedit.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <shlobj.h>
 
 #include "resource.h"
 
@@ -43,10 +44,21 @@ static const WCHAR wszRichEditClass[] = {'R','I','C','H','E','D','I','T','2','0'
 static const WCHAR wszMainWndClass[] = {'W','O','R','D','P','A','D','T','O','P',0};
 static const WCHAR wszAppTitle[] = {'W','i','n','e',' ','W','o','r','d','p','a','d',0};
 
+static const WCHAR key_recentfiles[] = {'R','e','c','e','n','t',' ','f','i','l','e',
+                                        ' ','l','i','s','t',0};
+static const WCHAR key_options[] = {'O','p','t','i','o','n','s',0};
+
+static const WCHAR var_file[] = {'F','i','l','e','%','d',0};
+static const WCHAR var_framerect[] = {'F','r','a','m','e','R','e','c','t',0};
+
+
 static HWND hMainWnd;
 static HWND hEditorWnd;
+static HWND hFindWnd;
 
-static WCHAR wszFilter[MAX_STRING_LEN];
+static UINT ID_FINDMSGSTRING;
+
+static WCHAR wszFilter[MAX_STRING_LEN*4+6*3+5];
 static WCHAR wszDefaultFileName[MAX_STRING_LEN];
 static WCHAR wszSaveChanges[MAX_STRING_LEN];
 
@@ -66,6 +78,10 @@ static void DoLoadStrings(void)
     lstrcpyW(p, files_rtf);
     p += lstrlenW(p) + 1;
     LoadStringW(hInstance, STRING_TEXT_FILES_TXT, p, MAX_STRING_LEN);
+    p += lstrlenW(p) + 1;
+    lstrcpyW(p, files_txt);
+    p += lstrlenW(p) + 1;
+    LoadStringW(hInstance, STRING_TEXT_FILES_UNICODE_TXT, p, MAX_STRING_LEN);
     p += lstrlenW(p) + 1;
     lstrcpyW(p, files_txt);
     p += lstrlenW(p) + 1;
@@ -139,7 +155,25 @@ static DWORD CALLBACK stream_out(DWORD_PTR cookie, LPBYTE buffer, LONG cb, LONG 
     return 0;
 }
 
+
+static LPWSTR file_basename(LPWSTR path)
+{
+    LPWSTR pos = path + lstrlenW(path);
+
+    while(pos > path)
+    {
+        if(*pos == '\\' || *pos == '/')
+        {
+            pos++;
+            break;
+        }
+        pos--;
+    }
+    return pos;
+}
+
 static WCHAR wszFileName[MAX_PATH];
+static WPARAM fileFormat = SF_RTF;
 
 static void set_caption(LPCWSTR wszNewFileName)
 {
@@ -149,6 +183,8 @@ static void set_caption(LPCWSTR wszNewFileName)
 
     if(!wszNewFileName)
         wszNewFileName = wszDefaultFileName;
+    else
+        wszNewFileName = file_basename((LPWSTR)wszNewFileName);
 
     wszCaption = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
                 lstrlenW(wszNewFileName)*sizeof(WCHAR)+sizeof(wszSeparator)+sizeof(wszAppTitle));
@@ -167,21 +203,342 @@ static void set_caption(LPCWSTR wszNewFileName)
     HeapFree(GetProcessHeap(), 0, wszCaption);
 }
 
+static LRESULT registry_get_handle(HKEY *hKey, LPDWORD action, LPCWSTR subKey)
+{
+    LONG ret;
+    static const WCHAR wszProgramKey[] = {'S','o','f','t','w','a','r','e','\\',
+        'M','i','c','r','o','s','o','f','t','\\',
+        'W','i','n','d','o','w','s','\\',
+        'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+        'A','p','p','l','e','t','s','\\',
+        'W','o','r','d','p','a','d',0};
+    LPWSTR key = (LPWSTR)wszProgramKey;
+
+    if(subKey)
+    {
+        WCHAR backslash[] = {'\\',0};
+        key = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                        (lstrlenW(wszProgramKey)+lstrlenW(subKey)+lstrlenW(backslash)+1)
+                        *sizeof(WCHAR));
+
+        if(!key)
+            return 1;
+
+        lstrcpyW(key, wszProgramKey);
+        lstrcatW(key, backslash);
+        lstrcatW(key, subKey);
+    }
+
+    if(action)
+    {
+        ret = RegCreateKeyExW(HKEY_CURRENT_USER, key, 0, NULL, REG_OPTION_NON_VOLATILE,
+                              KEY_READ | KEY_WRITE, NULL, hKey, action);
+    } else
+    {
+        ret = RegOpenKeyExW(HKEY_CURRENT_USER, key, 0, KEY_READ | KEY_WRITE, hKey);
+    }
+
+    if(subKey)
+        HeapFree(GetProcessHeap(), 0, key);
+
+    return ret;
+}
+
+static void registry_set_winrect(void)
+{
+    HKEY hKey;
+    DWORD action;
+
+    if(registry_get_handle(&hKey, &action, (LPWSTR)key_options) == ERROR_SUCCESS)
+    {
+        RECT rc;
+
+        GetWindowRect(hMainWnd, &rc);
+
+        RegSetValueExW(hKey, var_framerect, 0, REG_BINARY, (LPBYTE)&rc, sizeof(RECT));
+    }
+}
+
+static RECT registry_read_winrect(void)
+{
+    HKEY hKey;
+    RECT rc;
+    DWORD size = sizeof(RECT);
+
+    ZeroMemory(&rc, sizeof(RECT));
+    if(registry_get_handle(&hKey, 0, (LPWSTR)key_options) != ERROR_SUCCESS ||
+       RegQueryValueExW(hKey, var_framerect, 0, NULL, (LPBYTE)&rc, &size) !=
+       ERROR_SUCCESS || size != sizeof(RECT))
+    {
+        rc.top = 0;
+        rc.left = 0;
+        rc.bottom = 300;
+        rc.right = 600;
+    }
+
+    RegCloseKey(hKey);
+    return rc;
+}
+
+static void truncate_path(LPWSTR file, LPWSTR out, LPWSTR pos1, LPWSTR pos2)
+{
+    static const WCHAR dots[] = {'.','.','.',0};
+
+    *++pos1 = 0;
+
+    lstrcatW(out, file);
+    lstrcatW(out, dots);
+    lstrcatW(out, pos2);
+}
+
+static void format_filelist_filename(LPWSTR file, LPWSTR out)
+{
+    LPWSTR pos_basename;
+    LPWSTR truncpos1, truncpos2;
+    WCHAR myDocs[MAX_STRING_LEN];
+
+    SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, (LPWSTR)&myDocs);
+    pos_basename = file_basename(file);
+    truncpos1 = NULL;
+    truncpos2 = NULL;
+
+    *(pos_basename-1) = 0;
+    if(!lstrcmpiW(file, myDocs) || (lstrlenW(pos_basename) > FILELIST_ENTRY_LENGTH))
+    {
+        truncpos1 = pos_basename;
+        *(pos_basename-1) = '\\';
+    } else
+    {
+        LPWSTR pos;
+        BOOL morespace = FALSE;
+
+        *(pos_basename-1) = '\\';
+
+        for(pos = file; pos < pos_basename; pos++)
+        {
+            if(*pos == '\\' || *pos == '/')
+            {
+                if(truncpos1)
+                {
+                    if((pos - file + lstrlenW(pos_basename)) > FILELIST_ENTRY_LENGTH)
+                        break;
+
+                    truncpos1 = pos;
+                    morespace = TRUE;
+                    break;
+                }
+
+                if((pos - file + lstrlenW(pos_basename)) > FILELIST_ENTRY_LENGTH)
+                    break;
+
+                truncpos1 = pos;
+            }
+        }
+
+        if(morespace)
+        {
+            for(pos = pos_basename; pos >= truncpos1; pos--)
+            {
+                if(*pos == '\\' || *pos == '/')
+                {
+                    if((truncpos1 - file + lstrlenW(pos_basename) + pos_basename - pos) > FILELIST_ENTRY_LENGTH)
+                        break;
+
+                    truncpos2 = pos;
+                }
+            }
+        }
+    }
+
+    if(truncpos1 == pos_basename)
+        lstrcatW(out, pos_basename);
+    else if(truncpos1 == truncpos2 || !truncpos2)
+        lstrcatW(out, file);
+    else
+        truncate_path(file, out, truncpos1, truncpos2 ? truncpos2 : (pos_basename-1));
+}
+
+static void registry_read_filelist(HWND hMainWnd)
+{
+    HKEY hFileKey;
+
+    if(registry_get_handle(&hFileKey, 0, key_recentfiles) == ERROR_SUCCESS)
+    {
+        WCHAR itemText[MAX_PATH+3], buffer[MAX_PATH];
+        /* The menu item name is not the same as the file name, so we need to store
+           the file name here */
+        static WCHAR file1[MAX_PATH], file2[MAX_PATH], file3[MAX_PATH], file4[MAX_PATH];
+        WCHAR numFormat[] = {'&','%','d',' ',0};
+        LPWSTR pFile[] = {file1, file2, file3, file4};
+        DWORD pathSize = MAX_PATH*sizeof(WCHAR);
+        int i;
+        WCHAR key[6];
+        MENUITEMINFOW mi;
+        HMENU hMenu = GetMenu(hMainWnd);
+
+        mi.cbSize = sizeof(MENUITEMINFOW);
+        mi.fMask = MIIM_ID | MIIM_DATA | MIIM_STRING | MIIM_FTYPE;
+        mi.fType = MFT_STRING;
+        mi.dwTypeData = itemText;
+        mi.wID = ID_FILE_RECENT1;
+
+        RemoveMenu(hMenu, ID_FILE_RECENT_SEPARATOR, MF_BYCOMMAND);
+        for(i = 0; i < FILELIST_ENTRIES; i++)
+        {
+            wsprintfW(key, var_file, i+1);
+            RemoveMenu(hMenu, ID_FILE_RECENT1+i, MF_BYCOMMAND);
+            if(RegQueryValueExW(hFileKey, (LPWSTR)key, 0, NULL, (LPBYTE)pFile[i], &pathSize)
+               != ERROR_SUCCESS)
+                break;
+
+            mi.dwItemData = (DWORD)pFile[i];
+            wsprintfW(itemText, numFormat, i+1);
+
+            lstrcpyW(buffer, pFile[i]);
+
+            format_filelist_filename(buffer, itemText);
+
+            InsertMenuItemW(hMenu, ID_FILE_EXIT, FALSE, &mi);
+            mi.wID++;
+            pathSize = MAX_PATH*sizeof(WCHAR);
+        }
+        mi.fType = MFT_SEPARATOR;
+        mi.fMask = MIIM_FTYPE | MIIM_ID;
+        InsertMenuItemW(hMenu, ID_FILE_EXIT, FALSE, &mi);
+
+        RegCloseKey(hFileKey);
+    }
+}
+
+static void registry_set_filelist(LPCWSTR newFile)
+{
+    HKEY hKey;
+    DWORD action;
+
+    if(registry_get_handle(&hKey, &action, key_recentfiles) == ERROR_SUCCESS)
+    {
+        LPCWSTR pFiles[FILELIST_ENTRIES];
+        int i;
+        HMENU hMenu = GetMenu(hMainWnd);
+        MENUITEMINFOW mi;
+        WCHAR buffer[6];
+
+        mi.cbSize = sizeof(MENUITEMINFOW);
+        mi.fMask = MIIM_DATA;
+
+        for(i = 0; i < FILELIST_ENTRIES; i++)
+            pFiles[i] = NULL;
+
+        for(i = 0; GetMenuItemInfoW(hMenu, ID_FILE_RECENT1+i, FALSE, &mi); i++)
+            pFiles[i] = (LPWSTR)mi.dwItemData;
+
+        if(lstrcmpiW(newFile, pFiles[0]))
+        {
+            for(i = 0; pFiles[i] && i < FILELIST_ENTRIES; i++)
+            {
+                if(!lstrcmpiW(pFiles[i], newFile))
+                {
+                    int j;
+                    for(j = 0; pFiles[j] && j < i; j++)
+                    {
+                        pFiles[i-j] = pFiles[i-j-1];
+                    }
+                    pFiles[0] = NULL;
+                    break;
+                }
+            }
+
+            if(!pFiles[0])
+            {
+                pFiles[0] = newFile;
+            } else
+            {
+                for(i = 0; pFiles[i] && i < FILELIST_ENTRIES-1; i++)
+                    pFiles[FILELIST_ENTRIES-1-i] = pFiles[FILELIST_ENTRIES-2-i];
+
+                pFiles[0] = newFile;
+            }
+
+            for(i = 0; pFiles[i] && i < FILELIST_ENTRIES; i++)
+            {
+                wsprintfW(buffer, var_file, i+1);
+                RegSetValueExW(hKey, (LPWSTR)&buffer, 0, REG_SZ, (LPBYTE)pFiles[i],
+                               (lstrlenW(pFiles[i])+1)*sizeof(WCHAR));
+            }
+        }
+    }
+    RegCloseKey(hKey);
+    registry_read_filelist(hMainWnd);
+}
+
+static void clear_formatting(void)
+{
+    PARAFORMAT2 pf;
+
+    pf.cbSize = sizeof(pf);
+    pf.dwMask = PFM_ALIGNMENT;
+    pf.wAlignment = PFA_LEFT;
+    SendMessageW(hEditorWnd, EM_SETPARAFORMAT, 0, (LPARAM)&pf);
+}
+
+static int fileformat_number(WPARAM format)
+{
+    int number = 0;
+
+    if(format == SF_TEXT)
+    {
+        number = 1;
+    } else if (format == (SF_TEXT | SF_UNICODE))
+    {
+        number = 2;
+    }
+    return number;
+}
+
+static WPARAM fileformat_flags(int format)
+{
+    WPARAM flags[] = { SF_RTF , SF_TEXT , SF_TEXT | SF_UNICODE };
+
+    return flags[format];
+}
+
+static void set_fileformat(WPARAM format)
+{
+    fileFormat = format;
+}
+
 static void DoOpenFile(LPCWSTR szOpenFileName)
 {
     HANDLE hFile;
     EDITSTREAM es;
+    char fileStart[5];
+    DWORD readOut;
+    WPARAM format = SF_TEXT;
 
     hFile = CreateFileW(szOpenFileName, GENERIC_READ, FILE_SHARE_READ, NULL,
                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE)
         return;
 
+    ReadFile(hFile, fileStart, 5, &readOut, NULL);
+    SetFilePointer(hFile, 0, NULL, FILE_BEGIN);
+
+    if(readOut >= 2 && (BYTE)fileStart[0] == 0xff && (BYTE)fileStart[1] == 0xfe)
+    {
+        format = SF_TEXT | SF_UNICODE;
+        SetFilePointer(hFile, 2, NULL, FILE_BEGIN);
+    } else if(readOut >= 5)
+    {
+        static const char header[] = "{\\rtf";
+        if(!memcmp(header, fileStart, 5))
+            format = SF_RTF;
+    }
+
     es.dwCookie = (DWORD_PTR)hFile;
     es.pfnCallback = stream_in;
 
-    /* FIXME: Handle different file formats */
-    SendMessageW(hEditorWnd, EM_STREAMIN, SF_RTF, (LPARAM)&es);
+    clear_formatting();
+    SendMessageW(hEditorWnd, EM_STREAMIN, format, (LPARAM)&es);
 
     CloseHandle(hFile);
 
@@ -191,9 +548,11 @@ static void DoOpenFile(LPCWSTR szOpenFileName)
 
     lstrcpyW(wszFileName, szOpenFileName);
     SendMessageW(hEditorWnd, EM_SETMODIFY, FALSE, 0);
+    registry_set_filelist(szOpenFileName);
+    set_fileformat(format);
 }
 
-static void DoSaveFile(LPCWSTR wszSaveFileName)
+static void DoSaveFile(LPCWSTR wszSaveFileName, WPARAM format)
 {
     HANDLE hFile;
     EDITSTREAM stream;
@@ -205,22 +564,39 @@ static void DoSaveFile(LPCWSTR wszSaveFileName)
     if(hFile == INVALID_HANDLE_VALUE)
         return;
 
+    if(format == (SF_TEXT | SF_UNICODE))
+    {
+        static const BYTE unicode[] = {0xff,0xfe};
+        DWORD writeOut;
+        WriteFile(hFile, &unicode, sizeof(unicode), &writeOut, 0);
+
+        if(writeOut != sizeof(unicode))
+            return;
+    }
+
     stream.dwCookie = (DWORD_PTR)hFile;
     stream.pfnCallback = stream_out;
 
-    /* FIXME: Handle different formats */
-    ret = SendMessageW(hEditorWnd, EM_STREAMOUT, SF_RTF, (LPARAM)&stream);
+    ret = SendMessageW(hEditorWnd, EM_STREAMOUT, format, (LPARAM)&stream);
 
     CloseHandle(hFile);
 
     SetFocus(hEditorWnd);
 
     if(!ret)
-        return;
+    {
+        GETTEXTLENGTHEX gt;
+        gt.flags = GTL_DEFAULT;
+        gt.codepage = 1200;
+
+        if(SendMessageW(hEditorWnd, EM_GETTEXTLENGTHEX, (WPARAM)&gt, 0))
+            return;
+    }
 
     lstrcpyW(wszFileName, wszSaveFileName);
     set_caption(wszFileName);
     SendMessageW(hEditorWnd, EM_SETMODIFY, FALSE, 0);
+    set_fileformat(format);
 }
 
 static void DialogSaveFile(void)
@@ -233,17 +609,33 @@ static void DialogSaveFile(void)
     ZeroMemory(&sfn, sizeof(sfn));
 
     sfn.lStructSize = sizeof(sfn);
-    sfn.Flags = OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
+    sfn.Flags = OFN_HIDEREADONLY | OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
     sfn.hwndOwner = hMainWnd;
     sfn.lpstrFilter = wszFilter;
     sfn.lpstrFile = wszFile;
     sfn.nMaxFile = MAX_PATH;
     sfn.lpstrDefExt = wszDefExt;
+    sfn.nFilterIndex = fileformat_number(fileFormat)+1;
 
-    if(!GetSaveFileNameW(&sfn))
-        return;
-
-    DoSaveFile(sfn.lpstrFile);
+    while(GetSaveFileNameW(&sfn))
+    {
+        if(fileformat_flags(sfn.nFilterIndex-1) != SF_RTF)
+        {
+            if(MessageBoxW(hMainWnd, MAKEINTRESOURCEW(STRING_SAVE_LOSEFORMATTING),
+                           wszAppTitle, MB_YESNO | MB_ICONEXCLAMATION) != IDYES)
+            {
+                continue;
+            } else
+            {
+                DoSaveFile(sfn.lpstrFile, fileformat_flags(sfn.nFilterIndex-1));
+                break;
+            }
+        } else
+        {
+            DoSaveFile(sfn.lpstrFile, fileformat_flags(sfn.nFilterIndex-1));
+            break;
+        }
+    }
 }
 
 static BOOL prompt_save_changes(void)
@@ -269,7 +661,7 @@ static BOOL prompt_save_changes(void)
         if(!wszFileName[0])
             displayFileName = wszDefaultFileName;
         else
-            displayFileName = wszFileName;
+            displayFileName = file_basename(wszFileName);
 
         text = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
                          (lstrlenW(displayFileName)+lstrlenW(wszSaveChanges))*sizeof(WCHAR));
@@ -290,7 +682,7 @@ static BOOL prompt_save_changes(void)
 
             case IDYES:
                 if(wszFileName[0])
-                    DoSaveFile(wszFileName);
+                    DoSaveFile(wszFileName, fileFormat);
                 else
                     DialogSaveFile();
                 return TRUE;
@@ -317,11 +709,12 @@ static void DialogOpenFile(void)
     ofn.lpstrFile = wszFile;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = wszDefExt;
+    ofn.nFilterIndex = fileformat_number(fileFormat)+1;
 
     if(GetOpenFileNameW(&ofn))
     {
-        prompt_save_changes();
-        DoOpenFile(ofn.lpstrFile);
+        if(prompt_save_changes())
+            DoOpenFile(ofn.lpstrFile);
     }
 }
 
@@ -374,6 +767,109 @@ static void HandleCommandLine(LPWSTR cmdline)
     if (opt_print)
         MessageBox(hMainWnd, "Printing not implemented", "WordPad", MB_OK);
 }
+
+static LRESULT handle_findmsg(LPFINDREPLACEW pFr)
+{
+    if(pFr->Flags & FR_DIALOGTERM)
+    {
+        hFindWnd = 0;
+        pFr->Flags = FR_FINDNEXT;
+        return 0;
+    } else if(pFr->Flags & FR_FINDNEXT)
+    {
+        DWORD flags = FR_DOWN;
+        FINDTEXTW ft;
+        static CHARRANGE cr;
+        LRESULT end, ret;
+        GETTEXTLENGTHEX gt;
+        LRESULT length;
+        int startPos;
+        HMENU hMenu = GetMenu(hMainWnd);
+        MENUITEMINFOW mi;
+
+        mi.cbSize = sizeof(mi);
+        mi.fMask = MIIM_DATA;
+        mi.dwItemData = 1;
+        SetMenuItemInfoW(hMenu, ID_FIND_NEXT, FALSE, &mi);
+
+        gt.flags = GTL_NUMCHARS;
+        gt.codepage = 1200;
+
+        length = SendMessageW(hEditorWnd, EM_GETTEXTLENGTHEX, (WPARAM)&gt, 0);
+
+        if(pFr->lCustData == -1)
+        {
+            SendMessageW(hEditorWnd, EM_GETSEL, (WPARAM)&startPos, (LPARAM)&end);
+            cr.cpMin = startPos;
+            pFr->lCustData = startPos;
+            cr.cpMax = length;
+            if(cr.cpMin == length)
+                cr.cpMin = 0;
+        } else
+        {
+            startPos = pFr->lCustData;
+        }
+
+        if(cr.cpMax > length)
+        {
+            startPos = 0;
+            cr.cpMin = 0;
+            cr.cpMax = length;
+        }
+
+        ft.chrg = cr;
+        ft.lpstrText = pFr->lpstrFindWhat;
+
+        if(pFr->Flags & FR_MATCHCASE)
+            flags |= FR_MATCHCASE;
+        if(pFr->Flags & FR_WHOLEWORD)
+            flags |= FR_WHOLEWORD;
+
+        ret = SendMessageW(hEditorWnd, EM_FINDTEXTW, (WPARAM)flags, (LPARAM)&ft);
+
+        if(ret == -1)
+        {
+            if(cr.cpMax == length && cr.cpMax != startPos)
+            {
+                ft.chrg.cpMin = cr.cpMin = 0;
+                ft.chrg.cpMax = cr.cpMax = startPos;
+
+                ret = SendMessageW(hEditorWnd, EM_FINDTEXTW, (WPARAM)flags, (LPARAM)&ft);
+            }
+        }
+
+        if(ret == -1)
+        {
+            pFr->lCustData = -1;
+            MessageBoxW(hMainWnd, MAKEINTRESOURCEW(STRING_SEARCH_FINISHED), wszAppTitle,
+                        MB_OK | MB_ICONASTERISK);
+        } else
+        {
+            end = ret + lstrlenW(pFr->lpstrFindWhat);
+            cr.cpMin = end;
+            SendMessageW(hEditorWnd, EM_SETSEL, (WPARAM)ret, (LPARAM)end);
+            SendMessageW(hEditorWnd, EM_SCROLLCARET, 0, 0);
+        }
+    }
+
+    return 0;
+}
+
+static void dialog_find(LPFINDREPLACEW fr)
+{
+    static WCHAR findBuffer[MAX_STRING_LEN];
+
+    ZeroMemory(fr, sizeof(FINDREPLACEW));
+    fr->lStructSize = sizeof(FINDREPLACEW);
+    fr->hwndOwner = hMainWnd;
+    fr->Flags = FR_HIDEUPDOWN;
+    fr->lpstrFindWhat = findBuffer;
+    fr->lCustData = -1;
+    fr->wFindWhatLen = MAX_STRING_LEN*sizeof(WCHAR);
+
+    hFindWnd = FindTextW(fr);
+}
+
 
 static void DoDefaultFont(void)
 {
@@ -485,6 +981,49 @@ BOOL CALLBACK datetime_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
     return FALSE;
 }
 
+BOOL CALLBACK newfile_proc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch(message)
+    {
+        case WM_INITDIALOG:
+            {
+                HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hMainWnd, GWLP_HINSTANCE);
+                WCHAR buffer[MAX_STRING_LEN];
+                HWND hListWnd = GetDlgItem(hWnd, IDC_NEWFILE);
+
+                LoadStringW(hInstance, STRING_NEWFILE_RICHTEXT, (LPWSTR)buffer, MAX_STRING_LEN);
+                SendMessageW(hListWnd, LB_ADDSTRING, 0, (LPARAM)&buffer);
+                LoadStringW(hInstance, STRING_NEWFILE_TXT, (LPWSTR)buffer, MAX_STRING_LEN);
+                SendMessageW(hListWnd, LB_ADDSTRING, 0, (LPARAM)&buffer);
+                LoadStringW(hInstance, STRING_NEWFILE_TXT_UNICODE, (LPWSTR)buffer, MAX_STRING_LEN);
+                SendMessageW(hListWnd, LB_ADDSTRING, 0, (LPARAM)&buffer);
+
+                SendMessageW(hListWnd, LB_SETSEL, TRUE, 0);
+            }
+            break;
+
+        case WM_COMMAND:
+            switch(LOWORD(wParam))
+            {
+                case IDOK:
+                    {
+                        LRESULT index;
+                        HWND hListWnd = GetDlgItem(hWnd, IDC_NEWFILE);
+                        index = SendMessageW(hListWnd, LB_GETCURSEL, 0, 0);
+
+                        if(index != LB_ERR)
+                            EndDialog(hWnd, MAKELONG(fileformat_flags(index),0));
+                    }
+                    return TRUE;
+
+                case IDCANCEL:
+                    EndDialog(hWnd, MAKELONG(ID_NEWFILE_ABORT,0));
+                    return TRUE;
+            }
+    }
+    return FALSE;
+}
+
 static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
     HWND hToolBarWnd, hFormatBarWnd,  hReBarWnd;
@@ -550,11 +1089,7 @@ static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
 
     hFormatBarWnd = CreateToolbarEx(hReBarWnd,
          CCS_NOPARENTALIGN | CCS_NOMOVEY | WS_VISIBLE | TBSTYLE_TOOLTIPS | TBSTYLE_BUTTON,
-         IDC_FORMATBAR, 6, hInstance, IDB_FORMATBAR, NULL, 0, 24, 24, 16, 16, sizeof(TBBUTTON));
-
-    ab.hInst = HINST_COMMCTRL;
-    ab.nID = IDB_STD_SMALL_COLOR;
-    nStdBitmaps = SendMessageW(hFormatBarWnd, TB_ADDBITMAP, 6, (LPARAM)&ab);
+         IDC_FORMATBAR, 7, hInstance, IDB_FORMATBAR, NULL, 0, 16, 16, 16, 16, sizeof(TBBUTTON));
 
     AddButton(hFormatBarWnd, 0, ID_FORMAT_BOLD);
     AddButton(hFormatBarWnd, 1, ID_FORMAT_ITALIC);
@@ -563,6 +1098,8 @@ static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
     AddButton(hFormatBarWnd, 3, ID_ALIGN_LEFT);
     AddButton(hFormatBarWnd, 4, ID_ALIGN_CENTER);
     AddButton(hFormatBarWnd, 5, ID_ALIGN_RIGHT);
+    AddSeparator(hFormatBarWnd);
+    AddButton(hFormatBarWnd, 6, ID_BULLET);
 
     SendMessageW(hFormatBarWnd, TB_AUTOSIZE, 0, 0);
 
@@ -571,7 +1108,12 @@ static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
     SendMessageW(hReBarWnd, RB_INSERTBAND, BANDID_FORMATBAR, (LPARAM)&rbb);
 
     hDLL = LoadLibraryW(wszRichEditDll);
-    assert(hDLL);
+    if(!hDLL)
+    {
+        MessageBoxW(hWnd, MAKEINTRESOURCEW(STRING_LOAD_RICHED_FAILED), wszAppTitle,
+                    MB_OK | MB_ICONEXCLAMATION);
+        PostQuitMessage(1);
+    }
 
     hEditorWnd = CreateWindowExW(WS_EX_CLIENTEDGE, wszRichEditClass, NULL,
       WS_CHILD|WS_VISIBLE|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN|WS_VSCROLL,
@@ -592,6 +1134,10 @@ static LRESULT OnCreate( HWND hWnd, WPARAM wParam, LPARAM lParam)
     DoLoadStrings();
     SendMessageW(hEditorWnd, EM_SETMODIFY, FALSE, 0);
 
+    ID_FINDMSGSTRING = RegisterWindowMessageW(FINDMSGSTRINGW);
+
+    registry_read_filelist(hWnd);
+
     return 0;
 }
 
@@ -604,12 +1150,19 @@ static LRESULT OnUser( HWND hWnd, WPARAM wParam, LPARAM lParam)
     int from, to;
     CHARFORMAT2W fmt;
     PARAFORMAT2 pf;
+    GETTEXTLENGTHEX gt;
 
     ZeroMemory(&fmt, sizeof(fmt));
     fmt.cbSize = sizeof(fmt);
 
     ZeroMemory(&pf, sizeof(pf));
     pf.cbSize = sizeof(pf);
+
+    gt.flags = GTL_NUMCHARS;
+    gt.codepage = 1200;
+
+    SendMessageW(hwndToolBar, TB_ENABLEBUTTON, ID_FIND,
+                 SendMessageW(hwndEditor, EM_GETTEXTLENGTHEX, (WPARAM)&gt, 0) ? 1 : 0);
 
     SendMessageW(hwndEditor, EM_GETCHARFORMAT, TRUE, (LPARAM)&fmt);
 
@@ -636,6 +1189,7 @@ static LRESULT OnUser( HWND hWnd, WPARAM wParam, LPARAM lParam)
     SendMessageW(hwndFormatBar, TB_CHECKBUTTON, ID_ALIGN_CENTER, (pf.wAlignment == PFA_CENTER));
     SendMessageW(hwndFormatBar, TB_CHECKBUTTON, ID_ALIGN_RIGHT, (pf.wAlignment == PFA_RIGHT));
 
+    SendMessageW(hwndFormatBar, TB_CHECKBUTTON, ID_BULLET, (pf.wNumbering & PFN_BULLET));
     return 0;
 }
 
@@ -666,24 +1220,43 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
 {
     HWND hwndEditor = GetDlgItem(hWnd, IDC_EDITOR);
     HWND hwndStatus = GetDlgItem(hWnd, IDC_STATUSBAR);
+    static FINDREPLACEW findreplace;
 
     if ((HWND)lParam == hwndEditor)
         return 0;
 
     switch(LOWORD(wParam))
     {
+
     case ID_FILE_EXIT:
         PostMessageW(hWnd, WM_CLOSE, 0, 0);
         break;
 
     case ID_FILE_NEW:
-        if(prompt_save_changes())
         {
-            set_caption(NULL);
-            wszFileName[0] = '\0';
-            SetWindowTextW(hwndEditor, wszFileName);
-            SendMessageW(hEditorWnd, EM_SETMODIFY, FALSE, 0);
-            /* FIXME: set default format too */
+            HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE);
+            int ret = DialogBox(hInstance, MAKEINTRESOURCE(IDD_NEWFILE), hWnd,
+                                (DLGPROC)newfile_proc);
+
+            if(ret != ID_NEWFILE_ABORT)
+            {
+                if(prompt_save_changes())
+                {
+                    SETTEXTEX st;
+
+                    set_caption(NULL);
+                    wszFileName[0] = '\0';
+
+                    st.flags = ST_DEFAULT;
+                    st.codepage = 1200;
+                    SendMessageW(hEditorWnd, EM_SETTEXTEX, (WPARAM)&st, 0);
+
+                    clear_formatting();
+
+                    SendMessageW(hEditorWnd, EM_SETMODIFY, FALSE, 0);
+                    set_fileformat(ret);
+                }
+            }
         }
         break;
 
@@ -694,7 +1267,7 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
     case ID_FILE_SAVE:
         if(wszFileName[0])
         {
-            DoSaveFile(wszFileName);
+            DoSaveFile(wszFileName, fileFormat);
             break;
         }
         /* Fall through */
@@ -703,9 +1276,31 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
         DialogSaveFile();
         break;
 
+    case ID_FILE_RECENT1:
+    case ID_FILE_RECENT2:
+    case ID_FILE_RECENT3:
+    case ID_FILE_RECENT4:
+        {
+            HMENU hMenu = GetMenu(hWnd);
+            MENUITEMINFOW mi;
+
+            mi.cbSize = sizeof(MENUITEMINFOW);
+            mi.fMask = MIIM_DATA;
+            if(GetMenuItemInfoW(hMenu, LOWORD(wParam), FALSE, &mi))
+                DoOpenFile((LPWSTR)mi.dwItemData);
+        }
+        break;
+
+    case ID_FIND:
+        dialog_find(&findreplace);
+        break;
+
+    case ID_FIND_NEXT:
+        handle_findmsg(&findreplace);
+        break;
+
     case ID_PRINT:
     case ID_PREVIEW:
-    case ID_FIND:
         {
             static const WCHAR wszNotImplemented[] = {'N','o','t',' ',
                                                       'i','m','p','l','e','m','e','n','t','e','d','\0'};
@@ -844,6 +1439,30 @@ static LRESULT OnCommand( HWND hWnd, WPARAM wParam, LPARAM lParam)
         SendMessageW(hwndEditor, EM_REDO, 0, 0);
         return 0;
 
+    case ID_BULLET:
+        {
+            PARAFORMAT pf;
+
+            pf.cbSize = sizeof(pf);
+            pf.dwMask = PFM_NUMBERING;
+            SendMessageW(hwndEditor, EM_GETPARAFORMAT, 0, (LPARAM)&pf);
+
+            pf.dwMask |=  PFM_OFFSET;
+
+            if(pf.wNumbering == PFN_BULLET)
+            {
+                pf.wNumbering = 0;
+                pf.dxOffset = 0;
+            } else
+            {
+                pf.wNumbering = PFN_BULLET;
+                pf.dxOffset = 720;
+            }
+
+            SendMessageW(hwndEditor, EM_SETPARAFORMAT, 0, (LPARAM)&pf);
+        }
+        break;
+
     case ID_ALIGN_LEFT:
     case ID_ALIGN_CENTER:
     case ID_ALIGN_RIGHT:
@@ -908,6 +1527,9 @@ static LRESULT OnInitPopupMenu( HWND hWnd, WPARAM wParam, LPARAM lParam )
     int nAlignment = -1;
     REBARBANDINFOW rbbinfo;
     int selFrom, selTo;
+    GETTEXTLENGTHEX gt;
+    LRESULT textLength;
+    MENUITEMINFOW mi;
 
     SendMessageW(hEditorWnd, EM_GETSEL, (WPARAM)&selFrom, (LPARAM)&selTo);
     EnableMenuItem(hMenu, ID_EDIT_COPY, MF_BYCOMMAND|(selFrom == selTo) ? MF_GRAYED : MF_ENABLED);
@@ -927,6 +1549,8 @@ static LRESULT OnInitPopupMenu( HWND hWnd, WPARAM wParam, LPARAM lParam )
             MF_CHECKED : MF_UNCHECKED);
     CheckMenuItem(hMenu, ID_ALIGN_RIGHT, MF_BYCOMMAND|(nAlignment == PFA_RIGHT) ?
             MF_CHECKED : MF_UNCHECKED);
+    CheckMenuItem(hMenu, ID_BULLET, MF_BYCOMMAND | ((pf.wNumbering == PFN_BULLET) ?
+            MF_CHECKED : MF_UNCHECKED));
     EnableMenuItem(hMenu, ID_EDIT_UNDO, MF_BYCOMMAND|(SendMessageW(hwndEditor, EM_CANUNDO, 0, 0)) ?
             MF_ENABLED : MF_GRAYED);
     EnableMenuItem(hMenu, ID_EDIT_REDO, MF_BYCOMMAND|(SendMessageW(hwndEditor, EM_CANREDO, 0, 0)) ?
@@ -946,6 +1570,19 @@ static LRESULT OnInitPopupMenu( HWND hWnd, WPARAM wParam, LPARAM lParam )
 
     CheckMenuItem(hMenu, ID_TOGGLE_STATUSBAR, MF_BYCOMMAND|IsWindowVisible(hwndStatus) ?
             MF_CHECKED : MF_UNCHECKED);
+
+    gt.flags = GTL_NUMCHARS;
+    gt.codepage = 1200;
+    textLength = SendMessageW(hEditorWnd, EM_GETTEXTLENGTHEX, (WPARAM)&gt, 0);
+    EnableMenuItem(hMenu, ID_FIND, MF_BYCOMMAND|(textLength ? MF_ENABLED : MF_GRAYED));
+
+    mi.cbSize = sizeof(mi);
+    mi.fMask = MIIM_DATA;
+
+    GetMenuItemInfoW(hMenu, ID_FIND_NEXT, FALSE, &mi);
+
+    EnableMenuItem(hMenu, ID_FIND_NEXT, MF_BYCOMMAND|((textLength && mi.dwItemData) ?
+                   MF_ENABLED : MF_GRAYED));
     return 0;
 }
 
@@ -1003,6 +1640,9 @@ static LRESULT OnSize( HWND hWnd, WPARAM wParam, LPARAM lParam )
 
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    if(msg == ID_FINDMSGSTRING)
+        return handle_findmsg((LPFINDREPLACEW)lParam);
+
     switch(msg)
     {
     case WM_CREATE:
@@ -1023,7 +1663,10 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 
     case WM_CLOSE:
         if(prompt_save_changes())
+        {
+            registry_set_winrect();
             PostQuitMessage(0);
+        }
         break;
 
     case WM_ACTIVATE:
@@ -1050,6 +1693,7 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hOldInstance, LPSTR szCmdPar
     HACCEL hAccel;
     WNDCLASSW wc;
     MSG msg;
+    RECT rc;
     static const WCHAR wszAccelTable[] = {'M','A','I','N','A','C','C','E','L',
                                           'T','A','B','L','E','\0'};
 
@@ -1069,8 +1713,9 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hOldInstance, LPSTR szCmdPar
     wc.lpszClassName = wszMainWndClass;
     RegisterClassW(&wc);
 
+    rc = registry_read_winrect();
     hMainWnd = CreateWindowExW(0, wszMainWndClass, wszAppTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, CW_USEDEFAULT, 680, 260, NULL, NULL, hInstance, NULL);
+      rc.left, rc.top, rc.right-rc.left, rc.bottom-rc.top, NULL, NULL, hInstance, NULL);
     ShowWindow(hMainWnd, SW_SHOWDEFAULT);
 
     set_caption(NULL);
@@ -1079,6 +1724,9 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE hOldInstance, LPSTR szCmdPar
 
     while(GetMessageW(&msg,0,0,0))
     {
+        if (IsDialogMessage(hFindWnd, &msg))
+            continue;
+
         if (TranslateAcceleratorW(hMainWnd, hAccel, &msg))
             continue;
         TranslateMessage(&msg);

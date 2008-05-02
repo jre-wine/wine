@@ -1677,7 +1677,7 @@ static BOOL DIALOG_DlgDirSelect( HWND hwnd, LPWSTR str, INT len,
     item = SendMessageW(listbox, combo ? CB_GETCURSEL : LB_GETCURSEL, 0, 0 );
     if (item == LB_ERR) return FALSE;
 
-    size = SendMessageW(listbox, combo ? CB_GETLBTEXTLEN : LB_GETTEXTLEN, 0, 0 );
+    size = SendMessageW(listbox, combo ? CB_GETLBTEXTLEN : LB_GETTEXTLEN, item, 0 );
     if (size == LB_ERR) return FALSE;
 
     if (!(buffer = HeapAlloc( GetProcessHeap(), 0, (size+1) * sizeof(WCHAR) ))) return FALSE;
@@ -1736,6 +1736,7 @@ static INT DIALOG_DlgDirListW( HWND hDlg, LPWSTR spec, INT idLBox,
     {
         WCHAR *p, *p2;
         p = spec;
+        if ((p2 = strchrW( p, ':' ))) p = p2 + 1;
         if ((p2 = strrchrW( p, '\\' ))) p = p2;
         if ((p2 = strrchrW( p, '/' ))) p = p2;
         if (p != spec)

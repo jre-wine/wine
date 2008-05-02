@@ -91,17 +91,20 @@ DWORD joystick_map_pov(POINTL *p)
 LONG joystick_map_axis(ObjProps *props, int val)
 {
     LONG ret;
+    LONG center = (props->lMax - props->lMin) / 2;
 
     /* map the value from the hmin-hmax range into the wmin-wmax range */
     ret = MulDiv( val - props->lDevMin, props->lMax - props->lMin,
-                  props->lDevMax - props->lDevMin ) + props->lMin;
+                  props->lDevMax - props->lDevMin );
 
-    if ((ret >= -props->lDeadZone / 2 ) && (ret <= props->lDeadZone / 2))
-        ret = (props->lMax - props->lMin) / 2  + props->lMin;
+    if (abs( ret - center ) <= props->lDeadZone / 2 )
+        ret = center;
+
+    ret += props->lMin;
 
     TRACE( "(%d %d) -> (%d <%d> %d): val=%d ret=%d\n",
            props->lDevMin, props->lDevMax,
-           props->lMin, props->lDeadZone, props->lDevMax,
+           props->lMin, props->lDeadZone, props->lMax,
            val, ret );
 
     return ret;
@@ -115,6 +118,14 @@ LONG joystick_map_axis(ObjProps *props, int val)
 #define WINE_JOYSTICK_MAX_AXES    8
 #define WINE_JOYSTICK_MAX_POVS    4
 #define WINE_JOYSTICK_MAX_BUTTONS 128
+
+struct wine_input_absinfo {
+    LONG value;
+    LONG minimum;
+    LONG maximum;
+    LONG fuzz;
+    LONG flat;
+};
 
 typedef struct EffectListItem EffectListItem;
 struct EffectListItem
@@ -146,25 +157,8 @@ struct JoyDev {
 	BYTE				keybits[(KEY_MAX+7)/8];
 	BYTE				ffbits[(FF_MAX+7)/8];	
 
-#define AXIS_ABS     0
-#define AXIS_ABSMIN  1
-#define AXIS_ABSMAX  2
-#define AXIS_ABSFUZZ 3
-#define AXIS_ABSFLAT 4
-
 	/* data returned by the EVIOCGABS() ioctl */
-	int				axes[ABS_MAX][5];
-};
-
-struct ObjProps
-{
-	/* what we have */
-	LONG				havemax;
-	LONG				havemin;
-	/* what range and deadzone the game wants */
-	LONG				wantmin;
-	LONG				wantmax;
-	LONG				deadzone;
+        struct wine_input_absinfo       axes[ABS_MAX];
 };
 
 struct JoystickImpl
@@ -298,11 +292,11 @@ static void find_joydevs(void)
 	    if (-1!=ioctl(fd,EVIOCGABS(j),&(joydev.axes[j]))) {
 	      TRACE(" ... with axis %d: cur=%d, min=%d, max=%d, fuzz=%d, flat=%d\n",
 		  j,
-		  joydev.axes[j][AXIS_ABS],
-		  joydev.axes[j][AXIS_ABSMIN],
-		  joydev.axes[j][AXIS_ABSMAX],
-		  joydev.axes[j][AXIS_ABSFUZZ],
-		  joydev.axes[j][AXIS_ABSFLAT]
+		  joydev.axes[j].value,
+		  joydev.axes[j].minimum,
+		  joydev.axes[j].maximum,
+		  joydev.axes[j].fuzz,
+		  joydev.axes[j].flat
 		  );
 	    }
 	  }
@@ -428,12 +422,12 @@ static JoystickImpl *alloc_device(REFGUID rguid, const void *jvt, IDirectInputIm
 
         memcpy(&df->rgodf[idx], &c_dfDIJoystick2.rgodf[i], df->dwObjSize);
         newDevice->axes[i] = idx;
-        newDevice->props[idx].lDevMin = newDevice->joydev->axes[i][AXIS_ABSMIN];
-        newDevice->props[idx].lDevMax = newDevice->joydev->axes[i][AXIS_ABSMAX];
+        newDevice->props[idx].lDevMin = newDevice->joydev->axes[i].minimum;
+        newDevice->props[idx].lDevMax = newDevice->joydev->axes[i].maximum;
         newDevice->props[idx].lMin    = 0;
         newDevice->props[idx].lMax    = 0xffff;
         newDevice->props[idx].lSaturation = 0;
-        newDevice->props[idx].lDeadZone = MulDiv(newDevice->joydev->axes[i][AXIS_ABSFLAT], 0xffff,
+        newDevice->props[idx].lDeadZone = MulDiv(newDevice->joydev->axes[i].flat, 0xffff,
              newDevice->props[idx].lDevMax - newDevice->props[idx].lDevMin);
 
         df->rgodf[idx++].dwType = DIDFT_MAKEINSTANCE(newDevice->numAxes++) | DIDFT_ABSAXIS;
@@ -502,24 +496,31 @@ static HRESULT joydev_create_deviceA(IDirectInputImpl *dinput, REFGUID rguid, RE
 
     find_joydevs();
 
-    if ((index = get_joystick_index(rguid)) < MAX_JOYDEV) {
-      if ((riid == NULL) ||
-      IsEqualGUID(&IID_IDirectInputDeviceA,riid) ||
-      IsEqualGUID(&IID_IDirectInputDevice2A,riid) ||
-      IsEqualGUID(&IID_IDirectInputDevice7A,riid) ||
-      IsEqualGUID(&IID_IDirectInputDevice8A,riid)) {
-        *pdev = (IDirectInputDeviceA*) alloc_device(rguid, &JoystickAvt, dinput, index);
-        TRACE("Creating a Joystick device (%p)\n", *pdev);
-        if (*pdev==0) {
-          ERR("out of memory\n");
-          return DIERR_OUTOFMEMORY;
+    if ((index = get_joystick_index(rguid)) < MAX_JOYDEV &&
+        have_joydevs && index < have_joydevs)
+    {
+        if ((riid == NULL) ||
+            IsEqualGUID(&IID_IDirectInputDeviceA,  riid) ||
+            IsEqualGUID(&IID_IDirectInputDevice2A, riid) ||
+            IsEqualGUID(&IID_IDirectInputDevice7A, riid) ||
+            IsEqualGUID(&IID_IDirectInputDevice8A, riid))
+        {
+            *pdev = (IDirectInputDeviceA*) alloc_device(rguid, &JoystickAvt, dinput, index);
+            TRACE("Created a Joystick device (%p)\n", *pdev);
+
+            if (*pdev == NULL)
+            {
+                ERR("out of memory\n");
+                return DIERR_OUTOFMEMORY;
+            }
+            return DI_OK;
         }
-        return DI_OK;
-      } else {
+
+        WARN("no interface\n");
         return DIERR_NOINTERFACE;
-      }
     }
 
+    WARN("invalid device GUID\n");
     return DIERR_DEVICENOTREG;
 }
 
@@ -530,24 +531,30 @@ static HRESULT joydev_create_deviceW(IDirectInputImpl *dinput, REFGUID rguid, RE
 
     find_joydevs();
 
-    if ((index = get_joystick_index(rguid)) < MAX_JOYDEV) {
-      if ((riid == NULL) ||
-      IsEqualGUID(&IID_IDirectInputDeviceW,riid) ||
-      IsEqualGUID(&IID_IDirectInputDevice2W,riid) ||
-      IsEqualGUID(&IID_IDirectInputDevice7W,riid) ||
-      IsEqualGUID(&IID_IDirectInputDevice8W,riid)) {
-        *pdev = (IDirectInputDeviceW*) alloc_device(rguid, &JoystickWvt, dinput, index);
-        TRACE("Creating a Joystick device (%p)\n", *pdev);
-        if (*pdev==0) {
-          ERR("out of memory\n");
-          return DIERR_OUTOFMEMORY;
+    if ((index = get_joystick_index(rguid)) < MAX_JOYDEV &&
+        have_joydevs && index < have_joydevs)
+    {
+        if ((riid == NULL) ||
+            IsEqualGUID(&IID_IDirectInputDeviceW,  riid) ||
+            IsEqualGUID(&IID_IDirectInputDevice2W, riid) ||
+            IsEqualGUID(&IID_IDirectInputDevice7W, riid) ||
+            IsEqualGUID(&IID_IDirectInputDevice8W, riid))
+        {
+            *pdev = (IDirectInputDeviceW*) alloc_device(rguid, &JoystickWvt, dinput, index);
+            TRACE("Created a Joystick device (%p)\n", *pdev);
+
+            if (*pdev == NULL)
+            {
+                ERR("out of memory\n");
+                return DIERR_OUTOFMEMORY;
+            }
+            return DI_OK;
         }
-        return DI_OK;
-      } else {
+        WARN("no interface\n");
         return DIERR_NOINTERFACE;
-      }
     }
 
+    WARN("invalid device GUID\n");
     return DIERR_DEVICENOTREG;
 }
 
@@ -610,7 +617,7 @@ static HRESULT WINAPI JoystickAImpl_Unacquire(LPDIRECTINPUTDEVICE8A iface)
  */
 #define CENTER_AXIS(a) \
     (ji->axes[a] == -1 ? 0 : joystick_map_axis( &ji->props[ji->axes[a]], \
-                                                ji->joydev->axes[a][AXIS_ABS] ))
+                                                ji->joydev->axes[a].value ))
 static void fake_current_js_state(JoystickImpl *ji)
 {
     int i;
@@ -738,7 +745,8 @@ static HRESULT WINAPI JoystickAImpl_GetDeviceState(
 
     TRACE("(this=%p,0x%08x,%p)\n", This, len, ptr);
 
-    if (This->joyfd==-1) {
+    if (!This->base.acquired)
+    {
         WARN("not acquired\n");
         return DIERR_NOTACQUIRED;
     }
@@ -864,13 +872,14 @@ static HRESULT WINAPI JoystickAImpl_GetCapabilities(
     return DI_OK;
 }
 
-static HRESULT WINAPI JoystickAImpl_Poll(LPDIRECTINPUTDEVICE8A iface) {
+static HRESULT WINAPI JoystickAImpl_Poll(LPDIRECTINPUTDEVICE8A iface)
+{
     JoystickImpl *This = (JoystickImpl *)iface;
+
     TRACE("(%p)\n",This);
 
-    if (This->joyfd==-1) {
-      return DIERR_NOTACQUIRED;
-    }
+    if (!This->base.acquired)
+        return DIERR_NOTACQUIRED;
 
     joy_polldev(This);
     return DI_OK;

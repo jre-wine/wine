@@ -397,7 +397,9 @@ static void InternetReadFile_test(int flags)
         if (flags & INTERNET_FLAG_ASYNC)
             SET_EXPECT(INTERNET_STATUS_REQUEST_COMPLETE);
         rc = InternetQueryDataAvailable(hor,&length,0x0,0x0);
-        ok(!(rc == 0 && length != 0),"InternetQueryDataAvailable failed\n");
+        ok(!(rc == 0 && length != 0),"InternetQueryDataAvailable failed with non-zero length\n");
+        ok(rc != 0 || ((flags & INTERNET_FLAG_ASYNC) && GetLastError() == ERROR_IO_PENDING),
+           "InternetQueryDataAvailable failed, error %d\n", GetLastError());
         if (flags & INTERNET_FLAG_ASYNC)
         {
             if (rc != 0)
@@ -456,7 +458,7 @@ abort:
       if (flags & INTERNET_FLAG_ASYNC)
           Sleep(100);
     }
-    todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_HANDLE_CLOSING, (hor != 0x0) + (hic != 0x0));
+    CHECK_NOTIFIED2(INTERNET_STATUS_HANDLE_CLOSING, (hor != 0x0) + (hic != 0x0));
     if (hor != 0x0) todo_wine
     {
         CHECK_NOT_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
@@ -702,6 +704,8 @@ static void InternetReadFileExA_test(int flags)
 abort:
     SET_EXPECT2(INTERNET_STATUS_HANDLE_CLOSING, (hor != 0x0) + (hic != 0x0));
     if (hor) {
+        SET_WINE_ALLOW(INTERNET_STATUS_CLOSING_CONNECTION);
+        SET_WINE_ALLOW(INTERNET_STATUS_CONNECTION_CLOSED);
         rc = InternetCloseHandle(hor);
         ok ((rc != 0), "InternetCloseHandle of handle opened by HttpOpenRequestA failed\n");
         rc = InternetCloseHandle(hor);
@@ -717,7 +721,17 @@ abort:
       ok ((rc != 0), "InternetCloseHandle of handle opened by InternetOpenA failed\n");
       if (flags & INTERNET_FLAG_ASYNC)
           Sleep(100);
-      todo_wine CHECK_NOTIFIED2(INTERNET_STATUS_HANDLE_CLOSING, (hor != 0x0) + (hic != 0x0));
+      CHECK_NOTIFIED2(INTERNET_STATUS_HANDLE_CLOSING, (hor != 0x0) + (hic != 0x0));
+    }
+    if (hor != 0x0) todo_wine
+    {
+        CHECK_NOT_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
+        CHECK_NOT_NOTIFIED(INTERNET_STATUS_CONNECTION_CLOSED);
+    }
+    else
+    {
+        CHECK_NOT_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
+        CHECK_NOT_NOTIFIED(INTERNET_STATUS_CONNECTION_CLOSED);
     }
     CloseHandle(hCompleteEvent);
     first_connection_to_test_url = FALSE;
@@ -981,10 +995,62 @@ static void HttpHeaders_test(void)
                 buffer,&len,&index),"Unable to query header\n");
     ok(index == 1, "Index was not incremented\n");
     ok(strcmp(buffer,"test1")==0, "incorrect string was returned(%s)\n",buffer);
+    ok(len == 5, "Invalid length (exp. 5, got %d)\n", len);
+    ok(buffer[len] == 0, "Buffer not NULL-terminated\n"); /* len show only 5 characters but the buffer is NULL-terminated*/
     len = sizeof(buffer);
     strcpy(buffer,"Warning");
     ok(HttpQueryInfo(hRequest,HTTP_QUERY_CUSTOM|HTTP_QUERY_FLAG_REQUEST_HEADERS,
                 buffer,&len,&index)==0,"Second Index Should Not Exist\n");
+
+    index = 0;
+    len = 5; /* could store the string but not the NULL terminator */
+    strcpy(buffer,"Warning");
+    ok(HttpQueryInfo(hRequest,HTTP_QUERY_CUSTOM|HTTP_QUERY_FLAG_REQUEST_HEADERS,
+                buffer,&len,&index) == FALSE,"Query succeeded on a too small buffer\n");
+    ok(strcmp(buffer,"Warning")==0, "incorrect string was returned(%s)\n",buffer); /* string not touched */
+    ok(len == 6, "Invalid length (exp. 6, got %d)\n", len); /* unlike success, the length includes the NULL-terminator */
+
+    /* a call with NULL will fail but will return the length */
+    index = 0;
+    len = sizeof(buffer);
+    SetLastError(0xdeadbeef);
+    ok(HttpQueryInfo(hRequest,HTTP_QUERY_RAW_HEADERS_CRLF|HTTP_QUERY_FLAG_REQUEST_HEADERS,
+                NULL,&len,&index) == FALSE,"Query worked\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Unexpected last error: %d\n", GetLastError());
+    ok(len > 40, "Invalid length (exp. more than 40, got %d)\n", len);
+    ok(index == 0, "Index was incremented\n");
+
+    /* even for a len that is too small */
+    index = 0;
+    len = 15;
+    SetLastError(0xdeadbeef);
+    ok(HttpQueryInfo(hRequest,HTTP_QUERY_RAW_HEADERS_CRLF|HTTP_QUERY_FLAG_REQUEST_HEADERS,
+                NULL,&len,&index) == FALSE,"Query worked\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Unexpected last error: %d\n", GetLastError());
+    ok(len > 40, "Invalid length (exp. more than 40, got %d)\n", len);
+    ok(index == 0, "Index was incremented\n");
+
+    index = 0;
+    len = 0;
+    SetLastError(0xdeadbeef);
+    ok(HttpQueryInfo(hRequest,HTTP_QUERY_RAW_HEADERS_CRLF|HTTP_QUERY_FLAG_REQUEST_HEADERS,
+                NULL,&len,&index) == FALSE,"Query worked\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Unexpected last error: %d\n", GetLastError());
+    ok(len > 40, "Invalid length (exp. more than 40, got %d)\n", len);
+    ok(index == 0, "Index was incremented\n");
+
+
+    /* a working query */
+    index = 0;
+    len = sizeof(buffer);
+    ok(HttpQueryInfo(hRequest,HTTP_QUERY_RAW_HEADERS_CRLF|HTTP_QUERY_FLAG_REQUEST_HEADERS,
+                buffer,&len,&index),"Unable to query header\n");
+    /* what's in the middle differs between Wine and Windows so currently we check only the beginning and the end */
+    ok(strncmp(buffer, "POST /posttest.php HTTP/1", 25)==0, "Invalid beginning of headers string\n");
+    ok(strcmp(buffer + strlen(buffer) - 4, "\r\n\r\n")==0, "Invalid end of headers string\n");
+    ok(index == 0, "Index was incremented\n");
+
+
 
     ok(HttpAddRequestHeaders(hRequest,"Warning:test2",-1,HTTP_ADDREQ_FLAG_ADD),
             "Failed to add duplicate header using HTTP_ADDREQ_FLAG_ADD\n");

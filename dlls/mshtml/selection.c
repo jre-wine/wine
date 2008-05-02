@@ -42,6 +42,9 @@ typedef struct {
     LONG ref;
 
     nsISelection *nsselection;
+    HTMLDocument *doc;
+
+    struct list entry;
 } HTMLSelectionObject;
 
 #define HTMLSELOBJ(x)  ((IHTMLSelectionObject*) &(x)->lpHTMLSelectionObjectVtbl)
@@ -95,6 +98,8 @@ static ULONG WINAPI HTMLSelectionObject_Release(IHTMLSelectionObject *iface)
     if(!ref) {
         if(This->nsselection)
             nsISelection_Release(This->nsselection);
+        if(This->doc)
+            list_remove(&This->entry);
         mshtml_free(This);
     }
 
@@ -156,7 +161,7 @@ static HRESULT WINAPI HTMLSelectionObject_createRange(IHTMLSelectionObject *ifac
             ERR("GetRangeAt failed: %08x\n", nsres);
     }
 
-    *range = (IDispatch*)HTMLTxtRange_Create(nsrange);
+    *range = (IDispatch*)HTMLTxtRange_Create(This->doc, nsrange);
     return S_OK;
 }
 
@@ -177,7 +182,7 @@ static HRESULT WINAPI HTMLSelectionObject_clear(IHTMLSelectionObject *iface)
 static HRESULT WINAPI HTMLSelectionObject_get_type(IHTMLSelectionObject *iface, BSTR *p)
 {
     HTMLSelectionObject *This = HTMLSELOBJ_THIS(iface);
-    PRInt32 range_cnt = 0;
+    PRBool collapsed = TRUE;
 
     static const WCHAR wszNone[] = {'N','o','n','e',0};
     static const WCHAR wszText[] = {'T','e','x','t',0};
@@ -185,9 +190,10 @@ static HRESULT WINAPI HTMLSelectionObject_get_type(IHTMLSelectionObject *iface, 
     TRACE("(%p)->(%p)\n", This, p);
 
     if(This->nsselection)
-        nsISelection_GetRangeCount(This->nsselection, &range_cnt);
+        nsISelection_GetIsCollapsed(This->nsselection, &collapsed);
 
-    *p = SysAllocString(range_cnt ? wszText : wszNone); /* FIXME: control */
+    *p = SysAllocString(collapsed ? wszNone : wszText); /* FIXME: control */
+    TRACE("ret %s\n", debugstr_w(*p));
     return S_OK;
 }
 
@@ -207,7 +213,7 @@ static const IHTMLSelectionObjectVtbl HTMLSelectionObjectVtbl = {
     HTMLSelectionObject_get_type
 };
 
-IHTMLSelectionObject *HTMLSelectionObject_Create(nsISelection *nsselection)
+IHTMLSelectionObject *HTMLSelectionObject_Create(HTMLDocument *doc, nsISelection *nsselection)
 {
     HTMLSelectionObject *ret = mshtml_alloc(sizeof(HTMLSelectionObject));
 
@@ -215,5 +221,17 @@ IHTMLSelectionObject *HTMLSelectionObject_Create(nsISelection *nsselection)
     ret->ref = 1;
     ret->nsselection = nsselection; /* We shouldn't call AddRef here */
 
+    ret->doc = doc;
+    list_add_head(&doc->selection_list, &ret->entry);
+
     return HTMLSELOBJ(ret);
+}
+
+void detach_selection(HTMLDocument *This)
+{
+    HTMLSelectionObject *iter;
+
+    LIST_FOR_EACH_ENTRY(iter, &This->selection_list, HTMLSelectionObject, entry) {
+        iter->doc = NULL;
+    }
 }

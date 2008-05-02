@@ -1292,6 +1292,7 @@ AC_CHECK_FUNCS(\
 	strncasecmp \
 	strtold \
 	tcgetattr \
+	thr_kill2 \
 	timegm \
 	usleep \
 	vsnprintf \

@@ -79,6 +79,8 @@ struct GpGraphics{
     CompositingQuality compqual;
     InterpolationMode interpolation;
     PixelOffsetMode pixeloffset;
+    CompositingMode compmode;
+    TextRenderingHint texthint;
     GpUnit unit;    /* page unit */
     REAL scale;     /* page scale */
     GpMatrix * worldtrans; /* world transform */
@@ -167,6 +169,19 @@ struct GpBitmap{
 
 struct GpImageAttributes{
     WrapMode wrap;
+};
+
+struct GpFont{
+    LOGFONTW lfw;
+};
+
+struct GpStringFormat{
+    INT attr;
+    LANGID lang;
+    StringAlignment align;
+    StringTrimming trimming;
+    HotkeyPrefix hkprefix;
+    StringAlignment vertalign;
 };
 
 #endif

@@ -1525,7 +1525,7 @@ static NTSTATUS parse_manifest( struct actctx_loader* acl, struct assembly_ident
     return status;
 }
 
-static NTSTATUS open_nt_file( HANDLE handle, UNICODE_STRING *name )
+static NTSTATUS open_nt_file( HANDLE *handle, UNICODE_STRING *name )
 {
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
@@ -2277,7 +2277,7 @@ void WINAPI RtlReleaseActivationContext( HANDLE handle )
 /******************************************************************
  *		RtlActivateActivationContext (NTDLL.@)
  */
-NTSTATUS WINAPI RtlActivateActivationContext( ULONG unknown, HANDLE handle, ULONG_PTR *cookie )
+NTSTATUS WINAPI RtlActivateActivationContext( ULONG unknown, HANDLE handle, PULONG_PTR cookie )
 {
     RTL_ACTIVATION_CONTEXT_STACK_FRAME *frame;
 

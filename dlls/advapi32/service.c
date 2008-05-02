@@ -69,7 +69,6 @@ typedef struct service_start_info_t
 #define WINESERV_STARTINFO   1
 #define WINESERV_GETSTATUS   2
 #define WINESERV_SENDCONTROL 3
-#define WINESERV_SETPID      4
 
 typedef struct service_data_t
 {
@@ -454,7 +453,8 @@ static BOOL service_handle_start(HANDLE pipe, service_data *service, DWORD count
 
     if (service->thread)
     {
-        ERR("service is not stopped\n");
+        WARN("service is not stopped\n");
+        result = ERROR_SERVICE_ALREADY_RUNNING;
         goto end;
     }
 
@@ -503,7 +503,14 @@ static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
 
     r = WriteFile(pipe, ssi, sizeof *ssi + len*sizeof(WCHAR), &count, NULL);
     if (r)
+    {
         r = ReadFile(pipe, &result, sizeof result, &count, NULL);
+        if (r && result)
+        {
+            SetLastError(result);
+            r = FALSE;
+        }
+    }
 
     HeapFree(GetProcessHeap(),0,ssi);
 
@@ -539,41 +546,6 @@ static BOOL service_get_status(HANDLE pipe, LPSERVICE_STATUS_PROCESS status)
     }
     r = ReadFile( pipe, status, sizeof *status, &count, NULL );
     if (!r || count != sizeof *status)
-        ERR("service protocol error - failed to read pipe "
-            "r = %d  count = %d!\n", r, count);
-    return r;
-}
-
-/******************************************************************************
- * service_handle_set_processID
- */
-static BOOL service_handle_set_processID(HANDLE pipe, service_data *service, DWORD dwProcessId)
-{
-    DWORD count, ret = ERROR_SUCCESS;
-
-    TRACE("received control %d\n", dwProcessId);
-	service->status.dwProcessId = dwProcessId;
-    return WriteFile(pipe, &ret, sizeof ret , &count, NULL);
-}
-
-/******************************************************************************
- * service_set_processID
- */
-static BOOL service_set_processID(HANDLE pipe, DWORD dwprocessId, LPDWORD dwResult)
-{
-    DWORD cmd[2], count = 0;
-    BOOL r;
-
-    cmd[0] = WINESERV_SETPID;
-    cmd[1] = dwprocessId;
-    r = WriteFile( pipe, cmd, sizeof cmd, &count, NULL );
-    if (!r || count != sizeof cmd)
-    {
-        ERR("service protocol error - failed to write pipe!\n");
-        return r;
-    }
-    r = ReadFile( pipe, dwResult, sizeof *dwResult, &count, NULL );
-    if (!r || count != sizeof *dwResult)
         ERR("service protocol error - failed to read pipe "
             "r = %d  count = %d!\n", r, count);
     return r;
@@ -764,9 +736,6 @@ static DWORD WINAPI service_control_dispatcher(LPVOID arg)
         case WINESERV_SENDCONTROL:
             service_handle_control(pipe, service, req[1]);
             break;
-        case WINESERV_SETPID:
-            service_handle_set_processID(pipe, service, req[1]);
-            break;
         default:
             ERR("received invalid command %d length %d\n", req[0], req[1]);
         }
@@ -792,15 +761,18 @@ static BOOL service_run_threads(void)
 
     count = list_count( &service_list );
 
-    TRACE("starting %d pipe listener threads\n", count);
+    TRACE("Starting %d pipe listener threads. Services running as process %d\n", count, GetCurrentProcessId());
 
     handles = HeapAlloc(GetProcessHeap(), 0, sizeof(HANDLE) * (count + 1));
 
     handles[n++] = __wine_make_process_system();
 
     LIST_FOR_EACH_ENTRY( service, &service_list, service_data, entry )
+    {
+        service->status.dwProcessId = GetCurrentProcessId();
         handles[n++] = CreateThread( NULL, 0, service_control_dispatcher,
                                      service, 0, NULL );
+    }
     assert(n == count + 1);
 
     LeaveCriticalSection( &service_cs );
@@ -1733,7 +1705,6 @@ BOOL WINAPI StartServiceW(SC_HANDLE hService, DWORD dwNumServiceArgs,
 {
     struct sc_service *hsvc;
     BOOL r = FALSE;
-    DWORD dwResult, dwProcessId = 0;
     SC_LOCK hLock;
     HANDLE handle = INVALID_HANDLE_VALUE;
 
@@ -1754,20 +1725,13 @@ BOOL WINAPI StartServiceW(SC_HANDLE hService, DWORD dwNumServiceArgs,
     if (handle==INVALID_HANDLE_VALUE)
     {
         /* start the service process */
-        if (service_start_process(hsvc, &dwProcessId))
+        if (service_start_process(hsvc, NULL))
             handle = service_open_pipe(hsvc->name);
     }
 
     if (handle != INVALID_HANDLE_VALUE)
     {
         r = service_send_start_message(handle, lpServiceArgVectors, dwNumServiceArgs);
-        CloseHandle(handle);
-    }
-
-    handle = service_open_pipe(hsvc->name);
-    if (handle != INVALID_HANDLE_VALUE)
-    {
-        service_set_processID(handle, dwProcessId, &dwResult);
         CloseHandle(handle);
     }
 

@@ -332,7 +332,8 @@ HRESULT WINAPI UrlCanonicalizeW(LPCWSTR pszUrl, LPWSTR pszCanonicalized,
     }
 
     nByteLen = (lstrlenW(pszUrl) + 1) * sizeof(WCHAR); /* length in bytes */
-    lpszUrlCpy = HeapAlloc(GetProcessHeap(), 0, INTERNET_MAX_URL_LENGTH);
+    lpszUrlCpy = HeapAlloc(GetProcessHeap(), 0,
+                           INTERNET_MAX_URL_LENGTH * sizeof(WCHAR));
 
     if((dwFlags & URL_FILE_USE_PATHURL) && nByteLen >= sizeof(wszFile)
             && !memcmp(wszFile, pszUrl, sizeof(wszFile)))
@@ -735,8 +736,9 @@ HRESULT WINAPI UrlCombineW(LPCWSTR pszBase, LPCWSTR pszRelative,
 		process_case = 4;
 		break;
 	    }
-	    /* case where scheme is followed by document path */
-	    process_case = 5;
+            /* replace either just location if base's location starts with a
+             * slash or otherwise everything */
+            process_case = (*base.pszSuffix == '/') ? 5 : 1;
 	    break;
 	}
         if ((*relative.pszSuffix == '/') && (*(relative.pszSuffix+1) == '/')) {

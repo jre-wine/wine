@@ -36,6 +36,8 @@ class GpBitmap : public GpImage {};
 class GpPathGradient : public GpBrush {};
 class GpLineGradient : public GpBrush {};
 class GpTexture : public GpBrush {};
+class GpFont {};
+class GpStringFormat {};
 
 #else /* end of c++ declarations */
 
@@ -54,6 +56,8 @@ typedef struct GpBitmap GpBitmap;
 typedef struct GpPathGradient GpPathGradient;
 typedef struct GpLineGradient GpLineGradient;
 typedef struct GpTexture GpTexture;
+typedef struct GpFont GpFont;
+typedef struct GpStringFormat GpStringFormat;
 
 #endif /* end of c declarations */
 

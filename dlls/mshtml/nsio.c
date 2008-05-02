@@ -1186,8 +1186,8 @@ static nsresult NSAPI nsURI_GetSpec(nsIWineURI *iface, nsACString *aSpec)
     TRACE("(%p)->(%p)\n", This, aSpec);
 
     if(This->use_wine_url) {
-        char speca[INTERNET_MAX_URL_LENGTH];
-        WideCharToMultiByte(CP_ACP, 0, This->wine_url, -1, speca, sizeof(speca), NULL, NULL);
+        char speca[INTERNET_MAX_URL_LENGTH] = "wine:";
+        WideCharToMultiByte(CP_ACP, 0, This->wine_url, -1, speca+5, sizeof(speca)-5, NULL, NULL);
         nsACString_SetData(aSpec, speca);
 
         return NS_OK;
@@ -1528,7 +1528,7 @@ static nsresult NSAPI nsURI_GetAsciiSpec(nsIWineURI *iface, nsACString *aAsciiSp
 
     TRACE("(%p)->(%p)\n", This, aAsciiSpec);
 
-    if(This->wine_url)
+    if(This->use_wine_url)
         return nsIURI_GetSpec(NSURI(This), aAsciiSpec);
 
     if(This->uri)
@@ -1883,15 +1883,9 @@ static nsresult NSAPI nsIOService_QueryInterface(nsIIOService *iface, nsIIDRef r
 {
     *result = NULL;
 
-    if(IsEqualGUID(&IID_nsISupports, riid)) {
-        TRACE("(IID_nsISupports %p)\n", result);
+    if(IsEqualGUID(&IID_nsISupports, riid)
+       || IsEqualGUID(&IID_nsIIOService, riid)) {
         *result = iface;
-    }else if(IsEqualGUID(&IID_nsIIOService, riid)) {
-        TRACE("(IID_nsIIOService %p)\n", result);
-        *result = iface;
-    }
-
-    if(*result) {
         nsIIOService_AddRef(iface);
         return S_OK;
     }
@@ -1945,15 +1939,29 @@ static nsresult NSAPI nsIOService_GetProtocolFlags(nsIIOService *iface, const ch
     return nsIIOService_GetProtocolFlags(nsio, aScheme, _retval);
 }
 
+static BOOL is_gecko_special_uri(const char *spec)
+{
+    static const char chromeW[] = "chrome:";
+    static const char jarW[] = "jar:";
+    static const char resourceW[] = "resource:";
+    static const char javascriptW[] = "javascript:";
+
+    return !strncasecmp(spec, chromeW,     sizeof(chromeW)-1)
+        || !strncasecmp(spec, resourceW,   sizeof(resourceW)-1)
+        || !strncasecmp(spec, jarW,        sizeof(jarW)-1)
+        || !strncasecmp(spec, javascriptW, sizeof(javascriptW)-1);
+}
+
 static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *aSpec,
         const char *aOriginCharset, nsIURI *aBaseURI, nsIURI **_retval)
 {
     const char *spec = NULL;
+    nsACString spec_str;
     NSContainer *nscontainer = NULL;
     nsIURI *uri = NULL;
-    PRBool is_javascript = FALSE;
     LPCWSTR base_wine_url = NULL;
     nsIWineURI *base_wine_uri = NULL, *wine_uri;
+    BOOL is_wine_uri = FALSE;
     nsresult nsres;
 
     nsACString_GetData(aSpec, &spec, NULL);
@@ -1961,12 +1969,17 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
     TRACE("(%p(%s) %s %p %p)\n", aSpec, debugstr_a(spec), debugstr_a(aOriginCharset),
           aBaseURI, _retval);
 
+    if(is_gecko_special_uri(spec))
+        return nsIIOService_NewURI(nsio, aSpec, aOriginCharset, aBaseURI, _retval);
+
+    if(!strncmp(spec, "wine:", 5)) {
+        spec += 5;
+        is_wine_uri = TRUE;
+    }
+
     if(aBaseURI) {
         nsACString base_uri_str;
         const char *base_uri = NULL;
-
-        static const char szChrome[] = "chrome:";
-        static const char szResource[] = "resource:";
 
         nsACString_Init(&base_uri_str, NULL);
 
@@ -1979,24 +1992,13 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
         }
 
         nsACString_Finish(&base_uri_str);
-
-        if(!strncmp(spec, szChrome, sizeof(szChrome)-1)
-           || !strncmp(spec, szResource, sizeof(szResource)-1))
-            aBaseURI = NULL;
     }
 
+    nsACString_Init(&spec_str, spec);
     nsres = nsIIOService_NewURI(nsio, aSpec, aOriginCharset, aBaseURI, &uri);
+    nsACString_Finish(&spec_str);
     if(NS_FAILED(nsres))
         TRACE("NewURI failed: %08x\n", nsres);
-
-    if(uri) {
-        nsIURI_SchemeIs(uri, "javascript", &is_javascript);
-        if(is_javascript) {
-            TRACE("returning javascript uri: %p\n", uri);
-            *_retval = uri;
-            return NS_OK;
-        }
-    }
 
     if(aBaseURI) {
         nsres = nsIURI_QueryInterface(aBaseURI, &IID_nsIWineURI, (void**)&base_wine_uri);
@@ -2016,12 +2018,10 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
 
     if(base_wine_url) {
         WCHAR url[INTERNET_MAX_URL_LENGTH], rel_url[INTERNET_MAX_URL_LENGTH];
-        LPCSTR speca;
         DWORD len;
         HRESULT hres;
 
-        nsACString_GetData(aSpec, &speca, NULL);
-        MultiByteToWideChar(CP_ACP, 0, speca, -1, rel_url, sizeof(rel_url)/sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, spec, -1, rel_url, sizeof(rel_url)/sizeof(WCHAR));
 
         hres = CoInternetCombineUrl(base_wine_url, rel_url,
                                     URL_ESCAPE_SPACES_ONLY|URL_DONT_ESCAPE_EXTRA_INFO,
@@ -2029,7 +2029,12 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
         if(SUCCEEDED(hres))
             nsIWineURI_SetWineURL(wine_uri, url);
         else
-            WARN("CoCombineUrl failed: %08x\n", hres);
+             WARN("CoCombineUrl failed: %08x\n", hres);
+    }else if(is_wine_uri) {
+        WCHAR url[INTERNET_MAX_URL_LENGTH];
+
+        MultiByteToWideChar(CP_ACP, 0, spec, -1, url, sizeof(url)/sizeof(WCHAR));
+        nsIWineURI_SetWineURL(wine_uri, url);
     }
 
     if(base_wine_uri)

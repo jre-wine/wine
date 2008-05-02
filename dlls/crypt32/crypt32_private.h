@@ -126,6 +126,7 @@ HCRYPTPROV CRYPT_GetDefaultProvider(void);
 void crypt_oid_init(HINSTANCE hinst);
 void crypt_oid_free(void);
 void crypt_sip_free(void);
+void default_chain_engine_free(void);
 
 /* Some typedefs that make it easier to abstract which type of context we're
  * working with.
@@ -170,6 +171,85 @@ typedef const WINE_CONTEXT_INTERFACE *PCWINE_CONTEXT_INTERFACE;
 extern PCWINE_CONTEXT_INTERFACE pCertInterface;
 extern PCWINE_CONTEXT_INTERFACE pCRLInterface;
 extern PCWINE_CONTEXT_INTERFACE pCTLInterface;
+
+/* (Internal) certificate store types and functions */
+struct WINE_CRYPTCERTSTORE;
+
+typedef struct WINE_CRYPTCERTSTORE * (*StoreOpenFunc)(HCRYPTPROV hCryptProv,
+ DWORD dwFlags, const void *pvPara);
+
+/* Called to enumerate the next context in a store. */
+typedef void * (*EnumFunc)(struct WINE_CRYPTCERTSTORE *store, void *pPrev);
+
+/* Called to add a context to a store.  If toReplace is not NULL,
+ * context replaces toReplace in the store, and access checks should not be
+ * performed.  Otherwise context is a new context, and it should only be
+ * added if the store allows it.  If ppStoreContext is not NULL, the added
+ * context should be returned in *ppStoreContext.
+ */
+typedef BOOL (*AddFunc)(struct WINE_CRYPTCERTSTORE *store, void *context,
+ void *toReplace, const void **ppStoreContext);
+
+typedef BOOL (*DeleteFunc)(struct WINE_CRYPTCERTSTORE *store, void *context);
+
+typedef struct _CONTEXT_FUNCS
+{
+    AddFunc    addContext;
+    EnumFunc   enumContext;
+    DeleteFunc deleteContext;
+} CONTEXT_FUNCS, *PCONTEXT_FUNCS;
+
+typedef enum _CertStoreType {
+    StoreTypeMem,
+    StoreTypeCollection,
+    StoreTypeProvider,
+} CertStoreType;
+
+struct _CONTEXT_PROPERTY_LIST;
+typedef struct _CONTEXT_PROPERTY_LIST *PCONTEXT_PROPERTY_LIST;
+
+#define WINE_CRYPTCERTSTORE_MAGIC 0x74726563
+
+/* A cert store is polymorphic through the use of function pointers.  A type
+ * is still needed to distinguish collection stores from other types.
+ * On the function pointers:
+ * - closeStore is called when the store's ref count becomes 0
+ * - control is optional, but should be implemented by any store that supports
+ *   persistence
+ */
+typedef struct WINE_CRYPTCERTSTORE
+{
+    DWORD                       dwMagic;
+    LONG                        ref;
+    DWORD                       dwOpenFlags;
+    CertStoreType               type;
+    PFN_CERT_STORE_PROV_CLOSE   closeStore;
+    CONTEXT_FUNCS               certs;
+    CONTEXT_FUNCS               crls;
+    PFN_CERT_STORE_PROV_CONTROL control; /* optional */
+    PCONTEXT_PROPERTY_LIST      properties;
+} WINECRYPT_CERTSTORE, *PWINECRYPT_CERTSTORE;
+
+void CRYPT_InitStore(WINECRYPT_CERTSTORE *store, DWORD dwFlags,
+ CertStoreType type);
+void CRYPT_FreeStore(PWINECRYPT_CERTSTORE store);
+void CRYPT_EmptyStore(HCERTSTORE store);
+
+PWINECRYPT_CERTSTORE CRYPT_CollectionOpenStore(HCRYPTPROV hCryptProv,
+ DWORD dwFlags, const void *pvPara);
+PWINECRYPT_CERTSTORE CRYPT_ProvCreateStore(DWORD dwFlags,
+ PWINECRYPT_CERTSTORE memStore, const CERT_STORE_PROV_INFO *pProvInfo);
+PWINECRYPT_CERTSTORE CRYPT_ProvOpenStore(LPCSTR lpszStoreProvider,
+ DWORD dwEncodingType, HCRYPTPROV hCryptProv, DWORD dwFlags,
+ const void *pvPara);
+PWINECRYPT_CERTSTORE CRYPT_RegOpenStore(HCRYPTPROV hCryptProv, DWORD dwFlags,
+ const void *pvPara);
+PWINECRYPT_CERTSTORE CRYPT_FileOpenStore(HCRYPTPROV hCryptProv, DWORD dwFlags,
+ const void *pvPara);
+PWINECRYPT_CERTSTORE CRYPT_FileNameOpenStoreA(HCRYPTPROV hCryptProv,
+ DWORD dwFlags, const void *pvPara);
+PWINECRYPT_CERTSTORE CRYPT_FileNameOpenStoreW(HCRYPTPROV hCryptProv,
+ DWORD dwFlags, const void *pvPara);
 
 /* Helper function for store reading functions and
  * CertAddSerializedElementToStore.  Returns a context of the appropriate type
@@ -226,9 +306,6 @@ void *Context_GetLinkedContext(void *context, size_t contextSize);
 /* Copies properties from fromContext to toContext. */
 void Context_CopyProperties(const void *to, const void *from,
  size_t contextSize);
-
-struct _CONTEXT_PROPERTY_LIST;
-typedef struct _CONTEXT_PROPERTY_LIST *PCONTEXT_PROPERTY_LIST;
 
 /* Returns context's properties, or the linked context's properties if context
  * is a link context.

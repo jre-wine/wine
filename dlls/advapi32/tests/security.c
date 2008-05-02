@@ -55,6 +55,9 @@ static BOOL (WINAPI *pConvertStringSecurityDescriptorToSecurityDescriptorA)(LPCS
                                                                             PSECURITY_DESCRIPTOR*, PULONG );
 typedef BOOL (WINAPI *fnGetFileSecurityA)(LPCSTR, SECURITY_INFORMATION,
                                           PSECURITY_DESCRIPTOR, DWORD, LPDWORD);
+static DWORD (WINAPI *pGetNamedSecurityInfoA)(LPSTR, SE_OBJECT_TYPE, SECURITY_INFORMATION,
+                                              PSID*, PSID*, PACL*, PACL*,
+                                              PSECURITY_DESCRIPTOR*);
 typedef DWORD (WINAPI *fnRtlAdjustPrivilege)(ULONG,BOOLEAN,BOOLEAN,PBOOLEAN);
 typedef BOOL (WINAPI *fnCreateWellKnownSid)(WELL_KNOWN_SID_TYPE,PSID,PSID,DWORD*);
 typedef BOOL (WINAPI *fnDuplicateTokenEx)(HANDLE,DWORD,LPSECURITY_ATTRIBUTES,
@@ -65,6 +68,7 @@ typedef NTSTATUS (WINAPI *fnLsaClose)(LSA_HANDLE);
 typedef NTSTATUS (WINAPI *fnLsaFreeMemory)(PVOID);
 typedef NTSTATUS (WINAPI *fnLsaOpenPolicy)(PLSA_UNICODE_STRING,PLSA_OBJECT_ATTRIBUTES,ACCESS_MASK,PLSA_HANDLE);
 static NTSTATUS (WINAPI *pNtQueryObject)(HANDLE,OBJECT_INFORMATION_CLASS,PVOID,ULONG,PULONG);
+static DWORD (WINAPI *pSetEntriesInAclW)(ULONG, PEXPLICIT_ACCESSW, PACL, PACL*);
 
 static HMODULE hmod;
 static int     myARGC;
@@ -102,6 +106,8 @@ static void init(void)
     hmod = GetModuleHandle("advapi32.dll");
     pConvertStringSecurityDescriptorToSecurityDescriptorA =
         (void *)GetProcAddress(hmod, "ConvertStringSecurityDescriptorToSecurityDescriptorA" );
+    pGetNamedSecurityInfoA = (void *)GetProcAddress(hmod, "GetNamedSecurityInfoA");
+    pSetEntriesInAclW = (void *)GetProcAddress(hmod, "SetEntriesInAclW");
 
     myARGC = winetest_get_mainargs( &myARGV );
 }
@@ -1296,8 +1302,15 @@ static void test_LookupAccountName(void)
      */
 
     user_size = UNLEN + 1;
+    SetLastError(0xdeadbeef);
     ret = GetUserNameA(user_name, &user_size);
-    ok(ret, "Failed to get user name\n");
+    if (!ret && (GetLastError() == ERROR_NOT_LOGGED_ON))
+    {
+        /* Probably on win9x where the user used 'Cancel' instead of properly logging in */
+        skip("Cannot get the user name (win9x and not logged in properly)\n");
+        return;
+    }
+    ok(ret, "Failed to get user name : %d\n", GetLastError());
 
     /* get sizes */
     sid_size = 0;
@@ -1714,7 +1727,13 @@ static void test_SetEntriesInAcl(void)
     ACL *acl = (ACL*)0xdeadbeef;
     DWORD res;
 
-    res = SetEntriesInAclW(0, NULL, NULL, &acl);
+    if (!pSetEntriesInAclW)
+    {
+        skip("SetEntriesInAclW is not available\n");
+        return;
+    }
+
+    res = pSetEntriesInAclW(0, NULL, NULL, &acl);
     if(res == ERROR_CALL_NOT_IMPLEMENTED)
     {
         skip("SetEntriesInAclW is not implemented\n");
@@ -1737,11 +1756,17 @@ static void test_GetNamedSecurityInfoA(void)
     BOOL ret;
     CHAR windows_dir[MAX_PATH];
 
+    if (!pGetNamedSecurityInfoA)
+    {
+        skip("GetNamedSecurityInfoA is not available\n");
+        return;
+    }
+
     ret = GetWindowsDirectoryA(windows_dir, MAX_PATH);
     ok(ret, "GetWindowsDirectory failed with error %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
-    error = GetNamedSecurityInfoA(windows_dir, SE_FILE_OBJECT,
+    error = pGetNamedSecurityInfoA(windows_dir, SE_FILE_OBJECT,
         OWNER_SECURITY_INFORMATION|GROUP_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,
         NULL, NULL, NULL, NULL, &pSecDesc);
     if (error != ERROR_SUCCESS && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))

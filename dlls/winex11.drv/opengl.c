@@ -110,6 +110,7 @@ typedef struct wine_glcontext {
     GLXContext ctx;
     BOOL do_escape;
     X11DRV_PDEVICE *physDev;
+    X11DRV_PDEVICE *pReadDev;
     RECT viewport;
     RECT scissor;
     BOOL scissor_enabled;
@@ -173,6 +174,9 @@ static void dump_PIXELFORMATDESCRIPTOR(const PIXELFORMATDESCRIPTOR *ppfd) {
   TEST_AND_DUMP(ppfd->dwFlags, PFD_SWAP_COPY);
   TEST_AND_DUMP(ppfd->dwFlags, PFD_SWAP_EXCHANGE);
   TEST_AND_DUMP(ppfd->dwFlags, PFD_SWAP_LAYER_BUFFERS);
+  /* PFD_SUPPORT_COMPOSITION is new in Vista, it is similar to composition
+   * under X e.g. COMPOSITE + GLX_EXT_TEXTURE_FROM_PIXMAP. */
+  TEST_AND_DUMP(ppfd->dwFlags, PFD_SUPPORT_COMPOSITION);
 #undef TEST_AND_DUMP
   TRACE("\n");
 
@@ -241,10 +245,12 @@ MAKE_FUNCPTR(glXGetCurrentReadDrawable)
 
 /* GLX Extensions */
 static void* (*pglXGetProcAddressARB)(const GLubyte *);
-static BOOL  (*pglXBindTexImageARB)(Display *dpy, GLXPbuffer pbuffer, int buffer);
-static BOOL  (*pglXReleaseTexImageARB)(Display *dpy, GLXPbuffer pbuffer, int buffer);
-static BOOL  (*pglXDrawableAttribARB)(Display *dpy, GLXDrawable draw, const int *attribList);
 static int   (*pglXSwapIntervalSGI)(int);
+
+/* ATI GLX Extensions */
+static BOOL  (*pglXBindTexImageATI)(Display *dpy, GLXPbuffer pbuffer, int buffer);
+static BOOL  (*pglXReleaseTexImageATI)(Display *dpy, GLXPbuffer pbuffer, int buffer);
+static BOOL  (*pglXDrawableAttribATI)(Display *dpy, GLXDrawable draw, const int *attribList);
 
 /* NV GLX Extension */
 static void* (*pglXAllocateMemoryNV)(GLsizei size, GLfloat readfreq, GLfloat writefreq, GLfloat priority);
@@ -502,9 +508,10 @@ LOAD_FUNCPTR(glXFreeMemoryNV)
     }
 
     if(glxRequireExtension("GLX_ATI_render_texture")) {
-        pglXBindTexImageARB = (void*)pglXGetProcAddressARB((const GLubyte *) "glXBindTexImageARB");
-        pglXReleaseTexImageARB = (void*)pglXGetProcAddressARB((const GLubyte *) "glXReleaseTexImageARB");
-        pglXDrawableAttribARB = (void*)pglXGetProcAddressARB((const GLubyte *) "glXDrawableAttribARB");
+        use_render_texture_ati = 1;
+        pglXBindTexImageATI = (void*)pglXGetProcAddressARB((const GLubyte *) "glXBindTexImageATI");
+        pglXReleaseTexImageATI = (void*)pglXGetProcAddressARB((const GLubyte *) "glXReleaseTexImageATI");
+        pglXDrawableAttribATI = (void*)pglXGetProcAddressARB((const GLubyte *) "glXDrawableAttribATI");
     }
 
     X11DRV_WineGL_LoadExtensions();
@@ -538,30 +545,6 @@ static inline void free_context(Wine_GLContext *context)
     else context_list = context->next;
 
     HeapFree(GetProcessHeap(), 0, context);
-}
-
-static inline Wine_GLContext *get_context_from_GLXContext(GLXContext ctx)
-{
-    Wine_GLContext *ret;
-    if (!ctx) return NULL;
-    for (ret = context_list; ret; ret = ret->next) if (ctx == ret->ctx) break;
-    return ret;
-}
-
-/**
- * get_hdc_from_Drawable (internal)
- *
- * For use by wglGetCurrentReadDCARB.
- */
-static inline HDC get_hdc_from_Drawable(GLXDrawable d)
-{
-    Wine_GLContext *ret;
-    for (ret = context_list; ret; ret = ret->next) {
-        if (d == ret->physDev->drawable) {
-            return ret->hdc;
-        }
-    }
-    return NULL;
 }
 
 static inline BOOL is_valid_context( Wine_GLContext *ctx )
@@ -827,61 +810,13 @@ static int get_render_type_from_fbconfig(Display *display, GLXFBConfig fbconfig)
     return render_type;
 }
 
-static BOOL get_fbconfig_from_visualid(Display *display, Visual *visual, GLXFBConfig *fbconfig, int *fmt_id)
-{
-    GLXFBConfig* cfgs = NULL;
-    int i;
-    int nCfgs;
-    int tmp_fmt_id;
-    int tmp_vis_id;
-    VisualID visualid;
-
-    if(!display || !visual) {
-        ERR("Invalid display or visual\n");
-	return FALSE;
-    }
-    visualid = XVisualIDFromVisual(visual);
-
-    /* Get a list of all available framebuffer configurations */
-    cfgs = pglXGetFBConfigs(display, DefaultScreen(display), &nCfgs);
-    if (NULL == cfgs || 0 == nCfgs) {
-        ERR("glXChooseFBConfig returns NULL\n");
-        if(cfgs != NULL) XFree(cfgs);
-        return FALSE;
-    }
-
-    /* Find the requested offscreen format and count the number of offscreen formats */
-    for(i=0; i<nCfgs; i++) {
-        pglXGetFBConfigAttrib(display, cfgs[i], GLX_VISUAL_ID, &tmp_vis_id);
-        pglXGetFBConfigAttrib(display, cfgs[i], GLX_FBCONFIG_ID, &tmp_fmt_id);
-
-        /* We are looking up the GLX index of our main visual and have found it :) */
-        if(visualid == tmp_vis_id) {
-            TRACE("Found FBCONFIG_ID 0x%x at index %d for VISUAL_ID 0x%x\n", tmp_fmt_id, i, tmp_vis_id);
-            *fbconfig = cfgs[i];
-            *fmt_id = tmp_fmt_id;
-            XFree(cfgs);
-            return TRUE;
-        }
-    }
-
-    ERR("No fbconfig found for Wine's main visual (0x%lx), expect problems!\n", visualid);
-    XFree(cfgs);
-    return FALSE;
-}
-
 static BOOL init_formats(Display *display, int screen, Visual *visual)
 {
     int fmt_id, tmp_vis_id, tmp_fmt_id, nCfgs, i;
     GLXFBConfig* cfgs;
-    GLXFBConfig fbconfig;
+    GLXFBConfig fbconfig = NULL;
+    VisualID visualid = XVisualIDFromVisual(visual);
     int nOffscreenFormats = 0;
-
-    /* Locate the fbconfig correspondig to our main visual */
-    if(!get_fbconfig_from_visualid(display, visual, &fbconfig, &fmt_id)) {
-        ERR("Can't get the FBCONFIG_ID for the main visual, expect problems!\n");
-        return FALSE;
-    }
 
     /* As mentioned in various parts of the code only the format of the main visual can be used for onscreen rendering.
     * Next to this format there are also so called offscreen rendering formats (used for pbuffers) which can be supported
@@ -889,54 +824,51 @@ static BOOL init_formats(Display *display, int screen, Visual *visual)
     * because this call lists both types of formats instead of only onscreen ones. */
     cfgs = pglXGetFBConfigs(display, DefaultScreen(display), &nCfgs);
     if (NULL == cfgs || 0 == nCfgs) {
-        WARN("glXChooseFBConfig returns NULL\n");
+        ERR("glXChooseFBConfig returns NULL\n");
         if(cfgs != NULL) XFree(cfgs);
-
-        /* We only have the single format of Wine's main visual */
-        WineGLPixelFormatList = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WineGLPixelFormat));
-        WineGLPixelFormatList[0].iPixelFormat = 1;
-        WineGLPixelFormatList[0].fbconfig = fbconfig;
-        WineGLPixelFormatList[0].fmt_id = fmt_id;
-        WineGLPixelFormatList[0].render_type = get_render_type_from_fbconfig(display, fbconfig);
-        WineGLPixelFormatList[0].offscreenOnly = FALSE;
-        WineGLPixelFormatListSize = 1;
+        return FALSE;
     }
-    else {
-        /* Count the number of offscreen formats to determine the size for our pixelformat list */
-        for(i=0; i<nCfgs; i++) {
-            pglXGetFBConfigAttrib(display, cfgs[i], GLX_VISUAL_ID, &tmp_vis_id);
 
-            /* We have found an offscreen rendering format :) */
-            if(tmp_vis_id == 0) {
-                nOffscreenFormats++;
-            }
+    /* Count the number of offscreen formats to determine the size for our pixelformat list */
+    for(i=0; i<nCfgs; i++) {
+        pglXGetFBConfigAttrib(display, cfgs[i], GLX_VISUAL_ID, &tmp_vis_id);
+
+        /* We have found Wine's main visual */
+        if(tmp_vis_id == visualid) {
+            pglXGetFBConfigAttrib(display, cfgs[i], GLX_FBCONFIG_ID, &fmt_id);
+            fbconfig = cfgs[i];
         }
-        TRACE("Number of offscreen formats: %d\n", nOffscreenFormats);
 
-        /* Allocate memory for all the offscreen pixelformats and the format of Wine's main visual */
-        WineGLPixelFormatList = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (1+nOffscreenFormats)*sizeof(WineGLPixelFormat));
-        WineGLPixelFormatList[0].iPixelFormat = 1;
-        WineGLPixelFormatList[0].fbconfig = fbconfig;
-        WineGLPixelFormatList[0].fmt_id = fmt_id;
-        WineGLPixelFormatList[0].render_type = get_render_type_from_fbconfig(display, fbconfig);
-        WineGLPixelFormatList[0].offscreenOnly = FALSE;
-        WineGLPixelFormatListSize = 1;
+        /* We have found an offscreen rendering format :) */
+        if(tmp_vis_id == 0) {
+            nOffscreenFormats++;
+        }
+    }
+    TRACE("Number of offscreen formats: %d\n", nOffscreenFormats);
 
-        /* Fill the list with offscreen formats */
-        for(i=0; i<nCfgs; i++) {
-            pglXGetFBConfigAttrib(display, cfgs[i], GLX_VISUAL_ID, &tmp_vis_id);
-            pglXGetFBConfigAttrib(display, cfgs[i], GLX_FBCONFIG_ID, &tmp_fmt_id);
+    /* Allocate memory for all the offscreen pixelformats and the format of Wine's main visual */
+    WineGLPixelFormatList = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (1+nOffscreenFormats)*sizeof(WineGLPixelFormat));
+    WineGLPixelFormatList[0].iPixelFormat = 1;
+    WineGLPixelFormatList[0].fbconfig = fbconfig;
+    WineGLPixelFormatList[0].fmt_id = fmt_id;
+    WineGLPixelFormatList[0].render_type = get_render_type_from_fbconfig(display, fbconfig);
+    WineGLPixelFormatList[0].offscreenOnly = FALSE;
+    WineGLPixelFormatListSize = 1;
 
-            /* We have found an offscreen rendering format :) */
-            if(tmp_vis_id == 0) {
-                TRACE("Found offscreen format FBCONFIG_ID 0x%x corresponding to iPixelFormat %d at GLX index %d\n", tmp_fmt_id, WineGLPixelFormatListSize+1, i);
-                WineGLPixelFormatList[WineGLPixelFormatListSize].iPixelFormat = WineGLPixelFormatListSize+1; /* The index starts at 1 */
-                WineGLPixelFormatList[WineGLPixelFormatListSize].fbconfig = cfgs[i];
-                WineGLPixelFormatList[WineGLPixelFormatListSize].fmt_id = tmp_fmt_id;
-                WineGLPixelFormatList[WineGLPixelFormatListSize].render_type = get_render_type_from_fbconfig(display, cfgs[i]);
-                WineGLPixelFormatList[WineGLPixelFormatListSize].offscreenOnly = TRUE;
-                WineGLPixelFormatListSize++;
-            }
+    /* Fill the list with offscreen formats */
+    for(i=0; i<nCfgs; i++) {
+        pglXGetFBConfigAttrib(display, cfgs[i], GLX_VISUAL_ID, &tmp_vis_id);
+        pglXGetFBConfigAttrib(display, cfgs[i], GLX_FBCONFIG_ID, &tmp_fmt_id);
+
+        /* We have found an offscreen rendering format :) */
+        if(tmp_vis_id == 0) {
+            TRACE("Found offscreen format FBCONFIG_ID 0x%x corresponding to iPixelFormat %d at GLX index %d\n", tmp_fmt_id, WineGLPixelFormatListSize+1, i);
+            WineGLPixelFormatList[WineGLPixelFormatListSize].iPixelFormat = WineGLPixelFormatListSize+1; /* The index starts at 1 */
+            WineGLPixelFormatList[WineGLPixelFormatListSize].fbconfig = cfgs[i];
+            WineGLPixelFormatList[WineGLPixelFormatListSize].fmt_id = tmp_fmt_id;
+            WineGLPixelFormatList[WineGLPixelFormatListSize].render_type = get_render_type_from_fbconfig(display, cfgs[i]);
+            WineGLPixelFormatList[WineGLPixelFormatListSize].offscreenOnly = TRUE;
+            WineGLPixelFormatListSize++;
         }
     }
 
@@ -1015,6 +947,8 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
     int value = 0;
     int i = 0;
     int bestFormat = -1;
+    int bestDBuffer = -1;
+    int bestStereo = -1;
     int bestColor = -1;
     int bestAlpha = -1;
     int bestDepth = -1;
@@ -1057,33 +991,68 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
             continue;
         }
 
-        /* Doublebuffer:
-         * Ignore doublebuffer when PFD_DOUBLEBUFFER_DONTCARE is set. Further if the flag
-         * is not set, we must return a format without double buffering. */
         pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DOUBLEBUFFER, &value);
         if (value) dwFlags |= PFD_DOUBLEBUFFER;
-        if (!(ppfd->dwFlags & PFD_DOUBLEBUFFER_DONTCARE) && ((ppfd->dwFlags^dwFlags) & PFD_DOUBLEBUFFER))
-        {
-            TRACE("dbl buffer mismatch for iPixelFormat=%d\n", i+1);
-            continue;
-        }
-
-        /* Stereo:
-         * Ignore stereo when PFD_STEREO_DONTCARE is set. Further if the flag
-         * is not set, we must return a format without stereo support. */
         pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_STEREO, &value);
         if (value) dwFlags |= PFD_STEREO;
-        if (!(ppfd->dwFlags & PFD_STEREO_DONTCARE) && ((ppfd->dwFlags^dwFlags) & PFD_STEREO))
-        {
-            TRACE("stereo mismatch for iPixelFormat=%d\n", i+1);
-            continue;
-        }
-
         pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_BUFFER_SIZE, &color); /* cColorBits */
         pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_ALPHA_SIZE, &alpha); /* cAlphaBits */
         pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DEPTH_SIZE, &depth); /* cDepthBits */
         pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_STENCIL_SIZE, &stencil); /* cStencilBits */
         pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_AUX_BUFFERS, &aux); /* cAuxBuffers */
+
+        /* The behavior of PDF_STEREO/PFD_STEREO_DONTCARE and PFD_DOUBLEBUFFER / PFD_DOUBLEBUFFER_DONTCARE
+         * is not very clear on MSDN. They specify that ChoosePixelFormat tries to match pixel formats
+         * with the flag (PFD_STEREO / PFD_DOUBLEBUFFERING) set. Otherwise it says that it tries to match
+         * formats without the given flag set.
+         * A test on Windows using a Radeon 9500pro on WinXP (the driver doesn't support Stereo)
+         * has indicated that a format without stereo is returned when stereo is unavailable.
+         * So in case PFD_STEREO is set, formats that support it should have priority above formats
+         * without. In case PFD_STEREO_DONTCARE is set, stereo is ignored.
+         *
+         * To summarize the following is most likely the correct behavior:
+         * stereo not set -> prefer no-stereo formats, else also accept stereo formats
+         * stereo set -> prefer stereo formats, else also accept no-stereo formats
+         * stereo don't care -> it doesn't matter whether we get stereo or not
+         *
+         * In Wine we will treat no-stereo the same way as don't care because it makes
+         * format selection even more complicated and second drivers with Stereo advertise
+         * each format twice anyway.
+         */
+
+        /* Doublebuffer, see the comments above */
+        if( !(ppfd->dwFlags & PFD_DOUBLEBUFFER_DONTCARE) ) {
+            if( ((ppfd->dwFlags & PFD_DOUBLEBUFFER) != bestDBuffer) &&
+                ((dwFlags & PFD_DOUBLEBUFFER) == (ppfd->dwFlags & PFD_DOUBLEBUFFER)) )
+            {
+                bestDBuffer = dwFlags & PFD_DOUBLEBUFFER;
+                bestStereo = dwFlags & PFD_STEREO;
+                bestAlpha = alpha;
+                bestColor = color;
+                bestDepth = depth;
+                bestStencil = stencil;
+                bestAux = aux;
+                bestFormat = i;
+                continue;
+            }
+        }
+
+        /* Stereo, see the comments above. */
+        if( !(ppfd->dwFlags & PFD_STEREO_DONTCARE) ) {
+            if( ((ppfd->dwFlags & PFD_STEREO) != bestStereo) &&
+                ((dwFlags & PFD_STEREO) == (ppfd->dwFlags & PFD_STEREO)) )
+            {
+                bestDBuffer = dwFlags & PFD_DOUBLEBUFFER;
+                bestStereo = dwFlags & PFD_STEREO;
+                bestAlpha = alpha;
+                bestColor = color;
+                bestDepth = depth;
+                bestStencil = stencil;
+                bestAux = aux;
+                bestFormat = i;
+                continue;
+            }
+        }
 
         /* Below we will do a number of checks to select the 'best' pixelformat.
          * We assume the precedence cColorBits > cAlphaBits > cDepthBits > cStencilBits -> cAuxBuffers.
@@ -1094,6 +1063,8 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
         if( ((ppfd->cColorBits > bestColor) && (color > bestColor)) ||
             ((color >= ppfd->cColorBits) && (color < bestColor)) )
         {
+            bestDBuffer = dwFlags & PFD_DOUBLEBUFFER;
+            bestStereo = dwFlags & PFD_STEREO;
             bestAlpha = alpha;
             bestColor = color;
             bestDepth = depth;
@@ -1110,6 +1081,8 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
         if( ((ppfd->cAlphaBits > bestAlpha) && (alpha > bestAlpha)) ||
             ((alpha >= ppfd->cAlphaBits) && (alpha < bestAlpha)) )
         {
+            bestDBuffer = dwFlags & PFD_DOUBLEBUFFER;
+            bestStereo = dwFlags & PFD_STEREO;
             bestAlpha = alpha;
             bestColor = color;
             bestDepth = depth;
@@ -1126,6 +1099,8 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
         if( ((ppfd->cDepthBits > bestDepth) && (depth > bestDepth)) ||
             ((depth >= ppfd->cDepthBits) && (depth < bestDepth)) )
         {
+            bestDBuffer = dwFlags & PFD_DOUBLEBUFFER;
+            bestStereo = dwFlags & PFD_STEREO;
             bestAlpha = alpha;
             bestColor = color;
             bestDepth = depth;
@@ -1142,6 +1117,8 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
         if( ((ppfd->cStencilBits > bestStencil) && (stencil > bestStencil)) ||
             ((stencil >= ppfd->cStencilBits) && (stencil < bestStencil)) )
         {
+            bestDBuffer = dwFlags & PFD_DOUBLEBUFFER;
+            bestStereo = dwFlags & PFD_STEREO;
             bestAlpha = alpha;
             bestColor = color;
             bestDepth = depth;
@@ -1158,6 +1135,8 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
         if( ((ppfd->cAuxBuffers > bestAux) && (aux > bestAux)) ||
             ((aux >= ppfd->cAuxBuffers) && (aux < bestAux)) )
         {
+            bestDBuffer = dwFlags & PFD_DOUBLEBUFFER;
+            bestStereo = dwFlags & PFD_STEREO;
             bestAlpha = alpha;
             bestColor = color;
             bestDepth = depth;
@@ -1177,14 +1156,13 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
     }
     else {
         ret = bestFormat+1; /* the return value should be a 1-based index */
-        TRACE("Successfully found a matching mode, returning index: %d %x\n", ret, WineGLPixelFormatList[bestFormat-1].fmt_id);
+        TRACE("Successfully found a matching mode, returning index: %d %x\n", ret, WineGLPixelFormatList[bestFormat].fmt_id);
     }
 
     wine_tsx11_unlock();
 
     return ret;
 }
-
 /**
  * X11DRV_DescribePixelFormat
  *
@@ -1231,16 +1209,30 @@ int X11DRV_DescribePixelFormat(X11DRV_PDEVICE *physDev,
   ppfd->nVersion = 1;
 
   /* These flags are always the same... */
-  ppfd->dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
+  ppfd->dwFlags = PFD_SUPPORT_OPENGL;
   /* Now the flags extracted from the Visual */
 
   wine_tsx11_lock();
+
+  pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_X_RENDERABLE, &value);
+  if(value)
+      ppfd->dwFlags |= PFD_SUPPORT_GDI;
+
+  pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DRAWABLE_TYPE, &value);
+  if(value & GLX_WINDOW_BIT)
+      ppfd->dwFlags |= PFD_DRAW_TO_WINDOW;
+  if(value & GLX_PIXMAP_BIT)
+      ppfd->dwFlags |= PFD_DRAW_TO_BITMAP;
 
   pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_CONFIG_CAVEAT, &value);
   if(value == GLX_SLOW_CONFIG)
       ppfd->dwFlags |= PFD_GENERIC_ACCELERATED;
 
-  pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DOUBLEBUFFER, &value); if (value) ppfd->dwFlags |= PFD_DOUBLEBUFFER;
+  pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DOUBLEBUFFER, &value);
+  if (value) {
+      ppfd->dwFlags |= PFD_DOUBLEBUFFER;
+      ppfd->dwFlags &= ~PFD_SUPPORT_GDI;
+  }
   pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_STEREO, &value); if (value) ppfd->dwFlags |= PFD_STEREO;
 
   /* Pixel type */
@@ -1517,17 +1509,14 @@ BOOL X11DRV_wglDeleteContext(HGLRC hglrc)
  */
 static HDC WINAPI X11DRV_wglGetCurrentReadDCARB(void) 
 {
-    GLXDrawable gl_d;
-    HDC ret;
+    HDC ret = 0;
+    Wine_GLContext *ctx = NtCurrentTeb()->glContext;
+    X11DRV_PDEVICE *physDev = ctx ? ctx->pReadDev : NULL;
 
-    TRACE("()\n");
+    if(physDev)
+        ret = physDev->hdc;
 
-    wine_tsx11_lock();
-    gl_d = pglXGetCurrentReadDrawable();
-    ret = get_hdc_from_Drawable(gl_d);
-    wine_tsx11_unlock();
-
-    TRACE(" returning %p (GL drawable %lu)\n", ret, gl_d);
+    TRACE(" returning %p (GL drawable %lu)\n", ret, physDev ? physDev->drawable : 0);
     return ret;
 }
 
@@ -1665,7 +1654,9 @@ BOOL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
         NtCurrentTeb()->glContext = ctx;
         if(ret)
         {
+            ctx->hdc = hdc;
             ctx->physDev = physDev;
+            ctx->pReadDev = physDev;
 
             if (type == OBJ_MEMDC)
             {
@@ -1688,10 +1679,10 @@ BOOL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
  *
  * For OpenGL32 wglMakeContextCurrentARB
  */
-BOOL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* hDrawDev, X11DRV_PDEVICE* hReadDev, HGLRC hglrc) 
+BOOL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* pDrawDev, X11DRV_PDEVICE* pReadDev, HGLRC hglrc)
 {
     BOOL ret;
-    TRACE("(%p,%p,%p)\n", hDrawDev, hReadDev, hglrc);
+    TRACE("(%p,%p,%p)\n", pDrawDev, pReadDev, hglrc);
 
     if (!has_opengl()) {
         ERR("No libGL on this box - disabling OpenGL support !\n");
@@ -1707,13 +1698,16 @@ BOOL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* hDrawDev, X11DRV_PDEVICE* h
             ret = FALSE;
         } else {
             Wine_GLContext *ctx = (Wine_GLContext *) hglrc;
-            Drawable d_draw = get_glxdrawable(hDrawDev);
-            Drawable d_read = get_glxdrawable(hReadDev);
+            Drawable d_draw = get_glxdrawable(pDrawDev);
+            Drawable d_read = get_glxdrawable(pReadDev);
 
             if (ctx->ctx == NULL) {
-                ctx->ctx = pglXCreateContext(gdi_display, ctx->vis, NULL, GetObjectType(hDrawDev->hdc) == OBJ_MEMDC ? False : True);
+                ctx->ctx = pglXCreateContext(gdi_display, ctx->vis, NULL, GetObjectType(pDrawDev->hdc) == OBJ_MEMDC ? False : True);
                 TRACE(" created a delayed OpenGL context (%p)\n", ctx->ctx);
             }
+            ctx->hdc = pDrawDev->hdc;
+            ctx->physDev = pDrawDev;
+            ctx->pReadDev = pReadDev;
             ret = pglXMakeContextCurrent(gdi_display, d_draw, d_read, ctx->ctx);
             NtCurrentTeb()->glContext = ctx;
         }
@@ -1749,7 +1743,7 @@ BOOL X11DRV_wglShareLists(HGLRC hglrc1, HGLRC hglrc2) {
             describeContext(org);
 
             if(org->vis)
-                org->ctx = pglXCreateContext(gdi_display, org->vis, NULL, GetObjectType(org->physDev->hdc) == OBJ_MEMDC ? False : True);
+                org->ctx = pglXCreateContext(gdi_display, org->vis, NULL, GetObjectType(org->hdc) == OBJ_MEMDC ? False : True);
             else /* Create a GLX Context for a pbuffer */
                 org->ctx = pglXCreateNewContext(gdi_display, org->fmt->fbconfig, org->fmt->render_type, NULL, True);
             wine_tsx11_unlock();
@@ -1760,7 +1754,7 @@ BOOL X11DRV_wglShareLists(HGLRC hglrc1, HGLRC hglrc2) {
             describeContext(dest);
             /* Create the destination context with display lists shared */
             if(dest->vis)
-                dest->ctx = pglXCreateContext(gdi_display, dest->vis, org->ctx, GetObjectType(org->physDev->hdc) == OBJ_MEMDC ? False : True);
+                dest->ctx = pglXCreateContext(gdi_display, dest->vis, org->ctx, GetObjectType(org->hdc) == OBJ_MEMDC ? False : True);
             else /* Create a GLX Context for a pbuffer */
                 dest->ctx = pglXCreateNewContext(gdi_display, dest->fmt->fbconfig, dest->fmt->render_type, org->ctx, True);
             wine_tsx11_unlock();
@@ -1977,8 +1971,7 @@ static void WINAPI X11DRV_wglGetIntegerv(GLenum pname, GLint* params)
     {
     case GL_DEPTH_BITS:
         {
-            GLXContext gl_ctx = pglXGetCurrentContext();
-            Wine_GLContext* ret = get_context_from_GLXContext(gl_ctx);
+            Wine_GLContext *ctx = NtCurrentTeb()->glContext;
 
             pglGetIntegerv(pname, params);
             /**
@@ -1986,7 +1979,7 @@ static void WINAPI X11DRV_wglGetIntegerv(GLenum pname, GLint* params)
              * we only have the default wine desktop context,
              * so if we have only a 24 depth say we have 32
              */
-            if (NULL == ret && 24 == *params) {
+            if (!ctx && *params == 24) {
                 *params = 32;
             }
             TRACE("returns GL_DEPTH_BITS as '%d'\n", *params);
@@ -1994,10 +1987,9 @@ static void WINAPI X11DRV_wglGetIntegerv(GLenum pname, GLint* params)
         }
     case GL_ALPHA_BITS:
         {
-            GLXContext gl_ctx = pglXGetCurrentContext();
-            Wine_GLContext* ret = get_context_from_GLXContext(gl_ctx);
+            Wine_GLContext *ctx = NtCurrentTeb()->glContext;
 
-            pglXGetFBConfigAttrib(gdi_display, ret->fmt->fbconfig, GLX_ALPHA_SIZE, params);
+            pglXGetFBConfigAttrib(gdi_display, ctx->fmt->fbconfig, GLX_ALPHA_SIZE, params);
             TRACE("returns GL_ALPHA_BITS as '%d'\n", *params);
             break;
         }
@@ -2490,11 +2482,11 @@ static GLboolean WINAPI X11DRV_wglSetPbufferAttribARB(HPBUFFERARB hPbuffer, cons
     if (!use_render_texture_ati && 1 == use_render_texture_emulation) {
         return GL_TRUE;
     }
-    if (NULL != pglXDrawableAttribARB) {
+    if (NULL != pglXDrawableAttribATI) {
         if (use_render_texture_ati) {
             FIXME("Need conversion for GLX_ATI_render_texture\n");
         }
-        return pglXDrawableAttribARB(object->display, object->drawable, piAttribList); 
+        return pglXDrawableAttribATI(object->display, object->drawable, piAttribList);
     }
     return GL_FALSE;
 }
@@ -2712,6 +2704,13 @@ static GLboolean WINAPI X11DRV_wglGetPixelFormatAttribivARB(HDC hdc, int iPixelF
                 break;
 
             case WGL_SUPPORT_GDI_ARB:
+                if (!fmt) goto pix_error;
+                hTest = pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DOUBLEBUFFER, &tmp);
+                if (hTest) goto get_error;
+                if(tmp) {
+                    piValues[i] = GL_FALSE;
+                    continue;
+                }
                 curGLXAttr = GLX_X_RENDERABLE;
                 break;
 
@@ -2893,8 +2892,35 @@ static GLboolean WINAPI X11DRV_wglBindTexImageARB(HPBUFFERARB hPbuffer, int iBuf
         return GL_TRUE;
     }
 
-    if (NULL != pglXBindTexImageARB) {
-        return pglXBindTexImageARB(object->display, object->drawable, iBuffer);
+    if (NULL != pglXBindTexImageATI) {
+        int buffer;
+
+        switch(iBuffer)
+        {
+            case WGL_FRONT_LEFT_ARB:
+                buffer = GLX_FRONT_LEFT_ATI;
+                break;
+            case WGL_FRONT_RIGHT_ARB:
+                buffer = GLX_FRONT_RIGHT_ATI;
+                break;
+            case WGL_BACK_LEFT_ARB:
+                buffer = GLX_BACK_LEFT_ATI;
+                break;
+            case WGL_BACK_RIGHT_ARB:
+                buffer = GLX_BACK_RIGHT_ATI;
+                break;
+            default:
+                ERR("Unknown iBuffer=%#x\n", iBuffer);
+                return FALSE;
+        }
+
+        /* In the sample 'ogl_offscreen_rendering_3' from codesampler.net I get garbage on the screen.
+         * I'm not sure if that's a bug in the ATI extension or in the program. I think that the program
+         * expected a single buffering format since it didn't ask for double buffering. A buffer swap
+         * fixed the program. I don't know what the correct behavior is. On the other hand that demo
+         * works fine using our pbuffer emulation path.
+         */
+        return pglXBindTexImageATI(object->display, object->drawable, buffer);
     }
     return GL_FALSE;
 }
@@ -2919,8 +2945,28 @@ static GLboolean WINAPI X11DRV_wglReleaseTexImageARB(HPBUFFERARB hPbuffer, int i
     if (!use_render_texture_ati && 1 == use_render_texture_emulation) {
         return GL_TRUE;
     }
-    if (NULL != pglXReleaseTexImageARB) {
-        return pglXReleaseTexImageARB(object->display, object->drawable, iBuffer);
+    if (NULL != pglXReleaseTexImageATI) {
+        int buffer;
+
+        switch(iBuffer)
+        {
+            case WGL_FRONT_LEFT_ARB:
+                buffer = GLX_FRONT_LEFT_ATI;
+                break;
+            case WGL_FRONT_RIGHT_ARB:
+                buffer = GLX_FRONT_RIGHT_ATI;
+                break;
+            case WGL_BACK_LEFT_ARB:
+                buffer = GLX_BACK_LEFT_ATI;
+                break;
+            case WGL_BACK_RIGHT_ARB:
+                buffer = GLX_BACK_RIGHT_ATI;
+                break;
+            default:
+                ERR("Unknown iBuffer=%#x\n", iBuffer);
+                return FALSE;
+        }
+        return pglXReleaseTexImageATI(object->display, object->drawable, buffer);
     }
     return GL_FALSE;
 }
