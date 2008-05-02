@@ -1,3 +1,43 @@
+wine (0.9.43-1) unstable; urgency=low
+
+  * New upstream release 0.9.43.
+    - Direct3D support on top of WGL instead of GLX for better portability.
+    - Many DirectSound fixes.
+    - Still more gdiplus functions.
+    - Many crypt32 improvements.
+    - Lots of bug fixes.
+  * This version was released Aug 10, 2007.
+  * Deleted the move_to_fhs debconf template from libwine, as it
+    pertains to a transition that happened many years ago.
+    This was the only debconf template in libwine.
+    Closes: #440365.
+  * Deleted the move_to_fhs check from the libwine preinst script.
+    This was the only debconf usage in libwine; it no longer uses debconf.
+  * Deleted the rest of the libwine preinst script too, it only
+    applied to very old Wine installations. Deleted the file.
+  * Deleted the del_wine_conf debconf template from wine-bin, as it
+    also pertains to a transition that happened many years ago.
+  * Deleted the del_wine_conf check from the wine-bin configure script.
+    This was the only thing in it. Deleted the file.
+  * Deleted the del_wine_conf check from the wine-bin postinst script.
+    This was the only debconf usage in wine-bin; it no longer uses debconf.
+  * Deleted the wine-bin postrm script. It only deleted wine.conf
+    on purge, and wine.conf should have been deleted long ago.
+  * Deleted the install_type template from wine-bin, as this template has
+    not been used for years, if ever, and judging by the direction Wine
+    development is heading, will never be used again.
+    This was the only remaining debconf template in wine-bin.
+  * Deleted the po/ directory, since no debconf templates remain
+    whatsoever.
+  * Due to deletion, the bug in po/POTFILES.in (obsolete filename after
+    renaming wine to wine-bin) no longer apply. Closes: #440412.
+  * Deleted debconf-related dependencies from the control file.
+  * Deleted debconf-related commands from the rules file.
+  * Due to deletion, new debconf translations no longer apply.
+    Closes: #427024, #440730.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 05 Sep 2007 05:52:57 -0400
+
 wine (0.9.42-1) unstable; urgency=low
 
   * New upstream release 0.9.42.

@@ -42,7 +42,7 @@ Description: Windows API Implementation (standard suite)
 
 Package: wine-bin
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: ${debconf-depends}, libwine (= ${binary:Version}), xbase-clients (>= 4.0) | xcontrib
+Depends: libwine (= ${binary:Version}), xbase-clients (>= 4.0) | xcontrib
 Conflicts: binfmt-support (<< 1.1.2)
 Replaces: libwine (<< 0.0.20010216), wine-utils (<< 0.9.29), wine (<< 0.9.35)
 Description: Windows API Implementation (Binary Loader)
@@ -72,7 +72,7 @@ Description: Windows API Implementation (Development files)
 Package: libwine
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: ${debconf-depends}, ${shlibs:Depends}${freetype}, ia32-libs (>= 1.19) [amd64]
+Depends: ${shlibs:Depends}${freetype}, ia32-libs (>= 1.19) [amd64]
 Replaces: libwine0.0.971116, wine (<< 0.9.11-1), libwine-twain (<< 0.9.13)
 Conflicts: libwine0.0.971116
 Recommends: libwine-print, libwine-gl

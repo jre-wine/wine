@@ -15,14 +15,6 @@ else
 CFLAGS=-O2 -g
 endif
 
-ifeq (,$(wildcard /usr/bin/po2debconf))
-PO2DEBCONF := no
-MINDEBCONFVER := 0.5
-else
-PO2DEBCONF := yes
-MINDEBCONFVER := 1.2.0
-endif
-
 DEB_HOST_GNU_SYSTEM	?= $(shell dpkg-architecture -qDEB_HOST_GNU_SYSTEM)
 DEB_HOST_GNU_CPU	?= $(shell dpkg-architecture -qDEB_HOST_GNU_CPU)
 
@@ -70,18 +62,6 @@ clean:
 
 	-$(MAKE) distclean
 
-ifeq ($(PO2DEBCONF),yes)
-	# Hack for woody compatibility. This makes sure that the
-	# debian/templates file shipped in the source package doesn't
-	# specify encodings, which woody's debconf can't handle. If building
-	# on a system with po-debconf installed (conveniently debhelper (>=
-	# 4.1.16) depends on it), the binary-arch target will generate a
-	# better version for sarge.
-	echo 1 > debian/po/output
-	po2debconf debian/wine-bin.templates.master > debian/wine-bin.templates
-	po2debconf debian/libwine.templates.master > debian/libwine.templates
-	rm -f debian/po/output
-endif
 	dh_clean
 
 install-indep: build-indep
@@ -178,12 +158,6 @@ endif
 	mv debian/libwine/usr/lib/wine/wineps*   debian/libwine-print/usr/lib/wine
 endif
 
-ifeq ($(PO2DEBCONF),yes)
-	po2debconf -e utf8 debian/wine-bin.templates.master > debian/wine-bin.templates
-	po2debconf -e utf8 debian/libwine.templates.master > debian/libwine.templates
-endif
-
-	dh_installdebconf -s
 	dh_installdocs -s
 #	dh_installmenu -s
 	dh_installmime -s
@@ -229,7 +203,7 @@ ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM), i486-linux-gnu)
 	tar -cpf - `grep-dctrl -v "Architecture: all" debian/control | grep "^Package: " | sed -e "s,^Package: ,debian/,g"` \
 		| lzma -c9 | uuencode - > debian/amd64.tar.lzma.uu
 endif
-	dh_gencontrol -s -- -V'debconf-depends=debconf (>= $(MINDEBCONFVER)) | debconf-2.0'
+	dh_gencontrol -s
 	dh_md5sums -s
 	dh_builddeb -s
 
