@@ -1,3 +1,39 @@
+wine (0.9.49-1) unstable; urgency=low
+
+  * New upstream release 0.9.49.
+    - Many copy protection fixes.
+    - GLSL is now the default for Direct3D.
+    - Lots of memory errors fixed thanks to Valgrind.
+    - Support for TOPMOST windows.
+    - Beginnings of an inetcomm dll implementation.
+    - Lots of bug fixes.
+  * This version was released Nov 9, 2007.
+  * Added debian/tmp to all file paths in debian/*.install,
+    so I don't have to use dh_install's --sourcedir anymore.
+    Tweaked things a bit so almost everything I'm including
+    in the packaging is installed with dh_install instead of
+    with "install"/"cp" commands in debian/rules.
+  * On amd64, no longer explicitly add dependencies on libfreetype6,
+    libcupsys2, and libjack0.100.0-0; after all, wine needs the 32-bit
+    libraries in ia32-libs, not these 64-bit ones.
+  * Also moved the generation of the amd64.tar.lzma.uu further up in the
+    build process, before the dh_makeshlibs/dh_installdeb/dh_shlibdeps,
+    so that maintainer scripts and dependencies should be generated a bit
+    more like they would if the binaries were compiled directly on amd64.
+  * Deleted debian/shlibs.local, I doubt this hack is needed anymore.
+    (It contained overrides for GL and OSMesa dependencies, other OpenGL
+    packages (like nvidia-glx) probably have proper shlibs by now.)
+  * Updated -l option for dh_shlibdeps to properly handle the way recent
+    Wine versions are built. Added -L libwine, too.
+  * After generating amd64.tar.lzma.uu, debian/rules will now try to update
+    the source package with it if I set the DEB_FIXDIFF environment variable.
+    That means I only have to rebuild the package once, not twice, before
+    I can upload it. Yay.
+  * And I can set DEB_SAVEBUILD to avoid having to recompile everything
+    if I want to tweak the packaging further... double-yay.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 14 Dec 2007 07:24:02 +0100
+
 wine (0.9.48-1) unstable; urgency=low
 
   * New upstream release 0.9.48.
