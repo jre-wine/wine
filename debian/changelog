@@ -1,3 +1,44 @@
+wine (0.9.56-1) unstable; urgency=low
+
+  * New upstream release 0.9.56.
+    - Proper handling of OpenGL/Direct3D windows with menu bars.
+    - Stubs for all the d3dx9_xx dlls.
+    - Several graphics optimizations.
+    - Many installer fixes.
+    - Improved MIME message support.
+    - Lots of bug fixes.
+  * This version was released Feb 22, 2008.
+  * Added kfreebsd-amd64 to Architecture fields in debian/control.
+  * On amd64 architectures, libwine-dev now also depends on libc6-dev-i386.
+  * Force libwine to depend on libhal, libssl, libXcursor, libXi, libXrandr,
+    and libXinerama.
+    While the upstream Wine developers probably don't like the way I handle
+    dependencies much, I believe that my dependency system might be quite
+    useful on amd64 in the future, when users won't necessarily have the
+    necessary 32-bit libraries installed even when the regular 64-bit
+    libraries are installed and configured. And then they would be like,
+    "why doesn't ALSA sound work in Wine?!?!!111one1", "why can't I
+    print???", or "why won't it load SSL? I've installed it!"
+  * Force libwine-gl to depend on libXcomposite.
+    Technically, Xcomposite is loaded from x11drv, which is in libwine,
+    not libwine-gl, but I believe Xcomposite is only actually used for
+    offscreen rendering surfaces for 3D applications, so it seems
+    appropriate that libwine-gl pulls it in.
+  * Force wine-bin to depend on ncurses.
+    I'm not sure how useful this is. It's only used by wineconsole if
+    you specifically request ncurses-mode, and ncurses-mode is currently
+    broken. But then again, why not? It's just ncurses. Everybody has it.
+  * Added --noinhibit-exec linker option to debian/gendeps.sh, just in
+    case. Should hopefully ensure that even if not all build dependencies
+    are available at build time, at least information about those that
+    are will get into the built binary packages.
+  * Moved the d3dx9 dlls to libwine-gl.
+  * Added Homepage field to debian/control.
+  * Added libwine-oss to package list in README.Debian, and slightly
+    clarified what the metapackage does.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 03 Mar 2008 03:06:55 +0100
+
 wine (0.9.55-1) unstable; urgency=low
 
   * New upstream release 0.9.55.

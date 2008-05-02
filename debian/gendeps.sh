@@ -7,7 +7,7 @@ for dep in debian/*.deps; do
   deplist=$(sed 's,^,-l,' $dep)
 #  echo $path: $deplist
   for arch in $ARCHS; do
-    gcc -m$arch -o "$path/extradep$arch" debian/extradep.c $deplist
+    gcc -m$arch -Wl,--noinhibit-exec -o "$path/extradep$arch" debian/extradep.c $deplist
   done
 done
 # return success
