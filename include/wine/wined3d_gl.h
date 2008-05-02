@@ -2887,6 +2887,39 @@ typedef void (WINE_GLAPI * PGLFNFINISHRENDERAPPLEPROC) (void);
 #define GL_SAMPLER_2D_RECT_SHADOW_ARB       0x8B64
 #endif
 
+/* GL_APPLE_float_pixels */
+#ifndef GL_APPLE_float_pixels
+#define GL_APPLE_float_pixels
+#define GL_HALF_APPLE                       0x140B
+#define GL_COLOR_FLOAT_APPLE                0x8A0F
+#define GL_RGBA_FLOAT32_APPLE               0x8814
+#define GL_RGB_FLOAT32_APPLE                0x8815
+#define GL_ALPHA_FLOAT32_APPLE              0x8816
+#define GL_INTENSITY_FLOAT32_APPLE          0x8817
+#define GL_LUMINANCE_FLOAT32_APPLE          0x8818
+#define GL_LUMINANCE_ALPHA_FLOAT32_APPLE    0x8819
+#define GL_RGBA_FLOAT16_APPLE               0x881A
+#define GL_RGB_FLOAT16_APPLE                0x881B
+#define GL_ALPHA_FLOAT16_APPLE              0x881C
+#define GL_INTENSITY_FLOAT16_APPLE          0x881D
+#define GL_LUMINANCE_FLOAT16_APPLE          0x881E
+#define GL_LUMINANCE_ALPHA_FLOAT16_APPLE    0x881F
+#endif
+
+/* GL_EXT_gpu_program_parameters */
+#ifndef GL_EXT_gpu_program_parameters
+#define GL_EXT_gpu_program_parameters
+typedef void (WINE_GLAPI * PGLFNPROGRAMENVPARAMETERS4FVEXTPROC) (GLenum target, GLuint index, GLsizei count, const float *params);
+typedef void (WINE_GLAPI * PGLFNPROGRAMLOCALPARAMETERS4FVEXTPROC) (GLenum target, GLuint index, GLsizei count, const float *params);
+#endif
+
+/* GL_NV_light_max_exponent */
+#ifndef GL_NV_light_max_exponent
+#define GL_NV_light_max_exponent
+#define GL_MAX_SHININESS_NV                 0x8504
+#define GL_MAX_SPOT_EXPONENT_NV             0x8505
+#endif
+
 /* GL_VERSION_2_0 */
 #ifndef GL_VERSION_2_0
 #define GL_VERSION_2_0 1
@@ -3221,6 +3254,7 @@ typedef enum _GL_SupportedExt {
   EXT_TEXTURE_ENV_DOT3,
   EXT_TEXTURE_SRGB,
   EXT_VERTEX_WEIGHTING,
+  EXT_GPU_PROGRAM_PARAMETERS,
   /* NVIDIA */
   NV_HALF_FLOAT,
   NV_FOG_DISTANCE,
@@ -3240,6 +3274,7 @@ typedef enum _GL_SupportedExt {
   NV_VERTEX_PROGRAM3,
   NV_FENCE,
   NV_DEPTH_CLAMP,
+  NV_LIGHT_MAX_EXPONENT,
   /* ATI */
   ATI_SEPARATE_STENCIL,
   ATI_TEXTURE_ENV_COMBINE3,
@@ -3251,6 +3286,7 @@ typedef enum _GL_SupportedExt {
   APPLE_CLIENT_STORAGE,
   APPLE_FLUSH_RENDER,
   APPLE_YCBCR_422,
+  APPLE_FLOAT_PIXELS,
   /* SGI */
   SGI_VIDEO_SYNC,
   SGIS_GENERATE_MIPMAP,
@@ -3539,7 +3575,10 @@ typedef enum _GL_SupportedExt {
     USE_GL_FUNC(PGLXFNWAITVIDEOSYNCSGIPROC,                         glXWaitVideoSyncSGI,                        SGI_VIDEO_SYNC,         NULL );\
     /* GL_APPLE_flush_render */ \
     USE_GL_FUNC(PGLFNFLUSHRENDERAPPLEPROC,                          glFlushRenderApple,                         APPLE_FLUSH_RENDER,     NULL );\
-    USE_GL_FUNC(PGLFNFINISHRENDERAPPLEPROC,                         glFinishRenderApple,                        APPLE_FLUSH_RENDER,     NULL );
+    USE_GL_FUNC(PGLFNFINISHRENDERAPPLEPROC,                         glFinishRenderApple,                        APPLE_FLUSH_RENDER,     NULL );\
+    /* GL_EXT_gpu_program_parameters */ \
+    USE_GL_FUNC(PGLFNPROGRAMENVPARAMETERS4FVEXTPROC,                glProgramEnvParameters4fvEXT,            EXT_GPU_PROGRAM_PARAMETERS,NULL );\
+    USE_GL_FUNC(PGLFNPROGRAMLOCALPARAMETERS4FVEXTPROC,              glProgramLocalParameters4fvEXT,          EXT_GPU_PROGRAM_PARAMETERS,NULL );
 
 /****************************************************
  * OpenGL WGL defines and functions pointer
@@ -3691,6 +3730,7 @@ typedef struct _WineD3D_GL_Info {
   UINT   max_anisotropy;
   UINT   max_aux_buffers;
   UINT   max_glsl_varyings;
+  float  max_shininess;
 
   unsigned max_vshader_constantsF;
   unsigned max_pshader_constantsF;

@@ -5,6 +5,8 @@ TOPOBJDIR = ..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 
+INSTALLDIRS = $(DESTDIR)$(dlldir)
+
 # special configure-dependent targets
 
 GLU32FILES = glu32
@@ -269,6 +271,7 @@ BASEDIRS = \
 	wtsapi32
 
 IMPLIBSUBDIRS = \
+	adsiid \
 	dxerr8 \
 	dxerr9 \
 	dxguid \
@@ -417,6 +420,7 @@ WIN16_FILES = \
 	wineps16.drv16 \
 	wing.dll16 \
 	winnls.dll16 \
+	winoldap.mod16 \
 	winsock.dll16 \
 	wintab.dll16 \
 	wprocs.dll16
@@ -444,7 +448,7 @@ dispdib.dll16 gdi.exe16 wing.dll16:
 imm.dll16:
 	echo "imm32.dll" >$@
 
-comm.drv16 krnl386.exe16 stress.dll16 system.drv16 toolhelp.dll16 win87em.dll16 windebug.dll16:
+comm.drv16 krnl386.exe16 stress.dll16 system.drv16 toolhelp.dll16 win87em.dll16 windebug.dll16 winoldap.mod16:
 	echo "kernel32.dll" >$@
 
 lzexpand.dll16:
@@ -515,10 +519,12 @@ winsock.dll16:
 STATIC_IMPLIBEXT = $(IMPLIBEXT:def=def.a)
 
 IMPORT_SYMLINKS = \
+	libd3dx9.$(IMPLIBEXT) \
 	libwinspool.$(IMPLIBEXT)
 
 IMPORT_LIBS = \
 	$(IMPORT_SYMLINKS) \
+	adsiid/libadsiid.a \
 	dxerr8/libdxerr8.a \
 	dxerr9/libdxerr9.a \
 	dxguid/libdxguid.a \
@@ -550,6 +556,7 @@ IMPORT_LIBS = \
 	d3dim/libd3dim.$(IMPLIBEXT) \
 	d3drm/libd3drm.$(IMPLIBEXT) \
 	d3dx8/libd3dx8.$(IMPLIBEXT) \
+	d3dx9_36/libd3dx9.$(IMPLIBEXT) \
 	d3dxof/libd3dxof.$(IMPLIBEXT) \
 	dbghelp/libdbghelp.$(IMPLIBEXT) \
 	dciman32/libdciman32.$(IMPLIBEXT) \
@@ -735,6 +742,9 @@ d3drm/libd3drm.$(IMPLIBEXT): d3drm/d3drm.spec $(WINEBUILD)
 
 d3dx8/libd3dx8.$(IMPLIBEXT): d3dx8/d3dx8.spec $(WINEBUILD)
 	@cd d3dx8 && $(MAKE) libd3dx8.$(IMPLIBEXT)
+
+d3dx9_36/libd3dx9.$(IMPLIBEXT): d3dx9_36/d3dx9_36.spec $(WINEBUILD)
+	@cd d3dx9_36 && $(MAKE) libd3dx9.$(IMPLIBEXT)
 
 d3dxof/libd3dxof.$(IMPLIBEXT): d3dxof/d3dxof.spec $(WINEBUILD)
 	@cd d3dxof && $(MAKE) libd3dxof.$(IMPLIBEXT)
@@ -1054,6 +1064,9 @@ wsock32/libwsock32.$(IMPLIBEXT): wsock32/wsock32.spec $(WINEBUILD)
 wtsapi32/libwtsapi32.$(IMPLIBEXT): wtsapi32/wtsapi32.spec $(WINEBUILD)
 	@cd wtsapi32 && $(MAKE) libwtsapi32.$(IMPLIBEXT)
 
+libd3dx9.$(IMPLIBEXT): d3dx9_36/libd3dx9.$(IMPLIBEXT)
+	$(RM) $@ && $(LN_S) d3dx9_36/libd3dx9.$(IMPLIBEXT) $@
+
 libwinspool.$(IMPLIBEXT): winspool.drv/libwinspool.$(IMPLIBEXT)
 	$(RM) $@ && $(LN_S) winspool.drv/libwinspool.$(IMPLIBEXT) $@
 
@@ -1062,6 +1075,7 @@ $(INSTALLSUBDIRS:%=%/__install__) $(INSTALLSUBDIRS:%=%/__install-lib__): $(IMPOR
 
 # Map library name to the corresponding directory
 
+adsiid/libadsiid.a: adsiid
 dxerr8/libdxerr8.a: dxerr8
 dxerr9/libdxerr9.a: dxerr9
 dxguid/libdxguid.a: dxguid
@@ -1071,11 +1085,21 @@ winecrt0/libwinecrt0.a: winecrt0
 
 # Misc rules
 
+.PHONY: $(WIN16_FILES:%=__install__/%)
+
+WIN16_INSTALL = $(WIN16_FILES:%=__install__/%)
+
+$(WIN16_FILES:%=__install__/%): $(WIN16_FILES) $(DESTDIR)$(dlldir) dummy
+	$(INSTALL_DATA) `basename $@` $(DESTDIR)$(dlldir)/`basename $@`
+
+install install-lib:: @WIN16_INSTALL@
+
 install-lib:: $(INSTALLSUBDIRS:%=%/__install-lib__)
 
 install-dev:: $(INSTALLSUBDIRS:%=%/__install-dev__)
 
 uninstall::
+	-cd $(DESTDIR)$(dlldir) && $(RM) $(WIN16_FILES)
 	-rmdir $(DESTDIR)$(dlldir)
 
 clean::

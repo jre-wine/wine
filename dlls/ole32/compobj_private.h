@@ -43,7 +43,6 @@ typedef struct apartment APARTMENT;
 
 DEFINE_OLEGUID( CLSID_DfMarshal, 0x0000030b, 0, 0 );
 DEFINE_OLEGUID( CLSID_PSFactoryBuffer, 0x00000320, 0, 0 );
-DEFINE_OLEGUID( CLSID_InProcFreeMarshaler, 0x0000033a, 0, 0 );
 
 /* signal to stub manager that this is a rem unknown object */
 #define MSHLFLAGSP_REMUNKNOWN   0x80000000
@@ -54,7 +53,7 @@ DEFINE_OLEGUID( CLSID_InProcFreeMarshaler, 0x0000033a, 0, 0 );
  *         locking is required.
  * LOCK  - The value is written to only using Interlocked* functions.
  * CS    - The value is read or written to inside a critical section.
- *         The identifier following "CS" is the specific critical setion that
+ *         The identifier following "CS" is the specific critical section that
  *         must be used.
  * MUTEX - The value is read or written to with a mutex held.
  *         The identifier following "MUTEX" is the specific mutex that
@@ -269,8 +268,7 @@ void apartment_joinmta(void);
 #define DM_HOSTOBJECT   (WM_USER + 1) /* WPARAM = 0, LPARAM = (struct host_object_params *) */
 
 /*
- * Per-thread values are stored in the TEB on offset 0xF80,
- * see http://www.microsoft.com/msj/1099/bugslayer/bugslayer1099.htm
+ * Per-thread values are stored in the TEB on offset 0xF80
  */
 
 /* will create if necessary */

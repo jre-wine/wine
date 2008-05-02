@@ -158,6 +158,7 @@ fi
 AC_CHECK_TOOLS(AS,[gas as],as)
 AC_CHECK_TOOL(LD,ld,ld)
 AC_CHECK_TOOL(AR,ar,ar)
+AC_SUBST(ARFLAGS,rc)
 AC_PROG_RANLIB
 AC_CHECK_TOOL(STRIP,strip,strip)
 AC_CHECK_TOOL(WINDRES,windres,false)
@@ -328,31 +329,31 @@ dnl **** Checks for headers that depend on other ones ****
 
 AC_CHECK_HEADERS([sys/mount.h sys/statfs.h sys/user.h sys/vfs.h],,,
     [#include <sys/types.h>
-     #if HAVE_SYS_PARAM_H
+     #ifdef HAVE_SYS_PARAM_H
      # include <sys/param.h>
      #endif])
 
 AC_CHECK_HEADERS([netinet/in_pcb.h netinet/ip_var.h net/if.h net/if_arp.h net/if_dl.h net/if_types.h net/route.h netipx/ipx.h],,,
     [#include <sys/types.h>
-     #if HAVE_SYS_SOCKET_H
+     #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
      #endif
-     #if HAVE_SYS_SOCKETVAR_H
+     #ifdef HAVE_SYS_SOCKETVAR_H
      # include <sys/socketvar.h>
      #endif
-     #if HAVE_NETINET_IN_H
+     #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
      #endif])
 
 AC_CHECK_HEADERS([netinet/tcp_var.h],,,
     [#include <sys/types.h>
-     #if HAVE_SYS_SOCKET_H
+     #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
      #endif
-     #if HAVE_SYS_SOCKETVAR_H
+     #ifdef HAVE_SYS_SOCKETVAR_H
      # include <sys/socketvar.h>
      #endif
-     #if HAVE_NETINET_IN_H
+     #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
      #endif
      #ifdef HAVE_NETINET_TCP_H
@@ -364,19 +365,19 @@ AC_CHECK_HEADERS([linux/ipx.h],,,
      #ifdef HAVE_ASM_TYPES_H
      # include <asm/types.h>
      #endif
-     #if HAVE_SYS_SOCKET_H
+     #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
      #endif])
 
 AC_CHECK_HEADERS([resolv.h],,,
     [#include <sys/types.h>
-     #if HAVE_SYS_SOCKET_H
+     #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
      #endif
-     #if HAVE_NETINET_IN_H
+     #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
      #endif
-     #if HAVE_ARPA_NAMESER_H
+     #ifdef HAVE_ARPA_NAMESER_H
      # include <arpa/nameser.h>
      #endif])
 
@@ -384,7 +385,7 @@ AC_CHECK_HEADERS(ucontext.h,,,[#include <signal.h>])
 
 AC_CHECK_HEADERS([sys/thr.h],,,
 [#include <sys/types.h>
-#if HAVE_UCONTEXT_H
+#ifdef HAVE_UCONTEXT_H
 #include <ucontext.h>
 #endif])
 
@@ -636,7 +637,7 @@ then
                   $X_LIBS -lXext -lX11 $X_EXTRA_LIBS)
         fi
         WINE_NOTICE_WITH(xvidmode,[test "$ac_cv_lib_Xxf86vm_XF86VidModeQueryExtension" != "yes"],
-                         [libxxf86vm development files not found, XFree86 Vidmode won't be supported.])
+                         [libXxf86vm development files not found, XFree86 Vidmode won't be supported.])
 
         dnl *** Check for Transform functions in Xrender
         if test "$ac_cv_header_X11_extensions_Xrender_h" = "yes" -a "x$ac_cv_lib_soname_X11" != "x" -a "x$ac_cv_lib_soname_Xext" != "x"
@@ -961,8 +962,8 @@ then
                          freetype/ftwinfnt.h \
                          freetype/ftmodapi.h \
                          freetype/internal/sfnt.h,,,
-                         [#if HAVE_FT2BUILD_H
-                          #include <ft2build.h>
+                         [#ifdef HAVE_FT2BUILD_H
+                          # include <ft2build.h>
                           #endif])
 	AC_PREPROC_IFELSE([AC_LANG_SOURCE([[#include <ft2build.h>
                     #include <freetype/fttrigon.h>]])],[AC_DEFINE(HAVE_FREETYPE_FTTRIGON_H, 1,
@@ -1333,6 +1334,8 @@ AC_CHECK_FUNCS(\
 	_strdup \
 	_stricmp \
 	_strnicmp \
+	_strtoi64 \
+	_strtoui64 \
 	_vsnprintf \
 	asctime_r \
 	chsize \
@@ -1384,6 +1387,8 @@ AC_CHECK_FUNCS(\
 	strerror \
 	strncasecmp \
 	strtold \
+	strtoll \
+	strtoull \
 	tcgetattr \
 	thr_kill2 \
 	timegm \
@@ -1664,6 +1669,7 @@ AC_CONFIG_FILES([dlls/Makefile])
 AC_CONFIG_FILES([dlls/acledit/Makefile])
 AC_CONFIG_FILES([dlls/activeds/Makefile])
 AC_CONFIG_FILES([dlls/actxprxy/Makefile])
+AC_CONFIG_FILES([dlls/adsiid/Makefile])
 AC_CONFIG_FILES([dlls/advapi32/Makefile])
 AC_CONFIG_FILES([dlls/advapi32/tests/Makefile])
 AC_CONFIG_FILES([dlls/advpack/Makefile])
@@ -2027,6 +2033,7 @@ AC_CONFIG_FILES([programs/regedit/Makefile])
 AC_CONFIG_FILES([programs/regsvr32/Makefile])
 AC_CONFIG_FILES([programs/rpcss/Makefile])
 AC_CONFIG_FILES([programs/rundll32/Makefile])
+AC_CONFIG_FILES([programs/secedit/Makefile])
 AC_CONFIG_FILES([programs/spoolsv/Makefile])
 AC_CONFIG_FILES([programs/start/Makefile])
 AC_CONFIG_FILES([programs/svchost/Makefile])

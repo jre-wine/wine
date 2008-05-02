@@ -33,7 +33,6 @@
 #include "wine/wingdi16.h"
 
 #include "x11drv.h"
-#include "win.h"
 
 #include "wine/server.h"
 #include "wine/debug.h"
@@ -141,27 +140,25 @@ void X11DRV_SetWindowStyle( HWND hwnd, DWORD old_style )
     new_style = GetWindowLongW( hwnd, GWL_STYLE );
     changed = new_style ^ old_style;
 
-    if (changed & WS_VISIBLE)
+    if ((changed & WS_VISIBLE) && (new_style & WS_VISIBLE))
     {
-        data = X11DRV_get_win_data( hwnd );
-        if (data) invalidate_dce( hwnd, &data->window_rect );
-
         /* we don't unmap windows, that causes trouble with the window manager */
-        if (!(new_style & WS_VISIBLE)) return;
-
-        if (!data && !(data = X11DRV_create_win_data( hwnd ))) return;
+        if (!(data = X11DRV_get_win_data( hwnd )) &&
+            !(data = X11DRV_create_win_data( hwnd ))) return;
 
         if (data->whole_window && X11DRV_is_window_rect_mapped( &data->window_rect ))
         {
             X11DRV_set_wm_hints( display, data );
             if (!data->mapped)
             {
-                TRACE( "mapping win %p\n", hwnd );
+                TRACE( "mapping win %p/%lx\n", hwnd, data->whole_window );
+                wait_for_withdrawn_state( display, data, TRUE );
                 X11DRV_sync_window_style( display, data );
                 wine_tsx11_lock();
                 XMapWindow( display, data->whole_window );
                 wine_tsx11_unlock();
                 data->mapped = TRUE;
+                data->iconic = (new_style & WS_MINIMIZE) != 0;
             }
         }
     }
@@ -181,33 +178,38 @@ void X11DRV_SetWindowStyle( HWND hwnd, DWORD old_style )
 
 
 /***********************************************************************
- *     update_wm_states
+ *     update_net_wm_states
  */
-static void update_wm_states( Display *display, struct x11drv_win_data *data, BOOL force )
+static void update_net_wm_states( Display *display, struct x11drv_win_data *data )
 {
-    static const unsigned int state_atoms[NB_WM_STATES] =
+    static const unsigned int state_atoms[NB_NET_WM_STATES] =
     {
         XATOM__NET_WM_STATE_FULLSCREEN,
         XATOM__NET_WM_STATE_ABOVE,
+        XATOM__NET_WM_STATE_MAXIMIZED_VERT,
         XATOM__NET_WM_STATE_SKIP_PAGER,
         XATOM__NET_WM_STATE_SKIP_TASKBAR
     };
 
-    DWORD i, ex_style, new_state = 0;
+    DWORD i, style, ex_style, new_state = 0;
     XEvent xev;
 
     if (!data->managed) return;
     if (!data->mapped) return;
 
-    if (data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
+    style = GetWindowLongW( data->hwnd, GWL_STYLE );
+    if (style & WS_MAXIMIZE) new_state |= (1 << NET_WM_STATE_MAXIMIZED);
+
+    if (!(style & WS_MAXIMIZE) &&
+        data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
         data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height)
-        new_state |= (1 << WM_STATE_FULLSCREEN);
+        new_state |= (1 << NET_WM_STATE_FULLSCREEN);
 
     ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
     if (ex_style & WS_EX_TOPMOST)
-        new_state |= (1 << WM_STATE_ABOVE);
+        new_state |= (1 << NET_WM_STATE_ABOVE);
     if (ex_style & WS_EX_TOOLWINDOW)
-        new_state |= (1 << WM_STATE_SKIP_TASKBAR) | (1 << WM_STATE_SKIP_PAGER);
+        new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);
 
     xev.xclient.type = ClientMessage;
     xev.xclient.window = data->whole_window;
@@ -216,28 +218,25 @@ static void update_wm_states( Display *display, struct x11drv_win_data *data, BO
     xev.xclient.display = display;
     xev.xclient.send_event = True;
     xev.xclient.format = 32;
-    xev.xclient.data.l[2] = 0;
     xev.xclient.data.l[3] = 1;
 
-    for (i = 0; i < NB_WM_STATES; i++)
+    for (i = 0; i < NB_NET_WM_STATES; i++)
     {
-        if (!((data->wm_state ^ new_state) & (1 << i)))  /* unchanged */
-        {
-            /* if forced, we only add states, we don't remove them */
-            if (!force || !(new_state & (1 << i))) continue;
-        }
+        if (!((data->net_wm_state ^ new_state) & (1 << i))) continue;  /* unchanged */
 
         TRACE( "setting wm state %u for window %p/%lx to %u prev %u\n",
                i, data->hwnd, data->whole_window,
-               (new_state & (1 << i)) != 0, (data->wm_state & (1 << i)) != 0 );
+               (new_state & (1 << i)) != 0, (data->net_wm_state & (1 << i)) != 0 );
 
         xev.xclient.data.l[0] = (new_state & (1 << i)) ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE;
         xev.xclient.data.l[1] = X11DRV_Atoms[state_atoms[i] - FIRST_XATOM];
+        xev.xclient.data.l[2] = ((state_atoms[i] == XATOM__NET_WM_STATE_MAXIMIZED_VERT) ?
+                                 x11drv_atom(_NET_WM_STATE_MAXIMIZED_HORZ) : 0);
         wine_tsx11_lock();
         XSendEvent( display, root_window, False, SubstructureRedirectMask | SubstructureNotifyMask, &xev );
         wine_tsx11_unlock();
     }
-    data->wm_state = new_state;
+    data->net_wm_state = new_state;
 }
 
 
@@ -361,17 +360,8 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
         SERVER_END_REQ;
     }
 
-    /* invalidate DCEs */
-    if ((((swp_flags & SWP_AGG_NOPOSCHANGE) != SWP_AGG_NOPOSCHANGE) && (new_style & WS_VISIBLE)) ||
-        (swp_flags & (SWP_HIDEWINDOW | SWP_SHOWWINDOW)))
-    {
-        RECT rect;
-        UnionRect( &rect, rectWindow, &old_window_rect );
-        invalidate_dce( hwnd, &rect );
-    }
-
-    TRACE( "win %p window %s client %s style %08x\n",
-           hwnd, wine_dbgstr_rect(rectWindow), wine_dbgstr_rect(rectClient), new_style );
+    TRACE( "win %p window %s client %s style %08x flags %08x\n",
+           hwnd, wine_dbgstr_rect(rectWindow), wine_dbgstr_rect(rectClient), new_style, swp_flags );
 
     if (!IsRectEmpty( &valid_rects[0] ))
     {
@@ -402,355 +392,51 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
 
     if (data->mapped && (!(new_style & WS_VISIBLE) || !X11DRV_is_window_rect_mapped( rectWindow )))
     {
-        TRACE( "unmapping win %p\n", hwnd );
+        TRACE( "unmapping win %p/%lx\n", hwnd, data->whole_window );
+        wait_for_withdrawn_state( display, data, FALSE );
         wine_tsx11_lock();
-        XUnmapWindow( display, data->whole_window );
+        if (data->managed) XWithdrawWindow( display, data->whole_window, DefaultScreen(display) );
+        else XUnmapWindow( display, data->whole_window );
         wine_tsx11_unlock();
         data->mapped = FALSE;
+        data->net_wm_state = 0;
     }
 
-    X11DRV_sync_window_position( display, data, swp_flags, &old_client_rect, &old_whole_rect );
+    /* don't change position if we are about to minimize or maximize a managed window */
+    if (!(data->managed && (swp_flags & SWP_STATECHANGED) && (new_style & (WS_MINIMIZE|WS_MAXIMIZE))))
+        X11DRV_sync_window_position( display, data, swp_flags, &old_client_rect, &old_whole_rect );
 
-    if ((new_style & WS_VISIBLE) && !(new_style & WS_MINIMIZE) &&
-        X11DRV_is_window_rect_mapped( rectWindow ))
+    if ((new_style & WS_VISIBLE) &&
+        ((new_style & WS_MINIMIZE) || X11DRV_is_window_rect_mapped( rectWindow )))
     {
-        BOOL was_mapped = data->mapped;
-
-        if (!data->mapped || (swp_flags & SWP_FRAMECHANGED))
+        if (!data->mapped || (swp_flags & (SWP_FRAMECHANGED|SWP_STATECHANGED)))
             X11DRV_set_wm_hints( display, data );
 
         if (!data->mapped)
         {
-            TRACE( "mapping win %p\n", hwnd );
+            TRACE( "mapping win %p/%lx\n", hwnd, data->whole_window );
+            wait_for_withdrawn_state( display, data, TRUE );
             X11DRV_sync_window_style( display, data );
             wine_tsx11_lock();
             XMapWindow( display, data->whole_window );
             XFlush( display );
             wine_tsx11_unlock();
             data->mapped = TRUE;
+            data->iconic = (new_style & WS_MINIMIZE) != 0;
         }
-        update_wm_states( display, data, !was_mapped );
-    }
-}
-
-
-/***********************************************************************
- *           WINPOS_FindIconPos
- *
- * Find a suitable place for an iconic window.
- */
-static POINT WINPOS_FindIconPos( HWND hwnd, POINT pt )
-{
-    RECT rect, rectParent;
-    HWND parent, child;
-    HRGN hrgn, tmp;
-    int xspacing, yspacing;
-
-    parent = GetAncestor( hwnd, GA_PARENT );
-    GetClientRect( parent, &rectParent );
-    if ((pt.x >= rectParent.left) && (pt.x + GetSystemMetrics(SM_CXICON) < rectParent.right) &&
-        (pt.y >= rectParent.top) && (pt.y + GetSystemMetrics(SM_CYICON) < rectParent.bottom))
-        return pt;  /* The icon already has a suitable position */
-
-    xspacing = GetSystemMetrics(SM_CXICONSPACING);
-    yspacing = GetSystemMetrics(SM_CYICONSPACING);
-
-    /* Check if another icon already occupies this spot */
-    /* FIXME: this is completely inefficient */
-
-    hrgn = CreateRectRgn( 0, 0, 0, 0 );
-    tmp = CreateRectRgn( 0, 0, 0, 0 );
-    for (child = GetWindow( parent, GW_HWNDFIRST ); child; child = GetWindow( child, GW_HWNDNEXT ))
-    {
-        WND *childPtr;
-        if (child == hwnd) continue;
-        if ((GetWindowLongW( child, GWL_STYLE ) & (WS_VISIBLE|WS_MINIMIZE)) != (WS_VISIBLE|WS_MINIMIZE))
-            continue;
-        if (!(childPtr = WIN_GetPtr( child )) || childPtr == WND_OTHER_PROCESS)
-            continue;
-        SetRectRgn( tmp, childPtr->rectWindow.left, childPtr->rectWindow.top,
-                    childPtr->rectWindow.right, childPtr->rectWindow.bottom );
-        CombineRgn( hrgn, hrgn, tmp, RGN_OR );
-        WIN_ReleasePtr( childPtr );
-    }
-    DeleteObject( tmp );
-
-    for (rect.bottom = rectParent.bottom; rect.bottom >= yspacing; rect.bottom -= yspacing)
-    {
-        for (rect.left = rectParent.left; rect.left <= rectParent.right - xspacing; rect.left += xspacing)
+        else if ((swp_flags & SWP_STATECHANGED) && (!data->iconic != !(new_style & WS_MINIMIZE)))
         {
-            rect.right = rect.left + xspacing;
-            rect.top = rect.bottom - yspacing;
-            if (!RectInRegion( hrgn, &rect ))
-            {
-                /* No window was found, so it's OK for us */
-                pt.x = rect.left + (xspacing - GetSystemMetrics(SM_CXICON)) / 2;
-                pt.y = rect.top + (yspacing - GetSystemMetrics(SM_CYICON)) / 2;
-                DeleteObject( hrgn );
-                return pt;
-            }
+            data->iconic = (new_style & WS_MINIMIZE) != 0;
+            TRACE( "changing win %p iconic state to %u\n", data->hwnd, data->iconic );
+            wine_tsx11_lock();
+            if (data->iconic)
+                XIconifyWindow( display, data->whole_window, DefaultScreen(display) );
+            else if (X11DRV_is_window_rect_mapped( rectWindow ))
+                XMapWindow( display, data->whole_window );
+            wine_tsx11_unlock();
         }
+        update_net_wm_states( display, data );
     }
-    DeleteObject( hrgn );
-    pt.x = pt.y = 0;
-    return pt;
-}
-
-
-/***********************************************************************
- *           WINPOS_MinMaximize
- */
-UINT WINPOS_MinMaximize( HWND hwnd, UINT cmd, LPRECT rect )
-{
-    WND *wndPtr;
-    UINT swpFlags = 0;
-    POINT size;
-    LONG old_style;
-    WINDOWPLACEMENT wpl;
-
-    TRACE("%p %u\n", hwnd, cmd );
-
-    wpl.length = sizeof(wpl);
-    GetWindowPlacement( hwnd, &wpl );
-
-    if (HOOK_CallHooks( WH_CBT, HCBT_MINMAX, (WPARAM)hwnd, cmd, TRUE ))
-        return SWP_NOSIZE | SWP_NOMOVE;
-
-    if (IsIconic( hwnd ))
-    {
-        switch (cmd)
-        {
-        case SW_SHOWMINNOACTIVE:
-        case SW_SHOWMINIMIZED:
-        case SW_FORCEMINIMIZE:
-        case SW_MINIMIZE:
-            return SWP_NOSIZE | SWP_NOMOVE;
-        }
-        if (!SendMessageW( hwnd, WM_QUERYOPEN, 0, 0 )) return SWP_NOSIZE | SWP_NOMOVE;
-        swpFlags |= SWP_NOCOPYBITS;
-    }
-
-    switch( cmd )
-    {
-    case SW_SHOWMINNOACTIVE:
-    case SW_SHOWMINIMIZED:
-    case SW_FORCEMINIMIZE:
-    case SW_MINIMIZE:
-        if (!(wndPtr = WIN_GetPtr( hwnd )) || wndPtr == WND_OTHER_PROCESS) return 0;
-        if( wndPtr->dwStyle & WS_MAXIMIZE) wndPtr->flags |= WIN_RESTORE_MAX;
-        else wndPtr->flags &= ~WIN_RESTORE_MAX;
-        WIN_ReleasePtr( wndPtr );
-
-        old_style = WIN_SetStyle( hwnd, WS_MINIMIZE, WS_MAXIMIZE );
-
-        X11DRV_set_iconic_state( hwnd );
-
-        wpl.ptMinPosition = WINPOS_FindIconPos( hwnd, wpl.ptMinPosition );
-
-        if (!(old_style & WS_MINIMIZE)) swpFlags |= SWP_STATECHANGED;
-        SetRect( rect, wpl.ptMinPosition.x, wpl.ptMinPosition.y,
-                 GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON) );
-        swpFlags |= SWP_NOCOPYBITS;
-        break;
-
-    case SW_MAXIMIZE:
-        old_style = GetWindowLongW( hwnd, GWL_STYLE );
-        if ((old_style & WS_MAXIMIZE) && (old_style & WS_VISIBLE)) return SWP_NOSIZE | SWP_NOMOVE;
-
-        WINPOS_GetMinMaxInfo( hwnd, &size, &wpl.ptMaxPosition, NULL, NULL );
-
-        old_style = WIN_SetStyle( hwnd, WS_MAXIMIZE, WS_MINIMIZE );
-        if (old_style & WS_MINIMIZE)
-        {
-            WINPOS_ShowIconTitle( hwnd, FALSE );
-            X11DRV_set_iconic_state( hwnd );
-        }
-        if (!(old_style & WS_MAXIMIZE)) swpFlags |= SWP_STATECHANGED;
-        SetRect( rect, wpl.ptMaxPosition.x, wpl.ptMaxPosition.y, size.x, size.y );
-        break;
-
-    case SW_SHOWNOACTIVATE:
-    case SW_SHOWNORMAL:
-    case SW_RESTORE:
-        old_style = WIN_SetStyle( hwnd, 0, WS_MINIMIZE | WS_MAXIMIZE );
-        if (old_style & WS_MINIMIZE)
-        {
-            BOOL restore_max;
-
-            WINPOS_ShowIconTitle( hwnd, FALSE );
-            X11DRV_set_iconic_state( hwnd );
-
-            if (!(wndPtr = WIN_GetPtr( hwnd )) || wndPtr == WND_OTHER_PROCESS) return 0;
-            restore_max = (wndPtr->flags & WIN_RESTORE_MAX) != 0;
-            WIN_ReleasePtr( wndPtr );
-            if (restore_max)
-            {
-                /* Restore to maximized position */
-                WINPOS_GetMinMaxInfo( hwnd, &size, &wpl.ptMaxPosition, NULL, NULL);
-                WIN_SetStyle( hwnd, WS_MAXIMIZE, 0 );
-                swpFlags |= SWP_STATECHANGED;
-                SetRect( rect, wpl.ptMaxPosition.x, wpl.ptMaxPosition.y, size.x, size.y );
-                break;
-            }
-        }
-        else if (!(old_style & WS_MAXIMIZE)) break;
-
-        swpFlags |= SWP_STATECHANGED;
-
-        /* Restore to normal position */
-
-        *rect = wpl.rcNormalPosition;
-        rect->right -= rect->left;
-        rect->bottom -= rect->top;
-
-        break;
-    }
-
-    return swpFlags;
-}
-
-
-/***********************************************************************
- *              ShowWindow   (X11DRV.@)
- */
-BOOL X11DRV_ShowWindow( HWND hwnd, INT cmd )
-{
-    WND *wndPtr;
-    HWND parent;
-    LONG style = GetWindowLongW( hwnd, GWL_STYLE );
-    BOOL wasVisible = (style & WS_VISIBLE) != 0;
-    BOOL showFlag = TRUE;
-    RECT newPos = {0, 0, 0, 0};
-    UINT swp = 0;
-
-    TRACE("hwnd=%p, cmd=%d, wasVisible %d\n", hwnd, cmd, wasVisible);
-
-    switch(cmd)
-    {
-        case SW_HIDE:
-            if (!wasVisible) return FALSE;
-            showFlag = FALSE;
-            swp |= SWP_HIDEWINDOW | SWP_NOSIZE | SWP_NOMOVE;
-            if (hwnd != GetActiveWindow())
-                swp |= SWP_NOACTIVATE | SWP_NOZORDER;
-	    break;
-
-	case SW_SHOWMINNOACTIVE:
-            swp |= SWP_NOACTIVATE | SWP_NOZORDER;
-            /* fall through */
-        case SW_MINIMIZE:
-        case SW_FORCEMINIMIZE: /* FIXME: Does not work if thread is hung. */
-            if (style & WS_CHILD) swp |= SWP_NOACTIVATE | SWP_NOZORDER;
-            /* fall through */
-	case SW_SHOWMINIMIZED:
-            swp |= SWP_SHOWWINDOW | SWP_FRAMECHANGED;
-            swp |= WINPOS_MinMaximize( hwnd, cmd, &newPos );
-            if ((style & WS_MINIMIZE) && wasVisible) return TRUE;
-	    break;
-
-	case SW_SHOWMAXIMIZED: /* same as SW_MAXIMIZE */
-            if (!wasVisible) swp |= SWP_SHOWWINDOW;
-            swp |= SWP_FRAMECHANGED;
-            swp |= WINPOS_MinMaximize( hwnd, SW_MAXIMIZE, &newPos );
-            if ((style & WS_MAXIMIZE) && wasVisible) return TRUE;
-            break;
-
-	case SW_SHOWNA:
-            swp |= SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE;
-            if (style & WS_CHILD) swp |= SWP_NOZORDER;
-            break;
-	case SW_SHOW:
-            if (wasVisible) return TRUE;
-	    swp |= SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOMOVE;
-            if (style & WS_CHILD) swp |= SWP_NOACTIVATE | SWP_NOZORDER;
-	    break;
-
-	case SW_SHOWNOACTIVATE:
-            swp |= SWP_NOACTIVATE | SWP_NOZORDER;
-            /* fall through */
-	case SW_RESTORE:
-            /* fall through */
-	case SW_SHOWNORMAL:  /* same as SW_NORMAL: */
-	case SW_SHOWDEFAULT: /* FIXME: should have its own handler */
-            if (!wasVisible) swp |= SWP_SHOWWINDOW;
-            if (style & (WS_MINIMIZE | WS_MAXIMIZE))
-            {
-                swp |= SWP_FRAMECHANGED;
-                swp |= WINPOS_MinMaximize( hwnd, cmd, &newPos );
-            }
-            else
-            {
-                if (wasVisible) return TRUE;
-                swp |= SWP_NOSIZE | SWP_NOMOVE;
-            }
-            if (style & WS_CHILD && !(swp & SWP_STATECHANGED)) swp |= SWP_NOACTIVATE | SWP_NOZORDER;
-	    break;
-    }
-
-    if ((showFlag != wasVisible || cmd == SW_SHOWNA) && cmd != SW_SHOWMAXIMIZED && !(swp & SWP_STATECHANGED))
-    {
-        SendMessageW( hwnd, WM_SHOWWINDOW, showFlag, 0 );
-        if (!IsWindow( hwnd )) return wasVisible;
-    }
-
-    parent = GetAncestor( hwnd, GA_PARENT );
-    if (parent && !IsWindowVisible( parent ) && !(swp & SWP_STATECHANGED))
-    {
-        /* if parent is not visible simply toggle WS_VISIBLE and return */
-        if (showFlag) WIN_SetStyle( hwnd, WS_VISIBLE, 0 );
-        else WIN_SetStyle( hwnd, 0, WS_VISIBLE );
-    }
-    else
-        SetWindowPos( hwnd, HWND_TOP, newPos.left, newPos.top,
-                      newPos.right, newPos.bottom, LOWORD(swp) );
-
-    if (cmd == SW_HIDE)
-    {
-        HWND hFocus;
-
-        /* FIXME: This will cause the window to be activated irrespective
-         * of whether it is owned by the same thread. Has to be done
-         * asynchronously.
-         */
-
-        if (hwnd == GetActiveWindow())
-            WINPOS_ActivateOtherWindow(hwnd);
-
-        /* Revert focus to parent */
-        hFocus = GetFocus();
-        if (hwnd == hFocus || IsChild(hwnd, hFocus))
-        {
-            HWND parent = GetAncestor(hwnd, GA_PARENT);
-            if (parent == GetDesktopWindow()) parent = 0;
-            SetFocus(parent);
-        }
-    }
-
-    if (IsIconic(hwnd)) WINPOS_ShowIconTitle( hwnd, TRUE );
-
-    if (!(wndPtr = WIN_GetPtr( hwnd )) || wndPtr == WND_OTHER_PROCESS) return wasVisible;
-
-    if (wndPtr->flags & WIN_NEED_SIZE)
-    {
-        /* should happen only in CreateWindowEx() */
-	int wParam = SIZE_RESTORED;
-        RECT client = wndPtr->rectClient;
-
-	wndPtr->flags &= ~WIN_NEED_SIZE;
-	if (wndPtr->dwStyle & WS_MAXIMIZE) wParam = SIZE_MAXIMIZED;
-	else if (wndPtr->dwStyle & WS_MINIMIZE) wParam = SIZE_MINIMIZED;
-        WIN_ReleasePtr( wndPtr );
-
-        SendMessageW( hwnd, WM_SIZE, wParam,
-                      MAKELONG( client.right - client.left, client.bottom - client.top ));
-        SendMessageW( hwnd, WM_MOVE, 0, MAKELONG( client.left, client.top ));
-    }
-    else WIN_ReleasePtr( wndPtr );
-
-    /* if previous state was minimized Windows sets focus to the window */
-    if (style & WS_MINIMIZE) SetFocus( hwnd );
-
-    return wasVisible;
 }
 
 
@@ -760,20 +446,27 @@ BOOL X11DRV_ShowWindow( HWND hwnd, INT cmd )
 void X11DRV_MapNotify( HWND hwnd, XEvent *event )
 {
     struct x11drv_win_data *data;
-    HWND hwndFocus = GetFocus();
-    WND *win;
+    int state;
 
     if (!(data = X11DRV_get_win_data( hwnd ))) return;
+    if (!data->mapped) return;
 
-    if (!(win = WIN_GetPtr( hwnd ))) return;
+    if (!data->managed)
+    {
+        HWND hwndFocus = GetFocus();
+        if (hwndFocus && IsChild( hwnd, hwndFocus )) X11DRV_SetFocus(hwndFocus);  /* FIXME */
+        return;
+    }
+    if (!data->iconic) return;
 
-    if (data->managed && (win->dwStyle & WS_VISIBLE) && (win->dwStyle & WS_MINIMIZE))
+    state = get_window_wm_state( event->xmap.display, data );
+    if (state == NormalState)
     {
         int x, y;
         unsigned int width, height, border, depth;
         Window root, top;
+        WINDOWPLACEMENT wp;
         RECT rect;
-        LONG style = WS_VISIBLE;
 
         /* FIXME: hack */
         wine_tsx11_lock();
@@ -788,20 +481,19 @@ void X11DRV_MapNotify( HWND hwnd, XEvent *event )
         OffsetRect( &rect, virtual_screen_rect.left, virtual_screen_rect.top );
         X11DRV_X_to_window_rect( data, &rect );
 
-        invalidate_dce( hwnd, &data->window_rect );
+        wp.length = sizeof(wp);
+        GetWindowPlacement( hwnd, &wp );
+        wp.flags = 0;
+        wp.showCmd = SW_RESTORE;
+        wp.rcNormalPosition = rect;
 
-        if (win->flags & WIN_RESTORE_MAX) style |= WS_MAXIMIZE;
-        WIN_SetStyle( hwnd, style, WS_MINIMIZE );
-        WIN_ReleasePtr( win );
-
-        SendMessageW( hwnd, WM_SHOWWINDOW, SW_RESTORE, 0 );
+        TRACE( "restoring win %p/%lx\n", hwnd, data->whole_window );
+        data->iconic = FALSE;
         data->lock_changes++;
-        SetWindowPos( hwnd, 0, rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top,
-                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_STATECHANGED );
+        SetWindowPlacement( hwnd, &wp );
         data->lock_changes--;
     }
-    else WIN_ReleasePtr( win );
-    if (hwndFocus && IsChild( hwnd, hwndFocus )) X11DRV_SetFocus(hwndFocus);  /* FIXME */
+    else TRACE( "win %p/%lx ignoring since state=%d\n", hwnd, data->whole_window, state );
 }
 
 
@@ -811,31 +503,21 @@ void X11DRV_MapNotify( HWND hwnd, XEvent *event )
 void X11DRV_UnmapNotify( HWND hwnd, XEvent *event )
 {
     struct x11drv_win_data *data;
-    WND *win;
+    int state;
 
     if (!(data = X11DRV_get_win_data( hwnd ))) return;
+    if (!data->managed || !data->mapped || data->iconic) return;
 
-    if (!(win = WIN_GetPtr( hwnd ))) return;
-
-    if ((win->dwStyle & WS_VISIBLE) && data->managed &&
-        X11DRV_is_window_rect_mapped( &win->rectWindow ))
+    state = get_window_wm_state( event->xunmap.display, data );
+    if (state == IconicState)
     {
-        if (win->dwStyle & WS_MAXIMIZE)
-            win->flags |= WIN_RESTORE_MAX;
-        else if (!(win->dwStyle & WS_MINIMIZE))
-            win->flags &= ~WIN_RESTORE_MAX;
-
-        WIN_SetStyle( hwnd, WS_MINIMIZE, WS_MAXIMIZE );
-        WIN_ReleasePtr( win );
-
-        EndMenu();
-        SendMessageW( hwnd, WM_SHOWWINDOW, SW_MINIMIZE, 0 );
+        TRACE( "minimizing win %p/%lx\n", hwnd, data->whole_window );
+        data->iconic = TRUE;
         data->lock_changes++;
-        SetWindowPos( hwnd, 0, 0, 0, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON),
-                      SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_STATECHANGED );
+        ShowWindow( hwnd, SW_MINIMIZE );
         data->lock_changes--;
     }
-    else WIN_ReleasePtr( win );
+    else TRACE( "win %p/%lx ignoring since state=%d\n", hwnd, data->whole_window, state );
 }
 
 struct desktop_resize_data
@@ -856,7 +538,7 @@ static BOOL CALLBACK update_windows_on_desktop_resize( HWND hwnd, LPARAM lparam 
     if (GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE)
     {
         /* update the full screen state */
-        update_wm_states( display, data, FALSE );
+        update_net_wm_states( display, data );
     }
 
     if (resize_data->old_virtual_rect.left != virtual_screen_rect.left) mask |= CWX;

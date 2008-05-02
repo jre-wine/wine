@@ -72,7 +72,7 @@
 @ stub GdipCreateAdjustableArrowCap
 @ stub GdipCreateBitmapFromDirectDrawSurface
 @ stdcall GdipCreateBitmapFromFile(wstr ptr)
-@ stub GdipCreateBitmapFromFileICM
+@ stdcall GdipCreateBitmapFromFileICM(wstr ptr)
 @ stub GdipCreateBitmapFromGdiDib
 @ stdcall GdipCreateBitmapFromGraphics(long long ptr ptr)
 @ stub GdipCreateBitmapFromHBITMAP
@@ -153,9 +153,9 @@
 @ stdcall GdipDisposeImage(ptr)
 @ stdcall GdipDisposeImageAttributes(ptr)
 @ stdcall GdipDrawArc(ptr ptr long long long long long long)
-@ stub GdipDrawArcI
+@ stdcall GdipDrawArcI(ptr ptr long long long long long long)
 @ stdcall GdipDrawBezier(ptr ptr long long long long long long long long)
-@ stub GdipDrawBezierI
+@ stdcall GdipDrawBezierI(ptr ptr long long long long long long long long)
 @ stub GdipDrawBeziers
 @ stub GdipDrawBeziersI
 @ stub GdipDrawCachedBitmap
@@ -184,11 +184,11 @@
 @ stub GdipDrawImageRect
 @ stub GdipDrawImageRectI
 @ stdcall GdipDrawImageRectRect(ptr ptr long long long long long long long long long ptr long ptr)
-@ stub GdipDrawImageRectRectI
+@ stdcall GdipDrawImageRectRectI(ptr ptr long long long long long long long long long ptr long ptr)
 @ stdcall GdipDrawLine(ptr ptr long long long long)
 @ stdcall GdipDrawLineI(ptr ptr long long long long)
 @ stdcall GdipDrawLines(ptr ptr ptr long)
-@ stub GdipDrawLinesI
+@ stdcall GdipDrawLinesI(ptr ptr ptr long)
 @ stdcall GdipDrawPath(ptr ptr ptr)
 @ stdcall GdipDrawPie(ptr ptr long long long long long long)
 @ stub GdipDrawPieI
@@ -283,9 +283,9 @@
 @ stdcall GdipGetImageBounds(ptr ptr ptr)
 @ stub GdipGetImageDecoders
 @ stub GdipGetImageDecodersSize
-@ stub GdipGetImageDimension
-@ stub GdipGetImageEncoders
-@ stub GdipGetImageEncodersSize
+@ stdcall GdipGetImageDimension(ptr ptr ptr)
+@ stdcall GdipGetImageEncoders(long long ptr)
+@ stdcall GdipGetImageEncodersSize(ptr ptr)
 @ stub GdipGetImageFlags
 @ stdcall GdipGetImageGraphicsContext(ptr ptr)
 @ stdcall GdipGetImageHeight(ptr ptr)
@@ -435,7 +435,7 @@
 @ stub GdipIsVisibleRegionPointI
 @ stub GdipIsVisibleRegionRect
 @ stub GdipIsVisibleRegionRectI
-@ stub GdipLoadImageFromFile
+@ stdcall GdipLoadImageFromFile(wstr ptr)
 @ stub GdipLoadImageFromFileICM
 @ stdcall GdipLoadImageFromStream(ptr ptr)
 @ stdcall GdipLoadImageFromStreamICM(ptr ptr)

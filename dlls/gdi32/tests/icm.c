@@ -35,7 +35,13 @@ static void test_GetICMProfileA( HDC dc )
     DWORD size, error;
     char filename[MAX_PATH];
 
+    SetLastError( 0xdeadbeef );
     ret = GetICMProfileA( NULL, NULL, NULL );
+    if ( !ret && ( GetLastError() == ERROR_CALL_NOT_IMPLEMENTED ) )
+    {
+        skip( "GetICMProfileA is not implemented\n" );
+        return;
+    }
     ok( !ret, "GetICMProfileA succeeded\n" );
 
     ret = GetICMProfileA( dc, NULL, NULL );
@@ -73,15 +79,25 @@ static void test_GetICMProfileW( HDC dc )
     DWORD size, error;
     WCHAR filename[MAX_PATH];
 
+    SetLastError( 0xdeadbeef );
     ret = GetICMProfileW( NULL, NULL, NULL );
+    if ( !ret && ( GetLastError() == ERROR_CALL_NOT_IMPLEMENTED ) )
+    {
+        skip( "GetICMProfileW is not implemented\n" );
+        return;
+    }
     ok( !ret, "GetICMProfileW succeeded\n" );
 
     ret = GetICMProfileW( dc, NULL, NULL );
     ok( !ret, "GetICMProfileW succeeded\n" );
 
-    size = MAX_PATH;
-    ret = GetICMProfileW( dc, &size, NULL );
-    ok( ret, "GetICMProfileW failed %d\n", GetLastError() );
+    if (0)
+    {
+        /* Vista crashes */
+        size = MAX_PATH;
+        ret = GetICMProfileW( dc, &size, NULL );
+        ok( ret, "GetICMProfileW failed %d\n", GetLastError() );
+    }
 
     ret = GetICMProfileW( dc, NULL, filename );
     ok( !ret, "GetICMProfileW succeeded\n" );
@@ -107,6 +123,7 @@ static void test_SetICMMode( HDC dc )
 {
     INT ret, knob, save;
 
+    SetLastError( 0xdeadbeef );
     ret = SetICMMode( NULL, 0 );
     ok( !ret, "SetICMMode succeeded (%d)\n", GetLastError() );
 
@@ -127,7 +144,13 @@ static void test_SetICMMode( HDC dc )
     ret = SetICMMode( dc, save );
     ok( ret, "SetICMMode failed (%d)\n", GetLastError() );
 
+    SetLastError( 0xdeadbeef );
     dc = CreateDCW( displayW, NULL, NULL, NULL );
+    if ( !dc && ( GetLastError() == ERROR_CALL_NOT_IMPLEMENTED ) )
+    {
+        skip( "CreateDCW is not implemented\n" );
+        return;
+    }
     ok( dc != NULL, "CreateDCW failed (%d)\n", GetLastError() );
 
     ret = SetICMMode( dc, ICM_QUERY );

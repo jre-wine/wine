@@ -47,6 +47,7 @@ static const struct {
     {"GL_APPLE_fence",                      APPLE_FENCE,                    0                           },
     {"GL_APPLE_flush_render",               APPLE_FLUSH_RENDER,             0                           },
     {"GL_APPLE_ycbcr_422",                  APPLE_YCBCR_422,                0                           },
+    {"GL_APPLE_float_pixels",               APPLE_FLOAT_PIXELS,             0                           },
 
     /* ATI */
     {"GL_ATI_separate_stencil",             ATI_SEPARATE_STENCIL,           0                           },
@@ -106,6 +107,7 @@ static const struct {
     {"GL_EXT_texture_lod_bias",             EXT_TEXTURE_LOD_BIAS,           0                           },
     {"GL_EXT_vertex_shader",                EXT_VERTEX_SHADER,              0                           },
     {"GL_EXT_vertex_weighting",             EXT_VERTEX_WEIGHTING,           0                           },
+    {"GL_EXT_gpu_program_parameters",       EXT_GPU_PROGRAM_PARAMETERS,     0                           },
 
     /* NV */
     {"GL_NV_half_float",                    NV_HALF_FLOAT,                  0                           },
@@ -126,6 +128,7 @@ static const struct {
     {"GL_NV_vertex_program2",               NV_VERTEX_PROGRAM2,             0                           },
     {"GL_NV_vertex_program3",               NV_VERTEX_PROGRAM3,             0                           },
     {"GL_NV_depth_clamp",                   NV_DEPTH_CLAMP,                 0                           },
+    {"GL_NV_light_max_exponent",            NV_LIGHT_MAX_EXPONENT,          0                           },
 
     /* SGI */
     {"GL_SGIS_generate_mipmap",             SGIS_GENERATE_MIPMAP,           0                           },
@@ -138,6 +141,8 @@ static const struct {
 /* Adapters */
 static int numAdapters = 0;
 static struct WineD3DAdapter Adapters[1];
+
+static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat);
 
 /* lookup tables */
 int minLookup[MAX_LOOKUPS];
@@ -784,6 +789,25 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
              */
             gl_info->supported[NV_FENCE] = FALSE;
         }
+        if (gl_info->supported[APPLE_FLOAT_PIXELS]) {
+            /* GL_APPLE_float_pixels == GL_ARB_texture_float + GL_ARB_half_float_pixel
+             *
+             * The enums are the same:
+             * GL_RGBA16F_ARB     = GL_RGBA_FLOAT16_APPLE = 0x881A
+             * GL_RGB16F_ARB      = GL_RGB_FLOAT16_APPLE  = 0x881B
+             * GL_RGBA32F_ARB     = GL_RGBA_FLOAT32_APPLE = 0x8814
+             * GL_RGB32F_ARB      = GL_RGB_FLOAT32_APPLE  = 0x8815
+             * GL_HALF_FLOAT_ARB  = GL_HALF_APPLE         =  0x140B
+             */
+            if(!gl_info->supported[ARB_TEXTURE_FLOAT]) {
+                TRACE_(d3d_caps)(" IMPLIED: GL_ARB_texture_float support(from GL_APPLE_float_pixels\n");
+                gl_info->supported[ARB_TEXTURE_FLOAT] = TRUE;
+            }
+            if(!gl_info->supported[ARB_HALF_FLOAT_PIXEL]) {
+                TRACE_(d3d_caps)(" IMPLIED: GL_ARB_half_float_pixel support(from GL_APPLE_float_pixels\n");
+                gl_info->supported[ARB_HALF_FLOAT_PIXEL] = TRUE;
+            }
+        }
         if (gl_info->supported[ARB_TEXTURE_CUBE_MAP]) {
             TRACE_(d3d_caps)(" IMPLIED: NVIDIA (NV) Texture Gen Reflection support\n");
             gl_info->supported[NV_TEXGEN_REFLECTION] = TRUE;
@@ -931,6 +955,11 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             gl_info->ps_nv_version = PS_VERSION_30;
         } else if (gl_info->supported[NV_FRAGMENT_PROGRAM]) {
             gl_info->ps_nv_version = PS_VERSION_20;
+        }
+        if (gl_info->supported[NV_LIGHT_MAX_EXPONENT]) {
+            glGetFloatv(GL_MAX_SHININESS_NV, &gl_info->max_shininess);
+        } else {
+            gl_info->max_shininess = 128.0;
         }
         if (gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO]) {
             /* If we have full NP2 texture support, disable GL_ARB_texture_rectangle because we will never use it.
@@ -1613,10 +1642,10 @@ static BOOL IWineD3DImpl_IsPixelFormatCompatibleWithDepthFmt(const WineD3D_Pixel
         return FALSE;
     }
 
-    if(cfg->depthSize < depthSize)
+    if(cfg->depthSize != depthSize)
         return FALSE;
 
-    if(cfg->stencilSize < stencilSize)
+    if(cfg->stencilSize != stencilSize)
         return FALSE;
 
     return TRUE;
@@ -1690,19 +1719,17 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, U
     return WINED3DERR_NOTAVAILABLE;
 }
 
-static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE CheckType,
+static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType,
                                             WINED3DFORMAT DisplayFormat, WINED3DFORMAT BackBufferFormat, BOOL Windowed) {
 
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
-    int nCfgs = 0;
-    WineD3D_PixelFormat *cfgs;
-    int it;
     HRESULT hr = WINED3DERR_NOTAVAILABLE;
+    UINT nmodes;
 
     TRACE_(d3d_caps)("(%p)-> (STUB) (Adptr:%d, CheckType:(%x,%s), DispFmt:(%x,%s), BackBuf:(%x,%s), Win?%d): stub\n",
           This,
           Adapter,
-          CheckType, debug_d3ddevicetype(CheckType),
+          DeviceType, debug_d3ddevicetype(DeviceType),
           DisplayFormat, debug_d3dformat(DisplayFormat),
           BackBufferFormat, debug_d3dformat(BackBufferFormat),
           Windowed);
@@ -1712,21 +1739,66 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter
         return WINED3DERR_INVALIDCALL;
     }
 
-    cfgs = Adapters[Adapter].cfgs;
-    nCfgs = Adapters[Adapter].nCfgs;
-    for (it = 0; it < nCfgs; ++it) {
-        if (IWineD3DImpl_IsPixelFormatCompatibleWithRenderFmt(&cfgs[it], DisplayFormat)) {
-            hr = WINED3D_OK;
-            TRACE_(d3d_caps)("OK\n");
-            break ;
-        }
+    /* The task of this function is to check whether a certain display / backbuffer format
+     * combination is available on the given adapter. In fullscreen mode microsoft specified
+     * that the display format shouldn't provide alpha and that ignoring alpha the backbuffer
+     * and display format should match exactly.
+     * In windowed mode format conversion can occur and this depends on the driver. When format
+     * conversion is done, this function should nevertheless fail and applications need to use
+     * CheckDeviceFormatConversion.
+     * At the moment we assume that fullscreen and windowed have the same capabilities */
+
+    /* There are only 4 display formats */
+    if(!((DisplayFormat == WINED3DFMT_R5G6B5) ||
+         (DisplayFormat == WINED3DFMT_X1R5G5B5) ||
+         (DisplayFormat == WINED3DFMT_X8R8G8B8) ||
+         (DisplayFormat == WINED3DFMT_A2R10G10B10)))
+    {
+        TRACE_(d3d_caps)("Format %s unsupported as display format\n", debug_d3dformat(DisplayFormat));
+        return WINED3DERR_NOTAVAILABLE;
     }
 
-    if(hr != WINED3D_OK)
-        ERR("unsupported format %s\n", debug_d3dformat(DisplayFormat));
+    /* If the requested DisplayFormat is not available, don't continue */
+    nmodes = IWineD3DImpl_GetAdapterModeCount(iface, Adapter, DisplayFormat);
+    if(!nmodes) {
+        TRACE_(d3d_caps)("No available modes for display format %s\n", debug_d3dformat(DisplayFormat));
+        return WINED3DERR_NOTAVAILABLE;
+    }
 
-    if(hr != WINED3D_OK)
-        TRACE_(d3d_caps)("returning something different from WINED3D_OK\n");
+    /* Windowed mode allows you to specify WINED3DFMT_UNKNOWN for the backbufferformat, it means 'reuse' the display format for the backbuffer */
+    if(!Windowed && BackBufferFormat == WINED3DFMT_UNKNOWN) {
+        TRACE_(d3d_caps)("BackBufferFormat WINED3FMT_UNKNOWN not available in Windowed mode\n");
+        return WINED3DERR_NOTAVAILABLE;
+    }
+
+    /* In FULLSCREEN mode R5G6B5 can only be mixed with backbuffer format R5G6B5 */
+    if( (DisplayFormat == WINED3DFMT_R5G6B5) && (BackBufferFormat != WINED3DFMT_R5G6B5) ) {
+        TRACE_(d3d_caps)("Unsupported display/backbuffer format combination %s/%s\n", debug_d3dformat(DisplayFormat), debug_d3dformat(BackBufferFormat));
+        return WINED3DERR_NOTAVAILABLE;
+    }
+
+    /* In FULLSCREEN mode X1R5G5B5 can only be mixed with backbuffer format *1R5G5B5 */
+    if( (DisplayFormat == WINED3DFMT_X1R5G5B5) && !((BackBufferFormat == WINED3DFMT_X1R5G5B5) || (BackBufferFormat == WINED3DFMT_A1R5G5B5)) ) {
+        TRACE_(d3d_caps)("Unsupported display/backbuffer format combination %s/%s\n", debug_d3dformat(DisplayFormat), debug_d3dformat(BackBufferFormat));
+        return WINED3DERR_NOTAVAILABLE;
+    }
+
+    /* In FULLSCREEN mode X8R8G8B8 can only be mixed with backbuffer format *8R8G8B8 */
+    if( (DisplayFormat == WINED3DFMT_X8R8G8B8) && !((BackBufferFormat == WINED3DFMT_X8R8G8B8) || (BackBufferFormat == WINED3DFMT_A8R8G8B8)) ) {
+        TRACE_(d3d_caps)("Unsupported display/backbuffer format combination %s/%s\n", debug_d3dformat(DisplayFormat), debug_d3dformat(BackBufferFormat));
+        return WINED3DERR_NOTAVAILABLE;
+    }
+
+    /* A2R10G10B10 is only allowed in fullscreen mode and it can only be mixed with backbuffer format A2R10G10B10 */
+    if( (DisplayFormat == WINED3DFMT_A2R10G10B10) && ((BackBufferFormat != WINED3DFMT_A2R10G10B10) || Windowed)) {
+        TRACE_(d3d_caps)("Unsupported display/backbuffer format combination %s/%s\n", debug_d3dformat(DisplayFormat), debug_d3dformat(BackBufferFormat));
+        return WINED3DERR_NOTAVAILABLE;
+    }
+
+    /* Use CheckDeviceFormat to see if the BackBufferFormat is usable with the given DisplayFormat */
+    hr = IWineD3DImpl_CheckDeviceFormat(iface, Adapter, DeviceType, DisplayFormat, WINED3DUSAGE_RENDERTARGET, WINED3DRTYPE_SURFACE, BackBufferFormat);
+    if(FAILED(hr))
+        TRACE_(d3d_caps)("Unsupported display/backbuffer format combination %s/%s\n", debug_d3dformat(DisplayFormat), debug_d3dformat(BackBufferFormat));
 
     return hr;
 }
@@ -1822,9 +1894,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                 break;
         }
     }
-    /* TODO: Check support against more of the WINED3DUSAGE_QUERY_* constants
-     * See http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/IDirect3D9__CheckDeviceFormat.asp
-     * and http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/D3DUSAGE_QUERY.asp */
+    /* TODO: Check support against more of the WINED3DUSAGE_QUERY_* constants */
     if (Usage & WINED3DUSAGE_QUERY_VERTEXTEXTURE) {
         if (!GL_LIMITS(vertex_samplers)) {
             TRACE_(d3d_caps)("[FAILED]\n");
@@ -2806,6 +2876,20 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     } else {
         object->shader_backend = &none_shader_backend;
     }
+    if(FAILED(object->shader_backend->shader_alloc_private((IWineD3DDevice *) object))) {
+        IWineD3D_Release(object->wineD3D);
+        HeapFree(GetProcessHeap(), 0, object);
+        *ppReturnedDeviceInterface = NULL;
+        return E_OUTOFMEMORY;
+    }
+
+    /* Prefer the vtable with functions optimized for single dirtifyable objects if the shader
+     * model can deal with that. It is essentially the same, just with adjusted
+     * Set*ShaderConstantF implementations
+     */
+    if(object->shader_backend->shader_dirtifyable_constants((IWineD3DDevice *) object)) {
+        object->lpVtbl  = &IWineD3DDevice_DirtyConst_Vtbl;
+    }
 
     /* set the state of the device to valid */
     object->state = WINED3D_OK;
@@ -2935,7 +3019,7 @@ static void test_pbo_functionality(WineD3D_GL_Info *gl_info) {
         WARN_(d3d_caps)("Disabling PBOs. This may result in slower performance\n");
         gl_info->supported[ARB_PIXEL_BUFFER_OBJECT] = FALSE;
     } else {
-        TRACE_(d3d_caps)("PBO test successfull\n");
+        TRACE_(d3d_caps)("PBO test successful\n");
     }
 }
 #undef GLINFO_LOCATION
@@ -3025,10 +3109,10 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
          * We don't want to enable this on all cards, as it adds an extra instruction per texcoord used. This
          * makes the shader slower and eats instruction slots which should be available to the d3d app.
          *
-         * ATI Radeon HD 2xxx cards on MacOS have the issue. Instead of checking for the buggy cards blacklist
-         * all radeon cards on Macs but whitelist the good ones, that way we're prepared for the future. If
-         * this workaround is activated on cards that do not need it it won't break things, just affect
-         * performance negatively
+         * ATI Radeon HD 2xxx cards on MacOS have the issue. Instead of checking for the buggy cards, blacklist
+         * all radeon cards on Macs and whitelist the good ones. That way we're prepared for the future. If
+         * this workaround is activated on cards that do not need it, it won't break things, just affect
+         * performance negatively.
          */
         if(gl_info->gl_vendor == VENDOR_INTEL ||
            (gl_info->gl_vendor == VENDOR_ATI && gl_info->gl_card != CARD_ATI_RADEON_X1600)) {
@@ -3155,7 +3239,7 @@ void fillGLAttribFuncs(WineD3D_GL_Info *gl_info) {
     if(GL_SUPPORT(EXT_SECONDARY_COLOR)) {
         specular_funcs[WINED3DDECLTYPE_D3DCOLOR]    = (void *) specular_d3dcolor;
     } else {
-        specular_funcs[WINED3DDECLTYPE_FLOAT3]      = (void *) warn_no_specular_func;
+        specular_funcs[WINED3DDECLTYPE_D3DCOLOR]      = (void *) warn_no_specular_func;
     }
     specular_funcs[WINED3DDECLTYPE_UBYTE4]      = (void *) invalid_func;
     specular_funcs[WINED3DDECLTYPE_SHORT2]      = (void *) invalid_func;
@@ -3328,9 +3412,10 @@ BOOL InitAdapters(void) {
             TRACE("iPixelFormat=%d, RGBA=%d/%d/%d/%d, depth=%d, stencil=%d\n", cfgs->iPixelFormat, cfgs->redSize, cfgs->greenSize, cfgs->blueSize, cfgs->alphaSize, cfgs->depthSize, cfgs->stencilSize);
             cfgs++;
         }
-        WineD3D_ReleaseFakeGLContext();
 
         fixup_extensions(&Adapters[0].gl_info);
+
+        WineD3D_ReleaseFakeGLContext();
 
         select_shader_mode(&Adapters[0].gl_info, WINED3DDEVTYPE_HAL, &ps_selected_mode, &vs_selected_mode);
         select_shader_max_constants(ps_selected_mode, vs_selected_mode, &Adapters[0].gl_info);

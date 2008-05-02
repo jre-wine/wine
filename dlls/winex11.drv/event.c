@@ -21,6 +21,12 @@
 
 #include "config.h"
 
+#ifdef HAVE_POLL_H
+#include <poll.h>
+#endif
+#ifdef HAVE_SYS_POLL_H
+#include <sys/poll.h>
+#endif
 #include <X11/Xatom.h>
 #include <X11/keysym.h>
 #include <X11/Xlib.h>
@@ -38,7 +44,6 @@
 #include "winuser.h"
 #include "wingdi.h"
 
-#include "win.h"
 #include "x11drv.h"
 
 /* avoid conflict with field names in included win32 headers */
@@ -98,7 +103,7 @@ static struct event_handler handlers[MAX_EVENT_HANDLERS] =
     /* NoExpose */
     /* VisibilityNotify */
     /* CreateNotify */
-    /* DestroyNotify */
+    { DestroyNotify,    X11DRV_DestroyNotify },
     { UnmapNotify,      X11DRV_UnmapNotify },
     { MapNotify,        X11DRV_MapNotify },
     /* MapRequest */
@@ -118,7 +123,7 @@ static struct event_handler handlers[MAX_EVENT_HANDLERS] =
     { MappingNotify,    X11DRV_MappingNotify },
 };
 
-static int nb_event_handlers = 18;  /* change this if you add handlers above */
+static int nb_event_handlers = 19;  /* change this if you add handlers above */
 
 
 /* return the name of an X event */
@@ -239,7 +244,7 @@ static Bool filter_event( Display *display, XEvent *event, char *arg )
 /***********************************************************************
  *           process_events
  */
-static int process_events( Display *display, ULONG_PTR mask )
+static int process_events( Display *display, Bool (*filter)(), ULONG_PTR arg )
 {
     XEvent event;
     HWND hwnd;
@@ -247,14 +252,14 @@ static int process_events( Display *display, ULONG_PTR mask )
     x11drv_event_handler handler;
 
     wine_tsx11_lock();
-    while (XCheckIfEvent( display, &event, filter_event, (char *)mask ))
+    while (XCheckIfEvent( display, &event, filter, (char *)arg ))
     {
         count++;
         if (XFilterEvent( &event, None )) continue;  /* filtered, ignore it */
 
         if (!(handler = find_handler( event.type )))
         {
-            TRACE( "%s, ignoring\n", dbgstr_event( event.type ));
+            TRACE( "%s for win %lx, ignoring\n", dbgstr_event( event.type ), event.xany.window );
             continue;  /* no handler, ignore it */
         }
 
@@ -295,12 +300,12 @@ DWORD X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
 
     data->process_event_count++;
 
-    if (process_events( data->display, mask )) ret = count - 1;
+    if (process_events( data->display, filter_event, mask )) ret = count - 1;
     else if (count || timeout)
     {
         ret = WaitForMultipleObjectsEx( count, handles, flags & MWMO_WAITALL,
                                         timeout, flags & MWMO_ALERTABLE );
-        if (ret == count - 1) process_events( data->display, mask );
+        if (ret == count - 1) process_events( data->display, filter_event, mask );
     }
     else ret = WAIT_TIMEOUT;
 
@@ -583,36 +588,108 @@ static void EVENT_FocusOut( HWND hwnd, XEvent *xev )
 
 
 /***********************************************************************
+ *           get_window_wm_state
+ */
+int get_window_wm_state( Display *display, struct x11drv_win_data *data )
+{
+    struct
+    {
+        CARD32 state;
+        XID     icon;
+    } *state;
+    Atom type;
+    int format, ret = -1;
+    unsigned long count, remaining;
+
+    wine_tsx11_lock();
+    if (!XGetWindowProperty( display, data->whole_window, x11drv_atom(WM_STATE), 0,
+                             sizeof(*state)/sizeof(CARD32), False, x11drv_atom(WM_STATE),
+                             &type, &format, &count, &remaining, (unsigned char **)&state ))
+    {
+        if (type == x11drv_atom(WM_STATE) && format && count >= sizeof(*state)/(format/8))
+            ret = state->state;
+        XFree( state );
+    }
+    wine_tsx11_unlock();
+    return ret;
+}
+
+
+/***********************************************************************
  *           EVENT_PropertyNotify
- *   We use this to release resources like Pixmaps when a selection
- *   client no longer needs them.
  */
 static void EVENT_PropertyNotify( HWND hwnd, XEvent *xev )
 {
-  XPropertyEvent *event = &xev->xproperty;
-  /* Check if we have any resources to free */
-  TRACE("Received PropertyNotify event:\n");
+    XPropertyEvent *event = &xev->xproperty;
+    struct x11drv_win_data *data;
 
-  switch(event->state)
-  {
-    case PropertyDelete:
+    if (!hwnd) return;
+    if (!(data = X11DRV_get_win_data( hwnd ))) return;
+
+    switch(event->state)
     {
-      TRACE("\tPropertyDelete for atom %ld on window %ld\n",
-            event->atom, (long)event->window);
-      break;
-    }
+    case PropertyDelete:
+        if (event->atom == x11drv_atom(WM_STATE))
+        {
+            data->wm_state = WithdrawnState;
+            TRACE( "%p/%lx: WM_STATE deleted\n", data->hwnd, data->whole_window );
+        }
+        break;
 
     case PropertyNewValue:
-    {
-      TRACE("\tPropertyNewValue for atom %ld on window %ld\n\n",
-            event->atom, (long)event->window);
-      break;
+        if (event->atom == x11drv_atom(WM_STATE))
+        {
+            int new_state = get_window_wm_state( event->display, data );
+            if (new_state != -1 && new_state != data->wm_state)
+            {
+                TRACE( "%p/%lx: new WM_STATE %d\n", data->hwnd, data->whole_window, new_state );
+                data->wm_state = new_state;
+            }
+        }
+        break;
     }
-
-    default:
-      break;
-  }
 }
+
+
+/* event filter to wait for a WM_STATE change notification on a window */
+static Bool is_wm_state_notify( Display *display, XEvent *event, XPointer arg )
+{
+    if (event->xany.window != (Window)arg) return 0;
+    return (event->type == DestroyNotify ||
+            (event->type == PropertyNotify && event->xproperty.atom == x11drv_atom(WM_STATE)));
+}
+
+/***********************************************************************
+ *           wait_for_withdrawn_state
+ */
+void wait_for_withdrawn_state( Display *display, struct x11drv_win_data *data, BOOL set )
+{
+    DWORD end = GetTickCount() + 2000;
+
+    if (!data->managed) return;
+
+    TRACE( "waiting for window %p/%lx to become %swithdrawn\n",
+           data->hwnd, data->whole_window, set ? "" : "not " );
+
+    while (data->whole_window && ((data->wm_state == WithdrawnState) == !set))
+    {
+        if (!process_events( display, is_wm_state_notify, data->whole_window ))
+        {
+            struct pollfd pfd;
+            int timeout = end - GetTickCount();
+
+            pfd.fd = ConnectionNumber(display);
+            pfd.events = POLLIN;
+            if (timeout <= 0 || poll( &pfd, 1, timeout ) != 1)
+            {
+                FIXME( "window %p/%lx wait timed out\n", data->hwnd, data->whole_window );
+                break;
+            }
+        }
+    }
+    TRACE( "window %p/%lx state now %d\n", data->hwnd, data->whole_window, data->wm_state );
+}
+
 
 static HWND find_drop_window( HWND hQueryWnd, LPPOINT lpPt )
 {
@@ -655,6 +732,7 @@ static HWND find_drop_window( HWND hQueryWnd, LPPOINT lpPt )
  */
 static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
 {
+    struct x11drv_win_data *data;
     unsigned long	data_length;
     unsigned long	aux_long;
     unsigned char*	p_data = NULL;
@@ -662,7 +740,6 @@ static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
     int			x, y, dummy;
     BOOL	        bAccept;
     Window		win, w_aux_root, w_aux_child;
-    WND*                pWnd;
     HWND		hScope = hWnd;
 
     win = X11DRV_get_whole_window(hWnd);
@@ -673,14 +750,14 @@ static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
     y += virtual_screen_rect.top;
     wine_tsx11_unlock();
 
-    pWnd = WIN_GetPtr(hWnd);
+    if (!(data = X11DRV_get_win_data( hWnd ))) return;
 
     /* find out drop point and drop window */
     if( x < 0 || y < 0 ||
-        x > (pWnd->rectWindow.right - pWnd->rectWindow.left) ||
-        y > (pWnd->rectWindow.bottom - pWnd->rectWindow.top) )
+        x > (data->whole_rect.right - data->whole_rect.left) ||
+        y > (data->whole_rect.bottom - data->whole_rect.top) )
     {   
-	bAccept = pWnd->dwExStyle & WS_EX_ACCEPTFILES; 
+	bAccept = GetWindowLongW( hWnd, GWL_EXSTYLE ) & WS_EX_ACCEPTFILES;
 	x = 0;
 	y = 0; 
     }
@@ -700,7 +777,6 @@ static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
 	    bAccept = FALSE;
 	}
     }
-    WIN_ReleasePtr(pWnd);
 
     if (!bAccept) return;
 
@@ -734,17 +810,11 @@ static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
 
             if( lpDrop )
             {
-                WND *pDropWnd = WIN_GetPtr( hScope );
                 lpDrop->pFiles = sizeof(DROPFILES);
                 lpDrop->pt.x = x;
                 lpDrop->pt.y = y;
-                lpDrop->fNC =
-                    ( x < (pDropWnd->rectClient.left - pDropWnd->rectWindow.left)  ||
-                      y < (pDropWnd->rectClient.top - pDropWnd->rectWindow.top)    ||
-                      x > (pDropWnd->rectClient.right - pDropWnd->rectWindow.left) ||
-                      y > (pDropWnd->rectClient.bottom - pDropWnd->rectWindow.top) );
+                lpDrop->fNC = FALSE;
                 lpDrop->fWide = FALSE;
-                WIN_ReleasePtr(pDropWnd);
                 p_drop = (char *)(lpDrop + 1);
                 p = (char *)p_data;
                 while(*p)
@@ -773,6 +843,7 @@ static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
  */
 static void EVENT_DropURLs( HWND hWnd, XClientMessageEvent *event )
 {
+  struct x11drv_win_data *win_data;
   unsigned long	data_length;
   unsigned long	aux_long, drop_len = 0;
   unsigned char	*p_data = NULL; /* property data */
@@ -831,19 +902,18 @@ static void EVENT_DropURLs( HWND hWnd, XClientMessageEvent *event )
       hDrop = GlobalAlloc( GMEM_SHARE, drop_len );
       lpDrop = (DROPFILES *) GlobalLock( hDrop );
 
-      if( lpDrop ) {
-          WND *pDropWnd = WIN_GetPtr( hWnd );
+      if( lpDrop && (win_data = X11DRV_get_win_data( hWnd )))
+      {
 	  lpDrop->pFiles = sizeof(DROPFILES);
 	  lpDrop->pt.x = x;
 	  lpDrop->pt.y = y;
 	  lpDrop->fNC =
-	    ( x < (pDropWnd->rectClient.left - pDropWnd->rectWindow.left)  ||
-	      y < (pDropWnd->rectClient.top - pDropWnd->rectWindow.top)    ||
-	      x > (pDropWnd->rectClient.right - pDropWnd->rectWindow.left) ||
-	      y > (pDropWnd->rectClient.bottom - pDropWnd->rectWindow.top) );
+	    ( x < (win_data->client_rect.left - win_data->whole_rect.left)  ||
+	      y < (win_data->client_rect.top - win_data->whole_rect.top)    ||
+	      x > (win_data->client_rect.right - win_data->whole_rect.left) ||
+	      y > (win_data->client_rect.bottom - win_data->whole_rect.top) );
 	  lpDrop->fWide = FALSE;
 	  p_drop = (char*)(lpDrop + 1);
-          WIN_ReleasePtr(pDropWnd);
       }
 
       /* create message content */

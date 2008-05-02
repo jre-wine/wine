@@ -173,6 +173,8 @@ static ULONG WINAPI IWineD3DDeviceImpl_Release(IWineD3DDevice *iface) {
             GL_EXTCALL(glDeleteFramebuffersEXT(1, &This->dst_fbo));
         }
 
+        This->shader_backend->shader_free_private(iface);
+
         if (This->glsl_program_lookup) hash_table_destroy(This->glsl_program_lookup);
 
         /* TODO: Clean up all the surfaces and textures! */
@@ -1141,6 +1143,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateQuery(IWineD3DDevice *iface, WINE
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     IWineD3DQueryImpl *object; /*NOTE: impl ref allowed since this is a create function */
     HRESULT hr = WINED3DERR_NOTAVAILABLE;
+    const IWineD3DQueryVtbl *vtable;
 
     /* Just a check to see if we support this type of query */
     switch(Type) {
@@ -1150,6 +1153,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateQuery(IWineD3DDevice *iface, WINE
             hr = WINED3D_OK;
         else
             WARN("Unsupported in local OpenGL implementation: ARB_OCCLUSION_QUERY/NV_OCCLUSION_QUERY\n");
+
+        vtable = &IWineD3DOcclusionQuery_Vtbl;
         break;
 
     case WINED3DQUERYTYPE_EVENT:
@@ -1159,6 +1164,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateQuery(IWineD3DDevice *iface, WINE
              */
             FIXME("(%p) Event query: Unimplemented, but pretending to be supported\n", This);
         }
+        vtable = &IWineD3DEventQuery_Vtbl;
         hr = WINED3D_OK;
         break;
 
@@ -1175,6 +1181,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateQuery(IWineD3DDevice *iface, WINE
     case WINED3DQUERYTYPE_BANDWIDTHTIMINGS:
     case WINED3DQUERYTYPE_CACHEUTILIZATION:
     default:
+        /* Use the base Query vtable until we have a special one for each query */
+        vtable = &IWineD3DQuery_Vtbl;
         FIXME("(%p) Unhandled query type %d\n", This, Type);
     }
     if(NULL == ppQuery || hr != WINED3D_OK) {
@@ -1182,6 +1190,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateQuery(IWineD3DDevice *iface, WINE
     }
 
     D3DCREATEOBJECTINSTANCE(object, Query)
+    object->lpVtbl       = vtable;
     object->type         = Type;
     object->state        = QUERY_CREATED;
     /* allocated the 'extended' data based on the type of query requested */
@@ -1782,7 +1791,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclarationFromFVF(IWineD3D
     return WINED3D_OK;
 }
 
-/* http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/graphics/programmingguide/programmable/vertexshaders/vscreate.asp */
 static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexShader(IWineD3DDevice *iface, IWineD3DVertexDeclaration *vertex_declaration, CONST DWORD *pFunction, IWineD3DVertexShader **ppVertexShader, IUnknown *parent) {
     IWineD3DDeviceImpl       *This = (IWineD3DDeviceImpl *)iface;
     IWineD3DVertexShaderImpl *object;  /* NOTE: impl usage is ok, this is a create */
@@ -1921,6 +1929,54 @@ static void IWineD3DDeviceImpl_LoadLogo(IWineD3DDeviceImpl *This, const char *fi
     return;
 }
 
+static void create_dummy_textures(IWineD3DDeviceImpl *This) {
+    unsigned int i;
+    /* Under DirectX you can have texture stage operations even if no texture is
+    bound, whereas opengl will only do texture operations when a valid texture is
+    bound. We emulate this by creating dummy textures and binding them to each
+    texture stage, but disable all stages by default. Hence if a stage is enabled
+    then the default texture will kick in until replaced by a SetTexture call     */
+    ENTER_GL();
+
+    if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
+        /* The dummy texture does not have client storage backing */
+        glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE);
+        checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE)");
+    }
+    for (i = 0; i < GL_LIMITS(textures); i++) {
+        GLubyte white = 255;
+
+        /* Make appropriate texture active */
+        if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + i));
+            checkGLcall("glActiveTextureARB");
+        } else if (i > 0) {
+            FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
+        }
+
+        /* Generate an opengl texture name */
+        glGenTextures(1, &This->dummyTextureName[i]);
+        checkGLcall("glGenTextures");
+        TRACE("Dummy Texture %d given name %d\n", i, This->dummyTextureName[i]);
+
+        /* Generate a dummy 2d texture (not using 1d because they cause many
+        * DRI drivers fall back to sw) */
+        This->stateBlock->textureDimensions[i] = GL_TEXTURE_2D;
+        glBindTexture(GL_TEXTURE_2D, This->dummyTextureName[i]);
+        checkGLcall("glBindTexture");
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 1, 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &white);
+        checkGLcall("glTexImage2D");
+    }
+    if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
+        /* Reenable because if supported it is enabled by default */
+        glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE);
+        checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE)");
+    }
+
+    LEAVE_GL();
+}
+
 static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPRESENT_PARAMETERS* pPresentationParameters, D3DCB_CREATEADDITIONALSWAPCHAIN D3DCB_CreateAdditionalSwapChain) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
     IWineD3DSwapChainImpl *swapchain = NULL;
@@ -2007,6 +2063,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
 
     /* Setup all the devices defaults */
     IWineD3DStateBlock_InitStartupStateBlock((IWineD3DStateBlock *)This->stateBlock);
+    create_dummy_textures(This);
 #if 0
     IWineD3DImpl_CheckGraphicsMemory();
 #endif
@@ -2059,6 +2116,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     if(wined3d_settings.logo) {
         IWineD3DDeviceImpl_LoadLogo(This, wined3d_settings.logo);
     }
+    This->highest_dirty_ps_const = 0;
+    This->highest_dirty_vs_const = 0;
     return WINED3D_OK;
 
 err_out:
@@ -3393,6 +3452,41 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetVertexShaderConstantF(
     return WINED3D_OK;
 }
 
+static HRESULT WINAPI IWineD3DDeviceImpl_SetVertexShaderConstantF_DirtyConst(
+IWineD3DDevice *iface,
+UINT start,
+CONST float *srcData,
+UINT count) {
+
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    int i;
+
+    TRACE("(iface %p, srcData %p, start %d, count %d)\n",
+            iface, srcData, start, count);
+
+    /* Specifically test start > limit to catch MAX_UINT overflows when adding start + count */
+    if (srcData == NULL || start + count > GL_LIMITS(vshader_constantsF) || start > GL_LIMITS(vshader_constantsF))
+        return WINED3DERR_INVALIDCALL;
+
+    memcpy(&This->updateStateBlock->vertexShaderConstantF[start * 4], srcData, count * sizeof(float) * 4);
+    if(TRACE_ON(d3d)) {
+        for (i = 0; i < count; i++)
+            TRACE("Set FLOAT constant %u to { %f, %f, %f, %f }\n", start + i,
+                    srcData[i*4], srcData[i*4+1], srcData[i*4+2], srcData[i*4+3]);
+    }
+
+    /* We don't want shader constant dirtification to be an O(contexts), so just dirtify the active
+     * context. On a context switch the old context will be fully dirtified
+     */
+    memset(This->activeContext->vshader_const_dirty + start, 1,
+           sizeof(*This->activeContext->vshader_const_dirty) * count);
+    This->highest_dirty_vs_const = max(This->highest_dirty_vs_const, start+count);
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VERTEXSHADERCONSTANT);
+
+    return WINED3D_OK;
+}
+
 static HRESULT WINAPI IWineD3DDeviceImpl_GetVertexShaderConstantF(
     IWineD3DDevice *iface,
     UINT start,
@@ -3786,6 +3880,41 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetPixelShaderConstantF(
     return WINED3D_OK;
 }
 
+static HRESULT WINAPI IWineD3DDeviceImpl_SetPixelShaderConstantF_DirtyConst(
+    IWineD3DDevice *iface,
+    UINT start,
+    CONST float *srcData,
+    UINT count) {
+
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    int i;
+
+    TRACE("(iface %p, srcData %p, start %d, count %d)\n",
+            iface, srcData, start, count);
+
+    /* Specifically test start > limit to catch MAX_UINT overflows when adding start + count */
+    if (srcData == NULL || start + count > GL_LIMITS(pshader_constantsF) || start > GL_LIMITS(pshader_constantsF))
+        return WINED3DERR_INVALIDCALL;
+
+    memcpy(&This->updateStateBlock->pixelShaderConstantF[start * 4], srcData, count * sizeof(float) * 4);
+    if(TRACE_ON(d3d)) {
+        for (i = 0; i < count; i++)
+            TRACE("Set FLOAT constant %u to { %f, %f, %f, %f }\n", start + i,
+                    srcData[i*4], srcData[i*4+1], srcData[i*4+2], srcData[i*4+3]);
+    }
+
+    /* We don't want shader constant dirtification to be an O(contexts), so just dirtify the active
+     * context. On a context switch the old context will be fully dirtified
+     */
+    memset(This->activeContext->pshader_const_dirty + start, 1,
+           sizeof(*This->activeContext->pshader_const_dirty) * count);
+    This->highest_dirty_ps_const = max(This->highest_dirty_ps_const, start+count);
+
+    IWineD3DDeviceImpl_MarkStateDirty(This, STATE_PIXELSHADERCONSTANT);
+
+    return WINED3D_OK;
+}
+
 static HRESULT WINAPI IWineD3DDeviceImpl_GetPixelShaderConstantF(
     IWineD3DDevice *iface,
     UINT start,
@@ -3957,8 +4086,7 @@ process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIndex, DWORD dwCo
              * against d3d8 or d3d9!
              */
 
-            /* Clipping conditions: From
-             * http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/graphics/programmingguide/fixedfunction/viewportsclipping/clippingvolumes.asp
+            /* Clipping conditions: From msdn
              *
              * A vertex is clipped if it does not match the following requirements
              * -rhw < x <= rhw
@@ -5683,7 +5811,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawRectPatch(IWineD3DDevice *iface, UI
     return WINED3D_OK;
 }
 
-/* http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/reference/d3d/interfaces/idirect3ddevice9/DrawTriPatch.asp */
 static HRESULT WINAPI IWineD3DDeviceImpl_DrawTriPatch(IWineD3DDevice *iface, UINT Handle, CONST float* pNumSegs, CONST WINED3DTRIPATCH_INFO* pTriPatchInfo) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     TRACE("(%p) Handle(%d) noSegs(%p) tripatch(%p)\n", This, Handle, pNumSegs, pTriPatchInfo);
@@ -6376,9 +6503,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderTarget(IWineD3DDevice *iface, 
     /* MSDN says that null disables the render target
     but a device must always be associated with a render target
     nope MSDN says that we return invalid call to a null rendertarget with an index of 0
-
-    see http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/programmingguide/AdvancedTopics/PixelPipe/MultipleRenderTarget.asp
-    for more details
     */
     if (RenderTargetIndex == 0 && pRenderTarget == NULL) {
         FIXME("Trying to set render target 0 to NULL\n");
@@ -6881,7 +7005,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
     This->shader_backend->shader_destroy_depth_blt(iface);
 
     for (i = 0; i < GL_LIMITS(textures); i++) {
-        /* The stateblock initialization below will recreate them */
+        /* Textures are recreated below */
         glDeleteTextures(1, &This->dummyTextureName[i]);
         checkGLcall("glDeleteTextures(1, &This->dummyTextureName[i])");
         This->dummyTextureName[i] = 0;
@@ -6987,6 +7111,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
     if(FAILED(hr)) {
         ERR("Resetting the stateblock failed with error 0x%08x\n", hr);
     }
+    create_dummy_textures(This);
 
     /* All done. There is no need to reload resources or shaders, this will happen automatically on the
      * first use
@@ -7370,6 +7495,151 @@ const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl =
     IWineD3DDeviceImpl_EnumResources
 };
 
+const IWineD3DDeviceVtbl IWineD3DDevice_DirtyConst_Vtbl =
+{
+    /*** IUnknown methods ***/
+    IWineD3DDeviceImpl_QueryInterface,
+    IWineD3DDeviceImpl_AddRef,
+    IWineD3DDeviceImpl_Release,
+    /*** IWineD3DDevice methods ***/
+    IWineD3DDeviceImpl_GetParent,
+    /*** Creation methods**/
+    IWineD3DDeviceImpl_CreateVertexBuffer,
+    IWineD3DDeviceImpl_CreateIndexBuffer,
+    IWineD3DDeviceImpl_CreateStateBlock,
+    IWineD3DDeviceImpl_CreateSurface,
+    IWineD3DDeviceImpl_CreateTexture,
+    IWineD3DDeviceImpl_CreateVolumeTexture,
+    IWineD3DDeviceImpl_CreateVolume,
+    IWineD3DDeviceImpl_CreateCubeTexture,
+    IWineD3DDeviceImpl_CreateQuery,
+    IWineD3DDeviceImpl_CreateAdditionalSwapChain,
+    IWineD3DDeviceImpl_CreateVertexDeclaration,
+    IWineD3DDeviceImpl_CreateVertexDeclarationFromFVF,
+    IWineD3DDeviceImpl_CreateVertexShader,
+    IWineD3DDeviceImpl_CreatePixelShader,
+    IWineD3DDeviceImpl_CreatePalette,
+    /*** Odd functions **/
+    IWineD3DDeviceImpl_Init3D,
+    IWineD3DDeviceImpl_Uninit3D,
+    IWineD3DDeviceImpl_SetFullscreen,
+    IWineD3DDeviceImpl_SetMultithreaded,
+    IWineD3DDeviceImpl_EvictManagedResources,
+    IWineD3DDeviceImpl_GetAvailableTextureMem,
+    IWineD3DDeviceImpl_GetBackBuffer,
+    IWineD3DDeviceImpl_GetCreationParameters,
+    IWineD3DDeviceImpl_GetDeviceCaps,
+    IWineD3DDeviceImpl_GetDirect3D,
+    IWineD3DDeviceImpl_GetDisplayMode,
+    IWineD3DDeviceImpl_SetDisplayMode,
+    IWineD3DDeviceImpl_GetHWND,
+    IWineD3DDeviceImpl_SetHWND,
+    IWineD3DDeviceImpl_GetNumberOfSwapChains,
+    IWineD3DDeviceImpl_GetRasterStatus,
+    IWineD3DDeviceImpl_GetSwapChain,
+    IWineD3DDeviceImpl_Reset,
+    IWineD3DDeviceImpl_SetDialogBoxMode,
+    IWineD3DDeviceImpl_SetCursorProperties,
+    IWineD3DDeviceImpl_SetCursorPosition,
+    IWineD3DDeviceImpl_ShowCursor,
+    IWineD3DDeviceImpl_TestCooperativeLevel,
+    /*** Getters and setters **/
+    IWineD3DDeviceImpl_SetClipPlane,
+    IWineD3DDeviceImpl_GetClipPlane,
+    IWineD3DDeviceImpl_SetClipStatus,
+    IWineD3DDeviceImpl_GetClipStatus,
+    IWineD3DDeviceImpl_SetCurrentTexturePalette,
+    IWineD3DDeviceImpl_GetCurrentTexturePalette,
+    IWineD3DDeviceImpl_SetDepthStencilSurface,
+    IWineD3DDeviceImpl_GetDepthStencilSurface,
+    IWineD3DDeviceImpl_SetFVF,
+    IWineD3DDeviceImpl_GetFVF,
+    IWineD3DDeviceImpl_SetGammaRamp,
+    IWineD3DDeviceImpl_GetGammaRamp,
+    IWineD3DDeviceImpl_SetIndices,
+    IWineD3DDeviceImpl_GetIndices,
+    IWineD3DDeviceImpl_SetBaseVertexIndex,
+    IWineD3DDeviceImpl_GetBaseVertexIndex,
+    IWineD3DDeviceImpl_SetLight,
+    IWineD3DDeviceImpl_GetLight,
+    IWineD3DDeviceImpl_SetLightEnable,
+    IWineD3DDeviceImpl_GetLightEnable,
+    IWineD3DDeviceImpl_SetMaterial,
+    IWineD3DDeviceImpl_GetMaterial,
+    IWineD3DDeviceImpl_SetNPatchMode,
+    IWineD3DDeviceImpl_GetNPatchMode,
+    IWineD3DDeviceImpl_SetPaletteEntries,
+    IWineD3DDeviceImpl_GetPaletteEntries,
+    IWineD3DDeviceImpl_SetPixelShader,
+    IWineD3DDeviceImpl_GetPixelShader,
+    IWineD3DDeviceImpl_SetPixelShaderConstantB,
+    IWineD3DDeviceImpl_GetPixelShaderConstantB,
+    IWineD3DDeviceImpl_SetPixelShaderConstantI,
+    IWineD3DDeviceImpl_GetPixelShaderConstantI,
+    IWineD3DDeviceImpl_SetPixelShaderConstantF_DirtyConst,
+    IWineD3DDeviceImpl_GetPixelShaderConstantF,
+    IWineD3DDeviceImpl_SetRenderState,
+    IWineD3DDeviceImpl_GetRenderState,
+    IWineD3DDeviceImpl_SetRenderTarget,
+    IWineD3DDeviceImpl_GetRenderTarget,
+    IWineD3DDeviceImpl_SetFrontBackBuffers,
+    IWineD3DDeviceImpl_SetSamplerState,
+    IWineD3DDeviceImpl_GetSamplerState,
+    IWineD3DDeviceImpl_SetScissorRect,
+    IWineD3DDeviceImpl_GetScissorRect,
+    IWineD3DDeviceImpl_SetSoftwareVertexProcessing,
+    IWineD3DDeviceImpl_GetSoftwareVertexProcessing,
+    IWineD3DDeviceImpl_SetStreamSource,
+    IWineD3DDeviceImpl_GetStreamSource,
+    IWineD3DDeviceImpl_SetStreamSourceFreq,
+    IWineD3DDeviceImpl_GetStreamSourceFreq,
+    IWineD3DDeviceImpl_SetTexture,
+    IWineD3DDeviceImpl_GetTexture,
+    IWineD3DDeviceImpl_SetTextureStageState,
+    IWineD3DDeviceImpl_GetTextureStageState,
+    IWineD3DDeviceImpl_SetTransform,
+    IWineD3DDeviceImpl_GetTransform,
+    IWineD3DDeviceImpl_SetVertexDeclaration,
+    IWineD3DDeviceImpl_GetVertexDeclaration,
+    IWineD3DDeviceImpl_SetVertexShader,
+    IWineD3DDeviceImpl_GetVertexShader,
+    IWineD3DDeviceImpl_SetVertexShaderConstantB,
+    IWineD3DDeviceImpl_GetVertexShaderConstantB,
+    IWineD3DDeviceImpl_SetVertexShaderConstantI,
+    IWineD3DDeviceImpl_GetVertexShaderConstantI,
+    IWineD3DDeviceImpl_SetVertexShaderConstantF_DirtyConst,
+    IWineD3DDeviceImpl_GetVertexShaderConstantF,
+    IWineD3DDeviceImpl_SetViewport,
+    IWineD3DDeviceImpl_GetViewport,
+    IWineD3DDeviceImpl_MultiplyTransform,
+    IWineD3DDeviceImpl_ValidateDevice,
+    IWineD3DDeviceImpl_ProcessVertices,
+    /*** State block ***/
+    IWineD3DDeviceImpl_BeginStateBlock,
+    IWineD3DDeviceImpl_EndStateBlock,
+    /*** Scene management ***/
+    IWineD3DDeviceImpl_BeginScene,
+    IWineD3DDeviceImpl_EndScene,
+    IWineD3DDeviceImpl_Present,
+    IWineD3DDeviceImpl_Clear,
+    /*** Drawing ***/
+    IWineD3DDeviceImpl_DrawPrimitive,
+    IWineD3DDeviceImpl_DrawIndexedPrimitive,
+    IWineD3DDeviceImpl_DrawPrimitiveUP,
+    IWineD3DDeviceImpl_DrawIndexedPrimitiveUP,
+    IWineD3DDeviceImpl_DrawPrimitiveStrided,
+    IWineD3DDeviceImpl_DrawIndexedPrimitiveStrided,
+    IWineD3DDeviceImpl_DrawRectPatch,
+    IWineD3DDeviceImpl_DrawTriPatch,
+    IWineD3DDeviceImpl_DeletePatch,
+    IWineD3DDeviceImpl_ColorFill,
+    IWineD3DDeviceImpl_UpdateTexture,
+    IWineD3DDeviceImpl_UpdateSurface,
+    IWineD3DDeviceImpl_GetFrontBufferData,
+    /*** object tracking ***/
+    IWineD3DDeviceImpl_ResourceReleased,
+    IWineD3DDeviceImpl_EnumResources
+};
 
 const DWORD SavedPixelStates_R[NUM_SAVEDPIXELSTATES_R] = {
     WINED3DRS_ALPHABLENDENABLE   ,

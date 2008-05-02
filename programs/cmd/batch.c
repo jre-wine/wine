@@ -58,7 +58,7 @@ void WCMD_batch (WCHAR *file, WCHAR *command, int called, WCHAR *startLabel, HAN
   BATCH_CONTEXT *prev_context;
 
   if (startLabel == NULL) {
-    for(i=0; (i<((sizeof(extension_batch) * sizeof(WCHAR))/WCMD_BATCH_EXT_SIZE)) &&
+    for(i=0; (i<sizeof(extension_batch)/(WCMD_BATCH_EXT_SIZE * sizeof(WCHAR))) &&
              (h == INVALID_HANDLE_VALUE); i++) {
       strcpyW (string, file);
       CharLower (string);
@@ -506,7 +506,8 @@ void WCMD_HandleTildaModifiers(WCHAR **start, WCHAR *forVariable, WCHAR *forValu
     if (memchrW(firstModifier, 's', modifierLen) != NULL) {
       if (finaloutput[0] != 0x00) strcatW(finaloutput, space);
       /* Don't flag as doneModifier - %~s on its own is processed later */
-      GetShortPathName(outputparam, outputparam, sizeof(outputparam));
+      GetShortPathName(outputparam, outputparam,
+                       sizeof(outputparam)/sizeof(outputparam[0]));
     }
 
     /* 5. Handle 'f' : Fully qualified path (File doesn't have to exist) */

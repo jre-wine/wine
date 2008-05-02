@@ -150,7 +150,7 @@ HRESULT load_type_info(IDispatch *iface, ITypeInfo **pptinfo, REFIID clsid, LCID
 
 /* Create the automation object, placing the result in the pointer ppObj. The automation object is created
  * with the appropriate clsid and invocation function. */
-HRESULT create_automation_object(MSIHANDLE msiHandle, IUnknown *pUnkOuter, LPVOID *ppObj, REFIID clsid,
+static HRESULT create_automation_object(MSIHANDLE msiHandle, IUnknown *pUnkOuter, LPVOID *ppObj, REFIID clsid,
             HRESULT (STDMETHODCALLTYPE *funcInvoke)(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,
                                                     VARIANT*,EXCEPINFO*,UINT*),
                                  void (STDMETHODCALLTYPE *funcFree)(AutomationObject*),
@@ -191,7 +191,7 @@ HRESULT create_automation_object(MSIHANDLE msiHandle, IUnknown *pUnkOuter, LPVOI
 }
 
 /* Create a list enumerator, placing the result in the pointer ppObj.  */
-HRESULT create_list_enumerator(IUnknown *pUnkOuter, LPVOID *ppObj, AutomationObject *pObj, ULONG ulPos)
+static HRESULT create_list_enumerator(IUnknown *pUnkOuter, LPVOID *ppObj, AutomationObject *pObj, ULONG ulPos)
 {
     ListEnumerator *object;
 
@@ -705,7 +705,7 @@ static const struct IEnumVARIANTVtbl ListEnumerator_Vtbl =
 /* Helper function that copies a passed parameter instead of using VariantChangeType like the actual DispGetParam.
    This function is only for VARIANT type parameters that have several types that cannot be properly discriminated
    using DispGetParam/VariantChangeType. */
-HRESULT WINAPI DispGetParam_CopyOnly(
+static HRESULT WINAPI DispGetParam_CopyOnly(
         DISPPARAMS *pdispparams, /* [in] Parameter list */
         UINT        *position,    /* [in] Position of parameter to copy in pdispparams; on return will contain calculated position */
         VARIANT    *pvarResult)  /* [out] Destination for resulting variant */
@@ -1535,6 +1535,7 @@ static HRESULT WINAPI InstallerImpl_Invoke(
     HRESULT hr;
     LPWSTR szString = NULL;
     DWORD dwSize = 0;
+    INSTALLUILEVEL ui;
 
     VariantInit(&varg0);
     VariantInit(&varg1);
@@ -1623,6 +1624,31 @@ static HRESULT WINAPI InstallerImpl_Invoke(
                     ERR("MsiOpenDatabase returned %d\n", ret);
                     return DISP_E_EXCEPTION;
                 }
+            }
+            else return DISP_E_MEMBERNOTFOUND;
+            break;
+
+        case DISPID_INSTALLER_UILEVEL:
+            if (wFlags & DISPATCH_PROPERTYPUT)
+            {
+                hr = DispGetParam(pDispParams, 0, VT_I4, &varg0, puArgErr);
+                if (FAILED(hr)) return hr;
+                if ((ui = MsiSetInternalUI(V_I4(&varg0), NULL) == INSTALLUILEVEL_NOCHANGE))
+                {
+                    ERR("MsiSetInternalUI failed\n");
+                    return DISP_E_EXCEPTION;
+                }
+            }
+            else if (wFlags & DISPATCH_PROPERTYGET)
+            {
+                if ((ui = MsiSetInternalUI(INSTALLUILEVEL_NOCHANGE, NULL) == INSTALLUILEVEL_NOCHANGE))
+                {
+                    ERR("MsiSetInternalUI failed\n");
+                    return DISP_E_EXCEPTION;
+                }
+
+                V_VT(pVarResult) = VT_I4;
+                V_I4(pVarResult) = ui;
             }
             else return DISP_E_MEMBERNOTFOUND;
             break;

@@ -28,7 +28,7 @@
 @ stdcall CallNextHookEx(long long long long)
 @ stdcall CallWindowProcA(ptr long long long long)
 @ stdcall CallWindowProcW(ptr long long long long)
-@ stub CascadeChildWindows
+@ stdcall CascadeChildWindows(long long)
 @ stdcall CascadeWindows(long long ptr long ptr)
 @ stdcall ChangeClipboardChain(long long)
 @ stdcall ChangeDisplaySettingsA(ptr long)
@@ -328,7 +328,7 @@
 @ stdcall GetMessageW(ptr long long long)
 @ stdcall GetMonitorInfoA(long ptr)
 @ stdcall GetMonitorInfoW(long ptr)
-# @ stub GetMouseMovePointsEx
+@ stdcall GetMouseMovePointsEx(long ptr ptr long long)
 @ stdcall GetNextDlgGroupItem(long long long)
 @ stdcall GetNextDlgTabItem(long long long)
 # @ stub GetNextQueueWindow
@@ -698,7 +698,7 @@
 @ stdcall SystemParametersInfoW(long long ptr long)
 @ stdcall TabbedTextOutA(long long long str long long ptr long)
 @ stdcall TabbedTextOutW(long long long wstr long long ptr long)
-@ stub TileChildWindows
+@ stdcall TileChildWindows(long long)
 @ stdcall TileWindows(long long ptr long ptr)
 @ stdcall ToAscii(long long ptr ptr long)
 @ stdcall ToAsciiEx(long long ptr ptr long long)
@@ -788,9 +788,6 @@
 # Wine dll separation hacks, these will go away, don't use them
 #
 @ cdecl HOOK_CallHooks(long long long long long)
-@ cdecl USER_Unlock()
-@ cdecl WINPOS_ActivateOtherWindow(long)
 @ cdecl WINPOS_GetMinMaxInfo(long ptr ptr ptr ptr)
 @ cdecl WINPOS_ShowIconTitle(long long)
-@ cdecl WIN_GetPtr(long)
-@ cdecl WIN_SetStyle(long long long)
+@ cdecl WIN_invalidate_dce(long ptr) invalidate_dce

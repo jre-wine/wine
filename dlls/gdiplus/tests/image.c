@@ -21,6 +21,7 @@
 #include "windows.h"
 #include "gdiplus.h"
 #include "wine/test.h"
+#include <math.h>
 
 #define expect(expected, got) ok(((UINT)got) == ((UINT)expected), "Expected %.8x, got %.8x\n", (UINT)expected, (UINT)got)
 
@@ -73,6 +74,103 @@ static void test_Scan0(void)
     expect(0xdeadbeef, bm);
 }
 
+static void test_GetImageDimension(void)
+{
+    GpBitmap *bm;
+    GpStatus stat;
+    const REAL WIDTH = 10.0, HEIGHT = 20.0;
+    REAL w,h;
+
+    bm = (GpBitmap*)0xdeadbeef;
+    stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB,NULL, &bm);
+    expect(Ok,stat);
+    ok((GpBitmap*)0xdeadbeef != bm, "Expected bitmap to not be 0xdeadbeef\n");
+    ok(NULL != bm, "Expected bitmap to not be NULL\n");
+
+    stat = GdipGetImageDimension(NULL,&w,&h);
+    expect(InvalidParameter, stat);
+
+    stat = GdipGetImageDimension((GpImage*)bm,NULL,&h);
+    expect(InvalidParameter, stat);
+
+    stat = GdipGetImageDimension((GpImage*)bm,&w,NULL);
+    expect(InvalidParameter, stat);
+
+    w = -1;
+    h = -1;
+    stat = GdipGetImageDimension((GpImage*)bm,&w,&h);
+    expect(Ok, stat);
+    ok(fabs(WIDTH - w) < 0.0001, "Width wrong\n");
+    ok(fabs(HEIGHT - h) < 0.0001, "Height wrong\n");
+    GdipDisposeImage((GpImage*)bm);
+}
+
+static void test_LoadingImages(void)
+{
+    GpStatus stat;
+
+    stat = GdipCreateBitmapFromFile(0, 0);
+    expect(InvalidParameter, stat);
+
+    stat = GdipCreateBitmapFromFile(0, (GpBitmap**)0xdeadbeef);
+    expect(InvalidParameter, stat);
+
+    stat = GdipLoadImageFromFile(0, 0);
+    expect(InvalidParameter, stat);
+
+    stat = GdipLoadImageFromFile(0, (GpImage**)0xdeadbeef);
+    expect(InvalidParameter, stat);
+}
+
+static void test_encoders(void)
+{
+    GpStatus stat;
+    UINT n;
+    UINT s;
+    ImageCodecInfo *codecs;
+    int i;
+    int bmp_found;
+
+    static const WCHAR bmp_format[] = {'B', 'M', 'P', 0};
+
+    stat = GdipGetImageEncodersSize(&n, &s);
+    expect(stat, Ok);
+
+    codecs = GdipAlloc(s);
+    if (!codecs)
+        return;
+
+    stat = GdipGetImageEncoders(n, s, NULL);
+    expect(GenericError, stat);
+
+    stat = GdipGetImageEncoders(0, s, codecs);
+    expect(GenericError, stat);
+
+    stat = GdipGetImageEncoders(n, s-1, codecs);
+    expect(GenericError, stat);
+
+    stat = GdipGetImageEncoders(n, s+1, codecs);
+    expect(GenericError, stat);
+
+    stat = GdipGetImageEncoders(n, s, codecs);
+    expect(stat, Ok);
+
+    bmp_found = FALSE;
+    for (i = 0; i < n; i++)
+        {
+            if (CompareStringW(LOCALE_SYSTEM_DEFAULT, 0,
+                               codecs[i].FormatDescription, -1,
+                               bmp_format, -1) == CSTR_EQUAL) {
+                bmp_found = TRUE;
+                break;
+            }
+        }
+    if (!bmp_found)
+        ok(FALSE, "No BMP codec found.\n");
+
+    GdipFree(codecs);
+}
+
 START_TEST(image)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -86,6 +184,9 @@ START_TEST(image)
     GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 
     test_Scan0();
+    test_GetImageDimension();
+    test_LoadingImages();
+    test_encoders();
 
     GdiplusShutdown(gdiplusToken);
 }

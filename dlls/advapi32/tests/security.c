@@ -910,8 +910,17 @@ static void test_AccessCheck(void)
     /* test INHERIT_ONLY_ACE */
     ret = InitializeAcl(Acl, 256, ACL_REVISION);
     ok(ret, "InitializeAcl failed with error %d\n", GetLastError());
-    ret = pAddAccessAllowedAceEx(Acl, ACL_REVISION, INHERIT_ONLY_ACE, KEY_READ, EveryoneSid);
-    ok(ret, "AddAccessAllowedAceEx failed with error %d\n", GetLastError());
+
+    /* NT doesn't have AddAccessAllowedAceEx. Skipping this call/test doesn't influence
+     * the next ones.
+     */
+    if (pAddAccessAllowedAceEx)
+    {
+        ret = pAddAccessAllowedAceEx(Acl, ACL_REVISION, INHERIT_ONLY_ACE, KEY_READ, EveryoneSid);
+        ok(ret, "AddAccessAllowedAceEx failed with error %d\n", GetLastError());
+    }
+    else
+        skip("AddAccessAllowedAceEx is not available\n");
 
     ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
                       PrivSet, &PrivSetLen, &Access, &AccessStatus);
@@ -1676,14 +1685,14 @@ static void test_security_descriptor(void)
         ok(GetSecurityDescriptorOwner(&sd, &psid, &isDefault), "GetSecurityDescriptorOwner failed\n");
         expect_eq(psid, NULL, PSID, "%p");
         expect_eq(isDefault, FALSE, BOOL, "%d");
-        ok(GetSecurityDescriptorGroup(&sd, &psid, &isDefault), "GetSecurityDescriptorOwner failed\n");
+        ok(GetSecurityDescriptorGroup(&sd, &psid, &isDefault), "GetSecurityDescriptorGroup failed\n");
         expect_eq(psid, NULL, PSID, "%p");
         expect_eq(isDefault, FALSE, BOOL, "%d");
-        ok(GetSecurityDescriptorDacl(&sd, &isPresent, &pacl, &isDefault), "GetSecurityDescriptorOwner failed\n");
+        ok(GetSecurityDescriptorDacl(&sd, &isPresent, &pacl, &isDefault), "GetSecurityDescriptorDacl failed\n");
         expect_eq(isPresent, TRUE, BOOL, "%d");
         expect_eq(psid, NULL, PSID, "%p");
         expect_eq(isDefault, FALSE, BOOL, "%d");
-        ok(GetSecurityDescriptorSacl(&sd, &isPresent, &pacl, &isDefault), "GetSecurityDescriptorOwner failed\n");
+        ok(GetSecurityDescriptorSacl(&sd, &isPresent, &pacl, &isDefault), "GetSecurityDescriptorSacl failed\n");
         expect_eq(isPresent, TRUE, BOOL, "%d");
         expect_eq(psid, NULL, PSID, "%p");
         expect_eq(isDefault, FALSE, BOOL, "%d");

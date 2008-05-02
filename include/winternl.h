@@ -275,15 +275,26 @@ typedef struct _PEB
     PRTL_BITMAP                  TlsExpansionBitmap;                /* 150 */
     ULONG                        TlsExpansionBitmapBits[32];        /* 154 */
     ULONG                        SessionId;                         /* 1d4 */
+    ULARGE_INTEGER               AppCompatFlags;                    /* 1d8 */
+    ULARGE_INTEGER               AppCompatFlagsUser;                /* 1e0 */
+    PVOID                        ShimData;                          /* 1e8 */
+    PVOID                        AppCompatInfo;                     /* 1ec */
+    UNICODE_STRING               CSDVersion;                        /* 1f0 */
+    PVOID                        ActivationContextData;             /* 1f8 */
+    PVOID                        ProcessAssemblyStorageMap;         /* 1fc */
+    PVOID                        SystemDefaultActivationData;       /* 200 */
+    PVOID                        SystemAssemblyStorageMap;          /* 204 */
+    ULONG                        MinimumStackCommit;                /* 208 */
+    PVOID                       *FlsCallback;                       /* 20c */
+    LIST_ENTRY                   FlsListHead;                       /* 210 */
+    PRTL_BITMAP                  FlsBitmap;                         /* 218 */
+    ULONG                        FlsBitmapBits[4];                  /* 21c */
 } PEB, *PPEB;
 
 
 /***********************************************************************
  * TEB data structure
  */
-#ifndef WINE_NO_TEB  /* don't define TEB if included from thread.h */
-# ifndef WINE_TEB_DEFINED
-# define WINE_TEB_DEFINED
 typedef struct _TEB
 {
     NT_TIB          Tib;                        /* 000 */
@@ -305,7 +316,7 @@ typedef struct _TEB
     ACTIVATION_CONTEXT_STACK ActivationContextStack; /* 1a8 */
     BYTE            SpareBytes1[24];            /* 1bc used for ntdll private data in Wine */
     PVOID           SystemReserved2[10];        /* 1d4 used for ntdll private data in Wine */
-    GDI_TEB_BATCH   GdiTebBatch;                /* 1fc */
+    GDI_TEB_BATCH   GdiTebBatch;                /* 1fc used for vm86 private data in Wine */
     ULONG           gdiRgn;                     /* 6dc */
     ULONG           gdiPen;                     /* 6e0 */
     ULONG           gdiBrush;                   /* 6e4 */
@@ -343,9 +354,15 @@ typedef struct _TEB
     ULONG           WaitingOnLoaderLock;        /* f84 */
     PVOID           Reserved5[3];               /* f88 */
     PVOID          *TlsExpansionSlots;          /* f94 */
+    ULONG           ImpersonationLocale;        /* f98 */
+    ULONG           IsImpersonating;            /* f9c */
+    PVOID           NlsCache;                   /* fa0 */
+    PVOID           ShimData;                   /* fa4 */
+    ULONG           HeapVirtualAffinity;        /* fa8 */
+    PVOID           CurrentTransactionHandle;   /* fac */
+    PVOID           ActiveFrame;                /* fb0 */
+    PVOID          *FlsSlots;                   /* fb4 */
 } TEB, *PTEB;
-# endif /* WINE_TEB_DEFINED */
-#endif  /* WINE_NO_TEB */
 
 /***********************************************************************
  * Enums
@@ -2421,6 +2438,36 @@ static inline PLIST_ENTRY RemoveTailList(PLIST_ENTRY le)
     if (e != le) e->Flink = e->Blink = NULL;
     return e;
 }
+
+
+#ifdef __WINESRC__
+
+/* FIXME: private structure for vm86 mode, stored in teb->GdiTebBatch */
+typedef struct
+{
+    DWORD        dpmi_vif;
+    DWORD        vm86_pending;
+} WINE_VM86_TEB_INFO;
+
+static inline WINE_VM86_TEB_INFO *get_vm86_teb_info(void)
+{
+    return (WINE_VM86_TEB_INFO *)&NtCurrentTeb()->GdiTebBatch;
+}
+
+/* The thread information for 16-bit threads */
+/* NtCurrentTeb()->SubSystemTib points to this */
+typedef struct
+{
+    void           *unknown;    /* 00 unknown */
+    UNICODE_STRING *exe_name;   /* 04 exe module name */
+
+    /* the following fields do not exist under Windows */
+    UNICODE_STRING  exe_str;    /* exe name string pointed to by exe_name */
+    CURDIR          curdir;     /* current directory */
+    WCHAR           curdir_buffer[MAX_PATH];
+} WIN16_SUBSYSTEM_TIB;
+
+#endif /* __WINESRC__ */
 
 #ifdef __cplusplus
 } /* extern "C" */

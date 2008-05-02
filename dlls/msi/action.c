@@ -18,14 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-/*
- * Pages I need
- *
-http://msdn.microsoft.com/library/default.asp?url=/library/en-us/msi/setup/installexecutesequence_table.asp
-
-http://msdn.microsoft.com/library/default.asp?url=/library/en-us/msi/setup/standard_actions_reference.asp
- */
-
 #include <stdarg.h>
 
 #define COBJMACROS
@@ -584,7 +576,7 @@ static UINT msi_apply_transforms( MSIPACKAGE *package )
     return r;
 }
 
-BOOL ui_sequence_exists( MSIPACKAGE *package )
+static BOOL ui_sequence_exists( MSIPACKAGE *package )
 {
     MSIQUERY *view;
     UINT rc;
@@ -2322,7 +2314,6 @@ static LPSTR parse_value(MSIPACKAGE *package, LPCWSTR value, DWORD *type,
     {
         static const WCHAR szMulti[] = {'[','~',']',0};
         LPCWSTR ptr;
-        LPWSTR newdata;
         *type=REG_SZ;
 
         if (value[0]=='#')
@@ -2350,19 +2341,8 @@ static LPSTR parse_value(MSIPACKAGE *package, LPCWSTR value, DWORD *type,
         /* add double NULL terminator */
         if (*type == REG_MULTI_SZ)
         {
-            *size += sizeof(WCHAR);
-            newdata = msi_alloc(*size);
-            if (!newdata)
-            {
-                msi_free(data);
-                return NULL;
-            }
-
-            memcpy(newdata, data, *size - 1);
-            newdata[*size] = '\0';
-
-            msi_free(data);
-            data = (LPSTR)newdata;
+            *size += 2 * sizeof(WCHAR); /* two NULL terminators */
+            data = msi_realloc_zero(data, *size);
         }
     }
     return data;
@@ -2502,10 +2482,6 @@ static UINT ITERATE_WriteRegistryValues(MSIRECORD *row, LPVOID param)
     }
 
     deformat_string(package, name, &deformated);
-
-    /* get the double nulls to terminate SZ_MULTI */
-    if (type == REG_MULTI_SZ)
-        size +=sizeof(WCHAR);
 
     if (!check_first)
     {
@@ -3379,6 +3355,7 @@ static BOOL msi_check_publish(MSIPACKAGE *package)
 static UINT ACTION_PublishProduct(MSIPACKAGE *package)
 {
     UINT rc;
+    LPWSTR packname;
     MSIQUERY * view;
     MSISOURCELISTINFO *info;
     MSIMEDIADISK *disk;
@@ -3446,7 +3423,14 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     msi_free(buffer);
 
     langid = msi_get_property_int( package, szProductLanguage, 0 );
-    msi_reg_set_val_dword( hkey, INSTALLPROPERTY_LANGUAGEW, langid );
+    msi_reg_set_val_dword( hukey, INSTALLPROPERTY_LANGUAGEW, langid );
+
+    packname = strrchrW( package->PackagePath, '\\' ) + 1;
+    msi_reg_set_val_str( hukey, INSTALLPROPERTY_PACKAGENAMEW, packname );
+
+    /* FIXME */
+    msi_reg_set_val_dword( hukey, INSTALLPROPERTY_AUTHORIZED_LUA_APPW, 0 );
+    msi_reg_set_val_dword( props, INSTALLPROPERTY_INSTANCETYPEW, 0 );
 
     buffer = msi_dup_property( package, szARPProductIcon );
     if (buffer)
@@ -3461,7 +3445,7 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     if (buffer)
     {
         DWORD verdword = msi_version_str_to_dword(buffer);
-        msi_reg_set_val_dword( hkey, INSTALLPROPERTY_VERSIONW, verdword );
+        msi_reg_set_val_dword( hukey, INSTALLPROPERTY_VERSIONW, verdword );
     }
     msi_free(buffer);
 
@@ -3484,16 +3468,6 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     if (rc != ERROR_SUCCESS)
         goto end;
 
-    buffer = msi_dup_property( package, cszSourceDir );
-
-    rc = MsiSourceListSetInfoW( package->ProductCode, NULL,
-                                MSIINSTALLCONTEXT_USERUNMANAGED,
-                                MSICODE_PRODUCT | MSISOURCETYPE_NETWORK,
-                                INSTALLPROPERTY_LASTUSEDSOURCEW, buffer );
-    msi_free(buffer);
-    if (rc != ERROR_SUCCESS)
-        goto end;
-
     /* FIXME: Need to write more keys to the user registry */
   
     hDb= alloc_msihandle( &package->db->hdr );
@@ -3511,12 +3485,10 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
                                         guidbuffer, &size);
         if (rc == ERROR_SUCCESS)
         {
-            WCHAR squashed[GUID_SIZE];
             /* for now we only care about the first guid */
             LPWSTR ptr = strchrW(guidbuffer,';');
             if (ptr) *ptr = 0;
-            squash_guid(guidbuffer,squashed);
-            msi_reg_set_val_str( hukey, INSTALLPROPERTY_PACKAGECODEW, squashed );
+            msi_reg_set_val_str( hukey, INSTALLPROPERTY_PACKAGECODEW, guidbuffer );
         }
         else
         {
@@ -3534,9 +3506,13 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     /* publish the SourceList info */
     LIST_FOR_EACH_ENTRY(info, &package->sourcelist_info, MSISOURCELISTINFO, entry)
     {
-        MsiSourceListSetInfoW(package->ProductCode, NULL,
-                              info->context, info->options,
-                              info->property, info->value);
+        if (!lstrcmpW(info->property, INSTALLPROPERTY_LASTUSEDSOURCEW))
+            msi_set_last_used_source(package->ProductCode, NULL, info->context,
+                                     info->options, info->value);
+        else
+            MsiSourceListSetInfoW(package->ProductCode, NULL,
+                                  info->context, info->options,
+                                  info->property, info->value);
     }
 
     LIST_FOR_EACH_ENTRY(disk, &package->sourcelist_media, MSIMEDIADISK, entry)
@@ -4039,6 +4015,14 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
         {'P','r','o','d','u','c','t','L','a','n','g','u','a','g','e',0};
     static const WCHAR szProductVersion[] =
         {'P','r','o','d','u','c','t','V','e','r','s','i','o','n',0};
+    static const WCHAR szProductName[] =
+        {'P','r','o','d','u','c','t','N','a','m','e',0};
+    static const WCHAR szDisplayName[] =
+        {'D','i','s','p','l','a','y','N','a','m','e',0};
+    static const WCHAR szDisplayVersion[] =
+        {'D','i','s','p','l','a','y','V','e','r','s','i','o','n',0};
+    static const WCHAR szManufacturer[] =
+        {'M','a','n','u','f','a','c','t','u','r','e','r',0};
 
     SYSTEMTIME systime;
     static const WCHAR date_fmt[] = {'%','i','%','0','2','i','%','0','2','i',0};
@@ -4050,6 +4034,10 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
         return ERROR_SUCCESS;
 
     rc = MSIREG_OpenUninstallKey(package->ProductCode,&hkey,TRUE);
+    if (rc != ERROR_SUCCESS)
+        return rc;
+
+    rc = MSIREG_OpenInstallPropertiesKey(package->ProductCode, &props, TRUE);
     if (rc != ERROR_SUCCESS)
         return rc;
 
@@ -4070,22 +4058,39 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
 
     /* FIXME: Write real Estimated Size when we have it */
     msi_reg_set_val_dword( hkey, szEstimatedSize, 0 );
+
+    buffer = msi_dup_property( package, szProductName );
+    msi_reg_set_val_str( props, szDisplayName, buffer );
+    msi_free(buffer);
+
+    buffer = msi_dup_property( package, cszSourceDir );
+    msi_reg_set_val_str( props, INSTALLPROPERTY_INSTALLSOURCEW, buffer);
+    msi_free(buffer);
+
+    buffer = msi_dup_property( package, szManufacturer );
+    msi_reg_set_val_str( props, INSTALLPROPERTY_PUBLISHERW, buffer);
+    msi_free(buffer);
    
     GetLocalTime(&systime);
     sprintfW(szDate,date_fmt,systime.wYear,systime.wMonth,systime.wDay);
     msi_reg_set_val_str( hkey, INSTALLPROPERTY_INSTALLDATEW, szDate );
+    msi_reg_set_val_str( props, INSTALLPROPERTY_INSTALLDATEW, szDate );
    
     langid = msi_get_property_int( package, szProductLanguage, 0 );
     msi_reg_set_val_dword( hkey, INSTALLPROPERTY_LANGUAGEW, langid );
 
     buffer = msi_dup_property( package, szProductVersion );
+    msi_reg_set_val_str( props, szDisplayVersion, buffer );
     if (buffer)
     {
         DWORD verdword = msi_version_str_to_dword(buffer);
 
         msi_reg_set_val_dword( hkey, INSTALLPROPERTY_VERSIONW, verdword );
+        msi_reg_set_val_dword( props, INSTALLPROPERTY_VERSIONW, verdword );
         msi_reg_set_val_dword( hkey, INSTALLPROPERTY_VERSIONMAJORW, verdword>>24 );
+        msi_reg_set_val_dword( props, INSTALLPROPERTY_VERSIONMAJORW, verdword>>24 );
         msi_reg_set_val_dword( hkey, INSTALLPROPERTY_VERSIONMINORW, (verdword>>16)&0x00FF );
+        msi_reg_set_val_dword( props, INSTALLPROPERTY_VERSIONMINORW, (verdword>>16)&0x00FF );
     }
     msi_free(buffer);
     
@@ -4114,10 +4119,6 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
         return rc;
 
     RegCloseKey(hudkey);
-
-    rc = MSIREG_OpenInstallPropertiesKey(package->ProductCode, &props, TRUE);
-    if (rc != ERROR_SUCCESS)
-        return rc;
 
     msi_reg_set_val_dword( props, szWindowsInstaller, 1 );
     RegCloseKey(props);
@@ -4271,13 +4272,13 @@ static UINT ACTION_ResolveSource(MSIPACKAGE* package)
         DWORD size = 0;
 
         rc = MsiSourceListGetInfoW(package->ProductCode, NULL, 
-                MSIINSTALLCONTEXT_USERMANAGED, MSICODE_PRODUCT,
+                MSIINSTALLCONTEXT_USERUNMANAGED, MSICODE_PRODUCT,
                 INSTALLPROPERTY_DISKPROMPTW,NULL,&size);
         if (rc == ERROR_MORE_DATA)
         {
             prompt = msi_alloc(size * sizeof(WCHAR));
             MsiSourceListGetInfoW(package->ProductCode, NULL, 
-                    MSIINSTALLCONTEXT_USERMANAGED, MSICODE_PRODUCT,
+                    MSIINSTALLCONTEXT_USERUNMANAGED, MSICODE_PRODUCT,
                     INSTALLPROPERTY_DISKPROMPTW,prompt,&size);
         }
         else
@@ -4326,11 +4327,17 @@ static UINT ACTION_RegisterUser(MSIPACKAGE *package)
         {0},
     };
 
+    if (msi_check_unpublish(package))
+    {
+        MSIREG_DeleteUserDataProductKey(package->ProductCode);
+        return ERROR_SUCCESS;
+    }
+
     productid = msi_dup_property( package, INSTALLPROPERTY_PRODUCTIDW );
     if (!productid)
         return ERROR_SUCCESS;
 
-    rc = MSIREG_OpenUninstallKey(package->ProductCode,&hkey,TRUE);
+    rc = MSIREG_OpenInstallPropertiesKey(package->ProductCode, &hkey, TRUE);
     if (rc != ERROR_SUCCESS)
         goto end;
 
@@ -4347,7 +4354,7 @@ end:
 
     /* FIXME: call ui_actiondata */
 
-    return ERROR_SUCCESS;
+    return rc;
 }
 
 
@@ -5250,7 +5257,7 @@ static BOOL add_wildcard(FILE_LIST *files, LPWSTR source, LPWSTR dest)
     return TRUE;
 }
 
-BOOL move_files_wildcard(LPWSTR source, LPWSTR dest, int options)
+static BOOL move_files_wildcard(LPWSTR source, LPWSTR dest, int options)
 {
     WIN32_FIND_DATAW wfd;
     HANDLE hfile;

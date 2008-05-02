@@ -28,6 +28,9 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winnls.h"
+#include "winreg.h"
+
+#include "gdi_private.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -96,36 +99,18 @@ BOOL WINAPI GetICMProfileA(HDC hdc, LPDWORD size, LPSTR filename)
  */
 BOOL WINAPI GetICMProfileW(HDC hdc, LPDWORD size, LPWSTR filename)
 {
-    DWORD required;
-    WCHAR systemdir[MAX_PATH];
-    static const WCHAR profile[] =
-        {'\\','s','p','o','o','l','\\','d','r','i','v','e','r','s',
-         '\\','c','o','l','o','r','\\','s','R','G','B',' ','C','o','l','o','r',' ',
-         'S','p','a','c','e',' ','P','r','o','f','i','l','e','.','i','c','m',0};
+    BOOL ret = FALSE;
+    DC *dc = get_dc_ptr(hdc);
 
     TRACE("%p, %p, %p\n", hdc, size, filename);
 
-    if (!hdc || !size) return FALSE;
-
-    required  = GetSystemDirectoryW(systemdir, MAX_PATH);
-    required += sizeof(profile) / sizeof(WCHAR);
-
-    if (*size < required)
+    if (dc)
     {
-        *size = required;
-        SetLastError(ERROR_INSUFFICIENT_BUFFER);
-        return FALSE;
+        if (dc->funcs->pGetICMProfile)
+            ret = dc->funcs->pGetICMProfile(dc->physDev, size, filename);
+        release_dc_ptr(dc);
     }
-    if (filename)
-    {
-        strcpyW(filename, systemdir);
-        strcatW(filename, profile);
-
-        if (GetFileAttributesW(filename) == INVALID_FILE_ATTRIBUTES)
-            WARN("color profile not found\n");
-    }
-    *size = required;
-    return TRUE;
+    return ret;
 }
 
 /**********************************************************************

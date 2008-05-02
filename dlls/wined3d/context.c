@@ -210,6 +210,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         int attribs[256];
         int nAttribs = 0;
         unsigned int nFormats;
+        WINED3DFORMAT fmt = target->resource.format;
 
         hdc = GetDC(win_handle);
         if(hdc == NULL) {
@@ -224,7 +225,18 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         PUSH2(WGL_SUPPORT_OPENGL_ARB, GL_TRUE);
         PUSH2(WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB); /* Make sure we receive an accelerated format. On windows (at least on ATI) this is not always the case */
 
-        if(!getColorBits(target->resource.format, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits)) {
+        /* In case of ORM_BACKBUFFER, make sure to request an alpha component for X4R4G4B4/X8R8G8B8 as we might need it for the backbuffer. */
+        if(wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER) {
+            if(target->resource.format == WINED3DFMT_X4R4G4B4)
+                fmt = WINED3DFMT_A4R4G4B4;
+            else if(target->resource.format == WINED3DFMT_X8R8G8B8)
+                fmt = WINED3DFMT_A8R8G8B8;
+
+            /* We like to have two aux buffers in backbuffer mode */
+            PUSH2(WGL_AUX_BUFFERS_ARB, 2);
+        }
+
+        if(!getColorBits(fmt, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits)) {
             ERR("Unable to get color bits for format %#x!\n", target->resource.format);
             return FALSE;
         }
@@ -314,6 +326,17 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     ret->surface = (IWineD3DSurface *) target;
     ret->isPBuffer = create_pbuffer;
     ret->tid = GetCurrentThreadId();
+    if(This->shader_backend->shader_dirtifyable_constants((IWineD3DDevice *) This)) {
+        /* Create the dirty constants array and initialize them to dirty */
+        ret->vshader_const_dirty = HeapAlloc(GetProcessHeap(), 0,
+                sizeof(*ret->vshader_const_dirty) * GL_LIMITS(vshader_constantsF));
+        ret->pshader_const_dirty = HeapAlloc(GetProcessHeap(), 0,
+                sizeof(*ret->pshader_const_dirty) * GL_LIMITS(pshader_constantsF));
+        memset(ret->vshader_const_dirty, 1,
+               sizeof(*ret->vshader_const_dirty) * GL_LIMITS(vshader_constantsF));
+        memset(ret->pshader_const_dirty, 1,
+                sizeof(*ret->pshader_const_dirty) * GL_LIMITS(pshader_constantsF));
+    }
 
     TRACE("Successfully created new context %p\n", ret);
 
@@ -466,6 +489,8 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
     } else ReleaseDC(context->win_handle, context->hdc);
     pwglDeleteContext(context->glCtx);
 
+    HeapFree(GetProcessHeap(), 0, context->vshader_const_dirty);
+    HeapFree(GetProcessHeap(), 0, context->pshader_const_dirty);
     RemoveContextFromArray(This, context);
 }
 
@@ -887,6 +912,14 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
             if(ret == FALSE) {
                 ERR("Failed to activate the new context\n");
             }
+        }
+        if(This->activeContext->vshader_const_dirty) {
+            memset(This->activeContext->vshader_const_dirty, 1,
+                   sizeof(*This->activeContext->vshader_const_dirty) * GL_LIMITS(vshader_constantsF));
+        }
+        if(This->activeContext->pshader_const_dirty) {
+            memset(This->activeContext->pshader_const_dirty, 1,
+                   sizeof(*This->activeContext->pshader_const_dirty) * GL_LIMITS(pshader_constantsF));
         }
         This->activeContext = context;
     }

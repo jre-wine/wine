@@ -23,7 +23,6 @@
 
 #include "msvcrt.h"
 #include "mtdll.h"
-#include "msvcrt/errno.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
@@ -280,7 +279,7 @@ void* CDECL MSVCRT_malloc(MSVCRT_size_t size)
 {
   void *ret = HeapAlloc(GetProcessHeap(),0,size);
   if (!ret)
-    msvcrt_set_errno(MSVCRT_ENOMEM);
+      *MSVCRT__errno() = MSVCRT_ENOMEM;
   return ret;
 }
 
@@ -348,14 +347,14 @@ void * CDECL _aligned_offset_malloc(MSVCRT_size_t size, MSVCRT_size_t alignment,
     /* alignment must be a power of 2 */
     if ((alignment & (alignment - 1)) != 0)
     {
-        msvcrt_set_errno(EINVAL);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
         return NULL;
     }
 
     /* offset must be less than size */
     if (offset >= size)
     {
-        msvcrt_set_errno(EINVAL);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
         return NULL;
     }
 
@@ -405,14 +404,14 @@ void * CDECL _aligned_offset_realloc(void *memblock, MSVCRT_size_t size,
     /* alignment must be a power of 2 */
     if ((alignment & (alignment - 1)) != 0)
     {
-        msvcrt_set_errno(EINVAL);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
         return NULL;
     }
 
     /* offset must be less than size */
     if (offset >= size)
     {
-        msvcrt_set_errno(EINVAL);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
         return NULL;
     }
 
@@ -430,7 +429,7 @@ void * CDECL _aligned_offset_realloc(void *memblock, MSVCRT_size_t size,
     saved = SAVED_PTR(memblock);
     if (memblock != ALIGN_PTR(*saved, alignment, offset))
     {
-        msvcrt_set_errno(EINVAL);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
         return NULL;
     }
 

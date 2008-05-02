@@ -103,8 +103,6 @@ my @ignore_srcs = (
 );
 
 my %private_headers = (
-    "thread.h" => 1,
-    "win.h" => 1,
     "wine/irot.idl" => 1,
     "wine/list.h" => 1,
     "wine/mmsystem16.h" => 1,
@@ -227,7 +225,7 @@ sub parse_makefile($)
             $make{$1} = $2;
             next;
         }
-        if (/^(BISON_SRCS|LEX_SRCS|IDL_[CHIPS]_SRCS|IDL_TLB_SRCS|IMPLIB_SRCS|MC_SRCS|RC_SRCS|RC_SRCS16|RC_BINARIES|SPEC_SRCS16|MANPAGES|PROGRAMS)\s*=\s*(.*)/)
+        if (/^(BISON_SRCS|LEX_SRCS|IDL_[CHIPS]_SRCS|IDL_TLB_SRCS|IMPLIB_SRCS|MC_SRCS|RC_SRCS|RC_SRCS16|RC_BINARIES|SPEC_SRCS16|EXTRA_OBJS16|MANPAGES|PROGRAMS)\s*=\s*(.*)/)
         {
             my @list = split(/\s+/, $2);
             $make{$1} = \@list;
@@ -407,7 +405,7 @@ sub update_dlls(@)
 
         if (defined $makefile{"IMPORTLIB"})
         {
-            if ($makefile{"IMPORTLIB"} =~ /^([a-zA-Z0-9_.]+)\.\$\(IMPLIBEXT\)/)
+            if ($makefile{"IMPORTLIB"} =~ /^([a-zA-Z0-9_.]+)/)
             {
                 $importlibs{$module} = $1;
             }
@@ -423,6 +421,13 @@ sub update_dlls(@)
         {
             my @list = map { $_ =~ s/\.spec$//; $_ .= ".dll" unless $_ =~ /\./; $_; } @{$makefile{"SPEC_SRCS16"}};
             $altnames{$module} = \@list;
+        }
+        if (defined $makefile{"EXTRA_OBJS16"})
+        {
+            foreach my $obj (@{$makefile{"EXTRA_OBJS16"}})
+            {
+                if ($obj =~ /^(.*\.(exe|mod))\.o/) { push @{$altnames{$module}}, $1; }
+            }
         }
     }
 
@@ -506,12 +511,12 @@ sub update_dlls(@)
     {
         my $dir = $directories{$mod};
         my $lib = $importlibs{$mod};
-        if ($lib ne "lib" . $dir) { push @lib_symlinks, $mod; }
+        if ($lib ne $dir) { push @lib_symlinks, $mod; }
     }
     $text .= "IMPORT_SYMLINKS =";
     foreach my $mod (sort @lib_symlinks)
     {
-        $text .= sprintf " \\\n\t%s.\$(IMPLIBEXT)", $importlibs{$mod};
+        $text .= sprintf " \\\n\tlib%s.\$(IMPLIBEXT)", $importlibs{$mod};
     }
 
     $text .= "\n\nIMPORT_LIBS = \\\n\t\$(IMPORT_SYMLINKS)";
@@ -521,12 +526,9 @@ sub update_dlls(@)
     }
     foreach my $mod (sort keys %importlibs)
     {
-        my $dir = $directories{$mod};
-        my $def = $mod;
-        $def =~ s/\.(dll|drv)$//;
-        $text .= sprintf " \\\n\t%s/lib%s.\$(IMPLIBEXT)", $dir, $def;
+        $text .= " \\\n\t$directories{$mod}/lib$importlibs{$mod}.\$(IMPLIBEXT)";
         next unless defined $static_implibs{$mod};
-        $text .= sprintf " \\\n\t%s/lib%s.\$(STATIC_IMPLIBEXT)", $dir, $def
+        $text .= " \\\n\t$directories{$mod}/lib$importlibs{$mod}.\$(STATIC_IMPLIBEXT)";
     }
     $text .= "\n\n";
     $text .= "implib: \$(IMPORT_LIBS)\n\n";
@@ -538,16 +540,16 @@ sub update_dlls(@)
         my $lib = $importlibs{$mod};
         my $spec = $mod;
         $spec =~ s/\.dll$//;
-        $text .= sprintf "%s/%s.\$(IMPLIBEXT): %s/%s.spec \$(WINEBUILD)\n", $dir, $lib, $dir, $spec;
-        $text .= sprintf "\t\@cd %s && \$(MAKE) %s.\$(IMPLIBEXT)\n\n", $dir, $lib;
+        $text .= sprintf "%s/lib%s.\$(IMPLIBEXT): %s/%s.spec \$(WINEBUILD)\n", $dir, $lib, $dir, $spec;
+        $text .= sprintf "\t\@cd %s && \$(MAKE) lib%s.\$(IMPLIBEXT)\n\n", $dir, $lib;
         next unless $static_implibs{$mod};
-        $text .= sprintf "%s/%s.\$(STATIC_IMPLIBEXT): dummy\n", $dir, $lib, $dir, $spec;
-        $text .= sprintf "\t\@cd %s && \$(MAKE) %s.\$(STATIC_IMPLIBEXT)\n\n", $dir, $lib;
+        $text .= sprintf "%s/lib%s.\$(STATIC_IMPLIBEXT): dummy\n", $dir, $lib, $dir, $spec;
+        $text .= sprintf "\t\@cd %s && \$(MAKE) lib%s.\$(STATIC_IMPLIBEXT)\n\n", $dir, $lib;
     }
     foreach my $mod (sort @lib_symlinks)
     {
         my $dir = $directories{$mod};
-        my $lib = $importlibs{$mod} . ".\$(IMPLIBEXT)";
+        my $lib = "lib" . $importlibs{$mod} . ".\$(IMPLIBEXT)";
         $text .= sprintf "%s: %s/%s\n", $lib, $dir, $lib;
         $text .= sprintf "\t\$(RM) \$@ && \$(LN_S) %s/%s \$@\n\n", $dir, $lib;
     }
@@ -574,7 +576,7 @@ sub update_dlls(@)
 
     foreach my $mod (sort @lib_symlinks)
     {
-        push @ignores, "dlls/$importlibs{$mod}.def";
+        push @ignores, "dlls/lib$importlibs{$mod}.def";
     }
     foreach my $mod (sort keys %directories)
     {
@@ -583,10 +585,7 @@ sub update_dlls(@)
     }
     foreach my $mod (sort keys %importlibs)
     {
-        my $dir = $directories{$mod};
-        my $def = $mod;
-        $def =~ s/\.(dll|drv)$//;
-        push @ignores, "dlls/$dir/lib$def.def";
+        push @ignores, "dlls/$directories{$mod}/lib$importlibs{$mod}.def";
     }
 
     return @ignores;

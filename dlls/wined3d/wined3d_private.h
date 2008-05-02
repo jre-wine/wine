@@ -121,7 +121,15 @@ void init_type_lookup(WineD3D_GL_Info *gl_info);
 #define WINED3D_ATR_NORMALIZED(type)    GLINFO_LOCATION.glTypeLookup[type].normalized
 #define WINED3D_ATR_TYPESIZE(type)      GLINFO_LOCATION.glTypeLookup[type].typesize
 
-/* See GL_NV_half_float for reference */
+/* The following functions convert 16 bit floats in the FLOAT16 data type
+ * to standard C floats and vice versa. They do not depend on the encoding
+ * of the C float, so they are platform independent, but slow. On x86 and
+ * other IEEE 754 compliant platforms the conversion can be accelerated with
+ * bitshifting the exponent and mantissa. There are also some SSE-based
+ * assembly routines out there
+ *
+ * See GL_NV_half_float for a reference of the FLOAT16 / GL_HALF format
+ */
 static inline float float_16_to_32(const unsigned short *in) {
     const unsigned short s = ((*in) & 0x8000);
     const unsigned short e = ((*in) & 0x7C00) >> 10;
@@ -137,6 +145,54 @@ static inline float float_16_to_32(const unsigned short *in) {
         if(m == 0) return sgn / 0.0; /* +INF / -INF */
         else return 0.0 / 0.0; /* NAN */
     }
+}
+
+static inline unsigned short float_32_to_16(const float *in) {
+    int exp = 0;
+    float tmp = fabs(*in);
+    unsigned int mantissa;
+    unsigned short ret;
+
+    /* Deal with special numbers */
+    if(*in == 0.0) return 0x0000;
+    if(isnan(*in)) return 0x7C01;
+    if(isinf(*in)) return (*in < 0.0 ? 0xFC00 : 0x7c00);
+
+    if(tmp < pow(2, 10)) {
+        do
+        {
+            tmp = tmp * 2.0;
+            exp--;
+        }while(tmp < pow(2, 10));
+    } else if(tmp >= pow(2, 11)) {
+        do
+        {
+            tmp /= 2.0;
+            exp++;
+        }while(tmp >= pow(2, 11));
+    }
+
+    mantissa = (unsigned int) tmp;
+    if(tmp - mantissa >= 0.5) mantissa++; /* round to nearest, away from zero */
+
+    exp += 10;  /* Normalize the mantissa */
+    exp += 15;  /* Exponent is encoded with excess 15 */
+
+    if(exp > 30) { /* too big */
+        ret = 0x7c00; /* INF */
+    } else if(exp <= 0) {
+        /* exp == 0: Non-normalized mantissa. Returns 0x0000 (=0.0) for too small numbers */
+        while(exp <= 0) {
+            mantissa = mantissa >> 1;
+            exp++;
+        }
+        ret = mantissa & 0x3ff;
+    } else {
+        ret = (exp << 10) | (mantissa & 0x3ff);
+    }
+
+    ret |= ((*in < 0.0 ? 1 : 0) << 15); /* Add the sign */
+    return ret;
 }
 
 /**
@@ -201,11 +257,25 @@ typedef struct {
     void (*shader_cleanup)(IWineD3DDevice *iface);
     void (*shader_color_correction)(struct SHADER_OPCODE_ARG *arg);
     void (*shader_destroy)(IWineD3DBaseShader *iface);
+    HRESULT (*shader_alloc_private)(IWineD3DDevice *iface);
+    void (*shader_free_private)(IWineD3DDevice *iface);
+    BOOL (*shader_dirtifyable_constants)(IWineD3DDevice *iface);
 } shader_backend_t;
 
 extern const shader_backend_t glsl_shader_backend;
 extern const shader_backend_t arb_program_shader_backend;
 extern const shader_backend_t none_shader_backend;
+
+/* GLSL shader private data */
+struct shader_glsl_priv {
+    GLhandleARB             depth_blt_glsl_program_id;
+};
+
+/* ARB_program_shader private data */
+struct shader_arb_priv {
+    GLuint                  depth_blt_vprogram_id;
+    GLuint                  depth_blt_fprogram_id;
+};
 
 /* X11 locking */
 
@@ -506,6 +576,8 @@ struct WineD3DContext {
     char                    texShaderBumpMap;
     BOOL                    fog_coord;
 
+    char                    *vshader_const_dirty, *pshader_const_dirty;
+
     /* The actual opengl context */
     HGLRC                   glCtx;
     HWND                    win_handle;
@@ -656,6 +728,7 @@ struct IWineD3DDeviceImpl
     int ps_selected_mode;
     const shader_backend_t *shader_backend;
     hash_table_t *glsl_program_lookup;
+    void *shader_priv;
 
     /* To store */
     BOOL                    view_ident;        /* true iff view matrix is identity                */
@@ -679,6 +752,7 @@ struct IWineD3DDeviceImpl
 
     struct list             resources; /* a linked list to track resources created by the device */
     struct list             shaders;   /* a linked list to track shaders (pixel and vertex)      */
+    unsigned int            highest_dirty_ps_const, highest_dirty_vs_const;
 
     /* Render Target Support */
     IWineD3DSurface       **render_targets;
@@ -705,9 +779,6 @@ struct IWineD3DDeviceImpl
     GLuint                  dst_fbo;
     GLenum                  *draw_buffers;
     GLuint                  depth_blt_texture;
-    GLuint                  depth_blt_vprogram_id;
-    GLuint                  depth_blt_fprogram_id;
-    GLhandleARB             depth_blt_glsl_program_id;
 
     /* Cursor management */
     BOOL                    bCursorVisible;
@@ -775,7 +846,7 @@ struct IWineD3DDeviceImpl
     struct WineD3DRectPatch *currentPatch;
 };
 
-extern const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl;
+extern const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl, IWineD3DDevice_DirtyConst_Vtbl;
 
 HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfaceImpl *target, DWORD Count,
                                         CONST WINED3DRECT* pRects, DWORD Flags, WINED3DCOLOR Color,
@@ -884,11 +955,10 @@ typedef struct IWineD3DVertexBufferImpl
 
 extern const IWineD3DVertexBufferVtbl IWineD3DVertexBuffer_Vtbl;
 
-#define VBFLAG_LOAD           0x01    /* Data is written from allocatedMemory to the VBO */
-#define VBFLAG_OPTIMIZED      0x02    /* Optimize has been called for the VB */
-#define VBFLAG_DIRTY          0x04    /* Buffer data has been modified */
-#define VBFLAG_HASDESC        0x08    /* A vertex description has been found */
-#define VBFLAG_CREATEVBO      0x10    /* Attempt to create a VBO next PreLoad */
+#define VBFLAG_OPTIMIZED      0x01    /* Optimize has been called for the VB */
+#define VBFLAG_DIRTY          0x02    /* Buffer data has been modified */
+#define VBFLAG_HASDESC        0x04    /* A vertex description has been found */
+#define VBFLAG_CREATEVBO      0x08    /* Attempt to create a VBO next PreLoad */
 
 /*****************************************************************************
  * IWineD3DIndexBuffer implementation structure (extends IWineD3DResourceImpl)
@@ -1505,6 +1575,8 @@ typedef struct IWineD3DQueryImpl
 } IWineD3DQueryImpl;
 
 extern const IWineD3DQueryVtbl IWineD3DQuery_Vtbl;
+extern const IWineD3DQueryVtbl IWineD3DEventQuery_Vtbl;
+extern const IWineD3DQueryVtbl IWineD3DOcclusionQuery_Vtbl;
 
 /* Datastructures for IWineD3DQueryImpl.extendedData */
 typedef struct  WineQueryOcclusionData {
@@ -1663,9 +1735,9 @@ struct glsl_shader_prog_link {
     GLhandleARB             vuniformI_locations[MAX_CONST_I];
     GLhandleARB             puniformI_locations[MAX_CONST_I];
     GLhandleARB             posFixup_location;
-    GLhandleARB             bumpenvmat_location;
-    GLhandleARB             luminancescale_location;
-    GLhandleARB             luminanceoffset_location;
+    GLhandleARB             bumpenvmat_location[MAX_TEXTURES];
+    GLhandleARB             luminancescale_location[MAX_TEXTURES];
+    GLhandleARB             luminanceoffset_location[MAX_TEXTURES];
     GLhandleARB             srgb_comparison_location;
     GLhandleARB             srgb_mul_low_location;
     GLhandleARB             ycorrection_location;
@@ -1716,7 +1788,7 @@ typedef struct shader_reg_maps {
     /* Sampler usage tokens 
      * Use 0 as default (bit 31 is always 1 on a valid token) */
     DWORD samplers[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
-    char bumpmat, luminanceparams;
+    BOOL bumpmat[MAX_TEXTURES], luminanceparams[MAX_TEXTURES];
     char usesnrm, vpos, usesdsy;
     char usesrelconstF;
 
@@ -2106,6 +2178,17 @@ static inline BOOL shader_is_scalar(DWORD param) {
     }
 }
 
+static inline BOOL shader_constant_is_local(IWineD3DBaseShaderImpl* This, DWORD reg) {
+    local_constant* lconst;
+
+    if(This->baseShader.load_local_constsF) return FALSE;
+    LIST_FOR_EACH_ENTRY(lconst, &This->baseShader.constantsF, local_constant, entry) {
+        if(lconst->idx == reg) return TRUE;
+    }
+    return FALSE;
+
+}
+
 /* Internally used shader constants. Applications can use constants 0 to GL_LIMITS(vshader_constantsF) - 1,
  * so upload them above that
  */
@@ -2160,6 +2243,11 @@ enum vertexprocessing_mode {
     pretransformed
 };
 
+struct stb_const_desc {
+    char                    texunit;
+    UINT                    const_num;
+};
+
 typedef struct IWineD3DPixelShaderImpl {
     /* IUnknown parts */
     const IWineD3DPixelShaderVtbl *lpVtbl;
@@ -2179,9 +2267,9 @@ typedef struct IWineD3DPixelShaderImpl {
     PSHADERDATA                *data;
 
     /* Some information about the shader behavior */
-    char                        needsbumpmat;
-    UINT                        bumpenvmatconst;
-    UINT                        luminanceconst;
+    struct stb_const_desc       bumpenvmatconst[MAX_TEXTURES];
+    char                        numbumpenvmatconsts;
+    struct stb_const_desc       luminanceconst[MAX_TEXTURES];
     char                        srgb_enabled;
     char                        srgb_mode_hardcoded;
     UINT                        srgb_low_const;

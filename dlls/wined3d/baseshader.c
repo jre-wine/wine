@@ -212,8 +212,8 @@ HRESULT shader_get_registers_used(
     /* There are some minor differences between pixel and vertex shaders */
     char pshader = shader_is_pshader_version(This->baseShader.hex_version);
 
-    reg_maps->bumpmat = -1;
-    reg_maps->luminanceparams = -1;
+    memset(reg_maps->bumpmat, 0, sizeof(reg_maps->bumpmat));
+    memset(reg_maps->luminanceparams, 0, sizeof(reg_maps->luminanceparams));
 
     if (pToken == NULL)
         return WINED3D_OK;
@@ -348,7 +348,8 @@ HRESULT shader_get_registers_used(
             int i, limit;
 
             /* Declare 1.X samplers implicitly, based on the destination reg. number */
-            if (WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) == 1 && 
+            if (WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) == 1 &&
+                pshader /* Filter different instructions with the same enum values in VS */ &&
                 (WINED3DSIO_TEX == curOpcode->opcode ||
                  WINED3DSIO_TEXBEM == curOpcode->opcode ||
                  WINED3DSIO_TEXBEML == curOpcode->opcode ||
@@ -395,25 +396,17 @@ HRESULT shader_get_registers_used(
                 /* texbem is only valid with < 1.4 pixel shaders */
                 if(WINED3DSIO_TEXBEM  == curOpcode->opcode ||
                     WINED3DSIO_TEXBEML == curOpcode->opcode) {
-                    if(reg_maps->bumpmat != -1 && reg_maps->bumpmat != sampler_code) {
-                        FIXME("Pixel shader uses texbem instruction on more than 1 sampler\n");
-                    } else {
-                        reg_maps->bumpmat = sampler_code;
-                        if(WINED3DSIO_TEXBEML == curOpcode->opcode) {
-                            reg_maps->luminanceparams = sampler_code;
-                        }
+                    reg_maps->bumpmat[sampler_code] = TRUE;
+                    if(WINED3DSIO_TEXBEML == curOpcode->opcode) {
+                        reg_maps->luminanceparams[sampler_code] = TRUE;
                     }
                 }
             }
             if(WINED3DSIO_NRM  == curOpcode->opcode) {
                 reg_maps->usesnrm = 1;
-            } else if(WINED3DSIO_BEM == curOpcode->opcode) {
+            } else if(WINED3DSIO_BEM == curOpcode->opcode && pshader) {
                 DWORD regnum = *pToken & WINED3DSP_REGNUM_MASK;
-                if(reg_maps->bumpmat != -1 && reg_maps->bumpmat != regnum) {
-                    FIXME("Pixel shader uses bem or texbem instruction on more than 1 sampler\n");
-                } else {
-                    reg_maps->bumpmat = regnum;
-                }
+                reg_maps->bumpmat[regnum] = TRUE;
             } else if(WINED3DSIO_DSY  == curOpcode->opcode) {
                 reg_maps->usesdsy = 1;
             }
@@ -787,8 +780,7 @@ void shader_dump_param(
 /** Shared code in order to generate the bulk of the shader string.
     Use the shader_header_fct & shader_footer_fct to add strings
     that are specific to pixel or vertex functions
-    NOTE: A description of how to parse tokens can be found at:
-          http://msdn.microsoft.com/library/default.asp?url=/library/en-us/graphics/hh/graphics/usermodedisplaydriver_shader_cc8e4e05-f5c3-4ec0-8853-8ce07c1551b2.xml.asp */
+    NOTE: A description of how to parse tokens can be found on msdn */
 void shader_generate_main(
     IWineD3DBaseShader *iface,
     SHADER_BUFFER* buffer,
@@ -1103,6 +1095,9 @@ static void shader_none_load_constants(IWineD3DDevice *iface, char usePS, char u
 static void shader_none_cleanup(IWineD3DDevice *iface) {}
 static void shader_none_color_correction(SHADER_OPCODE_ARG* arg) {}
 static void shader_none_destroy(IWineD3DBaseShader *iface) {}
+static HRESULT shader_none_alloc(IWineD3DDevice *iface) {return WINED3D_OK;}
+static void shader_none_free(IWineD3DDevice *iface) {}
+static BOOL shader_none_dirty_const(IWineD3DDevice *iface) {return FALSE;}
 
 const shader_backend_t none_shader_backend = {
     &shader_none_select,
@@ -1111,7 +1106,10 @@ const shader_backend_t none_shader_backend = {
     &shader_none_load_constants,
     &shader_none_cleanup,
     &shader_none_color_correction,
-    &shader_none_destroy
+    &shader_none_destroy,
+    &shader_none_alloc,
+    &shader_none_free,
+    &shader_none_dirty_const
 };
 
 /* *******************************************

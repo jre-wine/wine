@@ -308,15 +308,12 @@ static BOOL PRINTDLG_UpdatePrintDlgA(HWND hDlg,
 	    nToPage   = GetDlgItemInt(hDlg, edt2, NULL, FALSE);
 	    if (nFromPage < lppd->nMinPage || nFromPage > lppd->nMaxPage ||
 		nToPage < lppd->nMinPage || nToPage > lppd->nMaxPage) {
-	        char resourcestr[256];
-		char resultstr[256];
-		LoadStringA(COMDLG32_hInstance, PD32_INVALID_PAGE_RANGE,
-			    resourcestr, 255);
-		sprintf(resultstr,resourcestr, lppd->nMinPage, lppd->nMaxPage);
-		LoadStringA(COMDLG32_hInstance, PD32_PRINT_TITLE,
-			    resourcestr, 255);
-		MessageBoxA(hDlg, resultstr, resourcestr,
-			    MB_OK | MB_ICONWARNING);
+	        WCHAR resourcestr[256];
+		WCHAR resultstr[256];
+		LoadStringW(COMDLG32_hInstance, PD32_INVALID_PAGE_RANGE, resourcestr, 255);
+		wsprintfW(resultstr,resourcestr, lppd->nMinPage, lppd->nMaxPage);
+		LoadStringW(COMDLG32_hInstance, PD32_PRINT_TITLE, resourcestr, 255);
+		MessageBoxW(hDlg, resultstr, resourcestr, MB_OK | MB_ICONWARNING);
 		return FALSE;
 	    }
 	    lppd->nFromPage = nFromPage;
@@ -361,6 +358,21 @@ static BOOL PRINTDLG_UpdatePrintDlgA(HWND hDlg,
             else
                lppd->Flags &= ~PD_COLLATE;
             lppd->nCopies = GetDlgItemInt(hDlg, edt3, NULL, FALSE);
+	}
+
+	/* Print quality, PrintDlg16 */
+	if(GetDlgItem(hDlg, cmb1))
+	{
+	    HWND hQuality = GetDlgItem(hDlg, cmb1);
+	    int Sel = SendMessageA(hQuality, CB_GETCURSEL, 0, 0);
+
+	    if(Sel != CB_ERR)
+	    {
+		LONG dpi = SendMessageA(hQuality, CB_GETITEMDATA, Sel, 0);
+		lpdm->dmFields |= DM_PRINTQUALITY | DM_YRESOLUTION;
+		lpdm->u1.s1.dmPrintQuality = LOWORD(dpi);
+		lpdm->dmYResolution = HIWORD(dpi);
+	    }
 	}
     }
     return TRUE;
@@ -997,6 +1009,61 @@ BOOL PRINTDLG_ChangePrinterA(HWND hDlg, char *name,
 	if (lppd->Flags & PD_HIDEPRINTTOFILE)
             ShowWindow(GetDlgItem(hDlg, chx1), SW_HIDE);
 
+	/* Fill print quality combo, PrintDlg16 */
+	if(GetDlgItem(hDlg, cmb1))
+	{
+	    DWORD numResolutions = DeviceCapabilitiesA(PrintStructures->lpPrinterInfo->pPrinterName,
+						       PrintStructures->lpPrinterInfo->pPortName,
+						       DC_ENUMRESOLUTIONS, NULL, lpdm);
+
+	    if(numResolutions != -1)
+	    {
+		HWND hQuality = GetDlgItem(hDlg, cmb1);
+		LONG* Resolutions;
+		char buf[255];
+		int i;
+		int dpiX, dpiY;
+		HDC hPrinterDC = CreateDCA(PrintStructures->lpPrinterInfo->pDriverName,
+					   PrintStructures->lpPrinterInfo->pPrinterName,
+					   0, lpdm);
+
+		Resolutions = HeapAlloc(GetProcessHeap(), 0, numResolutions*sizeof(LONG)*2);
+		DeviceCapabilitiesA(PrintStructures->lpPrinterInfo->pPrinterName,
+				    PrintStructures->lpPrinterInfo->pPortName,
+				    DC_ENUMRESOLUTIONS, (LPSTR)Resolutions, lpdm);
+
+		dpiX = GetDeviceCaps(hPrinterDC, LOGPIXELSX);
+		dpiY = GetDeviceCaps(hPrinterDC, LOGPIXELSY);
+		DeleteDC(hPrinterDC);
+
+		SendMessageA(hQuality, CB_RESETCONTENT, 0, 0);
+		for(i = 0; i < (numResolutions * 2); i += 2)
+		{
+		    BOOL IsDefault = FALSE;
+		    LRESULT Index;
+
+		    if(Resolutions[i] == Resolutions[i+1])
+		    {
+			if(dpiX == Resolutions[i])
+			    IsDefault = TRUE;
+			sprintf(buf, "%d dpi", Resolutions[i]);
+		    } else
+		    {
+			if(dpiX == Resolutions[i] && dpiY == Resolutions[i+1])
+			    IsDefault = TRUE;
+			sprintf(buf, "%d dpi x %d dpi", Resolutions[i], Resolutions[i+1]);
+		    }
+
+		    Index = SendMessageA(hQuality, CB_ADDSTRING, 0, (LPARAM)buf);
+
+		    if(IsDefault)
+			SendMessageA(hQuality, CB_SETCURSEL, Index, 0);
+
+		    SendMessageA(hQuality, CB_SETITEMDATA, Index, MAKELONG(dpiX,dpiY));
+		}
+		HeapFree(GetProcessHeap(), 0, Resolutions);
+	    }
+	}
     } else { /* PD_PRINTSETUP */
       BOOL bPortrait = (lpdm->u1.s1.dmOrientation == DMORIENT_PORTRAIT);
 
@@ -1536,9 +1603,8 @@ LRESULT PRINTDLG_WMCommandA(HWND hDlg, WPARAM wParam,
         }
         break;
 
-    case cmb1: /* Printer Combobox in PRINT SETUP, quality combobox in PRINT */
+    case cmb1: /* Printer Combobox in PRINT SETUP, quality combobox in PRINT16 */
 	 if (PrinterComboID != LOWORD(wParam)) {
-	     FIXME("No handling for print quality combo box yet.\n");
 	     break;
 	 }
 	 /* FALLTHROUGH */
@@ -1700,11 +1766,7 @@ static LRESULT PRINTDLG_WMCommandW(HWND hDlg, WPARAM wParam,
         }
         break;
 
-    case cmb1: /* Printer Combobox in PRINT SETUP, quality combobox in PRINT */
-	 if (PrinterComboID != LOWORD(wParam)) {
-	     FIXME("No handling for print quality combo box yet.\n");
-	     break;
-	 }
+    case cmb1: /* Printer Combobox in PRINT SETUP */
 	 /* FALLTHROUGH */
     case cmb4:                         /* Printer combobox */
          if (HIWORD(wParam)==CBN_SELCHANGE) {
@@ -2785,7 +2847,7 @@ PRINTDLG_PS_ChangePaperPrev(const PageSetupDataA *pda)
     MoveWindow(GetDlgItem(pda->hDlg, rct2), x+width, y+SHADOW, SHADOW, height, FALSE);
     MoveWindow(GetDlgItem(pda->hDlg, rct3), x+SHADOW, y+height, width, SHADOW, FALSE);
     MoveWindow(GetDlgItem(pda->hDlg, rct1), x, y, width, height, FALSE);
-    memcpy(&rtTmp, &pda->rtDrawRect, sizeof(RECT));
+    rtTmp = pda->rtDrawRect;
     rtTmp.right  += SHADOW;
     rtTmp.bottom += SHADOW;
 #undef SHADOW 
@@ -3504,9 +3566,9 @@ BOOL WINAPI PageSetupDlgA(LPPAGESETUPDLGA setupdlg) {
         bRet = PrintDlgA(&pdlg);
         if (!bRet){
             if (!(setupdlg->Flags & PSD_NOWARNING)) {
-                char errstr[256];
-                LoadStringA(COMDLG32_hInstance, PD32_NO_DEFAULT_PRINTER, errstr, 255);
-                MessageBoxA(setupdlg->hwndOwner, errstr, 0, MB_OK | MB_ICONERROR);
+                WCHAR errstr[256];
+                LoadStringW(COMDLG32_hInstance, PD32_NO_DEFAULT_PRINTER, errstr, 255);
+                MessageBoxW(setupdlg->hwndOwner, errstr, 0, MB_OK | MB_ICONERROR);
             }
             return FALSE;
         }

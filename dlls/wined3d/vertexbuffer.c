@@ -474,6 +474,9 @@ static void CreateVBO(IWineD3DVertexBufferImpl *This) {
     }
     This->vbo_size = This->resource.size;
     This->vbo_usage = glUsage;
+    This->dirtystart = 0;
+    This->dirtyend = This->resource.size;
+    This->Flags |= VBFLAG_DIRTY;
 
     LEAVE_GL();
 
@@ -495,10 +498,6 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
     BOOL declChanged = FALSE;
     int i, j;
     TRACE("(%p)->()\n", This);
-
-    if(This->Flags & VBFLAG_LOAD) {
-        return; /* Already doing that stuff */
-    }
 
     if(!This->vbo) {
         /* TODO: Make converting independent from VBOs */

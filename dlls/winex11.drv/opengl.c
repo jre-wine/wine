@@ -618,6 +618,11 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
     TRACE("pAttr[%d] = %x\n", cur, iWGLAttr[cur]);
 
     switch (iWGLAttr[cur]) {
+    case WGL_AUX_BUFFERS_ARB:
+      pop = iWGLAttr[++cur];
+      PUSH2(oGLXAttr, GLX_AUX_BUFFERS, pop);
+      TRACE("pAttr[%d] = GLX_AUX_BUFFERS: %d\n", cur, pop);
+      break;
     case WGL_COLOR_BITS_ARB:
       pop = iWGLAttr[++cur];
       PUSH2(oGLXAttr, GLX_BUFFER_SIZE, pop);
@@ -829,17 +834,10 @@ static int get_render_type_from_fbconfig(Display *display, GLXFBConfig fbconfig)
 
 static BOOL init_formats(Display *display, int screen, Visual *visual)
 {
-    int fmt_id, tmp_fmt_id, nCfgs, i;
+    int fmt_id, nCfgs, i, run;
     GLXFBConfig* cfgs;
-    GLXFBConfig fbconfig = NULL;
     XVisualInfo *visinfo;
-    VisualID visualid = XVisualIDFromVisual(visual);
-    int nOffscreenFormats = 0;
 
-    /* As mentioned in various parts of the code only the format of the main visual can be used for onscreen rendering.
-    * Next to this format there are also so called offscreen rendering formats (used for pbuffers) which can be supported
-    * because they don't need a visual. Below we use glXGetFBConfigs instead of glXChooseFBConfig to enumerate the fb configurations
-    * because this call lists both types of formats instead of only onscreen ones. */
     cfgs = pglXGetFBConfigs(display, DefaultScreen(display), &nCfgs);
     if (NULL == cfgs || 0 == nCfgs) {
         ERR("glXChooseFBConfig returns NULL\n");
@@ -847,48 +845,50 @@ static BOOL init_formats(Display *display, int screen, Visual *visual)
         return FALSE;
     }
 
-    /* Count the number of offscreen formats to determine the size for our pixelformat list */
-    for(i=0; i<nCfgs; i++) {
-        pglXGetFBConfigAttrib(display, cfgs[i], GLX_FBCONFIG_ID, &tmp_fmt_id);
+    WineGLPixelFormatList = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, nCfgs*sizeof(WineGLPixelFormat));
 
-        visinfo = pglXGetVisualFromFBConfig(display, cfgs[i]);
-        /* Onscreen formats have a corresponding XVisual, offscreen ones don't */
-        if(!visinfo) {
-            nOffscreenFormats++;
-        } else if(visinfo && visinfo->visualid == visualid) {
+    /* Fill the pixel format list. Put onscreen formats at the top and offscreen ones at the bottom.
+     * Do this as GLX doesn't guarantee that the list is sorted */
+    for(run=0; run < 2; run++)
+    {
+        for(i=0; i<nCfgs; i++) {
             pglXGetFBConfigAttrib(display, cfgs[i], GLX_FBCONFIG_ID, &fmt_id);
-            fbconfig = cfgs[i];
-            XFree(visinfo);
-        }
-    }
-    TRACE("Number of offscreen formats: %d\n", nOffscreenFormats);
+            visinfo = pglXGetVisualFromFBConfig(display, cfgs[i]);
 
-    /* Allocate memory for all the offscreen pixelformats and the format of Wine's main visual */
-    WineGLPixelFormatList = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (1+nOffscreenFormats)*sizeof(WineGLPixelFormat));
-    WineGLPixelFormatList[0].iPixelFormat = 1;
-    WineGLPixelFormatList[0].fbconfig = fbconfig;
-    WineGLPixelFormatList[0].fmt_id = fmt_id;
-    WineGLPixelFormatList[0].render_type = get_render_type_from_fbconfig(display, fbconfig);
-    WineGLPixelFormatList[0].offscreenOnly = FALSE;
-    WineGLPixelFormatListSize = 1;
-    WineGLPixelFormatOnScreenSize = 1;
+            /* The first run we only add onscreen formats (ones which have an associated X Visual).
+             * The second run we only set offscreen formats. */
+            if(!run && visinfo)
+            {
+                /* We implement child window rendering using offscreen buffers (using composite or an XPixmap).
+                 * The contents is copied to the destination using XCopyArea. For the copying to work
+                 * the depth of the source and destination window should be the same. In general this should
+                 * not be a problem for OpenGL as drivers only advertise formats with a similar depth (or no depth).
+                 * As of the introduction of composition managers at least Nvidia now also offers ARGB visuals
+                 * with a depth of 32 in addition to the default 24 bit. In order to prevent BadMatch errors we only
+                 * list formats with the same depth. */
+                if(visinfo->depth != screen_depth)
+                    continue;
 
-    /* Fill the list with offscreen formats */
-    for(i=0; i<nCfgs; i++) {
-        pglXGetFBConfigAttrib(display, cfgs[i], GLX_FBCONFIG_ID, &tmp_fmt_id);
+                TRACE("Found onscreen format FBCONFIG_ID 0x%x corresponding to iPixelFormat %d at GLX index %d\n", fmt_id, WineGLPixelFormatListSize+1, i);
+                WineGLPixelFormatList[WineGLPixelFormatListSize].iPixelFormat = WineGLPixelFormatListSize+1; /* The index starts at 1 */
+                WineGLPixelFormatList[WineGLPixelFormatListSize].fbconfig = cfgs[i];
+                WineGLPixelFormatList[WineGLPixelFormatListSize].fmt_id = fmt_id;
+                WineGLPixelFormatList[WineGLPixelFormatListSize].render_type = get_render_type_from_fbconfig(display, cfgs[i]);
 
-        visinfo = pglXGetVisualFromFBConfig(display, cfgs[i]);
-        /* We have found an offscreen rendering format when there is no visualinfo :) */
-        if(!visinfo) {
-            TRACE("Found offscreen format FBCONFIG_ID 0x%x corresponding to iPixelFormat %d at GLX index %d\n", tmp_fmt_id, WineGLPixelFormatListSize+1, i);
-            WineGLPixelFormatList[WineGLPixelFormatListSize].iPixelFormat = WineGLPixelFormatListSize+1; /* The index starts at 1 */
-            WineGLPixelFormatList[WineGLPixelFormatListSize].fbconfig = cfgs[i];
-            WineGLPixelFormatList[WineGLPixelFormatListSize].fmt_id = tmp_fmt_id;
-            WineGLPixelFormatList[WineGLPixelFormatListSize].render_type = get_render_type_from_fbconfig(display, cfgs[i]);
-            WineGLPixelFormatList[WineGLPixelFormatListSize].offscreenOnly = TRUE;
-            WineGLPixelFormatListSize++;
-        } else {
-	    XFree(visinfo);
+                WineGLPixelFormatList[WineGLPixelFormatListSize].offscreenOnly = FALSE;
+                WineGLPixelFormatListSize++;
+                WineGLPixelFormatOnScreenSize++;
+                XFree(visinfo);
+            } else if(run && !visinfo) {
+                TRACE("Found offscreen format FBCONFIG_ID 0x%x corresponding to iPixelFormat %d at GLX index %d\n", fmt_id, WineGLPixelFormatListSize+1, i);
+                WineGLPixelFormatList[WineGLPixelFormatListSize].iPixelFormat = WineGLPixelFormatListSize+1; /* The index starts at 1 */
+                WineGLPixelFormatList[WineGLPixelFormatListSize].fbconfig = cfgs[i];
+                WineGLPixelFormatList[WineGLPixelFormatListSize].fmt_id = fmt_id;
+                WineGLPixelFormatList[WineGLPixelFormatListSize].render_type = get_render_type_from_fbconfig(display, cfgs[i]);
+
+                WineGLPixelFormatList[WineGLPixelFormatListSize].offscreenOnly = TRUE;
+                WineGLPixelFormatListSize++;
+            }
         }
     }
 
@@ -1372,6 +1372,10 @@ int X11DRV_DescribePixelFormat(X11DRV_PDEVICE *physDev,
   ppfd->cAccumBlueBits = bb;
   ppfd->cAccumAlphaBits = ab;
 
+  /* Aux bits */
+  pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_AUX_BUFFERS, &value);
+  ppfd->cAuxBuffers = value;
+
   /* Depth bits */
   pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DEPTH_SIZE, &value);
   ppfd->cDepthBits = value;
@@ -1381,8 +1385,6 @@ int X11DRV_DescribePixelFormat(X11DRV_PDEVICE *physDev,
   ppfd->cStencilBits = value;
 
   wine_tsx11_unlock();
-
-  /* Aux : to do ... */
 
   ppfd->iLayerType = PFD_MAIN_PLANE;
 
@@ -1471,8 +1473,6 @@ BOOL X11DRV_SetPixelFormat(X11DRV_PDEVICE *physDev,
             ERR("Couldn't set format of the window, returning failure\n");
             return FALSE;
         }
-
-        physDev->gl_drawable = X11DRV_get_gl_drawable(hwnd);
     }
     else if(physDev->bitmap) {
         if(!(value&GLX_PIXMAP_BIT)) {
@@ -1528,15 +1528,44 @@ BOOL X11DRV_wglCopyContext(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask) {
      * Up to now that works fine.
      *
      * The delayed GLX context creation could cause issues for wglCopyContext as it might get called
-     * when there is no GLX context yet. Warn the user about it and let him report a bug report.
-     * The chance this will cause problems is small as at the time of writing Wine has had OpenGL support
-     * for more than 7 years and this function has remained a stub ever since then.
+     * when there is no GLX context yet. The chance this will cause problems is small as at the time of
+     * writing Wine has had OpenGL support for more than 7 years and this function has remained a stub
+     * ever since then.
      */
     if(!src->ctx || !dst->ctx) {
-        FIXME("No source or destination context available! This could indicate a Wine bug.\n");
-        return FALSE;
+        /* NOTE: As a special case, if both GLX contexts are NULL, that means
+         * neither WGL context was made current. In that case, both contexts
+         * are in a default state, so any copy would no-op.
+         */
+        if(!src->ctx && !dst->ctx) {
+            TRACE("No source or destination contexts set. No-op.\n");
+            return TRUE;
+        }
+
+        if (!src->ctx) {
+            DWORD type = GetObjectType(src->hdc);
+            wine_tsx11_lock();
+            if(src->vis)
+                src->ctx = pglXCreateContext(gdi_display, src->vis, NULL, type == OBJ_MEMDC ? False : True);
+            else /* Create a GLX Context for a pbuffer */
+                src->ctx = pglXCreateNewContext(gdi_display, src->fmt->fbconfig, src->fmt->render_type, NULL, True);
+            TRACE(" created a delayed OpenGL context (%p)\n", src->ctx);
+        }
+        else if (!dst->ctx) {
+            DWORD type = GetObjectType(dst->hdc);
+            wine_tsx11_lock();
+            if(dst->vis)
+                dst->ctx = pglXCreateContext(gdi_display, dst->vis, NULL, type == OBJ_MEMDC ? False : True);
+            else /* Create a GLX Context for a pbuffer */
+                dst->ctx = pglXCreateNewContext(gdi_display, dst->fmt->fbconfig, dst->fmt->render_type, NULL, True);
+            TRACE(" created a delayed OpenGL context (%p)\n", dst->ctx);
+        }
     }
+    else
+        wine_tsx11_lock();
+
     pglXCopyContext(gdi_display, src->ctx, dst->ctx, mask);
+    wine_tsx11_unlock();
 
     /* As opposed to wglCopyContext, glXCopyContext doesn't return anything, so hopefully we passed */
     return TRUE;
@@ -3369,47 +3398,6 @@ BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev)
   return TRUE;
 }
 
-/***********************************************************************
- *		X11DRV_setup_opengl_visual
- *
- * Setup the default visual used for OpenGL and Direct3D, and the desktop
- * window (if it exists).  If OpenGL isn't available, the visual is simply
- * set to the default visual for the display
- */
-XVisualInfo *X11DRV_setup_opengl_visual( Display *display )
-{
-    XVisualInfo *visual = NULL;
-    int i;
-
-    /* In order to support OpenGL or D3D, we require a double-buffered visual and stencil buffer support,
-     * D3D and some applications can make use of aux buffers.
-     */
-    int visualProperties[][11] = {
-        { GLX_RGBA, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, 24, GLX_STENCIL_SIZE, 8, GLX_ALPHA_SIZE, 8, GLX_AUX_BUFFERS, 1, None },
-        { GLX_RGBA, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, 24, GLX_STENCIL_SIZE, 8, GLX_ALPHA_SIZE, 8, None },
-        { GLX_RGBA, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, 16, GLX_STENCIL_SIZE, 8, None },
-        { GLX_RGBA, GLX_DOUBLEBUFFER, GLX_DEPTH_SIZE, 16, None },
-    };
-
-    if (!has_opengl())
-        return NULL;
-
-    wine_tsx11_lock();
-    for (i = 0; i < sizeof(visualProperties)/sizeof(visualProperties[0]); ++i) {
-        visual = pglXChooseVisual(display, DefaultScreen(display), visualProperties[i]);
-        if (visual)
-            break;
-    }
-    wine_tsx11_unlock();
-
-    if (visual)
-        TRACE("Visual ID %lx Chosen\n", visual->visualid);
-    else
-        WARN("No suitable visual found\n");
-
-    return visual;
-}
-
 XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id )
 {
     WineGLPixelFormat *fmt;
@@ -3582,11 +3570,6 @@ BOOL X11DRV_wglUseFontBitmapsW(X11DRV_PDEVICE *physDev, DWORD first, DWORD count
 {
     ERR_(opengl)("No OpenGL support compiled in.\n");
     return FALSE;
-}
-
-XVisualInfo *X11DRV_setup_opengl_visual( Display *display )
-{
-  return NULL;
 }
 
 Drawable get_glxdrawable(X11DRV_PDEVICE *physDev)

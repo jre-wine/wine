@@ -272,7 +272,7 @@ static void create_database(const CHAR *name, const msi_table *tables, int num_t
 
         write_file(table->filename, table->data, (table->size - 1) * sizeof(char));
 
-        printf("table->filename: %s\n", table->filename);
+        trace("table->filename: %s\n", table->filename);
         r = MsiDatabaseImportA(db, CURR_DIR, table->filename);
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
@@ -470,11 +470,9 @@ static void test_dispid(void)
     ok( get_dispid( pInstaller, "OpenPackage" ) == 2, "dispid wrong\n");
     todo_wine ok( get_dispid( pInstaller, "OpenProduct" ) == 3, "dispid wrong\n");
     ok( get_dispid( pInstaller, "OpenDatabase" ) == 4, "dispid wrong\n");
-    todo_wine {
-    ok( get_dispid( pInstaller, "SummaryInformation" ) == 5, "dispid wrong\n");
+    todo_wine ok( get_dispid( pInstaller, "SummaryInformation" ) == 5, "dispid wrong\n");
     ok( get_dispid( pInstaller, "UILevel" ) == 6, "dispid wrong\n");
-    ok( get_dispid( pInstaller, "EnableLog" ) == 7, "dispid wrong\n");
-    }
+    todo_wine ok( get_dispid( pInstaller, "EnableLog" ) == 7, "dispid wrong\n");
     ok( get_dispid( pInstaller, "InstallProduct" ) == 8, "dispid wrong\n");
     ok( get_dispid( pInstaller, "Version" ) == 9, "dispid wrong\n");
     todo_wine {
@@ -2139,7 +2137,7 @@ static void test_Installer_InstallProduct(void)
     /* Package name */
     memset(szString, 0, sizeof(szString));
     hr = Installer_ProductInfo(szProductCode, WINE_INSTALLPROPERTY_PACKAGENAMEW, szString);
-    todo_wine ok(hr == S_OK, "Installer_ProductInfo failed, hresult 0x%08x\n", hr);
+    ok(hr == S_OK, "Installer_ProductInfo failed, hresult 0x%08x\n", hr);
     todo_wine ok_w2("Installer_ProductInfo returned %s but expected %s\n", szString, szMsifile);
 
     /* Product name */
@@ -2247,11 +2245,6 @@ static void test_Installer_InstallProduct(void)
 
     res = RegDeleteKeyA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Installer\\Products\\05FA3C1F65B896A40AC00077F34EF203");
     todo_wine ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_SUCCESS, got %d\n", res);
-
-    res = delete_registry_key(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\"
-                              "CurrentVersion\\Installer\\Managed\\S-1-5-4\\"
-                              "Installer\\Products\\05FA3C1F65B896A40AC00077F34EF203");
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Delete installation files we installed */
     delete_test_files();

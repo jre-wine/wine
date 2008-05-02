@@ -626,11 +626,11 @@ BOOL WINAPI ImmDestroyContext(HIMC hIMC)
 
     if (hIMC)
     {
-        ImmDestroyIMCC(root_context->IMC.hCompStr);
-        ImmDestroyIMCC(root_context->IMC.hCandInfo);
-        ImmDestroyIMCC(root_context->IMC.hGuideLine);
-        ImmDestroyIMCC(root_context->IMC.hPrivate);
-        ImmDestroyIMCC(root_context->IMC.hMsgBuf);
+        ImmDestroyIMCC(data->IMC.hCompStr);
+        ImmDestroyIMCC(data->IMC.hCandInfo);
+        ImmDestroyIMCC(data->IMC.hGuideLine);
+        ImmDestroyIMCC(data->IMC.hPrivate);
+        ImmDestroyIMCC(data->IMC.hMsgBuf);
 
         if (data->textfont)
         {
@@ -1014,7 +1014,7 @@ BOOL WINAPI ImmGetCompositionWindow(HIMC hIMC, LPCOMPOSITIONFORM lpCompForm)
     if (!data)
         return FALSE;
 
-    memcpy(lpCompForm,&(data->IMC.cfCompForm),sizeof(COMPOSITIONFORM));
+    *lpCompForm = data->IMC.cfCompForm;
     return 1;
 }
 
@@ -1614,7 +1614,7 @@ BOOL WINAPI ImmSetCompositionFontW(HIMC hIMC, LPLOGFONTW lplf)
     if (!data)
         return FALSE;
 
-    memcpy(&data->IMC.lfFont.W,lplf,sizeof(LOGFONTW));
+    data->IMC.lfFont.W = *lplf;
     ImmInternalSendIMENotify(IMN_SETCOMPOSITIONFONT, 0);
 
     if (data->textfont)
@@ -1751,7 +1751,7 @@ BOOL WINAPI ImmSetCompositionWindow(
     if (!data)
         return FALSE;
 
-    memcpy(&data->IMC.cfCompForm,lpCompForm,sizeof(COMPOSITIONFORM));
+    data->IMC.cfCompForm = *lpCompForm;
 
     if (IsWindowVisible(hwndDefault))
     {
@@ -2101,7 +2101,6 @@ static void PaintDefaultIMEWnd(HWND hwnd)
             rect.top = cpt.y;
             rect.right = rect.left + pt.x;
             rect.bottom = rect.top + pt.y;
-            offX=offY=10;
             monitor = MonitorFromPoint(cpt, MONITOR_DEFAULTTOPRIMARY);
         }
         else /* CFS_DEFAULT */

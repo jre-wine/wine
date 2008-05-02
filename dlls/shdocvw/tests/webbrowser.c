@@ -89,6 +89,7 @@ DEFINE_EXPECT(Invoke_ONADDRESSBAR);
 DEFINE_EXPECT(Invoke_ONSTATUSBAR);
 DEFINE_EXPECT(Invoke_ONTOOLBAR);
 DEFINE_EXPECT(Invoke_ONFULLSCREEN);
+DEFINE_EXPECT(Invoke_ONTHEATERMODE);
 DEFINE_EXPECT(Invoke_WINDOWSETRESIZABLE);
 DEFINE_EXPECT(EnableModeless_TRUE);
 DEFINE_EXPECT(EnableModeless_FALSE);
@@ -105,6 +106,7 @@ DEFINE_EXPECT(QueryStatus_SETPROGRESSTEXT);
 
 static const WCHAR wszItem[] = {'i','t','e','m',0};
 static const WCHAR about_blankW[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
+static const WCHAR emptyW[] = {0};
 
 static VARIANT_BOOL exvb;
 static IWebBrowser2 *wb;
@@ -130,6 +132,26 @@ static const char *debugstr_guid(REFIID riid)
             riid->Data4[5], riid->Data4[6], riid->Data4[7]);
 
     return buf;
+}
+
+#define test_LocationURL(a,b) _test_LocationURL(__LINE__,a,b)
+static void _test_LocationURL(unsigned line, IUnknown *unk, LPCWSTR exurl)
+{
+    IWebBrowser2 *wb;
+    BSTR url = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IWebBrowser2, (void**)&wb);
+    ok(hres == S_OK, "Could not get IWebBrowser2 interface: %08x\n", hres);
+    if(FAILED(hres))
+        return;
+
+    hres = IWebBrowser2_get_LocationURL(wb, &url);
+    ok_(__FILE__,line) (hres == (*exurl ? S_OK : S_FALSE), "get_LocationURL failed: %08x\n", hres);
+    ok_(__FILE__,line) (!lstrcmpW(url, exurl), "unexpected URL: %s\n", debugstr_w(url));
+
+    SysFreeString(url);
+    IWebBrowser2_Release(wb);
 }
 
 static HRESULT QueryInterface(REFIID,void**);
@@ -596,6 +618,11 @@ static HRESULT WINAPI WebBrowserEvents2_Invoke(IDispatch *iface, DISPID dispIdMe
 
     case DISPID_ONFULLSCREEN:
         CHECK_EXPECT(Invoke_ONFULLSCREEN);
+        test_invoke_bool(pDispParams);
+        break;
+
+    case DISPID_ONTHEATERMODE:
+        CHECK_EXPECT(Invoke_ONTHEATERMODE);
         test_invoke_bool(pDispParams);
         break;
 
@@ -1554,6 +1581,35 @@ static void test_ie_funcs(IUnknown *unk)
     ok(hres == S_OK, "put_FullScreen failed: %08x\n", hres);
     CHECK_CALLED(Invoke_ONFULLSCREEN);
 
+    /* TheaterMode */
+
+    hres = IWebBrowser2_get_TheaterMode(wb, &b);
+    ok(hres == S_OK, "get_TheaterMode failed: %08x\n", hres);
+    ok(b == VARIANT_FALSE, "b=%x\n", b);
+
+    SET_EXPECT(Invoke_ONTHEATERMODE);
+    hres = IWebBrowser2_put_TheaterMode(wb, (exvb = VARIANT_TRUE));
+    ok(hres == S_OK, "put_TheaterMode failed: %08x\n", hres);
+    CHECK_CALLED(Invoke_ONTHEATERMODE);
+
+    hres = IWebBrowser2_get_TheaterMode(wb, &b);
+    ok(hres == S_OK, "get_TheaterMode failed: %08x\n", hres);
+    ok(b == VARIANT_TRUE, "b=%x\n", b);
+
+    SET_EXPECT(Invoke_ONTHEATERMODE);
+    hres = IWebBrowser2_put_TheaterMode(wb, (exvb = 100));
+    ok(hres == S_OK, "put_TheaterMode failed: %08x\n", hres);
+    CHECK_CALLED(Invoke_ONTHEATERMODE);
+
+    hres = IWebBrowser2_get_TheaterMode(wb, &b);
+    ok(hres == S_OK, "get_TheaterMode failed: %08x\n", hres);
+    ok(b == VARIANT_TRUE, "b=%x\n", b);
+
+    SET_EXPECT(Invoke_ONTHEATERMODE);
+    hres = IWebBrowser2_put_TheaterMode(wb, (exvb = VARIANT_FALSE));
+    ok(hres == S_OK, "put_TheaterMode failed: %08x\n", hres);
+    CHECK_CALLED(Invoke_ONTHEATERMODE);
+
     /* Resizable */
 
     b = 0x100;
@@ -1845,6 +1901,8 @@ static void test_Navigate2(IUnknown *unk)
     if(FAILED(hres))
         return;
 
+    test_LocationURL(unk, emptyW);
+
     V_VT(&url) = VT_BSTR;
     V_BSTR(&url) = SysAllocString(about_blankW);
 
@@ -1906,7 +1964,9 @@ static void test_QueryInterface(IUnknown *unk)
     IQuickActivate *qa = (IQuickActivate*)0xdeadbeef;
     IRunnableObject *runnable = (IRunnableObject*)0xdeadbeef;
     IPerPropertyBrowsing *propbrowse = (void*)0xdeadbeef;
+    IOleInPlaceSite *inplace = (void*)0xdeadbeef;
     IOleCache *cache = (void*)0xdeadbeef;
+    IObjectWithSite *site = (void*)0xdeadbeef;
     HRESULT hres;
 
     hres = IUnknown_QueryInterface(unk, &IID_IQuickActivate, (void**)&qa);
@@ -1919,11 +1979,19 @@ static void test_QueryInterface(IUnknown *unk)
 
     hres = IUnknown_QueryInterface(unk, &IID_IPerPropertyBrowsing, (void**)&propbrowse);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(runnable == NULL, "runnable=%p, ezpected NULL\n", runnable);
+    ok(propbrowse == NULL, "propbrowse=%p, ezpected NULL\n", runnable);
 
     hres = IUnknown_QueryInterface(unk, &IID_IOleCache, (void**)&cache);
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
-    ok(cache == NULL, "runnable=%p, ezpected NULL\n", runnable);
+    ok(cache == NULL, "cache=%p, ezpected NULL\n", runnable);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IOleInPlaceSite, (void**)&inplace);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(inplace == NULL, "inplace=%p, ezpected NULL\n", runnable);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IObjectWithSite, (void**)&site);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(site == NULL, "inplace=%p, ezpected NULL\n", runnable);
 }
 
 static void test_WebBrowser(void)
@@ -1943,6 +2011,7 @@ static void test_WebBrowser(void)
 
     test_QueryInterface(unk);
     test_ClassInfo(unk);
+    test_LocationURL(unk, emptyW);
     test_ConnectionPoint(unk, TRUE);
     test_ClientSite(unk, &ClientSite);
     test_Extent(unk);

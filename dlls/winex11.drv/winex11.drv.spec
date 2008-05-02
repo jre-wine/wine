@@ -22,6 +22,7 @@
 @ cdecl GetDIBits(ptr long long long ptr ptr long) X11DRV_GetDIBits
 @ cdecl GetDeviceCaps(ptr long) X11DRV_GetDeviceCaps
 @ cdecl GetDeviceGammaRamp(ptr ptr) X11DRV_GetDeviceGammaRamp
+@ cdecl GetICMProfile(ptr ptr ptr) X11DRV_GetICMProfile
 @ cdecl GetNearestColor(ptr long) X11DRV_GetNearestColor
 @ cdecl GetPixel(ptr long long) X11DRV_GetPixel
 @ cdecl GetPixelFormat(ptr) X11DRV_GetPixelFormat
@@ -96,11 +97,11 @@
 @ cdecl EnumClipboardFormats(long) X11DRV_EnumClipboardFormats
 @ cdecl GetClipboardData(long ptr ptr) X11DRV_GetClipboardData
 @ cdecl GetClipboardFormatName(long ptr long) X11DRV_GetClipboardFormatName
-@ cdecl GetDCEx(long long long) X11DRV_GetDCEx
+@ cdecl GetDC(long long long ptr ptr long) X11DRV_GetDC
 @ cdecl IsClipboardFormatAvailable(long) X11DRV_IsClipboardFormatAvailable
 @ cdecl MsgWaitForMultipleObjectsEx(long ptr long long long) X11DRV_MsgWaitForMultipleObjectsEx
 @ cdecl RegisterClipboardFormat(wstr) X11DRV_RegisterClipboardFormat
-@ cdecl ReleaseDC(long long long) X11DRV_ReleaseDC
+@ cdecl ReleaseDC(long long) X11DRV_ReleaseDC
 @ cdecl ScrollDC(long long long ptr ptr long ptr) X11DRV_ScrollDC
 @ cdecl SetClipboardData(long long long long) X11DRV_SetClipboardData
 @ cdecl SetFocus(long) X11DRV_SetFocus
@@ -110,9 +111,7 @@
 @ cdecl SetWindowRgn(long long long) X11DRV_SetWindowRgn
 @ cdecl SetWindowStyle(ptr long) X11DRV_SetWindowStyle
 @ cdecl SetWindowText(long wstr) X11DRV_SetWindowText
-@ cdecl ShowWindow(long long) X11DRV_ShowWindow
 @ cdecl SysCommandSizeMove(long long) X11DRV_SysCommandSizeMove
-@ cdecl WindowFromDC(long) X11DRV_WindowFromDC
 @ cdecl WindowMessage(long long long long) X11DRV_WindowMessage
 
 # WinTab32

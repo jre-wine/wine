@@ -28,12 +28,58 @@
 #include "bits.h"
 
 #include <string.h>
+#include "wine/list.h"
+
+/* Background copy job vtbl and related data */
+typedef struct
+{
+    const IBackgroundCopyJobVtbl *lpVtbl;
+    LONG ref;
+    LPWSTR displayName;
+    BG_JOB_TYPE type;
+    GUID jobId;
+    struct list files;
+    BG_JOB_PROGRESS jobProgress;
+    BG_JOB_STATE state;
+    struct list entryFromQmgr;
+} BackgroundCopyJobImpl;
+
+/* Enum background copy jobs vtbl and related data */
+typedef struct
+{
+    const IEnumBackgroundCopyJobsVtbl *lpVtbl;
+    LONG ref;
+    IBackgroundCopyJob **jobs;
+    ULONG numJobs;
+    ULONG indexJobs;
+} EnumBackgroundCopyJobsImpl;
+
+/* Enum background copy files vtbl and related data */
+typedef struct
+{
+    const IEnumBackgroundCopyFilesVtbl *lpVtbl;
+    LONG ref;
+    IBackgroundCopyFile **files;
+    ULONG numFiles;
+    ULONG indexFiles;
+} EnumBackgroundCopyFilesImpl;
+
+/* Background copy file vtbl and related data */
+typedef struct
+{
+    const IBackgroundCopyFileVtbl *lpVtbl;
+    LONG ref;
+    BG_FILE_INFO info;
+    BG_FILE_PROGRESS fileProgress;
+    struct list entryFromJob;
+} BackgroundCopyFileImpl;
 
 /* Background copy manager vtbl and related data */
 typedef struct
 {
     const IBackgroundCopyManagerVtbl *lpVtbl;
-    LONG ref;
+    CRITICAL_SECTION cs;
+    struct list jobs;
 } BackgroundCopyManagerImpl;
 
 typedef struct
@@ -44,6 +90,14 @@ typedef struct
 extern ClassFactoryImpl BITS_ClassFactory;
 
 HRESULT BackgroundCopyManagerConstructor(IUnknown *pUnkOuter, LPVOID *ppObj);
+HRESULT BackgroundCopyJobConstructor(LPCWSTR displayName, BG_JOB_TYPE type,
+                                     GUID *pJobId, LPVOID *ppObj);
+HRESULT EnumBackgroundCopyJobsConstructor(LPVOID *ppObj,
+                                          IBackgroundCopyManager* copyManager);
+HRESULT BackgroundCopyFileConstructor(LPCWSTR remoteName,
+                                      LPCWSTR localName, LPVOID *ppObj);
+HRESULT EnumBackgroundCopyFilesConstructor(LPVOID *ppObj,
+                                           IBackgroundCopyJob* copyJob);
 
 /* Little helper functions */
 static inline char *

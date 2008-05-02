@@ -3529,7 +3529,7 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD dwFlags, DWORD dwTimeout,
 /***********************************************************************
  *           CoGetObject [OLE32.@]
  *
- * Gets the object named by coverting the name to a moniker and binding to it.
+ * Gets the object named by converting the name to a moniker and binding to it.
  *
  * PARAMS
  *  pszName      [I] String representing the object.
@@ -3733,6 +3733,18 @@ HRESULT WINAPI CoGetObjectContext(REFIID riid, void **ppv)
 
     return hr;
 }
+
+
+/***********************************************************************
+ *           CoGetContextToken [OLE32.@]
+ */
+HRESULT WINAPI CoGetContextToken( ULONG_PTR *token )
+{
+    FIXME( "stub\n" );
+    if (token) *token = 0;
+    return E_NOTIMPL;
+}
+
 
 /***********************************************************************
  *		DllMain (OLE32.@)

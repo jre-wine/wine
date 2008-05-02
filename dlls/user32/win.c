@@ -133,7 +133,8 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
         return NULL;
     }
 
-    if (!(win = HeapAlloc( GetProcessHeap(), 0, sizeof(WND) + extra_bytes - sizeof(win->wExtra) )))
+    if (!(win = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                           sizeof(WND) + extra_bytes - sizeof(win->wExtra) )))
     {
         SERVER_START_REQ( destroy_window )
         {
@@ -163,13 +164,11 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
     win->hwndSelf   = handle;
     win->parent     = full_parent;
     win->owner      = full_owner;
+    win->class      = class;
+    win->winproc    = get_class_winproc( class );
     win->dwMagic    = WND_MAGIC;
-    win->flags      = 0;
     win->cbWndExtra = extra_bytes;
-    SetRectEmpty( &win->rectWindow );
-    SetRectEmpty( &win->rectClient );
-    memset( win->wExtra, 0, extra_bytes );
-    CLASS_AddWindow( class, win, unicode );
+    if (WINPROC_IsUnicode( win->winproc, unicode )) win->flags |= WIN_ISUNICODE;
     return win;
 }
 
@@ -523,7 +522,11 @@ ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits )
     }
     SERVER_END_REQ;
     WIN_ReleasePtr( win );
-    if (ok) USER_Driver->pSetWindowStyle( hwnd, old_style );
+    if (ok)
+    {
+        USER_Driver->pSetWindowStyle( hwnd, old_style );
+        if ((old_style ^ new_style) & WS_VISIBLE) invalidate_dce( hwnd, NULL );
+    }
     return old_style;
 }
 
@@ -593,6 +596,7 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
     WND *wndPtr;
     HWND *list;
     HMENU menu = 0, sys_menu;
+    HWND icon_title;
 
     TRACE("%p\n", hwnd );
 
@@ -624,16 +628,18 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
 
     /* FIXME: do we need to fake QS_MOUSEMOVE wakebit? */
 
-    WINPOS_CheckInternalPos( hwnd );
-
     /* free resources associated with the window */
 
     if (!(wndPtr = WIN_GetPtr( hwnd )) || wndPtr == WND_OTHER_PROCESS) return 0;
     if ((wndPtr->dwStyle & (WS_CHILD | WS_POPUP)) != WS_CHILD)
         menu = (HMENU)wndPtr->wIDmenu;
     sys_menu = wndPtr->hSysMenu;
+    free_dce( wndPtr->dce, hwnd );
+    wndPtr->dce = NULL;
+    icon_title = wndPtr->icon_title;
     WIN_ReleasePtr( wndPtr );
 
+    if (icon_title) DestroyWindow( icon_title );
     if (menu) DestroyMenu( menu );
     if (sys_menu) DestroyMenu( sys_menu );
 
@@ -863,7 +869,7 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
  */
 static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags )
 {
-    INT cx, cy, sw = SW_SHOW;
+    INT cx, cy, style, sw = SW_SHOW;
     LRESULT result;
     RECT rect;
     WND *wndPtr;
@@ -1148,6 +1154,10 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
         result = SendMessageA( hwnd, WM_CREATE, 0, (LPARAM)cs );
     if (result == -1) goto failed;
 
+    /* call the driver */
+
+    if (!USER_Driver->pCreateWindow( hwnd )) goto failed;
+
     NotifyWinEvent(EVENT_OBJECT_CREATE, hwnd, OBJID_WINDOW, 0);
 
     /* send the size messages */
@@ -1163,9 +1173,19 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
     }
     else WIN_ReleasePtr( wndPtr );
 
-    /* call the driver */
+    /* Show the window, maximizing or minimizing if needed */
 
-    if (!USER_Driver->pCreateWindow( hwnd )) goto failed;
+    style = WIN_SetStyle( hwnd, 0, WS_MAXIMIZE | WS_MINIMIZE );
+    if (style & (WS_MINIMIZE | WS_MAXIMIZE))
+    {
+        RECT newPos;
+        UINT swFlag = (style & WS_MINIMIZE) ? SW_MINIMIZE : SW_MAXIMIZE;
+
+        swFlag = WINPOS_MinMaximize( hwnd, swFlag, &newPos );
+        swFlag |= SWP_FRAMECHANGED; /* Frame always gets changed */
+        if (!(style & WS_VISIBLE) || (style & WS_CHILD) || GetActiveWindow()) swFlag |= SWP_NOACTIVATE;
+        SetWindowPos( hwnd, 0, newPos.left, newPos.top, newPos.right, newPos.bottom, swFlag );
+    }
 
     /* Notify the parent window only */
 

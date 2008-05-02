@@ -123,10 +123,12 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "RAW_CAP_HEIGHT",
     "WM_PROTOCOLS",
     "WM_DELETE_WINDOW",
+    "WM_STATE",
     "WM_TAKE_FOCUS",
     "KWM_DOCKWINDOW",
     "DndProtocol",
     "DndSelection",
+    "_ICC_PROFILE",
     "_MOTIF_WM_HINTS",
     "_KDE_NET_WM_SYSTEM_TRAY_WINDOW_FOR",
     "_NET_SYSTEM_TRAY_OPCODE",
@@ -138,6 +140,8 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_WM_STATE",
     "_NET_WM_STATE_ABOVE",
     "_NET_WM_STATE_FULLSCREEN",
+    "_NET_WM_STATE_MAXIMIZED_HORZ",
+    "_NET_WM_STATE_MAXIMIZED_VERT",
     "_NET_WM_STATE_SKIP_PAGER",
     "_NET_WM_STATE_SKIP_TASKBAR",
     "_NET_WM_WINDOW_TYPE",
@@ -476,7 +480,6 @@ sym_not_found:
 static BOOL process_attach(void)
 {
     Display *display;
-    XVisualInfo *desktop_vi = NULL;
     const char *env;
 
     setup_options();
@@ -513,15 +516,6 @@ static BOOL process_attach(void)
         }
     }
     if (!screen_depth) screen_depth = DefaultDepthOfScreen( screen );
-
-    /* If OpenGL is available, change the default visual, etc as necessary */
-    if ((desktop_vi = X11DRV_setup_opengl_visual( display )))
-    {
-        visual       = desktop_vi->visual;
-        screen       = ScreenOfDisplay(display, desktop_vi->screen);
-        screen_depth = desktop_vi->depth;
-        XFree(desktop_vi);
-    }
     screen_bpp = depth_to_bpp( screen_depth );
 
     XInternAtoms( display, (char **)atom_names, NB_XATOMS - FIRST_XATOM, False, X11DRV_Atoms );
@@ -669,6 +663,7 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     data->last_focus = 0;
     data->selection_wnd = 0;
     TlsSetValue( thread_data_tls_index, data );
+    X11DRV_SetCursor( NULL );
     return data;
 }
 

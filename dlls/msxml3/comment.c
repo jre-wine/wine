@@ -474,24 +474,64 @@ static HRESULT WINAPI domcomment_get_data(
     IXMLDOMComment *iface,
     BSTR *p)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domcomment *This = impl_from_IXMLDOMComment( iface );
+    HRESULT hr = E_FAIL;
+    VARIANT vRet;
+
+    if(!p)
+        return E_INVALIDARG;
+
+    hr = IXMLDOMNode_get_nodeValue( This->node, &vRet );
+    if(hr == S_OK)
+    {
+        *p = V_BSTR(&vRet);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI domcomment_put_data(
     IXMLDOMComment *iface,
     BSTR data)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domcomment *This = impl_from_IXMLDOMComment( iface );
+    HRESULT hr = E_FAIL;
+    VARIANT val;
+
+    TRACE("%p %s\n", This, debugstr_w(data) );
+
+    V_VT(&val) = VT_BSTR;
+    V_BSTR(&val) = data;
+
+    hr = IXMLDOMNode_put_nodeValue( This->node, val );
+
+    return hr;
 }
 
 static HRESULT WINAPI domcomment_get_length(
     IXMLDOMComment *iface,
     long *len)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domcomment *This = impl_from_IXMLDOMComment( iface );
+    xmlnode *pDOMNode = impl_from_IXMLDOMNode( This->node );
+    xmlChar *pContent;
+    long nLength = 0;
+
+    TRACE("%p\n", iface);
+
+    if(!len)
+        return E_INVALIDARG;
+
+    pContent = xmlNodeGetContent(pDOMNode->node);
+    if(pContent)
+    {
+        nLength = xmlStrlen(pContent);
+        xmlFree(pContent);
+    }
+
+    *len = nLength;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI domcomment_substringData(

@@ -114,6 +114,7 @@ GpStatus WINGDIPAPI GdipFillRectangle(GpGraphics*,GpBrush*,REAL,REAL,REAL,REAL);
 GpStatus WINGDIPAPI GdipFillRectangleI(GpGraphics*,GpBrush*,INT,INT,INT,INT);
 GpStatus WINGDIPAPI GdipGetCompositingMode(GpGraphics*,CompositingMode*);
 GpStatus WINGDIPAPI GdipGetCompositingQuality(GpGraphics*,CompositingQuality*);
+GpStatus WINGDIPAPI GdipGetImageDimension(GpImage*,REAL*,REAL*);
 GpStatus WINGDIPAPI GdipGetInterpolationMode(GpGraphics*,InterpolationMode*);
 GpStatus WINGDIPAPI GdipGetPageScale(GpGraphics*,REAL*);
 GpStatus WINGDIPAPI GdipGetPageUnit(GpGraphics*,GpUnit*);
@@ -248,6 +249,7 @@ GpStatus WINGDIPAPI GdipConvertToEmfPlus(const GpGraphics*,GpMetafile*,INT*,
 GpStatus WINGDIPAPI GdipConvertToEmfPlusToFile(const GpGraphics*,GpMetafile*,INT*,const WCHAR*,EmfType,const WCHAR*,GpMetafile**);
 GpStatus WINGDIPAPI GdipConvertToEmfPlusToStream(const GpGraphics*,GpMetafile*,INT*,IStream*,EmfType,const WCHAR*,GpMetafile**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromFile(GDIPCONST WCHAR*,GpBitmap**);
+GpStatus WINGDIPAPI GdipCreateBitmapFromFileICM(GDIPCONST WCHAR*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromGraphics(INT,INT,GpGraphics*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT,INT,INT,PixelFormat,BYTE*,
     GpBitmap**);
@@ -256,6 +258,8 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromStreamICM(IStream*,GpBitmap**);
 GpStatus WINGDIPAPI GdipDisposeImage(GpImage*);
 GpStatus WINGDIPAPI GdipFindFirstImageItem(GpImage*,ImageItemData*);
 GpStatus WINGDIPAPI GdipFindNextImageItem(GpImage*,ImageItemData*);
+GpStatus WINGDIPAPI GdipGetImageEncodersSize(UINT *numEncoders, UINT *size);
+GpStatus WINGDIPAPI GdipGetImageEncoders(UINT numEncoders, UINT size, ImageCodecInfo *encoders);
 GpStatus WINGDIPAPI GdipGetImageItemData(GpImage*,ImageItemData*);
 GpStatus WINGDIPAPI GdipGetImageBounds(GpImage*,GpRectF*,GpUnit*);
 GpStatus WINGDIPAPI GdipGetImageGraphicsContext(GpImage*,GpGraphics**);

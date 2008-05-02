@@ -1497,14 +1497,27 @@ static nsresult NSAPI nsURI_SetPath(nsIWineURI *iface, const nsACString *aPath)
 static nsresult NSAPI nsURI_Equals(nsIWineURI *iface, nsIURI *other, PRBool *_retval)
 {
     nsURI *This = NSURI_THIS(iface);
+    nsIWineURI *wine_uri;
+    LPCWSTR other_url = NULL;
+    nsresult nsres;
 
     TRACE("(%p)->(%p %p)\n", This, other, _retval);
 
     if(This->uri)
         return nsIURI_Equals(This->uri, other, _retval);
 
-    FIXME("default action not implemented\n");
-    return NS_ERROR_NOT_IMPLEMENTED;
+    nsres = nsIURI_QueryInterface(other, &IID_nsIWineURI, (void**)&wine_uri);
+    if(NS_FAILED(nsres)) {
+        TRACE("Could not get nsIWineURI interface\n");
+        *_retval = FALSE;
+        return NS_OK;
+    }
+
+    nsIWineURI_GetWineURL(wine_uri, &other_url);
+    *_retval = !UrlCompareW(This->wine_url, other_url, TRUE);
+    nsIWineURI_Release(wine_uri);
+
+    return NS_OK;
 }
 
 static nsresult NSAPI nsURI_SchemeIs(nsIWineURI *iface, const char *scheme, PRBool *_retval)
@@ -1533,29 +1546,28 @@ static nsresult NSAPI nsURI_SchemeIs(nsIWineURI *iface, const char *scheme, PRBo
 static nsresult NSAPI nsURI_Clone(nsIWineURI *iface, nsIURI **_retval)
 {
     nsURI *This = NSURI_THIS(iface);
+    nsIURI *nsuri = NULL;
+    nsIWineURI *wine_uri;
+    nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, _retval);
 
     if(This->uri) {
-        nsIURI *uri;
-        nsIWineURI *wine_uri;
-        nsresult nsres;
-
-        nsres = nsIURI_Clone(This->uri, &uri);
+        nsres = nsIURI_Clone(This->uri, &nsuri);
         if(NS_FAILED(nsres)) {
             WARN("Clone failed: %08x\n", nsres);
             return nsres;
         }
+    }
 
-        nsres = create_uri(uri, This->container, &wine_uri);
-        *_retval = (nsIURI*)wine_uri;
-        if(NS_SUCCEEDED(nsres))
-            return nsIWineURI_SetWineURL(wine_uri, This->wine_url);
+    nsres = create_uri(nsuri, This->container, &wine_uri);
+    if(NS_FAILED(nsres)) {
+        WARN("create_uri failed: %08x\n", nsres);
         return nsres;
     }
 
-    FIXME("default action not implemented\n");
-    return NS_ERROR_NOT_IMPLEMENTED;
+    *_retval = (nsIURI*)wine_uri;
+    return nsIWineURI_SetWineURL(wine_uri, This->wine_url);
 }
 
 static nsresult NSAPI nsURI_Resolve(nsIWineURI *iface, const nsACString *arelativePath,

@@ -39,7 +39,6 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/library.h"
-#include "thread.h"
 #include "ntdll_misc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(file);
@@ -1025,7 +1024,7 @@ NTSTATUS WINAPI RtlSetCurrentDirectory_U(const UNICODE_STRING* dir)
  */
 NTSTATUS wine_unix_to_nt_file_name( const ANSI_STRING *name, UNICODE_STRING *nt )
 {
-    static const WCHAR prefixW[] = {'\\','?','?','\\','a',':','\\'};
+    static const WCHAR prefixW[] = {'\\','?','?','\\','A',':','\\'};
     unsigned int lenW, lenA = name->Length;
     const char *path = name->Buffer;
     char *cwd;

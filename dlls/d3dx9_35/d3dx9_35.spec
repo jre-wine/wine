@@ -6,7 +6,7 @@
 @ stdcall D3DXBoxBoundProbe(ptr ptr ptr ptr) d3dx9_36.D3DXBoxBoundProbe
 @ stdcall D3DXCheckCubeTextureRequirements(ptr ptr ptr long ptr long) d3dx9_36.D3DXCheckCubeTextureRequirements
 @ stdcall D3DXCheckTextureRequirements(ptr ptr ptr ptr long ptr long) d3dx9_36.D3DXCheckTextureRequirements
-@ stdcall D3DXCheckVersion(long long) d3dx9_36.D3DXCheckVersion
+@ stdcall D3DXCheckVersion(long long)
 @ stdcall D3DXCheckVolumeTextureRequirements(ptr ptr ptr ptr ptr long ptr long) d3dx9_36.D3DXCheckVolumeTextureRequirements
 @ stdcall D3DXCleanMesh(ptr ptr ptr ptr ptr) d3dx9_36.D3DXCleanMesh
 @ stdcall D3DXColorAdjustContrast(ptr ptr long) d3dx9_36.D3DXColorAdjustContrast
@@ -197,7 +197,7 @@
 @ stdcall D3DXMatrixAffineTransformation(ptr long ptr ptr ptr) d3dx9_36.D3DXMatrixAffineTransformation
 @ stdcall D3DXMatrixAffineTransformation2D(ptr long ptr long ptr) d3dx9_36.D3DXMatrixAffineTransformation2D
 @ stdcall D3DXMatrixDecompose(ptr ptr ptr ptr) d3dx9_36.D3DXMatrixDecompose
-@ stdcall D3DXMatrixDeterminant(ptr) d3dx9_36.D3DXMatrixfDeterminant
+@ stdcall D3DXMatrixDeterminant(ptr) d3dx9_36.D3DXMatrixDeterminant
 @ stdcall D3DXMatrixInverse(ptr ptr ptr) d3dx9_36.D3DXMatrixInverse
 @ stdcall D3DXMatrixLookAtLH(ptr ptr ptr ptr) d3dx9_36.D3DXMatrixLookAtLH
 @ stdcall D3DXMatrixLookAtRH(ptr ptr ptr ptr) d3dx9_36.D3DXMatrixLookAtRH

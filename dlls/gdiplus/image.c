@@ -45,8 +45,7 @@ static INT ipicture_pixel_height(IPicture *pic)
 
     hdcref = GetDC(0);
 
-    y = (UINT)(((REAL)y) * ((REAL)GetDeviceCaps(hdcref, LOGPIXELSY)) /
-              ((REAL)INCH_HIMETRIC));
+    y = MulDiv(y, GetDeviceCaps(hdcref, LOGPIXELSY), INCH_HIMETRIC);
     ReleaseDC(0, hdcref);
 
     return y;
@@ -61,8 +60,7 @@ static INT ipicture_pixel_width(IPicture *pic)
 
     hdcref = GetDC(0);
 
-    x = (UINT)(((REAL)x) * ((REAL)GetDeviceCaps(hdcref, LOGPIXELSX)) /
-              ((REAL)INCH_HIMETRIC));
+    x = MulDiv(x, GetDeviceCaps(hdcref, LOGPIXELSX), INCH_HIMETRIC);
 
     ReleaseDC(0, hdcref);
 
@@ -247,10 +245,16 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromFile(GDIPCONST WCHAR* filename,
 
     stat = GdipCreateBitmapFromStream(stream, bitmap);
 
-    if(!stat)
-        IStream_Release(stream);
+    IStream_Release(stream);
 
     return stat;
+}
+
+/* FIXME: no icm */
+GpStatus WINGDIPAPI GdipCreateBitmapFromFileICM(GDIPCONST WCHAR* filename,
+    GpBitmap **bitmap)
+{
+    return GdipCreateBitmapFromFile(filename, bitmap);
 }
 
 GpStatus WINGDIPAPI GdipCreateHBITMAPFromBitmap(GpBitmap* bitmap,
@@ -441,7 +445,7 @@ GpStatus WINGDIPAPI GdipGetImageBounds(GpImage *image, GpRectF *srcRect,
     if(!image || !srcRect || !srcUnit)
         return InvalidParameter;
     if(image->type == ImageTypeMetafile){
-        memcpy(srcRect, &((GpMetafile*)image)->bounds, sizeof(GpRectF));
+        *srcRect = ((GpMetafile*)image)->bounds;
         *srcUnit = ((GpMetafile*)image)->unit;
     }
     else if(image->type == ImageTypeBitmap){
@@ -460,6 +464,37 @@ GpStatus WINGDIPAPI GdipGetImageBounds(GpImage *image, GpRectF *srcRect,
     TRACE("returning (%f, %f) (%f, %f) unit type %d\n", srcRect->X, srcRect->Y,
           srcRect->Width, srcRect->Height, *srcUnit);
 
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetImageDimension(GpImage *image, REAL *width,
+    REAL *height)
+{
+    if(!image || !height || !width)
+        return InvalidParameter;
+
+    if(image->type == ImageTypeMetafile){
+        HDC hdc = GetDC(0);
+
+        *height = convert_unit(hdc, ((GpMetafile*)image)->unit) *
+                        ((GpMetafile*)image)->bounds.Height;
+
+        *width = convert_unit(hdc, ((GpMetafile*)image)->unit) *
+                        ((GpMetafile*)image)->bounds.Width;
+
+        ReleaseDC(0, hdc);
+    }
+
+    else if(image->type == ImageTypeBitmap){
+        *height = ((GpBitmap*)image)->height;
+        *width = ((GpBitmap*)image)->width;
+    }
+    else{
+        *height = ipicture_pixel_height(image->picture);
+        *width = ipicture_pixel_width(image->picture);
+    }
+
+    TRACE("returning (%f, %f)\n", *height, *width);
     return Ok;
 }
 
@@ -667,6 +702,27 @@ GpStatus WINGDIPAPI GdipImageSelectActiveFrame(GpImage *image,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipLoadImageFromFile(GDIPCONST WCHAR* filename,
+                                          GpImage **image)
+{
+    GpStatus stat;
+    IStream *stream;
+
+    if (!filename || !image)
+        return InvalidParameter;
+
+    stat = GdipCreateStreamOnFile(filename, GENERIC_READ, &stream);
+
+    if (stat != Ok)
+        return stat;
+
+    stat = GdipLoadImageFromStream(stream, image);
+
+    IStream_Release(stream);
+
+    return stat;
+}
+
 GpStatus WINGDIPAPI GdipLoadImageFromStream(IStream* stream, GpImage **image)
 {
     IPicture *pic;
@@ -779,4 +835,64 @@ GpStatus WINGDIPAPI GdipSetImagePalette(GpImage *image,
         FIXME("not implemented\n");
 
     return NotImplemented;
+}
+
+/*************************************************************************
+ * Encoders -
+ *   Structures that represent which formats we support for encoding.
+ */
+
+typedef enum {
+    BMP,
+    NUM_ENCODERS_SUPPORTED
+} ImageFormat;
+
+/* ImageCodecInfo creation routines taken from libgdiplus */
+static const WCHAR bmp_codecname[] = {'B', 'u', 'i','l', 't', '-','i', 'n', ' ', 'B', 'M', 'P', 0}; /* Built-in BMP */
+static const WCHAR bmp_extension[] = {'*','.','B', 'M', 'P',';', '*','.', 'D','I', 'B',';', '*','.', 'R', 'L', 'E',0}; /* *.BMP;*.DIB;*.RLE */
+static const WCHAR bmp_mimetype[] = {'i', 'm', 'a','g', 'e', '/', 'b', 'm', 'p', 0}; /* image/bmp */
+static const WCHAR bmp_format[] = {'B', 'M', 'P', 0}; /* BMP */
+static const BYTE bmp_sig_pattern[] = { 0x42, 0x4D };
+static const BYTE bmp_sig_mask[] = { 0xFF, 0xFF };
+
+static const ImageCodecInfo codecs[NUM_ENCODERS_SUPPORTED] =
+    {
+        { /* BMP */
+            /* Clsid */              { 0x557cf400, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x0, 0x0, 0xf8, 0x1e, 0xf3, 0x2e } },
+            /* FormatID */           { 0xb96b3cabU, 0x0728U, 0x11d3U, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e} },
+            /* CodecName */          bmp_codecname,
+            /* DllName */            NULL,
+            /* FormatDescription */  bmp_format,
+            /* FilenameExtension */  bmp_extension,
+            /* MimeType */           bmp_mimetype,
+            /* Flags */              ImageCodecFlagsEncoder | ImageCodecFlagsDecoder | ImageCodecFlagsSupportBitmap | ImageCodecFlagsBuiltin,
+            /* Version */            1,
+            /* SigCount */           1,
+            /* SigSize */            2,
+            /* SigPattern */         bmp_sig_pattern,
+            /* SigMask */            bmp_sig_mask,
+        },
+    };
+
+GpStatus WINGDIPAPI GdipGetImageEncodersSize(UINT *numEncoders, UINT *size)
+{
+    if (!numEncoders || !size)
+        return InvalidParameter;
+
+    *numEncoders = NUM_ENCODERS_SUPPORTED;
+    *size = sizeof (codecs);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetImageEncoders(UINT numEncoders, UINT size, ImageCodecInfo *encoders)
+{
+    if (!encoders ||
+        (numEncoders != NUM_ENCODERS_SUPPORTED) ||
+        (size != sizeof (codecs)))
+        return GenericError;
+
+    memcpy(encoders, codecs, sizeof (codecs));
+
+    return Ok;
 }

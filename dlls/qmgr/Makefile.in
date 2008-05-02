@@ -7,7 +7,11 @@ IMPORTS   = advpack ole32 advapi32 kernel32
 EXTRALIBS = -luuid
 
 C_SRCS = \
+	enum_files.c \
+	enum_jobs.c \
 	factory.c \
+	file.c \
+	job.c \
 	qmgr.c \
 	qmgr_main.c \
 	service.c

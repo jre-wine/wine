@@ -270,7 +270,6 @@ extern BOOL X11DRV_XRender_ExtTextOut(X11DRV_PDEVICE *physDev, INT x, INT y, UIN
 				      UINT count, const INT *lpDx);
 extern void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev);
 
-extern XVisualInfo *X11DRV_setup_opengl_visual(Display *display);
 extern Drawable get_glxdrawable(X11DRV_PDEVICE *physDev);
 extern BOOL destroy_glxpixmap(Display *display, XID glxpixmap);
 
@@ -493,12 +492,6 @@ struct x11drv_escape_set_drawable
     Pixmap                   pixmap;       /* Pixmap for a GLXPixmap gl_drawable */
 };
 
-struct x11drv_escape_set_dce
-{
-    enum x11drv_escape_codes code;            /* escape code (X11DRV_SET_DRAWABLE) */
-    struct dce              *dce;             /* pointer to DCE (opaque ptr for GDI) */
-};
-
 /**************************************************************************
  * X11 USER driver
  */
@@ -566,10 +559,12 @@ enum x11drv_atoms
     XATOM_RAW_CAP_HEIGHT,
     XATOM_WM_PROTOCOLS,
     XATOM_WM_DELETE_WINDOW,
+    XATOM_WM_STATE,
     XATOM_WM_TAKE_FOCUS,
     XATOM_KWM_DOCKWINDOW,
     XATOM_DndProtocol,
     XATOM_DndSelection,
+    XATOM__ICC_PROFILE,
     XATOM__MOTIF_WM_HINTS,
     XATOM__KDE_NET_WM_SYSTEM_TRAY_WINDOW_FOR,
     XATOM__NET_SYSTEM_TRAY_OPCODE,
@@ -581,6 +576,8 @@ enum x11drv_atoms
     XATOM__NET_WM_STATE,
     XATOM__NET_WM_STATE_ABOVE,
     XATOM__NET_WM_STATE_FULLSCREEN,
+    XATOM__NET_WM_STATE_MAXIMIZED_HORZ,
+    XATOM__NET_WM_STATE_MAXIMIZED_VERT,
     XATOM__NET_WM_STATE_SKIP_PAGER,
     XATOM__NET_WM_STATE_SKIP_TASKBAR,
     XATOM__NET_WM_WINDOW_TYPE,
@@ -630,6 +627,7 @@ extern void X11DRV_EnterNotify( HWND hwnd, XEvent *event );
 extern void X11DRV_KeyEvent( HWND hwnd, XEvent *event );
 extern void X11DRV_KeymapNotify( HWND hwnd, XEvent *event );
 extern void X11DRV_Expose( HWND hwnd, XEvent *event );
+extern void X11DRV_DestroyNotify( HWND hwnd, XEvent *event );
 extern void X11DRV_MapNotify( HWND hwnd, XEvent *event );
 extern void X11DRV_UnmapNotify( HWND hwnd, XEvent *event );
 extern void X11DRV_ConfigureNotify( HWND hwnd, XEvent *event );
@@ -649,13 +647,14 @@ enum x11drv_window_messages
 };
 
 /* _NET_WM_STATE properties that we keep track of */
-enum x11drv_wm_state
+enum x11drv_net_wm_state
 {
-    WM_STATE_FULLSCREEN,
-    WM_STATE_ABOVE,
-    WM_STATE_SKIP_PAGER,
-    WM_STATE_SKIP_TASKBAR,
-    NB_WM_STATES
+    NET_WM_STATE_FULLSCREEN,
+    NET_WM_STATE_ABOVE,
+    NET_WM_STATE_MAXIMIZED,
+    NET_WM_STATE_SKIP_PAGER,
+    NET_WM_STATE_SKIP_TASKBAR,
+    NB_NET_WM_STATES
 };
 
 /* x11drv private window data */
@@ -676,8 +675,9 @@ struct x11drv_win_data
     XWMHints   *wm_hints;       /* window manager hints */
     BOOL        managed : 1;    /* is window managed? */
     BOOL        mapped : 1;     /* is window mapped? (in either normal or iconic state) */
-    DWORD       wm_state;       /* bit mask of active x11drv_wm_state values */
-    struct dce *dce;            /* DCE for CS_OWNDC or CS_CLASSDC windows */
+    BOOL        iconic : 1;     /* is window in iconic state? */
+    int         wm_state;       /* current value of the WM_STATE property */
+    DWORD       net_wm_state;   /* bit mask of active x11drv_net_wm_state values */
     unsigned int lock_changes;  /* lock count for X11 change requests */
     HBITMAP     hWMIconBitmap;
     HBITMAP     hWMIconMask;
@@ -687,9 +687,6 @@ extern struct x11drv_win_data *X11DRV_get_win_data( HWND hwnd );
 extern struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd );
 extern Window X11DRV_get_whole_window( HWND hwnd );
 extern Window X11DRV_get_client_window( HWND hwnd );
-extern XID X11DRV_get_fbconfig_id( HWND hwnd );
-extern Drawable X11DRV_get_gl_drawable( HWND hwnd );
-extern Pixmap X11DRV_get_gl_pixmap( HWND hwnd );
 extern BOOL X11DRV_is_window_rect_mapped( const RECT *rect );
 extern XIC X11DRV_get_ic( HWND hwnd );
 extern BOOL X11DRV_set_win_format( HWND hwnd, XID fbconfig );
@@ -700,9 +697,8 @@ extern void mark_drawable_dirty( Drawable old, Drawable new );
 extern Drawable create_glxpixmap( Display *display, XVisualInfo *vis, Pixmap parent );
 extern void flush_gl_drawable( X11DRV_PDEVICE *physDev );
 
-extern void alloc_window_dce( struct x11drv_win_data *data );
-extern void free_window_dce( struct x11drv_win_data *data );
-extern void invalidate_dce( HWND hwnd, const RECT *rect );
+extern int get_window_wm_state( Display *display, struct x11drv_win_data *data );
+extern void wait_for_withdrawn_state( Display *display, struct x11drv_win_data *data, BOOL set );
 
 /* X context to associate a hwnd to an X window */
 extern XContext winContext;
@@ -712,6 +708,7 @@ extern int X11DRV_AcquireClipboard(HWND hWndClipWindow);
 extern void X11DRV_ResetSelectionOwner(void);
 extern void X11DRV_SetFocus( HWND hwnd );
 extern Cursor X11DRV_GetCursor( Display *display, struct tagCURSORICONINFO *ptr );
+extern void X11DRV_SetCursor( struct tagCURSORICONINFO *lpCursor );
 extern BOOL X11DRV_ClipCursor( LPCRECT clip );
 extern void X11DRV_InitKeyboard( Display *display );
 extern void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWORD time,
@@ -726,7 +723,6 @@ typedef int (*x11drv_error_callback)( Display *display, XErrorEvent *event, void
 extern void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg );
 extern int X11DRV_check_error(void);
 extern BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rect );
-extern void X11DRV_set_iconic_state( HWND hwnd );
 extern void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect );
 extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect );
 extern void X11DRV_sync_window_style( Display *display, struct x11drv_win_data *data );
@@ -754,5 +750,12 @@ LPDDHALMODEINFO X11DRV_Settings_SetHandlers(const char *name,
                                             int reserve_depths);
 
 extern void X11DRV_DDHAL_SwitchMode(DWORD dwModeIndex, LPVOID fb_addr, LPVIDMEM fb_mem);
+
+/* FIXME: private functions imported from user32 */
+extern LRESULT HOOK_CallHooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode );
+extern BOOL WINPOS_ShowIconTitle( HWND hwnd, BOOL bShow );
+extern void WINPOS_GetMinMaxInfo( HWND hwnd, POINT *maxSize, POINT *maxPos, POINT *minTrack,
+                                  POINT *maxTrack );
+extern void WIN_invalidate_dce( HWND hwnd, const RECT *rect );
 
 #endif  /* __WINE_X11DRV_H */

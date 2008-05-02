@@ -38,18 +38,22 @@ typedef struct tagWND
     HWND           parent;        /* Window parent */
     HWND           owner;         /* Window owner */
     struct tagCLASS *class;       /* Window class */
+    struct dce    *dce;           /* DCE pointer */
     WNDPROC        winproc;       /* Window procedure */
     DWORD          dwMagic;       /* Magic number (must be WND_MAGIC) */
     DWORD          tid;           /* Owner thread id */
     HINSTANCE      hInstance;     /* Window hInstance (from CreateWindow) */
     RECT           rectClient;    /* Client area rel. to parent client area */
     RECT           rectWindow;    /* Whole window rel. to parent client area */
+    RECT           normal_rect;   /* Normal window rect saved when maximized/minimized */
+    POINT          min_pos;       /* Position for minimized window */
+    POINT          max_pos;       /* Position for maximized window */
+    HWND           icon_title;    /* Icon title window */
     LPWSTR         text;          /* Window text */
     void          *pVScroll;      /* Vertical scroll-bar info */
     void          *pHScroll;      /* Horizontal scroll-bar info */
     DWORD          dwStyle;       /* Window style (from CreateWindow) */
     DWORD          dwExStyle;     /* Extended style (from CreateWindowEx) */
-    DWORD          clsStyle;      /* Class style at window creation */
     UINT_PTR       wIDmenu;       /* ID or hmenu (from CreateWindow) */
     DWORD          helpContext;   /* Help context ID */
     UINT           flags;         /* Misc. flags (see below) */
@@ -113,10 +117,11 @@ extern void WINPOS_GetMinMaxInfo( HWND hwnd, POINT *maxSize, POINT *maxPos, POIN
                                   POINT *maxTrack ) DECLSPEC_HIDDEN;
 extern LONG WINPOS_HandleWindowPosChanging(HWND hwnd, WINDOWPOS *winpos) DECLSPEC_HIDDEN;
 extern HWND WINPOS_WindowFromPoint( HWND hwndScope, POINT pt, INT *hittest ) DECLSPEC_HIDDEN;
-extern void WINPOS_CheckInternalPos( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void WINPOS_ActivateOtherWindow( HWND hwnd ) DECLSPEC_HIDDEN;
+extern UINT WINPOS_MinMaximize( HWND hwnd, UINT cmd, LPRECT rect ) DECLSPEC_HIDDEN;
 
 extern BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
-                            const RECT *window_rect, const RECT *client_rect, const RECT *valid_rects );
+                            const RECT *window_rect, const RECT *client_rect,
+                            const RECT *valid_rects ) DECLSPEC_HIDDEN;
 
 #endif  /* __WINE_WIN_H */

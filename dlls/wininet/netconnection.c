@@ -49,13 +49,13 @@
 #include "winerror.h"
 #include "wincrypt.h"
 
+#include "wine/debug.h"
+#include "internet.h"
+
 /* To avoid conflicts with the Unix socket headers. we only need it for
  * the error codes anyway. */
 #define USE_WS_PREFIX
 #include "winsock2.h"
-
-#include "wine/debug.h"
-#include "internet.h"
 
 #define RESPONSE_TIMEOUT        30            /* FROM internet.c */
 
@@ -203,6 +203,7 @@ BOOL NETCON_connected(WININET_NETCONNECTION *connection)
 /* translate a unix error code into a winsock one */
 static int sock_get_error( int err )
 {
+#if !defined(__MINGW32__) && !defined (_MSC_VER)
     switch (err)
     {
         case EINTR:             return WSAEINTR;
@@ -262,6 +263,8 @@ static int sock_get_error( int err )
 #endif
     default: errno=err; perror("sock_set_error"); return WSAEFAULT;
     }
+#endif
+    return err;
 }
 
 /******************************************************************************
@@ -584,7 +587,7 @@ BOOL NETCON_query_data_available(WININET_NETCONNECTION *connection, DWORD *avail
     if (!connection->useSSL)
     {
         int unread;
-        int retval = ioctl(connection->socketFD, FIONREAD, &unread);
+        int retval = ioctlsocket(connection->socketFD, FIONREAD, &unread);
         if (!retval)
         {
             TRACE("%d bytes of queued, but unread data\n", unread);
@@ -745,7 +748,7 @@ LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection)
 #endif
 }
 
-BOOL NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value)
+DWORD NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value)
 {
     int result;
     struct timeval tv;
@@ -753,7 +756,7 @@ BOOL NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value)
     /* FIXME: we should probably store the timeout in the connection to set
      * when we do connect */
     if (!NETCON_connected(connection))
-        return TRUE;
+        return ERROR_SUCCESS;
 
     /* value is in milliseconds, convert to struct timeval */
     tv.tv_sec = value / 1000;
@@ -766,9 +769,8 @@ BOOL NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value)
     if (result == -1)
     {
         WARN("setsockopt failed (%s)\n", strerror(errno));
-        INTERNET_SetLastError(sock_get_error(errno));
-        return FALSE;
+        return sock_get_error(errno);
     }
 
-    return TRUE;
+    return ERROR_SUCCESS;
 }

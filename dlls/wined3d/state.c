@@ -664,14 +664,15 @@ state_specularenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCon
         glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, (float*) &stateblock->material.Specular);
         checkGLcall("glMaterialfv");
 
-        if(stateblock->material.Power > 128.0) {
+        if(stateblock->material.Power > GL_LIMITS(shininess)) {
             /* glMaterialf man page says that the material says that GL_SHININESS must be between 0.0
-             * and 128.0, although in d3d neither -1 nor 129 produce an error. For values > 128 clamp
-             * them, since 128 results in a hardly visible specular highlight, so it should be safe to
-             * to clamp to 128
+             * and 128.0, although in d3d neither -1 nor 129 produce an error. GL_NV_max_light_exponent
+             * allows bigger values. If the extension is supported, GL_LIMITS(shininess) contains the
+             * value reported by the extension, otherwise 128. For values > GL_LIMITS(shininess) clamp
+             * them, it should be safe to do so without major visual dissortions.
              */
-            WARN("Material power > 128\n");
-            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 128.0);
+            WARN("Material power = %f, limit %f\n", stateblock->material.Power, GL_LIMITS(shininess));
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, GL_LIMITS(shininess));
         } else {
             glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, stateblock->material.Power);
         }
@@ -1430,8 +1431,6 @@ static void state_pscale(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3
      * POINTSCALEENABLE controls how point size value is treated. If set to
      * true, the point size is scaled with respect to height of viewport.
      * When set to false point size is in pixels.
-     *
-     * http://msdn.microsoft.com/library/en-us/directx9_c/point_sprites.asp
      */
 
     /* Default values */
@@ -1564,7 +1563,6 @@ static void state_pointsprite(DWORD state, IWineD3DStateBlockImpl *stateblock, W
 static void state_wrap(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     /**
      http://www.cosc.brocku.ca/Offerings/3P98/course/lectures/texture/
-     http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/graphics/programmingguide/FixedFunction/Textures/texturewrapping.asp
      http://www.gamedev.net/reference/programming/features/rendererdll3/page2.asp
      Discussion on the ways to turn on WRAPing to solve an OpenGL conversion problem.
      http://www.flipcode.org/cgi-bin/fcmsg.cgi?thread_show=10248
@@ -2406,7 +2404,7 @@ static void tex_bumpenvlscale(DWORD state, IWineD3DStateBlockImpl *stateblock, W
     } tmpvalue;
 
     if(stateblock->pixelShader && stage != 0 &&
-       ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.luminanceparams == stage) {
+       ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.luminanceparams[stage]) {
         /* The pixel shader has to know the luminance scale. Do a constants update if it
          * isn't scheduled anyway
          */
@@ -2430,7 +2428,7 @@ static void tex_bumpenvloffset(DWORD state, IWineD3DStateBlockImpl *stateblock, 
     } tmpvalue;
 
     if(stateblock->pixelShader && stage != 0 &&
-       ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.luminanceparams == stage) {
+       ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.luminanceparams[stage]) {
         /* The pixel shader has to know the luminance offset. Do a constants update if it
          * isn't scheduled anyway
          */
@@ -2624,9 +2622,8 @@ static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 static void tex_bumpenvmat(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     float mat[2][2];
-
     if(stateblock->pixelShader && stage != 0 &&
-       ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->needsbumpmat == stage) {
+       ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.bumpmat[stage]) {
         /* The pixel shader has to know the bump env matrix. Do a constants update if it isn't scheduled
          * anyway
          */

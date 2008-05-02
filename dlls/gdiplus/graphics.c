@@ -915,7 +915,28 @@ GpStatus WINGDIPAPI GdipDrawArc(GpGraphics *graphics, GpPen *pen, REAL x,
     GpPointF points[MAX_ARC_PTS];
     GpStatus retval;
 
-    if(!graphics || !pen)
+    if(!graphics || !pen || width <= 0 || height <= 0)
+        return InvalidParameter;
+
+    num_pts = arc2polybezier(points, x, y, width, height, startAngle, sweepAngle);
+
+    save_state = prepare_dc(graphics, pen);
+
+    retval = draw_polybezier(graphics, pen, points, num_pts, TRUE);
+
+    restore_dc(graphics, save_state);
+
+    return retval;
+}
+
+GpStatus WINGDIPAPI GdipDrawArcI(GpGraphics *graphics, GpPen *pen, INT x,
+    INT y, INT width, INT height, REAL startAngle, REAL sweepAngle)
+{
+    INT save_state, num_pts;
+    GpPointF points[MAX_ARC_PTS];
+    GpStatus retval;
+
+    if(!graphics || !pen || width <= 0 || height <= 0)
         return InvalidParameter;
 
     num_pts = arc2polybezier(points, x, y, width, height, startAngle, sweepAngle);
@@ -931,6 +952,34 @@ GpStatus WINGDIPAPI GdipDrawArc(GpGraphics *graphics, GpPen *pen, REAL x,
 
 GpStatus WINGDIPAPI GdipDrawBezier(GpGraphics *graphics, GpPen *pen, REAL x1,
     REAL y1, REAL x2, REAL y2, REAL x3, REAL y3, REAL x4, REAL y4)
+{
+    INT save_state;
+    GpPointF pt[4];
+    GpStatus retval;
+
+    if(!graphics || !pen)
+        return InvalidParameter;
+
+    pt[0].X = x1;
+    pt[0].Y = y1;
+    pt[1].X = x2;
+    pt[1].Y = y2;
+    pt[2].X = x3;
+    pt[2].Y = y3;
+    pt[3].X = x4;
+    pt[3].Y = y4;
+
+    save_state = prepare_dc(graphics, pen);
+
+    retval = draw_polybezier(graphics, pen, pt, 4, TRUE);
+
+    restore_dc(graphics, save_state);
+
+    return retval;
+}
+
+GpStatus WINGDIPAPI GdipDrawBezierI(GpGraphics *graphics, GpPen *pen, INT x1,
+    INT y1, INT x2, INT y2, INT x3, INT y3, INT x4, INT y4)
 {
     INT save_state;
     GpPointF pt[4];
@@ -1109,6 +1158,25 @@ GpStatus WINGDIPAPI GdipDrawImageRectRect(GpGraphics *graphics, GpImage *image,
                srcwidth, srcheight, srcUnit, imageattr, callback, callbackData);
 }
 
+GpStatus WINGDIPAPI GdipDrawImageRectRectI(GpGraphics *graphics, GpImage *image,
+	INT dstx, INT dsty, INT dstwidth, INT dstheight, INT srcx, INT srcy,
+	INT srcwidth, INT srcheight, GpUnit srcUnit,
+	GDIPCONST GpImageAttributes* imageAttributes, DrawImageAbort callback,
+	VOID * callbackData)
+{
+   GpPointF points[3];
+
+    points[0].X = dstx;
+    points[0].Y = dsty;
+    points[1].X = dstx + dstwidth;
+    points[1].Y = dsty;
+    points[2].X = dstx;
+    points[2].Y = dsty + dstheight;
+
+    return GdipDrawImagePointsRect(graphics, image, points, 3, srcx, srcy,
+               srcwidth, srcheight, srcUnit, imageAttributes, callback, callbackData);
+}
+
 GpStatus WINGDIPAPI GdipDrawLine(GpGraphics *graphics, GpPen *pen, REAL x1,
     REAL y1, REAL x2, REAL y2)
 {
@@ -1172,6 +1240,35 @@ GpStatus WINGDIPAPI GdipDrawLines(GpGraphics *graphics, GpPen *pen, GDIPCONST
 
     restore_dc(graphics, save_state);
 
+    return retval;
+}
+
+GpStatus WINGDIPAPI GdipDrawLinesI(GpGraphics *graphics, GpPen *pen, GDIPCONST
+    GpPoint *points, INT count)
+{
+    INT save_state;
+    GpStatus retval;
+    GpPointF *ptf = NULL;
+    int i;
+
+    if(!pen || !graphics || (count < 2))
+        return InvalidParameter;
+
+    ptf = GdipAlloc(count * sizeof(GpPointF));
+    if(!ptf) return OutOfMemory;
+
+    for(i = 0; i < count; i ++){
+        ptf[i].X = (REAL) points[i].X;
+        ptf[i].Y = (REAL) points[i].Y;
+    }
+
+    save_state = prepare_dc(graphics, pen);
+
+    retval = draw_polyline(graphics, pen, ptf, count, TRUE);
+
+    restore_dc(graphics, save_state);
+
+    GdipFree(ptf);
     return retval;
 }
 
@@ -1348,7 +1445,7 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
      * width, angle). */
     SelectObject(graphics->hdc, CreateFontIndirectW(&font->lfw));
     GetTextMetricsW(graphics->hdc, &textmet);
-    memcpy(&lfw, &font->lfw, sizeof(LOGFONTW));
+    lfw = font->lfw;
 
     lfw.lfHeight = roundr(((REAL)lfw.lfHeight) * rel_height);
     lfw.lfWidth = roundr(textmet.tmAveCharWidth * rel_width);
@@ -1733,7 +1830,7 @@ GpStatus WINGDIPAPI GdipGetWorldTransform(GpGraphics *graphics, GpMatrix *matrix
     if(!graphics || !matrix)
         return InvalidParameter;
 
-    memcpy(matrix, graphics->worldtrans, sizeof(GpMatrix));
+    *matrix = *graphics->worldtrans;
     return Ok;
 }
 

@@ -329,6 +329,7 @@ static DWORD runCmd(LPWSTR cmdline, LPCWSTR dir, BOOL wait, BOOL minimized)
         GetExitCodeProcess(info.hProcess, &exit_code);
     }
 
+    CloseHandle( info.hThread );
     CloseHandle( info.hProcess );
 
     return exit_code;
@@ -561,7 +562,7 @@ static void start_services(void)
         return;
     }
 
-    while (!RegEnumKeyW( hkey, index++, name, sizeof(name) ))
+    while (!RegEnumKeyW( hkey, index++, name, sizeof(name)/sizeof(name[0]) ))
     {
         if (RegOpenKeyW( hkey, name, &skey )) continue;
         size = sizeof(start);
