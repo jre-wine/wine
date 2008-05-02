@@ -65,7 +65,6 @@ typedef int Status;
 #define MAX_DASHLEN 16
 
 struct tagCURSORICONINFO;
-struct dce;
 
 extern void wine_tsx11_lock(void);
 extern void wine_tsx11_unlock(void);
@@ -137,7 +136,6 @@ typedef struct
     int           textPixel;
     int           depth;       /* bit depth of the DC */
     int           exposures;   /* count of graphics exposures operations */
-    struct dce   *dce;         /* opaque pointer to DCE */
     int           current_pf;
     Drawable      gl_drawable;
     Pixmap        pixmap;      /* Pixmap for a GLXPixmap gl_drawable */
@@ -476,8 +474,8 @@ enum x11drv_escape_codes
     X11DRV_SET_DRAWABLE,     /* set current drawable for a DC */
     X11DRV_START_EXPOSURES,  /* start graphics exposures */
     X11DRV_END_EXPOSURES,    /* end graphics exposures */
-    X11DRV_GET_DCE,          /* get the DCE pointer */
-    X11DRV_SET_DCE,          /* set the DCE pointer */
+    X11DRV_GET_DCE,          /* no longer used */
+    X11DRV_SET_DCE,          /* no longer used */
     X11DRV_GET_GLX_DRAWABLE, /* get current glx drawable for a DC */
     X11DRV_SYNC_PIXMAP,      /* sync the dibsection to its pixmap */
     X11DRV_FLUSH_GL_DRAWABLE /* flush changes made to the gl drawable */
@@ -665,7 +663,9 @@ struct x11drv_win_data
 {
     HWND        hwnd;           /* hwnd that this private data belongs to */
     Window      whole_window;   /* X window for the complete window */
+    Window      client_window;  /* X window for the client area */
     Window      icon_window;    /* X window for the icon */
+    Colormap    colormap;       /* Colormap for this window */
     XID         fbconfig_id;    /* fbconfig id for the GL drawable this hwnd uses */
     Drawable    gl_drawable;    /* Optional GL drawable for rendering the client area */
     Pixmap      pixmap;         /* Base pixmap for if gl_drawable is a GLXPixmap */
@@ -686,6 +686,7 @@ struct x11drv_win_data
 extern struct x11drv_win_data *X11DRV_get_win_data( HWND hwnd );
 extern struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd );
 extern Window X11DRV_get_whole_window( HWND hwnd );
+extern Window X11DRV_get_client_window( HWND hwnd );
 extern XID X11DRV_get_fbconfig_id( HWND hwnd );
 extern Drawable X11DRV_get_gl_drawable( HWND hwnd );
 extern Pixmap X11DRV_get_gl_pixmap( HWND hwnd );
@@ -728,9 +729,11 @@ extern BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rec
 extern void X11DRV_set_iconic_state( HWND hwnd );
 extern void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect );
 extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect );
-extern void X11DRV_sync_gl_drawable( Display *display, struct x11drv_win_data *data );
 extern void X11DRV_sync_window_style( Display *display, struct x11drv_win_data *data );
 extern void X11DRV_sync_window_position( Display *display, struct x11drv_win_data *data,
+                                         UINT swp_flags, const RECT *old_client_rect,
+                                         const RECT *old_whole_rect );
+extern void X11DRV_sync_client_position( Display *display, struct x11drv_win_data *data,
                                          UINT swp_flags, const RECT *old_client_rect,
                                          const RECT *old_whole_rect );
 extern void X11DRV_set_wm_hints( Display *display, struct x11drv_win_data *data );

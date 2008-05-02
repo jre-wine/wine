@@ -44,8 +44,9 @@ double	[0-9]+\.[0-9]+([eE][+-]?[0-9]+)*
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
+
+#ifndef HAVE_UNISTD_H
+#define YY_NO_UNISTD_H
 #endif
 
 #include "widl.h"

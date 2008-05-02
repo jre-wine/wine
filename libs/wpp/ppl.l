@@ -163,6 +163,10 @@ ul	[uUlL]|[uUlL][lL]|[lL][uU]|[lL][lL][uU]|[uU][lL][lL]|[lL][uU][lL]
 #include <ctype.h>
 #include <assert.h>
 
+#ifndef HAVE_UNISTD_H
+#define YY_NO_UNISTD_H
+#endif
+
 #include "wpp_private.h"
 #include "ppy.tab.h"
 

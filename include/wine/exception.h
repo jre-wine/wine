@@ -23,6 +23,7 @@
 
 #include <setjmp.h>
 #include <windef.h>
+#include <excpt.h>
 
 /* The following definitions allow using exceptions in Wine and Winelib code
  *
@@ -72,6 +73,7 @@
 #define __FINALLY(func) __finally { (func)(!AbnormalTermination()); }
 #define __ENDTRY /*nothing*/
 #define __EXCEPT_PAGE_FAULT __except(GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+#define __EXCEPT_ALL __except(EXCEPTION_EXECUTE_HANDLER)
 
 #else  /* USE_COMPILER_EXCEPTIONS */
 
@@ -94,7 +96,7 @@
              __f.frame.Handler = __wine_exception_handler; \
              __f.u.filter = (func); \
              __wine_push_frame( &__f.frame ); \
-             if (sigsetjmp( __f.jmp, 1 )) { \
+             if (sigsetjmp( __f.jmp, 0 )) { \
                  const __WINE_FRAME * const __eptr __attribute__((unused)) = &__f; \
                  do {
 
@@ -125,9 +127,8 @@ typedef void (CALLBACK *__WINE_FINALLY)(BOOL);
 
 /* convenience handler for page fault exceptions */
 #define __EXCEPT_PAGE_FAULT __EXCEPT( (__WINE_FILTER)1 )
-
-#define WINE_EXCEPTION_FILTER(func) LONG WINAPI func( EXCEPTION_POINTERS *__eptr )
-#define WINE_FINALLY_FUNC(func) void WINAPI func( BOOL __normal )
+/* convenience handler for all exception */
+#define __EXCEPT_ALL __EXCEPT( NULL )
 
 #define GetExceptionInformation() (__eptr)
 #define GetExceptionCode()        (__eptr->ExceptionRecord->ExceptionCode)

@@ -627,8 +627,19 @@ static HRESULT WINAPI MimeBody_GetProp(
                               DWORD dwFlags,
                               LPPROPVARIANT pValue)
 {
-    FIXME("stub\n");
-    return E_NOTIMPL;
+    MimeBody *This = impl_from_IMimeBody(iface);
+    TRACE("(%p)->(%s, %d, %p)\n", This, pszName, dwFlags, pValue);
+
+    if(!strcasecmp(pszName, "att:pri-content-type"))
+    {
+        PropVariantClear(pValue);
+        pValue->vt = VT_LPSTR;
+        pValue->u.pszVal = strdupA(This->content_pri_type);
+        return S_OK;
+    }
+
+    FIXME("stub!\n");
+    return E_FAIL;
 }
 
 static HRESULT WINAPI MimeBody_SetProp(
@@ -704,7 +715,8 @@ static HRESULT WINAPI MimeBody_GetCharset(
                                  LPHCHARSET phCharset)
 {
     FIXME("stub\n");
-    return E_NOTIMPL;
+    *phCharset = NULL;
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeBody_SetCharset(
@@ -808,7 +820,7 @@ static HRESULT WINAPI MimeBody_SetOption(
                                 const TYPEDID oid,
                                 LPCPROPVARIANT pValue)
 {
-    FIXME("stub\n");
+    FIXME("(%p)->(%08x, %p): stub\n", iface, oid, pValue);
     return E_NOTIMPL;
 }
 
@@ -817,7 +829,7 @@ static HRESULT WINAPI MimeBody_GetOption(
                                 const TYPEDID oid,
                                 LPPROPVARIANT pValue)
 {
-    FIXME("stub\n");
+    FIXME("(%p)->(%08x, %p): stub\n", iface, oid, pValue);
     return E_NOTIMPL;
 }
 
@@ -834,7 +846,7 @@ static HRESULT WINAPI MimeBody_IsType(
                              IMimeBody* iface,
                              IMSGBODYTYPE bodytype)
 {
-    FIXME("stub\n");
+    FIXME("(%p)->(%d): stub\n", iface, bodytype);
     return E_NOTIMPL;
 }
 
@@ -914,8 +926,12 @@ static HRESULT WINAPI MimeBody_GetData(
                               ENCODINGTYPE ietEncoding,
                               IStream** ppStream)
 {
-    FIXME("stub\n");
-    return E_NOTIMPL;
+    MimeBody *This = impl_from_IMimeBody(iface);
+    FIXME("(%p)->(%d, %p). Ignoring encoding type.\n", This, ietEncoding, ppStream);
+
+    *ppStream = This->data;
+    IStream_AddRef(*ppStream);
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeBody_SetData(
@@ -1086,11 +1102,310 @@ HRESULT MimeBody_create(IUnknown *outer, void **obj)
     return S_OK;
 }
 
+typedef struct
+{
+    IStreamVtbl *lpVtbl;
+    LONG refs;
+
+    IStream *base;
+    ULARGE_INTEGER pos, start, length;
+} sub_stream_t;
+
+static inline sub_stream_t *impl_from_IStream( IStream *iface )
+{
+    return (sub_stream_t *)((char*)iface - FIELD_OFFSET(sub_stream_t, lpVtbl));
+}
+
+static HRESULT WINAPI sub_stream_QueryInterface(
+        IStream* iface,
+        REFIID riid,
+        void **ppvObject)
+{
+    sub_stream_t *This = impl_from_IStream(iface);
+
+    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppvObject);
+    *ppvObject = NULL;
+
+    if(IsEqualIID(riid, &IID_IUnknown) ||
+       IsEqualIID(riid, &IID_ISequentialStream) ||
+       IsEqualIID(riid, &IID_IStream))
+    {
+        IStream_AddRef(iface);
+        *ppvObject = iface;
+        return S_OK;
+    }
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI sub_stream_AddRef(
+         IStream* iface)
+{
+    sub_stream_t *This = impl_from_IStream(iface);
+
+    TRACE("(%p)\n", This);
+    return InterlockedIncrement(&This->refs);
+}
+
+static ULONG WINAPI  sub_stream_Release(
+        IStream* iface)
+{
+    sub_stream_t *This = impl_from_IStream(iface);
+    LONG refs;
+
+    TRACE("(%p)\n", This);
+    refs = InterlockedDecrement(&This->refs);
+    if(!refs)
+    {
+        IStream_Release(This->base);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+    return refs;
+}
+
+static HRESULT WINAPI sub_stream_Read(
+        IStream* iface,
+        void *pv,
+        ULONG cb,
+        ULONG *pcbRead)
+{
+    sub_stream_t *This = impl_from_IStream(iface);
+    HRESULT hr;
+    ULARGE_INTEGER base_pos;
+    LARGE_INTEGER tmp_pos;
+
+    TRACE("(%p, %d, %p)\n", pv, cb, pcbRead);
+
+    tmp_pos.QuadPart = 0;
+    IStream_Seek(This->base, tmp_pos, STREAM_SEEK_CUR, &base_pos);
+    tmp_pos.QuadPart = This->pos.QuadPart + This->start.QuadPart;
+    IStream_Seek(This->base, tmp_pos, STREAM_SEEK_SET, NULL);
+
+    if(This->pos.QuadPart + cb > This->length.QuadPart)
+        cb = This->length.QuadPart - This->pos.QuadPart;
+
+    hr = IStream_Read(This->base, pv, cb, pcbRead);
+
+    This->pos.QuadPart += *pcbRead;
+
+    tmp_pos.QuadPart = base_pos.QuadPart;
+    IStream_Seek(This->base, tmp_pos, STREAM_SEEK_SET, NULL);
+
+    return hr;
+}
+
+static HRESULT WINAPI sub_stream_Write(
+        IStream* iface,
+        const void *pv,
+        ULONG cb,
+        ULONG *pcbWritten)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI sub_stream_Seek(
+        IStream* iface,
+        LARGE_INTEGER dlibMove,
+        DWORD dwOrigin,
+        ULARGE_INTEGER *plibNewPosition)
+{
+    sub_stream_t *This = impl_from_IStream(iface);
+    LARGE_INTEGER new_pos;
+
+    TRACE("(%08x.%08x, %x, %p)\n", dlibMove.u.HighPart, dlibMove.u.LowPart, dwOrigin, plibNewPosition);
+
+    switch(dwOrigin)
+    {
+    case STREAM_SEEK_SET:
+        new_pos = dlibMove;
+        break;
+    case STREAM_SEEK_CUR:
+        new_pos.QuadPart = This->pos.QuadPart + dlibMove.QuadPart;
+        break;
+    case STREAM_SEEK_END:
+        new_pos.QuadPart = This->length.QuadPart + dlibMove.QuadPart;
+        break;
+    }
+
+    if(new_pos.QuadPart < 0) new_pos.QuadPart = 0;
+    else if(new_pos.QuadPart > This->length.QuadPart) new_pos.QuadPart = This->length.QuadPart;
+
+    This->pos.QuadPart = new_pos.QuadPart;
+
+    if(plibNewPosition) *plibNewPosition = This->pos;
+    return S_OK;
+}
+
+static HRESULT WINAPI sub_stream_SetSize(
+        IStream* iface,
+        ULARGE_INTEGER libNewSize)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI sub_stream_CopyTo(
+        IStream* iface,
+        IStream *pstm,
+        ULARGE_INTEGER cb,
+        ULARGE_INTEGER *pcbRead,
+        ULARGE_INTEGER *pcbWritten)
+{
+    HRESULT        hr = S_OK;
+    BYTE           tmpBuffer[128];
+    ULONG          bytesRead, bytesWritten, copySize;
+    ULARGE_INTEGER totalBytesRead;
+    ULARGE_INTEGER totalBytesWritten;
+
+    TRACE("(%p)->(%p, %d, %p, %p)\n", iface, pstm, cb.u.LowPart, pcbRead, pcbWritten);
+
+    totalBytesRead.QuadPart = 0;
+    totalBytesWritten.QuadPart = 0;
+
+    while ( cb.QuadPart > 0 )
+    {
+        if ( cb.QuadPart >= sizeof(tmpBuffer) )
+            copySize = sizeof(tmpBuffer);
+        else
+            copySize = cb.u.LowPart;
+
+        hr = IStream_Read(iface, tmpBuffer, copySize, &bytesRead);
+        if (FAILED(hr)) break;
+
+        totalBytesRead.QuadPart += bytesRead;
+
+        if (bytesRead)
+        {
+            hr = IStream_Write(pstm, tmpBuffer, bytesRead, &bytesWritten);
+            if (FAILED(hr)) break;
+            totalBytesWritten.QuadPart += bytesWritten;
+        }
+
+        if (bytesRead != copySize)
+            cb.QuadPart = 0;
+        else
+            cb.QuadPart -= bytesRead;
+    }
+
+    if (pcbRead) pcbRead->QuadPart = totalBytesRead.QuadPart;
+    if (pcbWritten) pcbWritten->QuadPart = totalBytesWritten.QuadPart;
+
+    return hr;
+}
+
+static HRESULT WINAPI sub_stream_Commit(
+        IStream* iface,
+        DWORD grfCommitFlags)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI sub_stream_Revert(
+        IStream* iface)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI sub_stream_LockRegion(
+        IStream* iface,
+        ULARGE_INTEGER libOffset,
+        ULARGE_INTEGER cb,
+        DWORD dwLockType)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI sub_stream_UnlockRegion(
+        IStream* iface,
+        ULARGE_INTEGER libOffset,
+        ULARGE_INTEGER cb,
+        DWORD dwLockType)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI sub_stream_Stat(
+        IStream* iface,
+        STATSTG *pstatstg,
+        DWORD grfStatFlag)
+{
+    sub_stream_t *This = impl_from_IStream(iface);
+    FIXME("(%p)->(%p, %08x)\n", This, pstatstg, grfStatFlag);
+    memset(pstatstg, 0, sizeof(*pstatstg));
+    pstatstg->cbSize = This->length;
+    return S_OK;
+}
+
+static HRESULT WINAPI sub_stream_Clone(
+        IStream* iface,
+        IStream **ppstm)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static struct IStreamVtbl sub_stream_vtbl =
+{
+    sub_stream_QueryInterface,
+    sub_stream_AddRef,
+    sub_stream_Release,
+    sub_stream_Read,
+    sub_stream_Write,
+    sub_stream_Seek,
+    sub_stream_SetSize,
+    sub_stream_CopyTo,
+    sub_stream_Commit,
+    sub_stream_Revert,
+    sub_stream_LockRegion,
+    sub_stream_UnlockRegion,
+    sub_stream_Stat,
+    sub_stream_Clone
+};
+
+static HRESULT create_sub_stream(IStream *stream, ULARGE_INTEGER start, ULARGE_INTEGER length, IStream **out)
+{
+    sub_stream_t *This;
+
+    *out = NULL;
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    if(!This) return E_OUTOFMEMORY;
+
+    This->lpVtbl = &sub_stream_vtbl;
+    This->refs = 1;
+    This->start = start;
+    This->length = length;
+    This->pos.QuadPart = 0;
+    IStream_AddRef(stream);
+    This->base = stream;
+
+    *out = (IStream*)&This->lpVtbl;
+    return S_OK;
+}
+
+
+typedef struct body_t
+{
+    struct list entry;
+    HBODY hbody;
+    IMimeBody *mime_body;
+
+    struct body_t *parent;
+    struct list children;
+} body_t;
+
 typedef struct MimeMessage
 {
     const IMimeMessageVtbl *lpVtbl;
 
     LONG refs;
+    IStream *stream;
+
+    struct list body_tree;
+    HBODY next_hbody;
 } MimeMessage;
 
 static HRESULT WINAPI MimeMessage_QueryInterface(IMimeMessage *iface, REFIID riid, void **ppv)
@@ -1120,6 +1435,18 @@ static ULONG WINAPI MimeMessage_AddRef(IMimeMessage *iface)
     return InterlockedIncrement(&This->refs);
 }
 
+static void empty_body_list(struct list *list)
+{
+    body_t *body, *cursor2;
+    LIST_FOR_EACH_ENTRY_SAFE(body, cursor2, list, body_t, entry)
+    {
+        empty_body_list(&body->children);
+        list_remove(&body->entry);
+        IMimeBody_Release(body->mime_body);
+        HeapFree(GetProcessHeap(), 0, body);
+    }
+}
+
 static ULONG WINAPI MimeMessage_Release(IMimeMessage *iface)
 {
     MimeMessage *This = (MimeMessage *)iface;
@@ -1130,6 +1457,9 @@ static ULONG WINAPI MimeMessage_Release(IMimeMessage *iface)
     refs = InterlockedDecrement(&This->refs);
     if (!refs)
     {
+        empty_body_list(&This->body_tree);
+
+        if(This->stream) IStream_Release(This->stream);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -1153,11 +1483,203 @@ static HRESULT WINAPI MimeMessage_IsDirty(
     return E_NOTIMPL;
 }
 
+static body_t *new_body_entry(IMimeBody *mime_body, HBODY hbody, body_t *parent)
+{
+    body_t *body = HeapAlloc(GetProcessHeap(), 0, sizeof(*body));
+    if(body)
+    {
+        body->mime_body = mime_body;
+        body->hbody = hbody;
+        list_init(&body->children);
+        body->parent = parent;
+    }
+    return body;
+}
+
+typedef struct
+{
+    struct list entry;
+    BODYOFFSETS offsets;
+} offset_entry_t;
+
+static HRESULT create_body_offset_list(IStream *stm, const char *boundary, struct list *body_offsets)
+{
+    HRESULT hr;
+    DWORD read;
+    int boundary_len = strlen(boundary);
+    char *buf, *nl_boundary, *ptr, *overlap;
+    DWORD total_read = 0;
+    DWORD start = 0, overlap_no;
+    offset_entry_t *cur_body = NULL;
+    ULARGE_INTEGER cur;
+    LARGE_INTEGER zero;
+
+    list_init(body_offsets);
+    nl_boundary = HeapAlloc(GetProcessHeap(), 0, 4 + boundary_len + 1);
+    memcpy(nl_boundary, "\r\n--", 4);
+    memcpy(nl_boundary + 4, boundary, boundary_len + 1);
+
+    overlap_no = boundary_len + 5;
+
+    overlap = buf = HeapAlloc(GetProcessHeap(), 0, overlap_no + PARSER_BUF_SIZE + 1);
+
+    zero.QuadPart = 0;
+    hr = IStream_Seek(stm, zero, STREAM_SEEK_CUR, &cur);
+    start = cur.u.LowPart;
+
+    do {
+        hr = IStream_Read(stm, overlap, PARSER_BUF_SIZE, &read);
+        if(FAILED(hr)) goto end;
+        if(read == 0) break;
+        total_read += read;
+        overlap[read] = '\0';
+
+        ptr = buf;
+        do {
+            ptr = strstr(ptr, nl_boundary);
+            if(ptr)
+            {
+                DWORD boundary_start = start + ptr - buf;
+                char *end = ptr + boundary_len + 4;
+
+                if(*end == '\0' || *(end + 1) == '\0')
+                    break;
+
+                if(*end == '\r' && *(end + 1) == '\n')
+                {
+                    if(cur_body)
+                    {
+                        cur_body->offsets.cbBodyEnd = boundary_start;
+                        list_add_tail(body_offsets, &cur_body->entry);
+                    }
+                    cur_body = HeapAlloc(GetProcessHeap(), 0, sizeof(*cur_body));
+                    cur_body->offsets.cbBoundaryStart = boundary_start + 2; /* doesn't including the leading \r\n */
+                    cur_body->offsets.cbHeaderStart = boundary_start + boundary_len + 6;
+                }
+                else if(*end == '-' && *(end + 1) == '-')
+                {
+                    if(cur_body)
+                    {
+                        cur_body->offsets.cbBodyEnd = boundary_start;
+                        list_add_tail(body_offsets, &cur_body->entry);
+                        goto end;
+                    }
+                }
+                ptr = end + 2;
+            }
+        } while(ptr);
+
+        if(overlap == buf) /* 1st iteration */
+        {
+            memcpy(buf, buf + PARSER_BUF_SIZE - overlap_no, overlap_no);
+            overlap = buf + overlap_no;
+            start += read - overlap_no;
+        }
+        else
+        {
+            memcpy(buf, buf + PARSER_BUF_SIZE, overlap_no);
+            start += read;
+        }
+    } while(1);
+
+end:
+    HeapFree(GetProcessHeap(), 0, buf);
+    return hr;
+}
+
+static body_t *create_sub_body(MimeMessage *msg, IStream *pStm, BODYOFFSETS *offset, body_t *parent)
+{
+    IMimeBody *mime_body;
+    HRESULT hr;
+    body_t *body;
+    ULARGE_INTEGER cur;
+    LARGE_INTEGER zero;
+
+    MimeBody_create(NULL, (void**)&mime_body);
+    IMimeBody_Load(mime_body, pStm);
+    zero.QuadPart = 0;
+    hr = IStream_Seek(pStm, zero, STREAM_SEEK_CUR, &cur);
+    offset->cbBodyStart = cur.u.LowPart + offset->cbHeaderStart;
+    if(parent) MimeBody_set_offsets(impl_from_IMimeBody(mime_body), offset);
+    IMimeBody_SetData(mime_body, IET_BINARY, NULL, NULL, &IID_IStream, pStm);
+    body = new_body_entry(mime_body, msg->next_hbody, parent);
+    msg->next_hbody = (HBODY)((DWORD)msg->next_hbody + 1);
+
+    if(IMimeBody_IsContentType(mime_body, "multipart", NULL) == S_OK)
+    {
+        MIMEPARAMINFO *param_info;
+        ULONG count, i;
+        IMimeAllocator *alloc;
+
+        hr = IMimeBody_GetParameters(mime_body, "Content-Type", &count, &param_info);
+        if(hr != S_OK || count == 0) return body;
+
+        MimeOleGetAllocator(&alloc);
+
+        for(i = 0; i < count; i++)
+        {
+            if(!strcasecmp(param_info[i].pszName, "boundary"))
+            {
+                struct list offset_list;
+                offset_entry_t *cur, *cursor2;
+                hr = create_body_offset_list(pStm, param_info[i].pszData, &offset_list);
+                LIST_FOR_EACH_ENTRY_SAFE(cur, cursor2, &offset_list, offset_entry_t, entry)
+                {
+                    body_t *sub_body;
+                    IStream *sub_stream;
+                    ULARGE_INTEGER start, length;
+
+                    start.u.LowPart = cur->offsets.cbHeaderStart;
+                    length.u.LowPart = cur->offsets.cbBodyEnd - cur->offsets.cbHeaderStart;
+                    create_sub_stream(pStm, start, length, &sub_stream);
+                    sub_body = create_sub_body(msg, sub_stream, &cur->offsets, body);
+                    IStream_Release(sub_stream);
+                    list_add_tail(&body->children, &sub_body->entry);
+                    list_remove(&cur->entry);
+                    HeapFree(GetProcessHeap(), 0, cur);
+                }
+                break;
+            }
+        }
+        IMimeAllocator_FreeParamInfoArray(alloc, count, param_info, TRUE);
+        IMimeAllocator_Release(alloc);
+    }
+    return body;
+}
+
 static HRESULT WINAPI MimeMessage_Load(
     IMimeMessage *iface,
-    LPSTREAM pStm){
-    FIXME("(%p)->(%p)\n", iface, pStm);
-    return E_NOTIMPL;
+    LPSTREAM pStm)
+{
+    MimeMessage *This = (MimeMessage *)iface;
+    body_t *root_body;
+    BODYOFFSETS offsets;
+    ULARGE_INTEGER cur;
+    LARGE_INTEGER zero;
+
+    TRACE("(%p)->(%p)\n", iface, pStm);
+
+    if(This->stream)
+    {
+        FIXME("already loaded a message\n");
+        return E_FAIL;
+    }
+
+    IStream_AddRef(pStm);
+    This->stream = pStm;
+    offsets.cbBoundaryStart = offsets.cbHeaderStart = 0;
+    offsets.cbBodyStart = offsets.cbBodyEnd = 0;
+
+    root_body = create_sub_body(This, pStm, &offsets, NULL);
+
+    zero.QuadPart = 0;
+    IStream_Seek(pStm, zero, STREAM_SEEK_END, &cur);
+    offsets.cbBodyEnd = cur.u.LowPart;
+    MimeBody_set_offsets(impl_from_IMimeBody(root_body->mime_body), &offsets);
+
+    list_add_head(&This->body_tree, &root_body->entry);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeMessage_Save(
@@ -1190,8 +1712,12 @@ static HRESULT WINAPI MimeMessage_GetMessageSource(
     IStream **ppStream,
     DWORD dwFlags)
 {
+    MimeMessage *This = (MimeMessage *)iface;
     FIXME("(%p)->(%p, 0x%x)\n", iface, ppStream, dwFlags);
-    return E_NOTIMPL;
+
+    IStream_AddRef(This->stream);
+    *ppStream = This->stream;
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeMessage_GetMessageSize(
@@ -1245,14 +1771,54 @@ static HRESULT WINAPI MimeMessage_HandsOffStorage(
     return E_NOTIMPL;
 }
 
+static HRESULT find_body(struct list *list, HBODY hbody, body_t **body)
+{
+    body_t *cur;
+    HRESULT hr;
+
+    if(hbody == HBODY_ROOT)
+    {
+        *body = LIST_ENTRY(list_head(list), body_t, entry);
+        return S_OK;
+    }
+
+    LIST_FOR_EACH_ENTRY(cur, list, body_t, entry)
+    {
+        if(cur->hbody == hbody)
+        {
+            *body = cur;
+            return S_OK;
+        }
+        hr = find_body(&cur->children, hbody, body);
+        if(hr == S_OK) return S_OK;
+    }
+    return S_FALSE;
+}
+
 static HRESULT WINAPI MimeMessage_BindToObject(
     IMimeMessage *iface,
     const HBODY hBody,
     REFIID riid,
     void **ppvObject)
 {
-    FIXME("(%p)->(%p, %s, %p)\n", iface, hBody, debugstr_guid(riid), ppvObject);
-    return E_NOTIMPL;
+    MimeMessage *This = (MimeMessage *)iface;
+    HRESULT hr;
+    body_t *body;
+
+    TRACE("(%p)->(%p, %s, %p)\n", iface, hBody, debugstr_guid(riid), ppvObject);
+
+    hr = find_body(&This->body_tree, hBody, &body);
+
+    if(hr != S_OK) return hr;
+
+    if(IsEqualIID(riid, &IID_IMimeBody))
+    {
+        IMimeBody_AddRef(body->mime_body);
+        *ppvObject = body->mime_body;
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
 }
 
 static HRESULT WINAPI MimeMessage_SaveBody(
@@ -1264,6 +1830,71 @@ static HRESULT WINAPI MimeMessage_SaveBody(
     FIXME("(%p)->(%p, 0x%x, %p)\n", iface, hBody, dwFlags, pStream);
     return E_NOTIMPL;
 }
+
+static HRESULT get_body(MimeMessage *msg, BODYLOCATION location, HBODY pivot, body_t **out)
+{
+    body_t *root = LIST_ENTRY(list_head(&msg->body_tree), body_t, entry);
+    body_t *body;
+    HRESULT hr;
+    struct list *list;
+
+    if(location == IBL_ROOT)
+    {
+        *out = root;
+        return S_OK;
+    }
+
+    hr = find_body(&msg->body_tree, pivot, &body);
+
+    if(hr == S_OK)
+    {
+        switch(location)
+        {
+        case IBL_PARENT:
+            *out = body->parent;
+            break;
+
+        case IBL_FIRST:
+            list = list_head(&body->children);
+            if(list)
+                *out = LIST_ENTRY(list, body_t, entry);
+            else
+                hr = MIME_E_NOT_FOUND;
+            break;
+
+        case IBL_LAST:
+            list = list_tail(&body->children);
+            if(list)
+                *out = LIST_ENTRY(list, body_t, entry);
+            else
+                hr = MIME_E_NOT_FOUND;
+            break;
+
+        case IBL_NEXT:
+            list = list_next(&body->parent->children, &body->entry);
+            if(list)
+                *out = LIST_ENTRY(list, body_t, entry);
+            else
+                hr = MIME_E_NOT_FOUND;
+            break;
+
+        case IBL_PREVIOUS:
+            list = list_prev(&body->parent->children, &body->entry);
+            if(list)
+                *out = LIST_ENTRY(list, body_t, entry);
+            else
+                hr = MIME_E_NOT_FOUND;
+            break;
+
+        default:
+            hr = E_FAIL;
+            break;
+        }
+    }
+
+    return hr;
+}
+
 
 static HRESULT WINAPI MimeMessage_InsertBody(
     IMimeMessage *iface,
@@ -1281,8 +1912,17 @@ static HRESULT WINAPI MimeMessage_GetBody(
     HBODY hPivot,
     LPHBODY phBody)
 {
-    FIXME("(%p)->(%d, %p, %p)\n", iface, location, hPivot, phBody);
-    return E_NOTIMPL;
+    MimeMessage *This = (MimeMessage *)iface;
+    body_t *body;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d, %p, %p)\n", iface, location, hPivot, phBody);
+
+    hr = get_body(This, location, hPivot, &body);
+
+    if(hr == S_OK) *phBody = body->hbody;
+
+    return hr;
 }
 
 static HRESULT WINAPI MimeMessage_DeleteBody(
@@ -1303,14 +1943,70 @@ static HRESULT WINAPI MimeMessage_MoveBody(
     return E_NOTIMPL;
 }
 
+static void count_children(body_t *body, boolean recurse, ULONG *count)
+{
+    body_t *child;
+
+    LIST_FOR_EACH_ENTRY(child, &body->children, body_t, entry)
+    {
+        (*count)++;
+        if(recurse) count_children(child, recurse, count);
+    }
+}
+
 static HRESULT WINAPI MimeMessage_CountBodies(
     IMimeMessage *iface,
     HBODY hParent,
     boolean fRecurse,
     ULONG *pcBodies)
 {
-    FIXME("(%p)->(%p, %s, %p)\n", iface, hParent, fRecurse ? "TRUE" : "FALSE", pcBodies);
-    return E_NOTIMPL;
+    HRESULT hr;
+    MimeMessage *This = (MimeMessage *)iface;
+    body_t *body;
+
+    TRACE("(%p)->(%p, %s, %p)\n", iface, hParent, fRecurse ? "TRUE" : "FALSE", pcBodies);
+
+    hr = find_body(&This->body_tree, hParent, &body);
+    if(hr != S_OK) return hr;
+
+    *pcBodies = 1;
+    count_children(body, fRecurse, pcBodies);
+
+    return S_OK;
+}
+
+static HRESULT find_next(IMimeMessage *msg, LPFINDBODY find_body, HBODY *out)
+{
+    HRESULT hr;
+    IMimeBody *mime_body;
+    HBODY next;
+
+    if(find_body->dwReserved == 0)
+        find_body->dwReserved = (DWORD)HBODY_ROOT;
+    else
+    {
+        hr = IMimeMessage_GetBody(msg, IBL_FIRST, (HBODY)find_body->dwReserved, &next);
+        if(hr == S_OK)
+            find_body->dwReserved = (DWORD)next;
+        else
+        {
+            hr = IMimeMessage_GetBody(msg, IBL_NEXT, (HBODY)find_body->dwReserved, &next);
+            if(hr == S_OK)
+                find_body->dwReserved = (DWORD)next;
+            else
+                return MIME_E_NOT_FOUND;
+        }
+    }
+
+    hr = IMimeMessage_BindToObject(msg, (HBODY)find_body->dwReserved, &IID_IMimeBody, (void**)&mime_body);
+    if(IMimeBody_IsContentType(mime_body, find_body->pszPriType, find_body->pszSubType) == S_OK)
+    {
+        IMimeBody_Release(mime_body);
+        *out = (HBODY)find_body->dwReserved;
+        return S_OK;
+    }
+    IMimeBody_Release(mime_body);
+    return find_next(msg, find_body, out);
 }
 
 static HRESULT WINAPI MimeMessage_FindFirst(
@@ -1318,8 +2014,10 @@ static HRESULT WINAPI MimeMessage_FindFirst(
     LPFINDBODY pFindBody,
     LPHBODY phBody)
 {
-    FIXME("(%p)->(%p, %p)\n", iface, pFindBody, phBody);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p, %p)\n", iface, pFindBody, phBody);
+
+    pFindBody->dwReserved = 0;
+    return find_next(iface, pFindBody, phBody);
 }
 
 static HRESULT WINAPI MimeMessage_FindNext(
@@ -1327,8 +2025,9 @@ static HRESULT WINAPI MimeMessage_FindNext(
     LPFINDBODY pFindBody,
     LPHBODY phBody)
 {
-    FIXME("(%p)->(%p, %p)\n", iface, pFindBody, phBody);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p, %p)\n", iface, pFindBody, phBody);
+
+    return find_next(iface, pFindBody, phBody);
 }
 
 static HRESULT WINAPI MimeMessage_ResolveURL(
@@ -1367,7 +2066,8 @@ static HRESULT WINAPI MimeMessage_GetCharset(
     LPHCHARSET phCharset)
 {
     FIXME("(%p)->(%p)\n", iface, phCharset);
-    return E_NOTIMPL;
+    *phCharset = NULL;
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeMessage_SetCharset(
@@ -1384,8 +2084,16 @@ static HRESULT WINAPI MimeMessage_IsBodyType(
     HBODY hBody,
     IMSGBODYTYPE bodytype)
 {
-    FIXME("(%p)->(%p, %d)\n", iface, hBody, bodytype);
-    return E_NOTIMPL;
+    HRESULT hr;
+    IMimeBody *mime_body;
+    TRACE("(%p)->(%p, %d)\n", iface, hBody, bodytype);
+
+    hr = IMimeMessage_BindToObject(iface, hBody, &IID_IMimeBody, (void**)&mime_body);
+    if(hr != S_OK) return hr;
+
+    hr = IMimeBody_IsType(mime_body, bodytype);
+    MimeBody_Release(mime_body);
+    return hr;
 }
 
 static HRESULT WINAPI MimeMessage_IsContentType(
@@ -1394,8 +2102,16 @@ static HRESULT WINAPI MimeMessage_IsContentType(
     LPCSTR pszPriType,
     LPCSTR pszSubType)
 {
-    FIXME("(%p)->(%p, %s, %s)\n", iface, hBody, pszPriType, pszSubType);
-    return E_NOTIMPL;
+    HRESULT hr;
+    IMimeBody *mime_body;
+    TRACE("(%p)->(%p, %s, %s)\n", iface, hBody, pszPriType, pszSubType);
+
+    hr = IMimeMessage_BindToObject(iface, hBody, &IID_IMimeBody, (void**)&mime_body);
+    if(FAILED(hr)) return hr;
+
+    hr = IMimeBody_IsContentType(mime_body, pszPriType, pszSubType);
+    IMimeBody_Release(mime_body);
+    return hr;
 }
 
 static HRESULT WINAPI MimeMessage_QueryBodyProp(
@@ -1417,8 +2133,18 @@ static HRESULT WINAPI MimeMessage_GetBodyProp(
     DWORD dwFlags,
     LPPROPVARIANT pValue)
 {
-    FIXME("(%p)->(%p, %s, 0x%x, %p)\n", iface, hBody, pszName, dwFlags, pValue);
-    return E_NOTIMPL;
+    HRESULT hr;
+    IMimeBody *mime_body;
+
+    TRACE("(%p)->(%p, %s, 0x%x, %p)\n", iface, hBody, pszName, dwFlags, pValue);
+
+    hr = IMimeMessage_BindToObject(iface, hBody, &IID_IMimeBody, (void**)&mime_body);
+    if(hr != S_OK) return hr;
+
+    hr = IMimeBody_GetProp(mime_body, pszName, dwFlags, pValue);
+    IMimeBody_Release(mime_body);
+
+    return hr;
 }
 
 static HRESULT WINAPI MimeMessage_SetBodyProp(
@@ -1446,7 +2172,7 @@ static HRESULT WINAPI MimeMessage_SetOption(
     const TYPEDID oid,
     LPCPROPVARIANT pValue)
 {
-    FIXME("(%p)->(%d, %p)\n", iface, oid, pValue);
+    FIXME("(%p)->(%08x, %p)\n", iface, oid, pValue);
     return E_NOTIMPL;
 }
 
@@ -1455,7 +2181,7 @@ static HRESULT WINAPI MimeMessage_GetOption(
     const TYPEDID oid,
     LPPROPVARIANT pValue)
 {
-    FIXME("(%p)->(%d, %p)\n", iface, oid, pValue);
+    FIXME("(%p)->(%08x, %p)\n", iface, oid, pValue);
     return E_NOTIMPL;
 }
 
@@ -1518,8 +2244,44 @@ static HRESULT WINAPI MimeMessage_GetTextBody(
     IStream **pStream,
     LPHBODY phBody)
 {
-    FIXME("(%p)->(%d, %d, %p, %p)\n", iface, dwTxtType, ietEncoding, pStream, phBody);
-    return E_NOTIMPL;
+    HRESULT hr;
+    HBODY hbody;
+    FINDBODY find_struct;
+    IMimeBody *mime_body;
+    static char text[] = "text";
+    static char plain[] = "plain";
+    static char html[] = "html";
+
+    TRACE("(%p)->(%d, %d, %p, %p)\n", iface, dwTxtType, ietEncoding, pStream, phBody);
+
+    find_struct.pszPriType = text;
+
+    switch(dwTxtType)
+    {
+    case TXT_PLAIN:
+        find_struct.pszSubType = plain;
+        break;
+    case TXT_HTML:
+        find_struct.pszSubType = html;
+        break;
+    default:
+        return MIME_E_INVALID_TEXT_TYPE;
+    }
+
+    hr = IMimeMessage_FindFirst(iface, &find_struct, &hbody);
+    if(hr != S_OK)
+    {
+        TRACE("not found hr %08x\n", hr);
+        *phBody = NULL;
+        return hr;
+    }
+
+    IMimeMessage_BindToObject(iface, hbody, &IID_IMimeBody, (void**)&mime_body);
+
+    IMimeBody_GetData(mime_body, ietEncoding, pStream);
+    *phBody = hbody;
+    IMimeBody_Release(mime_body);
+    return hr;
 }
 
 static HRESULT WINAPI MimeMessage_SetTextBody(
@@ -1572,8 +2334,38 @@ static HRESULT WINAPI MimeMessage_GetAttachments(
     ULONG *pcAttach,
     LPHBODY *pprghAttach)
 {
-    FIXME("(%p)->(%p, %p)\n", iface, pcAttach, pprghAttach);
-    return E_NOTIMPL;
+    HRESULT hr;
+    FINDBODY find_struct;
+    HBODY hbody;
+    LPHBODY array;
+    ULONG size = 10;
+
+    TRACE("(%p)->(%p, %p)\n", iface, pcAttach, pprghAttach);
+
+    *pcAttach = 0;
+    array = CoTaskMemAlloc(size * sizeof(HBODY));
+
+    find_struct.pszPriType = find_struct.pszSubType = NULL;
+    hr = IMimeMessage_FindFirst(iface, &find_struct, &hbody);
+    while(hr == S_OK)
+    {
+        hr = IMimeMessage_IsContentType(iface, hbody, "multipart", NULL);
+        TRACE("IsCT rets %08x %d\n", hr, *pcAttach);
+        if(hr != S_OK)
+        {
+            if(*pcAttach + 1 > size)
+            {
+                size *= 2;
+                array = CoTaskMemRealloc(array, size * sizeof(HBODY));
+            }
+            array[*pcAttach] = hbody;
+            (*pcAttach)++;
+        }
+        hr = IMimeMessage_FindNext(iface, &find_struct, &hbody);
+    }
+
+    *pprghAttach = array;
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeMessage_GetAddressTable(
@@ -1721,6 +2513,9 @@ HRESULT WINAPI MimeOleCreateMessage(IUnknown *pUnkOuter, IMimeMessage **ppMessag
 
     This->lpVtbl = &MimeMessageVtbl;
     This->refs = 1;
+    This->stream = NULL;
+    list_init(&This->body_tree);
+    This->next_hbody = (HBODY)1;
 
     *ppMessage = (IMimeMessage *)&This->lpVtbl;
     return S_OK;
@@ -2134,4 +2929,11 @@ HRESULT MimeAllocator_create(IUnknown *outer, void **obj)
 HRESULT WINAPI MimeOleGetAllocator(IMimeAllocator **alloc)
 {
     return MimeAllocator_create(NULL, (void**)alloc);
+}
+
+HRESULT WINAPI MimeOleGetCharsetInfo(HCHARSET hCharset, LPINETCSETINFO pCsetInfo)
+{
+    FIXME("(%p, %p)\n", hCharset, pCsetInfo);
+    if(!hCharset) return E_INVALIDARG;
+    return E_FAIL;
 }

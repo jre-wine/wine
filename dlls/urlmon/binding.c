@@ -420,31 +420,17 @@ static void load_doc_mon(Binding *binding, IPersistMoniker *persist)
         FIXME("Load failed: %08x\n", hres);
 }
 
-static void create_object(Binding *binding)
+static HRESULT create_mime_object(Binding *binding, const CLSID *clsid, LPCWSTR clsid_str)
 {
     IPersistMoniker *persist;
-    LPWSTR clsid_str;
-    CLSID clsid;
     HRESULT hres;
 
-    if(!binding->mime) {
-        FIXME("MIME unavailable\n");
-        return;
-    }
-
-    if(!(clsid_str = get_mime_clsid(binding->mime, &clsid))) {
-        FIXME("Could not find object for MIME %s\n", debugstr_w(binding->mime));
-        return;
-    }
-
-    IBindStatusCallback_OnProgress(binding->callback, 0, 0, BINDSTATUS_CLASSIDAVAILABLE, clsid_str);
-
-    IBindStatusCallback_OnProgress(binding->callback, 0, 0, BINDSTATUS_BEGINSYNCOPERATION, NULL);
-
-    hres = CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
+    hres = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
                             &binding->iid, (void**)&binding->obj);
-    if(FAILED(hres))
-        FIXME("CoCreateInstance failed: %08x\n", hres);
+    if(FAILED(hres)) {
+        WARN("CoCreateInstance failed: %08x\n", hres);
+        return INET_E_CANNOT_INSTANTIATE_OBJECT;
+    }
 
     binding->state |= BINDING_OBJAVAIL;
 
@@ -467,13 +453,38 @@ static void create_object(Binding *binding)
         /* FIXME: Try query IPersistFile */
     }
 
-    heap_free(clsid_str);
-
     IBindStatusCallback_OnObjectAvailable(binding->callback, &binding->iid, binding->obj);
+
+    return S_OK;
+}
+
+static void create_object(Binding *binding)
+{
+    LPWSTR clsid_str;
+    CLSID clsid;
+    HRESULT hres;
+
+    if(!binding->mime) {
+        FIXME("MIME not available\n");
+        return;
+    }
+
+    if(!(clsid_str = get_mime_clsid(binding->mime, &clsid))) {
+        FIXME("Could not find object for MIME %s\n", debugstr_w(binding->mime));
+        return;
+    }
+
+    IBindStatusCallback_OnProgress(binding->callback, 0, 0, BINDSTATUS_CLASSIDAVAILABLE, clsid_str);
+    IBindStatusCallback_OnProgress(binding->callback, 0, 0, BINDSTATUS_BEGINSYNCOPERATION, NULL);
+
+    hres = create_mime_object(binding, &clsid, clsid_str);
+    heap_free(clsid_str);
 
     IBindStatusCallback_OnProgress(binding->callback, 0, 0, BINDSTATUS_ENDSYNCOPERATION, NULL);
 
-    stop_binding(binding, S_OK, NULL);
+    stop_binding(binding, hres, NULL);
+    if(FAILED(hres))
+        IInternetProtocol_Terminate(binding->protocol, 0);
 }
 
 #define STGMEDUNK_THIS(iface) DEFINE_THIS(stgmed_buf_t, Unknown, iface)
@@ -1651,7 +1662,7 @@ static HRESULT start_binding(IMoniker *mon, Binding *binding_ctx, LPCWSTR url, I
     hres = IBindStatusCallback_OnStartBinding(binding->callback, 0, BINDING(binding));
     if(FAILED(hres)) {
         WARN("OnStartBinding failed: %08x\n", hres);
-        stop_binding(binding, 0x800c0008, NULL);
+        stop_binding(binding, INET_E_DOWNLOAD_FAILURE, NULL);
         IBinding_Release(BINDING(binding));
         return hres;
     }
@@ -1665,7 +1676,7 @@ static HRESULT start_binding(IMoniker *mon, Binding *binding_ctx, LPCWSTR url, I
 
         TRACE("start ret %08x\n", hres);
 
-        if(FAILED(hres)) {
+        if(FAILED(hres) && hres != E_PENDING) {
             stop_binding(binding, hres, NULL);
             IBinding_Release(BINDING(binding));
 

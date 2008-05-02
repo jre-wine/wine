@@ -27,6 +27,8 @@
 #define COBJMACROS
 #include "bits.h"
 
+#include <string.h>
+
 /* Background copy manager vtbl and related data */
 typedef struct
 {
@@ -42,5 +44,14 @@ typedef struct
 extern ClassFactoryImpl BITS_ClassFactory;
 
 HRESULT BackgroundCopyManagerConstructor(IUnknown *pUnkOuter, LPVOID *ppObj);
+
+/* Little helper functions */
+static inline char *
+qmgr_strdup(const char *s)
+{
+    size_t n = strlen(s) + 1;
+    char *d = HeapAlloc(GetProcessHeap(), 0, n);
+    return d ? memcpy(d, s, n) : NULL;
+}
 
 #endif /* __QMGR_H__ */

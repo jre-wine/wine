@@ -591,9 +591,9 @@ static DWORD CALLBACK apartment_hostobject_thread(LPVOID p)
     {
         if (!msg.hwnd && (msg.message == DM_HOSTOBJECT))
         {
-            struct host_object_params *params = (struct host_object_params *)msg.lParam;
-            params->hr = apartment_hostobject(apt, params);
-            SetEvent(params->event);
+            struct host_object_params *obj_params = (struct host_object_params *)msg.lParam;
+            obj_params->hr = apartment_hostobject(apt, obj_params);
+            SetEvent(obj_params->event);
         }
         else
         {
@@ -1779,11 +1779,6 @@ static HRESULT COM_GetRegisteredClassObject(const struct apartment *apt, REFCLSI
 {
   HRESULT hr = S_FALSE;
   RegisteredClass *curClass;
-
-  /*
-   * Sanity check
-   */
-  assert(ppUnk!=0);
 
   EnterCriticalSection( &csRegisteredClassList );
 
@@ -3437,8 +3432,8 @@ HRESULT WINAPI CoWaitForMultipleHandles(DWORD dwFlags, DWORD dwTimeout,
 
         if (message_loop)
         {
-            DWORD wait_flags = (dwFlags & COWAIT_WAITALL) ? MWMO_WAITALL : 0 |
-                    (dwFlags & COWAIT_ALERTABLE ) ? MWMO_ALERTABLE : 0;
+            DWORD wait_flags = ((dwFlags & COWAIT_WAITALL) ? MWMO_WAITALL : 0) |
+                    ((dwFlags & COWAIT_ALERTABLE ) ? MWMO_ALERTABLE : 0);
 
             TRACE("waiting for rpc completion or window message\n");
 

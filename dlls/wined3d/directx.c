@@ -85,6 +85,8 @@ static const struct {
     /* EXT */
     {"GL_EXT_blend_color",                  EXT_BLEND_COLOR,                0                           },
     {"GL_EXT_blend_minmax",                 EXT_BLEND_MINMAX,               0                           },
+    {"GL_EXT_blend_equation_separate",      EXT_BLEND_EQUATION_SEPARATE,    0                           },
+    {"GL_EXT_blend_func_separate",          EXT_BLEND_FUNC_SEPARATE,        0                           },
     {"GL_EXT_fog_coord",                    EXT_FOG_COORD,                  0                           },
     {"GL_EXT_framebuffer_blit",             EXT_FRAMEBUFFER_BLIT,           0                           },
     {"GL_EXT_framebuffer_object",           EXT_FRAMEBUFFER_OBJECT,         0                           },
@@ -426,7 +428,8 @@ static inline BOOL test_arb_vs_offset_limit(WineD3D_GL_Info *gl_info) {
         "!!ARBvp1.0\n"
         "PARAM C[66] = { program.env[0..65] };\n"
         "ADDRESS A0;"
-        "ARL A0.x, 0.0;\n"
+        "PARAM zero = {0.0, 0.0, 0.0, 0.0};\n"
+        "ARL A0.x, zero.x;\n"
         "MOV result.position, C[A0.x + 65];\n"
         "END\n";
 
@@ -2200,10 +2203,12 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                                         WINED3DPMISCCAPS_NULLREFERENCE
                                         WINED3DPMISCCAPS_INDEPENDENTWRITEMASKS
                                         WINED3DPMISCCAPS_FOGANDSPECULARALPHA
-                                        WINED3DPMISCCAPS_SEPARATEALPHABLEND
                                         WINED3DPMISCCAPS_MRTINDEPENDENTBITDEPTHS
                                         WINED3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING
                                         WINED3DPMISCCAPS_FOGVERTEXCLAMPED */
+
+    if(GL_SUPPORT(EXT_BLEND_EQUATION_SEPARATE) && GL_SUPPORT(EXT_BLEND_FUNC_SEPARATE))
+        *pCaps->PrimitiveMiscCaps |= WINED3DPMISCCAPS_SEPARATEALPHABLEND;
 
 /* The caps below can be supported but aren't handled yet in utils.c 'd3dta_to_combiner_input', disable them until support is fixed */
 #if 0
@@ -2873,6 +2878,68 @@ static BOOL implementation_is_apple(WineD3D_GL_Info *gl_info) {
     }
 }
 
+#define GLINFO_LOCATION (*gl_info)
+static void test_pbo_functionality(WineD3D_GL_Info *gl_info) {
+    /* Some OpenGL implementations, namely Apple's Geforce 8 driver, advertises PBOs,
+     * but glTexSubImage from a PBO fails miserably, with the first line repeated over
+     * all the texture. This function detects this bug by its symptom and disables PBOs
+     * if the test fails.
+     *
+     * The test uplaods a 4x4 texture via the PBO in the "native" format GL_BGRA,
+     * GL_UNSIGNED_INT_8_8_8_8_REV. This format triggers the bug, and it is what we use
+     * for D3DFMT_A8R8G8B8. Then the texture is read back without any PBO and the data
+     * read back is compared to the original. If they are equal PBOs are assumed to work,
+     * otherwise the PBO extension is disabled.
+     */
+    GLuint texture, pbo;
+    static const unsigned int pattern[] = {
+        0x00000000, 0x000000ff, 0x0000ff00, 0x40ff0000,
+        0x80ffffff, 0x40ffff00, 0x00ff00ff, 0x0000ffff,
+        0x00ffff00, 0x00ff00ff, 0x0000ffff, 0x000000ff,
+        0x80ff00ff, 0x0000ffff, 0x00ff00ff, 0x40ff00ff
+    };
+    unsigned int check[sizeof(pattern) / sizeof(pattern[0])];
+
+    if(!gl_info->supported[ARB_PIXEL_BUFFER_OBJECT]) {
+        /* No PBO -> No point in testing them */
+        return;
+    }
+
+    while(glGetError());
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, 0);
+    checkGLcall("Specifying the PBO test texture\n");
+
+    GL_EXTCALL(glGenBuffersARB(1, &pbo));
+    GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pbo));
+    GL_EXTCALL(glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, sizeof(pattern), pattern, GL_STREAM_DRAW_ARB));
+    checkGLcall("Specifying the PBO test pbo\n");
+
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
+    checkGLcall("Loading the PBO test texture\n");
+
+    GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
+    glFinish(); /* just to be sure */
+
+    memset(check, 0, sizeof(check));
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, check);
+    checkGLcall("Reading back the PBO test texture\n");
+
+    glDeleteTextures(1, &texture);
+    GL_EXTCALL(glDeleteBuffersARB(1, &pbo));
+    checkGLcall("PBO test cleanup\n");
+
+    if(memcmp(check, pattern, sizeof(check)) != 0) {
+        WARN_(d3d_caps)("PBO test failed, read back data doesn't match original\n");
+        WARN_(d3d_caps)("Disabling PBOs. This may result in slower performance\n");
+        gl_info->supported[ARB_PIXEL_BUFFER_OBJECT] = FALSE;
+    } else {
+        TRACE_(d3d_caps)("PBO test successfull\n");
+    }
+}
+#undef GLINFO_LOCATION
+
 /* Certain applications(Steam) complain if we report an outdated driver version. In general,
  * reporting a driver version is moot because we are not the Windows driver, and we have different
  * bugs, features, etc.
@@ -2957,12 +3024,21 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
          *
          * We don't want to enable this on all cards, as it adds an extra instruction per texcoord used. This
          * makes the shader slower and eats instruction slots which should be available to the d3d app.
+         *
+         * ATI Radeon HD 2xxx cards on MacOS have the issue. Instead of checking for the buggy cards blacklist
+         * all radeon cards on Macs but whitelist the good ones, that way we're prepared for the future. If
+         * this workaround is activated on cards that do not need it it won't break things, just affect
+         * performance negatively
          */
-        if(gl_info->gl_vendor == VENDOR_INTEL) {
+        if(gl_info->gl_vendor == VENDOR_INTEL ||
+           (gl_info->gl_vendor == VENDOR_ATI && gl_info->gl_card != CARD_ATI_RADEON_X1600)) {
             TRACE("Enabling vertex texture coord fixes in vertex shaders\n");
             gl_info->set_texcoord_w = TRUE;
         }
     }
+
+    /* Find out if PBOs work as they are supposed to */
+    test_pbo_functionality(gl_info);
 
     /* Fixup the driver version */
     for(i = 0; i < (sizeof(driver_version_table) / sizeof(driver_version_table[0])); i++) {

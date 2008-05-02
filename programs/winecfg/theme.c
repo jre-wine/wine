@@ -543,7 +543,7 @@ static void set_color_from_theme(WCHAR *keyName, COLORREF color)
 
     for (i=0; i<sizeof(metrics)/sizeof(metrics[0]); i++)
     {
-        if (strcmp(metrics[i].color_reg, keyNameA)==0)
+        if (lstrcmpiA(metrics[i].color_reg, keyNameA)==0)
         {
             metrics[i].color = color;
             save_sys_color(i, color);
@@ -585,7 +585,7 @@ static void do_parse_theme(WCHAR *file)
 
         sscanf(keyNameValueA, "%d %d %d", &red, &green, &blue);
 
-        color = RGB((BYTE)red, (BYTE)blue, (BYTE)green);
+        color = RGB((BYTE)red, (BYTE)green, (BYTE)blue);
 
         HeapFree(GetProcessHeap(), 0, keyNameValueA);
 

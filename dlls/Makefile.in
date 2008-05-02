@@ -38,6 +38,7 @@ BASEDIRS = \
 	credui \
 	crtdll \
 	crypt32 \
+	cryptdlg \
 	cryptdll \
 	cryptnet \
 	ctapi32 \
@@ -48,6 +49,18 @@ BASEDIRS = \
 	d3dim \
 	d3drm \
 	d3dx8 \
+	d3dx9_24 \
+	d3dx9_25 \
+	d3dx9_26 \
+	d3dx9_27 \
+	d3dx9_28 \
+	d3dx9_29 \
+	d3dx9_30 \
+	d3dx9_31 \
+	d3dx9_32 \
+	d3dx9_33 \
+	d3dx9_34 \
+	d3dx9_35 \
 	d3dx9_36 \
 	d3dxof \
 	dbghelp \
@@ -74,6 +87,7 @@ BASEDIRS = \
 	dpnhpast \
 	dpnlobby \
 	dsound \
+	dssenh \
 	dswave \
 	dwmapi \
 	dxdiagn \
@@ -81,6 +95,7 @@ BASEDIRS = \
 	gdi32 \
 	gdiplus \
 	gphoto2.ds \
+	gpkcsp \
 	hal \
 	hhctrl.ocx \
 	hid \
@@ -94,9 +109,11 @@ BASEDIRS = \
 	imm32 \
 	inetcomm \
 	infosoft \
+	initpki \
 	inkobj \
 	inseng \
 	iphlpapi \
+	itircl \
 	itss \
 	kernel32 \
 	localspl \
@@ -131,6 +148,7 @@ BASEDIRS = \
 	msisys.ocx \
 	msnet32 \
 	msrle32 \
+	mssip32 \
 	msvcirt \
 	msvcr71 \
 	msvcrt \
@@ -166,6 +184,7 @@ BASEDIRS = \
 	psapi \
 	pstorec \
 	qcap \
+	qedit \
 	qmgr \
 	qmgrprxy \
 	quartz \
@@ -178,6 +197,7 @@ BASEDIRS = \
 	rsabase \
 	rsaenh \
 	sane.ds \
+	sccbase \
 	schannel \
 	secur32 \
 	security \
@@ -191,7 +211,10 @@ BASEDIRS = \
 	shell32 \
 	shfolder \
 	shlwapi \
+	slbcsp \
+	slc \
 	snmpapi \
+	softpub \
 	spoolss \
 	stdole2.tlb \
 	stdole32.tlb \
@@ -304,6 +327,8 @@ TESTSUBDIRS = \
 	opengl32/tests \
 	pdh/tests \
 	psapi/tests \
+	qedit/tests \
+	qmgr/tests \
 	quartz/tests \
 	riched20/tests \
 	riched32/tests \
@@ -603,6 +628,7 @@ IMPORT_LIBS = \
 	shell32/libshell32.$(IMPLIBEXT) \
 	shfolder/libshfolder.$(IMPLIBEXT) \
 	shlwapi/libshlwapi.$(IMPLIBEXT) \
+	slc/libslc.$(IMPLIBEXT) \
 	snmpapi/libsnmpapi.$(IMPLIBEXT) \
 	spoolss/libspoolss.$(IMPLIBEXT) \
 	sti/libsti.$(IMPLIBEXT) \
@@ -943,6 +969,9 @@ shfolder/libshfolder.$(IMPLIBEXT): shfolder/shfolder.spec $(WINEBUILD)
 
 shlwapi/libshlwapi.$(IMPLIBEXT): shlwapi/shlwapi.spec $(WINEBUILD)
 	@cd shlwapi && $(MAKE) libshlwapi.$(IMPLIBEXT)
+
+slc/libslc.$(IMPLIBEXT): slc/slc.spec $(WINEBUILD)
+	@cd slc && $(MAKE) libslc.$(IMPLIBEXT)
 
 snmpapi/libsnmpapi.$(IMPLIBEXT): snmpapi/snmpapi.spec $(WINEBUILD)
 	@cd snmpapi && $(MAKE) libsnmpapi.$(IMPLIBEXT)

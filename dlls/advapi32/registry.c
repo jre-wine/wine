@@ -1065,7 +1065,7 @@ LSTATUS WINAPI RegSetValueExA( HKEY hkey, LPCSTR name, DWORD reserved, DWORD typ
  *  lpSubKey [I] Name of a subkey of hKey.
  *  dwType   [I] Type of information to store.
  *  lpData   [I] String that contains the data to set for the default value.
- *  cbData   [I] Size of lpData.
+ *  cbData   [I] Ignored.
  *
  * RETURNS
  *  Success: ERROR_SUCCESS
@@ -1078,7 +1078,7 @@ LSTATUS WINAPI RegSetValueW( HKEY hkey, LPCWSTR name, DWORD type, LPCWSTR data, 
 
     TRACE("(%p,%s,%d,%s,%d)\n", hkey, debugstr_w(name), type, debugstr_w(data), count );
 
-    if (type != REG_SZ) return ERROR_INVALID_PARAMETER;
+    if (type != REG_SZ || !data) return ERROR_INVALID_PARAMETER;
 
     if (name && name[0])  /* need to create the subkey */
     {
@@ -1104,7 +1104,7 @@ LSTATUS WINAPI RegSetValueA( HKEY hkey, LPCSTR name, DWORD type, LPCSTR data, DW
 
     TRACE("(%p,%s,%d,%s,%d)\n", hkey, debugstr_a(name), type, debugstr_a(data), count );
 
-    if (type != REG_SZ) return ERROR_INVALID_PARAMETER;
+    if (type != REG_SZ || !data) return ERROR_INVALID_PARAMETER;
 
     if (name && name[0])  /* need to create the subkey */
     {
@@ -2238,7 +2238,7 @@ LSTATUS WINAPI RegGetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInform
                                LPDWORD lpcbSecurityDescriptor )
 {
     TRACE("(%p,%d,%p,%d)\n",hkey,SecurityInformation,pSecurityDescriptor,
-          lpcbSecurityDescriptor?*lpcbSecurityDescriptor:0);
+          *lpcbSecurityDescriptor);
 
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 

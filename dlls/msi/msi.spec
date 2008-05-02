@@ -207,8 +207,8 @@
 211 stdcall MsiSourceListAddSourceW(wstr wstr long wstr)
 212 stub MsiSourceListForceResolutionA
 213 stub MsiSourceListForceResolutionW
-214 stub MsiIsProductElevatedA
-215 stub MsiIsProductElevatedW
+214 stdcall MsiIsProductElevatedA(str ptr)
+215 stdcall MsiIsProductElevatedW(wstr ptr)
 216 stdcall MsiGetShortcutTargetA(str ptr ptr ptr)
 217 stdcall MsiGetShortcutTargetW(wstr ptr ptr ptr)
 218 stdcall MsiGetFileHashA(str long ptr)
@@ -257,10 +257,10 @@
 261 stub MsiSourceListForceResolutionExA
 262 stub MsiSourceListForceResolutionExW
 263 stdcall MsiSourceListEnumSourcesA(str str long long long ptr ptr)
-264 stub MsiSourceListEnumSourcesW
+264 stdcall MsiSourceListEnumSourcesW(wstr wstr long long long ptr ptr)
 265 stdcall MsiSourceListGetInfoA(str str long long str ptr ptr)
 266 stdcall MsiSourceListGetInfoW(wstr wstr long long wstr ptr ptr)
-267 stub MsiSourceListSetInfoA
+267 stdcall MsiSourceListSetInfoA(str str long long str str)
 268 stdcall MsiSourceListSetInfoW(wstr wstr long long wstr wstr)
 269 stub MsiEnumPatchesExA
 270 stub MsiEnumPatchesExW

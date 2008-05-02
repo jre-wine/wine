@@ -210,31 +210,14 @@ static const struct object_creation_info object_creation[] =
 
 static void init_session(BOOL init)
 {
-    IInternetSession *session;
     int i;
 
-    CoInternetGetSession(0, &session, 0);
-
     for(i=0; i < sizeof(object_creation)/sizeof(object_creation[0]); i++) {
-        if(object_creation[i].protocol) {
-            if(init)
-            {
-                IInternetSession_RegisterNameSpace(session, object_creation[i].cf,
-                        object_creation[i].clsid, object_creation[i].protocol, 0, NULL, 0);
-                /* make sure that the AddRef on the class factory doesn't keep us loaded */
-                URLMON_UnlockModule();
-            }
-            else
-            {
-                /* make sure that the Release on the class factory doesn't unload us */
-                URLMON_LockModule();
-                IInternetSession_UnregisterNameSpace(session, object_creation[i].cf,
-                        object_creation[i].protocol);
-            }
-        }
-    }
 
-    IInternetSession_Release(session);
+        if(object_creation[i].protocol)
+            register_urlmon_namespace(object_creation[i].cf, object_creation[i].clsid,
+                                      object_creation[i].protocol, init);
+    }
 }
 
 /*******************************************************************************
@@ -398,7 +381,6 @@ void WINAPI ReleaseBindInfo(BINDINFO* pbindinfo)
     if(offsetof(BINDINFO, szExtraInfo) < size)
         CoTaskMemFree(pbindinfo->szCustomVerb);
 
-
     if(pbindinfo->pUnk && offsetof(BINDINFO, pUnk) < size)
         IUnknown_Release(pbindinfo->pUnk);
 
@@ -420,6 +402,13 @@ HRESULT WINAPI CopyStgMedium(const STGMEDIUM *src, STGMEDIUM *dst)
 
     switch(dst->tymed) {
     case TYMED_NULL:
+        break;
+    case TYMED_FILE:
+        if(src->u.lpszFileName && !src->pUnkForRelease) {
+            DWORD size = (strlenW(src->u.lpszFileName)+1)*sizeof(WCHAR);
+            dst->u.lpszFileName = CoTaskMemAlloc(size);
+            memcpy(dst->u.lpszFileName, src->u.lpszFileName, size);
+        }
         break;
     case TYMED_ISTREAM:
         if(dst->u.pstm)
@@ -461,6 +450,12 @@ static BOOL text_html_filter(const BYTE *b, DWORD size)
     }
 
     return FALSE;
+}
+
+static BOOL audio_basic_filter(const BYTE *b, DWORD size)
+{
+    return size > 4
+        && b[0] == '.' && b[1] == 's' && b[2] == 'n' && b[3] == 'd';
 }
 
 static BOOL audio_wav_filter(const BYTE *b, DWORD size)
@@ -607,6 +602,7 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
 
         static const WCHAR wszTextHtml[] = {'t','e','x','t','/','h','t','m','l',0};
         static const WCHAR wszTextRichtext[] = {'t','e','x','t','/','r','i','c','h','t','e','x','t',0};
+        static const WCHAR wszAudioBasic[] = {'a','u','d','i','o','/','b','a','s','i','c',0};
         static const WCHAR wszAudioWav[] = {'a','u','d','i','o','/','w','a','v',0};
         static const WCHAR wszImageGif[] = {'i','m','a','g','e','/','g','i','f',0};
         static const WCHAR wszImagePjpeg[] = {'i','m','a','g','e','/','p','j','p','e','g',0};
@@ -638,7 +634,7 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
             {wszTextHtml,       text_html_filter},
             {wszTextRichtext,   text_richtext_filter},
          /* {wszAudioXAiff,     audio_xaiff_filter}, */
-         /* {wszAudioBasic,     audio_basic_filter}, */
+            {wszAudioBasic,     audio_basic_filter},
             {wszAudioWav,       audio_wav_filter},
             {wszImageGif,       image_gif_filter},
             {wszImagePjpeg,     image_pjpeg_filter},

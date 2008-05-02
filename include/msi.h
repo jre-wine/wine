@@ -348,7 +348,7 @@ static const WCHAR INSTALLPROPERTY_MOREINFOURLW[] = {'M','o','r','e','I','n','f'
 /* Source List Info */
 #define INSTALLPROPERTY_LASTUSEDSOURCEA "LastUsedSource"
 static const WCHAR INSTALLPROPERTY_LASTUSEDSOURCEW[] = {'L','a','s','t','U','s','e','d','S','o','u','r','c','e',0};
-#define INSTALLPROPERTY_LASTUSEDSOURCE WINELIB_NAME_AW(INSTALLPROPERTY_LASTUSEDSOURCEW)
+#define INSTALLPROPERTY_LASTUSEDSOURCE WINELIB_NAME_AW(INSTALLPROPERTY_LASTUSEDSOURCE)
 
 #define INSTALLPROPERTY_LASTUSEDTYPEA "LastUsedType"
 static const WCHAR INSTALLPROPERTY_LASTUSEDTYPEW[] = {'L','a','s','t','U','s','e','d','T','y','p','e',0};
@@ -537,6 +537,10 @@ UINT WINAPI MsiSourceListAddSourceA(LPCSTR, LPCSTR, DWORD, LPCSTR);
 UINT WINAPI MsiSourceListAddSourceW(LPCWSTR, LPCWSTR, DWORD, LPCWSTR);
 #define     MsiSourceListAddSource WINELIB_NAME_AW(MsiSourceListAddSource)
 
+UINT WINAPI MsiSourceListEnumSourcesA(LPCSTR, LPCSTR, MSIINSTALLCONTEXT, DWORD, DWORD, LPSTR, LPDWORD);
+UINT WINAPI MsiSourceListEnumSourcesW(LPCWSTR, LPCWSTR, MSIINSTALLCONTEXT, DWORD, DWORD, LPWSTR, LPDWORD);
+#define     MsiSourceListEnumSources WINELIB_NAME_AW(MsiSourceListEnumSources)
+
 UINT WINAPI MsiSourceListClearAllA(LPCSTR, LPCSTR, DWORD);
 UINT WINAPI MsiSourceListClearAllW(LPCWSTR, LPCWSTR, DWORD);
 #define     MsiSourceListClearAll WINELIB_NAME_AW(MsiSourceListClearAll)
@@ -568,6 +572,10 @@ UINT WINAPI MsiGetFileHashW(LPCWSTR, DWORD, PMSIFILEHASHINFO);
 UINT WINAPI MsiAdvertiseScriptA(LPCSTR, DWORD, PHKEY, BOOL);
 UINT WINAPI MsiAdvertiseScriptW(LPCWSTR, DWORD, PHKEY, BOOL);
 #define     MsiAdvertiseScript WINELIB_NAME_AW(MsiAdvertiseScript)
+
+UINT WINAPI MsiIsProductElevatedA(LPCSTR, BOOL *);
+UINT WINAPI MsiIsProductElevatedW(LPCWSTR, BOOL *);
+#define     MsiIsProductElevated WINELIB_NAME_AW(MsiIsProductElevated)
 
 /* Non Unicode */
 UINT WINAPI MsiCloseHandle(MSIHANDLE);

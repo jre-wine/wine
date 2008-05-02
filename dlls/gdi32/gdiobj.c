@@ -944,30 +944,6 @@ HGDIOBJ WINAPI GetStockObject( INT obj )
 
 
 /***********************************************************************
- *           GetObject    (GDI.82)
- */
-INT16 WINAPI GetObject16( HGDIOBJ16 handle16, INT16 count, LPVOID buffer )
-{
-    GDIOBJHDR * ptr;
-    HGDIOBJ handle = HGDIOBJ_32( handle16 );
-    INT16 result = 0;
-
-    TRACE("%p %d %p\n", handle, count, buffer );
-    if (!count) return 0;
-
-    if (!(ptr = GDI_GetObjPtr( handle, MAGIC_DONTCARE ))) return 0;
-
-    if (ptr->funcs && ptr->funcs->pGetObject16)
-        result = ptr->funcs->pGetObject16( handle, ptr, count, buffer );
-    else
-        SetLastError( ERROR_INVALID_HANDLE );
-
-    GDI_ReleaseObj( handle );
-    return result;
-}
-
-
-/***********************************************************************
  *           GetObjectA    (GDI32.@)
  */
 INT WINAPI GetObjectA( HGDIOBJ handle, INT count, LPVOID buffer )
@@ -1257,26 +1233,6 @@ INT WINAPI EnumObjects( HDC hdc, INT nObjType,
 
 
 /***********************************************************************
- *           IsGDIObject    (GDI.462)
- *
- * returns type of object if valid (W95 system programming secrets p. 264-5)
- */
-BOOL16 WINAPI IsGDIObject16( HGDIOBJ16 handle16 )
-{
-    UINT16 magic = 0;
-    HGDIOBJ handle = HGDIOBJ_32( handle16 );
-
-    GDIOBJHDR *object = GDI_GetObjPtr( handle, MAGIC_DONTCARE );
-    if (object)
-    {
-        magic = GDIMAGIC(object->wMagic) - FIRST_MAGIC + 1;
-        GDI_ReleaseObj( handle );
-    }
-    return magic;
-}
-
-
-/***********************************************************************
  *           SetObjectOwner    (GDI32.@)
  */
 void WINAPI SetObjectOwner( HGDIOBJ handle, HANDLE owner )
@@ -1333,80 +1289,6 @@ DWORD WINAPI GdiGetBatchLimit(void)
 DWORD WINAPI GdiSetBatchLimit( DWORD limit )
 {
     return 1; /* FIXME */
-}
-
-
-/***********************************************************************
- *           GdiSeeGdiDo   (GDI.452)
- */
-DWORD WINAPI GdiSeeGdiDo16( WORD wReqType, WORD wParam1, WORD wParam2,
-                          WORD wParam3 )
-{
-    DWORD ret = ~0U;
-
-    switch (wReqType)
-    {
-    case 0x0001:  /* LocalAlloc */
-        WARN("LocalAlloc16(%x, %x): ignoring\n", wParam1, wParam3);
-        ret = 0;
-        break;
-    case 0x0002:  /* LocalFree */
-        WARN("LocalFree16(%x): ignoring\n", wParam1);
-        ret = 0;
-        break;
-    case 0x0003:  /* LocalCompact */
-        WARN("LocalCompact16(%x): ignoring\n", wParam3);
-        ret = 65000; /* lie about the amount of free space */
-        break;
-    case 0x0103:  /* LocalHeap */
-        WARN("LocalHeap16(): ignoring\n");
-        break;
-    default:
-        WARN("(wReqType=%04x): Unknown\n", wReqType);
-        break;
-    }
-    return ret;
-}
-
-/***********************************************************************
- *           GdiSignalProc32     (GDI.610)
- */
-WORD WINAPI GdiSignalProc( UINT uCode, DWORD dwThreadOrProcessID,
-                           DWORD dwFlags, HMODULE16 hModule )
-{
-    return 0;
-}
-
-/***********************************************************************
- *           GdiInit2     (GDI.403)
- *
- * See "Undocumented Windows"
- *
- * PARAMS
- *   h1 [I] GDI object
- *   h2 [I] global data
- */
-HANDLE16 WINAPI GdiInit216( HANDLE16 h1, HANDLE16 h2 )
-{
-    FIXME("(%04x, %04x), stub.\n", h1, h2);
-    if (h2 == 0xffff)
-	return 0xffff; /* undefined return value */
-    return h1; /* FIXME: should be the memory handle of h1 */
-}
-
-/***********************************************************************
- *           FinalGdiInit     (GDI.405)
- */
-void WINAPI FinalGdiInit16( HBRUSH16 hPattern /* [in] fill pattern of desktop */ )
-{
-}
-
-/***********************************************************************
- *           GdiFreeResources   (GDI.609)
- */
-WORD WINAPI GdiFreeResources16( DWORD reserve )
-{
-    return 90; /* lie about it, it shouldn't matter */
 }
 
 

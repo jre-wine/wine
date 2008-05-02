@@ -65,6 +65,7 @@ struct icon
     UINT           id;       /* the unique id given by the app */
     UINT           callback_message;
     BOOL           hidden;   /* icon display state */
+    WCHAR          tiptext[128]; /* Tooltip text. If empty => tooltip disabled */
 };
 
 static struct tray tray;
@@ -76,83 +77,8 @@ static BOOL hide_systray;
 /* space around icon (forces icon to center of KDE systray area) */
 #define ICON_BORDER  4
 
-static LRESULT WINAPI adaptor_wndproc(HWND window, UINT msg,
-                                      WPARAM wparam, LPARAM lparam)
-{
-    struct icon *icon = NULL;
-    BOOL ret;
 
-    WINE_TRACE("hwnd=%p, msg=0x%x\n", window, msg);
-
-    /* set the icon data for the window from the data passed into CreateWindow */
-    if (msg == WM_NCCREATE)
-        SetWindowLongPtrW(window, GWLP_USERDATA, (LPARAM)((const CREATESTRUCT *)lparam)->lpCreateParams);
-
-    icon = (struct icon *) GetWindowLongPtr(window, GWLP_USERDATA);
-
-    switch (msg)
-    {
-        case WM_PAINT:
-        {
-            RECT rc;
-            int top;
-            PAINTSTRUCT  ps;
-            HDC          hdc;
-
-            WINE_TRACE("painting\n");
-
-            hdc = BeginPaint(window, &ps);
-            GetClientRect(window, &rc);
-
-            /* calculate top so we can deal with arbitrary sized trays */
-            top = ((rc.bottom-rc.top)/2) - ((ICON_SIZE)/2);
-
-            DrawIconEx(hdc, (ICON_BORDER/2), top, icon->image,
-                       ICON_SIZE, ICON_SIZE, 0, 0, DI_DEFAULTSIZE|DI_NORMAL);
-
-            EndPaint(window, &ps);
-            break;
-        }
-
-        case WM_MOUSEMOVE:
-        case WM_LBUTTONDOWN:
-        case WM_LBUTTONUP:
-        case WM_RBUTTONDOWN:
-        case WM_RBUTTONUP:
-        case WM_MBUTTONDOWN:
-        case WM_MBUTTONUP:
-        case WM_LBUTTONDBLCLK:
-        case WM_RBUTTONDBLCLK:
-        case WM_MBUTTONDBLCLK:
-            /* notify the owner hwnd of the message */
-            WINE_TRACE("relaying 0x%x\n", msg);
-            ret = PostMessage(icon->owner, icon->callback_message, (WPARAM) icon->id, (LPARAM) msg);
-            if (!ret && (GetLastError() == ERROR_INVALID_HANDLE))
-            {
-                WINE_WARN("application window was destroyed without removing "
-                          "notification icon, removing automatically\n");
-                DestroyWindow(window);
-            }
-            break;
-
-        case WM_NCDESTROY:
-            SetWindowLongPtr(window, GWLP_USERDATA, 0);
-
-            list_remove(&icon->entry);
-            DestroyIcon(icon->image);
-            HeapFree(GetProcessHeap(), 0, icon);
-            break;
-
-        default:
-            return DefWindowProc(window, msg, wparam, lparam);
-    }
-
-    return 0;
-}
-
-
-/* listener code */
-
+/* Retrieves icon record by owner window and ID */
 static struct icon *get_icon(HWND owner, UINT id)
 {
     struct icon *this;
@@ -164,40 +90,81 @@ static struct icon *get_icon(HWND owner, UINT id)
     return NULL;
 }
 
-static void set_tooltip(struct icon *icon, WCHAR *szTip, BOOL modify)
+/* Creates tooltip window for icon. */
+static void create_tooltip(struct icon *icon)
 {
     TTTOOLINFOW ti;
+    static BOOL tooltips_initialized = FALSE;
 
+    /* Register tooltip classes if this is the first icon */
+    if (!tooltips_initialized)
+    {
+        INITCOMMONCONTROLSEX init_tooltip;
+
+        init_tooltip.dwSize = sizeof(INITCOMMONCONTROLSEX);
+        init_tooltip.dwICC = ICC_TAB_CLASSES;
+
+        InitCommonControlsEx(&init_tooltip);
+        tooltips_initialized = TRUE;
+    }
+
+    icon->tooltip = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
+                                   WS_POPUP | TTS_ALWAYSTIP,
+                                   CW_USEDEFAULT, CW_USEDEFAULT,
+                                   CW_USEDEFAULT, CW_USEDEFAULT,
+                                   icon->window, NULL, NULL, NULL);
+
+    ZeroMemory(&ti, sizeof(ti));
     ti.cbSize = sizeof(TTTOOLINFOW);
     ti.uFlags = TTF_SUBCLASS | TTF_IDISHWND;
     ti.hwnd = icon->window;
-    ti.hinst = 0;
     ti.uId = (UINT_PTR)icon->window;
-    ti.lpszText = szTip;
-    ti.lParam = 0;
-    ti.lpReserved = NULL;
-
-    if (modify)
-        SendMessageW(icon->tooltip, TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti);
-    else
-        SendMessageW(icon->tooltip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
+    ti.lpszText = icon->tiptext;
+    SendMessageW(icon->tooltip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
 }
 
+/* Synchronize tooltip text with tooltip window */
+static void update_tooltip_text(struct icon *icon)
+{
+    TTTOOLINFOW ti;
+
+    ZeroMemory(&ti, sizeof(ti));
+    ti.cbSize = sizeof(TTTOOLINFOW);
+    ti.uFlags = TTF_SUBCLASS | TTF_IDISHWND;
+    ti.hwnd = icon->window;
+    ti.uId = (UINT_PTR)icon->window;
+    ti.lpszText = icon->tiptext;
+
+    SendMessageW(icon->tooltip, TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti);
+}
+
+/*
+ * Sets visibility status of tray icon. Creates/deletes icon window.
+ * Does not create/delete icon record.
+ *
+ * The purpose is similar to ShowWindow function.
+ */
 static BOOL display_icon(struct icon *icon, BOOL hide)
 {
     HMODULE x11drv = GetModuleHandleA("winex11.drv");
     RECT rect;
     static const WCHAR adaptor_windowname[] = /* Wine System Tray Adaptor */ {'W','i','n','e',' ','S','y','s','t','e','m',' ','T','r','a','y',' ','A','d','a','p','t','o','r',0};
-    static BOOL tooltps_initialized = FALSE;
 
     WINE_TRACE("id=0x%x, hwnd=%p, hide=%d\n", icon->id, icon->owner, hide);
 
-    if (icon->hidden == hide || (!icon->hidden) == (!hide)) return TRUE;
+    /* not a startup case and nothing to do */
+    if (icon->window && !icon->hidden == !hide)
+        return TRUE;
+
     icon->hidden = hide;
     if (hide)
     {
-        DestroyWindow(icon->window);
-        DestroyWindow(icon->tooltip);
+        /* At startup icon->hidden == FALSE and icon->window == NULL */
+        if (icon->window)
+        {
+            DestroyWindow(icon->window);
+            DestroyWindow(icon->tooltip);
+        }
         return TRUE;
     }
 
@@ -224,29 +191,13 @@ static BOOL display_icon(struct icon *icon, BOOL hide)
     if (!hide_systray)
         ShowWindow(icon->window, SW_SHOWNA);
 
-    /* create icon tooltip */
+    create_tooltip(icon);
 
-    /* Register tooltip classes if this is the first icon */
-    if (!tooltps_initialized)
-    {
-        INITCOMMONCONTROLSEX init_tooltip;
-
-        init_tooltip.dwSize = sizeof(INITCOMMONCONTROLSEX);
-        init_tooltip.dwICC = ICC_TAB_CLASSES;
-
-        InitCommonControlsEx(&init_tooltip);
-        tooltps_initialized = TRUE;
-    }
-
-    icon->tooltip = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
-                                   WS_POPUP | TTS_ALWAYSTIP,
-                                   CW_USEDEFAULT, CW_USEDEFAULT,
-                                   CW_USEDEFAULT, CW_USEDEFAULT,
-                                   icon->window, NULL, NULL, NULL);
     return TRUE;
 }
 
-static BOOL modify_icon(NOTIFYICONDATAW *nid, BOOL modify_tooltip)
+/* Modifies an existing icon record */
+static BOOL modify_icon(NOTIFYICONDATAW *nid)
 {
     struct icon    *icon;
 
@@ -260,14 +211,11 @@ static BOOL modify_icon(NOTIFYICONDATAW *nid, BOOL modify_tooltip)
         return FALSE;
     }
 
-    if (nid->uFlags & NIF_STATE)
-    {
-        if (nid->dwStateMask & NIS_HIDDEN)
-            display_icon(icon, !!(nid->dwState & NIS_HIDDEN));
-        else
-            display_icon(icon, FALSE);
-    }
-    else
+    if ((nid->uFlags & NIF_STATE) && (nid->dwStateMask & NIS_HIDDEN))
+        display_icon(icon, !!(nid->dwState & NIS_HIDDEN));
+
+    /* startup case*/
+    if ((!icon->window) && (!icon->hidden))
         display_icon(icon, FALSE);
 
     if (nid->uFlags & NIF_ICON)
@@ -285,7 +233,9 @@ static BOOL modify_icon(NOTIFYICONDATAW *nid, BOOL modify_tooltip)
     }
     if (nid->uFlags & NIF_TIP)
     {
-        set_tooltip(icon, nid->szTip, modify_tooltip);
+        lstrcpynW(icon->tiptext, nid->szTip, sizeof(icon->tiptext)/sizeof(WCHAR));
+        if (!icon->hidden)
+            update_tooltip_text(icon);
     }
     if (nid->uFlags & NIF_INFO && nid->cbSize >= NOTIFYICONDATAA_V2_SIZE)
     {
@@ -294,6 +244,7 @@ static BOOL modify_icon(NOTIFYICONDATAW *nid, BOOL modify_tooltip)
     return TRUE;
 }
 
+/* Adds a new icon record to the list */
 static BOOL add_icon(NOTIFYICONDATAW *nid)
 {
     struct icon  *icon;
@@ -312,31 +263,45 @@ static BOOL add_icon(NOTIFYICONDATAW *nid)
         return FALSE;
     }
 
+    ZeroMemory(icon, sizeof(struct icon));
     icon->id     = nid->uID;
     icon->owner  = nid->hWnd;
-    icon->image  = NULL;
-    icon->window = NULL;
-    icon->hidden = TRUE;
 
     list_add_tail(&tray.icons, &icon->entry);
 
-    return modify_icon(nid, FALSE);
+    /*
+     * Both icon->window and icon->hidden are zero. modify_icon function
+     * will treat this case as a startup, i.e. icon window will be created if
+     * NIS_HIDDEN flag is not set.
+     */
+
+    return modify_icon(nid);
 }
 
+/* Deletes tray icon window and icon record */
+static BOOL delete_icon_directly(struct icon *icon)
+{
+    display_icon(icon, TRUE);
+    list_remove(&icon->entry);
+    DestroyIcon(icon->image);
+    HeapFree(GetProcessHeap(), 0, icon);
+    return TRUE;
+}
+
+/* Deletes tray icon window and icon structure */
 static BOOL delete_icon(const NOTIFYICONDATAW *nid)
 {
     struct icon *icon = get_icon(nid->hWnd, nid->uID);
 
     WINE_TRACE("id=0x%x, hwnd=%p\n", nid->uID, nid->hWnd);
-   
+
     if (!icon)
     {
         WINE_WARN("invalid tray icon ID specified: %u\n", nid->uID);
         return FALSE;
     }
 
-    display_icon(icon, TRUE);
-    return TRUE;
+    return delete_icon_directly(icon);
 }
 
 static BOOL handle_incoming(HWND hwndSource, COPYDATASTRUCT *cds)
@@ -399,7 +364,7 @@ static BOOL handle_incoming(HWND hwndSource, COPYDATASTRUCT *cds)
         ret = delete_icon(&nid);
         break;
     case NIM_MODIFY:
-        ret = modify_icon(&nid, TRUE);
+        ret = modify_icon(&nid);
         break;
     default:
         WINE_FIXME("unhandled tray message: %ld\n", cds->dwData);
@@ -421,6 +386,76 @@ static LRESULT WINAPI listener_wndproc(HWND window, UINT msg,
         return handle_incoming((HWND)wparam, (COPYDATASTRUCT *)lparam);
 
     return DefWindowProc(window, msg, wparam, lparam);
+}
+
+static LRESULT WINAPI adaptor_wndproc(HWND window, UINT msg,
+                                      WPARAM wparam, LPARAM lparam)
+{
+    struct icon *icon = NULL;
+    BOOL ret;
+
+    WINE_TRACE("hwnd=%p, msg=0x%x\n", window, msg);
+
+    /* set the icon data for the window from the data passed into CreateWindow */
+    if (msg == WM_NCCREATE)
+        SetWindowLongPtrW(window, GWLP_USERDATA, (LPARAM)((const CREATESTRUCT *)lparam)->lpCreateParams);
+
+    icon = (struct icon *) GetWindowLongPtr(window, GWLP_USERDATA);
+
+    switch (msg)
+    {
+        case WM_PAINT:
+        {
+            RECT rc;
+            int top;
+            PAINTSTRUCT  ps;
+            HDC          hdc;
+
+            WINE_TRACE("painting\n");
+
+            hdc = BeginPaint(window, &ps);
+            GetClientRect(window, &rc);
+
+            /* calculate top so we can deal with arbitrary sized trays */
+            top = ((rc.bottom-rc.top)/2) - ((ICON_SIZE)/2);
+
+            DrawIconEx(hdc, (ICON_BORDER/2), top, icon->image,
+                       ICON_SIZE, ICON_SIZE, 0, 0, DI_DEFAULTSIZE|DI_NORMAL);
+
+            EndPaint(window, &ps);
+            break;
+        }
+
+        case WM_MOUSEMOVE:
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONUP:
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONUP:
+        case WM_LBUTTONDBLCLK:
+        case WM_RBUTTONDBLCLK:
+        case WM_MBUTTONDBLCLK:
+            /* notify the owner hwnd of the message */
+            WINE_TRACE("relaying 0x%x\n", msg);
+            ret = PostMessage(icon->owner, icon->callback_message, (WPARAM) icon->id, (LPARAM) msg);
+            if (!ret && (GetLastError() == ERROR_INVALID_WINDOW_HANDLE))
+            {
+                WINE_WARN("application window was destroyed without removing "
+                          "notification icon, removing automatically\n");
+                delete_icon_directly(icon);
+            }
+            break;
+
+        case WM_NCDESTROY:
+            SetWindowLongPtr(window, GWLP_USERDATA, 0);
+            break;
+
+        default:
+            return DefWindowProc(window, msg, wparam, lparam);
+    }
+
+    return 0;
 }
 
 

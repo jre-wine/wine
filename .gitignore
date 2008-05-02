@@ -389,8 +389,15 @@ dlls/psapi/tests/*.ok
 dlls/psapi/tests/psapi_crosstest.exe
 dlls/psapi/tests/testlist.c
 dlls/qcap/version.res
+dlls/qedit/tests/*.ok
+dlls/qedit/tests/qedit_crosstest.exe
+dlls/qedit/tests/testlist.c
 dlls/qmgr/qmgr_local.h
 dlls/qmgr/qmgr_local_i.c
+dlls/qmgr/rsrc.res
+dlls/qmgr/tests/*.ok
+dlls/qmgr/tests/qmgr_crosstest.exe
+dlls/qmgr/tests/testlist.c
 dlls/qmgrprxy/qmgrprxy.h
 dlls/qmgrprxy/qmgrprxy_i.c
 dlls/qmgrprxy/qmgrprxy_p.c
@@ -472,6 +479,7 @@ dlls/shlwapi/shlwapi.res
 dlls/shlwapi/tests/*.ok
 dlls/shlwapi/tests/shlwapi_crosstest.exe
 dlls/shlwapi/tests/testlist.c
+dlls/slc/libslc.def
 dlls/snmpapi/libsnmpapi.def
 dlls/snmpapi/tests/*.ok
 dlls/snmpapi/tests/snmpapi_crosstest.exe
@@ -626,6 +634,7 @@ include/oleidl.h
 include/optary.h
 include/propidl.h
 include/pstore.h
+include/qedit.h
 include/richole.h
 include/sensevts.h
 include/servprov.h
@@ -774,6 +783,8 @@ programs/winetest/oleaut32_test.exe
 programs/winetest/opengl32_test.exe
 programs/winetest/pdh_test.exe
 programs/winetest/psapi_test.exe
+programs/winetest/qedit_test.exe
+programs/winetest/qmgr_test.exe
 programs/winetest/quartz_test.exe
 programs/winetest/riched20_test.exe
 programs/winetest/riched32_test.exe

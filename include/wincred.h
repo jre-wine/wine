@@ -147,7 +147,9 @@ DECL_WINELIB_TYPE_AW(PCREDUI_INFO)
 #define CRED_TYPE_DOMAIN_PASSWORD                   2
 #define CRED_TYPE_DOMAIN_CERTIFICATE                3
 #define CRED_TYPE_DOMAIN_VISIBLE_PASSWORD           4
-#define CRED_TYPE_MAXIMUM                           5
+#define CRED_TYPE_GENERIC_CERTIFICATE               5
+#define CRED_TYPE_MAXIMUM                           6
+#define CRED_TYPE_MAXIMUM_EX                        (CRED_TYPE_MAXIMUM+1000)
 
 /* values for CREDENTIAL::Persist */
 #define CRED_PERSIST_NONE                           0
@@ -183,6 +185,7 @@ WINADVAPI BOOL  WINAPI CredEnumerateA(LPCSTR,DWORD,DWORD *,PCREDENTIALA **);
 WINADVAPI BOOL  WINAPI CredEnumerateW(LPCWSTR,DWORD,DWORD *,PCREDENTIALW **);
 #define                CredEnumerate WINELIB_NAME_AW(CredEnumerate)
 WINADVAPI VOID  WINAPI CredFree(PVOID);
+WINADVAPI BOOL  WINAPI CredGetSessionTypes(DWORD,LPDWORD);
 WINADVAPI BOOL  WINAPI CredReadA(LPCSTR,DWORD,DWORD,PCREDENTIALA *);
 WINADVAPI BOOL  WINAPI CredReadW(LPCWSTR,DWORD,DWORD,PCREDENTIALW *);
 #define                CredRead WINELIB_NAME_AW(CredRead)

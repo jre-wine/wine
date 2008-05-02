@@ -347,11 +347,11 @@ static VOID set_installer_properties(MSIPACKAGE *package)
     DWORD verval;
     WCHAR verstr[10], bufstr[20];
     HDC dc;
-    LPWSTR check;
     HKEY hkey;
-    LONG res;
+    LPWSTR username, companyname;
     SYSTEM_INFO sys_info;
     SYSTEMTIME systemtime;
+    LANGID langid;
 
     static const WCHAR cszbs[]={'\\',0};
     static const WCHAR CFF[] = 
@@ -420,9 +420,17 @@ static VOID set_installer_properties(MSIPACKAGE *package)
     static const WCHAR szScreenX[] = {'S','c','r','e','e','n','X',0};
     static const WCHAR szScreenY[] = {'S','c','r','e','e','n','Y',0};
     static const WCHAR szColorBits[] = {'C','o','l','o','r','B','i','t','s',0};
-    static const WCHAR szScreenFormat[] = {'%','d',0};
+    static const WCHAR szIntFormat[] = {'%','d',0};
     static const WCHAR szIntel[] = { 'I','n','t','e','l',0 };
     static const WCHAR szAllUsers[] = { 'A','L','L','U','S','E','R','S',0 };
+    static const WCHAR szUserInfo[] = {
+        'S','O','F','T','W','A','R','E','\\',
+        'M','i','c','r','o','s','o','f','t','\\',
+        'M','S',' ','S','e','t','u','p',' ','(','A','C','M','E',')','\\',
+        'U','s','e','r',' ','I','n','f','o',0
+    };
+    static const WCHAR szDefName[] = { 'D','e','f','N','a','m','e',0 };
+    static const WCHAR szDefCompany[] = { 'D','e','f','C','o','m','p','a','n','y',0 };
     static const WCHAR szCurrentVersion[] = {
         'S','O','F','T','W','A','R','E','\\',
         'M','i','c','r','o','s','o','f','t','\\',
@@ -437,6 +445,7 @@ static VOID set_installer_properties(MSIPACKAGE *package)
     static const WCHAR szCOMPANYNAME[] = {'C','O','M','P','A','N','Y','N','A','M','E',0};
     static const WCHAR szDate[] = {'D','a','t','e',0};
     static const WCHAR szTime[] = {'T','i','m','e',0};
+    static const WCHAR szUserLangID[] = {'U','s','e','r','L','a','n','g','u','a','g','e','I','D',0};
 
     /*
      * Other things that probably should be set:
@@ -523,7 +532,7 @@ static VOID set_installer_properties(MSIPACKAGE *package)
     /* Physical Memory is specified in MB. Using total amount. */
     msex.dwLength = sizeof(msex);
     GlobalMemoryStatusEx( &msex );
-    sprintfW( bufstr, szScreenFormat, (int)(msex.ullTotalPhys/1024/1024));
+    sprintfW( bufstr, szIntFormat, (int)(msex.ullTotalPhys/1024/1024));
     MSI_SetPropertyW(package, szPhysicalMemory, bufstr);
 
     SHGetFolderPathW(NULL,CSIDL_WINDOWS,NULL,0,pth);
@@ -570,42 +579,48 @@ static VOID set_installer_properties(MSIPACKAGE *package)
     GetSystemInfo( &sys_info );
     if (sys_info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
     {
-        sprintfW( bufstr, szScreenFormat, sys_info.wProcessorLevel );
+        sprintfW( bufstr, szIntFormat, sys_info.wProcessorLevel );
         MSI_SetPropertyW( package, szIntel, bufstr );
     }
 
     /* Screen properties. */
     dc = GetDC(0);
-    sprintfW( bufstr, szScreenFormat, GetDeviceCaps( dc, HORZRES ) );
+    sprintfW( bufstr, szIntFormat, GetDeviceCaps( dc, HORZRES ) );
     MSI_SetPropertyW( package, szScreenX, bufstr );
-    sprintfW( bufstr, szScreenFormat, GetDeviceCaps( dc, VERTRES ));
+    sprintfW( bufstr, szIntFormat, GetDeviceCaps( dc, VERTRES ));
     MSI_SetPropertyW( package, szScreenY, bufstr );
-    sprintfW( bufstr, szScreenFormat, GetDeviceCaps( dc, BITSPIXEL ));
+    sprintfW( bufstr, szIntFormat, GetDeviceCaps( dc, BITSPIXEL ));
     MSI_SetPropertyW( package, szColorBits, bufstr );
     ReleaseDC(0, dc);
 
     /* USERNAME and COMPANYNAME */
-    res = RegOpenKeyW( HKEY_LOCAL_MACHINE, szCurrentVersion, &hkey );
-    if (res != ERROR_SUCCESS)
-        return;
+    username = msi_dup_property( package, szUSERNAME );
+    companyname = msi_dup_property( package, szCOMPANYNAME );
 
-    check = msi_dup_property( package, szUSERNAME );
-    if (!check)
+    if ((!username || !companyname) &&
+        RegOpenKeyW( HKEY_CURRENT_USER, szUserInfo, &hkey ) == ERROR_SUCCESS)
     {
-        LPWSTR user = msi_reg_get_val_str( hkey, szRegisteredUser );
-        MSI_SetPropertyW( package, szUSERNAME, user );
-        msi_free( user );
+        if (!username &&
+            (username = msi_reg_get_val_str( hkey, szDefName )))
+            MSI_SetPropertyW( package, szUSERNAME, username );
+        if (!companyname &&
+            (companyname = msi_reg_get_val_str( hkey, szDefCompany )))
+            MSI_SetPropertyW( package, szCOMPANYNAME, companyname );
+        CloseHandle( hkey );
     }
-
-    msi_free( check );
-
-    check = msi_dup_property( package, szCOMPANYNAME );
-    if (!check)
+    if ((!username || !companyname) &&
+        RegOpenKeyW( HKEY_LOCAL_MACHINE, szCurrentVersion, &hkey ) == ERROR_SUCCESS)
     {
-        LPWSTR company = msi_reg_get_val_str( hkey, szRegisteredOrg );
-        MSI_SetPropertyW( package, szCOMPANYNAME, company );
-        msi_free( company );
+        if (!username &&
+            (username = msi_reg_get_val_str( hkey, szRegisteredUser )))
+            MSI_SetPropertyW( package, szUSERNAME, username );
+        if (!companyname &&
+            (companyname = msi_reg_get_val_str( hkey, szRegisteredOrg )))
+            MSI_SetPropertyW( package, szCOMPANYNAME, companyname );
+        CloseHandle( hkey );
     }
+    msi_free( username );
+    msi_free( companyname );
 
     if ( set_user_sid_prop( package ) != ERROR_SUCCESS)
         ERR("Failed to set the UserSID property\n");
@@ -628,8 +643,10 @@ static VOID set_installer_properties(MSIPACKAGE *package)
 
     set_msi_assembly_prop( package );
 
-    msi_free( check );
-    CloseHandle( hkey );
+    langid = GetUserDefaultLangID();
+    sprintfW(bufstr, szIntFormat, langid);
+
+    MSI_SetPropertyW( package, szUserLangID, bufstr );
 }
 
 static UINT msi_load_summary_properties( MSIPACKAGE *package )

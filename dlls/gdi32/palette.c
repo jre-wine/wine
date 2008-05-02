@@ -52,7 +52,6 @@ static BOOL PALETTE_DeleteObject( HGDIOBJ handle, void *obj );
 static const struct gdi_obj_funcs palette_funcs =
 {
     NULL,                     /* pSelectObject */
-    PALETTE_GetObject,        /* pGetObject16 */
     PALETTE_GetObject,        /* pGetObjectA */
     PALETTE_GetObject,        /* pGetObjectW */
     PALETTE_UnrealizeObject,  /* pUnrealizeObject */
@@ -301,9 +300,6 @@ UINT WINAPI GetPaletteEntries(
       }
       memcpy( entries, &palPtr->logpalette.palPalEntry[start],
 	      count * sizeof(PALETTEENTRY) );
-      for( numEntries = 0; numEntries < count ; numEntries++ )
-	   if (entries[numEntries].peFlags & 0xF0)
-	       entries[numEntries].peFlags = 0;
     }
 
     GDI_ReleaseObj( hpalette );

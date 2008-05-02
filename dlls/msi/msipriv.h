@@ -568,6 +568,7 @@ typedef struct tagMSISCRIPT
 #define MSI_BUILDNUMBER 4000
 
 #define GUID_SIZE 39
+#define SQUISH_GUID_SIZE 33
 
 #define MSIHANDLE_MAGIC 0x4d434923
 
@@ -748,12 +749,10 @@ extern UINT MSIREG_OpenUninstallKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_DeleteUninstallKey(LPCWSTR szProduct);
 extern UINT MSIREG_OpenUserProductsKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUserPatchesKey(LPCWSTR szPatch, HKEY* key, BOOL create);
-extern UINT MSIREG_OpenFeatures(HKEY* key);
 extern UINT MSIREG_OpenFeaturesKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUserDataFeaturesKey(LPCWSTR szProduct, HKEY *key, BOOL create);
 extern UINT MSIREG_OpenComponents(HKEY* key);
 extern UINT MSIREG_OpenUserComponentsKey(LPCWSTR szComponent, HKEY* key, BOOL create);
-extern UINT MSIREG_OpenComponentsKey(LPCWSTR szComponent, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenUserDataComponentKey(LPCWSTR szComponent, HKEY *key, BOOL create);
 extern UINT MSIREG_OpenProductsKey(LPCWSTR szProduct, HKEY* key, BOOL create);
 extern UINT MSIREG_OpenPatchesKey(LPCWSTR szPatch, HKEY* key, BOOL create);

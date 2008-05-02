@@ -27,10 +27,7 @@
 #include "win.h"
 #include "windef.h"
 #include "wingdi.h"
-#include "wownt32.h"
 #include "x11drv.h"
-#include "wine/winbase16.h"
-#include "wine/wingdi16.h"
 #include "wine/server.h"
 #include "wine/list.h"
 #include "wine/debug.h"
@@ -146,17 +143,22 @@ static void update_visible_region( struct dce *dce )
     if (dce->clip_rgn) CombineRgn( vis_rgn, vis_rgn, dce->clip_rgn,
                                    (flags & DCX_INTERSECTRGN) ? RGN_AND : RGN_DIFF );
 
+    escape.fbconfig_id = 0;
+    escape.gl_drawable = 0;
+    escape.pixmap = 0;
+
     if (top == dce->hwnd && ((data = X11DRV_get_win_data( dce->hwnd )) != NULL) &&
          IsIconic( dce->hwnd ) && data->icon_window)
     {
         escape.drawable = data->icon_window;
-        escape.fbconfig_id = 0;
-        escape.gl_drawable = 0;
-        escape.pixmap = 0;
+    }
+    else if (top == dce->hwnd && (flags & DCX_WINDOW))
+    {
+        escape.drawable = X11DRV_get_whole_window( top );
     }
     else
     {
-        escape.drawable = X11DRV_get_whole_window( top );
+        escape.drawable = X11DRV_get_client_window( top );
         escape.fbconfig_id = X11DRV_get_fbconfig_id( dce->hwnd );
         escape.gl_drawable = X11DRV_get_gl_drawable( dce->hwnd );
         escape.pixmap = X11DRV_get_gl_pixmap( dce->hwnd );
@@ -170,7 +172,7 @@ static void update_visible_region( struct dce *dce )
     OffsetRgn( vis_rgn,
                -(escape.drawable_rect.left + escape.dc_rect.left),
                -(escape.drawable_rect.top + escape.dc_rect.top) );
-    SelectVisRgn16( HDC_16(dce->hdc), HRGN_16(vis_rgn) );
+    SelectVisRgn( dce->hdc, vis_rgn );
     DeleteObject( vis_rgn );
 }
 
@@ -214,7 +216,7 @@ static void delete_clip_rgn( struct dce *dce )
     dce->clip_rgn = 0;
 
     /* make it dirty so that the vis rgn gets recomputed next time */
-    SetHookFlags16( HDC_16(dce->hdc), DCHF_INVALIDATEVISRGN );
+    SetHookFlags( dce->hdc, DCHF_INVALIDATEVISRGN );
 }
 
 
@@ -225,7 +227,6 @@ static void delete_clip_rgn( struct dce *dce )
  */
 static struct dce *alloc_cache_dce(void)
 {
-    struct x11drv_escape_set_dce escape;
     struct dce *dce;
 
     if (!(dce = HeapAlloc( GetProcessHeap(), 0, sizeof(*dce) ))) return NULL;
@@ -248,11 +249,6 @@ static struct dce *alloc_cache_dce(void)
     EnterCriticalSection( &dce_section );
     list_add_head( &dce_list, &dce->entry );
     LeaveCriticalSection( &dce_section );
-
-    escape.code = X11DRV_SET_DCE;
-    escape.dce  = dce;
-    ExtEscape( dce->hdc, X11DRV_ESCAPE, sizeof(escape), (LPCSTR)&escape, 0, NULL );
-
     return dce;
 }
 
@@ -264,7 +260,6 @@ static struct dce *alloc_cache_dce(void)
  */
 void alloc_window_dce( struct x11drv_win_data *data )
 {
-    struct x11drv_escape_set_dce escape;
     struct dce *dce;
     void *class_ptr = NULL;
     LONG style = GetClassLongW( data->hwnd, GCL_STYLE );
@@ -317,16 +312,12 @@ void alloc_window_dce( struct x11drv_win_data *data )
         if (win_style & WS_CLIPCHILDREN) dce->flags |= DCX_CLIPCHILDREN;
         if (win_style & WS_CLIPSIBLINGS) dce->flags |= DCX_CLIPSIBLINGS;
     }
-    SetHookFlags16( HDC_16(dce->hdc), DCHF_INVALIDATEVISRGN );
+    SetHookFlags( dce->hdc, DCHF_INVALIDATEVISRGN );
 
     EnterCriticalSection( &dce_section );
     list_add_tail( &dce_list, &dce->entry );
     LeaveCriticalSection( &dce_section );
     data->dce = dce;
-
-    escape.code = X11DRV_SET_DCE;
-    escape.dce  = dce;
-    ExtEscape( dce->hdc, X11DRV_ESCAPE, sizeof(escape), (LPCSTR)&escape, 0, NULL );
 }
 
 
@@ -427,7 +418,7 @@ void invalidate_dce( HWND hwnd, const RECT *rect )
                     /* Set dirty bits in the hDC and DCE structs */
 
                     TRACE("\tfixed up %p dce [%p]\n", dce, dce->hwnd);
-                    SetHookFlags16( HDC_16(dce->hdc), DCHF_INVALIDATEVISRGN );
+                    SetHookFlags( dce->hdc, DCHF_INVALIDATEVISRGN );
                 }
             }
         } /* dce list */
@@ -561,7 +552,7 @@ HDC X11DRV_GetDCEx( HWND hwnd, HRGN hrgnClip, DWORD flags )
     dce->hwnd = hwnd;
     dce->flags = (dce->flags & ~clip_flags) | (flags & clip_flags);
 
-    if (SetHookFlags16( HDC_16(dce->hdc), DCHF_VALIDATEVISRGN ))
+    if (SetHookFlags( dce->hdc, DCHF_VALIDATEVISRGN ))
         bUpdateVisRgn = TRUE;  /* DC was dirty */
 
     if (bUpdateVisRgn) update_visible_region( dce );
@@ -582,15 +573,13 @@ HDC X11DRV_GetDCEx( HWND hwnd, HRGN hrgnClip, DWORD flags )
  */
 INT X11DRV_ReleaseDC( HWND hwnd, HDC hdc, BOOL end_paint )
 {
-    enum x11drv_escape_codes escape = X11DRV_GET_DCE;
     struct dce *dce;
     BOOL ret = FALSE;
 
     TRACE("%p %p\n", hwnd, hdc );
 
     EnterCriticalSection( &dce_section );
-    if (!ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape), (LPCSTR)&escape,
-                    sizeof(dce), (LPSTR)&dce )) dce = NULL;
+    dce = (struct dce *)GetDCHook( hdc, NULL );
     if (dce && dce->count)
     {
         if (end_paint || (dce->flags & DCX_CACHE)) delete_clip_rgn( dce );
@@ -656,14 +645,11 @@ static BOOL CALLBACK dc_hook( HDC hDC, WORD code, DWORD_PTR data, LPARAM lParam 
  */
 HWND X11DRV_WindowFromDC( HDC hdc )
 {
-    enum x11drv_escape_codes escape = X11DRV_GET_DCE;
     struct dce *dce;
     HWND hwnd = 0;
 
     EnterCriticalSection( &dce_section );
-    if (!ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape), (LPCSTR)&escape,
-                    sizeof(dce), (LPSTR)&dce )) dce = NULL;
-    if (dce) hwnd = dce->hwnd;
+    if ((dce = (struct dce *)GetDCHook( hdc, NULL ))) hwnd = dce->hwnd;
     LeaveCriticalSection( &dce_section );
     return hwnd;
 }

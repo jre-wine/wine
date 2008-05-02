@@ -160,12 +160,16 @@ static void testAddCert(void)
      */
     ret = CertAddEncodedCertificateToStore(0, X509_ASN_ENCODING, bigCert,
      sizeof(bigCert), 0, NULL);
-    ok(!ret && GetLastError() == STATUS_ACCESS_VIOLATION,
-     "Expected STATUS_ACCESS_VIOLATION, got %08x\n", GetLastError());
+    ok(!ret && (GetLastError() == STATUS_ACCESS_VIOLATION ||
+     GetLastError() == E_INVALIDARG),
+     "Expected STATUS_ACCESS_VIOLATION or E_INVALIDARG, got %08x\n",
+     GetLastError());
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCert, sizeof(bigCert), 0, NULL);
-    ok(!ret && GetLastError() == STATUS_ACCESS_VIOLATION,
-     "Expected STATUS_ACCESS_VIOLATION, got %08x\n", GetLastError());
+    ok(!ret && (GetLastError() == STATUS_ACCESS_VIOLATION ||
+     GetLastError() == E_INVALIDARG),
+     "Expected STATUS_ACCESS_VIOLATION or E_INVALIDARG, got %08x\n",
+     GetLastError());
 
     /* Weird--can add a cert to the NULL store (does this have special
      * meaning?)
@@ -326,8 +330,8 @@ static void checkHash(const BYTE *data, DWORD dataLen, ALG_ID algID,
     ok(ret, "CryptHashCertificate failed: %08x\n", GetLastError());
     ret = CertGetCertificateContextProperty(context, propID, NULL,
      &dwSizeWithNull);
-    ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
-     GetLastError());
+    ok(ret, "algID %08x, propID %d: CertGetCertificateContextProperty failed: %08x\n",
+     algID, propID, GetLastError());
     ret = CertGetCertificateContextProperty(context, propID, hashProperty,
      &size);
     ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
@@ -1548,12 +1552,14 @@ static void testSignCert(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigned,
     algoID.pszObjId = (LPSTR)sigOID;
     ret = CryptSignCertificate(0, 0, 0, toBeSigned->pbData, toBeSigned->cbData,
      &algoID, NULL, NULL, &size);
-    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-     "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
+    ok(!ret && (GetLastError() == ERROR_INVALID_PARAMETER || NTE_BAD_ALGID),
+     "Expected ERROR_INVALID_PARAMETER or NTE_BAD_ALGID, got %08x\n",
+     GetLastError());
     ret = CryptSignCertificate(0, AT_SIGNATURE, 0, toBeSigned->pbData,
      toBeSigned->cbData, &algoID, NULL, NULL, &size);
-    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-     "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
+    ok(!ret && (GetLastError() == ERROR_INVALID_PARAMETER || NTE_BAD_ALGID),
+     "Expected ERROR_INVALID_PARAMETER or NTE_BAD_ALGID, got %08x\n",
+     GetLastError());
 
     /* No keys exist in the new CSP yet.. */
     ret = CryptSignCertificate(csp, AT_SIGNATURE, 0, toBeSigned->pbData,
@@ -1763,8 +1769,9 @@ static void testSignAndEncodeCert(void)
     algID.pszObjId = oid_rsa_md5rsa;
     ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING,
      X509_CERT_TO_BE_SIGNED, &info, &algID, NULL, NULL, &size);
-    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-     "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
+    ok(!ret && (GetLastError() == ERROR_INVALID_PARAMETER || NTE_BAD_ALGID),
+     "Expected ERROR_INVALID_PARAMETER or NTE_BAD_ALGID, got %08x\n",
+     GetLastError());
     algID.pszObjId = oid_rsa_md5;
     ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING,
      X509_CERT_TO_BE_SIGNED, &info, &algID, NULL, NULL, &size);
@@ -2046,7 +2053,9 @@ static void testKeyUsage(void)
         if (pUsage->cUsageIdentifier)
             ok(!strcmp(pUsage->rgpszUsageIdentifier[0], oid),
              "Expected %s, got %s\n", oid, pUsage->rgpszUsageIdentifier[0]);
-        /* Yep, I can re-add the same usage identifier */
+        /* Re-adding the same usage identifier succeeds, though it only adds
+         * a duplicate usage identifier on versions prior to Vista
+         */
         ret = CertAddEnhancedKeyUsageIdentifier(context, oid);
         ok(ret, "CertAddEnhancedKeyUsageIdentifier failed: %08x\n",
          GetLastError());
@@ -2054,8 +2063,8 @@ static void testKeyUsage(void)
         ret = CertGetEnhancedKeyUsage(context, 0, pUsage, &size);
         ok(ret && GetLastError() == 0,
          "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        ok(pUsage->cUsageIdentifier == 2, "Expected 2 identifiers, got %d\n",
-         pUsage->cUsageIdentifier);
+        ok(pUsage->cUsageIdentifier == 1 || pUsage->cUsageIdentifier == 2,
+         "Expected 1 or 2 identifiers, got %d\n", pUsage->cUsageIdentifier);
         if (pUsage->cUsageIdentifier)
             ok(!strcmp(pUsage->rgpszUsageIdentifier[0], oid),
              "Expected %s, got %s\n", oid, pUsage->rgpszUsageIdentifier[0]);

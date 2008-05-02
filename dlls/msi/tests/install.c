@@ -352,7 +352,7 @@ static const CHAR ci_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
 static const CHAR ci_custom_action_dat[] = "Action\tType\tSource\tTarget\tISComments\n"
                                             "s72\ti2\tS64\tS0\tS255\n"
                                             "CustomAction\tAction\n"
-                                            "RunInstall\t23\tmsitest\\concurrent.msi\tMYPROP=[UILevel]\t\n";
+                                            "RunInstall\t87\tmsitest\\concurrent.msi\tMYPROP=[UILevel]\t\n";
 
 static const CHAR ci_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
                                        "s72\tS38\ts72\ti2\tS255\tS72\n"
@@ -887,6 +887,18 @@ static const msi_table wrv_tables[] =
     ADD_TABLE(wrv_registry),
 };
 
+static const msi_table sf_tables[] =
+{
+    ADD_TABLE(wrv_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(rof_feature),
+    ADD_TABLE(ci2_feature_comp),
+    ADD_TABLE(ci2_file),
+    ADD_TABLE(install_exec_seq),
+    ADD_TABLE(rof_media),
+    ADD_TABLE(property),
+};
+
 /* cabinet definitions */
 
 /* make the max size large so there is only one cab file */
@@ -1331,6 +1343,15 @@ static void test_MsiInstallProduct(void)
     LONG res;
     HKEY hkey;
     DWORD num, size, type;
+    SC_HANDLE scm;
+
+    scm = OpenSCManager(NULL, NULL, GENERIC_ALL);
+    if (!scm && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        skip("Services are not implemented, we are most likely on win9x\n");
+        return;
+    }
+    CloseServiceHandle(scm);
 
     create_test_files();
     create_database(msifile, tables, sizeof(tables) / sizeof(msi_table));
@@ -1848,9 +1869,15 @@ static void test_concurrentinstall(void)
     ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
     ok(delete_pf("msitest", FALSE), "File not installed\n");
 
-    /* Delete the files in the temp (current) folder */
-    DeleteFile(msifile);
     DeleteFile(path);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
+    ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
+    ok(delete_pf("msitest", FALSE), "File not installed\n");
+
+    DeleteFile(msifile);
     DeleteFile("msitest\\msitest\\augustus");
     DeleteFile("msitest\\maximus");
     RemoveDirectory("msitest\\msitest");
@@ -2871,6 +2898,7 @@ static void test_publishsourcelist(void)
     UINT r;
     DWORD size;
     CHAR value[MAX_PATH];
+    CHAR path[MAX_PATH];
     CHAR prodcode[] = "{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}";
 
     CreateDirectoryA("msitest", NULL);
@@ -2888,7 +2916,13 @@ static void test_publishsourcelist(void)
     /* nothing published */
     size = 0xdeadbeef;
     r = pMsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
-                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+                               MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
+
+    size = 0xdeadbeef;
+    r = MsiSourceListEnumSourcesA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                                  MSICODE_PRODUCT | MSISOURCETYPE_URL, 0, NULL, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
 
@@ -2900,7 +2934,13 @@ static void test_publishsourcelist(void)
     /* after RegisterProduct */
     size = 0xdeadbeef;
     r = pMsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
-                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+                               MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
+
+    size = 0xdeadbeef;
+    r = MsiSourceListEnumSourcesA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                                  MSICODE_PRODUCT | MSISOURCETYPE_URL, 0, NULL, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
 
@@ -2912,7 +2952,13 @@ static void test_publishsourcelist(void)
     /* after ProcessComponents */
     size = 0xdeadbeef;
     r = pMsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
-                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+                               MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
+
+    size = 0xdeadbeef;
+    r = MsiSourceListEnumSourcesA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                                  MSICODE_PRODUCT | MSISOURCETYPE_URL, 0, NULL, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
 
@@ -2924,7 +2970,13 @@ static void test_publishsourcelist(void)
     /* after PublishFeatures */
     size = 0xdeadbeef;
     r = pMsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
-                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+                               MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, &size);
+    ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
+    ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
+
+    size = 0xdeadbeef;
+    r = MsiSourceListEnumSourcesA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                                  MSICODE_PRODUCT | MSISOURCETYPE_URL, 0, NULL, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(size == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", size);
 
@@ -2937,13 +2989,78 @@ static void test_publishsourcelist(void)
     size = MAX_PATH;
     lstrcpyA(value, "aaa");
     r = pMsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
-                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, value, &size);
+                               MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, value, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(value, "msitest.msi"), "Expected 'msitest.msi', got %s\n", value);
+    ok(size == 11, "Expected 11, got %d\n", size);
+
+    size = MAX_PATH;
+    lstrcpyA(value, "aaa");
+    r = pMsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                               MSICODE_PRODUCT, INSTALLPROPERTY_MEDIAPACKAGEPATH, value, &size);
     todo_wine
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-        ok(!lstrcmpA(value, "msitest.msi"), "Expected 'msitest.msi', got %s\n", value);
-        ok(size == 11, "Expected 11, got %d\n", size);
+        ok(!lstrcmpA(value, ""), "Expected \"\", got \"%s\"\n", value);
+        ok(size == 0, "Expected 0, got %d\n", size);
     }
+
+    size = MAX_PATH;
+    lstrcpyA(value, "aaa");
+    r = pMsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                               MSICODE_PRODUCT, INSTALLPROPERTY_DISKPROMPT, value, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(value, ""), "Expected \"\", got \"%s\"\n", value);
+    ok(size == 0, "Expected 0, got %d\n", size);
+
+    lstrcpyA(path, CURR_DIR);
+    lstrcatA(path, "\\");
+
+    size = MAX_PATH;
+    lstrcpyA(value, "aaa");
+    r = pMsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                               MSICODE_PRODUCT, INSTALLPROPERTY_LASTUSEDSOURCE, value, &size);
+    todo_wine
+    {
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(value, path), "Expected \"%s\", got \"%s\"\n", path, value);
+        ok(size == lstrlenA(path), "Expected %d, got %d\n", lstrlenA(path), size);
+    }
+
+    size = MAX_PATH;
+    lstrcpyA(value, "aaa");
+    r = pMsiSourceListGetInfoA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                               MSICODE_PRODUCT, INSTALLPROPERTY_LASTUSEDTYPE, value, &size);
+    todo_wine
+    {
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(value, "n"), "Expected \"n\", got \"%s\"\n", value);
+        ok(size == 1, "Expected 1, got %d\n", size);
+    }
+
+    size = MAX_PATH;
+    lstrcpyA(value, "aaa");
+    r = MsiSourceListEnumSourcesA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                                  MSICODE_PRODUCT | MSISOURCETYPE_URL, 0, value, &size);
+    ok(r == ERROR_NO_MORE_ITEMS, "Expected ERROR_NO_MORE_ITEMS, got %d\n", r);
+    ok(!lstrcmpA(value, "aaa"), "Expected value to be unchanged, got %s\n", value);
+    ok(size == MAX_PATH, "Expected MAX_PATH, got %d\n", size);
+
+    size = MAX_PATH;
+    lstrcpyA(value, "aaa");
+    r = MsiSourceListEnumSourcesA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                                  MSICODE_PRODUCT | MSISOURCETYPE_NETWORK, 0, value, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(value, path), "Expected \"%s\", got \"%s\"\n", path, value);
+    ok(size == lstrlenA(path), "Expected %d, got %d\n", lstrlenA(path), size);
+
+    size = MAX_PATH;
+    lstrcpyA(value, "aaa");
+    r = MsiSourceListEnumSourcesA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED,
+                                  MSICODE_PRODUCT | MSISOURCETYPE_NETWORK, 1, value, &size);
+    ok(r == ERROR_NO_MORE_ITEMS, "Expected ERROR_NO_MORE_ITEMS, got %d\n", r);
+    ok(!lstrcmpA(value, "aaa"), "Expected value to be unchanged, got %s\n", value);
+    ok(size == MAX_PATH, "Expected MAX_PATH, got %d\n", size);
 
     /* complete uninstall */
     r = MsiInstallProductA(msifile, "FULL=1 REMOVE=ALL");
@@ -3530,9 +3647,12 @@ static void test_movefiles(void)
     ok(delete_pf("msitest\\kiribati", TRUE), "File not moved\n");
     ok(!delete_pf("msitest\\lebanon", TRUE), "File moved\n");
     ok(!delete_pf("msitest\\lebanon", FALSE), "Directory moved\n");
-    ok(!delete_pf("msitest\\apple", TRUE), "File should not exist\n");
+    /* either apple or application will be moved depending on directory order */
+    if (!delete_pf("msitest\\apple", TRUE))
+        ok(delete_pf("msitest\\application", TRUE), "File not moved\n");
+    else
+        ok(!delete_pf("msitest\\application", TRUE), "File should not exist\n");
     ok(delete_pf("msitest\\wildcard", TRUE), "File not moved\n");
-    ok(delete_pf("msitest\\application", TRUE), "File not moved\n");
     ok(!delete_pf("msitest\\ape", TRUE), "File moved\n");
     ok(delete_pf("msitest\\foo", TRUE), "File not moved\n");
     ok(!delete_pf("msitest\\fao", TRUE), "File should not exist\n");
@@ -3685,6 +3805,41 @@ static void test_writeregistryvalues(void)
     RemoveDirectory("msitest");
 }
 
+static void test_sourcefolder(void)
+{
+    UINT r;
+
+    CreateDirectoryA("msitest", NULL);
+    create_file("augustus", 500);
+
+    create_database(msifile, sf_tables, sizeof(sf_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
+    todo_wine
+    {
+        ok(r == ERROR_INSTALL_FAILURE,
+           "Expected ERROR_INSTALL_FAILURE, got %u\n", r);
+        ok(!delete_pf("msitest", FALSE), "File installed\n");
+    }
+
+    RemoveDirectoryA("msitest");
+
+    r = MsiInstallProductA(msifile, NULL);
+    todo_wine
+    {
+        ok(r == ERROR_INSTALL_FAILURE,
+           "Expected ERROR_INSTALL_FAILURE, got %u\n", r);
+        ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
+        ok(!delete_pf("msitest", FALSE), "File installed\n");
+    }
+
+    DeleteFile(msifile);
+    DeleteFile("augustus");
+}
+
 START_TEST(install)
 {
     DWORD len;
@@ -3728,6 +3883,7 @@ START_TEST(install)
     test_missingcab();
     test_duplicatefiles();
     test_writeregistryvalues();
+    test_sourcefolder();
 
     SetCurrentDirectoryA(prev_path);
 }

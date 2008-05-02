@@ -19,6 +19,7 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include "windows.h"
 #include "ole2.h"
@@ -202,6 +203,125 @@ static void test_Allocator(void)
     IMimeAllocator_Release(alloc);
 }
 
+static void test_CreateMessage(void)
+{
+    HRESULT hr;
+    IMimeMessage *msg;
+    IStream *stream;
+    LARGE_INTEGER pos;
+    LONG ref;
+    HBODY hbody;
+    IMimeBody *body;
+    BODYOFFSETS offsets;
+    ULONG count;
+    FINDBODY find_struct;
+    HCHARSET hcs;
+    INETCSETINFO csi;
+
+    char text[] = "text";
+    HBODY *body_list;
+    PROPVARIANT prop;
+    static char att_pritype[] = "att:pri-content-type";
+
+    hr = MimeOleCreateMessage(NULL, &msg);
+    ok(hr == S_OK, "ret %08x\n", hr);
+
+    CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    IStream_Write(stream, msg1, sizeof(msg1) - 1, NULL);
+    pos.QuadPart = 0;
+    IStream_Seek(stream, pos, STREAM_SEEK_SET, NULL);
+
+    hr = IMimeMessage_Load(msg, stream);
+    ok(hr == S_OK, "ret %08x\n", hr);
+
+    hr = IMimeMessage_CountBodies(msg, HBODY_ROOT, TRUE, &count);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    ok(count == 3, "got %d\n", count);
+
+    hr = IMimeMessage_CountBodies(msg, HBODY_ROOT, FALSE, &count);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    ok(count == 3, "got %d\n", count);
+
+    hr = IMimeMessage_BindToObject(msg, HBODY_ROOT, &IID_IMimeBody, (void**)&body);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    hr = IMimeBody_GetOffsets(body, &offsets);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    ok(offsets.cbBoundaryStart == 0, "got %d\n", offsets.cbBoundaryStart);
+    ok(offsets.cbHeaderStart == 0, "got %d\n", offsets.cbHeaderStart);
+    ok(offsets.cbBodyStart == 359, "got %d\n", offsets.cbBodyStart);
+    ok(offsets.cbBodyEnd == 666, "got %d\n", offsets.cbBodyEnd);
+    IMimeBody_Release(body);
+
+    hr = IMimeMessage_GetBody(msg, IBL_ROOT, NULL, &hbody);
+
+    PropVariantInit(&prop);
+    hr = IMimeMessage_GetBodyProp(msg, hbody, att_pritype, 0, &prop);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    ok(prop.vt == VT_LPSTR, "vt %08x\n", prop.vt);
+    ok(!strcasecmp(prop.u.pszVal, "multipart"), "got %s\n", prop.u.pszVal);
+    PropVariantClear(&prop);
+
+    hr = IMimeMessage_GetBody(msg, IBL_FIRST, hbody, &hbody);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    hr = IMimeMessage_BindToObject(msg, hbody, &IID_IMimeBody, (void**)&body);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    hr = IMimeBody_GetOffsets(body, &offsets);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    ok(offsets.cbBoundaryStart == 405, "got %d\n", offsets.cbBoundaryStart);
+    ok(offsets.cbHeaderStart == 428, "got %d\n", offsets.cbHeaderStart);
+    ok(offsets.cbBodyStart == 518, "got %d\n", offsets.cbBodyStart);
+    ok(offsets.cbBodyEnd == 523, "got %d\n", offsets.cbBodyEnd);
+
+    hr = IMimeBody_GetCharset(body, &hcs);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    ok(hcs == NULL, "ret %p\n", hcs);
+
+    IMimeBody_Release(body);
+
+    hr = IMimeMessage_GetBody(msg, IBL_NEXT, hbody, &hbody);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    hr = IMimeMessage_BindToObject(msg, hbody, &IID_IMimeBody, (void**)&body);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    hr = IMimeBody_GetOffsets(body, &offsets);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    ok(offsets.cbBoundaryStart == 525, "got %d\n", offsets.cbBoundaryStart);
+    ok(offsets.cbHeaderStart == 548, "got %d\n", offsets.cbHeaderStart);
+    ok(offsets.cbBodyStart == 629, "got %d\n", offsets.cbBodyStart);
+    ok(offsets.cbBodyEnd == 639, "got %d\n", offsets.cbBodyEnd);
+    IMimeBody_Release(body);
+
+    find_struct.pszPriType = text;
+    find_struct.pszSubType = NULL;
+
+    hr = IMimeMessage_FindFirst(msg, &find_struct, &hbody);
+    ok(hr == S_OK, "ret %08x\n", hr);
+
+    hr = IMimeMessage_FindNext(msg, &find_struct, &hbody);
+    ok(hr == S_OK, "ret %08x\n", hr);
+
+    hr = IMimeMessage_FindNext(msg, &find_struct, &hbody);
+    ok(hr == MIME_E_NOT_FOUND, "ret %08x\n", hr);
+
+    hr = IMimeMessage_GetAttachments(msg, &count, &body_list);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    ok(count == 2, "got %d\n", count);
+    CoTaskMemFree(body_list);
+
+    hr = IMimeMessage_GetCharset(body, &hcs);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    ok(hcs == NULL, "ret %p\n", hcs);
+    hr = MimeOleGetCharsetInfo(hcs, &csi);
+    ok(hr == E_INVALIDARG, "ret %08x\n", hr);
+
+    IMimeMessage_Release(msg);
+
+    ref = IStream_AddRef(stream);
+    ok(ref == 2, "ref %d\n", ref);
+    IStream_Release(stream);
+
+    IStream_Release(stream);
+}
+
 START_TEST(mimeole)
 {
     OleInitialize(NULL);
@@ -209,5 +329,6 @@ START_TEST(mimeole)
     test_CreateSecurity();
     test_CreateBody();
     test_Allocator();
+    test_CreateMessage();
     OleUninitialize();
 }

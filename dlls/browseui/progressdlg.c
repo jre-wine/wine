@@ -74,11 +74,9 @@ typedef struct tagProgressDialog {
     HWND hwndDisabledParent;    /* For modal dialog: the parent that need to be re-enabled when the dialog ends */
 } ProgressDialog;
 
-static const IProgressDialogVtbl ProgressDialogVtbl;
-
 static void set_buffer(LPWSTR *buffer, LPCWSTR string)
 {
-    const WCHAR empty_string = {0};
+    static const WCHAR empty_string[] = {0};
     IMalloc *malloc;
     int cb;
 
@@ -179,6 +177,8 @@ static INT_PTR CALLBACK dialog_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                 ShowWindow(GetDlgItem(hwnd, IDCANCEL), SW_HIDE);
             if (This->dwFlags & PROGDLG_MARQUEEPROGRESS)
                 set_progress_marquee(This);
+            if (This->dwFlags & PROGDLG_NOMINIMIZE)
+                SetWindowLongW(hwnd, GWL_STYLE, GetWindowLongW(hwnd, GWL_STYLE) & (~WS_MINIMIZEBOX));
 
             update_dialog(This, 0xffffffff);
             This->dwUpdate = 0;
@@ -244,37 +244,17 @@ static DWORD WINAPI dialog_thread(LPVOID lpParameter)
     return 0;
 }
 
-HRESULT WINAPI ProgressDialog_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
-{
-    ProgressDialog *This;
-    if (pUnkOuter)
-        return CLASS_E_NOAGGREGATION;
-
-    This = CoTaskMemAlloc(sizeof(ProgressDialog));
-    if (This == NULL)
-        return E_OUTOFMEMORY;
-    ZeroMemory(This, sizeof(*This));
-    This->vtbl = &ProgressDialogVtbl;
-    This->refCount = 1;
-    InitializeCriticalSection(&This->cs);
-
-    TRACE("returning %p\n", This);
-    *ppOut = (IUnknown *)This;
-    BROWSEUI_refCount++;
-    return S_OK;
-}
-
-static void WINAPI ProgressDialog_Destructor(ProgressDialog *This)
+static void ProgressDialog_Destructor(ProgressDialog *This)
 {
     TRACE("destroying %p\n", This);
     if (This->hwnd)
         end_dialog(This);
-    CoTaskMemFree(This->lines[0]);
-    CoTaskMemFree(This->lines[1]);
-    CoTaskMemFree(This->lines[2]);
-    CoTaskMemFree(This->cancelMsg);
-    CoTaskMemFree(This->title);
-    CoTaskMemFree(This);
+    heap_free(This->lines[0]);
+    heap_free(This->lines[1]);
+    heap_free(This->lines[2]);
+    heap_free(This->cancelMsg);
+    heap_free(This->title);
+    heap_free(This);
     BROWSEUI_refCount--;
 }
 
@@ -328,8 +308,6 @@ static HRESULT WINAPI ProgressDialog_StartProgressDialog(IProgressDialog *iface,
         FIXME("Flags PROGDLG_AUTOTIME not supported\n");
     if (dwFlags & PROGDLG_NOTIME)
         FIXME("Flags PROGDLG_NOTIME not supported\n");
-    if (dwFlags & PROGDLG_NOMINIMIZE)
-        FIXME("Flags PROGDLG_NOMINIMIZE not supported\n");
 
     EnterCriticalSection(&This->cs);
 
@@ -504,3 +482,23 @@ static const IProgressDialogVtbl ProgressDialogVtbl =
     ProgressDialog_SetCancelMsg,
     ProgressDialog_Timer
 };
+
+HRESULT ProgressDialog_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
+{
+    ProgressDialog *This;
+    if (pUnkOuter)
+        return CLASS_E_NOAGGREGATION;
+
+    This = heap_alloc_zero(sizeof(ProgressDialog));
+    if (This == NULL)
+        return E_OUTOFMEMORY;
+
+    This->vtbl = &ProgressDialogVtbl;
+    This->refCount = 1;
+    InitializeCriticalSection(&This->cs);
+
+    TRACE("returning %p\n", This);
+    *ppOut = (IUnknown *)This;
+    BROWSEUI_refCount++;
+    return S_OK;
+}

@@ -779,23 +779,22 @@ PDH_STATUS WINAPI PdhGetRawCounterValue( PDH_HCOUNTER handle, LPDWORD type,
 PDH_STATUS WINAPI PdhLookupPerfIndexByNameA( LPCSTR machine, LPCSTR name, LPDWORD index )
 {
     PDH_STATUS ret;
+    WCHAR *machineW = NULL;
     WCHAR *nameW;
 
     TRACE("%s %s %p\n", debugstr_a(machine), debugstr_a(name), index);
 
-    if (!name || !index) return PDH_INVALID_ARGUMENT;
+    if (!name) return PDH_INVALID_ARGUMENT;
 
-    if (machine)
-    {
-        FIXME("remote machine not supported\n");
-        return PDH_CSTATUS_NO_MACHINE;
-    }
+    if (machine && !(machineW = pdh_strdup_aw( machine ))) return PDH_MEMORY_ALLOCATION_FAILURE;
+
     if (!(nameW = pdh_strdup_aw( name )))
         return PDH_MEMORY_ALLOCATION_FAILURE;
 
-    ret = PdhLookupPerfIndexByNameW( NULL, nameW, index );
+    ret = PdhLookupPerfIndexByNameW( machineW, nameW, index );
 
     heap_free( nameW );
+    heap_free( machineW );
     return ret;
 }
 
@@ -832,21 +831,17 @@ PDH_STATUS WINAPI PdhLookupPerfIndexByNameW( LPCWSTR machine, LPCWSTR name, LPDW
 PDH_STATUS WINAPI PdhLookupPerfNameByIndexA( LPCSTR machine, DWORD index, LPSTR buffer, LPDWORD size )
 {
     PDH_STATUS ret;
+    WCHAR *machineW = NULL;
     WCHAR bufferW[PDH_MAX_COUNTER_NAME];
     DWORD sizeW = sizeof(bufferW) / sizeof(WCHAR);
 
     TRACE("%s %d %p %p\n", debugstr_a(machine), index, buffer, size);
 
-    if (machine)
-    {
-        FIXME("remote machine not supported\n");
-        return PDH_CSTATUS_NO_MACHINE;
-    }
+    if (!buffer || !size) return PDH_INVALID_ARGUMENT;
 
-    if (!buffer && !size) return PDH_INVALID_ARGUMENT;
-    if (!index) return ERROR_SUCCESS;
+    if (machine && !(machineW = pdh_strdup_aw( machine ))) return PDH_MEMORY_ALLOCATION_FAILURE;
 
-    if (!(ret = PdhLookupPerfNameByIndexW( NULL, index, bufferW, &sizeW )))
+    if (!(ret = PdhLookupPerfNameByIndexW( machineW, index, bufferW, &sizeW )))
     {
         int required = WideCharToMultiByte( CP_ACP, 0, bufferW, -1, NULL, 0, NULL, NULL );
 
@@ -854,6 +849,7 @@ PDH_STATUS WINAPI PdhLookupPerfNameByIndexA( LPCSTR machine, DWORD index, LPSTR 
         else WideCharToMultiByte( CP_ACP, 0, bufferW, -1, buffer, required, NULL, NULL );
         if (size) *size = required;
     }
+    heap_free( machineW );
     return ret;
 }
 

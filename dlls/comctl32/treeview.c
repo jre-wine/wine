@@ -241,8 +241,6 @@ TREEVIEW_GetInfoPtr(HWND hwnd)
 static inline int
 TREEVIEW_GetItemIndex(const TREEVIEW_INFO *infoPtr, HTREEITEM handle)
 {
-    assert(infoPtr != NULL);
-
     return DPA_GetPtrIndex(infoPtr->items, handle);
 }
 
@@ -407,8 +405,6 @@ TREEVIEW_GetPrevListItem(const TREEVIEW_INFO *infoPtr, const TREEVIEW_ITEM *tvIt
 static TREEVIEW_ITEM *
 TREEVIEW_GetNextListItem(const TREEVIEW_INFO *infoPtr, const TREEVIEW_ITEM *tvItem)
 {
-    assert(tvItem != NULL);
-
     /*
      * If this item has children and is expanded, return the first child
      */
@@ -1049,7 +1045,6 @@ static void
 TREEVIEW_InsertBefore(TREEVIEW_ITEM *newItem, TREEVIEW_ITEM *sibling,
 		      TREEVIEW_ITEM *parent)
 {
-    assert(newItem != NULL);
     assert(parent != NULL);
 
     if (sibling != NULL)
@@ -1082,7 +1077,6 @@ static void
 TREEVIEW_InsertAfter(TREEVIEW_ITEM *newItem, TREEVIEW_ITEM *sibling,
 		     TREEVIEW_ITEM *parent)
 {
-    assert(newItem != NULL);
     assert(parent != NULL);
 
     if (sibling != NULL)
@@ -3586,7 +3580,7 @@ TREEVIEW_Command(TREEVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 
 	    infoPtr->bLabelChanged = TRUE;
 
-	    len = GetWindowTextW(infoPtr->hwndEdit, buffer, sizeof(buffer));
+	    len = GetWindowTextW(infoPtr->hwndEdit, buffer, sizeof(buffer)/sizeof(buffer[0]));
 
 	    /* Select font to get the right dimension of the string */
 	    hFont = (HFONT)SendMessageW(infoPtr->hwndEdit, WM_GETFONT, 0, 0);

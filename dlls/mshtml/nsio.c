@@ -48,6 +48,8 @@ static const IID NS_IOSERVICE_CID =
 
 static nsIIOService *nsio = NULL;
 
+static const WCHAR about_blankW[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
+
 typedef struct {
     const nsIWineURIVtbl *lpWineURIVtbl;
 
@@ -593,7 +595,7 @@ static BOOL do_load_from_moniker_hack(nsChannel *This)
         const char *scheme;
 
         nsACString_GetData(&scheme_str, &scheme);
-        ret = !strcmp(scheme, "wine");
+        ret = !strcmp(scheme, "wine") || !strcmp(scheme, "about");
     }
 
     nsACString_Finish(&scheme_str);
@@ -1264,7 +1266,7 @@ static nsresult NSAPI nsURI_GetScheme(nsIWineURI *iface, nsACString *aScheme)
 
     TRACE("(%p)->(%p)\n", This, aScheme);
 
-    if(This->use_wine_url) {
+    if(This->use_wine_url && strcmpW(This->wine_url, about_blankW)) {
         /*
          * For Gecko we set scheme to unknown so it won't be handled
          * as any special case.
@@ -1926,21 +1928,7 @@ static nsIProtocolHandler *create_protocol_handler(nsIProtocolHandler *nshandler
     return NSPROTHANDLER(ret);
 }
 
-static nsresult NSAPI nsIOService_QueryInterface(nsIIOService *iface, nsIIDRef riid,
-                                                 nsQIResult result)
-{
-    *result = NULL;
-
-    if(IsEqualGUID(&IID_nsISupports, riid)
-       || IsEqualGUID(&IID_nsIIOService, riid)) {
-        *result = iface;
-        nsIIOService_AddRef(iface);
-        return S_OK;
-    }
-
-    WARN("(%s %p)\n", debugstr_guid(riid), result);
-    return NS_NOINTERFACE;
-}
+static nsresult NSAPI nsIOService_QueryInterface(nsIIOService*,nsIIDRef,nsQIResult);
 
 static nsrefcnt NSAPI nsIOService_AddRef(nsIIOService *iface)
 {
@@ -2197,6 +2185,72 @@ static const nsIIOServiceVtbl nsIOServiceVtbl = {
 };
 
 static nsIIOService nsIOService = { &nsIOServiceVtbl };
+
+static nsresult NSAPI nsNetUtil_QueryInterface(nsINetUtil *iface, nsIIDRef riid,
+                                               nsQIResult result)
+{
+    return nsIIOService_QueryInterface(&nsIOService, riid, result);
+}
+
+static nsrefcnt NSAPI nsNetUtil_AddRef(nsINetUtil *iface)
+{
+    return 2;
+}
+
+static nsrefcnt NSAPI nsNetUtil_Release(nsINetUtil *iface)
+{
+    return 1;
+}
+
+static nsresult NSAPI nsNetUtil_ParseContentType(nsINetUtil *iface, const nsACString *aTypeHeader,
+        nsACString *aCharset, PRBool *aHadCharset, nsACString *aContentType)
+{
+    nsINetUtil *net_util;
+    nsresult nsres;
+
+    TRACE("(%p %p %p %p)\n", aTypeHeader, aCharset, aHadCharset, aContentType);
+
+    nsres = nsIIOService_QueryInterface(nsio, &IID_nsINetUtil, (void**)&net_util);
+    if(NS_FAILED(nsres)) {
+        WARN("Could not get nsINetUtil interface: %08x\n", nsres);
+        return nsres;
+    }
+
+    nsres = nsINetUtil_ParseContentType(net_util, aTypeHeader, aCharset, aHadCharset, aContentType);
+
+    nsINetUtil_Release(net_util);
+    return nsres;
+}
+
+static const nsINetUtilVtbl nsNetUtilVtbl = {
+    nsNetUtil_QueryInterface,
+    nsNetUtil_AddRef,
+    nsNetUtil_Release,
+    nsNetUtil_ParseContentType
+};
+
+static nsINetUtil nsNetUtil = { &nsNetUtilVtbl };
+
+static nsresult NSAPI nsIOService_QueryInterface(nsIIOService *iface, nsIIDRef riid,
+                                                 nsQIResult result)
+{
+    *result = NULL;
+
+    if(IsEqualGUID(&IID_nsISupports, riid))
+        *result = &nsIOService;
+    else if(IsEqualGUID(&IID_nsIIOService, riid))
+        *result = &nsIOService;
+    else if(IsEqualGUID(&IID_nsINetUtil, riid))
+        *result = &nsNetUtil;
+
+    if(*result) {
+        nsISupports_AddRef((nsISupports*)*result);
+        return NS_OK;
+    }
+
+    FIXME("(%s %p)\n", debugstr_guid(riid), result);
+    return NS_NOINTERFACE;
+}
 
 static nsresult NSAPI nsIOServiceFactory_QueryInterface(nsIFactory *iface, nsIIDRef riid,
                                                         nsQIResult result)
