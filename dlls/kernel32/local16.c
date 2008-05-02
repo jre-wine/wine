@@ -133,7 +133,7 @@ typedef struct
   /* All local heap allocations are aligned on 4-byte boundaries */
 #define LALIGN(word)          (((word) + 3) & ~3)
 
-#define ARENA_PTR(ptr,arena)       ((LOCALARENA *)((char*)(ptr)+(arena)))
+#define ARENA_PTR(ptr,arena)       ((LOCALARENA *)((char *)(ptr)+(arena)))
 #define ARENA_PREV(ptr,arena)      (ARENA_PTR((ptr),(arena))->prev & ~3)
 #define ARENA_NEXT(ptr,arena)      (ARENA_PTR((ptr),(arena))->next)
 #define ARENA_FLAGS(ptr,arena)     (ARENA_PTR((ptr),(arena))->prev & 3)
@@ -1930,13 +1930,14 @@ static VOID Local32_ToHandle( LOCAL32HEADER *header, INT16 type,
 static VOID Local32_FromHandle( LOCAL32HEADER *header, INT16 type,
                                 DWORD *addr, LPDWORD handle, LPBYTE ptr )
 {
+    *addr = 0;
     switch (type)
     {
         case -2:    /* 16:16 pointer */
         case  1:
         {
             WORD *selTable = (LPWORD)(header->base + header->selectorTableOffset);
-            DWORD offset   = (LPBYTE)ptr - header->base;
+            DWORD offset   = ptr - header->base;
             *addr = MAKELONG( offset & 0x7fff, selTable[offset >> 15] );
         }
         break;

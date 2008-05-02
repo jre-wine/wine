@@ -64,7 +64,10 @@ void __wine_init_codepages( const union cptable *ansi, const union cptable *oem,
 }
 
 int ntdll_umbstowcs(DWORD flags, const char* src, int srclen, WCHAR* dst, int dstlen)
-{ 
+{
+#ifdef __APPLE__
+    flags |= MB_COMPOSITE;  /* work around broken Mac OS X filesystem that enforces decomposed Unicode */
+#endif
     return (unix_table) ?
         wine_cp_mbstowcs( unix_table, flags, src, srclen, dst, dstlen ) :
         wine_utf8_mbstowcs( flags, src, srclen, dst, dstlen );
@@ -1609,6 +1612,9 @@ BOOLEAN WINAPI RtlIsTextUnicode( LPCVOID buf, INT len, INT *pf )
 
     /* Check for an odd length ... pass if even. */
     if (len & 1) out_flags |= IS_TEXT_UNICODE_ODD_LENGTH;
+
+    if (((char *)buf)[len - 1] == 0)
+        len--;  /* Windows seems to do something like that to avoid e.g. false IS_TEXT_UNICODE_NULL_BYTES  */
 
     len /= sizeof(WCHAR);
     /* Windows only checks the first 256 characters */

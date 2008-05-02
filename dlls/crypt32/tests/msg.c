@@ -659,7 +659,6 @@ static void test_data_msg_encoding(void)
     CryptMsgUpdate(msg, msgData, sizeof(msgData), FALSE);
     CryptMsgUpdate(msg, msgData, sizeof(msgData), TRUE);
     CryptMsgClose(msg);
-    todo_wine
     check_updates("data message with indefinite length", &a3, &accum);
     free_updates(&accum);
 }
@@ -1922,11 +1921,12 @@ static void test_decode_msg_update(void)
      "Expected CRYPT_E_ASN1_BADTAG, got %x\n", GetLastError());
     CryptMsgClose(msg);
 
-    /* An empty message can be opened with indetermined type.. */
+    /* An empty message can be opened with undetermined type.. */
     msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL);
     ret = CryptMsgUpdate(msg, dataEmptyContent, sizeof(dataEmptyContent),
      TRUE);
     ok(ret, "CryptMsgUpdate failed: %x\n", GetLastError());
+    CryptMsgClose(msg);
     /* but decoding it as an explicitly typed message fails. */
     msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, CMSG_DATA, 0, NULL,
      NULL);
@@ -2051,6 +2051,23 @@ static void test_decode_msg_update(void)
     ret = CryptMsgUpdate(msg, signedWithCertAndCrlBareContent,
      sizeof(signedWithCertAndCrlBareContent), TRUE);
     ok(ret, "CryptMsgUpdate failed: %08x\n", GetLastError());
+    CryptMsgClose(msg);
+
+    msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, CMSG_DETACHED_FLAG, 0, 0,
+     NULL, NULL);
+    /* The first update succeeds.. */
+    ret = CryptMsgUpdate(msg, detachedSignedContent,
+     sizeof(detachedSignedContent), TRUE);
+    ok(ret, "CryptMsgUpdate failed: %08x\n", GetLastError());
+    /* as does a second (probably to update the detached portion).. */
+    ret = CryptMsgUpdate(msg, detachedSignedContent,
+     sizeof(detachedSignedContent), TRUE);
+    ok(ret, "CryptMsgUpdate failed: %08x\n", GetLastError());
+    /* while a third fails. */
+    ret = CryptMsgUpdate(msg, detachedSignedContent,
+     sizeof(detachedSignedContent), TRUE);
+    ok(!ret && GetLastError() == CRYPT_E_MSG_ERROR,
+     "expected CRYPT_E_MSG_ERROR, got %08x\n", GetLastError());
     CryptMsgClose(msg);
 }
 
@@ -2448,6 +2465,7 @@ static void test_msg_control(void)
      sizeof(signedWithCertWithValidPubKeyContent), TRUE);
     ret = CryptMsgControl(msg, 0, CMSG_CTRL_VERIFY_SIGNATURE, &certInfo);
     ok(ret, "CryptMsgControl failed: %08x\n", GetLastError());
+    CryptMsgClose(msg);
 }
 
 static void test_msg_get_signer_count(void)

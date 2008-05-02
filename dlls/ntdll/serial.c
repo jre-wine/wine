@@ -39,9 +39,6 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
-#ifdef HAVE_TERMIOS_H
-#include <termios.h>
-#endif
 #include <fcntl.h>
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
@@ -191,24 +188,29 @@ static NTSTATUS get_baud_rate(int fd, SERIAL_BAUD_RATE* sbr)
 
 static NTSTATUS get_hand_flow(int fd, SERIAL_HANDFLOW* shf)
 {
-    int stat;
+    int stat = 0;
     struct termios port;
-    
+
     if (tcgetattr(fd, &port) == -1)
     {
         ERR("tcgetattr error '%s'\n", strerror(errno));
         return FILE_GetNtStatus();
     }
+    /* termios does not support DTR/DSR flow control */
+    shf->ControlHandShake = 0;
+    shf->FlowReplace = 0;
 #ifdef TIOCMGET
     if (ioctl(fd, TIOCMGET, &stat) == -1)
     {
         WARN("ioctl error '%s'\n", strerror(errno));
-        stat = DTR_CONTROL_ENABLE | RTS_CONTROL_ENABLE;
+        shf->ControlHandShake |= SERIAL_DTR_CONTROL;
+        shf->FlowReplace |= SERIAL_RTS_CONTROL;
     }
+#else
+    WARN("Setting DTR/RTS to enabled by default\n");
+    shf->ControlHandShake |= SERIAL_DTR_CONTROL;
+    shf->FlowReplace |= SERIAL_RTS_CONTROL;
 #endif
-    /* termios does not support DTR/DSR flow control */
-    shf->ControlHandShake = 0;
-    shf->FlowReplace = 0;
 #ifdef TIOCM_DTR
     if (stat & TIOCM_DTR)
 #endif
@@ -216,7 +218,7 @@ static NTSTATUS get_hand_flow(int fd, SERIAL_HANDFLOW* shf)
 #ifdef CRTSCTS
     if (port.c_cflag & CRTSCTS)
     {
-        shf->ControlHandShake |= SERIAL_DTR_CONTROL | SERIAL_DTR_HANDSHAKE;
+        shf->FlowReplace |= SERIAL_RTS_CONTROL;
         shf->ControlHandShake |= SERIAL_CTS_HANDSHAKE;
     }
     else
@@ -225,11 +227,11 @@ static NTSTATUS get_hand_flow(int fd, SERIAL_HANDFLOW* shf)
 #ifdef TIOCM_RTS
         if (stat & TIOCM_RTS)
 #endif
-            shf->ControlHandShake |= SERIAL_RTS_CONTROL;
+            shf->FlowReplace |= SERIAL_RTS_CONTROL;
     }
-    if (port.c_iflag & IXON)
-        shf->FlowReplace |= SERIAL_AUTO_RECEIVE;
     if (port.c_iflag & IXOFF)
+        shf->FlowReplace |= SERIAL_AUTO_RECEIVE;
+    if (port.c_iflag & IXON)
         shf->FlowReplace |= SERIAL_AUTO_TRANSMIT;
 
     shf->XonLimit = 10;
@@ -269,7 +271,7 @@ static NTSTATUS get_line_control(int fd, SERIAL_LINE_CONTROL* slc)
     case CS8:	slc->WordLength = 8;	break;
     default: ERR("unknown size %x\n", (UINT)(port.c_cflag & CSIZE));
     }
-    
+
     if (port.c_cflag & CSTOPB)
     {
         if (slc->WordLength == 5)
@@ -611,13 +613,13 @@ static NTSTATUS set_handflow(int fd, const SERIAL_HANDFLOW* shf)
 #endif
 
     if (shf->FlowReplace & SERIAL_AUTO_RECEIVE)
-        port.c_iflag |= IXON;
-    else
-        port.c_iflag &= ~IXON;
-    if (shf->FlowReplace & SERIAL_AUTO_TRANSMIT)
         port.c_iflag |= IXOFF;
     else
         port.c_iflag &= ~IXOFF;
+    if (shf->FlowReplace & SERIAL_AUTO_TRANSMIT)
+        port.c_iflag |= IXON;
+    else
+        port.c_iflag &= ~IXON;
     if (tcsetattr(fd, TCSANOW, &port) == -1)
     {
         ERR("tcsetattr error '%s'\n", strerror(errno));
@@ -1077,7 +1079,7 @@ static NTSTATUS wait_on(HANDLE hDevice, int fd, HANDLE hEvent, DWORD* events)
         (status = get_modem_status(fd, &commio->mstat)))
         goto out_now;
 
-    /* We might have received something or the TX bufffer is delivered */
+    /* We might have received something or the TX buffer is delivered */
     *events = check_events(fd, commio->evtmask,
                                &commio->irq_info, &commio->irq_info,
                                commio->mstat, commio->mstat);
@@ -1363,7 +1365,7 @@ NTSTATUS COMM_DeviceIoControl(HANDLE hDevice,
 
         /* this is an ioctl we implement in a non blocking way if hEvent is not
          * null
-         * so we have to explicitely wait if no hEvent is provided
+         * so we have to explicitly wait if no hEvent is provided
          */
         if (!hev)
         {

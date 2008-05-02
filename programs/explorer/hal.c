@@ -102,9 +102,10 @@ failed:
     return FALSE;
 }
 
-static WINE_EXCEPTION_FILTER(assert_fault)
+static LONG WINAPI assert_fault(EXCEPTION_POINTERS *eptr)
 {
-    if (GetExceptionCode() == EXCEPTION_WINE_ASSERTION) return EXCEPTION_EXECUTE_HANDLER;
+    if (eptr->ExceptionRecord->ExceptionCode == EXCEPTION_WINE_ASSERTION)
+        return EXCEPTION_EXECUTE_HANDLER;
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -112,7 +113,10 @@ static WINE_EXCEPTION_FILTER(assert_fault)
 static void new_device( LibHalContext *ctx, const char *udi )
 {
     DBusError error;
-    char *parent, *mount_point, *device, *type;
+    char *parent = NULL;
+    char *mount_point = NULL;
+    char *device = NULL;
+    char *type = NULL;
 
     p_dbus_error_init( &error );
 
@@ -133,15 +137,14 @@ static void new_device( LibHalContext *ctx, const char *udi )
 
     add_dos_device( udi, device, mount_point, type );
 
-    if (type) p_libhal_free_string( type );
-    p_libhal_free_string( parent );
-    p_libhal_free_string( device );
-    p_libhal_free_string( mount_point );
-
     /* add property watch for mount point */
     p_libhal_device_add_property_watch( ctx, udi, &error );
 
 done:
+    if (type) p_libhal_free_string( type );
+    if (parent) p_libhal_free_string( parent );
+    if (device) p_libhal_free_string( device );
+    if (mount_point) p_libhal_free_string( mount_point );
     p_dbus_error_free( &error );
 }
 

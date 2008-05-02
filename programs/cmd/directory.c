@@ -2,6 +2,7 @@
  * CMD - Wine-compatible command line interface - Directory functions.
  *
  * Copyright (C) 1999 D A Pickles
+ * Copyright (C) 2007 J Edmeades
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -924,7 +925,7 @@ void WCMD_getfileowner(WCHAR *filename, WCHAR *owner, int ownerlen) {
     /* In case of error, return empty string */
     *owner = 0x00;
 
-    /* Find out how much space we need for the owner security descritpor */
+    /* Find out how much space we need for the owner security descriptor */
     GetFileSecurity(filename, OWNER_SECURITY_INFORMATION, 0, 0, &sizeNeeded);
     rc = GetLastError();
 

@@ -16,12 +16,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "wingdi.h"
 #include "docobj.h"
 #include "mshtml.h"
 #include "mshtmhst.h"
 #include "hlink.h"
+#include "dispex.h"
 
 #include "wine/list.h"
+#include "wine/unicode.h"
 
 #ifdef INIT_GUID
 #include "initguid.h"
@@ -52,9 +55,25 @@
 typedef struct HTMLDOMNode HTMLDOMNode;
 typedef struct ConnectionPoint ConnectionPoint;
 typedef struct BSCallback BSCallback;
+typedef struct nsChannelBSC nsChannelBSC;
+
+/* NOTE: make sure to keep in sync with dispex.c */
+typedef enum {
+    IHTMLWindow2_tid,
+    LAST_tid
+} tid_t;
+
+typedef struct {
+    const IDispatchExVtbl  *lpIDispatchExVtbl;
+
+    IUnknown *outer;
+} DispatchEx;
+
+void init_dispex(DispatchEx*,IUnknown*);
 
 typedef struct {
     const IHTMLWindow2Vtbl *lpHTMLWindow2Vtbl;
+    const IHTMLWindow3Vtbl *lpHTMLWindow3Vtbl;
 
     LONG ref;
 
@@ -89,14 +108,32 @@ struct ConnectionPoint {
     } *sinks;
     DWORD sinks_size;
 
-    IID iid;
+    const IID *iid;
 
     ConnectionPoint *next;
 };
 
+typedef struct {
+    const IHTMLLocationVtbl *lpHTMLLocationVtbl;
+
+    LONG ref;
+
+    HTMLDocument *doc;
+} HTMLLocation;
+
+typedef struct {
+    const IHTMLOptionElementFactoryVtbl *lpHTMLOptionElementFactoryVtbl;
+
+    LONG ref;
+
+    HTMLDocument *doc;
+} HTMLOptionElementFactory;
+
 struct HTMLDocument {
     const IHTMLDocument2Vtbl              *lpHTMLDocument2Vtbl;
     const IHTMLDocument3Vtbl              *lpHTMLDocument3Vtbl;
+    const IHTMLDocument4Vtbl              *lpHTMLDocument4Vtbl;
+    const IHTMLDocument5Vtbl              *lpHTMLDocument5Vtbl;
     const IPersistMonikerVtbl             *lpPersistMonikerVtbl;
     const IPersistFileVtbl                *lpPersistFileVtbl;
     const IMonikerPropVtbl                *lpMonikerPropVtbl;
@@ -124,9 +161,14 @@ struct HTMLDocument {
     IOleInPlaceFrame *frame;
     IOleInPlaceUIWindow *ip_window;
 
-    BSCallback *bscallback;
+    IOleUndoManager *undomgr;
+
+    nsChannelBSC *bscallback;
     IMoniker *mon;
-    BSTR url;
+    LPOLESTR url;
+    struct list bindings;
+
+    struct list script_hosts;
 
     HWND hwnd;
     HWND tooltips_hwnd;
@@ -141,6 +183,7 @@ struct HTMLDocument {
     BOOL has_key_path;
     BOOL container_locked;
     BOOL focus;
+    LPWSTR mime;
 
     DWORD update;
 
@@ -148,6 +191,9 @@ struct HTMLDocument {
     ConnectionPoint cp_htmldocevents;
     ConnectionPoint cp_htmldocevents2;
     ConnectionPoint cp_propnotif;
+
+    HTMLOptionElementFactory *option_factory;
+    HTMLLocation *location;
 
     struct list selection_list;
     struct list range_list;
@@ -174,12 +220,14 @@ struct NSContainer {
     nsEventListener focus_listener;
     nsEventListener keypress_listener;
     nsEventListener load_listener;
+    nsEventListener node_insert_listener;
 
     nsIWebBrowser *webbrowser;
     nsIWebNavigation *navigation;
     nsIBaseWindow *window;
     nsIWebBrowserFocus *focus;
 
+    nsIEditor *editor;
     nsIController *editor_controller;
 
     LONG ref;
@@ -191,7 +239,8 @@ struct NSContainer {
 
     HWND hwnd;
 
-    BSCallback *bscallback; /* hack */
+    nsChannelBSC *bscallback; /* hack */
+    HWND reset_focus; /* hack */
 };
 
 typedef struct {
@@ -208,58 +257,20 @@ typedef struct {
     nsIInterfaceRequestor *notif_callback;
     nsLoadFlags load_flags;
     nsIURI *original_uri;
-    char *content;
+    char *content_type;
     char *charset;
 } nsChannel;
 
 typedef struct {
-    const nsIInputStreamVtbl *lpInputStreamVtbl;
-
-    LONG ref;
-
-    char buf[1024];
-    DWORD buf_size;
-} nsProtocolStream;
-
-struct BSCallback {
-    const IBindStatusCallbackVtbl *lpBindStatusCallbackVtbl;
-    const IServiceProviderVtbl    *lpServiceProviderVtbl;
-    const IHttpNegotiate2Vtbl     *lpHttpNegotiate2Vtbl;
-    const IInternetBindInfoVtbl   *lpInternetBindInfoVtbl;
-
-    LONG ref;
-
-    LPWSTR headers;
-    HGLOBAL post_data;
-    ULONG post_data_len;
-    ULONG readed;
-
-    nsChannel *nschannel;
-    nsIStreamListener *nslistener;
-    nsISupports *nscontext;
-
-    IMoniker *mon;
-    IBinding *binding;
-
-    HTMLDocument *doc;
-
-    nsProtocolStream *nsstream;
-};
+    HRESULT (*qi)(HTMLDOMNode*,REFIID,void**);
+    void (*destructor)(HTMLDOMNode*);
+} NodeImplVtbl;
 
 struct HTMLDOMNode {
     const IHTMLDOMNodeVtbl *lpHTMLDOMNodeVtbl;
+    const NodeImplVtbl *vtbl;
 
-    void (*destructor)(IUnknown*);
-
-    enum {
-        NT_UNKNOWN,
-        NT_HTMLELEM
-    } node_type;
-
-    union {
-        IUnknown *unk;
-        IHTMLElement *elem;
-    } impl;
+    LONG ref;
 
     nsIDOMNode *nsnode;
     HTMLDocument *doc;
@@ -268,27 +279,30 @@ struct HTMLDOMNode {
 };
 
 typedef struct {
-    const IHTMLElementVtbl *lpHTMLElementVtbl;
-    const IHTMLElement2Vtbl *lpHTMLElement2Vtbl;
+    HTMLDOMNode node;
+    ConnectionPointContainer cp_container;
 
-    void (*destructor)(IUnknown*);
+    const IHTMLElementVtbl   *lpHTMLElementVtbl;
+    const IHTMLElement2Vtbl  *lpHTMLElement2Vtbl;
 
     nsIDOMHTMLElement *nselem;
-    HTMLDOMNode *node;
-
-    IUnknown *impl;
 } HTMLElement;
 
 typedef struct {
+    HTMLElement element;
+
     const IHTMLTextContainerVtbl *lpHTMLTextContainerVtbl;
 
-    HTMLElement *element;
+    ConnectionPoint cp;
 } HTMLTextContainer;
 
 #define HTMLWINDOW2(x)   ((IHTMLWindow2*)                 &(x)->lpHTMLWindow2Vtbl)
+#define HTMLWINDOW3(x)   ((IHTMLWindow3*)                 &(x)->lpHTMLWindow3Vtbl)
 
 #define HTMLDOC(x)       ((IHTMLDocument2*)               &(x)->lpHTMLDocument2Vtbl)
 #define HTMLDOC3(x)      ((IHTMLDocument3*)               &(x)->lpHTMLDocument3Vtbl)
+#define HTMLDOC4(x)      ((IHTMLDocument4*)               &(x)->lpHTMLDocument4Vtbl)
+#define HTMLDOC5(x)      ((IHTMLDocument5*)               &(x)->lpHTMLDocument5Vtbl)
 #define PERSIST(x)       ((IPersist*)                     &(x)->lpPersistFileVtbl)
 #define PERSISTMON(x)    ((IPersistMoniker*)              &(x)->lpPersistMonikerVtbl)
 #define PERSISTFILE(x)   ((IPersistFile*)                 &(x)->lpPersistFileVtbl)
@@ -334,16 +348,26 @@ typedef struct {
 
 #define HTMLTEXTCONT(x)  ((IHTMLTextContainer*)           &(x)->lpHTMLTextContainerVtbl)
 
-#define DEFINE_THIS(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,lp ## ifc ## Vtbl)))
+#define HTMLOPTFACTORY(x)  ((IHTMLOptionElementFactory*)  &(x)->lpHTMLOptionElementFactoryVtbl)
+#define HTMLLOCATION(x)  ((IHTMLLocation*) &(x)->lpHTMLLocationVtbl)
+
+#define DISPATCHEX(x)    ((IDispatchEx*) &(x)->lpIDispatchExVtbl)
+
+#define DEFINE_THIS2(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,ifc)))
+#define DEFINE_THIS(cls,ifc,iface) DEFINE_THIS2(cls,lp ## ifc ## Vtbl,iface)
 
 HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**);
 HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
 
 HTMLWindow *HTMLWindow_Create(HTMLDocument*);
 HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
+HTMLOptionElementFactory *HTMLOptionElementFactory_Create(HTMLDocument*);
+HTMLLocation *HTMLLocation_Create(HTMLDocument*);
+IOmNavigator *OmNavigator_Create(void);
 void setup_nswindow(HTMLWindow*);
 
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
+void HTMLDocument_HTMLDocument5_Init(HTMLDocument*);
 void HTMLDocument_Persist_Init(HTMLDocument*);
 void HTMLDocument_OleCmd_Init(HTMLDocument*);
 void HTMLDocument_OleObj_Init(HTMLDocument*);
@@ -352,15 +376,15 @@ void HTMLDocument_Window_Init(HTMLDocument*);
 void HTMLDocument_Service_Init(HTMLDocument*);
 void HTMLDocument_Hlink_Init(HTMLDocument*);
 
-void ConnectionPoint_Init(ConnectionPoint*,IConnectionPointContainer*,REFIID,ConnectionPoint*);
-void ConnectionPointContainer_Init(ConnectionPointContainer*,ConnectionPoint*,IUnknown*);
+void ConnectionPoint_Init(ConnectionPoint*,ConnectionPointContainer*,REFIID);
+void ConnectionPointContainer_Init(ConnectionPointContainer*,IUnknown*);
 void ConnectionPointContainer_Destroy(ConnectionPointContainer*);
 
 NSContainer *NSContainer_Create(HTMLDocument*,NSContainer*);
 void NSContainer_Release(NSContainer*);
 
 void HTMLDocument_LockContainer(HTMLDocument*,BOOL);
-void show_context_menu(HTMLDocument*,DWORD,POINT*);
+void show_context_menu(HTMLDocument*,DWORD,POINT*,IDispatch*);
 void notif_focus(HTMLDocument*);
 
 void show_tooltip(HTMLDocument*,DWORD,DWORD,LPCWSTR);
@@ -369,24 +393,28 @@ HRESULT get_client_disp_property(IOleClientSite*,DISPID,VARIANT*);
 
 HRESULT ProtocolFactory_Create(REFCLSID,REFIID,void**);
 
+BOOL load_gecko(BOOL);
 void close_gecko(void);
 void register_nsservice(nsIComponentRegistrar*,nsIServiceManager*);
 void init_nsio(nsIComponentManager*,nsIComponentRegistrar*);
+BOOL install_wine_gecko(BOOL);
 
 void hlink_frame_navigate(HTMLDocument*,IHlinkFrame*,LPCWSTR,nsIInputStream*,DWORD);
 
 void call_property_onchanged(ConnectionPoint*,DISPID);
+HRESULT call_set_active_object(IOleInPlaceUIWindow*,IOleInPlaceActiveObject*);
 
 void *nsalloc(size_t);
 void nsfree(void*);
 
 void nsACString_Init(nsACString*,const char*);
 void nsACString_SetData(nsACString*,const char*);
-PRUint32 nsACString_GetData(const nsACString*,const char**,PRBool*);
+PRUint32 nsACString_GetData(const nsACString*,const char**);
 void nsACString_Finish(nsACString*);
 
 void nsAString_Init(nsAString*,const PRUnichar*);
-PRUint32 nsAString_GetData(const nsAString*,const PRUnichar**,PRBool*);
+void nsAString_SetData(nsAString*,const PRUnichar*);
+PRUint32 nsAString_GetData(const nsAString*,const PRUnichar**);
 void nsAString_Finish(nsAString*);
 
 nsIInputStream *create_nsstream(const char*,PRInt32);
@@ -394,40 +422,58 @@ nsICommandParams *create_nscommand_params(void);
 nsIMutableArray *create_nsarray(void);
 nsIWritableVariant *create_nsvariant(void);
 void nsnode_to_nsstring(nsIDOMNode*,nsAString*);
-nsIController *get_editor_controller(NSContainer*);
+void get_editor_controller(NSContainer*);
 void init_nsevents(NSContainer*);
+nsresult get_nsinterface(nsISupports*,REFIID,void**);
 
-BSCallback *create_bscallback(IMoniker*);
-HRESULT start_binding(BSCallback*);
-HRESULT load_stream(BSCallback*,IStream*);
-void set_document_bscallback(HTMLDocument*,BSCallback*);
+void set_document_bscallback(HTMLDocument*,nsChannelBSC*);
 void set_current_mon(HTMLDocument*,IMoniker*);
+HRESULT start_binding(HTMLDocument*,BSCallback*,IBindCtx*);
+
+HRESULT bind_mon_to_buffer(HTMLDocument*,IMoniker*,void**,DWORD*);
+
+nsChannelBSC *create_channelbsc(IMoniker*);
+HRESULT channelbsc_load_stream(nsChannelBSC*,IStream*);
+void channelbsc_set_channel(nsChannelBSC*,nsChannel*,nsIStreamListener*,nsISupports*);
+IMoniker *get_channelbsc_mon(nsChannelBSC*);
 
 IHTMLSelectionObject *HTMLSelectionObject_Create(HTMLDocument*,nsISelection*);
 IHTMLTxtRange *HTMLTxtRange_Create(HTMLDocument*,nsIDOMRange*);
 IHTMLStyle *HTMLStyle_Create(nsIDOMCSSStyleDeclaration*);
-IHTMLStyleSheet *HTMLStyleSheet_Create(void);
+IHTMLStyleSheet *HTMLStyleSheet_Create(nsIDOMStyleSheet*);
+IHTMLStyleSheetsCollection *HTMLStyleSheetsCollection_Create(nsIDOMStyleSheetList*);
 
 void detach_selection(HTMLDocument*);
 void detach_ranges(HTMLDocument*);
 
-void HTMLElement_Create(HTMLDOMNode*);
-void HTMLBodyElement_Create(HTMLElement*);
-void HTMLInputElement_Create(HTMLElement*);
-void HTMLSelectElement_Create(HTMLElement*);
-void HTMLTextAreaElement_Create(HTMLElement*);
+HTMLElement *HTMLElement_Create(nsIDOMNode*);
+HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLInputElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLOptionElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLScriptElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLSelectElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLTable_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLTextAreaElement_Create(nsIDOMHTMLElement*);
 
+void HTMLElement_Init(HTMLElement*);
 void HTMLElement2_Init(HTMLElement*);
-
-void HTMLTextContainer_Init(HTMLTextContainer*,HTMLElement*);
+void HTMLTextContainer_Init(HTMLTextContainer*);
 
 HRESULT HTMLDOMNode_QI(HTMLDOMNode*,REFIID,void**);
-HRESULT HTMLElement_QI(HTMLElement*,REFIID,void**);
+void HTMLDOMNode_destructor(HTMLDOMNode*);
 
-HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*);
+HRESULT HTMLElement_QI(HTMLDOMNode*,REFIID,void**);
+void HTMLElement_destructor(HTMLDOMNode*);
+
+HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*,BOOL);
 void release_nodes(HTMLDocument*);
 
-BOOL install_wine_gecko(void);
+void release_script_hosts(HTMLDocument*);
+void connect_scripts(HTMLDocument*);
+void doc_insert_script(HTMLDocument*,nsIDOMHTMLScriptElement*);
+
+IHTMLElementCollection *create_all_collection(HTMLDOMNode*);
 
 /* commands */
 typedef struct {
@@ -437,6 +483,8 @@ typedef struct {
 } cmdtable_t;
 
 extern const cmdtable_t editmode_cmds[];
+
+void do_ns_command(NSContainer*,const char*,nsICommandParams*);
 
 /* timer */
 #define UPDATE_UI       0x0001
@@ -452,7 +500,9 @@ void handle_edit_event(HTMLDocument*,nsIDOMEvent*);
 HRESULT editor_exec_copy(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
 HRESULT editor_exec_cut(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
 HRESULT editor_exec_paste(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
-void handle_edit_load(HTMLDocument *This);
+void handle_edit_load(HTMLDocument*);
+HRESULT editor_is_dirty(HTMLDocument*);
+void set_dirty(HTMLDocument*,VARIANT_BOOL);
 
 extern DWORD mshtml_tls;
 
@@ -466,7 +516,7 @@ typedef struct task_t {
         TASK_START_BINDING
     } task_id;
 
-    BSCallback *bscallback;
+    nsChannelBSC *bscallback;
 
     struct task_t *next;
 } task_t;
@@ -482,13 +532,8 @@ HWND get_thread_hwnd(void);
 void push_task(task_t*);
 void remove_doc_tasks(const HTMLDocument*);
 
-/* typelibs */
-enum tid_t {
-    IHTMLWindow2_tid,
-    LAST_tid
-};
-
-HRESULT get_typeinfo(enum tid_t, ITypeInfo**);
+HRESULT get_typeinfo(tid_t,ITypeInfo**);
+void release_typelib(void);
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
@@ -504,24 +549,82 @@ extern LONG module_ref;
 
 /* memory allocation functions */
 
-static inline void *mshtml_alloc(size_t len)
+static inline void *heap_alloc(size_t len)
 {
     return HeapAlloc(GetProcessHeap(), 0, len);
 }
 
-static inline void *mshtml_alloc_zero(size_t len)
+static inline void *heap_alloc_zero(size_t len)
 {
     return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len);
 }
 
-static inline void *mshtml_realloc(void *mem, size_t len)
+static inline void *heap_realloc(void *mem, size_t len)
 {
     return HeapReAlloc(GetProcessHeap(), 0, mem, len);
 }
 
-static inline BOOL mshtml_free(void *mem)
+static inline BOOL heap_free(void *mem)
 {
     return HeapFree(GetProcessHeap(), 0, mem);
+}
+
+static inline LPWSTR heap_strdupW(LPCWSTR str)
+{
+    LPWSTR ret = NULL;
+
+    if(str) {
+        DWORD size;
+
+        size = (strlenW(str)+1)*sizeof(WCHAR);
+        ret = heap_alloc(size);
+        memcpy(ret, str, size);
+    }
+
+    return ret;
+}
+
+static inline char *heap_strdupA(const char *str)
+{
+    char *ret = NULL;
+
+    if(str) {
+        DWORD size;
+
+        size = strlen(str)+1;
+        ret = heap_alloc(size);
+        memcpy(ret, str, size);
+    }
+
+    return ret;
+}
+
+static inline WCHAR *heap_strdupAtoW(const char *str)
+{
+    LPWSTR ret = NULL;
+
+    if(str) {
+        DWORD len;
+
+        len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
+        ret = heap_alloc(len*sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
+    }
+
+    return ret;
+}
+
+static inline char *heap_strdupWtoA(LPCWSTR str)
+{
+    char *ret = NULL;
+
+    if(str) {
+        DWORD size = WideCharToMultiByte(CP_ACP, 0, str, -1, NULL, 0, NULL, NULL);
+        ret = heap_alloc(size);
+        WideCharToMultiByte(CP_ACP, 0, str, -1, ret, size, NULL, NULL);
+    }
+
+    return ret;
 }
 
 HINSTANCE get_shdoclc(void);

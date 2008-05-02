@@ -3,6 +3,7 @@
  * Glueing the RSAENH specific code to the crypto library
  *
  * Copyright (c) 2004, 2005 Michael Jung
+ * Copyright (c) 2007 Vijay Kiran Kamuju
  *
  * based on code by Mike McCormack and David Hammerton
  *
@@ -133,7 +134,7 @@ BOOL finalize_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext, BYTE *pbHash
 BOOL duplicate_hash_impl(ALG_ID aiAlgid, CONST HASH_CONTEXT *pSrcHashContext, 
                          HASH_CONTEXT *pDestHashContext) 
 {
-    memcpy(pDestHashContext, pSrcHashContext, sizeof(HASH_CONTEXT));
+    *pDestHashContext = *pSrcHashContext;
 
     return TRUE;
 }
@@ -166,8 +167,8 @@ BOOL free_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext)
     return TRUE;
 }
 
-BOOL setup_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen, DWORD dwSaltLen, 
-                    BYTE *abKeyValue) 
+BOOL setup_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen,
+                    DWORD dwEffectiveKeyLen, DWORD dwSaltLen, BYTE *abKeyValue)
 {
     switch (aiAlgid) 
     {
@@ -178,7 +179,8 @@ BOOL setup_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen, DW
             break;
         
         case CALG_RC2:
-            rc2_setup(abKeyValue, dwKeyLen + dwSaltLen, dwKeyLen << 3, 0, &pKeyContext->rc2);
+            rc2_setup(abKeyValue, dwKeyLen + dwSaltLen, dwEffectiveKeyLen ?
+                      dwEffectiveKeyLen : dwKeyLen << 3, 0, &pKeyContext->rc2);
             break;
         
         case CALG_3DES:
@@ -192,6 +194,19 @@ BOOL setup_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen, DW
         
         case CALG_DES:
             des_setup(abKeyValue, 8, 0, &pKeyContext->des);
+            break;
+
+        case CALG_AES:
+        case CALG_AES_128:
+            aes_setup(abKeyValue, 16, 0, &pKeyContext->aes);
+            break;
+
+        case CALG_AES_192:
+            aes_setup(abKeyValue, 24, 0, &pKeyContext->aes);
+            break;
+
+        case CALG_AES_256:
+            aes_setup(abKeyValue, 32, 0, &pKeyContext->aes);
             break;
     }
 
@@ -208,7 +223,11 @@ BOOL duplicate_key_impl(ALG_ID aiAlgid, CONST KEY_CONTEXT *pSrcKeyContext,
         case CALG_3DES:
         case CALG_3DES_112:
         case CALG_DES:
-            memcpy(pDestKeyContext, pSrcKeyContext, sizeof(KEY_CONTEXT));
+        case CALG_AES:
+        case CALG_AES_128:
+        case CALG_AES_192:
+        case CALG_AES_256:
+            *pDestKeyContext = *pSrcKeyContext;
             break;
         case CALG_RSA_KEYX:
         case CALG_RSA_SIGN:
@@ -271,6 +290,17 @@ BOOL encrypt_block_impl(ALG_ID aiAlgid, DWORD dwKeySpec, KEY_CONTEXT *pKeyContex
                 des_ecb_encrypt(in, out, &pKeyContext->des);
             } else {
                 des_ecb_decrypt(in, out, &pKeyContext->des);
+            }
+            break;
+
+        case CALG_AES:
+        case CALG_AES_128:
+        case CALG_AES_192:
+        case CALG_AES_256:
+            if (enc) {
+                aes_ecb_encrypt(in, out, &pKeyContext->aes);
+            } else {
+                aes_ecb_decrypt(in, out, &pKeyContext->aes);
             }
             break;
 

@@ -28,6 +28,9 @@
 
 #include "gdiplus.h"
 #include "gdiplus_private.h"
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
 GpStatus WINGDIPAPI GdipCreateStringFormat(INT attr, LANGID lang,
     GpStringFormat **format)
@@ -139,6 +142,28 @@ GpStatus WINGDIPAPI GdipSetStringFormatTrimming(GpStringFormat *format,
         return InvalidParameter;
 
     format->trimming = trimming;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipSetStringFormatFlags(GDIPCONST GpStringFormat *format, INT flags)
+{
+    FIXME("format (%p) flags (%d)\n", format, flags);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipCloneStringFormat(GDIPCONST GpStringFormat *format, GpStringFormat **newFormat)
+{
+    if(!format || !newFormat)
+        return InvalidParameter;
+
+    *newFormat = GdipAlloc(sizeof(GpStringFormat));
+    if(!*newFormat)    return OutOfMemory;
+
+    **newFormat = *format;
+
+    TRACE("%p %p\n",format,newFormat);
 
     return Ok;
 }

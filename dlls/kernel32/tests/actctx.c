@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <wine/test.h>
+#include "wine/test.h"
 #include <winbase.h>
 #include <windef.h>
 #include <winnt.h>
@@ -29,6 +29,7 @@ static HANDLE (WINAPI *pCreateActCtxW)(PCACTCTXW);
 static BOOL   (WINAPI *pDeactivateActCtx)(DWORD,ULONG_PTR);
 static BOOL   (WINAPI *pFindActCtxSectionStringW)(DWORD,const GUID *,ULONG,LPCWSTR,PACTCTX_SECTION_KEYED_DATA);
 static BOOL   (WINAPI *pGetCurrentActCtx)(HANDLE *);
+static BOOL   (WINAPI *pIsDebuggerPresent)(void);
 static BOOL   (WINAPI *pQueryActCtxW)(DWORD,HANDLE,PVOID,ULONG,PVOID,SIZE_T,SIZE_T*);
 static VOID   (WINAPI *pReleaseActCtx)(HANDLE);
 
@@ -75,7 +76,7 @@ static const char manifest4[] =
 "<dependency>"
 "<dependentAssembly>"
 "<assemblyIdentity type=\"win32\" name=\"Microsoft.Windows.Common-Controls\" "
-    "version=\"6.0.0.0\" processorArchitecture=\"x86\" publicKeyToken=\"6595b64144ccf1df\">"
+    "version=\"6.0.1.0\" processorArchitecture=\"x86\" publicKeyToken=\"6595b64144ccf1df\">"
 "</assemblyIdentity>"
 "</dependentAssembly>"
 "</dependency>"
@@ -163,7 +164,7 @@ static const WCHAR wndClass2W[] =
 static const WCHAR acr_manifest[] =
     {'a','c','r','.','m','a','n','i','f','e','s','t',0};
 
-static WCHAR app_dir[MAX_PATH], exe_path[MAX_PATH];
+static WCHAR app_dir[MAX_PATH], exe_path[MAX_PATH], work_dir[MAX_PATH], work_dir_subdir[MAX_PATH];
 static WCHAR app_manifest_path[MAX_PATH], manifest_path[MAX_PATH], depmanifest_path[MAX_PATH];
 
 static int strcmp_aw(LPCWSTR strw, const char *stra)
@@ -180,7 +181,7 @@ static DWORD strlen_aw(const char *str)
     return MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0) - 1;
 }
 
-static BOOL create_manifest_file(const char *filename, const char *manifest,
+static BOOL create_manifest_file(const char *filename, const char *manifest, int manifest_len,
                                  const char *depfile, const char *depmanifest)
 {
     DWORD size;
@@ -190,12 +191,15 @@ static BOOL create_manifest_file(const char *filename, const char *manifest,
     MultiByteToWideChar( CP_ACP, 0, filename, -1, path, MAX_PATH );
     GetFullPathNameW(path, sizeof(manifest_path)/sizeof(WCHAR), manifest_path, NULL);
 
+    if (manifest_len == -1)
+        manifest_len = strlen(manifest);
+
     file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                        FILE_ATTRIBUTE_NORMAL, NULL);
     ok(file != INVALID_HANDLE_VALUE, "CreateFile failed: %u\n", GetLastError());
     if(file == INVALID_HANDLE_VALUE)
         return FALSE;
-    WriteFile(file, manifest, strlen(manifest), &size, NULL);
+    WriteFile(file, manifest, manifest_len, &size, NULL);
     CloseHandle(file);
 
     if (depmanifest)
@@ -211,6 +215,25 @@ static BOOL create_manifest_file(const char *filename, const char *manifest,
         CloseHandle(file);
     }
     return TRUE;
+}
+
+static BOOL create_wide_manifest(const char *filename, const char *manifest, BOOL fBOM, BOOL fReverse)
+{
+    WCHAR *wmanifest = HeapAlloc(GetProcessHeap(), 0, (strlen(manifest)+2) * sizeof(WCHAR));
+    BOOL ret;
+    int offset = (fBOM ? 0 : 1);
+
+    MultiByteToWideChar(CP_ACP, 0, manifest, -1, &wmanifest[1], (strlen(manifest)+1) * sizeof(WCHAR));
+    wmanifest[0] = 0xfeff;
+    if (fReverse)
+    {
+        size_t i;
+        for (i = 0; i < strlen(manifest)+1; i++)
+            wmanifest[i] = (wmanifest[i] << 8) | ((wmanifest[i] >> 8) & 0xff);
+    }
+    ret = create_manifest_file(filename, (char *)&wmanifest[offset], (strlen(manifest)+1-offset) * sizeof(WCHAR), NULL, NULL);
+    HeapFree(GetProcessHeap(), 0, wmanifest);
+    return ret;
 }
 
 typedef struct {
@@ -230,7 +253,7 @@ static const detailed_info_t detailed_info0 = {
 static const detailed_info_t detailed_info1 = {
     1, 1, ACTIVATION_CONTEXT_PATH_TYPE_WIN32_FILE, manifest_path,
     ACTIVATION_CONTEXT_PATH_TYPE_NONE, ACTIVATION_CONTEXT_PATH_TYPE_WIN32_FILE,
-    app_dir,
+    work_dir,
 };
 
 static const detailed_info_t detailed_info1_child = {
@@ -242,7 +265,7 @@ static const detailed_info_t detailed_info1_child = {
 static const detailed_info_t detailed_info2 = {
     1, 2, ACTIVATION_CONTEXT_PATH_TYPE_WIN32_FILE, manifest_path,
     ACTIVATION_CONTEXT_PATH_TYPE_NONE, ACTIVATION_CONTEXT_PATH_TYPE_WIN32_FILE,
-    app_dir,
+    work_dir,
 };
 
 static void test_detailed_info(HANDLE handle, const detailed_info_t *exinfo)
@@ -253,7 +276,7 @@ static void test_detailed_info(HANDLE handle, const detailed_info_t *exinfo)
 
     exsize = sizeof(ACTIVATION_CONTEXT_DETAILED_INFORMATION)
         + (exinfo->root_manifest_path ? (lstrlenW(exinfo->root_manifest_path)+1)*sizeof(WCHAR):0)
-        + (exinfo->app_dir ? (lstrlenW(app_dir)+1)*sizeof(WCHAR) : 0);
+        + (exinfo->app_dir ? (lstrlenW(exinfo->app_dir)+1)*sizeof(WCHAR) : 0);
 
     if(exsize != sizeof(ACTIVATION_CONTEXT_DETAILED_INFORMATION)) {
         size = 0xdeadbeef;
@@ -298,9 +321,9 @@ static void test_detailed_info(HANDLE handle, const detailed_info_t *exinfo)
     ok(detailed_info->ulAppDirPathType == exinfo->app_dir_type,
        "detailed_info->ulAppDirPathType=%u, expected %u\n", detailed_info->ulAppDirPathType,
        exinfo->app_dir_type);
-    ok(detailed_info->ulAppDirPathChars == (exinfo->app_dir ? lstrlenW(app_dir) : 0),
+    ok(detailed_info->ulAppDirPathChars == (exinfo->app_dir ? lstrlenW(exinfo->app_dir) : 0),
        "detailed_info->ulAppDirPathChars=%u, expected %u\n",
-       detailed_info->ulAppDirPathChars, exinfo->app_dir ? lstrlenW(app_dir) : 0);
+       detailed_info->ulAppDirPathChars, exinfo->app_dir ? lstrlenW(exinfo->app_dir) : 0);
     if(exinfo->root_manifest_path) {
         ok(detailed_info->lpRootManifestPath != NULL, "detailed_info->lpRootManifestPath == NULL\n");
         if(detailed_info->lpRootManifestPath)
@@ -314,8 +337,8 @@ static void test_detailed_info(HANDLE handle, const detailed_info_t *exinfo)
     if(exinfo->app_dir) {
         ok(detailed_info->lpAppDirPath != NULL, "detailed_info->lpAppDirPath == NULL\n");
         if(detailed_info->lpAppDirPath)
-            ok(!lstrcmpiW(app_dir, detailed_info->lpAppDirPath),
-               "unexpected detailed_info->lpAppDirPath %s\n",strw(detailed_info->lpAppDirPath));
+            ok(!lstrcmpiW(exinfo->app_dir, detailed_info->lpAppDirPath),
+               "unexpected detailed_info->lpAppDirPath\n%s\n",strw(detailed_info->lpAppDirPath));
     }else {
         ok(detailed_info->lpAppDirPath == NULL, "detailed_info->lpAppDirPath != NULL\n");
     }
@@ -495,6 +518,7 @@ static void test_info_in_assembly(HANDLE handle, DWORD id, const info_in_assembl
     else
         ok(info->lpAssemblyDirectoryName == NULL, "info->lpAssemblyDirectoryName = %s\n",
            strw(info->lpAssemblyDirectoryName));
+    HeapFree(GetProcessHeap(), 0, info);
 }
 
 static void test_file_info(HANDLE handle, ULONG assid, ULONG fileid, LPCWSTR filename)
@@ -531,13 +555,14 @@ static void test_file_info(HANDLE handle, ULONG assid, ULONG fileid, LPCWSTR fil
 
     ok(info->ulFlags == 2, "info->ulFlags=%x, expected 2\n", info->ulFlags);
     ok(info->ulFilenameLength == lstrlenW(filename)*sizeof(WCHAR),
-       "info->ulFilenameLength=%u, expected %u\n",
-       info->ulFilenameLength, lstrlenW(filename)*sizeof(WCHAR));
+       "info->ulFilenameLength=%u, expected %u*sizeof(WCHAR)\n",
+       info->ulFilenameLength, lstrlenW(filename));
     ok(info->ulPathLength == 0, "info->ulPathLength=%u\n", info->ulPathLength);
     ok(info->lpFileName != NULL, "info->lpFileName == NULL\n");
     if(info->lpFileName)
         ok(!lstrcmpiW(info->lpFileName, filename), "unexpected info->lpFileName\n");
     ok(info->lpFilePath == NULL, "info->lpFilePath != NULL\n");
+    HeapFree(GetProcessHeap(), 0, info);
 }
 
 static HANDLE test_create(const char *file, const char *manifest)
@@ -581,7 +606,7 @@ static void test_create_and_fail(const char *manifest, const char *depmanifest, 
     actctx.cbSize = sizeof(ACTCTXW);
     actctx.lpSource = path;
 
-    create_manifest_file("bad.manifest", manifest, "testdep.manifest", depmanifest);
+    create_manifest_file("bad.manifest", manifest, -1, "testdep.manifest", depmanifest);
     handle = pCreateActCtxW(&actctx);
     if (todo) todo_wine
     {
@@ -596,6 +621,26 @@ static void test_create_and_fail(const char *manifest, const char *depmanifest, 
     if (handle != INVALID_HANDLE_VALUE) pReleaseActCtx( handle );
     DeleteFileA("bad.manifest");
     DeleteFileA("testdep.manifest");
+}
+
+static void test_create_wide_and_fail(const char *manifest, BOOL fBOM)
+{
+    ACTCTXW actctx;
+    HANDLE handle;
+    WCHAR path[MAX_PATH];
+
+    MultiByteToWideChar( CP_ACP, 0, "bad.manifest", -1, path, MAX_PATH );
+    memset(&actctx, 0, sizeof(ACTCTXW));
+    actctx.cbSize = sizeof(ACTCTXW);
+    actctx.lpSource = path;
+
+    create_wide_manifest("bad.manifest", manifest, fBOM, FALSE);
+    handle = pCreateActCtxW(&actctx);
+    ok(handle == INVALID_HANDLE_VALUE, "handle != INVALID_HANDLE_VALUE\n");
+    ok(GetLastError() == ERROR_SXS_CANT_GEN_ACTCTX, "GetLastError == %u\n", GetLastError());
+
+    if (handle != INVALID_HANDLE_VALUE) pReleaseActCtx( handle );
+    DeleteFileA("bad.manifest");
 }
 
 static void test_create_fail(void)
@@ -629,6 +674,8 @@ static void test_create_fail(void)
     test_create_and_fail(wrong_manifest7, NULL, 1 );
     trace("wrong_manifest8\n");
     test_create_and_fail(wrong_manifest8, NULL, 0 );
+    trace("UTF-16 manifest1 without BOM\n");
+    test_create_wide_and_fail(manifest1, FALSE );
     trace("manifest2\n");
     test_create_and_fail(manifest2, NULL, 0 );
     trace("manifest2+depmanifest1\n");
@@ -822,7 +869,7 @@ static void test_actctx(void)
         pReleaseActCtx(handle);
     }
 
-    if(!create_manifest_file("test1.manifest", manifest1, NULL, NULL)) {
+    if(!create_manifest_file("test1.manifest", manifest1, -1, NULL, NULL)) {
         skip("Could not create manifest file\n");
         return;
     }
@@ -835,14 +882,18 @@ static void test_actctx(void)
         test_detailed_info(handle, &detailed_info1);
         test_info_in_assembly(handle, 1, &manifest1_info);
 
-        b = CloseHandle(handle);
-        ok(!b, "CloseHandle succeeded\n");
-        ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() == %u\n", GetLastError());
+        if (pIsDebuggerPresent && !pIsDebuggerPresent())
+        {
+            /* CloseHandle will generate an exception if a debugger is present */
+            b = CloseHandle(handle);
+            ok(!b, "CloseHandle succeeded\n");
+            ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() == %u\n", GetLastError());
+        }
 
         pReleaseActCtx(handle);
     }
 
-    if(!create_manifest_file("test2.manifest", manifest2, "testdep.manifest", testdep_manifest1)) {
+    if(!create_manifest_file("test2.manifest", manifest2, -1, "testdep.manifest", testdep_manifest1)) {
         skip("Could not create manifest file\n");
         return;
     }
@@ -859,7 +910,7 @@ static void test_actctx(void)
         pReleaseActCtx(handle);
     }
 
-    if(!create_manifest_file("test3.manifest", manifest2, "testdep.manifest", testdep_manifest2)) {
+    if(!create_manifest_file("test3.manifest", manifest2, -1, "testdep.manifest", testdep_manifest2)) {
         skip("Could not create manifest file\n");
         return;
     }
@@ -888,7 +939,7 @@ static void test_actctx(void)
 
     trace("manifest2 depmanifest3\n");
 
-    if(!create_manifest_file("test2-3.manifest", manifest2, "testdep.manifest", testdep_manifest3)) {
+    if(!create_manifest_file("test2-3.manifest", manifest2, -1, "testdep.manifest", testdep_manifest3)) {
         skip("Could not create manifest file\n");
         return;
     }
@@ -917,7 +968,7 @@ static void test_actctx(void)
 
     trace("manifest3\n");
 
-    if(!create_manifest_file("test3.manifest", manifest3, NULL, NULL)) {
+    if(!create_manifest_file("test3.manifest", manifest3, -1, NULL, NULL)) {
         skip("Could not create manifest file\n");
         return;
     }
@@ -942,7 +993,7 @@ static void test_actctx(void)
 
     trace("manifest4\n");
 
-    if(!create_manifest_file("test4.manifest", manifest4, NULL, NULL)) {
+    if(!create_manifest_file("test4.manifest", manifest4, -1, NULL, NULL)) {
         skip("Could not create manifest file\n");
         return;
     }
@@ -956,6 +1007,57 @@ static void test_actctx(void)
         test_info_in_assembly(handle, 2, &manifest_comctrl_info);
         pReleaseActCtx(handle);
     }
+
+    trace("manifest1 in subdir\n");
+
+    CreateDirectoryW(work_dir_subdir, NULL);
+    if (SetCurrentDirectoryW(work_dir_subdir))
+    {
+        if(!create_manifest_file("..\\test1.manifest", manifest1, -1, NULL, NULL)) {
+            skip("Could not create manifest file\n");
+            return;
+        }
+        handle = test_create("..\\test1.manifest", manifest1);
+        DeleteFileA("..\\test1.manifest");
+        if(handle != INVALID_HANDLE_VALUE) {
+            test_detailed_info(handle, &detailed_info1);
+            test_info_in_assembly(handle, 1, &manifest1_info);
+            pReleaseActCtx(handle);
+        }
+        SetCurrentDirectoryW(work_dir);
+    }
+    else
+        skip("Couldn't change directory\n");
+    RemoveDirectoryW(work_dir_subdir);
+
+    trace("UTF-16 manifest1, with BOM\n");
+    if(!create_wide_manifest("test1.manifest", manifest1, TRUE, FALSE)) {
+        skip("Could not create manifest file\n");
+        return;
+    }
+
+    handle = test_create("test1.manifest", manifest1);
+    DeleteFileA("test1.manifest");
+    if (handle != INVALID_HANDLE_VALUE) {
+        test_detailed_info(handle, &detailed_info1);
+        test_info_in_assembly(handle, 1, &manifest1_info);
+        pReleaseActCtx(handle);
+    }
+
+    trace("UTF-16 manifest1, reverse endian, with BOM\n");
+    if(!create_wide_manifest("test1.manifest", manifest1, TRUE, TRUE)) {
+        skip("Could not create manifest file\n");
+        return;
+    }
+
+    handle = test_create("test1.manifest", manifest1);
+    DeleteFileA("test1.manifest");
+    if (handle != INVALID_HANDLE_VALUE) {
+        test_detailed_info(handle, &detailed_info1);
+        test_info_in_assembly(handle, 1, &manifest1_info);
+        pReleaseActCtx(handle);
+    }
+
 }
 
 static void test_app_manifest(void)
@@ -985,19 +1087,18 @@ static void run_child_process(void)
 
     GetModuleFileNameA(NULL, path, MAX_PATH);
     strcat(path, ".manifest");
-    if(!create_manifest_file(path, manifest1, NULL, NULL)) {
+    if(!create_manifest_file(path, manifest1, -1, NULL, NULL)) {
         skip("Could not create manifest file\n");
         return;
     }
 
     si.cb = sizeof(si);
     winetest_get_mainargs( &argv );
-    sprintf(cmdline, "%s %s manifest1", argv[0], argv[1]);
+    sprintf(cmdline, "\"%s\" %s manifest1", argv[0], argv[1]);
     ok(CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL,
                      &si, &pi) != 0, "Could not create process: %u\n", GetLastError());
+    winetest_wait_child_process( pi.hProcess );
     CloseHandle(pi.hThread);
-
-    WaitForSingleObject(pi.hProcess, INFINITE);
     CloseHandle(pi.hProcess);
     DeleteFileA(path);
 }
@@ -1005,13 +1106,23 @@ static void run_child_process(void)
 static void init_paths(void)
 {
     LPWSTR ptr;
+    WCHAR last;
 
     static const WCHAR dot_manifest[] = {'.','M','a','n','i','f','e','s','t',0};
+    static const WCHAR backslash[] = {'\\',0};
+    static const WCHAR subdir[] = {'T','e','s','t','S','u','b','d','i','r','\\',0};
 
     GetModuleFileNameW(NULL, exe_path, sizeof(exe_path)/sizeof(WCHAR));
     lstrcpyW(app_dir, exe_path);
-    for(ptr=app_dir+lstrlenW(app_dir); *ptr != '\\'; ptr--);
+    for(ptr=app_dir+lstrlenW(app_dir); *ptr != '\\' && *ptr != '/'; ptr--);
     ptr[1] = 0;
+
+    GetCurrentDirectoryW(MAX_PATH, work_dir);
+    last = work_dir[lstrlenW(work_dir) - 1];
+    if (last != '\\' && last != '/')
+        lstrcatW(work_dir, backslash);
+    lstrcpyW(work_dir_subdir, work_dir);
+    lstrcatW(work_dir_subdir, subdir);
 
     GetModuleFileNameW(NULL, app_manifest_path, sizeof(app_manifest_path)/sizeof(WCHAR));
     lstrcpyW(app_manifest_path+lstrlenW(app_manifest_path), dot_manifest);
@@ -1027,6 +1138,7 @@ static BOOL init_funcs(void)
     X(DeactivateActCtx);
     X(FindActCtxSectionStringW);
     X(GetCurrentActCtx);
+    X(IsDebuggerPresent);
     X(QueryActCtxW);
     X(ReleaseActCtx);
 #undef X

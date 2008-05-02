@@ -329,6 +329,7 @@ HINSTANCE WINAPI CoLoadLibrary(LPOLESTR lpszLibName, BOOL bAutoFree);
 void WINAPI CoFreeAllLibraries(void);
 void WINAPI CoFreeLibrary(HINSTANCE hLibrary);
 void WINAPI CoFreeUnusedLibraries(void);
+void WINAPI CoFreeUnusedLibrariesEx(DWORD dwUnloadDelay, DWORD dwReserved);
 
 HRESULT WINAPI CoCreateInstance(REFCLSID rclsid, LPUNKNOWN pUnkOuter, DWORD dwClsContext, REFIID iid, LPVOID *ppv);
 HRESULT WINAPI CoCreateInstanceEx(REFCLSID      rclsid,
@@ -348,6 +349,8 @@ LPVOID WINAPI CoTaskMemRealloc(LPVOID ptr, ULONG size);
 
 HRESULT WINAPI CoRegisterMallocSpy(LPMALLOCSPY pMallocSpy);
 HRESULT WINAPI CoRevokeMallocSpy(void);
+
+HRESULT WINAPI CoGetContextToken( ULONG_PTR *token );
 
 /* class registration flags; passed to CoRegisterClassObject */
 typedef enum tagREGCLS

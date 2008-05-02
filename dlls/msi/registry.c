@@ -52,14 +52,6 @@ static const WCHAR szUserFeatures_fmt[] = {
 'F','e','a','t','u','r','e','s','\\',
 '%','s',0};
 
-static const WCHAR szInstaller_Features[] = {
-'S','o','f','t','w','a','r','e','\\',
-'M','i','c','r','o','s','o','f','t','\\',
-'W','i','n','d','o','w','s','\\',
-'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
-'I','n','s','t','a','l','l','e','r','\\',
-'F','e','a','t','u','r','e','s',0 };
-
 static const WCHAR szUserDataFeatures_fmt[] = {
 'S','o','f','t','w','a','r','e','\\',
 'M','i','c','r','o','s','o','f','t','\\',
@@ -86,15 +78,6 @@ static const WCHAR szInstaller_Components[] = {
 'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
 'I','n','s','t','a','l','l','e','r','\\',
 'C','o','m','p','o','n','e','n','t','s',0 };
-
-static const WCHAR szInstaller_Components_fmt[] = {
-'S','o','f','t','w','a','r','e','\\',
-'M','i','c','r','o','s','o','f','t','\\',
-'W','i','n','d','o','w','s','\\',
-'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
-'I','n','s','t','a','l','l','e','r','\\',
-'C','o','m','p','o','n','e','n','t','s','\\',
-'%','s',0};
 
 static const WCHAR szUser_Components_fmt[] = {
 'S','o','f','t','w','a','r','e','\\',
@@ -230,8 +213,6 @@ static const WCHAR szInstaller_LocalManagedProd_fmt[] = {
 'M','a','n','a','g','e','d','\\','%','s','\\',
 'I','n','s','t','a','l','l','e','r','\\',
 'P','r','o','d','u','c','t','s','\\','%','s',0};
-
-#define SQUISH_GUID_SIZE 33
 
 BOOL unsquash_guid(LPCWSTR in, LPWSTR out)
 {
@@ -478,13 +459,17 @@ static UINT get_user_sid(LPWSTR *usersid)
         return ERROR_FUNCTION_FAILED;
 
     size = sizeof(buf);
-    if (!GetTokenInformation(token, TokenUser, (void *)buf, size, &size))
+    if (!GetTokenInformation(token, TokenUser, (void *)buf, size, &size)) {
+        CloseHandle(token);
         return ERROR_FUNCTION_FAILED;
+    }
 
     user = (PTOKEN_USER)buf;
-    if (!ConvertSidToStringSidW(user->User.Sid, usersid))
+    if (!ConvertSidToStringSidW(user->User.Sid, usersid)) {
+        CloseHandle(token);
         return ERROR_FUNCTION_FAILED;
-
+    }
+    CloseHandle(token);
     return ERROR_SUCCESS;
 }
 
@@ -502,6 +487,16 @@ UINT MSIREG_OpenUninstallKey(LPCWSTR szProduct, HKEY* key, BOOL create)
         rc = RegOpenKeyW(HKEY_LOCAL_MACHINE, keypath, key);
 
     return rc;
+}
+
+UINT MSIREG_DeleteUninstallKey(LPCWSTR szProduct)
+{
+    WCHAR keypath[0x200];
+    TRACE("%s\n",debugstr_w(szProduct));
+
+    sprintfW(keypath,szUninstall_fmt,szProduct);
+
+    return RegDeleteTreeW(HKEY_LOCAL_MACHINE, keypath);
 }
 
 UINT MSIREG_OpenUserProductsKey(LPCWSTR szProduct, HKEY* key, BOOL create)
@@ -596,11 +591,6 @@ UINT MSIREG_DeleteUserFeaturesKey(LPCWSTR szProduct)
     return RegDeleteTreeW(HKEY_CURRENT_USER, keypath);
 }
 
-UINT MSIREG_OpenFeatures(HKEY* key)
-{
-    return RegCreateKeyW(HKEY_LOCAL_MACHINE,szInstaller_Features,key);
-}
-
 UINT MSIREG_OpenFeaturesKey(LPCWSTR szProduct, HKEY* key, BOOL create)
 {
     UINT rc;
@@ -648,34 +638,13 @@ UINT MSIREG_OpenUserDataFeaturesKey(LPCWSTR szProduct, HKEY *key, BOOL create)
     else
         rc = RegOpenKeyW(HKEY_LOCAL_MACHINE, keypath, key);
 
-    msi_free(usersid);
+    LocalFree(usersid);
     return rc;
 }
 
 UINT MSIREG_OpenComponents(HKEY* key)
 {
     return RegCreateKeyW(HKEY_LOCAL_MACHINE,szInstaller_Components,key);
-}
-
-UINT MSIREG_OpenComponentsKey(LPCWSTR szComponent, HKEY* key, BOOL create)
-{
-    UINT rc;
-    WCHAR squished_cc[GUID_SIZE];
-    WCHAR keypath[0x200];
-
-    TRACE("%s\n",debugstr_w(szComponent));
-    if (!squash_guid(szComponent,squished_cc))
-        return ERROR_FUNCTION_FAILED;
-    TRACE("squished (%s)\n", debugstr_w(squished_cc));
-
-    sprintfW(keypath,szInstaller_Components_fmt,squished_cc);
-
-    if (create)
-        rc = RegCreateKeyW(HKEY_LOCAL_MACHINE,keypath,key);
-    else
-        rc = RegOpenKeyW(HKEY_LOCAL_MACHINE,keypath,key);
-
-    return rc;
 }
 
 UINT MSIREG_OpenUserComponentsKey(LPCWSTR szComponent, HKEY* key, BOOL create)
@@ -725,8 +694,33 @@ UINT MSIREG_OpenUserDataComponentKey(LPCWSTR szComponent, HKEY *key, BOOL create
     else
         rc = RegOpenKeyW(HKEY_LOCAL_MACHINE, keypath, key);
 
-    msi_free(usersid);
+    LocalFree(usersid);
     return rc;
+}
+
+UINT MSIREG_DeleteUserDataComponentKey(LPCWSTR szComponent)
+{
+    UINT rc;
+    WCHAR comp[GUID_SIZE];
+    WCHAR keypath[0x200];
+    LPWSTR usersid;
+
+    TRACE("%s\n", debugstr_w(szComponent));
+    if (!squash_guid(szComponent, comp))
+        return ERROR_FUNCTION_FAILED;
+    TRACE("squished (%s)\n", debugstr_w(comp));
+
+    rc = get_user_sid(&usersid);
+    if (rc != ERROR_SUCCESS || !usersid)
+    {
+        ERR("Failed to retrieve user SID: %d\n", rc);
+        return rc;
+    }
+
+    sprintfW(keypath, szUserDataComp_fmt, usersid, comp);
+
+    LocalFree(usersid);
+    return RegDeleteTreeW(HKEY_LOCAL_MACHINE, keypath);
 }
 
 UINT MSIREG_OpenUserDataProductKey(LPCWSTR szProduct, HKEY *key, BOOL create)
@@ -755,21 +749,37 @@ UINT MSIREG_OpenUserDataProductKey(LPCWSTR szProduct, HKEY *key, BOOL create)
     else
         rc = RegOpenKeyW(HKEY_LOCAL_MACHINE, keypath, key);
 
-    msi_free(usersid);
+    LocalFree(usersid);
     return rc;
 }
 
-UINT MSIREG_OpenInstallPropertiesKey(LPCWSTR szProduct, HKEY *key, BOOL create)
+static UINT MSIREG_OpenInstallProps(LPCWSTR szProduct, LPCWSTR szUserSID,
+                                    HKEY *key, BOOL create)
 {
     UINT rc;
     WCHAR squished_pc[GUID_SIZE];
     WCHAR keypath[0x200];
-    LPWSTR usersid;
 
     TRACE("%s\n", debugstr_w(szProduct));
     if (!squash_guid(szProduct, squished_pc))
         return ERROR_FUNCTION_FAILED;
     TRACE("squished (%s)\n", debugstr_w(squished_pc));
+
+    sprintfW(keypath, szInstallProperties_fmt, szUserSID, squished_pc);
+
+    if (create)
+        rc = RegCreateKeyW(HKEY_LOCAL_MACHINE, keypath, key);
+    else
+        rc = RegOpenKeyW(HKEY_LOCAL_MACHINE, keypath, key);
+
+    return rc;
+}
+
+UINT MSIREG_OpenCurrentUserInstallProps(LPCWSTR szProduct, HKEY *key,
+                                               BOOL create)
+{
+    UINT rc;
+    LPWSTR usersid;
 
     rc = get_user_sid(&usersid);
     if (rc != ERROR_SUCCESS || !usersid)
@@ -778,15 +788,18 @@ UINT MSIREG_OpenInstallPropertiesKey(LPCWSTR szProduct, HKEY *key, BOOL create)
         return rc;
     }
 
-    sprintfW(keypath, szInstallProperties_fmt, usersid, squished_pc);
+    rc = MSIREG_OpenInstallProps(szProduct, usersid, key, create);
 
-    if (create)
-        rc = RegCreateKeyW(HKEY_LOCAL_MACHINE, keypath, key);
-    else
-        rc = RegOpenKeyW(HKEY_LOCAL_MACHINE, keypath, key);
-
-    msi_free(usersid);
+    LocalFree(usersid);
     return rc;
+}
+
+UINT MSIREG_OpenLocalSystemInstallProps(LPCWSTR szProduct, HKEY *key,
+                                        BOOL create)
+{
+    static const WCHAR localsid[] = {'S','-','1','-','5','-','1','8',0};
+
+    return MSIREG_OpenInstallProps(szProduct, localsid, key, create);
 }
 
 UINT MSIREG_DeleteUserDataProductKey(LPCWSTR szProduct)
@@ -810,13 +823,8 @@ UINT MSIREG_DeleteUserDataProductKey(LPCWSTR szProduct)
 
     sprintfW(keypath, szUserDataProd_fmt, usersid, squished_pc);
 
-    msi_free(usersid);
+    LocalFree(usersid);
     return RegDeleteTreeW(HKEY_LOCAL_MACHINE, keypath);
-}
-
-UINT MSIREG_OpenProducts(HKEY* key)
-{
-    return RegCreateKeyW(HKEY_LOCAL_MACHINE,szInstaller_Products,key);
 }
 
 UINT MSIREG_OpenProductsKey(LPCWSTR szProduct, HKEY* key, BOOL create)
@@ -1000,7 +1008,7 @@ UINT MSIREG_OpenLocalManagedProductKey(LPCWSTR szProductCode, HKEY *key, BOOL cr
     }
 
     sprintfW(keypath, szInstaller_LocalManagedProd_fmt, usersid, squished_pc);
-    msi_free(usersid);
+    LocalFree(usersid);
 
     if (create)
         return RegCreateKeyW(HKEY_LOCAL_MACHINE, keypath, key);
@@ -1143,7 +1151,7 @@ UINT WINAPI MsiEnumProductsW(DWORD index, LPWSTR lpguid)
     if (NULL == lpguid)
         return ERROR_INVALID_PARAMETER;
 
-    r = MSIREG_OpenProducts(&hkeyProducts);
+    r = RegCreateKeyW(HKEY_LOCAL_MACHINE, szInstaller_Products, &hkeyProducts);
     if( r != ERROR_SUCCESS )
         return ERROR_NO_MORE_ITEMS;
 
@@ -1249,6 +1257,9 @@ UINT WINAPI MsiEnumClientsA(LPCSTR szComponent, DWORD index, LPSTR szProduct)
 
     TRACE("%s %d %p\n", debugstr_a(szComponent), index, szProduct);
 
+    if ( !szProduct )
+        return ERROR_INVALID_PARAMETER;
+
     if( szComponent )
     {
         szwComponent = strdupAtoW( szComponent );
@@ -1276,9 +1287,25 @@ UINT WINAPI MsiEnumClientsW(LPCWSTR szComponent, DWORD index, LPWSTR szProduct)
 
     TRACE("%s %d %p\n", debugstr_w(szComponent), index, szProduct);
 
-    r = MSIREG_OpenComponentsKey(szComponent,&hkeyComp,FALSE);
-    if( r != ERROR_SUCCESS )
-        return ERROR_NO_MORE_ITEMS;
+    if (!szComponent || !*szComponent || !szProduct)
+        return ERROR_INVALID_PARAMETER;
+
+    if (MSIREG_OpenUserDataComponentKey(szComponent, &hkeyComp, FALSE) != ERROR_SUCCESS &&
+        MSIREG_OpenLocalSystemComponentKey(szComponent, &hkeyComp, FALSE) != ERROR_SUCCESS)
+        return ERROR_UNKNOWN_COMPONENT;
+
+    /* see if there are any products at all */
+    sz = SQUISH_GUID_SIZE;
+    r = RegEnumValueW(hkeyComp, 0, szValName, &sz, NULL, NULL, NULL, NULL);
+    if (r != ERROR_SUCCESS)
+    {
+        RegCloseKey(hkeyComp);
+
+        if (index != 0)
+            return ERROR_INVALID_PARAMETER;
+
+        return ERROR_UNKNOWN_COMPONENT;
+    }
 
     sz = SQUISH_GUID_SIZE;
     r = RegEnumValueW(hkeyComp, index, szValName, &sz, NULL, NULL, NULL, NULL);

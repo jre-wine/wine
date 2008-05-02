@@ -19,6 +19,7 @@
  */
 
 #include <stdio.h>
+#include "wine/unicode.h"
 
 #define OEMRESOURCE
 
@@ -31,14 +32,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(explorer);
 #define DESKTOP_CLASS_ATOM ((LPCWSTR)MAKEINTATOM(32769))
 #define DESKTOP_ALL_ACCESS 0x01ff
 
-extern HANDLE __wine_make_process_system(void);
-
 static BOOL using_root;
 
 /* window procedure for the desktop window */
 static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 {
-    WINE_TRACE( "got msg %x wp %lx lp %lx\n", message, wp, lp );
+    WINE_TRACE( "got msg %04x wp %lx lp %lx\n", message, wp, lp );
 
     switch(message)
     {
@@ -115,6 +114,70 @@ static BOOL get_default_desktop_size( unsigned int *width, unsigned int *height 
     return ret;
 }
 
+static void initialize_display_settings( HWND desktop )
+{
+    static const WCHAR display_device_guid_propW[] = {
+        '_','_','w','i','n','e','_','d','i','s','p','l','a','y','_',
+        'd','e','v','i','c','e','_','g','u','i','d',0 };
+    GUID guid;
+    RPC_CSTR guid_str;
+    ATOM guid_atom;
+    DEVMODEW dmW;
+
+    UuidCreate( &guid );
+    UuidToStringA( &guid, &guid_str );
+    WINE_TRACE( "display guid %s\n", guid_str );
+
+    guid_atom = GlobalAddAtomA( (LPCSTR)guid_str );
+    SetPropW( desktop, display_device_guid_propW, ULongToHandle(guid_atom) );
+
+    RpcStringFreeA( &guid_str );
+
+    /* Store current display mode in the registry */
+    if (EnumDisplaySettingsExW( NULL, ENUM_CURRENT_SETTINGS, &dmW, 0 ))
+    {
+        WINE_TRACE( "Current display mode %ux%u %u bpp %u Hz\n", dmW.dmPelsWidth,
+                    dmW.dmPelsHeight, dmW.dmBitsPerPel, dmW.dmDisplayFrequency );
+        ChangeDisplaySettingsExW( NULL, &dmW, 0,
+                                  CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY,
+                                  NULL );
+    }
+}
+
+static void set_desktop_window_title( HWND hwnd, const char *name )
+{
+    static const WCHAR desktop_nameW[] = {'W','i','n','e',' ','d','e','s','k','t','o','p',0};
+    static const WCHAR desktop_name_separatorW[] = {' ', '-', ' ', 0};
+    WCHAR *window_titleW = NULL;
+    int window_title_len;
+    int name_len;
+
+    if (!name[0])
+    {
+        SetWindowTextW( hwnd, desktop_nameW );
+        return;
+    }
+
+    name_len = MultiByteToWideChar( CP_ACP, 0, name, -1, NULL, 0 );
+    window_title_len = name_len * sizeof(WCHAR)
+                     + sizeof(desktop_name_separatorW)
+                     + sizeof(desktop_nameW);
+    window_titleW = HeapAlloc( GetProcessHeap(), 0, window_title_len );
+    if (!window_titleW)
+    {
+        SetWindowTextW( hwnd, desktop_nameW );
+        return;
+    }
+
+    MultiByteToWideChar( CP_ACP, 0, name, -1,
+                         window_titleW, name_len );
+    strcatW( window_titleW, desktop_name_separatorW );
+    strcatW( window_titleW, desktop_nameW );
+
+    SetWindowTextW( hwnd, window_titleW );
+    HeapFree( GetProcessHeap(), 0, window_titleW );
+}
+
 /* main desktop management function */
 void manage_desktop( char *arg )
 {
@@ -124,7 +187,7 @@ void manage_desktop( char *arg )
     unsigned int width, height;
     char *cmdline = NULL;
     char *p = arg;
-    static const WCHAR desktop_nameW[] = {'W','i','n','e',' ','d','e','s','k','t','o','p',0};
+    const char *name = NULL;
 
     /* get the rest of the command line (if any) */
     while (*p && !isspace(*p)) p++;
@@ -146,31 +209,31 @@ void manage_desktop( char *arg )
             width = 800;
             height = 600;
         }
-        xwin = create_desktop( arg, width, height );
+        name = arg;
+        xwin = create_desktop( name, width, height );
     }
     else if (get_default_desktop_size( &width, &height ))
     {
-        xwin = create_desktop( "Default", width, height );
+        name = "Default";
+        xwin = create_desktop( name, width, height );
     }
 
-    if (!xwin)  /* using the root window */
-    {
-        using_root = TRUE;
-        width = GetSystemMetrics(SM_CXSCREEN);
-        height = GetSystemMetrics(SM_CYSCREEN);
-    }
+    if (!xwin) using_root = TRUE; /* using the root window */
 
     /* create the desktop window */
     hwnd = CreateWindowExW( 0, DESKTOP_CLASS_ATOM, NULL,
                             WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-                            0, 0, width, height, 0, 0, 0, NULL );
+                            GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+                            GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                            0, 0, 0, NULL );
     if (hwnd == GetDesktopWindow())
     {
         SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)desktop_wnd_proc );
         SendMessageW( hwnd, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW( 0, MAKEINTRESOURCEW(OIC_WINLOGO)));
-        SetWindowTextW( hwnd, desktop_nameW );
+        if (name) set_desktop_window_title( hwnd, name );
         SystemParametersInfoA( SPI_SETDESKPATTERN, -1, NULL, FALSE );
         SetDeskWallPaper( (LPSTR)-1 );
+        initialize_display_settings( hwnd );
         initialize_diskarbitration();
         initialize_hal();
         initialize_systray();
@@ -200,10 +263,6 @@ void manage_desktop( char *arg )
     /* run the desktop message loop */
     if (hwnd)
     {
-        /* we don't use the system process event, the server
-         * posts a WM_CLOSE when the last desktop user is gone */
-        CloseHandle( __wine_make_process_system() );
-
         WINE_TRACE( "desktop message loop starting on hwnd %p\n", hwnd );
         while (GetMessageW( &msg, 0, 0, 0 )) DispatchMessageW( &msg );
         WINE_TRACE( "desktop message loop exiting for hwnd %p\n", hwnd );

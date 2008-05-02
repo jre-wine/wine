@@ -1,10 +1,10 @@
-@ stub AddERExcludedApplicationA
-@ stub AddERExcludedApplicationW
+@ stdcall AddERExcludedApplicationA(str)
+@ stdcall AddERExcludedApplicationW(wstr)
 @ stub CreateMinidumpA
 @ stub CreateMinidumpW
 @ stub ReportEREvent
 @ stub ReportEREventDW
-@ stub ReportFault
+@ stdcall ReportFault(ptr long)
 @ stub ReportFaultDWM
 @ stub ReportFaultFromQueue
 @ stub ReportFaultToQueue

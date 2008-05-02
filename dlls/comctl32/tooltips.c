@@ -202,6 +202,44 @@ TOOLTIPS_InitSystemSettings (TOOLTIPS_INFO *infoPtr)
     infoPtr->hTitleFont = CreateFontIndirectW (&nclm.lfStatusFont);
 }
 
+/* Custom draw routines */
+static void
+TOOLTIPS_customdraw_fill(NMTTCUSTOMDRAW *lpnmttcd,
+                         const HWND hwnd,
+                         HDC hdc, const RECT *rcBounds, UINT uFlags)
+{
+    TOOLTIPS_INFO *infoPtr = TOOLTIPS_GetInfoPtr(hwnd);
+
+    ZeroMemory(lpnmttcd, sizeof(NMTTCUSTOMDRAW));
+    lpnmttcd->uDrawFlags = uFlags;
+    lpnmttcd->nmcd.hdr.hwndFrom = hwnd;
+    lpnmttcd->nmcd.hdr.code     = NM_CUSTOMDRAW;
+    if (infoPtr->nCurrentTool != -1) {
+        TTTOOL_INFO *toolPtr = &infoPtr->tools[infoPtr->nCurrentTool];
+        lpnmttcd->nmcd.hdr.idFrom = toolPtr->uId;
+    }
+    lpnmttcd->nmcd.hdc = hdc;
+    lpnmttcd->nmcd.rc = *rcBounds;
+    /* FIXME - dwItemSpec, uItemState, lItemlParam */
+}
+
+static inline DWORD
+TOOLTIPS_notify_customdraw (DWORD dwDrawStage, NMTTCUSTOMDRAW *lpnmttcd)
+{
+    LRESULT result = CDRF_DODEFAULT;
+    lpnmttcd->nmcd.dwDrawStage = dwDrawStage;
+
+    TRACE("Notifying stage %d, flags %x, id %x\n", lpnmttcd->nmcd.dwDrawStage,
+          lpnmttcd->uDrawFlags, lpnmttcd->nmcd.hdr.code);
+
+    result = SendMessageW(GetParent(lpnmttcd->nmcd.hdr.hwndFrom), WM_NOTIFY,
+                          0, (LPARAM)lpnmttcd);
+
+    TRACE("Notify result %x\n", (unsigned int)result);
+
+    return result;
+}
+
 static void
 TOOLTIPS_Refresh (HWND hwnd, HDC hdc)
 {
@@ -213,6 +251,8 @@ TOOLTIPS_Refresh (HWND hwnd, HDC hdc)
     UINT uFlags = DT_EXTERNALLEADING;
     HRGN hRgn = NULL;
     DWORD dwStyle = GetWindowLongW(hwnd, GWL_STYLE);
+    NMTTCUSTOMDRAW nmttcd;
+    DWORD cdmode;
 
     if (infoPtr->nMaxTipWidth > -1)
 	uFlags |= DT_WORDBREAK;
@@ -224,6 +264,13 @@ TOOLTIPS_Refresh (HWND hwnd, HDC hdc)
 
     oldBkMode = SetBkMode (hdc, TRANSPARENT);
     SetTextColor (hdc, infoPtr->clrText);
+    hOldFont = SelectObject (hdc, infoPtr->hFont);
+
+    /* Custom draw - Call PrePaint once initial properties set up     */
+    /* Note: Contrary to MSDN, CDRF_SKIPDEFAULT still draws a tooltip */
+    TOOLTIPS_customdraw_fill(&nmttcd, hwnd, hdc, &rc, uFlags);
+    cdmode = TOOLTIPS_notify_customdraw(CDDS_PREPAINT, &nmttcd);
+    uFlags = nmttcd.uDrawFlags;
 
     if (dwStyle & TTS_BALLOON)
     {
@@ -259,6 +306,7 @@ TOOLTIPS_Refresh (HWND hwnd, HDC hdc)
             RECT rcTitle = {rc.left, rc.top, rc.right, rc.bottom};
             int height;
             BOOL icon_present;
+            HFONT prevFont;
 
             /* draw icon */
             icon_present = infoPtr->hTitleIcon && 
@@ -270,9 +318,9 @@ TOOLTIPS_Refresh (HWND hwnd, HDC hdc)
             rcTitle.bottom = rc.top + ICON_HEIGHT;
 
             /* draw title text */
-            hOldFont = SelectObject (hdc, infoPtr->hTitleFont);
+            prevFont = SelectObject (hdc, infoPtr->hTitleFont);
             height = DrawTextW(hdc, infoPtr->pszTitle, -1, &rcTitle, DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
-            SelectObject (hdc, hOldFont);
+            SelectObject (hdc, prevFont);
             rc.top += height + BALLOON_TITLE_TEXT_SPACING;
         }
     }
@@ -286,8 +334,13 @@ TOOLTIPS_Refresh (HWND hwnd, HDC hdc)
     }
 
     /* draw text */
-    hOldFont = SelectObject (hdc, infoPtr->hFont);
     DrawTextW (hdc, infoPtr->szTipText, -1, &rc, uFlags);
+
+    /* Custom draw - Call PostPaint after drawing */
+    if (cdmode & CDRF_NOTIFYPOSTPAINT) {
+        TOOLTIPS_notify_customdraw(CDDS_POSTPAINT, &nmttcd);
+    }
+
     /* be polite and reset the things we changed in the dc */
     SelectObject (hdc, hOldFont);
     SetBkMode (hdc, oldBkMode);
@@ -320,8 +373,7 @@ static void TOOLTIPS_GetDispInfoA(HWND hwnd, TOOLTIPS_INFO *infoPtr, TTTOOL_INFO
     ttnmdi.lParam = toolPtr->lParam;
 
     TRACE("hdr.idFrom = %lx\n", ttnmdi.hdr.idFrom);
-    SendMessageW(toolPtr->hwnd, WM_NOTIFY,
-                 (WPARAM)toolPtr->uId, (LPARAM)&ttnmdi);
+    SendMessageW(toolPtr->hwnd, WM_NOTIFY, toolPtr->uId, (LPARAM)&ttnmdi);
 
     if (IS_INTRESOURCE(ttnmdi.lpszText)) {
         LoadStringW(ttnmdi.hinst, LOWORD(ttnmdi.lpszText),
@@ -351,8 +403,7 @@ static void TOOLTIPS_GetDispInfoA(HWND hwnd, TOOLTIPS_INFO *infoPtr, TTTOOL_INFO
     /* FIXME: Unsure if SETITEM should save the value or not        */
     if (infoPtr->szTipText[0] == 0x00) {
 
-        SendMessageW(GetParent(toolPtr->hwnd), WM_NOTIFY,
-                    (WPARAM)toolPtr->uId, (LPARAM)&ttnmdi);
+        SendMessageW(GetParent(toolPtr->hwnd), WM_NOTIFY, toolPtr->uId, (LPARAM)&ttnmdi);
 
         if (IS_INTRESOURCE(ttnmdi.lpszText)) {
             LoadStringW(ttnmdi.hinst, LOWORD(ttnmdi.lpszText),
@@ -378,8 +429,7 @@ static void TOOLTIPS_GetDispInfoW(HWND hwnd, TOOLTIPS_INFO *infoPtr, TTTOOL_INFO
     ttnmdi.lParam = toolPtr->lParam;
 
     TRACE("hdr.idFrom = %lx\n", ttnmdi.hdr.idFrom);
-    SendMessageW(toolPtr->hwnd, WM_NOTIFY,
-                 (WPARAM)toolPtr->uId, (LPARAM)&ttnmdi);
+    SendMessageW(toolPtr->hwnd, WM_NOTIFY, toolPtr->uId, (LPARAM)&ttnmdi);
 
     if (IS_INTRESOURCE(ttnmdi.lpszText)) {
         LoadStringW(ttnmdi.hinst, LOWORD(ttnmdi.lpszText),
@@ -409,8 +459,7 @@ static void TOOLTIPS_GetDispInfoW(HWND hwnd, TOOLTIPS_INFO *infoPtr, TTTOOL_INFO
     /* FIXME: Unsure if SETITEM should save the value or not        */
     if (infoPtr->szTipText[0] == 0x00) {
 
-        SendMessageW(GetParent(toolPtr->hwnd), WM_NOTIFY,
-                    (WPARAM)toolPtr->uId, (LPARAM)&ttnmdi);
+        SendMessageW(GetParent(toolPtr->hwnd), WM_NOTIFY, toolPtr->uId, (LPARAM)&ttnmdi);
 
         if (IS_INTRESOURCE(ttnmdi.lpszText)) {
             LoadStringW(ttnmdi.hinst, LOWORD(ttnmdi.lpszText),
@@ -515,7 +564,7 @@ TOOLTIPS_CalcTipSize (HWND hwnd, const TOOLTIPS_INFO *infoPtr, LPSIZE lpSize)
 
 
 static void
-TOOLTIPS_Show (HWND hwnd, TOOLTIPS_INFO *infoPtr)
+TOOLTIPS_Show (HWND hwnd, TOOLTIPS_INFO *infoPtr, BOOL track_activate)
 {
     TTTOOL_INFO *toolPtr;
     HMONITOR monitor;
@@ -525,92 +574,148 @@ TOOLTIPS_Show (HWND hwnd, TOOLTIPS_INFO *infoPtr)
     NMHDR  hdr;
     int ptfx = 0;
     DWORD style = GetWindowLongW(hwnd, GWL_STYLE);
+    INT nTool;
 
-    if (infoPtr->nTool == -1) {
-	TRACE("invalid tool (-1)!\n");
-	return;
+    if (track_activate)
+    {
+        if (infoPtr->nTrackTool == -1)
+        {
+            TRACE("invalid tracking tool (-1)!\n");
+            return;
+        }
+        nTool = infoPtr->nTrackTool;
+    }
+    else
+    {
+        if (infoPtr->nTool == -1)
+        {
+            TRACE("invalid tool (-1)!\n");
+		return;
+        }
+        nTool = infoPtr->nTool;
     }
 
-    infoPtr->nCurrentTool = infoPtr->nTool;
+    TRACE("Show tooltip pre %d! (%p)\n", nTool, hwnd);
 
-    TRACE("Show tooltip pre %d! (%p)\n", infoPtr->nTool, hwnd);
+    TOOLTIPS_GetTipText (hwnd, infoPtr, nTool);
 
-    TOOLTIPS_GetTipText (hwnd, infoPtr, infoPtr->nCurrentTool);
+    if (infoPtr->szTipText[0] == '\0')
+        return;
 
-    if (infoPtr->szTipText[0] == '\0') {
-	infoPtr->nCurrentTool = -1;
-	return;
-    }
+    toolPtr = &infoPtr->tools[nTool];
 
-    TRACE("Show tooltip %d!\n", infoPtr->nCurrentTool);
-    toolPtr = &infoPtr->tools[infoPtr->nCurrentTool];
+    if (!track_activate)
+        infoPtr->nCurrentTool = infoPtr->nTool;
+
+    TRACE("Show tooltip %d!\n", nTool);
 
     hdr.hwndFrom = hwnd;
     hdr.idFrom = toolPtr->uId;
     hdr.code = TTN_SHOW;
-    SendMessageW (toolPtr->hwnd, WM_NOTIFY,
-		    (WPARAM)toolPtr->uId, (LPARAM)&hdr);
+    SendMessageW (toolPtr->hwnd, WM_NOTIFY, toolPtr->uId, (LPARAM)&hdr);
 
     TRACE("%s\n", debugstr_w(infoPtr->szTipText));
 
     TOOLTIPS_CalcTipSize (hwnd, infoPtr, &size);
     TRACE("size %d x %d\n", size.cx, size.cy);
 
-    if (toolPtr->uFlags & TTF_CENTERTIP) {
-	RECT rc;
+    if (track_activate)
+    {
+        rect.left = infoPtr->xTrackPos;
+        rect.top  = infoPtr->yTrackPos;
+        ptfx = rect.left;
 
-	if (toolPtr->uFlags & TTF_IDISHWND)
-	    GetWindowRect ((HWND)toolPtr->uId, &rc);
-	else {
-	    rc = toolPtr->rect;
-	    MapWindowPoints (toolPtr->hwnd, NULL, (LPPOINT)&rc, 2);
-	}
-	rect.left = (rc.left + rc.right - size.cx) / 2;
-	if (style & TTS_BALLOON)
-	{
-          ptfx = rc.left + ((rc.right - rc.left) / 2);
-
-          /* CENTERTIP ballon tooltips default to below the field
-             if they fit on the screen                            */
-          if(rc.bottom + size.cy > GetSystemMetrics(SM_CYSCREEN))
-          {
-            rect.top = rc.top - size.cy;
-            infoPtr->bToolBelow = FALSE;
-          }
-          else
-          {
-            infoPtr->bToolBelow = TRUE;
-            rect.top = rc.bottom;
-          }
-          rect.left = max(0, rect.left - BALLOON_STEMINDENT);
-        }
-        else
+        if (toolPtr->uFlags & TTF_CENTERTIP)
         {
-          rect.top  = rc.bottom + 2;
-          infoPtr->bToolBelow = TRUE;
+            rect.left -= (size.cx / 2);
+            if (!(style & TTS_BALLOON))
+                rect.top  -= (size.cy / 2);
+        }
+        infoPtr->bToolBelow = TRUE;
+
+        if (!(toolPtr->uFlags & TTF_ABSOLUTE))
+        {
+            if (style & TTS_BALLOON)
+                rect.left -= BALLOON_STEMINDENT;
+            else
+            {
+                RECT rcTool;
+
+                if (toolPtr->uFlags & TTF_IDISHWND)
+                    GetWindowRect ((HWND)toolPtr->uId, &rcTool);
+                else
+                {
+                    rcTool = toolPtr->rect;
+                    MapWindowPoints (toolPtr->hwnd, NULL, (LPPOINT)&rcTool, 2);
+                }
+
+                /* smart placement */
+                if ((rect.left + size.cx > rcTool.left) && (rect.left < rcTool.right) &&
+                    (rect.top + size.cy > rcTool.top) && (rect.top < rcTool.bottom))
+                    rect.left = rcTool.right;
+            }
         }
     }
-    else {
-	GetCursorPos ((LPPOINT)&rect);
-	if (style & TTS_BALLOON)
-	{
-            ptfx = rect.left;
-            if(rect.top - size.cy >= 0)
+    else
+    {
+        if (toolPtr->uFlags & TTF_CENTERTIP)
+        {
+		RECT rc;
+
+            if (toolPtr->uFlags & TTF_IDISHWND)
+                GetWindowRect ((HWND)toolPtr->uId, &rc);
+            else {
+                rc = toolPtr->rect;
+                MapWindowPoints (toolPtr->hwnd, NULL, (LPPOINT)&rc, 2);
+            }
+            rect.left = (rc.left + rc.right - size.cx) / 2;
+            if (style & TTS_BALLOON)
             {
-              rect.top -= size.cy;
-              infoPtr->bToolBelow = FALSE;
+                ptfx = rc.left + ((rc.right - rc.left) / 2);
+
+                /* CENTERTIP ballon tooltips default to below the field
+                 * if they fit on the screen */
+                if (rc.bottom + size.cy > GetSystemMetrics(SM_CYSCREEN))
+                {
+                    rect.top = rc.top - size.cy;
+                    infoPtr->bToolBelow = FALSE;
+                }
+                else
+                {
+                    infoPtr->bToolBelow = TRUE;
+                    rect.top = rc.bottom;
+                }
+                rect.left = max(0, rect.left - BALLOON_STEMINDENT);
             }
             else
             {
-              infoPtr->bToolBelow = TRUE;
-              rect.top += 20;
+                rect.top  = rc.bottom + 2;
+                infoPtr->bToolBelow = TRUE;
             }
-            rect.left = max(0, rect.left - BALLOON_STEMINDENT);
         }
         else
         {
-	    rect.top += 20;
-	    infoPtr->bToolBelow = TRUE;
+            GetCursorPos ((LPPOINT)&rect);
+            if (style & TTS_BALLOON)
+            {
+                ptfx = rect.left;
+                if(rect.top - size.cy >= 0)
+                {
+                    rect.top -= size.cy;
+                    infoPtr->bToolBelow = FALSE;
+                }
+                else
+                {
+                    infoPtr->bToolBelow = TRUE;
+                    rect.top += 20;
+                }
+                rect.left = max(0, rect.left - BALLOON_STEMINDENT);
+            }
+            else
+            {
+		    rect.top += 20;
+		    infoPtr->bToolBelow = TRUE;
+            }
         }
     }
 
@@ -700,7 +805,7 @@ TOOLTIPS_Show (HWND hwnd, TOOLTIPS_INFO *infoPtr)
          * it is no longer needed */
     }
 
-    SetWindowPos (hwnd, HWND_TOP, rect.left, rect.top,
+    SetWindowPos (hwnd, HWND_TOPMOST, rect.left, rect.top,
 		    rect.right - rect.left, rect.bottom - rect.top,
 		    SWP_SHOWWINDOW | SWP_NOACTIVATE);
 
@@ -708,10 +813,13 @@ TOOLTIPS_Show (HWND hwnd, TOOLTIPS_INFO *infoPtr)
     InvalidateRect(hwnd, NULL, TRUE);
     UpdateWindow(hwnd);
 
-    SetTimer (hwnd, ID_TIMERPOP, infoPtr->nAutoPopTime, 0);
-    TRACE("timer 2 started!\n");
-    SetTimer (hwnd, ID_TIMERLEAVE, infoPtr->nReshowTime, 0);
-    TRACE("timer 3 started!\n");
+    if (!track_activate)
+    {
+        SetTimer (hwnd, ID_TIMERPOP, infoPtr->nAutoPopTime, 0);
+        TRACE("timer 2 started!\n");
+        SetTimer (hwnd, ID_TIMERLEAVE, infoPtr->nReshowTime, 0);
+        TRACE("timer 3 started!\n");
+    }
 }
 
 
@@ -732,8 +840,7 @@ TOOLTIPS_Hide (HWND hwnd, TOOLTIPS_INFO *infoPtr)
     hdr.hwndFrom = hwnd;
     hdr.idFrom = toolPtr->uId;
     hdr.code = TTN_POP;
-    SendMessageW (toolPtr->hwnd, WM_NOTIFY,
-		    (WPARAM)toolPtr->uId, (LPARAM)&hdr);
+    SendMessageW (toolPtr->hwnd, WM_NOTIFY, toolPtr->uId, (LPARAM)&hdr);
 
     infoPtr->nCurrentTool = -1;
 
@@ -745,98 +852,7 @@ TOOLTIPS_Hide (HWND hwnd, TOOLTIPS_INFO *infoPtr)
 static void
 TOOLTIPS_TrackShow (HWND hwnd, TOOLTIPS_INFO *infoPtr)
 {
-    TTTOOL_INFO *toolPtr;
-    RECT rect;
-    SIZE size;
-    NMHDR hdr;
-
-    if (infoPtr->nTrackTool == -1) {
-	TRACE("invalid tracking tool (-1)!\n");
-	return;
-    }
-
-    TRACE("show tracking tooltip pre %d!\n", infoPtr->nTrackTool);
-
-    TOOLTIPS_GetTipText (hwnd, infoPtr, infoPtr->nTrackTool);
-
-    if (infoPtr->szTipText[0] == '\0') {
-	infoPtr->nTrackTool = -1;
-	return;
-    }
-
-    TRACE("show tracking tooltip %d!\n", infoPtr->nTrackTool);
-    toolPtr = &infoPtr->tools[infoPtr->nTrackTool];
-
-    hdr.hwndFrom = hwnd;
-    hdr.idFrom = toolPtr->uId;
-    hdr.code = TTN_SHOW;
-    SendMessageW (toolPtr->hwnd, WM_NOTIFY,
-		    (WPARAM)toolPtr->uId, (LPARAM)&hdr);
-
-    TRACE("%s\n", debugstr_w(infoPtr->szTipText));
-
-    TOOLTIPS_CalcTipSize (hwnd, infoPtr, &size);
-    TRACE("size %d x %d\n", size.cx, size.cy);
-
-    if (toolPtr->uFlags & TTF_ABSOLUTE) {
-	rect.left = infoPtr->xTrackPos;
-	rect.top  = infoPtr->yTrackPos;
-
-	if (toolPtr->uFlags & TTF_CENTERTIP) {
-	    rect.left -= (size.cx / 2);
-	    rect.top  -= (size.cy / 2);
-	}
-    }
-    else {
-	RECT rcTool;
-
-	if (toolPtr->uFlags & TTF_IDISHWND)
-	    GetWindowRect ((HWND)toolPtr->uId, &rcTool);
-	else {
-	    rcTool = toolPtr->rect;
-	    MapWindowPoints (toolPtr->hwnd, NULL, (LPPOINT)&rcTool, 2);
-	}
-
-	GetCursorPos ((LPPOINT)&rect);
-	rect.top += 20;
-
-	if (toolPtr->uFlags & TTF_CENTERTIP) {
-	    rect.left -= (size.cx / 2);
-	    rect.top  -= (size.cy / 2);
-	}
-
-	/* smart placement */
-	if ((rect.left + size.cx > rcTool.left) && (rect.left < rcTool.right) &&
-	    (rect.top + size.cy > rcTool.top) && (rect.top < rcTool.bottom))
-	    rect.left = rcTool.right;
-    }
-
-    TRACE("pos %d - %d\n", rect.left, rect.top);
-
-    rect.right = rect.left + size.cx;
-    rect.bottom = rect.top + size.cy;
-
-    AdjustWindowRectEx (&rect, GetWindowLongW (hwnd, GWL_STYLE),
-			FALSE, GetWindowLongW (hwnd, GWL_EXSTYLE));
-
-    if (GetWindowLongW(hwnd, GWL_STYLE) & TTS_BALLOON)
-    {
-        HRGN hRgn;
-
-        /* FIXME: need to add pointy bit using CreatePolyRgn & CombinRgn */
-        hRgn = CreateRoundRectRgn(0, 0, rect.right - rect.left, rect.bottom - rect.top, BALLOON_ROUNDEDNESS, BALLOON_ROUNDEDNESS);
-
-        SetWindowRgn(hwnd, hRgn, FALSE);
-        /* we don't free the region handle as the system deletes it when 
-         * it is no longer needed */
-    }
-
-    SetWindowPos (hwnd, HWND_TOP, rect.left, rect.top,
-		    rect.right - rect.left, rect.bottom - rect.top,
-		    SWP_SHOWWINDOW | SWP_NOACTIVATE );
-
-    InvalidateRect(hwnd, NULL, TRUE);
-    UpdateWindow(hwnd);
+    TOOLTIPS_Show(hwnd, infoPtr, TRUE);
 }
 
 
@@ -856,8 +872,7 @@ TOOLTIPS_TrackHide (HWND hwnd, const TOOLTIPS_INFO *infoPtr)
     hdr.hwndFrom = hwnd;
     hdr.idFrom = toolPtr->uId;
     hdr.code = TTN_POP;
-    SendMessageW (toolPtr->hwnd, WM_NOTIFY,
-		    (WPARAM)toolPtr->uId, (LPARAM)&hdr);
+    SendMessageW (toolPtr->hwnd, WM_NOTIFY, toolPtr->uId, (LPARAM)&hdr);
 
     SetWindowPos (hwnd, HWND_TOP, 0, 0, 0, 0,
 		    SWP_NOZORDER | SWP_HIDEWINDOW | SWP_NOACTIVATE);
@@ -1140,7 +1155,7 @@ TOOLTIPS_AddToolW (HWND hwnd, WPARAM wParam, LPARAM lParam)
 
     if (IS_INTRESOURCE(lpToolInfo->lpszText)) {
 	TRACE("add string id %x\n", LOWORD(lpToolInfo->lpszText));
-	toolPtr->lpszText = (LPWSTR)lpToolInfo->lpszText;
+	toolPtr->lpszText = lpToolInfo->lpszText;
     }
     else if (lpToolInfo->lpszText) {
 	if (lpToolInfo->lpszText == LPSTR_TEXTCALLBACKW) {
@@ -1953,7 +1968,7 @@ TOOLTIPS_SetTitleA (HWND hwnd, WPARAM wParam, LPARAM lParam)
 {
     TOOLTIPS_INFO *infoPtr = TOOLTIPS_GetInfoPtr (hwnd);
     LPCSTR pszTitle = (LPCSTR)lParam;
-    UINT_PTR uTitleIcon = (UINT_PTR)wParam;
+    UINT_PTR uTitleIcon = wParam;
     UINT size;
 
     TRACE("hwnd = %p, title = %s, icon = %p\n", hwnd, debugstr_a(pszTitle),
@@ -1986,7 +2001,7 @@ TOOLTIPS_SetTitleW (HWND hwnd, WPARAM wParam, LPARAM lParam)
 {
     TOOLTIPS_INFO *infoPtr = TOOLTIPS_GetInfoPtr (hwnd);
     LPCWSTR pszTitle = (LPCWSTR)lParam;
-    UINT_PTR uTitleIcon = (UINT_PTR)wParam;
+    UINT_PTR uTitleIcon = wParam;
     UINT size;
 
     TRACE("hwnd = %p, title = %s, icon = %p\n", hwnd, debugstr_w(pszTitle),
@@ -2133,7 +2148,7 @@ TOOLTIPS_SetToolInfoW (HWND hwnd, WPARAM wParam, LPARAM lParam)
         if (infoPtr->szTipText[0] == 0)
             TOOLTIPS_Hide(hwnd, infoPtr);
         else
-            TOOLTIPS_Show (hwnd, infoPtr);
+            TOOLTIPS_Show (hwnd, infoPtr, FALSE);
     }
 
     return 0;
@@ -2255,7 +2270,7 @@ TOOLTIPS_UpdateTipTextA (HWND hwnd, WPARAM wParam, LPARAM lParam)
     if(infoPtr->nCurrentTool == -1) return 0;
     /* force repaint */
     if (infoPtr->bActive)
-	TOOLTIPS_Show (hwnd, infoPtr);
+	TOOLTIPS_Show (hwnd, infoPtr, FALSE);
     else if (infoPtr->bTrackActive)
 	TOOLTIPS_TrackShow (hwnd, infoPtr);
 
@@ -2311,9 +2326,9 @@ TOOLTIPS_UpdateTipTextW (HWND hwnd, WPARAM wParam, LPARAM lParam)
     if(infoPtr->nCurrentTool == -1) return 0;
     /* force repaint */
     if (infoPtr->bActive)
-	TOOLTIPS_Show (hwnd, infoPtr);
+	TOOLTIPS_Show (hwnd, infoPtr, FALSE);
     else if (infoPtr->bTrackActive)
-	TOOLTIPS_TrackShow (hwnd, infoPtr);
+	TOOLTIPS_Show (hwnd, infoPtr, TRUE);
 
     return 0;
 }
@@ -2570,7 +2585,7 @@ TOOLTIPS_Timer (HWND hwnd, WPARAM wParam, LPARAM lParam)
         KillTimer (hwnd, ID_TIMERSHOW);
 	nOldTool = infoPtr->nTool;
 	if ((infoPtr->nTool = TOOLTIPS_CheckTool (hwnd, TRUE)) == nOldTool)
-	    TOOLTIPS_Show (hwnd, infoPtr);
+	    TOOLTIPS_Show (hwnd, infoPtr, FALSE);
 	break;
 
     case ID_TIMERPOP:

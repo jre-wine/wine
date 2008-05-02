@@ -403,11 +403,11 @@ typedef struct {
 #define FDI_INT_MAGIC 0xfdfdfd05
 
 #define REALLY_IS_FCI(hfci) ( \
-  (((void *) hfci) != NULL) && \
+  ((hfci) != NULL) && \
   (PFCI_INT(hfci)->FCI_Intmagic == FCI_INT_MAGIC) )
 
 #define REALLY_IS_FDI(hfdi) ( \
-  (((void *) hfdi) != NULL) && \
+  ((hfdi) != NULL) && \
   (PFDI_INT(hfdi)->FDI_Intmagic == FDI_INT_MAGIC) )
 
 /*
@@ -638,7 +638,7 @@ static const cab_UWORD Zipmask[17] = {                                          
 struct FILELIST{
     LPSTR FileName;
     struct FILELIST *next;
-    BOOL Extracted;
+    BOOL DoExtract;
 };
 
 typedef struct {

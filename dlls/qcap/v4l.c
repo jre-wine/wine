@@ -293,9 +293,9 @@ HRESULT qcap_driver_get_format(const Capture *capBox, AM_MEDIA_TYPE ** mT)
         CoTaskMemFree(mT[0]);
         return E_OUTOFMEMORY;
     }
-    memcpy(&mT[0]->majortype, &MEDIATYPE_Video, sizeof(GUID));
-    memcpy(&mT[0]->subtype, &MEDIASUBTYPE_RGB24, sizeof(GUID));
-    memcpy(&mT[0]->formattype, &FORMAT_VideoInfo, sizeof(GUID));
+    mT[0]->majortype = MEDIATYPE_Video;
+    mT[0]->subtype = MEDIASUBTYPE_RGB24;
+    mT[0]->formattype = FORMAT_VideoInfo;
     mT[0]->bFixedSizeSamples = TRUE;
     mT[0]->bTemporalCompression = FALSE;
     mT[0]->pUnk = NULL;
@@ -893,11 +893,11 @@ Capture * qcap_driver_init( IPin *pOut, USHORT card )
 
     TRACE("format: %d bits - %d x %d\n", capBox->bitDepth, capBox->width, capBox->height);
 
-    return (Capture*) capBox;
+    return capBox;
 
 error:
     if (capBox)
-        qcap_driver_destroy( (Capture*) capBox );
+        qcap_driver_destroy( capBox );
 
     return NULL;
 }

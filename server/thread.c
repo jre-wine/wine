@@ -86,6 +86,7 @@ static const struct object_ops thread_apc_ops =
 {
     sizeof(struct thread_apc),  /* size */
     dump_thread_apc,            /* dump */
+    no_get_type,                /* get_type */
     add_queue,                  /* add_queue */
     remove_queue,               /* remove_queue */
     thread_apc_signaled,        /* signaled */
@@ -93,6 +94,8 @@ static const struct object_ops thread_apc_ops =
     no_signal,                  /* signal */
     no_get_fd,                  /* get_fd */
     no_map_access,              /* map_access */
+    default_get_sd,             /* get_sd */
+    default_set_sd,             /* set_sd */
     no_lookup_name,             /* lookup_name */
     no_open_file,               /* open_file */
     no_close_handle,            /* close_handle */
@@ -112,6 +115,7 @@ static const struct object_ops thread_ops =
 {
     sizeof(struct thread),      /* size */
     dump_thread,                /* dump */
+    no_get_type,                /* get_type */
     add_queue,                  /* add_queue */
     remove_queue,               /* remove_queue */
     thread_signaled,            /* signaled */
@@ -119,6 +123,8 @@ static const struct object_ops thread_ops =
     no_signal,                  /* signal */
     no_get_fd,                  /* get_fd */
     thread_map_access,          /* map_access */
+    default_get_sd,             /* get_sd */
+    default_set_sd,             /* set_sd */
     no_lookup_name,             /* lookup_name */
     no_open_file,               /* open_file */
     no_close_handle,            /* close_handle */
@@ -165,7 +171,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->state           = RUNNING;
     thread->exit_code       = 0;
     thread->priority        = 0;
-    thread->affinity        = 1;
+    thread->affinity        = ~0;
     thread->suspend         = 0;
     thread->desktop_users   = 0;
     thread->token           = NULL;
@@ -407,10 +413,7 @@ static void set_thread_info( struct thread *thread,
             set_error( STATUS_INVALID_PARAMETER );
     }
     if (req->mask & SET_THREAD_INFO_AFFINITY)
-    {
-        if (req->affinity != 1) set_error( STATUS_INVALID_PARAMETER );
-        else thread->affinity = req->affinity;
-    }
+        thread->affinity = req->affinity;
     if (req->mask & SET_THREAD_INFO_TOKEN)
         security_set_thread_token( thread, req->token );
 }
@@ -914,14 +917,14 @@ void kill_thread( struct thread *thread, int violent_death )
     {
         while (thread->wait) end_wait( thread );
         send_thread_wakeup( thread, NULL, STATUS_PENDING );
-        /* if it is waiting on the socket, we don't need to send a SIGTERM */
+        /* if it is waiting on the socket, we don't need to send a SIGQUIT */
         violent_death = 0;
     }
     kill_console_processes( thread, 0 );
     debug_exit_thread( thread );
     abandon_mutexes( thread );
     wake_up( &thread->obj, 0 );
-    if (violent_death) send_thread_signal( thread, SIGTERM );
+    if (violent_death) send_thread_signal( thread, SIGQUIT );
     cleanup_thread( thread );
     remove_process_thread( thread->process, thread );
     release_object( thread );
@@ -1195,7 +1198,7 @@ DECL_HANDLER(select)
         }
         else if (apc->result.type == APC_ASYNC_IO)
         {
-            if (apc->owner) async_set_result( apc->owner, apc->result.async_io.status );
+            if (apc->owner) async_set_result( apc->owner, apc->result.async_io.status, apc->result.async_io.total );
         }
         wake_up( &apc->obj, 0 );
         close_handle( current->process, req->prev_apc );

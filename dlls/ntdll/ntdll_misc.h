@@ -21,6 +21,7 @@
 
 #include <stdarg.h>
 #include <signal.h>
+#include <sys/types.h>
 
 #include "windef.h"
 #include "winnt.h"
@@ -28,6 +29,14 @@
 #include "wine/server.h"
 
 #define MAX_NT_PATH_LENGTH 277
+
+#define MAX_DOS_DRIVES 26
+
+struct drive_info
+{
+    dev_t dev;
+    ino_t ino;
+};
 
 /* exceptions */
 extern void wait_suspend( CONTEXT *context );
@@ -69,6 +78,11 @@ extern int server_remove_fd_from_cache( obj_handle_t handle );
 extern int server_get_unix_fd( obj_handle_t handle, unsigned int access, int *unix_fd,
                                int *needs_close, enum server_fd_type *type, unsigned int *options );
 
+/* security descriptors */
+NTSTATUS NTDLL_create_struct_sd(PSECURITY_DESCRIPTOR nt_sd, struct security_descriptor **server_sd,
+                                data_size_t *server_sd_len);
+void NTDLL_free_struct_sd(struct security_descriptor *server_sd);
+
 /* module handling */
 extern NTSTATUS MODULE_DllThreadAttach( LPVOID lpReserved );
 extern FARPROC RELAY_GetProcAddress( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
@@ -79,6 +93,9 @@ extern void RELAY_SetupDLL( HMODULE hmod );
 extern void SNOOP_SetupDLL( HMODULE hmod );
 extern UNICODE_STRING windows_dir;
 extern UNICODE_STRING system_dir;
+
+typedef LONG (WINAPI *PUNHANDLED_EXCEPTION_FILTER)(PEXCEPTION_POINTERS);
+extern PUNHANDLED_EXCEPTION_FILTER unhandled_exception_filter;
 
 /* redefine these to make sure we don't reference kernel symbols */
 #define GetProcessHeap()       (NtCurrentTeb()->Peb->ProcessHeap)
@@ -113,8 +130,11 @@ extern NTSTATUS FILE_GetNtStatus(void);
 extern BOOL DIR_is_hidden_file( const UNICODE_STRING *name );
 extern NTSTATUS DIR_unmount_device( HANDLE handle );
 extern NTSTATUS DIR_get_unix_cwd( char **cwd );
+extern unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] );
 
 /* virtual memory */
+extern NTSTATUS virtual_alloc_thread_stack( void *base, SIZE_T stack_size );
+extern BOOL virtual_handle_stack_fault( void *addr );
 extern NTSTATUS VIRTUAL_HandleFault(LPCVOID addr);
 extern void VIRTUAL_SetForceExec( BOOL enable );
 extern void VIRTUAL_UseLargeAddressSpace(void);
@@ -182,5 +202,8 @@ static inline struct ntdll_thread_regs *ntdll_get_thread_regs(void)
 {
     return (struct ntdll_thread_regs *)NtCurrentTeb()->SpareBytes1;
 }
+
+/* Completion */
+extern NTSTATUS NTDLL_AddCompletion( HANDLE hFile, ULONG_PTR CompletionValue, NTSTATUS CompletionStatus, ULONG_PTR Information );
 
 #endif

@@ -308,8 +308,8 @@ static const struct CharsetBindingInfo charsetbindings[] =
 	{ "\x82\x6c\x82\x72 \x82\x6f\x96\xbe\x92\xa9",
 			SHIFTJIS_CHARSET }, /* MS P mincho */
 	{ "GulimChe", HANGEUL_CHARSET },
-	{ "MS Song", GB2312_CHARSET },
-	{ "MS Hei", GB2312_CHARSET },
+	{ "\xcb\xce\xcc\xe5", GB2312_CHARSET }, /* SimSun */
+	{ "\xba\xda\xcc\xe5", GB2312_CHARSET }, /* SimHei */
 	{ "\xb7\x73\xb2\xd3\xa9\xfa\xc5\xe9", CHINESEBIG5_CHARSET },/*MS Mingliu*/
 	{ "\xb2\xd3\xa9\xfa\xc5\xe9", CHINESEBIG5_CHARSET },
 
@@ -1029,9 +1029,6 @@ static BOOL LFD_ComposeLFD( const fontObject* fo,
 
 /***********************************************************************
  *		X Font Resources
- *
- * font info		- http://www.microsoft.com/kb/articles/q65/1/23.htm
- * Windows font metrics	- http://www.microsoft.com/kb/articles/q32/6/67.htm
  */
 static void XFONT_GetLeading( const IFONTINFO16 *pFI, const XFontStruct* x_fs,
 			      INT16* pIL, INT16* pEL, const XFONTTRANS *XFT )
@@ -2404,7 +2401,6 @@ static int XFONT_GetDefResolution( int log_pixels_x, int log_pixels_y )
  *      weight, italics, underlines, strikeouts
  *
  * NOTE: you can experiment with different penalty weights to see what happens.
- * http://premium.microsoft.com/msdn/library/techart/f365/f36b/f37b/d38b/sa8bf.htm
  */
 static UINT XFONT_Match( fontMatch* pfm )
 {
@@ -3100,7 +3096,7 @@ static X_PHYSFONT XFONT_RealizeFont( LPLOGFONT16 plf,
 	    pfo->lpPixmap = NULL;
 
 	    for ( i = 0; i < X11FONT_REFOBJS_MAX; i++ )
-		pfo->prefobjs[i] = (X_PHYSFONT)0xffffffff; /* invalid value */
+		pfo->prefobjs[i] = 0xffffffff; /* invalid value */
 
             /* special treatment for DBCS that needs multiple fonts */
             /* All member of pfo must be set correctly. */
@@ -3165,7 +3161,7 @@ END:
     *faceMatched = pfo->fi->df.dfFace;
     *pcharsetMatched = pfo->fi->internal_charset;
 
-    return (X_PHYSFONT)(X_PFONT_MAGIC | index);
+    return X_PFONT_MAGIC | index;
 }
 
 /***********************************************************************
@@ -3305,9 +3301,18 @@ BOOL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
     NEWTEXTMETRICEXW	tm;
     fontResource*	pfr = fontList;
     BOOL	  	b, bRet = 0;
+    LOGFONTW lfW;
 
     /* don't enumerate x11 fonts if we're using client side fonts */
     if (physDev->has_gdi_font) return FALSE;
+
+    if (!plf)
+    {
+        lfW.lfCharSet = DEFAULT_CHARSET;
+        lfW.lfPitchAndFamily = 0;
+        lfW.lfFaceName[0] = 0;
+        plf = &lfW;
+    }
 
     if( plf->lfFaceName[0] )
     {

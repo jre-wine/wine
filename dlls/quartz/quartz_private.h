@@ -52,9 +52,12 @@ HRESULT MPEGSplitter_create(IUnknown * pUnkOuter, LPVOID * ppv);
 HRESULT AVIDec_create(IUnknown * pUnkOuter, LPVOID * ppv);
 HRESULT DSoundRender_create(IUnknown * pUnkOuter, LPVOID * ppv);
 HRESULT VideoRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv);
+HRESULT NullRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv);
+HRESULT VideoRendererDefault_create(IUnknown * pUnkOuter, LPVOID * ppv);
 HRESULT QUARTZ_CreateSystemClock(IUnknown * pUnkOuter, LPVOID * ppv);
 HRESULT ACMWrapper_create(IUnknown * pUnkOuter, LPVOID * ppv);
 HRESULT WAVEParser_create(IUnknown * pUnkOuter, LPVOID * ppv);
+HRESULT SeekingPassThru_create(IUnknown *pUnkOuter, LPVOID *ppObj);
 
 HRESULT EnumMonikerImpl_Create(IMoniker ** ppMoniker, ULONG nMonikerCount, IEnumMoniker ** ppEnum);
 
@@ -83,5 +86,6 @@ void FreeMediaType(AM_MEDIA_TYPE * pmt);
 void DeleteMediaType(AM_MEDIA_TYPE * pmt);
 BOOL CompareMediaTypes(const AM_MEDIA_TYPE * pmt1, const AM_MEDIA_TYPE * pmt2, BOOL bWildcards);
 void dump_AM_MEDIA_TYPE(const AM_MEDIA_TYPE * pmt);
+HRESULT updatehres( HRESULT original, HRESULT new );
 
 #endif /* __QUARTZ_PRIVATE_INCLUDED__ */

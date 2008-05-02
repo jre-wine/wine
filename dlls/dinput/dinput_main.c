@@ -36,6 +36,7 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -55,17 +56,17 @@ static const IDirectInput8WVtbl ddi8wvt;
 
 static inline IDirectInputImpl *impl_from_IDirectInput7W( IDirectInput7W *iface )
 {
-    return (IDirectInputImpl *)CONTAINING_RECORD( iface, IDirectInputImpl, lpVtbl7w );
+    return CONTAINING_RECORD( iface, IDirectInputImpl, lpVtbl7w );
 }
 
 static inline IDirectInputImpl *impl_from_IDirectInput8A( IDirectInput8A *iface )
 {
-    return (IDirectInputImpl *)CONTAINING_RECORD( iface, IDirectInputImpl, lpVtbl8a );
+    return CONTAINING_RECORD( iface, IDirectInputImpl, lpVtbl8a );
 }
 
 static inline IDirectInputImpl *impl_from_IDirectInput8W( IDirectInput8W *iface )
 {
-    return (IDirectInputImpl *)CONTAINING_RECORD( iface, IDirectInputImpl, lpVtbl8w );
+    return CONTAINING_RECORD( iface, IDirectInputImpl, lpVtbl8w );
 }
 
 static inline IDirectInput7W *IDirectInput7W_from_impl( IDirectInputImpl *iface )
@@ -82,7 +83,7 @@ static const struct dinput_device *dinput_devices[] =
 };
 #define NB_DINPUT_DEVICES (sizeof(dinput_devices)/sizeof(dinput_devices[0]))
 
-HINSTANCE DINPUT_instance = NULL;
+static HINSTANCE DINPUT_instance = NULL;
 
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserv)
 {
@@ -198,14 +199,45 @@ static void _dump_EnumDevices_dwFlags(DWORD dwFlags) {
 	    FE(DIEDFL_INCLUDEPHANTOMS)
 #undef FE
 	};
+	TRACE(" flags: ");
 	if (dwFlags == 0) {
-	    DPRINTF("DIEDFL_ALLDEVICES");
+	    TRACE("DIEDFL_ALLDEVICES");
 	    return;
 	}
 	for (i = 0; i < (sizeof(flags) / sizeof(flags[0])); i++)
 	    if (flags[i].mask & dwFlags)
-		DPRINTF("%s ",flags[i].name);
+		TRACE("%s ",flags[i].name);
     }
+    TRACE("\n");
+}
+
+void _dump_diactionformatA(LPDIACTIONFORMATA lpdiActionFormat) {
+    int i;
+
+    FIXME("diaf.dwSize = %d\n", lpdiActionFormat->dwSize);
+    FIXME("diaf.dwActionSize = %d\n", lpdiActionFormat->dwActionSize);
+    FIXME("diaf.dwDataSize = %d\n", lpdiActionFormat->dwDataSize);
+    FIXME("diaf.dwNumActions = %d\n", lpdiActionFormat->dwNumActions);
+    FIXME("diaf.rgoAction = %p\n", lpdiActionFormat->rgoAction);
+    for (i=0;i<lpdiActionFormat->dwNumActions;i++) {
+        FIXME("diaf.rgoAction[%d]:\n", i);
+        FIXME("\tuAppData=%lx\n", lpdiActionFormat->rgoAction[i].uAppData);
+        FIXME("\tdwSemantics=%x\n", lpdiActionFormat->rgoAction[i].dwSemantics);
+        FIXME("\tdwFlags=%x\n", lpdiActionFormat->rgoAction[i].dwFlags);
+        FIXME("\tszActionName=%s\n", debugstr_a(lpdiActionFormat->rgoAction[i].u.lptszActionName));
+        FIXME("\tguidInstance=%s\n", debugstr_guid(&lpdiActionFormat->rgoAction[i].guidInstance));
+        FIXME("\tdwObjID=%x\n", lpdiActionFormat->rgoAction[i].dwObjID);
+        FIXME("\tdwHow=%x\n", lpdiActionFormat->rgoAction[i].dwHow);
+    }
+    FIXME("diaf.guidActionMap = %s\n", debugstr_guid(&lpdiActionFormat->guidActionMap));
+    FIXME("diaf.dwGenre = %d\n", lpdiActionFormat->dwGenre);
+    FIXME("diaf.dwBufferSize = %d\n", lpdiActionFormat->dwBufferSize);
+    FIXME("diaf.lAxisMin = %d\n", lpdiActionFormat->lAxisMin);
+    FIXME("diaf.lAxisMax = %d\n", lpdiActionFormat->lAxisMax);
+    FIXME("diaf.hInstString = %p\n", lpdiActionFormat->hInstString);
+    FIXME("diaf.ftTimeStamp ...\n");
+    FIXME("diaf.dwCRC = %x\n", lpdiActionFormat->dwCRC);
+    FIXME("diaf.tszActionMap = %s\n", debugstr_a(lpdiActionFormat->tszActionMap));
 }
 
 /******************************************************************************
@@ -222,7 +254,7 @@ static HRESULT WINAPI IDirectInputAImpl_EnumDevices(
     TRACE("(this=%p,0x%04x '%s',%p,%p,%04x)\n",
 	  This, dwDevType, _dump_DIDEVTYPE_value(dwDevType),
 	  lpCallback, pvRef, dwFlags);
-    TRACE(" flags: "); _dump_EnumDevices_dwFlags(dwFlags); TRACE("\n");
+    _dump_EnumDevices_dwFlags(dwFlags);
 
     for (i = 0; i < NB_DINPUT_DEVICES; i++) {
         if (!dinput_devices[i]->enum_deviceA) continue;
@@ -252,7 +284,7 @@ static HRESULT WINAPI IDirectInputWImpl_EnumDevices(
     TRACE("(this=%p,0x%04x '%s',%p,%p,%04x)\n",
 	  This, dwDevType, _dump_DIDEVTYPE_value(dwDevType),
 	  lpCallback, pvRef, dwFlags);
-    TRACE(" flags: "); _dump_EnumDevices_dwFlags(dwFlags); TRACE("\n");
+    _dump_EnumDevices_dwFlags(dwFlags);
 
     for (i = 0; i < NB_DINPUT_DEVICES; i++) {
         if (!dinput_devices[i]->enum_deviceW) continue;
@@ -462,6 +494,11 @@ static HRESULT WINAPI IDirectInput7AImpl_CreateDeviceEx(LPDIRECTINPUT7A iface, R
       ret_value = DIERR_NOINTERFACE;
   }
 
+  if (ret_value == DIERR_NOINTERFACE)
+  {
+    WARN("invalid device GUID %s\n", debugstr_guid(rguid));
+  }
+
   return ret_value;
 }
 
@@ -630,11 +667,22 @@ static HRESULT WINAPI IDirectInput8AImpl_EnumDevicesBySemantics(
       LPVOID pvRef, DWORD dwFlags
 )
 {
-      IDirectInputImpl *This = impl_from_IDirectInput8A( iface );
+    IDirectInputImpl *This = impl_from_IDirectInput8A( iface );
 
-      FIXME("(this=%p,%s,%p,%p,%p,%04x): stub\n", This, ptszUserName, lpdiActionFormat,
-            lpCallback, pvRef, dwFlags);
-      return 0;
+    FIXME("(this=%p,%s,%p,%p,%p,%04x): stub\n", This, ptszUserName, lpdiActionFormat,
+          lpCallback, pvRef, dwFlags);
+#define X(x) if (dwFlags & x) FIXME("\tdwFlags |= "#x"\n");
+	X(DIEDBSFL_ATTACHEDONLY)
+	X(DIEDBSFL_THISUSER)
+	X(DIEDBSFL_FORCEFEEDBACK)
+	X(DIEDBSFL_AVAILABLEDEVICES)
+	X(DIEDBSFL_MULTIMICEKEYBOARDS)
+	X(DIEDBSFL_NONGAMINGDEVICES)
+#undef X
+
+    _dump_diactionformatA(lpdiActionFormat);
+
+    return DI_OK;
 }
 
 static HRESULT WINAPI IDirectInput8WImpl_EnumDevicesBySemantics(
@@ -921,7 +969,7 @@ static DWORD WINAPI hook_thread_proc(void *param)
                 EnterCriticalSection( &dinput->crit );
                 LIST_FOR_EACH_ENTRY( dev, &dinput->devices_list, IDirectInputDevice2AImpl, entry )
                 {
-                    if (!dev->acquired) continue;
+                    if (!dev->acquired || !dev->event_proc) continue;
 
                     if (IsEqualGUID( &dev->guid, &GUID_SysKeyboard ) ||
                         IsEqualGUID( &dev->guid, &DInput_Wine_Keyboard_GUID ))

@@ -48,12 +48,9 @@ WINE_DECLARE_DEBUG_CHANNEL(opengl);
 typedef struct wine_wgl_s {
     PROC WINAPI  (*p_wglGetProcAddress)(LPCSTR  lpszProc);
 
-    void WINAPI  (*p_wglDisable)(GLenum cap);
-    void WINAPI  (*p_wglEnable)(GLenum cap);
     void WINAPI  (*p_wglGetIntegerv)(GLenum pname, GLint* params);
-    GLboolean WINAPI (*p_wglIsEnabled)(GLenum cap);
-    void WINAPI  (*p_wglScissor)(GLint x, GLint y, GLsizei width, GLsizei height);
-    void WINAPI  (*p_wglViewport)(GLint x, GLint y, GLsizei width, GLsizei height);
+    void WINAPI  (*p_wglFinish)(void);
+    void WINAPI  (*p_wglFlush)(void);
 } wine_wgl_t;
 
 /** global wgl object */
@@ -80,7 +77,7 @@ void (*wine_tsx11_unlock_ptr)(void) = NULL;
 
 static HMODULE opengl32_handle;
 
-static char  internal_gl_disabled_extensions[512];
+static char* internal_gl_disabled_extensions = NULL;
 static char* internal_gl_extensions = NULL;
 
 typedef struct wine_glcontext {
@@ -121,17 +118,6 @@ HGLRC WINAPI wglCreateLayerContext(HDC hdc,
   FIXME(" no handler for layer %d\n", iLayerPlane);
 
   return NULL;
-}
-
-/***********************************************************************
- *		wglCopyContext (OPENGL32.@)
- */
-BOOL WINAPI wglCopyContext(HGLRC hglrcSrc,
-			   HGLRC hglrcDst,
-			   UINT mask) {
-  FIXME("(%p,%p,%d)\n", hglrcSrc, hglrcDst, mask);
-
-  return FALSE;
 }
 
 /***********************************************************************
@@ -569,48 +555,21 @@ BOOL WINAPI wglUseFontOutlinesW(HDC hdc,
 }
 
 /***********************************************************************
- *              glEnable (OPENGL32.@)
+ *              glFinish (OPENGL32.@)
  */
-void WINAPI wine_glEnable( GLenum cap )
+void WINAPI wine_glFinish( void )
 {
-    TRACE("(%d)\n", cap );
-    wine_wgl.p_wglEnable(cap);
+    TRACE("()\n");
+    wine_wgl.p_wglFinish();
 }
 
 /***********************************************************************
- *              glIsEnabled (OPENGL32.@)
+ *              glFlush (OPENGL32.@)
  */
-GLboolean WINAPI wine_glIsEnabled( GLenum cap )
+void WINAPI wine_glFlush( void )
 {
-    TRACE("(%d)\n", cap );
-    return wine_wgl.p_wglIsEnabled(cap);
-}
-
-/***********************************************************************
- *              glDisable (OPENGL32.@)
- */
-void WINAPI wine_glDisable( GLenum cap )
-{
-    TRACE("(%d)\n", cap );
-    wine_wgl.p_wglDisable(cap);
-}
-
-/***********************************************************************
- *              glScissor (OPENGL32.@)
- */
-void WINAPI wine_glScissor( GLint x, GLint y, GLsizei width, GLsizei height )
-{
-    TRACE("(%d, %d, %d, %d)\n", x, y, width, height );
-    wine_wgl.p_wglScissor(x, y, width, height);
-}
-
-/***********************************************************************
- *              glViewport (OPENGL32.@)
- */
-void WINAPI wine_glViewport( GLint x, GLint y, GLsizei width, GLsizei height )
-{
-    TRACE("(%d, %d, %d, %d)\n", x, y, width, height );
-    wine_wgl.p_wglViewport(x, y, width, height);
+    TRACE("()\n");
+    wine_wgl.p_wglFlush();
 }
 
 /***********************************************************************
@@ -650,7 +609,7 @@ const GLubyte * WINAPI wine_glGetString( GLenum name )
 	TRACE("- %s:", ThisExtn);
 	
 	/* test if supported API is disabled by config */
-	if (NULL == strstr(internal_gl_disabled_extensions, ThisExtn)) {
+	if (!internal_gl_disabled_extensions || !strstr(internal_gl_disabled_extensions, ThisExtn)) {
 	  strcat(internal_gl_extensions, " ");
 	  strcat(internal_gl_extensions, ThisExtn);
 	  TRACE(" active\n");
@@ -680,7 +639,7 @@ void WINAPI wine_glGetIntegerv( GLenum pname, GLint* params )
 static BOOL process_attach(void)
 {
   HMODULE mod_x11, mod_gdi32;
-  DWORD size = sizeof(internal_gl_disabled_extensions);
+  DWORD size;
   HKEY hkey = 0;
 
   GetDesktopWindow();  /* make sure winex11 is loaded (FIXME) */
@@ -699,17 +658,15 @@ static BOOL process_attach(void)
   wine_wgl.p_wglGetProcAddress = (void *)GetProcAddress(mod_gdi32, "wglGetProcAddress");
 
   /* Interal WGL function */
-  wine_wgl.p_wglDisable = (void *)wine_wgl.p_wglGetProcAddress("wglDisable");
-  wine_wgl.p_wglEnable = (void *)wine_wgl.p_wglGetProcAddress("wglEnable");
   wine_wgl.p_wglGetIntegerv = (void *)wine_wgl.p_wglGetProcAddress("wglGetIntegerv");
-  wine_wgl.p_wglIsEnabled = (void *)wine_wgl.p_wglGetProcAddress("wglIsEnabled");
-  wine_wgl.p_wglScissor = (void *)wine_wgl.p_wglGetProcAddress("wglScissor");
-  wine_wgl.p_wglViewport = (void *)wine_wgl.p_wglGetProcAddress("wglViewport");
+  wine_wgl.p_wglFinish = (void *)wine_wgl.p_wglGetProcAddress("wglFinish");
+  wine_wgl.p_wglFlush = (void *)wine_wgl.p_wglGetProcAddress("wglFlush");
 
-  internal_gl_disabled_extensions[0] = 0;
   if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\OpenGL", &hkey)) {
-    if (!RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, (LPBYTE)internal_gl_disabled_extensions, &size)) {
-      TRACE("found DisabledExtensions=\"%s\"\n", internal_gl_disabled_extensions);
+    if (!RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, NULL, &size)) {
+      internal_gl_disabled_extensions = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+      RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, (LPBYTE)internal_gl_disabled_extensions, &size);
+      TRACE("found DisabledExtensions=%s\n", debugstr_a(internal_gl_disabled_extensions));
     }
     RegCloseKey(hkey);
   }
@@ -723,6 +680,7 @@ static BOOL process_attach(void)
 static void process_detach(void)
 {
   HeapFree(GetProcessHeap(), 0, internal_gl_extensions);
+  HeapFree(GetProcessHeap(), 0, internal_gl_disabled_extensions);
 }
 
 /***********************************************************************

@@ -36,7 +36,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
-#include "thread.h"
 #include "kernel_private.h"
 
 #include "wine/exception.h"
@@ -806,7 +805,7 @@ static BOOL load_library_as_datafile( LPCWSTR name, HMODULE* hmod)
 
     *hmod = 0;
 
-    if (SearchPathW( NULL, (LPCWSTR)name, dotDLL, sizeof(filenameW) / sizeof(filenameW[0]),
+    if (SearchPathW( NULL, name, dotDLL, sizeof(filenameW) / sizeof(filenameW[0]),
                      filenameW, NULL ))
     {
         hFile = CreateFileW( filenameW, GENERIC_READ, FILE_SHARE_READ,

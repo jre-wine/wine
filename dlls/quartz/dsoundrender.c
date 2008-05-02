@@ -45,6 +45,7 @@ static const IPinVtbl DSoundRender_InputPin_Vtbl;
 static const IMemInputPinVtbl MemInputPin_Vtbl; 
 static const IBasicAudioVtbl IBasicAudio_Vtbl;
 static const IReferenceClockVtbl IReferenceClock_Vtbl;
+static const IMediaSeekingVtbl IMediaSeeking_Vtbl;
 
 typedef struct DSoundRenderImpl
 {
@@ -55,7 +56,7 @@ typedef struct DSoundRenderImpl
     LONG refCount;
     CRITICAL_SECTION csFilter;
     FILTER_STATE state;
-    REFERENCE_TIME rtStreamStart;
+    REFERENCE_TIME rtStreamStart, rtLastStop;
     IReferenceClock * pClock;
     FILTER_INFO filterInfo;
 
@@ -70,49 +71,71 @@ typedef struct DSoundRenderImpl
 
     DWORD last_play_pos;
     DWORD play_loops;
+
     REFERENCE_TIME play_time;
+    MediaSeekingImpl mediaSeeking;
 
     long volume;
     long pan;
 } DSoundRenderImpl;
 
-static HRESULT DSoundRender_InputPin_Construct(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
+/* Seeking is not needed for a renderer, rely on newsegment for the appropiate changes */
+static HRESULT sound_mod_stop(IBaseFilter *iface)
 {
-    InputPin * pPinImpl;
-
-    *ppPin = NULL;
-
-    if (pPinInfo->dir != PINDIR_INPUT)
-    {
-        ERR("Pin direction(%x) != PINDIR_INPUT\n", pPinInfo->dir);
-        return E_INVALIDARG;
-    }
-
-    pPinImpl = CoTaskMemAlloc(sizeof(*pPinImpl));
-
-    if (!pPinImpl)
-        return E_OUTOFMEMORY;
-
-    if (SUCCEEDED(InputPin_Init(pPinInfo, pSampleProc, pUserData, pQueryAccept, pCritSec, pPinImpl)))
-    {
-        pPinImpl->pin.lpVtbl = &DSoundRender_InputPin_Vtbl;
-        pPinImpl->lpVtblMemInput = &MemInputPin_Vtbl;
-        
-        *ppPin = (IPin *)(&pPinImpl->pin.lpVtbl);
-        return S_OK;
-    }
-    return E_FAIL;
+    TRACE("(%p)\n", iface);
+    return S_OK;
 }
 
+static HRESULT sound_mod_start(IBaseFilter *iface)
+{
+    TRACE("(%p)\n", iface);
 
-static inline HRESULT DSoundRender_GetPos(DSoundRenderImpl *This, DWORD *pPlayPos, DWORD *pWritePos, REFERENCE_TIME *pRefTime)
+    return S_OK;
+}
+
+static HRESULT sound_mod_rate(IBaseFilter *iface)
+{
+    DSoundRenderImpl *This = (DSoundRenderImpl *)iface;
+
+    WAVEFORMATEX *format = (WAVEFORMATEX*)This->pInputPin->pin.mtCurrent.pbFormat;
+    DWORD freq = format->nSamplesPerSec;
+    double rate = This->mediaSeeking.dRate;
+
+    freq = (DWORD)((double)freq * rate);
+
+    TRACE("(%p)\n", iface);
+
+    if (freq > DSBFREQUENCY_MAX)
+        return VFW_E_UNSUPPORTED_AUDIO;
+
+    if (freq < DSBFREQUENCY_MIN)
+        return VFW_E_UNSUPPORTED_AUDIO;
+
+    return S_OK;
+}
+
+static inline HRESULT DSoundRender_GetPos(DSoundRenderImpl *This, DWORD *pPlayPos, REFERENCE_TIME *pRefTime)
 {
     HRESULT hr;
 
     EnterCriticalSection(&This->csFilter);
     {
-        hr = IDirectSoundBuffer_GetCurrentPosition(This->dsbuffer, pPlayPos, pWritePos);
-        if (hr == DS_OK)
+        DWORD state;
+        DWORD write_pos;
+
+        hr = IDirectSoundBuffer_GetStatus(This->dsbuffer, &state);
+        if (SUCCEEDED(hr) && !(state & DSBSTATUS_PLAYING) && This->state == State_Running)
+        {
+            TRACE("Not playing, kickstarting the engine\n");
+
+            hr = IDirectSoundBuffer_Play(This->dsbuffer, 0, 0, DSBPLAY_LOOPING);
+            if (FAILED(hr))
+                ERR("Can't play sound buffer (%x)\n", hr);
+        }
+
+        if (SUCCEEDED(hr))
+            hr = IDirectSoundBuffer_GetCurrentPosition(This->dsbuffer, pPlayPos, &write_pos);
+        if (hr == S_OK)
         {
             DWORD play_pos = *pPlayPos;
 
@@ -120,10 +143,13 @@ static inline HRESULT DSoundRender_GetPos(DSoundRenderImpl *This, DWORD *pPlayPo
                 This->play_loops++;
             This->last_play_pos = play_pos;
 
-            /* If we're really falling behind, kick the play time back */
+            /* If we really fell behind, start at the next possible position
+             * Also happens when just starting playback for the first time,
+             * or when flushing
+             */
             if ((This->play_loops*This->buf_size)+play_pos >=
                 (This->write_loops*This->buf_size)+This->write_pos)
-                This->play_loops--;
+                This->write_pos = write_pos;
 
             if (pRefTime)
             {
@@ -148,7 +174,7 @@ static inline HRESULT DSoundRender_GetPos(DSoundRenderImpl *This, DWORD *pPlayPo
 
 static HRESULT DSoundRender_SendSampleData(DSoundRenderImpl* This, const BYTE *data, DWORD size)
 {
-    HRESULT hr;
+    HRESULT hr = S_OK;
     LPBYTE lpbuf1 = NULL;
     LPBYTE lpbuf2 = NULL;
     DWORD dwsize1 = 0;
@@ -157,7 +183,8 @@ static HRESULT DSoundRender_SendSampleData(DSoundRenderImpl* This, const BYTE *d
     DWORD play_pos,buf_free;
 
     do {
-        hr = DSoundRender_GetPos(This, &play_pos, NULL, NULL);
+
+        hr = DSoundRender_GetPos(This, &play_pos, NULL);
         if (hr != DS_OK)
         {
             ERR("GetPos returned error: %x\n", hr);
@@ -171,7 +198,7 @@ static HRESULT DSoundRender_SendSampleData(DSoundRenderImpl* This, const BYTE *d
         /* Wait for enough of the buffer to empty before filling it */
         if(buf_free < This->buf_size/4)
         {
-            Sleep(10);
+            Sleep(50);
             continue;
         }
 
@@ -214,22 +241,31 @@ static HRESULT DSoundRender_Sample(LPVOID iface, IMediaSample * pSample)
 
     TRACE("%p %p\n", iface, pSample);
 
-    if (This->state != State_Running)
-        return VFW_E_WRONG_STATE;
-    
+    /* Slightly incorrect, Pause completes when a frame is received so we should signal
+     * pause completion here, but for sound receiving a single frame doesn't make sense
+     */
+    if (This->state == State_Paused)
+        return S_FALSE;
+
+    if (This->state == State_Stopped)
+        return S_FALSE;
+
     hr = IMediaSample_GetPointer(pSample, &pbSrcStream);
     if (FAILED(hr))
     {
         ERR("Cannot get pointer to sample data (%x)\n", hr);
-	return hr;
+        return hr;
     }
 
     hr = IMediaSample_GetTime(pSample, &tStart, &tStop);
     if (FAILED(hr))
         ERR("Cannot get sample time (%x)\n", hr);
 
-    cbSrcStream = IMediaSample_GetActualDataLength(pSample);
+    if (This->rtLastStop != tStart && (IMediaSample_IsDiscontinuity(pSample) == S_FALSE))
+        FIXME("Unexpected discontinuity: Last: %lld, tStart: %lld\n", This->rtLastStop, tStart);
+    This->rtLastStop = tStop;
 
+    cbSrcStream = IMediaSample_GetActualDataLength(pSample);
     TRACE("Sample data ptr = %p, size = %ld\n", pbSrcStream, cbSrcStream);
 
 #if 0 /* For debugging purpose */
@@ -302,7 +338,7 @@ HRESULT DSoundRender_create(IUnknown * pUnkOuter, LPVOID * ppv)
     piInput.dir = PINDIR_INPUT;
     piInput.pFilter = (IBaseFilter *)pDSoundRender;
     lstrcpynW(piInput.achName, wcsInputPinName, sizeof(piInput.achName) / sizeof(piInput.achName[0]));
-    hr = DSoundRender_InputPin_Construct(&piInput, DSoundRender_Sample, (LPVOID)pDSoundRender, DSoundRender_QueryAccept, &pDSoundRender->csFilter, (IPin **)&pDSoundRender->pInputPin);
+    hr = InputPin_Construct(&DSoundRender_InputPin_Vtbl, &piInput, DSoundRender_Sample, pDSoundRender, DSoundRender_QueryAccept, NULL, &pDSoundRender->csFilter, (IPin **)&pDSoundRender->pInputPin);
 
     if (SUCCEEDED(hr))
     {
@@ -313,6 +349,9 @@ HRESULT DSoundRender_create(IUnknown * pUnkOuter, LPVOID * ppv)
 
     if (SUCCEEDED(hr))
     {
+        MediaSeekingImpl_Init((IBaseFilter*)pDSoundRender, sound_mod_stop, sound_mod_start, sound_mod_rate, &pDSoundRender->mediaSeeking, &pDSoundRender->csFilter);
+        pDSoundRender->mediaSeeking.lpVtbl = &IMediaSeeking_Vtbl;
+
         pDSoundRender->ppPins[0] = (IPin *)pDSoundRender->pInputPin;
         *ppv = (LPVOID)pDSoundRender;
     }
@@ -348,6 +387,8 @@ static HRESULT WINAPI DSoundRender_QueryInterface(IBaseFilter * iface, REFIID ri
         *ppv = (LPVOID)&(This->IBasicAudio_vtbl);
     else if (IsEqualIID(riid, &IID_IReferenceClock))
         *ppv = (LPVOID)&(This->IReferenceClock_vtbl);
+    else if (IsEqualIID(riid, &IID_IMediaSeeking))
+        *ppv = &This->mediaSeeking.lpVtbl;
 
     if (*ppv)
     {
@@ -355,7 +396,8 @@ static HRESULT WINAPI DSoundRender_QueryInterface(IBaseFilter * iface, REFIID ri
         return S_OK;
     }
 
-    FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
+    if (!IsEqualIID(riid, &IID_IPin) && !IsEqualIID(riid, &IID_IVideoWindow))
+        FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
 
     return E_NOINTERFACE;
 }
@@ -467,6 +509,9 @@ static HRESULT WINAPI DSoundRender_Pause(IBaseFilter * iface)
     EnterCriticalSection(&This->csFilter);
     {
         DWORD state = 0;
+        if (This->state == State_Stopped)
+            This->pInputPin->end_of_stream = 0;
+
         if (This->dsbuffer)
         {
             hr = IDirectSoundBuffer_GetStatus(This->dsbuffer, &state);
@@ -493,18 +538,9 @@ static HRESULT WINAPI DSoundRender_Run(IBaseFilter * iface, REFERENCE_TIME tStar
 
     EnterCriticalSection(&This->csFilter);
     {
-        /* It's okay if there's no buffer yet. It'll start when it's created */
-        if (This->dsbuffer)
-        {
-            hr = IDirectSoundBuffer_Play(This->dsbuffer, 0, 0, DSBPLAY_LOOPING);
-            if (FAILED(hr))
-                ERR("Can't start playing! (%x)\n", hr);
-        }
-        if (SUCCEEDED(hr))
-        {
-            This->rtStreamStart = tStart;
-            This->state = State_Running;
-        }
+        This->rtStreamStart = tStart;
+        This->state = State_Running;
+        This->pInputPin->end_of_stream = 0;
     }
     LeaveCriticalSection(&This->csFilter);
 
@@ -661,6 +697,7 @@ static HRESULT WINAPI DSoundRender_InputPin_ReceiveConnection(IPin * iface, IPin
     EnterCriticalSection(This->pin.pCritSec);
     {
         DSImpl = (DSoundRenderImpl*)This->pin.pinInfo.pFilter;
+        DSImpl->rtLastStop = -1;
 
         if (This->pin.pConnectedTo)
             hr = VFW_E_ALREADY_CONNECTED;
@@ -717,10 +754,6 @@ static HRESULT WINAPI DSoundRender_InputPin_ReceiveConnection(IPin * iface, IPin
 
             DSImpl->write_pos = 0;
             hr = S_OK;
-            if (DSImpl->state == State_Running)
-                hr = IDirectSoundBuffer_Play(DSImpl->dsbuffer, 0, 0, DSBPLAY_LOOPING);
-            if (FAILED(hr))
-                ERR("Can't play sound buffer (%x)\n", hr);
         }
 
         if (SUCCEEDED(hr))
@@ -759,18 +792,64 @@ static HRESULT WINAPI DSoundRender_InputPin_Disconnect(IPin * iface)
 static HRESULT WINAPI DSoundRender_InputPin_EndOfStream(IPin * iface)
 {
     InputPin* This = (InputPin*)iface;
+    DSoundRenderImpl *me = (DSoundRenderImpl*)This->pin.pinInfo.pFilter;
     IMediaEventSink* pEventSink;
     HRESULT hr;
 
-    TRACE("(%p/%p)->()\n", This, iface);
+    EnterCriticalSection(This->pin.pCritSec);
 
-    hr = IFilterGraph_QueryInterface(((DSoundRenderImpl*)This->pin.pinInfo.pFilter)->filterInfo.pGraph, &IID_IMediaEventSink, (LPVOID*)&pEventSink);
+    TRACE("(%p/%p)->()\n", This, iface);
+    InputPin_EndOfStream(iface);
+
+    hr = IFilterGraph_QueryInterface(me->filterInfo.pGraph, &IID_IMediaEventSink, (LPVOID*)&pEventSink);
     if (SUCCEEDED(hr))
     {
-        /* FIXME: We should wait that all audio data has been played */
+        BYTE * silence;
+
+        silence = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, me->buf_size);
+        if (silence)
+        {
+            memset(silence, 0, me->buf_size);
+            DSoundRender_SendSampleData((DSoundRenderImpl*)This->pin.pinInfo.pFilter, silence, me->buf_size);
+            HeapFree(GetProcessHeap(), 0, silence);
+        }
+
         hr = IMediaEventSink_Notify(pEventSink, EC_COMPLETE, S_OK, 0);
         IMediaEventSink_Release(pEventSink);
     }
+    LeaveCriticalSection(This->pin.pCritSec);
+
+    return hr;
+}
+
+static HRESULT WINAPI DSoundRender_InputPin_BeginFlush(IPin * iface)
+{
+    InputPin *This = (InputPin *)iface;
+    DSoundRenderImpl *pFilter = (DSoundRenderImpl *)This->pin.pinInfo.pFilter;
+    HRESULT hr;
+    LPBYTE buffer;
+    DWORD size;
+
+    TRACE("\n");
+
+    EnterCriticalSection(This->pin.pCritSec);
+    hr = InputPin_BeginFlush(iface);
+
+    if (pFilter->dsbuffer)
+    {
+        IDirectSoundBuffer_Stop(pFilter->dsbuffer);
+
+        /* Force a reset */
+        IDirectSoundBuffer_SetCurrentPosition(pFilter->dsbuffer, 0);
+        pFilter->write_pos = pFilter->last_play_pos = 0;
+        ++pFilter->play_loops;
+        pFilter->write_loops = pFilter->play_loops;
+
+        IDirectSoundBuffer_Lock(pFilter->dsbuffer, 0, 0, (LPVOID *)&buffer, &size, NULL, NULL, DSBLOCK_ENTIREBUFFER);
+        memset(buffer, 0, size);
+        IDirectSoundBuffer_Unlock(pFilter->dsbuffer, buffer, size, NULL, 0);
+    }
+    LeaveCriticalSection(This->pin.pCritSec);
 
     return hr;
 }
@@ -792,7 +871,7 @@ static const IPinVtbl DSoundRender_InputPin_Vtbl =
     IPinImpl_EnumMediaTypes,
     IPinImpl_QueryInternalConnections,
     DSoundRender_InputPin_EndOfStream,
-    InputPin_BeginFlush,
+    DSoundRender_InputPin_BeginFlush,
     InputPin_EndFlush,
     InputPin_NewSegment
 };
@@ -1007,9 +1086,9 @@ static HRESULT WINAPI ReferenceClock_GetTime(IReferenceClock *iface,
     TRACE("(%p/%p)->(%p)\n", This, iface, pTime);
 
     if (This->dsbuffer)
-        hr = DSoundRender_GetPos(This, &play_pos, NULL, pTime);
+        hr = DSoundRender_GetPos(This, &play_pos, pTime);
     if (FAILED(hr))
-        ERR("Could not get refreence time (%x)!\n", hr);
+        ERR("Could not get reference time (%x)!\n", hr);
 
     return hr;
 }
@@ -1059,4 +1138,54 @@ static const IReferenceClockVtbl IReferenceClock_Vtbl =
     ReferenceClock_AdviseTime,
     ReferenceClock_AdvisePeriodic,
     ReferenceClock_Unadvise
+};
+
+static inline DSoundRenderImpl *impl_from_IMediaSeeking( IMediaSeeking *iface )
+{
+    return (DSoundRenderImpl *)((char*)iface - FIELD_OFFSET(DSoundRenderImpl, mediaSeeking.lpVtbl));
+}
+
+static HRESULT WINAPI sound_seek_QueryInterface(IMediaSeeking * iface, REFIID riid, LPVOID * ppv)
+{
+    DSoundRenderImpl *This = impl_from_IMediaSeeking(iface);
+
+    return IUnknown_QueryInterface((IUnknown *)This, riid, ppv);
+}
+
+static ULONG WINAPI sound_seek_AddRef(IMediaSeeking * iface)
+{
+    DSoundRenderImpl *This = impl_from_IMediaSeeking(iface);
+
+    return IUnknown_AddRef((IUnknown *)This);
+}
+
+static ULONG WINAPI sound_seek_Release(IMediaSeeking * iface)
+{
+    DSoundRenderImpl *This = impl_from_IMediaSeeking(iface);
+
+    return IUnknown_Release((IUnknown *)This);
+}
+
+static const IMediaSeekingVtbl IMediaSeeking_Vtbl =
+{
+    sound_seek_QueryInterface,
+    sound_seek_AddRef,
+    sound_seek_Release,
+    MediaSeekingImpl_GetCapabilities,
+    MediaSeekingImpl_CheckCapabilities,
+    MediaSeekingImpl_IsFormatSupported,
+    MediaSeekingImpl_QueryPreferredFormat,
+    MediaSeekingImpl_GetTimeFormat,
+    MediaSeekingImpl_IsUsingTimeFormat,
+    MediaSeekingImpl_SetTimeFormat,
+    MediaSeekingImpl_GetDuration,
+    MediaSeekingImpl_GetStopPosition,
+    MediaSeekingImpl_GetCurrentPosition,
+    MediaSeekingImpl_ConvertTimeFormat,
+    MediaSeekingImpl_SetPositions,
+    MediaSeekingImpl_GetPositions,
+    MediaSeekingImpl_GetAvailable,
+    MediaSeekingImpl_SetRate,
+    MediaSeekingImpl_GetRate,
+    MediaSeekingImpl_GetPreroll
 };

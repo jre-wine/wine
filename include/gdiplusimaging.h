@@ -43,6 +43,24 @@ public:
     EncoderParameter Parameter[1];
 };
 
+class ImageCodecInfo
+{
+public:
+    CLSID Clsid;
+    GUID  FormatID;
+    const WCHAR* CodecName;
+    const WCHAR* DllName;
+    const WCHAR* FormatDescription;
+    const WCHAR* FilenameExtension;
+    const WCHAR* MimeType;
+    DWORD Flags;
+    DWORD Version;
+    DWORD SigCount;
+    DWORD SigSize;
+    const BYTE* SigPattern;
+    const BYTE* SigMask;
+};
+
 class BitmapData
 {
 public:
@@ -52,6 +70,18 @@ public:
     PixelFormat PixelFormat;
     VOID* Scan0;
     UINT_PTR Reserved;
+};
+
+class ImageItemData
+{
+public:
+    UINT  Size;
+    UINT  Position;
+    VOID* Desc;
+    UINT  DescSize;
+    VOID* Data;
+    UINT  DataSize;
+    UINT  Cookie;
 };
 
 #else /* end of c++ typedefs */
@@ -72,6 +102,23 @@ typedef struct EncoderParameters
     EncoderParameter Parameter[1];
 } EncoderParameters;
 
+typedef struct ImageCodecInfo
+{
+    CLSID Clsid;
+    GUID  FormatID;
+    const WCHAR* CodecName;
+    const WCHAR* DllName;
+    const WCHAR* FormatDescription;
+    const WCHAR* FilenameExtension;
+    const WCHAR* MimeType;
+    DWORD Flags;
+    DWORD Version;
+    DWORD SigCount;
+    DWORD SigSize;
+    const BYTE* SigPattern;
+    const BYTE* SigMask;
+} ImageCodecInfo;
+
 typedef struct BitmapData
 {
     UINT Width;
@@ -80,7 +127,18 @@ typedef struct BitmapData
     PixelFormat PixelFormat;
     VOID* Scan0;
     UINT_PTR Reserved; /* undocumented: stores the lock mode */
-}BitmapData;
+} BitmapData;
+
+typedef struct ImageItemData
+{
+    UINT  Size;
+    UINT  Position;
+    VOID* Desc;
+    UINT  DescSize;
+    VOID* Data;
+    UINT  DataSize;
+    UINT  Cookie;
+} ImageItemData;
 
 #endif /* end of c typedefs */
 

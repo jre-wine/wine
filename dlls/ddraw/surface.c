@@ -178,7 +178,7 @@ IDirectDrawSurfaceImpl_AddRef(IDirectDrawSurface7 *iface)
  *  This: Surface to free
  *
  *****************************************************************************/
-static void IDirectDrawSurfaceImpl_Destroy(IDirectDrawSurfaceImpl *This)
+void IDirectDrawSurfaceImpl_Destroy(IDirectDrawSurfaceImpl *This)
 {
     TRACE("(%p)\n", This);
 
@@ -287,7 +287,7 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
         IUnknown *ifaceToRelease = This->ifaceToRelease;
         int i;
 
-        /* Complex attached surfaces are destroyed implicitely when the root is released */
+        /* Complex attached surfaces are destroyed implicitly when the root is released */
         EnterCriticalSection(&ddraw_cs);
         if(!This->is_complex_root)
         {
@@ -540,6 +540,8 @@ IDirectDrawSurfaceImpl_GetAttachedSurface(IDirectDrawSurface7 *iface,
 
     TRACE("(%p) Didn't find a valid surface\n", This);
     LeaveCriticalSection(&ddraw_cs);
+
+    *Surface = NULL;
     return DDERR_NOTFOUND;
 }
 
@@ -577,20 +579,6 @@ IDirectDrawSurfaceImpl_Lock(IDirectDrawSurface7 *iface,
 
     /* This->surface_desc.dwWidth and dwHeight are changeable, thus lock */
     EnterCriticalSection(&ddraw_cs);
-    if (Rect)
-    {
-        if ((Rect->left < 0)
-                || (Rect->top < 0)
-                || (Rect->left > Rect->right)
-                || (Rect->top > Rect->bottom)
-                || (Rect->right > This->surface_desc.dwWidth)
-                || (Rect->bottom > This->surface_desc.dwHeight))
-        {
-            WARN("Trying to lock an invalid rectangle, returning DDERR_INVALIDPARAMS\n");
-            LeaveCriticalSection(&ddraw_cs);
-            return DDERR_INVALIDPARAMS;
-        }
-    }
 
     /* Should I check for the handle to be NULL?
      *
@@ -606,6 +594,24 @@ IDirectDrawSurfaceImpl_Lock(IDirectDrawSurface7 *iface,
         return DDERR_INVALIDPARAMS;
     }
 
+    /* Windows zeroes this if the rect is invalid */
+    DDSD->lpSurface = 0;
+
+    if (Rect)
+    {
+        if ((Rect->left < 0)
+                || (Rect->top < 0)
+                || (Rect->left > Rect->right)
+                || (Rect->top > Rect->bottom)
+                || (Rect->right > This->surface_desc.dwWidth)
+                || (Rect->bottom > This->surface_desc.dwHeight))
+        {
+            WARN("Trying to lock an invalid rectangle, returning DDERR_INVALIDPARAMS\n");
+            LeaveCriticalSection(&ddraw_cs);
+            return DDERR_INVALIDPARAMS;
+        }
+    }
+
     hr = IWineD3DSurface_LockRect(This->WineD3DSurface,
                                   &LockedRect,
                                   Rect,
@@ -613,7 +619,17 @@ IDirectDrawSurfaceImpl_Lock(IDirectDrawSurface7 *iface,
     if(hr != D3D_OK)
     {
         LeaveCriticalSection(&ddraw_cs);
-        return hr;
+        switch(hr)
+        {
+            /* D3D8 and D3D9 return the general D3DERR_INVALIDCALL error, but ddraw has a more
+             * specific error. But since IWineD3DSurface::LockRect returns that error in this
+             * only occasion, keep d3d8 and d3d9 free from the return value override. There are
+             * many different places where d3d8/9 would have to catch the DDERR_SURFACEBUSY, it
+             * is much easier to do it in one place in ddraw
+             */
+            case WINED3DERR_INVALIDCALL:    return DDERR_SURFACEBUSY;
+            default:                        return hr;
+        }
     }
 
     /* Override the memory area. The pitch should be set already. Strangely windows
@@ -695,7 +711,7 @@ IDirectDrawSurfaceImpl_Flip(IDirectDrawSurface7 *iface,
      * What about overlay surfaces, AFAIK they can flip too?
      */
     if( !(This->surface_desc.ddsCaps.dwCaps & DDSCAPS_FRONTBUFFER) )
-        return DDERR_INVALIDOBJECT; /* Unckecked */
+        return DDERR_INVALIDOBJECT; /* Unchecked */
 
     EnterCriticalSection(&ddraw_cs);
 
@@ -734,7 +750,7 @@ IDirectDrawSurfaceImpl_Flip(IDirectDrawSurface7 *iface,
  * Params:
  *  DestRect: Destination rectangle, can be NULL
  *  SrcSurface: Source surface, can be NULL
- *  SrcRect: Source rectange, can be NULL
+ *  SrcRect: Source rectangle, can be NULL
  *  Flags: Blt flags
  *  DDBltFx: Some extended blt parameters, connected to the flags
  *
@@ -777,7 +793,7 @@ IDirectDrawSurfaceImpl_Blt(IDirectDrawSurface7 *iface,
            DestRect->right > This->surface_desc.dwWidth ||
            DestRect->bottom > This->surface_desc.dwHeight)
         {
-            WARN("Source rectangle is invalid, returning DDERR_INVALIDRECT\n");
+            WARN("Destination rectangle is invalid, returning DDERR_INVALIDRECT\n");
             LeaveCriticalSection(&ddraw_cs);
             return DDERR_INVALIDRECT;
         }
@@ -1301,7 +1317,7 @@ IDirectDrawSurfaceImpl_PageLock(IDirectDrawSurface7 *iface,
  * Allows a sysmem surface to be paged out
  *
  * Params:
- *  Flags: Not used, must be 0(unckeched)
+ *  Flags: Not used, must be 0(unchecked)
  *
  * Returns:
  *  DD_OK, because it's a stub
@@ -2486,6 +2502,11 @@ IDirectDrawSurfaceImpl_SetPalette(IDirectDrawSurface7 *iface,
     IDirectDrawPaletteImpl *PalImpl = ICOM_OBJECT(IDirectDrawPaletteImpl, IDirectDrawPalette, Pal);
     HRESULT hr;
     TRACE("(%p)->(%p)\n", This, Pal);
+
+    if (!(This->surface_desc.u4.ddpfPixelFormat.dwFlags & (DDPF_PALETTEINDEXED1 | DDPF_PALETTEINDEXED2 |
+            DDPF_PALETTEINDEXED4 | DDPF_PALETTEINDEXED8 | DDPF_PALETTEINDEXEDTO8))) {
+        return DDERR_INVALIDPIXELFORMAT;
+    }
 
     /* Find the old palette */
     EnterCriticalSection(&ddraw_cs);

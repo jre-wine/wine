@@ -76,6 +76,7 @@ static const struct object_ops console_input_ops =
 {
     sizeof(struct console_input),     /* size */
     console_input_dump,               /* dump */
+    no_get_type,                      /* get_type */
     no_add_queue,                     /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
@@ -83,6 +84,8 @@ static const struct object_ops console_input_ops =
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
     console_map_access,               /* map_access */
+    default_get_sd,                   /* get_sd */
+    default_set_sd,                   /* set_sd */
     no_lookup_name,                   /* lookup_name */
     no_open_file,                     /* open_file */
     no_close_handle,                  /* close_handle */
@@ -105,6 +108,7 @@ static const struct object_ops console_input_events_ops =
 {
     sizeof(struct console_input_events), /* size */
     console_input_events_dump,        /* dump */
+    no_get_type,                      /* get_type */
     add_queue,                        /* add_queue */
     remove_queue,                     /* remove_queue */
     console_input_events_signaled,    /* signaled */
@@ -112,6 +116,8 @@ static const struct object_ops console_input_events_ops =
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
     console_map_access,               /* map_access */
+    default_get_sd,                   /* get_sd */
+    default_set_sd,                   /* set_sd */
     no_lookup_name,                   /* lookup_name */
     no_open_file,                     /* open_file */
     no_close_handle,                  /* close_handle */
@@ -145,6 +151,7 @@ static const struct object_ops screen_buffer_ops =
 {
     sizeof(struct screen_buffer),     /* size */
     screen_buffer_dump,               /* dump */
+    no_get_type,                      /* get_type */
     no_add_queue,                     /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
@@ -152,6 +159,8 @@ static const struct object_ops screen_buffer_ops =
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
     console_map_access,               /* map_access */
+    default_get_sd,                   /* get_sd */
+    default_set_sd,                   /* set_sd */
     no_lookup_name,                   /* lookup_name */
     no_open_file,                     /* open_file */
     no_close_handle,                  /* close_handle */
@@ -283,7 +292,7 @@ static struct object *create_console_input( struct thread* renderer )
     console_input->input_cp      = 0;
     console_input->output_cp     = 0;
     console_input->win           = 0;
-    console_input->event         = create_event( NULL, NULL, 0, 1, 0 );
+    console_input->event         = create_event( NULL, NULL, 0, 1, 0, NULL );
 
     if (!console_input->history || !console_input->evt)
     {
@@ -291,6 +300,43 @@ static struct object *create_console_input( struct thread* renderer )
 	return NULL;
     }
     return &console_input->obj;
+}
+
+static void generate_sb_initial_events( struct console_input *console_input )
+{
+    struct screen_buffer *screen_buffer = console_input->active;
+    struct console_renderer_event evt;
+
+    evt.event = CONSOLE_RENDERER_ACTIVE_SB_EVENT;
+    memset(&evt.u, 0, sizeof(evt.u));
+    console_input_events_append( console_input->evt, &evt );
+
+    evt.event = CONSOLE_RENDERER_SB_RESIZE_EVENT;
+    evt.u.resize.width  = screen_buffer->width;
+    evt.u.resize.height = screen_buffer->height;
+    console_input_events_append( console_input->evt, &evt );
+
+    evt.event = CONSOLE_RENDERER_DISPLAY_EVENT;
+    evt.u.display.left   = screen_buffer->win.left;
+    evt.u.display.top    = screen_buffer->win.top;
+    evt.u.display.width  = screen_buffer->win.right - screen_buffer->win.left + 1;
+    evt.u.display.height = screen_buffer->win.bottom - screen_buffer->win.top + 1;
+    console_input_events_append( console_input->evt, &evt );
+
+    evt.event = CONSOLE_RENDERER_UPDATE_EVENT;
+    evt.u.update.top    = 0;
+    evt.u.update.bottom = screen_buffer->height - 1;
+    console_input_events_append( console_input->evt, &evt );
+
+    evt.event = CONSOLE_RENDERER_CURSOR_GEOM_EVENT;
+    evt.u.cursor_geom.size    = screen_buffer->cursor_size;
+    evt.u.cursor_geom.visible = screen_buffer->cursor_visible;
+    console_input_events_append( console_input->evt, &evt );
+
+    evt.event = CONSOLE_RENDERER_CURSOR_POS_EVENT;
+    evt.u.cursor_pos.x = screen_buffer->cursor_x;
+    evt.u.cursor_pos.y = screen_buffer->cursor_y;
+    console_input_events_append( console_input->evt, &evt );
 }
 
 static struct screen_buffer *create_console_output( struct console_input *console_input )
@@ -332,40 +378,8 @@ static struct screen_buffer *create_console_output( struct console_input *consol
 
     if (!console_input->active)
     {
-        struct console_renderer_event evt;
 	console_input->active = (struct screen_buffer*)grab_object( screen_buffer );
-
-	/* generate the initial events */
-	evt.event = CONSOLE_RENDERER_ACTIVE_SB_EVENT;
-        memset(&evt.u, 0, sizeof(evt.u));
-	console_input_events_append( console_input->evt, &evt );
-
-	evt.event = CONSOLE_RENDERER_SB_RESIZE_EVENT;
-	evt.u.resize.width  = screen_buffer->width;
-	evt.u.resize.height = screen_buffer->height;
-	console_input_events_append( console_input->evt, &evt );
-
-	evt.event = CONSOLE_RENDERER_DISPLAY_EVENT;
-	evt.u.display.left   = screen_buffer->win.left;
-	evt.u.display.top    = screen_buffer->win.top;
-	evt.u.display.width  = screen_buffer->win.right - screen_buffer->win.left + 1;
-	evt.u.display.height = screen_buffer->win.bottom - screen_buffer->win.top + 1;
-	console_input_events_append( console_input->evt, &evt );
-
-	evt.event = CONSOLE_RENDERER_UPDATE_EVENT;
-	evt.u.update.top    = 0;
-	evt.u.update.bottom = screen_buffer->height - 1;
-	console_input_events_append( console_input->evt, &evt );
-
- 	evt.event = CONSOLE_RENDERER_CURSOR_GEOM_EVENT;
- 	evt.u.cursor_geom.size    = screen_buffer->cursor_size;
- 	evt.u.cursor_geom.visible = screen_buffer->cursor_visible;
- 	console_input_events_append( console_input->evt, &evt );
-
-	evt.event = CONSOLE_RENDERER_CURSOR_POS_EVENT;
-	evt.u.cursor_pos.x = screen_buffer->cursor_x;
-	evt.u.cursor_pos.y = screen_buffer->cursor_y;
-	console_input_events_append( console_input->evt, &evt );
+        generate_sb_initial_events( console_input );
     }
     return screen_buffer;
 }
@@ -656,8 +670,7 @@ static int set_console_input_info( const struct set_console_input_info_request *
 	{
 	    if (console->active) release_object( console->active );
 	    console->active = screen_buffer;
-	    evt.event = CONSOLE_RENDERER_ACTIVE_SB_EVENT;
-	    console_input_events_append( console->evt, &evt );
+	    generate_sb_initial_events( console );
 	}
 	else
 	    release_object( screen_buffer );
@@ -704,7 +717,7 @@ static int set_console_input_info( const struct set_console_input_info_request *
 	console->history_index -= delta;
 
 	for (i = 0; i < console->history_size; i++)
-	    if (console->history[i]) free( console->history[i] );
+	    free( console->history[i] );
 	free( console->history );
 	console->history = mem;
 	console->history_size = req->history_size;
@@ -1027,7 +1040,7 @@ static void console_input_destroy( struct object *obj )
     release_object( console_in->event );
 
     for (i = 0; i < console_in->history_size; i++)
-        if (console_in->history[i]) free( console_in->history[i] );
+        free( console_in->history[i] );
     free( console_in->history );
 }
 

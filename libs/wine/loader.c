@@ -88,7 +88,6 @@ static unsigned int nb_dll_paths;
 static int dll_path_maxlen;
 
 extern void mmap_init(void);
-extern void debug_init(void);
 extern const char *get_dlldir( const char **default_dlldir );
 
 /* build the dll load path from the WINEDLLPATH variable */
@@ -353,8 +352,8 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     /* Build the DOS and NT headers */
 
     dos->e_magic    = IMAGE_DOS_SIGNATURE;
-    dos->e_cblp     = sizeof(*dos);
-    dos->e_cp       = 1;
+    dos->e_cblp     = 0x90;
+    dos->e_cp       = 3;
     dos->e_cparhdr  = (sizeof(*dos)+0xf)/0x10;
     dos->e_minalloc = 0;
     dos->e_maxalloc = 0xffff;
@@ -597,7 +596,18 @@ static void set_max_limit( int limit )
     if (!getrlimit( limit, &rlimit ))
     {
         rlimit.rlim_cur = rlimit.rlim_max;
-        setrlimit( limit, &rlimit );
+        if (setrlimit( limit, &rlimit ) != 0)
+        {
+#if defined(__APPLE__) && defined(RLIMIT_NOFILE) && defined(OPEN_MAX)
+            /* On Leopard, setrlimit(RLIMIT_NOFILE, ...) fails on attempts to set
+             * rlim_cur above OPEN_MAX (even if rlim_max > OPEN_MAX). */
+            if (limit == RLIMIT_NOFILE && rlimit.rlim_cur > OPEN_MAX)
+            {
+                rlimit.rlim_cur = OPEN_MAX;
+                setrlimit( limit, &rlimit );
+            }
+#endif
+        }
     }
 #endif
 }
@@ -629,7 +639,6 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
     __wine_main_argv = argv;
     __wine_main_environ = environ;
     mmap_init();
-    debug_init();
 
     for (path = first_dll_path( "ntdll.dll", 0, &context ); path; path = next_dll_path( &context ))
     {
@@ -670,6 +679,25 @@ void *wine_dlopen( const char *filename, int flag, char *error, size_t errorsize
 #ifdef HAVE_DLOPEN
     void *ret;
     const char *s;
+
+#ifdef __APPLE__
+    /* the Mac OS loader pretends to be able to load PE files, so avoid them here */
+    unsigned char magic[2];
+    int fd = open( filename, O_RDONLY );
+    if (fd != -1)
+    {
+        if (pread( fd, magic, 2, 0 ) == 2 && magic[0] == 'M' && magic[1] == 'Z')
+        {
+            static const char msg[] = "MZ format";
+            size_t len = min( errorsize, sizeof(msg) );
+            memcpy( error, msg, len );
+            error[len - 1] = 0;
+            close( fd );
+            return NULL;
+        }
+        close( fd );
+    }
+#endif
     dlerror(); dlerror();
 #ifdef __sun
     if (strchr( filename, ':' ))

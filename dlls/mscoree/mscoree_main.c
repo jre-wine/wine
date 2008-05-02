@@ -27,8 +27,10 @@
 #include "winreg.h"
 #include "ole2.h"
 
+#include "initguid.h"
 #include "cor.h"
 #include "mscoree.h"
+#include "mscoree_private.h"
 
 #include "wine/debug.h"
 
@@ -98,6 +100,8 @@ HRESULT WINAPI CorBindToRuntimeHost(LPCWSTR pwszVersion, LPCWSTR pwszBuildFlavor
         MESSAGE("wine: Install the Windows version of Mono to run .NET executables\n");
         return E_FAIL;
     }
+
+    HeapFree(GetProcessHeap(), 0, mono_exe);
 
     return S_OK;
 }
@@ -263,4 +267,112 @@ HRESULT WINAPI GetAssemblyMDImport(LPCWSTR szFileName, REFIID riid, IUnknown **p
 {
     FIXME("(%p %s, %p, %p): stub\n", szFileName, debugstr_w(szFileName), riid, *ppIUnk);
     return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+HRESULT WINAPI GetVersionFromProcess(HANDLE hProcess, LPWSTR pVersion, DWORD cchBuffer, DWORD *dwLength)
+{
+    FIXME("(%p, %p, %d, %p): stub\n", hProcess, pVersion, cchBuffer, dwLength);
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI LoadStringRCEx(LCID culture, UINT resId, LPWSTR pBuffer, int iBufLen, int bQuiet, int* pBufLen)
+{
+    HRESULT res = S_OK;
+    if ((iBufLen <= 0) || !pBuffer)
+        return E_INVALIDARG;
+    pBuffer[0] = 0;
+    if (resId) {
+        FIXME("(%d, %x, %p, %d, %d, %p): semi-stub\n", culture, resId, pBuffer, iBufLen, bQuiet, pBufLen);
+        res = E_NOTIMPL;
+    }
+    else
+        res = E_FAIL;
+    if (pBufLen)
+        *pBufLen = lstrlenW(pBuffer);
+    return res;
+}
+
+HRESULT WINAPI LoadStringRC(UINT resId, LPWSTR pBuffer, int iBufLen, int bQuiet)
+{
+    return LoadStringRCEx(-1, resId, pBuffer, iBufLen, bQuiet, NULL);
+}
+
+HRESULT WINAPI CorBindToRuntimeEx(LPWSTR szVersion, LPWSTR szBuildFlavor, DWORD nflags, REFCLSID rslsid,
+                                  REFIID riid, LPVOID *ppv)
+{
+    FIXME("%s %s %d %s %s %p\n", debugstr_w(szVersion), debugstr_w(szBuildFlavor), nflags, debugstr_guid( rslsid ),
+          debugstr_guid( riid ), ppv);
+
+    if(IsEqualGUID( riid, &IID_ICorRuntimeHost ))
+    {
+        *ppv = create_corruntimehost();
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)
+{
+    FIXME("(%p, %p, %p): stub\n", rclsid, riid, ppv);
+    if(!ppv)
+        return E_INVALIDARG;
+
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI DllCanUnloadNow(VOID)
+{
+    FIXME("stub\n");
+    return S_OK;
+}
+
+INT WINAPI ND_RU1( const void *ptr, INT offset )
+{
+    return *((const BYTE *)ptr + offset);
+}
+
+INT WINAPI ND_RI2( const void *ptr, INT offset )
+{
+    return *(const SHORT *)((const BYTE *)ptr + offset);
+}
+
+INT WINAPI ND_RI4( const void *ptr, INT offset )
+{
+    return *(const INT *)((const BYTE *)ptr + offset);
+}
+
+INT64 WINAPI ND_RI8( const void *ptr, INT offset )
+{
+    return *(const INT64 *)((const BYTE *)ptr + offset);
+}
+
+void WINAPI ND_WU1( void *ptr, INT offset, BYTE val )
+{
+    *((BYTE *)ptr + offset) = val;
+}
+
+void WINAPI ND_WI2( void *ptr, INT offset, SHORT val )
+{
+    *(SHORT *)((BYTE *)ptr + offset) = val;
+}
+
+void WINAPI ND_WI4( void *ptr, INT offset, INT val )
+{
+    *(INT *)((BYTE *)ptr + offset) = val;
+}
+
+void WINAPI ND_WI8( void *ptr, INT offset, INT64 val )
+{
+    *(INT64 *)((BYTE *)ptr + offset) = val;
+}
+
+void WINAPI ND_CopyObjDst( const void *src, void *dst, INT offset, INT size )
+{
+    memcpy( (BYTE *)dst + offset, src, size );
+}
+
+void WINAPI ND_CopyObjSrc( const void *src, INT offset, void *dst, INT size )
+{
+    memcpy( dst, (const BYTE *)src + offset, size );
 }

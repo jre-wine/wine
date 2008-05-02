@@ -126,6 +126,9 @@
 /* Define if you have the <freetype/fttrigon.h> header file. */
 #undef HAVE_FREETYPE_FTTRIGON_H
 
+/* Define to 1 if you have the <freetype/fttypes.h> header file. */
+#undef HAVE_FREETYPE_FTTYPES_H
+
 /* Define to 1 if you have the <freetype/ftwinfnt.h> header file. */
 #undef HAVE_FREETYPE_FTWINFNT_H
 
@@ -228,9 +231,6 @@
 /* Define to 1 if you have the <hal/libhal.h> header file. */
 #undef HAVE_HAL_LIBHAL_H
 
-/* Define to 1 if the ICU libraries are installed */
-#undef HAVE_ICU
-
 /* Define to 1 if you have the <ieeefp.h> header file. */
 #undef HAVE_IEEEFP_H
 
@@ -287,6 +287,18 @@
 
 /* Define to 1 if you have the `ldap_parse_reference' function. */
 #undef HAVE_LDAP_PARSE_REFERENCE
+
+/* Define to 1 if you have the `ldap_parse_sortresponse_control' function. */
+#undef HAVE_LDAP_PARSE_SORTRESPONSE_CONTROL
+
+/* Define to 1 if you have the `ldap_parse_sort_control' function. */
+#undef HAVE_LDAP_PARSE_SORT_CONTROL
+
+/* Define to 1 if you have the `ldap_parse_vlvresponse_control' function. */
+#undef HAVE_LDAP_PARSE_VLVRESPONSE_CONTROL
+
+/* Define to 1 if you have the `ldap_parse_vlv_control' function. */
+#undef HAVE_LDAP_PARSE_VLV_CONTROL
 
 /* Define if you have libaudioIO */
 #undef HAVE_LIBAUDIOIO
@@ -576,6 +588,9 @@
 /* Define to 1 if you have the `sendmsg' function. */
 #undef HAVE_SENDMSG
 
+/* Define to 1 if you have the `setproctitle' function. */
+#undef HAVE_SETPROCTITLE
+
 /* Define to 1 if you have the `setrlimit' function. */
 #undef HAVE_SETRLIMIT
 
@@ -633,6 +648,9 @@
 /* Define to 1 if you have the `strcasecmp' function. */
 #undef HAVE_STRCASECMP
 
+/* Define to 1 if you have the `strdup' function. */
+#undef HAVE_STRDUP
+
 /* Define to 1 if you have the `strerror' function. */
 #undef HAVE_STRERROR
 
@@ -647,6 +665,12 @@
 
 /* Define to 1 if you have the `strtold' function. */
 #undef HAVE_STRTOLD
+
+/* Define to 1 if you have the `strtoll' function. */
+#undef HAVE_STRTOLL
+
+/* Define to 1 if you have the `strtoull' function. */
+#undef HAVE_STRTOULL
 
 /* Define to 1 if `direction' is member of `struct ff_effect'. */
 #undef HAVE_STRUCT_FF_EFFECT_DIRECTION
@@ -861,9 +885,6 @@
 /* Define to 1 if you have the <ucontext.h> header file. */
 #undef HAVE_UCONTEXT_H
 
-/* Define to 1 if you have the <unicode/ubidi.h> header file. */
-#undef HAVE_UNICODE_UBIDI_H
-
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
 
@@ -890,6 +911,9 @@
 
 /* Define to 1 if you have the <X11/extensions/shape.h> header file. */
 #undef HAVE_X11_EXTENSIONS_SHAPE_H
+
+/* Define to 1 if you have the <X11/extensions/Xcomposite.h> header file. */
+#undef HAVE_X11_EXTENSIONS_XCOMPOSITE_H
 
 /* Define to 1 if you have the <X11/extensions/xf86vmode.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XF86VMODE_H
@@ -921,6 +945,9 @@
 /* Define to 1 if you have the <X11/Xutil.h> header file. */
 #undef HAVE_X11_XUTIL_H
 
+/* Define to 1 if `callback' is member of `XICCallback'. */
+#undef HAVE_XICCALLBACK_CALLBACK
+
 /* Define if you have the XKB extension */
 #undef HAVE_XKB
 
@@ -932,6 +959,9 @@
 
 /* Define if Xrender has the XRenderSetPictureTransform function */
 #undef HAVE_XRENDERSETPICTURETRANSFORM
+
+/* Define to 1 if you have the `xsltInit' function. */
+#undef HAVE_XSLTINIT
 
 /* Define to 1 if you have the `_pclose' function. */
 #undef HAVE__PCLOSE
@@ -945,11 +975,20 @@
 /* Define to 1 if you have the `_spawnvp' function. */
 #undef HAVE__SPAWNVP
 
+/* Define to 1 if you have the `_strdup' function. */
+#undef HAVE__STRDUP
+
 /* Define to 1 if you have the `_stricmp' function. */
 #undef HAVE__STRICMP
 
 /* Define to 1 if you have the `_strnicmp' function. */
 #undef HAVE__STRNICMP
+
+/* Define to 1 if you have the `_strtoi64' function. */
+#undef HAVE__STRTOI64
+
+/* Define to 1 if you have the `_strtoui64' function. */
+#undef HAVE__STRTOUI64
 
 /* Define to 1 if you have the `_vsnprintf' function. */
 #undef HAVE__VSNPRINTF
@@ -1005,6 +1044,9 @@
 /* Define to the soname of the libncurses library. */
 #undef SONAME_LIBNCURSES
 
+/* Define to the soname of the libodbc library. */
+#undef SONAME_LIBODBC
+
 /* Define to the soname of the libpng library. */
 #undef SONAME_LIBPNG
 
@@ -1016,6 +1058,9 @@
 
 /* Define to the soname of the libX11 library. */
 #undef SONAME_LIBX11
+
+/* Define to the soname of the libXcomposite library. */
+#undef SONAME_LIBXCOMPOSITE
 
 /* Define to the soname of the libXcursor library. */
 #undef SONAME_LIBXCURSOR

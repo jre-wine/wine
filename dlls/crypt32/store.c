@@ -93,13 +93,6 @@ typedef struct _WINE_MEMSTORE
     struct ContextList *crls;
 } WINE_MEMSTORE, *PWINE_MEMSTORE;
 
-typedef struct _WINE_MSGSTOREINFO
-{
-    DWORD      dwOpenFlags;
-    HCERTSTORE memStore;
-    HCRYPTMSG  msg;
-} WINE_MSGSTOREINFO, *PWINE_MSGSTOREINFO;
-
 void CRYPT_InitStore(WINECRYPT_CERTSTORE *store, DWORD dwFlags,
  CertStoreType type)
 {
@@ -115,6 +108,43 @@ void CRYPT_FreeStore(PWINECRYPT_CERTSTORE store)
     if (store->properties)
         ContextPropertyList_Free(store->properties);
     CryptMemFree(store);
+}
+
+BOOL WINAPI I_CertUpdateStore(HCERTSTORE store1, HCERTSTORE store2, DWORD unk0,
+ DWORD unk1)
+{
+    static BOOL warned = FALSE;
+    const WINE_CONTEXT_INTERFACE * const interfaces[] = { pCertInterface,
+     pCRLInterface, pCTLInterface };
+    DWORD i;
+
+    TRACE("(%p, %p, %08x, %08x)\n", store1, store2, unk0, unk1);
+    if (!warned)
+    {
+        FIXME("semi-stub\n");
+        warned = TRUE;
+    }
+
+    /* Poor-man's resync:  empty first store, then add everything from second
+     * store to it.
+     */
+    for (i = 0; i < sizeof(interfaces) / sizeof(interfaces[0]); i++)
+    {
+        const void *context;
+
+        do {
+            context = interfaces[i]->enumContextsInStore(store1, NULL);
+            if (context)
+                interfaces[i]->deleteFromStore(context);
+        } while (context);
+        do {
+            context = interfaces[i]->enumContextsInStore(store2, context);
+            if (context)
+                interfaces[i]->addContextToStore(store1, context,
+                 CERT_STORE_ADD_ALWAYS, NULL);
+        } while (context);
+    }
+    return TRUE;
 }
 
 static BOOL CRYPT_MemAddCert(PWINECRYPT_CERTSTORE store, void *cert,
@@ -199,23 +229,6 @@ static BOOL CRYPT_MemDeleteCrl(PWINECRYPT_CERTSTORE store, void *pCrlContext)
     return TRUE;
 }
 
-void CRYPT_EmptyStore(HCERTSTORE store)
-{
-    PCCERT_CONTEXT cert;
-    PCCRL_CONTEXT crl;
-
-    do {
-        cert = CertEnumCertificatesInStore(store, NULL);
-        if (cert)
-            CertDeleteCertificateFromStore(cert);
-    } while (cert);
-    do {
-        crl = CertEnumCRLsInStore(store, NULL);
-        if (crl)
-            CertDeleteCRLFromStore(crl);
-    } while (crl);
-}
-
 static void WINAPI CRYPT_MemCloseStore(HCERTSTORE hCertStore, DWORD dwFlags)
 {
     WINE_MEMSTORE *store = (WINE_MEMSTORE *)hCertStore;
@@ -268,21 +281,16 @@ static WINECRYPT_CERTSTORE *CRYPT_MemOpenStore(HCRYPTPROV hCryptProv,
     return (PWINECRYPT_CERTSTORE)store;
 }
 
-/* FIXME: this isn't complete for the Root store, in which the top-level
- * self-signed CA certs reside.  Adding a cert to the Root store should present
- * the user with a dialog indicating the consequences of doing so, and asking
- * the user to confirm whether the cert should be added.
- */
 static PWINECRYPT_CERTSTORE CRYPT_SysRegOpenStoreW(HCRYPTPROV hCryptProv,
  DWORD dwFlags, const void *pvPara)
 {
+    static const WCHAR rootW[] = { 'R','o','o','t',0 };
     static const WCHAR fmt[] = { '%','s','\\','%','s',0 };
     LPCWSTR storeName = (LPCWSTR)pvPara;
     LPWSTR storePath;
     PWINECRYPT_CERTSTORE store = NULL;
     HKEY root;
     LPCWSTR base;
-    BOOL ret;
 
     TRACE("(%ld, %08x, %s)\n", hCryptProv, dwFlags,
      debugstr_w((LPCWSTR)pvPara));
@@ -292,8 +300,9 @@ static PWINECRYPT_CERTSTORE CRYPT_SysRegOpenStoreW(HCRYPTPROV hCryptProv,
         SetLastError(E_INVALIDARG);
         return NULL;
     }
+    if (!lstrcmpiW(storeName, rootW))
+        return CRYPT_RootOpenStore(hCryptProv, dwFlags);
 
-    ret = TRUE;
     switch (dwFlags & CERT_SYSTEM_STORE_LOCATION_MASK)
     {
     case CERT_SYSTEM_STORE_LOCAL_MACHINE:
@@ -510,29 +519,14 @@ static PWINECRYPT_CERTSTORE CRYPT_SysOpenStoreA(HCRYPTPROV hCryptProv,
 
 static void WINAPI CRYPT_MsgCloseStore(HCERTSTORE hCertStore, DWORD dwFlags)
 {
-    PWINE_MSGSTOREINFO store = (PWINE_MSGSTOREINFO)hCertStore;
+    HCRYPTMSG msg = hCertStore;
 
-    TRACE("(%p, %08x)\n", store, dwFlags);
-    CertCloseStore(store->memStore, dwFlags);
-    CryptMsgClose(store->msg);
-    CryptMemFree(store);
+    TRACE("(%p, %08x)\n", msg, dwFlags);
+    CryptMsgClose(msg);
 }
 
 static void *msgProvFuncs[] = {
     CRYPT_MsgCloseStore,
-    NULL, /* CERT_STORE_PROV_READ_CERT_FUNC */
-    NULL, /* CERT_STORE_PROV_WRITE_CERT_FUNC */
-    NULL, /* CERT_STORE_PROV_DELETE_CERT_FUNC */
-    NULL, /* CERT_STORE_PROV_SET_CERT_PROPERTY_FUNC */
-    NULL, /* CERT_STORE_PROV_READ_CRL_FUNC */
-    NULL, /* CERT_STORE_PROV_WRITE_CRL_FUNC */
-    NULL, /* CERT_STORE_PROV_DELETE_CRL_FUNC */
-    NULL, /* CERT_STORE_PROV_SET_CRL_PROPERTY_FUNC */
-    NULL, /* CERT_STORE_PROV_READ_CTL_FUNC */
-    NULL, /* CERT_STORE_PROV_WRITE_CTL_FUNC */
-    NULL, /* CERT_STORE_PROV_DELETE_CTL_FUNC */
-    NULL, /* CERT_STORE_PROV_SET_CTL_PROPERTY_FUNC */
-    NULL, /* CERT_STORE_PROV_CONTROL_FUNC */
 };
 
 static PWINECRYPT_CERTSTORE CRYPT_MsgOpenStore(HCRYPTPROV hCryptProv,
@@ -595,28 +589,17 @@ static PWINECRYPT_CERTSTORE CRYPT_MsgOpenStore(HCRYPTPROV hCryptProv,
         }
         if (ret)
         {
-            PWINE_MSGSTOREINFO info = CryptMemAlloc(sizeof(WINE_MSGSTOREINFO));
+            CERT_STORE_PROV_INFO provInfo = { 0 };
 
-            if (info)
-            {
-                CERT_STORE_PROV_INFO provInfo = { 0 };
-
-                info->dwOpenFlags = dwFlags;
-                info->memStore = memStore;
-                info->msg = CryptMsgDuplicate(msg);
-                provInfo.cbSize = sizeof(provInfo);
-                provInfo.cStoreProvFunc = sizeof(msgProvFuncs) /
-                 sizeof(msgProvFuncs[0]);
-                provInfo.rgpvStoreProvFunc = msgProvFuncs;
-                provInfo.hStoreProv = info;
-                store = CRYPT_ProvCreateStore(dwFlags, memStore,
-                 &provInfo);
-                /* Msg store doesn't need crypto provider, so close it */
-                if (hCryptProv && !(dwFlags & CERT_STORE_NO_CRYPT_RELEASE_FLAG))
-                    CryptReleaseContext(hCryptProv, 0);
-            }
-            else
-                CertCloseStore(memStore, 0);
+            provInfo.cbSize = sizeof(provInfo);
+            provInfo.cStoreProvFunc = sizeof(msgProvFuncs) /
+             sizeof(msgProvFuncs[0]);
+            provInfo.rgpvStoreProvFunc = msgProvFuncs;
+            provInfo.hStoreProv = CryptMsgDuplicate(msg);
+            store = CRYPT_ProvCreateStore(dwFlags, memStore, &provInfo);
+            /* Msg store doesn't need crypto provider, so close it */
+            if (hCryptProv && !(dwFlags & CERT_STORE_NO_CRYPT_RELEASE_FLAG))
+                CryptReleaseContext(hCryptProv, 0);
         }
         else
             CertCloseStore(memStore, 0);
@@ -783,14 +766,6 @@ HCERTSTORE WINAPI CertOpenSystemStoreW(HCRYPTPROV_LEGACY hProv,
      CERT_SYSTEM_STORE_CURRENT_USER, szSubSystemProtocol);
 }
 
-BOOL WINAPI CertSaveStore(HCERTSTORE hCertStore, DWORD dwMsgAndCertEncodingType,
-             DWORD dwSaveAs, DWORD dwSaveTo, void* pvSaveToPara, DWORD dwFlags)
-{
-    FIXME("(%p,%d,%d,%d,%p,%08x) stub!\n", hCertStore, 
-          dwMsgAndCertEncodingType, dwSaveAs, dwSaveTo, pvSaveToPara, dwFlags);
-    return TRUE;
-}
-
 #define CertContext_CopyProperties(to, from) \
  Context_CopyProperties((to), (from), sizeof(CERT_CONTEXT))
 
@@ -805,12 +780,6 @@ BOOL WINAPI CertAddCertificateContextToStore(HCERTSTORE hCertStore,
     TRACE("(%p, %p, %08x, %p)\n", hCertStore, pCertContext,
      dwAddDisposition, ppStoreContext);
 
-    /* Weird case to pass a test */
-    if (dwAddDisposition == 0)
-    {
-        SetLastError(STATUS_ACCESS_VIOLATION);
-        return FALSE;
-    }
     if (dwAddDisposition != CERT_STORE_ADD_ALWAYS)
     {
         BYTE hashToAdd[20];
@@ -860,8 +829,25 @@ BOOL WINAPI CertAddCertificateContextToStore(HCERTSTORE hCertStore,
         else
             toAdd = CertDuplicateCertificateContext(pCertContext);
         break;
+    case CERT_STORE_ADD_NEWER:
+        if (existing)
+        {
+            if (CompareFileTime(&existing->pCertInfo->NotBefore,
+             &pCertContext->pCertInfo->NotBefore) >= 0)
+            {
+                TRACE("existing certificate is newer, not adding\n");
+                SetLastError(CRYPT_E_EXISTS);
+                ret = FALSE;
+            }
+            else
+                toAdd = CertDuplicateCertificateContext(pCertContext);
+        }
+        else
+            toAdd = CertDuplicateCertificateContext(pCertContext);
+        break;
     default:
         FIXME("Unimplemented add disposition %d\n", dwAddDisposition);
+        SetLastError(E_INVALIDARG);
         ret = FALSE;
     }
 

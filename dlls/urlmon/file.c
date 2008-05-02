@@ -16,17 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-
-#define COBJMACROS
-
-#include "windef.h"
-#include "winbase.h"
-#include "winuser.h"
-#include "ole2.h"
-#include "urlmon.h"
 #include "urlmon_main.h"
-
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(urlmon);
@@ -92,7 +82,7 @@ static ULONG WINAPI FileProtocol_Release(IInternetProtocol *iface)
     if(!ref) {
         if(This->file)
             CloseHandle(This->file);
-        HeapFree(GetProcessHeap(), 0, This);
+        heap_free(This);
 
         URLMON_UnlockModule();
     }
@@ -135,10 +125,10 @@ static HRESULT WINAPI FileProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
         return MK_E_SYNTAX;
 
     len = lstrlenW(szUrl)+16;
-    url = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
+    url = heap_alloc(len*sizeof(WCHAR));
     hres = CoInternetParseUrl(szUrl, PARSE_ENCODE, 0, url, len, &len, 0);
     if(FAILED(hres)) {
-        HeapFree(GetProcessHeap(), 0, url);
+        heap_free(url);
         return hres;
     }
 
@@ -163,7 +153,7 @@ static HRESULT WINAPI FileProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
             This->file = NULL;
             IInternetProtocolSink_ReportResult(pOIProtSink, INET_E_RESOURCE_NOT_FOUND,
                     GetLastError(), NULL);
-            HeapFree(GetProcessHeap(), 0, url);
+            heap_free(url);
             return INET_E_RESOURCE_NOT_FOUND;
         }
 
@@ -180,7 +170,7 @@ static HRESULT WINAPI FileProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
         }
     }
 
-    HeapFree(GetProcessHeap(), 0, url);
+    heap_free(url);
 
     if(GetFileSizeEx(This->file, &size))
         IInternetProtocolSink_ReportData(pOIProtSink,
@@ -239,10 +229,14 @@ static HRESULT WINAPI FileProtocol_Read(IInternetProtocol *iface, void *pv,
 
     TRACE("(%p)->(%p %u %p)\n", This, pv, cb, pcbRead);
 
+    if (pcbRead)
+        *pcbRead = 0;
+
     if(!This->file)
         return INET_E_DATA_NOT_AVAILABLE;
 
-    ReadFile(This->file, pv, cb, &read, NULL);
+    if (!ReadFile(This->file, pv, cb, &read, NULL))
+        return INET_E_DOWNLOAD_FAILURE;
 
     if(pcbRead)
         *pcbRead = read;
@@ -353,7 +347,7 @@ HRESULT FileProtocol_Construct(IUnknown *pUnkOuter, LPVOID *ppobj)
 
     URLMON_LockModule();
 
-    ret = HeapAlloc(GetProcessHeap(), 0, sizeof(FileProtocol));
+    ret = heap_alloc(sizeof(FileProtocol));
 
     ret->lpInternetProtocolVtbl = &FileProtocolVtbl;
     ret->lpInternetPriorityVtbl = &FilePriorityVtbl;

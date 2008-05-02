@@ -66,6 +66,7 @@ static const WCHAR reg_start_x[] = { 's','t','a','r','t','X','\0'};
 static const WCHAR reg_start_y[] = { 's','t','a','r','t','Y','\0'};
 static const WCHAR reg_width[] = { 'w','i','d','t','h','\0'};
 static const WCHAR reg_height[] = { 'h','e','i','g','h','t','\0'};
+static const WCHAR reg_logfont[] = { 'l','o','g','f','o','n','t','\0'};
 
 enum ENTRY_TYPE {
 	ET_WINDOWS,
@@ -241,22 +242,6 @@ static void display_network_error(HWND hwnd)
 
 	if (WNetGetLastError(&error, msg, BUFFER_LEN, provider, BUFFER_LEN) == NO_ERROR)
 		MessageBox(hwnd, msg, RS(b2,IDS_WINEFILE), MB_OK);
-}
-
-static VOID WineLicense(HWND Wnd)
-{
-	WCHAR cap[20], text[1024];
-	LoadStringW(Globals.hInstance, IDS_LICENSE, text, 1024);
-	LoadStringW(Globals.hInstance, IDS_LICENSE_CAPTION, cap, 20);
-	MessageBoxW(Wnd, text, cap, MB_ICONINFORMATION | MB_OK);
-}
-
-static VOID WineWarranty(HWND Wnd)
-{
-	WCHAR cap[20], text[1024];
-	LoadStringW(Globals.hInstance, IDS_WARRANTY, text, 1024);
-	LoadStringW(Globals.hInstance, IDS_WARRANTY_CAPTION, cap, 20);
-	MessageBoxW(Wnd, text, cap, MB_ICONEXCLAMATION | MB_OK);
 }
 
 static inline BOOL get_check(HWND hwnd, INT id)
@@ -1645,6 +1630,7 @@ static windowOptions load_registry_settings(void)
 	DWORD type;
 	HKEY hKey;
 	windowOptions opts;
+	LOGFONT logfont;
 
         RegOpenKeyExW( HKEY_CURRENT_USER, registry_key,
                        0, KEY_QUERY_VALUE, &hKey );
@@ -1666,9 +1652,14 @@ static windowOptions load_registry_settings(void)
         if( RegQueryValueExW( hKey, reg_height, NULL, &type,
                               (LPBYTE) &opts.height, &size ) != ERROR_SUCCESS )
 		opts.height = CW_USEDEFAULT;
+	size=sizeof(logfont);
+	if( RegQueryValueExW( hKey, reg_logfont, NULL, &type,
+                              (LPBYTE) &logfont, &size ) != ERROR_SUCCESS )
+		GetObject(GetStockObject(DEFAULT_GUI_FONT),sizeof(logfont),&logfont);
 
 	RegCloseKey( hKey );
 
+	Globals.hfont = CreateFontIndirect(&logfont);
 	return opts;
 }
 
@@ -1677,6 +1668,7 @@ static void save_registry_settings(void)
 	WINDOWINFO wi;
 	HKEY hKey;
 	INT width, height;
+	LOGFONT logfont;
 
 	wi.cbSize = sizeof( WINDOWINFO );
 	GetWindowInfo(Globals.hMainWnd, &wi);
@@ -1704,6 +1696,9 @@ static void save_registry_settings(void)
                         (LPBYTE) &width, sizeof(DWORD) );
         RegSetValueExW( hKey, reg_height, 0, REG_DWORD,
                         (LPBYTE) &height, sizeof(DWORD) );
+        GetObject(Globals.hfont, sizeof(logfont), &logfont);
+        RegSetValueExW( hKey, reg_logfont, 0, REG_BINARY,
+                        (LPBYTE) &logfont, sizeof(LOGFONT) );
 
 	/* TODO: Save more settings here (List vs. Detailed View, etc.) */
 	RegCloseKey( hKey );
@@ -2411,7 +2406,7 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 					if (DialogBoxParam(Globals.hInstance, MAKEINTRESOURCE(IDD_EXECUTE), hwnd, ExecuteDialogDlgProc, (LPARAM)&dlg) == IDOK) {
 						HINSTANCE hinst = ShellExecute(hwnd, NULL/*operation*/, dlg.cmd/*file*/, NULL/*parameters*/, NULL/*dir*/, dlg.cmdshow);
 
-						if ((int)hinst <= 32)
+						if (PtrToUlong(hinst) <= 32)
 							display_error(hwnd, GetLastError());
 					}
 					break;}
@@ -2498,25 +2493,11 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 
 				/*TODO: There are even more menu items! */
 
-#ifndef _NO_EXTENSIONS
-#ifdef __WINE__
-				case ID_LICENSE:
-					WineLicense(Globals.hMainWnd);
-					break;
-
-				case ID_NO_WARRANTY:
-					WineWarranty(Globals.hMainWnd);
-					break;
-
-				case ID_ABOUT_WINE:
-					ShellAbout(hwnd, RS(b2,IDS_WINE), RS(b1,IDS_WINEFILE), 0);
-					break;
-#endif
-
 				case ID_ABOUT:
-					ShellAbout(hwnd, RS(b1,IDS_WINEFILE), NULL, 0);
+                                        ShellAbout(hwnd, RS(b1,IDS_WINEFILE), NULL,
+                                                   LoadImage( Globals.hInstance, MAKEINTRESOURCE(IDI_WINEFILE),
+                                                              IMAGE_ICON, 48, 48, LR_SHARED ));
 					break;
-#endif	/* _NO_EXTENSIONS */
 
 				default:
 					/*TODO: if (wParam >= PM_FIRST_LANGUAGE && wParam <= PM_LAST_LANGUAGE)
@@ -2617,13 +2598,13 @@ static void resize_tree(ChildWnd* child, int cx, int cy)
 
 #ifndef _NO_EXTENSIONS
 
-static HWND create_header(HWND parent, Pane* pane, int id)
+static HWND create_header(HWND parent, Pane* pane, UINT id)
 {
 	HD_ITEM hdi;
 	int idx;
 
 	HWND hwnd = CreateWindow(WC_HEADER, 0, WS_CHILD|WS_VISIBLE|HDS_HORZ|HDS_FULLDRAG/*TODO: |HDS_BUTTONS + sort orders*/,
-								0, 0, 0, 0, parent, (HMENU)id, Globals.hInstance, 0);
+                                 0, 0, 0, 0, parent, (HMENU)ULongToHandle(id), Globals.hInstance, 0);
 	if (!hwnd)
 		return 0;
 
@@ -2971,7 +2952,7 @@ static void set_space_status(void)
 
 static WNDPROC g_orgTreeWndProc;
 
-static void create_tree_window(HWND parent, Pane* pane, int id, int id_header, LPCTSTR pattern, int filter_flags)
+static void create_tree_window(HWND parent, Pane* pane, UINT id, UINT id_header, LPCTSTR pattern, int filter_flags)
 {
 	static const TCHAR sListBox[] = {'L','i','s','t','B','o','x','\0'};
 
@@ -2979,8 +2960,8 @@ static void create_tree_window(HWND parent, Pane* pane, int id, int id_header, L
 	Entry* entry = pane->root;
 
 	pane->hwnd = CreateWindow(sListBox, sEmpty, WS_CHILD|WS_VISIBLE|WS_HSCROLL|WS_VSCROLL|
-								LBS_DISABLENOSCROLL|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_NOTIFY,
-								0, 0, 0, 0, parent, (HMENU)id, Globals.hInstance, 0);
+                                  LBS_DISABLENOSCROLL|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_NOTIFY,
+                                  0, 0, 0, 0, parent, (HMENU)ULongToHandle(id), Globals.hInstance, 0);
 
 	SetWindowLongPtr(pane->hwnd, GWLP_USERDATA, (LPARAM)pane);
 	g_orgTreeWndProc = (WNDPROC) SetWindowLongPtr(pane->hwnd, GWLP_WNDPROC, (LPARAM)TreeWndProc);
@@ -3955,7 +3936,7 @@ static BOOL launch_file(HWND hwnd, LPCTSTR cmd, UINT nCmdShow)
 {
 	HINSTANCE hinst = ShellExecute(hwnd, NULL/*operation*/, cmd, NULL/*parameters*/, NULL/*dir*/, nCmdShow);
 
-	if ((int)hinst <= 32) {
+	if (PtrToUlong(hinst) <= 32) {
 		display_error(hwnd, GetLastError());
 		return FALSE;
 	}
@@ -4480,7 +4461,7 @@ static LRESULT CALLBACK ChildWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 
 				case ID_FILE_DELETE: {
 					TCHAR path[BUFFER_LEN];
-					SHFILEOPSTRUCT shfo = {hwnd, FO_DELETE, path};
+                                        SHFILEOPSTRUCT shfo = {hwnd, FO_DELETE, path, NULL, FOF_ALLOWUNDO};
 
 					get_path(pane->cur, path);
 
@@ -4799,7 +4780,7 @@ static void show_frame(HWND hwndParent, int cmdshow, LPCTSTR path)
 
 
 	/* create main window */
-	Globals.hMainWnd = CreateWindowEx(0, (LPCTSTR)(int)Globals.hframeClass, RS(b1,IDS_WINE_FILE), WS_OVERLAPPEDWINDOW,
+	Globals.hMainWnd = CreateWindowEx(0, MAKEINTRESOURCE(Globals.hframeClass), RS(b1,IDS_WINE_FILE), WS_OVERLAPPEDWINDOW,
 					opts.start_x, opts.start_y, opts.width, opts.height,
 					hwndParent, Globals.hMenuFrame, Globals.hInstance, 0/*lpParam*/);
 

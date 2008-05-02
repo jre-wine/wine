@@ -32,14 +32,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <errno.h>
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
 #ifdef HAVE_SYS_TIME_H
 # include <sys/time.h>
 #endif
-#include <sys/fcntl.h>
+#include <fcntl.h>
 #ifdef HAVE_SYS_IOCTL_H
 # include <sys/ioctl.h>
 #endif
@@ -138,6 +137,7 @@ static INT find_joystick_devices(void)
 
     if (joystick_devices_count != -1) return joystick_devices_count;
 
+    joystick_devices_count = 0;
     for (i = 0; i < MAX_JOYSTICKS; i++)
     {
         CHAR device_name[MAX_PATH], *str;
@@ -151,10 +151,12 @@ static INT find_joystick_devices(void)
             if ((fd = open(device_name, O_RDONLY)) < 0) continue;
         }
 
+        close(fd);
+
         if (!(str = HeapAlloc(GetProcessHeap(), 0, len))) break;
         memcpy(str, device_name, len);
 
-        joystick_devices[++joystick_devices_count] = str;
+        joystick_devices[joystick_devices_count++] = str;
     }
 
     return joystick_devices_count;
@@ -164,7 +166,7 @@ static BOOL joydev_enum_deviceA(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTAN
 {
     int fd = -1;
 
-    if (id > find_joystick_devices()) return FALSE;
+    if (id >= find_joystick_devices()) return FALSE;
 
     if (dwFlags & DIEDFL_FORCEFEEDBACK) {
         WARN("force feedback not supported\n");
@@ -215,7 +217,7 @@ static BOOL joydev_enum_deviceW(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTAN
     char name[MAX_PATH];
     char friendly[32];
 
-    if (id > find_joystick_devices()) return FALSE;
+    if (id >= find_joystick_devices()) return FALSE;
 
     if (dwFlags & DIEDFL_FORCEFEEDBACK) {
         WARN("force feedback not supported\n");
@@ -262,50 +264,17 @@ static BOOL joydev_enum_deviceW(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTAN
 }
 
 /*
- * Get a config key from either the app-specific or the default config
- */
-
-static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
-                                    char *buffer, DWORD size )
-{
-    if (appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE)buffer, &size ))
-        return 0;
-
-    if (defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE)buffer, &size ))
-        return 0;
-
-    return ERROR_FILE_NOT_FOUND;
-}
-
-/*
  * Setup the dinput options.
  */
 
 static HRESULT setup_dinput_options(JoystickImpl * device)
 {
     char buffer[MAX_PATH+16];
-    HKEY hkey, appkey = 0;
-    DWORD len;
+    HKEY hkey, appkey;
 
     buffer[MAX_PATH]='\0';
 
-    /* @@ Wine registry key: HKCU\Software\Wine\DirectInput */
-    if (RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\DirectInput", &hkey)) hkey = 0;
-
-    len = GetModuleFileNameA( 0, buffer, MAX_PATH );
-    if (len && len < MAX_PATH) {
-        HKEY tmpkey;
-        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\DirectInput */
-        if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey ))
-        {
-            char *p, *appname = buffer;
-            if ((p = strrchr( appname, '/' ))) appname = p + 1;
-            if ((p = strrchr( appname, '\\' ))) appname = p + 1;
-            strcat( appname, "\\DirectInput" );
-            if (RegOpenKeyA( tmpkey, appname, &appkey )) appkey = 0;
-            RegCloseKey( tmpkey );
-        }
-    }
+    get_app_key(&hkey, &appkey);
 
     /* get options */
 
@@ -409,6 +378,8 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
     LPDIDATAFORMAT df = NULL;
     int idx = 0;
 
+    TRACE("%s %p %p %p %hu\n", debugstr_guid(rguid), jvt, dinput, pdev, index);
+
     newDevice = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(JoystickImpl));
     if (newDevice == 0) {
         WARN("out of memory\n");
@@ -454,7 +425,7 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
     newDevice->base.lpVtbl = jvt;
     newDevice->base.ref = 1;
     newDevice->base.dinput = dinput;
-    CopyMemory(&newDevice->base.guid, rguid, sizeof(*rguid));
+    newDevice->base.guid = *rguid;
     InitializeCriticalSection(&newDevice->base.crit);
     newDevice->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": JoystickImpl*->base.crit");
 
@@ -502,6 +473,7 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
     for (i = 0; i < newDevice->buttons; i++)
     {
         memcpy(&df->rgodf[idx], &c_dfDIJoystick2.rgodf[i + 12], df->dwObjSize);
+        df->rgodf[idx  ].pguid = &GUID_Button;
         df->rgodf[idx++].dwType = DIDFT_MAKEINSTANCE(i) | DIDFT_PSHBUTTON;
     }
     newDevice->base.data_format.wine_df = df;
@@ -585,6 +557,7 @@ static HRESULT joydev_create_deviceA(IDirectInputImpl *dinput, REFGUID rguid, RE
 {
     unsigned short index;
 
+    TRACE("%p %s %p %p\n",dinput, debugstr_guid(rguid), riid, pdev);
     find_joystick_devices();
     *pdev = NULL;
 
@@ -604,7 +577,6 @@ static HRESULT joydev_create_deviceA(IDirectInputImpl *dinput, REFGUID rguid, RE
         return DIERR_NOINTERFACE;
     }
 
-    WARN("invalid device GUID\n");
     return DIERR_DEVICENOTREG;
 }
 
@@ -612,6 +584,7 @@ static HRESULT joydev_create_deviceW(IDirectInputImpl *dinput, REFGUID rguid, RE
 {
     unsigned short index;
 
+    TRACE("%p %s %p %p\n",dinput, debugstr_guid(rguid), riid, pdev);
     find_joystick_devices();
     *pdev = NULL;
 
@@ -630,7 +603,7 @@ static HRESULT joydev_create_deviceW(IDirectInputImpl *dinput, REFGUID rguid, RE
         return DIERR_NOINTERFACE;
     }
 
-    WARN("invalid device GUID\n");
+    WARN("invalid device GUID %s\n",debugstr_guid(rguid));
     return DIERR_DEVICENOTREG;
 }
 

@@ -30,6 +30,7 @@
 #include "wine/port.h"
 
 #include <stdlib.h>
+#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -292,6 +293,9 @@ static HRESULT WINAPI IDsDriverBufferImpl_Lock(PIDSDRIVERBUFFER iface,
     /* **** */
     EnterCriticalSection(&This->pcm_crst);
 
+    if (dwFlags & DSBLOCK_ENTIREBUFFER)
+        dwWriteLen = This->mmap_buflen_bytes;
+
     if (dwWriteLen > This->mmap_buflen_bytes || dwWritePosition >= This->mmap_buflen_bytes)
     {
         /* **** */
@@ -368,7 +372,7 @@ static HRESULT WINAPI IDsDriverBufferImpl_Unlock(PIDSDRIVERBUFFER iface,
     return DS_OK;
 }
 
-static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL forced)
+static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx)
 {
     snd_pcm_t *pcm = NULL;
     snd_pcm_hw_params_t *hw_params = This->hw_params;
@@ -382,22 +386,16 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL fo
     {
         case  8: format = SND_PCM_FORMAT_U8; break;
         case 16: format = SND_PCM_FORMAT_S16_LE; break;
-        case 24: format = SND_PCM_FORMAT_S24_LE; break;
+        case 24: format = SND_PCM_FORMAT_S24_3LE; break;
         case 32: format = SND_PCM_FORMAT_S32_LE; break;
         default: FIXME("Unsupported bpp: %d\n", pwfx->wBitsPerSample); return DSERR_GENERIC;
     }
 
-    /* **** */
-    EnterCriticalSection(&This->pcm_crst);
-
     err = snd_pcm_open(&pcm, WOutDev[This->drv->wDevID].pcmname, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
-
     if (err < 0)
     {
         if (errno != EBUSY || !This->pcm)
         {
-            /* **** */
-            LeaveCriticalSection(&This->pcm_crst);
             WARN("Cannot open sound device: %s\n", snd_strerror(err));
             return DSERR_GENERIC;
         }
@@ -407,8 +405,6 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL fo
         err = snd_pcm_open(&pcm, WOutDev[This->drv->wDevID].pcmname, SND_PCM_STREAM_PLAYBACK, SND_PCM_NONBLOCK);
         if (err < 0)
         {
-            /* **** */
-            LeaveCriticalSection(&This->pcm_crst);
             WARN("Cannot open sound device: %s\n", snd_strerror(err));
             return DSERR_BUFFERLOST;
         }
@@ -427,7 +423,7 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL fo
      * side effects, which may include: Less granular pointer, changing buffer sizes, etc
      */
 #if SND_LIB_VERSION >= 0x010009
-    snd_pcm_hw_params_set_rate_resample(pcm, hw_params, 0 && forced);
+    snd_pcm_hw_params_set_rate_resample(pcm, hw_params, 0);
 #endif
 
     err = snd_pcm_hw_params_set_rate_near(pcm, hw_params, &rate, NULL);
@@ -463,12 +459,8 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL fo
         snd_pcm_close(This->pcm);
     }
     This->pcm = pcm;
-
     snd_pcm_prepare(This->pcm);
     DSDB_CreateMMAP(This);
-
-    /* **** */
-    LeaveCriticalSection(&This->pcm_crst);
     return S_OK;
 
     err:
@@ -483,8 +475,6 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx, BOOL fo
     if (This->pcm)
         snd_pcm_hw_params_current(This->pcm, This->hw_params);
 
-    /* **** */
-    LeaveCriticalSection(&This->pcm_crst);
     return DSERR_BADFORMAT;
 }
 
@@ -495,11 +485,14 @@ static HRESULT WINAPI IDsDriverBufferImpl_SetFormat(PIDSDRIVERBUFFER iface, LPWA
 
     TRACE("(%p, %p)\n", iface, pwfx);
 
-    hr = SetFormat(This, pwfx, TRUE);
+    /* **** */
+    EnterCriticalSection(&This->pcm_crst);
+    hr = SetFormat(This, pwfx);
+    /* **** */
+    LeaveCriticalSection(&This->pcm_crst);
 
-    if (hr == S_OK)
-        /* Buffer size / Location changed, so tell dsound to recreate */
-        return DSERR_BUFFERLOST;
+    if (hr == DS_OK)
+        return S_FALSE;
     return hr;
 }
 
@@ -668,7 +661,7 @@ static HRESULT WINAPI IDsDriverImpl_GetDriverDesc(PIDSDRIVER iface, PDSDRIVERDES
 {
     IDsDriverImpl *This = (IDsDriverImpl *)iface;
     TRACE("(%p,%p)\n",iface,pDesc);
-    memcpy(pDesc, &(WOutDev[This->wDevID].ds_desc), sizeof(DSDRIVERDESC));
+    *pDesc			= WOutDev[This->wDevID].ds_desc;
     pDesc->dwFlags		= DSDDESC_DONTNEEDSECONDARYLOCK | DSDDESC_DONTNEEDWRITELEAD;
     pDesc->dnDevNode		= WOutDev[This->wDevID].waveDesc.dnDevNode;
     pDesc->wVxdId		= 0;
@@ -737,7 +730,7 @@ static HRESULT WINAPI IDsDriverImpl_GetCaps(PIDSDRIVER iface, PDSDRIVERCAPS pCap
 {
     IDsDriverImpl *This = (IDsDriverImpl *)iface;
     TRACE("(%p,%p)\n",iface,pCaps);
-    memcpy(pCaps, &(WOutDev[This->wDevID].ds_caps), sizeof(DSDRIVERCAPS));
+    *pCaps = WOutDev[This->wDevID].ds_caps;
     return DS_OK;
 }
 
@@ -778,7 +771,7 @@ static HRESULT WINAPI IDsDriverImpl_CreateSoundBuffer(PIDSDRIVER iface,
     (*ippdsdb)->pcm_crst.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ALSA_DSOUTPUT.pcm_crst");
 
     /* SetFormat has to re-initialize pcm here anyway */
-    err = SetFormat(*ippdsdb, pwfx, FALSE);
+    err = SetFormat(*ippdsdb, pwfx);
     if (FAILED(err))
     {
         WARN("Error occurred: %08x\n", err);
@@ -851,7 +844,7 @@ DWORD wodDsCreate(UINT wDevID, PIDSDRIVER* drv)
 
 DWORD wodDsDesc(UINT wDevID, PDSDRIVERDESC desc)
 {
-    memcpy(desc, &(WOutDev[wDevID].ds_desc), sizeof(DSDRIVERDESC));
+    *desc = WOutDev[wDevID].ds_desc;
     return MMSYSERR_NOERROR;
 }
 

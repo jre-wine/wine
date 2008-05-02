@@ -1050,7 +1050,7 @@ static void test_VarParseNumFromStr(void)
   EXPECT(1,NUMPRS_HEX_OCT,0,1,0,0);
   EXPECT2(0,FAILDIG);
 
-  /* Doesn't recognise hex in .asm sytax */
+  /* Doesn't recognise hex in .asm syntax */
   CONVERT("0h", NUMPRS_HEX_OCT);
   EXPECT(1,NUMPRS_HEX_OCT,0,1,0,0);
   EXPECT2(0,FAILDIG);
@@ -1060,7 +1060,7 @@ static void test_VarParseNumFromStr(void)
   EXPECT(1,NUMPRS_HEX_OCT,0,1,0,0);
   EXPECT2(0,FAILDIG);
 
-  /* Doesn't recognise hex format humbers at all! */
+  /* Doesn't recognise hex format numbers at all! */
   CONVERT("0x0", NUMPRS_HEX_OCT);
   EXPECT(1,NUMPRS_HEX_OCT,0,1,0,0);
   EXPECT2(0,FAILDIG);
@@ -1777,7 +1777,7 @@ static HRESULT (WINAPI *pVarAbs)(LPVARIANT,LPVARIANT);
 
 static void test_VarAbs(void)
 {
-    static const WCHAR szNum[] = {'-','1','.','1','\0' };
+    static WCHAR szNum[] = {'-','1','.','1','\0' };
     char buff[8];
     HRESULT hres;
     VARIANT v, vDst, exp;
@@ -1851,10 +1851,12 @@ static void test_VarAbs(void)
     ok(hres == S_OK && V_VT(&vDst) == VT_CY && V_CY(&vDst).int64 == 10000,
        "VarAbs(CY): expected 0x0 got 0x%X\n", hres);
     GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, buff, sizeof(buff)/sizeof(char));
-    if (buff[0] != '.' || buff[1])
+    if (buff[1])
     {
         trace("Skipping VarAbs(BSTR) as decimal separator is '%s'\n", buff);
         return;
+    } else {
+	szNum[2] = buff[0];
     }
     V_VT(&v) = VT_BSTR;
     V_BSTR(&v) = (BSTR)szNum;
@@ -3102,11 +3104,12 @@ static void test_Round( int line, VARIANT *arg, int deci, VARIANT *expected )
 
 static void test_VarRound(void)
 {
-    static const WCHAR szNumMin[] = {'-','1','.','4','5','\0' };
-    static const WCHAR szNum[] = {'1','.','4','5','\0' };
+    static WCHAR szNumMin[] = {'-','1','.','4','4','9','\0' };
+    static WCHAR szNum[] = {'1','.','4','5','1','\0' };
     HRESULT hres;
     VARIANT v, exp, vDst;
     CY *pcy = &V_CY(&v);
+    char buff[8];
 
     CHECKPTR(VarRound);
 
@@ -3137,9 +3140,18 @@ static void test_VarRound(void)
     /* floating point numbers aren't exactly equal and we can't just
      * compare the first few digits. */
     VARROUND(DATE,1.451,1,DATE,1.5);
-    VARROUND(DATE,-1.45,1,DATE,-1.4);
-    VARROUND(BSTR,(BSTR)szNumMin,1,R8,-1.40);
-    if (0) { VARROUND(BSTR,(BSTR)szNum,1,R8,1.50); }
+    VARROUND(DATE,-1.449,1,DATE,-1.4);
+
+    /* replace the decimal separator */
+    GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, buff, sizeof(buff)/sizeof(char));
+    if (!buff[1]) {
+        szNumMin[2] = buff[0];
+        szNum[1] = buff[0];
+        VARROUND(BSTR,(BSTR)szNumMin,1,R8,-1.40);
+        VARROUND(BSTR,(BSTR)szNum,1,R8,1.50);
+    } else {
+        skip("Skipping VarRound(BSTR) as decimal separator is '%s'\n", buff);
+    }
 
     VARROUND(R4,1.23456f,0,R4,1.0f);
     VARROUND(R4,1.23456f,1,R4,1.2f);
@@ -5249,7 +5261,7 @@ static void test_VarCat(void)
         }
     }
 
-    /* Runnning single comparison tests to compare outputs */
+    /* Running single comparison tests to compare outputs */
 
     /* Test concat strings */
     V_VT(&left) = VT_BSTR;
@@ -6261,7 +6273,7 @@ static void test_VarCmp(void)
         }
     }
 
-    /* VARCMP{,EX} run each 4 tests with a permutation of all posible
+    /* VARCMP{,EX} run each 4 tests with a permutation of all possible
        input variants with (1) and without (0) VT_RESERVED set. The order
        of the permutations is (0,0); (1,0); (0,1); (1,1) */
     VARCMP(INT,4711,I2,4711,VARCMP_EQ);
@@ -6847,11 +6859,20 @@ static void test_VarPow(void)
         "VARPOW: CY value %f, expected %f\n", V_R8(&result), 4.0);
 
     hres = pVarPow(&cy, &right, &result);
-    ok(hres == S_OK && V_VT(&result) == VT_R8,
-        "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
-        S_OK, hres, vtstr(V_VT(&result)));
-    ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
-        "VARPOW: CY value %f, expected %f\n", V_R8(&result), 4.0);
+    if (hres == S_OK)
+    {
+        ok(hres == S_OK && V_VT(&result) == VT_R8,
+           "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
+           S_OK, hres, vtstr(V_VT(&result)));
+        ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
+           "VARPOW: CY value %f, expected %f\n", V_R8(&result), 4.0);
+    }
+    else
+    {
+        ok(hres == DISP_E_BADVARTYPE && V_VT(&result) == VT_EMPTY,
+           "VARPOW: expected coerced hres 0x%X type VT_EMPTY, got hres 0x%X type %s!\n",
+           DISP_E_BADVARTYPE, hres, vtstr(V_VT(&result)));
+    }
 
     hres = pVarPow(&left, &cy, &result);
     ok(hres == S_OK && V_VT(&result) == VT_R8,
@@ -6875,11 +6896,20 @@ static void test_VarPow(void)
         "VARPOW: DECIMAL value %f, expected %f\n", V_R8(&result), 4.0);
 
     hres = pVarPow(&dec, &right, &result);
-    ok(hres == S_OK && V_VT(&result) == VT_R8,
-        "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
-        S_OK, hres, vtstr(V_VT(&result)));
-    ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
-        "VARPOW: DECIMAL value %f, expected %f\n", V_R8(&result), 4.0);
+    if (hres == S_OK)
+    {
+        ok(hres == S_OK && V_VT(&result) == VT_R8,
+           "VARPOW: expected coerced hres 0x%X type VT_R8, got hres 0x%X type %s!\n",
+           S_OK, hres, vtstr(V_VT(&result)));
+        ok(hres == S_OK && EQ_DOUBLE(V_R8(&result), 4.0),
+           "VARPOW: DECIMAL value %f, expected %f\n", V_R8(&result), 4.0);
+    }
+    else
+    {
+        ok(hres == DISP_E_BADVARTYPE && V_VT(&result) == VT_EMPTY,
+           "VARPOW: expected coerced hres 0x%X type VT_EMPTY, got hres 0x%X type %s!\n",
+           DISP_E_BADVARTYPE, hres, vtstr(V_VT(&result)));
+    }
 
     SysFreeString(num2_str);
     SysFreeString(num3_str);
@@ -7877,7 +7907,7 @@ static void test_VarImp(void)
                 BOOL bFail = FALSE;
                 SKIPTESTIMP(rightvt);
 
-                /* Native crashes using the the extra flag VT_BYREF
+                /* Native crashes when using the extra flag VT_BYREF
                  * or with the following VT combinations
                  */
                 if ((leftvt == VT_UI4 && rightvt == VT_BSTR) ||

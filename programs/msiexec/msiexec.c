@@ -209,7 +209,7 @@ static DWORD msi_atou(LPCWSTR str)
 		ret += (*str - '0');
 		str++;
 	}
-	return 0;
+	return ret;
 }
 
 static LPWSTR msi_strdup(LPCWSTR str)
@@ -487,6 +487,7 @@ static BOOL process_args_from_reg( LPWSTR ident, int *pargc, WCHAR ***pargv )
 			process_args(buf, pargc, pargv);
 			ret = TRUE;
 		}
+		HeapFree(GetProcessHeap(), 0, buf);
 	}
 	RegCloseKey(hkeyArgs);
 	return ret;

@@ -10,10 +10,12 @@ CTESTS = \
 	clist.c \
 	clsid.c \
 	generated.c \
+	istream.c \
 	ordinal.c \
 	path.c \
 	shreg.c \
-	string.c
+	string.c \
+	url.c
 
 @MAKE_TEST_RULES@
 

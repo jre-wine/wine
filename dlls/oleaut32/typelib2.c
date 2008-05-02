@@ -1225,7 +1225,7 @@ static HRESULT WINAPI ICreateTypeInfo2_fnSetTypeFlags(ICreateTypeInfo2 *iface, U
 
     This->typeinfo->flags = uTypeFlags;
 
-    if (uTypeFlags & 0x1000) {
+    if (uTypeFlags & TYPEFLAG_FDISPATCHABLE) {
 	MSFT_GuidEntry foo;
 	int guidoffset;
 	int fileoffset;
@@ -3493,7 +3493,7 @@ static HRESULT WINAPI ITypeLib2_fnGetTypeInfo(
 
     TRACE("(%p,%d,%p)\n", iface, index, ppTInfo);
 
-    if ((index < 0) || (index >= This->typelib_header.nrtypeinfos)) {
+    if (index >= This->typelib_header.nrtypeinfos) {
 	return TYPE_E_ELEMENTNOTFOUND;
     }
 
@@ -3514,7 +3514,7 @@ static HRESULT WINAPI ITypeLib2_fnGetTypeInfoType(
 
     TRACE("(%p,%d,%p)\n", iface, index, pTKind);
 
-    if ((index < 0) || (index >= This->typelib_header.nrtypeinfos)) {
+    if (index >= This->typelib_header.nrtypeinfos) {
 	return TYPE_E_ELEMENTNOTFOUND;
     }
 

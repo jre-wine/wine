@@ -237,7 +237,7 @@ static WCHAR *get_lcid_subkey( LCID lcid, SYSKIND syskind, WCHAR *buffer )
     return buffer;
 }
 
-static int TLB_ReadTypeLib(LPCWSTR pszFileName, LPWSTR pszPath, UINT cchPath, ITypeLib2 **ppTypeLib);
+static HRESULT TLB_ReadTypeLib(LPCWSTR pszFileName, LPWSTR pszPath, UINT cchPath, ITypeLib2 **ppTypeLib);
 
 
 /****************************************************************************
@@ -998,7 +998,7 @@ typedef struct tagITypeInfoImpl
     const ITypeInfo2Vtbl *lpVtbl;
     const ITypeCompVtbl  *lpVtblTypeComp;
     LONG ref;
-    BOOL no_free_data; /* don't free data structurees */
+    BOOL no_free_data; /* don't free data structures */
     TYPEATTR TypeAttr ;         /* _lots_ of type information. */
     ITypeLibImpl * pTypeLib;        /* back pointer to typelib */
     int index;                  /* index in this typelib; */
@@ -1419,6 +1419,19 @@ static void *TLB_CopyTypeDesc( TYPEDESC *dest, const TYPEDESC *src, void *buffer
         break;
     }
     return buffer;
+}
+
+/* free custom data allocated by MSFT_CustData */
+static inline void TLB_FreeCustData(TLBCustData *pCustData)
+{
+    TLBCustData *pCustDataNext;
+    for (; pCustData; pCustData = pCustDataNext)
+    {
+        VariantClear(&pCustData->data);
+
+        pCustDataNext = pCustData->next;
+        TLB_Free(pCustData);
+    }
 }
 
 /**********************************************************************
@@ -2204,6 +2217,188 @@ static CRITICAL_SECTION_DEBUG cache_section_debug =
 static CRITICAL_SECTION cache_section = { &cache_section_debug, -1, 0, 0, 0, 0 };
 
 
+typedef struct TLB_PEFile
+{
+    const IUnknownVtbl *lpvtbl;
+    LONG refs;
+    HMODULE dll;
+    HRSRC typelib_resource;
+    HGLOBAL typelib_global;
+    LPVOID typelib_base;
+} TLB_PEFile;
+
+static HRESULT WINAPI TLB_PEFile_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
+{
+    if (IsEqualIID(riid, &IID_IUnknown))
+    {
+        *ppv = iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI TLB_PEFile_AddRef(IUnknown *iface)
+{
+    TLB_PEFile *This = (TLB_PEFile *)iface;
+    return InterlockedIncrement(&This->refs);
+}
+
+static ULONG WINAPI TLB_PEFile_Release(IUnknown *iface)
+{
+    TLB_PEFile *This = (TLB_PEFile *)iface;
+    ULONG refs = InterlockedDecrement(&This->refs);
+    if (!refs)
+    {
+        if (This->typelib_global)
+            FreeResource(This->typelib_global);
+        if (This->dll)
+            FreeLibrary(This->dll);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+    return refs;
+}
+
+static const IUnknownVtbl TLB_PEFile_Vtable =
+{
+    TLB_PEFile_QueryInterface,
+    TLB_PEFile_AddRef,
+    TLB_PEFile_Release
+};
+
+static HRESULT TLB_PEFile_Open(LPCWSTR path, INT index, LPVOID *ppBase, DWORD *pdwTLBLength, IUnknown **ppFile)
+{
+    TLB_PEFile *This;
+
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    if (!This)
+        return E_OUTOFMEMORY;
+
+    This->lpvtbl = &TLB_PEFile_Vtable;
+    This->refs = 1;
+    This->dll = NULL;
+    This->typelib_resource = NULL;
+    This->typelib_global = NULL;
+    This->typelib_base = NULL;
+
+    This->dll = LoadLibraryExW(path, 0, DONT_RESOLVE_DLL_REFERENCES |
+                    LOAD_LIBRARY_AS_DATAFILE | LOAD_WITH_ALTERED_SEARCH_PATH);
+
+    if (This->dll)
+    {
+        static const WCHAR TYPELIBW[] = {'T','Y','P','E','L','I','B',0};
+        This->typelib_resource = FindResourceW(This->dll, MAKEINTRESOURCEW(index), TYPELIBW);
+        if (This->typelib_resource)
+        {
+            This->typelib_global = LoadResource(This->dll, This->typelib_resource);
+            if (This->typelib_global)
+            {
+                This->typelib_base = LockResource(This->typelib_global);
+
+                if (This->typelib_base)
+                {
+                    *pdwTLBLength = SizeofResource(This->dll, This->typelib_resource);
+                    *ppBase = This->typelib_base;
+                    *ppFile = (IUnknown *)&This->lpvtbl;
+                    return S_OK;
+                }
+            }
+        }
+    }
+
+    TLB_PEFile_Release((IUnknown *)&This->lpvtbl);
+    return TYPE_E_CANTLOADLIBRARY;
+}
+
+
+typedef struct TLB_Mapping
+{
+    const IUnknownVtbl *lpvtbl;
+    LONG refs;
+    HANDLE file;
+    HANDLE mapping;
+    LPVOID typelib_base;
+} TLB_Mapping;
+
+static HRESULT WINAPI TLB_Mapping_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
+{
+    if (IsEqualIID(riid, &IID_IUnknown))
+    {
+        *ppv = iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI TLB_Mapping_AddRef(IUnknown *iface)
+{
+    TLB_Mapping *This = (TLB_Mapping *)iface;
+    return InterlockedIncrement(&This->refs);
+}
+
+static ULONG WINAPI TLB_Mapping_Release(IUnknown *iface)
+{
+    TLB_Mapping *This = (TLB_Mapping *)iface;
+    ULONG refs = InterlockedDecrement(&This->refs);
+    if (!refs)
+    {
+        if (This->typelib_base)
+            UnmapViewOfFile(This->typelib_base);
+        if (This->mapping)
+            CloseHandle(This->mapping);
+        if (This->file != INVALID_HANDLE_VALUE)
+            CloseHandle(This->file);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+    return refs;
+}
+
+static const IUnknownVtbl TLB_Mapping_Vtable =
+{
+    TLB_Mapping_QueryInterface,
+    TLB_Mapping_AddRef,
+    TLB_Mapping_Release
+};
+
+static HRESULT TLB_Mapping_Open(LPCWSTR path, LPVOID *ppBase, DWORD *pdwTLBLength, IUnknown **ppFile)
+{
+    TLB_Mapping *This;
+
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    if (!This)
+        return E_OUTOFMEMORY;
+
+    This->lpvtbl = &TLB_Mapping_Vtable;
+    This->refs = 1;
+    This->file = INVALID_HANDLE_VALUE;
+    This->mapping = NULL;
+    This->typelib_base = NULL;
+
+    This->file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
+    if (INVALID_HANDLE_VALUE != This->file)
+    {
+        This->mapping = CreateFileMappingW(This->file, NULL, PAGE_READONLY | SEC_COMMIT, 0, 0, NULL);
+        if (This->mapping)
+        {
+            This->typelib_base = MapViewOfFile(This->mapping, FILE_MAP_READ, 0, 0, 0);
+            if(This->typelib_base)
+            {
+                /* retrieve file size */
+                *pdwTLBLength = GetFileSize(This->file, NULL);
+                *ppBase = This->typelib_base;
+                *ppFile = (IUnknown *)&This->lpvtbl;
+                return S_OK;
+            }
+        }
+    }
+
+    IUnknown_Release((IUnknown *)&This->lpvtbl);
+    return TYPE_E_CANTLOADLIBRARY;
+}
+
 /****************************************************************************
  *	TLB_ReadTypeLib
  *
@@ -2212,13 +2407,15 @@ static CRITICAL_SECTION cache_section = { &cache_section_debug, -1, 0, 0, 0, 0 }
  */
 #define MSFT_SIGNATURE 0x5446534D /* "MSFT" */
 #define SLTG_SIGNATURE 0x47544c53 /* "SLTG" */
-static int TLB_ReadTypeLib(LPCWSTR pszFileName, LPWSTR pszPath, UINT cchPath, ITypeLib2 **ppTypeLib)
+static HRESULT TLB_ReadTypeLib(LPCWSTR pszFileName, LPWSTR pszPath, UINT cchPath, ITypeLib2 **ppTypeLib)
 {
     ITypeLibImpl *entry;
-    int ret = TYPE_E_CANTLOADLIBRARY;
+    HRESULT ret;
     INT index = 1;
-    HINSTANCE hinstDLL;
     LPWSTR index_str, file = (LPWSTR)pszFileName;
+    LPVOID pBase = NULL;
+    DWORD dwTLBLength = 0;
+    IUnknown *pFile = NULL;
 
     *ppTypeLib = NULL;
 
@@ -2272,63 +2469,27 @@ static int TLB_ReadTypeLib(LPCWSTR pszFileName, LPWSTR pszPath, UINT cchPath, IT
 
     /* now actually load and parse the typelib */
 
-    hinstDLL = LoadLibraryExW(pszPath, 0, DONT_RESOLVE_DLL_REFERENCES |
-            LOAD_LIBRARY_AS_DATAFILE | LOAD_WITH_ALTERED_SEARCH_PATH);
-
-    if (hinstDLL)
+    ret = TLB_PEFile_Open(pszPath, index, &pBase, &dwTLBLength, &pFile);
+    if (ret == TYPE_E_CANTLOADLIBRARY)
+        ret = TLB_Mapping_Open(pszPath, &pBase, &dwTLBLength, &pFile);
+    if (SUCCEEDED(ret))
     {
-        static const WCHAR TYPELIBW[] = {'T','Y','P','E','L','I','B',0};
-        HRSRC hrsrc = FindResourceW(hinstDLL, MAKEINTRESOURCEW(index), TYPELIBW);
-        if (hrsrc)
+        if (dwTLBLength >= 4)
         {
-            HGLOBAL hGlobal = LoadResource(hinstDLL, hrsrc);
-            if (hGlobal)
+            DWORD dwSignature = FromLEDWord(*((DWORD*) pBase));
+            if (dwSignature == MSFT_SIGNATURE)
+                *ppTypeLib = ITypeLib2_Constructor_MSFT(pBase, dwTLBLength);
+            else if (dwSignature == SLTG_SIGNATURE)
+                *ppTypeLib = ITypeLib2_Constructor_SLTG(pBase, dwTLBLength);
+            else
             {
-                LPVOID pBase = LockResource(hGlobal);
-                DWORD  dwTLBLength = SizeofResource(hinstDLL, hrsrc);
-
-                if (pBase)
-                {
-                    /* try to load as incore resource */
-                    DWORD dwSignature = FromLEDWord(*((DWORD*) pBase));
-                    if (dwSignature == MSFT_SIGNATURE)
-                        *ppTypeLib = ITypeLib2_Constructor_MSFT(pBase, dwTLBLength);
-                    else if (dwSignature == SLTG_SIGNATURE)
-                        *ppTypeLib = ITypeLib2_Constructor_SLTG(pBase, dwTLBLength);
-                    else
-                        FIXME("Header type magic 0x%08x not supported.\n",dwSignature);
-                }
-                FreeResource( hGlobal );
+                FIXME("Header type magic 0x%08x not supported.\n",dwSignature);
+                ret = TYPE_E_CANTLOADLIBRARY;
             }
         }
-        FreeLibrary(hinstDLL);
-    }
-    else
-    {
-        HANDLE hFile = CreateFileW(pszPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
-        if (INVALID_HANDLE_VALUE != hFile)
-        {
-            HANDLE hMapping = CreateFileMappingW( hFile, NULL, PAGE_READONLY | SEC_COMMIT, 0, 0, NULL );
-            if (hMapping)
-            {
-                LPVOID pBase = MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, 0);
-                if(pBase)
-                {
-                    /* retrieve file size */
-                    DWORD dwTLBLength = GetFileSize(hFile, NULL);
-                    DWORD dwSignature = FromLEDWord(*((DWORD*) pBase));
-
-                    if (dwSignature == MSFT_SIGNATURE)
-                        *ppTypeLib = ITypeLib2_Constructor_MSFT(pBase, dwTLBLength);
-                    else if (dwSignature == SLTG_SIGNATURE)
-                        *ppTypeLib = ITypeLib2_Constructor_SLTG(pBase, dwTLBLength);
-
-                    UnmapViewOfFile(pBase);
-                }
-                CloseHandle(hMapping);
-            }
-            CloseHandle(hFile);
-        }
+        else
+            ret = TYPE_E_CANTLOADLIBRARY;
+        IUnknown_Release(pFile);
     }
 
     if(*ppTypeLib) {
@@ -2463,7 +2624,7 @@ static ITypeLib2* ITypeLib2_Constructor_MSFT(LPVOID pLib, DWORD dwTLBLength)
         pTypeLibImpl->ctCustData = MSFT_CustData(&cx, tlbHeader.CustomDataOffset, &pTypeLibImpl->pCustData);
     }
 
-    /* fill in typedescriptions */
+    /* fill in type descriptions */
     if(tlbSegDir.pTypdescTab.length > 0)
     {
         int i, j, cTD = tlbSegDir.pTypdescTab.length / (2*sizeof(INT));
@@ -2574,7 +2735,7 @@ static ITypeLib2* ITypeLib2_Constructor_MSFT(LPVOID pLib, DWORD dwTLBLength)
         ITypeInfoImpl **ppTI = &(pTypeLibImpl->pTypeInfo);
         int i;
 
-        for(i = 0; i<(int)tlbHeader.nrtypeinfos; i++)
+        for(i = 0; i < tlbHeader.nrtypeinfos; i++)
         {
             *ppTI = MSFT_DoTypeInfo(&cx, i, pTypeLibImpl);
 
@@ -3076,7 +3237,7 @@ static void SLTG_DoFuncs(char *pBlk, char *pFirstItem, ITypeInfoImpl *pTI,
 	       pointing at an alpha-numeric char.  However if *pArg is
 	       0xffff or 0xfffe then the param has no name, the former
 	       meaning that the next WORD is the type, the latter
-	       meaning the the next WORD is an offset to the type. */
+	       meaning that the next WORD is an offset to the type. */
 
 	    HaveOffs = FALSE;
 	    if(*pArg == 0xffff)
@@ -3216,7 +3377,7 @@ static void SLTG_ProcessDispatch(char *pBlk, ITypeInfoImpl *pTI,
     SLTG_DoFuncs(pBlk, pBlk + pTITail->funcs_off, pTI, pTITail->cFuncs, pNameTable, ref_lookup);
 
   /* this is necessary to cope with MSFT typelibs that set cFuncs to the number
-   * of dispinterface functons including the IDispatch ones, so
+   * of dispinterface functions including the IDispatch ones, so
    * ITypeInfo::GetFuncDesc takes the real value for cFuncs from cbSizeVft */
   pTI->TypeAttr.cbSizeVft = pTI->TypeAttr.cFuncs * sizeof(void *);
 
@@ -3464,8 +3625,7 @@ static ITypeLib2* ITypeLib2_Constructor_SLTG(LPVOID pLib, DWORD dwTLBLength)
 					     pOtherTypeInfoBlks[i].name_offs +
 					     pNameTable);
       (*ppTypeInfoImpl)->dwHelpContext = pOtherTypeInfoBlks[i].helpcontext;
-      memcpy(&((*ppTypeInfoImpl)->TypeAttr.guid), &pOtherTypeInfoBlks[i].uuid,
-	     sizeof(GUID));
+      (*ppTypeInfoImpl)->TypeAttr.guid = pOtherTypeInfoBlks[i].uuid;
       (*ppTypeInfoImpl)->TypeAttr.typekind = pTIHeader->typekind;
       (*ppTypeInfoImpl)->TypeAttr.wMajorVerNum = pTIHeader->major_version;
       (*ppTypeInfoImpl)->TypeAttr.wMinorVerNum = pTIHeader->minor_version;
@@ -3758,7 +3918,7 @@ static HRESULT WINAPI ITypeLib2_fnGetTypeInfoType(
     int i;
     ITypeInfoImpl *pTInfo = This->pTypeInfo;
     
-    if ((ITypeLib2_fnGetTypeInfoCount(iface) < index + 1) || (index < 0))
+    if (ITypeLib2_fnGetTypeInfoCount(iface) < index + 1)
     	 return TYPE_E_ELEMENTNOTFOUND;
 
     TRACE("(%p) index %d\n", This, index);
@@ -3836,7 +3996,7 @@ static HRESULT WINAPI ITypeLib2_fnGetLibAttr(
     ITypeLibImpl *This = (ITypeLibImpl *)iface;
     TRACE("(%p)\n",This);
     *ppTLibAttr = HeapAlloc(GetProcessHeap(), 0, sizeof(**ppTLibAttr));
-    memcpy(*ppTLibAttr, &This->LibAttr, sizeof(**ppTLibAttr));
+    **ppTLibAttr = This->LibAttr;
     return S_OK;
 }
 
@@ -4474,7 +4634,6 @@ static ULONG WINAPI ITypeInfo_fnRelease(ITypeInfo2 *iface)
       TLBFuncDesc *pFInfo, *pFInfoNext;
       TLBVarDesc *pVInfo, *pVInfoNext;
       TLBImplType *pImpl, *pImplNext;
-      TLBCustData *pCustData, *pCustDataNext;
 
       TRACE("destroying ITypeInfo(%p)\n",This);
 
@@ -4514,13 +4673,7 @@ static ULONG WINAPI ITypeInfo_fnRelease(ITypeInfo2 *iface)
           }
           TLB_Free(pFInfo->funcdesc.lprgelemdescParam);
           TLB_Free(pFInfo->pParamDesc);
-          for (pCustData = This->pCustData; pCustData; pCustData = pCustDataNext)
-          {
-              VariantClear(&pCustData->data);
-
-              pCustDataNext = pCustData->next;
-              TLB_Free(pCustData);
-          }
+          TLB_FreeCustData(pFInfo->pCustData);
           if (HIWORD(pFInfo->Entry) != 0 && pFInfo->Entry != (BSTR)-1) 
               SysFreeString(pFInfo->Entry);
           SysFreeString(pFInfo->HelpString);
@@ -4536,23 +4689,18 @@ static ULONG WINAPI ITypeInfo_fnRelease(ITypeInfo2 *iface)
               VariantClear(pVInfo->vardesc.u.lpvarValue);
               TLB_Free(pVInfo->vardesc.u.lpvarValue);
           }
+          TLB_FreeCustData(pVInfo->pCustData);
           SysFreeString(pVInfo->Name);
           pVInfoNext = pVInfo->next;
           TLB_Free(pVInfo);
       }
       for(pImpl = This->impltypelist; pImpl; pImpl = pImplNext)
       {
-          for (pCustData = pImpl->pCustData; pCustData; pCustData = pCustDataNext)
-          {
-              VariantClear(&pCustData->data);
-
-              pCustDataNext = pCustData->next;
-              TLB_Free(pCustData);
-          }
+          TLB_FreeCustData(pImpl->pCustData);
           pImplNext = pImpl->next;
           TLB_Free(pImpl);
       }
-      TLB_Free(This->pCustData);
+      TLB_FreeCustData(This->pCustData);
 
 finish_free:
       if (This->next)
@@ -4588,7 +4736,7 @@ static HRESULT WINAPI ITypeInfo_fnGetTypeAttr( ITypeInfo2 *iface,
     if (!*ppTypeAttr)
         return E_OUTOFMEMORY;
 
-    memcpy(*ppTypeAttr, &This->TypeAttr, sizeof(**ppTypeAttr));
+    **ppTypeAttr = This->TypeAttr;
 
     if (This->TypeAttr.typekind == TKIND_ALIAS)
         TLB_CopyTypeDesc(&(*ppTypeAttr)->tdescAlias,
@@ -4631,14 +4779,14 @@ static SIZE_T TLB_SizeElemDesc( const ELEMDESC *elemdesc )
 
 static HRESULT TLB_CopyElemDesc( const ELEMDESC *src, ELEMDESC *dest, char **buffer )
 {
-    memcpy(dest, src, sizeof(ELEMDESC));
+    *dest = *src;
     *buffer = TLB_CopyTypeDesc(&dest->tdesc, &src->tdesc, *buffer);
     if (src->u.paramdesc.wParamFlags & PARAMFLAG_FHASDEFAULT)
     {
         const PARAMDESCEX *pparamdescex_src = src->u.paramdesc.pparamdescex;
         PARAMDESCEX *pparamdescex_dest = dest->u.paramdesc.pparamdescex = (PARAMDESCEX *)*buffer;
         *buffer += sizeof(PARAMDESCEX);
-        memcpy(pparamdescex_dest, pparamdescex_src, sizeof(PARAMDESCEX));
+        *pparamdescex_dest = *pparamdescex_src;
         VariantInit(&pparamdescex_dest->varDefaultValue);
         return VariantCopy(&pparamdescex_dest->varDefaultValue, 
                            (VARIANTARG *)&pparamdescex_src->varDefaultValue);
@@ -4673,7 +4821,9 @@ static HRESULT TLB_AllocAndInitFuncDesc( const FUNCDESC *src, FUNCDESC **dest_pt
     dest = (FUNCDESC *)SysAllocStringByteLen(NULL, size);
     if (!dest) return E_OUTOFMEMORY;
 
-    memcpy(dest, src, sizeof(FUNCDESC));
+    *dest = *src;
+    if (dispinterface)    /* overwrite funckind */
+        dest->funckind = FUNC_DISPATCH;
     buffer = (char *)(dest + 1);
 
     dest->lprgscode = (SCODE *)buffer;
@@ -5430,7 +5580,7 @@ static HRESULT typedescvt_to_variantvt(ITypeInfo *tinfo, const TYPEDESC *tdesc, 
 /***********************************************************************
  *		DispCallFunc (OLEAUT32.@)
  *
- * Invokes a function of the specifed calling convention, passing the
+ * Invokes a function of the specified calling convention, passing the
  * specified arguments and returns the result.
  *
  * PARAMS
@@ -6246,7 +6396,7 @@ static HRESULT WINAPI ITypeInfo_fnGetRefTypeInfo(
                 if(ref_type->pImpTLInfo->pImpTypeLib) {
 		    TRACE("typeinfo in imported typelib that is already loaded\n");
                     pTLib = (ITypeLib*)ref_type->pImpTLInfo->pImpTypeLib;
-		    ITypeLib2_AddRef((ITypeLib*) pTLib);
+		    ITypeLib2_AddRef(pTLib);
 		    result = S_OK;
 		} else {
 		    TRACE("typeinfo in imported typelib that isn't already loaded\n");
@@ -6645,7 +6795,7 @@ static HRESULT WINAPI ITypeInfo2_fnGetParamCustData(
 
     for(i=0, pFDesc=This->funclist; i!=indexFunc && pFDesc; i++,pFDesc=pFDesc->next);
 
-    if(pFDesc && indexParam >=0 && indexParam<pFDesc->funcdesc.cParams)
+    if(pFDesc && indexParam<pFDesc->funcdesc.cParams)
         for(pCData=pFDesc->pParamDesc[indexParam].pCustData; pCData;
                 pCData = pCData->next)
             if( IsEqualIID(guid, &pCData->guid)) break;
@@ -6878,7 +7028,7 @@ static HRESULT WINAPI ITypeInfo2_fnGetAllParamCustData( ITypeInfo2 * iface,
     for(i=0, pFDesc=This->funclist; i!=indexFunc && pFDesc; i++,
             pFDesc=pFDesc->next)
         ;
-    if(pFDesc && indexParam >=0 && indexParam<pFDesc->funcdesc.cParams){
+    if(pFDesc && indexParam<pFDesc->funcdesc.cParams){
         pCustData->prgCustData =
             TLB_Alloc(pFDesc->pParamDesc[indexParam].ctCustData *
                     sizeof(CUSTDATAITEM));

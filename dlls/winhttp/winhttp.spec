@@ -3,16 +3,16 @@
 @ stdcall -private DllRegisterServer()
 @ stdcall -private DllUnregisterServer()
 @ stub WinHttpAddRequestHeaders
-@ stub WinHttpCheckPlatform
+@ stdcall WinHttpCheckPlatform()
 @ stub WinHttpCloseHandle
 @ stub WinHttpConnect
 @ stub WinHttpCrackUrl
 @ stub WinHttpCreateUrl
-@ stub WinHttpDetectAutoProxyConfigUrl
+@ stdcall WinHttpDetectAutoProxyConfigUrl(long ptr)
 @ stub WinHttpGetDefaultProxyConfiguration
-@ stub WinHttpGetIEProxyConfigForCurrentUser
+@ stdcall WinHttpGetIEProxyConfigForCurrentUser(ptr)
 @ stub WinHttpGetProxyForUrl
-@ stub WinHttpOpen
+@ stdcall WinHttpOpen(wstr long wstr wstr long)
 @ stub WinHttpOpenRequest
 @ stub WinHttpQueryAuthSchemes
 @ stub WinHttpQueryDataAvailable

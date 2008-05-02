@@ -42,7 +42,6 @@
 #include "shlwapi.h"
 
 #include "wine/winbase16.h"
-#include "wine/winuser16.h"
 #include "shell32_main.h"
 
 #include "wine/debug.h"
@@ -134,7 +133,7 @@ end:
 void WINAPI DragFinish16(HDROP16 h)
 {
     TRACE("\n");
-    GlobalFree16((HGLOBAL16)h);
+    GlobalFree16(h);
 }
 
 
@@ -308,7 +307,7 @@ static LPSTR SHELL_FindString(LPSTR lpEnv, LPCSTR entry)
 
 /**********************************************************************/
 
-SEGPTR WINAPI FindEnvironmentString16(LPSTR str)
+SEGPTR WINAPI FindEnvironmentString16(LPCSTR str)
 { SEGPTR  spEnv;
   LPSTR lpEnv,lpString;
   TRACE("\n");
@@ -585,7 +584,7 @@ DWORD WINAPI RegEnumKey16( HKEY hkey, DWORD index, LPSTR name, DWORD name_len )
  *           SHELL_Execute16 [Internal]
  */
 static UINT_PTR SHELL_Execute16(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
-			    LPSHELLEXECUTEINFOW psei, LPSHELLEXECUTEINFOW psei_out)
+			    const SHELLEXECUTEINFOW *psei, LPSHELLEXECUTEINFOW psei_out)
 {
     UINT ret;
     char sCmd[MAX_PATH];

@@ -54,6 +54,8 @@ typedef struct tagWINDOWPROC
 #define MAX_WINPROCS  8192
 #define BUILTIN_WINPROCS 8  /* first BUILTIN_WINPROCS entries are reserved for builtin procs */
 
+WNDPROC EDIT_winproc_handle = 0;
+
 static WINDOWPROC winproc_array[MAX_WINPROCS];
 static UINT builtin_used;
 static UINT winproc_used = BUILTIN_WINPROCS;
@@ -109,19 +111,6 @@ static inline WINDOWPROC *find_winproc( WNDPROC funcA, WNDPROC funcW )
         if (funcA && winproc_array[i].procA != funcA) continue;
         if (funcW && winproc_array[i].procW != funcW) continue;
         return &winproc_array[i];
-    }
-    return NULL;
-}
-
-/* find an existing builtin winproc */
-static inline WINDOWPROC *find_builtin_proc( WNDPROC func )
-{
-    unsigned int i;
-
-    for (i = 0; i < builtin_used; i++)
-    {
-        if (winproc_array[i].procA == func || winproc_array[i].procW == func)
-            return &winproc_array[i];
     }
     return NULL;
 }
@@ -524,7 +513,7 @@ static LRESULT call_window_proc16( HWND16 hwnd, UINT16 msg, WPARAM16 wParam, LPA
     if (!(context.Eax = GetWindowWord( HWND_32(hwnd), GWLP_HINSTANCE ))) context.Eax = context.SegDs;
     context.SegCs = SELECTOROF(proc);
     context.Eip   = OFFSETOF(proc);
-    context.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + (WORD)&((STACK16FRAME*)0)->bp;
+    context.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + FIELD_OFFSET(STACK16FRAME, bp);
 
     if (lParam)
     {
@@ -789,12 +778,12 @@ LRESULT WINPROC_CallProcAtoW( winproc_callback_t callback, HWND hwnd, UINT msg, 
             MDICREATESTRUCTW mdi_cs;
             DWORD name_lenA = 0, name_lenW = 0, class_lenA = 0, class_lenW = 0;
 
-            if (HIWORD(csA->lpszClass))
+            if (!IS_INTRESOURCE(csA->lpszClass))
             {
                 class_lenA = strlen(csA->lpszClass) + 1;
                 RtlMultiByteToUnicodeSize( &class_lenW, csA->lpszClass, class_lenA );
             }
-            if (HIWORD(csA->lpszName))
+            if (!IS_INTRESOURCE(csA->lpszName))
             {
                 name_lenA = strlen(csA->lpszName) + 1;
                 RtlMultiByteToUnicodeSize( &name_lenW, csA->lpszName, name_lenA );
@@ -836,12 +825,12 @@ LRESULT WINPROC_CallProcAtoW( winproc_callback_t callback, HWND hwnd, UINT msg, 
 
             memcpy( &csW, csA, sizeof(csW) );
 
-            if (HIWORD(csA->szTitle))
+            if (!IS_INTRESOURCE(csA->szTitle))
             {
                 title_lenA = strlen(csA->szTitle) + 1;
                 RtlMultiByteToUnicodeSize( &title_lenW, csA->szTitle, title_lenA );
             }
-            if (HIWORD(csA->szClass))
+            if (!IS_INTRESOURCE(csA->szClass))
             {
                 class_lenA = strlen(csA->szClass) + 1;
                 RtlMultiByteToUnicodeSize( &class_lenW, csA->szClass, class_lenA );
@@ -1043,37 +1032,35 @@ static LRESULT WINPROC_CallProcWtoA( winproc_callback_t callback, HWND hwnd, UIN
     {
     case WM_NCCREATE:
     case WM_CREATE:
-        {   /* csW->lpszName and csW->lpszClass are NOT supposed to be atoms
-             * at this point.
-             */
-            char buffer[1024], *cls, *name;
+        {
+            char buffer[1024], *cls;
             CREATESTRUCTW *csW = (CREATESTRUCTW *)lParam;
             CREATESTRUCTA csA = *(CREATESTRUCTA *)csW;
             MDICREATESTRUCTA mdi_cs;
-            DWORD name_lenA, name_lenW, class_lenA, class_lenW;
+            DWORD name_lenA = 0, name_lenW = 0, class_lenA = 0, class_lenW = 0;
 
-            class_lenW = strlenW(csW->lpszClass) * sizeof(WCHAR);
-            RtlUnicodeToMultiByteSize(&class_lenA, csW->lpszClass, class_lenW);
-
-            if (csW->lpszName)
+            if (!IS_INTRESOURCE(csW->lpszClass))
             {
-                name_lenW = strlenW(csW->lpszName) * sizeof(WCHAR);
+                class_lenW = (strlenW(csW->lpszClass) + 1) * sizeof(WCHAR);
+                RtlUnicodeToMultiByteSize(&class_lenA, csW->lpszClass, class_lenW);
+            }
+            if (!IS_INTRESOURCE(csW->lpszName))
+            {
+                name_lenW = (strlenW(csW->lpszName) + 1) * sizeof(WCHAR);
                 RtlUnicodeToMultiByteSize(&name_lenA, csW->lpszName, name_lenW);
             }
-            else
-                name_lenW = name_lenA = 0;
 
-            if (!(cls = get_buffer( buffer, sizeof(buffer), class_lenA + name_lenA + 2 ))) break;
+            if (!(cls = get_buffer( buffer, sizeof(buffer), class_lenA + name_lenA ))) break;
 
-            RtlUnicodeToMultiByteN(cls, class_lenA, NULL, csW->lpszClass, class_lenW);
-            cls[class_lenA] = 0;
-            csA.lpszClass = cls;
-
-            if (csW->lpszName)
+            if (class_lenA)
             {
-                name = cls + class_lenA + 1;
+                RtlUnicodeToMultiByteN(cls, class_lenA, NULL, csW->lpszClass, class_lenW);
+                csA.lpszClass = cls;
+            }
+            if (name_lenA)
+            {
+                char *name = cls + class_lenA;
                 RtlUnicodeToMultiByteN(name, name_lenA, NULL, csW->lpszName, name_lenW);
-                name[name_lenA] = 0;
                 csA.lpszName = name;
             }
 
@@ -1160,12 +1147,12 @@ static LRESULT WINPROC_CallProcWtoA( winproc_callback_t callback, HWND hwnd, UIN
 
             memcpy( &csA, csW, sizeof(csA) );
 
-            if (HIWORD(csW->szTitle))
+            if (!IS_INTRESOURCE(csW->szTitle))
             {
                 title_lenW = (strlenW(csW->szTitle) + 1) * sizeof(WCHAR);
                 RtlUnicodeToMultiByteSize( &title_lenA, csW->szTitle, title_lenW );
             }
-            if (HIWORD(csW->szClass))
+            if (!IS_INTRESOURCE(csW->szClass))
             {
                 class_lenW = (strlenW(csW->szClass) + 1) * sizeof(WCHAR);
                 RtlUnicodeToMultiByteSize( &class_lenA, csW->szClass, class_lenW );
@@ -2288,12 +2275,7 @@ LRESULT WINAPI CallWindowProcA(
     if (!func) return 0;
 
     if (!(proc = handle_to_proc( func )))
-    {
-        if ((proc = find_builtin_proc( func )) && !IsWindowUnicode( hwnd ))
-            call_window_proc( hwnd, msg, wParam, lParam, &result, proc->procA );
-        else
-            call_window_proc( hwnd, msg, wParam, lParam, &result, func );
-    }
+        call_window_proc( hwnd, msg, wParam, lParam, &result, func );
     else if (proc->procA)
         call_window_proc( hwnd, msg, wParam, lParam, &result, proc->procA );
     else if (proc->procW)
@@ -2319,12 +2301,7 @@ LRESULT WINAPI CallWindowProcW( WNDPROC func, HWND hwnd, UINT msg,
     if (!func) return 0;
 
     if (!(proc = handle_to_proc( func )))
-    {
-        if ((proc = find_builtin_proc( func )) && IsWindowUnicode( hwnd ))
-            call_window_proc( hwnd, msg, wParam, lParam, &result, proc->procW );
-        else
-            call_window_proc( hwnd, msg, wParam, lParam, &result, func );
-    }
+        call_window_proc( hwnd, msg, wParam, lParam, &result, func );
     else if (proc->procW)
         call_window_proc( hwnd, msg, wParam, lParam, &result, proc->procW );
     else if (proc->procA)
@@ -2382,12 +2359,7 @@ INT_PTR WINPROC_CallDlgProcA( DLGPROC func, HWND hwnd, UINT msg, WPARAM wParam, 
     if (!func) return 0;
 
     if (!(proc = handle_to_proc( func )))
-    {
-        if ((proc = find_builtin_proc( func )) && !IsWindowUnicode( hwnd ))
-            ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, proc->procA );
-        else
-            ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, func );
-    }
+        ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, func );
     else if (proc->procA)
         ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, proc->procA );
     else if (proc->procW)
@@ -2417,12 +2389,7 @@ INT_PTR WINPROC_CallDlgProcW( DLGPROC func, HWND hwnd, UINT msg, WPARAM wParam, 
     if (!func) return 0;
 
     if (!(proc = handle_to_proc( func )))
-    {
-        if ((proc = find_builtin_proc( func )) && IsWindowUnicode( hwnd ))
-            ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, proc->procW );
-        else
-            ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, func );
-    }
+        ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, func );
     else if (proc->procW)
         ret = call_dialog_proc( hwnd, msg, wParam, lParam, &result, proc->procW );
     else if (proc->procA)

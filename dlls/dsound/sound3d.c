@@ -102,23 +102,6 @@ static inline D3DVALUE RadToDeg (D3DVALUE angle)
 	return newangle;
 }
 
-/* angle between vectors - deg version */
-static inline D3DVALUE AngleBetweenVectorsDeg (const D3DVECTOR *a, const D3DVECTOR *b)
-{
-	D3DVALUE la, lb, product, angle, cos;
-	/* definition of scalar product: a*b = |a|*|b|*cos...therefore: */
-	product = ScalarProduct (a,b);
-	la = VectorMagnitude (a);
-	lb = VectorMagnitude (b);
-	cos = product/(la*lb);
-	angle = acos(cos);
-	/* we now have angle in radians */
-	angle = RadToDeg(angle);
-	TRACE("angle between (%f,%f,%f) and (%f,%f,%f) = %f degrees\n",  a->x, a->y, a->z, b->x,
-	      b->y, b->z, angle);
-	return angle;	
-}
-
 /* angle between vectors - rad version */
 static inline D3DVALUE AngleBetweenVectorsRad (const D3DVECTOR *a, const D3DVECTOR *b)
 {
@@ -127,11 +110,19 @@ static inline D3DVALUE AngleBetweenVectorsRad (const D3DVECTOR *a, const D3DVECT
 	product = ScalarProduct (a,b);
 	la = VectorMagnitude (a);
 	lb = VectorMagnitude (b);
+	if (!la || !lb)
+		return 0;
+
 	cos = product/(la*lb);
 	angle = acos(cos);
-	TRACE("angle between (%f,%f,%f) and (%f,%f,%f) = %f radians\n",  a->x, a->y, a->z, b->x,
-	      b->y, b->z, angle);
+	TRACE("angle between (%f,%f,%f) and (%f,%f,%f) = %f radians (%f degrees)\n",  a->x, a->y, a->z, b->x,
+	      b->y, b->z, angle, RadToDeg(angle));
 	return angle;	
+}
+
+static inline D3DVALUE AngleBetweenVectorsDeg (const D3DVECTOR *a, const D3DVECTOR *b)
+{
+	return RadToDeg(AngleBetweenVectorsRad(a, b));
 }
 
 /* calculates vector between two points */

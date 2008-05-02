@@ -46,8 +46,8 @@
 @ stub DriverFinalPolicy
 @ stub DriverInitializePolicy
 @ stub FindCertsByIssuer
-@ stub GenericChainCertificateTrust
-@ stub GenericChainFinalProv
+@ stdcall GenericChainCertificateTrust(ptr)
+@ stdcall GenericChainFinalProv(ptr)
 @ stub HTTPSCertificateTrust
 @ stub HTTPSFinalProv
 @ stub IsCatalogFile
@@ -56,18 +56,18 @@
 @ stub OfficeCleanupPolicy
 @ stub OfficeInitializePolicy
 @ stub OpenPersonalTrustDBDialog
-@ stub SoftpubAuthenticode
-@ stub SoftpubCheckCert
-@ stub SoftpubCleanup
-@ stub SoftpubDefCertInit
+@ stdcall SoftpubAuthenticode(ptr)
+@ stdcall SoftpubCheckCert(ptr long long long)
+@ stdcall SoftpubCleanup(ptr)
+@ stdcall SoftpubDefCertInit(ptr)
 @ stdcall SoftpubDllRegisterServer()
 @ stdcall SoftpubDllUnregisterServer()
 @ stub SoftpubDumpStructure
 @ stub SoftpubFreeDefUsageCallData
-@ stub SoftpubInitialize
+@ stdcall SoftpubInitialize(ptr)
 @ stub SoftpubLoadDefUsageCallData
-@ stub SoftpubLoadMessage
-@ stub SoftpubLoadSignature
+@ stdcall SoftpubLoadMessage(ptr)
+@ stdcall SoftpubLoadSignature(ptr)
 @ stub TrustDecode
 @ stub TrustFindIssuerCertificate
 @ stub TrustFreeDecode
@@ -77,8 +77,8 @@
 @ stub WTHelperCertIsSelfSigned
 @ stub WTHelperCheckCertUsage
 @ stub WTHelperGetAgencyInfo
-@ stub WTHelperGetFileHandle
-@ stub WTHelperGetFileName
+@ stdcall WTHelperGetFileHandle(ptr)
+@ stdcall WTHelperGetFileName(ptr)
 @ stub WTHelperGetKnownUsages
 @ stdcall WTHelperGetProvCertFromChain(ptr long)
 @ stub WTHelperGetProvPrivateDataFromChain
@@ -104,7 +104,7 @@
 @ stub WVTAsn1SpcSigInfoEncode
 @ stub WVTAsn1SpcSpAgencyInfoDecode
 @ stub WVTAsn1SpcSpAgencyInfoEncode
-@ stub WVTAsn1SpcSpOpusInfoDecode
+@ stdcall WVTAsn1SpcSpOpusInfoDecode(long str ptr long long ptr ptr)
 @ stub WVTAsn1SpcSpOpusInfoEncode
 @ stub WVTAsn1SpcStatementTypeDecode
 @ stub WVTAsn1SpcStatementTypeEncode
@@ -112,7 +112,7 @@
 @ stdcall WinVerifyTrustEx(long ptr ptr)
 @ stdcall WintrustAddActionID(ptr long ptr)
 @ stdcall WintrustAddDefaultForUsage(ptr ptr)
-@ stub WintrustCertificateTrust
+@ stdcall WintrustCertificateTrust(ptr)
 @ stub WintrustGetDefaultForUsage
 @ stdcall WintrustGetRegPolicyFlags(ptr)
 @ stdcall WintrustLoadFunctionPointers(ptr ptr)

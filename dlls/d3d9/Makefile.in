@@ -3,8 +3,8 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = d3d9.dll
-IMPORTLIB = libd3d9.$(IMPLIBEXT)
-IMPORTS   = wined3d user32 gdi32 kernel32
+IMPORTLIB = d3d9
+IMPORTS   = wined3d kernel32
 EXTRALIBS = -ldxguid -luuid
 
 C_SRCS = \

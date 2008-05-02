@@ -76,8 +76,8 @@ static inline HRESULT get_facbuf_for_iid(REFIID riid, IPSFactoryBuffer **facbuf)
 
     if ((hr = CoGetPSClsid(riid, &clsid)))
         return hr;
-    return CoGetClassObject(&clsid, CLSCTX_INPROC_SERVER, NULL,
-        &IID_IPSFactoryBuffer, (LPVOID*)facbuf);
+    return CoGetClassObject(&clsid, CLSCTX_INPROC_SERVER | WINE_CLSCTX_DONT_HOST,
+        NULL, &IID_IPSFactoryBuffer, (LPVOID*)facbuf);
 }
 
 /* marshals an object into a STDOBJREF structure */
@@ -279,7 +279,7 @@ static HRESULT WINAPI ClientIdentity_QueryMultipleInterfaces(IMultiQI *iface, UL
         /* get IRemUnknown proxy so we can communicate with the remote object */
         hr = proxy_manager_get_remunknown(This, &remunk);
 
-        if (hr == S_OK)
+        if (SUCCEEDED(hr))
         {
             hr = IRemUnknown_RemQueryInterface(remunk, ipid, NORMALEXTREFS,
                                                nonlocal_mqis, iids, &qiresults);
@@ -511,15 +511,31 @@ static HRESULT WINAPI ProxyCliSec_QueryBlanket(IClientSecurity *iface,
                                                IUnknown *pProxy,
                                                DWORD *pAuthnSvc,
                                                DWORD *pAuthzSvc,
-                                               OLECHAR **pServerPrincName,
+                                               OLECHAR **ppServerPrincName,
                                                DWORD *pAuthnLevel,
                                                DWORD *pImpLevel,
                                                void **pAuthInfo,
                                                DWORD *pCapabilities)
 {
     FIXME("(%p, %p, %p, %p, %p, %p, %p, %p): stub\n", pProxy, pAuthnSvc,
-          pAuthzSvc, pServerPrincName, pAuthnLevel, pImpLevel, pAuthInfo,
+          pAuthzSvc, ppServerPrincName, pAuthnLevel, pImpLevel, pAuthInfo,
           pCapabilities);
+
+    if (pAuthnSvc)
+        *pAuthnSvc = 0;
+    if (pAuthzSvc)
+        *pAuthzSvc = 0;
+    if (ppServerPrincName)
+        *ppServerPrincName = NULL;
+    if (pAuthnLevel)
+        *pAuthnLevel = RPC_C_AUTHN_LEVEL_DEFAULT;
+    if (pImpLevel)
+        *pImpLevel = RPC_C_IMP_LEVEL_DEFAULT;
+    if (pAuthInfo)
+        *pAuthInfo = NULL;
+    if (pCapabilities)
+        *pCapabilities = EOAC_NONE;
+
     return E_NOTIMPL;
 }
 
@@ -1081,10 +1097,15 @@ static BOOL find_proxy_manager(APARTMENT * apt, OXID oxid, OID oid, struct proxy
         struct proxy_manager * proxy = LIST_ENTRY(cursor, struct proxy_manager, entry);
         if ((oxid == proxy->oxid) && (oid == proxy->oid))
         {
-            *proxy_found = proxy;
-            ClientIdentity_AddRef((IMultiQI *)&proxy->lpVtbl);
-            found = TRUE;
-            break;
+            /* be careful of a race with ClientIdentity_Release, which would
+             * cause us to return a proxy which is in the process of being
+             * destroyed */
+            if (ClientIdentity_AddRef((IMultiQI *)&proxy->lpVtbl) != 0)
+            {
+                *proxy_found = proxy;
+                found = TRUE;
+                break;
+            }
         }
     }
     LeaveCriticalSection(&apt->cs);

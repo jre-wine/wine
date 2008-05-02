@@ -27,6 +27,10 @@
 
 #include "wine/test.h"
 
+
+static BOOL (WINAPI *pCryptEnumOIDInfo)(DWORD,DWORD,void*,PFN_CRYPT_ENUM_OID_INFO);
+
+
 struct OIDToAlgID
 {
     LPCSTR oid;
@@ -95,10 +99,12 @@ static void testOIDToAlgID(void)
     /* Test with a bogus one */
     SetLastError(0xdeadbeef);
     alg = CertOIDToAlgId("1.2.3");
-    ok(!alg && (GetLastError() == 0xdeadbeef ||
-     GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND),
-     "Expected ERROR_RESOURCE_NAME_NOT_FOUND or no error set, got %08x\n",
-     GetLastError());
+    ok(!alg, "Expected failure, got %d\n", alg);
+    ok(GetLastError() == 0xdeadbeef ||
+       GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND ||
+       GetLastError() == ERROR_SUCCESS, /* win2k */
+       "Expected ERROR_RESOURCE_NAME_NOT_FOUND, ERROR_SUCCESS "
+       "or no error set, got %08x\n", GetLastError());
 
     for (i = 0; i < sizeof(oidToAlgID) / sizeof(oidToAlgID[0]); i++)
     {
@@ -414,6 +420,51 @@ static void test_registerDefaultOIDFunction(void)
      "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
 }
 
+static void test_getDefaultOIDFunctionAddress(void)
+{
+    BOOL ret;
+    HCRYPTOIDFUNCSET set;
+    void *funcAddr;
+    HCRYPTOIDFUNCADDR hFuncAddr;
+
+    /* Crash
+    ret = CryptGetDefaultOIDFunctionAddress(0, 0, NULL, 0, NULL, NULL);
+    ret = CryptGetDefaultOIDFunctionAddress(0, 0, NULL, 0, &funcAddr, NULL);
+    ret = CryptGetDefaultOIDFunctionAddress(0, 0, NULL, 0, NULL, &hFuncAddr);
+    ret = CryptGetDefaultOIDFunctionAddress(0, 0, NULL, 0, &funcAddr,
+     &hFuncAddr);
+     */
+    set = CryptInitOIDFunctionSet("CertDllOpenStoreProv", 0);
+    ok(set != 0, "CryptInitOIDFunctionSet failed: %d\n", GetLastError());
+    /* This crashes if hFuncAddr is not 0 to begin with */
+    hFuncAddr = 0;
+    ret = CryptGetDefaultOIDFunctionAddress(set, 0, NULL, 0, &funcAddr,
+     &hFuncAddr);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+    /* This fails with the normal encoding too, so built-in functions aren't
+     * returned.
+     */
+    ret = CryptGetDefaultOIDFunctionAddress(set, X509_ASN_ENCODING, NULL, 0,
+     &funcAddr, &hFuncAddr);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+
+    /* Even with a registered dll, this fails (since the dll doesn't exist) */
+    SetLastError(0xdeadbeef);
+    ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
+     bogusDll);
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
+        skip("Need admin rights\n");
+    else
+        ok(ret, "CryptRegisterDefaultOIDFunction failed: %08x\n", GetLastError());
+    ret = CryptGetDefaultOIDFunctionAddress(set, 0, NULL, 0, &funcAddr,
+     &hFuncAddr);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+    CryptUnregisterDefaultOIDFunction(0, "CertDllOpenStoreProv", bogusDll);
+}
+
 static BOOL WINAPI countOidInfo(PCCRYPT_OID_INFO pInfo, void *pvArg)
 {
     (*(DWORD *)pvArg)++;
@@ -430,14 +481,20 @@ static void test_enumOIDInfo(void)
     BOOL ret;
     DWORD count = 0;
 
+    if (!pCryptEnumOIDInfo)
+    {
+        skip("CryptEnumOIDInfo() is not available\n");
+        return;
+    }
+
     /* This crashes
-    ret = CryptEnumOIDInfo(7, 0, NULL, NULL);
+    ret = pCryptEnumOIDInfo(7, 0, NULL, NULL);
      */
 
     /* Silly tests, check that more than one thing is enumerated */
-    ret = CryptEnumOIDInfo(0, 0, &count, countOidInfo);
+    ret = pCryptEnumOIDInfo(0, 0, &count, countOidInfo);
     ok(ret && count > 0, "Expected more than item enumerated\n");
-    ret = CryptEnumOIDInfo(0, 0, NULL, noOidInfo);
+    ret = pCryptEnumOIDInfo(0, 0, NULL, noOidInfo);
     ok(!ret, "Expected FALSE\n");
 }
 
@@ -491,6 +548,9 @@ static void test_findOIDInfo(void)
 
 START_TEST(oid)
 {
+    HMODULE hCrypt32 = GetModuleHandleA("crypt32.dll");
+    pCryptEnumOIDInfo = (void*)GetProcAddress(hCrypt32, "CryptEnumOIDInfo");
+
     testOIDToAlgID();
     testAlgIDToOID();
     test_enumOIDInfo();
@@ -499,4 +559,5 @@ START_TEST(oid)
     test_installOIDFunctionAddress();
     test_registerOIDFunction();
     test_registerDefaultOIDFunction();
+    test_getDefaultOIDFunctionAddress();
 }

@@ -28,7 +28,7 @@
 #define MEDIA_SIZE          999999999
 #define FOLDER_THRESHOLD    900000
 
-/* The following defintions were copied from dlls/cabinet/cabinet.h
+/* The following definitions were copied from dlls/cabinet/cabinet.h
  * because they are undocumented in windows.
  */
 
@@ -39,7 +39,7 @@
 struct FILELIST{
     LPSTR FileName;
     struct FILELIST *next;
-    BOOL Extracted;
+    BOOL DoExtract;
 };
 
 typedef struct {
@@ -314,7 +314,7 @@ static void create_cab_file(void)
     ok(res, "Failed to destroy the cabinet\n");
 }
 
-static BOOL check_list(struct FILELIST **node, const char *filename, BOOL extracted)
+static BOOL check_list(struct FILELIST **node, const char *filename, BOOL do_extract)
 {
     if (!*node)
         return FALSE;
@@ -322,7 +322,7 @@ static BOOL check_list(struct FILELIST **node, const char *filename, BOOL extrac
     if (lstrcmpA((*node)->FileName, filename))
         return FALSE;
 
-    if ((*node)->Extracted != extracted)
+    if ((*node)->DoExtract != do_extract)
         return FALSE;
 
     *node = (*node)->next;
@@ -445,7 +445,9 @@ static void test_Extract(void)
     ok(!*session.Reserved, "Expected empty string, got %s\n", session.Reserved);
     ok(!session.FilterList, "Expected empty filter list\n");
     ok(!DeleteFileA("dest\\a.txt"), "Expected dest\\a.txt to not exist\n");
+    ok(!DeleteFileA("dest\\b.txt"), "Expected dest\\b.txt to not exist\n");
     ok(!DeleteFileA("dest\\testdir\\c.txt"), "Expected dest\\testdir\\c.txt to not exist\n");
+    ok(!DeleteFileA("dest\\testdir\\d.txt"), "Expected dest\\testdir\\d.txt to not exist\n");
     ok(check_list(&node, "testdir\\d.txt", FALSE), "list entry wrong\n");
     ok(check_list(&node, "testdir\\c.txt", FALSE), "list entry wrong\n");
     ok(check_list(&node, "b.txt", FALSE), "list entry wrong\n");
@@ -472,13 +474,10 @@ static void test_Extract(void)
        "Expected dest\\testdir\\d.txt, got %s\n", session.CurrentFile);
     ok(!*session.Reserved, "Expected empty string, got %s\n", session.Reserved);
     ok(!session.FilterList, "Expected empty filter list\n");
-    todo_wine
-    {
-        ok(DeleteFileA("dest\\a.txt"), "Expected dest\\a.txt to exist\n");
-        ok(DeleteFileA("dest\\testdir\\c.txt"), "Expected dest\\testdir\\c.txt to exist\n");
-        ok(!DeleteFileA("dest\\b.txt"), "Expected dest\\b.txt to not exist\n");
-        ok(!DeleteFileA("dest\\testdir\\d.txt"), "Expected dest\\testdir\\d.txt to not exist\n");
-    }
+    ok(DeleteFileA("dest\\a.txt"), "Expected dest\\a.txt to exist\n");
+    ok(DeleteFileA("dest\\testdir\\c.txt"), "Expected dest\\testdir\\c.txt to exist\n");
+    ok(!DeleteFileA("dest\\b.txt"), "Expected dest\\b.txt to not exist\n");
+    ok(!DeleteFileA("dest\\testdir\\d.txt"), "Expected dest\\testdir\\d.txt to not exist\n");
     ok(check_list(&node, "testdir\\d.txt", FALSE), "list entry wrong\n");
     ok(!check_list(&node, "testdir\\c.txt", FALSE), "list entry wrong\n");
     ok(check_list(&node, "b.txt", FALSE), "list entry wrong\n");
@@ -605,8 +604,8 @@ static void test_Extract(void)
     node = session.FileList;
     todo_wine
     {
-        ok(res == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED),
-           "Expected HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED), got %08x\n", res);
+        ok(res == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED) || res == E_FAIL,
+           "Expected HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED) or E_FAIL, got %08x\n", res);
         ok(session.FileSize == 6, "Expected 6, got %d\n", session.FileSize);
         ok(session.Error.erfOper == FDIERROR_USER_ABORT,
            "Expected FDIERROR_USER_ABORT, got %d\n", session.Error.erfOper);
@@ -645,8 +644,8 @@ static void test_Extract(void)
     res = pExtract(&session, "extract.cab");
     todo_wine
     {
-        ok(res == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED),
-           "Expected HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED), got %08x\n", res);
+        ok(res == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED) || res == E_FAIL,
+           "Expected HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED) or E_FAIL, got %08x\n", res);
         ok(session.FileSize == 26, "Expected 26, got %d\n", session.FileSize);
         ok(session.Error.erfOper == FDIERROR_USER_ABORT,
            "Expected FDIERROR_USER_ABORT, got %d\n", session.Error.erfOper);

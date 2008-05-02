@@ -97,7 +97,7 @@ static void test_pbuffers(HDC hdc)
      * and a pixelformat that's only available for offscreen rendering (this means that only
      * wglChoosePixelFormatARB and friends know about the format.
      *
-     * The first thing we need are pixelformats with pbuffer capabilites.
+     * The first thing we need are pixelformats with pbuffer capabilities.
      */
     res = pwglChoosePixelFormatARB(hdc, iAttribList, NULL, MAX_FORMATS, iFormats, &nFormats);
     if(res <= 0)
@@ -176,10 +176,86 @@ static void test_pbuffers(HDC hdc)
     else skip("Pbuffer test for offscreen pixelformat skipped as no offscreen-only format with pbuffer capabilities has been found\n");
 }
 
-static void test_setpixelformat(void)
+static void test_choosepixelformat(HDC hdc)
+{
+    int iPixelFormat;
+    int nFormats;
+    BOOL found=FALSE;
+    PIXELFORMATDESCRIPTOR pfd = {
+        sizeof(PIXELFORMATDESCRIPTOR),
+        1,                     /* version */
+        PFD_DRAW_TO_WINDOW |
+        PFD_SUPPORT_OPENGL |
+        PFD_DOUBLEBUFFER,
+        PFD_TYPE_RGBA,
+        32,                    /* 32-bit color depth */
+        0, 0, 0, 0, 0, 0,      /* color bits */
+        0,                     /* alpha buffer */
+        0,                     /* shift bit */
+        0,                     /* accumulation buffer */
+        0, 0, 0, 0,            /* accum bits */
+        0,                     /* z-buffer */
+        0,                     /* stencil buffer */
+        0,                     /* auxiliary buffer */
+        PFD_MAIN_PLANE,        /* main layer */
+        0,                     /* reserved */
+        0, 0, 0                /* layer masks */
+    };
+
+    /* Below we test the behavior of ChoosePixelFormat. As documented on MSDN this
+     * function doesn't give any guarantees about its outcome. Programs should not
+     * rely on weird behavior of the function but unfortunately a few programs like
+     * e.g. Serious Sam TSE rely on it.
+     *
+     * MSDN documents of a few flags like double buffering / stereo that they can be set to DONTCARE.
+     * It appears that a 0 value on other options like alpha, red, .. means DONTCARE. The hypothesis
+     * is that ChoosePixelFormat returns the first available format which matches the criteria.
+     *
+     * This test tries to proof the DONTCARE behavior by passing an almost 'empty' pfd to
+     * ChoosePixelFormat. The pfd only has some really needed flags (RGBA, window, double buffer) set.
+     * Further a 32 bit color buffer has been requested. The idea is that when a format with e.g. depth or stencil bits
+     * is returned, while there are also 'better' candidates in the list without them (but located AFTER the returned one)
+     * that an option set to zero means DONTCARE. We try to proof this by checking the aux/depth/stencil bits.
+     * Proofing this behavior for the color bits isn't possible as all formats have red/green/blue/(alpha), so we assume
+     * that if it holds for aux/depth/stencil it also holds for the others.
+     *
+     * The test below passes at least on various ATI cards (rv250, r300) and Nvidia cards.
+     */
+
+    iPixelFormat = ChoosePixelFormat(hdc, &pfd);
+    if(iPixelFormat) {
+        PIXELFORMATDESCRIPTOR pfd_tmp;
+        BOOL res;
+        int i;
+
+        memset(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
+        res = DescribePixelFormat(hdc, iPixelFormat, sizeof(PIXELFORMATDESCRIPTOR), &pfd);
+
+        nFormats = DescribePixelFormat(hdc, 0, 0, NULL);
+        /* Start testing from iPixelFormat, second formats start counting from index=1, so use '<=' */
+        for(i=iPixelFormat; i<=nFormats; i++) {
+            memset(&pfd_tmp, 0, sizeof(PIXELFORMATDESCRIPTOR));
+            res = DescribePixelFormat(hdc, i, sizeof(PIXELFORMATDESCRIPTOR), &pfd_tmp);
+            if(!res)
+                continue;
+
+            /* Check if there is a format which better matches the requirements */
+            if((pfd_tmp.cAuxBuffers < pfd.cAuxBuffers) || (pfd_tmp.cDepthBits < pfd.cDepthBits) || (pfd_tmp.cStencilBits < pfd.cStencilBits))
+                found = TRUE;
+        }
+
+        /* When found=TRUE we were able to confirm our hypothesis */
+        ok(found == TRUE, "Unable to confirm DONTCARE behavior of unset pixelformatdescriptor flags\n");
+    }
+
+}
+
+static void test_setpixelformat(HDC winhdc)
 {
     int res = 0;
+    int nCfgs;
     int pf;
+    int i;
     PIXELFORMATDESCRIPTOR pfd = {
         sizeof(PIXELFORMATDESCRIPTOR),
         1,                     /* version */
@@ -211,6 +287,17 @@ static void test_setpixelformat(void)
     /* SetPixelFormat on the main device context 'X root window' should fail */
     res = SetPixelFormat(hdc, pf, &pfd);
     ok(res == 0, "SetPixelFormat on main device context should fail\n");
+
+    /* Setting the same format that was set on the HDC is allowed; other
+       formats fail */
+    nCfgs = DescribePixelFormat(winhdc, 0, 0, NULL);
+    pf = GetPixelFormat(winhdc);
+    for(i = 1;i <= nCfgs;i++)
+    {
+        int res = SetPixelFormat(winhdc, i, NULL);
+        if(i == pf) ok(res, "Failed to set the same pixel format\n");
+        else ok(!res, "Unexpectedly set an alternate pixel format\n");
+    }
 }
 
 static void test_colorbits(HDC hdc)
@@ -222,6 +309,12 @@ static void test_colorbits(HDC hdc)
     unsigned int nFormats;
     int res;
     int iPixelFormat = 0;
+
+    if (!pwglChoosePixelFormatARB)
+    {
+        skip("wglChoosePixelFormatARB is not available\n");
+        return;
+    }
 
     /* We need a pixel format with at least one bit of alpha */
     res = pwglChoosePixelFormatARB(hdc, iAttribs, NULL, 1, &iPixelFormat, &nFormats);
@@ -250,6 +343,12 @@ static void test_gdi_dbuf(HDC hdc)
     unsigned int nFormats;
     int iPixelFormat;
     int res;
+
+    if (!pwglGetPixelFormatAttribivARB)
+    {
+        skip("wglGetPixelFormatAttribivARB is not available\n");
+        return;
+    }
 
     nFormats = DescribePixelFormat(hdc, 0, 0, NULL);
     for(iPixelFormat = 1;iPixelFormat <= nFormats;iPixelFormat++)
@@ -294,6 +393,29 @@ static void test_make_current_read(HDC hdc)
     ok(hread == hdc, "wglGetCurrentReadDCARB failed for wglMakeContextCurrent\n");
 }
 
+static void test_dc(HWND hwnd, HDC hdc)
+{
+    int pf1, pf2;
+    HDC hdc2;
+
+    /* Get another DC and make sure it has the same pixel format */
+    hdc2 = GetDC(hwnd);
+    if(hdc != hdc2)
+    {
+        pf1 = GetPixelFormat(hdc);
+        pf2 = GetPixelFormat(hdc2);
+        ok(pf1 == pf2, "Second DC does not have the same format (%d != %d)\n", pf1, pf2);
+    }
+    else
+        skip("Could not get a different DC for the window\n");
+
+    if(hdc2)
+    {
+        ReleaseDC(hwnd, hdc2);
+        hdc2 = NULL;
+    }
+}
+
 START_TEST(opengl)
 {
     HWND hwnd;
@@ -326,6 +448,7 @@ START_TEST(opengl)
         HDC hdc;
         int iPixelFormat, res;
         HGLRC hglrc;
+        DWORD error;
         ShowWindow(hwnd, SW_SHOW);
 
         hdc = GetDC(hwnd);
@@ -333,17 +456,33 @@ START_TEST(opengl)
         iPixelFormat = ChoosePixelFormat(hdc, &pfd);
         ok(iPixelFormat > 0, "No pixelformat found!\n"); /* This should never happen as ChoosePixelFormat always returns a closest match */
 
+        /* We shouldn't be able to create a context from a hdc which doesn't have a pixel format set */
+        hglrc = wglCreateContext(hdc);
+        ok(hglrc == NULL, "wglCreateContext should fail when no pixel format has been set, but it passed\n");
+        error = GetLastError();
+        ok(error == ERROR_INVALID_PIXEL_FORMAT, "expected ERROR_INVALID_PIXEL_FORMAT for wglCreateContext without a pixelformat set, but received %#x\n", error);
+
         res = SetPixelFormat(hdc, iPixelFormat, &pfd);
         ok(res, "SetPixelformat failed: %x\n", GetLastError());
+
+        test_dc(hwnd, hdc);
 
         hglrc = wglCreateContext(hdc);
         res = wglMakeCurrent(hdc, hglrc);
         ok(res, "wglMakeCurrent failed!\n");
         init_functions();
 
-        test_setpixelformat();
+        test_choosepixelformat(hdc);
+        test_setpixelformat(hdc);
         test_colorbits(hdc);
         test_gdi_dbuf(hdc);
+
+        if (!pwglGetExtensionsStringARB)
+        {
+            skip("wglGetExtensionsStringARB is not available\n");
+            DestroyWindow(hwnd);
+            return;
+        }
 
         wgl_extensions = pwglGetExtensionsStringARB(hdc);
         if(wgl_extensions == NULL) skip("Skipping opengl32 tests because this OpenGL implementation doesn't support WGL extensions!\n");

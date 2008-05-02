@@ -19,9 +19,10 @@
 @ stdcall CoInternetGetSession(long ptr long)
 @ stdcall CoInternetParseUrl(wstr long long wstr long ptr long)
 @ stdcall CoInternetQueryInfo(ptr long long ptr long ptr long)
+@ stdcall CoInternetSetFeatureEnabled(long long long)
 @ stub CompareSecurityIds
 @ stub CopyBindInfo
-@ stub CopyStgMedium
+@ stdcall CopyStgMedium(ptr ptr)
 @ stdcall CreateAsyncBindCtx(long ptr ptr ptr)
 @ stdcall CreateAsyncBindCtxEx(ptr long ptr ptr ptr long)
 @ stdcall CreateFormatEnumerator(long ptr ptr)
@@ -38,7 +39,7 @@
 @ stub FindMediaType
 @ stub FindMediaTypeClass
 @ stdcall FindMimeFromData(long ptr ptr long ptr long ptr long)
-@ stub GetClassFileOrMime
+@ stdcall GetClassFileOrMime(ptr wstr ptr long wstr long ptr)
 @ stub GetClassURL
 @ stub GetComponentIDFromCLSSPEC
 @ stub GetMarkOfTheWeb
@@ -53,7 +54,7 @@
 @ stub IsLoggingEnabledA
 @ stub IsLoggingEnabledW
 @ stdcall IsValidURL(ptr wstr long)
-@ stdcall MkParseDisplayNameEx(ptr ptr ptr ptr) ole32.MkParseDisplayName
+@ stdcall MkParseDisplayNameEx(ptr wstr ptr ptr)
 @ stdcall ObtainUserAgentString(long str ptr)
 @ stub PrivateCoInstall
 @ stdcall RegisterBindStatusCallback(ptr ptr ptr long)

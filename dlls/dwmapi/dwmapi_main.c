@@ -59,3 +59,33 @@ HRESULT WINAPI DwmIsCompositionEnabled(BOOL *enabled)
     *enabled = FALSE;
     return S_OK;
 }
+
+/**********************************************************************
+ *           DwmEnableComposition         (DWMAPI.102)
+ */
+HRESULT WINAPI DwmEnableComposition(UINT uCompositionAction)
+{
+    FIXME("(%d) stub\n", uCompositionAction);
+
+    return S_OK;
+}
+
+/**********************************************************************
+ *           DwmSetWindowAttribute         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmSetWindowAttribute(HWND hwnd, DWORD attributenum, LPCVOID attribute, DWORD size)
+{
+    FIXME("(%p, %x, %p, %x) stub\n", hwnd, attributenum, attribute, size);
+
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
+ *           DwmUnregisterThumbnail         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmUnregisterThumbnail(HTHUMBNAIL thumbnail)
+{
+    FIXME("(%p) stub\n", thumbnail);
+
+    return E_NOTIMPL;
+}

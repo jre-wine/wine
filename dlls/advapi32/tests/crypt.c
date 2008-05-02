@@ -34,7 +34,6 @@ static const char szKeySet[] = "wine_test_keyset";
 static const char szBadKeySet[] = "wine_test_bad_keyset";
 #define NON_DEF_PROV_TYPE 999
 
-static HMODULE hadvapi32;
 static BOOL (WINAPI *pCryptAcquireContextA)(HCRYPTPROV*,LPCSTR,LPCSTR,DWORD,DWORD);
 static BOOL (WINAPI *pCryptEnumProviderTypesA)(DWORD, DWORD*, DWORD, DWORD*, LPSTR, DWORD*);
 static BOOL (WINAPI *pCryptEnumProvidersA)(DWORD, DWORD*, DWORD, DWORD*, LPSTR, DWORD*);
@@ -68,7 +67,7 @@ static BOOL (WINAPI *pCryptVerifySignatureW)(HCRYPTHASH, BYTE*, DWORD, HCRYPTKEY
 
 static void init_function_pointers(void)
 {
-    hadvapi32 = GetModuleHandleA("advapi32.dll");
+    HMODULE hadvapi32 = GetModuleHandleA("advapi32.dll");
 
     pCryptAcquireContextA = (void*)GetProcAddress(hadvapi32, "CryptAcquireContextA");
     pCryptEnumProviderTypesA = (void*)GetProcAddress(hadvapi32, "CryptEnumProviderTypesA");
@@ -324,10 +323,15 @@ static void test_incorrect_api_usage(void)
     result = pCryptImportKey(hProv, &temp, 1, (HCRYPTKEY)NULL, 0, &hKey2);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
 
-    dwLen = 1;
-    result = pCryptSignHashW(hHash, 0, NULL, 0, &temp, &dwLen);
-    ok (!result && (GetLastError() == ERROR_INVALID_PARAMETER ||
-        GetLastError() == ERROR_CALL_NOT_IMPLEMENTED), "%d\n", GetLastError());
+    if (pCryptSignHashW)
+    {
+        dwLen = 1;
+        result = pCryptSignHashW(hHash, 0, NULL, 0, &temp, &dwLen);
+        ok (!result && (GetLastError() == ERROR_INVALID_PARAMETER ||
+            GetLastError() == ERROR_CALL_NOT_IMPLEMENTED), "%d\n", GetLastError());
+    }
+    else
+        skip("CryptSignHashW is not available\n");
 
     result = pCryptSetKeyParam(hKey, 0, &temp, 1);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
@@ -338,9 +342,14 @@ static void test_incorrect_api_usage(void)
     result = pCryptSetProvParam(hProv, 0, &temp, 1);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
 
-    result = pCryptVerifySignatureW(hHash, &temp, 1, hKey, NULL, 0);
-    ok (!result && (GetLastError() == ERROR_INVALID_PARAMETER ||
-        GetLastError() == ERROR_CALL_NOT_IMPLEMENTED), "%d\n", GetLastError());
+    if (pCryptVerifySignatureW)
+    {
+        result = pCryptVerifySignatureW(hHash, &temp, 1, hKey, NULL, 0);
+        ok (!result && (GetLastError() == ERROR_INVALID_PARAMETER ||
+            GetLastError() == ERROR_CALL_NOT_IMPLEMENTED), "%d\n", GetLastError());
+    }
+    else
+        skip("CryptVerifySignatureW is not available\n");
 
     result = pCryptDestroyHash(hHash);
     ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
@@ -383,8 +392,19 @@ static void test_verify_sig(void)
 	HCRYPTHASH hash;
 	BYTE bogus[] = { 0 };
 
+	if (!pCryptVerifySignatureW)
+	{
+		skip("CryptVerifySignatureW is not available\n");
+		return;
+	}
+
 	SetLastError(0xdeadbeef);
 	ret = pCryptVerifySignatureW(0, NULL, 0, 0, NULL, 0);
+	if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+	{
+		skip("CryptVerifySignatureW is not implemented\n");
+		return;
+	}
 	ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
 	 "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
 	ret = pCryptAcquireContextA(&prov, szKeySet, NULL, PROV_RSA_FULL,
@@ -405,12 +425,16 @@ static void test_verify_sig(void)
 	 "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
 	SetLastError(0xdeadbeef);
 	ret = pCryptVerifySignatureW(hash, NULL, 0, key, NULL, 0);
-	ok(!ret && GetLastError() == NTE_BAD_SIGNATURE,
-	 "Expected NTE_BAD_SIGNATURE, got %08x\n", GetLastError());
+	ok(!ret && (GetLastError() == NTE_BAD_SIGNATURE ||
+	 GetLastError() == ERROR_INVALID_PARAMETER),
+	 "Expected NTE_BAD_SIGNATURE or ERROR_INVALID_PARAMETER, got %08x\n",
+	 GetLastError());
 	SetLastError(0xdeadbeef);
 	ret = pCryptVerifySignatureW(hash, NULL, sizeof(bogus), key, NULL, 0);
-	ok(!ret && GetLastError() == NTE_BAD_SIGNATURE,
-	 "Expected NTE_BAD_SIGNATURE, got %08x\n", GetLastError());
+	ok(!ret && (GetLastError() == NTE_BAD_SIGNATURE ||
+	 GetLastError() == ERROR_INVALID_PARAMETER),
+	 "Expected NTE_BAD_SIGNATURE or ERROR_INVALID_PARAMETER, got %08x\n",
+	 GetLastError());
 	SetLastError(0xdeadbeef);
 	ret = pCryptVerifySignatureW(hash, bogus, 0, key, NULL, 0);
 	ok(!ret && GetLastError() == NTE_BAD_SIGNATURE,
@@ -847,6 +871,51 @@ static void test_set_provider_ex(void)
 	LocalFree(pszProvName);
 }
 
+static void test_machine_guid(void)
+{
+   char originalGuid[40], guid[40];
+   LONG r;
+   HKEY key;
+   DWORD size;
+   HCRYPTPROV hCryptProv;
+   BOOL restoreGuid = FALSE, ret;
+
+   r = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Cryptography",
+                     0, KEY_ALL_ACCESS, &key);
+   if (r != ERROR_SUCCESS)
+   {
+       skip("couldn't open HKLM\\Software\\Microsoft\\Cryptography\n");
+       return;
+   }
+   /* Cache existing MachineGuid, and delete it */
+   size = sizeof(originalGuid);
+   r = RegQueryValueExA(key, "MachineGuid", NULL, NULL, (BYTE *)originalGuid,
+                        &size);
+   if (r == ERROR_SUCCESS)
+   {
+       restoreGuid = TRUE;
+       r = RegDeleteValueA(key, "MachineGuid");
+       ok(!r, "RegDeleteValueA failed: %d\n", r);
+   }
+   else
+       ok(r == ERROR_FILE_NOT_FOUND, "expected ERROR_FILE_NOT_FOUND, got %d\n",
+          r);
+   /* Create and release a provider */
+   ret = pCryptAcquireContextA(&hCryptProv, szKeySet, NULL, PROV_RSA_FULL, 0);
+   ok(ret, "CryptAcquireContextA failed: %08x\n", GetLastError());
+   CryptReleaseContext(hCryptProv, 0);
+   /* Check that MachineGuid was created */
+   size = sizeof(guid);
+   r = RegQueryValueExA(key, "MachineGuid", NULL, NULL, (BYTE *)guid, &size);
+   ok(!r, "expected to find MachineGuid: %d\n", r);
+   r = RegDeleteValueA(key, "MachineGuid");
+   ok(!r, "RegDeleteValueA failed: %d\n", r);
+   if (restoreGuid)
+       RegSetValueExA(key, "MachineGuid", 0, REG_SZ, (const BYTE *)originalGuid,
+                      strlen(originalGuid)+1);
+   RegCloseKey(key);
+}
+
 START_TEST(crypt)
 {
 	init_function_pointers();
@@ -855,6 +924,7 @@ START_TEST(crypt)
 	test_acquire_context();
 	test_incorrect_api_usage();
 	test_verify_sig();
+	test_machine_guid();
 	clean_up_environment();
 	}
 	

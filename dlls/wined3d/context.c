@@ -1,7 +1,7 @@
 /*
  * Context and render target management in wined3d
  *
- * Copyright 2007 Stefan Dösinger for CodeWeavers
+ * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -39,9 +39,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
  * Params:
  *  context: Context to mark the state dirty in
  *  state: State to mark dirty
+ *  StateTable: Pointer to the state table in use(for state grouping)
  *
  *****************************************************************************/
-static void Context_MarkStateDirty(WineD3DContext *context, DWORD state) {
+static void Context_MarkStateDirty(WineD3DContext *context, DWORD state, const struct StateEntry *StateTable) {
     DWORD rep = StateTable[state].representative;
     DWORD idx;
     BYTE shift;
@@ -101,7 +102,7 @@ static WineD3DContext *AddContextToArray(IWineD3DDeviceImpl *This, HWND win_hand
     /* Mark all states dirty to force a proper initialization of the states on the first use of the context
      */
     for(state = 0; state <= STATE_HIGHEST; state++) {
-        Context_MarkStateDirty(This->contexts[This->numContexts], state);
+        Context_MarkStateDirty(This->contexts[This->numContexts], state, This->shader_backend->StateTable);
     }
 
     This->numContexts++;
@@ -131,10 +132,12 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
 
     TRACE("(%p): Creating a %s context for render target %p\n", This, create_pbuffer ? "offscreen" : "onscreen", target);
 
+#define PUSH1(att)        attribs[nAttribs++] = (att);
+#define PUSH2(att,value)  attribs[nAttribs++] = (att); attribs[nAttribs++] = (value);
     if(create_pbuffer) {
         HDC hdc_parent = GetDC(win_handle);
         int iPixelFormat = 0;
-        short red, green, blue, alphaBits, colorBits;
+        short redBits, greenBits, blueBits, alphaBits, colorBits;
         short depthBits, stencilBits;
 
         IWineD3DSurface *StencilSurface = This->stencilBufferTarget;
@@ -144,22 +147,19 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         int nAttribs = 0;
         unsigned int nFormats;
 
-#define PUSH1(att)        attribs[nAttribs++] = (att);
-#define PUSH2(att,value)  attribs[nAttribs++] = (att); attribs[nAttribs++] = (value);
-
         /* Retrieve the specifications for the pixelformat from the backbuffer / stencilbuffer */
-        getColorBits(target->resource.format, &red, &green, &blue, &alphaBits, &colorBits);
+        getColorBits(target->resource.format, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits);
         getDepthStencilBits(StencilBufferFormat, &depthBits, &stencilBits);
         PUSH2(WGL_DRAW_TO_PBUFFER_ARB, 1); /* We need pbuffer support; doublebuffering isn't needed */
         PUSH2(WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB); /* Make sure we don't get a float or color index format */
         PUSH2(WGL_COLOR_BITS_ARB, colorBits);
+        PUSH2(WGL_RED_BITS_ARB, redBits);
+        PUSH2(WGL_GREEN_BITS_ARB, greenBits);
+        PUSH2(WGL_BLUE_BITS_ARB, blueBits);
         PUSH2(WGL_ALPHA_BITS_ARB, alphaBits);
         PUSH2(WGL_DEPTH_BITS_ARB, depthBits);
         PUSH2(WGL_STENCIL_BITS_ARB, stencilBits);
         PUSH1(0); /* end the list */
-
-#undef PUSH1
-#undef PUSH2
 
         /* Try to find a pixelformat that matches exactly. If that fails let ChoosePixelFormat try to find a close match */
         if(!GL_EXTCALL(wglChoosePixelFormatARB(hdc_parent, (const int*)&attribs, NULL, 1, &iPixelFormat, &nFormats)))
@@ -205,10 +205,13 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     } else {
         PIXELFORMATDESCRIPTOR pfd;
         int iPixelFormat;
-        short red, green, blue, alpha;
-        short colorBits;
-        short depthBits, stencilBits;
+        short redBits, greenBits, blueBits, alphaBits, colorBits;
+        short depthBits=0, stencilBits=0;
         int res;
+        int attribs[256];
+        int nAttribs = 0;
+        unsigned int nFormats;
+        WINED3DFORMAT fmt = target->resource.format;
 
         hdc = GetDC(win_handle);
         if(hdc == NULL) {
@@ -217,36 +220,75 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         }
 
         /* PixelFormat selection */
-        /* TODO: fill cColorBits/cDepthBits with target->resource.format */
-        ZeroMemory(&pfd, sizeof(pfd));
-        pfd.nSize      = sizeof(pfd);
-        pfd.nVersion   = 1;
-        pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
-        pfd.iPixelType = PFD_TYPE_RGBA;
-        pfd.cColorBits = 32;
-        pfd.cDepthBits = 0;
-        pfd.cStencilBits = 0;
-        pfd.iLayerType = PFD_MAIN_PLANE;
+        PUSH2(WGL_DRAW_TO_WINDOW_ARB, GL_TRUE); /* We want to draw to a window */
+        PUSH2(WGL_DOUBLE_BUFFER_ARB, GL_TRUE);
+        PUSH2(WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB); /* Make sure we don't get a float or color index format */
+        PUSH2(WGL_SUPPORT_OPENGL_ARB, GL_TRUE);
+        PUSH2(WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB); /* Make sure we receive an accelerated format. On windows (at least on ATI) this is not always the case */
 
-        /* Try to match the colorBits of the d3d format */
-        if(getColorBits(target->resource.format, &red, &green, &blue, &alpha, &colorBits))
-            pfd.cColorBits = colorBits;
+        /* In case of ORM_BACKBUFFER, make sure to request an alpha component for X4R4G4B4/X8R8G8B8 as we might need it for the backbuffer. */
+        if(wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER) {
+            if(target->resource.format == WINED3DFMT_X4R4G4B4)
+                fmt = WINED3DFMT_A4R4G4B4;
+            else if(target->resource.format == WINED3DFMT_X8R8G8B8)
+                fmt = WINED3DFMT_A8R8G8B8;
+
+            /* We like to have two aux buffers in backbuffer mode */
+            PUSH2(WGL_AUX_BUFFERS_ARB, 2);
+        }
+
+        /* DirectDraw supports 8bit paletted render targets and these are used by old games like Starcraft and C&C.
+         * Most modern hardware doesn't support 8bit natively so we perform some form of 8bit -> 32bit conversion.
+         * The conversion (ab)uses the alpha component for storing the palette index. For this reason we require
+         * a format with 8bit alpha, so request A8R8G8B8. */
+        if(fmt == WINED3DFMT_P8)
+            fmt = WINED3DFMT_A8R8G8B8;
+
+        if(!getColorBits(fmt, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits)) {
+            ERR("Unable to get color bits for format %#x!\n", target->resource.format);
+            return FALSE;
+        }
+        PUSH2(WGL_COLOR_BITS_ARB, colorBits);
+        PUSH2(WGL_RED_BITS_ARB, redBits);
+        PUSH2(WGL_GREEN_BITS_ARB, greenBits);
+        PUSH2(WGL_BLUE_BITS_ARB, blueBits);
+        PUSH2(WGL_ALPHA_BITS_ARB, alphaBits);
 
         /* Retrieve the depth stencil format from the present parameters.
          * The choice of the proper format can give a nice performance boost
          * in case of GPU limited programs. */
         if(pPresentParms->EnableAutoDepthStencil) {
             TRACE("pPresentParms->EnableAutoDepthStencil=enabled; using AutoDepthStencilFormat=%s\n", debug_d3dformat(pPresentParms->AutoDepthStencilFormat));
-            if(getDepthStencilBits(pPresentParms->AutoDepthStencilFormat, &depthBits, &stencilBits)) {
-                pfd.cDepthBits = depthBits;
-                pfd.cStencilBits = stencilBits;
+            if(!getDepthStencilBits(pPresentParms->AutoDepthStencilFormat, &depthBits, &stencilBits)) {
+                ERR("Unable to get depth / stencil bits for AutoDepthStencilFormat %#x!\n", pPresentParms->AutoDepthStencilFormat);
+                return FALSE;
             }
+            PUSH2(WGL_DEPTH_BITS_ARB, depthBits);
+            PUSH2(WGL_STENCIL_BITS_ARB, stencilBits);
         }
 
-        iPixelFormat = ChoosePixelFormat(hdc, &pfd);
-        if(!iPixelFormat) {
-            /* If this happens something is very wrong as ChoosePixelFormat barely fails */
-            ERR("Can't find a suitable iPixelFormat\n");
+        PUSH1(0); /* end the list */
+
+        /* In case of failure hope that standard ChoosePixelFormat will find something suitable */
+        if(!GL_EXTCALL(wglChoosePixelFormatARB(hdc, (const int*)&attribs, NULL, 1, &iPixelFormat, &nFormats)))
+        {
+            /* PixelFormat selection */
+            ZeroMemory(&pfd, sizeof(pfd));
+            pfd.nSize      = sizeof(pfd);
+            pfd.nVersion   = 1;
+            pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
+            pfd.iPixelType = PFD_TYPE_RGBA;
+            pfd.cAlphaBits = alphaBits;
+            pfd.cColorBits = colorBits;
+            pfd.cDepthBits = depthBits;
+            pfd.cStencilBits = stencilBits;
+            pfd.iLayerType = PFD_MAIN_PLANE;
+
+            iPixelFormat = ChoosePixelFormat(hdc, &pfd);
+            if(!iPixelFormat) {
+                /* If this happens something is very wrong as ChoosePixelFormat barely fails */
+                ERR("Can't find a suitable iPixelFormat\n");
+            }
         }
 
         DescribePixelFormat(hdc, iPixelFormat, sizeof(pfd), &pfd);
@@ -265,6 +307,8 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
             }
         }
     }
+#undef PUSH1
+#undef PUSH2
 
     ctx = pwglCreateContext(hdc);
     if(This->numContexts) pwglShareLists(This->contexts[0]->glCtx, ctx);
@@ -290,16 +334,36 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     ret->surface = (IWineD3DSurface *) target;
     ret->isPBuffer = create_pbuffer;
     ret->tid = GetCurrentThreadId();
+    if(This->shader_backend->shader_dirtifyable_constants((IWineD3DDevice *) This)) {
+        /* Create the dirty constants array and initialize them to dirty */
+        ret->vshader_const_dirty = HeapAlloc(GetProcessHeap(), 0,
+                sizeof(*ret->vshader_const_dirty) * GL_LIMITS(vshader_constantsF));
+        ret->pshader_const_dirty = HeapAlloc(GetProcessHeap(), 0,
+                sizeof(*ret->pshader_const_dirty) * GL_LIMITS(pshader_constantsF));
+        memset(ret->vshader_const_dirty, 1,
+               sizeof(*ret->vshader_const_dirty) * GL_LIMITS(vshader_constantsF));
+        memset(ret->pshader_const_dirty, 1,
+                sizeof(*ret->pshader_const_dirty) * GL_LIMITS(pshader_constantsF));
+    }
 
     TRACE("Successfully created new context %p\n", ret);
 
     /* Set up the context defaults */
     oldCtx  = pwglGetCurrentContext();
     oldDrawable = pwglGetCurrentDC();
+    if(oldCtx && oldDrawable && GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
+        /* See comment in ActivateContext context switching */
+        glDisable(GL_FRAGMENT_SHADER_ATI);
+        checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
+    }
     if(pwglMakeCurrent(hdc, ctx) == FALSE) {
         ERR("Cannot activate context to set up defaults\n");
         goto out;
     }
+
+    ENTER_GL();
+
+    glGetIntegerv(GL_AUX_BUFFERS, &ret->aux_buffers);
 
     TRACE("Setting up the screen\n");
     /* Clear the screen */
@@ -359,6 +423,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
             checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_PREVIOUS_TEXTURE_INPUT_NV, ...\n");
         }
     }
+
     if(GL_SUPPORT(ARB_POINT_SPRITE)) {
         for(s = 0; s < GL_LIMITS(textures); s++) {
             GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + s));
@@ -366,9 +431,17 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
             checkGLcall("glTexEnvi(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, GL_TRUE)\n");
         }
     }
+    LEAVE_GL();
 
+    /* Never keep GL_FRAGMENT_SHADER_ATI enabled on a context that we switch away from,
+     * but enable it for the first context we create, and reenable it on the old context
+     */
     if(oldDrawable && oldCtx) {
         pwglMakeCurrent(oldDrawable, oldCtx);
+    }
+    if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
+        glEnable(GL_FRAGMENT_SHADER_ATI);
+        checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
     }
 
 out:
@@ -440,6 +513,8 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
     } else ReleaseDC(context->win_handle, context->hdc);
     pwglDeleteContext(context->glCtx);
 
+    HeapFree(GetProcessHeap(), 0, context->vshader_const_dirty);
+    HeapFree(GetProcessHeap(), 0, context->pshader_const_dirty);
     RemoveContextFromArray(This, context);
 }
 
@@ -447,12 +522,11 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
  * SetupForBlit
  *
  * Sets up a context for DirectDraw blitting.
- * All texture units are disabled, except unit 0
- * Texture unit 0 is activted where GL_TEXTURE_2D is activated
- * fog, lighting, blending, alpha test, z test, scissor test, culling diabled
+ * All texture units are disabled, texture unit 0 is set as current unit
+ * fog, lighting, blending, alpha test, z test, scissor test, culling disabled
  * color writing enabled for all channels
  * register combiners disabled, shaders disabled
- * world matris is set to identity, texture matrix 0 too
+ * world matrix is set to identity, texture matrix 0 too
  * projection matrix is setup for drawing screen coordinates
  *
  * Params:
@@ -464,6 +538,7 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
  *****************************************************************************/
 static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *context, UINT width, UINT height) {
     int i;
+    const struct StateEntry *StateTable = This->shader_backend->StateTable;
 
     TRACE("Setting up context %p for blitting\n", context);
     if(context->last_was_blit) {
@@ -476,8 +551,8 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
 
     /* Disable shaders */
     This->shader_backend->shader_cleanup((IWineD3DDevice *) This);
-    Context_MarkStateDirty(context, STATE_VSHADER);
-    Context_MarkStateDirty(context, STATE_PIXELSHADER);
+    Context_MarkStateDirty(context, STATE_VSHADER, StateTable);
+    Context_MarkStateDirty(context, STATE_PIXELSHADER, StateTable);
 
     /* Disable all textures. The caller can then bind a texture it wants to blit
      * from
@@ -506,8 +581,8 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
             checkGLcall("glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);");
 
-            Context_MarkStateDirty(context, STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP));
-            Context_MarkStateDirty(context, STATE_SAMPLER(i));
+            Context_MarkStateDirty(context, STATE_TEXTURESTAGE(i, WINED3DTSS_COLOROP), StateTable);
+            Context_MarkStateDirty(context, STATE_SAMPLER(i), StateTable);
         }
         GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
         checkGLcall("glActiveTextureARB");
@@ -518,8 +593,8 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
     }
     glDisable(GL_TEXTURE_3D);
     checkGLcall("glDisable GL_TEXTURE_3D");
-    glEnable(GL_TEXTURE_2D);
-    checkGLcall("glEnable GL_TEXTURE_2D");
+    glDisable(GL_TEXTURE_2D);
+    checkGLcall("glDisable GL_TEXTURE_2D");
 
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 
@@ -527,7 +602,7 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
     checkGLcall("glMatrixMode(GL_TEXTURE)");
     glLoadIdentity();
     checkGLcall("glLoadIdentity()");
-    Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_TEXTURE0));
+    Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_TEXTURE0), StateTable);
 
     if (GL_SUPPORT(EXT_TEXTURE_LOD_BIAS)) {
         glTexEnvf(GL_TEXTURE_FILTER_CONTROL_EXT,
@@ -535,46 +610,59 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
                   0.0);
         checkGLcall("glTexEnvi GL_TEXTURE_LOD_BIAS_EXT ...");
     }
-    Context_MarkStateDirty(context, STATE_SAMPLER(0));
-    Context_MarkStateDirty(context, STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP));
+    Context_MarkStateDirty(context, STATE_SAMPLER(0), StateTable);
+    Context_MarkStateDirty(context, STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP), StateTable);
 
     /* Other misc states */
     glDisable(GL_ALPHA_TEST);
     checkGLcall("glDisable(GL_ALPHA_TEST)");
-    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHATESTENABLE));
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHATESTENABLE), StateTable);
     glDisable(GL_LIGHTING);
     checkGLcall("glDisable GL_LIGHTING");
-    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_LIGHTING));
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_LIGHTING), StateTable);
     glDisable(GL_DEPTH_TEST);
     checkGLcall("glDisable GL_DEPTH_TEST");
-    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ZENABLE));
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ZENABLE), StateTable);
     glDisable(GL_FOG);
     checkGLcall("glDisable GL_FOG");
-    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_FOGENABLE));
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_FOGENABLE), StateTable);
     glDisable(GL_BLEND);
     checkGLcall("glDisable GL_BLEND");
-    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHABLENDENABLE));
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHABLENDENABLE), StateTable);
     glDisable(GL_CULL_FACE);
     checkGLcall("glDisable GL_CULL_FACE");
-    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_CULLMODE));
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_CULLMODE), StateTable);
     glDisable(GL_STENCIL_TEST);
     checkGLcall("glDisable GL_STENCIL_TEST");
-    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_STENCILENABLE));
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_STENCILENABLE), StateTable);
+    glDisable(GL_SCISSOR_TEST);
+    checkGLcall("glDisable GL_SCISSOR_TEST");
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_SCISSORTESTENABLE), StateTable);
     if(GL_SUPPORT(ARB_POINT_SPRITE)) {
         glDisable(GL_POINT_SPRITE_ARB);
         checkGLcall("glDisable GL_POINT_SPRITE_ARB");
-        Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_POINTSPRITEENABLE));
+        Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_POINTSPRITEENABLE), StateTable);
     }
     glColorMask(GL_TRUE, GL_TRUE,GL_TRUE,GL_TRUE);
     checkGLcall("glColorMask");
-    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_CLIPPING));
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_CLIPPING), StateTable);
+    if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
+        glDisable(GL_COLOR_SUM_EXT);
+        Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_SPECULARENABLE), StateTable);
+        checkGLcall("glDisable(GL_COLOR_SUM_EXT)");
+    }
+    if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
+        GL_EXTCALL(glFinalCombinerInputNV(GL_VARIABLE_B_NV, GL_SPARE0_NV, GL_UNSIGNED_IDENTITY_NV, GL_RGB));
+        Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_SPECULARENABLE), StateTable);
+        checkGLcall("glFinalCombinerInputNV");
+    }
 
     /* Setup transforms */
     glMatrixMode(GL_MODELVIEW);
     checkGLcall("glMatrixMode(GL_MODELVIEW)");
     glLoadIdentity();
     checkGLcall("glLoadIdentity()");
-    Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)));
+    Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_WORLDMATRIX(0)), StateTable);
 
     glMatrixMode(GL_PROJECTION);
     checkGLcall("glMatrixMode(GL_PROJECTION)");
@@ -582,10 +670,10 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
     checkGLcall("glLoadIdentity()");
     glOrtho(0, width, height, 0, 0.0, -1.0);
     checkGLcall("glOrtho");
-    Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION));
+    Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION), StateTable);
 
     context->last_was_rhw = TRUE;
-    Context_MarkStateDirty(context, STATE_VDECL); /* because of last_was_rhw = TRUE */
+    Context_MarkStateDirty(context, STATE_VDECL, StateTable); /* because of last_was_rhw = TRUE */
 
     glDisable(GL_CLIP_PLANE0); checkGLcall("glDisable(clip plane 0)");
     glDisable(GL_CLIP_PLANE1); checkGLcall("glDisable(clip plane 1)");
@@ -593,15 +681,18 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
     glDisable(GL_CLIP_PLANE3); checkGLcall("glDisable(clip plane 3)");
     glDisable(GL_CLIP_PLANE4); checkGLcall("glDisable(clip plane 4)");
     glDisable(GL_CLIP_PLANE5); checkGLcall("glDisable(clip plane 5)");
-    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_CLIPPING));
+    Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_CLIPPING), StateTable);
 
     glViewport(0, 0, width, height);
     checkGLcall("glViewport");
-    Context_MarkStateDirty(context, STATE_VIEWPORT);
+    Context_MarkStateDirty(context, STATE_VIEWPORT, StateTable);
 
     if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
         glDisable(GL_TEXTURE_SHADER_NV);
         checkGLcall("glDisable(GL_TEXTURE_SHADER_NV)");
+    } else if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
+        glDisable(GL_FRAGMENT_SHADER_ATI);
+        checkGLcall("glDisable(GL_FRAGMENT_SHADER_ATI)");
     }
 }
 
@@ -638,12 +729,29 @@ static WineD3DContext *findThreadContextForSwapChain(IWineD3DSwapChain *swapchai
  * Returns: The needed context
  *
  *****************************************************************************/
-static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, DWORD tid) {
+static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, DWORD tid, GLint *buffer) {
     IWineD3DSwapChain *swapchain = NULL;
     HRESULT hr;
     BOOL readTexture = wined3d_settings.offscreen_rendering_mode != ORM_FBO && This->render_offscreen;
     WineD3DContext *context = This->activeContext;
     BOOL oldRenderOffscreen = This->render_offscreen;
+    const WINED3DFORMAT oldFmt = ((IWineD3DSurfaceImpl *) This->lastActiveRenderTarget)->resource.format;
+    const WINED3DFORMAT newFmt = ((IWineD3DSurfaceImpl *) target)->resource.format;
+    const struct StateEntry *StateTable = This->shader_backend->StateTable;
+
+    /* To compensate the lack of format switching with some offscreen rendering methods and on onscreen buffers
+     * the alpha blend state changes with different render target formats
+     */
+    if(oldFmt != newFmt) {
+        const GlPixelFormatDesc *glDesc;
+        const StaticPixelFormatDesc *old = getFormatDescEntry(oldFmt, NULL, NULL);
+        const StaticPixelFormatDesc *new = getFormatDescEntry(newFmt, &GLINFO_LOCATION, &glDesc);
+
+        /* Disable blending when the alphaMask has changed and when a format doesn't support blending */
+        if((old->alphaMask && !new->alphaMask) || (!old->alphaMask && new->alphaMask) || !(glDesc->Flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING)) {
+            Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHABLENDENABLE), StateTable);
+        }
+    }
 
     hr = IWineD3DSurface_GetContainer(target, &IID_IWineD3DSwapChain, (void **) &swapchain);
     if(hr == WINED3D_OK && swapchain) {
@@ -657,15 +765,12 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
          * rendering. No context change is needed in that case
          */
 
-        if (wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER) {
-            if(((IWineD3DSwapChainImpl *) swapchain)->backBuffer) {
-                glDrawBuffer(GL_BACK);
-                checkGLcall("glDrawBuffer(GL_BACK)");
-            } else {
-                glDrawBuffer(GL_FRONT);
-                checkGLcall("glDrawBuffer(GL_FRONT)");
-            }
-        } else if(wined3d_settings.offscreen_rendering_mode == ORM_PBUFFER) {
+        if(((IWineD3DSwapChainImpl *) swapchain)->frontBuffer == target) {
+            *buffer = GL_FRONT;
+        } else {
+            *buffer = GL_BACK;
+        }
+        if(wined3d_settings.offscreen_rendering_mode == ORM_PBUFFER) {
             if(This->pbufferContext && tid == This->pbufferContext->tid) {
                 This->pbufferContext->tid = 0;
             }
@@ -673,16 +778,17 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
         IWineD3DSwapChain_Release(swapchain);
 
         if(oldRenderOffscreen) {
-            Context_MarkStateDirty(context, WINED3DRS_CULLMODE);
-            Context_MarkStateDirty(context, WINED3DTS_PROJECTION);
-            Context_MarkStateDirty(context, STATE_VDECL);
-            Context_MarkStateDirty(context, STATE_VIEWPORT);
-            Context_MarkStateDirty(context, STATE_SCISSORRECT);
+            Context_MarkStateDirty(context, WINED3DTS_PROJECTION, StateTable);
+            Context_MarkStateDirty(context, STATE_VDECL, StateTable);
+            Context_MarkStateDirty(context, STATE_VIEWPORT, StateTable);
+            Context_MarkStateDirty(context, STATE_SCISSORRECT, StateTable);
+            Context_MarkStateDirty(context, STATE_FRONTFACE, StateTable);
         }
 
     } else {
         TRACE("Rendering offscreen\n");
         This->render_offscreen = TRUE;
+        *buffer = This->offscreenBuffer;
 
         switch(wined3d_settings.offscreen_rendering_mode) {
             case ORM_FBO:
@@ -690,7 +796,7 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
                 if(This->activeContext && tid == This->lastThread) {
                     context = This->activeContext;
                 } else {
-                    /* This may happen if the app jumps streight into offscreen rendering
+                    /* This may happen if the app jumps straight into offscreen rendering
                      * Start using the context of the primary swapchain. tid == 0 is no problem
                      * for findThreadContextForSwapChain.
                      *
@@ -739,7 +845,7 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
                 if(This->activeContext && tid == This->lastThread) {
                     context = This->activeContext;
                 } else {
-                    /* This may happen if the app jumps streight into offscreen rendering
+                    /* This may happen if the app jumps straight into offscreen rendering
                      * Start using the context of the primary swapchain. tid == 0 is no problem
                      * for findThreadContextForSwapChain.
                      *
@@ -748,8 +854,6 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
                      */
                     context = findThreadContextForSwapChain(This->swapchains[0], tid);
                 }
-                glDrawBuffer(This->offscreenBuffer);
-                checkGLcall("glDrawBuffer(This->offscreenBuffer)");
                 break;
         }
 
@@ -761,11 +865,11 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
         }
 
         if(!oldRenderOffscreen) {
-            Context_MarkStateDirty(context, WINED3DRS_CULLMODE);
-            Context_MarkStateDirty(context, WINED3DTS_PROJECTION);
-            Context_MarkStateDirty(context, STATE_VDECL);
-            Context_MarkStateDirty(context, STATE_VIEWPORT);
-            Context_MarkStateDirty(context, STATE_SCISSORRECT);
+            Context_MarkStateDirty(context, WINED3DTS_PROJECTION, StateTable);
+            Context_MarkStateDirty(context, STATE_VDECL, StateTable);
+            Context_MarkStateDirty(context, STATE_VIEWPORT, StateTable);
+            Context_MarkStateDirty(context, STATE_SCISSORRECT, StateTable);
+            Context_MarkStateDirty(context, STATE_FRONTFACE, StateTable);
         }
     }
     if (readTexture) {
@@ -783,7 +887,7 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
         IWineD3DSurface_PreLoad(This->lastActiveRenderTarget);
 
         /* Assume that the drawable will be modified by some other things now */
-        ((IWineD3DSurfaceImpl *) This->lastActiveRenderTarget)->Flags &= ~SFLAG_INDRAWABLE;
+        IWineD3DSurface_ModifyLocation(This->lastActiveRenderTarget, SFLAG_INDRAWABLE, FALSE);
 
         This->isInDraw = oldInDraw;
     }
@@ -813,12 +917,12 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
     DWORD                         dirtyState, idx;
     BYTE                          shift;
     WineD3DContext                *context;
+    GLint                         drawBuffer=0;
+    const struct StateEntry       *StateTable = This->shader_backend->StateTable;
 
     TRACE("(%p): Selecting context for render target %p, thread %d\n", This, target, tid);
-
-    ENTER_GL();
     if(This->lastActiveRenderTarget != target || tid != This->lastThread) {
-        context = FindContext(This, target, tid);
+        context = FindContext(This, target, tid, &drawBuffer);
         This->lastActiveRenderTarget = target;
         This->lastThread = tid;
     } else {
@@ -829,14 +933,52 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
     /* Activate the opengl context */
     if(context != This->activeContext) {
         BOOL ret;
-        TRACE("Switching gl ctx to %p, hdc=%p ctx=%p\n", context, context->hdc, context->glCtx);
-        LEAVE_GL();
-        ret = pwglMakeCurrent(context->hdc, context->glCtx);
-        ENTER_GL();
-        if(ret == FALSE) {
-            ERR("Failed to activate the new context\n");
+
+        /* Prevent an unneeded context switch as those are expensive */
+        if(context->glCtx && (context->glCtx == pwglGetCurrentContext())) {
+            TRACE("Already using gl context %p\n", context->glCtx);
+        }
+        else {
+            TRACE("Switching gl ctx to %p, hdc=%p ctx=%p\n", context, context->hdc, context->glCtx);
+
+            if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
+                /* Mesa crashes when enabling a context with GL_FRAGMENT_SHADER_ATI enabled.
+                 * Thus we disable it before deactivating any context, and re-enable it afterwards.
+                 *
+                 * This bug is filed as bug #15269 on bugs.freedesktop.org
+                 */
+                glDisable(GL_FRAGMENT_SHADER_ATI);
+                checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
+            }
+
+            ret = pwglMakeCurrent(context->hdc, context->glCtx);
+            if(ret == FALSE) {
+                ERR("Failed to activate the new context\n");
+            } else if(GL_SUPPORT(ATI_FRAGMENT_SHADER) && !context->last_was_blit) {
+                glEnable(GL_FRAGMENT_SHADER_ATI);
+                checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
+            }
+        }
+        if(This->activeContext->vshader_const_dirty) {
+            memset(This->activeContext->vshader_const_dirty, 1,
+                   sizeof(*This->activeContext->vshader_const_dirty) * GL_LIMITS(vshader_constantsF));
+        }
+        if(This->activeContext->pshader_const_dirty) {
+            memset(This->activeContext->pshader_const_dirty, 1,
+                   sizeof(*This->activeContext->pshader_const_dirty) * GL_LIMITS(pshader_constantsF));
         }
         This->activeContext = context;
+    }
+
+    /* We only need ENTER_GL for the gl calls made below and for the helper functions which make GL calls */
+    ENTER_GL();
+    /* Select the right draw buffer. It is selected in FindContext. */
+    if(drawBuffer && context->last_draw_buffer != drawBuffer) {
+        TRACE("Drawing to buffer: %#x\n", drawBuffer);
+        context->last_draw_buffer = drawBuffer;
+
+        glDrawBuffer(drawBuffer);
+        checkGLcall("glDrawBuffer");
     }
 
     switch(usage) {
@@ -845,23 +987,39 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
             break;
 
         case CTXUSAGE_CLEAR:
-            if(context->last_was_blit && GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-                glEnable(GL_TEXTURE_SHADER_NV);
-                checkGLcall("glEnable(GL_TEXTURE_SHADER_NV)");
+            if(context->last_was_blit) {
+                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                    glEnable(GL_TEXTURE_SHADER_NV);
+                    checkGLcall("glEnable(GL_TEXTURE_SHADER_NV)");
+                } else if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
+                    glEnable(GL_FRAGMENT_SHADER_ATI);
+                    checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
+                }
             }
+
+            /* Blending and clearing should be orthogonal, but tests on the nvidia driver show that disabling
+             * blending when clearing improves the clearing performance increadibly
+             */
+            glDisable(GL_BLEND);
+            Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHABLENDENABLE), StateTable);
 
             glEnable(GL_SCISSOR_TEST);
             checkGLcall("glEnable GL_SCISSOR_TEST");
             context->last_was_blit = FALSE;
-            Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_SCISSORTESTENABLE));
-            Context_MarkStateDirty(context, STATE_SCISSORRECT);
+            Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_SCISSORTESTENABLE), StateTable);
+            Context_MarkStateDirty(context, STATE_SCISSORRECT, StateTable);
             break;
 
         case CTXUSAGE_DRAWPRIM:
             /* This needs all dirty states applied */
-            if(context->last_was_blit && GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-                glEnable(GL_TEXTURE_SHADER_NV);
-                checkGLcall("glEnable(GL_TEXTURE_SHADER_NV)");
+            if(context->last_was_blit) {
+                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                    glEnable(GL_TEXTURE_SHADER_NV);
+                    checkGLcall("glEnable(GL_TEXTURE_SHADER_NV)");
+                } else if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
+                    glEnable(GL_FRAGMENT_SHADER_ATI);
+                    checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
+                }
             }
 
             IWineD3DDeviceImpl_FindTexUnitMap(This);

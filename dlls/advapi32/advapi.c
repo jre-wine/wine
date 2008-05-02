@@ -29,6 +29,7 @@
 #include "winreg.h"
 #include "winternl.h"
 #include "winerror.h"
+#include "wincred.h"
 
 #include "wine/library.h"
 #include "wine/debug.h"

@@ -20,8 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -30,12 +28,12 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "winreg.h"
 #include "ole2.h"
 #include "advpub.h"
 #include "shlwapi.h"
 #include "optary.h"
+#include "shlguid.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -51,47 +49,6 @@ DWORD mshtml_tls = 0;
 
 static HINSTANCE shdoclc = NULL;
 
-static ITypeLib *typelib;
-static ITypeInfo *typeinfos[LAST_tid];
-
-static REFIID tid_ids[] = {
-    &IID_IHTMLWindow2
-};
-
-HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo)
-{
-    HRESULT hres;
-
-    if(!typelib) {
-        ITypeLib *tl;
-
-        hres = LoadRegTypeLib(&LIBID_MSHTML, 4, 0, LOCALE_SYSTEM_DEFAULT, &tl);
-        if(FAILED(hres)) {
-            ERR("LoadRegTypeLib failed: %08x\n", hres);
-            return hres;
-        }
-
-        if(InterlockedCompareExchangePointer((void**)&typelib, tl, NULL))
-            ITypeLib_Release(tl);
-    }
-
-    if(!typeinfos[tid]) {
-        ITypeInfo *typeinfo;
-
-        hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &typeinfo);
-        if(FAILED(hres)) {
-            ERR("GetTypeInfoOfGuid failed: %08x\n", hres);
-            return hres;
-        }
-
-        if(InterlockedCompareExchangePointer((void**)(typeinfos+tid), typeinfo, NULL))
-            ITypeInfo_Release(typeinfo);
-    }
-
-    *typeinfo = typeinfos[tid];
-    return S_OK;
-}
-
 static void thread_detach(void)
 {
     thread_data_t *thread_data;
@@ -103,22 +60,13 @@ static void thread_detach(void)
     if(thread_data->thread_hwnd)
         DestroyWindow(thread_data->thread_hwnd);
 
-    mshtml_free(thread_data);
+    heap_free(thread_data);
 }
 
 static void process_detach(void)
 {
     close_gecko();
-
-    if(typelib) {
-        unsigned i;
-
-        for(i=0; i < sizeof(typeinfos)/sizeof(*typeinfos); i++)
-            if(typeinfos[i])
-                ITypeInfo_Release(typeinfos[i]);
-
-        ITypeLib_Release(typelib);
-    }
+    release_typelib();
 
     if(shdoclc)
         FreeLibrary(shdoclc);
@@ -192,7 +140,7 @@ static ULONG WINAPI ClassFactory_Release(IClassFactory *iface)
     TRACE("(%p) ref = %u\n", This, ref);
 
     if(!ref) {
-        mshtml_free(This);
+        heap_free(This);
         UNLOCK_MODULE();
     }
 
@@ -228,7 +176,7 @@ static const IClassFactoryVtbl HTMLClassFactoryVtbl = {
 
 static HRESULT ClassFactory_Create(REFIID riid, void **ppv, CreateInstanceFunc fnCreateInstance)
 {
-    ClassFactory *ret = mshtml_alloc(sizeof(ClassFactory));
+    ClassFactory *ret = heap_alloc(sizeof(ClassFactory));
     HRESULT hres;
 
     ret->lpVtbl = &HTMLClassFactoryVtbl;
@@ -239,7 +187,7 @@ static HRESULT ClassFactory_Create(REFIID riid, void **ppv, CreateInstanceFunc f
     if(SUCCEEDED(hres)) {
         LOCK_MODULE();
     }else {
-        mshtml_free(ret);
+        heap_free(ret);
         *ppv = NULL;
     }
     return hres;
@@ -326,15 +274,12 @@ HRESULT WINAPI ShowHTMLDialog(HWND hwndParent, IMoniker *pMk, VARIANT *pvarArgIn
     return E_NOTIMPL;
 }
 
-DEFINE_GUID(CLSID_CAnchorBrowsePropertyPage, 0x3050F3BB, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CBackgroundPropertyPage, 0x3050F232, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CCDAnchorPropertyPage, 0x3050F1FC, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CCDGenericPropertyPage, 0x3050F17F, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
-DEFINE_GUID(CLSID_CDocBrowsePropertyPage, 0x3050F3B4, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CDwnBindInfo, 0x3050F3C2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CHiFiUses, 0x5AAF51B3, 0xB1F0, 0x11D1, 0xB6,0xAB, 0x00,0xA0,0xC9,0x08,0x33,0xE9);
 DEFINE_GUID(CLSID_CHtmlComponentConstructor, 0x3050F4F8, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
-DEFINE_GUID(CLSID_CImageBrowsePropertyPage, 0x3050F3B3, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CInlineStylePropertyPage, 0x3050F296, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CPeerHandler, 0x5AAF51B2, 0xB1F0, 0x11D1, 0xB6,0xAB, 0x00,0xA0,0xC9,0x08,0x33,0xE9);
 DEFINE_GUID(CLSID_CRecalcEngine, 0x3050F499, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
@@ -369,7 +314,7 @@ static HRESULT register_server(BOOL do_register)
 {
     HRESULT hres;
     HMODULE hAdvpack;
-    typeof(RegInstallA) *pRegInstall;
+    HRESULT (WINAPI *pRegInstall)(HMODULE hm, LPCSTR pszSection, const STRTABLEA* pstTable);
     STRTABLEA strtable;
     STRENTRYA pse[35];
     static CLSID const *clsids[35];
@@ -416,7 +361,7 @@ static HRESULT register_server(BOOL do_register)
     INF_SET_ID(LIBID_MSHTML);
 
     for(i=0; i < sizeof(pse)/sizeof(pse[0]); i++) {
-        pse[i].pszValue = mshtml_alloc(39);
+        pse[i].pszValue = heap_alloc(39);
         sprintf(pse[i].pszValue, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
                 clsids[i]->Data1, clsids[i]->Data2, clsids[i]->Data3, clsids[i]->Data4[0],
                 clsids[i]->Data4[1], clsids[i]->Data4[2], clsids[i]->Data4[3], clsids[i]->Data4[4],
@@ -427,12 +372,12 @@ static HRESULT register_server(BOOL do_register)
     strtable.pse = pse;
 
     hAdvpack = LoadLibraryW(wszAdvpack);
-    pRegInstall = (typeof(RegInstallA)*)GetProcAddress(hAdvpack, "RegInstall");
+    pRegInstall = (void *)GetProcAddress(hAdvpack, "RegInstall");
 
     hres = pRegInstall(hInst, do_register ? "RegisterDll" : "UnregisterDll", &strtable);
 
     for(i=0; i < sizeof(pse)/sizeof(pse[0]); i++)
-        mshtml_free(pse[i].pszValue);
+        heap_free(pse[i].pszValue);
 
     if(FAILED(hres)) {
         ERR("RegInstall failed: %08x\n", hres);
@@ -453,6 +398,9 @@ static HRESULT register_server(BOOL do_register)
 
     if(FAILED(hres))
         ERR("typelib registration failed: %08x\n", hres);
+
+    if(do_register && SUCCEEDED(hres))
+        load_gecko(TRUE);
 
     return hres;
 }

@@ -219,7 +219,8 @@ static LPVIRTNODE *pvnlist = NULL;
 static DWORD vn_num = 0;
 static DWORD vn_last = 0;
 
-static RETERR16 VCP_VirtnodeCreate(LPVCPFILESPEC vfsSrc, LPVCPFILESPEC vfsDst, WORD fl, LPARAM lParam, LPEXPANDVTBL lpExpandVtbl)
+static RETERR16 VCP_VirtnodeCreate(const VCPFILESPEC *vfsSrc, const VCPFILESPEC *vfsDst,
+                                   WORD fl, LPARAM lParam, LPEXPANDVTBL lpExpandVtbl)
 {
     HANDLE heap;
     LPVIRTNODE lpvn;
@@ -249,10 +250,10 @@ static RETERR16 VCP_VirtnodeCreate(LPVCPFILESPEC vfsSrc, LPVCPFILESPEC vfsDst, W
     lpvn->cbSize = sizeof(VIRTNODE);
 
     if (vfsSrc)
-        memcpy(&lpvn->vfsSrc, vfsSrc, sizeof(VCPFILESPEC));
+        lpvn->vfsSrc = *vfsSrc;
 
     if (vfsDst)
-        memcpy(&lpvn->vfsDst, vfsDst, sizeof(VCPFILESPEC));
+        lpvn->vfsDst = *vfsDst;
 
     lpvn->fl = fl;
     lpvn->lParam = lParam;

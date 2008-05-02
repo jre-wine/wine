@@ -207,7 +207,7 @@ static VOID WINAPI callback(
             ok(dwStatusInformationLength == sizeof(INTERNET_ASYNC_RESULT),
                 "info length should be sizeof(INTERNET_ASYNC_RESULT) instead of %d\n",
                 dwStatusInformationLength);
-            trace("%04x:Callback %p 0x%lx INTERNET_STATUS_REQUEST_COMPLETE {%d,%d} %d\n",
+            trace("%04x:Callback %p 0x%lx INTERNET_STATUS_REQUEST_COMPLETE {%ld,%d} %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 iar->dwResult,iar->dwError,dwStatusInformationLength);
             SetEvent(hCompleteEvent);
@@ -233,6 +233,7 @@ static VOID WINAPI callback(
 
 static void InternetReadFile_test(int flags)
 {
+    BOOL res;
     DWORD rc;
     CHAR buffer[4000];
     DWORD length;
@@ -285,6 +286,11 @@ static void InternetReadFile_test(int flags)
     trace("HttpOpenRequestA -->\n");
 
     if (hor == 0x0) goto abort;
+
+    length = sizeof(buffer);
+    res = InternetQueryOptionA(hor, INTERNET_OPTION_URL, buffer, &length);
+    ok(res, "InternetQueryOptionA(INTERNET_OPTION_URL) failed: %u\n", GetLastError());
+    ok(!strcmp(buffer, "http://www.winehq.org/about/"), "Wrong URL %s\n", buffer);
 
     CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
     todo_wine
@@ -366,10 +372,10 @@ static void InternetReadFile_test(int flags)
     buffer[length]=0;
     trace("Option 0x16 -> %i  %s\n",rc,buffer);
 
-    length = 4000;
-    rc = InternetQueryOptionA(hor,INTERNET_OPTION_URL,buffer,&length);
-    buffer[length]=0;
-    trace("Option 0x22 -> %i  %s\n",rc,buffer);
+    length = sizeof(buffer);
+    res = InternetQueryOptionA(hor, INTERNET_OPTION_URL, buffer, &length);
+    ok(res, "InternetQueryOptionA(INTERNET_OPTION_URL) failed: %u\n", GetLastError());
+    ok(!strcmp(buffer, "http://www.winehq.org/site/about"), "Wrong URL %s\n", buffer);
 
     length = 16;
     rc = HttpQueryInfoA(hor,HTTP_QUERY_CONTENT_LENGTH,&buffer,&length,0x0);
@@ -447,10 +453,10 @@ abort:
             "Double close of handle should have set ERROR_INVALID_HANDLE instead of %u\n",
             GetLastError());
     }
-    if (hic != 0x0) {
-        rc = InternetCloseHandle(hic);
-        ok ((rc != 0), "InternetCloseHandle of handle opened by InternetConnectA failed\n");
-    }
+    /* We intentionally do not close the handle opened by InternetConnectA as this
+     * tickles bug #9479: native closes child internet handles when the parent handles
+     * are closed. This is verified below by checking that the number of
+     * INTERNET_STATUS_HANDLE_CLOSING notifications matches the number expected. */
     if (hi != 0x0) {
       SET_WINE_ALLOW(INTERNET_STATUS_HANDLE_CLOSING);
       rc = InternetCloseHandle(hi);
@@ -653,6 +659,8 @@ static void InternetReadFileExA_test(int flags)
             if (GetLastError() == ERROR_IO_PENDING)
             {
                 trace("InternetReadFileEx -> PENDING\n");
+                ok(flags & INTERNET_FLAG_ASYNC,
+                   "Should not get ERROR_IO_PENDING without INTERNET_FLAG_ASYNC\n");
                 CHECK_NOTIFIED(INTERNET_STATUS_RECEIVING_RESPONSE);
                 WaitForSingleObject(hCompleteEvent, INFINITE);
                 CHECK_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
@@ -753,7 +761,7 @@ static void InternetOpenUrlA_test(void)
   SetLastError(0);
   myhttp = InternetOpenUrl(myhinternet, TEST_URL, 0, 0,
 			   INTERNET_FLAG_RELOAD|INTERNET_FLAG_NO_CACHE_WRITE|INTERNET_FLAG_TRANSFER_BINARY,0);
-  if (GetLastError() == 12007)
+  if (GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED)
     return; /* WinXP returns this when not connected to the net */
   ok((myhttp != 0),"InternetOpenUrl failed, error %u\n",GetLastError());
   ret = InternetReadFile(myhttp, buffer,0x400,&readbytes);
@@ -762,6 +770,9 @@ static void InternetOpenUrlA_test(void)
   while (readbytes && InternetReadFile(myhttp, buffer,0x400,&readbytes))
     totalbytes += readbytes;
   trace("read 0x%08x bytes\n",totalbytes);
+
+  InternetCloseHandle(myhttp);
+  InternetCloseHandle(myhinternet);
 }
 
 static void InternetTimeFromSystemTimeA_test(void)
@@ -885,8 +896,8 @@ static void HttpSendRequestEx_test(void)
     BufferIn.dwStructSize = sizeof( INTERNET_BUFFERS);
     BufferIn.Next = (LPINTERNET_BUFFERS)0xdeadcab;
     BufferIn.lpcszHeader = szContentType;
-    BufferIn.dwHeadersLength = sizeof(szContentType);
-    BufferIn.dwHeadersTotal = sizeof(szContentType);
+    BufferIn.dwHeadersLength = sizeof(szContentType)-1;
+    BufferIn.dwHeadersTotal = sizeof(szContentType)-1;
     BufferIn.lpvBuffer = szPostData;
     BufferIn.dwBufferLength = 3;
     BufferIn.dwBufferTotal = sizeof(szPostData)-1;
@@ -926,9 +937,19 @@ static void InternetOpenRequest_test(void)
     session = InternetOpenA("Wine Regression Test", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     ok(session != NULL ,"Unable to open Internet session\n");
 
+    connect = InternetConnectA(session, NULL, INTERNET_DEFAULT_HTTP_PORT, NULL, NULL,
+                              INTERNET_SERVICE_HTTP, 0, 0);
+    ok(connect == NULL, "InternetConnectA should have failed\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "InternetConnectA with NULL server named should have failed with ERROR_INVALID_PARAMETER instead of %d\n", GetLastError());
+
+    connect = InternetConnectA(session, "", INTERNET_DEFAULT_HTTP_PORT, NULL, NULL,
+                              INTERNET_SERVICE_HTTP, 0, 0);
+    ok(connect == NULL, "InternetConnectA should have failed\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "InternetConnectA with blank server named should have failed with ERROR_INVALID_PARAMETER instead of %d\n", GetLastError());
+
     connect = InternetConnectA(session, "winehq.org", INTERNET_DEFAULT_HTTP_PORT, NULL, NULL,
                               INTERNET_SERVICE_HTTP, 0, 0);
-    ok(connect != NULL, "Unable to connect to http://winehq.org\n");
+    ok(connect != NULL, "Unable to connect to http://winehq.org with error %d\n", GetLastError());
 
     request = HttpOpenRequestA(connect, NULL, "/", NULL, NULL, types, INTERNET_FLAG_NO_CACHE_WRITE, 0);
     if (!request && GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED)
@@ -950,6 +971,103 @@ static void InternetOpenRequest_test(void)
     ok(InternetCloseHandle(request), "Close request handle failed\n");
 
 done:
+    ok(InternetCloseHandle(connect), "Close connect handle failed\n");
+    ok(InternetCloseHandle(session), "Close session handle failed\n");
+}
+
+static void test_http_cache(void)
+{
+    HINTERNET session, connect, request;
+    char file_name[MAX_PATH], url[INTERNET_MAX_URL_LENGTH];
+    DWORD size, file_size;
+    BYTE buf[100];
+    HANDLE file;
+    BOOL ret;
+
+    static const char *types[] = { "*", "", NULL };
+
+    session = InternetOpenA("Wine Regression Test", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    ok(session != NULL ,"Unable to open Internet session\n");
+
+    connect = InternetConnectA(session, "www.winehq.org", INTERNET_DEFAULT_HTTP_PORT, NULL, NULL,
+                              INTERNET_SERVICE_HTTP, 0, 0);
+    ok(connect != NULL, "Unable to connect to http://winehq.org with error %d\n", GetLastError());
+
+    request = HttpOpenRequestA(connect, NULL, "/site/about", NULL, NULL, types, INTERNET_FLAG_NEED_FILE, 0);
+    if (!request && GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED)
+    {
+        trace( "Network unreachable, skipping test\n" );
+
+        ok(InternetCloseHandle(connect), "Close connect handle failed\n");
+        ok(InternetCloseHandle(session), "Close session handle failed\n");
+
+        return;
+    }
+    ok(request != NULL, "Failed to open request handle err %u\n", GetLastError());
+
+    size = sizeof(url);
+    ret = InternetQueryOptionA(request, INTERNET_OPTION_URL, url, &size);
+    ok(ret, "InternetQueryOptionA(INTERNET_OPTION_url) failed: %u\n", GetLastError());
+    ok(!strcmp(url, "http://www.winehq.org/site/about"), "Wrong URL %s\n", url);
+
+    size = sizeof(file_name);
+    ret = InternetQueryOptionA(request, INTERNET_OPTION_DATAFILE_NAME, file_name, &size);
+    ok(!ret, "InternetQueryOptionA(INTERNET_OPTION_DATAFILE_NAME) succeeded\n");
+    ok(GetLastError() == ERROR_INTERNET_ITEM_NOT_FOUND, "GetLastError()=%u\n", GetLastError());
+    ok(!size, "size = %d\n", size);
+
+    ret = HttpSendRequest(request, NULL, 0, NULL, 0);
+    ok(ret, "HttpSendRequest failed: %u\n", GetLastError());
+
+    size = sizeof(file_name);
+    ret = InternetQueryOptionA(request, INTERNET_OPTION_DATAFILE_NAME, file_name, &size);
+    ok(ret, "InternetQueryOptionA(INTERNET_OPTION_DATAFILE_NAME) failed: %u\n", GetLastError());
+
+    file = CreateFile(file_name, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                      FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "Could not create file: %u\n", GetLastError());
+    file_size = GetFileSize(file, NULL);
+    ok(file_size == 0, "file size=%d\n", file_size);
+
+    ret = InternetReadFile(request, buf, sizeof(buf), &size);
+    ok(ret, "InternetReadFile failed: %u\n", GetLastError());
+    ok(size == sizeof(buf), "size=%d\n", size);
+
+    file_size = GetFileSize(file, NULL);
+    ok(file_size == sizeof(buf), "file size=%d\n", file_size);
+    CloseHandle(file);
+
+    ok(InternetCloseHandle(request), "Close request handle failed\n");
+
+    file = CreateFile(file_name, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                      FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(file == INVALID_HANDLE_VALUE, "CreateFile succeeded\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "GetLastError()=%u, expected ERROR_FILE_NOT_FOUND\n", GetLastError());
+
+    request = HttpOpenRequestA(connect, NULL, "/", NULL, NULL, types, INTERNET_FLAG_NO_CACHE_WRITE, 0);
+    ok(request != NULL, "Failed to open request handle err %u\n", GetLastError());
+
+    ret = InternetQueryOptionA(request, INTERNET_OPTION_DATAFILE_NAME, file_name, &size);
+    ok(!ret, "InternetQueryOptionA(INTERNET_OPTION_DATAFILE_NAME) succeeded\n");
+    ok(GetLastError() == ERROR_INTERNET_ITEM_NOT_FOUND, "GetLastError()=%u\n", GetLastError());
+    ok(!size, "size = %d\n", size);
+
+    ret = HttpSendRequest(request, NULL, 0, NULL, 0);
+    ok(ret, "HttpSendRequest failed: %u\n", GetLastError());
+
+    size = sizeof(file_name);
+    ret = InternetQueryOptionA(request, INTERNET_OPTION_DATAFILE_NAME, file_name, &size);
+    ok(!ret, "InternetQueryOptionA(INTERNET_OPTION_DATAFILE_NAME) succeeded\n");
+    ok(GetLastError() == ERROR_INTERNET_ITEM_NOT_FOUND, "GetLastError()=%u\n", GetLastError());
+    ok(!size, "size = %d\n", size);
+
+    file = CreateFile(file_name, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                      FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(file == INVALID_HANDLE_VALUE, "CreateFile succeeded\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "GetLastError()=%u, expected ERROR_FILE_NOT_FOUND\n", GetLastError());
+
+    ok(InternetCloseHandle(request), "Close request handle failed\n");
+
     ok(InternetCloseHandle(connect), "Close connect handle failed\n");
     ok(InternetCloseHandle(session), "Close session handle failed\n");
 }
@@ -996,7 +1114,7 @@ static void HttpHeaders_test(void)
     ok(index == 1, "Index was not incremented\n");
     ok(strcmp(buffer,"test1")==0, "incorrect string was returned(%s)\n",buffer);
     ok(len == 5, "Invalid length (exp. 5, got %d)\n", len);
-    ok(buffer[len] == 0, "Buffer not NULL-terminated\n"); /* len show only 5 characters but the buffer is NULL-terminated*/
+    ok((len < sizeof(buffer)) && (buffer[len] == 0), "Buffer not NULL-terminated\n"); /* len show only 5 characters but the buffer is NULL-terminated*/
     len = sizeof(buffer);
     strcpy(buffer,"Warning");
     ok(HttpQueryInfo(hRequest,HTTP_QUERY_CUSTOM|HTTP_QUERY_FLAG_REQUEST_HEADERS,
@@ -1189,18 +1307,21 @@ done:
     ok(InternetCloseHandle(hSession), "Close session handle failed\n");
 }
 
+static const char contmsg[] =
+"HTTP/1.1 100 Continue\r\n";
+
 static const char okmsg[] =
-"HTTP/1.0 200 OK\r\n"
+"HTTP/1.1 200 OK\r\n"
 "Server: winetest\r\n"
 "\r\n";
 
 static const char notokmsg[] =
-"HTTP/1.0 400 Bad Request\r\n"
+"HTTP/1.1 400 Bad Request\r\n"
 "Server: winetest\r\n"
 "\r\n";
 
 static const char noauthmsg[] =
-"HTTP/1.0 401 Unauthorized\r\n"
+"HTTP/1.1 401 Unauthorized\r\n"
 "Server: winetest\r\n"
 "\r\n";
 
@@ -1225,7 +1346,8 @@ struct server_info {
 static DWORD CALLBACK server_thread(LPVOID param)
 {
     struct server_info *si = param;
-    int r, s, c, i, on;
+    int r, c, i, on;
+    SOCKET s;
     struct sockaddr_in sa;
     char buffer[0x100];
     WSADATA wsaData;
@@ -1234,7 +1356,7 @@ static DWORD CALLBACK server_thread(LPVOID param)
     WSAStartup(MAKEWORD(1,1), &wsaData);
 
     s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s<0)
+    if (s == INVALID_SOCKET)
         return 1;
 
     on = 1;
@@ -1271,8 +1393,13 @@ static DWORD CALLBACK server_thread(LPVOID param)
 
         if (strstr(buffer, "GET /test1"))
         {
-            send(c, okmsg, sizeof okmsg-1, 0);
-            send(c, page1, sizeof page1-1, 0);
+            if (!strstr(buffer, "Content-Length: 0"))
+            {
+                send(c, okmsg, sizeof okmsg-1, 0);
+                send(c, page1, sizeof page1-1, 0);
+            }
+            else
+                send(c, notokmsg, sizeof notokmsg-1, 0);
         }
 
         if (strstr(buffer, "/test2"))
@@ -1302,7 +1429,26 @@ static DWORD CALLBACK server_thread(LPVOID param)
                 send(c, notokmsg, sizeof notokmsg-1, 0);
         }
 
-        if (strstr(buffer, "/quit"))
+        if (strstr(buffer, "POST /test5"))
+        {
+            if (strstr(buffer, "Content-Length: 0"))
+            {
+                send(c, okmsg, sizeof okmsg-1, 0);
+                send(c, page1, sizeof page1-1, 0);
+            }
+            else
+                send(c, notokmsg, sizeof notokmsg-1, 0);
+        }
+
+        if (strstr(buffer, "GET /test6"))
+        {
+            send(c, contmsg, sizeof contmsg-1, 0);
+            send(c, contmsg, sizeof contmsg-1, 0);
+            send(c, okmsg, sizeof okmsg-1, 0);
+            send(c, page1, sizeof page1-1, 0);
+        }
+
+        if (strstr(buffer, "GET /quit"))
         {
             send(c, okmsg, sizeof okmsg-1, 0);
             send(c, page1, sizeof page1-1, 0);
@@ -1318,19 +1464,19 @@ static DWORD CALLBACK server_thread(LPVOID param)
     return 0;
 }
 
-static void test_basic_request(int port, const char *url)
+static void test_basic_request(int port, const char *verb, const char *url)
 {
     HINTERNET hi, hc, hr;
     DWORD r, count;
     char buffer[0x100];
 
-    hi = InternetOpen(NULL, 0, NULL, NULL, 0);
+    hi = InternetOpen(NULL, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
     ok(hi != NULL, "open failed\n");
 
     hc = InternetConnect(hi, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
     ok(hc != NULL, "connect failed\n");
 
-    hr = HttpOpenRequest(hc, NULL, url, NULL, NULL, NULL, 0, 0);
+    hr = HttpOpenRequest(hc, verb, url, NULL, NULL, NULL, 0, 0);
     ok(hr != NULL, "HttpOpenRequest failed\n");
 
     r = HttpSendRequest(hr, NULL, 0, NULL, 0);
@@ -1477,7 +1623,10 @@ static void test_header_handling_order(int port)
     request = HttpOpenRequest(connect, NULL, "/test3", NULL, NULL, types, INTERNET_FLAG_KEEP_CONNECTION, 0);
     ok(request != NULL, "HttpOpenRequest failed\n");
 
-    ret = HttpSendRequest(request, authorization, ~0UL, NULL, 0);
+    ret = HttpAddRequestHeaders(request, authorization, ~0UL, HTTP_ADDREQ_FLAG_ADD);
+    ok(ret, "HttpAddRequestHeaders failed\n");
+
+    ret = HttpSendRequest(request, NULL, 0, NULL, 0);
     ok(ret, "HttpSendRequest failed\n");
 
     status = 0;
@@ -1522,13 +1671,15 @@ static void test_http_connection(void)
     if (r != WAIT_OBJECT_0)
         return;
 
-    test_basic_request(si.port, "/test1");
+    test_basic_request(si.port, "GET", "/test1");
     test_proxy_indirect(si.port);
     test_proxy_direct(si.port);
     test_header_handling_order(si.port);
+    test_basic_request(si.port, "POST", "/test5");
+    test_basic_request(si.port, "GET", "/test6");
 
     /* send the basic request again to shutdown the server thread */
-    test_basic_request(si.port, "/quit");
+    test_basic_request(si.port, "GET", "/quit");
 
     r = WaitForSingleObject(hThread, 3000);
     ok( r == WAIT_OBJECT_0, "thread wait failed\n");
@@ -1594,6 +1745,7 @@ START_TEST(http)
         InternetReadFileExA_test(INTERNET_FLAG_ASYNC);
     }
     InternetOpenRequest_test();
+    test_http_cache();
     InternetOpenUrlA_test();
     if (!pInternetTimeFromSystemTimeA)
         skip("skipping the InternetTime tests\n");

@@ -404,7 +404,7 @@ DGifGetImageDesc(GifFileType * GifFile) {
     }
 
     sp = &GifFile->SavedImages[GifFile->ImageCount];
-    memcpy(&sp->ImageDesc, &GifFile->Image, sizeof(GifImageDesc));
+    sp->ImageDesc = GifFile->Image;
     if (GifFile->Image.ColorMap != NULL) {
         sp->ImageDesc.ColorMap = MakeMapObject(
                                  GifFile->Image.ColorMap->ColorCount,
@@ -616,7 +616,7 @@ DGifDecompressLine(GifFileType * GifFile,
     LastCode = Private->LastCode;
 
     if (StackPtr != 0) {
-        /* Let pop the stack off before continueing to read the gif file: */
+        /* Let pop the stack off before continuing to read the gif file: */
         while (StackPtr != 0 && i < LineLen)
             Line[i++] = Stack[--StackPtr];
     }
@@ -626,7 +626,7 @@ DGifDecompressLine(GifFileType * GifFile,
             return GIF_ERROR;
 
         if (CrntCode == EOFCode) {
-            /* Note however that usually we will not be here as we will stop
+            /* Note, however, that usually we will not be here as we will stop
              * decoding as soon as we got all the pixel, or EOF code will
              * not be read at all, and DGifGetLine/Pixel clean everything.  */
             if (i != LineLen - 1 || Private->PixelCount != 0) {
@@ -642,17 +642,17 @@ DGifDecompressLine(GifFileType * GifFile,
             Private->MaxCode1 = 1 << Private->RunningBits;
             LastCode = Private->LastCode = NO_SUCH_CODE;
         } else {
-            /* Its regular code - if in pixel range simply add it to output
+            /* It's a regular code - if in pixel range simply add it to output
              * stream, otherwise trace to codes linked list until the prefix
              * is in pixel range: */
             if (CrntCode < ClearCode) {
                 /* This is simple - its pixel scalar, so add it to output: */
                 Line[i++] = CrntCode;
             } else {
-                /* Its a code to needed to be traced: trace the linked list
+                /* It's a code to be traced: trace the linked list
                  * until the prefix is a pixel, while pushing the suffix
                  * pixels on our stack. If we done, pop the stack in reverse
-                 * (thats what stack is good for!) order to output.  */
+                 * order (that's what stack is good for!) for output.  */
                 if (Prefix[CrntCode] == NO_SUCH_CODE) {
                     /* Only allowed if CrntCode is exactly the running code:
                      * In that case CrntCode = XXXCode, CrntCode or the

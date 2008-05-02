@@ -325,6 +325,8 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         return NC_HandleNCLButtonDown( hwnd, wParam, lParam );
 
     case WM_LBUTTONDBLCLK:
+        return NC_HandleNCLButtonDblClk( hwnd, HTCLIENT, lParam );
+
     case WM_NCLBUTTONDBLCLK:
         return NC_HandleNCLButtonDblClk( hwnd, wParam, lParam );
 
@@ -384,7 +386,7 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         break;
 
     case WM_NCACTIVATE:
-        return NC_HandleNCActivate( hwnd, wParam );
+        return NC_HandleNCActivate( hwnd, wParam, lParam );
 
     case WM_NCDESTROY:
         {
@@ -419,8 +421,8 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                   GetClientRect( hwnd, &rc );
                   x = (rc.right - rc.left - GetSystemMetrics(SM_CXICON))/2;
                   y = (rc.bottom - rc.top - GetSystemMetrics(SM_CYICON))/2;
-                  TRACE("Painting class icon: vis rect=(%d,%d - %d,%d)\n",
-                        ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right, ps.rcPaint.bottom );
+                  TRACE("Painting class icon: vis rect=(%s)\n",
+                        wine_dbgstr_rect(&ps.rcPaint));
                   DrawIcon( hdc, x, y, hIcon );
               }
               EndPaint( hwnd, &ps );
@@ -719,6 +721,29 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 HOOK_CallHooks(WH_SHELL, HSHELL_APPCOMMAND, wParam, lParam, TRUE);
             else
                 SendMessageW( parent, msg, wParam, lParam );
+            break;
+        }
+    case WM_KEYF1:
+        {
+            HELPINFO hi;
+
+            hi.cbSize = sizeof(HELPINFO);
+            GetCursorPos( &hi.MousePos );
+            if (MENU_IsMenuActive())
+            {
+                hi.iContextType = HELPINFO_MENUITEM;
+                hi.hItemHandle = MENU_IsMenuActive();
+                hi.iCtrlId = MenuItemFromPoint( hwnd, hi.hItemHandle, hi.MousePos );
+                hi.dwContextId = GetMenuContextHelpId( hi.hItemHandle );
+            }
+            else
+            {
+                hi.iContextType = HELPINFO_WINDOW;
+                hi.hItemHandle = hwnd;
+                hi.iCtrlId = GetWindowLongPtrA( hwnd, GWLP_ID );
+                hi.dwContextId = GetWindowContextHelpId( hwnd );
+            }
+            SendMessageW( hwnd, WM_HELP, 0, (LPARAM)&hi );
             break;
         }
     }

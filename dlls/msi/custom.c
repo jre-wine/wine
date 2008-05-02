@@ -226,7 +226,7 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL 
     if (type & msidbCustomActionTypeInScript)
     {
         if (type & msidbCustomActionTypeNoImpersonate)
-            FIXME("msidbCustomActionTypeNoImpersonate not handled\n");
+            WARN("msidbCustomActionTypeNoImpersonate not handled\n");
 
         if (type & msidbCustomActionTypeRollback)
         {
@@ -317,6 +317,7 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL 
         case 23: /* installs another package in the source tree */
             deformat_string(package,target,&deformated);
             rc = HANDLE_CustomType23(package,source,deformated,type,action);
+            msi_free(deformated);
             break;
         case 50: /*EXE file specified by a property value */
             rc = HANDLE_CustomType50(package,source,target,type,action);
@@ -330,6 +331,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL 
             msi_free(deformated);
             break;
         case 51: /* Property set with formatted text. */
+            if (!source)
+                break;
+
             deformat_string(package,target,&deformated);
             rc = MSI_SetPropertyW(package,source,deformated);
             msi_free(deformated);
@@ -688,6 +692,8 @@ static DWORD WINAPI ACTION_CallDllFunction( const GUID *guid )
             TRACE("calling %s\n", debugstr_w( function ) );
             handle_msi_break( function );
 
+            CoInitialize(NULL);
+
             __TRY
             {
                 r = fn( hPackage );
@@ -699,6 +705,8 @@ static DWORD WINAPI ACTION_CallDllFunction( const GUID *guid )
                 r = ERROR_SUCCESS;
             }
             __ENDTRY;
+
+            CoUninitialize();
 
             MsiCloseHandle( hPackage );
         }
@@ -851,12 +859,6 @@ static UINT HANDLE_CustomType23(MSIPACKAGE *package, LPCWSTR source,
     MSI_GetPropertyW(package, cszSourceDir, package_path, &size);
     lstrcatW(package_path, backslash);
     lstrcatW(package_path, source);
-
-    if (GetFileAttributesW(package_path) == INVALID_FILE_ATTRIBUTES)
-    {
-        ERR("Source package does not exist: %s\n", debugstr_w(package_path));
-        return ERROR_FUNCTION_FAILED;
-    }
 
     TRACE("Installing package %s concurrently\n", debugstr_w(package_path));
 

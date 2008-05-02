@@ -4,8 +4,9 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = crypt32.dll
-IMPORTLIB = libcrypt32.$(IMPLIBEXT)
+IMPORTLIB = crypt32
 IMPORTS   = user32 advapi32 kernel32 ntdll
+DELAYIMPORTS = imagehlp
 
 C_SRCS = \
 	base64.c \
@@ -19,11 +20,13 @@ C_SRCS = \
 	filestore.c \
 	main.c \
 	msg.c \
+	object.c \
 	oid.c \
 	proplist.c \
 	protectdata.c \
 	provstore.c \
 	regstore.c \
+	rootstore.c \
 	serialize.c \
 	sip.c \
 	store.c \

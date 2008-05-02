@@ -5,6 +5,8 @@ TOPOBJDIR = ..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 
+INSTALLDIRS = $(DESTDIR)$(dlldir)
+
 # special configure-dependent targets
 
 GLU32FILES = glu32
@@ -18,6 +20,7 @@ EXTRADIRS = @GLU32FILES@ @OPENGLFILES@ @QUARTZFILES@ @XFILES@
 BASEDIRS = \
 	acledit \
 	activeds \
+	actxprxy \
 	advapi32 \
 	advpack \
 	amstream \
@@ -37,8 +40,11 @@ BASEDIRS = \
 	credui \
 	crtdll \
 	crypt32 \
+	cryptdlg \
 	cryptdll \
 	cryptnet \
+	cryptui \
+	ctapi32 \
 	ctl3d32 \
 	d3d10 \
 	d3d8 \
@@ -46,6 +52,20 @@ BASEDIRS = \
 	d3dim \
 	d3drm \
 	d3dx8 \
+	d3dx9_24 \
+	d3dx9_25 \
+	d3dx9_26 \
+	d3dx9_27 \
+	d3dx9_28 \
+	d3dx9_29 \
+	d3dx9_30 \
+	d3dx9_31 \
+	d3dx9_32 \
+	d3dx9_33 \
+	d3dx9_34 \
+	d3dx9_35 \
+	d3dx9_36 \
+	d3dx9_37 \
 	d3dxof \
 	dbghelp \
 	dciman32 \
@@ -71,13 +91,16 @@ BASEDIRS = \
 	dpnhpast \
 	dpnlobby \
 	dsound \
+	dssenh \
 	dswave \
 	dwmapi \
 	dxdiagn \
 	faultrep \
+	fusion \
 	gdi32 \
 	gdiplus \
 	gphoto2.ds \
+	gpkcsp \
 	hal \
 	hhctrl.ocx \
 	hid \
@@ -89,11 +112,15 @@ BASEDIRS = \
 	imaadp32.acm \
 	imagehlp \
 	imm32 \
+	inetcomm \
 	infosoft \
+	initpki \
 	inkobj \
 	inseng \
 	iphlpapi \
+	itircl \
 	itss \
+	jscript \
 	kernel32 \
 	localspl \
 	localui \
@@ -107,11 +134,13 @@ BASEDIRS = \
 	mlang \
 	mmdevldr.vxd \
 	monodebg.vxd \
+	mountmgr.sys \
 	mpr \
 	mprapi \
 	msacm32 \
 	msacm32.drv \
 	msadp32.acm \
+	mscat32 \
 	mscms \
 	mscoree \
 	msdmo \
@@ -121,9 +150,13 @@ BASEDIRS = \
 	mshtml.tlb \
 	msi \
 	msimg32 \
+	msimtf \
 	msisys.ocx \
 	msnet32 \
 	msrle32 \
+	mssip32 \
+	msvcirt \
+	msvcr71 \
 	msvcrt \
 	msvcrt20 \
 	msvcrt40 \
@@ -149,12 +182,17 @@ BASEDIRS = \
 	oledlg \
 	olepro32 \
 	olesvr32 \
+	olethk32 \
 	pdh \
 	powrprof \
 	printui \
+	propsys \
 	psapi \
 	pstorec \
 	qcap \
+	qedit \
+	qmgr \
+	qmgrprxy \
 	quartz \
 	query \
 	rasapi32 \
@@ -165,6 +203,7 @@ BASEDIRS = \
 	rsabase \
 	rsaenh \
 	sane.ds \
+	sccbase \
 	schannel \
 	secur32 \
 	security \
@@ -178,7 +217,10 @@ BASEDIRS = \
 	shell32 \
 	shfolder \
 	shlwapi \
+	slbcsp \
+	slc \
 	snmpapi \
+	softpub \
 	spoolss \
 	stdole2.tlb \
 	stdole32.tlb \
@@ -225,6 +267,7 @@ BASEDIRS = \
 	wintab32 \
 	wintrust \
 	wldap32 \
+	wmi \
 	wnaspi32 \
 	wow32 \
 	ws2_32 \
@@ -232,6 +275,7 @@ BASEDIRS = \
 	wtsapi32
 
 IMPLIBSUBDIRS = \
+	adsiid \
 	dxerr8 \
 	dxerr9 \
 	dxguid \
@@ -247,21 +291,29 @@ TESTSUBDIRS = \
 	comcat/tests \
 	comctl32/tests \
 	comdlg32/tests \
+	credui/tests \
 	crypt32/tests \
+	cryptnet/tests \
 	d3d8/tests \
 	d3d9/tests \
 	d3drm/tests \
+	d3dx8/tests \
+	d3dx9_36/tests \
 	ddraw/tests \
 	dinput/tests \
 	dnsapi/tests \
 	dplayx/tests \
 	dsound/tests \
+	fusion/tests \
 	gdi32/tests \
 	gdiplus/tests \
 	hlink/tests \
+	imm32/tests \
+	inetcomm/tests \
 	infosoft/tests \
 	iphlpapi/tests \
 	itss/tests \
+	jscript/tests \
 	kernel32/tests \
 	localspl/tests \
 	localui/tests \
@@ -277,6 +329,7 @@ TESTSUBDIRS = \
 	msxml3/tests \
 	netapi32/tests \
 	ntdll/tests \
+	ntdsapi/tests \
 	ntprint/tests \
 	odbccp32/tests \
 	ole32/tests \
@@ -284,10 +337,12 @@ TESTSUBDIRS = \
 	opengl32/tests \
 	pdh/tests \
 	psapi/tests \
+	qedit/tests \
+	qmgr/tests \
 	quartz/tests \
 	riched20/tests \
+	riched32/tests \
 	rpcrt4/tests \
-	rsabase/tests \
 	rsaenh/tests \
 	schannel/tests \
 	secur32/tests \
@@ -297,6 +352,7 @@ TESTSUBDIRS = \
 	shell32/tests \
 	shlwapi/tests \
 	snmpapi/tests \
+	spoolss/tests \
 	urlmon/tests \
 	user32/tests \
 	usp10/tests \
@@ -370,6 +426,7 @@ WIN16_FILES = \
 	wineps16.drv16 \
 	wing.dll16 \
 	winnls.dll16 \
+	winoldap.mod16 \
 	winsock.dll16 \
 	wintab.dll16 \
 	wprocs.dll16
@@ -397,7 +454,7 @@ dispdib.dll16 gdi.exe16 wing.dll16:
 imm.dll16:
 	echo "imm32.dll" >$@
 
-comm.drv16 krnl386.exe16 stress.dll16 system.drv16 toolhelp.dll16 win87em.dll16 windebug.dll16:
+comm.drv16 krnl386.exe16 stress.dll16 system.drv16 toolhelp.dll16 win87em.dll16 windebug.dll16 winoldap.mod16:
 	echo "kernel32.dll" >$@
 
 lzexpand.dll16:
@@ -468,10 +525,12 @@ winsock.dll16:
 STATIC_IMPLIBEXT = $(IMPLIBEXT:def=def.a)
 
 IMPORT_SYMLINKS = \
+	libd3dx9.$(IMPLIBEXT) \
 	libwinspool.$(IMPLIBEXT)
 
 IMPORT_LIBS = \
 	$(IMPORT_SYMLINKS) \
+	adsiid/libadsiid.a \
 	dxerr8/libdxerr8.a \
 	dxerr9/libdxerr9.a \
 	dxguid/libdxguid.a \
@@ -492,15 +551,18 @@ IMPORT_LIBS = \
 	comctl32/libcomctl32.$(IMPLIBEXT) \
 	comdlg32/libcomdlg32.$(IMPLIBEXT) \
 	compstui/libcompstui.$(IMPLIBEXT) \
+	credui/libcredui.$(IMPLIBEXT) \
 	crtdll/libcrtdll.$(IMPLIBEXT) \
 	crypt32/libcrypt32.$(IMPLIBEXT) \
 	cryptdll/libcryptdll.$(IMPLIBEXT) \
+	cryptnet/libcryptnet.$(IMPLIBEXT) \
 	ctl3d32/libctl3d32.$(IMPLIBEXT) \
 	d3d8/libd3d8.$(IMPLIBEXT) \
 	d3d9/libd3d9.$(IMPLIBEXT) \
 	d3dim/libd3dim.$(IMPLIBEXT) \
 	d3drm/libd3drm.$(IMPLIBEXT) \
 	d3dx8/libd3dx8.$(IMPLIBEXT) \
+	d3dx9_36/libd3dx9.$(IMPLIBEXT) \
 	d3dxof/libd3dxof.$(IMPLIBEXT) \
 	dbghelp/libdbghelp.$(IMPLIBEXT) \
 	dciman32/libdciman32.$(IMPLIBEXT) \
@@ -523,6 +585,7 @@ IMPORT_LIBS = \
 	icmp/libicmp.$(IMPLIBEXT) \
 	imagehlp/libimagehlp.$(IMPLIBEXT) \
 	imm32/libimm32.$(IMPLIBEXT) \
+	inetcomm/libinetcomm.$(IMPLIBEXT) \
 	iphlpapi/libiphlpapi.$(IMPLIBEXT) \
 	kernel32/libkernel32.$(IMPLIBEXT) \
 	lz32/liblz32.$(IMPLIBEXT) \
@@ -536,6 +599,7 @@ IMPORT_LIBS = \
 	mshtml/libmshtml.$(IMPLIBEXT) \
 	msi/libmsi.$(IMPLIBEXT) \
 	msimg32/libmsimg32.$(IMPLIBEXT) \
+	msvcr71/libmsvcr71.$(IMPLIBEXT) \
 	msvcrt/libmsvcrt.$(IMPLIBEXT) \
 	msvcrt20/libmsvcrt20.$(IMPLIBEXT) \
 	msvcrt40/libmsvcrt40.$(IMPLIBEXT) \
@@ -577,6 +641,7 @@ IMPORT_LIBS = \
 	shell32/libshell32.$(IMPLIBEXT) \
 	shfolder/libshfolder.$(IMPLIBEXT) \
 	shlwapi/libshlwapi.$(IMPLIBEXT) \
+	slc/libslc.$(IMPLIBEXT) \
 	snmpapi/libsnmpapi.$(IMPLIBEXT) \
 	spoolss/libspoolss.$(IMPLIBEXT) \
 	sti/libsti.$(IMPLIBEXT) \
@@ -651,6 +716,9 @@ comdlg32/libcomdlg32.$(IMPLIBEXT): comdlg32/comdlg32.spec $(WINEBUILD)
 compstui/libcompstui.$(IMPLIBEXT): compstui/compstui.spec $(WINEBUILD)
 	@cd compstui && $(MAKE) libcompstui.$(IMPLIBEXT)
 
+credui/libcredui.$(IMPLIBEXT): credui/credui.spec $(WINEBUILD)
+	@cd credui && $(MAKE) libcredui.$(IMPLIBEXT)
+
 crtdll/libcrtdll.$(IMPLIBEXT): crtdll/crtdll.spec $(WINEBUILD)
 	@cd crtdll && $(MAKE) libcrtdll.$(IMPLIBEXT)
 
@@ -659,6 +727,9 @@ crypt32/libcrypt32.$(IMPLIBEXT): crypt32/crypt32.spec $(WINEBUILD)
 
 cryptdll/libcryptdll.$(IMPLIBEXT): cryptdll/cryptdll.spec $(WINEBUILD)
 	@cd cryptdll && $(MAKE) libcryptdll.$(IMPLIBEXT)
+
+cryptnet/libcryptnet.$(IMPLIBEXT): cryptnet/cryptnet.spec $(WINEBUILD)
+	@cd cryptnet && $(MAKE) libcryptnet.$(IMPLIBEXT)
 
 ctl3d32/libctl3d32.$(IMPLIBEXT): ctl3d32/ctl3d32.spec $(WINEBUILD)
 	@cd ctl3d32 && $(MAKE) libctl3d32.$(IMPLIBEXT)
@@ -677,6 +748,9 @@ d3drm/libd3drm.$(IMPLIBEXT): d3drm/d3drm.spec $(WINEBUILD)
 
 d3dx8/libd3dx8.$(IMPLIBEXT): d3dx8/d3dx8.spec $(WINEBUILD)
 	@cd d3dx8 && $(MAKE) libd3dx8.$(IMPLIBEXT)
+
+d3dx9_36/libd3dx9.$(IMPLIBEXT): d3dx9_36/d3dx9_36.spec $(WINEBUILD)
+	@cd d3dx9_36 && $(MAKE) libd3dx9.$(IMPLIBEXT)
 
 d3dxof/libd3dxof.$(IMPLIBEXT): d3dxof/d3dxof.spec $(WINEBUILD)
 	@cd d3dxof && $(MAKE) libd3dxof.$(IMPLIBEXT)
@@ -744,6 +818,9 @@ imagehlp/libimagehlp.$(IMPLIBEXT): imagehlp/imagehlp.spec $(WINEBUILD)
 imm32/libimm32.$(IMPLIBEXT): imm32/imm32.spec $(WINEBUILD)
 	@cd imm32 && $(MAKE) libimm32.$(IMPLIBEXT)
 
+inetcomm/libinetcomm.$(IMPLIBEXT): inetcomm/inetcomm.spec $(WINEBUILD)
+	@cd inetcomm && $(MAKE) libinetcomm.$(IMPLIBEXT)
+
 iphlpapi/libiphlpapi.$(IMPLIBEXT): iphlpapi/iphlpapi.spec $(WINEBUILD)
 	@cd iphlpapi && $(MAKE) libiphlpapi.$(IMPLIBEXT)
 
@@ -782,6 +859,9 @@ msi/libmsi.$(IMPLIBEXT): msi/msi.spec $(WINEBUILD)
 
 msimg32/libmsimg32.$(IMPLIBEXT): msimg32/msimg32.spec $(WINEBUILD)
 	@cd msimg32 && $(MAKE) libmsimg32.$(IMPLIBEXT)
+
+msvcr71/libmsvcr71.$(IMPLIBEXT): msvcr71/msvcr71.spec $(WINEBUILD)
+	@cd msvcr71 && $(MAKE) libmsvcr71.$(IMPLIBEXT)
 
 msvcrt/libmsvcrt.$(IMPLIBEXT): msvcrt/msvcrt.spec $(WINEBUILD)
 	@cd msvcrt && $(MAKE) libmsvcrt.$(IMPLIBEXT)
@@ -906,6 +986,9 @@ shfolder/libshfolder.$(IMPLIBEXT): shfolder/shfolder.spec $(WINEBUILD)
 shlwapi/libshlwapi.$(IMPLIBEXT): shlwapi/shlwapi.spec $(WINEBUILD)
 	@cd shlwapi && $(MAKE) libshlwapi.$(IMPLIBEXT)
 
+slc/libslc.$(IMPLIBEXT): slc/slc.spec $(WINEBUILD)
+	@cd slc && $(MAKE) libslc.$(IMPLIBEXT)
+
 snmpapi/libsnmpapi.$(IMPLIBEXT): snmpapi/snmpapi.spec $(WINEBUILD)
 	@cd snmpapi && $(MAKE) libsnmpapi.$(IMPLIBEXT)
 
@@ -987,6 +1070,9 @@ wsock32/libwsock32.$(IMPLIBEXT): wsock32/wsock32.spec $(WINEBUILD)
 wtsapi32/libwtsapi32.$(IMPLIBEXT): wtsapi32/wtsapi32.spec $(WINEBUILD)
 	@cd wtsapi32 && $(MAKE) libwtsapi32.$(IMPLIBEXT)
 
+libd3dx9.$(IMPLIBEXT): d3dx9_36/libd3dx9.$(IMPLIBEXT)
+	$(RM) $@ && $(LN_S) d3dx9_36/libd3dx9.$(IMPLIBEXT) $@
+
 libwinspool.$(IMPLIBEXT): winspool.drv/libwinspool.$(IMPLIBEXT)
 	$(RM) $@ && $(LN_S) winspool.drv/libwinspool.$(IMPLIBEXT) $@
 
@@ -995,6 +1081,7 @@ $(INSTALLSUBDIRS:%=%/__install__) $(INSTALLSUBDIRS:%=%/__install-lib__): $(IMPOR
 
 # Map library name to the corresponding directory
 
+adsiid/libadsiid.a: adsiid
 dxerr8/libdxerr8.a: dxerr8
 dxerr9/libdxerr9.a: dxerr9
 dxguid/libdxguid.a: dxguid
@@ -1004,11 +1091,21 @@ winecrt0/libwinecrt0.a: winecrt0
 
 # Misc rules
 
+.PHONY: $(WIN16_FILES:%=__install__/%)
+
+WIN16_INSTALL = $(WIN16_FILES:%=__install__/%)
+
+$(WIN16_FILES:%=__install__/%): $(WIN16_FILES) $(DESTDIR)$(dlldir) dummy
+	$(INSTALL_DATA) `basename $@` $(DESTDIR)$(dlldir)/`basename $@`
+
+install install-lib:: @WIN16_INSTALL@
+
 install-lib:: $(INSTALLSUBDIRS:%=%/__install-lib__)
 
 install-dev:: $(INSTALLSUBDIRS:%=%/__install-dev__)
 
 uninstall::
+	-cd $(DESTDIR)$(dlldir) && $(RM) $(WIN16_FILES)
 	-rmdir $(DESTDIR)$(dlldir)
 
 clean::

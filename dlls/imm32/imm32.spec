@@ -10,14 +10,14 @@
 @ stdcall ImmDestroyIMCC(long)
 @ stub ImmDestroySoftKeyboard
 @ stdcall ImmDisableIME(long)
-@ stub ImmDisableIme
+@ stdcall ImmDisableIme(long) ImmDisableIME
 @ stub ImmEnumInputContext
 @ stdcall ImmEnumRegisterWordA(long ptr str long str ptr)
 @ stdcall ImmEnumRegisterWordW(long ptr wstr long wstr ptr)
 @ stdcall ImmEscapeA(long long long ptr)
 @ stdcall ImmEscapeW(long long long ptr)
 @ stub ImmFreeLayout
-@ stub ImmGenerateMessage
+@ stdcall ImmGenerateMessage(ptr)
 @ stdcall ImmGetCandidateListA(long long ptr long)
 @ stdcall ImmGetCandidateListCountA(long ptr)
 @ stdcall ImmGetCandidateListCountW(long ptr)
@@ -72,7 +72,7 @@
 @ stub ImmLockImeDpi
 @ stdcall ImmNotifyIME(long long long long)
 @ stub ImmPenAuxInput
-@ stub ImmProcessKey
+@ stdcall ImmProcessKey(long long long long long)
 @ stub ImmPutImeMenuItemsIntoMappedFile
 @ stdcall ImmReSizeIMCC(long long)
 @ stub ImmRegisterClient
@@ -99,7 +99,7 @@
 @ stub ImmShowSoftKeyboard
 @ stdcall ImmSimulateHotKey(long long)
 @ stub ImmSystemHandler
-@ stub ImmTranslateMessage
+@ stdcall ImmTranslateMessage(long long long long)
 @ stub ImmUnlockClientImc
 @ stdcall ImmUnlockIMC(long)
 @ stdcall ImmUnlockIMCC(long)

@@ -125,7 +125,7 @@ void *Context_GetLinkedContext(void *context, size_t contextSize)
      contextSize);
 }
 
-PCONTEXT_PROPERTY_LIST Context_GetProperties(void *context, size_t contextSize)
+PCONTEXT_PROPERTY_LIST Context_GetProperties(const void *context, size_t contextSize)
 {
     PBASE_CONTEXT ptr = BASE_CONTEXT_FROM_CONTEXT(context, contextSize);
 
@@ -244,7 +244,7 @@ void *ContextList_Add(struct ContextList *list, void *toLink, void *toReplace)
             list->contextInterface->free(toReplace);
         }
         else
-            list_add_tail(&list->contexts, entry);
+            list_add_head(&list->contexts, entry);
         LeaveCriticalSection(&list->cs);
     }
     return context;

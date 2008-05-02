@@ -37,10 +37,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(winecfg);
 
 #define RES_MAXLEN 5 /* the maximum number of characters in a screen dimension. 5 digits should be plenty, what kind of crazy person runs their screen >10,000 pixels across? */
 #define MINDPI 96
-#define MAXDPI 120
+#define MAXDPI 480
 #define DEFDPI 96
 
-static const char logpixels_reg[] = "System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts";
+#define IDT_DPIEDIT 0x1234
+
+static const WCHAR logpixels_reg[] = {'S','y','s','t','e','m','\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\','H','a','r','d','w','a','r','e',' ','P','r','o','f','i','l','e','s','\\','C','u','r','r','e','n','t','\\','S','o','f','t','w','a','r','e','\\','F','o','n','t','s',0};
+static const WCHAR logpixels[] = {'L','o','g','P','i','x','e','l','s',0};
 
 static struct SHADERMODE
 {
@@ -78,7 +81,7 @@ static void update_gui_for_desktop_mode(HWND dialog) {
         char* buf, *bufindex;
 	CheckDlgButton(dialog, IDC_ENABLE_DESKTOP, BST_CHECKED);
 
-        buf = get_reg_key(config_key, keypath("X11 Driver"), "Desktop", "640x480");
+        buf = get_reg_key(config_key, keypath("X11 Driver"), "Desktop", "800x600");
         /* note: this test must match the one in x11drv */
         if( buf[0] != 'n' &&  buf[0] != 'N' &&  buf[0] != 'F' &&  buf[0] != 'f'
                 &&  buf[0] != '0') {
@@ -96,8 +99,8 @@ static void update_gui_for_desktop_mode(HWND dialog) {
                 SetWindowText(GetDlgItem(dialog, IDC_DESKTOP_HEIGHT), bufindex);
             } else {
                 WINE_TRACE("Desktop registry entry is malformed\n");
-                SetWindowText(GetDlgItem(dialog, IDC_DESKTOP_WIDTH), "640");
-                SetWindowText(GetDlgItem(dialog, IDC_DESKTOP_HEIGHT), "480");
+                SetWindowText(GetDlgItem(dialog, IDC_DESKTOP_WIDTH), "800");
+                SetWindowText(GetDlgItem(dialog, IDC_DESKTOP_HEIGHT), "600");
             }
         }
         HeapFree(GetProcessHeap(), 0, buf);
@@ -144,6 +147,14 @@ static void init_dialog(HWND dialog)
 	CheckDlgButton(dialog, IDC_ENABLE_MANAGED, BST_UNCHECKED);
     HeapFree(GetProcessHeap(), 0, buf);
 
+    buf = get_reg_key(config_key, keypath("X11 Driver"), "Decorated", "Y");
+    if (IS_OPTION_TRUE(*buf))
+	CheckDlgButton(dialog, IDC_ENABLE_DECORATED, BST_CHECKED);
+    else
+	CheckDlgButton(dialog, IDC_ENABLE_DECORATED, BST_UNCHECKED);
+    HeapFree(GetProcessHeap(), 0, buf);
+
+
     SendDlgItemMessage(dialog, IDC_D3D_VSHADER_MODE, CB_RESETCONTENT, 0, 0);
     for (it = 0; 0 != D3D_VS_Modes[it].displayStrID; ++it) {
       SendDlgItemMessageW (dialog, IDC_D3D_VSHADER_MODE, CB_ADDSTRING, 0,
@@ -183,12 +194,12 @@ static void set_from_desktop_edits(HWND dialog) {
 
     if (width == NULL || strcmp(width, "") == 0) {
         HeapFree(GetProcessHeap(), 0, width);
-        width = strdupA("640");
+        width = strdupA("800");
     }
     
     if (height == NULL || strcmp(height, "") == 0) {
         HeapFree(GetProcessHeap(), 0, height);
-        height = strdupA("480");
+        height = strdupA("600");
     }
 
     new = HeapAlloc(GetProcessHeap(), 0, strlen(width) + strlen(height) + 2 /* x + terminator */);
@@ -222,6 +233,16 @@ static void on_enable_managed_clicked(HWND dialog) {
     }
 }
 
+static void on_enable_decorated_clicked(HWND dialog) {
+    WINE_TRACE("\n");
+
+    if (IsDlgButtonChecked(dialog, IDC_ENABLE_DECORATED) == BST_CHECKED) {
+        set_reg_key(config_key, keypath("X11 Driver"), "Decorated", "Y");
+    } else {
+        set_reg_key(config_key, keypath("X11 Driver"), "Decorated", "N");
+    }
+}
+
 static void on_dx_mouse_grab_clicked(HWND dialog) {
     if (IsDlgButtonChecked(dialog, IDC_DX_MOUSE_GRAB) == BST_CHECKED) 
         set_reg_key(config_key, keypath("X11 Driver"), "DXGrab", "Y");
@@ -244,8 +265,7 @@ static void on_d3d_pshader_mode_clicked(HWND dialog) {
 static INT read_logpixels_reg(void)
 {
     DWORD dwLogPixels;
-    char *buf  = get_reg_key(HKEY_LOCAL_MACHINE, logpixels_reg,
-                             "LogPixels", NULL);
+    WCHAR *buf = get_reg_keyW(HKEY_LOCAL_MACHINE, logpixels_reg, logpixels, NULL);
     dwLogPixels = buf ? *buf : DEFDPI;
     HeapFree(GetProcessHeap(), 0, buf);
     return dwLogPixels;
@@ -253,18 +273,16 @@ static INT read_logpixels_reg(void)
 
 static void init_dpi_editbox(HWND hDlg)
 {
-    HWND hDpiEditBox = GetDlgItem(hDlg, IDC_RES_DPIEDIT);
     DWORD dwLogpixels;
     char szLogpixels[MAXBUFLEN];
 
     updating_ui = TRUE;
 
     dwLogpixels = read_logpixels_reg();
-    WINE_TRACE("%d\n", (int) dwLogpixels);
+    WINE_TRACE("%u\n", dwLogpixels);
 
-    szLogpixels[0] = 0;
-    sprintf(szLogpixels, "%d", dwLogpixels);
-    SendMessage(hDpiEditBox, WM_SETTEXT, 0, (LPARAM) szLogpixels);
+    sprintf(szLogpixels, "%u", dwLogpixels);
+    SetDlgItemText(hDlg, IDC_RES_DPIEDIT, szLogpixels);
 
     updating_ui = FALSE;
 }
@@ -284,6 +302,40 @@ static void init_trackbar(HWND hDlg)
     updating_ui = FALSE;
 }
 
+static void update_dpi_trackbar_from_edit(HWND hDlg, BOOL fix)
+{
+    DWORD dpi;
+
+    updating_ui = TRUE;
+
+    dpi = GetDlgItemInt(hDlg, IDC_RES_DPIEDIT, NULL, FALSE);
+
+    if (fix)
+    {
+        DWORD fixed_dpi = dpi;
+
+        if (dpi < MINDPI) fixed_dpi = MINDPI;
+        if (dpi > MAXDPI) fixed_dpi = MAXDPI;
+
+        if (fixed_dpi != dpi)
+        {
+            char buf[16];
+
+            dpi = fixed_dpi;
+            sprintf(buf, "%u", dpi);
+            SetDlgItemText(hDlg, IDC_RES_DPIEDIT, buf);
+        }
+    }
+
+    if (dpi >= MINDPI && dpi <= MAXDPI)
+    {
+        SendDlgItemMessage(hDlg, IDC_RES_TRACKBAR, TBM_SETPOS, TRUE, dpi);
+        set_reg_key_dwordW(HKEY_LOCAL_MACHINE, logpixels_reg, logpixels, dpi);
+    }
+
+    updating_ui = FALSE;
+}
+
 INT_PTR CALLBACK
 GraphDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -296,6 +348,14 @@ GraphDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
         case WM_SHOWWINDOW:
             set_window_title(hDlg);
             break;
+
+        case WM_TIMER:
+            if (wParam == IDT_DPIEDIT)
+            {
+                KillTimer(hDlg, IDT_DPIEDIT);
+                update_dpi_trackbar_from_edit(hDlg, TRUE);
+            }
+            break;
             
 	case WM_COMMAND:
 	    switch(HIWORD(wParam)) {
@@ -304,6 +364,11 @@ GraphDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		    SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
 		    if ( ((LOWORD(wParam) == IDC_DESKTOP_WIDTH) || (LOWORD(wParam) == IDC_DESKTOP_HEIGHT)) && !updating_ui )
 			set_from_desktop_edits(hDlg);
+                    else if (LOWORD(wParam) == IDC_RES_DPIEDIT)
+                    {
+                        update_dpi_trackbar_from_edit(hDlg, FALSE);
+                        SetTimer(hDlg, IDT_DPIEDIT, 1500, NULL);
+                    }
 		    break;
 		}
 		case BN_CLICKED: {
@@ -312,6 +377,7 @@ GraphDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		    switch(LOWORD(wParam)) {
 			case IDC_ENABLE_DESKTOP: on_enable_desktop_clicked(hDlg); break;
                         case IDC_ENABLE_MANAGED: on_enable_managed_clicked(hDlg); break;
+                        case IDC_ENABLE_DECORATED: on_enable_decorated_clicked(hDlg); break;
 			case IDC_DX_MOUSE_GRAB:  on_dx_mouse_grab_clicked(hDlg); break;
 		        case IDC_D3D_PSHADER_MODE: on_d3d_pshader_mode_clicked(hDlg); break;
 		    }
@@ -357,7 +423,7 @@ GraphDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		    buf[0] = 0;
 		    sprintf(buf, "%d", i);
 		    SendMessage(GetDlgItem(hDlg, IDC_RES_DPIEDIT), WM_SETTEXT, 0, (LPARAM) buf);
-		    set_reg_key_dword(HKEY_LOCAL_MACHINE, logpixels_reg, "LogPixels", i);
+		    set_reg_key_dwordW(HKEY_LOCAL_MACHINE, logpixels_reg, logpixels, i);
 		    break;
 		}
 	    }

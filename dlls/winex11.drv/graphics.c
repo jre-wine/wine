@@ -25,6 +25,7 @@
 
 #include "config.h"
 
+#include <stdarg.h>
 #include <math.h>
 #ifdef HAVE_FLOAT_H
 # include <float.h>
@@ -35,9 +36,14 @@
 #endif
 #include <string.h>
 
+#include "windef.h"
+#include "winbase.h"
+#include "winreg.h"
+
 #include "x11drv.h"
 #include "x11font.h"
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(graphics);
 
@@ -242,15 +248,16 @@ BOOL X11DRV_SetupGCForPen( X11DRV_PDEVICE *physDev )
     default:
 	val.join_style = JoinRound;
     }
-    wine_tsx11_lock();
+
     if (physDev->pen.dash_len)
-    {
-        XSetDashes( gdi_display, physDev->gc, 0, physDev->pen.dashes, physDev->pen.dash_len );
         val.line_style = ((GetBkMode(physDev->hdc) == OPAQUE) && (!physDev->pen.ext))
                          ? LineDoubleDash : LineOnOffDash;
-    }
-    else val.line_style = LineSolid;
+    else
+        val.line_style = LineSolid;
 
+    wine_tsx11_lock();
+    if (physDev->pen.dash_len)
+        XSetDashes( gdi_display, physDev->gc, 0, physDev->pen.dashes, physDev->pen.dash_len );
     XChangeGC( gdi_display, physDev->gc,
 	       GCFunction | GCForeground | GCBackground | GCLineWidth |
 	       GCLineStyle | GCCapStyle | GCJoinStyle | GCFillStyle, &val );
@@ -334,7 +341,7 @@ X11DRV_LineTo( X11DRV_PDEVICE *physDev, INT x, INT y )
 
     if (X11DRV_SetupGCForPen( physDev )) {
 	/* Update the pixmap from the DIB section */
-	X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+	X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
         GetCurrentPositionEx( physDev->hdc, &pt[0] );
         pt[1].x = x;
@@ -430,7 +437,7 @@ X11DRV_DrawArc( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
     if (idiff_angle <= 0) idiff_angle += 360 * 64;
 
     /* Update the pixmap from the DIB section */
-    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
       /* Fill arc with brush if Chord() or Pie() */
 
@@ -590,7 +597,7 @@ X11DRV_Ellipse( X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT botto
     physDev->pen.width = width;
 
     /* Update the pixmap from the DIB section */
-    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
     if (X11DRV_SetupGCForBrush( physDev ))
     {
@@ -659,7 +666,7 @@ X11DRV_Rectangle(X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bott
         physDev->pen.linejoin = PS_JOIN_MITER;
 
     /* Update the pixmap from the DIB section */
-    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
     if ((rc.right > rc.left + width) && (rc.bottom > rc.top + width))
     {
@@ -746,11 +753,11 @@ X11DRV_RoundRect( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
     physDev->pen.endcap = PS_ENDCAP_SQUARE;
 
     /* Update the pixmap from the DIB section */
-    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
-    wine_tsx11_lock();
     if (X11DRV_SetupGCForBrush( physDev ))
     {
+        wine_tsx11_lock();
         if (ell_width > (rc.right-rc.left) )
             if (ell_height > (rc.bottom-rc.top) )
                 XFillArc( gdi_display, physDev->drawable, physDev->gc,
@@ -812,6 +819,7 @@ X11DRV_RoundRect( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
                             rc.right - rc.left - 2,
                             rc.bottom - rc.top - ell_height - 1);
         }
+        wine_tsx11_unlock();
 	update = TRUE;
     }
     /* FIXME: this could be done with on X call
@@ -825,6 +833,7 @@ X11DRV_RoundRect( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
      */
     if (X11DRV_SetupGCForPen( physDev ))
     {
+        wine_tsx11_lock();
         if (ell_width > (rc.right-rc.left) )
             if (ell_height > (rc.bottom-rc.top) )
                 XDrawArc( gdi_display, physDev->drawable, physDev->gc,
@@ -888,9 +897,9 @@ X11DRV_RoundRect( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
                        physDev->dc_rect.left + rc.left,
                        physDev->dc_rect.top + rc.bottom - (ell_height+1) / 2);
 	}
+        wine_tsx11_unlock();
 	update = TRUE;
     }
-    wine_tsx11_unlock();
     /* Update the DIBSection from the pixmap */
     X11DRV_UnlockDIBSection(physDev, update);
 
@@ -915,7 +924,7 @@ X11DRV_SetPixel( X11DRV_PDEVICE *physDev, INT x, INT y, COLORREF color )
     pixel = X11DRV_PALETTE_ToPhysical( physDev, color );
 
     /* Update the pixmap from the DIB section */
-    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
     /* inefficient but simple... */
     wine_tsx11_lock();
@@ -949,7 +958,7 @@ X11DRV_GetPixel( X11DRV_PDEVICE *physDev, INT x, INT y )
     LPtoDP( physDev->hdc, &pt, 1 );
 
     /* Update the pixmap from the DIB section */
-    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
     wine_tsx11_lock();
     if (memdc)
@@ -999,7 +1008,7 @@ X11DRV_PaintRgn( X11DRV_PDEVICE *physDev, HRGN hrgn )
             rect[i].y += physDev->dc_rect.top;
         }
 
-        X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+        X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
         wine_tsx11_lock();
         XFillRectangles( gdi_display, physDev->drawable, physDev->gc, rect, data->rdh.nCount );
         wine_tsx11_unlock();
@@ -1033,7 +1042,7 @@ X11DRV_Polyline( X11DRV_PDEVICE *physDev, const POINT* pt, INT count )
 
     if (X11DRV_SetupGCForPen ( physDev ))
     {
-        X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+        X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
         wine_tsx11_lock();
         XDrawLines( gdi_display, physDev->drawable, physDev->gc,
                     points, count, CoordModeOrigin );
@@ -1071,7 +1080,7 @@ X11DRV_Polygon( X11DRV_PDEVICE *physDev, const POINT* pt, INT count )
     points[count] = points[0];
 
     /* Update the pixmap from the DIB section */
-    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+    X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
     if (X11DRV_SetupGCForBrush( physDev ))
     {
@@ -1122,7 +1131,7 @@ X11DRV_PolyPolygon( X11DRV_PDEVICE *physDev, const POINT* pt, const INT* counts,
 	XPoint *points;
 
 	/* Update the pixmap from the DIB section */
-	X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+	X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
 	for (i = 0; i < polygons; i++) if (counts[i] > max) max = counts[i];
         if (!(points = HeapAlloc( GetProcessHeap(), 0, sizeof(XPoint) * (max+1) )))
@@ -1168,7 +1177,7 @@ X11DRV_PolyPolyline( X11DRV_PDEVICE *physDev, const POINT* pt, const DWORD* coun
         XPoint *points;
 
 	/* Update the pixmap from the DIB section */
-    	X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+	X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
         for (i = 0; i < polylines; i++) if (counts[i] > max) max = counts[i];
         if (!(points = HeapAlloc( GetProcessHeap(), 0, sizeof(XPoint) * max )))
@@ -1294,20 +1303,20 @@ X11DRV_ExtFloodFill( X11DRV_PDEVICE *physDev, INT x, INT y, COLORREF color,
     if (!PtInRegion( physDev->region, pt.x, pt.y )) return FALSE;
     GetRgnBox( physDev->region, &rect );
 
-    wine_tsx11_lock();
     X11DRV_expect_error( gdi_display, ExtFloodFillXGetImageErrorHandler, NULL );
     image = XGetImage( gdi_display, physDev->drawable,
                        physDev->dc_rect.left + rect.left, physDev->dc_rect.top + rect.top,
                        rect.right - rect.left, rect.bottom - rect.top,
                        AllPlanes, ZPixmap );
     if(X11DRV_check_error()) image = NULL;
-    wine_tsx11_unlock();
     if (!image) return FALSE;
 
     if (X11DRV_SetupGCForBrush( physDev ))
     {
+        unsigned long pixel = X11DRV_PALETTE_ToPhysical( physDev, color );
+
 	/* Update the pixmap from the DIB section */
-	X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod, FALSE);
+	X11DRV_LockDIBSection(physDev, DIB_Status_GdiMod);
 
           /* ROP mode is always GXcopy for flood-fill */
         wine_tsx11_lock();
@@ -1317,8 +1326,7 @@ X11DRV_ExtFloodFill( X11DRV_PDEVICE *physDev, INT x, INT y, COLORREF color,
                                  pt.y - rect.top,
                                  physDev->dc_rect.left + rect.left,
                                  physDev->dc_rect.top + rect.top,
-                                 X11DRV_PALETTE_ToPhysical( physDev, color ),
-                                 fillType );
+                                 pixel, fillType );
         wine_tsx11_unlock();
         /* Update the DIBSection of the dc's bitmap */
         X11DRV_UnlockDIBSection(physDev, TRUE);
@@ -1371,4 +1379,119 @@ DWORD X11DRV_SetDCOrg( X11DRV_PDEVICE *physDev, INT x, INT y )
     physDev->dc_rect.left = x - physDev->drawable_rect.left;
     physDev->dc_rect.top = y - physDev->drawable_rect.top;
     return ret;
+}
+
+static unsigned char *get_icm_profile( unsigned long *size )
+{
+    Atom type;
+    int format;
+    unsigned long count, remaining;
+    unsigned char *profile, *ret = NULL;
+
+    wine_tsx11_lock();
+    XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display),
+                        x11drv_atom(_ICC_PROFILE), 0, ~0UL, False, AnyPropertyType,
+                        &type, &format, &count, &remaining, &profile );
+    if (format && count)
+    {
+        *size = get_property_size( format, count );
+        if ((ret = HeapAlloc( GetProcessHeap(), 0, *size ))) memcpy( ret, profile, *size );
+        XFree( profile );
+    }
+    wine_tsx11_unlock();
+    return ret;
+}
+
+typedef struct
+{
+    unsigned int unknown[6];
+    unsigned int state[5];
+    unsigned int count[2];
+    unsigned char buffer[64];
+} sha_ctx;
+
+extern void WINAPI A_SHAInit( sha_ctx * );
+extern void WINAPI A_SHAUpdate( sha_ctx *, const unsigned char *, unsigned int );
+extern void WINAPI A_SHAFinal( sha_ctx *, unsigned char * );
+
+/***********************************************************************
+ *              GetICMProfile (X11DRV.@)
+ */
+BOOL X11DRV_GetICMProfile( X11DRV_PDEVICE *physDev, LPDWORD size, LPWSTR filename )
+{
+    static const WCHAR path[] =
+        {'\\','s','p','o','o','l','\\','d','r','i','v','e','r','s',
+         '\\','c','o','l','o','r','\\',0};
+    static const WCHAR srgb[] =
+        {'s','R','G','B',' ','C','o','l','o','r',' ','S','p','a','c','e',' ',
+         'P','r','o','f','i','l','e','.','i','c','m',0};
+    static const WCHAR mntr[] =
+        {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
+         'W','i','n','d','o','w','s',' ','N','T','\\','C','u','r','r','e','n','t',
+         'V','e','r','s','i','o','n','\\','I','C','M','\\','m','n','t','r',0};
+
+    HKEY hkey;
+    DWORD required, len;
+    WCHAR profile[MAX_PATH], fullname[2*MAX_PATH + sizeof(path)/sizeof(WCHAR)];
+    unsigned char *buffer;
+    unsigned long buflen;
+
+    if (!size) return FALSE;
+
+    GetSystemDirectoryW( fullname, MAX_PATH );
+    strcatW( fullname, path );
+
+    len = sizeof(profile)/sizeof(WCHAR);
+    if (!RegCreateKeyExW( HKEY_LOCAL_MACHINE, mntr, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &hkey, NULL ) &&
+        !RegEnumValueW( hkey, 0, profile, &len, NULL, NULL, NULL, NULL )) /* FIXME handle multiple values */
+    {
+        strcatW( fullname, profile );
+        RegCloseKey( hkey );
+    }
+    else if ((buffer = get_icm_profile( &buflen )))
+    {
+        static const WCHAR fmt[] = {'%','0','2','x',0};
+        static const WCHAR icm[] = {'.','i','c','m',0};
+
+        unsigned char sha1sum[20];
+        unsigned int i;
+        sha_ctx ctx;
+        HANDLE file;
+
+        A_SHAInit( &ctx );
+        A_SHAUpdate( &ctx, buffer, buflen );
+        A_SHAFinal( &ctx, sha1sum );
+
+        for (i = 0; i < sizeof(sha1sum); i++) sprintfW( &profile[i * 2], fmt, sha1sum[i] );
+        memcpy( &profile[i * 2], icm, sizeof(icm) );
+
+        strcatW( fullname, profile );
+        file = CreateFileW( fullname, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, 0 );
+        if (file != INVALID_HANDLE_VALUE)
+        {
+            DWORD written;
+
+            if (!WriteFile( file, buffer, buflen, &written, NULL ) || written != buflen)
+                ERR( "Unable to write color profile\n" );
+            CloseHandle( file );
+        }
+        HeapFree( GetProcessHeap(), 0, buffer );
+    }
+    else strcatW( fullname, srgb );
+
+    required = strlenW( fullname ) + 1;
+    if (*size < required)
+    {
+        *size = required;
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+    if (filename)
+    {
+        strcpyW( filename, fullname );
+        if (GetFileAttributesW( filename ) == INVALID_FILE_ATTRIBUTES)
+            WARN( "color profile not found\n" );
+    }
+    *size = required;
+    return TRUE;
 }

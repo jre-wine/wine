@@ -153,6 +153,57 @@ int CDECL MSVCRT_strcoll( const char* str1, const char* str2 )
 }
 
 /*********************************************************************
+ *      strcpy_s (MSVCRT.@)
+ */
+int CDECL MSVCRT_strcpy_s( char* dst, MSVCRT_size_t elem, const char* src )
+{
+    MSVCRT_size_t i;
+    if(!elem) return MSVCRT_EINVAL;
+    if(!dst) return MSVCRT_EINVAL;
+    if(!src)
+    {
+        dst[0] = '\0';
+        return MSVCRT_EINVAL;
+    }
+
+    for(i = 0; i < elem; i++)
+    {
+        if((dst[i] = src[i]) == '\0') return 0;
+    }
+    dst[0] = '\0';
+    return MSVCRT_ERANGE;
+}
+
+/*********************************************************************
+ *      strcat_s (MSVCRT.@)
+ */
+int CDECL MSVCRT_strcat_s( char* dst, MSVCRT_size_t elem, const char* src )
+{
+    MSVCRT_size_t i, j;
+    if(!dst) return MSVCRT_EINVAL;
+    if(elem == 0) return MSVCRT_EINVAL;
+    if(!src)
+    {
+        dst[0] = '\0';
+        return MSVCRT_EINVAL;
+    }
+
+    for(i = 0; i < elem; i++)
+    {
+        if(dst[i] == '\0')
+        {
+            for(j = 0; (j + i) < elem; j++)
+            {
+                if((dst[j + i] = src[j]) == '\0') return 0;
+            }
+        }
+    }
+    /* Set the first element to 0, not the first element after the skipped part */
+    dst[0] = '\0';
+    return MSVCRT_ERANGE;
+}
+
+/*********************************************************************
  *		strxfrm (MSVCRT.@)
  */
 MSVCRT_size_t CDECL MSVCRT_strxfrm( char *dest, const char *src, MSVCRT_size_t len )
@@ -174,7 +225,7 @@ int CDECL MSVCRT__stricoll( const char* str1, const char* str2 )
 /********************************************************************
  *		_atoldbl (MSVCRT.@)
  */
-int CDECL MSVCRT__atoldbl(_LDOUBLE * value, char * str)
+int CDECL MSVCRT__atoldbl(MSVCRT__LDOUBLE *value, const char *str)
 {
   /* FIXME needs error checking for huge/small values */
 #ifdef HAVE_STRTOLD
@@ -184,4 +235,18 @@ int CDECL MSVCRT__atoldbl(_LDOUBLE * value, char * str)
   FIXME("stub, str %s value %p\n",str,value);
 #endif
   return 0;
+}
+
+/********************************************************************
+ *		__STRINGTOLD (MSVCRT.@)
+ */
+int CDECL __STRINGTOLD( MSVCRT__LDOUBLE *value, char **endptr, const char *str, int flags )
+{
+#ifdef HAVE_STRTOLD
+    FIXME("%p %p %s %x partial stub\n", value, endptr, str, flags );
+    value->x = strtold(str,endptr);
+#else
+    FIXME("%p %p %s %x stub\n", value, endptr, str, flags );
+#endif
+    return 0;
 }

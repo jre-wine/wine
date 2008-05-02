@@ -53,13 +53,82 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
-#include "thread.h"
+#include "winternl.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+/* creates a struct security_descriptor and contained information in one contiguous piece of memory */
+NTSTATUS NTDLL_create_struct_sd(PSECURITY_DESCRIPTOR nt_sd, struct security_descriptor **server_sd,
+                                data_size_t *server_sd_len)
+{
+    unsigned int len;
+    PSID owner, group;
+    ACL *dacl, *sacl;
+    BOOLEAN owner_present, group_present, dacl_present, sacl_present;
+    BOOLEAN defaulted;
+    NTSTATUS status;
+    unsigned char *ptr;
+
+    if (!nt_sd)
+    {
+        *server_sd = NULL;
+        *server_sd_len = 0;
+        return STATUS_SUCCESS;
+    }
+
+    len = sizeof(struct security_descriptor);
+
+    status = RtlGetOwnerSecurityDescriptor(nt_sd, &owner, &owner_present);
+    if (status != STATUS_SUCCESS) return status;
+    status = RtlGetGroupSecurityDescriptor(nt_sd, &group, &group_present);
+    if (status != STATUS_SUCCESS) return status;
+    status = RtlGetSaclSecurityDescriptor(nt_sd, &sacl_present, &sacl, &defaulted);
+    if (status != STATUS_SUCCESS) return status;
+    status = RtlGetDaclSecurityDescriptor(nt_sd, &dacl_present, &dacl, &defaulted);
+    if (status != STATUS_SUCCESS) return status;
+
+    if (owner_present)
+        len += RtlLengthSid(owner);
+    if (group_present)
+        len += RtlLengthSid(group);
+    if (sacl_present && sacl)
+        len += sacl->AclSize;
+    if (dacl_present && dacl)
+        len += dacl->AclSize;
+
+    /* fix alignment for the Unicode name that follows the structure */
+    len = (len + sizeof(WCHAR) - 1) & ~(sizeof(WCHAR) - 1);
+    *server_sd = RtlAllocateHeap(GetProcessHeap(), 0, len);
+    if (!*server_sd) return STATUS_NO_MEMORY;
+
+    (*server_sd)->control = ((SECURITY_DESCRIPTOR *)nt_sd)->Control & ~SE_SELF_RELATIVE;
+    (*server_sd)->owner_len = owner_present ? RtlLengthSid(owner) : 0;
+    (*server_sd)->group_len = group_present ? RtlLengthSid(group) : 0;
+    (*server_sd)->sacl_len = (sacl_present && sacl) ? sacl->AclSize : 0;
+    (*server_sd)->dacl_len = (dacl_present && dacl) ? dacl->AclSize : 0;
+
+    ptr = (unsigned char *)(*server_sd + 1);
+    memcpy(ptr, owner, (*server_sd)->owner_len);
+    ptr += (*server_sd)->owner_len;
+    memcpy(ptr, group, (*server_sd)->group_len);
+    ptr += (*server_sd)->group_len;
+    memcpy(ptr, sacl, (*server_sd)->sacl_len);
+    ptr += (*server_sd)->sacl_len;
+    memcpy(ptr, dacl, (*server_sd)->dacl_len);
+
+    *server_sd_len = len;
+
+    return STATUS_SUCCESS;
+}
+
+/* frees a struct security_descriptor allocated by NTDLL_create_struct_sd */
+void NTDLL_free_struct_sd(struct security_descriptor *server_sd)
+{
+    RtlFreeHeap(GetProcessHeap(), 0, server_sd);
+}
 
 /*
  *	Semaphores
@@ -76,23 +145,38 @@ NTSTATUS WINAPI NtCreateSemaphore( OUT PHANDLE SemaphoreHandle,
 {
     DWORD len = attr && attr->ObjectName ? attr->ObjectName->Length : 0;
     NTSTATUS ret;
+    struct object_attributes objattr;
+    struct security_descriptor *sd = NULL;
 
     if (MaximumCount <= 0 || InitialCount < 0 || InitialCount > MaximumCount)
         return STATUS_INVALID_PARAMETER;
     if (len >= MAX_PATH * sizeof(WCHAR)) return STATUS_NAME_TOO_LONG;
 
+    objattr.rootdir =  attr ? attr->RootDirectory : 0;
+    objattr.sd_len = 0;
+    objattr.name_len = len;
+    if (attr)
+    {
+        ret = NTDLL_create_struct_sd( attr->SecurityDescriptor, &sd, &objattr.sd_len );
+        if (ret != STATUS_SUCCESS) return ret;
+    }
+
     SERVER_START_REQ( create_semaphore )
     {
         req->access  = access;
         req->attributes = (attr) ? attr->Attributes : 0;
-        req->rootdir = attr ? attr->RootDirectory : 0;
         req->initial = InitialCount;
         req->max     = MaximumCount;
+        wine_server_add_data( req, &objattr, sizeof(objattr) );
+        if (objattr.sd_len) wine_server_add_data( req, sd, objattr.sd_len );
         if (len) wine_server_add_data( req, attr->ObjectName->Buffer, len );
         ret = wine_server_call( req );
         *SemaphoreHandle = reply->handle;
     }
     SERVER_END_REQ;
+
+    NTDLL_free_struct_sd( sd );
+
     return ret;
 }
 
@@ -172,21 +256,36 @@ NTSTATUS WINAPI NtCreateEvent(
 {
     DWORD len = attr && attr->ObjectName ? attr->ObjectName->Length : 0;
     NTSTATUS ret;
+    struct security_descriptor *sd = NULL;
+    struct object_attributes objattr;
 
     if (len >= MAX_PATH * sizeof(WCHAR)) return STATUS_NAME_TOO_LONG;
+
+    objattr.rootdir = attr ? attr->RootDirectory : 0;
+    objattr.sd_len = 0;
+    objattr.name_len = len;
+    if (attr)
+    {
+        ret = NTDLL_create_struct_sd( attr->SecurityDescriptor, &sd, &objattr.sd_len );
+        if (ret != STATUS_SUCCESS) return ret;
+    }
 
     SERVER_START_REQ( create_event )
     {
         req->access = DesiredAccess;
         req->attributes = (attr) ? attr->Attributes : 0;
-        req->rootdir = attr ? attr->RootDirectory : 0;
         req->manual_reset = ManualReset;
         req->initial_state = InitialState;
+        wine_server_add_data( req, &objattr, sizeof(objattr) );
+        if (objattr.sd_len) wine_server_add_data( req, sd, objattr.sd_len );
         if (len) wine_server_add_data( req, attr->ObjectName->Buffer, len );
         ret = wine_server_call( req );
         *EventHandle = reply->handle;
     }
     SERVER_END_REQ;
+
+    NTDLL_free_struct_sd( sd );
+
     return ret;
 }
 
@@ -319,22 +418,37 @@ NTSTATUS WINAPI NtCreateMutant(OUT HANDLE* MutantHandle,
                                IN const OBJECT_ATTRIBUTES* attr OPTIONAL,
                                IN BOOLEAN InitialOwner)
 {
-    NTSTATUS    status;
-    DWORD       len = attr && attr->ObjectName ? attr->ObjectName->Length : 0;
+    NTSTATUS status;
+    DWORD len = attr && attr->ObjectName ? attr->ObjectName->Length : 0;
+    struct security_descriptor *sd = NULL;
+    struct object_attributes objattr;
 
     if (len >= MAX_PATH * sizeof(WCHAR)) return STATUS_NAME_TOO_LONG;
+
+    objattr.rootdir = attr ? attr->RootDirectory : 0;
+    objattr.sd_len = 0;
+    objattr.name_len = len;
+    if (attr)
+    {
+        status = NTDLL_create_struct_sd( attr->SecurityDescriptor, &sd, &objattr.sd_len );
+        if (status != STATUS_SUCCESS) return status;
+    }
 
     SERVER_START_REQ( create_mutex )
     {
         req->access  = access;
         req->attributes = (attr) ? attr->Attributes : 0;
-        req->rootdir = attr ? attr->RootDirectory : 0;
         req->owned   = InitialOwner;
+        wine_server_add_data( req, &objattr, sizeof(objattr) );
+        if (objattr.sd_len) wine_server_add_data( req, sd, objattr.sd_len );
         if (len) wine_server_add_data( req, attr->ObjectName->Buffer, len );
         status = wine_server_call( req );
         *MutantHandle = reply->handle;
     }
     SERVER_END_REQ;
+
+    NTDLL_free_struct_sd( sd );
+
     return status;
 }
 
@@ -672,7 +786,8 @@ static BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
         result->type = call->type;
         result->async_io.status = call->async_io.func( call->async_io.user,
                                                        call->async_io.sb,
-                                                       call->async_io.status );
+                                                       call->async_io.status,
+                                                       &result->async_io.total );
         break;
     case APC_VIRTUAL_ALLOC:
         result->type = call->type;
@@ -754,8 +869,7 @@ static BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
         result->type = call->type;
         result->map_view.addr   = call->map_view.addr;
         result->map_view.size   = call->map_view.size;
-        offset.u.LowPart        = call->map_view.offset_low;
-        offset.u.HighPart       = call->map_view.offset_high;
+        offset.QuadPart         = call->map_view.offset;
         result->map_view.status = NtMapViewOfSection( call->map_view.handle, NtCurrentProcess(),
                                                       &result->map_view.addr, call->map_view.zero_bits,
                                                       0, &offset, &result->map_view.size, ViewShare,
@@ -1008,9 +1122,28 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
 NTSTATUS WINAPI NtCreateIoCompletion( PHANDLE CompletionPort, ACCESS_MASK DesiredAccess,
                                       POBJECT_ATTRIBUTES ObjectAttributes, ULONG NumberOfConcurrentThreads )
 {
-    FIXME("(%p, %x, %p, %d)\n", CompletionPort, DesiredAccess,
+    NTSTATUS status;
+
+    TRACE("(%p, %x, %p, %d)\n", CompletionPort, DesiredAccess,
           ObjectAttributes, NumberOfConcurrentThreads);
-    return STATUS_NOT_IMPLEMENTED;
+
+    if (!CompletionPort)
+        return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( create_completion )
+    {
+        req->access     = DesiredAccess;
+        req->attributes = ObjectAttributes ? ObjectAttributes->Attributes : 0;
+        req->rootdir    = ObjectAttributes ? ObjectAttributes->RootDirectory : NULL;
+        req->concurrent = NumberOfConcurrentThreads;
+        if (ObjectAttributes && ObjectAttributes->ObjectName)
+            wine_server_add_data( req, ObjectAttributes->ObjectName->Buffer,
+                                       ObjectAttributes->ObjectName->Length );
+        if (!(status = wine_server_call( req )))
+            *CompletionPort = reply->handle;
+    }
+    SERVER_END_REQ;
+    return status;
 }
 
 /******************************************************************
@@ -1028,11 +1161,24 @@ NTSTATUS WINAPI NtCreateIoCompletion( PHANDLE CompletionPort, ACCESS_MASK Desire
  */
 NTSTATUS WINAPI NtSetIoCompletion( HANDLE CompletionPort, ULONG_PTR CompletionKey,
                                    ULONG_PTR CompletionValue, NTSTATUS Status,
-                                   ULONG NumberOfBytesToTransfer )
+                                   ULONG NumberOfBytesTransferred )
 {
-    FIXME("(%p, %lx, %lx, %x, %d)\n", CompletionPort, CompletionKey,
-          CompletionValue, Status, NumberOfBytesToTransfer);
-    return STATUS_NOT_IMPLEMENTED;
+    NTSTATUS status;
+
+    TRACE("(%p, %lx, %lx, %x, %d)\n", CompletionPort, CompletionKey,
+          CompletionValue, Status, NumberOfBytesTransferred);
+
+    SERVER_START_REQ( add_completion )
+    {
+        req->handle      = CompletionPort;
+        req->ckey        = CompletionKey;
+        req->cvalue      = CompletionValue;
+        req->status      = Status;
+        req->information = NumberOfBytesTransferred;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
 }
 
 /******************************************************************
@@ -1053,9 +1199,31 @@ NTSTATUS WINAPI NtRemoveIoCompletion( HANDLE CompletionPort, PULONG_PTR Completi
                                       PULONG_PTR CompletionValue, PIO_STATUS_BLOCK iosb,
                                       PLARGE_INTEGER WaitTime )
 {
-    FIXME("(%p, %p, %p, %p, %p)\n", CompletionPort, CompletionKey,
+    NTSTATUS status;
+
+    TRACE("(%p, %p, %p, %p, %p)\n", CompletionPort, CompletionKey,
           CompletionValue, iosb, WaitTime);
-    return STATUS_NOT_IMPLEMENTED;
+
+    for(;;)
+    {
+        SERVER_START_REQ( remove_completion )
+        {
+            req->handle = CompletionPort;
+            if (!(status = wine_server_call( req )))
+            {
+                *CompletionKey    = reply->ckey;
+                *CompletionValue  = reply->cvalue;
+                iosb->Information = reply->information;
+                iosb->u.Status    = reply->status;
+            }
+        }
+        SERVER_END_REQ;
+        if (status != STATUS_PENDING) break;
+
+        status = NtWaitForSingleObject( CompletionPort, FALSE, WaitTime );
+        if (status != WAIT_OBJECT_0) break;
+    }
+    return status;
 }
 
 /******************************************************************
@@ -1073,8 +1241,24 @@ NTSTATUS WINAPI NtRemoveIoCompletion( HANDLE CompletionPort, PULONG_PTR Completi
 NTSTATUS WINAPI NtOpenIoCompletion( PHANDLE CompletionPort, ACCESS_MASK DesiredAccess,
                                     POBJECT_ATTRIBUTES ObjectAttributes )
 {
-    FIXME("(%p, 0x%x, %p)\n", CompletionPort, DesiredAccess, ObjectAttributes);
-    return STATUS_NOT_IMPLEMENTED;
+    NTSTATUS status;
+
+    TRACE("(%p, 0x%x, %p)\n", CompletionPort, DesiredAccess, ObjectAttributes);
+
+    if (!CompletionPort || !ObjectAttributes || !ObjectAttributes->ObjectName)
+        return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( open_completion )
+    {
+        req->access     = DesiredAccess;
+        req->rootdir    = ObjectAttributes->RootDirectory;
+        wine_server_add_data( req, ObjectAttributes->ObjectName->Buffer,
+                                   ObjectAttributes->ObjectName->Length );
+        if (!(status = wine_server_call( req )))
+            *CompletionPort = reply->handle;
+    }
+    SERVER_END_REQ;
+    return status;
 }
 
 /******************************************************************
@@ -1094,7 +1278,52 @@ NTSTATUS WINAPI NtOpenIoCompletion( PHANDLE CompletionPort, ACCESS_MASK DesiredA
 NTSTATUS WINAPI NtQueryIoCompletion( HANDLE CompletionPort, IO_COMPLETION_INFORMATION_CLASS InformationClass,
                                      PVOID CompletionInformation, ULONG BufferLength, PULONG RequiredLength )
 {
-    FIXME("(%p, %d, %p, 0x%x, %p)\n", CompletionPort, InformationClass, CompletionInformation,
-            BufferLength, RequiredLength);
-    return STATUS_NOT_IMPLEMENTED;
+    NTSTATUS status;
+
+    TRACE("(%p, %d, %p, 0x%x, %p)\n", CompletionPort, InformationClass, CompletionInformation,
+          BufferLength, RequiredLength);
+
+    if (!CompletionInformation) return STATUS_INVALID_PARAMETER;
+    switch( InformationClass )
+    {
+        case IoCompletionBasicInformation:
+            {
+                ULONG *info = (ULONG *)CompletionInformation;
+
+                if (RequiredLength) *RequiredLength = sizeof(*info);
+                if (BufferLength != sizeof(*info))
+                    status = STATUS_INFO_LENGTH_MISMATCH;
+                else
+                {
+                    SERVER_START_REQ( query_completion )
+                    {
+                        req->handle = CompletionPort;
+                        if (!(status = wine_server_call( req )))
+                            *info = reply->depth;
+                    }
+                    SERVER_END_REQ;
+                }
+            }
+            break;
+        default:
+            status = STATUS_INVALID_PARAMETER;
+            break;
+    }
+    return status;
+}
+
+NTSTATUS NTDLL_AddCompletion( HANDLE hFile, ULONG_PTR CompletionValue, NTSTATUS CompletionStatus, ULONG_PTR Information )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( add_fd_completion )
+    {
+        req->handle      = hFile;
+        req->cvalue      = CompletionValue;
+        req->status      = CompletionStatus;
+        req->information = Information;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
 }

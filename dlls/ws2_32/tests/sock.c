@@ -238,7 +238,7 @@ static char* test_buffer ( char *buf, int chunk_size, int n_chunks )
 
 /*
  * This routine is called when a client / server does not expect any more data,
- * but needs to acknowedge the closing of the connection (by reasing 0 bytes).
+ * but needs to acknowledge the closing of the connection (by reading 0 bytes).
  */
 static void read_zero_bytes ( SOCKET s )
 {
@@ -650,17 +650,17 @@ static void WINAPI event_client ( client_params *par )
     event = WSACreateEvent ();
     WSAEventSelect ( mem->s, event, FD_CONNECT );
     tmp = connect ( mem->s, (struct sockaddr*) &mem->addr, sizeof ( mem->addr ) );
-    if ( tmp != 0 && ( err = WSAGetLastError () ) != WSAEWOULDBLOCK )
-        ok ( 0, "event_client (%x): connect error: %d\n", id, err );
-
-    tmp = WaitForSingleObject ( event, INFINITE );
-    ok ( tmp == WAIT_OBJECT_0, "event_client (%x): wait for connect event failed: %d\n", id, tmp );
-    err = WSAEnumNetworkEvents ( mem->s, event, &wsa_events );
-    wsa_ok ( err, 0 ==, "event_client (%x): WSAEnumNetworkEvents error: %d\n" );
-
-    err = wsa_events.iErrorCode[ FD_CONNECT_BIT ];
-    ok ( err == 0, "event_client (%x): connect error: %d\n", id, err );
-    if ( err ) goto out;
+    if ( tmp != 0 ) {
+        err = WSAGetLastError ();
+        ok ( err == WSAEWOULDBLOCK, "event_client (%x): connect error: %d\n", id, err );
+        tmp = WaitForSingleObject ( event, INFINITE );
+        ok ( tmp == WAIT_OBJECT_0, "event_client (%x): wait for connect event failed: %d\n", id, tmp );
+        err = WSAEnumNetworkEvents ( mem->s, event, &wsa_events );
+        wsa_ok ( err, 0 ==, "event_client (%x): WSAEnumNetworkEvents error: %d\n" );
+        err = wsa_events.iErrorCode[ FD_CONNECT_BIT ];
+        ok ( err == 0, "event_client (%x): connect error: %d\n", id, err );
+        if ( err ) goto out;
+    }
 
     trace ( "event_client (%x) connected\n", id );
 
@@ -816,10 +816,10 @@ static void do_test( test_setup *test )
     WaitForSingleObject ( server_ready, INFINITE );
 
     wait = WaitForMultipleObjects ( 1 + n, thread, TRUE, 1000 * TEST_TIMEOUT );
-    ok ( wait >= WAIT_OBJECT_0 && wait <= WAIT_OBJECT_0 + n , 
+    ok ( wait <= WAIT_OBJECT_0 + n ,
          "some threads have not completed: %x\n", wait );
 
-    if ( ! ( wait >= WAIT_OBJECT_0 && wait <= WAIT_OBJECT_0 + n ) )
+    if ( ! ( wait <= WAIT_OBJECT_0 + n ) )
     {
         for (i = 0; i <= n; i++)
         {
@@ -850,7 +850,7 @@ LINGER linger_testvals[] = {
 static void test_set_getsockopt(void)
 {
     SOCKET s;
-    int i, err;
+    int i, err, lasterr;
     int timeout;
     LINGER lingval;
     int size;
@@ -889,6 +889,15 @@ static void test_set_getsockopt(void)
                  lingval.l_onoff, lingval.l_linger,
                  linger_testvals[i].l_onoff, linger_testvals[i].l_linger);
     }
+    /* Test for erroneously passing a value instead of a pointer as optval */
+    size = sizeof(char);
+    err = setsockopt(s, SOL_SOCKET, SO_DONTROUTE, (char *)1, size);
+    ok(err == SOCKET_ERROR, "setsockopt with optval being a value passed "
+                            "instead of failing.\n");
+    lasterr = WSAGetLastError();
+    ok(lasterr == WSAEFAULT, "setsockopt with optval being a value "
+                             "returned 0x%08x, not WSAEFAULT(0x%08x)\n",
+                             lasterr, WSAEFAULT);
     closesocket(s);
 }
 
@@ -1638,7 +1647,7 @@ static void test_extendedSocketOptions(void)
     sa.sin_port = htons(0);
     sa.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP)) < 0){
+    if((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP)) == INVALID_SOCKET) {
         trace("Creating the socket failed: %d\n", WSAGetLastError());
         WSACleanup();
         return;
@@ -1664,7 +1673,7 @@ static void test_extendedSocketOptions(void)
 
     closesocket(sock);
 
-    if((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP)) < 0){
+    if((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP)) == INVALID_SOCKET) {
         trace("Creating the socket failed: %d\n", WSAGetLastError());
         WSACleanup();
         return;
@@ -1711,7 +1720,7 @@ static void test_getsockname(void)
     sa_set.sin_port = htons(0);
     sa_set.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP)) < 0){
+    if((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP)) == INVALID_SOCKET) {
         trace("Creating the socket failed: %d\n", WSAGetLastError());
         WSACleanup();
         return;
@@ -1909,6 +1918,52 @@ end:
     CloseHandle(hEvent);
 }
 
+static void test_ipv6only(void)
+{
+    SOCKET v4 = INVALID_SOCKET,
+           v6 = INVALID_SOCKET;
+    struct sockaddr_in sin4;
+    struct sockaddr_in6 sin6;
+    int ret;
+
+    memset(&sin4, 0, sizeof(sin4));
+    sin4.sin_family = AF_INET;
+    sin4.sin_port = htons(SERVERPORT);
+
+    memset(&sin6, 0, sizeof(sin6));
+    sin6.sin6_family = AF_INET6;
+    sin6.sin6_port = htons(SERVERPORT);
+
+    v6 = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    if (v6 == INVALID_SOCKET) {
+        skip("Could not create IPv6 socket (LastError: %d; %d expected if IPv6 not available).\n",
+            WSAGetLastError(), WSAEAFNOSUPPORT);
+        goto end;
+    }
+    ret = bind(v6, (struct sockaddr*)&sin6, sizeof(sin6));
+    if (ret) {
+        skip("Could not bind IPv6 address (LastError: %d).\n",
+            WSAGetLastError());
+        goto end;
+    }
+
+    v4 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (v4 == INVALID_SOCKET) {
+        skip("Could not create IPv4 socket (LastError: %d).\n",
+            WSAGetLastError());
+        goto end;
+    }
+    ret = bind(v4, (struct sockaddr*)&sin4, sizeof(sin4));
+    ok(!ret, "Could not bind IPv4 address (LastError: %d; %d expected if IPv6 binds to IPv4 as well).\n",
+        WSAGetLastError(), WSAEADDRINUSE);
+
+end:
+    if (v4 != INVALID_SOCKET)
+        closesocket(v4);
+    if (v6 != INVALID_SOCKET)
+        closesocket(v6);
+}
+
 /**************** Main program  ***************/
 
 START_TEST( sock )
@@ -1945,6 +2000,8 @@ START_TEST( sock )
 
     test_send();
     test_write_events();
+
+    test_ipv6only();
 
     Exit();
 }

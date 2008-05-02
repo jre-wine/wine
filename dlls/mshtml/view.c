@@ -26,7 +26,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "wingdi.h"
 #include "commctrl.h"
 #include "ole2.h"
 #include "resource.h"
@@ -93,6 +92,7 @@ static void activate_gecko(NSContainer *This)
 
     nsIBaseWindow_SetVisibility(This->window, TRUE);
     nsIBaseWindow_SetEnabled(This->window, TRUE);
+    nsIWebBrowserFocus_Activate(This->focus);
 }
 
 void update_doc(HTMLDocument *This, DWORD flags)
@@ -368,7 +368,7 @@ static LRESULT WINAPI tooltips_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
 
 static void create_tooltips_window(HTMLDocument *This)
 {
-    tooltip_data *data = mshtml_alloc(sizeof(*data));
+    tooltip_data *data = heap_alloc(sizeof(*data));
 
     This->tooltips_hwnd = CreateWindowExW(0, TOOLTIPS_CLASSW, NULL, TTS_NOPREFIX | WS_POPUP,
             CW_USEDEFAULT, CW_USEDEFAULT, 10, 10, This->hwnd, NULL, hInst, NULL);
@@ -413,6 +413,18 @@ void hide_tooltip(HTMLDocument *This)
 
     SendMessageW(This->tooltips_hwnd, TTM_DELTOOLW, 0, (LPARAM)&toolinfo);
     SendMessageW(This->tooltips_hwnd, TTM_ACTIVATE, FALSE, 0);
+}
+
+HRESULT call_set_active_object(IOleInPlaceUIWindow *window, IOleInPlaceActiveObject *act_obj)
+{
+    static WCHAR html_documentW[30];
+
+    if(act_obj && !html_documentW[0]) {
+        LoadStringW(hInst, IDS_HTMLDOCUMENT, html_documentW,
+                    sizeof(html_documentW)/sizeof(WCHAR));
+    }
+
+    return IOleInPlaceFrame_SetActiveObject(window, act_obj, act_obj ? html_documentW : NULL);
 }
 
 /**********************************************************
@@ -564,7 +576,6 @@ static HRESULT WINAPI OleDocumentView_UIActivate(IOleDocumentView *iface, BOOL f
     }
 
     if(fUIActivate) {
-        OLECHAR wszHTMLDocument[30];
         RECT rcBorderWidths;
 
         if(This->ui_active)
@@ -577,17 +588,15 @@ static HRESULT WINAPI OleDocumentView_UIActivate(IOleDocumentView *iface, BOOL f
         }
 
         This->focus = TRUE;
-        nsIWebBrowserFocus_Activate(This->nscontainer->focus);
+        if(This->nscontainer)
+            nsIWebBrowserFocus_Activate(This->nscontainer->focus);
         notif_focus(This);
 
         update_doc(This, UPDATE_UI);
 
-        LoadStringW(hInst, IDS_HTMLDOCUMENT, wszHTMLDocument,
-                    sizeof(wszHTMLDocument)/sizeof(WCHAR));
-
         hres = IOleInPlaceSite_OnUIActivate(This->ipsite);
         if(SUCCEEDED(hres)) {
-            IOleInPlaceFrame_SetActiveObject(This->frame, ACTOBJ(This), wszHTMLDocument);
+            call_set_active_object((IOleInPlaceUIWindow*)This->frame, ACTOBJ(This));
         }else {
             FIXME("OnUIActivate failed: %08x\n", hres);
             IOleInPlaceFrame_Release(This->frame);
@@ -603,7 +612,7 @@ static HRESULT WINAPI OleDocumentView_UIActivate(IOleDocumentView *iface, BOOL f
             IDocHostUIHandler_HideUI(This->hostui);
 
         if(This->ip_window)
-            IOleInPlaceUIWindow_SetActiveObject(This->ip_window, ACTOBJ(This), wszHTMLDocument);
+            call_set_active_object(This->ip_window, ACTOBJ(This));
 
         memset(&rcBorderWidths, 0, sizeof(rcBorderWidths));
         IOleInPlaceFrame_SetBorderSpace(This->frame, &rcBorderWidths);
@@ -613,9 +622,9 @@ static HRESULT WINAPI OleDocumentView_UIActivate(IOleDocumentView *iface, BOOL f
         if(This->ui_active) {
             This->ui_active = FALSE;
             if(This->ip_window)
-                IOleInPlaceUIWindow_SetActiveObject(This->ip_window, NULL, NULL);
+                call_set_active_object(This->ip_window, NULL);
             if(This->frame)
-                IOleInPlaceFrame_SetActiveObject(This->frame, NULL, NULL);
+                call_set_active_object((IOleInPlaceUIWindow*)This->frame, NULL);
             if(This->hostui)
                 IDocHostUIHandler_HideUI(This->hostui);
             if(This->ipsite)

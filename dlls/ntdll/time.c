@@ -62,8 +62,6 @@ static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static RTL_CRITICAL_SECTION TIME_tz_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
-#define SETTIME_MAX_ADJUST 120
-
 #define TICKSPERSEC        10000000
 #define TICKSPERMSEC       10000
 #define SECSPERDAY         86400
@@ -686,7 +684,7 @@ static void find_reg_tz_info(RTL_TIME_ZONE_INFORMATION *tzi)
 
         if (match_tz_info(tzi, &reg_tzi))
         {
-            memcpy(tzi, &reg_tzi, sizeof(*tzi));
+            *tzi = reg_tzi;
             NtClose(hkey);
             return;
         }
@@ -787,53 +785,51 @@ static int init_tz_info(RTL_TIME_ZONE_INFORMATION *tzi)
     TRACE("dlt: %s", ctime(&dlt));
 
     if (dlt == std || !dlt || !std)
-    {
-        RtlLeaveCriticalSection( &TIME_tz_section );
         TRACE("there is no daylight saving rules in this time zone\n");
-        return 0;
+    else
+    {
+        tmp = dlt - tzi->Bias * 60;
+        tm = gmtime(&tmp);
+        TRACE("dlt gmtime: %s", asctime(tm));
+
+        tzi->DaylightBias = -60;
+        tzi->DaylightDate.wYear = tm->tm_year + 1900;
+        tzi->DaylightDate.wMonth = tm->tm_mon + 1;
+        tzi->DaylightDate.wDayOfWeek = tm->tm_wday;
+        tzi->DaylightDate.wDay = tm->tm_mday;
+        tzi->DaylightDate.wHour = tm->tm_hour;
+        tzi->DaylightDate.wMinute = tm->tm_min;
+        tzi->DaylightDate.wSecond = tm->tm_sec;
+        tzi->DaylightDate.wMilliseconds = 0;
+
+        TRACE("daylight (d/m/y): %u/%02u/%04u day of week %u %u:%02u:%02u.%03u bias %d\n",
+            tzi->DaylightDate.wDay, tzi->DaylightDate.wMonth,
+            tzi->DaylightDate.wYear, tzi->DaylightDate.wDayOfWeek,
+            tzi->DaylightDate.wHour, tzi->DaylightDate.wMinute,
+            tzi->DaylightDate.wSecond, tzi->DaylightDate.wMilliseconds,
+            tzi->DaylightBias);
+
+        tmp = std - tzi->Bias * 60 - tzi->DaylightBias * 60;
+        tm = gmtime(&tmp);
+        TRACE("std gmtime: %s", asctime(tm));
+
+        tzi->StandardBias = 0;
+        tzi->StandardDate.wYear = tm->tm_year + 1900;
+        tzi->StandardDate.wMonth = tm->tm_mon + 1;
+        tzi->StandardDate.wDayOfWeek = tm->tm_wday;
+        tzi->StandardDate.wDay = tm->tm_mday;
+        tzi->StandardDate.wHour = tm->tm_hour;
+        tzi->StandardDate.wMinute = tm->tm_min;
+        tzi->StandardDate.wSecond = tm->tm_sec;
+        tzi->StandardDate.wMilliseconds = 0;
+
+        TRACE("standard (d/m/y): %u/%02u/%04u day of week %u %u:%02u:%02u.%03u bias %d\n",
+            tzi->StandardDate.wDay, tzi->StandardDate.wMonth,
+            tzi->StandardDate.wYear, tzi->StandardDate.wDayOfWeek,
+            tzi->StandardDate.wHour, tzi->StandardDate.wMinute,
+            tzi->StandardDate.wSecond, tzi->StandardDate.wMilliseconds,
+            tzi->StandardBias);
     }
-
-    tmp = dlt - tzi->Bias * 60;
-    tm = gmtime(&tmp);
-    TRACE("dlt gmtime: %s", asctime(tm));
-
-    tzi->DaylightBias = -60;
-    tzi->DaylightDate.wYear = tm->tm_year + 1900;
-    tzi->DaylightDate.wMonth = tm->tm_mon + 1;
-    tzi->DaylightDate.wDayOfWeek = tm->tm_wday;
-    tzi->DaylightDate.wDay = tm->tm_mday;
-    tzi->DaylightDate.wHour = tm->tm_hour;
-    tzi->DaylightDate.wMinute = tm->tm_min;
-    tzi->DaylightDate.wSecond = tm->tm_sec;
-    tzi->DaylightDate.wMilliseconds = 0;
-
-    TRACE("daylight (d/m/y): %u/%02u/%04u day of week %u %u:%02u:%02u.%03u bias %d\n",
-        tzi->DaylightDate.wDay, tzi->DaylightDate.wMonth,
-        tzi->DaylightDate.wYear, tzi->DaylightDate.wDayOfWeek,
-        tzi->DaylightDate.wHour, tzi->DaylightDate.wMinute,
-        tzi->DaylightDate.wSecond, tzi->DaylightDate.wMilliseconds,
-        tzi->DaylightBias);
-
-    tmp = std - tzi->Bias * 60 - tzi->DaylightBias * 60;
-    tm = gmtime(&tmp);
-    TRACE("std gmtime: %s", asctime(tm));
-
-    tzi->StandardBias = 0;
-    tzi->StandardDate.wYear = tm->tm_year + 1900;
-    tzi->StandardDate.wMonth = tm->tm_mon + 1;
-    tzi->StandardDate.wDayOfWeek = tm->tm_wday;
-    tzi->StandardDate.wDay = tm->tm_mday;
-    tzi->StandardDate.wHour = tm->tm_hour;
-    tzi->StandardDate.wMinute = tm->tm_min;
-    tzi->StandardDate.wSecond = tm->tm_sec;
-    tzi->StandardDate.wMilliseconds = 0;
-
-    TRACE("standard (d/m/y): %u/%02u/%04u day of week %u %u:%02u:%02u.%03u bias %d\n",
-        tzi->StandardDate.wDay, tzi->StandardDate.wMonth,
-        tzi->StandardDate.wYear, tzi->StandardDate.wDayOfWeek,
-        tzi->StandardDate.wHour, tzi->StandardDate.wMinute,
-        tzi->StandardDate.wSecond, tzi->StandardDate.wMilliseconds,
-        tzi->StandardBias);
 
     find_reg_tz_info(tzi);
     cached_tzi = *tzi;
@@ -900,7 +896,6 @@ NTSTATUS WINAPI NtSetSystemTime(const LARGE_INTEGER *NewTime, LARGE_INTEGER *Old
     time_t tm_t;
     DWORD sec, oldsec;
     LARGE_INTEGER tm;
-    int err;
 
     /* Return the old time if necessary */
     if (!OldTime) OldTime = &tm;
@@ -914,30 +909,20 @@ NTSTATUS WINAPI NtSetSystemTime(const LARGE_INTEGER *NewTime, LARGE_INTEGER *Old
     tv.tv_sec = sec;
     tv.tv_usec = 0;
 
-    /* error and sanity check*/
-    if(sec == (time_t)-1 || abs((int)(sec-oldsec)) > SETTIME_MAX_ADJUST) {
-        err = 2;
-    } else {
 #ifdef HAVE_SETTIMEOFDAY
-        err = settimeofday(&tv, NULL); /* 0 is OK, -1 is error */
-        if(err == 0)
-            return STATUS_SUCCESS;
-#else
-        err = 1;
-#endif
-    }
-
+    if (!settimeofday(&tv, NULL)) /* 0 is OK, -1 is error */
+        return STATUS_SUCCESS;
     tm_t = sec;
-    ERR("Cannot set time to %s Time adjustment %ld %s\n",
-        ctime( &tm_t ),
-            (long)(sec-oldsec),
-            err == -1 ? "No Permission"
-                      : sec == (time_t)-1 ? "" : "is too large." );
-
-    if(err == 2)
-        return STATUS_INVALID_PARAMETER;
-    else if(err == -1)
+    ERR("Cannot set time to %s, time adjustment %ld: %s\n",
+        ctime(&tm_t), (long)(sec-oldsec), strerror(errno));
+    if (errno == EPERM)
         return STATUS_PRIVILEGE_NOT_HELD;
     else
-        return STATUS_NOT_IMPLEMENTED;
+        return STATUS_INVALID_PARAMETER;
+#else
+    tm_t = sec;
+    FIXME("setting time to %s not implemented for missing settimeofday\n",
+        ctime(&tm_t));
+    return STATUS_NOT_IMPLEMENTED;
+#endif
 }

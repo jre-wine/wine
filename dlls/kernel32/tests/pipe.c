@@ -805,6 +805,7 @@ static void test_CreatePipe(void)
     /* But now we need to get informed that the pipe is closed */
     ok(ReadFile(piperead,readbuf,sizeof(readbuf),&read, NULL) == 0, "Broken pipe not detected\n");
     ok(CloseHandle(piperead), "CloseHandle for the read pipe failed\n");
+    HeapFree(GetProcessHeap(), 0, buffer);
 }
 
 struct named_pipe_client_params
@@ -961,21 +962,17 @@ static void test_ImpersonateNamedPipeClient(HANDLE hClientToken, DWORD security_
     ok(ret, "ReadFile failed with error %d\n", GetLastError());
 
     ret = ImpersonateNamedPipeClient(hPipeServer);
-    todo_wine
     ok(ret, "ImpersonateNamedPipeClient failed with error %d\n", GetLastError());
 
     ret = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, FALSE, &hToken);
-    todo_wine
     ok(ret, "OpenThreadToken failed with error %d\n", GetLastError());
 
     (*test_func)(0, hToken);
 
     ImpersonationLevel = 0xdeadbeef; /* to avoid false positives */
     ret = GetTokenInformation(hToken, TokenImpersonationLevel, &ImpersonationLevel, sizeof(ImpersonationLevel), &size);
-    todo_wine {
     ok(ret, "GetTokenInformation(TokenImpersonationLevel) failed with error %d\n", GetLastError());
     ok(ImpersonationLevel == SecurityImpersonation, "ImpersonationLevel should have been SecurityImpersonation(%d) instead of %d\n", SecurityImpersonation, ImpersonationLevel);
-    }
 
     CloseHandle(hToken);
 
@@ -988,11 +985,9 @@ static void test_ImpersonateNamedPipeClient(HANDLE hClientToken, DWORD security_
     ok(ret, "ReadFile failed with error %d\n", GetLastError());
 
     ret = ImpersonateNamedPipeClient(hPipeServer);
-    todo_wine
     ok(ret, "ImpersonateNamedPipeClient failed with error %d\n", GetLastError());
 
     ret = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, FALSE, &hToken);
-    todo_wine
     ok(ret, "OpenThreadToken failed with error %d\n", GetLastError());
 
     (*test_func)(1, hToken);
@@ -1007,7 +1002,6 @@ static void test_ImpersonateNamedPipeClient(HANDLE hClientToken, DWORD security_
     WaitForSingleObject(hThread, INFINITE);
 
     ret = ImpersonateNamedPipeClient(hPipeServer);
-    todo_wine
     ok(ret, "ImpersonateNamedPipeClient failed with error %d\n", GetLastError());
 
     RevertToSelf();
@@ -1029,7 +1023,11 @@ static BOOL are_all_privileges_disabled(HANDLE hToken)
     {
         Privileges = HeapAlloc(GetProcessHeap(), 0, Size);
         ret = GetTokenInformation(hToken, TokenPrivileges, Privileges, Size, &Size);
-        if (!ret) return FALSE;
+        if (!ret)
+        {
+            HeapFree(GetProcessHeap(), 0, Privileges);
+            return FALSE;
+        }
     }
     else
         return FALSE;
@@ -1055,7 +1053,6 @@ static DWORD get_privilege_count(HANDLE hToken)
     BOOL ret;
 
     ret = GetTokenInformation(hToken, TokenStatistics, &Statistics, Size, &Size);
-    todo_wine
     ok(ret, "GetTokenInformation(TokenStatistics)\n");
     if (!ret) return -1;
 
@@ -1135,7 +1132,6 @@ static void test_dynamic_context_no_token(int call_index, HANDLE hToken)
     switch (call_index)
     {
     case 0:
-        todo_wine
         ok(are_all_privileges_disabled(hToken), "token should be a copy of the process one\n");
         break;
     case 1:

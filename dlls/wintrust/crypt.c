@@ -51,7 +51,14 @@ BOOL WINAPI CryptCATAdminAcquireContext(HCATADMIN* catAdmin,
 {
     FIXME("%p %s %x\n", catAdmin, debugstr_guid(sysSystem), dwFlags);
 
-    if (catAdmin) *catAdmin = (HCATADMIN)0xdeadbeef;
+    if (!catAdmin)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    *catAdmin = (HCATADMIN)0xdeadbeef;
+
     return TRUE;
 }
 
@@ -218,10 +225,10 @@ BOOL WINAPI CryptSIPGetSignedDataMsg(SIP_SUBJECTINFO* pSubjectInfo, DWORD* pdwEn
     }
     else
     {
-        DWORD len;
+        DWORD len = 0;
 
         ret = ImageGetCertificateData(pSubjectInfo->hFile, dwIndex, NULL, &len);
-        if (!ret)
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
             goto error;
         pCert = HeapAlloc(GetProcessHeap(), 0, len);
         if (!pCert)

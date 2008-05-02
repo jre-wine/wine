@@ -16,17 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <stdio.h>
 
 #define COBJMACROS
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "ole2.h"
 
 #include "wine/debug.h"
@@ -100,7 +96,7 @@ static ULONG WINAPI HTMLSelectionObject_Release(IHTMLSelectionObject *iface)
             nsISelection_Release(This->nsselection);
         if(This->doc)
             list_remove(&This->entry);
-        mshtml_free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -153,8 +149,36 @@ static HRESULT WINAPI HTMLSelectionObject_createRange(IHTMLSelectionObject *ifac
         nsresult nsres;
 
         nsISelection_GetRangeCount(This->nsselection, &nsrange_cnt);
-        if(nsrange_cnt != 1)
+        if(!nsrange_cnt) {
+            nsIDOMDocument *nsdoc;
+            nsIDOMHTMLDocument *nshtmldoc;
+            nsIDOMHTMLElement *nsbody = NULL;
+
+            TRACE("nsrange_cnt = 0\n");
+
+            nsres = nsIWebNavigation_GetDocument(This->doc->nscontainer->navigation, &nsdoc);
+            if(NS_FAILED(nsres) || !nsdoc) {
+                ERR("GetDocument failed: %08x\n", nsres);
+                return E_FAIL;
+            }
+
+            nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDOMHTMLDocument, (void**)&nshtmldoc);
+            nsIDOMDocument_Release(nsdoc);
+
+            nsres = nsIDOMHTMLDocument_GetBody(nshtmldoc, &nsbody);
+            nsIDOMHTMLDocument_Release(nshtmldoc);
+            if(NS_FAILED(nsres) || !nsbody) {
+                ERR("Could not get body: %08x\n", nsres);
+                return E_FAIL;
+            }
+
+            nsres = nsISelection_Collapse(This->nsselection, (nsIDOMNode*)nsbody, 0);
+            nsIDOMHTMLElement_Release(nsbody);
+            if(NS_FAILED(nsres))
+                ERR("Collapse failed: %08x\n", nsres);
+        }else if(nsrange_cnt > 1) {
             FIXME("range_cnt = %d\n", nsrange_cnt);
+        }
 
         nsres = nsISelection_GetRangeAt(This->nsselection, 0, &nsrange);
         if(NS_FAILED(nsres))
@@ -215,7 +239,7 @@ static const IHTMLSelectionObjectVtbl HTMLSelectionObjectVtbl = {
 
 IHTMLSelectionObject *HTMLSelectionObject_Create(HTMLDocument *doc, nsISelection *nsselection)
 {
-    HTMLSelectionObject *ret = mshtml_alloc(sizeof(HTMLSelectionObject));
+    HTMLSelectionObject *ret = heap_alloc(sizeof(HTMLSelectionObject));
 
     ret->lpHTMLSelectionObjectVtbl = &HTMLSelectionObjectVtbl;
     ret->ref = 1;

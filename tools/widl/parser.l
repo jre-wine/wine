@@ -44,8 +44,11 @@ double	[0-9]+\.[0-9]+([eE][+-]?[0-9]+)*
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
+
 #ifdef HAVE_UNISTD_H
-# include <unistd.h>
+#include <unistd.h>
+#else
+#define YY_NO_UNISTD_H
 #endif
 
 #include "widl.h"
@@ -76,9 +79,7 @@ struct {
 } import_stack[MAX_IMPORT_DEPTH];
 int import_stack_ptr = 0;
 
-static void pop_import(void);
-
-static UUID* parse_uuid(const char*u)
+UUID *parse_uuid(const char *u)
 {
   UUID* uuid = xmalloc(sizeof(UUID));
   char b[3];
@@ -113,14 +114,14 @@ static UUID* parse_uuid(const char*u)
                             yy_pop_state();
                             lineno = (int)strtol(yytext, &cptr, 10);
                             if(!lineno)
-                                parser_error("Malformed '#...' line-directive; invalid linenumber");
+                                error_loc("Malformed '#...' line-directive; invalid linenumber\n");
                             fname = strchr(cptr, '"');
                             if(!fname)
-                                parser_error("Malformed '#...' line-directive; missing filename");
+                                error_loc("Malformed '#...' line-directive; missing filename\n");
                             fname++;
                             cptr = strchr(fname, '"');
                             if(!cptr)
-                                parser_error("Malformed '#...' line-directive; missing terminating \"");
+                                error_loc("Malformed '#...' line-directive; missing terminating \"\n");
                             *cptr = '\0';
                             line_number = lineno - 1;  /* We didn't read the newline */
                             free( input_name );
@@ -163,10 +164,8 @@ SAFEARRAY{ws}*/\(	return tSAFEARRAY;
 <INITIAL,ATTR>\>\>	return SHR;
 <INITIAL,ATTR>.		return yytext[0];
 <<EOF>>			{
-				if (import_stack_ptr) {
-					pop_import();
+				if (import_stack_ptr)
 					return aEOF;
-				}
 				else yyterminate();
 			}
 %%
@@ -187,13 +186,19 @@ static const struct keyword keywords[] = {
 	{"FALSE",			tFALSE},
 	{"TRUE",			tTRUE},
 	{"__cdecl",			tCDECL},
+	{"__fastcall",			tFASTCALL},
 	{"__int64",			tINT64},
+	{"__pascal",			tPASCAL},
 	{"__stdcall",			tSTDCALL},
+	{"_cdecl",			tCDECL},
+	{"_fastcall",			tFASTCALL},
+	{"_pascal",			tPASCAL},
 	{"_stdcall",			tSTDCALL},
 	{"boolean",			tBOOLEAN},
 	{"byte",			tBYTE},
 	{"callback",			tCALLBACK},
 	{"case",			tCASE},
+	{"cdecl",			tCDECL},
 	{"char",			tCHAR},
 	{"coclass",			tCOCLASS},
 	{"code",			tCODE},
@@ -218,11 +223,13 @@ static const struct keyword keywords[] = {
 	{"long",			tLONG},
 	{"methods",			tMETHODS},
 	{"module",			tMODULE},
+	{"pascal",			tPASCAL},
 	{"properties",			tPROPERTIES},
 	{"short",			tSHORT},
 	{"signed",			tSIGNED},
 	{"sizeof",			tSIZEOF},
         {"small",			tSMALL},
+	{"stdcall",			tSTDCALL},
 	{"struct",			tSTRUCT},
 	{"switch",			tSWITCH},
 	{"typedef",			tTYPEDEF},
@@ -299,6 +306,7 @@ static const struct keyword attr_keywords[] =
         {"single",                      tSINGLE},
         {"size_is",                     tSIZEIS},
         {"source",                      tSOURCE},
+        {"strict_context_handle",       tSTRICTCONTEXTHANDLE},
         {"string",                      tSTRING},
         {"switch_is",                   tSWITCHIS},
         {"switch_type",                 tSWITCHTYPE},
@@ -352,7 +360,7 @@ static void addcchar(char c)
 		cbufalloc += 1024;
 		cbuffer = xrealloc(cbuffer, cbufalloc * sizeof(cbuffer[0]));
 		if(cbufalloc > 65536)
-			parser_warning("Reallocating string buffer larger than 64kB");
+			parser_warning("Reallocating string buffer larger than 64kB\n");
 	}
 	cbuffer[cbufidx++] = c;
 }
@@ -363,7 +371,7 @@ static char *get_buffered_cstring(void)
 	return xstrdup(cbuffer);
 }
 
-static void pop_import(void)
+void pop_import(void)
 {
 	int ptr = import_stack_ptr-1;
 
@@ -413,8 +421,12 @@ int do_import(char *fname)
 	import->next = first_import;
 	first_import = import;
 
-        if (!(path = wpp_find_include( fname, input_name )))
-            parser_error("Unable to open include file %s", fname);
+        /* don't search for a file name with a path in the include directories,
+         * for compatibility with MIDL */
+        if (strchr( fname, '/' ) || strchr( fname, '\\' ))
+            path = strdup( fname );
+        else if (!(path = wpp_find_include( fname, input_name )))
+            error_loc("Unable to open include file %s\n", fname);
 
 	import_stack[ptr].temp_name = temp_name;
 	import_stack[ptr].input_name = input_name;
@@ -427,7 +439,7 @@ int do_import(char *fname)
         if (ret) exit(1);
 
 	if((f = fopen(temp_name, "r")) == NULL)
-		parser_error("Unable to open %s", temp_name);
+		error_loc("Unable to open %s\n", temp_name);
 
 	import_stack[ptr].state = YY_CURRENT_BUFFER;
 	yy_switch_to_buffer(yy_create_buffer(f, YY_BUF_SIZE));

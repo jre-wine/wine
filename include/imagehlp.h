@@ -71,13 +71,6 @@ typedef enum _IMAGEHLP_STATUS_REASON {
 
 #define CERT_SECTION_TYPE_ANY 0xFF
 
-#define WIN_CERT_REVISION_1_0 0x0100
-#define WIN_CERT_REVISION_2_0 0x0200
-
-#define WIN_CERT_TYPE_X509             0x0001 /* X.509 Certificate */
-#define WIN_CERT_TYPE_PKCS_SIGNED_DATA 0x0002 /* PKCS SignedData */
-#define WIN_CERT_TYPE_RESERVED_1       0x0003 /* Reserved */
-
 #define SPLITSYM_REMOVE_PRIVATE    0x00000001
 #define SPLITSYM_EXTRACT_ALL       0x00000002
 #define SPLITSYM_SYMBOLPATH_IS_SRC 0x00000004
@@ -179,13 +172,6 @@ typedef struct _LOADED_IMAGE
     ULONG                       SizeOfImage;
 } LOADED_IMAGE, *PLOADED_IMAGE;
 
-typedef struct _WIN_CERTIFICATE {
-  DWORD dwLength;
-  WORD  wRevision;                   /*  WIN_CERT_REVISON_xxx */
-  WORD  wCertificateType;            /*  WIN_CERT_TYPE_xxx */
-  BYTE  bCertificate[ANYSIZE_ARRAY];
-} WIN_CERTIFICATE, *PWIN_CERTIFICATE;
-
 typedef struct _API_VERSION {
   USHORT  MajorVersion;
   USHORT  MinorVersion;
@@ -240,7 +226,7 @@ typedef struct _ADDRESS {
     DWORD          Offset;
     WORD           Segment;
     ADDRESS_MODE Mode;
-} ADDRESS, *PADDRESS;
+} ADDRESS, *LPADDRESS;
 
 typedef struct _ADDRESS64 {
     DWORD64        Offset;
@@ -554,6 +540,8 @@ typedef struct _IMAGEHLP_GET_TYPE_INFO_PARAMS
 #define IMAGEHLP_SYMBOL_INFO_CONSTANT              SYMF_CONSTANT
 #define IMAGEHLP_SYMBOL_FUNCTION                   SYMF_FUNCTION
 
+#define MAX_SYM_NAME                               2000
+
 typedef struct _SYMBOL_INFO {
     ULONG       SizeOfStruct;
     ULONG       TypeIndex;
@@ -590,6 +578,18 @@ typedef struct _SYMBOL_INFOW
     ULONG       MaxNameLen;
     WCHAR       Name[1];
 } SYMBOL_INFOW, *PSYMBOL_INFOW;
+
+typedef struct _SYMBOL_INFO_PACKAGE
+{
+    SYMBOL_INFO si;
+    CHAR        name[MAX_SYM_NAME+1];
+} SYMBOL_INFO_PACKAGE, *PSYMBOL_INFO_PACKAGE;
+
+typedef struct _SYMBOL_INFO_PACKAGEW
+{
+    SYMBOL_INFOW si;
+    WCHAR        name[MAX_SYM_NAME+1];
+} SYMBOL_INFO_PACKAGEW, *PSYMBOL_INFO_PACKAGEW;
 
 #define DBHHEADER_DEBUGDIRS     0x1
 typedef struct _MODLOAD_DATA
@@ -680,10 +680,10 @@ typedef BOOL (CALLBACK *PIMAGEHLP_STATUS_ROUTINE64)(
 );
 
 typedef BOOL (CALLBACK *PSYM_ENUMERATESYMBOLS_CALLBACK)(
-  PSYMBOL_INFO pSymInfo, DWORD SymbolSize, PVOID UserContext
+  PSYMBOL_INFO pSymInfo, ULONG SymbolSize, PVOID UserContext
 );
 typedef BOOL (CALLBACK *PSYM_ENUMERATESYMBOLS_CALLBACKW)(
-  PSYMBOL_INFOW pSymInfo, DWORD SymbolSize, PVOID UserContext
+  PSYMBOL_INFOW pSymInfo, ULONG SymbolSize, PVOID UserContext
 );
 
 typedef BOOL (CALLBACK* PSYM_ENUMLINES_CALLBACK)(
@@ -711,10 +711,10 @@ typedef BOOL (CALLBACK *PSYM_ENUMMODULES_CALLBACKW64)(
 );
 
 typedef BOOL (CALLBACK *PSYM_ENUMSYMBOLS_CALLBACK)(
-  PCSTR, DWORD, ULONG, PVOID
+  PCSTR, ULONG, ULONG, PVOID
 );
 typedef BOOL (CALLBACK *PSYM_ENUMSYMBOLS_CALLBACKW)(
-  PCWSTR, DWORD, ULONG, PVOID
+  PCWSTR, ULONG, ULONG, PVOID
 );
 typedef BOOL (CALLBACK *PSYM_ENUMSYMBOLS_CALLBACK64)(
   PCSTR, DWORD64, ULONG, PVOID
@@ -743,7 +743,7 @@ typedef BOOL (CALLBACK *DIGEST_FUNCTION)(
 );
 
 typedef BOOL (CALLBACK *PREAD_PROCESS_MEMORY_ROUTINE)(
-  HANDLE  hProcess, LPCVOID lpBaseAddress, PVOID lpBuffer,
+  HANDLE  hProcess, DWORD lpBaseAddress, PVOID lpBuffer,
   DWORD nSize, PDWORD lpNumberOfBytesRead
 );
 
@@ -767,7 +767,7 @@ typedef DWORD (CALLBACK *PGET_MODULE_BASE_ROUTINE64)(
   HANDLE hProcess, DWORD64 ReturnAddress);
 
 typedef DWORD (CALLBACK *PTRANSLATE_ADDRESS_ROUTINE)(
-  HANDLE hProcess, HANDLE hThread, PADDRESS lpaddr
+  HANDLE hProcess, HANDLE hThread, LPADDRESS lpaddr
 );
 
 typedef DWORD (CALLBACK *PTRANSLATE_ADDRESS_ROUTINE64)(
@@ -841,7 +841,7 @@ DWORD WINAPI GetTimestampForLoadedLibrary(
   HMODULE Module
 );
 BOOL WINAPI ImageAddCertificate(
-  HANDLE FileHandle, PWIN_CERTIFICATE Certificate, PDWORD Index
+  HANDLE FileHandle, LPWIN_CERTIFICATE Certificate, PDWORD Index
 );
 PVOID WINAPI ImageDirectoryEntryToData(
   PVOID Base, BOOLEAN MappedAsImage, USHORT DirectoryEntry, PULONG Size
@@ -852,11 +852,11 @@ BOOL WINAPI ImageEnumerateCertificates(
 );
 BOOL WINAPI ImageGetCertificateData(
   HANDLE FileHandle, DWORD CertificateIndex,
-  PWIN_CERTIFICATE Certificate, PDWORD RequiredLength
+  LPWIN_CERTIFICATE Certificate, PDWORD RequiredLength
 );
 BOOL WINAPI ImageGetCertificateHeader(
   HANDLE FileHandle, DWORD CertificateIndex,
-  PWIN_CERTIFICATE Certificateheader
+  LPWIN_CERTIFICATE Certificateheader
 );
 BOOL WINAPI ImageGetDigestStream(
   HANDLE FileHandle, DWORD DigestLevel,
@@ -1294,6 +1294,9 @@ BOOL WINAPI SymSetParentWindow(
 );
 BOOL WINAPI SymSetSearchPath(
   HANDLE hProcess, PCSTR szSearchPath
+);
+BOOL WINAPI SymSetSearchPathW(
+  HANDLE hProcess, PCWSTR szSearchPath
 );
 BOOL WINAPI SymUnDName(
   PIMAGEHLP_SYMBOL sym, PSTR UnDecName, DWORD UnDecNameLength

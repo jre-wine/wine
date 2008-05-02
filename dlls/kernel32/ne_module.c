@@ -529,7 +529,7 @@ FARPROC16 NE_GetEntryPointEx( HMODULE16 hModule, WORD ordinal, BOOL16 snoop )
     if (!snoop)
         return (FARPROC16)MAKESEGPTR( sel, offset );
     else
-        return (FARPROC16)SNOOP16_GetProcAddress16(hModule,ordinal,(FARPROC16)MAKESEGPTR( sel, offset ));
+        return SNOOP16_GetProcAddress16(hModule,ordinal,(FARPROC16)MAKESEGPTR( sel, offset ));
 }
 
 
@@ -1193,9 +1193,11 @@ HINSTANCE16 WINAPI LoadModule16( LPCSTR name, LPVOID paramBlock )
     HMODULE16 hModule;
     NE_MODULE *pModule;
     LPSTR cmdline;
-    WORD cmdShow;
+    WORD cmdShow = 1; /* SW_SHOWNORMAL but we don't want to include winuser.h here */
 
     if (name == NULL) return 0;
+
+    TRACE("name %s, paramBlock %p\n", name, paramBlock);
 
     /* Load module */
 
@@ -1235,7 +1237,8 @@ HINSTANCE16 WINAPI LoadModule16( LPCSTR name, LPVOID paramBlock )
      *  information.
      */
     params = (LOADPARAMS16 *)paramBlock;
-    cmdShow = ((WORD *)MapSL(params->showCmd))[1];
+    if (params->showCmd)
+        cmdShow = ((WORD *)MapSL( params->showCmd ))[1];
     cmdline = MapSL( params->cmdLine );
     return NE_CreateThread( pModule, cmdShow, cmdline );
 }
@@ -1706,10 +1709,24 @@ HINSTANCE16 WINAPI WinExec16( LPCSTR lpCmdLine, UINT16 nCmdShow )
 
     if (ret == 21 || ret == ERROR_BAD_FORMAT)  /* 32-bit module or unknown executable*/
     {
-        DWORD count;
-        ReleaseThunkLock( &count );
-        ret = LOWORD( WinExec( lpCmdLine, nCmdShow ) );
-        RestoreThunkLock( count );
+        LOADPARAMS16 params;
+        WORD showCmd[2];
+        showCmd[0] = 2;
+        showCmd[1] = nCmdShow;
+
+        arglen = strlen( lpCmdLine );
+        cmdline = HeapAlloc( GetProcessHeap(), 0, arglen + 1 );
+        cmdline[0] = (BYTE)arglen;
+        memcpy( cmdline + 1, lpCmdLine, arglen );
+
+        params.hEnvironment = 0;
+        params.cmdLine = MapLS( cmdline );
+        params.showCmd = MapLS( showCmd );
+        params.reserved = 0;
+
+        ret = LoadModule16( "winoldap.mod", &params );
+        UnMapLS( params.cmdLine );
+        UnMapLS( params.showCmd );
     }
     return ret;
 }
@@ -2051,7 +2068,7 @@ static HMODULE16 create_dummy_module( HMODULE module32 )
     pStr += len+2;
 
     /* All tables zero terminated */
-    pModule->ne_rsrctab = pModule->ne_imptab = pModule->ne_enttab = (char *)pStr - (char *)pModule;
+    pModule->ne_rsrctab = pModule->ne_imptab = pModule->ne_enttab = pStr - (char *)pModule;
 
     NE_RegisterModule( pModule );
     pModule->owner32 = LoadLibraryA( filename );  /* increment the ref count of the 32-bit module */

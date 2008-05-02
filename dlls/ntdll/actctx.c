@@ -33,6 +33,7 @@
 #define WIN32_NO_STATUS
 #include "winternl.h"
 #include "ntdll_misc.h"
+#include "wine/exception.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
 
@@ -72,7 +73,7 @@ struct file_info
     WCHAR              *info;
 };
 
-struct version
+struct assembly_version
 {
     USHORT              major;
     USHORT              minor;
@@ -87,7 +88,7 @@ struct assembly_identity
     WCHAR                *public_key;
     WCHAR                *language;
     WCHAR                *type;
-    struct version        version;
+    struct assembly_version version;
     BOOL                  optional;
 };
 
@@ -144,7 +145,8 @@ struct dll_redirect
 enum assembly_type
 {
     APPLICATION_MANIFEST,
-    ASSEMBLY_MANIFEST
+    ASSEMBLY_MANIFEST,
+    ASSEMBLY_SHARED_MANIFEST,
 };
 
 struct assembly
@@ -272,7 +274,7 @@ static inline const char* debugstr_xmlstr(const xmlstr_t* str)
     return debugstr_wn(str->ptr, str->len);
 }
 
-static inline const char* debugstr_version(const struct version *ver)
+static inline const char* debugstr_version(const struct assembly_version *ver)
 {
     return wine_dbg_sprintf("%u.%u.%u.%u", ver->major, ver->minor, ver->build, ver->revision);
 }
@@ -567,16 +569,18 @@ static WCHAR *build_assembly_id( const struct assembly_identity *ai )
 
 static ACTIVATION_CONTEXT *check_actctx( HANDLE h )
 {
-    ACTIVATION_CONTEXT *actctx = h;
+    ACTIVATION_CONTEXT *ret = NULL, *actctx = h;
 
     if (!h || h == INVALID_HANDLE_VALUE) return NULL;
-    switch (actctx->magic)
+    __TRY
     {
-    case ACTCTX_MAGIC:
-        return actctx;
-    default:
-        return NULL;
+        if (actctx->magic == ACTCTX_MAGIC) ret = actctx;
     }
+    __EXCEPT_PAGE_FAULT
+    {
+    }
+    __ENDTRY
+    return ret;
 }
 
 static inline void actctx_addref( ACTIVATION_CONTEXT *actctx )
@@ -743,7 +747,7 @@ static BOOL parse_text_content(xmlbuf_t* xmlbuf, xmlstr_t* content)
     return TRUE;
 }
 
-static BOOL parse_version(const xmlstr_t *str, struct version *version)
+static BOOL parse_version(const xmlstr_t *str, struct assembly_version *version)
 {
     unsigned int ver[4];
     unsigned int pos;
@@ -1379,7 +1383,8 @@ static BOOL parse_assembly_elem(xmlbuf_t* xmlbuf, struct actctx_loader* acl,
         if (!parse_noinheritable_elem(xmlbuf) || !next_xml_elem(xmlbuf, &elem))
             return FALSE;
     }
-    else if (assembly->type == ASSEMBLY_MANIFEST && assembly->no_inherit)
+    else if ((assembly->type == ASSEMBLY_MANIFEST || assembly->type == ASSEMBLY_SHARED_MANIFEST) &&
+             assembly->no_inherit)
         return FALSE;
 
     if (xmlstr_cmp(&elem, assemblyIdentityW))
@@ -1393,7 +1398,17 @@ static BOOL parse_assembly_elem(xmlbuf_t* xmlbuf, struct actctx_loader* acl,
             if (assembly->type == ASSEMBLY_MANIFEST &&
                 memcmp(&assembly->id.version, &expected_ai->version, sizeof(assembly->id.version)))
             {
-                FIXME("wrong version\n");
+                FIXME("wrong version for assembly manifest\n");
+                return FALSE;
+            }
+            else if (assembly->type == ASSEMBLY_SHARED_MANIFEST &&
+                (assembly->id.version.major != expected_ai->version.major ||
+                 assembly->id.version.minor != expected_ai->version.minor ||
+                 assembly->id.version.build < expected_ai->version.build ||
+                 (assembly->id.version.build == expected_ai->version.build &&
+                  assembly->id.version.revision < expected_ai->version.revision)))
+            {
+                FIXME("wrong version for shared assembly manifest\n");
                 return FALSE;
             }
         }
@@ -1479,15 +1494,17 @@ static NTSTATUS parse_manifest_buffer( struct actctx_loader* acl, struct assembl
 }
 
 static NTSTATUS parse_manifest( struct actctx_loader* acl, struct assembly_identity* ai,
-                                LPCWSTR filename, LPCWSTR directory, const void *buffer, SIZE_T size )
+                                LPCWSTR filename, LPCWSTR directory, BOOL shared,
+                                const void *buffer, SIZE_T size )
 {
     xmlbuf_t xmlbuf;
     NTSTATUS status;
     struct assembly *assembly;
+    int unicode_tests;
 
     TRACE( "parsing manifest loaded from %s base dir %s\n", debugstr_w(filename), debugstr_w(directory) );
 
-    if (!(assembly = add_assembly(acl->actctx, ASSEMBLY_MANIFEST)))
+    if (!(assembly = add_assembly(acl->actctx, shared ? ASSEMBLY_SHARED_MANIFEST : ASSEMBLY_MANIFEST)))
         return STATUS_SXS_CANT_GEN_ACTCTX;
 
     if (directory && !(assembly->directory = strdupW(directory)))
@@ -1497,7 +1514,29 @@ static NTSTATUS parse_manifest( struct actctx_loader* acl, struct assembly_ident
     assembly->manifest.type = assembly->manifest.info ? ACTIVATION_CONTEXT_PATH_TYPE_WIN32_FILE
                                                       : ACTIVATION_CONTEXT_PATH_TYPE_NONE;
 
-    if (!RtlIsTextUnicode( buffer, size, NULL ))
+    unicode_tests = IS_TEXT_UNICODE_SIGNATURE | IS_TEXT_UNICODE_REVERSE_SIGNATURE;
+    if (RtlIsTextUnicode( buffer, size, &unicode_tests ))
+    {
+        xmlbuf.ptr = buffer;
+        xmlbuf.end = xmlbuf.ptr + size / sizeof(WCHAR);
+        status = parse_manifest_buffer( acl, assembly, ai, &xmlbuf );
+    }
+    else if (unicode_tests & IS_TEXT_UNICODE_REVERSE_SIGNATURE)
+    {
+        const WCHAR *buf = buffer;
+        WCHAR *new_buff;
+        unsigned int i;
+
+        if (!(new_buff = RtlAllocateHeap( GetProcessHeap(), 0, size )))
+            return STATUS_NO_MEMORY;
+        for (i = 0; i < size / sizeof(WCHAR); i++)
+            new_buff[i] = RtlUshortByteSwap( buf[i] );
+        xmlbuf.ptr = new_buff;
+        xmlbuf.end = xmlbuf.ptr + size / sizeof(WCHAR);
+        status = parse_manifest_buffer( acl, assembly, ai, &xmlbuf );
+        RtlFreeHeap( GetProcessHeap(), 0, new_buff );
+    }
+    else
     {
         /* let's assume utf-8 for now */
         int len = wine_utf8_mbstowcs( 0, buffer, size, NULL, 0 );
@@ -1515,12 +1554,6 @@ static NTSTATUS parse_manifest( struct actctx_loader* acl, struct assembly_ident
         xmlbuf.end = xmlbuf.ptr + len;
         status = parse_manifest_buffer( acl, assembly, ai, &xmlbuf );
         RtlFreeHeap( GetProcessHeap(), 0, new_buff );
-    }
-    else
-    {
-        xmlbuf.ptr = buffer;
-        xmlbuf.end = xmlbuf.ptr + size / sizeof(WCHAR);
-        status = parse_manifest_buffer( acl, assembly, ai, &xmlbuf );
     }
     return status;
 }
@@ -1563,8 +1596,8 @@ static NTSTATUS get_module_filename( HMODULE module, UNICODE_STRING *str, unsign
 }
 
 static NTSTATUS get_manifest_in_module( struct actctx_loader* acl, struct assembly_identity* ai,
-                                        LPCWSTR filename, LPCWSTR directory, HANDLE hModule,
-                                        LPCWSTR resname, ULONG lang )
+                                        LPCWSTR filename, LPCWSTR directory, BOOL shared,
+                                        HANDLE hModule, LPCWSTR resname, ULONG lang )
 {
     NTSTATUS status;
     UNICODE_STRING nameW;
@@ -1613,14 +1646,14 @@ static NTSTATUS get_manifest_in_module( struct actctx_loader* acl, struct assemb
     if (status == STATUS_SUCCESS) status = LdrAccessResource(hModule, entry, &ptr, NULL);
 
     if (status == STATUS_SUCCESS)
-        status = parse_manifest(acl, ai, filename, directory, ptr, entry->Size);
+        status = parse_manifest(acl, ai, filename, directory, shared, ptr, entry->Size);
 
     return status;
 }
 
 static NTSTATUS get_manifest_in_pe_file( struct actctx_loader* acl, struct assembly_identity* ai,
-                                         LPCWSTR filename, LPCWSTR directory, HANDLE file,
-                                         LPCWSTR resname, ULONG lang )
+                                         LPCWSTR filename, LPCWSTR directory, BOOL shared,
+                                         HANDLE file, LPCWSTR resname, ULONG lang )
 {
     HANDLE              mapping;
     OBJECT_ATTRIBUTES   attr;
@@ -1655,7 +1688,7 @@ static NTSTATUS get_manifest_in_pe_file( struct actctx_loader* acl, struct assem
     if (RtlImageNtHeader(base)) /* we got a PE file */
     {
         HANDLE module = (HMODULE)((ULONG_PTR)base | 1);  /* make it a LOAD_LIBRARY_AS_DATAFILE handle */
-        status = get_manifest_in_module( acl, ai, filename, directory, module, resname, lang );
+        status = get_manifest_in_module( acl, ai, filename, directory, shared, module, resname, lang );
     }
     else status = STATUS_INVALID_IMAGE_FORMAT;
 
@@ -1664,7 +1697,7 @@ static NTSTATUS get_manifest_in_pe_file( struct actctx_loader* acl, struct assem
 }
 
 static NTSTATUS get_manifest_in_manifest_file( struct actctx_loader* acl, struct assembly_identity* ai,
-                                               LPCWSTR filename, LPCWSTR directory, HANDLE file )
+                                               LPCWSTR filename, LPCWSTR directory, BOOL shared, HANDLE file )
 {
     FILE_END_OF_FILE_INFORMATION info;
     IO_STATUS_BLOCK io;
@@ -1700,7 +1733,7 @@ static NTSTATUS get_manifest_in_manifest_file( struct actctx_loader* acl, struct
 
     status = NtQueryInformationFile( file, &io, &info, sizeof(info), FileEndOfFileInformation );
     if (status == STATUS_SUCCESS)
-        status = parse_manifest(acl, ai, filename, directory, base, info.EndOfFile.QuadPart);
+        status = parse_manifest(acl, ai, filename, directory, shared, base, info.EndOfFile.QuadPart);
 
     NtUnmapViewOfSection( GetCurrentProcess(), base );
     return status;
@@ -1748,7 +1781,7 @@ static NTSTATUS get_manifest_in_associated_manifest( struct actctx_loader* acl, 
 
     if (!open_nt_file( &file, &nameW ))
     {
-        status = get_manifest_in_manifest_file( acl, ai, nameW.Buffer, directory, file );
+        status = get_manifest_in_manifest_file( acl, ai, nameW.Buffer, directory, FALSE, file );
         NtClose( file );
     }
     else status = STATUS_RESOURCE_DATA_NOT_FOUND;
@@ -1888,7 +1921,7 @@ static NTSTATUS lookup_winsxs(struct actctx_loader* acl, struct assembly_identit
 
     if (!open_nt_file( &handle, &path_us ))
     {
-        io.u.Status = get_manifest_in_manifest_file(acl, &sxs_ai, path_us.Buffer, file, handle);
+        io.u.Status = get_manifest_in_manifest_file(acl, &sxs_ai, path_us.Buffer, file, TRUE, handle);
         NtClose( handle );
     }
     else io.u.Status = STATUS_NO_SUCH_FILE;
@@ -1945,7 +1978,7 @@ static NTSTATUS lookup_assembly(struct actctx_loader* acl,
             status = open_nt_file( &file, &nameW );
             if (!status)
             {
-                status = get_manifest_in_pe_file( acl, ai, nameW.Buffer, directory, file,
+                status = get_manifest_in_pe_file( acl, ai, nameW.Buffer, directory, FALSE, file,
                                                   (LPCWSTR)CREATEPROCESS_MANIFEST_RESOURCE_ID, 0 );
                 NtClose( file );
                 break;
@@ -1959,7 +1992,7 @@ static NTSTATUS lookup_assembly(struct actctx_loader* acl,
             status = open_nt_file( &file, &nameW );
             if (!status)
             {
-                status = get_manifest_in_manifest_file( acl, ai, nameW.Buffer, directory, file );
+                status = get_manifest_in_manifest_file( acl, ai, nameW.Buffer, directory, FALSE, file );
                 NtClose( file );
                 break;
             }
@@ -2213,7 +2246,7 @@ NTSTATUS WINAPI RtlCreateActivationContext( HANDLE *handle, const void *ptr )
         /* if we have a resource it's a PE file */
         if (pActCtx->dwFlags & ACTCTX_FLAG_HMODULE_VALID)
         {
-            status = get_manifest_in_module( &acl, NULL, NULL, directory, pActCtx->hModule,
+            status = get_manifest_in_module( &acl, NULL, NULL, directory, FALSE, pActCtx->hModule,
                                              pActCtx->lpResourceName, lang );
             if (status && status != STATUS_SXS_CANT_GEN_ACTCTX)
                 /* FIXME: what to do if pActCtx->lpSource is set */
@@ -2222,7 +2255,7 @@ NTSTATUS WINAPI RtlCreateActivationContext( HANDLE *handle, const void *ptr )
         }
         else if (pActCtx->lpSource)
         {
-            status = get_manifest_in_pe_file( &acl, NULL, nameW.Buffer, directory,
+            status = get_manifest_in_pe_file( &acl, NULL, nameW.Buffer, directory, FALSE,
                                               file, pActCtx->lpResourceName, lang );
             if (status && status != STATUS_SXS_CANT_GEN_ACTCTX)
                 status = get_manifest_in_associated_manifest( &acl, NULL, nameW.Buffer, directory,
@@ -2232,7 +2265,7 @@ NTSTATUS WINAPI RtlCreateActivationContext( HANDLE *handle, const void *ptr )
     }
     else
     {
-        status = get_manifest_in_manifest_file( &acl, NULL, nameW.Buffer, directory, file );
+        status = get_manifest_in_manifest_file( &acl, NULL, nameW.Buffer, directory, FALSE, file );
     }
 
     if (file) NtClose( file );
@@ -2485,7 +2518,8 @@ NTSTATUS WINAPI RtlQueryInformationActivationContext( ULONG flags, HANDLE handle
             id_len = strlenW(assembly_id) + 1;
             if (assembly->directory) ad_len = strlenW(assembly->directory) + 1;
 
-            if (assembly->manifest.info && assembly->type == ASSEMBLY_MANIFEST)
+            if (assembly->manifest.info &&
+                (assembly->type == ASSEMBLY_MANIFEST || assembly->type == ASSEMBLY_SHARED_MANIFEST))
                 path_len  = strlenW(assembly->manifest.info) + 1;
 
             len = sizeof(*afdi) + (id_len + ad_len + path_len) * sizeof(WCHAR);

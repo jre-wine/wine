@@ -84,6 +84,24 @@ typedef struct tagCOMPOSITIONSTRING {
     DWORD dwPrivateOffset;
 } COMPOSITIONSTRING, *LPCOMPOSITIONSTRING;
 
+typedef struct tagGUIDELINE {
+    DWORD dwSize;
+    DWORD dwLevel;
+    DWORD dwIndex;
+    DWORD dwStrLen;
+    DWORD dwStrOffset;
+    DWORD dwPrivateSize;
+    DWORD dwPrivateOffset;
+} GUIDELINE, *LPGUIDELINE;
+
+typedef struct tagCANDIDATEINFO {
+    DWORD               dwSize;
+    DWORD               dwCount;
+    DWORD               dwOffset[32];
+    DWORD               dwPrivateSize;
+    DWORD               dwPrivateOffset;
+} CANDIDATEINFO, *LPCANDIDATEINFO;
+
 LPINPUTCONTEXT WINAPI ImmLockIMC(HIMC);
 BOOL  WINAPI ImmUnlockIMC(HIMC);
 DWORD WINAPI ImmGetIMCLockCount(HIMC);
@@ -94,6 +112,9 @@ BOOL   WINAPI ImmUnlockIMCC(HIMCC);
 DWORD  WINAPI ImmGetIMCCLockCount(HIMCC);
 HIMCC  WINAPI ImmReSizeIMCC(HIMCC, DWORD);
 DWORD  WINAPI ImmGetIMCCSize(HIMCC);
+
+#define IMMGWL_IMC                      0
+#define IMMGWL_PRIVATE                  (sizeof(LONG))
 
 /* IME Property bits */
 #define IME_PROP_END_UNLOAD             0x0001
@@ -120,6 +141,23 @@ DWORD  WINAPI ImmGetIMCCSize(HIMCC);
 #define NI_IMEMENUSELECTED              0x0018
 
 BOOL WINAPI ImmGenerateMessage(HIMC);
+
+BOOL WINAPI ImeInquire(LPIMEINFO, LPWSTR, LPCWSTR lpszOptions);
+BOOL WINAPI ImeConfigure (HKL, HWND, DWORD, LPVOID);
+DWORD WINAPI ImeConversionList(HIMC, LPCWSTR, LPCANDIDATELIST,DWORD,UINT);
+BOOL WINAPI ImeDestroy(UINT);
+LRESULT WINAPI ImeEscape(HIMC, UINT, LPVOID);
+BOOL WINAPI ImeProcessKey(HIMC, UINT, LPARAM, CONST LPBYTE);
+BOOL WINAPI ImeSelect(HIMC, BOOL);
+BOOL WINAPI ImeSetActiveContext(HIMC, BOOL);
+UINT WINAPI ImeToAsciiEx(UINT, UINT, CONST LPBYTE, LPDWORD, UINT, HIMC);
+BOOL WINAPI NotifyIME(HIMC, DWORD, DWORD, DWORD);
+BOOL WINAPI ImeRegisterWord(LPCWSTR, DWORD, LPCWSTR);
+BOOL WINAPI ImeUnregisterWord(LPCWSTR, DWORD, LPCWSTR);
+UINT WINAPI ImeGetRegisterWordStyle(UINT, LPSTYLEBUFW);
+UINT WINAPI ImeEnumRegisterWord(REGISTERWORDENUMPROCW, LPCWSTR, DWORD, LPCWSTR, LPVOID);
+BOOL WINAPI ImeSetCompositionString(HIMC, DWORD, LPCVOID, DWORD, LPCVOID, DWORD);
+DWORD WINAPI ImeGetImeMenuItems(HIMC, DWORD, DWORD, LPIMEMENUITEMINFOW, LPIMEMENUITEMINFOW, DWORD);
 
 #ifdef __cplusplus
 } /* extern "C" */

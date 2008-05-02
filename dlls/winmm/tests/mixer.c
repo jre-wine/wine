@@ -195,12 +195,11 @@ static void mixer_test_controlA(HMIXER mix, LPMIXERCONTROLA control)
         ok(rc==MMSYSERR_NOERROR,"mixerGetControlDetails(MIXER_GETCONTROLDETAILSF_VALUE): "
            "MMSYSERR_NOERROR expected, got %s\n",
            mmsys_error(rc));
-        if (rc==MMSYSERR_NOERROR) {
+        if (rc==MMSYSERR_NOERROR && winetest_interactive) {
             MIXERCONTROLDETAILS new_details;
             MIXERCONTROLDETAILS_UNSIGNED new_value;
 
-            if (winetest_interactive)
-                trace("            Value=%d\n",value.dwValue);
+            trace("            Value=%d\n",value.dwValue);
 
             if (value.dwValue + control->Metrics.cSteps < S1(control->Bounds).dwMaximum)
                 new_value.dwValue = value.dwValue + control->Metrics.cSteps;
@@ -275,12 +274,11 @@ static void mixer_test_controlA(HMIXER mix, LPMIXERCONTROLA control)
         ok(rc==MMSYSERR_NOERROR,"mixerGetControlDetails(MIXER_GETCONTROLDETAILSF_VALUE): "
            "MMSYSERR_NOERROR expected, got %s\n",
            mmsys_error(rc));
-        if (rc==MMSYSERR_NOERROR) {
+        if (rc==MMSYSERR_NOERROR && winetest_interactive) {
             MIXERCONTROLDETAILS new_details;
             MIXERCONTROLDETAILS_BOOLEAN new_value;
 
-            if (winetest_interactive)
-                trace("            Value=%d\n",value.fValue);
+            trace("            Value=%d\n",value.fValue);
 
             if (value.fValue == FALSE)
                 new_value.fValue = TRUE;
@@ -436,7 +434,8 @@ static void mixer_test_deviceA(int device)
                mmsys_error(rc));
             if (rc==MMSYSERR_NODRIVER)
                 trace("  No Driver\n");
-            else if (rc==MMSYSERR_NOERROR && winetest_interactive) {
+            else if (rc==MMSYSERR_NOERROR) {
+	      if (winetest_interactive) {
                 trace("    %d: \"%s\" (%s) Destination=%d Source=%d\n",
                       d,mixerlineA.szShortName, mixerlineA.szName,
                       mixerlineA.dwDestination,mixerlineA.dwSource);
@@ -456,9 +455,9 @@ static void mixer_test_deviceA(int device)
                       mixerlineA.Target.vDriverVersion >> 8,
                       mixerlineA.Target.vDriverVersion & 0xff,
                       mixerlineA.Target.wMid, mixerlineA.Target.wPid);
-            }
-            ns=mixerlineA.cConnections;
-            for(s=0;s<ns;s++) {
+	      }
+              ns=mixerlineA.cConnections;
+              for(s=0;s<ns;s++) {
                 mixerlineA.cbStruct = sizeof(mixerlineA);
                 mixerlineA.dwDestination=d;
                 mixerlineA.dwSource=s;
@@ -552,6 +551,7 @@ static void mixer_test_deviceA(int device)
                         }
                     }
                 }
+              }
             }
         }
         rc=mixerClose(mix);
@@ -582,12 +582,11 @@ static void mixer_test_controlW(HMIXER mix, LPMIXERCONTROLW control)
         ok(rc==MMSYSERR_NOERROR,"mixerGetControlDetails(MIXER_GETCONTROLDETAILSF_VALUE): "
            "MMSYSERR_NOERROR expected, got %s\n",
            mmsys_error(rc));
-        if (rc==MMSYSERR_NOERROR) {
+        if (rc==MMSYSERR_NOERROR && winetest_interactive) {
             MIXERCONTROLDETAILS new_details;
             MIXERCONTROLDETAILS_UNSIGNED new_value;
 
-            if (winetest_interactive)
-                trace("            Value=%d\n",value.dwValue);
+            trace("            Value=%d\n",value.dwValue);
 
             if (value.dwValue + control->Metrics.cSteps < S1(control->Bounds).dwMaximum)
                 new_value.dwValue = value.dwValue + control->Metrics.cSteps;
@@ -662,12 +661,11 @@ static void mixer_test_controlW(HMIXER mix, LPMIXERCONTROLW control)
         ok(rc==MMSYSERR_NOERROR,"mixerGetControlDetails(MIXER_GETCONTROLDETAILSF_VALUE): "
            "MMSYSERR_NOERROR expected, got %s\n",
            mmsys_error(rc));
-        if (rc==MMSYSERR_NOERROR) {
+        if (rc==MMSYSERR_NOERROR && winetest_interactive) {
             MIXERCONTROLDETAILS new_details;
             MIXERCONTROLDETAILS_BOOLEAN new_value;
 
-            if (winetest_interactive)
-                trace("            Value=%d\n",value.fValue);
+            trace("            Value=%d\n",value.fValue);
 
             if (value.fValue == FALSE)
                 new_value.fValue = TRUE;

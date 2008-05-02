@@ -3322,7 +3322,7 @@ static void test_VarDateFromStr(void)
   CHECKPTR(VarDateFromStr);
   CHECKPTR(SystemTimeToVariantTime);
 
-  /* Some date formats are relative, so we need to find the cuurent year */
+  /* Some date formats are relative, so we need to find the current year */
   GetSystemTime(&st);
   st.wHour = st.wMinute = st.wSecond = st.wMilliseconds = 0;
   DFS(NULL); EXPECT_MISMATCH;
@@ -4747,7 +4747,7 @@ static void test_VarBstrFromR4(void)
     }
   }
 
-  f = -1e-400;    /* deliberately cause underflow */
+  f = -0.0;
   hres = pVarBstrFromR4(f, lcid, 0, &bstr);
   ok(hres == S_OK, "got hres 0x%08x\n", hres);
   if (bstr)
@@ -4928,12 +4928,12 @@ static void test_VarBstrCmp(void)
     bstr = SysAllocString(sz);
     bstrempty = SysAllocString(szempty);
     
-    /* NULL handling. Yepp, MSDN is totaly wrong here */
+    /* NULL handling. Yepp, MSDN is totally wrong here */
     VARBSTRCMP(NULL,NULL,0,VARCMP_EQ);
     VARBSTRCMP(bstr,NULL,0,VARCMP_GT);
     VARBSTRCMP(NULL,bstr,0,VARCMP_LT);
 
-    /* NULL and empty string comparisions */
+    /* NULL and empty string comparisons */
     VARBSTRCMP(bstrempty,NULL,0,VARCMP_EQ);
     VARBSTRCMP(NULL,bstrempty,0,VARCMP_EQ);
 
@@ -5066,6 +5066,9 @@ static void test_SysAllocStringByteLen(void)
   BSTR str;
 
   str = SysAllocStringByteLen(szTestA, 0x80000000);
+  ok (str == NULL, "Expected NULL, got %p\n", str);
+
+  str = SysAllocStringByteLen(szTestA, 0xffffffff);
   ok (str == NULL, "Expected NULL, got %p\n", str);
 
   str = SysAllocStringByteLen(NULL, 0);

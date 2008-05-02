@@ -120,13 +120,12 @@ typedef struct
 } RGNOBJ;
 
 
-static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, void *obj, HDC hdc );
+static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, HDC hdc );
 static BOOL REGION_DeleteObject( HGDIOBJ handle, void *obj );
 
 static const struct gdi_obj_funcs region_funcs =
 {
     REGION_SelectObject,  /* pSelectObject */
-    NULL,                 /* pGetObject16 */
     NULL,                 /* pGetObjectA */
     NULL,                 /* pGetObjectW */
     NULL,                 /* pUnrealizeObject */
@@ -549,7 +548,7 @@ static BOOL REGION_DeleteObject( HGDIOBJ handle, void *obj )
 /***********************************************************************
  *           REGION_SelectObject
  */
-static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
+static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, HDC hdc )
 {
     return ULongToHandle(SelectClipRgn( hdc, handle ));
 }
@@ -894,7 +893,7 @@ HRGN WINAPI CreateRoundRectRgn( INT left, INT top,
  *
  * NOTES
  *   This is a special case of CreateRoundRectRgn() where the width of the
- *   ellipse at each corner is equal to the width the the rectangle and
+ *   ellipse at each corner is equal to the width the rectangle and
  *   the same for the height.
  */
 HRGN WINAPI CreateEllipticRgn( INT left, INT top,
@@ -919,7 +918,7 @@ HRGN WINAPI CreateEllipticRgn( INT left, INT top,
  *
  * NOTES
  *   This is a special case of CreateRoundRectRgn() where the width of the
- *   ellipse at each corner is equal to the width the the rectangle and
+ *   ellipse at each corner is equal to the width the rectangle and
  *   the same for the height.
  */
 HRGN WINAPI CreateEllipticRgnIndirect( const RECT *rect )
@@ -994,7 +993,7 @@ DWORD WINAPI GetRegionData(HRGN hrgn, DWORD count, LPRGNDATA rgndata)
  * PARAMS
  *   lpXform [I] World-space to logical-space transformation data.
  *   dwCount [I] Size of the data pointed to by rgndata, in bytes.
- *   rgndata [I] Data that specifes the region.
+ *   rgndata [I] Data that specifies the region.
  *
  * RETURNS
  *   Success: Handle to region.
@@ -1240,7 +1239,7 @@ BOOL REGION_FrameRgn( HRGN hDest, HRGN hSrc, INT x, INT y )
 /***********************************************************************
  *           CombineRgn   (GDI32.@)
  *
- * Combines two regions with the specifed operation and stores the result
+ * Combines two regions with the specified operation and stores the result
  * in the specified destination region.
  *
  * PARAMS
@@ -1683,7 +1682,7 @@ static void REGION_RegionOp(
 	    top = max(r1->top,ybot);
 	    bot = min(r1->bottom,r2->top);
 
-	    if ((top != bot) && (nonOverlap1Func != (void (*)())NULL))
+            if ((top != bot) && (nonOverlap1Func != NULL))
 	    {
 		(* nonOverlap1Func) (newReg, r1, r1BandEnd, top, bot);
 	    }
@@ -1695,7 +1694,7 @@ static void REGION_RegionOp(
 	    top = max(r2->top,ybot);
 	    bot = min(r2->bottom,r1->top);
 
-	    if ((top != bot) && (nonOverlap2Func != (void (*)())NULL))
+            if ((top != bot) && (nonOverlap2Func != NULL))
 	    {
 		(* nonOverlap2Func) (newReg, r2, r2BandEnd, top, bot);
 	    }
@@ -1755,7 +1754,7 @@ static void REGION_RegionOp(
     curBand = newReg->numRects;
     if (r1 != r1End)
     {
-	if (nonOverlap1Func != (void (*)())NULL)
+        if (nonOverlap1Func != NULL)
 	{
 	    do
 	    {
@@ -1770,7 +1769,7 @@ static void REGION_RegionOp(
 	    } while (r1 != r1End);
 	}
     }
-    else if ((r2 != r2End) && (nonOverlap2Func != (void (*)())NULL))
+    else if ((r2 != r2End) && (nonOverlap2Func != NULL))
     {
 	do
 	{

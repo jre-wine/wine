@@ -82,7 +82,7 @@ void remove_doc_tasks(const HTMLDocument *doc)
         while(iter->next && iter->next->doc == doc) {
             tmp = iter->next;
             iter->next = tmp->next;
-            mshtml_free(tmp);
+            heap_free(tmp);
         }
 
         if(!iter->next)
@@ -211,10 +211,11 @@ static void set_progress(HTMLDocument *doc)
     }
 }
 
-static void task_start_binding(BSCallback *bscallback)
+static void task_start_binding(HTMLDocument *doc, BSCallback *bscallback)
 {
-    start_binding(bscallback);
-    IBindStatusCallback_Release(STATUSCLB(bscallback));
+    if(doc)
+        start_binding(doc, bscallback, NULL);
+    IUnknown_Release((IUnknown*)bscallback);
 }
 
 static void process_task(task_t *task)
@@ -230,7 +231,7 @@ static void process_task(task_t *task)
         set_progress(task->doc);
         break;
     case TASK_START_BINDING:
-        task_start_binding(task->bscallback);
+        task_start_binding(task->doc, (BSCallback*)task->bscallback);
         break;
     default:
         ERR("Wrong task_id %d\n", task->task_id);
@@ -247,7 +248,7 @@ static LRESULT WINAPI hidden_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 break;
 
             process_task(task);
-            mshtml_free(task);
+            heap_free(task);
         }
 
         return 0;
@@ -304,7 +305,7 @@ thread_data_t *get_thread_data(BOOL create)
 
     thread_data = TlsGetValue(mshtml_tls);
     if(!thread_data && create) {
-        thread_data = mshtml_alloc_zero(sizeof(thread_data_t));
+        thread_data = heap_alloc_zero(sizeof(thread_data_t));
         TlsSetValue(mshtml_tls, thread_data);
     }
 

@@ -308,7 +308,7 @@ BOOL module_get_debug(struct module_pair* pair)
             idslW64.CheckSum = pair->effective->module.CheckSum;
             idslW64.TimeDateStamp = pair->effective->module.TimeDateStamp;
             memcpy(idslW64.FileName, pair->effective->module.ImageName,
-                   sizeof(idslW64.FileName));
+                   sizeof(pair->effective->module.ImageName));
             idslW64.Reparse = FALSE;
             idslW64.hFile = INVALID_HANDLE_VALUE;
 
@@ -402,23 +402,32 @@ static BOOL module_is_elf_container_loaded(const struct process* pcs,
  */
 enum module_type module_get_type_by_name(const WCHAR* name)
 {
-    const WCHAR*ptr;
-    int         len = strlenW(name);
+    int len = strlenW(name);
+
+    /* Skip all version extensions (.[digits]) regex: "(\.\d+)*$" */
+    do
+    {
+        int i = len;
+
+        while (i && isdigit(name[i - 1])) i--;
+
+        if (i && name[i - 1] == '.')
+            len = i - 1;
+        else
+            break;
+    } while (len);
 
     /* check for terminating .so or .so.[digit] */
-    ptr = strrchrW(name, '.');
-    if (ptr)
-    {
-        if (!strcmpW(ptr, S_DotSoW) ||
-            (isdigit(ptr[1]) && !ptr[2] && ptr >= name + 3 && !memcmp(ptr - 3, S_DotSoW, 3)))
-            return DMT_ELF;
-        else if (!strcmpiW(ptr, S_DotPdbW))
-            return DMT_PDB;
-    }
+    if (len > 3 && !memcmp(name + len - 3, S_DotSoW, 3))
+        return DMT_ELF;
+
+    if (len > 4 && !strncmpiW(name + len - 4, S_DotPdbW, 4))
+        return DMT_PDB;
+
     /* wine-[kp]thread is also an ELF module */
-    else if (((len > 12 && name[len - 13] == '/') || len == 12) &&
-             (!strcmpiW(name + len - 12, S_WinePThreadW) ||
-              !strcmpiW(name + len - 12, S_WineKThreadW)))
+    if (((len > 12 && name[len - 13] == '/') || len == 12) &&
+        (!strncmpiW(name + len - 12, S_WinePThreadW, 12) ||
+         !strncmpiW(name + len - 12, S_WineKThreadW, 12)))
     {
         return DMT_ELF;
     }
@@ -546,7 +555,7 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
     if (wModuleName)
         module_set_module(module, wModuleName);
     lstrcpynW(module->module.ImageName, wImageName,
-              sizeof(module->module.ImageName) / sizeof(CHAR));
+              sizeof(module->module.ImageName) / sizeof(WCHAR));
 
     return module->module.BaseOfImage;
 }
@@ -572,7 +581,7 @@ BOOL module_remove(struct process* pcs, struct module* module)
     TRACE("%s (%p)\n", debugstr_w(module->module.ModuleName), module);
     hash_table_destroy(&module->ht_symbols);
     hash_table_destroy(&module->ht_types);
-    HeapFree(GetProcessHeap(), 0, (char*)module->sources);
+    HeapFree(GetProcessHeap(), 0, module->sources);
     HeapFree(GetProcessHeap(), 0, module->addr_sorttab);
     HeapFree(GetProcessHeap(), 0, module->dwarf2_info);
     pool_destroy(&module->pool);

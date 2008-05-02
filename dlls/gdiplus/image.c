@@ -34,8 +34,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
-typedef void ImageItemData;
-
 #define PIXELFORMATBPP(x) ((x) ? ((x) >> 8) & 255 : 24)
 
 static INT ipicture_pixel_height(IPicture *pic)
@@ -47,8 +45,7 @@ static INT ipicture_pixel_height(IPicture *pic)
 
     hdcref = GetDC(0);
 
-    y = (UINT)(((REAL)y) * ((REAL)GetDeviceCaps(hdcref, LOGPIXELSY)) /
-              ((REAL)INCH_HIMETRIC));
+    y = MulDiv(y, GetDeviceCaps(hdcref, LOGPIXELSY), INCH_HIMETRIC);
     ReleaseDC(0, hdcref);
 
     return y;
@@ -63,8 +60,7 @@ static INT ipicture_pixel_width(IPicture *pic)
 
     hdcref = GetDC(0);
 
-    x = (UINT)(((REAL)x) * ((REAL)GetDeviceCaps(hdcref, LOGPIXELSX)) /
-              ((REAL)INCH_HIMETRIC));
+    x = MulDiv(x, GetDeviceCaps(hdcref, LOGPIXELSX), INCH_HIMETRIC);
 
     ReleaseDC(0, hdcref);
 
@@ -118,8 +114,7 @@ GpStatus WINGDIPAPI GdipBitmapLockBits(GpBitmap* bitmap, GDIPCONST GpRect* rect,
     if(flags & ImageLockModeUserInputBuf)
         return NotImplemented;
 
-    if((bitmap->lockmode & ImageLockModeWrite) || (bitmap->lockmode &&
-        (flags & ImageLockModeWrite)))
+    if(bitmap->lockmode)
         return WrongState;
 
     IPicture_get_Handle(bitmap->image.picture, &hbm);
@@ -174,8 +169,7 @@ GpStatus WINGDIPAPI GdipBitmapLockBits(GpBitmap* bitmap, GDIPCONST GpRect* rect,
     bitmap->lockmode = flags;
     bitmap->numlocks++;
 
-    if(flags & ImageLockModeWrite)
-        bitmap->bitmapbits = buff;
+    bitmap->bitmapbits = buff;
 
     return Ok;
 }
@@ -202,7 +196,8 @@ GpStatus WINGDIPAPI GdipBitmapUnlockBits(GpBitmap* bitmap,
         if(!(--bitmap->numlocks))
             bitmap->lockmode = 0;
 
-        GdipFree(lockeddata->Scan0);
+        GdipFree(bitmap->bitmapbits);
+        bitmap->bitmapbits = NULL;
         return Ok;
     }
 
@@ -229,6 +224,8 @@ GpStatus WINGDIPAPI GdipBitmapUnlockBits(GpBitmap* bitmap,
     }
 
     GdipFree(bitmap->bitmapbits);
+    bitmap->bitmapbits = NULL;
+    bitmap->lockmode = 0;
 
     return Ok;
 }
@@ -249,10 +246,26 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromFile(GDIPCONST WCHAR* filename,
 
     stat = GdipCreateBitmapFromStream(stream, bitmap);
 
-    if(!stat)
-        IStream_Release(stream);
+    IStream_Release(stream);
 
     return stat;
+}
+
+/* FIXME: no icm */
+GpStatus WINGDIPAPI GdipCreateBitmapFromFileICM(GDIPCONST WCHAR* filename,
+    GpBitmap **bitmap)
+{
+    return GdipCreateBitmapFromFile(filename, bitmap);
+}
+
+GpStatus WINGDIPAPI GdipCreateHBITMAPFromBitmap(GpBitmap* bitmap,
+    HBITMAP* hbmReturn, ARGB background)
+{
+    FIXME("stub\n");
+
+    hbmReturn = NULL;
+
+    return NotImplemented;
 }
 
 GpStatus WINGDIPAPI GdipConvertToEmfPlus(const GpGraphics* ref,
@@ -414,6 +427,8 @@ GpStatus WINGDIPAPI GdipDisposeImage(GpImage *image)
     IPicture_get_CurDC(image->picture, &hdc);
     DeleteDC(hdc);
     IPicture_Release(image->picture);
+    if (image->type == ImageTypeBitmap)
+        GdipFree(((GpBitmap*)image)->bitmapbits);
     GdipFree(image);
 
     return Ok;
@@ -433,7 +448,7 @@ GpStatus WINGDIPAPI GdipGetImageBounds(GpImage *image, GpRectF *srcRect,
     if(!image || !srcRect || !srcUnit)
         return InvalidParameter;
     if(image->type == ImageTypeMetafile){
-        memcpy(srcRect, &((GpMetafile*)image)->bounds, sizeof(GpRectF));
+        *srcRect = ((GpMetafile*)image)->bounds;
         *srcUnit = ((GpMetafile*)image)->unit;
     }
     else if(image->type == ImageTypeBitmap){
@@ -452,6 +467,37 @@ GpStatus WINGDIPAPI GdipGetImageBounds(GpImage *image, GpRectF *srcRect,
     TRACE("returning (%f, %f) (%f, %f) unit type %d\n", srcRect->X, srcRect->Y,
           srcRect->Width, srcRect->Height, *srcUnit);
 
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetImageDimension(GpImage *image, REAL *width,
+    REAL *height)
+{
+    if(!image || !height || !width)
+        return InvalidParameter;
+
+    if(image->type == ImageTypeMetafile){
+        HDC hdc = GetDC(0);
+
+        *height = convert_unit(hdc, ((GpMetafile*)image)->unit) *
+                        ((GpMetafile*)image)->bounds.Height;
+
+        *width = convert_unit(hdc, ((GpMetafile*)image)->unit) *
+                        ((GpMetafile*)image)->bounds.Width;
+
+        ReleaseDC(0, hdc);
+    }
+
+    else if(image->type == ImageTypeBitmap){
+        *height = ((GpBitmap*)image)->height;
+        *width = ((GpBitmap*)image)->width;
+    }
+    else{
+        *height = ipicture_pixel_height(image->picture);
+        *width = ipicture_pixel_width(image->picture);
+    }
+
+    TRACE("returning (%f, %f)\n", *height, *width);
     return Ok;
 }
 
@@ -659,6 +705,27 @@ GpStatus WINGDIPAPI GdipImageSelectActiveFrame(GpImage *image,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipLoadImageFromFile(GDIPCONST WCHAR* filename,
+                                          GpImage **image)
+{
+    GpStatus stat;
+    IStream *stream;
+
+    if (!filename || !image)
+        return InvalidParameter;
+
+    stat = GdipCreateStreamOnFile(filename, GENERIC_READ, &stream);
+
+    if (stat != Ok)
+        return stat;
+
+    stat = GdipLoadImageFromStream(stream, image);
+
+    IStream_Release(stream);
+
+    return stat;
+}
+
 GpStatus WINGDIPAPI GdipLoadImageFromStream(IStream* stream, GpImage **image)
 {
     IPicture *pic;
@@ -672,8 +739,6 @@ GpStatus WINGDIPAPI GdipLoadImageFromStream(IStream* stream, GpImage **image)
         TRACE("Could not load picture\n");
         return GenericError;
     }
-
-    IStream_AddRef(stream);
 
     IPicture_get_Type(pic, &type);
 
@@ -746,17 +811,176 @@ GpStatus WINGDIPAPI GdipRemovePropertyItem(GpImage *image, PROPID propId)
     return NotImplemented;
 }
 
+GpStatus WINGDIPAPI GdipSaveImageToFile(GpImage *image, GDIPCONST WCHAR* filename,
+                                        GDIPCONST CLSID *clsidEncoder,
+                                        GDIPCONST EncoderParameters *encoderParams)
+{
+    GpStatus stat;
+    IStream *stream;
+
+    if (!image || !filename|| !clsidEncoder)
+        return InvalidParameter;
+
+    if (!(image->picture))
+        return InvalidParameter;
+
+    stat = GdipCreateStreamOnFile(filename, GENERIC_WRITE, &stream);
+    if (stat != Ok)
+        return GenericError;
+
+    stat = GdipSaveImageToStream(image, stream, clsidEncoder, encoderParams);
+
+    IStream_Release(stream);
+    return stat;
+}
+
+/*************************************************************************
+ * Encoding functions -
+ *   These functions encode an image in different image file formats.
+ */
+#define BITMAP_FORMAT_BMP   0x4d42 /* "BM" */
+#define BITMAP_FORMAT_JPEG  0xd8ff
+#define BITMAP_FORMAT_GIF   0x4947
+#define BITMAP_FORMAT_PNG   0x5089
+#define BITMAP_FORMAT_APM   0xcdd7
+
+static GpStatus encode_image_BMP(LPVOID bitmap_bits, LPBITMAPINFO bitmap_info,
+                                 void **output, unsigned int *output_size)
+{
+    int num_palette_entries;
+    BITMAPFILEHEADER *bmp_file_hdr;
+    BITMAPINFO *bmp_info_hdr;
+
+    if (bitmap_info->bmiHeader.biClrUsed) {
+        num_palette_entries = bitmap_info->bmiHeader.biClrUsed;
+        if (num_palette_entries > 256) num_palette_entries = 256;
+    } else {
+        if (bitmap_info->bmiHeader.biBitCount <= 8)
+            num_palette_entries = 1 << bitmap_info->bmiHeader.biBitCount;
+        else
+            num_palette_entries = 0;
+    }
+
+    *output_size =
+        sizeof(BITMAPFILEHEADER) +
+        sizeof(BITMAPINFOHEADER) +
+        num_palette_entries * sizeof(RGBQUAD) +
+        bitmap_info->bmiHeader.biSizeImage;
+
+    *output = GdipAlloc(*output_size);
+
+    bmp_file_hdr = (BITMAPFILEHEADER*) *output;
+    bmp_file_hdr->bfType = BITMAP_FORMAT_BMP;
+    bmp_file_hdr->bfSize = *output_size;
+    bmp_file_hdr->bfOffBits =
+        sizeof(BITMAPFILEHEADER) +
+        sizeof(BITMAPINFOHEADER) +
+        num_palette_entries * sizeof (RGBQUAD);
+
+    bmp_info_hdr = (BITMAPINFO*) ((unsigned char*)(*output) + sizeof(BITMAPFILEHEADER));
+    memcpy(bmp_info_hdr, bitmap_info, sizeof(BITMAPINFOHEADER) + num_palette_entries * sizeof(RGBQUAD));
+    memcpy((unsigned char *)(*output) +
+           sizeof(BITMAPFILEHEADER) +
+           sizeof(BITMAPINFOHEADER) +
+           num_palette_entries * sizeof(RGBQUAD),
+           bitmap_bits, bitmap_info->bmiHeader.biSizeImage);
+
+    return Ok;
+}
+
+typedef GpStatus encode_image_func(LPVOID bitmap_bits, LPBITMAPINFO bitmap_info,
+                                   void **output, unsigned int *output_size);
+
+typedef enum {
+    BMP,
+    NUM_ENCODERS_SUPPORTED
+} ImageFormat;
+
+static const ImageCodecInfo codecs[NUM_ENCODERS_SUPPORTED];
+static encode_image_func *const encode_image_funcs[NUM_ENCODERS_SUPPORTED] = {
+    encode_image_BMP,
+};
+
 GpStatus WINGDIPAPI GdipSaveImageToStream(GpImage *image, IStream* stream,
     GDIPCONST CLSID* clsid, GDIPCONST EncoderParameters* params)
 {
+    GpStatus stat;
+    HRESULT hr;
+    short type;
+    HBITMAP hbmp;
+    HBITMAP old_hbmp;
+    HDC hdc;
+    int bm_is_selected;
+    BITMAPINFO bmp_info;
+    LPVOID bmp_bits;
+    encode_image_func* encode_image;
+    LPVOID output;
+    unsigned int output_size;
+    unsigned int dummy;
+    int i;
+
+    old_hbmp = 0;
+    output = NULL;
+    output_size = 0;
+
     if(!image || !stream)
         return InvalidParameter;
 
-    /* FIXME: CLSID, EncoderParameters not used */
+    if (!image->picture)
+        return GenericError;
 
-    IPicture_SaveAsFile(image->picture, stream, FALSE, NULL);
+    hr = IPicture_get_Type(image->picture, &type);
+    if (FAILED(hr) || type != PICTYPE_BITMAP)
+        return GenericError;
 
-    return Ok;
+    /* select correct encoder */
+    encode_image = NULL;
+    for (i = 0; i < NUM_ENCODERS_SUPPORTED; i++) {
+        if (IsEqualCLSID(clsid, &codecs[i].Clsid))
+            encode_image = encode_image_funcs[i];
+    }
+    if (encode_image == NULL)
+        return UnknownImageFormat;
+
+    /* extract underlying hbitmap representation from the IPicture */
+    hr = IPicture_get_Handle(image->picture, (OLE_HANDLE*)&hbmp);
+    if (FAILED(hr) || !hbmp)
+        return GenericError;
+    hr = IPicture_get_CurDC(image->picture, &hdc);
+    if (FAILED(hr))
+        return GenericError;
+    bm_is_selected = (hdc != 0);
+    if (!bm_is_selected) {
+        hdc = CreateCompatibleDC(0);
+        old_hbmp = SelectObject(hdc, hbmp);
+    }
+
+    /* get bits from HBITMAP */
+    bmp_info.bmiHeader.biSize = sizeof(bmp_info.bmiHeader);
+    bmp_info.bmiHeader.biBitCount = 0;
+    GetDIBits(hdc, hbmp, 0, 0, NULL, &bmp_info, DIB_RGB_COLORS);
+
+    bmp_bits = GdipAlloc(bmp_info.bmiHeader.biSizeImage);
+
+    if (bmp_bits)
+        GetDIBits(hdc, hbmp, 0, abs(bmp_info.bmiHeader.biHeight), bmp_bits, &bmp_info, DIB_RGB_COLORS);
+
+    if (!bm_is_selected) {
+        SelectObject(hdc, old_hbmp);
+        DeleteDC(hdc);
+    }
+
+    if (!bmp_bits)
+        return OutOfMemory;
+
+    stat = encode_image(bmp_bits, &bmp_info, &output, &output_size);
+    if (stat == Ok)
+        IStream_Write(stream, output, output_size, &dummy);
+
+    GdipFree(output);
+    GdipFree(bmp_bits);
+
+    return stat;
 }
 
 GpStatus WINGDIPAPI GdipSetImagePalette(GpImage *image,
@@ -766,6 +990,117 @@ GpStatus WINGDIPAPI GdipSetImagePalette(GpImage *image,
 
     if(!image || !palette)
         return InvalidParameter;
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
+}
+
+/*************************************************************************
+ * Encoders -
+ *   Structures that represent which formats we support for encoding.
+ */
+
+/* ImageCodecInfo creation routines taken from libgdiplus */
+static const WCHAR bmp_codecname[] = {'B', 'u', 'i','l', 't', '-','i', 'n', ' ', 'B', 'M', 'P', 0}; /* Built-in BMP */
+static const WCHAR bmp_extension[] = {'*','.','B', 'M', 'P',';', '*','.', 'D','I', 'B',';', '*','.', 'R', 'L', 'E',0}; /* *.BMP;*.DIB;*.RLE */
+static const WCHAR bmp_mimetype[] = {'i', 'm', 'a','g', 'e', '/', 'b', 'm', 'p', 0}; /* image/bmp */
+static const WCHAR bmp_format[] = {'B', 'M', 'P', 0}; /* BMP */
+static const BYTE bmp_sig_pattern[] = { 0x42, 0x4D };
+static const BYTE bmp_sig_mask[] = { 0xFF, 0xFF };
+
+static const ImageCodecInfo codecs[NUM_ENCODERS_SUPPORTED] =
+    {
+        { /* BMP */
+            /* Clsid */              { 0x557cf400, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x0, 0x0, 0xf8, 0x1e, 0xf3, 0x2e } },
+            /* FormatID */           { 0xb96b3cabU, 0x0728U, 0x11d3U, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e} },
+            /* CodecName */          bmp_codecname,
+            /* DllName */            NULL,
+            /* FormatDescription */  bmp_format,
+            /* FilenameExtension */  bmp_extension,
+            /* MimeType */           bmp_mimetype,
+            /* Flags */              ImageCodecFlagsEncoder | ImageCodecFlagsDecoder | ImageCodecFlagsSupportBitmap | ImageCodecFlagsBuiltin,
+            /* Version */            1,
+            /* SigCount */           1,
+            /* SigSize */            2,
+            /* SigPattern */         bmp_sig_pattern,
+            /* SigMask */            bmp_sig_mask,
+        },
+    };
+
+GpStatus WINGDIPAPI GdipGetImageEncodersSize(UINT *numEncoders, UINT *size)
+{
+    if (!numEncoders || !size)
+        return InvalidParameter;
+
+    *numEncoders = NUM_ENCODERS_SUPPORTED;
+    *size = sizeof (codecs);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetImageEncoders(UINT numEncoders, UINT size, ImageCodecInfo *encoders)
+{
+    if (!encoders ||
+        (numEncoders != NUM_ENCODERS_SUPPORTED) ||
+        (size != sizeof (codecs)))
+        return GenericError;
+
+    memcpy(encoders, codecs, sizeof (codecs));
+
+    return Ok;
+}
+GpStatus WINGDIPAPI GdipCreateBitmapFromHBITMAP(HBITMAP hbm, HPALETTE hpal, GpBitmap** bitmap)
+{
+    BITMAP bm;
+    GpStatus retval;
+    PixelFormat format;
+
+    if(!hbm || !bitmap)
+        return InvalidParameter;
+
+    /* TODO: Support for device-dependent bitmaps */
+    if(hpal){
+        FIXME("no support for device-dependent bitmaps\n");
+        return NotImplemented;
+    }
+
+    if (GetObjectA(hbm, sizeof(bm), &bm) != sizeof(bm))
+            return InvalidParameter;
+
+    /* TODO: Figure out the correct format for 16, 32, 64 bpp */
+    switch(bm.bmBitsPixel) {
+        case 1:
+            format = PixelFormat1bppIndexed;
+            break;
+        case 4:
+            format = PixelFormat4bppIndexed;
+            break;
+        case 8:
+            format = PixelFormat8bppIndexed;
+            break;
+        case 24:
+            format = PixelFormat24bppRGB;
+            break;
+        case 48:
+            format = PixelFormat48bppRGB;
+            break;
+        default:
+            FIXME("don't know how to handle %d bpp\n", bm.bmBitsPixel);
+            return InvalidParameter;
+    }
+
+    retval = GdipCreateBitmapFromScan0(bm.bmWidth, bm.bmHeight, bm.bmWidthBytes,
+        format, bm.bmBits, bitmap);
+
+    return retval;
+}
+
+GpStatus WINGDIPAPI GdipSetEffectParameters(CGpEffect *effect,
+    const VOID *params, const UINT size)
+{
+    static int calls;
 
     if(!(calls++))
         FIXME("not implemented\n");

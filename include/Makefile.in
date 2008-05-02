@@ -5,27 +5,36 @@ VPATH	  = @srcdir@
 MODULE	  = none
 
 IDL_H_SRCS = \
+	activaut.idl \
+	activdbg.idl \
 	activscp.idl \
 	amstream.idl \
 	amvideo.idl \
 	austream.idl \
+	bits.idl \
+	bits1_5.idl \
 	comcat.idl \
 	control.idl \
 	d3d10.idl \
 	ddstream.idl \
+	dimm.idl \
 	dispex.idl \
 	docobj.idl \
 	downloadmgr.idl \
 	dxgi.idl \
 	dxgitype.idl \
 	exdisp.idl \
+	fusion.idl \
 	hlink.idl \
 	htiframe.idl \
 	iads.idl \
 	icftypes.idl \
+	imnact.idl \
+	imnxport.idl \
 	indexsrv.idl \
 	mediaobj.idl \
 	mimeinfo.idl \
+	mimeole.idl \
 	mlang.idl \
 	mmstream.idl \
 	mscoree.idl \
@@ -40,11 +49,13 @@ IDL_H_SRCS = \
 	objsafe.idl \
 	ocidl.idl \
 	ocmm.idl \
+	oleacc.idl \
 	oledb.idl \
 	oleidl.idl \
 	optary.idl \
 	propidl.idl \
 	pstore.idl \
+	qedit.idl \
 	richole.idl \
 	sensevts.idl \
 	servprov.idl \
@@ -57,6 +68,7 @@ IDL_H_SRCS = \
 	urlhist.idl \
 	urlmon.idl \
 	wine/itss.idl \
+	wine/svcctl.idl \
 	wtypes.idl \
 	xmldom.idl \
 	xmldso.idl
@@ -78,6 +90,8 @@ SRCDIR_INCLUDES = \
 	axextend.idl \
 	basetsd.h \
 	basetyps.h \
+	bcrypt.h \
+	bitsmsg.h \
 	cderr.h \
 	cfgmgr32.h \
 	cguid.h \
@@ -87,6 +101,7 @@ SRCDIR_INCLUDES = \
 	commdlg.h \
 	compobj.h \
 	cor.h \
+	corerror.h \
 	cpl.h \
 	custcntl.h \
 	cvconst.h \
@@ -103,7 +118,16 @@ SRCDIR_INCLUDES = \
 	d3drmdef.h \
 	d3dtypes.h \
 	d3dvec.inl \
+	d3dx8.h \
 	d3dx8core.h \
+	d3dx8math.h \
+	d3dx8math.inl \
+	d3dx8mesh.h \
+	d3dx9.h \
+	d3dx9core.h \
+	d3dx9math.h \
+	d3dx9math.inl \
+	d3dx9tex.h \
 	dbghelp.h \
 	dbinit.idl \
 	dbprop.idl \
@@ -116,10 +140,13 @@ SRCDIR_INCLUDES = \
 	ddk/compstui.h \
 	ddk/hidsdi.h \
 	ddk/imm.h \
+	ddk/mountmgr.h \
 	ddk/ntddcdvd.h \
+	ddk/ntddk.h \
 	ddk/ntddser.h \
 	ddk/ntddtape.h \
 	ddk/wdm.h \
+	ddk/winddiui.h \
 	ddk/winsplp.h \
 	ddraw.h \
 	ddrawi.h \
@@ -154,12 +181,14 @@ SRCDIR_INCLUDES = \
 	dshow.h \
 	dsound.h \
 	dsrole.h \
+	dvdmedia.h \
 	dwmapi.h \
 	dxdiag.h \
 	dxerr8.h \
 	dxerr9.h \
 	dxfile.h \
 	dyngraph.idl \
+	errorrep.h \
 	errors.h \
 	evcode.h \
 	evntrace.h \
@@ -168,6 +197,7 @@ SRCDIR_INCLUDES = \
 	fci.h \
 	fdi.h \
 	gdiplus.h \
+	gdipluscolor.h \
 	gdipluscolormatrix.h \
 	gdiplusenums.h \
 	gdiplusflat.h \
@@ -181,17 +211,20 @@ SRCDIR_INCLUDES = \
 	guiddef.h \
 	hlguids.h \
 	htmlhelp.h \
+	i_cryptasn1tls.h \
 	icm.h \
 	icmpapi.h \
 	idispids.h \
 	imagehlp.h \
 	imm.h \
 	initguid.h \
+	intshcut.h \
 	ipexport.h \
 	iphlpapi.h \
 	ipifcons.h \
 	iprtrmib.h \
 	iptypes.h \
+	isguids.h \
 	ks.h \
 	ksguid.h \
 	ksmedia.h \
@@ -222,6 +255,7 @@ SRCDIR_INCLUDES = \
 	mciavi.h \
 	mcx.h \
 	mediaerr.h \
+	midles.h \
 	minmax.h \
 	mmddk.h \
 	mmreg.h \
@@ -302,6 +336,7 @@ SRCDIR_INCLUDES = \
 	poppack.h \
 	powrprof.h \
 	profinfo.h \
+	propvarutil.h \
 	prsht.h \
 	psapi.h \
 	pshpack1.h \
@@ -314,6 +349,7 @@ SRCDIR_INCLUDES = \
 	richedit.h \
 	rmxfguid.h \
 	rpc.h \
+	rpcasync.h \
 	rpcdce.h \
 	rpcdcep.h \
 	rpcndr.h \
@@ -334,6 +370,8 @@ SRCDIR_INCLUDES = \
 	shlobj.h \
 	shlwapi.h \
 	sipbase.h \
+	slerror.h \
+	slpublic.h \
 	snmp.h \
 	softpub.h \
 	sql.h \
@@ -356,6 +394,7 @@ SRCDIR_INCLUDES = \
 	ver.h \
 	vfw.h \
 	vfwmsgs.h \
+	wfext.h \
 	winbase.h \
 	wincon.h \
 	wincred.h \
@@ -370,6 +409,7 @@ SRCDIR_INCLUDES = \
 	wine/unicode.h \
 	winerror.h \
 	wingdi.h \
+	winhttp.h \
 	wininet.h \
 	winineti.h \
 	winioctl.h \

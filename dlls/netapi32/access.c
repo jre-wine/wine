@@ -58,10 +58,6 @@ struct sam_user
     LPWSTR user_logon_script_path;
 };
 
-static const WCHAR sAdminUserName[] = {'A','d','m','i','n','i','s','t','r','a','t',
-                                'o','r',0};
-static const WCHAR sGuestUserName[] = {'G','u','e','s','t',0};
-
 static struct list user_list = LIST_INIT( user_list );
 
 BOOL NETAPI_IsLocalComputer(LPCWSTR ServerName);
@@ -178,13 +174,8 @@ NET_API_STATUS WINAPI NetUserAdd(LPCWSTR servername,
         break;
     }
 
-    if(su)
-    {
-        HeapFree(GetProcessHeap(), 0, su->home_dir);
-        HeapFree(GetProcessHeap(), 0, su->user_comment);
-        HeapFree(GetProcessHeap(), 0, su->user_logon_script_path);
-        HeapFree(GetProcessHeap(), 0, su);
-    }
+    HeapFree(GetProcessHeap(), 0, su);
+
     return status;
 }
 
@@ -609,7 +600,7 @@ NetQueryDisplayInformation(
         NetApiBufferAllocate(dwSize +
                              admin_size - sizeof(NET_DISPLAY_USER) +
                              guest_size - sizeof(NET_DISPLAY_USER),
-                             (LPVOID *) SortedBuffer);
+                             SortedBuffer);
         inf = (PNET_DISPLAY_USER) *SortedBuffer;
         str = (LPWSTR) ((PBYTE) inf + sizeof(NET_DISPLAY_USER) * records);
         inf->usri1_name = str;

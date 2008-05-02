@@ -2,6 +2,7 @@
  * Window messaging support
  *
  * Copyright 2001 Alexandre Julliard
+ * Copyright 2008 Maarten Lankhorst
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -34,6 +35,7 @@
 #include "winnls.h"
 #include "dbt.h"
 #include "dde.h"
+#include "imm.h"
 #include "wine/unicode.h"
 #include "wine/server.h"
 #include "user_private.h"
@@ -1683,6 +1685,21 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
 {
     EVENTMSG event;
 
+    if (msg->message == WM_KEYDOWN || msg->message == WM_SYSKEYDOWN ||
+        msg->message == WM_KEYUP || msg->message == WM_SYSKEYUP)
+        switch (msg->wParam)
+        {
+            case VK_LSHIFT: case VK_RSHIFT:
+                msg->wParam = VK_SHIFT;
+                break;
+            case VK_LCONTROL: case VK_RCONTROL:
+                msg->wParam = VK_CONTROL;
+                break;
+            case VK_LMENU: case VK_RMENU:
+                msg->wParam = VK_MENU;
+                break;
+        }
+
     /* FIXME: is this really the right place for this hook? */
     event.message = msg->message;
     event.hwnd    = msg->hwnd;
@@ -1702,17 +1719,9 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
            (msg->hwnd != GetDesktopWindow()))
         {
             /* Handle F1 key by sending out WM_HELP message */
-            if(msg->wParam == VK_F1 &&
-               !MENU_IsMenuActive())
+            if (msg->wParam == VK_F1)
             {
-                HELPINFO hi;
-                hi.cbSize = sizeof(HELPINFO);
-                hi.iContextType = HELPINFO_WINDOW;
-                hi.iCtrlId = GetWindowLongPtrA( msg->hwnd, GWLP_ID );
-                hi.hItemHandle = msg->hwnd;
-                hi.dwContextId = GetWindowContextHelpId( msg->hwnd );
-                hi.MousePos = msg->pt;
-                SendMessageW( msg->hwnd, WM_HELP, 0, (LPARAM)&hi );
+                PostMessageW( msg->hwnd, WM_KEYF1, 0, 0 );
             }
             else if(msg->wParam >= VK_BROWSER_BACK &&
                     msg->wParam <= VK_LAUNCH_APP2)
@@ -1987,25 +1996,6 @@ static inline void call_sendmsg_callback( SENDASYNCPROC callback, HWND hwnd, UIN
 
 
 /***********************************************************************
- *		get_hook_proc
- *
- * Retrieve the hook procedure real value for a module-relative proc
- */
-static void *get_hook_proc( void *proc, const WCHAR *module )
-{
-    HMODULE mod;
-
-    if (!(mod = GetModuleHandleW(module)))
-    {
-        TRACE( "loading %s\n", debugstr_w(module) );
-        /* FIXME: the library will never be freed */
-        if (!(mod = LoadLibraryW(module))) return NULL;
-    }
-    return (char *)mod + (ULONG_PTR)proc;
-}
-
-
-/***********************************************************************
  *           peek_message
  *
  * Peek for a message matching the given parameters. Return FALSE if none available.
@@ -2017,9 +2007,12 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
     ULONG_PTR extra_info = 0;
     struct user_thread_info *thread_info = get_user_thread_info();
     struct received_message_info info, *old_info;
+    unsigned int wake_mask, changed_mask = HIWORD(flags);
     unsigned int hw_id = 0;  /* id of previous hardware message */
 
     if (!first && !last) last = ~0;
+    if (!changed_mask) changed_mask = QS_ALLINPUT;
+    wake_mask = changed_mask & (QS_SENDMESSAGE | QS_SMRESULT);
 
     for (;;)
     {
@@ -2038,6 +2031,8 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
                 req->get_first = first;
                 req->get_last  = last;
                 req->hw_id     = hw_id;
+                req->wake_mask = wake_mask;
+                req->changed_mask = changed_mask;
                 if (buffer_size) wine_server_set_reply( req, buffer, buffer_size );
                 if (!(res = wine_server_call( req )))
                 {
@@ -2168,11 +2163,11 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
                                    WMCHAR_MAP_RECVMESSAGE );
         reply_message( &info, result, TRUE );
         thread_info->receive_info = old_info;
-    next:
-        HeapFree( GetProcessHeap(), 0, buffer );
 
         /* if some PM_QS* flags were specified, only handle sent messages from now on */
         if (HIWORD(flags)) flags = PM_QS_SENDMESSAGE | LOWORD(flags);
+    next:
+        HeapFree( GetProcessHeap(), 0, buffer );
     }
 }
 
@@ -2933,35 +2928,14 @@ BOOL WINAPI GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
         if ((first <= WM_SYSTIMER) && (last >= WM_SYSTIMER)) mask |= QS_TIMER;
         if ((first <= WM_PAINT) && (last >= WM_PAINT)) mask |= QS_PAINT;
     }
-    else mask |= QS_MOUSE | QS_KEY | QS_TIMER | QS_PAINT;
+    else mask = QS_ALLINPUT;
 
-    while (!PeekMessageW( msg, hwnd, first, last, PM_REMOVE ))
+    while (!PeekMessageW( msg, hwnd, first, last, PM_REMOVE | PM_NOYIELD | (mask << 16) ))
     {
-        /* wait until one of the bits is set */
-        unsigned int wake_bits = 0, changed_bits = 0;
         DWORD dwlc;
 
-        SERVER_START_REQ( set_queue_mask )
-        {
-            req->wake_mask    = QS_SENDMESSAGE;
-            req->changed_mask = mask;
-            req->skip_wait    = 1;
-            if (!wine_server_call( req ))
-            {
-                wake_bits    = reply->wake_bits;
-                changed_bits = reply->changed_bits;
-            }
-        }
-        SERVER_END_REQ;
-
-        if (changed_bits & mask) continue;
-        if (wake_bits & QS_SENDMESSAGE) continue;
-
-        TRACE( "(%04x) mask=%08x, bits=%08x, changed=%08x, waiting\n",
-               GetCurrentThreadId(), mask, wake_bits, changed_bits );
-
         ReleaseThunkLock( &dwlc );
-        USER_Driver->pMsgWaitForMultipleObjectsEx( 1, &server_queue, INFINITE, QS_ALLINPUT, 0 );
+        USER_Driver->pMsgWaitForMultipleObjectsEx( 1, &server_queue, INFINITE, mask, 0 );
         if (dwlc) RestoreThunkLock( dwlc );
     }
 
@@ -3020,6 +2994,9 @@ BOOL WINAPI TranslateMessage( const MSG *msg )
 
     TRACE_(key)("Translating key %s (%04lx), scancode %02x\n",
                  SPY_GetVKeyName(msg->wParam), msg->wParam, LOBYTE(HIWORD(msg->lParam)));
+
+    if (ImmProcessKey(msg->hwnd, GetKeyboardLayout(0), msg->wParam, msg->lParam,0))
+        return TRUE;
 
     GetKeyboardState( state );
     /* FIXME : should handle ToUnicode yielding 2 */
@@ -3371,6 +3348,105 @@ UINT WINAPI RegisterWindowMessageW( LPCWSTR str )
     return ret;
 }
 
+typedef struct BroadcastParm
+{
+    DWORD flags;
+    LPDWORD recipients;
+    UINT msg;
+    WPARAM wp;
+    LPARAM lp;
+    DWORD success;
+    HWINSTA winsta;
+} BroadcastParm;
+
+static BOOL CALLBACK bcast_childwindow( HWND hw, LPARAM lp )
+{
+    BroadcastParm *parm = (BroadcastParm*)lp;
+    DWORD_PTR retval = 0;
+    LRESULT lresult;
+
+    if (parm->flags & BSF_IGNORECURRENTTASK && WIN_IsCurrentProcess(hw))
+    {
+        TRACE("Not telling myself %p\n", hw);
+        return TRUE;
+    }
+
+    /* I don't know 100% for sure if this is what Windows does, but it fits the tests */
+    if (parm->flags & BSF_QUERY)
+    {
+        TRACE("Telling window %p using SendMessageTimeout\n", hw);
+
+        /* Not tested for conflicting flags */
+        if (parm->flags & BSF_FORCEIFHUNG || parm->flags & BSF_NOHANG)
+            lresult = SendMessageTimeoutW( hw, parm->msg, parm->wp, parm->lp, SMTO_ABORTIFHUNG, 2000, &retval );
+        else if (parm->flags & BSF_NOTIMEOUTIFNOTHUNG)
+            lresult = SendMessageTimeoutW( hw, parm->msg, parm->wp, parm->lp, SMTO_NOTIMEOUTIFNOTHUNG, 2000, &retval );
+        else
+            lresult = SendMessageTimeoutW( hw, parm->msg, parm->wp, parm->lp, SMTO_NORMAL, 2000, &retval );
+
+        if (!lresult && GetLastError() == ERROR_TIMEOUT)
+        {
+            WARN("Timed out!\n");
+            if (!(parm->flags & BSF_FORCEIFHUNG))
+                goto fail;
+        }
+        if (retval == BROADCAST_QUERY_DENY)
+            goto fail;
+
+        return TRUE;
+
+fail:
+        parm->success = 0;
+        return FALSE;
+    }
+    else if (parm->flags & BSF_POSTMESSAGE)
+    {
+        TRACE("Telling window %p using PostMessage\n", hw);
+        PostMessageW( hw, parm->msg, parm->wp, parm->lp );
+    }
+    else
+    {
+        TRACE("Telling window %p using SendNotifyMessage\n", hw);
+        SendNotifyMessageW( hw, parm->msg, parm->wp, parm->lp );
+    }
+
+    return TRUE;
+}
+
+static BOOL CALLBACK bcast_desktop( LPWSTR desktop, LPARAM lp )
+{
+    BOOL ret;
+    HDESK hdesktop;
+    BroadcastParm *parm = (BroadcastParm*)lp;
+
+    TRACE("desktop: %s\n", debugstr_w( desktop ));
+
+    hdesktop = open_winstation_desktop( parm->winsta, desktop, 0, FALSE, DESKTOP_ENUMERATE|DESKTOP_WRITEOBJECTS|STANDARD_RIGHTS_WRITE );
+    if (!hdesktop)
+    {
+        FIXME("Could not open desktop %s\n", debugstr_w(desktop));
+        return TRUE;
+    }
+
+    ret = EnumDesktopWindows( hdesktop, bcast_childwindow, lp );
+    CloseDesktop(hdesktop);
+    TRACE("-->%d\n", ret);
+    return parm->success;
+}
+
+static BOOL CALLBACK bcast_winsta( LPWSTR winsta, LPARAM lp )
+{
+    BOOL ret;
+    HWINSTA hwinsta = OpenWindowStationW( winsta, FALSE, WINSTA_ENUMDESKTOPS );
+    TRACE("hwinsta: %p/%s/%08x\n", hwinsta, debugstr_w( winsta ), GetLastError());
+    if (!hwinsta)
+        return TRUE;
+    ((BroadcastParm *)lp)->winsta = hwinsta;
+    ret = EnumDesktopsW( hwinsta, bcast_desktop, lp );
+    CloseWindowStation( hwinsta );
+    TRACE("-->%d\n", ret);
+    return ret;
+}
 
 /***********************************************************************
  *		BroadcastSystemMessageA (USER32.@)
@@ -3378,17 +3454,7 @@ UINT WINAPI RegisterWindowMessageW( LPCWSTR str )
  */
 LONG WINAPI BroadcastSystemMessageA( DWORD flags, LPDWORD recipients, UINT msg, WPARAM wp, LPARAM lp )
 {
-    if ((*recipients & BSM_APPLICATIONS) || (*recipients == BSM_ALLCOMPONENTS))
-    {
-        FIXME( "(%08x,%08x,%08x,%08lx,%08lx): semi-stub!\n", flags, *recipients, msg, wp, lp );
-        PostMessageA( HWND_BROADCAST, msg, wp, lp );
-        return 1;
-    }
-    else
-    {
-        FIXME( "(%08x,%08x,%08x,%08lx,%08lx): stub!\n", flags, *recipients, msg, wp, lp);
-        return -1;
-    }
+    return BroadcastSystemMessageExA( flags, recipients, msg, wp, lp, NULL );
 }
 
 
@@ -3397,19 +3463,65 @@ LONG WINAPI BroadcastSystemMessageA( DWORD flags, LPDWORD recipients, UINT msg, 
  */
 LONG WINAPI BroadcastSystemMessageW( DWORD flags, LPDWORD recipients, UINT msg, WPARAM wp, LPARAM lp )
 {
-    if ((*recipients & BSM_APPLICATIONS) || (*recipients == BSM_ALLCOMPONENTS))
-    {
-        FIXME( "(%08x,%08x,%08x,%08lx,%08lx): semi-stub!\n", flags, *recipients, msg, wp, lp );
-        PostMessageW( HWND_BROADCAST, msg, wp, lp );
-        return 1;
-    }
-    else
-    {
-        FIXME( "(%08x,%08x,%08x,%08lx,%08lx): stub!\n", flags, *recipients, msg, wp, lp );
-        return -1;
-    }
+    return BroadcastSystemMessageExW( flags, recipients, msg, wp, lp, NULL );
 }
 
+/***********************************************************************
+ *              BroadcastSystemMessageExA (USER32.@)
+ */
+LONG WINAPI BroadcastSystemMessageExA( DWORD flags, LPDWORD recipients, UINT msg, WPARAM wp, LPARAM lp, PBSMINFO pinfo )
+{
+    map_wparam_AtoW( msg, &wp, WMCHAR_MAP_NOMAPPING );
+    return BroadcastSystemMessageExW( flags, recipients, msg, wp, lp, NULL );
+}
+
+
+/***********************************************************************
+ *              BroadcastSystemMessageExW (USER32.@)
+ */
+LONG WINAPI BroadcastSystemMessageExW( DWORD flags, LPDWORD recipients, UINT msg, WPARAM wp, LPARAM lp, PBSMINFO pinfo )
+{
+    BroadcastParm parm;
+    DWORD recips = BSM_ALLCOMPONENTS;
+    BOOL ret = TRUE;
+    static const DWORD all_flags = ( BSF_QUERY | BSF_IGNORECURRENTTASK | BSF_FLUSHDISK | BSF_NOHANG
+                                   | BSF_POSTMESSAGE | BSF_FORCEIFHUNG | BSF_NOTIMEOUTIFNOTHUNG
+                                   | BSF_ALLOWSFW | BSF_SENDNOTIFYMESSAGE | BSF_RETURNHDESK | BSF_LUID );
+
+    TRACE("Flags: %08x, recipients: %p(0x%x), msg: %04x, wparam: %08lx, lparam: %08lx\n", flags, recipients,
+         (recipients ? *recipients : recips), msg, wp, lp);
+
+    if (flags & ~all_flags)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    if (!recipients)
+        recipients = &recips;
+
+    if ( pinfo && flags & BSF_QUERY )
+        FIXME("Not returning PBSMINFO information yet\n");
+
+    parm.flags = flags;
+    parm.recipients = recipients;
+    parm.msg = msg;
+    parm.wp = wp;
+    parm.lp = lp;
+    parm.success = TRUE;
+
+    if (*recipients & BSM_ALLDESKTOPS || *recipients == BSM_ALLCOMPONENTS)
+        ret = EnumWindowStationsW(bcast_winsta, (LONG_PTR)&parm);
+    else if (*recipients & BSM_APPLICATIONS)
+    {
+        EnumWindows(bcast_childwindow, (LONG_PTR)&parm);
+        ret = parm.success;
+    }
+    else
+        FIXME("Recipients %08x not supported!\n", *recipients);
+
+    return ret;
+}
 
 /***********************************************************************
  *		SetMessageQueue (USER32.@)
@@ -3502,8 +3614,6 @@ BOOL WINAPI KillTimer( HWND hwnd, UINT_PTR id )
 {
     BOOL ret;
 
-    TRACE("%p %ld\n", hwnd, id );
-
     SERVER_START_REQ( kill_win_timer )
     {
         req->win = hwnd;
@@ -3522,8 +3632,6 @@ BOOL WINAPI KillTimer( HWND hwnd, UINT_PTR id )
 BOOL WINAPI KillSystemTimer( HWND hwnd, UINT_PTR id )
 {
     BOOL ret;
-
-    TRACE("%p %ld\n", hwnd, id );
 
     SERVER_START_REQ( kill_win_timer )
     {
@@ -3576,6 +3684,13 @@ BOOL WINAPI GetGUIThreadInfo( DWORD id, GUITHREADINFO *info )
  */
 BOOL WINAPI IsHungAppWindow( HWND hWnd )
 {
-    DWORD_PTR dwResult;
-    return !SendMessageTimeoutA(hWnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 5000, &dwResult);
+    BOOL ret;
+
+    SERVER_START_REQ( is_window_hung )
+    {
+        req->win = hWnd;
+        ret = !wine_server_call_err( req ) && reply->is_hung;
+    }
+    SERVER_END_REQ;
+    return ret;
 }

@@ -216,7 +216,7 @@ static	unsigned dbg_save_internal_vars(void)
 
     for (i = 0; i < DBG_IV_LAST; i++) 
     {
-        /* FIXME: type should be infered from basic type -if any- of intvar */
+        /* FIXME: type should be inferred from basic type -if any- of intvar */
         if (dbg_internal_vars[i].pval == &dbg_internal_vars[i].val)
             RegSetValueEx(hkey, dbg_internal_vars[i].name, 0,
                           REG_DWORD, (const void*)dbg_internal_vars[i].pval, 
@@ -604,7 +604,7 @@ int main(int argc, char** argv)
     parser_handle(hFile);
 
     while (dbg_process_list)
-        dbg_process_list->process_io->close_process(dbg_process_list, TRUE);
+        dbg_process_list->process_io->close_process(dbg_process_list, FALSE);
 
     dbg_save_internal_vars();
 

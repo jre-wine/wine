@@ -114,6 +114,7 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
             memcpy(chm_file, filename, (index-filename)*sizeof(WCHAR));
             chm_file[index-filename] = 0;
             filename = chm_file;
+            index += 2; /* advance beyond "::" for calling NavigateToChm() later */
         }
         else
         {
@@ -131,8 +132,7 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
             if(!res)
                 ReleaseHelpViewer(info);
         }
-
-        return NULL; /* FIXME */
+        return info->WinType.hwndHelp;
     }
     case HH_HELP_CONTEXT: {
         HHInfo *info;
@@ -147,9 +147,18 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
             return NULL;
 
         NavigateToUrl(info, url);
-        hhctrl_free(url);
+        heap_free(url);
+        return info->WinType.hwndHelp;
+    }
+    case HH_PRETRANSLATEMESSAGE: {
+        static BOOL warned = FALSE;
 
-        return NULL; /* FIXME */
+        if (!warned)
+        {
+            FIXME("HH_PRETRANSLATEMESSAGE unimplemented\n");
+            warned = TRUE;
+        }
+        return 0;
     }
     default:
         FIXME("HH case %s not handled.\n", command_to_string( command ));
@@ -170,7 +179,7 @@ HWND WINAPI HtmlHelpA(HWND caller, LPCSTR filename, UINT command, DWORD_PTR data
     if (filename)
     {
         len = MultiByteToWideChar( CP_ACP, 0, filename, -1, NULL, 0 );
-        wfile = hhctrl_alloc(len*sizeof(WCHAR));
+        wfile = heap_alloc(len*sizeof(WCHAR));
         MultiByteToWideChar( CP_ACP, 0, filename, -1, wfile, len );
     }
 
@@ -195,7 +204,7 @@ HWND WINAPI HtmlHelpA(HWND caller, LPCSTR filename, UINT command, DWORD_PTR data
         case HH_GET_WIN_HANDLE:
         case HH_SAFE_DISPLAY_TOPIC:
             len = MultiByteToWideChar( CP_ACP, 0, (const char*)data, -1, NULL, 0 );
-            wdata = hhctrl_alloc(len*sizeof(WCHAR));
+            wdata = heap_alloc(len*sizeof(WCHAR));
             MultiByteToWideChar( CP_ACP, 0, (const char*)data, -1, wdata, len );
             break;
 
@@ -217,8 +226,8 @@ HWND WINAPI HtmlHelpA(HWND caller, LPCSTR filename, UINT command, DWORD_PTR data
 
     result = HtmlHelpW( caller, wfile, command, wdata ? (DWORD_PTR)wdata : data );
 
-    hhctrl_free(wfile);
-    hhctrl_free(wdata);
+    heap_free(wfile);
+    heap_free(wdata);
     return result;
 }
 

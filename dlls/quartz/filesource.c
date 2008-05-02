@@ -30,6 +30,7 @@
 #include "vfwmsgs.h"
 #include "winbase.h"
 #include "winreg.h"
+#include "shlwapi.h"
 #include <assert.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
@@ -62,10 +63,48 @@ static inline AsyncReader *impl_from_IFileSourceFilter( IFileSourceFilter *iface
     return (AsyncReader *)((char*)iface - FIELD_OFFSET(AsyncReader, lpVtblFSF));
 }
 
+static WCHAR const mediatype_name[11] = {
+    'M', 'e', 'd', 'i', 'a', ' ', 'T', 'y', 'p', 'e', 0 };
+static WCHAR const subtype_name[8] = {
+    'S', 'u', 'b', 't', 'y', 'p', 'e', 0 };
+
 static HRESULT process_extensions(HKEY hkeyExtensions, LPCOLESTR pszFileName, GUID * majorType, GUID * minorType)
 {
-    /* FIXME: implement */
-    return E_NOTIMPL;
+    WCHAR *extension;
+    LONG l;
+    HKEY hsub;
+    WCHAR keying[39];
+    DWORD size;
+
+    if (!pszFileName)
+        return E_POINTER;
+
+    /* Get the part of the name that matters */
+    extension = PathFindExtensionW(pszFileName);
+    if (*extension != '.')
+        return E_FAIL;
+
+    l = RegOpenKeyExW(hkeyExtensions, extension, 0, KEY_READ, &hsub);
+    if (l)
+        return E_FAIL;
+
+    size = sizeof(keying);
+    l = RegQueryValueExW(hsub, mediatype_name, NULL, NULL, (LPBYTE)keying, &size);
+    if (!l)
+        CLSIDFromString(keying, majorType);
+
+    size = sizeof(keying);
+    if (!l)
+        l = RegQueryValueExW(hsub, subtype_name, NULL, NULL, (LPBYTE)keying, &size);
+
+    if (!l)
+        CLSIDFromString(keying, minorType);
+
+    RegCloseKey(hsub);
+
+    if (!l)
+        return S_OK;
+    return E_FAIL;
 }
 
 static unsigned char byte_from_hex_char(WCHAR wHex)
@@ -197,8 +236,10 @@ static HRESULT GetClassMediaFile(IAsyncReader * pReader, LPCOLESTR pszFileName, 
     BOOL bFound = FALSE;
     static const WCHAR wszMediaType[] = {'M','e','d','i','a',' ','T','y','p','e',0};
 
-    CopyMemory(majorType, &GUID_NULL, sizeof(*majorType));
-    CopyMemory(minorType, &GUID_NULL, sizeof(*minorType));
+    TRACE("(%p, %s, %p, %p)\n", pReader, debugstr_w(pszFileName), majorType, minorType);
+
+    *majorType = GUID_NULL;
+    *minorType = GUID_NULL;
 
     lRet = RegOpenKeyExW(HKEY_CLASSES_ROOT, wszMediaType, 0, KEY_READ, &hkeyMediaType);
     hr = HRESULT_FROM_WIN32(lRet);
@@ -213,7 +254,7 @@ static HRESULT GetClassMediaFile(IAsyncReader * pReader, LPCOLESTR pszFileName, 
             WCHAR wszMajorKeyName[CHARS_IN_GUID];
             DWORD dwKeyNameLength = sizeof(wszMajorKeyName) / sizeof(wszMajorKeyName[0]);
             static const WCHAR wszExtensions[] = {'E','x','t','e','n','s','i','o','n','s',0};
-    
+
             if (RegEnumKeyExW(hkeyMediaType, indexMajor, wszMajorKeyName, &dwKeyNameLength, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
                 break;
             if (RegOpenKeyExW(hkeyMediaType, wszMajorKeyName, 0, KEY_READ, &hkeyMajor) != ERROR_SUCCESS)
@@ -353,7 +394,8 @@ static HRESULT WINAPI AsyncReader_QueryInterface(IBaseFilter * iface, REFIID rii
         return S_OK;
     }
 
-    FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
+    if (!IsEqualIID(riid, &IID_IPin) && !IsEqualIID(riid, &IID_IMediaSeeking) && !IsEqualIID(riid, &IID_IVideoWindow))
+        FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
 
     return E_NOINTERFACE;
 }
@@ -391,6 +433,9 @@ static ULONG WINAPI AsyncReader_Release(IBaseFilter * iface)
         This->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->csFilter);
         This->lpVtbl = NULL;
+        CoTaskMemFree(This->pszFileName);
+        if (This->pmt)
+            FreeMediaType(This->pmt);
         CoTaskMemFree(This);
         return 0;
     }
@@ -598,8 +643,13 @@ static HRESULT WINAPI FileSource_Load(IFileSourceFilter * iface, LPCOLESTR pszFi
     /* store file name & media type */
     if (SUCCEEDED(hr))
     {
+        CoTaskMemFree(This->pszFileName);
+        if (This->pmt)
+            FreeMediaType(This->pmt);
+
         This->pszFileName = CoTaskMemAlloc((strlenW(pszFileName) + 1) * sizeof(WCHAR));
         strcpyW(This->pszFileName, pszFileName);
+
         This->pmt = CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE));
         if (!pmt)
         {
@@ -609,7 +659,7 @@ static HRESULT WINAPI FileSource_Load(IFileSourceFilter * iface, LPCOLESTR pszFi
             This->pmt->pbFormat = NULL;
             This->pmt->pUnk = NULL;
             This->pmt->lSampleSize = 0;
-            memcpy(&This->pmt->formattype, &FORMAT_None, sizeof(FORMAT_None));
+            This->pmt->formattype = FORMAT_None;
             hr = GetClassMediaFile(pReader, pszFileName, &This->pmt->majortype, &This->pmt->subtype);
             if (FAILED(hr))
             {
@@ -633,7 +683,10 @@ static HRESULT WINAPI FileSource_Load(IFileSourceFilter * iface, LPCOLESTR pszFi
         }
 
         CoTaskMemFree(This->pszFileName);
+        if (This->pmt)
+            FreeMediaType(This->pmt);
         This->pszFileName = NULL;
+        This->pmt = NULL;
 
         CloseHandle(hFile);
     }
@@ -730,7 +783,7 @@ static HRESULT AcceptProcAFR(LPVOID iface, const AM_MEDIA_TYPE *pmt)
     return S_FALSE;
 }
 
-/* overriden pin functions */
+/* overridden pin functions */
 
 static HRESULT WINAPI FileAsyncReaderPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * ppv)
 {
@@ -752,7 +805,8 @@ static HRESULT WINAPI FileAsyncReaderPin_QueryInterface(IPin * iface, REFIID rii
         return S_OK;
     }
 
-    FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
+    if (!IsEqualIID(riid, &IID_IPin) && !IsEqualIID(riid, &IID_IMediaSeeking))
+        FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
 
     return E_NOINTERFACE;
 }
@@ -851,23 +905,18 @@ static HRESULT FileAsyncReaderPin_ConnectSpecific(IPin * iface, IPin * pReceiveP
 
 static HRESULT FileAsyncReader_Construct(HANDLE hFile, IBaseFilter * pBaseFilter, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
 {
-    FileAsyncReader * pPinImpl;
     PIN_INFO piOutput;
+    HRESULT hr;
 
     *ppPin = NULL;
-
-    pPinImpl = CoTaskMemAlloc(sizeof(*pPinImpl));
-
-    if (!pPinImpl)
-        return E_OUTOFMEMORY;
-
     piOutput.dir = PINDIR_OUTPUT;
     piOutput.pFilter = pBaseFilter;
     strcpyW(piOutput.achName, wszOutputPinName);
+    hr = OutputPin_Construct(&FileAsyncReaderPin_Vtbl, sizeof(FileAsyncReader), &piOutput, NULL, pBaseFilter, AcceptProcAFR, pCritSec, ppPin);
 
-    if (SUCCEEDED(OutputPin_Init(&piOutput, NULL, pBaseFilter, AcceptProcAFR, pCritSec, &pPinImpl->pin)))
+    if (SUCCEEDED(hr))
     {
-        pPinImpl->pin.pin.lpVtbl = &FileAsyncReaderPin_Vtbl;
+        FileAsyncReader *pPinImpl =  (FileAsyncReader *)*ppPin;
         pPinImpl->lpVtblAR = &FileAsyncReader_Vtbl;
         pPinImpl->hFile = hFile;
         pPinImpl->hEvent = CreateEventW(NULL, 0, 0, NULL);
@@ -876,11 +925,8 @@ static HRESULT FileAsyncReader_Construct(HANDLE hFile, IBaseFilter * pBaseFilter
         pPinImpl->pin.pConnectSpecific = FileAsyncReaderPin_ConnectSpecific;
         InitializeCriticalSection(&pPinImpl->csList);
         pPinImpl->csList.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": FileAsyncReader.csList");
-
-        *ppPin = (IPin *)(&pPinImpl->pin.pin.lpVtbl);
-        return S_OK;
     }
-    return E_FAIL;
+    return hr;
 }
 
 /* IAsyncReader */
@@ -1059,16 +1105,13 @@ static HRESULT WINAPI FileAsyncReader_WaitForNext(IAsyncReader * iface, DWORD dw
     *ppSample = NULL;
     *pdwUser = 0;
 
-    /* we return immediately if flushing */
-    if (This->bFlushing)
-        hr = VFW_E_WRONG_STATE;
-
-    if (SUCCEEDED(hr))
+    if (!This->bFlushing)
     {
         /* wait for the read to finish or timeout */
         if (WaitForSingleObject(This->hEvent, dwTimeout) == WAIT_TIMEOUT)
             hr = VFW_E_TIMEOUT;
     }
+
     if (SUCCEEDED(hr))
     {
         EnterCriticalSection(&This->csList);
@@ -1082,7 +1125,7 @@ static HRESULT WINAPI FileAsyncReader_WaitForNext(IAsyncReader * iface, DWORD dw
         LeaveCriticalSection(&This->csList);
     }
 
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(hr) && !This->bFlushing)
     {
         /* get any errors */
         if (!GetOverlappedResult(This->hFile, &pDataRq->ovl, &dwBytes, FALSE))
@@ -1098,7 +1141,14 @@ static HRESULT WINAPI FileAsyncReader_WaitForNext(IAsyncReader * iface, DWORD dw
 
     /* no need to close event handle since we will close it when the pin is destroyed */
     CoTaskMemFree(pDataRq);
-    
+
+    /* Return the sample if flushing so it can be destroyed */
+    if (This->bFlushing && SUCCEEDED(hr))
+    {
+        hr = VFW_E_WRONG_STATE;
+        IMediaSample_SetActualDataLength(pDataRq->pSample, 0);
+    }
+
     TRACE("-- %x\n", hr);
     return hr;
 }

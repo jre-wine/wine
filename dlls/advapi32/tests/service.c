@@ -26,6 +26,7 @@
 #include "winerror.h"
 #include "winreg.h"
 #include "winsvc.h"
+#include "winnls.h"
 #include "lmcons.h"
 
 #include "wine/test.h"
@@ -444,10 +445,17 @@ static void test_get_displayname(void)
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    tempsize = displaysize;
+
+    displaysize = 0;
+    ret = GetServiceDisplayNameA(scm_handle, spooler, NULL, &displaysize);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(displaysize == tempsize, "Buffer size mismatch (%d vs %d)\n", tempsize, displaysize);
 
     /* Buffer is too small */
     SetLastError(0xdeadbeef);
-    tempsize = displaysize;
     displaysize = (tempsize / 2);
     ret = GetServiceDisplayNameA(scm_handle, spooler, displayname, &displaysize);
     ok(!ret, "Expected failure\n");
@@ -607,45 +615,77 @@ static void test_get_servicekeyname(void)
     SC_HANDLE scm_handle, svc_handle;
     CHAR servicename[4096];
     CHAR displayname[4096];
+    WCHAR servicenameW[4096];
+    WCHAR displaynameW[4096];
     DWORD servicesize, displaysize, tempsize;
     BOOL ret;
     static const CHAR deadbeef[] = "Deadbeef";
+    static const WCHAR deadbeefW[] = {'D','e','a','d','b','e','e','f',0};
 
     /* Having NULL for the size of the buffer will crash on W2K3 */
 
     SetLastError(0xdeadbeef);
     ret = GetServiceKeyNameA(NULL, NULL, NULL, &servicesize);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_HANDLE,
        "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
 
     scm_handle = OpenSCManagerA(NULL, NULL, SC_MANAGER_CONNECT);
 
+    servicesize = 200;
     SetLastError(0xdeadbeef);
     ret = GetServiceKeyNameA(scm_handle, NULL, NULL, &servicesize);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_ADDRESS   /* W2K, XP, W2K3, Vista */ ||
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Expected ERROR_INVALID_ADDRESS or ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    todo_wine ok(servicesize == 1, "Service size expected 1, got %d\n", servicesize);
 
     /* Valid handle and buffer but no displayname */
+    servicesize = 200;
     SetLastError(0xdeadbeef);
     ret = GetServiceKeyNameA(scm_handle, NULL, servicename, &servicesize);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_ADDRESS   /* W2K, XP, W2K3, Vista */ ||
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Expected ERROR_INVALID_ADDRESS or ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    todo_wine ok(servicesize == 200, "Service size expected 1, got %d\n", servicesize);
 
     /* Test for nonexistent displayname */
     SetLastError(0xdeadbeef);
     ret = GetServiceKeyNameA(scm_handle, deadbeef, NULL, &servicesize);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST,
        "Expected ERROR_SERVICE_DOES_NOT_EXIST, got %d\n", GetLastError());
+    todo_wine ok(servicesize == 1, "Service size expected 1, got %d\n", servicesize);
+
+    servicesize = 15;
+    strcpy(servicename, "ABC");
+    ret = GetServiceKeyNameA(scm_handle, deadbeef, servicename, &servicesize);
+    ok(!ret, "Expected failure\n");
+    todo_wine ok(servicesize == 15, "Service size expected 15, got %d\n", servicesize);
+    ok(servicename[0] == 0, "Service name not empty\n");
+
+    servicesize = 15;
+    servicenameW[0] = 'A';
+    ret = GetServiceKeyNameW(scm_handle, deadbeefW, servicenameW, &servicesize);
+    ok(!ret, "Expected failure\n");
+    todo_wine ok(servicesize == 15, "Service size expected 15, got %d\n", servicesize);
+    ok(servicenameW[0] == 0, "Service name not empty\n");
+
+    servicesize = 0;
+    strcpy(servicename, "ABC");
+    ret = GetServiceKeyNameA(scm_handle, deadbeef, servicename, &servicesize);
+    ok(!ret, "Expected failure\n");
+    todo_wine ok(servicesize == 1, "Service size expected 1, got %d\n", servicesize);
+    ok(servicename[0] == 'A', "Service name changed\n");
+
+    servicesize = 0;
+    servicenameW[0] = 'A';
+    ret = GetServiceKeyNameW(scm_handle, deadbeefW, servicenameW, &servicesize);
+    ok(!ret, "Expected failure\n");
+    todo_wine ok(servicesize == 2, "Service size expected 2, got %d\n", servicesize);
+    ok(servicenameW[0] == 'A', "Service name changed\n");
 
     /* Check if 'Spooler' exists */
     svc_handle = OpenServiceA(scm_handle, spooler, GENERIC_READ);
@@ -666,7 +706,6 @@ static void test_get_servicekeyname(void)
     servicesize = 0;
     ret = GetServiceKeyNameA(scm_handle, displayname, NULL, &servicesize);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
 
@@ -675,7 +714,6 @@ static void test_get_servicekeyname(void)
     tempsize = servicesize;
     servicesize *= 2;
     ret = GetServiceKeyNameA(scm_handle, displayname, servicename, &servicesize);
-    todo_wine
     ok(ret, "Expected success\n");
     ok(GetLastError() == ERROR_SUCCESS    /* W2K3 */ ||
        GetLastError() == ERROR_IO_PENDING /* W2K */ ||
@@ -686,7 +724,34 @@ static void test_get_servicekeyname(void)
         ok(lstrlen(servicename) == tempsize/2,
            "Expected the buffer to be twice the length of the string\n") ;
         ok(!lstrcmpi(servicename, spooler), "Expected %s, got %s\n", spooler, servicename);
+        ok(servicesize == (tempsize * 2),
+           "Expected servicesize not to change if buffer not insufficient\n") ;
     }
+
+    MultiByteToWideChar(CP_ACP, 0, displayname, -1, displaynameW, sizeof(displaynameW)/2);
+    SetLastError(0xdeadbeef);
+    servicesize *= 2;
+    ret = GetServiceKeyNameW(scm_handle, displaynameW, servicenameW, &servicesize);
+    ok(ret, "Expected success\n");
+    ok(GetLastError() == ERROR_SUCCESS    /* W2K3 */ ||
+       GetLastError() == ERROR_IO_PENDING /* W2K */ ||
+       GetLastError() == 0xdeadbeef       /* NT4, XP, Vista */,
+       "Expected ERROR_SUCCESS, ERROR_IO_PENDING or 0xdeadbeef, got %d\n", GetLastError());
+    if (ret)
+    {
+        ok(lstrlen(servicename) == tempsize/2,
+           "Expected the buffer to be twice the length of the string\n") ;
+        ok(servicesize == lstrlenW(servicenameW),
+           "Expected servicesize not to change if buffer not insufficient\n") ;
+    }
+
+    SetLastError(0xdeadbeef);
+    servicesize = 3;
+    ret = GetServiceKeyNameW(scm_handle, displaynameW, servicenameW, &servicesize);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(servicenameW[0] == 0, "Buffer not empty\n");
 
     CloseServiceHandle(scm_handle);
 }
@@ -699,11 +764,8 @@ static void test_close(void)
     /* NULL handle */
     SetLastError(0xdeadbeef);
     ret = CloseServiceHandle(NULL);
-    todo_wine
-    {
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_HANDLE, "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
-    }
 
     /* TODO: Add some tests with invalid handles. These produce errors on Windows but crash on Wine */
 
@@ -726,8 +788,9 @@ static void test_sequence(void)
     DWORD given, needed;
     static const CHAR servicename [] = "Winetest";
     static const CHAR displayname [] = "Winetest dummy service";
+    static const CHAR displayname2[] = "Winetest dummy service (2)";
     static const CHAR pathname    [] = "we_dont_care.exe";
-    static const CHAR dependencies[] = "Master1\0Master2\0+MasterGroup1\0\0";
+    static const CHAR dependencies[] = "Master1\0Master2\0+MasterGroup1\0";
     static const CHAR password    [] = "";
     static const CHAR empty       [] = "";
     static const CHAR localsystem [] = "LocalSystem";
@@ -794,12 +857,12 @@ static void test_sequence(void)
     SetLastError(0xdeadbeef);
     ret = QueryServiceConfigA(svc_handle, config, given, &needed);
     ok(ret, "Expected success\n");
-    todo_wine
-    {
     ok(GetLastError() == ERROR_SUCCESS    /* W2K3 */||
        GetLastError() == 0xdeadbeef       /* NT4, XP, Vista */ ||
        GetLastError() == ERROR_IO_PENDING /* W2K */,
         "Expected ERROR_SUCCESS, ERROR_IO_PENDING or 0xdeadbeef, got %d\n", GetLastError());
+    todo_wine
+    {
     ok(given == needed, "Expected the given (%d) and needed (%d) buffersizes to be equal\n", given, needed);
     }
     ok(config->lpBinaryPathName && config->lpLoadOrderGroup && config->lpDependencies && config->lpServiceStartName &&
@@ -815,10 +878,28 @@ static void test_sequence(void)
     todo_wine
     {
     ok(!memcmp(config->lpDependencies, dependencies, sizeof(dependencies)), "Wrong string\n");
-    ok(!strcmp(config->lpServiceStartName, localsystem), "Expected 'LocalSystem', got '%s'\n", config->lpServiceStartName);
     }
+    ok(!strcmp(config->lpServiceStartName, localsystem), "Expected 'LocalSystem', got '%s'\n", config->lpServiceStartName);
     ok(!strcmp(config->lpDisplayName, displayname), "Expected '%s', got '%s'\n", displayname, config->lpDisplayName);
     
+    ok(ChangeServiceConfigA(svc_handle, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, SERVICE_ERROR_NORMAL, NULL, "TestGroup2", NULL, NULL, NULL, NULL, displayname2),
+        "ChangeServiceConfig failed (err=%d)\n", GetLastError());
+
+    QueryServiceConfigA(svc_handle, NULL, 0, &needed);
+    config = HeapReAlloc(GetProcessHeap(), 0, config, needed);
+    ok(QueryServiceConfigA(svc_handle, config, needed, &needed), "QueryServiceConfig failed\n");
+    ok(config->lpBinaryPathName && config->lpLoadOrderGroup && config->lpDependencies && config->lpServiceStartName &&
+        config->lpDisplayName, "Expected all string struct members to be non-NULL\n");
+    ok(config->dwServiceType == (SERVICE_INTERACTIVE_PROCESS | SERVICE_WIN32_OWN_PROCESS),
+        "Expected SERVICE_INTERACTIVE_PROCESS | SERVICE_WIN32_OWN_PROCESS, got %d\n", config->dwServiceType);
+    ok(config->dwStartType == SERVICE_DISABLED, "Expected SERVICE_DISABLED, got %d\n", config->dwStartType);
+    ok(config->dwErrorControl == SERVICE_ERROR_NORMAL, "Expected SERVICE_ERROR_NORMAL, got %d\n", config->dwErrorControl);
+    ok(!strcmp(config->lpBinaryPathName, pathname), "Expected '%s', got '%s'\n", pathname, config->lpBinaryPathName);
+    ok(!strcmp(config->lpLoadOrderGroup, "TestGroup2"), "Expected 'TestGroup2', got '%s'\n", config->lpLoadOrderGroup);
+    ok(config->dwTagId == 0, "Expected 0, got %d\n", config->dwTagId);
+    ok(!strcmp(config->lpServiceStartName, localsystem), "Expected 'LocalSystem', got '%s'\n", config->lpServiceStartName);
+    ok(!strcmp(config->lpDisplayName, displayname2), "Expected '%s', got '%s'\n", displayname2, config->lpDisplayName);
+
     SetLastError(0xdeadbeef);
     ret = DeleteService(svc_handle);
     ok(ret, "Expected success\n");
@@ -827,6 +908,197 @@ static void test_sequence(void)
        GetLastError() == ERROR_IO_PENDING /* W2K */,
         "Expected ERROR_SUCCESS, ERROR_IO_PENDING or 0xdeadbeef, got %d\n", GetLastError());
     
+    CloseServiceHandle(svc_handle);
+
+    /* Wait a while. The following test does a CreateService again */
+    Sleep(1000);
+
+    CloseServiceHandle(scm_handle);
+    HeapFree(GetProcessHeap(), 0, config);
+}
+
+static void test_queryconfig2(void)
+{
+    SC_HANDLE scm_handle, svc_handle;
+    BOOL ret;
+    DWORD expected, needed;
+    BYTE buffer[MAX_PATH];
+    LPSERVICE_DESCRIPTIONA pConfig = (LPSERVICE_DESCRIPTIONA)buffer;
+    static const CHAR servicename [] = "Winetest";
+    static const CHAR displayname [] = "Winetest dummy service";
+    static const CHAR pathname    [] = "we_dont_care.exe";
+    static const CHAR dependencies[] = "Master1\0Master2\0+MasterGroup1\0";
+    static const CHAR password    [] = "";
+    static const CHAR description [] = "Description";
+    HMODULE dllhandle = GetModuleHandleA("advapi32.dll");
+    BOOL (WINAPI *pChangeServiceConfig2A)(SC_HANDLE,DWORD,LPVOID)
+            = (void*)GetProcAddress(dllhandle, "ChangeServiceConfig2A");
+    BOOL (WINAPI *pQueryServiceConfig2A)(SC_HANDLE,DWORD,LPBYTE,DWORD,LPDWORD)
+            = (void*)GetProcAddress(dllhandle, "QueryServiceConfig2A");
+    BOOL (WINAPI *pQueryServiceConfig2W)(SC_HANDLE,DWORD,LPBYTE,DWORD,LPDWORD)
+            = (void*)GetProcAddress(dllhandle, "QueryServiceConfig2W");
+    if(!pQueryServiceConfig2A)
+    {
+        skip("function QueryServiceConfig2A not present\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    scm_handle = OpenSCManagerA(NULL, NULL, GENERIC_ALL);
+
+    if (!scm_handle)
+    {
+	if(GetLastError() == ERROR_ACCESS_DENIED)
+            skip("Not enough rights to get a handle to the manager\n");
+        else
+            ok(FALSE, "Could not get a handle to the manager: %d\n", GetLastError());
+        return;
+    }
+
+    /* Create a dummy service */
+    SetLastError(0xdeadbeef);
+    svc_handle = CreateServiceA(scm_handle, servicename, displayname, GENERIC_ALL,
+        SERVICE_INTERACTIVE_PROCESS | SERVICE_WIN32_OWN_PROCESS, SERVICE_DISABLED, SERVICE_ERROR_IGNORE,
+        pathname, NULL, NULL, dependencies, NULL, password);
+
+    if (!svc_handle)
+    {
+        if(GetLastError() == ERROR_SERVICE_EXISTS)
+        {
+            /* We try and open the service and do the rest of the tests. Some could
+             * fail if the tests were changed between these runs.
+             */
+            trace("Deletion probably didn't work last time\n");
+            SetLastError(0xdeadbeef);
+            svc_handle = OpenServiceA(scm_handle, servicename, GENERIC_ALL);
+            if (!svc_handle)
+            {
+                if(GetLastError() == ERROR_ACCESS_DENIED)
+                    skip("Not enough rights to open the service\n");
+                else
+                    ok(FALSE, "Could not open the service : %d\n", GetLastError());
+                CloseServiceHandle(scm_handle);
+                return;
+            }
+        }
+        if (GetLastError() == ERROR_ACCESS_DENIED)
+        {
+            skip("Not enough rights to create the service\n");
+            CloseServiceHandle(scm_handle);
+            return;
+        }
+        ok(svc_handle != NULL, "Could not create the service : %d\n", GetLastError());
+	if (!svc_handle)
+        {
+            CloseServiceHandle(scm_handle);
+            return;
+        }
+    }
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2A(svc_handle,0xfff0,buffer,sizeof(SERVICE_DESCRIPTIONA),&needed);
+    ok(!ret, "expected QueryServiceConfig2A to fail\n");
+    ok(ERROR_INVALID_LEVEL == GetLastError(), "expected error ERROR_INVALID_LEVEL, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2A(svc_handle,0xfff0,buffer,sizeof(SERVICE_DESCRIPTIONA),NULL);
+    ok(!ret, "expected QueryServiceConfig2A to fail\n");
+    ok(ERROR_INVALID_LEVEL == GetLastError(), "expected error ERROR_INVALID_LEVEL, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer,sizeof(SERVICE_DESCRIPTIONA),NULL);
+    ok(!ret, "expected QueryServiceConfig2A to fail\n");
+    ok(ERROR_INVALID_ADDRESS == GetLastError(), "expected error ERROR_INVALID_ADDRESS, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,NULL,sizeof(SERVICE_DESCRIPTIONA),&needed);
+    ok(!ret, "expected QueryServiceConfig2A to fail\n");
+    ok((ERROR_INVALID_ADDRESS == GetLastError()) || (ERROR_INSUFFICIENT_BUFFER == GetLastError()),
+       "expected error ERROR_INVALID_ADDRESS or ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,NULL,sizeof(SERVICE_DESCRIPTIONA),NULL);
+    ok(!ret, "expected QueryServiceConfig2A to fail\n");
+    ok(ERROR_INVALID_ADDRESS == GetLastError(), "expected error ERROR_INVALID_ADDRESS, got %d\n", GetLastError());
+
+    needed = 0;
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer,sizeof(SERVICE_DESCRIPTIONA)-1,&needed);
+    ok(!ret, "expected QueryServiceConfig2A to fail\n");
+    ok(ERROR_INSUFFICIENT_BUFFER == GetLastError(), "expected error ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(needed == sizeof(SERVICE_DESCRIPTIONA), "got %d\n", needed);
+
+    needed = 0;
+    pConfig->lpDescription = (LPSTR)0xdeadbeef;
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer,sizeof(SERVICE_DESCRIPTIONA),&needed);
+    ok(ret, "expected QueryServiceConfig2A to succeed\n");
+    ok(needed == sizeof(SERVICE_DESCRIPTIONA), "got %d\n", needed);
+    ok(!pConfig->lpDescription, "expected lpDescription to be NULL, got %p\n", pConfig->lpDescription);
+
+    SetLastError(0xdeadbeef);
+    needed = 0;
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,NULL,0,&needed);
+    ok(!ret, "expected QueryServiceConfig2A to fail\n");
+    ok(ERROR_INSUFFICIENT_BUFFER == GetLastError(), "expected error ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(needed == sizeof(SERVICE_DESCRIPTIONA), "got %d\n", needed);
+
+    if(!pChangeServiceConfig2A)
+    {
+        skip("function ChangeServiceConfig2A not present\n");
+        goto cleanup;
+    }
+
+    pConfig->lpDescription = (LPSTR) description;
+    ret = pChangeServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer);
+    ok(ret, "ChangeServiceConfig2A failed\n");
+    if (!ret) {
+        goto cleanup;
+    }
+
+    SetLastError(0xdeadbeef);
+    needed = 0;
+    expected = sizeof(SERVICE_DESCRIPTIONA) + sizeof(description) * sizeof(WCHAR); /* !! */
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer,sizeof(SERVICE_DESCRIPTIONA),&needed);
+    ok(!ret, "expected QueryServiceConfig2A to fail\n");
+    ok(ERROR_INSUFFICIENT_BUFFER == GetLastError(), "expected error ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(needed == expected, "expected needed to be %d, got %d\n", expected, needed);
+
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer,needed-1,&needed);
+    ok(!ret, "expected QueryServiceConfig2A to fail\n");
+    ok(ERROR_INSUFFICIENT_BUFFER == GetLastError(), "expected error ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer,needed,&needed);
+    ok(ret, "expected QueryServiceConfig2A to succeed\n");
+    ok(pConfig->lpDescription && !strcmp(description,pConfig->lpDescription),
+        "expected lpDescription to be %s, got %s\n",description ,pConfig->lpDescription);
+
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2A(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer, needed + 1,&needed);
+    ok(ret, "expected QueryServiceConfig2A to succeed\n");
+    ok(pConfig->lpDescription && !strcmp(description,pConfig->lpDescription),
+        "expected lpDescription to be %s, got %s\n",description ,pConfig->lpDescription);
+
+    if(!pQueryServiceConfig2W)
+    {
+        skip("function QueryServiceConfig2W not present\n");
+        goto cleanup;
+    }
+    SetLastError(0xdeadbeef);
+    needed = 0;
+    expected = sizeof(SERVICE_DESCRIPTIONW) + sizeof(WCHAR) * sizeof(description);
+    ret = pQueryServiceConfig2W(svc_handle, SERVICE_CONFIG_DESCRIPTION,NULL,0,&needed);
+    ok(!ret, "expected QueryServiceConfig2W to fail\n");
+    ok(ERROR_INSUFFICIENT_BUFFER == GetLastError(), "expected error ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(needed == expected, "expected needed to be %d, got %d\n", expected, needed);
+
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2W(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer, needed,&needed);
+    ok(ret, "expected QueryServiceConfig2W to succeed\n");
+
+cleanup:
+    DeleteService(svc_handle);
+
     CloseServiceHandle(svc_handle);
 
     /* Wait a while. The following test does a CreateService again */
@@ -959,6 +1231,7 @@ START_TEST(service)
     test_close();
     /* Test the creation, querying and deletion of a service */
     test_sequence();
+    test_queryconfig2();
     /* The main reason for this test is to check if any refcounting is used
      * and what the rules are
      */

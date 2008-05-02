@@ -33,6 +33,21 @@ static LPDIRECT3DVERTEXBUFFER7 lpVBufSrc = NULL;
 static LPDIRECT3DVERTEXBUFFER7 lpVBufDest1 = NULL;
 static LPDIRECT3DVERTEXBUFFER7 lpVBufDest2 = NULL;
 
+static IDirectDraw *DirectDraw1 = NULL;
+static IDirectDrawSurface *Surface1 = NULL;
+static IDirect3D *Direct3D1 = NULL;
+static IDirect3DDevice *Direct3DDevice1 = NULL;
+static IDirect3DExecuteBuffer *ExecuteBuffer = NULL;
+static IDirect3DViewport *Viewport = NULL;
+
+typedef struct {
+    int total;
+    int rgb;
+    int hal;
+    int tnlhal;
+    int unk;
+} D3D7ETest;
+
 /* To compare bad floating point numbers. Not the ideal way to do it,
  * but it should be enough for here */
 #define comparefloat(a, b) ( (((a) - (b)) < 0.0001) && (((a) - (b)) > -0.0001) )
@@ -85,9 +100,8 @@ static BOOL CreateDirect3D(void)
     ddsd.dwWidth = 256;
     ddsd.dwHeight = 256;
     rc = IDirectDraw7_CreateSurface(lpDD, &ddsd, &lpDDS, NULL);
-    ok(rc==DD_OK, "CreateSurface returned: %x\n", rc);
     if (!SUCCEEDED(rc))
-	return FALSE;
+        return FALSE;
 
     memset(&ddsd, 0, sizeof(ddsd));
     ddsd.dwSize = sizeof(ddsd);
@@ -173,6 +187,9 @@ static void LightTest(void)
     float one = 1.0f;
     float zero= 0.0f;
     D3DMATERIAL7 mat;
+    BOOL enabled;
+    unsigned int i;
+    D3DDEVICEDESC7 caps;
 
     /* Set a few lights with funky indices. */
     memset(&light, 0, sizeof(light));
@@ -336,6 +353,38 @@ static void LightTest(void)
     rc = IDirect3DDevice7_GetMaterial(lpD3DDevice, &mat);
     ok(rc == D3D_OK, "IDirect3DDevice7_GetMaterial returned: %x\n", rc);
     ok(U4(mat).power == -1, "Returned power is %f\n", U4(mat).power);
+
+    memset(&caps, 0, sizeof(caps));
+    rc = IDirect3DDevice7_GetCaps(lpD3DDevice, &caps);
+    ok(rc == D3D_OK, "IDirect3DDevice7_GetCaps failed with %x\n", rc);
+
+    if ( caps.dwMaxActiveLights == (DWORD) -1) {
+        /* Some cards without T&L Support return -1 (Examples: Voodoo Banshee, RivaTNT / NV4) */
+        skip("T&L not supported\n");
+        return;
+    }
+
+    for(i = 1; i <= caps.dwMaxActiveLights; i++) {
+        rc = IDirect3DDevice7_LightEnable(lpD3DDevice, i, TRUE);
+        ok(rc == D3D_OK, "Enabling light %u failed with %x\n", i, rc);
+        rc = IDirect3DDevice7_GetLightEnable(lpD3DDevice, i, &enabled);
+        ok(rc == D3D_OK, "GetLightEnable on light %u failed with %x\n", i, rc);
+        ok(enabled, "Light %d is %s\n", i, enabled ? "enabled" : "disabled");
+    }
+
+    /* TODO: Test the rendering results in this situation */
+    rc = IDirect3DDevice7_LightEnable(lpD3DDevice, i + 1, TRUE);
+    ok(rc == D3D_OK, "Enabling one light more than supported returned %x\n", rc);
+    rc = IDirect3DDevice7_GetLightEnable(lpD3DDevice, i + 1, &enabled);
+    ok(rc == D3D_OK, "GetLightEnable on light %u failed with %x\n", i + 1,  rc);
+    ok(enabled, "Light %d is %s\n", i + 1, enabled ? "enabled" : "disabled");
+    rc = IDirect3DDevice7_LightEnable(lpD3DDevice, i + 1, FALSE);
+    ok(rc == D3D_OK, "Disabling the additional returned %x\n", rc);
+
+    for(i = 1; i <= caps.dwMaxActiveLights; i++) {
+        rc = IDirect3DDevice7_LightEnable(lpD3DDevice, i, FALSE);
+        ok(rc == D3D_OK, "Disabling light %u failed with %x\n", i, rc);
+    }
 }
 
 static void ProcessVerticesTest(void)
@@ -469,7 +518,7 @@ static void ProcessVerticesTest(void)
     rc = IDirect3DVertexBuffer7_Lock(lpVBufDest2, 0, (void **) &out2, NULL);
     ok(rc==D3D_OK , "IDirect3DVertexBuffer::Lock returned: %x\n", rc);
     if(!out2) goto out;
-    /* Small thing without much practial meaning, but I stumbled upon it,
+    /* Small thing without much practical meaning, but I stumbled upon it,
      * so let's check for it: If the output vertex buffer has to RHW value,
      * The RHW value of the last vertex is written into the next vertex
      */
@@ -789,6 +838,51 @@ static HRESULT WINAPI enumDevicesCallback(GUID *Guid,LPSTR DeviceDescription,LPS
     return DDENUMRET_OK;
 }
 
+static HRESULT WINAPI enumDevicesCallbackTest7(LPSTR DeviceDescription, LPSTR DeviceName, LPD3DDEVICEDESC7 lpdd7, LPVOID Context)
+{
+    D3D7ETest *d3d7et = (D3D7ETest*)Context;
+    if(IsEqualGUID(&lpdd7->deviceGUID, &IID_IDirect3DRGBDevice))
+        d3d7et->rgb++;
+    else if(IsEqualGUID(&lpdd7->deviceGUID, &IID_IDirect3DHALDevice))
+        d3d7et->hal++;
+    else if(IsEqualGUID(&lpdd7->deviceGUID, &IID_IDirect3DTnLHalDevice))
+        d3d7et->tnlhal++;
+    else
+        d3d7et->unk++;
+
+    d3d7et->total++;
+
+    return DDENUMRET_OK;
+}
+
+
+/*  Check the deviceGUID of devices enumerated by
+    IDirect3D7_EnumDevices. */
+static void D3D7EnumTest(void)
+{
+    D3D7ETest d3d7et;
+
+    if (!lpD3D) {
+        skip("No Direct3D7 interface.\n");
+        return;
+    }
+
+    memset(&d3d7et, 0, sizeof(d3d7et));
+    IDirect3D7_EnumDevices(lpD3D, enumDevicesCallbackTest7, (LPVOID) &d3d7et);
+
+
+    /* A couple of games (Delta Force LW and TFD) rely on this behaviour */
+    ok(d3d7et.tnlhal < d3d7et.total, "TnLHal device enumerated as only device.\n");
+
+    /* We make two additional assumptions. */
+    ok(d3d7et.rgb, "No RGB Device enumerated.\n");
+
+    if(d3d7et.tnlhal)
+        ok(d3d7et.hal, "TnLHal device enumerated, but no Hal device found.\n");
+
+    return;
+}
+
 static void CapsTest(void)
 {
     IDirect3D3 *d3d3;
@@ -825,16 +919,100 @@ struct v_out {
     float x, y, z, rhw;
 };
 
-static void Direct3D1Test(void)
+static BOOL D3D1_createObjects(void)
 {
-    IDirect3DDevice *dev1 = NULL;
-    IDirectDraw *dd;
-    IDirect3D *d3d;
-    IDirectDrawSurface *dds;
-    IDirect3DExecuteBuffer *exebuf;
-    IDirect3DViewport *vp;
     HRESULT hr;
     DDSURFACEDESC ddsd;
+    D3DEXECUTEBUFFERDESC desc;
+    D3DVIEWPORT vp_data;
+
+    /* An IDirect3DDevice cannot be queryInterfaced from an IDirect3DDevice7 on windows */
+    hr = DirectDrawCreate(NULL, &DirectDraw1, NULL);
+    ok(hr==DD_OK || hr==DDERR_NODIRECTDRAWSUPPORT, "DirectDrawCreate returned: %x\n", hr);
+    if (!DirectDraw1) {
+        return FALSE;
+    }
+
+    hr = IDirectDraw_SetCooperativeLevel(DirectDraw1, NULL, DDSCL_NORMAL);
+    ok(hr==DD_OK, "SetCooperativeLevel returned: %x\n", hr);
+
+    hr = IDirectDraw_QueryInterface(DirectDraw1, &IID_IDirect3D, (void**) &Direct3D1);
+    ok(hr==DD_OK, "QueryInterface returned: %x\n", hr);
+    if (!Direct3D1) {
+        return FALSE;
+    }
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE;
+    ddsd.dwWidth = 256;
+    ddsd.dwHeight = 256;
+    hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &Surface1, NULL);
+    if (!Surface1) {
+        skip("DDSCAPS_3DDEVICE surface not available\n");
+        return FALSE;
+    }
+
+    hr = IDirectDrawSurface_QueryInterface(Surface1, &IID_IDirect3DRGBDevice, (void **) &Direct3DDevice1);
+    ok(hr==D3D_OK || hr==DDERR_NOPALETTEATTACHED || hr==E_OUTOFMEMORY, "CreateDevice returned: %x\n", hr);
+    if(!Direct3DDevice1) {
+        return FALSE;
+    }
+
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = D3DDEB_BUFSIZE | D3DDEB_CAPS;
+    desc.dwCaps = D3DDEBCAPS_VIDEOMEMORY;
+    desc.dwBufferSize = 128;
+    desc.lpData = NULL;
+    hr = IDirect3DDevice_CreateExecuteBuffer(Direct3DDevice1, &desc, &ExecuteBuffer, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice_CreateExecuteBuffer failed: %08x\n", hr);
+    if(!ExecuteBuffer) {
+        return FALSE;
+    }
+
+    hr = IDirect3D_CreateViewport(Direct3D1, &Viewport, NULL);
+    ok(hr == D3D_OK, "IDirect3D_CreateViewport failed: %08x\n", hr);
+    if(!Viewport) {
+        return FALSE;
+    }
+
+    hr = IDirect3DViewport_Initialize(Viewport, Direct3D1);
+    ok(hr == DDERR_ALREADYINITIALIZED, "IDirect3DViewport_Initialize returned %08x\n", hr);
+
+    hr = IDirect3DDevice_AddViewport(Direct3DDevice1, Viewport);
+    ok(hr == D3D_OK, "IDirect3DDevice_AddViewport returned %08x\n", hr);
+    vp_data.dwSize = sizeof(vp_data);
+    vp_data.dwX = 0;
+    vp_data.dwY = 0;
+    vp_data.dwWidth = 256;
+    vp_data.dwHeight = 256;
+    vp_data.dvScaleX = 1;
+    vp_data.dvScaleY = 1;
+    vp_data.dvMaxX = 256;
+    vp_data.dvMaxY = 256;
+    vp_data.dvMinZ = 0;
+    vp_data.dvMaxZ = 1;
+    hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
+    ok(hr == D3D_OK, "IDirect3DViewport_SetViewport returned %08x\n", hr);
+
+    return TRUE;
+}
+
+static void D3D1_releaseObjects(void)
+{
+    if (Viewport) IDirect3DViewport_Release(Viewport);
+    if (ExecuteBuffer) IDirect3DExecuteBuffer_Release(ExecuteBuffer);
+    if (Direct3DDevice1) IDirect3DDevice_Release(Direct3DDevice1);
+    if (Surface1) IDirectDrawSurface_Release(Surface1);
+    if (Direct3D1) IDirect3D_Release(Direct3D1);
+    if (DirectDraw1) IDirectDraw_Release(DirectDraw1);
+}
+
+static void Direct3D1Test(void)
+{
+    HRESULT hr;
     D3DEXECUTEBUFFERDESC desc;
     D3DVIEWPORT vp_data;
     D3DINSTRUCTION *instr;
@@ -846,7 +1024,7 @@ static void Direct3D1Test(void)
     };
     static struct v_in cliptest[] = {
         {25.59, 25.59, 1.0},  {-25.59, -25.59,  0.0},
-        {25.61, 25.61, 1.01}, {-25.60, -25.60, -0.01},
+        {25.61, 25.61, 1.01}, {-25.61, -25.61, -0.01},
     };
     static struct v_in offscreentest[] = {
         {128.1, 0.0, 0.0},
@@ -856,48 +1034,12 @@ static void Direct3D1Test(void)
     D3DTRANSFORMDATA transformdata;
     DWORD i = FALSE;
 
-    /* An IDirect3DDevice cannot be queryInterfaced from an IDirect3DDevice7 on windows */
-    hr = DirectDrawCreate(NULL, &dd, NULL);
-    ok(hr==DD_OK || hr==DDERR_NODIRECTDRAWSUPPORT, "DirectDrawCreate returned: %x\n", hr);
-    if (!dd) {
-        trace("DirectDrawCreate() failed with an error %x\n", hr);
-        return;
-    }
-
-    hr = IDirectDraw_SetCooperativeLevel(dd, NULL, DDSCL_NORMAL);
-    ok(hr==DD_OK, "SetCooperativeLevel returned: %x\n", hr);
-
-    hr = IDirectDraw_QueryInterface(dd, &IID_IDirect3D, (void**) &d3d);
-    ok(hr==DD_OK, "QueryInterface returned: %x\n", hr);
-
-    memset(&ddsd, 0, sizeof(ddsd));
-    ddsd.dwSize = sizeof(ddsd);
-    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
-    ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE;
-    ddsd.dwWidth = 256;
-    ddsd.dwHeight = 256;
-    hr = IDirectDraw_CreateSurface(dd, &ddsd, &dds, NULL);
-    ok(hr==DD_OK, "CreateSurface returned: %x\n", hr);
-
-    dev1 = NULL;
-    hr = IDirectDrawSurface_QueryInterface(dds, &IID_IDirect3DRGBDevice, (void **) &dev1);
-    ok(hr==D3D_OK || hr==DDERR_NOPALETTEATTACHED || hr==E_OUTOFMEMORY, "CreateDevice returned: %x\n", hr);
-    if(!dev1) return;
-
     memset(&desc, 0, sizeof(desc));
     desc.dwSize = sizeof(desc);
-    desc.dwFlags = D3DDEB_BUFSIZE | D3DDEB_CAPS;
-    desc.dwCaps = D3DDEBCAPS_VIDEOMEMORY;
-    desc.dwBufferSize = 128;
-    desc.lpData = NULL;
-    hr = IDirect3DDevice_CreateExecuteBuffer(dev1, &desc, &exebuf, NULL);
-    ok(hr == D3D_OK, "IDirect3DDevice_CreateExecuteBuffer failed: %08x\n", hr);
-
-    memset(&desc, 0, sizeof(desc));
-    desc.dwSize = sizeof(desc);
-
-    hr = IDirect3DExecuteBuffer_Lock(exebuf, &desc);
+    hr = IDirect3DExecuteBuffer_Lock(ExecuteBuffer, &desc);
     ok(hr == D3D_OK, "IDirect3DExecuteBuffer_Lock failed: %08x\n", hr);
+
+    memset(desc.lpData, 0, 128);
     instr = desc.lpData;
     instr[idx].bOpcode = D3DOP_BRANCHFORWARD;
     instr[idx].bSize = sizeof(*branch);
@@ -911,32 +1053,63 @@ static void Direct3D1Test(void)
     idx += (sizeof(*branch) / sizeof(*instr));
     instr[idx].bOpcode = D3DOP_EXIT;
     instr[idx].bSize = 0;
-    instr[idx].bSize = 0;
-    hr = IDirect3DExecuteBuffer_Unlock(exebuf);
+    instr[idx].wCount = 0;
+    hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
     ok(hr == D3D_OK, "IDirect3DExecuteBuffer_Unlock failed: %08x\n", hr);
 
-    hr = IDirect3D_CreateViewport(d3d, &vp, NULL);
-    ok(hr == D3D_OK, "IDirect3D_CreateViewport failed: %08x\n", hr);
-    hr = IDirect3DViewport_Initialize(vp, d3d);
-    ok(hr == DDERR_ALREADYINITIALIZED, "IDirect3DViewport_Initialize returned %08x\n", hr);
+    hr = IDirect3DDevice_Execute(Direct3DDevice1, ExecuteBuffer, Viewport, D3DEXECUTE_CLIPPED);
+    ok(hr == D3D_OK, "IDirect3DDevice_Execute returned %08x\n", hr);
 
-    hr = IDirect3DDevice_AddViewport(dev1, vp);
-    ok(hr == D3D_OK, "IDirect3DDevice_AddViewport returned %08x\n", hr);
-    vp_data.dwSize = sizeof(vp_data);
-    vp_data.dwX = 0;
-    vp_data.dwY = 0;
-    vp_data.dwWidth = 256;
-    vp_data.dwHeight = 256;
-    vp_data.dvScaleX = 1;
-    vp_data.dvScaleY = 1;
-    vp_data.dvMaxX = 256;
-    vp_data.dvMaxY = 256;
-    vp_data.dvMinZ = 0;
-    vp_data.dvMaxZ = 1;
-    hr = IDirect3DViewport_SetViewport(vp, &vp_data);
-    ok(hr == D3D_OK, "IDirect3DViewport_SetViewport returned %08x\n", hr);
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
 
-    hr = IDirect3DDevice_Execute(dev1, exebuf, vp, D3DEXECUTE_CLIPPED);
+    hr = IDirect3DExecuteBuffer_Lock(ExecuteBuffer, &desc);
+    ok(hr == D3D_OK, "IDirect3DExecuteBuffer_Lock failed: %08x\n", hr);
+
+    memset(desc.lpData, 0, 128);
+    instr = desc.lpData;
+    idx = 0;
+    instr[idx].bOpcode = D3DOP_BRANCHFORWARD;
+    instr[idx].bSize = sizeof(*branch);
+    instr[idx].wCount = 1;
+    idx++;
+    branch = (D3DBRANCH *) &instr[idx];
+    branch->dwMask = 0x0;
+    branch->dwValue = 1;
+    branch->bNegate = TRUE;
+    branch->dwOffset = 64;
+    instr = (D3DINSTRUCTION*)((char*)desc.lpData + 64);
+    instr[0].bOpcode = D3DOP_EXIT;
+    instr[0].bSize = 0;
+    instr[0].wCount = 0;
+    hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
+    ok(hr == D3D_OK, "IDirect3DExecuteBuffer_Unlock failed: %08x\n", hr);
+
+    hr = IDirect3DDevice_Execute(Direct3DDevice1, ExecuteBuffer, Viewport, D3DEXECUTE_CLIPPED);
+    ok(hr == D3D_OK, "IDirect3DDevice_Execute returned %08x\n", hr);
+
+    /* Test rendering 0 triangles */
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+
+    hr = IDirect3DExecuteBuffer_Lock(ExecuteBuffer, &desc);
+    ok(hr == D3D_OK, "IDirect3DExecuteBuffer_Lock failed: %08x\n", hr);
+
+    memset(desc.lpData, 0, 128);
+    instr = desc.lpData;
+    idx = 0;
+
+    instr->bOpcode = D3DOP_TRIANGLE;
+    instr->bSize = sizeof(D3DOP_TRIANGLE);
+    instr->wCount = 0;
+    instr = ((D3DINSTRUCTION*)(instr))+1;
+    instr->bOpcode = D3DOP_EXIT;
+    instr->bSize = 0;
+    instr->wCount = 0;
+    hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
+    ok(hr == D3D_OK, "IDirect3DExecuteBuffer_Unlock failed: %08x\n", hr);
+
+    hr = IDirect3DDevice_Execute(Direct3DDevice1, ExecuteBuffer, Viewport, D3DEXECUTE_CLIPPED);
     ok(hr == D3D_OK, "IDirect3DDevice_Execute returned %08x\n", hr);
 
     memset(&transformdata, 0, sizeof(transformdata));
@@ -947,14 +1120,14 @@ static void Direct3D1Test(void)
     transformdata.dwOutSize = sizeof(out[0]);
 
     transformdata.lpHOut = NULL;
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(testverts) / sizeof(testverts[0]),
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(testverts) / sizeof(testverts[0]),
                                              &transformdata, D3DTRANSFORM_UNCLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
 
     transformdata.lpHOut = outH;
-    memset(outH, 0xaa, sizeof(outH));
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(testverts) / sizeof(testverts[0]),
+    memset(outH, 0xcc, sizeof(outH));
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(testverts) / sizeof(testverts[0]),
                                              &transformdata, D3DTRANSFORM_UNCLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
@@ -973,23 +1146,31 @@ static void Direct3D1Test(void)
            cmp[i].x, cmp[i].y, cmp[i].z, cmp[i].rhw);
     }
     for(i = 0; i < sizeof(outH); i++) {
-        if(((unsigned char *) outH)[i] != 0xaa) {
-            ok(FALSE, "Homogenous output was generated despite UNCLIPPED flag\n");
+        if(((unsigned char *) outH)[i] != 0xcc) {
+            ok(FALSE, "Homogeneous output was generated despite UNCLIPPED flag\n");
             break;
         }
     }
 
+    vp_data.dwSize = sizeof(vp_data);
+    vp_data.dwX = 0;
+    vp_data.dwY = 0;
+    vp_data.dwWidth = 256;
+    vp_data.dwHeight = 256;
+    vp_data.dvMaxX = 256;
+    vp_data.dvMaxY = 256;
     vp_data.dvScaleX = 5;
     vp_data.dvScaleY = 5;
     vp_data.dvMinZ = -25;
     vp_data.dvMaxZ = 60;
-    hr = IDirect3DViewport_SetViewport(vp, &vp_data);
+    hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
     ok(hr == D3D_OK, "IDirect3DViewport_SetViewport returned %08x\n", hr);
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(testverts) / sizeof(testverts[0]),
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(testverts) / sizeof(testverts[0]),
                                              &transformdata, D3DTRANSFORM_UNCLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
     ok(i == 0, "Offscreen is %d\n", i);
+
     for(i = 0; i < sizeof(testverts) / sizeof(testverts[0]); i++) {
         static const struct v_out cmp[] = {
             {128.0, 128.0, 0.0, 1}, {133.0, 123.0,  1.0, 1}, {123.0, 133.0, -1, 1},
@@ -1004,9 +1185,9 @@ static void Direct3D1Test(void)
 
     vp_data.dwX = 10;
     vp_data.dwY = 20;
-    hr = IDirect3DViewport_SetViewport(vp, &vp_data);
+    hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
     ok(hr == D3D_OK, "IDirect3DViewport_SetViewport returned %08x\n", hr);
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(testverts) / sizeof(testverts[0]),
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(testverts) / sizeof(testverts[0]),
                                              &transformdata, D3DTRANSFORM_UNCLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
@@ -1023,8 +1204,8 @@ static void Direct3D1Test(void)
            cmp[i].x, cmp[i].y, cmp[i].z, cmp[i].rhw);
     }
 
-    memset(out, 0xbb, sizeof(out));
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(testverts) / sizeof(testverts[0]),
+    memset(out, 0xcc, sizeof(out));
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(testverts) / sizeof(testverts[0]),
                                              &transformdata, D3DTRANSFORM_CLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
@@ -1060,13 +1241,13 @@ static void Direct3D1Test(void)
         }
     }
     for(i = 0; i < sizeof(out) / sizeof(DWORD); i++) {
-        ok(((DWORD *) out)[i] != 0xbbbbbbbb,
+        ok(((DWORD *) out)[i] != 0xcccccccc,
                 "Regular output DWORD %d remained untouched\n", i);
     }
 
     transformdata.lpIn = (void *) cliptest;
     transformdata.dwInSize = sizeof(cliptest[0]);
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(cliptest) / sizeof(cliptest[0]),
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(cliptest) / sizeof(cliptest[0]),
                                              &transformdata, D3DTRANSFORM_CLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
@@ -1086,10 +1267,10 @@ static void Direct3D1Test(void)
 
     vp_data.dwWidth = 10;
     vp_data.dwHeight = 1000;
-    hr = IDirect3DViewport_SetViewport(vp, &vp_data);
+    hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
     i = 10;
     ok(hr == D3D_OK, "IDirect3DViewport_SetViewport returned %08x\n", hr);
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(cliptest) / sizeof(cliptest[0]),
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(cliptest) / sizeof(cliptest[0]),
                                              &transformdata, D3DTRANSFORM_CLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
@@ -1110,9 +1291,9 @@ static void Direct3D1Test(void)
     vp_data.dwHeight = 256;
     vp_data.dvScaleX = 1;
     vp_data.dvScaleY = 1;
-    hr = IDirect3DViewport_SetViewport(vp, &vp_data);
+    hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
     ok(hr == D3D_OK, "IDirect3DViewport_SetViewport returned %08x\n", hr);
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(cliptest) / sizeof(cliptest[0]),
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(cliptest) / sizeof(cliptest[0]),
                                              &transformdata, D3DTRANSFORM_CLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
@@ -1139,26 +1320,26 @@ static void Direct3D1Test(void)
     vp_data.dwHeight = 5;
     vp_data.dvScaleX = 10000;
     vp_data.dvScaleY = 10000;
-    hr = IDirect3DViewport_SetViewport(vp, &vp_data);
+    hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
     ok(hr == D3D_OK, "IDirect3DViewport_SetViewport returned %08x\n", hr);
     transformdata.lpIn = cliptest;
-    hr = IDirect3DViewport_TransformVertices(vp, 1,
+    hr = IDirect3DViewport_TransformVertices(Viewport, 1,
                                              &transformdata, D3DTRANSFORM_UNCLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
     ok(i == 0, "Offscreen is %d\n", i);
-    hr = IDirect3DViewport_TransformVertices(vp, 1,
+    hr = IDirect3DViewport_TransformVertices(Viewport, 1,
                                              &transformdata, D3DTRANSFORM_CLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
     ok(i == (D3DCLIP_RIGHT | D3DCLIP_TOP), "Offscreen is %d\n", i);
-    hr = IDirect3DViewport_TransformVertices(vp, 2,
+    hr = IDirect3DViewport_TransformVertices(Viewport, 2,
                                              &transformdata, D3DTRANSFORM_CLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
     ok(i == 0, "Offscreen is %d\n", i);
     transformdata.lpIn = cliptest + 1;
-    hr = IDirect3DViewport_TransformVertices(vp, 1,
+    hr = IDirect3DViewport_TransformVertices(Viewport, 1,
                                              &transformdata, D3DTRANSFORM_CLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
@@ -1170,39 +1351,245 @@ static void Direct3D1Test(void)
     vp_data.dwHeight = 257;
     vp_data.dvScaleX = 1;
     vp_data.dvScaleY = 1;
-    hr = IDirect3DViewport_SetViewport(vp, &vp_data);
+    hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
     i = 12345;
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(offscreentest) / sizeof(offscreentest[0]),
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(offscreentest) / sizeof(offscreentest[0]),
                                              &transformdata, D3DTRANSFORM_CLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
     ok(i == 0, "Offscreen is %d\n", i);
     vp_data.dwWidth = 256;
     vp_data.dwHeight = 256;
-    hr = IDirect3DViewport_SetViewport(vp, &vp_data);
+    hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
     i = 12345;
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(offscreentest) / sizeof(offscreentest[0]),
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(offscreentest) / sizeof(offscreentest[0]),
                                              &transformdata, D3DTRANSFORM_CLIPPED,
                                              &i);
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
     ok(i == D3DCLIP_RIGHT, "Offscreen is %d\n", i);
 
-    hr = IDirect3DViewport_TransformVertices(vp, sizeof(testverts) / sizeof(testverts[0]),
+    hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(testverts) / sizeof(testverts[0]),
                                              &transformdata, 0,
                                              &i);
     ok(hr == DDERR_INVALIDPARAMS, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
 
-    hr = IDirect3DDevice_DeleteViewport(dev1, vp);
+    hr = IDirect3DDevice_DeleteViewport(Direct3DDevice1, Viewport);
     ok(hr == D3D_OK, "IDirect3DDevice_DeleteViewport returned %08x\n", hr);
-
-    IDirect3DViewport_Release(vp);
-    IDirect3DExecuteBuffer_Release(exebuf);
-    IDirect3DDevice_Release(dev1);
-    IDirectDrawSurface_Release(dds);
-    IDirect3D_Release(d3d);
-    IDirectDraw_Release(dd);
-    return;
 }
+
+static BOOL colortables_check_equality(PALETTEENTRY table1[256], PALETTEENTRY table2[256])
+{
+    int i;
+
+    for (i = 0; i < 256; i++) {
+       if (table1[i].peRed != table2[i].peRed || table1[i].peGreen != table2[i].peGreen ||
+           table1[i].peBlue != table2[i].peBlue) return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* test palette handling in IDirect3DTexture_Load */
+static void TextureLoadTest(void)
+{
+    IDirectDrawSurface *TexSurface = NULL;
+    IDirect3DTexture *Texture = NULL;
+    IDirectDrawSurface *TexSurface2 = NULL;
+    IDirect3DTexture *Texture2 = NULL;
+    IDirectDrawPalette *palette = NULL;
+    IDirectDrawPalette *palette2 = NULL;
+    IDirectDrawPalette *palette_tmp = NULL;
+    PALETTEENTRY table1[256], table2[256], table_tmp[256];
+    HRESULT hr;
+    DDSURFACEDESC ddsd;
+    int i;
+
+    memset (&ddsd, 0, sizeof (ddsd));
+    ddsd.dwSize = sizeof (ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
+    ddsd.dwHeight = 128;
+    ddsd.dwWidth = 128;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+    ddsd.ddpfPixelFormat.dwSize = sizeof(ddsd.ddpfPixelFormat);
+    ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB | DDPF_PALETTEINDEXED8;
+    U1(ddsd.ddpfPixelFormat).dwRGBBitCount = 8;
+
+    hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &TexSurface, NULL);
+    ok(hr==D3D_OK, "CreateSurface returned: %x\n", hr);
+    if (FAILED(hr)) {
+        skip("IDirectDraw_CreateSurface failed; skipping further tests\n");
+        goto cleanup;
+    }
+
+    hr = IDirectDrawSurface_QueryInterface(TexSurface, &IID_IDirect3DTexture,
+                (void *)&Texture);
+    ok(hr==D3D_OK, "IDirectDrawSurface_QueryInterface returned: %x\n", hr);
+    if (FAILED(hr)) {
+        skip("Can't get IDirect3DTexture interface; skipping further tests\n");
+        goto cleanup;
+    }
+
+    hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &TexSurface2, NULL);
+    ok(hr==D3D_OK, "CreateSurface returned: %x\n", hr);
+    if (FAILED(hr)) {
+        skip("IDirectDraw_CreateSurface failed; skipping further tests\n");
+        goto cleanup;
+    }
+
+    hr = IDirectDrawSurface_QueryInterface(TexSurface2, &IID_IDirect3DTexture,
+                (void *)&Texture2);
+    ok(hr==D3D_OK, "IDirectDrawSurface_QueryInterface returned: %x\n", hr);
+    if (FAILED(hr)) {
+        skip("Can't get IDirect3DTexture interface; skipping further tests\n");
+        goto cleanup;
+    }
+
+    /* test Load when both textures have no palette */
+    hr = IDirect3DTexture_Load(Texture2, Texture);
+    ok(hr == DD_OK, "IDirect3DTexture_Load returned %08x\n", hr);
+
+    for (i = 0; i < 256; i++) {
+        table1[i].peRed = i;
+        table1[i].peGreen = i;
+        table1[i].peBlue = i;
+        table1[i].peFlags = 0;
+    }
+
+    hr = IDirectDraw_CreatePalette(DirectDraw1, DDPCAPS_ALLOW256 | DDPCAPS_8BIT, table1, &palette, NULL);
+    ok(hr == DD_OK, "CreatePalette returned %08x\n", hr);
+    if (FAILED(hr)) {
+        skip("IDirectDraw_CreatePalette failed; skipping further tests\n");
+        goto cleanup;
+    }
+
+    /* test Load when source texture has palette and destination has no palette */
+    hr = IDirectDrawSurface_SetPalette(TexSurface, palette);
+    ok(hr == DD_OK, "IDirectDrawSurface_SetPalette returned %08x\n", hr);
+    hr = IDirect3DTexture_Load(Texture2, Texture);
+    ok(hr == DDERR_NOPALETTEATTACHED, "IDirect3DTexture_Load returned %08x\n", hr);
+
+    for (i = 0; i < 256; i++) {
+        table2[i].peRed = 255 - i;
+        table2[i].peGreen = 255 - i;
+        table2[i].peBlue = 255 - i;
+        table2[i].peFlags = 0;
+    }
+
+    hr = IDirectDraw_CreatePalette(DirectDraw1, DDPCAPS_ALLOW256 | DDPCAPS_8BIT, table2, &palette2, NULL);
+    ok(hr == DD_OK, "CreatePalette returned %08x\n", hr);
+    if (FAILED(hr)) {
+        skip("IDirectDraw_CreatePalette failed; skipping further tests\n");
+        goto cleanup;
+    }
+
+    /* test Load when source has no palette and destination has a palette */
+    hr = IDirectDrawSurface_SetPalette(TexSurface, NULL);
+    ok(hr == DD_OK, "IDirectDrawSurface_SetPalette returned %08x\n", hr);
+    hr = IDirectDrawSurface_SetPalette(TexSurface2, palette2);
+    ok(hr == DD_OK, "IDirectDrawSurface_SetPalette returned %08x\n", hr);
+    hr = IDirect3DTexture_Load(Texture2, Texture);
+    ok(hr == DD_OK, "IDirect3DTexture_Load returned %08x\n", hr);
+    hr = IDirectDrawSurface_GetPalette(TexSurface2, &palette_tmp);
+    ok(hr == DD_OK, "IDirectDrawSurface_GetPalette returned %08x\n", hr);
+    if (!palette_tmp) {
+        skip("IDirectDrawSurface_GetPalette failed; skipping color table check\n");
+        goto cleanup;
+    } else {
+        hr = IDirectDrawPalette_GetEntries(palette_tmp, 0, 0, 256, table_tmp);
+        ok(hr == DD_OK, "IDirectDrawPalette_GetEntries returned %08x\n", hr);
+        ok(colortables_check_equality(table2, table_tmp), "Unexpected palettized texture color table\n");
+        IDirectDrawPalette_Release(palette_tmp);
+    }
+
+    /* test Load when both textures have palettes */
+    hr = IDirectDrawSurface_SetPalette(TexSurface, palette);
+    ok(hr == DD_OK, "IDirectDrawSurface_SetPalette returned %08x\n", hr);
+    hr = IDirect3DTexture_Load(Texture2, Texture);
+    ok(hr == DD_OK, "IDirect3DTexture_Load returned %08x\n", hr);
+    hr = IDirect3DTexture_Load(Texture2, Texture);
+    ok(hr == DD_OK, "IDirect3DTexture_Load returned %08x\n", hr);
+    hr = IDirectDrawSurface_GetPalette(TexSurface2, &palette_tmp);
+    ok(hr == DD_OK, "IDirectDrawSurface_GetPalette returned %08x\n", hr);
+    if (!palette_tmp) {
+        skip("IDirectDrawSurface_GetPalette failed; skipping color table check\n");
+        goto cleanup;
+    } else {
+        hr = IDirectDrawPalette_GetEntries(palette_tmp, 0, 0, 256, table_tmp);
+        ok(hr == DD_OK, "IDirectDrawPalette_GetEntries returned %08x\n", hr);
+        ok(colortables_check_equality(table1, table_tmp), "Unexpected palettized texture color table\n");
+        IDirectDrawPalette_Release(palette_tmp);
+    }
+
+    cleanup:
+
+    if (palette) IDirectDrawPalette_Release(palette);
+    if (palette2) IDirectDrawPalette_Release(palette2);
+    if (TexSurface) IDirectDrawSurface_Release(TexSurface);
+    if (Texture) IDirect3DTexture_Release(Texture);
+    if (TexSurface2) IDirectDrawSurface_Release(TexSurface2);
+    if (Texture2) IDirect3DTexture_Release(Texture2);
+}
+
+static void VertexBufferDescTest(void)
+{
+    HRESULT rc;
+    D3DVERTEXBUFFERDESC desc;
+    union mem_t
+    {
+        D3DVERTEXBUFFERDESC desc2;
+        unsigned char buffer[512];
+    } mem;
+
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwCaps = 0;
+    desc.dwFVF = D3DFVF_XYZ;
+    desc.dwNumVertices = 1;
+    rc = IDirect3D7_CreateVertexBuffer(lpD3D, &desc, &lpVBufSrc, 0);
+    ok(rc==D3D_OK || rc==E_OUTOFMEMORY, "CreateVertexBuffer returned: %x\n", rc);
+    if (!lpVBufSrc)
+    {
+        trace("IDirect3D7::CreateVertexBuffer() failed with an error %x\n", rc);
+        goto out;
+    }
+
+    memset(mem.buffer, 0x12, sizeof(mem.buffer));
+    mem.desc2.dwSize = sizeof(D3DVERTEXBUFFERDESC)*2;
+    rc = IDirect3DVertexBuffer7_GetVertexBufferDesc(lpVBufSrc, &mem.desc2);
+    if(rc != D3D_OK)
+        skip("GetVertexBuffer Failed!\n");
+    ok( mem.desc2.dwSize == sizeof(D3DVERTEXBUFFERDESC)*2, "Size returned from GetVertexBufferDesc does not match the value put in\n" );
+    ok( mem.buffer[sizeof(D3DVERTEXBUFFERDESC)] == 0x12, "GetVertexBufferDesc cleared outside of the struct! (dwSize was double the size of the struct)\n");
+    ok( mem.desc2.dwCaps == desc.dwCaps, "dwCaps returned differs. Got %x, expected %x\n", mem.desc2.dwCaps, desc.dwCaps);
+    ok( mem.desc2.dwFVF == desc.dwFVF, "dwFVF returned differs. Got %x, expected %x\n", mem.desc2.dwFVF, desc.dwFVF);
+    ok (mem.desc2.dwNumVertices == desc.dwNumVertices, "dwNumVertices returned differs. Got %x, expected %x\n", mem.desc2.dwNumVertices, desc.dwNumVertices);
+
+    memset(mem.buffer, 0x12, sizeof(mem.buffer));
+    mem.desc2.dwSize = 0;
+    rc = IDirect3DVertexBuffer7_GetVertexBufferDesc(lpVBufSrc, &mem.desc2);
+    if(rc != D3D_OK)
+        skip("GetVertexBuffer Failed!\n");
+    ok( mem.desc2.dwSize == 0, "Size returned from GetVertexBufferDesc does not match the value put in\n" );
+    ok( mem.buffer[sizeof(D3DVERTEXBUFFERDESC)] == 0x12, "GetVertexBufferDesc cleared outside of the struct! (dwSize was 0)\n");
+    ok( mem.desc2.dwCaps == desc.dwCaps, "dwCaps returned differs. Got %x, expected %x\n", mem.desc2.dwCaps, desc.dwCaps);
+    ok( mem.desc2.dwFVF == desc.dwFVF, "dwFVF returned differs. Got %x, expected %x\n", mem.desc2.dwFVF, desc.dwFVF);
+    ok (mem.desc2.dwNumVertices == desc.dwNumVertices, "dwNumVertices returned differs. Got %x, expected %x\n", mem.desc2.dwNumVertices, desc.dwNumVertices);
+
+    memset(mem.buffer, 0x12, sizeof(mem.buffer));
+    mem.desc2.dwSize = sizeof(D3DVERTEXBUFFERDESC);
+    rc = IDirect3DVertexBuffer7_GetVertexBufferDesc(lpVBufSrc, &mem.desc2);
+    if(rc != D3D_OK)
+        skip("GetVertexBuffer Failed!\n");
+    ok( mem.desc2.dwSize == sizeof(D3DVERTEXBUFFERDESC), "Size returned from GetVertexBufferDesc does not match the value put in\n" );
+    ok( mem.buffer[sizeof(D3DVERTEXBUFFERDESC)] == 0x12, "GetVertexBufferDesc cleared outside of the struct! (dwSize was the size of the struct)\n");
+    ok( mem.desc2.dwCaps == desc.dwCaps, "dwCaps returned differs. Got %x, expected %x\n", mem.desc2.dwCaps, desc.dwCaps);
+    ok( mem.desc2.dwFVF == desc.dwFVF, "dwFVF returned differs. Got %x, expected %x\n", mem.desc2.dwFVF, desc.dwFVF);
+    ok (mem.desc2.dwNumVertices == desc.dwNumVertices, "dwNumVertices returned differs. Got %x, expected %x\n", mem.desc2.dwNumVertices, desc.dwNumVertices);
+
+out:
+    IDirect3DVertexBuffer7_Release(lpVBufSrc);
+}
+
 
 START_TEST(d3d)
 {
@@ -1213,15 +1600,24 @@ START_TEST(d3d)
     }
 
     if(!CreateDirect3D()) {
-        trace("Skipping tests\n");
-        return;
+        skip("Skipping d3d7 tests\n");
+    } else {
+        LightTest();
+        ProcessVerticesTest();
+        StateTest();
+        SceneTest();
+        LimitTest();
+        D3D7EnumTest();
+        CapsTest();
+        VertexBufferDescTest();
+        ReleaseDirect3D();
     }
-    LightTest();
-    ProcessVerticesTest();
-    StateTest();
-    SceneTest();
-    LimitTest();
-    CapsTest();
-    ReleaseDirect3D();
-    Direct3D1Test();
+
+    if (!D3D1_createObjects()) {
+        skip("Skipping d3d1 tests\n");
+    } else {
+        Direct3D1Test();
+        TextureLoadTest();
+        D3D1_releaseObjects();
+    }
 }

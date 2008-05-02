@@ -129,6 +129,11 @@ typedef struct tag_des3_key {
     ulong32 ek[3][32], dk[3][32];
 } des3_key;
 
+typedef struct tag_aes_key {
+   ulong32 eK[64], dK[64];
+   int Nr;
+} aes_key;
+
 int rc2_setup(const unsigned char *key, int keylen, int bits, int num_rounds, rc2_key *skey);
 void rc2_ecb_encrypt(const unsigned char *pt, unsigned char *ct, rc2_key *key);
 void rc2_ecb_decrypt(const unsigned char *ct, unsigned char *pt, rc2_key *key);
@@ -140,6 +145,10 @@ void des_ecb_decrypt(const unsigned char *ct, unsigned char *pt, const des_key *
 int des3_setup(const unsigned char *key, int keylen, int num_rounds, des3_key *skey);
 void des3_ecb_encrypt(const unsigned char *pt, unsigned char *ct, const des3_key *key);
 void des3_ecb_decrypt(const unsigned char *ct, unsigned char *pt, const des3_key *key);
+
+int aes_setup(const unsigned char *key, int keylen, int rounds, aes_key *skey);
+void aes_ecb_encrypt(const unsigned char *pt, unsigned char *ct, aes_key *skey);
+void aes_ecb_decrypt(const unsigned char *ct, unsigned char *pt, aes_key *skey);
 
 typedef struct tag_md2_state {
     unsigned char chksum[16], X[48], buf[16];
@@ -472,9 +481,6 @@ int mp_exptmod(const mp_int *a, const mp_int *b, mp_int *c, mp_int *d);
 
 /* number of primes */
 #define PRIME_SIZE      256
-
-/* table of first PRIME_SIZE primes */
-extern const mp_digit __prime_tab[];
 
 /* result=1 if a is divisible by one of the first PRIME_SIZE primes */
 int mp_prime_is_divisible(const mp_int *a, int *result);

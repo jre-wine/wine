@@ -124,6 +124,12 @@ enum InterpolationMode
     InterpolationModeHighQualityBicubic
 };
 
+enum PenAlignment
+{
+    PenAlignmentCenter   = 0,
+    PenAlignmentInset    = 1
+};
+
 enum PixelOffsetMode
 {
     PixelOffsetModeInvalid     = QualityModeInvalid,
@@ -251,6 +257,28 @@ enum HotkeyPrefix
     HotkeyPrefixHide   = 2
 };
 
+enum ImageCodecFlags
+{
+    ImageCodecFlagsEncoder		= 1,
+    ImageCodecFlagsDecoder		= 2,
+    ImageCodecFlagsSupportBitmap	= 4,
+    ImageCodecFlagsSupportVector	= 8,
+    ImageCodecFlagsSeekableEncode	= 16,
+    ImageCodecFlagsBlockingDecode	= 32,
+    ImageCodecFlagsBuiltin		= 65536,
+    ImageCodecFlagsSystem	        = 131072,
+    ImageCodecFlagsUser		        = 262144
+};
+
+enum CombineMode
+{
+    CombineModeReplace,
+    CombineModeIntersect,
+    CombineModeUnion,
+    CombineModeXor,
+    CombineModeExclude,
+    CombineModeComplement
+};
 
 #ifndef __cplusplus
 
@@ -279,6 +307,9 @@ typedef enum StringAlignment StringAlignment;
 typedef enum StringTrimming StringTrimming;
 typedef enum StringFormatFlags StringFormatFlags;
 typedef enum HotkeyPrefix HotkeyPrefix;
+typedef enum PenAlignment GpPenAlignment;
+typedef enum ImageCodecFlags ImageCodecFlags;
+typedef enum CombineMode CombineMode;
 
 #endif /* end of c typedefs */
 

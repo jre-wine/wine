@@ -3,8 +3,8 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = gdiplus.dll
-IMPORTLIB = libgdiplus.$(IMPLIBEXT)
-IMPORTS   = shlwapi oleaut32 ole32 user32 gdi32 advapi32 kernel32 ntdll
+IMPORTLIB = gdiplus
+IMPORTS   = shlwapi oleaut32 ole32 user32 gdi32 kernel32
 EXTRALIBS = -luuid
 
 C_SRCS = \
@@ -19,6 +19,7 @@ C_SRCS = \
 	matrix.c \
 	pathiterator.c \
 	pen.c \
+	region.c \
 	stringformat.c
 
 @MAKE_DLL_RULES@

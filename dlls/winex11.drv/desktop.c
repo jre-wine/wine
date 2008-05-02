@@ -22,10 +22,11 @@
 #include <X11/cursorfont.h>
 #include <X11/Xlib.h>
 
-#include "wine/winuser16.h"
-#include "win.h"
-#include "ddrawi.h"
 #include "x11drv.h"
+
+/* avoid conflict with field names in included win32 headers */
+#undef Status
+#include "ddrawi.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
@@ -66,46 +67,10 @@ static void make_modes(void)
     }
 }
 
-/***********************************************************************
- *		X11DRV_resize_desktop
- *
- * Reset the desktop window size and WM hints
- */
-static int X11DRV_resize_desktop( unsigned int width, unsigned int height )
-{
-    XSizeHints *size_hints;
-    Display *display = thread_display();
-    Window w = root_window;
-    /* set up */
-    wine_tsx11_lock();
-    size_hints  = XAllocSizeHints();
-    if (!size_hints)
-    {
-        ERR("Not enough memory for window manager hints.\n" );
-        wine_tsx11_unlock();
-        return 0;
-    }
-    size_hints->min_width = size_hints->max_width = width;
-    size_hints->min_height = size_hints->max_height = height;
-    size_hints->flags = PMinSize | PMaxSize | PSize;
-
-    /* do the work */
-    XSetWMNormalHints( display, w, size_hints );
-    XResizeWindow( display, w, width, height );
-
-    /* clean up */
-    XFree( size_hints );
-    XFlush( display );
-    wine_tsx11_unlock();
-    X11DRV_handle_desktop_resize( width, height );
-    return 1;
-}
-
 static int X11DRV_desktop_GetCurrentMode(void)
 {
     unsigned int i;
-    DWORD dwBpp = screen_depth;
-    if (dwBpp == 24) dwBpp = 32;
+    DWORD dwBpp = screen_bpp;
     for (i=0; i<dd_mode_count; i++)
     {
         if ( (screen_width == dd_modes[i].dwWidth) &&
@@ -119,12 +84,11 @@ static int X11DRV_desktop_GetCurrentMode(void)
 
 static LONG X11DRV_desktop_SetCurrentMode(int mode)
 {
-    DWORD dwBpp = screen_depth;
-    if (dwBpp == 24) dwBpp = 32;
+    DWORD dwBpp = screen_bpp;
     if (dwBpp != dd_modes[mode].dwBPP)
     {
         FIXME("Cannot change screen BPP from %d to %d\n", dwBpp, dd_modes[mode].dwBPP);
-        /* Ignore the depth missmatch
+        /* Ignore the depth mismatch
          *
          * Some (older) applications require a specific bit depth, this will allow them
          * to run. X11drv performs a color depth conversion if needed.
@@ -143,11 +107,10 @@ static LONG X11DRV_desktop_SetCurrentMode(int mode)
 void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
 {
     root_window = win;
+    managed_mode = 0;  /* no managed windows in desktop mode */
     max_width = screen_width;
     max_height = screen_height;
-    screen_width  = width;
-    screen_height = height;
-    xinerama_init();
+    xinerama_init( width, height );
 
     /* initialize the available resolutions */
     dd_modes = X11DRV_Settings_SetHandlers("desktop", 
@@ -157,7 +120,6 @@ void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
     make_modes();
     X11DRV_Settings_AddDepthModes();
     dd_mode_count = X11DRV_Settings_GetModeCount();
-    X11DRV_Settings_SetDefaultMode(0);
 }
 
 

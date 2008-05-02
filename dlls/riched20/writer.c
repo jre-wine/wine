@@ -18,6 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include "editor.h"
 #include "rtf.h"
 
@@ -92,7 +95,7 @@ ME_StreamOutMove(ME_OutStream *pStream, const char *buffer, int len)
     int space = STREAMOUT_BUFFER_SIZE - pStream->pos;
     int fit = min(space, len);
 
-    TRACE("%u:%u:%.*s\n", pStream->pos, fit, fit, buffer);
+    TRACE("%u:%u:%s\n", pStream->pos, fit, debugstr_an(buffer,fit));
     memmove(pStream->buffer + pStream->pos, buffer, fit);
     len -= fit;
     buffer += fit;
@@ -711,6 +714,10 @@ ME_StreamOutRTF(ME_TextEditor *editor, ME_OutStream *pStream, int nStart, int nC
           nChars--;
           if (editor->bEmulateVersion10 && nChars)
             nChars--;
+        } else if (p->member.run.nFlags & MERF_ENDROW) {
+          if (!ME_StreamOutPrint(pStream, "\\line \r\n"))
+            return FALSE;
+          nChars--;
         } else {
           int nEnd;
           

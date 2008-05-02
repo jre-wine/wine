@@ -909,6 +909,15 @@ void WINAPI ControlPanelInfo16( INT16 nInfoType, WORD wData, LPSTR lpBuffer )
 
 
 /***********************************************************************
+ *           OldSetDeskPattern   (USER.279)
+ */
+BOOL16 WINAPI SetDeskPattern16(void)
+{
+    return SystemParametersInfoA( SPI_SETDESKPATTERN, -1, NULL, FALSE );
+}
+
+
+/***********************************************************************
  *		GetSysColorBrush (USER.281)
  */
 HBRUSH16 WINAPI GetSysColorBrush16( INT16 index )
@@ -979,6 +988,15 @@ WORD WINAPI GetFreeSystemResources16( WORD resType )
     FreeLibrary16( gdi_inst );
     TRACE("<- userPercent %d, gdiPercent %d\n", userPercent, gdiPercent);
     return (WORD)min( userPercent, gdiPercent );
+}
+
+
+/***********************************************************************
+ *           SetDeskWallPaper   (USER.285)
+ */
+BOOL16 WINAPI SetDeskWallPaper16( LPCSTR filename )
+{
+    return SetDeskWallPaper( filename );
 }
 
 

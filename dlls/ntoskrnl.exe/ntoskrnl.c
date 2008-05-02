@@ -172,7 +172,7 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
         DPRINTF( "%04x:Ret  driver dispatch %p (device=%p,irp=%p) retval=%08x\n",
                  GetCurrentThreadId(), dispatch, device, &irp, status );
 
-    *out_size = irp.IoStatus.u.Status ? 0 : irp.IoStatus.Information;
+    *out_size = (irp.IoStatus.u.Status >= 0) ? irp.IoStatus.Information : 0;
     return irp.IoStatus.u.Status;
 }
 
@@ -245,6 +245,72 @@ NTSTATUS wine_ntoskrnl_main_loop( HANDLE stop_event )
             break;
         }
     }
+}
+
+/***********************************************************************
+ *           IoAllocateMdl  (NTOSKRNL.EXE.@)
+ */
+PMDL WINAPI IoAllocateMdl( PVOID VirtualAddress, ULONG Length, BOOLEAN SecondaryBuffer, BOOLEAN ChargeQuota, PIRP Irp )
+{
+    FIXME( "stub: %p, %u, %i, %i, %p\n", VirtualAddress, Length, SecondaryBuffer, ChargeQuota, Irp );
+    return NULL;
+}
+
+
+/***********************************************************************
+ *           IoAllocateWorkItem  (NTOSKRNL.EXE.@)
+ */
+PIO_WORKITEM WINAPI IoAllocateWorkItem( PDEVICE_OBJECT DeviceObject )
+{
+    FIXME( "stub: %p\n", DeviceObject );
+    return NULL;
+}
+
+
+/***********************************************************************
+ *           IoCreateDriver   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoCreateDriver( UNICODE_STRING *name, PDRIVER_INITIALIZE init )
+{
+    DRIVER_OBJECT *driver;
+    DRIVER_EXTENSION *extension;
+    NTSTATUS status;
+
+    if (!(driver = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                    sizeof(*driver) + sizeof(*extension) )))
+        return STATUS_NO_MEMORY;
+
+    if ((status = RtlDuplicateUnicodeString( 1, name, &driver->DriverName )))
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, driver );
+        return status;
+    }
+
+    extension = (DRIVER_EXTENSION *)(driver + 1);
+    driver->Size            = sizeof(*driver);
+    driver->DriverInit      = init;
+    driver->DriverExtension = extension;
+    extension->DriverObject   = driver;
+    extension->ServiceKeyName = driver->DriverName;
+
+    status = driver->DriverInit( driver, name );
+
+    if (status)
+    {
+        RtlFreeUnicodeString( &driver->DriverName );
+        RtlFreeHeap( GetProcessHeap(), 0, driver );
+    }
+    return status;
+}
+
+
+/***********************************************************************
+ *           IoDeleteDriver   (NTOSKRNL.EXE.@)
+ */
+void WINAPI IoDeleteDriver( DRIVER_OBJECT *driver )
+{
+    RtlFreeUnicodeString( &driver->DriverName );
+    RtlFreeHeap( GetProcessHeap(), 0, driver );
 }
 
 
@@ -419,11 +485,62 @@ void WINAPI ExFreePoolWithTag( void *ptr, ULONG tag )
 
 
 /***********************************************************************
+ *           KeInitializeSpinLock   (NTOSKRNL.EXE.@)
+ */
+void WINAPI KeInitializeSpinLock( PKSPIN_LOCK SpinLock )
+{
+    FIXME("%p\n", SpinLock);
+}
+
+
+/***********************************************************************
+ *           KeInitializeTimerEx   (NTOSKRNL.EXE.@)
+ */
+void WINAPI KeInitializeTimerEx( PKTIMER Timer, TIMER_TYPE Type )
+{
+    FIXME("%p %d\n", Timer, Type);
+}
+
+
+/***********************************************************************
  *           KeInitializeTimer   (NTOSKRNL.EXE.@)
  */
 void WINAPI KeInitializeTimer( PKTIMER Timer )
 {
-    FIXME("%p\n", Timer);
+    KeInitializeTimerEx(Timer, NotificationTimer);
+}
+
+
+/**********************************************************************
+ *           KeQueryActiveProcessors   (NTOSKRNL.EXE.@)
+ *
+ * Return the active Processors as bitmask
+ *
+ * RETURNS
+ *   active Processors as bitmask
+ *
+ */
+KAFFINITY WINAPI KeQueryActiveProcessors( void )
+{
+    DWORD_PTR AffinityMask;
+
+    GetProcessAffinityMask( GetCurrentProcess(), &AffinityMask, NULL);
+    return AffinityMask;
+}
+
+
+/**********************************************************************
+ *           KeQueryInterruptTime   (NTOSKRNL.EXE.@)
+ *
+ * Return the interrupt time count
+ *
+ */
+ULONGLONG WINAPI KeQueryInterruptTime( void )
+{
+    LARGE_INTEGER totaltime;
+
+    KeQueryTickCount(&totaltime);
+    return totaltime.QuadPart;
 }
 
 
@@ -477,6 +594,55 @@ void WINAPI MmFreeNonCachedMemory( void *addr, SIZE_T size )
     VirtualFree( addr, 0, MEM_RELEASE );
 }
 
+/***********************************************************************
+ *           MmIsAddressValid   (NTOSKRNL.EXE.@)
+ *
+ * Check if the process can access the virtual address without a pagefault
+ *
+ * PARAMS
+ *  VirtualAddress [I] Address to check
+ *
+ * RETURNS
+ *  Failure: FALSE
+ *  Success: TRUE  (Accessing the Address works without a Pagefault)
+ *
+ */
+BOOLEAN WINAPI MmIsAddressValid(PVOID VirtualAddress)
+{
+    TRACE("(%p)\n", VirtualAddress);
+    return !IsBadWritePtr(VirtualAddress, 1);
+}
+
+/***********************************************************************
+ *           MmPageEntireDriver   (NTOSKRNL.EXE.@)
+ */
+PVOID WINAPI MmPageEntireDriver(PVOID AddrInSection)
+{
+    TRACE("%p\n", AddrInSection);
+    return AddrInSection;
+}
+
+/***********************************************************************
+ *           MmResetDriverPaging   (NTOSKRNL.EXE.@)
+ */
+void WINAPI MmResetDriverPaging(PVOID AddrInSection)
+{
+    TRACE("%p\n", AddrInSection);
+}
+
+/***********************************************************************
+ *           PsCreateSystemThread   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI PsCreateSystemThread(PHANDLE ThreadHandle, ULONG DesiredAccess,
+				     POBJECT_ATTRIBUTES ObjectAttributes,
+			             HANDLE ProcessHandle, PCLIENT_ID ClientId,
+                                     PKSTART_ROUTINE StartRoutine, PVOID StartContext)
+{
+    if (!ProcessHandle) ProcessHandle = GetCurrentProcess();
+    return RtlCreateUserThread(ProcessHandle, 0, FALSE, 0, 0,
+                               0, StartRoutine, StartContext,
+                               ThreadHandle, ClientId);
+}
 
 /***********************************************************************
  *           PsGetCurrentProcessId   (NTOSKRNL.EXE.@)

@@ -36,7 +36,7 @@
  * 	that only care about gross token distinctions.
  * Major/minor numbers: Within their class, tokens have a major
  * 	number, and may also have a minor number to further
- * 	distinquish tokens with the same major number.
+ * 	distinguish tokens with the same major number.
  *
  *	*** Class, major and minor token numbers are all >= 0 ***
  *
@@ -597,23 +597,24 @@
 # define		rtfWinMetafile		2
 # define		rtfDevIndBitmap		3
 # define		rtfWinBitmap		4
-# define		rtfPixelBits		5
-# define		rtfBitmapPlanes		6
-# define		rtfBitmapWid		7
-# define		rtfPicWid		8
-# define		rtfPicHt		9
-# define		rtfPicGoalWid		10
-# define		rtfPicGoalHt		11
-# define		rtfPicScaleX		12
-# define		rtfPicScaleY		13
-# define		rtfPicScaled		14
-# define		rtfPicCropTop		15
-# define		rtfPicCropBottom	16
-# define		rtfPicCropLeft		17
-# define		rtfPicCropRight		18
-# define		rtfPicMFHasBitmap	19	/* new in 1.10 */
-# define		rtfPicMFBitsPerPixel	20	/* new in 1.10 */
-# define		rtfPicBinary		21
+# define                rtfEmfBlip              5
+# define		rtfPixelBits		6
+# define		rtfBitmapPlanes		7
+# define		rtfBitmapWid		8
+# define		rtfPicWid		9
+# define		rtfPicHt		10
+# define		rtfPicGoalWid		11
+# define		rtfPicGoalHt		12
+# define		rtfPicScaleX		13
+# define		rtfPicScaleY		14
+# define		rtfPicScaled		15
+# define		rtfPicCropTop		16
+# define		rtfPicCropBottom	17
+# define		rtfPicCropLeft		18
+# define		rtfPicCropRight		19
+# define		rtfPicMFHasBitmap	20	/* new in 1.10 */
+# define		rtfPicMFBitsPerPixel	21	/* new in 1.10 */
+# define		rtfPicBinary		22
 
 # define	rtfBookmarkAttr	14
 # define		rtfBookmarkFirstCol	0
@@ -961,7 +962,7 @@ struct RTFFont
 
 
 /*
- * Color values are -1 if the default color for the the color
+ * Color values are -1 if the default color for the color
  * number should be used.  The default color is writer-dependent.
  */
 
@@ -1005,7 +1006,7 @@ struct RTFStyleElt
  * if no memory available.
  */
 
-# define        New(t)  ((t *) RTFAlloc ((int) sizeof (t)))
+# define        New(t)  (heap_alloc (sizeof (t)))
 
 /* Parser stack size */
 
@@ -1103,6 +1104,7 @@ struct _RTF_Info {
     RTFState         stack[maxStack];
     int              stackTop;
     BOOL             styleChanged;
+    LPRICHEDITOLE       lpRichEditOle;
 };
 
 

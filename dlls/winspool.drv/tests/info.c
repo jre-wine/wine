@@ -768,7 +768,12 @@ static void test_EnumForms(LPSTR pName)
     DWORD   pcbNeeded;
     DWORD   pcReturned;
     DWORD   level;
-  
+    UINT    i;
+    const char *formtype;
+    static const char * const formtypes[] = { "FORM_USER", "FORM_BUILTIN", "FORM_PRINTER", "FORM_flag_unknown" };
+#define FORMTYPE_MAX 2
+    PFORM_INFO_1A pFI_1a;
+    PFORM_INFO_2A pFI_2a;
 
     res = OpenPrinter(pName, &hprinter, NULL);
     RETURN_ON_DEACTIVATED_SPOOLER(res)
@@ -785,7 +790,7 @@ static void test_EnumForms(LPSTR pName)
         pcReturned = 0xdeadbeef;
         SetLastError(0xdeadbeef);
         res = EnumFormsA(hprinter, level, NULL, 0, &cbBuf, &pcReturned);
-       
+
         /* EnumForms is not implemented in win9x */
         if (!res && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)) continue;
 
@@ -803,7 +808,7 @@ static void test_EnumForms(LPSTR pName)
                 "ERROR_INVALID_LEVEL or '!=0' and 0x0)\n",
                 level, res, GetLastError(), pcReturned);
             continue;
-        }        
+        }
 
         ok((!res) && (GetLastError() == ERROR_INSUFFICIENT_BUFFER),
             "(%d) returned %d with %d (expected '0' with "
@@ -816,8 +821,31 @@ static void test_EnumForms(LPSTR pName)
         res = EnumFormsA(hprinter, level, buffer, cbBuf, &pcbNeeded, &pcReturned);
         ok(res, "(%d) returned %d with %d (expected '!=0')\n",
                 level, res, GetLastError());
-        /* We can dump the returned Data here */
 
+        if (winetest_debug > 1) {
+            trace("dumping %d forms level %d\n", pcReturned, level);
+            pFI_1a = (PFORM_INFO_1A)buffer;
+            pFI_2a = (PFORM_INFO_2A)buffer;
+            for (i = 0; i < pcReturned; i++)
+            {
+                /* first part is same in FORM_INFO_1 and FORM_INFO_2 */
+                formtype = (pFI_1a->Flags <= FORMTYPE_MAX) ? formtypes[pFI_1a->Flags] : formtypes[3];
+                trace("%u (%s): %.03fmm x %.03fmm, %s\n", i, pFI_1a->pName,
+                      (float)pFI_1a->Size.cx/1000, (float)pFI_1a->Size.cy/1000, formtype);
+
+                if (level == 1) pFI_1a ++;
+                else {
+                    /* output additional FORM_INFO_2 fields */
+                    trace("\tkeyword=%s strtype=%u muidll=%s resid=%u dispname=%s langid=%u\n",
+                          pFI_2a->pKeyword, pFI_2a->StringType, pFI_2a->pMuiDll,
+                          pFI_2a->dwResourceId, pFI_2a->pDisplayName, pFI_2a->wLangId);
+
+                    /* offset pointer pFI_1a by 1*sizeof(FORM_INFO_2A) Bytes */
+                    pFI_2a ++;
+                    pFI_1a = (PFORM_INFO_1A)pFI_2a;
+                }
+            }
+        }
 
         SetLastError(0xdeadbeef);
         res = EnumFormsA(hprinter, level, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
@@ -2087,7 +2115,7 @@ static void test_GetPrinterDriver(void)
 
             /* MSDN is wrong: The Drivers on the win9x-CD's have cVersion=0x0400
                NT351: 1, NT4.0+w2k(Kernelmode): 2, w2k and above(Usermode): 3  */
-            ok((di_2->cVersion >= 0 && di_2->cVersion <= 3) ||
+            ok( (di_2->cVersion <= 3) ||
                 (di_2->cVersion == 0x0400), "di_2->cVersion = %d\n", di_2->cVersion);
             ok(di_2->pName != NULL, "not expected NULL ptr\n");
             ok(di_2->pEnvironment != NULL, "not expected NULL ptr\n");

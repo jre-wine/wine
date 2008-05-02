@@ -4,6 +4,7 @@
  * Copyright 1998 Lionel Ulmer
  * Copyright 2000-2001 TransGaming Technologies Inc.
  * Copyright 2006 Stefan Dösinger
+ * Copyright 2008 Denver Gingerich
  *
  * This file contains the (internal) driver registration functions,
  * driver enumeration APIs and DirectDraw creation functions.
@@ -67,6 +68,9 @@ static CRITICAL_SECTION_DEBUG ddraw_cs_debug =
     0, 0, { (DWORD_PTR)(__FILE__ ": ddraw_cs") }
 };
 CRITICAL_SECTION ddraw_cs = { &ddraw_cs_debug, -1, 0, 0, 0, 0 };
+
+/* value of ForceRefreshRate */
+DWORD force_refresh_rate = 0;
 
 /***********************************************************************
  *
@@ -645,7 +649,7 @@ IDirectDrawClassFactoryImpl_Release(IClassFactory *iface)
  * What is this? Seems to create DirectDraw objects...
  *
  * Params
- *  The ususal things???
+ *  The usual things???
  *
  * RETURNS
  *  ???
@@ -886,6 +890,38 @@ DllMain(HINSTANCE hInstDLL,
             }
         }
 
+        /* On Windows one can force the refresh rate that DirectDraw uses by
+         * setting an override value in dxdiag.  This is documented in KB315614
+         * (main article), KB230002, and KB217348.  By comparing registry dumps
+         * before and after setting the override, we see that the override value
+         * is stored in HKLM\Software\Microsoft\DirectDraw\ForceRefreshRate as a
+         * DWORD that represents the refresh rate to force.  We use this
+         * registry entry to modify the behavior of SetDisplayMode so that Wine
+         * users can override the refresh rate in a Windows-compatible way.
+         *
+         * dxdiag will not accept a refresh rate lower than 40 or higher than
+         * 120 so this value should be within that range.  It is, of course,
+         * possible for a user to set the registry entry value directly so that
+         * assumption might not hold.
+         *
+         * There is no current mechanism for setting this value through the Wine
+         * GUI.  It would be most appropriate to set this value through a dxdiag
+         * clone, but it may be sufficient to use winecfg.
+         *
+         * TODO: Create a mechanism for setting this value through the Wine GUI.
+         */
+        if ( !RegOpenKeyA( HKEY_LOCAL_MACHINE, "Software\\Microsoft\\DirectDraw", &hkey ) )
+        {
+            DWORD type, data;
+            size = sizeof(data);
+            if (!RegQueryValueExA( hkey, "ForceRefreshRate", NULL, &type, (LPBYTE)&data, &size ) && type == REG_DWORD)
+            {
+                TRACE("ForceRefreshRate set; overriding refresh rate to %d Hz\n", data);
+                force_refresh_rate = data;
+            }
+            RegCloseKey( hkey );
+        }
+
         DisableThreadLibraryCalls(hInstDLL);
     }
     else if (Reason == DLL_PROCESS_DETACH)
@@ -895,7 +931,7 @@ DllMain(HINSTANCE hInstDLL,
             struct list *entry, *entry2;
             WARN("There are still existing DirectDraw interfaces. Wine bug or buggy application?\n");
 
-            /* We remove elemets from this loop */
+            /* We remove elements from this loop */
             LIST_FOR_EACH_SAFE(entry, entry2, &global_ddraw_list)
             {
                 HRESULT hr;
@@ -905,7 +941,7 @@ DllMain(HINSTANCE hInstDLL,
 
                 WARN("DDraw %p has a refcount of %d\n", ddraw, ddraw->ref7 + ddraw->ref4 + ddraw->ref3 + ddraw->ref2 + ddraw->ref1);
 
-                /* Add references to each interface to avoid freeing them unexpectadely */
+                /* Add references to each interface to avoid freeing them unexpectedly */
                 IDirectDraw_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw));
                 IDirectDraw2_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw2));
                 IDirectDraw3_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw3));
@@ -914,7 +950,7 @@ DllMain(HINSTANCE hInstDLL,
 
                 /* Does a D3D device exist? Destroy it
                     * TODO: Destroy all Vertex buffers, Lights, Materials
-                    * and execture buffers too
+                    * and execute buffers too
                     */
                 if(ddraw->d3ddevice)
                 {

@@ -514,7 +514,7 @@ HRESULT WINAPI DelNodeRunDLL32W(HWND hWnd, HINSTANCE hInst, LPWSTR cmdline, INT 
     return res;
 }
 
-/* The following defintions were copied from dlls/cabinet/cabinet.h */
+/* The following definitions were copied from dlls/cabinet/cabinet.h */
 
 /* SESSION Operation */
 #define EXTRACT_FILLFILELIST  0x00000001
@@ -523,7 +523,7 @@ HRESULT WINAPI DelNodeRunDLL32W(HWND hWnd, HINSTANCE hInst, LPWSTR cmdline, INT 
 struct FILELIST{
     LPSTR FileName;
     struct FILELIST *next;
-    BOOL Extracted;
+    BOOL DoExtract;
 };
 
 typedef struct {
@@ -564,9 +564,7 @@ static LPSTR convert_file_list(LPCSTR FileList, DWORD *dwNumFiles)
     dwLen = last - first + 3; /* room for double-null termination */
     szConvertedList = HeapAlloc(GetProcessHeap(), 0, dwLen);
     lstrcpynA(szConvertedList, first, dwLen - 1);
-
     szConvertedList[dwLen - 1] = '\0';
-    szConvertedList[dwLen] = '\0';
 
     /* empty list */
     if (!lstrlenA(szConvertedList))
@@ -621,14 +619,12 @@ static BOOL file_in_list(LPCSTR szFile, LPCSTR szFileList)
     return FALSE;
 }
 
-/* removes nodes from the linked list that aren't specified in szFileList
- * returns the number of files that are in both the linked list and szFileList
- */
+
+/* returns the number of files that are in both the linked list and szFileList */
 static DWORD fill_file_list(SESSION *session, LPCSTR szCabName, LPCSTR szFileList)
 {
     DWORD dwNumFound = 0;
     struct FILELIST *pNode;
-    struct FILELIST *prev = NULL;
 
     session->Operation |= EXTRACT_FILLFILELIST;
     if (pExtract(session, szCabName))
@@ -640,24 +636,12 @@ static DWORD fill_file_list(SESSION *session, LPCSTR szCabName, LPCSTR szFileLis
     pNode = session->FileList;
     while (pNode)
     {
-        if (file_in_list(pNode->FileName, szFileList))
-        {
-            prev = pNode;
-            pNode = pNode->next;
-            dwNumFound++;
-        }
-        else if (prev)
-        {
-            prev->next = pNode->next;
-            free_file_node(pNode);
-            pNode = prev->next;
-        }
+        if (!file_in_list(pNode->FileName, szFileList))
+            pNode->DoExtract = FALSE;
         else
-        {
-            session->FileList = pNode->next;
-            free_file_node(pNode);
-            pNode = session->FileList;
-        }
+            dwNumFound++;
+
+        pNode = pNode->next;
     }
 
     session->Operation &= ~EXTRACT_FILLFILELIST;

@@ -19,7 +19,7 @@
  */
 
 /*
- * Here are helper functions formally in action.c that are used by a variaty of
+ * Here are helper functions formally in action.c that are used by a variety of
  * actions and functions.
  */
 
@@ -368,18 +368,16 @@ DWORD deformat_string(MSIPACKAGE *package, LPCWSTR ptr, WCHAR** data )
 
         MSI_RecordSetStringW(rec,0,ptr);
         MSI_FormatRecordW(package,rec,NULL,&size);
-        if (size >= 0)
-        {
-            size++;
-            *data = msi_alloc(size*sizeof(WCHAR));
-            if (size > 1)
-                MSI_FormatRecordW(package,rec,*data,&size);
-            else
-                *data[0] = 0;
-            msiobj_release( &rec->hdr );
-            return sizeof(WCHAR)*size;
-        }
+
+        size++;
+        *data = msi_alloc(size*sizeof(WCHAR));
+        if (size > 1)
+            MSI_FormatRecordW(package,rec,*data,&size);
+        else
+            *data[0] = 0;
+
         msiobj_release( &rec->hdr );
+        return sizeof(WCHAR)*size;
     }
 
     *data = NULL;
@@ -831,9 +829,6 @@ BOOL ACTION_VerifyFeatureForAction( const MSIFEATURE* feature, INSTALLSTATE chec
     if (!feature)
         return FALSE;
 
-    if (feature->Installed == check)
-        return FALSE;
-
     if (feature->ActionRequest == check)
         return TRUE;
     else
@@ -890,7 +885,7 @@ LPWSTR create_component_advertise_string(MSIPACKAGE* package,
     return output;
 }
 
-/* update compoennt state based on a feature change */
+/* update component state based on a feature change */
 void ACTION_UpdateComponentStates(MSIPACKAGE *package, LPCWSTR szFeature)
 {
     INSTALLSTATE newstate;
@@ -1034,20 +1029,14 @@ WCHAR* generate_error_string(MSIPACKAGE *package, UINT error, DWORD count, ... )
     va_end(va);
 
     MSI_FormatRecordW(package,rec,NULL,&size);
-    if (size >= 0)
-    {
-        size++;
-        data = msi_alloc(size*sizeof(WCHAR));
-        if (size > 1)
-            MSI_FormatRecordW(package,rec,data,&size);
-        else
-            data[0] = 0;
-        msiobj_release( &rec->hdr );
-        return data;
-    }
 
+    size++;
+    data = msi_alloc(size*sizeof(WCHAR));
+    if (size > 1)
+        MSI_FormatRecordW(package,rec,data,&size);
+    else
+        data[0] = 0;
     msiobj_release( &rec->hdr );
-    data = NULL;
     return data;
 }
 

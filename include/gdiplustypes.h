@@ -21,9 +21,6 @@
 
 typedef float REAL;
 
-typedef BOOL (CALLBACK * ImageAbort)(VOID *);
-typedef ImageAbort DrawImageAbort;
-
 enum Status{
     Ok                          = 0,
     GenericError                = 1,
@@ -45,8 +42,23 @@ enum Status{
     UnsupportedGdiplusVersion   = 17,
     GdiplusNotInitialized       = 18,
     PropertyNotFound            = 19,
-    PropertyNotSupported        = 20
+    PropertyNotSupported        = 20,
+    ProfileNotFound             = 21
 };
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef BOOL (CALLBACK * ImageAbort)(VOID *);
+typedef ImageAbort DrawImageAbort;
+typedef ImageAbort GetThumbnailImageAbort;
+
+#ifdef __cplusplus
+}
+#endif
+
 
 #ifdef __cplusplus
 
@@ -177,6 +189,7 @@ public:
     REAL Height;
 };
 
+/* FIXME: missing the methods. */
 class Rect
 {
 public:

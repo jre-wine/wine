@@ -29,6 +29,7 @@
 #include "winbase.h"
 #include "objbase.h"
 #include "shlguid.h"
+#include "shobjidl.h"
 
 #include "wine/test.h"
 
@@ -434,6 +435,8 @@ static void test_same_apartment_unmarshal_failure(void)
     ok(hr == E_NOINTERFACE, "CoUnmarshalInterface should have returned E_NOINTERFACE instead of 0x%08x\n", hr);
 
     ok_no_locks();
+
+    IStream_Release(pStream);
 }
 
 /* tests success case of an interthread marshal */
@@ -1829,15 +1832,19 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     }
 }
 
-static void test_message_reentrancy(void)
+static void register_test_window(void)
 {
     WNDCLASS wndclass;
-    MSG msg;
 
     memset(&wndclass, 0, sizeof(wndclass));
     wndclass.lpfnWndProc = window_proc;
     wndclass.lpszClassName = "WineCOMTest";
     RegisterClass(&wndclass);
+}
+
+static void test_message_reentrancy(void)
+{
+    MSG msg;
 
     hwnd_app = CreateWindow("WineCOMTest", NULL, 0, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, NULL, 0);
     ok(hwnd_app != NULL, "Window creation failed\n");
@@ -1850,6 +1857,7 @@ static void test_message_reentrancy(void)
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+    DestroyWindow(hwnd_app);
 }
 
 static HRESULT WINAPI TestMsg_IClassFactory_CreateInstance(
@@ -1915,6 +1923,7 @@ static void test_call_from_message(void)
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+    DestroyWindow(hwnd_app);
 }
 
 static void test_WM_QUIT_handling(void)
@@ -2469,11 +2478,13 @@ static HANDLE create_target_process(const char *arg)
     STARTUPINFO si = { 0 };
     si.cb = sizeof(si);
 
+    pi.hThread = NULL;
+    pi.hProcess = NULL;
     winetest_get_mainargs( &argv );
     sprintf(cmdline, "%s %s %s", argv[0], argv[1], arg);
     ok(CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL,
-                     &si, &pi) != 0, "error: %u\n", GetLastError());
-    ok(CloseHandle(pi.hThread) != 0, "error %u\n", GetLastError());
+                     &si, &pi) != 0, "CreateProcess failed with error: %u\n", GetLastError());
+    if (pi.hThread) CloseHandle(pi.hThread);
     return pi.hProcess;
 }
 
@@ -2539,8 +2550,9 @@ static void test_local_server(void)
     hr = CoGetClassObject(&CLSID_WineOOPTest, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, NULL,
         &IID_IClassFactory, (LPVOID*)&cf);
     ok(hr == CO_E_SERVER_STOPPING || /* NT */
+       hr == REGDB_E_CLASSNOTREG || /* win2k */
        hr == S_OK /* Win9x */,
-        "CoGetClassObject should have returned CO_E_SERVER_STOPPING instead of 0x%08x\n", hr);
+        "CoGetClassObject should have returned CO_E_SERVER_STOPPING or REGDB_E_CLASSNOTREG instead of 0x%08x\n", hr);
 
     hr = CoRevokeClassObject(cookie);
     ok_ole_success(hr, CoRevokeClassObject);
@@ -2551,7 +2563,7 @@ static void test_local_server(void)
     ok(process != NULL, "couldn't start local server process, error was %d\n", GetLastError());
 
     ready_event = CreateEvent(NULL, FALSE, FALSE, "Wine COM Test Ready Event");
-    WaitForSingleObject(ready_event, 1000);
+    WaitForSingleObject(ready_event, INFINITE);
     CloseHandle(ready_event);
 
     hr = CoCreateInstance(&CLSID_WineOOPTest, NULL, CLSCTX_LOCAL_SERVER, &IID_IClassFactory, (void **)&cf);
@@ -2565,7 +2577,7 @@ static void test_local_server(void)
     quit_event = CreateEvent(NULL, FALSE, FALSE, "Wine COM Test Quit Event");
     SetEvent(quit_event);
 
-    WaitForSingleObject(process, INFINITE);
+    winetest_wait_child_process( process );
     CloseHandle(quit_event);
     CloseHandle(process);
 }
@@ -2583,8 +2595,9 @@ static DWORD CALLBACK get_global_interface_proc(LPVOID pv)
 	IClassFactory *cf;
 
 	hr = IGlobalInterfaceTable_GetInterfaceFromGlobal(params->git, params->cookie, &IID_IClassFactory, (void **)&cf);
-	ok(hr == CO_E_NOTINITIALIZED,
-		"IGlobalInterfaceTable_GetInterfaceFromGlobal should have failed with error CO_E_NOTINITIALIZED instead of 0x%08x\n",
+	ok(hr == CO_E_NOTINITIALIZED ||
+		hr == E_UNEXPECTED, /* win2k */
+		"IGlobalInterfaceTable_GetInterfaceFromGlobal should have failed with error CO_E_NOTINITIALIZED or E_UNEXPECTED instead of 0x%08x\n",
 		hr);
 
 	CoInitialize(NULL);
@@ -2869,7 +2882,6 @@ static void test_channel_hook(void)
 
 START_TEST(marshal)
 {
-    WNDCLASS wndclass;
     HMODULE hOle32 = GetModuleHandle("ole32");
     int argc;
     char **argv;
@@ -2886,11 +2898,7 @@ START_TEST(marshal)
         return;
     }
 
-    /* register a window class used in several tests */
-    memset(&wndclass, 0, sizeof(wndclass));
-    wndclass.lpfnWndProc = window_proc;
-    wndclass.lpszClassName = "WineCOMTest";
-    RegisterClass(&wndclass);
+    register_test_window();
 
     test_cocreateinstance_proxy();
 

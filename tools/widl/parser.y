@@ -31,8 +31,6 @@
 #include <alloca.h>
 #endif
 
-#include "windef.h"
-
 #include "widl.h"
 #include "utils.h"
 #include "parser.h"
@@ -65,6 +63,13 @@
 # endif
 #endif
 
+#define YYERROR_VERBOSE
+
+unsigned char pointer_default = RPC_FC_UP;
+static int is_object_interface = FALSE;
+/* are we inside a library block? */
+static int is_inside_library = FALSE;
+
 typedef struct list typelist_t;
 struct typenode {
   type_t *type;
@@ -92,7 +97,7 @@ static expr_t *make_expr3(enum expr_type type, expr_t *expr1, expr_t *expr2, exp
 static type_t *make_type(unsigned char type, type_t *ref);
 static expr_list_t *append_expr(expr_list_t *list, expr_t *expr);
 static array_dims_t *append_array(array_dims_t *list, expr_t *expr);
-static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr);
+static void set_type(var_t *v, type_t *type, const pident_t *pident, array_dims_t *arr, int top);
 static ifref_list_t *append_ifref(ifref_list_t *list, ifref_t *iface);
 static ifref_t *make_ifref(type_t *iface);
 static var_list_t *append_var(var_list_t *list, var_t *var);
@@ -126,7 +131,17 @@ static int compute_method_indexes(type_t *iface);
 static char *gen_name(void);
 static void process_typedefs(var_list_t *names);
 static void check_arg(var_t *arg);
+static void check_functions(const type_t *iface);
 static void check_all_user_types(ifref_list_t *ifaces);
+static const attr_list_t *check_iface_attrs(const char *name, const attr_list_t *attrs);
+static attr_list_t *check_function_attrs(const char *name, attr_list_t *attrs);
+static attr_list_t *check_typedef_attrs(attr_list_t *attrs);
+static attr_list_t *check_field_attrs(const char *name, attr_list_t *attrs);
+static const attr_list_t *check_library_attrs(const char *name, const attr_list_t *attrs);
+static attr_list_t *check_dispiface_attrs(const char *name, attr_list_t *attrs);
+static const attr_list_t *check_module_attrs(const char *name, const attr_list_t *attrs);
+static const attr_list_t *check_coclass_attrs(const char *name, const attr_list_t *attrs);
+const char *get_attr_display_name(enum attr_type type);
 
 #define tsENUM   1
 #define tsSTRUCT 2
@@ -153,6 +168,7 @@ static void check_all_user_types(ifref_list_t *ifaces);
 	UUID *uuid;
 	unsigned int num;
 	double dbl;
+	interface_info_t ifinfo;
 }
 
 %token <str> aIDENTIFIER
@@ -179,6 +195,7 @@ static void check_all_user_types(ifref_list_t *ifaces);
 %token tENTRY tENUM tERRORSTATUST
 %token tEXPLICITHANDLE tEXTERN
 %token tFALSE
+%token tFASTCALL
 %token tFLOAT
 %token tHANDLE
 %token tHANDLET
@@ -206,6 +223,7 @@ static void check_all_user_types(ifref_list_t *ifaces);
 %token tOBJECT tODL tOLEAUTOMATION
 %token tOPTIONAL
 %token tOUT
+%token tPASCAL
 %token tPOINTERDEFAULT
 %token tPROPERTIES
 %token tPROPGET tPROPPUT tPROPPUTREF
@@ -224,6 +242,7 @@ static void check_all_user_types(ifref_list_t *ifaces);
 %token tSMALL
 %token tSOURCE
 %token tSTDCALL
+%token tSTRICTCONTEXTHANDLE
 %token tSTRING tSTRUCT
 %token tSWITCH tSWITCHIS tSWITCHTYPE
 %token tTRANSMITAS
@@ -245,7 +264,8 @@ static void check_all_user_types(ifref_list_t *ifaces);
 %type <expr> m_expr expr expr_const
 %type <expr_list> m_exprs /* exprs expr_list */ expr_list_const
 %type <array_dims> array array_list
-%type <type> inherit interface interfacehdr interfacedef interfacedec
+%type <ifinfo> interfacehdr
+%type <type> inherit interface interfacedef interfacedec
 %type <type> dispinterface dispinterfacehdr dispinterfacedef
 %type <type> module modulehdr moduledef
 %type <type> base_type int_std
@@ -256,13 +276,15 @@ static void check_all_user_types(ifref_list_t *ifaces);
 %type <var> arg field s_field case enum constdef externdef
 %type <var_list> m_args no_args args fields cases enums enum_list dispint_props
 %type <var> m_ident t_ident ident
-%type <pident> p_ident pident
+%type <pident> pident func_ident direct_ident
 %type <pident_list> pident_list
 %type <func> funcdef
 %type <func_list> int_statements dispint_meths
 %type <type> coclass coclasshdr coclassdef
 %type <num> pointer_type version
-%type <str> libraryhdr
+%type <str> libraryhdr callconv
+%type <uuid> uuid_string
+%type <num> import_start
 
 %left ','
 %right '?' ':'
@@ -275,6 +297,7 @@ static void check_all_user_types(ifref_list_t *ifaces);
 %right CAST
 %right PPTR
 %right NEG
+%right ADDRESSOF
 
 %%
 
@@ -283,6 +306,7 @@ input:   gbl_statements				{ fix_incomplete();
 						  write_proxies($1);
 						  write_client($1);
 						  write_server($1);
+						  write_dlldata($1);
 						}
 	;
 
@@ -314,6 +338,7 @@ imp_statements:					{}
 	| imp_statements moduledef		{ if (!parse_only) add_typelib_entry($2); }
 	| imp_statements statement		{}
 	| imp_statements importlib		{}
+	| imp_statements librarydef		{}
 	;
 
 int_statements:					{ $$ = NULL; }
@@ -321,24 +346,27 @@ int_statements:					{ $$ = NULL; }
 	| int_statements statement		{ $$ = $1; }
 	;
 
-statement: ';'					{}
-	| constdef ';'				{ if (!parse_only && do_header) { write_constdef($1); } }
+semicolon_opt:
+	| ';'
+	;
+
+statement: constdef ';'				{ if (!parse_only && do_header) { write_constdef($1); } }
 	| cppquote				{}
 	| enumdef ';'				{ if (!parse_only && do_header) {
-						    write_type(header, $1, FALSE, NULL);
+						    write_type_def_or_decl(header, $1, FALSE, NULL);
 						    fprintf(header, ";\n\n");
 						  }
 						}
 	| externdef ';'				{ if (!parse_only && do_header) { write_externdef($1); } }
 	| import				{}
 	| structdef ';'				{ if (!parse_only && do_header) {
-						    write_type(header, $1, FALSE, NULL);
+						    write_type_def_or_decl(header, $1, FALSE, NULL);
 						    fprintf(header, ";\n\n");
 						  }
 						}
 	| typedef ';'				{}
 	| uniondef ';'				{ if (!parse_only && do_header) {
-						    write_type(header, $1, FALSE, NULL);
+						    write_type_def_or_decl(header, $1, FALSE, NULL);
 						    fprintf(header, ";\n\n");
 						  }
 						}
@@ -347,22 +375,30 @@ statement: ';'					{}
 cppquote: tCPPQUOTE '(' aSTRING ')'		{ if (!parse_only && do_header) fprintf(header, "%s\n", $3); }
 	;
 import_start: tIMPORT aSTRING ';'		{ assert(yychar == YYEMPTY);
-						  if (!do_import($2)) yychar = aEOF; }
-	;
-import:   import_start imp_statements aEOF	{}
+						  $$ = do_import($2);
+						  if (!$$) yychar = aEOF;
+						}
 	;
 
-importlib: tIMPORTLIB '(' aSTRING ')'		{ if(!parse_only) add_importlib($3); }
+import: import_start imp_statements aEOF
+						{ if ($1) pop_import(); }
+	;
+
+importlib: tIMPORTLIB '(' aSTRING ')'
+	   semicolon_opt			{ if(!parse_only) add_importlib($3); }
 	;
 
 libraryhdr: tLIBRARY aIDENTIFIER		{ $$ = $2; }
 	;
-library_start: attributes libraryhdr '{'	{ start_typelib($2, $1);
+library_start: attributes libraryhdr '{'	{ check_library_attrs($2, $1);
+						  if (!parse_only) start_typelib($2, $1);
 						  if (!parse_only && do_header) write_library($2, $1);
 						  if (!parse_only && do_idfile) write_libid($2, $1);
+						  is_inside_library = TRUE;
 						}
 	;
-librarydef: library_start imp_statements '}'	{ end_typelib(); }
+librarydef: library_start imp_statements '}'
+	    semicolon_opt			{ if (!parse_only) end_typelib(); is_inside_library = FALSE; }
 	;
 
 m_args:						{ $$ = NULL; }
@@ -380,23 +416,12 @@ args:	  arg					{ check_arg($1); $$ = append_var( NULL, $1 ); }
 /* split into two rules to get bison to resolve a tVOID conflict */
 arg:	  attributes type pident array		{ $$ = $3->var;
 						  $$->attrs = $1;
-						  set_type($$, $2, $3->ptr_level, $4);
+						  set_type($$, $2, $3, $4, TRUE);
 						  free($3);
 						}
 	| type pident array			{ $$ = $2->var;
-						  set_type($$, $1, $2->ptr_level, $3);
+						  set_type($$, $1, $2, $3, TRUE);
 						  free($2);
-						}
-	| attributes type pident '(' m_args ')'	{ $$ = $3->var;
-						  $$->attrs = $1;
-						  set_type($$, $2, $3->ptr_level - 1, NULL);
-						  free($3);
-						  $$->args = $5;
-						}
-	| type pident '(' m_args ')'		{ $$ = $2->var;
-						  set_type($$, $1, $2->ptr_level - 1, NULL);
-						  free($2);
-						  $$->args = $4;
 						}
 	;
 
@@ -417,7 +442,7 @@ m_attributes:					{ $$ = NULL; }
 attributes:
 	  '[' attrib_list ']'			{ $$ = $2;
 						  if (!$$)
-						    yyerror("empty attribute lists unsupported");
+						    error_loc("empty attribute lists unsupported\n");
 						}
 	;
 
@@ -436,6 +461,7 @@ attribute:					{ $$ = NULL; }
 	| tASYNC				{ $$ = make_attr(ATTR_ASYNC); }
 	| tAUTOHANDLE				{ $$ = make_attr(ATTR_AUTO_HANDLE); }
 	| tBINDABLE				{ $$ = make_attr(ATTR_BINDABLE); }
+	| tBROADCAST				{ $$ = make_attr(ATTR_BROADCAST); }
 	| tCALLAS '(' ident ')'			{ $$ = make_attrp(ATTR_CALLAS, $3); }
 	| tCASE '(' expr_list_const ')'		{ $$ = make_attrp(ATTR_CASE, $3); }
 	| tCONTEXTHANDLE			{ $$ = make_attrv(ATTR_CONTEXTHANDLE, 0); }
@@ -463,7 +489,7 @@ attribute:					{ $$ = NULL; }
 	| tHIDDEN				{ $$ = make_attr(ATTR_HIDDEN); }
 	| tID '(' expr_const ')'		{ $$ = make_attrp(ATTR_ID, $3); }
 	| tIDEMPOTENT				{ $$ = make_attr(ATTR_IDEMPOTENT); }
-	| tIIDIS '(' ident ')'			{ $$ = make_attrp(ATTR_IIDIS, $3); }
+	| tIIDIS '(' expr ')'			{ $$ = make_attrp(ATTR_IIDIS, $3); }
 	| tIMMEDIATEBIND			{ $$ = make_attr(ATTR_IMMEDIATEBIND); }
 	| tIMPLICITHANDLE '(' tHANDLET aIDENTIFIER ')'	{ $$ = make_attrp(ATTR_IMPLICIT_HANDLE, $4); }
 	| tIN					{ $$ = make_attr(ATTR_IN); }
@@ -492,11 +518,12 @@ attribute:					{ $$ = NULL; }
 	| tRETVAL				{ $$ = make_attr(ATTR_RETVAL); }
 	| tSIZEIS '(' m_exprs ')'		{ $$ = make_attrp(ATTR_SIZEIS, $3); }
 	| tSOURCE				{ $$ = make_attr(ATTR_SOURCE); }
+	| tSTRICTCONTEXTHANDLE                  { $$ = make_attr(ATTR_STRICTCONTEXTHANDLE); }
 	| tSTRING				{ $$ = make_attr(ATTR_STRING); }
 	| tSWITCHIS '(' expr ')'		{ $$ = make_attrp(ATTR_SWITCHIS, $3); }
 	| tSWITCHTYPE '(' type ')'		{ $$ = make_attrp(ATTR_SWITCHTYPE, $3); }
 	| tTRANSMITAS '(' type ')'		{ $$ = make_attrp(ATTR_TRANSMITAS, $3); }
-	| tUUID '(' aUUID ')'			{ $$ = make_attrp(ATTR_UUID, $3); }
+	| tUUID '(' uuid_string ')'		{ $$ = make_attrp(ATTR_UUID, $3); }
 	| tV1ENUM				{ $$ = make_attr(ATTR_V1ENUM); }
 	| tVARARG				{ $$ = make_attr(ATTR_VARARG); }
 	| tVERSION '(' version ')'		{ $$ = make_attrv(ATTR_VERSION, $3); }
@@ -504,8 +531,17 @@ attribute:					{ $$ = NULL; }
 	| pointer_type				{ $$ = make_attrv(ATTR_POINTERTYPE, $1); }
 	;
 
-callconv:
-	| tSTDCALL
+uuid_string:
+	  aUUID
+	| aSTRING				{ if (!is_valid_uuid($1))
+						    error_loc("invalid UUID: %s\n", $1);
+						  $$ = parse_uuid($1); }
+        ;
+
+callconv: tCDECL				{ $$ = $<str>1; }
+	| tFASTCALL				{ $$ = $<str>1; }
+	| tPASCAL				{ $$ = $<str>1; }
+	| tSTDCALL				{ $$ = $<str>1; }
 	;
 
 cases:						{ $$ = NULL; }
@@ -523,7 +559,7 @@ case:	  tCASE expr ':' field			{ attr_t *a = make_attrp(ATTR_CASE, append_expr( 
 	;
 
 constdef: tCONST type ident '=' expr_const	{ $$ = reg_const($3);
-						  set_type($$, $2, 0, NULL);
+						  set_type($$, $2, NULL, NULL, FALSE);
 						  $$->eval = $5;
 						}
 	;
@@ -557,7 +593,7 @@ enum:	  ident '=' expr_const			{ $$ = reg_const($1);
 
 enumdef: tENUM t_ident '{' enums '}'		{ $$ = get_typev(RPC_FC_ENUM16, $2, tsENUM);
 						  $$->kind = TKIND_ENUM;
-						  $$->fields = $4;
+						  $$->fields_or_args = $4;
 						  $$->defined = TRUE;
                                                   if(in_typelib)
                                                       add_typelib_entry($$);
@@ -599,6 +635,7 @@ expr:	  aNUM					{ $$ = make_exprl(EXPR_NUM, $1); }
 	| expr SHR expr				{ $$ = make_expr2(EXPR_SHR, $1, $3); }
 	| '~' expr				{ $$ = make_expr1(EXPR_NOT, $2); }
 	| '-' expr %prec NEG			{ $$ = make_expr1(EXPR_NEG, $2); }
+	| '&' expr %prec ADDRESSOF      { $$ = make_expr1(EXPR_ADDRESSOF, $2); }
 	| '*' expr %prec PPTR			{ $$ = make_expr1(EXPR_PPTR, $2); }
 	| '(' type ')' expr %prec CAST		{ $$ = make_exprt(EXPR_CAST, $2, $4); }
 	| tSIZEOF '(' type ')'			{ $$ = make_exprt(EXPR_SIZEOF, $3, NULL); }
@@ -611,12 +648,12 @@ expr_list_const: expr_const                     { $$ = append_expr( NULL, $1 ); 
 
 expr_const: expr				{ $$ = $1;
 						  if (!$$->is_const)
-						      yyerror("expression is not constant");
+						      error_loc("expression is not constant\n");
 						}
 	;
 
 externdef: tEXTERN tCONST type ident		{ $$ = $4;
-						  set_type($$, $3, 0, NULL);
+						  set_type($$, $3, NULL, NULL, FALSE);
 						}
 	;
 
@@ -631,22 +668,19 @@ field:	  s_field ';'				{ $$ = $1; }
 	;
 
 s_field:  m_attributes type pident array	{ $$ = $3->var;
-						  $$->attrs = $1;
-						  set_type($$, $2, $3->ptr_level, $4);
+						  $$->attrs = check_field_attrs($$->name, $1);
+						  set_type($$, $2, $3, $4, FALSE);
 						  free($3);
 						}
 	;
 
 funcdef:
-	  m_attributes type callconv pident
-	  '(' m_args ')'			{ var_t *v = $4->var;
-						  v->attrs = $1;
-						  set_type(v, $2, $4->ptr_level, NULL);
-						  free($4);
-						  $$ = make_func(v, $6);
-						  if (is_attr(v->attrs, ATTR_IN)) {
-						    yyerror("inapplicable attribute [in] for function '%s'",$$->def->name);
-						  }
+	  m_attributes type pident		{ var_t *v = $3->var;
+						  var_list_t *args = $3->args;
+						  v->attrs = check_function_attrs(v->name, $1);
+						  set_type(v, $2, $3, NULL, FALSE);
+						  free($3);
+						  $$ = make_func(v, args);
 						}
 	;
 
@@ -708,13 +742,13 @@ int_std:  tINT					{ $$ = make_builtin($<str>1); }
 
 coclass:  tCOCLASS aIDENTIFIER			{ $$ = make_class($2); }
 	| tCOCLASS aKNOWNTYPE			{ $$ = find_type($2, 0);
-						  if ($$->defined) yyerror("multiple definition error");
-						  if ($$->kind != TKIND_COCLASS) yyerror("%s was not declared a coclass", $2);
+						  if ($$->defined) error_loc("multiple definition error\n");
+						  if ($$->kind != TKIND_COCLASS) error_loc("%s was not declared a coclass\n", $2);
 						}
 	;
 
 coclasshdr: attributes coclass			{ $$ = $2;
-						  $$->attrs = $1;
+						  $$->attrs = check_coclass_attrs($2->name, $1);
 						  if (!parse_only && do_header)
 						    write_coclass($$);
 						  if (!parse_only && do_idfile)
@@ -722,7 +756,8 @@ coclasshdr: attributes coclass			{ $$ = $2;
 						}
 	;
 
-coclassdef: coclasshdr '{' coclass_ints '}'	{ $$ = $1;
+coclassdef: coclasshdr '{' coclass_ints '}' semicolon_opt
+						{ $$ = $1;
 						  $$->ifaces = $3;
 						  $$->defined = TRUE;
 						}
@@ -741,12 +776,13 @@ dispinterface: tDISPINTERFACE aIDENTIFIER	{ $$ = get_type(0, $2, 0); $$->kind = 
 	;
 
 dispinterfacehdr: attributes dispinterface	{ attr_t *attrs;
+						  is_object_interface = TRUE;
 						  $$ = $2;
-						  if ($$->defined) yyerror("multiple definition error");
+						  if ($$->defined) error_loc("multiple definition error\n");
 						  attrs = make_attr(ATTR_DISPINTERFACE);
-						  $$->attrs = append_attr( $1, attrs );
+						  $$->attrs = append_attr( check_dispiface_attrs($2->name, $1), attrs );
 						  $$->ref = find_type("IDispatch", 0);
-						  if (!$$->ref) yyerror("IDispatch is undefined");
+						  if (!$$->ref) error_loc("IDispatch is undefined\n");
 						  $$->defined = TRUE;
 						  if (!parse_only && do_header) write_forward($$);
 						}
@@ -764,14 +800,14 @@ dispinterfacedef: dispinterfacehdr '{'
 	  dispint_props
 	  dispint_meths
 	  '}'					{ $$ = $1;
-						  $$->fields = $3;
+						  $$->fields_or_args = $3;
 						  $$->funcs = $4;
 						  if (!parse_only && do_header) write_dispinterface($$);
 						  if (!parse_only && do_idfile) write_diid($$);
 						}
 	| dispinterfacehdr
-	 '{' interface ';' '}'			{ $$ = $1;
-						  $$->fields = $3->fields;
+	 '{' interface ';' '}' 			{ $$ = $1;
+						  $$->fields_or_args = $3->fields_or_args;
 						  $$->funcs = $3->funcs;
 						  if (!parse_only && do_header) write_dispinterface($$);
 						  if (!parse_only && do_idfile) write_diid($$);
@@ -786,34 +822,44 @@ interface: tINTERFACE aIDENTIFIER		{ $$ = get_type(RPC_FC_IP, $2, 0); $$->kind =
 	|  tINTERFACE aKNOWNTYPE		{ $$ = get_type(RPC_FC_IP, $2, 0); $$->kind = TKIND_INTERFACE; }
 	;
 
-interfacehdr: attributes interface		{ $$ = $2;
-						  if ($$->defined) yyerror("multiple definition error");
-						  $$->attrs = $1;
-						  $$->defined = TRUE;
-						  if (!parse_only && do_header) write_forward($$);
+interfacehdr: attributes interface		{ $$.interface = $2;
+						  $$.old_pointer_default = pointer_default;
+						  if (is_attr($1, ATTR_POINTERDEFAULT))
+						    pointer_default = get_attrv($1, ATTR_POINTERDEFAULT);
+						  is_object_interface = is_object($1);
+						  if ($2->defined) error_loc("multiple definition error\n");
+						  $2->attrs = check_iface_attrs($2->name, $1);
+						  $2->defined = TRUE;
+						  if (!parse_only && do_header) write_forward($2);
 						}
 	;
 
 interfacedef: interfacehdr inherit
-	  '{' int_statements '}'		{ $$ = $1;
+	  '{' int_statements '}' semicolon_opt	{ $$ = $1.interface;
 						  $$->ref = $2;
 						  $$->funcs = $4;
+						  check_functions($$);
 						  compute_method_indexes($$);
 						  if (!parse_only && do_header) write_interface($$);
+						  if (!parse_only && local_stubs) write_locals(local_stubs, $$, TRUE);
 						  if (!parse_only && do_idfile) write_iid($$);
+						  pointer_default = $1.old_pointer_default;
 						}
 /* MIDL is able to import the definition of a base class from inside the
  * definition of a derived class, I'll try to support it with this rule */
 	| interfacehdr ':' aIDENTIFIER
-	  '{' import int_statements '}'		{ $$ = $1;
+	  '{' import int_statements '}'
+	   semicolon_opt			{ $$ = $1.interface;
 						  $$->ref = find_type2($3, 0);
-						  if (!$$->ref) yyerror("base class '%s' not found in import", $3);
+						  if (!$$->ref) error_loc("base class '%s' not found in import\n", $3);
 						  $$->funcs = $6;
 						  compute_method_indexes($$);
 						  if (!parse_only && do_header) write_interface($$);
+						  if (!parse_only && local_stubs) write_locals(local_stubs, $$, TRUE);
 						  if (!parse_only && do_idfile) write_iid($$);
+						  pointer_default = $1.old_pointer_default;
 						}
-	| dispinterfacedef			{ $$ = $1; }
+	| dispinterfacedef semicolon_opt	{ $$ = $1; }
 	;
 
 interfacedec:
@@ -826,23 +872,39 @@ module:   tMODULE aIDENTIFIER			{ $$ = make_type(0, NULL); $$->name = $2; $$->ki
 	;
 
 modulehdr: attributes module			{ $$ = $2;
-						  $$->attrs = $1;
+						  $$->attrs = check_module_attrs($2->name, $1);
 						}
 	;
 
-moduledef: modulehdr '{' int_statements '}'	{ $$ = $1;
+moduledef: modulehdr '{' int_statements '}'
+	   semicolon_opt			{ $$ = $1;
 						  $$->funcs = $3;
 						  /* FIXME: if (!parse_only && do_header) write_module($$); */
 						}
 	;
 
-p_ident:  '*' pident %prec PPTR			{ $$ = $2; $$->ptr_level++; }
-	| tCONST p_ident			{ $$ = $2; /* FIXME */ }
+pident:   '*' pident %prec PPTR			{ $$ = $2; $$->ptr_level++; }
+	| tCONST pident				{ $$ = $2; /* FIXME */ }
+	| callconv pident                       { $$ = $2;
+						  if ($$->callconv) parser_warning("multiple calling conventions %s, %s for function %s\n", $$->callconv, $1, $$->var->name);
+						  $$->callconv = $1;
+						}
+	| direct_ident
 	;
 
-pident:	  ident					{ $$ = make_pident($1); }
-	| p_ident
+func_ident: direct_ident '(' m_args ')'
+						{ $$ = $1;
+						  $1->args = $3;
+						  $1->is_func = TRUE;
+						}
+	;
+
+direct_ident: ident				{ $$ = make_pident($1); }
 	| '(' pident ')'			{ $$ = $2; }
+	| func_ident				{ $$ = $1;
+						  $$->func_ptr_level = $$->ptr_level;
+						  $$->ptr_level = 0;
+						}
 	;
 
 pident_list:
@@ -860,7 +922,7 @@ structdef: tSTRUCT t_ident '{' fields '}'	{ $$ = get_typev(RPC_FC_STRUCT, $2, ts
                                                   /* overwrite RPC_FC_STRUCT with a more exact type */
 						  $$->type = get_struct_type( $4 );
 						  $$->kind = TKIND_RECORD;
-						  $$->fields = $4;
+						  $$->fields_or_args = $4;
 						  $$->defined = TRUE;
                                                   if(in_typelib)
                                                       add_typelib_entry($$);
@@ -880,14 +942,14 @@ type:	  tVOID					{ $$ = duptype(find_type("void", 0), 1); }
 	| tSAFEARRAY '(' type ')'		{ $$ = make_safearray($3); }
 	;
 
-typedef: tTYPEDEF m_attributes type pident_list	{ reg_typedefs($3, $4, $2);
+typedef: tTYPEDEF m_attributes type pident_list	{ reg_typedefs($3, $4, check_typedef_attrs($2));
 						  process_typedefs($4);
 						}
 	;
 
 uniondef: tUNION t_ident '{' fields '}'		{ $$ = get_typev(RPC_FC_NON_ENCAPSULATED_UNION, $2, tsUNION);
 						  $$->kind = TKIND_UNION;
-						  $$->fields = $4;
+						  $$->fields_or_args = $4;
 						  $$->defined = TRUE;
 						}
 	| tUNION t_ident
@@ -898,17 +960,17 @@ uniondef: tUNION t_ident '{' fields '}'		{ $$ = get_typev(RPC_FC_NON_ENCAPSULATE
 						  if (!u) u = make_var( xstrdup("tagged_union") );
 						  u->type = make_type(RPC_FC_NON_ENCAPSULATED_UNION, NULL);
 						  u->type->kind = TKIND_UNION;
-						  u->type->fields = $9;
+						  u->type->fields_or_args = $9;
 						  u->type->defined = TRUE;
-						  $$->fields = append_var( $$->fields, $5 );
-						  $$->fields = append_var( $$->fields, u );
+						  $$->fields_or_args = append_var( $$->fields_or_args, $5 );
+						  $$->fields_or_args = append_var( $$->fields_or_args, u );
 						  $$->defined = TRUE;
 						}
 	;
 
 version:
-	  aNUM					{ $$ = MAKELONG($1, 0); }
-	| aNUM '.' aNUM				{ $$ = MAKELONG($1, $3); }
+	  aNUM					{ $$ = MAKEVERSION($1, 0); }
+	| aNUM '.' aNUM				{ $$ = MAKEVERSION($1, $3); }
 	;
 
 %%
@@ -976,12 +1038,21 @@ static str_list_t *append_str(str_list_t *list, char *str)
 
 static attr_list_t *append_attr(attr_list_t *list, attr_t *attr)
 {
+    attr_t *attr_existing;
     if (!attr) return list;
     if (!list)
     {
         list = xmalloc( sizeof(*list) );
         list_init( list );
     }
+    LIST_FOR_EACH_ENTRY(attr_existing, list, attr_t, entry)
+        if (attr_existing->type == attr->type)
+        {
+            parser_warning("duplicate attribute %s\n", get_attr_display_name(attr->type));
+            /* use the last attribute, like MIDL does */
+            list_remove(&attr_existing->entry);
+            break;
+        }
     list_add_tail( list, &attr->entry );
     return list;
 }
@@ -1017,6 +1088,7 @@ static expr_t *make_expr(enum expr_type type)
   e->ref = NULL;
   e->u.lval = 0;
   e->is_const = FALSE;
+  e->cval = 0;
   return e;
 }
 
@@ -1117,6 +1189,8 @@ static expr_t *make_exprt(enum expr_type type, type_t *tref, expr_t *expr)
 static expr_t *make_expr1(enum expr_type type, expr_t *expr)
 {
   expr_t *e;
+  if (type == EXPR_ADDRESSOF && expr->type != EXPR_IDENTIFIER)
+    error_loc("address-of operator applied to invalid expression\n");
   e = xmalloc(sizeof(expr_t));
   e->type = type;
   e->ref = expr;
@@ -1232,9 +1306,30 @@ static array_dims_t *append_array(array_dims_t *list, expr_t *expr)
     return list;
 }
 
+static struct list type_pool = LIST_INIT(type_pool);
+typedef struct
+{
+  type_t data;
+  struct list link;
+} type_pool_node_t;
+
+type_t *alloc_type(void)
+{
+  type_pool_node_t *node = xmalloc(sizeof *node);
+  list_add_tail(&type_pool, &node->link);
+  return &node->data;
+}
+
+void set_all_tfswrite(int val)
+{
+  type_pool_node_t *node;
+  LIST_FOR_EACH_ENTRY(node, &type_pool, type_pool_node_t, link)
+    node->data.tfswrite = val;
+}
+
 static type_t *make_type(unsigned char type, type_t *ref)
 {
-  type_t *t = xmalloc(sizeof(type_t));
+  type_t *t = alloc_type();
   t->name = NULL;
   t->kind = TKIND_PRIMITIVE;
   t->type = type;
@@ -1242,12 +1337,13 @@ static type_t *make_type(unsigned char type, type_t *ref)
   t->attrs = NULL;
   t->orig = NULL;
   t->funcs = NULL;
-  t->fields = NULL;
+  t->fields_or_args = NULL;
   t->ifaces = NULL;
   t->dim = 0;
   t->size_is = NULL;
   t->length_is = NULL;
   t->typestring_offset = 0;
+  t->ptrdesc = 0;
   t->declarray = FALSE;
   t->ignore = (parse_only != 0);
   t->is_const = FALSE;
@@ -1260,24 +1356,67 @@ static type_t *make_type(unsigned char type, type_t *ref)
   return t;
 }
 
-static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
+static void set_type(var_t *v, type_t *type, const pident_t *pident, array_dims_t *arr,
+                     int top)
 {
   expr_list_t *sizes = get_attrp(v->attrs, ATTR_SIZEIS);
   expr_list_t *lengs = get_attrp(v->attrs, ATTR_LENGTHIS);
+  int ptr_attr = get_attrv(v->attrs, ATTR_POINTERTYPE);
+  int ptr_type = ptr_attr;
   int sizeless, has_varconf;
   expr_t *dim;
   type_t *atype, **ptype;
+  int ptr_level = (pident ? pident->ptr_level : 0);
 
   v->type = type;
 
+  if (!ptr_type && top)
+    ptr_type = RPC_FC_RP;
+
   for ( ; 0 < ptr_level; --ptr_level)
-    v->type = make_type(RPC_FC_RP, v->type);
+  {
+    v->type = make_type(pointer_default, v->type);
+    if (ptr_level == 1 && ptr_type && !arr)
+    {
+      v->type->type = ptr_type;
+      ptr_type = 0;
+    }
+  }
+
+  if (ptr_type && !arr)
+  {
+    if (is_ptr(v->type))
+    {
+      if (v->type->type != ptr_type)
+      {
+        v->type = duptype(v->type, 1);
+        v->type->type = ptr_type;
+      }
+    }
+    else if (!arr && ptr_attr)
+      error_loc("%s: pointer attribute applied to non-pointer type\n", v->name);
+  }
+
+  if (pident && pident->is_func) {
+    int func_ptr_level = pident->func_ptr_level;
+    v->type = make_type(RPC_FC_FUNCTION, v->type);
+    v->type->fields_or_args = pident->args;
+    if (pident->callconv)
+      v->type->attrs = append_attr(NULL, make_attrp(ATTR_CALLCONV, pident->callconv));
+    else if (is_object_interface) {
+      static char *stdmethodcalltype;
+      if (!stdmethodcalltype) stdmethodcalltype = strdup("STDMETHODCALLTYPE");
+      v->type->attrs = append_attr(NULL, make_attrp(ATTR_CALLCONV, stdmethodcalltype));
+    }
+    for (; func_ptr_level > 0; func_ptr_level--)
+      v->type = make_type(ptr_type, v->type);
+  }
 
   sizeless = FALSE;
   if (arr) LIST_FOR_EACH_ENTRY_REV(dim, arr, expr_t, entry)
   {
     if (sizeless)
-      error("%s: only the first array dimension can be unspecified\n", v->name);
+      error_loc("%s: only the first array dimension can be unspecified\n", v->name);
 
     if (dim->is_const)
     {
@@ -1285,10 +1424,10 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
       size_t size = type_memsize(v->type, &align);
 
       if (dim->cval <= 0)
-        error("%s: array dimension must be positive\n", v->name);
+        error_loc("%s: array dimension must be positive\n", v->name);
 
       if (0xffffffffuL / size < (unsigned long) dim->cval)
-        error("%s: total array size is too large", v->name);
+        error_loc("%s: total array size is too large\n", v->name);
       else if (0xffffuL < size * dim->cval)
         v->type = make_type(RPC_FC_LGFARRAY, v->type);
       else
@@ -1314,10 +1453,10 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
       atype = *ptype = duptype(*ptype, 0);
 
       if (atype->type == RPC_FC_SMFARRAY || atype->type == RPC_FC_LGFARRAY)
-        error("%s: cannot specify size_is for a fixed sized array\n", v->name);
+        error_loc("%s: cannot specify size_is for a fixed sized array\n", v->name);
 
       if (atype->type != RPC_FC_CARRAY && !is_ptr(atype))
-        error("%s: size_is attribute applied to illegal type\n", v->name);
+        error_loc("%s: size_is attribute applied to illegal type\n", v->name);
 
       atype->type = RPC_FC_CARRAY;
       atype->size_is = dim;
@@ -1325,7 +1464,7 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
 
     ptype = &(*ptype)->ref;
     if (*ptype == NULL)
-      error("%s: too many expressions in size_is attribute\n", v->name);
+      error_loc("%s: too many expressions in size_is attribute\n", v->name);
   }
 
   ptype = &v->type;
@@ -1343,14 +1482,14 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
       else if (atype->type == RPC_FC_CARRAY)
         atype->type = RPC_FC_CVARRAY;
       else
-        error("%s: length_is attribute applied to illegal type\n", v->name);
+        error_loc("%s: length_is attribute applied to illegal type\n", v->name);
 
       atype->length_is = dim;
     }
 
     ptype = &(*ptype)->ref;
     if (*ptype == NULL)
-      error("%s: too many expressions in length_is attribute\n", v->name);
+      error_loc("%s: too many expressions in length_is attribute\n", v->name);
   }
 
   if (has_varconf && !last_array(v->type))
@@ -1361,6 +1500,29 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
       *ptype = duptype(*ptype, 0);
       (*ptype)->type = RPC_FC_BOGUS_ARRAY;
     }
+  }
+
+  if (is_array(v->type))
+  {
+    const type_t *rt = v->type->ref;
+    if (is_user_type(rt))
+      v->type->type = RPC_FC_BOGUS_ARRAY;
+    else
+      switch (rt->type)
+        {
+        case RPC_FC_BOGUS_STRUCT:
+        case RPC_FC_NON_ENCAPSULATED_UNION:
+        case RPC_FC_ENCAPSULATED_UNION:
+        case RPC_FC_ENUM16:
+          v->type->type = RPC_FC_BOGUS_ARRAY;
+          break;
+          /* FC_RP should be above, but widl overuses these, and will break things.  */
+        case RPC_FC_UP:
+        case RPC_FC_RP:
+          if (rt->ref->type == RPC_FC_IP)
+            v->type->type = RPC_FC_BOGUS_ARRAY;
+          break;
+        }
   }
 }
 
@@ -1401,9 +1563,11 @@ static var_t *make_var(char *name)
   var_t *v = xmalloc(sizeof(var_t));
   v->name = name;
   v->type = NULL;
-  v->args = NULL;
   v->attrs = NULL;
   v->eval = NULL;
+  v->loc_info.input_name = input_name ? input_name : "stdin";
+  v->loc_info.line_number = line_number;
+  v->loc_info.near_text = parser_text;
   return v;
 }
 
@@ -1422,7 +1586,11 @@ static pident_t *make_pident(var_t *var)
 {
   pident_t *p = xmalloc(sizeof(*p));
   p->var = var;
+  p->is_func = FALSE;
   p->ptr_level = 0;
+  p->func_ptr_level = 0;
+  p->args = NULL;
+  p->callconv = NULL;
   return p;
 }
 
@@ -1460,7 +1628,7 @@ static type_t *make_safearray(type_t *type)
 {
   type_t *sa = duptype(find_type("SAFEARRAY", 0), 1);
   sa->ref = type;
-  return make_type(RPC_FC_FP, sa);
+  return make_type(pointer_default, sa);
 }
 
 #define HASHMAX 64
@@ -1493,7 +1661,7 @@ static type_t *reg_type(type_t *type, const char *name, int t)
   struct rtype *nt;
   int hash;
   if (!name) {
-    yyerror("registering named type without name");
+    error_loc("registering named type without name\n");
     return type;
   }
   hash = hash_ident(name);
@@ -1523,7 +1691,7 @@ static void fix_type(type_t *t)
   if (t->kind == TKIND_ALIAS && is_incomplete(t)) {
     type_t *ot = t->orig;
     fix_type(ot);
-    t->fields = ot->fields;
+    t->fields_or_args = ot->fields_or_args;
     t->defined = ot->defined;
   }
 }
@@ -1558,7 +1726,7 @@ static type_t *reg_typedefs(type_t *type, pident_list_t *pidents, attr_list_t *a
     if (c != RPC_FC_CHAR && c != RPC_FC_BYTE && c != RPC_FC_WCHAR)
     {
       pident = LIST_ENTRY( list_head( pidents ), const pident_t, entry );
-      yyerror("'%s': [string] attribute is only valid on 'char', 'byte', or 'wchar_t' pointers and arrays",
+      error_loc("'%s': [string] attribute is only valid on 'char', 'byte', or 'wchar_t' pointers and arrays\n",
               pident->var->name);
     }
   }
@@ -1584,7 +1752,7 @@ static type_t *reg_typedefs(type_t *type, pident_list_t *pidents, attr_list_t *a
       int cptr = pident->ptr_level;
       if (cptr > ptrc) {
         while (cptr > ptrc) {
-          cur = ptr = make_type(RPC_FC_RP, cur);
+          cur = ptr = make_type(pointer_default, cur);
           ptrc++;
         }
       } else {
@@ -1593,6 +1761,20 @@ static type_t *reg_typedefs(type_t *type, pident_list_t *pidents, attr_list_t *a
           cptr++;
         }
       }
+      if (pident->is_func) {
+        int func_ptr_level = pident->func_ptr_level;
+        cur = make_type(RPC_FC_FUNCTION, cur);
+        cur->fields_or_args = pident->args;
+        if (pident->callconv)
+          cur->attrs = append_attr(NULL, make_attrp(ATTR_CALLCONV, pident->callconv));
+        else if (is_object_interface) {
+          static char *stdmethodcalltype;
+          if (!stdmethodcalltype) stdmethodcalltype = strdup("STDMETHODCALLTYPE");
+          cur->attrs = append_attr(NULL, make_attrp(ATTR_CALLCONV, stdmethodcalltype));
+        }
+        for (; func_ptr_level > 0; func_ptr_level--)
+          cur = make_type(pointer_default, cur);
+      }
       cur = alias(cur, name->name);
       cur->attrs = attrs;
       if (ptr_type)
@@ -1600,11 +1782,11 @@ static type_t *reg_typedefs(type_t *type, pident_list_t *pidents, attr_list_t *a
         if (is_ptr(cur))
           cur->type = ptr_type;
         else
-          yyerror("'%s': pointer attribute applied to non-pointer type",
+          error_loc("'%s': pointer attribute applied to non-pointer type\n",
                   cur->name);
       }
       else if (is_str && ! is_ptr(cur))
-        yyerror("'%s': [string] attribute applied to non-pointer type",
+        error_loc("'%s': [string] attribute applied to non-pointer type\n",
                 cur->name);
 
       if (is_incomplete(cur))
@@ -1621,7 +1803,7 @@ static type_t *find_type(const char *name, int t)
   while (cur && (cur->t != t || strcmp(cur->name, name)))
     cur = cur->next;
   if (!cur) {
-    yyerror("type '%s' not found", name);
+    error_loc("type '%s' not found\n", name);
     return NULL;
   }
   return cur->type;
@@ -1679,9 +1861,15 @@ static int get_struct_type(var_list_t *fields)
   int has_variance = 0;
   var_t *field;
 
+  if (get_padding(fields))
+    return RPC_FC_BOGUS_STRUCT;
+
   if (fields) LIST_FOR_EACH_ENTRY( field, fields, var_t, entry )
   {
     type_t *t = field->type;
+
+    if (is_user_type(t))
+      return RPC_FC_BOGUS_STRUCT;
 
     if (is_ptr(t))
     {
@@ -1719,7 +1907,7 @@ static int get_struct_type(var_list_t *fields)
         {
             has_conformance = 1;
             if (field->type->declarray && list_next(fields, &field->entry))
-                yyerror("field '%s' deriving from a conformant array must be the last field in the structure",
+                error_loc("field '%s' deriving from a conformant array must be the last field in the structure\n",
                         field->name);
         }
         if (field->type->length_is)
@@ -1752,7 +1940,6 @@ static int get_struct_type(var_list_t *fields)
     case RPC_FC_FLOAT:
     case RPC_FC_DOUBLE:
     case RPC_FC_STRUCT:
-    case RPC_FC_ENUM16:
     case RPC_FC_ENUM32:
       break;
 
@@ -1762,6 +1949,7 @@ static int get_struct_type(var_list_t *fields)
     case RPC_FC_OP:
     case RPC_FC_CARRAY:
     case RPC_FC_CVARRAY:
+    case RPC_FC_BOGUS_ARRAY:
       has_pointer = 1;
       break;
 
@@ -1778,7 +1966,7 @@ static int get_struct_type(var_list_t *fields)
     case RPC_FC_CPSTRUCT:
       has_conformance = 1;
       if (list_next( fields, &field->entry ))
-          yyerror("field '%s' deriving from a conformant array must be the last field in the structure",
+          error_loc("field '%s' deriving from a conformant array must be the last field in the structure\n",
                   field->name);
       has_pointer = 1;
       break;
@@ -1786,7 +1974,7 @@ static int get_struct_type(var_list_t *fields)
     case RPC_FC_CSTRUCT:
       has_conformance = 1;
       if (list_next( fields, &field->entry ))
-          yyerror("field '%s' deriving from a conformant array must be the last field in the structure",
+          error_loc("field '%s' deriving from a conformant array must be the last field in the structure\n",
                   field->name);
       break;
 
@@ -1795,19 +1983,14 @@ static int get_struct_type(var_list_t *fields)
       break;
 
     default:
-      fprintf(stderr,"Unknown struct member %s with type (0x%02x)\n",
-              field->name, t->type);
+      error_loc("Unknown struct member %s with type (0x%02x)\n", field->name, t->type);
       /* fallthru - treat it as complex */
 
     /* as soon as we see one of these these members, it's bogus... */
-    case RPC_FC_IP:
     case RPC_FC_ENCAPSULATED_UNION:
     case RPC_FC_NON_ENCAPSULATED_UNION:
-    case RPC_FC_TRANSMIT_AS:
-    case RPC_FC_REPRESENT_AS:
-    case RPC_FC_PAD:
-    case RPC_FC_EMBEDDED_COMPLEX:
     case RPC_FC_BOGUS_STRUCT:
+    case RPC_FC_ENUM16:
       return RPC_FC_BOGUS_STRUCT;
     }
   }
@@ -1843,7 +2026,7 @@ static var_t *reg_const(var_t *var)
   struct rconst *nc;
   int hash;
   if (!var->name) {
-    yyerror("registering constant without name");
+    error_loc("registering constant without name\n");
     return var;
   }
   hash = hash_ident(var->name);
@@ -1861,7 +2044,7 @@ static var_t *find_const(char *name, int f)
   while (cur && strcmp(cur->name, name))
     cur = cur->next;
   if (!cur) {
-    if (f) yyerror("constant '%s' not found", name);
+    if (f) error_loc("constant '%s' not found\n", name);
     return NULL;
   }
   return cur->var;
@@ -1956,12 +2139,287 @@ static void process_typedefs(pident_list_t *pidents)
   }
 }
 
+struct allowed_attr
+{
+    unsigned int dce_compatible : 1;
+    unsigned int acf : 1;
+    unsigned int on_interface : 1;
+    unsigned int on_function : 1;
+    unsigned int on_arg : 1;
+    unsigned int on_type : 1;
+    unsigned int on_field : 1;
+    unsigned int on_library : 1;
+    unsigned int on_dispinterface : 1;
+    unsigned int on_module : 1;
+    unsigned int on_coclass : 1;
+    const char *display_name;
+};
+
+struct allowed_attr allowed_attr[] =
+{
+    /* attr                     { D ACF I Fn ARG T Fi  L  DI M  C  <display name> } */
+    /* ATTR_AGGREGATABLE */     { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, "aggregatable" },
+    /* ATTR_APPOBJECT */        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, "appobject" },
+    /* ATTR_ASYNC */            { 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, "async" },
+    /* ATTR_AUTO_HANDLE */      { 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, "auto_handle" },
+    /* ATTR_BINDABLE */         { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "bindable" },
+    /* ATTR_BROADCAST */        { 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "broadcast" },
+    /* ATTR_CALLAS */           { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "call_as" },
+    /* ATTR_CALLCONV */         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL },
+    /* ATTR_CASE */             { 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, "case" },
+    /* ATTR_CONTEXTHANDLE */    { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, "context_handle" },
+    /* ATTR_CONTROL */          { 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, "control" },
+    /* ATTR_DEFAULT */          { 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, "default" },
+    /* ATTR_DEFAULTCOLLELEM */  { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "defaultcollelem" },
+    /* ATTR_DEFAULTVALUE_EXPR */ { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, "defaultvalue" },
+    /* ATTR_DEFAULTVALUE_STRING */ { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, "defaultvalue" },
+    /* ATTR_DEFAULTVTABLE */    { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, "defaultvtable" },
+    /* ATTR_DISPINTERFACE */    { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL },
+    /* ATTR_DISPLAYBIND */      { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "displaybind" },
+    /* ATTR_DLLNAME */          { 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, "dllname" },
+    /* ATTR_DUAL */             { 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, "dual" },
+    /* ATTR_ENDPOINT */         { 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, "endpoint" },
+    /* ATTR_ENTRY_ORDINAL */    { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "entry" },
+    /* ATTR_ENTRY_STRING */     { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "entry" },
+    /* ATTR_EXPLICIT_HANDLE */  { 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, "explicit_handle" },
+    /* ATTR_HANDLE */           { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, "handle" },
+    /* ATTR_HELPCONTEXT */      { 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, "helpcontext" },
+    /* ATTR_HELPFILE */         { 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, "helpfile" },
+    /* ATTR_HELPSTRING */       { 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, "helpstring" },
+    /* ATTR_HELPSTRINGCONTEXT */ { 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, "helpstringcontext" },
+    /* ATTR_HELPSTRINGDLL */    { 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, "helpstringdll" },
+    /* ATTR_HIDDEN */           { 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, "hidden" },
+    /* ATTR_ID */               { 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, "id" },
+    /* ATTR_IDEMPOTENT */       { 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "idempotent" },
+    /* ATTR_IIDIS */            { 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, "iid_is" },
+    /* ATTR_IMMEDIATEBIND */    { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "immediatebind" },
+    /* ATTR_IMPLICIT_HANDLE */  { 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, "implicit_handle" },
+    /* ATTR_IN */               { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, "in" },
+    /* ATTR_INPUTSYNC */        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "inputsync" },
+    /* ATTR_LENGTHIS */         { 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, "length_is" },
+    /* ATTR_LOCAL */            { 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, "local" },
+    /* ATTR_NONBROWSABLE */     { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "nonbrowsable" },
+    /* ATTR_NONCREATABLE */     { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, "noncreatable" },
+    /* ATTR_NONEXTENSIBLE */    { 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, "nonextensible" },
+    /* ATTR_OBJECT */           { 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, "object" },
+    /* ATTR_ODL */              { 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, "odl" },
+    /* ATTR_OLEAUTOMATION */    { 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, "oleautomation" },
+    /* ATTR_OPTIONAL */         { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, "optional" },
+    /* ATTR_OUT */              { 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, "out" },
+    /* ATTR_POINTERDEFAULT */   { 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, "pointer_default" },
+    /* ATTR_POINTERTYPE */      { 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, "ref, unique or ptr" },
+    /* ATTR_PROPGET */          { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "propget" },
+    /* ATTR_PROPPUT */          { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "propput" },
+    /* ATTR_PROPPUTREF */       { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "propputref" },
+    /* ATTR_PUBLIC */           { 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, "public" },
+    /* ATTR_RANGE */            { 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, "range" },
+    /* ATTR_READONLY */         { 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, "readonly" },
+    /* ATTR_REQUESTEDIT */      { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "requestedit" },
+    /* ATTR_RESTRICTED */       { 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, "restricted" },
+    /* ATTR_RETVAL */           { 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, "retval" },
+    /* ATTR_SIZEIS */           { 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, "size_is" },
+    /* ATTR_SOURCE */           { 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, "source" },
+    /* ATTR_STRICTCONTEXTHANDLE */ { 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, "strict_context_handle" },
+    /* ATTR_STRING */           { 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, "string" },
+    /* ATTR_SWITCHIS */         { 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, "switch_is" },
+    /* ATTR_SWITCHTYPE */       { 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, "switch_type" },
+    /* ATTR_TRANSMITAS */       { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, "transmit_as" },
+    /* ATTR_UUID */             { 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, "uuid" },
+    /* ATTR_V1ENUM */           { 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, "v1_enum" },
+    /* ATTR_VARARG */           { 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, "vararg" },
+    /* ATTR_VERSION */          { 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, "version" },
+    /* ATTR_WIREMARSHAL */      { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, "wire_marshal" },
+};
+
+const char *get_attr_display_name(enum attr_type type)
+{
+    return allowed_attr[type].display_name;
+}
+
+static const attr_list_t *check_iface_attrs(const char *name, const attr_list_t *attrs)
+{
+  const attr_t *attr;
+  if (!attrs) return attrs;
+  LIST_FOR_EACH_ENTRY(attr, attrs, const attr_t, entry)
+  {
+    if (!allowed_attr[attr->type].on_interface)
+      error_loc("inapplicable attribute %s for interface %s\n",
+                allowed_attr[attr->type].display_name, name);
+  }
+  return attrs;
+}
+
+static attr_list_t *check_function_attrs(const char *name, attr_list_t *attrs)
+{
+  const attr_t *attr;
+  if (!attrs) return attrs;
+  LIST_FOR_EACH_ENTRY(attr, attrs, const attr_t, entry)
+  {
+    if (!allowed_attr[attr->type].on_function)
+      error_loc("inapplicable attribute %s for function %s\n",
+                allowed_attr[attr->type].display_name, name);
+  }
+  return attrs;
+}
+
 static void check_arg(var_t *arg)
 {
-  type_t *t = arg->type;
+  const type_t *t = arg->type;
+  const attr_t *attr;
 
   if (t->type == 0 && ! is_var_ptr(arg))
-    yyerror("argument '%s' has void type", arg->name);
+    error_loc("argument '%s' has void type\n", arg->name);
+
+  if (arg->attrs)
+  {
+    LIST_FOR_EACH_ENTRY(attr, arg->attrs, const attr_t, entry)
+    {
+      if (!allowed_attr[attr->type].on_arg)
+        error_loc("inapplicable attribute %s for argument %s\n",
+                  allowed_attr[attr->type].display_name, arg->name);
+    }
+  }
+}
+
+static attr_list_t *check_typedef_attrs(attr_list_t *attrs)
+{
+  const attr_t *attr;
+  if (!attrs) return attrs;
+  LIST_FOR_EACH_ENTRY(attr, attrs, const attr_t, entry)
+  {
+    if (!allowed_attr[attr->type].on_type)
+      error_loc("inapplicable attribute %s for typedef\n",
+                allowed_attr[attr->type].display_name);
+  }
+  return attrs;
+}
+
+static attr_list_t *check_field_attrs(const char *name, attr_list_t *attrs)
+{
+  const attr_t *attr;
+  if (!attrs) return attrs;
+  LIST_FOR_EACH_ENTRY(attr, attrs, const attr_t, entry)
+  {
+    if (!allowed_attr[attr->type].on_field)
+      error_loc("inapplicable attribute %s for field %s\n",
+                allowed_attr[attr->type].display_name, name);
+  }
+  return attrs;
+}
+
+static const attr_list_t *check_library_attrs(const char *name, const attr_list_t *attrs)
+{
+  const attr_t *attr;
+  if (!attrs) return attrs;
+  LIST_FOR_EACH_ENTRY(attr, attrs, const attr_t, entry)
+  {
+    if (!allowed_attr[attr->type].on_library)
+      error_loc("inapplicable attribute %s for library %s\n",
+                allowed_attr[attr->type].display_name, name);
+  }
+  return attrs;
+}
+
+static attr_list_t *check_dispiface_attrs(const char *name, attr_list_t *attrs)
+{
+  const attr_t *attr;
+  if (!attrs) return attrs;
+  LIST_FOR_EACH_ENTRY(attr, attrs, const attr_t, entry)
+  {
+    if (!allowed_attr[attr->type].on_dispinterface)
+      error_loc("inapplicable attribute %s for dispinterface %s\n",
+                allowed_attr[attr->type].display_name, name);
+  }
+  return attrs;
+}
+
+static const attr_list_t *check_module_attrs(const char *name, const attr_list_t *attrs)
+{
+  const attr_t *attr;
+  if (!attrs) return attrs;
+  LIST_FOR_EACH_ENTRY(attr, attrs, const attr_t, entry)
+  {
+    if (!allowed_attr[attr->type].on_module)
+      error_loc("inapplicable attribute %s for module %s\n",
+                allowed_attr[attr->type].display_name, name);
+  }
+  return attrs;
+}
+
+static const attr_list_t *check_coclass_attrs(const char *name, const attr_list_t *attrs)
+{
+  const attr_t *attr;
+  if (!attrs) return attrs;
+  LIST_FOR_EACH_ENTRY(attr, attrs, const attr_t, entry)
+  {
+    if (!allowed_attr[attr->type].on_coclass)
+      error_loc("inapplicable attribute %s for coclass %s\n",
+                allowed_attr[attr->type].display_name, name);
+  }
+  return attrs;
+}
+
+/* checks that arguments for a function make sense for marshalling and unmarshalling */
+static void check_remoting_args(const func_t *func)
+{
+    const char *funcname = func->def->name;
+    const var_t *arg;
+
+    if (func->args) LIST_FOR_EACH_ENTRY( arg, func->args, const var_t, entry )
+    {
+        int ptr_level = 0;
+        const type_t *type = arg->type;
+        int is_wire_marshal = 0;
+        int is_context_handle = 0;
+
+        /* get pointer level and fundamental type for the argument */
+        for (;;)
+        {
+            if (!is_wire_marshal && is_attr(type->attrs, ATTR_WIREMARSHAL))
+                is_wire_marshal = 1;
+            if (!is_context_handle && is_attr(type->attrs, ATTR_CONTEXTHANDLE))
+                is_context_handle = 1;
+            if (type->kind == TKIND_ALIAS)
+                type = type->orig;
+            else if (is_ptr(type))
+            {
+                ptr_level++;
+                type = type->ref;
+            }
+            else
+                break;
+        }
+
+        /* check that [out] parameters have enough pointer levels */
+        if (is_attr(arg->attrs, ATTR_OUT))
+        {
+            if (!is_array(type))
+            {
+                if (!ptr_level)
+                    error_loc_info(&arg->loc_info, "out parameter \'%s\' of function \'%s\' is not a pointer\n", arg->name, funcname);
+                if (type->type == RPC_FC_IP && ptr_level == 1)
+                    error_loc_info(&arg->loc_info, "out interface pointer \'%s\' of function \'%s\' is not a double pointer\n", arg->name, funcname);
+            }
+        }
+
+        if (type->type == 0 && !is_attr(arg->attrs, ATTR_IIDIS) && !is_wire_marshal && !is_context_handle)
+            error_loc_info(&arg->loc_info, "parameter \'%s\' of function \'%s\' cannot derive from void *\n", arg->name, funcname);
+        else if (type->type == RPC_FC_FUNCTION)
+            error_loc_info(&arg->loc_info, "parameter \'%s\' of function \'%s\' cannot be a function pointer\n", arg->name, funcname);
+    }
+}
+
+static void check_functions(const type_t *iface)
+{
+    if (!is_inside_library && !is_attr(iface->attrs, ATTR_LOCAL))
+    {
+        const func_t *func;
+        if (iface->funcs) LIST_FOR_EACH_ENTRY( func, iface->funcs, const func_t, entry )
+        {
+            if (!is_attr(func->def->attrs, ATTR_LOCAL))
+                check_remoting_args(func);
+        }
+    }
 }
 
 static void check_all_user_types(ifref_list_t *ifrefs)
@@ -1973,6 +2431,23 @@ static void check_all_user_types(ifref_list_t *ifrefs)
   {
     const func_list_t *fs = ifref->iface->funcs;
     if (fs) LIST_FOR_EACH_ENTRY(f, fs, const func_t, entry)
-      check_for_user_types(f->args);
+      check_for_additional_prototype_types(f->args);
   }
+}
+
+int is_valid_uuid(const char *s)
+{
+  int i;
+
+  for (i = 0; i < 36; ++i)
+    if (i == 8 || i == 13 || i == 18 || i == 23)
+    {
+      if (s[i] != '-')
+        return FALSE;
+    }
+    else
+      if (!isxdigit(s[i]))
+        return FALSE;
+
+  return s[i] == '\0';
 }
