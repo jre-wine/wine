@@ -1,3 +1,21 @@
+wine (0.9.60-4) unstable; urgency=medium
+
+  * Added the lpr virtual package as an alternative dependency for
+    cupsys-bsd in the libwine-print package. I probably should have
+    done that in the first place, but wasn't sure it made sense...
+    Closes: #478053.
+  * Changed debian/rules to make building and using amd64.tar.lzma.uu
+    a bit more tweakable (and possible to turn off easily). I'm not
+    totally sure how I should handle backports, given that ia32-libs
+    in etch probably lacks a lot of stuff, but there's now commented-out
+    code to automatically delete amd64.tar.lzma.uu if building on stable.
+    Perhaps the opposite makes more sense?
+  * Set urgency to medium, as all the bugfixes in 0.9.60 are eagerly
+    awaited by many testing users, and all these debian revisions
+    have stalled migration long enough, I guess.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 26 Apr 2008 18:31:20 +0200
+
 wine (0.9.60-3) unstable; urgency=low
 
   * Just noticed that I broke the amd64 build (again) by trying

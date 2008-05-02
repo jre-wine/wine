@@ -206,7 +206,7 @@ Description: Windows API implementation - OSS sound module
 Package: libwine-print
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: ${shlibs:Depends}, cupsys-bsd
+Depends: ${shlibs:Depends}, cupsys-bsd | lpr
 Replaces: libwine (<< 0.0.20020710)
 Description: Windows API implementation - printing module
  Wine is a free MS-Windows API implementation.

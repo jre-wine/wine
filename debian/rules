@@ -17,7 +17,23 @@ CONFIGOPTS = --with-x --enable-opengl
 DEB_HOST_GNU_SYSTEM	?= $(shell dpkg-architecture -qDEB_HOST_GNU_SYSTEM)
 DEB_HOST_GNU_CPU	?= $(shell dpkg-architecture -qDEB_HOST_GNU_CPU)
 
+DEBIAN_VERSION := $(shell cat /etc/debian_version)
 VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
+
+DEBIAN_SID := $(findstring sid,$(DEBIAN_VERSION))
+
+#ifeq (,$(DEBIAN_SID))
+## delete amd64.tar.lzma.uu if we're not on testing/unstable.
+#AMD64_PACK = false
+#endif
+
+# On i386, pack binaries into amd64.tar.lzma.uu and embed it into
+# source package, because debian's amd64 port has pretty crappy
+# support for building 32-bit binaries natively.
+
+ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM),i486-linux-gnu)
+AMD64_PACK ?= true
+endif
 
 # On amd64, build 32-bit package by simply unpacking amd64.tar.lzma.uu
 # if it exists, otherwise build from source using 32-bit compiler.
@@ -145,6 +161,9 @@ clean: $(patsubst build%,clean-arch%,$(BUILDS))
 	dh_testdir
 	dh_testroot
 	rm -f install-arch-stamp build-indep-stamp
+ifeq (false,$(AMD64_PACK))
+	rm -f debian/amd64.tar.lzma.uu
+endif
 	dh_clean
 
 install-indep: build-indep
@@ -304,7 +323,7 @@ ifneq (,$(AMD64_COPY))
 	# Using compressed 32-bit build.  Make sure it's the latest one!!
 	uudecode < debian/amd64.tar.lzma.uu | lzma -d | tar -xpf -
 endif
-ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM),i486-linux-gnu)
+ifeq (true,$(AMD64_PACK))
 	# Generating compressed 32-bit build.  Make sure to keep your *_i386.deb in sync with this file in your *.diff.gz!!
 	tar -cpf - `grep-dctrl -v "Architecture: all" debian/control | grep "^Package: " | sed -e "s,^Package: ,debian/,g"` \
 		| lzma -c9 | uuencode - > debian/amd64.tar.lzma.uu
