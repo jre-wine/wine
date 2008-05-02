@@ -1,3 +1,16 @@
+wine (0.9.51-1) unstable; urgency=low
+
+  * New upstream release 0.9.51.
+    - A bunch of WinHelp improvements.
+    - Better Japanese font support.
+    - A ton of rpcrt4 fixes.
+    - Several Alsa capture fixes.
+    - Improved support for screen resolution changes.
+    - Lots of bug fixes.
+  * This version was released Dec 14, 2007.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 22 Dec 2007 11:51:35 +0100
+
 wine (0.9.50-1) unstable; urgency=low
 
   * New upstream release 0.9.50.
