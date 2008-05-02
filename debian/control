@@ -30,6 +30,8 @@ Build-Depends: debhelper (>= 5), flex | flex-old, bison,
  lib32z1-dev [amd64 kfreebsd-amd64]
 Standards-Version: 3.7.3
 Homepage: http://www.winehq.org/
+Vcs-Browser: http://git.debian.org/?p=pkg-wine/wine.git
+Vcs-Git: git://git.debian.org/git/pkg-wine/wine.git
 
 Package: wine
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
