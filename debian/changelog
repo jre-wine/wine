@@ -1,3 +1,41 @@
+wine (0.9.60-1) unstable; urgency=low
+
+  * New upstream release 0.9.60.
+    - Better support for Windows IMEs.
+    - Option for Windows-style window decorations.
+    - Improved system tray behavior.
+    - Window management fixes.
+    - Improved quartz audio support.
+    - Better support for launching apps from Unix file managers.
+    - Lots of bug fixes.
+  * This version was released Apr 18, 2008.
+  * The winelauncher is removed upstream, so its flaws won't be
+    bothering anyone anymore. Closes: #464166, #321470.
+  * However, I've been too lazy to change the way I do wine-safe
+    and wine-auto, so I took the code I used to patch the old
+    winelauncher with, and put it into debian/winelauncher. So
+    there's still a wrapper script, but it doesn't do any of the
+    old winelauncher magic. It just does two things now:
+    * if Wine is launched from mailcap, it asks for confirmation,
+      like before.
+    * plus, I made it check if it's running on amd64, and if so,
+      check if the user has a broken libnss-mdns configuration.
+      If so, it tells them to fix it.
+  * The bug_report.pl script is also removed upstream, so it's
+    also no longer in the wine-bin package.
+  * Removed the --ignore-missing-info again.
+  * Added a couple of hooks for reportbug, so the libwine dependencies
+    are included if people file bugs on wine or wine-bin.
+  * Renamed font_convert.sh in wine-utils to wine-font-convert,
+    to comply with new Policy 3.7.0 guideline of not including
+    script extension.
+  * Upgraded Standards-Version to 3.7.3.
+  * Added dh_desktop call to debian/rules.
+  * Added a couple of lintian overrides for libwine. The package isn't
+    lintian clean, I just added what I'm sure should be overridden.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 20 Apr 2008 20:43:19 +0200
+
 wine (0.9.59-1) unstable; urgency=low
 
   * New upstream release 0.9.59.

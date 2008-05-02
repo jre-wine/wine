@@ -49,3 +49,4 @@ debian/uninstaller.desktop usr/share/applications
 debian/wine.desktop usr/share/applications
 debian/winecfg.desktop usr/share/applications
 programs/winemenubuilder/wine*.xpm usr/share/pixmaps
+debian/bug/wine-bin usr/share/bug

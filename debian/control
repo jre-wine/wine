@@ -28,7 +28,7 @@ Build-Depends: debhelper (>= 5), flex | flex-old, bison,
  ia32-libs (>= 1.19) [amd64 kfreebsd-amd64],
  lib32ncurses5-dev [amd64 kfreebsd-amd64], lib32asound2-dev [amd64],
  lib32z1-dev [amd64 kfreebsd-amd64]
-Standards-Version: 3.6.2
+Standards-Version: 3.7.3
 Homepage: http://www.winehq.org/
 
 Package: wine

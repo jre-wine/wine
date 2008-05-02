@@ -159,14 +159,12 @@ install-arch32-stamp: build-arch32-stamp
 
 	# install wine, libwine, fonts, and tools
 	$(MAKE) -C build32 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
-	# move the real binaries into /usr/lib/wine,
-	# wrapping them with the winelauncher
+	# move the real binaries into /usr/lib/wine
 	mv debian/tmp/usr/bin/wine debian/tmp/usr/lib/wine/wine.bin
 	mv debian/tmp/usr/bin/wine-kthread debian/tmp/usr/lib/wine/wine-kthread
 	mv debian/tmp/usr/bin/wine-pthread debian/tmp/usr/lib/wine/wine-pthread
 	mv debian/tmp/usr/bin/wine-preloader debian/tmp/usr/lib/wine/wine-preloader
 	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/lib/wine/wineserver
-	mv debian/tmp/usr/bin/winelauncher debian/tmp/usr/bin/wine
 	# install manpages
 	$(MAKE) -C build32/documentation install prefix=`pwd`/debian/tmp/usr
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
@@ -186,11 +184,9 @@ install-arch64-stamp: build-arch64-stamp
 
 	# install wine, libwine, fonts, and tools
 	$(MAKE) -C build64 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/lib
-	# move the real binaries into /usr/lib/wine,
-	# wrapping them with the winelauncher
+	# move the real binaries into /usr/lib/wine
 	mv debian/tmp/usr/bin/wine debian/tmp/usr/lib/wine/wine.bin
 	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/lib/wine/wineserver
-	mv debian/tmp/usr/bin/winelauncher debian/tmp/usr/bin/wine
 	# install manpages
 	$(MAKE) -C build64/documentation install prefix=`pwd`/debian/tmp/usr
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
@@ -206,6 +202,8 @@ install-arch-stamp: $(patsubst build%,install-arch%-stamp,$(BUILDS))
 	dh_testdir
 	dh_testroot
 
+	install -m 755 debian/winelauncher debian/tmp/usr/bin/wine
+	# MIME and binfmt databases
 	mkdir -p debian/tmp/usr/share/{mime-info,binfmts}
 	cp debian/mime-info.mime	debian/tmp/usr/share/mime-info/wine.mime
 	cp debian/mime-info.keys	debian/tmp/usr/share/mime-info/wine.keys
@@ -214,6 +212,8 @@ install-arch-stamp: $(patsubst build%,install-arch%-stamp,$(BUILDS))
 	mkdir -p debian/tmp/usr/share/doc/wine
 	cp dlls/twain_32/README		debian/tmp/usr/share/doc/wine/README.twain
 	cp tools/winedump/README	debian/tmp/usr/share/doc/wine/README.winedump
+	# tools
+	cp tools/font_convert.sh	debian/tmp/usr/bin/wine-font-convert
 
 	touch install-arch-stamp
 
@@ -291,6 +291,11 @@ endif
 	# We don't need symbols for the build tools...
 	rm -rf debian/libwine-dbg/usr/lib/debug/usr/bin
 
+	# debhelper 6 has dh_lintian, but I don't want to depend on it yet...
+	install -m 644 debian/libwine.lintian-overrides debian/libwine/usr/share/lintian/overrides/libwine
+
+	dh_desktop -s
+
 	dh_compress -s
 	dh_fixperms -s
 
@@ -312,7 +317,7 @@ endif
 	dh_makeshlibs -plibwine -n -V "libwine (= $(VERSION))"
 
 	bash debian/gendeps.sh $(patsubst build%,%,$(BUILDS))
-	dh_shlibdeps -s -Llibwine -ldebian/libwine/usr/lib -- --ignore-missing-info
+	dh_shlibdeps -s -Llibwine -ldebian/libwine/usr/lib
 	bash debian/cleandeps.sh
 
 	# relaxed libwine dependencies for everyone else

@@ -4,3 +4,4 @@ usr/share
 usr/share/doc
 usr/share/doc/libwine
 usr/share/wine
+usr/share/lintian/overrides
