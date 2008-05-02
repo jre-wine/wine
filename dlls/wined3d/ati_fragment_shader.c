@@ -27,9 +27,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
 
-/* Some private defines, Constant associations, etc
+/* Some private defines, Constant associations, etc.
  * Env bump matrix and per stage constant should be independent,
- * a stage that bumpmaps can't read the per state constant
+ * a stage that bump maps can't read the per state constant
  */
 #define ATI_FFP_CONST_BUMPMAT(i) (GL_CON_0_ATI + i)
 #define ATI_FFP_CONST_CONSTANT0 GL_CON_0_ATI
@@ -45,6 +45,7 @@ struct atifs_ffp_desc
 {
     struct ffp_desc parent;
     GLuint shader;
+    unsigned int num_textures_used;
 };
 
 struct atifs_private_data
@@ -600,7 +601,7 @@ static GLuint gen_ati_shader(struct texture_stage_op op[MAX_TEXTURES], WineD3D_G
 
             case WINED3DTOP_BUMPENVMAP:
             case WINED3DTOP_BUMPENVMAPLUMINANCE:
-                /* Those are handled in the first pass of the shader(generation pass 1 and 2) alraedy */
+                /* Those are handled in the first pass of the shader(generation pass 1 and 2) already */
                 break;
 
             default: FIXME("Unhandled color operation %d on stage %d\n", op[stage].cop, stage);
@@ -782,6 +783,8 @@ static void set_tex_op_atifs(DWORD state, IWineD3DStateBlockImpl *stateblock, Wi
     struct atifs_ffp_desc       *desc;
     struct texture_stage_op     op[MAX_TEXTURES];
     struct atifs_private_data   *priv = (struct atifs_private_data *) This->shader_priv;
+    DWORD mapped_stage;
+    unsigned int i;
 
     gen_ffp_op(stateblock, op);
     desc = (struct atifs_ffp_desc *) find_ffp_shader(&priv->fragment_shaders, op);
@@ -791,10 +794,28 @@ static void set_tex_op_atifs(DWORD state, IWineD3DStateBlockImpl *stateblock, Wi
             ERR("Out of memory\n");
             return;
         }
+        desc->num_textures_used = 0;
+        for(i = 0; i < GL_LIMITS(texture_stages); i++) {
+            if(op[i].cop == WINED3DTOP_DISABLE) break;
+            desc->num_textures_used = i;
+        }
+
         memcpy(desc->parent.op, op, sizeof(op));
         desc->shader = gen_ati_shader(op, &GLINFO_LOCATION);
         add_ffp_shader(&priv->fragment_shaders, &desc->parent);
         TRACE("Allocated fixed function replacement shader descriptor %p\n", desc);
+    }
+
+    /* GL_ATI_fragment_shader depends on the GL_TEXTURE_xD enable settings. Update the texture stages
+     * used by this shader
+     */
+    for(i = 0; i < desc->num_textures_used; i++) {
+        mapped_stage = This->texUnitMap[i];
+        if(mapped_stage != -1) {
+            GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
+            checkGLcall("glActiveTextureARB");
+            texture_activate_dimensions(i, stateblock, context);
+        }
     }
 
     GL_EXTCALL(glBindFragmentShaderATI(desc->shader));
@@ -1026,6 +1047,16 @@ static void shader_atifs_generate_vshader(IWineD3DVertexShader *iface, SHADER_BU
     arb_program_shader_backend.shader_generate_vshader(iface, buffer);
 }
 
+static void shader_atifs_fragment_enable(IWineD3DDevice *iface, BOOL enable) {
+    if(enable) {
+        glEnable(GL_FRAGMENT_SHADER_ATI);
+        checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
+    } else {
+        glDisable(GL_FRAGMENT_SHADER_ATI);
+        checkGLcall("glDisable(GL_FRAGMENT_SHADER_ATI)");
+    }
+}
+
 const shader_backend_t atifs_shader_backend = {
     shader_atifs_select,
     shader_atifs_select_depth_blt,
@@ -1041,5 +1072,6 @@ const shader_backend_t atifs_shader_backend = {
     shader_atifs_generate_vshader,
     shader_atifs_get_caps,
     shader_atifs_load_init,
+    shader_atifs_fragment_enable,
     ATIFSStateTable
 };

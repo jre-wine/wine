@@ -47,6 +47,9 @@ typedef struct ACMWrapperImpl
     HACMSTREAM has;
     LPWAVEFORMATEX pWfIn;
     LPWAVEFORMATEX pWfOut;
+
+    LONGLONG lasttime_real;
+    LONGLONG lasttime_sent;
 } ACMWrapperImpl;
 
 static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilter, IMediaSample *pSample)
@@ -58,7 +61,7 @@ static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilte
     LPBYTE pbDstStream;
     LPBYTE pbSrcStream = NULL;
     ACMSTREAMHEADER ash;
-    BOOL unprepare_header = FALSE;
+    BOOL unprepare_header = FALSE, preroll;
     MMRESULT res;
     HRESULT hr;
     LONGLONG tStart = -1, tStop = -1, tMed;
@@ -70,8 +73,23 @@ static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilte
 	return hr;
     }
 
+    preroll = (IMediaSample_IsPreroll(pSample) == S_OK);
+
     IMediaSample_GetTime(pSample, &tStart, &tStop);
     cbSrcStream = IMediaSample_GetActualDataLength(pSample);
+
+    /* Prevent discontinuities when codecs 'absorb' data but not give anything back in return */
+    if (IMediaSample_IsDiscontinuity(pSample) == S_OK)
+    {
+        This->lasttime_real = tStart;
+        This->lasttime_sent = tStart;
+    }
+    else if (This->lasttime_real == tStart)
+        tStart = This->lasttime_sent;
+    else
+        WARN("Discontinuity\n");
+
+    tMed = tStart;
 
     TRACE("Sample data ptr = %p, size = %ld\n", pbSrcStream, (long)cbSrcStream);
 
@@ -91,6 +109,7 @@ static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilte
 	    ERR("Unable to get delivery buffer (%x)\n", hr);
 	    return hr;
 	}
+	IMediaSample_SetPreroll(pOutSample, preroll);
 
 	hr = IMediaSample_SetActualDataLength(pOutSample, 0);
 	assert(hr == S_OK);
@@ -115,26 +134,34 @@ static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilte
 	unprepare_header = TRUE;
 
         if (IMediaSample_IsDiscontinuity(pSample) == S_OK)
+        {
             res = acmStreamConvert(This->has, &ash, ACM_STREAMCONVERTF_START);
+            IMediaSample_SetDiscontinuity(pOutSample, TRUE);
+            /* One sample could be converted to multiple packets */
+            IMediaSample_SetDiscontinuity(pSample, FALSE);
+        }
         else
+        {
             res = acmStreamConvert(This->has, &ash, 0);
-
+            IMediaSample_SetDiscontinuity(pOutSample, FALSE);
+        }
 
         if (res)
         {
-	    if(res != MMSYSERR_MOREDATA)
-	        ERR("Cannot convert data header %d\n", res);
-	    goto error;
-	}
+            if(res != MMSYSERR_MOREDATA)
+                ERR("Cannot convert data header %d\n", res);
+            goto error;
+        }
 
-	TRACE("used in %u/%u, used out %u/%u\n", ash.cbSrcLengthUsed, ash.cbSrcLength, ash.cbDstLengthUsed, ash.cbDstLength);
+        TRACE("used in %u/%u, used out %u/%u\n", ash.cbSrcLengthUsed, ash.cbSrcLength, ash.cbDstLengthUsed, ash.cbDstLength);
 
-	hr = IMediaSample_SetActualDataLength(pOutSample, ash.cbDstLengthUsed);
-	assert(hr == S_OK);
+        hr = IMediaSample_SetActualDataLength(pOutSample, ash.cbDstLengthUsed);
+        assert(hr == S_OK);
 
+        /* Bug in acm codecs? It apparantly uses the input, but doesn't necessarily output immediately kl*/
         if (!ash.cbSrcLengthUsed)
         {
-            WARN("Sample was skipped\n");
+            WARN("Sample was skipped? Outputted: %u\n", ash.cbDstLengthUsed);
             ash.cbSrcLength = 0;
             goto error;
         }
@@ -143,7 +170,7 @@ static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilte
         if (ash.cbSrcLengthUsed == cbSrcStream)
         {
             IMediaSample_SetTime(pOutSample, &tStart, &tStop);
-            tStart = tStop;
+            tStart = tMed = tStop;
         }
         else if (tStop != tStart)
         {
@@ -159,10 +186,7 @@ static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilte
         }
         TRACE("Sample stop time: %u.%03u\n", (DWORD)(tStart/10000000), (DWORD)((tStart/10000)%1000));
 
-        if (IMediaSample_IsDiscontinuity(pSample) == S_FALSE)
-            hr = OutputPin_SendSample((OutputPin*)This->tf.ppPins[1], pOutSample);
-        else
-            TRACE("Skipping first sample: Discontinuity\n");
+        hr = OutputPin_SendSample((OutputPin*)This->tf.ppPins[1], pOutSample);
 
         if (hr != S_OK && hr != VFW_E_NOT_CONNECTED) {
             if (FAILED(hr))
@@ -180,7 +204,14 @@ error:
         if (pOutSample)
             IMediaSample_Release(pOutSample);
         pOutSample = NULL;
+
     }
+
+    This->lasttime_real = tStop;
+    This->lasttime_sent = tMed;
+
+    if (hr != S_OK)
+        FIXME("FATALITY: %08x\n", hr);
 
     return hr;
 }
@@ -245,7 +276,8 @@ static HRESULT ACMWrapper_Cleanup(TransformFilterImpl* pTransformFilter)
 	acmStreamClose(This->has, 0);
 
     This->has = 0;
-    
+    This->lasttime_real = This->lasttime_sent = -1;
+
     return S_OK;
 }
 
@@ -280,6 +312,7 @@ HRESULT ACMWrapper_create(IUnknown * pUnkOuter, LPVOID * ppv)
         return hr;
 
     *ppv = (LPVOID)This;
+    This->lasttime_real = This->lasttime_sent = -1;
 
     return hr;
 }

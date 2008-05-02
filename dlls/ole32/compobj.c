@@ -206,7 +206,7 @@ static void COMPOBJ_InitProcess( void )
     /* Dispatching to the correct thread in an apartment is done through
      * window messages rather than RPC transports. When an interface is
      * marshalled into another apartment in the same process, a window of the
-     * following class is created. The *caller* of CoMarshalInterface (ie the
+     * following class is created. The *caller* of CoMarshalInterface (i.e., the
      * application) is responsible for pumping the message loop in that thread.
      * The WM_USER messages which point to the RPCs are then dispatched to
      * COM_AptWndProc by the user's code from the apartment in which the interface
@@ -2652,9 +2652,9 @@ HRESULT WINAPI CoLockObjectExternal(
     if (stubmgr)
     {
         if (fLock)
-            stub_manager_ext_addref(stubmgr, 1);
+            stub_manager_ext_addref(stubmgr, 1, FALSE);
         else
-            stub_manager_ext_release(stubmgr, 1, fLastUnlockReleases);
+            stub_manager_ext_release(stubmgr, 1, FALSE, fLastUnlockReleases);
         
         stub_manager_int_release(stubmgr);
 
@@ -2666,7 +2666,7 @@ HRESULT WINAPI CoLockObjectExternal(
 
         if (stubmgr)
         {
-            stub_manager_ext_addref(stubmgr, 1);
+            stub_manager_ext_addref(stubmgr, 1, FALSE);
             stub_manager_int_release(stubmgr);
         }
 

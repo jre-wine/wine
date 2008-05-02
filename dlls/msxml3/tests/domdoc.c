@@ -143,10 +143,9 @@ static  const CHAR szTransformSSXML[] =
 "</xsl:stylesheet>";
 
 static  const CHAR szTransformOutput[] =
-"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
-"<html><body><h1>\n"
-"Hello World\n"
-"</h1></body></html>\n";
+"<html><body><h1>"
+"Hello World"
+"</h1></body></html>";
 
 static const WCHAR szNonExistentFile[] = {
     'c', ':', '\\', 'N', 'o', 'n', 'e', 'x', 'i', 's', 't', 'e', 'n', 't', '.', 'x', 'm', 'l', 0
@@ -240,6 +239,19 @@ static VARIANT _variantbstr_(const char *str)
     V_VT(&v) = VT_BSTR;
     V_BSTR(&v) = _bstr_(str);
     return v;
+}
+
+static BOOL compareIgnoreReturns(BSTR sLeft, BSTR sRight)
+{
+    for (;;)
+    {
+        while (*sLeft == '\r' || *sLeft == '\n') sLeft++;
+        while (*sRight == '\r' || *sRight == '\n') sRight++;
+        if (*sLeft != *sRight) return FALSE;
+        if (!*sLeft) return TRUE;
+        sLeft++;
+        sRight++;
+    }
 }
 
 static void get_str_for_type(DOMNodeType type, char *buf)
@@ -2327,6 +2339,47 @@ static void test_xmlTypes(void)
                 ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string\n");
                 SysFreeString(str);
 
+                /* test insertData */
+                str = SysAllocStringLen(NULL, 0);
+                hr = IXMLDOMComment_insertData(pComment, -1, str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, -1, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 1000, str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 1000, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 0, NULL);
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 0, str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                SysFreeString(str);
+
+                hr = IXMLDOMComment_insertData(pComment, -1, _bstr_("Inserting"));
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 1000, _bstr_("Inserting"));
+                ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 0, _bstr_("Begin "));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 17, _bstr_("Middle"));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_insertData(pComment, 39, _bstr_(" End"));
+                ok(hr == S_OK, "ret %08x\n", hr );
+
+                hr = IXMLDOMComment_get_text(pComment, &str);
+                ok(hr == S_OK, "ret %08x\n", hr );
+                ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
+                SysFreeString(str);
+
                 IXMLDOMComment_Release(pComment);
             }
 
@@ -3193,13 +3246,72 @@ static void test_testTransforms(void)
 
         hr = IXMLDOMDocument_transformNode(doc, pNode, &bOut);
         ok(hr == S_OK, "ret %08x\n", hr );
-        ok( !lstrcmpW( bOut, _bstr_(szTransformOutput) ), "Stylesheet output not correct\n");
+        ok( compareIgnoreReturns( bOut, _bstr_(szTransformOutput)), "Stylesheet output not correct\n");
 
         IXMLDOMNode_Release(pNode);
     }
 
     IXMLDOMDocument_Release(docSS);
     IXMLDOMDocument_Release(doc);
+
+    free_bstrs();
+}
+
+static void test_Namespaces(void)
+{
+    IXMLDOMDocument2 *doc = NULL;
+    IXMLDOMNode *pNode;
+    IXMLDOMNode *pNode2 = NULL;
+    VARIANT_BOOL bSucc;
+    HRESULT hr;
+    BSTR str;
+    static  const CHAR szNamespacesXML[] =
+"<?xml version=\"1.0\"?>\n"
+"<root xmlns:WEB='http://www.winehq.org'>\n"
+"<WEB:Site version=\"1.0\" />\n"
+"</root>";
+
+    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
+    if( hr != S_OK )
+        return;
+
+    hr = IXMLDOMDocument2_loadXML(doc, _bstr_(szNamespacesXML), &bSucc);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    ok(bSucc == VARIANT_TRUE, "Expected VARIANT_TRUE got VARIANT_FALSE");
+
+    hr = IXMLDOMDocument_selectSingleNode(doc, _bstr_("root"), &pNode );
+    ok(hr == S_OK, "ret %08x\n", hr );
+    if(hr == S_OK)
+    {
+        hr = IXMLDOMNode_get_firstChild( pNode, &pNode2 );
+        ok( hr == S_OK, "ret %08x\n", hr );
+        ok( pNode2 != NULL, "pNode2 == NULL\n");
+
+        /* Test get_prefix */
+        hr = IXMLDOMNode_get_prefix(pNode2, NULL);
+        ok( hr == E_INVALIDARG, "ret %08x\n", hr );
+        /* NOTE: Need to test that arg2 gets cleared on Error. */
+
+        hr = IXMLDOMNode_get_prefix(pNode2, &str);
+        ok( hr == S_OK, "ret %08x\n", hr );
+        ok( !lstrcmpW( str, _bstr_("WEB")), "incorrect prefix string\n");
+        SysFreeString(str);
+
+        /* Test get_namespaceURI */
+        hr = IXMLDOMNode_get_namespaceURI(pNode2, NULL);
+        ok( hr == E_INVALIDARG, "ret %08x\n", hr );
+        /* NOTE: Need to test that arg2 gets cleared on Error. */
+
+        hr = IXMLDOMNode_get_namespaceURI(pNode2, &str);
+        ok( hr == S_OK, "ret %08x\n", hr );
+        ok( !lstrcmpW( str, _bstr_("http://www.winehq.org")), "incorrect namespaceURI string\n");
+        SysFreeString(str);
+
+        IXMLDOMNode_Release(pNode2);
+        IXMLDOMNode_Release(pNode);
+    }
+
+    IXMLDOMDocument2_Release(doc);
 
     free_bstrs();
 }
@@ -3227,6 +3339,7 @@ START_TEST(domdoc)
     test_nodeTypeTests();
     test_DocumentSaveToDocument();
     test_testTransforms();
+    test_Namespaces();
 
     CoUninitialize();
 }

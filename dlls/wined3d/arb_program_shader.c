@@ -1226,9 +1226,6 @@ void pshader_hw_texreg2ar(SHADER_OPCODE_ARG* arg) {
 void pshader_hw_texreg2gb(SHADER_OPCODE_ARG* arg) {
 
      SHADER_BUFFER* buffer = arg->buffer;
-     IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
-     IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
-     DWORD flags;
 
      DWORD reg1 = arg->dst & WINED3DSP_REGNUM_MASK;
      char dst_str[8];
@@ -1238,23 +1235,18 @@ void pshader_hw_texreg2gb(SHADER_OPCODE_ARG* arg) {
      pshader_gen_input_modifier_line(arg->shader, buffer, arg->src[0], 0, src_str);
      shader_addline(buffer, "MOV TMP.r, %s.g;\n", src_str);
      shader_addline(buffer, "MOV TMP.g, %s.b;\n", src_str);
-     flags = reg1 < MAX_TEXTURES ? deviceImpl->stateBlock->textureState[reg1][WINED3DTSS_TEXTURETRANSFORMFLAGS] : 0;
      shader_hw_sample(arg, reg1, dst_str, "TMP", FALSE, FALSE);
 }
 
 void pshader_hw_texreg2rgb(SHADER_OPCODE_ARG* arg) {
 
     SHADER_BUFFER* buffer = arg->buffer;
-    IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
-    IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
-    DWORD flags;
     DWORD reg1 = arg->dst & WINED3DSP_REGNUM_MASK;
     char dst_str[8];
     char src_str[50];
 
     sprintf(dst_str, "T%u", reg1);
     pshader_gen_input_modifier_line(arg->shader, buffer, arg->src[0], 0, src_str);
-    flags = reg1 < MAX_TEXTURES ? deviceImpl->stateBlock->textureState[reg1][WINED3DTSS_TEXTURETRANSFORMFLAGS] : 0;
     shader_hw_sample(arg, reg1, dst_str, src_str, FALSE, FALSE);
 }
 
@@ -1993,7 +1985,7 @@ static void shader_arb_generate_vshader(IWineD3DVertexShader *iface, SHADER_BUFF
      * a replacement shader depend on the texcoord.w being set properly.
      *
      * GL_NV_vertex_program defines that all output values are initialized to {0.0, 0.0, 0.0, 1.0}. This
-     * assetion is in effect even when using GL_ARB_vertex_program without any NV specific additions. So
+     * assertion is in effect even when using GL_ARB_vertex_program without any NV specific additions. So
      * skip this if NV_vertex_program is supported. Otherwise, initialize the secondary color. For the tex-
      * coords, we have a flag in the opengl caps. Many cards do not require the texcoord being set, and
      * this can eat a number of instructions, so skip it unless this cap is set as well
@@ -2081,6 +2073,10 @@ static void shader_arb_get_caps(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info
 static void shader_arb_load_init(void) {
 }
 
+static void shader_arb_fragment_enable(IWineD3DDevice *iface, BOOL enable) {
+    none_shader_backend.shader_fragment_enable(iface, enable);
+}
+
 const shader_backend_t arb_program_shader_backend = {
     &shader_arb_select,
     &shader_arb_select_depth_blt,
@@ -2096,5 +2092,6 @@ const shader_backend_t arb_program_shader_backend = {
     &shader_arb_generate_vshader,
     &shader_arb_get_caps,
     &shader_arb_load_init,
+    &shader_arb_fragment_enable,
     FFPStateTable
 };

@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2006 Jacek Caban for CodeWeavers
+ * Copyright 2005-2008 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -56,29 +56,83 @@ typedef struct HTMLDOMNode HTMLDOMNode;
 typedef struct ConnectionPoint ConnectionPoint;
 typedef struct BSCallback BSCallback;
 typedef struct nsChannelBSC nsChannelBSC;
+typedef struct event_target_t event_target_t;
 
 /* NOTE: make sure to keep in sync with dispex.c */
 typedef enum {
+    NULL_tid,
+    DispDOMChildrenCollection_tid,
+    DispHTMLCommentElement_tid,
+    DispHTMLDocument_tid,
+    DispHTMLDOMTextNode_tid,
+    DispHTMLElementCollection_tid,
+    DispHTMLImg_tid,
+    DispHTMLInputElement_tid,
+    DispHTMLOptionElement_tid,
+    DispHTMLStyle_tid,
+    DispHTMLUnknownElement_tid,
+    DispHTMLWindow2_tid,
+    IHTMLCommentElement_tid,
+    IHTMLDocument2_tid,
+    IHTMLDocument3_tid,
+    IHTMLDocument4_tid,
+    IHTMLDocument5_tid,
+    IHTMLDOMChildrenCollection_tid,
+    IHTMLDOMNode_tid,
+    IHTMLDOMNode2_tid,
+    IHTMLDOMTextNode_tid,
+    IHTMLElement_tid,
+    IHTMLElement2_tid,
+    IHTMLElementCollection_tid,
+    IHTMLImgElement_tid,
+    IHTMLInputElement_tid,
+    IHTMLOptionElement_tid,
+    IHTMLStyle_tid,
     IHTMLWindow2_tid,
+    IHTMLWindow3_tid,
+    IOmNavigator_tid,
     LAST_tid
 } tid_t;
+
+typedef struct dispex_data_t dispex_data_t;
+
+#define MSHTML_DISPID_CUSTOM_MIN 0x60000000
+#define MSHTML_DISPID_CUSTOM_MAX 0x6fffffff
+
+typedef struct {
+    HRESULT (*get_dispid)(IUnknown*,BSTR,DWORD,DISPID*);
+    HRESULT (*invoke)(IUnknown*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
+} dispex_static_data_vtbl_t;
+
+typedef struct {
+    const dispex_static_data_vtbl_t *vtbl;
+    const tid_t disp_tid;
+    dispex_data_t *data;
+    const tid_t iface_tids[];
+} dispex_static_data_t;
 
 typedef struct {
     const IDispatchExVtbl  *lpIDispatchExVtbl;
 
     IUnknown *outer;
+
+    dispex_static_data_t *data;
 } DispatchEx;
 
-void init_dispex(DispatchEx*,IUnknown*);
+void init_dispex(DispatchEx*,IUnknown*,dispex_static_data_t*);
 
 typedef struct {
+    DispatchEx dispex;
     const IHTMLWindow2Vtbl *lpHTMLWindow2Vtbl;
     const IHTMLWindow3Vtbl *lpHTMLWindow3Vtbl;
+    const IDispatchExVtbl  *lpIDispatchExVtbl;
 
     LONG ref;
 
     HTMLDocument *doc;
     nsIDOMWindow *nswindow;
+
+    IHTMLEventObj *event;
 
     struct list entry;
 } HTMLWindow;
@@ -130,6 +184,7 @@ typedef struct {
 } HTMLOptionElementFactory;
 
 struct HTMLDocument {
+    DispatchEx dispex;
     const IHTMLDocument2Vtbl              *lpHTMLDocument2Vtbl;
     const IHTMLDocument3Vtbl              *lpHTMLDocument3Vtbl;
     const IHTMLDocument4Vtbl              *lpHTMLDocument4Vtbl;
@@ -149,6 +204,7 @@ struct HTMLDocument {
     const IHlinkTargetVtbl                *lpHlinkTargetVtbl;
     const IPersistStreamInitVtbl          *lpPersistStreamInitVtbl;
     const ICustomDocVtbl                  *lpCustomDocVtbl;
+    const IDispatchExVtbl                 *lpIDispatchExVtbl;
 
     LONG ref;
 
@@ -267,13 +323,16 @@ typedef struct {
 } NodeImplVtbl;
 
 struct HTMLDOMNode {
-    const IHTMLDOMNodeVtbl *lpHTMLDOMNodeVtbl;
+    DispatchEx dispex;
+    const IHTMLDOMNodeVtbl   *lpHTMLDOMNodeVtbl;
+    const IHTMLDOMNode2Vtbl  *lpHTMLDOMNode2Vtbl;
     const NodeImplVtbl *vtbl;
 
     LONG ref;
 
     nsIDOMNode *nsnode;
     HTMLDocument *doc;
+    event_target_t *event_target;
 
     HTMLDOMNode *next;
 };
@@ -345,6 +404,7 @@ typedef struct {
 #define HTMLELEM(x)      ((IHTMLElement*)                 &(x)->lpHTMLElementVtbl)
 #define HTMLELEM2(x)     ((IHTMLElement2*)                &(x)->lpHTMLElement2Vtbl)
 #define HTMLDOMNODE(x)   ((IHTMLDOMNode*)                 &(x)->lpHTMLDOMNodeVtbl)
+#define HTMLDOMNODE2(x)  ((IHTMLDOMNode2*)                &(x)->lpHTMLDOMNode2Vtbl)
 
 #define HTMLTEXTCONT(x)  ((IHTMLTextContainer*)           &(x)->lpHTMLTextContainerVtbl)
 
@@ -426,6 +486,15 @@ void get_editor_controller(NSContainer*);
 void init_nsevents(NSContainer*);
 nsresult get_nsinterface(nsISupports*,REFIID,void**);
 
+typedef enum {
+    EVENTID_LOAD,
+    EVENTID_LAST
+} eventid_t;
+
+void check_event_attr(HTMLDocument*,nsIDOMElement*);
+void release_event_target(event_target_t*);
+void fire_event(HTMLDocument*,eventid_t,nsIDOMNode*);
+
 void set_document_bscallback(HTMLDocument*,nsChannelBSC*);
 void set_current_mon(HTMLDocument*,IMoniker*);
 HRESULT start_binding(HTMLDocument*,BSCallback*,IBindCtx*);
@@ -446,9 +515,13 @@ IHTMLStyleSheetsCollection *HTMLStyleSheetsCollection_Create(nsIDOMStyleSheetLis
 void detach_selection(HTMLDocument*);
 void detach_ranges(HTMLDocument*);
 
+HTMLDOMNode *HTMLDOMTextNode_Create(nsIDOMNode*);
+
 HTMLElement *HTMLElement_Create(nsIDOMNode*);
+HTMLElement *HTMLCommentElement_Create(nsIDOMNode*);
 HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLImgElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLInputElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLOptionElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLScriptElement_Create(nsIDOMHTMLElement*);
@@ -472,6 +545,7 @@ void release_nodes(HTMLDocument*);
 void release_script_hosts(HTMLDocument*);
 void connect_scripts(HTMLDocument*);
 void doc_insert_script(HTMLDocument*,nsIDOMHTMLScriptElement*);
+IDispatch *script_parse_event(HTMLDocument*,LPCWSTR);
 
 IHTMLElementCollection *create_all_collection(HTMLDOMNode*);
 
@@ -525,15 +599,18 @@ typedef struct {
     HWND thread_hwnd;
     task_t *task_queue_head;
     task_t *task_queue_tail;
+    struct list timer_list;
 } thread_data_t;
 
 thread_data_t *get_thread_data(BOOL);
 HWND get_thread_hwnd(void);
 void push_task(task_t*);
 void remove_doc_tasks(const HTMLDocument*);
+DWORD set_task_timer(HTMLDocument*,DWORD,IDispatch*);
 
 HRESULT get_typeinfo(tid_t,ITypeInfo**);
 void release_typelib(void);
+void call_disp_func(HTMLDocument*,IDispatch*);
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);

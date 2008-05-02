@@ -223,8 +223,14 @@ static HRESULT WINAPI HTMLInputElement_put_disabled(IHTMLInputElement *iface, VA
 static HRESULT WINAPI HTMLInputElement_get_disabled(IHTMLInputElement *iface, VARIANT_BOOL *p)
 {
     HTMLInputElement *This = HTMLINPUT_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    PRBool disabled = FALSE;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsIDOMHTMLInputElement_GetDisabled(This->nsinput, &disabled);
+
+    *p = disabled ? VARIANT_TRUE : VARIANT_FALSE;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLInputElement_get_form(IHTMLInputElement *iface, IHTMLFormElement **p)
@@ -1053,15 +1059,30 @@ static const NodeImplVtbl HTMLInputElementImplVtbl = {
     HTMLInputElement_destructor
 };
 
+static dispex_static_data_t HTMLInputElement_dispex = {
+    NULL,
+    DispHTMLInputElement_tid,
+    NULL,
+    {
+        IHTMLDOMNode_tid,
+        IHTMLDOMNode2_tid,
+        IHTMLElement_tid,
+        IHTMLElement2_tid,
+        IHTMLInputElement_tid,
+        0
+    }
+};
+
 HTMLElement *HTMLInputElement_Create(nsIDOMHTMLElement *nselem)
 {
-    HTMLInputElement *ret = heap_alloc(sizeof(HTMLInputElement));
+    HTMLInputElement *ret = heap_alloc_zero(sizeof(HTMLInputElement));
     nsresult nsres;
-
-    HTMLElement_Init(&ret->element);
 
     ret->lpHTMLInputElementVtbl = &HTMLInputElementVtbl;
     ret->element.node.vtbl = &HTMLInputElementImplVtbl;
+
+    init_dispex(&ret->element.node.dispex, (IUnknown*)HTMLINPUT(ret), &HTMLInputElement_dispex);
+    HTMLElement_Init(&ret->element);
 
     nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLInputElement,
                                              (void**)&ret->nsinput);

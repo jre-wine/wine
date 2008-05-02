@@ -44,6 +44,10 @@
 # include <libxslt/xsltInternals.h>
 #endif
 
+#ifdef HAVE_LIBXML2
+# include <libxml/HTMLtree.h>
+#endif
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
@@ -135,8 +139,13 @@ static HRESULT WINAPI xmlnode_GetTypeInfoCount(
     IXMLDOMNode *iface,
     UINT* pctinfo )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+
+    TRACE("(%p)->(%p)\n", This, pctinfo);
+
+    *pctinfo = 1;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlnode_GetTypeInfo(
@@ -145,8 +154,14 @@ static HRESULT WINAPI xmlnode_GetTypeInfo(
     LCID lcid,
     ITypeInfo** ppTInfo )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    HRESULT hr;
+
+    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+
+    hr = get_typeinfo(IXMLDOMNode_tid, ppTInfo);
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_GetIDsOfNames(
@@ -157,8 +172,25 @@ static HRESULT WINAPI xmlnode_GetIDsOfNames(
     LCID lcid,
     DISPID* rgDispId )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
+          lcid, rgDispId);
+
+    if(!rgszNames || cNames == 0 || !rgDispId)
+        return E_INVALIDARG;
+
+    hr = get_typeinfo(IXMLDOMNode_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_Invoke(
@@ -172,8 +204,22 @@ static HRESULT WINAPI xmlnode_Invoke(
     EXCEPINFO* pExcepInfo,
     UINT* puArgErr )
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IXMLDOMNode_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, &(This->lpVtbl), dispIdMember, wFlags, pDispParams,
+                pVarResult, pExcepInfo, puArgErr);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_get_nodeName(
@@ -1065,21 +1111,39 @@ static HRESULT WINAPI xmlnode_transformNode(
             result = xsltApplyStylesheet(xsltSS, This->node->doc, NULL);
             if(result)
             {
-                xmlBufferPtr pXmlBuf;
-                int nSize;
+                const xmlChar *pContent;
 
-                pXmlBuf = xmlBufferCreate();
-                if(pXmlBuf)
+                if(result->type == XML_HTML_DOCUMENT_NODE)
                 {
-                    nSize = xmlNodeDump(pXmlBuf, NULL, (xmlNodePtr)result, 0, 0);
-                    if(nSize > 0)
+                    xmlOutputBufferPtr	pOutput = xmlAllocOutputBuffer(NULL);
+                    if(pOutput)
                     {
-                        const xmlChar *pContent;
+                        htmlDocContentDumpOutput(pOutput, result->doc, NULL);
+                        if(pOutput)
+                        {
+                            pContent = xmlBufferContent(pOutput->buffer);
+                            *xmlString = bstr_from_xmlChar(pContent);
+                        }
 
-                        pContent = xmlBufferContent(pXmlBuf);
-                        *xmlString = bstr_from_xmlChar(pContent);
+                        xmlOutputBufferClose(pOutput);
+                    }
+                }
+                else
+                {
+                    xmlBufferPtr pXmlBuf;
+                    int nSize;
 
-                        xmlBufferFree(pXmlBuf);
+                    pXmlBuf = xmlBufferCreate();
+                    if(pXmlBuf)
+                    {
+                        nSize = xmlNodeDump(pXmlBuf, NULL, (xmlNodePtr)result, 0, 0);
+                        if(nSize > 0)
+                        {
+                            pContent = xmlBufferContent(pXmlBuf);
+                            *xmlString = bstr_from_xmlChar(pContent);
+
+                            xmlBufferFree(pXmlBuf);
+                        }
                     }
                 }
             }
@@ -1143,16 +1207,52 @@ static HRESULT WINAPI xmlnode_get_namespaceURI(
     IXMLDOMNode *iface,
     BSTR* namespaceURI)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    HRESULT hr = S_FALSE;
+    xmlNsPtr *pNSList;
+
+    TRACE("%p %p\n", This, namespaceURI );
+
+    if(!namespaceURI)
+        return E_INVALIDARG;
+
+    *namespaceURI = NULL;
+
+    pNSList = xmlGetNsList(This->node->doc, This->node);
+    if(pNSList)
+    {
+        *namespaceURI = bstr_from_xmlChar( pNSList[0]->href );
+
+        hr = S_OK;
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_get_prefix(
     IXMLDOMNode *iface,
     BSTR* prefixString)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    xmlnode *This = impl_from_IXMLDOMNode( iface );
+    HRESULT hr = S_FALSE;
+    xmlNsPtr *pNSList;
+
+    TRACE("%p %p\n", This, prefixString );
+
+    if(!prefixString)
+        return E_INVALIDARG;
+
+    *prefixString = NULL;
+
+    pNSList = xmlGetNsList(This->node->doc, This->node);
+    if(pNSList)
+    {
+        *prefixString = bstr_from_xmlChar( pNSList[0]->prefix );
+
+        hr = S_OK;
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI xmlnode_get_baseName(

@@ -318,13 +318,13 @@ static const struct message WmSwitchNotMaximizedChild[] = {
     { WM_NCACTIVATE, sent|wparam|defwinproc, 1 }, /* in the 2nd MDI child */
     { WM_SETVISIBLE, hook }, /* in the 1st MDI child */
     { WM_KILLFOCUS, sent|defwinproc }, /* in the 1st MDI child */
-    { WM_IME_SETCONTEXT, sent|defwinproc }, /* in the 1st MDI child */
-    { WM_IME_SETCONTEXT, sent }, /* in the  MDI client */
+    { WM_IME_SETCONTEXT, sent|defwinproc|optional }, /* in the 1st MDI child */
+    { WM_IME_SETCONTEXT, sent|optional }, /* in the  MDI client */
     { WM_SETFOCUS, sent, 0 }, /* in the  MDI client */
     { WM_SETVISIBLE, hook },
     { WM_KILLFOCUS, sent }, /* in the  MDI client */
-    { WM_IME_SETCONTEXT, sent }, /* in the  MDI client */
-    { WM_IME_SETCONTEXT, sent|defwinproc  }, /* in the 1st MDI child */
+    { WM_IME_SETCONTEXT, sent|optional }, /* in the  MDI client */
+    { WM_IME_SETCONTEXT, sent|defwinproc|optional  }, /* in the 1st MDI child */
     { WM_SETFOCUS, sent|defwinproc }, /* in the 2nd MDI child */
     { WM_MDIACTIVATE, sent|defwinproc }, /* in the 2nd MDI child */
     { WM_WINDOWPOSCHANGED, sent|wparam, SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE}, /* in the 2nd MDI child */
@@ -3411,7 +3411,7 @@ static void test_mdi_messages(void)
     flush_sequence();
 
     SendMessageA(mdi_client, WM_MDIACTIVATE, (WPARAM)mdi_child2, 0);
-    ok_sequence(WmSwitchNotMaximizedChild, "Not maximized child did not switch correctly", TRUE);
+    ok_sequence(WmSwitchNotMaximizedChild, "Not maximized child did not switch correctly", FALSE);
     trace("end of test for switch not maximized MDI children\n");
     flush_sequence();
 
@@ -5065,6 +5065,76 @@ static void test_combobox_messages(void)
 
     DestroyWindow(combo);
     DestroyWindow(parent);
+}
+
+/****************** WM_IME_KEYDOWN message test *******************/
+
+static const struct message WmImeKeydownMsgSeq_0[] =
+{
+    { WM_IME_KEYDOWN, wparam, VK_RETURN },
+    { WM_CHAR, wparam, 'A' },
+    { 0 }
+};
+
+static const struct message WmImeKeydownMsgSeq_1[] =
+{
+    { WM_KEYDOWN, wparam, VK_RETURN },
+    { WM_CHAR,    wparam, VK_RETURN },
+    { 0 }
+};
+
+static LRESULT WINAPI wmime_keydown_procA(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    struct message msg;
+
+    trace("wmime_keydown_procA: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
+
+    msg.message = message;
+    msg.flags = wparam|lparam;
+    msg.wParam = wParam;
+    msg.lParam = lParam;
+    add_message(&msg);
+
+    return DefWindowProcA(hwnd, message, wParam, lParam);
+}
+
+static void register_wmime_keydown_class(void)
+{
+    WNDCLASSA cls;
+
+    ZeroMemory(&cls, sizeof(WNDCLASSA));
+    cls.lpfnWndProc = wmime_keydown_procA;
+    cls.hInstance = GetModuleHandleA(0);
+    cls.lpszClassName = "wmime_keydown_class";
+    if (!RegisterClassA(&cls)) assert(0);
+}
+
+void test_wmime_keydown_message(void)
+{
+    HWND hwnd;
+    MSG msg;
+
+    trace("Message sequences by WM_IME_KEYDOWN\n");
+
+    register_wmime_keydown_class();
+    hwnd = CreateWindowExA(0, "wmime_keydown_class", NULL, WS_OVERLAPPEDWINDOW,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 300, 300, 0,
+                           NULL, NULL, 0);
+    flush_events();
+    flush_sequence();
+
+    SendMessage(hwnd, WM_IME_KEYDOWN, VK_RETURN, 0x1c0001);
+    SendMessage(hwnd, WM_CHAR, 'A', 1);
+    ok_sequence(WmImeKeydownMsgSeq_0, "WM_IME_KEYDOWN 0", FALSE);
+
+    while ( PeekMessage(&msg, 0, 0, 0, PM_REMOVE) )
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+    ok_sequence(WmImeKeydownMsgSeq_1, "WM_IME_KEYDOWN 1", FALSE);
+
+    DestroyWindow(hwnd);
 }
 
 /************* painting message test ********************/
@@ -10353,6 +10423,7 @@ START_TEST(msg)
     test_static_messages();
     test_listbox_messages();
     test_combobox_messages();
+    test_wmime_keydown_message();
     test_paint_messages();
     test_interthread_messages();
     test_message_conversion();

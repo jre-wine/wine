@@ -129,6 +129,9 @@ static nsresult NSAPI handle_keypress(nsIDOMEventListener *iface,
 static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event)
 {
     NSContainer *This = NSEVENTLIST_THIS(iface)->This;
+    nsIDOMHTMLDocument *nshtmldoc;
+    nsIDOMHTMLElement *nsbody = NULL;
+    nsIDOMDocument *nsdoc;
     task_t *task;
 
     TRACE("(%p)\n", This);
@@ -159,6 +162,19 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
      */
     push_task(task);
 
+
+    nsIWebNavigation_GetDocument(This->navigation, &nsdoc);
+    nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDOMHTMLDocument, (void**)&nshtmldoc);
+    nsIDOMDocument_Release(nsdoc);
+
+    nsIDOMHTMLDocument_GetBody(nshtmldoc, &nsbody);
+    nsIDOMHTMLDocument_Release(nshtmldoc);
+
+    if(nsbody) {
+        fire_event(This->doc, EVENTID_LOAD, (nsIDOMNode*)nsbody);
+        nsIDOMHTMLElement_Release(nsbody);
+    }
+
     return NS_OK;
 }
 
@@ -167,6 +183,7 @@ static nsresult NSAPI handle_node_insert(nsIDOMEventListener *iface, nsIDOMEvent
     NSContainer *This = NSEVENTLIST_THIS(iface)->This;
     nsIDOMHTMLScriptElement *script;
     nsIDOMEventTarget *target;
+    nsIDOMElement *elem;
     nsresult nsres;
 
     TRACE("(%p %p)\n", This, event);
@@ -174,16 +191,23 @@ static nsresult NSAPI handle_node_insert(nsIDOMEventListener *iface, nsIDOMEvent
     nsres = nsIDOMEvent_GetTarget(event, &target);
     if(NS_FAILED(nsres)) {
         ERR("GetTarget failed: %08x\n", nsres);
-        return nsres;
+        return NS_OK;
     }
 
-    nsres = nsISupports_QueryInterface(target, &IID_nsIDOMHTMLScriptElement, (void**)&script);
+    nsres = nsIDOMEventTarget_QueryInterface(target, &IID_nsIDOMElement, (void**)&elem);
+    nsIDOMEventTarget_Release(target);
+    if(NS_FAILED(nsres))
+        return NS_OK;
+
+    nsres = nsIDOMElement_QueryInterface(elem, &IID_nsIDOMHTMLScriptElement, (void**)&script);
     if(SUCCEEDED(nsres)) {
         doc_insert_script(This->doc, script);
         nsIDOMHTMLScriptElement_Release(script);
     }
 
-    nsIDOMEventTarget_Release(target);
+    check_event_attr(This->doc, elem);
+
+    nsIDOMNode_Release(elem);
     return NS_OK;
 }
 

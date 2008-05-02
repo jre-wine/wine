@@ -175,9 +175,9 @@ glAttribFunc normal_funcs[WINED3DDECLTYPE_UNUSED];
 glTexAttribFunc texcoord_funcs[WINED3DDECLTYPE_UNUSED];
 
 /**
- * Note: GL seems to trap if GetDeviceCaps is called before any HWND's created
- * ie there is no GL Context - Get a default rendering context to enable the
- * function query some info from GL
+ * Note: GL seems to trap if GetDeviceCaps is called before any HWND's created,
+ * i.e., there is no GL Context - Get a default rendering context to enable the
+ * function query some info from GL.
  */
 
 static int             wined3d_fake_gl_context_ref = 0;
@@ -832,7 +832,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
              */
             gl_info->supported[ATI_ENVMAP_BUMPMAP] = FALSE;
             if(gl_info->supported[NV_REGISTER_COMBINERS]) {
-                /* Also disable ATI_FRAGMENT_SHADER if register combienrs and texture_shader2
+                /* Also disable ATI_FRAGMENT_SHADER if register combiners and texture_shader2
                  * are supported. The nv extensions provide the same functionality as the
                  * ATI one, and a bit more(signed pixelformats)
                  */
@@ -1377,6 +1377,10 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
                     gl_info->supported[WGL_ARB_PBUFFER] = TRUE;
                     TRACE_(d3d_caps)("FOUND: WGL_ARB_pbuffer support\n");
                 }
+                if (!strcmp(ThisExtn, "WGL_WINE_pixel_format_passthrough")) {
+                    gl_info->supported[WGL_WINE_PIXEL_FORMAT_PASSTHROUGH] = TRUE;
+                    TRACE_(d3d_caps)("FOUND: WGL_WINE_pixel_format_passthrough support\n");
+                }
             }
         }
     }
@@ -1749,7 +1753,10 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, U
                                                        BOOL Windowed, WINED3DMULTISAMPLE_TYPE MultiSampleType, DWORD*   pQualityLevels) {
 
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
-    TRACE_(d3d_caps)("(%p)-> (STUB) (Adptr:%d, DevType:(%x,%s), SurfFmt:(%x,%s), Win?%d, MultiSamp:%x, pQual:%p)\n",
+    const GlPixelFormatDesc *glDesc;
+    const StaticPixelFormatDesc *desc;
+
+    TRACE_(d3d_caps)("(%p)-> (Adptr:%d, DevType:(%x,%s), SurfFmt:(%x,%s), Win?%d, MultiSamp:%x, pQual:%p)\n",
           This,
           Adapter,
           DeviceType, debug_d3ddevicetype(DeviceType),
@@ -1762,17 +1769,66 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, U
         return WINED3DERR_INVALIDCALL;
     }
 
-    /* TODO: Store in Adapter structure */
-    if (pQualityLevels != NULL) {
-        static int s_single_shot = 0;
-        if (!s_single_shot) {
-            FIXME("Quality levels unsupported at present\n");
-            s_single_shot = 1;
-        }
-        *pQualityLevels = 1; /* Guess at a value! */
-    }
+    /* TODO: handle Windowed, add more quality levels */
 
     if (WINED3DMULTISAMPLE_NONE == MultiSampleType) return WINED3D_OK;
+
+    desc = getFormatDescEntry(SurfaceFormat, &Adapters[Adapter].gl_info, &glDesc);
+    if(!desc || !glDesc) {
+        return WINED3DERR_INVALIDCALL;
+    }
+
+    if(glDesc->Flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)) {
+        int i, nCfgs;
+        WineD3D_PixelFormat *cfgs;
+
+        cfgs = Adapters[Adapter].cfgs;
+        nCfgs = Adapters[Adapter].nCfgs;
+        for(i=0; i<nCfgs; i++) {
+            if(cfgs[i].numSamples != MultiSampleType)
+                continue;
+
+            if(!IWineD3DImpl_IsPixelFormatCompatibleWithDepthFmt(&cfgs[i], SurfaceFormat))
+                continue;
+
+            TRACE("Found iPixelFormat=%d to support MultiSampleType=%d for format %s\n", cfgs[i].iPixelFormat, MultiSampleType, debug_d3dformat(SurfaceFormat));
+
+            if(pQualityLevels)
+                *pQualityLevels = 1; /* Guess at a value! */
+            return WINED3D_OK;
+        }
+    }
+    else if(glDesc->Flags & WINED3DFMT_FLAG_RENDERTARGET) {
+        short redSize, greenSize, blueSize, alphaSize, colorBits;
+        int i, nCfgs;
+        WineD3D_PixelFormat *cfgs;
+
+        if(!getColorBits(SurfaceFormat, &redSize, &greenSize, &blueSize, &alphaSize, &colorBits)) {
+            ERR("Unable to color bits for format %#x, can't check multisampling capability!\n", SurfaceFormat);
+            return WINED3DERR_NOTAVAILABLE;
+        }
+
+        cfgs = Adapters[Adapter].cfgs;
+        nCfgs = Adapters[Adapter].nCfgs;
+        for(i=0; i<nCfgs; i++) {
+            if(cfgs[i].numSamples != MultiSampleType)
+                continue;
+            if(cfgs[i].redSize != redSize)
+                continue;
+            if(cfgs[i].greenSize != greenSize)
+                continue;
+            if(cfgs[i].blueSize != blueSize)
+                continue;
+            if(cfgs[i].alphaSize != alphaSize)
+                continue;
+
+            TRACE("Found iPixelFormat=%d to support MultiSampleType=%d for format %s\n", cfgs[i].iPixelFormat, MultiSampleType, debug_d3dformat(SurfaceFormat));
+
+            if(pQualityLevels)
+                *pQualityLevels = 1; /* Guess at a value! */
+            return WINED3D_OK;
+        }
+    }
     return WINED3DERR_NOTAVAILABLE;
 }
 
@@ -2342,7 +2398,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                     if(GL_SUPPORT(SGIS_GENERATE_MIPMAP)) {
                         UsageCaps |= WINED3DUSAGE_AUTOGENMIPMAP;
                     } else {
-                        /* When autogenmipmap isn't around continue and return WINED3DOK_NOAUOTGEN instead of D3D_OK */
+                        /* When autogenmipmap isn't around continue and return WINED3DOK_NOAUTOGEN instead of D3D_OK */
                         TRACE_(d3d_caps)("[FAILED] - No autogenmipmap support, but continuing\n");
                     }
                 }
@@ -2485,7 +2541,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                 if(GL_SUPPORT(SGIS_GENERATE_MIPMAP)) {
                     UsageCaps |= WINED3DUSAGE_AUTOGENMIPMAP;
                 } else {
-                    /* When autogenmipmap isn't around continue and return WINED3DOK_NOAUOTGEN instead of D3D_OK */
+                    /* When autogenmipmap isn't around continue and return WINED3DOK_NOAUTOGEN instead of D3D_OK */
                     TRACE_(d3d_caps)("[FAILED] - No autogenmipmap support, but continuing\n");
                 }
             }
@@ -3427,7 +3483,7 @@ static void test_pbo_functionality(WineD3D_GL_Info *gl_info) {
      * all the texture. This function detects this bug by its symptom and disables PBOs
      * if the test fails.
      *
-     * The test uplaods a 4x4 texture via the PBO in the "native" format GL_BGRA,
+     * The test uploads a 4x4 texture via the PBO in the "native" format GL_BGRA,
      * GL_UNSIGNED_INT_8_8_8_8_REV. This format triggers the bug, and it is what we use
      * for D3DFMT_A8R8G8B8. Then the texture is read back without any PBO and the data
      * read back is compared to the original. If they are equal PBOs are assumed to work,
@@ -3779,8 +3835,8 @@ BOOL InitAdapters(void) {
     /* For now only one default adapter */
     {
         int iPixelFormat;
-        int attribs[8];
-        int values[8];
+        int attribs[10];
+        int values[10];
         int nAttribs = 0;
         int res;
         WineD3D_PixelFormat *cfgs;
@@ -3849,6 +3905,8 @@ BOOL InitAdapters(void) {
         PUSH1(WGL_STENCIL_BITS_ARB)
         PUSH1(WGL_DRAW_TO_WINDOW_ARB)
         PUSH1(WGL_PIXEL_TYPE_ARB)
+        PUSH1(WGL_DOUBLE_BUFFER_ARB)
+        PUSH1(WGL_AUX_BUFFERS_ARB)
 
         for(iPixelFormat=1; iPixelFormat<=Adapters[0].nCfgs; iPixelFormat++) {
             res = GL_EXTCALL(wglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0, nAttribs, attribs, values));
@@ -3866,10 +3924,11 @@ BOOL InitAdapters(void) {
             cfgs->stencilSize = values[5];
             cfgs->windowDrawable = values[6];
             cfgs->iPixelType = values[7];
+            cfgs->doubleBuffer = values[8];
+            cfgs->auxBuffers = values[9];
 
             cfgs->pbufferDrawable = FALSE;
-            /* Check for pbuffer support when it is around as wglGetPixelFormatAttribiv fails for unknown
-attributes. */
+            /* Check for pbuffer support when it is around as wglGetPixelFormatAttribiv fails for unknown attributes. */
             if(GL_SUPPORT(WGL_ARB_PBUFFER)) {
                 int attrib = WGL_DRAW_TO_PBUFFER_ARB;
                 int value;
@@ -3877,7 +3936,20 @@ attributes. */
                     cfgs->pbufferDrawable = value;
             }
 
-            TRACE("iPixelFormat=%d, iPixelType=%#x, RGBA=%d/%d/%d/%d, depth=%d, stencil=%d, windowDrawable=%d, pbufferDrawable=%d\n", cfgs->iPixelFormat, cfgs->iPixelType, cfgs->redSize, cfgs->greenSize, cfgs->blueSize, cfgs->alphaSize, cfgs->depthSize, cfgs->stencilSize, cfgs->windowDrawable, cfgs->pbufferDrawable);
+            cfgs->numSamples = 0;
+            /* Check multisample support */
+            if(GL_SUPPORT(ARB_MULTISAMPLE)) {
+                int attrib[2] = {WGL_SAMPLE_BUFFERS_ARB, WGL_SAMPLES_ARB};
+                int value[2];
+                if(GL_EXTCALL(wglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0, 2, attrib, value))) {
+                    /* value[0] = WGL_SAMPLE_BUFFERS_ARB which tells whether multisampling is supported.
+                     * value[1] = number of multi sample buffers*/
+                    if(value[0])
+                        cfgs->numSamples = value[1];
+                }
+            }
+
+            TRACE("iPixelFormat=%d, iPixelType=%#x, doubleBuffer=%d, RGBA=%d/%d/%d/%d, depth=%d, stencil=%d, windowDrawable=%d, pbufferDrawable=%d\n", cfgs->iPixelFormat, cfgs->iPixelType, cfgs->doubleBuffer, cfgs->redSize, cfgs->greenSize, cfgs->blueSize, cfgs->alphaSize, cfgs->depthSize, cfgs->stencilSize, cfgs->windowDrawable, cfgs->pbufferDrawable);
             cfgs++;
         }
 

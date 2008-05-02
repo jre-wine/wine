@@ -33,6 +33,10 @@
 #include "msipriv.h"
 #include "winuser.h"
 #include "shlobj.h"
+#include "objbase.h"
+#include "mscoree.h"
+#include "fusion.h"
+#include "shlwapi.h"
 #include "wine/unicode.h"
 #include "winver.h"
 
@@ -1246,6 +1250,9 @@ static MSIFEATURE *find_feature_by_name( MSIPACKAGE *package, LPCWSTR name )
 {
     MSIFEATURE *feature;
 
+    if ( !name )
+        return NULL;
+
     LIST_FOR_EACH_ENTRY( feature, &package->features, MSIFEATURE, entry )
     {
         if ( !lstrcmpW( feature->Feature, name ) )
@@ -2426,7 +2433,7 @@ static UINT ITERATE_WriteRegistryValues(MSIRECORD *row, LPVOID param)
     {
         static const WCHAR szEmpty[] = {0};
         value_data = (LPSTR)strdupW(szEmpty);
-        size = 0;
+        size = sizeof(szEmpty);
         type = REG_SZ;
     }
 
@@ -3772,8 +3779,10 @@ static UINT ACTION_PublishFeatures(MSIPACKAGE *package)
             size = strlenW(feature->Feature_Parent)*sizeof(WCHAR);
         if (!absent)
         {
+            static const WCHAR emptyW[] = {0};
+            size += sizeof(WCHAR);
             RegSetValueExW(hukey,feature->Feature,0,REG_SZ,
-                       (LPBYTE)feature->Feature_Parent,size);
+                           (LPBYTE)(feature->Feature_Parent ? feature->Feature_Parent : emptyW),size);
         }
         else
         {
@@ -5068,7 +5077,7 @@ static LONG env_set_flags( LPCWSTR *name, LPCWSTR *value, DWORD *flags )
 static UINT ITERATE_WriteEnvironmentString( MSIRECORD *rec, LPVOID param )
 {
     MSIPACKAGE *package = param;
-    LPCWSTR name, value, comp;
+    LPCWSTR name, value;
     LPWSTR data = NULL, newval = NULL;
     LPWSTR deformatted = NULL, ptr;
     DWORD flags, type, size;
@@ -5088,7 +5097,6 @@ static UINT ITERATE_WriteEnvironmentString( MSIRECORD *rec, LPVOID param )
 
     name = MSI_RecordGetString(rec, 2);
     value = MSI_RecordGetString(rec, 3);
-    comp = MSI_RecordGetString(rec, 4);
 
     res = env_set_flags(&name, &value, &flags);
     if (res != ERROR_SUCCESS)
@@ -5541,6 +5549,154 @@ static UINT ACTION_MoveFiles( MSIPACKAGE *package )
     return rc;
 }
 
+static HRESULT (WINAPI *pCreateAssemblyCache)(IAssemblyCache **ppAsmCache,
+                                              DWORD dwReserved);
+static HRESULT (WINAPI *pLoadLibraryShim)(LPCWSTR szDllName, LPCWSTR szVersion,
+                                          LPVOID pvReserved, HMODULE *phModDll);
+
+static BOOL init_functionpointers(void)
+{
+    HRESULT hr;
+    HMODULE hfusion;
+    HMODULE hmscoree;
+
+    static const WCHAR szFusion[] = {'f','u','s','i','o','n','.','d','l','l',0};
+
+    hmscoree = LoadLibraryA("mscoree.dll");
+    if (!hmscoree)
+    {
+        WARN("mscoree.dll not available\n");
+        return FALSE;
+    }
+
+    pLoadLibraryShim = (void *)GetProcAddress(hmscoree, "LoadLibraryShim");
+    if (!pLoadLibraryShim)
+    {
+        WARN("LoadLibraryShim not available\n");
+        FreeLibrary(hmscoree);
+        return FALSE;
+    }
+
+    hr = pLoadLibraryShim(szFusion, NULL, NULL, &hfusion);
+    if (FAILED(hr))
+    {
+        WARN("fusion.dll not available\n");
+        FreeLibrary(hmscoree);
+        return FALSE;
+    }
+
+    pCreateAssemblyCache = (void *)GetProcAddress(hfusion, "CreateAssemblyCache");
+
+    FreeLibrary(hmscoree);
+    return TRUE;
+}
+
+static UINT install_assembly(LPWSTR path)
+{
+    IAssemblyCache *cache;
+    HRESULT hr;
+    UINT r = ERROR_FUNCTION_FAILED;
+
+    if (!init_functionpointers() || !pCreateAssemblyCache)
+        return ERROR_FUNCTION_FAILED;
+
+    hr = pCreateAssemblyCache(&cache, 0);
+    if (FAILED(hr))
+        goto done;
+
+    hr = IAssemblyCache_InstallAssembly(cache, 0, path, NULL);
+    if (FAILED(hr))
+        ERR("Failed to install assembly: %s %08x\n", debugstr_w(path), hr);
+
+    r = ERROR_SUCCESS;
+
+done:
+    IAssemblyCache_Release(cache);
+    return r;
+}
+
+static UINT ITERATE_PublishAssembly( MSIRECORD *rec, LPVOID param )
+{
+    MSIPACKAGE *package = param;
+    MSICOMPONENT *comp;
+    MSIFEATURE *feature;
+    MSIFILE *file;
+    WCHAR path[MAX_PATH];
+    LPCWSTR app;
+    DWORD attr;
+    UINT r;
+
+    comp = get_loaded_component(package, MSI_RecordGetString(rec, 1));
+    if (!comp || !comp->Enabled ||
+        !(comp->Action & (INSTALLSTATE_LOCAL | INSTALLSTATE_SOURCE)))
+    {
+        ERR("Component not set for install, not publishing assembly\n");
+        return ERROR_SUCCESS;
+    }
+
+    feature = find_feature_by_name(package, MSI_RecordGetString(rec, 2));
+    if (feature)
+        msi_feature_set_state(feature, INSTALLSTATE_LOCAL);
+
+    if (MSI_RecordGetString(rec, 3))
+        FIXME("Manifest unhandled\n");
+
+    app = MSI_RecordGetString(rec, 4);
+    if (app)
+    {
+        FIXME("Assembly should be privately installed\n");
+        return ERROR_SUCCESS;
+    }
+
+    attr = MSI_RecordGetInteger(rec, 5);
+    if (attr == msidbAssemblyAttributesWin32)
+    {
+        FIXME("Win32 assemblies not handled\n");
+        return ERROR_SUCCESS;
+    }
+
+    /* FIXME: extract all files belonging to this component */
+    file = msi_find_file(package, comp->KeyPath);
+
+    GetTempPathW(MAX_PATH, path);
+    r = msi_extract_file(package, file, path);
+    if (r != ERROR_SUCCESS)
+    {
+        ERR("Failed to extract temporary assembly\n");
+        return r;
+    }
+
+    PathAddBackslashW(path);
+    lstrcatW(path, file->FileName);
+
+    r = install_assembly(path);
+    if (r != ERROR_SUCCESS)
+        ERR("Failed to install assembly\n");
+
+    /* FIXME: write Installer assembly reg values */
+
+    return r;
+}
+
+static UINT ACTION_MsiPublishAssemblies( MSIPACKAGE *package )
+{
+    UINT rc;
+    MSIQUERY *view;
+
+    static const WCHAR ExecSeqQuery[] =
+        {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
+         '`','M','s','i','A','s','s','e','m','b','l','y','`',0};
+
+    rc = MSI_DatabaseOpenViewW(package->db, ExecSeqQuery, &view);
+    if (rc != ERROR_SUCCESS)
+        return ERROR_SUCCESS;
+
+    rc = MSI_IterateRecords(view, NULL, ITERATE_PublishAssembly, package);
+    msiobj_release(&view->hdr);
+
+    return rc;
+}
+
 static UINT msi_unimplemented_action_stub( MSIPACKAGE *package,
                                            LPCSTR action, LPCWSTR table )
 {
@@ -5627,13 +5783,6 @@ static UINT ACTION_RemoveEnvironmentStrings( MSIPACKAGE *package )
     static const WCHAR table[] = {
         'E','n','v','i','r','o','n','m','e','n','t',0 };
     return msi_unimplemented_action_stub( package, "RemoveEnvironmentStrings", table );
-}
-
-static UINT ACTION_MsiPublishAssemblies( MSIPACKAGE *package )
-{
-    static const WCHAR table[] = {
-        'M','s','i','A','s','s','e','m','b','l','y',0 };
-    return msi_unimplemented_action_stub( package, "MsiPublishAssemblies", table );
 }
 
 static UINT ACTION_MsiUnpublishAssemblies( MSIPACKAGE *package )

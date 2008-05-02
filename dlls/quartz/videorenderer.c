@@ -67,8 +67,7 @@ typedef struct VideoRendererImpl
     IReferenceClock * pClock;
     FILTER_INFO filterInfo;
 
-    InputPin * pInputPin;
-    IPin ** ppPins;
+    InputPin *pInputPin;
 
     BOOL init;
     HANDLE hThread;
@@ -86,6 +85,7 @@ typedef struct VideoRendererImpl
     IUnknown * pUnkOuter;
     BOOL bUnkOuterValid;
     BOOL bAggregatable;
+    REFERENCE_TIME rtLastStop;
 } VideoRendererImpl;
 
 static LRESULT CALLBACK VideoWndProcA(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -277,7 +277,7 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
     TRACE("%p %p %d\n", This, data, size);
 
     sdesc.dwSize = sizeof(sdesc);
-    hr = IPin_ConnectionMediaType(This->ppPins[0], &amt);
+    hr = IPin_ConnectionMediaType((IPin *)This->pInputPin, &amt);
     if (FAILED(hr)) {
         ERR("Unable to retrieve media type\n");
         return hr;
@@ -309,7 +309,7 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
     width = bmiHeader->biWidth;
     height = bmiHeader->biHeight;
     palette = ((LPBYTE)bmiHeader) + bmiHeader->biSize;
- 
+
     if (!This->init)
     {
         if (!This->WindowPos.right || !This->WindowPos.bottom)
@@ -362,16 +362,33 @@ static HRESULT VideoRenderer_Sample(LPVOID iface, IMediaSample * pSample)
 
     TRACE("%p %p\n", iface, pSample);
 
+    hr = IMediaSample_GetTime(pSample, &tStart, &tStop);
+    if (FAILED(hr))
+        ERR("Cannot get sample time (%x)\n", hr);
+
+    if (This->rtLastStop != tStart)
+    {
+        if (IMediaSample_IsDiscontinuity(pSample) == S_FALSE)
+            ERR("Unexpected discontinuity: Last: %u.%03u, tStart: %u.%03u\n",
+                (DWORD)(This->rtLastStop / 10000000),
+                (DWORD)((This->rtLastStop / 10000)%1000),
+                (DWORD)(tStart / 10000000), (DWORD)((tStart / 10000)%1000));
+        This->rtLastStop = tStart;
+    }
+
+    /* Preroll means the sample isn't shown, this is used for key frames and things like that */
+    if (IMediaSample_IsPreroll(pSample) == S_OK)
+    {
+        This->rtLastStop = tStop;
+        return S_OK;
+    }
+
     hr = IMediaSample_GetPointer(pSample, &pbSrcStream);
     if (FAILED(hr))
     {
         ERR("Cannot get pointer to sample data (%x)\n", hr);
         return hr;
     }
-
-    hr = IMediaSample_GetTime(pSample, &tStart, &tStop);
-    if (FAILED(hr))
-        ERR("Cannot get sample time (%x)\n", hr);
 
     cbSrcStream = IMediaSample_GetActualDataLength(pSample);
 
@@ -389,7 +406,38 @@ static HRESULT VideoRenderer_Sample(LPVOID iface, IMediaSample * pSample)
         TRACE("\n");
     }
 #endif
-    
+
+    if (This->pClock && This->state == State_Running)
+    {
+        REFERENCE_TIME time, trefstart, trefstop;
+        LONG delta;
+
+        /* Perhaps I <SHOULD> use the reference clock AdviseTime function here
+         * I'm not going to! When I tried, it seemed to generate lag and
+         * it caused instability.
+         */
+        IReferenceClock_GetTime(This->pClock, &time);
+
+        trefstart = This->rtStreamStart;
+        trefstop = (REFERENCE_TIME)((double)(tStop - tStart) / This->pInputPin->dRate) + This->rtStreamStart;
+        delta = (LONG)((trefstart-time)/10000);
+        This->rtStreamStart = trefstop;
+        This->rtLastStop = tStop;
+
+        if (delta > 0)
+        {
+            TRACE("Sleeping for %u ms\n", delta);
+            Sleep(delta);
+        }
+        else if (time > trefstop)
+        {
+            TRACE("Dropping sample: Time: %lld ms trefstop: %lld ms!\n", time/10000, trefstop/10000);
+            This->rtLastStop = tStop;
+            return S_OK;
+        }
+    }
+    This->rtLastStop = tStop;
+
     VideoRenderer_SendSampleData(This, pbSrcStream, cbSrcStream);
 
     return S_OK;
@@ -461,9 +509,8 @@ HRESULT VideoRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv)
     pVideoRenderer->pClock = NULL;
     pVideoRenderer->init = 0;
     pVideoRenderer->AutoShow = 1;
+    pVideoRenderer->rtLastStop = -1;
     ZeroMemory(&pVideoRenderer->filterInfo, sizeof(FILTER_INFO));
-
-    pVideoRenderer->ppPins = CoTaskMemAlloc(1 * sizeof(IPin *));
 
     /* construct input pin */
     piInput.dir = PINDIR_INPUT;
@@ -474,12 +521,10 @@ HRESULT VideoRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv)
 
     if (SUCCEEDED(hr))
     {
-        pVideoRenderer->ppPins[0] = (IPin *)pVideoRenderer->pInputPin;
         *ppv = (LPVOID)pVideoRenderer;
     }
     else
     {
-        CoTaskMemFree(pVideoRenderer->ppPins);
         pVideoRenderer->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&pVideoRenderer->csFilter);
         CoTaskMemFree(pVideoRenderer);
@@ -561,16 +606,15 @@ static ULONG WINAPI VideoRendererInner_Release(IUnknown * iface)
         if (This->pClock)
             IReferenceClock_Release(This->pClock);
         
-        if (SUCCEEDED(IPin_ConnectedTo(This->ppPins[0], &pConnectedTo)))
+        if (SUCCEEDED(IPin_ConnectedTo((IPin *)This->pInputPin, &pConnectedTo)))
         {
             IPin_Disconnect(pConnectedTo);
             IPin_Release(pConnectedTo);
         }
-        IPin_Disconnect(This->ppPins[0]);
+        IPin_Disconnect((IPin *)This->pInputPin);
 
-        IPin_Release(This->ppPins[0]);
-        
-        CoTaskMemFree(This->ppPins);
+        IPin_Release((IPin *)This->pInputPin);
+
         This->lpVtbl = NULL;
         
         This->csFilter.DebugInfo->Spare[0] = 0;
@@ -695,6 +739,7 @@ static HRESULT WINAPI VideoRenderer_Run(IBaseFilter * iface, REFERENCE_TIME tSta
     TRACE("(%p/%p)->(%s)\n", This, iface, wine_dbgstr_longlong(tStart));
 
     EnterCriticalSection(&This->csFilter);
+    if (This->state != State_Running)
     {
         if (This->state == State_Stopped)
             This->pInputPin->end_of_stream = 0;
@@ -750,7 +795,8 @@ static HRESULT WINAPI VideoRenderer_GetSyncSource(IBaseFilter * iface, IReferenc
     EnterCriticalSection(&This->csFilter);
     {
         *ppClock = This->pClock;
-        IReferenceClock_AddRef(This->pClock);
+        if (This->pClock)
+            IReferenceClock_AddRef(This->pClock);
     }
     LeaveCriticalSection(&This->csFilter);
     
@@ -759,16 +805,28 @@ static HRESULT WINAPI VideoRenderer_GetSyncSource(IBaseFilter * iface, IReferenc
 
 /** IBaseFilter implementation **/
 
+static HRESULT VideoRenderer_GetPin(IBaseFilter *iface, ULONG pos, IPin **pin, DWORD *lastsynctick)
+{
+    VideoRendererImpl *This = (VideoRendererImpl *)iface;
+
+    /* Our pins are static, not changing so setting static tick count is ok */
+    *lastsynctick = 0;
+
+    if (pos >= 1)
+        return S_FALSE;
+
+    *pin = (IPin *)This->pInputPin;
+    IPin_AddRef(*pin);
+    return S_OK;
+}
+
 static HRESULT WINAPI VideoRenderer_EnumPins(IBaseFilter * iface, IEnumPins **ppEnum)
 {
-    ENUMPINDETAILS epd;
     VideoRendererImpl *This = (VideoRendererImpl *)iface;
 
     TRACE("(%p/%p)->(%p)\n", This, iface, ppEnum);
 
-    epd.cPins = 1; /* input pin */
-    epd.ppPins = This->ppPins;
-    return IEnumPinsImpl_Construct(&epd, ppEnum);
+    return IEnumPinsImpl_Construct(ppEnum, VideoRenderer_GetPin, iface);
 }
 
 static HRESULT WINAPI VideoRenderer_FindPin(IBaseFilter * iface, LPCWSTR Id, IPin **ppPin)
@@ -1808,7 +1866,7 @@ static HRESULT WINAPI Videowindow_SetWindowForeground(IVideoWindow *iface,
     if ((Focus != FALSE) && (Focus != TRUE))
         return E_INVALIDARG;
 
-    hr = IPin_ConnectedTo(This->ppPins[0], &pPin);
+    hr = IPin_ConnectedTo((IPin *)This->pInputPin, &pPin);
     if ((hr != S_OK) || !pPin)
         return VFW_E_NOT_CONNECTED;
 

@@ -3373,6 +3373,7 @@ typedef enum _GL_SupportedExt {
 
   /* WGL extensions */
   WGL_ARB_PBUFFER,
+  WGL_WINE_PIXEL_FORMAT_PASSTHROUGH,
 
   OPENGL_SUPPORTED_EXT_END
 } GL_SupportedExt;
@@ -3681,6 +3682,11 @@ typedef enum _GL_SupportedExt {
 
 /* WGL_ARB_extensions_string */
 typedef const char * (WINAPI * WINED3D_PFNWGLGETEXTENSIONSSTRINGARBPROC) (HDC hdc);
+/* WGL_ARB_multisample */
+#ifndef WGL_ARB_multisample
+#define WGL_SAMPLE_BUFFERS_ARB         0x2041
+#define WGL_SAMPLES_ARB                0x2042
+#endif
 /* WGL_ARB_pixel_format */
 #ifndef WGL_ARB_pixel_format
 #define WGL_ARB_pixel_format 1
@@ -3762,6 +3768,8 @@ typedef BOOL (WINAPI * WINED3D_PFNWGLQUERYPBUFFERARBPROC) (HPBUFFERARB hPbuffer,
 #define WGL_ARB_pixel_format_float 1
 #define WGL_TYPE_RGBA_FLOAT_ARB        0x21A0
 #endif
+/* WGL_WINE_pixel_format_passthrough */
+typedef BOOL (WINAPI * WINED3D_PFNWGLSETPIXELFORMATWINE) (HDC hdc, int iPixelFormat, const PIXELFORMATDESCRIPTOR* ppfd);
 
 #define WGL_EXT_FUNCS_GEN \
     USE_GL_FUNC(WINED3D_PFNWGLGETEXTENSIONSSTRINGARBPROC, wglGetExtensionsStringARB, 0, NULL); \
@@ -3774,7 +3782,8 @@ typedef BOOL (WINAPI * WINED3D_PFNWGLQUERYPBUFFERARBPROC) (HPBUFFERARB hPbuffer,
     USE_GL_FUNC(WINED3D_PFNWGLGETPBUFFERDCARBPROC, wglGetPbufferDCARB, 0, NULL); \
     USE_GL_FUNC(WINED3D_PFNWGLRELEASEPBUFFERDCARBPROC, wglReleasePbufferDCARB, 0, NULL); \
     USE_GL_FUNC(WINED3D_PFNWGLDESTROYPBUFFERARBPROC, wglDestroyPbufferARB, 0, NULL); \
-    USE_GL_FUNC(WINED3D_PFNWGLQUERYPBUFFERARBPROC, wglQueryPbufferARB, 0, NULL);
+    USE_GL_FUNC(WINED3D_PFNWGLQUERYPBUFFERARBPROC, wglQueryPbufferARB, 0, NULL) \
+    USE_GL_FUNC(WINED3D_PFNWGLSETPIXELFORMATWINE, wglSetPixelFormatWINE, 0, NULL);
 
 
 /****************************************************

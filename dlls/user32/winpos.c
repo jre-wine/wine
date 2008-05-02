@@ -1465,6 +1465,11 @@ LONG WINPOS_HandleWindowPosChanging( HWND hwnd, WINDOWPOS *winpos )
  */
 static void dump_winpos_flags(UINT flags)
 {
+    static const DWORD dumped_flags = (SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOREDRAW |
+                                       SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW |
+                                       SWP_HIDEWINDOW | SWP_NOCOPYBITS | SWP_NOOWNERZORDER |
+                                       SWP_NOSENDCHANGING | SWP_DEFERERASE | SWP_ASYNCWINDOWPOS |
+                                       SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE | SWP_STATECHANGED);
     TRACE("flags:");
     if(flags & SWP_NOSIZE) TRACE(" SWP_NOSIZE");
     if(flags & SWP_NOMOVE) TRACE(" SWP_NOMOVE");
@@ -1479,25 +1484,12 @@ static void dump_winpos_flags(UINT flags)
     if(flags & SWP_NOSENDCHANGING) TRACE(" SWP_NOSENDCHANGING");
     if(flags & SWP_DEFERERASE) TRACE(" SWP_DEFERERASE");
     if(flags & SWP_ASYNCWINDOWPOS) TRACE(" SWP_ASYNCWINDOWPOS");
+    if(flags & SWP_NOCLIENTSIZE) TRACE(" SWP_NOCLIENTSIZE");
+    if(flags & SWP_NOCLIENTMOVE) TRACE(" SWP_NOCLIENTMOVE");
+    if(flags & SWP_STATECHANGED) TRACE(" SWP_STATECHANGED");
 
-#define DUMPED_FLAGS \
-    (SWP_NOSIZE | \
-    SWP_NOMOVE | \
-    SWP_NOZORDER | \
-    SWP_NOREDRAW | \
-    SWP_NOACTIVATE | \
-    SWP_FRAMECHANGED | \
-    SWP_SHOWWINDOW | \
-    SWP_HIDEWINDOW | \
-    SWP_NOCOPYBITS | \
-    SWP_NOOWNERZORDER | \
-    SWP_NOSENDCHANGING | \
-    SWP_DEFERERASE | \
-    SWP_ASYNCWINDOWPOS)
-
-    if(flags & ~DUMPED_FLAGS) TRACE(" %08x", flags & ~DUMPED_FLAGS);
+    if(flags & ~dumped_flags) TRACE(" %08x", flags & ~dumped_flags);
     TRACE("\n");
-#undef DUMPED_FLAGS
 }
 
 /***********************************************************************
@@ -1875,7 +1867,6 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
     WND *win;
     BOOL ret;
     RECT visible_rect, old_window_rect;
-    DWORD new_style;
 
     if (!(win = WIN_GetPtr( hwnd ))) return FALSE;
     if (win == WND_DESKTOP || win == WND_OTHER_PROCESS) return FALSE;
@@ -1909,7 +1900,6 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
         }
     }
     SERVER_END_REQ;
-    new_style = win->dwStyle;
     WIN_ReleasePtr( win );
 
     if (ret)
@@ -1917,8 +1907,8 @@ BOOL set_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
         USER_Driver->pSetWindowPos( hwnd, insert_after, swp_flags, window_rect,
                                     client_rect, &visible_rect, valid_rects );
 
-        if ((((swp_flags & SWP_AGG_NOPOSCHANGE) != SWP_AGG_NOPOSCHANGE) && (new_style & WS_VISIBLE)) ||
-            (swp_flags & (SWP_HIDEWINDOW | SWP_SHOWWINDOW)))
+        if (((swp_flags & SWP_AGG_NOPOSCHANGE) != SWP_AGG_NOPOSCHANGE) ||
+            (swp_flags & (SWP_HIDEWINDOW | SWP_SHOWWINDOW | SWP_STATECHANGED)))
             invalidate_dce( hwnd, &old_window_rect );
     }
     return ret;

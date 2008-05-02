@@ -663,7 +663,7 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, U
     object->glDescription.level            = Level;
 
     /* Flags */
-    object->Flags      = 0;
+    object->Flags      = SFLAG_NORMCOORD; /* Default to normalized coords */
     object->Flags     |= Discard ? SFLAG_DISCARD : 0;
     object->Flags     |= (WINED3DFMT_D16_LOCKABLE == Format) ? SFLAG_LOCKABLE : 0;
     object->Flags     |= Lockable ? SFLAG_LOCKABLE : 0;
@@ -3085,6 +3085,8 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetClipStatus(IWineD3DDevice *iface, 
  *****/
 static HRESULT WINAPI IWineD3DDeviceImpl_SetMaterial(IWineD3DDevice *iface, CONST WINED3DMATERIAL* pMaterial) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+
+    if (!pMaterial) return WINED3DERR_INVALIDCALL;
 
     This->updateStateBlock->changed.material = TRUE;
     This->updateStateBlock->material = *pMaterial;
@@ -6968,7 +6970,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_TestCooperativeLevel(IWineD3DDevice* 
     IWineD3DResourceImpl *resource;
     TRACE("(%p) : state (%u)\n", This, This->state);
 
-    /* TODO: Implement wrapping of the WndProc so that mimimize and maxamise can be monitored and the states adjusted. */
+    /* TODO: Implement wrapping of the WndProc so that mimimize and maximize can be monitored and the states adjusted. */
     switch (This->state) {
     case WINED3D_OK:
         return WINED3D_OK;
@@ -7077,7 +7079,7 @@ static void reset_fbo_state(IWineD3DDevice *iface) {
         GL_EXTCALL(glDeleteFramebuffersEXT(1, &This->dst_fbo));
         This->dst_fbo = 0;
     }
-    checkGLcall("Tear down fbos\n");
+    checkGLcall("Tear down FBOs\n");
     LEAVE_GL();
 
     for (i = 0; i < GL_LIMITS(buffers); ++i) {
@@ -7332,11 +7334,10 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetCreationParameters(IWineD3DDevice 
 
 static void WINAPI IWineD3DDeviceImpl_SetGammaRamp(IWineD3DDevice * iface, UINT iSwapChain, DWORD Flags, CONST WINED3DGAMMARAMP* pRamp) {
     IWineD3DSwapChain *swapchain;
-    HRESULT hrc = WINED3D_OK;
 
     TRACE("Relaying  to swapchain\n");
 
-    if ((hrc = IWineD3DDeviceImpl_GetSwapChain(iface, iSwapChain, &swapchain)) == WINED3D_OK) {
+    if (IWineD3DDeviceImpl_GetSwapChain(iface, iSwapChain, &swapchain) == WINED3D_OK) {
         IWineD3DSwapChain_SetGammaRamp(swapchain, Flags, (WINED3DGAMMARAMP *)pRamp);
         IWineD3DSwapChain_Release(swapchain);
     }
@@ -7345,12 +7346,11 @@ static void WINAPI IWineD3DDeviceImpl_SetGammaRamp(IWineD3DDevice * iface, UINT 
 
 static void WINAPI IWineD3DDeviceImpl_GetGammaRamp(IWineD3DDevice *iface, UINT iSwapChain, WINED3DGAMMARAMP* pRamp) {
     IWineD3DSwapChain *swapchain;
-    HRESULT hrc = WINED3D_OK;
 
     TRACE("Relaying  to swapchain\n");
 
-    if ((hrc = IWineD3DDeviceImpl_GetSwapChain(iface, iSwapChain, &swapchain)) == WINED3D_OK) {
-        hrc =IWineD3DSwapChain_GetGammaRamp(swapchain, pRamp);
+    if (IWineD3DDeviceImpl_GetSwapChain(iface, iSwapChain, &swapchain) == WINED3D_OK) {
+        IWineD3DSwapChain_GetGammaRamp(swapchain, pRamp);
         IWineD3DSwapChain_Release(swapchain);
     }
     return;

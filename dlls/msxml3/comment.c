@@ -597,10 +597,32 @@ static HRESULT WINAPI domcomment_appendData(
     pContent = xmlChar_from_wchar( (WCHAR*)p );
     if(pContent)
     {
+        /* Older versions of libxml < 2.6.27 didn't correctly support
+           xmlTextConcat on Comment nodes. Fallback to setting the
+           contents directly if xmlTextConcat fails.
+
+           NOTE: if xmlTextConcat fails, pContent is destroyed.
+         */
         if(xmlTextConcat(pDOMNode->node, pContent, SysStringLen(p) ) == 0)
             hr = S_OK;
         else
-            hr = E_FAIL;
+        {
+            xmlChar *pNew;
+            pContent = xmlChar_from_wchar( (WCHAR*)p );
+            if(pContent)
+            {
+                pNew = xmlStrcat(xmlNodeGetContent(pDOMNode->node), pContent);
+                if(pNew)
+                {
+                    xmlNodeSetContent(pDOMNode->node, pNew);
+                    hr = S_OK;
+                }
+                else
+                    hr = E_FAIL;
+            }
+            else
+                hr = E_FAIL;
+        }
     }
     else
         hr = E_FAIL;
@@ -612,8 +634,69 @@ static HRESULT WINAPI domcomment_insertData(
     IXMLDOMComment *iface,
     long offset, BSTR p)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domcomment *This = impl_from_IXMLDOMComment( iface );
+    xmlnode *pDOMNode = impl_from_IXMLDOMNode( This->node );
+    xmlChar *pXmlContent;
+    BSTR sNewString;
+    HRESULT hr = S_FALSE;
+    long nLength = 0, nLengthP = 0;
+    xmlChar *str = NULL;
+
+    TRACE("%p\n", This);
+
+    /* If have a NULL or empty string, don't do anything. */
+    if(SysStringLen(p) == 0)
+        return S_OK;
+
+    if(offset < 0)
+    {
+        return E_INVALIDARG;
+    }
+
+    pXmlContent = xmlNodeGetContent(pDOMNode->node);
+    if(pXmlContent)
+    {
+        BSTR sContent = bstr_from_xmlChar( pXmlContent );
+        nLength = SysStringLen(sContent);
+        nLengthP = SysStringLen(p);
+
+        if(nLength < offset)
+        {
+            SysFreeString(sContent);
+            xmlFree(pXmlContent);
+
+            return E_INVALIDARG;
+        }
+
+        sNewString = SysAllocStringLen(NULL, nLength + nLengthP + 1);
+        if(sNewString)
+        {
+            if(offset > 0)
+                memcpy(sNewString, sContent, offset * sizeof(WCHAR));
+
+            memcpy(&sNewString[offset], p, nLengthP * sizeof(WCHAR));
+
+            if(offset+nLengthP < nLength)
+                memcpy(&sNewString[offset+nLengthP], &sContent[offset], (nLength-offset) * sizeof(WCHAR));
+
+            sNewString[nLengthP + nLength] = 0;
+
+            str = xmlChar_from_wchar((WCHAR*)sNewString);
+            if(str)
+            {
+                xmlNodeSetContent(pDOMNode->node, str);
+                hr = S_OK;
+            }
+
+            SysFreeString(sNewString);
+        }
+
+        SysFreeString(sContent);
+
+        xmlFree(pXmlContent);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI domcomment_deleteData(

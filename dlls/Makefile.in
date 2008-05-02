@@ -355,6 +355,7 @@ TESTSUBDIRS = \
 	spoolss/tests \
 	urlmon/tests \
 	user32/tests \
+	userenv/tests \
 	usp10/tests \
 	uxtheme/tests \
 	version/tests \
@@ -650,6 +651,7 @@ IMPORT_LIBS = \
 	url/liburl.$(IMPLIBEXT) \
 	urlmon/liburlmon.$(IMPLIBEXT) \
 	user32/libuser32.$(IMPLIBEXT) \
+	userenv/libuserenv.$(IMPLIBEXT) \
 	usp10/libusp10.$(IMPLIBEXT) \
 	uxtheme/libuxtheme.$(IMPLIBEXT) \
 	vdmdbg/libvdmdbg.$(IMPLIBEXT) \
@@ -764,8 +766,8 @@ dciman32/libdciman32.$(IMPLIBEXT): dciman32/dciman32.spec $(WINEBUILD)
 ddraw/libddraw.$(IMPLIBEXT): ddraw/ddraw.spec $(WINEBUILD)
 	@cd ddraw && $(MAKE) libddraw.$(IMPLIBEXT)
 
-dinput/libdinput.$(IMPLIBEXT): dinput/dinput.spec $(WINEBUILD)
-	@cd dinput && $(MAKE) libdinput.$(IMPLIBEXT)
+dinput/libdinput.def: dinput/dinput.spec $(WINEBUILD)
+	@cd dinput && $(MAKE) libdinput.def
 
 dinput/libdinput.$(STATIC_IMPLIBEXT): dummy
 	@cd dinput && $(MAKE) libdinput.$(STATIC_IMPLIBEXT)
@@ -1012,6 +1014,9 @@ urlmon/liburlmon.$(IMPLIBEXT): urlmon/urlmon.spec $(WINEBUILD)
 
 user32/libuser32.$(IMPLIBEXT): user32/user32.spec $(WINEBUILD)
 	@cd user32 && $(MAKE) libuser32.$(IMPLIBEXT)
+
+userenv/libuserenv.$(IMPLIBEXT): userenv/userenv.spec $(WINEBUILD)
+	@cd userenv && $(MAKE) libuserenv.$(IMPLIBEXT)
 
 usp10/libusp10.$(IMPLIBEXT): usp10/usp10.spec $(WINEBUILD)
 	@cd usp10 && $(MAKE) libusp10.$(IMPLIBEXT)

@@ -125,6 +125,15 @@ OBJS = $(C_SRCS:.c=.o) $(BISON_SRCS:.y=.tab.o) $(LEX_SRCS:.l=.yy.o) $(IDL_GEN_C_
 RCOBJS = $(RC_SRCS:.rc=.res.o)
 LINTS  = $(C_SRCS:.c=.ln)
 
+# 'all' target first in case the enclosing Makefile didn't define any target
+
+all:
+
+filter: dummy
+	@$(TOPSRCDIR)/tools/winapi/make_filter --make $(MAKE) all
+
+.PHONY: all filter
+
 # Implicit rules
 
 .SUFFIXES: .mc .rc .mc.rc .res .res.o .spec .spec.o .idl .tlb .h .y .l .tab.c .tab.h .yy.c .ok .man.in .man _c.c _i.c _p.c _s.c @MAINTAINER_MODE@ .sfd .ttf .svg .ico
@@ -193,23 +202,10 @@ LINTS  = $(C_SRCS:.c=.ln)
 	$(ICOTOOL) -c -o $@ $*-16.png $*-32.png $*-48.png
 	$(RM) $*-16.png $*-32.png $*-48.png
 
-# 'all' target first in case the enclosing Makefile didn't define any target
-
-all:
-
-filter: dummy
-	@$(TOPSRCDIR)/tools/winapi/make_filter --make $(MAKE) all
-
-.PHONY: all filter
-
 # Rules for IDL files
 
 dlldata.c: $(WIDL) Makefile.in
 	$(WIDL) $(IDLFLAGS) --dlldata-only --dlldata=$@ $(IDL_P_SRCS)
-
-# Rules for resources
-
-$(RC_SRCS:.rc=.res) $(RC_SRCS16:.rc=.res): $(WRC) $(IDL_TLB_SRCS:.idl=.tlb)
 
 # Rule for linting
 
@@ -233,7 +229,10 @@ winapi_check:: dummy
 
 # Rules for dependencies
 
-DEPEND_SRCS = $(C_SRCS) $(C_SRCS16) $(RC_SRCS) $(RC_SRCS16) $(MC_SRCS) $(IDL_H_SRCS) $(IDL_C_SRCS) $(IDL_I_SRCS) $(IDL_P_SRCS) $(IDL_S_SRCS) $(IDL_GEN_C_SRCS) $(BISON_SRCS) $(LEX_SRCS) $(EXTRA_SRCS)
+DEPEND_SRCS = $(C_SRCS) $(C_SRCS16) $(RC_SRCS) $(RC_SRCS16) $(MC_SRCS) \
+              $(IDL_H_SRCS) $(IDL_C_SRCS) $(IDL_I_SRCS) $(IDL_P_SRCS) $(IDL_S_SRCS) \
+              $(IDL_GEN_C_SRCS) $(IDL_TLB_SRCS) $(IDL_TLB_SRCS:.idl=.tlb) \
+              $(BISON_SRCS) $(LEX_SRCS) $(EXTRA_SRCS)
 
 $(SUBDIRS:%=%/__depend__): dummy
 	@cd `dirname $@` && $(MAKE) depend
@@ -322,6 +321,8 @@ doc-sgml: $(DOCSUBDIRS:%=%/__doc_sgml__)
 $(MC_SRCS:.mc=.mc.rc): $(WMC)
 
 $(IDL_GEN_HEADERS) $(IDL_GEN_C_SRCS) $(IDL_TLB_SRCS:.idl=.tlb): $(WIDL)
+
+$(RC_SRCS:.rc=.res) $(RC_SRCS16:.rc=.res): $(WRC)
 
 $(SUBDIRS): dummy
 	@cd $@ && $(MAKE)

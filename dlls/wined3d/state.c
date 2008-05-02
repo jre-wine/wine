@@ -682,7 +682,7 @@ state_specularenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCon
              * and 128.0, although in d3d neither -1 nor 129 produce an error. GL_NV_max_light_exponent
              * allows bigger values. If the extension is supported, GL_LIMITS(shininess) contains the
              * value reported by the extension, otherwise 128. For values > GL_LIMITS(shininess) clamp
-             * them, it should be safe to do so without major visual dissortions.
+             * them, it should be safe to do so without major visual distortions.
              */
             WARN("Material power = %f, limit %f\n", stateblock->material.Power, GL_LIMITS(shininess));
             glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, GL_LIMITS(shininess));
@@ -772,32 +772,14 @@ static void state_texfactor(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
 
 static void
 renderstate_stencil_twosided(IWineD3DStateBlockImpl *stateblock, GLint face, GLint func, GLint ref, GLuint mask, GLint stencilFail, GLint depthFail, GLint stencilPass ) {
-#if 0 /* Don't use OpenGL 2.0 calls for now */
-            if(GL_EXTCALL(glStencilFuncSeparate) && GL_EXTCALL(glStencilOpSeparate)) {
-                GL_EXTCALL(glStencilFuncSeparate(face, func, ref, mask));
-                checkGLcall("glStencilFuncSeparate(...)");
-                GL_EXTCALL(glStencilOpSeparate(face, stencilFail, depthFail, stencilPass));
-                checkGLcall("glStencilOpSeparate(...)");
-        }
-            else
-#endif
-    if(GL_SUPPORT(EXT_STENCIL_TWO_SIDE)) {
-        glEnable(GL_STENCIL_TEST_TWO_SIDE_EXT);
-        checkGLcall("glEnable(GL_STENCIL_TEST_TWO_SIDE_EXT)");
-        GL_EXTCALL(glActiveStencilFaceEXT(face));
-        checkGLcall("glActiveStencilFaceEXT(...)");
-        glStencilFunc(func, ref, mask);
-        checkGLcall("glStencilFunc(...)");
-        glStencilOp(stencilFail, depthFail, stencilPass);
-        checkGLcall("glStencilOp(...)");
-    } else if(GL_SUPPORT(ATI_SEPARATE_STENCIL)) {
-        GL_EXTCALL(glStencilFuncSeparateATI(face, func, ref, mask));
-        checkGLcall("glStencilFuncSeparateATI(...)");
-        GL_EXTCALL(glStencilOpSeparateATI(face, stencilFail, depthFail, stencilPass));
-        checkGLcall("glStencilOpSeparateATI(...)");
-    } else {
-        ERR("Separate (two sided) stencil not supported on this version of opengl. Caps weren't honored?\n");
-    }
+    glEnable(GL_STENCIL_TEST_TWO_SIDE_EXT);
+    checkGLcall("glEnable(GL_STENCIL_TEST_TWO_SIDE_EXT)");
+    GL_EXTCALL(glActiveStencilFaceEXT(face));
+    checkGLcall("glActiveStencilFaceEXT(...)");
+    glStencilFunc(func, ref, mask);
+    checkGLcall("glStencilFunc(...)");
+    glStencilOp(stencilFail, depthFail, stencilPass);
+    checkGLcall("glStencilOp(...)");
 }
 
 static void
@@ -848,20 +830,36 @@ state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *c
         glEnable(GL_STENCIL_TEST);
         checkGLcall("glEnable GL_STENCIL_TEST");
 
-        /* Apply back first, then front. This function calls glActiveStencilFaceEXT,
-         * which has an effect on the code below too. If we apply the front face
-         * afterwards, we are sure that the active stencil face is set to front,
-         * and other stencil functions which do not use two sided stencil do not have
-         * to set it back
-         */
-        renderstate_stencil_twosided(stateblock, GL_BACK, func_ccw, ref, mask, stencilFail_ccw, depthFail_ccw, stencilPass_ccw);
-        renderstate_stencil_twosided(stateblock, GL_FRONT, func, ref, mask, stencilFail, depthFail, stencilPass);
+        if(GL_SUPPORT(EXT_STENCIL_TWO_SIDE)) {
+            /* Apply back first, then front. This function calls glActiveStencilFaceEXT,
+             * which has an effect on the code below too. If we apply the front face
+             * afterwards, we are sure that the active stencil face is set to front,
+             * and other stencil functions which do not use two sided stencil do not have
+             * to set it back
+             */
+            renderstate_stencil_twosided(stateblock, GL_BACK, func_ccw, ref, mask,
+                                         stencilFail_ccw, depthFail_ccw, stencilPass_ccw);
+            renderstate_stencil_twosided(stateblock, GL_FRONT, func, ref, mask,
+                                         stencilFail, depthFail, stencilPass);
+        } else if(GL_SUPPORT(ATI_SEPARATE_STENCIL)) {
+            GL_EXTCALL(glStencilFuncSeparateATI(func, func_ccw, ref, mask));
+            checkGLcall("glStencilFuncSeparateATI(...)");
+            GL_EXTCALL(glStencilOpSeparateATI(GL_FRONT, stencilFail, depthFail, stencilPass));
+            checkGLcall("glStencilOpSeparateATI(GL_FRONT, ...)");
+            GL_EXTCALL(glStencilOpSeparateATI(GL_BACK, stencilFail_ccw, depthFail_ccw, stencilPass_ccw));
+            checkGLcall("glStencilOpSeparateATI(GL_BACK, ...)");
+        } else {
+            ERR("Separate (two sided) stencil not supported on this version of opengl. Caps weren't honored?\n");
+        }
     } else if(onesided_enable) {
         if(GL_SUPPORT(EXT_STENCIL_TWO_SIDE)) {
             glDisable(GL_STENCIL_TEST_TWO_SIDE_EXT);
             checkGLcall("glDisable(GL_STENCIL_TEST_TWO_SIDE_EXT)");
         }
 
+        /* This code disables the ATI extension as well, since the standard stencil functions are equal
+         * to calling the ATI functions with GL_FRONT_AND_BACK as face parameter
+         */
         glEnable(GL_STENCIL_TEST);
         checkGLcall("glEnable GL_STENCIL_TEST");
         glStencilFunc(func, ref, mask);
@@ -1810,118 +1808,6 @@ static void state_ckeyblend(DWORD state, IWineD3DStateBlockImpl *stateblock, Win
     }
 }
 
-/* Activates the texture dimension according to the bound D3D texture.
- * Does not care for the colorop or correct gl texture unit(when using nvrc)
- * Requires the caller to activate the correct unit before
- */
-static void activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    BOOL bumpmap = FALSE;
-
-    if(stage > 0 && (stateblock->textureState[stage - 1][WINED3DTSS_COLOROP] == WINED3DTOP_BUMPENVMAPLUMINANCE ||
-                     stateblock->textureState[stage - 1][WINED3DTSS_COLOROP] == WINED3DTOP_BUMPENVMAP)) {
-        bumpmap = TRUE;
-        context->texShaderBumpMap |= (1 << stage);
-    } else {
-        context->texShaderBumpMap &= ~(1 << stage);
-    }
-
-    if(stateblock->textures[stage]) {
-        switch(stateblock->textureDimensions[stage]) {
-            case GL_TEXTURE_2D:
-                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-                    glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, bumpmap ? GL_OFFSET_TEXTURE_2D_NV : GL_TEXTURE_2D);
-                    checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, ...)");
-                } else {
-                    glDisable(GL_TEXTURE_3D);
-                    checkGLcall("glDisable(GL_TEXTURE_3D)");
-                    if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
-                        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-                        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-                    }
-                    if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
-                        glDisable(GL_TEXTURE_RECTANGLE_ARB);
-                        checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
-                    }
-                    glEnable(GL_TEXTURE_2D);
-                    checkGLcall("glEnable(GL_TEXTURE_2D)");
-                }
-                break;
-            case GL_TEXTURE_RECTANGLE_ARB:
-                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-                    glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, bumpmap ? GL_OFFSET_TEXTURE_2D_NV : GL_TEXTURE_RECTANGLE_ARB);
-                    checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, ...)");
-                } else {
-                    glDisable(GL_TEXTURE_2D);
-                    checkGLcall("glDisable(GL_TEXTURE_2D)");
-                    glDisable(GL_TEXTURE_3D);
-                    checkGLcall("glDisable(GL_TEXTURE_3D)");
-                    if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
-                        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-                        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-                    }
-                    glEnable(GL_TEXTURE_RECTANGLE_ARB);
-                    checkGLcall("glEnable(GL_TEXTURE_RECTANGLE_ARB)");
-                }
-                break;
-            case GL_TEXTURE_3D:
-                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-                    glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_3D);
-                    checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_3D)");
-                } else {
-                    if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
-                        glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-                        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-                    }
-                    if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
-                        glDisable(GL_TEXTURE_RECTANGLE_ARB);
-                        checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
-                    }
-                    glDisable(GL_TEXTURE_2D);
-                    checkGLcall("glDisable(GL_TEXTURE_2D)");
-                    glEnable(GL_TEXTURE_3D);
-                    checkGLcall("glEnable(GL_TEXTURE_3D)");
-                }
-                break;
-            case GL_TEXTURE_CUBE_MAP_ARB:
-                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-                    glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_CUBE_MAP_ARB);
-                    checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_CUBE_MAP_ARB)");
-                } else {
-                    glDisable(GL_TEXTURE_2D);
-                    checkGLcall("glDisable(GL_TEXTURE_2D)");
-                    glDisable(GL_TEXTURE_3D);
-                    checkGLcall("glDisable(GL_TEXTURE_3D)");
-                    if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
-                        glDisable(GL_TEXTURE_RECTANGLE_ARB);
-                        checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
-                    }
-                    glEnable(GL_TEXTURE_CUBE_MAP_ARB);
-                    checkGLcall("glEnable(GL_TEXTURE_CUBE_MAP_ARB)");
-                }
-              break;
-        }
-    } else {
-        if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-            glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_NONE);
-            checkGLcall("glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_NONE)");
-        } else {
-            glEnable(GL_TEXTURE_2D);
-            checkGLcall("glEnable(GL_TEXTURE_2D)");
-            glDisable(GL_TEXTURE_3D);
-            checkGLcall("glDisable(GL_TEXTURE_3D)");
-            if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
-                glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-                checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-            }
-            if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
-                glDisable(GL_TEXTURE_RECTANGLE_ARB);
-                checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
-            }
-            /* Binding textures is done by samplers. A dummy texture will be bound */
-        }
-    }
-}
-
 static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
@@ -1987,7 +1873,7 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
      * if the sampler for this stage is dirty
      */
     if(!isStateDirty(context, STATE_SAMPLER(stage))) {
-        if (tex_used) activate_dimensions(stage, stateblock, context);
+        if (tex_used) texture_activate_dimensions(stage, stateblock, context);
     }
 
     /* Set the texture combiners */
@@ -2010,7 +1896,7 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
             if(usesBump != usedBump) {
                 GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage + 1));
                 checkGLcall("glActiveTextureARB");
-                activate_dimensions(stage + 1, stateblock, context);
+                texture_activate_dimensions(stage + 1, stateblock, context);
                 GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB + mapped_stage));
                 checkGLcall("glActiveTextureARB");
             }
@@ -2539,7 +2425,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
             checkGLcall("glEnable(stateblock->textureDimensions[sampler])");
         } else if(sampler < stateblock->lowest_disabled_stage) {
             if(!isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) {
-                activate_dimensions(sampler, stateblock, context);
+                texture_activate_dimensions(sampler, stateblock, context);
             }
 
             if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && sampler == 0) {
@@ -2553,7 +2439,7 @@ static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCont
         if(sampler < stateblock->lowest_disabled_stage) {
             /* TODO: What should I do with pixel shaders here ??? */
             if(!isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) {
-                activate_dimensions(sampler, stateblock, context);
+                texture_activate_dimensions(sampler, stateblock, context);
             }
 
             if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && sampler == 0) {
@@ -3021,7 +2907,7 @@ static inline void unloadNumberedArrays(IWineD3DStateBlockImpl *stateblock) {
          * deactivated stream disabled, some other drivers(ATI, NV GF 8) set the undefined values to 0x00.
          * Let's set them to 0x00 to avoid hitting some undefined aspects of OpenGL. All that is really
          * important here is the glDisableVertexAttribArrayARB call above. The test shows that the refrast
-         * keeps dereferencing the pointers, which would cause crashes in some games like Half Life 2 Eposide 2
+         * keeps dereferencing the pointers, which would cause crashes in some games like Half Life 2: Episode Two.
          */
         GL_EXTCALL(glVertexAttrib4NubARB(i, 0, 0, 0, 0));
         checkGLcall("glVertexAttrib4NubARB(i, 0, 0, 0, 0)");
@@ -3393,7 +3279,7 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, WineDirect3DVerte
     /*     go directly into fast mode from app pgm, because       */
     /*     directx requires data in BGRA format.                  */
     /* currently fixupVertices swizzles the format, but this isn't*/
-    /* very practical when using VBOS                             */
+    /* very practical when using VBOs                             */
     /* NOTE: Unless we write a vertex shader to swizzle the colour*/
     /* , or the user doesn't care and wants the speed advantage   */
 

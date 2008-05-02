@@ -75,7 +75,6 @@ static const WCHAR UI_CLASS_NAME[] = {'W','i','n','e','X','1','1','I','M','E',0}
 
 static HIMC *hSelectedFrom = NULL;
 static INT  hSelectedCount = 0;
-static BOOL hXIMPresent = FALSE;
 
 /* MSIME messages */
 static UINT WM_MSIME_SERVICE;
@@ -122,6 +121,42 @@ static BOOL UnlockRealIMC(HIMC hIMC)
         return ImmUnlockIMC(real_imc);
     else
         return FALSE;
+}
+
+static void IME_RegisterClasses(void)
+{
+    static int done;
+    WNDCLASSW wndClass;
+
+    if (done) return;
+    done = 1;
+
+    ZeroMemory(&wndClass, sizeof(WNDCLASSW));
+    wndClass.style = CS_GLOBALCLASS | CS_IME | CS_HREDRAW | CS_VREDRAW;
+    wndClass.lpfnWndProc = IME_WindowProc;
+    wndClass.cbClsExtra = 0;
+    wndClass.cbWndExtra = 2 * sizeof(LONG);
+    wndClass.hInstance = x11drv_module;
+    wndClass.hCursor = LoadCursorW(NULL, (LPWSTR)IDC_ARROW);
+    wndClass.hIcon = LoadIconW(NULL, (LPWSTR)IDI_APPLICATION);
+    wndClass.hbrBackground = (HBRUSH)(COLOR_WINDOW +1);
+    wndClass.lpszMenuName   = 0;
+    wndClass.lpszClassName = UI_CLASS_NAME;
+
+    RegisterClassW(&wndClass);
+
+    WM_MSIME_SERVICE = RegisterWindowMessageA("MSIMEService");
+    WM_MSIME_RECONVERTOPTIONS = RegisterWindowMessageA("MSIMEReconvertOptions");
+    WM_MSIME_MOUSE = RegisterWindowMessageA("MSIMEMouseOperation");
+    WM_MSIME_RECONVERTREQUEST = RegisterWindowMessageA("MSIMEReconvertRequest");
+    WM_MSIME_RECONVERT = RegisterWindowMessageA("MSIMEReconvert");
+    WM_MSIME_QUERYPOSITION = RegisterWindowMessageA("MSIMEQueryPosition");
+    WM_MSIME_DOCUMENTFEED = RegisterWindowMessageA("MSIMEDocumentFeed");
+}
+
+void IME_UnregisterClasses(void)
+{
+    UnregisterClassW(UI_CLASS_NAME, x11drv_module);
 }
 
 static HIMCC ImeCreateBlankCompStr(void)
@@ -521,11 +556,7 @@ BOOL WINAPI ImeInquire(LPIMEINFO lpIMEInfo, LPWSTR lpszUIClass,
                        LPCWSTR lpszOption)
 {
     TRACE("\n");
-    if (!hXIMPresent)
-    {
-        ERR("No XIM in the back end\n");
-        return FALSE;
-    }
+    IME_RegisterClasses();
     lpIMEInfo->dwPrivateDataSize = sizeof (IMEPRIVATE);
     lpIMEInfo->fdwProperty = IME_PROP_UNICODE | IME_PROP_AT_CARET;
     lpIMEInfo->fdwConversionCaps = IME_CMODE_NATIVE;
@@ -592,12 +623,6 @@ BOOL WINAPI ImeSelect(HIMC hIMC, BOOL fSelect)
         return FALSE;
     }
 
-    if (!hXIMPresent)
-    {
-        ERR("No XIM in the back end\n");
-        return FALSE;
-    }
-
     if (!hIMC)
         return TRUE;
 
@@ -659,7 +684,6 @@ BOOL WINAPI NotifyIME(HIMC hIMC, DWORD dwAction, DWORD dwIndex, DWORD dwValue)
         case NI_SETCANDIDATE_PAGESTART: FIXME("NI_SETCANDIDATE_PAGESTART\n"); break;
         case NI_SETCANDIDATE_PAGESIZE: FIXME("NI_SETCANDIDATE_PAGESIZE\n"); break;
         case NI_CONTEXTUPDATED:
-            FIXME("NI_CONTEXTUPDATED:");
             switch (dwValue)
             {
                 case IMC_SETCOMPOSITIONWINDOW: FIXME("IMC_SETCOMPOSITIONWINDOW\n"); break;
@@ -687,16 +711,22 @@ BOOL WINAPI NotifyIME(HIMC hIMC, DWORD dwAction, DWORD dwIndex, DWORD dwValue)
                     TRACE("IMC_SETOPENSTATUS\n");
 
                     myPrivate = (LPIMEPRIVATE)ImmLockIMCC(lpIMC->hPrivate);
-                    if (lpIMC->fOpen != myPrivate->bInternalState)
+                    if (lpIMC->fOpen != myPrivate->bInternalState &&
+                        myPrivate->bInComposition)
                     {
                         if(lpIMC->fOpen == FALSE)
                         {
                             X11DRV_ForceXIMReset(lpIMC->hWnd);
                             GenerateIMEMessage(hIMC,WM_IME_ENDCOMPOSITION,0,0);
+                            myPrivate->bInComposition = FALSE;
                         }
                         else
+                        {
                             GenerateIMEMessage(hIMC,WM_IME_STARTCOMPOSITION,0,0);
+                            GenerateIMEMessage(hIMC, WM_IME_COMPOSITION, 0, 0);
+                        }
                     }
+                    myPrivate->bInternalState = lpIMC->fOpen;
                     bRet = TRUE;
                 }
                 break;
@@ -704,7 +734,6 @@ BOOL WINAPI NotifyIME(HIMC hIMC, DWORD dwAction, DWORD dwIndex, DWORD dwValue)
             }
             break;
         case NI_COMPOSITIONSTR:
-            TRACE("NI_COMPOSITIONSTR:");
             switch (dwIndex)
             {
                 case CPS_COMPLETE:
@@ -763,25 +792,23 @@ BOOL WINAPI NotifyIME(HIMC hIMC, DWORD dwAction, DWORD dwIndex, DWORD dwValue)
                 case CPS_REVERT: FIXME("CPS_REVERT\n"); break;
                 case CPS_CANCEL:
                 {
-                    BOOL send;
-                    LPCOMPOSITIONSTRING lpCompStr;
+                    LPIMEPRIVATE myPrivate;
 
                     TRACE("CPS_CANCEL\n");
 
                     X11DRV_ForceXIMReset(lpIMC->hWnd);
 
-                    lpCompStr = ImmLockIMCC(lpIMC->hCompStr);
-                    send = (lpCompStr->dwCompStrLen != 0);
-                    ImmUnlockIMCC(lpIMC->hCompStr);
-
-                    if (send)
-                    {
-                        HIMCC newCompStr;
-                        newCompStr = updateCompStr(lpIMC->hCompStr, NULL, 0);
+                    if (lpIMC->hCompStr)
                         ImmDestroyIMCC(lpIMC->hCompStr);
-                        lpIMC->hCompStr = newCompStr;
-                        GenerateIMEMessage(hIMC, WM_IME_COMPOSITION, 0, GCS_COMPSTR);
+                    lpIMC->hCompStr = ImeCreateBlankCompStr();
+
+                    myPrivate = (LPIMEPRIVATE)ImmLockIMCC(lpIMC->hPrivate);
+                    if (myPrivate->bInComposition)
+                    {
+                        GenerateIMEMessage(hIMC, WM_IME_ENDCOMPOSITION, 0, 0);
+                        myPrivate->bInComposition = FALSE;
                     }
+                    ImmUnlockIMCC(lpIMC->hPrivate);
                     bRet = TRUE;
                 }
                 break;
@@ -915,37 +942,6 @@ DWORD WINAPI ImeGetImeMenuItems(HIMC hIMC,  DWORD dwFlags,  DWORD dwType,
 
 /* Interfaces to XIM and other parts of winex11drv */
 
-void IME_RegisterClasses(HINSTANCE hImeInst)
-{
-    WNDCLASSW wndClass;
-    ZeroMemory(&wndClass, sizeof(WNDCLASSW));
-    wndClass.style = CS_GLOBALCLASS | CS_IME | CS_HREDRAW | CS_VREDRAW;
-    wndClass.lpfnWndProc = (WNDPROC) IME_WindowProc;
-    wndClass.cbClsExtra = 0;
-    wndClass.cbWndExtra = 2 * sizeof(LONG);
-    wndClass.hInstance = hImeInst;
-    wndClass.hCursor = LoadCursorW(NULL, (LPWSTR)IDC_ARROW);
-    wndClass.hIcon = LoadIconW(NULL, (LPWSTR)IDI_APPLICATION);
-    wndClass.hbrBackground = (HBRUSH)(COLOR_WINDOW +1);
-    wndClass.lpszMenuName   = 0;
-    wndClass.lpszClassName = UI_CLASS_NAME;
-
-    RegisterClassW(&wndClass);
-
-    WM_MSIME_SERVICE = RegisterWindowMessageA("MSIMEService");
-    WM_MSIME_RECONVERTOPTIONS = RegisterWindowMessageA("MSIMEReconvertOptions");
-    WM_MSIME_MOUSE = RegisterWindowMessageA("MSIMEMouseOperation");
-    WM_MSIME_RECONVERTREQUEST = RegisterWindowMessageA("MSIMEReconvertRequest");
-    WM_MSIME_RECONVERT = RegisterWindowMessageA("MSIMEReconvert");
-    WM_MSIME_QUERYPOSITION = RegisterWindowMessageA("MSIMEQueryPosition");
-    WM_MSIME_DOCUMENTFEED = RegisterWindowMessageA("MSIMEDocumentFeed");
-}
-
-void IME_UnregisterClasses(HINSTANCE hImeInst)
-{
-    UnregisterClassW(UI_CLASS_NAME, hImeInst);
-}
-
 void IME_SetOpenStatus(BOOL fOpen)
 {
     LPINPUTCONTEXT lpIMC;
@@ -963,17 +959,18 @@ void IME_SetOpenStatus(BOOL fOpen)
         ImmDestroyIMCC(lpIMC->hCompStr);
         lpIMC->hCompStr = ImeCreateBlankCompStr();
     }
-    myPrivate->bInternalState = fOpen;
 
     ImmUnlockIMCC(lpIMC->hPrivate);
     UnlockRealIMC(FROM_X11);
 
-    ImmSetOpenStatus(RealIMC(FROM_X11), fOpen);
-}
+    if (myPrivate->bInComposition && fOpen == FALSE)
+    {
+        GenerateIMEMessage(FROM_X11, WM_IME_ENDCOMPOSITION, 0, 0);
+        myPrivate->bInComposition = FALSE;
+    }
 
-void IME_XIMPresent(BOOL present)
-{
-    hXIMPresent  = present;
+    if (!myPrivate->bInternalState && fOpen == TRUE)
+        ImmSetOpenStatus(RealIMC(FROM_X11), fOpen);
 }
 
 LRESULT IME_SendMessageToSelectedHWND(UINT msg, WPARAM wParam, LPARAM lParam)
@@ -992,7 +989,7 @@ LRESULT IME_SendMessageToSelectedHWND(UINT msg, WPARAM wParam, LPARAM lParam)
     return rc;
 }
 
-INT IME_GetCursorPos()
+INT IME_GetCursorPos(void)
 {
     LPINPUTCONTEXT lpIMC;
     INT rc = 0;

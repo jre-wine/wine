@@ -414,10 +414,20 @@ static BOOL is_tablet_cursor(const char *name, const char *type)
 
 static BOOL is_stylus(const char *name, const char *type)
 {
-    if (name && match_token(name, "stylus"))
-        return TRUE;
-    if (type && match_token(type, "stylus"))
-        return TRUE;
+    int i;
+    static const char* tablet_stylus_whitelist[] = {
+        "stylus",
+        "wizardpen",
+        NULL
+    };
+
+    for (i=0; tablet_stylus_whitelist[i] != NULL; i++) {
+        if (name && match_token(name, tablet_stylus_whitelist[i]))
+            return TRUE;
+        if (type && match_token(type, tablet_stylus_whitelist[i]))
+            return TRUE;
+    }
+
     return FALSE;
 }
 
@@ -513,21 +523,19 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
     {
         int class_loop;
         char *device_type = devices[loop].type ? XGetAtomName(data->display, devices[loop].type) : NULL;
+        LPWTI_CURSORS_INFO cursor;
 
-        TRACE("Device %i:  [id %d|name %s|type %s|num_classes %d|use %s]\n",
+        TRACE("Device %i:  [id %d|name %s|type %s|num_classes %d|use %d]\n",
                 loop, (int) devices[loop].id, devices[loop].name, device_type ? device_type : "",
-                devices[loop].num_classes,
-                devices[loop].use == IsXKeyboard ? "IsXKeyboard" :
-                    devices[loop].use == IsXPointer ? "IsXPointer" :
-                    devices[loop].use == IsXExtensionDevice ? "IsXExtensionDevice" :
-                    "Unknown"
-                );
+                devices[loop].num_classes, devices[loop].use );
 
-        if (devices[loop].use == IsXExtensionDevice)
+        switch (devices[loop].use)
         {
-            LPWTI_CURSORS_INFO cursor;
-
-            TRACE("Is Extension Device\n");
+        case IsXExtensionDevice:
+#ifdef IsXExtensionPointer
+        case IsXExtensionPointer:
+#endif
+            TRACE("Is XExtension%s\n", (devices[loop].use == IsXExtensionDevice)? "Device":"Pointer");
             cursor_target++;
             target = &devices[loop];
             cursor = &gSysCursor[cursor_target];
@@ -536,8 +544,7 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
             {
                 ERR("Input device '%s' name too long - skipping\n", wine_dbgstr_a(target->name));
                 cursor_target--;
-                XFree(device_type);
-                continue;
+                break;
             }
 
             X11DRV_expect_error(data->display, Tablet_ErrorHandler, NULL);
@@ -555,8 +562,7 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
                     TRACE("No buttons, Non Tablet Device\n");
                     pXCloseDevice(data->display, opendevice);
                     cursor_target --;
-                    XFree(device_type);
-                    continue;
+                    break;
                 }
 
                 for (i=0; i< cursor->BUTTONS; i++,shft++)
@@ -570,8 +576,7 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
             {
                 WARN("Unable to open device %s\n",target->name);
                 cursor_target --;
-                XFree(device_type);
-                continue;
+                break;
             }
             MultiByteToWideChar(CP_UNIXCP, 0, target->name, -1, cursor->NAME, WT_MAX_NAME_LEN);
 
@@ -579,9 +584,8 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
             {
                 WARN("Skipping device %d [name %s|type %s]; not apparently a tablet cursor type device.  If this is wrong, please report it to wine-devel@winehq.org\n",
                      loop, devices[loop].name, device_type ? device_type : "");
-                XFree(device_type);
                 cursor_target --;
-                continue;
+                break;
             }
 
             cursor->ACTIVE = 1;
@@ -620,7 +624,7 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
                         **         the various inputs to see what the values are.  Odds are that a
                         **         more 'correct' algorithm would condense to this one anyway.
                         */
-                        if (!axis_read_complete && Val->num_axes >= 5 && cursor->TYPE == CSR_TYPE_PEN)
+                        if (!axis_read_complete && cursor->TYPE == CSR_TYPE_PEN)
                         {
                             Axis = (XAxisInfoPtr) ((char *) Val + sizeof
                                 (XValuatorInfo));
@@ -716,10 +720,10 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
                 }
                 any = (XAnyClassPtr) ((char*) any + any->length);
             }
+            break;
         }
 
         XFree(device_type);
-
     }
     pXFreeDeviceList(devices);
 

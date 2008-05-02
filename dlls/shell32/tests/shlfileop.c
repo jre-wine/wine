@@ -809,7 +809,7 @@ static void test_copy(void)
     shfo.pFrom = "test1.txt\0";
     shfo.pTo = "test2.txt\0";
     shfo.fAnyOperationsAborted = FALSE;
-    /* without FOF_NOCOFIRMATION the confirmation is Yes/No */
+    /* without FOF_NOCONFIRMATION the confirmation is Yes/No */
     retval = SHFileOperation(&shfo);
     ok(retval == 0, "Expected 0, got %d\n", retval);
     ok(file_has_content("test2.txt", "test1.txt\n"), "The file was not copied\n");
@@ -817,7 +817,7 @@ static void test_copy(void)
     shfo.pFrom = "test3.txt\0test1.txt\0";
     shfo.pTo = "test2.txt\0one.txt\0";
     shfo.fFlags = FOF_NOCONFIRMATION | FOF_MULTIDESTFILES;
-    /* without FOF_NOCOFIRMATION the confirmation is Yes/Yes to All/No/Cancel */
+    /* without FOF_NOCONFIRMATION the confirmation is Yes/Yes to All/No/Cancel */
     retval = SHFileOperation(&shfo);
     ok(retval == 0, "Expected 0, got %d\n", retval);
     ok(file_has_content("test2.txt", "test3.txt\n"), "The file was not copied\n");
@@ -825,7 +825,7 @@ static void test_copy(void)
     shfo.pFrom = "one.txt\0";
     shfo.pTo = "testdir2\0";
     shfo.fFlags = FOF_NOCONFIRMATION;
-    /* without FOF_NOCOFIRMATION the confirmation is Yes/No */
+    /* without FOF_NOCONFIRMATION the confirmation is Yes/No */
     retval = SHFileOperation(&shfo);
     ok(retval == 0, "Expected 0, got %d\n", retval);
     ok(file_has_content("testdir2\\one.txt", "test1.txt\n"), "The file was not copied\n");
@@ -836,7 +836,7 @@ static void test_copy(void)
     shfo.fFlags = FOF_NOCONFIRMATION;
     ok(!SHFileOperation(&shfo), "First SHFileOperation failed\n");
     createTestFile("test4.txt\\.\\test1.txt"); /* modify the content of the file */
-    /* without FOF_NOCOFIRMATION the confirmation is "This folder already contains a folder named ..." */
+    /* without FOF_NOCONFIRMATION the confirmation is "This folder already contains a folder named ..." */
     retval = SHFileOperation(&shfo);
     ok(retval == 0, "Expected 0, got %d\n", retval);
     ok(file_has_content("testdir2\\test4.txt\\test1.txt", "test4.txt\\.\\test1.txt\n"), "The file was not copied\n");
@@ -963,7 +963,9 @@ static void test_copy(void)
     shfo.fFlags = FOF_MULTIDESTFILES | FOF_NOCONFIRMATION |
                   FOF_SILENT | FOF_NOERRORUI;
     retval = SHFileOperation(&shfo);
-    ok(retval == ERROR_CANCELLED, "Expected ERROR_CANCELLED, got %d\n", retval);
+    ok(retval == ERROR_CANCELLED ||
+       retval == ERROR_SUCCESS, /* win2k3 */
+       "Expected ERROR_CANCELLED or ERROR_SUCCESS, got %d\n", retval);
     ok(!DeleteFileA("threedir\\one.txt"), "Expected file to not exist\n");
     ok(!DeleteFileA("threedir\\two.txt"), "Expected file to not exist\n");
     ok(DeleteFileA("one.txt"), "Expected file to exist\n");

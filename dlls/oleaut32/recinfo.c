@@ -211,12 +211,12 @@ static HRESULT WINAPI IRecordInfoImpl_RecordClear(IRecordInfo *iface, PVOID pvEx
         var = ((PBYTE)pvExisting)+This->fields[i].offset;
         switch(This->fields[i].vt) {
             case VT_BSTR:
-                /* NOTE: Windows implementation reads DWORD (len) before string,
-                 *       but it seems to do nothing with this */
+               SysFreeString(*(BSTR*)var);
                 *(BSTR*)var = NULL;
                 break;
             case VT_I2:
             case VT_I4:
+            case VT_R4:
             case VT_R8:
             case VT_CY:
             case VT_DATE:
@@ -467,8 +467,13 @@ static HRESULT WINAPI IRecordInfoImpl_RecordCreateCopy(IRecordInfo *iface, PVOID
 static HRESULT WINAPI IRecordInfoImpl_RecordDestroy(IRecordInfo *iface, PVOID pvRecord)
 {
     IRecordInfoImpl *This = (IRecordInfoImpl*)iface;
+    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, pvRecord);
+
+    hres = IRecordInfo_RecordClear(iface, pvRecord);
+    if(FAILED(hres))
+        return hres;
 
     if(!HeapFree(GetProcessHeap(), 0, pvRecord))
         return E_INVALIDARG;

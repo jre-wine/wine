@@ -111,19 +111,32 @@ static LONG WINTRUST_DefaultVerify(HWND hwnd, GUID *actionID,
     provData->pgActionID = actionID;
     WintrustGetRegPolicyFlags(&provData->dwRegPolicySettings);
 
-    err = provData->psPfns->pfnInitialize(provData);
-    if (err)
-        goto done;
-    err = provData->psPfns->pfnObjectTrust(provData);
-    if (err)
-        goto done;
-    err = provData->psPfns->pfnSignatureTrust(provData);
-    if (err)
-        goto done;
-    err = provData->psPfns->pfnCertificateTrust(provData);
-    if (err)
-        goto done;
-    err = provData->psPfns->pfnFinalPolicy(provData);
+    if (provData->psPfns->pfnInitialize)
+    {
+        err = provData->psPfns->pfnInitialize(provData);
+        if (err)
+            goto done;
+    }
+    if (provData->psPfns->pfnObjectTrust)
+    {
+        err = provData->psPfns->pfnObjectTrust(provData);
+        if (err)
+            goto done;
+    }
+    if (provData->psPfns->pfnSignatureTrust)
+    {
+        err = provData->psPfns->pfnSignatureTrust(provData);
+        if (err)
+            goto done;
+    }
+    if (provData->psPfns->pfnCertificateTrust)
+    {
+        err = provData->psPfns->pfnCertificateTrust(provData);
+        if (err)
+            goto done;
+    }
+    if (provData->psPfns->pfnFinalPolicy)
+        err = provData->psPfns->pfnFinalPolicy(provData);
     goto done;
 
 oom:
@@ -425,6 +438,25 @@ CRYPT_PROVIDER_CERT * WINAPI WTHelperGetProvCertFromChain(
     return cert;
 }
 
+CRYPT_PROVIDER_PRIVDATA *WINAPI WTHelperGetProvPrivateDataFromChain(
+ CRYPT_PROVIDER_DATA* pProvData,
+ GUID* pgProviderID)
+{
+    CRYPT_PROVIDER_PRIVDATA *privdata = NULL;
+    DWORD i;
+
+    TRACE("(%p, %s)\n", pProvData, debugstr_guid(pgProviderID));
+
+    for (i = 0; i < pProvData->csProvPrivData; i++)
+        if (IsEqualGUID(pgProviderID, &pProvData->pasProvPrivData[i].gProviderID))
+        {
+            privdata = &pProvData->pasProvPrivData[i];
+            break;
+        }
+
+    return privdata;
+}
+
 /***********************************************************************
  *		WTHelperProvDataFromStateData (WINTRUST.@)
  */
@@ -644,6 +676,44 @@ BOOL WINAPI WINTRUST_AddCert(CRYPT_PROVIDER_DATA *data, DWORD idxSigner,
         cert->pCert = CertDuplicateCertificateContext(pCert2Add);
         data->pasSigners[idxSigner].csCertChain++;
         ret = TRUE;
+    }
+    else
+        SetLastError(ERROR_OUTOFMEMORY);
+    return ret;
+}
+
+BOOL WINAPI WINTRUST_AddPrivData(CRYPT_PROVIDER_DATA *data,
+ CRYPT_PROVIDER_PRIVDATA *pPrivData2Add)
+{
+    BOOL ret = FALSE;
+
+    TRACE("(%p, %p)\n", data, pPrivData2Add);
+
+    if (pPrivData2Add->cbStruct > sizeof(CRYPT_PROVIDER_PRIVDATA))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        WARN("invalid struct size\n");
+        return FALSE;
+    }
+    if (data->csProvPrivData)
+        data->pasProvPrivData = WINTRUST_ReAlloc(data->pasProvPrivData,
+         (data->csProvPrivData + 1) * sizeof(CRYPT_PROVIDER_SGNR));
+    else
+    {
+        data->pasProvPrivData = WINTRUST_Alloc(sizeof(CRYPT_PROVIDER_SGNR));
+        data->csProvPrivData = 0;
+    }
+    if (data->pasProvPrivData)
+    {
+        DWORD i;
+
+        for (i = 0; i < data->csProvPrivData; i++)
+            if (IsEqualGUID(&pPrivData2Add->gProviderID, &data->pasProvPrivData[i]))
+                break;
+
+        data->pasProvPrivData[i] = *pPrivData2Add;
+        if (i == data->csProvPrivData)
+            data->csProvPrivData++;
     }
     else
         SetLastError(ERROR_OUTOFMEMORY);

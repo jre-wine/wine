@@ -1180,7 +1180,7 @@ static void EDIT_BuildLineDefs_ML(EDITSTATE *es, INT istart, INT iend, INT delta
 			{
 				if (current_position - es->text > iend)
 					break; /* We reached end of line modifications */
-				/* else recalulate this line */
+				/* else recalculate this line */
 			}
 		}
 
@@ -3424,7 +3424,6 @@ static void EDIT_EM_ScrollCaret(EDITSTATE *es)
 {
 	if (es->style & ES_MULTILINE) {
 		INT l;
-		INT li;
 		INT vlc;
 		INT ww;
 		INT cw = es->char_width;
@@ -3433,7 +3432,6 @@ static void EDIT_EM_ScrollCaret(EDITSTATE *es)
 		INT dx = 0;
 
 		l = EDIT_EM_LineFromChar(es, es->selection_end);
-		li = EDIT_EM_LineIndex(es, l);
 		x = (short)LOWORD(EDIT_EM_PosFromChar(es, es->selection_end, es->flags & EF_AFTER_WRAP));
 		vlc = (es->format_rect.bottom - es->format_rect.top) / es->line_height;
 		if (l >= es->y_offset + vlc)
@@ -3807,8 +3805,8 @@ static void EDIT_EM_SetSel(EDITSTATE *es, UINT start, UINT end, BOOL after_wrap)
 	 * *sorting* the interval endpoints.  Let's assume that we sort them
 	 * in this order:
 	 *        start <= end <= old_start <= old_end
-	 * Knuth 5.3.1 (p 183) asssures us that this can be done optimally
-	 * in 5 comparisons; ie it's impossible to do better than the
+	 * Knuth 5.3.1 (p 183) assures us that this can be done optimally
+	 * in 5 comparisons; i.e. it is impossible to do better than the
 	 * following: */
         ORDER_UINT(end, old_end);
         ORDER_UINT(start, old_start);
@@ -4254,11 +4252,9 @@ static LRESULT EDIT_WM_Destroy(EDITSTATE *es)
 	LINEDEF *pc, *pp;
 
 	if (es->hloc32W) {
-		while (LocalUnlock(es->hloc32W)) ;
 		LocalFree(es->hloc32W);
 	}
 	if (es->hloc32A) {
-		while (LocalUnlock(es->hloc32A)) ;
 		LocalFree(es->hloc32A);
 	}
 	if (es->hloc16) {
@@ -4604,8 +4600,13 @@ static LRESULT EDIT_WM_KeyDown(EDITSTATE *es, INT key)
 	    /* If the edit doesn't want the return send a message to the default object */
 	    if(!(es->style & ES_MULTILINE) || !(es->style & ES_WANTRETURN))
 	    {
-		HWND hwndParent = GetParent(es->hwndSelf);
-		DWORD dw = SendMessageW( hwndParent, DM_GETDEFID, 0, 0 );
+		HWND hwndParent;
+		DWORD dw;
+
+                if (!EDIT_IsInsideDialog(es)) return 1;
+                if (control) break;
+                hwndParent = GetParent(es->hwndSelf);
+                dw = SendMessageW( hwndParent, DM_GETDEFID, 0, 0 );
 		if (HIWORD(dw) == DC_HASDEFID)
 		{
 		    SendMessageW( hwndParent, WM_COMMAND,

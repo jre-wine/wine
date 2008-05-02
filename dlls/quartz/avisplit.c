@@ -100,7 +100,7 @@ static HRESULT AVISplitter_NextChunk(LONGLONG * pllCurrentChunkOffset, RIFFCHUNK
     return S_OK;
 }
 
-static HRESULT AVISplitter_Sample(LPVOID iface, IMediaSample * pSample)
+static HRESULT AVISplitter_Sample(LPVOID iface, IMediaSample * pSample, DWORD_PTR cookie)
 {
     AVISplitterImpl *This = (AVISplitterImpl *)iface;
     LPBYTE pbSrcStream = NULL;
@@ -438,6 +438,7 @@ static HRESULT AVISplitter_ProcessOldIndex(AVISplitterImpl *This)
             IAsyncReader_SyncRead(pin->pReader, offset, sizeof(DWORD), (BYTE *)&temp);
             relative = (chunkid != temp);
 
+            TRACE("dwChunkId: %.4s\n", (char *)&chunkid);
             if (chunkid == mmioFOURCC('7','F','x','x')
                 && ((char *)&temp)[0] == 'i' && ((char *)&temp)[1] == 'x')
                 relative = FALSE;
@@ -459,14 +460,16 @@ static HRESULT AVISplitter_ProcessOldIndex(AVISplitterImpl *This)
                         debugstr_an((char *)&temp2, 4), (DWORD)((mov_pos + offset) >> 32), (DWORD)(mov_pos + offset));
                     relative = -1;
                 }
+                else
+                    TRACE("Scanned dwChunkId: %s\n", debugstr_an((char *)&temp2, 4));
             }
+            else if (!relative)
+               TRACE("Scanned dwChunkId: %s\n", debugstr_an((char *)&temp, 4));
+            TRACE("dwFlags: %08x\n", pAviOldIndex->aIndex[x].dwFlags);
+            TRACE("dwOffset (%s): %08x\n", relative ? "relative" : "absolute", offset);
+            TRACE("dwSize: %08x\n", pAviOldIndex->aIndex[x].dwSize);
         }
-
-        TRACE("Scanned dwChunkId: %s\n", debugstr_an((char *)&temp, 4));
-        TRACE("dwChunkId: %.4s\n", (char *)&chunkid);
-        TRACE("dwFlags: %08x\n", pAviOldIndex->aIndex[x].dwFlags);
-        TRACE("dwOffset (%s): %08x\n", relative ? "relative" : "absolute", offset);
-        TRACE("dwSize: %08x\n", pAviOldIndex->aIndex[x].dwSize);
+        else break;
     }
 
     if (relative == -1)
@@ -525,13 +528,14 @@ static HRESULT AVISplitter_ProcessStreamList(AVISplitterImpl * This, const BYTE 
                 stream->streamheader = *pStrHdr;
 
                 fSamplesPerSec = (float)pStrHdr->dwRate / (float)pStrHdr->dwScale;
+                CoTaskMemFree(amt.pbFormat);
+                amt.pbFormat = NULL;
+                amt.cbFormat = 0;
 
                 switch (pStrHdr->fccType)
                 {
                 case streamtypeVIDEO:
                     amt.formattype = FORMAT_VideoInfo;
-                    amt.pbFormat = NULL;
-                    amt.cbFormat = 0;
                     break;
                 case streamtypeAUDIO:
                     amt.formattype = FORMAT_WaveFormatEx;
@@ -737,7 +741,7 @@ static HRESULT AVISplitter_InitializeStreams(AVISplitterImpl *This)
 
         nMax = This->oldindex->cb / sizeof(This->oldindex->aIndex[0]);
 
-        /* Ok, maybe this is more an excercize to see if I interpret everything correctly or not, but that is useful for now */
+        /* Ok, maybe this is more of an excercise to see if I interpret everything correctly or not, but that is useful for now. */
         for (n = 0; n < nMax; ++n)
         {
             DWORD streamId = StreamFromFOURCC(This->oldindex->aIndex[n].dwChunkId);
@@ -809,7 +813,7 @@ static HRESULT AVISplitter_InitializeStreams(AVISplitterImpl *This)
 static HRESULT AVISplitter_Disconnect(LPVOID iface);
 
 /* FIXME: fix leaks on failure here */
-static HRESULT AVISplitter_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
+static HRESULT AVISplitter_InputPin_PreConnect(IPin * iface, IPin * pConnectPin, ALLOCATOR_PROPERTIES *props)
 {
     PullPin *This = (PullPin *)iface;
     HRESULT hr;
@@ -914,7 +918,8 @@ static HRESULT AVISplitter_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
 
     IAsyncReader_Length(This->pReader, &total, &avail);
 
-    /* FIXME: AVIX files are added ("eXtended") beyond the "AVI " length, and thus won't be played here	 */
+    /* FIXME: AVIX files are extended beyond the FOURCC chunk "AVI ", and thus won't be played here,
+     * once I get one of the files I'll try to fix it */
     if (hr == S_OK)
     {
         This->rtStart = pAviSplit->CurrentChunkOffset = MEDIATIME_FROM_BYTES(pos + sizeof(RIFFLIST));
@@ -1037,6 +1042,25 @@ static HRESULT AVISplitter_Disconnect(LPVOID iface)
     return S_OK;
 }
 
+static const IBaseFilterVtbl AVISplitter_Vtbl =
+{
+    Parser_QueryInterface,
+    Parser_AddRef,
+    Parser_Release,
+    Parser_GetClassID,
+    Parser_Stop,
+    Parser_Pause,
+    Parser_Run,
+    Parser_GetState,
+    Parser_SetSyncSource,
+    Parser_GetSyncSource,
+    Parser_EnumPins,
+    Parser_FindPin,
+    Parser_QueryFilterInfo,
+    Parser_JoinFilterGraph,
+    Parser_QueryVendorInfo
+};
+
 HRESULT AVISplitter_create(IUnknown * pUnkOuter, LPVOID * ppv)
 {
     HRESULT hr;
@@ -1056,7 +1080,7 @@ HRESULT AVISplitter_create(IUnknown * pUnkOuter, LPVOID * ppv)
     This->streams = NULL;
     This->oldindex = NULL;
 
-    hr = Parser_Create(&(This->Parser), &CLSID_AviSplitter, AVISplitter_Sample, AVISplitter_QueryAccept, AVISplitter_InputPin_PreConnect, AVISplitter_Cleanup, AVISplitter_Disconnect, NULL, NULL, NULL);
+    hr = Parser_Create(&(This->Parser), &AVISplitter_Vtbl, &CLSID_AviSplitter, AVISplitter_Sample, AVISplitter_QueryAccept, AVISplitter_InputPin_PreConnect, AVISplitter_Cleanup, AVISplitter_Disconnect, NULL, NULL, NULL, NULL, NULL);
 
     if (FAILED(hr))
         return hr;

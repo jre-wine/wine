@@ -143,6 +143,7 @@ static IDirect3DDevice9 *init_d3d9(void)
     IDirect3DDevice9 *device_ptr = 0;
     D3DPRESENT_PARAMETERS present_parameters;
     HRESULT hr;
+    D3DADAPTER_IDENTIFIER9 identifier;
 
     d3d9_create = (void *)GetProcAddress(d3d9_handle, "Direct3DCreate9");
     ok(d3d9_create != NULL, "Failed to get address of Direct3DCreate9\n");
@@ -161,6 +162,16 @@ static IDirect3DDevice9 *init_d3d9(void)
     present_parameters.BackBufferFormat = D3DFMT_X8R8G8B8;
     present_parameters.EnableAutoDepthStencil = TRUE;
     present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
+
+    memset(&identifier, 0, sizeof(identifier));
+    hr = IDirect3D9_GetAdapterIdentifier(d3d9_ptr, 0, 0, &identifier);
+    ok(hr == D3D_OK, "Failed to get adapter identifier description\n");
+    trace("Driver string: \"%s\"\n", identifier.Driver);
+    trace("Description string: \"%s\"\n", identifier.Description);
+    trace("Device name string: \"%s\"\n", identifier.DeviceName);
+    trace("Driver version %d.%d.%d.%d\n",
+          HIWORD(identifier.DriverVersion.HighPart), LOWORD(identifier.DriverVersion.HighPart),
+          HIWORD(identifier.DriverVersion.LowPart), LOWORD(identifier.DriverVersion.LowPart));
 
     hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
     if(FAILED(hr)) {
@@ -6552,9 +6563,15 @@ static void fog_srgbwrite_test(IDirect3DDevice9 *device)
     DWORD color;
 
     IDirect3DDevice9_GetDirect3D(device, &d3d);
+    /* Ask for srgb writing on D3DRTYPE_TEXTURE. Some Windows drivers do not report it on surfaces.
+     * For some not entirely understood reasons D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_SRGBWRITE
+     * passes on surfaces, while asking for SRGBWRITE alone fails. Textures advertize srgb writing
+     * alone as well, so use that since it is not the point of this test to show how CheckDeviceFormat
+     * works
+     */
     if(IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8,
                                     D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_SRGBWRITE,
-                                    D3DRTYPE_SURFACE, D3DFMT_A8R8G8B8) != D3D_OK) {
+                                    D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8) != D3D_OK) {
         skip("No SRGBWRITEENABLE support on D3DFMT_X8R8G8B8\n");
         IDirect3D9_Release(d3d);
         return;
@@ -8445,6 +8462,7 @@ static void pixelshader_blending_test(IDirect3DDevice9 *device)
     IDirect3DSurface9 *backbuffer = NULL, *offscreen = NULL;
     IDirect3D9 *d3d = NULL;
     DWORD color;
+    DWORD r0, g0, b0, r1, g1, b1;
     int fmt_index;
 
     static const float quad[][5] = {
@@ -8568,7 +8586,18 @@ static void pixelshader_blending_test(IDirect3DDevice9 *device)
         if(IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING, D3DRTYPE_TEXTURE, fmt) == D3D_OK) {
             /* Compare the color of the center quad with our expectation */
             color = getPixelColor(device, 320, 240);
-            ok(color == test_formats[fmt_index].resultColorBlending, "Offscreen failed for %s: Got color %#08x, expected %#08x.\n", test_formats[fmt_index].fmtName, color, test_formats[fmt_index].resultColorBlending);
+            r0 = (color & 0x00ff0000) >> 16;
+            g0 = (color & 0x0000ff00) >>  8;
+            b0 = (color & 0x000000ff) >>  0;
+
+            r1 = (test_formats[fmt_index].resultColorBlending & 0x00ff0000) >> 16;
+            g1 = (test_formats[fmt_index].resultColorBlending & 0x0000ff00) >>  8;
+            b1 = (test_formats[fmt_index].resultColorBlending & 0x000000ff) >>  0;
+
+            ok(r0 >= max(r1, 1) - 1 && r0 <= r1 + 1 &&
+               g0 >= max(g1, 1) - 1 && g0 <= g1 + 1 &&
+               b0 >= max(b1, 1) - 1 && b0 <= b1 + 1,
+               "Offscreen failed for %s: Got color %#08x, expected %#08x.\n", test_formats[fmt_index].fmtName, color, test_formats[fmt_index].resultColorBlending);
         } else {
             /* No pixel shader blending is supported so expected garbage.The type of 'garbage' depends on the driver version and OS.
              * E.g. on G16R16 ati reports (on old r9600 drivers) 0x00ffffff and on modern ones 0x002010ff which is also what Nvidia
@@ -8951,6 +8980,109 @@ out:
     if(shader)IDirect3DVertexShader9_Release(shader);
 }
 
+static void np2_stretch_rect_test(IDirect3DDevice9 *device) {
+    IDirect3DSurface9 *src = NULL, *dst = NULL, *backbuffer = NULL;
+    IDirect3DTexture9 *dsttex = NULL;
+    HRESULT hr;
+    DWORD color;
+    D3DRECT r1 = {0,  0,  50,  50 };
+    D3DRECT r2 = {50, 0,  100, 50 };
+    D3DRECT r3 = {50, 50, 100, 100};
+    D3DRECT r4 = {0,  50,  50, 100};
+    const float quad[] = {
+        -1.0,   -1.0,   0.1,    0.0,    0.0,
+         1.0,   -1.0,   0.1,    1.0,    0.0,
+        -1.0,    1.0,   0.1,    0.0,    1.0,
+         1.0,    1.0,   0.1,    1.0,    1.0,
+    };
+
+    hr = IDirect3DDevice9_GetBackBuffer(device, 0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer);
+    ok(hr == D3D_OK, "IDirect3DDevice9_GetBackBuffer failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_CreateRenderTarget(device, 100, 100, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, TRUE, &src, NULL );
+    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_CreateRenderTarget failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_CreateTexture(device, 25, 25, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &dsttex, NULL);
+    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_CreateTexture failed with %s\n", DXGetErrorString9(hr));
+
+    if(!src || !dsttex) {
+        skip("One or more test resources could not be created\n");
+        goto cleanup;
+    }
+
+    hr = IDirect3DTexture9_GetSurfaceLevel(dsttex, 0, &dst);
+    ok(hr == D3D_OK, "IDirect3DTexture9_GetSurfaceLevel failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_Clear(device, 1, NULL, D3DCLEAR_TARGET, 0xff00ffff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+
+    /* Clear the StretchRect destination for debugging */
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, dst);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_Clear(device, 1, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, src);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_Clear(device, 1, &r1, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_Clear(device, 1, &r2, D3DCLEAR_TARGET, 0xff00ff00, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_Clear(device, 1, &r3, D3DCLEAR_TARGET, 0xff0000ff, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_Clear(device, 1, &r4, D3DCLEAR_TARGET, 0xff000000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %s\n", DXGetErrorString9(hr));
+
+    /* Stretchrect before setting the render target back to the backbuffer. This will make Wine use
+     * the target -> texture GL blit path
+     */
+    hr = IDirect3DDevice9_StretchRect(device, src, NULL, dst, NULL, D3DTEXF_POINT);
+    ok(hr == D3D_OK, "IDirect3DDevice9_StretchRect failed with %s\n", DXGetErrorString9(hr));
+    IDirect3DSurface9_Release(dst);
+
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderTarget failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) dsttex);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %s\n", DXGetErrorString9(hr));
+    if(SUCCEEDED(hr)) {
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(float) * 5);
+        ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %s\n", DXGetErrorString9(hr));
+    }
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+    color = getPixelColor(device, 160, 360);
+    ok(color == 0x00ff0000, "stretchrect: Pixel 160,360 has color 0x%08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 480, 360);
+    ok(color == 0x0000ff00, "stretchrect: Pixel 480,360 has color 0x%08x, expected 0x0000ff00\n", color);
+    color = getPixelColor(device, 480, 120);
+    ok(color == 0x000000ff, "stretchrect: Pixel 480,120 has color 0x%08x, expected 0x000000ff\n", color);
+    color = getPixelColor(device, 160, 120);
+    ok(color == 0x00000000, "stretchrect: Pixel 160,120 has color 0x%08x, expected 0x00000000\n", color);
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed with %s\n", DXGetErrorString9(hr));
+
+cleanup:
+    if(src) IDirect3DSurface9_Release(src);
+    if(backbuffer) IDirect3DSurface9_Release(backbuffer);
+    if(dsttex) IDirect3DTexture9_Release(dsttex);
+}
+
 START_TEST(visual)
 {
     IDirect3DDevice9 *device_ptr;
@@ -9045,6 +9177,7 @@ START_TEST(visual)
     }
     pointsize_test(device_ptr);
     tssargtemp_test(device_ptr);
+    np2_stretch_rect_test(device_ptr);
 
     if (caps.VertexShaderVersion >= D3DVS_VERSION(1, 1))
     {

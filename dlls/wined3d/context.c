@@ -110,6 +110,123 @@ static WineD3DContext *AddContextToArray(IWineD3DDeviceImpl *This, HWND win_hand
     return This->contexts[This->numContexts - 1];
 }
 
+/* This function takes care of WineD3D pixel format selection. */
+static int WineD3D_ChoosePixelFormat(IWineD3DDeviceImpl *This, HDC hdc, WINED3DFORMAT ColorFormat, WINED3DFORMAT DepthStencilFormat, BOOL auxBuffers, int numSamples, BOOL pbuffer, BOOL findCompatible)
+{
+    int iPixelFormat=0;
+    short redBits, greenBits, blueBits, alphaBits, colorBits;
+    short depthBits=0, stencilBits=0;
+
+    int i = 0;
+    int nCfgs = This->adapter->nCfgs;
+    WineD3D_PixelFormat *cfgs = This->adapter->cfgs;
+
+    if(!getColorBits(ColorFormat, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits)) {
+        ERR("Unable to get color bits for format %s (%#x)!\n", debug_d3dformat(ColorFormat), ColorFormat);
+        return 0;
+    }
+
+    if(DepthStencilFormat) {
+        getDepthStencilBits(DepthStencilFormat, &depthBits, &stencilBits);
+    }
+
+    /* Find a pixel format which EXACTLY matches our requirements (except for depth) */
+    for(i=0; i<nCfgs; i++) {
+        BOOL exactDepthMatch = TRUE;
+        cfgs = &This->adapter->cfgs[i];
+
+        /* For now only accept RGBA formats. Perhaps some day we will
+         * allow floating point formats for pbuffers. */
+        if(cfgs->iPixelType != WGL_TYPE_RGBA_ARB)
+            continue;
+
+        /* In window mode (!pbuffer) we need a window drawable format and double buffering. */
+        if(!pbuffer && !(cfgs->windowDrawable && cfgs->doubleBuffer))
+            continue;
+
+        /* We like to have aux buffers in backbuffer mode */
+        if(auxBuffers && !cfgs->auxBuffers)
+            continue;
+
+        /* In pbuffer-mode we need a pbuffer-capable format but we don't want double buffering */
+        if(pbuffer && (!cfgs->pbufferDrawable || cfgs->doubleBuffer))
+            continue;
+
+        if(cfgs->redSize != redBits)
+            continue;
+        if(cfgs->greenSize != greenBits)
+            continue;
+        if(cfgs->blueSize != blueBits)
+            continue;
+        if(cfgs->alphaSize != alphaBits)
+            continue;
+
+        /* We try to locate a format which matches our requirements exactly. In case of
+         * depth it is no problem to emulate 16-bit using e.g. 24-bit, so accept that. */
+        if(cfgs->depthSize < depthBits)
+            continue;
+        else if(cfgs->depthSize > depthBits)
+            exactDepthMatch = FALSE;
+
+        /* In all cases make sure the number of stencil bits matches our requirements
+         * even when we don't need stencil because it could affect performance */
+        if(!(cfgs->stencilSize == stencilBits))
+            continue;
+
+        /* Check multisampling support */
+        if(cfgs->numSamples != numSamples)
+            continue;
+
+        /* When we have passed all the checks then we have found a format which matches our
+         * requirements. Note that we only check for a limit number of capabilities right now,
+         * so there can easily be a dozen of pixel formats which appear to be the 'same' but
+         * can still differ in things like multisampling, stereo, SRGB and other flags.
+         */
+
+        /* Exit the loop as we have found a format :) */
+        if(exactDepthMatch) {
+            iPixelFormat = cfgs->iPixelFormat;
+            break;
+        } else if(!iPixelFormat) {
+            /* In the end we might end up with a format which doesn't exactly match our depth
+             * requirements. Accept the first format we found because formats with higher iPixelFormat
+             * values tend to have more extended capabilities (e.g. multisampling) which we don't need. */
+            iPixelFormat = cfgs->iPixelFormat;
+        }
+    }
+
+    /* When findCompatible is set and no suitable format was found, let ChoosePixelFormat choose a pixel format in order not to crash. */
+    if(!iPixelFormat && !findCompatible) {
+        ERR("Can't find a suitable iPixelFormat\n");
+        return FALSE;
+    } else if(!iPixelFormat) {
+        PIXELFORMATDESCRIPTOR pfd;
+
+        TRACE("Falling back to ChoosePixelFormat as we weren't able to find an exactly matching pixel format\n");
+        /* PixelFormat selection */
+        ZeroMemory(&pfd, sizeof(pfd));
+        pfd.nSize      = sizeof(pfd);
+        pfd.nVersion   = 1;
+        pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
+        pfd.iPixelType = PFD_TYPE_RGBA;
+        pfd.cAlphaBits = alphaBits;
+        pfd.cColorBits = colorBits;
+        pfd.cDepthBits = depthBits;
+        pfd.cStencilBits = stencilBits;
+        pfd.iLayerType = PFD_MAIN_PLANE;
+
+        iPixelFormat = ChoosePixelFormat(hdc, &pfd);
+        if(!iPixelFormat) {
+            /* If this happens something is very wrong as ChoosePixelFormat barely fails */
+            ERR("Can't find a suitable iPixelFormat\n");
+            return FALSE;
+        }
+    }
+
+    TRACE("Found iPixelFormat=%d for ColorFormat=%s, DepthStencilFormat=%s\n", iPixelFormat, debug_d3dformat(ColorFormat), debug_d3dformat(DepthStencilFormat));
+    return iPixelFormat;
+}
+
 /*****************************************************************************
  * CreateContext
  *
@@ -132,57 +249,28 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
 
     TRACE("(%p): Creating a %s context for render target %p\n", This, create_pbuffer ? "offscreen" : "onscreen", target);
 
-#define PUSH1(att)        attribs[nAttribs++] = (att);
-#define PUSH2(att,value)  attribs[nAttribs++] = (att); attribs[nAttribs++] = (value);
     if(create_pbuffer) {
         HDC hdc_parent = GetDC(win_handle);
         int iPixelFormat = 0;
-        short redBits, greenBits, blueBits, alphaBits, colorBits;
-        short depthBits, stencilBits;
 
         IWineD3DSurface *StencilSurface = This->stencilBufferTarget;
         WINED3DFORMAT StencilBufferFormat = (NULL != StencilSurface) ? ((IWineD3DSurfaceImpl *) StencilSurface)->resource.format : 0;
 
-        int attribs[256];
-        int nAttribs = 0;
-        unsigned int nFormats;
+        /* Try to find a pixel format with pbuffer support. */
+        iPixelFormat = WineD3D_ChoosePixelFormat(This, hdc_parent, target->resource.format, StencilBufferFormat, FALSE /* auxBuffers */, 0 /* numSamples */, TRUE /* PBUFFER */, FALSE /* findCompatible */);
+        if(!iPixelFormat) {
+            TRACE("Trying to locate a compatible pixel format because an exact match failed.\n");
 
-        /* Retrieve the specifications for the pixelformat from the backbuffer / stencilbuffer */
-        getColorBits(target->resource.format, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits);
-        getDepthStencilBits(StencilBufferFormat, &depthBits, &stencilBits);
-        PUSH2(WGL_DRAW_TO_PBUFFER_ARB, 1); /* We need pbuffer support; doublebuffering isn't needed */
-        PUSH2(WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB); /* Make sure we don't get a float or color index format */
-        PUSH2(WGL_COLOR_BITS_ARB, colorBits);
-        PUSH2(WGL_RED_BITS_ARB, redBits);
-        PUSH2(WGL_GREEN_BITS_ARB, greenBits);
-        PUSH2(WGL_BLUE_BITS_ARB, blueBits);
-        PUSH2(WGL_ALPHA_BITS_ARB, alphaBits);
-        PUSH2(WGL_DEPTH_BITS_ARB, depthBits);
-        PUSH2(WGL_STENCIL_BITS_ARB, stencilBits);
-        PUSH1(0); /* end the list */
+            /* For some reason we weren't able to find a format, try to find something instead of crashing.
+             * A reason for failure could have been wglChoosePixelFormatARB strictness. */
+            iPixelFormat = WineD3D_ChoosePixelFormat(This, hdc_parent, target->resource.format, StencilBufferFormat, FALSE /* auxBuffer */, 0 /* numSamples */, TRUE /* PBUFFER */, TRUE /* findCompatible */);
+        }
 
-        /* Try to find a pixelformat that matches exactly. If that fails let ChoosePixelFormat try to find a close match */
-        if(!GL_EXTCALL(wglChoosePixelFormatARB(hdc_parent, (const int*)&attribs, NULL, 1, &iPixelFormat, &nFormats)))
-        {
-            PIXELFORMATDESCRIPTOR pfd;
-
-            TRACE("Falling back to ChoosePixelFormat as wglChoosePixelFormatARB failed\n");
-
-            ZeroMemory(&pfd, sizeof(pfd));
-            pfd.nSize      = sizeof(pfd);
-            pfd.nVersion   = 1;
-            pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER_DONTCARE | PFD_DRAW_TO_WINDOW;
-            pfd.iPixelType = PFD_TYPE_RGBA;
-            pfd.cColorBits = colorBits;
-            pfd.cDepthBits = depthBits;
-            pfd.cStencilBits = stencilBits;
-            pfd.iLayerType = PFD_MAIN_PLANE;
-
-            iPixelFormat = ChoosePixelFormat(hdc_parent, &pfd);
-            if(!iPixelFormat) {
-                /* If this happens something is very wrong as ChoosePixelFormat barely fails */
-                ERR("Can't find a suitable iPixelFormat for the pbuffer\n");
-            }
+        /* This shouldn't happen as ChoosePixelFormat always returns something */
+        if(!iPixelFormat) {
+            ERR("Unable to locate a pixel format for a pbuffer\n");
+            ReleaseDC(win_handle, hdc_parent);
+            goto out;
         }
 
         TRACE("Creating a pBuffer drawable for the new context\n");
@@ -205,13 +293,11 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     } else {
         PIXELFORMATDESCRIPTOR pfd;
         int iPixelFormat;
-        short redBits, greenBits, blueBits, alphaBits, colorBits;
-        short depthBits=0, stencilBits=0;
         int res;
-        int attribs[256];
-        int nAttribs = 0;
-        unsigned int nFormats;
-        WINED3DFORMAT fmt = target->resource.format;
+        WINED3DFORMAT ColorFormat = target->resource.format;
+        WINED3DFORMAT DepthStencilFormat = 0;
+        BOOL auxBuffers = FALSE;
+        int numSamples = 0;
 
         hdc = GetDC(win_handle);
         if(hdc == NULL) {
@@ -219,76 +305,54 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
             goto out;
         }
 
-        /* PixelFormat selection */
-        PUSH2(WGL_DRAW_TO_WINDOW_ARB, GL_TRUE); /* We want to draw to a window */
-        PUSH2(WGL_DOUBLE_BUFFER_ARB, GL_TRUE);
-        PUSH2(WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB); /* Make sure we don't get a float or color index format */
-        PUSH2(WGL_SUPPORT_OPENGL_ARB, GL_TRUE);
-        PUSH2(WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB); /* Make sure we receive an accelerated format. On windows (at least on ATI) this is not always the case */
-
         /* In case of ORM_BACKBUFFER, make sure to request an alpha component for X4R4G4B4/X8R8G8B8 as we might need it for the backbuffer. */
         if(wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER) {
-            if(target->resource.format == WINED3DFMT_X4R4G4B4)
-                fmt = WINED3DFMT_A4R4G4B4;
-            else if(target->resource.format == WINED3DFMT_X8R8G8B8)
-                fmt = WINED3DFMT_A8R8G8B8;
+            auxBuffers = TRUE;
 
-            /* We like to have two aux buffers in backbuffer mode */
-            PUSH2(WGL_AUX_BUFFERS_ARB, 2);
+            if(target->resource.format == WINED3DFMT_X4R4G4B4)
+                ColorFormat = WINED3DFMT_A4R4G4B4;
+            else if(target->resource.format == WINED3DFMT_X8R8G8B8)
+                ColorFormat = WINED3DFMT_A8R8G8B8;
         }
 
         /* DirectDraw supports 8bit paletted render targets and these are used by old games like Starcraft and C&C.
          * Most modern hardware doesn't support 8bit natively so we perform some form of 8bit -> 32bit conversion.
          * The conversion (ab)uses the alpha component for storing the palette index. For this reason we require
          * a format with 8bit alpha, so request A8R8G8B8. */
-        if(fmt == WINED3DFMT_P8)
-            fmt = WINED3DFMT_A8R8G8B8;
-
-        if(!getColorBits(fmt, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits)) {
-            ERR("Unable to get color bits for format %#x!\n", target->resource.format);
-            return FALSE;
-        }
-        PUSH2(WGL_COLOR_BITS_ARB, colorBits);
-        PUSH2(WGL_RED_BITS_ARB, redBits);
-        PUSH2(WGL_GREEN_BITS_ARB, greenBits);
-        PUSH2(WGL_BLUE_BITS_ARB, blueBits);
-        PUSH2(WGL_ALPHA_BITS_ARB, alphaBits);
+        if(ColorFormat == WINED3DFMT_P8)
+            ColorFormat = WINED3DFMT_A8R8G8B8;
 
         /* Retrieve the depth stencil format from the present parameters.
          * The choice of the proper format can give a nice performance boost
          * in case of GPU limited programs. */
         if(pPresentParms->EnableAutoDepthStencil) {
             TRACE("pPresentParms->EnableAutoDepthStencil=enabled; using AutoDepthStencilFormat=%s\n", debug_d3dformat(pPresentParms->AutoDepthStencilFormat));
-            if(!getDepthStencilBits(pPresentParms->AutoDepthStencilFormat, &depthBits, &stencilBits)) {
-                ERR("Unable to get depth / stencil bits for AutoDepthStencilFormat %#x!\n", pPresentParms->AutoDepthStencilFormat);
-                return FALSE;
-            }
-            PUSH2(WGL_DEPTH_BITS_ARB, depthBits);
-            PUSH2(WGL_STENCIL_BITS_ARB, stencilBits);
+            DepthStencilFormat = pPresentParms->AutoDepthStencilFormat;
         }
 
-        PUSH1(0); /* end the list */
-
-        /* In case of failure hope that standard ChoosePixelFormat will find something suitable */
-        if(!GL_EXTCALL(wglChoosePixelFormatARB(hdc, (const int*)&attribs, NULL, 1, &iPixelFormat, &nFormats)))
-        {
-            /* PixelFormat selection */
-            ZeroMemory(&pfd, sizeof(pfd));
-            pfd.nSize      = sizeof(pfd);
-            pfd.nVersion   = 1;
-            pfd.dwFlags    = PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW;/*PFD_GENERIC_ACCELERATED*/
-            pfd.iPixelType = PFD_TYPE_RGBA;
-            pfd.cAlphaBits = alphaBits;
-            pfd.cColorBits = colorBits;
-            pfd.cDepthBits = depthBits;
-            pfd.cStencilBits = stencilBits;
-            pfd.iLayerType = PFD_MAIN_PLANE;
-
-            iPixelFormat = ChoosePixelFormat(hdc, &pfd);
-            if(!iPixelFormat) {
-                /* If this happens something is very wrong as ChoosePixelFormat barely fails */
-                ERR("Can't find a suitable iPixelFormat\n");
+        /* D3D only allows multisampling when SwapEffect is set to WINED3DSWAPEFFECT_DISCARD */
+        if(pPresentParms->MultiSampleType && (pPresentParms->SwapEffect == WINED3DSWAPEFFECT_DISCARD)) {
+            if(!GL_SUPPORT(ARB_MULTISAMPLE))
+                ERR("The program is requesting multisampling without support!\n");
+            else {
+                ERR("Requesting MultiSampleType=%d\n", pPresentParms->MultiSampleType);
+                numSamples = pPresentParms->MultiSampleType;
             }
+        }
+
+        /* Try to find a pixel format which matches our requirements */
+        iPixelFormat = WineD3D_ChoosePixelFormat(This, hdc, ColorFormat, DepthStencilFormat, auxBuffers, numSamples, FALSE /* PBUFFER */, FALSE /* findCompatible */);
+
+        /* Try to locate a compatible format if we weren't able to find anything */
+        if(!iPixelFormat) {
+            TRACE("Trying to locate a compatible pixel format because an exact match failed.\n");
+            iPixelFormat = WineD3D_ChoosePixelFormat(This, hdc, ColorFormat, DepthStencilFormat, auxBuffers, 0 /* numSamples */, FALSE /* PBUFFER */, TRUE /* findCompatible */ );
+        }
+
+        /* If we still don't have a pixel format, something is very wrong as ChoosePixelFormat barely fails */
+        if(!iPixelFormat) {
+            ERR("Can't find a suitable iPixelFormat\n");
+            return FALSE;
         }
 
         DescribePixelFormat(hdc, iPixelFormat, sizeof(pfd), &pfd);
@@ -296,19 +360,29 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         if(!res) {
             int oldPixelFormat = GetPixelFormat(hdc);
 
-            if(oldPixelFormat) {
+            /* By default WGL doesn't allow pixel format adjustments but we need it here.
+             * For this reason there is a WINE-specific wglSetPixelFormat which allows you to
+             * set the pixel format multiple times. Only use it when it is really needed. */
+
+            if(oldPixelFormat == iPixelFormat) {
+                /* We don't have to do anything as the formats are the same :) */
+            } else if(oldPixelFormat && GL_SUPPORT(WGL_WINE_PIXEL_FORMAT_PASSTHROUGH)) {
+                res = GL_EXTCALL(wglSetPixelFormatWINE(hdc, iPixelFormat, NULL));
+
+                if(!res) {
+                    ERR("wglSetPixelFormatWINE failed on HDC=%p for iPixelFormat=%d\n", hdc, iPixelFormat);
+                    return FALSE;
+                }
+            } else if(oldPixelFormat) {
                 /* OpenGL doesn't allow pixel format adjustments. Print an error and continue using the old format.
                  * There's a big chance that the old format works although with a performance hit and perhaps rendering errors. */
                 ERR("HDC=%p is already set to iPixelFormat=%d and OpenGL doesn't allow changes!\n", hdc, oldPixelFormat);
-            }
-            else {
+            } else {
                 ERR("SetPixelFormat failed on HDC=%p for iPixelFormat=%d\n", hdc, iPixelFormat);
                 return FALSE;
             }
         }
     }
-#undef PUSH1
-#undef PUSH2
 
     ctx = pwglCreateContext(hdc);
     if(This->numContexts) pwglShareLists(This->contexts[0]->glCtx, ctx);
@@ -351,10 +425,9 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     /* Set up the context defaults */
     oldCtx  = pwglGetCurrentContext();
     oldDrawable = pwglGetCurrentDC();
-    if(oldCtx && oldDrawable && GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
+    if(oldCtx && oldDrawable) {
         /* See comment in ActivateContext context switching */
-        glDisable(GL_FRAGMENT_SHADER_ATI);
-        checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
+        This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, FALSE);
     }
     if(pwglMakeCurrent(hdc, ctx) == FALSE) {
         ERR("Cannot activate context to set up defaults\n");
@@ -439,10 +512,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     if(oldDrawable && oldCtx) {
         pwglMakeCurrent(oldDrawable, oldCtx);
     }
-    if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
-        glEnable(GL_FRAGMENT_SHADER_ATI);
-        checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
-    }
+    This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, TRUE);
 
 out:
     return ret;
@@ -687,13 +757,7 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *contex
     checkGLcall("glViewport");
     Context_MarkStateDirty(context, STATE_VIEWPORT, StateTable);
 
-    if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-        glDisable(GL_TEXTURE_SHADER_NV);
-        checkGLcall("glDisable(GL_TEXTURE_SHADER_NV)");
-    } else if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
-        glDisable(GL_FRAGMENT_SHADER_ATI);
-        checkGLcall("glDisable(GL_FRAGMENT_SHADER_ATI)");
-    }
+    This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, FALSE);
 }
 
 /*****************************************************************************
@@ -941,22 +1005,12 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
         else {
             TRACE("Switching gl ctx to %p, hdc=%p ctx=%p\n", context, context->hdc, context->glCtx);
 
-            if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
-                /* Mesa crashes when enabling a context with GL_FRAGMENT_SHADER_ATI enabled.
-                 * Thus we disable it before deactivating any context, and re-enable it afterwards.
-                 *
-                 * This bug is filed as bug #15269 on bugs.freedesktop.org
-                 */
-                glDisable(GL_FRAGMENT_SHADER_ATI);
-                checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
-            }
-
+            This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, FALSE);
             ret = pwglMakeCurrent(context->hdc, context->glCtx);
             if(ret == FALSE) {
                 ERR("Failed to activate the new context\n");
-            } else if(GL_SUPPORT(ATI_FRAGMENT_SHADER) && !context->last_was_blit) {
-                glEnable(GL_FRAGMENT_SHADER_ATI);
-                checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
+            } else if(!context->last_was_blit) {
+                This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, TRUE);
             }
         }
         if(This->activeContext->vshader_const_dirty) {
@@ -988,17 +1042,11 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
 
         case CTXUSAGE_CLEAR:
             if(context->last_was_blit) {
-                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-                    glEnable(GL_TEXTURE_SHADER_NV);
-                    checkGLcall("glEnable(GL_TEXTURE_SHADER_NV)");
-                } else if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
-                    glEnable(GL_FRAGMENT_SHADER_ATI);
-                    checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
-                }
+                This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, TRUE);
             }
 
             /* Blending and clearing should be orthogonal, but tests on the nvidia driver show that disabling
-             * blending when clearing improves the clearing performance increadibly
+             * blending when clearing improves the clearing performance incredibly.
              */
             glDisable(GL_BLEND);
             Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHABLENDENABLE), StateTable);
@@ -1013,13 +1061,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
         case CTXUSAGE_DRAWPRIM:
             /* This needs all dirty states applied */
             if(context->last_was_blit) {
-                if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
-                    glEnable(GL_TEXTURE_SHADER_NV);
-                    checkGLcall("glEnable(GL_TEXTURE_SHADER_NV)");
-                } else if(GL_SUPPORT(ATI_FRAGMENT_SHADER)) {
-                    glEnable(GL_FRAGMENT_SHADER_ATI);
-                    checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
-                }
+                This->shader_backend->shader_fragment_enable((IWineD3DDevice *) This, TRUE);
             }
 
             IWineD3DDeviceImpl_FindTexUnitMap(This);

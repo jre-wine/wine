@@ -129,9 +129,9 @@ void init_type_lookup(WineD3D_GL_Info *gl_info);
 /* The following functions convert 16 bit floats in the FLOAT16 data type
  * to standard C floats and vice versa. They do not depend on the encoding
  * of the C float, so they are platform independent, but slow. On x86 and
- * other IEEE 754 compliant platforms the conversion can be accelerated with
- * bitshifting the exponent and mantissa. There are also some SSE-based
- * assembly routines out there
+ * other IEEE 754 compliant platforms the conversion can be accelerated by
+ * bit shifting the exponent and mantissa. There are also some SSE-based
+ * assembly routines out there.
  *
  * See GL_NV_half_float for a reference of the FLOAT16 / GL_HALF format
  */
@@ -300,6 +300,7 @@ typedef struct {
     void (*shader_generate_vshader)(IWineD3DVertexShader *iface, SHADER_BUFFER *buffer);
     void (*shader_get_caps)(WINED3DDEVTYPE devtype, WineD3D_GL_Info *gl_info, struct shader_caps *caps);
     void (*shader_dll_load_init)(void);
+    void (*shader_fragment_enable)(IWineD3DDevice *iface, BOOL enable);
     const struct StateEntry *StateTable;
 } shader_backend_t;
 
@@ -683,6 +684,9 @@ typedef struct WineD3D_PixelFormat
     int depthSize, stencilSize;
     BOOL windowDrawable;
     BOOL pbufferDrawable;
+    BOOL doubleBuffer;
+    int auxBuffers;
+    int numSamples;
 } WineD3D_PixelFormat;
 
 /* The adapter structure */
@@ -1347,7 +1351,7 @@ void get_drawable_size_fbo(IWineD3DSurfaceImpl *This, UINT *width, UINT *height)
 /* Surface flags: */
 #define SFLAG_OVERSIZE    0x00000001 /* Surface is bigger than gl size, blts only */
 #define SFLAG_CONVERTED   0x00000002 /* Converted for color keying or Palettized */
-#define SFLAG_DIBSECTION  0x00000004 /* Has a DIB section attached for getdc */
+#define SFLAG_DIBSECTION  0x00000004 /* Has a DIB section attached for GetDC */
 #define SFLAG_LOCKABLE    0x00000008 /* Surface can be locked */
 #define SFLAG_DISCARD     0x00000010 /* ??? */
 #define SFLAG_LOCKED      0x00000020 /* Surface is locked atm */
@@ -1364,6 +1368,7 @@ void get_drawable_size_fbo(IWineD3DSurfaceImpl *This, UINT *width, UINT *height)
 #define SFLAG_CLIENT      0x00010000 /* GL_APPLE_client_storage is used on that texture */
 #define SFLAG_ALLOCATED   0x00020000 /* A gl texture is allocated for this surface */
 #define SFLAG_PBO         0x00040000 /* Has a PBO attached for speeding up data transfers for dynamically locked surfaces */
+#define SFLAG_NORMCOORD   0x00080000   /* Set if the GL texture coords are normalized(non-texture rectangle) */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_OVERSIZE: Not all data can be kept in GL
@@ -1735,6 +1740,7 @@ GLenum CompareFunc(DWORD func);
 void   set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3);
 void   set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3, INT texture_idx, DWORD dst);
 void   set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords, BOOL transformed, DWORD coordtype);
+void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context);
 
 void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int width, unsigned int height);
 GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchain);

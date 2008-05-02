@@ -259,6 +259,33 @@ GpStatus WINGDIPAPI GdipTransformMatrixPoints(GpMatrix *matrix, GpPointF *pts,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipTransformMatrixPointsI(GpMatrix *matrix, GpPoint *pts, INT count)
+{
+    GpPointF *ptsF;
+    GpStatus ret;
+    INT i;
+
+    ptsF = GdipAlloc(sizeof(GpPointF) * count);
+    if(!ptsF)
+        return OutOfMemory;
+
+    for(i = 0; i < count; i++){
+        ptsF[i].X = (REAL)pts[i].X;
+        ptsF[i].Y = (REAL)pts[i].Y;
+    }
+
+    ret = GdipTransformMatrixPoints(matrix, ptsF, count);
+
+    if(ret == Ok)
+        for(i = 0; i < count; i++){
+            pts[i].X = roundr(ptsF[i].X);
+            pts[i].Y = roundr(ptsF[i].Y);
+        }
+    GdipFree(ptsF);
+
+    return ret;
+}
+
 GpStatus WINGDIPAPI GdipTranslateMatrix(GpMatrix *matrix, REAL offsetX,
     REAL offsetY, GpMatrixOrder order)
 {
@@ -300,4 +327,63 @@ GpStatus WINGDIPAPI GdipVectorTransformMatrixPoints(GpMatrix *matrix, GpPointF *
     }
 
     return Ok;
+}
+
+GpStatus WINGDIPAPI GdipVectorTransformMatrixPointsI(GpMatrix *matrix, GpPoint *pts, INT count)
+{
+    GpPointF *ptsF;
+    GpStatus ret;
+    INT i;
+
+    ptsF = GdipAlloc(sizeof(GpPointF) * count);
+    if(!ptsF)
+        return OutOfMemory;
+
+    for(i = 0; i < count; i++){
+        ptsF[i].X = (REAL)pts[i].X;
+        ptsF[i].Y = (REAL)pts[i].Y;
+    }
+
+    ret = GdipVectorTransformMatrixPoints(matrix, ptsF, count);
+    /* store back */
+    if(ret == Ok)
+        for(i = 0; i < count; i++){
+            pts[i].X = roundr(ptsF[i].X);
+            pts[i].Y = roundr(ptsF[i].Y);
+        }
+    GdipFree(ptsF);
+
+    return ret;
+}
+
+GpStatus WINGDIPAPI GdipIsMatrixEqual(GDIPCONST GpMatrix *matrix, GDIPCONST GpMatrix *matrix2,
+    BOOL *result)
+{
+    if(!matrix || !matrix2 || !result)
+        return InvalidParameter;
+    /* based on single array member of GpMatrix */
+    *result = (memcmp(matrix->matrix, matrix2->matrix, sizeof(GpMatrix)) == 0);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipIsMatrixIdentity(GDIPCONST GpMatrix *matrix, BOOL *result)
+{
+    GpMatrix *e;
+    GpStatus ret;
+    BOOL isIdentity;
+
+    if(!matrix || !result)
+        return InvalidParameter;
+
+    ret = GdipCreateMatrix(&e);
+    if(ret != Ok) return ret;
+
+    ret = GdipIsMatrixEqual(matrix, e, &isIdentity);
+    if(ret == Ok)
+        *result = isIdentity;
+
+    GdipFree(e);
+
+    return ret;
 }

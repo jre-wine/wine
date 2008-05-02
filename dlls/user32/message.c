@@ -36,6 +36,7 @@
 #include "dbt.h"
 #include "dde.h"
 #include "imm.h"
+#include "ddk/imm.h"
 #include "wine/unicode.h"
 #include "wine/server.h"
 #include "user_private.h"
@@ -1747,6 +1748,11 @@ static BOOL process_keyboard_message( MSG *msg, UINT hw_id, HWND hwnd_filter,
         return FALSE;
     }
     accept_hardware_message( hw_id, remove, 0 );
+
+    if ( msg->message == WM_KEYDOWN || msg->message == WM_KEYUP )
+        if ( ImmProcessKey(msg->hwnd, GetKeyboardLayout(0), msg->wParam, msg->lParam, 0) )
+            msg->wParam = VK_PROCESSKEY;
+
     return TRUE;
 }
 
@@ -2220,7 +2226,7 @@ static void wait_message_reply( UINT flags )
 
     for (;;)
     {
-        unsigned int wake_bits = 0, changed_bits = 0;
+        unsigned int wake_bits = 0;
         DWORD dwlc, res;
 
         SERVER_START_REQ( set_queue_mask )
@@ -2229,10 +2235,7 @@ static void wait_message_reply( UINT flags )
             req->changed_mask = req->wake_mask;
             req->skip_wait    = 1;
             if (!wine_server_call( req ))
-            {
-                wake_bits    = reply->wake_bits;
-                changed_bits = reply->changed_bits;
-            }
+                wake_bits = reply->wake_bits;
         }
         SERVER_END_REQ;
 
@@ -2995,8 +2998,8 @@ BOOL WINAPI TranslateMessage( const MSG *msg )
     TRACE_(key)("Translating key %s (%04lx), scancode %02x\n",
                  SPY_GetVKeyName(msg->wParam), msg->wParam, LOBYTE(HIWORD(msg->lParam)));
 
-    if (ImmProcessKey(msg->hwnd, GetKeyboardLayout(0), msg->wParam, msg->lParam,0))
-        return TRUE;
+    if ( msg->wParam == VK_PROCESSKEY )
+        return ImmTranslateMessage(msg->hwnd, msg->message, msg->wParam, msg->lParam);
 
     GetKeyboardState( state );
     /* FIXME : should handle ToUnicode yielding 2 */

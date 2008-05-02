@@ -30,7 +30,6 @@
 #include "winnls.h"
 #include "x11drv.h"
 #include "imm.h"
-#include "ddk/imm.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
@@ -476,7 +475,6 @@ static void X11DRV_OpenIM(Display *display, XPointer ptr, XPointer data)
     thread_data->xim = xim;
     XUnregisterIMInstantiateCallback(display, NULL, NULL, NULL, X11DRV_OpenIM, NULL);
     wine_tsx11_unlock();
-    IME_XIMPresent(TRUE);
     IME_UpdateAssociation(NULL);
 }
 

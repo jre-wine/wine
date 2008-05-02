@@ -2053,31 +2053,64 @@ UINT X11DRV_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
     if (hkl != X11DRV_GetKeyboardLayout(0))
         FIXME("keyboard layout %p is not supported\n", hkl);
 
-	switch(wMapType) {
-		case MAPVK_VK_TO_VSC: /* vkey-code to scan-code */
-		case MAPVK_VK_TO_VSC_EX: /* FIXME: should differentiate between
-                                            left and right keys */
-		{
-			/* let's do vkey -> keycode -> scan */
-			int keyc;
-			for (keyc=min_keycode; keyc<=max_keycode; keyc++)
-				if ((keyc2vkey[keyc] & 0xFF) == wCode)
-					returnMVK (keyc2scan[keyc] & 0xFF);
-			TRACE("returning no scan-code.\n");
-		        return 0;
-		}
-		case MAPVK_VSC_TO_VK: /* scan-code to vkey-code */
-		case MAPVK_VSC_TO_VK_EX: /* FIXME: should differentiate between
-                                            left and right keys */
-		{
-			/* let's do scan -> keycode -> vkey */
-			int keyc;
-			for (keyc=min_keycode; keyc<=max_keycode; keyc++)
-				if ((keyc2scan[keyc] & 0xFF) == (wCode & 0xFF))
-					returnMVK (keyc2vkey[keyc] & 0xFF);
-			TRACE("returning no vkey-code.\n");
-		        return 0;
-		}
+    switch(wMapType)
+    {
+        case MAPVK_VK_TO_VSC: /* vkey-code to scan-code */
+        case MAPVK_VK_TO_VSC_EX:
+        {
+            int keyc;
+
+            switch (wCode)
+            {
+                case VK_SHIFT: wCode = VK_LSHIFT; break;
+                case VK_CONTROL: wCode = VK_LCONTROL; break;
+                case VK_MENU: wCode = VK_LMENU; break;
+            }
+
+            /* let's do vkey -> keycode -> scan */
+            for (keyc = min_keycode; keyc <= max_keycode; keyc++)
+                if ((keyc2vkey[keyc] & 0xFF) == wCode) break;
+
+            if (keyc > max_keycode)
+            {
+                TRACE("returning no scan-code.\n");
+                return 0;
+            }
+            returnMVK (keyc2scan[keyc] & 0xFF);
+        }
+        case MAPVK_VSC_TO_VK: /* scan-code to vkey-code */
+        case MAPVK_VSC_TO_VK_EX:
+        {
+            int keyc;
+            UINT vkey;
+
+            /* let's do scan -> keycode -> vkey */
+            for (keyc = min_keycode; keyc <= max_keycode; keyc++)
+                if ((keyc2scan[keyc] & 0xFF) == (wCode & 0xFF)) break;
+
+            if (keyc > max_keycode)
+            {
+                TRACE("returning no vkey-code.\n");
+                return 0;
+            }
+
+            vkey = keyc2vkey[keyc] & 0xFF;
+            if (wMapType == MAPVK_VSC_TO_VK)
+                switch (vkey)
+                {
+                    case VK_LSHIFT:
+                    case VK_RSHIFT:
+                        vkey = VK_SHIFT; break;
+                    case VK_LCONTROL:
+                    case VK_RCONTROL:
+                        vkey = VK_CONTROL; break;
+                    case VK_LMENU:
+                    case VK_RMENU:
+                        vkey = VK_MENU; break;
+                }
+
+            returnMVK (vkey);
+        }
 		case MAPVK_VK_TO_CHAR: /* vkey-code to unshifted ANSI code */
 		{
                         /* we still don't know what "unshifted" means. in windows VK_W (0x57)
@@ -2158,14 +2191,15 @@ INT X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
   scanCode = lParam >> 16;
   scanCode &= 0x1ff;  /* keep "extended-key" flag with code */
 
-  /* FIXME: should use MVK type 3 (NT version that distinguishes right and left */
-  vkey = X11DRV_MapVirtualKeyEx(scanCode, 1, X11DRV_GetKeyboardLayout(0));
+  vkey = X11DRV_MapVirtualKeyEx(scanCode, MAPVK_VSC_TO_VK_EX, X11DRV_GetKeyboardLayout(0));
 
   /*  handle "don't care" bit (0x02000000) */
   if (!(lParam & 0x02000000)) {
     switch (vkey) {
-         case VK_LSHIFT:
          case VK_RSHIFT:
+                          /* R-Shift is "special" - it is an extended key with separate scan code */
+                          scanCode |= 0x100;
+         case VK_LSHIFT:
                           vkey = VK_SHIFT;
                           break;
        case VK_LCONTROL:
@@ -2176,12 +2210,10 @@ INT X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
           case VK_RMENU:
                           vkey = VK_MENU;
                           break;
-               default:
-                          break;
     }
   }
 
-  ansi = X11DRV_MapVirtualKeyEx(vkey, 2, X11DRV_GetKeyboardLayout(0));
+  ansi = X11DRV_MapVirtualKeyEx(vkey, MAPVK_VK_TO_CHAR, X11DRV_GetKeyboardLayout(0));
   TRACE("scan 0x%04x, vkey 0x%04x, ANSI 0x%04x\n", scanCode, vkey, ansi);
 
   /* first get the name of the "regular" keys which is the Upper case
@@ -2565,6 +2597,12 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
         {
             lpChar[0] = 0;
             ret = 0;
+        }
+	else if((lpKeyState[VK_CONTROL] & 0x80) /* Control is pressed */
+		&& (keysym == XK_Return || keysym == XK_KP_Enter))
+        {
+            lpChar[0] = '\n';
+            ret = 1;
         }
 
         /* Hack to detect an XLookupString hard-coded to Latin1 */

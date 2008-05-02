@@ -35,7 +35,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
-WINE_DECLARE_DEBUG_CHANNEL(opengl);
 
 #ifdef SONAME_LIBGL
 
@@ -105,10 +104,10 @@ typedef struct wine_glpixelformat {
 
 typedef struct wine_glcontext {
     HDC hdc;
+    BOOL do_escape;
     XVisualInfo *vis;
     WineGLPixelFormat *fmt;
     GLXContext ctx;
-    BOOL do_escape;
     HDC read_hdc;
     Drawable drawables[2];
     BOOL refresh_drawables;
@@ -781,6 +780,11 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
        *  TODO: wglChoosePixelFormat
        */
       break ;
+    case WGL_FRAMEBUFFER_SRGB_CAPABLE_EXT:
+      pop = iWGLAttr[++cur];
+      PUSH2(oGLXAttr, GLX_FRAMEBUFFER_SRGB_CAPABLE_EXT, pop);
+      TRACE("pAttr[%d] = GLX_FRAMEBUFFER_SRGB_CAPABLE_EXT: %x\n", cur, pop);
+      break ;
 
     default:
       FIXME("unsupported %x WGL Attribute\n", iWGLAttr[cur]);
@@ -1043,7 +1047,6 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
     int bestDepth = -1;
     int bestStencil = -1;
     int bestAux = -1;
-    int score;
 
     if (!has_opengl()) {
         ERR("No libGL on this box - disabling OpenGL support !\n");
@@ -1065,7 +1068,6 @@ int X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
         int alpha=0, color=0, depth=0, stencil=0, aux=0;
 
         fmt = ConvertPixelFormatWGLtoGLX(gdi_display, i+1 /* 1-based index */, FALSE /* offscreen */, &value);
-        score = 0;
 
         /* Pixel type */
         pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_RENDER_TYPE, &value);
@@ -1442,41 +1444,29 @@ int X11DRV_GetPixelFormat(X11DRV_PDEVICE *physDev) {
   return physDev->current_pf;
 }
 
-/**
- * X11DRV_SetPixelFormat
- *
- * Set the pixel-format id used by this DC
- */
-BOOL X11DRV_SetPixelFormat(X11DRV_PDEVICE *physDev,
+/* This function is the core of X11DRV_SetPixelFormat and X11DRV_SetPixelFormatWINE.
+ * Both functions are the same except that X11DRV_SetPixelFormatWINE allows you to
+ * set the pixel format multiple times. */
+static BOOL internal_SetPixelFormat(X11DRV_PDEVICE *physDev,
 			   int iPixelFormat,
 			   const PIXELFORMATDESCRIPTOR *ppfd) {
-  WineGLPixelFormat *fmt;
-  int value;
-  HWND hwnd;
+    WineGLPixelFormat *fmt;
+    int value;
+    HWND hwnd;
 
-  TRACE("(%p,%d,%p)\n", physDev, iPixelFormat, ppfd);
+    /* SetPixelFormat is not allowed on the X root_window e.g. GetDC(0) */
+    if(get_glxdrawable(physDev) == root_window)
+    {
+        ERR("Invalid operation on root_window\n");
+        return FALSE;
+    }
 
-  if (!has_opengl()) {
-    ERR("No libGL on this box - disabling OpenGL support !\n");
-    return FALSE;
-  }
-
-  /* SetPixelFormat is not allowed on the X root_window e.g. GetDC(0) */
-  if(get_glxdrawable(physDev) == root_window)
-  {
-    ERR("Invalid operation on root_window\n");
-    return FALSE;
-  }
-
-  /* Check if iPixelFormat is in our list of supported formats to see if it is supported. */
-  fmt = ConvertPixelFormatWGLtoGLX(gdi_display, iPixelFormat, FALSE /* Offscreen */, &value);
-  if(!fmt) {
-    ERR("Invalid iPixelFormat: %d\n", iPixelFormat);
-    return FALSE;
-  }
-
-    if(physDev->current_pf)  /* cannot change it if already set */
-        return (physDev->current_pf == iPixelFormat);
+    /* Check if iPixelFormat is in our list of supported formats to see if it is supported. */
+    fmt = ConvertPixelFormatWGLtoGLX(gdi_display, iPixelFormat, FALSE /* Offscreen */, &value);
+    if(!fmt) {
+        ERR("Invalid iPixelFormat: %d\n", iPixelFormat);
+        return FALSE;
+    }
 
     pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DRAWABLE_TYPE, &value);
 
@@ -1508,24 +1498,46 @@ BOOL X11DRV_SetPixelFormat(X11DRV_PDEVICE *physDev,
         FIXME("called on a non-window, non-bitmap object?\n");
     }
 
-  physDev->current_pf = iPixelFormat;
+    physDev->current_pf = iPixelFormat;
 
-  if (TRACE_ON(wgl)) {
-    int gl_test = 0;
+    if (TRACE_ON(wgl)) {
+        int gl_test = 0;
 
-    gl_test = pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_FBCONFIG_ID, &value);
-    if (gl_test) {
-      ERR("Failed to retrieve FBCONFIG_ID from GLXFBConfig, expect problems.\n");
-    } else {
-      TRACE(" FBConfig have :\n");
-      TRACE(" - FBCONFIG_ID   0x%x\n", value);
-      pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_VISUAL_ID, &value);
-      TRACE(" - VISUAL_ID     0x%x\n", value);
-      pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DRAWABLE_TYPE, &value);
-      TRACE(" - DRAWABLE_TYPE 0x%x\n", value);
+        gl_test = pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_FBCONFIG_ID, &value);
+        if (gl_test) {
+           ERR("Failed to retrieve FBCONFIG_ID from GLXFBConfig, expect problems.\n");
+        } else {
+            TRACE(" FBConfig have :\n");
+            TRACE(" - FBCONFIG_ID   0x%x\n", value);
+            pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_VISUAL_ID, &value);
+            TRACE(" - VISUAL_ID     0x%x\n", value);
+            pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DRAWABLE_TYPE, &value);
+            TRACE(" - DRAWABLE_TYPE 0x%x\n", value);
+        }
     }
-  }
-  return TRUE;
+    return TRUE;
+}
+
+
+/**
+ * X11DRV_SetPixelFormat
+ *
+ * Set the pixel-format id used by this DC
+ */
+BOOL X11DRV_SetPixelFormat(X11DRV_PDEVICE *physDev,
+			   int iPixelFormat,
+			   const PIXELFORMATDESCRIPTOR *ppfd) {
+    TRACE("(%p,%d,%p)\n", physDev, iPixelFormat, ppfd);
+
+    if (!has_opengl()) {
+        ERR("No libGL on this box - disabling OpenGL support !\n");
+        return FALSE;
+    }
+
+    if(physDev->current_pf)  /* cannot change it if already set */
+        return (physDev->current_pf == iPixelFormat);
+
+    return internal_SetPixelFormat(physDev, iPixelFormat, ppfd);
 }
 
 /**
@@ -2831,6 +2843,10 @@ static GLboolean WINAPI X11DRV_wglGetPixelFormatAttribivARB(HDC hdc, int iPixelF
                 curGLXAttr = GLX_FLOAT_COMPONENTS_NV;
                 break;
 
+            case WGL_FRAMEBUFFER_SRGB_CAPABLE_EXT:
+                curGLXAttr = GLX_FRAMEBUFFER_SRGB_CAPABLE_EXT;
+                break;
+
             case WGL_ACCUM_RED_BITS_ARB:
                 curGLXAttr = GLX_ACCUM_RED_SIZE;
                 break;
@@ -3120,6 +3136,28 @@ static void WINAPI X11DRV_wglFreeMemoryNV(GLvoid* pointer) {
 }
 
 /**
+ * X11DRV_wglSetPixelFormatWINE
+ *
+ * WGL_WINE_pixel_format_passthrough: wglSetPixelFormatWINE
+ * This is a WINE-specific wglSetPixelFormat which can set the pixel format multiple times.
+ */
+BOOL X11DRV_wglSetPixelFormatWINE(X11DRV_PDEVICE *physDev, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd)
+{
+    TRACE("(%p,%d,%p)\n", physDev, iPixelFormat, ppfd);
+
+    if (!has_opengl()) {
+        ERR("No libGL on this box - disabling OpenGL support !\n");
+        return FALSE;
+    }
+
+    if (physDev->current_pf == iPixelFormat) return TRUE;
+
+    /* Relay to the core SetPixelFormat */
+    TRACE("Changing iPixelFormat from %d to %d\n", physDev->current_pf, iPixelFormat);
+    return internal_SetPixelFormat(physDev, iPixelFormat, ppfd);
+}
+
+/**
  * glxRequireVersion (internal)
  *
  * Check if the supported GLX version matches requiredVersion.
@@ -3257,6 +3295,14 @@ static const WineGLExtension WGL_NV_vertex_array_range =
   }
 };
 
+static const WineGLExtension WGL_WINE_pixel_format_passthrough =
+{
+  "WGL_WINE_pixel_format_passthrough",
+  {
+    { "wglSetPixelFormatWINE", X11DRV_wglSetPixelFormatWINE },
+  }
+};
+
 /**
  * X11DRV_WineGL_LoadExtensions
  */
@@ -3323,9 +3369,19 @@ static void X11DRV_WineGL_LoadExtensions(void)
      * Games like Call of Duty and K.O.T.O.R. rely on it. Further our emulation is good enough. */
     register_extension(&WGL_EXT_swap_control);
 
+    if(glxRequireExtension("GLX_EXT_framebuffer_sRGB"))
+        register_extension_string("WGL_EXT_framebuffer_sRGB");
+
     /* The OpenGL extension GL_NV_vertex_array_range adds wgl/glX functions which aren't exported as 'real' wgl/glX extensions. */
     if(strstr(WineGLInfo.glExtensions, "GL_NV_vertex_array_range") != NULL)
         register_extension(&WGL_NV_vertex_array_range);
+
+    /* WINE-specific WGL Extensions */
+
+    /* In WineD3D we need the ability to set the pixel format more than once (e.g. after a device reset).
+     * The default wglSetPixelFormat doesn't allow this, so add our own which allows it.
+     */
+    register_extension(&WGL_WINE_pixel_format_passthrough);
 }
 
 
@@ -3370,7 +3426,7 @@ BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev)
     return 0;
   }
   
-  TRACE_(opengl)("(%p)\n", physDev);
+  TRACE("(%p)\n", physDev);
 
   drawable = get_glxdrawable(physDev);
 
@@ -3491,7 +3547,7 @@ BOOL X11DRV_SetPixelFormat(X11DRV_PDEVICE *physDev,
  *		SwapBuffers (X11DRV.@)
  */
 BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev) {
-  ERR_(opengl)("No OpenGL support compiled in.\n");
+  ERR("No OpenGL support compiled in.\n");
 
   return FALSE;
 }
@@ -3502,7 +3558,7 @@ BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev) {
  * For OpenGL32 wglCopyContext.
  */
 BOOL X11DRV_wglCopyContext(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask) {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
     return FALSE;
 }
 
@@ -3512,7 +3568,7 @@ BOOL X11DRV_wglCopyContext(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask) {
  * For OpenGL32 wglCreateContext.
  */
 HGLRC X11DRV_wglCreateContext(X11DRV_PDEVICE *physDev) {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
     return NULL;
 }
 
@@ -3522,7 +3578,7 @@ HGLRC X11DRV_wglCreateContext(X11DRV_PDEVICE *physDev) {
  * For OpenGL32 wglDeleteContext.
  */
 BOOL X11DRV_wglDeleteContext(HGLRC hglrc) {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
     return FALSE;
 }
 
@@ -3532,18 +3588,18 @@ BOOL X11DRV_wglDeleteContext(HGLRC hglrc) {
  * For OpenGL32 wglGetProcAddress.
  */
 PROC X11DRV_wglGetProcAddress(LPCSTR lpszProc) {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
     return NULL;
 }
 
 HDC X11DRV_wglGetPbufferDCARB(X11DRV_PDEVICE *hDevice, void *hPbuffer)
 {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
     return NULL;
 }
 
 BOOL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* hDrawDev, X11DRV_PDEVICE* hReadDev, HGLRC hglrc) {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
     return FALSE;
 }
 
@@ -3553,7 +3609,7 @@ BOOL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* hDrawDev, X11DRV_PDEVICE* h
  * For OpenGL32 wglMakeCurrent.
  */
 BOOL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
     return FALSE;
 }
 
@@ -3563,7 +3619,7 @@ BOOL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
  * For OpenGL32 wglShaderLists.
  */
 BOOL X11DRV_wglShareLists(HGLRC hglrc1, HGLRC hglrc2) {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
     return FALSE;
 }
 
@@ -3574,7 +3630,7 @@ BOOL X11DRV_wglShareLists(HGLRC hglrc1, HGLRC hglrc2) {
  */
 BOOL X11DRV_wglUseFontBitmapsA(X11DRV_PDEVICE *physDev, DWORD first, DWORD count, DWORD listBase)
 {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
     return FALSE;
 }
 
@@ -3585,7 +3641,19 @@ BOOL X11DRV_wglUseFontBitmapsA(X11DRV_PDEVICE *physDev, DWORD first, DWORD count
  */
 BOOL X11DRV_wglUseFontBitmapsW(X11DRV_PDEVICE *physDev, DWORD first, DWORD count, DWORD listBase)
 {
-    ERR_(opengl)("No OpenGL support compiled in.\n");
+    ERR("No OpenGL support compiled in.\n");
+    return FALSE;
+}
+
+/**
+ * X11DRV_wglSetPixelFormatWINE
+ *
+ * WGL_WINE_pixel_format_passthrough: wglSetPixelFormatWINE
+ * This is a WINE-specific wglSetPixelFormat which can set the pixel format multiple times.
+ */
+BOOL X11DRV_wglSetPixelFormatWINE(X11DRV_PDEVICE *physDev, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd)
+{
+    ERR("No OpenGL support compiled in.\n");
     return FALSE;
 }
 

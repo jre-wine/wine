@@ -35,6 +35,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d_surface);
 
 HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UINT height, UINT outpitch, CONVERT_TYPES convert, IWineD3DSurfaceImpl *surf);
 static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4], BOOL colorkey);
+static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES convert);
 static inline void clear_unused_channels(IWineD3DSurfaceImpl *This);
 static void surface_remove_pbo(IWineD3DSurfaceImpl *This);
 
@@ -116,7 +117,7 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
         int dst_pitch = 0;
 
         /* In case of P8 the index is stored in the alpha component if the primary render target uses P8 */
-        if(This->resource.format == WINED3DFMT_P8) {
+        if(This->resource.format == WINED3DFMT_P8 && primary_render_target_is_p8(This->resource.wineD3DDevice)) {
             format = GL_ALPHA;
             type = GL_UNSIGNED_BYTE;
         }
@@ -625,6 +626,11 @@ void WINAPI IWineD3DSurfaceImpl_SetGlTextureDesc(IWineD3DSurface *iface, UINT te
         IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
         IWineD3DSurface_AddDirtyRect(iface, NULL);
     }
+    if(target == GL_TEXTURE_RECTANGLE_ARB && This->glDescription.target != target) {
+        This->Flags &= ~SFLAG_NORMCOORD;
+    } else if(This->glDescription.target == GL_TEXTURE_RECTANGLE_ARB && target != GL_TEXTURE_RECTANGLE_ARB) {
+        This->Flags |= SFLAG_NORMCOORD;
+    }
     This->glDescription.textureName = textureName;
     This->glDescription.target      = target;
     This->Flags &= ~SFLAG_ALLOCATED;
@@ -862,7 +868,6 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This)
     int bpp;
     GLenum format, internal, type;
     CONVERT_TYPES convert;
-    BOOL srcIsUpsideDown;
     GLint prevRead;
 
     d3dfmt_get_conv(This, TRUE /* We need color keying */, TRUE /* We will use textures */, &format, &internal, &type, &convert, &bpp, This->srgb);
@@ -889,7 +894,6 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This)
          */
         TRACE("Locking offscreen render target\n");
         glReadBuffer(device->offscreenBuffer);
-        srcIsUpsideDown = TRUE;
     } else {
         GLenum buffer = surface_get_gl_buffer((IWineD3DSurface *) This, (IWineD3DSwapChain *)swapchain);
         TRACE("Locking %#x buffer\n", buffer);
@@ -897,7 +901,6 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This)
         checkGLcall("glReadBuffer");
 
         IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
-        srcIsUpsideDown = FALSE;
     }
 
     if(!(This->Flags & SFLAG_ALLOCATED)) {
@@ -1026,7 +1029,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
 
     /* Now download the surface content from opengl
      * Use the render target readback if the surface is on a swapchain(=onscreen render target) or the current primary target
-     * Offscreen targets which are not active at the moment or are higher targets(fbos) can be locked with the texture path
+     * Offscreen targets which are not active at the moment or are higher targets(FBOs) can be locked with the texture path
      */
     IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain);
     if(swapchain || iface == myDevice->render_targets[0]) {
@@ -1188,7 +1191,7 @@ static void flush_to_framebuffer_drawpixels(IWineD3DSurfaceImpl *This, GLenum fm
      * catch to put the dib section in InSync mode, which leads to a crash
      * and a blocked x server on my radeon card.
      *
-     * The following lines read the dib section so it is put in inSync mode
+     * The following lines read the dib section so it is put in InSync mode
      * before glDrawPixels is called and the crash is prevented. There won't
      * be any interfering gdi accesses, because UnlockRect is called from
      * ReleaseDC, and the app won't use the dc any more afterwards.
@@ -2578,7 +2581,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_SetMem(IWineD3DSurface *iface, void *Mem) {
         /* Now free the old memory if any */
         HeapFree(GetProcessHeap(), 0, release);
     } else if(This->Flags & SFLAG_USERPTR) {
-        /* Lockrect and GetDC will re-create the dib section and allocated memory */
+        /* LockRect and GetDC will re-create the dib section and allocated memory */
         This->resource.allocatedMemory = NULL;
         /* HeapMemory should be NULL already */
         if(This->resource.heapMemory != NULL) ERR("User pointer surface has heap memory allocated\n");
@@ -2785,8 +2788,11 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
         Src->Flags &= ~SFLAG_INTEXTURE;
     }
 
-    glReadBuffer(GL_BACK);
-    checkGLcall("glReadBuffer(GL_BACK)");
+    if(swapchain) {
+        glReadBuffer(surface_get_gl_buffer(SrcSurface, (IWineD3DSwapChain *)swapchain));
+    } else {
+        glReadBuffer(myDevice->offscreenBuffer);
+    }
 
     /* TODO: Only back up the part that will be overwritten */
     glCopyTexSubImage2D(texture_target, 0,
@@ -2844,15 +2850,22 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
     }
     checkGLcall("glEnd and previous");
 
-    left = (float) srect->x1 / (float) Src->pow2Width;
-    right = (float) srect->x2 / (float) Src->pow2Width;
+    left = srect->x1;
+    right = srect->x2;
 
     if(upsidedown) {
-        top = (float) (Src->currentDesc.Height - srect->y1) / (float) Src->pow2Height;
-        bottom = (float) (Src->currentDesc.Height - srect->y2) / (float) Src->pow2Height;
+        top = Src->currentDesc.Height - srect->y1;
+        bottom = Src->currentDesc.Height - srect->y2;
     } else {
-        top = (float) (Src->currentDesc.Height - srect->y2) / (float) Src->pow2Height;
-        bottom = (float) (Src->currentDesc.Height - srect->y1) / (float) Src->pow2Height;
+        top = Src->currentDesc.Height - srect->y2;
+        bottom = Src->currentDesc.Height - srect->y1;
+    }
+
+    if(Src->Flags & SFLAG_NORMCOORD) {
+        left /= Src->pow2Width;
+        right /= Src->pow2Width;
+        top /= Src->pow2Height;
+        bottom /= Src->pow2Height;
     }
 
     /* draw the source texture stretched and upside down. The correct surface is bound already */
@@ -3638,12 +3651,49 @@ HRESULT WINAPI IWineD3DSurfaceImpl_RealizePalette(IWineD3DSurface *iface) {
     if(This->resource.format == WINED3DFMT_P8 ||
        This->resource.format == WINED3DFMT_A8P8)
     {
-        if(!(This->Flags & SFLAG_INSYSMEM)) {
-            TRACE("Palette changed with surface that does not have an up to date system memory copy\n");
-            IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+        int bpp;
+        GLenum format, internal, type;
+        CONVERT_TYPES convert;
+
+        /* Check if we are using a RTL mode which uses texturing for uploads */
+        BOOL use_texture = (wined3d_settings.rendertargetlock_mode == RTL_READTEX || wined3d_settings.rendertargetlock_mode == RTL_TEXTEX);
+
+        /* Check if we have hardware palette conversion if we have convert is set to NO_CONVERSION */
+        d3dfmt_get_conv(This, TRUE, use_texture, &format, &internal, &type, &convert, &bpp, This->srgb);
+
+        if((This->resource.usage & WINED3DUSAGE_RENDERTARGET) && (convert == NO_CONVERSION))
+        {
+            ENTER_GL();
+            if (This->glDescription.textureName == 0) {
+                glGenTextures(1, &This->glDescription.textureName);
+                checkGLcall("glGenTextures");
+            }
+            glBindTexture(This->glDescription.target, This->glDescription.textureName);
+            checkGLcall("glBindTexture(This->glDescription.target, This->glDescription.textureName)");
+            LEAVE_GL();
+
+            /* Make sure the texture is up to date. This call doesn't do anything if the texture is already up to date. */
+            IWineD3DSurface_LoadLocation(iface, SFLAG_INTEXTURE, NULL);
+
+            /* We want to force a palette refresh, so mark the drawable as not being up to date */
+            IWineD3DSurface_ModifyLocation(iface, SFLAG_INDRAWABLE, FALSE);
+
+            /* Re-upload the palette */
+            d3dfmt_p8_upload_palette(iface, convert);
+
+            /* Without this some palette updates are missed. This at least happens on Nvidia drivers but
+             * it works fine using Mesa. */
+            ENTER_GL();
+            glFlush();
+            LEAVE_GL();
+        } else {
+            if(!(This->Flags & SFLAG_INSYSMEM)) {
+                TRACE("Palette changed with surface that does not have an up to date system memory copy\n");
+                IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+            }
+            TRACE("Dirtifying surface\n");
+            IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
         }
-        TRACE("Dirtifying surface\n");
-        IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
     }
 
     if(This->Flags & SFLAG_DIBSECTION) {
@@ -3657,8 +3707,7 @@ HRESULT WINAPI IWineD3DSurfaceImpl_RealizePalette(IWineD3DSurface *iface) {
         SetDIBColorTable(This->hDC, 0, 256, col);
     }
 
-    /* Propagate the changes to the drawable when we have a palette.
-     * TODO: in case of hardware p8 palettes we should only upload the palette. */
+    /* Propagate the changes to the drawable when we have a palette. */
     if(This->resource.usage & WINED3DUSAGE_RENDERTARGET)
         IWineD3DSurface_LoadLocation(iface, SFLAG_INDRAWABLE, NULL);
 
@@ -3737,7 +3786,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_PrivateSetup(IWineD3DSurface *iface) {
             This->glDescription.target = GL_TEXTURE_RECTANGLE_ARB;
             This->pow2Width  = This->currentDesc.Width;
             This->pow2Height = This->currentDesc.Height;
-            This->Flags &= ~SFLAG_NONPOW2;
+            This->Flags &= ~(SFLAG_NONPOW2 | SFLAG_NORMCOORD);
         }
 
         /* No oversize, gl rect is the full texture size */

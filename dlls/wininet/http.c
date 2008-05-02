@@ -878,6 +878,9 @@ BOOL WINAPI HttpEndRequestW(HINTERNET hRequest,
                 HeapFree(GetProcessHeap(),0,lpwhr->lpszVerb);
                 lpwhr->lpszVerb = WININET_strdupW(szGET);
                 HTTP_DrainContent(lpwhr);
+                INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
+                                      INTERNET_STATUS_REDIRECT, szNewLocation,
+                                      dwBufferSize);
                 rc = HTTP_HandleRedirect(lpwhr, szNewLocation);
                 if (rc)
                     rc = HTTP_HttpSendRequestW(lpwhr, NULL, 0, NULL, 0, 0, TRUE);
@@ -2861,10 +2864,13 @@ static BOOL HTTP_GetRequestURL(WININETHTTPREQW *req, LPWSTR buf)
  */
 static BOOL HTTP_HandleRedirect(LPWININETHTTPREQW lpwhr, LPCWSTR lpszUrl)
 {
+    static const WCHAR szContentType[] = {'C','o','n','t','e','n','t','-','T','y','p','e',0};
+    static const WCHAR szContentLength[] = {'C','o','n','t','e','n','t','-','L','e','n','g','t','h',0};
     LPWININETHTTPSESSIONW lpwhs = lpwhr->lpHttpSession;
     LPWININETAPPINFOW hIC = lpwhs->lpAppInfo;
     BOOL using_proxy = hIC->lpszProxy && hIC->lpszProxy[0];
     WCHAR path[INTERNET_MAX_URL_LENGTH];
+    int index;
 
     if(lpszUrl[0]=='/')
     {
@@ -3050,6 +3056,14 @@ static BOOL HTTP_HandleRedirect(LPWININETHTTPREQW lpwhr, LPCWSTR lpszUrl)
             strcpyW(lpwhr->lpszPath,path);
         }
     }
+
+    /* Remove custom content-type/length headers on redirects.  */
+    index = HTTP_GetCustomHeaderIndex(lpwhr, szContentType, 0, TRUE);
+    if (0 <= index)
+        HTTP_DeleteCustomHeader(lpwhr, index);
+    index = HTTP_GetCustomHeaderIndex(lpwhr, szContentLength, 0, TRUE);
+    if (0 <= index)
+        HTTP_DeleteCustomHeader(lpwhr, index);
 
     return TRUE;
 }
@@ -3266,7 +3280,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
             if (lpwhr->dwContentLength == 0)
                 HTTP_FinishedReading(lpwhr);
 
-            /* Correct the case where both a Content-Length and Transfer-encoding = chuncked are set */
+            /* Correct the case where both a Content-Length and Transfer-encoding = chunked are set */
 
             dwBufferSize = sizeof(encoding);
             if (HTTP_HttpQueryInfoW(lpwhr, HTTP_QUERY_TRANSFER_ENCODING, encoding, &dwBufferSize, NULL) &&

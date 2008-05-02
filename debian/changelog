@@ -1,3 +1,9 @@
+wine (0.9.61-1) UNRELEASED; urgency=low
+
+  * Merge upstream Wine 0.9.61
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 03 May 2008 00:39:30 +0200
+
 wine (0.9.60-4) unstable; urgency=medium
 
   * Added the lpr virtual package as an alternative dependency for

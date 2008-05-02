@@ -15,6 +15,10 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
+#include "config.h"
+#include "wine/port.h"
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
@@ -1673,6 +1677,9 @@ static BOOL CDecodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
             {
                 ret = CDecodeMsg_CopyData(msg, pbData, cbData);
                 msg->base.state = MsgStateDataFinalized;
+                if (ret)
+                    ret = CDecodeMsg_DecodeContent(msg, &msg->msg_data,
+                     msg->type);
             }
             else
             {

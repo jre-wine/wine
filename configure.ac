@@ -35,6 +35,8 @@ AC_ARG_WITH(esd,       AS_HELP_STRING([--without-esd],[do not use the EsounD sou
 AC_ARG_WITH(fontconfig,AS_HELP_STRING([--without-fontconfig],[do not use fontconfig]),
             [if test "x$withval" = "xno"; then ac_cv_header_fontconfig_fontconfig_h=no; fi])
 AC_ARG_WITH(gphoto,    AS_HELP_STRING([--without-gphoto],[do not use gphoto (Digital Camera support)]))
+AC_ARG_WITH(glu,       AS_HELP_STRING([--without-glu],[do not use the GLU library]),
+            [if test "x$withval" = "xno"; then ac_cv_header_GL_glu_h=no; fi])
 AC_ARG_WITH(hal,       AS_HELP_STRING([--without-hal],[do not use HAL (dynamic device support)]))
 AC_ARG_WITH(jack,      AS_HELP_STRING([--without-jack],[do not use the Jack sound support]),
             [if test "x$withval" = "xno"; then ac_cv_header_jack_jack_h=no; fi])
@@ -735,13 +737,13 @@ This probably prevents linking to OpenGL. Try deleting the file and restarting c
 	                            fi],
 				    $X_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)],
 			     $X_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS)
-
-	        dnl Check for GLU32 library.
-		AC_CHECK_LIB(GLU,gluLookAt,
-			     [OPENGL_LIBS="$OPENGL_LIBS -lGLU"
-			     GLU32FILES='$(GLU32FILES)']
-			     ,,
-			     $OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS)
+                 if test "$ac_cv_header_GL_glu_h" = "yes"
+                 then
+                    WINE_CHECK_SONAME(GLU,gluLookAt,[GLU32FILES='$(GLU32FILES)'],,
+                                      [$OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS])
+                 fi
+                 WINE_NOTICE_WITH(glu,[test "x$ac_cv_lib_soname_GLU" = "x"],
+                                 [libGLU development files not found, GLU won't be supported.])
              else
                  opengl_msg="Old Mesa headers detected. Consider upgrading your Mesa libraries."
 	     fi
@@ -1612,6 +1614,14 @@ then
     AC_DEFINE(HAVE_DAYLIGHT, 1, [Define if you have the daylight variable])
 fi
 
+dnl Check for isinf
+AC_CACHE_CHECK([for isinf], ac_cv_have_isinf,
+               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <math.h>]], [[float f = 0.0; isinf(f)]])],[ac_cv_have_isinf="yes"],[ac_cv_have_isinf="no"]))
+if test "$ac_cv_have_isinf" = "yes"
+then
+    AC_DEFINE(HAVE_ISINF, 1, [Define to 1 if you have the `isinf' function.])
+fi
+
 dnl *** check for the need to define platform-specific symbols
 
 case $host_cpu in
@@ -1639,6 +1649,7 @@ Makefile: dummy\\
 \\
 \$(OBJS): \$(IDL_GEN_HEADERS)\\
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)\\
+\$(RC_SRCS:.rc=.res): \$(IDL_TLB_SRCS:.idl=.tlb)\\
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)\\
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"],
 ["### Dependencies:
@@ -1650,6 +1661,7 @@ Makefile: dummy
 
 \$(OBJS): \$(IDL_GEN_HEADERS)
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)
+\$(RC_SRCS:.rc=.res): \$(IDL_TLB_SRCS:.idl=.tlb)
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)
 \$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"]))
 
@@ -1980,6 +1992,7 @@ AC_CONFIG_FILES([dlls/urlmon/tests/Makefile])
 AC_CONFIG_FILES([dlls/user32/Makefile])
 AC_CONFIG_FILES([dlls/user32/tests/Makefile])
 AC_CONFIG_FILES([dlls/userenv/Makefile])
+AC_CONFIG_FILES([dlls/userenv/tests/Makefile])
 AC_CONFIG_FILES([dlls/usp10/Makefile])
 AC_CONFIG_FILES([dlls/usp10/tests/Makefile])
 AC_CONFIG_FILES([dlls/uuid/Makefile])

@@ -193,8 +193,14 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID fImpLoad)
         /* close all opened MCI drivers */
         MCI_SendCommand(MCI_ALL_DEVICE_ID, MCI_CLOSE, MCI_WAIT, 0L, TRUE);
         MMDRV_Exit();
-        /* now unload all remaining drivers... */
-        DRIVER_UnloadAll();
+        /* There's no guarantee the drivers haven't already been unloaded on
+         * process shutdown.
+         */
+        if (!fImpLoad)
+        {
+            /* now unload all remaining drivers... */
+            DRIVER_UnloadAll();
+        }
 
 	WINMM_DeleteIData();
 	break;
@@ -2197,7 +2203,7 @@ UINT WINAPI waveOutGetErrorTextW(UINT uError, LPWSTR lpText, UINT uSize)
     if (lpText == NULL) ret = MMSYSERR_INVALPARAM;
     else if (uSize == 0) ret = MMSYSERR_NOERROR;
     else if (
-	       /* test has been removed 'coz MMSYSERR_BASE is 0, and gcc did emit
+	       /* test has been removed because MMSYSERR_BASE is 0, and gcc did emit
 		* a warning for the test was always true */
 	       (/*uError >= MMSYSERR_BASE && */ uError <= MMSYSERR_LASTERROR) ||
 	       (uError >= WAVERR_BASE  && uError <= WAVERR_LASTERROR)) {

@@ -372,7 +372,7 @@ DWORD svcctl_CreateServiceW(
     entry->config.lpServiceStartName = strdupW(lpServiceStartName);
     entry->config.lpDisplayName = strdupW(lpDisplayName);
 
-    if (lpdwTagId)      /* TODO: in most situations a non-NULL tagid will generate a ERROR_INVALID_PARAMETER */
+    if (lpdwTagId)      /* TODO: In most situations a non-NULL TagId will generate an ERROR_INVALID_PARAMETER. */
         entry->config.dwTagId = *lpdwTagId;
     else
         entry->config.dwTagId = 0;
@@ -479,7 +479,7 @@ DWORD svcctl_ChangeServiceConfigW(
         DWORD dwPasswordSize,
         LPCWSTR lpDisplayName)
 {
-    struct service_entry new_entry;
+    struct service_entry new_entry, *entry;
     struct sc_service_handle *service;
     DWORD err;
 
@@ -501,7 +501,8 @@ DWORD svcctl_ChangeServiceConfigW(
     }
 
     if (lpDisplayName != NULL &&
-        scmdatabase_find_service_by_displayname(service->service_entry->db, lpDisplayName))
+        (entry = scmdatabase_find_service_by_displayname(service->service_entry->db, lpDisplayName)) &&
+        (entry != service->service_entry))
     {
         service_unlock(service->service_entry);
         return ERROR_DUPLICATE_SERVICE_NAME;

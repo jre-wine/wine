@@ -186,13 +186,13 @@ static int X11DRV_DIB_GetDIBImageBytes( int width, int height, int depth )
 
 
 /***********************************************************************
- *           X11DRV_DIB_BitmapInfoSize
+ *           bitmap_info_size
  *
  * Return the size of the bitmap info structure including color table.
  */
-int X11DRV_DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
+int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
 {
-    unsigned int colors;
+    unsigned int colors, masks = 0;
 
     if (info->bmiHeader.biSize == sizeof(BITMAPCOREHEADER))
     {
@@ -206,7 +206,8 @@ int X11DRV_DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
         colors = info->bmiHeader.biClrUsed;
         if (!colors && (info->bmiHeader.biBitCount <= 8))
             colors = 1 << info->bmiHeader.biBitCount;
-        return sizeof(BITMAPINFOHEADER) + colors *
+        if (info->bmiHeader.biCompression == BI_BITFIELDS) masks = 3;
+        return sizeof(BITMAPINFOHEADER) + masks * sizeof(DWORD) + colors *
                ((coloruse == DIB_RGB_COLORS) ? sizeof(RGBQUAD) : sizeof(WORD));
     }
 }
@@ -2898,7 +2899,6 @@ static void X11DRV_DIB_SetImageBits_32(int lines, const BYTE *srcbits,
                                        DWORD linebytes)
 {
     DWORD x;
-    const DWORD *ptr;
     int h, width = min(srcwidth, dstwidth);
     const dib_conversions *convs = (bmpImage->byte_order == LSBFirst) ? &dib_normal : &dib_dst_byteswap;
 
@@ -2908,8 +2908,6 @@ static void X11DRV_DIB_SetImageBits_32(int lines, const BYTE *srcbits,
        srcbits = srcbits + ( linebytes * (lines-1) );
        linebytes = -linebytes;
     }
-
-    ptr = (const DWORD *) srcbits + left;
 
     switch (bmpImage->depth)
     {
@@ -4874,7 +4872,8 @@ HGLOBAL X11DRV_DIB_CreateDIBFromPixmap(Pixmap pixmap, HDC hdc)
 {
     HDC hdcMem;
     X_PHYSBITMAP *physBitmap;
-    HBITMAP hBmp = 0, old;
+    Pixmap orig_pixmap;
+    HBITMAP hBmp = 0;
     HGLOBAL hPackedDIB = 0;
     Window root;
     int x,y;               /* Unused */
@@ -4899,17 +4898,14 @@ HGLOBAL X11DRV_DIB_CreateDIBFromPixmap(Pixmap pixmap, HDC hdc)
 
     /* force bitmap to be owned by a screen DC */
     hdcMem = CreateCompatibleDC( hdc );
-    old = SelectObject( hdcMem, hBmp );
+    SelectObject( hdcMem, SelectObject( hdcMem, hBmp ));
+    DeleteDC( hdcMem );
 
     physBitmap = X11DRV_get_phys_bitmap( hBmp );
 
-    wine_tsx11_lock();
-    if (physBitmap->pixmap) XFreePixmap( gdi_display, physBitmap->pixmap );
+    /* swap the new pixmap in */
+    orig_pixmap = physBitmap->pixmap;
     physBitmap->pixmap = pixmap;
-    wine_tsx11_unlock();
-
-    SelectObject( hdcMem, old );
-    DeleteDC( hdcMem );
 
     /*
      * Create a packed DIB from the Pixmap wrapper bitmap created above.
@@ -4918,9 +4914,8 @@ HGLOBAL X11DRV_DIB_CreateDIBFromPixmap(Pixmap pixmap, HDC hdc)
      */
     hPackedDIB = X11DRV_DIB_CreateDIBFromBitmap(hdc, hBmp);
 
-    /* We can now get rid of the HBITMAP wrapper we created earlier.
-     * Note: Simply calling DeleteObject will free the embedded Pixmap as well.
-     */
+    /* we can now get rid of the HBITMAP and its original pixmap */
+    physBitmap->pixmap = orig_pixmap;
     DeleteObject(hBmp);
 
     TRACE("\tReturning packed DIB %p\n", hPackedDIB);
@@ -4944,7 +4939,7 @@ Pixmap X11DRV_DIB_CreatePixmapFromDIB( HGLOBAL hPackedDIB, HDC hdc )
 
     pbmi = GlobalLock(hPackedDIB);
     hBmp = CreateDIBitmap(hdc, &pbmi->bmiHeader, CBM_INIT,
-                          (LPBYTE)pbmi + X11DRV_DIB_BitmapInfoSize( pbmi, DIB_RGB_COLORS ),
+                          (LPBYTE)pbmi + bitmap_info_size( pbmi, DIB_RGB_COLORS ),
                           pbmi, DIB_RGB_COLORS);
     GlobalUnlock(hPackedDIB);
 
@@ -4956,6 +4951,6 @@ Pixmap X11DRV_DIB_CreatePixmapFromDIB( HGLOBAL hPackedDIB, HDC hdc )
     /* Delete the DDB we created earlier now that we have stolen its pixmap */
     DeleteObject(hBmp);
 
-    TRACE("Returning Pixmap %ld\n", pixmap);
+    TRACE("Returning Pixmap %lx\n", pixmap);
     return pixmap;
 }

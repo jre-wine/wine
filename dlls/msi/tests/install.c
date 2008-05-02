@@ -1956,8 +1956,9 @@ static void test_concurrentinstall(void)
 
     r = MsiInstallProductA(msifile, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    if (!delete_pf("msitest\\augustus", TRUE))
+        trace("concurrent installs not supported\n");
     ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
-    ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
     ok(delete_pf("msitest", FALSE), "File not installed\n");
 
     DeleteFile(path);
@@ -1978,6 +1979,10 @@ static void test_concurrentinstall(void)
 static void test_setpropertyfolder(void)
 {
     UINT r;
+    CHAR path[MAX_PATH];
+
+    lstrcpyA(path, PROG_FILES_DIR);
+    lstrcatA(path, "\\msitest\\added");
 
     CreateDirectoryA("msitest", NULL);
     create_file("msitest\\maximus", 500);
@@ -1988,9 +1993,18 @@ static void test_setpropertyfolder(void)
 
     r = MsiInstallProductA(msifile, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
-    ok(delete_pf("msitest\\added\\maximus", TRUE), "File not installed\n");
-    ok(delete_pf("msitest\\added", FALSE), "File not installed\n");
-    ok(delete_pf("msitest", FALSE), "File not installed\n");
+    if (GetFileAttributesA(path) == FILE_ATTRIBUTE_DIRECTORY)
+    {
+        ok(delete_pf("msitest\\added\\maximus", TRUE), "File not installed\n");
+        ok(delete_pf("msitest\\added", FALSE), "File not installed\n");
+        ok(delete_pf("msitest", FALSE), "File not installed\n");
+    }
+    else
+    {
+        trace("changing folder property not supported\n");
+        ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
+        ok(delete_pf("msitest", FALSE), "File not installed\n");
+    }
 
     /* Delete the files in the temp (current) folder */
     DeleteFile(msifile);
@@ -4034,7 +4048,6 @@ static void test_movefiles(void)
     create_database(msifile, mov_tables, sizeof(mov_tables) / sizeof(msi_table));
 
     MsiSetInternalUI(INSTALLUILEVEL_FULL, NULL);
-    MsiEnableLog(INSTALLLOGMODE_VERBOSE | INSTALLLOGMODE_EXTRADEBUG, "log.txt", 0);
 
     /* if the source or dest property is not a full path,
      * windows tries to access it as a network resource
