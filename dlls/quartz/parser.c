@@ -43,7 +43,7 @@ static const IPinVtbl Parser_OutputPin_Vtbl;
 static const IPinVtbl Parser_InputPin_Vtbl;
 
 static HRESULT Parser_OutputPin_QueryAccept(LPVOID iface, const AM_MEDIA_TYPE * pmt);
-static HRESULT Parser_ChangeStart(IBaseFilter *iface);
+static HRESULT Parser_ChangeCurrent(IBaseFilter *iface);
 static HRESULT Parser_ChangeStop(IBaseFilter *iface);
 static HRESULT Parser_ChangeRate(IBaseFilter *iface);
 
@@ -55,7 +55,7 @@ static inline ParserImpl *impl_from_IMediaSeeking( IMediaSeeking *iface )
 }
 
 
-HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMPLE fnProcessSample, PFN_QUERY_ACCEPT fnQueryAccept, PFN_PRE_CONNECT fnPreConnect, PFN_CLEANUP fnCleanup)
+HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMPLE fnProcessSample, PFN_QUERY_ACCEPT fnQueryAccept, PFN_PRE_CONNECT fnPreConnect, PFN_CLEANUP fnCleanup, CHANGEPROC stop, CHANGEPROC current, CHANGEPROC rate)
 {
     HRESULT hr;
     PIN_INFO piInput;
@@ -80,7 +80,16 @@ HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMP
     piInput.pFilter = (IBaseFilter *)pParser;
     lstrcpynW(piInput.achName, wcsInputPinName, sizeof(piInput.achName) / sizeof(piInput.achName[0]));
 
-    MediaSeekingImpl_Init((IBaseFilter*)pParser, Parser_ChangeStop, Parser_ChangeStart, Parser_ChangeRate, &pParser->mediaSeeking, &pParser->csFilter);
+    if (!current)
+        current = Parser_ChangeCurrent;
+
+    if (!stop)
+        stop = Parser_ChangeStop;
+
+    if (!rate)
+        rate = Parser_ChangeRate;
+
+    MediaSeekingImpl_Init((IBaseFilter*)pParser, stop, current, rate, &pParser->mediaSeeking, &pParser->csFilter);
     pParser->mediaSeeking.lpVtbl = &Parser_Seeking_Vtbl;
 
     hr = Parser_InputPin_Construct(&piInput, fnProcessSample, (LPVOID)pParser, fnQueryAccept, &pParser->csFilter, (IPin **)&pParser->pInputPin);
@@ -159,7 +168,8 @@ static HRESULT WINAPI Parser_QueryInterface(IBaseFilter * iface, REFIID riid, LP
         return S_OK;
     }
 
-    FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
+    if (!IsEqualIID(riid, &IID_IPin))
+        FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
 
     return E_NOINTERFACE;
 }
@@ -249,11 +259,11 @@ static HRESULT WINAPI Parser_Stop(IBaseFilter * iface)
             LeaveCriticalSection(&This->csFilter);
             return S_OK;
         }
-        hr = PullPin_StopProcessing(This->pInputPin);
         This->state = State_Stopped;
     }
     LeaveCriticalSection(&This->csFilter);
-    
+
+    hr = PullPin_StopProcessing(This->pInputPin);
     return hr;
 }
 
@@ -280,8 +290,6 @@ static HRESULT WINAPI Parser_Pause(IBaseFilter * iface)
     if (bInit)
     {
         unsigned int i;
-
-        hr = PullPin_Seek(This->pInputPin, 0, ((LONGLONG)0x7fffffff << 32) | 0xffffffff);
 
         if (SUCCEEDED(hr))
             hr = PullPin_InitProcessing(This->pInputPin);
@@ -332,11 +340,11 @@ static HRESULT WINAPI Parser_Run(IBaseFilter * iface, REFERENCE_TIME tStart)
 
         This->rtStreamStart = tStart;
 
-        hr = PullPin_Seek(This->pInputPin, 0, ((LONGLONG)0x7fffffff << 32) | 0xffffffff);
-
         if (SUCCEEDED(hr) && (This->state == State_Stopped))
         {
+            LeaveCriticalSection(&This->csFilter);
             hr = PullPin_InitProcessing(This->pInputPin);
+            EnterCriticalSection(&This->csFilter);
 
             if (SUCCEEDED(hr))
             { 
@@ -348,7 +356,11 @@ static HRESULT WINAPI Parser_Run(IBaseFilter * iface, REFERENCE_TIME tStart)
         }
 
         if (SUCCEEDED(hr))
+        {
+            LeaveCriticalSection(&This->csFilter);
             hr = PullPin_StartProcessing(This->pInputPin);
+            EnterCriticalSection(&This->csFilter);
+        }
 
         if (SUCCEEDED(hr))
             This->state = State_Running;
@@ -550,21 +562,21 @@ static HRESULT Parser_RemoveOutputPins(ParserImpl * This)
     return S_OK;
 }
 
-static HRESULT Parser_ChangeStart(IBaseFilter *iface)
+static HRESULT Parser_ChangeCurrent(IBaseFilter *iface)
 {
-    FIXME("(%p)\n", iface);
+    FIXME("(%p) filter hasn't implemented current position change!\n", iface);
     return S_OK;
 }
 
 static HRESULT Parser_ChangeStop(IBaseFilter *iface)
 {
-    FIXME("(%p)\n", iface);
+    FIXME("(%p) filter hasn't implemented stop position change!\n", iface);
     return S_OK;
 }
 
 static HRESULT Parser_ChangeRate(IBaseFilter *iface)
 {
-    FIXME("(%p)\n", iface);
+    FIXME("(%p) filter hasn't implemented rate change!\n", iface);
     return S_OK;
 }
 
@@ -628,7 +640,7 @@ static HRESULT WINAPI Parser_OutputPin_QueryInterface(IPin * iface, REFIID riid,
         *ppv = (LPVOID)iface;
     else if (IsEqualIID(riid, &IID_IMediaSeeking))
     {
-        return IBaseFilter_QueryInterface((IBaseFilter*)&This->pin.pin.pinInfo.pFilter, &IID_IMediaSeeking, ppv);
+        return IBaseFilter_QueryInterface(This->pin.pin.pinInfo.pFilter, &IID_IMediaSeeking, ppv);
     }
 
     if (*ppv)

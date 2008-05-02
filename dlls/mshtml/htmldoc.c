@@ -159,6 +159,7 @@ static ULONG WINAPI HTMLDocument_Release(IHTMLDocument2 *iface)
 
     if(!ref) {
         remove_doc_tasks(This);
+        release_script_hosts(This);
 
         if(This->client)
             IOleObject_SetClientSite(OLEOBJ(This), NULL);
@@ -181,6 +182,9 @@ static ULONG WINAPI HTMLDocument_Release(IHTMLDocument2 *iface)
             This->option_factory->doc = NULL;
             IHTMLOptionElementFactory_Release(HTMLOPTFACTORY(This->option_factory));
         }
+
+        if(This->location)
+            This->location->doc = NULL;
 
         if(This->window)
             IHTMLWindow2_Release(HTMLWINDOW2(This->window));
@@ -536,8 +540,17 @@ static HRESULT WINAPI HTMLDocument_get_referrer(IHTMLDocument2 *iface, BSTR *p)
 
 static HRESULT WINAPI HTMLDocument_get_location(IHTMLDocument2 *iface, IHTMLLocation **p)
 {
-    FIXME("(%p)->(%p)\n", iface, p);
-    return E_NOTIMPL;
+    HTMLDocument *This = HTMLDOC_THIS(iface);
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(This->location)
+        IHTMLLocation_AddRef(HTMLLOCATION(This->location));
+    else
+        This->location = HTMLLocation_Create(This);
+
+    *p = HTMLLOCATION(This->location);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_get_lastModified(IHTMLDocument2 *iface, BSTR *p)
@@ -1246,16 +1259,13 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
 
     TRACE("(%p %s %p)\n", pUnkOuter, debugstr_guid(riid), ppvObject);
 
-    ret = heap_alloc(sizeof(HTMLDocument));
+    ret = heap_alloc_zero(sizeof(HTMLDocument));
     ret->lpHTMLDocument2Vtbl = &HTMLDocumentVtbl;
     ret->ref = 0;
-    ret->nscontainer = NULL;
-    ret->nodes = NULL;
     ret->readystate = READYSTATE_UNINITIALIZED;
-    ret->window = NULL;
-    ret->option_factory = NULL;
 
     list_init(&ret->bindings);
+    list_init(&ret->script_hosts);
     list_init(&ret->selection_list);
     list_init(&ret->range_list);
 

@@ -24,6 +24,7 @@
 
 #include "version.rc"
 
+#include "rsrc_De.rc"
 #include "rsrc_En.rc"
 #include "rsrc_Es.rc"
 #include "rsrc_Fr.rc"
@@ -31,4 +32,5 @@
 #include "rsrc_Nl.rc"
 #include "rsrc_No.rc"
 #include "rsrc_Pl.rc"
+#include "rsrc_Ro.rc"
 #include "rsrc_Ru.rc"

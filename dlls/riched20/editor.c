@@ -459,8 +459,10 @@ static void ME_RTFParAttrHook(RTF_Info *info)
     fmt.cTabCount = 0;
     fmt.dxOffset = fmt.dxStartIndent = fmt.dxRightIndent = 0;
     fmt.wBorderWidth = fmt.wBorders = 0;
+    fmt.wBorderSpace = 0;
     fmt.bLineSpacingRule = 0;
     fmt.dySpaceBefore = fmt.dySpaceAfter = 0;
+    fmt.dyLineSpacing = 0;
     RTFFlushOutputBuffer(info);
     ME_GetParagraph(info->editor->pCursors[0].pRun)->member.para.bTable = FALSE;
     break;
@@ -1600,7 +1602,7 @@ ME_TextEditor *ME_MakeEditor(HWND hWnd) {
   ed->nLastSelStart = ed->nLastSelEnd = 0;
   ed->pLastSelStartPara = ed->pLastSelEndPara = ME_FindItemFwd(ed->pBuffer->pFirst, diParagraph);
   ed->bRedraw = TRUE;
-  ed->bWordWrap = FALSE;
+  ed->bWordWrap = (GetWindowLongW(hWnd, GWL_STYLE) & WS_HSCROLL) ? FALSE : TRUE;
   ed->bHideSelection = FALSE;
   ed->nInvalidOfs = -1;
   ed->pfnWordBreak = NULL;
@@ -3205,12 +3207,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
   case EM_SETTARGETDEVICE:
     if (wParam == 0)
     {
-        switch (lParam)
-        {
-        case 0: editor->bWordWrap = TRUE; break;
-        case 1: editor->bWordWrap = FALSE; break;
-        default: FIXME("Unknown option to EM_SETTARGETDEVICE(NULL,%ld)\n", lParam);
-        }
+      editor->bWordWrap = (lParam == 0);
     }
     else FIXME("Unsupported yet non NULL device in EM_SETTARGETDEVICE\n");
     break;

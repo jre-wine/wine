@@ -6,7 +6,7 @@
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
  * Copyright 2006 Henri Verbeet
- * Copyright 2007 Stefan Dösinger for CodeWeavers
+ * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -983,6 +983,8 @@ void drawPrimitive(IWineD3DDevice *iface,
     IWineD3DBaseTexture          *texture = NULL;
     IWineD3DSurfaceImpl          *target;
     int i;
+
+    if (NumPrimitives == 0) return;
 
     /* Signals other modules that a drawing is in progress and the stateblock finalized */
     This->isInDraw = TRUE;

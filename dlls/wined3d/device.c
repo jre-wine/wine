@@ -6,7 +6,7 @@
  * Copyright 2003-2004 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006-2007 Stefan Dösinger for CodeWeavers
+ * Copyright 2006-2008 Stefan Dösinger for CodeWeavers
  * Copyright 2006-2007 Henri Verbeet
  * Copyright 2007 Andrew Riedi
  *
@@ -172,8 +172,6 @@ static ULONG WINAPI IWineD3DDeviceImpl_Release(IWineD3DDevice *iface) {
         if (This->dst_fbo) {
             GL_EXTCALL(glDeleteFramebuffersEXT(1, &This->dst_fbo));
         }
-
-        This->shader_backend->shader_free_private(iface);
 
         if (This->glsl_program_lookup) hash_table_destroy(This->glsl_program_lookup);
 
@@ -770,10 +768,15 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface, U
     const GlPixelFormatDesc *glDesc;
     getFormatDescEntry(Format, &GLINFO_LOCATION, &glDesc);
 
-
     TRACE("(%p) : Width %d, Height %d, Levels %d, Usage %#x\n", This, Width, Height, Levels, Usage);
     TRACE("Format %#x (%s), Pool %#x, ppTexture %p, pSharedHandle %p, parent %p\n",
             Format, debug_d3dformat(Format), Pool, ppTexture, pSharedHandle, parent);
+
+    if((Usage & (WINED3DUSAGE_AUTOGENMIPMAP | WINED3DUSAGE_RENDERTARGET)) ==
+                (WINED3DUSAGE_AUTOGENMIPMAP | WINED3DUSAGE_RENDERTARGET)) {
+        WARN("Application requests both D3DUSAGE_AUTOGENMIPMAP and D3DUSAGE_RENDERTARGET, which are mutually exclusive\n");
+        return WINED3DERR_INVALIDCALL;
+    }
 
     /* TODO: It should only be possible to create textures for formats 
              that are reported as supported */
@@ -1040,6 +1043,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
     unsigned int pow2EdgeLength  = EdgeLength;
     const GlPixelFormatDesc *glDesc;
     getFormatDescEntry(Format, &GLINFO_LOCATION, &glDesc);
+
+    if((Usage & (WINED3DUSAGE_AUTOGENMIPMAP | WINED3DUSAGE_RENDERTARGET)) ==
+                (WINED3DUSAGE_AUTOGENMIPMAP | WINED3DUSAGE_RENDERTARGET)) {
+        WARN("Application requests both D3DUSAGE_AUTOGENMIPMAP and D3DUSAGE_RENDERTARGET, which are mutually exclusive\n");
+        return WINED3DERR_INVALIDCALL;
+    }
 
     /* TODO: It should only be possible to create textures for formats 
              that are reported as supported */
@@ -2008,9 +2017,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     IWineD3DSwapChainImpl *swapchain = NULL;
     HRESULT hr;
     DWORD state;
+    unsigned int i;
 
     TRACE("(%p)->(%p,%p)\n", This, pPresentationParameters, D3DCB_CreateAdditionalSwapChain);
     if(This->d3d_initialized) return WINED3DERR_INVALIDCALL;
+    if(!This->adapter->opengl) return WINED3DERR_INVALIDCALL;
 
     /* TODO: Test if OpenGL is compiled in and loaded */
 
@@ -2036,6 +2047,25 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     This->render_targets = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
     This->fbo_color_attachments = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DSurface *) * GL_LIMITS(buffers));
     This->draw_buffers = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(GLenum) * GL_LIMITS(buffers));
+
+    This->NumberOfPalettes = 1;
+    This->palettes = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(PALETTEENTRY*));
+    if(!This->palettes || !This->render_targets || !This->fbo_color_attachments || !This->draw_buffers) {
+        ERR("Out of memory!\n");
+        goto err_out;
+    }
+    This->palettes[0] = HeapAlloc(GetProcessHeap(), 0, sizeof(PALETTEENTRY) * 256);
+    if(!This->palettes[0]) {
+        ERR("Out of memory!\n");
+        goto err_out;
+    }
+    for (i = 0; i < 256; ++i) {
+        This->palettes[0][i].peRed   = 0xFF;
+        This->palettes[0][i].peGreen = 0xFF;
+        This->palettes[0][i].peBlue  = 0xFF;
+        This->palettes[0][i].peFlags = 0xFF;
+    }
+    This->currentPalette = 0;
 
     /* Initialize the texture unit mapping to a 1:1 mapping */
     for (state = 0; state < MAX_COMBINED_SAMPLERS; ++state) {
@@ -2082,6 +2112,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     This->stencilBufferTarget = This->auto_depth_stencil_buffer;
     if (NULL != This->stencilBufferTarget) {
         IWineD3DSurface_AddRef(This->stencilBufferTarget);
+    }
+
+    hr = This->shader_backend->shader_alloc_private(iface);
+    if(FAILED(hr)) {
+        TRACE("Shader private data couldn't be allocated\n");
+        goto err_out;
     }
 
     /* Set up some starting GL setup */
@@ -2147,11 +2183,17 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     return WINED3D_OK;
 
 err_out:
+    This->shader_backend->shader_free_private(iface);
     HeapFree(GetProcessHeap(), 0, This->render_targets);
     HeapFree(GetProcessHeap(), 0, This->fbo_color_attachments);
     HeapFree(GetProcessHeap(), 0, This->draw_buffers);
     HeapFree(GetProcessHeap(), 0, This->swapchains);
     This->NumberOfSwapChains = 0;
+    if(This->palettes) {
+        HeapFree(GetProcessHeap(), 0, This->palettes[0]);
+        HeapFree(GetProcessHeap(), 0, This->palettes);
+    }
+    This->NumberOfPalettes = 0;
     if(swapchain) {
         IWineD3DSwapChain_Release( (IWineD3DSwapChain *) swapchain);
     }
@@ -2212,6 +2254,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
         IWineD3DDevice_SetTexture(iface, WINED3DVERTEXTEXTURESAMPLER0 + sampler, NULL);
     }
 
+    /* Destroy the depth blt resources, they will be invalid after the reset. Also free shader
+     * private data, it might contain opengl pointers
+     */
+    This->shader_backend->shader_destroy_depth_blt(iface);
+    This->shader_backend->shader_free_private(iface);
+
     /* Release the update stateblock */
     if(IWineD3DStateBlock_Release((IWineD3DStateBlock *)This->updateStateBlock) > 0){
         if(This->updateStateBlock != This->stateBlock)
@@ -2264,13 +2312,17 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
     This->swapchains = NULL;
     This->NumberOfSwapChains = 0;
 
+    for (i = 0; i < This->NumberOfPalettes; i++) HeapFree(GetProcessHeap(), 0, This->palettes[i]);
+    HeapFree(GetProcessHeap(), 0, This->palettes);
+    This->palettes = NULL;
+    This->NumberOfPalettes = 0;
+
     HeapFree(GetProcessHeap(), 0, This->render_targets);
     HeapFree(GetProcessHeap(), 0, This->fbo_color_attachments);
     HeapFree(GetProcessHeap(), 0, This->draw_buffers);
     This->render_targets = NULL;
     This->fbo_color_attachments = NULL;
     This->draw_buffers = NULL;
-
 
     This->d3d_initialized = FALSE;
     return WINED3D_OK;
@@ -4411,7 +4463,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetTextureStageState(IWineD3DDevice *if
     }
 
     if(Stage > This->stateBlock->lowest_disabled_stage &&
-       StateTable[STATE_TEXTURESTAGE(0, Type)].representative == STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP)) {
+       This->shader_backend->StateTable[STATE_TEXTURESTAGE(0, Type)].representative == STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP)) {
         /* Colorop change above lowest disabled stage? That won't change anything in the gl setup
          * Changes in other states are important on disabled stages too
          */
@@ -5438,20 +5490,60 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_ValidateDevice(IWineD3DDevice *iface,
     return WINED3D_OK;
 }
 
+static void dirtify_p8_texture_samplers(IWineD3DDeviceImpl *device)
+{
+    int i;
+
+    for (i = 0; i < MAX_COMBINED_SAMPLERS; i++) {
+            IWineD3DBaseTextureImpl *texture = (IWineD3DBaseTextureImpl*)device->stateBlock->textures[i];
+            if (texture && (texture->resource.format == WINED3DFMT_P8 || texture->resource.format == WINED3DFMT_A8P8)) {
+                IWineD3DDeviceImpl_MarkStateDirty(device, STATE_SAMPLER(i));
+            }
+        }
+}
+
 static HRESULT  WINAPI  IWineD3DDeviceImpl_SetPaletteEntries(IWineD3DDevice *iface, UINT PaletteNumber, CONST PALETTEENTRY* pEntries) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     int j;
+    UINT NewSize;
+    PALETTEENTRY **palettes;
+
     TRACE("(%p) : PaletteNumber %u\n", This, PaletteNumber);
+
     if (PaletteNumber >= MAX_PALETTES) {
-        WARN("(%p) : (%u) Out of range 0-%u, returning Invalid Call\n", This, PaletteNumber, MAX_PALETTES);
+        ERR("(%p) : (%u) Out of range 0-%u, returning Invalid Call\n", This, PaletteNumber, MAX_PALETTES);
         return WINED3DERR_INVALIDCALL;
     }
+
+    if (PaletteNumber >= This->NumberOfPalettes) {
+        NewSize = This->NumberOfPalettes;
+        do {
+           NewSize *= 2;
+        } while(PaletteNumber >= NewSize);
+        palettes = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, This->palettes, sizeof(PALETTEENTRY*) * NewSize);
+        if (!palettes) {
+            ERR("Out of memory!\n");
+            return E_OUTOFMEMORY;
+        }
+        This->palettes = palettes;
+        This->NumberOfPalettes = NewSize;
+    }
+
+    if (!This->palettes[PaletteNumber]) {
+        This->palettes[PaletteNumber] = HeapAlloc(GetProcessHeap(),  0, sizeof(PALETTEENTRY) * 256);
+        if (!This->palettes[PaletteNumber]) {
+            ERR("Out of memory!\n");
+            return E_OUTOFMEMORY;
+        }
+    }
+
     for (j = 0; j < 256; ++j) {
         This->palettes[PaletteNumber][j].peRed   = pEntries[j].peRed;
         This->palettes[PaletteNumber][j].peGreen = pEntries[j].peGreen;
         This->palettes[PaletteNumber][j].peBlue  = pEntries[j].peBlue;
         This->palettes[PaletteNumber][j].peFlags = pEntries[j].peFlags;
     }
+    if (PaletteNumber == This->currentPalette) dirtify_p8_texture_samplers(This);
     TRACE("(%p) : returning\n", This);
     return WINED3D_OK;
 }
@@ -5460,8 +5552,10 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetPaletteEntries(IWineD3DDevice *ifa
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     int j;
     TRACE("(%p) : PaletteNumber %u\n", This, PaletteNumber);
-    if (PaletteNumber >= MAX_PALETTES) {
-        WARN("(%p) : (%u) Out of range 0-%u, returning Invalid Call\n", This, PaletteNumber, MAX_PALETTES);
+    if (PaletteNumber >= This->NumberOfPalettes || !This->palettes[PaletteNumber]) {
+        /* What happens in such situation isn't documented; Native seems to silently abort
+           on such conditions. Return Invalid Call. */
+        ERR("(%p) : (%u) Non-existent palette. NumberOfPalettes %u\n", This, PaletteNumber, This->NumberOfPalettes);
         return WINED3DERR_INVALIDCALL;
     }
     for (j = 0; j < 256; ++j) {
@@ -5477,12 +5571,17 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetPaletteEntries(IWineD3DDevice *ifa
 static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCurrentTexturePalette(IWineD3DDevice *iface, UINT PaletteNumber) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     TRACE("(%p) : PaletteNumber %u\n", This, PaletteNumber);
-    if (PaletteNumber >= MAX_PALETTES) {
-        WARN("(%p) : (%u) Out of range 0-%u, returning Invalid Call\n", This, PaletteNumber, MAX_PALETTES);
+    /* Native appears to silently abort on attempt to make an uninitialized palette current and render.
+       (tested with reference rasterizer). Return Invalid Call. */
+    if (PaletteNumber >= This->NumberOfPalettes || !This->palettes[PaletteNumber]) {
+        ERR("(%p) : (%u) Non-existent palette. NumberOfPalettes %u\n", This, PaletteNumber, This->NumberOfPalettes);
         return WINED3DERR_INVALIDCALL;
     }
     /*TODO: stateblocks */
-    This->currentPalette = PaletteNumber;
+    if (This->currentPalette != PaletteNumber) {
+        This->currentPalette = PaletteNumber;
+        dirtify_p8_texture_samplers(This);
+    }
     TRACE("(%p) : returning\n", This);
     return WINED3D_OK;
 }
@@ -6879,7 +6978,9 @@ static void updateSurfaceDesc(IWineD3DSurfaceImpl *surface, WINED3DPRESENT_PARAM
     } else  {
         surface->Flags &= ~SFLAG_NONPOW2;
     }
-    HeapFree(GetProcessHeap(), 0, surface->resource.allocatedMemory);
+    HeapFree(GetProcessHeap(), 0, surface->resource.heapMemory);
+    surface->resource.allocatedMemory = NULL;
+    surface->resource.heapMemory = NULL;
     surface->resource.size = IWineD3DSurface_GetPitch((IWineD3DSurface *) surface) * surface->pow2Width;
 }
 
@@ -7029,6 +7130,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
         This->depth_blt_texture = 0;
     }
     This->shader_backend->shader_destroy_depth_blt(iface);
+    This->shader_backend->shader_free_private(iface);
 
     for (i = 0; i < GL_LIMITS(textures); i++) {
         /* Textures are recreated below */
@@ -7123,6 +7225,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
                                           &swapchain->presentParms);
     swapchain->num_contexts = 1;
     This->activeContext = swapchain->context[0];
+    IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
 
     hr = IWineD3DStateBlock_InitStartupStateBlock((IWineD3DStateBlock *) This->stateBlock);
     if(FAILED(hr)) {
@@ -7130,11 +7233,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
     }
     create_dummy_textures(This);
 
+
+    hr = This->shader_backend->shader_alloc_private(iface);
+    if(FAILED(hr)) {
+        ERR("Failed to recreate shader private data\n");
+        return hr;
+    }
+
     /* All done. There is no need to reload resources or shaders, this will happen automatically on the
      * first use
      */
-
-    IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
     return WINED3D_OK;
 }
 
@@ -7778,7 +7886,7 @@ const DWORD SavedVertexStates_S[NUM_SAVEDVERTEXSTATES_S] = {
 };
 
 void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state) {
-    DWORD rep = StateTable[state].representative;
+    DWORD rep = This->shader_backend->StateTable[state].representative;
     DWORD idx;
     BYTE shift;
     UINT i;

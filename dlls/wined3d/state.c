@@ -7,7 +7,7 @@
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
  * Copyright 2006 Henri Verbeet
- * Copyright 2006-2007 Stefan Dösinger for CodeWeavers
+ * Copyright 2006-2008 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -243,8 +243,19 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     if (stateblock->renderState[WINED3DRS_ALPHABLENDENABLE]      ||
         stateblock->renderState[WINED3DRS_EDGEANTIALIAS]         ||
         stateblock->renderState[WINED3DRS_ANTIALIASEDLINEENABLE]) {
-        glEnable(GL_BLEND);
-        checkGLcall("glEnable GL_BLEND");
+        const GlPixelFormatDesc *glDesc;
+        getFormatDescEntry(target->resource.format, &GLINFO_LOCATION, &glDesc);
+
+        /* Disable blending in all cases even without pixelshaders. With blending on we could face a big performance penalty.
+         * The d3d9 visual test confirms the behavior. */
+        if(!(glDesc->Flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING)) {
+            glDisable(GL_BLEND);
+            checkGLcall("glDisable GL_BLEND");
+            return;
+        } else {
+            glEnable(GL_BLEND);
+            checkGLcall("glEnable GL_BLEND");
+        }
     } else {
         glDisable(GL_BLEND);
         checkGLcall("glDisable GL_BLEND");
@@ -435,6 +446,7 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     /* colorkey fixup for stage 0 alphaop depends on WINED3DRS_ALPHABLENDENABLE state,
         so it may need updating */
     if (stateblock->renderState[WINED3DRS_COLORKEYENABLE]) {
+        const struct StateEntry *StateTable = stateblock->wineD3DDevice->shader_backend->StateTable;
         StateTable[STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP)].apply(STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP), stateblock, context);
     }
 }
@@ -484,6 +496,7 @@ static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     }
 
     if(enable_ckey || context->last_was_ckey) {
+        const struct StateEntry *StateTable = stateblock->wineD3DDevice->shader_backend->StateTable;
         StateTable[STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP)].apply(STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP), stateblock, context);
     }
     context->last_was_ckey = enable_ckey;
@@ -1984,7 +1997,8 @@ static void tex_colorop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
                          stateblock->textureState[stage][WINED3DTSS_COLORARG1],
                          stateblock->textureState[stage][WINED3DTSS_COLORARG2],
                          stateblock->textureState[stage][WINED3DTSS_COLORARG0],
-                         mapped_stage);
+                         mapped_stage,
+                         stateblock->textureState[stage][WINED3DTSS_RESULTARG]);
 
         /* In register combiners bump mapping is done in the stage AFTER the one that has the bump map operation set,
          * thus the texture shader may have to be updated
@@ -2090,7 +2104,8 @@ static void tex_alphaop(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     if (GL_SUPPORT(NV_REGISTER_COMBINERS)) {
         set_tex_op_nvrc((IWineD3DDevice *)stateblock->wineD3DDevice, TRUE, stage,
                          op, arg1, arg2, arg0,
-                         mapped_stage);
+                         mapped_stage,
+                         stateblock->textureState[stage][WINED3DTSS_RESULTARG]);
     } else {
         set_tex_op((IWineD3DDevice *)stateblock->wineD3DDevice, TRUE, stage,
                     op, arg1, arg2, arg0);
@@ -2444,18 +2459,6 @@ static void tex_bumpenvloffset(DWORD state, IWineD3DStateBlockImpl *stateblock, 
     }
 }
 
-static void tex_resultarg(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / WINED3D_HIGHEST_TEXTURE_STATE;
-
-    if(stage >= GL_LIMITS(texture_stages)) {
-        return;
-    }
-
-    if(stateblock->textureState[stage][WINED3DTSS_RESULTARG] != WINED3DTA_CURRENT) {
-        FIXME("WINED3DTSS_RESULTARG not supported yet\n");
-    }
-}
-
 static void sampler(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD sampler = state - STATE_SAMPLER(0);
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[sampler];
@@ -2605,7 +2608,7 @@ static void pixelshader(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
             update_fog = TRUE;
     }
 
-    if(!isStateDirty(context, StateTable[STATE_VSHADER].representative)) {
+    if(!isStateDirty(context, FFPStateTable[STATE_VSHADER].representative)) {
         device->shader_backend->shader_select((IWineD3DDevice *)stateblock->wineD3DDevice, use_pshader, use_vshader);
 
         if (!isStateDirty(context, STATE_VERTEXSHADERCONSTANT) && (use_vshader || use_pshader)) {
@@ -3003,7 +3006,7 @@ static inline void unloadVertexData(IWineD3DStateBlockImpl *stateblock) {
  */
 static inline void unloadNumberedArrays(IWineD3DStateBlockImpl *stateblock) {
     /* disable any attribs (this is the same for both GLSL and ARB modes) */
-    GLint maxAttribs;
+    GLint maxAttribs = 16;
     int i;
 
     /* Leave all the attribs disabled */
@@ -3915,7 +3918,7 @@ static void frontface(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
     }
 }
 
-const struct StateEntry StateTable[] =
+const struct StateEntry FFPStateTable[] =
 {
       /* State name                                         representative,                                     apply function */
     { /* 0,  Undefined                              */      0,                                                  state_undefined     },
@@ -4159,7 +4162,7 @@ const struct StateEntry StateTable[] =
     { /*0, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*0, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*0, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(0, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*0, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(0, WINED3DTSS_RESULTARG),        tex_resultarg       },
+    { /*0, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(0, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*0, 29, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*0, 30, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*0, 31, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -4192,7 +4195,7 @@ const struct StateEntry StateTable[] =
     { /*1, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*1, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*1, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(1, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*1, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(1, WINED3DTSS_RESULTARG),        tex_resultarg       },
+    { /*0, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(1, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*1, 29, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*1, 30, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*1, 31, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -4225,7 +4228,7 @@ const struct StateEntry StateTable[] =
     { /*2, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*2, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*2, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(2, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*2, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(2, WINED3DTSS_RESULTARG),        tex_resultarg       },
+    { /*0, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(2, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*2, 29, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*2, 30, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*2, 31, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -4258,7 +4261,7 @@ const struct StateEntry StateTable[] =
     { /*3, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*3, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*3, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(3, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*3, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(3, WINED3DTSS_RESULTARG),        tex_resultarg       },
+    { /*0, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(3, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*3, 29, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*3, 30, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*3, 31, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -4291,7 +4294,7 @@ const struct StateEntry StateTable[] =
     { /*4, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*4, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*4, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(4, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*4, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(4, WINED3DTSS_RESULTARG),        tex_resultarg       },
+    { /*0, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(4, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*4, 29, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*4, 30, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*4, 31, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -4324,7 +4327,7 @@ const struct StateEntry StateTable[] =
     { /*5, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*5, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*5, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(5, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*5, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(5, WINED3DTSS_RESULTARG),        tex_resultarg       },
+    { /*0, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(5, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*5, 29, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*5, 30, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*5, 31, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -4357,7 +4360,7 @@ const struct StateEntry StateTable[] =
     { /*6, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*6, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*6, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(6, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*6, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(6, WINED3DTSS_RESULTARG),        tex_resultarg       },
+    { /*0, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(6, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*6, 29, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*6, 30, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*6, 31, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
@@ -4390,7 +4393,7 @@ const struct StateEntry StateTable[] =
     { /*7, 25, WINED3DTSS_ADDRESSW                  */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*7, 26, WINED3DTSS_COLORARG0                 */      STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*7, 27, WINED3DTSS_ALPHAARG0                 */      STATE_TEXTURESTAGE(7, WINED3DTSS_ALPHAOP),          tex_alphaop         },
-    { /*7, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(7, WINED3DTSS_RESULTARG),        tex_resultarg       },
+    { /*0, 28, WINED3DTSS_RESULTARG                 */      STATE_TEXTURESTAGE(7, WINED3DTSS_COLOROP),          tex_colorop         },
     { /*7, 29, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*7, 30, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },
     { /*7, 31, undefined                            */      0 /* -> sampler state in ddraw / d3d8 */,           state_undefined     },

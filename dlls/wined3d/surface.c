@@ -7,7 +7,7 @@
  * Copyright 2002-2003 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006-2007 Stefan Dösinger for CodeWeavers
+ * Copyright 2006-2008 Stefan Dösinger for CodeWeavers
  * Copyright 2007 Henri Verbeet
  * Copyright 2006-2008 Roderick Colenbrander
  *
@@ -47,7 +47,9 @@ static void surface_bind_and_dirtify(IWineD3DSurfaceImpl *This) {
      * TODO: Track the current active texture per GL context instead of using glGet
      */
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
+        ENTER_GL();
         glGetIntegerv(GL_ACTIVE_TEXTURE, &active_texture);
+        LEAVE_GL();
         active_texture -= GL_TEXTURE0_ARB;
     } else {
         active_texture = 0;
@@ -299,8 +301,10 @@ static void surface_allocate_surface(IWineD3DSurfaceImpl *This, GLenum internal,
             /* Neither NONPOW2, DIBSECTION nor OVERSIZE flags can be set on compressed textures */
             This->Flags |= SFLAG_CLIENT;
             mem = (BYTE *)(((ULONG_PTR) This->resource.heapMemory + (RESOURCE_ALIGNMENT - 1)) & ~(RESOURCE_ALIGNMENT - 1));
+            ENTER_GL();
             GL_EXTCALL(glCompressedTexImage2DARB(This->glDescription.target, This->glDescription.level, internal,
                        width, height, 0 /* border */, This->resource.size, mem));
+            LEAVE_GL();
         }
 
         return;
@@ -419,26 +423,30 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
         renderbuffer_entry_t *entry, *entry2;
         TRACE("(%p) : cleaning up\n", This);
 
+        /* Need a context to destroy the texture. Use the currently active render target, but only if
+         * the primary render target exists. Otherwise lastActiveRenderTarget is garbage, see above.
+         * When destroying the primary rt, Uninit3D will activate a context before doing anything
+         */
+        if(device->render_targets && device->render_targets[0]) {
+            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        }
+
+        ENTER_GL();
         if (This->glDescription.textureName != 0) { /* release the openGL texture.. */
-
-            /* Need a context to destroy the texture. Use the currently active render target, but only if
-             * the primary render target exists. Otherwise lastActiveRenderTarget is garbage, see above.
-             * When destroying the primary rt, Uninit3D will activate a context before doing anything
-             */
-            if(device->render_targets && device->render_targets[0]) {
-                ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
-            }
-
             TRACE("Deleting texture %d\n", This->glDescription.textureName);
-            ENTER_GL();
             glDeleteTextures(1, &This->glDescription.textureName);
-            LEAVE_GL();
         }
 
         if(This->Flags & SFLAG_PBO) {
             /* Delete the PBO */
             GL_EXTCALL(glDeleteBuffersARB(1, &This->pbo));
         }
+
+        LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &This->renderbuffers, renderbuffer_entry_t, entry) {
+            GL_EXTCALL(glDeleteRenderbuffersEXT(1, &entry->id));
+            HeapFree(GetProcessHeap(), 0, entry);
+        }
+        LEAVE_GL();
 
         if(This->Flags & SFLAG_DIBSECTION) {
             /* Release the DC */
@@ -456,11 +464,6 @@ ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface) {
         IWineD3DResourceImpl_CleanUp((IWineD3DResource *)iface);
         if(iface == device->ddraw_primary)
             device->ddraw_primary = NULL;
-
-        LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &This->renderbuffers, renderbuffer_entry_t, entry) {
-            GL_EXTCALL(glDeleteRenderbuffersEXT(1, &entry->id));
-            HeapFree(GetProcessHeap(), 0, entry);
-        }
 
         TRACE("(%p) Released\n", This);
         HeapFree(GetProcessHeap(), 0, This);
@@ -491,6 +494,15 @@ void WINAPI IWineD3DSurfaceImpl_PreLoad(IWineD3DSurface *iface) {
             ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
         }
 
+        if (This->resource.format == WINED3DFMT_P8 || This->resource.format == WINED3DFMT_A8P8) {
+            if(palette9_changed(This)) {
+                TRACE("Reloading surface because the d3d8/9 palette was changed\n");
+                /* TODO: This is not necessarily needed with hw palettized texture support */
+                IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+                /* Make sure the texture is reloaded because of the palette change, this kills performance though :( */
+                IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
+            }
+        }
         ENTER_GL();
         glEnable(This->glDescription.target);/* make sure texture support is enabled in this context */
         if (!This->glDescription.level) {
@@ -501,19 +513,22 @@ void WINAPI IWineD3DSurfaceImpl_PreLoad(IWineD3DSurface *iface) {
             }
             glBindTexture(This->glDescription.target, This->glDescription.textureName);
             checkGLcall("glBindTexture");
+            LEAVE_GL();
             IWineD3DSurface_LoadTexture(iface, FALSE);
             /* This is where we should be reducing the amount of GLMemoryUsed */
         } else if (This->glDescription.textureName) { /* NOTE: the level 0 surface of a mpmapped texture must be loaded first! */
             /* assume this is a coding error not a real error for now */
             FIXME("Mipmap surface has a glTexture bound to it!\n");
+            LEAVE_GL();
         }
         if (This->resource.pool == WINED3DPOOL_DEFAULT) {
             /* Tell opengl to try and keep this texture in video ram (well mostly) */
             GLclampf tmp;
             tmp = 0.9f;
+            ENTER_GL();
             glPrioritizeTextures(1, &This->glDescription.textureName, &tmp);
+            LEAVE_GL();
         }
-        LEAVE_GL();
     }
     return;
 }
@@ -789,19 +804,24 @@ static void read_from_framebuffer(IWineD3DSurfaceImpl *This, CONST RECT *rect, v
         }
     }
 
+    LEAVE_GL();
+
     /* For P8 textures we need to perform an inverse palette lookup. This is done by searching for a palette
      * index which matches the RGB value. Note this isn't guaranteed to work when there are multiple entries for
      * the same color but we have no choice.
      * In case of P8 render targets, the index is stored in the alpha component so no conversion is needed.
      */
     if((This->resource.format == WINED3DFMT_P8) && !primary_render_target_is_p8(myDevice)) {
-        PALETTEENTRY *pal;
+        PALETTEENTRY *pal = NULL;
         DWORD width = pitch / 3;
         int x, y, c;
+
         if(This->palette) {
             pal = This->palette->palents;
         } else {
-            pal = This->resource.wineD3DDevice->palettes[This->resource.wineD3DDevice->currentPalette];
+            ERR("Palette is missing, cannot perform inverse palette lookup\n");
+            HeapFree(GetProcessHeap(), 0, mem);
+            return ;
         }
 
         for(y = local_rect.top; y < local_rect.bottom; y++) {
@@ -824,7 +844,6 @@ static void read_from_framebuffer(IWineD3DSurfaceImpl *This, CONST RECT *rect, v
         }
         HeapFree(GetProcessHeap(), 0, mem);
     }
-    LEAVE_GL();
 }
 
 /* Read the framebuffer contents into a texture */
@@ -1355,6 +1374,14 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
     if (This->Flags & SFLAG_LOCKED)
         return WINED3DERR_INVALIDCALL;
 
+    /* According to Direct3D9 docs, only these formats are supported */
+    if (((IWineD3DImpl *)This->resource.wineD3DDevice->wineD3D)->dxVersion > 7) {
+        if (This->resource.format != WINED3DFMT_R5G6B5 &&
+            This->resource.format != WINED3DFMT_X1R5G5B5 &&
+            This->resource.format != WINED3DFMT_R8G8B8 &&
+            This->resource.format != WINED3DFMT_X8R8G8B8) return WINED3DERR_INVALIDCALL;
+    }
+
     memset(&lock, 0, sizeof(lock)); /* To be sure */
 
     /* Create a DIB section if there isn't a hdc yet */
@@ -1388,29 +1415,28 @@ HRESULT WINAPI IWineD3DSurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
 
     if(This->resource.format == WINED3DFMT_P8 ||
         This->resource.format == WINED3DFMT_A8P8) {
+        /* GetDC on palettized formats is unsupported in D3D9, and the method is missing in
+            D3D8, so this should only be used for DX <=7 surfaces (with non-device palettes) */
         unsigned int n;
+        PALETTEENTRY *pal = NULL;
+
         if(This->palette) {
-            PALETTEENTRY ent[256];
-
-            GetPaletteEntries(This->palette->hpal, 0, 256, ent);
-            for (n=0; n<256; n++) {
-                col[n].rgbRed   = ent[n].peRed;
-                col[n].rgbGreen = ent[n].peGreen;
-                col[n].rgbBlue  = ent[n].peBlue;
-                col[n].rgbReserved = 0;
-            }
+            pal = This->palette->palents;
         } else {
-            IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+            IWineD3DSurfaceImpl *dds_primary = (IWineD3DSurfaceImpl *)This->resource.wineD3DDevice->ddraw_primary;
+            if (dds_primary && dds_primary->palette)
+                pal = dds_primary->palette->palents;
+        }
 
+        if (pal) {
             for (n=0; n<256; n++) {
-                col[n].rgbRed   = device->palettes[device->currentPalette][n].peRed;
-                col[n].rgbGreen = device->palettes[device->currentPalette][n].peGreen;
-                col[n].rgbBlue  = device->palettes[device->currentPalette][n].peBlue;
+                col[n].rgbRed   = pal[n].peRed;
+                col[n].rgbGreen = pal[n].peGreen;
+                col[n].rgbBlue  = pal[n].peBlue;
                 col[n].rgbReserved = 0;
             }
-
+            SetDIBColorTable(This->hDC, 0, 256, col);
         }
-        SetDIBColorTable(This->hDC, 0, 256, col);
     }
 
     *pHDC = This->hDC;
@@ -2031,15 +2057,13 @@ static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4]
             return;
         }
 
-        /* Still no palette? Use the device's palette */
-        /* can ddraw and d3d < 8 surfaces use device's palette (d3d >= 8 feature)? */
+        /*  Direct3D >= 8 palette usage style: P8 textures use device palettes, palette entry format is A8R8G8B8,
+            alpha is stored in peFlags and may be used by the app if D3DPTEXTURECAPS_ALPHAPALETTE device
+            capability flag is present (wine does advertise this capability) */
         for (i = 0; i < 256; i++) {
             table[i][0] = device->palettes[device->currentPalette][i].peRed;
             table[i][1] = device->palettes[device->currentPalette][i].peGreen;
             table[i][2] = device->palettes[device->currentPalette][i].peBlue;
-            /* Direct3D >= 8 palette usage style: P8 textures use device palettes, palette entry format is A8R8G8B8,
-               alpha is stored in peFlags and may be used by the app if D3DPTEXTURECAPS_ALPHAPALETTE device
-               capability flag is present (wine does advertise this capability) */
             table[i][3] = device->palettes[device->currentPalette][i].peFlags;
         }
     } else {
@@ -2129,7 +2153,7 @@ static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES conve
     }
 }
 
-static BOOL palette9_changed(IWineD3DSurfaceImpl *This) {
+BOOL palette9_changed(IWineD3DSurfaceImpl *This) {
     IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
 
     if(This->palette || (This->resource.format != WINED3DFMT_P8 && This->resource.format != WINED3DFMT_A8P8)) {
@@ -2206,13 +2230,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface, BO
         IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
         /* Make sure the texture is reloaded because of the color key change, this kills performance though :( */
         /* TODO: This is not necessarily needed with hw palettized texture support */
-        This->Flags &= ~SFLAG_INTEXTURE;
-    } else if(palette9_changed(This)) {
-        TRACE("Reloading surface because the d3d8/9 palette was changed\n");
-        /* TODO: This is not necessarily needed with hw palettized texture support */
-        IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
-
-        /* Make sure the texture is reloaded because of the color key change, this kills performance though :( */
         This->Flags &= ~SFLAG_INTEXTURE;
     } else {
         TRACE("surface is already in texture\n");
@@ -3375,13 +3392,18 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
              * 'clear' expect it in ARGB format => we need to do some conversion :-)
              */
             if (This->resource.format == WINED3DFMT_P8) {
+                DWORD alpha;
+
+                if (primary_render_target_is_p8(myDevice)) alpha = DDBltFx->u5.dwFillColor << 24;
+                else alpha = 0xFF000000;
+
                 if (This->palette) {
-                    color = ((0xFF000000) |
+                    color = (alpha |
                             (This->palette->palents[DDBltFx->u5.dwFillColor].peRed << 16) |
                             (This->palette->palents[DDBltFx->u5.dwFillColor].peGreen << 8) |
                             (This->palette->palents[DDBltFx->u5.dwFillColor].peBlue));
                 } else {
-                    color = 0xFF000000;
+                    color = alpha;
                 }
             }
             else if (This->resource.format == WINED3DFMT_R5G6B5) {
@@ -3565,6 +3587,8 @@ HRESULT WINAPI IWineD3DSurfaceImpl_RealizePalette(IWineD3DSurface *iface) {
     unsigned int n;
     TRACE("(%p)\n", This);
 
+    if (!pal) return WINED3D_OK;
+
     if(This->resource.format == WINED3DFMT_P8 ||
        This->resource.format == WINED3DFMT_A8P8)
     {
@@ -3579,26 +3603,17 @@ HRESULT WINAPI IWineD3DSurfaceImpl_RealizePalette(IWineD3DSurface *iface) {
     if(This->Flags & SFLAG_DIBSECTION) {
         TRACE("(%p): Updating the hdc's palette\n", This);
         for (n=0; n<256; n++) {
-            if(pal) {
-                col[n].rgbRed   = pal->palents[n].peRed;
-                col[n].rgbGreen = pal->palents[n].peGreen;
-                col[n].rgbBlue  = pal->palents[n].peBlue;
-            } else {
-                IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-                /* Use the default device palette */
-                col[n].rgbRed   = device->palettes[device->currentPalette][n].peRed;
-                col[n].rgbGreen = device->palettes[device->currentPalette][n].peGreen;
-                col[n].rgbBlue  = device->palettes[device->currentPalette][n].peBlue;
-            }
+            col[n].rgbRed   = pal->palents[n].peRed;
+            col[n].rgbGreen = pal->palents[n].peGreen;
+            col[n].rgbBlue  = pal->palents[n].peBlue;
             col[n].rgbReserved = 0;
         }
         SetDIBColorTable(This->hDC, 0, 256, col);
     }
 
-    /* Propagate the changes to the drawable when we have a palette. This function is also called
-     * when the palette is removed.
+    /* Propagate the changes to the drawable when we have a palette.
      * TODO: in case of hardware p8 palettes we should only upload the palette. */
-    if(pal && (This->resource.usage & WINED3DUSAGE_RENDERTARGET))
+    if(This->resource.usage & WINED3DUSAGE_RENDERTARGET)
         IWineD3DSurface_LoadLocation(iface, SFLAG_INDRAWABLE, NULL);
 
     return WINED3D_OK;
@@ -3871,6 +3886,7 @@ static inline void surface_blt_to_drawable(IWineD3DSurfaceImpl *This, const RECT
                 coords[1].x =  1;   coords[1].y = -1;   coords[1].z = -1;
                 coords[2].x =  1;   coords[2].y = -1;   coords[2].z = -1;
                 coords[3].x = -1;   coords[3].y = -1;   coords[3].z = -1;
+                break;
 
             default:
                 ERR("Unexpected texture target\n");

@@ -353,11 +353,14 @@ static BOOL PRINTDLG_UpdatePrintDlgA(HWND hDlg,
 	    if (lpdm->dmFields & DM_COPIES)
 	        lpdm->u1.s1.dmCopies = GetDlgItemInt(hDlg, edt3, NULL, FALSE);
 	} else {
+            /* Application is responsible for multiple copies */
 	    if (IsDlgButtonChecked(hDlg, chx2) == BST_CHECKED)
 	        lppd->Flags |= PD_COLLATE;
             else
                lppd->Flags &= ~PD_COLLATE;
             lppd->nCopies = GetDlgItemInt(hDlg, edt3, NULL, FALSE);
+            /* multiple copies already included in the document. Driver must print only one copy */
+            lpdm->u1.s1.dmCopies = 1;
 	}
 
 	/* Print quality, PrintDlg16 */
@@ -497,7 +500,6 @@ static BOOL PRINTDLG_PaperSizeA(
     for (i=0;i<NrOfEntries;i++)
 	if (Words[i] == PaperSize)
 	    break;
-    HeapFree(GetProcessHeap(),0,Words);
     if (i == NrOfEntries) {
 	FIXME("Papersize %d not found in list?\n",PaperSize);
 	goto out;
@@ -555,7 +557,6 @@ static BOOL PRINTDLG_PaperSizeW(
     for (i=0;i<NrOfEntries;i++)
 	if (!lstrcmpW(PaperSize,Names+(64*i)))
 	    break;
-    HeapFree(GetProcessHeap(),0,Names);
     if (i==NrOfEntries) {
 	FIXME("Papersize %s not found in list?\n",debugstr_w(PaperSize));
 	goto out;

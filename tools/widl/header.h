@@ -24,6 +24,7 @@
 #include "widltypes.h"
 
 extern int is_ptrchain_attr(const var_t *var, enum attr_type t);
+extern int is_aliaschain_attr(const type_t *var, enum attr_type t);
 extern int is_attr(const attr_list_t *list, enum attr_type t);
 extern void *get_attrp(const attr_list_t *list, enum attr_type t);
 extern unsigned long get_attrv(const attr_list_t *list, enum attr_type t);
@@ -61,7 +62,10 @@ extern void write_externdef(const var_t *v);
 extern void write_library(const char *name, const attr_list_t *attr);
 extern void write_user_types(void);
 extern void write_context_handle_rundowns(void);
+extern void write_generic_handle_routines(void);
 extern const var_t* get_explicit_handle_var(const func_t* func);
+extern const type_t* get_explicit_generic_handle_type(const var_t* var);
+extern const var_t* get_explicit_generic_handle_var(const func_t* func);
 extern int has_out_arg_or_return(const func_t *func);
 extern void write_guid(FILE *f, const char *guid_prefix, const char *name,
                        const UUID *uuid);
@@ -78,7 +82,7 @@ static inline int last_array(const type_t *type)
 
 static inline int is_string_type(const attr_list_t *attrs, const type_t *type)
 {
-    return ((is_attr(attrs, ATTR_STRING) || is_attr(type->attrs, ATTR_STRING))
+    return ((is_attr(attrs, ATTR_STRING) || is_aliaschain_attr(type, ATTR_STRING))
             && (last_ptr(type) || last_array(type)));
 }
 

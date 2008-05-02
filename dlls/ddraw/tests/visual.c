@@ -175,7 +175,7 @@ static DWORD getPixelColor(IDirect3DDevice7 *device, UINT x, UINT y)
      * really important for these tests
      */
     ret = ((DWORD *) ddsd.lpSurface)[0] & 0x00ffffff;
-    hr = IDirectDrawSurface7_Unlock(surf, &rectToLock);
+    hr = IDirectDrawSurface7_Unlock(surf, NULL);
     if(FAILED(hr))
     {
         trace("Can't unlock the offscreen surface, hr=%08x\n", hr);
@@ -554,7 +554,7 @@ static void offscreen_test(IDirect3DDevice7 *device)
         hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
         ok(hr == D3D_OK, "Clear failed, hr = %08x\n", hr);
 
-        /* Draw without textures - Should resut in a white quad */
+        /* Draw without textures - Should result in a white quad */
         hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEX1, quad, 4, 0);
         ok(hr == D3D_OK, "DrawPrimitive failed, hr = %08x\n", hr);
 
@@ -971,7 +971,7 @@ static DWORD D3D1_getPixelColor(IDirectDraw *DirectDraw1, IDirectDrawSurface *Su
      * really important for these tests
      */
     ret = ((DWORD *) ddsd.lpSurface)[0] & 0x00ffffff;
-    hr = IDirectDrawSurface_Unlock(surf, &rectToLock);
+    hr = IDirectDrawSurface_Unlock(surf, NULL);
     if(FAILED(hr))
     {
         trace("Can't unlock the offscreen surface, hr=%08x\n", hr);
@@ -1720,6 +1720,469 @@ static void D3D1_TextureMapBlendTest(void)
     if (Texture) IDirect3DTexture_Release(Texture);
 }
 
+static void p8_surface_fill_rect(IDirectDrawSurface *dest, UINT x, UINT y, UINT w, UINT h, BYTE colorindex)
+{
+    DDSURFACEDESC ddsd;
+    HRESULT hr;
+    UINT i, i1;
+    BYTE *p;
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+
+    hr = IDirectDrawSurface_Lock(dest, NULL, &ddsd, DDLOCK_WRITEONLY | DDLOCK_WAIT, NULL);
+    ok(hr==DD_OK, "IDirectDrawSurface_Lock returned: %x\n", hr);
+
+    p = (BYTE *)ddsd.lpSurface + ddsd.lPitch * y + x;
+
+    for (i = 0; i < h; i++) {
+        for (i1 = 0; i1 < w; i1++) {
+            p[i1] = colorindex;
+        }
+        p += ddsd.lPitch;
+    }
+
+    hr = IDirectDrawSurface_Unlock(dest, NULL);
+    ok(hr==DD_OK, "IDirectDrawSurface_UnLock returned: %x\n", hr);
+}
+
+static COLORREF getPixelColor_GDI(IDirectDrawSurface *Surface, UINT x, UINT y)
+{
+    COLORREF clr = CLR_INVALID;
+    HDC hdc;
+    HRESULT hr;
+
+    hr = IDirectDrawSurface_GetDC(Surface, &hdc);
+    ok(hr==DD_OK, "IDirectDrawSurface_GetDC returned: %x\n", hr);
+
+    if (SUCCEEDED(hr)) {
+        clr = GetPixel(hdc, x, y);
+
+        hr = IDirectDrawSurface_ReleaseDC(Surface, hdc);
+        ok(hr==DD_OK, "IDirectDrawSurface_ReleaseDC returned: %x\n", hr);
+    }
+
+    return clr;
+}
+
+static BOOL colortables_check_equality(PALETTEENTRY table1[256], RGBQUAD table2[256])
+{
+    int i;
+
+    for (i = 0; i < 256; i++) {
+       if (table1[i].peRed != table2[i].rgbRed || table1[i].peGreen != table2[i].rgbGreen ||
+           table1[i].peBlue != table2[i].rgbBlue) return FALSE;
+    }
+
+    return TRUE;
+}
+
+static void p8_primary_test()
+{
+    /* Test 8bit mode used by games like StarCraft, C&C Red Alert I etc */
+    DDSURFACEDESC ddsd;
+    HDC hdc;
+    HRESULT hr;
+    PALETTEENTRY entries[256];
+    RGBQUAD coltable[256];
+    UINT i, i1, i2;
+    IDirectDrawPalette *ddprimpal = NULL;
+    IDirectDrawSurface *offscreen = NULL;
+    WNDCLASS wc = {0};
+    DDBLTFX ddbltfx;
+    COLORREF color;
+    RECT rect;
+    unsigned differences;
+
+    /* An IDirect3DDevice cannot be queryInterfaced from an IDirect3DDevice7 on windows */
+    hr = DirectDrawCreate(NULL, &DirectDraw1, NULL);
+
+    ok(hr==DD_OK || hr==DDERR_NODIRECTDRAWSUPPORT, "DirectDrawCreate returned: %x\n", hr);
+    if (FAILED(hr)) {
+        goto out;
+    }
+
+    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpszClassName = "p8_primary_test_wc";
+    RegisterClass(&wc);
+    window = CreateWindow("p8_primary_test_wc", "p8_primary_test", WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION , 0, 0, 640, 480, 0, 0, 0, 0);
+
+    hr = IDirectDraw_SetCooperativeLevel(DirectDraw1, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(hr==DD_OK, "SetCooperativeLevel returned: %x\n", hr);
+    if(FAILED(hr)) {
+        goto out;
+    }
+
+    hr = IDirectDraw_SetDisplayMode(DirectDraw1, 640, 480, 8);
+    ok(hr==DD_OK || hr == DDERR_UNSUPPORTED, "SetDisplayMode returned: %x\n", hr);
+    if (FAILED(hr)) {
+        goto out;
+    }
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
+    hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &Surface1, NULL);
+    ok(hr==DD_OK, "CreateSurface returned: %x\n", hr);
+    if (FAILED(hr)) {
+        goto out;
+    }
+
+    memset(entries, 0, sizeof(entries));
+    entries[0].peRed = 0xff;
+    entries[1].peGreen = 0xff;
+    entries[2].peBlue = 0xff;
+
+    hr = IDirectDraw_CreatePalette(DirectDraw1, DDPCAPS_ALLOW256 | DDPCAPS_8BIT, entries, &ddprimpal, NULL);
+    ok(hr == DD_OK, "CreatePalette returned %08x\n", hr);
+    if (FAILED(hr)) {
+        skip("IDirectDraw_CreatePalette failed; skipping further tests\n");
+        goto out;
+    }
+
+    hr = IDirectDrawSurface_SetPalette(Surface1, ddprimpal);
+    ok(hr==DD_OK, "IDirectDrawSurface_SetPalette returned: %x\n", hr);
+
+    p8_surface_fill_rect(Surface1, 0, 0, 640, 480, 2);
+
+    color = getPixelColor_GDI(Surface1, 10, 10);
+    ok(GetRValue(color) == 0 && GetGValue(color) == 0 && GetBValue(color) == 0xFF,
+            "got R %02X G %02X B %02X, expected R 00 G 00 B FF\n",
+            GetRValue(color), GetGValue(color), GetBValue(color));
+
+    memset(&ddbltfx, 0, sizeof(ddbltfx));
+    ddbltfx.dwSize = sizeof(ddbltfx);
+    U5(ddbltfx).dwFillColor = 0;
+    hr = IDirectDrawSurface_Blt(Surface1, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &ddbltfx);
+    ok(hr == DD_OK, "IDirectDrawSurface_Blt failed with %08x\n", hr);
+
+    color = getPixelColor_GDI(Surface1, 10, 10);
+    ok(GetRValue(color) == 0xFF && GetGValue(color) == 0 && GetBValue(color) == 0,
+            "got R %02X G %02X B %02X, expected R FF G 00 B 00\n",
+            GetRValue(color), GetGValue(color), GetBValue(color));
+
+    memset(&ddbltfx, 0, sizeof(ddbltfx));
+    ddbltfx.dwSize = sizeof(ddbltfx);
+    U5(ddbltfx).dwFillColor = 1;
+    hr = IDirectDrawSurface_Blt(Surface1, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &ddbltfx);
+    ok(hr == DD_OK, "IDirectDrawSurface_Blt failed with %08x\n", hr);
+
+    color = getPixelColor_GDI(Surface1, 10, 10);
+    ok(GetRValue(color) == 0 && GetGValue(color) == 0xFF && GetBValue(color) == 0,
+            "got R %02X G %02X B %02X, expected R 00 G FF B 00\n",
+            GetRValue(color), GetGValue(color), GetBValue(color));
+
+    memset (&ddsd, 0, sizeof (ddsd));
+    ddsd.dwSize = sizeof (ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
+    ddsd.dwWidth = 16;
+    ddsd.dwHeight = 16;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_VIDEOMEMORY;
+    ddsd.ddpfPixelFormat.dwSize = sizeof(ddsd.ddpfPixelFormat);
+    ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB | DDPF_PALETTEINDEXED8;
+    U1(ddsd.ddpfPixelFormat).dwRGBBitCount      = 8;
+    hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &offscreen, NULL);
+    ok(hr == DD_OK, "IDirectDraw_CreateSurface returned %08x\n", hr);
+    if (FAILED(hr)) goto out;
+
+    memset(entries, 0, sizeof(entries));
+    for (i = 0; i < 256; i++) {
+        entries[i].peBlue = i;
+        }
+    hr = IDirectDrawPalette_SetEntries(ddprimpal, 0, 0, 256, entries);
+    ok(hr == DD_OK, "IDirectDrawPalette_SetEntries failed with %08x\n", hr);
+
+    hr = IDirectDrawSurface_GetDC(offscreen, &hdc);
+    ok(hr==DD_OK, "IDirectDrawSurface_GetDC returned: %x\n", hr);
+    i = GetDIBColorTable(hdc, 0, 256, coltable);
+    ok(i == 256, "GetDIBColorTable returned %u, last error: %x\n", i, GetLastError());
+    hr = IDirectDrawSurface_ReleaseDC(offscreen, hdc);
+    ok(hr==DD_OK, "IDirectDrawSurface_ReleaseDC returned: %x\n", hr);
+
+    ok(colortables_check_equality(entries, coltable), "unexpected colortable on offscreen surface\n");
+
+    p8_surface_fill_rect(offscreen, 0, 0, 16, 16, 1);
+
+    memset(entries, 0, sizeof(entries));
+    entries[0].peRed = 0xff;
+    entries[1].peGreen = 0xff;
+    entries[2].peBlue = 0xff;
+    hr = IDirectDrawPalette_SetEntries(ddprimpal, 0, 0, 256, entries);
+    ok(hr == DD_OK, "IDirectDrawPalette_SetEntries failed with %08x\n", hr);
+
+    hr = IDirectDrawSurface_BltFast(Surface1, 0, 0, offscreen, NULL, 0);
+    ok(hr==DD_OK, "IDirectDrawSurface_BltFast returned: %x\n", hr);
+
+    color = getPixelColor_GDI(Surface1, 1, 1);
+    ok(GetRValue(color) == 0 && GetGValue(color) == 0xFF && GetBValue(color) == 0,
+            "got R %02X G %02X B %02X, expected R 00 G FF B 00\n",
+            GetRValue(color), GetGValue(color), GetBValue(color));
+
+    /* Test blitting and locking patterns that are likely to trigger bugs in opengl renderer (p8
+       surface conversion and uploading/downloading to/from opengl texture). Similar patterns (
+       blitting front buffer areas to/from an offscreen surface mixed with locking) are used by C&C
+       Red Alert I. */
+    IDirectDrawSurface_Release(offscreen);
+
+    memset (&ddsd, 0, sizeof (ddsd));
+    ddsd.dwSize = sizeof (ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
+    ddsd.dwWidth = 640;
+    ddsd.dwHeight = 480;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    ddsd.ddpfPixelFormat.dwSize = sizeof(ddsd.ddpfPixelFormat);
+    ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB | DDPF_PALETTEINDEXED8;
+    U1(ddsd.ddpfPixelFormat).dwRGBBitCount      = 8;
+    hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &offscreen, NULL);
+    ok(hr == DD_OK, "IDirectDraw_CreateSurface returned %08x\n", hr);
+
+    if (FAILED(hr)) goto out;
+
+    /* Test two times, first time front buffer has a palette and second time front buffer
+       has no palette; the latter is somewhat contrived example, but an app could set
+       front buffer palette later. */
+    for (i2 = 0; i2 < 2; i2++) {
+        if (i2 == 1) {
+            hr = IDirectDrawSurface_SetPalette(Surface1, NULL);
+            ok(hr==DD_OK, "IDirectDrawSurface_SetPalette returned: %x\n", hr);
+        }
+
+        memset(&ddsd, 0, sizeof(ddsd));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface_Lock(Surface1, NULL, &ddsd, DDLOCK_WAIT, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface_Lock returned: %x\n", hr);
+
+        for (i = 0; i < 256; i++) {
+            unsigned x = (i % 128) * 4;
+            unsigned y = (i / 128) * 4;
+            BYTE *p = (BYTE *)ddsd.lpSurface + ddsd.lPitch * y + x;
+
+            for (i1 = 0; i1 < 4; i1++) {
+                p[0] = p[1] = p[2] = p[3] = i;
+                p += ddsd.lPitch;
+            }
+        }
+
+        hr = IDirectDrawSurface_Unlock(Surface1, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface_UnLock returned: %x\n", hr);
+
+        hr = IDirectDrawSurface_BltFast(offscreen, 0, 0, Surface1, NULL, 0);
+        ok(hr==DD_OK, "IDirectDrawSurface_BltFast returned: %x\n", hr);
+
+        /* This ensures offscreen surface contens will be downloaded to system memory. */
+        memset(&ddsd, 0, sizeof(ddsd));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface_Lock(offscreen, NULL, &ddsd, DDLOCK_WAIT, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface_Lock returned: %x\n", hr);
+        hr = IDirectDrawSurface_Unlock(offscreen, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface_UnLock returned: %x\n", hr);
+
+        /* Offscreen surface data will have to be converted and uploaded to texture. */
+        rect.left = 0;
+        rect.top = 0;
+        rect.right = 16;
+        rect.bottom = 16;
+        hr = IDirectDrawSurface_BltFast(offscreen, 600, 400, Surface1, &rect, 0);
+        ok(hr==DD_OK, "IDirectDrawSurface_BltFast returned: %x\n", hr);
+
+        /* This ensures offscreen surface contens will be downloaded to system memory. */
+        memset(&ddsd, 0, sizeof(ddsd));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface_Lock(offscreen, NULL, &ddsd, DDLOCK_WAIT, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface_Lock returned: %x\n", hr);
+        hr = IDirectDrawSurface_Unlock(offscreen, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface_UnLock returned: %x\n", hr);
+
+        hr = IDirectDrawSurface_BltFast(Surface1, 0, 0, offscreen, NULL, 0);
+        ok(hr==DD_OK, "IDirectDrawSurface_BltFast returned: %x\n", hr);
+
+        memset(&ddsd, 0, sizeof(ddsd));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface_Lock(Surface1, NULL, &ddsd, DDLOCK_WAIT, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface_Lock returned: %x\n", hr);
+
+        differences = 0;
+
+        for (i = 0; i < 256; i++) {
+            unsigned x = (i % 128) * 4 + 1;
+            unsigned y = (i / 128) * 4 + 1;
+            BYTE *p = (BYTE *)ddsd.lpSurface + ddsd.lPitch * y + x;
+
+            if (*p != i) differences++;
+        }
+
+        hr = IDirectDrawSurface_Unlock(Surface1, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface_UnLock returned: %x\n", hr);
+
+        ok(differences == 0, i2 == 0 ? "Pass 1. Unexpected front buffer contens after blit (%u differences)\n" :
+                "Pass 2 (with NULL front buffer palette). Unexpected front buffer contens after blit (%u differences)\n",
+                differences);
+    }
+
+    out:
+
+    if(ddprimpal) IDirectDrawPalette_Release(ddprimpal);
+    if(offscreen) IDirectDrawSurface_Release(offscreen);
+    if(Surface1) IDirectDrawSurface_Release(Surface1);
+    if(DirectDraw1) IDirectDraw_Release(DirectDraw1);
+    if(window) DestroyWindow(window);
+}
+
+static void cubemap_test(IDirect3DDevice7 *device)
+{
+    IDirect3D7 *d3d;
+    IDirectDraw7 *ddraw;
+    IDirectDrawSurface7 *cubemap, *surface;
+    D3DDEVICEDESC7 d3dcaps;
+    HRESULT hr;
+    DWORD color;
+    DDSURFACEDESC2 ddsd;
+    DDBLTFX DDBltFx;
+    DDSCAPS2 caps;
+    static float quad[] = {
+      -1.0,   -1.0,    0.1,    1.0,    0.0,    0.0, /* Lower left */
+       0.0,   -1.0,    0.1,    1.0,    0.0,    0.0,
+      -1.0,    0.0,    0.1,    1.0,    0.0,    0.0,
+       0.0,    0.0,    0.1,    1.0,    0.0,    0.0,
+
+       0.0,   -1.0,    0.1,    0.0,    1.0,    0.0, /* Lower right */
+       1.0,   -1.0,    0.1,    0.0,    1.0,    0.0,
+       0.0,    0.0,    0.1,    0.0,    1.0,    0.0,
+       1.0,    0.0,    0.1,    0.0,    1.0,    0.0,
+
+       0.0,    0.0,    0.1,    0.0,    0.0,    1.0, /* upper right */
+       1.0,    0.0,    0.1,    0.0,    0.0,    1.0,
+       0.0,    1.0,    0.1,    0.0,    0.0,    1.0,
+       1.0,    1.0,    0.1,    0.0,    0.0,    1.0,
+
+      -1.0,    0.0,    0.1,   -1.0,    0.0,    0.0, /* Upper left */
+       0.0,    0.0,    0.1,   -1.0,    0.0,    0.0,
+      -1.0,    1.0,    0.1,   -1.0,    0.0,    0.0,
+       0.0,    1.0,    0.1,   -1.0,    0.0,    0.0,
+    };
+
+    memset(&DDBltFx, 0, sizeof(DDBltFx));
+    DDBltFx.dwSize = sizeof(DDBltFx);
+
+    memset(&d3dcaps, 0, sizeof(d3dcaps));
+    hr = IDirect3DDevice7_GetCaps(device, &d3dcaps);
+    ok(hr == D3D_OK, "IDirect3DDevice7_GetCaps returned %08x\n", hr);
+    if(!(d3dcaps.dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_CUBEMAP))
+    {
+        skip("No cubemap support\n");
+        return;
+    }
+
+    hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff000000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice7_Clear failed with %08x\n", hr);
+
+    hr = IDirect3DDevice7_GetDirect3D(device, &d3d);
+    ok(hr == D3D_OK, "IDirect3DDevice7_GetDirect3D returned %08x\n", hr);
+    hr = IDirect3D7_QueryInterface(d3d, &IID_IDirectDraw7, (void **) &ddraw);
+    ok(hr == D3D_OK, "IDirect3D7_QueryInterface returned %08x\n", hr);
+    IDirect3D7_Release(d3d);
+
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+    ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_CAPS;
+    ddsd.dwWidth = 16;
+    ddsd.dwHeight = 16;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX;
+    ddsd.ddsCaps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_ALLFACES | DDSCAPS2_TEXTUREMANAGE;
+    ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB;
+    ddsd.ddpfPixelFormat.dwRGBBitCount = 32;
+    ddsd.ddpfPixelFormat.dwRBitMask = 0x00FF0000;
+    ddsd.ddpfPixelFormat.dwGBitMask = 0x0000FF00;
+    ddsd.ddpfPixelFormat.dwBBitMask = 0x000000FF;
+
+    hr = IDirectDraw7_CreateSurface(ddraw, &ddsd, &cubemap, NULL);
+    ok(hr == DD_OK, "IDirectDraw7_CreateSurface returned %08x\n", hr);
+    IDirectDraw7_Release(ddraw);
+
+    /* Positive X */
+    DDBltFx.dwFillColor = 0x00ff0000;
+    hr = IDirectDrawSurface7_Blt(cubemap, NULL, NULL, NULL, DDBLT_COLORFILL, &DDBltFx);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Blt returned %08x\n", hr);
+
+    memset(&caps, 0, sizeof(caps));
+    caps.dwCaps = DDSCAPS_TEXTURE;
+    caps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_NEGATIVEX;
+    hr = IDirectDrawSurface_GetAttachedSurface(cubemap, &caps, &surface);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Lock returned %08x\n", hr);
+    DDBltFx.dwFillColor = 0x0000ffff;
+    hr = IDirectDrawSurface7_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL, &DDBltFx);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Blt returned %08x\n", hr);
+
+    caps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_NEGATIVEZ;
+    hr = IDirectDrawSurface_GetAttachedSurface(cubemap, &caps, &surface);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Lock returned %08x\n", hr);
+    DDBltFx.dwFillColor = 0x0000ff00;
+    hr = IDirectDrawSurface7_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL, &DDBltFx);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Blt returned %08x\n", hr);
+
+    caps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_POSITIVEZ;
+    hr = IDirectDrawSurface_GetAttachedSurface(cubemap, &caps, &surface);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Lock returned %08x\n", hr);
+    DDBltFx.dwFillColor = 0x000000ff;
+    hr = IDirectDrawSurface7_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL, &DDBltFx);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Blt returned %08x\n", hr);
+
+    caps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_NEGATIVEY;
+    hr = IDirectDrawSurface_GetAttachedSurface(cubemap, &caps, &surface);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Lock returned %08x\n", hr);
+    DDBltFx.dwFillColor = 0x00ffff00;
+    hr = IDirectDrawSurface7_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL, &DDBltFx);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Blt returned %08x\n", hr);
+
+    caps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_POSITIVEY;
+    hr = IDirectDrawSurface_GetAttachedSurface(cubemap, &caps, &surface);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Lock returned %08x\n", hr);
+    DDBltFx.dwFillColor = 0x00ff00ff;
+    hr = IDirectDrawSurface7_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL, &DDBltFx);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Blt returned %08x\n", hr);
+
+    hr = IDirect3DDevice7_SetTexture(device, 0, cubemap);
+    ok(hr == DD_OK, "IDirect3DDevice7_SetTexture returned %08x\n", hr);
+    hr = IDirect3DDevice7_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    ok(hr == DD_OK, "IDirect3DDevice7_SetTextureStageState returned %08x\n", hr);
+    hr = IDirect3DDevice7_SetTextureStageState(device, 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    ok(hr == DD_OK, "IDirect3DDevice7_SetTextureStageState returned %08x\n", hr);
+
+    hr = IDirect3DDevice7_BeginScene(device);
+    ok(hr == DD_OK, "IDirect3DDevice7_BeginScene returned %08x\n", hr);
+    if(SUCCEEDED(hr))
+    {
+        hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1, quad + 0 * 6, 4, 0);
+        ok(hr == DD_OK, "IDirect3DDevice7_DrawPrimitive returned %08x\n", hr);
+        hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1, quad + 4 * 6, 4, 0);
+        ok(hr == DD_OK, "IDirect3DDevice7_DrawPrimitive returned %08x\n", hr);
+        hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1, quad + 8 * 6, 4, 0);
+        ok(hr == DD_OK, "IDirect3DDevice7_DrawPrimitive returned %08x\n", hr);
+        hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1, quad + 12* 6, 4, 0);
+        ok(hr == DD_OK, "IDirect3DDevice7_DrawPrimitive returned %08x\n", hr);
+
+        hr = IDirect3DDevice7_EndScene(device);
+        ok(hr == DD_OK, "IDirect3DDevice7_EndScene returned %08x\n", hr);
+    }
+    hr = IDirect3DDevice7_SetTextureStageState(device, 0, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    ok(hr == DD_OK, "IDirect3DDevice7_SetTextureStageState returned %08x\n", hr);
+
+    color = getPixelColor(device, 160, 360); /* lower left quad - positivex */
+    ok(color == 0x00ff0000, "DDSCAPS2_CUBEMAP_POSITIVEX has color 0x%08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 160, 120); /* upper left quad - negativex */
+    ok(color == 0x0000ffff, "DDSCAPS2_CUBEMAP_NEGATIVEX has color 0x%08x, expected 0x0000ffff\n", color);
+    color = getPixelColor(device, 480, 360); /* lower right quad - positivey */
+    ok(color == 0x00ff00ff, "DDSCAPS2_CUBEMAP_POSITIVEY has color 0x%08x, expected 0x00ff00ff\n", color);
+    color = getPixelColor(device, 480, 120); /* upper right quad - positivez */
+    ok(color == 0x000000ff, "DDSCAPS2_CUBEMAP_POSITIVEZ has color 0x%08x, expected 0x000000ff\n", color);
+    hr = IDirect3DDevice7_SetTexture(device, 0, NULL);
+    ok(hr == DD_OK, "IDirect3DDevice7_SetTexture returned %08x\n", hr);
+    IDirectDrawSurface7_Release(cubemap);
+}
+
 START_TEST(visual)
 {
     HRESULT hr;
@@ -1766,6 +2229,7 @@ START_TEST(visual)
     offscreen_test(Direct3DDevice);
     alpha_test(Direct3DDevice);
     rhw_zero_test(Direct3DDevice);
+    cubemap_test(Direct3DDevice);
 
     releaseObjects(); /* release DX7 interfaces to test D3D1 */
 
@@ -1776,6 +2240,9 @@ START_TEST(visual)
         D3D1_TextureMapBlendTest();
     }
     D3D1_releaseObjects();
+
+    p8_primary_test();
+
     return ;
 
 cleanup:

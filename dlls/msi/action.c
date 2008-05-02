@@ -47,6 +47,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(msi);
 static UINT ACTION_ProcessExecSequence(MSIPACKAGE *package, BOOL UIran);
 static UINT ACTION_ProcessUISequence(MSIPACKAGE *package);
 static UINT ACTION_PerformActionSequence(MSIPACKAGE *package, UINT seq, BOOL UI);
+static BOOL ACTION_HandleStandardAction(MSIPACKAGE *package, LPCWSTR action, UINT* rc, BOOL force);
 
 /*
  * consts and values used
@@ -232,8 +233,6 @@ struct _actions {
     LPCWSTR action;
     STANDARDACTIONHANDLER handler;
 };
-
-static const struct _actions StandardActions[];
 
 
 /********************************************************
@@ -965,56 +964,6 @@ static UINT ACTION_ProcessUISequence(MSIPACKAGE *package)
 /********************************************************
  * ACTION helper functions and functions that perform the actions
  *******************************************************/
-static BOOL ACTION_HandleStandardAction(MSIPACKAGE *package, LPCWSTR action, 
-                                        UINT* rc, BOOL force )
-{
-    BOOL ret = FALSE; 
-    BOOL run = force;
-    int i;
-
-    if (!run && !package->script->CurrentlyScripting)
-        run = TRUE;
-   
-    if (!run)
-    {
-        if (strcmpW(action,szInstallFinalize) == 0 ||
-            strcmpW(action,szInstallExecute) == 0 ||
-            strcmpW(action,szInstallExecuteAgain) == 0) 
-                run = TRUE;
-    }
-    
-    i = 0;
-    while (StandardActions[i].action != NULL)
-    {
-        if (strcmpW(StandardActions[i].action, action)==0)
-        {
-            if (!run)
-            {
-                ui_actioninfo(package, action, TRUE, 0);
-                *rc = schedule_action(package,INSTALL_SCRIPT,action);
-                ui_actioninfo(package, action, FALSE, *rc);
-            }
-            else
-            {
-                ui_actionstart(package, action);
-                if (StandardActions[i].handler)
-                {
-                    *rc = StandardActions[i].handler(package);
-                }
-                else
-                {
-                    FIXME("unhandled standard action %s\n",debugstr_w(action));
-                    *rc = ERROR_SUCCESS;
-                }
-            }
-            ret = TRUE;
-            break;
-        }
-        i++;
-    }
-    return ret;
-}
-
 static BOOL ACTION_HandleCustomAction( MSIPACKAGE* package, LPCWSTR action,
                                        UINT* rc, UINT script, BOOL force )
 {
@@ -1053,7 +1002,7 @@ UINT ACTION_PerformAction(MSIPACKAGE *package, const WCHAR *action, UINT script,
 
     if (!handled)
     {
-        FIXME("unhandled msi action %s\n",debugstr_w(action));
+        WARN("unhandled msi action %s\n",debugstr_w(action));
         rc = ERROR_FUNCTION_NOT_CALLED;
     }
 
@@ -1077,7 +1026,7 @@ UINT ACTION_PerformUIAction(MSIPACKAGE *package, const WCHAR *action, UINT scrip
 
     if (!handled)
     {
-        FIXME("unhandled msi action %s\n",debugstr_w(action));
+        WARN("unhandled msi action %s\n",debugstr_w(action));
         rc = ERROR_FUNCTION_NOT_CALLED;
     }
 
@@ -4678,6 +4627,130 @@ static UINT ACTION_StartServices( MSIPACKAGE *package )
     return rc;
 }
 
+static BOOL stop_service_dependents(SC_HANDLE scm, SC_HANDLE service)
+{
+    DWORD i, needed, count;
+    ENUM_SERVICE_STATUSW *dependencies;
+    SERVICE_STATUS ss;
+    SC_HANDLE depserv;
+
+    if (EnumDependentServicesW(service, SERVICE_ACTIVE, NULL,
+                               0, &needed, &count))
+        return TRUE;
+
+    if (GetLastError() != ERROR_MORE_DATA)
+        return FALSE;
+
+    dependencies = msi_alloc(needed);
+    if (!dependencies)
+        return FALSE;
+
+    if (!EnumDependentServicesW(service, SERVICE_ACTIVE, dependencies,
+                                needed, &needed, &count))
+        goto error;
+
+    for (i = 0; i < count; i++)
+    {
+        depserv = OpenServiceW(scm, dependencies[i].lpServiceName,
+                               SERVICE_STOP | SERVICE_QUERY_STATUS);
+        if (!depserv)
+            goto error;
+
+        if (!ControlService(depserv, SERVICE_CONTROL_STOP, &ss))
+            goto error;
+    }
+
+    return TRUE;
+
+error:
+    msi_free(dependencies);
+    return FALSE;
+}
+
+static UINT ITERATE_StopService(MSIRECORD *rec, LPVOID param)
+{
+    MSIPACKAGE *package = (MSIPACKAGE *)param;
+    MSICOMPONENT *comp;
+    SERVICE_STATUS status;
+    SERVICE_STATUS_PROCESS ssp;
+    SC_HANDLE scm = NULL, service = NULL;
+    LPWSTR name, args;
+    DWORD event, needed;
+
+    event = MSI_RecordGetInteger(rec, 3);
+    if (!(event & msidbServiceControlEventStop))
+        return ERROR_SUCCESS;
+
+    comp = get_loaded_component(package, MSI_RecordGetString(rec, 6));
+    if (!comp || comp->Action == INSTALLSTATE_UNKNOWN || comp->Action == INSTALLSTATE_ABSENT)
+        return ERROR_SUCCESS;
+
+    deformat_string(package, MSI_RecordGetString(rec, 2), &name);
+    deformat_string(package, MSI_RecordGetString(rec, 4), &args);
+    args = strdupW(MSI_RecordGetString(rec, 4));
+
+    scm = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+    if (!scm)
+    {
+        WARN("Failed to open the SCM: %d\n", GetLastError());
+        goto done;
+    }
+
+    service = OpenServiceW(scm, name,
+                           SERVICE_STOP |
+                           SERVICE_QUERY_STATUS |
+                           SERVICE_ENUMERATE_DEPENDENTS);
+    if (!service)
+    {
+        WARN("Failed to open service (%s): %d\n",
+              debugstr_w(name), GetLastError());
+        goto done;
+    }
+
+    if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, (LPBYTE)&ssp,
+                              sizeof(SERVICE_STATUS_PROCESS), &needed))
+    {
+        WARN("Failed to query service status (%s): %d\n",
+             debugstr_w(name), GetLastError());
+        goto done;
+    }
+
+    if (ssp.dwCurrentState == SERVICE_STOPPED)
+        goto done;
+
+    stop_service_dependents(scm, service);
+
+    if (!ControlService(service, SERVICE_CONTROL_STOP, &status))
+        WARN("Failed to stop service (%s): %d\n", debugstr_w(name), GetLastError());
+
+done:
+    CloseServiceHandle(service);
+    CloseServiceHandle(scm);
+    msi_free(name);
+    msi_free(args);
+
+    return ERROR_SUCCESS;
+}
+
+static UINT ACTION_StopServices( MSIPACKAGE *package )
+{
+    UINT rc;
+    MSIQUERY *view;
+
+    static const WCHAR query[] = {
+        'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',
+        'S','e','r','v','i','c','e','C','o','n','t','r','o','l',0 };
+
+    rc = MSI_DatabaseOpenViewW(package->db, query, &view);
+    if (rc != ERROR_SUCCESS)
+        return ERROR_SUCCESS;
+
+    rc = MSI_IterateRecords(view, NULL, ITERATE_StopService, package);
+    msiobj_release(&view->hdr);
+
+    return rc;
+}
+
 static MSIFILE *msi_find_file( MSIPACKAGE *package, LPCWSTR filename )
 {
     MSIFILE *file;
@@ -5289,6 +5362,10 @@ static BOOL move_files_wildcard(LPWSTR source, LPWSTR dest, int options)
         msi_free(path);
     }
 
+    /* no files match the wildcard */
+    if (list_empty(&files.entry))
+        goto done;
+
     /* only the first wildcard match gets renamed to dest */
     file = LIST_ENTRY(list_head(&files.entry), FILE_LIST, entry);
     size = (strrchrW(file->dest, '\\') - file->dest) + lstrlenW(file->destname) + 2;
@@ -5510,13 +5587,6 @@ static UINT ACTION_SelfUnregModules( MSIPACKAGE *package )
     return msi_unimplemented_action_stub( package, "SelfUnregModules", table );
 }
 
-static UINT ACTION_StopServices( MSIPACKAGE *package )
-{
-    static const WCHAR table[] = {
-        'S','e','r','v','i','c','e','C','o','n','t','r','o','l',0 };
-    return msi_unimplemented_action_stub( package, "StopServices", table );
-}
-
 static UINT ACTION_DeleteServices( MSIPACKAGE *package )
 {
     static const WCHAR table[] = {
@@ -5731,3 +5801,53 @@ static const struct _actions StandardActions[] = {
     { szWriteRegistryValues, ACTION_WriteRegistryValues },
     { NULL, NULL },
 };
+
+static BOOL ACTION_HandleStandardAction(MSIPACKAGE *package, LPCWSTR action,
+                                        UINT* rc, BOOL force )
+{
+    BOOL ret = FALSE;
+    BOOL run = force;
+    int i;
+
+    if (!run && !package->script->CurrentlyScripting)
+        run = TRUE;
+
+    if (!run)
+    {
+        if (strcmpW(action,szInstallFinalize) == 0 ||
+            strcmpW(action,szInstallExecute) == 0 ||
+            strcmpW(action,szInstallExecuteAgain) == 0)
+                run = TRUE;
+    }
+
+    i = 0;
+    while (StandardActions[i].action != NULL)
+    {
+        if (strcmpW(StandardActions[i].action, action)==0)
+        {
+            if (!run)
+            {
+                ui_actioninfo(package, action, TRUE, 0);
+                *rc = schedule_action(package,INSTALL_SCRIPT,action);
+                ui_actioninfo(package, action, FALSE, *rc);
+            }
+            else
+            {
+                ui_actionstart(package, action);
+                if (StandardActions[i].handler)
+                {
+                    *rc = StandardActions[i].handler(package);
+                }
+                else
+                {
+                    FIXME("unhandled standard action %s\n",debugstr_w(action));
+                    *rc = ERROR_SUCCESS;
+                }
+            }
+            ret = TRUE;
+            break;
+        }
+        i++;
+    }
+    return ret;
+}

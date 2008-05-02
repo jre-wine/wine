@@ -18,6 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#ifndef QUARTZ_CONTROL_H
+#define QUARTZ_CONTROL_H
+
 typedef HRESULT (* CHANGEPROC)(IBaseFilter *pUserData);
 
 typedef struct MediaSeekingImpl
@@ -27,18 +30,16 @@ typedef struct MediaSeekingImpl
 	ULONG refCount;
 	IBaseFilter *pUserData;
 	CHANGEPROC fnChangeStop;
-	CHANGEPROC fnChangeStart;
+	CHANGEPROC fnChangeCurrent;
 	CHANGEPROC fnChangeRate;
 	DWORD dwCapabilities;
 	double dRate;
-	LONGLONG llStart;
-	LONGLONG llStop;
-	LONGLONG llDuration; /* FIXME: needed? */
+	LONGLONG llCurrent, llStop, llDuration;
 	GUID timeformat;
 	PCRITICAL_SECTION crst;
 } MediaSeekingImpl;
 
-HRESULT MediaSeekingImpl_Init(IBaseFilter *pUserData, CHANGEPROC fnChangeStop, CHANGEPROC fnChangeStart, CHANGEPROC fnChangeRate, MediaSeekingImpl * pSeeking, PCRITICAL_SECTION crit_sect);
+HRESULT MediaSeekingImpl_Init(IBaseFilter *pUserData, CHANGEPROC fnChangeStop, CHANGEPROC fnChangeCurrent, CHANGEPROC fnChangeRate, MediaSeekingImpl * pSeeking, PCRITICAL_SECTION crit_sect);
 
 HRESULT WINAPI MediaSeekingImpl_GetCapabilities(IMediaSeeking * iface, DWORD * pCapabilities);
 HRESULT WINAPI MediaSeekingImpl_CheckCapabilities(IMediaSeeking * iface, DWORD * pCapabilities);
@@ -57,3 +58,5 @@ HRESULT WINAPI MediaSeekingImpl_GetAvailable(IMediaSeeking * iface, LONGLONG * p
 HRESULT WINAPI MediaSeekingImpl_SetRate(IMediaSeeking * iface, double dRate);
 HRESULT WINAPI MediaSeekingImpl_GetRate(IMediaSeeking * iface, double * dRate);
 HRESULT WINAPI MediaSeekingImpl_GetPreroll(IMediaSeeking * iface, LONGLONG * pPreroll);
+
+#endif /*QUARTZ_CONTROL_H*/

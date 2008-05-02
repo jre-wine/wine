@@ -350,7 +350,7 @@ static void update_font_list(void)
     fmt.cbSize = sizeof(fmt);
 
     SendMessageW(hEditorWnd, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM)&fmt);
-    SendMessageW(hFontListEdit, WM_GETTEXT, MAX_PATH, (LPARAM)fontName);
+    if (!SendMessageW(hFontListEdit, WM_GETTEXT, MAX_PATH, (LPARAM)fontName)) return;
 
     if(lstrcmpW(fontName, fmt.szFaceName))
     {
@@ -883,7 +883,7 @@ static void DialogOpenFile(void)
 static void dialog_about(void)
 {
     HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hMainWnd, GWLP_HINSTANCE);
-    HICON icon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_WORDPAD));
+    HICON icon = LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_WORDPAD), IMAGE_ICON, 48, 48, LR_SHARED);
     ShellAboutW(hMainWnd, wszAppTitle, 0, icon);
 }
 

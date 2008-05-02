@@ -132,6 +132,7 @@ static void print_version (void)
     OSVERSIONINFOEX ver;
     BOOL ext;
     int is_win2k3_r2;
+    const char *(*wine_get_build_id)(void);
 
     ver.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
     if (!(ext = GetVersionEx ((OSVERSIONINFO *) &ver)))
@@ -147,6 +148,9 @@ static void print_version (void)
              "    dwBuildNumber=%ld\n    PlatformId=%ld\n    szCSDVersion=%s\n",
              ver.dwMajorVersion, ver.dwMinorVersion, ver.dwBuildNumber,
              ver.dwPlatformId, ver.szCSDVersion);
+
+    wine_get_build_id = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_build_id");
+    if (wine_get_build_id) xprintf( "    WineBuild=%s\n", wine_get_build_id() );
 
     is_win2k3_r2 = GetSystemMetrics(SM_SERVERR2);
     if(is_win2k3_r2)
@@ -497,6 +501,7 @@ run_tests (char *logname)
     int logfile;
     char *strres, *eol, *nextline;
     DWORD strsize;
+    char build[64];
 
     SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 
@@ -535,7 +540,8 @@ run_tests (char *logname)
     xprintf ("Version 4\n");
     strres = extract_rcdata (MAKEINTRESOURCE(WINE_BUILD), STRINGRES, &strsize);
     xprintf ("Tests from build ");
-    if (strres) xprintf ("%.*s", strsize, strres);
+    if (LoadStringA( 0, IDS_BUILD_ID, build, sizeof(build) )) xprintf( "%s\n", build );
+    else if (strres) xprintf ("%.*s", strsize, strres);
     else xprintf ("-\n");
     strres = extract_rcdata (MAKEINTRESOURCE(TESTS_URL), STRINGRES, &strsize);
     xprintf ("Archive: ");

@@ -359,7 +359,7 @@ static void LightTest(void)
     ok(rc == D3D_OK, "IDirect3DDevice7_GetCaps failed with %x\n", rc);
 
     if ( caps.dwMaxActiveLights == (DWORD) -1) {
-        /* Some cards without T&L Support return -1 (Examples: Vodoo banshee, RivaTNT / NV4) */
+        /* Some cards without T&L Support return -1 (Examples: Voodoo Banshee, RivaTNT / NV4) */
         skip("T&L not supported\n");
         return;
     }
@@ -518,7 +518,7 @@ static void ProcessVerticesTest(void)
     rc = IDirect3DVertexBuffer7_Lock(lpVBufDest2, 0, (void **) &out2, NULL);
     ok(rc==D3D_OK , "IDirect3DVertexBuffer::Lock returned: %x\n", rc);
     if(!out2) goto out;
-    /* Small thing without much practial meaning, but I stumbled upon it,
+    /* Small thing without much practical meaning, but I stumbled upon it,
      * so let's check for it: If the output vertex buffer has to RHW value,
      * The RHW value of the last vertex is written into the next vertex
      */
@@ -949,8 +949,8 @@ static BOOL D3D1_createObjects(void)
     ddsd.dwWidth = 256;
     ddsd.dwHeight = 256;
     hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &Surface1, NULL);
-    ok(hr==DD_OK, "CreateSurface returned: %x\n", hr);
     if (!Surface1) {
+        skip("DDSCAPS_3DDEVICE surface not available\n");
         return FALSE;
     }
 
@@ -1082,6 +1082,30 @@ static void Direct3D1Test(void)
     instr[0].bOpcode = D3DOP_EXIT;
     instr[0].bSize = 0;
     instr[0].wCount = 0;
+    hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
+    ok(hr == D3D_OK, "IDirect3DExecuteBuffer_Unlock failed: %08x\n", hr);
+
+    hr = IDirect3DDevice_Execute(Direct3DDevice1, ExecuteBuffer, Viewport, D3DEXECUTE_CLIPPED);
+    ok(hr == D3D_OK, "IDirect3DDevice_Execute returned %08x\n", hr);
+
+    /* Test rendering 0 triangles */
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+
+    hr = IDirect3DExecuteBuffer_Lock(ExecuteBuffer, &desc);
+    ok(hr == D3D_OK, "IDirect3DExecuteBuffer_Lock failed: %08x\n", hr);
+
+    memset(desc.lpData, 0, 128);
+    instr = desc.lpData;
+    idx = 0;
+
+    instr->bOpcode = D3DOP_TRIANGLE;
+    instr->bSize = sizeof(D3DOP_TRIANGLE);
+    instr->wCount = 0;
+    instr = ((D3DINSTRUCTION*)(instr))+1;
+    instr->bOpcode = D3DOP_EXIT;
+    instr->bSize = 0;
+    instr->wCount = 0;
     hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
     ok(hr == D3D_OK, "IDirect3DExecuteBuffer_Unlock failed: %08x\n", hr);
 
@@ -1506,6 +1530,67 @@ static void TextureLoadTest(void)
     if (Texture2) IDirect3DTexture_Release(Texture2);
 }
 
+static void VertexBufferDescTest(void)
+{
+    HRESULT rc;
+    D3DVERTEXBUFFERDESC desc;
+    union mem_t
+    {
+        D3DVERTEXBUFFERDESC desc2;
+        unsigned char buffer[512];
+    } mem;
+
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwCaps = 0;
+    desc.dwFVF = D3DFVF_XYZ;
+    desc.dwNumVertices = 1;
+    rc = IDirect3D7_CreateVertexBuffer(lpD3D, &desc, &lpVBufSrc, 0);
+    ok(rc==D3D_OK || rc==E_OUTOFMEMORY, "CreateVertexBuffer returned: %x\n", rc);
+    if (!lpVBufSrc)
+    {
+        trace("IDirect3D7::CreateVertexBuffer() failed with an error %x\n", rc);
+        goto out;
+    }
+
+    memset(mem.buffer, 0x12, sizeof(mem.buffer));
+    mem.desc2.dwSize = sizeof(D3DVERTEXBUFFERDESC)*2;
+    rc = IDirect3DVertexBuffer7_GetVertexBufferDesc(lpVBufSrc, &mem.desc2);
+    if(rc != D3D_OK)
+        skip("GetVertexBuffer Failed!\n");
+    ok( mem.desc2.dwSize == sizeof(D3DVERTEXBUFFERDESC)*2, "Size returned from GetVertexBufferDesc does not match the value put in\n" );
+    ok( mem.buffer[sizeof(D3DVERTEXBUFFERDESC)] == 0x12, "GetVertexBufferDesc cleared outside of the struct! (dwSize was double the size of the struct)\n");
+    ok( mem.desc2.dwCaps == desc.dwCaps, "dwCaps returned differs. Got %x, expected %x\n", mem.desc2.dwCaps, desc.dwCaps);
+    ok( mem.desc2.dwFVF == desc.dwFVF, "dwFVF returned differs. Got %x, expected %x\n", mem.desc2.dwFVF, desc.dwFVF);
+    ok (mem.desc2.dwNumVertices == desc.dwNumVertices, "dwNumVertices returned differs. Got %x, expected %x\n", mem.desc2.dwNumVertices, desc.dwNumVertices);
+
+    memset(mem.buffer, 0x12, sizeof(mem.buffer));
+    mem.desc2.dwSize = 0;
+    rc = IDirect3DVertexBuffer7_GetVertexBufferDesc(lpVBufSrc, &mem.desc2);
+    if(rc != D3D_OK)
+        skip("GetVertexBuffer Failed!\n");
+    ok( mem.desc2.dwSize == 0, "Size returned from GetVertexBufferDesc does not match the value put in\n" );
+    ok( mem.buffer[sizeof(D3DVERTEXBUFFERDESC)] == 0x12, "GetVertexBufferDesc cleared outside of the struct! (dwSize was 0)\n");
+    ok( mem.desc2.dwCaps == desc.dwCaps, "dwCaps returned differs. Got %x, expected %x\n", mem.desc2.dwCaps, desc.dwCaps);
+    ok( mem.desc2.dwFVF == desc.dwFVF, "dwFVF returned differs. Got %x, expected %x\n", mem.desc2.dwFVF, desc.dwFVF);
+    ok (mem.desc2.dwNumVertices == desc.dwNumVertices, "dwNumVertices returned differs. Got %x, expected %x\n", mem.desc2.dwNumVertices, desc.dwNumVertices);
+
+    memset(mem.buffer, 0x12, sizeof(mem.buffer));
+    mem.desc2.dwSize = sizeof(D3DVERTEXBUFFERDESC);
+    rc = IDirect3DVertexBuffer7_GetVertexBufferDesc(lpVBufSrc, &mem.desc2);
+    if(rc != D3D_OK)
+        skip("GetVertexBuffer Failed!\n");
+    ok( mem.desc2.dwSize == sizeof(D3DVERTEXBUFFERDESC), "Size returned from GetVertexBufferDesc does not match the value put in\n" );
+    ok( mem.buffer[sizeof(D3DVERTEXBUFFERDESC)] == 0x12, "GetVertexBufferDesc cleared outside of the struct! (dwSize was the size of the struct)\n");
+    ok( mem.desc2.dwCaps == desc.dwCaps, "dwCaps returned differs. Got %x, expected %x\n", mem.desc2.dwCaps, desc.dwCaps);
+    ok( mem.desc2.dwFVF == desc.dwFVF, "dwFVF returned differs. Got %x, expected %x\n", mem.desc2.dwFVF, desc.dwFVF);
+    ok (mem.desc2.dwNumVertices == desc.dwNumVertices, "dwNumVertices returned differs. Got %x, expected %x\n", mem.desc2.dwNumVertices, desc.dwNumVertices);
+
+out:
+    IDirect3DVertexBuffer7_Release(lpVBufSrc);
+}
+
+
 START_TEST(d3d)
 {
     init_function_pointers();
@@ -1524,6 +1609,7 @@ START_TEST(d3d)
         LimitTest();
         D3D7EnumTest();
         CapsTest();
+        VertexBufferDescTest();
         ReleaseDirect3D();
     }
 

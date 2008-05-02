@@ -7,7 +7,7 @@
  * Copyright 2002-2003 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006-2007 Stefan Dösinger for CodeWeavers
+ * Copyright 2006-2008 Stefan Dösinger for CodeWeavers
  * Copyright 2007 Henri Verbeet
  * Copyright 2006-2007 Roderick Colenbrander
  *
@@ -206,26 +206,16 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_SetPalette(IWineD3DSurface *iface, IWineD
         if(This->resource.usage & WINED3DUSAGE_RENDERTARGET)
             This->palette->Flags &= ~WINEDDPCAPS_PRIMARYSURFACE;
 
-    if(PalImpl != NULL) {
-        if(This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
-            /* Set the device's main palette if the palette
-            * wasn't a primary palette before
-            */
-            if(!(PalImpl->Flags & WINEDDPCAPS_PRIMARYSURFACE)) {
-                IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-                unsigned int i;
-
-                for(i=0; i < 256; i++) {
-                    device->palettes[device->currentPalette][i] = PalImpl->palents[i];
-                }
-            }
-
-            (PalImpl)->Flags |= WINEDDPCAPS_PRIMARYSURFACE;
-        }
-    }
     This->palette = PalImpl;
 
-    return IWineD3DSurface_RealizePalette(iface);
+    if(PalImpl != NULL) {
+        if(This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
+            (PalImpl)->Flags |= WINEDDPCAPS_PRIMARYSURFACE;
+        }
+
+        return IWineD3DSurface_RealizePalette(iface);
+    }
+    else return WINED3D_OK;
 }
 
 HRESULT WINAPI IWineD3DBaseSurfaceImpl_SetColorKey(IWineD3DSurface *iface, DWORD Flags, WINEDDCOLORKEY *CKey) {

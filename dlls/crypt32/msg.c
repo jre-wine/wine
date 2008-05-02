@@ -52,6 +52,7 @@ BOOL CRYPT_DefaultMsgControl(HCRYPTMSG hCryptMsg, DWORD dwFlags,
 typedef enum _CryptMsgState {
     MsgStateInit,
     MsgStateUpdated,
+    MsgStateDataFinalized,
     MsgStateFinalized
 } CryptMsgState;
 
@@ -188,7 +189,9 @@ static BOOL CDataEncodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
     CDataEncodeMsg *msg = (CDataEncodeMsg *)hCryptMsg;
     BOOL ret = FALSE;
 
-    if (msg->base.streamed)
+    if (msg->base.state == MsgStateFinalized)
+        SetLastError(CRYPT_E_MSG_ERROR);
+    else if (msg->base.streamed)
     {
         __TRY
         {
@@ -225,11 +228,15 @@ static BOOL CDataEncodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
                 }
             }
             if (!fFinal)
+            {
                 ret = msg->base.stream_info.pfnStreamOutput(
                  msg->base.stream_info.pvArg, (BYTE *)pbData, cbData,
                  FALSE);
+                msg->base.state = MsgStateUpdated;
+            }
             else
             {
+                msg->base.state = MsgStateFinalized;
                 if (msg->base.stream_info.cbContent == 0xffffffff)
                 {
                     BYTE indefinite_trailer[6] = { 0 };
@@ -265,6 +272,7 @@ static BOOL CDataEncodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
         }
         else
         {
+            msg->base.state = MsgStateFinalized;
             if (!cbData)
                 SetLastError(E_INVALIDARG);
             else
@@ -504,12 +512,15 @@ static BOOL CHashEncodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
 
     TRACE("(%p, %p, %d, %d)\n", hCryptMsg, pbData, cbData, fFinal);
 
-    if (msg->base.streamed || (msg->base.open_flags & CMSG_DETACHED_FLAG))
+    if (msg->base.state == MsgStateFinalized)
+        SetLastError(CRYPT_E_MSG_ERROR);
+    else if (msg->base.streamed || (msg->base.open_flags & CMSG_DETACHED_FLAG))
     {
         /* Doesn't do much, as stream output is never called, and you
          * can't get the content.
          */
         ret = CryptHashData(msg->hash, pbData, cbData, 0);
+        msg->base.state = fFinal ? MsgStateFinalized : MsgStateUpdated;
     }
     else
     {
@@ -529,6 +540,7 @@ static BOOL CHashEncodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
                 else
                     ret = FALSE;
             }
+            msg->base.state = MsgStateFinalized;
         }
     }
     return ret;
@@ -1183,12 +1195,15 @@ static BOOL CSignedEncodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
     CSignedEncodeMsg *msg = (CSignedEncodeMsg *)hCryptMsg;
     BOOL ret = FALSE;
 
-    if (msg->base.streamed || (msg->base.open_flags & CMSG_DETACHED_FLAG))
+    if (msg->base.state == MsgStateFinalized)
+        SetLastError(CRYPT_E_MSG_ERROR);
+    else if (msg->base.streamed || (msg->base.open_flags & CMSG_DETACHED_FLAG))
     {
         ret = CSignedMsgData_Update(&msg->msg_data, pbData, cbData, fFinal,
          Sign);
         if (msg->base.streamed)
             FIXME("streamed partial stub\n");
+        msg->base.state = fFinal ? MsgStateFinalized : MsgStateUpdated;
     }
     else
     {
@@ -1211,6 +1226,7 @@ static BOOL CSignedEncodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
             if (ret)
                 ret = CSignedMsgData_Update(&msg->msg_data, pbData, cbData,
                  fFinal, Sign);
+            msg->base.state = MsgStateFinalized;
         }
     }
     return ret;
@@ -1644,11 +1660,34 @@ static BOOL CDecodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
 
     TRACE("(%p, %p, %d, %d)\n", hCryptMsg, pbData, cbData, fFinal);
 
-    if (msg->base.streamed)
+    if (msg->base.state == MsgStateFinalized)
+        SetLastError(CRYPT_E_MSG_ERROR);
+    else if (msg->base.streamed)
     {
-        ret = CDecodeMsg_CopyData(msg, pbData, cbData);
         FIXME("(%p, %p, %d, %d): streamed update stub\n", hCryptMsg, pbData,
          cbData, fFinal);
+        if (fFinal)
+        {
+            if (msg->base.open_flags & CMSG_DETACHED_FLAG &&
+             msg->base.state != MsgStateDataFinalized)
+            {
+                ret = CDecodeMsg_CopyData(msg, pbData, cbData);
+                msg->base.state = MsgStateDataFinalized;
+            }
+            else
+            {
+                FIXME("(%p, %p, %d, %d): detached update stub\n", hCryptMsg,
+                 pbData, cbData, fFinal);
+                ret = TRUE;
+                msg->base.state = MsgStateFinalized;
+            }
+        }
+        else
+        {
+            ret = CDecodeMsg_CopyData(msg, pbData, cbData);
+            if (msg->base.state == MsgStateInit)
+                msg->base.state = MsgStateUpdated;
+        }
     }
     else
     {
@@ -1656,10 +1695,24 @@ static BOOL CDecodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
             SetLastError(CRYPT_E_MSG_ERROR);
         else
         {
-            ret = CDecodeMsg_CopyData(msg, pbData, cbData);
-            if (ret)
-                ret = CDecodeMsg_DecodeContent(msg, &msg->msg_data, msg->type);
-
+            if (msg->base.state == MsgStateInit)
+            {
+                ret = CDecodeMsg_CopyData(msg, pbData, cbData);
+                if (ret)
+                    ret = CDecodeMsg_DecodeContent(msg, &msg->msg_data,
+                     msg->type);
+                if (msg->base.open_flags & CMSG_DETACHED_FLAG)
+                    msg->base.state = MsgStateDataFinalized;
+                else
+                    msg->base.state = MsgStateFinalized;
+            }
+            else if (msg->base.state == MsgStateDataFinalized)
+            {
+                FIXME("(%p, %p, %d, %d): detached update stub\n", hCryptMsg,
+                 pbData, cbData, fFinal);
+                ret = TRUE;
+                msg->base.state = MsgStateFinalized;
+            }
         }
     }
     return ret;
@@ -2360,20 +2413,10 @@ BOOL WINAPI CryptMsgUpdate(HCRYPTMSG hCryptMsg, const BYTE *pbData,
  DWORD cbData, BOOL fFinal)
 {
     CryptMsgBase *msg = (CryptMsgBase *)hCryptMsg;
-    BOOL ret = FALSE;
 
     TRACE("(%p, %p, %d, %d)\n", hCryptMsg, pbData, cbData, fFinal);
 
-    if (msg->state == MsgStateFinalized)
-        SetLastError(CRYPT_E_MSG_ERROR);
-    else
-    {
-        ret = msg->update(hCryptMsg, pbData, cbData, fFinal);
-        msg->state = MsgStateUpdated;
-        if (fFinal)
-            msg->state = MsgStateFinalized;
-    }
-    return ret;
+    return msg->update(hCryptMsg, pbData, cbData, fFinal);
 }
 
 BOOL WINAPI CryptMsgGetParam(HCRYPTMSG hCryptMsg, DWORD dwParamType,

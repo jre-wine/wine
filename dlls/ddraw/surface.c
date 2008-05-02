@@ -287,7 +287,7 @@ IDirectDrawSurfaceImpl_Release(IDirectDrawSurface7 *iface)
         IUnknown *ifaceToRelease = This->ifaceToRelease;
         int i;
 
-        /* Complex attached surfaces are destroyed implicitely when the root is released */
+        /* Complex attached surfaces are destroyed implicitly when the root is released */
         EnterCriticalSection(&ddraw_cs);
         if(!This->is_complex_root)
         {
@@ -540,6 +540,8 @@ IDirectDrawSurfaceImpl_GetAttachedSurface(IDirectDrawSurface7 *iface,
 
     TRACE("(%p) Didn't find a valid surface\n", This);
     LeaveCriticalSection(&ddraw_cs);
+
+    *Surface = NULL;
     return DDERR_NOTFOUND;
 }
 
@@ -709,7 +711,7 @@ IDirectDrawSurfaceImpl_Flip(IDirectDrawSurface7 *iface,
      * What about overlay surfaces, AFAIK they can flip too?
      */
     if( !(This->surface_desc.ddsCaps.dwCaps & DDSCAPS_FRONTBUFFER) )
-        return DDERR_INVALIDOBJECT; /* Unckecked */
+        return DDERR_INVALIDOBJECT; /* Unchecked */
 
     EnterCriticalSection(&ddraw_cs);
 
@@ -1315,7 +1317,7 @@ IDirectDrawSurfaceImpl_PageLock(IDirectDrawSurface7 *iface,
  * Allows a sysmem surface to be paged out
  *
  * Params:
- *  Flags: Not used, must be 0(unckeched)
+ *  Flags: Not used, must be 0(unchecked)
  *
  * Returns:
  *  DD_OK, because it's a stub
@@ -2500,6 +2502,11 @@ IDirectDrawSurfaceImpl_SetPalette(IDirectDrawSurface7 *iface,
     IDirectDrawPaletteImpl *PalImpl = ICOM_OBJECT(IDirectDrawPaletteImpl, IDirectDrawPalette, Pal);
     HRESULT hr;
     TRACE("(%p)->(%p)\n", This, Pal);
+
+    if (!(This->surface_desc.u4.ddpfPixelFormat.dwFlags & (DDPF_PALETTEINDEXED1 | DDPF_PALETTEINDEXED2 |
+            DDPF_PALETTEINDEXED4 | DDPF_PALETTEINDEXED8 | DDPF_PALETTEINDEXEDTO8))) {
+        return DDERR_INVALIDPIXELFORMAT;
+    }
 
     /* Find the old palette */
     EnterCriticalSection(&ddraw_cs);

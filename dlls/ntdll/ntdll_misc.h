@@ -133,6 +133,8 @@ extern NTSTATUS DIR_get_unix_cwd( char **cwd );
 extern unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] );
 
 /* virtual memory */
+extern NTSTATUS virtual_alloc_thread_stack( void *base, SIZE_T stack_size );
+extern BOOL virtual_handle_stack_fault( void *addr );
 extern NTSTATUS VIRTUAL_HandleFault(LPCVOID addr);
 extern void VIRTUAL_SetForceExec( BOOL enable );
 extern void VIRTUAL_UseLargeAddressSpace(void);

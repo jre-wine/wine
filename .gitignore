@@ -20,6 +20,8 @@ dlls/actxprxy/actxprxy_servprov.h
 dlls/actxprxy/actxprxy_servprov_i.c
 dlls/actxprxy/actxprxy_servprov_p.c
 dlls/advapi32/libadvapi32.def
+dlls/advapi32/svcctl.h
+dlls/advapi32/svcctl_c.c
 dlls/advapi32/tests/*.ok
 dlls/advapi32/tests/advapi32_crosstest.exe
 dlls/advapi32/tests/testlist.c
@@ -127,6 +129,9 @@ dlls/dsound/tests/*.ok
 dlls/dsound/tests/dsound_crosstest.exe
 dlls/dsound/tests/testlist.c
 dlls/dwmapi/libdwmapi.def
+dlls/fusion/tests/*.ok
+dlls/fusion/tests/fusion_crosstest.exe
+dlls/fusion/tests/testlist.c
 dlls/gdi.exe16
 dlls/gdi32/libgdi32.def
 dlls/gdi32/tests/*.ok
@@ -163,6 +168,9 @@ dlls/iphlpapi/tests/testlist.c
 dlls/itss/tests/*.ok
 dlls/itss/tests/itss_crosstest.exe
 dlls/itss/tests/testlist.c
+dlls/jscript/tests/*.ok
+dlls/jscript/tests/jscript_crosstest.exe
+dlls/jscript/tests/testlist.c
 dlls/kernel32/libkernel32.def
 dlls/kernel32/nls/winerr_deu.mc.rc
 dlls/kernel32/nls/winerr_enu.mc.rc
@@ -342,9 +350,6 @@ dlls/rpcrt4/tests/server.h
 dlls/rpcrt4/tests/server_c.c
 dlls/rpcrt4/tests/server_s.c
 dlls/rpcrt4/tests/testlist.c
-dlls/rsabase/tests/*.ok
-dlls/rsabase/tests/rsabase_crosstest.exe
-dlls/rsabase/tests/testlist.c
 dlls/rsaenh/librsaenh.def
 dlls/rsaenh/tests/*.ok
 dlls/rsaenh/tests/rsaenh_crosstest.exe
@@ -471,6 +476,7 @@ dlls/ws2_32/tests/ws2_32_crosstest.exe
 dlls/wsock32/libwsock32.def
 dlls/wtsapi32/libwtsapi32.def
 include/activaut.h
+include/activdbg.h
 include/activscp.h
 include/amstream.h
 include/amvideo.h
@@ -489,6 +495,7 @@ include/downloadmgr.h
 include/dxgi.h
 include/dxgitype.h
 include/exdisp.h
+include/fusion.h
 include/hlink.h
 include/htiframe.h
 include/iads.h
@@ -534,6 +541,7 @@ include/unknwn.h
 include/urlhist.h
 include/urlmon.h
 include/wine/itss.h
+include/wine/svcctl.h
 include/wtypes.h
 include/xmldom.h
 include/xmldso.h
@@ -578,6 +586,9 @@ programs/rpcss/irot_s.c
 programs/rpcss/rpcss
 programs/rundll32/rundll32
 programs/secedit/secedit
+programs/services/services
+programs/services/svcctl.h
+programs/services/svcctl_s.c
 programs/spoolsv/spoolsv
 programs/start/start
 programs/svchost/svchost
@@ -620,6 +631,7 @@ programs/winetest/dinput_test.exe
 programs/winetest/dnsapi_test.exe
 programs/winetest/dplayx_test.exe
 programs/winetest/dsound_test.exe
+programs/winetest/fusion_test.exe
 programs/winetest/gdi32_test.exe
 programs/winetest/gdiplus_test.exe
 programs/winetest/hlink_test.exe
@@ -628,6 +640,7 @@ programs/winetest/inetcomm_test.exe
 programs/winetest/infosoft_test.exe
 programs/winetest/iphlpapi_test.exe
 programs/winetest/itss_test.exe
+programs/winetest/jscript_test.exe
 programs/winetest/kernel32_test.exe
 programs/winetest/localspl_test.exe
 programs/winetest/localui_test.exe
@@ -657,7 +670,6 @@ programs/winetest/quartz_test.exe
 programs/winetest/riched20_test.exe
 programs/winetest/riched32_test.exe
 programs/winetest/rpcrt4_test.exe
-programs/winetest/rsabase_test.exe
 programs/winetest/rsaenh_test.exe
 programs/winetest/schannel_test.exe
 programs/winetest/secur32_test.exe

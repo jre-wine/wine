@@ -69,13 +69,12 @@ BEGIN
     CONTROL	    "Разрешить приложению DirectX удерживать мышь в своём окне",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,14,235,8
     CONTROL	    "Разрешить менеджеру окон управлять окнами Wine",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,34,230,8
 
+    CONTROL         "Эмулировать виртуальный рабочий стол",IDC_ENABLE_DESKTOP,"Button",
+                    BS_AUTOCHECKBOX | WS_TABSTOP,15,152,230,10
     LTEXT           "Если включить эмуляцию рабочего стола, то все окна будут отображаться в одном 'виртуальном экране' заданного размера. Иначе окна размещаются, как обычно, на стандартном рабочем столе.",
                     IDC_STATIC,15,117,228,36
     LTEXT           "Размер рабочего стола:",IDC_DESKTOP_SIZE,15,167,44,8,WS_DISABLED
     LTEXT           "X",IDC_DESKTOP_BY,108,167,8,8,WS_DISABLED
-    CONTROL         "Эмулировать виртуальный рабочий стол",IDC_ENABLE_DESKTOP,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,15,152,230,10
-
     EDITTEXT        IDC_DESKTOP_WIDTH,64,167,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
     EDITTEXT        IDC_DESKTOP_HEIGHT,117,167,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
 
@@ -308,4 +307,19 @@ BEGIN
     IDC_SYSPARAMS_INACTIVE_TITLE    "Пассивное окно"
     IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "Пассивное окно - текст"
     IDC_SYSPARAMS_MSGBOX_TEXT       "Окно сообщения - текст"
+    IDC_SYSPARAMS_APPWORKSPACE      "Содержимое окна MDI - фон"
+    IDC_SYSPARAMS_WINDOW_FRAME      "Окно - рамка"
+    IDC_SYSPARAMS_ACTIVE_BORDER     "Активное окно - рамка"
+    IDC_SYSPARAMS_INACTIVE_BORDER   "Пассивное окно - рамка"
+    IDC_SYSPARAMS_BUTTON_SHADOW     "Элементы управления - тень"
+    IDC_SYSPARAMS_GRAY_TEXT         "Недоступный элемент"
+    IDC_SYSPARAMS_BUTTON_HILIGHT    "Элементы управления - светлая рамка"
+    IDC_SYSPARAMS_BUTTON_DARK_SHADOW "Элементы управления - темная тень"
+    IDC_SYSPARAMS_BUTTON_LIGHT      "Элементы управления - свет"
+    IDC_SYSPARAMS_BUTTON_ALTERNATE  "Элементы управления - фон 2"
+    IDC_SYSPARAMS_HOT_TRACKING      "Ссылка, Подсветка"
+    IDC_SYSPARAMS_ACTIVE_TITLE_GRADIENT "Градиент активного окна"
+    IDC_SYSPARAMS_INACTIVE_TITLE_GRADIENT "Градиент пассивного окна"
+    IDC_SYSPARAMS_MENU_HILIGHT      "Плоское меню - подсветка"
+    IDC_SYSPARAMS_MENUBAR           "Плоское меню - фон"
 END

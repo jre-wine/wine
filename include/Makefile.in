@@ -6,6 +6,7 @@ MODULE	  = none
 
 IDL_H_SRCS = \
 	activaut.idl \
+	activdbg.idl \
 	activscp.idl \
 	amstream.idl \
 	amvideo.idl \
@@ -23,6 +24,7 @@ IDL_H_SRCS = \
 	dxgi.idl \
 	dxgitype.idl \
 	exdisp.idl \
+	fusion.idl \
 	hlink.idl \
 	htiframe.idl \
 	iads.idl \
@@ -66,6 +68,7 @@ IDL_H_SRCS = \
 	urlhist.idl \
 	urlmon.idl \
 	wine/itss.idl \
+	wine/svcctl.idl \
 	wtypes.idl \
 	xmldom.idl \
 	xmldso.idl
@@ -98,6 +101,7 @@ SRCDIR_INCLUDES = \
 	commdlg.h \
 	compobj.h \
 	cor.h \
+	corerror.h \
 	cpl.h \
 	custcntl.h \
 	cvconst.h \

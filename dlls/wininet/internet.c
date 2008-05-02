@@ -38,6 +38,12 @@
 #ifdef HAVE_SYS_SOCKET_H
 # include <sys/socket.h>
 #endif
+#ifdef HAVE_POLL_H
+#include <poll.h>
+#endif
+#ifdef HAVE_SYS_POLL_H
+# include <sys/poll.h>
+#endif
 #ifdef HAVE_SYS_TIME_H
 # include <sys/time.h>
 #endif
@@ -330,53 +336,56 @@ BOOL WINAPI DetectAutoProxyUrl(LPSTR lpszAutoProxyUrl,
 
 
 /***********************************************************************
- *           INTERNET_ConfigureProxyFromReg
+ *           INTERNET_ConfigureProxy
  *
  * FIXME:
  * The proxy may be specified in the form 'http=proxy.my.org'
  * Presumably that means there can be ftp=ftpproxy.my.org too.
  */
-static BOOL INTERNET_ConfigureProxyFromReg( LPWININETAPPINFOW lpwai )
+static BOOL INTERNET_ConfigureProxy( LPWININETAPPINFOW lpwai )
 {
     HKEY key;
-    DWORD r, keytype, len, enabled;
-    LPCSTR lpszInternetSettings =
-        "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    DWORD type, len, enabled = 0;
+    LPCSTR envproxy;
+    static const WCHAR szInternetSettings[] =
+        { 'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
+          'W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+          'I','n','t','e','r','n','e','t',' ','S','e','t','t','i','n','g','s',0 };
     static const WCHAR szProxyServer[] = { 'P','r','o','x','y','S','e','r','v','e','r', 0 };
+    static const WCHAR szProxyEnable[] = { 'P','r','o','x','y','E','n','a','b','l','e', 0 };
 
-    r = RegOpenKeyA(HKEY_CURRENT_USER, lpszInternetSettings, &key);
-    if ( r != ERROR_SUCCESS )
-        return FALSE;
+    if (RegOpenKeyW( HKEY_CURRENT_USER, szInternetSettings, &key )) return FALSE;
 
     len = sizeof enabled;
-    r = RegQueryValueExA( key, "ProxyEnable", NULL, &keytype,
-                          (BYTE*)&enabled, &len);
-    if( (r == ERROR_SUCCESS) && enabled )
+    if (RegQueryValueExW( key, szProxyEnable, NULL, &type, (BYTE *)&enabled, &len ) || type != REG_DWORD)
+        RegSetValueExW( key, szProxyEnable, 0, REG_DWORD, (BYTE *)&enabled, sizeof(REG_DWORD) );
+
+    if (enabled)
     {
         TRACE("Proxy is enabled.\n");
 
         /* figure out how much memory the proxy setting takes */
-        r = RegQueryValueExW( key, szProxyServer, NULL, &keytype, 
-                              NULL, &len);
-        if( (r == ERROR_SUCCESS) && len && (keytype == REG_SZ) )
+        if (!RegQueryValueExW( key, szProxyServer, NULL, &type, NULL, &len ) && len && (type == REG_SZ))
         {
             LPWSTR szProxy, p;
             static const WCHAR szHttp[] = {'h','t','t','p','=',0};
 
-            szProxy=HeapAlloc( GetProcessHeap(), 0, len );
-            RegQueryValueExW( key, szProxyServer, NULL, &keytype,
-                              (BYTE*)szProxy, &len);
+            if (!(szProxy = HeapAlloc( GetProcessHeap(), 0, len )))
+            {
+                RegCloseKey( key );
+                return FALSE;
+            }
+            RegQueryValueExW( key, szProxyServer, NULL, &type, (BYTE*)szProxy, &len );
 
             /* find the http proxy, and strip away everything else */
             p = strstrW( szProxy, szHttp );
-            if( p )
+            if (p)
             {
-                 p += lstrlenW(szHttp);
-                 lstrcpyW( szProxy, p );
+                p += lstrlenW( szHttp );
+                lstrcpyW( szProxy, p );
             }
             p = strchrW( szProxy, ' ' );
-            if( p )
-                *p = 0;
+            if (p) *p = 0;
 
             lpwai->dwAccessType = INTERNET_OPEN_TYPE_PROXY;
             lpwai->lpszProxy = szProxy;
@@ -384,13 +393,26 @@ static BOOL INTERNET_ConfigureProxyFromReg( LPWININETAPPINFOW lpwai )
             TRACE("http proxy = %s\n", debugstr_w(lpwai->lpszProxy));
         }
         else
-            ERR("Couldn't read proxy server settings.\n");
+            ERR("Couldn't read proxy server settings from registry.\n");
     }
-    else
-        TRACE("Proxy is not enabled.\n");
-    RegCloseKey(key);
+    else if ((envproxy = getenv( "http_proxy" )))
+    {
+        WCHAR *envproxyW;
 
-    return enabled;
+        len = MultiByteToWideChar( CP_UNIXCP, 0, envproxy, -1, NULL, 0 );
+        if (!(envproxyW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR)))) return FALSE;
+        MultiByteToWideChar( CP_UNIXCP, 0, envproxy, -1, envproxyW, len );
+
+        lpwai->dwAccessType = INTERNET_OPEN_TYPE_PROXY;
+        lpwai->lpszProxy = envproxyW;
+
+        TRACE("http proxy (from environment) = %s\n", debugstr_w(lpwai->lpszProxy));
+        enabled = 1;
+    }
+    if (!enabled) TRACE("Proxy is not enabled.\n");
+
+    RegCloseKey( key );
+    return (enabled > 0);
 }
 
 /***********************************************************************
@@ -576,7 +598,7 @@ HINTERNET WINAPI InternetOpenW(LPCWSTR lpszAgent, DWORD dwAccessType,
             lstrcpyW( lpwai->lpszAgent, lpszAgent );
     }
     if(dwAccessType == INTERNET_OPEN_TYPE_PRECONFIG)
-        INTERNET_ConfigureProxyFromReg( lpwai );
+        INTERNET_ConfigureProxy( lpwai );
     else if (NULL != lpszProxy)
     {
         lpwai->lpszProxy = HeapAlloc( GetProcessHeap(), 0,
@@ -1916,7 +1938,7 @@ static BOOL INET_QueryOptionHelper(BOOL bIsUnicode, HINTERNET hInternet, DWORD d
             {
                 TRACE("Getting global proxy info\n");
                 memset(&wai, 0, sizeof(WININETAPPINFOW));
-                INTERNET_ConfigureProxyFromReg( &wai );
+                INTERNET_ConfigureProxy( &wai );
                 lpwai = &wai;
             }
 
@@ -2979,7 +3001,7 @@ static DWORD CALLBACK INTERNET_WorkerThreadFunc(LPVOID lpvParam)
 
     TRACE("\n");
 
-    memcpy(&workRequest, lpRequest, sizeof(WORKREQUEST));
+    workRequest = *lpRequest;
     HeapFree(GetProcessHeap(), 0, lpRequest);
 
     workRequest.asyncproc(&workRequest);
@@ -3008,7 +3030,7 @@ BOOL INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest)
     if (!lpNewRequest)
         return FALSE;
 
-    memcpy(lpNewRequest, lpWorkRequest, sizeof(WORKREQUEST));
+    *lpNewRequest = *lpWorkRequest;
 
     bSuccess = QueueUserWorkItem(INTERNET_WorkerThreadFunc, lpNewRequest, WT_EXECUTELONGFUNCTION);
     if (!bSuccess)
@@ -3049,22 +3071,19 @@ LPSTR INTERNET_GetResponseBuffer(void)
 
 LPSTR INTERNET_GetNextLine(INT nSocket, LPDWORD dwLen)
 {
-    struct timeval tv;
-    fd_set infd;
+    struct pollfd pfd;
     BOOL bSuccess = FALSE;
     INT nRecv = 0;
     LPSTR lpszBuffer = INTERNET_GetResponseBuffer();
 
     TRACE("\n");
 
-    FD_ZERO(&infd);
-    FD_SET(nSocket, &infd);
-    tv.tv_sec=RESPONSE_TIMEOUT;
-    tv.tv_usec=0;
+    pfd.fd = nSocket;
+    pfd.events = POLLIN;
 
     while (nRecv < MAX_REPLY_LEN)
     {
-        if (select(nSocket+1,&infd,NULL,NULL,&tv) > 0)
+        if (poll(&pfd,1, RESPONSE_TIMEOUT * 1000) > 0)
         {
             if (recv(nSocket, &lpszBuffer[nRecv], 1, 0) <= 0)
             {

@@ -227,6 +227,7 @@ ALL_MAKEFILES = \
 	dlls/d3dx9_35/Makefile \
 	dlls/d3dx9_36/Makefile \
 	dlls/d3dx9_36/tests/Makefile \
+	dlls/d3dx9_37/Makefile \
 	dlls/d3dxof/Makefile \
 	dlls/dbghelp/Makefile \
 	dlls/dciman32/Makefile \
@@ -266,6 +267,7 @@ ALL_MAKEFILES = \
 	dlls/dxguid/Makefile \
 	dlls/faultrep/Makefile \
 	dlls/fusion/Makefile \
+	dlls/fusion/tests/Makefile \
 	dlls/gdi32/Makefile \
 	dlls/gdi32/tests/Makefile \
 	dlls/gdiplus/Makefile \
@@ -299,6 +301,7 @@ ALL_MAKEFILES = \
 	dlls/itss/Makefile \
 	dlls/itss/tests/Makefile \
 	dlls/jscript/Makefile \
+	dlls/jscript/tests/Makefile \
 	dlls/kernel32/Makefile \
 	dlls/kernel32/tests/Makefile \
 	dlls/localspl/Makefile \
@@ -409,7 +412,6 @@ ALL_MAKEFILES = \
 	dlls/rpcrt4/Makefile \
 	dlls/rpcrt4/tests/Makefile \
 	dlls/rsabase/Makefile \
-	dlls/rsabase/tests/Makefile \
 	dlls/rsaenh/Makefile \
 	dlls/rsaenh/tests/Makefile \
 	dlls/sane.ds/Makefile \
@@ -537,6 +539,7 @@ ALL_MAKEFILES = \
 	programs/rpcss/Makefile \
 	programs/rundll32/Makefile \
 	programs/secedit/Makefile \
+	programs/services/Makefile \
 	programs/spoolsv/Makefile \
 	programs/start/Makefile \
 	programs/svchost/Makefile \
@@ -648,6 +651,7 @@ dlls/d3dx9_34/Makefile: dlls/d3dx9_34/Makefile.in dlls/Makedll.rules
 dlls/d3dx9_35/Makefile: dlls/d3dx9_35/Makefile.in dlls/Makedll.rules
 dlls/d3dx9_36/Makefile: dlls/d3dx9_36/Makefile.in dlls/Makedll.rules
 dlls/d3dx9_36/tests/Makefile: dlls/d3dx9_36/tests/Makefile.in dlls/Maketest.rules
+dlls/d3dx9_37/Makefile: dlls/d3dx9_37/Makefile.in dlls/Makedll.rules
 dlls/d3dxof/Makefile: dlls/d3dxof/Makefile.in dlls/Makedll.rules
 dlls/dbghelp/Makefile: dlls/dbghelp/Makefile.in dlls/Makedll.rules
 dlls/dciman32/Makefile: dlls/dciman32/Makefile.in dlls/Makedll.rules
@@ -687,6 +691,7 @@ dlls/dxerr9/Makefile: dlls/dxerr9/Makefile.in dlls/Makeimplib.rules
 dlls/dxguid/Makefile: dlls/dxguid/Makefile.in dlls/Makeimplib.rules
 dlls/faultrep/Makefile: dlls/faultrep/Makefile.in dlls/Makedll.rules
 dlls/fusion/Makefile: dlls/fusion/Makefile.in dlls/Makedll.rules
+dlls/fusion/tests/Makefile: dlls/fusion/tests/Makefile.in dlls/Maketest.rules
 dlls/gdi32/Makefile: dlls/gdi32/Makefile.in dlls/Makedll.rules
 dlls/gdi32/tests/Makefile: dlls/gdi32/tests/Makefile.in dlls/Maketest.rules
 dlls/gdiplus/Makefile: dlls/gdiplus/Makefile.in dlls/Makedll.rules
@@ -720,6 +725,7 @@ dlls/itircl/Makefile: dlls/itircl/Makefile.in dlls/Makedll.rules
 dlls/itss/Makefile: dlls/itss/Makefile.in dlls/Makedll.rules
 dlls/itss/tests/Makefile: dlls/itss/tests/Makefile.in dlls/Maketest.rules
 dlls/jscript/Makefile: dlls/jscript/Makefile.in dlls/Makedll.rules
+dlls/jscript/tests/Makefile: dlls/jscript/tests/Makefile.in dlls/Maketest.rules
 dlls/kernel32/Makefile: dlls/kernel32/Makefile.in dlls/Makedll.rules
 dlls/kernel32/tests/Makefile: dlls/kernel32/tests/Makefile.in dlls/Maketest.rules
 dlls/localspl/Makefile: dlls/localspl/Makefile.in dlls/Makedll.rules
@@ -830,7 +836,6 @@ dlls/riched32/tests/Makefile: dlls/riched32/tests/Makefile.in dlls/Maketest.rule
 dlls/rpcrt4/Makefile: dlls/rpcrt4/Makefile.in dlls/Makedll.rules
 dlls/rpcrt4/tests/Makefile: dlls/rpcrt4/tests/Makefile.in dlls/Maketest.rules
 dlls/rsabase/Makefile: dlls/rsabase/Makefile.in dlls/Makedll.rules
-dlls/rsabase/tests/Makefile: dlls/rsabase/tests/Makefile.in dlls/Maketest.rules
 dlls/rsaenh/Makefile: dlls/rsaenh/Makefile.in dlls/Makedll.rules
 dlls/rsaenh/tests/Makefile: dlls/rsaenh/tests/Makefile.in dlls/Maketest.rules
 dlls/sane.ds/Makefile: dlls/sane.ds/Makefile.in dlls/Makedll.rules
@@ -958,6 +963,7 @@ programs/regsvr32/Makefile: programs/regsvr32/Makefile.in programs/Makeprog.rule
 programs/rpcss/Makefile: programs/rpcss/Makefile.in programs/Makeprog.rules
 programs/rundll32/Makefile: programs/rundll32/Makefile.in programs/Makeprog.rules
 programs/secedit/Makefile: programs/secedit/Makefile.in programs/Makeprog.rules
+programs/services/Makefile: programs/services/Makefile.in programs/Makeprog.rules
 programs/spoolsv/Makefile: programs/spoolsv/Makefile.in programs/Makeprog.rules
 programs/start/Makefile: programs/start/Makefile.in programs/Makeprog.rules
 programs/svchost/Makefile: programs/svchost/Makefile.in programs/Makeprog.rules

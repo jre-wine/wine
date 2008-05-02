@@ -1978,7 +1978,7 @@ static HRESULT WINAPI DP_IF_EnumGroupPlayers
   for( ;; )
   {
     /* We do not enum the name server or app server as they are of no
-     * concequence to the end user.
+     * consequence to the end user.
      */
     if( ( lpPList->lpPData->dpid != DPID_NAME_SERVER ) &&
         ( lpPList->lpPData->dpid != DPID_SERVERPLAYER )
@@ -2303,7 +2303,7 @@ static HRESULT WINAPI DP_IF_EnumSessions
         /* FIXME: need to kill the thread on object deletion */
         lpData->lpSpData  = &This->dp2->spData;
 
-        CopyMemory( &lpData->requestGuid, &lpsd->guidApplication, sizeof(GUID) );
+        lpData->requestGuid = lpsd->guidApplication;
         lpData->dwEnumSessionFlags = dwFlags;
         lpData->dwTimeout = dwTimeout;
 
@@ -3334,7 +3334,7 @@ DWORD DP_CalcSessionDescSize( LPCDPSESSIONDESC2 lpSessDesc, BOOL bAnsi )
   return dwSize;
 }
 
-/* Assumes that contugous buffers are already allocated. */
+/* Assumes that contiguous buffers are already allocated. */
 static void DP_CopySessionDesc( LPDPSESSIONDESC2 lpSessionDest,
                                 LPCDPSESSIONDESC2 lpSessionSrc, BOOL bAnsi )
 {

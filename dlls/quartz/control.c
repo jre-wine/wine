@@ -32,7 +32,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
 typedef HRESULT (*SeekFunc)( IMediaSeeking *to, LPVOID arg );
 
-static HRESULT ForwardCmdSeek( IBaseFilter* from, SeekFunc fnSeek, LPVOID arg )
+static HRESULT ForwardCmdSeek( PCRITICAL_SECTION crit_sect, IBaseFilter* from, SeekFunc fnSeek, LPVOID arg )
 {
     HRESULT hr = S_OK;
     HRESULT hr_return = S_OK;
@@ -71,7 +71,9 @@ static HRESULT ForwardCmdSeek( IBaseFilter* from, SeekFunc fnSeek, LPVOID arg )
                     if (!hr_local)
                     {
                         foundend = TRUE;
+                        LeaveCriticalSection( crit_sect );
                         hr_local = fnSeek( seek , arg );
+                        EnterCriticalSection( crit_sect );
                         if (hr_local != E_NOTIMPL)
                             allnotimpl = FALSE;
 
@@ -90,28 +92,28 @@ static HRESULT ForwardCmdSeek( IBaseFilter* from, SeekFunc fnSeek, LPVOID arg )
         hr = hr_return;
 
 out:
-    FIXME("Returning: %08x\n", hr);
+    TRACE("Returning: %08x\n", hr);
     return hr;
 }
 
 
-HRESULT MediaSeekingImpl_Init(IBaseFilter *pUserData, CHANGEPROC fnChangeStop, CHANGEPROC fnChangeStart, CHANGEPROC fnChangeRate, MediaSeekingImpl * pSeeking, PCRITICAL_SECTION crit_sect)
+HRESULT MediaSeekingImpl_Init(IBaseFilter *pUserData, CHANGEPROC fnChangeStop, CHANGEPROC fnChangeCurrent, CHANGEPROC fnChangeRate, MediaSeekingImpl * pSeeking, PCRITICAL_SECTION crit_sect)
 {
-    assert(fnChangeStop && fnChangeStart && fnChangeRate);
+    assert(fnChangeStop && fnChangeCurrent && fnChangeRate);
 
     pSeeking->refCount = 1;
     pSeeking->pUserData = pUserData;
     pSeeking->fnChangeRate = fnChangeRate;
     pSeeking->fnChangeStop = fnChangeStop;
-    pSeeking->fnChangeStart = fnChangeStart;
+    pSeeking->fnChangeCurrent = fnChangeCurrent;
     pSeeking->dwCapabilities = AM_SEEKING_CanSeekForwards |
         AM_SEEKING_CanSeekBackwards |
         AM_SEEKING_CanSeekAbsolute |
         AM_SEEKING_CanGetStopPos |
         AM_SEEKING_CanGetDuration;
-    pSeeking->llStart = 0;
+    pSeeking->llCurrent = 0;
     pSeeking->llStop = ((ULONGLONG)0x80000000) << 32;
-    pSeeking->llDuration = pSeeking->llStop - pSeeking->llStart;
+    pSeeking->llDuration = pSeeking->llStop;
     pSeeking->dRate = 1.0;
     pSeeking->timeformat = TIME_FORMAT_MEDIA_TIME;
     pSeeking->crst = crit_sect;
@@ -148,7 +150,9 @@ HRESULT WINAPI MediaSeekingImpl_CheckCapabilities(IMediaSeeking * iface, DWORD *
     if (!pCapabilities)
         return E_POINTER;
 
-    hr = ForwardCmdSeek(This->pUserData, fwd_checkcaps, pCapabilities);
+    EnterCriticalSection(This->crst);
+    hr = ForwardCmdSeek(This->crst, This->pUserData, fwd_checkcaps, pCapabilities);
+    LeaveCriticalSection(This->crst);
     if (FAILED(hr) && hr != E_NOTIMPL)
         return hr;
 
@@ -217,7 +221,9 @@ HRESULT WINAPI MediaSeekingImpl_SetTimeFormat(IMediaSeeking * iface, const GUID 
     MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
     TRACE("(%s)\n", qzdebugstr_guid(pFormat));
 
-    ForwardCmdSeek(This->pUserData, fwd_settimeformat, (LPVOID)pFormat);
+    EnterCriticalSection(This->crst);
+    ForwardCmdSeek(This->crst, This->pUserData, fwd_settimeformat, (LPVOID)pFormat);
+    LeaveCriticalSection(This->crst);
 
     return (IsEqualIID(pFormat, &TIME_FORMAT_MEDIA_TIME) ? S_OK : S_FALSE);
 }
@@ -246,7 +252,7 @@ HRESULT WINAPI MediaSeekingImpl_GetDuration(IMediaSeeking * iface, LONGLONG * pD
 
     EnterCriticalSection(This->crst);
     *pDuration = This->llDuration;
-    ForwardCmdSeek(This->pUserData, fwd_getduration, pDuration);
+    ForwardCmdSeek(This->crst, This->pUserData, fwd_getduration, pDuration);
     LeaveCriticalSection(This->crst);
 
     return S_OK;
@@ -276,7 +282,7 @@ HRESULT WINAPI MediaSeekingImpl_GetStopPosition(IMediaSeeking * iface, LONGLONG 
 
     EnterCriticalSection(This->crst);
     *pStop = This->llStop;
-    ForwardCmdSeek(This->pUserData, fwd_getstopposition, pStop);
+    ForwardCmdSeek(This->crst, This->pUserData, fwd_getstopposition, pStop);
     LeaveCriticalSection(This->crst);
 
     return S_OK;
@@ -306,8 +312,8 @@ HRESULT WINAPI MediaSeekingImpl_GetCurrentPosition(IMediaSeeking * iface, LONGLO
     TRACE("(%p)\n", pCurrent);
 
     EnterCriticalSection(This->crst);
-    *pCurrent = This->llStart;
-    ForwardCmdSeek(This->pUserData, fwd_getcurposition, pCurrent);
+    *pCurrent = This->llCurrent;
+    ForwardCmdSeek(This->crst, This->pUserData, fwd_getcurposition, pCurrent);
     LeaveCriticalSection(This->crst);
 
     return S_OK;
@@ -341,38 +347,60 @@ static inline LONGLONG Adjust(LONGLONG value, const LONGLONG * pModifier, DWORD 
     }
 }
 
+struct pos_args {
+    LONGLONG* current, *stop;
+    DWORD curflags, stopflags;
+};
+
+static HRESULT fwd_setposition(IMediaSeeking *seek, LPVOID pargs)
+{
+    struct pos_args *args = (void*)pargs;
+
+    return IMediaSeeking_SetPositions(seek, args->current, args->curflags, args->stop, args->stopflags);
+}
+
+
 HRESULT WINAPI MediaSeekingImpl_SetPositions(IMediaSeeking * iface, LONGLONG * pCurrent, DWORD dwCurrentFlags, LONGLONG * pStop, DWORD dwStopFlags)
 {
     MediaSeekingImpl *This = (MediaSeekingImpl *)iface;
-    BOOL bChangeStart = FALSE, bChangeStop = FALSE;
-    LONGLONG llNewStart, llNewStop;
+    BOOL bChangeCurrent = FALSE, bChangeStop = FALSE;
+    LONGLONG llNewCurrent, llNewStop;
+    struct pos_args args;
 
     TRACE("(%p, %x, %p, %x)\n", pCurrent, dwCurrentFlags, pStop, dwStopFlags);
 
+    args.current = pCurrent;
+    args.stop = pStop;
+    args.curflags = dwCurrentFlags;
+    args.stopflags = dwStopFlags;
+
     EnterCriticalSection(This->crst);
 
-    llNewStart = Adjust(This->llStart, pCurrent, dwCurrentFlags);
+    llNewCurrent = Adjust(This->llCurrent, pCurrent, dwCurrentFlags);
     llNewStop = Adjust(This->llStop, pStop, dwStopFlags);
 
-    if (llNewStart != This->llStart)
-        bChangeStart = TRUE;
+    if (llNewCurrent != This->llCurrent)
+        bChangeCurrent = TRUE;
     if (llNewStop != This->llStop)
         bChangeStop = TRUE;
 
-    This->llStart = llNewStart;
+    TRACE("Old: %u, New: %u\n", (DWORD)(This->llCurrent/10000000), (DWORD)(llNewCurrent/10000000));
+
+    This->llCurrent = llNewCurrent;
     This->llStop = llNewStop;
 
     if (dwCurrentFlags & AM_SEEKING_ReturnTime)
-        *pCurrent = llNewStart;
+        *pCurrent = llNewCurrent;
     if (dwStopFlags & AM_SEEKING_ReturnTime)
         *pStop = llNewStop;
 
-    if (bChangeStart)
-        This->fnChangeStart(This->pUserData);
+    ForwardCmdSeek(This->crst, This->pUserData, fwd_setposition, &args);
+    LeaveCriticalSection(This->crst);
+
+    if (bChangeCurrent)
+        This->fnChangeCurrent(This->pUserData);
     if (bChangeStop)
         This->fnChangeStop(This->pUserData);
-
-    LeaveCriticalSection(This->crst);
 
     return S_OK;
 }
@@ -384,7 +412,7 @@ HRESULT WINAPI MediaSeekingImpl_GetPositions(IMediaSeeking * iface, LONGLONG * p
     TRACE("(%p, %p)\n", pCurrent, pStop);
 
     EnterCriticalSection(This->crst);
-    *pCurrent = This->llStart;
+    *pCurrent = This->llCurrent;
     *pStop = This->llStop;
     LeaveCriticalSection(This->crst);
 
@@ -426,11 +454,17 @@ HRESULT WINAPI MediaSeekingImpl_SetRate(IMediaSeeking * iface, double dRate)
 
     TRACE("(%e)\n", dRate);
 
+    if (dRate > 100 || dRate < .001)
+    {
+        FIXME("Excessive rate %e, ignoring\n", dRate);
+        return VFW_E_UNSUPPORTED_AUDIO;
+    }
+
     EnterCriticalSection(This->crst);
     This->dRate = dRate;
     if (bChangeRate)
         hr = This->fnChangeRate(This->pUserData);
-    ForwardCmdSeek(This->pUserData, fwd_setrate, &dRate);
+    ForwardCmdSeek(This->crst, This->pUserData, fwd_setrate, &dRate);
     LeaveCriticalSection(This->crst);
 
     return hr;

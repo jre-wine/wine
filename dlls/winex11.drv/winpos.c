@@ -199,6 +199,8 @@ static void update_net_wm_states( Display *display, struct x11drv_win_data *data
         new_state |= (1 << NET_WM_STATE_ABOVE);
     if (ex_style & WS_EX_TOOLWINDOW)
         new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);
+    if (!(ex_style & WS_EX_APPWINDOW) && GetWindow( data->hwnd, GW_OWNER ))
+        new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR);
 
     xev.xclient.type = ClientMessage;
     xev.xclient.window = data->whole_window;
@@ -298,10 +300,12 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
                           const RECT *rectWindow, const RECT *rectClient,
                           const RECT *visible_rect, const RECT *valid_rects )
 {
-    Display *display = thread_display();
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+    Display *display = thread_data->display;
     struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
     DWORD new_style = GetWindowLongW( hwnd, GWL_STYLE );
     RECT old_window_rect, old_whole_rect, old_client_rect;
+    int event_type;
 
     if (!data)
     {
@@ -377,9 +381,18 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
 
     X11DRV_sync_client_position( display, data, swp_flags, &old_client_rect, &old_whole_rect );
 
-    if (!data->whole_window || data->lock_changes) return;  /* nothing more to do */
+    if (!data->whole_window) return;
 
-    if (data->mapped && (!(new_style & WS_VISIBLE) || !X11DRV_is_window_rect_mapped( rectWindow )))
+    /* check if we are currently processing an event relevant to this window */
+    event_type = 0;
+    if (thread_data->current_event && thread_data->current_event->xany.window == data->whole_window)
+        event_type = thread_data->current_event->type;
+
+    if (event_type != ConfigureNotify && event_type != PropertyNotify)
+        event_type = 0;  /* ignore other events */
+
+    if (data->mapped && (!(new_style & WS_VISIBLE) ||
+                         (!event_type && !X11DRV_is_window_rect_mapped( rectWindow ))))
     {
         TRACE( "unmapping win %p/%lx\n", hwnd, data->whole_window );
         wait_for_withdrawn_state( display, data, FALSE );
@@ -392,7 +405,8 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
     }
 
     /* don't change position if we are about to minimize or maximize a managed window */
-    if (!(data->managed && (swp_flags & SWP_STATECHANGED) && (new_style & (WS_MINIMIZE|WS_MAXIMIZE))))
+    if (!event_type &&
+        !(data->managed && (swp_flags & SWP_STATECHANGED) && (new_style & (WS_MINIMIZE|WS_MAXIMIZE))))
         X11DRV_sync_window_position( display, data, swp_flags, &old_client_rect, &old_whole_rect );
 
     if ((new_style & WS_VISIBLE) &&
@@ -412,6 +426,7 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
             wine_tsx11_unlock();
             data->mapped = TRUE;
             data->iconic = (new_style & WS_MINIMIZE) != 0;
+            update_net_wm_states( display, data );
         }
         else if ((swp_flags & SWP_STATECHANGED) && (!data->iconic != !(new_style & WS_MINIMIZE)))
         {
@@ -423,8 +438,12 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
             else if (X11DRV_is_window_rect_mapped( rectWindow ))
                 XMapWindow( display, data->whole_window );
             wine_tsx11_unlock();
+            update_net_wm_states( display, data );
         }
-        update_net_wm_states( display, data );
+        else if (!event_type)
+        {
+            update_net_wm_states( display, data );
+        }
     }
 }
 
@@ -435,7 +454,6 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
 void X11DRV_MapNotify( HWND hwnd, XEvent *event )
 {
     struct x11drv_win_data *data;
-    int state;
 
     if (!(data = X11DRV_get_win_data( hwnd ))) return;
     if (!data->mapped) return;
@@ -444,70 +462,9 @@ void X11DRV_MapNotify( HWND hwnd, XEvent *event )
     {
         HWND hwndFocus = GetFocus();
         if (hwndFocus && IsChild( hwnd, hwndFocus )) X11DRV_SetFocus(hwndFocus);  /* FIXME */
-        return;
     }
-    if (!data->iconic) return;
-
-    state = get_window_wm_state( event->xmap.display, data );
-    if (state == NormalState)
-    {
-        int x, y;
-        unsigned int width, height, border, depth;
-        Window root, top;
-        WINDOWPLACEMENT wp;
-        RECT rect;
-
-        /* FIXME: hack */
-        wine_tsx11_lock();
-        XGetGeometry( event->xmap.display, data->whole_window, &root, &x, &y, &width, &height,
-                        &border, &depth );
-        XTranslateCoordinates( event->xmap.display, data->whole_window, root, 0, 0, &x, &y, &top );
-        wine_tsx11_unlock();
-        rect.left   = x;
-        rect.top    = y;
-        rect.right  = x + width;
-        rect.bottom = y + height;
-        OffsetRect( &rect, virtual_screen_rect.left, virtual_screen_rect.top );
-        X11DRV_X_to_window_rect( data, &rect );
-
-        wp.length = sizeof(wp);
-        GetWindowPlacement( hwnd, &wp );
-        wp.flags = 0;
-        wp.showCmd = SW_RESTORE;
-        wp.rcNormalPosition = rect;
-
-        TRACE( "restoring win %p/%lx\n", hwnd, data->whole_window );
-        data->iconic = FALSE;
-        data->lock_changes++;
-        SetWindowPlacement( hwnd, &wp );
-        data->lock_changes--;
-    }
-    else TRACE( "win %p/%lx ignoring since state=%d\n", hwnd, data->whole_window, state );
 }
 
-
-/**********************************************************************
- *              X11DRV_UnmapNotify
- */
-void X11DRV_UnmapNotify( HWND hwnd, XEvent *event )
-{
-    struct x11drv_win_data *data;
-    int state;
-
-    if (!(data = X11DRV_get_win_data( hwnd ))) return;
-    if (!data->managed || !data->mapped || data->iconic) return;
-
-    state = get_window_wm_state( event->xunmap.display, data );
-    if (state == IconicState)
-    {
-        TRACE( "minimizing win %p/%lx\n", hwnd, data->whole_window );
-        data->iconic = TRUE;
-        data->lock_changes++;
-        ShowWindow( hwnd, SW_MINIMIZE );
-        data->lock_changes--;
-    }
-    else TRACE( "win %p/%lx ignoring since state=%d\n", hwnd, data->whole_window, state );
-}
 
 struct desktop_resize_data
 {
@@ -592,6 +549,7 @@ void X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
 
     if (!hwnd) return;
     if (!(data = X11DRV_get_win_data( hwnd ))) return;
+    if (!data->mapped) return;
 
     /* Get geometry */
 
@@ -638,9 +596,7 @@ void X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
         TRACE( "%p resizing from (%dx%d) to (%dx%d)\n",
                hwnd, rect.right - rect.left, rect.bottom - rect.top, cx, cy );
 
-    data->lock_changes++;
     SetWindowPos( hwnd, 0, x, y, cx, cy, flags );
-    data->lock_changes--;
 }
 
 

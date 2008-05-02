@@ -64,6 +64,7 @@ BASEDIRS = \
 	d3dx9_34 \
 	d3dx9_35 \
 	d3dx9_36 \
+	d3dx9_37 \
 	d3dxof \
 	dbghelp \
 	dciman32 \
@@ -302,6 +303,7 @@ TESTSUBDIRS = \
 	dnsapi/tests \
 	dplayx/tests \
 	dsound/tests \
+	fusion/tests \
 	gdi32/tests \
 	gdiplus/tests \
 	hlink/tests \
@@ -310,6 +312,7 @@ TESTSUBDIRS = \
 	infosoft/tests \
 	iphlpapi/tests \
 	itss/tests \
+	jscript/tests \
 	kernel32/tests \
 	localspl/tests \
 	localui/tests \
@@ -339,7 +342,6 @@ TESTSUBDIRS = \
 	riched20/tests \
 	riched32/tests \
 	rpcrt4/tests \
-	rsabase/tests \
 	rsaenh/tests \
 	schannel/tests \
 	secur32/tests \

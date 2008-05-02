@@ -58,6 +58,17 @@ static void rungraph(void)
     hr = IMediaControl_Run(pmc);
     ok(hr==S_FALSE, "Cannot run the graph returned: %x\n", hr);
 
+    Sleep(100);
+    /* Crash fun */
+    hr = IMediaControl_Stop(pmc);
+    ok(hr==S_OK || hr == S_FALSE, "Cannot stop the graph returned: %x\n", hr);
+    hr = IMediaControl_Run(pmc);
+    ok(hr==S_OK || hr == S_FALSE, "Cannot start the graph returned: %x\n", hr);
+    hr = IMediaControl_Pause(pmc);
+    ok(hr==S_OK || hr == S_FALSE, "Cannot pause the graph returned: %x\n", hr);
+    hr = IMediaControl_Run(pmc);
+    ok(hr==S_OK || hr == S_FALSE, "Cannot start the graph returned: %x\n", hr);
+
     hr = IGraphBuilder_QueryInterface(pgraph, &IID_IMediaEvent, (LPVOID*)&pme);
     ok(hr==S_OK, "Cannot get IMediaEvent interface returned: %x\n", hr);
 
@@ -172,6 +183,42 @@ static void test_graph_builder_addfilter(void)
 
     hr = IGraphBuilder_AddFilter(pgraph, pF, NULL);
     ok(hr == S_OK, "IGraphBuilder_AddFilter returned: %x\n", hr);
+    IMediaFilter_Release(pF);
+}
+
+static void test_mediacontrol(void)
+{
+    HRESULT hr;
+    LONGLONG pos = 0xdeadbeef;
+    IMediaSeeking *seeking = NULL;
+    IMediaFilter *filter = NULL;
+
+    IFilterGraph2_SetDefaultSyncSource(pgraph);
+    hr = IFilterGraph2_QueryInterface(pgraph, &IID_IMediaSeeking, (void**) &seeking);
+    ok(hr == S_OK, "QueryInterface IMediaControl failed: %08x\n", hr);
+    if (FAILED(hr))
+        return;
+
+    hr = IFilterGraph2_QueryInterface(pgraph, &IID_IMediaFilter, (void**) &filter);
+    ok(hr == S_OK, "QueryInterface IMediaFilter failed: %08x\n", hr);
+    if (FAILED(hr))
+    {
+        IUnknown_Release(seeking);
+        return;
+    }
+
+    hr = IMediaSeeking_GetCurrentPosition(seeking, &pos);
+    ok(hr == S_OK, "GetCurrentPosition failed: %08x\n", hr);
+    ok(pos == 0, "Position != 0 (%x%08x)\n", (DWORD)(pos >> 32), (DWORD)pos);
+
+    IMediaFilter_SetSyncSource(filter, NULL);
+    pos = 0xdeadbeef;
+    hr = IMediaSeeking_GetCurrentPosition(seeking, &pos);
+    ok(hr == S_OK, "GetCurrentPosition failed: %08x\n", hr);
+    ok(pos == 0, "Position != 0 (%x%08x)\n", (DWORD)(pos >> 32), (DWORD)pos);
+
+    IUnknown_Release(seeking);
+    IUnknown_Release(filter);
     releasefiltergraph();
 }
 
@@ -195,5 +242,6 @@ START_TEST(filtergraph)
     test_render_run();
     test_graph_builder();
     test_graph_builder_addfilter();
+    test_mediacontrol();
     test_filter_graph2();
 }

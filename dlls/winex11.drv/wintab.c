@@ -982,9 +982,9 @@ int X11DRV_AttachEventQueueToTablet(HWND hOwner)
 /***********************************************************************
  *		X11DRV_GetCurrentPacket (X11DRV.@)
  */
-int X11DRV_GetCurrentPacket(LPWTPACKET *packet)
+int X11DRV_GetCurrentPacket(LPWTPACKET packet)
 {
-    memcpy(packet,&gMsgPacket,sizeof(WTPACKET));
+    *packet = gMsgPacket;
     return 1;
 }
 
@@ -1435,7 +1435,7 @@ int X11DRV_AttachEventQueueToTablet(HWND hOwner)
 /***********************************************************************
  *		GetCurrentPacket (X11DRV.@)
  */
-int X11DRV_GetCurrentPacket(LPWTPACKET *packet)
+int X11DRV_GetCurrentPacket(LPWTPACKET packet)
 {
     return 0;
 }

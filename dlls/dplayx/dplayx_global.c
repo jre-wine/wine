@@ -20,9 +20,9 @@
  *
  * NOTES: 
  *  o Implementation of all things which are associated with dplay on
- *    the computer - ie shared resources and such. Methods in this
- *    compilation unit should not call anything out side this unit
- *    excepting base windows services and an interface to start the
+ *    the computer - i.e. shared resources and such. Methods in this
+ *    compilation unit should not call anything outside of this unit
+ *    except base windows services and an interface to start the
  *    messaging thread.
  *  o Methods that begin with DPLAYX_ are used for dealing with
  *    dplayx.dll data which is accessible from all processes.
@@ -333,7 +333,7 @@ BOOL DPLAYX_ConstructData(void)
       sessionData[i].dwSize = 0;
     }
 
-    /* Zero out the dynmaic area */
+    /* Zero out the dynamic area */
     ZeroMemory( lpMemArea, dwDynamicSharedSize );
 
     /* Just for fun sync the whole data area */
@@ -433,7 +433,7 @@ BOOL DPLAYX_IsAppIdLobbied( DWORD dwAppID, LPDPLAYX_LOBBYDATA* lplpDplData )
   return FALSE;
 }
 
-/* Reserve a spot for the new appliction. TRUE means success and FALSE failure.  */
+/* Reserve a spot for the new application. TRUE means success and FALSE failure.  */
 BOOL DPLAYX_CreateLobbyApplication( DWORD dwAppID )
 {
   UINT i;
@@ -506,7 +506,7 @@ BOOL DPLAYX_SetLobbyHandles( DWORD dwAppID,
 {
   LPDPLAYX_LOBBYDATA lpLData;
 
-  /* Need to explictly give lobby application. Can't set for yourself */
+  /* Need to explicitly give lobby application. Can't set for yourself */
   if( dwAppID == 0 )
   {
     return FALSE;
@@ -662,7 +662,7 @@ void DPLAYX_CopyConnStructA( LPDPLCONNECTION dest, const DPLCONNECTION *src )
 {
   BYTE* lpStartOfFreeSpace;
 
-  CopyMemory( dest, src, sizeof( DPLCONNECTION ) );
+  *dest = *src;
 
   lpStartOfFreeSpace = ((BYTE*)dest) + sizeof( DPLCONNECTION );
 
@@ -671,7 +671,7 @@ void DPLAYX_CopyConnStructA( LPDPLCONNECTION dest, const DPLCONNECTION *src )
   {
     dest->lpSessionDesc = (LPDPSESSIONDESC2)lpStartOfFreeSpace;
     lpStartOfFreeSpace += sizeof( DPSESSIONDESC2 );
-    CopyMemory( dest->lpSessionDesc, src->lpSessionDesc, sizeof( DPSESSIONDESC2 ) );
+    *dest->lpSessionDesc = *src->lpSessionDesc;
 
     /* Session names may or may not exist */
     if( src->lpSessionDesc->u1.lpszSessionNameA )
@@ -696,7 +696,7 @@ void DPLAYX_CopyConnStructA( LPDPLCONNECTION dest, const DPLCONNECTION *src )
   {
     dest->lpPlayerName = (LPDPNAME)lpStartOfFreeSpace;
     lpStartOfFreeSpace += sizeof( DPNAME );
-    CopyMemory( dest->lpPlayerName, src->lpPlayerName, sizeof( DPNAME ) );
+    *dest->lpPlayerName = *src->lpPlayerName;
 
     if( src->lpPlayerName->u1.lpszShortNameA )
     {
@@ -784,7 +784,7 @@ void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, const DPLCONNECTION *src )
 {
   BYTE*              lpStartOfFreeSpace;
 
-  CopyMemory( dest, src, sizeof( DPLCONNECTION ) );
+  *dest = *src;
 
   lpStartOfFreeSpace = ( (BYTE*)dest) + sizeof( DPLCONNECTION );
 
@@ -793,7 +793,7 @@ void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, const DPLCONNECTION *src )
   {
     dest->lpSessionDesc = (LPDPSESSIONDESC2)lpStartOfFreeSpace;
     lpStartOfFreeSpace += sizeof( DPSESSIONDESC2 );
-    CopyMemory( dest->lpSessionDesc, src->lpSessionDesc, sizeof( DPSESSIONDESC2 ) );
+    *dest->lpSessionDesc = *src->lpSessionDesc;
 
     /* Session names may or may not exist */
     if( src->lpSessionDesc->u1.lpszSessionName )
@@ -818,7 +818,7 @@ void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, const DPLCONNECTION *src )
   {
     dest->lpPlayerName = (LPDPNAME)lpStartOfFreeSpace;
     lpStartOfFreeSpace += sizeof( DPNAME );
-    CopyMemory( dest->lpPlayerName, src->lpPlayerName, sizeof( DPNAME ) );
+    *dest->lpPlayerName = *src->lpPlayerName;
 
     if( src->lpPlayerName->u1.lpszShortName )
     {
@@ -848,9 +848,9 @@ void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, const DPLCONNECTION *src )
 
 }
 
-/* Store the structure into the shared data structre. Ensure that allocs for
+/* Store the structure into the shared data structure. Ensure that allocs for
  * variable length strings come from the shared data structure.
- * FIXME: We need to free information as well
+ * FIXME: We need to free information as well.
  */
 HRESULT DPLAYX_SetConnectionSettingsA
 ( DWORD dwFlags,

@@ -104,7 +104,7 @@ static struct event_handler handlers[MAX_EVENT_HANDLERS] =
     /* VisibilityNotify */
     /* CreateNotify */
     { DestroyNotify,    X11DRV_DestroyNotify },
-    { UnmapNotify,      X11DRV_UnmapNotify },
+    /* UnmapNotify */
     { MapNotify,        X11DRV_MapNotify },
     /* MapRequest */
     /* ReparentNotify */
@@ -123,7 +123,7 @@ static struct event_handler handlers[MAX_EVENT_HANDLERS] =
     { MappingNotify,    X11DRV_MappingNotify },
 };
 
-static int nb_event_handlers = 19;  /* change this if you add handlers above */
+static int nb_event_handlers = 18;  /* change this if you add handlers above */
 
 
 /* return the name of an X event */
@@ -687,28 +687,20 @@ int get_window_wm_state( Display *display, struct x11drv_win_data *data )
 
 
 /***********************************************************************
- *           EVENT_PropertyNotify
+ *           handle_wm_state_notify
+ *
+ * Handle a PropertyNotify for WM_STATE.
  */
-static void EVENT_PropertyNotify( HWND hwnd, XEvent *xev )
+static void handle_wm_state_notify( struct x11drv_win_data *data, XPropertyEvent *event,
+                                    BOOL update_window )
 {
-    XPropertyEvent *event = &xev->xproperty;
-    struct x11drv_win_data *data;
-
-    if (!hwnd) return;
-    if (!(data = X11DRV_get_win_data( hwnd ))) return;
-
     switch(event->state)
     {
     case PropertyDelete:
-        if (event->atom == x11drv_atom(WM_STATE))
-        {
-            data->wm_state = WithdrawnState;
-            TRACE( "%p/%lx: WM_STATE deleted\n", data->hwnd, data->whole_window );
-        }
+        data->wm_state = WithdrawnState;
+        TRACE( "%p/%lx: WM_STATE deleted\n", data->hwnd, data->whole_window );
         break;
-
     case PropertyNewValue:
-        if (event->atom == x11drv_atom(WM_STATE))
         {
             int new_state = get_window_wm_state( event->display, data );
             if (new_state != -1 && new_state != data->wm_state)
@@ -719,6 +711,61 @@ static void EVENT_PropertyNotify( HWND hwnd, XEvent *xev )
         }
         break;
     }
+
+    if (!update_window || !data->managed || !data->mapped) return;
+
+    if (data->iconic && data->wm_state == NormalState)  /* restore window */
+    {
+        int x, y;
+        unsigned int width, height, border, depth;
+        Window root, top;
+        WINDOWPLACEMENT wp;
+        RECT rect;
+
+        /* FIXME: hack */
+        wine_tsx11_lock();
+        XGetGeometry( event->display, data->whole_window, &root, &x, &y, &width, &height,
+                        &border, &depth );
+        XTranslateCoordinates( event->display, data->whole_window, root, 0, 0, &x, &y, &top );
+        wine_tsx11_unlock();
+        rect.left   = x;
+        rect.top    = y;
+        rect.right  = x + width;
+        rect.bottom = y + height;
+        OffsetRect( &rect, virtual_screen_rect.left, virtual_screen_rect.top );
+        X11DRV_X_to_window_rect( data, &rect );
+
+        wp.length = sizeof(wp);
+        GetWindowPlacement( data->hwnd, &wp );
+        wp.flags = 0;
+        wp.showCmd = SW_RESTORE;
+        wp.rcNormalPosition = rect;
+
+        TRACE( "restoring win %p/%lx\n", data->hwnd, data->whole_window );
+        data->iconic = FALSE;
+        SetWindowPlacement( data->hwnd, &wp );
+    }
+    else if (!data->iconic && data->wm_state == IconicState)
+    {
+        TRACE( "minimizing win %p/%lx\n", data->hwnd, data->whole_window );
+        data->iconic = TRUE;
+        ShowWindow( data->hwnd, SW_MINIMIZE );
+    }
+}
+
+
+/***********************************************************************
+ *           EVENT_PropertyNotify
+ */
+static void EVENT_PropertyNotify( HWND hwnd, XEvent *xev )
+{
+    XPropertyEvent *event = &xev->xproperty;
+    struct x11drv_win_data *data;
+
+    if (!hwnd) return;
+    if (!(data = X11DRV_get_win_data( hwnd ))) return;
+
+    if (event->atom == x11drv_atom(WM_STATE)) handle_wm_state_notify( data, event, TRUE );
 }
 
 
@@ -744,7 +791,25 @@ void wait_for_withdrawn_state( Display *display, struct x11drv_win_data *data, B
 
     while (data->whole_window && ((data->wm_state == WithdrawnState) == !set))
     {
-        if (!process_events( display, is_wm_state_notify, data->whole_window ))
+        XEvent event;
+        int count = 0;
+
+        wine_tsx11_lock();
+        while (XCheckIfEvent( display, &event, is_wm_state_notify, (char *)data->whole_window ))
+        {
+            count++;
+            if (XFilterEvent( &event, None )) continue;  /* filtered, ignore it */
+            if (event.type == DestroyNotify) call_event_handler( display, &event );
+            else
+            {
+                wine_tsx11_unlock();
+                handle_wm_state_notify( data, &event.xproperty, FALSE );
+                wine_tsx11_lock();
+            }
+        }
+        wine_tsx11_unlock();
+
+        if (!count)
         {
             struct pollfd pfd;
             int timeout = end - GetTickCount();

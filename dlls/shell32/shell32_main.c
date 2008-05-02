@@ -851,26 +851,19 @@ typedef struct
     HFONT hFont;
 } ABOUT_INFO;
 
-#define IDC_STATIC_TEXT1   100
-#define IDC_STATIC_TEXT2   101
-#define IDC_LISTBOX        99
-#define IDC_WINE_TEXT      98
+#define DROP_FIELD_TOP    (-12)
 
-#define DROP_FIELD_TOP    (-15)
-#define DROP_FIELD_HEIGHT  15
-
-static BOOL __get_dropline( HWND hWnd, LPRECT lprect )
+static void paint_dropline( HDC hdc, HWND hWnd )
 {
-    HWND hWndCtl = GetDlgItem(hWnd, IDC_WINE_TEXT);
+    HWND hWndCtl = GetDlgItem(hWnd, IDC_ABOUT_WINE_TEXT);
+    RECT rect;
 
-    if( hWndCtl )
-    {
-        GetWindowRect( hWndCtl, lprect );
-        MapWindowPoints( 0, hWnd, (LPPOINT)lprect, 2 );
-        lprect->bottom = (lprect->top += DROP_FIELD_TOP);
-        return TRUE;
-    }
-    return FALSE;
+    if (!hWndCtl) return;
+    GetWindowRect( hWndCtl, &rect );
+    MapWindowPoints( 0, hWnd, (LPPOINT)&rect, 2 );
+    rect.top += DROP_FIELD_TOP;
+    rect.bottom = rect.top + 2;
+    DrawEdge( hdc, &rect, BDR_SUNKENOUTER, BF_RECT );
 }
 
 /*************************************************************************
@@ -984,26 +977,32 @@ INT_PTR CALLBACK AboutDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
     case WM_INITDIALOG:
         {
             ABOUT_INFO *info = (ABOUT_INFO *)lParam;
-            WCHAR Template[512], AppTitle[512];
+            WCHAR template[512], buffer[512], version[64];
+            extern const char *wine_get_build_id(void);
 
             if (info)
             {
                 const char* const *pstr = SHELL_Authors;
                 SendDlgItemMessageW(hWnd, stc1, STM_SETICON,(WPARAM)info->hIcon, 0);
-                GetWindowTextW( hWnd, Template, sizeof(Template)/sizeof(WCHAR) );
-                sprintfW( AppTitle, Template, info->szApp );
-                SetWindowTextW( hWnd, AppTitle );
-                SetWindowTextW( GetDlgItem(hWnd, IDC_STATIC_TEXT1), info->szApp );
-                SetWindowTextW( GetDlgItem(hWnd, IDC_STATIC_TEXT2), info->szOtherStuff );
-                hWndCtl = GetDlgItem(hWnd, IDC_LISTBOX);
+                GetWindowTextW( hWnd, template, sizeof(template)/sizeof(WCHAR) );
+                sprintfW( buffer, template, info->szApp );
+                SetWindowTextW( hWnd, buffer );
+                SetWindowTextW( GetDlgItem(hWnd, IDC_ABOUT_STATIC_TEXT1), info->szApp );
+                SetWindowTextW( GetDlgItem(hWnd, IDC_ABOUT_STATIC_TEXT2), info->szOtherStuff );
+                GetWindowTextW( GetDlgItem(hWnd, IDC_ABOUT_STATIC_TEXT3),
+                                template, sizeof(template)/sizeof(WCHAR) );
+                MultiByteToWideChar( CP_UTF8, 0, wine_get_build_id(), -1,
+                                     version, sizeof(version)/sizeof(WCHAR) );
+                sprintfW( buffer, template, version );
+                SetWindowTextW( GetDlgItem(hWnd, IDC_ABOUT_STATIC_TEXT3), buffer );
+                hWndCtl = GetDlgItem(hWnd, IDC_ABOUT_LISTBOX);
                 SendMessageW( hWndCtl, WM_SETREDRAW, 0, 0 );
                 SendMessageW( hWndCtl, WM_SETFONT, (WPARAM)info->hFont, 0 );
                 while (*pstr)
                 {
-                    WCHAR name[64];
                     /* authors list is in utf-8 format */
-                    MultiByteToWideChar( CP_UTF8, 0, *pstr, -1, name, sizeof(name)/sizeof(WCHAR) );
-                    SendMessageW( hWndCtl, LB_ADDSTRING, (WPARAM)-1, (LPARAM)name );
+                    MultiByteToWideChar( CP_UTF8, 0, *pstr, -1, buffer, sizeof(buffer)/sizeof(WCHAR) );
+                    SendMessageW( hWndCtl, LB_ADDSTRING, (WPARAM)-1, (LPARAM)buffer );
                     pstr++;
                 }
                 SendMessageW( hWndCtl, WM_SETREDRAW, 1, 0 );
@@ -1013,16 +1012,9 @@ INT_PTR CALLBACK AboutDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
 
     case WM_PAINT:
         {
-            RECT rect;
             PAINTSTRUCT ps;
             HDC hDC = BeginPaint( hWnd, &ps );
-
-            if (__get_dropline( hWnd, &rect ))
-            {
-                SelectObject( hDC, GetStockObject( BLACK_PEN ) );
-                MoveToEx( hDC, rect.left, rect.top, NULL );
-                LineTo( hDC, rect.right, rect.bottom );
-            }
+            paint_dropline( hDC, hWnd );
             EndPaint( hWnd, &ps );
         }
     break;
@@ -1032,6 +1024,22 @@ INT_PTR CALLBACK AboutDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
         {
             EndDialog(hWnd, TRUE);
             return TRUE;
+        }
+        if (wParam == IDC_ABOUT_LICENSE)
+        {
+            MSGBOXPARAMSW params;
+
+            params.cbSize = sizeof(params);
+            params.hwndOwner = hWnd;
+            params.hInstance = shell32_hInstance;
+            params.lpszText = MAKEINTRESOURCEW(IDS_LICENSE);
+            params.lpszCaption = MAKEINTRESOURCEW(IDS_LICENSE_CAPTION);
+            params.dwStyle = MB_ICONINFORMATION | MB_OK;
+            params.lpszIcon = 0;
+            params.dwContextHelpId = 0;
+            params.lpfnMsgBoxCallback = NULL;
+            params.dwLanguageId = LANG_NEUTRAL;
+            MessageBoxIndirectW( &params );
         }
         break;
     case WM_CLOSE:
@@ -1093,9 +1101,10 @@ BOOL WINAPI ShellAboutW( HWND hWnd, LPCWSTR szApp, LPCWSTR szOtherStuff,
         return FALSE;
     if(!(template = LoadResource(shell32_hInstance, hRes)))
         return FALSE;
+    if (!hIcon) hIcon = LoadImageW( 0, (LPWSTR)IDI_WINLOGO, IMAGE_ICON, 48, 48, LR_SHARED );
     info.szApp        = szApp;
     info.szOtherStuff = szOtherStuff;
-    info.hIcon        = hIcon ? hIcon : LoadIconW( 0, (LPWSTR)IDI_WINLOGO );
+    info.hIcon        = hIcon;
 
     SystemParametersInfoW( SPI_GETICONTITLELOGFONT, 0, &logFont, 0 );
     info.hFont = CreateFontIndirectW( &logFont );

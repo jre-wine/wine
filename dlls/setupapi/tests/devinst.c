@@ -47,7 +47,9 @@ static HKEY     (WINAPI *pSetupDiCreateDevRegKeyW)(HDEVINFO, PSP_DEVINFO_DATA, D
 static BOOL     (WINAPI *pSetupDiCreateDeviceInfoA)(HDEVINFO, PCSTR, GUID *, PCSTR, HWND, DWORD, PSP_DEVINFO_DATA);
 static BOOL     (WINAPI *pSetupDiGetDeviceInstanceIdA)(HDEVINFO, PSP_DEVINFO_DATA, PSTR, DWORD, PDWORD);
 static BOOL     (WINAPI *pSetupDiGetDeviceInterfaceDetailA)(HDEVINFO, PSP_DEVICE_INTERFACE_DATA, PSP_DEVICE_INTERFACE_DETAIL_DATA_A, DWORD, PDWORD, PSP_DEVINFO_DATA);
+static BOOL     (WINAPI *pSetupDiGetDeviceInterfaceDetailW)(HDEVINFO, PSP_DEVICE_INTERFACE_DATA, PSP_DEVICE_INTERFACE_DETAIL_DATA_W, DWORD, PDWORD, PSP_DEVINFO_DATA);
 static BOOL     (WINAPI *pSetupDiRegisterDeviceInfo)(HDEVINFO, PSP_DEVINFO_DATA, DWORD, PSP_DETSIG_CMPPROC, PVOID, PSP_DEVINFO_DATA);
+static HDEVINFO (WINAPI *pSetupDiGetClassDevsA)(CONST GUID *, LPCSTR, HWND, DWORD);
 
 static void init_function_pointers(void)
 {
@@ -63,11 +65,13 @@ static void init_function_pointers(void)
     pSetupDiEnumDeviceInterfaces = (void *)GetProcAddress(hSetupAPI, "SetupDiEnumDeviceInterfaces");
     pSetupDiGetDeviceInstanceIdA = (void *)GetProcAddress(hSetupAPI, "SetupDiGetDeviceInstanceIdA");
     pSetupDiGetDeviceInterfaceDetailA = (void *)GetProcAddress(hSetupAPI, "SetupDiGetDeviceInterfaceDetailA");
+    pSetupDiGetDeviceInterfaceDetailW = (void *)GetProcAddress(hSetupAPI, "SetupDiGetDeviceInterfaceDetailW");
     pSetupDiInstallClassA = (void *)GetProcAddress(hSetupAPI, "SetupDiInstallClassA");
     pSetupDiOpenClassRegKeyExA = (void *)GetProcAddress(hSetupAPI, "SetupDiOpenClassRegKeyExA");
     pSetupDiOpenDevRegKey = (void *)GetProcAddress(hSetupAPI, "SetupDiOpenDevRegKey");
     pSetupDiCreateDevRegKeyW = (void *)GetProcAddress(hSetupAPI, "SetupDiCreateDevRegKeyW");
     pSetupDiRegisterDeviceInfo = (void *)GetProcAddress(hSetupAPI, "SetupDiRegisterDeviceInfo");
+    pSetupDiGetClassDevsA = (void *)GetProcAddress(hSetupAPI, "SetupDiGetClassDevsA");
 }
 
 /* RegDeleteTreeW from dlls/advapi32/registry.c */
@@ -627,6 +631,7 @@ static void testGetDeviceInterfaceDetail(void)
             LPBYTE buf = HeapAlloc(GetProcessHeap(), 0, size);
             SP_DEVICE_INTERFACE_DETAIL_DATA_A *detail =
                 (SP_DEVICE_INTERFACE_DETAIL_DATA_A *)buf;
+            DWORD expectedsize = offsetof(SP_DEVICE_INTERFACE_DETAIL_DATA_W, DevicePath) + sizeof(WCHAR)*(1 + strlen(path));
 
             detail->cbSize = 0;
             SetLastError(0xdeadbeef);
@@ -649,13 +654,23 @@ static void testGetDeviceInterfaceDetail(void)
             /* Windows 2000 and up check for the exact size. Win9x returns ERROR_INVALID_PARAMETER
              * on every call (so doesn't get here) and NT4 doesn't have this function.
              */
-            detail->cbSize = offsetof(SP_DEVICE_INTERFACE_DETAIL_DATA_A, DevicePath) + sizeof(char);
+            detail->cbSize = FIELD_OFFSET(SP_DEVICE_INTERFACE_DETAIL_DATA_A, DevicePath[1]);
             ret = pSetupDiGetDeviceInterfaceDetailA(set, &interfaceData, detail,
                     size, &size, NULL);
             ok(ret, "SetupDiGetDeviceInterfaceDetailA failed: %d\n",
                     GetLastError());
             ok(!lstrcmpiA(path, detail->DevicePath), "Unexpected path %s\n",
                     detail->DevicePath);
+            /* Check SetupDiGetDeviceInterfaceDetailW */
+            if (pSetupDiGetDeviceInterfaceDetailW)
+            {
+                ret = pSetupDiGetDeviceInterfaceDetailW(set, &interfaceData, NULL, 0, &size, NULL);
+                ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Expected ERROR_INSUFFICIENT_BUFFER, got error code: %d\n", GetLastError());
+                ok(expectedsize == size, "SetupDiGetDeviceInterfaceDetailW returned wrong reqsize: expected %d, got %d\n", expectedsize, size);
+            }
+            else
+                skip("SetupDiGetDeviceInterfaceDetailW is not available\n");
+
             HeapFree(GetProcessHeap(), 0, buf);
         }
         pSetupDiDestroyDeviceInfoList(set);
@@ -766,6 +781,69 @@ static void testDevRegKey(void)
     devinst_RegDeleteTreeW(HKEY_LOCAL_MACHINE, classKey);
 }
 
+static void testRegisterAndGetDetail(void)
+{
+    HDEVINFO set;
+    BOOL ret;
+    GUID guid = {0x6a55b5a4, 0x3f65, 0x11db, {0xb7,0x04,
+        0x00,0x11,0x95,0x5c,0x2b,0xdb}};
+    SP_DEVINFO_DATA devInfo = { sizeof(SP_DEVINFO_DATA), { 0 } };
+    SP_DEVICE_INTERFACE_DATA interfaceData = { sizeof(interfaceData), { 0 } };
+    DWORD dwSize = 0;
+
+    SetLastError(0xdeadbeef);
+    set = pSetupDiGetClassDevsA(&guid, NULL, 0, DIGCF_ALLCLASSES);
+    ok(set != INVALID_HANDLE_VALUE, "SetupDiGetClassDevsA failed: %08x\n",
+     GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pSetupDiCreateDeviceInfoA(set, "LEGACY_BOGUS", &guid, NULL, 0,
+     DICD_GENERATE_ID, &devInfo);
+    ok(ret, "SetupDiCreateDeviceInfoA failed: %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pSetupDiCreateDeviceInterfaceA(set, &devInfo, &guid, NULL, 0, &interfaceData);
+    ok(ret, "SetupDiCreateDeviceInterfaceA failed: %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pSetupDiRegisterDeviceInfo(set, &devInfo, 0, NULL, NULL, NULL);
+    ok(ret, "SetupDiRegisterDeviceInfo failed: %08x\n", GetLastError());
+
+    pSetupDiDestroyDeviceInfoList(set);
+
+    SetLastError(0xdeadbeef);
+    set = pSetupDiGetClassDevsA(&guid, NULL, 0, DIGCF_DEVICEINTERFACE);
+    ok(set != INVALID_HANDLE_VALUE, "SetupDiGetClassDevsA failed: %08x\n",
+     GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pSetupDiEnumDeviceInterfaces(set, NULL, &guid, 0, &interfaceData);
+    ok(ret, "SetupDiEnumDeviceInterfaces failed: %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pSetupDiGetDeviceInterfaceDetailA(set, &interfaceData, NULL, 0, &dwSize, NULL);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+     "Expected ERROR_INSUFFICIENT_BUFFER, got %08x\n", GetLastError());
+    if (!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+    {
+        static const char path[] =
+            "\\\\?\\root#legacy_bogus#0000#{6a55b5a4-3f65-11db-b704-0011955c2bdb}";
+        PSP_DEVICE_INTERFACE_DETAIL_DATA_A detail = NULL;
+
+        detail = (PSP_DEVICE_INTERFACE_DETAIL_DATA_A)HeapAlloc(GetProcessHeap(), 0, dwSize);
+        if (detail)
+        {
+            detail->cbSize = offsetof(SP_DEVICE_INTERFACE_DETAIL_DATA_A, DevicePath) + sizeof(char);
+            SetLastError(0xdeadbeef);
+            ret = pSetupDiGetDeviceInterfaceDetailA(set, &interfaceData,
+             detail, dwSize, &dwSize, NULL);
+            ok(ret, "SetupDiGetDeviceInterfaceDetailA failed: %08x\n", GetLastError());
+            ok(!lstrcmpiA(path, detail->DevicePath), "Unexpected path %s\n",
+                    detail->DevicePath);
+            HeapFree(GetProcessHeap(), 0, detail);
+        }
+    }
+
+    pSetupDiDestroyDeviceInfoList(set);
+}
+
 START_TEST(devinst)
 {
     init_function_pointers();
@@ -786,4 +864,5 @@ START_TEST(devinst)
     testCreateDeviceInterface();
     testGetDeviceInterfaceDetail();
     testDevRegKey();
+    testRegisterAndGetDetail();
 }

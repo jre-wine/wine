@@ -193,6 +193,7 @@ AC_CHECK_PROGS(ICOTOOL, icotool, false)
 
 if test "${enable_maintainer_mode+set}" = set
 then
+  if test "$FONTFORGE" = "false"; then WINE_WARNING([fontforge is missing, fonts can't be rebuilt.]); fi
   if test "$RSVG" = "false"; then WINE_WARNING([rsvg is missing, icons can't be rebuilt.]); fi
   if test "$ICOTOOL" = "false"; then WINE_WARNING([icotool is missing, icons can't be rebuilt.]); fi
 fi
@@ -995,12 +996,8 @@ then
     fi
 fi
 
-dnl Only build the fonts dir if we have both freetype and fontforge
-if test "$FONTFORGE" = "false"
-then
-    WINE_WARNING([FontForge is missing.
-Fonts will not be built. Dialog text may be invisible or unaligned.])
-elif test "x$FREETYPELIBS" = "x"
+dnl Only build the fonts dir if we have freetype
+if test "x$FREETYPELIBS" = "x"
 then
     WINE_WARNING([FreeType development files not found.
 Fonts will not be built. Dialog text may be invisible or unaligned.])
@@ -1738,6 +1735,7 @@ AC_CONFIG_FILES([dlls/d3dx9_34/Makefile])
 AC_CONFIG_FILES([dlls/d3dx9_35/Makefile])
 AC_CONFIG_FILES([dlls/d3dx9_36/Makefile])
 AC_CONFIG_FILES([dlls/d3dx9_36/tests/Makefile])
+AC_CONFIG_FILES([dlls/d3dx9_37/Makefile])
 AC_CONFIG_FILES([dlls/d3dxof/Makefile])
 AC_CONFIG_FILES([dlls/dbghelp/Makefile])
 AC_CONFIG_FILES([dlls/dciman32/Makefile])
@@ -1777,6 +1775,7 @@ AC_CONFIG_FILES([dlls/dxerr9/Makefile])
 AC_CONFIG_FILES([dlls/dxguid/Makefile])
 AC_CONFIG_FILES([dlls/faultrep/Makefile])
 AC_CONFIG_FILES([dlls/fusion/Makefile])
+AC_CONFIG_FILES([dlls/fusion/tests/Makefile])
 AC_CONFIG_FILES([dlls/gdi32/Makefile])
 AC_CONFIG_FILES([dlls/gdi32/tests/Makefile])
 AC_CONFIG_FILES([dlls/gdiplus/Makefile])
@@ -1810,6 +1809,7 @@ AC_CONFIG_FILES([dlls/itircl/Makefile])
 AC_CONFIG_FILES([dlls/itss/Makefile])
 AC_CONFIG_FILES([dlls/itss/tests/Makefile])
 AC_CONFIG_FILES([dlls/jscript/Makefile])
+AC_CONFIG_FILES([dlls/jscript/tests/Makefile])
 AC_CONFIG_FILES([dlls/kernel32/Makefile])
 AC_CONFIG_FILES([dlls/kernel32/tests/Makefile])
 AC_CONFIG_FILES([dlls/localspl/Makefile])
@@ -1920,7 +1920,6 @@ AC_CONFIG_FILES([dlls/riched32/tests/Makefile])
 AC_CONFIG_FILES([dlls/rpcrt4/Makefile])
 AC_CONFIG_FILES([dlls/rpcrt4/tests/Makefile])
 AC_CONFIG_FILES([dlls/rsabase/Makefile])
-AC_CONFIG_FILES([dlls/rsabase/tests/Makefile])
 AC_CONFIG_FILES([dlls/rsaenh/Makefile])
 AC_CONFIG_FILES([dlls/rsaenh/tests/Makefile])
 AC_CONFIG_FILES([dlls/sane.ds/Makefile])
@@ -2048,6 +2047,7 @@ AC_CONFIG_FILES([programs/regsvr32/Makefile])
 AC_CONFIG_FILES([programs/rpcss/Makefile])
 AC_CONFIG_FILES([programs/rundll32/Makefile])
 AC_CONFIG_FILES([programs/secedit/Makefile])
+AC_CONFIG_FILES([programs/services/Makefile])
 AC_CONFIG_FILES([programs/spoolsv/Makefile])
 AC_CONFIG_FILES([programs/start/Makefile])
 AC_CONFIG_FILES([programs/svchost/Makefile])

@@ -1173,64 +1173,70 @@ static void create_dest_dirs(LPCWSTR szDestDir)
 }
 
 /* the FO_COPY operation */
-static HRESULT copy_files(FILE_OPERATION *op, const FILE_LIST *flFrom, const FILE_LIST *flTo)
+static HRESULT copy_files(FILE_OPERATION *op, const FILE_LIST *flFrom, FILE_LIST *flTo)
 {
     DWORD i;
     const FILE_ENTRY *entryToCopy;
     const FILE_ENTRY *fileDest = &flTo->feFiles[0];
-    BOOL bCancelIfAnyDirectories = FALSE;
 
     if (flFrom->bAnyDontExist)
         return ERROR_SHELL_INTERNAL_FILE_NOT_FOUND;
 
-    if (op->req->fFlags & FOF_MULTIDESTFILES && flFrom->bAnyFromWildcard)
-        return ERROR_CANCELLED;
-
-    if (!(op->req->fFlags & FOF_MULTIDESTFILES) && flTo->dwNumFiles != 1)
-        return ERROR_CANCELLED;
-
-    if (op->req->fFlags & FOF_MULTIDESTFILES && flFrom->dwNumFiles != 1 &&
-        flFrom->dwNumFiles != flTo->dwNumFiles)
+    if (op->req->fFlags & FOF_MULTIDESTFILES)
     {
-        return ERROR_CANCELLED;
+        if (flFrom->bAnyFromWildcard)
+            return ERROR_CANCELLED;
+
+        if (flFrom->dwNumFiles != flTo->dwNumFiles)
+        {
+            if (flFrom->dwNumFiles != 1 && !IsAttribDir(fileDest->attributes))
+                return ERROR_CANCELLED;
+
+            flTo->dwNumFiles = 1;
+        }
+        else if (IsAttribDir(fileDest->attributes))
+        {
+            for (i = 1; i < flTo->dwNumFiles; i++)
+                if (!IsAttribDir(flTo->feFiles[i].attributes) ||
+                    !IsAttribDir(flFrom->feFiles[i].attributes))
+                {
+                    return ERROR_CANCELLED;
+                }
+        }
     }
-
-    if (flFrom->dwNumFiles > 1 && flTo->dwNumFiles == 1 &&
-        !PathFileExistsW(flTo->feFiles[0].szFullPath) &&
-        IsAttribFile(fileDest->attributes))
+    else if (flFrom->dwNumFiles != 1)
     {
-        bCancelIfAnyDirectories = TRUE;
-    }
+        if (flTo->dwNumFiles != 1 && !IsAttribDir(fileDest->attributes))
+            return ERROR_CANCELLED;
 
-    if (flFrom->dwNumFiles > 1 && flTo->dwNumFiles == 1 && fileDest->bFromRelative &&
-        !PathFileExistsW(fileDest->szFullPath))
-    {
-        op->req->fAnyOperationsAborted = TRUE;
-        return ERROR_CANCELLED;
-    }
+        if (PathFileExistsW(fileDest->szFullPath) &&
+            IsAttribFile(fileDest->attributes))
+        {
+            return ERROR_CANCELLED;
+        }
 
-    if (!(op->req->fFlags & FOF_MULTIDESTFILES) && flFrom->dwNumFiles != 1 &&
-        PathFileExistsW(fileDest->szFullPath) &&
-        IsAttribFile(fileDest->attributes))
-    {
-        return ERROR_CANCELLED;
+        if (flTo->dwNumFiles == 1 && fileDest->bFromRelative &&
+            !PathFileExistsW(fileDest->szFullPath))
+        {
+            return ERROR_CANCELLED;
+        }
     }
 
     for (i = 0; i < flFrom->dwNumFiles; i++)
     {
         entryToCopy = &flFrom->feFiles[i];
 
-        if (op->req->fFlags & FOF_MULTIDESTFILES)
+        if ((op->req->fFlags & FOF_MULTIDESTFILES) &&
+            flTo->dwNumFiles > 1)
+        {
             fileDest = &flTo->feFiles[i];
+        }
 
         if (IsAttribDir(entryToCopy->attributes) &&
             !lstrcmpiW(entryToCopy->szFullPath, fileDest->szDirectory))
         {
             return ERROR_SUCCESS;
         }
-
-        if (IsAttribDir(entryToCopy->attributes) && bCancelIfAnyDirectories)
-            return ERROR_CANCELLED;
 
         create_dest_dirs(fileDest->szDirectory);
 
@@ -1243,7 +1249,7 @@ static HRESULT copy_files(FILE_OPERATION *op, const FILE_LIST *flFrom, const FIL
         }
 
         if ((flFrom->dwNumFiles > 1 && flTo->dwNumFiles == 1) ||
-            (flFrom->dwNumFiles == 1 && IsAttribDir(fileDest->attributes)))
+            IsAttribDir(fileDest->attributes))
         {
             copy_to_dir(op, entryToCopy, fileDest);
         }
@@ -1537,7 +1543,7 @@ int WINAPI SHFileOperationW(LPSHFILEOPSTRUCTW lpFileOp)
 
     if (ret == ERROR_CANCELLED)
         lpFileOp->fAnyOperationsAborted = TRUE;
-    
+
     return ret;
 }
 

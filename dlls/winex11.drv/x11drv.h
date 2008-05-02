@@ -630,7 +630,6 @@ extern void X11DRV_KeymapNotify( HWND hwnd, XEvent *event );
 extern void X11DRV_Expose( HWND hwnd, XEvent *event );
 extern void X11DRV_DestroyNotify( HWND hwnd, XEvent *event );
 extern void X11DRV_MapNotify( HWND hwnd, XEvent *event );
-extern void X11DRV_UnmapNotify( HWND hwnd, XEvent *event );
 extern void X11DRV_ConfigureNotify( HWND hwnd, XEvent *event );
 extern void X11DRV_SelectionRequest( HWND hWnd, XEvent *event );
 extern void X11DRV_SelectionClear( HWND hWnd, XEvent *event );
@@ -679,7 +678,6 @@ struct x11drv_win_data
     BOOL        iconic : 1;     /* is window in iconic state? */
     int         wm_state;       /* current value of the WM_STATE property */
     DWORD       net_wm_state;   /* bit mask of active x11drv_net_wm_state values */
-    unsigned int lock_changes;  /* lock count for X11 change requests */
     HBITMAP     hWMIconBitmap;
     HBITMAP     hWMIconMask;
 };

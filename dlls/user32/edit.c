@@ -795,21 +795,33 @@ static LRESULT WINAPI EditWndProc_common( HWND hwnd, UINT msg,
 		result = DLGC_HASSETSEL | DLGC_WANTCHARS | DLGC_WANTARROWS;
 		
 		if (es->style & ES_MULTILINE)
-		{
 		   result |= DLGC_WANTALLKEYS;
-		   break;
-		}
 
 		if (lParam && (((LPMSG)lParam)->message == WM_KEYDOWN))
 		{
 		   int vk = (int)((LPMSG)lParam)->wParam;
 
-		   if (es->hwndListBox && (vk == VK_RETURN || vk == VK_ESCAPE))
-		   {
-		      if (SendMessageW(GetParent(hwnd), CB_GETDROPPEDSTATE, 0, 0))
-		         result |= DLGC_WANTMESSAGE;
-		   }
-		}
+                   if (es->hwndListBox)
+                   {
+                       if (vk == VK_RETURN || vk == VK_ESCAPE)
+                           if (SendMessageW(GetParent(hwnd), CB_GETDROPPEDSTATE, 0, 0))
+                               result |= DLGC_WANTMESSAGE;
+                   }
+                   else
+                   {
+                       switch (vk)
+                       {
+                           case VK_ESCAPE:
+                               SendMessageW(GetParent(hwnd), WM_CLOSE, 0, 0);
+                               break;
+                           case VK_TAB:
+                               SendMessageW(GetParent(hwnd), WM_NEXTDLGCTL, (GetKeyState(VK_SHIFT) & 0x8000), 0);
+                               break;
+                           default:
+                               break;
+                       }
+                   }
+                }
 		break;
 
         case WM_IME_CHAR:
@@ -838,12 +850,22 @@ static LRESULT WINAPI EditWndProc_common( HWND hwnd, UINT msg,
 		    MultiByteToWideChar(CP_ACP, 0, &charA, 1, &charW, 1);
 		}
 
-		if ((charW == VK_RETURN || charW == VK_ESCAPE) && es->hwndListBox)
-		{
-		   if (SendMessageW(GetParent(hwnd), CB_GETDROPPEDSTATE, 0, 0))
-		      SendMessageW(GetParent(hwnd), WM_KEYDOWN, charW, 0);
-		   break;
-		}
+                if (es->hwndListBox)
+                {
+                    if (charW == VK_RETURN || charW == VK_ESCAPE)
+                    {
+                        if (SendMessageW(GetParent(hwnd), CB_GETDROPPEDSTATE, 0, 0))
+                        {
+                            SendMessageW(GetParent(hwnd), WM_KEYDOWN, charW, 0);
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                  if (charW == VK_TAB || charW == VK_RETURN)
+                      break;
+                }
 		EDIT_WM_Char(es, charW);
 		break;
 	}
@@ -4583,6 +4605,8 @@ static LRESULT EDIT_WM_KeyDown(EDITSTATE *es, INT key)
 				  MAKEWPARAM( LOWORD(dw), BN_CLICKED ),
  			      (LPARAM)GetDlgItem( hwndParent, LOWORD(dw) ) );
 		}
+                else
+                    SendMessageW( hwndParent, WM_COMMAND, IDOK, (LPARAM)GetDlgItem( hwndParent, IDOK ) );
 	    }
 	    break;
 	}

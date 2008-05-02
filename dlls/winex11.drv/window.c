@@ -131,6 +131,20 @@ BOOL X11DRV_is_window_rect_mapped( const RECT *rect )
 
 
 /***********************************************************************
+ *		is_window_resizable
+ *
+ * Check if window should be made resizable by the window manager
+ */
+static inline BOOL is_window_resizable( struct x11drv_win_data *data, DWORD style )
+{
+    if (style & WS_THICKFRAME) return TRUE;
+    /* Metacity needs the window to be resizable to make it fullscreen */
+    return (data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
+            data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height);
+}
+
+
+/***********************************************************************
  *              get_mwm_decorations
  */
 static unsigned long get_mwm_decorations( DWORD style, DWORD ex_style )
@@ -690,6 +704,8 @@ void X11DRV_make_systray_window( HWND hwnd )
     struct x11drv_win_data *data;
     Window systray_window;
 
+    if (root_window != DefaultRootWindow(display)) return;
+
     if (!(data = X11DRV_get_win_data( hwnd )) &&
         !(data = X11DRV_create_win_data( hwnd ))) return;
 
@@ -784,10 +800,11 @@ static void set_size_hints( Display *display, struct x11drv_win_data *data, DWOR
 {
     XSizeHints* size_hints;
 
-    if ((size_hints = XAllocSizeHints()))
-    {
-        size_hints->flags = 0;
+    if (!(size_hints = XAllocSizeHints())) return;
 
+    /* don't update size hints if window is not in normal state */
+    if (!(style & (WS_MINIMIZE | WS_MAXIMIZE)))
+    {
         if (data->hwnd != GetDesktopWindow())  /* don't force position of desktop */
         {
             size_hints->win_gravity = StaticGravity;
@@ -796,24 +813,17 @@ static void set_size_hints( Display *display, struct x11drv_win_data *data, DWOR
             size_hints->flags |= PWinGravity | PPosition;
         }
 
-        if ( !(style & WS_THICKFRAME) )
+        if (!is_window_resizable( data, style ))
         {
-            /* If we restrict window resizing Metacity decides that it should
-             * disable fullscreen support for this window as well.
-             */
-            if (!(data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
-                  data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height))
-            {
-                size_hints->max_width = data->whole_rect.right - data->whole_rect.left;
-                size_hints->max_height = data->whole_rect.bottom - data->whole_rect.top;
-                size_hints->min_width = size_hints->max_width;
-                size_hints->min_height = size_hints->max_height;
-                size_hints->flags |= PMinSize | PMaxSize;
-            }
+            size_hints->max_width = data->whole_rect.right - data->whole_rect.left;
+            size_hints->max_height = data->whole_rect.bottom - data->whole_rect.top;
+            size_hints->min_width = size_hints->max_width;
+            size_hints->min_height = size_hints->max_height;
+            size_hints->flags |= PMinSize | PMaxSize;
         }
-        XSetWMNormalHints( display, data->whole_window, size_hints );
-        XFree( size_hints );
     }
+    XSetWMNormalHints( display, data->whole_window, size_hints );
+    XFree( size_hints );
 }
 
 
@@ -956,7 +966,7 @@ void X11DRV_set_wm_hints( Display *display, struct x11drv_win_data *data )
     mwm_hints.flags = MWM_HINTS_FUNCTIONS | MWM_HINTS_DECORATIONS;
     mwm_hints.decorations = get_mwm_decorations( style, ex_style );
     mwm_hints.functions = MWM_FUNC_MOVE;
-    if (style & WS_THICKFRAME)  mwm_hints.functions |= MWM_FUNC_RESIZE;
+    if (is_window_resizable( data, style )) mwm_hints.functions |= MWM_FUNC_RESIZE;
     if (style & WS_MINIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MINIMIZE;
     if (style & WS_MAXIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MAXIMIZE;
     if (style & WS_SYSMENU)     mwm_hints.functions |= MWM_FUNC_CLOSE;
@@ -1034,8 +1044,22 @@ void X11DRV_sync_window_position( Display *display, struct x11drv_win_data *data
                                   UINT swp_flags, const RECT *old_client_rect,
                                   const RECT *old_whole_rect )
 {
+    DWORD style = GetWindowLongW( data->hwnd, GWL_STYLE );
     XWindowChanges changes;
-    int mask = get_window_changes( &changes, old_whole_rect, &data->whole_rect );
+    int mask = CWWidth | CWHeight;
+
+    if (data->managed && data->iconic) return;
+
+    if ((changes.width = data->whole_rect.right - data->whole_rect.left) <= 0) changes.width = 1;
+    if ((changes.height = data->whole_rect.bottom - data->whole_rect.top) <= 0) changes.height = 1;
+
+    /* only the size is allowed to change for the desktop window */
+    if (data->whole_window != root_window)
+    {
+        changes.x = data->whole_rect.left - virtual_screen_rect.left;
+        changes.y = data->whole_rect.top - virtual_screen_rect.top;
+        mask |= CWX | CWY;
+    }
 
     if (!(swp_flags & SWP_NOZORDER))
     {
@@ -1048,42 +1072,20 @@ void X11DRV_sync_window_position( Display *display, struct x11drv_win_data *data
             changes.stack_mode = Above;
             mask |= CWStackMode;
         }
-        else
-        {
-            /* should use stack_mode Below but most window managers don't get it right */
-            /* so move it above the next one in Z order */
-            HWND next = GetWindow( data->hwnd, GW_HWNDNEXT );
-            while (next && !(GetWindowLongW( next, GWL_STYLE ) & WS_VISIBLE))
-                next = GetWindow( next, GW_HWNDNEXT );
-            if (next)
-            {
-                changes.stack_mode = Above;
-                changes.sibling = X11DRV_get_whole_window(next);
-                mask |= CWStackMode | CWSibling;
-            }
-        }
+        /* should use stack_mode Below but most window managers don't get it right */
+        /* and Above with a sibling doesn't work so well either, so we ignore it */
     }
 
-    /* only the size is allowed to change for the desktop window */
-    if (data->whole_window == root_window) mask &= CWWidth | CWHeight;
+    TRACE( "setting win %p/%lx pos %d,%d,%dx%d after %lx changes=%x\n",
+           data->hwnd, data->whole_window, data->whole_rect.left, data->whole_rect.top,
+           data->whole_rect.right - data->whole_rect.left,
+           data->whole_rect.bottom - data->whole_rect.top, changes.sibling, mask );
 
-    if (mask)
-    {
-        DWORD style = GetWindowLongW( data->hwnd, GWL_STYLE );
-
-        TRACE( "setting win %lx pos %d,%d,%dx%d after %lx changes=%x\n",
-               data->whole_window, data->whole_rect.left, data->whole_rect.top,
-               data->whole_rect.right - data->whole_rect.left,
-               data->whole_rect.bottom - data->whole_rect.top, changes.sibling, mask );
-
-        wine_tsx11_lock();
-        if (mask & (CWWidth|CWHeight)) set_size_hints( display, data, style );
-        if (mask & CWX) changes.x -= virtual_screen_rect.left;
-        if (mask & CWY) changes.y -= virtual_screen_rect.top;
-        XReconfigureWMWindow( display, data->whole_window,
-                              DefaultScreen(display), mask, &changes );
-        wine_tsx11_unlock();
-    }
+    wine_tsx11_lock();
+    set_size_hints( display, data, style );
+    XReconfigureWMWindow( display, data->whole_window,
+                          DefaultScreen(display), mask, &changes );
+    wine_tsx11_unlock();
 }
 
 
@@ -1575,7 +1577,7 @@ void X11DRV_SetCapture( HWND hwnd, UINT flags )
 {
     struct x11drv_thread_data *thread_data = x11drv_thread_data();
 
-    if (!(flags & GUI_INMOVESIZE)) return;
+    if (!(flags & (GUI_INMOVESIZE | GUI_INMENUMODE))) return;
 
     if (hwnd)
     {
@@ -1586,7 +1588,7 @@ void X11DRV_SetCapture( HWND hwnd, UINT flags )
         XFlush( gdi_display );
         XGrabPointer( thread_data->display, grab_win, False,
                       PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
-                      GrabModeAsync, GrabModeAsync, root_window, None, CurrentTime );
+                      GrabModeAsync, GrabModeAsync, None, None, CurrentTime );
         wine_tsx11_unlock();
         thread_data->grab_window = grab_win;
     }

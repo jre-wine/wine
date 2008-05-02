@@ -237,8 +237,8 @@ static HRESULT GetClassMediaFile(IAsyncReader * pReader, LPCOLESTR pszFileName, 
 
     TRACE("(%p, %s, %p, %p)\n", pReader, debugstr_w(pszFileName), majorType, minorType);
 
-    CopyMemory(majorType, &GUID_NULL, sizeof(*majorType));
-    CopyMemory(minorType, &GUID_NULL, sizeof(*minorType));
+    *majorType = GUID_NULL;
+    *minorType = GUID_NULL;
 
     lRet = RegOpenKeyExW(HKEY_CLASSES_ROOT, wszMediaType, 0, KEY_READ, &hkeyMediaType);
     hr = HRESULT_FROM_WIN32(lRet);
@@ -393,7 +393,8 @@ static HRESULT WINAPI AsyncReader_QueryInterface(IBaseFilter * iface, REFIID rii
         return S_OK;
     }
 
-    FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
+    if (!IsEqualIID(riid, &IID_IPin) && !IsEqualIID(riid, &IID_IMediaSeeking))
+        FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
 
     return E_NOINTERFACE;
 }
@@ -792,7 +793,8 @@ static HRESULT WINAPI FileAsyncReaderPin_QueryInterface(IPin * iface, REFIID rii
         return S_OK;
     }
 
-    FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
+    if (!IsEqualIID(riid, &IID_IPin) && !IsEqualIID(riid, &IID_IMediaSeeking))
+        FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
 
     return E_NOINTERFACE;
 }

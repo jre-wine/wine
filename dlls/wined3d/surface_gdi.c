@@ -579,28 +579,25 @@ HRESULT WINAPI IWineGDISurfaceImpl_GetDC(IWineD3DSurface *iface, HDC *pHDC) {
     if(This->resource.format == WINED3DFMT_P8 ||
        This->resource.format == WINED3DFMT_A8P8) {
         unsigned int n;
+        PALETTEENTRY *pal = NULL;
+
         if(This->palette) {
-            PALETTEENTRY ent[256];
-
-            GetPaletteEntries(This->palette->hpal, 0, 256, ent);
-            for (n=0; n<256; n++) {
-                col[n].rgbRed   = ent[n].peRed;
-                col[n].rgbGreen = ent[n].peGreen;
-                col[n].rgbBlue  = ent[n].peBlue;
-                col[n].rgbReserved = 0;
-            }
+            pal = This->palette->palents;
         } else {
-            IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+            IWineD3DSurfaceImpl *dds_primary = (IWineD3DSurfaceImpl *)This->resource.wineD3DDevice->ddraw_primary;
+            if (dds_primary && dds_primary->palette)
+                pal = dds_primary->palette->palents;
+        }
 
+        if (pal) {
             for (n=0; n<256; n++) {
-                col[n].rgbRed   = device->palettes[device->currentPalette][n].peRed;
-                col[n].rgbGreen = device->palettes[device->currentPalette][n].peGreen;
-                col[n].rgbBlue  = device->palettes[device->currentPalette][n].peBlue;
+                col[n].rgbRed   = pal[n].peRed;
+                col[n].rgbGreen = pal[n].peGreen;
+                col[n].rgbBlue  = pal[n].peBlue;
                 col[n].rgbReserved = 0;
             }
-
+            SetDIBColorTable(This->hDC, 0, 256, col);
         }
-        SetDIBColorTable(This->hDC, 0, 256, col);
     }
 
     *pHDC = This->hDC;
@@ -638,30 +635,22 @@ HRESULT WINAPI IWineGDISurfaceImpl_RealizePalette(IWineD3DSurface *iface) {
     unsigned int n;
     TRACE("(%p)\n", This);
 
+    if (!pal) return WINED3D_OK;
+
     if(This->Flags & SFLAG_DIBSECTION) {
         TRACE("(%p): Updating the hdc's palette\n", This);
         for (n=0; n<256; n++) {
-            if(pal) {
-                col[n].rgbRed   = pal->palents[n].peRed;
-                col[n].rgbGreen = pal->palents[n].peGreen;
-                col[n].rgbBlue  = pal->palents[n].peBlue;
-            } else {
-                IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-                /* Use the default device palette */
-                col[n].rgbRed   = device->palettes[device->currentPalette][n].peRed;
-                col[n].rgbGreen = device->palettes[device->currentPalette][n].peGreen;
-                col[n].rgbBlue  = device->palettes[device->currentPalette][n].peBlue;
-            }
+            col[n].rgbRed   = pal->palents[n].peRed;
+            col[n].rgbGreen = pal->palents[n].peGreen;
+            col[n].rgbBlue  = pal->palents[n].peBlue;
             col[n].rgbReserved = 0;
         }
         SetDIBColorTable(This->hDC, 0, 256, col);
     }
 
-    /* Update the image because of the palette change. Note that this function is also
-     * called on a palette removal. In such a case we don't have to update the screen.
-     * Some games like e.g Red Alert call SetEntries a lot to implement fading.
-     */
-    if(pal && This->resource.usage & WINED3DUSAGE_RENDERTARGET)
+    /* Update the image because of the palette change. Some games like e.g Red Alert
+       call SetEntries a lot to implement fading. */
+    if(This->resource.usage & WINED3DUSAGE_RENDERTARGET)
         x11_copy_to_screen(This, NULL);
 
     return WINED3D_OK;
