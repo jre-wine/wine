@@ -673,14 +673,16 @@ static DWORD enumIPAddresses(PDWORD pcAddresses, struct ifconf *ifc)
     int ioctlRet = 0;
     DWORD guessedNumAddresses = 0, numAddresses = 0;
     caddr_t ifPtr;
+    int lastlen;
 
     ret = NO_ERROR;
     ifc->ifc_len = 0;
     ifc->ifc_buf = NULL;
     /* there is no way to know the interface count beforehand,
        so we need to loop again and again upping our max each time
-       until returned < max */
+       until returned is constant across 2 calls */
     do {
+      lastlen = ifc->ifc_len;
       HeapFree(GetProcessHeap(), 0, ifc->ifc_buf);
       if (guessedNumAddresses == 0)
         guessedNumAddresses = INITIAL_INTERFACES_ASSUMED;
@@ -689,13 +691,16 @@ static DWORD enumIPAddresses(PDWORD pcAddresses, struct ifconf *ifc)
       ifc->ifc_len = sizeof(struct ifreq) * guessedNumAddresses;
       ifc->ifc_buf = HeapAlloc(GetProcessHeap(), 0, ifc->ifc_len);
       ioctlRet = ioctl(fd, SIOCGIFCONF, ifc);
-    } while (ioctlRet == 0 &&
-     ifc->ifc_len > (sizeof(struct ifreq) * (guessedNumAddresses - 2)));
+    } while ((ioctlRet == 0) && (ifc->ifc_len != lastlen));
 
     if (ioctlRet == 0) {
       ifPtr = ifc->ifc_buf;
       while (ifPtr && ifPtr < ifc->ifc_buf + ifc->ifc_len) {
-        numAddresses++;
+        struct ifreq *ifr = (struct ifreq *)ifPtr;
+
+        if (ifr->ifr_addr.sa_family == AF_INET)
+          numAddresses++;
+
         ifPtr += ifreq_len((struct ifreq *)ifPtr);
       }
     }
@@ -751,6 +756,11 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
         while (!ret && ifPtr && ifPtr < ifc.ifc_buf + ifc.ifc_len) {
           struct ifreq *ifr = (struct ifreq *)ifPtr;
 
+          ifPtr += ifreq_len(ifr);
+
+          if (ifr->ifr_addr.sa_family != AF_INET)
+             continue;
+
           ret = getInterfaceIndexByName(ifr->ifr_name,
            &(*ppIpAddrTable)->table[i].dwIndex);
           memcpy(&(*ppIpAddrTable)->table[i].dwAddr, ifr->ifr_addr.sa_data + 2,
@@ -769,7 +779,6 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
 
           (*ppIpAddrTable)->table[i].unused1 = 0;
           (*ppIpAddrTable)->table[i].wType = 0;
-          ifPtr += ifreq_len(ifr);
           i++;
         }
       }

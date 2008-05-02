@@ -30,21 +30,51 @@ typedef struct _RpcAuthInfo
 {
   LONG refs;
 
-  unsigned long AuthnLevel;
-  unsigned long AuthnSvc;
+  ULONG AuthnLevel;
+  ULONG AuthnSvc;
   CredHandle cred;
   TimeStamp exp;
+  ULONG cbMaxToken;
+  /* the auth identity pointer that the application passed us (freed by application) */
+  RPC_AUTH_IDENTITY_HANDLE *identity;
+  /* our copy of NT auth identity structure, if the authentication service
+   * takes an NT auth identity */
+  SEC_WINNT_AUTH_IDENTITY_W *nt_identity;
 } RpcAuthInfo;
+
+typedef struct _RpcQualityOfService
+{
+    LONG refs;
+
+    RPC_SECURITY_QOS_V2_W *qos;
+} RpcQualityOfService;
+
+typedef struct _RpcAssoc
+{
+    struct list entry; /* entry in the global list of associations */
+    LONG refs;
+
+    LPSTR Protseq;
+    LPSTR NetworkAddr;
+    LPSTR Endpoint;
+    LPWSTR NetworkOptions;
+
+    /* id of this association group */
+    ULONG assoc_group_id;
+
+    CRITICAL_SECTION cs;
+    struct list connection_pool;
+} RpcAssoc;
 
 struct connection_ops;
 
 typedef struct _RpcConnection
 {
   struct _RpcConnection* Next;
-  struct _RpcBinding* Used;
   BOOL server;
   LPSTR NetworkAddr;
   LPSTR Endpoint;
+  LPWSTR NetworkOptions;
   const struct connection_ops *ops;
   USHORT MaxTransmissionSize;
   /* The active interface bound to server. */
@@ -56,9 +86,13 @@ typedef struct _RpcConnection
   TimeStamp exp;
   ULONG attr;
   RpcAuthInfo *AuthInfo;
+  ULONG encryption_auth_len;
+  ULONG signature_auth_len;
+  RpcQualityOfService *QOS;
 
   /* client-only */
   struct list conn_pool_entry;
+  ULONG assoc_group_id; /* association group returned during binding */
 } RpcConnection;
 
 struct connection_ops {
@@ -84,18 +118,21 @@ typedef struct _RpcBinding
   LPSTR Protseq;
   LPSTR NetworkAddr;
   LPSTR Endpoint;
+  LPWSTR NetworkOptions;
   RPC_BLOCKING_FN BlockingFn;
   ULONG ServerTid;
   RpcConnection* FromConn;
+  RpcAssoc *Assoc;
 
   /* authentication */
   RpcAuthInfo *AuthInfo;
+  RpcQualityOfService *QOS;
 } RpcBinding;
 
 LPSTR RPCRT4_strndupA(LPCSTR src, INT len);
-LPWSTR RPCRT4_strndupW(LPWSTR src, INT len);
-LPSTR RPCRT4_strdupWtoA(LPWSTR src);
-LPWSTR RPCRT4_strdupAtoW(LPSTR src);
+LPWSTR RPCRT4_strndupW(LPCWSTR src, INT len);
+LPSTR RPCRT4_strdupWtoA(LPCWSTR src);
+LPWSTR RPCRT4_strdupAtoW(LPCSTR src);
 void RPCRT4_strfree(LPSTR src);
 
 #define RPCRT4_strdupA(x) RPCRT4_strndupA((x),-1)
@@ -103,21 +140,24 @@ void RPCRT4_strfree(LPSTR src);
 
 ULONG RpcAuthInfo_AddRef(RpcAuthInfo *AuthInfo);
 ULONG RpcAuthInfo_Release(RpcAuthInfo *AuthInfo);
+BOOL RpcAuthInfo_IsEqual(const RpcAuthInfo *AuthInfo1, const RpcAuthInfo *AuthInfo2);
+ULONG RpcQualityOfService_AddRef(RpcQualityOfService *qos);
+ULONG RpcQualityOfService_Release(RpcQualityOfService *qos);
+BOOL RpcQualityOfService_IsEqual(const RpcQualityOfService *qos1, const RpcQualityOfService *qos2);
 
-RpcConnection *RPCRT4_GetIdleConnection(const RPC_SYNTAX_IDENTIFIER *InterfaceId, const RPC_SYNTAX_IDENTIFIER *TransferSyntax, LPCSTR Protseq, LPCSTR NetworkAddr, LPCSTR Endpoint, RpcAuthInfo* AuthInfo);
-void RPCRT4_ReleaseIdleConnection(RpcConnection *Connection);
-RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server, LPCSTR Protseq, LPCSTR NetworkAddr, LPCSTR Endpoint, LPCSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcBinding* Binding);
+RPC_STATUS RPCRT4_GetAssociation(LPCSTR Protseq, LPCSTR NetworkAddr, LPCSTR Endpoint, LPCWSTR NetworkOptions, RpcAssoc **assoc);
+RpcConnection *RpcAssoc_GetIdleConnection(RpcAssoc *assoc, const RPC_SYNTAX_IDENTIFIER *InterfaceId, const RPC_SYNTAX_IDENTIFIER *TransferSyntax, const RpcAuthInfo *AuthInfo, const RpcQualityOfService *QOS);
+void RpcAssoc_ReleaseIdleConnection(RpcAssoc *assoc, RpcConnection *Connection);
+ULONG RpcAssoc_Release(RpcAssoc *assoc);
+
+RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server, LPCSTR Protseq, LPCSTR NetworkAddr, LPCSTR Endpoint, LPCWSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcQualityOfService *QOS);
 RPC_STATUS RPCRT4_DestroyConnection(RpcConnection* Connection);
 RPC_STATUS RPCRT4_OpenClientConnection(RpcConnection* Connection);
 RPC_STATUS RPCRT4_CloseConnection(RpcConnection* Connection);
 RPC_STATUS RPCRT4_SpawnConnection(RpcConnection** Connection, RpcConnection* OldConnection);
 
-RPC_STATUS RPCRT4_CreateBindingA(RpcBinding** Binding, BOOL server, LPSTR Protseq);
-RPC_STATUS RPCRT4_CreateBindingW(RpcBinding** Binding, BOOL server, LPWSTR Protseq);
-RPC_STATUS RPCRT4_CompleteBindingA(RpcBinding* Binding, LPSTR NetworkAddr,  LPSTR Endpoint,  LPSTR NetworkOptions);
-RPC_STATUS RPCRT4_CompleteBindingW(RpcBinding* Binding, LPWSTR NetworkAddr, LPWSTR Endpoint, LPWSTR NetworkOptions);
-RPC_STATUS RPCRT4_ResolveBinding(RpcBinding* Binding, LPSTR Endpoint);
-RPC_STATUS RPCRT4_SetBindingObject(RpcBinding* Binding, UUID* ObjectUuid);
+RPC_STATUS RPCRT4_ResolveBinding(RpcBinding* Binding, LPCSTR Endpoint);
+RPC_STATUS RPCRT4_SetBindingObject(RpcBinding* Binding, const UUID* ObjectUuid);
 RPC_STATUS RPCRT4_MakeBinding(RpcBinding** Binding, RpcConnection* Connection);
 RPC_STATUS RPCRT4_ExportBinding(RpcBinding** Binding, RpcBinding* OldBinding);
 RPC_STATUS RPCRT4_DestroyBinding(RpcBinding* Binding);

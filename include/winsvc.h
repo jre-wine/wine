@@ -38,6 +38,11 @@ extern "C" {
 #define SERVICES_ACTIVE_DATABASE      WINELIB_NAME_AW( SERVICES_ACTIVE_DATABASE )
 #define SERVICES_FAILED_DATABASE      WINELIB_NAME_AW( SERVICES_FAILED_DATABASE )
 
+/* Service State requests */
+#define SERVICE_ACTIVE                        0x00000001
+#define SERVICE_INACTIVE                      0x00000002
+#define SERVICE_STATE_ALL                     (SERVICE_ACTIVE | SERVICE_INACTIVE)
+
 /* Controls */
 #define SERVICE_CONTROL_STOP                  0x00000001
 #define SERVICE_CONTROL_PAUSE                 0x00000002
@@ -131,6 +136,21 @@ typedef struct _SERVICE_STATUS {
   DWORD dwWaitHint;
 } SERVICE_STATUS, *LPSERVICE_STATUS;
 
+/* Service status process structure */
+
+typedef struct _SERVICE_STATUS_PROCESS
+{
+  DWORD dwServiceType;
+  DWORD dwCurrentState;
+  DWORD dwControlsAccepted;
+  DWORD dwWin32ExitCode;
+  DWORD dwServiceSpecificExitCode;
+  DWORD dwCheckPoint;
+  DWORD dwWaitHint;
+  DWORD dwProcessId;
+  DWORD dwServiceFlags;
+} SERVICE_STATUS_PROCESS, *LPSERVICE_STATUS_PROCESS;
+
 typedef enum _SC_STATUS_TYPE {
   SC_STATUS_PROCESS_INFO      = 0
 } SC_STATUS_TYPE;
@@ -170,12 +190,27 @@ typedef struct _ENUM_SERVICE_STATUSW {
     SERVICE_STATUS ServiceStatus;
 } ENUM_SERVICE_STATUSW, *LPENUM_SERVICE_STATUSW;
 
+DECL_WINELIB_TYPE_AW(ENUM_SERVICE_STATUS)
+DECL_WINELIB_TYPE_AW(LPENUM_SERVICE_STATUS)
+
+typedef struct _ENUM_SERVICE_STATUS_PROCESSA {
+  LPSTR          lpServiceName;
+  LPSTR          lpDisplayName;
+  SERVICE_STATUS_PROCESS ServiceStatusProcess;
+} ENUM_SERVICE_STATUS_PROCESSA, *LPENUM_SERVICE_STATUS_PROCESSA;
+
+typedef struct _ENUM_SERVICE_STATUS_PROCESSW {
+    LPWSTR         lpServiceName;
+    LPWSTR         lpDisplayName;
+    SERVICE_STATUS_PROCESS ServiceStatusProcess;
+} ENUM_SERVICE_STATUS_PROCESSW, *LPENUM_SERVICE_STATUS_PROCESSW;
+
+DECL_WINELIB_TYPE_AW(ENUM_SERVICE_STATUS_PROCESS)
+DECL_WINELIB_TYPE_AW(LPENUM_SERVICE_STATUS_PROCESS)
+
 typedef enum _SC_ENUM_TYPE {
     SC_ENUM_PROCESS_INFO      = 0
 } SC_ENUM_TYPE;
-
-DECL_WINELIB_TYPE_AW(ENUM_SERVICE_STATUS)
-DECL_WINELIB_TYPE_AW(LPENUM_SERVICE_STATUS)
 
 typedef struct _QUERY_SERVICE_CONFIGA {
     DWORD   dwServiceType;
@@ -292,6 +327,11 @@ BOOL        WINAPI EnumServicesStatusA(SC_HANDLE,DWORD,DWORD,LPENUM_SERVICE_STAT
 BOOL        WINAPI EnumServicesStatusW(SC_HANDLE,DWORD,DWORD,LPENUM_SERVICE_STATUSW,
                                        DWORD,LPDWORD,LPDWORD,LPDWORD);
 #define     EnumServicesStatus WINELIB_NAME_AW(EnumServicesStatus)
+BOOL        WINAPI EnumServicesStatusExA(SC_HANDLE,SC_ENUM_TYPE,DWORD,DWORD,LPBYTE,
+                                         DWORD,LPDWORD,LPDWORD,LPDWORD,LPCSTR);
+BOOL        WINAPI EnumServicesStatusExW(SC_HANDLE,SC_ENUM_TYPE,DWORD,DWORD,LPBYTE,
+                                         DWORD,LPDWORD,LPDWORD,LPDWORD,LPCWSTR);
+#define     EnumServicesStatus WINELIB_NAME_AW(EnumServicesStatus)
 BOOL        WINAPI GetServiceDisplayNameA(SC_HANDLE,LPCSTR,LPSTR,LPDWORD);
 BOOL        WINAPI GetServiceDisplayNameW(SC_HANDLE,LPCWSTR,LPWSTR,LPDWORD);
 #define     GetServiceDisplayName WINELIB_NAME_AW(GetServiceDisplayName)
@@ -326,8 +366,8 @@ BOOL        WINAPI SetServiceStatus(SERVICE_STATUS_HANDLE,LPSERVICE_STATUS);
 BOOL        WINAPI StartServiceA(SC_HANDLE,DWORD,LPCSTR*);
 BOOL        WINAPI StartServiceW(SC_HANDLE,DWORD,LPCWSTR*);
 #define     StartService WINELIB_NAME_AW(StartService)
-BOOL        WINAPI StartServiceCtrlDispatcherA(LPSERVICE_TABLE_ENTRYA);
-BOOL        WINAPI StartServiceCtrlDispatcherW(LPSERVICE_TABLE_ENTRYW);
+BOOL        WINAPI StartServiceCtrlDispatcherA(const SERVICE_TABLE_ENTRYA*);
+BOOL        WINAPI StartServiceCtrlDispatcherW(const SERVICE_TABLE_ENTRYW*);
 #define     StartServiceCtrlDispatcher WINELIB_NAME_AW(StartServiceCtrlDispatcher)
 BOOL        WINAPI UnlockServiceDatabase(SC_LOCK);
 

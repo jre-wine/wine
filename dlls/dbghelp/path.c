@@ -25,19 +25,27 @@
 
 #include "dbghelp_private.h"
 #include "winnls.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
 static inline BOOL is_sep(char ch) {return ch == '/' || ch == '\\';}
+static inline BOOL is_sepW(WCHAR ch) {return ch == '/' || ch == '\\';}
 
 static inline const char* file_name(const char* str)
 {
     const char*       p;
 
     for (p = str + strlen(str) - 1; p >= str && !is_sep(*p); p--);
+    return p + 1;
+}
+
+static inline const WCHAR* file_nameW(const WCHAR* str)
+{
+    const WCHAR*      p;
+
+    for (p = str + strlenW(str) - 1; p >= str && !is_sepW(*p); p--);
     return p + 1;
 }
 
@@ -76,17 +84,46 @@ HANDLE WINAPI FindDebugInfoFileEx(PCSTR FileName, PCSTR SymbolPath,
 }
 
 /******************************************************************
+ *		FindExecutableImageExW (DBGHELP.@)
+ *
+ */
+HANDLE WINAPI FindExecutableImageExW(PCWSTR FileName, PCWSTR SymbolPath, PWSTR ImageFilePath,
+                                     PFIND_EXE_FILE_CALLBACKW Callback, void* user)
+{
+    HANDLE h;
+
+    if (Callback) FIXME("Unsupported callback yet\n");
+    if (!SearchPathW(SymbolPath, FileName, NULL, MAX_PATH, ImageFilePath, NULL))
+        return NULL;
+    h = CreateFileW(ImageFilePath, GENERIC_READ, FILE_SHARE_READ, NULL,
+                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    return (h == INVALID_HANDLE_VALUE) ? NULL : h;
+}
+
+/******************************************************************
+ *		FindExecutableImageEx (DBGHELP.@)
+ *
+ */
+HANDLE WINAPI FindExecutableImageEx(PCSTR FileName, PCSTR SymbolPath, PSTR ImageFilePath,
+                                    PFIND_EXE_FILE_CALLBACK Callback, void* user)
+{
+    HANDLE h;
+
+    if (Callback) FIXME("Unsupported callback yet\n");
+    if (!SearchPathA(SymbolPath, FileName, NULL, MAX_PATH, ImageFilePath, NULL))
+        return NULL;
+    h = CreateFileA(ImageFilePath, GENERIC_READ, FILE_SHARE_READ, NULL,
+                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    return (h == INVALID_HANDLE_VALUE) ? NULL : h;
+}
+
+/******************************************************************
  *		FindExecutableImage (DBGHELP.@)
  *
  */
 HANDLE WINAPI FindExecutableImage(PCSTR FileName, PCSTR SymbolPath, PSTR ImageFilePath)
 {
-    HANDLE h;
-    if (!SearchPathA(SymbolPath, FileName, NULL, MAX_PATH, ImageFilePath, NULL))
-        return NULL;
-    h = CreateFileA(ImageFilePath, GENERIC_READ, FILE_SHARE_READ, NULL, 
-                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    return (h == INVALID_HANDLE_VALUE) ? NULL : h;
+    return FindExecutableImageEx(FileName, SymbolPath, ImageFilePath, NULL, NULL);
 }
 
 /***********************************************************************
@@ -117,6 +154,34 @@ BOOL WINAPI MakeSureDirectoryPathExists(LPCSTR DirPath)
 }
 
 /******************************************************************
+ *		SymMatchFileNameW (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymMatchFileNameW(WCHAR* file, WCHAR* match,
+                              WCHAR** filestop, WCHAR** matchstop)
+{
+    WCHAR*      fptr;
+    WCHAR*      mptr;
+
+    TRACE("(%s %s %p %p)\n",
+          debugstr_w(file), debugstr_w(match), filestop, matchstop);
+
+    fptr = file + strlenW(file) - 1;
+    mptr = match + strlenW(match) - 1;
+
+    while (fptr >= file && mptr >= match)
+    {
+        if (toupperW(*fptr) != toupperW(*mptr) && !(is_sepW(*fptr) && is_sepW(*mptr)))
+            break;
+        fptr--; mptr--;
+    }
+    if (filestop) *filestop = fptr;
+    if (matchstop) *matchstop = mptr;
+
+    return mptr == match - 1;
+}
+
+/******************************************************************
  *		SymMatchFileName (DBGHELP.@)
  *
  */
@@ -143,34 +208,37 @@ BOOL WINAPI SymMatchFileName(char* file, char* match,
     return mptr == match - 1;
 }
 
-static BOOL do_search(const char* file, char* buffer, BOOL recurse,
-                      PENUMDIRTREE_CALLBACK cb, void* user)
+static BOOL do_searchW(const WCHAR* file, WCHAR* buffer, BOOL recurse,
+                       PENUMDIRTREE_CALLBACKW cb, void* user)
 {
     HANDLE              h;
-    WIN32_FIND_DATAA    fd;
+    WIN32_FIND_DATAW    fd;
     unsigned            pos;
     BOOL                found = FALSE;
+    static const WCHAR  S_AllW[] = {'*','.','*','\0'};
+    static const WCHAR  S_DotW[] = {'.','\0'};
+    static const WCHAR  S_DotDotW[] = {'.','\0'};
 
-    pos = strlen(buffer);
+    pos = strlenW(buffer);
     if (buffer[pos - 1] != '\\') buffer[pos++] = '\\';
-    strcpy(buffer + pos, "*.*");
-    if ((h = FindFirstFileA(buffer, &fd)) == INVALID_HANDLE_VALUE)
+    strcpyW(buffer + pos, S_AllW);
+    if ((h = FindFirstFileW(buffer, &fd)) == INVALID_HANDLE_VALUE)
         return FALSE;
-    /* doc doesn't specify how the tree is enumerated... 
+    /* doc doesn't specify how the tree is enumerated...
      * doing a depth first based on, but may be wrong
      */
     do
     {
-        if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
+        if (!strcmpW(fd.cFileName, S_DotW) || !strcmpW(fd.cFileName, S_DotDotW)) continue;
 
-        strcpy(buffer + pos, fd.cFileName);
+        strcpyW(buffer + pos, fd.cFileName);
         if (recurse && (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
-            found = do_search(file, buffer, TRUE, cb, user);
-        else if (SymMatchFileName(buffer, (char*)file, NULL, NULL))
+            found = do_searchW(file, buffer, TRUE, cb, user);
+        else if (SymMatchFileNameW(buffer, (WCHAR*)file, NULL, NULL))
         {
             if (!cb || cb(buffer, user)) found = TRUE;
         }
-    } while (!found && FindNextFileA(h, &fd));
+    } while (!found && FindNextFileW(h, &fd));
     if (!found) buffer[--pos] = '\0';
     FindClose(h);
 
@@ -178,14 +246,47 @@ static BOOL do_search(const char* file, char* buffer, BOOL recurse,
 }
 
 /***********************************************************************
+ *           SearchTreeForFileW (DBGHELP.@)
+ */
+BOOL WINAPI SearchTreeForFileW(PCWSTR root, PCWSTR file, PWSTR buffer)
+{
+    TRACE("(%s, %s, %p)\n",
+          debugstr_w(root), debugstr_w(file), buffer);
+    strcpyW(buffer, root);
+    return do_searchW(file, buffer, TRUE, NULL, NULL);
+}
+
+/***********************************************************************
  *           SearchTreeForFile (DBGHELP.@)
  */
 BOOL WINAPI SearchTreeForFile(PCSTR root, PCSTR file, PSTR buffer)
 {
-    TRACE("(%s, %s, %p)\n", 
-          debugstr_a(root), debugstr_a(file), buffer);
-    strcpy(buffer, root);
-    return do_search(file, buffer, TRUE, NULL, NULL);
+    WCHAR       rootW[MAX_PATH];
+    WCHAR       fileW[MAX_PATH];
+    WCHAR       bufferW[MAX_PATH];
+    BOOL        ret;
+
+    MultiByteToWideChar(CP_ACP, 0, root, -1, rootW, MAX_PATH);
+    MultiByteToWideChar(CP_ACP, 0, file, -1, fileW, MAX_PATH);
+    ret = SearchTreeForFileW(rootW, fileW, bufferW);
+    if (ret)
+        WideCharToMultiByte(CP_ACP, 0, bufferW, -1, buffer, MAX_PATH, NULL, NULL);
+    return ret;
+}
+
+/******************************************************************
+ *		EnumDirTreeW (DBGHELP.@)
+ *
+ *
+ */
+BOOL WINAPI EnumDirTreeW(HANDLE hProcess, PCWSTR root, PCWSTR file,
+                        LPWSTR buffer, PENUMDIRTREE_CALLBACKW cb, PVOID user)
+{
+    TRACE("(%p %s %s %p %p %p)\n",
+          hProcess, debugstr_w(root), debugstr_w(file), buffer, cb, user);
+
+    strcpyW(buffer, root);
+    return do_searchW(file, buffer, TRUE, cb, user);
 }
 
 /******************************************************************
@@ -193,13 +294,37 @@ BOOL WINAPI SearchTreeForFile(PCSTR root, PCSTR file, PSTR buffer)
  *
  *
  */
+struct enum_dir_treeWA
+{
+    PENUMDIRTREE_CALLBACK       cb;
+    void*                       user;
+    char                        name[MAX_PATH];
+};
+
+static BOOL CALLBACK enum_dir_treeWA(LPCWSTR name, PVOID user)
+{
+    struct enum_dir_treeWA*     edt = user;
+
+    WideCharToMultiByte(CP_ACP, 0, name, -1, edt->name, MAX_PATH, NULL, NULL);
+    return edt->cb(edt->name, edt->user);
+}
+
 BOOL WINAPI EnumDirTree(HANDLE hProcess, PCSTR root, PCSTR file,
                         LPSTR buffer, PENUMDIRTREE_CALLBACK cb, PVOID user)
 {
-    TRACE("(%p %s %s %p %p %p)\n", hProcess, root, file, buffer, cb, user);
+    WCHAR                       rootW[MAX_PATH];
+    WCHAR                       fileW[MAX_PATH];
+    WCHAR                       bufferW[MAX_PATH];
+    struct enum_dir_treeWA      edt;
+    BOOL                        ret;
 
-    strcpy(buffer, root);
-    return do_search(file, buffer, TRUE, cb, user);
+    edt.cb = cb;
+    edt.user = user;
+    MultiByteToWideChar(CP_ACP, 0, root, -1, rootW, MAX_PATH);
+    MultiByteToWideChar(CP_ACP, 0, file, -1, fileW, MAX_PATH);
+    if ((ret = EnumDirTreeW(hProcess, rootW, fileW, bufferW, enum_dir_treeWA, &edt)))
+        WideCharToMultiByte(CP_ACP, 0, bufferW, -1, buffer, MAX_PATH, NULL, NULL);
+    return ret;
 }
 
 struct sffip
@@ -216,7 +341,7 @@ struct sffip
     DWORD                       two;
     DWORD                       three;
     DWORD                       flags;
-    PFINDFILEINPATHCALLBACK     cb;
+    PFINDFILEINPATHCALLBACKW    cb;
     void*                       user;
 };
 
@@ -225,7 +350,7 @@ struct sffip
  * returns TRUE when file is found, FALSE to continue searching
  * (NB this is the opposite conventions as for SymFindFileInPathProc)
  */
-static BOOL CALLBACK sffip_cb(LPCSTR buffer, void* user)
+static BOOL CALLBACK sffip_cb(LPCWSTR buffer, void* user)
 {
     struct sffip*       s = (struct sffip*)user;
     DWORD               size, checksum;
@@ -243,10 +368,10 @@ static BOOL CALLBACK sffip_cb(LPCSTR buffer, void* user)
 
             timestamp = ~(DWORD_PTR)s->id;
             size = ~s->two;
-            hFile = CreateFileA(buffer, GENERIC_READ, FILE_SHARE_READ, NULL, 
+            hFile = CreateFileW(buffer, GENERIC_READ, FILE_SHARE_READ, NULL,
                                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
             if (hFile == INVALID_HANDLE_VALUE) return FALSE;
-            if ((hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) != NULL)
+            if ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) != NULL)
             {
                 if ((mapping = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) != NULL)
                 {
@@ -260,7 +385,7 @@ static BOOL CALLBACK sffip_cb(LPCSTR buffer, void* user)
             CloseHandle(hFile);
             if (timestamp != (DWORD_PTR)s->id || size != s->two)
             {
-                WARN("Found %s, but wrong size or timestamp\n", buffer);
+                WARN("Found %s, but wrong size or timestamp\n", debugstr_w(buffer));
                 return FALSE;
             }
         }
@@ -271,21 +396,23 @@ static BOOL CALLBACK sffip_cb(LPCSTR buffer, void* user)
             if (checksum != (DWORD_PTR)s->id)
             {
                 WARN("Found %s, but wrong checksums: %08x %08lx\n",
-                      buffer, checksum, (DWORD_PTR)s->id);
+                     debugstr_w(buffer), checksum, (DWORD_PTR)s->id);
                 return FALSE;
             }
         }
         else
         {
-            WARN("Couldn't read %s\n", buffer);
+            WARN("Couldn't read %s\n", debugstr_w(buffer));
             return FALSE;
         }
         break;
     case DMT_PDB:
         {
             struct pdb_lookup   pdb_lookup;
+            char                fn[MAX_PATH];
 
-            pdb_lookup.filename = buffer;
+            WideCharToMultiByte(CP_ACP, 0, buffer, -1, fn, MAX_PATH, NULL, NULL);
+            pdb_lookup.filename = fn;
 
             if (!pdb_fetch_file_info(&pdb_lookup)) return FALSE;
             switch (pdb_lookup.kind)
@@ -293,26 +420,26 @@ static BOOL CALLBACK sffip_cb(LPCSTR buffer, void* user)
             case PDB_JG:
                 if (s->flags & SSRVOPT_GUIDPTR)
                 {
-                    WARN("Found %s, but wrong PDB version\n", buffer);
+                    WARN("Found %s, but wrong PDB version\n", debugstr_w(buffer));
                     return FALSE;
                 }
                 if (pdb_lookup.u.jg.timestamp != (DWORD_PTR)s->id)
                 {
                     WARN("Found %s, but wrong signature: %08x %08lx\n",
-                         buffer, pdb_lookup.u.jg.timestamp, (DWORD_PTR)s->id);
+                         debugstr_w(buffer), pdb_lookup.u.jg.timestamp, (DWORD_PTR)s->id);
                     return FALSE;
                 }
                 break;
             case PDB_DS:
                 if (!(s->flags & SSRVOPT_GUIDPTR))
                 {
-                    WARN("Found %s, but wrong PDB version\n", buffer);
+                    WARN("Found %s, but wrong PDB version\n", debugstr_w(buffer));
                     return FALSE;
                 }
                 if (memcmp(&pdb_lookup.u.ds.guid, (GUID*)s->id, sizeof(GUID)))
                 {
                     WARN("Found %s, but wrong GUID: %s %s\n",
-                         buffer, debugstr_guid(&pdb_lookup.u.ds.guid),
+                         debugstr_w(buffer), debugstr_guid(&pdb_lookup.u.ds.guid),
                          debugstr_guid((GUID*)s->id));
                     return FALSE;
                 }
@@ -321,7 +448,7 @@ static BOOL CALLBACK sffip_cb(LPCSTR buffer, void* user)
             if (pdb_lookup.age != s->two)
             {
                 WARN("Found %s, but wrong age: %08x %08x\n",
-                     buffer, pdb_lookup.age, s->two);
+                     debugstr_w(buffer), pdb_lookup.age, s->two);
                 return FALSE;
             }
         }
@@ -333,39 +460,30 @@ static BOOL CALLBACK sffip_cb(LPCSTR buffer, void* user)
     /* yes, EnumDirTree/do_search and SymFindFileInPath callbacks use the opposite
      * convention to stop/continue enumeration. sigh.
      */
-    return !(s->cb)((char*)buffer, s->user);
+    return !(s->cb)((WCHAR*)buffer, s->user);
 }
 
 /******************************************************************
- *		SymFindFileInPath (DBGHELP.@)
+ *		SymFindFileInPathW (DBGHELP.@)
  *
  */
-BOOL WINAPI SymFindFileInPath(HANDLE hProcess, PCSTR inSearchPath, PCSTR full_path,
-                              PVOID id, DWORD two, DWORD three, DWORD flags,
-                              LPSTR buffer, PFINDFILEINPATHCALLBACK cb,
-                              PVOID user)
+BOOL WINAPI SymFindFileInPathW(HANDLE hProcess, PCWSTR searchPath, PCWSTR full_path,
+                               PVOID id, DWORD two, DWORD three, DWORD flags,
+                               LPWSTR buffer, PFINDFILEINPATHCALLBACKW cb,
+                               PVOID user)
 {
     struct sffip        s;
     struct process*     pcs = process_find_by_handle(hProcess);
-    char                tmp[MAX_PATH];
-    char*               ptr;
-    char*               buf = NULL;
-    const char*         filename;
-    const char*         searchPath = inSearchPath;
+    WCHAR               tmp[MAX_PATH];
+    WCHAR*              ptr;
+    const WCHAR*        filename;
 
     TRACE("(%p %s %s %p %08x %08x %08x %p %p %p)\n",
-          hProcess, searchPath, full_path, id, two, three, flags,
-          buffer, cb, user);
+          hProcess, debugstr_w(searchPath), debugstr_w(full_path),
+          id, two, three, flags, buffer, cb, user);
 
     if (!pcs) return FALSE;
-    if (!searchPath)
-    {
-        unsigned len = WideCharToMultiByte(CP_ACP, 0, pcs->search_path, -1, NULL, 0, NULL, NULL);
-
-        searchPath = buf = HeapAlloc(GetProcessHeap(), 0, len);
-        if (!searchPath) return FALSE;
-        WideCharToMultiByte(CP_ACP, 0, pcs->search_path, -1, buf, len, NULL, NULL);
-    }
+    if (!searchPath) searchPath = pcs->search_path;
 
     s.id = id;
     s.two = two;
@@ -374,38 +492,66 @@ BOOL WINAPI SymFindFileInPath(HANDLE hProcess, PCSTR inSearchPath, PCSTR full_pa
     s.cb = cb;
     s.user = user;
 
-    filename = file_name(full_path);
+    filename = file_nameW(full_path);
     s.kind = module_get_type_by_name(filename);
 
     /* first check full path to file */
     if (sffip_cb(full_path, &s))
     {
-        strcpy(buffer, full_path);
-        HeapFree(GetProcessHeap(), 0, buf);
+        strcpyW(buffer, full_path);
         return TRUE;
     }
 
     while (searchPath)
     {
-        ptr = strchr(searchPath, ';');
+        ptr = strchrW(searchPath, ';');
         if (ptr)
         {
-            memcpy(tmp, searchPath, ptr - searchPath);
+            memcpy(tmp, searchPath, (ptr - searchPath) * sizeof(WCHAR));
             tmp[ptr - searchPath] = 0;
             searchPath = ptr + 1;
         }
         else
         {
-            strcpy(tmp, searchPath);
+            strcpyW(tmp, searchPath);
             searchPath = NULL;
         }
-        if (do_search(filename, tmp, FALSE, sffip_cb, &s))
+        if (do_searchW(filename, tmp, FALSE, sffip_cb, &s))
         {
-            strcpy(buffer, tmp);
-            HeapFree(GetProcessHeap(), 0, buf);
+            strcpyW(buffer, tmp);
             return TRUE;
         }
     }
-    HeapFree(GetProcessHeap(), 0, buf);
     return FALSE;
+}
+
+/******************************************************************
+ *		SymFindFileInPath (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymFindFileInPath(HANDLE hProcess, PCSTR searchPath, PCSTR full_path,
+                              PVOID id, DWORD two, DWORD three, DWORD flags,
+                              LPSTR buffer, PFINDFILEINPATHCALLBACK cb,
+                              PVOID user)
+{
+    WCHAR                       searchPathW[MAX_PATH];
+    WCHAR                       full_pathW[MAX_PATH];
+    WCHAR                       bufferW[MAX_PATH];
+    struct enum_dir_treeWA      edt;
+    BOOL                        ret;
+
+    /* a PFINDFILEINPATHCALLBACK and a PENUMDIRTREE_CALLBACK have actually the
+     * same signature & semantics, hence we can reuse the EnumDirTree W->A
+     * conversion helper
+     */
+    edt.cb = cb;
+    edt.user = user;
+    if (searchPath)
+        MultiByteToWideChar(CP_ACP, 0, searchPath, -1, searchPathW, MAX_PATH);
+    MultiByteToWideChar(CP_ACP, 0, full_path, -1, full_pathW, MAX_PATH);
+    if ((ret =  SymFindFileInPathW(hProcess, searchPath ? searchPathW : NULL, full_pathW,
+                                   id, two, three, flags,
+                                   bufferW, enum_dir_treeWA, &edt)))
+        WideCharToMultiByte(CP_ACP, 0, bufferW, -1, buffer, MAX_PATH, NULL, NULL);
+    return ret;
 }

@@ -54,8 +54,6 @@ struct SysMouseImpl
 {
     struct IDirectInputDevice2AImpl base;
     
-    IDirectInputImpl               *dinput;
-
     /* SysMouseAImpl */
     /* These are used in case of relative -> absolute transitions */
     POINT                           org_coords;
@@ -73,7 +71,7 @@ struct SysMouseImpl
 /* FIXME: This is ugly and not thread safe :/ */
 static IDirectInputDevice8A* current_lock = NULL;
 
-static GUID DInput_Wine_Mouse_GUID = { /* 9e573ed8-7734-11d2-8d4a-23903fb6bdf7 */
+static const GUID DInput_Wine_Mouse_GUID = { /* 9e573ed8-7734-11d2-8d4a-23903fb6bdf7 */
     0x9e573ed8,
     0x7734,
     0x11d2,
@@ -177,7 +175,8 @@ static SysMouseImpl *alloc_device(REFGUID rguid, const void *mvt, IDirectInputIm
     newDevice->base.dwCoopLevel = DISCL_NONEXCLUSIVE | DISCL_BACKGROUND;
     memcpy(&newDevice->base.guid, rguid, sizeof(*rguid));
     InitializeCriticalSection(&newDevice->base.crit);
-    newDevice->dinput = dinput;
+    newDevice->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": SysMouseImpl*->base.crit");
+    newDevice->base.dinput = dinput;
 
     /* Create copy of default data format */
     if (!(df = HeapAlloc(GetProcessHeap(), 0, c_dfDIMouse2.dwSize))) goto failed;
@@ -193,7 +192,7 @@ static SysMouseImpl *alloc_device(REFGUID rguid, const void *mvt, IDirectInputIm
             df->rgodf[i].dwType = DIDFT_MAKEINSTANCE(i) | DIDFT_PSHBUTTON;
 
     newDevice->base.data_format.wine_df = df;
-    IDirectInput_AddRef((LPDIRECTINPUTDEVICE8A)newDevice->dinput);
+    IDirectInput_AddRef((LPDIRECTINPUTDEVICE8A)newDevice->base.dinput);
     return newDevice;
 
 failed:
@@ -255,34 +254,6 @@ const struct dinput_device mouse_device = {
  *	SysMouseA (DInput Mouse support)
  */
 
-/******************************************************************************
-  *     Release : release the mouse buffer.
-  */
-static ULONG WINAPI SysMouseAImpl_Release(LPDIRECTINPUTDEVICE8A iface)
-{
-    SysMouseImpl *This = (SysMouseImpl *)iface;
-    ULONG ref;
- 
-    ref = InterlockedDecrement(&This->base.ref);
-    if (ref)
-	return ref;
-
-    set_dinput_hook(WH_MOUSE_LL, NULL);
-
-    /* Free the data queue */
-    HeapFree(GetProcessHeap(), 0, This->base.data_queue);
-
-    /* Free data format */
-    HeapFree(GetProcessHeap(), 0, (LPVOID)This->base.data_format.wine_df->rgodf);
-    HeapFree(GetProcessHeap(), 0, (LPVOID)This->base.data_format.wine_df);
-    release_DataFormat(&This->base.data_format);
-
-    IDirectInput_Release((LPDIRECTINPUTDEVICE8A)This->dinput);
-    DeleteCriticalSection(&This->base.crit);
-    HeapFree(GetProcessHeap(),0,This);
-    return 0;
-}
-
 /* low-level mouse hook */
 static LRESULT CALLBACK dinput_mouse_hook( int code, WPARAM wparam, LPARAM lparam )
 {
@@ -315,7 +286,7 @@ static LRESULT CALLBACK dinput_mouse_hook( int code, WPARAM wparam, LPARAM lpara
             if (pt.x)
                 queue_event((LPDIRECTINPUTDEVICE8A)This, id_to_offset(&This->base.data_format,
                             DIDFT_MAKEINSTANCE(WINE_MOUSE_X_AXIS_INSTANCE) | DIDFT_RELAXIS),
-                            pt1.x, hook->time, This->dinput->evsequence);
+                            pt1.x, hook->time, This->base.dinput->evsequence);
             if (pt.y)
             {
                 inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_Y_AXIS_INSTANCE) | DIDFT_RELAXIS;
@@ -367,14 +338,14 @@ static LRESULT CALLBACK dinput_mouse_hook( int code, WPARAM wparam, LPARAM lpara
     {
         int i;
 
-        TRACE("msg %x @ (%d %d): (X: %d Y: %d Z: %d\n", wparam, hook->pt.x, hook->pt.y,
+        TRACE("msg %lx @ (%d %d): (X: %d Y: %d Z: %d", wparam, hook->pt.x, hook->pt.y,
               This->m_state.lX, This->m_state.lY, This->m_state.lZ);
         for (i = 0; i < 5; i++) TRACE(" B%d: %02x", i, This->m_state.rgbButtons[i]);
         TRACE(")\n");
     }
     if (inst_id != -1)
         queue_event((LPDIRECTINPUTDEVICE8A)This, id_to_offset(&This->base.data_format, inst_id),
-                    wdata, hook->time, This->dinput->evsequence++);
+                    wdata, hook->time, This->base.dinput->evsequence++);
 
     LeaveCriticalSection(&This->base.crit);
     
@@ -634,7 +605,7 @@ static HRESULT WINAPI SysMouseAImpl_GetCapabilities(
 
     devcaps.dwSize = lpDIDevCaps->dwSize;
     devcaps.dwFlags = DIDC_ATTACHED;
-    if (This->dinput->dwVersion >= 0x0800)
+    if (This->base.dinput->dwVersion >= 0x0800)
 	devcaps.dwDevType = DI8DEVTYPE_MOUSE | (DI8DEVTYPEMOUSE_TRADITIONAL << 8);
     else
 	devcaps.dwDevType = DIDEVTYPE_MOUSE | (DIDEVTYPEMOUSE_TRADITIONAL << 8);
@@ -713,7 +684,7 @@ static HRESULT WINAPI SysMouseAImpl_GetDeviceInfo(
 	return DI_OK;
     }
 
-    fill_mouse_dideviceinstanceA(pdidi, This->dinput->dwVersion);
+    fill_mouse_dideviceinstanceA(pdidi, This->base.dinput->dwVersion);
     
     return DI_OK;
 }
@@ -728,7 +699,7 @@ static HRESULT WINAPI SysMouseWImpl_GetDeviceInfo(LPDIRECTINPUTDEVICE8W iface, L
 	return DI_OK;
     }
 
-    fill_mouse_dideviceinstanceW(pdidi, This->dinput->dwVersion);
+    fill_mouse_dideviceinstanceW(pdidi, This->base.dinput->dwVersion);
     
     return DI_OK;
 }
@@ -738,7 +709,7 @@ static const IDirectInputDevice8AVtbl SysMouseAvt =
 {
     IDirectInputDevice2AImpl_QueryInterface,
     IDirectInputDevice2AImpl_AddRef,
-    SysMouseAImpl_Release,
+    IDirectInputDevice2AImpl_Release,
     SysMouseAImpl_GetCapabilities,
     IDirectInputDevice2AImpl_EnumObjects,
     SysMouseAImpl_GetProperty,
@@ -780,7 +751,7 @@ static const IDirectInputDevice8WVtbl SysMouseWvt =
 {
     IDirectInputDevice2WImpl_QueryInterface,
     XCAST(AddRef)IDirectInputDevice2AImpl_AddRef,
-    XCAST(Release)SysMouseAImpl_Release,
+    XCAST(Release)IDirectInputDevice2AImpl_Release,
     XCAST(GetCapabilities)SysMouseAImpl_GetCapabilities,
     IDirectInputDevice2WImpl_EnumObjects,
     XCAST(GetProperty)SysMouseAImpl_GetProperty,

@@ -238,7 +238,7 @@ typedef HRESULT (*PFN_PROVIDER_OBJTRUST_CALL)(
  struct _CRYPT_PROVIDER_DATA *pProvData);
 typedef HRESULT (*PFN_PROVIDER_SIGTRUST_CALL)(
  struct _CRYPT_PROVIDER_DATA *pProvData);
-typedef HRESULT (*PFN_PROVIDER_CERTTTRUST_CALL)(
+typedef HRESULT (*PFN_PROVIDER_CERTTRUST_CALL)(
  struct _CRYPT_PROVIDER_DATA *pProvData);
 typedef HRESULT (*PFN_PROVIDER_FINALPOLICY_CALL)(
  struct _CRYPT_PROVIDER_DATA *pProvData);
@@ -261,7 +261,7 @@ typedef struct _CRYPT_PROVIDER_FUNCTIONS {
     PFN_PROVIDER_INIT_CALL            pfnInitialize;
     PFN_PROVIDER_OBJTRUST_CALL        pfnObjectTrust;
     PFN_PROVIDER_SIGTRUST_CALL        pfnSignatureTrust;
-    PFN_PROVIDER_CERTTTRUST_CALL      pfnCertificateTrust;
+    PFN_PROVIDER_CERTTRUST_CALL       pfnCertificateTrust;
     PFN_PROVIDER_FINALPOLICY_CALL     pfnFinalPolicy;
     PFN_PROVIDER_CERTCHKPOLICY_CALL   pfnCertCheckPolicy;
     PFN_PROVIDER_TESTFINALPOLICY_CALL pfnTestFinalPolicy;
@@ -362,8 +362,9 @@ static const WCHAR WT_PROVIDER_CERTTRUST_FUNCTION[] =
 BOOL      WINAPI WintrustAddActionID(GUID*,DWORD,CRYPT_REGISTER_ACTIONID*);
 BOOL      WINAPI WintrustRemoveActionID(GUID*);
 BOOL      WINAPI WintrustLoadFunctionPointers(GUID*,CRYPT_PROVIDER_FUNCTIONS*);
-BOOL      WINAPI WintrustAddDefaultForUsage(const CHAR*,CRYPT_PROVIDER_REGDEFUSAGE*);
+BOOL      WINAPI WintrustAddDefaultForUsage(const char*,CRYPT_PROVIDER_REGDEFUSAGE*);
 void      WINAPI WintrustGetRegPolicyFlags(DWORD*);
+BOOL      WINAPI WintrustSetRegPolicyFlags(DWORD);
 LONG      WINAPI WinVerifyTrust(HWND,GUID*,LPVOID);
 HRESULT   WINAPI WinVerifyTrustEx(HWND,GUID*,WINTRUST_DATA*);
 

@@ -255,7 +255,7 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
         case WINED3DFMT_DXT3:
         case WINED3DFMT_DXT4:
         case WINED3DFMT_DXT5:
-        case WINED3DFMT_MULTI2_ARGB:
+        case WINED3DFMT_MULTI2_ARGB8:
         case WINED3DFMT_G8R8_G8B8:
         case WINED3DFMT_R8G8_B8G8:
             DDPixelFormat->dwFlags = DDPF_FOURCC;
@@ -337,7 +337,7 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
  *  WINED3DFMT_UNKNOWN if a matching format wasn't found
  *****************************************************************************/
 WINED3DFORMAT
-PixelFormat_DD2WineD3D(DDPIXELFORMAT *DDPixelFormat)
+PixelFormat_DD2WineD3D(const DDPIXELFORMAT *DDPixelFormat)
 {
     TRACE("Convert a DirectDraw Pixelformat to a WineD3D Pixelformat\n");    
     if(TRACE_ON(ddraw))
@@ -583,7 +583,7 @@ PixelFormat_DD2WineD3D(DDPIXELFORMAT *DDPixelFormat)
         {
             return WINED3DFMT_R8G8_B8G8;
         }
-        return WINED3DFMT_UNKNOWN;  /* Abuse this as a error value */
+        return WINED3DFMT_UNKNOWN;  /* Abuse this as an error value */
     }
     else if(DDPixelFormat->dwFlags & DDPF_BUMPDUDV)
     {
@@ -874,7 +874,7 @@ void DDRAW_dump_surface_desc(const DDSURFACEDESC2 *lpddsd)
 }
 
 void
-dump_D3DMATRIX(D3DMATRIX *mat)
+dump_D3DMATRIX(const D3DMATRIX *mat)
 {
     DPRINTF("  %f %f %f %f\n", mat->_11, mat->_12, mat->_13, mat->_14);
     DPRINTF("  %f %f %f %f\n", mat->_21, mat->_22, mat->_23, mat->_24);
@@ -894,9 +894,14 @@ get_flexible_vertex_size(DWORD d3dvtVertexType)
     if (d3dvtVertexType & D3DFVF_RESERVED1) size += sizeof(DWORD);
     switch (d3dvtVertexType & D3DFVF_POSITION_MASK)
     {
-        case D3DFVF_XYZ: size += 3 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZ:    size += 3 * sizeof(D3DVALUE); break;
         case D3DFVF_XYZRHW: size += 4 * sizeof(D3DVALUE); break;
-        default: TRACE(" matrix weighting not handled yet...\n");
+        case D3DFVF_XYZB1:  size += 4 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZB2:  size += 5 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZB3:  size += 6 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZB4:  size += 7 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZB5:  size += 8 * sizeof(D3DVALUE); break;
+        default: ERR("Unexpected position mask\n");
     }
     for (i = 0; i < GET_TEXCOUNT_FROM_FVF(d3dvtVertexType); i++)
     {
@@ -1129,8 +1134,8 @@ void DDRAW_dump_DDCAPS(const DDCAPS *lpcaps)
  *****************************************************************************/
 void
 multiply_matrix(D3DMATRIX *dest,
-                D3DMATRIX *src1,
-                D3DMATRIX *src2)
+                const D3DMATRIX *src1,
+                const D3DMATRIX *src2)
 {
     D3DMATRIX temp;
 

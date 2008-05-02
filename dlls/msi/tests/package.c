@@ -147,6 +147,15 @@ static UINT create_signature_table( MSIHANDLE hdb )
             "PRIMARY KEY `Signature`)" );
 }
 
+static UINT create_launchcondition_table( MSIHANDLE hdb )
+{
+    return run_query( hdb,
+            "CREATE TABLE `LaunchCondition` ("
+            "`Condition` CHAR(255) NOT NULL, "
+            "`Description` CHAR(255) NOT NULL "
+            "PRIMARY KEY `Condition`)" );
+}
+
 static UINT add_component_entry( MSIHANDLE hdb, const char *values )
 {
     char insert[] = "INSERT INTO `Component`  "
@@ -247,6 +256,22 @@ static UINT add_signature_entry( MSIHANDLE hdb, const char *values )
     char insert[] = "INSERT INTO `Signature` "
             "(`Signature`, `FileName`, `MinVersion`, `MaxVersion`,"
             " `MinSize`, `MaxSize`, `MinDate`, `MaxDate`, `Languages`) "
+            "VALUES( %s )";
+    char *query;
+    UINT sz, r;
+
+    sz = strlen(values) + sizeof insert;
+    query = HeapAlloc(GetProcessHeap(),0,sz);
+    sprintf(query,insert,values);
+    r = run_query( hdb, query );
+    HeapFree(GetProcessHeap(), 0, query);
+    return r;
+}
+
+static UINT add_launchcondition_entry( MSIHANDLE hdb, const char *values )
+{
+    char insert[] = "INSERT INTO `LaunchCondition` "
+            "(`Condition`, `Description`) "
             "VALUES( %s )";
     char *query;
     UINT sz, r;
@@ -1329,6 +1354,29 @@ static void test_condition(void)
     r = MsiEvaluateCondition(hpkg, "one < \"1\"");
     ok( r == MSICONDITION_FALSE, "wrong return val\n");
 
+    MsiSetProperty(hpkg, "X", "5.0");
+
+    r = MsiEvaluateCondition(hpkg, "X != \"\"");
+    ok( r == MSICONDITION_ERROR, "wrong return val (%d)\n", r);
+
+    r = MsiEvaluateCondition(hpkg, "X =\"5.0\"");
+    ok( r == MSICONDITION_TRUE, "wrong return val (%d)\n", r);
+
+    r = MsiEvaluateCondition(hpkg, "X =\"5.1\"");
+    ok( r == MSICONDITION_FALSE, "wrong return val (%d)\n", r);
+
+    r = MsiEvaluateCondition(hpkg, "X =\"6.0\"");
+    ok( r == MSICONDITION_FALSE, "wrong return val (%d)\n", r);
+
+    r = MsiEvaluateCondition(hpkg, "X =\"5.0\" or X =\"5.1\" or X =\"6.0\"");
+    ok( r == MSICONDITION_TRUE, "wrong return val (%d)\n", r);
+
+    r = MsiEvaluateCondition(hpkg, "(X =\"5.0\" or X =\"5.1\" or X =\"6.0\")");
+    ok( r == MSICONDITION_TRUE, "wrong return val (%d)\n", r);
+
+    r = MsiEvaluateCondition(hpkg, "X !=\"\" and (X =\"5.0\" or X =\"5.1\" or X =\"6.0\")");
+    ok( r == MSICONDITION_ERROR, "wrong return val (%d)\n", r);
+
     MsiCloseHandle( hpkg );
     DeleteFile(msifile);
 }
@@ -1347,12 +1395,26 @@ static BOOL check_prop_empty( MSIHANDLE hpkg, const char * prop)
 
 static void test_props(void)
 {
-    MSIHANDLE hpkg;
+    MSIHANDLE hpkg, hdb;
     UINT r;
     DWORD sz;
     char buffer[0x100];
 
-    hpkg = package_from_db(create_package_db());
+    hdb = create_package_db();
+    r = run_query( hdb,
+            "CREATE TABLE `Property` ( "
+            "`Property` CHAR(255) NOT NULL, "
+            "`Value` CHAR(255) "
+            "PRIMARY KEY `Property`)" );
+    ok( r == ERROR_SUCCESS , "Failed\n" );
+
+    r = run_query(hdb,
+            "INSERT INTO `Property` "
+            "(`Property`, `Value`) "
+            "VALUES( 'MetadataCompName', 'Photoshop.dll' )");
+    ok( r == ERROR_SUCCESS , "Failed\n" );
+
+    hpkg = package_from_db( hdb );
     ok( hpkg, "failed to create package\n");
 
     /* test invalid values */
@@ -1472,6 +1534,35 @@ static void test_props(void)
     ok( r == ERROR_SUCCESS, "wrong return val\n");
     ok( !strcmp(buffer,"foo"), "buffer wrong\n");
     ok( sz == 3, "wrong size returned\n");
+
+    r = MsiSetProperty(hpkg, "MetadataCompName", "Photoshop.dll");
+    ok( r == ERROR_SUCCESS, "wrong return val\n");
+
+    sz = 0;
+    r = MsiGetProperty(hpkg, "MetadataCompName", NULL, &sz );
+    ok( r == ERROR_SUCCESS, "return wrong\n");
+    ok( sz == 13, "size wrong (%d)\n", sz);
+
+    sz = 13;
+    r = MsiGetProperty(hpkg, "MetadataCompName", buffer, &sz );
+    ok( r == ERROR_MORE_DATA, "return wrong\n");
+    ok( !strcmp(buffer,"Photoshop.dl"), "buffer wrong\n");
+
+    r = MsiSetProperty(hpkg, "property", "value");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    sz = 6;
+    r = MsiGetProperty(hpkg, "property", buffer, &sz);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok( !strcmp(buffer, "value"), "Expected value, got %s\n", buffer);
+
+    r = MsiSetProperty(hpkg, "property", NULL);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    sz = 6;
+    r = MsiGetProperty(hpkg, "property", buffer, &sz);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok( !strlen(buffer), "Expected empty string, got %s\n", buffer);
 
     MsiCloseHandle( hpkg );
     DeleteFile(msifile);
@@ -2971,6 +3062,31 @@ static void test_installprops(void)
     ok( r == ERROR_SUCCESS, "failed to get property: %d\n", r);
     ok( !lstrcmp(buf, path), "Expected %s, got %s\n", path, buf);
 
+    size = MAX_PATH;
+    r = MsiGetProperty(hpkg, "VersionDatabase", buf, &size);
+    ok( r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+    trace("VersionDatabase = %s\n", buf);
+
+    size = MAX_PATH;
+    r = MsiGetProperty(hpkg, "VersionMsi", buf, &size);
+    ok( r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+    trace("VersionMsi = %s\n", buf);
+
+    size = MAX_PATH;
+    r = MsiGetProperty(hpkg, "Date", buf, &size);
+    ok( r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+    trace("Date = %s\n", buf);
+
+    size = MAX_PATH;
+    r = MsiGetProperty(hpkg, "Time", buf, &size);
+    ok( r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+    trace("Time = %s\n", buf);
+
+    size = MAX_PATH;
+    r = MsiGetProperty(hpkg, "PackageCode", buf, &size);
+    ok( r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+    trace("PackageCode = %s\n", buf);
+
     CloseHandle(hkey);
     MsiCloseHandle(hpkg);
     DeleteFile(msifile);
@@ -3138,6 +3254,50 @@ static void test_prop_path(void)
     DeleteFile(msifile);
 }
 
+static void test_launchconditions(void)
+{
+    MSIHANDLE hpkg;
+    MSIHANDLE hdb;
+    UINT r;
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    hdb = create_package_db();
+    ok( hdb, "failed to create package database\n" );
+
+    r = create_launchcondition_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create LaunchCondition table: %d\n", r );
+
+    r = add_launchcondition_entry( hdb, "'X = \"1\"', 'one'" );
+    ok( r == ERROR_SUCCESS, "cannot add launch condition: %d\n", r );
+
+    /* invalid condition */
+    r = add_launchcondition_entry( hdb, "'X != \"1\"', 'one'" );
+    ok( r == ERROR_SUCCESS, "cannot add launch condition: %d\n", r );
+
+    hpkg = package_from_db( hdb );
+    ok( hpkg, "failed to create package\n");
+
+    MsiCloseHandle( hdb );
+
+    r = MsiSetProperty( hpkg, "X", "1" );
+    ok( r == ERROR_SUCCESS, "failed to set property\n" );
+
+    /* invalid conditions are ignored */
+    r = MsiDoAction( hpkg, "LaunchConditions" );
+    ok( r == ERROR_SUCCESS, "cost init failed\n" );
+
+    /* verify LaunchConditions still does some verification */
+    r = MsiSetProperty( hpkg, "X", "2" );
+    ok( r == ERROR_SUCCESS, "failed to set property\n" );
+
+    r = MsiDoAction( hpkg, "LaunchConditions" );
+    ok( r == ERROR_INSTALL_FAILURE, "Expected ERROR_INSTALL_FAILURE, got %d\n", r );
+
+    MsiCloseHandle( hpkg );
+    DeleteFile( msifile );
+}
+
 START_TEST(package)
 {
     test_createpackage();
@@ -3159,4 +3319,5 @@ START_TEST(package)
     test_installprops();
     test_sourcedirprop();
     test_prop_path();
+    test_launchconditions();
 }

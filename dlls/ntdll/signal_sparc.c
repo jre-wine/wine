@@ -54,7 +54,7 @@ static wine_signal_handler handlers[256];
 /***********************************************************************
  *           dispatch_signal
  */
-inline static int dispatch_signal(unsigned int sig)
+static inline int dispatch_signal(unsigned int sig)
 {
     if (handlers[sig] == NULL) return 0;
     return handlers[sig](sig);
@@ -436,9 +436,8 @@ static int set_handler( int sig, void (*func)() )
 {
     struct sigaction sig_act;
 
-    sig_act.sa_handler = NULL;
     sig_act.sa_sigaction = func;
-    sigemptyset( &sig_act.sa_mask );
+    sig_act.sa_mask = server_block_set;
     sig_act.sa_flags = SA_SIGINFO;
 
     return sigaction( sig, &sig_act, NULL );

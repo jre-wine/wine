@@ -482,7 +482,7 @@ run_tests (char *logname)
         report (R_FATAL, "Could not create directory: %s", tempdir);
     report (R_DIR, tempdir);
 
-    xprintf ("Version 3\n");
+    xprintf ("Version 4\n");
     strres = extract_rcdata (MAKEINTRESOURCE(WINE_BUILD), STRINGRES, &strsize);
     xprintf ("Tests from build ");
     if (strres) xprintf ("%.*s", strsize, strres);
@@ -555,15 +555,15 @@ run_tests (char *logname)
 static void
 usage (void)
 {
-    fprintf (stderr, "\
-Usage: winetest [OPTION]...\n\n\
-  -c       console mode, no GUI\n\
-  -e       preserve the environment\n\
-  -h       print this message and exit\n\
-  -q       quiet mode, no output at all\n\
-  -o FILE  put report into FILE, do not submit\n\
-  -s FILE  submit FILE, do not run tests\n\
-  -t TAG   include TAG of characters [-.0-9a-zA-Z] in the report\n");
+    fprintf (stderr,
+"Usage: winetest [OPTION]...\n\n"
+"  -c       console mode, no GUI\n"
+"  -e       preserve the environment\n"
+"  -h       print this message and exit\n"
+"  -q       quiet mode, no output at all\n"
+"  -o FILE  put report into FILE, do not submit\n"
+"  -s FILE  submit FILE, do not run tests\n"
+"  -t TAG   include TAG of characters [-.0-9a-zA-Z] in the report\n");
 }
 
 int WINAPI WinMain (HINSTANCE hInst, HINSTANCE hPrevInst,
@@ -629,16 +629,20 @@ int WINAPI WinMain (HINSTANCE hInst, HINSTANCE hPrevInst,
     }
     if (!submit) {
         static CHAR platform_windows[]  = "WINETEST_PLATFORM=windows",
+                    platform_wine[]     = "WINETEST_PLATFORM=wine",
                     debug_yes[]         = "WINETEST_DEBUG=1",
                     interactive_no[]    = "WINETEST_INTERACTIVE=0",
                     report_success_no[] = "WINETEST_REPORT_SUCCESS=0";
+        CHAR *platform;
 
         report (R_STATUS, "Starting up");
 
         if (!running_on_visible_desktop ())
             report (R_FATAL, "Tests must be run on a visible desktop");
 
-        if (reset_env && (putenv (platform_windows) ||
+        platform = running_under_wine () ? platform_wine : platform_windows;
+
+        if (reset_env && (putenv (platform) ||
                           putenv (debug_yes)        ||
                           putenv (interactive_no)   ||
                           putenv (report_success_no)))

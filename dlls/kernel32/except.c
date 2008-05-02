@@ -44,7 +44,6 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
-#include "winerror.h"
 #include "winternl.h"
 #include "wingdi.h"
 #include "winuser.h"
@@ -186,7 +185,7 @@ static BOOL	start_debugger(PEXCEPTION_POINTERS epointers, HANDLE hEvent)
     UNICODE_STRING nameW;
     char *cmdline, *env, *p;
     HANDLE		hDbgConf;
-    DWORD		bAuto = FALSE;
+    DWORD		bAuto = TRUE;
     PROCESS_INFORMATION	info;
     STARTUPINFOA	startup;
     char*		format = NULL;
@@ -260,7 +259,6 @@ static BOOL	start_debugger(PEXCEPTION_POINTERS epointers, HANDLE hEvent)
                bAuto = atoiW( str );
            }
        }
-       else bAuto = TRUE;
 
        NtClose(hDbgConf);
     }
@@ -393,7 +391,7 @@ static	int	start_debugger_atomic(PEXCEPTION_POINTERS epointers)
  * If yes, we unprotect the resources to let broken apps continue
  * (Windows does this too).
  */
-inline static BOOL check_resource_write( void *addr )
+static inline BOOL check_resource_write( void *addr )
 {
     void *rsrc;
     DWORD size;
@@ -416,7 +414,7 @@ inline static BOOL check_resource_write( void *addr )
  *
  * Check for executing a protected area.
  */
-inline static BOOL check_no_exec( void *addr )
+static inline BOOL check_no_exec( void *addr )
 {
     MEMORY_BASIC_INFORMATION info;
 

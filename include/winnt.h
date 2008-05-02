@@ -30,6 +30,11 @@
 #include <string.h>
 #endif
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define NTAPI __stdcall
 
 #if (defined(_M_IX86) || defined(_M_IA64) || defined(_M_AMD64) || defined(__MINGW32__)) && !defined(MIDL_PASS)
@@ -393,10 +398,13 @@ typedef LPCSTR          PCTSTR,      LPCTSTR;
 
 /* Misc common WIN32 types */
 typedef char            CCHAR;
-typedef LONG            HRESULT;
 typedef DWORD           LCID,       *PLCID;
 typedef WORD            LANGID;
 typedef DWORD		EXECUTION_STATE;
+#ifndef _HRESULT_DEFINED
+#define _HRESULT_DEFINED
+typedef LONG            HRESULT;
+#endif
 
 /* Handle type */
 
@@ -592,6 +600,63 @@ typedef struct _LIST_ENTRY {
 typedef struct _SINGLE_LIST_ENTRY {
   struct _SINGLE_LIST_ENTRY *Next;
 } SINGLE_LIST_ENTRY, *PSINGLE_LIST_ENTRY;
+
+#ifdef _WIN64
+
+typedef struct DECLSPEC_ALIGN(16) _SLIST_ENTRY *PSLIST_ENTRY;
+typedef struct DECLSPEC_ALIGN(16) _SLIST_ENTRY {
+    PSLIST_ENTRY Next;
+} SLIST_ENTRY;
+
+typedef union DECLSPEC_ALIGN(16) _SLIST_HEADER {
+    struct {
+        ULONGLONG Alignment;
+        ULONGLONG Region;
+    } DUMMYSTRUCTNAME;
+    struct {
+        ULONGLONG Depth:16;
+        ULONGLONG Sequence:9;
+        ULONGLONG NextEntry:39;
+        ULONGLONG HeaderType:1;
+        ULONGLONG Init:1;
+        ULONGLONG Reserved:59;
+        ULONGLONG Region:3;
+    } Header8;
+    struct {
+        ULONGLONG Depth:16;
+        ULONGLONG Sequence:48;
+        ULONGLONG HeaderType:1;
+        ULONGLONG Init:1;
+        ULONGLONG Reserved:2;
+        ULONGLONG NextEntry:60;
+    } Header16;
+} SLIST_HEADER, *PSLIST_HEADER;
+
+#else
+
+#undef SLIST_ENTRY /* for Mac OS */
+#define SLIST_ENTRY SINGLE_LIST_ENTRY
+#define _SLIST_ENTRY _SINGLE_LIST_ENTRY
+#define PSLIST_ENTRY PSINGLE_LIST_ENTRY
+
+typedef union _SLIST_HEADER {
+    ULONGLONG Alignment;
+    struct {
+        SLIST_ENTRY Next;
+        WORD Depth;
+        WORD Sequence;
+    } DUMMYSTRUCTNAME;
+} SLIST_HEADER, *PSLIST_HEADER;
+
+#endif
+
+PSLIST_ENTRY WINAPI RtlFirstEntrySList(const SLIST_HEADER*);
+VOID         WINAPI RtlInitializeSListHead(PSLIST_HEADER);
+PSLIST_ENTRY WINAPI RtlInterlockedFlushSList(PSLIST_HEADER);
+PSLIST_ENTRY WINAPI RtlInterlockedPopEntrySList(PSLIST_HEADER);
+PSLIST_ENTRY WINAPI RtlInterlockedPushEntrySList(PSLIST_HEADER, PSLIST_ENTRY);
+WORD         WINAPI RtlQueryDepthSList(PSLIST_HEADER);
+
 
 /* Heap flags */
 
@@ -4735,5 +4800,89 @@ ULONGLONG WINAPI VerSetConditionMask(ULONGLONG,DWORD,BYTE);
 #define	VER_LESS_EQUAL				5
 #define	VER_AND					6
 #define	VER_OR					7
+
+typedef struct _ACTIVATION_CONTEXT_DETAILED_INFORMATION {
+    DWORD dwFlags;
+    DWORD ulFormatVersion;
+    DWORD ulAssemblyCount;
+    DWORD ulRootManifestPathType;
+    DWORD ulRootManifestPathChars;
+    DWORD ulRootConfigurationPathType;
+    DWORD ulRootConfigurationPathChars;
+    DWORD ulAppDirPathType;
+    DWORD ulAppDirPathChars;
+    PCWSTR lpRootManifestPath;
+    PCWSTR lpRootConfigurationPath;
+    PCWSTR lpAppDirPath;
+} ACTIVATION_CONTEXT_DETAILED_INFORMATION, *PACTIVATION_CONTEXT_DETAILED_INFORMATION;
+
+typedef struct _ACTIVATION_CONTEXT_ASSEMBLY_DETAILED_INFORMATION {
+    DWORD ulFlags;
+    DWORD ulEncodedAssemblyIdentityLength;
+    DWORD ulManifestPathType;
+    DWORD ulManifestPathLength;
+    LARGE_INTEGER liManifestLastWriteTime;
+    DWORD ulPolicyPathType;
+    DWORD ulPolicyPathLength;
+    LARGE_INTEGER liPolicyLastWriteTime;
+    DWORD ulMetadataSatelliteRosterIndex;
+    DWORD ulManifestVersionMajor;
+    DWORD ulManifestVersionMinor;
+    DWORD ulPolicyVersionMajor;
+    DWORD ulPolicyVersionMinor;
+    DWORD ulAssemblyDirectoryNameLength;
+    PCWSTR lpAssemblyEncodedAssemblyIdentity;
+    PCWSTR lpAssemblyManifestPath;
+    PCWSTR lpAssemblyPolicyPath;
+    PCWSTR lpAssemblyDirectoryName;
+    DWORD  ulFileCount;
+} ACTIVATION_CONTEXT_ASSEMBLY_DETAILED_INFORMATION, *PACTIVATION_CONTEXT_ASSEMBLY_DETAILED_INFORMATION;
+
+typedef struct _ACTIVATION_CONTEXT_QUERY_INDEX {
+    DWORD ulAssemblyIndex;
+    DWORD ulFileIndexInAssembly;
+} ACTIVATION_CONTEXT_QUERY_INDEX, *PACTIVATION_CONTEXT_QUERY_INDEX;
+
+typedef const struct _ACTIVATION_CONTEXT_QUERY_INDEX *PCACTIVATION_CONTEXT_QUERY_INDEX;
+
+typedef struct _ASSEMBLY_FILE_DETAILED_INFORMATION {
+    DWORD ulFlags;
+    DWORD ulFilenameLength;
+    DWORD ulPathLength;
+    PCWSTR lpFileName;
+    PCWSTR lpFilePath;
+} ASSEMBLY_FILE_DETAILED_INFORMATION, *PASSEMBLY_FILE_DETAILED_INFORMATION;
+
+typedef const ASSEMBLY_FILE_DETAILED_INFORMATION *PCASSEMBLY_FILE_DETAILED_INFORMATION;
+
+typedef enum _ACTIVATION_CONTEXT_INFO_CLASS {
+    ActivationContextBasicInformation                       = 1,
+    ActivationContextDetailedInformation                    = 2,
+    AssemblyDetailedInformationInActivationContext          = 3,
+    FileInformationInAssemblyOfAssemblyInActivationContext  = 4,
+    MaxActivationContextInfoClass,
+
+    AssemblyDetailedInformationInActivationContxt          = 3,
+    FileInformationInAssemblyOfAssemblyInActivationContxt  = 4
+} ACTIVATION_CONTEXT_INFO_CLASS;
+
+#define ACTIVATION_CONTEXT_PATH_TYPE_NONE         1
+#define ACTIVATION_CONTEXT_PATH_TYPE_WIN32_FILE   2
+#define ACTIVATION_CONTEXT_PATH_TYPE_URL          3
+#define ACTIVATION_CONTEXT_PATH_TYPE_ASSEMBLYREF  4
+
+#define ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION          1
+#define ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION               2
+#define ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION      3
+#define ACTIVATION_CONTEXT_SECTION_COM_SERVER_REDIRECTION        4
+#define ACTIVATION_CONTEXT_SECTION_COM_INTERFACE_REDIRECTION     5
+#define ACTIVATION_CONTEXT_SECTION_COM_TYPE_LIBRARY_REDIRECTION  6
+#define ACTIVATION_CONTEXT_SECTION_COM_PROGID_REDIRECTION        7
+#define ACTIVATION_CONTEXT_SECTION_GLOBAL_OBJECT_RENAME_TABLE    8
+#define ACTIVATION_CONTEXT_SECTION_CLR_SURROGATES                9
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  /* _WINNT_ */

@@ -25,7 +25,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
@@ -34,7 +33,6 @@
 #include "wownt32.h"
 #include "mmddk.h"
 #include "winioctl.h"
-#include "ntddstor.h"
 #include "ntddcdrm.h"
 #include "winternl.h"
 #include "wine/debug.h"
@@ -74,7 +72,7 @@ static	DWORD	MCICDA_drvOpen(LPCWSTR str, LPMCI_OPEN_DRIVER_PARMSW modp)
 	return 0;
 
     wmcda->wDevID = modp->wDeviceID;
-    mciSetDriverData(wmcda->wDevID, (DWORD)wmcda);
+    mciSetDriverData(wmcda->wDevID, (DWORD_PTR)wmcda);
     modp->wCustomCommandTable = MCI_NO_COMMAND_TABLE;
     modp->wType = MCI_DEVTYPE_CD_AUDIO;
     return modp->wDeviceID;
@@ -148,7 +146,7 @@ static	int	MCICDA_GetError(WINE_MCICDAUDIO* wmcda)
     case ERROR_NOT_READY:     return MCIERR_DEVICE_NOT_READY;
     case ERROR_IO_DEVICE:     return MCIERR_HARDWARE;
     default:
-	FIXME("Unknown mode %x\n", GetLastError());
+	FIXME("Unknown mode %u\n", GetLastError());
     }
     return MCIERR_DRIVER_INTERNAL;
 }
@@ -295,7 +293,7 @@ static DWORD MCICDA_Open(UINT wDevID, DWORD dwFlags, LPMCI_OPEN_PARMSW lpOpenPar
     }
     if (dwFlags & MCI_OPEN_ELEMENT) {
         if (dwFlags & MCI_OPEN_ELEMENT_ID) {
-            WARN("MCI_OPEN_ELEMENT_ID %8x ! Abort\n", (DWORD)lpOpenParms->lpstrElementName);
+            WARN("MCI_OPEN_ELEMENT_ID %p! Abort\n", lpOpenParms->lpstrElementName);
             return MCIERR_NO_ELEMENT_ALLOWED;
         }
         TRACE("MCI_OPEN_ELEMENT element name: %s\n", debugstr_w(lpOpenParms->lpstrElementName));

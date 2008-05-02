@@ -31,11 +31,8 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winreg.h"
 #include "ole2.h"
 #include "mlang.h"
-
-#include "uuids.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -604,9 +601,46 @@ HRESULT WINAPI ConvertINetString(
     LPINT pcDstSize
 )
 {
-    FIXME("%p %d %d %s %p %p %p: stub!\n", pdwMode, dwSrcEncoding, dwDstEncoding,
+    TRACE("%p %d %d %s %p %p %p\n", pdwMode, dwSrcEncoding, dwDstEncoding,
           debugstr_a(pSrcStr), pcSrcSize, pDstStr, pcDstSize);
-    return E_NOTIMPL;
+
+    if (dwSrcEncoding == CP_UNICODE)
+    {
+        INT cSrcSizeW;
+        if (pcSrcSize && *pcSrcSize != -1)
+        {
+            cSrcSizeW = *pcSrcSize / sizeof(WCHAR);
+            pcSrcSize = &cSrcSizeW;
+        }
+        return ConvertINetUnicodeToMultiByte(pdwMode, dwDstEncoding, (LPCWSTR)pSrcStr, pcSrcSize, pDstStr, pcDstSize);
+    }
+    else if (dwDstEncoding == CP_UNICODE)
+    {
+        HRESULT hr = ConvertINetMultiByteToUnicode(pdwMode, dwSrcEncoding, pSrcStr, pcSrcSize, (LPWSTR)pDstStr, pcDstSize);
+        *pcDstSize *= sizeof(WCHAR);
+        return hr;
+    }
+    else
+    {
+        INT cDstSizeW;
+        LPWSTR pDstStrW;
+        HRESULT hr;
+
+        TRACE("convert %s from %d to %d\n", debugstr_a(pSrcStr), dwSrcEncoding, dwDstEncoding);
+
+        hr = ConvertINetMultiByteToUnicode(pdwMode, dwSrcEncoding, pSrcStr, pcSrcSize, NULL, &cDstSizeW);
+        if (hr != S_OK)
+            return hr;
+
+        pDstStrW = HeapAlloc(GetProcessHeap(), 0, cDstSizeW * sizeof(WCHAR));
+        hr = ConvertINetMultiByteToUnicode(pdwMode, dwSrcEncoding, pSrcStr, pcSrcSize, pDstStrW, &cDstSizeW);
+        if (hr != S_OK)
+            return hr;
+
+        hr = ConvertINetUnicodeToMultiByte(pdwMode, dwDstEncoding, pDstStrW, &cDstSizeW, pDstStr, pcDstSize);
+        HeapFree(GetProcessHeap(), 0, pDstStrW);
+        return hr;
+    }
 }
 
 static HRESULT GetFamilyCodePage(
@@ -704,6 +738,28 @@ HRESULT WINAPI LcidToRfc1766W(
         return S_OK;
 
     return S_FALSE;
+}
+
+static HRESULT lcid_from_rfc1766(IEnumRfc1766 *iface, LCID *lcid, LPCWSTR rfc1766)
+{
+    RFC1766INFO info;
+    ULONG num;
+
+    while (IEnumRfc1766_Next(iface, 1, &info, &num) == S_OK)
+    {
+        if (!strcmpW(info.wszRfc1766, rfc1766))
+        {
+            *lcid = info.lcid;
+            return S_OK;
+        }
+        if (strlenW(rfc1766) == 2 && !memcmp(info.wszRfc1766, rfc1766, 2 * sizeof(WCHAR)))
+        {
+            *lcid = PRIMARYLANGID(info.lcid);
+            return S_OK;
+        }
+    }
+
+    return E_FAIL;
 }
 
 /******************************************************************************
@@ -1497,8 +1553,24 @@ static HRESULT WINAPI fnIMultiLanguage_GetCodePageInfo(
     UINT uiCodePage,
     PMIMECPINFO pCodePageInfo)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    UINT i, n;
+
+    ICOM_THIS_MULTI(MLang_impl, vtbl_IMultiLanguage, iface);
+    TRACE("%p, %u, %p\n", This, uiCodePage, pCodePageInfo);
+
+    for (i = 0; i < sizeof(mlang_data)/sizeof(mlang_data[0]); i++)
+    {
+        for (n = 0; n < mlang_data[i].number_of_cp; n++)
+        {
+            if (mlang_data[i].mime_cp_info[n].cp == uiCodePage)
+            {
+                fill_cp_info(&mlang_data[i], n, pCodePageInfo);
+                return S_OK;
+            }
+        }
+    }
+
+    return S_FALSE;
 }
 
 static HRESULT WINAPI fnIMultiLanguage_GetFamilyCodePage(
@@ -1606,8 +1678,22 @@ static HRESULT WINAPI fnIMultiLanguage_GetLcidFromRfc1766(
     LCID* pLocale,
     BSTR bstrRfc1766)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hr;
+    IEnumRfc1766 *rfc1766;
+
+    TRACE("%p %p %s\n", iface, pLocale, debugstr_w(bstrRfc1766));
+
+    if (!pLocale || !bstrRfc1766)
+        return E_INVALIDARG;
+
+    hr = IMultiLanguage_EnumRfc1766(iface, &rfc1766);
+    if (FAILED(hr))
+        return hr;
+
+    hr = lcid_from_rfc1766(rfc1766, pLocale, bstrRfc1766);
+
+    IEnumRfc1766_Release(rfc1766);
+    return hr;
 }
 
 /******************************************************************************/
@@ -2122,8 +2208,22 @@ static HRESULT WINAPI fnIMultiLanguage2_GetLcidFromRfc1766(
     LCID* pLocale,
     BSTR bstrRfc1766)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hr;
+    IEnumRfc1766 *rfc1766;
+
+    TRACE("%p %p %s\n", iface, pLocale, debugstr_w(bstrRfc1766));
+
+    if (!pLocale || !bstrRfc1766)
+        return E_INVALIDARG;
+
+    hr = IMultiLanguage2_EnumRfc1766(iface, 0, &rfc1766);
+    if (FAILED(hr))
+        return hr;
+
+    hr = lcid_from_rfc1766(rfc1766, pLocale, bstrRfc1766);
+
+    IEnumRfc1766_Release(rfc1766);
+    return hr;
 }
 
 static HRESULT WINAPI fnIMultiLanguage2_EnumRfc1766(

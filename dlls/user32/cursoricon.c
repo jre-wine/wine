@@ -53,9 +53,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "wownt32.h"
 #include "winerror.h"
-#include "excpt.h"
 #include "wine/winbase16.h"
 #include "wine/winuser16.h"
 #include "wine/exception.h"
@@ -950,6 +948,9 @@ static HICON CURSORICON_Load(HINSTANCE hInstance, LPCWSTR name,
     WORD wResId;
     DWORD dwBytesInRes;
 
+    TRACE("%p, %s, %dx%d, colors %d, fCursor %d, flags 0x%04x\n",
+          hInstance, debugstr_w(name), width, height, colors, fCursor, loadflags);
+
     if ( loadflags & LR_LOADFROMFILE )    /* Load from file */
         return CURSORICON_LoadFromFile( name, width, height, colors, fCursor, loadflags );
 
@@ -1236,24 +1237,7 @@ HICON16 WINAPI CreateIcon16( HINSTANCE16 hInstance, INT16 nWidth,
  *  Success: handle to an icon
  *  Failure: NULL
  *
- * BUGS
- *
- *  - The provided bitmaps are not resized!
- *  - The documentation says the lpXORbits bitmap must be in a device
- *    dependent format. But we must still resize it and perform depth
- *    conversions if necessary.
- *  - I'm a bit unsure about the how the 'device dependent format' thing works.
- *    I did some tests on windows and found that if you provide a 16bpp bitmap
- *    in lpXORbits, then its format but be 565 RGB if the screen's bit depth
- *    is 16bpp but it must be 555 RGB if the screen's bit depth is anything
- *    else. I don't know if this is part of the GDI specs or if this is a
- *    quirk of the graphics card driver.
- *  - You may think that we check whether the bit depths match or not
- *    as an optimization. But the truth is that the conversion using
- *    CreateDIBitmap does not work for some bit depth (e.g. 8bpp) and I have
- *    no idea why.
- *  - I'm pretty sure that all the things we do in CreateIcon should
- *    also be done in CreateIconIndirect...
+ * FIXME: Do we need to resize the bitmaps?
  */
 HICON WINAPI CreateIcon(
     HINSTANCE hInstance,  /* [in] the application's hInstance */
@@ -1264,58 +1248,23 @@ HICON WINAPI CreateIcon(
     LPCVOID   lpANDbits,  /* [in] a monochrome bitmap representing the icon's mask */
     LPCVOID   lpXORbits)  /* [in] the icon's 'color' bitmap */
 {
+    ICONINFO iinfo;
     HICON hIcon;
-    HDC hdc;
 
-    TRACE_(icon)("%dx%dx%d, xor=%p, and=%p\n",
-                 nWidth, nHeight, bPlanes * bBitsPixel, lpXORbits, lpANDbits);
+    TRACE_(icon)("%dx%d, planes %d, bpp %d, xor %p, and %p\n",
+                 nWidth, nHeight, bPlanes, bBitsPixel, lpXORbits, lpANDbits);
 
-    hdc=GetDC(0);
-    if (!hdc)
-        return 0;
+    iinfo.fIcon = TRUE;
+    iinfo.xHotspot = ICON_HOTSPOT;
+    iinfo.yHotspot = ICON_HOTSPOT;
+    iinfo.hbmMask = CreateBitmap( nWidth, nHeight, 1, 1, lpANDbits );
+    iinfo.hbmColor = CreateBitmap( nWidth, nHeight, bPlanes, bBitsPixel, lpXORbits );
 
-    if (GetDeviceCaps(hdc,BITSPIXEL)==bBitsPixel) {
-        CURSORICONINFO info;
+    hIcon = CreateIconIndirect( &iinfo );
 
-        info.ptHotSpot.x = ICON_HOTSPOT;
-        info.ptHotSpot.y = ICON_HOTSPOT;
-        info.nWidth = nWidth;
-        info.nHeight = nHeight;
-        info.nWidthBytes = 0;
-        info.bPlanes = bPlanes;
-        info.bBitsPerPixel = bBitsPixel;
+    DeleteObject( iinfo.hbmMask );
+    DeleteObject( iinfo.hbmColor );
 
-        hIcon=HICON_32(CreateCursorIconIndirect16(0, &info, lpANDbits, lpXORbits));
-    } else {
-        ICONINFO iinfo;
-        BITMAPINFO bmi;
-
-        iinfo.fIcon=TRUE;
-        iinfo.xHotspot=ICON_HOTSPOT;
-        iinfo.yHotspot=ICON_HOTSPOT;
-        iinfo.hbmMask=CreateBitmap(nWidth,nHeight,1,1,lpANDbits);
-
-        bmi.bmiHeader.biSize=sizeof(bmi.bmiHeader);
-        bmi.bmiHeader.biWidth=nWidth;
-        bmi.bmiHeader.biHeight=-nHeight;
-        bmi.bmiHeader.biPlanes=bPlanes;
-        bmi.bmiHeader.biBitCount=bBitsPixel;
-        bmi.bmiHeader.biCompression=BI_RGB;
-        bmi.bmiHeader.biSizeImage=0;
-        bmi.bmiHeader.biXPelsPerMeter=0;
-        bmi.bmiHeader.biYPelsPerMeter=0;
-        bmi.bmiHeader.biClrUsed=0;
-        bmi.bmiHeader.biClrImportant=0;
-
-        iinfo.hbmColor = CreateDIBitmap( hdc, &bmi.bmiHeader,
-                                         CBM_INIT, lpXORbits,
-                                         &bmi, DIB_RGB_COLORS );
-
-        hIcon=CreateIconIndirect(&iinfo);
-        DeleteObject(iinfo.hbmMask);
-        DeleteObject(iinfo.hbmColor);
-    }
-    ReleaseDC(0,hdc);
     return hIcon;
 }
 
@@ -1447,6 +1396,8 @@ BOOL WINAPI DrawIcon( HDC hdc, INT x, INT y, HICON hIcon )
     HBITMAP hXorBits, hAndBits;
     COLORREF oldFg, oldBg;
 
+    TRACE("%p, (%d,%d), %p\n", hdc, x, y, hIcon);
+
     if (!(ptr = (CURSORICONINFO *)GlobalLock16(HICON_16(hIcon)))) return FALSE;
     if (!(hMemDC = CreateCompatibleDC( hdc ))) return FALSE;
     hAndBits = CreateBitmap( ptr->nWidth, ptr->nHeight, 1, 1,
@@ -1507,7 +1458,7 @@ HCURSOR WINAPI SetCursor( HCURSOR hCursor /* [in] Handle of cursor to show */ )
     HCURSOR hOldCursor;
 
     if (hCursor == thread_info->cursor) return hCursor;  /* No change */
-    TRACE_(cursor)("%p\n", hCursor );
+    TRACE("%p\n", hCursor);
     hOldCursor = thread_info->cursor;
     thread_info->cursor = hCursor;
     /* Change the cursor shape only if it is visible */
@@ -1526,7 +1477,7 @@ INT WINAPI ShowCursor( BOOL bShow )
 {
     struct user_thread_info *thread_info = get_user_thread_info();
 
-    TRACE_(cursor)("%d, count=%d\n", bShow, thread_info->cursor_count );
+    TRACE("%d, count=%d\n", bShow, thread_info->cursor_count );
 
     if (bShow)
     {
@@ -1716,6 +1667,8 @@ HICON16 WINAPI LoadIconHandler16( HGLOBAL16 hResource, BOOL16 bNew )
  */
 HCURSOR WINAPI LoadCursorW(HINSTANCE hInstance, LPCWSTR name)
 {
+    TRACE("%p, %s\n", hInstance, debugstr_w(name));
+
     return LoadImageW( hInstance, name, IMAGE_CURSOR, 0, 0,
                        LR_SHARED | LR_DEFAULTSIZE );
 }
@@ -1725,6 +1678,8 @@ HCURSOR WINAPI LoadCursorW(HINSTANCE hInstance, LPCWSTR name)
  */
 HCURSOR WINAPI LoadCursorA(HINSTANCE hInstance, LPCSTR name)
 {
+    TRACE("%p, %s\n", hInstance, debugstr_a(name));
+
     return LoadImageA( hInstance, name, IMAGE_CURSOR, 0, 0,
                        LR_SHARED | LR_DEFAULTSIZE );
 }
@@ -1734,6 +1689,8 @@ HCURSOR WINAPI LoadCursorA(HINSTANCE hInstance, LPCSTR name)
  */
 HCURSOR WINAPI LoadCursorFromFileW (LPCWSTR name)
 {
+    TRACE("%s\n", debugstr_w(name));
+
     return LoadImageW( 0, name, IMAGE_CURSOR, 0, 0,
                        LR_LOADFROMFILE | LR_DEFAULTSIZE );
 }
@@ -1743,6 +1700,8 @@ HCURSOR WINAPI LoadCursorFromFileW (LPCWSTR name)
  */
 HCURSOR WINAPI LoadCursorFromFileA (LPCSTR name)
 {
+    TRACE("%s\n", debugstr_a(name));
+
     return LoadImageA( 0, name, IMAGE_CURSOR, 0, 0,
                        LR_LOADFROMFILE | LR_DEFAULTSIZE );
 }
@@ -1752,6 +1711,8 @@ HCURSOR WINAPI LoadCursorFromFileA (LPCSTR name)
  */
 HICON WINAPI LoadIconW(HINSTANCE hInstance, LPCWSTR name)
 {
+    TRACE("%p, %s\n", hInstance, debugstr_w(name));
+
     return LoadImageW( hInstance, name, IMAGE_ICON, 0, 0,
                        LR_SHARED | LR_DEFAULTSIZE );
 }
@@ -1761,6 +1722,8 @@ HICON WINAPI LoadIconW(HINSTANCE hInstance, LPCWSTR name)
  */
 HICON WINAPI LoadIconA(HINSTANCE hInstance, LPCSTR name)
 {
+    TRACE("%p, %s\n", hInstance, debugstr_a(name));
+
     return LoadImageA( hInstance, name, IMAGE_ICON, 0, 0,
                        LR_SHARED | LR_DEFAULTSIZE );
 }
@@ -1777,6 +1740,9 @@ BOOL WINAPI GetIconInfo(HICON hIcon, PICONINFO iconinfo)
     if (!ciconinfo)
         return FALSE;
 
+    TRACE("%p => %dx%d, %d bpp\n", hIcon,
+          ciconinfo->nWidth, ciconinfo->nHeight, ciconinfo->bBitsPerPixel);
+
     if ( (ciconinfo->ptHotSpot.x == ICON_HOTSPOT) &&
          (ciconinfo->ptHotSpot.y == ICON_HOTSPOT) )
     {
@@ -1791,6 +1757,8 @@ BOOL WINAPI GetIconInfo(HICON hIcon, PICONINFO iconinfo)
       iconinfo->yHotspot = ciconinfo->ptHotSpot.y;
     }
 
+    height = ciconinfo->nHeight;
+
     if (ciconinfo->bBitsPerPixel > 1)
     {
         iconinfo->hbmColor = CreateBitmap( ciconinfo->nWidth, ciconinfo->nHeight,
@@ -1798,12 +1766,11 @@ BOOL WINAPI GetIconInfo(HICON hIcon, PICONINFO iconinfo)
                                 (char *)(ciconinfo + 1)
                                 + ciconinfo->nHeight *
                                 get_bitmap_width_bytes (ciconinfo->nWidth,1) );
-        height = ciconinfo->nHeight;
     }
     else
     {
         iconinfo->hbmColor = 0;
-        height = ciconinfo->nHeight * 2;
+        height *= 2;
     }
 
     iconinfo->hbmMask = CreateBitmap ( ciconinfo->nWidth, height,
@@ -1823,11 +1790,26 @@ HICON WINAPI CreateIconIndirect(PICONINFO iconinfo)
     HICON16 hObj;
     int	sizeXor,sizeAnd;
 
-    if (iconinfo->hbmColor) GetObjectA( iconinfo->hbmColor, sizeof(bmpXor), &bmpXor );
-    GetObjectA( iconinfo->hbmMask, sizeof(bmpAnd), &bmpAnd );
+    TRACE("color %p, mask %p, hotspot %ux%u, fIcon %d\n",
+           iconinfo->hbmColor, iconinfo->hbmMask,
+           iconinfo->xHotspot, iconinfo->yHotspot, iconinfo->fIcon);
+
+    if (!iconinfo->hbmMask) return 0;
+
+    if (iconinfo->hbmColor)
+    {
+        GetObjectW( iconinfo->hbmColor, sizeof(bmpXor), &bmpXor );
+        TRACE("color: width %d, height %d, width bytes %d, planes %u, bpp %u\n",
+               bmpXor.bmWidth, bmpXor.bmHeight, bmpXor.bmWidthBytes,
+               bmpXor.bmPlanes, bmpXor.bmBitsPixel);
+    }
+    GetObjectW( iconinfo->hbmMask, sizeof(bmpAnd), &bmpAnd );
+    TRACE("mask: width %d, height %d, width bytes %d, planes %u, bpp %u\n",
+           bmpAnd.bmWidth, bmpAnd.bmHeight, bmpAnd.bmWidthBytes,
+           bmpAnd.bmPlanes, bmpAnd.bmBitsPixel);
 
     sizeXor = iconinfo->hbmColor ? (bmpXor.bmHeight * bmpXor.bmWidthBytes) : 0;
-    sizeAnd = bmpAnd.bmHeight * bmpAnd.bmWidthBytes;
+    sizeAnd = bmpAnd.bmHeight * get_bitmap_width_bytes(bmpAnd.bmWidth, 1);
 
     hObj = GlobalAlloc16( GMEM_MOVEABLE,
                           sizeof(CURSORICONINFO) + sizeXor + sizeAnd );
@@ -1861,14 +1843,42 @@ HICON WINAPI CreateIconIndirect(PICONINFO iconinfo)
         {
             info->nWidth        = bmpAnd.bmWidth;
             info->nHeight       = bmpAnd.bmHeight / 2;
-            info->nWidthBytes   = bmpAnd.bmWidthBytes;
-            info->bPlanes       = bmpAnd.bmPlanes;
-            info->bBitsPerPixel = bmpAnd.bmBitsPixel;
+            info->nWidthBytes   = get_bitmap_width_bytes(bmpAnd.bmWidth, 1);
+            info->bPlanes       = 1;
+            info->bBitsPerPixel = 1;
         }
 
         /* Transfer the bitmap bits to the CURSORICONINFO structure */
 
-        GetBitmapBits( iconinfo->hbmMask, sizeAnd, (char*)(info + 1) );
+        /* Some apps pass a color bitmap as a mask, convert it to b/w */
+        if (bmpAnd.bmBitsPixel == 1)
+        {
+            GetBitmapBits( iconinfo->hbmMask, sizeAnd, (char*)(info + 1) );
+        }
+        else
+        {
+            HDC hdc, hdc_mem;
+            HBITMAP hbmp_old, hbmp_mem_old, hbmp_mono;
+
+            hdc = GetDC( 0 );
+            hdc_mem = CreateCompatibleDC( hdc );
+
+            hbmp_mono = CreateBitmap( bmpAnd.bmWidth, bmpAnd.bmHeight, 1, 1, NULL );
+
+            hbmp_old = SelectObject( hdc, iconinfo->hbmMask );
+            hbmp_mem_old = SelectObject( hdc_mem, hbmp_mono );
+
+            BitBlt( hdc_mem, 0, 0, bmpAnd.bmWidth, bmpAnd.bmHeight, hdc, 0, 0, SRCCOPY );
+
+            SelectObject( hdc, hbmp_old );
+            SelectObject( hdc_mem, hbmp_mem_old );
+
+            DeleteDC( hdc_mem );
+            ReleaseDC( 0, hdc );
+
+            GetBitmapBits( hbmp_mono, sizeAnd, (char*)(info + 1) );
+            DeleteObject( hbmp_mono );
+        }
         if (iconinfo->hbmColor) GetBitmapBits( iconinfo->hbmColor, sizeXor, (char*)(info + 1) + sizeAnd );
         GlobalUnlock16( hObj );
     }

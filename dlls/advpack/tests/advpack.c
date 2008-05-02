@@ -185,7 +185,7 @@ static void append_str(char **str, const char *data)
     *str += strlen(*str);
 }
 
-static void create_inf_file()
+static void create_inf_file(void)
 {
     char data[1024];
     char *ptr = data;
@@ -215,7 +215,7 @@ static void create_inf_file()
     CloseHandle(hf);
 }
 
-static void translateinfstring_test()
+static void translateinfstring_test(void)
 {
     HRESULT hr;
     char buffer[MAX_PATH];
@@ -329,6 +329,8 @@ static void translateinfstringex_test(void)
     ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n", hr);
 
     /* try an empty filename */
+    memset(buffer, 'a', 25);
+    buffer[24] = '\0';
     size = MAX_PATH;
     hr = pTranslateInfStringEx(hinf, "", "Options.NTx86", "InstallDir",
                               buffer, size, &size, NULL);
@@ -360,6 +362,8 @@ static void translateinfstringex_test(void)
     ok(hr == SPAPI_E_LINE_NOT_FOUND, "Expected SPAPI_E_LINE_NOT_FOUND, got %08x\n", hr);
 
     /* successfully translate the string */
+    memset(buffer, 'a', 25);
+    buffer[24] = '\0';
     size = MAX_PATH;
     hr = pTranslateInfStringEx(hinf, "c:\\test.inf", "Options.NTx86", "InstallDir",
                               buffer, size, &size, NULL);
@@ -383,6 +387,8 @@ static void translateinfstringex_test(void)
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
 
     /* translate the string with the install section specified */
+    memset(buffer, 'a', PROG_FILES_LEN);
+    buffer[PROG_FILES_LEN - 1] = '\0';
     size = MAX_PATH;
     hr = pTranslateInfStringEx(hinf, "c:\\test.inf", "Options.NTx86", "InstallDir",
                               buffer, size, &size, NULL);

@@ -46,14 +46,14 @@ static const WCHAR **debug_snoop_excludelist;
 static const WCHAR **debug_snoop_includelist;
 
 /* compare an ASCII and a Unicode string without depending on the current codepage */
-inline static int strcmpiAW( const char *strA, const WCHAR *strW )
+static inline int strcmpiAW( const char *strA, const WCHAR *strW )
 {
     while (*strA && (toupperW((unsigned char)*strA) == toupperW(*strW))) { strA++; strW++; }
     return toupperW((unsigned char)*strA) - toupperW(*strW);
 }
 
 /* compare an ASCII and a Unicode string without depending on the current codepage */
-inline static int strncmpiAW( const char *strA, const WCHAR *strW, int n )
+static inline int strncmpiAW( const char *strA, const WCHAR *strW, int n )
 {
     int ret = 0;
     for ( ; n > 0; n--, strA++, strW++)
@@ -302,7 +302,7 @@ __ASM_GLOBAL_FUNC( call_entry_point,
                    "\tpopl %edi\n"
                    "\tpopl %esi\n"
                    "\tpopl %ebp\n"
-                   "\tret" );
+                   "\tret" )
 
 
 /***********************************************************************

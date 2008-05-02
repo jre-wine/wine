@@ -24,7 +24,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION ((IWineD3DImpl *)(((IWineD3DDeviceImpl *)This->wineD3DDevice)->wineD3D))->gl_info
+#define GLINFO_LOCATION This->wineD3DDevice->adapter->gl_info
 
 /***************************************
  * Stateblock helper functions follow
@@ -78,15 +78,16 @@ void stateblock_savedstates_copy(
     dest->vertexDecl = source->vertexDecl;
     dest->pixelShader = source->pixelShader;
     dest->vertexShader = source->vertexShader;
+    dest->scissorRect = dest->scissorRect;
 
     /* Fixed size arrays */
     memcpy(dest->streamSource, source->streamSource, bsize * MAX_STREAMS);
     memcpy(dest->streamFreq, source->streamFreq, bsize * MAX_STREAMS);
-    memcpy(dest->textures, source->textures, bsize * MAX_SAMPLERS);
+    memcpy(dest->textures, source->textures, bsize * MAX_COMBINED_SAMPLERS);
     memcpy(dest->transform, source->transform, bsize * (HIGHEST_TRANSFORMSTATE + 1));
     memcpy(dest->renderState, source->renderState, bsize * (WINEHIGHEST_RENDER_STATE + 1));
     memcpy(dest->textureState, source->textureState, bsize * MAX_TEXTURES * (WINED3D_HIGHEST_TEXTURE_STATE + 1));
-    memcpy(dest->samplerState, source->samplerState, bsize * MAX_SAMPLERS * (WINED3D_HIGHEST_SAMPLER_STATE + 1));
+    memcpy(dest->samplerState, source->samplerState, bsize * MAX_COMBINED_SAMPLERS * (WINED3D_HIGHEST_SAMPLER_STATE + 1));
     memcpy(dest->clipplane, source->clipplane, bsize * MAX_CLIPPLANES);
     memcpy(dest->pixelShaderConstantsB, source->pixelShaderConstantsB, bsize * MAX_CONST_B);
     memcpy(dest->pixelShaderConstantsI, source->pixelShaderConstantsI, bsize * MAX_CONST_I);
@@ -115,15 +116,16 @@ void stateblock_savedstates_set(
     states->vertexDecl = value;
     states->pixelShader = value;
     states->vertexShader = value;
+    states->scissorRect = value;
 
     /* Fixed size arrays */
     memset(states->streamSource, value, bsize * MAX_STREAMS);
     memset(states->streamFreq, value, bsize * MAX_STREAMS);
-    memset(states->textures, value, bsize * MAX_SAMPLERS);
+    memset(states->textures, value, bsize * MAX_COMBINED_SAMPLERS);
     memset(states->transform, value, bsize * (HIGHEST_TRANSFORMSTATE + 1));
     memset(states->renderState, value, bsize * (WINEHIGHEST_RENDER_STATE + 1));
     memset(states->textureState, value, bsize * MAX_TEXTURES * (WINED3D_HIGHEST_TEXTURE_STATE + 1));
-    memset(states->samplerState, value, bsize * MAX_SAMPLERS * (WINED3D_HIGHEST_SAMPLER_STATE + 1));
+    memset(states->samplerState, value, bsize * MAX_COMBINED_SAMPLERS * (WINED3D_HIGHEST_SAMPLER_STATE + 1));
     memset(states->clipplane, value, bsize * MAX_CLIPPLANES);
     memset(states->pixelShaderConstantsB, value, bsize * MAX_CONST_B);
     memset(states->pixelShaderConstantsI, value, bsize * MAX_CONST_I);
@@ -138,6 +140,7 @@ void stateblock_savedstates_set(
 void stateblock_copy(
     IWineD3DStateBlock* destination,
     IWineD3DStateBlock* source) {
+    int l;
 
     IWineD3DStateBlockImpl *This = (IWineD3DStateBlockImpl *)source;
     IWineD3DStateBlockImpl *Dest = (IWineD3DStateBlockImpl *)destination;
@@ -162,12 +165,32 @@ void stateblock_copy(
     Dest->streamIsUP = This->streamIsUP;
     Dest->pIndexData = This->pIndexData;
     Dest->baseVertexIndex = This->baseVertexIndex;
-    Dest->lights = This->lights;
+    /* Dest->lights = This->lights; */
     Dest->clip_status = This->clip_status;
     Dest->viewport = This->viewport;
     Dest->material = This->material;
     Dest->pixelShader = This->pixelShader;
     Dest->glsl_program = This->glsl_program;
+    memcpy(&Dest->scissorRect, &This->scissorRect, sizeof(Dest->scissorRect));
+
+    /* Lights */
+    memset(This->activeLights, 0, sizeof(This->activeLights));
+    for(l = 0; l < LIGHTMAP_SIZE; l++) {
+        struct list *e1, *e2;
+        LIST_FOR_EACH_SAFE(e1, e2, &Dest->lightMap[l]) {
+            PLIGHTINFOEL *light = LIST_ENTRY(e1, PLIGHTINFOEL, entry);
+            list_remove(&light->entry);
+            HeapFree(GetProcessHeap(), 0, light);
+        }
+
+        LIST_FOR_EACH(e1, &This->lightMap[l]) {
+            PLIGHTINFOEL *light = LIST_ENTRY(e1, PLIGHTINFOEL, entry), *light2;
+            light2 = HeapAlloc(GetProcessHeap(), 0, sizeof(*light));
+            memcpy(light2, light, sizeof(*light));
+            list_add_tail(&This->lightMap[l], &light2->entry);
+            if(light2->glIndex != -1) This->activeLights[light2->glIndex] = light2;
+        }
+    }
 
     /* Fixed size arrays */
     memcpy(Dest->vertexShaderConstantB, This->vertexShaderConstantB, sizeof(BOOL) * MAX_CONST_B);
@@ -183,10 +206,10 @@ void stateblock_copy(
     memcpy(Dest->transforms,   This->transforms,   sizeof(WINED3DMATRIX) * (HIGHEST_TRANSFORMSTATE + 1));
     memcpy(Dest->clipplane,    This->clipplane,    sizeof(double) * MAX_CLIPPLANES * 4);
     memcpy(Dest->renderState,  This->renderState,  sizeof(DWORD) * (WINEHIGHEST_RENDER_STATE + 1));
-    memcpy(Dest->textures,     This->textures,     sizeof(IWineD3DBaseTexture*) * MAX_SAMPLERS);
-    memcpy(Dest->textureDimensions, This->textureDimensions, sizeof(int) * MAX_SAMPLERS);
+    memcpy(Dest->textures,     This->textures,     sizeof(IWineD3DBaseTexture*) * MAX_COMBINED_SAMPLERS);
+    memcpy(Dest->textureDimensions, This->textureDimensions, sizeof(int) * MAX_COMBINED_SAMPLERS);
     memcpy(Dest->textureState, This->textureState, sizeof(DWORD) * MAX_TEXTURES * (WINED3D_HIGHEST_TEXTURE_STATE + 1));
-    memcpy(Dest->samplerState, This->samplerState, sizeof(DWORD) * MAX_SAMPLERS * (WINED3D_HIGHEST_SAMPLER_STATE + 1));
+    memcpy(Dest->samplerState, This->samplerState, sizeof(DWORD) * MAX_COMBINED_SAMPLERS * (WINED3D_HIGHEST_SAMPLER_STATE + 1));
 
     /* Dynamically sized arrays */
     memcpy(Dest->vertexShaderConstantF, This->vertexShaderConstantF, sizeof(float) * GL_LIMITS(vshader_constantsF) * 4);
@@ -226,15 +249,15 @@ static ULONG  WINAPI IWineD3DStateBlockImpl_Release(IWineD3DStateBlock *iface) {
     TRACE("(%p) : Releasing from %d\n", This, refCount + 1);
 
     if (!refCount) {
-        constant_entry *constant, *constant2;
+        constants_entry *constant, *constant2;
+        int counter;
 
         /* type 0 represents the primary stateblock, so free all the resources */
         if (This->blockType == WINED3DSBT_INIT) {
-            int counter;
             FIXME("Releasing primary stateblock\n");
 
             /* NOTE: according to MSDN: The application is responsible for making sure the texture references are cleared down */
-            for (counter = 0; counter < GL_LIMITS(sampler_stages); counter++) {
+            for (counter = 0; counter < MAX_COMBINED_SAMPLERS; counter++) {
                 if (This->textures[counter]) {
                     /* release our 'internal' hold on the texture */
                     if(0 != IWineD3DBaseTexture_Release(This->textures[counter])) {
@@ -245,6 +268,15 @@ static ULONG  WINAPI IWineD3DStateBlockImpl_Release(IWineD3DStateBlock *iface) {
 
         }
 
+        for(counter = 0; counter < LIGHTMAP_SIZE; counter++) {
+            struct list *e1, *e2;
+            LIST_FOR_EACH_SAFE(e1, e2, &This->lightMap[counter]) {
+                PLIGHTINFOEL *light = LIST_ENTRY(e1, PLIGHTINFOEL, entry);
+                list_remove(&light->entry);
+                HeapFree(GetProcessHeap(), 0, light);
+            }
+        }
+
         HeapFree(GetProcessHeap(), 0, This->vertexShaderConstantF);
         HeapFree(GetProcessHeap(), 0, This->set.vertexShaderConstantsF);
         HeapFree(GetProcessHeap(), 0, This->changed.vertexShaderConstantsF);
@@ -252,11 +284,11 @@ static ULONG  WINAPI IWineD3DStateBlockImpl_Release(IWineD3DStateBlock *iface) {
         HeapFree(GetProcessHeap(), 0, This->set.pixelShaderConstantsF);
         HeapFree(GetProcessHeap(), 0, This->changed.pixelShaderConstantsF);
 
-        LIST_FOR_EACH_ENTRY_SAFE(constant, constant2, &This->set_vconstantsF, constant_entry, entry) {
+        LIST_FOR_EACH_ENTRY_SAFE(constant, constant2, &This->set_vconstantsF, constants_entry, entry) {
             HeapFree(GetProcessHeap(), 0, constant);
         }
 
-        LIST_FOR_EACH_ENTRY_SAFE(constant, constant2, &This->set_pconstantsF, constant_entry, entry) {
+        LIST_FOR_EACH_ENTRY_SAFE(constant, constant2, &This->set_pconstantsF, constants_entry, entry) {
             HeapFree(GetProcessHeap(), 0, constant);
         }
 
@@ -295,22 +327,26 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
     /* If not recorded, then update can just recapture */
     if (/*TODO: 'magic' statetype, replace with BOOL This->blockType == D3DSBT_RECORDED  */ 0) {
         IWineD3DStateBlockImpl* tmpBlock;
-        PLIGHTINFOEL *tmp = This->lights;
+        int i;
 
         IWineD3DDevice_CreateStateBlock((IWineD3DDevice *)This->wineD3DDevice, This->blockType, (IWineD3DStateBlock**) &tmpBlock, NULL/*parent*/);
 
-        /* Note just swap the light chains over so when deleting, the old one goes */
         memcpy(This, tmpBlock, sizeof(IWineD3DStateBlockImpl));
-        tmpBlock->lights = tmp;
 
-        /* Delete the temporary one (which points to the old light chain though */
+        /* Move the light elements from the tmpBlock to This. No need to duplicate them, but they have to be removed from tmpBlock
+         * and the pointers updated for the base element in This.
+         *
+         * No need to update This->activeLights because the lights objects are untouched(same address)
+         */
+        for(i = 0; i < LIGHTMAP_SIZE; i++) {
+            list_init(&This->lightMap[i]); /* This element contains rubish due to the memcpy */
+            list_move_tail(&This->lightMap[i], &tmpBlock->lightMap[i]); /* Cleans the list entry in tmpBlock */
+        }
+
         IWineD3DStateBlock_Release((IWineD3DStateBlock *)tmpBlock);
-        /*IDirect3DDevice_DeleteStateBlock(pDevice, tmpBlock);*/
 
     } else {
         unsigned int i, j;
-
-        PLIGHTINFOEL *src;
 
         /* Recorded => Only update 'changed' values */
         if (This->vertexShader != targetStateBlock->vertexShader) {
@@ -360,37 +396,52 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
                 This->vertexShaderConstantB[i] =  targetStateBlock->vertexShaderConstantB[i];
             }
         }
-        
+
         /* Lights... For a recorded state block, we just had a chain of actions to perform,
              so we need to walk that chain and update any actions which differ */
-        src = This->lights;
-        while (src != NULL) {
-            PLIGHTINFOEL *realLight = NULL;
+        for(i = 0; i < LIGHTMAP_SIZE; i++) {
+            struct list *e, *f;
+            LIST_FOR_EACH(e, &This->lightMap[i]) {
+                BOOL updated = FALSE;
+                PLIGHTINFOEL *src = LIST_ENTRY(e, PLIGHTINFOEL, entry), *realLight;
+                if(!src->changed || !src->enabledChanged) continue;
 
-            /* Locate the light in the live lights */
-            realLight = targetStateBlock->lights;
-            while (realLight != NULL && realLight->OriginalIndex != src->OriginalIndex) realLight = realLight->next;
+                /* Look up the light in the destination */
+                LIST_FOR_EACH(f, &targetStateBlock->lightMap[i]) {
+                    realLight = LIST_ENTRY(f, PLIGHTINFOEL, entry);
+                    if(realLight->OriginalIndex == src->OriginalIndex) {
+                        if(src->changed) {
+                            memcpy(&src->OriginalParms, &realLight->OriginalParms, sizeof(src->OriginalParms));
+                        }
+                        if(src->enabledChanged) {
+                            /* Need to double check because enabledChanged does not catch enabled -> disabled -> enabled
+                             * or disabled -> enabled -> disabled changes
+                             */
+                            if(realLight->glIndex == -1 && src->glIndex != -1) {
+                                /* Light disabled */
+                                This->activeLights[src->glIndex] = NULL;
+                            } else if(realLight->glIndex != -1 && src->glIndex == -1){
+                                /* Light enabled */
+                                This->activeLights[realLight->glIndex] = src;
+                            }
+                            src->glIndex = realLight->glIndex;
+                        }
+                        updated = TRUE;
+                        break;
+                    }
+                }
 
-            /* If 'changed' then its a SetLight command. Rather than comparing to see
-                 if the OriginalParms have changed and then copy them (twice through
-                 memory) just do the copy                                              */
-            if (src->changed) {
-
-                /* If the light exists, copy its parameters, otherwise copy the default parameters */
-                const WINED3DLIGHT* params = realLight? &realLight->OriginalParms: &WINED3D_default_light;
-                TRACE("Updating lights for light %d\n", src->OriginalIndex);
-                memcpy(&src->OriginalParms, params, sizeof(*params));
+                if(updated) {
+                    /* Found a light, all done, proceed with next hash entry */
+                    continue;
+                } else if(src->changed) {
+                    /* Otherwise assign defaul params */
+                    memcpy(&src->OriginalParms, &WINED3D_default_light, sizeof(src->OriginalParms));
+                } else {
+                    /* Not enabled by default */
+                    src->glIndex = -1;
+                }
             }
-
-            /* If 'enabledchanged' then its a LightEnable command */
-            if (src->enabledChanged) {
-
-                /* If the light exists, check if it's enabled, otherwise default is disabled state */
-                TRACE("Updating lightEnabled for light %d\n", src->OriginalIndex);
-                src->lightEnabled = realLight? realLight->lightEnabled: FALSE;
-            }
-
-            src = src->next;
         }
 
         /* Recorded => Only update 'changed' values */
@@ -484,6 +535,14 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
             memcpy(&This->viewport, &targetStateBlock->viewport, sizeof(WINED3DVIEWPORT));
         }
 
+        if(This->set.scissorRect && memcmp(&targetStateBlock->scissorRect,
+                                           &This->scissorRect,
+                                           sizeof(targetStateBlock->scissorRect)))
+        {
+            TRACE("Updating scissor rect\n");
+            memcpy(&targetStateBlock->scissorRect, &This->scissorRect, sizeof(targetStateBlock->scissorRect));
+        }
+
         for (i = 0; i < MAX_STREAMS; i++) {
             if (This->set.streamSource[i] &&
                             ((This->streamStride[i] != targetStateBlock->streamStride[i]) ||
@@ -525,7 +584,7 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
         }
 
         /* Texture states */
-        for (j = 0; j < GL_LIMITS(texture_stages); j++) {
+        for (j = 0; j < MAX_TEXTURES; j++) {
             /* TODO: move over to using memcpy */
             for (i = 1; i <= WINED3D_HIGHEST_TEXTURE_STATE ; i++) {
                 if (This->set.textureState[j][i]) {
@@ -538,7 +597,7 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
 
         /* Samplers */
         /* TODO: move over to using memcpy */
-        for (j = 0; j < GL_LIMITS(sampler_stages); j++) {
+        for (j = 0; j < MAX_COMBINED_SAMPLERS; j++) {
             if (This->set.textures[j]) {
                 TRACE("Updating texture %d to %p (was %p)\n", j, targetStateBlock->textures[j],  This->textures[j]);
                 This->textures[j] = targetStateBlock->textures[j];
@@ -576,14 +635,19 @@ should really perform a delta so that only the changes get updated*/
 
     if (/*TODO: 'magic' statetype, replace with BOOL This->blockType == D3DSBT_RECORDED || */This->blockType == WINED3DSBT_INIT || This->blockType == WINED3DSBT_ALL || This->blockType == WINED3DSBT_VERTEXSTATE) {
 
+        for(i = 0; i < LIGHTMAP_SIZE; i++) {
+            struct list *e;
 
-        PLIGHTINFOEL *toDo = This->lights;
-        while (toDo != NULL) {
-            if (toDo->changed)
-                  IWineD3DDevice_SetLight(pDevice, toDo->OriginalIndex, &toDo->OriginalParms);
-            if (toDo->enabledChanged)
-                  IWineD3DDevice_SetLightEnable(pDevice, toDo->OriginalIndex, toDo->lightEnabled);
-            toDo = toDo->next;
+            LIST_FOR_EACH(e, &This->lightMap[i]) {
+                PLIGHTINFOEL *light = LIST_ENTRY(e, PLIGHTINFOEL, entry);
+
+                if(light->changed) {
+                    IWineD3DDevice_SetLight(pDevice, light->OriginalIndex, &light->OriginalParms);
+                }
+                if(light->enabledChanged) {
+                    IWineD3DDevice_SetLightEnable(pDevice, light->OriginalIndex, light->glIndex != -1);
+                }
+            }
         }
 
         /* Vertex Shader */
@@ -608,7 +672,7 @@ should really perform a delta so that only the changes get updated*/
         }
     }
 
-    if (/*TODO: 'magic' statetype, replace with BOOL This->blockType == D3DSBT_RECORDED || */ This->blockType == D3DSBT_ALL || This->blockType == D3DSBT_PIXELSTATE) {
+    if (/*TODO: 'magic' statetype, replace with BOOL This->blockType == D3DSBT_RECORDED || */ This->blockType == WINED3DSBT_ALL || This->blockType == WINED3DSBT_PIXELSTATE) {
 
         /* Pixel Shader */
         if (This->set.pixelShader && This->changed.pixelShader) {
@@ -647,14 +711,19 @@ should really perform a delta so that only the changes get updated*/
                 IWineD3DDevice_SetTransform(pDevice, i, &This->transforms[i]);
         }
 
-        if (This->set.indices && This->changed.indices)
-            IWineD3DDevice_SetIndices(pDevice, This->pIndexData, This->baseVertexIndex);
+        if (This->set.indices && This->changed.indices) {
+            IWineD3DDevice_SetIndices(pDevice, This->pIndexData);
+            IWineD3DDevice_SetBaseVertexIndex(pDevice, This->baseVertexIndex);
+        }
 
         if (This->set.material && This->changed.material )
             IWineD3DDevice_SetMaterial(pDevice, &This->material);
 
         if (This->set.viewport && This->changed.viewport)
             IWineD3DDevice_SetViewport(pDevice, &This->viewport);
+
+        if (This->set.scissorRect && This->changed.scissorRect)
+            IWineD3DDevice_SetScissorRect(pDevice, &This->scissorRect);
 
         /* TODO: Proper implementation using SetStreamSource offset (set to 0 for the moment)\n") */
         for (i=0; i<MAX_STREAMS; i++) {
@@ -684,7 +753,7 @@ should really perform a delta so that only the changes get updated*/
         }
 
         /* Texture states */
-        for (j = 0; j < GL_LIMITS(texture_stages); j++) { /* Set The texture first, just in case it resets the states? */
+        for (j = 0; j < MAX_TEXTURES; j++) { /* Set The texture first, just in case it resets the states? */
             /* TODO: move over to memcpy */
             for (i = 1; i <= WINED3D_HIGHEST_TEXTURE_STATE; i++) {
                 if (This->set.textureState[j][i] && This->changed.textureState[j][i]) { /* tb_dx9_10 failes without this test */
@@ -699,9 +768,13 @@ should really perform a delta so that only the changes get updated*/
 
         /* Samplers */
         /* TODO: move over to memcpy */
-        for (j = 0 ; j < GL_LIMITS(sampler_stages); j++){
+        for (j = 0 ; j < MAX_COMBINED_SAMPLERS; j++){
             if (This->set.textures[j] && This->changed.textures[j]) {
-                IWineD3DDevice_SetTexture(pDevice, j, This->textures[j]);
+                if (j < MAX_FRAGMENT_SAMPLERS) {
+                    IWineD3DDevice_SetTexture(pDevice, j, This->textures[j]);
+                } else {
+                    IWineD3DDevice_SetTexture(pDevice, WINED3DVERTEXTEXTURESAMPLER0 + j - MAX_FRAGMENT_SAMPLERS, This->textures[j]);
+                }
             }
             for (i = 1; i <= WINED3D_HIGHEST_SAMPLER_STATE; i++){
                 if (This->set.samplerState[j][i] && This->changed.samplerState[j][i]) {
@@ -722,14 +795,14 @@ should really perform a delta so that only the changes get updated*/
 
         }
 
-        for (j = 0; j < GL_LIMITS(texture_stages); j++) {
+        for (j = 0; j < MAX_TEXTURES; j++) {
             for (i = 0; i < NUM_SAVEDPIXELSTATES_T; i++) {
                 ((IWineD3DDeviceImpl *)pDevice)->stateBlock->textureState[j][SavedPixelStates_T[i]] = This->textureState[j][SavedPixelStates_T[i]];
                 IWineD3DDeviceImpl_MarkStateDirty((IWineD3DDeviceImpl *)pDevice, STATE_TEXTURESTAGE(j, SavedPixelStates_T[i]));
             }
         }
 
-        for (j = 0; j < GL_LIMITS(sampler_stages); j++) {
+        for (j = 0; j < MAX_COMBINED_SAMPLERS; j++) {
             for (i = 0; i < NUM_SAVEDPIXELSTATES_S; i++) {
                 ((IWineD3DDeviceImpl *)pDevice)->stateBlock->samplerState[j][SavedPixelStates_S[i]] = This->samplerState[j][SavedPixelStates_S[i]];
             }
@@ -742,14 +815,14 @@ should really perform a delta so that only the changes get updated*/
                 IWineD3DDevice_SetRenderState(pDevice, SavedVertexStates_R[i], This->renderState[SavedVertexStates_R[i]]);
         }
 
-        for (j = 0; j < GL_LIMITS(texture_stages); j++) {
+        for (j = 0; j < MAX_TEXTURES; j++) {
             for (i = 0; i < NUM_SAVEDVERTEXSTATES_T; i++) {
                 ((IWineD3DDeviceImpl *)pDevice)->stateBlock->textureState[j][SavedVertexStates_T[i]] = This->textureState[j][SavedVertexStates_T[i]];
                 IWineD3DDeviceImpl_MarkStateDirty((IWineD3DDeviceImpl *)pDevice, STATE_TEXTURESTAGE(j, SavedVertexStates_T[i]));
             }
         }
 
-        for (j = 0; j < GL_LIMITS(sampler_stages); j++) {
+        for (j = 0; j < MAX_COMBINED_SAMPLERS; j++) {
             for (i = 0; i < NUM_SAVEDVERTEXSTATES_S; i++) {
                 ((IWineD3DDeviceImpl *)pDevice)->stateBlock->samplerState[j][SavedVertexStates_S[i]] = This->samplerState[j][SavedVertexStates_S[i]];
             }
@@ -762,7 +835,7 @@ should really perform a delta so that only the changes get updated*/
     stateblock_savedstates_copy(iface, &((IWineD3DDeviceImpl*)pDevice)->stateBlock->changed, &This->changed);
     ((IWineD3DDeviceImpl *)pDevice)->stateBlock->lowest_disabled_stage = MAX_TEXTURES - 1;
     for(j = 0; j < MAX_TEXTURES - 1; j++) {
-        if(((IWineD3DDeviceImpl *)pDevice)->stateBlock->textureState[j][D3DTSS_COLOROP] == WINED3DTOP_DISABLE) {
+        if(((IWineD3DDeviceImpl *)pDevice)->stateBlock->textureState[j][WINED3DTSS_COLOROP] == WINED3DTOP_DISABLE) {
             ((IWineD3DDeviceImpl *)pDevice)->stateBlock->lowest_disabled_stage = j;
             break;
         }
@@ -946,7 +1019,7 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
     This->clip_status.ClipIntersection = 0xFFFFFFFF;
 
     /* Texture Stage States - Put directly into state block, we will call function below */
-    for (i = 0; i < GL_LIMITS(texture_stages); i++) {
+    for (i = 0; i < MAX_TEXTURES; i++) {
         TRACE("Setting up default texture states for texture Stage %d\n", i);
         memcpy(&This->transforms[WINED3DTS_TEXTURE0 + i], &identity, sizeof(identity));
         This->textureState[i][WINED3DTSS_COLOROP               ] = (i==0)? WINED3DTOP_MODULATE :  WINED3DTOP_DISABLE;
@@ -971,7 +1044,7 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
     This->lowest_disabled_stage = 1;
 
         /* Sampler states*/
-    for (i = 0 ; i <  GL_LIMITS(sampler_stages); i++) {
+    for (i = 0 ; i <  MAX_COMBINED_SAMPLERS; i++) {
         TRACE("Setting up default samplers states for sampler %d\n", i);
         This->samplerState[i][WINED3DSAMP_ADDRESSU         ] = WINED3DTADDRESS_WRAP;
         This->samplerState[i][WINED3DSAMP_ADDRESSV         ] = WINED3DTADDRESS_WRAP;
@@ -983,7 +1056,7 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
         This->samplerState[i][WINED3DSAMP_MIPMAPLODBIAS    ] = 0;
         This->samplerState[i][WINED3DSAMP_MAXMIPLEVEL      ] = 0;
         This->samplerState[i][WINED3DSAMP_MAXANISOTROPY    ] = 1;
-        This->samplerState[i][WINED3DSAMP_SRGBTEXTURE      ] = 0; /* TODO: Gamma correction value*/
+        This->samplerState[i][WINED3DSAMP_SRGBTEXTURE      ] = 0;
         This->samplerState[i][WINED3DSAMP_ELEMENTINDEX     ] = 0; /* TODO: Indicates which element of a  multielement texture to use */
         This->samplerState[i][WINED3DSAMP_DMAPOFFSET       ] = 0; /* TODO: Vertex offset in the presampled displacement map */
     }
@@ -995,7 +1068,12 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
        then the default texture will kick in until replaced by a SetTexture call     */
     ENTER_GL();
 
-    for (i = 0; i < GL_LIMITS(texture_stages); i++) {
+    if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
+        /* The dummy texture does not have client storage backing */
+        glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE);
+        checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE)");
+    }
+    for (i = 0; i < GL_LIMITS(textures); i++) {
         GLubyte white = 255;
 
         /* Note this avoids calling settexture, so pretend it has been called */
@@ -1016,13 +1094,19 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
         checkGLcall("glGenTextures");
         TRACE("Dummy Texture %d given name %d\n", i, ThisDevice->dummyTextureName[i]);
 
-        /* Generate a dummy 1d texture */
-        This->textureDimensions[i] = GL_TEXTURE_1D;
-        glBindTexture(GL_TEXTURE_1D, ThisDevice->dummyTextureName[i]);
+        /* Generate a dummy 2d texture (not using 1d because they cause many
+         * DRI drivers fall back to sw) */
+        This->textureDimensions[i] = GL_TEXTURE_2D;
+        glBindTexture(GL_TEXTURE_2D, ThisDevice->dummyTextureName[i]);
         checkGLcall("glBindTexture");
 
-        glTexImage1D(GL_TEXTURE_1D, 0, GL_LUMINANCE, 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &white);
-        checkGLcall("glTexImage1D");
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 1, 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, &white);
+        checkGLcall("glTexImage2D");
+    }
+    if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
+        /* Reenable because if supported it is enabled by default */
+        glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE);
+        checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE)");
     }
 
     LEAVE_GL();

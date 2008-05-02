@@ -112,12 +112,6 @@ static const ULONG PROPERTY_NULL             = 0xFFFFFFFF;
      STGM_NOSNAPSHOT | STGM_DIRECT_SWMR | STGM_DELETEONRELEASE | STGM_SIMPLE)
 
 /*
- * These are signatures to detect the type of Document file.
- */
-static const BYTE STORAGE_magic[8]    ={0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1};
-static const BYTE STORAGE_oldmagic[8] ={0xd0,0xcf,0x11,0xe0,0x0e,0x11,0xfc,0x0d};
-
-/*
  * Forward declarations of all the structures used by the storage
  * module.
  */
@@ -191,11 +185,11 @@ BigBlockFile*  BIGBLOCKFILE_Construct(HANDLE hFile,
                                       BOOL fileBased);
 void           BIGBLOCKFILE_Destructor(LPBIGBLOCKFILE This);
 void           BIGBLOCKFILE_EnsureExists(LPBIGBLOCKFILE This, ULONG index);
-void*          BIGBLOCKFILE_GetBigBlock(LPBIGBLOCKFILE This, ULONG index);
-void*          BIGBLOCKFILE_GetROBigBlock(LPBIGBLOCKFILE This, ULONG index);
-void           BIGBLOCKFILE_ReleaseBigBlock(LPBIGBLOCKFILE This, void *pBlock);
 void           BIGBLOCKFILE_SetSize(LPBIGBLOCKFILE This, ULARGE_INTEGER newSize);
-ULARGE_INTEGER BIGBLOCKFILE_GetSize(LPBIGBLOCKFILE This);
+HRESULT        BIGBLOCKFILE_ReadAt(LPBIGBLOCKFILE This, ULARGE_INTEGER offset,
+           void* buffer, ULONG size, ULONG* bytesRead);
+HRESULT        BIGBLOCKFILE_WriteAt(LPBIGBLOCKFILE This, ULARGE_INTEGER offset,
+           void* buffer, const ULONG size, ULONG* bytesRead);
 
 /*************************************************************************
  * Ole Convert support
@@ -251,12 +245,18 @@ struct StorageBaseImpl
    * flags that this storage was opened or created with
    */
   DWORD openFlags;
+
+  /*
+   * State bits appear to only be preserved while running. No in the stream
+   */
+  DWORD stateBits;
 };
 
 /****************************************************************************
  * StorageBaseImpl stream list handlers
  */
 
+void StorageBaseImpl_AddStream(StorageBaseImpl * stg, StgStreamImpl * strm);
 void StorageBaseImpl_RemoveStream(StorageBaseImpl * stg, StgStreamImpl * strm);
 
 /****************************************************************************

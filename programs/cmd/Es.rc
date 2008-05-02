@@ -2,7 +2,7 @@
  * Wine command prompt
  * Spanish Language Support
  *
- * Copyright (C) 2004 José Manuel Ferrer Ortiz
+ * Copyright (C) 2004, 2007 José Manuel Ferrer Ortiz
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -64,7 +64,7 @@ un conjunto de archivos.\n\
 Sintaxis: FOR %variable IN (conjunto) DO comando\n\
 \n\
 La necesidad de doblar el signo % cuando se utiliza FOR en un archivo\n\
-por lotes no existe en wcmd.\n"
+por lotes no existe en cmd.\n"
 
   WCMD_GOTO,
 "El comando GOTO transfiere la ejecución a otro mandato dentro de un\n\
@@ -111,7 +111,7 @@ MOVE falla si la localización vieja y la nueva están en diferentes\n\
 letras de unidad de DOS.\n"
 
   WCMD_PATH,
-"PATH muestra o cambia la ruta de búsqueda de wcmd.\n\
+"PATH muestra o cambia la ruta de búsqueda de cmd.\n\
 \n\
 Al introducir PATH se mostrará la configuración actual de PATH\n\
 (inicialmente esto es el valor dado en su archivo wine.conf). Para\n\
@@ -132,7 +132,7 @@ de la pantalla.\n"
 "PROMPT ajusta el prompt de la línea de comandos.\n\
 \n\
 La cadena que sigue al comando PROMPT (y el espacio inmediatamente\n\
-después) aparece al principio de la línea cuando wcmd está esperando\n\
+después) aparece al principio de la línea cuando cmd está esperando\n\
 la entrada.\n\
 \n\
 Las siguientes cadenas de caracteres tienen el significado especial\n\
@@ -141,7 +141,7 @@ que se muestra:\n\
 $$    Signo dólar         $_    Nueva línea         $b    Signo de tubo (|)\n\
 $d    Fecha actual        $e    Escape              $g    Signo >\n\
 $l    Signo <             $n    Unidad actual       $p    Ruta actual\n\
-$q    Signo igual         $t    Hora actual         $v    Versión de wcmd\n\
+$q    Signo igual         $t    Hora actual         $v    Versión de cmd\n\
 \n\
 Nótese que si se introduce el comando PROMPT sin una cadena de prompt\n\
 reinicializa el prompt al valor por defecto, que es el directorio\n\
@@ -164,7 +164,7 @@ comentario en un archivo por lotes.\n"
   WCMD_RMDIR,  "Ayuda sobre RMDIR\n"
 
   WCMD_SET,
-"SET muestra o cambia las variables de entorno de wcmd.\n\
+"SET muestra o cambia las variables de entorno de cmd.\n\
 \n\
 SET sin parámetros muestra todas las variables de entorno actuales.\n\
 \n\
@@ -179,7 +179,7 @@ embebidos.\n\
 Bajo Wine, el entorno del sistema operativo que hay por debajo se\n\
 incluye en el entorno de Win32 por lo que, por lo general, habrá muchos\n\
 más valores que en una implementación Win32 nativa. Nótese que no es\n\
-posible afectar al entorno del sistema operativo desde wcmd.\n"
+posible afectar al entorno del sistema operativo desde cmd.\n"
 
   WCMD_SHIFT,
 "SHIFT se utiliza en un archivo por lotes para eliminar un parámetro\n\
@@ -190,7 +190,7 @@ de comando.\n"
   WCMD_TIME,   "Ayuda sobre TIME\n"
 
   WCMD_TITLE,
-"Ajusta el título de la ventana de wcmd, sintaxis TITLE [cadena]\n"
+"Ajusta el título de la ventana de cmd, sintaxis TITLE [cadena]\n"
 
   WCMD_TYPE,
 "TYPE <nombre de archivo> copia <nombre de archivo> al dispositivo de\n\
@@ -208,15 +208,24 @@ VERIFY		Muestra ON u OFF como corresponda.\n\
 La bandera de verificación no tiene funcionalidad en Wine.\n"
 
   WCMD_VER,
-"VER muestra la versión de wcmd que está ejecutando\n"
+"VER muestra la versión de cmd que está ejecutando\n"
 
   WCMD_VOL,    "Ayuda sobre VOL\n"
 
+  WCMD_PUSHD,
+"PUSHD <nombre de directorio> almacena el directorio actual a una\n\
+pila, y luego cambia el directorio actual al proporcionado.\n"
+
+  WCMD_POPD,   "POPD cambia el directorio actual al último almacenado con\n\
+PUSHD.\n"
+
+  WCMD_MORE,   "MORE muestra la salida de archivos o entrada entubada por páginas.\n"
+
   WCMD_EXIT,
 "EXIT termina la sesión de comandos actual y regresa al sistema\n\
-operativo o intérprete de comandos desde el que invocó wcmd.\n"
+operativo o intérprete de comandos desde el que invocó cmd.\n"
 
-  1000, "Los comandos internos de WCMD son:\n\
+  1000, "Los comandos internos de CMD son:\n\
 ATTRIB\t\tMostrar o cambiar los atributos de archivo de DOS\n\
 CALL\t\tInvocar un archivo por lotes desde dentro de otro\n\
 CD (CHDIR)\tCambiar el directorio por defecto actual\n\
@@ -229,17 +238,55 @@ DIR\t\tListar el contenido de un directorio\n\
 ECHO\t\tCopiar texto directamente a la salida de consola\n\
 HELP\t\tMostrar detalles breves de ayuda sobre un tema\n\
 MD (MKDIR)\tCrear un subdirectorio\n\
+MORE\t\tMostrar la salida por páginas\n\
 MOVE\t\tMover un archivo, conjunto de archivos o árbol de directorio\n\
 PATH\t\tAjustar o cambiar la ruta de búsqueda\n\
+POPD\t\tRestaurar el directorio al último almacenado con PUSHD\n\
 PROMPT\t\tCambiar el prompt de comandos\n\
+PUSHD\t\tCambiar a un nuevo directorio, almacenando el actual\n\
 REN (RENAME)\tRenombrar un archivo\n\
 RD (RMDIR)\tEliminar un subdirectorio\n\
 SET\t\tAjustar o mostrar variables de entorno\n\
 TIME\t\tAjustar o mostrar la hora actual del sistema\n\
-TITLE\t\tAjustar el título de la ventana para la sesión de WCMD\n\
+TITLE\t\tAjustar el título de la ventana para la sesión de CMD\n\
 TYPE\t\tTeclear el contenido de un archivo de texto\n\
-VER\t\tMostrar la versión actual de WCMD\n\
+VER\t\tMostrar la versión actual de CMD\n\
 VOL\t\tMostrar la etiqueta de volumen de un dispositivo de disco\n\
-EXIT\t\tConcluir WCMD\n\n\
+EXIT\t\tConcluir CMD\n\n\
 Introduzca HELP <comando> para más información sobre cualquiera de los comandos\nde arriba\n"
+
+  WCMD_CONFIRM, "Está seguro"
+  WCMD_YES, "S"
+  WCMD_NO, "N"
+  WCMD_NOASSOC, "Falta una asociación de archivo para la extensión %s\n"
+  WCMD_NOFTYPE, "Ningún comando de apertura asociado con el tipo de archivo '%s'\n"
+  WCMD_OVERWRITE, "Overwrite %s"
+  WCMD_MORESTR, "Más..."
+  WCMD_TRUNCATEDLINE, "Line in Batch processing possibly truncated. Using:\n"
+  WCMD_NYI, "Not Yet Implemented\n\n"
+  WCMD_NOARG, "Argument missing\n"
+  WCMD_SYNTAXERR, "Syntax error\n"
+  WCMD_FILENOTFOUND, "%s : File Not Found\n"
+  WCMD_NOCMDHELP, "No help available for %s\n"
+  WCMD_NOTARGET, "Target to GOTO not found\n"
+  WCMD_CURRENTDATE, "Current Date is %s\n"
+  WCMD_CURRENTTIME, "Current Time is %s\n"
+  WCMD_NEWDATE, "Enter new date: "
+  WCMD_NEWTIME, "Enter new time: "
+  WCMD_MISSINGENV, "Environment variable %s not defined\n"
+  WCMD_READFAIL, "Failed to open '%s'\n"
+  WCMD_CALLINSCRIPT, "Cannot call batch label outside of a batch script\n"
+  WCMD_ALL, "A"
+  WCMD_DELPROMPT, "%s, Delete"
+  WCMD_ECHOPROMPT, "Echo is %s\n"
+  WCMD_VERIFYPROMPT, "Verify is %s\n"
+  WCMD_VERIFYERR, "Verify must be ON or OFF\n";
+  WCMD_ARGERR, "Parameter error\n"
+  WCMD_VOLUMEDETAIL, "Volume in drive %c is %s\nVolume Serial Number is %04x-%04x\n\n"
+  WCMD_VOLUMEPROMPT, "Volume label (11 characters, ENTER for none)?"
+  WCMD_NOPATH, "PATH not found\n"
+  WCMD_ANYKEY,"Press Return key to continue: "
+  WCMD_CONSTITLE,"Wine Command Prompt"
+  WCMD_VERSION,"CMD Version %s\n\n"
+  WCMD_MOREPROMPT, "More? "
 }

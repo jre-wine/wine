@@ -76,13 +76,12 @@
 #endif
 
 #ifdef HAVE_IOKIT_IOKITLIB_H
-# ifndef SENSEBUFLEN
-#  include <sys/disk.h>
-#  include <IOKit/IOKitLib.h>
-#  include <IOKit/storage/IOMedia.h>
-#  include <IOKit/scsi/SCSICmds_REQUEST_SENSE_Defs.h>
-#  define SENSEBUFLEN kSenseDefaultSize
-# endif
+# include <sys/disk.h>
+# include <IOKit/IOKitLib.h>
+# include <IOKit/storage/IOMedia.h>
+# include <IOKit/storage/IOCDMediaBSDClient.h>
+# include <IOKit/scsi/SCSICmds_REQUEST_SENSE_Defs.h>
+# define SENSEBUFLEN kSenseDefaultSize
 #endif
 
 #define NONAMELESSUNION
@@ -489,6 +488,33 @@ static NTSTATUS CDROM_SyncCache(int dev, int fd)
         toc->TrackData[i - toc->FirstTrack].Address[2] = toc_buffer.addr.msf.second;
         toc->TrackData[i - toc->FirstTrack].Address[3] = toc_buffer.addr.msf.frame;
     }
+    cdrom_cache[dev].toc_good = 1;
+    return STATUS_SUCCESS;
+
+#elif defined(__APPLE__)
+    int i;
+    dk_cd_read_toc_t hdr;
+    CDROM_TOC *toc = &cdrom_cache[dev].toc;
+    cdrom_cache[dev].toc_good = 0;
+
+    memset( &hdr, 0, sizeof(hdr) );
+    hdr.buffer = toc;
+    hdr.bufferLength = sizeof(*toc);
+    if (ioctl(fd, DKIOCCDREADTOC, &hdr) == -1)
+    {
+        WARN("(%d) -- Error occurred (%s)!\n", dev, strerror(errno));
+        return FILE_GetNtStatus();
+    }
+    for (i = toc->FirstTrack; i <= toc->LastTrack + 1; i++)
+    {
+        /* convert address format */
+        TRACK_DATA *data = &toc->TrackData[i - toc->FirstTrack];
+        DWORD frame = (((DWORD)data->Address[0] << 24) | ((DWORD)data->Address[1] << 16) |
+                       ((DWORD)data->Address[2] << 8) | data->Address[3]);
+        MSF_OF_FRAME( data->Address[1], frame );
+        data->Address[0] = 0;
+    }
+
     cdrom_cache[dev].toc_good = 1;
     return STATUS_SUCCESS;
 #else
@@ -1712,7 +1738,7 @@ static NTSTATUS CDROM_GetAddress(int fd, SCSI_ADDRESS* address)
  *
  *
  */
-static NTSTATUS DVD_StartSession(int fd, PDVD_SESSION_ID sid_in, PDVD_SESSION_ID sid_out)
+static NTSTATUS DVD_StartSession(int fd, const DVD_SESSION_ID *sid_in, PDVD_SESSION_ID sid_out)
 {
 #if defined(linux)
     NTSTATUS ret = STATUS_NOT_SUPPORTED;
@@ -1720,7 +1746,7 @@ static NTSTATUS DVD_StartSession(int fd, PDVD_SESSION_ID sid_in, PDVD_SESSION_ID
 
     memset( &auth_info, 0, sizeof( auth_info ) );
     auth_info.type = DVD_LU_SEND_AGID;
-    if (sid_in) auth_info.lsa.agid = *(int*)sid_in; /* ?*/
+    if (sid_in) auth_info.lsa.agid = *(const int*)sid_in; /* ?*/
 
     TRACE("fd 0x%08x\n",fd);
     ret =CDROM_GetStatusCode(ioctl(fd, DVD_AUTH, &auth_info));
@@ -1738,14 +1764,14 @@ static NTSTATUS DVD_StartSession(int fd, PDVD_SESSION_ID sid_in, PDVD_SESSION_ID
  *
  *
  */
-static NTSTATUS DVD_EndSession(int fd, PDVD_SESSION_ID sid)
+static NTSTATUS DVD_EndSession(int fd, const DVD_SESSION_ID *sid)
 {
 #if defined(linux)
     dvd_authinfo auth_info;
 
     memset( &auth_info, 0, sizeof( auth_info ) );
     auth_info.type = DVD_INVALIDATE_AGID;
-    auth_info.lsa.agid = *(int*)sid;
+    auth_info.lsa.agid = *(const int*)sid;
 
     TRACE("\n");
     return CDROM_GetStatusCode(ioctl(fd, DVD_AUTH, &auth_info));
@@ -1761,7 +1787,7 @@ static NTSTATUS DVD_EndSession(int fd, PDVD_SESSION_ID sid)
  *
  *
  */
-static NTSTATUS DVD_SendKey(int fd, PDVD_COPY_PROTECT_KEY key)
+static NTSTATUS DVD_SendKey(int fd, const DVD_COPY_PROTECT_KEY *key)
 {
 #if defined(linux)
     NTSTATUS ret = STATUS_NOT_SUPPORTED;
@@ -1905,7 +1931,7 @@ static NTSTATUS DVD_GetRegion(int dev, PDVD_REGION region)
  *
  *
  */
-static NTSTATUS DVD_ReadStructure(int dev, PDVD_READ_STRUCTURE structure, PDVD_LAYER_DESCRIPTOR layer)
+static NTSTATUS DVD_ReadStructure(int dev, const DVD_READ_STRUCTURE *structure, PDVD_LAYER_DESCRIPTOR layer)
 {
 #ifdef DVD_READ_STRUCT
     dvd_struct s;

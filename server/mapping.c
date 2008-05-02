@@ -68,6 +68,7 @@ static const struct object_ops mapping_ops =
     mapping_get_fd,              /* get_fd */
     mapping_map_access,          /* map_access */
     no_lookup_name,              /* lookup_name */
+    no_open_file,                /* open_file */
     fd_close_handle,             /* close_handle */
     mapping_destroy              /* destroy */
 };
@@ -266,7 +267,7 @@ static int get_image_params( struct mapping *mapping )
 }
 
 /* get the size of the unix file associated with the mapping */
-inline static int get_file_size( struct file *file, file_pos_t *size )
+static inline int get_file_size( struct file *file, file_pos_t *size )
 {
     struct stat st;
     int unix_fd = get_file_unix_fd( file );
@@ -432,6 +433,7 @@ DECL_HANDLER(open_mapping)
 DECL_HANDLER(get_mapping_info)
 {
     struct mapping *mapping;
+    struct fd *fd;
 
     if ((mapping = (struct mapping *)get_handle_obj( current->process, req->handle,
                                                      0, &mapping_ops )))
@@ -443,9 +445,20 @@ DECL_HANDLER(get_mapping_info)
         reply->base        = mapping->base;
         reply->shared_file = 0;
         reply->shared_size = mapping->shared_size;
+        if ((fd = get_obj_fd( &mapping->obj )))
+        {
+            if (!is_fd_removable(fd))
+                reply->mapping = alloc_handle( current->process, mapping, 0, 0 );
+            release_object( fd );
+        }
         if (mapping->shared_file)
-            reply->shared_file = alloc_handle( current->process, mapping->shared_file,
-                                               GENERIC_READ|GENERIC_WRITE, 0 );
+        {
+            if (!(reply->shared_file = alloc_handle( current->process, mapping->shared_file,
+                                                     GENERIC_READ|GENERIC_WRITE, 0 )))
+            {
+                if (reply->mapping) close_handle( current->process, reply->mapping );
+            }
+        }
         release_object( mapping );
     }
 }

@@ -232,21 +232,28 @@ ME_MoveCaret(ME_TextEditor *editor)
 
   ME_WrapMarkedParagraphs(editor);
   ME_GetCursorCoordinates(editor, &editor->pCursors[0], &x, &y, &height);
-  CreateCaret(editor->hWnd, NULL, 0, height);
-  SetCaretPos(x, y);
+  if(editor->bHaveFocus)
+  {
+    CreateCaret(editor->hWnd, NULL, 0, height);
+    SetCaretPos(x, y);
+  }
 }
 
 
 void ME_ShowCaret(ME_TextEditor *ed)
 {
   ME_MoveCaret(ed);
-  ShowCaret(ed->hWnd);
+  if(ed->bHaveFocus)
+    ShowCaret(ed->hWnd);
 }
 
 void ME_HideCaret(ME_TextEditor *ed)
 {
-  HideCaret(ed->hWnd);
-  DestroyCaret();
+  if(ed->bHaveFocus)
+  {
+    HideCaret(ed->hWnd);
+    DestroyCaret();
+  }
 }
 
 void ME_InternalDeleteText(ME_TextEditor *editor, int nOfs, 
@@ -366,6 +373,8 @@ void ME_DeleteTextAtCursor(ME_TextEditor *editor, int nCursor,
   int nChars)
 {  
   assert(nCursor>=0 && nCursor<editor->nCursors);
+  /* text operations set modified state */
+  editor->nModifyStep = 1;
   ME_InternalDeleteText(editor, ME_GetCursorOfs(editor, nCursor), nChars);
 }
 
@@ -431,15 +440,20 @@ void ME_InsertTextFromCursor(ME_TextEditor *editor, int nCursor,
 {
   const WCHAR *pos;
   ME_Cursor *p = NULL;
-  /* FIXME: is this too slow? */
-  /* Didn't affect performance for WM_SETTEXT (around 50sec/30K) */
-  int freeSpace = editor->nTextLimit - ME_GetTextLength(editor);
-
-  assert(style);
+  int freeSpace;
 
   /* FIXME really HERE ? */
   if (ME_IsSelection(editor))
     ME_DeleteSelection(editor);
+
+  /* FIXME: is this too slow? */
+  /* Didn't affect performance for WM_SETTEXT (around 50sec/30K) */
+  freeSpace = editor->nTextLimit - ME_GetTextLength(editor);
+
+  /* text operations set modified state */
+  editor->nModifyStep = 1;
+
+  assert(style);
 
   assert(nCursor>=0 && nCursor<editor->nCursors);
   if (len == -1)

@@ -42,7 +42,6 @@
 #include "internet.h"
 #include "winreg.h"
 #include "shlwapi.h"
-#include "wingdi.h"
 #include "shlobj.h"
 
 #include "wine/unicode.h"
@@ -253,7 +252,7 @@ static BOOL URLCacheContainer_OpenIndex(URLCACHECONTAINER * pContainer)
 
     if (dwFileSize == 0)
     {
-        static CHAR const szCacheContent[] = "Software\\Microsoft\\Windows\\CurrentVersion\\Cache\\Content";
+        static const CHAR szCacheContent[] = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Cache\\Content";
 	HKEY	key;
 	char	achZeroes[0x1000];
 	DWORD	dwOffset;

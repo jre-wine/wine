@@ -28,7 +28,7 @@ extern "C" {
 #endif
 
 BOOL WINAPI ShowHideMenuCtl (HWND, UINT_PTR, LPINT);
-VOID WINAPI GetEffectiveClientRect (HWND, LPRECT, LPINT);
+VOID WINAPI GetEffectiveClientRect (HWND, LPRECT, const INT*);
 VOID WINAPI InitCommonControls (VOID);
 
 typedef struct tagINITCOMMONCONTROLSEX {
@@ -36,7 +36,7 @@ typedef struct tagINITCOMMONCONTROLSEX {
     DWORD dwICC;
 } INITCOMMONCONTROLSEX, *LPINITCOMMONCONTROLSEX;
 
-BOOL WINAPI InitCommonControlsEx (LPINITCOMMONCONTROLSEX);
+BOOL WINAPI InitCommonControlsEx (const INITCOMMONCONTROLSEX*);
 
 LANGID WINAPI GetMUILanguage (VOID);
 VOID WINAPI InitMUILanguage (LANGID uiLang);
@@ -340,8 +340,8 @@ static const WCHAR STATUSCLASSNAMEW[] = { 'm','s','c','t','l','s','_',
 HWND WINAPI CreateStatusWindowA (LONG, LPCSTR, HWND, UINT);
 HWND WINAPI CreateStatusWindowW (LONG, LPCWSTR, HWND, UINT);
 #define CreateStatusWindow WINELIB_NAME_AW(CreateStatusWindow)
-VOID WINAPI DrawStatusTextA (HDC, LPRECT, LPCSTR, UINT);
-VOID WINAPI DrawStatusTextW (HDC, LPRECT, LPCWSTR, UINT);
+VOID WINAPI DrawStatusTextA (HDC, LPCRECT, LPCSTR, UINT);
+VOID WINAPI DrawStatusTextW (HDC, LPCRECT, LPCWSTR, UINT);
 #define DrawStatusText WINELIB_NAME_AW(DrawStatusText)
 VOID WINAPI MenuHelp (UINT, WPARAM, LPARAM, HMENU,
                       HINSTANCE, HWND, UINT*);
@@ -713,7 +713,7 @@ BOOL WINAPI GetWindowSubclass(HWND, SUBCLASSPROC, UINT_PTR, DWORD_PTR*);
 BOOL WINAPI RemoveWindowSubclass(HWND, SUBCLASSPROC, UINT_PTR);
 LRESULT WINAPI DefSubclassProc(HWND, UINT, WPARAM, LPARAM);
 
-int WINAPI DrawShadowText(HDC, LPCWSTR, UINT, RECT*, DWORD, COLORREF, COLORREF, int, int);
+int WINAPI DrawShadowText(HDC, LPCWSTR, UINT, const RECT*, DWORD, COLORREF, COLORREF, int, int);
 
 /* Header control */
 
@@ -3743,6 +3743,8 @@ typedef struct NMLVSCROLL
 #define ListView_GetItemW(hwnd,pitem) \
     (BOOL)SNDMSGW((hwnd),LVM_GETITEMW,0,(LPARAM)(LVITEMW *)(pitem))
 #define ListView_GetItem WINELIB_NAME_AW(ListView_GetItem)
+#define ListView_GetOrigin(hwnd,ppt) \
+    (BOOL)SNDMSGW((hwnd),LVM_GETORIGIN,0,(LPARAM)(POINT *)(ppt))
 
 #define ListView_HitTest(hwnd,pinfo) \
     (INT)SNDMSGA((hwnd),LVM_HITTEST,0,(LPARAM)(LPLVHITTESTINFO)(pinfo))
@@ -4887,6 +4889,7 @@ static const WCHAR WC_LINK[] = { 'S','y','s','L','i','n','k',0 };
 /* SysLink messages */
 #define LM_HITTEST           (WM_USER + 768)
 #define LM_GETIDEALHEIGHT    (WM_USER + 769)
+#define LM_GETIDEALSIZE      (LM_GETIDEALHEIGHT)
 #define LM_SETITEM           (WM_USER + 770)
 #define LM_GETITEM           (WM_USER + 771)
 

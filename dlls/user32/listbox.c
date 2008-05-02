@@ -165,7 +165,7 @@ const struct builtin_class_descr COMBOLBOX_builtin_class =
 
 
 /* check whether app is a Win 3.1 app */
-inline static BOOL is_old_app( LB_DESCR *descr )
+static inline BOOL is_old_app( LB_DESCR *descr )
 {
     return (GetExpWinVer16( GetWindowLongPtrW(descr->self, GWLP_HINSTANCE) ) & 0xFF00 ) == 0x0300;
 }
@@ -568,12 +568,12 @@ static void LISTBOX_PaintItem( LB_DESCR *descr, HDC hdc, const RECT *rect,
         dis.hDC          = hdc;
         dis.itemID       = index;
         dis.itemState    = 0;
-        if (item && item->selected) dis.itemState |= ODS_SELECTED;
+        if (item->selected) dis.itemState |= ODS_SELECTED;
         if (!ignoreFocus && (descr->focus_item == index) &&
             (descr->caret_on) &&
             (descr->in_focus)) dis.itemState |= ODS_FOCUS;
         if (!IsWindowEnabled(descr->self)) dis.itemState |= ODS_DISABLED;
-        dis.itemData     = item ? item->data : 0;
+        dis.itemData     = item->data;
         dis.rcItem       = *rect;
         TRACE("[%p]: drawitem %d (%s) action=%02x state=%02x rect=%d,%d-%d,%d\n",
               descr->self, index, item ? debugstr_w(item->str) : "", action,
@@ -2569,7 +2569,7 @@ static LRESULT WINAPI ListBoxWndProc_common( HWND hwnd, UINT msg,
     }
     if (descr->style & LBS_COMBOBOX) lphc = descr->lphc;
 
-    TRACE("[%p]: msg %s wp %08x lp %08lx\n",
+    TRACE("[%p]: msg %s wp %08lx lp %08lx\n",
           descr->self, SPY_GetMsgName(msg, descr->self), wParam, lParam );
 
     switch(msg)
@@ -3209,7 +3209,7 @@ static LRESULT WINAPI ListBoxWndProc_common( HWND hwnd, UINT msg,
 
     default:
         if ((msg >= WM_USER) && (msg < 0xc000))
-            WARN("[%p]: unknown msg %04x wp %08x lp %08lx\n",
+            WARN("[%p]: unknown msg %04x wp %08lx lp %08lx\n",
                  hwnd, msg, wParam, lParam );
     }
 

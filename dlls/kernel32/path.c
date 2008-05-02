@@ -47,7 +47,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(file);
 
 
 /* check if a file name is for an executable file (.exe or .com) */
-inline static BOOL is_executable( const WCHAR *name )
+static inline BOOL is_executable( const WCHAR *name )
 {
     static const WCHAR exeW[] = {'.','e','x','e',0};
     static const WCHAR comW[] = {'.','c','o','m',0};
@@ -708,7 +708,7 @@ UINT WINAPI GetTempFileNameW( LPCWSTR path, LPCWSTR prefix, UINT unique, LPWSTR 
  * Check if the file name contains a path; helper for SearchPathW.
  * A relative path is not considered a path unless it starts with ./ or ../
  */
-inline static BOOL contains_pathW (LPCWSTR name)
+static inline BOOL contains_pathW (LPCWSTR name)
 {
     if (RtlDetermineDosPathNameType_U( name ) != RELATIVE_PATH) return TRUE;
     if (name[0] != '.') return FALSE;
@@ -1507,6 +1507,43 @@ UINT WINAPI GetSystemWow64DirectoryA( LPSTR lpBuffer, UINT uSize )
 {
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return 0;
+}
+
+
+/***********************************************************************
+ *           NeedCurrentDirectoryForExePathW   (KERNEL32.@)
+ */
+BOOL WINAPI NeedCurrentDirectoryForExePathW( LPCWSTR name )
+{
+    static const WCHAR env_name[] = {'N','o','D','e','f','a','u','l','t',
+                                     'C','u','r','r','e','n','t',
+                                     'D','i','r','e','c','t','o','r','y',
+                                     'I','n','E','x','e','P','a','t','h',0};
+    WCHAR env_val;
+
+    /* MSDN mentions some 'registry location'. We do not use registry. */
+    FIXME("(%s): partial stub\n", debugstr_w(name));
+
+    if (strchrW(name, '\\'))
+        return TRUE;
+
+    /* Check the existence of the variable, not value */
+    if (!GetEnvironmentVariableW( env_name, &env_val, 1 ))
+        return TRUE;
+
+    return FALSE;
+}
+
+
+/***********************************************************************
+ *           NeedCurrentDirectoryForExePathA   (KERNEL32.@)
+ */
+BOOL WINAPI NeedCurrentDirectoryForExePathA( LPCSTR name )
+{
+    WCHAR *nameW;
+
+    if (!(nameW = FILE_name_AtoW( name, FALSE ))) return TRUE;
+    return NeedCurrentDirectoryForExePathW( nameW );
 }
 
 

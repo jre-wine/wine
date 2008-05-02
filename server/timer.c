@@ -42,8 +42,8 @@ struct timer
     struct object        obj;       /* object header */
     int                  manual;    /* manual reset */
     int                  signaled;  /* current signaled state */
-    int                  period;    /* timer period in ms */
-    struct timeval       when;      /* next expiration */
+    unsigned int         period;    /* timer period in ms */
+    timeout_t            when;      /* next expiration */
     struct timeout_user *timeout;   /* timeout user */
     struct thread       *thread;    /* thread that set the APC function */
     void                *callback;  /* callback APC function */
@@ -68,6 +68,7 @@ static const struct object_ops timer_ops =
     no_get_fd,                 /* get_fd */
     timer_map_access,          /* map_access */
     no_lookup_name,            /* lookup_name */
+    no_open_file,              /* open_file */
     no_close_handle,           /* close_handle */
     timer_destroy              /* destroy */
 };
@@ -84,13 +85,12 @@ static struct timer *create_timer( struct directory *root, const struct unicode_
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
             /* initialize it if it didn't already exist */
-            timer->manual       = manual;
-            timer->signaled     = 0;
-            timer->when.tv_sec  = 0;
-            timer->when.tv_usec = 0;
-            timer->period       = 0;
-            timer->timeout      = NULL;
-            timer->thread       = NULL;
+            timer->manual   = manual;
+            timer->signaled = 0;
+            timer->when     = 0;
+            timer->period   = 0;
+            timer->timeout  = NULL;
+            timer->thread   = NULL;
         }
     }
     return timer;
@@ -109,11 +109,10 @@ static void timer_callback( void *private )
         memset( &data, 0, sizeof(data) );
         if (timer->callback)
         {
-            data.type            = APC_TIMER;
-            data.timer.func      = timer->callback;
-            data.timer.time.sec  = timer->when.tv_sec;
-            data.timer.time.usec = timer->when.tv_usec;
-            data.timer.arg       = timer->arg;
+            data.type       = APC_TIMER;
+            data.timer.func = timer->callback;
+            data.timer.time = timer->when;
+            data.timer.arg  = timer->arg;
         }
         else data.type = APC_NONE;  /* wake up only */
 
@@ -126,8 +125,8 @@ static void timer_callback( void *private )
 
     if (timer->period)  /* schedule the next expiration */
     {
-        add_timeout( &timer->when, timer->period );
-        timer->timeout = add_timeout_user( &timer->when, timer_callback, timer );
+        timer->when += (timeout_t)timer->period * 10000;
+        timer->timeout = add_timeout_user( timer->when, timer_callback, timer );
     }
     else timer->timeout = NULL;
 
@@ -156,7 +155,7 @@ static int cancel_timer( struct timer *timer )
 }
 
 /* set the timer expiration and period */
-static int set_timer( struct timer *timer, const abs_time_t *expire, int period,
+static int set_timer( struct timer *timer, timeout_t expire, unsigned int period,
                       void *callback, void *arg )
 {
     int signaled = cancel_timer( timer );
@@ -165,22 +164,13 @@ static int set_timer( struct timer *timer, const abs_time_t *expire, int period,
         period = 0;  /* period doesn't make any sense for a manual timer */
         timer->signaled = 0;
     }
-    if (!expire->sec && !expire->usec)
-    {
-        /* special case: use now + period as first expiration */
-        timer->when = current_time;
-        add_timeout( &timer->when, period );
-    }
-    else
-    {
-        timer->when.tv_sec  = expire->sec;
-        timer->when.tv_usec = expire->usec;
-    }
-    timer->period       = period;
-    timer->callback     = callback;
-    timer->arg          = arg;
+    if (expire > 0 && expire < current_time) expire = current_time;
+    timer->when     = expire;
+    timer->period   = period;
+    timer->callback = callback;
+    timer->arg      = arg;
     if (callback) timer->thread = (struct thread *)grab_object( current );
-    timer->timeout = add_timeout_user( &timer->when, timer_callback, timer );
+    timer->timeout = add_timeout_user( timer->when, timer_callback, timer );
     return signaled;
 }
 
@@ -188,8 +178,8 @@ static void timer_dump( struct object *obj, int verbose )
 {
     struct timer *timer = (struct timer *)obj;
     assert( obj->ops == &timer_ops );
-    fprintf( stderr, "Timer manual=%d when=%ld.%06u period=%d ",
-             timer->manual, timer->when.tv_sec, (unsigned int)timer->when.tv_usec, timer->period );
+    fprintf( stderr, "Timer manual=%d when=%s period=%u ",
+             timer->manual, get_timeout_str(timer->when), timer->period );
     dump_object_name( &timer->obj );
     fputc( '\n', stderr );
 }
@@ -276,7 +266,7 @@ DECL_HANDLER(set_timer)
     if ((timer = (struct timer *)get_handle_obj( current->process, req->handle,
                                                  TIMER_MODIFY_STATE, &timer_ops )))
     {
-        reply->signaled = set_timer( timer, &req->expire, req->period, req->callback, req->arg );
+        reply->signaled = set_timer( timer, req->expire, req->period, req->callback, req->arg );
         release_object( timer );
     }
 }
@@ -302,8 +292,7 @@ DECL_HANDLER(get_timer_info)
     if ((timer = (struct timer *)get_handle_obj( current->process, req->handle,
                                                  TIMER_QUERY_STATE, &timer_ops )))
     {
-        reply->when.sec  = timer->when.tv_sec;
-        reply->when.usec = timer->when.tv_usec;
+        reply->when      = timer->when;
         reply->signaled  = timer->signaled;
         release_object( timer );
     }

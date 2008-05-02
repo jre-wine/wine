@@ -75,7 +75,7 @@ BOOL WINAPI _CorDllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     return TRUE;
 }
 
-static LPWSTR get_mono_exe()
+static LPWSTR get_mono_exe(void)
 {
     static const WCHAR mono_exe[] = {'b','i','n','\\','m','o','n','o','.','e','x','e',' ',0};
     static const WCHAR mono_key[] = {'S','o','f','t','w','a','r','e','\\','N','o','v','e','l','l','\\','M','o','n','o',0};
@@ -186,7 +186,7 @@ void WINAPI _CorImageUnloading(LPCVOID* imageBase)
     TRACE("(%p): stub\n", imageBase);
 }
 
-DWORD _CorValidateImage(LPCVOID* imageBase, LPCWSTR imageName)
+DWORD WINAPI _CorValidateImage(LPCVOID* imageBase, LPCWSTR imageName)
 {
     TRACE("(%p, %s): stub\n", imageBase, debugstr_w(imageName));
     return E_FAIL;

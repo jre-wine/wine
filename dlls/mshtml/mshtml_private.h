@@ -71,6 +71,30 @@ typedef enum {
     EDITMODE        
 } USERMODE;
 
+typedef struct {
+    const IConnectionPointContainerVtbl  *lpConnectionPointContainerVtbl;
+
+    ConnectionPoint *cp_list;
+    IUnknown *outer;
+} ConnectionPointContainer;
+
+struct ConnectionPoint {
+    const IConnectionPointVtbl *lpConnectionPointVtbl;
+
+    IConnectionPointContainer *container;
+
+    union {
+        IUnknown *unk;
+        IDispatch *disp;
+        IPropertyNotifySink *propnotif;
+    } *sinks;
+    DWORD sinks_size;
+
+    IID iid;
+
+    ConnectionPoint *next;
+};
+
 struct HTMLDocument {
     const IHTMLDocument2Vtbl              *lpHTMLDocument2Vtbl;
     const IHTMLDocument3Vtbl              *lpHTMLDocument3Vtbl;
@@ -87,7 +111,6 @@ struct HTMLDocument {
     const IOleCommandTargetVtbl           *lpOleCommandTargetVtbl;
     const IOleControlVtbl                 *lpOleControlVtbl;
     const IHlinkTargetVtbl                *lpHlinkTargetVtbl;
-    const IConnectionPointContainerVtbl   *lpConnectionPointContainerVtbl;
     const IPersistStreamInitVtbl          *lpPersistStreamInitVtbl;
 
     LONG ref;
@@ -101,6 +124,8 @@ struct HTMLDocument {
     IOleInPlaceFrame *frame;
 
     BSCallback *bscallback;
+    IMoniker *mon;
+    BSTR url;
 
     HWND hwnd;
     HWND tooltips_hwnd;
@@ -114,13 +139,22 @@ struct HTMLDocument {
     BOOL window_active;
     BOOL has_key_path;
     BOOL container_locked;
+    BOOL focus;
 
-    ConnectionPoint *cp_htmldocevents;
-    ConnectionPoint *cp_htmldocevents2;
-    ConnectionPoint *cp_propnotif;
+    DWORD update;
+
+    ConnectionPointContainer cp_container;
+    ConnectionPoint cp_htmldocevents;
+    ConnectionPoint cp_htmldocevents2;
+    ConnectionPoint cp_propnotif;
 
     HTMLDOMNode *nodes;
 };
+
+typedef struct {
+    const nsIDOMEventListenerVtbl      *lpDOMEventListenerVtbl;
+    NSContainer *This;
+} nsEventListener;
 
 struct NSContainer {
     const nsIWebBrowserChromeVtbl       *lpWebBrowserChromeVtbl;
@@ -131,12 +165,18 @@ struct NSContainer {
     const nsIInterfaceRequestorVtbl     *lpInterfaceRequestorVtbl;
     const nsIWeakReferenceVtbl          *lpWeakReferenceVtbl;
     const nsISupportsWeakReferenceVtbl  *lpSupportsWeakReferenceVtbl;
-    const nsIDOMEventListenerVtbl       *lpDOMEventListenerVtbl;
+
+    nsEventListener blur_listener;
+    nsEventListener focus_listener;
+    nsEventListener keypress_listener;
+    nsEventListener load_listener;
 
     nsIWebBrowser *webbrowser;
     nsIWebNavigation *navigation;
     nsIBaseWindow *window;
     nsIWebBrowserFocus *focus;
+
+    nsIController *editor_controller;
 
     LONG ref;
 
@@ -165,6 +205,7 @@ typedef struct {
     nsLoadFlags load_flags;
     nsIURI *original_uri;
     char *content;
+    char *charset;
 } nsChannel;
 
 typedef struct {
@@ -294,7 +335,7 @@ HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**);
 HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
 
 HTMLWindow *HTMLWindow_Create(HTMLDocument*);
-HTMLWindow *nswindow_to_window(nsIDOMWindow*);
+HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
 
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
 void HTMLDocument_Persist_Init(HTMLDocument*);
@@ -304,15 +345,17 @@ void HTMLDocument_View_Init(HTMLDocument*);
 void HTMLDocument_Window_Init(HTMLDocument*);
 void HTMLDocument_Service_Init(HTMLDocument*);
 void HTMLDocument_Hlink_Init(HTMLDocument*);
-void HTMLDocument_ConnectionPoints_Init(HTMLDocument*);
 
-void HTMLDocument_ConnectionPoints_Destroy(HTMLDocument*);
+void ConnectionPoint_Init(ConnectionPoint*,IConnectionPointContainer*,REFIID,ConnectionPoint*);
+void ConnectionPointContainer_Init(ConnectionPointContainer*,ConnectionPoint*,IUnknown*);
+void ConnectionPointContainer_Destroy(ConnectionPointContainer*);
 
 NSContainer *NSContainer_Create(HTMLDocument*,NSContainer*);
 void NSContainer_Release(NSContainer*);
 
 void HTMLDocument_LockContainer(HTMLDocument*,BOOL);
-void HTMLDocument_ShowContextMenu(HTMLDocument*,DWORD,POINT*);
+void show_context_menu(HTMLDocument*,DWORD,POINT*);
+void notif_focus(HTMLDocument*);
 
 void show_tooltip(HTMLDocument*,DWORD,DWORD,LPCWSTR);
 void hide_tooltip(HTMLDocument*);
@@ -343,14 +386,17 @@ void nsAString_Finish(nsAString*);
 nsIInputStream *create_nsstream(const char*,PRInt32);
 nsICommandParams *create_nscommand_params(void);
 void nsnode_to_nsstring(nsIDOMNode*,nsAString*);
+nsIController *get_editor_controller(NSContainer*);
+void init_nsevents(NSContainer*);
 
 BSCallback *create_bscallback(IMoniker*);
 HRESULT start_binding(BSCallback*);
+HRESULT load_stream(BSCallback*,IStream*);
 void set_document_bscallback(HTMLDocument*,BSCallback*);
+void set_current_mon(HTMLDocument*,IMoniker*);
 
-IHlink *Hlink_Create(void);
 IHTMLSelectionObject *HTMLSelectionObject_Create(nsISelection*);
-IHTMLTxtRange *HTMLTxtRange_Create(nsISelection*);
+IHTMLTxtRange *HTMLTxtRange_Create(nsIDOMRange*);
 IHTMLStyle *HTMLStyle_Create(nsIDOMCSSStyleDeclaration*);
 IHTMLStyleSheet *HTMLStyleSheet_Create(void);
 
@@ -370,13 +416,31 @@ HRESULT HTMLElement_QI(HTMLElement*,REFIID,void**);
 HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*);
 void release_nodes(HTMLDocument*);
 
-void install_wine_gecko(void);
+BOOL install_wine_gecko(void);
+
+/* commands */
+typedef struct {
+    DWORD id;
+    HRESULT (*query)(HTMLDocument*,OLECMD*);
+    HRESULT (*exec)(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+} cmdtable_t;
+
+extern const cmdtable_t editmode_cmds[];
+
+/* timer */
+#define UPDATE_UI       0x0001
+#define UPDATE_TITLE    0x0002
+
+void update_doc(HTMLDocument *This, DWORD flags);
+void update_title(HTMLDocument*);
 
 /* editor */
+void init_editor(HTMLDocument*);
+void set_ns_editmode(NSContainer*);
 void handle_edit_event(HTMLDocument*,nsIDOMEvent*);
-
-void get_font_size(HTMLDocument*,WCHAR*);
-void set_font_size(HTMLDocument*,LPCWSTR);
+HRESULT editor_exec_copy(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+HRESULT editor_exec_cut(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+HRESULT editor_exec_paste(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
 
 extern DWORD mshtml_tls;
 
@@ -386,8 +450,11 @@ typedef struct task_t {
     enum {
         TASK_SETDOWNLOADSTATE,
         TASK_PARSECOMPLETE,
-        TASK_SETPROGRESS
+        TASK_SETPROGRESS,
+        TASK_START_BINDING
     } task_id;
+
+    BSCallback *bscallback;
 
     struct task_t *next;
 } task_t;
@@ -401,7 +468,7 @@ typedef struct {
 thread_data_t *get_thread_data(BOOL);
 HWND get_thread_hwnd(void);
 void push_task(task_t*);
-void remove_doc_tasks(HTMLDocument*);
+void remove_doc_tasks(const HTMLDocument*);
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);

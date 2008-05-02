@@ -19,6 +19,11 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
+/* With Visual Studio >= 2005,  swprintf() takes an extra parameter unless
+ * the following macro is defined.
+ */
+#define _CRT_NON_CONFORMING_SWPRINTFS
  
 #include <stdio.h>
 
@@ -278,6 +283,11 @@ static void test_sprintf( void )
     r = sprintf(buffer,format,1,"foo");
     ok(!strcmp(buffer,"f"),"Precision ignored \"%s\"\n",buffer);
     ok( r==1, "return count wrong\n");
+
+    format = "%*s";
+    r = sprintf(buffer,format,-5,"foo");
+    ok(!strcmp(buffer,"foo  "),"Negative field width ignored \"%s\"\n",buffer);
+    ok( r==5, "return count wrong\n");
 
     format = "%#-012p";
     r = sprintf(buffer,format,(void *)57);

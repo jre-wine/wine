@@ -36,7 +36,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "winreg.h"
 #include "winuser.h"
 #include "wine/unicode.h"
 
@@ -67,7 +66,7 @@ static const char visual_id_prop[]    = "__wine_x11_visual_id";
  *
  * Check if a given window should be managed
  */
-inline static BOOL is_window_managed( HWND hwnd )
+static inline BOOL is_window_managed( HWND hwnd )
 {
     DWORD style, ex_style;
 
@@ -86,10 +85,13 @@ inline static BOOL is_window_managed( HWND hwnd )
     if (style & WS_THICKFRAME) return TRUE;
     /* application windows are managed */
     if (ex_style & WS_EX_APPWINDOW) return TRUE;
-    /* full-screen popup windows are managed */
     if (style & WS_POPUP)
     {
         RECT rect;
+
+        /* popup with sysmenu == caption are managed */
+        if (style & WS_SYSMENU) return TRUE;
+        /* full-screen popup windows are managed */
         GetWindowRect( hwnd, &rect );
         if ((rect.right - rect.left) == screen_width && (rect.bottom - rect.top) == screen_height)
             return TRUE;
@@ -1077,8 +1079,8 @@ BOOL X11DRV_CreateWindow( HWND hwnd, CREATESTRUCTA *cs, BOOL unicode )
         POINT maxSize, maxPos, minTrack, maxTrack;
 
         WINPOS_GetMinMaxInfo( hwnd, &maxSize, &maxPos, &minTrack, &maxTrack);
-        if (maxSize.x < cs->cx) cs->cx = maxSize.x;
-        if (maxSize.y < cs->cy) cs->cy = maxSize.y;
+        if (maxTrack.x < cs->cx) cs->cx = maxTrack.x;
+        if (maxTrack.y < cs->cy) cs->cy = maxTrack.y;
         if (cs->cx < 0) cs->cx = 0;
         if (cs->cy < 0) cs->cy = 0;
 

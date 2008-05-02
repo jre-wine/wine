@@ -273,6 +273,22 @@ extern "C" {
 #define JOB_EXECUTE         (STANDARD_RIGHTS_EXECUTE | JOB_ACCESS_ADMINISTER)
 #define JOB_ALL_ACCESS      (STANDARD_RIGHTS_REQUIRED | JOB_ACCESS_ADMINISTER)
 
+
+/* Flags for printer drivers */
+#define DRIVER_KERNELMODE       0x00000001
+#define DRIVER_USERMODE         0x00000002
+
+#define APD_STRICT_UPGRADE      0x00000001
+#define APD_STRICT_DOWNGRADE    0x00000002
+#define APD_COPY_ALL_FILES      0x00000004
+#define APD_COPY_NEW_FILES      0x00000008
+#define APD_COPY_FROM_DIRECTORY 0x00000010
+
+#define DPD_DELETE_UNUSED_FILES     0x00000001
+#define DPD_DELETE_SPECIFIC_VERSION 0x00000002
+#define DPD_DELETE_ALL_FILES        0x00000004
+
+
 /* TYPES */
 typedef struct _PRINTER_DEFAULTSA {
   LPSTR        pDatatype;
@@ -1333,10 +1349,8 @@ BOOL WINAPI AddPortA(LPSTR pName, HWND hWnd, LPSTR pMonitorName);
 BOOL WINAPI AddPortW(LPWSTR pName, HWND hWnd, LPWSTR pMonitorName);
 #define AddPort WINELIB_NAME_AW(AddPort)
 
-BOOL WINAPI AddPortExA(HANDLE hMonitor, LPSTR pName, DWORD Level,
-                       LPBYTE lpBuffer, LPSTR lpMonitorName);
-BOOL WINAPI AddPortExW(HANDLE hMonitor, LPWSTR pName, DWORD Level,
-                       LPBYTE lpBuffer, LPWSTR lpMonitorName);
+BOOL WINAPI AddPortExA(LPSTR, DWORD, LPBYTE, LPSTR);
+BOOL WINAPI AddPortExW(LPWSTR, DWORD, LPBYTE, LPWSTR);
 #define AddPortEx WINELIB_NAME_AW(AddPortEx)
 
 BOOL WINAPI ConfigurePortA(LPSTR pName, HWND hWnd, LPSTR pPortName);
@@ -1388,6 +1402,10 @@ LONG WINAPI ExtDeviceMode( HWND hWnd, HANDLE hInst, LPDEVMODEA pDevModeOutput,
 LPSTR WINAPI StartDocDlgA(HANDLE hPrinter, DOCINFOA *doc);
 LPWSTR WINAPI StartDocDlgW(HANDLE hPrinter, DOCINFOW *doc);
 #define StartDocDlg WINELIB_NAME_AW(StartDocDlg)
+
+BOOL WINAPI XcvDataW(HANDLE hXcv, LPCWSTR pszDataName, PBYTE pInputData,
+    DWORD cbInputData, PBYTE pOutputData, DWORD cbOutputData,
+    PDWORD pcbOutputNeeded, PDWORD pdwStatus);
 
 #ifdef __cplusplus
 } /* extern "C" */

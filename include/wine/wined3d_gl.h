@@ -283,6 +283,15 @@ typedef void (APIENTRY * PGLFNGLPOINTPARAMETERFVARBPROC) (GLenum pname, const GL
 #define GL_MODELVIEW31_ARB                0x873F
 #endif
 typedef void (APIENTRY * PGLFNGLWEIGHTPOINTERARB) (GLint size, GLenum type, GLsizei stride, GLvoid* pointer);
+typedef void (APIENTRY * PGLFNGLWEIGHTBV) (GLint size, const GLbyte *weights);
+typedef void (APIENTRY * PGLFNGLWEIGHTSV) (GLint size, const GLshort *weights);
+typedef void (APIENTRY * PGLFNGLWEIGHTIV) (GLint size, const GLint *weights);
+typedef void (APIENTRY * PGLFNGLWEIGHTFV) (GLint size, const GLfloat *weights);
+typedef void (APIENTRY * PGLFNGLWEIGHTDV) (GLint size, const GLdouble *weights);
+typedef void (APIENTRY * PGLFNGLWEIGHTUBV) (GLint size, const GLubyte *weights);
+typedef void (APIENTRY * PGLFNGLWEIGHTUSV) (GLint size, const GLushort *weights);
+typedef void (APIENTRY * PGLFNGLWEIGHTUIV) (GLint size, const GLuint *weights);
+typedef void (APIENTRY * PGLFNGLVERTEXBLENDARB) (GLint count);
 /* GL_ARB_pixel_buffer_object */
 #ifndef GL_ARB_pixel_buffer_object
 #define GL_ARB_pixel_buffer_object 1
@@ -345,6 +354,7 @@ typedef void (APIENTRY * PGLFNGLWEIGHTPOINTERARB) (GLint size, GLenum type, GLsi
 #define GL_MAX_COLOR_ATTACHMENTS_EXT           0x8CDF
 #define GL_MAX_RENDERBUFFER_SIZE_EXT           0x84E8
 #define GL_INVALID_FRAMEBUFFER_OPERATION_EXT   0x0506
+
 #endif
 typedef GLboolean (APIENTRY * PGLFNGLISRENDERBUFFEREXTPROC)(GLuint renderbuffer);
 typedef void (APIENTRY * PGLFNGLBINDRENDERBUFFEREXTPROC)(GLenum target, GLuint renderbuffer);
@@ -363,6 +373,15 @@ typedef void (APIENTRY * PGLFNGLFRAMEBUFFERTEXTURE3DEXTPROC)(GLenum target, GLen
 typedef void (APIENTRY * PGLFNGLFRAMEBUFFERRENDERBUFFEREXTPROC)(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
 typedef void (APIENTRY * PGLFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVEXTPROC)(GLenum target, GLenum attachment, GLenum pname, GLint *params);
 typedef void (APIENTRY * PGLFNGLGENERATEMIPMAPEXTPROC)(GLenum target);
+/* GL_EXT_framebuffer_blit */
+#ifndef GL_EXT_framebuffer_blit
+#define GL_EXT_framebuffer_blit 1
+#define GL_READ_FRAMEBUFFER_EXT                0x8CA8
+#define GL_DRAW_FRAMEBUFFER_EXT                0x8CA9
+#define GL_DRAW_FRAMEBUFFER_BINDING_EXT        0x8CA6
+#define GL_READ_FRAMEBUFFER_BINDING_EXT        0x8CAA
+#endif
+typedef void (APIENTRY * PGLFNGLBLITFRAMEBUFFEREXTPROC) (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
 /* GL_EXT_secondary_color */
 #ifndef GL_EXT_secondary_color
 #define GL_EXT_secondary_color 1
@@ -500,6 +519,26 @@ typedef void (APIENTRY * PGLFNGLTEXSUBIMAGE3DEXTPROC) (GLenum target, GLint leve
 #define GL_EXT_texture_env_dot3 1
 #define GL_DOT3_RGB_EXT                   0x8740
 #define GL_DOT3_RGBA_EXT                  0x8741
+#endif
+/* GL_EXT_texture_sRGB */
+#ifndef GL_EXT_texture_sRGB
+#define GL_EXT_texture_sRGB 1
+#define GL_SRGB_EXT                            0x8C40
+#define GL_SRGB8_EXT                           0x8C41
+#define GL_SRGB_ALPHA_EXT                      0x8C42
+#define GL_SRGB8_ALPHA8_EXT                    0x8C43
+#define GL_SLUMINANCE_ALPHA_EXT                0x8C44
+#define GL_SLUMINANCE8_ALPHA8_EXT              0x8C45
+#define GL_SLUMINANCE_EXT                      0x8C46
+#define GL_SLUMINANCE8_EXT                     0x8C47
+#define GL_COMPRESSED_SRGB_EXT                 0x8C48
+#define GL_COMPRESSED_SRGB_ALPHA_EXT           0x8C49
+#define GL_COMPRESSED_SLUMINANCE_EXT           0x8C4A
+#define GL_COMPRESSED_SLUMINANCE_ALPHA_EXT     0x8C4B
+#define GL_COMPRESSED_SRGB_S3TC_DXT1_EXT       0x8C4C
+#define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT 0x8C4D
+#define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT 0x8C4E
+#define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT 0x8C4F
 #endif
 /* GL_ARB_texture_float */
 #ifndef GL_ARB_texture_float
@@ -745,6 +784,9 @@ typedef void (APIENTRY * PGLFNGLFOGCOORDPOINTEREXTPROC) (GLenum type, GLsizei st
 #define GL_ARB_shader_objects 1
 typedef char GLcharARB;
 typedef unsigned int GLhandleARB;
+#define GL_PROGRAM_OBJECT_ARB                   0x8B40
+#define GL_OBJECT_TYPE_ARB                      0x8B4E
+#define GL_OBJECT_SUBTYPE_ARB                   0x8B4F
 #define GL_OBJECT_DELETE_STATUS_ARB             0x8B80
 #define GL_OBJECT_COMPILE_STATUS_ARB            0x8B81
 #define GL_OBJECT_LINK_STATUS_ARB               0x8B82
@@ -754,6 +796,28 @@ typedef unsigned int GLhandleARB;
 #define GL_OBJECT_ACTIVE_UNIFORMS_ARB           0x8B86
 #define GL_OBJECT_ACTIVE_UNIFORM_MAX_LENGTH_ARB 0x8B87
 #define GL_OBJECT_SHADER_SOURCE_LENGTH_ARB      0x8B88
+#define GL_SHADER_OBJECT_ARB                    0x8B48
+#define GL_FLOAT_VEC2_ARB                       0x8B50
+#define GL_FLOAT_VEC3_ARB                       0x8B51
+#define GL_FLOAT_VEC4_ARB                       0x8B52
+#define GL_INT_VEC2_ARB                         0x8B53
+#define GL_INT_VEC3_ARB                         0x8B54
+#define GL_INT_VEC4_ARB                         0x8B55
+#define GL_BOOL_ARB                             0x8B56
+#define GL_BOOL_VEC2_ARB                        0x8B57
+#define GL_BOOL_VEC3_ARB                        0x8B58
+#define GL_BOOL_VEC4_ARB                        0x8B59
+#define GL_FLOAT_MAT2_ARB                       0x8B5A
+#define GL_FLOAT_MAT3_ARB                       0x8B5B
+#define GL_FLOAT_MAT4_ARB                       0x8B5C
+#define GL_SAMPLER_1D_ARB                       0x8B5D
+#define GL_SAMPLER_2D_ARB                       0x8B5E
+#define GL_SAMPLER_3D_ARB                       0x8B5F
+#define GL_SAMPLER_CUBE_ARB                     0x8B60
+#define GL_SAMPLER_1D_SHADOW_ARB                0x8B61
+#define GL_SAMPLER_2D_SHADOW_ARB                0x8B62
+#define GL_SAMPLER_2D_RECT_ARB                  0x8B63
+#define GL_SAMPELR_2D_RECT_SHADOW_ARB           0x8B64
 #endif
 #ifndef GL_ARB_shading_language_100
 #define GL_ARB_shading_language_100         1
@@ -763,34 +827,17 @@ typedef unsigned int GLhandleARB;
 #define GL_ARB_fragment_shader 1
 #define GL_FRAGMENT_SHADER_ARB                  0x8B30
 #define GL_MAX_FRAGMENT_UNIFORM_COMPONENTS_ARB  0x8B49
+#define GL_FRAGMENT_SHADER_DERIVATIVE_HINT_ARB  0x8B8B
 #endif
 #ifndef GL_ARB_vertex_shader
 #define GL_ARB_vertex_shader 1
-#define GL_VERTEX_SHADER_ARB              0x8B31
-#define GL_MAX_VERTEX_UNIFORM_COMPONENTS_ARB 0x8B4A
-#define GL_PROGRAM_OBJECT_ARB             0x8B40
-#define GL_SHADER_OBJECT_ARB              0x8B48
-#define GL_OBJECT_TYPE_ARB                0x8B4E
-#define GL_OBJECT_SUBTYPE_ARB             0x8B4F
-#define GL_FLOAT_VEC2_ARB                 0x8B50
-#define GL_FLOAT_VEC3_ARB                 0x8B51
-#define GL_FLOAT_VEC4_ARB                 0x8B52
-#define GL_INT_VEC2_ARB                   0x8B53
-#define GL_INT_VEC3_ARB                   0x8B54
-#define GL_INT_VEC4_ARB                   0x8B55
-#define GL_BOOL_ARB                       0x8B56
-#define GL_BOOL_VEC2_ARB                  0x8B57
-#define GL_BOOL_VEC3_ARB                  0x8B58
-#define GL_BOOL_VEC4_ARB                  0x8B59
-#define GL_FLOAT_MAT2_ARB                 0x8B5A
-#define GL_FLOAT_MAT3_ARB                 0x8B5B
-#define GL_FLOAT_MAT4_ARB                 0x8B5C
-#define GL_SAMPLER_1D_ARB                 0x8B5D
-#define GL_SAMPLER_2D_ARB                 0x8B5E
-#define GL_SAMPLER_3D_ARB                 0x8B5F
-#define GL_SAMPLER_CUBE_ARB               0x8B60
-#define GL_SAMPLER_1D_SHADOW_ARB          0x8B61
-#define GL_SAMPLER_2D_SHADOW_ARB          0x8B62
+#define GL_VERTEX_SHADER_ARB                        0x8B31
+#define GL_MAX_VERTEX_UNIFORM_COMPONENTS_ARB        0x8B4A
+#define GL_MAX_VARYING_FLOATS_ARB                   0x8B4B
+#define GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS_ARB       0x8B4C
+#define GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS_ARB     0x8B4D
+#define GL_OBJECT_ACTIVE_ATTRIBUTES_ARB             0x8B89
+#define GL_OBJECT_ACTIVE_ATTRIBUTE_MAX_LENGTH_ARB   0x8B8A
 #endif
 typedef void (APIENTRY * WINED3D_PFNGLGETOBJECTPARAMETERIVARBPROC) (GLhandleARB obj, GLenum pname, GLint *params);
 typedef void (APIENTRY * WINED3D_PFNGLGETOBJECTPARAMETERFVARBPROC) (GLhandleARB obj, GLenum pname, GLfloat *params);
@@ -1132,6 +1179,56 @@ typedef void (APIENTRY * PGLFNACTIVESTENCILFACEEXTPROC) (GLenum face);
 #endif
 typedef void (APIENTRY * PGLFNSTENCILOPSEPARATEATIPROC) (GLenum, GLenum, GLenum, GLenum);
 typedef void (APIENTRY * PGLFNSTENCILFUNCSEPARATEATIPROC) (GLenum, GLenum, GLint, GLuint);
+/* GL_NV_fence */
+#ifndef GL_NV_fence
+#define GL_ALL_COMPLETED_NV                 0x84F2
+#define GL_FENCE_STATUS_NV                  0x84F3
+#define GL_FENCE_CONDITION_NV               0x84F4
+#endif
+typedef void (APIENTRY * PGLFNGENFENCESNVPROC) (GLsizei, GLuint *);
+typedef void (APIENTRY * PGLFNDELETEFENCESNVPROC) (GLuint, const GLuint *);
+typedef void (APIENTRY * PGLFNSETFENCENVPROC) (GLuint, GLenum);
+typedef GLboolean (APIENTRY * PGLFNTESTFENCENVPROC) (GLuint);
+typedef void (APIENTRY * PGLFNFINISHFENCENVPROC) (GLuint);
+typedef GLboolean (APIENTRY * PGLFNISFENCENVPROC) (GLuint);
+typedef void (APIENTRY * PGLFNGETFENCEIVNVPROC) (GLuint, GLenum, GLint *);
+/* GL_APPLE_fence */
+#ifndef GL_APPLE_fence
+#define GL_DRAW_PIXELS_APPLE                0x8A0A
+#define GL_FENCE_APPLE                      0x84F3
+#endif
+typedef void (APIENTRY * PGLFNGENFENCESAPPLEPROC) (GLsizei, GLuint *);
+typedef void (APIENTRY * PGLFNDELETEFENCESAPPLEPROC) (GLuint, const GLuint *);
+typedef void (APIENTRY * PGLFNSETFENCEAPPLEPROC) (GLuint);
+typedef GLboolean (APIENTRY * PGLFNTESTFENCEAPPLEPROC) (GLuint);
+typedef void (APIENTRY * PGLFNFINISHFENCEAPPLEPROC) (GLuint);
+typedef GLboolean (APIENTRY * PGLFNISFENCEAPPLEPROC) (GLuint);
+typedef GLboolean (APIENTRY * PGLFNTESTOBJECTAPPLEPROC) (GLenum, GLuint);
+typedef void (APIENTRY * PGLFNFINISHOBJECTAPPLEPROC) (GLenum, GLuint);
+/* GL_APPLE_client_storage */
+#ifndef GL_APPLE_client_storage
+#define GL_UNPACK_CLIENT_STORAGE_APPLE      0x85B2
+#endif
+/* GL_ATI_envmap_bumpmap */
+#ifndef GL_ATI_envmap_bumpmap
+#define GL_BUMP_ROT_MATRIX_ATI              0x8775
+#define GL_BUMP_ROT_MATRIX_SIZE_ATI         0x8776
+#define GL_BUMP_NUM_TEX_UNITS_ATI           0x8777
+#define GL_BUMP_TEX_UNITS_ATI               0x8778
+#define GL_DUDV_ATI                         0x8779
+#define GL_DU8DV8_ATI                       0x877A
+#define GL_BUMP_ENVMAP_ATI                  0x877B
+#define GL_BUMP_TARGET_ATI                  0x877C
+#endif
+typedef void (APIENTRY * PGLFNTEXBUMPPARAMETERIVATIPROC) (GLenum, GLint *);
+typedef void (APIENTRY * PGLFNTEXBUMPPARAMETERFVATIPROC) (GLenum, GLfloat *);
+typedef void (APIENTRY * PGLFNGETTEXBUMPPARAMETERIVATIPROC) (GLenum, GLint *);
+typedef void (APIENTRY * PGLFNGETTEXBUMPPARAMETERFVATIPROC) (GLenum, GLfloat *);
+
+/* GLX_SGI_video_sync */
+typedef int (APIENTRY * PGLXFNGETVIDEOSYNCSGIPROC) (unsigned int *);
+typedef int (APIENTRY * PGLXFNWAITVIDEOSYNCSGIPROC) (int, int, unsigned int *);
+
 /* GL_VERSION_2_0 */
 #ifndef GL_VERSION_2_0
 #define GL_VERSION_2_0 1
@@ -1461,6 +1558,7 @@ typedef enum _GL_SupportedExt {
   EXT_BLEND_MINMAX,
   EXT_FOG_COORD,
   EXT_FRAMEBUFFER_OBJECT,
+  EXT_FRAMEBUFFER_BLIT,
   EXT_PALETTED_TEXTURE,
   EXT_PIXEL_BUFFER_OBJECT,
   EXT_POINT_PARAMETERS,
@@ -1475,10 +1573,12 @@ typedef enum _GL_SupportedExt {
   EXT_TEXTURE_ENV_ADD,
   EXT_TEXTURE_ENV_COMBINE,
   EXT_TEXTURE_ENV_DOT3,
+  EXT_TEXTURE_SRGB,
   EXT_VERTEX_WEIGHTING,
   /* NVIDIA */
   NV_FOG_DISTANCE,
   NV_FRAGMENT_PROGRAM,
+  NV_FRAGMENT_PROGRAM2,
   NV_OCCLUSION_QUERY,
   NV_REGISTER_COMBINERS,
   NV_REGISTER_COMBINERS2,
@@ -1488,11 +1588,21 @@ typedef enum _GL_SupportedExt {
   NV_TEXTURE_SHADER2,
   NV_TEXTURE_SHADER3,
   NV_VERTEX_PROGRAM,
+  NV_VERTEX_PROGRAM1_1,
+  NV_VERTEX_PROGRAM2,
+  NV_VERTEX_PROGRAM3,
+  NV_FENCE,
   /* ATI */
   ATI_SEPARATE_STENCIL,
   ATI_TEXTURE_ENV_COMBINE3,
   ATI_TEXTURE_MIRROR_ONCE,
   EXT_VERTEX_SHADER,
+  ATI_ENVMAP_BUMPMAP,
+  /* APPLE */
+  APPLE_FENCE,
+  APPLE_CLIENT_STORAGE,
+  /* SGI */
+  SGI_VIDEO_SYNC,
 
   OPENGL_SUPPORTED_EXT_END
 } GL_SupportedExt;
@@ -1533,6 +1643,15 @@ typedef enum _GL_SupportedExt {
     USE_GL_FUNC(PGLFNGETCOMPRESSEDTEXIMAGEPROC,      glGetCompressedTexImageARB); \
     /* GL_ARB_vertex_blend */ \
     USE_GL_FUNC(PGLFNGLWEIGHTPOINTERARB,             glWeightPointerARB); \
+    USE_GL_FUNC(PGLFNGLWEIGHTBV,                     glWeightbvARB); \
+    USE_GL_FUNC(PGLFNGLWEIGHTSV,                     glWeightsvARB); \
+    USE_GL_FUNC(PGLFNGLWEIGHTIV,                     glWeightivARB); \
+    USE_GL_FUNC(PGLFNGLWEIGHTFV,                     glWeightfvARB); \
+    USE_GL_FUNC(PGLFNGLWEIGHTDV,                     glWeightdvARB); \
+    USE_GL_FUNC(PGLFNGLWEIGHTUBV,                    glWeightubvARB); \
+    USE_GL_FUNC(PGLFNGLWEIGHTUSV,                    glWeightusvARB); \
+    USE_GL_FUNC(PGLFNGLWEIGHTUIV,                    glWeightuivARB); \
+    USE_GL_FUNC(PGLFNGLVERTEXBLENDARB,               glVertexBlendARB); \
     /* GL_ARB_vertex_buffer_object */ \
     USE_GL_FUNC(PGLFNBINDBUFFERARBPROC,              glBindBufferARB); \
     USE_GL_FUNC(PGLFNDELETEBUFFERSARBPROC,           glDeleteBuffersARB); \
@@ -1570,6 +1689,8 @@ typedef enum _GL_SupportedExt {
     USE_GL_FUNC(PGLFNGLGENERATEMIPMAPEXTPROC,          glGenerateMipmapEXT); \
     USE_GL_FUNC(PGLFNGLGETRENDERBUFFERPARAMETERIVEXTPROC, glGetRenderbufferParameterivEXT); \
     USE_GL_FUNC(PGLFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVEXTPROC, glGetFramebufferAttachmentParameterivEXT); \
+    /* GL_EXT_framebuffer_blit */ \
+    USE_GL_FUNC(PGLFNGLBLITFRAMEBUFFEREXTPROC, glBlitFramebufferEXT); \
     /* GL_EXT_paletted_texture */ \
     USE_GL_FUNC(PGLFNGLCOLORTABLEEXTPROC,             glColorTableEXT); \
     /* GL_EXT_point_parameters */ \
@@ -1592,6 +1713,42 @@ typedef enum _GL_SupportedExt {
     USE_GL_FUNC(PGLFNVERTEXATTRIBPOINTERARBPROC,      glVertexAttribPointerARB); \
     USE_GL_FUNC(PGLFNENABLEVERTEXATTRIBARRAYARBPROC,  glEnableVertexAttribArrayARB); \
     USE_GL_FUNC(PGLFNDISABLEVERTEXATTRIBARRAYARBPROC, glDisableVertexAttribArrayARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB1DARBPROC,           glVertexAttrib1dARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB1DVARBPROC,          glVertexAttrib1dvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB1FARBPROC,           glVertexAttrib1fARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB1FVARBPROC,          glVertexAttrib1fvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB1SARBPROC,           glVertexAttrib1sARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB1SVARBPROC,          glVertexAttrib1svARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB2DARBPROC,           glVertexAttrib2dARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB2DVARBPROC,          glVertexAttrib2dvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB2FARBPROC,           glVertexAttrib2fARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB2FVARBPROC,          glVertexAttrib2fvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB2SARBPROC,           glVertexAttrib2sARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB2SVARBPROC,          glVertexAttrib2svARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB3DARBPROC,           glVertexAttrib3dARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB3DVARBPROC,          glVertexAttrib3dvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB3FARBPROC,           glVertexAttrib3fARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB3FVARBPROC,          glVertexAttrib3fvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB3SARBPROC,           glVertexAttrib3sARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB3SVARBPROC,          glVertexAttrib3svARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4NBVARBPROC,         glVertexAttrib4NbvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4NIVARBPROC,         glVertexAttrib4NivARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4NSVARBPROC,         glVertexAttrib4NsvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4NUBARBPROC,         glVertexAttrib4NubARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4NUBVARBPROC,        glVertexAttrib4NubvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4NUIVARBPROC,        glVertexAttrib4NuivARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4NUSVARBPROC,        glVertexAttrib4NusvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4BVARBPROC,          glVertexAttrib4bvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4DARBPROC,           glVertexAttrib4dARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4DVARBPROC,          glVertexAttrib4dvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4FARBPROC,           glVertexAttrib4fARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4FVARBPROC,          glVertexAttrib4fvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4IVARBPROC,          glVertexAttrib4ivARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4SARBPROC,           glVertexAttrib4sARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4SVARBPROC,          glVertexAttrib4svARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4UBVARBPROC,         glVertexAttrib4ubvARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4UIVARBPROC,         glVertexAttrib4uivARB); \
+    USE_GL_FUNC(PGLFNVERTEXATTRIB4USVARBPROC,         glVertexAttrib4usvARB); \
     USE_GL_FUNC(PGLFNGETPROGRAMIVARBPROC,             glGetProgramivARB); \
     /* GL_ARB_shader_objects */ \
     USE_GL_FUNC(WINED3D_PFNGLGETOBJECTPARAMETERIVARBPROC,     glGetObjectParameterivARB); \
@@ -1648,6 +1805,31 @@ typedef enum _GL_SupportedExt {
     USE_GL_FUNC(PGLFNCOMBINERPARAMETERINVPROC,                  glCombinerParameteriNV); \
     USE_GL_FUNC(PGLFNCOMBINERPARAMETERIVNVPROC,                 glCombinerParameterivNV); \
     USE_GL_FUNC(PGLFNFINALCOMBINERINPUTNVPROC,                  glFinalCombinerInputNV); \
+    /* GL_NV_fence */ \
+    USE_GL_FUNC(PGLFNGENFENCESNVPROC,                           glGenFencesNV); \
+    USE_GL_FUNC(PGLFNDELETEFENCESNVPROC,                        glDeleteFencesNV); \
+    USE_GL_FUNC(PGLFNSETFENCENVPROC,                            glSetFenceNV); \
+    USE_GL_FUNC(PGLFNTESTFENCENVPROC,                           glTestFenceNV); \
+    USE_GL_FUNC(PGLFNFINISHFENCENVPROC,                         glFinishFenceNV); \
+    USE_GL_FUNC(PGLFNISFENCENVPROC,                             glIsFenceNV); \
+    USE_GL_FUNC(PGLFNGETFENCEIVNVPROC,                          glGetFenceivNV); \
+    /* GL_APPLE_fence */ \
+    USE_GL_FUNC(PGLFNGENFENCESAPPLEPROC,                        glGenFencesAPPLE); \
+    USE_GL_FUNC(PGLFNDELETEFENCESAPPLEPROC,                     glDeleteFencesAPPLE); \
+    USE_GL_FUNC(PGLFNSETFENCEAPPLEPROC,                         glSetFenceAPPLE); \
+    USE_GL_FUNC(PGLFNTESTFENCEAPPLEPROC,                        glTestFenceAPPLE); \
+    USE_GL_FUNC(PGLFNFINISHFENCEAPPLEPROC,                      glFinishFenceAPPLE); \
+    USE_GL_FUNC(PGLFNISFENCEAPPLEPROC,                          glIsFenceAPPLE); \
+    USE_GL_FUNC(PGLFNTESTOBJECTAPPLEPROC,                       glTestObjectAPPLE); \
+    USE_GL_FUNC(PGLFNFINISHOBJECTAPPLEPROC,                     glFinishObjectAPPLE); \
+    /* GL_ATI_envmap_bumpmap */ \
+    USE_GL_FUNC(PGLFNTEXBUMPPARAMETERIVATIPROC,                 glTexBumpParameterivATI); \
+    USE_GL_FUNC(PGLFNTEXBUMPPARAMETERFVATIPROC,                 glTexBumpParameterfvATI); \
+    USE_GL_FUNC(PGLFNGETTEXBUMPPARAMETERIVATIPROC,              glGetTexBumpParameterivATI); \
+    USE_GL_FUNC(PGLFNGETTEXBUMPPARAMETERFVATIPROC,              glGetTexBumpParameterfvATI); \
+    /* GLX_SGI_video_sync */ \
+    USE_GL_FUNC(PGLXFNGETVIDEOSYNCSGIPROC,                      glXGetVideoSyncSGI); \
+    USE_GL_FUNC(PGLXFNWAITVIDEOSYNCSGIPROC,                     glXWaitVideoSyncSGI); \
 
 /* OpenGL 2.0 functions */
 #define GL2_FUNCS_GEN \
@@ -1783,7 +1965,9 @@ typedef struct _WineD3D_GL_Info {
   UINT   max_lights;
   UINT   max_textures;
   UINT   max_texture_stages;
-  UINT   max_samplers;
+  UINT   max_fragment_samplers;
+  UINT   max_vertex_samplers;
+  UINT   max_combined_samplers;
   UINT   max_sampler_stages;
   UINT   max_clipplanes;
   UINT   max_texture_size;
@@ -1791,6 +1975,7 @@ typedef struct _WineD3D_GL_Info {
   float  max_pointsize;
   UINT   max_blends;
   UINT   max_anisotropy;
+  UINT   max_aux_buffers;
 
   unsigned max_vshader_constantsF;
   unsigned max_pshader_constantsF;

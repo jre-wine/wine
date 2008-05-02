@@ -29,6 +29,7 @@
 #include "winbase.h"
 #include "objbase.h"
 #include "comcat.h"
+#include "olectl.h"
 
 #include "wine/test.h"
 
@@ -138,6 +139,45 @@ static const IClassFactoryVtbl TestClassFactory_Vtbl =
 };
 
 static IClassFactory Test_ClassFactory = { &TestClassFactory_Vtbl };
+
+typedef struct
+{
+    const IUnknownVtbl *lpVtbl;
+    ULONG refs;
+} HeapUnknown;
+
+static HRESULT WINAPI HeapUnknown_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
+{
+    if (IsEqualIID(riid, &IID_IUnknown))
+    {
+        IUnknown_AddRef(iface);
+        *ppv = (LPVOID)iface;
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI HeapUnknown_AddRef(IUnknown *iface)
+{
+    HeapUnknown *This = (HeapUnknown *)iface;
+    return InterlockedIncrement((LONG*)&This->refs);
+}
+
+static ULONG WINAPI HeapUnknown_Release(IUnknown *iface)
+{
+    HeapUnknown *This = (HeapUnknown *)iface;
+    ULONG refs = InterlockedDecrement((LONG*)&This->refs);
+    if (!refs) HeapFree(GetProcessHeap(), 0, This);
+    return refs;
+}
+
+static const IUnknownVtbl HeapUnknown_Vtbl =
+{
+    HeapUnknown_QueryInterface,
+    HeapUnknown_AddRef,
+    HeapUnknown_Release
+};
 
 static HRESULT WINAPI
 MonikerNoROTData_QueryInterface(IMoniker* iface,REFIID riid,void** ppvObject)
@@ -584,6 +624,19 @@ static void test_ROT(void)
     hr = CreateFileMoniker(wszFileName, &pMoniker);
     ok_ole_success(hr, CreateClassMoniker);
 
+    /* test flags: 0 */
+    hr = IRunningObjectTable_Register(pROT, 0, (IUnknown*)&Test_ClassFactory,
+                                      pMoniker, &dwCookie);
+    ok_ole_success(hr, IRunningObjectTable_Register);
+
+    ok_more_than_one_lock();
+
+    hr = IRunningObjectTable_Revoke(pROT, dwCookie);
+    ok_ole_success(hr, IRunningObjectTable_Revoke);
+
+    ok_no_locks();
+
+    /* test flags: ROTFLAGS_REGISTRATIONKEEPSALIVE */
     hr = IRunningObjectTable_Register(pROT, ROTFLAGS_REGISTRATIONKEEPSALIVE,
         (IUnknown*)&Test_ClassFactory, pMoniker, &dwCookie);
     ok_ole_success(hr, IRunningObjectTable_Register);
@@ -595,6 +648,7 @@ static void test_ROT(void)
 
     ok_no_locks();
 
+    /* test flags: ROTFLAGS_REGISTRATIONKEEPSALIVE|ROTFLAGS_ALLOWANYCLIENT */
     /* only succeeds when process is started by SCM and has LocalService
      * or RunAs AppId values */
     hr = IRunningObjectTable_Register(pROT,
@@ -613,6 +667,55 @@ static void test_ROT(void)
     IRunningObjectTable_Release(pROT);
 }
 
+static HRESULT WINAPI ParseDisplayName_QueryInterface(IParseDisplayName *iface, REFIID riid, void **ppv)
+{
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IParseDisplayName))
+    {
+        *ppv = iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI ParseDisplayName_AddRef(IParseDisplayName *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI ParseDisplayName_Release(IParseDisplayName *iface)
+{
+    return 1;
+}
+
+static LPCWSTR expected_display_name;
+
+static HRESULT WINAPI ParseDisplayName_ParseDisplayName(IParseDisplayName *iface,
+                                                        IBindCtx *pbc,
+                                                        LPOLESTR pszDisplayName,
+                                                        ULONG *pchEaten,
+                                                        IMoniker **ppmkOut)
+{
+    char display_nameA[256];
+    WideCharToMultiByte(CP_ACP, 0, pszDisplayName, -1, display_nameA, sizeof(display_nameA), NULL, NULL);
+    ok(!lstrcmpW(pszDisplayName, expected_display_name), "unexpected display name \"%s\"\n", display_nameA);
+    ok(pszDisplayName == expected_display_name, "pszDisplayName should be the same pointer as passed into MkParseDisplayName\n");
+    *pchEaten = lstrlenW(pszDisplayName);
+    return CreateAntiMoniker(ppmkOut);
+}
+
+static const IParseDisplayNameVtbl ParseDisplayName_Vtbl =
+{
+    ParseDisplayName_QueryInterface,
+    ParseDisplayName_AddRef,
+    ParseDisplayName_Release,
+    ParseDisplayName_ParseDisplayName
+};
+
+static IParseDisplayName ParseDisplayName = { &ParseDisplayName_Vtbl };
+
 static int count_moniker_matches(IBindCtx * pbc, IEnumMoniker * spEM)
 {
     IMoniker * spMoniker;
@@ -626,7 +729,7 @@ static int count_moniker_matches(IBindCtx * pbc, IEnumMoniker * spEM)
         hr=IMoniker_GetDisplayName(spMoniker, pbc, NULL, &szDisplayn);
         if (SUCCEEDED(hr))
         {
-            if (!lstrcmpW(szDisplayn, wszFileName1) || !lstrcmpW(szDisplayn, wszFileName2))
+            if (!lstrcmpiW(szDisplayn, wszFileName1) || !lstrcmpiW(szDisplayn, wszFileName2))
                 matchCnt++;
             CoTaskMemFree(szDisplayn);
         }
@@ -655,19 +758,121 @@ static void test_MkParseDisplayName(void)
     DWORD pdwReg1=0;
     DWORD grflags=0;
     DWORD pdwReg2=0;
+    DWORD moniker_type;
     IRunningObjectTable * pprot=NULL;
 
     /* CLSID of My Computer */
     static const WCHAR wszDisplayName[] = {'c','l','s','i','d',':',
         '2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-','A','2','D','8','-','0','8','0','0','2','B','3','0','3','0','9','D',':',0};
+    static const WCHAR wszDisplayNameClsid[] = {'c','l','s','i','d',':',0};
+    static const WCHAR wszNonExistentProgId[] = {'N','o','n','E','x','i','s','t','e','n','t','P','r','o','g','I','d',':',0};
+    static const WCHAR wszDisplayNameRunning[] = {'W','i','n','e','T','e','s','t','R','u','n','n','i','n','g',0};
+    static const WCHAR wszDisplayNameProgId1[] = {'S','t','d','F','o','n','t',':',0};
+    static const WCHAR wszDisplayNameProgId2[] = {'@','S','t','d','F','o','n','t',0};
+    static const WCHAR wszDisplayNameProgIdFail[] = {'S','t','d','F','o','n','t',0};
+    char szDisplayNameFile[256];
+    WCHAR wszDisplayNameFile[256];
 
     hr = CreateBindCtx(0, &pbc);
     ok_ole_success(hr, CreateBindCtx);
 
-    hr = MkParseDisplayName(pbc, wszDisplayName, &eaten, &pmk);
-    todo_wine { ok_ole_success(hr, MkParseDisplayName); }
+    hr = MkParseDisplayName(pbc, wszNonExistentProgId, &eaten, &pmk);
+    ok(hr == MK_E_SYNTAX || hr == MK_E_CANTOPENFILE /* Win9x */,
+        "MkParseDisplayName should have failed with MK_E_SYNTAX or MK_E_CANTOPENFILE instead of 0x%08x\n", hr);
 
-    if (object)
+    /* no special handling of "clsid:" without the string form of the clsid
+     * following */
+    hr = MkParseDisplayName(pbc, wszDisplayNameClsid, &eaten, &pmk);
+    ok(hr == MK_E_SYNTAX || hr == MK_E_CANTOPENFILE /* Win9x */,
+        "MkParseDisplayName should have failed with MK_E_SYNTAX or MK_E_CANTOPENFILE instead of 0x%08x\n", hr);
+
+    /* shows clsid has higher precedence than a running object */
+    hr = CreateFileMoniker(wszDisplayName, &pmk);
+    ok_ole_success(hr, CreateFileMoniker);
+    hr = IBindCtx_GetRunningObjectTable(pbc, &pprot);
+    ok_ole_success(hr, IBindCtx_GetRunningObjectTable);
+    hr = IRunningObjectTable_Register(pprot, 0, (IUnknown *)&Test_ClassFactory, pmk, &pdwReg1);
+    ok_ole_success(hr, IRunningObjectTable_Register);
+    IMoniker_Release(pmk);
+    pmk = NULL;
+    hr = MkParseDisplayName(pbc, wszDisplayName, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_CLASSMONIKER, "moniker_type was %d instead of MKSYS_CLASSMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+    hr = IRunningObjectTable_Revoke(pprot, pdwReg1);
+    ok_ole_success(hr, IRunningObjectTable_Revoke);
+    IRunningObjectTable_Release(pprot);
+
+    hr = CreateFileMoniker(wszDisplayNameRunning, &pmk);
+    ok_ole_success(hr, CreateFileMoniker);
+    hr = IBindCtx_GetRunningObjectTable(pbc, &pprot);
+    ok_ole_success(hr, IBindCtx_GetRunningObjectTable);
+    hr = IRunningObjectTable_Register(pprot, 0, (IUnknown *)&Test_ClassFactory, pmk, &pdwReg1);
+    ok_ole_success(hr, IRunningObjectTable_Register);
+    IMoniker_Release(pmk);
+    pmk = NULL;
+    hr = MkParseDisplayName(pbc, wszDisplayNameRunning, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_FILEMONIKER, "moniker_type was %d instead of MKSYS_FILEMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+    hr = IRunningObjectTable_Revoke(pprot, pdwReg1);
+    ok_ole_success(hr, IRunningObjectTable_Revoke);
+    IRunningObjectTable_Release(pprot);
+
+    hr = CoRegisterClassObject(&CLSID_StdFont, (IUnknown *)&ParseDisplayName, CLSCTX_INPROC_SERVER, REGCLS_MULTI_SEPARATE, &pdwReg1);
+    ok_ole_success(hr, CoRegisterClassObject);
+
+    expected_display_name = wszDisplayNameProgId1;
+    hr = MkParseDisplayName(pbc, wszDisplayNameProgId1, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_ANTIMONIKER, "moniker_type was %d instead of MKSYS_ANTIMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+
+    expected_display_name = wszDisplayNameProgId2;
+    hr = MkParseDisplayName(pbc, wszDisplayNameProgId2, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_ANTIMONIKER, "moniker_type was %d instead of MKSYS_ANTIMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+
+    hr = MkParseDisplayName(pbc, wszDisplayNameProgIdFail, &eaten, &pmk);
+    ok(hr == MK_E_SYNTAX || hr == MK_E_CANTOPENFILE /* Win9x */,
+        "MkParseDisplayName with ProgId without marker should fail with MK_E_SYNTAX or MK_E_CANTOPENFILE instead of 0x%08x\n", hr);
+
+    hr = CoRevokeClassObject(pdwReg1);
+    ok_ole_success(hr, CoRevokeClassObject);
+
+    GetSystemDirectoryA(szDisplayNameFile, sizeof(szDisplayNameFile));
+    strcat(szDisplayNameFile, "\\kernel32.dll");
+    MultiByteToWideChar(CP_ACP, 0, szDisplayNameFile, -1, wszDisplayNameFile, sizeof(wszDisplayNameFile)/sizeof(wszDisplayNameFile[0]));
+    hr = MkParseDisplayName(pbc, wszDisplayNameFile, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+    if (pmk)
+    {
+        IMoniker_IsSystemMoniker(pmk, &moniker_type);
+        ok(moniker_type == MKSYS_FILEMONIKER, "moniker_type was %d instead of MKSYS_FILEMONIKER\n", moniker_type);
+        IMoniker_Release(pmk);
+    }
+
+    hr = MkParseDisplayName(pbc, wszDisplayName, &eaten, &pmk);
+    ok_ole_success(hr, MkParseDisplayName);
+
+    if (pmk)
     {
         hr = IMoniker_BindToObject(pmk, pbc, NULL, &IID_IUnknown, (LPVOID*)&object);
         ok_ole_success(hr, IMoniker_BindToObject);
@@ -908,7 +1113,7 @@ static void test_moniker(
 
     hr = IMoniker_GetDisplayName(moniker, bindctx, NULL, &display_name);
     ok_ole_success(hr, IMoniker_GetDisplayName);
-	ok(!lstrcmpW(display_name, expected_display_name), "display name wasn't what was expected\n");
+    ok(!lstrcmpW(display_name, expected_display_name), "%s: display name wasn't what was expected\n", testname);
 
     CoTaskMemFree(display_name);
     IBindCtx_Release(bindctx);
@@ -1383,6 +1588,106 @@ static void test_generic_composite_moniker(void)
     IMoniker_Release(moniker);
 }
 
+static void test_bind_context(void)
+{
+    HRESULT hr;
+    IBindCtx *pBindCtx;
+    IEnumString *pEnumString;
+    BIND_OPTS2 bind_opts;
+    HeapUnknown *unknown;
+    HeapUnknown *unknown2;
+    IUnknown *param_obj;
+    ULONG refs;
+    static const WCHAR wszParamName[] = {'G','e','m','m','a',0};
+    static const WCHAR wszNonExistent[] = {'N','o','n','E','x','i','s','t','e','n','t',0};
+
+    hr = CreateBindCtx(0, NULL);
+    ok(hr == E_INVALIDARG, "CreateBindCtx with NULL ppbc should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = CreateBindCtx(0xdeadbeef, &pBindCtx);
+    ok(hr == E_INVALIDARG, "CreateBindCtx with reserved value non-zero should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = CreateBindCtx(0, &pBindCtx);
+    ok_ole_success(hr, "CreateBindCtx");
+
+    bind_opts.cbStruct = -1;
+    hr = IBindCtx_GetBindOptions(pBindCtx, (BIND_OPTS *)&bind_opts);
+    ok_ole_success(hr, "IBindCtx_GetBindOptions");
+    ok(bind_opts.cbStruct == sizeof(bind_opts), "bind_opts.cbStruct was %d\n", bind_opts.cbStruct);
+
+    bind_opts.cbStruct = sizeof(BIND_OPTS);
+    hr = IBindCtx_GetBindOptions(pBindCtx, (BIND_OPTS *)&bind_opts);
+    ok_ole_success(hr, "IBindCtx_GetBindOptions");
+    ok(bind_opts.cbStruct == sizeof(BIND_OPTS), "bind_opts.cbStruct was %d\n", bind_opts.cbStruct);
+
+    bind_opts.cbStruct = sizeof(bind_opts);
+    hr = IBindCtx_GetBindOptions(pBindCtx, (BIND_OPTS *)&bind_opts);
+    ok_ole_success(hr, "IBindCtx_GetBindOptions");
+    ok(bind_opts.cbStruct == sizeof(bind_opts), "bind_opts.cbStruct was %d\n", bind_opts.cbStruct);
+    ok(bind_opts.grfFlags == 0, "bind_opts.grfFlags was 0x%x instead of 0\n", bind_opts.grfFlags);
+    ok(bind_opts.grfMode == STGM_READWRITE, "bind_opts.grfMode was 0x%x instead of STGM_READWRITE\n", bind_opts.grfMode);
+    ok(bind_opts.dwTickCountDeadline == 0, "bind_opts.dwTickCountDeadline was %d instead of 0\n", bind_opts.dwTickCountDeadline);
+    ok(bind_opts.dwTrackFlags == 0, "bind_opts.dwTrackFlags was 0x%x instead of 0\n", bind_opts.dwTrackFlags);
+    ok(bind_opts.dwClassContext == (CLSCTX_INPROC_SERVER|CLSCTX_LOCAL_SERVER|CLSCTX_REMOTE_SERVER),
+        "bind_opts.dwClassContext should have been 0x15 instead of 0x%x\n", bind_opts.dwClassContext);
+    ok(bind_opts.locale == GetThreadLocale(), "bind_opts.locale should have been 0x%x instead of 0x%x\n", GetThreadLocale(), bind_opts.locale);
+    ok(bind_opts.pServerInfo == NULL, "bind_opts.pServerInfo should have been NULL instead of %p\n", bind_opts.pServerInfo);
+
+    bind_opts.cbStruct = -1;
+    hr = IBindCtx_SetBindOptions(pBindCtx, (BIND_OPTS *)&bind_opts);
+    ok(hr == E_INVALIDARG, "IBindCtx_SetBindOptions with bad cbStruct should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    hr = IBindCtx_RegisterObjectParam(pBindCtx, (WCHAR *)wszParamName, NULL);
+    ok(hr == E_INVALIDARG, "IBindCtx_RegisterObjectParam should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+
+    unknown = HeapAlloc(GetProcessHeap(), 0, sizeof(*unknown));
+    unknown->lpVtbl = &HeapUnknown_Vtbl;
+    unknown->refs = 1;
+    hr = IBindCtx_RegisterObjectParam(pBindCtx, (WCHAR *)wszParamName, (IUnknown *)&unknown->lpVtbl);
+    ok_ole_success(hr, "IBindCtx_RegisterObjectParam");
+
+    hr = IBindCtx_GetObjectParam(pBindCtx, (WCHAR *)wszParamName, &param_obj);
+    ok_ole_success(hr, "IBindCtx_GetObjectParam");
+    IUnknown_Release(param_obj);
+
+    hr = IBindCtx_GetObjectParam(pBindCtx, (WCHAR *)wszNonExistent, &param_obj);
+    ok(hr == E_FAIL, "IBindCtx_GetObjectParam with nonexistent key should have failed with E_FAIL instead of 0x%08x\n", hr);
+    ok(param_obj == NULL, "IBindCtx_GetObjectParam with nonexistent key should have set output parameter to NULL instead of %p\n", param_obj);
+
+    hr = IBindCtx_RevokeObjectParam(pBindCtx, (WCHAR *)wszNonExistent);
+    ok(hr == E_FAIL, "IBindCtx_RevokeObjectParam with nonexistent key should have failed with E_FAIL instead of 0x%08x\n", hr);
+
+    hr = IBindCtx_EnumObjectParam(pBindCtx, &pEnumString);
+    ok(hr == E_NOTIMPL, "IBindCtx_EnumObjectParam should have returned E_NOTIMPL instead of 0x%08x\n", hr);
+    ok(!pEnumString, "pEnumString should be NULL\n");
+
+    hr = IBindCtx_RegisterObjectBound(pBindCtx, NULL);
+    ok_ole_success(hr, "IBindCtx_RegisterObjectBound(NULL)");
+
+    hr = IBindCtx_RevokeObjectBound(pBindCtx, NULL);
+    ok(hr == E_INVALIDARG, "IBindCtx_RevokeObjectBound(NULL) should have return E_INVALIDARG instead of 0x%08x\n", hr);
+
+    unknown2 = HeapAlloc(GetProcessHeap(), 0, sizeof(*unknown));
+    unknown2->lpVtbl = &HeapUnknown_Vtbl;
+    unknown2->refs = 1;
+    hr = IBindCtx_RegisterObjectBound(pBindCtx, (IUnknown *)&unknown2->lpVtbl);
+    ok_ole_success(hr, "IBindCtx_RegisterObjectBound");
+
+    hr = IBindCtx_RevokeObjectBound(pBindCtx, (IUnknown *)&unknown2->lpVtbl);
+    ok_ole_success(hr, "IBindCtx_RevokeObjectBound");
+
+    hr = IBindCtx_RevokeObjectBound(pBindCtx, (IUnknown *)&unknown2->lpVtbl);
+    ok(hr == MK_E_NOTBOUND, "IBindCtx_RevokeObjectBound with not bound object should have returned MK_E_NOTBOUND instead of 0x%08x\n", hr);
+
+    IBindCtx_Release(pBindCtx);
+
+    refs = IUnknown_Release((IUnknown *)&unknown->lpVtbl);
+    ok(!refs, "object param should have been destroyed, instead of having %d refs\n", refs);
+
+    refs = IUnknown_Release((IUnknown *)&unknown2->lpVtbl);
+    ok(!refs, "bound object should have been destroyed, instead of having %d refs\n", refs);
+}
+
 START_TEST(moniker)
 {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -1396,6 +1701,8 @@ START_TEST(moniker)
     test_generic_composite_moniker();
 
     /* FIXME: test moniker creation funcs and parsing other moniker formats */
+
+    test_bind_context();
 
     CoUninitialize();
 }

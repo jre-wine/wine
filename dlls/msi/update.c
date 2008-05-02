@@ -13,7 +13,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * Lesser General Public License for more details.
  *
- * You should have receuved a copy of the GNU Lesser General Public
+ * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
@@ -177,6 +177,7 @@ static const MSIVIEWOPS update_ops =
     NULL,
     NULL,
     NULL,
+    NULL,
     UPDATE_execute,
     UPDATE_close,
     UPDATE_get_dimensions,
@@ -186,7 +187,7 @@ static const MSIVIEWOPS update_ops =
     UPDATE_find_matching_rows
 };
 
-UINT UPDATE_CreateView( MSIDATABASE *db, MSIVIEW **view, LPWSTR table,
+UINT UPDATE_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR table,
                         column_info *columns, struct expr *expr )
 {
     MSIUPDATEVIEW *uv = NULL;

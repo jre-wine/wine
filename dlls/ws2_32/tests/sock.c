@@ -24,6 +24,7 @@
 #include <windef.h>
 #include <winbase.h>
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <mswsock.h>
 #include "wine/test.h"
 #include <winnt.h>
@@ -145,6 +146,57 @@ static HANDLE     client_ready[MAX_CLIENTS];
 static int        client_id;
 
 /**************** General utility functions ***************/
+
+static int tcp_socketpair(SOCKET *src, SOCKET *dst)
+{
+    SOCKET server = INVALID_SOCKET;
+    struct sockaddr_in addr;
+    int len;
+    int ret;
+
+    *src = INVALID_SOCKET;
+    *dst = INVALID_SOCKET;
+
+    *src = socket(AF_INET, SOCK_STREAM, 0);
+    if (*src == INVALID_SOCKET)
+        goto end;
+
+    server = socket(AF_INET, SOCK_STREAM, 0);
+    if (server == INVALID_SOCKET)
+        goto end;
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    ret = bind(server, (struct sockaddr*)&addr, sizeof(addr));
+    if (ret != 0)
+        goto end;
+
+    len = sizeof(addr);
+    ret = getsockname(server, (struct sockaddr*)&addr, &len);
+    if (ret != 0)
+        goto end;
+
+    ret = listen(server, 1);
+    if (ret != 0)
+        goto end;
+
+    ret = connect(*src, (struct sockaddr*)&addr, sizeof(addr));
+    if (ret != 0)
+        goto end;
+
+    len = sizeof(addr);
+    *dst = accept(server, (struct sockaddr*)&addr, &len);
+
+end:
+    if (server != INVALID_SOCKET)
+        closesocket(server);
+    if (*src != INVALID_SOCKET && *dst != INVALID_SOCKET)
+        return 0;
+    closesocket(*src);
+    closesocket(*dst);
+    return -1;
+}
 
 static void set_so_opentype ( BOOL overlapped )
 {
@@ -1199,6 +1251,7 @@ static void test_WSAStringToAddressA(void)
 {
     INT ret, len;
     SOCKADDR_IN sockaddr;
+    SOCKADDR_IN6 sockaddr6;
     int GLE;
 
     CHAR address1[] = "0.0.0.0";
@@ -1206,6 +1259,9 @@ static void test_WSAStringToAddressA(void)
     CHAR address3[] = "255.255.255.255";
     CHAR address4[] = "127.127.127.127:65535";
     CHAR address5[] = "255.255.255.255:65535";
+    CHAR address6[] = "::1";
+    CHAR address7[] = "[::1]";
+    CHAR address8[] = "[::1]:65535";
 
     len = 0;
     sockaddr.sin_family = AF_INET;
@@ -1257,12 +1313,45 @@ static void test_WSAStringToAddressA(void)
     ok( (ret == 0 && sockaddr.sin_addr.s_addr == 0xffffffff && sockaddr.sin_port == 0xffff) || 
         (ret == SOCKET_ERROR && (GLE == ERROR_INVALID_PARAMETER || GLE == WSAEINVAL)),
         "WSAStringToAddressA() failed unexpectedly: %d\n", GLE );
+
+    len = sizeof(sockaddr6);
+    memset(&sockaddr6, 0, len);
+    sockaddr6.sin6_family = AF_INET6;
+
+    ret = WSAStringToAddressA( address6, AF_INET6, NULL, (SOCKADDR*)&sockaddr6,
+            &len );
+    GLE = WSAGetLastError();
+    ok( ret == 0 || (ret == SOCKET_ERROR && GLE == WSAEINVAL),
+        "WSAStringToAddressA() failed for IPv6 address: %d\n", GLE);
+
+    len = sizeof(sockaddr6);
+    memset(&sockaddr6, 0, len);
+    sockaddr6.sin6_family = AF_INET6;
+
+    ret = WSAStringToAddressA( address7, AF_INET6, NULL, (SOCKADDR*)&sockaddr6,
+            &len );
+    GLE = WSAGetLastError();
+    ok( ret == 0 || (ret == SOCKET_ERROR && GLE == WSAEINVAL),
+        "WSAStringToAddressA() failed for IPv6 address: %d\n", GLE);
+
+    len = sizeof(sockaddr6);
+    memset(&sockaddr6, 0, len);
+    sockaddr6.sin6_family = AF_INET6;
+
+    ret = WSAStringToAddressA( address8, AF_INET6, NULL, (SOCKADDR*)&sockaddr6,
+            &len );
+    GLE = WSAGetLastError();
+    ok( (ret == 0 && sockaddr6.sin6_port == 0xffff) ||
+        (ret == SOCKET_ERROR && GLE == WSAEINVAL),
+        "WSAStringToAddressA() failed for IPv6 address: %d\n", GLE);
+
 }
 
 static void test_WSAStringToAddressW(void)
 {
     INT ret, len;
     SOCKADDR_IN sockaddr;
+    SOCKADDR_IN6 sockaddr6;
     int GLE;
 
     WCHAR address1[] = { '0','.','0','.','0','.','0', 0 };
@@ -1272,6 +1361,9 @@ static void test_WSAStringToAddressW(void)
                          ':', '6', '5', '5', '3', '5', 0 };
     WCHAR address5[] = { '2','5','5','.','2','5','5','.','2','5','5','.','2','5','5', ':',
                          '6', '5', '5', '3', '5', 0 };
+    WCHAR address6[] = {':',':','1','\0'};
+    WCHAR address7[] = {'[',':',':','1',']','\0'};
+    WCHAR address8[] = {'[',':',':','1',']',':','6','5','5','3','5','\0'};
 
     len = 0;
     sockaddr.sin_family = AF_INET;
@@ -1322,6 +1414,38 @@ static void test_WSAStringToAddressW(void)
     ok( (ret == 0 && sockaddr.sin_addr.s_addr == 0xffffffff && sockaddr.sin_port == 0xffff) || 
         (ret == SOCKET_ERROR && (GLE == ERROR_INVALID_PARAMETER || GLE == WSAEINVAL)),
         "WSAStringToAddressW() failed unexpectedly: %d\n", GLE );
+
+    len = sizeof(sockaddr6);
+    memset(&sockaddr6, 0, len);
+    sockaddr6.sin6_family = AF_INET6;
+
+    ret = WSAStringToAddressW( address6, AF_INET6, NULL, (SOCKADDR*)&sockaddr6,
+            &len );
+    GLE = WSAGetLastError();
+    ok( ret == 0 || (ret == SOCKET_ERROR && GLE == WSAEINVAL),
+        "WSAStringToAddressW() failed for IPv6 address: %d\n", GLE);
+
+    len = sizeof(sockaddr6);
+    memset(&sockaddr6, 0, len);
+    sockaddr6.sin6_family = AF_INET6;
+
+    ret = WSAStringToAddressW( address7, AF_INET6, NULL, (SOCKADDR*)&sockaddr6,
+            &len );
+    GLE = WSAGetLastError();
+    ok( ret == 0 || (ret == SOCKET_ERROR && GLE == WSAEINVAL),
+        "WSAStringToAddressW() failed for IPv6 address: %d\n", GLE);
+
+    len = sizeof(sockaddr6);
+    memset(&sockaddr6, 0, len);
+    sockaddr6.sin6_family = AF_INET6;
+
+    ret = WSAStringToAddressW( address8, AF_INET6, NULL, (SOCKADDR*)&sockaddr6,
+            &len );
+    GLE = WSAGetLastError();
+    ok( (ret == 0 && sockaddr6.sin6_port == 0xffff) ||
+        (ret == SOCKET_ERROR && GLE == WSAEINVAL),
+        "WSAStringToAddressW() failed for IPv6 address: %d\n", GLE);
+
 }
 
 static VOID WINAPI SelectReadThread(select_thread_params *par)
@@ -1356,6 +1480,7 @@ static void test_select(void)
     struct timeval select_timeout;
     select_thread_params thread_params;
     HANDLE thread_handle;
+    DWORD id;
 
     fdRead = socket(AF_INET, SOCK_STREAM, 0);
     ok( (fdRead != INVALID_SOCKET), "socket failed unexpectedly: %d\n", WSAGetLastError() );
@@ -1395,7 +1520,7 @@ static void test_select(void)
     thread_params.s = fdRead;
     thread_params.ReadKilled = FALSE;
     server_ready = CreateEventW(NULL, TRUE, FALSE, NULL);
-    thread_handle = CreateThread (NULL, 0, (LPTHREAD_START_ROUTINE) &SelectReadThread, &thread_params, 0, NULL );
+    thread_handle = CreateThread (NULL, 0, (LPTHREAD_START_ROUTINE) &SelectReadThread, &thread_params, 0, &id );
     ok ( (thread_handle != NULL), "CreateThread failed unexpectedly: %d\n", GetLastError());
 
     WaitForSingleObject (server_ready, INFINITE);
@@ -1429,6 +1554,7 @@ static void test_accept(void)
     struct sockaddr_in address;
     select_thread_params thread_params;
     HANDLE thread_handle = NULL;
+    DWORD id;
 
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket == INVALID_SOCKET)
@@ -1463,7 +1589,7 @@ static void test_accept(void)
     thread_params.s = server_socket;
     thread_params.ReadKilled = FALSE;
     thread_handle = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE) AcceptKillThread,
-        &thread_params, 0, NULL);
+        &thread_params, 0, &id);
     if (thread_handle == NULL)
     {
         trace("error creating thread: %d\n", GetLastError());
@@ -1491,7 +1617,7 @@ done:
         closesocket(server_socket);
 }
 
-static void test_extendedSocketOptions()
+static void test_extendedSocketOptions(void)
 {
     WSADATA wsa;
     SOCKET sock;
@@ -1565,7 +1691,7 @@ static void test_extendedSocketOptions()
     WSACleanup();
 }
 
-static void test_getsockname()
+static void test_getsockname(void)
 {
     WSADATA wsa;
     SOCKET sock;
@@ -1591,6 +1717,16 @@ static void test_getsockname()
         return;
     }
 
+    memcpy(&sa_get, &sa_set, sizeof(sa_set));
+    if (getsockname(sock, (struct sockaddr*) &sa_get, &sa_get_len) == 0)
+        ok(0, "getsockname on unbound socket should fail\n");
+    else {
+        ok(WSAGetLastError() == WSAEINVAL, "getsockname on unbound socket "
+            "failed with %d, expected %d\n", WSAGetLastError(), WSAEINVAL);
+        ok(memcmp(&sa_get, &sa_set, sizeof(sa_get)) == 0,
+            "failed getsockname modified sockaddr when it shouldn't\n");
+    }
+
     if(bind(sock, (struct sockaddr *) &sa_set, sa_set_len) < 0){
         trace("Failed to bind socket: %d\n", WSAGetLastError());
         closesocket(sock);
@@ -1610,6 +1746,167 @@ static void test_getsockname()
 
     closesocket(sock);
     WSACleanup();
+}
+
+static void test_dns(void)
+{
+    struct hostent *h;
+
+    h = gethostbyname("");
+    ok(h != NULL, "gethostbyname(\"\") failed with %d\n", h_errno);
+}
+
+static void test_inet_addr(void)
+{
+    u_long addr;
+
+    addr = inet_addr(NULL);
+    ok(addr == INADDR_NONE, "inet_addr succeeded unexpectedly\n");
+}
+
+static DWORD WINAPI drain_socket_thread(LPVOID arg)
+{
+    char buffer[1024];
+    SOCKET sock = *(SOCKET*)arg;
+
+    while (recv(sock, buffer, sizeof(buffer), 0) > 0)
+        ;
+    return 0;
+}
+
+static void test_send(void)
+{
+    SOCKET src = INVALID_SOCKET;
+    SOCKET dst = INVALID_SOCKET;
+    HANDLE hThread = NULL;
+    const int buflen = 1024*1024;
+    char *buffer = NULL;
+    int ret;
+    DWORD id;
+
+    if (tcp_socketpair(&src, &dst) != 0)
+    {
+        ok(0, "creating socket pair failed, skipping test\n");
+        return;
+    }
+
+    hThread = CreateThread(NULL, 0, drain_socket_thread, &dst, 0, &id);
+    if (hThread == NULL)
+    {
+        ok(0, "CreateThread failed, error %d\n", GetLastError());
+        goto end;
+    }
+
+    buffer = HeapAlloc(GetProcessHeap(), 0, buflen);
+    if (buffer == NULL)
+    {
+        ok(0, "HeapAlloc failed, error %d\n", GetLastError());
+        goto end;
+    }
+
+    ret = send(src, buffer, buflen, 0);
+    if (ret >= 0)
+        ok(ret == buflen, "send should have sent %d bytes, but it only sent %d\n", buflen, ret);
+    else
+        ok(0, "send failed, error %d\n", WSAGetLastError());
+
+end:
+    if (src != INVALID_SOCKET)
+        closesocket(src);
+    if (dst != INVALID_SOCKET)
+        closesocket(dst);
+    if (hThread != NULL)
+        CloseHandle(hThread);
+    HeapFree(GetProcessHeap(), 0, buffer);
+}
+
+static void test_write_events(void)
+{
+    SOCKET src = INVALID_SOCKET;
+    SOCKET dst = INVALID_SOCKET;
+    HANDLE hThread = NULL;
+    HANDLE hEvent = INVALID_HANDLE_VALUE;
+    int len;
+    u_long one = 1;
+    int ret;
+    DWORD id;
+
+    if (tcp_socketpair(&src, &dst) != 0)
+    {
+        ok(0, "creating socket pair failed, skipping test\n");
+        return;
+    }
+
+    hThread = CreateThread(NULL, 0, drain_socket_thread, &dst, 0, &id);
+    if (hThread == NULL)
+    {
+        ok(0, "CreateThread failed, error %d\n", GetLastError());
+        goto end;
+    }
+
+    hEvent = CreateEventW(NULL, FALSE, TRUE, NULL);
+    if (hEvent == INVALID_HANDLE_VALUE)
+    {
+        ok(0, "CreateEventW failed, error %d\n", GetLastError());
+        goto end;
+    }
+
+    ret = ioctlsocket(src, FIONBIO, &one);
+    if (ret)
+    {
+        ok(0, "ioctlsocket failed, error %d\n", WSAGetLastError());
+        goto end;
+    }
+
+    ret = WSAEventSelect(src, hEvent, FD_WRITE | FD_CLOSE);
+    if (ret)
+    {
+        ok(0, "WSAEventSelect failed, error %d\n", ret);
+        goto end;
+    }
+
+    for (len = 100; len > 0; --len)
+    {
+         WSANETWORKEVENTS netEvents;
+         DWORD dwRet = WaitForSingleObject(hEvent, 5000);
+         if (dwRet != WAIT_OBJECT_0)
+         {
+             ok(0, "WaitForSingleObject failed, error %d\n", dwRet);
+             goto end;
+         }
+
+         ret = WSAEnumNetworkEvents(src, NULL, &netEvents);
+         if (ret)
+         {
+             ok(0, "WSAEnumNetworkEvents failed, error %d\n", ret);
+             goto end;
+         }
+
+         if (netEvents.lNetworkEvents & FD_WRITE)
+         {
+             ret = send(src, "a", 1, 0);
+             if (ret < 0 && WSAGetLastError() != WSAEWOULDBLOCK)
+             {
+                 ok(0, "send failed, error %d\n", WSAGetLastError());
+                 goto end;
+             }
+         }
+
+         if (netEvents.lNetworkEvents & FD_CLOSE)
+         {
+             ok(0, "unexpected close\n");
+             goto end;
+         }
+    }
+
+end:
+    if (src != INVALID_SOCKET)
+        closesocket(src);
+    if (dst != INVALID_SOCKET)
+        closesocket(dst);
+    if (hThread != NULL)
+        CloseHandle(hThread);
+    CloseHandle(hEvent);
 }
 
 /**************** Main program  ***************/
@@ -1643,6 +1940,11 @@ START_TEST( sock )
     test_select();
     test_accept();
     test_getsockname();
+    test_inet_addr();
+    test_dns();
+
+    test_send();
+    test_write_events();
 
     Exit();
 }

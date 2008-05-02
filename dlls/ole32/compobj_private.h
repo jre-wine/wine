@@ -45,6 +45,9 @@ DEFINE_OLEGUID( CLSID_DfMarshal, 0x0000030b, 0, 0 );
 DEFINE_OLEGUID( CLSID_PSFactoryBuffer, 0x00000320, 0, 0 );
 DEFINE_OLEGUID( CLSID_InProcFreeMarshaler, 0x0000033a, 0, 0 );
 
+/* signal to stub manager that this is a rem unknown object */
+#define MSHLFLAGSP_REMUNKNOWN   0x80000000
+
 /* Thread-safety Annotation Legend:
  *
  * RO    - The value is read only. It never changes after creation, so no
@@ -93,6 +96,7 @@ struct stub_manager
     OID               oid;        /* apartment-scoped unique identifier (RO) */
     IUnknown         *object;     /* the object we are managing the stub for (RO) */
     ULONG             next_ipid;  /* currently unused (LOCK) */
+    OXID_INFO         oxid_info;  /* string binding, ipid of rem unknown and other information (RO) */
 
     /* We need to keep a count of the outstanding marshals, so we can enforce the
      * marshalling rules (ie, you can only unmarshal normal marshals once). Note
@@ -112,7 +116,7 @@ struct ifproxy
   STDOBJREF stdobjref;     /* marshal data that represents this object (RO) */
   IID iid;                 /* interface ID (RO) */
   LPRPCPROXYBUFFER proxy;  /* interface proxy (RO) */
-  DWORD refs;              /* imported (public) references (MUTEX parent->remoting_mutex) */
+  ULONG refs;              /* imported (public) references (LOCK) */
   IRpcChannelBuffer *chan; /* channel to object (CS parent->cs) */
 };
 
@@ -121,9 +125,11 @@ struct proxy_manager
 {
   const IMultiQIVtbl *lpVtbl;
   const IMarshalVtbl *lpVtblMarshal;
+  const IClientSecurityVtbl *lpVtblCliSec;
   struct apartment *parent; /* owning apartment (RO) */
   struct list entry;        /* entry in apartment (CS parent->cs) */
   OXID oxid;                /* object exported ID (RO) */
+  OXID_INFO oxid_info;      /* string binding, ipid of rem unknown and other information (RO) */
   OID oid;                  /* object ID (RO) */
   struct list interfaces;   /* imported interfaces (CS cs) */
   LONG refs;                /* proxy reference count (LOCK) */
@@ -151,6 +157,9 @@ struct apartment
   BOOL remunk_exported;    /* has the IRemUnknown interface for this apartment been created yet? (CS cs) */
   LONG remoting_started;   /* has the RPC system been started for this apartment? (LOCK) */
   struct list psclsids;    /* list of registered PS CLSIDs (CS cs) */
+  struct list loaded_dlls; /* list of dlls loaded by this apartment (CS cs) */
+  DWORD host_apt_tid;      /* thread ID of apartment hosting objects of differing threading model (CS cs) */
+  HWND host_apt_hwnd;      /* handle to apartment window of host apartment (CS cs) */
 
   /* FIXME: OID's should be given out by RPCSS */
   OID oidc;                /* object ID counter, starts at 1, zero is invalid OID (CS cs) */
@@ -215,16 +224,19 @@ struct dispatch_params;
 
 void    RPC_StartRemoting(struct apartment *apt);
 HRESULT RPC_CreateClientChannel(const OXID *oxid, const IPID *ipid,
+                                const OXID_INFO *oxid_info,
                                 DWORD dest_context, void *dest_context_data,
                                 IRpcChannelBuffer **chan);
 HRESULT RPC_CreateServerChannel(IRpcChannelBuffer **chan);
 void    RPC_ExecuteCall(struct dispatch_params *params);
 HRESULT RPC_RegisterInterface(REFIID riid);
 void    RPC_UnregisterInterface(REFIID riid);
-void    RPC_StartLocalServer(REFCLSID clsid, IStream *stream);
+HRESULT RPC_StartLocalServer(REFCLSID clsid, IStream *stream, BOOL multi_use, void **registration);
+void    RPC_StopLocalServer(void *registration);
 HRESULT RPC_GetLocalClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv);
 HRESULT RPC_RegisterChannelHook(REFGUID rguid, IChannelHook *hook);
 void    RPC_UnregisterAllChannelHooks(void);
+HRESULT RPC_ResolveOxid(OXID oxid, OXID_INFO *oxid_info);
 
 /* This function initialize the Running Object Table */
 HRESULT WINAPI RunningObjectTableImpl_Initialize(void);
@@ -232,9 +244,8 @@ HRESULT WINAPI RunningObjectTableImpl_Initialize(void);
 /* This function uninitialize the Running Object Table */
 HRESULT WINAPI RunningObjectTableImpl_UnInitialize(void);
 
-/* This function decomposes a String path to a String Table containing all the elements ("\" or "subDirectory" or "Directory" or "FileName") of the path */
-int FileMonikerImpl_DecomposePath(LPCOLESTR str, LPOLESTR** stringTable);
-
+/* Drag and drop */
+void OLEDD_UnInitialize(void);
 
 /* Apartment Functions */
 
@@ -244,13 +255,13 @@ DWORD apartment_addref(struct apartment *apt);
 DWORD apartment_release(struct apartment *apt);
 HRESULT apartment_disconnectproxies(struct apartment *apt);
 void apartment_disconnectobject(struct apartment *apt, void *object);
-static inline HRESULT apartment_getoxid(struct apartment *apt, OXID *oxid)
+static inline HRESULT apartment_getoxid(const struct apartment *apt, OXID *oxid)
 {
     *oxid = apt->oxid;
     return S_OK;
 }
 HRESULT apartment_createwindowifneeded(struct apartment *apt);
-HWND apartment_getwindow(struct apartment *apt);
+HWND apartment_getwindow(const struct apartment *apt);
 void apartment_joinmta(void);
 
 

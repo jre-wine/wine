@@ -30,11 +30,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
-#include "winreg.h"
 #include "ole2.h"
-
-#include "uuids.h"
 
 #include "chm_lib.h"
 #include "itsstor.h"
@@ -296,6 +292,7 @@ static ULONG WINAPI ITSS_IStorageImpl_Release(
 
     if (ref == 0)
     {
+        chm_close(This->chmfile);
         HeapFree(GetProcessHeap(), 0, This);
         ITSS_UnlockModule();
     }
@@ -328,7 +325,7 @@ static HRESULT WINAPI ITSS_IStorageImpl_OpenStream(
     DWORD len;
     struct chmUnitInfo ui;
     int r;
-    WCHAR *path;
+    WCHAR *path, *p;
 
     TRACE("%p %s %p %u %u %p\n", This, debugstr_w(pwcsName),
           reserved1, grfMode, reserved2, ppstm );
@@ -336,21 +333,32 @@ static HRESULT WINAPI ITSS_IStorageImpl_OpenStream(
     len = strlenW( This->dir ) + strlenW( pwcsName ) + 1;
     path = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR) );
     strcpyW( path, This->dir );
-    if( pwcsName[0] == '/' )
+
+    if( pwcsName[0] == '/' || pwcsName[0] == '\\' )
     {
-        WCHAR *p = &path[strlenW( path ) - 1];
+        p = &path[strlenW( path ) - 1];
         while( ( path <= p ) && ( *p == '/' ) )
             *p-- = 0;
     }
     strcatW( path, pwcsName );
+
+    for(p=path; *p; p++) {
+        if(*p == '\\')
+            *p = '/';
+    }
+
+    if(*--p == '/')
+        *p = 0;
 
     TRACE("Resolving %s\n", debugstr_w(path));
 
     r = chm_resolve_object(This->chmfile, path, &ui);
     HeapFree( GetProcessHeap(), 0, path );
 
-    if( r != CHM_RESOLVE_SUCCESS )
+    if( r != CHM_RESOLVE_SUCCESS ) {
+        WARN("Could not resolve object\n");
         return STG_E_FILENOTFOUND;
+    }
 
     stm = ITSS_create_stream( This, &ui );
     if( !stm )
@@ -659,8 +667,8 @@ static HRESULT WINAPI ITSS_IStream_Read(
     This->addr += count;
     if( pcbRead )
         *pcbRead = count;
-    
-    return S_OK;
+
+    return count ? S_OK : S_FALSE;
 }
 
 static HRESULT WINAPI ITSS_IStream_Write(

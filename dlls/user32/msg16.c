@@ -164,7 +164,7 @@ BOOL16 WINAPI PeekMessage32_16( MSG32_16 *msg16, HWND16 hwnd16,
     HWND hwnd = WIN_Handle32( hwnd16 );
 
     if(USER16_AlertableWait)
-        MsgWaitForMultipleObjectsEx( 0, NULL, 1, 0, MWMO_ALERTABLE );
+        MsgWaitForMultipleObjectsEx( 0, NULL, 0, 0, MWMO_ALERTABLE );
     if (!PeekMessageA( &msg, hwnd, first, last, flags )) return FALSE;
 
     msg16->msg.time    = msg.time;
@@ -194,7 +194,7 @@ LRESULT WINAPI DefWindowProc16( HWND16 hwnd16, UINT16 msg, WPARAM16 wParam, LPAR
             CREATESTRUCT16 *cs16 = MapSL(lParam);
             CREATESTRUCTA cs32;
 
-            cs32.lpCreateParams = (LPVOID)cs16->lpCreateParams;
+            cs32.lpCreateParams = ULongToPtr(cs16->lpCreateParams);
             cs32.hInstance      = HINSTANCE_32(cs16->hInstance);
             cs32.hMenu          = HMENU_32(cs16->hMenu);
             cs32.hwndParent     = WIN_Handle32(cs16->hwndParent);

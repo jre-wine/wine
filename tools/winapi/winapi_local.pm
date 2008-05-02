@@ -117,20 +117,12 @@ sub _check_function($$$$$$) {
     my $declared_calling_convention = $winapi->function_internal_calling_convention($internal_name) || "";
     my @declared_argument_kinds = split(/\s+/, $winapi->function_internal_arguments($internal_name));
 
-    my $declared_register = 0;
-    if ($declared_calling_convention =~ /^(\w+) -register$/) {
-	$declared_register = 1;
-	$declared_calling_convention = $1;
-    }
+    my $declared_register = ($declared_calling_convention =~ / -register\b/);
+    my $declared_i386 = ($declared_calling_convention =~ /(?:^pascal| -i386)\b/);
+    $declared_calling_convention =~ s/ .*$//;
 
-    if ($declared_register)
-    {
-        if ($implemented_calling_convention eq "stdcall")
-        {
-	    $output->write("-register functions should not be implemented as stdcall\n");
-        }
-    }
-    elsif($implemented_calling_convention ne $declared_calling_convention &&
+    if(!$declared_register &&
+       $implemented_calling_convention ne $declared_calling_convention &&
        $implemented_calling_convention ne "asm" &&
        !($declared_calling_convention =~ /^pascal/ && $forbidden_return_type) &&
        !($implemented_calling_convention =~ /^(?:cdecl|varargs)$/ && $declared_calling_convention =~ /^(?:cdecl|varargs)$/))
@@ -164,12 +156,6 @@ sub _check_function($$$$$$) {
 	}
     }
 
-    if($#argument_types != -1 && $argument_types[$#argument_types] eq "CONTEXT *" &&
-       $internal_name =~ /^(?:RtlRaiseException|RtlUnwind|NtRaiseException)$/) # FIXME: Kludge
-    {
-	$#argument_types--;
-    }
-
     if($internal_name =~ /^(?:NTDLL__ftol|NTDLL__CIpow)$/) { # FIXME: Kludge
 	# ignore
     } else {
@@ -178,7 +164,9 @@ sub _check_function($$$$$$) {
 	    my $type = $_;
 	    my $kind = "unknown";
 	    $winapi->type_used_in_module($type,$module);
-	    if($type eq "CONTEXT86 *") {
+	    if($type eq "CONTEXT *") {
+		$kind = "context";
+	    } elsif($type eq "CONTEXT86 *") {
 		$kind = "context86";
 	    } elsif(!defined($kind = $winapi->translate_argument($type))) {
 		$winapi->declare_argument($type, "unknown");
@@ -199,15 +187,22 @@ sub _check_function($$$$$$) {
 		("double", "double");
 	    } elsif(defined($kind) && $kind eq "longlong") {
 		$n+=1;
-		"double";
+		"longlong";
 	    } else {
 		$n++;
 		$kind;
 	    }
 	} @argument_types;
 
-	if ($declared_register && $argument_kinds[$#argument_kinds] ne "context86") {
-	    $output->write("function declared as register, but CONTEXT86 * is not last argument\n");
+	if ($declared_register)
+        {
+            if (!$declared_i386 &&
+                $argument_kinds[$#argument_kinds] ne "context") {
+                $output->write("function declared as register, but CONTEXT * is not last argument\n");
+            } elsif ($declared_i386 &&
+                     $argument_kinds[$#argument_kinds] ne "context86") {
+                $output->write("function declared as register, but CONTEXT86 * is not last argument\n");
+            }
 	}
 
 	for my $n (0..$#argument_kinds) {
@@ -224,7 +219,7 @@ sub _check_function($$$$$$) {
 		$argument_types[$n] = "";
 	    }
 
-	    if($argument_kinds[$n] eq "context86") {
+	    if($argument_kinds[$n] =~ /^context(?:86)?$/) {
 		# Nothing
 	    } elsif(!$winapi->is_allowed_kind($argument_kinds[$n]) ||
 	       !$winapi->is_allowed_type_in_module($argument_types[$n], $module))
@@ -235,7 +230,8 @@ sub _check_function($$$$$$) {
 		    $output->write("argument " . ($n + 1) . " type is forbidden: " .
 				   "$argument_types[$n] ($argument_kinds[$n])\n");
 		}
-	    } elsif($argument_kinds[$n] ne $declared_argument_kinds[$n]) {
+	    } elsif($argument_kinds[$n] ne $declared_argument_kinds[$n] &&
+                   !($argument_kinds[$n] eq "longlong" && $declared_argument_kinds[$n] eq "double")) {
 		if($options->report_argument_kind($argument_kinds[$n]) ||
 		   $options->report_argument_kind($declared_argument_kinds[$n]))
 		{

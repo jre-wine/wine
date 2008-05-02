@@ -107,7 +107,14 @@ static unsigned dbg_fetch_context(void)
     return TRUE;
 }
 
-static unsigned dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
+/***********************************************************************
+ *              dbg_exception_prolog
+ *
+ * Examine exception and decide if interactive mode is entered(return TRUE)
+ * or exception is silently continued(return FALSE)
+ * is_debug means the exception is a breakpoint or single step exception
+ */
+static unsigned dbg_exception_prolog(BOOL is_debug, BOOL first_chance, const EXCEPTION_RECORD* rec)
 {
     ADDRESS64   addr;
     BOOL        is_break;
@@ -143,7 +150,7 @@ static unsigned dbg_exception_prolog(BOOL is_debug, const EXCEPTION_RECORD* rec)
     /* this will resynchronize builtin dbghelp's internal ELF module list */
     SymLoadModule(dbg_curr_process->handle, 0, 0, 0, 0, 0);
 
-    if (is_debug) break_adjust_pc(&addr, rec->ExceptionCode, &is_break);
+    if (is_debug) break_adjust_pc(&addr, rec->ExceptionCode, first_chance, &is_break);
     /*
      * Do a quiet backtrace so that we have an idea of what the situation
      * is WRT the source files.
@@ -381,6 +388,14 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
 	case EXCEPTION_FLT_STACK_CHECK:
             dbg_printf("floating point stack check");
             break;
+        case CXX_EXCEPTION:
+            if(rec->NumberParameters == 3 && rec->ExceptionInformation[0] == CXX_FRAME_MAGIC)
+                dbg_printf("C++ exception(object = 0x%08lx, type = 0x%08lx)",
+                           rec->ExceptionInformation[1], rec->ExceptionInformation[2]);
+            else
+                dbg_printf("C++ exception with strange parameter count %d or magic 0x%08lx",
+                           rec->NumberParameters, rec->ExceptionInformation[0]);
+            break;
         default:
             dbg_printf("0x%08x", rec->ExceptionCode);
             break;
@@ -390,7 +405,7 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
         dbg_printf( ", invalid program stack" );
     }
 
-    if (dbg_exception_prolog(is_debug, rec))
+    if (dbg_exception_prolog(is_debug, first_chance, rec))
     {
 	dbg_interactiveP = TRUE;
         return 0;
@@ -664,7 +679,7 @@ static void wait_exception(void)
 {
     DEBUG_EVENT		de;
 
-    while (dbg_curr_process && WaitForDebugEvent(&de, INFINITE))
+    while (dbg_num_processes() && WaitForDebugEvent(&de, INFINITE))
     {
         if (dbg_handle_debug_event(&de)) break;
     }
@@ -703,19 +718,25 @@ void     dbg_active_wait_for_first_exception(void)
 static	unsigned dbg_start_debuggee(LPSTR cmdLine)
 {
     PROCESS_INFORMATION	info;
-    STARTUPINFOA	startup;
+    STARTUPINFOA	startup, current;
+    DWORD               flags;
+
+    GetStartupInfoA(&current);
 
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESHOWWINDOW;
-    startup.wShowWindow = SW_SHOWNORMAL;
+
+    startup.wShowWindow = (current.dwFlags & STARTF_USESHOWWINDOW) ?
+        current.wShowWindow : SW_SHOWNORMAL;
 
     /* FIXME: shouldn't need the CREATE_NEW_CONSOLE, but as usual CUI:s need it
      * while GUI:s don't
      */
-    if (!CreateProcess(NULL, cmdLine, NULL, NULL,
-                       FALSE, 
-                       DEBUG_PROCESS|DEBUG_ONLY_THIS_PROCESS|CREATE_NEW_CONSOLE,
+    flags = DEBUG_PROCESS | CREATE_NEW_CONSOLE;
+    if (!DBG_IVAR(AlsoDebugProcChild)) flags |= DEBUG_ONLY_THIS_PROCESS;
+
+    if (!CreateProcess(NULL, cmdLine, NULL, NULL, FALSE, flags,
                        NULL, NULL, &startup, &info))
     {
 	dbg_printf("Couldn't start process '%s'\n", cmdLine);

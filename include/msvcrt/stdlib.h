@@ -11,6 +11,8 @@
 #define __WINE_USE_MSVCRT
 #endif
 
+#include <pshpack8.h>
+
 #ifndef NULL
 #ifdef __cplusplus
 #define NULL  0
@@ -26,8 +28,16 @@ typedef unsigned short wchar_t;
 #endif
 #endif
 
+#if defined(__x86_64__) && !defined(_WIN64)
+#define _WIN64
+#endif
+
 #if !defined(_MSC_VER) && !defined(__int64)
-#define __int64 long long
+# ifdef _WIN64
+#   define __int64 long
+# else
+#   define __int64 long long
+# endif
 #endif
 
 #define EXIT_SUCCESS        0
@@ -245,5 +255,7 @@ static inline ldiv_t __wine_msvcrt_ldiv(long num, long denom)
 #define div(num,denom) __wine_msvcrt_div(num,denom)
 #define ldiv(num,denom) __wine_msvcrt_ldiv(num,denom)
 #endif
+
+#include <poppack.h>
 
 #endif /* __WINE_STDLIB_H */

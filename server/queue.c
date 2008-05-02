@@ -85,7 +85,7 @@ struct message
 struct timer
 {
     struct list     entry;     /* entry in timer list */
-    struct timeval  when;      /* next expiration */
+    timeout_t       when;      /* next expiration */
     unsigned int    rate;      /* timer rate in ms */
     user_handle_t   win;       /* window handle */
     unsigned int    msg;       /* message to post */
@@ -113,6 +113,7 @@ struct thread_input
 struct msg_queue
 {
     struct object          obj;             /* object header */
+    struct fd             *fd;              /* optional file descriptor to poll */
     unsigned int           wake_bits;       /* wakeup bits */
     unsigned int           wake_mask;       /* wakeup mask */
     unsigned int           changed_bits;    /* changed wakeup bits */
@@ -130,7 +131,7 @@ struct msg_queue
     struct timeout_user   *timeout;         /* timeout for next timer to expire */
     struct thread_input   *input;           /* thread input descriptor */
     struct hook_table     *hooks;           /* hook table */
-    struct timeval         last_get_msg;    /* time of last get message call */
+    timeout_t              last_get_msg;    /* time of last get message call */
 };
 
 static void msg_queue_dump( struct object *obj, int verbose );
@@ -139,6 +140,7 @@ static void msg_queue_remove_queue( struct object *obj, struct wait_queue_entry 
 static int msg_queue_signaled( struct object *obj, struct thread *thread );
 static int msg_queue_satisfied( struct object *obj, struct thread *thread );
 static void msg_queue_destroy( struct object *obj );
+static void msg_queue_poll_event( struct fd *fd, int event );
 static void thread_input_dump( struct object *obj, int verbose );
 static void thread_input_destroy( struct object *obj );
 static void timer_callback( void *private );
@@ -155,8 +157,21 @@ static const struct object_ops msg_queue_ops =
     no_get_fd,                 /* get_fd */
     no_map_access,             /* map_access */
     no_lookup_name,            /* lookup_name */
+    no_open_file,              /* open_file */
     no_close_handle,           /* close_handle */
     msg_queue_destroy          /* destroy */
+};
+
+static const struct fd_ops msg_queue_fd_ops =
+{
+    NULL,                        /* get_poll_events */
+    msg_queue_poll_event,        /* poll_event */
+    NULL,                        /* flush */
+    NULL,                        /* get_fd_type */
+    NULL,                        /* ioctl */
+    NULL,                        /* queue_async */
+    NULL,                        /* reselect_async */
+    NULL                         /* cancel async */
 };
 
 
@@ -172,6 +187,7 @@ static const struct object_ops thread_input_ops =
     no_get_fd,                    /* get_fd */
     no_map_access,                /* map_access */
     no_lookup_name,               /* lookup_name */
+    no_open_file,                 /* open_file */
     no_close_handle,              /* close_handle */
     thread_input_destroy          /* destroy */
 };
@@ -241,6 +257,7 @@ static struct msg_queue *create_msg_queue( struct thread *thread, struct thread_
     if (!input && !(input = create_thread_input( thread ))) return NULL;
     if ((queue = alloc_object( &msg_queue_ops )))
     {
+        queue->fd              = NULL;
         queue->wake_bits       = 0;
         queue->wake_mask       = 0;
         queue->changed_bits    = 0;
@@ -306,13 +323,13 @@ void set_queue_hooks( struct thread *thread, struct hook_table *hooks )
 }
 
 /* check the queue status */
-inline static int is_signaled( struct msg_queue *queue )
+static inline int is_signaled( struct msg_queue *queue )
 {
     return ((queue->wake_bits & queue->wake_mask) || (queue->changed_bits & queue->changed_mask));
 }
 
 /* set some queue bits */
-inline static void set_queue_bits( struct msg_queue *queue, unsigned int bits )
+static inline void set_queue_bits( struct msg_queue *queue, unsigned int bits )
 {
     queue->wake_bits |= bits;
     queue->changed_bits |= bits;
@@ -320,26 +337,26 @@ inline static void set_queue_bits( struct msg_queue *queue, unsigned int bits )
 }
 
 /* clear some queue bits */
-inline static void clear_queue_bits( struct msg_queue *queue, unsigned int bits )
+static inline void clear_queue_bits( struct msg_queue *queue, unsigned int bits )
 {
     queue->wake_bits &= ~bits;
     queue->changed_bits &= ~bits;
 }
 
 /* check whether msg is a keyboard message */
-inline static int is_keyboard_msg( struct message *msg )
+static inline int is_keyboard_msg( struct message *msg )
 {
     return (msg->msg >= WM_KEYFIRST && msg->msg <= WM_KEYLAST);
 }
 
 /* check if message is matched by the filter */
-inline static int check_msg_filter( unsigned int msg, unsigned int first, unsigned int last )
+static inline int check_msg_filter( unsigned int msg, unsigned int first, unsigned int last )
 {
     return (msg >= first && msg <= last);
 }
 
 /* check whether a message filter contains at least one potential hardware message */
-inline static int filter_contains_hw_range( unsigned int first, unsigned int last )
+static inline int filter_contains_hw_range( unsigned int first, unsigned int last )
 {
     /* hardware message ranges are (in numerical order):
      *   WM_NCMOUSEFIRST .. WM_NCMOUSELAST
@@ -354,7 +371,7 @@ inline static int filter_contains_hw_range( unsigned int first, unsigned int las
 }
 
 /* get the QS_* bit corresponding to a given hardware message */
-inline static int get_hardware_msg_bit( struct message *msg )
+static inline int get_hardware_msg_bit( struct message *msg )
 {
     if (msg->msg == WM_MOUSEMOVE || msg->msg == WM_NCMOUSEMOVE) return QS_MOUSEMOVE;
     if (is_keyboard_msg( msg )) return QS_KEY;
@@ -362,7 +379,7 @@ inline static int get_hardware_msg_bit( struct message *msg )
 }
 
 /* get the current thread queue, creating it if needed */
-inline static struct msg_queue *get_current_queue(void)
+static inline struct msg_queue *get_current_queue(void)
 {
     struct msg_queue *queue = current->queue;
     if (!queue) queue = create_msg_queue( current, NULL );
@@ -370,7 +387,7 @@ inline static struct msg_queue *get_current_queue(void)
 }
 
 /* get a (pseudo-)unique id to tag hardware messages */
-inline static unsigned int get_unique_id(void)
+static inline unsigned int get_unique_id(void)
 {
     static unsigned int id;
     if (!++id) id = 1;  /* avoid an id of 0 */
@@ -519,7 +536,7 @@ static void result_timeout( void *private )
 /* allocate and fill a message result structure */
 static struct message_result *alloc_message_result( struct msg_queue *send_queue,
                                                     struct msg_queue *recv_queue,
-                                                    struct message *msg, int timeout )
+                                                    struct message *msg, timeout_t timeout )
 {
     struct message_result *result = mem_alloc( sizeof(*result) );
     if (result)
@@ -566,12 +583,8 @@ static struct message_result *alloc_message_result( struct msg_queue *send_queue
             list_add_head( &send_queue->send_result, &result->sender_entry );
         }
 
-        if (timeout)
-        {
-            struct timeval when = current_time;
-            add_timeout( &when, timeout );
-            result->timeout = add_timeout_user( &when, result_timeout, result );
-        }
+        if (timeout != TIMEOUT_INFINITE)
+            result->timeout = add_timeout_user( timeout, result_timeout, result );
     }
     return result;
 }
@@ -669,7 +682,7 @@ found:
     reply->time   = msg->time;
     reply->info   = msg->info;
 
-    if (flags & GET_MSG_REMOVE)
+    if (flags & PM_REMOVE)
     {
         if (msg->data)
         {
@@ -700,7 +713,7 @@ static int get_quit_message( struct msg_queue *queue, unsigned int flags,
         reply->time   = get_tick_count();
         reply->info   = 0;
 
-        if (flags & GET_MSG_REMOVE)
+        if (flags & PM_REMOVE)
         {
             queue->quit_message = 0;
             if (list_empty( &queue->msg_list[POST_MESSAGE] ))
@@ -749,7 +762,7 @@ static int is_queue_hung( struct msg_queue *queue )
 {
     struct wait_queue_entry *entry;
 
-    if (current_time.tv_sec - queue->last_get_msg.tv_sec <= 5)
+    if (current_time - queue->last_get_msg <= 5 * TICKS_PER_SEC)
         return 0;  /* less than 5 seconds since last get message -> not hung */
 
     LIST_FOR_EACH_ENTRY( entry, &queue->obj.wait_queue, struct wait_queue_entry, entry )
@@ -776,6 +789,8 @@ static int msg_queue_add_queue( struct object *obj, struct wait_queue_entry *ent
     {
         if (process->idle_event) set_event( process->idle_event );
     }
+    if (queue->fd && list_empty( &obj->wait_queue ))  /* first on the queue */
+        set_fd_events( queue->fd, POLLIN );
     add_queue( obj, entry );
     return 1;
 }
@@ -786,6 +801,8 @@ static void msg_queue_remove_queue(struct object *obj, struct wait_queue_entry *
     struct process *process = entry->thread->process;
 
     remove_queue( obj, entry );
+    if (queue->fd && list_empty( &obj->wait_queue ))  /* last on the queue is gone */
+        set_fd_events( queue->fd, 0 );
 
     assert( entry->thread->queue == queue );
 
@@ -806,7 +823,18 @@ static void msg_queue_dump( struct object *obj, int verbose )
 static int msg_queue_signaled( struct object *obj, struct thread *thread )
 {
     struct msg_queue *queue = (struct msg_queue *)obj;
-    return is_signaled( queue );
+    int ret = 0;
+
+    if (queue->fd)
+    {
+        if ((ret = check_fd_events( queue->fd, POLLIN )))
+            /* stop waiting on select() if we are signaled */
+            set_fd_events( queue->fd, 0 );
+        else if (!list_empty( &obj->wait_queue ))
+            /* restart waiting on poll() if we are no longer signaled */
+            set_fd_events( queue->fd, POLLIN );
+    }
+    return ret || is_signaled( queue );
 }
 
 static int msg_queue_satisfied( struct object *obj, struct thread *thread )
@@ -841,6 +869,16 @@ static void msg_queue_destroy( struct object *obj )
     if (queue->timeout) remove_timeout_user( queue->timeout );
     if (queue->input) release_object( queue->input );
     if (queue->hooks) release_object( queue->hooks );
+    if (queue->fd) release_object( queue->fd );
+}
+
+static void msg_queue_poll_event( struct fd *fd, int event )
+{
+    struct msg_queue *queue = get_fd_user( fd );
+    assert( queue->obj.ops == &msg_queue_ops );
+
+    if (event & (POLLERR | POLLHUP)) set_fd_events( fd, -1 );
+    wake_up( &queue->obj, 0 );
 }
 
 static void thread_input_dump( struct object *obj, int verbose )
@@ -860,7 +898,7 @@ static void thread_input_destroy( struct object *obj )
 }
 
 /* fix the thread input data when a window is destroyed */
-inline static void thread_input_cleanup_window( struct msg_queue *queue, user_handle_t window )
+static inline void thread_input_cleanup_window( struct msg_queue *queue, user_handle_t window )
 {
     struct thread_input *input = queue->input;
 
@@ -955,7 +993,7 @@ static void set_next_timer( struct msg_queue *queue )
     if ((ptr = list_head( &queue->pending_timers )))
     {
         struct timer *timer = LIST_ENTRY( ptr, struct timer, entry );
-        queue->timeout = add_timeout_user( &timer->when, timer_callback, queue );
+        queue->timeout = add_timeout_user( timer->when, timer_callback, queue );
     }
     /* set/clear QS_TIMER bit */
     if (list_empty( &queue->expired_timers ))
@@ -1007,7 +1045,7 @@ static void link_timer( struct msg_queue *queue, struct timer *timer )
     for (ptr = queue->pending_timers.next; ptr != &queue->pending_timers; ptr = ptr->next)
     {
         struct timer *t = LIST_ENTRY( ptr, struct timer, entry );
-        if (!time_before( &t->when, &timer->when )) break;
+        if (t->when >= timer->when) break;
     }
     list_add_before( ptr, &timer->entry );
 }
@@ -1024,7 +1062,7 @@ static void free_timer( struct msg_queue *queue, struct timer *timer )
 static void restart_timer( struct msg_queue *queue, struct timer *timer )
 {
     list_remove( &timer->entry );
-    while (!time_before( &current_time, &timer->when )) add_timeout( &timer->when, timer->rate );
+    while (timer->when <= current_time) timer->when += (timeout_t)timer->rate * 10000;
     link_timer( queue, timer );
     set_next_timer( queue );
 }
@@ -1056,8 +1094,7 @@ static struct timer *set_timer( struct msg_queue *queue, unsigned int rate )
     if (timer)
     {
         timer->rate = max( rate, 1 );
-        timer->when = current_time;
-        add_timeout( &timer->when, rate );
+        timer->when = current_time + (timeout_t)timer->rate * 10000;
         link_timer( queue, timer );
         /* check if we replaced the next timer */
         if (list_head( &queue->pending_timers ) == &timer->entry) set_next_timer( queue );
@@ -1522,6 +1559,31 @@ DECL_HANDLER(get_msg_queue)
 }
 
 
+/* set the file descriptor associated to the current thread queue */
+DECL_HANDLER(set_queue_fd)
+{
+    struct msg_queue *queue = get_current_queue();
+    struct file *file;
+    int unix_fd;
+
+    if (queue->fd)  /* fd can only be set once */
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if (!(file = get_file_obj( current->process, req->handle, SYNCHRONIZE ))) return;
+
+    if ((unix_fd = get_file_unix_fd( file )) != -1)
+    {
+        if ((unix_fd = dup( unix_fd )) != -1)
+            queue->fd = create_anonymous_fd( &msg_queue_fd_ops, unix_fd, &queue->obj, 0 );
+        else
+            file_set_error();
+    }
+    release_object( file );
+}
+
+
 /* set the current message queue wakeup mask */
 DECL_HANDLER(set_queue_mask)
 {
@@ -1691,11 +1753,13 @@ DECL_HANDLER(get_message)
     struct list *ptr;
     struct msg_queue *queue = get_current_queue();
     user_handle_t get_win = get_user_full_handle( req->get_win );
+    unsigned int filter = req->flags >> 16;
 
     reply->active_hooks = get_active_hooks();
 
     if (!queue) return;
     queue->last_get_msg = current_time;
+    if (!filter) filter = QS_ALLINPUT;
 
     /* first check for sent messages */
     if ((ptr = list_head( &queue->msg_list[SEND_MESSAGE] )))
@@ -1704,14 +1768,19 @@ DECL_HANDLER(get_message)
         receive_message( queue, msg, reply );
         return;
     }
-    if (req->flags & GET_MSG_SENT_ONLY) goto done;  /* nothing else to check */
 
     /* clear changed bits so we can wait on them if we don't find a message */
-    if (req->get_first == 0 && req->get_last == ~0U) queue->changed_bits = 0;
-    else queue->changed_bits &= QS_ALLPOSTMESSAGE;
+    if (filter & QS_POSTMESSAGE)
+    {
+        queue->changed_bits &= ~(QS_POSTMESSAGE | QS_HOTKEY | QS_TIMER);
+        if (req->get_first == 0 && req->get_last == ~0U) queue->changed_bits &= ~QS_ALLPOSTMESSAGE;
+    }
+    if (filter & QS_INPUT) queue->changed_bits &= ~QS_INPUT;
+    if (filter & QS_PAINT) queue->changed_bits &= ~QS_PAINT;
 
     /* then check for posted messages */
-    if (get_posted_message( queue, get_win, req->get_first, req->get_last, req->flags, reply ))
+    if ((filter & QS_POSTMESSAGE) &&
+        get_posted_message( queue, get_win, req->get_first, req->get_last, req->flags, reply ))
         return;
 
     /* only check for quit messages if not posted messages pending.
@@ -1720,12 +1789,14 @@ DECL_HANDLER(get_message)
         return;
 
     /* then check for any raw hardware message */
-    if (filter_contains_hw_range( req->get_first, req->get_last ) &&
+    if ((filter & QS_INPUT) &&
+        filter_contains_hw_range( req->get_first, req->get_last ) &&
         get_hardware_message( current, req->hw_id, get_win, req->get_first, req->get_last, reply ))
         return;
 
     /* now check for WM_PAINT */
-    if (queue->paint_count &&
+    if ((filter & QS_PAINT) &&
+        queue->paint_count &&
         check_msg_filter( WM_PAINT, req->get_first, req->get_last ) &&
         (reply->win = find_window_to_repaint( get_win, current )))
     {
@@ -1741,8 +1812,9 @@ DECL_HANDLER(get_message)
     }
 
     /* now check for timer */
-    if ((timer = find_expired_timer( queue, get_win, req->get_first,
-                                     req->get_last, (req->flags & GET_MSG_REMOVE) )))
+    if ((filter & QS_TIMER) &&
+        (timer = find_expired_timer( queue, get_win, req->get_first,
+                                     req->get_last, (req->flags & PM_REMOVE) )))
     {
         reply->type   = MSG_POSTED;
         reply->win    = timer->win;
@@ -1756,7 +1828,6 @@ DECL_HANDLER(get_message)
         return;
     }
 
- done:
     set_error( STATUS_PENDING );  /* FIXME */
 }
 

@@ -111,7 +111,7 @@ static void X11DRV_DIB_Unlock(X_PHYSBITMAP *,BOOL);
  *
  * Return the width of an X image in bytes
  */
-inline static int X11DRV_DIB_GetXImageWidthBytes( int width, int depth )
+static inline int X11DRV_DIB_GetXImageWidthBytes( int width, int depth )
 {
     if (!depth || depth > 32) goto error;
 
@@ -4608,6 +4608,7 @@ HBITMAP X11DRV_CreateDIBSection( X11DRV_PDEVICE *physDev, HBITMAP hbitmap,
 
       /* install fault handler */
     InitializeCriticalSection( &physBitmap->lock );
+    physBitmap->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": X_PHYSBITMAP.lock");
 
     physBitmap->base   = dib.dsBm.bmBits;
     physBitmap->size   = dib.dsBmih.biSizeImage;
@@ -4663,6 +4664,7 @@ void X11DRV_DIB_DeleteDIBSection(X_PHYSBITMAP *physBitmap, DIBSECTION *dib)
   }
 
   HeapFree(GetProcessHeap(), 0, physBitmap->colorMap);
+  physBitmap->lock.DebugInfo->Spare[0] = 0;
   DeleteCriticalSection(&physBitmap->lock);
 }
 

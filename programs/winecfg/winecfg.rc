@@ -29,7 +29,7 @@
 #include "resource.h"
 
 #include "Bg.rc"
-/* #include "Cs.rc" */
+#include "Cs.rc"
 #include "De.rc"
 #include "En.rc"
 #include "Es.rc"
@@ -41,7 +41,9 @@
 #include "Ko.rc"
 #include "Nl.rc"
 #include "No.rc"
+#include "Pl.rc"
 /* #include "Pt.rc" */
+#include "Ro.rc"
 #include "Ru.rc"
 /* #include "Si.rc" */
 #include "Tr.rc"

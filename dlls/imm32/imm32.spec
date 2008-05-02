@@ -43,10 +43,10 @@
 @ stub ImmGetIMCCSize
 @ stub ImmGetIMCLockCount
 @ stdcall ImmGetIMEFileNameA(long ptr long)
-@ stdcall ImmGetIMEFileNameW(long ptr long) 
+@ stdcall ImmGetIMEFileNameW(long ptr long)
 @ stub ImmGetImeInfoEx
-@ stub ImmGetImeMenuItemsA
-@ stub ImmGetImeMenuItemsW
+@ stdcall ImmGetImeMenuItemsA(long long long ptr ptr long)
+@ stdcall ImmGetImeMenuItemsW(long long long ptr ptr long)
 @ stdcall ImmGetOpenStatus(long)
 @ stdcall ImmGetProperty(long long)
 @ stdcall ImmGetRegisterWordStyleA(long long ptr)
@@ -93,7 +93,7 @@
 @ stdcall ImmSetCompositionStringW(long long ptr long ptr long)
 @ stdcall ImmSetCompositionWindow(long ptr)
 @ stdcall ImmSetConversionStatus(long long long)
-@ stdcall ImmSetHotKey(long long long ptr) user32.CliImmSetHotKey
+#@ stdcall ImmSetHotKey(long long long ptr) user32.CliImmSetHotKey
 @ stdcall ImmSetOpenStatus(long long)
 @ stdcall ImmSetStatusWindowPos(long ptr)
 @ stub ImmShowSoftKeyboard

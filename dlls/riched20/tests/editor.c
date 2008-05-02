@@ -2,6 +2,8 @@
 * Unit test suite for rich edit control
 *
 * Copyright 2006 Google (Thomas Kho)
+* Copyright 2007 Matt Finnicum
+* Copyright 2007 Dmitry Timoshkov
 *
 * This library is free software; you can redistribute it and/or
 * modify it under the terms of the GNU Lesser General Public
@@ -18,10 +20,17 @@
 * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
 */
 
-#include <wine/test.h>
-#include <windows.h>
+#include <stdarg.h>
+#include <assert.h>
+#include <windef.h>
+#include <winbase.h>
+#include <wingdi.h>
+#include <winuser.h>
+#include <winnls.h>
+#include <ole2.h>
 #include <richedit.h>
 #include <time.h>
+#include <wine/test.h>
 
 static HMODULE hmoduleRichEdit;
 
@@ -877,7 +886,7 @@ static void test_EM_SETUNDOLIMIT(void)
 
 static void test_ES_PASSWORD(void)
 {
-  /* This isn't hugely testable, so we're just going to run it through it's paces. */
+  /* This isn't hugely testable, so we're just going to run it through its paces */
 
   HWND hwndRichEdit = new_richedit(NULL);
   WCHAR result;
@@ -974,11 +983,52 @@ static void test_EM_SETTEXTEX(void)
   DestroyWindow(hwndRichEdit);
 }
 
+static void test_EM_LIMITTEXT(void)
+{
+  int ret;
+
+  HWND hwndRichEdit = new_richedit(NULL);
+
+  /* The main purpose of this test is to demonstrate that the nonsense in MSDN
+   * about setting the length to -1 for multiline edit controls doesn't happen.
+   */
+
+  /* Don't check default gettextlimit case. That's done in other tests */
+
+  /* Set textlimit to 100 */
+  SendMessage (hwndRichEdit, EM_LIMITTEXT, 100, 0);
+  ret = SendMessage (hwndRichEdit, EM_GETLIMITTEXT, 0, 0);
+  ok (ret == 100,
+      "EM_LIMITTEXT: set to 100, returned: %d, expected: 100\n", ret);
+
+  /* Set textlimit to 0 */
+  SendMessage (hwndRichEdit, EM_LIMITTEXT, 0, 0);
+  ret = SendMessage (hwndRichEdit, EM_GETLIMITTEXT, 0, 0);
+  ok (ret == 65536,
+      "EM_LIMITTEXT: set to 0, returned: %d, expected: 65536\n", ret);
+
+  /* Set textlimit to -1 */
+  SendMessage (hwndRichEdit, EM_LIMITTEXT, -1, 0);
+  ret = SendMessage (hwndRichEdit, EM_GETLIMITTEXT, 0, 0);
+  ok (ret == -1,
+      "EM_LIMITTEXT: set to -1, returned: %d, expected: -1\n", ret);
+
+  /* Set textlimit to -2 */
+  SendMessage (hwndRichEdit, EM_LIMITTEXT, -2, 0);
+  ret = SendMessage (hwndRichEdit, EM_GETLIMITTEXT, 0, 0);
+  ok (ret == -2,
+      "EM_LIMITTEXT: set to -2, returned: %d, expected: -2\n", ret);
+
+  DestroyWindow (hwndRichEdit);
+}
+
 
 static void test_EM_EXLIMITTEXT(void)
 {
   int i, selBegin, selEnd, len1, len2;
+  int result;
   char text[1024 + 1];
+  char buffer[1024 + 1];
   int textlimit = 0; /* multiple of 100 */
   HWND hwndRichEdit = new_richedit(NULL);
   
@@ -1045,6 +1095,18 @@ static void test_EM_EXLIMITTEXT(void)
   ok(len1 == len2, 
     "EM_EXLIMITTEXT: No Change Expected\nOld Length: %d, New Length: %d, Limit: %d\n",
     len1,len2,i);
+
+  /* set text up to the limit, select all the text, then add a char */
+  textlimit = 5;
+  memset(text, 'W', textlimit);
+  text[textlimit] = 0;
+  SendMessage(hwndRichEdit, EM_EXLIMITTEXT, 0, textlimit);
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text);
+  SendMessage(hwndRichEdit, EM_SETSEL, 0, -1);
+  SendMessage(hwndRichEdit, WM_CHAR, 'A', 1);
+  SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+  result = strcmp(buffer, "A");
+  ok(0 == result, "got string = \"%s\"\n", buffer);
 
   DestroyWindow(hwndRichEdit);
 }
@@ -1192,10 +1254,8 @@ static void test_EM_GETMODIFY(void)
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
   SendMessage(hwndRichEdit, WM_SETFONT, (WPARAM)testFont,(LPARAM) MAKELONG((WORD) TRUE, 0));
   result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
-  todo_wine {
   ok (result == 0,
       "EM_GETMODIFY returned non-zero, instead of zero on setting font\n");
-  }
 
   /* setting text should set modify flag */
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
@@ -1207,20 +1267,16 @@ static void test_EM_GETMODIFY(void)
   /* undo previous text doesn't reset modify flag */
   SendMessage(hwndRichEdit, WM_UNDO, 0, 0);
   result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
-  todo_wine {
   ok (result != 0,
       "EM_GETMODIFY returned zero, instead of non-zero on undo after setting text\n");
-  }
   
   /* set text with no flag to keep undo stack should not set modify flag */
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
   setText.flags = 0;
   SendMessage(hwndRichEdit, EM_SETTEXTEX, (WPARAM)&setText, (LPARAM)TestItem1);
   result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
-  todo_wine {
   ok (result == 0,
       "EM_GETMODIFY returned non-zero, instead of zero when setting text while not keeping undo stack\n");
-  }
   
   /* WM_SETTEXT doesn't modify */
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
@@ -1273,6 +1329,14 @@ static void test_EM_GETMODIFY(void)
   result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
   ok (result != 0,
       "EM_GETMODIFY returned zero, instead of non-zero for WM_CHAR\n");
+
+  /* press del */
+  SendMessage(hwndRichEdit, WM_CHAR, 'A', 0);
+  SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
+  SendMessage(hwndRichEdit, WM_KEYDOWN, VK_BACK, 0);
+  result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
+  ok (result != 0,
+      "EM_GETMODIFY returned zero, instead of non-zero for backspace\n");
   
   /* set char format */
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
@@ -1295,10 +1359,8 @@ static void test_EM_GETMODIFY(void)
   pf2.wAlignment = PFA_RIGHT;
   SendMessage(hwndRichEdit, EM_SETPARAFORMAT, 0, (LPARAM) &pf2);
   result = SendMessage(hwndRichEdit, EM_GETMODIFY, 0, 0);
-  todo_wine {
   ok (result == 0,
       "EM_GETMODIFY returned zero, instead of non-zero for EM_SETPARAFORMAT\n");
-  }
 
   /* EM_STREAM */
   SendMessage(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
@@ -1394,6 +1456,373 @@ static void test_EM_EXSETSEL(void)
     DestroyWindow(hwndRichEdit);
 }
 
+static void test_WM_PASTE(void)
+{
+    int result;
+    char buffer[1024] = {0};
+    const char* text1 = "testing paste\r";
+    const char* text2 = "testing paste\r\rtesting paste";
+    const char* text3 = "testing paste\rpaste\rtesting paste";
+    HWND hwndRichEdit = new_richedit(NULL);
+
+    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text1);
+    SendMessage(hwndRichEdit, EM_SETSEL, 0, 14);
+    SendMessage(hwndRichEdit, WM_CHAR, 3, 0);  /* ctrl-c */
+    SendMessage(hwndRichEdit, EM_SETSEL, 14, 14);
+    SendMessage(hwndRichEdit, WM_CHAR, 22, 0);  /* ctrl-v */
+    SendMessage(hwndRichEdit, WM_CHAR, 26, 0);  /* ctrl-z */
+    SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+    result = strcmp(text1, buffer);
+    ok(result == 0,
+        "test paste: strcmp = %i\n", result);
+
+    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text2);
+    SendMessage(hwndRichEdit, EM_SETSEL, 8, 13);
+    SendMessage(hwndRichEdit, WM_CHAR, 3, 0);  /* ctrl-c */
+    SendMessage(hwndRichEdit, EM_SETSEL, 14, 14);
+    SendMessage(hwndRichEdit, WM_CHAR, 22, 0);  /* ctrl-v */
+    SendMessage(hwndRichEdit, WM_CHAR, 26, 0);  /* ctrl-z */
+    SendMessage(hwndRichEdit, WM_CHAR, 25, 0);  /* ctrl-y */
+    SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+    result = strcmp(buffer,text3);
+    ok(result == 0,
+        "test paste: strcmp = %i\n", result);
+
+    DestroyWindow(hwndRichEdit);
+}
+
+static void test_EM_FORMATRANGE(void)
+{
+  int r;
+  FORMATRANGE fr;
+  HDC hdc;
+  HWND hwndRichEdit = new_richedit(NULL);
+
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) haystack);
+
+  hdc = GetDC(hwndRichEdit);
+  ok(hdc != NULL, "Could not get HDC\n");
+
+  fr.hdc = fr.hdcTarget = hdc;
+  fr.rc.top = fr.rcPage.top = fr.rc.left = fr.rcPage.left = 0;
+  fr.rc.right = fr.rcPage.right = GetDeviceCaps(hdc, HORZRES);
+  fr.rc.bottom = fr.rcPage.bottom = GetDeviceCaps(hdc, VERTRES);
+  fr.chrg.cpMin = 0;
+  fr.chrg.cpMax = 20;
+
+  r = SendMessage(hwndRichEdit, EM_FORMATRANGE, TRUE, (LPARAM) NULL);
+  todo_wine {
+    ok(r == 31, "EM_FORMATRANGE expect %d, got %d\n", 31, r);
+  }
+
+  r = SendMessage(hwndRichEdit, EM_FORMATRANGE, TRUE, (LPARAM) &fr);
+  todo_wine {
+    ok(r == 20, "EM_FORMATRANGE expect %d, got %d\n", 20, r);
+  }
+
+  fr.chrg.cpMin = 0;
+  fr.chrg.cpMax = 10;
+
+  r = SendMessage(hwndRichEdit, EM_FORMATRANGE, TRUE, (LPARAM) &fr);
+  todo_wine {
+    ok(r == 10, "EM_FORMATRANGE expect %d, got %d\n", 10, r);
+  }
+
+  r = SendMessage(hwndRichEdit, EM_FORMATRANGE, TRUE, (LPARAM) NULL);
+  todo_wine {
+    ok(r == 31, "EM_FORMATRANGE expect %d, got %d\n", 31, r);
+  }
+
+  DestroyWindow(hwndRichEdit);
+}
+
+static int nCallbackCount = 0;
+
+static DWORD CALLBACK EditStreamCallback(DWORD_PTR dwCookie, LPBYTE pbBuff,
+				 LONG cb, LONG* pcb)
+{
+  const char text[] = {'t','e','s','t'};
+
+  if (sizeof(text) <= cb)
+  {
+    if ((int)dwCookie != nCallbackCount)
+    {
+      *pcb = 0;
+      return 0;
+    }
+
+    memcpy (pbBuff, text, sizeof(text));
+    *pcb = sizeof(text);
+
+    nCallbackCount++;
+
+    return 0;
+  }
+  else
+    return 1; /* indicates callback failed */
+}
+
+static void test_EM_StreamIn_Undo(void)
+{
+  /* The purpose of this test is to determine when a EM_StreamIn should be
+   * undoable. This is important because WM_PASTE currently uses StreamIn and
+   * pasting should always be undoable but streaming isn't always.
+   *
+   * cases to test:
+   * StreamIn plain text without SFF_SELECTION.
+   * StreamIn plain text with SFF_SELECTION set but a zero-length selection
+   * StreamIn plain text with SFF_SELECTION and a valid, normal selection
+   * StreamIn plain text with SFF_SELECTION and a backwards-selection (from>to)
+   * Feel free to add tests for other text modes or StreamIn things.
+   */
+
+
+  HWND hwndRichEdit = new_richedit(NULL);
+  LRESULT result;
+  EDITSTREAM es;
+  char buffer[1024] = {0};
+  const char randomtext[] = "Some text";
+
+  es.pfnCallback = (EDITSTREAMCALLBACK) EditStreamCallback;
+
+  /* StreamIn, no SFF_SELECTION */
+  es.dwCookie = nCallbackCount;
+  SendMessage(hwndRichEdit,EM_EMPTYUNDOBUFFER, 0,0);
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) randomtext);
+  SendMessage(hwndRichEdit, EM_SETSEL,0,0);
+  SendMessage(hwndRichEdit, EM_STREAMIN, (WPARAM)SF_TEXT, (LPARAM)&es);
+  SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+  result = strcmp (buffer,"test");
+  ok (result  == 0,
+      "EM_STREAMIN: Test 1 set wrong text: Result: %s\n",buffer);
+
+  result = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  ok (result == FALSE,
+      "EM_STREAMIN without SFF_SELECTION wrongly allows undo\n");
+
+  /* StreamIn, SFF_SELECTION, but nothing selected */
+  es.dwCookie = nCallbackCount;
+  SendMessage(hwndRichEdit,EM_EMPTYUNDOBUFFER, 0,0);
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) randomtext);
+  SendMessage(hwndRichEdit, EM_SETSEL,0,0);
+  SendMessage(hwndRichEdit, EM_STREAMIN,
+	      (WPARAM)(SF_TEXT|SFF_SELECTION), (LPARAM)&es);
+  SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+  result = strcmp (buffer,"testSome text");
+  ok (result  == 0,
+      "EM_STREAMIN: Test 2 set wrong text: Result: %s\n",buffer);
+
+  result = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  ok (result == TRUE,
+     "EM_STREAMIN with SFF_SELECTION but no selection set "
+      "should create an undo\n");
+
+  /* StreamIn, SFF_SELECTION, with a selection */
+  es.dwCookie = nCallbackCount;
+  SendMessage(hwndRichEdit,EM_EMPTYUNDOBUFFER, 0,0);
+  SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) randomtext);
+  SendMessage(hwndRichEdit, EM_SETSEL,4,5);
+  SendMessage(hwndRichEdit, EM_STREAMIN,
+	      (WPARAM)(SF_TEXT|SFF_SELECTION), (LPARAM)&es);
+  SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buffer);
+  result = strcmp (buffer,"Sometesttext");
+  ok (result  == 0,
+      "EM_STREAMIN: Test 2 set wrong text: Result: %s\n",buffer);
+
+  result = SendMessage(hwndRichEdit, EM_CANUNDO, 0, 0);
+  ok (result == TRUE,
+      "EM_STREAMIN with SFF_SELECTION and selection set "
+      "should create an undo\n");
+
+}
+
+static BOOL is_em_settextex_supported(HWND hwnd)
+{
+    SETTEXTEX stex = { ST_DEFAULT, CP_ACP };
+    return SendMessageA(hwnd, EM_SETTEXTEX, (WPARAM)&stex, 0) != 0;
+}
+
+static void test_unicode_conversions(void)
+{
+    static const WCHAR tW[] = {'t',0};
+    static const WCHAR teW[] = {'t','e',0};
+    static const WCHAR textW[] = {'t','e','s','t',0};
+    static const char textA[] = "test";
+    char bufA[64];
+    WCHAR bufW[64];
+    HWND hwnd;
+    int is_win9x, em_settextex_supported, ret;
+
+    is_win9x = GetVersion() & 0x80000000;
+
+#define set_textA(hwnd, wm_set_text, txt) \
+    do { \
+        SETTEXTEX stex = { ST_DEFAULT, CP_ACP }; \
+        WPARAM wparam = (wm_set_text == WM_SETTEXT) ? 0 : (WPARAM)&stex; \
+        assert(wm_set_text == WM_SETTEXT || wm_set_text == EM_SETTEXTEX); \
+        ret = SendMessageA(hwnd, wm_set_text, wparam, (LPARAM)txt); \
+        ok(ret, "SendMessageA(%02x) error %u\n", wm_set_text, GetLastError()); \
+    } while(0)
+#define expect_textA(hwnd, wm_get_text, txt) \
+    do { \
+        GETTEXTEX gtex = { 64, GT_DEFAULT, CP_ACP, NULL, NULL }; \
+        WPARAM wparam = (wm_get_text == WM_GETTEXT) ? 64 : (WPARAM)&gtex; \
+        assert(wm_get_text == WM_GETTEXT || wm_get_text == EM_GETTEXTEX); \
+        memset(bufA, 0xAA, sizeof(bufA)); \
+        ret = SendMessageA(hwnd, wm_get_text, wparam, (LPARAM)bufA); \
+        ok(ret, "SendMessageA(%02x) error %u\n", wm_get_text, GetLastError()); \
+        ret = lstrcmpA(bufA, txt); \
+        ok(!ret, "%02x: strings do not match: expected %s got %s\n", wm_get_text, txt, bufA); \
+    } while(0)
+
+#define set_textW(hwnd, wm_set_text, txt) \
+    do { \
+        SETTEXTEX stex = { ST_DEFAULT, 1200 }; \
+        WPARAM wparam = (wm_set_text == WM_SETTEXT) ? 0 : (WPARAM)&stex; \
+        assert(wm_set_text == WM_SETTEXT || wm_set_text == EM_SETTEXTEX); \
+        ret = SendMessageW(hwnd, wm_set_text, wparam, (LPARAM)txt); \
+        ok(ret, "SendMessageW(%02x) error %u\n", wm_set_text, GetLastError()); \
+    } while(0)
+#define expect_textW(hwnd, wm_get_text, txt) \
+    do { \
+        GETTEXTEX gtex = { 64, GT_DEFAULT, 1200, NULL, NULL }; \
+        WPARAM wparam = (wm_get_text == WM_GETTEXT) ? 64 : (WPARAM)&gtex; \
+        assert(wm_get_text == WM_GETTEXT || wm_get_text == EM_GETTEXTEX); \
+        memset(bufW, 0xAA, sizeof(bufW)); \
+        if (is_win9x) \
+        { \
+            assert(wm_get_text == EM_GETTEXTEX); \
+            ret = SendMessageA(hwnd, wm_get_text, wparam, (LPARAM)bufW); \
+            ok(ret, "SendMessageA(%02x) error %u\n", wm_get_text, GetLastError()); \
+        } \
+        else \
+        { \
+            ret = SendMessageW(hwnd, wm_get_text, wparam, (LPARAM)bufW); \
+            ok(ret, "SendMessageW(%02x) error %u\n", wm_get_text, GetLastError()); \
+        } \
+        ret = lstrcmpW(bufW, txt); \
+        ok(!ret, "%02x: strings do not match: expected[0] %x got[0] %x\n", wm_get_text, txt[0], bufW[0]); \
+    } while(0)
+#define expect_empty(hwnd, wm_get_text) \
+    do { \
+        GETTEXTEX gtex = { 64, GT_DEFAULT, CP_ACP, NULL, NULL }; \
+        WPARAM wparam = (wm_get_text == WM_GETTEXT) ? 64 : (WPARAM)&gtex; \
+        assert(wm_get_text == WM_GETTEXT || wm_get_text == EM_GETTEXTEX); \
+        memset(bufA, 0xAA, sizeof(bufA)); \
+        ret = SendMessageA(hwnd, wm_get_text, wparam, (LPARAM)bufA); \
+        ok(!ret, "empty richedit should return 0, got %d\n", ret); \
+        ok(!*bufA, "empty richedit should return empty string, got %s\n", bufA); \
+    } while(0)
+
+    hwnd = CreateWindowExA(0, "RichEdit20W", NULL, WS_POPUP,
+                           0, 0, 200, 60, 0, 0, 0, 0);
+    ok(hwnd != 0, "CreateWindowExA error %u\n", GetLastError());
+
+    ret = IsWindowUnicode(hwnd);
+    if (is_win9x)
+        ok(!ret, "RichEdit20W should NOT be unicode under Win9x\n");
+    else
+        ok(ret, "RichEdit20W should be unicode under NT\n");
+
+    /* EM_SETTEXTEX is supported starting from version 3.0 */
+    em_settextex_supported = is_em_settextex_supported(hwnd);
+    trace("EM_SETTEXTEX is %ssupported on this platform\n",
+          em_settextex_supported ? "" : "NOT ");
+
+    expect_empty(hwnd, WM_GETTEXT);
+    expect_empty(hwnd, EM_GETTEXTEX);
+
+    ret = SendMessageA(hwnd, WM_CHAR, (WPARAM)textW[0], 0);
+    ok(!ret, "SendMessageA(WM_CHAR) should return 0, got %d\n", ret);
+    expect_textA(hwnd, WM_GETTEXT, "t");
+    expect_textA(hwnd, EM_GETTEXTEX, "t");
+    expect_textW(hwnd, EM_GETTEXTEX, tW);
+
+    ret = SendMessageA(hwnd, WM_CHAR, (WPARAM)textA[1], 0);
+    ok(!ret, "SendMessageA(WM_CHAR) should return 0, got %d\n", ret);
+    expect_textA(hwnd, WM_GETTEXT, "te");
+    expect_textA(hwnd, EM_GETTEXTEX, "te");
+    expect_textW(hwnd, EM_GETTEXTEX, teW);
+
+    set_textA(hwnd, WM_SETTEXT, NULL);
+    expect_empty(hwnd, WM_GETTEXT);
+    expect_empty(hwnd, EM_GETTEXTEX);
+
+    if (is_win9x)
+        set_textA(hwnd, WM_SETTEXT, textW);
+    else
+        set_textA(hwnd, WM_SETTEXT, textA);
+    expect_textA(hwnd, WM_GETTEXT, textA);
+    expect_textA(hwnd, EM_GETTEXTEX, textA);
+    expect_textW(hwnd, EM_GETTEXTEX, textW);
+
+    if (em_settextex_supported)
+    {
+        set_textA(hwnd, EM_SETTEXTEX, textA);
+        expect_textA(hwnd, WM_GETTEXT, textA);
+        expect_textA(hwnd, EM_GETTEXTEX, textA);
+        expect_textW(hwnd, EM_GETTEXTEX, textW);
+    }
+
+    if (!is_win9x)
+    {
+        set_textW(hwnd, WM_SETTEXT, textW);
+        expect_textW(hwnd, WM_GETTEXT, textW);
+        expect_textA(hwnd, WM_GETTEXT, textA);
+        expect_textW(hwnd, EM_GETTEXTEX, textW);
+        expect_textA(hwnd, EM_GETTEXTEX, textA);
+
+        if (em_settextex_supported)
+        {
+            set_textW(hwnd, EM_SETTEXTEX, textW);
+            expect_textW(hwnd, WM_GETTEXT, textW);
+            expect_textA(hwnd, WM_GETTEXT, textA);
+            expect_textW(hwnd, EM_GETTEXTEX, textW);
+            expect_textA(hwnd, EM_GETTEXTEX, textA);
+        }
+    }
+    DestroyWindow(hwnd);
+
+    hwnd = CreateWindowExA(0, "RichEdit20A", NULL, WS_POPUP,
+                           0, 0, 200, 60, 0, 0, 0, 0);
+    ok(hwnd != 0, "CreateWindowExA error %u\n", GetLastError());
+
+    ret = IsWindowUnicode(hwnd);
+    ok(!ret, "RichEdit20A should NOT be unicode\n");
+
+    set_textA(hwnd, WM_SETTEXT, textA);
+    expect_textA(hwnd, WM_GETTEXT, textA);
+    expect_textA(hwnd, EM_GETTEXTEX, textA);
+    expect_textW(hwnd, EM_GETTEXTEX, textW);
+
+    if (em_settextex_supported)
+    {
+        set_textA(hwnd, EM_SETTEXTEX, textA);
+        expect_textA(hwnd, WM_GETTEXT, textA);
+        expect_textA(hwnd, EM_GETTEXTEX, textA);
+        expect_textW(hwnd, EM_GETTEXTEX, textW);
+    }
+
+    if (!is_win9x)
+    {
+        set_textW(hwnd, WM_SETTEXT, textW);
+        expect_textW(hwnd, WM_GETTEXT, textW);
+        expect_textA(hwnd, WM_GETTEXT, textA);
+        expect_textW(hwnd, EM_GETTEXTEX, textW);
+        expect_textA(hwnd, EM_GETTEXTEX, textA);
+
+        if (em_settextex_supported)
+        {
+            set_textW(hwnd, EM_SETTEXTEX, textW);
+            expect_textW(hwnd, WM_GETTEXT, textW);
+            expect_textA(hwnd, WM_GETTEXT, textA);
+            expect_textW(hwnd, EM_GETTEXTEX, textW);
+            expect_textA(hwnd, EM_GETTEXTEX, textA);
+        }
+    }
+    DestroyWindow(hwnd);
+}
+
 START_TEST( editor )
 {
   MSG msg;
@@ -1403,6 +1832,7 @@ START_TEST( editor )
    * RICHED20.DLL, so the linker doesn't actually link to it. */
   hmoduleRichEdit = LoadLibrary("RICHED20.DLL");
   ok(hmoduleRichEdit != NULL, "error: %d\n", (int) GetLastError());
+
   test_EM_FINDTEXT();
   test_EM_GETLINE();
   test_EM_SCROLLCARET();
@@ -1415,11 +1845,16 @@ START_TEST( editor )
   test_EM_SETUNDOLIMIT();
   test_ES_PASSWORD();
   test_EM_SETTEXTEX();
+  test_EM_LIMITTEXT();
   test_EM_EXLIMITTEXT();
   test_EM_GETLIMITTEXT();
   test_WM_SETFONT();
   test_EM_GETMODIFY();
   test_EM_EXSETSEL();
+  test_WM_PASTE();
+  test_EM_StreamIn_Undo();
+  test_EM_FORMATRANGE();
+  test_unicode_conversions();
 
   /* Set the environment variable WINETEST_RICHED20 to keep windows
    * responsive and open for 30 seconds. This is useful for debugging.

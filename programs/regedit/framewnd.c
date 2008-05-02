@@ -42,6 +42,10 @@ static TCHAR favoriteName[128];
 static TCHAR searchString[128];
 static int searchMask = SEARCH_KEYS | SEARCH_VALUES | SEARCH_CONTENT;
 
+static TCHAR FileNameBuffer[_MAX_PATH];
+static TCHAR FileTitleBuffer[_MAX_PATH];
+static TCHAR FilterBuffer[_MAX_PATH];
+
 /*******************************************************************************
  * Local module support methods
  */
@@ -251,7 +255,7 @@ static void ExportRegistryFile_StoreSelection(HWND hdlg, OPENFILENAME *pOpenFile
         pOpenFileName->lCustData = (LPARAM)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(TCHAR));
 }
 
-static UINT_PTR CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
+static UINT CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
 {
     static OPENFILENAME* pOpenFileName;
     OFNOTIFY *pOfNotify;
@@ -286,9 +290,6 @@ static UINT_PTR CALLBACK ExportRegistryFile_OFNHookProc(HWND hdlg, UINT uiMsg, W
     return 0L;
 }
 
-TCHAR FileNameBuffer[_MAX_PATH];
-TCHAR FileTitleBuffer[_MAX_PATH];
-TCHAR FilterBuffer[_MAX_PATH];
 
 static BOOL InitOpenFileName(HWND hWnd, OPENFILENAME *pofn)
 {
@@ -708,6 +709,9 @@ static BOOL _CmdWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	break;
     case ID_EDIT_NEW_STRINGVALUE:
 	valueType = REG_SZ;
+	goto create_value;
+    case ID_EDIT_NEW_MULTI_STRINGVALUE:
+	valueType = REG_MULTI_SZ;
 	goto create_value;
     case ID_EDIT_NEW_BINARYVALUE:
 	valueType = REG_BINARY;

@@ -107,7 +107,7 @@ static struct window *progman_window;
 static struct window *taskman_window;
 
 /* retrieve a pointer to a window from its handle */
-inline static struct window *get_window( user_handle_t handle )
+static inline struct window *get_window( user_handle_t handle )
 {
     struct window *ret = get_user_object( handle, USER_WINDOW );
     if (!ret) set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
@@ -285,7 +285,7 @@ static obj_handle_t get_property( struct window *win, atom_t atom )
 }
 
 /* destroy all properties of a window */
-inline static void destroy_properties( struct window *win )
+static inline void destroy_properties( struct window *win )
 {
     int i;
 
@@ -1037,6 +1037,20 @@ static void validate_whole_window( struct window *win )
 }
 
 
+/* validate a window's children so that we don't get any further paint messages for it */
+static void validate_children( struct window *win )
+{
+    struct window *child;
+
+    LIST_FOR_EACH_ENTRY( child, &win->children, struct window, entry )
+    {
+        if (!(child->style & WS_VISIBLE)) continue;
+        validate_children(child);
+        validate_whole_window(child);
+    }
+}
+
+
 /* validate the update region of a window on all parents; helper for redraw_window */
 static void validate_parents( struct window *child )
 {
@@ -1370,6 +1384,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     {
         /* clear the update region since the window is no longer visible */
         validate_whole_window( win );
+        validate_children( win );
         goto done;
     }
 
@@ -1425,6 +1440,33 @@ static void set_window_pos( struct window *win, struct window *previous,
 done:
     free_region( new_vis_rgn );
     clear_error();  /* we ignore out of memory errors once the new rects have been set */
+}
+
+
+/* set the window region, updating the update region if necessary */
+static void set_window_region( struct window *win, struct region *region, int redraw )
+{
+    struct region *old_vis_rgn = NULL, *new_vis_rgn;
+    struct window *top = get_top_clipping_window( win );
+
+    /* no need to redraw if window is not visible */
+    if (redraw && !is_visible( win )) redraw = 0;
+
+    if (redraw) old_vis_rgn = get_visible_region( win, top, DCX_WINDOW );
+
+    if (win->win_region) free_region( win->win_region );
+    win->win_region = region;
+
+    if (old_vis_rgn && (new_vis_rgn = get_visible_region( win, top, DCX_WINDOW )))
+    {
+        /* expose anything revealed by the change */
+        if (xor_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ))
+            expose_window( win, top, new_vis_rgn );
+        free_region( new_vis_rgn );
+    }
+
+    if (old_vis_rgn) free_region( old_vis_rgn );
+    clear_error();  /* we ignore out of memory errors since the region has been set */
 }
 
 
@@ -1885,8 +1927,7 @@ DECL_HANDLER(set_window_region)
         if (!(region = create_region_from_req_data( get_req_data(), get_req_data_size() )))
             return;
     }
-    if (win->win_region) free_region( win->win_region );
-    win->win_region = region;
+    set_window_region( win, region, req->redraw );
 }
 
 

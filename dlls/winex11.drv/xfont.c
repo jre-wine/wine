@@ -365,7 +365,7 @@ static int		fontLF = -1, fontMRU = -1;	/* last free, most recently used */
 /***********************************************************************
  *           is_stock_font
  */
-inline static BOOL is_stock_font( HFONT font )
+static inline BOOL is_stock_font( HFONT font )
 {
     int i;
     for (i = OEM_FIXED_FONT; i <= DEFAULT_GUI_FONT; i++)
@@ -400,14 +400,14 @@ static void FONT_LogFontWTo16( const LOGFONTW* font32, LPLOGFONT16 font16 )
 /***********************************************************************
  *           Checksums
  */
-static UINT16   __lfCheckSum( LPLOGFONT16 plf )
+static UINT16   __lfCheckSum( const LOGFONT16 *plf )
 {
     CHAR        font[LF_FACESIZE];
     UINT16      checksum = 0;
-    UINT16 *ptr;
+    const UINT16 *ptr;
     int i;
 
-    ptr = (UINT16 *)plf;
+    ptr = (const UINT16 *)plf;
     for (i = 0; i < 9; i++) checksum ^= *ptr++;
     for (i = 0; i < LF_FACESIZE; i++)
     {
@@ -857,6 +857,7 @@ static BOOL LFD_ComposeLFD( const fontObject* fo,
    const char   *any = "*";
    char         h_string[64], resx_string[64], resy_string[64];
    LFD          aLFD;
+   const fontEncodingTemplate* boba = &fETTable[0];
 
 /* Get the worst case over with first */
 
@@ -1001,33 +1002,22 @@ static BOOL LFD_ComposeLFD( const fontObject* fo,
 
 /* encoding */
 
-   if (uRelax <= 5)
-   {
-       const fontEncodingTemplate* boba = &fETTable[0];
+   for(i = fo->fi->fi_encoding >> 8; i; i--) boba = boba->next;
+   aLFD.charset_registry = boba->prefix ? boba->prefix : any;
 
-       for(i = fo->fi->fi_encoding >> 8; i; i--) boba = boba->next;
-       aLFD.charset_registry = boba->prefix ? boba->prefix : any;
+   i = fo->fi->fi_encoding & 255;
+   switch( i ) {
+   default:
+       aLFD.charset_encoding = boba->sufch[i].psuffix;
+       break;
 
-       i = fo->fi->fi_encoding & 255;
-       switch( i )
-       {
-       default:
-	   aLFD.charset_encoding = boba->sufch[i].psuffix;
-	   break;
-
-       case 254:
-	   aLFD.charset_encoding = any;
-	   break;
-
-       case 255: /* no suffix - it ends eg "-ascii" */
-	   aLFD.charset_encoding = NULL;
-	   break;
-       }
-   }
-   else
-   {
-       aLFD.charset_registry = any;
+   case 254:
        aLFD.charset_encoding = any;
+       break;
+
+   case 255: /* no suffix - it ends eg "-ascii" */
+       aLFD.charset_encoding = NULL;
+       break;
    }
 
    LFD_UnParse(lpLFD, MAX_LFD_LENGTH, &aLFD);
@@ -1043,7 +1033,7 @@ static BOOL LFD_ComposeLFD( const fontObject* fo,
  * font info		- http://www.microsoft.com/kb/articles/q65/1/23.htm
  * Windows font metrics	- http://www.microsoft.com/kb/articles/q32/6/67.htm
  */
-static void XFONT_GetLeading( const LPIFONTINFO16 pFI, const XFontStruct* x_fs,
+static void XFONT_GetLeading( const IFONTINFO16 *pFI, const XFontStruct* x_fs,
 			      INT16* pIL, INT16* pEL, const XFONTTRANS *XFT )
 {
     unsigned long height;
@@ -2045,13 +2035,10 @@ static int XFONT_BuildMetrics(char** x_pattern, int res, unsigned x_checksum, in
 	if( !fr ) /* add new family */
 	{
 	    n_ff++;
-	    fr = HeapAlloc(GetProcessHeap(), 0, sizeof(fontResource));
+	    fr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(fontResource));
 	    if (fr)
 	    {
-		memset(fr, 0, sizeof(fontResource));
-
-		fr->resource = HeapAlloc(GetProcessHeap(), 0, sizeof(LFD));
-		memset(fr->resource, 0, sizeof(LFD));
+		fr->resource = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(LFD));
 
 		TRACE("family: -%s-%s-\n", lfd.foundry, lfd.family );
 		fr->resource->foundry = HeapAlloc(GetProcessHeap(), 0, strlen(lfd.foundry)+1);
@@ -2214,9 +2201,10 @@ static BOOL XFONT_ReadCachedMetrics( int fd, int res, unsigned x_checksum, int x
 			{
 			   if( offset > length ||
 			       pfi->cptable >= (UINT16)X11DRV_CPTABLE_COUNT ||
-			      (int)(pfi->next) != j++ )
+			       PtrToInt(pfi->next) != j++ )
 			   {
-			       TRACE("error: offset=%ld length=%ld cptable=%d pfi->next=%d j=%d\n",(long)offset,(long)length,pfi->cptable,(int)pfi->next,j-1);
+			       TRACE("error: offset=%ld length=%ld cptable=%d pfi->next=%p j=%d\n",
+                                      (long)offset, (long)length, pfi->cptable, pfi->next, j-1);
 			       goto fail;
 			   }
 
@@ -2345,7 +2333,7 @@ static BOOL XFONT_WriteCachedMetrics( int fd, unsigned x_checksum, int x_count, 
 		    fi = *pfi;
 
 		    fi.df.dfFace = NULL;
-		    fi.next = (fontInfo*)k;	/* loader checks this */
+		    fi.next = IntToPtr(k);	/* loader checks this */
 
 		    j = write( fd, &fi, sizeof(fi) );
 		    k++;
@@ -2737,7 +2725,7 @@ static void XFONT_GrowFreeList(int start, int end)
    }
 }
 
-static fontObject* XFONT_LookupCachedFont( const LPLOGFONT16 plf, UINT16* checksum )
+static fontObject* XFONT_LookupCachedFont( const LOGFONT16 *plf, UINT16* checksum )
 {
     UINT16	cs = __lfCheckSum( plf );
     int		i = fontMRU, prev = -1;
@@ -3027,7 +3015,7 @@ static BOOL XFONT_SetX11Trans( fontObject *pfo )
 /***********************************************************************
  *           X Device Font Objects
  */
-static X_PHYSFONT XFONT_RealizeFont( const LPLOGFONT16 plf,
+static X_PHYSFONT XFONT_RealizeFont( LPLOGFONT16 plf,
 				     LPCSTR* faceMatched, BOOL bSubFont,
 				     WORD internal_charset,
 				     WORD* pcharsetMatched )

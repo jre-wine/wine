@@ -28,7 +28,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winerror.h"
 #include "winreg.h"
 #include "wingdi.h"
 #include "winternl.h"
@@ -195,7 +194,7 @@ static BOOL is_extension_supported(const char* extension)
     if(strncmp(extension, "GL_VERSION_", 11) == 0)
     {
         const GLubyte *gl_version = glGetString(GL_VERSION);
-        const const char *version = extension + 11; /* Move past 'GL_VERSION_' */
+        const char *version = extension + 11; /* Move past 'GL_VERSION_' */
 
         if(!gl_version) {
             ERR("Error no OpenGL version found,\n");
@@ -363,7 +362,7 @@ static void tess_callback_end(void)
 /***********************************************************************
  *		wglUseFontOutlines_common
  */
-BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
+static BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
                                       DWORD first,
                                       DWORD count,
                                       DWORD listBase,
@@ -524,7 +523,7 @@ error_in_list:
 
 #else /* HAVE_GL_GLU_H */
 
-BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
+static BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
                                       DWORD first,
                                       DWORD count,
                                       DWORD listBase,

@@ -297,62 +297,6 @@ static HRESULT WINAPI IDirectInputWImpl_QueryInterface(LPDIRECTINPUT7W iface, RE
 	return E_FAIL;
 }
 
-static HRESULT WINAPI IDirectInputAImpl_CreateDevice(
-	LPDIRECTINPUT7A iface,REFGUID rguid,LPDIRECTINPUTDEVICEA* pdev,
-	LPUNKNOWN punk
-) {
-	IDirectInputImpl *This = (IDirectInputImpl *)iface;
-	HRESULT ret_value = DIERR_DEVICENOTREG;
-	int i;
-
-	TRACE("(this=%p,%s,%p,%p)\n",This,debugstr_guid(rguid),pdev,punk);
-
-	if (pdev == NULL) {
-		WARN("invalid pointer: pdev == NULL\n");
-		return E_POINTER;
-	}
-
-	if (rguid == NULL) {
-		WARN("invalid pointer: rguid == NULL\n");
-		return E_POINTER;
-	}
-
-	/* Loop on all the devices to see if anyone matches the given GUID */
-	for (i = 0; i < NB_DINPUT_DEVICES; i++) {
-	  HRESULT ret;
-	  if (!dinput_devices[i]->create_deviceA) continue;
-	  if ((ret = dinput_devices[i]->create_deviceA(This, rguid, NULL, pdev)) == DI_OK)
-	    return DI_OK;
-
-	  if (ret == DIERR_NOINTERFACE)
-	    ret_value = DIERR_NOINTERFACE;
-	}
-
-	return ret_value;
-}
-
-static HRESULT WINAPI IDirectInputWImpl_CreateDevice(LPDIRECTINPUT7W iface, 
-						     REFGUID rguid, LPDIRECTINPUTDEVICEW* pdev, LPUNKNOWN punk) {
-        IDirectInputImpl *This = (IDirectInputImpl *)iface;
-	HRESULT ret_value = DIERR_DEVICENOTREG;
-	int i;
-
-	TRACE("(this=%p,%s,%p,%p)\n",This,debugstr_guid(rguid),pdev,punk);
-
-	/* Loop on all the devices to see if anyone matches the given GUID */
-	for (i = 0; i < NB_DINPUT_DEVICES; i++) {
-	  HRESULT ret;
-	  if (!dinput_devices[i]->create_deviceW) continue;
-	  if ((ret = dinput_devices[i]->create_deviceW(This, rguid, NULL, pdev)) == DI_OK)
-	    return DI_OK;
-
-	  if (ret == DIERR_NOINTERFACE)
-	    ret_value = DIERR_NOINTERFACE;
-	}
-
-	return ret_value;
-}
-
 static HRESULT WINAPI IDirectInputAImpl_Initialize(LPDIRECTINPUT7A iface, HINSTANCE hinst, DWORD x) {
 	TRACE("(this=%p,%p,%x)\n",iface, hinst, x);
 	
@@ -406,6 +350,8 @@ static HRESULT WINAPI IDirectInput7AImpl_CreateDeviceEx(LPDIRECTINPUT7A iface, R
 
   TRACE("(%p)->(%s, %s, %p, %p)\n", This, debugstr_guid(rguid), debugstr_guid(riid), pvOut, lpUnknownOuter);
 
+  if (!rguid || !pvOut) return E_POINTER;
+
   /* Loop on all the devices to see if anyone matches the given GUID */
   for (i = 0; i < NB_DINPUT_DEVICES; i++) {
     HRESULT ret;
@@ -429,6 +375,8 @@ static HRESULT WINAPI IDirectInput7WImpl_CreateDeviceEx(LPDIRECTINPUT7W iface, R
 
   TRACE("(%p)->(%s, %s, %p, %p)\n", This, debugstr_guid(rguid), debugstr_guid(riid), pvOut, lpUnknownOuter);
 
+  if (!rguid || !pvOut) return E_POINTER;
+
   /* Loop on all the devices to see if anyone matches the given GUID */
   for (i = 0; i < NB_DINPUT_DEVICES; i++) {
     HRESULT ret;
@@ -441,6 +389,18 @@ static HRESULT WINAPI IDirectInput7WImpl_CreateDeviceEx(LPDIRECTINPUT7W iface, R
   }
 
   return ret_value;
+}
+
+static HRESULT WINAPI IDirectInputAImpl_CreateDevice(LPDIRECTINPUT7A iface, REFGUID rguid,
+                                                     LPDIRECTINPUTDEVICEA* pdev, LPUNKNOWN punk)
+{
+    return IDirectInput7AImpl_CreateDeviceEx(iface, rguid, NULL, (LPVOID*)pdev, punk);
+}
+
+static HRESULT WINAPI IDirectInputWImpl_CreateDevice(LPDIRECTINPUT7W iface, REFGUID rguid,
+                                                     LPDIRECTINPUTDEVICEW* pdev, LPUNKNOWN punk)
+{
+    return IDirectInput7WImpl_CreateDeviceEx(iface, rguid, NULL, (LPVOID*)pdev, punk);
 }
 
 static HRESULT WINAPI IDirectInput8AImpl_QueryInterface(LPDIRECTINPUT8A iface, REFIID riid, LPVOID *ppobj) {
@@ -753,6 +713,7 @@ static LRESULT CALLBACK dinput_hook_WndProc(HWND hWnd, UINT message, WPARAM wPar
 
 static HWND hook_thread_hwnd;
 static LONG hook_thread_refcount;
+static HANDLE hook_thread;
 
 static const WCHAR classW[]={'H','o','o','k','_','L','L','_','C','L',0};
 
@@ -776,6 +737,7 @@ static DWORD WINAPI hook_thread_proc(void *param)
     }
     else ERR("Error creating message window\n");
 
+    UnregisterClassW(classW, DINPUT_instance);
     return 0;
 }
 
@@ -791,39 +753,36 @@ static CRITICAL_SECTION dinput_hook_crit = { &dinput_critsect_debug, -1, 0, 0, 0
 static BOOL create_hook_thread(void)
 {
     LONG ref;
-    static ATOM class_atom;
 
     EnterCriticalSection(&dinput_hook_crit);
-
-    if (!class_atom)
-    {
-        WNDCLASSEXW wcex;
-        memset(&wcex, 0, sizeof(wcex));
-        wcex.cbSize = sizeof(wcex);
-        wcex.lpfnWndProc = dinput_hook_WndProc;
-        wcex.lpszClassName = classW;
-        wcex.hInstance = GetModuleHandleW(0);
-        if (!(class_atom = RegisterClassExW(&wcex))) ERR("Error registering window class\n");
-    }
 
     ref = ++hook_thread_refcount;
     TRACE("Refcount %d\n", ref);
     if (ref == 1)
     {
         DWORD tid;
-        HANDLE thread, event;
+        HANDLE event;
+
+        /* Create window class */
+        WNDCLASSEXW wcex;
+        memset(&wcex, 0, sizeof(wcex));
+        wcex.cbSize = sizeof(wcex);
+        wcex.lpfnWndProc = dinput_hook_WndProc;
+        wcex.lpszClassName = classW;
+        wcex.hInstance = DINPUT_instance;
+        if (!RegisterClassExW(&wcex))
+            ERR("Error registering window class\n");
 
         event = CreateEventW(NULL, FALSE, FALSE, NULL);
-        thread = CreateThread(NULL, 0, hook_thread_proc, &event, 0, &tid);
-        if (event && thread)
+        hook_thread = CreateThread(NULL, 0, hook_thread_proc, &event, 0, &tid);
+        if (event && hook_thread)
         {
             HANDLE handles[2];
             handles[0] = event;
-            handles[1] = thread;
+            handles[1] = hook_thread;
             WaitForMultipleObjects(2, handles, FALSE, INFINITE);
         }
         CloseHandle(event);
-        CloseHandle(thread);
     }
     LeaveCriticalSection(&dinput_hook_crit);
 
@@ -842,6 +801,9 @@ static void release_hook_thread(void)
         HWND hwnd = hook_thread_hwnd;
         hook_thread_hwnd = 0;
         SendMessageW(hwnd, WM_USER+0x10, 0, 0);
+        /* wait for hook thread to exit */
+        WaitForSingleObject(hook_thread, INFINITE);
+        CloseHandle(hook_thread);
     }
     LeaveCriticalSection(&dinput_hook_crit);
 }

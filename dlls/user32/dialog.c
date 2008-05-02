@@ -220,7 +220,7 @@ static const WORD *DIALOG_GetControl32( const WORD *p, DLG_CONTROL_INFO *info,
         p += strlenW( info->windowName ) + 1;
     }
 
-    TRACE("    %s %s %d, %d, %d, %d, %d, %08x, %08x, %08x\n",
+    TRACE("    %s %s %ld, %d, %d, %d, %d, %08x, %08x, %08x\n",
           debugstr_w( info->className ), debugstr_w( info->windowName ),
           info->id, info->x, info->y, info->cx, info->cy,
           info->style, info->exStyle, info->helpId );
@@ -651,7 +651,7 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
     if (unicode) SetWindowLongPtrW( hwnd, DWLP_DLGPROC, (ULONG_PTR)dlgProc );
     else SetWindowLongPtrA( hwnd, DWLP_DLGPROC, (ULONG_PTR)dlgProc );
 
-    if (dlgInfo->hUserFont)
+    if (dlgProc && dlgInfo->hUserFont)
         SendMessageW( hwnd, WM_SETFONT, (WPARAM)dlgInfo->hUserFont, 0 );
 
     /* Create controls */
@@ -660,13 +660,16 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
     {
         /* Send initialisation messages and set focus */
 
-        if (SendMessageW( hwnd, WM_INITDIALOG, (WPARAM)dlgInfo->hwndFocus, param ) &&
-            ((~template.style & DS_CONTROL) || (template.style & WS_VISIBLE)))
+        if (dlgProc)
         {
-            /* By returning TRUE, app has requested a default focus assignment */
-            dlgInfo->hwndFocus = GetNextDlgTabItem( hwnd, 0, FALSE);
-            if( dlgInfo->hwndFocus )
-                SetFocus( dlgInfo->hwndFocus );
+            if (SendMessageW( hwnd, WM_INITDIALOG, (WPARAM)dlgInfo->hwndFocus, param ) &&
+                ((~template.style & DS_CONTROL) || (template.style & WS_VISIBLE)))
+            {
+                /* By returning TRUE, app has requested a default focus assignment */
+                dlgInfo->hwndFocus = GetNextDlgTabItem( hwnd, 0, FALSE);
+                if( dlgInfo->hwndFocus )
+                    SetFocus( dlgInfo->hwndFocus );
+            }
         }
 
         if (template.style & WS_VISIBLE && !(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE))
@@ -800,11 +803,11 @@ INT_PTR WINAPI DialogBoxParamA( HINSTANCE hInst, LPCSTR name,
     HRSRC hrsrc;
     LPCDLGTEMPLATEA ptr;
 
-    if (!(hrsrc = FindResourceA( hInst, name, (LPSTR)RT_DIALOG ))) return 0;
-    if (!(ptr = (LPCDLGTEMPLATEA)LoadResource(hInst, hrsrc))) return 0;
+    if (!(hrsrc = FindResourceA( hInst, name, (LPSTR)RT_DIALOG ))) return -1;
+    if (!(ptr = (LPCDLGTEMPLATEA)LoadResource(hInst, hrsrc))) return -1;
     hwnd = DIALOG_CreateIndirect( hInst, ptr, owner, dlgProc, param, FALSE, TRUE );
     if (hwnd) return DIALOG_DoDialogBox( hwnd, owner );
-    return -1;
+    return 0;
 }
 
 
@@ -818,11 +821,11 @@ INT_PTR WINAPI DialogBoxParamW( HINSTANCE hInst, LPCWSTR name,
     HRSRC hrsrc;
     LPCDLGTEMPLATEW ptr;
 
-    if (!(hrsrc = FindResourceW( hInst, name, (LPWSTR)RT_DIALOG ))) return 0;
-    if (!(ptr = (LPCDLGTEMPLATEW)LoadResource(hInst, hrsrc))) return 0;
+    if (!(hrsrc = FindResourceW( hInst, name, (LPWSTR)RT_DIALOG ))) return -1;
+    if (!(ptr = (LPCDLGTEMPLATEW)LoadResource(hInst, hrsrc))) return -1;
     hwnd = DIALOG_CreateIndirect( hInst, ptr, owner, dlgProc, param, TRUE, TRUE );
     if (hwnd) return DIALOG_DoDialogBox( hwnd, owner );
-    return -1;
+    return 0;
 }
 
 
@@ -866,7 +869,7 @@ BOOL WINAPI EndDialog( HWND hwnd, INT_PTR retval )
     DIALOGINFO * dlgInfo;
     HWND owner;
 
-    TRACE("%p %d\n", hwnd, retval );
+    TRACE("%p %ld\n", hwnd, retval );
 
     if (!(dlgInfo = DIALOG_get_info( hwnd, FALSE )))
     {
@@ -1668,7 +1671,7 @@ static BOOL DIALOG_DlgDirSelect( HWND hwnd, LPWSTR str, INT len,
     BOOL ret;
     HWND listbox = GetDlgItem( hwnd, id );
 
-    TRACE("%p '%s' %d\n", hwnd, unicode ? debugstr_w(str) : debugstr_a((LPSTR)str), id );
+    TRACE("%p %s %d\n", hwnd, unicode ? debugstr_w(str) : debugstr_a((LPSTR)str), id );
     if (!listbox) return FALSE;
 
     item = SendMessageW(listbox, combo ? CB_GETCURSEL : LB_GETCURSEL, 0, 0 );
@@ -1704,7 +1707,7 @@ static BOOL DIALOG_DlgDirSelect( HWND hwnd, LPWSTR str, INT len,
     }
     else lstrcpynW( str, ptr, len );
     HeapFree( GetProcessHeap(), 0, buffer );
-    TRACE("Returning %d '%s'\n", ret, unicode ? debugstr_w(str) : debugstr_a((LPSTR)str) );
+    TRACE("Returning %d %s\n", ret, unicode ? debugstr_w(str) : debugstr_a((LPSTR)str) );
     return ret;
 }
 

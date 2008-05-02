@@ -23,8 +23,9 @@ BEGIN
     POPUP "&Datei"
     BEGIN
         MENUITEM "&Neu\tCtrl+N",          ID_FILE_NEW
-        MENUITEM "&Öffnen\tCtrl+O",       ID_FILE_OPEN
+        MENUITEM "&Öffnen...\tCtrl+O",    ID_FILE_OPEN
         MENUITEM "&Speichern\tCtrl+S",    ID_FILE_SAVE
+        MENUITEM "Speichern &unter...",        ID_FILE_SAVEAS
         MENUITEM SEPARATOR
         MENUITEM "&Beenden",      ID_FILE_EXIT
     END
@@ -32,10 +33,12 @@ BEGIN
     BEGIN
         MENUITEM "&Rückgängig\tCtrl+Z",         ID_EDIT_UNDO
         MENUITEM "&Wiederholen\tCtrl+Y",        ID_EDIT_REDO
-        MENUITEM "&Alles markieren\tCtrl+A",    ID_EDIT_SELECTALL
         MENUITEM SEPARATOR
         MENUITEM "Aus&schneiden\tCtrl+X",       ID_EDIT_CUT
         MENUITEM "&Kopieren\tCtrl+C",           ID_EDIT_COPY
+        MENUITEM "&Einfügen\tCtrl+V",           ID_EDIT_PASTE
+        MENUITEM "&Löschen\tDEL",               ID_EDIT_CLEAR
+        MENUITEM "&Alles markieren\tCtrl+A",    ID_EDIT_SELECTALL
         MENUITEM SEPARATOR
         MENUITEM "Schreibgeschü&tzt",           ID_EDIT_READONLY
         MENUITEM "&Geändert",                   ID_EDIT_MODIFIED
@@ -48,6 +51,12 @@ BEGIN
             MENUITEM "&Absatzformat",               ID_EDIT_PARAFORMAT
             MENUITEM "&Get text",                   ID_EDIT_GETTEXT
         END
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Toolbar",        ID_TOGGLE_TOOLBAR
+        MENUITEM "&Formatbar",      ID_TOGGLE_FORMATBAR
+        MENUITEM "&Statusbar",      ID_TOGGLE_STATUSBAR
     END
     POPUP "F&ormat"
     BEGIN
@@ -63,4 +72,11 @@ BEGIN
             MENUITEM "&Rechts\tCtrl+R",       ID_ALIGN_RIGHT
         END
     END
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    STRING_RICHTEXT_FILES_RTF,  "Rich-Text-Format (*.rtf)"
+    STRING_TEXT_FILES_TXT,      "Textdateien (*.txt)"
+    STRING_ALL_FILES,           "Alle Dokumente (*.*)"
 END

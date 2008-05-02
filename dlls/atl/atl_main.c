@@ -208,24 +208,36 @@ IUnknown* WINAPI AtlComPtrAssign(IUnknown** pp, IUnknown *p)
     return p;
 }
 
+IUnknown* WINAPI AtlComQIPtrAssign(IUnknown** pp, IUnknown *p, REFIID riid)
+{
+    IUnknown *new_p = NULL;
 
-HRESULT WINAPI AtlInternalQueryInterface(LPVOID this, const _ATL_INTMAP_ENTRY* pEntries,  REFIID iid, LPVOID* ppvObject)
+    TRACE("(%p %p %s)\n", pp, p, debugstr_guid(riid));
+
+    if (p) IUnknown_QueryInterface(p, riid, (void **)&new_p);
+    if (*pp) IUnknown_Release(*pp);
+    *pp = new_p;
+    return new_p;
+}
+
+
+HRESULT WINAPI AtlInternalQueryInterface(void* this, const _ATL_INTMAP_ENTRY* pEntries,  REFIID iid, void** ppvObject)
 {
     int i = 0;
     HRESULT rc = E_NOINTERFACE;
-    TRACE("(%p, %p, %p, %p)\n",this, pEntries, iid, ppvObject);
+    TRACE("(%p, %p, %s, %p)\n",this, pEntries, debugstr_guid(iid), ppvObject);
 
     if (IsEqualGUID(iid,&IID_IUnknown))
     {
         TRACE("Returning IUnknown\n");
-        *ppvObject = this;
-        IUnknown_AddRef((IUnknown*)this);
+        *ppvObject = ((LPSTR)this+pEntries[0].dw);
+        IUnknown_AddRef((IUnknown*)*ppvObject);
         return S_OK;
     }
 
     while (pEntries[i].pFunc != 0)
     {
-        TRACE("Trying entry %i (%p %i %p)\n",i,pEntries[i].piid,
+        TRACE("Trying entry %i (%s %i %p)\n",i,debugstr_guid(pEntries[i].piid),
               pEntries[i].dw, pEntries[i].pFunc);
 
         if (pEntries[i].piid && IsEqualGUID(iid,pEntries[i].piid))
@@ -235,7 +247,7 @@ HRESULT WINAPI AtlInternalQueryInterface(LPVOID this, const _ATL_INTMAP_ENTRY* p
             {
                 TRACE("Offset\n");
                 *ppvObject = ((LPSTR)this+pEntries[i].dw);
-                IUnknown_AddRef((IUnknown*)this);
+                IUnknown_AddRef((IUnknown*)*ppvObject);
                 rc = S_OK;
             }
             else
@@ -340,6 +352,7 @@ HRESULT WINAPI AtlModuleGetClassObject(_ATL_MODULEW *pm, REFCLSID rclsid,
                                        REFIID riid, LPVOID *ppv)
 {
     int i;
+    HRESULT hres = CLASS_E_CLASSNOTAVAILABLE;
 
     TRACE("%p %s %s %p\n", pm, debugstr_guid(rclsid), debugstr_guid(riid), ppv);
 
@@ -354,13 +367,21 @@ HRESULT WINAPI AtlModuleGetClassObject(_ATL_MODULEW *pm, REFCLSID rclsid,
 
             TRACE("found object %i\n", i);
             if (obj->pfnGetClassObject)
-                return obj->pfnGetClassObject(obj->pfnCreateInstance, riid, ppv);
+            {
+                if (!obj->pCF)
+                    hres = obj->pfnGetClassObject(obj->pfnCreateInstance,
+                                                  &IID_IUnknown,
+                                                  (void **)&obj->pCF);
+                if (obj->pCF)
+                    hres = IUnknown_QueryInterface(obj->pCF, riid, ppv);
+                break;
+            }
         }
     }
 
     WARN("no class object found for %s\n", debugstr_guid(rclsid));
 
-    return E_FAIL;
+    return hres;
 }
 
 /***********************************************************************
@@ -421,8 +442,8 @@ HRESULT WINAPI AtlModuleUnregisterServer(_ATL_MODULEW *pm, const CLSID *clsid)
  * NOTES
  *  Can be called multiple times without error, unlike RegisterClassEx().
  *
- *  If the class name is NULL then it a class with a name of "ATLxxxxxxxx" is
- *  registered, where the x's represent an unique value.
+ *  If the class name is NULL, then a class with a name of "ATLxxxxxxxx" is
+ *  registered, where the 'x's represent a unique value.
  *
  */
 ATOM WINAPI AtlModuleRegisterWndClassInfoW(_ATL_MODULEW *pm, _ATL_WNDCLASSINFOW *wci, WNDPROC *pProc)
@@ -478,7 +499,7 @@ void WINAPI AtlPixelToHiMetric(const SIZEL* lpPix, SIZEL* lpHiMetric)
 /***********************************************************************
  *           AtlModuleAddCreateWndData          [ATL.@]
  */
-void WINAPI AtlModuleAddCreateWndData(_ATL_MODULEW *pM, _AtlCreateWndData *pData, LPVOID pvObject)
+void WINAPI AtlModuleAddCreateWndData(_ATL_MODULEW *pM, _AtlCreateWndData *pData, void* pvObject)
 {
     TRACE("(%p, %p, %p)\n", pM, pData, pvObject);
 
@@ -496,7 +517,7 @@ void WINAPI AtlModuleAddCreateWndData(_ATL_MODULEW *pM, _AtlCreateWndData *pData
  *        records from the current thread from a list
  *
  */
-LPVOID WINAPI AtlModuleExtractCreateWndData(_ATL_MODULEW *pM)
+void* WINAPI AtlModuleExtractCreateWndData(_ATL_MODULEW *pM)
 {
     _AtlCreateWndData **ppData;
 
@@ -512,4 +533,36 @@ LPVOID WINAPI AtlModuleExtractCreateWndData(_ATL_MODULEW *pM)
         }
     }
     return NULL;
+}
+
+/* FIXME: should be in a header file */
+typedef struct ATL_PROPMAP_ENTRY
+{
+    LPCOLESTR szDesc;
+    DISPID dispid;
+    const CLSID* pclsidPropPage;
+    const IID* piidDispatch;
+    DWORD dwOffsetData;
+    DWORD dwSizeData;
+    VARTYPE vt;
+} ATL_PROPMAP_ENTRY;
+
+/***********************************************************************
+ *           AtlIPersistStreamInit_Load      [ATL.@]
+ */
+HRESULT WINAPI AtlIPersistStreamInit_Load( LPSTREAM pStm, ATL_PROPMAP_ENTRY *pMap,
+                                           void *pThis, IUnknown *pUnk)
+{
+    FIXME("(%p, %p, %p, %p)\n", pStm, pMap, pThis, pUnk);
+
+    return S_OK;
+}
+
+HRESULT WINAPI AtlIPersistStreamInit_Save(LPSTREAM pStm, BOOL fClearDirty,
+                                          ATL_PROPMAP_ENTRY *pMap, void *pThis,
+                                          IUnknown *pUnk)
+{
+    FIXME("(%p, %d, %p, %p, %p)\n", pStm, fClearDirty, pMap, pThis, pUnk);
+
+    return S_OK;
 }

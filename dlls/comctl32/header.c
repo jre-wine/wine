@@ -108,20 +108,12 @@ typedef struct
 static BOOL HEADER_PrepareCallbackItems(HWND hwnd, INT iItem, INT reqMask);
 static void HEADER_FreeCallbackItems(HEADER_ITEM *lpItem);
 static LRESULT HEADER_SendNotify(HWND hwnd, UINT code, NMHDR *hdr);
-static LRESULT HEADER_SendCtrlCustomDraw(HWND hwnd, DWORD dwDrawStage, HDC hdc, RECT *rect);
+static LRESULT HEADER_SendCtrlCustomDraw(HWND hwnd, DWORD dwDrawStage, HDC hdc, const RECT *rect);
 
 static const WCHAR themeClass[] = {'H','e','a','d','e','r',0};
 static WCHAR emptyString[] = {0};
 
-static void HEADER_DisposeItem(HEADER_ITEM *lpItem)
-{
-    if (lpItem->pszText)
-    {
-        Free(lpItem->pszText);
-    }
-}
-
-static void HEADER_StoreHDItemInHeader(HEADER_ITEM *lpItem, UINT mask, HDITEMW *phdi, BOOL fUnicode)
+static void HEADER_StoreHDItemInHeader(HEADER_ITEM *lpItem, UINT mask, const HDITEMW *phdi, BOOL fUnicode)
 {
     if (mask & HDI_UNSUPPORTED_FIELDS)
         FIXME("unsupported header fields %x\n", (mask & HDI_UNSUPPORTED_FIELDS));
@@ -149,11 +141,8 @@ static void HEADER_StoreHDItemInHeader(HEADER_ITEM *lpItem, UINT mask, HDITEMW *
 
     if (mask & HDI_TEXT)
     {
-        if (lpItem->pszText)
-        {
-            Free(lpItem->pszText);
-            lpItem->pszText = NULL;
-        }
+        Free(lpItem->pszText);
+        lpItem->pszText = NULL;
 
         if (phdi->pszText != LPSTR_TEXTCALLBACKW) /* covers != TEXTCALLBACKA too */
         {
@@ -172,7 +161,7 @@ static void HEADER_StoreHDItemInHeader(HEADER_ITEM *lpItem, UINT mask, HDITEMW *
     }
 }
 
-inline static LRESULT
+static inline LRESULT
 HEADER_IndexToOrder (HWND hwnd, INT iItem)
 {
     HEADER_INFO *infoPtr = HEADER_GetInfoPtr (hwnd);
@@ -193,7 +182,7 @@ HEADER_OrderToIndex(HWND hwnd, WPARAM wParam)
 }
 
 static void
-HEADER_ChangeItemOrder(HEADER_INFO *infoPtr, INT iItem, INT iNewOrder)
+HEADER_ChangeItemOrder(const HEADER_INFO *infoPtr, INT iItem, INT iNewOrder)
 {
     HEADER_ITEM *lpItem = &infoPtr->items[iItem];
     INT i, nMin, nMax;
@@ -268,7 +257,7 @@ HEADER_Size (HWND hwnd, WPARAM wParam)
     return 0;
 }
 
-static void HEADER_GetHotDividerRect(HWND hwnd, HEADER_INFO *infoPtr, RECT *r)
+static void HEADER_GetHotDividerRect(HWND hwnd, const HEADER_INFO *infoPtr, RECT *r)
 {
     INT iDivider = infoPtr->iHotDivider;
     if (infoPtr->uNumItem > 0)
@@ -599,7 +588,7 @@ HEADER_RefreshItem (HWND hwnd, HDC hdc, INT iItem)
 
 
 static void
-HEADER_InternalHitTest (HWND hwnd, LPPOINT lpPt, UINT *pFlags, INT *pItem)
+HEADER_InternalHitTest (HWND hwnd, const POINT *lpPt, UINT *pFlags, INT *pItem)
 {
     HEADER_INFO *infoPtr = HEADER_GetInfoPtr (hwnd);
     RECT rect, rcTest;
@@ -751,8 +740,8 @@ HEADER_DrawTrackLine (HWND hwnd, HDC hdc, INT x)
  * 
  * NOTE: We depend on HDITEMA and HDITEMW having the same structure
  */
-static void HEADER_CopyHDItemForNotify(HEADER_INFO *infoPtr, HDITEMW *dest,
-    HDITEMW *src, BOOL fSourceUnicode, LPVOID *ppvScratch)
+static void HEADER_CopyHDItemForNotify(const HEADER_INFO *infoPtr, HDITEMW *dest,
+    const HDITEMW *src, BOOL fSourceUnicode, LPVOID *ppvScratch)
 {
     *ppvScratch = NULL;
     *dest = *src;
@@ -805,7 +794,7 @@ HEADER_SendSimpleNotify (HWND hwnd, UINT code)
 }
 
 static LRESULT
-HEADER_SendCtrlCustomDraw(HWND hwnd, DWORD dwDrawStage, HDC hdc, RECT *rect)
+HEADER_SendCtrlCustomDraw(HWND hwnd, DWORD dwDrawStage, HDC hdc, const RECT *rect)
 {
     NMCUSTOMDRAW nm;
     nm.dwDrawStage = dwDrawStage;
@@ -968,12 +957,12 @@ HEADER_PrepareCallbackItems(HWND hwnd, INT iItem, INT reqMask)
 static void
 HEADER_FreeCallbackItems(HEADER_ITEM *lpItem)
 {
-    if (lpItem->callbackMask&HDI_TEXT && lpItem->pszText != NULL)
+    if (lpItem->callbackMask&HDI_TEXT)
     {
         Free(lpItem->pszText);
         lpItem->pszText = NULL;
     }
-    
+
     if (lpItem->callbackMask&HDI_IMAGE)
         lpItem->iImage = I_IMAGECALLBACK;
 }
@@ -990,6 +979,7 @@ HEADER_CreateDragImage (HWND hwnd, WPARAM wParam)
     HDC hMemoryDC;
     HDC hDeviceDC;
     int height, width;
+    HFONT hFont;
     
     if (wParam < 0 || wParam >= infoPtr->uNumItem)
         return FALSE;
@@ -1007,6 +997,8 @@ HEADER_CreateDragImage (HWND hwnd, WPARAM wParam)
     ReleaseDC(NULL, hDeviceDC);
     hOldBitmap = SelectObject(hMemoryDC, hMemory);
     SetViewportOrgEx(hMemoryDC, -lpItem->rect.left, -lpItem->rect.top, NULL);
+    hFont = infoPtr->hFont ? infoPtr->hFont : GetStockObject(SYSTEM_FONT);
+    SelectObject(hMemoryDC, hFont);
 
     GetClientRect(hwnd, &rc);
     lCDFlags = HEADER_SendCtrlCustomDraw(hwnd, CDDS_PREPAINT, hMemoryDC, &rc);
@@ -1093,7 +1085,7 @@ HEADER_DeleteItem (HWND hwnd, WPARAM wParam)
        TRACE("%d: order=%d, iOrder=%d, ->iOrder=%d\n", i, infoPtr->order[i], infoPtr->items[i].iOrder, infoPtr->items[infoPtr->order[i]].iOrder);
 
     iOrder = infoPtr->items[iItem].iOrder;
-    HEADER_DisposeItem(&infoPtr->items[iItem]);
+    Free(infoPtr->items[iItem].pszText);
 
     infoPtr->uNumItem--;
     memmove(&infoPtr->items[iItem], &infoPtr->items[iItem + 1],
@@ -1189,7 +1181,7 @@ HEADER_GetItemT (HWND hwnd, INT nItem, LPHDITEMW phdi, BOOL bUnicode)
 }
 
 
-inline static LRESULT
+static inline LRESULT
 HEADER_GetItemCount (HWND hwnd)
 {
     HEADER_INFO *infoPtr = HEADER_GetInfoPtr (hwnd);
@@ -1250,7 +1242,7 @@ HEADER_SetOrderArray(HWND hwnd, WPARAM wParam, LPARAM lParam)
     return TRUE;
 }
 
-inline static LRESULT
+static inline LRESULT
 HEADER_GetUnicodeFormat (HWND hwnd)
 {
     HEADER_INFO *infoPtr = HEADER_GetInfoPtr (hwnd);
@@ -1273,7 +1265,7 @@ HEADER_HitTest (HWND hwnd, WPARAM wParam, LPARAM lParam)
 
 
 static LRESULT
-HEADER_InsertItemT (HWND hwnd, INT nItem, LPHDITEMW phdi, BOOL bUnicode)
+HEADER_InsertItemT (HWND hwnd, INT nItem, const HDITEMW *phdi, BOOL bUnicode)
 {
     HEADER_INFO *infoPtr = HEADER_GetInfoPtr (hwnd);
     HEADER_ITEM *lpItem;
@@ -1405,7 +1397,7 @@ HEADER_SetBitmapMargin(HWND hwnd, WPARAM wParam)
 }
 
 static LRESULT
-HEADER_SetItemT (HWND hwnd, INT nItem, LPHDITEMW phdi, BOOL bUnicode)
+HEADER_SetItemT (HWND hwnd, INT nItem, const HDITEMW *phdi, BOOL bUnicode)
 {
     HEADER_INFO *infoPtr = HEADER_GetInfoPtr (hwnd);
     HEADER_ITEM *lpItem;
@@ -1422,7 +1414,7 @@ HEADER_SetItemT (HWND hwnd, INT nItem, LPHDITEMW phdi, BOOL bUnicode)
     HEADER_CopyHDItemForNotify(infoPtr, &hdNotify, phdi, bUnicode, &pvScratch);
     if (HEADER_SendNotifyWithHDItemT(hwnd, HDN_ITEMCHANGINGW, nItem, &hdNotify))
     {
-        if (pvScratch) Free(pvScratch);
+        Free(pvScratch);
 	return FALSE;
     }
 
@@ -1439,12 +1431,11 @@ HEADER_SetItemT (HWND hwnd, INT nItem, LPHDITEMW phdi, BOOL bUnicode)
 
     InvalidateRect(hwnd, NULL, FALSE);
 
-    if (pvScratch != NULL)
-        Free(pvScratch);
+    Free(pvScratch);
     return TRUE;
 }
 
-inline static LRESULT
+static inline LRESULT
 HEADER_SetUnicodeFormat (HWND hwnd, WPARAM wParam)
 {
     HEADER_INFO *infoPtr = HEADER_GetInfoPtr (hwnd);
@@ -1517,13 +1508,12 @@ HEADER_NCDestroy (HWND hwnd, WPARAM wParam, LPARAM lParam)
     if (infoPtr->items) {
         lpItem = infoPtr->items;
         for (nItem = 0; nItem < infoPtr->uNumItem; nItem++, lpItem++) {
-            HEADER_DisposeItem(lpItem);
+            Free(lpItem->pszText);
         }
         Free (infoPtr->items);
     }
 
-    if (infoPtr->order)
-        Free(infoPtr->order);
+    Free(infoPtr->order);
 
     if (infoPtr->himl)
       ImageList_Destroy (infoPtr->himl);
@@ -1545,7 +1535,7 @@ HEADER_GetFont (HWND hwnd)
 
 
 static BOOL
-HEADER_IsDragDistance(HEADER_INFO *infoPtr, POINT *pt)
+HEADER_IsDragDistance(const HEADER_INFO *infoPtr, const POINT *pt)
 {
     /* Windows allows for a mouse movement before starting the drag. We use the
      * SM_CXDOUBLECLICK/SM_CYDOUBLECLICK as that distance.
@@ -2007,7 +1997,7 @@ static LRESULT HEADER_ThemeChanged(HWND hwnd)
 static LRESULT WINAPI
 HEADER_WindowProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    TRACE("hwnd=%p msg=%x wparam=%x lParam=%lx\n", hwnd, msg, wParam, lParam);
+    TRACE("hwnd=%p msg=%x wparam=%lx lParam=%lx\n", hwnd, msg, wParam, lParam);
     if (!HEADER_GetInfoPtr (hwnd) && (msg != WM_CREATE))
 	return DefWindowProcW (hwnd, msg, wParam, lParam);
     switch (msg) {
@@ -2137,7 +2127,7 @@ HEADER_WindowProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         default:
             if ((msg >= WM_USER) && (msg < WM_APP))
-		ERR("unknown msg %04x wp=%04x lp=%08lx\n",
+		ERR("unknown msg %04x wp=%04lx lp=%08lx\n",
 		     msg, wParam, lParam );
 	    return DefWindowProcW(hwnd, msg, wParam, lParam);
     }

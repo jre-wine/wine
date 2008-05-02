@@ -53,13 +53,13 @@ static void test_IMalloc(void)
     lpVoid = NULL;
     hRet = IMalloc_QueryInterface(lpMalloc, &IID_IUnknown, &lpVoid);
     ok (hRet == S_OK && lpVoid != NULL,
-        "IID_IUnknown: exepected S_OK, non-null, got 0x%08x, %p\n",
+        "IID_IUnknown: expected S_OK, non-null, got 0x%08x, %p\n",
         hRet, lpVoid);
 
     lpVoid = NULL;
     hRet = IMalloc_QueryInterface(lpMalloc, &IID_IMalloc, &lpVoid);
     ok (hRet == S_OK && lpVoid != NULL,
-        "IID_IIMalloc: exepected S_OK, non-null, got 0x%08x, %p\n",
+        "IID_IIMalloc: expected S_OK, non-null, got 0x%08x, %p\n",
         hRet, lpVoid);
 
     /* Prove that native mapi uses LocalAlloc/LocalFree */
@@ -87,12 +87,28 @@ static void test_IMalloc(void)
 
 START_TEST(imalloc)
 {
+    SCODE ret;
+
     hMapi32 = LoadLibraryA("mapi32.dll");
 
     pScInitMapiUtil = (void*)GetProcAddress(hMapi32, "ScInitMapiUtil@4");
     if (!pScInitMapiUtil)
+    {
+        skip("ScInitMapiUtil is not available\n");
+        FreeLibrary(hMapi32);
         return;
-    pScInitMapiUtil(0);
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = pScInitMapiUtil(0);
+    if ((ret != S_OK) && (GetLastError() == ERROR_PROC_NOT_FOUND))
+    {
+        skip("ScInitMapiUtil is not implemented\n");
+        FreeLibrary(hMapi32);
+        return;
+    }
 
     test_IMalloc();
+
+    FreeLibrary(hMapi32);
 }

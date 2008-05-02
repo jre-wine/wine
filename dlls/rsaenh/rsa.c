@@ -6,7 +6,7 @@
  * Based on public domain code by Tom St Denis (tomstdenis@iahu.ca)
  *
  * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public 
+ * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
  * version 2.1 of the License, or (at your option) any later version.
  *
@@ -39,7 +39,7 @@ static const struct {
 };
 
 /* convert a MPI error to a LTC error (Possibly the most powerful function ever!  Oh wait... no) */
-int mpi_to_ltc_error(int err)
+static int mpi_to_ltc_error(int err)
 {
    int x;
 
@@ -58,7 +58,7 @@ static int rand_prime_helper(unsigned char *dst, int len, void *dat)
     return gen_rand_impl(dst, len) ? len : 0;
 }
 
-int rand_prime(mp_int *N, long len)
+static int rand_prime(mp_int *N, long len)
 {
    int type;
 

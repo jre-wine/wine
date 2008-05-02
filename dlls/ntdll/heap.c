@@ -90,7 +90,7 @@ typedef struct tagARENA_FREE
 #define HEAP_MIN_SHRINK_SIZE  (HEAP_MIN_DATA_SIZE+sizeof(ARENA_FREE))
 
 /* Max size of the blocks on the free lists */
-static const DWORD HEAP_freeListSizes[] =
+static const SIZE_T HEAP_freeListSizes[] =
 {
     0x10, 0x20, 0x30, 0x40, 0x60, 0x80, 0x100, 0x200, 0x400, 0x1000, ~0UL
 };
@@ -236,7 +236,7 @@ static void HEAP_Dump( HEAP *heap )
 
     DPRINTF( "\nFree lists:\n Block   Stat   Size    Id\n" );
     for (i = 0; i < HEAP_NB_FREE_LISTS; i++)
-        DPRINTF( "%p free %08x prev=%p next=%p\n",
+        DPRINTF( "%p free %08lx prev=%p next=%p\n",
                  &heap->freeList[i].arena, HEAP_freeListSizes[i],
                  LIST_ENTRY( heap->freeList[i].arena.entry.prev, ARENA_FREE, entry ),
                  LIST_ENTRY( heap->freeList[i].arena.entry.next, ARENA_FREE, entry ));
@@ -395,7 +395,8 @@ static SUBHEAP *HEAP_FindSubHeap(
     while (sub)
     {
         if (((const char *)ptr >= (const char *)sub) &&
-            ((const char *)ptr < (const char *)sub + sub->size)) return (SUBHEAP*)sub;
+            ((const char *)ptr < (const char *)sub + sub->size - sizeof(ARENA_INUSE)))
+            return (SUBHEAP *)sub;
         sub = sub->next;
     }
     return NULL;
@@ -653,7 +654,11 @@ static BOOL HEAP_InitSubHeap( HEAP *heap, LPVOID address, DWORD flags,
             heap->critSection.SpinCount      = 0;
             process_heap_critsect_debug.CriticalSection = &heap->critSection;
         }
-        else RtlInitializeCriticalSection( &heap->critSection );
+        else
+        {
+            RtlInitializeCriticalSection( &heap->critSection );
+            heap->critSection.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": HEAP.critSection");
+        }
 
         if (flags & HEAP_SHARED)
         {
@@ -664,6 +669,8 @@ static BOOL HEAP_InitSubHeap( HEAP *heap, LPVOID address, DWORD flags,
             NtDuplicateObject( NtCurrentProcess(), sem, NtCurrentProcess(), &sem, 0, 0,
                                DUP_HANDLE_MAKE_GLOBAL | DUP_HANDLE_SAME_ACCESS | DUP_HANDLE_CLOSE_SOURCE );
             heap->critSection.LockSemaphore = sem;
+            RtlFreeHeap( processHeap, 0, heap->critSection.DebugInfo );
+            heap->critSection.DebugInfo = NULL;
         }
     }
 
@@ -728,6 +735,7 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
 {
     SUBHEAP *subheap;
     struct list *ptr;
+    SIZE_T total_size;
     FREE_LIST_ENTRY *pEntry = heap->freeList + get_freelist_index( size + sizeof(ARENA_INUSE) );
 
     /* Find a suitable free list, and in it find a block large enough */
@@ -759,13 +767,15 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
      * So just one heap struct, one first free arena which will eventually
      * get used, and a second free arena that might get assigned all remaining
      * free space in HEAP_ShrinkBlock() */
-    size += ROUND_SIZE(sizeof(SUBHEAP)) + sizeof(ARENA_INUSE) + sizeof(ARENA_FREE);
-    if (!(subheap = HEAP_CreateSubHeap( heap, NULL, heap->flags, size,
-                                        max( HEAP_DEF_SIZE, size ) )))
+    total_size = size + ROUND_SIZE(sizeof(SUBHEAP)) + sizeof(ARENA_INUSE) + sizeof(ARENA_FREE);
+    if (total_size < size) return NULL;  /* overflow */
+
+    if (!(subheap = HEAP_CreateSubHeap( heap, NULL, heap->flags, total_size,
+                                        max( HEAP_DEF_SIZE, total_size ) )))
         return NULL;
 
     TRACE("created new sub-heap %p of %08lx bytes for heap %p\n",
-            subheap, size, heap );
+            subheap, total_size, heap );
 
     *ppSubHeap = subheap;
     return (ARENA_FREE *)(subheap + 1);
@@ -777,7 +787,7 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
  *
  * Check that the pointer is inside the range possible for arenas.
  */
-static BOOL HEAP_IsValidArenaPtr( const HEAP *heap, const void *ptr )
+static BOOL HEAP_IsValidArenaPtr( const HEAP *heap, const ARENA_FREE *ptr )
 {
     int i;
     const SUBHEAP *subheap = HEAP_FindSubHeap( heap, ptr );
@@ -997,13 +1007,12 @@ static BOOL HEAP_IsRealArena( HEAP *heapPtr,   /* [in] ptr to the heap */
     if (!(flags & HEAP_NO_SERIALIZE))
         RtlEnterCriticalSection( &heapPtr->critSection );
 
-    if (block)
+    if (block)  /* only check this single memory block */
     {
-        /* Only check this single memory block */
+        const ARENA_INUSE *arena = (const ARENA_INUSE *)block - 1;
 
-        if (!(subheap = HEAP_FindSubHeap( heapPtr, block )) ||
-            ((const char *)block < (char *)subheap + subheap->headerSize
-                                   + sizeof(ARENA_INUSE)))
+        if (!(subheap = HEAP_FindSubHeap( heapPtr, arena )) ||
+            ((const char *)arena < (char *)subheap + subheap->headerSize))
         {
             if (quiet == NOISY)
                 ERR("Heap %p: block %p is not inside heap\n", heapPtr, block );
@@ -1011,7 +1020,7 @@ static BOOL HEAP_IsRealArena( HEAP *heapPtr,   /* [in] ptr to the heap */
                 WARN("Heap %p: block %p is not inside heap\n", heapPtr, block );
             ret = FALSE;
         } else
-            ret = HEAP_ValidateInUseArena( subheap, (const ARENA_INUSE *)block - 1, quiet );
+            ret = HEAP_ValidateInUseArena( subheap, arena, quiet );
 
         if (!(flags & HEAP_NO_SERIALIZE))
             RtlLeaveCriticalSection( &heapPtr->critSection );
@@ -1126,6 +1135,7 @@ HANDLE WINAPI RtlDestroyHeap( HANDLE heap )
     list_remove( &heapPtr->entry );
     RtlLeaveCriticalSection( &processHeap->critSection );
 
+    heapPtr->critSection.DebugInfo->Spare[0] = 0;
     RtlDeleteCriticalSection( &heapPtr->critSection );
     subheap = &heapPtr->subheap;
     while (subheap)
@@ -1171,6 +1181,11 @@ PVOID WINAPI RtlAllocateHeap( HANDLE heap, ULONG flags, SIZE_T size )
     flags &= HEAP_GENERATE_EXCEPTIONS | HEAP_NO_SERIALIZE | HEAP_ZERO_MEMORY;
     flags |= heapPtr->flags;
     rounded_size = ROUND_SIZE(size);
+    if (rounded_size < size)  /* overflow */
+    {
+        if (flags & HEAP_GENERATE_EXCEPTIONS) RtlRaiseStatus( STATUS_NO_MEMORY );
+        return NULL;
+    }
     if (rounded_size < HEAP_MIN_DATA_SIZE) rounded_size = HEAP_MIN_DATA_SIZE;
 
     if (!(flags & HEAP_NO_SERIALIZE)) RtlEnterCriticalSection( &heapPtr->critSection );
@@ -1313,6 +1328,12 @@ PVOID WINAPI RtlReAllocateHeap( HANDLE heap, ULONG flags, PVOID ptr, SIZE_T size
              HEAP_REALLOC_IN_PLACE_ONLY;
     flags |= heapPtr->flags;
     rounded_size = ROUND_SIZE(size);
+    if (rounded_size < size)  /* overflow */
+    {
+        if (flags & HEAP_GENERATE_EXCEPTIONS) RtlRaiseStatus( STATUS_NO_MEMORY );
+        RtlSetLastWin32ErrorAndNtStatusFromNtStatus( STATUS_NO_MEMORY );
+        return NULL;
+    }
     if (rounded_size < HEAP_MIN_DATA_SIZE) rounded_size = HEAP_MIN_DATA_SIZE;
 
     if (!(flags & HEAP_NO_SERIALIZE)) RtlEnterCriticalSection( &heapPtr->critSection );
@@ -1504,7 +1525,7 @@ BOOLEAN WINAPI RtlUnlockHeap( HANDLE heap )
  * NOTES
  *  The size may be bigger than what was passed to RtlAllocateHeap().
  */
-SIZE_T WINAPI RtlSizeHeap( HANDLE heap, ULONG flags, PVOID ptr )
+SIZE_T WINAPI RtlSizeHeap( HANDLE heap, ULONG flags, const void *ptr )
 {
     SIZE_T ret;
     HEAP *heapPtr = HEAP_GetPtr( heap );
@@ -1524,7 +1545,7 @@ SIZE_T WINAPI RtlSizeHeap( HANDLE heap, ULONG flags, PVOID ptr )
     }
     else
     {
-        ARENA_INUSE *pArena = (ARENA_INUSE *)ptr - 1;
+        const ARENA_INUSE *pArena = (const ARENA_INUSE *)ptr - 1;
         ret = (pArena->size & ARENA_SIZE_MASK) - pArena->unused_bytes;
     }
     if (!(flags & HEAP_NO_SERIALIZE)) RtlLeaveCriticalSection( &heapPtr->critSection );
@@ -1606,7 +1627,19 @@ NTSTATUS WINAPI RtlWalkHeap( HANDLE heap, PVOID entry_ptr )
             goto HW_end;
         }
 
-        ptr += entry->cbData; /* point to next arena */
+        if (((ARENA_INUSE *)ptr - 1)->magic == ARENA_INUSE_MAGIC)
+        {
+            ARENA_INUSE *pArena = (ARENA_INUSE *)ptr - 1;
+            ptr += pArena->size & ARENA_SIZE_MASK;
+        }
+        else if (((ARENA_FREE *)ptr - 1)->magic == ARENA_FREE_MAGIC)
+        {
+            ARENA_FREE *pArena = (ARENA_FREE *)ptr - 1;
+            ptr += pArena->size & ARENA_SIZE_MASK;
+        }
+        else
+            ptr += entry->cbData; /* point to next arena */
+
         if (ptr > (char *)currentheap + currentheap->size - 1)
         {   /* proceed with next subheap */
             if (!(currentheap = currentheap->next))

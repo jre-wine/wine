@@ -33,11 +33,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "wingdi.h"
 #include "wine/exception.h"
-#include "excpt.h"
 
 #include "ddraw.h"
 #include "d3d.h"
@@ -55,14 +53,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d7);
  *
  *****************************************************************************/
 
-static void _dump_executedata(LPD3DEXECUTEDATA lpData) {
+static void _dump_executedata(const D3DEXECUTEDATA *lpData) {
     DPRINTF("dwSize : %d\n", lpData->dwSize);
     DPRINTF("Vertex      Offset : %d  Count  : %d\n", lpData->dwVertexOffset, lpData->dwVertexCount);
     DPRINTF("Instruction Offset : %d  Length : %d\n", lpData->dwInstructionOffset, lpData->dwInstructionLength);
     DPRINTF("HVertex     Offset : %d\n", lpData->dwHVertexOffset);
 }
 
-static void _dump_D3DEXECUTEBUFFERDESC(LPD3DEXECUTEBUFFERDESC lpDesc) {
+static void _dump_D3DEXECUTEBUFFERDESC(const D3DEXECUTEBUFFERDESC *lpDesc) {
     DPRINTF("dwSize       : %d\n", lpDesc->dwSize);
     DPRINTF("dwFlags      : %x\n", lpDesc->dwFlags);
     DPRINTF("dwCaps       : %x\n", lpDesc->dwCaps);

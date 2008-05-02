@@ -242,7 +242,6 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_SHADER_MODE_HARDWARE    "Hardware"
     IDS_SHADER_MODE_NONE        "Aus"
-    IDS_SHADER_MODE_EMULATION   "Emuliert"
 END
 
 STRINGTABLE DISCARDABLE
@@ -267,7 +266,6 @@ BEGIN
     IDS_ACCEL_BASIC             "Einfach"
     IDS_ACCEL_EMULATION         "Emulation"
     IDS_DRIVER_ALSA             "ALSA-Treiber"
-    IDS_DRIVER_ARTS             "aRts-Treiber"
     IDS_DRIVER_ESOUND           "EsounD-Treiber"
     IDS_DRIVER_OSS              "OSS-Treiber"
     IDS_DRIVER_JACK             "JACK-Treiber"

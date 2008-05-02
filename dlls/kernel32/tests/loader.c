@@ -40,8 +40,10 @@ static const struct
 static IMAGE_NT_HEADERS nt_header =
 {
     IMAGE_NT_SIGNATURE, /* Signature */
-#ifdef __i386__
+#if defined __i386__
     { IMAGE_FILE_MACHINE_I386, /* Machine */
+#elif defined __x86_64__
+    { IMAGE_FILE_MACHINE_AMD64, /* Machine */
 #else
 # error You must specify the machine type
 #endif
@@ -231,7 +233,8 @@ START_TEST(loader)
     static const char section_data[0x10] = "section data";
     int i;
     DWORD dummy, file_size, file_align;
-    HANDLE hfile, hlib;
+    HANDLE hfile;
+    HMODULE hlib, hlib_as_data_file;
     SYSTEM_INFO si;
     char temp_path[MAX_PATH];
     char dll_name[MAX_PATH];
@@ -324,6 +327,13 @@ START_TEST(loader)
             MEMORY_BASIC_INFORMATION info;
 
             ok(hlib != 0, "%d: LoadLibrary error %d\n", i, GetLastError());
+
+            /* No point in crashing. Test crashes on Vista with some of the given files */
+            if (hlib == 0)
+            {
+                skip("Failed to load dll number %d\n", i);
+                goto endloop;
+            }
 
             SetLastError(0xdeadbeef);
             ok(VirtualQuery(hlib, &info, sizeof(info)) == sizeof(info),
@@ -421,7 +431,33 @@ START_TEST(loader)
             }
 
             SetLastError(0xdeadbeef);
+            hlib_as_data_file = LoadLibraryEx(dll_name, 0, LOAD_LIBRARY_AS_DATAFILE);
+            ok(hlib_as_data_file != 0, "LoadLibraryEx error %u\n", GetLastError());
+            ok(hlib_as_data_file == hlib, "hlib_as_file and hlib are different\n");
+
+            SetLastError(0xdeadbeef);
             ok(FreeLibrary(hlib), "FreeLibrary error %d\n", GetLastError());
+
+            SetLastError(0xdeadbeef);
+            hlib = GetModuleHandle(dll_name);
+            ok(hlib != 0, "GetModuleHandle error %u\n", GetLastError());
+
+            SetLastError(0xdeadbeef);
+            ok(FreeLibrary(hlib_as_data_file), "FreeLibrary error %d\n", GetLastError());
+
+            hlib = GetModuleHandle(dll_name);
+            ok(!hlib, "GetModuleHandle should fail\n");
+
+            SetLastError(0xdeadbeef);
+            hlib_as_data_file = LoadLibraryEx(dll_name, 0, LOAD_LIBRARY_AS_DATAFILE);
+            ok(hlib_as_data_file != 0, "LoadLibraryEx error %u\n", GetLastError());
+            ok((ULONG_PTR)hlib_as_data_file & 1, "hlib_as_data_file is even\n");
+
+            hlib = GetModuleHandle(dll_name);
+            ok(!hlib, "GetModuleHandle should fail\n");
+
+            SetLastError(0xdeadbeef);
+            ok(FreeLibrary(hlib_as_data_file), "FreeLibrary error %d\n", GetLastError());
         }
         else
         {   /* LoadLibrary is expected to fail */
@@ -438,6 +474,7 @@ START_TEST(loader)
                i, td[i].error, GetLastError());
         }
 
+endloop:
         SetLastError(0xdeadbeef);
         ok(DeleteFile(dll_name), "DeleteFile error %d\n", GetLastError());
     }

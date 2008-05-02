@@ -55,7 +55,7 @@ static inline WCHAR *strchrW( const WCHAR *str, WCHAR ch )
     return NULL;
 }
 
-inline static int isdigitW( WCHAR wc )
+static inline int isdigitW( WCHAR wc )
 {
     WORD type;
     GetStringTypeW( CT_CTYPE1, &wc, 1, &type );
@@ -87,16 +87,12 @@ static IsValidLanguageGroupFn pIsValidLanguageGroup;
 static void InitFunctionPointers(void)
 {
   hKernel32 = GetModuleHandleA("kernel32");
-
-  if (hKernel32)
-  {
-    pEnumSystemLanguageGroupsA = (void*)GetProcAddress(hKernel32, "EnumSystemLanguageGroupsA");
-    pEnumLanguageGroupLocalesA = (void*)GetProcAddress(hKernel32, "EnumLanguageGroupLocalesA");
-    pFoldStringA = (void*)GetProcAddress(hKernel32, "FoldStringA");
-    pFoldStringW = (void*)GetProcAddress(hKernel32, "FoldStringW");
-    pIsValidLanguageGroup = (void*)GetProcAddress(hKernel32, "IsValidLanguageGroup");
-    pEnumUILanguagesA = (void*)GetProcAddress(hKernel32, "EnumUILanguagesA");
-  }
+  pEnumSystemLanguageGroupsA = (void*)GetProcAddress(hKernel32, "EnumSystemLanguageGroupsA");
+  pEnumLanguageGroupLocalesA = (void*)GetProcAddress(hKernel32, "EnumLanguageGroupLocalesA");
+  pFoldStringA = (void*)GetProcAddress(hKernel32, "FoldStringA");
+  pFoldStringW = (void*)GetProcAddress(hKernel32, "FoldStringW");
+  pIsValidLanguageGroup = (void*)GetProcAddress(hKernel32, "IsValidLanguageGroup");
+  pEnumUILanguagesA = (void*)GetProcAddress(hKernel32, "EnumUILanguagesA");
 }
 
 #define eq(received, expected, label, type) \
@@ -428,6 +424,34 @@ static void test_GetDateFormatW(void)
   STRINGSW("dddd d MMMM yyyy","Wednesday 23 October 2002"); /* Incorrect DOW and time */
   ret = GetDateFormatW (lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
   EXPECT_VALID; EXPECT_LENW; EXPECT_EQW;
+
+  /* Limit tests */
+
+  curtime.wYear = 1601;
+  curtime.wMonth = 1;
+  curtime.wDay = 1;
+  curtime.wDayOfWeek = 0; /* Irrelevant */
+  curtime.wHour = 0;
+  curtime.wMinute = 0;
+  curtime.wSecond = 0;
+  curtime.wMilliseconds = 0;
+  STRINGSW("dddd d MMMM yyyy","Monday 1 January 1601");
+  SetLastError(0xdeadbeef);
+  ret = GetDateFormatW (lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
+  EXPECT_VALID; EXPECT_LENW; EXPECT_EQW;
+
+  curtime.wYear = 1600;
+  curtime.wMonth = 12;
+  curtime.wDay = 31;
+  curtime.wDayOfWeek = 0; /* Irrelevant */
+  curtime.wHour = 23;
+  curtime.wMinute = 59;
+  curtime.wSecond = 59;
+  curtime.wMilliseconds = 999;
+  STRINGSW("dddd d MMMM yyyy","Friday 31 December 1600");
+  SetLastError(0xdeadbeef);
+  ret = GetDateFormatW (lcid, 0, &curtime, input, buffer, COUNTOF(buffer));
+  EXPECT_INVALID;
 }
 
 
@@ -2229,13 +2253,42 @@ static void test_EnumTimeFormatsA(void)
     ok(!lstrcmpA(date_fmt_buf, buf), "expected \"%s\" got \"%s\"\n", date_fmt_buf, buf);
 }
 
+static void test_GetCPInfo(void)
+{
+    BOOL ret;
+    CPINFO cpinfo;
+
+    SetLastError(0xdeadbeef);
+    ret = GetCPInfo(CP_SYMBOL, &cpinfo);
+    ok(!ret, "GetCPInfo(CP_SYMBOL) should fail\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetCPInfo(CP_UTF7, &cpinfo);
+    ok(ret, "GetCPInfo(CP_UTF7) error %u\n", GetLastError());
+    ok(cpinfo.DefaultChar[0] == 0x3f, "expected 0x3f, got 0x%x\n", cpinfo.DefaultChar[0]);
+    ok(cpinfo.DefaultChar[1] == 0, "expected 0, got 0x%x\n", cpinfo.DefaultChar[1]);
+    ok(cpinfo.LeadByte[0] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[0]);
+    ok(cpinfo.LeadByte[1] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[1]);
+    ok(cpinfo.MaxCharSize == 5, "expected 5, got 0x%x\n", cpinfo.MaxCharSize);
+
+    SetLastError(0xdeadbeef);
+    ret = GetCPInfo(CP_UTF8, &cpinfo);
+    ok(ret, "GetCPInfo(CP_UTF8) error %u\n", GetLastError());
+    ok(cpinfo.DefaultChar[0] == 0x3f, "expected 0x3f, got 0x%x\n", cpinfo.DefaultChar[0]);
+    ok(cpinfo.DefaultChar[1] == 0, "expected 0, got 0x%x\n", cpinfo.DefaultChar[1]);
+    ok(cpinfo.LeadByte[0] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[0]);
+    ok(cpinfo.LeadByte[1] == 0, "expected 0, got 0x%x\n", cpinfo.LeadByte[1]);
+    ok(cpinfo.MaxCharSize == 4, "expected 5, got 0x%x\n", cpinfo.MaxCharSize);
+}
+
 START_TEST(locale)
 {
   InitFunctionPointers();
 
   test_EnumTimeFormatsA();
   test_EnumDateFormatsA();
-
   test_GetLocaleInfoA();
   test_GetTimeFormatA();
   test_GetDateFormatA();
@@ -2252,7 +2305,7 @@ START_TEST(locale)
   test_EnumLanguageGroupLocalesA();
   test_SetLocaleInfoA();
   test_EnumUILanguageA();
-
+  test_GetCPInfo();
   /* this requires collation table patch to make it MS compatible */
   if (0) test_sorting();
 }

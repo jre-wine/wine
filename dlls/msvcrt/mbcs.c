@@ -26,6 +26,7 @@
 #include "msvcrt.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
+#include "msvcrt/mbctype.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
@@ -46,7 +47,7 @@ static MSVCRT_wchar_t msvcrt_mbc_to_wc(unsigned int ch)
     mbch[1] = ch & 0xff;
     n_chars = 2;
   }
-  if (!MultiByteToWideChar(msvcrt_current_lc_all_cp, 0, mbch, n_chars, &chW, 1))
+  if (!MultiByteToWideChar(MSVCRT___lc_codepage, 0, mbch, n_chars, &chW, 1))
   {
     WARN("MultiByteToWideChar failed on %x\n", ch);
     return 0;
@@ -740,12 +741,37 @@ unsigned int CDECL _mbbtombc(unsigned int c)
 }
 
 /*********************************************************************
+ *		_mbbtype(MSVCRT.@)
+ */
+int CDECL _mbbtype(unsigned char c, int type)
+{
+    if (type == 1)
+    {
+        if ((c >= 0x20 && c <= 0x7e) || (c >= 0xa1 && c <= 0xdf))
+            return _MBC_SINGLE;
+        else if ((c >= 0x40 && c <= 0x7e) || (c >= 0x80 && c <= 0xfc))
+            return _MBC_TRAIL;
+        else
+            return _MBC_ILLEGAL;
+    }
+    else
+    {
+        if ((c >= 0x20 && c <= 0x7e) || (c >= 0xa1 && c <= 0xdf))
+            return _MBC_SINGLE;
+        else if ((c >= 0x81 && c <= 0x9f) || (c >= 0xe0 && c <= 0xfc))
+            return _MBC_LEAD;
+        else
+            return _MBC_ILLEGAL;
+    }
+}
+
+/*********************************************************************
  *		_ismbbkana(MSVCRT.@)
  */
 int CDECL _ismbbkana(unsigned int c)
 {
   /* FIXME: use lc_ctype when supported, not lc_all */
-  if(msvcrt_current_lc_all_cp == 932)
+  if(MSVCRT___lc_codepage == 932)
   {
     /* Japanese/Katakana, CP 932 */
     return (c >= 0xa1 && c <= 0xdf);
@@ -855,7 +881,7 @@ int CDECL _ismbcpunct(unsigned int ch)
 int CDECL _ismbchira(unsigned int c)
 {
   /* FIXME: use lc_ctype when supported, not lc_all */
-  if(msvcrt_current_lc_all_cp == 932)
+  if(MSVCRT___lc_codepage == 932)
   {
     /* Japanese/Hiragana, CP 932 */
     return (c >= 0x829f && c <= 0x82f1);
@@ -869,7 +895,7 @@ int CDECL _ismbchira(unsigned int c)
 int CDECL _ismbckata(unsigned int c)
 {
   /* FIXME: use lc_ctype when supported, not lc_all */
-  if(msvcrt_current_lc_all_cp == 932)
+  if(MSVCRT___lc_codepage == 932)
   {
     if(c < 256)
       return _ismbbkana(c);

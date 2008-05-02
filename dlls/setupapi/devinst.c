@@ -271,7 +271,7 @@ BOOL WINAPI SetupDiBuildClassInfoListExW(
 	    TRACE("Guid: %p\n", szKeyName);
 	    if (dwGuidListIndex < ClassGuidListSize)
 	    {
-		if (szKeyName[0] == L'{' && szKeyName[37] == L'}')
+		if (szKeyName[0] == '{' && szKeyName[37] == '}')
 		{
 		    szKeyName[37] = 0;
 		}
@@ -447,7 +447,7 @@ BOOL WINAPI SetupDiClassGuidsFromNameExW(
 		    TRACE("Guid: %p\n", szKeyName);
 		    if (dwGuidListIndex < ClassGuidListSize)
 		    {
-			if (szKeyName[0] == L'{' && szKeyName[37] == L'}')
+			if (szKeyName[0] == '{' && szKeyName[37] == '}')
 			{
 			    szKeyName[37] = 0;
 			}
@@ -648,7 +648,7 @@ SetupDiCreateDeviceInfoListExA(const GUID *ClassGuid,
  *                 with this list.
  *   hwndParent [I] hwnd needed for interface related actions.
  *   MachineName [I] name of machine to create emtpy DeviceInfoSet list, if NULL
- *                   local regestry will be used.
+ *                   local registry will be used.
  *   Reserved [I] must be NULL
  *
  * RETURNS
@@ -772,6 +772,7 @@ BOOL WINAPI SetupDiEnumDeviceInfo(
     if(info->cbSize < sizeof(*info))
         return FALSE;
 
+    SetLastError(ERROR_NO_MORE_ITEMS);
     return FALSE;
 }
 
@@ -1008,32 +1009,11 @@ HDEVINFO WINAPI SetupDiGetClassDevsW(
        HWND parent,
        DWORD flags)
 {
-    HDEVINFO ret = (HDEVINFO)INVALID_HANDLE_VALUE;
+    TRACE("%s %s %p 0x%08x\n", debugstr_guid(class), debugstr_w(enumstr), parent, flags);
 
-    TRACE("%s %s %p 0x%08x\n", debugstr_guid(class), debugstr_w(enumstr),
-     parent, flags);
-
-    if(flags & DIGCF_DEVICEINTERFACE)
-    {
-        if(!class)
-            SetLastError(ERROR_INVALID_PARAMETER);
-        else
-        {
-            /* WinXP always succeeds, returns empty list for unknown classes */
-            FIXME(": returning empty list\n");
-            ret = SetupDiCreateDeviceInfoList(class, parent);
-        }
-    }
-    else if (enumstr)
-        FIXME(": unimplemented for enumerator strings (%s)\n",
-         debugstr_w(enumstr));
-    else if (flags & DIGCF_ALLCLASSES)
-        FIXME(": unimplemented for DIGCF_ALLCLASSES\n");
-    else
-    {
-        FIXME("(%s): stub\n", debugstr_guid(class));
-    }
-    return ret;
+    /* WinXP always succeeds, returns empty list for unknown classes */
+    FIXME("returning empty list\n");
+    return SetupDiCreateDeviceInfoList(class, parent);
 }
 
 /***********************************************************************

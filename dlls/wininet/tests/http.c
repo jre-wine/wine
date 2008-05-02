@@ -34,6 +34,15 @@
 #define TEST_URL "http://www.winehq.org/site/about"
 
 static HANDLE hCompleteEvent;
+static BOOL bResponseReceived;
+static BOOL bReceivingResponse;
+
+static INTERNET_STATUS_CALLBACK (WINAPI *pInternetSetStatusCallbackA)(HINTERNET ,INTERNET_STATUS_CALLBACK);
+static BOOL (WINAPI *pInternetTimeFromSystemTimeA)(CONST SYSTEMTIME *,DWORD ,LPSTR ,DWORD);
+static BOOL (WINAPI *pInternetTimeFromSystemTimeW)(CONST SYSTEMTIME *,DWORD ,LPWSTR ,DWORD);
+static BOOL (WINAPI *pInternetTimeToSystemTimeA)(LPCSTR ,SYSTEMTIME *,DWORD);
+static BOOL (WINAPI *pInternetTimeToSystemTimeW)(LPCWSTR ,SYSTEMTIME *,DWORD);
+
 
 static VOID WINAPI callback(
      HINTERNET hInternet,
@@ -49,21 +58,25 @@ static VOID WINAPI callback(
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_RESOLVING_NAME \"%s\" %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 (LPCSTR)lpvStatusInformation,dwStatusInformationLength);
+            *(LPSTR)lpvStatusInformation = '\0';
             break;
         case INTERNET_STATUS_NAME_RESOLVED:
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_NAME_RESOLVED \"%s\" %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 (LPCSTR)lpvStatusInformation,dwStatusInformationLength);
+            *(LPSTR)lpvStatusInformation = '\0';
             break;
         case INTERNET_STATUS_CONNECTING_TO_SERVER:
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_CONNECTING_TO_SERVER \"%s\" %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 (LPCSTR)lpvStatusInformation,dwStatusInformationLength);
+            *(LPSTR)lpvStatusInformation = '\0';
             break;
         case INTERNET_STATUS_CONNECTED_TO_SERVER:
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_CONNECTED_TO_SERVER \"%s\" %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 (LPCSTR)lpvStatusInformation,dwStatusInformationLength);
+            *(LPSTR)lpvStatusInformation = '\0';
             break;
         case INTERNET_STATUS_SENDING_REQUEST:
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_SENDING_REQUEST %p %d\n",
@@ -82,6 +95,7 @@ static VOID WINAPI callback(
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_RECEIVING_RESPONSE %p %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 lpvStatusInformation,dwStatusInformationLength);
+            bReceivingResponse = TRUE;
             break;
         case INTERNET_STATUS_RESPONSE_RECEIVED:
             ok(dwStatusInformationLength == sizeof(DWORD),
@@ -90,6 +104,7 @@ static VOID WINAPI callback(
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_RESPONSE_RECEIVED 0x%x %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 *(DWORD *)lpvStatusInformation,dwStatusInformationLength);
+            bResponseReceived = TRUE;
             break;
         case INTERNET_STATUS_CTL_RESPONSE_RECEIVED:
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_CTL_RESPONSE_RECEIVED %p %d\n",
@@ -143,6 +158,7 @@ static VOID WINAPI callback(
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_REDIRECT \"%s\" %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 (LPCSTR)lpvStatusInformation, dwStatusInformationLength);
+            *(LPSTR)lpvStatusInformation = '\0';
             break;
         case INTERNET_STATUS_INTERMEDIATE_RESPONSE:
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_INTERMEDIATE_RESPONSE %p %d\n",
@@ -176,7 +192,7 @@ static void InternetReadFile_test(int flags)
 
     if (hi == 0x0) goto abort;
 
-    InternetSetStatusCallback(hi,&callback);
+    pInternetSetStatusCallbackA(hi,&callback);
 
     trace("InternetConnectA <--\n");
     hic=InternetConnectA(hi, "www.winehq.org", INTERNET_INVALID_PORT_NUMBER,
@@ -318,7 +334,7 @@ static void InternetReadFileExA_test(int flags)
 
     if (hi == 0x0) goto abort;
 
-    InternetSetStatusCallback(hi,&callback);
+    pInternetSetStatusCallbackA(hi,&callback);
 
     trace("InternetConnectA <--\n");
     hic=InternetConnectA(hi, "www.winehq.org", INTERNET_INVALID_PORT_NUMBER,
@@ -401,13 +417,17 @@ static void InternetReadFileExA_test(int flags)
         inetbuffers.dwOffsetHigh = 1234;
         inetbuffers.dwOffsetLow = 5678;
 
+        bReceivingResponse = FALSE;
+        bResponseReceived = FALSE;
         rc = InternetReadFileExA(hor, &inetbuffers, IRF_ASYNC | IRF_USE_CONTEXT, 0xcafebabe);
         if (!rc)
         {
             if (GetLastError() == ERROR_IO_PENDING)
             {
                 trace("InternetReadFileEx -> PENDING\n");
+                ok(bReceivingResponse, "INTERNET_STATUS_RECEIVING_RESPONSE should have been sent to callback function\n");
                 WaitForSingleObject(hCompleteEvent, INFINITE);
+                ok(!bResponseReceived, "INTERNET_STATUS_RESPONSE_RECEIVED should not have been sent to callback function\n");
             }
             else
             {
@@ -416,7 +436,11 @@ static void InternetReadFileExA_test(int flags)
             }
         }
         else
+        {
             trace("InternetReadFileEx -> SUCCEEDED\n");
+            ok(bReceivingResponse, "INTERNET_STATUS_RECEIVING_RESPONSE should have been sent to callback function\n");
+            ok(bResponseReceived, "INTERNET_STATUS_RESPONSE_RECEIVED should have been sent to callback function\n");
+        }
 
         trace("read %i bytes\n", inetbuffers.dwBufferLength);
         ((char *)inetbuffers.lpvBuffer)[inetbuffers.dwBufferLength] = '\0';
@@ -432,6 +456,7 @@ static void InternetReadFileExA_test(int flags)
 
         length += inetbuffers.dwBufferLength;
     }
+    ok(length > 0, "failed to read any of the document\n");
     trace("Finished. Read %d bytes\n", length);
 
 abort:
@@ -488,7 +513,7 @@ static void InternetTimeFromSystemTimeA_test(void)
     char string[INTERNET_RFC1123_BUFSIZE];
     static const char expect[] = "Fri, 07 Jan 2005 12:06:35 GMT";
 
-    ret = InternetTimeFromSystemTimeA( &time, INTERNET_RFC1123_FORMAT, string, sizeof(string) );
+    ret = pInternetTimeFromSystemTimeA( &time, INTERNET_RFC1123_FORMAT, string, sizeof(string) );
     ok( ret, "InternetTimeFromSystemTimeA failed (%u)\n", GetLastError() );
 
     ok( !memcmp( string, expect, sizeof(expect) ),
@@ -503,7 +528,7 @@ static void InternetTimeFromSystemTimeW_test(void)
     static const WCHAR expect[] = { 'F','r','i',',',' ','0','7',' ','J','a','n',' ','2','0','0','5',' ',
                                     '1','2',':','0','6',':','3','5',' ','G','M','T',0 };
 
-    ret = InternetTimeFromSystemTimeW( &time, INTERNET_RFC1123_FORMAT, string, sizeof(string) );
+    ret = pInternetTimeFromSystemTimeW( &time, INTERNET_RFC1123_FORMAT, string, sizeof(string) );
     ok( ret, "InternetTimeFromSystemTimeW failed (%u)\n", GetLastError() );
 
     ok( !memcmp( string, expect, sizeof(expect) ),
@@ -518,12 +543,12 @@ static void InternetTimeToSystemTimeA_test(void)
     static const char string[] = "Fri, 07 Jan 2005 12:06:35 GMT";
     static const char string2[] = " fri 7 jan 2005 12 06 35";
 
-    ret = InternetTimeToSystemTimeA( string, &time, 0 );
+    ret = pInternetTimeToSystemTimeA( string, &time, 0 );
     ok( ret, "InternetTimeToSystemTimeA failed (%u)\n", GetLastError() );
     ok( !memcmp( &time, &expect, sizeof(expect) ),
         "InternetTimeToSystemTimeA failed (%u)\n", GetLastError() );
 
-    ret = InternetTimeToSystemTimeA( string2, &time, 0 );
+    ret = pInternetTimeToSystemTimeA( string2, &time, 0 );
     ok( ret, "InternetTimeToSystemTimeA failed (%u)\n", GetLastError() );
     ok( !memcmp( &time, &expect, sizeof(expect) ),
         "InternetTimeToSystemTimeA failed (%u)\n", GetLastError() );
@@ -540,29 +565,29 @@ static void InternetTimeToSystemTimeW_test(void)
                                      '1','2',' ','0','6',' ','3','5',0 };
     static const WCHAR string3[] = { 'F','r',0 };
 
-    ret = InternetTimeToSystemTimeW( NULL, NULL, 0 );
+    ret = pInternetTimeToSystemTimeW( NULL, NULL, 0 );
     ok( !ret, "InternetTimeToSystemTimeW succeeded (%u)\n", GetLastError() );
 
-    ret = InternetTimeToSystemTimeW( NULL, &time, 0 );
+    ret = pInternetTimeToSystemTimeW( NULL, &time, 0 );
     ok( !ret, "InternetTimeToSystemTimeW succeeded (%u)\n", GetLastError() );
 
-    ret = InternetTimeToSystemTimeW( string, NULL, 0 );
+    ret = pInternetTimeToSystemTimeW( string, NULL, 0 );
     ok( !ret, "InternetTimeToSystemTimeW succeeded (%u)\n", GetLastError() );
 
-    ret = InternetTimeToSystemTimeW( string, &time, 1 );
+    ret = pInternetTimeToSystemTimeW( string, &time, 0 );
     ok( ret, "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
 
-    ret = InternetTimeToSystemTimeW( string, &time, 0 );
-    ok( ret, "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
-    ok( !memcmp( &time, &expect, sizeof(expect) ),
-        "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
-
-    ret = InternetTimeToSystemTimeW( string2, &time, 0 );
+    ret = pInternetTimeToSystemTimeW( string, &time, 0 );
     ok( ret, "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
     ok( !memcmp( &time, &expect, sizeof(expect) ),
         "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
 
-    ret = InternetTimeToSystemTimeW( string3, &time, 0 );
+    ret = pInternetTimeToSystemTimeW( string2, &time, 0 );
+    ok( ret, "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
+    ok( !memcmp( &time, &expect, sizeof(expect) ),
+        "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
+
+    ret = pInternetTimeToSystemTimeW( string3, &time, 0 );
     ok( ret, "InternetTimeToSystemTimeW failed (%u)\n", GetLastError() );
 }
 
@@ -630,6 +655,45 @@ static void HttpSendRequestEx_test(void)
 done:
     ok(InternetCloseHandle(hConnect), "Close connect handle failed\n");
     ok(InternetCloseHandle(hSession), "Close session handle failed\n");
+}
+
+static void InternetOpenRequest_test(void)
+{
+    HINTERNET session, connect, request;
+    static const char *types[] = { "*", "", NULL };
+    static const WCHAR slash[] = {'/', 0}, any[] = {'*', 0}, empty[] = {0};
+    static const WCHAR *typesW[] = { any, empty, NULL };
+    BOOL ret;
+
+    session = InternetOpenA("Wine Regression Test", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    ok(session != NULL ,"Unable to open Internet session\n");
+
+    connect = InternetConnectA(session, "winehq.org", INTERNET_DEFAULT_HTTP_PORT, NULL, NULL,
+                              INTERNET_SERVICE_HTTP, 0, 0);
+    ok(connect != NULL, "Unable to connect to http://winehq.org\n");
+
+    request = HttpOpenRequestA(connect, NULL, "/", NULL, NULL, types, INTERNET_FLAG_NO_CACHE_WRITE, 0);
+    if (!request && GetLastError() == ERROR_INTERNET_NAME_NOT_RESOLVED)
+    {
+        trace( "Network unreachable, skipping test\n" );
+        goto done;
+    }
+    ok(request != NULL, "Failed to open request handle err %u\n", GetLastError());
+
+    ret = HttpSendRequest(request, NULL, 0, NULL, 0);
+    ok(ret, "HttpSendRequest failed: %u\n", GetLastError());
+    ok(InternetCloseHandle(request), "Close request handle failed\n");
+
+    request = HttpOpenRequestW(connect, NULL, slash, NULL, NULL, typesW, INTERNET_FLAG_NO_CACHE_WRITE, 0);
+    ok(request != NULL, "Failed to open request handle err %u\n", GetLastError());
+
+    ret = HttpSendRequest(request, NULL, 0, NULL, 0);
+    ok(ret, "HttpSendRequest failed: %u\n", GetLastError());
+    ok(InternetCloseHandle(request), "Close request handle failed\n");
+
+done:
+    ok(InternetCloseHandle(connect), "Close connect handle failed\n");
+    ok(InternetCloseHandle(session), "Close session handle failed\n");
 }
 
 static void HttpHeaders_test(void)
@@ -1089,14 +1153,33 @@ static void test_http_connection(void)
 
 START_TEST(http)
 {
-    InternetReadFile_test(INTERNET_FLAG_ASYNC);
-    InternetReadFile_test(0);
-    InternetReadFileExA_test(INTERNET_FLAG_ASYNC);
+    HMODULE hdll;
+    hdll = GetModuleHandleA("wininet.dll");
+    pInternetSetStatusCallbackA = (void*)GetProcAddress(hdll, "InternetSetStatusCallbackA");
+    pInternetTimeFromSystemTimeA = (void*)GetProcAddress(hdll, "InternetTimeFromSystemTimeA");
+    pInternetTimeFromSystemTimeW = (void*)GetProcAddress(hdll, "InternetTimeFromSystemTimeW");
+    pInternetTimeToSystemTimeA = (void*)GetProcAddress(hdll, "InternetTimeToSystemTimeA");
+    pInternetTimeToSystemTimeW = (void*)GetProcAddress(hdll, "InternetTimeToSystemTimeW");
+
+    if (!pInternetSetStatusCallbackA)
+        skip("skipping the InternetReadFile tests\n");
+    else
+    {
+        InternetReadFile_test(INTERNET_FLAG_ASYNC);
+        InternetReadFile_test(0);
+        InternetReadFileExA_test(INTERNET_FLAG_ASYNC);
+    }
+    InternetOpenRequest_test();
     InternetOpenUrlA_test();
-    InternetTimeFromSystemTimeA_test();
-    InternetTimeFromSystemTimeW_test();
-    InternetTimeToSystemTimeA_test();
-    InternetTimeToSystemTimeW_test();
+    if (!pInternetTimeFromSystemTimeA)
+        skip("skipping the InternetTime tests\n");
+    else
+    {
+        InternetTimeFromSystemTimeA_test();
+        InternetTimeFromSystemTimeW_test();
+        InternetTimeToSystemTimeA_test();
+        InternetTimeToSystemTimeW_test();
+    }
     HttpSendRequestEx_test();
     HttpHeaders_test();
     test_http_connection();

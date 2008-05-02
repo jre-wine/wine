@@ -212,14 +212,14 @@ static const unsigned int message_unicode_flags[] =
 };
 
 /* check whether a given message type includes pointers */
-inline static int is_pointer_message( UINT message )
+static inline int is_pointer_message( UINT message )
 {
     if (message >= 8*sizeof(message_pointer_flags)) return FALSE;
     return (message_pointer_flags[message / 32] & SET(message)) != 0;
 }
 
 /* check whether a given message type contains Unicode (or ASCII) chars */
-inline static int is_unicode_message( UINT message )
+static inline int is_unicode_message( UINT message )
 {
     if (message >= 8*sizeof(message_unicode_flags)) return FALSE;
     return (message_unicode_flags[message / 32] & SET(message)) != 0;
@@ -228,7 +228,7 @@ inline static int is_unicode_message( UINT message )
 #undef SET
 
 /* add a data field to a packed message */
-inline static void push_data( struct packed_message *data, const void *ptr, size_t size )
+static inline void push_data( struct packed_message *data, const void *ptr, size_t size )
 {
     data->data[data->count] = ptr;
     data->size[data->count] = size;
@@ -236,13 +236,13 @@ inline static void push_data( struct packed_message *data, const void *ptr, size
 }
 
 /* add a string to a packed message */
-inline static void push_string( struct packed_message *data, LPCWSTR str )
+static inline void push_string( struct packed_message *data, LPCWSTR str )
 {
     push_data( data, str, (strlenW(str) + 1) * sizeof(WCHAR) );
 }
 
 /* retrieve a pointer to data from a packed message and increment the buffer pointer */
-inline static void *get_data( void **buffer, size_t size )
+static inline void *get_data( void **buffer, size_t size )
 {
     void *ret = *buffer;
     *buffer = (char *)*buffer + size;
@@ -250,7 +250,7 @@ inline static void *get_data( void **buffer, size_t size )
 }
 
 /* make sure that the buffer contains a valid null-terminated Unicode string */
-inline static BOOL check_string( LPCWSTR str, size_t size )
+static inline BOOL check_string( LPCWSTR str, size_t size )
 {
     for (size /= sizeof(WCHAR); size; size--, str++)
         if (!*str) return TRUE;
@@ -258,7 +258,7 @@ inline static BOOL check_string( LPCWSTR str, size_t size )
 }
 
 /* make sure that there is space for 'size' bytes in buffer, growing it if needed */
-inline static void *get_buffer_space( void **buffer, size_t size )
+static inline void *get_buffer_space( void **buffer, size_t size )
 {
     void *ret;
 
@@ -273,41 +273,35 @@ inline static void *get_buffer_space( void **buffer, size_t size )
     return ret;
 }
 
-/* retrieve a string pointer from packed data */
-inline static LPWSTR get_string( void **buffer )
-{
-    return get_data( buffer, (strlenW( (LPWSTR)*buffer ) + 1) * sizeof(WCHAR) );
-}
-
 /* check whether a combobox expects strings or ids in CB_ADDSTRING/CB_INSERTSTRING */
-inline static BOOL combobox_has_strings( HWND hwnd )
+static inline BOOL combobox_has_strings( HWND hwnd )
 {
     DWORD style = GetWindowLongA( hwnd, GWL_STYLE );
     return (!(style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) || (style & CBS_HASSTRINGS));
 }
 
 /* check whether a listbox expects strings or ids in LB_ADDSTRING/LB_INSERTSTRING */
-inline static BOOL listbox_has_strings( HWND hwnd )
+static inline BOOL listbox_has_strings( HWND hwnd )
 {
     DWORD style = GetWindowLongA( hwnd, GWL_STYLE );
     return (!(style & (LBS_OWNERDRAWFIXED | LBS_OWNERDRAWVARIABLE)) || (style & LBS_HASSTRINGS));
 }
 
 /* check whether message is in the range of keyboard messages */
-inline static BOOL is_keyboard_message( UINT message )
+static inline BOOL is_keyboard_message( UINT message )
 {
     return (message >= WM_KEYFIRST && message <= WM_KEYLAST);
 }
 
 /* check whether message is in the range of mouse messages */
-inline static BOOL is_mouse_message( UINT message )
+static inline BOOL is_mouse_message( UINT message )
 {
     return ((message >= WM_NCMOUSEFIRST && message <= WM_NCMOUSELAST) ||
             (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST));
 }
 
 /* check whether message matches the specified hwnd filter */
-inline static BOOL check_hwnd_filter( const MSG *msg, HWND hwnd_filter )
+static inline BOOL check_hwnd_filter( const MSG *msg, HWND hwnd_filter )
 {
     if (!hwnd_filter) return TRUE;
     return (msg->hwnd == hwnd_filter || IsChild( hwnd_filter, msg->hwnd ));
@@ -1343,13 +1337,13 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
                 /* send back the value of h on the other side */
                 push_data( data, &h, sizeof(HGLOBAL) );
                 lp = uiLo;
-                TRACE( "send dde-ack %x %08x => %p\n", uiLo, uiHi, h );
+                TRACE( "send dde-ack %lx %08lx => %p\n", uiLo, uiHi, h );
             }
         }
         else
         {
             /* uiHi should contain either an atom or 0 */
-            TRACE( "send dde-ack %x atom=%x\n", uiLo, uiHi );
+            TRACE( "send dde-ack %lx atom=%lx\n", uiLo, uiHi );
             lp = MAKELONG( uiLo, uiHi );
         }
         break;
@@ -1381,7 +1375,7 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
                 hunlock = (HGLOBAL)uiLo;
             }
         }
-        TRACE( "send ddepack %u %x\n", size, uiHi );
+        TRACE( "send ddepack %u %lx\n", size, uiHi );
         break;
     case WM_DDE_EXECUTE:
         if (info->lparam)
@@ -1405,7 +1399,7 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
         req->msg     = info->msg;
         req->wparam  = info->wparam;
         req->lparam  = lp;
-        req->timeout = 0;
+        req->timeout = TIMEOUT_INFINITE;
         for (i = 0; i < data->count; i++)
             wine_server_add_data( req, data->data[i], data->size[i] );
         if ((res = wine_server_call( req )))
@@ -1448,13 +1442,13 @@ static BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM 
             uiLo = *lparam;
             memcpy( &hMem, *buffer, size );
             uiHi = (UINT_PTR)hMem;
-            TRACE("recv dde-ack %x mem=%x[%lx]\n", uiLo, uiHi, GlobalSize( hMem ));
+            TRACE("recv dde-ack %lx mem=%lx[%lx]\n", uiLo, uiHi, GlobalSize( hMem ));
         }
         else
         {
             uiLo = LOWORD( *lparam );
             uiHi = HIWORD( *lparam );
-            TRACE("recv dde-ack %x atom=%x\n", uiLo, uiHi);
+            TRACE("recv dde-ack %lx atom=%lx\n", uiLo, uiHi);
         }
 	*lparam = PackDDElParam( WM_DDE_ACK, uiLo, uiHi );
 	break;
@@ -1491,7 +1485,7 @@ static BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM 
 	    {
 		memcpy( ptr, *buffer, size );
 		GlobalUnlock( hMem );
-                TRACE( "exec: pairing c=%08lx s=%08x\n", *lparam, (DWORD)hMem );
+                TRACE( "exec: pairing c=%08lx s=%p\n", *lparam, hMem );
                 if (!dde_add_pair( (HGLOBAL)*lparam, hMem ))
                 {
                     GlobalFree( hMem );
@@ -1911,6 +1905,8 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info
 static inline void call_sendmsg_callback( SENDASYNCPROC callback, HWND hwnd, UINT msg,
                                           ULONG_PTR data, LRESULT result )
 {
+    if (!callback) return;
+
     if (TRACE_ON(relay))
         DPRINTF( "%04x:Call message callback %p (hwnd=%p,msg=%s,data=%08lx,result=%08lx)\n",
                  GetCurrentThreadId(), callback, hwnd, SPY_GetMsgName( msg, hwnd ),
@@ -1948,7 +1944,7 @@ static void *get_hook_proc( void *proc, const WCHAR *module )
  * Peek for a message matching the given parameters. Return FALSE if none available.
  * All pending sent messages are processed before returning.
  */
-static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, int flags )
+static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags )
 {
     LRESULT result;
     ULONG_PTR extra_info = 0;
@@ -2002,7 +1998,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, int flags 
 
         if (res) return FALSE;
 
-        TRACE( "got type %d msg %x (%s) hwnd %p wp %x lp %lx\n",
+        TRACE( "got type %d msg %x (%s) hwnd %p wp %lx lp %lx\n",
                info.type, info.msg.message,
                (info.type == MSG_WINEVENT) ? "MSG_WINEVENT" : SPY_GetMsgName(info.msg.message, info.msg.hwnd),
                info.msg.hwnd, info.msg.wParam, info.msg.lParam );
@@ -2050,7 +2046,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, int flags 
                 }
 
                 if (TRACE_ON(relay))
-                    DPRINTF( "%04x:Call winevent proc %p (hook=%p,event=%x,hwnd=%p,object_id=%x,child_id=%lx,tid=%04x,time=%x)\n",
+                    DPRINTF( "%04x:Call winevent proc %p (hook=%p,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
                              GetCurrentThreadId(), hook_proc,
                              data->hook, info.msg.message, info.msg.hwnd, info.msg.wParam,
                              info.msg.lParam, data->tid, info.msg.time);
@@ -2059,7 +2055,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, int flags 
                                  info.msg.lParam, data->tid, info.msg.time );
 
                 if (TRACE_ON(relay))
-                    DPRINTF( "%04x:Ret  winevent proc %p (hook=%p,event=%x,hwnd=%p,object_id=%x,child_id=%lx,tid=%04x,time=%x)\n",
+                    DPRINTF( "%04x:Ret  winevent proc %p (hook=%p,event=%x,hwnd=%p,object_id=%lx,child_id=%lx,tid=%04x,time=%x)\n",
                              GetCurrentThreadId(), hook_proc,
                              data->hook, info.msg.message, info.msg.hwnd, info.msg.wParam,
                              info.msg.lParam, data->tid, info.msg.time);
@@ -2077,7 +2073,7 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, int flags 
             break;
         case MSG_HARDWARE:
             if (!process_hardware_message( &info.msg, hw_id, extra_info,
-                                           hwnd, first, last, flags & GET_MSG_REMOVE ))
+                                           hwnd, first, last, flags & PM_REMOVE ))
             {
                 TRACE("dropping msg %x\n", info.msg.message );
                 goto next;  /* ignore it */
@@ -2106,6 +2102,9 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, int flags 
         thread_info->receive_info = old_info;
     next:
         HeapFree( GetProcessHeap(), 0, buffer );
+
+        /* if some PM_QS* flags were specified, only handle sent messages from now on */
+        if (HIWORD(flags)) flags = PM_QS_SENDMESSAGE | LOWORD(flags);
     }
 }
 
@@ -2115,10 +2114,10 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, int flags 
  *
  * Process all pending sent messages.
  */
-inline static void process_sent_messages(void)
+static inline void process_sent_messages(void)
 {
     MSG msg;
-    peek_message( &msg, 0, 0, 0, GET_MSG_REMOVE | GET_MSG_SENT_ONLY );
+    peek_message( &msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE );
 }
 
 
@@ -2202,7 +2201,8 @@ static BOOL put_message_in_queue( const struct send_message_info *info, size_t *
     struct packed_message data;
     message_data_t msg_data;
     unsigned int res;
-    int i, timeout = 0;
+    int i;
+    timeout_t timeout = TIMEOUT_INFINITE;
 
     /* Check for INFINITE timeout for compatibility with Win9x,
      * although Windows >= NT does not do so
@@ -2210,8 +2210,12 @@ static BOOL put_message_in_queue( const struct send_message_info *info, size_t *
     if (info->type != MSG_NOTIFY &&
         info->type != MSG_CALLBACK &&
         info->type != MSG_POSTED &&
+        info->timeout &&
         info->timeout != INFINITE)
-        timeout = info->timeout;
+    {
+        /* timeout is signed despite the prototype */
+        timeout = (timeout_t)max( 0, (int)info->timeout ) * -10000;
+    }
 
     data.count = 0;
     if (info->type == MSG_OTHER_PROCESS)
@@ -2296,7 +2300,7 @@ static LRESULT retrieve_reply( const struct send_message_info *info,
 
     HeapFree( GetProcessHeap(), 0, reply_data );
 
-    TRACE( "hwnd %p msg %x (%s) wp %x lp %lx got reply %lx (err=%d)\n",
+    TRACE( "hwnd %p msg %x (%s) wp %lx lp %lx got reply %lx (err=%d)\n",
            info->hwnd, info->msg, SPY_GetMsgName(info->msg, info->hwnd), info->wparam,
            info->lparam, *result, status );
 
@@ -2313,7 +2317,7 @@ static LRESULT send_inter_thread_message( const struct send_message_info *info, 
 {
     size_t reply_size = 0;
 
-    TRACE( "hwnd %p msg %x (%s) wp %x lp %lx\n",
+    TRACE( "hwnd %p msg %x (%s) wp %lx lp %lx\n",
            info->hwnd, info->msg, SPY_GetMsgName(info->msg, info->hwnd), info->wparam, info->lparam );
 
     USER_CheckNotLock();
@@ -2664,7 +2668,7 @@ BOOL WINAPI PostMessageW( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
         return FALSE;
     }
 
-    TRACE( "hwnd %p msg %x (%s) wp %x lp %lx\n",
+    TRACE( "hwnd %p msg %x (%s) wp %lx lp %lx\n",
            hwnd, msg, SPY_GetMsgName(msg, hwnd), wparam, lparam );
 
     info.type   = MSG_POSTED;
@@ -2761,9 +2765,6 @@ BOOL WINAPI PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT f
     struct user_thread_info *thread_info = get_user_thread_info();
     MSG msg;
 
-    if (HIWORD(flags))
-        FIXME("PM_QS_xxxx flags (%04x) are not handled\n", flags >> 16);
-
     USER_CheckNotLock();
 
     /* check for graphics events */
@@ -2773,7 +2774,7 @@ BOOL WINAPI PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT f
 
     for (;;)
     {
-        if (!peek_message( &msg, hwnd, first, last, (flags & PM_REMOVE) ? GET_MSG_REMOVE : 0 ))
+        if (!peek_message( &msg, hwnd, first, last, flags ))
         {
             if (!(flags & PM_NOYIELD))
             {
@@ -2791,7 +2792,7 @@ BOOL WINAPI PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT f
                 /* Have to remove the message explicitly.
                    Do this before handling it, because the message handler may
                    call PeekMessage again */
-                peek_message( &msg, msg.hwnd, msg.message, msg.message, GET_MSG_REMOVE );
+                peek_message( &msg, msg.hwnd, msg.message, msg.message, flags | PM_REMOVE );
             }
             handle_internal_message( msg.hwnd, msg.message, msg.wParam, msg.lParam );
         }
@@ -2930,7 +2931,7 @@ BOOL WINAPI TranslateMessage( const MSG *msg )
     if (msg->message < WM_KEYFIRST || msg->message > WM_KEYLAST) return FALSE;
     if (msg->message != WM_KEYDOWN && msg->message != WM_SYSKEYDOWN) return TRUE;
 
-    TRACE_(key)("Translating key %s (%04x), scancode %02x\n",
+    TRACE_(key)("Translating key %s (%04lx), scancode %02x\n",
                  SPY_GetVKeyName(msg->wParam), msg->wParam, LOBYTE(HIWORD(msg->lParam)));
 
     GetKeyboardState( state );
@@ -3192,13 +3193,12 @@ DWORD WINAPI MsgWaitForMultipleObjectsEx( DWORD count, CONST HANDLE *pHandles,
     }
     SERVER_END_REQ;
 
-    /* Add the thread event to the handle list */
+    /* add the queue to the handle list */
     for (i = 0; i < count; i++) handles[i] = pHandles[i];
     handles[count] = get_server_queue_handle();
 
     ReleaseThunkLock( &lock );
     ret = USER_Driver->pMsgWaitForMultipleObjectsEx( count+1, handles, timeout, mask, flags );
-    if (ret == count+1) ret = count; /* pretend the msg queue is ready */
     if (lock) RestoreThunkLock( lock );
     return ret;
 }
@@ -3321,13 +3321,13 @@ LONG WINAPI BroadcastSystemMessageA( DWORD flags, LPDWORD recipients, UINT msg, 
 {
     if ((*recipients & BSM_APPLICATIONS) || (*recipients == BSM_ALLCOMPONENTS))
     {
-        FIXME( "(%08x,%08x,%08x,%08x,%08lx): semi-stub!\n", flags, *recipients, msg, wp, lp );
+        FIXME( "(%08x,%08x,%08x,%08lx,%08lx): semi-stub!\n", flags, *recipients, msg, wp, lp );
         PostMessageA( HWND_BROADCAST, msg, wp, lp );
         return 1;
     }
     else
     {
-        FIXME( "(%08x,%08x,%08x,%08x,%08lx): stub!\n", flags, *recipients, msg, wp, lp);
+        FIXME( "(%08x,%08x,%08x,%08lx,%08lx): stub!\n", flags, *recipients, msg, wp, lp);
         return -1;
     }
 }
@@ -3340,13 +3340,13 @@ LONG WINAPI BroadcastSystemMessageW( DWORD flags, LPDWORD recipients, UINT msg, 
 {
     if ((*recipients & BSM_APPLICATIONS) || (*recipients == BSM_ALLCOMPONENTS))
     {
-        FIXME( "(%08x,%08x,%08x,%08x,%08lx): semi-stub!\n", flags, *recipients, msg, wp, lp );
+        FIXME( "(%08x,%08x,%08x,%08lx,%08lx): semi-stub!\n", flags, *recipients, msg, wp, lp );
         PostMessageW( HWND_BROADCAST, msg, wp, lp );
         return 1;
     }
     else
     {
-        FIXME( "(%08x,%08x,%08x,%08x,%08lx): stub!\n", flags, *recipients, msg, wp, lp );
+        FIXME( "(%08x,%08x,%08x,%08lx,%08lx): stub!\n", flags, *recipients, msg, wp, lp );
         return -1;
     }
 }
@@ -3400,7 +3400,7 @@ UINT_PTR WINAPI SetTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC proc )
     }
     SERVER_END_REQ;
 
-    TRACE("Added %p %x %p timeout %d\n", hwnd, id, winproc, timeout );
+    TRACE("Added %p %lx %p timeout %d\n", hwnd, id, winproc, timeout );
     return ret;
 }
 
@@ -3431,7 +3431,7 @@ UINT_PTR WINAPI SetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout, TIMERPROC 
     }
     SERVER_END_REQ;
 
-    TRACE("Added %p %x %p timeout %d\n", hwnd, id, winproc, timeout );
+    TRACE("Added %p %lx %p timeout %d\n", hwnd, id, winproc, timeout );
     return ret;
 }
 
@@ -3443,7 +3443,7 @@ BOOL WINAPI KillTimer( HWND hwnd, UINT_PTR id )
 {
     BOOL ret;
 
-    TRACE("%p %d\n", hwnd, id );
+    TRACE("%p %ld\n", hwnd, id );
 
     SERVER_START_REQ( kill_win_timer )
     {
@@ -3464,7 +3464,7 @@ BOOL WINAPI KillSystemTimer( HWND hwnd, UINT_PTR id )
 {
     BOOL ret;
 
-    TRACE("%p %d\n", hwnd, id );
+    TRACE("%p %ld\n", hwnd, id );
 
     SERVER_START_REQ( kill_win_timer )
     {

@@ -23,13 +23,8 @@
 #include "control_private.h"
 #include "pin.h"
 
-#include "uuids.h"
-#include "aviriff.h"
-#include "mmreg.h"
 #include "vfwmsgs.h"
 #include "amvideo.h"
-
-#include "fourcc.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -60,7 +55,7 @@ static inline Parser_OutputPin *impl_from_IMediaSeeking( IMediaSeeking *iface )
 }
 
 
-HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMPLE fnProcessSample, PFN_QUERY_ACCEPT fnQueryAccept, PFN_PRE_CONNECT fnPreConnect)
+HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMPLE fnProcessSample, PFN_QUERY_ACCEPT fnQueryAccept, PFN_PRE_CONNECT fnPreConnect, PFN_CLEANUP fnCleanup)
 {
     HRESULT hr;
     PIN_INFO piInput;
@@ -71,8 +66,10 @@ HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMP
     pParser->lpVtbl = &Parser_Vtbl;
     pParser->refCount = 1;
     InitializeCriticalSection(&pParser->csFilter);
+    pParser->csFilter.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ParserImpl.csFilter");
     pParser->state = State_Stopped;
     pParser->pClock = NULL;
+    pParser->fnCleanup = fnCleanup;
     ZeroMemory(&pParser->filterInfo, sizeof(FILTER_INFO));
 
     pParser->cStreams = 0;
@@ -93,6 +90,7 @@ HRESULT Parser_Create(ParserImpl* pParser, const CLSID* pClsid, PFN_PROCESS_SAMP
     else
     {
         CoTaskMemFree(pParser->ppPins);
+        pParser->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&pParser->csFilter);
         CoTaskMemFree(pParser);
     }
@@ -179,23 +177,39 @@ static ULONG WINAPI Parser_Release(IBaseFilter * iface)
     ParserImpl *This = (ParserImpl *)iface;
     ULONG refCount = InterlockedDecrement(&This->refCount);
 
-    TRACE("(%p/%p)->() Release from %d\n", This, iface, refCount + 1);
+    TRACE("(%p)->() Release from %d\n", This, refCount + 1);
     
     if (!refCount)
     {
         ULONG i;
 
-        DeleteCriticalSection(&This->csFilter);
+        if (This->fnCleanup)
+            This->fnCleanup(This);
+
         if (This->pClock)
             IReferenceClock_Release(This->pClock);
         
         for (i = 0; i < This->cStreams + 1; i++)
+        {
+            IPin *pConnectedTo;
+
+            if (SUCCEEDED(IPin_ConnectedTo(This->ppPins[i], &pConnectedTo)))
+            {
+                IPin_Disconnect(pConnectedTo);
+                IPin_Release(pConnectedTo);
+            }
+            IPin_Disconnect(This->ppPins[i]);
+
             IPin_Release(This->ppPins[i]);
+        }
         
-        HeapFree(GetProcessHeap(), 0, This->ppPins);
+        CoTaskMemFree(This->ppPins);
         This->lpVtbl = NULL;
+
+        This->csFilter.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->csFilter);
         
-        TRACE("Destroying AVI splitter\n");
+        TRACE("Destroying parser\n");
         CoTaskMemFree(This);
         
         return 0;
@@ -208,9 +222,11 @@ static ULONG WINAPI Parser_Release(IBaseFilter * iface)
 
 static HRESULT WINAPI Parser_GetClassID(IBaseFilter * iface, CLSID * pClsid)
 {
+    ParserImpl *This = (ParserImpl *)iface;
+
     TRACE("(%p)\n", pClsid);
 
-    *pClsid = CLSID_AviSplitter;
+    *pClsid = This->clsid;
 
     return S_OK;
 }
@@ -486,7 +502,7 @@ HRESULT Parser_AddPin(ParserImpl * This, PIN_INFO * piOutput, ALLOCATOR_PROPERTI
 
     ppOldPins = This->ppPins;
 
-    This->ppPins = HeapAlloc(GetProcessHeap(), 0, (This->cStreams + 2) * sizeof(IPin *));
+    This->ppPins = CoTaskMemAlloc((This->cStreams + 2) * sizeof(IPin *));
     memcpy(This->ppPins, ppOldPins, (This->cStreams + 1) * sizeof(IPin *));
 
     hr = Parser_OutputPin_Construct(piOutput, props, NULL, Parser_OutputPin_QueryAccept, amt, fSamplesPerSec, &This->csFilter, This->ppPins + This->cStreams + 1);
@@ -497,11 +513,11 @@ HRESULT Parser_AddPin(ParserImpl * This, PIN_INFO * piOutput, ALLOCATOR_PROPERTI
         ((Parser_OutputPin *)(This->ppPins[This->cStreams + 1]))->dwLength = dwLength;
         ((Parser_OutputPin *)(This->ppPins[This->cStreams + 1]))->pin.pin.pUserData = (LPVOID)This->ppPins[This->cStreams + 1];
         This->cStreams++;
-        HeapFree(GetProcessHeap(), 0, ppOldPins);
+        CoTaskMemFree(ppOldPins);
     }
     else
     {
-        HeapFree(GetProcessHeap(), 0, This->ppPins);
+        CoTaskMemFree(This->ppPins);
         This->ppPins = ppOldPins;
         ERR("Failed with error %x\n", hr);
     }
@@ -517,7 +533,7 @@ static HRESULT Parser_RemoveOutputPins(ParserImpl * This)
     IPin ** ppOldPins = This->ppPins;
 
     /* reduce the pin array down to 1 (just our input pin) */
-    This->ppPins = HeapAlloc(GetProcessHeap(), 0, sizeof(IPin *) * 1);
+    This->ppPins = CoTaskMemAlloc(sizeof(IPin *) * 1);
     memcpy(This->ppPins, ppOldPins, sizeof(IPin *) * 1);
 
     for (i = 0; i < This->cStreams; i++)
@@ -527,7 +543,7 @@ static HRESULT Parser_RemoveOutputPins(ParserImpl * This)
     }
 
     This->cStreams = 0;
-    HeapFree(GetProcessHeap(), 0, ppOldPins);
+    CoTaskMemFree(ppOldPins);
 
     return S_OK;
 }
@@ -596,7 +612,7 @@ static const IMediaSeekingVtbl Parser_Seeking_Vtbl =
     MediaSeekingImpl_GetPreroll
 };
 
-HRESULT WINAPI Parser_OutputPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * ppv)
+static HRESULT WINAPI Parser_OutputPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * ppv)
 {
     Parser_OutputPin *This = (Parser_OutputPin *)iface;
 
@@ -745,13 +761,32 @@ static HRESULT WINAPI Parser_InputPin_Disconnect(IPin * iface)
     return hr;
 }
 
+HRESULT WINAPI Parser_PullPin_ReceiveConnection(IPin * iface, IPin * pReceivePin, const AM_MEDIA_TYPE * pmt)
+{
+    HRESULT hr;
+
+    TRACE("()\n");
+
+    hr = PullPin_ReceiveConnection(iface, pReceivePin, pmt);
+    if (FAILED(hr))
+    {
+        IPinImpl *This = (IPinImpl *)iface;
+
+        EnterCriticalSection(This->pCritSec);
+        Parser_RemoveOutputPins((ParserImpl *)This->pinInfo.pFilter);
+        LeaveCriticalSection(This->pCritSec);
+    }
+
+    return hr;
+}
+
 static const IPinVtbl Parser_InputPin_Vtbl =
 {
     PullPin_QueryInterface,
     IPinImpl_AddRef,
     PullPin_Release,
     OutputPin_Connect,
-    PullPin_ReceiveConnection,
+    Parser_PullPin_ReceiveConnection,
     Parser_InputPin_Disconnect,
     IPinImpl_ConnectedTo,
     IPinImpl_ConnectionMediaType,

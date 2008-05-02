@@ -49,12 +49,10 @@
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 
 #include "wine/exception.h"
 #include "wine/debug.h"
-#include "excpt.h"
 #include "dbghelp_private.h"
 #include "wine/mscvpdb.h"
 
@@ -321,7 +319,7 @@ struct codeview_type_parse
     DWORD               num;
 };
 
-static inline const void* codeview_jump_to_type(struct codeview_type_parse* ctp, DWORD idx)
+static inline const void* codeview_jump_to_type(const struct codeview_type_parse* ctp, DWORD idx)
 {
     if (idx < FIRST_DEFINABLE_TYPE) return NULL;
     idx -= FIRST_DEFINABLE_TYPE;
@@ -344,14 +342,13 @@ static int codeview_add_type(unsigned int typeno, struct symt* dt)
     {
         cv_current_module->num_defined_types += 0x100;
         if (cv_current_module->defined_types)
-            cv_current_module->defined_types = (struct symt**)
-                HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 
-                            cv_current_module->defined_types,
+            cv_current_module->defined_types = HeapReAlloc(GetProcessHeap(),
+                            HEAP_ZERO_MEMORY, cv_current_module->defined_types,
                             cv_current_module->num_defined_types * sizeof(struct symt*));
         else
-            cv_current_module->defined_types = (struct symt**)
-                HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                          cv_current_module->num_defined_types * sizeof(struct symt*));
+            cv_current_module->defined_types = HeapAlloc(GetProcessHeap(),
+                            HEAP_ZERO_MEMORY,
+                            cv_current_module->num_defined_types * sizeof(struct symt*));
 
         if (cv_current_module->defined_types == NULL) return FALSE;
     }
@@ -755,12 +752,9 @@ static struct symt* codeview_add_type_struct(struct codeview_type_parse* ctp,
 
 static struct symt* codeview_new_func_signature(struct codeview_type_parse* ctp, 
                                                 struct symt* existing,
-                                                unsigned ret_type,
-                                                unsigned args_list,
                                                 enum CV_call_e call_conv)
 {
     struct symt_function_signature*     sym;
-    const union codeview_reftype*       reftype;
 
     if (existing)
     {
@@ -769,10 +763,19 @@ static struct symt* codeview_new_func_signature(struct codeview_type_parse* ctp,
     }
     else
     {
-        sym = symt_new_function_signature(ctp->module, 
-                                          codeview_fetch_type(ctp, ret_type),
-                                          call_conv);
+        sym = symt_new_function_signature(ctp->module, NULL, call_conv);
     }
+    return &sym->symt;
+}
+
+static void codeview_add_func_signature_args(struct codeview_type_parse* ctp,
+                                             struct symt_function_signature* sym,
+                                             unsigned ret_type,
+                                             unsigned args_list)
+{
+    const union codeview_reftype*       reftype;
+
+    sym->rettype = codeview_fetch_type(ctp, ret_type);
     if (args_list && (reftype = codeview_jump_to_type(ctp, args_list)))
     {
         int i;
@@ -792,8 +795,6 @@ static struct symt* codeview_new_func_signature(struct codeview_type_parse* ctp,
             FIXME("Unexpected leaf %x for signature's pmt\n", reftype->generic.id);
         }
     }
-
-    return &sym->symt;
 }
 
 static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
@@ -979,34 +980,55 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         break;
 
     case LF_PROCEDURE_V1:
-        symt = codeview_new_func_signature(ctp, existing,
-                                           type->procedure_v1.rvtype,
-                                           details ? type->procedure_v1.arglist : 0,
-                                           type->procedure_v1.call);
+        symt = codeview_new_func_signature(ctp, existing, type->procedure_v1.call);
+        if (details)
+        {
+            codeview_add_type(curr_type, symt);
+            codeview_add_func_signature_args(ctp,
+                                             (struct symt_function_signature*)symt,
+                                             type->procedure_v1.rvtype,
+                                             type->procedure_v1.arglist);
+        }
         break;
     case LF_PROCEDURE_V2:
-        symt = codeview_new_func_signature(ctp, existing,
-                                           type->procedure_v2.rvtype,
-                                           details ? type->procedure_v2.arglist : 0,
-                                           type->procedure_v2.call);
+        symt = codeview_new_func_signature(ctp, existing,type->procedure_v2.call);
+        if (details)
+        {
+            codeview_add_type(curr_type, symt);
+            codeview_add_func_signature_args(ctp,
+                                             (struct symt_function_signature*)symt,
+                                             type->procedure_v2.rvtype,
+                                             type->procedure_v2.arglist);
+        }
         break;
+
     case LF_MFUNCTION_V1:
         /* FIXME: for C++, this is plain wrong, but as we don't use arg types
          * nor class information, this would just do for now
          */
-        symt = codeview_new_func_signature(ctp, existing,
-                                           type->mfunction_v1.rvtype,
-                                           details ? type->mfunction_v1.arglist : 0,
-                                           type->mfunction_v1.call);
+        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v1.call);
+        if (details)
+        {
+            codeview_add_type(curr_type, symt);
+            codeview_add_func_signature_args(ctp,
+                                             (struct symt_function_signature*)symt,
+                                             type->mfunction_v1.rvtype,
+                                             type->mfunction_v1.arglist);
+        }
         break;
     case LF_MFUNCTION_V2:
         /* FIXME: for C++, this is plain wrong, but as we don't use arg types
          * nor class information, this would just do for now
          */
-        symt = codeview_new_func_signature(ctp, existing,
-                                           type->mfunction_v2.rvtype,
-                                           details ? type->mfunction_v2.arglist : 0,
-                                           type->mfunction_v2.call);
+        symt = codeview_new_func_signature(ctp, existing, type->mfunction_v2.call);
+        if (details)
+        {
+            codeview_add_type(curr_type, symt);
+            codeview_add_func_signature_args(ctp,
+                                             (struct symt_function_signature*)symt,
+                                             type->mfunction_v2.rvtype,
+                                             type->mfunction_v2.arglist);
+        }
         break;
 
     case LF_VTSHAPE_V1:
@@ -1101,8 +1123,8 @@ static struct codeview_linetab* codeview_snarf_linetab(struct module* module,
      * There is one header for each segment, so that we can reach in
      * and pull bits as required.
      */
-    lt_hdr = (struct codeview_linetab*)
-        HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (nseg + 1) * sizeof(*lt_hdr));
+    lt_hdr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                (nseg + 1) * sizeof(*lt_hdr));
     if (lt_hdr == NULL)
     {
         goto leave;
@@ -1856,7 +1878,7 @@ static void pdb_convert_symbol_file(const PDB_SYMBOLS* symbols,
     }
 }
 
-static BOOL CALLBACK pdb_match(char* file, void* user)
+static BOOL CALLBACK pdb_match(const char* file, void* user)
 {
     /* accept first file that exists */
     HANDLE h = CreateFileA(file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -1901,7 +1923,7 @@ static HANDLE open_pdb_file(const struct process* pcs,
 }
 
 static void pdb_process_types(const struct msc_debug_info* msc_dbg, 
-                              const char* image, struct pdb_lookup* pdb_lookup)
+                              const char* image, const struct pdb_lookup* pdb_lookup)
 {
     BYTE*       types_image = NULL;
 
@@ -2073,9 +2095,10 @@ static BOOL pdb_process_internal(const struct process* pcs,
 
 static void pdb_process_symbol_imports(const struct process* pcs, 
                                        const struct msc_debug_info* msc_dbg,
-                                       PDB_SYMBOLS* symbols, 
+                                       const PDB_SYMBOLS* symbols,
                                        const void* symbols_image,
-                                       char* image, struct pdb_lookup* pdb_lookup,
+                                       const char* image,
+                                       const struct pdb_lookup* pdb_lookup,
                                        unsigned module_index)
 {
     if (module_index == -1 && symbols && symbols->pdbimport_size)
@@ -2139,7 +2162,7 @@ static BOOL pdb_process_internal(const struct process* pcs,
 
     /* Open and map() .PDB file */
     if ((hFile = open_pdb_file(pcs, pdb_lookup)) == NULL ||
-        ((hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
+        ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
         ((image = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) == NULL))
     {
         WARN("Unable to open .PDB file: %s\n", pdb_lookup->filename);
@@ -2248,7 +2271,9 @@ static BOOL pdb_process_file(const struct process* pcs,
         else
             msc_dbg->module->module.PdbSig70 = pdb_lookup->u.ds.guid;
         msc_dbg->module->module.PdbAge = pdb_lookup->age;
-        strcpy(msc_dbg->module->module.LoadedPdbName, pdb_lookup->filename);
+        MultiByteToWideChar(CP_ACP, 0, pdb_lookup->filename, -1,
+                            msc_dbg->module->module.LoadedPdbName,
+                            sizeof(msc_dbg->module->module.LoadedPdbName) / sizeof(WCHAR));
         /* FIXME: we could have a finer grain here */
         msc_dbg->module->module.LineNumbers = TRUE;
         msc_dbg->module->module.GlobalSymbols = TRUE;
@@ -2265,9 +2290,9 @@ BOOL pdb_fetch_file_info(struct pdb_lookup* pdb_lookup)
     char*               image = NULL;
     BOOL                ret = TRUE;
 
-    if ((hFile = CreateFileA(pdb_lookup->filename, GENERIC_READ, FILE_SHARE_READ, NULL, 
+    if ((hFile = CreateFileA(pdb_lookup->filename, GENERIC_READ, FILE_SHARE_READ, NULL,
                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE ||
-        ((hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
+        ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
         ((image = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) == NULL))
     {
         WARN("Unable to open .PDB file: %s\n", pdb_lookup->filename);
@@ -2281,7 +2306,7 @@ BOOL pdb_fetch_file_info(struct pdb_lookup* pdb_lookup)
 
     if (image) UnmapViewOfFile(image);
     if (hMap) CloseHandle(hMap);
-    if (hFile) CloseHandle(hFile);
+    if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
 
     return ret;
 }
@@ -2416,8 +2441,8 @@ static BOOL codeview_process_info(const struct process* pcs,
         break;
     }
     default:
-        ERR("Unknown CODEVIEW signature %.4s in module %s\n",
-            (const char*)signature, msc_dbg->module->module.ModuleName);
+        ERR("Unknown CODEVIEW signature %08x in module %s\n",
+            *signature, debugstr_w(msc_dbg->module->module.ModuleName));
         break;
     }
     if (ret)

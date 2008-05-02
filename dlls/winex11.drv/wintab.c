@@ -367,8 +367,9 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
             target = &devices[loop];
             cursor = &gSysCursor[cursor_target];
 
+            X11DRV_expect_error(data->display, Tablet_ErrorHandler, NULL);
             opendevice = pXOpenDevice(data->display,target->id);
-            if (opendevice)
+            if (!X11DRV_check_error() && opendevice)
             {
                 unsigned char map[32];
                 int i;
@@ -757,7 +758,7 @@ int X11DRV_GetCurrentPacket(LPWTPACKET *packet)
 }
 
 
-inline static int CopyTabletData(LPVOID target, LPVOID src, INT size)
+static inline int CopyTabletData(LPVOID target, LPVOID src, INT size)
 {
     /*
      * It is valid to call CopyTabletData with NULL.

@@ -43,6 +43,9 @@
 #ifdef HAVE_NETINET_IN_H
 # include <netinet/in.h>
 #endif
+#ifdef HAVE_NETINET_TCP_H
+# include <netinet/tcp.h>
+#endif
 #ifdef HAVE_ARPA_INET_H
 # include <arpa/inet.h>
 #endif
@@ -57,7 +60,6 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "winerror.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wine/unicode.h"
 
@@ -71,18 +73,22 @@
 #include "rpc_server.h"
 #include "epm_towers.h"
 
+#ifndef SOL_TCP
+# define SOL_TCP IPPROTO_TCP
+#endif
+
 WINE_DEFAULT_DEBUG_CHANNEL(rpc);
 
-static CRITICAL_SECTION connection_pool_cs;
-static CRITICAL_SECTION_DEBUG connection_pool_cs_debug =
+static CRITICAL_SECTION assoc_list_cs;
+static CRITICAL_SECTION_DEBUG assoc_list_cs_debug =
 {
-    0, 0, &connection_pool_cs,
-    { &connection_pool_cs_debug.ProcessLocksList, &connection_pool_cs_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": connection_pool") }
+    0, 0, &assoc_list_cs,
+    { &assoc_list_cs_debug.ProcessLocksList, &assoc_list_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": assoc_list_cs") }
 };
-static CRITICAL_SECTION connection_pool_cs = { &connection_pool_cs_debug, -1, 0, 0, 0, 0 };
+static CRITICAL_SECTION assoc_list_cs = { &assoc_list_cs_debug, -1, 0, 0, 0, 0 };
 
-static struct list connection_pool = LIST_INIT(connection_pool);
+static struct list assoc_list = LIST_INIT(assoc_list);
 
 /**** ncacn_np support ****/
 
@@ -162,8 +168,33 @@ static RPC_STATUS rpcrt4_conn_open_pipe(RpcConnection *Connection, LPCSTR pname,
   TRACE("connecting to %s\n", pname);
 
   while (TRUE) {
+    DWORD dwFlags = 0;
+    if (Connection->QOS)
+    {
+        dwFlags = SECURITY_SQOS_PRESENT;
+        switch (Connection->QOS->qos->ImpersonationType)
+        {
+            case RPC_C_IMP_LEVEL_DEFAULT:
+                /* FIXME: what to do here? */
+                break;
+            case RPC_C_IMP_LEVEL_ANONYMOUS:
+                dwFlags |= SECURITY_ANONYMOUS;
+                break;
+            case RPC_C_IMP_LEVEL_IDENTIFY:
+                dwFlags |= SECURITY_IDENTIFICATION;
+                break;
+            case RPC_C_IMP_LEVEL_IMPERSONATE:
+                dwFlags |= SECURITY_IMPERSONATION;
+                break;
+            case RPC_C_IMP_LEVEL_DELEGATE:
+                dwFlags |= SECURITY_DELEGATION;
+                break;
+        }
+        if (Connection->QOS->qos->IdentityTracking == RPC_C_QOS_IDENTIFY_DYNAMIC)
+            dwFlags |= SECURITY_CONTEXT_TRACKING;
+    }
     pipe = CreateFileA(pname, GENERIC_READ|GENERIC_WRITE, 0, NULL,
-                       OPEN_EXISTING, 0, 0);
+                       OPEN_EXISTING, dwFlags, 0);
     if (pipe != INVALID_HANDLE_VALUE) break;
     err = GetLastError();
     if (err == ERROR_PIPE_BUSY) {
@@ -275,7 +306,12 @@ static RPC_STATUS rpcrt4_protseq_ncacn_np_open_endpoint(RpcServerProtseq *protse
   strcat(strcpy(pname, prefix), Connection->Endpoint);
   r = rpcrt4_conn_create_pipe(Connection, pname);
   I_RpcFree(pname);
-    
+
+  EnterCriticalSection(&protseq->cs);
+  Connection->Next = protseq->conn;
+  protseq->conn = Connection;
+  LeaveCriticalSection(&protseq->cs);
+
   return r;
 }
 
@@ -329,21 +365,40 @@ static int rpcrt4_conn_np_read(RpcConnection *Connection,
                         void *buffer, unsigned int count)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  DWORD dwRead = 0;
-  if (!ReadFile(npc->pipe, buffer, count, &dwRead, NULL) &&
-      (GetLastError() != ERROR_MORE_DATA))
-    return -1;
-  return dwRead;
+  char *buf = buffer;
+  BOOL ret = TRUE;
+  unsigned int bytes_left = count;
+
+  while (bytes_left)
+  {
+    DWORD bytes_read;
+    ret = ReadFile(npc->pipe, buf, bytes_left, &bytes_read, NULL);
+    if (!ret || !bytes_read)
+        break;
+    bytes_left -= bytes_read;
+    buf += bytes_read;
+  }
+  return ret ? count : -1;
 }
 
 static int rpcrt4_conn_np_write(RpcConnection *Connection,
                              const void *buffer, unsigned int count)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  DWORD dwWritten = 0;
-  if (!WriteFile(npc->pipe, buffer, count, &dwWritten, NULL))
-    return -1;
-  return dwWritten;
+  const char *buf = buffer;
+  BOOL ret = TRUE;
+  unsigned int bytes_left = count;
+
+  while (bytes_left)
+  {
+    DWORD bytes_written;
+    ret = WriteFile(npc->pipe, buf, count, &bytes_written, NULL);
+    if (!ret || !bytes_written)
+        break;
+    bytes_left -= bytes_written;
+    buf += bytes_written;
+  }
+  return ret ? count : -1;
 }
 
 static int rpcrt4_conn_np_close(RpcConnection *Connection)
@@ -693,6 +748,8 @@ static RPC_STATUS rpcrt4_ncacn_ip_tcp_open(RpcConnection* Connection)
 
   for (ai_cur = ai; ai_cur; ai_cur = ai_cur->ai_next)
   {
+    int val;
+
     if (TRACE_ON(rpc))
     {
       char host[256];
@@ -716,6 +773,11 @@ static RPC_STATUS rpcrt4_ncacn_ip_tcp_open(RpcConnection* Connection)
       close(sock);
       continue;
     }
+
+    /* RPC depends on having minimal latency so disable the Nagle algorithm */
+    val = 1;
+    setsockopt(sock, SOL_TCP, TCP_NODELAY, &val, sizeof(val));
+
     tcpc->sock = sock;
 
     freeaddrinfo(ai);
@@ -1291,7 +1353,7 @@ RPC_STATUS RPCRT4_CloseConnection(RpcConnection* Connection)
 
 RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
     LPCSTR Protseq, LPCSTR NetworkAddr, LPCSTR Endpoint,
-    LPCSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcBinding* Binding)
+    LPCWSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcQualityOfService *QOS)
 {
   const struct connection_ops *ops;
   RpcConnection* NewConnection;
@@ -1309,14 +1371,21 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
   NewConnection->ops = ops;
   NewConnection->NetworkAddr = RPCRT4_strdupA(NetworkAddr);
   NewConnection->Endpoint = RPCRT4_strdupA(Endpoint);
-  NewConnection->Used = Binding;
+  NewConnection->NetworkOptions = RPCRT4_strdupW(NetworkOptions);
   NewConnection->MaxTransmissionSize = RPC_MAX_PACKET_SIZE;
   memset(&NewConnection->ActiveInterface, 0, sizeof(NewConnection->ActiveInterface));
   NewConnection->NextCallId = 1;
 
   SecInvalidateHandle(&NewConnection->ctx);
+  memset(&NewConnection->exp, 0, sizeof(NewConnection->exp));
+  NewConnection->attr = 0;
   if (AuthInfo) RpcAuthInfo_AddRef(AuthInfo);
   NewConnection->AuthInfo = AuthInfo;
+  NewConnection->encryption_auth_len = 0;
+  NewConnection->signature_auth_len = 0;
+  if (QOS) RpcQualityOfService_AddRef(QOS);
+  NewConnection->QOS = QOS;
+
   list_init(&NewConnection->conn_pool_entry);
 
   TRACE("connection: %p\n", NewConnection);
@@ -1325,37 +1394,116 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
   return RPC_S_OK;
 }
 
-RpcConnection *RPCRT4_GetIdleConnection(const RPC_SYNTAX_IDENTIFIER *InterfaceId,
-    const RPC_SYNTAX_IDENTIFIER *TransferSyntax, LPCSTR Protseq, LPCSTR NetworkAddr,
-    LPCSTR Endpoint, RpcAuthInfo* AuthInfo)
+RPC_STATUS RPCRT4_GetAssociation(LPCSTR Protseq, LPCSTR NetworkAddr,
+                                 LPCSTR Endpoint, LPCWSTR NetworkOptions,
+                                 RpcAssoc **assoc_out)
+{
+  RpcAssoc *assoc;
+
+  EnterCriticalSection(&assoc_list_cs);
+  LIST_FOR_EACH_ENTRY(assoc, &assoc_list, RpcAssoc, entry)
+  {
+    if (!strcmp(Protseq, assoc->Protseq) &&
+        !strcmp(NetworkAddr, assoc->NetworkAddr) &&
+        !strcmp(Endpoint, assoc->Endpoint) &&
+        ((!assoc->NetworkOptions && !NetworkOptions) || !strcmpW(NetworkOptions, assoc->NetworkOptions)))
+    {
+      assoc->refs++;
+      *assoc_out = assoc;
+      LeaveCriticalSection(&assoc_list_cs);
+      TRACE("using existing assoc %p\n", assoc);
+      return RPC_S_OK;
+    }
+  }
+
+  assoc = HeapAlloc(GetProcessHeap(), 0, sizeof(*assoc));
+  if (!assoc)
+  {
+    LeaveCriticalSection(&assoc_list_cs);
+    return RPC_S_OUT_OF_RESOURCES;
+  }
+  assoc->refs = 1;
+  list_init(&assoc->connection_pool);
+  InitializeCriticalSection(&assoc->cs);
+  assoc->Protseq = RPCRT4_strdupA(Protseq);
+  assoc->NetworkAddr = RPCRT4_strdupA(NetworkAddr);
+  assoc->Endpoint = RPCRT4_strdupA(Endpoint);
+  assoc->NetworkOptions = NetworkOptions ? RPCRT4_strdupW(NetworkOptions) : NULL;
+  assoc->assoc_group_id = 0;
+  list_add_head(&assoc_list, &assoc->entry);
+  *assoc_out = assoc;
+
+  LeaveCriticalSection(&assoc_list_cs);
+
+  TRACE("new assoc %p\n", assoc);
+
+  return RPC_S_OK;
+}
+
+ULONG RpcAssoc_Release(RpcAssoc *assoc)
+{
+  ULONG refs;
+
+  EnterCriticalSection(&assoc_list_cs);
+  refs = --assoc->refs;
+  if (!refs)
+    list_remove(&assoc->entry);
+  LeaveCriticalSection(&assoc_list_cs);
+
+  if (!refs)
+  {
+    RpcConnection *Connection, *cursor2;
+
+    TRACE("destroying assoc %p\n", assoc);
+
+    LIST_FOR_EACH_ENTRY_SAFE(Connection, cursor2, &assoc->connection_pool, RpcConnection, conn_pool_entry)
+    {
+      list_remove(&Connection->conn_pool_entry);
+      RPCRT4_DestroyConnection(Connection);
+    }
+
+    HeapFree(GetProcessHeap(), 0, assoc->NetworkOptions);
+    HeapFree(GetProcessHeap(), 0, assoc->Endpoint);
+    HeapFree(GetProcessHeap(), 0, assoc->NetworkAddr);
+    HeapFree(GetProcessHeap(), 0, assoc->Protseq);
+
+    HeapFree(GetProcessHeap(), 0, assoc);
+  }
+
+  return refs;
+}
+
+RpcConnection *RpcAssoc_GetIdleConnection(RpcAssoc *assoc,
+    const RPC_SYNTAX_IDENTIFIER *InterfaceId,
+    const RPC_SYNTAX_IDENTIFIER *TransferSyntax, const RpcAuthInfo *AuthInfo,
+    const RpcQualityOfService *QOS)
 {
   RpcConnection *Connection;
   /* try to find a compatible connection from the connection pool */
-  EnterCriticalSection(&connection_pool_cs);
-  LIST_FOR_EACH_ENTRY(Connection, &connection_pool, RpcConnection, conn_pool_entry)
-    if ((Connection->AuthInfo == AuthInfo) &&
-        !memcmp(&Connection->ActiveInterface, InterfaceId,
-           sizeof(RPC_SYNTAX_IDENTIFIER)) &&
-        !strcmp(rpcrt4_conn_get_name(Connection), Protseq) &&
-        !strcmp(Connection->NetworkAddr, NetworkAddr) &&
-        !strcmp(Connection->Endpoint, Endpoint))
+  EnterCriticalSection(&assoc->cs);
+  LIST_FOR_EACH_ENTRY(Connection, &assoc->connection_pool, RpcConnection, conn_pool_entry)
+    if (!memcmp(&Connection->ActiveInterface, InterfaceId,
+                sizeof(RPC_SYNTAX_IDENTIFIER)) &&
+        RpcAuthInfo_IsEqual(Connection->AuthInfo, AuthInfo) &&
+        RpcQualityOfService_IsEqual(Connection->QOS, QOS))
     {
       list_remove(&Connection->conn_pool_entry);
-      LeaveCriticalSection(&connection_pool_cs);
+      LeaveCriticalSection(&assoc->cs);
       TRACE("got connection from pool %p\n", Connection);
       return Connection;
     }
 
-  LeaveCriticalSection(&connection_pool_cs);
+  LeaveCriticalSection(&assoc->cs);
   return NULL;
 }
 
-void RPCRT4_ReleaseIdleConnection(RpcConnection *Connection)
+void RpcAssoc_ReleaseIdleConnection(RpcAssoc *assoc, RpcConnection *Connection)
 {
   assert(!Connection->server);
-  EnterCriticalSection(&connection_pool_cs);
-  list_add_head(&connection_pool, &Connection->conn_pool_entry);
-  LeaveCriticalSection(&connection_pool_cs);
+  EnterCriticalSection(&assoc->cs);
+  if (!assoc->assoc_group_id) assoc->assoc_group_id = Connection->assoc_group_id;
+  list_add_head(&assoc->connection_pool, &Connection->conn_pool_entry);
+  LeaveCriticalSection(&assoc->cs);
 }
 
 
@@ -1367,7 +1515,7 @@ RPC_STATUS RPCRT4_SpawnConnection(RpcConnection** Connection, RpcConnection* Old
                                 rpcrt4_conn_get_name(OldConnection),
                                 OldConnection->NetworkAddr,
                                 OldConnection->Endpoint, NULL,
-                                OldConnection->AuthInfo, NULL);
+                                OldConnection->AuthInfo, OldConnection->QOS);
   if (err == RPC_S_OK)
     rpcrt4_conn_handoff(OldConnection, *Connection);
   return err;
@@ -1380,7 +1528,9 @@ RPC_STATUS RPCRT4_DestroyConnection(RpcConnection* Connection)
   RPCRT4_CloseConnection(Connection);
   RPCRT4_strfree(Connection->Endpoint);
   RPCRT4_strfree(Connection->NetworkAddr);
+  HeapFree(GetProcessHeap(), 0, Connection->NetworkOptions);
   if (Connection->AuthInfo) RpcAuthInfo_Release(Connection->AuthInfo);
+  if (Connection->QOS) RpcQualityOfService_Release(Connection->QOS);
   HeapFree(GetProcessHeap(), 0, Connection);
   return RPC_S_OK;
 }

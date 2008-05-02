@@ -25,8 +25,9 @@ BEGIN
     POPUP "&Dosya"
     BEGIN
         MENUITEM "&Yeni\tCtrl+N",         ID_FILE_NEW
-        MENUITEM "&Aç\tCtrl+O",           ID_FILE_OPEN
+        MENUITEM "&Aç...\tCtrl+O",        ID_FILE_OPEN
         MENUITEM "&Kaydet\tCtrl+S",       ID_FILE_SAVE
+        MENUITEM "&Farklý Kaydet...",     ID_FILE_SAVEAS
         MENUITEM SEPARATOR
         MENUITEM "&Çýk",          ID_FILE_EXIT
     END
@@ -34,10 +35,12 @@ BEGIN
     BEGIN
         MENUITEM "&Geri Al\tCtrl+Z",            ID_EDIT_UNDO
         MENUITEM "&Yinele\tCtrl+Y",             ID_EDIT_REDO
-        MENUITEM "&Tümünü seç\tCtrl+A",         ID_EDIT_SELECTALL
         MENUITEM SEPARATOR
         MENUITEM "Ke&s\tCtrl+X",                ID_EDIT_CUT
         MENUITEM "&Kopyala\tCtrl+C",            ID_EDIT_COPY
+        MENUITEM "Ya&pýþtýr\tCtrl+V",           ID_EDIT_PASTE
+        MENUITEM "&Sil\tDel",                   ID_EDIT_CLEAR
+        MENUITEM "&Tümünü seç\tCtrl+A",         ID_EDIT_SELECTALL
         MENUITEM SEPARATOR
         MENUITEM "Salt-&okunur",                ID_EDIT_READONLY
         MENUITEM "&Deðiþmiþ",                   ID_EDIT_MODIFIED
@@ -50,6 +53,12 @@ BEGIN
             MENUITEM "Paragra&f biçimi",            ID_EDIT_PARAFORMAT
             MENUITEM "&Metni al",                   ID_EDIT_GETTEXT
         END
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Toolbar",        ID_TOGGLE_TOOLBAR
+        MENUITEM "&Formatbar",      ID_TOGGLE_FORMATBAR
+        MENUITEM "&Statusbar",      ID_TOGGLE_STATUSBAR
     END
     POPUP "&Biçim"
     BEGIN

@@ -331,7 +331,6 @@ static HRESULT DELNODE_recurse_dirtree(LPWSTR fname, DWORD flags)
     DWORD fattrs = GetFileAttributesW(fname);
     HRESULT ret = E_FAIL;
 
-    static const WCHAR backslash[] = {'\\',0};
     static const WCHAR asterisk[] = {'*',0};
     static const WCHAR dot[] = {'.',0};
     static const WCHAR dotdot[] = {'.','.',0};
@@ -344,11 +343,7 @@ static HRESULT DELNODE_recurse_dirtree(LPWSTR fname, DWORD flags)
         int fname_len = lstrlenW(fname);
 
         /* Generate a path with wildcard suitable for iterating */
-        if (lstrcmpW(CharPrevW(fname, fname + fname_len), backslash))
-        {
-            lstrcpyW(fname + fname_len, backslash);
-            ++fname_len;
-        }
+        if (fname_len && fname[fname_len-1] != '\\') fname[fname_len++] = '\\';
         lstrcpyW(fname + fname_len, asterisk);
 
         if ((hFindFile = FindFirstFileW(fname, &w32fd)) != INVALID_HANDLE_VALUE)
@@ -603,7 +598,7 @@ static void free_file_node(struct ExtractFileList *pNode)
 }
 
 /* determines whether szFile is in the NULL-separated szFileList */
-static BOOL file_in_list(LPSTR szFile, LPSTR szFileList)
+static BOOL file_in_list(LPCSTR szFile, LPCSTR szFileList)
 {
     DWORD dwLen = lstrlenA(szFile);
     DWORD dwTestLen;
@@ -627,7 +622,7 @@ static BOOL file_in_list(LPSTR szFile, LPSTR szFileList)
 /* removes nodes from the linked list that aren't specified in szFileList
  * returns the number of files that are in both the linked list and szFileList
  */
-static DWORD fill_file_list(EXTRACTdest *extractDest, LPCSTR szCabName, LPSTR szFileList)
+static DWORD fill_file_list(EXTRACTdest *extractDest, LPCSTR szCabName, LPCSTR szFileList)
 {
     DWORD dwNumFound = 0;
     struct ExtractFileList *pNode;

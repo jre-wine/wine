@@ -161,7 +161,7 @@ static inline BOOL is_invalid_dos_char( WCHAR ch )
 }
 
 /* check if the device can be a mounted volume */
-static inline int is_valid_mounted_device( struct stat *st )
+static inline int is_valid_mounted_device( const struct stat *st )
 {
 #if defined(linux) || defined(__sun__)
     return S_ISBLK( st->st_mode );
@@ -236,24 +236,22 @@ static char *get_default_lpt_device( int num )
 #include <sys/vfstab.h>
 static char *parse_vfstab_entries( FILE *f, dev_t dev, ino_t ino)
 {
-
-    struct vfstab vfs_entry;
-    struct vfstab *entry=&vfs_entry;
+    struct vfstab entry;
     struct stat st;
     char *device;
 
-    while (! getvfsent( f, entry ))
+    while (! getvfsent( f, &entry ))
     {
         /* don't even bother stat'ing network mounts, there's no meaningful device anyway */
-        if (!strcmp( entry->vfs_fstype, "nfs" ) ||
-            !strcmp( entry->vfs_fstype, "smbfs" ) ||
-            !strcmp( entry->vfs_fstype, "ncpfs" )) continue;
+        if (!strcmp( entry.vfs_fstype, "nfs" ) ||
+            !strcmp( entry.vfs_fstype, "smbfs" ) ||
+            !strcmp( entry.vfs_fstype, "ncpfs" )) continue;
 
-        if (stat( entry->vfs_mountp, &st ) == -1) continue;
+        if (stat( entry.vfs_mountp, &st ) == -1) continue;
         if (st.st_dev != dev || st.st_ino != ino) continue;
-        if (!strcmp( entry->vfs_fstype, "fd" ))
+        if (!strcmp( entry.vfs_fstype, "fd" ))
         {
-            if ((device = strstr( entry->vfs_mntopts, "dev=" )))
+            if ((device = strstr( entry.vfs_mntopts, "dev=" )))
             {
                 char *p = strchr( device + 4, ',' );
                 if (p) *p = 0;
@@ -261,7 +259,7 @@ static char *parse_vfstab_entries( FILE *f, dev_t dev, ino_t ino)
             }
         }
         else
-            return entry->vfs_special;
+            return entry.vfs_special;
     }
     return NULL;
 }
@@ -335,25 +333,23 @@ static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
 #include <sys/mnttab.h>
 static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
 {
-
-    volatile struct mnttab mntentry;
-    struct mnttab *entry=&mntentry;
+    struct mnttab entry;
     struct stat st;
     char *device;
 
 
-    while (( ! getmntent( f , entry) ))
+    while (( ! getmntent( f, &entry) ))
     {
         /* don't even bother stat'ing network mounts, there's no meaningful device anyway */
-        if (!strcmp( entry->mnt_fstype, "nfs" ) ||
-            !strcmp( entry->mnt_fstype, "smbfs" ) ||
-            !strcmp( entry->mnt_fstype, "ncpfs" )) continue;
+        if (!strcmp( entry.mnt_fstype, "nfs" ) ||
+            !strcmp( entry.mnt_fstype, "smbfs" ) ||
+            !strcmp( entry.mnt_fstype, "ncpfs" )) continue;
 
-        if (stat( entry->mnt_mountp, &st ) == -1) continue;
+        if (stat( entry.mnt_mountp, &st ) == -1) continue;
         if (st.st_dev != dev || st.st_ino != ino) continue;
-        if (!strcmp( entry->mnt_fstype, "fd" ))
+        if (!strcmp( entry.mnt_fstype, "fd" ))
         {
-            if ((device = strstr( entry->mnt_mntopts, "dev=" )))
+            if ((device = strstr( entry.mnt_mntopts, "dev=" )))
             {
                 char *p = strchr( device + 4, ',' );
                 if (p) *p = 0;
@@ -361,7 +357,7 @@ static char *parse_mount_entries( FILE *f, dev_t dev, ino_t ino )
             }
         }
         else
-            return entry->mnt_special;
+            return entry.mnt_special;
     }
     return NULL;
 }
@@ -1511,7 +1507,8 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event,
 
     if (show_dot_files == -1) init_options();
 
-    if ((cwd = open(".", O_RDONLY)) != -1 && fchdir( fd ) != -1)
+    cwd = open( ".", O_RDONLY );
+    if (fchdir( fd ) != -1)
     {
 #ifdef VFAT_IOCTL_READDIR_BOTH
         if ((read_directory_vfat( fd, io, buffer, length, single_entry, mask, restart_scan )) != -1)
@@ -1530,7 +1527,7 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event,
         read_directory_readdir( fd, io, buffer, length, single_entry, mask, restart_scan );
 
     done:
-        if (fchdir( cwd ) == -1) chdir( "/" );
+        if (cwd == -1 || fchdir( cwd ) == -1) chdir( "/" );
     }
     else io->u.Status = FILE_GetNtStatus();
 
@@ -1803,7 +1800,7 @@ static inline int get_dos_prefix_len( const UNICODE_STRING *name )
 NTSTATUS wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
                                     UINT disposition, BOOLEAN check_case )
 {
-    static const WCHAR uncW[] = {'U','N','C','\\'};
+    static const WCHAR unixW[] = {'u','n','i','x'};
     static const WCHAR invalid_charsW[] = { INVALID_NT_CHARS, 0 };
 
     NTSTATUS status = STATUS_SUCCESS;
@@ -1811,71 +1808,87 @@ NTSTATUS wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *un
     const WCHAR *name, *p;
     struct stat st;
     char *unix_name;
-    int pos, ret, name_len, unix_len, used_default;
+    int pos, ret, name_len, unix_len, prefix_len, used_default;
+    WCHAR prefix[MAX_DIR_ENTRY_LEN];
+    BOOLEAN is_unix = FALSE;
 
     name     = nameW->Buffer;
     name_len = nameW->Length / sizeof(WCHAR);
 
     if (!name_len || !IS_SEPARATOR(name[0])) return STATUS_OBJECT_PATH_SYNTAX_BAD;
 
-    if ((pos = get_dos_prefix_len( nameW )))
+    if (!(pos = get_dos_prefix_len( nameW )))
+        return STATUS_BAD_DEVICE_TYPE;  /* no DOS prefix, assume NT native name */
+
+    name += pos;
+    name_len -= pos;
+
+    /* check for sub-directory */
+    for (pos = 0; pos < name_len; pos++)
     {
-        BOOLEAN is_unc = FALSE;
+        if (IS_SEPARATOR(name[pos])) break;
+        if (name[pos] < 32 || strchrW( invalid_charsW, name[pos] ))
+            return STATUS_OBJECT_NAME_INVALID;
+    }
+    if (pos > MAX_DIR_ENTRY_LEN)
+        return STATUS_OBJECT_NAME_INVALID;
 
-        name += pos;
-        name_len -= pos;
+    if (pos == name_len)  /* no subdir, plain DOS device */
+        return get_dos_device( name, name_len, unix_name_ret );
 
-        /* check for UNC prefix */
-        if (name_len > 4 && !memicmpW( name, uncW, 4 ))
-        {
-            name += 3;
-            name_len -= 3;
-            is_unc = TRUE;
-        }
-        else
-        {
-            /* check for a drive letter with path */
-            if (name_len < 3 || !isalphaW(name[0]) || name[1] != ':' || !IS_SEPARATOR(name[2]))
-            {
-                /* not a drive with path, try other DOS devices */
-                return get_dos_device( name, name_len, unix_name_ret );
-            }
-            name += 2;  /* skip drive letter */
-            name_len -= 2;
-        }
+    for (prefix_len = 0; prefix_len < pos; prefix_len++)
+        prefix[prefix_len] = tolowerW(name[prefix_len]);
 
-        /* check for invalid characters */
+    name += prefix_len;
+    name_len -= prefix_len;
+
+    /* check for invalid characters (all chars except 0 are valid for unix) */
+    is_unix = (prefix_len == 4 && !memcmp( prefix, unixW, sizeof(unixW) ));
+    if (is_unix)
+    {
+        for (p = name; p < name + name_len; p++)
+            if (!*p) return STATUS_OBJECT_NAME_INVALID;
+        check_case = TRUE;
+    }
+    else
+    {
         for (p = name; p < name + name_len; p++)
             if (*p < 32 || strchrW( invalid_charsW, *p )) return STATUS_OBJECT_NAME_INVALID;
-
-        unix_len = ntdll_wcstoumbs( 0, name, name_len, NULL, 0, NULL, NULL );
-        unix_len += MAX_DIR_ENTRY_LEN + 3;
-        unix_len += strlen(config_dir) + sizeof("/dosdevices/") + 3;
-        if (!(unix_name = RtlAllocateHeap( GetProcessHeap(), 0, unix_len )))
-            return STATUS_NO_MEMORY;
-        strcpy( unix_name, config_dir );
-        strcat( unix_name, "/dosdevices/" );
-        pos = strlen(unix_name);
-        if (is_unc)
-        {
-            strcpy( unix_name + pos, "unc" );
-            pos += 3;
-        }
-        else
-        {
-            unix_name[pos++] = tolowerW( name[-2] );
-            unix_name[pos++] = ':';
-            unix_name[pos] = 0;
-        }
     }
-    else  /* no DOS prefix, assume NT native name, map directly to Unix */
+
+    unix_len = ntdll_wcstoumbs( 0, prefix, prefix_len, NULL, 0, NULL, NULL );
+    unix_len += ntdll_wcstoumbs( 0, name, name_len, NULL, 0, NULL, NULL );
+    unix_len += MAX_DIR_ENTRY_LEN + 3;
+    unix_len += strlen(config_dir) + sizeof("/dosdevices/");
+    if (!(unix_name = RtlAllocateHeap( GetProcessHeap(), 0, unix_len )))
+        return STATUS_NO_MEMORY;
+    strcpy( unix_name, config_dir );
+    strcat( unix_name, "/dosdevices/" );
+    pos = strlen(unix_name);
+
+    ret = ntdll_wcstoumbs( 0, prefix, prefix_len, unix_name + pos, unix_len - pos - 1,
+                           NULL, &used_default );
+    if (!ret || used_default)
     {
-        if (!name_len || !IS_SEPARATOR(name[0])) return STATUS_OBJECT_NAME_INVALID;
-        unix_len = ntdll_wcstoumbs( 0, name, name_len, NULL, 0, NULL, NULL );
-        unix_len += MAX_DIR_ENTRY_LEN + 3;
-        if (!(unix_name = RtlAllocateHeap( GetProcessHeap(), 0, unix_len )))
-            return STATUS_NO_MEMORY;
-        pos = 0;
+        RtlFreeHeap( GetProcessHeap(), 0, unix_name );
+        return STATUS_OBJECT_NAME_INVALID;
+    }
+    pos += ret;
+
+    /* check if prefix exists (except for DOS drives to avoid extra stat calls) */
+
+    if (prefix_len != 2 || prefix[1] != ':')
+    {
+        unix_name[pos] = 0;
+        if (lstat( unix_name, &st ) == -1 && errno == ENOENT)
+        {
+            if (!is_unix)
+            {
+                RtlFreeHeap( GetProcessHeap(), 0, unix_name );
+                return STATUS_BAD_DEVICE_TYPE;
+            }
+            pos = 0;  /* fall back to unix root */
+        }
     }
 
     /* try a shortcut first */
@@ -2000,12 +2013,21 @@ done:
 BOOLEAN WINAPI RtlDoesFileExists_U(LPCWSTR file_name)
 {
     UNICODE_STRING nt_name;
-    ANSI_STRING unix_name;
+    FILE_BASIC_INFORMATION basic_info;
+    OBJECT_ATTRIBUTES attr;
     BOOLEAN ret;
 
     if (!RtlDosPathNameToNtPathName_U( file_name, &nt_name, NULL, NULL )) return FALSE;
-    ret = (wine_nt_to_unix_file_name( &nt_name, &unix_name, FILE_OPEN, FALSE ) == STATUS_SUCCESS);
-    if (ret) RtlFreeAnsiString( &unix_name );
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nt_name;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    ret = NtQueryAttributesFile(&attr, &basic_info) == STATUS_SUCCESS;
+
     RtlFreeUnicodeString( &nt_name );
     return ret;
 }
@@ -2020,14 +2042,6 @@ NTSTATUS DIR_unmount_device( HANDLE handle )
 {
     NTSTATUS status;
     int unix_fd, needs_close;
-
-    SERVER_START_REQ( unmount_device )
-    {
-        req->handle = handle;
-        status = wine_server_call( req );
-    }
-    SERVER_END_REQ;
-    if (status) return status;
 
     if (!(status = server_get_unix_fd( handle, 0, &unix_fd, &needs_close, NULL, NULL )))
     {
@@ -2152,31 +2166,27 @@ done:
 struct read_changes_info
 {
     HANDLE FileHandle;
-    HANDLE Event;
-    PIO_APC_ROUTINE ApcRoutine;
-    PVOID ApcContext;
     PVOID Buffer;
     ULONG BufferSize;
+    PIO_APC_ROUTINE apc;
+    void           *apc_arg;
 };
 
-static void WINAPI read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, ULONG status )
+/* callback for ioctl user APC */
+static void WINAPI read_changes_user_apc( void *arg, IO_STATUS_BLOCK *io, ULONG reserved )
+{
+    struct read_changes_info *info = arg;
+    if (info->apc) info->apc( info->apc_arg, io, reserved );
+    RtlFreeHeap( GetProcessHeap(), 0, info );
+}
+
+static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS status )
 {
     struct read_changes_info *info = user;
     char path[PATH_MAX];
     NTSTATUS ret = STATUS_SUCCESS;
     int len, action, i;
 
-    TRACE("%p %p %p %08x\n", info, info->ApcContext, iosb, status);
-
-    /*
-     * FIXME: race me!
-     *
-     * hEvent/hDir is set before the output buffer and iosb is updated.
-     * Since the thread that called NtNotifyChangeDirectoryFile is usually
-     * waiting, we'll be safe since we're called in that thread's context.
-     * If a different thread is waiting on our hEvent/hDir we're going to be
-     * in trouble...
-     */
     SERVER_START_REQ( read_change )
     {
         req->handle = info->FileHandle;
@@ -2206,9 +2216,6 @@ static void WINAPI read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, ULONG st
         pfni->Action = action;
         pfni->FileNameLength = len * sizeof (WCHAR);
         pfni->FileName[len] = 0;
-
-        TRACE("action = %d name = %s\n", pfni->Action,
-              debugstr_w(pfni->FileName) );
         len = sizeof (*pfni) - sizeof (DWORD) + pfni->FileNameLength;
     }
     else
@@ -2219,8 +2226,7 @@ static void WINAPI read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, ULONG st
 
     iosb->u.Status = ret;
     iosb->Information = len;
-
-    RtlFreeHeap( GetProcessHeap(), 0, info );
+    return ret;
 }
 
 #define FILE_NOTIFY_ALL        (  \
@@ -2255,30 +2261,27 @@ NtNotifyChangeDirectoryFile( HANDLE FileHandle, HANDLE Event,
     if (CompletionFilter == 0 || (CompletionFilter & ~FILE_NOTIFY_ALL))
         return STATUS_INVALID_PARAMETER;
 
-    if (ApcRoutine)
-        FIXME("parameters ignored %p %p\n", ApcRoutine, ApcContext );
-
     info = RtlAllocateHeap( GetProcessHeap(), 0, sizeof *info );
     if (!info)
         return STATUS_NO_MEMORY;
 
     info->FileHandle = FileHandle;
-    info->Event      = Event;
     info->Buffer     = Buffer;
     info->BufferSize = BufferSize;
-    info->ApcRoutine = ApcRoutine;
-    info->ApcContext = ApcContext;
+    info->apc        = ApcRoutine;
+    info->apc_arg    = ApcContext;
 
     SERVER_START_REQ( read_directory_changes )
     {
         req->handle     = FileHandle;
-        req->event      = Event;
         req->filter     = CompletionFilter;
         req->want_data  = (Buffer != NULL);
         req->subtree    = WatchTree;
-        req->io_apc     = read_changes_apc;
-        req->io_sb      = IoStatusBlock;
-        req->io_user    = info;
+        req->async.callback = read_changes_apc;
+        req->async.iosb     = IoStatusBlock;
+        req->async.arg      = info;
+        req->async.apc      = read_changes_user_apc;
+        req->async.event    = Event;
         status = wine_server_call( req );
     }
     SERVER_END_REQ;

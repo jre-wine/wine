@@ -1768,9 +1768,7 @@ static void test_overlapped(void)
     ov.Internal = STATUS_PENDING;
     ov.InternalHigh = 0xabcd;
     r = GetOverlappedResult(0, &ov, &result, 0);
-    todo_wine {
     ok( GetLastError() == ERROR_IO_INCOMPLETE, "wrong error %u\n", GetLastError() );
-    }
     ok( r == FALSE, "should return false\n");
     ok( result == 0, "wrong result %u\n", result );
 
@@ -1793,6 +1791,31 @@ static void test_overlapped(void)
 
     r = CloseHandle( ov.hEvent );
     ok( r == TRUE, "close handle failed\n");
+}
+
+static void test_RemoveDirectory(void)
+{
+    int rc;
+    char directory[] = "removeme";
+
+    rc = CreateDirectory(directory, NULL);
+    ok( rc, "Createdirectory failed, gle=%d\n", GetLastError() );
+
+    rc = SetCurrentDirectory(directory);
+    ok( rc, "SetCurrentDirectory failed, gle=%d\n", GetLastError() );
+
+    rc = RemoveDirectory(".");
+    todo_wine {
+    ok( !rc, "RemoveDirectory unexpectedly worked\n" );
+    }
+
+    rc = SetCurrentDirectory("..");
+    ok( rc, "SetCurrentDirectory failed, gle=%d\n", GetLastError() );
+
+    rc = RemoveDirectory(directory);
+    todo_wine {
+    ok( rc, "RemoveDirectory failed, gle=%d\n", GetLastError() );
+    }
 }
 
 START_TEST(file)
@@ -1825,4 +1848,5 @@ START_TEST(file)
     test_read_write();
     test_OpenFile();
     test_overlapped();
+    test_RemoveDirectory();
 }

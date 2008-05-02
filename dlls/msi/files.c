@@ -64,25 +64,44 @@ struct media_info {
     LPWSTR cabinet;
     LPWSTR volume_label;
     BOOL is_continuous;
+    BOOL is_extracted;
     WCHAR source[MAX_PATH];
 };
+
+static BOOL source_matches_volume(struct media_info *mi, LPWSTR source_root)
+{
+    WCHAR volume_name[MAX_PATH + 1];
+
+    if (!GetVolumeInformationW(source_root, volume_name, MAX_PATH + 1,
+                               NULL, NULL, NULL, NULL, 0))
+    {
+        ERR("Failed to get volume information\n");
+        return FALSE;
+    }
+
+    return !lstrcmpW(mi->volume_label, volume_name);
+}
 
 static UINT msi_change_media( MSIPACKAGE *package, struct media_info *mi )
 {
     LPSTR msg;
     LPWSTR error, error_dialog;
+    LPWSTR source_dir;
     UINT r = ERROR_SUCCESS;
 
     static const WCHAR szUILevel[] = {'U','I','L','e','v','e','l',0};
     static const WCHAR error_prop[] = {'E','r','r','o','r','D','i','a','l','o','g',0};
 
-    if ( msi_get_property_int(package, szUILevel, 0) == INSTALLUILEVEL_NONE && !gUIHandlerA )
+    if ( (msi_get_property_int(package, szUILevel, 0) & INSTALLUILEVEL_MASK) == INSTALLUILEVEL_NONE && !gUIHandlerA )
         return ERROR_SUCCESS;
 
     error = generate_error_string( package, 1302, 1, mi->disk_prompt );
     error_dialog = msi_dup_property( package, error_prop );
+    source_dir = msi_dup_property( package, cszSourceDir );
+    PathStripToRootW(source_dir);
 
-    while ( r == ERROR_SUCCESS && GetFileAttributesW( mi->source ) == INVALID_FILE_ATTRIBUTES )
+    while ( r == ERROR_SUCCESS &&
+            !source_matches_volume(mi, source_dir) )
     {
         r = msi_spawn_error_dialog( package, error_dialog, error );
 
@@ -96,6 +115,7 @@ static UINT msi_change_media( MSIPACKAGE *package, struct media_info *mi )
 
     msi_free( error );
     msi_free( error_dialog );
+    msi_free( source_dir );
 
     return r;
 }
@@ -262,6 +282,7 @@ static UINT msi_media_get_disk_info( MSIPACKAGE *package, struct media_info *mi 
 
     mi->disk_prompt = strdupW(MSI_RecordGetString(row, 3));
     mi->cabinet = strdupW(MSI_RecordGetString(row, 4));
+    mi->volume_label = strdupW(MSI_RecordGetString(row, 5));
 
     ptr = strrchrW(mi->source, '\\') + 1;
     lstrcpyW(ptr, mi->cabinet);
@@ -290,6 +311,8 @@ static INT_PTR cabinet_notify(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
         UINT rc;
 
         msi_free(mi->disk_prompt);
+        msi_free(mi->cabinet);
+        msi_free(mi->volume_label);
 
         mi->disk_id++;
         mi->is_continuous = TRUE;
@@ -434,6 +457,9 @@ done:
     msi_free(cabinet);
     msi_free(cab_path);
 
+    if (ret)
+        mi->is_extracted = TRUE;
+
     return ret;
 }
 
@@ -442,9 +468,10 @@ static VOID set_file_source(MSIPACKAGE* package, MSIFILE* file, LPCWSTR path)
     if (!file->IsCompressed)
     {
         LPWSTR p, path;
-        p = resolve_folder(package, file->Component->Directory, TRUE, FALSE, NULL);
+        p = resolve_folder(package, file->Component->Directory, TRUE, FALSE, TRUE, NULL);
         path = build_directory_name(2, p, file->ShortName);
-        if (INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
+        if (file->LongName &&
+            INVALID_FILE_ATTRIBUTES == GetFileAttributesW( path ))
         {
             msi_free(path);
             path = build_directory_name(2, p, file->LongName);
@@ -522,6 +549,7 @@ static UINT load_media_info(MSIPACKAGE *package, MSIFILE *file, struct media_inf
         return ERROR_FUNCTION_FAILED;
     }
 
+    mi->is_extracted = FALSE;
     mi->disk_id = MSI_RecordGetInteger(row, 1);
     mi->last_sequence = MSI_RecordGetInteger(row, 2);
     msi_free(mi->disk_prompt);
@@ -567,8 +595,9 @@ static UINT load_media_info(MSIPACKAGE *package, MSIFILE *file, struct media_inf
 
 static UINT ready_media(MSIPACKAGE *package, MSIFILE *file, struct media_info *mi)
 {
-    UINT rc = ERROR_SUCCESS;
-    BOOL found = FALSE;
+    UINT rc = ERROR_SUCCESS, type;
+    BOOL found = TRUE;
+    LPWSTR source_dir;
 
     /* media info for continuous cabinet is already loaded */
     if (mi->is_continuous)
@@ -581,9 +610,26 @@ static UINT ready_media(MSIPACKAGE *package, MSIFILE *file, struct media_info *m
         return ERROR_FUNCTION_FAILED;
     }
 
+    if (mi->volume_label && mi->disk_id > 1)
+    {
+        source_dir = msi_dup_property(package, cszSourceDir);
+        PathStripToRootW(source_dir);
+        type = GetDriveTypeW(source_dir);
+
+        if (type == DRIVE_CDROM || type == DRIVE_REMOVABLE)
+            found = source_matches_volume(mi, source_dir);
+
+        if (!found)
+            found = GetFileAttributesW(mi->cabinet) != INVALID_FILE_ATTRIBUTES;
+
+        msi_free(source_dir);
+    }
+
     if (file->IsCompressed &&
         GetFileAttributesW(mi->source) == INVALID_FILE_ATTRIBUTES)
     {
+        found = FALSE;
+
         if (package->BaseURL && UrlIsW(package->BaseURL, URLIS_URL))
         {
             rc = download_remote_cabinet(package, mi);
@@ -593,10 +639,10 @@ static UINT ready_media(MSIPACKAGE *package, MSIFILE *file, struct media_info *m
                 found = TRUE;
             }
         }
-
-        if (!found)
-            rc = msi_change_media(package, mi);
     }
+
+    if (!found)
+        rc = msi_change_media(package, mi);
 
     return rc;
 }
@@ -634,13 +680,9 @@ static void schedule_install_files(MSIPACKAGE *package)
     }
 }
 
-static UINT copy_install_file(MSIFILE *file)
+static UINT copy_file(MSIFILE *file)
 {
     BOOL ret;
-    UINT gle;
-
-    TRACE("Copying %s to %s\n", debugstr_w(file->SourcePath),
-          debugstr_w(file->TargetPath));
 
     ret = CopyFileW(file->SourcePath, file->TargetPath, FALSE);
     if (ret)
@@ -649,7 +691,20 @@ static UINT copy_install_file(MSIFILE *file)
         return ERROR_SUCCESS;
     }
 
-    gle = GetLastError();
+    return GetLastError();
+}
+
+static UINT copy_install_file(MSIFILE *file)
+{
+    UINT gle;
+
+    TRACE("Copying %s to %s\n", debugstr_w(file->SourcePath),
+          debugstr_w(file->TargetPath));
+
+    gle = copy_file(file);
+    if (gle == ERROR_SUCCESS)
+        return gle;
+
     if (gle == ERROR_ALREADY_EXISTS && file->state == msifs_overwrite)
     {
         TRACE("overwriting existing file\n");
@@ -660,6 +715,13 @@ static UINT copy_install_file(MSIFILE *file)
         /* FIXME: this needs to be tested, I'm pretty sure it fails */
         TRACE("Source file not found\n");
         gle = ERROR_SUCCESS;
+    }
+    else if (gle == ERROR_ACCESS_DENIED)
+    {
+        SetFileAttributesW(file->TargetPath, FILE_ATTRIBUTE_NORMAL);
+
+        gle = copy_file(file);
+        TRACE("Overwriting existing file: %d\n", gle);
     }
     else if (!(file->Attributes & msidbFileAttributesVital))
     {
@@ -712,10 +774,11 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
 
     LIST_FOR_EACH_ENTRY( file, &package->files, MSIFILE, entry )
     {
-        if (file->state != msifs_missing && file->state != msifs_overwrite)
+        if (file->state != msifs_missing && !mi->is_continuous && file->state != msifs_overwrite)
             continue;
 
-        if (file->Sequence > mi->last_sequence || mi->is_continuous)
+        if (file->Sequence > mi->last_sequence || mi->is_continuous ||
+            (file->IsCompressed && !mi->is_extracted))
         {
             rc = ready_media(package, file, mi);
             if (rc != ERROR_SUCCESS)
@@ -740,6 +803,7 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
 
         if (!file->IsCompressed)
         {
+            msi_file_update_ui(package, file, szInstallFiles);
             rc = copy_install_file(file);
             if (rc != ERROR_SUCCESS)
             {
@@ -824,7 +888,7 @@ static UINT ITERATE_DuplicateFiles(MSIRECORD *row, LPVOID param)
     {
         LPCWSTR destkey;
         destkey = MSI_RecordGetString(row,5);
-        dest_path = resolve_folder(package, destkey, FALSE,FALSE,NULL);
+        dest_path = resolve_folder(package, destkey, FALSE, FALSE, TRUE, NULL);
         if (!dest_path)
         {
             /* try a Property */
@@ -841,6 +905,8 @@ static UINT ITERATE_DuplicateFiles(MSIRECORD *row, LPVOID param)
 
     TRACE("Duplicating file %s to %s\n",debugstr_w(file->TargetPath),
                     debugstr_w(dest)); 
+
+    CreateDirectoryW(dest_path, NULL);
 
     if (strcmpW(file->TargetPath,dest))
         rc = !CopyFileW(file->TargetPath,dest,TRUE);

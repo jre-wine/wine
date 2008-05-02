@@ -33,6 +33,7 @@
 
 #include "dsound_test.h"
 
+static HRESULT (WINAPI *pDirectSoundEnumerateA)(LPDSENUMCALLBACKA,LPVOID)=NULL;
 static HRESULT (WINAPI *pDirectSoundCreate8)(LPCGUID,LPDIRECTSOUND8*,LPUNKNOWN)=NULL;
 
 typedef struct {
@@ -306,6 +307,7 @@ void test_buffer8(LPDIRECTSOUND8 dso, LPDIRECTSOUNDBUFFER * dsbo,
            "    buffer size changed after SetFormat() - "
            "previous size was %u, current size is %u\n",
            dsbcaps.dwBufferBytes, new_dsbcaps.dwBufferBytes);
+        dsbcaps.dwBufferBytes = new_dsbcaps.dwBufferBytes;
 
         /* Check for primary buffer flags change */
         ok(new_dsbcaps.dwFlags == dsbcaps.dwFlags,
@@ -484,8 +486,8 @@ void test_buffer8(LPDIRECTSOUND8 dso, LPDIRECTSOUNDBUFFER * dsbo,
             ok(rc==DS_OK,"IDirectSound3dListener_GetAllParameters() "
                "failed: %s\n",DXGetErrorString8(rc));
             if (move_listener) {
-                listener_param.vPosition.x = -5.0;
-                listener_param.vVelocity.x = 10.0/duration;
+                listener_param.vPosition.x = -5.0f;
+                listener_param.vVelocity.x = (float)(10.0/duration);
             }
             rc=IDirectSound3DListener_SetAllParameters(listener,
                                                        &listener_param,
@@ -495,8 +497,8 @@ void test_buffer8(LPDIRECTSOUND8 dso, LPDIRECTSOUNDBUFFER * dsbo,
         }
         if (buffer3d) {
             if (move_sound) {
-                buffer_param.vPosition.x = 100.0;
-                buffer_param.vVelocity.x = -200.0/duration;
+                buffer_param.vPosition.x = 100.0f;
+                buffer_param.vVelocity.x = (float)(-200.0/duration);
             }
             buffer_param.flMinDistance = 10;
             rc=IDirectSound3DBuffer_SetAllParameters(buffer,&buffer_param,
@@ -510,8 +512,7 @@ void test_buffer8(LPDIRECTSOUND8 dso, LPDIRECTSOUNDBUFFER * dsbo,
             WaitForSingleObject(GetCurrentProcess(),TIME_SLICE);
             now=GetTickCount();
             if (listener && move_listener) {
-                listener_param.vPosition.x = -5.0+10.0*(now-start_time)/
-                    1000/duration;
+                listener_param.vPosition.x = (float)(-5.0+10.0*(now-start_time)/1000/duration);
                 if (winetest_debug>2)
                     trace("listener position=%g\n",listener_param.vPosition.x);
                 rc=IDirectSound3DListener_SetPosition(listener,
@@ -521,8 +522,7 @@ void test_buffer8(LPDIRECTSOUND8 dso, LPDIRECTSOUNDBUFFER * dsbo,
                    "%s\n",DXGetErrorString8(rc));
             }
             if (buffer3d && move_sound) {
-                buffer_param.vPosition.x = 100-200.0*(now-start_time)/
-                    1000/duration;
+                buffer_param.vPosition.x = (float)(100-200.0*(now-start_time)/1000/duration);
                 if (winetest_debug>2)
                     trace("sound position=%g\n",buffer_param.vPosition.x);
                 rc=IDirectSound3DBuffer_SetPosition(buffer,
@@ -635,9 +635,18 @@ static HRESULT test_secondary8(LPGUID lpGuid, int play,
                                                            &listener_param);
                 ok(rc==DS_OK,"IDirectSound3dListener_GetAllParameters() "
                    "failed: %s\n",DXGetErrorString8(rc));
+            } else {
+                ok(listener==NULL, "IDirectSoundBuffer_QueryInterface() "
+                   "failed but returned a listener anyway\n");
+                ok(rc!=DS_OK, "IDirectSoundBuffer_QueryInterface() succeeded "
+                   "but returned a NULL listener\n");
+                if (listener) {
+                    ref=IDirectSound3DListener_Release(listener);
+                    ok(ref==0,"IDirectSound3dListener_Release() listener has "
+                       "%d references, should have 0\n",ref);
+                }
+                goto EXIT2;
             }
-            else
-                goto EXIT;
         }
 
         init_format(&wfx,WAVE_FORMAT_PCM,22050,16,2);
@@ -795,18 +804,28 @@ static HRESULT test_secondary8(LPGUID lpGuid, int play,
                    ref);
             }
         }
-    }
 EXIT1:
-    if (has_listener) {
-        ref=IDirectSound3DListener_Release(listener);
-        ok(ref==0,"IDirectSound3dListener_Release() listener has %d "
-           "references, should have 0\n",ref);
+        if (has_listener) {
+            ref=IDirectSound3DListener_Release(listener);
+            ok(ref==0,"IDirectSound3dListener_Release() listener has %d "
+               "references, should have 0\n",ref);
+        } else {
+            ref=IDirectSoundBuffer_Release(primary);
+            ok(ref==0,"IDirectSoundBuffer_Release() primary has %d references, "
+               "should have 0\n",ref);
+        }
     } else {
-        ref=IDirectSoundBuffer_Release(primary);
-        ok(ref==0,"IDirectSoundBuffer_Release() primary has %d references, "
-           "should have 0\n",ref);
+        ok(primary==NULL,"IDirectSound8_CreateSoundBuffer(primary) failed "
+           "but primary created anyway\n");
+        ok(rc!=DS_OK,"IDirectSound8_CreateSoundBuffer(primary) succeeded "
+           "but primary not created\n");
+        if (primary) {
+            ref=IDirectSoundBuffer_Release(primary);
+            ok(ref==0,"IDirectSoundBuffer_Release() primary has %d references, "
+               "should have 0\n",ref);
+        }
     }
-
+EXIT2:
     /* Set the CooperativeLevel back to normal */
     /* DSOUND: Setting DirectSound cooperative level to DSSCL_NORMAL */
     rc=IDirectSound8_SetCooperativeLevel(dso,get_hwnd(),DSSCL_NORMAL);
@@ -1152,7 +1171,7 @@ static BOOL WINAPI dsenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
 static void ds3d8_tests(void)
 {
     HRESULT rc;
-    rc=DirectSoundEnumerateA(&dsenum_callback,NULL);
+    rc=pDirectSoundEnumerateA(&dsenum_callback,NULL);
     ok(rc==DS_OK,"DirectSoundEnumerateA() failed: %s\n",DXGetErrorString8(rc));
 }
 
@@ -1162,21 +1181,24 @@ START_TEST(ds3d8)
 
     CoInitialize(NULL);
 
-    hDsound = LoadLibraryA("dsound.dll");
-    if (!hDsound) {
-        trace("dsound.dll not found\n");
-        return;
+    hDsound = LoadLibrary("dsound.dll");
+    if (hDsound)
+    {
+        trace("DLL Version: %s\n", get_file_version("dsound.dll"));
+
+        pDirectSoundEnumerateA = (void*)GetProcAddress(hDsound,
+            "DirectSoundEnumerateA");
+        pDirectSoundCreate8 = (void*)GetProcAddress(hDsound,
+            "DirectSoundCreate8");
+        if (pDirectSoundCreate8)
+            ds3d8_tests();
+        else
+            skip("ds3d8 test skipped\n");
+
+        FreeLibrary(hDsound);
     }
-
-    trace("DLL Version: %s\n", get_file_version("dsound.dll"));
-
-    pDirectSoundCreate8 = (void*)GetProcAddress(hDsound, "DirectSoundCreate8");
-    if (!pDirectSoundCreate8) {
-        trace("ds3d8 test skipped\n");
-        return;
-    }
-
-    ds3d8_tests();
+    else
+        skip("dsound.dll not found!\n");
 
     CoUninitialize();
 }

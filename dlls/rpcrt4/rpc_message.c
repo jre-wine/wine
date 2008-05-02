@@ -27,7 +27,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "winreg.h"
 
 #include "rpc.h"
 #include "rpcndr.h"
@@ -59,7 +58,7 @@ enum secure_packet_direction
 
 static RPC_STATUS I_RpcReAllocateBuffer(PRPC_MESSAGE pMsg);
 
-static DWORD RPCRT4_GetHeaderSize(RpcPktHdr *Header)
+static DWORD RPCRT4_GetHeaderSize(const RpcPktHdr *Header)
 {
   static const DWORD header_sizes[] = {
     sizeof(Header->request), 0, sizeof(Header->response),
@@ -82,14 +81,14 @@ static DWORD RPCRT4_GetHeaderSize(RpcPktHdr *Header)
   return ret;
 }
 
-static int packet_has_body(RpcPktHdr *Header)
+static int packet_has_body(const RpcPktHdr *Header)
 {
     return (Header->common.ptype == PKT_FAULT) ||
            (Header->common.ptype == PKT_REQUEST) ||
            (Header->common.ptype == PKT_RESPONSE);
 }
 
-static int packet_has_auth_verifier(RpcPktHdr *Header)
+static int packet_has_auth_verifier(const RpcPktHdr *Header)
 {
     return !(Header->common.ptype == PKT_BIND_NACK) &&
            !(Header->common.ptype == PKT_SHUTDOWN);
@@ -178,8 +177,9 @@ RpcPktHdr *RPCRT4_BuildFaultHeader(unsigned long DataRepresentation,
 RpcPktHdr *RPCRT4_BuildBindHeader(unsigned long DataRepresentation,
                                   unsigned short MaxTransmissionSize,
                                   unsigned short MaxReceiveSize,
-                                  RPC_SYNTAX_IDENTIFIER *AbstractId,
-                                  RPC_SYNTAX_IDENTIFIER *TransferId)
+                                  unsigned long  AssocGroupId,
+                                  const RPC_SYNTAX_IDENTIFIER *AbstractId,
+                                  const RPC_SYNTAX_IDENTIFIER *TransferId)
 {
   RpcPktHdr *header;
 
@@ -192,6 +192,7 @@ RpcPktHdr *RPCRT4_BuildBindHeader(unsigned long DataRepresentation,
   header->common.frag_len = sizeof(header->bind);
   header->bind.max_tsize = MaxTransmissionSize;
   header->bind.max_rsize = MaxReceiveSize;
+  header->bind.assoc_gid = AssocGroupId;
   header->bind.num_elements = 1;
   header->bind.num_syntaxes = 1;
   memcpy(&header->bind.abstract, AbstractId, sizeof(RPC_SYNTAX_IDENTIFIER));
@@ -200,7 +201,7 @@ RpcPktHdr *RPCRT4_BuildBindHeader(unsigned long DataRepresentation,
   return header;
 }
 
-RpcPktHdr *RPCRT4_BuildAuthHeader(unsigned long DataRepresentation)
+static RpcPktHdr *RPCRT4_BuildAuthHeader(unsigned long DataRepresentation)
 {
   RpcPktHdr *header;
 
@@ -239,10 +240,10 @@ RpcPktHdr *RPCRT4_BuildBindNackHeader(unsigned long DataRepresentation,
 RpcPktHdr *RPCRT4_BuildBindAckHeader(unsigned long DataRepresentation,
                                      unsigned short MaxTransmissionSize,
                                      unsigned short MaxReceiveSize,
-                                     LPSTR ServerAddress,
+                                     LPCSTR ServerAddress,
                                      unsigned long Result,
                                      unsigned long Reason,
-                                     RPC_SYNTAX_IDENTIFIER *TransferId)
+                                     const RPC_SYNTAX_IDENTIFIER *TransferId)
 {
   RpcPktHdr *header;
   unsigned long header_size;
@@ -379,7 +380,12 @@ static RPC_STATUS RPCRT4_SendAuth(RpcConnection *Connection, RpcPktHdr *Header,
   if (AuthLength)
     Header->common.auth_len = AuthLength;
   else if (Connection->AuthInfo && packet_has_auth_verifier(Header))
-    Header->common.auth_len = 16 /* FIXME */;
+  {
+    if ((Connection->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_PRIVACY) && packet_has_body(Header))
+      Header->common.auth_len = Connection->encryption_auth_len;
+    else
+      Header->common.auth_len = Connection->signature_auth_len;
+  }
   else
     Header->common.auth_len = 0;
   Header->common.flags |= RPC_FLG_FIRST;
@@ -459,13 +465,18 @@ write:
 }
 
 /***********************************************************************
- *           RPCRT4_AuthNegotiate (internal)
+ *           RPCRT4_ClientAuthorize (internal)
+ *
+ * Authorize a client connection. A NULL in param signifies a new connection.
  */
-static void RPCRT4_AuthNegotiate(RpcConnection *conn, SecBuffer *out)
+static RPC_STATUS RPCRT4_ClientAuthorize(RpcConnection *conn, SecBuffer *in,
+                                         SecBuffer *out)
 {
   SECURITY_STATUS r;
   SecBufferDesc out_desc;
-  unsigned char *buffer;
+  SecBufferDesc inp_desc;
+  SecPkgContext_Sizes secctx_sizes;
+  BOOL continue_needed;
   ULONG context_req = ISC_REQ_CONNECTION | ISC_REQ_USE_DCE_STYLE |
                       ISC_REQ_MUTUAL_AUTH | ISC_REQ_DELEGATE;
 
@@ -474,24 +485,64 @@ static void RPCRT4_AuthNegotiate(RpcConnection *conn, SecBuffer *out)
   else if (conn->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
     context_req |= ISC_REQ_CONFIDENTIALITY | ISC_REQ_INTEGRITY;
 
-  buffer = HeapAlloc(GetProcessHeap(), 0, 0x100);
-
   out->BufferType = SECBUFFER_TOKEN;
-  out->cbBuffer = 0x100;
-  out->pvBuffer = buffer;
+  out->cbBuffer = conn->AuthInfo->cbMaxToken;
+  out->pvBuffer = HeapAlloc(GetProcessHeap(), 0, out->cbBuffer);
+  if (!out->pvBuffer) return ERROR_OUTOFMEMORY;
 
   out_desc.ulVersion = 0;
   out_desc.cBuffers = 1;
   out_desc.pBuffers = out;
 
-  conn->attr = 0;
-  SecInvalidateHandle(&conn->ctx);
+  inp_desc.cBuffers = 1;
+  inp_desc.pBuffers = in;
+  inp_desc.ulVersion = 0;
 
-  r = InitializeSecurityContextA(&conn->AuthInfo->cred, NULL, NULL,
-        context_req, 0, SECURITY_NETWORK_DREP,
-        NULL, 0, &conn->ctx, &out_desc, &conn->attr, &conn->exp);
+  r = InitializeSecurityContextA(&conn->AuthInfo->cred, in ? &conn->ctx : NULL,
+        NULL, context_req, 0, SECURITY_NETWORK_DREP,
+        in ? &inp_desc : NULL, 0, &conn->ctx, &out_desc, &conn->attr,
+        &conn->exp);
+  if (FAILED(r))
+  {
+      WARN("InitializeSecurityContext failed with error 0x%08x\n", r);
+      goto failed;
+  }
 
-  TRACE("r = %08x cbBuffer = %ld attr = %08x\n", r, out->cbBuffer, conn->attr);
+  TRACE("r = 0x%08x, attr = 0x%08x\n", r, conn->attr);
+  continue_needed = ((r == SEC_I_CONTINUE_NEEDED) ||
+                     (r == SEC_I_COMPLETE_AND_CONTINUE));
+
+  if ((r == SEC_I_COMPLETE_NEEDED) || (r == SEC_I_COMPLETE_AND_CONTINUE))
+  {
+      TRACE("complete needed\n");
+      r = CompleteAuthToken(&conn->ctx, &out_desc);
+      if (FAILED(r))
+      {
+          WARN("CompleteAuthToken failed with error 0x%08x\n", r);
+          goto failed;
+      }
+  }
+
+  TRACE("cbBuffer = %ld\n", out->cbBuffer);
+
+  if (!continue_needed)
+  {
+      r = QueryContextAttributesA(&conn->ctx, SECPKG_ATTR_SIZES, &secctx_sizes);
+      if (FAILED(r))
+      {
+          WARN("QueryContextAttributes failed with error 0x%08x\n", r);
+          goto failed;
+      }
+      conn->signature_auth_len = secctx_sizes.cbMaxSignature;
+      conn->encryption_auth_len = secctx_sizes.cbSecurityTrailer;
+  }
+
+  return RPC_S_OK;
+
+failed:
+  HeapFree(GetProcessHeap(), 0, out->pvBuffer);
+  out->pvBuffer = NULL;
+  return ERROR_ACCESS_DENIED; /* FIXME: is this correct? */
 }
 
 /***********************************************************************
@@ -500,46 +551,18 @@ static void RPCRT4_AuthNegotiate(RpcConnection *conn, SecBuffer *out)
 static RPC_STATUS RPCRT_AuthorizeConnection(RpcConnection* conn,
                                             BYTE *challenge, ULONG count)
 {
-  SecBufferDesc inp_desc, out_desc;
   SecBuffer inp, out;
-  SECURITY_STATUS r;
-  unsigned char buffer[0x100];
   RpcPktHdr *resp_hdr;
   RPC_STATUS status;
-  ULONG context_req = ISC_REQ_CONNECTION | ISC_REQ_USE_DCE_STYLE |
-                      ISC_REQ_MUTUAL_AUTH | ISC_REQ_DELEGATE;
 
   TRACE("challenge %s, %d bytes\n", challenge, count);
-
-  if (conn->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_INTEGRITY)
-    context_req |= ISC_REQ_INTEGRITY;
-  else if (conn->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
-    context_req |= ISC_REQ_CONFIDENTIALITY | ISC_REQ_INTEGRITY;
-
-  out.BufferType = SECBUFFER_TOKEN;
-  out.cbBuffer = sizeof buffer;
-  out.pvBuffer = buffer;
-
-  out_desc.ulVersion = 0;
-  out_desc.cBuffers = 1;
-  out_desc.pBuffers = &out;
 
   inp.BufferType = SECBUFFER_TOKEN;
   inp.pvBuffer = challenge;
   inp.cbBuffer = count;
 
-  inp_desc.cBuffers = 1;
-  inp_desc.pBuffers = &inp;
-  inp_desc.ulVersion = 0;
-
-  r = InitializeSecurityContextA(&conn->AuthInfo->cred, &conn->ctx, NULL,
-        context_req, 0, SECURITY_NETWORK_DREP,
-        &inp_desc, 0, &conn->ctx, &out_desc, &conn->attr, &conn->exp);
-  if (r)
-  {
-    WARN("InitializeSecurityContext failed with error 0x%08x\n", r);
-    return ERROR_ACCESS_DENIED;
-  }
+  status = RPCRT4_ClientAuthorize(conn, &inp, &out);
+  if (status) return status;
 
   resp_hdr = RPCRT4_BuildAuthHeader(NDR_LOCAL_DATA_REPRESENTATION);
   if (!resp_hdr)
@@ -547,6 +570,7 @@ static RPC_STATUS RPCRT_AuthorizeConnection(RpcConnection* conn,
 
   status = RPCRT4_SendAuth(conn, resp_hdr, NULL, 0, out.pvBuffer, out.cbBuffer);
 
+  HeapFree(GetProcessHeap(), 0, out.pvBuffer);
   RPCRT4_FreeHeader(resp_hdr);
 
   return status;
@@ -568,12 +592,8 @@ RPC_STATUS RPCRT4_Send(RpcConnection *Connection, RpcPktHdr *Header,
     return RPCRT4_SendAuth(Connection, Header, Buffer, BufferLength, NULL, 0);
   }
 
-  out.BufferType = SECBUFFER_TOKEN;
-  out.cbBuffer = 0;
-  out.pvBuffer = NULL;
-
   /* tack on a negotiate packet */
-  RPCRT4_AuthNegotiate(Connection, &out);
+  RPCRT4_ClientAuthorize(Connection, NULL, &out);
   r = RPCRT4_SendAuth(Connection, Header, Buffer, BufferLength, out.pvBuffer, out.cbBuffer);
   HeapFree(GetProcessHeap(), 0, out.pvBuffer);
 
@@ -672,7 +692,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
     if (((*Header)->common.frag_len < hdr_length) ||
         ((*Header)->common.frag_len - hdr_length < header_auth_len)) {
       WARN("frag_len %d too small for hdr_length %d and auth_len %d\n",
-        common_hdr.frag_len, hdr_length, common_hdr.auth_len);
+        (*Header)->common.frag_len, hdr_length, header_auth_len);
       status = RPC_S_PROTOCOL_ERROR;
       goto fail;
     }
@@ -784,6 +804,27 @@ fail:
 
 /***********************************************************************
  *           I_RpcGetBuffer [RPCRT4.@]
+ *
+ * Allocates a buffer for use by I_RpcSend or I_RpcSendReceive and binds to the
+ * server interface.
+ *
+ * PARAMS
+ *  pMsg [I/O] RPC message information.
+ *
+ * RETURNS
+ *  Success: RPC_S_OK.
+ *  Failure: RPC_S_INVALID_BINDING if pMsg->Handle is invalid.
+ *           RPC_S_SERVER_UNAVAILABLE if unable to connect to server.
+ *           ERROR_OUTOFMEMORY if buffer allocation failed.
+ *
+ * NOTES
+ *  The pMsg->BufferLength field determines the size of the buffer to allocate,
+ *  in bytes.
+ *
+ *  Use I_RpcFreeBuffer() to unbind from the server and free the message buffer.
+ *
+ * SEE ALSO
+ *  I_RpcFreeBuffer(), I_RpcSend(), I_RpcReceive(), I_RpcSendReceive().
  */
 RPC_STATUS WINAPI I_RpcGetBuffer(PRPC_MESSAGE pMsg)
 {
@@ -810,6 +851,18 @@ static RPC_STATUS I_RpcReAllocateBuffer(PRPC_MESSAGE pMsg)
 
 /***********************************************************************
  *           I_RpcFreeBuffer [RPCRT4.@]
+ *
+ * Frees a buffer allocated by I_RpcGetBuffer or I_RpcReceive and unbinds from
+ * the server interface.
+ *
+ * PARAMS
+ *  pMsg [I/O] RPC message information.
+ *
+ * RETURNS
+ *  RPC_S_OK.
+ *
+ * SEE ALSO
+ *  I_RpcGetBuffer(), I_RpcReceive().
  */
 RPC_STATUS WINAPI I_RpcFreeBuffer(PRPC_MESSAGE pMsg)
 {
@@ -822,6 +875,20 @@ RPC_STATUS WINAPI I_RpcFreeBuffer(PRPC_MESSAGE pMsg)
 
 /***********************************************************************
  *           I_RpcSend [RPCRT4.@]
+ *
+ * Sends a message to the server.
+ *
+ * PARAMS
+ *  pMsg [I/O] RPC message information.
+ *
+ * RETURNS
+ *  Unknown.
+ *
+ * NOTES
+ *  The buffer must have been allocated with I_RpcGetBuffer().
+ *
+ * SEE ALSO
+ *  I_RpcGetBuffer(), I_RpcReceive(), I_RpcSendReceive().
  */
 RPC_STATUS WINAPI I_RpcSend(PRPC_MESSAGE pMsg)
 {
@@ -860,7 +927,7 @@ RPC_STATUS WINAPI I_RpcSend(PRPC_MESSAGE pMsg)
   if (bind->server) {
     if (pMsg->RpcFlags & WINE_RPCFLAG_EXCEPTION) {
       hdr = RPCRT4_BuildFaultHeader(pMsg->DataRepresentation,
-                                    RPC_S_CALL_FAILED);
+                                    *(DWORD *)pMsg->Buffer);
     } else {
       hdr = RPCRT4_BuildResponseHeader(pMsg->DataRepresentation,
                                        pMsg->BufferLength);
@@ -885,6 +952,23 @@ RPC_STATUS WINAPI I_RpcSend(PRPC_MESSAGE pMsg)
   RPCRT4_CloseBinding(bind, conn);
 
   return status;
+}
+
+/* is this status something that the server can't recover from? */
+static inline BOOL is_hard_error(RPC_STATUS status)
+{
+    switch (status)
+    {
+    case 0: /* user-defined fault */
+    case ERROR_ACCESS_DENIED:
+    case ERROR_INVALID_PARAMETER:
+    case RPC_S_PROTOCOL_ERROR:
+    case RPC_S_CALL_FAILED:
+    case RPC_S_CALL_FAILED_DNE:
+        return TRUE;
+    default:
+        return FALSE;
+    }
 }
 
 /***********************************************************************
@@ -934,44 +1018,74 @@ RPC_STATUS WINAPI I_RpcReceive(PRPC_MESSAGE pMsg)
     goto fail;
   }
 
-  status = RPC_S_PROTOCOL_ERROR;
-
   switch (hdr->common.ptype) {
   case PKT_RESPONSE:
-    if (bind->server) goto fail;
+    if (bind->server) {
+        status = RPC_S_PROTOCOL_ERROR;
+        goto fail;
+    }
     break;
   case PKT_REQUEST:
-    if (!bind->server) goto fail;
+    if (!bind->server) {
+        status = RPC_S_PROTOCOL_ERROR;
+        goto fail;
+    }
     break;
   case PKT_FAULT:
     pMsg->RpcFlags |= WINE_RPCFLAG_EXCEPTION;
     ERR ("we got fault packet with status 0x%lx\n", hdr->fault.status);
     status = hdr->fault.status; /* FIXME: do translation from nca error codes */
-    goto fail;
+    if (is_hard_error(status))
+        goto fail;
+    break;
   default:
     WARN("bad packet type %d\n", hdr->common.ptype);
+    status = RPC_S_PROTOCOL_ERROR;
     goto fail;
   }
 
   /* success */
-  status = RPC_S_OK;
+  RPCRT4_CloseBinding(bind, conn);
+  RPCRT4_FreeHeader(hdr);
+  return status;
 
 fail:
   RPCRT4_FreeHeader(hdr);
-  RPCRT4_CloseBinding(bind, conn);
+  RPCRT4_DestroyConnection(conn);
   return status;
 }
 
 /***********************************************************************
  *           I_RpcSendReceive [RPCRT4.@]
+ *
+ * Sends a message to the server and receives the response.
+ *
+ * PARAMS
+ *  pMsg [I/O] RPC message information.
+ *
+ * RETURNS
+ *  Success: RPC_S_OK.
+ *  Failure: Any error code.
+ *
+ * NOTES
+ *  The buffer must have been allocated with I_RpcGetBuffer().
+ *
+ * SEE ALSO
+ *  I_RpcGetBuffer(), I_RpcSend(), I_RpcReceive().
  */
 RPC_STATUS WINAPI I_RpcSendReceive(PRPC_MESSAGE pMsg)
 {
   RPC_STATUS status;
+  RPC_MESSAGE original_message;
 
   TRACE("(%p)\n", pMsg);
+
+  original_message = *pMsg;
   status = I_RpcSend(pMsg);
   if (status == RPC_S_OK)
     status = I_RpcReceive(pMsg);
+  /* free the buffer replaced by a new buffer in I_RpcReceive */
+  if (status == RPC_S_OK)
+    I_RpcFreeBuffer(&original_message);
   return status;
 }

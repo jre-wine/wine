@@ -5,7 +5,7 @@
  * Copyright 2003-2004 Raphael Junqueira
  * Copyright 2004 Christian Costa
  * Copyright 2005 Oliver Stieber
- * Copyright 2006 Henri Verbeet
+ * Copyright 2006-2007 Henri Verbeet
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,84 +27,84 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
-#define GLINFO_LOCATION ((IWineD3DImpl *)(This->wineD3D))->gl_info
+#define GLINFO_LOCATION This->adapter->gl_info
 
 /*****************************************************************************
  * Pixel format array
  */
 static const PixelFormatDesc formats[] = {
-  /*{WINED3DFORMAT          ,alphamask  ,redmask    ,greenmask  ,bluemask   ,bpp    ,isFourcc   ,internal   ,format ,type   }*/
-    {WINED3DFMT_UNKNOWN     ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,0                      ,0                  ,0                              },
+  /*{WINED3DFORMAT          ,alphamask  ,redmask    ,greenmask  ,bluemask   ,bpp    ,isFourcc   ,internal                         ,srgbInternal                           ,format  ,type   }*/
+    {WINED3DFMT_UNKNOWN     ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
     /* FourCC formats, kept here to have WINED3DFMT_R8G8B8(=20) at position 20 */
-    {WINED3DFMT_UYVY        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                      ,0                  ,0                              },
-    {WINED3DFMT_YUY2        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                      ,0                  ,0                              },
-    {WINED3DFMT_DXT1        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,GL_RGBA   ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_DXT2        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT3_EXT,GL_RGBA   ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_DXT3        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT3_EXT,GL_RGBA   ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_DXT4        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,GL_RGBA   ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_DXT5        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,GL_RGBA   ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_MULTI2_ARGB ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                      ,0                  ,0                              },
-    {WINED3DFMT_G8R8_G8B8   ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                      ,0                  ,0                              },
-    {WINED3DFMT_R8G8_B8G8   ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                      ,0                  ,0                              },
+    {WINED3DFMT_UYVY        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_YUY2        ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_DXT1        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT1_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
+    {WINED3DFMT_DXT2        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
+    {WINED3DFMT_DXT3        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT3_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
+    {WINED3DFMT_DXT4        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
+    {WINED3DFMT_DXT5        ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,TRUE       ,GL_COMPRESSED_RGBA_S3TC_DXT5_EXT ,GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT ,GL_RGBA ,GL_UNSIGNED_BYTE         },
+    {WINED3DFMT_MULTI2_ARGB8,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_G8R8_G8B8   ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_R8G8_B8G8   ,0x0        ,0x0        ,0x0        ,0x0        ,1/*?*/ ,TRUE       ,0                                ,0                                      ,0       ,0                        },
     /* IEEE formats */
-    {WINED3DFMT_R32F        ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_RGB32F_ARB         ,GL_RED             ,GL_FLOAT                       },
-    {WINED3DFMT_G32R32F     ,0x0        ,0x0        ,0x0        ,0x0        ,8      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_A32B32G32R32F,0x0       ,0x0        ,0x0        ,0x0        ,16     ,FALSE      ,GL_RGBA32F_ARB         ,GL_RGBA            ,GL_FLOAT                       },
+    {WINED3DFMT_R32F        ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_RGB32F_ARB                    ,GL_RGB32F_ARB                          ,GL_RED  ,GL_FLOAT                 },
+    {WINED3DFMT_G32R32F     ,0x0        ,0x0        ,0x0        ,0x0        ,8      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_A32B32G32R32F,0x0       ,0x0        ,0x0        ,0x0        ,16     ,FALSE      ,GL_RGBA32F_ARB                   ,GL_RGBA32F_ARB                         ,GL_RGBA ,GL_FLOAT                 },
     /* Hmm? */
-    {WINED3DFMT_CxV8U8      ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                      ,0                  ,0                              },
+    {WINED3DFMT_CxV8U8      ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
     /* Float */
-    {WINED3DFMT_R16F        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_RGB16F_ARB         ,GL_RED             ,GL_HALF_FLOAT_ARB              },
-    {WINED3DFMT_G16R16F     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_A16B16G16R16F,0x0       ,0x0        ,0x0        ,0x0        ,8      ,FALSE      ,GL_RGBA16F_ARB         ,GL_RGBA            ,GL_HALF_FLOAT_ARB              },
+    {WINED3DFMT_R16F        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_RGB16F_ARB                    ,GL_RGB16F_ARB                          ,GL_RED  ,GL_HALF_FLOAT_ARB        },
+    {WINED3DFMT_G16R16F     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_A16B16G16R16F,0x0       ,0x0        ,0x0        ,0x0        ,8      ,FALSE      ,GL_RGBA16F_ARB                   ,GL_RGBA16F_ARB                         ,GL_RGBA ,GL_HALF_FLOAT_ARB        },
     /* Palettized formats */
-    {WINED3DFMT_A8P8        ,0x0000ff00 ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_P8          ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_COLOR_INDEX8_EXT    ,GL_COLOR_INDEX     ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_A8P8        ,0x0000ff00 ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_P8          ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_COLOR_INDEX8_EXT              ,GL_COLOR_INDEX8_EXT                    ,GL_COLOR_INDEX ,GL_UNSIGNED_BYTE  },
     /* Standard ARGB formats. Keep WINED3DFMT_R8G8B8(=20) at position 20 */
-    {WINED3DFMT_R8G8B8      ,0x0        ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,3      ,FALSE      ,GL_RGB8                ,GL_BGR             ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_A8R8G8B8    ,0xff000000 ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,4      ,FALSE      ,GL_RGBA8               ,GL_BGRA            ,GL_UNSIGNED_INT_8_8_8_8_REV    },
-    {WINED3DFMT_X8R8G8B8    ,0x0        ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,4      ,FALSE      ,GL_RGB8                ,GL_BGRA            ,GL_UNSIGNED_INT_8_8_8_8_REV    },
-    {WINED3DFMT_R5G6B5      ,0x0        ,0x0000F800 ,0x000007e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5                ,GL_RGB             ,GL_UNSIGNED_SHORT_5_6_5        },
-    {WINED3DFMT_X1R5G5B5    ,0x0        ,0x00007c00 ,0x000003e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5_A1             ,GL_BGRA            ,GL_UNSIGNED_SHORT_1_5_5_5_REV  },
-    {WINED3DFMT_A1R5G5B5    ,0x00008000 ,0x00007c00 ,0x000003e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5_A1             ,GL_BGRA            ,GL_UNSIGNED_SHORT_1_5_5_5_REV  },
-    {WINED3DFMT_A4R4G4B4    ,0x0000f000 ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,FALSE      ,GL_RGBA4               ,GL_BGRA            ,GL_UNSIGNED_SHORT_4_4_4_4_REV  },
-    {WINED3DFMT_R3G3B2      ,0x0        ,0x000000e0 ,0x0000001c ,0x00000003 ,1      ,FALSE      ,GL_R3_G3_B2            ,GL_RGB             ,GL_UNSIGNED_BYTE_2_3_3_REV     },
-    {WINED3DFMT_A8          ,0x000000ff ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_ALPHA8              ,GL_ALPHA           ,GL_ALPHA                       },
-    {WINED3DFMT_A8R3G3B2    ,0x0000ff00 ,0x000000e0 ,0x0000001c ,0x00000003 ,2      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_X4R4G4B4    ,0x0        ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,FALSE      ,GL_RGB4                ,GL_BGRA            ,GL_UNSIGNED_SHORT_4_4_4_4_REV  },
-    {WINED3DFMT_A2B10G10R10 ,0xb0000000 ,0x000003ff ,0x000ffc00 ,0x3ff00000 ,4      ,FALSE      ,GL_RGB                 ,GL_RGBA            ,GL_UNSIGNED_INT_2_10_10_10_REV },
-    {WINED3DFMT_A8B8G8R8    ,0xff000000 ,0x000000ff ,0x0000ff00 ,0x00ff0000 ,4      ,FALSE      ,GL_RGBA8               ,GL_RGBA            ,GL_UNSIGNED_INT_8_8_8_8_REV    },
-    {WINED3DFMT_X8B8G8R8    ,0x0        ,0x000000ff ,0x0000ff00 ,0x00ff0000 ,4      ,FALSE      ,GL_RGB8                ,GL_RGBA            ,GL_UNSIGNED_INT_8_8_8_8_REV    },
-    {WINED3DFMT_G16R16      ,0x0        ,0x0000ffff ,0xffff0000 ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_A2R10G10B10 ,0xb0000000 ,0x3ff00000 ,0x000ffc00 ,0x000003ff ,4      ,FALSE      ,GL_RGBA                ,GL_BGRA            ,GL_UNSIGNED_INT_2_10_10_10_REV },
-    {WINED3DFMT_A16B16G16R16,0x0        ,0x0000ffff ,0xffff0000 ,0x0        ,8      ,FALSE      ,GL_RGBA16_EXT          ,GL_RGBA            ,GL_UNSIGNED_SHORT              },
+    {WINED3DFMT_R8G8B8      ,0x0        ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,3      ,FALSE      ,GL_RGB8                          ,GL_RGB8                                ,GL_BGR  ,GL_UNSIGNED_BYTE         },
+    {WINED3DFMT_A8R8G8B8    ,0xff000000 ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,4      ,FALSE      ,GL_RGBA8                         ,GL_SRGB8_ALPHA8_EXT                 ,GL_BGRA ,GL_UNSIGNED_INT_8_8_8_8_REV },
+    {WINED3DFMT_X8R8G8B8    ,0x0        ,0x00ff0000 ,0x0000ff00 ,0x000000ff ,4      ,FALSE      ,GL_RGB8                          ,GL_SRGB8_EXT                        ,GL_BGRA ,GL_UNSIGNED_INT_8_8_8_8_REV },
+    {WINED3DFMT_R5G6B5      ,0x0        ,0x0000F800 ,0x000007e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5                          ,GL_RGB5                              ,GL_RGB  ,GL_UNSIGNED_SHORT_5_6_5    },
+    {WINED3DFMT_X1R5G5B5    ,0x0        ,0x00007c00 ,0x000003e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5_A1                       ,GL_RGB5_A1                        ,GL_BGRA ,GL_UNSIGNED_SHORT_1_5_5_5_REV },
+    {WINED3DFMT_A1R5G5B5    ,0x00008000 ,0x00007c00 ,0x000003e0 ,0x0000001f ,2      ,FALSE      ,GL_RGB5_A1                       ,GL_RGB5_A1                        ,GL_BGRA ,GL_UNSIGNED_SHORT_1_5_5_5_REV },
+    {WINED3DFMT_A4R4G4B4    ,0x0000f000 ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,FALSE      ,GL_RGBA4                         ,GL_SRGB8_ALPHA8_EXT               ,GL_BGRA ,GL_UNSIGNED_SHORT_4_4_4_4_REV },
+    {WINED3DFMT_R3G3B2      ,0x0        ,0x000000e0 ,0x0000001c ,0x00000003 ,1      ,FALSE      ,GL_R3_G3_B2                      ,GL_R3_G3_B2                          ,GL_RGB  ,GL_UNSIGNED_BYTE_2_3_3_REV },
+    {WINED3DFMT_A8          ,0x000000ff ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_ALPHA8                        ,GL_ALPHA8                              ,GL_ALPHA ,GL_UNSIGNED_BYTE        },
+    {WINED3DFMT_A8R3G3B2    ,0x0000ff00 ,0x000000e0 ,0x0000001c ,0x00000003 ,2      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_X4R4G4B4    ,0x0        ,0x00000f00 ,0x000000f0 ,0x0000000f ,2      ,FALSE      ,GL_RGB4                          ,GL_RGB4                           ,GL_BGRA ,GL_UNSIGNED_SHORT_4_4_4_4_REV },
+    {WINED3DFMT_A2B10G10R10 ,0xb0000000 ,0x000003ff ,0x000ffc00 ,0x3ff00000 ,4      ,FALSE      ,GL_RGB                           ,GL_RGB                           ,GL_RGBA ,GL_UNSIGNED_INT_2_10_10_10_REV },
+    {WINED3DFMT_A8B8G8R8    ,0xff000000 ,0x000000ff ,0x0000ff00 ,0x00ff0000 ,4      ,FALSE      ,GL_RGBA8                         ,GL_RGBA8                            ,GL_RGBA ,GL_UNSIGNED_INT_8_8_8_8_REV },
+    {WINED3DFMT_X8B8G8R8    ,0x0        ,0x000000ff ,0x0000ff00 ,0x00ff0000 ,4      ,FALSE      ,GL_RGB8                          ,GL_RGB8                             ,GL_RGBA ,GL_UNSIGNED_INT_8_8_8_8_REV },
+    {WINED3DFMT_G16R16      ,0x0        ,0x0000ffff ,0xffff0000 ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_A2R10G10B10 ,0xb0000000 ,0x3ff00000 ,0x000ffc00 ,0x000003ff ,4      ,FALSE      ,GL_RGBA                          ,GL_RGBA                          ,GL_BGRA ,GL_UNSIGNED_INT_2_10_10_10_REV },
+    {WINED3DFMT_A16B16G16R16,0x0        ,0x0000ffff ,0xffff0000 ,0x0        ,8      ,FALSE      ,GL_RGBA16_EXT                    ,GL_RGBA16_EXT                          ,GL_RGBA ,GL_UNSIGNED_SHORT        },
     /* Luminance */
-    {WINED3DFMT_L8          ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_LUMINANCE8          ,GL_LUMINANCE       ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_A8L8        ,0x0000ff00 ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_LUMINANCE8_ALPHA8   ,GL_LUMINANCE_ALPHA ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_A4L4        ,0x000000f0 ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_LUMINANCE4_ALPHA4   ,GL_LUMINANCE_ALPHA ,GL_UNSIGNED_BYTE               },
+    {WINED3DFMT_L8          ,0x0        ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_LUMINANCE8                    ,GL_SLUMINANCE8_EXT                     ,GL_LUMINANCE ,GL_UNSIGNED_BYTE    },
+    {WINED3DFMT_A8L8        ,0x0000ff00 ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_LUMINANCE8_ALPHA8             ,GL_SLUMINANCE8_ALPHA8_EXT          ,GL_LUMINANCE_ALPHA ,GL_UNSIGNED_BYTE  },
+    {WINED3DFMT_A4L4        ,0x000000f0 ,0x0        ,0x0        ,0x0        ,1      ,FALSE      ,GL_LUMINANCE4_ALPHA4             ,GL_LUMINANCE4_ALPHA4               ,GL_LUMINANCE_ALPHA ,GL_UNSIGNED_BYTE  },
     /* Bump mapping stuff */
-    {WINED3DFMT_V8U8        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_COLOR_INDEX8_EXT    ,GL_COLOR_INDEX     ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_L6V5U5      ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_COLOR_INDEX8_EXT    ,GL_COLOR_INDEX     ,GL_UNSIGNED_SHORT_5_5_5_1      },
-    {WINED3DFMT_X8L8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_RGBA8               ,GL_BGRA            ,GL_UNSIGNED_BYTE               },
-    {WINED3DFMT_Q8W8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_RGBA8               ,GL_RGBA            ,GL_UNSIGNED_INT_8_8_8_8_REV/*?*/},
-    {WINED3DFMT_V16U16      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_SHORT              },
-    {WINED3DFMT_W11V11U10   ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_A2W10V10U10 ,0xb0000000 ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
+    {WINED3DFMT_V8U8        ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DSDT8_NV                      ,GL_DSDT8_NV                            ,GL_DSDT_NV      ,GL_BYTE          },
+    {WINED3DFMT_L6V5U5      ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_COLOR_INDEX8_EXT              ,GL_COLOR_INDEX8_EXT            ,GL_COLOR_INDEX ,GL_UNSIGNED_SHORT_5_5_5_1 },
+    {WINED3DFMT_X8L8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DSDT8_MAG8_INTENSITY8_NV      ,GL_DSDT8_MAG8_INTENSITY8_NV            ,GL_DSDT_MAG_INTENSITY_NV ,GL_BYTE },
+    {WINED3DFMT_Q8W8V8U8    ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_SIGNED_RGBA8_NV               ,GL_SIGNED_RGBA8_NV                     ,GL_RGBA  ,GL_BYTE                 },
+    {WINED3DFMT_V16U16      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_SIGNED_HILO16_NV              ,GL_SIGNED_HILO16_NV                    ,GL_HILO_NV ,GL_SHORT              },
+    {WINED3DFMT_W11V11U10   ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_A2W10V10U10 ,0xb0000000 ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
     /* Depth stencil formats */
-    {WINED3DFMT_D16_LOCKABLE,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_SHORT              },
-    {WINED3DFMT_D32         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT32_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT                },
-    {WINED3DFMT_D15S1       ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_SHORT              },
-    {WINED3DFMT_D24S8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT                },
-    {WINED3DFMT_D24X8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT                },
-    {WINED3DFMT_D24X4S4     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT                },
-    {WINED3DFMT_D16         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_UNSIGNED_SHORT              },
-    {WINED3DFMT_L16         ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_LUMINANCE16_EXT     ,GL_LUMINANCE       ,GL_UNSIGNED_SHORT              },
-    {WINED3DFMT_D32F_LOCKABLE,0x0       ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT32_ARB,GL_DEPTH_COMPONENT,GL_FLOAT                       },
-    {WINED3DFMT_D24FS8      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB,GL_DEPTH_COMPONENT,GL_FLOAT                       },
+    {WINED3DFMT_D16_LOCKABLE,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB           ,GL_DEPTH_COMPONENT ,GL_UNSIGNED_SHORT },
+    {WINED3DFMT_D32         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT32_ARB         ,GL_DEPTH_COMPONENT32_ARB             ,GL_DEPTH_COMPONENT ,GL_UNSIGNED_INT },
+    {WINED3DFMT_D15S1       ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB           ,GL_DEPTH_COMPONENT ,GL_UNSIGNED_SHORT },
+    {WINED3DFMT_D24S8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB             ,GL_DEPTH_COMPONENT ,GL_UNSIGNED_INT },
+    {WINED3DFMT_D24X8       ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB              ,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT },
+    {WINED3DFMT_D24X4S4     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB              ,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT },
+    {WINED3DFMT_D16         ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB            ,GL_DEPTH_COMPONENT,GL_UNSIGNED_SHORT },
+    {WINED3DFMT_L16         ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,GL_LUMINANCE16_EXT               ,GL_LUMINANCE16_EXT                  ,GL_LUMINANCE   ,GL_UNSIGNED_SHORT    },
+    {WINED3DFMT_D32F_LOCKABLE,0x0       ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT32_ARB         ,GL_DEPTH_COMPONENT32_ARB               ,GL_DEPTH_COMPONENT ,GL_FLOAT      },
+    {WINED3DFMT_D24FS8      ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,GL_DEPTH_COMPONENT24_ARB         ,GL_DEPTH_COMPONENT24_ARB               ,GL_DEPTH_COMPONENT ,GL_FLOAT      },
     /* Is this a vertex buffer? */
-    {WINED3DFMT_VERTEXDATA  ,0x0        ,0x0        ,0x0        ,0x0        ,0      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_INDEX16     ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_INDEX32     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                      ,0                  ,0                              },
-    {WINED3DFMT_Q16W16V16U16,0x0        ,0x0        ,0x0        ,0x0        ,8      ,FALSE      ,GL_COLOR_INDEX         ,GL_COLOR_INDEX     ,GL_UNSIGNED_SHORT              }
+    {WINED3DFMT_VERTEXDATA  ,0x0        ,0x0        ,0x0        ,0x0        ,0      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_INDEX16     ,0x0        ,0x0        ,0x0        ,0x0        ,2      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_INDEX32     ,0x0        ,0x0        ,0x0        ,0x0        ,4      ,FALSE      ,0                                ,0                                      ,0       ,0                        },
+    {WINED3DFMT_Q16W16V16U16,0x0        ,0x0        ,0x0        ,0x0        ,8      ,FALSE      ,GL_COLOR_INDEX                   ,GL_COLOR_INDEX                         ,GL_COLOR_INDEX ,GL_UNSIGNED_SHORT }
 };
 
 const PixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt)
@@ -174,7 +174,7 @@ const char* debug_d3dformat(WINED3DFORMAT fmt) {
     FMT_TO_STR(WINED3DFMT_DXT3);
     FMT_TO_STR(WINED3DFMT_DXT4);
     FMT_TO_STR(WINED3DFMT_DXT5);
-    FMT_TO_STR(WINED3DFMT_MULTI2_ARGB);
+    FMT_TO_STR(WINED3DFMT_MULTI2_ARGB8);
     FMT_TO_STR(WINED3DFMT_G8R8_G8B8);
     FMT_TO_STR(WINED3DFMT_R8G8_B8G8);
     FMT_TO_STR(WINED3DFMT_D16_LOCKABLE);
@@ -317,20 +317,20 @@ const char* debug_d3ddecltype(WINED3DDECLTYPE type) {
 const char* debug_d3ddeclusage(BYTE usage) {
     switch (usage) {
 #define WINED3DDECLUSAGE_TO_STR(u) case u: return #u
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_POSITION);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_BLENDWEIGHT);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_BLENDINDICES);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_NORMAL);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_PSIZE);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_TEXCOORD);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_TANGENT);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_BINORMAL);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_TESSFACTOR);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_POSITIONT);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_COLOR);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_FOG);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_DEPTH);
-        WINED3DDECLUSAGE_TO_STR(D3DDECLUSAGE_SAMPLE);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_POSITION);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_BLENDWEIGHT);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_BLENDINDICES);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_NORMAL);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_PSIZE);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_TEXCOORD);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_TANGENT);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_BINORMAL);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_TESSFACTOR);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_POSITIONT);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_COLOR);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_FOG);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_DEPTH);
+        WINED3DDECLUSAGE_TO_STR(WINED3DDECLUSAGE_SAMPLE);
 #undef WINED3DDECLUSAGE_TO_STR
         default:
             FIXME("Unrecognized %u declaration usage!\n", usage);
@@ -571,6 +571,24 @@ const char* debug_d3dsamplerstate(DWORD state) {
   }
 }
 
+const char *debug_d3dtexturefiltertype(WINED3DTEXTUREFILTERTYPE filter_type) {
+    switch (filter_type) {
+#define D3DTEXTUREFILTERTYPE_TO_STR(u) case u: return #u
+        D3DTEXTUREFILTERTYPE_TO_STR(WINED3DTEXF_NONE);
+        D3DTEXTUREFILTERTYPE_TO_STR(WINED3DTEXF_POINT);
+        D3DTEXTUREFILTERTYPE_TO_STR(WINED3DTEXF_LINEAR);
+        D3DTEXTUREFILTERTYPE_TO_STR(WINED3DTEXF_ANISOTROPIC);
+        D3DTEXTUREFILTERTYPE_TO_STR(WINED3DTEXF_FLATCUBIC);
+        D3DTEXTUREFILTERTYPE_TO_STR(WINED3DTEXF_GAUSSIANCUBIC);
+        D3DTEXTUREFILTERTYPE_TO_STR(WINED3DTEXF_PYRAMIDALQUAD);
+        D3DTEXTUREFILTERTYPE_TO_STR(WINED3DTEXF_GAUSSIANQUAD);
+#undef D3DTEXTUREFILTERTYPE_TO_STR
+        default:
+            FIXME("Unrecognied texture filter type 0x%08x\n", filter_type);
+            return "unrecognized";
+    }
+}
+
 const char* debug_d3dtexturestate(DWORD state) {
   switch (state) {
 #define D3DSTATE_TO_STR(u) case u: return #u
@@ -604,7 +622,7 @@ const char* debug_d3dtexturestate(DWORD state) {
   }
 }
 
-const char* debug_d3dtop(WINED3DTEXTUREOP d3dtop) {
+static const char* debug_d3dtop(WINED3DTEXTUREOP d3dtop) {
     switch (d3dtop) {
 #define D3DTOP_TO_STR(u) case u: return #u
         D3DTOP_TO_STR(WINED3DTOP_DISABLE);
@@ -676,6 +694,42 @@ const char* debug_d3dpool(WINED3DPOOL Pool) {
     FIXME("Unrecognized %u WINED3DPOOL!\n", Pool);
     return "unrecognized";
   }
+}
+
+const char *debug_fbostatus(GLenum status) {
+    switch(status) {
+#define FBOSTATUS_TO_STR(u) case u: return #u
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_COMPLETE_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_FORMATS_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER_EXT);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_UNSUPPORTED_EXT);
+#undef FBOSTATUS_TO_STR
+        default:
+            FIXME("Unrecognied FBO status 0x%08x\n", status);
+            return "unrecognized";
+    }
+}
+
+const char *debug_glerror(GLenum error) {
+    switch(error) {
+#define GLERROR_TO_STR(u) case u: return #u
+        GLERROR_TO_STR(GL_NO_ERROR);
+        GLERROR_TO_STR(GL_INVALID_ENUM);
+        GLERROR_TO_STR(GL_INVALID_VALUE);
+        GLERROR_TO_STR(GL_INVALID_OPERATION);
+        GLERROR_TO_STR(GL_STACK_OVERFLOW);
+        GLERROR_TO_STR(GL_STACK_UNDERFLOW);
+        GLERROR_TO_STR(GL_OUT_OF_MEMORY);
+        GLERROR_TO_STR(GL_INVALID_FRAMEBUFFER_OPERATION_EXT);
+#undef GLERROR_TO_STR
+        default:
+            FIXME("Unrecognied GL error 0x%08x\n", error);
+            return "unrecognized";
+    }
 }
 
 /*****************************************************************************
@@ -780,9 +834,12 @@ static BOOL is_invalid_op(IWineD3DDeviceImpl *This, int stage, WINED3DTEXTUREOP 
     if (op == WINED3DTOP_DISABLE) return FALSE;
     if (This->stateBlock->textures[stage]) return FALSE;
 
-    if (arg1 == WINED3DTA_TEXTURE && op != WINED3DTOP_SELECTARG2) return TRUE;
-    if (arg2 == WINED3DTA_TEXTURE && op != WINED3DTOP_SELECTARG1) return TRUE;
-    if (arg3 == WINED3DTA_TEXTURE && (op == WINED3DTOP_MULTIPLYADD || op == WINED3DTOP_LERP)) return TRUE;
+    if ((arg1 & WINED3DTA_SELECTMASK) == WINED3DTA_TEXTURE
+            && op != WINED3DTOP_SELECTARG2) return TRUE;
+    if ((arg2 & WINED3DTA_SELECTMASK) == WINED3DTA_TEXTURE
+            && op != WINED3DTOP_SELECTARG1) return TRUE;
+    if ((arg3 & WINED3DTA_SELECTMASK) == WINED3DTA_TEXTURE
+            && (op == WINED3DTOP_MULTIPLYADD || op == WINED3DTOP_LERP)) return TRUE;
 
     return FALSE;
 }
@@ -810,8 +867,8 @@ void set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEX
     get_src_and_opr_nvrc(stage, arg3, is_alpha, &tex_op_args.input[2],
             &tex_op_args.mapping[2], &tex_op_args.component_usage[2], texture_idx);
 
-    ENTER_GL();
 
+    /* This is called by a state handler which has the gl lock held and a context for the thread */
     switch(op)
     {
         case WINED3DTOP_DISABLE:
@@ -1075,6 +1132,23 @@ void set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEX
                     GL_SPARE0_NV, GL_NONE, GL_NONE, GL_FALSE, GL_FALSE, GL_FALSE));
             break;
 
+        case WINED3DTOP_BUMPENVMAPLUMINANCE:
+        case WINED3DTOP_BUMPENVMAP:
+            if(GL_SUPPORT(NV_TEXTURE_SHADER)) {
+                /* The bump map stage itself isn't exciting, just read the texture. But tell the next stage to
+                 * perform bump mapping and source from the current stage. Pretty much a SELECTARG2.
+                 * ARG2 is passed through unmodified(apps will most likely use D3DTA_CURRENT for arg2, arg1
+                 * (which will most likely be D3DTA_TEXTURE) is available as a texture shader input for the next stage
+                 */
+                GL_EXTCALL(glCombinerInputNV(target, portion, GL_VARIABLE_A_NV,
+                        tex_op_args.input[1], tex_op_args.mapping[1], tex_op_args.component_usage[1]));
+                GL_EXTCALL(glCombinerInputNV(target, portion, GL_VARIABLE_B_NV,
+                        GL_ZERO, GL_UNSIGNED_INVERT_NV, portion));
+                GL_EXTCALL(glCombinerOutputNV(target, portion, GL_SPARE0_NV, GL_DISCARD_NV,
+                        GL_DISCARD_NV, GL_NONE, GL_NONE, GL_FALSE, GL_FALSE, GL_FALSE));
+                break;
+            }
+
         default:
             FIXME("Unhandled WINED3DTOP: stage %d, is_alpha %d, op %s (%#x), arg1 %#x, arg2 %#x, arg3 %#x, texture_idx %d\n",
                     stage, is_alpha, debug_d3dtop(op), op, arg1, arg2, arg3, texture_idx);
@@ -1082,7 +1156,6 @@ void set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEX
 
     checkGLcall("set_tex_op_nvrc()\n");
 
-    LEAVE_GL();
 }
 
 static void get_src_and_opr(DWORD arg, BOOL is_alpha, GLenum* source, GLenum* operand) {
@@ -1147,7 +1220,6 @@ void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP
 /* Setup the texture operations texture stage states */
 void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP op, DWORD arg1, DWORD arg2, DWORD arg3)
 {
-#define GLINFO_LOCATION ((IWineD3DImpl *)(This->wineD3D))->gl_info
         GLenum src1, src2, src3;
         GLenum opr1, opr2, opr3;
         GLenum comb_target;
@@ -1160,7 +1232,7 @@ void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP
 
         TRACE("Alpha?(%d), Stage:%d Op(%s), a1(%d), a2(%d), a3(%d)\n", isAlpha, Stage, debug_d3dtop(op), arg1, arg2, arg3);
 
-        ENTER_GL();
+        /* This is called by a state handler which has the gl lock held and a context for the thread */
 
         /* Note: Operations usually involve two ars, src0 and src1 and are operations of
            the form (a1 <operation> a2). However, some of the more complex operations
@@ -1670,91 +1742,10 @@ void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP
 
           case WINED3DTOP_BUMPENVMAP:
             {
-              if (GL_SUPPORT(NV_TEXTURE_SHADER)) {
-                /*
-                  texture unit 0: GL_TEXTURE_2D
-                  texture unit 1: GL_DOT_PRODUCT_NV
-                  texture unit 2: GL_DOT_PRODUCT_DIFFUSE_CUBE_MAP_NV
-                  texture unit 3: GL_DOT_PRODUCT_REFLECT_CUBE_MAP_NV
-                */
-                float m[2][2];
-
-                union {
-                  float f;
-                  DWORD d;
-                } tmpvalue;
-
-                tmpvalue.d = This->stateBlock->textureState[Stage][WINED3DTSS_BUMPENVMAT00];
-                m[0][0] = tmpvalue.f;
-                tmpvalue.d = This->stateBlock->textureState[Stage][WINED3DTSS_BUMPENVMAT01];
-                m[0][1] = tmpvalue.f;
-                tmpvalue.d = This->stateBlock->textureState[Stage][WINED3DTSS_BUMPENVMAT10];
-                m[1][0] = tmpvalue.f;
-                tmpvalue.d = This->stateBlock->textureState[Stage][WINED3DTSS_BUMPENVMAT11];
-                m[1][1] = tmpvalue.f;
-
-                /*FIXME("Stage %d matrix is (%.2f,%.2f),(%.2f,%.2f)\n", Stage, m[0][0], m[0][1], m[1][0], m[1][0]);*/
-
-                if (!This->texture_shader_active) {
-                  This->texture_shader_active = TRUE;
-                  glEnable(GL_TEXTURE_SHADER_NV);
-                }
-
-                /*
-                glEnable(GL_REGISTER_COMBINERS_NV);
-                glCombinerParameteriNV (GL_NUM_GENERAL_COMBINERS_NV, 1);
-                glCombinerInputNV (GL_COMBINER0_NV, GL_RGB, GL_VARIABLE_A_NV, GL_TEXTURE0_ARB, GL_SIGNED_IDENTITY_NV, GL_RGB);
-                glCombinerInputNV (GL_COMBINER0_NV, GL_RGB, GL_VARIABLE_B_NV, GL_NONE, GL_UNSIGNED_INVERT_NV, GL_RGB);
-                glCombinerInputNV (GL_COMBINER0_NV, GL_RGB, GL_VARIABLE_C_NV, GL_TEXTURE2_ARB, GL_SIGNED_IDENTITY_NV, GL_RGB);
-                glCombinerInputNV (GL_COMBINER0_NV, GL_RGB, GL_VARIABLE_D_NV, GL_NONE, GL_UNSIGNED_INVERT_NV, GL_RGB);
-                glCombinerOutputNV (GL_COMBINER0_NV, GL_RGB, GL_DISCARD_NV, GL_DISCARD_NV, GL_PRIMARY_COLOR_NV, 0, 0, 0, 0, 0);
-                glCombinerInputNV (GL_COMBINER0_NV, GL_ALPHA, GL_VARIABLE_A_NV, GL_TEXTURE0_ARB, GL_SIGNED_IDENTITY_NV, GL_ALPHA);
-                glCombinerInputNV (GL_COMBINER0_NV, GL_ALPHA, GL_VARIABLE_B_NV, GL_NONE, GL_UNSIGNED_INVERT_NV, GL_ALPHA);
-                glCombinerInputNV (GL_COMBINER0_NV, GL_ALPHA, GL_VARIABLE_C_NV, GL_TEXTURE2_ARB, GL_SIGNED_IDENTITY_NV, GL_ALPHA);
-                glCombinerInputNV (GL_COMBINER0_NV, GL_ALPHA, GL_VARIABLE_D_NV, GL_NONE, GL_UNSIGNED_INVERT_NV, GL_ALPHA);
-                glCombinerOutputNV (GL_COMBINER0_NV, GL_ALPHA, GL_DISCARD_NV, GL_DISCARD_NV, GL_PRIMARY_COLOR_NV, 0, 0, 0, 0, 0);
-                glDisable (GL_PER_STAGE_CONSTANTS_NV);
-                glCombinerParameteriNV (GL_COLOR_SUM_CLAMP_NV, 0);
-                glFinalCombinerInputNV (GL_VARIABLE_A_NV, 0, GL_UNSIGNED_IDENTITY_NV, GL_RGB);
-                glFinalCombinerInputNV (GL_VARIABLE_B_NV, 0, GL_UNSIGNED_IDENTITY_NV, GL_RGB);
-                glFinalCombinerInputNV (GL_VARIABLE_C_NV, 0, GL_UNSIGNED_IDENTITY_NV, GL_RGB);
-                glFinalCombinerInputNV (GL_VARIABLE_D_NV, GL_PRIMARY_COLOR_NV, GL_UNSIGNED_IDENTITY_NV, GL_RGB);
-                glFinalCombinerInputNV (GL_VARIABLE_E_NV, 0, GL_UNSIGNED_IDENTITY_NV, GL_RGB);
-                glFinalCombinerInputNV (GL_VARIABLE_F_NV, 0, GL_UNSIGNED_IDENTITY_NV, GL_RGB);
-                glFinalCombinerInputNV (GL_VARIABLE_G_NV, GL_PRIMARY_COLOR_NV, GL_UNSIGNED_IDENTITY_NV, GL_ALPHA);
-                */
-                /*
-                int i;
-                for (i = 0; i < Stage; i++) {
-                  if (GL_SUPPORT(ARB_MULTITEXTURE)) {
-                    GL_ACTIVETEXTURE(i);
-                    glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_2D);
-                    checkGLcall("Activate texture..");
-                  } else if (i>0) {
-                    FIXME("Program using multiple concurrent textures which this opengl implementation doesn't support\n");
-                  }
-                }
-                */
-                /*
-                  GL_ACTIVETEXTURE(Stage - 1);
-                  glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_TEXTURE_2D);
-                */
-                /*
-                GL_ACTIVETEXTURE(Stage);
-                checkGLcall("Activate texture.. to update const color");
-                glTexEnvi(GL_TEXTURE_SHADER_NV, GL_SHADER_OPERATION_NV, GL_OFFSET_TEXTURE_2D_NV);
-                checkGLcall("glTexEnv");
-                glTexEnvi(GL_TEXTURE_SHADER_NV, GL_PREVIOUS_TEXTURE_INPUT_NV, GL_TEXTURE0_ARB + Stage - 1);
-                checkGLcall("glTexEnv");
-                glTexEnvfv(GL_TEXTURE_SHADER_NV, GL_OFFSET_TEXTURE_MATRIX_NV, (float*)&m[0]);
-                checkGLcall("glTexEnv");
-                */
-                LEAVE_GL();
-                return;
-              }
             }
 
           case WINED3DTOP_BUMPENVMAPLUMINANCE:
+                FIXME("Implement bump environment mapping in GL_NV_texture_env_combine4 path\n");
 
           default:
             Handled = FALSE;
@@ -1763,7 +1754,6 @@ void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE4_NV);
             checkGLcall("GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE4_NV");
 
-            LEAVE_GL();
             return;
           }
         } /* GL_NV_texture_env_combine4 */
@@ -2197,6 +2187,46 @@ void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP
                 } else
                   Handled = FALSE;
                 break;
+        case WINED3DTOP_BUMPENVMAPLUMINANCE:
+                if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+                    /* Some apps use BUMPENVMAPLUMINANCE instead of D3DTOP_BUMPENVMAP, although
+                     * they check for the non-luminance cap flag. Well, give them what they asked
+                     * for :-)
+                     */
+                    WARN("Application uses WINED3DTOP_BUMPENVMAPLUMINANCE\n");
+                } else {
+                    Handled = FALSE;
+                    break;
+                }
+                /* Fall through */
+        case WINED3DTOP_BUMPENVMAP:
+                if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+                    TRACE("Using ati bumpmap on stage %d, target %d\n", Stage, Stage + 1);
+                    glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_BUMP_ENVMAP_ATI);
+                    checkGLcall("glTexEnvi(GL_TEXTURE_ENV, comb_target, GL_BUMP_ENVMAP_ATI)");
+                    glTexEnvi(GL_TEXTURE_ENV, GL_BUMP_TARGET_ATI, GL_TEXTURE0_ARB + Stage + 1);
+                    checkGLcall("glTexEnvi(GL_TEXTURE_ENV, GL_BUMP_TARGET_ATI, GL_TEXTURE0_ARB + Stage + 1)");
+                    glTexEnvi(GL_TEXTURE_ENV, src0_target, src3);
+                    checkGLcall("GL_TEXTURE_ENV, src0_target, src3");
+                    glTexEnvi(GL_TEXTURE_ENV, opr0_target, opr3);
+                    checkGLcall("GL_TEXTURE_ENV, opr0_target, opr3");
+                    glTexEnvi(GL_TEXTURE_ENV, src1_target, src1);
+                    checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                    glTexEnvi(GL_TEXTURE_ENV, opr1_target, opr1);
+                    checkGLcall("GL_TEXTURE_ENV, opr1_target, opr1");
+                    glTexEnvi(GL_TEXTURE_ENV, src2_target, src2);
+                    checkGLcall("GL_TEXTURE_ENV, src0_target, src1");
+                    glTexEnvi(GL_TEXTURE_ENV, opr2_target, opr2);
+                    checkGLcall("GL_TEXTURE_ENV, opr2_target, opr2");
+
+                    Handled = TRUE;
+                    break;
+                } else if(GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+                    /* Technically texture shader support without register combiners is possible, but not expected to occur
+                     * on real world cards, so for now a fixme should be enough
+                     */
+                    FIXME("Implement bump mapping with GL_NV_texture_shader in non register combiner path\n");
+                }
         default:
                 Handled = FALSE;
         }
@@ -2230,7 +2260,6 @@ void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP
                 break;
               default:
                 FIXME("Can't use COMBINE4 and COMBINE together, thisop=%s, otherop=%s, isAlpha(%d)\n", debug_d3dtop(op), debug_d3dtop(op2), isAlpha);
-                LEAVE_GL();
                 return;
               }
             }
@@ -2240,12 +2269,9 @@ void set_tex_op(IWineD3DDevice *iface, BOOL isAlpha, int Stage, WINED3DTEXTUREOP
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, useext(GL_COMBINE));
             checkGLcall("GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, useext(GL_COMBINE)");
 
-            LEAVE_GL();
             return;
           }
         }
-
-        LEAVE_GL();
 
         /* After all the extensions, if still unhandled, report fixme */
         FIXME("Unhandled texture operation %s\n", debug_d3dtop(op));
@@ -2521,9 +2547,14 @@ DWORD get_flexible_vertex_size(DWORD d3dvtVertexType) {
     if (d3dvtVertexType & WINED3DFVF_SPECULAR) size += sizeof(DWORD);
     if (d3dvtVertexType & WINED3DFVF_PSIZE) size += sizeof(DWORD);
     switch (d3dvtVertexType & WINED3DFVF_POSITION_MASK) {
-        case WINED3DFVF_XYZ: size += 3 * sizeof(float); break;
+        case WINED3DFVF_XYZ:    size += 3 * sizeof(float); break;
         case WINED3DFVF_XYZRHW: size += 4 * sizeof(float); break;
-        default: TRACE(" matrix weighting not handled yet...\n");
+        case WINED3DFVF_XYZB1:  size += 4 * sizeof(float); break;
+        case WINED3DFVF_XYZB2:  size += 5 * sizeof(float); break;
+        case WINED3DFVF_XYZB3:  size += 6 * sizeof(float); break;
+        case WINED3DFVF_XYZB4:  size += 7 * sizeof(float); break;
+        case WINED3DFVF_XYZB5:  size += 8 * sizeof(float); break;
+        default: ERR("Unexpected position mask\n");
     }
     for (i = 0; i < numTextures; i++) {
         size += GET_TEXCOORD_SIZE_FROM_FVF(d3dvtVertexType, i) * sizeof(float);
@@ -2548,7 +2579,7 @@ DWORD get_flexible_vertex_size(DWORD d3dvtVertexType) {
  *  FALSE otherwise
  *
  *********************************************************************/
-#define GLINFO_LOCATION ((IWineD3DImpl *)(This->resource.wineD3DDevice->wineD3D))->gl_info
+#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]) {
     int x1 = Rect->left, x2 = Rect->right;
@@ -2590,7 +2621,7 @@ BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]
          * If the texture is dirty, or the part can't be used,
          * re-position the part to load
          */
-        if(!(This->Flags & SFLAG_DIRTY)) {
+        if(This->Flags & SFLAG_INTEXTURE) {
             if(This->glRect.left <= x1 && This->glRect.right >= x2 &&
                This->glRect.top <= y1 && This->glRect.bottom >= x2 ) {
                 /* Ok, the rectangle is ok, re-use it */
@@ -2598,12 +2629,12 @@ BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]
             } else {
                 /* Rectangle is not ok, dirtify the texture to reload it */
                 TRACE("Dirtifying texture to force reload\n");
-                This->Flags |= SFLAG_DIRTY;
+                This->Flags &= ~SFLAG_INTEXTURE;
             }
         }
 
         /* Now if we are dirty(no else if!) */
-        if(This->Flags & SFLAG_DIRTY) {
+        if(!(This->Flags & SFLAG_INTEXTURE)) {
             /* Set the new rectangle. Use the following strategy:
              * 1) Use as big textures as possible.
              * 2) Place the texture part in the way that the requested
@@ -2661,3 +2692,221 @@ BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]
     return TRUE;
 }
 #undef GLINFO_LOCATION
+
+/* Hash table functions */
+
+hash_table_t *hash_table_create(hash_function_t *hash_function, compare_function_t *compare_function)
+{
+    hash_table_t *table;
+    unsigned int initial_size = 8;
+
+    table = HeapAlloc(GetProcessHeap(), 0, sizeof(hash_table_t) + (initial_size * sizeof(struct list)));
+    if (!table)
+    {
+        ERR("Failed to allocate table, returning NULL.\n");
+        return NULL;
+    }
+
+    table->hash_function = hash_function;
+    table->compare_function = compare_function;
+
+    table->grow_size = initial_size - (initial_size >> 2);
+    table->shrink_size = 0;
+
+    table->buckets = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, initial_size * sizeof(struct list));
+    if (!table->buckets)
+    {
+        ERR("Failed to allocate table buckets, returning NULL.\n");
+        HeapFree(GetProcessHeap(), 0, table);
+        return NULL;
+    }
+    table->bucket_count = initial_size;
+
+    table->entries = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, table->grow_size * sizeof(hash_table_entry_t));
+    if (!table->entries)
+    {
+        ERR("Failed to allocate table entries, returning NULL.\n");
+        HeapFree(GetProcessHeap(), 0, table->buckets);
+        HeapFree(GetProcessHeap(), 0, table);
+        return NULL;
+    }
+    table->entry_count = 0;
+
+    list_init(&table->free_entries);
+    table->count = 0;
+
+    return table;
+}
+
+void hash_table_destroy(hash_table_t *table)
+{
+    unsigned int i = 0;
+
+    for (i = 0; i < table->entry_count; ++i)
+    {
+        HeapFree(GetProcessHeap(), 0, table->entries[i].key);
+    }
+
+    HeapFree(GetProcessHeap(), 0, table->entries);
+    HeapFree(GetProcessHeap(), 0, table->buckets);
+    HeapFree(GetProcessHeap(), 0, table);
+}
+
+static inline hash_table_entry_t *hash_table_get_by_idx(hash_table_t *table, void *key, unsigned int idx)
+{
+    hash_table_entry_t *entry;
+
+    if (table->buckets[idx].next)
+        LIST_FOR_EACH_ENTRY(entry, &(table->buckets[idx]), hash_table_entry_t, entry)
+            if (table->compare_function(entry->key, key)) return entry;
+
+    return NULL;
+}
+
+static BOOL hash_table_resize(hash_table_t *table, unsigned int new_bucket_count)
+{
+    unsigned int new_entry_count = 0;
+    hash_table_entry_t *new_entries;
+    struct list *new_buckets;
+    unsigned int grow_size = new_bucket_count - (new_bucket_count >> 2);
+    unsigned int i;
+
+    new_buckets = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, new_bucket_count * sizeof(struct list));
+    if (!new_buckets)
+    {
+        ERR("Failed to allocate new buckets, returning FALSE.\n");
+        return FALSE;
+    }
+
+    new_entries = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, grow_size * sizeof(hash_table_entry_t));
+    if (!new_entries)
+    {
+        ERR("Failed to allocate new entries, returning FALSE.\n");
+        HeapFree(GetProcessHeap(), 0, new_buckets);
+        return FALSE;
+    }
+
+    for (i = 0; i < table->bucket_count; ++i)
+    {
+        if (table->buckets[i].next)
+        {
+            hash_table_entry_t *entry, *entry2;
+
+            LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &table->buckets[i], hash_table_entry_t, entry)
+            {
+                int j;
+                hash_table_entry_t *new_entry = new_entries + (new_entry_count++);
+                *new_entry = *entry;
+
+                j = new_entry->hash & (new_bucket_count - 1);
+
+                if (!new_buckets[j].next) list_init(&new_buckets[j]);
+                list_add_head(&new_buckets[j], &new_entry->entry);
+            }
+        }
+    }
+
+    HeapFree(GetProcessHeap(), 0, table->buckets);
+    table->buckets = new_buckets;
+
+    HeapFree(GetProcessHeap(), 0, table->entries);
+    table->entries = new_entries;
+
+    table->entry_count = new_entry_count;
+    list_init(&table->free_entries);
+
+    table->bucket_count = new_bucket_count;
+    table->grow_size = grow_size;
+    table->shrink_size = new_bucket_count > 8 ? new_bucket_count >> 2 : 0;
+
+    return TRUE;
+}
+
+void hash_table_put(hash_table_t *table, void *key, void *value)
+{
+    unsigned int idx;
+    unsigned int hash;
+    hash_table_entry_t *entry;
+
+    hash = table->hash_function(key);
+    idx = hash & (table->bucket_count - 1);
+    entry = hash_table_get_by_idx(table, key, idx);
+
+    if (entry)
+    {
+        HeapFree(GetProcessHeap(), 0, key);
+        entry->value = value;
+
+        if (!value)
+        {
+            HeapFree(GetProcessHeap(), 0, entry->key);
+            entry->key = NULL;
+
+            /* Remove the entry */
+            list_remove(&entry->entry);
+            list_add_head(&table->free_entries, &entry->entry);
+
+            --table->count;
+
+            /* Shrink if necessary */
+            if (table->count < table->shrink_size) {
+                if (!hash_table_resize(table, table->bucket_count >> 1))
+                {
+                    ERR("Failed to shrink the table...\n");
+                }
+            }
+        }
+
+        return;
+    }
+
+    if (!value) return;
+
+    /* Grow if necessary */
+    if (table->count >= table->grow_size)
+    {
+        if (!hash_table_resize(table, table->bucket_count << 1))
+        {
+            ERR("Failed to grow the table, returning.\n");
+            return;
+        }
+
+        idx = hash & (table->bucket_count - 1);
+    }
+
+    /* Find an entry to insert */
+    if (!list_empty(&table->free_entries))
+    {
+        struct list *elem = list_head(&table->free_entries);
+
+        list_remove(elem);
+        entry = LIST_ENTRY(elem, hash_table_entry_t, entry);
+    } else {
+        entry = table->entries + (table->entry_count++);
+    }
+
+    /* Insert the entry */
+    entry->key = key;
+    entry->value = value;
+    entry->hash = hash;
+    if (!table->buckets[idx].next) list_init(&table->buckets[idx]);
+    list_add_head(&table->buckets[idx], &entry->entry);
+
+    ++table->count;
+}
+
+void hash_table_remove(hash_table_t *table, void *key)
+{
+    hash_table_put(table, key, NULL);
+}
+
+void *hash_table_get(hash_table_t *table, void *key)
+{
+    unsigned int idx;
+    hash_table_entry_t *entry;
+
+    idx = table->hash_function(key) & (table->bucket_count - 1);
+    entry = hash_table_get_by_idx(table, key, idx);
+
+    return entry ? entry->value : NULL;
+}

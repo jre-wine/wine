@@ -333,7 +333,9 @@ DLLSPEC *alloc_dll_spec(void)
     spec->alloc_entry_points = 0;
     spec->nb_names           = 0;
     spec->nb_resources       = 0;
-    spec->characteristics    = 0;
+    spec->characteristics    = IMAGE_FILE_EXECUTABLE_IMAGE;
+    if (get_ptr_size() > 4)
+        spec->characteristics |= IMAGE_FILE_LARGE_ADDRESS_AWARE;
     spec->dll_characteristics = IMAGE_DLLCHARACTERISTICS_NX_COMPAT;
     spec->subsystem          = 0;
     spec->subsystem_major    = 4;
@@ -454,7 +456,7 @@ unsigned int get_alignment(unsigned int align)
     case CPU_POWERPC:
     case CPU_ALPHA:
         n = 0;
-        while ((1 << n) != align) n++;
+        while ((1u << n) != align) n++;
         return n;
     }
     /* unreached */

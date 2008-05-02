@@ -29,7 +29,6 @@
 
 #include "windef.h"
 #include "winternl.h"
-#include "excpt.h"
 #include "wine/exception.h"
 #include "ntdll_misc.h"
 #include "wine/unicode.h"
@@ -83,14 +82,14 @@ static const WCHAR **debug_from_snoop_includelist;
 static BOOL init_done;
 
 /* compare an ASCII and a Unicode string without depending on the current codepage */
-inline static int strcmpAW( const char *strA, const WCHAR *strW )
+static inline int strcmpAW( const char *strA, const WCHAR *strW )
 {
     while (*strA && ((unsigned char)*strA == *strW)) { strA++; strW++; }
     return (unsigned char)*strA - *strW;
 }
 
 /* compare an ASCII and a Unicode string without depending on the current codepage */
-inline static int strncmpiAW( const char *strA, const WCHAR *strW, int n )
+static inline int strncmpiAW( const char *strA, const WCHAR *strW, int n )
 {
     int ret = 0;
     for ( ; n > 0; n--, strA++, strW++)
@@ -243,7 +242,7 @@ static void init_debug_lists(void)
  *
  * Check if a given module and function is in the list.
  */
-static BOOL check_list( const char *module, int ordinal, const char *func, const WCHAR **list )
+static BOOL check_list( const char *module, int ordinal, const char *func, const WCHAR *const *list )
 {
     char ord_str[10];
 
@@ -321,14 +320,14 @@ static BOOL check_from_module( const WCHAR **includelist, const WCHAR **excludel
 /***********************************************************************
  *           RELAY_PrintArgs
  */
-static inline void RELAY_PrintArgs( int *args, int nb_args, unsigned int typemask )
+static inline void RELAY_PrintArgs( const int *args, int nb_args, unsigned int typemask )
 {
     while (nb_args--)
     {
 	if ((typemask & 3) && HIWORD(*args))
         {
 	    if (typemask & 2)
-                DPRINTF( "%08x %s", *args, debugstr_w((LPWSTR)*args) );
+                DPRINTF( "%08x %s", *args, debugstr_w((LPCWSTR)*args) );
             else
                 DPRINTF( "%08x %s", *args, debugstr_a((LPCSTR)*args) );
 	}
@@ -360,7 +359,7 @@ __ASM_GLOBAL_FUNC( call_entry_point,
                    "\tpopl %edi\n"
                    "\tpopl %esi\n"
                    "\tpopl %ebp\n"
-                   "\tret" );
+                   "\tret" )
 
 
 /***********************************************************************
@@ -368,7 +367,7 @@ __ASM_GLOBAL_FUNC( call_entry_point,
  *
  * stack points to the return address, i.e. the first argument is stack[1].
  */
-static LONGLONG WINAPI relay_call_from_32( struct relay_descr *descr, unsigned int idx, int *stack )
+static LONGLONG WINAPI relay_call_from_32( struct relay_descr *descr, unsigned int idx, const int *stack )
 {
     LONGLONG ret;
     WORD ordinal = LOWORD(idx);
@@ -472,7 +471,7 @@ void WINAPI __regs_relay_call_from_32_regs( struct relay_descr *descr, unsigned 
     }
 }
 extern void WINAPI relay_call_from_32_regs(void);
-DEFINE_REGS_ENTRYPOINT( relay_call_from_32_regs, 16, 16 );
+DEFINE_REGS_ENTRYPOINT( relay_call_from_32_regs, 16, 16 )
 
 
 /***********************************************************************
@@ -945,8 +944,8 @@ void WINAPI __regs_SNOOP_Return( CONTEXT86 *context )
 }
 
 /* assembly wrappers that save the context */
-DEFINE_REGS_ENTRYPOINT( SNOOP_Entry, 0, 0 );
-DEFINE_REGS_ENTRYPOINT( SNOOP_Return, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( SNOOP_Entry, 0, 0 )
+DEFINE_REGS_ENTRYPOINT( SNOOP_Return, 0, 0 )
 
 #else  /* __i386__ */
 

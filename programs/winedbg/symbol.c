@@ -239,23 +239,27 @@ enum sym_get_lval symbol_get_lvalue(const char* name, const int lineno,
     SymSetOptions((opt = SymGetOptions()) | 0x40000000);
     SymEnumSymbols(dbg_curr_process->handle, 0, buffer, sgv_cb, (void*)&sgv);
 
-    if (!sgv.num && (name[0] != '_'))
+    if (!sgv.num)
     {
-        char*   ptr = strchr(name, '!');
-
-        if (ptr++)
+        const char*   ptr = strchr(name, '!');
+        if ((ptr && ptr[1] != '_') || (!ptr && *name != '_'))
         {
-            memmove(ptr + 1, ptr, strlen(ptr));
-            *ptr = '_';
+            if (ptr)
+            {
+                int offset = ptr - name;
+                memcpy(buffer, name, offset + 1);
+                buffer[offset + 1] = '_';
+                strcpy(&buffer[offset + 2], ptr + 1);
+            }
+            else
+            {
+                buffer[0] = '*';
+                buffer[1] = '!';
+                buffer[2] = '_';
+                strcpy(&buffer[3], name);
+            }
+            SymEnumSymbols(dbg_curr_process->handle, 0, buffer, sgv_cb, (void*)&sgv);
         }
-        else
-        {
-            buffer[0] = '*';
-            buffer[1] = '!';
-            buffer[2] = '_';
-            strcpy(&buffer[3], name);
-        }
-        SymEnumSymbols(dbg_curr_process->handle, 0, buffer, sgv_cb, (void*)&sgv);
     }
     SymSetOptions(opt);
 
@@ -356,6 +360,7 @@ enum sym_get_lval symbol_get_lvalue(const char* name, const int lineno,
                     if (i < 1 || i > sgv.num)
                         dbg_printf("Invalid choice %d\n", i);
                 }
+                else return sglv_aborted;
             } while (i < 1 || i > sgv.num);
 
             /* The array is 0-based, but the choices are 1..n, 

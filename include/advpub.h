@@ -223,8 +223,8 @@ HRESULT WINAPI OpenINFEngineA(LPCSTR pszInfFilename, LPCSTR pszInstallSection,
 HRESULT WINAPI OpenINFEngineW(LPCWSTR pszInfFilename, LPCWSTR pszInstallSection,
      DWORD dwFlags, HINF *phInf, PVOID pvReserved);
 #define OpenINFEngine WINELIB_NAME_AW(OpenINFEngine)
-HRESULT WINAPI RebootCheckOnInstallA(HWND hWnd, LPCSTR pszINF, LPSTR pszSec, DWORD dwReserved);
-HRESULT WINAPI RebootCheckOnInstallW(HWND hWnd, LPCWSTR pszINF, LPWSTR pszSec, DWORD dwReserved);
+HRESULT WINAPI RebootCheckOnInstallA(HWND hWnd, LPCSTR pszINF, LPCSTR pszSec, DWORD dwReserved);
+HRESULT WINAPI RebootCheckOnInstallW(HWND hWnd, LPCWSTR pszINF, LPCWSTR pszSec, DWORD dwReserved);
 #define RebootCheckOnInstall WINELIB_NAME_AW(RebootCheckOnInstall)
 HRESULT WINAPI RegInstallA(HMODULE hm, LPCSTR pszSection, const STRTABLEA* pstTable);
 HRESULT WINAPI RegInstallW(HMODULE hm, LPCWSTR pszSection, const STRTABLEW* pstTable);
@@ -249,8 +249,8 @@ HRESULT WINAPI RunSetupCommandW(HWND hWnd,
      LPCWSTR szCmdName, LPCWSTR szInfSection, LPCWSTR szDir, LPCWSTR lpszTitle,
      HANDLE *phEXE, DWORD dwFlags, LPVOID pvReserved);
 #define RunSetupCommand WINELIB_NAME_AW(RunSetupCommand)
-HRESULT WINAPI SetPerUserSecValuesA(PPERUSERSECTIONA pPerUser);
-HRESULT WINAPI SetPerUserSecValuesW(PPERUSERSECTIONW pPerUser);
+HRESULT WINAPI SetPerUserSecValuesA(PERUSERSECTIONA* pPerUser);
+HRESULT WINAPI SetPerUserSecValuesW(PERUSERSECTIONW* pPerUser);
 #define SetPerUserSecValues WINELIB_NAME_AW(SetPerUserSecValues)
 HRESULT WINAPI TranslateInfStringA(LPCSTR pszInfFilename, LPCSTR pszInstallSection,
      LPCSTR pszTranslateSection, LPCSTR pszTranslateKey, LPSTR pszBuffer,

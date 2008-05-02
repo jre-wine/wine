@@ -36,7 +36,6 @@
 #include "wine/unicode.h"
 
 #include "d3d9.h"
-#include "ddraw.h"
 #include "wine/wined3d_interface.h"
 
 /* ===========================================================================
@@ -45,6 +44,7 @@
 extern HRESULT vdecl_convert_fvf(
     DWORD FVF,
     D3DVERTEXELEMENT9** ppVertexElements);
+extern CRITICAL_SECTION d3d9_cs;
 
 /* ===========================================================================
     Macros
@@ -178,6 +178,9 @@ typedef struct IDirect3DDevice9Impl
 
     /* Avoids recursion with nested ReleaseRef to 0 */
     BOOL                          inDestruction;
+
+    IDirect3DVertexDeclaration9  **convertedDecls;
+    unsigned int                 numConvertedDecls, declArraySize;
 
 } IDirect3DDevice9Impl;
 
@@ -476,12 +479,18 @@ typedef struct IDirect3DVertexDeclaration9Impl {
   const IDirect3DVertexDeclaration9Vtbl *lpVtbl;
   LONG    ref;
 
+  D3DVERTEXELEMENT9 *elements;
+  size_t element_count;
+
   /* IDirect3DVertexDeclaration9 fields */
   IWineD3DVertexDeclaration *wineD3DVertexDeclaration;
-  
+  DWORD convFVF;
+
   /* Parent reference */
   LPDIRECT3DDEVICE9 parentDevice;
 } IDirect3DVertexDeclaration9Impl;
+
+void IDirect3DVertexDeclaration9Impl_Destroy(LPDIRECT3DVERTEXDECLARATION9 iface);
 
 /* ---------------------- */
 /* IDirect3DVertexShader9 */
@@ -544,7 +553,8 @@ typedef struct IDirect3DQuery9Impl {
 /* Callbacks */
 extern HRESULT WINAPI D3D9CB_CreateSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, DWORD Usage, WINED3DPOOL Pool, UINT Level,
-                                         IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
+                                         WINED3DCUBEMAP_FACES Face, IWineD3DSurface** ppSurface,
+                                         HANDLE* pSharedHandle);
 
 extern HRESULT WINAPI D3D9CB_CreateVolume(IUnknown  *pDevice, IUnknown *pSuperior, UINT Width, UINT Height, UINT Depth,
                                           WINED3DFORMAT  Format, WINED3DPOOL Pool, DWORD Usage,

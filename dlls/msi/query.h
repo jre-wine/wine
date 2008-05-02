@@ -66,6 +66,7 @@ typedef struct _column_info
     LPCWSTR table;
     LPCWSTR column;
     UINT   type;
+    BOOL   temporary;
     struct expr *val;
     struct _column_info *next;
 } column_info;
@@ -97,7 +98,7 @@ UINT MSI_ParseSQL( MSIDATABASE *db, LPCWSTR command, MSIVIEW **phview,
 UINT TABLE_CreateView( MSIDATABASE *db, LPCWSTR name, MSIVIEW **view );
 
 UINT SELECT_CreateView( MSIDATABASE *db, MSIVIEW **view, MSIVIEW *table,
-                        column_info *columns );
+                        const column_info *columns );
 
 UINT DISTINCT_CreateView( MSIDATABASE *db, MSIVIEW **view, MSIVIEW *table );
 
@@ -108,12 +109,12 @@ UINT WHERE_CreateView( MSIDATABASE *db, MSIVIEW **view, MSIVIEW *table,
                        struct expr *cond );
 
 UINT CREATE_CreateView( MSIDATABASE *db, MSIVIEW **view, LPWSTR table,
-                        column_info *col_info, BOOL temp );
+                        column_info *col_info, BOOL hold );
 
-UINT INSERT_CreateView( MSIDATABASE *db, MSIVIEW **view, LPWSTR table,
+UINT INSERT_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR table,
                         column_info *columns, column_info *values, BOOL temp );
 
-UINT UPDATE_CreateView( MSIDATABASE *db, MSIVIEW **, LPWSTR table,
+UINT UPDATE_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR table,
                         column_info *list, struct expr *expr );
 
 UINT DELETE_CreateView( MSIDATABASE *db, MSIVIEW **view, MSIVIEW *table );
@@ -123,8 +124,13 @@ UINT JOIN_CreateView( MSIDATABASE *db, MSIVIEW **view,
 
 UINT ALTER_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR name, int hold );
 
+UINT STREAMS_CreateView( MSIDATABASE *db, MSIVIEW **view );
+
 int sqliteGetToken(const WCHAR *z, int *tokenType);
 
-MSIRECORD *msi_query_merge_record( UINT fields, column_info *vl, MSIRECORD *rec );
+MSIRECORD *msi_query_merge_record( UINT fields, const column_info *vl, MSIRECORD *rec );
+
+UINT msi_create_table( MSIDATABASE *db, LPCWSTR name, column_info *col_info,
+                       BOOL persistent, MSITABLE **table_ret);
 
 #endif /* __WINE_MSI_QUERY_H */

@@ -221,7 +221,7 @@ static void clean_spaces_from_path( LPWSTR p )
 }
 
 LPWSTR resolve_folder(MSIPACKAGE *package, LPCWSTR name, BOOL source, 
-                      BOOL set_prop, MSIFOLDER **folder)
+                      BOOL set_prop, BOOL load_prop, MSIFOLDER **folder)
 {
     MSIFOLDER *f;
     LPWSTR p, path = NULL, parent;
@@ -293,6 +293,13 @@ LPWSTR resolve_folder(MSIPACKAGE *package, LPCWSTR name, BOOL source,
         return path;
     }
 
+    if (!source && load_prop && (path = msi_dup_property( package, name )))
+    {
+        f->ResolvedTarget = strdupW( path );
+        TRACE("   property set to %s\n", debugstr_w(path));
+        return path;
+    }
+
     if (!f->Parent)
         return path;
 
@@ -300,7 +307,7 @@ LPWSTR resolve_folder(MSIPACKAGE *package, LPCWSTR name, BOOL source,
 
     TRACE(" ! Parent is %s\n", debugstr_w(parent));
 
-    p = resolve_folder(package, parent, source, set_prop, NULL);
+    p = resolve_folder(package, parent, source, set_prop, load_prop, NULL);
     if (!source)
     {
         TRACE("   TargetDefault = %s\n", debugstr_w(f->TargetDefault));
@@ -786,7 +793,7 @@ void ui_actiondata(MSIPACKAGE *package, LPCWSTR action, MSIRECORD * record)
     msiobj_release(&row->hdr);
 }
 
-BOOL ACTION_VerifyComponentForAction( MSICOMPONENT* comp, INSTALLSTATE check )
+BOOL ACTION_VerifyComponentForAction( const MSICOMPONENT* comp, INSTALLSTATE check )
 {
     if (!comp)
         return FALSE;
@@ -800,7 +807,7 @@ BOOL ACTION_VerifyComponentForAction( MSICOMPONENT* comp, INSTALLSTATE check )
         return FALSE;
 }
 
-BOOL ACTION_VerifyFeatureForAction( MSIFEATURE* feature, INSTALLSTATE check )
+BOOL ACTION_VerifyFeatureForAction( const MSIFEATURE* feature, INSTALLSTATE check )
 {
     if (!feature)
         return FALSE;
@@ -962,7 +969,7 @@ UINT register_unique_action(MSIPACKAGE *package, LPCWSTR action)
     return ERROR_SUCCESS;
 }
 
-BOOL check_unique_action(MSIPACKAGE *package, LPCWSTR action)
+BOOL check_unique_action(const MSIPACKAGE *package, LPCWSTR action)
 {
     INT i;
 

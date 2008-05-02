@@ -243,7 +243,6 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_SHADER_MODE_HARDWARE    "¬ключены"
     IDS_SHADER_MODE_NONE        "¬ыключены"
-    IDS_SHADER_MODE_EMULATION   "Ёмул€ци€"
 END
 
 STRINGTABLE DISCARDABLE
@@ -268,7 +267,6 @@ BEGIN
     IDS_ACCEL_BASIC             "ћинимальное"
     IDS_ACCEL_EMULATION         "Ёмул€ци€"
     IDS_DRIVER_ALSA             "ALSA драйвер"
-    IDS_DRIVER_ARTS             "aRts драйвер"
     IDS_DRIVER_ESOUND           "EsounD драйвер"
     IDS_DRIVER_OSS              "OSS драйвер"
     IDS_DRIVER_JACK             "JACK драйвер"

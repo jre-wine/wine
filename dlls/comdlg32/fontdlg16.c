@@ -32,7 +32,6 @@
 #include "wine/winbase16.h"
 #include "wine/winuser16.h"
 #include "commdlg.h"
-#include "dlgs.h"
 #include "wine/debug.h"
 #include "cderr.h"
 
@@ -44,7 +43,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(commdlg);
 static const WCHAR strWineFontData16[] =
                                {'_','_','W','I','N','E','_','F','O','N','T','D','L','G','D','A','T','A','1','6',0};
 
-static void FONT_LogFont16To32W( const LPLOGFONT16 font16, LPLOGFONTW font32 )
+static void FONT_LogFont16To32W( const LOGFONT16 *font16, LPLOGFONTW font32 )
 {
     font32->lfHeight = font16->lfHeight;
     font32->lfWidth = font16->lfWidth;
@@ -72,7 +71,7 @@ static void FONT_Metrics16To32W( const TEXTMETRIC16 *pm16,
     pnm32w->ntmTm.tmExternalLeading = pm16->tmExternalLeading;
 }
 
-static void CFn_CHOOSEFONT16to32W(LPCHOOSEFONT16 chf16, LPCHOOSEFONTW chf32w)
+static void CFn_CHOOSEFONT16to32W(const CHOOSEFONT16 *chf16, LPCHOOSEFONTW chf32w)
 {
   int len;
   if (chf16->Flags & CF_ENABLETEMPLATE)
@@ -106,7 +105,7 @@ static void CFn_CHOOSEFONT16to32W(LPCHOOSEFONT16 chf16, LPCHOOSEFONTW chf32w)
 /***********************************************************************
  *                          CFn_HookCallChk                 [internal]
  */
-static BOOL CFn_HookCallChk(LPCHOOSEFONT16 lpcf)
+static BOOL CFn_HookCallChk(const CHOOSEFONT16 *lpcf)
 {
  if (lpcf)
   if(lpcf->Flags & CF_ENABLEHOOK)

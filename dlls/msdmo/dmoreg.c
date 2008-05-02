@@ -102,7 +102,7 @@ static LPWSTR GUIDToString(LPWSTR lpwstr, REFGUID lpcguid)
     return lpwstr;
 }
 
-static BOOL IsMediaTypeEqual(DMO_PARTIAL_MEDIATYPE* mt1, DMO_PARTIAL_MEDIATYPE* mt2)
+static BOOL IsMediaTypeEqual(const DMO_PARTIAL_MEDIATYPE* mt1, const DMO_PARTIAL_MEDIATYPE* mt2)
 {
 
     return (IsEqualCLSID(&mt1->type, &mt2->type) ||
@@ -302,7 +302,7 @@ static BOOL IEnumDMO_Destructor(IEnumDMO* iface)
 /**************************************************************************
  *  IEnumDMO_Constructor
  */
-IEnumDMO * IEnumDMO_Constructor(
+static IEnumDMO * IEnumDMO_Constructor(
     REFGUID guidCategory,
     DWORD dwFlags,
     DWORD cInTypes,
@@ -650,11 +650,11 @@ static const IEnumDMOVtbl edmovt =
 };
 
 
-HRESULT WINAPI DMOGetTypes(REFCLSID a, unsigned long b, unsigned long* c,
-			   DMO_PARTIAL_MEDIATYPE* d, unsigned long e,
-			   unsigned long* f, DMO_PARTIAL_MEDIATYPE* g)
+HRESULT WINAPI DMOGetTypes(REFCLSID a, ULONG b, ULONG* c,
+			   DMO_PARTIAL_MEDIATYPE* d, ULONG e,
+			   ULONG* f, DMO_PARTIAL_MEDIATYPE* g)
 {
-  FIXME("(%p,%lu,%p,%p,%lu,%p,%p),stub!\n",a,b,c,d,e,f,g);
+  FIXME("(%p,%u,%p,%p,%u,%p,%p),stub!\n",a,b,c,d,e,f,g);
 
   return E_NOTIMPL;
 }

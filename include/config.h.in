@@ -17,9 +17,6 @@
 /* Define to 1 if you have the <arpa/nameser.h> header file. */
 #undef HAVE_ARPA_NAMESER_H
 
-/* Define if you have ARTS sound server */
-#undef HAVE_ARTS
-
 /* Define to 1 if you have the `asctime_r' function. */
 #undef HAVE_ASCTIME_R
 
@@ -49,9 +46,6 @@
 
 /* Define to 1 if you have the `clone' function. */
 #undef HAVE_CLONE
-
-/* Define to 1 if you have the `connect' function. */
-#undef HAVE_CONNECT
 
 /* Define to 1 if you have the <CoreAudio/CoreAudio.h> header file. */
 #undef HAVE_COREAUDIO_COREAUDIO_H
@@ -183,9 +177,6 @@
 /* Define to 1 if you have the `getdirentries' function. */
 #undef HAVE_GETDIRENTRIES
 
-/* Define to 1 if you have the `gethostbyname' function. */
-#undef HAVE_GETHOSTBYNAME
-
 /* Define to 1 if you have the `getnameinfo' function. */
 #undef HAVE_GETNAMEINFO
 
@@ -245,9 +236,6 @@
 
 /* Define to 1 if you have the <ieeefp.h> header file. */
 #undef HAVE_IEEEFP_H
-
-/* Define to 1 if you have the `inet_aton' function. */
-#undef HAVE_INET_ATON
 
 /* Define to 1 if you have the `inet_network' function. */
 #undef HAVE_INET_NETWORK
@@ -312,17 +300,8 @@
 /* Define to 1 if you have the `i386' library (-li386). */
 #undef HAVE_LIBI386
 
-/* Define to 1 if you have the `nsl' library (-lnsl). */
-#undef HAVE_LIBNSL
-
 /* Define to 1 if you have the `ossaudio' library (-lossaudio). */
 #undef HAVE_LIBOSSAUDIO
-
-/* Define to 1 if you have the `resolv' library (-lresolv). */
-#undef HAVE_LIBRESOLV
-
-/* Define to 1 if you have the `socket' library (-lsocket). */
-#undef HAVE_LIBSOCKET
 
 /* Define if you have the Xinerama library */
 #undef HAVE_LIBXINERAMA
@@ -924,6 +903,9 @@
 /* Define to 1 if you have the <X11/extensions/XShm.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XSHM_H
 
+/* Define to 1 if you have the <X11/Xcursor/Xcursor.h> header file. */
+#undef HAVE_X11_XCURSOR_XCURSOR_H
+
 /* Define to 1 if you have the <X11/XKBlib.h> header file. */
 #undef HAVE_X11_XKBLIB_H
 
@@ -1017,6 +999,9 @@
 /* Define to the soname of the libncurses library. */
 #undef SONAME_LIBNCURSES
 
+/* Define to the soname of the libsane library. */
+#undef SONAME_LIBSANE
+
 /* Define to the soname of the libssl library. */
 #undef SONAME_LIBSSL
 
@@ -1025,6 +1010,9 @@
 
 /* Define to the soname of the libX11 library. */
 #undef SONAME_LIBX11
+
+/* Define to the soname of the libXcursor library. */
+#undef SONAME_LIBXCURSOR
 
 /* Define to the soname of the libXext library. */
 #undef SONAME_LIBXEXT
@@ -1049,10 +1037,6 @@
 
 /* Define to 1 if the X Window System is missing or not being used. */
 #undef X_DISPLAY_MISSING
-
-/* Define to 1 if `lex' declares `yytext' as a `char *' by default, not a
-   `char[]'. */
-#undef YYTEXT_POINTER
 
 /* Define to a macro to generate an assembly function directive */
 #undef __ASM_FUNC

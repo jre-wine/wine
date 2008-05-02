@@ -66,7 +66,7 @@ static task_t *pop_task(void)
     return task;
 }
 
-void remove_doc_tasks(HTMLDocument *doc)
+void remove_doc_tasks(const HTMLDocument *doc)
 {
     thread_data_t *thread_data = get_thread_data(FALSE);
     task_t *iter, *tmp;
@@ -132,10 +132,13 @@ static void set_parsecomplete(HTMLDocument *doc)
 
     TRACE("(%p)\n", doc);
 
-    call_property_onchanged(doc->cp_propnotif, 1005);
+    if(doc->usermode == EDITMODE)
+        init_editor(doc);
+
+    call_property_onchanged(&doc->cp_propnotif, 1005);
 
     doc->readystate = READYSTATE_INTERACTIVE;
-    call_property_onchanged(doc->cp_propnotif, DISPID_READYSTATE);
+    call_property_onchanged(&doc->cp_propnotif, DISPID_READYSTATE);
 
     if(doc->client)
         IOleClientSite_QueryInterface(doc->client, &IID_IOleCommandTarget, (void**)&olecmd);
@@ -155,28 +158,19 @@ static void set_parsecomplete(HTMLDocument *doc)
 
         IOleCommandTarget_Exec(olecmd, &CGID_MSHTML, IDM_PARSECOMPLETE, 0, NULL, NULL);
         IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_HTTPEQUIV_DONE, 0, NULL, NULL);
+
+        IOleCommandTarget_Release(olecmd);
     }
 
     doc->readystate = READYSTATE_COMPLETE;
-    call_property_onchanged(doc->cp_propnotif, DISPID_READYSTATE);
+    call_property_onchanged(&doc->cp_propnotif, DISPID_READYSTATE);
 
     if(doc->frame) {
         static const WCHAR wszDone[] = {'D','o','n','e',0};
         IOleInPlaceFrame_SetStatusText(doc->frame, wszDone);
     }
 
-    if(olecmd) {
-        VARIANT title;
-        WCHAR empty[] = {0};
-        
-        V_VT(&title) = VT_BSTR;
-        V_BSTR(&title) = SysAllocString(empty);
-        IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_SETTITLE, OLECMDEXECOPT_DONTPROMPTUSER,
-                               &title, NULL);
-        SysFreeString(V_BSTR(&title));
-
-        IOleCommandTarget_Release(olecmd);
-    }
+    update_title(doc);
 }
 
 static void set_progress(HTMLDocument *doc)
@@ -217,15 +211,27 @@ static void set_progress(HTMLDocument *doc)
     }
 }
 
+static void task_start_binding(BSCallback *bscallback)
+{
+    start_binding(bscallback);
+    IBindStatusCallback_Release(STATUSCLB(bscallback));
+}
+
 static void process_task(task_t *task)
 {
     switch(task->task_id) {
     case TASK_SETDOWNLOADSTATE:
-        return set_downloading(task->doc);
+        set_downloading(task->doc);
+        break;
     case TASK_PARSECOMPLETE:
-        return set_parsecomplete(task->doc);
+        set_parsecomplete(task->doc);
+        break;
     case TASK_SETPROGRESS:
-        return set_progress(task->doc);
+        set_progress(task->doc);
+        break;
+    case TASK_START_BINDING:
+        task_start_binding(task->bscallback);
+        break;
     default:
         ERR("Wrong task_id %d\n", task->task_id);
     }
@@ -248,7 +254,7 @@ static LRESULT WINAPI hidden_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     }
 
     if(msg > WM_USER)
-        FIXME("(%p %d %x %lx)\n", hwnd, msg, wParam, lParam);
+        FIXME("(%p %d %lx %lx)\n", hwnd, msg, wParam, lParam);
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }

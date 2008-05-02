@@ -173,7 +173,11 @@ HFCI __cdecl FCICreate(
   int err;
   PFCI_Int p_fci_internal;
 
-  if ((!perf) || (!pfnalloc) || (!pfnfree) || (!pfnopen) || (!pfnread) ||
+  if (!perf) {
+    SetLastError(ERROR_BAD_ARGUMENTS);
+    return NULL;
+  }
+  if ((!pfnalloc) || (!pfnfree) || (!pfnopen) || (!pfnread) ||
       (!pfnwrite) || (!pfnclose) || (!pfnseek) || (!pfndelete) ||
       (!pfnfcigtf) || (!pccab)) {
     perf->erfOper = FCIERR_NONE;
@@ -430,12 +434,12 @@ static BOOL fci_flush_data_block (HFCI hfci, int* err,
 
 
 
-static cab_ULONG fci_get_checksum(void *pv, UINT cb, CHECKSUM seed)
+static cab_ULONG fci_get_checksum(const void *pv, UINT cb, CHECKSUM seed)
 {
-  cab_ULONG csum;
-  cab_ULONG ul;
-  int       cUlong;
-  BYTE      *pb;
+  cab_ULONG     csum;
+  cab_ULONG     ul;
+  int           cUlong;
+  const BYTE    *pb;
 
   csum = seed;
   cUlong = cb / 4;

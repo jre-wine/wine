@@ -193,7 +193,7 @@ static BOOL CALLBACK CRYPT_ReturnhWnd(HWND *phWnd)
 	if ( !(provider->pFuncs->p##name = (void*)GetProcAddress(provider->hModule, #name)) ) goto error
 #define CRYPT_GetProvFuncOpt(name) \
 	provider->pFuncs->p##name = (void*)GetProcAddress(provider->hModule, #name)
-static PCRYPTPROV CRYPT_LoadProvider(PWSTR pImage)
+static PCRYPTPROV CRYPT_LoadProvider(PCWSTR pImage)
 {
 	PCRYPTPROV provider;
 	DWORD errorcode = ERROR_NOT_ENOUGH_MEMORY;
@@ -987,7 +987,7 @@ BOOL WINAPI CryptDuplicateKey (HCRYPTKEY hKey, DWORD *pdwReserved, DWORD dwFlags
  * Encrypts data.
  *
  * PARAMS
- *  hKey       [I] Handle to the enryption key.
+ *  hKey       [I] Handle to the encryption key.
  *  hHash      [I] Handle to a hash object.
  *  Final      [I] TRUE if this is the last section to encrypt.
  *  dwFlags    [I] Can be CRYPT_OAEP.
@@ -1027,7 +1027,7 @@ BOOL WINAPI CryptEncrypt (HCRYPTKEY hKey, HCRYPTHASH hHash, BOOL Final,
 /******************************************************************************
  * CryptEnumProvidersW (ADVAPI32.@)
  *
- * Returns the next availabe CSP.
+ * Returns the next available CSP.
  *
  * PARAMS
  *  dwIndex     [I] Index of the next provider to be enumerated.
@@ -1139,7 +1139,8 @@ BOOL WINAPI CryptEnumProvidersA (DWORD dwIndex, DWORD *pdwReserved,
 	TRACE("(%d, %p, %08x, %p, %p, %p)\n", dwIndex, pdwReserved, dwFlags,
 			pdwProvType, pszProvName, pcbProvName);
 
-	CryptEnumProvidersW(dwIndex, pdwReserved, dwFlags, pdwProvType, NULL, &strlen);
+	if(!CryptEnumProvidersW(dwIndex, pdwReserved, dwFlags, pdwProvType, NULL, &strlen))
+		return FALSE;
 	if ( pszProvName && !(str = CRYPT_Alloc(strlen)) )
 	{
 		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
@@ -1267,7 +1268,8 @@ BOOL WINAPI CryptEnumProviderTypesA (DWORD dwIndex, DWORD *pdwReserved,
 	TRACE("(%d, %p, %08x, %p, %p, %p)\n", dwIndex, pdwReserved, dwFlags,
 			pdwProvType, pszTypeName, pcbTypeName);
 
-	CryptEnumProviderTypesW(dwIndex, pdwReserved, dwFlags, pdwProvType, NULL, &strlen);
+	if(!CryptEnumProviderTypesW(dwIndex, pdwReserved, dwFlags, pdwProvType, NULL, &strlen))
+		return FALSE;
 	if ( pszTypeName && !(str = CRYPT_Alloc(strlen)) )
 	{
 		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
@@ -1741,7 +1743,7 @@ BOOL WINAPI CryptHashSessionKey (HCRYPTHASH hHash, HCRYPTKEY hKey, DWORD dwFlags
  *  Success: TRUE
  *  Failure: FALSE
  */
-BOOL WINAPI CryptImportKey (HCRYPTPROV hProv, BYTE *pbData, DWORD dwDataLen,
+BOOL WINAPI CryptImportKey (HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDataLen,
 		HCRYPTKEY hPubKey, DWORD dwFlags, HCRYPTKEY *phKey)
 {
 	PCRYPTPROV prov = (PCRYPTPROV)hProv;
@@ -1856,7 +1858,7 @@ BOOL WINAPI CryptSignHashA (HCRYPTHASH hHash, DWORD dwKeySpec, LPCSTR sDescripti
  *  Success: TRUE
  *  Failure: FALSE
  */
-BOOL WINAPI CryptSetHashParam (HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, DWORD dwFlags)
+BOOL WINAPI CryptSetHashParam (HCRYPTHASH hHash, DWORD dwParam, CONST BYTE *pbData, DWORD dwFlags)
 {
 	PCRYPTPROV prov;
 	PCRYPTHASH hash = (PCRYPTHASH)hHash;
@@ -1889,7 +1891,7 @@ BOOL WINAPI CryptSetHashParam (HCRYPTHASH hHash, DWORD dwParam, BYTE *pbData, DW
  *  Success: TRUE
  *  Failure: FALSE
  */
-BOOL WINAPI CryptSetKeyParam (HCRYPTKEY hKey, DWORD dwParam, BYTE *pbData, DWORD dwFlags)
+BOOL WINAPI CryptSetKeyParam (HCRYPTKEY hKey, DWORD dwParam, CONST BYTE *pbData, DWORD dwFlags)
 {
 	PCRYPTPROV prov;
 	PCRYPTKEY key = (PCRYPTKEY)hKey;
@@ -2063,7 +2065,7 @@ BOOL WINAPI CryptSetProviderExA (LPCSTR pszProvName, DWORD dwProvType, DWORD *pd
  *  Success: TRUE
  *  Failure: FALSE
  */
-BOOL WINAPI CryptSetProvParam (HCRYPTPROV hProv, DWORD dwParam, BYTE *pbData, DWORD dwFlags)
+BOOL WINAPI CryptSetProvParam (HCRYPTPROV hProv, DWORD dwParam, CONST BYTE *pbData, DWORD dwFlags)
 {
 	PCRYPTPROV prov = (PCRYPTPROV)hProv;
 
@@ -2122,7 +2124,7 @@ BOOL WINAPI CryptSetProvParam (HCRYPTPROV hProv, DWORD dwParam, BYTE *pbData, DW
  *  NULL. It is supported only for compatibility with Microsoft's Cryptographic
  *  Providers.
  */
-BOOL WINAPI CryptVerifySignatureW (HCRYPTHASH hHash, BYTE *pbSignature, DWORD dwSigLen,
+BOOL WINAPI CryptVerifySignatureW (HCRYPTHASH hHash, CONST BYTE *pbSignature, DWORD dwSigLen,
 		HCRYPTKEY hPubKey, LPCWSTR sDescription, DWORD dwFlags)
 {
 	PCRYPTHASH hash = (PCRYPTHASH)hHash;
@@ -2155,7 +2157,7 @@ BOOL WINAPI CryptVerifySignatureW (HCRYPTHASH hHash, BYTE *pbSignature, DWORD dw
  *
  * See CryptVerifySignatureW.
  */
-BOOL WINAPI CryptVerifySignatureA (HCRYPTHASH hHash, BYTE *pbSignature, DWORD dwSigLen,
+BOOL WINAPI CryptVerifySignatureA (HCRYPTHASH hHash, CONST BYTE *pbSignature, DWORD dwSigLen,
 		HCRYPTKEY hPubKey, LPCSTR sDescription, DWORD dwFlags)
 {
 	LPWSTR wsDescription;

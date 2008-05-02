@@ -394,8 +394,11 @@ static void test_GetColorProfileHeader(void)
         ret = pGetColorProfileHeader( NULL, &header );
         ok( !ret, "GetColorProfileHeader() succeeded (%d)\n", GetLastError() );
 
-        ret = pGetColorProfileHeader( handle, NULL );
-        ok( !ret, "GetColorProfileHeader() succeeded (%d)\n", GetLastError() );
+        if (0) /* Crashes on Vista */
+        {
+            ret = pGetColorProfileHeader( handle, NULL );
+            ok( !ret, "GetColorProfileHeader() succeeded (%d)\n", GetLastError() );
+        }
 
         /* Functional checks */
 
@@ -551,9 +554,9 @@ static void check_registry(void)
     }
 
     res = RegQueryInfoKeyA(hkIcmKey, NULL, NULL, NULL, NULL, NULL, NULL, &dwValCount, NULL, NULL, NULL, NULL);
-    if (!res) 
+    if (res) 
     {
-        trace("RegQueryInfoKeyA() failed\n");
+        trace("RegQueryInfoKeyA() failed : %d\n", res);
         return;
     }
 

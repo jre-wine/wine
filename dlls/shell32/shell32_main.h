@@ -153,9 +153,10 @@ void FreeChangeNotifications(void);
 #define ASK_TRASH_FOLDER          8
 #define ASK_TRASH_MULTIPLE_ITEM   9
 #define ASK_CANT_TRASH_ITEM      10
+#define ASK_OVERWRITE_FOLDER     11
 
 BOOL SHELL_DeleteDirectoryW(HWND hwnd, LPCWSTR pwszDir, BOOL bShowUI);
-BOOL SHELL_ConfirmDialogW(HWND hWnd, int nKindOfDialog, LPCWSTR szDir);
+BOOL SHELL_ConfirmYesNoW(HWND hWnd, int nKindOfDialog, LPCWSTR szDir);
 
 /* 16-bit functions */
 void        WINAPI DragAcceptFiles16(HWND16 hWnd, BOOL16 b);
@@ -174,7 +175,7 @@ BOOL16      WINAPI AboutDlgProc16(HWND16,UINT16,WPARAM16,LPARAM);
 void WINAPI _InsertMenuItem (HMENU hmenu, UINT indexMenu, BOOL fByPosition,
 			UINT wID, UINT fType, LPCSTR dwTypeData, UINT fState);
 
-inline static BOOL SHELL_OsIsUnicode(void)
+static inline BOOL SHELL_OsIsUnicode(void)
 {
     /* if high-bit of version is 0, we are emulating NT */
     return !(GetVersion() & 0x80000000);
@@ -185,26 +186,26 @@ inline static BOOL SHELL_OsIsUnicode(void)
 	  SHFree(*ptr); \
 	  *ptr = NULL; \
 	};
-inline static void __SHCloneStrA(char ** target,const char * source)
+static inline void __SHCloneStrA(char ** target,const char * source)
 {
 	*target = SHAlloc(strlen(source)+1);
 	strcpy(*target, source);
 }
 
-inline static void __SHCloneStrWtoA(char ** target, const WCHAR * source)
+static inline void __SHCloneStrWtoA(char ** target, const WCHAR * source)
 {
 	int len = WideCharToMultiByte(CP_ACP, 0, source, -1, NULL, 0, NULL, NULL);
 	*target = SHAlloc(len);
 	WideCharToMultiByte(CP_ACP, 0, source, -1, *target, len, NULL, NULL);
 }
 
-inline static void __SHCloneStrW(WCHAR ** target, const WCHAR * source)
+static inline void __SHCloneStrW(WCHAR ** target, const WCHAR * source)
 {
 	*target = SHAlloc( (lstrlenW(source)+1) * sizeof(WCHAR) );
 	lstrcpyW(*target, source);
 }
 
-inline static WCHAR * __SHCloneStrAtoW(WCHAR ** target, const char * source)
+static inline WCHAR * __SHCloneStrAtoW(WCHAR ** target, const char * source)
 {
 	int len = MultiByteToWideChar(CP_ACP, 0, source, -1, NULL, 0);
 	*target = SHAlloc(len*sizeof(WCHAR));

@@ -173,7 +173,7 @@ static inline void strcpynAtoW( WCHAR *dst, const char *src, size_t n )
  *
  * Retrieve the ANSI codepage for a given locale.
  */
-inline static UINT get_lcid_codepage( LCID lcid )
+static inline UINT get_lcid_codepage( LCID lcid )
 {
     UINT ret;
     if (!GetLocaleInfoW( lcid, LOCALE_IDEFAULTANSICODEPAGE|LOCALE_RETURN_NUMBER, (WCHAR *)&ret,
@@ -325,8 +325,8 @@ done:
  */
 static void parse_locale_name( const WCHAR *str, struct locale_name *name )
 {
-    static const WCHAR sepW[] = {'-','_','.','@'};
-    static const WCHAR winsepW[] = {'-','_'};
+    static const WCHAR sepW[] = {'-','_','.','@',0};
+    static const WCHAR winsepW[] = {'-','_',0};
     static const WCHAR posixW[] = {'P','O','S','I','X',0};
     static const WCHAR cW[] = {'C',0};
     static const WCHAR latinW[] = {'l','a','t','i','n',0};
@@ -563,7 +563,7 @@ static LCID convert_default_lcid( LCID lcid, LCTYPE lctype )
  *
  * Create the Control Panel\\International registry key.
  */
-inline static HANDLE create_registry_key(void)
+static inline HANDLE create_registry_key(void)
 {
     static const WCHAR intlW[] = {'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\',
                                   'I','n','t','e','r','n','a','t','i','o','n','a','l',0};
@@ -1240,7 +1240,7 @@ INT WINAPI GetLocaleInfoW( LCID lcid, LCTYPE lctype, LPWSTR buffer, INT len )
         lang_id = MAKELANGID(PRIMARYLANGID(lang_id), SUBLANG_DEFAULT);
 
     if (!(hrsrc = FindResourceExW( kernel32_handle, (LPWSTR)RT_STRING,
-                                   (LPCWSTR)((lctype >> 4) + 1), lang_id )))
+                                   ULongToPtr((lctype >> 4) + 1), lang_id )))
     {
         SetLastError( ERROR_INVALID_FLAGS );  /* no such lctype */
         return 0;
@@ -1745,9 +1745,9 @@ BOOL WINAPI EnumSystemCodePagesW( CODEPAGE_ENUMPROCW lpfnCodePageEnum, DWORD fla
  *   page   [I] Codepage character set to convert from
  *   flags  [I] Character mapping flags
  *   src    [I] Source string buffer
- *   srclen [I] Length of src, or -1 if src is NUL terminated
+ *   srclen [I] Length of src (in bytes), or -1 if src is NUL terminated
  *   dst    [O] Destination buffer
- *   dstlen [I] Length of dst, or 0 to compute the required length
+ *   dstlen [I] Length of dst (in WCHARs), or 0 to compute the required length
  *
  * RETURNS
  *   Success: If dstlen > 0, the number of characters written to dst.
@@ -1764,7 +1764,6 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
 {
     const union cptable *table;
     int ret;
-    static int once;
 
     if (!src || (!dst && dstlen))
     {
@@ -1773,12 +1772,6 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
     }
 
     if (srclen < 0) srclen = strlen(src) + 1;
-
-    if (!once && (flags & MB_USEGLYPHCHARS))
-    {
-        once = 1;
-        FIXME("MB_USEGLYPHCHARS not supported\n");
-    }
 
     switch(page)
     {
@@ -1823,6 +1816,8 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
         }
         ret = 0;
     }
+    TRACE("cp %d %s -> %s, ret = %d\n",
+          page, debugstr_an(src, srclen), debugstr_wn(dst, ret), ret);
     return ret;
 }
 
@@ -1836,9 +1831,9 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
  *   page    [I] Code page character set to convert to
  *   flags   [I] Mapping Flags (MB_ constants from "winnls.h").
  *   src     [I] Source string buffer
- *   srclen  [I] Length of src, or -1 if src is NUL terminated
+ *   srclen  [I] Length of src (in WCHARs), or -1 if src is NUL terminated
  *   dst     [O] Destination buffer
- *   dstlen  [I] Length of dst, or 0 to compute the required length
+ *   dstlen  [I] Length of dst (in bytes), or 0 to compute the required length
  *   defchar [I] Default character to use for conversion if no exact
  *		    conversion can be made
  *   used    [O] Set if default character was used in the conversion
@@ -1890,7 +1885,7 @@ INT WINAPI WideCharToMultiByte( UINT page, DWORD flags, LPCWSTR src, INT srclen,
         /* fall through */
     case CP_UTF8:
         if (used) *used = FALSE;  /* all chars are valid for UTF-8 */
-        ret = wine_utf8_wcstombs( src, srclen, dst, dstlen );
+        ret = wine_utf8_wcstombs( flags, src, srclen, dst, dstlen );
         break;
     default:
         if (!(table = get_codepage_table( page )))

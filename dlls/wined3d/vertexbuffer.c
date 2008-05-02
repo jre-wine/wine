@@ -24,7 +24,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION ((IWineD3DImpl *)(((IWineD3DDeviceImpl *)This->resource.wineD3DDevice)->wineD3D))->gl_info
+#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 #define VB_MAXDECLCHANGES     100     /* After that number we stop converting */
 #define VB_RESETDECLCHANGE    1000    /* Reset the changecount after that number of draws */
@@ -62,7 +62,10 @@ static ULONG WINAPI IWineD3DVertexBufferImpl_Release(IWineD3DVertexBuffer *iface
     if (ref == 0) {
 
         if(This->vbo) {
+            IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+
             ENTER_GL();
+            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
             GL_EXTCALL(glDeleteBuffersARB(1, &This->vbo));
             checkGLcall("glDeleteBuffersARB");
             LEAVE_GL();
@@ -101,13 +104,20 @@ static DWORD    WINAPI IWineD3DVertexBufferImpl_GetPriority(IWineD3DVertexBuffer
     return IWineD3DResourceImpl_GetPriority((IWineD3DResource *)iface);
 }
 
-static void fixup_vertices(BYTE *src, BYTE *dst, int stride, int num, BYTE *pos, BOOL haspos, BYTE *diffuse, BOOL hasdiffuse, BYTE *specular, BOOL hasspecular) {
+static void fixup_vertices(
+	BYTE *src, BYTE *dst,
+	int stride,
+	int num,
+	int pos, BOOL haspos,
+	int diffuse, BOOL hasdiffuse,
+	int specular, BOOL hasspecular
+) {
     int i;
     float x, y, z, w;
 
     for(i = num - 1; i >= 0; i--) {
         if(haspos) {
-            float *p = (float *) (((int) src + (int) pos) + i * stride);
+            float *p = (float *) ((src + pos) + i * stride);
 
             /* rhw conversion like in drawStridedSlow */
             if(p[3] == 1.0 || ((p[3] < eps) && (p[3] > -eps))) {
@@ -121,15 +131,15 @@ static void fixup_vertices(BYTE *src, BYTE *dst, int stride, int num, BYTE *pos,
                 y = p[1] * w;
                 z = p[2] * w;
             }
-            p = (float *) ((int) dst + i * stride + (int) pos);
+            p = (float *) (dst + i * stride + pos);
             p[0] = x;
             p[1] = y;
             p[2] = z;
             p[3] = w;
         }
         if(hasdiffuse) {
-            DWORD srcColor, *dstColor = (DWORD *) (dst + i * stride + (int) diffuse);
-            srcColor = * (DWORD *) ( ((int) src + (int) diffuse) + i * stride);
+            DWORD srcColor, *dstColor = (DWORD *) (dst + i * stride + diffuse);
+            srcColor = * (DWORD *) ( (src + diffuse) + i * stride);
 
             /* Color conversion like in drawStridedSlow. watch out for little endianity
             * If we want that stuff to work on big endian machines too we have to consider more things
@@ -146,8 +156,8 @@ static void fixup_vertices(BYTE *src, BYTE *dst, int stride, int num, BYTE *pos,
             *dstColor |= (srcColor & 0x000000ff) << 16;   /* Blue */
         }
         if(hasspecular) {
-            DWORD srcColor, *dstColor = (DWORD *) (dst + i * stride + (int) specular);
-            srcColor = * (DWORD *) ( ((int) src + (int) specular) + i * stride);
+            DWORD srcColor, *dstColor = (DWORD *) (dst + i * stride + specular);
+            srcColor = * (DWORD *) ( (src + specular) + i * stride);
 
             /* Similar to diffuse
              * TODO: Write the alpha value out for fog coords
@@ -165,7 +175,13 @@ inline BOOL WINAPI IWineD3DVertexBufferImpl_FindDecl(IWineD3DVertexBufferImpl *T
     WineDirect3DVertexStridedData strided;
     IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
 
-    memset(&strided, 0, sizeof(strided));
+    /* In d3d7 the vertex buffer declaration NEVER changes because it is stored in the d3d7 vertex buffer.
+     * Once we have our declaration there is no need to look it up again.
+     */
+    if(((IWineD3DImpl *)device->wineD3D)->dxVersion == 7 && This->Flags & VBFLAG_HASDESC) {
+        return FALSE;
+    }
+
     /* There are certain vertex data types that need to be fixed up. The Vertex Buffers FVF doesn't
      * help finding them, only the vertex declaration or the device FVF can determine that at drawPrim
      * time. Rules are as follows:
@@ -190,7 +206,7 @@ inline BOOL WINAPI IWineD3DVertexBufferImpl_FindDecl(IWineD3DVertexBufferImpl *T
      *  FALSE: otherwise
      */
 
-    if(device->stateBlock->vertexShader && ((IWineD3DVertexShaderImpl *) device->stateBlock->vertexShader)->baseShader.function) {
+    if (use_vs(device)) {
         /* Assume no conversion */
         memset(&strided, 0, sizeof(strided));
     } else {
@@ -203,12 +219,6 @@ inline BOOL WINAPI IWineD3DVertexBufferImpl_FindDecl(IWineD3DVertexBufferImpl *T
         if(strided.u.s.specular.VBO != This->vbo)    memset(&strided.u.s.specular, 0, sizeof(strided.u.s.specular));
         if(strided.u.s.position2.VBO != This->vbo)   memset(&strided.u.s.position2, 0, sizeof(strided.u.s.position2));
     }
-
-    /* Filter out data that does not come from this VBO */
-    if(strided.u.s.position.VBO != This->vbo)    memset(&strided.u.s.position, 0, sizeof(strided.u.s.position));
-    if(strided.u.s.diffuse.VBO != This->vbo)     memset(&strided.u.s.diffuse, 0, sizeof(strided.u.s.diffuse));
-    if(strided.u.s.specular.VBO != This->vbo)    memset(&strided.u.s.specular, 0, sizeof(strided.u.s.specular));
-    if(strided.u.s.position2.VBO != This->vbo)   memset(&strided.u.s.position2, 0, sizeof(strided.u.s.position2));
 
     /* We have a declaration now in the buffer */
     This->Flags |= VBFLAG_HASDESC;
@@ -244,6 +254,7 @@ inline BOOL WINAPI IWineD3DVertexBufferImpl_FindDecl(IWineD3DVertexBufferImpl *T
 
 static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *iface) {
     IWineD3DVertexBufferImpl *This = (IWineD3DVertexBufferImpl *) iface;
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
     BYTE *data;
     UINT start = 0, end = 0, stride = 0;
     BOOL declChanged = FALSE;
@@ -259,7 +270,7 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
     }
 
     /* Reading the declaration makes only sense if the stateblock is finalized and the buffer bound to a stream */
-    if(This->resource.wineD3DDevice->isInDraw && This->Flags & VBFLAG_STREAM) {
+    if(device->isInDraw && This->bindCount > 0) {
         declChanged = IWineD3DVertexBufferImpl_FindDecl(This);
     } else if(This->Flags & VBFLAG_HASDESC) {
         /* Reuse the declaration stored in the buffer. It will most likely not change, and if it does
@@ -282,27 +293,22 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
         This->draws = 0;
 
         if(This->declChanges > VB_MAXDECLCHANGES) {
-            if(This->resource.allocatedMemory) {
-                FIXME("Too much declaration changes, stopping converting\n");
-                ENTER_GL();
-                GL_EXTCALL(glDeleteBuffersARB(1, &This->vbo));
-                checkGLcall("glDeleteBuffersARB");
-                LEAVE_GL();
-                This->vbo = 0;
+            FIXME("Too much declaration changes, stopping converting\n");
+            ENTER_GL();
+            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+            GL_EXTCALL(glDeleteBuffersARB(1, &This->vbo));
+            checkGLcall("glDeleteBuffersARB");
+            LEAVE_GL();
+            This->vbo = 0;
 
-                /* The stream source state handler might have read the memory of the vertex buffer already
-                 * and got the memory in the vbo which is not valid any longer. Dirtify the stream source
-                 * to force a reload. This happens only once per changed vertexbuffer and should occur rather
-                 * rarely
-                 */
-                IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_STREAMSRC);
-
-                return;
-            }
-            /* Otherwise do not bother to release the VBO. If we're doing direct locking now,
-             * and the declarations changed the code below will fetch the VBO's contents, convert
-             * and on the next decl change the data will be in sysmem too and we can just release the VBO
+            /* The stream source state handler might have read the memory of the vertex buffer already
+             * and got the memory in the vbo which is not valid any longer. Dirtify the stream source
+             * to force a reload. This happens only once per changed vertexbuffer and should occur rather
+             * rarely
              */
+            IWineD3DDeviceImpl_MarkStateDirty(device, STATE_STREAMSRC);
+
+            return;
         }
     } else {
         /* However, it is perfectly fine to change the declaration every now and then. We don't want a game that
@@ -332,46 +338,23 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
     This->dirtystart = 0;
     This->dirtyend = 0;
 
-    /* If there was no conversion done before, then resource.allocatedMemory does not exist
-     * because locking was done directly into the VBO. In this case get the data out
-     */
-    if(declChanged && !This->resource.allocatedMemory) {
-
-        This->resource.allocatedMemory = HeapAlloc(GetProcessHeap(), 0, This->resource.size);
-        if(!This->resource.allocatedMemory) {
-            ERR("Out of memory when allocating memory for a vertex buffer\n");
-            return;
-        }
-        ERR("Was locking directly into the VBO, reading data back because conv is needed\n");
-
-        ENTER_GL();
-        GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, This->vbo));
-        checkGLcall("glBindBufferARB");
-        data = GL_EXTCALL(glMapBufferARB(GL_ARRAY_BUFFER_ARB, GL_READ_WRITE_ARB));
-        if(!data) {
-            ERR("glMapBuffer failed!\n");
-            LEAVE_GL();
-            return;
-        }
-        memcpy(This->resource.allocatedMemory, data, This->resource.size);
-        GL_EXTCALL(glUnmapBufferARB(GL_ARRAY_BUFFER_ARB));
-        checkGLcall("glUnmapBufferARB");
-        LEAVE_GL();
-    }
-
     if     (This->strided.u.s.position.dwStride) stride = This->strided.u.s.position.dwStride;
     else if(This->strided.u.s.specular.dwStride) stride = This->strided.u.s.specular.dwStride;
     else if(This->strided.u.s.diffuse.dwStride)  stride = This->strided.u.s.diffuse.dwStride;
     else {
-        /* That means that there is nothing to fixup. Upload everything into the VBO and
-         * free This->resource.allocatedMemory
+        /* That means that there is nothing to fixup. Just upload from This->resource.allocatedMemory
+         * directly into the vbo. Do not free the system memory copy because drawPrimitive may need it if
+         * the stride is 0, for instancing emulation, vertex blending emulation or shader emulation.
          */
         TRACE("No conversion needed, locking directly into the VBO in future\n");
 
         ENTER_GL();
+        if(!device->isInDraw) {
+            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        }
         GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, This->vbo));
         checkGLcall("glBindBufferARB");
-        GL_EXTCALL(glBufferSubDataARB(GL_ARRAY_BUFFER_ARB, 0, This->resource.size, This->resource.allocatedMemory));
+        GL_EXTCALL(glBufferSubDataARB(GL_ARRAY_BUFFER_ARB, start, end-start, This->resource.allocatedMemory + start));
         checkGLcall("glBufferSubDataARB");
         LEAVE_GL();
         return;
@@ -389,16 +372,19 @@ static void     WINAPI IWineD3DVertexBufferImpl_PreLoad(IWineD3DVertexBuffer *if
 
     fixup_vertices(data, data, stride, ( end - start) / stride,
                    /* Position */
-                   This->strided.u.s.position.lpData, /* Data location */
+                   (int)This->strided.u.s.position.lpData, /* Data location */
                    This->strided.u.s.position_transformed, /* Do convert? */
                    /* Diffuse color */
-                   This->strided.u.s.diffuse.lpData, /* Location */
+                   (int)This->strided.u.s.diffuse.lpData, /* Location */
                    This->strided.u.s.diffuse.dwType == WINED3DDECLTYPE_SHORT4 || This->strided.u.s.diffuse.dwType == WINED3DDECLTYPE_D3DCOLOR, /* Convert? */
                    /* specular color */
-                   This->strided.u.s.specular.lpData, /* location */
+                   (int)This->strided.u.s.specular.lpData, /* location */
                    This->strided.u.s.specular.dwType == WINED3DDECLTYPE_SHORT4 || This->strided.u.s.specular.dwType == WINED3DDECLTYPE_D3DCOLOR);
 
     ENTER_GL();
+    if(!device->isInDraw) {
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+    }
     GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, This->vbo));
     checkGLcall("glBindBufferARB");
     GL_EXTCALL(glBufferSubDataARB(GL_ARRAY_BUFFER_ARB, start, end - start, data));
@@ -441,31 +427,8 @@ static HRESULT  WINAPI IWineD3DVertexBufferImpl_Lock(IWineD3DVertexBuffer *iface
             This->dirtyend = This->resource.size;
     }
 
-    if(This->resource.allocatedMemory) {
-          data = This->resource.allocatedMemory;
-          This->Flags |= VBFLAG_DIRTY;
-    } else {
-        GLenum mode = GL_READ_WRITE_ARB;
-        /* Return data to the VBO */
-
-        TRACE("Locking directly into the buffer\n");
-
-        if((This->resource.usage & WINED3DUSAGE_WRITEONLY) || ( Flags & WINED3DLOCK_DISCARD) ) {
-            mode = GL_WRITE_ONLY_ARB;
-        } else if( Flags & (WINED3DLOCK_READONLY | WINED3DLOCK_NO_DIRTY_UPDATE) ) {
-            mode = GL_READ_ONLY_ARB;
-        }
-
-        ENTER_GL();
-        GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, This->vbo));
-        checkGLcall("glBindBufferARB");
-        data = GL_EXTCALL(glMapBufferARB(GL_ARRAY_BUFFER_ARB, mode));
-        LEAVE_GL();
-        if(!data) {
-            ERR("glMapBuffer failed\n");
-            return WINED3DERR_INVALIDCALL;
-        }
-    }
+    data = This->resource.allocatedMemory;
+    This->Flags |= VBFLAG_DIRTY;
     *ppbData = data + OffsetToLock;
 
     TRACE("(%p) : returning memory of %p (base:%p,offset:%u)\n", This, data + OffsetToLock, data, OffsetToLock);
@@ -481,16 +444,11 @@ HRESULT  WINAPI IWineD3DVertexBufferImpl_Unlock(IWineD3DVertexBuffer *iface) {
     if(lockcount > 0) {
         /* Delay loading the buffer until everything is unlocked */
         TRACE("Ignoring the unlock\n");
-        return D3D_OK;
+        return WINED3D_OK;
     }
 
-    if(!This->resource.allocatedMemory) {
-        ENTER_GL();
-        GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, This->vbo));
-        checkGLcall("glBindBufferARB");
-        GL_EXTCALL(glUnmapBufferARB(GL_ARRAY_BUFFER_ARB));
-        checkGLcall("glUnmapBufferARB");
-        LEAVE_GL();
+    if(This->Flags & VBFLAG_HASDESC) {
+        IWineD3DVertexBufferImpl_PreLoad(iface);
     }
     return WINED3D_OK;
 }

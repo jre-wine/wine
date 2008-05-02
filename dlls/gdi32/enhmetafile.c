@@ -250,9 +250,20 @@ static inline BOOL is_dib_monochrome( const BITMAPINFO* info )
 HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
 {
     HENHMETAFILE hmf = 0;
-    ENHMETAFILEOBJ *metaObj = GDI_AllocObject( sizeof(ENHMETAFILEOBJ),
-                                               ENHMETAFILE_MAGIC,
-					       (HGDIOBJ *)&hmf, NULL );
+    ENHMETAFILEOBJ *metaObj;
+
+    if (emh->iType != EMR_HEADER || emh->dSignature != ENHMETA_SIGNATURE ||
+        (emh->nBytes & 3)) /* refuse to load unaligned EMF as Windows does */
+    {
+        WARN("Invalid emf header type 0x%08x sig 0x%08x.\n",
+             emh->iType, emh->dSignature);
+        SetLastError(ERROR_INVALID_DATA);
+        return 0;
+    }
+
+    metaObj = GDI_AllocObject( sizeof(ENHMETAFILEOBJ),
+                               ENHMETAFILE_MAGIC,
+                               (HGDIOBJ *)&hmf, NULL );
     if (metaObj)
     {
         metaObj->emh = emh;
@@ -304,6 +315,7 @@ static HENHMETAFILE EMF_GetEnhMetaFile( HANDLE hFile )
 {
     ENHMETAHEADER *emh;
     HANDLE hMapping;
+    HENHMETAFILE hemf;
 
     hMapping = CreateFileMappingA( hFile, NULL, PAGE_READONLY, 0, 0, NULL );
     emh = MapViewOfFile( hMapping, FILE_MAP_READ, 0, 0, 0 );
@@ -311,24 +323,10 @@ static HENHMETAFILE EMF_GetEnhMetaFile( HANDLE hFile )
 
     if (!emh) return 0;
 
-    if (emh->iType != EMR_HEADER || emh->dSignature != ENHMETA_SIGNATURE) {
-        WARN("Invalid emf header type 0x%08x sig 0x%08x.\n",
-	     emh->iType, emh->dSignature);
-        goto err;
-    }
-
-    /* refuse to load unaligned EMF as Windows does */
-    if (emh->nBytes & 3)
-    {
-        WARN("Refusing to load unaligned EMF\n");
-        goto err;
-    }
-
-    return EMF_Create_HENHMETAFILE( emh, TRUE );
-
-err:
-    UnmapViewOfFile( emh );
-    return 0;
+    hemf = EMF_Create_HENHMETAFILE( emh, TRUE );
+    if (!hemf)
+        UnmapViewOfFile( emh );
+    return hemf;
 }
 
 
@@ -516,7 +514,7 @@ typedef struct enum_emh_data
 
 #define IS_WIN9X() (GetVersion()&0x80000000)
 
-static void EMF_Update_MF_Xform(HDC hdc, enum_emh_data *info)
+static void EMF_Update_MF_Xform(HDC hdc, const enum_emh_data *info)
 {
     XFORM mapping_mode_trans, final_trans;
     FLOAT scaleX, scaleY;

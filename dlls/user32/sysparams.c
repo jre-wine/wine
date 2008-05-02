@@ -196,8 +196,6 @@ static const WCHAR SPI_SETPOWEROFFACTIVE_REGKEY[]=            {'C','o','n','t','
 static const WCHAR SPI_SETPOWEROFFACTIVE_VALNAME[]=           {'P','o','w','e','r','O','f','f','A','c','t','i','v','e',0};
 static const WCHAR SPI_USERPREFERENCEMASK_REGKEY[]=           {'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\','D','e','s','k','t','o','p',0};
 static const WCHAR SPI_USERPREFERENCEMASK_VALNAME[]=          {'U','s','e','r','P','r','e','f','e','r','e','n','c','e','m','a','s','k',0};
-static const WCHAR SPI_SETLISTBOXSMOOTHSCROLLING_REGKEY[]=    {'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\','D','e','s','k','t','o','p',0};
-static const WCHAR SPI_SETLISTBOXSMOOTHSCROLLING_VALNAME[]=   {'S','m','o','o','t','h','S','c','r','o','l','l',0};
 static const WCHAR SPI_SETMOUSEHOVERWIDTH_REGKEY[]=           {'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\','M','o','u','s','e',0};
 static const WCHAR SPI_SETMOUSEHOVERWIDTH_VALNAME[]=          {'M','o','u','s','e','H','o','v','e','r','W','i','d','t','h',0};
 static const WCHAR SPI_SETMOUSEHOVERHEIGHT_REGKEY[]=          {'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\','M','o','u','s','e',0};
@@ -316,7 +314,7 @@ static ICONMETRICSW icon_metrics =
     75,   /* iHorzSpacing */
     75,   /* iVertSpacing */
     TRUE, /* iTitleWrap */
-    { -11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET,
+    { -11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH }   /* lfFont */
 };
 
@@ -705,7 +703,7 @@ static inline int get_display_dpi(void)
  *       Technical Reference to the Windows 2000 Registry ->
  *       HKEY_CURRENT_USER -> Control Panel -> Desktop -> WindowMetrics
  */
-inline static int SYSPARAMS_Twips2Pixels(int x)
+static inline int SYSPARAMS_Twips2Pixels(int x)
 {
     if (x < 0)
         x = (-x * get_display_dpi() + 720) / 1440;
@@ -2138,7 +2136,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETMENUANIMATION:             /* 0x1003  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
-        ret = set_user_pref_param( 0, 0x02, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 0, 0x02, PtrToUlong(pvParam), fWinIni );
         break;
 
     case SPI_GETCOMBOBOXANIMATION:         /* 0x1004  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
@@ -2146,7 +2144,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETCOMBOBOXANIMATION:         /* 0x1005  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
-        ret = set_user_pref_param( 0, 0x04, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 0, 0x04, PtrToUlong(pvParam), fWinIni );
         break;
 
     case SPI_GETLISTBOXSMOOTHSCROLLING:    /* 0x1006  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
@@ -2154,7 +2152,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETLISTBOXSMOOTHSCROLLING:    /* 0x1007  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
-        ret = set_user_pref_param( 0, 0x08, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 0, 0x08, PtrToUlong(pvParam), fWinIni );
         break;
 
     case SPI_GETGRADIENTCAPTIONS:
@@ -2162,7 +2160,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETGRADIENTCAPTIONS:
-        ret = set_user_pref_param( 0, 0x10, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 0, 0x10, PtrToUlong(pvParam), fWinIni );
         break;
 
     case SPI_GETKEYBOARDCUES:
@@ -2170,7 +2168,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETKEYBOARDCUES:
-        ret = set_user_pref_param( 0, 0x20, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 0, 0x20, PtrToUlong(pvParam), fWinIni );
         break;
 
     WINE_SPI_FIXME(SPI_GETACTIVEWNDTRKZORDER);  /* 0x100C  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
@@ -2180,7 +2178,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETHOTTRACKING:
-        ret = set_user_pref_param( 0, 0x80, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 0, 0x80, PtrToUlong(pvParam), fWinIni );
         break;
 
     WINE_SPI_FIXME(SPI_GETMENUFADE);            /* 0x1012  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
@@ -2190,7 +2188,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETSELECTIONFADE:                  /* 0x1015  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
-        ret = set_user_pref_param( 1, 0x04, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 1, 0x04, PtrToUlong(pvParam), fWinIni );
         break;
 
     case SPI_GETTOOLTIPANIMATION:               /* 0x1016  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
@@ -2198,7 +2196,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETTOOLTIPANIMATION:               /* 0x1017  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
-        ret = set_user_pref_param( 1, 0x08, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 1, 0x08, PtrToUlong(pvParam), fWinIni );
         break;
 
     case SPI_GETTOOLTIPFADE:                    /* 0x1018  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
@@ -2206,7 +2204,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETTOOLTIPFADE:                    /* 0x1019  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
-        ret = set_user_pref_param( 1, 0x10, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 1, 0x10, PtrToUlong(pvParam), fWinIni );
         break;
 
     case SPI_GETCURSORSHADOW:                   /* 0x101A  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
@@ -2214,7 +2212,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETCURSORSHADOW:                   /* 0x101B  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
-        ret = set_user_pref_param( 1, 0x20, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 1, 0x20, PtrToUlong(pvParam), fWinIni );
         break;
 
     WINE_SPI_FIXME(SPI_GETMOUSESONAR);          /* 0x101C  _WIN32_WINNT >= 0x510 || _WIN32_WINDOW >= 0x490*/
@@ -2228,7 +2226,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         break;
 
     case SPI_SETFLATMENU:
-        ret = set_user_pref_param( 2, 0x02, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 2, 0x02, PtrToUlong(pvParam), fWinIni );
         break;
 
     WINE_SPI_FIXME(SPI_GETDROPSHADOW);          /* 0x1024  _WIN32_WINNT >= 0x510 */
@@ -2241,7 +2239,7 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
 
     case SPI_SETUIEFFECTS:
         /* FIXME: this probably should mask other UI effect values when unset */
-        ret = set_user_pref_param( 3, 0x80, (BOOL)pvParam, fWinIni );
+        ret = set_user_pref_param( 3, 0x80, PtrToUlong(pvParam), fWinIni );
         break;
 
     WINE_SPI_FIXME(SPI_GETFOREGROUNDLOCKTIMEOUT);/* 0x2000  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
@@ -2727,7 +2725,7 @@ INT WINAPI GetSystemMetrics( INT index )
         return tmMenuFont.tmHeight <= 0 ? 13 :
         ((tmMenuFont.tmHeight + tmMenuFont.tmExternalLeading + 1) / 2) * 2 - 1;
     case SM_SLOWMACHINE:
-        return 0;  /* FIXME: Should check the type of processor */
+        return 0;  /* Never true */
     case SM_MIDEASTENABLED:
         return 0;  /* FIXME */
     case SM_MOUSEWHEELPRESENT:
@@ -2906,11 +2904,11 @@ DWORD WINAPI SetSysColorsTemp( const COLORREF *pPens, const HBRUSH *pBrushes, DW
             SysColorBrushes[i] = pBrushes[i];
         }
 
-        return (DWORD)pOldCol;
+        return (DWORD)pOldCol; /* FIXME: pointer truncation */
     }
     if (!pPens && !pBrushes) /* "restore" call */
     {
-        LPVOID pOldCol = (LPVOID)n;
+        LPVOID pOldCol = (LPVOID)n; /* FIXME: not 64-bit safe */
         LPVOID p = pOldCol;
         DWORD nCount = *(DWORD *)p;
         p = (char*)p + sizeof(DWORD);

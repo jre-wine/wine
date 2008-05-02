@@ -23,11 +23,8 @@
 #include "config.h"
 #include "wine/port.h"
 
-#include <stdlib.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
-#include <assert.h>
 
 #define COBJMACROS
 #define NONAMELESSUNION
@@ -42,7 +39,6 @@
 #include "rpc.h"
 #include "winerror.h"
 #include "winreg.h"
-#include "wtypes.h"
 #include "wine/unicode.h"
 
 #include "compobj_private.h"
@@ -108,6 +104,7 @@ typedef struct
 
     RPC_BINDING_HANDLE     bind; /* handle to the remote server */
     OXID                   oxid; /* apartment in which the channel is valid */
+    DWORD                  server_pid; /* id of server process */
     DWORD                  dest_context; /* returned from GetDestCtx */
     LPVOID                 dest_context_data; /* returned from GetDestCtx */
     HANDLE                 event; /* cached event handle */
@@ -600,7 +597,7 @@ static HRESULT WINAPI ClientRpcChannelBuffer_GetBuffer(LPRPCCHANNELBUFFER iface,
     message_state->channel_hook_info.iid = *riid;
     message_state->channel_hook_info.cbSize = sizeof(message_state->channel_hook_info);
     message_state->channel_hook_info.uCausality = COM_CurrentCausalityId();
-    message_state->channel_hook_info.dwServerPid = 0; /* FIXME */
+    message_state->channel_hook_info.dwServerPid = This->server_pid;
     message_state->channel_hook_info.iMethod = msg->ProcNum;
     message_state->channel_hook_info.pObject = NULL; /* only present on server-side */
 
@@ -704,7 +701,8 @@ static DWORD WINAPI rpc_sendreceive_thread(LPVOID param)
 {
     struct dispatch_params *data = (struct dispatch_params *) param;
 
-    /* FIXME: trap and rethrow RPC exceptions in app thread */
+    /* Note: I_RpcSendReceive doesn't raise exceptions like the higher-level
+     * RPC functions do */
     data->status = I_RpcSendReceive((RPC_MESSAGE *)data->msg);
 
     TRACE("completed with status 0x%lx\n", data->status);
@@ -859,7 +857,7 @@ static HRESULT WINAPI ClientRpcChannelBuffer_SendReceive(LPRPCCHANNELBUFFER ifac
     TRACE("hrFault = 0x%08x\n", hrFault);
 
     /* FIXME: this condition should be
-     * "hr == S_OK && (!hrFault || msg->BufferLength > FIELD_OFFSET(ORPCTHAT, extentions) + 4)"
+     * "hr == S_OK && (!hrFault || msg->BufferLength > FIELD_OFFSET(ORPCTHAT, extensions) + 4)"
      * but we don't currently reset the message length for PostMessage
      * dispatched calls */
     if (hr == S_OK && hrFault == S_OK)
@@ -1001,6 +999,7 @@ static const IRpcChannelBufferVtbl ServerRpcChannelBufferVtbl =
 
 /* returns a channel buffer for proxies */
 HRESULT RPC_CreateClientChannel(const OXID *oxid, const IPID *ipid,
+                                const OXID_INFO *oxid_info,
                                 DWORD dest_context, void *dest_context_data,
                                 IRpcChannelBuffer **chan)
 {
@@ -1010,7 +1009,7 @@ HRESULT RPC_CreateClientChannel(const OXID *oxid, const IPID *ipid,
     RPC_STATUS              status;
     LPWSTR                  string_binding;
 
-    /* connect to the apartment listener thread */
+    /* FIXME: get the endpoint from oxid_info->psa instead */
     get_rpc_endpoint(endpoint, oxid);
 
     TRACE("proxy pipe: connecting to endpoint: %s\n", debugstr_w(endpoint));
@@ -1055,6 +1054,7 @@ HRESULT RPC_CreateClientChannel(const OXID *oxid, const IPID *ipid,
     This->super.refs = 1;
     This->bind = bind;
     apartment_getoxid(COM_CurrentApt(), &This->oxid);
+    This->server_pid = oxid_info->dwPid;
     This->dest_context = dest_context;
     This->dest_context_data = dest_context_data;
     This->event = NULL;
@@ -1352,7 +1352,11 @@ static void __RPC_STUB dispatch_rpc(RPC_MESSAGE *msg)
     TRACE("ipid = %s, iMethod = %d\n", debugstr_guid(&ipid), msg->ProcNum);
 
     params = HeapAlloc(GetProcessHeap(), 0, sizeof(*params));
-    if (!params) return RpcRaiseException(E_OUTOFMEMORY);
+    if (!params)
+    {
+        RpcRaiseException(E_OUTOFMEMORY);
+        return;
+    }
 
     hr = ipid_get_dispatch_params(&ipid, &apt, &params->stub, &params->chan,
                                   &params->iid, &params->iface);
@@ -1360,7 +1364,8 @@ static void __RPC_STUB dispatch_rpc(RPC_MESSAGE *msg)
     {
         ERR("no apartment found for ipid %s\n", debugstr_guid(&ipid));
         HeapFree(GetProcessHeap(), 0, params);
-        return RpcRaiseException(hr);
+        RpcRaiseException(hr);
+        return;
     }
 
     params->msg = (RPCOLEMESSAGE *)msg;
@@ -1489,6 +1494,27 @@ void RPC_UnregisterInterface(REFIID riid)
         }
     }
     LeaveCriticalSection(&csRegIf);
+}
+
+/* get the info for an OXID, including the IPID for the rem unknown interface
+ * and the string binding */
+HRESULT RPC_ResolveOxid(OXID oxid, OXID_INFO *oxid_info)
+{
+    TRACE("%s\n", wine_dbgstr_longlong(oxid));
+
+    oxid_info->dwTid = 0;
+    oxid_info->dwPid = 0;
+    oxid_info->dwAuthnHint = RPC_C_AUTHN_LEVEL_NONE;
+    /* FIXME: this is a hack around not having an OXID resolver yet -
+     * this function should contact the machine's OXID resolver and then it
+     * should give us the IPID of the IRemUnknown interface */
+    oxid_info->ipidRemUnknown.Data1 = 0xffffffff;
+    oxid_info->ipidRemUnknown.Data2 = 0xffff;
+    oxid_info->ipidRemUnknown.Data3 = 0xffff;
+    memcpy(&oxid_info->ipidRemUnknown.Data4, &oxid, sizeof(OXID));
+    oxid_info->psa = NULL /* FIXME */;
+
+    return S_OK;
 }
 
 /* make the apartment reachable by other threads and processes and create the
@@ -1735,6 +1761,8 @@ struct local_server_params
     CLSID clsid;
     IStream *stream;
     HANDLE ready_event;
+    BOOL multi_use;
+    HANDLE pipe;
 };
 
 /* FIXME: should call to rpcss instead */
@@ -1751,6 +1779,7 @@ static DWORD WINAPI local_server_thread(LPVOID param)
     LARGE_INTEGER	seekto;
     ULARGE_INTEGER	newpos;
     ULONG		res;
+    BOOL multi_use = lsp->multi_use;
 
     TRACE("Starting threader for %s.\n",debugstr_guid(&lsp->clsid));
 
@@ -1760,6 +1789,7 @@ static DWORD WINAPI local_server_thread(LPVOID param)
                               PIPE_TYPE_BYTE|PIPE_WAIT, PIPE_UNLIMITED_INSTANCES,
                               4096, 4096, 500 /* 0.5 second timeout */, NULL );
 
+    lsp->pipe = hPipe;
     SetEvent(lsp->ready_event);
 
     HeapFree(GetProcessHeap(), 0, lsp);
@@ -1771,9 +1801,21 @@ static DWORD WINAPI local_server_thread(LPVOID param)
     }
     
     while (1) {
-        if (!ConnectNamedPipe(hPipe,NULL) && GetLastError() != ERROR_PIPE_CONNECTED) {
-            ERR("Failure during ConnectNamedPipe %u, ABORT!\n",GetLastError());
-            break;
+        if (!ConnectNamedPipe(hPipe,NULL))
+        {
+            DWORD error = GetLastError();
+            /* client already connected isn't an error */
+            if (error != ERROR_PIPE_CONNECTED)
+            {
+                /* if error wasn't caused by RPC_StopLocalServer closing the
+                 * pipe for us */
+                if (error != ERROR_INVALID_HANDLE)
+                {
+                    ERR("Failure during ConnectNamedPipe %u\n", error);
+                    CloseHandle(hPipe);
+                }
+                break;
+            }
         }
 
         TRACE("marshalling IClassFactory to client\n");
@@ -1806,13 +1848,20 @@ static DWORD WINAPI local_server_thread(LPVOID param)
         DisconnectNamedPipe(hPipe);
 
         TRACE("done marshalling IClassFactory\n");
+
+        if (!multi_use)
+        {
+            TRACE("single use object, shutting down pipe %s\n", debugstr_w(pipefn));
+            CloseHandle(hPipe);
+            break;
+        }
     }
-    CloseHandle(hPipe);
     IStream_Release(pStm);
     return 0;
 }
 
-void RPC_StartLocalServer(REFCLSID clsid, IStream *stream)
+/* starts listening for a local server */
+HRESULT RPC_StartLocalServer(REFCLSID clsid, IStream *stream, BOOL multi_use, void **registration)
 {
     DWORD tid;
     HANDLE thread, ready_event;
@@ -1822,11 +1871,23 @@ void RPC_StartLocalServer(REFCLSID clsid, IStream *stream)
     lsp->stream = stream;
     IStream_AddRef(stream);
     lsp->ready_event = ready_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    lsp->multi_use = multi_use;
 
     thread = CreateThread(NULL, 0, local_server_thread, lsp, 0, &tid);
+    if (!thread)
+        return HRESULT_FROM_WIN32(GetLastError());
     CloseHandle(thread);
-    /* FIXME: failure handling */
 
     WaitForSingleObject(ready_event, INFINITE);
     CloseHandle(ready_event);
+
+    *registration = lsp->pipe;
+    return S_OK;
+}
+
+/* stops listening for a local server */
+void RPC_StopLocalServer(void *registration)
+{
+    HANDLE pipe = registration;
+    CloseHandle(pipe);
 }

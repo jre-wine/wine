@@ -96,9 +96,10 @@
 @ cdecl __isascii(long) MSVCRT___isascii
 @ cdecl __iscsym(long) MSVCRT___iscsym
 @ cdecl __iscsymf(long) MSVCRT___iscsymf
-# extern __lc_codepage
+@ extern __lc_codepage MSVCRT___lc_codepage
 @ stub __lc_collate
-# extern __lc_handle
+@ extern __lc_collate_cp MSVCRT___lc_collate_cp
+@ extern __lc_handle MSVCRT___lc_handle
 @ cdecl __lconv_init()
 @ extern __mb_cur_max MSVCRT___mb_cur_max
 @ cdecl __p___argc()
@@ -242,7 +243,7 @@
 @ cdecl _fputwchar(long)
 @ cdecl _fsopen(str str long) MSVCRT__fsopen
 @ cdecl _fstat(long ptr) MSVCRT__fstat
-@ stub _fstat64
+@ cdecl _fstat64(long ptr) MSVCRT__fstat64
 @ cdecl _fstati64(long ptr) MSVCRT__fstati64
 @ cdecl _ftime(ptr)
 @ cdecl -ret64 _ftol() ntdll._ftol
@@ -322,7 +323,7 @@
 @ cdecl _kbhit()
 @ cdecl _lfind(ptr ptr ptr long ptr)
 @ cdecl _loaddll(str)
-@ cdecl _local_unwind2(ptr long)
+@ cdecl -i386 _local_unwind2(ptr long)
 @ cdecl _lock(long)
 @ cdecl _locking(long long long)
 @ cdecl _logb( double )
@@ -334,10 +335,10 @@
 @ cdecl -ret64 _lseeki64(long double long)
 @ cdecl _ltoa(long ptr long) ntdll._ltoa
 @ cdecl _ltow(long ptr long) ntdll._ltow
-@ cdecl _makepath(str str str str str)
+@ cdecl _makepath(ptr str str str str)
 @ cdecl _matherr(ptr) MSVCRT__matherr
 @ cdecl _mbbtombc(long)
-@ stub _mbbtype #(long long)
+@ cdecl _mbbtype(long long)
 # extern _mbcasemap
 @ cdecl _mbccpy (str str)
 @ stub _mbcjistojms #(long)
@@ -450,7 +451,7 @@
 @ cdecl _spawnvpe(long str ptr ptr)
 @ cdecl _splitpath(str ptr ptr ptr ptr) ntdll._splitpath
 @ cdecl _stat(str ptr) MSVCRT__stat
-@ stub _stat64 
+@ cdecl _stat64(str ptr) MSVCRT__stat64
 @ cdecl _stati64(str ptr) MSVCRT__stati64
 @ cdecl _statusfp()
 @ cdecl _strcmpi(str str) ntdll._strcmpi
@@ -559,6 +560,7 @@
 @ cdecl _wsplitpath(wstr wstr wstr wstr wstr)
 @ cdecl _wstat(wstr ptr) MSVCRT__wstat
 @ cdecl _wstati64(wstr ptr) MSVCRT__wstati64
+@ cdecl _wstat64(wstr ptr) MSVCRT__wstat64
 @ cdecl _wstrdate(ptr)
 @ cdecl _wstrtime(ptr)
 @ stub _wsystem #(wstr)
@@ -685,7 +687,7 @@
 @ cdecl putwc(long ptr) MSVCRT_fputwc
 @ cdecl putwchar(long) _fputwchar
 @ cdecl qsort(ptr long long ptr) ntdll.qsort
-@ stub raise #(long)
+@ cdecl raise(long) MSVCRT_raise
 @ cdecl rand() MSVCRT_rand
 @ cdecl realloc(ptr long) MSVCRT_realloc
 @ cdecl remove(str) MSVCRT_remove
@@ -767,4 +769,3 @@
 @ cdecl wctomb(ptr long) MSVCRT_wctomb
 @ varargs wprintf(wstr) MSVCRT_wprintf
 @ varargs wscanf(wstr) MSVCRT_wscanf
-# extern __lc_collate_cp

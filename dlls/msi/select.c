@@ -124,7 +124,7 @@ static UINT SELECT_set_row( struct tagMSIVIEW *view, UINT row, MSIRECORD *rec, U
     return r;
 }
 
-static UINT SELECT_insert_row( struct tagMSIVIEW *view, MSIRECORD *record )
+static UINT SELECT_insert_row( struct tagMSIVIEW *view, MSIRECORD *record, BOOL temporary )
 {
     MSISELECTVIEW *sv = (MSISELECTVIEW*)view;
     UINT i, table_cols, r;
@@ -149,7 +149,7 @@ static UINT SELECT_insert_row( struct tagMSIVIEW *view, MSIRECORD *record )
             goto fail;
     }
 
-    r = sv->table->ops->insert_row( sv->table, outrec );
+    r = sv->table->ops->insert_row( sv->table, outrec, temporary );
 
 fail:
     msiobj_release( &outrec->hdr );
@@ -267,6 +267,7 @@ static const MSIVIEWOPS select_ops =
     SELECT_fetch_stream,
     SELECT_set_row,
     SELECT_insert_row,
+    NULL,
     SELECT_execute,
     SELECT_close,
     SELECT_get_dimensions,
@@ -310,7 +311,7 @@ static UINT SELECT_AddColumn( MSISELECTVIEW *sv, LPCWSTR name )
     return ERROR_SUCCESS;
 }
 
-static int select_count_columns( column_info *col )
+static int select_count_columns( const column_info *col )
 {
     int n;
     for (n = 0; col; col = col->next)
@@ -319,7 +320,7 @@ static int select_count_columns( column_info *col )
 }
 
 UINT SELECT_CreateView( MSIDATABASE *db, MSIVIEW **view, MSIVIEW *table,
-                        column_info *columns )
+                        const column_info *columns )
 {
     MSISELECTVIEW *sv = NULL;
     UINT count = 0, r = ERROR_SUCCESS;

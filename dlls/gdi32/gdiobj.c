@@ -485,7 +485,7 @@ static UINT get_default_charset( void )
 
     uACP = GetACP();
     csi.ciCharset = ANSI_CHARSET;
-    if ( ! TranslateCharsetInfo( (LPDWORD)uACP, &csi, TCI_SRCCODEPAGE ) )
+    if ( !TranslateCharsetInfo( ULongToPtr(uACP), &csi, TCI_SRCCODEPAGE ) )
     {
         FIXME( "unhandled codepage %u - use ANSI_CHARSET for default stock objects\n", uACP );
         return ANSI_CHARSET;
@@ -528,7 +528,7 @@ static DWORD get_dpi( void )
  *
  * Increment the reference count of a GDI object.
  */
-inline static void inc_ref_count( HGDIOBJ handle )
+static inline void inc_ref_count( HGDIOBJ handle )
 {
     GDIOBJHDR *header;
 
@@ -545,7 +545,7 @@ inline static void inc_ref_count( HGDIOBJ handle )
  *
  * Decrement the reference count of a GDI object.
  */
-inline static void dec_ref_count( HGDIOBJ handle )
+static inline void dec_ref_count( HGDIOBJ handle )
 {
     GDIOBJHDR *header;
 
@@ -638,7 +638,7 @@ static int next_large_handle;
  *
  * Allocate a GDI handle from the large heap. Helper for GDI_AllocObject
  */
-inline static GDIOBJHDR *alloc_large_heap( WORD size, HGDIOBJ *handle )
+static inline GDIOBJHDR *alloc_large_heap( WORD size, HGDIOBJ *handle )
 {
     int i;
     GDIOBJHDR *obj;
@@ -1157,7 +1157,7 @@ HGDIOBJ WINAPI SelectObject( HDC hdc, HGDIOBJ hObj )
             if (header->funcs && header->funcs->pSelectObject)
             {
                 ret = header->funcs->pSelectObject( hObj, header, hdc );
-                if (ret && ret != hObj && (INT)ret > COMPLEXREGION)
+                if (ret && ret != hObj && HandleToULong(ret) > COMPLEXREGION)
                 {
                     inc_ref_count( hObj );
                     dec_ref_count( ret );

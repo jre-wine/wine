@@ -298,8 +298,8 @@ typedef struct _CABINET_INFO_W {
   USHORT CabinetNumber;
 } CABINET_INFO_W, *PCABINET_INFO_W;
 
-DECL_WINELIB_SETUPAPI_TYPE_AW(CABINET_INFO);
-DECL_WINELIB_SETUPAPI_TYPE_AW(PCABINET_INFO);
+DECL_WINELIB_SETUPAPI_TYPE_AW(CABINET_INFO)
+DECL_WINELIB_SETUPAPI_TYPE_AW(PCABINET_INFO)
 
 typedef struct _SP_INF_INFORMATION {
     DWORD InfStyle;
@@ -342,6 +342,23 @@ typedef struct _FILEPATHS_W
 
 DECL_WINELIB_SETUPAPI_TYPE_AW(FILEPATHS)
 DECL_WINELIB_SETUPAPI_TYPE_AW(PFILEPATHS)
+
+typedef struct _SP_ORIGINAL_FILE_INFO_A
+{
+    DWORD cbSize;
+    CHAR  OriginalInfName[MAX_PATH];
+    CHAR  OriginalCatalogName[MAX_PATH];
+} SP_ORIGINAL_FILE_INFO_A, *PSP_ORIGINAL_FILE_INFO_A;
+
+typedef struct _SP_ORIGINAL_FILE_INFO_W
+{
+    DWORD cbSize;
+    WCHAR  OriginalInfName[MAX_PATH];
+    WCHAR  OriginalCatalogName[MAX_PATH];
+} SP_ORIGINAL_FILE_INFO_W, *PSP_ORIGINAL_FILE_INFO_W;
+
+DECL_WINELIB_SETUPAPI_TYPE_AW(SP_ORIGINAL_FILE_INFO)
+DECL_WINELIB_SETUPAPI_TYPE_AW(PSP_ORIGINAL_FILE_INFO)
 
 #define SPFILENOTIFY_STARTQUEUE           0x0001
 #define SPFILENOTIFY_ENDQUEUE             0x0002
@@ -414,6 +431,18 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PFILEPATHS)
 #define SP_COPY_REPLACE_BOOT_FILE         0x00080000
 #define SP_COPY_NOPRUNE                   0x00100000
 #define SP_COPY_OEM_F6_INF                0x00200000
+
+#define SPOST_NONE  0
+#define SPOST_PATH  1
+#define SPOST_URL   2
+#define SPOST_MAX   3
+
+#define SPQ_SCAN_FILE_PRESENCE            0x00000001
+#define SPQ_SCAN_FILE_VALIDITY            0x00000002
+#define SPQ_SCAN_USE_CALLBACK             0x00000004
+#define SPQ_SCAN_USE_CALLBACKEX           0x00000008
+#define SPQ_SCAN_INFORM_USER              0x00000010
+#define SPQ_SCAN_PRUNE_COPY_QUEUE         0x00000020
 
 #define FLG_ADDREG_DELREG_BIT             0x00008000
 #define FLG_ADDREG_BINVALUETYPE           0x00000001
@@ -696,6 +725,11 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PFILEPATHS)
 #define SRCINFO_TAGFILE        2
 #define SRCINFO_DESCRIPTION    3
 
+#define FILE_COMPRESSION_NONE       0
+#define FILE_COMPRESSION_WINLZA     1
+#define FILE_COMPRESSION_MSZIP      2
+#define FILE_COMPRESSION_NTCAB      3
+
 LONG     WINAPI AddTagToGroupOrderList(PCWSTR lpGroupName, DWORD dwUnknown2, DWORD dwUnknown3);
 DWORD    WINAPI CaptureAndConvertAnsiArg(PCSTR lpSrc, PWSTR *lpDst);
 DWORD    WINAPI CaptureStringArg(PCWSTR lpSrc, PWSTR *lpDst);
@@ -723,6 +757,12 @@ BOOL     WINAPI SetupCommitFileQueueW( HWND, HSPFILEQ, PSP_FILE_CALLBACK_W, PVOI
 UINT     WINAPI SetupCopyErrorA( HWND, PCSTR, PCSTR, PCSTR, PCSTR, PCSTR, UINT, DWORD, PSTR, DWORD, PDWORD );
 UINT     WINAPI SetupCopyErrorW( HWND, PCWSTR, PCWSTR, PCWSTR, PCWSTR, PCWSTR, UINT, DWORD, PWSTR, DWORD, PDWORD );
 #define         SetupCopyError WINELIB_NAME_AW(SetupCopyError)
+BOOL     WINAPI SetupCopyOEMInfA( PCSTR, PCSTR, DWORD, DWORD, PSTR, DWORD, PDWORD, PSTR * );
+BOOL     WINAPI SetupCopyOEMInfW( PCWSTR, PCWSTR, DWORD, DWORD, PWSTR, DWORD, PDWORD, PWSTR * );
+#define         SetupCopyOEMInf WINELIB_NAME_AW(SetupCopyOEMInf)
+DWORD    WINAPI SetupDecompressOrCopyFileA( PCSTR, PCSTR, PUINT );
+DWORD    WINAPI SetupDecompressOrCopyFileW( PCWSTR, PCWSTR, PUINT );
+#define         SetupDecompressOrCopyFile WINELIB_NAME_AW(SetupDecompressOrCopyFile)
 UINT     WINAPI SetupDefaultQueueCallbackA( PVOID, UINT, UINT_PTR, UINT_PTR );
 UINT     WINAPI SetupDefaultQueueCallbackW( PVOID, UINT, UINT_PTR, UINT_PTR );
 #define         SetupDefaultQueueCallback WINELIB_NAME_AW(SetupDefaultQueueCallback)
@@ -777,6 +817,9 @@ BOOL     WINAPI SetupDiGetDeviceInstallParamsA(HDEVINFO, PSP_DEVINFO_DATA, PSP_D
 BOOL     WINAPI SetupDiGetDeviceInstallParamsW(HDEVINFO, PSP_DEVINFO_DATA, PSP_DEVINSTALL_PARAMS_W);
 #define         SetupDiGetDeviceInstallParams WINELIB_NAME_AW(SetupDiGetDeviceInstallParams)
 BOOL     WINAPI SetupDiGetDeviceRegistryPropertyA(HDEVINFO, PSP_DEVINFO_DATA, DWORD, PDWORD, PBYTE, DWORD, PDWORD);
+BOOL     WINAPI SetupDiGetINFClassA(PCSTR, LPGUID, PSTR, DWORD, PDWORD);
+BOOL     WINAPI SetupDiGetINFClassW(PCWSTR, LPGUID, PWSTR, DWORD, PDWORD);
+#define         SetupDiGetINFClass WINELIB_NAME_AW(SetupDiGetINFClass)
 BOOL     WINAPI SetupDiInstallClassA(HWND, PCSTR, DWORD, HSPFILEQ);
 BOOL     WINAPI SetupDiInstallClassW(HWND, PCWSTR, DWORD, HSPFILEQ);
 #define         SetupDiInstallClass WINELIB_NAME_AW(SetupDiInstallClass)
@@ -800,6 +843,12 @@ BOOL     WINAPI SetupFindNextMatchLineW( PINFCONTEXT context_in, PCWSTR key, PIN
 #define         SetupFindNextMatchLine WINELIB_NAME_AW(SetupFindNextMatchLine)
 BOOL     WINAPI SetupGetBinaryField( PINFCONTEXT context, DWORD index, BYTE *buffer, DWORD size, LPDWORD required );
 DWORD    WINAPI SetupGetFieldCount( PINFCONTEXT context );
+DWORD    WINAPI SetupGetFileCompressionInfoA(PCSTR, PSTR *, PDWORD, PDWORD, PUINT);
+DWORD    WINAPI SetupGetFileCompressionInfoW(PCWSTR, PWSTR *, PDWORD, PDWORD, PUINT);
+#define         SetupGetFileCompressionInfo WINELIB_NAME_AW(SetupGetFileCompressionInfo)
+BOOL     WINAPI SetupGetFileCompressionInfoExA(PCSTR, PSTR, DWORD, PDWORD, PDWORD, PDWORD, PUINT);
+BOOL     WINAPI SetupGetFileCompressionInfoExW(PCWSTR, PWSTR, DWORD, PDWORD, PDWORD, PDWORD, PUINT);
+#define         SetupGetFileCompressionInfoEx WINELIB_NAME_AW(SetupGetFileCompressionInfoEx)
 BOOL     WINAPI SetupGetFileQueueCount( HSPFILEQ, UINT, PUINT );
 BOOL     WINAPI SetupGetFileQueueFlags( HSPFILEQ, PDWORD );
 BOOL     WINAPI SetupGetInfInformationA( LPCVOID, DWORD, PSP_INF_INFORMATION, DWORD, PDWORD);
@@ -855,6 +904,9 @@ INT      WINAPI SetupPromptReboot( HSPFILEQ, HWND, BOOL);
 BOOL     WINAPI SetupQueryInfFileInformationA(PSP_INF_INFORMATION, UINT, PSTR, DWORD, PDWORD);
 BOOL     WINAPI SetupQueryInfFileInformationW(PSP_INF_INFORMATION, UINT, PWSTR, DWORD, PDWORD);
 #define         SetupQueryInfFileInformation WINELIB_NAME_AW(SetupQueryInFileInformation)
+BOOL     WINAPI SetupQueryInfOriginalFileInformationA(PSP_INF_INFORMATION, UINT, PSP_ALTPLATFORM_INFO, PSP_ORIGINAL_FILE_INFO_A);
+BOOL     WINAPI SetupQueryInfOriginalFileInformationW(PSP_INF_INFORMATION, UINT, PSP_ALTPLATFORM_INFO, PSP_ORIGINAL_FILE_INFO_W);
+#define         SetupQueryInfOriginalFileInformation WINELIB_NAME_AW(SetupQueryInfOriginalFileInformation)
 BOOL     WINAPI SetupQueueCopyA(HSPFILEQ,PCSTR,PCSTR,PCSTR,PCSTR,PCSTR,PCSTR,PCSTR,DWORD);
 BOOL     WINAPI SetupQueueCopyW(HSPFILEQ,PCWSTR,PCWSTR,PCWSTR,PCWSTR,PCWSTR,PCWSTR,PCWSTR,DWORD);
 #define         SetupQueueCopy WINELIB_NAME_AW(SetupQueueCopy)
@@ -892,6 +944,9 @@ BOOL     WINAPI SetupSetFileQueueAlternatePlatformA( HSPFILEQ, PSP_ALTPLATFORM_I
 BOOL     WINAPI SetupSetFileQueueAlternatePlatformW( HSPFILEQ, PSP_ALTPLATFORM_INFO, PCWSTR );
 #define         SetupSetFileQueueAlternatePlatform WINELIB_NAME_AW(SetupSetFileQueueAlternatePlatform)
 BOOL     WINAPI SetupSetFileQueueFlags( HSPFILEQ, DWORD, DWORD );
+BOOL     WINAPI SetupSetSourceListA(DWORD, PCSTR *, UINT);
+BOOL     WINAPI SetupSetSourceListW(DWORD, PCWSTR *, UINT);
+#define         SetupSetSourceList WINELIB_NAME_AW(SetupSetSourceList)
 void     WINAPI SetupTermDefaultQueueCallback( PVOID );
 DWORD    WINAPI StampFileSecurity(PCWSTR, PSECURITY_DESCRIPTOR);
 DWORD    WINAPI TakeOwnershipOfFile(PCWSTR);

@@ -211,7 +211,7 @@ void NS_SetLocalAddr( LPVOID lpNSInfo, LPCVOID lpHdr, DWORD dwHdrSize )
  */
 HRESULT NS_SendSessionRequestBroadcast( LPCGUID lpcGuid,
                                         DWORD dwFlags,
-                                        LPSPINITDATA lpSpData )
+                                        const SPINITDATA *lpSpData )
 
 {
   DPSP_ENUMSESSIONSDATA data;
@@ -410,7 +410,7 @@ void NS_ReplyToEnumSessionsRequest( LPCVOID lpcMsg,
   rmsg->envelope.wVersion   = DPMSGVER_DP6;
 
   CopyMemory( &rmsg->sd, lpDP->dp2->lpSessionDesc,
-              sizeof( lpDP->dp2->lpSessionDesc->dwSize ) );
+              lpDP->dp2->lpSessionDesc->dwSize );
   rmsg->dwUnknown = 0x0000005c;
   if( bAnsi )
   {
