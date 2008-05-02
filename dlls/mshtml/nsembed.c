@@ -997,7 +997,7 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
         FIXME("aContextFlags=%08x\n", aContextFlags);
     };
 
-    show_context_menu(This->doc, dwID, &pt);
+    show_context_menu(This->doc, dwID, &pt, (IDispatch*)HTMLDOMNODE(get_node(This->doc, aNode)));
 
     return NS_OK;
 }
@@ -1537,7 +1537,7 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
     nsres = nsIWebBrowser_QueryInterface(ret->webbrowser, &IID_nsIWebBrowserSetup,
                                          (void**)&wbsetup);
     if(NS_SUCCEEDED(nsres)) {
-        nsres = nsIWebBrowserSetup_SetProperty(wbsetup, SETUP_IS_CHROME_WRAPPER, TRUE);
+        nsres = nsIWebBrowserSetup_SetProperty(wbsetup, SETUP_IS_CHROME_WRAPPER, FALSE);
         nsIWebBrowserSetup_Release(wbsetup);
         if(NS_FAILED(nsres))
             ERR("SetProperty(SETUP_IS_CHROME_WRAPPER) failed: %08x\n", nsres);

@@ -699,6 +699,7 @@ struct IWineD3DDeviceImpl
     /* palettes texture management */
     PALETTEENTRY            palettes[MAX_PALETTES][256];
     UINT                    currentPalette;
+    UINT                    paletteConversionShader;
 
     /* For rendering to a texture using glCopyTexImage */
     BOOL                    render_offscreen;
@@ -1652,10 +1653,10 @@ typedef struct shader_reg_maps {
      * Use 0 as default (bit 31 is always 1 on a valid token) */
     DWORD samplers[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
     char bumpmat, luminanceparams;
-    char usesnrm;
+    char usesnrm, vpos;
 
-    /* Whether or not a loop is used in this shader */
-    char loop;
+    /* Whether or not loops are used in this shader, and nesting depth */
+    unsigned loop_depth;
 
     /* Whether or not this shader uses fog */
     char fog;
@@ -1788,14 +1789,15 @@ extern void pshader_hw_texdp3(SHADER_OPCODE_ARG* arg);
 extern void pshader_hw_texm3x3(SHADER_OPCODE_ARG* arg);
 extern void pshader_hw_texm3x2depth(SHADER_OPCODE_ARG* arg);
 extern void pshader_hw_dp2add(SHADER_OPCODE_ARG* arg);
+extern void pshader_hw_texreg2rgb(SHADER_OPCODE_ARG* arg);
 
 /* ARB vertex / pixel shader common prototypes */
 extern void shader_hw_nrm(SHADER_OPCODE_ARG* arg);
 extern void shader_hw_sincos(SHADER_OPCODE_ARG* arg);
+extern void shader_hw_mnxn(SHADER_OPCODE_ARG* arg);
 
 /* ARB vertex shader prototypes */
 extern void vshader_hw_map2gl(SHADER_OPCODE_ARG* arg);
-extern void vshader_hw_mnxn(SHADER_OPCODE_ARG* arg);
 extern void vshader_hw_rsq_rcp(SHADER_OPCODE_ARG* arg);
 
 /* GLSL helper functions */
@@ -1838,6 +1840,7 @@ extern void shader_glsl_call(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_callnz(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_label(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_pow(SHADER_OPCODE_ARG* arg);
+extern void shader_glsl_log(SHADER_OPCODE_ARG* arg);
 extern void shader_glsl_texldl(SHADER_OPCODE_ARG* arg);
 
 /** GLSL Pixel Shader Prototypes */
@@ -1883,6 +1886,7 @@ typedef struct IWineD3DBaseShaderClass
     UINT                            functionLength;
     GLuint                          prgId;
     BOOL                            is_compiled;
+    UINT                            cur_loop_depth, cur_loop_regno;
 
     /* Type of shader backend */
     int shader_mode;
@@ -2077,10 +2081,14 @@ typedef struct IWineD3DPixelShaderImpl {
     /* Some information about the shader behavior */
     char                        needsbumpmat;
     UINT                        bumpenvmatconst;
+    UINT                        luminanceconst;
     char                        srgb_enabled;
     char                        srgb_mode_hardcoded;
     UINT                        srgb_low_const;
     UINT                        srgb_cmp_const;
+    char                        vpos_uniform;
+    BOOL                        render_offscreen;
+    UINT                        height;
 
 #if 0 /* needs reworking */
     PSHADERINPUTDATA input;

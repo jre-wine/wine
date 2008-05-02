@@ -719,6 +719,7 @@ static void test_AccessCheck(void)
     if(!res && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
         skip("ACLs not implemented - skipping tests\n");
+        HeapFree(GetProcessHeap(), 0, Acl);
         return;
     }
     ok(res, "InitializeAcl failed with error %d\n", GetLastError());
@@ -1540,6 +1541,7 @@ static void test_process_security(void)
     if (!res && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
         skip("ACLs not implemented - skipping tests\n");
+        HeapFree(GetProcessHeap(), 0, Acl);
         return;
     }
     ok(res, "InitializeAcl failed with error %d\n", GetLastError());
@@ -1547,7 +1549,11 @@ static void test_process_security(void)
     /* get owner from the token we might be running as a user not admin */
     res = OpenProcessToken( GetCurrentProcess(), MAXIMUM_ALLOWED, &token );
     ok(res, "OpenProcessToken failed with error %d\n", GetLastError());
-    if (!res) return;
+    if (!res)
+    {
+        HeapFree(GetProcessHeap(), 0, Acl);
+        return;
+    }
 
     res = GetTokenInformation( token, TokenOwner, owner, sizeof(owner), &tmp );
     ok(res, "GetTokenInformation failed with error %d\n", GetLastError());
@@ -1557,7 +1563,11 @@ static void test_process_security(void)
     UsersSid = ((TOKEN_PRIMARY_GROUP*)group)->PrimaryGroup;
 
     CloseHandle( token );
-    if (!res) return;
+    if (!res)
+    {
+        HeapFree(GetProcessHeap(), 0, Acl);
+        return;
+    }
 
     res = AddAccessDeniedAce(Acl, ACL_REVISION, PROCESS_VM_READ, AdminSid);
     ok(res, "AddAccessDeniedAce failed with error %d\n", GetLastError());
@@ -1971,7 +1981,7 @@ static void test_ConvertSecurityDescriptorToString()
         return;
     }
 
-/* It seems Windows XP add an extra character to the length of the string for each ACE in an ACL. We
+/* It seems Windows XP adds an extra character to the length of the string for each ACE in an ACL. We
  * don't replicate this feature so we only test len >= strlen+1. */
 #define CHECK_RESULT_AND_FREE(exp_str) \
     ok(strcmp(string, (exp_str)) == 0, "String mismatch (expected \"%s\", got \"%s\")\n", (exp_str), string); \
@@ -1979,70 +1989,70 @@ static void test_ConvertSecurityDescriptorToString()
     LocalFree(string);
 
     InitializeSecurityDescriptor(&desc, SECURITY_DESCRIPTOR_REVISION);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("");
 
     size = 4096;
     CreateWellKnownSid(WinLocalSid, NULL, sid_buf, &size);
     SetSecurityDescriptorOwner(&desc, (PSID)sid_buf, FALSE);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:S-1-2-0");
 
     SetSecurityDescriptorOwner(&desc, (PSID)sid_buf, TRUE);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:S-1-2-0");
 
     size = sizeof(sid_buf);
     CreateWellKnownSid(WinLocalSystemSid, NULL, sid_buf, &size);
     SetSecurityDescriptorOwner(&desc, (PSID)sid_buf, TRUE);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SY");
 
     ConvertStringSidToSid("S-1-5-21-93476-23408-4576", &psid);
     SetSecurityDescriptorGroup(&desc, psid, TRUE);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576");
 
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, GROUP_SECURITY_INFORMATION, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, GROUP_SECURITY_INFORMATION, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("G:S-1-5-21-93476-23408-4576");
 
     pacl = (PACL)acl_buf;
     InitializeAcl(pacl, sizeof(acl_buf), ACL_REVISION);
     SetSecurityDescriptorDacl(&desc, TRUE, pacl, TRUE);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576D:");
 
     SetSecurityDescriptorDacl(&desc, TRUE, pacl, FALSE);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576D:");
 
     ConvertStringSidToSid("S-1-5-6", &psid2);
     AddAccessAllowedAceEx(pacl, ACL_REVISION, NO_PROPAGATE_INHERIT_ACE, 0xf0000000, psid2);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576D:(A;NP;GAGXGWGR;;;SU)");
 
     AddAccessAllowedAceEx(pacl, ACL_REVISION, INHERIT_ONLY_ACE|INHERITED_ACE, 0x00000003, psid2);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576D:(A;NP;GAGXGWGR;;;SU)(A;IOID;CCDC;;;SU)");
 
     AddAccessDeniedAceEx(pacl, ACL_REVISION, OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE, 0xffffffff, psid);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576D:(A;NP;GAGXGWGR;;;SU)(A;IOID;CCDC;;;SU)(D;OICI;0xffffffff;;;S-1-5-21-93476-23408-4576)");
 
 
     pacl = (PACL)acl_buf;
     InitializeAcl(pacl, sizeof(acl_buf), ACL_REVISION);
     SetSecurityDescriptorSacl(&desc, TRUE, pacl, FALSE);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576D:S:");
 
     SetSecurityDescriptorDacl(&desc, TRUE, NULL, FALSE);
     AddAuditAccessAceEx(pacl, ACL_REVISION, VALID_INHERIT_FLAGS, KEY_READ|KEY_WRITE, psid2, TRUE, TRUE);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576D:S:(AU;OICINPIOIDSAFA;CCDCLCSWRPRC;;;SU)");
 
     AddAuditAccessAceEx(pacl, ACL_REVISION, NO_PROPAGATE_INHERIT_ACE, FILE_GENERIC_READ|FILE_GENERIC_WRITE, psid2, TRUE, FALSE);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(&desc, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576D:S:(AU;OICINPIOIDSAFA;CCDCLCSWRPRC;;;SU)(AU;NPSA;0x12019f;;;SU)");
 }
 
@@ -2071,7 +2081,7 @@ static void test_PrivateObjectSecurity(void)
     ok(GetPrivateObjectSecurity(sec, GROUP_SECURITY_INFORMATION, buf, dwDescSize, &retSize),
         "GetPrivateObjectSecurity failed (err=%u)\n", GetLastError());
     ok(retSize <= dwDescSize, "Buffer too small (%d vs %d)\n", retSize, dwDescSize);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(buf, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(buf, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("G:S-1-5-21-93476-23408-4576");
     GetSecurityDescriptorControl(buf, &ctrl, &dwRevision);
     expect_eq(ctrl, 0x8000, int, "%x");
@@ -2079,7 +2089,7 @@ static void test_PrivateObjectSecurity(void)
     ok(GetPrivateObjectSecurity(sec, GROUP_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION, buf, dwDescSize, &retSize),
         "GetPrivateObjectSecurity failed (err=%u)\n", GetLastError());
     ok(retSize <= dwDescSize, "Buffer too small (%d vs %d)\n", retSize, dwDescSize);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(buf, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed err=%u\n", GetLastError());
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(buf, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed err=%u\n", GetLastError());
     CHECK_RESULT_AND_FREE("G:S-1-5-21-93476-23408-4576D:(A;NP;GAGXGWGR;;;SU)(A;IOID;CCDC;;;SU)(D;OICI;0xffffffff;;;S-1-5-21-93476-23408-4576)");
     GetSecurityDescriptorControl(buf, &ctrl, &dwRevision);
     expect_eq(ctrl, 0x8004, int, "%x");
@@ -2087,7 +2097,7 @@ static void test_PrivateObjectSecurity(void)
     ok(GetPrivateObjectSecurity(sec, sec_info, buf, dwDescSize, &retSize),
         "GetPrivateObjectSecurity failed (err=%u)\n", GetLastError());
     ok(retSize == dwDescSize, "Buffer too small (%d vs %d)\n", retSize, dwDescSize);
-    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(buf, SDDL_REVISION_1, sec_info, &string, &len), "Convertion failed\n");
+    ok(pConvertSecurityDescriptorToStringSecurityDescriptorA(buf, SDDL_REVISION_1, sec_info, &string, &len), "Conversion failed\n");
     CHECK_RESULT_AND_FREE("O:SY"
         "G:S-1-5-21-93476-23408-4576"
         "D:(A;NP;GAGXGWGR;;;SU)(A;IOID;CCDC;;;SU)(D;OICI;0xffffffff;;;S-1-5-21-93476-23408-4576)"
@@ -2100,6 +2110,7 @@ static void test_PrivateObjectSecurity(void)
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Expected error ERROR_INSUFFICIENT_BUFFER, got %u\n", GetLastError());
 
     LocalFree(sec);
+    HeapFree(GetProcessHeap(), 0, buf);
 }
 #undef CHECK_RESULT_AND_FREE
 

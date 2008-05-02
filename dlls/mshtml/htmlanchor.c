@@ -49,31 +49,8 @@ static HRESULT WINAPI HTMLAnchorElement_QueryInterface(IHTMLAnchorElement *iface
         REFIID riid, void **ppv)
 {
     HTMLAnchorElement *This = HTMLANCHOR_THIS(iface);
-    HRESULT hres;
 
-    *ppv = NULL;
-
-    if(IsEqualGUID(&IID_IUnknown, riid)) {
-        TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
-        *ppv = HTMLANCHOR(This);
-    }else if(IsEqualGUID(&IID_IDispatch, riid)) {
-        TRACE("(%p)->(IID_IDispatch %p)\n", This, ppv);
-        *ppv = HTMLANCHOR(This);
-    }else if(IsEqualGUID(&IID_IHTMLAnchorElement, riid)) {
-        TRACE("(%p)->(IID_IHTMLAnchorElement %p)\n", This, ppv);
-        *ppv = HTMLANCHOR(This);
-    }
-
-    if(*ppv) {
-        IUnknown_AddRef((IUnknown*)*ppv);
-        return S_OK;
-    }
-
-    hres = HTMLElement_QI(&This->element, riid, ppv);
-    if(FAILED(hres))
-        WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
-
-    return hres;
+    return IHTMLDOMNode_QueryInterface(HTMLDOMNODE(&This->element.node), riid, ppv);
 }
 
 static ULONG WINAPI HTMLAnchorElement_AddRef(IHTMLAnchorElement *iface)
@@ -412,11 +389,7 @@ static HRESULT WINAPI HTMLAnchorElement_blur(IHTMLAnchorElement *iface)
     return E_NOTIMPL;
 }
 
-static void HTMLAnchorElement_destructor(IUnknown *iface)
-{
-    HTMLAnchorElement *This = HTMLANCHOR_THIS(iface);
-    mshtml_free(This);
-}
+#undef HTMLANCHOR_THIS
 
 static const IHTMLAnchorElementVtbl HTMLAnchorElementVtbl = {
     HTMLAnchorElement_QueryInterface,
@@ -469,14 +442,52 @@ static const IHTMLAnchorElementVtbl HTMLAnchorElementVtbl = {
     HTMLAnchorElement_blur
 };
 
+#define HTMLANCHOR_NODE_THIS(iface) DEFINE_THIS2(HTMLAnchorElement, element.node, iface)
+
+static HRESULT HTMLAnchorElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
+{
+    HTMLAnchorElement *This = HTMLANCHOR_NODE_THIS(iface);
+
+    *ppv = NULL;
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
+        *ppv = HTMLANCHOR(This);
+    }else if(IsEqualGUID(&IID_IDispatch, riid)) {
+        TRACE("(%p)->(IID_IDispatch %p)\n", This, ppv);
+        *ppv = HTMLANCHOR(This);
+    }else if(IsEqualGUID(&IID_IHTMLAnchorElement, riid)) {
+        TRACE("(%p)->(IID_IHTMLAnchorElement %p)\n", This, ppv);
+        *ppv = HTMLANCHOR(This);
+    }
+
+    if(*ppv) {
+        IUnknown_AddRef((IUnknown*)*ppv);
+        return S_OK;
+    }
+
+    return HTMLElement_QI(&This->element.node, riid, ppv);
+}
+
+static void HTMLAnchorElement_destructor(HTMLDOMNode *iface)
+{
+    HTMLAnchorElement *This = HTMLANCHOR_NODE_THIS(iface);
+    HTMLElement_destructor(&This->element.node);
+}
+
+#undef HTMLANCHOR_NODE_THIS
+
+static const NodeImplVtbl HTMLAnchorElementImplVtbl = {
+    HTMLAnchorElement_QI,
+    HTMLAnchorElement_destructor
+};
+
 HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement *nselem)
 {
     HTMLAnchorElement *ret = mshtml_alloc(sizeof(HTMLAnchorElement));
 
     ret->lpHTMLAnchorElementVtbl = &HTMLAnchorElementVtbl;
-
-    ret->element.impl = (IUnknown*)HTMLANCHOR(ret);
-    ret->element.destructor = HTMLAnchorElement_destructor;
+    ret->element.node.vtbl = &HTMLAnchorElementImplVtbl;
 
     return &ret->element;
 }

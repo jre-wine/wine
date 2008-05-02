@@ -29,7 +29,9 @@ typedef struct tag_vector
 
 [
   uuid(00000000-4114-0704-2301-000000000000),
+#ifndef __midl
   implicit_handle(handle_t IServer_IfHandle)
+#endif
 ]
 interface IServer
 {
@@ -247,6 +249,21 @@ cpp_quote("#endif")
 
   int str_struct_len(str_struct_t *s);
   int wstr_struct_len(wstr_struct_t *s);
+
+  typedef struct
+  {
+    unsigned int n;
+    [size_is(n)] byte a[];
+  } doub_carr_1_t;
+
+  typedef struct
+  {
+    int n;
+    [size_is(n)] doub_carr_1_t *a[];
+  } doub_carr_t;
+
+  int sum_doub_carr(doub_carr_t *dc);
+  void make_pyramid_doub_carr(unsigned char n, [out] doub_carr_t **dc);
 
   void stop(void);
 }

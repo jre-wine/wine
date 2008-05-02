@@ -32,6 +32,8 @@ static HMODULE pdh;
 static PDH_STATUS   (WINAPI *pPdhAddEnglishCounterA)(PDH_HQUERY, LPCSTR, DWORD_PTR, PDH_HCOUNTER *);
 static PDH_STATUS   (WINAPI *pPdhAddEnglishCounterW)(PDH_HQUERY, LPCWSTR, DWORD_PTR, PDH_HCOUNTER *);
 static PDH_STATUS   (WINAPI *pPdhCollectQueryDataWithTime)(PDH_HQUERY, LONGLONG *);
+static PDH_STATUS   (WINAPI *pPdhValidatePathExA)(PDH_HLOG, LPCSTR);
+static PDH_STATUS   (WINAPI *pPdhValidatePathExW)(PDH_HLOG, LPCWSTR);
 
 #define GETFUNCPTR(func) p##func = (void *)GetProcAddress( pdh, #func );
 
@@ -41,6 +43,8 @@ static void init_function_ptrs( void )
     GETFUNCPTR( PdhAddEnglishCounterA )
     GETFUNCPTR( PdhAddEnglishCounterW )
     GETFUNCPTR( PdhCollectQueryDataWithTime )
+    GETFUNCPTR( PdhValidatePathExA )
+    GETFUNCPTR( PdhValidatePathExW )
 }
 
 static const WCHAR processor_time[] =
@@ -207,11 +211,14 @@ static void test_PdhAddEnglishCounterA( void )
     ret = PdhOpenQueryA( NULL, 0, &query );
     ok(ret == ERROR_SUCCESS, "PdhOpenQueryA failed 0x%08x\n", ret);
 
+    ret = PdhCollectQueryData( query );
+    ok(ret == PDH_NO_DATA, "PdhCollectQueryData failed 0x%08x\n", ret);
+
     ret = pPdhAddEnglishCounterA( NULL, "\\System\\System Up Time", 0, NULL );
     ok(ret == PDH_INVALID_ARGUMENT, "PdhAddEnglishCounterA failed 0x%08x\n", ret);
 
     ret = pPdhAddEnglishCounterA( NULL, "\\System\\System Up Time", 0, &counter );
-    ok(ret == PDH_INVALID_HANDLE, "PdhAddEnglishCounterA failed 0x%08x\n", ret);
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhAddEnglishCounterA failed 0x%08x\n", ret);
 
     ret = pPdhAddEnglishCounterA( query, NULL, 0, &counter );
     ok(ret == PDH_INVALID_ARGUMENT, "PdhAddEnglishCounterA failed 0x%08x\n", ret);
@@ -245,11 +252,14 @@ static void test_PdhAddEnglishCounterW( void )
     ret = PdhOpenQueryW( NULL, 0, &query );
     ok(ret == ERROR_SUCCESS, "PdhOpenQueryW failed 0x%08x\n", ret);
 
+    ret = PdhCollectQueryData( query );
+    ok(ret == PDH_NO_DATA, "PdhCollectQueryData failed 0x%08x\n", ret);
+
     ret = pPdhAddEnglishCounterW( NULL, system_uptime, 0, NULL );
     ok(ret == PDH_INVALID_ARGUMENT, "PdhAddEnglishCounterW failed 0x%08x\n", ret);
 
     ret = pPdhAddEnglishCounterW( NULL, system_uptime, 0, &counter );
-    ok(ret == PDH_INVALID_HANDLE, "PdhAddEnglishCounterW failed 0x%08x\n", ret);
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhAddEnglishCounterW failed 0x%08x\n", ret);
 
     ret = pPdhAddEnglishCounterW( query, NULL, 0, &counter );
     ok(ret == PDH_INVALID_ARGUMENT, "PdhAddEnglishCounterW failed 0x%08x\n", ret);
@@ -284,14 +294,17 @@ static void test_PdhCollectQueryDataWithTime( void )
     ret = PdhOpenQueryA( NULL, 0, &query );
     ok(ret == ERROR_SUCCESS, "PdhOpenQueryA failed 0x%08x\n", ret);
 
+    ret = PdhCollectQueryData( query );
+    ok(ret == PDH_NO_DATA, "PdhCollectQueryData failed 0x%08x\n", ret);
+
     ret = PdhAddCounterA( query, "\\System\\System Up Time", 0, &counter );
     ok(ret == ERROR_SUCCESS, "PdhAddCounterA failed 0x%08x\n", ret);
 
     ret = pPdhCollectQueryDataWithTime( NULL, NULL );
-    ok(ret == PDH_INVALID_HANDLE, "PdhCollectQueryDataWithTime failed 0x%08x\n", ret);
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhCollectQueryDataWithTime failed 0x%08x\n", ret);
 
     ret = pPdhCollectQueryDataWithTime( query, NULL );
-    ok(ret == ERROR_SUCCESS, "PdhCollectQueryDataWithTime failed 0x%08x\n", ret);
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhCollectQueryDataWithTime failed 0x%08x\n", ret);
 
     ret = pPdhCollectQueryDataWithTime( NULL, &time );
     ok(ret == PDH_INVALID_HANDLE, "PdhCollectQueryDataWithTime failed 0x%08x\n", ret);
@@ -695,8 +708,161 @@ static void test_PdhLookupPerfNameByIndexW( void )
     ok(size == sizeof(uptime) / sizeof(WCHAR), "PdhLookupPerfNameByIndexW failed %d\n", size);
 }
 
+static void test_PdhValidatePathA( void )
+{
+    PDH_STATUS ret;
+
+    ret = PdhValidatePathA( NULL );
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhValidatePathA failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathA( "" );
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhValidatePathA failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathA( "\\System" );
+    ok(ret == PDH_CSTATUS_BAD_COUNTERNAME, "PdhValidatePathA failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathA( "System Up Time" );
+    ok(ret == PDH_CSTATUS_BAD_COUNTERNAME, "PdhValidatePathA failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathA( "\\System\\System Down Time" );
+    ok(ret == PDH_CSTATUS_NO_COUNTER, "PdhValidatePathA failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathA( "\\System\\System Up Time" );
+    ok(ret == ERROR_SUCCESS, "PdhValidatePathA failed 0x%08x\n", ret);
+}
+
+static void test_PdhValidatePathW( void )
+{
+    PDH_STATUS ret;
+
+    static const WCHAR empty[] = {0};
+    static const WCHAR system[] = {'\\','S','y','s','t','e','m',0};
+
+    ret = PdhValidatePathW( NULL );
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhValidatePathW failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathW( empty );
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhValidatePathW failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathW( system );
+    ok(ret == PDH_CSTATUS_BAD_COUNTERNAME, "PdhValidatePathW failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathW( uptime );
+    ok(ret == PDH_CSTATUS_BAD_COUNTERNAME, "PdhValidatePathW failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathW( system_downtime );
+    ok(ret == PDH_CSTATUS_NO_COUNTER, "PdhValidatePathW failed 0x%08x\n", ret);
+
+    ret = PdhValidatePathW( system_uptime );
+    ok(ret == ERROR_SUCCESS, "PdhValidatePathW failed 0x%08x\n", ret);
+}
+
+static void test_PdhValidatePathExA( void )
+{
+    PDH_STATUS ret;
+
+    ret = pPdhValidatePathExA( NULL, NULL );
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhValidatePathExA failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExA( NULL, "" );
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhValidatePathExA failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExA( NULL, "\\System" );
+    ok(ret == PDH_CSTATUS_BAD_COUNTERNAME, "PdhValidatePathExA failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExA( NULL, "System Up Time" );
+    ok(ret == PDH_CSTATUS_BAD_COUNTERNAME, "PdhValidatePathExA failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExA( NULL, "\\System\\System Down Time" );
+    ok(ret == PDH_CSTATUS_NO_COUNTER, "PdhValidatePathExA failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExA( NULL, "\\System\\System Up Time" );
+    ok(ret == ERROR_SUCCESS, "PdhValidatePathExA failed 0x%08x\n", ret);
+}
+
+static void test_PdhValidatePathExW( void )
+{
+    PDH_STATUS ret;
+
+    static const WCHAR empty[] = {0};
+    static const WCHAR system[] = {'\\','S','y','s','t','e','m',0};
+
+    ret = pPdhValidatePathExW( NULL, NULL );
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhValidatePathExW failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExW( NULL, empty );
+    ok(ret == PDH_INVALID_ARGUMENT, "PdhValidatePathExW failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExW( NULL, system );
+    ok(ret == PDH_CSTATUS_BAD_COUNTERNAME, "PdhValidatePathExW failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExW( NULL, uptime );
+    ok(ret == PDH_CSTATUS_BAD_COUNTERNAME, "PdhValidatePathExW failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExW( NULL, system_downtime );
+    ok(ret == PDH_CSTATUS_NO_COUNTER, "PdhValidatePathExW failed 0x%08x\n", ret);
+
+    ret = pPdhValidatePathExW( NULL, system_uptime );
+    ok(ret == ERROR_SUCCESS, "PdhValidatePathExW failed 0x%08x\n", ret);
+}
+
+static void test_PdhCollectQueryDataEx(void)
+{
+    PDH_STATUS status;
+    PDH_HQUERY query;
+    PDH_HCOUNTER counter;
+    HANDLE event;
+    BOOL ret;
+    UINT i;
+
+    status = PdhOpenQueryA( NULL, 0, &query );
+    ok(status == ERROR_SUCCESS, "PdhOpenQuery failed 0x%08x\n", status);
+
+    event = CreateEventA( NULL, FALSE, FALSE, "winetest" );
+    ok(event != NULL, "CreateEvent failed\n");
+
+    status = PdhAddCounterA( query, "\\System\\System Up Time", 0, &counter );
+    ok(status == ERROR_SUCCESS, "PdhAddCounterA failed 0x%08x\n", status);
+
+    status = PdhCollectQueryDataEx( NULL, 1, event );
+    ok(status == PDH_INVALID_HANDLE, "PdhCollectQueryDataEx failed 0x%08x\n", status);
+
+    status = PdhCollectQueryDataEx( query, 1, NULL );
+    ok(status == ERROR_SUCCESS, "PdhCollectQueryDataEx failed 0x%08x\n", status);
+
+    status = PdhCollectQueryDataEx( query, 1, event );
+    ok(status == ERROR_SUCCESS, "PdhCollectQueryDataEx failed 0x%08x\n", status);
+
+    status = PdhCollectQueryData( query );
+    ok(status == ERROR_SUCCESS, "PdhCollectQueryData failed 0x%08x\n", status);
+
+    for (i = 0; i < 3; i++)
+    {
+        if (WaitForSingleObject( event, INFINITE ) == WAIT_OBJECT_0)
+        {
+            PDH_FMT_COUNTERVALUE value;
+
+            status = PdhGetFormattedCounterValue( counter, PDH_FMT_LARGE, NULL, &value );
+            ok(status == ERROR_SUCCESS, "PdhGetFormattedCounterValue failed 0x%08x\n", status);
+
+            trace( "uptime %x%08x\n", (DWORD)(U(value).largeValue >> 32), (DWORD)U(value).largeValue );
+        }
+    }
+
+    ret = CloseHandle( event );
+    ok(ret, "CloseHandle failed\n");
+
+    status = PdhCloseQuery( query );
+    ok(status == ERROR_SUCCESS, "PdhCloseQuery failed 0x%08x\n", status);
+}
+
 START_TEST(pdh)
 {
+    if (PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale())) != LANG_ENGLISH)
+    {
+        skip("non-english locale\n");
+        return;
+    }
     init_function_ptrs();
 
     test_PdhOpenQueryA();
@@ -722,4 +888,12 @@ START_TEST(pdh)
 
     test_PdhLookupPerfNameByIndexA();
     test_PdhLookupPerfNameByIndexW();
+
+    test_PdhValidatePathA();
+    test_PdhValidatePathW();
+
+    if (pPdhValidatePathExA) test_PdhValidatePathExA();
+    if (pPdhValidatePathExW) test_PdhValidatePathExW();
+
+    test_PdhCollectQueryDataEx();
 }

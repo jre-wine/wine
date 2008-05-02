@@ -70,6 +70,11 @@ static void dump_timeout( const timeout_t *time )
     fprintf( stderr, get_timeout_str(*time) );
 }
 
+static void dump_file_pos( const file_pos_t *pos )
+{
+    fprintf( stderr, "%x%08x", (unsigned int)(*pos >> 32), (unsigned int)*pos );
+}
+
 static void dump_rectangle( const rectangle_t *rect )
 {
     fprintf( stderr, "{%d,%d;%d,%d}",
@@ -153,8 +158,8 @@ static void dump_apc_call( const apc_call_t *call )
     case APC_MAP_VIEW:
         fprintf( stderr, "APC_MAP_VIEW,handle=%p,addr=%p,size=%lu,offset=%x%08x,zero_bits=%u,alloc_type=%x,prot=%x",
                  call->map_view.handle, call->map_view.addr, call->map_view.size,
-                 call->map_view.offset_high, call->map_view.offset_low, call->map_view.zero_bits,
-                 call->map_view.alloc_type, call->map_view.prot );
+                 (unsigned int)(call->map_view.offset >> 32), (unsigned int)call->map_view.offset,
+                 call->map_view.zero_bits, call->map_view.alloc_type, call->map_view.prot );
         break;
     case APC_UNMAP_VIEW:
         fprintf( stderr, "APC_UNMAP_VIEW,addr=%p", call->unmap_view.addr );
@@ -1308,10 +1313,12 @@ static void dump_flush_file_reply( const struct flush_file_reply *req )
 static void dump_lock_file_request( const struct lock_file_request *req )
 {
     fprintf( stderr, " handle=%p,", req->handle );
-    fprintf( stderr, " offset_low=%08x,", req->offset_low );
-    fprintf( stderr, " offset_high=%08x,", req->offset_high );
-    fprintf( stderr, " count_low=%08x,", req->count_low );
-    fprintf( stderr, " count_high=%08x,", req->count_high );
+    fprintf( stderr, " offset=" );
+    dump_file_pos( &req->offset );
+    fprintf( stderr, "," );
+    fprintf( stderr, " count=" );
+    dump_file_pos( &req->count );
+    fprintf( stderr, "," );
     fprintf( stderr, " shared=%d,", req->shared );
     fprintf( stderr, " wait=%d", req->wait );
 }
@@ -1325,10 +1332,11 @@ static void dump_lock_file_reply( const struct lock_file_reply *req )
 static void dump_unlock_file_request( const struct unlock_file_request *req )
 {
     fprintf( stderr, " handle=%p,", req->handle );
-    fprintf( stderr, " offset_low=%08x,", req->offset_low );
-    fprintf( stderr, " offset_high=%08x,", req->offset_high );
-    fprintf( stderr, " count_low=%08x,", req->count_low );
-    fprintf( stderr, " count_high=%08x", req->count_high );
+    fprintf( stderr, " offset=" );
+    dump_file_pos( &req->offset );
+    fprintf( stderr, "," );
+    fprintf( stderr, " count=" );
+    dump_file_pos( &req->count );
 }
 
 static void dump_create_socket_request( const struct create_socket_request *req )
@@ -1691,8 +1699,9 @@ static void dump_create_mapping_request( const struct create_mapping_request *re
     fprintf( stderr, " access=%08x,", req->access );
     fprintf( stderr, " attributes=%08x,", req->attributes );
     fprintf( stderr, " rootdir=%p,", req->rootdir );
-    fprintf( stderr, " size_high=%d,", req->size_high );
-    fprintf( stderr, " size_low=%d,", req->size_low );
+    fprintf( stderr, " size=" );
+    dump_file_pos( &req->size );
+    fprintf( stderr, "," );
     fprintf( stderr, " protect=%d,", req->protect );
     fprintf( stderr, " file_handle=%p,", req->file_handle );
     fprintf( stderr, " name=" );
@@ -1725,14 +1734,14 @@ static void dump_get_mapping_info_request( const struct get_mapping_info_request
 
 static void dump_get_mapping_info_reply( const struct get_mapping_info_reply *req )
 {
-    fprintf( stderr, " size_high=%d,", req->size_high );
-    fprintf( stderr, " size_low=%d,", req->size_low );
+    fprintf( stderr, " size=" );
+    dump_file_pos( &req->size );
+    fprintf( stderr, "," );
     fprintf( stderr, " protect=%d,", req->protect );
     fprintf( stderr, " header_size=%d,", req->header_size );
     fprintf( stderr, " base=%p,", req->base );
     fprintf( stderr, " mapping=%p,", req->mapping );
-    fprintf( stderr, " shared_file=%p,", req->shared_file );
-    fprintf( stderr, " shared_size=%d", req->shared_size );
+    fprintf( stderr, " shared_file=%p", req->shared_file );
 }
 
 static void dump_create_snapshot_request( const struct create_snapshot_request *req )
@@ -3350,6 +3359,19 @@ static void dump_set_security_object_request( const struct set_security_object_r
     dump_varargs_security_descriptor( cur_size );
 }
 
+static void dump_get_security_object_request( const struct get_security_object_request *req )
+{
+    fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " security_info=%08x", req->security_info );
+}
+
+static void dump_get_security_object_reply( const struct get_security_object_reply *req )
+{
+    fprintf( stderr, " sd_len=%08x,", req->sd_len );
+    fprintf( stderr, " sd=" );
+    dump_varargs_security_descriptor( cur_size );
+}
+
 static void dump_create_mailslot_request( const struct create_mailslot_request *req )
 {
     fprintf( stderr, " access=%08x,", req->access );
@@ -3840,6 +3862,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_token_user_request,
     (dump_func)dump_get_token_groups_request,
     (dump_func)dump_set_security_object_request,
+    (dump_func)dump_get_security_object_request,
     (dump_func)dump_create_mailslot_request,
     (dump_func)dump_set_mailslot_info_request,
     (dump_func)dump_create_directory_request,
@@ -4069,6 +4092,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_token_user_reply,
     (dump_func)dump_get_token_groups_reply,
     (dump_func)0,
+    (dump_func)dump_get_security_object_reply,
     (dump_func)dump_create_mailslot_reply,
     (dump_func)dump_set_mailslot_info_reply,
     (dump_func)dump_create_directory_reply,
@@ -4298,6 +4322,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_token_user",
     "get_token_groups",
     "set_security_object",
+    "get_security_object",
     "create_mailslot",
     "set_mailslot_info",
     "create_directory",

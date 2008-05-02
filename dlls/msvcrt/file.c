@@ -59,6 +59,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 /* values for wxflag in file descriptor */
 #define WX_OPEN           0x01
 #define WX_ATEOF          0x02
+#define WX_READEOF        0x04  /* like ATEOF, but for underlying file rather than buffer */
 #define WX_DONTINHERIT    0x10
 #define WX_APPEND         0x20
 #define WX_TEXT           0x80
@@ -827,7 +828,7 @@ __int64 CDECL _lseeki64(int fd, __int64 offset, int whence)
   ofs.QuadPart = offset;
   if (SetFilePointerEx(hand, ofs, &ret, whence))
   {
-    MSVCRT_fdesc[fd].wxflag &= ~WX_ATEOF;
+    MSVCRT_fdesc[fd].wxflag &= ~(WX_ATEOF|WX_READEOF);
     /* FIXME: What if we seek _to_ EOF - is EOF set? */
 
     return ret.QuadPart;
@@ -1639,15 +1640,21 @@ int CDECL _rmtmp(void)
 /*********************************************************************
  * (internal) remove_cr
  *
- *    Remove all \r inplace.
+ * Translate all \r\n to \n inplace.
  * return the number of \r removed
+ * Corner cases required by some apps:
+ *   \r\r\n -> \r\n
+ * BUG: should save state across calls somehow, so CR LF that
+ * straddles buffer boundary gets recognized properly?
  */
 static unsigned int remove_cr(char *buf, unsigned int count)
 {
     unsigned int i, j;
 
-    for (i = 0; i < count; i++) if (buf[i] == '\r') break;
-    for (j = i + 1; j < count; j++) if (buf[j] != '\r') buf[i++] = buf[j];
+    for (i=0, j=0; j < count; j++)
+        if ((buf[j] != '\r') || ((j+1) < count && buf[j+1] != '\n'))
+	    buf[i++] = buf[j];
+
     return count - i;
 }
 
@@ -1660,6 +1667,11 @@ static int read_i(int fd, void *buf, unsigned int count)
   char *bufstart = buf;
   HANDLE hand = msvcrt_fdtoh(fd);
 
+  if (MSVCRT_fdesc[fd].wxflag & WX_READEOF) {
+     MSVCRT_fdesc[fd].wxflag |= WX_ATEOF;
+     TRACE("already at EOF, returning 0\n");
+     return 0;
+  }
   /* Don't trace small reads, it gets *very* annoying */
   if (count > 4)
     TRACE(":fd (%d) handle (%p) buf (%p) len (%d)\n",fd,hand,buf,count);
@@ -1686,7 +1698,7 @@ static int read_i(int fd, void *buf, unsigned int count)
         }
         if (num_read != count)
         {
-            MSVCRT_fdesc[fd].wxflag |= WX_ATEOF;
+            MSVCRT_fdesc[fd].wxflag |= (WX_ATEOF|WX_READEOF);
             TRACE(":EOF %s\n",debugstr_an(buf,num_read));
         }
     }
@@ -2210,8 +2222,9 @@ int CDECL MSVCRT_fgetc(MSVCRT_FILE* file)
       j = *i;
     } else
       j = MSVCRT__filbuf(file);
-    if (!(MSVCRT_fdesc[file->_file].wxflag & WX_TEXT) || (j != '\r'))
-      return j;
+    if (!(MSVCRT_fdesc[file->_file].wxflag & WX_TEXT)
+    || ((j != '\r') || (file->_cnt && ((char *)file->_ptr)[0] != '\n')))
+        return j;
   } while(1);
 }
 

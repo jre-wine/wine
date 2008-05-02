@@ -251,8 +251,10 @@ static HRESULT WINAPI SecManagerImpl_MapUrlToZone(IInternetSecurityManager *ifac
             return hres;
     }
 
-    if(!pwszUrl)
+    if(!pwszUrl) {
+        *pdwZone = -1;
         return E_INVALIDARG;
+    }
 
     if(dwFlags)
         FIXME("not supported flags: %08x\n", dwFlags);
@@ -316,6 +318,8 @@ static HRESULT WINAPI SecManagerImpl_GetSecurityId(IInternetSecurityManager *ifa
 
         static const BYTE secidFile[] = {'f','i','l','e',':'};
 
+        HeapFree(GetProcessHeap(), 0, buf);
+
         if(*pcbSecurityId < sizeof(secidFile)+sizeof(zone))
             return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
 
@@ -339,8 +343,10 @@ static HRESULT WINAPI SecManagerImpl_GetSecurityId(IInternetSecurityManager *ifa
 
     len = WideCharToMultiByte(CP_ACP, 0, buf, -1, NULL, 0, NULL, NULL)-1;
 
-    if(len+sizeof(DWORD) > *pcbSecurityId)
+    if(len+sizeof(DWORD) > *pcbSecurityId) {
+        HeapFree(GetProcessHeap(), 0, buf);
         return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+    }
 
     WideCharToMultiByte(CP_ACP, 0, buf, -1, (LPSTR)pbSecurityId, -1, NULL, NULL);
     HeapFree(GetProcessHeap(), 0, buf);

@@ -109,11 +109,9 @@ typedef struct wine_glcontext {
     WineGLPixelFormat *fmt;
     GLXContext ctx;
     BOOL do_escape;
-    X11DRV_PDEVICE *physDev;
-    X11DRV_PDEVICE *pReadDev;
-    RECT viewport;
-    RECT scissor;
-    BOOL scissor_enabled;
+    HDC read_hdc;
+    Drawable drawables[2];
+    BOOL refresh_drawables;
     struct wine_glcontext *next;
     struct wine_glcontext *prev;
 } Wine_GLContext;
@@ -257,26 +255,24 @@ static BOOL  (*pglXDrawableAttribATI)(Display *dpy, GLXDrawable draw, const int 
 static void* (*pglXAllocateMemoryNV)(GLsizei size, GLfloat readfreq, GLfloat writefreq, GLfloat priority);
 static void  (*pglXFreeMemoryNV)(GLvoid *pointer);
 
+/* MESA GLX Extensions */
+static void (*pglXCopySubBufferMESA)(Display *dpy, GLXDrawable drawable, int x, int y, int width, int height);
+
 /* Standard OpenGL */
 MAKE_FUNCPTR(glBindTexture)
 MAKE_FUNCPTR(glBitmap)
 MAKE_FUNCPTR(glCopyTexSubImage1D)
 MAKE_FUNCPTR(glCopyTexImage2D)
 MAKE_FUNCPTR(glCopyTexSubImage2D)
-MAKE_FUNCPTR(glDisable)
 MAKE_FUNCPTR(glDrawBuffer)
-MAKE_FUNCPTR(glEnable)
 MAKE_FUNCPTR(glEndList)
 MAKE_FUNCPTR(glGetError)
 MAKE_FUNCPTR(glGetIntegerv)
 MAKE_FUNCPTR(glGetString)
-MAKE_FUNCPTR(glIsEnabled)
 MAKE_FUNCPTR(glNewList)
 MAKE_FUNCPTR(glPixelStorei)
 MAKE_FUNCPTR(glReadPixels)
-MAKE_FUNCPTR(glScissor)
 MAKE_FUNCPTR(glTexImage2D)
-MAKE_FUNCPTR(glViewport)
 MAKE_FUNCPTR(glFinish)
 MAKE_FUNCPTR(glFlush)
 #undef MAKE_FUNCPTR
@@ -416,20 +412,15 @@ LOAD_FUNCPTR(glBitmap)
 LOAD_FUNCPTR(glCopyTexSubImage1D)
 LOAD_FUNCPTR(glCopyTexImage2D)
 LOAD_FUNCPTR(glCopyTexSubImage2D)
-LOAD_FUNCPTR(glDisable)
 LOAD_FUNCPTR(glDrawBuffer)
-LOAD_FUNCPTR(glEnable)
 LOAD_FUNCPTR(glEndList)
 LOAD_FUNCPTR(glGetError)
 LOAD_FUNCPTR(glGetIntegerv)
 LOAD_FUNCPTR(glGetString)
-LOAD_FUNCPTR(glIsEnabled)
 LOAD_FUNCPTR(glNewList)
 LOAD_FUNCPTR(glPixelStorei)
 LOAD_FUNCPTR(glReadPixels)
-LOAD_FUNCPTR(glScissor)
 LOAD_FUNCPTR(glTexImage2D)
-LOAD_FUNCPTR(glViewport)
 LOAD_FUNCPTR(glFinish)
 LOAD_FUNCPTR(glFlush)
 #undef LOAD_FUNCPTR
@@ -517,6 +508,10 @@ LOAD_FUNCPTR(glXFreeMemoryNV)
         pglXBindTexImageATI = (void*)pglXGetProcAddressARB((const GLubyte *) "glXBindTexImageATI");
         pglXReleaseTexImageATI = (void*)pglXGetProcAddressARB((const GLubyte *) "glXReleaseTexImageATI");
         pglXDrawableAttribATI = (void*)pglXGetProcAddressARB((const GLubyte *) "glXDrawableAttribATI");
+    }
+
+    if(glxRequireExtension("GLX_MESA_copy_sub_buffer")) {
+        pglXCopySubBufferMESA = (void*)pglXGetProcAddressARB((const GLubyte *) "glXCopySubBufferMESA");
     }
 
     X11DRV_WineGL_LoadExtensions();
@@ -612,6 +607,8 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
   int drawattrib = 0;
   int nvfloatattrib = GLX_DONT_CARE;
   int pixelattrib = 0;
+  int supportgdi = -1;
+  int doublebuf = -1;
 
   /* The list of WGL attributes is allowed to be NULL. We don't return here for NULL
    * because we need to do fixups for GLX_DRAWABLE_TYPE/GLX_RENDER_TYPE/GLX_FLOAT_COMPONENTS_NV. */
@@ -658,6 +655,7 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
       pop = iWGLAttr[++cur];
       PUSH2(oGLXAttr, GLX_DOUBLEBUFFER, pop);
       TRACE("pAttr[%d] = GLX_DOUBLEBUFFER: %d\n", cur, pop);
+      doublebuf = pop;
       break;
 
     case WGL_PIXEL_TYPE_ARB:
@@ -678,6 +676,7 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
       pop = iWGLAttr[++cur];
       PUSH2(oGLXAttr, GLX_X_RENDERABLE, pop);
       TRACE("pAttr[%d] = WGL_SUPPORT_GDI_ARB: %d\n", cur, pop);
+      supportgdi = pop;
       break;
 
     case WGL_DRAW_TO_BITMAP_ARB:
@@ -775,6 +774,15 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
       break;
     }
     ++cur;
+  }
+
+  if(supportgdi > 0) {
+    if(doublebuf > 0) {
+      WARN("Attempting double-buffered gdi format\n");
+      return -1;
+    }
+    if(doublebuf < 0)
+      PUSH2(oGLXAttr, GLX_DOUBLEBUFFER, False);
   }
 
   /* Apply the OR'd drawable type bitmask now EVEN when WGL_DRAW_TO* is unset.
@@ -952,6 +960,60 @@ int pixelformat_from_fbconfig_id(XID fbconfig_id)
     return 0;
 }
 
+
+/* Mark any allocated context using the glx drawable 'old' to use 'new' */
+void mark_drawable_dirty(Drawable old, Drawable new)
+{
+    Wine_GLContext *ctx;
+    for (ctx = context_list; ctx; ctx = ctx->next) {
+        if (old == ctx->drawables[0]) {
+            ctx->drawables[0] = new;
+            ctx->refresh_drawables = TRUE;
+        }
+        if (old == ctx->drawables[1]) {
+            ctx->drawables[1] = new;
+            ctx->refresh_drawables = TRUE;
+        }
+    }
+}
+
+/* Given the current context, make sure its drawable is sync'd */
+static inline void sync_context(Wine_GLContext *context)
+{
+    if(context && context->refresh_drawables) {
+        if (glxRequireVersion(3))
+            pglXMakeContextCurrent(gdi_display, context->drawables[0],
+                                   context->drawables[1], context->ctx);
+        else
+            pglXMakeCurrent(gdi_display, context->drawables[0], context->ctx);
+        context->refresh_drawables = FALSE;
+    }
+}
+
+
+Drawable create_glxpixmap(Display *display, XVisualInfo *vis, Pixmap parent)
+{
+    return pglXCreateGLXPixmap(display, vis, parent);
+}
+
+
+static XID create_bitmap_glxpixmap(X11DRV_PDEVICE *physDev, WineGLPixelFormat *fmt)
+{
+    GLXPixmap ret = 0;
+    XVisualInfo *vis;
+
+    wine_tsx11_lock();
+
+    vis = pglXGetVisualFromFBConfig(gdi_display, fmt->fbconfig);
+    if(vis) {
+        if(vis->depth == physDev->bitmap->pixmap_depth)
+            ret = pglXCreateGLXPixmap(gdi_display, vis, physDev->bitmap->pixmap);
+        XFree(vis);
+    }
+    wine_tsx11_unlock();
+    TRACE("return %lx\n", ret);
+    return ret;
+}
 
 /**
  * X11DRV_ChoosePixelFormat
@@ -1406,6 +1468,23 @@ BOOL X11DRV_SetPixelFormat(X11DRV_PDEVICE *physDev,
             ERR("Couldn't set format of the window, returning failure\n");
             return FALSE;
         }
+
+        physDev->gl_drawable = X11DRV_get_gl_drawable(hwnd);
+    }
+    else if(physDev->bitmap) {
+        if(!(value&GLX_PIXMAP_BIT)) {
+            WARN("Pixel format %d is not compatible for bitmap rendering\n", iPixelFormat);
+            return FALSE;
+        }
+
+        physDev->bitmap->glxpixmap = create_bitmap_glxpixmap(physDev, fmt);
+        if(!physDev->bitmap->glxpixmap) {
+            WARN("Couldn't create glxpixmap for pixel format %d\n", iPixelFormat);
+            return FALSE;
+        }
+    }
+    else {
+        FIXME("called on a non-window, non-bitmap object?\n");
     }
 
   physDev->current_pf = iPixelFormat;
@@ -1464,7 +1543,6 @@ HGLRC X11DRV_wglCreateContext(X11DRV_PDEVICE *physDev)
     ret = alloc_context();
     wine_tsx11_unlock();
     ret->hdc = hdc;
-    ret->physDev = physDev;
     ret->fmt = fmt;
 
     /*ret->vis = vis;*/
@@ -1519,12 +1597,10 @@ static HDC WINAPI X11DRV_wglGetCurrentReadDCARB(void)
 {
     HDC ret = 0;
     Wine_GLContext *ctx = NtCurrentTeb()->glContext;
-    X11DRV_PDEVICE *physDev = ctx ? ctx->pReadDev : NULL;
 
-    if(physDev)
-        ret = physDev->hdc;
+    if (ctx) ret = ctx->read_hdc;
 
-    TRACE(" returning %p (GL drawable %lu)\n", ret, physDev ? physDev->drawable : 0);
+    TRACE(" returning %p (GL drawable %lu)\n", ret, ctx ? ctx->drawables[1] : 0);
     return ret;
 }
 
@@ -1566,53 +1642,6 @@ PROC X11DRV_wglGetProcAddress(LPCSTR lpszProc)
 
     WARN("(%s) - not found\n", lpszProc);
     return NULL;
-}
-
-/***********************************************************************
- *		sync_current_drawable
- *
- * Adjust the current viewport and scissor in order to position
- * and size the current drawable correctly on the parent window.
- */
-static void sync_current_drawable(BOOL updatedc)
-{
-    int dy;
-    int width;
-    int height;
-    RECT rc;
-    Wine_GLContext *ctx = (Wine_GLContext *) NtCurrentTeb()->glContext;
-
-    TRACE("\n");
-
-    if (ctx && ctx->physDev)
-    {
-        if (updatedc)
-            GetClipBox(ctx->physDev->hdc, &rc); /* Make sure physDev is up to date */
-
-        dy = ctx->physDev->drawable_rect.bottom - ctx->physDev->drawable_rect.top -
-            ctx->physDev->dc_rect.bottom;
-        width = ctx->physDev->dc_rect.right - ctx->physDev->dc_rect.left;
-        height = ctx->physDev->dc_rect.bottom - ctx->physDev->dc_rect.top;
-
-        wine_tsx11_lock();
-
-        pglViewport(ctx->physDev->dc_rect.left + ctx->viewport.left,
-            dy + ctx->viewport.top,
-            ctx->viewport.right ? (ctx->viewport.right - ctx->viewport.left) : width,
-            ctx->viewport.bottom ? (ctx->viewport.bottom - ctx->viewport.top) : height);
-
-        pglEnable(GL_SCISSOR_TEST);
-
-        if (ctx->scissor_enabled)
-            pglScissor(ctx->physDev->dc_rect.left + min(width, max(0, ctx->scissor.left)),
-                dy + min(height, max(0, ctx->scissor.top)),
-                min(width, max(0, ctx->scissor.right - ctx->scissor.left)),
-                min(height, max(0, ctx->scissor.bottom - ctx->scissor.top)));
-        else
-            pglScissor(ctx->physDev->dc_rect.left, dy, width, height);
-
-        wine_tsx11_unlock();
-    }
 }
 
 /**
@@ -1663,17 +1692,15 @@ BOOL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
         if(ret)
         {
             ctx->hdc = hdc;
-            ctx->physDev = physDev;
-            ctx->pReadDev = physDev;
+            ctx->read_hdc = hdc;
+            ctx->drawables[0] = drawable;
+            ctx->drawables[1] = drawable;
+            ctx->refresh_drawables = FALSE;
 
             if (type == OBJ_MEMDC)
             {
                 ctx->do_escape = TRUE;
                 pglDrawBuffer(GL_FRONT_LEFT);
-            }
-            else
-            {
-                sync_current_drawable(FALSE);
             }
         }
     }
@@ -1716,8 +1743,10 @@ BOOL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* pDrawDev, X11DRV_PDEVICE* p
                 TRACE(" created a delayed OpenGL context (%p)\n", ctx->ctx);
             }
             ctx->hdc = pDrawDev->hdc;
-            ctx->physDev = pDrawDev;
-            ctx->pReadDev = pReadDev;
+            ctx->read_hdc = pReadDev->hdc;
+            ctx->drawables[0] = d_draw;
+            ctx->drawables[1] = d_read;
+            ctx->refresh_drawables = FALSE;
             ret = pglXMakeContextCurrent(gdi_display, d_draw, d_read, ctx->ctx);
             NtCurrentTeb()->glContext = ctx;
         }
@@ -1941,40 +1970,6 @@ BOOL X11DRV_wglUseFontBitmapsW(X11DRV_PDEVICE *physDev, DWORD first, DWORD count
      return TRUE;
 }
 
-static void WINAPI X11DRV_wglDisable(GLenum cap)
-{
-    if (cap == GL_SCISSOR_TEST)
-    {
-       Wine_GLContext *ctx = (Wine_GLContext *) NtCurrentTeb()->glContext;
-
-       if (ctx)
-          ctx->scissor_enabled = FALSE;
-    }
-    else
-    {
-        wine_tsx11_lock();
-        pglDisable(cap);
-        wine_tsx11_unlock();
-    }
-}
-
-static void WINAPI X11DRV_wglEnable(GLenum cap)
-{
-    if (cap == GL_SCISSOR_TEST)
-    {
-       Wine_GLContext *ctx = (Wine_GLContext *) NtCurrentTeb()->glContext;
-
-       if (ctx)
-           ctx->scissor_enabled = TRUE;
-    }
-    else
-    {
-        wine_tsx11_lock();
-        pglEnable(cap);
-        wine_tsx11_unlock();
-    }
-}
-
 /* WGL helper function which handles differences in glGetIntegerv from WGL and GLX */
 static void WINAPI X11DRV_wglGetIntegerv(GLenum pname, GLint* params)
 {
@@ -2012,68 +2007,53 @@ static void WINAPI X11DRV_wglGetIntegerv(GLenum pname, GLint* params)
     wine_tsx11_unlock();
 }
 
-static GLboolean WINAPI X11DRV_wglIsEnabled(GLenum cap)
+void flush_gl_drawable(X11DRV_PDEVICE *physDev)
 {
-    GLboolean enabled = False;
+    int w, h;
 
-    if (cap == GL_SCISSOR_TEST)
-    {
-       Wine_GLContext *ctx = (Wine_GLContext *) NtCurrentTeb()->glContext;
+    if(!physDev->gl_drawable)
+        return;
 
-       if (ctx)
-           enabled = ctx->scissor_enabled;
-    }
-    else
-    {
+    w = physDev->dc_rect.right - physDev->dc_rect.left;
+    h = physDev->dc_rect.bottom - physDev->dc_rect.top;
+
+    if(w > 0 && h > 0) {
+        Drawable src = physDev->pixmap;
+        if(!src) src = physDev->gl_drawable;
+
+        /* The GL drawable may be lagged behind if we don't flush first, so
+         * flush the display make sure we copy up-to-date data */
         wine_tsx11_lock();
-        enabled = pglIsEnabled(cap);
+        XFlush(gdi_display);
+        XCopyArea(gdi_display, src, physDev->drawable, physDev->gc, 0, 0, w, h,
+                  physDev->dc_rect.left, physDev->dc_rect.top);
         wine_tsx11_unlock();
     }
-    return enabled;
 }
 
-static void WINAPI X11DRV_wglScissor(GLint x, GLint y, GLsizei width, GLsizei height)
-{
-    Wine_GLContext *ctx = (Wine_GLContext *) NtCurrentTeb()->glContext;
-
-    if (ctx)
-    {
-        ctx->scissor.left = x;
-        ctx->scissor.top = y;
-        ctx->scissor.right = x + width;
-        ctx->scissor.bottom = y + height;
-
-        sync_current_drawable(TRUE);
-    }
-}
-
-static void WINAPI X11DRV_wglViewport(GLint x, GLint y, GLsizei width, GLsizei height)
-{
-    Wine_GLContext *ctx = (Wine_GLContext *) NtCurrentTeb()->glContext;
-
-    if (ctx)
-    {
-        ctx->viewport.left = x;
-        ctx->viewport.top = y;
-        ctx->viewport.right = x + width;
-        ctx->viewport.bottom = y + height;
-
-        sync_current_drawable(TRUE);
-    }
-}
 
 static void WINAPI X11DRV_wglFinish(void)
 {
+    Wine_GLContext *ctx = NtCurrentTeb()->glContext;
+    enum x11drv_escape_codes code = X11DRV_FLUSH_GL_DRAWABLE;
+
     wine_tsx11_lock();
+    sync_context(ctx);
     pglFinish();
     wine_tsx11_unlock();
+    ExtEscape(ctx->hdc, X11DRV_ESCAPE, sizeof(code), (LPSTR)&code, 0, NULL );
 }
 
 static void WINAPI X11DRV_wglFlush(void)
 {
+    Wine_GLContext *ctx = NtCurrentTeb()->glContext;
+    enum x11drv_escape_codes code = X11DRV_FLUSH_GL_DRAWABLE;
+
     wine_tsx11_lock();
+    sync_context(ctx);
     pglFlush();
     wine_tsx11_unlock();
+    ExtEscape(ctx->hdc, X11DRV_ESCAPE, sizeof(code), (LPSTR)&code, 0, NULL );
 }
 
 /**
@@ -3109,12 +3089,7 @@ static const WineGLExtension WGL_internal_functions =
 {
   "",
   {
-    { "wglDisable", X11DRV_wglDisable },
-    { "wglEnable", X11DRV_wglEnable },
     { "wglGetIntegerv", X11DRV_wglGetIntegerv },
-    { "wglIsEnabled", X11DRV_wglIsEnabled },
-    { "wglScissor", X11DRV_wglScissor },
-    { "wglViewport", X11DRV_wglViewport },
     { "wglFinish", X11DRV_wglFinish },
     { "wglFlush", X11DRV_wglFlush },
   }
@@ -3273,26 +3248,6 @@ static void X11DRV_WineGL_LoadExtensions(void)
 }
 
 
-static XID create_glxpixmap(X11DRV_PDEVICE *physDev)
-{
-    GLXPixmap ret;
-    XVisualInfo *vis;
-    XVisualInfo template;
-    int num;
-
-    wine_tsx11_lock();
-
-    /* Retrieve the visualid from our main visual which is the only visual we can use */
-    template.visualid =  XVisualIDFromVisual(visual);
-    vis = XGetVisualInfo(gdi_display, VisualIDMask, &template, &num);
-
-    ret = pglXCreateGLXPixmap(gdi_display, vis, physDev->bitmap->pixmap);
-    XFree(vis);
-    wine_tsx11_unlock(); 
-    TRACE("return %lx\n", ret);
-    return ret;
-}
-
 Drawable get_glxdrawable(X11DRV_PDEVICE *physDev)
 {
     Drawable ret;
@@ -3302,21 +3257,19 @@ Drawable get_glxdrawable(X11DRV_PDEVICE *physDev)
         if (physDev->bitmap->hbitmap == BITMAP_stock_phys_bitmap.hbitmap)
             ret = physDev->drawable; /* PBuffer */
         else
-        {
-            if(!physDev->bitmap->glxpixmap)
-                physDev->bitmap->glxpixmap = create_glxpixmap(physDev);
             ret = physDev->bitmap->glxpixmap;
-        }
     }
+    else if(physDev->gl_drawable)
+        ret = physDev->gl_drawable;
     else
         ret = physDev->drawable;
     return ret;
 }
 
-BOOL destroy_glxpixmap(XID glxpixmap)
+BOOL destroy_glxpixmap(Display *display, XID glxpixmap)
 {
     wine_tsx11_lock(); 
-    pglXDestroyGLXPixmap(gdi_display, glxpixmap);
+    pglXDestroyGLXPixmap(display, glxpixmap);
     wine_tsx11_unlock(); 
     return TRUE;
 }
@@ -3329,6 +3282,8 @@ BOOL destroy_glxpixmap(XID glxpixmap)
 BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev)
 {
   GLXDrawable drawable;
+  Wine_GLContext *ctx = NtCurrentTeb()->glContext;
+
   if (!has_opengl()) {
     ERR("No libGL on this box - disabling OpenGL support !\n");
     return 0;
@@ -3337,8 +3292,28 @@ BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev)
   TRACE_(opengl)("(%p)\n", physDev);
 
   drawable = get_glxdrawable(physDev);
+
   wine_tsx11_lock();
-  pglXSwapBuffers(gdi_display, drawable);
+  sync_context(ctx);
+  if(physDev->pixmap) {
+      if(pglXCopySubBufferMESA) {
+          int w = physDev->dc_rect.right - physDev->dc_rect.left;
+          int h = physDev->dc_rect.bottom - physDev->dc_rect.top;
+
+          /* (glX)SwapBuffers has an implicit glFlush effect, however
+           * GLX_MESA_copy_sub_buffer doesn't. Make sure GL is flushed before
+           * copying */
+          pglFlush();
+          if(w > 0 && h > 0)
+              pglXCopySubBufferMESA(gdi_display, drawable, 0, 0, w, h);
+      }
+      else
+          pglXSwapBuffers(gdi_display, drawable);
+  }
+  else
+      pglXSwapBuffers(gdi_display, drawable);
+
+  flush_gl_drawable(physDev);
   wine_tsx11_unlock();
 
   /* FPS support */
@@ -3400,9 +3375,32 @@ XVisualInfo *X11DRV_setup_opengl_visual( Display *display )
     return visual;
 }
 
+XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id )
+{
+    WineGLPixelFormat *fmt;
+
+    fmt = ConvertPixelFormatGLXtoWGL(gdi_display, fbconfig_id);
+    if(fmt == NULL)
+        return NULL;
+    return pglXGetVisualFromFBConfig(gdi_display, fmt->fbconfig);
+}
+
 #else  /* no OpenGL includes */
 
 int pixelformat_from_fbconfig_id(XID fbconfig_id)
+{
+    return 0;
+}
+
+void mark_drawable_dirty(Drawable old, Drawable new)
+{
+}
+
+void flush_gl_drawable(X11DRV_PDEVICE *physDev)
+{
+}
+
+Drawable create_glxpixmap(Display *display, XVisualInfo *vis, Pixmap parent)
 {
     return 0;
 }
@@ -3551,9 +3549,14 @@ Drawable get_glxdrawable(X11DRV_PDEVICE *physDev)
     return 0;
 }
 
-BOOL destroy_glxpixmap(XID glxpixmap)
+BOOL destroy_glxpixmap(Display *display, XID glxpixmap)
 {
     return FALSE;
+}
+
+XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id )
+{
+    return NULL;
 }
 
 #endif /* defined(HAVE_OPENGL) */

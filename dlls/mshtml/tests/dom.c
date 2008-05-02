@@ -80,9 +80,27 @@ static void _test_node_name(unsigned line, IUnknown *unk, const char *exname)
     hres = IHTMLDOMNode_get_nodeName(node, &name);
     IHTMLDOMNode_Release(node);
     ok_(__FILE__, line) (hres == S_OK, "get_nodeName failed: %08x\n", hres);
-    ok_(__FILE__, line) (!strcmp_wa(name, exname), "got name: %s, expected HTML\n", dbgstr_w(name));
+    ok_(__FILE__, line) (!strcmp_wa(name, exname), "got name: %s, expected %s\n", dbgstr_w(name), exname);
 
     SysFreeString(name);
+}
+
+#define test_elem_tag(u,n) _test_elem_tag(__LINE__,u,n)
+static void _test_elem_tag(unsigned line, IUnknown *unk, const char *extag)
+{
+    IHTMLElement *elem;
+    BSTR tag;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLElement, (void**)&elem);
+    ok_(__FILE__, line) (hres == S_OK, "QueryInterface(IID_IHTMLElement) failed: %08x\n", hres);
+
+    hres = IHTMLElement_get_tagName(elem, &tag);
+    IHTMLElement_Release(elem);
+    ok_(__FILE__, line) (hres == S_OK, "get_tagName failed: %08x\n", hres);
+    ok_(__FILE__, line) (!strcmp_wa(tag, extag), "got tag: %s, expected %s\n", dbgstr_w(tag), extag);
+
+    SysFreeString(tag);
 }
 
 static void test_doc_elem(IHTMLDocument2 *doc)
@@ -99,6 +117,7 @@ static void test_doc_elem(IHTMLDocument2 *doc)
     ok(hres == S_OK, "get_documentElement failed: %08x\n", hres);
 
     test_node_name((IUnknown*)elem, "HTML");
+    test_elem_tag((IUnknown*)elem, "HTML");
 
     IHTMLElement_Release(elem);
 }
@@ -578,8 +597,10 @@ typedef void (*domtest_t)(IHTMLDocument2*);
 static void run_domtest(const char *str, domtest_t test)
 {
     IHTMLDocument2 *doc;
+    IHTMLElement *body = NULL;
     ULONG ref;
     MSG msg;
+    HRESULT hres;
 
     doc = create_doc_with_string(str);
     do_advise((IUnknown*)doc, &IID_IPropertyNotifySink, (IUnknown*)&PropertyNotifySink);
@@ -589,7 +610,15 @@ static void run_domtest(const char *str, domtest_t test)
         DispatchMessage(&msg);
     }
 
-    test(doc);
+    hres = IHTMLDocument2_get_body(doc, &body);
+    ok(hres == S_OK, "get_body failed: %08x\n", hres);
+
+    if(body) {
+        IHTMLElement_Release(body);
+        test(doc);
+    }else {
+        skip("Could not get document body. Assuming no Gecko installed.\n");
+    }
 
     ref = IHTMLDocument2_Release(doc);
     ok(!ref, "ref = %d\n", ref);

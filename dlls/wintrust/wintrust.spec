@@ -46,8 +46,8 @@
 @ stub DriverFinalPolicy
 @ stub DriverInitializePolicy
 @ stub FindCertsByIssuer
-@ stub GenericChainCertificateTrust
-@ stub GenericChainFinalProv
+@ stdcall GenericChainCertificateTrust(ptr)
+@ stdcall GenericChainFinalProv(ptr)
 @ stub HTTPSCertificateTrust
 @ stub HTTPSFinalProv
 @ stub IsCatalogFile
@@ -59,7 +59,7 @@
 @ stdcall SoftpubAuthenticode(ptr)
 @ stdcall SoftpubCheckCert(ptr long long long)
 @ stdcall SoftpubCleanup(ptr)
-@ stub SoftpubDefCertInit
+@ stdcall SoftpubDefCertInit(ptr)
 @ stdcall SoftpubDllRegisterServer()
 @ stdcall SoftpubDllUnregisterServer()
 @ stub SoftpubDumpStructure
@@ -104,7 +104,7 @@
 @ stub WVTAsn1SpcSigInfoEncode
 @ stub WVTAsn1SpcSpAgencyInfoDecode
 @ stub WVTAsn1SpcSpAgencyInfoEncode
-@ stub WVTAsn1SpcSpOpusInfoDecode
+@ stdcall WVTAsn1SpcSpOpusInfoDecode(long str ptr long long ptr ptr)
 @ stub WVTAsn1SpcSpOpusInfoEncode
 @ stub WVTAsn1SpcStatementTypeDecode
 @ stub WVTAsn1SpcStatementTypeEncode

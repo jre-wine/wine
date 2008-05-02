@@ -87,6 +87,7 @@ Services="System\CurrentControlSet\Services"
 
 [Classes]
 HKCR,.avi,"Content Type",2,"video/avi"
+HKCR,.chm,,2,"chm.file"
 HKCR,.dll,"Content Type",2,"application/x-msdownload"
 HKCR,.exe,,2,"exefile"
 HKCR,.exe,"Content Type",2,"application/x-msdownload"
@@ -108,6 +109,7 @@ HKCR,.wri,,2,"wrifile"
 HKCR,.wav,"Content Type",2,"audio/wav"
 HKCR,.xml,"Content Type",2,"text/xml"
 HKCR,.xsl,"Content Type",2,"text/xsl"
+HKCR,chm.file\shell\open\command,,2,"%11%\hh.exe %1"
 HKCR,exefile\DefaultIcon,,2,"%1"
 HKCR,exefile\shell\open\command,,2,"""%1"" %*"
 HKCR,folder\shell\open\ddeexec,,2,"[ViewFolder("%l", %I, %S)]"
@@ -332,6 +334,7 @@ HKLM,Software\Microsoft\Rpc\SecurityService,68,2,"netlogon.dll"
 HKLM,Software\Microsoft\Rpc\SecurityService,9,2,"secur32.dll"
 HKLM,System\CurrentControlSet\Control\Session Manager,,,""
 HKLM,System\CurrentControlSet\Control\VMM32Files,,,""
+HKCU,Software\Microsoft\Protected Storage System Provider,,,""
 HKCU,Software\Wine\MSHTML,"GeckoUrl",,"http://source.winehq.org/winegecko.php"
 HKLM,HARDWARE\DEVICEMAP\PARALLEL PORTS,,,""
 HKLM,HARDWARE\DEVICEMAP\SERIALCOMM,,,""
@@ -2230,6 +2233,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,olepro32.dll
 11,,opengl32.dll
 11,,progman.exe
+11,,psapi.dll
 11,,quartz.dll
 11,,regsvr32.exe
 11,,riched20.dll

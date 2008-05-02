@@ -127,6 +127,7 @@ struct DeviceInfo
     struct DeviceInfoSet *set;
     HKEY                  key;
     BOOL                  phantom;
+    DWORD                 devId;
     LPWSTR                instanceId;
     struct list           interfaces;
 };
@@ -407,8 +408,50 @@ static BOOL SETUPDI_SetInterfaceSymbolicLink(SP_DEVICE_INTERFACE_DATA *iface,
     return ret;
 }
 
+static HKEY SETUPDI_CreateDevKey(struct DeviceInfo *devInfo)
+{
+    HKEY enumKey, key = INVALID_HANDLE_VALUE;
+    LONG l;
+
+    l = RegCreateKeyExW(HKEY_LOCAL_MACHINE, Enum, 0, NULL, 0, KEY_ALL_ACCESS,
+            NULL, &enumKey, NULL);
+    if (!l)
+    {
+        RegCreateKeyExW(enumKey, devInfo->instanceId, 0, NULL, 0,
+                KEY_READ | KEY_WRITE, NULL, &key, NULL);
+        RegCloseKey(enumKey);
+    }
+    return key;
+}
+
+static HKEY SETUPDI_CreateDrvKey(struct DeviceInfo *devInfo)
+{
+    static const WCHAR slash[] = { '\\',0 };
+    WCHAR classKeyPath[MAX_PATH];
+    HKEY classKey, key = INVALID_HANDLE_VALUE;
+    LONG l;
+
+    lstrcpyW(classKeyPath, ControlClass);
+    lstrcatW(classKeyPath, slash);
+    SETUPDI_GuidToString(&devInfo->set->ClassGuid,
+            classKeyPath + lstrlenW(classKeyPath));
+    l = RegCreateKeyExW(HKEY_LOCAL_MACHINE, classKeyPath, 0, NULL, 0,
+            KEY_ALL_ACCESS, NULL, &classKey, NULL);
+    if (!l)
+    {
+        static const WCHAR fmt[] = { '%','0','4','d',0 };
+        WCHAR devId[5];
+
+        sprintfW(devId, fmt, devInfo->devId);
+        RegCreateKeyExW(classKey, devId, 0, NULL, 0, KEY_READ | KEY_WRITE,
+                NULL, &key, NULL);
+        RegCloseKey(classKey);
+    }
+    return key;
+}
+
 static struct DeviceInfo *SETUPDI_AllocateDeviceInfo(struct DeviceInfoSet *set,
-        LPCWSTR instanceId, BOOL phantom)
+        DWORD devId, LPCWSTR instanceId, BOOL phantom)
 {
     struct DeviceInfo *devInfo = HeapAlloc(GetProcessHeap(), 0,
             sizeof(struct DeviceInfo));
@@ -416,27 +459,21 @@ static struct DeviceInfo *SETUPDI_AllocateDeviceInfo(struct DeviceInfoSet *set,
     if (devInfo)
     {
         devInfo->set = set;
+        devInfo->devId = devId;
         devInfo->instanceId = HeapAlloc(GetProcessHeap(), 0,
                 (lstrlenW(instanceId) + 1) * sizeof(WCHAR));
         if (devInfo->instanceId)
         {
-            HKEY enumKey;
-            LONG l;
-
             devInfo->key = INVALID_HANDLE_VALUE;
             devInfo->phantom = phantom;
             lstrcpyW(devInfo->instanceId, instanceId);
             struprW(devInfo->instanceId);
-            l = RegCreateKeyExW(HKEY_LOCAL_MACHINE, Enum, 0, NULL, 0,
-                    KEY_ALL_ACCESS, NULL, &enumKey, NULL);
-            if (!l)
+            devInfo->key = SETUPDI_CreateDevKey(devInfo);
+            if (devInfo->key != INVALID_HANDLE_VALUE)
             {
-                RegCreateKeyExW(enumKey, devInfo->instanceId, 0, NULL, 0,
-                        KEY_ALL_ACCESS, NULL, &devInfo->key, NULL);
                 if (phantom)
                     RegSetValueExW(devInfo->key, Phantom, 0, REG_DWORD,
                             (LPBYTE)&phantom, sizeof(phantom));
-                RegCloseKey(enumKey);
             }
             list_init(&devInfo->interfaces);
         }
@@ -492,8 +529,8 @@ static BOOL SETUPDI_AddDeviceToSet(struct DeviceInfoSet *set,
         SP_DEVINFO_DATA **dev)
 {
     BOOL ret = FALSE;
-    struct DeviceInfo *devInfo = SETUPDI_AllocateDeviceInfo(set, instanceId,
-            phantom);
+    struct DeviceInfo *devInfo = SETUPDI_AllocateDeviceInfo(set, set->cDevices,
+            instanceId, phantom);
 
     TRACE("%p, %s, %d, %s, %d\n", set, debugstr_guid(guid), devInst,
             debugstr_w(instanceId), phantom);
@@ -509,16 +546,18 @@ static BOOL SETUPDI_AddDeviceToSet(struct DeviceInfoSet *set,
         if (set->devices)
         {
             WCHAR classGuidStr[39];
+            SP_DEVINFO_DATA *DeviceInfoData = &set->devices[set->cDevices++];
 
-            *dev = &set->devices[set->cDevices++];
-            (*dev)->cbSize = sizeof(SP_DEVINFO_DATA);
-            memcpy(&(*dev)->ClassGuid, guid, sizeof(GUID));
-            (*dev)->DevInst = devInst;
-            (*dev)->Reserved = (ULONG_PTR)devInfo;
+            DeviceInfoData->cbSize = sizeof(SP_DEVINFO_DATA);
+            memcpy(&DeviceInfoData->ClassGuid, guid, sizeof(GUID));
+            DeviceInfoData->DevInst = devInst;
+            DeviceInfoData->Reserved = (ULONG_PTR)devInfo;
             SETUPDI_GuidToString(guid, classGuidStr);
             SetupDiSetDeviceRegistryPropertyW((HDEVINFO)set,
-                *dev, SPDRP_CLASSGUID, (const BYTE *)classGuidStr,
+                DeviceInfoData, SPDRP_CLASSGUID, (const BYTE *)classGuidStr,
                 lstrlenW(classGuidStr) * sizeof(WCHAR));
+            if (dev)
+                *dev = DeviceInfoData;
             ret = TRUE;
         }
         else
@@ -795,8 +834,6 @@ BOOL WINAPI SetupDiClassGuidsFromNameExA(
     LPWSTR ClassNameW = NULL;
     LPWSTR MachineNameW = NULL;
     BOOL bResult;
-
-    FIXME("\n");
 
     ClassNameW = MultiByteToUnicode(ClassName, CP_ACP);
     if (ClassNameW == NULL)
@@ -1147,6 +1184,109 @@ SetupDiCreateDeviceInfoListExW(const GUID *ClassGuid,
     list->devices = NULL;
 
     return (HDEVINFO)list;
+}
+
+/***********************************************************************
+ *              SetupDiCreateDevRegKeyA (SETUPAPI.@)
+ */
+HKEY WINAPI SetupDiCreateDevRegKeyA(
+        HDEVINFO DeviceInfoSet,
+        PSP_DEVINFO_DATA DeviceInfoData,
+        DWORD Scope,
+        DWORD HwProfile,
+        DWORD KeyType,
+        HINF InfHandle,
+        PCSTR InfSectionName)
+{
+    PWSTR InfSectionNameW = NULL;
+    HKEY key;
+
+    TRACE("%p %p %d %d %d %p %s\n", DeviceInfoSet, DeviceInfoData, Scope,
+            HwProfile, KeyType, InfHandle, debugstr_a(InfSectionName));
+
+    if (InfHandle)
+    {
+        if (!InfSectionName)
+        {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return INVALID_HANDLE_VALUE;
+        }
+        else
+        {
+            InfSectionNameW = MultiByteToUnicode(InfSectionName, CP_ACP);
+            if (InfSectionNameW == NULL) return INVALID_HANDLE_VALUE;
+        }
+    }
+    key = SetupDiCreateDevRegKeyW(DeviceInfoSet, DeviceInfoData, Scope,
+            HwProfile, KeyType, InfHandle, InfSectionNameW);
+    MyFree(InfSectionNameW);
+    return key;
+}
+
+/***********************************************************************
+ *              SetupDiCreateDevRegKeyW (SETUPAPI.@)
+ */
+HKEY WINAPI SetupDiCreateDevRegKeyW(
+        HDEVINFO DeviceInfoSet,
+        PSP_DEVINFO_DATA DeviceInfoData,
+        DWORD Scope,
+        DWORD HwProfile,
+        DWORD KeyType,
+        HINF InfHandle,
+        PCWSTR InfSectionName)
+{
+    struct DeviceInfoSet *set = (struct DeviceInfoSet *)DeviceInfoSet;
+    struct DeviceInfo *devInfo;
+    HKEY key = INVALID_HANDLE_VALUE;
+
+    TRACE("%p %p %d %d %d %p %s\n", DeviceInfoSet, DeviceInfoData, Scope,
+            HwProfile, KeyType, InfHandle, debugstr_w(InfSectionName));
+
+    if (!DeviceInfoSet || DeviceInfoSet == (HDEVINFO)INVALID_HANDLE_VALUE)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (set->magic != SETUP_DEVICE_INFO_SET_MAGIC)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (!DeviceInfoData || DeviceInfoData->cbSize != sizeof(SP_DEVINFO_DATA)
+            || !DeviceInfoData->Reserved)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return INVALID_HANDLE_VALUE;
+    }
+    devInfo = (struct DeviceInfo *)DeviceInfoData->Reserved;
+    if (devInfo->set != set)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (devInfo->phantom)
+    {
+        SetLastError(ERROR_DEVINFO_NOT_REGISTERED);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (Scope != DICS_FLAG_GLOBAL)
+        FIXME("unimplemented for scope %d\n", Scope);
+    switch (KeyType)
+    {
+        case DIREG_DEV:
+            key = SETUPDI_CreateDevKey(devInfo);
+            break;
+        case DIREG_DRV:
+            key = SETUPDI_CreateDrvKey(devInfo);
+            break;
+        default:
+            WARN("unknown KeyType %d\n", KeyType);
+    }
+    if (InfHandle)
+        SetupInstallFromInfSectionW(NULL, InfHandle, InfSectionName, SPINST_ALL,
+                NULL, NULL, SP_COPY_NEWER_ONLY, NULL, NULL, DeviceInfoSet,
+                DeviceInfoData);
+    return key;
 }
 
 /***********************************************************************
@@ -1986,7 +2126,7 @@ static void SETUPDI_EnumerateInterfaces(HDEVINFO DeviceInfoSet,
 static void SETUPDI_EnumerateMatchingDevices(HDEVINFO DeviceInfoSet,
         LPCWSTR parent, HKEY key, const GUID *class, DWORD flags)
 {
-    struct DeviceInfoSet *set = (struct DeviceInfoSet *)set;
+    struct DeviceInfoSet *set = (struct DeviceInfoSet *)DeviceInfoSet;
     DWORD i, len;
     WCHAR subKeyName[MAX_PATH];
     LONG l = ERROR_SUCCESS;
@@ -2029,12 +2169,10 @@ static void SETUPDI_EnumerateMatchingDevices(HDEVINFO DeviceInfoSet,
                                 * sizeof(WCHAR));
                             if (instanceId)
                             {
-                                SP_DEVINFO_DATA *dev;
-
                                 sprintfW(instanceId, fmt, parent, subKeyName);
                                 SETUPDI_AddDeviceToSet(set, &deviceClass,
                                         0 /* FIXME: DevInst */, instanceId,
-                                        FALSE, &dev);
+                                        FALSE, NULL);
                                 HeapFree(GetProcessHeap(), 0, instanceId);
                             }
                         }
@@ -3058,6 +3196,7 @@ BOOL WINAPI SetupDiInstallClassA(
 
 static HKEY CreateClassKey(HINF hInf)
 {
+    static const WCHAR slash[] = { '\\',0 };
     WCHAR FullBuffer[MAX_PATH];
     WCHAR Buffer[MAX_PATH];
     DWORD RequiredSize;
@@ -3075,6 +3214,7 @@ static HKEY CreateClassKey(HINF hInf)
     }
 
     lstrcpyW(FullBuffer, ControlClass);
+    lstrcatW(FullBuffer, slash);
     lstrcatW(FullBuffer, Buffer);
 
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
@@ -3170,9 +3310,7 @@ BOOL WINAPI SetupDiInstallClassW(
 
 
     /* Try to append a layout file */
-#if 0
     SetupOpenAppendInfFileW(NULL, hInf, NULL);
-#endif
 
     /* Retrieve the actual section name */
     SetupDiGetActualSectionToInstallW(hInf,
@@ -3200,7 +3338,7 @@ BOOL WINAPI SetupDiInstallClassW(
     SetupInstallFromInfSectionW(NULL,
 				hInf,
 				SectionName,
-				SPINST_REGISTRY,
+				SPINST_COPYINF | SPINST_FILES | SPINST_REGISTRY,
 				hClassKey,
 				NULL,
 				0,

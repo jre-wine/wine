@@ -221,6 +221,8 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         PUSH2(WGL_DRAW_TO_WINDOW_ARB, GL_TRUE); /* We want to draw to a window */
         PUSH2(WGL_DOUBLE_BUFFER_ARB, GL_TRUE);
         PUSH2(WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB); /* Make sure we don't get a float or color index format */
+        PUSH2(WGL_SUPPORT_OPENGL_ARB, GL_TRUE);
+        PUSH2(WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB); /* Make sure we receive an accelerated format. On windows (at least on ATI) this is not always the case */
 
         if(!getColorBits(target->resource.format, &redBits, &greenBits, &blueBits, &alphaBits, &colorBits)) {
             ERR("Unable to get color bits for format %#x!\n", target->resource.format);
@@ -246,7 +248,6 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         }
 
         PUSH1(0); /* end the list */
-        iPixelFormat = ChoosePixelFormat(hdc, &pfd);
 
         /* In case of failure hope that standard ChooosePixelFormat will find something suitable */
         if(!GL_EXTCALL(wglChoosePixelFormatARB(hdc, (const int*)&attribs, NULL, 1, &iPixelFormat, &nFormats)))
@@ -324,6 +325,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
         goto out;
     }
 
+    ENTER_GL();
     TRACE("Setting up the screen\n");
     /* Clear the screen */
     glClearColor(1.0, 0.0, 0.0, 0.0);
@@ -389,6 +391,7 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
             checkGLcall("glTexEnvi(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, GL_TRUE)\n");
         }
     }
+    LEAVE_GL();
 
     if(oldDrawable && oldCtx) {
         pwglMakeCurrent(oldDrawable, oldCtx);
@@ -849,7 +852,6 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
 
     TRACE("(%p): Selecting context for render target %p, thread %d\n", This, target, tid);
 
-    ENTER_GL();
     if(This->lastActiveRenderTarget != target || tid != This->lastThread) {
         context = FindContext(This, target, tid);
         This->lastActiveRenderTarget = target;
@@ -863,15 +865,15 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
     if(context != This->activeContext) {
         BOOL ret;
         TRACE("Switching gl ctx to %p, hdc=%p ctx=%p\n", context, context->hdc, context->glCtx);
-        LEAVE_GL();
         ret = pwglMakeCurrent(context->hdc, context->glCtx);
-        ENTER_GL();
         if(ret == FALSE) {
             ERR("Failed to activate the new context\n");
         }
         This->activeContext = context;
     }
 
+    /* We only need ENTER_GL for the gl calls made below and for the helper functions which make GL calls */
+    ENTER_GL();
     switch(usage) {
         case CTXUSAGE_RESOURCELOAD:
             /* This does not require any special states to be set up */

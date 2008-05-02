@@ -156,6 +156,8 @@ static const struct object_ops msg_queue_ops =
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
     no_map_access,             /* map_access */
+    default_get_sd,            /* get_sd */
+    default_set_sd,            /* set_sd */
     no_lookup_name,            /* lookup_name */
     no_open_file,              /* open_file */
     no_close_handle,           /* close_handle */
@@ -186,6 +188,8 @@ static const struct object_ops thread_input_ops =
     no_signal,                    /* signal */
     no_get_fd,                    /* get_fd */
     no_map_access,                /* map_access */
+    default_get_sd,               /* get_sd */
+    default_set_sd,               /* set_sd */
     no_lookup_name,               /* lookup_name */
     no_open_file,                 /* open_file */
     no_close_handle,              /* close_handle */
@@ -402,7 +406,6 @@ static int merge_message( struct thread_input *input, const struct message *msg 
 
     if (!ptr) return 0;
     prev = LIST_ENTRY( ptr, struct message, entry );
-    if (prev->unique_id) return 0;
     if (prev->result) return 0;
     if (prev->win != msg->win) return 0;
     if (prev->msg != msg->msg) return 0;

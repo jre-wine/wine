@@ -129,7 +129,7 @@ struct HTMLDocument {
 
     BSCallback *bscallback;
     IMoniker *mon;
-    BSTR url;
+    LPOLESTR url;
 
     HWND hwnd;
     HWND tooltips_hwnd;
@@ -250,15 +250,14 @@ struct BSCallback {
     nsProtocolStream *nsstream;
 };
 
+typedef struct {
+    HRESULT (*qi)(HTMLDOMNode*,REFIID,void**);
+    void (*destructor)(HTMLDOMNode*);
+} NodeImplVtbl;
+
 struct HTMLDOMNode {
     const IHTMLDOMNodeVtbl *lpHTMLDOMNodeVtbl;
-
-    void (*destructor)(IUnknown*);
-
-    union {
-        IUnknown *unk;
-        IHTMLElement *elem;
-    } impl;
+    const NodeImplVtbl *vtbl;
 
     nsIDOMNode *nsnode;
     HTMLDocument *doc;
@@ -269,14 +268,10 @@ struct HTMLDOMNode {
 typedef struct {
     HTMLDOMNode node;
 
-    const IHTMLElementVtbl *lpHTMLElementVtbl;
-    const IHTMLElement2Vtbl *lpHTMLElement2Vtbl;
-
-    void (*destructor)(IUnknown*);
+    const IHTMLElementVtbl   *lpHTMLElementVtbl;
+    const IHTMLElement2Vtbl  *lpHTMLElement2Vtbl;
 
     nsIDOMHTMLElement *nselem;
-
-    IUnknown *impl;
 } HTMLElement;
 
 typedef struct {
@@ -335,7 +330,8 @@ typedef struct {
 
 #define HTMLTEXTCONT(x)  ((IHTMLTextContainer*)           &(x)->lpHTMLTextContainerVtbl)
 
-#define DEFINE_THIS(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,lp ## ifc ## Vtbl)))
+#define DEFINE_THIS2(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,ifc)))
+#define DEFINE_THIS(cls,ifc,iface) DEFINE_THIS2(cls,lp ## ifc ## Vtbl,iface)
 
 HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**);
 HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
@@ -362,7 +358,7 @@ NSContainer *NSContainer_Create(HTMLDocument*,NSContainer*);
 void NSContainer_Release(NSContainer*);
 
 void HTMLDocument_LockContainer(HTMLDocument*,BOOL);
-void show_context_menu(HTMLDocument*,DWORD,POINT*);
+void show_context_menu(HTMLDocument*,DWORD,POINT*,IDispatch*);
 void notif_focus(HTMLDocument*);
 
 void show_tooltip(HTMLDocument*,DWORD,DWORD,LPCWSTR);
@@ -419,6 +415,7 @@ HTMLElement *HTMLElement_Create(nsIDOMNode*);
 HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLInputElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLOptionElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLSelectElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLTextAreaElement_Create(nsIDOMHTMLElement*);
 
@@ -426,10 +423,15 @@ void HTMLElement2_Init(HTMLElement*);
 void HTMLTextContainer_Init(HTMLTextContainer*);
 
 HRESULT HTMLDOMNode_QI(HTMLDOMNode*,REFIID,void**);
-HRESULT HTMLElement_QI(HTMLElement*,REFIID,void**);
+void HTMLDOMNode_destructor(HTMLDOMNode*);
+
+HRESULT HTMLElement_QI(HTMLDOMNode*,REFIID,void**);
+void HTMLElement_destructor(HTMLDOMNode*);
 
 HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*);
 void release_nodes(HTMLDocument*);
+
+IHTMLElementCollection *create_all_collection(HTMLDOMNode*);
 
 BOOL install_wine_gecko(void);
 

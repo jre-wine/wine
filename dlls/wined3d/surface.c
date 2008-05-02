@@ -34,6 +34,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d_surface);
 #define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UINT height, UINT outpitch, CONVERT_TYPES convert, IWineD3DSurfaceImpl *surf);
+static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE (*table)[4], BOOL colorkey);
 
 static void surface_download_data(IWineD3DSurfaceImpl *This) {
     if (!(This->resource.allocatedMemory || This->Flags & SFLAG_PBO)) This->resource.allocatedMemory = HeapAlloc(GetProcessHeap(), 0, This->resource.size + 4);
@@ -486,24 +487,32 @@ static void read_from_framebuffer(IWineD3DSurfaceImpl *This, CONST RECT *rect, v
     {
         case WINED3DFMT_P8:
         {
-            /* GL can't return palettized data, so read ARGB pixels into a
-             * separate block of memory and convert them into palettized format
-             * in software. Slow, but if the app means to use palettized render
-             * targets and locks it...
-             *
-             * Use GL_RGB, GL_UNSIGNED_BYTE to read the surface for performance reasons
-             * Don't use GL_BGR as in the WINED3DFMT_R8G8B8 case, instead watch out
-             * for the color channels when palettizing the colors.
-             */
-            fmt = GL_RGB;
-            type = GL_UNSIGNED_BYTE;
-            pitch *= 3;
-            mem = HeapAlloc(GetProcessHeap(), 0, This->resource.size * 3);
-            if(!mem) {
-                ERR("Out of memory\n");
-                return;
+            if(This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
+                /* In case of P8 render targets the index is stored in the alpha component */
+                fmt = GL_ALPHA;
+                type = GL_UNSIGNED_BYTE;
+                mem = dest;
+                bpp = This->bytesPerPixel;
+            } else {
+                /* GL can't return palettized data, so read ARGB pixels into a
+                 * separate block of memory and convert them into palettized format
+                 * in software. Slow, but if the app means to use palettized render
+                 * targets and locks it...
+                 *
+                 * Use GL_RGB, GL_UNSIGNED_BYTE to read the surface for performance reasons
+                 * Don't use GL_BGR as in the WINED3DFMT_R8G8B8 case, instead watch out
+                 * for the color channels when palettizing the colors.
+                 */
+                fmt = GL_RGB;
+                type = GL_UNSIGNED_BYTE;
+                pitch *= 3;
+                mem = HeapAlloc(GetProcessHeap(), 0, This->resource.size * 3);
+                if(!mem) {
+                    ERR("Out of memory\n");
+                    return;
+                }
+                bpp = This->bytesPerPixel * 3;
             }
-            bpp = This->bytesPerPixel * 3;
         }
         break;
 
@@ -575,7 +584,12 @@ static void read_from_framebuffer(IWineD3DSurfaceImpl *This, CONST RECT *rect, v
         }
     }
 
-    if(This->resource.format == WINED3DFMT_P8) {
+    /* For P8 textures we need to perform an inverse palette lookup. This is done by searching for a palette
+     * index which matches the RGB value. Note this isn't guaranteed to work when there are multiple entries for
+     * the same color but we have no choice.
+     * In case of render targets, the index is stored in the alpha component so no conversion is needed.
+     */
+    if((This->resource.format == WINED3DFMT_P8) && !(This->resource.usage & WINED3DUSAGE_RENDERTARGET)) {
         PALETTEENTRY *pal;
         DWORD width = pitch / 3;
         int x, y, c;
@@ -1399,7 +1413,7 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
             /* Use conversion when the paletted texture extension is not available, or when it is available make sure it is used
              * for texturing as it won't work for calls like glDraw-/glReadPixels and further also use conversion in case of color keying.
              */
-            if(!GL_SUPPORT(EXT_PALETTED_TEXTURE) || colorkey_active || (!use_texturing && GL_SUPPORT(EXT_PALETTED_TEXTURE)) ) {
+            if( !(GL_SUPPORT(EXT_PALETTED_TEXTURE) || GL_SUPPORT(ARB_FRAGMENT_PROGRAM))  || colorkey_active || (!use_texturing && GL_SUPPORT(EXT_PALETTED_TEXTURE)) ) {
                 *format = GL_RGBA;
                 *internal = GL_RGBA;
                 *type = GL_UNSIGNED_BYTE;
@@ -1409,6 +1423,12 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
                 } else {
                     *convert = CONVERT_PALETTED;
                 }
+            }
+            else if(GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
+                *format = GL_RED;
+                *internal = GL_RGBA;
+                *type = GL_UNSIGNED_BYTE;
+                *target_bpp = 1;
             }
 
             break;
@@ -1589,54 +1609,13 @@ HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UIN
         {
             IWineD3DPaletteImpl* pal = This->palette;
             BYTE table[256][4];
-            unsigned int i;
             unsigned int x, y;
 
             if( pal == NULL) {
                 /* TODO: If we are a sublevel, try to get the palette from level 0 */
             }
 
-            if (pal == NULL) {
-                /* Still no palette? Use the device's palette */
-                /* Get the surface's palette */
-                for (i = 0; i < 256; i++) {
-                    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-
-                    table[i][0] = device->palettes[device->currentPalette][i].peRed;
-                    table[i][1] = device->palettes[device->currentPalette][i].peGreen;
-                    table[i][2] = device->palettes[device->currentPalette][i].peBlue;
-                    if ((convert == CONVERT_PALETTED_CK) &&
-                        (i >= This->SrcBltCKey.dwColorSpaceLowValue) &&
-                        (i <= This->SrcBltCKey.dwColorSpaceHighValue)) {
-                        /* We should maybe here put a more 'neutral' color than the standard bright purple
-                          one often used by application to prevent the nice purple borders when bi-linear
-                          filtering is on */
-                        table[i][3] = 0x00;
-                    } else {
-                        table[i][3] = 0xFF;
-                    }
-                }
-            } else {
-                TRACE("Using surface palette %p\n", pal);
-                /* Get the surface's palette */
-                for (i = 0; i < 256; i++) {
-                    table[i][0] = pal->palents[i].peRed;
-                    table[i][1] = pal->palents[i].peGreen;
-                    table[i][2] = pal->palents[i].peBlue;
-                    if ((convert == CONVERT_PALETTED_CK) &&
-                        (i >= This->SrcBltCKey.dwColorSpaceLowValue) &&
-                        (i <= This->SrcBltCKey.dwColorSpaceHighValue)) {
-                        /* We should maybe here put a more 'neutral' color than the standard bright purple
-                          one often used by application to prevent the nice purple borders when bi-linear
-                          filtering is on */
-                        table[i][3] = 0x00;
-                    } else if(pal->Flags & WINEDDPCAPS_ALPHA) {
-                        table[i][3] = pal->palents[i].peFlags;
-                    } else {
-                        table[i][3] = 0xFF;
-                    }
-                }
-            }
+            d3dfmt_p8_init_palette(This, table, (convert == CONVERT_PALETTED_CK));
 
             for (y = 0; y < height; y++)
             {
@@ -1930,26 +1909,35 @@ HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UIN
     return WINED3D_OK;
 }
 
-/* This function is used in case of 8bit paletted textures to upload the palette.
-   For now it only supports GL_EXT_paletted_texture extension but support for other
-   extensions like ARB_fragment_program and ATI_fragment_shaders will be added as well.
-*/
-static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES convert) {
-    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
+static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE (*table)[4], BOOL colorkey) {
     IWineD3DPaletteImpl* pal = This->palette;
-    BYTE table[256][4];
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    BOOL index_in_alpha = FALSE;
     int i;
+
+    /* Old games like StarCraft, C&C, Red Alert and others use P8 render targets.
+    * Reading back the RGB output each lockrect (each frame as they lock the whole screen)
+    * is slow. Further RGB->P8 conversion is not possible because palettes can have
+    * duplicate entries. Store the color key in the unused alpha component to speed the
+    * download up and to make conversion unneeded. */
+    if (device->render_targets && device->render_targets[0]) {
+        IWineD3DSurfaceImpl* render_target = (IWineD3DSurfaceImpl*)device->render_targets[0];
+
+        if(render_target->resource.usage & WINED3DUSAGE_RENDERTARGET)
+            index_in_alpha = TRUE;
+    }
 
     if (pal == NULL) {
         /* Still no palette? Use the device's palette */
         /* Get the surface's palette */
         for (i = 0; i < 256; i++) {
-            IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-
             table[i][0] = device->palettes[device->currentPalette][i].peRed;
             table[i][1] = device->palettes[device->currentPalette][i].peGreen;
             table[i][2] = device->palettes[device->currentPalette][i].peBlue;
-            if ((convert == CONVERT_PALETTED_CK) &&
+
+            if(index_in_alpha) {
+                table[i][3] = i;
+            } else if (colorkey &&
                 (i >= This->SrcBltCKey.dwColorSpaceLowValue) &&
                 (i <= This->SrcBltCKey.dwColorSpaceHighValue)) {
                 /* We should maybe here put a more 'neutral' color than the standard bright purple
@@ -1967,7 +1955,11 @@ static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES conve
             table[i][0] = pal->palents[i].peRed;
             table[i][1] = pal->palents[i].peGreen;
             table[i][2] = pal->palents[i].peBlue;
-            if ((convert == CONVERT_PALETTED_CK) &&
+
+            if(index_in_alpha) {
+                table[i][3] = i;
+            }
+            else if (colorkey &&
                 (i >= This->SrcBltCKey.dwColorSpaceLowValue) &&
                 (i <= This->SrcBltCKey.dwColorSpaceHighValue)) {
                 /* We should maybe here put a more 'neutral' color than the standard bright purple
@@ -1981,7 +1973,66 @@ static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES conve
             }
         }
     }
-    GL_EXTCALL(glColorTableEXT(GL_TEXTURE_2D,GL_RGBA,256,GL_RGBA,GL_UNSIGNED_BYTE, table));
+}
+
+const char *fragment_palette_conversion =
+    "!!ARBfp1.0\n"
+    "TEMP index;\n"
+    "PARAM constants = { 0.996, 0.00195, 0, 0 };\n" /* { 255/256, 0.5/255*255/256, 0, 0 } */
+    "TEX index.x, fragment.texcoord[0], texture[0], 2D;\n" /* store the red-component of the current pixel */
+    "MUL index.x, index.x, constants.x;\n" /* Scale the index by 255/256 */
+    "ADD index.x, index.x, constants.y;\n" /* Add a bias of '0.5' in order to sample in the middle */
+    "TEX result.color, index, texture[1], 1D;\n" /* use the red-component as a index in the palette to get the final color */
+    "END";
+
+/* This function is used in case of 8bit paletted textures to upload the palette.
+   It supports GL_EXT_paletted_texture and GL_ARB_fragment_program, support for other
+   extensions like ATI_fragment_shaders is possible.
+*/
+static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES convert) {
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
+    BYTE table[256][4];
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+
+    d3dfmt_p8_init_palette(This, table, (convert == CONVERT_PALETTED_CK));
+
+    /* Try to use the paletted texture extension */
+    if(GL_SUPPORT(EXT_PALETTED_TEXTURE))
+    {
+        TRACE("Using GL_EXT_PALETTED_TEXTURE for 8-bit paletted texture support\n");
+        GL_EXTCALL(glColorTableEXT(GL_TEXTURE_2D,GL_RGBA,256,GL_RGBA,GL_UNSIGNED_BYTE, table));
+    }
+    else
+    {
+        /* Let a fragment shader do the color conversion by uploading the palette to a 1D texture.
+         * The 8bit pixel data will be used as an index in this palette texture to retrieve the final color. */
+        TRACE("Using fragment shaders for emulating 8-bit paletted texture support\n");
+
+        /* Create the fragment program if we don't have it */
+        if(!device->paletteConversionShader)
+        {
+            glEnable(GL_FRAGMENT_PROGRAM_ARB);
+            GL_EXTCALL(glGenProgramsARB(1, &device->paletteConversionShader));
+            GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, device->paletteConversionShader));
+            GL_EXTCALL(glProgramStringARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB, strlen(fragment_palette_conversion), (const GLbyte *)fragment_palette_conversion));
+            glDisable(GL_FRAGMENT_PROGRAM_ARB);
+        }
+
+        glEnable(GL_FRAGMENT_PROGRAM_ARB);
+        GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, device->paletteConversionShader));
+
+        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE1));
+        glEnable(GL_TEXTURE_1D);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+
+        glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); /* Make sure we have discrete color levels. */
+        glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexImage1D(GL_TEXTURE_1D, 0, GL_RGBA, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, table); /* Upload the palette */
+
+        /* Switch back to unit 0 in which the 2D texture will be stored. */
+        GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0));
+    }
 }
 
 static BOOL palette9_changed(IWineD3DSurfaceImpl *This) {
@@ -2153,7 +2204,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface, BO
         d3dfmt_convert_surface(This->resource.allocatedMemory, mem, pitch, width, height, outpitch, convert, This);
 
         This->Flags |= SFLAG_CONVERTED;
-    } else if (This->resource.format == WINED3DFMT_P8 && GL_SUPPORT(EXT_PALETTED_TEXTURE)) {
+    } else if( (This->resource.format == WINED3DFMT_P8) && (GL_SUPPORT(EXT_PALETTED_TEXTURE) || GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) ) {
         d3dfmt_p8_upload_palette(iface, convert);
         This->Flags &= ~SFLAG_CONVERTED;
         mem = This->resource.allocatedMemory;

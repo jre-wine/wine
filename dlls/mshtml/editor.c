@@ -385,71 +385,6 @@ static void set_font_size(HTMLDocument *This, LPCWSTR size)
     nsIDOMDocument_Release(nsdoc);
 }
 
-static BOOL is_visible_text_node(nsIDOMNode *node)
-{
-    nsIDOMCharacterData *char_data;
-    nsAString data_str;
-    LPCWSTR data, ptr;
-    PRUint32 len;
-
-    nsIDOMNode_QueryInterface(node, &IID_nsIDOMCharacterData, (void**)&char_data);
-
-    nsIDOMCharacterData_GetLength(char_data, &len);
-
-    nsAString_Init(&data_str, NULL);
-    nsIDOMCharacterData_GetData(char_data, &data_str);
-    nsAString_GetData(&data_str, &data, NULL);
-
-    if(*data == '\n') {
-        len--;
-        for(ptr=data+1; ptr && isspaceW(*ptr); ptr++)
-            len--;
-    }
-
-    nsAString_Finish(&data_str);
-
-    nsIDOMCharacterData_Release(char_data);
-
-    return len != 0;
-}
-
-static nsIDOMNode *get_child_text_node(nsIDOMNode *node, BOOL first)
-{
-    nsIDOMNode *iter, *iter2;
-
-    if(first)
-        nsIDOMNode_GetFirstChild(node, &iter);
-    else
-        nsIDOMNode_GetLastChild(node, &iter);
-
-    while(iter) {
-        PRUint16 node_type;
-
-        nsIDOMNode_GetNodeType(iter, &node_type);
-        switch(node_type) {
-        case TEXT_NODE:
-            if(is_visible_text_node(iter))
-                return iter;
-        case ELEMENT_NODE:
-            iter2 = get_child_text_node(iter, first);
-            if(iter2) {
-                nsIDOMNode_Release(iter);
-                return iter2;
-            }
-        }
-
-        if(first)
-            nsIDOMNode_GetNextSibling(iter, &iter2);
-        else
-            nsIDOMNode_GetPreviousSibling(iter, &iter2);
-
-        nsIDOMNode_Release(iter);
-        iter = iter2;
-    }
-
-    return NULL;
-}
-
 static void handle_arrow_key(HTMLDocument *This, nsIDOMKeyEvent *event, const char * const cmds[4])
 {
     int i=0;
@@ -570,29 +505,6 @@ void handle_edit_event(HTMLDocument *This, nsIDOMEvent *event)
 void handle_edit_load(HTMLDocument *This)
 {
     get_editor_controller(This->nscontainer);
-
-    if(This->ui_active) {
-        OLECHAR wszHTMLDocument[30];
-        RECT rcBorderWidths;
-
-        if(This->ip_window)
-            IOleInPlaceUIWindow_SetActiveObject(This->ip_window, NULL, NULL);
-        if(This->hostui)
-            IDocHostUIHandler_HideUI(This->hostui);
-
-        if(This->hostui)
-            IDocHostUIHandler_ShowUI(This->hostui, DOCHOSTUITYPE_AUTHOR, ACTOBJ(This), CMDTARGET(This),
-                This->frame, This->ip_window);
-
-        LoadStringW(hInst, IDS_HTMLDOCUMENT, wszHTMLDocument,
-                    sizeof(wszHTMLDocument)/sizeof(WCHAR));
-
-        if(This->ip_window)
-            IOleInPlaceUIWindow_SetActiveObject(This->ip_window, ACTOBJ(This), wszHTMLDocument);
-
-        memset(&rcBorderWidths, 0, sizeof(rcBorderWidths));
-        IOleInPlaceFrame_SetBorderSpace(This->frame, &rcBorderWidths);
-    }
 }
 
 static void set_ns_fontname(NSContainer *This, const char *fontname)

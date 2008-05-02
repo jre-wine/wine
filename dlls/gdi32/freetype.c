@@ -170,6 +170,7 @@ MAKE_FUNCPTR(FT_Outline_Get_Bitmap);
 MAKE_FUNCPTR(FT_Outline_Transform);
 MAKE_FUNCPTR(FT_Outline_Translate);
 MAKE_FUNCPTR(FT_Select_Charmap);
+MAKE_FUNCPTR(FT_Set_Charmap);
 MAKE_FUNCPTR(FT_Set_Pixel_Sizes);
 MAKE_FUNCPTR(FT_Vector_Transform);
 static void (*pFT_Library_Version)(FT_Library,FT_Int*,FT_Int*,FT_Int*);
@@ -2045,6 +2046,7 @@ BOOL WineEngInit(void)
     LOAD_FUNCPTR(FT_Outline_Transform)
     LOAD_FUNCPTR(FT_Outline_Translate)
     LOAD_FUNCPTR(FT_Select_Charmap)
+    LOAD_FUNCPTR(FT_Set_Charmap)
     LOAD_FUNCPTR(FT_Set_Pixel_Sizes)
     LOAD_FUNCPTR(FT_Vector_Transform)
 
@@ -2110,7 +2112,7 @@ BOOL WineEngInit(void)
     if (data_dir && (unixname = HeapAlloc(GetProcessHeap(), 0, strlen(data_dir) + sizeof("/fonts/")))) {
         strcpy(unixname, data_dir);
         strcat(unixname, "/fonts/");
-        ReadFontDir(unixname, FALSE);
+        ReadFontDir(unixname, TRUE);
         HeapFree(GetProcessHeap(), 0, unixname);
     }
 
@@ -2720,6 +2722,61 @@ static BOOL create_child_font_list(GdiFont *font)
     return ret;
 }
 
+static BOOL select_charmap(FT_Face ft_face, FT_Encoding encoding)
+{
+    FT_Error ft_err = FT_Err_Invalid_CharMap_Handle;
+
+    if (pFT_Set_Charmap)
+    {
+        FT_Int i;
+        FT_CharMap cmap0, cmap1, cmap2, cmap3, cmap_def;
+
+        cmap0 = cmap1 = cmap2 = cmap3 = cmap_def = NULL;
+
+        for (i = 0; i < ft_face->num_charmaps; i++)
+        {
+            if (ft_face->charmaps[i]->encoding == encoding)
+            {
+                TRACE("found cmap with platform_id %u, encoding_id %u\n",
+                       ft_face->charmaps[i]->platform_id, ft_face->charmaps[i]->encoding_id);
+
+                switch (ft_face->charmaps[i]->platform_id)
+                {
+                    default:
+                        cmap_def = ft_face->charmaps[i];
+                        break;
+                    case 0: /* Apple Unicode */
+                        cmap0 = ft_face->charmaps[i];
+                        break;
+                    case 1: /* Macintosh */
+                        cmap1 = ft_face->charmaps[i];
+                        break;
+                    case 2: /* ISO */
+                        cmap2 = ft_face->charmaps[i];
+                        break;
+                    case 3: /* Microsoft */
+                        cmap3 = ft_face->charmaps[i];
+                        break;
+                }
+            }
+
+            if (cmap3) /* prefer Microsoft cmap table */
+                ft_err = pFT_Set_Charmap(ft_face, cmap3);
+            else if (cmap1)
+                ft_err = pFT_Set_Charmap(ft_face, cmap1);
+            else if (cmap2)
+                ft_err = pFT_Set_Charmap(ft_face, cmap2);
+            else if (cmap0)
+                ft_err = pFT_Set_Charmap(ft_face, cmap0);
+            else if (cmap_def)
+                ft_err = pFT_Set_Charmap(ft_face, cmap_def);
+        }
+        return ft_err == FT_Err_Ok;
+    }
+
+    return pFT_Select_Charmap(ft_face, encoding) == FT_Err_Ok;
+}
+
 /*************************************************************
  * WineEngCreateFontInstance
  *
@@ -3007,14 +3064,14 @@ found:
     ret->ntmFlags = face->ntmFlags;
 
     if (ret->charset == SYMBOL_CHARSET && 
-        !pFT_Select_Charmap(ret->ft_face, FT_ENCODING_MS_SYMBOL)) {
+        select_charmap(ret->ft_face, FT_ENCODING_MS_SYMBOL)) {
         /* No ops */
     }
-    else if (!pFT_Select_Charmap(ret->ft_face, FT_ENCODING_UNICODE)) {
+    else if (select_charmap(ret->ft_face, FT_ENCODING_UNICODE)) {
         /* No ops */
     }
     else {
-        pFT_Select_Charmap(ret->ft_face, FT_ENCODING_APPLE_ROMAN);
+        select_charmap(ret->ft_face, FT_ENCODING_APPLE_ROMAN);
     }
 
     ret->orientation = FT_IS_SCALABLE(ret->ft_face) ? lf.lfOrientation : 0;
@@ -3443,7 +3500,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     DWORD width, height, pitch, needed = 0;
     FT_Bitmap ft_bitmap;
     FT_Error err;
-    INT left, right, top = 0, bottom = 0;
+    INT left, right, top = 0, bottom = 0, adv, lsb, bbx;
     FT_Angle angle = 0;
     FT_Int load_flags = FT_LOAD_DEFAULT | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH;
     float widthRatio = 1.0;
@@ -3476,7 +3533,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     if (!font->gm[glyph_index / GM_BLOCK_SIZE])
         font->gm[glyph_index / GM_BLOCK_SIZE] = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY, sizeof(GM) * GM_BLOCK_SIZE);
 
-    if(font->orientation || (format != GGO_METRICS && format != GGO_BITMAP) || font->aveWidth || lpmat)
+    if(font->orientation || (format != GGO_METRICS && format != GGO_BITMAP && format != WINE_GGO_GRAY16_BITMAP) || font->aveWidth || lpmat)
         load_flags |= FT_LOAD_NO_BITMAP;
 
     err = pFT_Load_Glyph(ft_face, glyph_index, load_flags);
@@ -3494,9 +3551,9 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     left = (INT)(ft_face->glyph->metrics.horiBearingX * widthRatio) & -64;
     right = (INT)((ft_face->glyph->metrics.horiBearingX + ft_face->glyph->metrics.width) * widthRatio + 63) & -64;
 
-    FONT_GM(font,glyph_index)->adv = (INT)((ft_face->glyph->metrics.horiAdvance * widthRatio) + 63) >> 6;
-    FONT_GM(font,glyph_index)->lsb = left >> 6;
-    FONT_GM(font,glyph_index)->bbx = (right - left) >> 6;
+    adv = (INT)((ft_face->glyph->metrics.horiAdvance * widthRatio) + 63) >> 6;
+    lsb = left >> 6;
+    bbx = (right - left) >> 6;
 
     /* Scaling transform */
     if(font->aveWidth) {
@@ -3552,7 +3609,7 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
 	top = (ft_face->glyph->metrics.horiBearingY + 63) & -64;
 	bottom = (ft_face->glyph->metrics.horiBearingY -
 		  ft_face->glyph->metrics.height) & -64;
-	lpgm->gmCellIncX = FONT_GM(font,glyph_index)->adv;
+	lpgm->gmCellIncX = adv;
 	lpgm->gmCellIncY = 0;
     } else {
         INT xc, yc;
@@ -3593,13 +3650,19 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
     lpgm->gmptGlyphOrigin.x = left >> 6;
     lpgm->gmptGlyphOrigin.y = top >> 6;
 
-    FONT_GM(font,glyph_index)->gm = *lpgm;
-    FONT_GM(font,glyph_index)->init = TRUE;
+    if(format == GGO_METRICS || format == GGO_BITMAP || format ==  WINE_GGO_GRAY16_BITMAP)
+    {
+        FONT_GM(font,glyph_index)->gm = *lpgm;
+        FONT_GM(font,glyph_index)->adv = adv;
+        FONT_GM(font,glyph_index)->lsb = lsb;
+        FONT_GM(font,glyph_index)->bbx = bbx;
+        FONT_GM(font,glyph_index)->init = TRUE;
+    }
 
     if(format == GGO_METRICS)
         return 1; /* FIXME */
 
-    if(ft_face->glyph->format != ft_glyph_format_outline && format != GGO_BITMAP) {
+    if(ft_face->glyph->format != ft_glyph_format_outline && format != GGO_BITMAP && format != WINE_GGO_GRAY16_BITMAP) {
         TRACE("loaded a bitmap\n");
 	return GDI_ERROR;
     }
@@ -3665,34 +3728,54 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
 	needed = pitch * height;
 
 	if(!buf || !buflen) break;
-	ft_bitmap.width = width;
-	ft_bitmap.rows = height;
-	ft_bitmap.pitch = pitch;
-	ft_bitmap.pixel_mode = ft_pixel_mode_grays;
-	ft_bitmap.buffer = buf;
 
-	if(needsTransform) {
-		pFT_Outline_Transform(&ft_face->glyph->outline, &transMat);
-	}
+	switch(ft_face->glyph->format) {
+	case ft_glyph_format_bitmap:
+	  {
+            BYTE *src = ft_face->glyph->bitmap.buffer, *dst = buf;
+            INT h = ft_face->glyph->bitmap.rows;
+            INT x;
+            while(h--) {
+                for(x = 0; x < pitch; x++)
+                    dst[x] = (src[x / 8] & (1 << ( (7 - (x % 8))))) ? 0xff : 0;
+                src += ft_face->glyph->bitmap.pitch;
+                dst += pitch;
+            }
+            return needed;
+	  }
+        case ft_glyph_format_outline:
+          {
+            ft_bitmap.width = width;
+            ft_bitmap.rows = height;
+            ft_bitmap.pitch = pitch;
+            ft_bitmap.pixel_mode = ft_pixel_mode_grays;
+            ft_bitmap.buffer = buf;
 
-	pFT_Outline_Translate(&ft_face->glyph->outline, -left, -bottom );
+            if(needsTransform)
+                pFT_Outline_Transform(&ft_face->glyph->outline, &transMat);
 
-	memset(ft_bitmap.buffer, 0, buflen);
+            pFT_Outline_Translate(&ft_face->glyph->outline, -left, -bottom );
 
-	pFT_Outline_Get_Bitmap(library, &ft_face->glyph->outline, &ft_bitmap);
+            memset(ft_bitmap.buffer, 0, buflen);
 
-	if(format == GGO_GRAY2_BITMAP)
-	    mult = 4;
-	else if(format == GGO_GRAY4_BITMAP)
-	    mult = 16;
-	else if(format == GGO_GRAY8_BITMAP)
-	    mult = 64;
-	else if(format == WINE_GGO_GRAY16_BITMAP)
-	    break;
-	else {
-	    assert(0);
-	    break;
-	}
+            pFT_Outline_Get_Bitmap(library, &ft_face->glyph->outline, &ft_bitmap);
+
+            if(format == GGO_GRAY2_BITMAP)
+                mult = 4;
+            else if(format == GGO_GRAY4_BITMAP)
+                mult = 16;
+            else if(format == GGO_GRAY8_BITMAP)
+                mult = 64;
+            else if(format == WINE_GGO_GRAY16_BITMAP)
+                return needed;
+            else
+                assert(0);
+            break;
+          }
+        default:
+            FIXME("loaded glyph format %x\n", ft_face->glyph->format);
+            return GDI_ERROR;
+        }
 
 	start = buf;
 	for(row = 0; row < height; row++) {

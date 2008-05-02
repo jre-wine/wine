@@ -1356,6 +1356,7 @@ static void z_range_test(IDirect3DDevice9 *device)
     DWORD color;
     IDirect3DVertexShader9 *shader;
     IDirect3DVertexDeclaration9 *decl;
+    D3DCAPS9 caps;
     const DWORD shader_code[] = {
         0xfffe0101,                                     /* vs_1_1           */
         0x0000001f, 0x80000000, 0x900f0000,             /* dcl_position v0  */
@@ -1453,12 +1454,15 @@ static void z_range_test(IDirect3DDevice9 *device)
     ok(color == 0x00ffffff, "Z range failed: Got color 0x%08x, expected 0x00ffffff.\n", color);
 
     /* Test the shader path */
-    hr = IDirect3DDevice9_CreateVertexShader(device, shader_code, &shader);
-    if(FAILED(hr)) {
-        skip("Can't create test vertex shader, most likely shaders not supported\n");
+    IDirect3DDevice9_GetDeviceCaps(device, &caps);
+    if (caps.VertexShaderVersion < D3DVS_VERSION(1, 1)) {
+        skip("Vertex shaders not supported\n");
         goto out;
     }
+    hr = IDirect3DDevice9_CreateVertexShader(device, shader_code, &shader);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateVertexShader returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &decl);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateVertexDeclaration returned %s\n", DXGetErrorString9(hr));
 
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.4, 0);
 
@@ -2563,8 +2567,11 @@ static void texdepth_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 638, 240);
     ok(color == 0x000000ff, "Pixel 638(100%% + 2 pixel) has color %08x, expected 0x000000ff\n", color);
 
+    /* Cleanup */
     hr = IDirect3DDevice9_SetPixelShader(device, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed (%08x)\n", hr);
+    IDirect3DPixelShader9_Release(shader);
+
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ZENABLE, D3DZB_FALSE);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ZWRITEENABLE, TRUE);
@@ -2718,6 +2725,11 @@ static void texkill_test(IDirect3DDevice9 *device)
     ok(color == 0x00ffff00, "Pixel 578/49 has color %08x, expected 0x00ffff00\n", color);
     color = getPixelColor(device, 575, 430);
     ok(color == 0x000000ff, "Pixel 575/49 has color %08x, expected 0x000000ff\n", color);
+
+    /* Cleanup */
+    hr = IDirect3DDevice9_SetPixelShader(device, NULL);
+    ok(SUCCEEDED(hr), "SetPixelShader failed (%08x)\n", hr);
+    IDirect3DPixelShader9_Release(shader);
 }
 
 static void x8l8v8u8_test(IDirect3DDevice9 *device)
@@ -3560,6 +3572,61 @@ static void cnd_test(IDirect3DDevice9 *device)
     IDirect3DPixelShader9_Release(shader_11);
 }
 
+static void nested_loop_test(IDirect3DDevice9 *device) {
+    const DWORD shader_code[] = {
+        0xffff0300,                                                             /* ps_3_0               */
+        0x05000051, 0xa00f0000, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, /* def c0, 0, 0, 0, 1   */
+        0x05000051, 0xa00f0001, 0x3d000000, 0x00000000, 0x00000000, 0x00000000, /* def c1, 1/32, 0, 0, 0*/
+        0x05000030, 0xf00f0000, 0x00000004, 0x00000000, 0x00000002, 0x00000000, /* defi i0, 4, 0, 2, 0  */
+        0x02000001, 0x800f0000, 0xa0e40000,                                     /* mov r0, c0           */
+        0x0200001b, 0xf0e40800, 0xf0e40000,                                     /* loop aL, i0          */
+        0x0200001b, 0xf0e40800, 0xf0e40000,                                     /* loop aL, i0          */
+        0x03000002, 0x800f0000, 0x80e40000, 0xa0e40001,                         /* add r0, r0, c1       */
+        0x0000001d,                                                             /* endloop              */
+        0x0000001d,                                                             /* endloop              */
+        0x02000001, 0x800f0800, 0x80e40000,                                     /* mov oC0, r0          */
+        0x0000ffff                                                              /* end                  */
+    };
+    IDirect3DPixelShader9 *shader;
+    HRESULT hr;
+    DWORD color;
+    const float quad[] = {
+        -1.0,   -1.0,   0.1,
+         1.0,   -1.0,   0.1,
+        -1.0,    1.0,   0.1,
+         1.0,    1.0,   0.1
+    };
+
+    hr = IDirect3DDevice9_CreatePixelShader(device, shader_code, &shader);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreatePixelShader failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetPixelShader(device, shader);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0x0000ff00, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene returned %s\n", DXGetErrorString9(hr));
+    if(SUCCEEDED(hr))
+    {
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, 3 * sizeof(float));
+        ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene returned %s\n", DXGetErrorString9(hr));
+    }
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+
+    color = getPixelColor(device, 360, 240);
+    ok(color == 0x007f0000 || color == 0x00800000 || color == 0x00810000,
+       "Nested loop test returned color 0x%08x, expected 0x00800000\n", color);
+
+    hr = IDirect3DDevice9_SetPixelShader(device, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed with %s\n", DXGetErrorString9(hr));
+    IDirect3DPixelShader9_Release(shader);
+}
+
 START_TEST(visual)
 {
     IDirect3DDevice9 *device_ptr;
@@ -3667,6 +3734,11 @@ START_TEST(visual)
         if (caps.PixelShaderVersion >= D3DPS_VERSION(1, 4)) {
             constant_clamp_ps_test(device_ptr);
             cnd_test(device_ptr);
+            if (caps.PixelShaderVersion >= D3DPS_VERSION(3, 0)) {
+                nested_loop_test(device_ptr);
+            } else {
+                skip("No ps_3_0 support\n");
+            }
         }
     }
     else skip("No ps_1_1 support\n");

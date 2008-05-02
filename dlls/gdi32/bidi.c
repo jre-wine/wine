@@ -1054,7 +1054,7 @@ BOOL BIDI_Reorder(
 {
     WORD *levels;
     WORD *chartype;
-    unsigned i, baselevel = 0, forcedir = 0, done;
+    unsigned i, baselevel = 0, done;
     TRACE("%s, %d, 0x%08x lpOutString=%p, lpOrder=%p\n",
           debugstr_wn(lpString, uCount), uCount, dwFlags,
           lpOutString, lpOrder);
@@ -1081,14 +1081,8 @@ BOOL BIDI_Reorder(
 
     memcpy(lpOutString, lpString, uCount * sizeof(WCHAR));
 
-    switch (dwWineGCP_Flags&WINE_GCPW_DIR_MASK)
-    {
-    /* force means initial level is set directly,
-     * loose means initial level is determined by first character that has a direction */
-    case WINE_GCPW_FORCE_LTR: forcedir = L; break;
-    case WINE_GCPW_FORCE_RTL: forcedir = R; baselevel = 1; break;
-    default: break;
-    }
+    if (WINE_GCPW_FORCE_RTL == (dwWineGCP_Flags&WINE_GCPW_DIR_MASK))
+        baselevel = 1;
 
     i = done = 0;
     while (done < uCount)
@@ -1097,39 +1091,36 @@ BOOL BIDI_Reorder(
         classify(lpOutString + done, chartype, uCount - done);
         /* limit text to first block */
         i = resolveParagraphs(chartype, uCount - done);
-        for (j = 0; j < i - 1; ++j)
+        for (j = 0; j < i; ++j)
             switch(chartype[j])
             {
                 case B:
                 case S:
                 case WS:
-                case ON: chartype[i] = N;
+                case ON: chartype[j] = N;
                 default: continue;
             }
 
-        if (!forcedir)
-        {
-            if ((dwWineGCP_Flags&WINE_GCPW_DIR_MASK) == WINE_GCPW_LOOSE_RTL)
-                baselevel = 1;
-            else baselevel = 0;
+        if ((dwWineGCP_Flags&WINE_GCPW_DIR_MASK) == WINE_GCPW_LOOSE_RTL)
+            baselevel = 1;
+        else if ((dwWineGCP_Flags&WINE_GCPW_DIR_MASK) == WINE_GCPW_LOOSE_LTR)
+            baselevel = 0;
 
+        if (dwWineGCP_Flags & WINE_GCPW_LOOSE_MASK)
             for (j = 0; j < i; ++j)
-            {
                 if (chartype[j] == L)
                 {
                     baselevel = 0;
                     break;
                 }
-                if (chartype[j] == R)
+                else if (chartype[j] == R || chartype[j] == AL)
                 {
                     baselevel = 1;
                     break;
                 }
-            }
-        }
 
         /* resolve explicit */
-        resolveExplicit(baselevel, forcedir, chartype, levels, i, 0);
+        resolveExplicit(baselevel, N, chartype, levels, i, 0);
 
         /* resolve weak */
         resolveWeak(baselevel, chartype, levels, i);

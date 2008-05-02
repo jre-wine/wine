@@ -198,6 +198,8 @@ static const struct object_ops fd_ops =
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
     no_map_access,            /* map_access */
+    default_get_sd,           /* get_sd */
+    default_set_sd,           /* set_sd */
     no_lookup_name,           /* lookup_name */
     no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
@@ -232,6 +234,8 @@ static const struct object_ops device_ops =
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
     no_map_access,            /* map_access */
+    default_get_sd,           /* get_sd */
+    default_set_sd,           /* set_sd */
     no_lookup_name,           /* lookup_name */
     no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
@@ -265,6 +269,8 @@ static const struct object_ops inode_ops =
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
     no_map_access,            /* map_access */
+    default_get_sd,           /* get_sd */
+    default_set_sd,           /* set_sd */
     no_lookup_name,           /* lookup_name */
     no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
@@ -300,6 +306,8 @@ static const struct object_ops file_lock_ops =
     no_signal,                  /* signal */
     no_get_fd,                  /* get_fd */
     no_map_access,              /* map_access */
+    default_get_sd,             /* get_sd */
+    default_set_sd,             /* set_sd */
     no_lookup_name,             /* lookup_name */
     no_open_file,               /* open_file */
     no_close_handle,            /* close_handle */
@@ -1708,6 +1716,16 @@ int default_fd_signaled( struct object *obj, struct thread *thread )
     int ret = fd->signaled;
     release_object( fd );
     return ret;
+}
+
+/* default map_access() routine for objects that behave like an fd */
+unsigned int default_fd_map_access( struct object *obj, unsigned int access )
+{
+    if (access & GENERIC_READ)    access |= FILE_GENERIC_READ;
+    if (access & GENERIC_WRITE)   access |= FILE_GENERIC_WRITE;
+    if (access & GENERIC_EXECUTE) access |= FILE_GENERIC_EXECUTE;
+    if (access & GENERIC_ALL)     access |= FILE_ALL_ACCESS;
+    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
 int default_fd_get_poll_events( struct fd *fd )

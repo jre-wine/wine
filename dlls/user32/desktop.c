@@ -179,24 +179,6 @@ BOOL WINAPI PaintDesktop(HDC hdc)
 }
 
 /***********************************************************************
- *           OldSetDeskPattern   (USER.279)
- */
-BOOL16 WINAPI SetDeskPattern(void)
-{
-    return SystemParametersInfoA( SPI_SETDESKPATTERN, -1, NULL, FALSE );
-}
-
-
-/***********************************************************************
- *           SetDeskWallPaper   (USER.285)
- */
-BOOL16 WINAPI SetDeskWallPaper16( LPCSTR filename )
-{
-    return SetDeskWallPaper( filename );
-}
-
-
-/***********************************************************************
  *           SetDeskWallPaper   (USER32.@)
  *
  * FIXME: is there a unicode version?

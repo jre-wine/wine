@@ -1922,18 +1922,54 @@ BOOL WINAPI CertRemoveEnhancedKeyUsageIdentifier(PCCERT_CONTEXT pCertContext,
     return ret;
 }
 
+struct BitField
+{
+    DWORD  cIndexes;
+    DWORD *indexes;
+};
+
+#define BITS_PER_DWORD (sizeof(DWORD) * 8)
+
+static void CRYPT_SetBitInField(struct BitField *field, DWORD bit)
+{
+    DWORD indexIndex = bit / BITS_PER_DWORD;
+
+    if (indexIndex + 1 > field->cIndexes)
+    {
+        if (field->cIndexes)
+            field->indexes = CryptMemRealloc(field->indexes,
+             (indexIndex + 1) * sizeof(DWORD));
+        else
+            field->indexes = CryptMemAlloc(sizeof(DWORD));
+        if (field->indexes)
+            field->cIndexes = indexIndex + 1;
+    }
+    if (field->indexes)
+        field->indexes[indexIndex] |= 1 << (bit % BITS_PER_DWORD);
+}
+
+static BOOL CRYPT_IsBitInFieldSet(struct BitField *field, DWORD bit)
+{
+    BOOL set = FALSE;
+    DWORD indexIndex = bit / BITS_PER_DWORD;
+
+    assert(field->cIndexes);
+    set = field->indexes[indexIndex] & (1 << (bit % BITS_PER_DWORD));
+    return set;
+}
+
 BOOL WINAPI CertGetValidUsages(DWORD cCerts, PCCERT_CONTEXT *rghCerts,
- int *cNumOIDSs, LPSTR *rghOIDs, DWORD *pcbOIDs)
+ int *cNumOIDs, LPSTR *rghOIDs, DWORD *pcbOIDs)
 {
     BOOL ret = TRUE;
     DWORD i, cbOIDs = 0;
     BOOL allUsagesValid = TRUE;
     CERT_ENHKEY_USAGE validUsages = { 0, NULL };
 
-    TRACE("(%d, %p, %p, %p, %d)\n", cCerts, *rghCerts, cNumOIDSs,
+    TRACE("(%d, %p, %d, %p, %d)\n", cCerts, rghCerts, *cNumOIDs,
      rghOIDs, *pcbOIDs);
 
-    for (i = 0; ret && i < cCerts; i++)
+    for (i = 0; i < cCerts; i++)
     {
         CERT_ENHKEY_USAGE usage;
         DWORD size = sizeof(usage);
@@ -1975,12 +2011,11 @@ BOOL WINAPI CertGetValidUsages(DWORD cCerts, PCCERT_CONTEXT *rghCerts,
                                 nextOID += lstrlenA(nextOID) + 1;
                             }
                         }
-                        else
-                            ret = FALSE;
                     }
                     else
                     {
-                        DWORD j, k, validIndexes = 0, numRemoved = 0;
+                        struct BitField validIndexes = { 0, NULL };
+                        DWORD j, k, numRemoved = 0;
 
                         /* Merge: build a bitmap of all the indexes of
                          * validUsages.rgpszUsageIdentifier that are in pUsage.
@@ -1992,7 +2027,7 @@ BOOL WINAPI CertGetValidUsages(DWORD cCerts, PCCERT_CONTEXT *rghCerts,
                                 if (!strcmp(pUsage->rgpszUsageIdentifier[j],
                                  validUsages.rgpszUsageIdentifier[k]))
                                 {
-                                    validIndexes |= (1 << k);
+                                    CRYPT_SetBitInField(&validIndexes, k);
                                     break;
                                 }
                             }
@@ -2002,7 +2037,7 @@ BOOL WINAPI CertGetValidUsages(DWORD cCerts, PCCERT_CONTEXT *rghCerts,
                          */
                         for (j = 0; j < validUsages.cUsageIdentifier; j++)
                         {
-                            if (!(validIndexes & (1 << j)))
+                            if (!CRYPT_IsBitInFieldSet(&validIndexes, j))
                             {
                                 if (j < validUsages.cUsageIdentifier - 1)
                                 {
@@ -2014,52 +2049,54 @@ BOOL WINAPI CertGetValidUsages(DWORD cCerts, PCCERT_CONTEXT *rghCerts,
                                     cbOIDs -= lstrlenA(
                                      validUsages.rgpszUsageIdentifier[j]) + 1 +
                                      sizeof(LPSTR);
+                                    validUsages.cUsageIdentifier--;
                                     numRemoved++;
                                 }
                                 else
                                     validUsages.cUsageIdentifier--;
                             }
                         }
+                        CryptMemFree(validIndexes.indexes);
                     }
                 }
                 CryptMemFree(pUsage);
             }
-            else
-                ret = FALSE;
         }
     }
-    if (ret)
+    ret = TRUE;
+    if (allUsagesValid)
     {
-        if (allUsagesValid)
+        *cNumOIDs = -1;
+        *pcbOIDs = 0;
+    }
+    else
+    {
+        *cNumOIDs = validUsages.cUsageIdentifier;
+        if (!rghOIDs)
+            *pcbOIDs = cbOIDs;
+        else if (*pcbOIDs < cbOIDs)
         {
-            *cNumOIDSs = -1;
-            *pcbOIDs = 0;
+            *pcbOIDs = cbOIDs;
+            SetLastError(ERROR_MORE_DATA);
+            ret = FALSE;
         }
         else
         {
-            if (!rghOIDs || *pcbOIDs < cbOIDs)
-            {
-                *pcbOIDs = cbOIDs;
-                SetLastError(ERROR_MORE_DATA);
-                ret = FALSE;
-            }
-            else
-            {
-                LPSTR nextOID = (LPSTR)((LPBYTE)rghOIDs +
-                 validUsages.cUsageIdentifier * sizeof(LPSTR));
+            LPSTR nextOID = (LPSTR)((LPBYTE)rghOIDs +
+             validUsages.cUsageIdentifier * sizeof(LPSTR));
 
-                *pcbOIDs = cbOIDs;
-                *cNumOIDSs = validUsages.cUsageIdentifier;
-                for (i = 0; i < validUsages.cUsageIdentifier; i++)
-                {
-                    rghOIDs[i] = nextOID;
-                    lstrcpyA(nextOID, validUsages.rgpszUsageIdentifier[i]);
-                    nextOID += lstrlenA(nextOID) + 1;
-                }
+            *pcbOIDs = cbOIDs;
+            for (i = 0; i < validUsages.cUsageIdentifier; i++)
+            {
+                rghOIDs[i] = nextOID;
+                lstrcpyA(nextOID, validUsages.rgpszUsageIdentifier[i]);
+                nextOID += lstrlenA(nextOID) + 1;
             }
         }
     }
     CryptMemFree(validUsages.rgpszUsageIdentifier);
+    TRACE("cNumOIDs: %d\n", *cNumOIDs);
+    TRACE("returning %d\n", ret);
     return ret;
 }
 

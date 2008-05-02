@@ -51,6 +51,23 @@
 #define WND_POPUP_ID		2
 #define WND_CHILD_ID		3
 
+/* encoded DRAWITEMSTRUCT into an LPARAM */
+typedef struct
+{
+    union
+    {
+        struct
+        {
+            UINT type    : 4;  /* ODT_* flags */
+            UINT ctl_id  : 4;  /* Control ID */
+            UINT item_id : 4;  /* Menu item ID */
+            UINT action  : 4;  /* ODA_* flags */
+            UINT state   : 16; /* ODS_* flags */
+        } item;
+        LPARAM lp;
+    } u;
+} DRAW_ITEM_STRUCT;
+
 static BOOL test_DestroyWindow_flag;
 static HWINEVENTHOOK hEvent_hook;
 
@@ -261,14 +278,14 @@ static const struct message WmSwitchChild[] = {
     { WM_NCACTIVATE, sent|wparam|defwinproc, 1 }, /* in the 1st MDI child */
     { HCBT_SETFOCUS, hook },
     { WM_KILLFOCUS, sent|defwinproc }, /* in the 2nd MDI child */
-    { WM_IME_SETCONTEXT, sent|wparam|defwinproc, 0 },/* in the 1st MDI child */
-    { WM_IME_SETCONTEXT, sent|wparam, 1 }, /* in MDI client */
+    { WM_IME_SETCONTEXT, sent|wparam|defwinproc|optional, 0 },/* in the 1st MDI child */
+    { WM_IME_SETCONTEXT, sent|wparam|optional, 1 }, /* in MDI client */
     { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SETFOCUS, sent },/* in the MDI client */
     { HCBT_SETFOCUS, hook },
     { WM_KILLFOCUS, sent },/* in the MDI client */
-    { WM_IME_SETCONTEXT, sent|wparam, 0 }, /* in MDI client */
-    { WM_IME_SETCONTEXT, sent|wparam|defwinproc, 1 }, /* in the 1st MDI child */
+    { WM_IME_SETCONTEXT, sent|wparam|optional, 0 }, /* in MDI client */
+    { WM_IME_SETCONTEXT, sent|wparam|defwinproc|optional, 1 }, /* in the 1st MDI child */
     { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SETFOCUS, sent|defwinproc }, /* in the 1st MDI child */
     { WM_MDIACTIVATE, sent|defwinproc },/* in the 1st MDI child */
@@ -3852,6 +3869,41 @@ static const struct message WmSetIcon_2[] = {
     { 0 }
 };
 
+/* Sending undocumented 0x3B message with wparam = 0x8000000b */
+static const struct message WmInitEndSession[] = {
+    { 0x003B, sent },
+    { WM_QUERYENDSESSION, sent|defwinproc|wparam|lparam, 0, ENDSESSION_LOGOFF },
+    { 0 }
+};
+
+/* Sending undocumented 0x3B message with wparam = 0x0000000b */
+static const struct message WmInitEndSession_2[] = {
+    { 0x003B, sent },
+    { WM_QUERYENDSESSION, sent|defwinproc|wparam|lparam, 0, 0 },
+    { 0 }
+};
+
+/* Sending undocumented 0x3B message with wparam = 0x80000008 */
+static const struct message WmInitEndSession_3[] = {
+    { 0x003B, sent },
+    { WM_ENDSESSION, sent|defwinproc|wparam|lparam, 0, ENDSESSION_LOGOFF },
+    { 0 }
+};
+
+/* Sending undocumented 0x3B message with wparam = 0x00000008 */
+static const struct message WmInitEndSession_4[] = {
+    { 0x003B, sent },
+    { WM_ENDSESSION, sent|defwinproc|wparam|lparam, 0, 0 },
+    { 0 }
+};
+
+/* Sending undocumented 0x3B message with wparam = 0x80000001 */
+static const struct message WmInitEndSession_5[] = {
+    { 0x003B, sent },
+    { WM_ENDSESSION, sent|defwinproc|wparam|lparam, 1, ENDSESSION_LOGOFF },
+    { 0 }
+};
+
 static void test_MsgWaitForMultipleObjects(HWND hwnd)
 {
     DWORD ret;
@@ -3902,6 +3954,7 @@ static void test_messages(void)
     HWND hchild2, hbutton;
     HMENU hmenu;
     MSG msg;
+    LRESULT res;
 
     flush_sequence();
 
@@ -4275,6 +4328,41 @@ static void test_messages(void)
     flush_sequence();
     SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)LoadIcon(0, IDI_APPLICATION));
     ok_sequence(WmSetIcon_2, "WM_SETICON for hidden window without caption", FALSE);
+
+    flush_sequence();
+    res = SendMessage(hwnd, 0x3B, 0x8000000b, 0);
+    ok_sequence(WmInitEndSession, "Handling of undocumented 0x3B message by DefWindowProc wparam=0x8000000b", TRUE);
+    todo_wine
+    ok(res == 1, "SendMessage(hwnd, 0x3B, 0x8000000b, 0) should have returned 1 instead of %ld\n", res);
+    res = SendMessage(hwnd, 0x3B, 0x0000000b, 0);
+    ok_sequence(WmInitEndSession_2, "Handling of undocumented 0x3B message by DefWindowProc wparam=0x0000000b", TRUE);
+    todo_wine
+    ok(res == 1, "SendMessage(hwnd, 0x3B, 0x0000000b, 0) should have returned 1 instead of %ld\n", res);
+    res = SendMessage(hwnd, 0x3B, 0x0000000f, 0);
+    ok_sequence(WmInitEndSession_2, "Handling of undocumented 0x3B message by DefWindowProc wparam=0x0000000f", TRUE);
+    todo_wine
+    ok(res == 1, "SendMessage(hwnd, 0x3B, 0x0000000f, 0) should have returned 1 instead of %ld\n", res);
+
+    flush_sequence();
+    res = SendMessage(hwnd, 0x3B, 0x80000008, 0);
+    ok_sequence(WmInitEndSession_3, "Handling of undocumented 0x3B message by DefWindowProc wparam=0x80000008", TRUE);
+    todo_wine
+    ok(res == 2, "SendMessage(hwnd, 0x3B, 0x80000008, 0) should have returned 2 instead of %ld\n", res);
+    res = SendMessage(hwnd, 0x3B, 0x00000008, 0);
+    ok_sequence(WmInitEndSession_4, "Handling of undocumented 0x3B message by DefWindowProc wparam=0x00000008", TRUE);
+    todo_wine
+    ok(res == 2, "SendMessage(hwnd, 0x3B, 0x00000008, 0) should have returned 2 instead of %ld\n", res);
+
+    res = SendMessage(hwnd, 0x3B, 0x80000004, 0);
+    ok_sequence(WmInitEndSession_3, "Handling of undocumented 0x3B message by DefWindowProc wparam=0x80000004", TRUE);
+    todo_wine
+    ok(res == 2, "SendMessage(hwnd, 0x3B, 0x80000004, 0) should have returned 2 instead of %ld\n", res);
+
+    res = SendMessage(hwnd, 0x3B, 0x80000001, 0);
+    ok_sequence(WmInitEndSession_5, "Handling of undocumented 0x3B message by DefWindowProc wparam=0x80000001", TRUE);
+    todo_wine
+    ok(res == 2, "SendMessage(hwnd, 0x3B, 0x80000001, 0) should have returned 2 instead of %ld\n", res);
+
     DestroyWindow(hwnd);
     flush_sequence();
 }
@@ -6164,6 +6252,7 @@ static LRESULT WINAPI ParentMsgCheckProcA(HWND hwnd, UINT message, WPARAM wParam
         message == WM_PARENTNOTIFY || message == WM_CANCELMODE ||
 	message == WM_SETFOCUS || message == WM_KILLFOCUS ||
 	message == WM_ENABLE ||	message == WM_ENTERIDLE ||
+        message == WM_DRAWITEM ||
 	message == WM_IME_SETCONTEXT)
     {
         switch (message)
@@ -6202,6 +6291,25 @@ static LRESULT WINAPI ParentMsgCheckProcA(HWND hwnd, UINT message, WPARAM wParam
                 wParam = winpos->flags & 0xffff;
                 /* We are not interested in the flags that don't match under XP and Win9x */
                 wParam &= ~(SWP_NOZORDER);
+                break;
+            }
+
+            case WM_DRAWITEM:
+            {
+                /* encode DRAWITEMSTRUCT into an LPARAM */
+                DRAW_ITEM_STRUCT di;
+                DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
+
+                trace("WM_DRAWITEM: type %x, ctl_id %x, item_id %x, action %x, state %x\n",
+                      dis->CtlType, dis->CtlID, dis->itemID, dis->itemAction, dis->itemState);
+
+                di.u.item.type = dis->CtlType;
+                di.u.item.ctl_id = dis->CtlID;
+                di.u.item.item_id = dis->itemID;
+                di.u.item.action = dis->itemAction;
+                di.u.item.state = dis->itemState;
+
+                lParam = di.u.lp;
                 break;
             }
         }
@@ -6533,6 +6641,7 @@ static LRESULT CALLBACK cbt_hook_proc(int nCode, WPARAM wParam, LPARAM lParam)
 	    !lstrcmpiA(buf, "my_button_class") ||
 	    !lstrcmpiA(buf, "my_edit_class") ||
 	    !lstrcmpiA(buf, "static") ||
+	    !lstrcmpiA(buf, "ListBox") ||
 	    !lstrcmpiA(buf, "MyDialogClass") ||
 	    !lstrcmpiA(buf, "#32770"))
 	{
@@ -6580,6 +6689,7 @@ static void CALLBACK win_event_proc(HWINEVENTHOOK hevent,
 	    !lstrcmpiA(buf, "my_button_class") ||
 	    !lstrcmpiA(buf, "my_edit_class") ||
 	    !lstrcmpiA(buf, "static") ||
+	    !lstrcmpiA(buf, "ListBox") ||
 	    !lstrcmpiA(buf, "MyDialogClass") ||
 	    !lstrcmpiA(buf, "#32770"))
 	{
@@ -8435,6 +8545,107 @@ todo_wine {
     DestroyWindow(info.hwnd);
 }
 
+static void wait_move_event(HWND hwnd, int x, int y)
+{
+    MSG msg;
+    DWORD time;
+    BOOL  ret;
+    int go = 0;
+
+    time = GetTickCount();
+    while (GetTickCount() - time < 200 && !go) {
+	ret = PeekMessageA(&msg, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_NOREMOVE);
+	go  = ret && msg.pt.x > x && msg.pt.y > y;
+    }
+}
+
+#define STEP 20
+static void test_PeekMessage2(void)
+{
+    HWND hwnd;
+    BOOL ret;
+    MSG msg;
+    UINT message;
+    DWORD time1, time2, time3;
+    int x1, y1, x2, y2, x3, y3;
+    POINT pos;
+
+    time1 = time2 = time3 = 0;
+    x1 = y1 = x2 = y2 = x3 = y3 = 0;
+
+    /* Initialise window and make sure it is ready for events */
+    hwnd = CreateWindow("TestWindowClass", "PeekMessage2", WS_OVERLAPPEDWINDOW,
+                        10, 10, 800, 800, NULL, NULL, NULL, NULL);
+    assert(hwnd);
+    trace("Window for test_PeekMessage2 %p\n", hwnd);
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
+    SetFocus(hwnd);
+    GetCursorPos(&pos);
+    SetCursorPos(100, 100);
+    mouse_event(MOUSEEVENTF_MOVE, -STEP, -STEP, 0, 0);
+    flush_events();
+
+    /* Do initial mousemove, wait until we can see it
+       and then do our test peek with PM_NOREMOVE. */
+    mouse_event(MOUSEEVENTF_MOVE, STEP, STEP, 0, 0);
+    wait_move_event(hwnd, 80, 80);
+
+    ret = PeekMessageA(&msg, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_NOREMOVE);
+    ok(ret, "no message available\n");
+    if (ret) {
+	trace("1st move event: %04x %x %d %d\n", msg.message, msg.time, msg.pt.x, msg.pt.y);
+	message = msg.message;
+	time1 = msg.time;
+	x1 = msg.pt.x;
+	y1 = msg.pt.y;
+        ok(message == WM_MOUSEMOVE, "message not WM_MOUSEMOVE, %04x instead\n", message);
+    }
+
+    /* Allow time to advance a bit, and then simulate the user moving their
+     * mouse around. After that we peek again with PM_NOREMOVE.
+     * Although the previous mousemove message was never removed, the
+     * mousemove we now peek should reflect the recent mouse movements
+     * because the input queue will merge the move events. */
+    Sleep(2);
+    mouse_event(MOUSEEVENTF_MOVE, STEP, STEP, 0, 0);
+    wait_move_event(hwnd, x1, y1);
+
+    ret = PeekMessageA(&msg, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_NOREMOVE);
+    ok(ret, "no message available\n");
+    if (ret) {
+	trace("2nd move event: %04x %x %d %d\n", msg.message, msg.time, msg.pt.x, msg.pt.y);
+	message = msg.message;
+	time2 = msg.time;
+	x2 = msg.pt.x;
+	y2 = msg.pt.y;
+        ok(message == WM_MOUSEMOVE, "message not WM_MOUSEMOVE, %04x instead\n", message);
+	ok(time2 > time1, "message time not advanced: %x %x\n", time1, time2);
+	ok(x2 != x1 && y2 != y1, "coords not changed: (%d %d) (%d %d)\n", x1, y1, x2, y2);
+    }
+
+    /* Have another go, to drive the point home */
+    Sleep(2);
+    mouse_event(MOUSEEVENTF_MOVE, STEP, STEP, 0, 0);
+    wait_move_event(hwnd, x2, y2);
+
+    ret = PeekMessageA(&msg, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_NOREMOVE);
+    ok(ret, "no message available\n");
+    if (ret) {
+	trace("3rd move event: %04x %x %d %d\n", msg.message, msg.time, msg.pt.x, msg.pt.y);
+	message = msg.message;
+	time3 = msg.time;
+	x3 = msg.pt.x;
+	y3 = msg.pt.y;
+        ok(message == WM_MOUSEMOVE, "message not WM_MOUSEMOVE, %04x instead\n", message);
+	ok(time3 > time2, "message time not advanced: %x %x\n", time2, time3);
+	ok(x3 != x2 && y3 != y2, "coords not changed: (%d %d) (%d %d)\n", x2, y2, x3, y3);
+    }
+
+    DestroyWindow(hwnd);
+    SetCursorPos(pos.x, pos.y);
+    flush_events();
+}
 
 static void test_quit_message(void)
 {
@@ -9631,6 +9842,113 @@ static void test_dbcs_wm_char(void)
     DestroyWindow(hwnd);
 }
 
+#define ID_LISTBOX 0x000f
+
+static const struct message wm_lb_setcursel_0[] =
+{
+    { LB_SETCURSEL, sent|wparam|lparam, 0, 0 },
+    { WM_CTLCOLORLISTBOX, sent|parent },
+    { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x00120f2 },
+    { 0 }
+};
+static const struct message wm_lb_setcursel_1[] =
+{
+    { LB_SETCURSEL, sent|wparam|lparam, 1, 0 },
+    { WM_CTLCOLORLISTBOX, sent|parent },
+    { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x00020f2 },
+    { WM_CTLCOLORLISTBOX, sent|parent },
+    { WM_DRAWITEM, sent|wparam|lparam|parent, ID_LISTBOX, 0x00121f2 },
+    { 0 }
+};
+
+#define check_lb_state(a1, a2, a3, a4, a5) check_lb_state_dbg(a1, a2, a3, a4, a5, __LINE__)
+
+static LRESULT (WINAPI *listbox_orig_proc)(HWND, UINT, WPARAM, LPARAM);
+
+static LRESULT WINAPI listbox_hook_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
+{
+    struct message msg;
+
+    /* do not log painting messages */
+    if (message != WM_PAINT &&
+        message != WM_NCPAINT &&
+        message != WM_SYNCPAINT &&
+        message != WM_ERASEBKGND &&
+        message != WM_NCHITTEST &&
+        message != WM_GETTEXT &&
+        message != WM_GETICON &&
+        message != WM_DEVICECHANGE)
+    {
+        trace("listbox: %p, %04x, %08lx, %08lx\n", hwnd, message, wp, lp);
+
+        msg.message = message;
+        msg.flags = sent|wparam|lparam;
+        msg.wParam = wp;
+        msg.lParam = lp;
+        add_message(&msg);
+    }
+
+    return CallWindowProcA(listbox_orig_proc, hwnd, message, wp, lp);
+}
+
+static void check_lb_state_dbg(HWND listbox, int count, int cur_sel,
+                               int caret_index, int top_index, int line)
+{
+    LRESULT ret;
+
+    ret = SendMessage(listbox, LB_GETCOUNT, 0, 0);
+    ok_(__FILE__, line)(ret == count, "expected count %d, got %ld\n", count, ret);
+    ret = SendMessage(listbox, LB_GETCURSEL, 0, 0);
+    ok_(__FILE__, line)(ret == cur_sel, "expected cur sel %d, got %ld\n", cur_sel, ret);
+    ret = SendMessage(listbox, LB_GETCARETINDEX, 0, 0);
+    ok_(__FILE__, line)(ret == caret_index, "expected caret index %d, got %ld\n", caret_index, ret);
+    ret = SendMessage(listbox, LB_GETTOPINDEX, 0, 0);
+    ok_(__FILE__, line)(ret == top_index, "expected top index %d, got %ld\n", top_index, ret);
+}
+
+static void test_listbox(void)
+{
+    HWND parent, listbox;
+    LRESULT ret;
+
+    parent = CreateWindowExA(0, "TestParentClass", NULL, WS_OVERLAPPEDWINDOW  | WS_VISIBLE,
+                             100, 100, 200, 200, 0, 0, 0, NULL);
+    listbox = CreateWindowExA(WS_EX_NOPARENTNOTIFY, "ListBox", NULL,
+                              WS_CHILD | LBS_NOTIFY | LBS_OWNERDRAWVARIABLE | LBS_HASSTRINGS | WS_VISIBLE,
+                              10, 10, 80, 20, parent, (HMENU)ID_LISTBOX, 0, NULL);
+    listbox_orig_proc = (WNDPROC)SetWindowLongPtrA(listbox, GWLP_WNDPROC, (ULONG_PTR)listbox_hook_proc);
+
+    check_lb_state(listbox, 0, LB_ERR, 0, 0);
+
+    ret = SendMessage(listbox, LB_ADDSTRING, 0, (LPARAM)"item 1");
+    ok(ret == 0, "expected 0, got %ld\n", ret);
+    ret = SendMessage(listbox, LB_ADDSTRING, 0, (LPARAM)"item 2");
+    ok(ret == 1, "expected 1, got %ld\n", ret);
+    ret = SendMessage(listbox, LB_ADDSTRING, 0, (LPARAM)"item 3");
+    ok(ret == 2, "expected 2, got %ld\n", ret);
+
+    check_lb_state(listbox, 3, LB_ERR, 0, 0);
+
+    flush_sequence();
+
+    log_all_parent_messages++;
+
+    trace("selecting item 0\n");
+    SendMessage(listbox, LB_SETCURSEL, 0, 0);
+    ok_sequence(wm_lb_setcursel_0, "LB_SETCURSEL 0", FALSE );
+    check_lb_state(listbox, 3, 0, 0, 0);
+    flush_sequence();
+
+    trace("selecting item 1\n");
+    SendMessage(listbox, LB_SETCURSEL, 1, 0);
+    ok_sequence(wm_lb_setcursel_1, "LB_SETCURSEL 1", FALSE );
+    check_lb_state(listbox, 3, 1, 1, 0);
+
+    log_all_parent_messages--;
+
+    DestroyWindow(parent);
+}
+
 START_TEST(msg)
 {
     BOOL ret;
@@ -9677,6 +9995,7 @@ START_TEST(msg)
 
     test_ShowWindow();
     test_PeekMessage();
+    test_PeekMessage2();
     test_scrollwindowex();
     test_messages();
     test_showwindow();
@@ -9708,6 +10027,7 @@ START_TEST(msg)
     test_nullCallback();
     test_SetForegroundWindow();
     test_dbcs_wm_char();
+    test_listbox();
 
     UnhookWindowsHookEx(hCBT_hook);
     if (pUnhookWinEvent)

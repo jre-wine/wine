@@ -193,6 +193,7 @@ HRESULT shader_get_registers_used(
     IWineD3DStateBlockImpl *stateBlock) {
 
     IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*) iface;
+    unsigned int cur_loop_depth = 0, max_loop_depth = 0;
 
     /* There are some minor differences between pixel and vertex shaders */
     char pshader = shader_is_pshader_version(This->baseShader.hex_version);
@@ -305,23 +306,21 @@ HRESULT shader_get_registers_used(
         /* If there's a loop in the shader */
         } else if (WINED3DSIO_LOOP == curOpcode->opcode ||
                    WINED3DSIO_REP == curOpcode->opcode) {
-            reg_maps->loop = 1;
+            cur_loop_depth++;
+            if(cur_loop_depth > max_loop_depth)
+                max_loop_depth = cur_loop_depth;
             pToken += curOpcode->num_params;
-   
+
+        } else if (WINED3DSIO_ENDLOOP == curOpcode->opcode ||
+                   WINED3DSIO_ENDREP == curOpcode->opcode) {
+            cur_loop_depth--;
+
         /* For subroutine prototypes */
         } else if (WINED3DSIO_LABEL == curOpcode->opcode) {
 
             DWORD snum = *pToken & WINED3DSP_REGNUM_MASK; 
             reg_maps->labels[snum] = 1;
             pToken += curOpcode->num_params;
-
-        } else if(WINED3DSIO_BEM == curOpcode->opcode) {
-            DWORD regnum = *pToken & WINED3DSP_REGNUM_MASK;
-            if(reg_maps->bumpmat != -1 && reg_maps->bumpmat != regnum) {
-                FIXME("Pixel shader uses bem or texbem instruction on more than 1 sampler\n");
-            } else {
-                reg_maps->bumpmat = regnum;
-            }
 
         /* Set texture, address, temporary registers */
         } else {
@@ -383,6 +382,13 @@ HRESULT shader_get_registers_used(
             }
             if(WINED3DSIO_NRM  == curOpcode->opcode) {
                 reg_maps->usesnrm = 1;
+            } else if(WINED3DSIO_BEM == curOpcode->opcode) {
+                DWORD regnum = *pToken & WINED3DSP_REGNUM_MASK;
+                if(reg_maps->bumpmat != -1 && reg_maps->bumpmat != regnum) {
+                    FIXME("Pixel shader uses bem or texbem instruction on more than 1 sampler\n");
+                } else {
+                    reg_maps->bumpmat = regnum;
+                }
             }
 
             /* This will loop over all the registers and try to
@@ -419,9 +425,13 @@ HRESULT shader_get_registers_used(
 
                 else if (WINED3DSPR_RASTOUT == regtype && reg == 1)
                     reg_maps->fog = 1;
+
+                else if (WINED3DSPR_MISCTYPE == regtype && reg == 0 && pshader)
+                    reg_maps->vpos = 1;
             }
         }
     }
+    reg_maps->loop_depth = max_loop_depth;
 
     return WINED3D_OK;
 }

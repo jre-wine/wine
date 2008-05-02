@@ -198,6 +198,115 @@ static LONG WINTRUST_PublishedSoftware(HWND hwnd, GUID *actionID,
     return WINTRUST_DefaultVerifyAndClose(hwnd, actionID, &wintrust_data);
 }
 
+static void dump_file_info(WINTRUST_FILE_INFO *pFile)
+{
+    TRACE("%p\n", pFile);
+    if (pFile)
+    {
+        TRACE("cbStruct: %d\n", pFile->cbStruct);
+        TRACE("pcwszFilePath: %s\n", debugstr_w(pFile->pcwszFilePath));
+        TRACE("hFile: %p\n", pFile->hFile);
+        TRACE("pgKnownSubject: %s\n", debugstr_guid(pFile->pgKnownSubject));
+    }
+}
+
+static void dump_catalog_info(WINTRUST_CATALOG_INFO *catalog)
+{
+    TRACE("%p\n", catalog);
+    if (catalog)
+    {
+        TRACE("cbStruct: %d\n", catalog->cbStruct);
+        TRACE("dwCatalogVersion: %d\n", catalog->dwCatalogVersion);
+        TRACE("pcwszCatalogFilePath: %s\n",
+         debugstr_w(catalog->pcwszCatalogFilePath));
+        TRACE("pcwszMemberTag: %s\n", debugstr_w(catalog->pcwszMemberTag));
+        TRACE("pcwszMemberFilePath: %s\n",
+         debugstr_w(catalog->pcwszMemberFilePath));
+        TRACE("hMemberFile: %p\n", catalog->hMemberFile);
+        TRACE("pbCalculatedFileHash: %p\n", catalog->pbCalculatedFileHash);
+        TRACE("cbCalculatedFileHash: %d\n", catalog->cbCalculatedFileHash);
+        TRACE("pcCatalogContext: %p\n", catalog->pcCatalogContext);
+    }
+}
+
+static void dump_blob_info(WINTRUST_BLOB_INFO *blob)
+{
+    TRACE("%p\n", blob);
+    if (blob)
+    {
+        TRACE("cbStruct: %d\n", blob->cbStruct);
+        TRACE("gSubject: %s\n", debugstr_guid(&blob->gSubject));
+        TRACE("pcwszDisplayName: %s\n", debugstr_w(blob->pcwszDisplayName));
+        TRACE("cbMemObject: %d\n", blob->cbMemObject);
+        TRACE("pbMemObject: %p\n", blob->pbMemObject);
+        TRACE("cbMemSignedMsg: %d\n", blob->cbMemSignedMsg);
+        TRACE("pbMemSignedMsg: %p\n", blob->pbMemSignedMsg);
+    }
+}
+
+static void dump_sgnr_info(WINTRUST_SGNR_INFO *sgnr)
+{
+    TRACE("%p\n", sgnr);
+    if (sgnr)
+    {
+        TRACE("cbStruct: %d\n", sgnr->cbStruct);
+        TRACE("pcwszDisplayName: %s\n", debugstr_w(sgnr->pcwszDisplayName));
+        TRACE("psSignerInfo: %p\n", sgnr->psSignerInfo);
+        TRACE("chStores: %d\n", sgnr->chStores);
+    }
+}
+
+static void dump_cert_info(WINTRUST_CERT_INFO *cert)
+{
+    TRACE("%p\n", cert);
+    if (cert)
+    {
+        TRACE("cbStruct: %d\n", cert->cbStruct);
+        TRACE("pcwszDisplayName: %s\n", debugstr_w(cert->pcwszDisplayName));
+        TRACE("psCertContext: %p\n", cert->psCertContext);
+        TRACE("chStores: %d\n", cert->chStores);
+        TRACE("dwFlags: %08x\n", cert->dwFlags);
+        TRACE("psftVerifyAsOf: %p\n", cert->psftVerifyAsOf);
+    }
+}
+
+static void dump_wintrust_data(WINTRUST_DATA *data)
+{
+    TRACE("%p\n", data);
+    if (data)
+    {
+        TRACE("cbStruct: %d\n", data->cbStruct);
+        TRACE("pPolicyCallbackData: %p\n", data->pPolicyCallbackData);
+        TRACE("pSIPClientData: %p\n", data->pSIPClientData);
+        TRACE("dwUIChoice: %d\n", data->dwUIChoice);
+        TRACE("fdwRevocationChecks: %08x\n", data->fdwRevocationChecks);
+        TRACE("dwUnionChoice: %d\n", data->dwUnionChoice);
+        switch (data->dwUnionChoice)
+        {
+        case WTD_CHOICE_FILE:
+            dump_file_info(data->u.pFile);
+            break;
+        case WTD_CHOICE_CATALOG:
+            dump_catalog_info(data->u.pCatalog);
+            break;
+        case WTD_CHOICE_BLOB:
+            dump_blob_info(data->u.pBlob);
+            break;
+        case WTD_CHOICE_SIGNER:
+            dump_sgnr_info(data->u.pSgnr);
+            break;
+        case WTD_CHOICE_CERT:
+            dump_cert_info(data->u.pCert);
+            break;
+        }
+        TRACE("dwStateAction: %d\n", data->dwStateAction);
+        TRACE("hWVTStateData: %p\n", data->hWVTStateData);
+        TRACE("pwszURLReference: %s\n", debugstr_w(data->pwszURLReference));
+        TRACE("dwProvFlags: %08x\n", data->dwProvFlags);
+        TRACE("dwUIContext: %d\n", data->dwUIContext);
+    }
+}
+
 /***********************************************************************
  *		WinVerifyTrust (WINTRUST.@)
  *
@@ -222,10 +331,13 @@ LONG WINAPI WinVerifyTrust( HWND hwnd, GUID *ActionID, LPVOID ActionData )
      0x00,0xC0,0x4F,0xC2,0x95,0xEE } };
     static const GUID published_software = WIN_SPUB_ACTION_PUBLISHED_SOFTWARE;
     static const GUID generic_verify_v2 = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    static const GUID generic_cert_verify = WINTRUST_ACTION_GENERIC_CERT_VERIFY;
+    static const GUID generic_chain_verify = WINTRUST_ACTION_GENERIC_CHAIN_VERIFY;
     LONG err = ERROR_SUCCESS;
     WINTRUST_DATA *actionData = (WINTRUST_DATA *)ActionData;
 
     TRACE("(%p, %s, %p)\n", hwnd, debugstr_guid(ActionID), ActionData);
+    dump_wintrust_data(ActionData);
 
     /* Support for known old-style callers: */
     if (IsEqualGUID(ActionID, &published_software))
@@ -234,7 +346,9 @@ LONG WINAPI WinVerifyTrust( HWND hwnd, GUID *ActionID, LPVOID ActionData )
     {
         /* Check known actions to warn of possible problems */
         if (!IsEqualGUID(ActionID, &unknown) &&
-         !IsEqualGUID(ActionID, &generic_verify_v2))
+         !IsEqualGUID(ActionID, &generic_verify_v2) &&
+         !IsEqualGUID(ActionID, &generic_cert_verify) &&
+         !IsEqualGUID(ActionID, &generic_chain_verify))
             WARN("unknown action %s, default behavior may not be right\n",
              debugstr_guid(ActionID));
         switch (actionData->dwStateAction)

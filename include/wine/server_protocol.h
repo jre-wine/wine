@@ -22,6 +22,7 @@ typedef unsigned int process_id_t;
 typedef unsigned int thread_id_t;
 typedef unsigned int data_size_t;
 typedef unsigned int ioctl_code_t;
+typedef unsigned __int64 file_pos_t;
 
 struct request_header
 {
@@ -317,8 +318,7 @@ typedef union
         obj_handle_t     handle;
         void            *addr;
         unsigned long    size;
-        unsigned int     offset_low;
-        unsigned int     offset_high;
+        file_pos_t       offset;
         unsigned int     zero_bits;
         unsigned int     alloc_type;
         unsigned int     prot;
@@ -1094,10 +1094,8 @@ struct lock_file_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    unsigned int offset_low;
-    unsigned int offset_high;
-    unsigned int count_low;
-    unsigned int count_high;
+    file_pos_t   offset;
+    file_pos_t   count;
     int          shared;
     int          wait;
 };
@@ -1114,10 +1112,8 @@ struct unlock_file_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    unsigned int offset_low;
-    unsigned int offset_high;
-    unsigned int count_low;
-    unsigned int count_high;
+    file_pos_t   offset;
+    file_pos_t   count;
 };
 struct unlock_file_reply
 {
@@ -1665,8 +1661,7 @@ struct create_mapping_request
     unsigned int access;
     unsigned int attributes;
     obj_handle_t rootdir;
-    int          size_high;
-    int          size_low;
+    file_pos_t   size;
     int          protect;
     obj_handle_t file_handle;
     /* VARARG(name,unicode_str); */
@@ -1712,14 +1707,12 @@ struct get_mapping_info_request
 struct get_mapping_info_reply
 {
     struct reply_header __header;
-    int          size_high;
-    int          size_low;
+    file_pos_t   size;
     int          protect;
     int          header_size;
     void*        base;
     obj_handle_t mapping;
     obj_handle_t shared_file;
-    int          shared_size;
 };
 
 
@@ -3832,6 +3825,19 @@ struct set_security_object_reply
     struct reply_header __header;
 };
 
+struct get_security_object_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+    unsigned int    security_info;
+};
+struct get_security_object_reply
+{
+    struct reply_header __header;
+    unsigned int    sd_len;
+    /* VARARG(sd,security_descriptor); */
+};
+
 
 struct create_mailslot_request
 {
@@ -4376,6 +4382,7 @@ enum request
     REQ_get_token_user,
     REQ_get_token_groups,
     REQ_set_security_object,
+    REQ_get_security_object,
     REQ_create_mailslot,
     REQ_set_mailslot_info,
     REQ_create_directory,
@@ -4609,6 +4616,7 @@ union generic_request
     struct get_token_user_request get_token_user_request;
     struct get_token_groups_request get_token_groups_request;
     struct set_security_object_request set_security_object_request;
+    struct get_security_object_request get_security_object_request;
     struct create_mailslot_request create_mailslot_request;
     struct set_mailslot_info_request set_mailslot_info_request;
     struct create_directory_request create_directory_request;
@@ -4840,6 +4848,7 @@ union generic_reply
     struct get_token_user_reply get_token_user_reply;
     struct get_token_groups_reply get_token_groups_reply;
     struct set_security_object_reply set_security_object_reply;
+    struct get_security_object_reply get_security_object_reply;
     struct create_mailslot_reply create_mailslot_reply;
     struct set_mailslot_info_reply set_mailslot_info_reply;
     struct create_directory_reply create_directory_reply;
@@ -4864,6 +4873,6 @@ union generic_reply
     struct set_completion_info_reply set_completion_info_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 315
+#define SERVER_PROTOCOL_VERSION 317
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -380,6 +380,26 @@ static int ntlm_GetTokenBufferIndex(PSecBufferDesc pMessage)
     return -1;
 }
 
+/*************************************************************************
+ *             ntlm_GetDataBufferIndex
+ * Calculates the index of the first secbuffer with BufferType == SECBUFFER_DATA
+ * Returns index if found or -1 if not found.
+ */
+static int ntlm_GetDataBufferIndex(PSecBufferDesc pMessage)
+{
+    UINT i;
+
+    TRACE("%p\n", pMessage);
+
+    for( i = 0; i < pMessage->cBuffers; ++i )
+    {
+        if(pMessage->pBuffers[i].BufferType == SECBUFFER_DATA)
+            return i;
+    }
+
+    return -1;
+}
+
 /***********************************************************************
  *              InitializeSecurityContextW
  */
@@ -437,7 +457,10 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         TRACE("First time in ISC()\n");
 
         if(!phCredential)
-            return SEC_E_INVALID_HANDLE;
+        {
+            ret = SEC_E_INVALID_HANDLE;
+            goto isc_end;
+        }
 
         /* As the server side of sspi never calls this, make sure that
          * the handler is a client handler.
@@ -446,7 +469,8 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         if(ntlm_cred->mode != NTLM_CLIENT)
         {
             TRACE("Cred mode = %d\n", ntlm_cred->mode);
-            return SEC_E_INVALID_HANDLE;
+            ret = SEC_E_INVALID_HANDLE;
+            goto isc_end;
         }
 
         client_argv[0] = ntlm_auth;
@@ -637,7 +661,10 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         }
 
         if(!phContext)
-            return SEC_E_INVALID_HANDLE;
+        {
+            ret = SEC_E_INVALID_HANDLE;
+            goto isc_end;
+        }
 
         /* As the server side of sspi never calls this, make sure that
          * the handler is a client handler.
@@ -646,7 +673,8 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         if(helper->mode != NTLM_CLIENT)
         {
             TRACE("Helper mode = %d\n", helper->mode);
-            return SEC_E_INVALID_HANDLE;
+            ret = SEC_E_INVALID_HANDLE;
+            goto isc_end;
         }
 
         if (!pInput->pBuffers[input_token_idx].pvBuffer)
@@ -1110,6 +1138,10 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcceptSecurityContext(
 
         TRACE("Reply from ntlm_auth: %s\n", debugstr_a(buffer));
 
+        /* At this point, we get a NA if the user didn't authenticate, but a BH
+         * if ntlm_auth could not connect to winbindd. Apart from running Wine
+         * as root, there is no way to fix this for now, so just handle this as
+         * a failed login. */
         if(strncmp(buffer, "AF ", 3) != 0)
         {
             if(strncmp(buffer, "NA ", 3) == 0)
@@ -1119,7 +1151,18 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcceptSecurityContext(
             }
             else
             {
-                ret = SEC_E_INTERNAL_ERROR;
+                size_t ntlm_pipe_err_len = strlen("BH NT_STATUS_ACCESS_DENIED");
+
+                if( (buffer_len >= ntlm_pipe_err_len) &&
+                    (strncmp(buffer, "BH NT_STATUS_ACCESS_DENIED",
+                             ntlm_pipe_err_len) == 0))
+                {
+                    TRACE("Connection to winbindd failed\n");
+                    ret = SEC_E_LOGON_DENIED;
+                }
+                else
+                    ret = SEC_E_INTERNAL_ERROR;
+
                 goto asc_end;
             }
         }
@@ -1609,7 +1652,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_EncryptMessage(PCtxtHandle phContext,
         ULONG fQOP, PSecBufferDesc pMessage, ULONG MessageSeqNo)
 {
     PNegoHelper helper;
-    int token_idx;
+    int token_idx, data_idx;
 
     TRACE("(%p %d %p %d)\n", phContext, fQOP, pMessage, MessageSeqNo);
 
@@ -1628,6 +1671,9 @@ static SECURITY_STATUS SEC_ENTRY ntlm_EncryptMessage(PCtxtHandle phContext,
     if((token_idx = ntlm_GetTokenBufferIndex(pMessage)) == -1)
         return SEC_E_INVALID_TOKEN;
 
+    if((data_idx = ntlm_GetDataBufferIndex(pMessage)) ==-1 )
+        return SEC_E_INVALID_TOKEN;
+
     if(pMessage->pBuffers[token_idx].cbBuffer < 16)
         return SEC_E_BUFFER_TOO_SMALL;
 
@@ -1638,8 +1684,8 @@ static SECURITY_STATUS SEC_ENTRY ntlm_EncryptMessage(PCtxtHandle phContext,
     { 
         ntlm_CreateSignature(helper, pMessage, token_idx, NTLM_SEND, FALSE);
         SECUR32_arc4Process(helper->crypt.ntlm2.send_a4i,
-                (BYTE *)pMessage->pBuffers[1].pvBuffer,
-                pMessage->pBuffers[1].cbBuffer);
+                (BYTE *)pMessage->pBuffers[data_idx].pvBuffer,
+                pMessage->pBuffers[data_idx].cbBuffer);
 
         if(helper->neg_flags & NTLMSSP_NEGOTIATE_KEY_EXCHANGE)
             SECUR32_arc4Process(helper->crypt.ntlm2.send_a4i,
@@ -1662,8 +1708,9 @@ static SECURITY_STATUS SEC_ENTRY ntlm_EncryptMessage(PCtxtHandle phContext,
 
         sig = pMessage->pBuffers[token_idx].pvBuffer;
 
-        SECUR32_arc4Process(helper->crypt.ntlm.a4i, pMessage->pBuffers[1].pvBuffer,
-                pMessage->pBuffers[1].cbBuffer);
+        SECUR32_arc4Process(helper->crypt.ntlm.a4i,
+                pMessage->pBuffers[data_idx].pvBuffer,
+                pMessage->pBuffers[data_idx].cbBuffer);
         SECUR32_arc4Process(helper->crypt.ntlm.a4i, sig+4, 12);
 
         if(helper->neg_flags & NTLMSSP_NEGOTIATE_ALWAYS_SIGN || helper->neg_flags == 0)
@@ -1683,7 +1730,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_DecryptMessage(PCtxtHandle phContext,
     SECURITY_STATUS ret;
     ULONG ntlmssp_flags_save;
     PNegoHelper helper;
-    int token_idx;
+    int token_idx, data_idx;
     TRACE("(%p %p %d %p)\n", phContext, pMessage, MessageSeqNo, pfQOP);
 
     if(!phContext)
@@ -1698,6 +1745,9 @@ static SECURITY_STATUS SEC_ENTRY ntlm_DecryptMessage(PCtxtHandle phContext,
     if((token_idx = ntlm_GetTokenBufferIndex(pMessage)) == -1)
         return SEC_E_INVALID_TOKEN;
 
+    if((data_idx = ntlm_GetDataBufferIndex(pMessage)) ==-1)
+        return SEC_E_INVALID_TOKEN;
+
     if(pMessage->pBuffers[token_idx].cbBuffer < 16)
         return SEC_E_BUFFER_TOO_SMALL;
 
@@ -1706,12 +1756,14 @@ static SECURITY_STATUS SEC_ENTRY ntlm_DecryptMessage(PCtxtHandle phContext,
     if(helper->neg_flags & NTLMSSP_NEGOTIATE_NTLM2 && helper->neg_flags & NTLMSSP_NEGOTIATE_SEAL)
     {
         SECUR32_arc4Process(helper->crypt.ntlm2.recv_a4i,
-                pMessage->pBuffers[1].pvBuffer, pMessage->pBuffers[1].cbBuffer);
+                pMessage->pBuffers[data_idx].pvBuffer,
+                pMessage->pBuffers[data_idx].cbBuffer);
     }
     else
     {
         SECUR32_arc4Process(helper->crypt.ntlm.a4i,
-                pMessage->pBuffers[1].pvBuffer, pMessage->pBuffers[1].cbBuffer);
+                pMessage->pBuffers[data_idx].pvBuffer,
+                pMessage->pBuffers[data_idx].cbBuffer);
     }
 
     /* Make sure we use a session key for the signature check, EncryptMessage

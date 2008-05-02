@@ -65,6 +65,8 @@
 # endif
 #endif
 
+unsigned char pointer_default = RPC_FC_UP;
+
 typedef struct list typelist_t;
 struct typenode {
   type_t *type;
@@ -92,7 +94,7 @@ static expr_t *make_expr3(enum expr_type type, expr_t *expr1, expr_t *expr2, exp
 static type_t *make_type(unsigned char type, type_t *ref);
 static expr_list_t *append_expr(expr_list_t *list, expr_t *expr);
 static array_dims_t *append_array(array_dims_t *list, expr_t *expr);
-static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr);
+static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr, int top);
 static ifref_list_t *append_ifref(ifref_list_t *list, ifref_t *iface);
 static ifref_t *make_ifref(type_t *iface);
 static var_list_t *append_var(var_list_t *list, var_t *var);
@@ -153,6 +155,7 @@ static void check_all_user_types(ifref_list_t *ifaces);
 	UUID *uuid;
 	unsigned int num;
 	double dbl;
+	interface_info_t ifinfo;
 }
 
 %token <str> aIDENTIFIER
@@ -245,7 +248,8 @@ static void check_all_user_types(ifref_list_t *ifaces);
 %type <expr> m_expr expr expr_const
 %type <expr_list> m_exprs /* exprs expr_list */ expr_list_const
 %type <array_dims> array array_list
-%type <type> inherit interface interfacehdr interfacedef interfacedec
+%type <ifinfo> interfacehdr
+%type <type> inherit interface interfacedef interfacedec
 %type <type> dispinterface dispinterfacehdr dispinterfacedef
 %type <type> module modulehdr moduledef
 %type <type> base_type int_std
@@ -263,6 +267,7 @@ static void check_all_user_types(ifref_list_t *ifaces);
 %type <type> coclass coclasshdr coclassdef
 %type <num> pointer_type version
 %type <str> libraryhdr
+%type <uuid> uuid_string
 
 %left ','
 %right '?' ':'
@@ -325,20 +330,20 @@ statement: ';'					{}
 	| constdef ';'				{ if (!parse_only && do_header) { write_constdef($1); } }
 	| cppquote				{}
 	| enumdef ';'				{ if (!parse_only && do_header) {
-						    write_type(header, $1, FALSE, NULL);
+						    write_type_def_or_decl(header, $1, FALSE, NULL);
 						    fprintf(header, ";\n\n");
 						  }
 						}
 	| externdef ';'				{ if (!parse_only && do_header) { write_externdef($1); } }
 	| import				{}
 	| structdef ';'				{ if (!parse_only && do_header) {
-						    write_type(header, $1, FALSE, NULL);
+						    write_type_def_or_decl(header, $1, FALSE, NULL);
 						    fprintf(header, ";\n\n");
 						  }
 						}
 	| typedef ';'				{}
 	| uniondef ';'				{ if (!parse_only && do_header) {
-						    write_type(header, $1, FALSE, NULL);
+						    write_type_def_or_decl(header, $1, FALSE, NULL);
 						    fprintf(header, ";\n\n");
 						  }
 						}
@@ -380,21 +385,21 @@ args:	  arg					{ check_arg($1); $$ = append_var( NULL, $1 ); }
 /* split into two rules to get bison to resolve a tVOID conflict */
 arg:	  attributes type pident array		{ $$ = $3->var;
 						  $$->attrs = $1;
-						  set_type($$, $2, $3->ptr_level, $4);
+						  set_type($$, $2, $3->ptr_level, $4, TRUE);
 						  free($3);
 						}
 	| type pident array			{ $$ = $2->var;
-						  set_type($$, $1, $2->ptr_level, $3);
+						  set_type($$, $1, $2->ptr_level, $3, TRUE);
 						  free($2);
 						}
 	| attributes type pident '(' m_args ')'	{ $$ = $3->var;
 						  $$->attrs = $1;
-						  set_type($$, $2, $3->ptr_level - 1, NULL);
+						  set_type($$, $2, $3->ptr_level - 1, NULL, TRUE);
 						  free($3);
 						  $$->args = $5;
 						}
 	| type pident '(' m_args ')'		{ $$ = $2->var;
-						  set_type($$, $1, $2->ptr_level - 1, NULL);
+						  set_type($$, $1, $2->ptr_level - 1, NULL, TRUE);
 						  free($2);
 						  $$->args = $4;
 						}
@@ -496,13 +501,19 @@ attribute:					{ $$ = NULL; }
 	| tSWITCHIS '(' expr ')'		{ $$ = make_attrp(ATTR_SWITCHIS, $3); }
 	| tSWITCHTYPE '(' type ')'		{ $$ = make_attrp(ATTR_SWITCHTYPE, $3); }
 	| tTRANSMITAS '(' type ')'		{ $$ = make_attrp(ATTR_TRANSMITAS, $3); }
-	| tUUID '(' aUUID ')'			{ $$ = make_attrp(ATTR_UUID, $3); }
+	| tUUID '(' uuid_string ')'		{ $$ = make_attrp(ATTR_UUID, $3); }
 	| tV1ENUM				{ $$ = make_attr(ATTR_V1ENUM); }
 	| tVARARG				{ $$ = make_attr(ATTR_VARARG); }
 	| tVERSION '(' version ')'		{ $$ = make_attrv(ATTR_VERSION, $3); }
 	| tWIREMARSHAL '(' type ')'		{ $$ = make_attrp(ATTR_WIREMARSHAL, $3); }
 	| pointer_type				{ $$ = make_attrv(ATTR_POINTERTYPE, $1); }
 	;
+
+uuid_string:
+	  aUUID
+	| aSTRING				{ if (!is_valid_uuid($1))
+						    yyerror("invalid UUID: %s", $1);
+						  $$ = parse_uuid($1); }
 
 callconv:
 	| tSTDCALL
@@ -523,7 +534,7 @@ case:	  tCASE expr ':' field			{ attr_t *a = make_attrp(ATTR_CASE, append_expr( 
 	;
 
 constdef: tCONST type ident '=' expr_const	{ $$ = reg_const($3);
-						  set_type($$, $2, 0, NULL);
+						  set_type($$, $2, 0, NULL, FALSE);
 						  $$->eval = $5;
 						}
 	;
@@ -616,7 +627,7 @@ expr_const: expr				{ $$ = $1;
 	;
 
 externdef: tEXTERN tCONST type ident		{ $$ = $4;
-						  set_type($$, $3, 0, NULL);
+						  set_type($$, $3, 0, NULL, FALSE);
 						}
 	;
 
@@ -632,7 +643,7 @@ field:	  s_field ';'				{ $$ = $1; }
 
 s_field:  m_attributes type pident array	{ $$ = $3->var;
 						  $$->attrs = $1;
-						  set_type($$, $2, $3->ptr_level, $4);
+						  set_type($$, $2, $3->ptr_level, $4, FALSE);
 						  free($3);
 						}
 	;
@@ -641,7 +652,7 @@ funcdef:
 	  m_attributes type callconv pident
 	  '(' m_args ')'			{ var_t *v = $4->var;
 						  v->attrs = $1;
-						  set_type(v, $2, $4->ptr_level, NULL);
+						  set_type(v, $2, $4->ptr_level, NULL, FALSE);
 						  free($4);
 						  $$ = make_func(v, $6);
 						  if (is_attr(v->attrs, ATTR_IN)) {
@@ -786,32 +797,37 @@ interface: tINTERFACE aIDENTIFIER		{ $$ = get_type(RPC_FC_IP, $2, 0); $$->kind =
 	|  tINTERFACE aKNOWNTYPE		{ $$ = get_type(RPC_FC_IP, $2, 0); $$->kind = TKIND_INTERFACE; }
 	;
 
-interfacehdr: attributes interface		{ $$ = $2;
-						  if ($$->defined) yyerror("multiple definition error");
-						  $$->attrs = $1;
-						  $$->defined = TRUE;
-						  if (!parse_only && do_header) write_forward($$);
+interfacehdr: attributes interface		{ $$.interface = $2;
+						  $$.old_pointer_default = pointer_default;
+						  if (is_attr($1, ATTR_POINTERDEFAULT))
+						    pointer_default = get_attrv($1, ATTR_POINTERDEFAULT);
+						  if ($2->defined) yyerror("multiple definition error");
+						  $2->attrs = $1;
+						  $2->defined = TRUE;
+						  if (!parse_only && do_header) write_forward($2);
 						}
 	;
 
 interfacedef: interfacehdr inherit
-	  '{' int_statements '}'		{ $$ = $1;
+	  '{' int_statements '}'		{ $$ = $1.interface;
 						  $$->ref = $2;
 						  $$->funcs = $4;
 						  compute_method_indexes($$);
 						  if (!parse_only && do_header) write_interface($$);
 						  if (!parse_only && do_idfile) write_iid($$);
+						  pointer_default = $1.old_pointer_default;
 						}
 /* MIDL is able to import the definition of a base class from inside the
  * definition of a derived class, I'll try to support it with this rule */
 	| interfacehdr ':' aIDENTIFIER
-	  '{' import int_statements '}'		{ $$ = $1;
+	  '{' import int_statements '}'		{ $$ = $1.interface;
 						  $$->ref = find_type2($3, 0);
 						  if (!$$->ref) yyerror("base class '%s' not found in import", $3);
 						  $$->funcs = $6;
 						  compute_method_indexes($$);
 						  if (!parse_only && do_header) write_interface($$);
 						  if (!parse_only && do_idfile) write_iid($$);
+						  pointer_default = $1.old_pointer_default;
 						}
 	| dispinterfacedef			{ $$ = $1; }
 	;
@@ -1233,9 +1249,30 @@ static array_dims_t *append_array(array_dims_t *list, expr_t *expr)
     return list;
 }
 
+static struct list type_pool = LIST_INIT(type_pool);
+typedef struct
+{
+  type_t data;
+  struct list link;
+} type_pool_node_t;
+
+type_t *alloc_type(void)
+{
+  type_pool_node_t *node = xmalloc(sizeof *node);
+  list_add_tail(&type_pool, &node->link);
+  return &node->data;
+}
+
+void set_all_tfswrite(int val)
+{
+  type_pool_node_t *node;
+  LIST_FOR_EACH_ENTRY(node, &type_pool, type_pool_node_t, link)
+    node->data.tfswrite = val;
+}
+
 static type_t *make_type(unsigned char type, type_t *ref)
 {
-  type_t *t = xmalloc(sizeof(type_t));
+  type_t *t = alloc_type();
   t->name = NULL;
   t->kind = TKIND_PRIMITIVE;
   t->type = type;
@@ -1262,20 +1299,25 @@ static type_t *make_type(unsigned char type, type_t *ref)
   return t;
 }
 
-static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
+static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr,
+                     int top)
 {
   expr_list_t *sizes = get_attrp(v->attrs, ATTR_SIZEIS);
   expr_list_t *lengs = get_attrp(v->attrs, ATTR_LENGTHIS);
-  int ptr_type = get_attrv(v->attrs, ATTR_POINTERTYPE);
+  int ptr_attr = get_attrv(v->attrs, ATTR_POINTERTYPE);
+  int ptr_type = ptr_attr;
   int sizeless, has_varconf;
   expr_t *dim;
   type_t *atype, **ptype;
 
   v->type = type;
 
+  if (!ptr_type && top)
+    ptr_type = RPC_FC_RP;
+
   for ( ; 0 < ptr_level; --ptr_level)
   {
-    v->type = make_type(RPC_FC_RP, v->type);
+    v->type = make_type(pointer_default, v->type);
     if (ptr_level == 1 && ptr_type && !arr)
     {
       v->type->type = ptr_type;
@@ -1287,11 +1329,14 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
   {
     if (is_ptr(v->type))
     {
-      v->type = duptype(v->type, 1);
-      v->type->type = ptr_type;
+      if (v->type->type != ptr_type)
+      {
+        v->type = duptype(v->type, 1);
+        v->type->type = ptr_type;
+      }
     }
-    else if (!arr)
-      error("%s: pointer attribute applied to non-pointer type", v->name);
+    else if (!arr && ptr_attr)
+      error("%s: pointer attribute applied to non-pointer type\n", v->name);
   }
 
   sizeless = FALSE;
@@ -1309,7 +1354,7 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
         error("%s: array dimension must be positive\n", v->name);
 
       if (0xffffffffuL / size < (unsigned long) dim->cval)
-        error("%s: total array size is too large", v->name);
+        error("%s: total array size is too large\n", v->name);
       else if (0xffffuL < size * dim->cval)
         v->type = make_type(RPC_FC_LGFARRAY, v->type);
       else
@@ -1504,7 +1549,7 @@ static type_t *make_safearray(type_t *type)
 {
   type_t *sa = duptype(find_type("SAFEARRAY", 0), 1);
   sa->ref = type;
-  return make_type(RPC_FC_FP, sa);
+  return make_type(pointer_default, sa);
 }
 
 #define HASHMAX 64
@@ -1628,7 +1673,7 @@ static type_t *reg_typedefs(type_t *type, pident_list_t *pidents, attr_list_t *a
       int cptr = pident->ptr_level;
       if (cptr > ptrc) {
         while (cptr > ptrc) {
-          cur = ptr = make_type(RPC_FC_RP, cur);
+          cur = ptr = make_type(pointer_default, cur);
           ptrc++;
         }
       } else {
@@ -1729,6 +1774,9 @@ static int get_struct_type(var_list_t *fields)
   if (fields) LIST_FOR_EACH_ENTRY( field, fields, var_t, entry )
   {
     type_t *t = field->type;
+
+    if (is_user_type(t))
+      return RPC_FC_BOGUS_STRUCT;
 
     if (is_ptr(t))
     {
@@ -2023,4 +2071,21 @@ static void check_all_user_types(ifref_list_t *ifrefs)
     if (fs) LIST_FOR_EACH_ENTRY(f, fs, const func_t, entry)
       check_for_user_types_and_context_handles(f->args);
   }
+}
+
+int is_valid_uuid(const char *s)
+{
+  int i;
+
+  for (i = 0; i < 36; ++i)
+    if (i == 8 || i == 13 || i == 18 || i == 23)
+    {
+      if (s[i] != '-')
+        return FALSE;
+    }
+    else
+      if (!isxdigit(s[i]))
+        return FALSE;
+
+  return s[i] == '\0';
 }

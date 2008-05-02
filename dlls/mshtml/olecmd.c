@@ -41,22 +41,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
-#define NSCMD_BOLD "cmd_bold"
 #define NSCMD_COPY "cmd_copy"
-#define NSCMD_ITALIC "cmd_italic"
-#define NSCMD_UNDERLINE "cmd_underline"
-#define NSCMD_ALIGN "cmd_align"
-#define NSCMD_INDENT "cmd_indent"
-#define NSCMD_OUTDENT "cmd_outdent"
-#define NSCMD_INSERTHR "cmd_insertHR"
-#define NSCMD_UL "cmd_ul"
-#define NSCMD_OL "cmd_ol"
-
-#define NSSTATE_ATTRIBUTE "state_attribute"
-
-#define NSALIGN_CENTER "center"
-#define NSALIGN_LEFT   "left"
-#define NSALIGN_RIGHT  "right"
 
 void do_ns_command(NSContainer *This, const char *cmd, nsICommandParams *nsparam)
 {
@@ -598,7 +583,35 @@ static HRESULT exec_editmode(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, 
 
     update_doc(This, UPDATE_UI);
 
-    return IPersistMoniker_Load(PERSISTMON(This), TRUE, mon, NULL, 0);
+    hres = IPersistMoniker_Load(PERSISTMON(This), TRUE, mon, NULL, 0);
+    IMoniker_Release(mon);
+    if(FAILED(hres))
+        return hres;
+
+    if(This->ui_active) {
+        OLECHAR wszHTMLDocument[30];
+        RECT rcBorderWidths;
+
+        if(This->ip_window)
+            IOleInPlaceUIWindow_SetActiveObject(This->ip_window, NULL, NULL);
+        if(This->hostui)
+            IDocHostUIHandler_HideUI(This->hostui);
+
+        if(This->hostui)
+            IDocHostUIHandler_ShowUI(This->hostui, DOCHOSTUITYPE_AUTHOR, ACTOBJ(This), CMDTARGET(This),
+                This->frame, This->ip_window);
+
+        LoadStringW(hInst, IDS_HTMLDOCUMENT, wszHTMLDocument,
+                    sizeof(wszHTMLDocument)/sizeof(WCHAR));
+
+        if(This->ip_window)
+            IOleInPlaceUIWindow_SetActiveObject(This->ip_window, ACTOBJ(This), wszHTMLDocument);
+
+        memset(&rcBorderWidths, 0, sizeof(rcBorderWidths));
+        IOleInPlaceFrame_SetBorderSpace(This->frame, &rcBorderWidths);
+    }
+
+    return S_OK;
 }
 
 static HRESULT exec_htmleditmode(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
@@ -867,14 +880,14 @@ static const IOleCommandTargetVtbl OleCommandTargetVtbl = {
     OleCommandTarget_Exec
 };
 
-void show_context_menu(HTMLDocument *This, DWORD dwID, POINT *ppt)
+void show_context_menu(HTMLDocument *This, DWORD dwID, POINT *ppt, IDispatch *elem)
 {
     HMENU menu_res, menu;
     DWORD cmdid;
     HRESULT hres;
 
     hres = IDocHostUIHandler_ShowContextMenu(This->hostui, dwID, ppt,
-            (IUnknown*)CMDTARGET(This), (IDispatch*)HTMLDOC(This));
+            (IUnknown*)CMDTARGET(This), elem);
     if(hres == S_OK)
         return;
 

@@ -11,12 +11,12 @@
 @ stub PdhBrowseCountersHA
 @ stub PdhBrowseCountersHW
 @ stub PdhBrowseCountersW
-@ stub PdhCalculateCounterFromRawValue
+@ stdcall PdhCalculateCounterFromRawValue(ptr long ptr ptr ptr)
 @ stub PdhCloseLog
 @ stdcall PdhCloseQuery(ptr)
 @ stdcall PdhCollectQueryData(ptr)
 @ stdcall PdhCollectQueryDataWithTime(ptr ptr)
-@ stub PdhCollectQueryDataEx
+@ stdcall PdhCollectQueryDataEx(ptr long ptr)
 @ stub PdhComputeCounterStatistics
 @ stub PdhConnectMachineA
 @ stub PdhConnectMachineW
@@ -137,10 +137,10 @@
 @ stub PdhUpdateLogA
 @ stub PdhUpdateLogFileCatalog
 @ stub PdhUpdateLogW
-@ stub PdhValidatePathA
-@ stub PdhValidatePathExA
-@ stub PdhValidatePathExW
-@ stub PdhValidatePathW
+@ stdcall PdhValidatePathA(str)
+@ stdcall PdhValidatePathExA(ptr str)
+@ stdcall PdhValidatePathExW(ptr wstr)
+@ stdcall PdhValidatePathW(wstr)
 @ stub PdhVbAddCounter
 @ stub PdhVbCreateCounterPathList
 @ stub PdhVbGetCounterPathElements

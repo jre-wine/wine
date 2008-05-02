@@ -510,7 +510,6 @@ static void X11DRV_DIB_SetImageBits_1( int lines, const BYTE *srcbits,
     /* ==== pal 1 dib -> any bmp format ==== */
     for (h = lines-1; h >=0; h--) {
         srcbyte=srcbits;
-        /* FIXME: should avoid putting x<left pixels (minor speed issue) */
         for (i = width/8, x = left; i > 0; i--) {
             srcval=*srcbyte++;
             XPutPixel( bmpImage, x++, h, colors[ srcval >> 7] );
@@ -3622,7 +3621,7 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
 
 #ifdef HAVE_LIBXXSHM
 
-    /* We must not call XShmGetImage() with a bitmap which is bigger than the avilable area.
+    /* We must not call XShmGetImage() with a bitmap which is bigger than the available area.
        If we do, XShmGetImage() will fail (X exception), as it checks for this internally. */
     if((descr->image && descr->useShm) && (bmpImage->width <= (descr->width - descr->xSrc))
       && (bmpImage->height <= (descr->height - descr->ySrc)))
@@ -3989,7 +3988,7 @@ INT X11DRV_GetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan, 
   height = descr.lines;
   if (height < 0) height = -height;
   if( lines > height ) lines = height;
-  /* Top-down images have a negative biHeight, the scanlines of theses images
+  /* Top-down images have a negative biHeight, the scanlines of these images
    * were inverted in X11DRV_DIB_GetImageBits_xx
    * To prevent this we simply change the sign of lines
    * (the number of scan lines to copy).

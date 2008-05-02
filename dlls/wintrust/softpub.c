@@ -23,9 +23,23 @@
 #include "winbase.h"
 #include "wintrust.h"
 #include "mssip.h"
+#include "softpub.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wintrust);
+
+HRESULT WINAPI SoftpubDefCertInit(CRYPT_PROVIDER_DATA *data)
+{
+    HRESULT ret = S_FALSE;
+
+    TRACE("(%p)\n", data);
+
+    if (data->padwTrustStepErrors &&
+     !data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_WVTINIT])
+        ret = S_OK;
+    TRACE("returning %08x\n", ret);
+    return ret;
+}
 
 HRESULT WINAPI SoftpubInitialize(CRYPT_PROVIDER_DATA *data)
 {
@@ -62,6 +76,9 @@ static BOOL SOFTPUB_OpenFile(CRYPT_PROVIDER_DATA *data)
         else
             ret = FALSE;
     }
+    if (ret)
+        GetFileTime(data->pWintrustData->u.pFile->hFile, &data->sftSystemTime,
+         NULL, NULL);
     TRACE("returning %d\n", ret);
     return ret;
 }
@@ -255,8 +272,50 @@ HRESULT WINAPI SoftpubLoadMessage(CRYPT_PROVIDER_DATA *data)
     switch (data->pWintrustData->dwUnionChoice)
     {
     case WTD_CHOICE_CERT:
-        /* Do nothing!?  See the tests */
-        ret = TRUE;
+        if (data->pWintrustData->u.pCert &&
+         data->pWintrustData->u.pCert->cbStruct == sizeof(WINTRUST_CERT_INFO))
+        {
+            if (data->psPfns)
+            {
+                CRYPT_PROVIDER_SGNR signer = { sizeof(signer), { 0 } };
+                DWORD i;
+
+                /* Add a signer with nothing but the time to verify, so we can
+                 * add a cert to it
+                 */
+                if (data->pWintrustData->u.pCert->psftVerifyAsOf)
+                    memcpy(&data->sftSystemTime, &signer.sftVerifyAsOf,
+                     sizeof(FILETIME));
+                else
+                {
+                    SYSTEMTIME sysTime;
+
+                    GetSystemTime(&sysTime);
+                    SystemTimeToFileTime(&sysTime, &signer.sftVerifyAsOf);
+                }
+                ret = data->psPfns->pfnAddSgnr2Chain(data, FALSE, 0, &signer);
+                if (!ret)
+                    goto error;
+                ret = data->psPfns->pfnAddCert2Chain(data, 0, FALSE, 0,
+                 data->pWintrustData->u.pCert->psCertContext);
+                if (!ret)
+                    goto error;
+                for (i = 0; ret && i < data->pWintrustData->u.pCert->chStores;
+                 i++)
+                    ret = data->psPfns->pfnAddStore2Chain(data,
+                     data->pWintrustData->u.pCert->pahStores[i]);
+            }
+            else
+            {
+                /* Do nothing!?  See the tests */
+                ret = TRUE;
+            }
+        }
+        else
+        {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            ret = FALSE;
+        }
         break;
     case WTD_CHOICE_FILE:
         if (!data->pWintrustData->u.pFile)
@@ -292,6 +351,8 @@ error:
     if (!ret)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV] =
          GetLastError();
+    TRACE("returning %d (%08x)\n", ret ? S_OK : S_FALSE,
+     data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV]);
     return ret ? S_OK : S_FALSE;
 }
 
@@ -333,6 +394,7 @@ static BOOL WINTRUST_SaveSigner(CRYPT_PROVIDER_DATA *data, DWORD signerIdx)
         CRYPT_PROVIDER_SGNR sgnr = { sizeof(sgnr), { 0 } };
 
         sgnr.psSigner = signerInfo;
+        memcpy(&sgnr.sftVerifyAsOf, &data->sftSystemTime, sizeof(FILETIME));
         ret = data->psPfns->pfnAddSgnr2Chain(data, FALSE, signerIdx, &sgnr);
     }
     else
@@ -407,28 +469,34 @@ static BOOL WINTRUST_VerifySigner(CRYPT_PROVIDER_DATA *data, DWORD signerIdx)
 HRESULT WINAPI SoftpubLoadSignature(CRYPT_PROVIDER_DATA *data)
 {
     BOOL ret;
-    DWORD signerCount, size;
 
     TRACE("(%p)\n", data);
 
     if (!data->padwTrustStepErrors)
         return S_FALSE;
 
-    size = sizeof(signerCount);
-    ret = CryptMsgGetParam(data->hMsg, CMSG_SIGNER_COUNT_PARAM, 0,
-     &signerCount, &size);
-    if (ret)
+    if (data->hMsg)
     {
-        DWORD i;
+        DWORD signerCount, size;
 
-        for (i = 0; ret && i < signerCount; i++)
+        size = sizeof(signerCount);
+        ret = CryptMsgGetParam(data->hMsg, CMSG_SIGNER_COUNT_PARAM, 0,
+         &signerCount, &size);
+        if (ret)
         {
-            if ((ret = WINTRUST_SaveSigner(data, i)))
-                ret = WINTRUST_VerifySigner(data, i);
+            DWORD i;
+
+            for (i = 0; ret && i < signerCount; i++)
+            {
+                if ((ret = WINTRUST_SaveSigner(data, i)))
+                    ret = WINTRUST_VerifySigner(data, i);
+            }
         }
+        else
+            SetLastError(TRUST_E_NOSIGNATURE);
     }
     else
-        SetLastError(TRUST_E_NOSIGNATURE);
+        ret = TRUE;
     if (!ret)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV] =
          GetLastError();
@@ -459,11 +527,7 @@ BOOL WINAPI SoftpubCheckCert(CRYPT_PROVIDER_DATA *data, DWORD idxSigner,
         {
             /* Set confidence */
             data->pasSigners[idxSigner].pasCertChain[i].dwConfidence = 0;
-            /* The last element in the chain doesn't have an issuer, so it
-             * can't have a valid time (with respect to its issuer)
-             */
-            if (i != simpleChain->cElement - 1 &&
-             !(simpleChain->rgpElement[i]->TrustStatus.dwErrorStatus &
+            if (!(simpleChain->rgpElement[i]->TrustStatus.dwErrorStatus &
              CERT_TRUST_IS_NOT_TIME_VALID))
                 data->pasSigners[idxSigner].pasCertChain[i].dwConfidence
                  |= CERT_CONFIDENCE_TIME;
@@ -511,9 +575,69 @@ static BOOL WINTRUST_CopyChain(CRYPT_PROVIDER_DATA *data, DWORD signerIdx)
     return ret;
 }
 
+static void WINTRUST_CreateChainPolicyCreateInfo(
+ const CRYPT_PROVIDER_DATA *data, PWTD_GENERIC_CHAIN_POLICY_CREATE_INFO info,
+ PCERT_CHAIN_PARA chainPara)
+{
+    chainPara->cbSize = sizeof(CERT_CHAIN_PARA);
+    if (data->pRequestUsage)
+        memcpy(&chainPara->RequestedUsage, data->pRequestUsage,
+         sizeof(CERT_USAGE_MATCH));
+    info->u.cbSize = sizeof(WTD_GENERIC_CHAIN_POLICY_CREATE_INFO);
+    info->hChainEngine = NULL;
+    info->pChainPara = chainPara;
+    if (data->dwProvFlags & CPD_REVOCATION_CHECK_END_CERT)
+        info->dwFlags = CERT_CHAIN_REVOCATION_CHECK_END_CERT;
+    else if (data->dwProvFlags & CPD_REVOCATION_CHECK_CHAIN)
+        info->dwFlags = CERT_CHAIN_REVOCATION_CHECK_CHAIN;
+    else if (data->dwProvFlags & CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT)
+        info->dwFlags = CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
+    else
+        info->dwFlags = 0;
+    info->pvReserved = NULL;
+}
+
+static BOOL WINTRUST_CreateChainForSigner(CRYPT_PROVIDER_DATA *data,
+ DWORD signer, PWTD_GENERIC_CHAIN_POLICY_CREATE_INFO createInfo,
+ PCERT_CHAIN_PARA chainPara)
+{
+    BOOL ret = TRUE;
+
+    /* Expect the end certificate for each signer to be the only cert in the
+     * chain:
+     */
+    if (data->pasSigners[signer].csCertChain)
+    {
+        /* Create a certificate chain for each signer */
+        ret = CertGetCertificateChain(createInfo->hChainEngine,
+         data->pasSigners[signer].pasCertChain[0].pCert,
+         &data->pasSigners[signer].sftVerifyAsOf,
+         data->chStores ? data->pahStores[0] : NULL,
+         chainPara, createInfo->dwFlags, createInfo->pvReserved,
+         &data->pasSigners[signer].pChainContext);
+        if (ret)
+        {
+            if (data->pasSigners[signer].pChainContext->cChain != 1)
+            {
+                FIXME("unimplemented for more than 1 simple chain\n");
+                ret = FALSE;
+            }
+            else
+            {
+                if ((ret = WINTRUST_CopyChain(data, signer)))
+                    ret = data->psPfns->pfnCertCheckPolicy(data, signer, FALSE,
+                     0);
+            }
+        }
+    }
+    return ret;
+}
+
 HRESULT WINAPI WintrustCertificateTrust(CRYPT_PROVIDER_DATA *data)
 {
     BOOL ret;
+
+    TRACE("(%p)\n", data);
 
     if (!data->csSigners)
     {
@@ -523,55 +647,72 @@ HRESULT WINAPI WintrustCertificateTrust(CRYPT_PROVIDER_DATA *data)
     else
     {
         DWORD i;
+        WTD_GENERIC_CHAIN_POLICY_CREATE_INFO createInfo;
+        CERT_CHAIN_PARA chainPara;
 
+        WINTRUST_CreateChainPolicyCreateInfo(data, &createInfo, &chainPara);
         ret = TRUE;
         for (i = 0; i < data->csSigners; i++)
-        {
-            CERT_CHAIN_PARA chainPara = { sizeof(chainPara), { 0 } };
-            DWORD flags;
-
-            if (data->pRequestUsage)
-                memcpy(&chainPara.RequestedUsage, data->pRequestUsage,
-                 sizeof(CERT_USAGE_MATCH));
-            if (data->dwProvFlags & CPD_REVOCATION_CHECK_END_CERT)
-                flags = CERT_CHAIN_REVOCATION_CHECK_END_CERT;
-            else if (data->dwProvFlags & CPD_REVOCATION_CHECK_CHAIN)
-                flags = CERT_CHAIN_REVOCATION_CHECK_CHAIN;
-            else if (data->dwProvFlags & CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT)
-                flags = CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
-            else
-                flags = 0;
-            /* Expect the end certificate for each signer to be the only
-             * cert in the chain:
-             */
-            if (data->pasSigners[i].csCertChain)
-            {
-                /* Create a certificate chain for each signer */
-                ret = CertGetCertificateChain(NULL,
-                 data->pasSigners[i].pasCertChain[0].pCert,
-                 NULL, /* FIXME: use data->pasSigners[i].sftVerifyAsOf? */
-                 data->chStores ? data->pahStores[0] : NULL,
-                 &chainPara, flags, NULL, &data->pasSigners[i].pChainContext);
-                if (ret)
-                {
-                    if (data->pasSigners[i].pChainContext->cChain != 1)
-                    {
-                        FIXME("unimplemented for more than 1 simple chain\n");
-                        ret = FALSE;
-                    }
-                    else
-                    {
-                        if ((ret = WINTRUST_CopyChain(data, i)))
-                            ret = data->psPfns->pfnCertCheckPolicy(data, i,
-                             FALSE, 0);
-                    }
-                }
-            }
-        }
+            ret = WINTRUST_CreateChainForSigner(data, i, &createInfo,
+             &chainPara);
     }
     if (!ret)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_CERTPROV] =
          GetLastError();
+    TRACE("returning %d (%08x)\n", ret ? S_OK : S_FALSE,
+     data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_CERTPROV]);
+    return ret ? S_OK : S_FALSE;
+}
+
+HRESULT WINAPI GenericChainCertificateTrust(CRYPT_PROVIDER_DATA *data)
+{
+    BOOL ret;
+    WTD_GENERIC_CHAIN_POLICY_DATA *policyData =
+     (WTD_GENERIC_CHAIN_POLICY_DATA *)data->pWintrustData->pPolicyCallbackData;
+
+    TRACE("(%p)\n", data);
+
+    if (policyData && policyData->u.cbSize !=
+     sizeof(WTD_GENERIC_CHAIN_POLICY_CREATE_INFO))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        ret = FALSE;
+        goto end;
+    }
+    if (!data->csSigners)
+    {
+        ret = FALSE;
+        SetLastError(TRUST_E_NOSIGNATURE);
+    }
+    else
+    {
+        DWORD i;
+        WTD_GENERIC_CHAIN_POLICY_CREATE_INFO createInfo, *pCreateInfo;
+        CERT_CHAIN_PARA chainPara, *pChainPara;
+
+        if (policyData)
+        {
+            pCreateInfo = policyData->pSignerChainInfo;
+            pChainPara = pCreateInfo->pChainPara;
+        }
+        else
+        {
+            WINTRUST_CreateChainPolicyCreateInfo(data, &createInfo, &chainPara);
+            pChainPara = &chainPara;
+            pCreateInfo = &createInfo;
+        }
+        ret = TRUE;
+        for (i = 0; i < data->csSigners; i++)
+            ret = WINTRUST_CreateChainForSigner(data, i, pCreateInfo,
+             pChainPara);
+    }
+
+end:
+    if (!ret)
+        data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_CERTPROV] =
+         GetLastError();
+    TRACE("returning %d (%08x)\n", ret ? S_OK : S_FALSE,
+     data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_CERTPROV]);
     return ret ? S_OK : S_FALSE;
 }
 
@@ -579,6 +720,8 @@ HRESULT WINAPI SoftpubAuthenticode(CRYPT_PROVIDER_DATA *data)
 {
     BOOL ret;
     CERT_CHAIN_POLICY_STATUS policyStatus = { sizeof(policyStatus), 0 };
+
+    TRACE("(%p)\n", data);
 
     if (data->pWintrustData->dwUIChoice != WTD_UI_NONE)
         FIXME("unimplemented for UI choice %d\n",
@@ -621,7 +764,104 @@ HRESULT WINAPI SoftpubAuthenticode(CRYPT_PROVIDER_DATA *data)
     if (!ret)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_POLICYPROV] =
          policyStatus.dwError;
+    TRACE("returning %d (%08x)\n", ret ? S_OK : S_FALSE,
+     data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_POLICYPROV]);
     return ret ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI WINTRUST_DefaultPolicy(CRYPT_PROVIDER_DATA *pProvData,
+ DWORD dwStepError, DWORD dwRegPolicySettings, DWORD cSigner,
+ PWTD_GENERIC_CHAIN_POLICY_SIGNER_INFO rgpSigner, void *pvPolicyArg)
+{
+    DWORD i;
+    CERT_CHAIN_POLICY_STATUS policyStatus = { sizeof(policyStatus), 0 };
+
+    for (i = 0; !policyStatus.dwError && i < cSigner; i++)
+    {
+        CERT_CHAIN_POLICY_PARA policyPara = { sizeof(policyPara), 0 };
+
+        if (dwRegPolicySettings & WTPF_IGNOREEXPIRATION)
+            policyPara.dwFlags |=
+             CERT_CHAIN_POLICY_IGNORE_NOT_TIME_VALID_FLAG |
+             CERT_CHAIN_POLICY_IGNORE_CTL_NOT_TIME_VALID_FLAG |
+             CERT_CHAIN_POLICY_IGNORE_NOT_TIME_NESTED_FLAG;
+        if (dwRegPolicySettings & WTPF_IGNOREREVOKATION)
+            policyPara.dwFlags |=
+             CERT_CHAIN_POLICY_IGNORE_END_REV_UNKNOWN_FLAG |
+             CERT_CHAIN_POLICY_IGNORE_CTL_SIGNER_REV_UNKNOWN_FLAG |
+             CERT_CHAIN_POLICY_IGNORE_CA_REV_UNKNOWN_FLAG |
+             CERT_CHAIN_POLICY_IGNORE_ROOT_REV_UNKNOWN_FLAG;
+        CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_BASE,
+         rgpSigner[i].pChainContext, &policyPara, &policyStatus);
+    }
+    return policyStatus.dwError;
+}
+
+HRESULT WINAPI GenericChainFinalProv(CRYPT_PROVIDER_DATA *data)
+{
+    HRESULT err = NO_ERROR; /* not a typo, MS confused the types */
+    WTD_GENERIC_CHAIN_POLICY_DATA *policyData =
+     (WTD_GENERIC_CHAIN_POLICY_DATA *)data->pWintrustData->pPolicyCallbackData;
+
+    TRACE("(%p)\n", data);
+
+    if (data->pWintrustData->dwUIChoice != WTD_UI_NONE)
+        FIXME("unimplemented for UI choice %d\n",
+         data->pWintrustData->dwUIChoice);
+    if (!data->csSigners)
+        err = TRUST_E_NOSIGNATURE;
+    else
+    {
+        PFN_WTD_GENERIC_CHAIN_POLICY_CALLBACK policyCallback;
+        void *policyArg;
+        WTD_GENERIC_CHAIN_POLICY_SIGNER_INFO *signers = NULL;
+
+        if (policyData)
+        {
+            policyCallback = policyData->pfnPolicyCallback;
+            policyArg = policyData->pvPolicyArg;
+        }
+        else
+        {
+            policyCallback = WINTRUST_DefaultPolicy;
+            policyArg = NULL;
+        }
+        if (data->csSigners)
+        {
+            DWORD i;
+
+            signers = data->psPfns->pfnAlloc(
+             data->csSigners * sizeof(WTD_GENERIC_CHAIN_POLICY_SIGNER_INFO));
+            if (signers)
+            {
+                for (i = 0; i < data->csSigners; i++)
+                {
+                    signers[i].u.cbSize =
+                     sizeof(WTD_GENERIC_CHAIN_POLICY_SIGNER_INFO);
+                    signers[i].pChainContext =
+                     data->pasSigners[i].pChainContext;
+                    signers[i].dwSignerType = data->pasSigners[i].dwSignerType;
+                    signers[i].pMsgSignerInfo = data->pasSigners[i].psSigner;
+                    signers[i].dwError = data->pasSigners[i].dwError;
+                    if (data->pasSigners[i].csCounterSigners)
+                        FIXME("unimplemented for counter signers\n");
+                    signers[i].cCounterSigner = 0;
+                    signers[i].rgpCounterSigner = NULL;
+                }
+            }
+            else
+                err = ERROR_OUTOFMEMORY;
+        }
+        if (!err)
+            err = policyCallback(data, TRUSTERROR_STEP_FINAL_POLICYPROV,
+             data->dwRegPolicySettings, data->csSigners, signers, policyArg);
+        data->psPfns->pfnFree(signers);
+    }
+    if (err)
+        data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_POLICYPROV] = err;
+    TRACE("returning %d (%08x)\n", !err ? S_OK : S_FALSE,
+     data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_POLICYPROV]);
+    return err == NO_ERROR ? S_OK : S_FALSE;
 }
 
 HRESULT WINAPI SoftpubCleanup(CRYPT_PROVIDER_DATA *data)

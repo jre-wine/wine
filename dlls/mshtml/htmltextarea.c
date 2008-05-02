@@ -51,31 +51,8 @@ static HRESULT WINAPI HTMLTextAreaElement_QueryInterface(IHTMLTextAreaElement *i
                                                          REFIID riid, void **ppv)
 {
     HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
-    HRESULT hres;
 
-    *ppv = NULL;
-
-    if(IsEqualGUID(&IID_IUnknown, riid)) {
-        TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
-        *ppv = HTMLTXTAREA(This);
-    }else if(IsEqualGUID(&IID_IDispatch, riid)) {
-        TRACE("(%p)->(IID_IDispatch %p)\n", This, ppv);
-        *ppv = HTMLTXTAREA(This);
-    }else if(IsEqualGUID(&IID_IHTMLTextAreaElement, riid)) {
-        TRACE("(%p)->(IID_IHTMLTextAreaElement %p)\n", This, ppv);
-        *ppv = HTMLTXTAREA(This);
-    }
-
-    if(*ppv) {
-        IUnknown_AddRef((IUnknown*)*ppv);
-        return S_OK;
-    }
-
-    hres = HTMLElement_QI(&This->element, riid, ppv);
-    if(FAILED(hres))
-        WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
-
-    return hres;
+    return IHTMLDOMNode_QueryInterface(HTMLDOMNODE(&This->element.node), riid, ppv);
 }
 
 static ULONG WINAPI HTMLTextAreaElement_AddRef(IHTMLTextAreaElement *iface)
@@ -346,14 +323,6 @@ static HRESULT WINAPI HTMLTextAreaElement_createTextRange(IHTMLTextAreaElement *
     return E_NOTIMPL;
 }
 
-static void HTMLTextAreaElement_destructor(IUnknown *iface)
-{
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
-
-    nsIDOMHTMLTextAreaElement_Release(This->nstextarea);
-    mshtml_free(This);
-}
-
 #undef HTMLTXTAREA_THIS
 
 static const IHTMLTextAreaElementVtbl HTMLTextAreaElementVtbl = {
@@ -392,20 +361,61 @@ static const IHTMLTextAreaElementVtbl HTMLTextAreaElementVtbl = {
     HTMLTextAreaElement_createTextRange
 };
 
+#define HTMLTXTAREA_NODE_THIS(iface) DEFINE_THIS2(HTMLTextAreaElement, element.node, iface)
+
+static HRESULT HTMLTextAreaElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
+{
+    HTMLTextAreaElement *This = HTMLTXTAREA_NODE_THIS(iface);
+
+    *ppv = NULL;
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
+        *ppv = HTMLTXTAREA(This);
+    }else if(IsEqualGUID(&IID_IDispatch, riid)) {
+        TRACE("(%p)->(IID_IDispatch %p)\n", This, ppv);
+        *ppv = HTMLTXTAREA(This);
+    }else if(IsEqualGUID(&IID_IHTMLTextAreaElement, riid)) {
+        TRACE("(%p)->(IID_IHTMLTextAreaElement %p)\n", This, ppv);
+        *ppv = HTMLTXTAREA(This);
+    }
+
+    if(*ppv) {
+        IUnknown_AddRef((IUnknown*)*ppv);
+        return S_OK;
+    }
+
+    return HTMLElement_QI(&This->element.node, riid, ppv);
+}
+
+static void HTMLTextAreaElement_destructor(HTMLDOMNode *iface)
+{
+    HTMLTextAreaElement *This = HTMLTXTAREA_NODE_THIS(iface);
+
+    nsIDOMHTMLTextAreaElement_Release(This->nstextarea);
+
+    HTMLElement_destructor(&This->element.node);
+}
+
+#undef HTMLTXTAREA_NODE_THIS
+
+static const NodeImplVtbl HTMLTextAreaElementImplVtbl = {
+    HTMLTextAreaElement_QI,
+    HTMLTextAreaElement_destructor
+};
+
 HTMLElement *HTMLTextAreaElement_Create(nsIDOMHTMLElement *nselem)
 {
     HTMLTextAreaElement *ret = mshtml_alloc(sizeof(HTMLTextAreaElement));
     nsresult nsres;
 
     ret->lpHTMLTextAreaElementVtbl = &HTMLTextAreaElementVtbl;
+    ret->element.node.vtbl = &HTMLTextAreaElementImplVtbl;
 
     nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLTextAreaElement,
                                              (void**)&ret->nstextarea);
     if(NS_FAILED(nsres))
         ERR("Could not get nsDOMHTMLInputElement: %08x\n", nsres);
-
-    ret->element.impl = (IUnknown*)HTMLTXTAREA(ret);
-    ret->element.destructor = HTMLTextAreaElement_destructor;
 
     return &ret->element;
 }

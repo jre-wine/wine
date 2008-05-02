@@ -40,6 +40,7 @@
 #include "wine/unicode.h"
 
 #include "x11drv.h"
+#include "xcomposite.h"
 #include "wine/debug.h"
 #include "wine/server.h"
 #include "win.h"
@@ -56,11 +57,15 @@ static XContext win_data_context;
 static const char whole_window_prop[] = "__wine_x11_whole_window";
 static const char icon_window_prop[]  = "__wine_x11_icon_window";
 static const char fbconfig_id_prop[]  = "__wine_x11_fbconfig_id";
+static const char gl_drawable_prop[]  = "__wine_x11_gl_drawable";
+static const char pixmap_prop[]       = "__wine_x11_pixmap";
 static const char managed_prop[]      = "__wine_x11_managed";
 static const char visual_id_prop[]    = "__wine_x11_visual_id";
 
 /* for XDG systray icons */
 #define SYSTEM_TRAY_REQUEST_DOCK    0
+
+extern int usexcomposite;
 
 /***********************************************************************
  *		is_window_managed
@@ -124,6 +129,56 @@ BOOL X11DRV_is_window_rect_mapped( const RECT *rect )
 
 
 /***********************************************************************
+ *              get_mwm_decorations
+ */
+static unsigned long get_mwm_decorations( DWORD style, DWORD ex_style )
+{
+    unsigned long ret = 0;
+
+    if (ex_style & WS_EX_TOOLWINDOW) return 0;
+
+    if ((style & WS_CAPTION) == WS_CAPTION)
+    {
+        ret |= MWM_DECOR_TITLE | MWM_DECOR_BORDER;
+        if (style & WS_SYSMENU) ret |= MWM_DECOR_MENU;
+        if (style & WS_MINIMIZEBOX) ret |= MWM_DECOR_MINIMIZE;
+        if (style & WS_MAXIMIZEBOX) ret |= MWM_DECOR_MAXIMIZE;
+    }
+    if (ex_style & WS_EX_DLGMODALFRAME) ret |= MWM_DECOR_BORDER;
+    else if (style & WS_THICKFRAME) ret |= MWM_DECOR_BORDER | MWM_DECOR_RESIZEH;
+    else if ((style & (WS_DLGFRAME|WS_BORDER)) == WS_DLGFRAME) ret |= MWM_DECOR_BORDER;
+    return ret;
+}
+
+
+/***********************************************************************
+ *		get_x11_rect_offset
+ *
+ * Helper for X11DRV_window_to_X_rect and X11DRV_X_to_window_rect.
+ */
+static void get_x11_rect_offset( struct x11drv_win_data *data, RECT *rect )
+{
+    DWORD style, ex_style, style_mask = 0, ex_style_mask = 0;
+    unsigned long decor;
+
+    rect->top = rect->bottom = rect->left = rect->right = 0;
+
+    style = GetWindowLongW( data->hwnd, GWL_STYLE );
+    ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
+    decor = get_mwm_decorations( style, ex_style );
+
+    if (decor & MWM_DECOR_TITLE) style_mask |= WS_CAPTION;
+    if (decor & MWM_DECOR_BORDER)
+    {
+        style_mask |= WS_DLGFRAME | WS_THICKFRAME;
+        ex_style_mask |= WS_EX_DLGMODALFRAME;
+    }
+
+    AdjustWindowRectEx( rect, style & style_mask, FALSE, ex_style & ex_style_mask );
+}
+
+
+/***********************************************************************
  *              get_window_attributes
  *
  * Fill the window attributes structure for an X window.
@@ -171,14 +226,201 @@ void X11DRV_sync_window_style( Display *display, struct x11drv_win_data *data )
  */
 BOOL X11DRV_set_win_format( HWND hwnd, XID fbconfig_id )
 {
+    Display *display = thread_display();
     struct x11drv_win_data *data;
+    XVisualInfo *vis;
+    Drawable parent;
+    HWND next_hwnd;
+    int w, h;
 
     if (!(data = X11DRV_get_win_data(hwnd))) return FALSE;
 
+    wine_tsx11_lock();
+
+    vis = visual_from_fbconfig_id(fbconfig_id);
+    if(!vis) return FALSE;
+
+    if(data->whole_window && vis->visualid == XVisualIDFromVisual(visual))
+    {
+        TRACE("Whole window available and visual match, rendering onscreen\n");
+        goto done;
+    }
+
+    wine_tsx11_unlock();
+
+    parent = data->whole_window;
+    next_hwnd = hwnd;
+    while(!parent)
+    {
+        next_hwnd = GetAncestor(next_hwnd, GA_PARENT);
+        if(!next_hwnd)
+        {
+            ERR("Could not find parent HWND with a drawable!\n");
+            return FALSE;
+        }
+        parent = X11DRV_get_whole_window(next_hwnd);
+    }
+
+    w = data->client_rect.right - data->client_rect.left;
+    h = data->client_rect.bottom - data->client_rect.top;
+
+    if(w <= 0) w = 1;
+    if(h <= 0) h = 1;
+
+    wine_tsx11_lock();
+#ifdef SONAME_LIBXCOMPOSITE
+    if(usexcomposite)
+    {
+        XSetWindowAttributes attrib;
+
+        attrib.override_redirect = True;
+        attrib.colormap = XCreateColormap(display, parent, vis->visual,
+                                          (vis->class == PseudoColor ||
+                                           vis->class == GrayScale ||
+                                           vis->class == DirectColor) ?
+                                          AllocAll : AllocNone);
+        XInstallColormap(gdi_display, attrib.colormap);
+
+        data->gl_drawable = XCreateWindow(display, parent, -w, 0, w, h, 0,
+                                          vis->depth, InputOutput, vis->visual,
+                                          CWColormap | CWOverrideRedirect,
+                                          &attrib);
+        if(data->gl_drawable)
+        {
+            pXCompositeRedirectWindow(display, data->gl_drawable,
+                                      CompositeRedirectManual);
+            XMapWindow(display, data->gl_drawable);
+        }
+    }
+    else
+#endif
+    {
+        WARN("XComposite is not available, using GLXPixmap hack\n");
+
+        data->pixmap = XCreatePixmap(display, parent, w, h, vis->depth);
+        if(!data->pixmap)
+        {
+            ERR("Failed to create pixmap for offscreen rendering\n");
+            XFree(vis);
+            wine_tsx11_unlock();
+            return FALSE;
+        }
+
+        data->gl_drawable = create_glxpixmap(display, vis, data->pixmap);
+        if(!data->gl_drawable)
+        {
+            XFreePixmap(display, data->pixmap);
+            data->pixmap = 0;
+        }
+    }
+
+    if(!data->gl_drawable)
+    {
+        ERR("Failed to create drawable for offscreen rendering\n");
+        XFree(vis);
+        wine_tsx11_unlock();
+        return FALSE;
+    }
+
+done:
+    XFree(vis);
+
+    XFlush(display);
+    wine_tsx11_unlock();
+
+    TRACE("Created GL drawable 0x%lx, using FBConfigID 0x%lx\n",
+          data->gl_drawable, fbconfig_id);
+
     data->fbconfig_id = fbconfig_id;
     SetPropA(hwnd, fbconfig_id_prop, (HANDLE)data->fbconfig_id);
+    SetPropA(hwnd, gl_drawable_prop, (HANDLE)data->gl_drawable);
+    SetPropA(hwnd, pixmap_prop, (HANDLE)data->pixmap);
     invalidate_dce( hwnd, &data->window_rect );
     return TRUE;
+}
+
+static void update_gl_drawable(Display *display, struct x11drv_win_data *data, const RECT *old_client_rect)
+{
+    int w = data->client_rect.right - data->client_rect.left;
+    int h = data->client_rect.bottom - data->client_rect.top;
+    XVisualInfo *vis;
+    Drawable parent;
+    HWND next_hwnd;
+    Drawable glxp;
+    Pixmap pix;
+
+    if((w == old_client_rect->right - old_client_rect->left &&
+        h == old_client_rect->bottom - old_client_rect->top) ||
+       w <= 0 || h <= 0)
+    {
+        TRACE("No resize needed\n");
+        return;
+    }
+
+    TRACE("Resizing GL drawable 0x%lx to %dx%d\n", data->gl_drawable, w, h);
+#ifdef SONAME_LIBXCOMPOSITE
+    if(usexcomposite)
+    {
+        wine_tsx11_lock();
+        XMoveResizeWindow(display, data->gl_drawable, -w, 0, w, h);
+        wine_tsx11_unlock();
+        return;
+    }
+#endif
+
+    parent = data->whole_window;
+    next_hwnd = data->hwnd;
+    while(!parent)
+    {
+        next_hwnd = GetAncestor(next_hwnd, GA_PARENT);
+        if(!next_hwnd)
+        {
+            ERR("Could not find parent HWND with a drawable!\n");
+            return;
+        }
+        parent = X11DRV_get_whole_window(next_hwnd);
+    }
+
+    wine_tsx11_lock();
+
+    vis = visual_from_fbconfig_id(data->fbconfig_id);
+    if(!vis) return;
+
+    pix = XCreatePixmap(display, parent, w, h, vis->depth);
+    if(!pix)
+    {
+        ERR("Failed to create pixmap for offscreen rendering\n");
+        XFree(vis);
+        wine_tsx11_unlock();
+        return;
+    }
+
+    glxp = create_glxpixmap(display, vis, pix);
+    if(!glxp)
+    {
+        ERR("Failed to create drawable for offscreen rendering\n");
+        XFreePixmap(display, pix);
+        XFree(vis);
+        wine_tsx11_unlock();
+        return;
+    }
+
+    XFree(vis);
+
+    mark_drawable_dirty(data->gl_drawable, glxp);
+
+    XFreePixmap(display, data->pixmap);
+    destroy_glxpixmap(display, data->gl_drawable);
+
+    data->pixmap = pix;
+    data->gl_drawable = glxp;
+
+    XFlush(display);
+    wine_tsx11_unlock();
+
+    SetPropA(data->hwnd, gl_drawable_prop, (HANDLE)data->gl_drawable);
+    SetPropA(data->hwnd, pixmap_prop, (HANDLE)data->pixmap);
+    invalidate_dce( data->hwnd, &data->window_rect );
 }
 
 
@@ -576,27 +818,12 @@ void X11DRV_set_wm_hints( Display *display, struct x11drv_win_data *data )
 		    XA_ATOM, 32, PropModeReplace, (unsigned char*)&window_type, 1);
 
     mwm_hints.flags = MWM_HINTS_FUNCTIONS | MWM_HINTS_DECORATIONS;
+    mwm_hints.decorations = get_mwm_decorations( style, ex_style );
     mwm_hints.functions = MWM_FUNC_MOVE;
     if (style & WS_THICKFRAME)  mwm_hints.functions |= MWM_FUNC_RESIZE;
     if (style & WS_MINIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MINIMIZE;
     if (style & WS_MAXIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MAXIMIZE;
     if (style & WS_SYSMENU)     mwm_hints.functions |= MWM_FUNC_CLOSE;
-    mwm_hints.decorations = 0;
-    if (!(ex_style & WS_EX_TOOLWINDOW))
-    {
-        if ((style & WS_CAPTION) == WS_CAPTION)
-        {
-            mwm_hints.decorations |= MWM_DECOR_TITLE;
-            if (style & WS_SYSMENU) mwm_hints.decorations |= MWM_DECOR_MENU;
-            if (style & WS_MINIMIZEBOX) mwm_hints.decorations |= MWM_DECOR_MINIMIZE;
-            if (style & WS_MAXIMIZEBOX) mwm_hints.decorations |= MWM_DECOR_MAXIMIZE;
-        }
-        if (ex_style & WS_EX_DLGMODALFRAME) mwm_hints.decorations |= MWM_DECOR_BORDER;
-        else if (style & WS_THICKFRAME) mwm_hints.decorations |= MWM_DECOR_BORDER | MWM_DECOR_RESIZEH;
-        else if ((style & (WS_DLGFRAME|WS_BORDER)) == WS_DLGFRAME) mwm_hints.decorations |= MWM_DECOR_BORDER;
-        else if (style & WS_BORDER) mwm_hints.decorations |= MWM_DECOR_BORDER;
-        else if (!(style & (WS_CHILD|WS_POPUP))) mwm_hints.decorations |= MWM_DECOR_BORDER;
-    }
 
     XChangeProperty( display, data->whole_window, x11drv_atom(_MOTIF_WM_HINTS),
                      x11drv_atom(_MOTIF_WM_HINTS), 32, PropModeReplace,
@@ -670,17 +897,11 @@ void X11DRV_set_iconic_state( HWND hwnd )
 void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect )
 {
     RECT rc;
-    DWORD ex_style;
 
     if (!data->managed) return;
     if (IsRectEmpty( rect )) return;
-    ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
-    if (ex_style & WS_EX_TOOLWINDOW) return;
 
-    rc.top = rc.bottom = rc.left = rc.right = 0;
-
-    AdjustWindowRectEx( &rc, GetWindowLongW( data->hwnd, GWL_STYLE ) & ~(WS_HSCROLL|WS_VSCROLL),
-                        FALSE, ex_style );
+    get_x11_rect_offset( data, &rc );
 
     rect->left   -= rc.left;
     rect->right  -= rc.right;
@@ -698,16 +919,17 @@ void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect )
  */
 void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect )
 {
-    DWORD ex_style;
+    RECT rc;
 
     if (!data->managed) return;
     if (IsRectEmpty( rect )) return;
-    ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
-    if (ex_style & WS_EX_TOOLWINDOW) return;
 
-    AdjustWindowRectEx( rect, GetWindowLongW( data->hwnd, GWL_STYLE ) & ~(WS_HSCROLL|WS_VSCROLL),
-                        FALSE, ex_style );
+    get_x11_rect_offset( data, &rc );
 
+    rect->left   += rc.left;
+    rect->right  += rc.right;
+    rect->top    += rc.top;
+    rect->bottom += rc.bottom;
     if (rect->top >= rect->bottom) rect->bottom = rect->top + 1;
     if (rect->left >= rect->right) rect->right = rect->left + 1;
 }
@@ -725,12 +947,17 @@ void X11DRV_sync_window_position( Display *display, struct x11drv_win_data *data
     XWindowChanges changes;
     int mask;
     RECT old_whole_rect;
+    RECT old_client_rect;
 
     old_whole_rect = data->whole_rect;
     data->whole_rect = *new_whole_rect;
 
+    old_client_rect = data->client_rect;
     data->client_rect = *new_client_rect;
     OffsetRect( &data->client_rect, -data->whole_rect.left, -data->whole_rect.top );
+
+    if (data->gl_drawable)
+        update_gl_drawable(display, data, &old_client_rect);
 
     if (!data->whole_window || data->lock_changes) return;
 
@@ -930,6 +1157,20 @@ void X11DRV_DestroyWindow( HWND hwnd )
 
     if (!(data = X11DRV_get_win_data( hwnd ))) return;
 
+    if (data->pixmap)
+    {
+        destroy_glxpixmap(display, data->gl_drawable);
+        wine_tsx11_lock();
+        XFreePixmap(display, data->pixmap);
+        wine_tsx11_unlock();
+    }
+    else if (data->gl_drawable)
+    {
+        wine_tsx11_lock();
+        XDestroyWindow(display, data->gl_drawable);
+        wine_tsx11_unlock();
+    }
+
     free_window_dce( data );
     destroy_whole_window( display, data );
     destroy_icon_window( display, data );
@@ -955,8 +1196,11 @@ static struct x11drv_win_data *alloc_win_data( Display *display, HWND hwnd )
         data->whole_window  = 0;
         data->icon_window   = 0;
         data->fbconfig_id   = 0;
+        data->gl_drawable   = 0;
+        data->pixmap        = 0;
         data->xic           = 0;
         data->managed       = FALSE;
+        data->wm_state      = 0;
         data->dce           = NULL;
         data->lock_changes  = 0;
         data->hWMIconBitmap = 0;
@@ -1258,6 +1502,32 @@ XID X11DRV_get_fbconfig_id( HWND hwnd )
 
     if (!data) return (XID)GetPropA( hwnd, fbconfig_id_prop );
     return data->fbconfig_id;
+}
+
+/***********************************************************************
+ *              X11DRV_get_gl_drawable
+ *
+ * Return the GL drawable for this window.
+ */
+Drawable X11DRV_get_gl_drawable( HWND hwnd )
+{
+    struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
+
+    if (!data) return (Drawable)GetPropA( hwnd, gl_drawable_prop );
+    return data->gl_drawable;
+}
+
+/***********************************************************************
+ *              X11DRV_get_gl_pixmap
+ *
+ * Return the Pixmap associated with the GL drawable (if any) for this window.
+ */
+Pixmap X11DRV_get_gl_pixmap( HWND hwnd )
+{
+    struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
+
+    if (!data) return (Pixmap)GetPropA( hwnd, pixmap_prop );
+    return data->pixmap;
 }
 
 

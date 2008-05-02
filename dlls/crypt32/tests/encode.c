@@ -462,17 +462,51 @@ static void testTimeEncoding(DWORD dwEncoding, LPCSTR structType,
          "Expected CRYPT_E_BAD_ENCODE, got 0x%08x\n", GetLastError());
 }
 
+static const char *printSystemTime(const SYSTEMTIME *st)
+{
+    static char buf[25];
+
+    sprintf(buf, "%02d-%02d-%04d %02d:%02d:%02d.%03d", st->wMonth, st->wDay,
+     st->wYear, st->wHour, st->wMinute, st->wSecond, st->wMilliseconds);
+    return buf;
+}
+
+static const char *printFileTime(const FILETIME *ft)
+{
+    static char buf[25];
+    SYSTEMTIME st;
+
+    FileTimeToSystemTime(ft, &st);
+    sprintf(buf, "%02d-%02d-%04d %02d:%02d:%02d.%03d", st.wMonth, st.wDay,
+     st.wYear, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    return buf;
+}
+
+static void compareTime(const SYSTEMTIME *expected, const FILETIME *got)
+{
+    SYSTEMTIME st;
+
+    FileTimeToSystemTime(got, &st);
+    ok(expected->wYear == st.wYear &&
+     expected->wMonth == st.wMonth &&
+     expected->wDay == st.wDay &&
+     expected->wHour == st.wHour &&
+     expected->wMinute == st.wMinute &&
+     expected->wSecond == st.wSecond &&
+     abs(expected->wMilliseconds - st.wMilliseconds) <= 1,
+     "Got unexpected value for time decoding:\nexpected %s, got %s\n",
+     printSystemTime(expected), printFileTime(got));
+}
+
 static void testTimeDecoding(DWORD dwEncoding, LPCSTR structType,
  const struct encodedFiletime *time)
 {
-    FILETIME ft1 = { 0 }, ft2 = { 0 };
-    DWORD size = sizeof(ft2);
+    FILETIME ft = { 0 };
+    DWORD size = sizeof(ft);
     BOOL ret;
 
-    ret = SystemTimeToFileTime(&time->sysTime, &ft1);
-    ok(ret, "SystemTimeToFileTime failed: %d\n", GetLastError());
     ret = CryptDecodeObjectEx(dwEncoding, structType, time->encodedTime,
-     time->encodedTime[1] + 2, 0, NULL, &ft2, &size);
+     time->encodedTime[1] + 2, 0, NULL, &ft, &size);
     /* years other than 1950-2050 are not allowed for encodings other than
      * X509_CHOICE_OF_TIME.
      */
@@ -481,8 +515,7 @@ static void testTimeDecoding(DWORD dwEncoding, LPCSTR structType,
     {
         ok(ret, "CryptDecodeObjectEx failed: %d (0x%08x)\n", GetLastError(),
          GetLastError());
-        ok(!memcmp(&ft1, &ft2, sizeof(ft1)),
-         "Got unexpected value for time decoding\n");
+        compareTime(&time->sysTime, &ft);
     }
     else
         ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
@@ -1229,11 +1262,6 @@ static void test_encodeNameValue(DWORD dwEncoding)
     BOOL ret;
     CERT_NAME_VALUE value = { 0, { 0, NULL } };
 
-    value.dwValueType = 14;
-    ret = CryptEncodeObjectEx(dwEncoding, X509_NAME_VALUE, &value,
-     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
-    ok(!ret && GetLastError() == CRYPT_E_ASN1_CHOICE,
-     "Expected CRYPT_E_ASN1_CHOICE, got %08x\n", GetLastError());
     value.dwValueType = CERT_RDN_ENCODED_BLOB;
     value.Value.pbData = printableCommonNameValue;
     value.Value.cbData = sizeof(printableCommonNameValue);
@@ -1589,7 +1617,6 @@ static struct UnicodeExpectedError unicodeErrors[] = {
  { CERT_RDN_ANY_TYPE,         oneW,       0, CRYPT_E_NOT_CHAR_STRING },
  { CERT_RDN_ENCODED_BLOB,     oneW,       0, CRYPT_E_NOT_CHAR_STRING },
  { CERT_RDN_OCTET_STRING,     oneW,       0, CRYPT_E_NOT_CHAR_STRING },
- { 14,                        oneW,       0, CRYPT_E_ASN1_CHOICE },
  { CERT_RDN_NUMERIC_STRING,   aW,         0, CRYPT_E_INVALID_NUMERIC_STRING },
  { CERT_RDN_PRINTABLE_STRING, quoteW,     0, CRYPT_E_INVALID_PRINTABLE_STRING },
  { CERT_RDN_IA5_STRING,       nihongoURL, 7, CRYPT_E_INVALID_IA5_STRING },
@@ -3368,7 +3395,10 @@ static void compareAltNameEntry(const CERT_ALT_NAME_ENTRY *expected,
         case CERT_ALT_NAME_URL:
         case CERT_ALT_NAME_REGISTERED_ID:
             ok((!U(*expected).pwszURL && !U(*got).pwszURL) ||
-               !lstrcmpW(U(*expected).pwszURL, U(*got).pwszURL), "Unexpected name\n");
+             (!U(*expected).pwszURL && !lstrlenW(U(*got).pwszURL)) ||
+             (!U(*got).pwszURL && !lstrlenW(U(*expected).pwszURL)) ||
+             !lstrcmpW(U(*expected).pwszURL, U(*got).pwszURL),
+             "Unexpected name\n");
             break;
         case CERT_ALT_NAME_X400_ADDRESS:
         case CERT_ALT_NAME_DIRECTORY_NAME:
@@ -5441,6 +5471,226 @@ static void test_decodePKCSSignerInfo(DWORD dwEncoding)
     }
 }
 
+static BYTE emptyDNSPermittedConstraints[] = {
+0x30,0x06,0xa0,0x04,0x30,0x02,0x82,0x00 };
+static BYTE emptyDNSExcludedConstraints[] = {
+0x30,0x06,0xa1,0x04,0x30,0x02,0x82,0x00 };
+static BYTE DNSExcludedConstraints[] = {
+0x30,0x17,0xa1,0x15,0x30,0x13,0x82,0x11,0x68,0x74,0x74,0x70,0x3a,0x2f,0x2f,
+0x77,0x69,0x6e,0x65,0x68,0x71,0x2e,0x6f,0x72,0x67 };
+static BYTE permittedAndExcludedConstraints[] = {
+0x30,0x25,0xa0,0x0c,0x30,0x0a,0x87,0x08,0x30,0x06,0x87,0x04,0x7f,0x00,0x00,
+0x01,0xa1,0x15,0x30,0x13,0x82,0x11,0x68,0x74,0x74,0x70,0x3a,0x2f,0x2f,0x77,
+0x69,0x6e,0x65,0x68,0x71,0x2e,0x6f,0x72,0x67 };
+static BYTE permittedAndExcludedWithMinConstraints[] = {
+0x30,0x28,0xa0,0x0f,0x30,0x0d,0x87,0x08,0x30,0x06,0x87,0x04,0x7f,0x00,0x00,
+0x01,0x80,0x01,0x05,0xa1,0x15,0x30,0x13,0x82,0x11,0x68,0x74,0x74,0x70,0x3a,
+0x2f,0x2f,0x77,0x69,0x6e,0x65,0x68,0x71,0x2e,0x6f,0x72,0x67 };
+static BYTE permittedAndExcludedWithMinMaxConstraints[] = {
+0x30,0x2b,0xa0,0x12,0x30,0x10,0x87,0x08,0x30,0x06,0x87,0x04,0x7f,0x00,0x00,
+0x01,0x80,0x01,0x05,0x81,0x01,0x03,0xa1,0x15,0x30,0x13,0x82,0x11,0x68,0x74,
+0x74,0x70,0x3a,0x2f,0x2f,0x77,0x69,0x6e,0x65,0x68,0x71,0x2e,0x6f,0x72,0x67 };
+
+static void test_encodeNameConstraints(DWORD dwEncoding)
+{
+    BOOL ret;
+    CERT_NAME_CONSTRAINTS_INFO constraints = { 0 };
+    CERT_GENERAL_SUBTREE permitted = { { 0 } };
+    CERT_GENERAL_SUBTREE excluded = { { 0 } };
+    LPBYTE buf;
+    DWORD size;
+
+    ret = CryptEncodeObjectEx(dwEncoding, X509_NAME_CONSTRAINTS, &constraints,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(emptySequence), "Unexpected size\n");
+        ok(!memcmp(buf, emptySequence, size), "Unexpected value\n");
+        LocalFree(buf);
+    }
+    constraints.cPermittedSubtree = 1;
+    constraints.rgPermittedSubtree = &permitted;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, X509_NAME_CONSTRAINTS, &constraints,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(!ret && GetLastError() == E_INVALIDARG,
+     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+    permitted.Base.dwAltNameChoice = CERT_ALT_NAME_DNS_NAME;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_NAME_CONSTRAINTS, &constraints,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(emptyDNSPermittedConstraints), "Unexpected size\n");
+        ok(!memcmp(buf, emptyDNSPermittedConstraints, size),
+         "Unexpected value\n");
+        LocalFree(buf);
+    }
+    constraints.cPermittedSubtree = 0;
+    constraints.cExcludedSubtree = 1;
+    constraints.rgExcludedSubtree = &excluded;
+    excluded.Base.dwAltNameChoice = CERT_ALT_NAME_DNS_NAME;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_NAME_CONSTRAINTS, &constraints,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(emptyDNSExcludedConstraints), "Unexpected size\n");
+        ok(!memcmp(buf, emptyDNSExcludedConstraints, size),
+         "Unexpected value\n");
+        LocalFree(buf);
+    }
+    excluded.Base.pwszURL = (LPWSTR)url;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_NAME_CONSTRAINTS, &constraints,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(DNSExcludedConstraints), "Unexpected size\n");
+        ok(!memcmp(buf, DNSExcludedConstraints, size),
+         "Unexpected value\n");
+        LocalFree(buf);
+    }
+    permitted.Base.dwAltNameChoice = CERT_ALT_NAME_IP_ADDRESS;
+    permitted.Base.IPAddress.cbData = sizeof(encodedIPAddr);
+    permitted.Base.IPAddress.pbData = (LPBYTE)encodedIPAddr;
+    constraints.cPermittedSubtree = 1;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_NAME_CONSTRAINTS, &constraints,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(permittedAndExcludedConstraints),
+         "Unexpected size\n");
+        ok(!memcmp(buf, permittedAndExcludedConstraints, size),
+         "Unexpected value\n");
+        LocalFree(buf);
+    }
+    permitted.dwMinimum = 5;
+    ret = CryptEncodeObjectEx(dwEncoding, X509_NAME_CONSTRAINTS, &constraints,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(permittedAndExcludedWithMinConstraints),
+         "Unexpected size\n");
+        ok(!memcmp(buf, permittedAndExcludedWithMinConstraints, size),
+         "Unexpected value\n");
+        LocalFree(buf);
+    }
+    permitted.fMaximum = TRUE;
+    permitted.dwMaximum = 3;
+    SetLastError(0xdeadbeef);
+    ret = CryptEncodeObjectEx(dwEncoding, X509_NAME_CONSTRAINTS, &constraints,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (ret)
+    {
+        ok(size == sizeof(permittedAndExcludedWithMinMaxConstraints),
+         "Unexpected size\n");
+        ok(!memcmp(buf, permittedAndExcludedWithMinMaxConstraints, size),
+         "Unexpected value\n");
+        LocalFree(buf);
+    }
+}
+
+struct EncodedNameConstraints
+{
+    CRYPT_DATA_BLOB            encoded;
+    CERT_NAME_CONSTRAINTS_INFO constraints;
+};
+
+static CERT_GENERAL_SUBTREE emptyDNSSubtree = {
+ { CERT_ALT_NAME_DNS_NAME, { 0 } }, 0 };
+static CERT_GENERAL_SUBTREE DNSSubtree = {
+ { CERT_ALT_NAME_DNS_NAME, { 0 } }, 0 };
+static CERT_GENERAL_SUBTREE IPAddressSubtree = {
+ { CERT_ALT_NAME_IP_ADDRESS, { 0 } }, 0 };
+static CERT_GENERAL_SUBTREE IPAddressWithMinSubtree = {
+ { CERT_ALT_NAME_IP_ADDRESS, { 0 } }, 5, 0 };
+static CERT_GENERAL_SUBTREE IPAddressWithMinMaxSubtree = {
+ { CERT_ALT_NAME_IP_ADDRESS, { 0 } }, 5, TRUE, 3 };
+
+struct EncodedNameConstraints encodedNameConstraints[] = {
+ { { sizeof(emptySequence), (LPBYTE)emptySequence }, { 0 } },
+ { { sizeof(emptyDNSPermittedConstraints), emptyDNSPermittedConstraints },
+   { 1, &emptyDNSSubtree, 0, NULL } },
+ { { sizeof(emptyDNSExcludedConstraints), emptyDNSExcludedConstraints },
+   { 0, NULL, 1, &emptyDNSSubtree } },
+ { { sizeof(DNSExcludedConstraints), DNSExcludedConstraints },
+   { 0, NULL, 1, &DNSSubtree } },
+ { { sizeof(permittedAndExcludedConstraints), permittedAndExcludedConstraints },
+   { 1, &IPAddressSubtree, 1, &DNSSubtree } },
+ { { sizeof(permittedAndExcludedWithMinConstraints),
+     permittedAndExcludedWithMinConstraints },
+   { 1, &IPAddressWithMinSubtree, 1, &DNSSubtree } },
+ { { sizeof(permittedAndExcludedWithMinMaxConstraints),
+     permittedAndExcludedWithMinMaxConstraints },
+   { 1, &IPAddressWithMinMaxSubtree, 1, &DNSSubtree } },
+};
+
+static void test_decodeNameConstraints(DWORD dwEncoding)
+{
+    BOOL ret;
+    DWORD i;
+    CERT_NAME_CONSTRAINTS_INFO *constraints;
+
+    DNSSubtree.Base.pwszURL = (LPWSTR)url;
+    IPAddressSubtree.Base.IPAddress.cbData = sizeof(encodedIPAddr);
+    IPAddressSubtree.Base.IPAddress.pbData = (LPBYTE)encodedIPAddr;
+    IPAddressWithMinSubtree.Base.IPAddress.cbData = sizeof(encodedIPAddr);
+    IPAddressWithMinSubtree.Base.IPAddress.pbData = (LPBYTE)encodedIPAddr;
+    IPAddressWithMinMaxSubtree.Base.IPAddress.cbData = sizeof(encodedIPAddr);
+    IPAddressWithMinMaxSubtree.Base.IPAddress.pbData = (LPBYTE)encodedIPAddr;
+    for (i = 0;
+     i < sizeof(encodedNameConstraints) / sizeof(encodedNameConstraints[0]);
+     i++)
+    {
+        DWORD size;
+
+        ret = CryptDecodeObjectEx(dwEncoding, X509_NAME_CONSTRAINTS,
+         encodedNameConstraints[i].encoded.pbData,
+         encodedNameConstraints[i].encoded.cbData,
+         CRYPT_DECODE_ALLOC_FLAG, NULL, &constraints, &size);
+        ok(ret, "%d: CryptDecodeObjectEx failed: %08x\n", i, GetLastError());
+        if (ret)
+        {
+            DWORD j;
+
+            if (constraints->cPermittedSubtree !=
+             encodedNameConstraints[i].constraints.cPermittedSubtree)
+                fprintf(stderr, "%d: expected %d permitted, got %d\n", i,
+                 encodedNameConstraints[i].constraints.cPermittedSubtree,
+                 constraints->cPermittedSubtree);
+            if (constraints->cPermittedSubtree ==
+             encodedNameConstraints[i].constraints.cPermittedSubtree)
+            {
+                for (j = 0; j < constraints->cPermittedSubtree; j++)
+                {
+                    compareAltNameEntry(&constraints->rgPermittedSubtree[j].Base,
+                     &encodedNameConstraints[i].constraints.rgPermittedSubtree[j].Base);
+                }
+            }
+            if (constraints->cExcludedSubtree !=
+             encodedNameConstraints[i].constraints.cExcludedSubtree)
+                fprintf(stderr, "%d: expected %d excluded, got %d\n", i,
+                 encodedNameConstraints[i].constraints.cExcludedSubtree,
+                 constraints->cExcludedSubtree);
+            if (constraints->cExcludedSubtree ==
+             encodedNameConstraints[i].constraints.cExcludedSubtree)
+            {
+                for (j = 0; j < constraints->cExcludedSubtree; j++)
+                {
+                    compareAltNameEntry(&constraints->rgExcludedSubtree[j].Base,
+                     &encodedNameConstraints[i].constraints.rgExcludedSubtree[j].Base);
+                }
+            }
+            LocalFree(constraints);
+        }
+    }
+}
+
 /* Free *pInfo with HeapFree */
 static void testExportPublicKey(HCRYPTPROV csp, PCERT_PUBLIC_KEY_INFO *pInfo)
 {
@@ -5656,6 +5906,8 @@ START_TEST(encode)
         test_decodePKCSAttributes(encodings[i]);
         test_encodePKCSSignerInfo(encodings[i]);
         test_decodePKCSSignerInfo(encodings[i]);
+        test_encodeNameConstraints(encodings[i]);
+        test_decodeNameConstraints(encodings[i]);
     }
     testPortPublicKeyInfo();
 }

@@ -307,10 +307,14 @@ struct _user_type_t {
     const char *name;
 };
 
+extern unsigned char pointer_default;
+
 extern user_type_list_t user_type_list;
 void check_for_user_types_and_context_handles(const var_list_t *list);
 
 void init_types(void);
+type_t *alloc_type(void);
+void set_all_tfswrite(int val);
 
 type_t *duptype(type_t *t, int dupname);
 type_t *alias(type_t *t, const char *name);

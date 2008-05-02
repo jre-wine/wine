@@ -167,7 +167,7 @@ CONST SHADER_OPCODE IWineD3DPixelShaderImpl_shader_ins[] = {
     {WINED3DSIO_SGE,  "sge",  "SGE", 1, 3, pshader_hw_map2gl, shader_glsl_compare, 0, 0},
     {WINED3DSIO_ABS,  "abs",  "ABS", 1, 2, pshader_hw_map2gl, shader_glsl_map2gl, 0, 0},
     {WINED3DSIO_EXP,  "exp",  "EX2", 1, 2, pshader_hw_map2gl, shader_glsl_map2gl, 0, 0},
-    {WINED3DSIO_LOG,  "log",  "LG2", 1, 2, pshader_hw_map2gl, shader_glsl_map2gl, 0, 0},
+    {WINED3DSIO_LOG,  "log",  "LG2", 1, 2, pshader_hw_map2gl, shader_glsl_log, 0, 0},
     {WINED3DSIO_EXPP, "expp", "EXP", 1, 2, pshader_hw_map2gl, shader_glsl_expp, 0, 0},
     {WINED3DSIO_LOGP, "logp", "LOG", 1, 2, pshader_hw_map2gl, shader_glsl_map2gl, 0, 0},
     {WINED3DSIO_DST,  "dst",  "DST", 1, 3, pshader_hw_map2gl, shader_glsl_dst, 0, 0},
@@ -182,11 +182,11 @@ CONST SHADER_OPCODE IWineD3DPixelShaderImpl_shader_ins[] = {
     {WINED3DSIO_SINCOS,   "sincos",   "SCS", 1, 2, shader_hw_sincos, shader_glsl_sincos, WINED3DPS_VERSION(3,0), -1},
     {WINED3DSIO_DP2ADD,   "dp2add",   NULL, 1, 4, pshader_hw_dp2add, pshader_glsl_dp2add, WINED3DPS_VERSION(2,0), -1},
     /* Matrix */
-    {WINED3DSIO_M4x4, "m4x4", "undefined", 1, 3, NULL, shader_glsl_mnxn, 0, 0},
-    {WINED3DSIO_M4x3, "m4x3", "undefined", 1, 3, NULL, shader_glsl_mnxn, 0, 0},
-    {WINED3DSIO_M3x4, "m3x4", "undefined", 1, 3, NULL, shader_glsl_mnxn, 0, 0},
-    {WINED3DSIO_M3x3, "m3x3", "undefined", 1, 3, NULL, shader_glsl_mnxn, 0, 0},
-    {WINED3DSIO_M3x2, "m3x2", "undefined", 1, 3, NULL, shader_glsl_mnxn, 0, 0},
+    {WINED3DSIO_M4x4, "m4x4", "undefined", 1, 3, shader_hw_mnxn, shader_glsl_mnxn, 0, 0},
+    {WINED3DSIO_M4x3, "m4x3", "undefined", 1, 3, shader_hw_mnxn, shader_glsl_mnxn, 0, 0},
+    {WINED3DSIO_M3x4, "m3x4", "undefined", 1, 3, shader_hw_mnxn, shader_glsl_mnxn, 0, 0},
+    {WINED3DSIO_M3x3, "m3x3", "undefined", 1, 3, shader_hw_mnxn, shader_glsl_mnxn, 0, 0},
+    {WINED3DSIO_M3x2, "m3x2", "undefined", 1, 3, shader_hw_mnxn, shader_glsl_mnxn, 0, 0},
     /* Register declarations */
     {WINED3DSIO_DCL,      "dcl",      NULL, 0, 2, NULL, NULL, 0, 0},
     /* Flow control - requires GLSL or software shaders */
@@ -220,7 +220,7 @@ CONST SHADER_OPCODE IWineD3DPixelShaderImpl_shader_ins[] = {
     {WINED3DSIO_TEXBEML,  "texbeml",  GLNAME_REQUIRE_GLSL, 1, 2, pshader_hw_texbem, pshader_glsl_texbem, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXREG2AR,"texreg2ar","undefined", 1, 2, pshader_hw_texreg2ar, pshader_glsl_texreg2ar, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXREG2GB,"texreg2gb","undefined", 1, 2, pshader_hw_texreg2gb, pshader_glsl_texreg2gb, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,3)},
-    {WINED3DSIO_TEXREG2RGB,   "texreg2rgb",   GLNAME_REQUIRE_GLSL, 1, 2, NULL, pshader_glsl_texreg2rgb, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
+    {WINED3DSIO_TEXREG2RGB,   "texreg2rgb",   "undefined", 1, 2, pshader_hw_texreg2rgb, pshader_glsl_texreg2rgb, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXM3x2PAD,   "texm3x2pad",   "undefined", 1, 2, pshader_hw_texm3x2pad, pshader_glsl_texm3x2pad, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXM3x2TEX,   "texm3x2tex",   "undefined", 1, 2, pshader_hw_texm3x2tex, pshader_glsl_texm3x2tex, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXM3x3PAD,   "texm3x3pad",   "undefined", 1, 2, pshader_hw_texm3x3pad, pshader_glsl_texm3x3pad, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,3)},
@@ -592,6 +592,13 @@ static HRESULT WINAPI IWineD3DPixelShaderImpl_CompileShader(IWineD3DPixelShader 
             WARN("Recompiling shader because srgb correction is different and hardcoded\n");
             goto recompile;
         }
+        if(This->baseShader.reg_maps.vpos && !This->vpos_uniform) {
+            if(This->render_offscreen != deviceImpl->render_offscreen ||
+               This->height != ((IWineD3DSurfaceImpl *) deviceImpl->render_targets[0])->currentDesc.Height) {
+                WARN("Recompiling shader because vpos is used, hard compiled and changed\n");
+                goto recompile;
+            }
+        }
 
         return WINED3D_OK;
 
@@ -625,7 +632,7 @@ static HRESULT WINAPI IWineD3DPixelShaderImpl_CompileShader(IWineD3DPixelShader 
         /* FIXME: validate reg_maps against OpenGL */
     }
 
-    /* Reset fields tracking stateblock values beeing hardcoded in the shader */
+    /* Reset fields tracking stateblock values being hardcoded in the shader */
     This->baseShader.num_sampled_samplers = 0;
 
     /* Generate the HW shader */

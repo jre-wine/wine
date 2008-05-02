@@ -52,6 +52,8 @@
 #include "handle.h"
 #include "thread.h"
 #include "request.h"
+#include "process.h"
+#include "security.h"
 
 struct file
 {
@@ -59,13 +61,15 @@ struct file
     struct fd          *fd;         /* file descriptor for this file */
     unsigned int        access;     /* file access (FILE_READ_DATA etc.) */
     mode_t              mode;       /* file stat.st_mode */
+    uid_t               uid;        /* file stat.st_uid */
 };
 
 static unsigned int generic_file_map_access( unsigned int access );
 
 static void file_dump( struct object *obj, int verbose );
 static struct fd *file_get_fd( struct object *obj );
-static unsigned int file_map_access( struct object *obj, unsigned int access );
+static struct security_descriptor *file_get_sd( struct object *obj );
+static int file_set_sd( struct object *obj, const struct security_descriptor *sd, unsigned int set_info );
 static void file_destroy( struct object *obj );
 
 static int file_get_poll_events( struct fd *fd );
@@ -82,7 +86,9 @@ static const struct object_ops file_ops =
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     file_get_fd,                  /* get_fd */
-    file_map_access,              /* map_access */
+    default_fd_map_access,        /* map_access */
+    file_get_sd,                  /* get_sd */
+    file_set_sd,                  /* set_sd */
     no_lookup_name,               /* lookup_name */
     no_open_file,                 /* open_file */
     fd_close_handle,              /* close_handle */
@@ -122,7 +128,7 @@ static struct file *create_file_for_fd( int fd, unsigned int access, unsigned in
     if ((file = alloc_object( &file_ops )))
     {
         file->mode = st.st_mode;
-        file->access = file_map_access( &file->obj, access );
+        file->access = default_fd_map_access( &file->obj, access );
         if (!(file->fd = create_anonymous_fd( &file_fd_ops, fd, &file->obj,
                                               FILE_SYNCHRONOUS_IO_NONALERT )))
         {
@@ -268,9 +274,247 @@ static unsigned int generic_file_map_access( unsigned int access )
     return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
-static unsigned int file_map_access( struct object *obj, unsigned int access )
+static struct security_descriptor *file_get_sd( struct object *obj )
 {
-    return generic_file_map_access( access );
+    struct file *file = (struct file *)obj;
+    struct stat st;
+    int unix_fd;
+    struct security_descriptor *sd;
+    const SID *user;
+    const SID *group;
+    size_t dacl_size;
+    ACCESS_ALLOWED_ACE *aaa;
+    ACL *dacl;
+    SID *sid;
+    char *ptr;
+    const SID *world_sid = security_world_sid;
+    const SID *local_system_sid = security_local_system_sid;
+
+    assert( obj->ops == &file_ops );
+
+    unix_fd = get_file_unix_fd( file );
+
+    if (unix_fd == -1) return obj->sd;
+
+    if (fstat( unix_fd, &st ) == -1)
+        return obj->sd;
+
+    /* mode and uid the same? if so, no need to re-generate security descriptor */
+    if (obj->sd && (st.st_mode & (S_IRWXU|S_IRWXO)) == (file->mode & (S_IRWXU|S_IRWXO)) &&
+        (st.st_uid == file->uid))
+        return obj->sd;
+
+    user = security_unix_uid_to_sid( st.st_uid );
+    group = token_get_primary_group( current->process->token );
+
+    dacl_size = sizeof(ACL) + FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) +
+        FIELD_OFFSET(SID, SubAuthority[local_system_sid->SubAuthorityCount]);
+    if (st.st_mode & S_IRWXU)
+        dacl_size += FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) +
+            FIELD_OFFSET(SID, SubAuthority[user->SubAuthorityCount]);
+    if (st.st_mode & S_IRWXO)
+        dacl_size += FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) +
+            FIELD_OFFSET(SID, SubAuthority[world_sid->SubAuthorityCount]);
+
+    sd = mem_alloc( sizeof(struct security_descriptor) +
+                    FIELD_OFFSET(SID, SubAuthority[user->SubAuthorityCount]) +
+                    FIELD_OFFSET(SID, SubAuthority[group->SubAuthorityCount]) +
+                    dacl_size );
+    if (!sd) return obj->sd;
+
+    sd->control = SE_DACL_PRESENT;
+    sd->owner_len = FIELD_OFFSET(SID, SubAuthority[user->SubAuthorityCount]);
+    sd->group_len = FIELD_OFFSET(SID, SubAuthority[group->SubAuthorityCount]);
+    sd->sacl_len = 0;
+    sd->dacl_len = dacl_size;
+
+    ptr = (char *)(sd + 1);
+    memcpy( ptr, user, sd->owner_len );
+    ptr += sd->owner_len;
+    memcpy( ptr, group, sd->group_len );
+    ptr += sd->group_len;
+
+    dacl = (ACL *)ptr;
+    dacl->AclRevision = ACL_REVISION;
+    dacl->Sbz1 = 0;
+    dacl->AclSize = dacl_size;
+    dacl->AceCount = 1 + (st.st_mode & S_IRWXU ? 1 : 0) + (st.st_mode & S_IRWXO ? 1 : 0);
+    dacl->Sbz2 = 0;
+
+    /* always give FILE_ALL_ACCESS for Local System */
+    aaa = (ACCESS_ALLOWED_ACE *)(dacl + 1);
+    aaa->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
+    aaa->Header.AceFlags = 0;
+    aaa->Header.AceSize = FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) +
+        FIELD_OFFSET(SID, SubAuthority[local_system_sid->SubAuthorityCount]);
+    aaa->Mask = FILE_ALL_ACCESS;
+    sid = (SID *)&aaa->SidStart;
+    memcpy( sid, local_system_sid, FIELD_OFFSET(SID, SubAuthority[local_system_sid->SubAuthorityCount]) );
+
+    if (st.st_mode & S_IRWXU)
+    {
+        /* appropriate access rights for the user */
+        aaa = (ACCESS_ALLOWED_ACE *)ace_next( &aaa->Header );
+        aaa->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
+        aaa->Header.AceFlags = 0;
+        aaa->Header.AceSize = FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) +
+                              FIELD_OFFSET(SID, SubAuthority[user->SubAuthorityCount]);
+        aaa->Mask = WRITE_DAC | WRITE_OWNER;
+        if (st.st_mode & S_IRUSR)
+            aaa->Mask |= FILE_GENERIC_READ;
+        if (st.st_mode & S_IWUSR)
+            aaa->Mask |= FILE_GENERIC_WRITE | DELETE;
+        if (st.st_mode & S_IXUSR)
+            aaa->Mask |= FILE_GENERIC_EXECUTE;
+        sid = (SID *)&aaa->SidStart;
+        memcpy( sid, user, FIELD_OFFSET(SID, SubAuthority[user->SubAuthorityCount]) );
+    }
+    if (st.st_mode & S_IRWXO)
+    {
+        /* appropriate access rights for Everyone */
+        aaa = (ACCESS_ALLOWED_ACE *)ace_next( &aaa->Header );
+        aaa->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
+        aaa->Header.AceFlags = 0;
+        aaa->Header.AceSize = FIELD_OFFSET(ACCESS_ALLOWED_ACE, SidStart) +
+                             FIELD_OFFSET(SID, SubAuthority[world_sid->SubAuthorityCount]);
+        aaa->Mask = 0;
+        if (st.st_mode & S_IROTH)
+            aaa->Mask |= FILE_GENERIC_READ;
+        if (st.st_mode & S_IWOTH)
+            aaa->Mask |= FILE_GENERIC_WRITE | DELETE;
+        if (st.st_mode & S_IXOTH)
+            aaa->Mask |= FILE_GENERIC_EXECUTE;
+        sid = (SID *)&aaa->SidStart;
+        memcpy( sid, world_sid, FIELD_OFFSET(SID, SubAuthority[world_sid->SubAuthorityCount]) );
+    }
+
+    file->mode = st.st_mode;
+    file->uid = st.st_uid;
+    free( obj->sd );
+    obj->sd = sd;
+    return sd;
+}
+
+static int file_set_sd( struct object *obj, const struct security_descriptor *sd,
+                        unsigned int set_info )
+{
+    struct file *file = (struct file *)obj;
+    mode_t new_mode;
+    mode_t denied_mode = 0;
+    const SID *owner;
+    int unix_fd;
+
+    assert( obj->ops == &file_ops );
+
+    unix_fd = get_file_unix_fd( file );
+
+    if (unix_fd == -1) return 1;
+
+    if (set_info & OWNER_SECURITY_INFORMATION)
+    {
+        owner = sd_get_owner( sd );
+        if (!owner)
+        {
+            set_error( STATUS_INVALID_SECURITY_DESCR );
+            return 0;
+        }
+        if (!obj->sd || !security_equal_sid( owner, sd_get_owner( obj->sd ) ))
+        {
+            /* FIXME: get Unix uid and call fchown */
+        }
+    }
+    else if (obj->sd)
+        owner = sd_get_owner( obj->sd );
+    else
+        owner = token_get_user( current->process->token );
+
+    /* group and sacl not supported */
+
+    /* keep the bits that we don't map to access rights in the ACL */
+    new_mode = file->mode & (S_ISUID|S_ISGID|S_ISVTX|S_IRWXG);
+
+    if (set_info & DACL_SECURITY_INFORMATION)
+    {
+        if (sd->control & SE_DACL_PRESENT)
+        {
+            const ACL *dacl = (const ACL *)((char *)sd + sd->owner_len + sd->group_len + sd->sacl_len);
+            const ACE_HEADER *ace = (const ACE_HEADER *)(dacl + 1);
+            ULONG i;
+            for (i = 0; i < dacl->AceCount; i++)
+            {
+                const ACCESS_ALLOWED_ACE *aa_ace;
+                const ACCESS_DENIED_ACE *ad_ace;
+                const SID *sid;
+                switch (ace->AceType)
+                {
+                case ACCESS_DENIED_ACE_TYPE:
+                    ad_ace = (const ACCESS_DENIED_ACE *)ace;
+                    sid = (const SID *)&ad_ace->SidStart;
+                    if (security_equal_sid( sid, security_world_sid ))
+                    {
+                        unsigned int access = generic_file_map_access( ad_ace->Mask );
+                        if (access & FILE_READ_DATA)
+                            denied_mode |= S_IROTH;
+                        if (access & FILE_WRITE_DATA)
+                            denied_mode |= S_IWOTH;
+                        if (access & FILE_EXECUTE)
+                            denied_mode |= S_IXOTH;
+                    }
+                    else if (security_equal_sid( sid, owner ))
+                    {
+                        unsigned int access = generic_file_map_access( ad_ace->Mask );
+                        if (access & FILE_READ_DATA)
+                            denied_mode |= S_IRUSR;
+                        if (access & FILE_WRITE_DATA)
+                            denied_mode |= S_IWUSR;
+                        if (access & FILE_EXECUTE)
+                            denied_mode |= S_IXUSR;
+                    }
+                    break;
+                case ACCESS_ALLOWED_ACE_TYPE:
+                    aa_ace = (const ACCESS_ALLOWED_ACE *)ace;
+                    sid = (const SID *)&aa_ace->SidStart;
+                    if (security_equal_sid( sid, security_world_sid ))
+                    {
+                        unsigned int access = generic_file_map_access( aa_ace->Mask );
+                        if (access & FILE_READ_DATA)
+                            new_mode |= S_IROTH;
+                        if (access & FILE_WRITE_DATA)
+                            new_mode |= S_IWOTH;
+                        if (access & FILE_EXECUTE)
+                            new_mode |= S_IXOTH;
+                    }
+                    else if (security_equal_sid( sid, owner ))
+                    {
+                        unsigned int access = generic_file_map_access( aa_ace->Mask );
+                        if (access & FILE_READ_DATA)
+                            new_mode |= S_IRUSR;
+                        if (access & FILE_WRITE_DATA)
+                            new_mode |= S_IWUSR;
+                        if (access & FILE_EXECUTE)
+                            new_mode |= S_IXUSR;
+                    }
+                    break;
+                }
+                ace = ace_next( ace );
+            }
+        }
+        else
+            /* no ACL means full access rights to anyone */
+            new_mode |= S_IRWXU | S_IRWXO;
+
+        if (file->mode != (new_mode & ~denied_mode))
+        {
+            if (fchmod( unix_fd, new_mode & ~denied_mode ) == -1)
+            {
+                file_set_error();
+                return 0;
+            }
+
+            file->mode = new_mode & ~denied_mode;
+        }
+    }
+    return 1;
 }
 
 static void file_destroy( struct object *obj )
@@ -413,12 +657,10 @@ DECL_HANDLER(alloc_file_handle)
 DECL_HANDLER(lock_file)
 {
     struct file *file;
-    file_pos_t offset = ((file_pos_t)req->offset_high << 32) | req->offset_low;
-    file_pos_t count = ((file_pos_t)req->count_high << 32) | req->count_low;
 
     if ((file = get_file_obj( current->process, req->handle, 0 )))
     {
-        reply->handle = lock_fd( file->fd, offset, count, req->shared, req->wait );
+        reply->handle = lock_fd( file->fd, req->offset, req->count, req->shared, req->wait );
         reply->overlapped = is_overlapped( file );
         release_object( file );
     }
@@ -428,12 +670,10 @@ DECL_HANDLER(lock_file)
 DECL_HANDLER(unlock_file)
 {
     struct file *file;
-    file_pos_t offset = ((file_pos_t)req->offset_high << 32) | req->offset_low;
-    file_pos_t count = ((file_pos_t)req->count_high << 32) | req->count_low;
 
     if ((file = get_file_obj( current->process, req->handle, 0 )))
     {
-        unlock_fd( file->fd, offset, count );
+        unlock_fd( file->fd, req->offset, req->count );
         release_object( file );
     }
 }

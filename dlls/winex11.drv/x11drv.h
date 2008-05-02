@@ -139,6 +139,8 @@ typedef struct
     int           exposures;   /* count of graphics exposures operations */
     struct dce   *dce;         /* opaque pointer to DCE */
     int           current_pf;
+    Drawable      gl_drawable;
+    Pixmap        pixmap;      /* Pixmap for a GLXPixmap gl_drawable */
     XRENDERINFO   xrender;
 } X11DRV_PDEVICE;
 
@@ -272,7 +274,7 @@ extern void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev);
 
 extern XVisualInfo *X11DRV_setup_opengl_visual(Display *display);
 extern Drawable get_glxdrawable(X11DRV_PDEVICE *physDev);
-extern BOOL destroy_glxpixmap(XID glxpixmap);
+extern BOOL destroy_glxpixmap(Display *display, XID glxpixmap);
 
 /* XIM support */
 extern XIC X11DRV_CreateIC(XIM xim, Display *display, Window win);
@@ -475,7 +477,8 @@ enum x11drv_escape_codes
     X11DRV_GET_DCE,          /* get the DCE pointer */
     X11DRV_SET_DCE,          /* set the DCE pointer */
     X11DRV_GET_GLX_DRAWABLE, /* get current glx drawable for a DC */
-    X11DRV_SYNC_PIXMAP       /* sync the dibsection to its pixmap */
+    X11DRV_SYNC_PIXMAP,      /* sync the dibsection to its pixmap */
+    X11DRV_FLUSH_GL_DRAWABLE /* flush changes made to the gl drawable */
 };
 
 struct x11drv_escape_set_drawable
@@ -486,6 +489,8 @@ struct x11drv_escape_set_drawable
     RECT                     dc_rect;      /* DC rectangle relative to drawable */
     RECT                     drawable_rect;/* Drawable rectangle relative to screen */
     XID                      fbconfig_id;  /* fbconfig id used by the GL drawable */
+    Drawable                 gl_drawable;  /* GL drawable */
+    Pixmap                   pixmap;       /* Pixmap for a GLXPixmap gl_drawable */
 };
 
 struct x11drv_escape_set_dce
@@ -574,6 +579,8 @@ enum x11drv_atoms
     XATOM__NET_WM_PING,
     XATOM__NET_WM_STATE,
     XATOM__NET_WM_STATE_FULLSCREEN,
+    XATOM__NET_WM_STATE_SKIP_PAGER,
+    XATOM__NET_WM_STATE_SKIP_TASKBAR,
     XATOM__NET_WM_WINDOW_TYPE,
     XATOM__NET_WM_WINDOW_TYPE_DIALOG,
     XATOM__NET_WM_WINDOW_TYPE_NORMAL,
@@ -638,6 +645,15 @@ enum x11drv_window_messages
     WM_X11DRV_SET_WIN_FORMAT
 };
 
+/* _NET_WM_STATE properties that we keep track of */
+enum x11drv_wm_state
+{
+    WM_STATE_FULLSCREEN,
+    WM_STATE_SKIP_PAGER,
+    WM_STATE_SKIP_TASKBAR,
+    NB_WM_STATES
+};
+
 /* x11drv private window data */
 struct x11drv_win_data
 {
@@ -645,12 +661,15 @@ struct x11drv_win_data
     Window      whole_window;   /* X window for the complete window */
     Window      icon_window;    /* X window for the icon */
     XID         fbconfig_id;    /* fbconfig id for the GL drawable this hwnd uses */
+    Drawable    gl_drawable;    /* Optional GL drawable for rendering the client area */
+    Pixmap      pixmap;         /* Base pixmap for if gl_drawable is a GLXPixmap */
     RECT        window_rect;    /* USER window rectangle relative to parent */
     RECT        whole_rect;     /* X window rectangle for the whole window relative to parent */
     RECT        client_rect;    /* client area relative to whole window */
     XIC         xic;            /* X input context */
     XWMHints   *wm_hints;       /* window manager hints */
     BOOL        managed;        /* is window managed? */
+    DWORD       wm_state;       /* bit mask of active x11drv_wm_state values */
     struct dce *dce;            /* DCE for CS_OWNDC or CS_CLASSDC windows */
     unsigned int lock_changes;  /* lock count for X11 change requests */
     HBITMAP     hWMIconBitmap;
@@ -660,11 +679,17 @@ struct x11drv_win_data
 extern struct x11drv_win_data *X11DRV_get_win_data( HWND hwnd );
 extern Window X11DRV_get_whole_window( HWND hwnd );
 extern XID X11DRV_get_fbconfig_id( HWND hwnd );
+extern Drawable X11DRV_get_gl_drawable( HWND hwnd );
+extern Pixmap X11DRV_get_gl_pixmap( HWND hwnd );
 extern BOOL X11DRV_is_window_rect_mapped( const RECT *rect );
 extern XIC X11DRV_get_ic( HWND hwnd );
 extern BOOL X11DRV_set_win_format( HWND hwnd, XID fbconfig );
 
 extern int pixelformat_from_fbconfig_id( XID fbconfig_id );
+extern XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id );
+extern void mark_drawable_dirty( Drawable old, Drawable new );
+extern Drawable create_glxpixmap( Display *display, XVisualInfo *vis, Pixmap parent );
+extern void flush_gl_drawable( X11DRV_PDEVICE *physDev );
 
 extern void alloc_window_dce( struct x11drv_win_data *data );
 extern void free_window_dce( struct x11drv_win_data *data );
