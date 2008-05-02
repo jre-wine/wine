@@ -39,7 +39,6 @@
 
 #include "shellapi.h"
 #include "objbase.h"
-#include "shlguid.h"
 #include "pidl.h"
 #include "shell32_main.h"
 #include "undocshell.h"
@@ -614,6 +613,19 @@ int WINAPI SHMapPIDLToSystemImageListIndex(
 	    return -1;
 
 	return Index;
+}
+
+/*************************************************************************
+ * SHMapIDListToImageListIndexAsync  [SHELL32.148]
+ */
+HRESULT WINAPI SHMapIDListToImageListIndexAsync(IUnknown *pts, IShellFolder *psf,
+                                                LPCITEMIDLIST pidl, UINT flags,
+                                                void *pfn, void *pvData, void *pvHint,
+                                                int *piIndex, int *piIndexSel)
+{
+    FIXME("(%p, %p, %p, 0x%08x, %p, %p, %p, %p, %p)\n",
+            pts, psf, pidl, flags, pfn, pvData, pvHint, piIndex, piIndexSel);
+    return E_FAIL;
 }
 
 /*************************************************************************

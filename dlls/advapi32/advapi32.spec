@@ -22,7 +22,7 @@
 # @ stub AddAccessDeniedObjectAce
 @ stdcall AddAce(ptr long long ptr long)
 @ stdcall AddAuditAccessAce(ptr long long ptr long long)
-# @ stub AddAuditAccessAceEx
+@ stdcall AddAuditAccessAceEx(ptr long long long ptr long long)
 # @ stub AddAuditAccessObjectAce
 # @ stub AddUsersToEncryptedFile
 @ stdcall AdjustTokenGroups(long long ptr long ptr ptr)
@@ -75,8 +75,8 @@
 # @ stub ConvertSecurityDescriptorToAccessNamedA
 # @ stub ConvertSecurityDescriptorToAccessNamedW
 # @ stub ConvertSecurityDescriptorToAccessW
-# @ stub ConvertSecurityDescriptorToStringSecurityDescriptorA
-# @ stub ConvertSecurityDescriptorToStringSecurityDescriptorW
+@ stdcall ConvertSecurityDescriptorToStringSecurityDescriptorA(ptr long long ptr ptr)
+@ stdcall ConvertSecurityDescriptorToStringSecurityDescriptorW(ptr long long ptr ptr)
 @ stdcall ConvertSidToStringSidA(ptr ptr)
 @ stdcall ConvertSidToStringSidW(ptr ptr)
 # @ stub ConvertStringSDToSDDomainA
@@ -210,8 +210,8 @@
 @ stub EnumServiceGroupA
 @ stub EnumServiceGroupW
 @ stdcall EnumServicesStatusA (long long long ptr long ptr ptr ptr)
-# @ stub EnumServicesStatusExA
-# @ stub EnumServicesStatusExW
+@ stdcall EnumServicesStatusExA(long long long long ptr long ptr ptr ptr str)
+@ stdcall EnumServicesStatusExW(long long long long ptr long ptr ptr ptr wstr)
 @ stdcall EnumServicesStatusW (long long long ptr long ptr ptr ptr)
 # @ stub EnumerateTraceGuids
 # @ stub EqualDomainSid
@@ -473,6 +473,8 @@
 @ stdcall RegCreateKeyW(long wstr ptr)
 @ stdcall RegDeleteKeyA(long str)
 @ stdcall RegDeleteKeyW(long wstr)
+@ stdcall RegDeleteTreeA(long str)
+@ stdcall RegDeleteTreeW(long wstr)
 @ stdcall RegDeleteValueA(long str)
 @ stdcall RegDeleteValueW(long wstr)
 @ stdcall RegDisablePredefinedCache()

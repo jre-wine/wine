@@ -62,6 +62,7 @@ typedef int Status;
 #include "wine/list.h"
 
 #define MAX_PIXELFORMATS 8
+#define MAX_DASHLEN 16
 
 struct tagCURSORICONINFO;
 struct dce;
@@ -77,9 +78,10 @@ typedef struct
     int          linejoin;
     int          pixel;
     int          width;
-    char *       dashes;
+    char         dashes[MAX_DASHLEN];
     int          dash_len;
     int          type;          /* GEOMETRIC || COSMETIC */
+    int          ext;           /* extended pen - 1, otherwise - 0 */
 } X_PHYSPEN;
 
   /* X physical brush */
@@ -123,9 +125,9 @@ typedef struct
     HDC           hdc;
     GC            gc;          /* X Window GC */
     Drawable      drawable;
-    POINT         org;          /* DC origin relative to drawable */
-    POINT         drawable_org; /* Origin of drawable relative to screen */
-    HRGN          region;       /* Device region (visible region & clip region) */
+    RECT          dc_rect;       /* DC rectangle relative to drawable */
+    RECT          drawable_rect; /* Drawable rectangle relative to screen */
+    HRGN          region;        /* Device region (visible region & clip region) */
     X_PHYSFONT    font;
     X_PHYSPEN     pen;
     X_PHYSBRUSH   brush;
@@ -137,6 +139,8 @@ typedef struct
     int           exposures;   /* count of graphics exposures operations */
     struct dce   *dce;         /* opaque pointer to DCE */
     int           current_pf;
+    Drawable      gl_drawable;
+    Pixmap        pixmap;      /* Pixmap for a GLXPixmap gl_drawable */
     XRENDERINFO   xrender;
 } X11DRV_PDEVICE;
 
@@ -228,6 +232,7 @@ extern BOOL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev);
 
 /* X11 driver internal functions */
 
+extern void X11DRV_Xcursor_Init(void);
 extern void X11DRV_BITMAP_Init(void);
 extern void X11DRV_FONT_Init( int log_pixels_x, int log_pixels_y );
 
@@ -269,7 +274,7 @@ extern void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev);
 
 extern XVisualInfo *X11DRV_setup_opengl_visual(Display *display);
 extern Drawable get_glxdrawable(X11DRV_PDEVICE *physDev);
-extern BOOL destroy_glxpixmap(XID glxpixmap);
+extern BOOL destroy_glxpixmap(Display *display, XID glxpixmap);
 
 /* XIM support */
 extern XIC X11DRV_CreateIC(XIM xim, Display *display, Window win);
@@ -472,7 +477,8 @@ enum x11drv_escape_codes
     X11DRV_GET_DCE,          /* get the DCE pointer */
     X11DRV_SET_DCE,          /* set the DCE pointer */
     X11DRV_GET_GLX_DRAWABLE, /* get current glx drawable for a DC */
-    X11DRV_SYNC_PIXMAP       /* sync the dibsection to its pixmap */
+    X11DRV_SYNC_PIXMAP,      /* sync the dibsection to its pixmap */
+    X11DRV_FLUSH_GL_DRAWABLE /* flush changes made to the gl drawable */
 };
 
 struct x11drv_escape_set_drawable
@@ -480,8 +486,11 @@ struct x11drv_escape_set_drawable
     enum x11drv_escape_codes code;         /* escape code (X11DRV_SET_DRAWABLE) */
     Drawable                 drawable;     /* X drawable */
     int                      mode;         /* ClipByChildren or IncludeInferiors */
-    POINT                    org;          /* origin of DC relative to drawable */
-    POINT                    drawable_org; /* origin of drawable relative to screen */
+    RECT                     dc_rect;      /* DC rectangle relative to drawable */
+    RECT                     drawable_rect;/* Drawable rectangle relative to screen */
+    XID                      fbconfig_id;  /* fbconfig id used by the GL drawable */
+    Drawable                 gl_drawable;  /* GL drawable */
+    Pixmap                   pixmap;       /* Pixmap for a GLXPixmap gl_drawable */
 };
 
 struct x11drv_escape_set_dce
@@ -497,7 +506,6 @@ struct x11drv_escape_set_dce
 struct x11drv_thread_data
 {
     Display *display;
-    HANDLE   display_fd;
     int      process_event_count;  /* recursion count for event processing */
     Cursor   cursor;               /* current cursor */
     Window   cursor_window;        /* current window that contains the cursor */
@@ -510,14 +518,14 @@ struct x11drv_thread_data
 extern struct x11drv_thread_data *x11drv_init_thread_data(void);
 extern DWORD thread_data_tls_index;
 
-inline static struct x11drv_thread_data *x11drv_thread_data(void)
+static inline struct x11drv_thread_data *x11drv_thread_data(void)
 {
     struct x11drv_thread_data *data = TlsGetValue( thread_data_tls_index );
     if (!data) data = x11drv_init_thread_data();
     return data;
 }
 
-inline static Display *thread_display(void) { return x11drv_thread_data()->display; }
+static inline Display *thread_display(void) { return x11drv_thread_data()->display; }
 
 extern Visual *visual;
 extern Window root_window;
@@ -526,6 +534,7 @@ extern unsigned int screen_height;
 extern unsigned int screen_depth;
 extern RECT virtual_screen_rect;
 extern unsigned int text_caps;
+extern int dxgrab;
 extern int use_xkb;
 extern int use_take_focus;
 extern int use_primary_selection;
@@ -570,6 +579,8 @@ enum x11drv_atoms
     XATOM__NET_WM_PING,
     XATOM__NET_WM_STATE,
     XATOM__NET_WM_STATE_FULLSCREEN,
+    XATOM__NET_WM_STATE_SKIP_PAGER,
+    XATOM__NET_WM_STATE_SKIP_TASKBAR,
     XATOM__NET_WM_WINDOW_TYPE,
     XATOM__NET_WM_WINDOW_TYPE_DIALOG,
     XATOM__NET_WM_WINDOW_TYPE_NORMAL,
@@ -596,6 +607,7 @@ enum x11drv_atoms
     XATOM_text_plain,
     XATOM_text_rtf,
     XATOM_text_richtext,
+    XATOM_text_uri_list,
     NB_XATOMS
 };
 
@@ -629,7 +641,17 @@ extern DWORD EVENT_x11_time_to_win32_time(Time time);
 enum x11drv_window_messages
 {
     WM_X11DRV_ACQUIRE_SELECTION = 0x80001000,
-    WM_X11DRV_DELETE_WINDOW
+    WM_X11DRV_DELETE_WINDOW,
+    WM_X11DRV_SET_WIN_FORMAT
+};
+
+/* _NET_WM_STATE properties that we keep track of */
+enum x11drv_wm_state
+{
+    WM_STATE_FULLSCREEN,
+    WM_STATE_SKIP_PAGER,
+    WM_STATE_SKIP_TASKBAR,
+    NB_WM_STATES
 };
 
 /* x11drv private window data */
@@ -638,11 +660,16 @@ struct x11drv_win_data
     HWND        hwnd;           /* hwnd that this private data belongs to */
     Window      whole_window;   /* X window for the complete window */
     Window      icon_window;    /* X window for the icon */
+    XID         fbconfig_id;    /* fbconfig id for the GL drawable this hwnd uses */
+    Drawable    gl_drawable;    /* Optional GL drawable for rendering the client area */
+    Pixmap      pixmap;         /* Base pixmap for if gl_drawable is a GLXPixmap */
     RECT        window_rect;    /* USER window rectangle relative to parent */
     RECT        whole_rect;     /* X window rectangle for the whole window relative to parent */
     RECT        client_rect;    /* client area relative to whole window */
     XIC         xic;            /* X input context */
+    XWMHints   *wm_hints;       /* window manager hints */
     BOOL        managed;        /* is window managed? */
+    DWORD       wm_state;       /* bit mask of active x11drv_wm_state values */
     struct dce *dce;            /* DCE for CS_OWNDC or CS_CLASSDC windows */
     unsigned int lock_changes;  /* lock count for X11 change requests */
     HBITMAP     hWMIconBitmap;
@@ -651,8 +678,18 @@ struct x11drv_win_data
 
 extern struct x11drv_win_data *X11DRV_get_win_data( HWND hwnd );
 extern Window X11DRV_get_whole_window( HWND hwnd );
+extern XID X11DRV_get_fbconfig_id( HWND hwnd );
+extern Drawable X11DRV_get_gl_drawable( HWND hwnd );
+extern Pixmap X11DRV_get_gl_pixmap( HWND hwnd );
 extern BOOL X11DRV_is_window_rect_mapped( const RECT *rect );
 extern XIC X11DRV_get_ic( HWND hwnd );
+extern BOOL X11DRV_set_win_format( HWND hwnd, XID fbconfig );
+
+extern int pixelformat_from_fbconfig_id( XID fbconfig_id );
+extern XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id );
+extern void mark_drawable_dirty( Drawable old, Drawable new );
+extern Drawable create_glxpixmap( Display *display, XVisualInfo *vis, Pixmap parent );
+extern void flush_gl_drawable( X11DRV_PDEVICE *physDev );
 
 extern void alloc_window_dce( struct x11drv_win_data *data );
 extern void free_window_dce( struct x11drv_win_data *data );
@@ -666,16 +703,20 @@ extern int X11DRV_AcquireClipboard(HWND hWndClipWindow);
 extern void X11DRV_ResetSelectionOwner(void);
 extern void X11DRV_SetFocus( HWND hwnd );
 extern Cursor X11DRV_GetCursor( Display *display, struct tagCURSORICONINFO *ptr );
+extern BOOL X11DRV_ClipCursor( LPCRECT clip );
 extern void X11DRV_InitKeyboard(void);
 extern void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWORD time,
                                         DWORD dwExtraInfo, UINT injected_flags );
 extern void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
                                      DWORD data, DWORD time, DWORD extra_info, UINT injected_flags );
+extern DWORD X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
+                                                 DWORD mask, DWORD flags );
 
 typedef int (*x11drv_error_callback)( Display *display, XErrorEvent *event, void *arg );
 
 extern void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg );
 extern int X11DRV_check_error(void);
+extern BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rect );
 extern void X11DRV_set_iconic_state( HWND hwnd );
 extern void X11DRV_window_to_X_rect( struct x11drv_win_data *data, RECT *rect );
 extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect );
@@ -683,7 +724,7 @@ extern void X11DRV_sync_window_style( Display *display, struct x11drv_win_data *
 extern void X11DRV_sync_window_position( Display *display, struct x11drv_win_data *data,
                                          UINT swp_flags, const RECT *new_client_rect,
                                          const RECT *new_whole_rect );
-extern BOOL X11DRV_set_window_pos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
+extern BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
                                    const RECT *rectClient, UINT swp_flags, const RECT *validRects );
 extern void X11DRV_set_wm_hints( Display *display, struct x11drv_win_data *data );
 extern void xinerama_init(void);
@@ -697,10 +738,10 @@ extern LPDDHALMODEINFO X11DRV_Settings_CreateModes(unsigned int max_modes, int r
 unsigned int X11DRV_Settings_GetModeCount(void);
 void X11DRV_Settings_Init(void);
 extern void X11DRV_Settings_SetDefaultMode(int mode);
-LPDDHALMODEINFO X11DRV_Settings_SetHandlers(const char *name, 
-                                            int (*pNewGCM)(void), 
-                                            void (*pNewSCM)(int), 
-                                            unsigned int nmodes, 
+LPDDHALMODEINFO X11DRV_Settings_SetHandlers(const char *name,
+                                            int (*pNewGCM)(void),
+                                            LONG (*pNewSCM)(int),
+                                            unsigned int nmodes,
                                             int reserve_depths);
 
 extern void X11DRV_DDHAL_SwitchMode(DWORD dwModeIndex, LPVOID fb_addr, LPVIDMEM fb_mem);

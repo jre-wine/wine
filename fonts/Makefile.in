@@ -48,7 +48,9 @@ BITMAP_FONTS  = \
 	vgas874.fon
 
 TRUETYPE_FONTS = \
-	marlett.ttf
+	marlett.ttf \
+	tahoma.ttf \
+	tahomabd.ttf
 
 FONTS = \
 	$(BITMAP_FONTS) \

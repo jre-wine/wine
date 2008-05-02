@@ -30,14 +30,10 @@ static HRESULT (WINAPI *pDirectDrawCreateEx)(LPGUID,LPVOID*,REFIID,LPUNKNOWN);
 static void init_function_pointers(void)
 {
     HMODULE hmod = GetModuleHandleA("ddraw.dll");
-
-    if(hmod)
-    {
-        pDirectDrawCreateEx = (void*)GetProcAddress(hmod, "DirectDrawCreateEx");
-    }
+    pDirectDrawCreateEx = (void*)GetProcAddress(hmod, "DirectDrawCreateEx");
 }
 
-unsigned long getRefcount(IUnknown *iface)
+static unsigned long getRefcount(IUnknown *iface)
 {
     IUnknown_AddRef(iface);
     return IUnknown_Release(iface);
@@ -49,10 +45,12 @@ static void test_ddraw_objects(void)
     unsigned long ref;
     IDirectDraw7 *DDraw7;
     IDirectDraw4 *DDraw4;
-    IDirectDraw4 *DDraw2;
-    IDirectDraw4 *DDraw1;
+    IDirectDraw2 *DDraw2;
+    IDirectDraw  *DDraw1;
     IDirectDrawPalette *palette;
     IDirectDrawSurface7 *surface;
+    IDirectDrawSurface *surface1;
+    IDirectDrawSurface4 *surface4;
     PALETTEENTRY Table[256];
     DDSURFACEDESC2 ddsd;
 
@@ -162,6 +160,26 @@ static void test_ddraw_objects(void)
     ref = getRefcount( (IUnknown *) DDraw1);
     ok(ref == 1, "Got refcount %ld, expected 1\n", ref);
     IDirectDrawPalette_Release(palette);
+
+    /* Similar for surfaces */
+    hr = IDirectDraw4_CreateSurface(DDraw4, &ddsd, &surface4, NULL);
+    ok(hr == DD_OK, "CreateSurface returned %08x\n", hr);
+    ref = getRefcount( (IUnknown *) DDraw4);
+    ok(ref == 2, "Got refcount %ld, expected 2\n", ref);
+    IDirectDrawSurface4_Release(surface4);
+
+    ddsd.dwSize = sizeof(DDSURFACEDESC);
+    hr = IDirectDraw2_CreateSurface(DDraw2, (DDSURFACEDESC *) &ddsd, &surface1, NULL);
+    ok(hr == DD_OK, "CreateSurface returned %08x\n", hr);
+    ref = getRefcount( (IUnknown *) DDraw2);
+    ok(ref == 1, "Got refcount %ld, expected 1\n", ref);
+    IDirectDrawSurface_Release(surface1);
+
+    hr = IDirectDraw_CreateSurface(DDraw1, (DDSURFACEDESC *) &ddsd, &surface1, NULL);
+    ok(hr == DD_OK, "CreateSurface returned %08x\n", hr);
+    ref = getRefcount( (IUnknown *) DDraw1);
+    ok(ref == 1, "Got refcount %ld, expected 1\n", ref);
+    IDirectDrawSurface_Release(surface1);
 
     IDirectDraw7_Release(DDraw7);
     IDirectDraw4_Release(DDraw4);
@@ -416,7 +434,7 @@ START_TEST(refcount)
     init_function_pointers();
     if(!pDirectDrawCreateEx)
     {
-        trace("function DirectDrawCreateEx not available, skipping tests\n");
+        skip("function DirectDrawCreateEx not available\n");
         return;
     }
     test_ddraw_objects();

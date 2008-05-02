@@ -21,7 +21,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "sspi.h"
 #include "secur32_priv.h"
@@ -352,7 +351,7 @@ SECURITY_STATUS SEC_ENTRY thunk_AddCredentialsW(PCredHandle hCredentials,
     return ret;
 }
 
-static PSecPkgInfoA _copyPackageInfoFlatWToA(PSecPkgInfoW infoW)
+static PSecPkgInfoA _copyPackageInfoFlatWToA(const SecPkgInfoW *infoW)
 {
     PSecPkgInfoA ret;
 
@@ -577,7 +576,7 @@ SECURITY_STATUS SEC_ENTRY thunk_QueryContextAttributesA(PCtxtHandle phContext,
     return ret;
 }
 
-static PSecPkgInfoW _copyPackageInfoFlatAToW(PSecPkgInfoA infoA)
+static PSecPkgInfoW _copyPackageInfoFlatAToW(const SecPkgInfoA *infoA)
 {
     PSecPkgInfoW ret;
 

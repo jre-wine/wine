@@ -88,9 +88,10 @@ struct window
     char             extra_bytes[1];  /* extra bytes storage */
 };
 
-#define PAINT_INTERNAL  0x01  /* internal WM_PAINT pending */
-#define PAINT_ERASE     0x02  /* needs WM_ERASEBKGND */
-#define PAINT_NONCLIENT 0x04  /* needs WM_NCPAINT */
+#define PAINT_INTERNAL      0x01  /* internal WM_PAINT pending */
+#define PAINT_ERASE         0x02  /* needs WM_ERASEBKGND */
+#define PAINT_NONCLIENT     0x04  /* needs WM_NCPAINT */
+#define PAINT_DELAYED_ERASE 0x08  /* still needs erase after WM_ERASEBKGND */
 
 /* growable array of user handles */
 struct user_handle_array
@@ -107,7 +108,7 @@ static struct window *progman_window;
 static struct window *taskman_window;
 
 /* retrieve a pointer to a window from its handle */
-inline static struct window *get_window( user_handle_t handle )
+static inline struct window *get_window( user_handle_t handle )
 {
     struct window *ret = get_user_object( handle, USER_WINDOW );
     if (!ret) set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
@@ -285,7 +286,7 @@ static obj_handle_t get_property( struct window *win, atom_t atom )
 }
 
 /* destroy all properties of a window */
-inline static void destroy_properties( struct window *win )
+static inline void destroy_properties( struct window *win )
 {
     int i;
 
@@ -514,7 +515,7 @@ int is_child_window( user_handle_t parent, user_handle_t child )
 int is_top_level_window( user_handle_t window )
 {
     struct window *win = get_user_object( window, USER_WINDOW );
-    return (win && win->parent && is_desktop_window(win->parent));
+    return (win && (is_desktop_window(win) || is_desktop_window(win->parent)));
 }
 
 /* make a window active if possible */
@@ -756,6 +757,18 @@ static inline void client_to_screen( struct window *win, int *x, int *y )
     }
 }
 
+/* convert coordinates from client to screen coords */
+static inline void client_to_screen_rect( struct window *win, rectangle_t *rect )
+{
+    for ( ; win && !is_desktop_window(win); win = win->parent)
+    {
+        rect->left   += win->client_rect.left;
+        rect->right  += win->client_rect.left;
+        rect->top    += win->client_rect.top;
+        rect->bottom += win->client_rect.top;
+    }
+}
+
 /* map the region from window to screen coordinates */
 static inline void map_win_region_to_screen( struct window *win, struct region *region )
 {
@@ -827,7 +840,7 @@ static inline struct window *get_top_clipping_window( struct window *win )
 
 
 /* compute the visible region of a window, in window coordinates */
-static struct region *get_visible_region( struct window *win, struct window *top, unsigned int flags )
+static struct region *get_visible_region( struct window *win, unsigned int flags )
 {
     struct region *tmp = NULL, *region;
     int offset_x, offset_y;
@@ -840,7 +853,7 @@ static struct region *get_visible_region( struct window *win, struct window *top
 
     /* create a region relative to the window itself */
 
-    if ((flags & DCX_PARENTCLIP) && win != top && win->parent)
+    if ((flags & DCX_PARENTCLIP) && win->parent && !is_desktop_window(win->parent))
     {
         set_region_client_rect( region, win->parent );
         offset_region( region, -win->parent->client_rect.left, -win->parent->client_rect.top );
@@ -878,11 +891,12 @@ static struct region *get_visible_region( struct window *win, struct window *top
         offset_y = win->window_rect.top;
     }
 
-    if (top && top != win && (tmp = create_empty_region()) != NULL)
+    if ((tmp = create_empty_region()) != NULL)
     {
-        while (win != top && win->parent)
+        while (win->parent)
         {
-            if (win->style & WS_CLIPSIBLINGS)
+            /* we don't clip out top-level siblings as that's up to the native windowing system */
+            if ((win->style & WS_CLIPSIBLINGS) && !is_desktop_window( win->parent ))
             {
                 if (!clip_children( win->parent, win, region, 0, 0 )) goto error;
                 if (is_region_empty( region )) break;
@@ -966,7 +980,7 @@ static void set_update_region( struct window *win, struct region *region )
             inc_window_paint_count( win, -1 );
             free_region( win->update_region );
         }
-        win->paint_flags &= ~(PAINT_ERASE | PAINT_NONCLIENT);
+        win->paint_flags &= ~(PAINT_ERASE | PAINT_DELAYED_ERASE | PAINT_NONCLIENT);
         win->update_region = NULL;
         if (region) free_region( region );
     }
@@ -1025,7 +1039,21 @@ static void validate_whole_window( struct window *win )
 }
 
 
-/* validate the update region of a window on all parents; helper for redraw_window */
+/* validate a window's children so that we don't get any further paint messages for it */
+static void validate_children( struct window *win )
+{
+    struct window *child;
+
+    LIST_FOR_EACH_ENTRY( child, &win->children, struct window, entry )
+    {
+        if (!(child->style & WS_VISIBLE)) continue;
+        validate_children(child);
+        validate_whole_window(child);
+    }
+}
+
+
+/* validate the update region of a window on all parents; helper for get_update_region */
 static void validate_parents( struct window *child )
 {
     int offset_x = 0, offset_y = 0;
@@ -1096,7 +1124,7 @@ static void redraw_window( struct window *win, struct region *region, int frame,
                 set_update_region( win, tmp );
             }
             if (flags & RDW_NOFRAME) validate_non_client( win );
-            if (flags & RDW_NOERASE) win->paint_flags &= ~PAINT_ERASE;
+            if (flags & RDW_NOERASE) win->paint_flags &= ~(PAINT_ERASE | PAINT_DELAYED_ERASE);
         }
     }
 
@@ -1109,12 +1137,6 @@ static void redraw_window( struct window *win, struct region *region, int frame,
     {
         win->paint_flags &= ~PAINT_INTERNAL;
         inc_window_paint_count( win, -1 );
-    }
-
-    if (flags & RDW_UPDATENOW)
-    {
-        validate_parents( win );
-        flags &= ~RDW_UPDATENOW;
     }
 
     /* now process children recursively */
@@ -1158,11 +1180,19 @@ static unsigned int get_update_flags( struct window *win, unsigned int flags )
     }
     if (flags & UPDATE_PAINT)
     {
-        if (win->update_region) ret |= UPDATE_PAINT;
+        if (win->update_region)
+        {
+            if (win->paint_flags & PAINT_DELAYED_ERASE) ret |= UPDATE_DELAYED_ERASE;
+            ret |= UPDATE_PAINT;
+        }
     }
     if (flags & UPDATE_INTERNALPAINT)
     {
-        if (win->paint_flags & PAINT_INTERNAL) ret |= UPDATE_INTERNALPAINT;
+        if (win->paint_flags & PAINT_INTERNAL)
+        {
+            ret |= UPDATE_INTERNALPAINT;
+            if (win->paint_flags & PAINT_DELAYED_ERASE) ret |= UPDATE_DELAYED_ERASE;
+        }
     }
     return ret;
 }
@@ -1273,28 +1303,19 @@ static unsigned int get_window_update_flags( struct window *win, struct window *
 }
 
 
-/* expose a region of a window, looking for the top most parent that needs to be exposed */
+/* expose a region of a window on its parent */
 /* the region is in window coordinates */
-static void expose_window( struct window *win, struct window *top, struct region *region )
+static void expose_window( struct window *win, struct region *region )
 {
-    struct window *parent, *ptr;
-    int offset_x, offset_y;
+    struct window *parent = win;
+    int offset_x = win->window_rect.left - win->client_rect.left;
+    int offset_y = win->window_rect.top - win->client_rect.top;
 
-    /* find the top most parent that doesn't clip either siblings or children */
-    for (parent = ptr = win; ptr != top; ptr = ptr->parent)
+    if (win->parent && !is_desktop_window(win->parent))
     {
-        if (!(ptr->style & WS_CLIPCHILDREN)) parent = ptr;
-        if (!(ptr->style & WS_CLIPSIBLINGS)) parent = ptr->parent;
-    }
-    if (parent == win && parent != top && win->parent)
-        parent = win->parent;  /* always go up at least one level if possible */
-
-    offset_x = win->window_rect.left - win->client_rect.left;
-    offset_y = win->window_rect.top - win->client_rect.top;
-    for (ptr = win; ptr != parent && !is_desktop_window(ptr); ptr = ptr->parent)
-    {
-        offset_x += ptr->client_rect.left;
-        offset_y += ptr->client_rect.top;
+        offset_x += win->client_rect.left;
+        offset_y += win->client_rect.top;
+        parent = win->parent;
     }
     offset_region( region, offset_x, offset_y );
     redraw_window( parent, region, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
@@ -1312,12 +1333,11 @@ static void set_window_pos( struct window *win, struct window *previous,
     const rectangle_t old_window_rect = win->window_rect;
     const rectangle_t old_visible_rect = win->visible_rect;
     const rectangle_t old_client_rect = win->client_rect;
-    struct window *top = get_top_clipping_window( win );
     int visible = (win->style & WS_VISIBLE) || (swp_flags & SWP_SHOWWINDOW);
 
     if (win->parent && !is_visible( win->parent )) visible = 0;
 
-    if (visible && !(old_vis_rgn = get_visible_region( win, top, DCX_WINDOW ))) return;
+    if (visible && !(old_vis_rgn = get_visible_region( win, DCX_WINDOW ))) return;
 
     /* set the new window info before invalidating anything */
 
@@ -1336,7 +1356,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     /* if the window is not visible, everything is easy */
     if (!visible) return;
 
-    if (!(new_vis_rgn = get_visible_region( win, top, DCX_WINDOW )))
+    if (!(new_vis_rgn = get_visible_region( win, DCX_WINDOW )))
     {
         free_region( old_vis_rgn );
         clear_error();  /* ignore error since the window info has been modified already */
@@ -1350,7 +1370,7 @@ static void set_window_pos( struct window *win, struct window *previous,
         offset_region( old_vis_rgn, old_window_rect.left - window_rect->left,
                        old_window_rect.top - window_rect->top );
         if (xor_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ))
-            expose_window( win, top, new_vis_rgn );
+            expose_window( win, new_vis_rgn );
     }
     free_region( old_vis_rgn );
 
@@ -1358,6 +1378,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     {
         /* clear the update region since the window is no longer visible */
         validate_whole_window( win );
+        validate_children( win );
         goto done;
     }
 
@@ -1413,6 +1434,32 @@ static void set_window_pos( struct window *win, struct window *previous,
 done:
     free_region( new_vis_rgn );
     clear_error();  /* we ignore out of memory errors once the new rects have been set */
+}
+
+
+/* set the window region, updating the update region if necessary */
+static void set_window_region( struct window *win, struct region *region, int redraw )
+{
+    struct region *old_vis_rgn = NULL, *new_vis_rgn;
+
+    /* no need to redraw if window is not visible */
+    if (redraw && !is_visible( win )) redraw = 0;
+
+    if (redraw) old_vis_rgn = get_visible_region( win, DCX_WINDOW );
+
+    if (win->win_region) free_region( win->win_region );
+    win->win_region = region;
+
+    if (old_vis_rgn && (new_vis_rgn = get_visible_region( win, DCX_WINDOW )))
+    {
+        /* expose anything revealed by the change */
+        if (xor_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ))
+            expose_window( win, new_vis_rgn );
+        free_region( new_vis_rgn );
+    }
+
+    if (old_vis_rgn) free_region( old_vis_rgn );
+    clear_error();  /* we ignore out of memory errors since the region has been set */
 }
 
 
@@ -1819,25 +1866,29 @@ DECL_HANDLER(get_visible_region)
     if (!win) return;
 
     top = get_top_clipping_window( win );
-    if ((region = get_visible_region( win, top, req->flags )))
+    if ((region = get_visible_region( win, req->flags )))
     {
         rectangle_t *data;
         map_win_region_to_screen( win, region );
         data = get_region_data_and_free( region, get_reply_max_size(), &reply->total_size );
         if (data) set_reply_data_ptr( data, reply->total_size );
     }
-    reply->top_win   = top->handle;
-    reply->top_org_x = top->visible_rect.left;
-    reply->top_org_y = top->visible_rect.top;
+    reply->top_win  = top->handle;
+    reply->top_rect = top->visible_rect;
 
-    if (!is_desktop_window(top))
+    if (!is_desktop_window(win))
     {
-        reply->win_org_x = (req->flags & DCX_WINDOW) ? win->window_rect.left : win->client_rect.left;
-        reply->win_org_y = (req->flags & DCX_WINDOW) ? win->window_rect.top : win->client_rect.top;
-        client_to_screen( top->parent, &reply->top_org_x, &reply->top_org_y );
-        client_to_screen( win->parent, &reply->win_org_x, &reply->win_org_y );
+        reply->win_rect = (req->flags & DCX_WINDOW) ? win->window_rect : win->client_rect;
+        client_to_screen_rect( top->parent, &reply->top_rect );
+        client_to_screen_rect( win->parent, &reply->win_rect );
     }
-    else reply->win_org_x = reply->win_org_y = 0;
+    else
+    {
+        reply->win_rect.left   = 0;
+        reply->win_rect.top    = 0;
+        reply->win_rect.right  = win->client_rect.right - win->client_rect.left;
+        reply->win_rect.bottom = win->client_rect.bottom - win->client_rect.top;
+    }
 }
 
 
@@ -1869,8 +1920,7 @@ DECL_HANDLER(set_window_region)
         if (!(region = create_region_from_req_data( get_req_data(), get_req_data_size() )))
             return;
     }
-    if (win->win_region) free_region( win->win_region );
-    win->win_region = region;
+    set_window_region( win, region, req->redraw );
 }
 
 
@@ -1901,6 +1951,12 @@ DECL_HANDLER(get_update_region)
         }
     }
 
+    if (flags & UPDATE_DELAYED_ERASE)  /* this means that the previous call didn't erase */
+    {
+        if (from_child) from_child->paint_flags |= PAINT_DELAYED_ERASE;
+        else win->paint_flags |= PAINT_DELAYED_ERASE;
+    }
+
     reply->flags = get_window_update_flags( win, from_child, flags, &win );
     reply->child = win->handle;
 
@@ -1925,6 +1981,7 @@ DECL_HANDLER(get_update_region)
 
     if (reply->flags & (UPDATE_PAINT|UPDATE_INTERNALPAINT)) /* validate everything */
     {
+        validate_parents( win );
         validate_whole_window( win );
     }
     else
@@ -1932,7 +1989,7 @@ DECL_HANDLER(get_update_region)
         if (reply->flags & UPDATE_NONCLIENT) validate_non_client( win );
         if (reply->flags & UPDATE_ERASE)
         {
-            win->paint_flags &= ~PAINT_ERASE;
+            win->paint_flags &= ~(PAINT_ERASE | PAINT_DELAYED_ERASE);
             /* desktop window only gets erased, not repainted */
             if (is_desktop_window(win)) validate_whole_window( win );
         }

@@ -22,6 +22,7 @@
 #include "config.h"
 #include "wine/port.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #ifdef HAVE_UNISTD_H
@@ -48,7 +49,7 @@
 /* O = generate interpreted stubs */
 /* w = select win16/win32 output (?) */
 
-static char usage[] =
+static const char usage[] =
 "Usage: widl [options...] infile.idl\n"
 "   -c          Generate client stub\n"
 "   -C file     Name of client stub file (default is infile_c.c)\n"
@@ -62,6 +63,9 @@ static char usage[] =
 "   --oldnames  Use old naming conventions\n"
 "   -p          Generate proxy\n"
 "   -P file     Name of proxy file (default is infile_p.c)\n"
+"   --prefix-all=p  Prefix names of client stubs / server functions with 'p'\n"
+"   --prefix-client=p  Prefix names of client stubs with 'p'\n"
+"   --prefix-server=p  Prefix names of server functions with 'p'\n"
 "   -s          Generate server stub\n"
 "   -S file     Name of server stub file (default is infile_s.c)\n"
 "   -t          Generate typelib\n"
@@ -87,7 +91,7 @@ int debuglevel = DEBUGLEVEL_NONE;
 int parser_debug, yy_flex_debug;
 
 int pedantic = 0;
-static int do_everything = 1;
+int do_everything = 1;
 int preprocess_only = 0;
 int do_header = 0;
 int do_typelib = 0;
@@ -111,6 +115,8 @@ char *server_token;
 char *idfile_name;
 char *idfile_token;
 char *temp_name;
+const char *prefix_client = "";
+const char *prefix_server = "";
 
 int line_number = 1;
 
@@ -120,15 +126,24 @@ FILE *idfile;
 
 time_t now;
 
-static const char *short_options =
+enum {
+    OLDNAMES_OPTION = CHAR_MAX + 1,
+    PREFIX_ALL_OPTION,
+    PREFIX_CLIENT_OPTION,
+    PREFIX_SERVER_OPTION
+};
+
+static const char short_options[] =
     "cC:d:D:EhH:I:NpP:sS:tT:uU:VW";
-static struct option long_options[] = {
-    { "oldnames", 0, 0, 1 },
+static const struct option long_options[] = {
+    { "oldnames", no_argument, 0, OLDNAMES_OPTION },
+    { "prefix-all", required_argument, 0, PREFIX_ALL_OPTION },
+    { "prefix-client", required_argument, 0, PREFIX_CLIENT_OPTION },
+    { "prefix-server", required_argument, 0, PREFIX_SERVER_OPTION },
     { 0, 0, 0, 0 }
 };
 
 static void rm_tempfile(void);
-static void segvhandler(int sig);
 
 static char *make_token(const char *name)
 {
@@ -170,7 +185,6 @@ int main(int argc,char *argv[])
   int ret = 0;
   int opti = 0;
 
-  signal(SIGSEGV, segvhandler);
   signal( SIGTERM, exit_on_signal );
   signal( SIGINT, exit_on_signal );
 #ifdef SIGHUP
@@ -181,8 +195,18 @@ int main(int argc,char *argv[])
 
   while((optc = getopt_long(argc, argv, short_options, long_options, &opti)) != EOF) {
     switch(optc) {
-    case 1:
+    case OLDNAMES_OPTION:
       old_names = 1;
+      break;
+    case PREFIX_ALL_OPTION:
+      prefix_client = xstrdup(optarg);
+      prefix_server = xstrdup(optarg);
+      break;
+    case PREFIX_CLIENT_OPTION:
+      prefix_client = xstrdup(optarg);
+      break;
+    case PREFIX_SERVER_OPTION:
+      prefix_server = xstrdup(optarg);
       break;
     case 'c':
       do_everything = 0;
@@ -372,8 +396,7 @@ int main(int argc,char *argv[])
     fprintf(idfile, "from %s - Do not edit ***/\n\n", input_name);
     fprintf(idfile, "#include <rpc.h>\n");
     fprintf(idfile, "#include <rpcndr.h>\n\n");
-    fprintf(idfile, "#define INITGUID\n");
-    fprintf(idfile, "#include <guiddef.h>\n\n");
+    fprintf(idfile, "#include <initguid.h>\n\n");
     fprintf(idfile, "#ifdef __cplusplus\n");
     fprintf(idfile, "extern \"C\" {\n");
     fprintf(idfile, "#endif\n\n");
@@ -386,6 +409,7 @@ int main(int argc,char *argv[])
     fprintf(header, "/* Begin additional prototypes for all interfaces */\n");
     fprintf(header, "\n");
     write_user_types();
+    write_context_handle_rundowns();
     fprintf(header, "\n");
     fprintf(header, "/* End additional prototypes */\n");
     fprintf(header, "\n");
@@ -428,12 +452,4 @@ static void rm_tempfile(void)
     unlink(client_name);
   if (server_name)
     unlink(server_name);
-}
-
-static void segvhandler(int sig)
-{
-  fprintf(stderr, "\n%s:%d: Oops, segment violation\n", input_name, line_number);
-  fflush(stdout);
-  fflush(stderr);
-  abort();
 }

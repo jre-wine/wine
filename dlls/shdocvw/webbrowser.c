@@ -210,8 +210,8 @@ static HRESULT WINAPI WebBrowser_GoForward(IWebBrowser2 *iface)
 static HRESULT WINAPI WebBrowser_GoHome(IWebBrowser2 *iface)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+    TRACE("(%p)\n", This);
+    return go_home(&This->doc_host);
 }
 
 static HRESULT WINAPI WebBrowser_GoSearch(IWebBrowser2 *iface)
@@ -638,15 +638,21 @@ static HRESULT WINAPI WebBrowser_put_MenuBar(IWebBrowser2 *iface, VARIANT_BOOL V
 static HRESULT WINAPI WebBrowser_get_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL *pbFullScreen)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, pbFullScreen);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, pbFullScreen);
+
+    *pbFullScreen = This->full_screen;
+    return S_OK;
 }
 
 static HRESULT WINAPI WebBrowser_put_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL bFullScreen)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%x)\n", This, bFullScreen);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%x)\n", This, bFullScreen);
+
+    This->full_screen = bFullScreen ? VARIANT_TRUE : VARIANT_FALSE;
+    return S_OK;
 }
 
 static HRESULT WINAPI WebBrowser_Navigate2(IWebBrowser2 *iface, VARIANT *URL, VARIANT *Flags,
@@ -706,7 +712,7 @@ static HRESULT WINAPI WebBrowser_get_Offline(IWebBrowser2 *iface, VARIANT_BOOL *
 
     TRACE("(%p)->(%p)\n", This, pbOffline);
 
-    *pbOffline = This->offline;
+    *pbOffline = This->doc_host.offline;
     return S_OK;
 }
 
@@ -716,7 +722,7 @@ static HRESULT WINAPI WebBrowser_put_Offline(IWebBrowser2 *iface, VARIANT_BOOL b
 
     TRACE("(%p)->(%x)\n", This, bOffline);
 
-    This->offline = bOffline ? VARIANT_TRUE : VARIANT_FALSE;
+    This->doc_host.offline = bOffline ? VARIANT_TRUE : VARIANT_FALSE;
     return S_OK;
 }
 
@@ -726,7 +732,7 @@ static HRESULT WINAPI WebBrowser_get_Silent(IWebBrowser2 *iface, VARIANT_BOOL *p
 
     TRACE("(%p)->(%p)\n", This, pbSilent);
 
-    *pbSilent = This->silent;
+    *pbSilent = This->doc_host.silent;
     return S_OK;
 }
 
@@ -736,7 +742,7 @@ static HRESULT WINAPI WebBrowser_put_Silent(IWebBrowser2 *iface, VARIANT_BOOL bS
 
     TRACE("(%p)->(%x)\n", This, bSilent);
 
-    This->silent = bSilent ? VARIANT_TRUE : VARIANT_FALSE;
+    This->doc_host.silent = bSilent ? VARIANT_TRUE : VARIANT_FALSE;
     return S_OK;
 }
 
@@ -819,15 +825,21 @@ static HRESULT WINAPI WebBrowser_put_AddressBar(IWebBrowser2 *iface, VARIANT_BOO
 static HRESULT WINAPI WebBrowser_get_Resizable(IWebBrowser2 *iface, VARIANT_BOOL *Value)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, Value);
+
+    TRACE("(%p)->(%p)\n", This, Value);
+
+    /* It's InternetExplorer object's method. We have nothing to do here. */
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI WebBrowser_put_Resizable(IWebBrowser2 *iface, VARIANT_BOOL Value)
 {
     WebBrowser *This = WEBBROWSER_THIS(iface);
-    FIXME("(%p)->(%x)\n", This, Value);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%x)\n", This, Value);
+
+    /* It's InternetExplorer object's method. We have nothing to do here. */
+    return S_OK;
 }
 
 #undef WEBBROWSER_THIS
@@ -927,8 +939,7 @@ static HRESULT WebBrowser_Create(INT version, IUnknown *pOuter, REFIID riid, voi
     ret->address_bar = VARIANT_TRUE;
     ret->status_bar = VARIANT_TRUE;
     ret->tool_bar = VARIANT_TRUE;
-    ret->silent = VARIANT_FALSE;
-    ret->offline = VARIANT_FALSE;
+    ret->full_screen = VARIANT_FALSE;
 
     WebBrowser_OleObject_Init(ret);
     WebBrowser_ViewObject_Init(ret);

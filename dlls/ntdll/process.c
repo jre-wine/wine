@@ -71,6 +71,24 @@ PEB * WINAPI RtlGetCurrentPeb(void)
     return NtCurrentTeb()->Peb;
 }
 
+/***********************************************************************
+ *           __wine_make_process_system   (NTDLL.@)
+ *
+ * Mark the current process as a system process.
+ * Returns the event that is signaled when all non-system processes have exited.
+ */
+HANDLE __wine_make_process_system(void)
+{
+    HANDLE ret = 0;
+    SERVER_START_REQ( make_process_system )
+    {
+        if (!wine_server_call( req )) ret = reply->event;
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+
 #define UNIMPLEMENTED_INFO_CLASS(c) \
     case c: \
         FIXME("(process=%p) Unimplemented information class: " #c "\n", ProcessHandle); \
@@ -144,7 +162,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                         if ((ret = wine_server_call( req )) == STATUS_SUCCESS)
                         {
                             pbi.ExitStatus = reply->exit_code;
-                            pbi.PebBaseAddress = (DWORD)reply->peb;
+                            pbi.PebBaseAddress = reply->peb;
                             pbi.AffinityMask = reply->affinity;
                             pbi.BasePriority = reply->priority;
                             pbi.UniqueProcessId = reply->pid;
@@ -236,8 +254,8 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                       req->handle = ProcessHandle;
                       if ((ret = wine_server_call( req )) == STATUS_SUCCESS)
                       {
-                          NTDLL_from_server_abstime(&pti.CreateTime, &reply->start_time);
-                          NTDLL_from_server_abstime(&pti.ExitTime, &reply->end_time);
+                          pti.CreateTime.QuadPart = reply->start_time;
+                          pti.ExitTime.QuadPart = reply->end_time;
                       }
                     }
                     SERVER_END_REQ;
@@ -386,7 +404,7 @@ NTSTATUS  WINAPI NtOpenProcess(PHANDLE handle, ACCESS_MASK access,
 
     SERVER_START_REQ( open_process )
     {
-        req->pid        = (process_id_t)cid->UniqueProcess;
+        req->pid        = HandleToULong(cid->UniqueProcess);
         req->access     = access;
         req->attributes = attr ? attr->Attributes : 0;
         status = wine_server_call( req );

@@ -19,19 +19,21 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "windef.h"
+#include "winbase.h"
+#include "wingdi.h"
 #include "wine/winbase16.h"
-#include "wine/wingdi16.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(bitmap);
 
 
-static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, void *obj, HDC hdc );
+static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc );
 static INT BITMAP_GetObject16( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
 static INT BITMAP_GetObject( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
 static BOOL BITMAP_DeleteObject( HGDIOBJ handle, void *obj );
@@ -205,7 +207,7 @@ HBITMAP WINAPI CreateCompatibleBitmap( HDC hdc, INT width, INT height)
             }
             GDI_ReleaseObj(dc->hBitmap);
         }
-        GDI_ReleaseObj(hdc);
+        DC_ReleaseDCPtr( dc );
     }
 
     TRACE("\t\t%p\n", hbmpRet);
@@ -234,10 +236,8 @@ HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
     BITMAPOBJ *bmpobj;
     HBITMAP hbitmap;
 
-    if (!bmp || bmp->bmType || bmp->bmPlanes != 1)
+    if (!bmp || bmp->bmType)
     {
-        if (bmp && bmp->bmPlanes != 1)
-            FIXME("planes = %d\n", bmp->bmPlanes);
         SetLastError( ERROR_INVALID_PARAMETER );
         return NULL;
     }
@@ -246,10 +246,7 @@ HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
 
     if (!bm.bmWidth || !bm.bmHeight)
     {
-        bm.bmWidth = bm.bmHeight = 1;
-        bm.bmPlanes = bm.bmBitsPixel = 1;
-        bm.bmWidthBytes = 2;
-        bm.bmBits = NULL;
+        return GetStockObject( DEFAULT_BITMAP );
     }
     else
     {
@@ -258,6 +255,16 @@ HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
         if (bm.bmWidth < 0)
             bm.bmWidth = -bm.bmWidth;
     }
+
+    if (bm.bmPlanes != 1)
+    {
+        FIXME("planes = %d\n", bm.bmPlanes);
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return NULL;
+    }
+
+    /* Windows ignores the provided bm.bmWidthBytes */
+    bm.bmWidthBytes = BITMAP_GetWidthBytes( bm.bmWidth, bm.bmBitsPixel );
 
       /* Create the BITMAPOBJ */
     bmpobj = GDI_AllocObject( sizeof(BITMAPOBJ), BITMAP_MAGIC,
@@ -547,17 +554,23 @@ BOOL BITMAP_SetOwnerDC( HBITMAP hbitmap, DC *dc )
 /***********************************************************************
  *           BITMAP_SelectObject
  */
-static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
+static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
 {
     HGDIOBJ ret;
-    BITMAPOBJ *bitmap = obj;
-    DC *dc = DC_GetDCPtr( hdc );
+    BITMAPOBJ *bitmap;
+    DC *dc;
 
-    if (!dc) return 0;
+    if (!(bitmap = GDI_GetObjPtr( handle, BITMAP_MAGIC ))) return 0;
+
+    if (!(dc = get_dc_ptr( hdc )))
+    {
+        GDI_ReleaseObj( handle );
+        return 0;
+    }
     if (GetObjectType( hdc ) != OBJ_MEMDC)
     {
-        GDI_ReleaseObj( hdc );
-        return 0;
+        ret = 0;
+        goto done;
     }
     ret = dc->hBitmap;
     if (handle == dc->hBitmap) goto done;  /* nothing to do */
@@ -565,14 +578,14 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
     if (bitmap->header.dwCount && (handle != GetStockObject(DEFAULT_BITMAP)))
     {
         WARN( "Bitmap already selected in another DC\n" );
-        GDI_ReleaseObj( hdc );
-        return 0;
+        ret = 0;
+        goto done;
     }
 
     if (!bitmap->funcs && !BITMAP_SetOwnerDC( handle, dc ))
     {
-        GDI_ReleaseObj( hdc );
-        return 0;
+        ret = 0;
+        goto done;
     }
 
     if (dc->funcs->pSelectBitmap) handle = dc->funcs->pSelectBitmap( dc->physDev, handle );
@@ -580,14 +593,17 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
     if (handle)
     {
         dc->hBitmap = handle;
-        dc->flags &= ~DC_DIRTY;
+        GDI_inc_ref_count( handle );
+        dc->dirty = 0;
         SetRectRgn( dc->hVisRgn, 0, 0, bitmap->bitmap.bmWidth, bitmap->bitmap.bmHeight);
         DC_InitDC( dc );
+        GDI_dec_ref_count( ret );
     }
     else ret = 0;
 
  done:
-    GDI_ReleaseObj( hdc );
+    GDI_ReleaseObj( handle );
+    release_dc_ptr( dc );
     return ret;
 }
 

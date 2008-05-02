@@ -74,8 +74,15 @@ struct object_ops
     struct fd *(*get_fd)(struct object *);
     /* map access rights to the specific rights for this object */
     unsigned int (*map_access)(struct object *, unsigned int);
+    /* returns the security descriptor of the object */
+    struct security_descriptor *(*get_sd)( struct object * );
+    /* sets the security descriptor of the object */
+    int (*set_sd)( struct object *, const struct security_descriptor *, unsigned int );
     /* lookup a name if an object has a namespace */
     struct object *(*lookup_name)(struct object *, struct unicode_str *,unsigned int);
+    /* open a file object to access this object */
+    struct object *(*open_file)(struct object *, unsigned int access, unsigned int sharing,
+                                unsigned int options);
     /* close a handle to this object */
     int (*close_handle)(struct object *,struct process *,obj_handle_t);
     /* destroy on refcount == 0 */
@@ -88,6 +95,7 @@ struct object
     const struct object_ops  *ops;
     struct list               wait_queue;
     struct object_name       *name;
+    struct security_descriptor *sd;
 #ifdef DEBUG_OBJECTS
     struct list               obj_list;
 #endif
@@ -123,7 +131,11 @@ extern int no_satisfied( struct object *obj, struct thread *thread );
 extern int no_signal( struct object *obj, unsigned int access );
 extern struct fd *no_get_fd( struct object *obj );
 extern unsigned int no_map_access( struct object *obj, unsigned int access );
+extern struct security_descriptor *default_get_sd( struct object *obj );
+extern int default_set_sd( struct object *obj, const struct security_descriptor *sd, unsigned int set_info );
 extern struct object *no_lookup_name( struct object *obj, struct unicode_str *name, unsigned int attributes );
+extern struct object *no_open_file( struct object *obj, unsigned int access, unsigned int sharing,
+                                    unsigned int options );
 extern int no_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 extern void no_destroy( struct object *obj );
 #ifdef DEBUG_OBJECTS
@@ -208,11 +220,11 @@ extern void create_mailslot_device( struct directory *root, const struct unicode
 
   /* command-line options */
 extern int debug_level;
-extern int master_socket_timeout;
 extern int foreground;
+extern timeout_t master_socket_timeout;
 extern const char *server_argv0;
 
   /* server start time used for GetTickCount() */
-extern struct timeval server_start_time;
+extern timeout_t server_start_time;
 
 #endif  /* __WINE_SERVER_OBJECT_H */

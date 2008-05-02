@@ -24,24 +24,15 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION ((IWineD3DImpl *)(((IWineD3DDeviceImpl *)This->resource.wineD3DDevice)->wineD3D))->gl_info
+#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 static const GLenum cube_targets[6] = {
-#if defined(GL_VERSION_1_3)
-  GL_TEXTURE_CUBE_MAP_POSITIVE_X,
-  GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
-  GL_TEXTURE_CUBE_MAP_POSITIVE_Y,
-  GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
-  GL_TEXTURE_CUBE_MAP_POSITIVE_Z,
-  GL_TEXTURE_CUBE_MAP_NEGATIVE_Z
-#else
   GL_TEXTURE_CUBE_MAP_POSITIVE_X_ARB,
   GL_TEXTURE_CUBE_MAP_NEGATIVE_X_ARB,
   GL_TEXTURE_CUBE_MAP_POSITIVE_Y_ARB,
   GL_TEXTURE_CUBE_MAP_NEGATIVE_Y_ARB,
   GL_TEXTURE_CUBE_MAP_POSITIVE_Z_ARB,
   GL_TEXTURE_CUBE_MAP_NEGATIVE_Z_ARB
-#endif
 };
 
 /* *******************************************
@@ -76,28 +67,7 @@ static ULONG WINAPI IWineD3DCubeTextureImpl_Release(IWineD3DCubeTexture *iface) 
     TRACE("(%p) : Releasing from %d\n", This, This->resource.ref);
     ref = InterlockedDecrement(&This->resource.ref);
     if (ref == 0) {
-        int i,j;
-        TRACE("(%p) : Cleaning up\n",This);
-        for (i = 0; i < This->baseTexture.levels; i++) {
-            for (j = 0; j < 6; j++) {
-                if (This->surfaces[j][i] != NULL) {
-                    /* Because the surfaces were created using a callback we need to release there parent otehrwise we leave the parent hanging */
-                    IUnknown* surfaceParent;
-                    /* Clean out the texture name we gave to the surface so that the surface doesn't try and release it */
-                    IWineD3DSurface_SetGlTextureDesc(This->surfaces[j][i], 0, 0);
-                    /* Cleanup the container */
-                    IWineD3DSurface_SetContainer(This->surfaces[j][i], 0);
-                    /* Now, release the parent, which will take care of cleaning up the surface for us */
-                    TRACE("(%p) : Releasing surface%d %d  %p\n", This, j, i, This->surfaces[j][i]);
-                    IWineD3DSurface_GetParent(This->surfaces[j][i], &surfaceParent);
-                    IUnknown_Release(surfaceParent);
-                    IUnknown_Release(surfaceParent);
-                }
-            }
-        }
-        IWineD3DBaseTextureImpl_CleanUp((IWineD3DBaseTexture *) iface);
-        /* finally delete the object */
-        HeapFree(GetProcessHeap(), 0, This);
+        IWineD3DCubeTexture_Destroy(iface, D3DCB_DefaultDestroySurface);
     }
     return ref;
 }
@@ -134,27 +104,62 @@ static void WINAPI IWineD3DCubeTextureImpl_PreLoad(IWineD3DCubeTexture *iface) {
     unsigned int i,j;
     BOOL setGlTextureDesc = FALSE;
     IWineD3DCubeTextureImpl *This = (IWineD3DCubeTextureImpl *)iface;
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    BOOL srgb_mode = This->baseTexture.is_srgb;
+    BOOL srgb_was_toggled = FALSE;
 
     TRACE("(%p) : About to load texture: dirtified(%d)\n", This, This->baseTexture.dirty);
 
     if (This->baseTexture.textureName == 0)  setGlTextureDesc = TRUE;
 
+    /* We only have to activate a context for gl when we're not drawing. In most cases PreLoad will be called during draw
+     * and a context was activated at the beginning of drawPrimitive
+     */
+    if(!device->isInDraw) {
+        /* No danger of recursive calls, ActivateContext sets isInDraw to true when loading
+         * offscreen render targets into their texture
+         */
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+    } else if (GL_SUPPORT(EXT_TEXTURE_SRGB) && This->baseTexture.bindCount > 0) {
+        srgb_mode = device->stateBlock->samplerState[This->baseTexture.sampler][WINED3DSAMP_SRGBTEXTURE];
+        srgb_was_toggled = (This->baseTexture.is_srgb != srgb_mode);
+        This->baseTexture.is_srgb = srgb_mode;
+    }
     IWineD3DCubeTexture_BindTexture(iface);
 
     ENTER_GL();
-    /* If were dirty then reload the surfaces */
+    /* If the texture is marked dirty or the srgb sampler setting has changed since the last load then reload the surfaces */
     if (This->baseTexture.dirty) {
         for (i = 0; i < This->baseTexture.levels; i++) {
             for (j = WINED3DCUBEMAP_FACE_POSITIVE_X; j <= WINED3DCUBEMAP_FACE_NEGATIVE_Z ; j++) {
                 if(setGlTextureDesc)
                       IWineD3DSurface_SetGlTextureDesc(This->surfaces[j][i], This->baseTexture.textureName, cube_targets[j]);
-                IWineD3DSurface_LoadTexture(This->surfaces[j][i]);
+                IWineD3DSurface_LoadTexture(This->surfaces[j][i], srgb_mode);
             }
         }
-        /* No longer dirty */
-        This->baseTexture.dirty = FALSE;
+    } else if (srgb_was_toggled) {
+        /* Loop is repeated in the else block with the extra AddDirtyRect line to avoid the alternative of
+         * checking srgb_was_toggled in every iteration, even when the texture is just dirty
+         */
+        if (This->baseTexture.srgb_mode_change_count < 20)
+            ++This->baseTexture.srgb_mode_change_count;
+        else
+            FIXME("Cubetexture (%p) has been reloaded at least 20 times due to WINED3DSAMP_SRGBTEXTURE changes on it\'s sampler\n", This);
+
+        for (i = 0; i < This->baseTexture.levels; i++) {
+            for (j = WINED3DCUBEMAP_FACE_POSITIVE_X; j <= WINED3DCUBEMAP_FACE_NEGATIVE_Z ; j++) {
+                IWineD3DSurface_AddDirtyRect(This->surfaces[j][i], NULL);
+                IWineD3DSurface_SetGlTextureDesc(This->surfaces[j][i], This->baseTexture.textureName, cube_targets[j]);
+                IWineD3DSurface_LoadTexture(This->surfaces[j][i], srgb_mode);
+            }
+        }
+    } else {
+        TRACE("(%p) Texture not dirty, nothing to do\n" , iface);
     }
     LEAVE_GL();
+
+    /* No longer dirty */
+    This->baseTexture.dirty = FALSE;
     return ;
 }
 
@@ -190,7 +195,7 @@ static WINED3DTEXTUREFILTERTYPE WINAPI IWineD3DCubeTextureImpl_GetAutoGenFilterT
 }
 
 static void WINAPI IWineD3DCubeTextureImpl_GenerateMipSubLevels(IWineD3DCubeTexture *iface) {
-  return IWineD3DBaseTextureImpl_GenerateMipSubLevels((IWineD3DBaseTexture *)iface);
+    IWineD3DBaseTextureImpl_GenerateMipSubLevels((IWineD3DBaseTexture *)iface);
 }
 
 /* Internal function, No d3d mapping */
@@ -265,6 +270,26 @@ static void WINAPI IWineD3DCubeTextureImpl_ApplyStateChanges(IWineD3DCubeTexture
 /* *******************************************
    IWineD3DCubeTexture IWineD3DCubeTexture parts follow
    ******************************************* */
+static void WINAPI IWineD3DCubeTextureImpl_Destroy(IWineD3DCubeTexture *iface, D3DCB_DESTROYSURFACEFN D3DCB_DestroySurface) {
+    IWineD3DCubeTextureImpl *This = (IWineD3DCubeTextureImpl *)iface;
+    int i,j;
+    TRACE("(%p) : Cleaning up\n",This);
+    for (i = 0; i < This->baseTexture.levels; i++) {
+        for (j = 0; j < 6; j++) {
+            if (This->surfaces[j][i] != NULL) {
+                /* Clean out the texture name we gave to the surface so that the surface doesn't try and release it */
+                IWineD3DSurface_SetGlTextureDesc(This->surfaces[j][i], 0, 0);
+                /* Cleanup the container */
+                IWineD3DSurface_SetContainer(This->surfaces[j][i], 0);
+                D3DCB_DestroySurface(This->surfaces[j][i]);
+            }
+        }
+    }
+    IWineD3DBaseTextureImpl_CleanUp((IWineD3DBaseTexture *) iface);
+    /* finally delete the object */
+    HeapFree(GetProcessHeap(), 0, This);
+}
+
 static HRESULT WINAPI IWineD3DCubeTextureImpl_GetLevelDesc(IWineD3DCubeTexture *iface, UINT Level, WINED3DSURFACE_DESC* pDesc) {
     IWineD3DCubeTextureImpl *This = (IWineD3DCubeTextureImpl *)iface;
 
@@ -372,6 +397,7 @@ const IWineD3DCubeTextureVtbl IWineD3DCubeTexture_Vtbl =
     IWineD3DCubeTextureImpl_GetTextureDimensions,
     IWineD3DCubeTextureImpl_ApplyStateChanges,
     /* IWineD3DCubeTexture */
+    IWineD3DCubeTextureImpl_Destroy,
     IWineD3DCubeTextureImpl_GetLevelDesc,
     IWineD3DCubeTextureImpl_GetCubeMapSurface,
     IWineD3DCubeTextureImpl_LockRect,

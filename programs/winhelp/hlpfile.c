@@ -157,7 +157,7 @@ HLPFILE_PAGE *HLPFILE_PageByOffset(HLPFILE* hlpfile, LONG offset)
  */
 HLPFILE_PAGE *HLPFILE_PageByHash(HLPFILE* hlpfile, LONG lHash)
 {
-    int                 i;
+    unsigned int i;
 
     if (!hlpfile) return 0;
 
@@ -179,7 +179,7 @@ HLPFILE_PAGE *HLPFILE_PageByHash(HLPFILE* hlpfile, LONG lHash)
  */
 HLPFILE_PAGE *HLPFILE_PageByMap(HLPFILE* hlpfile, LONG lMap)
 {
-    int                 i;
+    unsigned int i;
 
     if (!hlpfile) return 0;
 
@@ -452,10 +452,12 @@ static BOOL HLPFILE_AddPage(HLPFILE *hlpfile, BYTE *buf, BYTE *end, unsigned off
     while (ptr < page->lpszTitle + titlesize)
     {
         unsigned len = strlen(ptr);
+        char*    macro_str;
+
         WINE_TRACE("macro: %s\n", ptr);
         macro = HeapAlloc(GetProcessHeap(), 0, sizeof(HLPFILE_MACRO) + len + 1);
-        macro->lpszMacro = (char*)(macro + 1);
-        memcpy((char*)macro->lpszMacro, ptr, len + 1);
+        macro->lpszMacro = macro_str = (char*)(macro + 1);
+        memcpy(macro_str, ptr, len + 1);
         /* FIXME: shall we really link macro in reverse order ??
          * may produce strange results when played at page opening
          */
@@ -822,6 +824,7 @@ static HLPFILE_LINK*       HLPFILE_AllocLink(int cookie, const char* str, LONG h
                                              BOOL clrChange, unsigned wnd)
 {
     HLPFILE_LINK*  link;
+    char*          link_str;
 
     /* FIXME: should build a string table for the attributes.link.lpszPath
      * they are reallocated for each link
@@ -830,8 +833,8 @@ static HLPFILE_LINK*       HLPFILE_AllocLink(int cookie, const char* str, LONG h
     if (!link) return NULL;
 
     link->cookie     = cookie;
-    link->lpszString = (char*)link + sizeof(HLPFILE_LINK);
-    strcpy((char*)link->lpszString, str);
+    link->lpszString = link_str = (char*)link + sizeof(HLPFILE_LINK);
+    strcpy(link_str, str);
     link->lHash      = hash;
     link->bClrChange = clrChange ? 1 : 0;
     link->window     = wnd;
@@ -938,7 +941,7 @@ static BOOL HLPFILE_AddParagraph(HLPFILE *hlpfile, BYTE *buf, BYTE *end, unsigne
 
         while (text < text_end && format < format_end)
         {
-            WINE_TRACE("Got text: '%s' (%p/%p - %p/%p)\n", wine_dbgstr_a(text), text, text_end, format, format_end);
+            WINE_TRACE("Got text: %s (%p/%p - %p/%p)\n", wine_dbgstr_a(text), text, text_end, format, format_end);
             textsize = strlen(text) + 1;
             if (textsize > 1)
             {
@@ -1575,12 +1578,13 @@ static BOOL HLPFILE_UncompressLZ77_Phrases(HLPFILE* hlpfile)
  */
 static BOOL HLPFILE_Uncompress_Phrases40(HLPFILE* hlpfile)
 {
-    UINT num, dec_size, cpr_size;
+    UINT num;
+    INT dec_size, cpr_size;
     BYTE *buf_idx, *end_idx;
     BYTE *buf_phs, *end_phs;
-    short i, n;
     long* ptr, mask = 0;
-    unsigned short bc;
+    unsigned int i;
+    unsigned short bc, n;
 
     if (!HLPFILE_FindSubFile("|PhrIndex", &buf_idx, &end_idx) ||
         !HLPFILE_FindSubFile("|PhrImage", &buf_phs, &end_phs)) return FALSE;
@@ -1646,7 +1650,7 @@ static BOOL HLPFILE_Uncompress_Phrases40(HLPFILE* hlpfile)
 static BOOL HLPFILE_Uncompress_Topic(HLPFILE* hlpfile)
 {
     BYTE *buf, *ptr, *end, *newptr;
-    int  i, newsize = 0;
+    unsigned int i, newsize = 0;
 
     if (!HLPFILE_FindSubFile("|TOPIC", &buf, &end))
     {WINE_WARN("topic0\n"); return FALSE;}
@@ -1758,7 +1762,7 @@ static void HLPFILE_Uncompress2(const BYTE *ptr, const BYTE *end, BYTE *newptr, 
 static BOOL HLPFILE_Uncompress3(char* dst, const char* dst_end,
                                 const BYTE* src, const BYTE* src_end)
 {
-    int         idx, len;
+    unsigned int idx, len;
 
     for (; src < src_end; src++)
     {

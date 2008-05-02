@@ -44,8 +44,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winedump.h"
-#include "pe.h"
-#include "cvinclude.h"
+#include "wine/mscvpdb.h"
 
 /*
  * .DBG File Layout:
@@ -99,8 +98,8 @@
  *    (OMFDirHeader.cDir)
  */
 
-extern const IMAGE_NT_HEADERS*        PE_nt_headers;
-static const void*		cv_base /* = 0 */;
+extern const IMAGE_NT_HEADERS*  PE_nt_headers;
+static const void*	        cv_base /* = 0 */;
 
 static int dump_cv_sst_module(const OMFDirEntry* omfde)
 {
@@ -124,7 +123,7 @@ static int dump_cv_sst_module(const OMFDirEntry* omfde)
 
     for (i = 0; i < module->cSeg; i++)
     {
-	printf ("      segment #%2d: offset = [0x%8lx], size = [0x%8lx]\n",
+	printf ("      segment #%2d: offset = [0x%8x], size = [0x%8x]\n",
 		segDesc->Seg, segDesc->Off, segDesc->cbSeg);
 	segDesc++;
     }
@@ -136,18 +135,12 @@ static int dump_cv_sst_global_pub(const OMFDirEntry* omfde)
     long	        fileoffset;
     const OMFSymHash*   header;
     const BYTE*	        symbols;
-    const BYTE*	        curpos;
-    const PUBSYM32*	sym;
-    unsigned 	        symlen;
-    int		        recordlen;
-    char 	        nametmp[256];
 
     fileoffset = Offset(cv_base) + omfde->lfo;
     printf ("    GlobalPub section starts at file offset 0x%lx\n", fileoffset);
     printf ("    Symbol table starts at 0x%lx\n", fileoffset + sizeof (OMFSymHash));
 
     printf ("\n                           ----- Begin Symbol Table -----\n");
-    printf ("      (type)      (symbol name)                 (offset)      (len) (seg) (ind)\n");
 
     header = PRD(fileoffset, sizeof(OMFSymHash));
     if (!header) {printf("Can't get OMF-SymHash, aborting\n");return FALSE;}
@@ -155,35 +148,7 @@ static int dump_cv_sst_global_pub(const OMFDirEntry* omfde)
     symbols = PRD(fileoffset + sizeof(OMFSymHash), header->cbSymbol);
     if (!symbols) {printf("Can't OMF-SymHash details, aborting\n"); return FALSE;}
 
-    /* We don't know how many symbols are in this block of memory...only what
-     * the total size of the block is.  Because the symbol's name is tacked
-     * on to the end of the PUBSYM32 struct, each symbol may take up a different
-     * # of bytes.  This makes it harder to parse through the symbol table,
-     * since we won't know the exact location of the following symbol until we've
-     * already parsed the current one.
-     */
-    for (curpos = symbols; curpos < symbols + header->cbSymbol; curpos += recordlen)
-    {
-	/* Point to the next PUBSYM32 in the table.
-	 */
-	sym = (const PUBSYM32*)curpos;
-
-	if (sym->reclen < sizeof(PUBSYM32)) break;
-
-	symlen = sym->reclen - sizeof(PUBSYM32) + 1;
-	if (symlen > sizeof(nametmp)) {printf("\nsqueeze%d\n", symlen);symlen = sizeof(nametmp) - 1;}
-
-	memcpy(nametmp, curpos + sizeof (PUBSYM32) + 1, symlen);
-	nametmp[symlen] = '\0';
-
-	printf ("      0x%04x  %-30.30s  [0x%8lx]  [0x%4x]  %d     %ld\n",
-		sym->rectyp, nametmp, sym->off, sym->reclen, sym->seg, sym->typind);
-
-	/* The entire record is null-padded to the nearest 4-byte
-	 * boundary, so we must do a little extra math to keep things straight.
-	 */
-	recordlen = (sym->reclen + 3) & ~3;
-    }
+    codeview_dump_symbols(symbols, header->cbSymbol);
 
     return TRUE;
 }
@@ -208,7 +173,30 @@ static int dump_cv_sst_libraries(const OMFDirEntry* omfde)
 
 static int dump_cv_sst_global_types(const OMFDirEntry* omfde)
 {
-    /*** NOT YET IMPLEMENTED ***/
+    long	        fileoffset;
+    const OMFGlobalTypes*types;
+    const BYTE*         data;
+    unsigned            sz;
+
+    fileoffset = Offset(cv_base) + omfde->lfo;
+    printf ("    GlobalTypes section starts at file offset 0x%lx\n", fileoffset);
+
+    printf ("\n                           ----- Begin Global Types Table -----\n");
+
+    types = PRD(fileoffset, sizeof(OMFGlobalTypes));
+    if (!types) {printf("Can't get OMF-GlobalTypes, aborting\n");return FALSE;}
+
+    sz = omfde->cb - sizeof(OMFGlobalTypes) - sizeof(DWORD) * types->cTypes;
+    data = PRD(fileoffset + sizeof(OMFGlobalTypes) + sizeof(DWORD) * types->cTypes, sz);
+    if (!data) {printf("Can't OMF-SymHash details, aborting\n"); return FALSE;}
+
+    /* doc says:
+     * - for NB07 & NB08 (that we don't support yet), offsets are from types
+     * - for NB09, offsets are from data
+     * For now, we only support the later
+     */
+    codeview_dump_types_from_offsets(data, (const DWORD*)(types + 1), types->cTypes);
+
     return TRUE;
 }
 
@@ -341,7 +329,11 @@ static int dump_cv_sst_src_module(const OMFDirEntry* omfde)
 
 static int dump_cv_sst_align_sym(const OMFDirEntry* omfde)
 {
-    /*** NOT YET IMPLEMENTED ***/
+    const char* rawdata = PRD(Offset(cv_base) + omfde->lfo, omfde->cb);
+
+    if (!rawdata) {printf("Can't get srcAlignSym subsection details, aborting\n");return FALSE;}
+    if (omfde->cb < sizeof(DWORD)) return TRUE;
+    codeview_dump_symbols(rawdata + sizeof(DWORD), omfde->cb - sizeof(DWORD));
 
     return TRUE;
 }
@@ -376,8 +368,8 @@ static void dump_codeview_all_modules(const OMFDirHeader *omfdh)
 	printf("Module #%2d (%p)\n", i + 1, &dirEntry[i]);
 	printf("  SubSection:            %04X (%s)\n", dirEntry[i].SubSection, str);
 	printf("  iMod:                  %d\n", dirEntry[i].iMod);
-	printf("  lfo:                   %ld\n", dirEntry[i].lfo);
-	printf("  cb:                    %lu\n", dirEntry[i].cb);
+	printf("  lfo:                   %d\n", dirEntry[i].lfo);
+	printf("  cb:                    %u\n", dirEntry[i].cb);
 
 	switch (dirEntry[i].SubSection)
 	{
@@ -402,8 +394,9 @@ static void dump_codeview_all_modules(const OMFDirHeader *omfdh)
 static void dump_codeview_headers(unsigned long base, unsigned long len)
 {
     const OMFDirHeader* dirHeader;
-    const OMFSignature* signature;
+    const char*         signature;
     const OMFDirEntry*  dirEntry;
+    const OMFSignature* sig;
     unsigned		i;
     int modulecount = 0, alignsymcount = 0, srcmodulecount = 0, librariescount = 0;
     int globalsymcount = 0, globalpubcount = 0, globaltypescount = 0;
@@ -415,36 +408,49 @@ static void dump_codeview_headers(unsigned long base, unsigned long len)
     signature = cv_base;
 
     printf("    CodeView Data\n");
+    printf("      Signature:         %.4s\n", signature);
 
-    printf("      Signature:         %.4s\n", signature->Signature);
-    printf("      Filepos:           0x%08lX\n", signature->filepos);
-
-    if (memcmp(signature->Signature, "NB10", 4) == 0)
+    if (memcmp(signature, "NB10", 4) == 0)
     {
-	const struct {DWORD TimeStamp; DWORD  Dunno; char Name[1];} *pdb_data;
-	pdb_data = (const void *)(signature + 1);
+	const CODEVIEW_PDB_DATA* pdb_data;
+	pdb_data = (const void *)cv_base;
 
-	printf("        TimeStamp:            %08X (%s)\n",
-	       pdb_data->TimeStamp, get_time_str(pdb_data->TimeStamp));
-	printf("        Dunno:                %08X\n", pdb_data->Dunno);
-	printf("        Filename:             %s\n", pdb_data->Name);
+        printf("      Filepos:           0x%08lX\n", pdb_data->filepos);
+	printf("      TimeStamp:         %08X (%s)\n",
+	       pdb_data->timestamp, get_time_str(pdb_data->timestamp));
+	printf("      Dunno:             %08X\n", pdb_data->unknown);
+	printf("      Filename:          %s\n", pdb_data->name);
+	return;
+    }
+    if (memcmp(signature, "RSDS", 4) == 0)
+    {
+	const OMFSignatureRSDS* rsds_data;
+
+	rsds_data = (const void *)cv_base;
+	printf("      Guid:              %s\n", get_guid_str(&rsds_data->guid));
+	printf("      Dunno:             %08X\n", rsds_data->unknown);
+	printf("      Filename:          %s\n", rsds_data->name);
 	return;
     }
 
-    if (memcmp(signature->Signature, "NB09", 4) != 0 && memcmp(signature->Signature, "NB11", 4) != 0)
+    if (memcmp(signature, "NB09", 4) != 0 && memcmp(signature, "NB11", 4) != 0)
     {
-	printf("Unsupported signature, aborting\n");
+	printf("Unsupported signature (%.4s), aborting\n", signature);
 	return;
     }
 
-    dirHeader = PRD(Offset(cv_base) + signature->filepos, sizeof(OMFDirHeader));
+    sig = cv_base;
+
+    printf("      Filepos:           0x%08lX\n", sig->filepos);
+
+    dirHeader = PRD(Offset(cv_base) + sig->filepos, sizeof(OMFDirHeader));
     if (!dirHeader) {printf("Can't get debug header, aborting\n"); return;}
 
     printf("      Size of header:    0x%4X\n", dirHeader->cbDirHeader);
     printf("      Size per entry:    0x%4X\n", dirHeader->cbDirEntry);
-    printf("      # of entries:      0x%8lX (%ld)\n", dirHeader->cDir, dirHeader->cDir);
-    printf("      Offset to NextDir: 0x%8lX\n", dirHeader->lfoNextDir);
-    printf("      Flags:             0x%8lX\n", dirHeader->flags);
+    printf("      # of entries:      0x%8X (%d)\n", dirHeader->cDir, dirHeader->cDir);
+    printf("      Offset to NextDir: 0x%8X\n", dirHeader->lfoNextDir);
+    printf("      Flags:             0x%8X\n", dirHeader->flags);
 
     if (!dirHeader->cDir) return;
 
@@ -579,8 +585,33 @@ void	dump_codeview(unsigned long base, unsigned long len)
 
 void	dump_frame_pointer_omission(unsigned long base, unsigned long len)
 {
-	/* FPO is used to describe nonstandard stack frames */
-	printf("FIXME: FPO (frame pointer omission) debug symbol dumping not implemented yet.\n");
+    const FPO_DATA*     fpo;
+    const FPO_DATA*     last;
+    const char*         x;
+    /* FPO is used to describe nonstandard stack frames */
+    printf("Range             #loc #pmt Prlg #reg Info\n"
+           "-----------------+----+----+----+----+------------\n");
+
+    fpo = (const FPO_DATA*)PRD(base, len);
+    if (!fpo) {printf("Couldn't get FPO blob\n"); return;}
+    last = (const FPO_DATA*)((const char*)fpo + len);
+
+    while (fpo < last && fpo->ulOffStart)
+    {
+        switch (fpo->cbFrame)
+        {
+        case FRAME_FPO: x = "FRAME_FPO"; break;
+        case FRAME_NONFPO: x = "FRAME_NONFPO"; break;
+        case FRAME_TRAP: x = "FRAME_TRAP"; break;
+        case FRAME_TSS: x = "case FRAME_TSS"; break;
+        default: x = NULL; break;
+        }
+        printf("%08x-%08x %4u %4u %4u %4u %s%s%s\n",
+               fpo->ulOffStart, fpo->ulOffStart + fpo->cbProcSize,
+               fpo->cdwLocals, fpo->cdwParams, fpo->cbProlog, fpo->cbRegs,
+               x, fpo->fHasSEH ? " SEH" : "", fpo->fUseBP ? " UseBP" : "");
+        fpo++;
+    }
 }
 
 struct stab_nlist
@@ -597,7 +628,7 @@ struct stab_nlist
     unsigned long       n_value;
 };
 
-static const char* stabs_defs[] = {
+static const char * const stabs_defs[] = {
     NULL,NULL,NULL,NULL,                /* 00 */
     NULL,NULL,NULL,NULL,                /* 08 */
     NULL,NULL,NULL,NULL,                /* 10 */

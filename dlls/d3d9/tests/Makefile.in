@@ -8,11 +8,13 @@ EXTRALIBS = -ldxerr9 -luuid -ldxguid
 
 CTESTS = \
 	device.c \
+	query.c \
 	shader.c \
 	stateblock.c \
 	surface.c \
 	texture.c \
 	vertexdeclaration.c \
+	visual.c \
 	volume.c
 
 @MAKE_TEST_RULES@

@@ -25,7 +25,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(richedit);
 
 
 static BOOL
-ME_StreamOutRTFText(ME_OutStream *pStream, WCHAR *text, LONG nChars);
+ME_StreamOutRTFText(ME_OutStream *pStream, const WCHAR *text, LONG nChars);
 
 
 static ME_OutStream*
@@ -92,7 +92,7 @@ ME_StreamOutMove(ME_OutStream *pStream, const char *buffer, int len)
     int space = STREAMOUT_BUFFER_SIZE - pStream->pos;
     int fit = min(space, len);
 
-    TRACE("%u:%u:%.*s\n", pStream->pos, fit, fit, buffer);
+    TRACE("%u:%u:%s\n", pStream->pos, fit, debugstr_an(buffer,fit));
     memmove(pStream->buffer + pStream->pos, buffer, fit);
     len -= fit;
     buffer += fit;
@@ -192,7 +192,7 @@ ME_StreamOutRTFHeader(ME_OutStream *pStream, int dwFormat)
 
 
 static BOOL
-ME_StreamOutRTFFontAndColorTbl(ME_OutStream *pStream, ME_DisplayItem *pFirstRun, ME_DisplayItem *pLastRun)
+ME_StreamOutRTFFontAndColorTbl(ME_OutStream *pStream, ME_DisplayItem *pFirstRun, const ME_DisplayItem *pLastRun)
 {
   ME_DisplayItem *item = pFirstRun;
   ME_FontTableItem *table = pStream->fonttbl;
@@ -282,7 +282,7 @@ ME_StreamOutRTFFontAndColorTbl(ME_OutStream *pStream, ME_DisplayItem *pFirstRun,
 
 
 static BOOL
-ME_StreamOutRTFParaProps(ME_OutStream *pStream, ME_DisplayItem *para)
+ME_StreamOutRTFParaProps(ME_OutStream *pStream, const ME_DisplayItem *para)
 {
   PARAFORMAT2 *fmt = para->member.para.pFmt;
   char props[STREAMOUT_BUFFER_SIZE] = "";
@@ -390,7 +390,7 @@ ME_StreamOutRTFParaProps(ME_OutStream *pStream, ME_DisplayItem *para)
     sprintf(props + strlen(props), "\\s%d", fmt->sStyle);
 
   if (fmt->dwMask & PFM_TABSTOPS) {
-    static const char *leader[6] = { "", "\\tldot", "\\tlhyph", "\\tlul", "\\tlth", "\\tleq" };
+    static const char * const leader[6] = { "", "\\tldot", "\\tlhyph", "\\tlul", "\\tlth", "\\tleq" };
     
     for (i = 0; i < fmt->cTabCount; i++) {
       switch ((fmt->rgxTabs[i] >> 24) & 0xF) {
@@ -415,7 +415,7 @@ ME_StreamOutRTFParaProps(ME_OutStream *pStream, ME_DisplayItem *para)
     
   
   if (fmt->dwMask & PFM_SHADING) {
-    static const char *style[16] = { "", "\\bgdkhoriz", "\\bgdkvert", "\\bgdkfdiag",
+    static const char * const style[16] = { "", "\\bgdkhoriz", "\\bgdkvert", "\\bgdkfdiag",
                                      "\\bgdkbdiag", "\\bgdkcross", "\\bgdkdcross",
                                      "\\bghoriz", "\\bgvert", "\\bgfdiag",
                                      "\\bgbdiag", "\\bgcross", "\\bgdcross",
@@ -579,7 +579,7 @@ ME_StreamOutRTFCharProps(ME_OutStream *pStream, CHARFORMAT2W *fmt)
 
 
 static BOOL
-ME_StreamOutRTFText(ME_OutStream *pStream, WCHAR *text, LONG nChars)
+ME_StreamOutRTFText(ME_OutStream *pStream, const WCHAR *text, LONG nChars)
 {
   char buffer[STREAMOUT_BUFFER_SIZE];
   int pos = 0;

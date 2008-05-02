@@ -48,7 +48,6 @@
 #include "winreg.h"
 #include "wownt32.h"
 #include "wine/debug.h"
-#include "gdi.h"
 #include "gdi_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(print);
@@ -72,7 +71,7 @@ static const char Printers[]          = "System\\CurrentControlSet\\Control\\Pri
 INT WINAPI StartDocW(HDC hdc, const DOCINFOW* doc)
 {
     INT ret = 0;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     TRACE("DocName = %s Output = %s Datatype = %s\n",
           debugstr_w(doc->lpszDocName), debugstr_w(doc->lpszOutput),
@@ -81,7 +80,7 @@ INT WINAPI StartDocW(HDC hdc, const DOCINFOW* doc)
     if(!dc) return SP_ERROR;
 
     if (dc->funcs->pStartDoc) ret = dc->funcs->pStartDoc( dc->physDev, doc );
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -137,11 +136,11 @@ INT WINAPI StartDocA(HDC hdc, const DOCINFOA* doc)
 INT WINAPI EndDoc(HDC hdc)
 {
     INT ret = 0;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
     if(!dc) return SP_ERROR;
 
     if (dc->funcs->pEndDoc) ret = dc->funcs->pEndDoc( dc->physDev );
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -153,14 +152,14 @@ INT WINAPI EndDoc(HDC hdc)
 INT WINAPI StartPage(HDC hdc)
 {
     INT ret = 1;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
     if(!dc) return SP_ERROR;
 
     if(dc->funcs->pStartPage)
         ret = dc->funcs->pStartPage( dc->physDev );
     else
         FIXME("stub\n");
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -171,19 +170,17 @@ INT WINAPI StartPage(HDC hdc)
  */
 INT WINAPI EndPage(HDC hdc)
 {
-    ABORTPROC abort_proc;
     INT ret = 0;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
     if(!dc) return SP_ERROR;
 
     if (dc->funcs->pEndPage) ret = dc->funcs->pEndPage( dc->physDev );
-    abort_proc = dc->pAbortProc;
-    GDI_ReleaseObj( hdc );
-    if (abort_proc && !abort_proc( hdc, 0 ))
+    if (dc->pAbortProc && !dc->pAbortProc( hdc, 0 ))
     {
         EndDoc( hdc );
         ret = 0;
     }
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -194,11 +191,11 @@ INT WINAPI EndPage(HDC hdc)
 INT WINAPI AbortDoc(HDC hdc)
 {
     INT ret = 0;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
     if(!dc) return SP_ERROR;
 
     if (dc->funcs->pAbortDoc) ret = dc->funcs->pAbortDoc( dc->physDev );
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -215,19 +212,14 @@ BOOL16 WINAPI QueryAbort16(HDC16 hdc16, INT16 reserved)
 {
     BOOL ret = TRUE;
     HDC hdc = HDC_32( hdc16 );
-    DC *dc = DC_GetDCPtr( hdc );
-    ABORTPROC abproc;
+    DC *dc = get_dc_ptr( hdc );
 
     if(!dc) {
         ERR("Invalid hdc %p\n", hdc);
 	return FALSE;
     }
-
-    abproc = dc->pAbortProc;
-    GDI_ReleaseObj( hdc );
-
-    if (abproc)
-	ret = abproc(hdc, 0);
+    if (dc->pAbortProc) ret = dc->pAbortProc(hdc, 0);
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -238,11 +230,11 @@ BOOL16 WINAPI QueryAbort16(HDC16 hdc16, INT16 reserved)
 static BOOL CALLBACK call_abort_proc16( HDC hdc, INT code )
 {
     ABORTPROC16 proc16;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     if (!dc) return FALSE;
     proc16 = dc->pAbortProc16;
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     if (proc16)
     {
         WORD args[2];
@@ -263,12 +255,13 @@ static BOOL CALLBACK call_abort_proc16( HDC hdc, INT code )
 INT16 WINAPI SetAbortProc16(HDC16 hdc16, ABORTPROC16 abrtprc)
 {
     HDC hdc = HDC_32( hdc16 );
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     if (!dc) return FALSE;
     dc->pAbortProc16 = abrtprc;
-    GDI_ReleaseObj( hdc );
-    return SetAbortProc( hdc, call_abort_proc16 );
+    dc->pAbortProc   = call_abort_proc16;
+    release_dc_ptr( dc );
+    return TRUE;
 }
 
 /**********************************************************************
@@ -277,11 +270,11 @@ INT16 WINAPI SetAbortProc16(HDC16 hdc16, ABORTPROC16 abrtprc)
  */
 INT WINAPI SetAbortProc(HDC hdc, ABORTPROC abrtprc)
 {
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     if (!dc) return FALSE;
     dc->pAbortProc = abrtprc;
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -440,7 +433,7 @@ typedef struct PRINTJOB
 #define MAX_PRINT_JOBS 1
 #define SP_OK 1
 
-PPRINTJOB gPrintJobsTable[MAX_PRINT_JOBS];
+static PPRINTJOB gPrintJobsTable[MAX_PRINT_JOBS];
 
 
 static PPRINTJOB FindPrintJobFromHandle(HANDLE16 hHandle)
@@ -469,7 +462,7 @@ static int CreateSpoolFile(LPCSTR pszOutput)
         RegCloseKey(hkey);
     }
     if (!psCmd[0] && !strncmp("LPR:",pszOutput,4))
-        sprintf(psCmd,"|lpr -P%s",pszOutput+4);
+        sprintf(psCmd,"|lpr -P'%s'",pszOutput+4);
 
     TRACE("Got printerSpoolCommand '%s' for output device '%s'\n",
 	  psCmd, pszOutput);
@@ -506,8 +499,8 @@ static int CreateSpoolFile(LPCSTR pszOutput)
             signal( SIGPIPE, SIG_DFL );
             signal( SIGCHLD, SIG_DFL );
 
-            system(psCmdP);
-            exit(0);
+            execl("/bin/sh", "/bin/sh", "-c", psCmdP, (char*)0);
+            _exit(1);
 
         }
         close (fds[0]);
@@ -529,7 +522,7 @@ static int CreateSpoolFile(LPCSTR pszOutput)
         MultiByteToWideChar(CP_ACP, 0, psCmdP, -1, psCmdPW, MAX_PATH);
         if ((buffer = wine_get_unix_file_name(psCmdPW)))
         {
-            if ((fd = open(buffer, O_CREAT | O_TRUNC | O_WRONLY , 0600)) < 0)
+            if ((fd = open(buffer, O_CREAT | O_TRUNC | O_WRONLY, 0666)) < 0)
             {
                 ERR("Failed to create spool file '%s' ('%s'). (error %s)\n",
                     buffer, psCmdP, strerror(errno));
@@ -805,7 +798,7 @@ DWORD WINAPI DrvGetPrinterData16(LPSTR lpPrinter, LPSTR lpProfile,
     strcpy(RegStr_Printer, Printers);
     strcat(RegStr_Printer, lpPrinter);
 
-    if (((DWORD)lpProfile == INT_PD_DEFAULT_DEVMODE) || (HIWORD(lpProfile) &&
+    if ((PtrToUlong(lpProfile) == INT_PD_DEFAULT_DEVMODE) || (HIWORD(lpProfile) &&
     (!strcmp(lpProfile, DefaultDevMode)))) {
 	size = DrvGetPrinterDataInternal(RegStr_Printer, lpPrinterData, cbData,
 					 INT_PD_DEFAULT_DEVMODE);
@@ -817,7 +810,7 @@ DWORD WINAPI DrvGetPrinterData16(LPSTR lpPrinter, LPSTR lpProfile,
 	else res = ERROR_INVALID_PRINTER_NAME;
     }
     else
-    if (((DWORD)lpProfile == INT_PD_DEFAULT_MODEL) || (HIWORD(lpProfile) &&
+    if ((PtrToUlong(lpProfile) == INT_PD_DEFAULT_MODEL) || (HIWORD(lpProfile) &&
     (!strcmp(lpProfile, PrinterModel)))) {
 	*lpNeeded = 32;
 	if (!lpPrinterData) goto failed;
@@ -891,7 +884,7 @@ DWORD WINAPI DrvSetPrinterData16(LPSTR lpPrinter, LPSTR lpProfile,
     TRACE("lpType %08x\n",lpType);
 
     if ((!lpPrinter) || (!lpProfile) ||
-    ((DWORD)lpProfile == INT_PD_DEFAULT_MODEL) || (HIWORD(lpProfile) &&
+    (PtrToUlong(lpProfile) == INT_PD_DEFAULT_MODEL) || (HIWORD(lpProfile) &&
     (!strcmp(lpProfile, PrinterModel))))
 	return ERROR_INVALID_PARAMETER;
 
@@ -900,7 +893,7 @@ DWORD WINAPI DrvSetPrinterData16(LPSTR lpPrinter, LPSTR lpProfile,
     strcpy(RegStr_Printer, Printers);
     strcat(RegStr_Printer, lpPrinter);
 
-    if (((DWORD)lpProfile == INT_PD_DEFAULT_DEVMODE) || (HIWORD(lpProfile) &&
+    if ((PtrToUlong(lpProfile) == INT_PD_DEFAULT_DEVMODE) || (HIWORD(lpProfile) &&
     (!strcmp(lpProfile, DefaultDevMode)))) {
 	if ( RegOpenKeyA(HKEY_LOCAL_MACHINE, RegStr_Printer, &hkey)
 	     != ERROR_SUCCESS ||

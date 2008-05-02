@@ -32,7 +32,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
 HANDLE RPCRT4_RpcssNPConnect(void)
 {
-  HANDLE the_pipe = NULL;
+  HANDLE the_pipe;
   DWORD dwmode, wait_result;
   HANDLE master_mutex = RPCRT4_GetMasterMutex();
   
@@ -69,7 +69,6 @@ HANDLE RPCRT4_RpcssNPConnect(void)
     if (GetLastError() != ERROR_PIPE_BUSY) {
       WARN("Unable to open named pipe %s (assuming unavailable).\n", 
         debugstr_a(NAME_RPCSS_NAMED_PIPE));
-      the_pipe = NULL;
       break;
     }
 
@@ -78,18 +77,17 @@ HANDLE RPCRT4_RpcssNPConnect(void)
     if (!ReleaseMutex(master_mutex))
       ERR("Failed to release master mutex.  Expect deadlock.\n");
 
-    /* wait for the named pipe.  We are only 
-       willing to wait only 5 seconds.  It should be available /very/ soon. */
+    /* wait for the named pipe.  We are only willing to wait for 5 seconds.
+       It should be available /very/ soon. */
     if (! WaitNamedPipeA(NAME_RPCSS_NAMED_PIPE, MASTER_MUTEX_WAITNAMEDPIPE_TIMEOUT))
     {
       ERR("Named pipe unavailable after waiting.  Something is probably wrong.\n");
-      the_pipe = NULL;
       break;
     }
 
   }
 
-  if (the_pipe) {
+  if (the_pipe != INVALID_HANDLE_VALUE) {
     dwmode = PIPE_READMODE_MESSAGE;
     /* SetNamedPipeHandleState not implemented ATM, but still seems to work somehow. */
     if (! SetNamedPipeHandleState(the_pipe, &dwmode, NULL, NULL))

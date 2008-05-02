@@ -363,3 +363,30 @@ void WINAPI DiagOutput16(LPCSTR str)
         /* FIXME */
         TRACE("DIAGOUTPUT:%s\n", debugstr_a(str));
 }
+
+/***********************************************************************
+ *           TermsrvAppInstallMode       (KERNEL32.@)
+ *
+ * Find out whether the terminal server is in INSTALL or EXECUTE mode.
+ */
+BOOL WINAPI TermsrvAppInstallMode(void)
+{
+    FIXME("stub\n");
+    return FALSE;
+}
+
+/***********************************************************************
+ *           SetTermsrvAppInstallMode       (KERNEL32.@)
+ *
+ * This function is said to switch between the INSTALL (TRUE) or
+ * EXECUTE (FALSE) terminal server modes.
+ *
+ * This function always returns zero on WinXP Home so it's probably
+ * safe to return that value in most cases. However, if a terminal
+ * server is running it will probably return something else.
+ */
+DWORD WINAPI SetTermsrvAppInstallMode(BOOL bInstallMode)
+{
+    FIXME("(%d): stub\n", bInstallMode);
+    return 0;
+}

@@ -20,6 +20,7 @@
 
 #include "config.h"
 #include <stdarg.h>
+#include <stdio.h>
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -38,7 +39,7 @@
 
 #define INITIAL_BUFFER_SIZE 200
 
-WINE_DEFAULT_DEBUG_CHANNEL(secur32);
+WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 
 SECURITY_STATUS fork_helper(PNegoHelper *new_helper, const char *prog,
         char* const argv[])
@@ -109,16 +110,17 @@ SECURITY_STATUS fork_helper(PNegoHelper *new_helper, const char *prog,
     else
     {
         *new_helper = helper;
-        helper->version = -1;
-        helper->password = NULL;
+        helper->major = helper->minor = helper->micro = -1;
         helper->com_buf = NULL;
         helper->com_buf_size = 0;
         helper->com_buf_offset = 0;
         helper->session_key = NULL;
         helper->neg_flags = 0;
         helper->pipe_in = pipe_in[0];
+        fcntl( pipe_in[0], F_SETFD, 1 );
         close(pipe_in[1]);
         helper->pipe_out = pipe_out[1];
+        fcntl( pipe_out[1], F_SETFD, 1 );
         close(pipe_out[0]);
     }
 
@@ -273,6 +275,7 @@ void check_version(PNegoHelper helper)
 {
     char temp[80];
     char *newline;
+    int major = 0, minor = 0, micro = 0, ret;
 
     TRACE("Checking version of helper\n");
     if(helper != NULL)
@@ -286,18 +289,18 @@ void check_version(PNegoHelper helper)
                 temp[len] = 0;
 
             TRACE("Exact version is %s\n", debugstr_a(temp));
-            if(strncmp(temp+8, "4", 1) == 0)
+            ret = sscanf(temp, "Version %d.%d.%d", &major, &minor, &micro);
+            if(ret != 3)
             {
-                helper->version = 4;
-            }
-            else if(strncmp(temp+8, "3", 1) == 0)
-            {
-                helper->version = 3;
+                ERR("Failed to get the helper version.\n");
+                helper->major = helper->minor = helper->micro = -1;
             }
             else
             {
-                TRACE("Unknown version!\n");
-                helper->version = -1;
+                TRACE("Version recognized: %d.%d.%d\n", major, minor, micro);
+                helper->major = major;
+                helper->minor = minor;
+                helper->micro = micro;
             }
         }
     }

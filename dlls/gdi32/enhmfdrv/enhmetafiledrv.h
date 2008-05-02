@@ -26,7 +26,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "gdi.h"
 #include "gdi_private.h"
 
 /* Enhanced Metafile driver physical DC */
@@ -34,7 +33,6 @@
 typedef struct
 {
     HDC             hdc;
-    DC             *dc;
     ENHMETAHEADER  *emh;           /* Pointer to enhanced metafile header */
     UINT       handles_size, cur_handles;
     HGDIOBJ   *handles;
@@ -47,6 +45,7 @@ typedef struct
     INT        rastercaps;
     INT        technology;
     INT        planes;
+    INT        numcolors;
 } EMFDRV_PDEVICE;
 
 

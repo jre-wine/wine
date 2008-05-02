@@ -2,19 +2,19 @@
  *
  * Copyright (C) 2003-2004 Rok Mandeljc
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Library General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #include "dmusic_private.h"
@@ -715,7 +715,7 @@ static HRESULT WINAPI IDirectMusicCollectionImpl_IPersistStream_Load (LPPERSISTS
 		if (This->pDesc->dwValidData & DMUS_OBJ_OBJECT)
 			TRACE(" - GUID = %s\n", debugstr_dmguid(&This->pDesc->guidObject));
 		if (This->pDesc->dwValidData & DMUS_OBJ_VERSION)
-			TRACE(" - Version = %i,%i,%i,%i\n", (This->pDesc->vVersion.dwVersionMS >> 8) & 0x0000FFFF, This->pDesc->vVersion.dwVersionMS & 0x0000FFFF, \
+			TRACE(" - Version = %i,%i,%i,%i\n", (This->pDesc->vVersion.dwVersionMS >> 8) & 0x0000FFFF, This->pDesc->vVersion.dwVersionMS & 0x0000FFFF,
 				(This->pDesc->vVersion.dwVersionLS >> 8) & 0x0000FFFF, This->pDesc->vVersion.dwVersionLS & 0x0000FFFF);
 		if (This->pDesc->dwValidData & DMUS_OBJ_NAME)
 			TRACE(" - Name = %s\n", debugstr_w(This->pDesc->wszName));

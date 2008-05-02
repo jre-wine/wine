@@ -66,7 +66,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "gdi.h"
 #include "wownt32.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
@@ -150,22 +149,11 @@ int DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
  *           DIB_GetBitmapInfo
  *
  * Get the info from a bitmap header.
- * Return 1 for INFOHEADER, 0 for COREHEADER,
- * 4 for V4HEADER, 5 for V5HEADER, -1 for error.
+ * Return 0 for COREHEADER, 1 for INFOHEADER, -1 for error.
  */
 static int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
                               LONG *height, WORD *planes, WORD *bpp, DWORD *compr, DWORD *size )
 {
-    if (header->biSize == sizeof(BITMAPINFOHEADER))
-    {
-        *width  = header->biWidth;
-        *height = header->biHeight;
-        *planes = header->biPlanes;
-        *bpp    = header->biBitCount;
-        *compr  = header->biCompression;
-        *size   = header->biSizeImage;
-        return 1;
-    }
     if (header->biSize == sizeof(BITMAPCOREHEADER))
     {
         const BITMAPCOREHEADER *core = (const BITMAPCOREHEADER *)header;
@@ -177,27 +165,15 @@ static int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
         *size   = 0;
         return 0;
     }
-    if (header->biSize == sizeof(BITMAPV4HEADER))
+    if (header->biSize >= sizeof(BITMAPINFOHEADER)) /* assume BITMAPINFOHEADER */
     {
-        const BITMAPV4HEADER *v4hdr = (const BITMAPV4HEADER *)header;
-        *width  = v4hdr->bV4Width;
-        *height = v4hdr->bV4Height;
-        *planes = v4hdr->bV4Planes;
-        *bpp    = v4hdr->bV4BitCount;
-        *compr  = v4hdr->bV4V4Compression;
-        *size   = v4hdr->bV4SizeImage;
-        return 4;
-    }
-    if (header->biSize == sizeof(BITMAPV5HEADER))
-    {
-        const BITMAPV5HEADER *v5hdr = (const BITMAPV5HEADER *)header;
-        *width  = v5hdr->bV5Width;
-        *height = v5hdr->bV5Height;
-        *planes = v5hdr->bV5Planes;
-        *bpp    = v5hdr->bV5BitCount;
-        *compr  = v5hdr->bV5Compression;
-        *size   = v5hdr->bV5SizeImage;
-        return 5;
+        *width  = header->biWidth;
+        *height = header->biHeight;
+        *planes = header->biPlanes;
+        *bpp    = header->biBitCount;
+        *compr  = header->biCompression;
+        *size   = header->biSizeImage;
+        return 1;
     }
     ERR("(%d): unknown/wrong size for header\n", header->biSize );
     return -1;
@@ -217,15 +193,15 @@ INT WINAPI StretchDIBits(HDC hdc, INT xDst, INT yDst, INT widthDst,
     if (!bits || !info)
 	return 0;
 
-    dc = DC_GetDCUpdate( hdc );
-    if(!dc) return FALSE;
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
 
     if(dc->funcs->pStretchDIBits)
     {
+        update_dc( dc );
         heightSrc = dc->funcs->pStretchDIBits(dc->physDev, xDst, yDst, widthDst,
                                               heightDst, xSrc, ySrc, widthSrc,
                                               heightSrc, bits, info, wUsage, dwRop);
-        GDI_ReleaseObj( hdc );
+        release_dc_ptr( dc );
     }
     else /* use StretchBlt */
     {
@@ -237,7 +213,7 @@ INT WINAPI StretchDIBits(HDC hdc, INT xDst, INT yDst, INT widthDst,
         WORD planes, bpp;
         DWORD compr, size;
 
-        GDI_ReleaseObj( hdc );
+        release_dc_ptr( dc );
 
         if (DIB_GetBitmapInfo( &info->bmiHeader, &width, &height, &planes, &bpp, &compr, &size ) == -1)
         {
@@ -327,29 +303,35 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
     BITMAPOBJ *bitmap;
     INT result = 0;
 
-    if (!(dc = DC_GetDCUpdate( hdc )))
+    if (!(dc = get_dc_ptr( hdc )))
     {
         if (coloruse == DIB_RGB_COLORS) FIXME( "shouldn't require a DC for DIB_RGB_COLORS\n" );
         return 0;
     }
 
+    update_dc( dc );
+
     if (!(bitmap = GDI_GetObjPtr( hbitmap, BITMAP_MAGIC )))
     {
-        GDI_ReleaseObj( hdc );
+        release_dc_ptr( dc );
         return 0;
     }
 
     if (!bitmap->funcs && !BITMAP_SetOwnerDC( hbitmap, dc )) goto done;
 
-    if (bitmap->funcs && bitmap->funcs->pSetDIBits)
-        result = bitmap->funcs->pSetDIBits( dc->physDev, hbitmap, startscan, lines,
+    result = lines;
+    if (bitmap->funcs)
+    {
+        if (bitmap->funcs != dc->funcs)
+            ERR( "not supported: DDB bitmap %p not belonging to device %p\n", hbitmap, hdc );
+        else if (dc->funcs->pSetDIBits)
+            result = dc->funcs->pSetDIBits( dc->physDev, hbitmap, startscan, lines,
                                             bits, info, coloruse );
-    else
-        result = lines;
+    }
 
  done:
     GDI_ReleaseObj( hbitmap );
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return result;
 }
 
@@ -365,18 +347,23 @@ INT WINAPI SetDIBitsToDevice(HDC hdc, INT xDest, INT yDest, DWORD cx,
     INT ret;
     DC *dc;
 
-    if (!(dc = DC_GetDCUpdate( hdc ))) return 0;
+    if (!bits) return 0;
+
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
     if(dc->funcs->pSetDIBitsToDevice)
+    {
+        update_dc( dc );
         ret = dc->funcs->pSetDIBitsToDevice( dc->physDev, xDest, yDest, cx, cy, xSrc,
 					     ySrc, startscan, lines, bits,
 					     info, coloruse );
+    }
     else {
         FIXME("unimplemented on hdc %p\n", hdc);
 	ret = 0;
     }
 
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -409,7 +396,7 @@ UINT WINAPI SetDIBColorTable( HDC hdc, UINT startpos, UINT entries, CONST RGBQUA
     if (dc->funcs->pSetDIBColorTable)
         dc->funcs->pSetDIBColorTable(dc->physDev, startpos, entries, colors);
 
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return result;
 }
 
@@ -444,7 +431,7 @@ UINT WINAPI GetDIBColorTable( HDC hdc, UINT startpos, UINT entries, RGBQUAD *col
             GDI_ReleaseObj( dc->hBitmap );
         }
     }
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return result;
 }
 
@@ -585,13 +572,15 @@ INT WINAPI GetDIBits(
         return 0;
     }
     core_header = (bitmap_type == 0);
-    if (!(dc = DC_GetDCUpdate( hdc )))
+    if (!(dc = get_dc_ptr( hdc )))
     {
+        SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
+    update_dc( dc );
     if (!(bmp = (BITMAPOBJ *)GDI_GetObjPtr( hbitmap, BITMAP_MAGIC )))
     {
-        GDI_ReleaseObj( hdc );
+        release_dc_ptr( dc );
 	return 0;
     }
 
@@ -638,33 +627,33 @@ INT WINAPI GetDIBits(
         else {
             if(bpp >= bmp->bitmap.bmBitsPixel) {
                 /* Generate the color map from the selected palette */
-                PALETTEENTRY * palEntry;
-                PALETTEOBJ * palette;
-                if (!(palette = (PALETTEOBJ*)GDI_GetObjPtr( dc->hPalette, PALETTE_MAGIC ))) {
-                    GDI_ReleaseObj( hdc );
+                PALETTEENTRY palEntry[256];
+
+                memset( palEntry, 0, sizeof(palEntry) );
+                if (!GetPaletteEntries( dc->hPalette, 0, 1 << bmp->bitmap.bmBitsPixel, palEntry ))
+                {
+                    release_dc_ptr( dc );
                     GDI_ReleaseObj( hbitmap );
                     return 0;
                 }
-                palEntry = palette->logpalette.palPalEntry;
-                for (i = 0; i < (1 << bmp->bitmap.bmBitsPixel); i++, palEntry++) {
+                for (i = 0; i < (1 << bmp->bitmap.bmBitsPixel); i++) {
                     if (coloruse == DIB_RGB_COLORS) {
                         if (core_header)
                         {
-                            rgbTriples[i].rgbtRed   = palEntry->peRed;
-                            rgbTriples[i].rgbtGreen = palEntry->peGreen;
-                            rgbTriples[i].rgbtBlue  = palEntry->peBlue;
+                            rgbTriples[i].rgbtRed   = palEntry[i].peRed;
+                            rgbTriples[i].rgbtGreen = palEntry[i].peGreen;
+                            rgbTriples[i].rgbtBlue  = palEntry[i].peBlue;
                         }
                         else
                         {
-                            rgbQuads[i].rgbRed      = palEntry->peRed;
-                            rgbQuads[i].rgbGreen    = palEntry->peGreen;
-                            rgbQuads[i].rgbBlue     = palEntry->peBlue;
+                            rgbQuads[i].rgbRed      = palEntry[i].peRed;
+                            rgbQuads[i].rgbGreen    = palEntry[i].peGreen;
+                            rgbQuads[i].rgbBlue     = palEntry[i].peBlue;
                             rgbQuads[i].rgbReserved = 0;
                         }
                     }
                     else ((WORD *)colorPtr)[i] = (WORD)i;
                 }
-                GDI_ReleaseObj( dc->hPalette );
             } else {
                 switch (bpp) {
                 case 1:
@@ -993,11 +982,15 @@ INT WINAPI GetDIBits(
                     break;
                     
                 case 16:
+                    if (bits)
+                    {
+                        /* Add color only when bits is given, as per MSDN */
+                        ((PDWORD)info->bmiColors)[0] = 0xf800;
+                        ((PDWORD)info->bmiColors)[1] = 0x07e0;
+                        ((PDWORD)info->bmiColors)[2] = 0x001f;
+                    }
                     info->bmiHeader.biBitCount = 16;
                     info->bmiHeader.biCompression = BI_BITFIELDS;
-                    ((PDWORD)info->bmiColors)[0] = 0xf800;
-                    ((PDWORD)info->bmiColors)[1] = 0x07e0;
-                    ((PDWORD)info->bmiColors)[2] = 0x001f;
                     break;
     
                 default:
@@ -1036,7 +1029,7 @@ INT WINAPI GetDIBits(
     }
     TRACE("biWidth = %d, biHeight = %d\n", width, height);
 
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     GDI_ReleaseObj( hbitmap );
     return lines;
 }
@@ -1089,7 +1082,7 @@ HBITMAP WINAPI CreateDIBitmap( HDC hdc, const BITMAPINFOHEADER *header,
                 DeleteObject( handle );
                 handle = 0;
             }
-            GDI_ReleaseObj( hdc );
+            DC_ReleaseDCPtr( dc );
         }
     }
 
@@ -1189,21 +1182,17 @@ static void DIB_CopyColorTable( DC *dc, BITMAPOBJ *bmp, WORD coloruse, const BIT
     }
     else
     {
-        PALETTEOBJ *palette;
+        PALETTEENTRY entries[256];
         const WORD *index = (const WORD*) ((const BYTE*) info + (WORD) info->bmiHeader.biSize);
+        UINT count = GetPaletteEntries( dc->hPalette, 0, colors, entries );
 
-        if ((palette = GDI_GetObjPtr( dc->hPalette, PALETTE_MAGIC )))
+        for (i = 0; i < colors; i++, index++)
         {
-            UINT entries = palette->logpalette.palNumEntries;
-            for (i = 0; i < colors; i++, index++)
-            {
-                PALETTEENTRY *entry = &palette->logpalette.palPalEntry[*index % entries];
-                colorTable[i].rgbRed = entry->peRed;
-                colorTable[i].rgbGreen = entry->peGreen;
-                colorTable[i].rgbBlue = entry->peBlue;
-                colorTable[i].rgbReserved = 0;
-            }
-            GDI_ReleaseObj( dc->hPalette );
+            PALETTEENTRY *entry = &entries[*index % count];
+            colorTable[i].rgbRed = entry->peRed;
+            colorTable[i].rgbGreen = entry->peGreen;
+            colorTable[i].rgbBlue = entry->peBlue;
+            colorTable[i].rgbReserved = 0;
         }
     }
     bmp->color_table = colorTable;
@@ -1358,7 +1347,7 @@ HBITMAP WINAPI CreateDIBSection(HDC hdc, CONST BITMAPINFO *bmi, UINT usage,
         }
     }
 
-    GDI_ReleaseObj(hdc);
+    DC_ReleaseDCPtr( dc );
     if (bDesktopDC) DeleteDC( hdc );
     if (ret && bits) *bits = dib->dsBm.bmBits;
     return ret;

@@ -108,7 +108,7 @@ static void UPDOWN_DoAction (UPDOWN_INFO *infoPtr, int delta, int action);
  *           UPDOWN_IsBuddyEdit
  * Tests if our buddy is an edit control.
  */
-static inline BOOL UPDOWN_IsBuddyEdit(UPDOWN_INFO *infoPtr)
+static inline BOOL UPDOWN_IsBuddyEdit(const UPDOWN_INFO *infoPtr)
 {
     return infoPtr->BuddyType == BUDDY_TYPE_EDIT;
 }
@@ -117,7 +117,7 @@ static inline BOOL UPDOWN_IsBuddyEdit(UPDOWN_INFO *infoPtr)
  *           UPDOWN_IsBuddyListbox
  * Tests if our buddy is a listbox control.
  */
-static inline BOOL UPDOWN_IsBuddyListbox(UPDOWN_INFO *infoPtr)
+static inline BOOL UPDOWN_IsBuddyListbox(const UPDOWN_INFO *infoPtr)
 {
     return infoPtr->BuddyType == BUDDY_TYPE_LISTBOX;
 }
@@ -126,7 +126,7 @@ static inline BOOL UPDOWN_IsBuddyListbox(UPDOWN_INFO *infoPtr)
  *           UPDOWN_InBounds
  * Tests if a given value 'val' is between the Min&Max limits
  */
-static BOOL UPDOWN_InBounds(UPDOWN_INFO *infoPtr, int val)
+static BOOL UPDOWN_InBounds(const UPDOWN_INFO *infoPtr, int val)
 {
     if(infoPtr->MaxVal > infoPtr->MinVal)
         return (infoPtr->MinVal <= val) && (val <= infoPtr->MaxVal);
@@ -162,7 +162,7 @@ static BOOL UPDOWN_OffsetVal(UPDOWN_INFO *infoPtr, int delta)
  * When we have a buddy set and that we are aligned on our buddy, we
  * want to draw a sunken edge to make like we are part of that control.
  */
-static BOOL UPDOWN_HasBuddyBorder(UPDOWN_INFO* infoPtr)
+static BOOL UPDOWN_HasBuddyBorder(const UPDOWN_INFO *infoPtr)
 {
     return  ( ((infoPtr->dwStyle & (UDS_ALIGNLEFT | UDS_ALIGNRIGHT)) != 0) &&
 	      UPDOWN_IsBuddyEdit(infoPtr) );
@@ -176,7 +176,7 @@ static BOOL UPDOWN_HasBuddyBorder(UPDOWN_INFO* infoPtr)
  *            FLAG_DECR to get the "decrement" rect (down or left)
  *            If both flags are pressent, the envelope is returned.
  */
-static void UPDOWN_GetArrowRect (UPDOWN_INFO* infoPtr, RECT *rect, int arrow)
+static void UPDOWN_GetArrowRect (const UPDOWN_INFO* infoPtr, RECT *rect, int arrow)
 {
     HTHEME theme = GetWindowTheme (infoPtr->Self);
     const int border = theme ? DEFAULT_BUDDYBORDER_THEMED : DEFAULT_BUDDYBORDER;
@@ -228,7 +228,7 @@ static void UPDOWN_GetArrowRect (UPDOWN_INFO* infoPtr, RECT *rect, int arrow)
  * If it returns the up rect, it returns FLAG_INCR.
  * If it returns the down rect, it returns FLAG_DECR.
  */
-static INT UPDOWN_GetArrowFromPoint (UPDOWN_INFO* infoPtr, RECT *rect, POINT pt)
+static INT UPDOWN_GetArrowFromPoint (const UPDOWN_INFO *infoPtr, RECT *rect, POINT pt)
 {
     UPDOWN_GetArrowRect (infoPtr, rect, FLAG_INCR);
     if(PtInRect(rect, pt)) return FLAG_INCR;
@@ -306,7 +306,7 @@ static BOOL UPDOWN_GetBuddyInt (UPDOWN_INFO *infoPtr)
  *   TRUE  - if it set the caption of the  buddy successfully
  *   FALSE - if an error occurred
  */
-static BOOL UPDOWN_SetBuddyInt (UPDOWN_INFO *infoPtr)
+static BOOL UPDOWN_SetBuddyInt (const UPDOWN_INFO *infoPtr)
 {
     WCHAR fmt[3] = { '%', 'd', '\0' };
     WCHAR txt[20];
@@ -352,7 +352,7 @@ static BOOL UPDOWN_SetBuddyInt (UPDOWN_INFO *infoPtr)
  *
  * Draw buddy background for visual integration.
  */
-static BOOL UPDOWN_DrawBuddyBackground (UPDOWN_INFO *infoPtr, HDC hdc)
+static BOOL UPDOWN_DrawBuddyBackground (const UPDOWN_INFO *infoPtr, HDC hdc)
 {
     RECT br;
     HTHEME buddyTheme = GetWindowTheme (infoPtr->Buddy);
@@ -370,7 +370,7 @@ static BOOL UPDOWN_DrawBuddyBackground (UPDOWN_INFO *infoPtr, HDC hdc)
  *
  * Draw the arrows. The background need not be erased.
  */
-static LRESULT UPDOWN_Draw (UPDOWN_INFO *infoPtr, HDC hdc)
+static LRESULT UPDOWN_Draw (const UPDOWN_INFO *infoPtr, HDC hdc)
 {
     BOOL uPressed, uHot, dPressed, dHot;
     RECT rect;
@@ -437,7 +437,7 @@ static LRESULT UPDOWN_Draw (UPDOWN_INFO *infoPtr, HDC hdc)
  * Asynchronous drawing (must ONLY be used in WM_PAINT).
  * Calls UPDOWN_Draw.
  */
-static LRESULT UPDOWN_Paint (UPDOWN_INFO *infoPtr, HDC hdc)
+static LRESULT UPDOWN_Paint (const UPDOWN_INFO *infoPtr, HDC hdc)
 {
     PAINTSTRUCT ps;
     if (hdc) return UPDOWN_Draw (infoPtr, hdc);
@@ -478,7 +478,7 @@ UPDOWN_Buddy_SubclassProc(HWND  hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     WNDPROC superClassWndProc = (WNDPROC)GetPropW(hwnd, BUDDY_SUPERCLASS_WNDPROC);
 
-    TRACE("hwnd=%p, wndProc=%p, uMsg=%04x, wParam=%08x, lParam=%08lx\n",
+    TRACE("hwnd=%p, wndProc=%p, uMsg=%04x, wParam=%08lx, lParam=%08lx\n",
           hwnd, superClassWndProc, uMsg, wParam, lParam);
 
     if (uMsg == WM_KEYDOWN) {
@@ -650,7 +650,7 @@ static void UPDOWN_DoAction (UPDOWN_INFO *infoPtr, int delta, int action)
  * Returns TRUE if it is enabled as well as its buddy (if any)
  *         FALSE otherwise
  */
-static BOOL UPDOWN_IsEnabled (UPDOWN_INFO *infoPtr)
+static BOOL UPDOWN_IsEnabled (const UPDOWN_INFO *infoPtr)
 {
     if (!IsWindowEnabled(infoPtr->Self))
         return FALSE;
@@ -794,7 +794,7 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
     static const WCHAR themeClass[] = {'S','p','i','n',0};
     HTHEME theme;
 
-    TRACE("hwnd=%p msg=%04x wparam=%08x lparam=%08lx\n", hwnd, message, wParam, lParam);
+    TRACE("hwnd=%p msg=%04x wparam=%08lx lparam=%08lx\n", hwnd, message, wParam, lParam);
 
     if (!infoPtr && (message != WM_CREATE))
         return DefWindowProcW (hwnd, message, wParam, lParam);
@@ -831,7 +831,7 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    break;
 
 	case WM_DESTROY:
-	    if(infoPtr->AccelVect) Free (infoPtr->AccelVect);
+	    Free (infoPtr->AccelVect);
 
 	    if(infoPtr->Buddy) RemovePropW(infoPtr->Buddy, BUDDY_UPDOWN_HWND);
 
@@ -970,7 +970,7 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    return infoPtr->Base;
 
 	case UDM_SETBASE:
-	    TRACE("UpDown Ctrl new base(%d), hwnd=%p\n", wParam, hwnd);
+	    TRACE("UpDown Ctrl new base(%ld), hwnd=%p\n", wParam, hwnd);
 	    if (wParam==10 || wParam==16) {
 		temp = infoPtr->Base;
 		infoPtr->Base = wParam;
@@ -1052,7 +1052,7 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 
 	default:
 	    if ((message >= WM_USER) && (message < WM_APP))
-	     	ERR("unknown msg %04x wp=%04x lp=%08lx\n", message, wParam, lParam);
+		ERR("unknown msg %04x wp=%04lx lp=%08lx\n", message, wParam, lParam);
 	    return DefWindowProcW (hwnd, message, wParam, lParam);
     }
 

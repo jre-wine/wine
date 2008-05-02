@@ -28,7 +28,6 @@
 #include "wingdi.h"
 #include "wownt32.h"
 #include "mfdrv/metafiledrv.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -57,6 +56,23 @@ UINT MFDRV_AddHandle( PHYSDEV dev, HGDIOBJ obj )
         physDev->mh->mtNoObjects++;
 
     return index ; /* index 0 is not reserved for metafiles */
+}
+
+/******************************************************************
+ *         MFDRV_RemoveHandle
+ */
+BOOL MFDRV_RemoveHandle( PHYSDEV dev, UINT index )
+{
+    METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
+    BOOL ret = FALSE;
+
+    if (index < physDev->handles_size && physDev->handles[index])
+    {
+        physDev->handles[index] = 0;
+        physDev->cur_handles--;
+        ret = TRUE;
+    }
+    return ret;
 }
 
 /******************************************************************

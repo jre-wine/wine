@@ -29,6 +29,8 @@
 #include "wine/wingdi16.h"
 #include "winspool.h"
 
+#include "wine/list.h"
+
 typedef struct {
     INT		    index;
     LPCSTR	    sz;
@@ -131,13 +133,13 @@ typedef struct {
 /* Solaris kludge */
 #undef PAGESIZE
 typedef struct _tagPAGESIZE {
+    struct list         entry;
     char		*Name;
     char		*FullName;
     char		*InvocationString;
     IMAGEABLEAREA	*ImageableArea;
     PAPERDIMENSION	*PaperDimension;
     WORD		WinPage; /*eg DMPAPER_A4. Doesn't really belong here */
-    struct _tagPAGESIZE *next;
 } PAGESIZE;
 
 
@@ -191,10 +193,19 @@ typedef struct _tagDUPLEX {
     struct _tagDUPLEX           *next;
 } DUPLEX;
 
+/* Many Mac OS X based ppd files don't include a *ColorDevice line, so
+   we use a tristate here rather than a boolean.  Code that
+   cares is expected to treat these as if they were colour. */
+typedef enum {
+    CD_NotSpecified,
+    CD_False,
+    CD_True
+} COLORDEVICE;
+
 typedef struct {
     char		*NickName;
     int			LanguageLevel;
-    BOOL		ColorDevice;
+    COLORDEVICE	        ColorDevice;
     int			DefaultResolution;
     signed int		LandscapeOrientation;
     char		*JCLBegin;
@@ -202,7 +213,7 @@ typedef struct {
     char		*JCLEnd;
     char		*DefaultFont;
     FONTNAME		*InstalledFonts; /* ptr to a list of FontNames */
-    PAGESIZE		*PageSizes;
+    struct list         PageSizes;
     PAGESIZE            *DefaultPageSize;
     OPTION		*InstalledOptions;
     CONSTRAINT		*Constraints;

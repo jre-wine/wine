@@ -457,13 +457,13 @@ static void decode_cinepak(cinepak_info *cvinfo, unsigned char *buf, int size,
 
         for(i = cvinfo->strip_num; i < strips; i++)
             {
-            if((cvinfo->v4_codebook[i] = (cvid_codebook *)ICCVID_Alloc(sizeof(cvid_codebook), 260)) == NULL)
+            if((cvinfo->v4_codebook[i] = ICCVID_Alloc(sizeof(cvid_codebook), 260)) == NULL)
                 {
                 ERR("CVID: codebook v4 alloc err\n");
                 return;
                 }
 
-            if((cvinfo->v1_codebook[i] = (cvid_codebook *)ICCVID_Alloc(sizeof(cvid_codebook), 260)) == NULL)
+            if((cvinfo->v1_codebook[i] = ICCVID_Alloc(sizeof(cvid_codebook), 260)) == NULL)
                 {
                 ERR("CVID: codebook v1 alloc err\n");
                 return;
@@ -872,6 +872,11 @@ static LRESULT ICCVID_Decompress( ICCVID_Info *info, ICDECOMPRESS *icd, DWORD si
 
     if( (info==NULL) || (info->dwMagic!=ICCVID_MAGIC) )
         return ICERR_BADPARAM;
+    if (info->cvinfo==NULL)
+    {
+        ERR("ICM_DECOMPRESS sent after ICM_DECOMPRESS_END\n");
+        return ICERR_BADPARAM;
+    }
 
     width  = icd->lpbiInput->biWidth;
     height = icd->lpbiInput->biHeight;
@@ -890,6 +895,11 @@ static LRESULT ICCVID_DecompressEx( ICCVID_Info *info, ICDECOMPRESSEX *icd, DWOR
 
     if( (info==NULL) || (info->dwMagic!=ICCVID_MAGIC) )
         return ICERR_BADPARAM;
+    if (info->cvinfo==NULL)
+    {
+        ERR("ICM_DECOMPRESSEX sent after ICM_DECOMPRESS_END\n");
+        return ICERR_BADPARAM;
+    }
 
     /* FIXME: flags are ignored */
 

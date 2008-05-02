@@ -43,7 +43,6 @@
 #include "winternl.h"
 #include "wine/unicode.h"
 #include "wine/exception.h"
-#include "excpt.h"
 #include "wine/debug.h"
 
 #include "kernel_private.h"
@@ -89,9 +88,14 @@ static BOOL dns_gethostbyname ( char *name, int *size )
         ebufsize *= 2;
         extrabuf = HeapReAlloc( GetProcessHeap(), 0, extrabuf, ebufsize ) ;
     }
-    
+
     if ( res )
         WARN ("Error in gethostbyname_r %d (%d)\n", res, locerr);
+    else if ( !host )
+    {
+        WARN ("gethostbyname_r returned NULL host, locerr = %d\n", locerr);
+        res = 1;
+    }
     else
     {
         int len = strlen ( host->h_name );
@@ -175,7 +179,7 @@ static BOOL dns_domainname ( char *name, int *size )
 /*********************************************************************** 
  *                      _init_attr    (INTERNAL)
  */
-inline static void _init_attr ( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *name )
+static inline void _init_attr ( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *name )
 {
     attr->Length = sizeof (OBJECT_ATTRIBUTES);
     attr->RootDirectory = 0;
@@ -333,28 +337,18 @@ BOOL WINAPI GetComputerNameW(LPWSTR name,LPDWORD size)
     len = (len -offsetof( KEY_VALUE_PARTIAL_INFORMATION, Data )) / sizeof (WCHAR) - 1;
     TRACE ("ComputerName is %s (length %u)\n", debugstr_w ( theName ), len);
 
-    __TRY
+    if ( *size < len + 1 )
     {
-        if ( *size < len )
-        {
-            memcpy ( name, theName, *size * sizeof (WCHAR) );
-            name[*size] = 0;
-            *size = len;
-            st = STATUS_MORE_ENTRIES;
-        }
-        else
-        {
-            memcpy ( name, theName, len * sizeof (WCHAR) );
-            name[len] = 0;
-            *size = len;
-            st = STATUS_SUCCESS;
-        }
+        *size = len + 1;
+        st = STATUS_MORE_ENTRIES;
     }
-    __EXCEPT_PAGE_FAULT
+    else
     {
-        st = STATUS_INVALID_PARAMETER;
+        memcpy ( name, theName, len * sizeof (WCHAR) );
+        name[len] = 0;
+        *size = len;
+        st = STATUS_SUCCESS;
     }
-    __ENDTRY
 
 out:
     NtClose ( hsubkey );
@@ -376,28 +370,26 @@ out:
 BOOL WINAPI GetComputerNameA(LPSTR name, LPDWORD size)
 {
     WCHAR nameW[ MAX_COMPUTERNAME_LENGTH + 1 ];
-    DWORD sizeW = MAX_COMPUTERNAME_LENGTH;
+    DWORD sizeW = MAX_COMPUTERNAME_LENGTH + 1;
     unsigned int len;
     BOOL ret;
 
     if ( !GetComputerNameW (nameW, &sizeW) ) return FALSE;
 
-    len = WideCharToMultiByte ( CP_ACP, 0, nameW, sizeW, NULL, 0, NULL, 0 );
+    len = WideCharToMultiByte ( CP_ACP, 0, nameW, -1, NULL, 0, NULL, 0 );
+    /* for compatibility with Win9x */
     __TRY
     {
         if ( *size < len )
         {
-            WideCharToMultiByte ( CP_ACP, 0, nameW, sizeW, name, *size, NULL, 0 );
-            name[*size] = 0;
             *size = len;
             SetLastError( ERROR_MORE_DATA );
             ret = FALSE;
         }
-        else 
+        else
         {
-            WideCharToMultiByte ( CP_ACP, 0, nameW, sizeW, name, len, NULL, 0 );
-            name[len] = 0;
-            *size = len;
+            WideCharToMultiByte ( CP_ACP, 0, nameW, -1, name, len, NULL, 0 );
+            *size = len - 1;
             ret = TRUE;
         }
     }
@@ -417,7 +409,7 @@ BOOL WINAPI GetComputerNameA(LPSTR name, LPDWORD size)
 BOOL WINAPI GetComputerNameExA(COMPUTER_NAME_FORMAT type, LPSTR name, LPDWORD size)
 {
     char buf[256];
-    int len = sizeof (buf), ret;
+    int len = sizeof(buf) - 1, ret;
     TRACE("%d, %p, %p\n", type, name, size);
     switch( type )
     {
@@ -444,30 +436,19 @@ BOOL WINAPI GetComputerNameExA(COMPUTER_NAME_FORMAT type, LPSTR name, LPDWORD si
     if ( ret )
     {
         TRACE ("-> %s (%d)\n", debugstr_a (buf), len);
-        __TRY
+        if ( *size < len + 1 )
         {
-            if ( *size < len )
-            {
-                memcpy( name, buf, *size );
-                name[*size] = 0;
-                *size = len;
-                SetLastError( ERROR_MORE_DATA );
-                ret = FALSE;
-            }
-            else
-            {
-                memcpy( name, buf, len );
-                name[len] = 0;
-                *size = len;
-                ret = TRUE;
-            }
+            *size = len + 1;
+            SetLastError( ERROR_MORE_DATA );
+            ret = FALSE;
         }
-        __EXCEPT_PAGE_FAULT
+        else
         {
-            SetLastError( ERROR_INVALID_PARAMETER );
-            return FALSE;
+            memcpy( name, buf, len );
+            name[len] = 0;
+            *size = len;
+            ret = TRUE;
         }
-        __ENDTRY
     }
 
     return ret;
@@ -480,7 +461,7 @@ BOOL WINAPI GetComputerNameExA(COMPUTER_NAME_FORMAT type, LPSTR name, LPDWORD si
 BOOL WINAPI GetComputerNameExW( COMPUTER_NAME_FORMAT type, LPWSTR name, LPDWORD size )
 {
     char buf[256];
-    int len = sizeof (buf), ret;
+    int len = sizeof(buf) - 1, ret;
 
     TRACE("%d, %p, %p\n", type, name, size);
     switch( type )
@@ -507,32 +488,24 @@ BOOL WINAPI GetComputerNameExW( COMPUTER_NAME_FORMAT type, LPWSTR name, LPDWORD 
 
     if ( ret )
     {
+        unsigned int lenW;
+
         TRACE ("-> %s (%d)\n", debugstr_a (buf), len);
-        __TRY
+
+        lenW = MultiByteToWideChar( CP_ACP, 0, buf, len, NULL, 0 );
+        if ( *size < lenW + 1 )
         {
-            unsigned int lenW = MultiByteToWideChar( CP_ACP, 0, buf, len, NULL, 0 );
-            if ( *size < lenW )
-            {
-                MultiByteToWideChar( CP_ACP, 0, buf, len, name, *size );
-                name[*size] = 0;
-                *size = lenW;
-                SetLastError( ERROR_MORE_DATA );
-                ret = FALSE;
-            }
-            else
-            {
-                MultiByteToWideChar( CP_ACP, 0, buf, len, name, lenW );
-                name[lenW] = 0;
-                *size = lenW;
-                ret = TRUE;
-            }
+            *size = lenW + 1;
+            SetLastError( ERROR_MORE_DATA );
+            ret = FALSE;
         }
-        __EXCEPT_PAGE_FAULT
+        else
         {
-            SetLastError( ERROR_INVALID_PARAMETER );
-            return FALSE;
+            MultiByteToWideChar( CP_ACP, 0, buf, len, name, lenW );
+            name[lenW] = 0;
+            *size = lenW;
+            ret = TRUE;
         }
-        __ENDTRY
     }
 
     return ret;

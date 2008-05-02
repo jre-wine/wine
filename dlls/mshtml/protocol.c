@@ -102,6 +102,13 @@ static HRESULT WINAPI InternetProtocolInfo_CombineUrl(IInternetProtocolInfo *ifa
     return INET_E_USE_DEFAULT_PROTOCOLHANDLER;
 }
 
+static HRESULT WINAPI InternetProtocolInfo_CompareUrl(IInternetProtocolInfo *iface, LPCWSTR pwzUrl1,
+        LPCWSTR pwzUrl2, DWORD dwCompareFlags)
+{
+    TRACE("%p)->(%s %s %08x)\n", iface, debugstr_w(pwzUrl1), debugstr_w(pwzUrl2), dwCompareFlags);
+    return E_NOTIMPL;
+}
+
 #undef PROTOCOLINFO_THIS
 
 #define CLASSFACTORY_THIS(iface) DEFINE_THIS(ProtocolFactory, ClassFactory, iface)
@@ -438,13 +445,6 @@ static HRESULT WINAPI AboutProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, L
     return INET_E_DEFAULT_ACTION;
 }
 
-static HRESULT WINAPI AboutProtocolInfo_CompareUrl(IInternetProtocolInfo *iface, LPCWSTR pwzUrl1,
-        LPCWSTR pwzUrl2, DWORD dwCompareFlags)
-{
-    FIXME("%p)->(%s %s %08x)\n", iface, debugstr_w(pwzUrl1), debugstr_w(pwzUrl2), dwCompareFlags);
-    return E_NOTIMPL;
-}
-
 static HRESULT WINAPI AboutProtocolInfo_QueryInfo(IInternetProtocolInfo *iface, LPCWSTR pwzUrl,
         QUERYOPTION QueryOption, DWORD dwQueryFlags, LPVOID pBuffer, DWORD cbBuffer, DWORD* pcbBuf,
         DWORD dwReserved)
@@ -460,7 +460,7 @@ static const IInternetProtocolInfoVtbl AboutProtocolInfoVtbl = {
     InternetProtocolInfo_Release,
     AboutProtocolInfo_ParseUrl,
     InternetProtocolInfo_CombineUrl,
-    AboutProtocolInfo_CompareUrl,
+    InternetProtocolInfo_CompareUrl,
     AboutProtocolInfo_QueryInfo
 };
 
@@ -584,9 +584,9 @@ static HRESULT WINAPI ResProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
 
     if(len < sizeof(wszRes)/sizeof(wszRes[0]) || memcmp(url, wszRes, sizeof(wszRes))) {
         WARN("Wrong protocol of url: %s\n", debugstr_w(url));
-        IInternetProtocolSink_ReportResult(pOIProtSink, MK_E_SYNTAX, 0, NULL);
+        IInternetProtocolSink_ReportResult(pOIProtSink, E_INVALIDARG, 0, NULL);
         mshtml_free(url);
-        return MK_E_SYNTAX;
+        return E_INVALIDARG;
     }
 
     url_dll = url + sizeof(wszRes)/sizeof(wszRes[0]);
@@ -803,11 +803,11 @@ static HRESULT WINAPI ResProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, LPC
         static const WCHAR wszRes[] = {'r','e','s',':','/','/'};
 
         if(strlenW(pwzUrl) <= sizeof(wszRes)/sizeof(WCHAR) || memcmp(pwzUrl, wszRes, sizeof(wszRes)))
-            return MK_E_SYNTAX;
+            return E_INVALIDARG;
 
         ptr = strchrW(pwzUrl + sizeof(wszRes)/sizeof(WCHAR), '/');
         if(!ptr)
-            return MK_E_SYNTAX;
+            return E_INVALIDARG;
 
         size = ptr-pwzUrl + sizeof(wszFile)/sizeof(WCHAR) - sizeof(wszRes)/sizeof(WCHAR);
         if(size >= cchResult)
@@ -839,13 +839,6 @@ static HRESULT WINAPI ResProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, LPC
     return INET_E_DEFAULT_ACTION;
 }
 
-static HRESULT WINAPI ResProtocolInfo_CompareUrl(IInternetProtocolInfo *iface, LPCWSTR pwzUrl1,
-        LPCWSTR pwzUrl2, DWORD dwCompareFlags)
-{
-    FIXME("%p)->(%s %s %08x)\n", iface, debugstr_w(pwzUrl1), debugstr_w(pwzUrl2), dwCompareFlags);
-    return E_NOTIMPL;
-}
-
 static HRESULT WINAPI ResProtocolInfo_QueryInfo(IInternetProtocolInfo *iface, LPCWSTR pwzUrl,
         QUERYOPTION QueryOption, DWORD dwQueryFlags, LPVOID pBuffer, DWORD cbBuffer, DWORD* pcbBuf,
         DWORD dwReserved)
@@ -861,7 +854,7 @@ static const IInternetProtocolInfoVtbl ResProtocolInfoVtbl = {
     InternetProtocolInfo_Release,
     ResProtocolInfo_ParseUrl,
     InternetProtocolInfo_CombineUrl,
-    ResProtocolInfo_CompareUrl,
+    InternetProtocolInfo_CompareUrl,
     ResProtocolInfo_QueryInfo
 };
 

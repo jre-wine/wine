@@ -30,23 +30,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
 
-/* INTERNAL: MSVCRT_malloc() based wstrndup */
-MSVCRT_wchar_t* msvcrt_wstrndup(const MSVCRT_wchar_t *buf, unsigned int size)
-{
-  MSVCRT_wchar_t* ret;
-  unsigned int len = strlenW(buf), max_len;
-
-  max_len = size <= len? size : len + 1;
-
-  ret = MSVCRT_malloc(max_len * sizeof (MSVCRT_wchar_t));
-  if (ret)
-  {
-    memcpy(ret,buf,max_len * sizeof (MSVCRT_wchar_t));
-    ret[max_len] = 0;
-  }
-  return ret;
-}
-
 /*********************************************************************
  *		_wcsdup (MSVCRT.@)
  */
@@ -281,6 +264,7 @@ static inline int pf_output_stringA( pf_output *out, LPCSTR str, int len )
     return -1;
 }
 
+/* pf_fill: takes care of signs, alignment, zero and field padding */
 static inline int pf_fill( pf_output *out, int len, pf_flags *flags, char left )
 {
     int i, r = 0;
@@ -426,15 +410,19 @@ static void pf_rebuild_format_string( char *p, pf_flags *flags )
     *p++ = 0;
 }
 
-/* pf_integer_conv:  prints x to buf, including alternate formats,
-   but not the sign */
-static void pf_integer_conv( char *buf, pf_flags *flags, LONGLONG x )
+/* pf_integer_conv:  prints x to buf, including alternate formats and
+   additional precision digits, but not field characters or the sign */
+static void pf_integer_conv( char *buf, int buf_len, pf_flags *flags,
+                             LONGLONG x )
 {
     unsigned int base;
     const char *digits;
 
     int i, j, k;
-    char tmp[40];
+    char number[40], *tmp = number;
+
+    if( buf_len > sizeof number )
+        tmp = HeapAlloc( GetProcessHeap(), 0, buf_len );
 
     base = 10;
     if( flags->Format == 'o' )
@@ -486,6 +474,9 @@ static void pf_integer_conv( char *buf, pf_flags *flags, LONGLONG x )
 
     /* Adjust precision so pf_fill won't truncate the number later */
     flags->Precision = strlen( buf );
+
+    if( tmp != number )
+        HeapFree( GetProcessHeap(), 0, tmp );
 
     return;
 }
@@ -560,9 +551,14 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
 
         /* deal with the field width specifier */
         flags.FieldLength = 0;
-        if( *p == '*' ) 
+        if( *p == '*' )
         {
             flags.FieldLength = va_arg( valist, int );
+            if (flags.FieldLength < 0)
+            {
+                flags.LeftAlign = '-';
+                flags.FieldLength = -flags.FieldLength;
+            }
             p++;
         }
         else while( isdigit(*p) )
@@ -660,14 +656,22 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
         {
             char number[40], *x = number;
 
-            if( flags.FieldLength >= sizeof number )
-                x = HeapAlloc( GetProcessHeap(), 0, flags.FieldLength+1 );
+            /* Estimate largest possible required buffer size:
+               * Chooses the larger of the field or precision
+               * Includes extra bytes: 1 byte for null, 1 byte for sign,
+                 4 bytes for exponent, 2 bytes for alternate formats, 1 byte 
+                 for a decimal, and 1 byte for an additional float digit. */
+            int x_len = ((flags.FieldLength > flags.Precision) ? 
+                        flags.FieldLength : flags.Precision) + 10;
 
-            pf_integer_conv( x, &flags, va_arg(valist, LONGLONG) );
+            if( x_len >= sizeof number)
+                x = HeapAlloc( GetProcessHeap(), 0, x_len );
+
+            pf_integer_conv( x, x_len, &flags, va_arg(valist, LONGLONG) );
 
             r = pf_output_format_A( out, x, -1, &flags );
             if( x != number )
-                HeapFree( GetProcessHeap(), 0, number );
+                HeapFree( GetProcessHeap(), 0, x );
         }
 
         /* deal with integers and floats using libc's printf */
@@ -675,8 +679,16 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
         {
             char fmt[20], number[40], *x = number;
 
-            if( flags.FieldLength >= sizeof number )
-                x = HeapAlloc( GetProcessHeap(), 0, flags.FieldLength+1 );
+            /* Estimate largest possible required buffer size:
+               * Chooses the larger of the field or precision
+               * Includes extra bytes: 1 byte for null, 1 byte for sign,
+                 4 bytes for exponent, 2 bytes for alternate formats, 1 byte 
+                 for a decimal, and 1 byte for an additional float digit. */
+            int x_len = ((flags.FieldLength > flags.Precision) ? 
+                        flags.FieldLength : flags.Precision) + 10;
+
+            if( x_len >= sizeof number)
+                x = HeapAlloc( GetProcessHeap(), 0, x_len );
 
             pf_rebuild_format_string( fmt, &flags );
 
@@ -687,7 +699,7 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
 
             r = pf_output_stringA( out, x, -1 );
             if( x != number )
-                HeapFree( GetProcessHeap(), 0, number );
+                HeapFree( GetProcessHeap(), 0, x );
         }
         else
             continue;
@@ -732,6 +744,14 @@ int CDECL MSVCRT_vsnprintf( char *str, unsigned int len,
     HeapFree( GetProcessHeap(), 0, formatW );
 
     return r;
+}
+
+/*********************************************************************
+ *		vsprintf (MSVCRT.@)
+ */
+int CDECL MSVCRT_vsprintf( char *str, const char *format, va_list valist)
+{
+    return MSVCRT_vsnprintf(str, INT_MAX, format, valist);
 }
 
 /*********************************************************************

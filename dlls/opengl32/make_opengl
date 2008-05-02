@@ -6,12 +6,16 @@ use strict;
 #   make_opengl path_to_spec_file opengl_version
 #
 #     - path_to_spec_file is the path to the directory where the OpenGL
-#       spec files are located. These files are part of the OpenGL
-#       sample implementation CVS tree and are located in
+#       spec files are located. These files are hosted in the OpenGL
+#       extension registry at opengl.org:
+#       http://www.opengl.org/registry/api/gl.spec
+#       http://www.opengl.org/registry/api/gl.tm
+#
+#       The files used to be hosted and maintained by SGI. You can still find
+#       find them in the sample implementation CVS tree which is located at
 #       CVS_ROOT/projects/ogl-sample/main/doc/registry/specs.
-#       You can find them on the web at the following URL :
+#       You can also find them on the web at the following URL :
 #         http://oss.sgi.com/cgi-bin/cvsweb.cgi/projects/ogl-sample/main/doc/registry/specs/
-#       You will need gl.tm and gl.spec.
 #
 #     - opengl_version is the OpenGL version emulated by the library
 #       (can be 1.0 to 1.5).
@@ -208,7 +212,11 @@ sub GenerateThunk($$$$$)
     my $ret = "";
     my $call_arg = "";
     my $trace_arg = "";
-    my $wine_func_ref_name = "";
+
+    return "" if $func_ref->[0] eq "glGetString";
+    return "" if $func_ref->[0] eq "glGetIntegerv";
+    return "" if $func_ref->[0] eq "glFinish";
+    return "" if $func_ref->[0] eq "glFlush";
 
     # If for opengl_norm.c, generate a nice heading otherwise Patrik won't be happy :-)
     # Patrik says: Well I would be even happier if a (OPENGL32.@) was added as well. Done. :-)
@@ -259,14 +267,7 @@ sub GenerateThunk($$$$$)
     if ($func_ref->[1] ne "void") {
 	$ret = $ret . "ret_value = ";
     }
-    $wine_func_ref_name = $func_ref->[0];
-    if ( $func_ref->[0] eq "glGetString" ) {
-	$wine_func_ref_name = "internal_glGetString";
-    }
-    if ( $func_ref->[0] eq "glGetIntegerv" ) {
-	$wine_func_ref_name = "internal_glGetIntegerv";
-    }
-    $ret = "$ret$prefix$wine_func_ref_name( $call_arg);\n";
+    $ret = "$ret$prefix$func_ref->[0]( $call_arg);\n";
     if ($thread_safe) {
 	$ret = "$ret  LEAVE_GL();\n";
     }
@@ -324,11 +325,8 @@ while (my $line = <TYPES>) {
 }
 # This is to override the 'void' -> '*' bogus conversion
 $pseudo_to_opengl{"void"} = "void";
-# This is a bug in the spec file...
-$pseudo_to_opengl{"FfdTargetSGIX"} = "GLint";
-$pseudo_to_opengl{"FfdMaskSGIX"} = "GLint";
-$pseudo_to_opengl{"IglooFunctionSelectSGIX"} = "GLint";
-$pseudo_to_opengl{"IglooParameterSGIX"} = "GLint";
+$pseudo_to_opengl{"Int64EXT"} = "INT64";
+$pseudo_to_opengl{"UInt64EXT"} = "UINT64";
 
 #
 # Then, create the list of all OpenGL functions using the 'gl.spec'
@@ -599,34 +597,6 @@ close(REGISTRY);
 #
 open(SPEC, ">$spec_file");
 
-print SPEC "@  stdcall wglCreateContext(long)
-@  stdcall wglCreateLayerContext(long long)
-@  stdcall wglCopyContext(long long long)
-@  stdcall wglDeleteContext(long)
-@  stdcall wglDescribeLayerPlane(long long long long ptr)
-@  stdcall wglGetCurrentContext()
-@  stdcall wglGetCurrentDC()
-@  stdcall wglGetLayerPaletteEntries(long long long long ptr)
-@  stdcall wglGetProcAddress(str)
-@  stdcall wglMakeCurrent(long long)
-@  stdcall wglRealizeLayerPalette(long long long)
-@  stdcall wglSetLayerPaletteEntries(long long long long ptr)
-@  stdcall wglShareLists(long long)
-@  stdcall wglSwapLayerBuffers(long long)
-@  stdcall wglUseFontBitmapsA(long long long long)
-@  stdcall wglUseFontOutlinesA(long long long long long long long ptr)
-@  stub    glGetLevelParameterfv
-@  stub    glGetLevelParameteriv
-@  stdcall wglUseFontBitmapsW(long long long long)
-@  stub    wglUseFontOutlinesW
-@  stub    wglGetDefaultProcAddress
-@  stdcall wglChoosePixelFormat(long ptr) gdi32.ChoosePixelFormat
-@  stdcall wglDescribePixelFormat(long long long ptr) gdi32.DescribePixelFormat
-@  stdcall wglGetPixelFormat(long) gdi32.GetPixelFormat
-@  stdcall wglSetPixelFormat(long long ptr) gdi32.SetPixelFormat
-@  stdcall wglSwapBuffers(long) gdi32.SwapBuffers
-";
-
 foreach (sort keys %norm_functions) {
     my $func_name = $norm_functions{$_}->[0];
     print SPEC "@  stdcall $func_name( ";
@@ -642,6 +612,35 @@ foreach (sort keys %norm_functions) {
     }
     print SPEC ") wine_$func_name\n";
 }
+
+print SPEC "@  stub    glGetLevelParameterfv
+@  stub    glGetLevelParameteriv
+@  stdcall wglChoosePixelFormat(long ptr) gdi32.ChoosePixelFormat
+@  stdcall wglCopyContext(long long long)
+@  stdcall wglCreateContext(long) gdi32.wglCreateContext
+@  stdcall wglCreateLayerContext(long long)
+@  stdcall wglDeleteContext(long) gdi32.wglDeleteContext
+@  stdcall wglDescribeLayerPlane(long long long long ptr)
+@  stdcall wglDescribePixelFormat(long long long ptr) gdi32.DescribePixelFormat
+@  stdcall wglGetCurrentContext() gdi32.wglGetCurrentContext
+@  stdcall wglGetCurrentDC() gdi32.wglGetCurrentDC
+@  stub    wglGetDefaultProcAddress
+@  stdcall wglGetLayerPaletteEntries(long long long long ptr)
+@  stdcall wglGetPixelFormat(long) gdi32.GetPixelFormat
+@  stdcall wglGetProcAddress(str)
+@  stdcall wglMakeCurrent(long long) gdi32.wglMakeCurrent
+@  stdcall wglRealizeLayerPalette(long long long)
+@  stdcall wglSetLayerPaletteEntries(long long long long ptr)
+@  stdcall wglSetPixelFormat(long long ptr) gdi32.SetPixelFormat
+@  stdcall wglShareLists(long long) gdi32.wglShareLists
+@  stdcall wglSwapBuffers(long) gdi32.SwapBuffers
+@  stdcall wglSwapLayerBuffers(long long)
+@  stdcall wglUseFontBitmapsA(long long long long) gdi32.wglUseFontBitmapsA
+@  stdcall wglUseFontBitmapsW(long long long long) gdi32.wglUseFontBitmapsW
+@  stdcall wglUseFontOutlinesA(long long long long long long long ptr)
+@  stdcall wglUseFontOutlinesW(long long long long long long long ptr)
+";
+
 close(SPEC);
 
 #
@@ -660,7 +659,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(opengl);
 foreach (sort keys %norm_functions) {
     my $string = GenerateThunk($norm_functions{$_}, 1, "", $gen_thread_safe, "");
 
-    print NORM "\n$string";
+    print NORM "\n$string" if $string;
 }
 close(NORM);
 

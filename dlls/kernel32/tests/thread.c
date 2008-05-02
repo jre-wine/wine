@@ -22,6 +22,7 @@
 #define _WIN32_WINNT 0x0500
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "wine/test.h"
 #include <windef.h>
@@ -67,9 +68,24 @@ static SetThreadIdealProcessor_t pSetThreadIdealProcessor=NULL;
 typedef BOOL (WINAPI *SetThreadPriorityBoost_t)(HANDLE,BOOL);
 static SetThreadPriorityBoost_t pSetThreadPriorityBoost=NULL;
 
+static HANDLE create_target_process(const char *arg)
+{
+    char **argv;
+    char cmdline[MAX_PATH];
+    PROCESS_INFORMATION pi;
+    STARTUPINFO si = { 0 };
+    si.cb = sizeof(si);
+
+    winetest_get_mainargs( &argv );
+    sprintf(cmdline, "%s %s %s", argv[0], argv[1], arg);
+    ok(CreateProcess(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL,
+                     &si, &pi) != 0, "error: %u\n", GetLastError());
+    ok(CloseHandle(pi.hThread) != 0, "error %u\n", GetLastError());
+    return pi.hProcess;
+}
+
 /* Functions not tested yet:
   AttachThreadInput
-  CreateRemoteThread
   SetThreadContext
   SwitchToThread
 
@@ -174,6 +190,118 @@ static DWORD WINAPI threadFunc5(LPVOID p)
    return 0;
 }
 #endif
+
+static DWORD WINAPI threadFunc_SetEvent(LPVOID p)
+{
+    SetEvent((HANDLE) p);
+    return 0;
+}
+
+static DWORD WINAPI threadFunc_CloseHandle(LPVOID p)
+{
+    CloseHandle((HANDLE) p);
+    return 0;
+}
+
+static void create_function_addr_events(HANDLE events[2])
+{
+    char buffer[256];
+
+    sprintf(buffer, "threadFunc_SetEvent %p", threadFunc_SetEvent);
+    events[0] = CreateEvent(NULL, FALSE, FALSE, buffer);
+
+    sprintf(buffer, "threadFunc_CloseHandle %p", threadFunc_CloseHandle);
+    events[1] = CreateEvent(NULL, FALSE, FALSE, buffer);
+}
+
+/* check CreateRemoteThread */
+static VOID test_CreateRemoteThread(void)
+{
+    HANDLE hProcess, hThread, hEvent, hRemoteEvent;
+    DWORD tid, ret, exitcode;
+    HANDLE hAddrEvents[2];
+
+    hProcess = create_target_process("sleep");
+    ok(hProcess != NULL, "Can't start process\n");
+
+    /* ensure threadFunc_SetEvent & threadFunc_CloseHandle are the same
+     * address as in the child process */
+    create_function_addr_events(hAddrEvents);
+    ret = WaitForMultipleObjects(2, hAddrEvents, TRUE, 5000);
+    if (ret == WAIT_TIMEOUT)
+    {
+        skip("child process wasn't mapped at same address, so can't do CreateRemoteThread tests.\n");
+        return;
+    }
+
+    hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+    ok(hEvent != NULL, "Can't create event, err=%u\n", GetLastError());
+    ret = DuplicateHandle(GetCurrentProcess(), hEvent, hProcess, &hRemoteEvent,
+                          0, FALSE, DUPLICATE_SAME_ACCESS);
+    ok(ret != 0, "DuplicateHandle failed, err=%u\n", GetLastError());
+
+    /* create suspended remote thread with entry point SetEvent() */
+    SetLastError(0xdeadbeef);
+    hThread = CreateRemoteThread(hProcess, NULL, 0, threadFunc_SetEvent,
+                                 hRemoteEvent, CREATE_SUSPENDED, &tid);
+    if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("CreateRemoteThread is not implemented\n");
+        goto cleanup;
+    }
+    ok(hThread != NULL, "CreateRemoteThread failed, err=%u\n", GetLastError());
+    ok(tid != 0, "null tid\n");
+    ret = SuspendThread(hThread);
+    ok(ret == 1, "ret=%u, err=%u\n", ret, GetLastError());
+    ret = ResumeThread(hThread);
+    ok(ret == 2, "ret=%u, err=%u\n", ret, GetLastError());
+
+    /* thread still suspended, so wait times out */
+    ret = WaitForSingleObject(hEvent, 100);
+    ok(ret == WAIT_TIMEOUT, "wait did not time out, ret=%u\n", ret);
+
+    ret = ResumeThread(hThread);
+    ok(ret == 1, "ret=%u, err=%u\n", ret, GetLastError());
+
+    /* wait that doesn't time out */
+    ret = WaitForSingleObject(hEvent, 100);
+    ok(ret == WAIT_OBJECT_0, "object not signaled, ret=%u\n", ret);
+
+    /* wait for thread end */
+    ret = WaitForSingleObject(hThread, 100);
+    ok(ret == WAIT_OBJECT_0, "waiting for thread failed, ret=%u\n", ret);
+    CloseHandle(hThread);
+
+    /* create and wait for remote thread with entry point CloseHandle() */
+    hThread = CreateRemoteThread(hProcess, NULL, 0,
+                                 threadFunc_CloseHandle,
+                                 hRemoteEvent, 0, &tid);
+    ok(hThread != NULL, "CreateRemoteThread failed, err=%u\n", GetLastError());
+    ret = WaitForSingleObject(hThread, 100);
+    ok(ret == WAIT_OBJECT_0, "waiting for thread failed, ret=%u\n", ret);
+    CloseHandle(hThread);
+
+    /* create remote thread with entry point SetEvent() */
+    hThread = CreateRemoteThread(hProcess, NULL, 0,
+                                 threadFunc_SetEvent,
+                                 hRemoteEvent, 0, &tid);
+    ok(hThread != NULL, "CreateRemoteThread failed, err=%u\n", GetLastError());
+
+    /* closed handle, so wait times out */
+    ret = WaitForSingleObject(hEvent, 100);
+    ok(ret == WAIT_TIMEOUT, "wait did not time out, ret=%u\n", ret);
+
+    /* check that remote SetEvent() failed */
+    ret = GetExitCodeThread(hThread, &exitcode);
+    ok(ret != 0, "GetExitCodeThread failed, err=%u\n", GetLastError());
+    if (ret) ok(exitcode == 0, "SetEvent succeeded, expected to fail\n");
+    CloseHandle(hThread);
+
+cleanup:
+    TerminateProcess(hProcess, 0);
+    CloseHandle(hEvent);
+    CloseHandle(hProcess);
+}
 
 /* Check basic funcationality of CreateThread and Tls* functions */
 static VOID test_CreateThread_basic(void)
@@ -440,10 +568,10 @@ static VOID test_thread_priority(void)
        obey_ar(GetExitCodeThread(access_thread,&exitCode)==0);
        ok(CloseHandle(access_thread),"Error Closing thread handle\n");
      }
-#if USE_EXTENDED_PRIORITIES
-     min_priority=-7; max_priority=6;
-#endif
    }
+#if USE_EXTENDED_PRIORITIES
+   min_priority=-7; max_priority=6;
+#endif
    for(i=min_priority;i<=max_priority;i++) {
      ok(SetThreadPriority(curthread,i)!=0,
         "SetThreadPriority Failed for priority: %d\n",i);
@@ -460,6 +588,28 @@ static VOID test_thread_priority(void)
        "GetThreadPriority Failed\n");
    ok(SetThreadPriority(curthread,0)!=0,"SetThreadPriority Failed\n");
 
+/* Check that the thread priority is not changed if SetThreadPriority
+   is called with a value outside of the max/min range */
+   SetThreadPriority(curthread,min_priority);
+   SetLastError(0xdeadbeef);
+   rc = SetThreadPriority(curthread,min_priority-1);
+
+   ok(rc == FALSE, "SetThreadPriority passed with a bad argument\n");
+   ok(GetLastError() == ERROR_INVALID_PARAMETER,
+      "SetThreadPriority error %d, expected ERROR_INVALID_PARAMETER (87)\n", GetLastError());
+   ok(GetThreadPriority(curthread)==min_priority,
+      "GetThreadPriority didn't return min_priority\n");
+
+   SetThreadPriority(curthread,max_priority);
+   SetLastError(0xdeadbeef);
+   rc = SetThreadPriority(curthread,max_priority+1);
+
+   ok(rc == FALSE, "SetThreadPriority passed with a bad argument\n");
+   ok(GetLastError() == ERROR_INVALID_PARAMETER,
+      "SetThreadPriority error %d, expected ERROR_INVALID_PARAMETER (87)\n", GetLastError());
+   ok(GetThreadPriority(curthread)==max_priority,
+      "GetThreadPriority didn't return max_priority\n");
+
 /* Check thread priority boost */
    if (!pGetThreadPriorityBoost || !pSetThreadPriorityBoost) 
      return; /* Win9x */
@@ -469,20 +619,23 @@ static VOID test_thread_priority(void)
    if (rc==0 && GetLastError()==ERROR_CALL_NOT_IMPLEMENTED)
      return; /* WinME */
 
+   todo_wine
+     ok(rc!=0,"error=%d\n",GetLastError());
+
+   if (pOpenThread) {
 /* check that access control is obeyed */
-   access_thread=pOpenThread(THREAD_ALL_ACCESS &
-                     (~THREAD_QUERY_INFORMATION) & (~THREAD_SET_INFORMATION),
-                     0,curthreadId);
-   ok(access_thread!=NULL,"OpenThread returned an invalid handle\n");
-   if (access_thread!=NULL) {
-     obey_ar(pSetThreadPriorityBoost(access_thread,1)==0);
-     obey_ar(pGetThreadPriorityBoost(access_thread,&disabled)==0);
-     ok(CloseHandle(access_thread),"Error Closing thread handle\n");
+     access_thread=pOpenThread(THREAD_ALL_ACCESS &
+                       (~THREAD_QUERY_INFORMATION) & (~THREAD_SET_INFORMATION),
+                       0,curthreadId);
+     ok(access_thread!=NULL,"OpenThread returned an invalid handle\n");
+     if (access_thread!=NULL) {
+       obey_ar(pSetThreadPriorityBoost(access_thread,1)==0);
+       obey_ar(pGetThreadPriorityBoost(access_thread,&disabled)==0);
+       ok(CloseHandle(access_thread),"Error Closing thread handle\n");
+     }
    }
 
    todo_wine {
-     ok(rc!=0,"error=%d\n",GetLastError());
-
      rc = pSetThreadPriorityBoost(curthread,1);
      ok( rc != 0, "error=%d\n",GetLastError());
      rc=pGetThreadPriorityBoost(curthread,&disabled);
@@ -723,6 +876,9 @@ static void test_QueueUserWorkItem(void)
 START_TEST(thread)
 {
    HINSTANCE lib;
+   int argc;
+   char **argv;
+   argc = winetest_get_mainargs( &argv );
 /* Neither Cygwin nor mingW export OpenThread, so do a dynamic check
    so that the compile passes
 */
@@ -733,6 +889,33 @@ START_TEST(thread)
    pQueueUserWorkItem=(QueueUserWorkItem_t)GetProcAddress(lib,"QueueUserWorkItem");
    pSetThreadIdealProcessor=(SetThreadIdealProcessor_t)GetProcAddress(lib,"SetThreadIdealProcessor");
    pSetThreadPriorityBoost=(SetThreadPriorityBoost_t)GetProcAddress(lib,"SetThreadPriorityBoost");
+
+   if (argc >= 3)
+   {
+       if (!strcmp(argv[2], "sleep"))
+       {
+           HANDLE hAddrEvents[2];
+           create_function_addr_events(hAddrEvents);
+           SetEvent(hAddrEvents[0]);
+           SetEvent(hAddrEvents[1]);
+           Sleep(5000); /* spawned process runs for at most 5 seconds */
+           return;
+       }
+       while (1)
+       {
+           HANDLE hThread;
+           hThread = CreateThread(NULL, 0, threadFunc2, NULL, 0, NULL);
+           ok(hThread != NULL, "CreateThread failed, error %u\n",
+              GetLastError());
+           ok(WaitForSingleObject(hThread, 200) == WAIT_OBJECT_0,
+              "Thread did not exit in time\n");
+           if (hThread == NULL) break;
+           CloseHandle(hThread);
+       }
+       return;
+   }
+
+   test_CreateRemoteThread();
    test_CreateThread_basic();
    test_CreateThread_suspended();
    test_SuspendThread();

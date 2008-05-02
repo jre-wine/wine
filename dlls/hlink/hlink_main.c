@@ -33,8 +33,6 @@
 #include "wine/debug.h"
 #include "wine/unicode.h"
 #include "hlink.h"
-
-#include "initguid.h"
 #include "hlguids.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(hlink);
@@ -134,17 +132,22 @@ HRESULT WINAPI HlinkCreateFromString( LPCWSTR pwzTarget, LPCWSTR pwzLocation,
 
         if (FAILED(r))
         {
-            FIXME("ParseDisplayName failed, falling back to file\n");
-            r = CreateFileMoniker(pwzTarget,&pTgtMk);
+            LPCWSTR p = strchrW(pwzTarget, ':');
+            if (p && (p - pwzTarget > 1))
+                r = CreateURLMoniker(NULL, pwzTarget, &pTgtMk);
+            else
+                r = CreateFileMoniker(pwzTarget,&pTgtMk);
         }
 
-        if (pTgtMk)
+        if (FAILED(r))
         {
-            IHlink_SetMonikerReference(hl, 0, pTgtMk, pwzLocation);
-            IMoniker_Release(pTgtMk);
+            ERR("couldn't create moniker for %s, failed with error 0x%08x\n",
+                debugstr_w(pwzTarget), r);
+            return r;
         }
-        else
-            FIXME("Unable to come up with a moniker, expect problems\n");
+
+        IHlink_SetMonikerReference(hl, 0, pTgtMk, pwzLocation);
+        IMoniker_Release(pTgtMk);
 
         IHlink_SetStringReference(hl, HLINKSETF_TARGET, pwzTarget, NULL);
     }
@@ -273,6 +276,12 @@ HRESULT WINAPI HlinkIsShortcut(LPCWSTR pwzFileName)
     return strcmpiW(pwzFileName+len, url_ext) ? S_FALSE : S_OK;
 }
 
+HRESULT WINAPI HlinkGetSpecialReference(ULONG uReference, LPWSTR *ppwzReference)
+{
+    FIXME("(%u %p) stub\n", uReference, ppwzReference);
+    return E_NOTIMPL;
+}
+
 HRESULT WINAPI HlinkTranslateURL(LPCWSTR pwzURL, DWORD grfFlags, LPWSTR *ppwzTranslatedURL)
 {
     FIXME("(%s %08x %p)\n", debugstr_w(pwzURL), grfFlags, ppwzTranslatedURL);
@@ -339,6 +348,9 @@ static const IClassFactoryVtbl hlcfvt =
 static CFImpl HLink_cf = { &hlcfvt, &HLink_Constructor };
 static CFImpl HLinkBrowseContext_cf = { &hlcfvt, &HLinkBrowseContext_Constructor };
 
+/***********************************************************************
+ *             DllGetClassObject (HLINK.@)
+ */
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
 {
     IClassFactory   *pcf = NULL;

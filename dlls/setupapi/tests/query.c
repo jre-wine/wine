@@ -29,21 +29,24 @@ static void (WINAPI *pSetupCloseInfFile)(HINF);
 static BOOL (WINAPI *pSetupGetInfInformationA)(LPCVOID,DWORD,PSP_INF_INFORMATION,DWORD,PDWORD);
 static HINF (WINAPI *pSetupOpenInfFileA)(PCSTR,PCSTR,DWORD,PUINT);
 static BOOL (WINAPI *pSetupQueryInfFileInformationA)(PSP_INF_INFORMATION,UINT,PSTR,DWORD,PDWORD);
+static BOOL (WINAPI *pSetupGetSourceFileLocationA)(HINF,PINFCONTEXT,PCSTR,PUINT,PSTR,DWORD,PDWORD);
+static BOOL (WINAPI *pSetupGetSourceInfoA)(HINF,UINT,UINT,PSTR,DWORD,PDWORD);
+static BOOL (WINAPI *pSetupGetTargetPathA)(HINF,PINFCONTEXT,PCSTR,PSTR,DWORD,PDWORD);
 
 CHAR CURR_DIR[MAX_PATH];
 CHAR WIN_DIR[MAX_PATH];
 
 static void init_function_pointers(void)
 {
-    hSetupAPI = LoadLibraryA("setupapi.dll");
+    hSetupAPI = GetModuleHandleA("setupapi.dll");
 
-    if (hSetupAPI)
-    {
-        pSetupCloseInfFile = (void *)GetProcAddress(hSetupAPI, "SetupCloseInfFile");
-        pSetupGetInfInformationA = (void *)GetProcAddress(hSetupAPI, "SetupGetInfInformationA");
-        pSetupOpenInfFileA = (void *)GetProcAddress(hSetupAPI, "SetupOpenInfFileA");
-        pSetupQueryInfFileInformationA = (void *)GetProcAddress(hSetupAPI, "SetupQueryInfFileInformationA");
-    }
+    pSetupCloseInfFile = (void *)GetProcAddress(hSetupAPI, "SetupCloseInfFile");
+    pSetupGetInfInformationA = (void *)GetProcAddress(hSetupAPI, "SetupGetInfInformationA");
+    pSetupOpenInfFileA = (void *)GetProcAddress(hSetupAPI, "SetupOpenInfFileA");
+    pSetupQueryInfFileInformationA = (void *)GetProcAddress(hSetupAPI, "SetupQueryInfFileInformationA");
+    pSetupGetSourceFileLocationA = (void *)GetProcAddress(hSetupAPI, "SetupGetSourceFileLocationA");
+    pSetupGetSourceInfoA = (void *)GetProcAddress(hSetupAPI, "SetupGetSourceInfoA");
+    pSetupGetTargetPathA = (void *)GetProcAddress(hSetupAPI, "SetupGetTargetPathA");
 }
 
 static void get_directories(void)
@@ -80,6 +83,37 @@ static void create_inf_file(LPSTR filename)
     append_str(&ptr, "[Version]\n");
     append_str(&ptr, "Signature=\"$Chicago$\"\n");
     append_str(&ptr, "AdvancedINF=2.5\n");
+    append_str(&ptr, "[SourceDisksNames]\n");
+    append_str(&ptr, "2 = %%SrcDiskName%%, LANCOM\\LANtools\\lanconf.cab\n");
+    append_str(&ptr, "[SourceDisksFiles]\n");
+    append_str(&ptr, "lanconf.exe = 2\n");
+    append_str(&ptr, "[DestinationDirs]\n");
+    append_str(&ptr, "DefaultDestDir = 24, %%DefaultDest%%\n");
+    append_str(&ptr, "[Strings]\n");
+    append_str(&ptr, "LangDir = english\n");
+    append_str(&ptr, "DefaultDest = LANCOM\n");
+    append_str(&ptr, "SrcDiskName = \"LANCOM Software CD\"\n");
+
+    WriteFile(hf, data, ptr - data, &dwNumberOfBytesWritten, NULL);
+    CloseHandle(hf);
+}
+
+static void create_inf_file2(LPSTR filename)
+{
+    char data[1024];
+    char *ptr = data;
+    DWORD dwNumberOfBytesWritten;
+    HANDLE hf = CreateFile(filename, GENERIC_WRITE, 0, NULL,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    append_str(&ptr, "[SourceFileInfo]\n");
+    append_str(&ptr, "sp1qfe\\bitsinst.exe=250B3702C7CCD7C2F9E4DAA1555C933E,000600060A28062C,27136,SP1QFE\n");
+    append_str(&ptr, "sp1qfe\\bitsprx2.dll=4EBEA67F4BB4EB402E725CA7CA2857AE,000600060A280621,7680,SP1QFE\n");
+    append_str(&ptr, "sp1qfe\\bitsprx3.dll=C788A1D9330DA011EF25E95D3BC7BDE5,000600060A280621,7168,SP1QFE\n");
+    append_str(&ptr, "sp1qfe\\qmgr.dll=696AC82FB290A03F205901442E0E9589,000600060A280621,361984,SP1QFE\n");
+    append_str(&ptr, "sp1qfe\\qmgrprxy.dll=8B5848144829E1BC985EA4C3D8CA7E3F,000600060A280621,17408,SP1QFE\n");
+    append_str(&ptr, "sp1qfe\\winhttp.dll=3EC6F518114606CA59D4160322077437,000500010A280615,331776,SP1QFE\n");
+    append_str(&ptr, "sp1qfe\\xpob2res.dll=DB83156B9F496F20D1EA70E4ABEC0166,000500010A280622,158720,SP1QFE\n");
 
     WriteFile(hf, data, ptr - data, &dwNumberOfBytesWritten, NULL);
     CloseHandle(hf);
@@ -251,10 +285,141 @@ static void test_SetupGetInfInformation(void)
     DeleteFileA(inf_two);
 }
 
+static void test_SetupGetSourceFileLocation(void)
+{
+    char buffer[MAX_PATH] = "not empty", inf_filename[MAX_PATH];
+    UINT source_id;
+    DWORD required, error;
+    HINF hinf;
+    BOOL ret;
+
+    lstrcpyA(inf_filename, CURR_DIR);
+    lstrcatA(inf_filename, "\\");
+    lstrcatA(inf_filename, "test.inf");
+
+    create_inf_file(inf_filename);
+
+    hinf = pSetupOpenInfFileA(inf_filename, NULL, INF_STYLE_WIN4, NULL);
+    ok(hinf != INVALID_HANDLE_VALUE, "could not open inf file\n");
+
+    required = 0;
+    source_id = 0;
+
+    ret = pSetupGetSourceFileLocationA(hinf, NULL, "lanconf.exe", &source_id, buffer, sizeof(buffer), &required);
+    ok(ret, "SetupGetSourceFileLocation failed\n");
+
+    ok(required == 1, "unexpected required size: %d\n", required);
+    ok(source_id == 2, "unexpected source id: %d\n", source_id);
+    ok(!lstrcmpA("", buffer), "unexpected result string: %s\n", buffer);
+
+    pSetupCloseInfFile(hinf);
+    DeleteFileA(inf_filename);
+
+    create_inf_file2(inf_filename);
+
+    SetLastError(0xdeadbeef);
+    hinf = pSetupOpenInfFileA(inf_filename, NULL, INF_STYLE_WIN4, NULL);
+    error = GetLastError();
+    ok(hinf == INVALID_HANDLE_VALUE, "could open inf file\n");
+    ok(error == ERROR_WRONG_INF_STYLE, "got wrong error: %d\n", error);
+
+    hinf = pSetupOpenInfFileA(inf_filename, NULL, INF_STYLE_OLDNT, NULL);
+    ok(hinf != INVALID_HANDLE_VALUE, "could not open inf file\n");
+
+    ret = pSetupGetSourceFileLocationA(hinf, NULL, "", &source_id, buffer, sizeof(buffer), &required);
+    ok(!ret, "SetupGetSourceFileLocation succeeded\n");
+
+    pSetupCloseInfFile(hinf);
+    DeleteFileA(inf_filename);
+}
+
+static void test_SetupGetSourceInfo(void)
+{
+    char buffer[MAX_PATH], inf_filename[MAX_PATH];
+    DWORD required;
+    HINF hinf;
+    BOOL ret;
+
+    lstrcpyA(inf_filename, CURR_DIR);
+    lstrcatA(inf_filename, "\\");
+    lstrcatA(inf_filename, "test.inf");
+
+    create_inf_file(inf_filename);
+
+    hinf = pSetupOpenInfFileA(inf_filename, NULL, INF_STYLE_WIN4, NULL);
+    ok(hinf != INVALID_HANDLE_VALUE, "could not open inf file\n");
+
+    required = 0;
+
+    ret = pSetupGetSourceInfoA(hinf, 2, SRCINFO_PATH, buffer, sizeof(buffer), &required);
+    ok(ret, "SetupGetSourceInfoA failed\n");
+
+    ok(required == 1, "unexpected required size: %d\n", required);
+    ok(!lstrcmpA("", buffer), "unexpected result string: %s\n", buffer);
+
+    required = 0;
+    buffer[0] = 0;
+
+    ret = pSetupGetSourceInfoA(hinf, 2, SRCINFO_TAGFILE, buffer, sizeof(buffer), &required);
+    ok(ret, "SetupGetSourceInfoA failed\n");
+
+    ok(required == 28, "unexpected required size: %d\n", required);
+    ok(!lstrcmpA("LANCOM\\LANtools\\lanconf.cab", buffer), "unexpected result string: %s\n", buffer);
+
+    required = 0;
+    buffer[0] = 0;
+
+    ret = pSetupGetSourceInfoA(hinf, 2, SRCINFO_DESCRIPTION, buffer, sizeof(buffer), &required);
+    ok(ret, "SetupGetSourceInfoA failed\n");
+
+    ok(required == 19, "unexpected required size: %d\n", required);
+    ok(!lstrcmpA("LANCOM Software CD", buffer), "unexpected result string: %s\n", buffer);
+
+    pSetupCloseInfFile(hinf);
+    DeleteFileA(inf_filename);
+}
+
+static void test_SetupGetTargetPath(void)
+{
+    char buffer[MAX_PATH], inf_filename[MAX_PATH];
+    DWORD required;
+    HINF hinf;
+    INFCONTEXT ctx;
+    BOOL ret;
+
+    lstrcpyA(inf_filename, CURR_DIR);
+    lstrcatA(inf_filename, "\\");
+    lstrcatA(inf_filename, "test.inf");
+
+    create_inf_file(inf_filename);
+
+    hinf = pSetupOpenInfFileA(inf_filename, NULL, INF_STYLE_WIN4, NULL);
+    ok(hinf != INVALID_HANDLE_VALUE, "could not open inf file\n");
+
+    ctx.Inf = hinf;
+    ctx.CurrentInf = hinf;
+    ctx.Section = 7;
+    ctx.Line = 0;
+
+    required = 0;
+
+    ret = pSetupGetTargetPathA(hinf, &ctx, NULL, buffer, sizeof(buffer), &required);
+    ok(ret, "SetupGetTargetPathA failed\n");
+
+    ok(required == 10, "unexpected required size: %d\n", required);
+    ok(!lstrcmpiA("C:\\LANCOM", buffer), "unexpected result string: %s\n", buffer);
+
+    pSetupCloseInfFile(hinf);
+    DeleteFileA(inf_filename);
+}
+
 START_TEST(query)
 {
     init_function_pointers();
     get_directories();
 
     test_SetupGetInfInformation();
+    test_SetupGetSourceFileLocation();
+    test_SetupGetSourceInfo();
+    test_SetupGetTargetPath();
 }

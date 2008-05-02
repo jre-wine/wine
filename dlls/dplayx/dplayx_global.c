@@ -51,10 +51,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(dplay);
 /* FIXME: Need to do all that fun other dll referencing type of stuff */
 
 /* Static data for all processes */
-static LPCSTR lpszDplayxSemaName = "WINE_DPLAYX_SM";
+static const char lpszDplayxSemaName[] = "WINE_DPLAYX_SM";
 static HANDLE hDplayxSema;
 
-static LPCSTR lpszDplayxFileMapping = "WINE_DPLAYX_FM";
+static const char lpszDplayxFileMapping[] = "WINE_DPLAYX_FM";
 static HANDLE hDplayxSharedMem;
 
 static LPVOID lpSharedStaticData = NULL;
@@ -199,14 +199,16 @@ static DPSESSIONDESC2* sessionData = NULL;
 /* static DPSESSIONDESC2* sessionData[ numSupportedSessions ]; */
 
 /* Function prototypes */
-DWORD DPLAYX_SizeOfLobbyDataA( LPDPLCONNECTION lpDplData );
-DWORD DPLAYX_SizeOfLobbyDataW( LPDPLCONNECTION lpDplData );
-void DPLAYX_CopyConnStructA( LPDPLCONNECTION dest, LPDPLCONNECTION src );
-void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, LPDPLCONNECTION src );
-BOOL DPLAYX_IsAppIdLobbied( DWORD dwAppId, LPDPLAYX_LOBBYDATA* dplData );
-void DPLAYX_InitializeLobbyDataEntry( LPDPLAYX_LOBBYDATA lpData );
-BOOL DPLAYX_CopyIntoSessionDesc2A( LPDPSESSIONDESC2  lpSessionDest,
-                                   LPCDPSESSIONDESC2 lpSessionSrc );
+static DWORD DPLAYX_SizeOfLobbyDataA( const DPLCONNECTION *lpDplData );
+static DWORD DPLAYX_SizeOfLobbyDataW( const DPLCONNECTION *lpDplData );
+static void DPLAYX_CopyConnStructA( LPDPLCONNECTION dest, const DPLCONNECTION *src );
+static void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, const DPLCONNECTION *src );
+static BOOL DPLAYX_IsAppIdLobbied( DWORD dwAppId, LPDPLAYX_LOBBYDATA* dplData );
+static void DPLAYX_InitializeLobbyDataEntry( LPDPLAYX_LOBBYDATA lpData );
+static BOOL DPLAYX_CopyIntoSessionDesc2A( LPDPSESSIONDESC2  lpSessionDest,
+                                          LPCDPSESSIONDESC2 lpSessionSrc );
+static BOOL DPLAYX_GetThisLobbyHandles( LPHANDLE lphStart, LPHANDLE lphDeath,
+                                        LPHANDLE lphConnRead, BOOL bClearSetHandles );
 
 
 
@@ -527,10 +529,10 @@ BOOL DPLAYX_SetLobbyHandles( DWORD dwAppID,
   return TRUE;
 }
 
-BOOL DPLAYX_GetThisLobbyHandles( LPHANDLE lphStart,
-                                 LPHANDLE lphDeath,
-                                 LPHANDLE lphConnRead,
-                                 BOOL     bClearSetHandles )
+static BOOL DPLAYX_GetThisLobbyHandles( LPHANDLE lphStart,
+                                        LPHANDLE lphDeath,
+                                        LPHANDLE lphConnRead,
+                                        BOOL     bClearSetHandles )
 {
   LPDPLAYX_LOBBYDATA lpLData;
 
@@ -656,7 +658,7 @@ HRESULT DPLAYX_GetConnectionSettingsA
 }
 
 /* Assumption: Enough contiguous space was allocated at dest */
-void DPLAYX_CopyConnStructA( LPDPLCONNECTION dest, LPDPLCONNECTION src )
+void DPLAYX_CopyConnStructA( LPDPLCONNECTION dest, const DPLCONNECTION *src )
 {
   BYTE* lpStartOfFreeSpace;
 
@@ -778,7 +780,7 @@ HRESULT DPLAYX_GetConnectionSettingsW
 }
 
 /* Assumption: Enough contiguous space was allocated at dest */
-void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, LPDPLCONNECTION src )
+void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, const DPLCONNECTION *src )
 {
   BYTE*              lpStartOfFreeSpace;
 
@@ -796,8 +798,8 @@ void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, LPDPLCONNECTION src )
     /* Session names may or may not exist */
     if( src->lpSessionDesc->u1.lpszSessionName )
     {
-      strcpyW( (LPWSTR)lpStartOfFreeSpace, dest->lpSessionDesc->u1.lpszSessionName );
-      src->lpSessionDesc->u1.lpszSessionName = (LPWSTR)lpStartOfFreeSpace;
+      strcpyW( (LPWSTR)lpStartOfFreeSpace, src->lpSessionDesc->u1.lpszSessionName );
+      dest->lpSessionDesc->u1.lpszSessionName = (LPWSTR)lpStartOfFreeSpace;
       lpStartOfFreeSpace +=  sizeof(WCHAR) *
         ( strlenW( (LPWSTR)dest->lpSessionDesc->u1.lpszSessionName ) + 1 );
     }
@@ -853,7 +855,7 @@ void DPLAYX_CopyConnStructW( LPDPLCONNECTION dest, LPDPLCONNECTION src )
 HRESULT DPLAYX_SetConnectionSettingsA
 ( DWORD dwFlags,
   DWORD dwAppID,
-  LPDPLCONNECTION lpConn )
+  const DPLCONNECTION *lpConn )
 {
   LPDPLAYX_LOBBYDATA lpDplData;
 
@@ -915,7 +917,7 @@ HRESULT DPLAYX_SetConnectionSettingsA
 HRESULT DPLAYX_SetConnectionSettingsW
 ( DWORD dwFlags,
   DWORD dwAppID,
-  LPDPLCONNECTION lpConn )
+  const DPLCONNECTION *lpConn )
 {
   LPDPLAYX_LOBBYDATA lpDplData;
 
@@ -959,7 +961,7 @@ HRESULT DPLAYX_SetConnectionSettingsW
   return DP_OK;
 }
 
-DWORD DPLAYX_SizeOfLobbyDataA( LPDPLCONNECTION lpConn )
+DWORD DPLAYX_SizeOfLobbyDataA( const DPLCONNECTION *lpConn )
 {
   DWORD dwTotalSize = sizeof( DPLCONNECTION );
 
@@ -1006,7 +1008,7 @@ DWORD DPLAYX_SizeOfLobbyDataA( LPDPLCONNECTION lpConn )
   return dwTotalSize;
 }
 
-DWORD DPLAYX_SizeOfLobbyDataW( LPDPLCONNECTION lpConn )
+DWORD DPLAYX_SizeOfLobbyDataW( const DPLCONNECTION *lpConn )
 {
   DWORD dwTotalSize = sizeof( DPLCONNECTION );
 

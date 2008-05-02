@@ -33,7 +33,6 @@
 #include "winerror.h"
 #include "winternl.h"
 #include "winnt.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -48,16 +47,16 @@ typedef struct opengl_context
 
 /* We route all wgl functions from opengl32.dll through gdi32.dll to
  * the display driver. Various wgl calls have a hDC as one of their parameters.
- * Using DC_GetDCPtr we get access to the functions exported by the driver.
+ * Using get_dc_ptr we get access to the functions exported by the driver.
  * Some functions don't receive a hDC. This function creates a global hdc and
  * if there's already a global hdc, it returns it.
  */
-static DC* OPENGL_GetDefaultDC()
+static DC* OPENGL_GetDefaultDC(void)
 {
     if(!default_hdc)
         default_hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
-        
-    return DC_GetDCPtr(default_hdc);
+
+    return get_dc_ptr(default_hdc);
 }
 
 /***********************************************************************
@@ -66,16 +65,17 @@ static DC* OPENGL_GetDefaultDC()
 HGLRC WINAPI wglCreateContext(HDC hdc)
 {
     HGLRC ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
 
     TRACE("(%p)\n",hdc);
 
     if (!dc) return 0;
 
+    update_dc( dc );
     if (!dc->funcs->pwglCreateContext) FIXME(" :stub\n");
     else ret = dc->funcs->pwglCreateContext(dc->physDev);
 
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -94,13 +94,13 @@ BOOL WINAPI wglDeleteContext(HGLRC hglrc)
         return FALSE;
 
     /* Retrieve the HDC associated with the context to access the display driver */
-    dc = DC_GetDCPtr(ctx->hdc);
+    dc = get_dc_ptr(ctx->hdc);
     if (!dc) return FALSE;
 
     if (!dc->funcs->pwglDeleteContext) FIXME(" :stub\n");
     else ret = dc->funcs->pwglDeleteContext(hglrc);
 
-    GDI_ReleaseObj(ctx->hdc);
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -139,7 +139,7 @@ static HDC WINAPI wglGetPbufferDCARB(void *pbuffer)
 
     /* Create a device context to associate with the pbuffer */
     HDC hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
-    DC *dc = DC_GetDCPtr(hdc);
+    DC *dc = get_dc_ptr(hdc);
 
     TRACE("(%p)\n", pbuffer);
 
@@ -152,8 +152,8 @@ static HDC WINAPI wglGetPbufferDCARB(void *pbuffer)
     else ret = dc->funcs->pwglGetPbufferDCARB(dc->physDev, pbuffer);
 
     TRACE("(%p), hdc=%p\n", pbuffer, ret);
-    
-    GDI_ReleaseObj(hdc);
+
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -170,20 +170,17 @@ BOOL WINAPI wglMakeCurrent(HDC hdc, HGLRC hglrc)
     if(hglrc == NULL)
         dc = OPENGL_GetDefaultDC();
     else
-        dc = DC_GetDCPtr( hdc );
+        dc = get_dc_ptr( hdc );
 
     TRACE("hdc: (%p), hglrc: (%p)\n", hdc, hglrc);
 
     if (!dc) return FALSE;
 
+    update_dc( dc );
     if (!dc->funcs->pwglMakeCurrent) FIXME(" :stub\n");
     else ret = dc->funcs->pwglMakeCurrent(dc->physDev,hglrc);
 
-    if(hglrc == NULL)
-        GDI_ReleaseObj(default_hdc);
-    else
-        GDI_ReleaseObj(hdc);
-
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -199,21 +196,22 @@ static BOOL WINAPI wglMakeContextCurrentARB(HDC hDrawDC, HDC hReadDC, HGLRC hglr
     TRACE("hDrawDC: (%p), hReadDC: (%p) hglrc: (%p)\n", hDrawDC, hReadDC, hglrc);
 
     /* Both hDrawDC and hReadDC need to be valid */
-    DrawDC = DC_GetDCPtr( hDrawDC);
+    DrawDC = get_dc_ptr( hDrawDC );
     if (!DrawDC) return FALSE;
 
-    ReadDC = DC_GetDCPtr( hReadDC);
+    ReadDC = get_dc_ptr( hReadDC );
     if (!ReadDC) {
-        GDI_ReleaseObj(hDrawDC);
+        release_dc_ptr( DrawDC );
         return FALSE;
     }
 
+    update_dc( DrawDC );
+    update_dc( ReadDC );
     if (!DrawDC->funcs->pwglMakeContextCurrentARB) FIXME(" :stub\n");
     else ret = DrawDC->funcs->pwglMakeContextCurrentARB(DrawDC->physDev, ReadDC->physDev, hglrc);
 
-    GDI_ReleaseObj(hDrawDC);
-    GDI_ReleaseObj(hReadDC);
-
+    release_dc_ptr( DrawDC );
+    release_dc_ptr( ReadDC );
     return ret;
 }
 
@@ -229,15 +227,15 @@ BOOL WINAPI wglShareLists(HGLRC hglrc1, HGLRC hglrc2)
     TRACE("hglrc1: (%p); hglrc: (%p)\n", hglrc1, hglrc2);
     if(ctx == NULL)
         return FALSE;
-    
+
     /* Retrieve the HDC associated with the context to access the display driver */
-    dc = DC_GetDCPtr(ctx->hdc);
+    dc = get_dc_ptr(ctx->hdc);
     if (!dc) return FALSE;
 
     if (!dc->funcs->pwglShareLists) FIXME(" :stub\n");
     else ret = dc->funcs->pwglShareLists(hglrc1, hglrc2);
 
-    GDI_ReleaseObj(ctx->hdc);
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -247,7 +245,7 @@ BOOL WINAPI wglShareLists(HGLRC hglrc1, HGLRC hglrc2)
 BOOL WINAPI wglUseFontBitmapsA(HDC hdc, DWORD first, DWORD count, DWORD listBase)
 {
     BOOL ret = FALSE;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
 
     TRACE("(%p, %d, %d, %d)\n", hdc, first, count, listBase);
 
@@ -256,7 +254,7 @@ BOOL WINAPI wglUseFontBitmapsA(HDC hdc, DWORD first, DWORD count, DWORD listBase
     if (!dc->funcs->pwglUseFontBitmapsA) FIXME(" :stub\n");
     else ret = dc->funcs->pwglUseFontBitmapsA(dc->physDev, first, count, listBase);
 
-    GDI_ReleaseObj( hdc);
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -266,7 +264,7 @@ BOOL WINAPI wglUseFontBitmapsA(HDC hdc, DWORD first, DWORD count, DWORD listBase
 BOOL WINAPI wglUseFontBitmapsW(HDC hdc, DWORD first, DWORD count, DWORD listBase)
 {
     BOOL ret = FALSE;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
 
     TRACE("(%p, %d, %d, %d)\n", hdc, first, count, listBase);
 
@@ -275,7 +273,7 @@ BOOL WINAPI wglUseFontBitmapsW(HDC hdc, DWORD first, DWORD count, DWORD listBase
     if (!dc->funcs->pwglUseFontBitmapsW) FIXME(" :stub\n");
     else ret = dc->funcs->pwglUseFontBitmapsW(dc->physDev, first, count, listBase);
 
-    GDI_ReleaseObj( hdc);
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -290,7 +288,7 @@ PROC WINAPI wglGetProcAddress(LPCSTR func)
     if(!func)
 	return NULL;
 
-    TRACE("func: '%p'\n", func);
+    TRACE("func: '%s'\n", func);
 
     /* Retrieve the global hDC to get access to the driver.  */
     dc = OPENGL_GetDefaultDC();
@@ -299,7 +297,7 @@ PROC WINAPI wglGetProcAddress(LPCSTR func)
     if (!dc->funcs->pwglGetProcAddress) FIXME(" :stub\n");
     else ret = dc->funcs->pwglGetProcAddress(func);
 
-    GDI_ReleaseObj(default_hdc);
+    release_dc_ptr( dc );
 
     /* At the moment we implement one WGL extension which requires a HDC. When we
      * are looking up this call and when the Extension is available (that is the case
@@ -307,7 +305,7 @@ PROC WINAPI wglGetProcAddress(LPCSTR func)
      * of a wrapper function which will handle the HDC->PhysDev conversion.
      */
     if(ret && strcmp(func, "wglMakeContextCurrentARB") == 0)
-        return wglMakeContextCurrentARB;
+        return (PROC)wglMakeContextCurrentARB;
     else if(ret && strcmp(func, "wglGetPbufferDCARB") == 0)
         return (PROC)wglGetPbufferDCARB;
 

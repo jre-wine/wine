@@ -7,6 +7,7 @@ MODULE    = kernel32.dll
 IMPORTLIB = libkernel32.$(IMPLIBEXT)
 IMPORTS   = ntdll
 EXTRALIBS = @COREFOUNDATIONLIB@ @LIBPOLL@
+DLLFILENAME = KERNEL32.dll
 BASEADDRESS = 0x7b800000
 
 SPEC_SRCS16 = \
@@ -92,6 +93,7 @@ RC_SRCS16 = \
 MC_SRCS = \
 	nls/winerr_deu.mc \
 	nls/winerr_enu.mc \
+	nls/winerr_fra.mc \
 	nls/winerr_kor.mc
 
 EXTRA_OBJS   = relay16asm.o

@@ -67,12 +67,10 @@ BEGIN
     GROUPBOX        " Настройки окна ",IDC_STATIC,8,4,244,180
 
     CONTROL	    "Разрешить приложению DirectX удерживать мышь в своём окне",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,14,235,8
-    CONTROL	    "Включить двойную буферизацию рабочего стола",IDC_DOUBLE_BUFFER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,24,230,8
-    CONTROL	    "Разрешить менеджеру окон управлять окнами",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,34,230,8
+    CONTROL	    "Разрешить менеджеру окон управлять окнами Wine",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,34,230,8
 
-    /* FIXME: the wording of this explanation could be a lot better */
-    LTEXT           "Если включить эмуляцию рабочего стола, то все окна будут отображаться в одном 'виртуальном экране', иначе окна размещаются как обычные, на стандартном рабочем столе.",
-                    IDC_STATIC,15,125,228,28
+    LTEXT           "Если включить эмуляцию рабочего стола, то все окна будут отображаться в одном 'виртуальном экране' заданного размера. Иначе окна размещаются, как обычно, на стандартном рабочем столе.",
+                    IDC_STATIC,15,117,228,36
     LTEXT           "Размер рабочего стола:",IDC_DESKTOP_SIZE,15,167,44,8,WS_DISABLED
     LTEXT           "X",IDC_DESKTOP_BY,108,167,8,8,WS_DISABLED
     CONTROL         "Эмулировать виртуальный рабочий стол",IDC_ENABLE_DESKTOP,"Button",
@@ -81,12 +79,16 @@ BEGIN
     EDITTEXT        IDC_DESKTOP_WIDTH,64,167,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
     EDITTEXT        IDC_DESKTOP_HEIGHT,117,167,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
 
-    GROUPBOX        " Direct3D ",IDC_STATIC,8,189,244,55
+    GROUPBOX        " Direct3D ",IDC_STATIC,8,189,244,45
 
     LTEXT	    "Вершинные шейдеры: ",IDC_STATIC,15,199,120,30
     COMBOBOX	    IDC_D3D_VSHADER_MODE,120,197,125,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
     CONTROL         "Включить Pixel Shader (если поддерживается оборудованием)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,216,230,10
+    GROUPBOX        " Screen Resolution ",IDC_STATIC,8,242,244,25
+    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
+    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT           "dpi",IDC_STATIC,235,252,10,8
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -180,13 +182,21 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Внешний вид ",IDC_STATIC,8,4,244,106
-    LTEXT           "Тема:",IDC_STATIC,15,16,230,8
-    COMBOBOX        IDC_THEME_THEMECOMBO,15,24,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Установить тему...",IDC_THEME_INSTALL,152,38,93,14
-    LTEXT           "Цвет:",IDC_THEME_COLORTEXT,15,54,230,8
-    COMBOBOX        IDC_THEME_COLORCOMBO,15,62,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Размер:",IDC_THEME_SIZETEXT,15,80,230,8
-    COMBOBOX        IDC_THEME_SIZECOMBO,15,88,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Тема:",IDC_STATIC,15,16,130,8
+    COMBOBOX        IDC_THEME_THEMECOMBO,15,24,130,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Установить тему...",IDC_THEME_INSTALL,152,23,93,14
+    LTEXT           "Цвет:",IDC_THEME_COLORTEXT,15,40,112,8
+    COMBOBOX        IDC_THEME_COLORCOMBO,15,48,112,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Размер:",IDC_THEME_SIZETEXT,135,40,110,8
+    COMBOBOX        IDC_THEME_SIZECOMBO,135,48,110,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Элемент:",IDC_STATIC,15,64,112,8
+    COMBOBOX        IDC_SYSPARAM_COMBO,15,74,112,120,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP | CBS_SORT
+    LTEXT           "Цвет:",IDC_SYSPARAM_COLOR_TEXT,135,64,25,8,WS_DISABLED
+    PUSHBUTTON      "",IDC_SYSPARAM_COLOR,135,74,25,13,WS_DISABLED | BS_OWNERDRAW
+    LTEXT           "Размер:",IDC_SYSPARAM_SIZE_TEXT,166,64,30,8,WS_DISABLED
+    EDITTEXT        IDC_SYSPARAM_SIZE,166,74,23,13,ES_AUTOHSCROLL | WS_TABSTOP | WS_DISABLED
+    CONTROL         "",IDC_SYSPARAM_SIZE_UD,UPDOWN_CLASS,UDS_SETBUDDYINT | WS_DISABLED,187,74,15,13
+    PUSHBUTTON      "Шрифт",IDC_SYSPARAM_FONT,208,74,37,13,WS_DISABLED
     GROUPBOX        " Стандартные папки ",IDC_STATIC,8,114,244,100
     CONTROL         "Listview",IDC_LIST_SFPATHS,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                      LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,126,230,64
@@ -206,13 +216,14 @@ BEGIN
     IDS_SHOW_ADVANCED       "Показать дополнительные"
     IDS_NOTHEME             "(без темы)"
     IDS_TAB_GRAPHICS        "Графика"
-    IDS_TAB_DESKTOP_INTEGRATION "Desktop Integration"
+    IDS_TAB_DESKTOP_INTEGRATION "Вид и интеграция"
     IDS_TAB_AUDIO           "Аудио"
     IDS_TAB_ABOUT           "О программе"
     IDS_WINECFG_TITLE       "Настройка Wine"
     IDS_WINECFG_TITLE_APP   "Настройка Wine для %s"
     IDS_THEMEFILE           "Файлы тем"
     IDS_THEMEFILE_SELECT    "Выберите файл с темой"
+    IDS_AUDIO_MISSING       "Конфигурация звукового драйвера не найдена.\n\nВыбран драйвер по умолчанию. Если необходимо, вы можете выбрать другой из списка доступных драйверов.\n\nДля сохранения изменений нажмите кнопку Применить."
     IDS_SHELL_FOLDER        "Стандартные папки"
     IDS_LINKS_TO            "Связано с"
 END
@@ -236,7 +247,6 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_SHADER_MODE_HARDWARE    "Включены"
     IDS_SHADER_MODE_NONE        "Выключены"
-    IDS_SHADER_MODE_EMULATION   "Эмуляция"
 END
 
 STRINGTABLE DISCARDABLE
@@ -261,7 +271,6 @@ BEGIN
     IDS_ACCEL_BASIC             "Минимальное"
     IDS_ACCEL_EMULATION         "Эмуляция"
     IDS_DRIVER_ALSA             "ALSA драйвер"
-    IDS_DRIVER_ARTS             "aRts драйвер"
     IDS_DRIVER_ESOUND           "EsounD драйвер"
     IDS_DRIVER_OSS              "OSS драйвер"
     IDS_DRIVER_JACK             "JACK драйвер"
@@ -278,4 +287,25 @@ BEGIN
     IDS_DEVICES_MIXER           "Устройство микширования"
     IDS_UNAVAILABLE_DRIVER      "Драйвер, указанный в реестре, не найден!\n\nУдалить \"%s\" из реестра?"
     IDS_WARNING                 "Внимание"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    IDC_SYSPARAMS_BUTTON            "Элементы управления - фон"
+    IDC_SYSPARAMS_BUTTON_TEXT       "Элементы управления - текст"
+    IDC_SYSPARAMS_DESKTOP           "Стол"
+    IDC_SYSPARAMS_MENU              "Меню - фон"
+    IDC_SYSPARAMS_MENU_TEXT         "Меню - текст"
+    IDC_SYSPARAMS_SCROLLBAR         "Полоса прокрутки"
+    IDC_SYSPARAMS_SELECTION         "Выделение - фон"
+    IDC_SYSPARAMS_SELECTION_TEXT    "Выделение - текст"
+    IDC_SYSPARAMS_TOOLTIP           "Подсказка - фон"
+    IDC_SYSPARAMS_TOOLTIP_TEXT      "Подсказка - текст"
+    IDC_SYSPARAMS_WINDOW            "Содержимое окна - фон"
+    IDC_SYSPARAMS_WINDOW_TEXT       "Содержимое окна - текст"
+    IDC_SYSPARAMS_ACTIVE_TITLE      "Активное окно"
+    IDC_SYSPARAMS_ACTIVE_TITLE_TEXT "Активное окно - текст"
+    IDC_SYSPARAMS_INACTIVE_TITLE    "Пассивное окно"
+    IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "Пассивное окно - текст"
+    IDC_SYSPARAMS_MSGBOX_TEXT       "Message Box Text"
 END

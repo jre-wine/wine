@@ -31,12 +31,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(explorer);
 #define DESKTOP_CLASS_ATOM ((LPCWSTR)MAKEINTATOM(32769))
 #define DESKTOP_ALL_ACCESS 0x01ff
 
+extern HANDLE __wine_make_process_system(void);
+
 static BOOL using_root;
 
 /* window procedure for the desktop window */
 static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 {
-    WINE_TRACE( "got msg %x wp %x lp %lx\n", message, wp, lp );
+    WINE_TRACE( "got msg %x wp %lx lp %lx\n", message, wp, lp );
 
     switch(message)
     {
@@ -198,6 +200,10 @@ void manage_desktop( char *arg )
     /* run the desktop message loop */
     if (hwnd)
     {
+        /* we don't use the system process event, the server
+         * posts a WM_CLOSE when the last desktop user is gone */
+        CloseHandle( __wine_make_process_system() );
+
         WINE_TRACE( "desktop message loop starting on hwnd %p\n", hwnd );
         while (GetMessageW( &msg, 0, 0, 0 )) DispatchMessageW( &msg );
         WINE_TRACE( "desktop message loop exiting for hwnd %p\n", hwnd );

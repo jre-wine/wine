@@ -26,7 +26,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "gdi.h"
 #include "gdi_private.h"
 
 /* Metafile driver physical DC */
@@ -34,7 +33,6 @@
 typedef struct
 {
     HDC          hdc;
-    DC          *dc;
     METAHEADER  *mh;           /* Pointer to metafile header */
     UINT       handles_size, cur_handles;
     HGDIOBJ   *handles;
@@ -57,6 +55,7 @@ extern BOOL MFDRV_MetaParam8(PHYSDEV dev, short func, short param1, short param2
                              short param6, short param7, short param8);
 extern BOOL MFDRV_WriteRecord(PHYSDEV dev, METARECORD *mr, DWORD rlen);
 extern UINT MFDRV_AddHandle( PHYSDEV dev, HGDIOBJ obj );
+extern BOOL MFDRV_RemoveHandle( PHYSDEV dev, UINT index );
 extern INT16 MFDRV_CreateBrushIndirect( PHYSDEV dev, HBRUSH hBrush );
 
 /* Metafile driver functions */

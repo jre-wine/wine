@@ -93,14 +93,14 @@ typedef struct
 
 #define ANIMATE_COLOR_NONE  	0xffffffff
 
-static void ANIMATE_Notify(ANIMATE_INFO *infoPtr, UINT notif)
+static void ANIMATE_Notify(const ANIMATE_INFO *infoPtr, UINT notif)
 {
     SendMessageW(infoPtr->hwndNotify, WM_COMMAND,
 		 MAKEWPARAM(GetDlgCtrlID(infoPtr->hwndSelf), notif),
 		 (LPARAM)infoPtr->hwndSelf);
 }
 
-static BOOL ANIMATE_LoadResW(ANIMATE_INFO *infoPtr, HINSTANCE hInst, LPWSTR lpName)
+static BOOL ANIMATE_LoadResW(ANIMATE_INFO *infoPtr, HINSTANCE hInst, LPCWSTR lpName)
 {
     static const WCHAR aviW[] = { 'A', 'V', 'I', 0 };
     HRSRC 	hrsrc;
@@ -217,7 +217,7 @@ static void ANIMATE_Free(ANIMATE_INFO *infoPtr)
     infoPtr->transparentColor = ANIMATE_COLOR_NONE;
 }
 
-static void ANIMATE_TransparentBlt(ANIMATE_INFO *infoPtr, HDC hdcDest, HDC hdcSource)
+static void ANIMATE_TransparentBlt(ANIMATE_INFO const *infoPtr, HDC hdcDest, HDC hdcSource)
 {
     HDC hdcMask;
     HBITMAP hbmMask;
@@ -251,8 +251,8 @@ static void ANIMATE_TransparentBlt(ANIMATE_INFO *infoPtr, HDC hdcDest, HDC hdcSo
 
 static BOOL ANIMATE_PaintFrame(ANIMATE_INFO* infoPtr, HDC hDC)
 {
-    void *pBitmapData;
-    LPBITMAPINFO pBitmapInfo;
+    void const *pBitmapData;
+    BITMAPINFO const *pBitmapInfo;
     HDC hdcMem;
     HBITMAP hbmOld;
     int nOffsetX = 0;
@@ -772,7 +772,7 @@ static BOOL ANIMATE_Stop(ANIMATE_INFO *infoPtr)
 }
 
 
-static BOOL ANIMATE_Create(HWND hWnd, LPCREATESTRUCTW lpcs)
+static BOOL ANIMATE_Create(HWND hWnd, const CREATESTRUCTW *lpcs)
 {
     static const WCHAR msvfw32W[] = { 'm', 's', 'v', 'f', 'w', '3', '2', '.', 'd', 'l', 'l', 0 };
     ANIMATE_INFO *infoPtr;
@@ -803,6 +803,7 @@ static BOOL ANIMATE_Create(HWND hWnd, LPCREATESTRUCTW lpcs)
     TRACE("Animate style=0x%08x, parent=%p\n", infoPtr->dwStyle, infoPtr->hwndNotify);
 
     InitializeCriticalSection(&infoPtr->cs);
+    infoPtr->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ANIMATE_INFO*->cs");
 
     return TRUE;
 }
@@ -816,6 +817,7 @@ static LRESULT ANIMATE_Destroy(ANIMATE_INFO *infoPtr)
     /* free animate info data */
     SetWindowLongPtrW(infoPtr->hwndSelf, 0, 0);
 
+    infoPtr->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&infoPtr->cs);
     Free(infoPtr);
 
@@ -823,7 +825,7 @@ static LRESULT ANIMATE_Destroy(ANIMATE_INFO *infoPtr)
 }
 
 
-static BOOL ANIMATE_EraseBackground(ANIMATE_INFO *infoPtr, HDC hdc)
+static BOOL ANIMATE_EraseBackground(ANIMATE_INFO const *infoPtr, HDC hdc)
 {
     RECT rect;
     HBRUSH hBrush = 0;
@@ -841,9 +843,9 @@ static BOOL ANIMATE_EraseBackground(ANIMATE_INFO *infoPtr, HDC hdc)
 }
 
 
-static LRESULT ANIMATE_StyleChanged(ANIMATE_INFO *infoPtr, WPARAM wStyleType, LPSTYLESTRUCT lpss)
+static LRESULT ANIMATE_StyleChanged(ANIMATE_INFO *infoPtr, WPARAM wStyleType, const STYLESTRUCT *lpss)
 {
-    TRACE("(styletype=%x, styleOld=0x%08x, styleNew=0x%08x)\n",
+    TRACE("(styletype=%lx, styleOld=0x%08x, styleNew=0x%08x)\n",
           wStyleType, lpss->styleOld, lpss->styleNew);
 
     if (wStyleType != GWL_STYLE) return 0;
@@ -859,7 +861,7 @@ static LRESULT WINAPI ANIMATE_WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 {
     ANIMATE_INFO *infoPtr = (ANIMATE_INFO *)GetWindowLongPtrW(hWnd, 0);
 
-    TRACE("hwnd=%p msg=%x wparam=%x lparam=%lx\n", hWnd, uMsg, wParam, lParam);
+    TRACE("hwnd=%p msg=%x wparam=%lx lparam=%lx\n", hWnd, uMsg, wParam, lParam);
     if (!infoPtr && (uMsg != WM_NCCREATE))
 	return DefWindowProcW(hWnd, uMsg, wParam, lParam);
     switch (uMsg)
@@ -943,7 +945,7 @@ static LRESULT WINAPI ANIMATE_WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
 
     default:
 	if ((uMsg >= WM_USER) && (uMsg < WM_APP))
-	    ERR("unknown msg %04x wp=%08x lp=%08lx\n", uMsg, wParam, lParam);
+	    ERR("unknown msg %04x wp=%08lx lp=%08lx\n", uMsg, wParam, lParam);
 
 	return DefWindowProcW(hWnd, uMsg, wParam, lParam);
     }

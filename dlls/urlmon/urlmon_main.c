@@ -181,6 +181,8 @@ static const ClassFactory FtpProtocolCF =
     { &ClassFactoryVtbl, FtpProtocol_Construct};
 static const ClassFactory HttpProtocolCF =
     { &ClassFactoryVtbl, HttpProtocol_Construct};
+static const ClassFactory MkProtocolCF =
+    { &ClassFactoryVtbl, MkProtocol_Construct};
 static const ClassFactory SecurityManagerCF =
     { &ClassFactoryVtbl, SecManagerImpl_Construct};
 static const ClassFactory ZoneManagerCF =
@@ -196,12 +198,14 @@ struct object_creation_info
 static const WCHAR wszFile[] = {'f','i','l','e',0};
 static const WCHAR wszFtp[]  = {'f','t','p',0};
 static const WCHAR wszHttp[] = {'h','t','t','p',0};
+static const WCHAR wszMk[]   = {'m','k',0};
 
 static const struct object_creation_info object_creation[] =
 {
     { &CLSID_FileProtocol,            CLASSFACTORY(&FileProtocolCF),    wszFile },
     { &CLSID_FtpProtocol,             CLASSFACTORY(&FtpProtocolCF),     wszFtp  },
     { &CLSID_HttpProtocol,            CLASSFACTORY(&HttpProtocolCF),    wszHttp },
+    { &CLSID_MkProtocol,              CLASSFACTORY(&MkProtocolCF),      wszMk },
     { &CLSID_InternetSecurityManager, CLASSFACTORY(&SecurityManagerCF), NULL    },
     { &CLSID_InternetZoneManager,     CLASSFACTORY(&ZoneManagerCF),     NULL    }
 };
@@ -216,11 +220,19 @@ static void init_session(BOOL init)
     for(i=0; i < sizeof(object_creation)/sizeof(object_creation[0]); i++) {
         if(object_creation[i].protocol) {
             if(init)
+            {
                 IInternetSession_RegisterNameSpace(session, object_creation[i].cf,
                         object_creation[i].clsid, object_creation[i].protocol, 0, NULL, 0);
+                /* make sure that the AddRef on the class factory doesn't keep us loaded */
+                URLMON_UnlockModule();
+            }
             else
+            {
+                /* make sure that the Release on the class factory doesn't unload us */
+                URLMON_LockModule();
                 IInternetSession_UnregisterNameSpace(session, object_creation[i].cf,
                         object_creation[i].protocol);
+            }
         }
     }
 
@@ -292,21 +304,20 @@ HRESULT WINAPI ObtainUserAgentString(DWORD dwOption, LPSTR pcszUAOut, DWORD *cbS
 {
     FIXME("(%d, %p, %p): stub\n", dwOption, pcszUAOut, cbSize);
 
-    if(dwOption) {
-      ERR("dwOption: %d, must be zero\n", dwOption);
+    if (pcszUAOut == NULL || cbSize == NULL)
+        return E_INVALIDARG;
+
+    if (*cbSize < sizeof(Agent))
+    {
+        *cbSize = sizeof(Agent);
+        return E_OUTOFMEMORY;
     }
 
     if (sizeof(Agent) < *cbSize)
         *cbSize = sizeof(Agent);
-    lstrcpynA(pcszUAOut, Agent, *cbSize); 
+    lstrcpynA(pcszUAOut, Agent, *cbSize);
 
     return S_OK;
-}
-
-HRESULT WINAPI CoInternetCompareUrl(LPCWSTR pwzUrl1, LPCWSTR pwzUrl2, DWORD dwCompareFlags)
-{
-    TRACE("(%s,%s,%08x)\n", debugstr_w(pwzUrl1), debugstr_w(pwzUrl2), dwCompareFlags);
-    return UrlCompareW(pwzUrl1, pwzUrl2, dwCompareFlags)==0?S_OK:S_FALSE;
 }
 
 /**************************************************************************
@@ -402,7 +413,7 @@ void WINAPI ReleaseBindInfo(BINDINFO* pbindinfo)
  *
  * Determines the Multipurpose Internet Mail Extensions (MIME) type from the data provided.
  */
-static BOOL text_html_filter(const BYTE const *b, DWORD size)
+static BOOL text_html_filter(const BYTE *b, DWORD size)
 {
     int i;
 
@@ -421,7 +432,7 @@ static BOOL text_html_filter(const BYTE const *b, DWORD size)
     return FALSE;
 }
 
-static BOOL image_gif_filter(const BYTE const *b, DWORD size)
+static BOOL image_gif_filter(const BYTE *b, DWORD size)
 {
     return size >= 6
         && (b[0] == 'G' || b[0] == 'g')
@@ -432,44 +443,69 @@ static BOOL image_gif_filter(const BYTE const *b, DWORD size)
         && (b[5] == 'A' || b[5] == 'a');
 }
 
-static BOOL image_pjpeg_filter(const BYTE const *b, DWORD size)
+static BOOL image_pjpeg_filter(const BYTE *b, DWORD size)
 {
     return size > 2 && b[0] == 0xff && b[1] == 0xd8;
 }
 
-static BOOL image_tiff_filter(const BYTE const *b, DWORD size)
+static BOOL image_tiff_filter(const BYTE *b, DWORD size)
 {
     return size > 2 && b[0] == 0x4d && b[1] == 0x4d;
 }
 
-static BOOL image_xpng_filter(const BYTE const *b, DWORD size)
+static BOOL image_xpng_filter(const BYTE *b, DWORD size)
 {
     static const BYTE xpng_header[] = {0x89,'P','N','G',0x0d,0x0a,0x1a,0x0a};
     return size > sizeof(xpng_header) && !memcmp(b, xpng_header, sizeof(xpng_header));
 }
 
-static BOOL image_bmp_filter(const BYTE const *b, DWORD size)
+static BOOL image_bmp_filter(const BYTE *b, DWORD size)
 {
     return size >= 14
         && b[0] == 0x42 && b[1] == 0x4d
-        && *(DWORD*)(b+6) == 0;
+        && *(const DWORD *)(b+6) == 0;
 }
 
-static BOOL video_avi_filter(const BYTE const *b, DWORD size)
+static BOOL video_avi_filter(const BYTE *b, DWORD size)
 {
     return size > 12
         && b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F'
         && b[8] == 'A' && b[9] == 'V' && b[10] == 'I' && b[11] == 0x20;
 }
 
-static BOOL video_mpeg_filter(const BYTE const *b, DWORD size)
+static BOOL video_mpeg_filter(const BYTE *b, DWORD size)
 {
     return size > 4
         && !b[0] && !b[1] && b[2] == 0x01
         && (b[3] == 0xb3 || b[3] == 0xba);
 }
 
-static BOOL text_plain_filter(const BYTE const *b, DWORD size)
+static BOOL application_pdf_filter(const BYTE *b, DWORD size)
+{
+    return size > 4 && b[0] == 0x25 && b[1] == 0x50 && b[2] == 0x44 && b[3] == 0x46;
+}
+
+static BOOL application_xzip_filter(const BYTE *b, DWORD size)
+{
+    return size > 2 && b[0] == 0x50 && b[1] == 0x4b;
+}
+
+static BOOL application_xgzip_filter(const BYTE *b, DWORD size)
+{
+    return size > 2 && b[0] == 0x1f && b[1] == 0x8b;
+}
+
+static BOOL application_java_filter(const BYTE *b, DWORD size)
+{
+    return size > 4 && b[0] == 0xca && b[1] == 0xfe && b[2] == 0xba && b[3] == 0xbe;
+}
+
+static BOOL application_xmsdownload(const BYTE *b, DWORD size)
+{
+    return size > 2 && b[0] == 'M' && b[1] == 'Z';
+}
+
+static BOOL text_plain_filter(const BYTE *b, DWORD size)
 {
     const BYTE *ptr;
 
@@ -481,7 +517,7 @@ static BOOL text_plain_filter(const BYTE const *b, DWORD size)
     return TRUE;
 }
 
-static BOOL application_octet_stream_filter(const BYTE const *b, DWORD size)
+static BOOL application_octet_stream_filter(const BYTE *b, DWORD size)
 {
     return TRUE;
 }
@@ -516,7 +552,7 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
     }
 
     if(pBuffer) {
-        const BYTE const *buf = pBuffer;
+        const BYTE *buf = pBuffer;
         DWORD len;
         LPCWSTR ret = NULL;
         int i;
@@ -529,13 +565,23 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
         static const WCHAR wszImageBmp[] = {'i','m','a','g','e','/','b','m','p',0};
         static const WCHAR wszVideoAvi[] = {'v','i','d','e','o','/','a','v','i',0};
         static const WCHAR wszVideoMpeg[] = {'v','i','d','e','o','/','m','p','e','g',0};
+        static const WCHAR wszAppPdf[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+            'p','d','f',0};
+        static const WCHAR wszAppXZip[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+            'x','-','z','i','p','-','c','o','m','p','r','e','s','s','e','d',0};
+        static const WCHAR wszAppXGzip[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+            'x','-','g','z','i','p','-','c','o','m','p','r','e','s','s','e','d',0};
+        static const WCHAR wszAppJava[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+            'j','a','v','a',0};
+        static const WCHAR wszAppXMSDownload[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
+            'x','-','m','s','d','o','w','n','l','o','a','d',0};
         static const WCHAR wszTextPlain[] = {'t','e','x','t','/','p','l','a','i','n','\0'};
         static const WCHAR wszAppOctetStream[] = {'a','p','p','l','i','c','a','t','i','o','n','/',
             'o','c','t','e','t','-','s','t','r','e','a','m','\0'};
 
         static const struct {
             LPCWSTR mime;
-            BOOL (*filter)(const BYTE const*,DWORD);
+            BOOL (*filter)(const BYTE *,DWORD);
         } mime_filters[] = {
             {wszTextHtml,       text_html_filter},
             {wszImageGif,       image_gif_filter},
@@ -545,6 +591,11 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
             {wszImageBmp,       image_bmp_filter},
             {wszVideoAvi,       video_avi_filter},
             {wszVideoMpeg,      video_mpeg_filter},
+            {wszAppPdf,         application_pdf_filter},
+            {wszAppXZip,        application_xzip_filter},
+            {wszAppXGzip,       application_xgzip_filter},
+            {wszAppJava,        application_java_filter},
+            {wszAppXMSDownload, application_xmsdownload},
             {wszTextPlain,      text_plain_filter},
             {wszAppOctetStream, application_octet_stream_filter}
         };
@@ -609,13 +660,13 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
 
         res = RegOpenKeyW(HKEY_CLASSES_ROOT, ptr, &hkey);
         if(res != ERROR_SUCCESS)
-            return E_FAIL;
+            return HRESULT_FROM_WIN32(res);
 
         size = sizeof(mime);
         res = RegQueryValueExW(hkey, wszContentType, NULL, NULL, (LPBYTE)mime, &size);
         RegCloseKey(hkey);
         if(res != ERROR_SUCCESS)
-            return E_FAIL;
+            return HRESULT_FROM_WIN32(res);
 
         *ppwzMimeOut = CoTaskMemAlloc(size);
         memcpy(*ppwzMimeOut, mime, size);

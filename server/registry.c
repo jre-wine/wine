@@ -103,7 +103,7 @@ struct key_value
 /* the root of the registry tree */
 static struct key *root_key;
 
-static const int save_period = 30000;           /* delay between periodic saves (in ms) */
+static const timeout_t save_period = 30 * -TICKS_PER_SEC;  /* delay between periodic saves */
 static struct timeout_user *save_timeout_user;  /* saving timer */
 
 static void set_periodic_save_timer(void);
@@ -149,7 +149,10 @@ static const struct object_ops key_ops =
     no_signal,               /* signal */
     no_get_fd,               /* get_fd */
     key_map_access,          /* map_access */
+    default_get_sd,          /* get_sd */
+    default_set_sd,          /* set_sd */
     no_lookup_name,          /* lookup_name */
+    no_open_file,            /* open_file */
     key_close_handle,        /* close_handle */
     key_destroy              /* destroy */
 };
@@ -350,7 +353,7 @@ static void key_destroy( struct object *obj )
 }
 
 /* get the request vararg as registry path */
-inline static void get_req_path( struct unicode_str *str, int skip_root )
+static inline void get_req_path( struct unicode_str *str, int skip_root )
 {
     static const WCHAR root_name[] = { '\\','R','e','g','i','s','t','r','y','\\' };
 
@@ -1682,11 +1685,8 @@ static void periodic_save( void *arg )
 /* start the periodic save timer */
 static void set_periodic_save_timer(void)
 {
-    struct timeval next = current_time;
-
-    add_timeout( &next, save_period );
     if (save_timeout_user) remove_timeout_user( save_timeout_user );
-    save_timeout_user = add_timeout_user( &next, periodic_save, NULL );
+    save_timeout_user = add_timeout_user( save_period, periodic_save, NULL );
 }
 
 /* save the modified registry branches to disk */
@@ -1713,7 +1713,6 @@ DECL_HANDLER(create_key)
     struct unicode_str name, class;
     unsigned int access = req->access;
 
-    if (access & MAXIMUM_ALLOWED) access = KEY_ALL_ACCESS;  /* FIXME: needs general solution */
     reply->hkey = 0;
 
     if (req->namelen > get_req_data_size())
@@ -1752,7 +1751,6 @@ DECL_HANDLER(open_key)
     struct unicode_str name;
     unsigned int access = req->access;
 
-    if (access & MAXIMUM_ALLOWED) access = KEY_ALL_ACCESS;  /* FIXME: needs general solution */
     reply->hkey = 0;
     /* NOTE: no access rights are required to open the parent key, only the child key */
     if ((parent = get_parent_hkey_obj( req->parent )))

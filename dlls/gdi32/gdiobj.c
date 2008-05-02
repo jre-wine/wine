@@ -32,7 +32,6 @@
 #include "winerror.h"
 #include "winternl.h"
 
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -75,13 +74,6 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
       0, 0, { (DWORD_PTR)(__FILE__ ": GDI_level") }
 };
 static SYSLEVEL GDI_level = { { &critsect_debug, -1, 0, 0, 0, 0 }, 3 };
-
-inline static BOOL get_bool(char *buffer)
-{
-    return (buffer[0] == 'y' || buffer[0] == 'Y' ||
-            buffer[0] == 't' || buffer[0] == 'T' ||
-            buffer[0] == '1');
-}
 
 
 /****************************************************************************
@@ -493,7 +485,7 @@ static UINT get_default_charset( void )
 
     uACP = GetACP();
     csi.ciCharset = ANSI_CHARSET;
-    if ( ! TranslateCharsetInfo( (LPDWORD)uACP, &csi, TCI_SRCCODEPAGE ) )
+    if ( !TranslateCharsetInfo( ULongToPtr(uACP), &csi, TCI_SRCCODEPAGE ) )
     {
         FIXME( "unhandled codepage %u - use ANSI_CHARSET for default stock objects\n", uACP );
         return ANSI_CHARSET;
@@ -532,11 +524,11 @@ static DWORD get_dpi( void )
 
 
 /***********************************************************************
- *           inc_ref_count
+ *           GDI_inc_ref_count
  *
  * Increment the reference count of a GDI object.
  */
-inline static void inc_ref_count( HGDIOBJ handle )
+BOOL GDI_inc_ref_count( HGDIOBJ handle )
 {
     GDIOBJHDR *header;
 
@@ -545,15 +537,16 @@ inline static void inc_ref_count( HGDIOBJ handle )
         header->dwCount++;
         GDI_ReleaseObj( handle );
     }
+    return header != NULL;
 }
 
 
 /***********************************************************************
- *           dec_ref_count
+ *           GDI_dec_ref_count
  *
  * Decrement the reference count of a GDI object.
  */
-inline static void dec_ref_count( HGDIOBJ handle )
+BOOL GDI_dec_ref_count( HGDIOBJ handle )
 {
     GDIOBJHDR *header;
 
@@ -570,6 +563,7 @@ inline static void dec_ref_count( HGDIOBJ handle )
             DeleteObject( handle );
         }
     }
+    return header != NULL;
 }
 
 
@@ -646,7 +640,7 @@ static int next_large_handle;
  *
  * Allocate a GDI handle from the large heap. Helper for GDI_AllocObject
  */
-inline static GDIOBJHDR *alloc_large_heap( WORD size, HGDIOBJ *handle )
+static inline GDIOBJHDR *alloc_large_heap( WORD size, HGDIOBJ *handle )
 {
     int i;
     GDIOBJHDR *obj;
@@ -837,7 +831,7 @@ BOOL WINAPI DeleteObject( HGDIOBJ obj )
         {
             if(dc->funcs->pDeleteObject)
                 dc->funcs->pDeleteObject( dc->physDev, obj );
-            GDI_ReleaseObj( header->hdcs->hdc );
+            DC_ReleaseDCPtr( dc );
         }
         tmp = header->hdcs;
         header->hdcs = header->hdcs->next;
@@ -1123,7 +1117,7 @@ HGDIOBJ WINAPI GetCurrentObject(HDC hdc,UINT type)
     	FIXME("(%p,%d): unknown type.\n",hdc,type);
 	    break;
         }
-        GDI_ReleaseObj( hdc );
+        DC_ReleaseDCPtr( dc );
     }
     return ret;
 }
@@ -1157,21 +1151,14 @@ HGDIOBJ WINAPI SelectObject( HDC hdc, HGDIOBJ hObj )
         SetLastError( ERROR_INVALID_HANDLE );
     else
     {
-        GDI_ReleaseObj( hdc );
+        DC_ReleaseDCPtr( dc );
 
         header = GDI_GetObjPtr( hObj, MAGIC_DONTCARE );
         if (header)
         {
-            if (header->funcs && header->funcs->pSelectObject)
-            {
-                ret = header->funcs->pSelectObject( hObj, header, hdc );
-                if (ret && ret != hObj && (INT)ret > COMPLEXREGION)
-                {
-                    inc_ref_count( hObj );
-                    dec_ref_count( ret );
-                }
-            }
-	    GDI_ReleaseObj( hObj );
+            const struct gdi_obj_funcs *funcs = header->funcs;
+            GDI_ReleaseObj( hObj );
+            if (funcs && funcs->pSelectObject) ret = funcs->pSelectObject( hObj, hdc );
         }
     }
     return ret;
@@ -1456,8 +1443,8 @@ BOOL WINAPI GdiComment(HDC hdc, UINT cbSize, const BYTE *lpData)
     {
         if (dc->funcs->pGdiComment)
             ret = dc->funcs->pGdiComment( dc->physDev, cbSize, lpData );
+        DC_ReleaseDCPtr( dc );
     }
-    GDI_ReleaseObj( hdc );
     return ret;
 }
 

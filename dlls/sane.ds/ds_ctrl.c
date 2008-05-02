@@ -485,7 +485,7 @@ TW_UINT16 SANE_SetupFileXfer2Set (pTW_IDENTITY pOrigin,
 TW_UINT16 SANE_SetupMemXferGet (pTW_IDENTITY pOrigin, 
                                   TW_MEMREF pData)
 {
-#ifndef HAVE_SANE
+#ifndef SONAME_LIBSANE
     return TWRC_FAILURE;
 #else
     pTW_SETUPMEMXFER  pSetupMemXfer = (pTW_SETUPMEMXFER)pData;
@@ -573,10 +573,10 @@ TW_UINT16 SANE_EnableDSUserInterface (pTW_IDENTITY pOrigin,
             {
                 activeDS.pendingEvent.TWMessage = MSG_CLOSEDSREQ;
             }
-#ifdef HAVE_SANE
+#ifdef SONAME_LIBSANE
             else
             {
-                sane_get_parameters (activeDS.deviceHandle, &activeDS.sane_param);
+                psane_get_parameters (activeDS.deviceHandle, &activeDS.sane_param);
                 activeDS.sane_param_valid = TRUE;
             }
 #endif

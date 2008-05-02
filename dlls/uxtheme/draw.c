@@ -1389,7 +1389,7 @@ static HRESULT draw_rect_edge (HDC hdc, HTHEME theme, int part, int state,
         LTInnerI = RBInnerI = LTRBInnerFlat[uType & (BDR_INNER|BDR_OUTER)];
         LTOuterI = RBOuterI = LTRBOuterFlat[uType & (BDR_INNER|BDR_OUTER)];
 
-        if( LTInnerI != -1 ) LTInnerI = RBInnerI = COLOR_BTNFACE;
+        if( LTInnerI != -1 ) LTInnerI = RBInnerI = EDGE_FILL;
     }
     else if(uFlags & BF_SOFT)
     {
@@ -1719,8 +1719,8 @@ HRESULT WINAPI GetThemeBackgroundRegion(HTHEME hTheme, HDC hdc, int iPartId,
 }
 
 /* compute part size for "borderfill" backgrounds */
-HRESULT get_border_background_size (HTHEME hTheme, int iPartId,
-                                    int iStateId, THEMESIZE eSize, POINT* psz)
+static HRESULT get_border_background_size (HTHEME hTheme, int iPartId,
+                                           int iStateId, THEMESIZE eSize, POINT* psz)
 {
     HRESULT hr = S_OK;
     int bordersize = 1;

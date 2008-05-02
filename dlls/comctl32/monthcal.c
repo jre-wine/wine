@@ -94,6 +94,7 @@ typedef struct
                         /* control moves when user clicks a scroll button */
     int		visible;	/* # of months visible */
     int		firstDay;	/* Start month calendar with firstDay's day */
+    int		firstDayHighWord;    /* High word only used externally */
     int		monthRange;
     MONTHDAYSTATE *monthdayState;
     SYSTEMTIME	todaysDate;
@@ -189,7 +190,7 @@ static int MONTHCAL_CalculateDayOfWeek(DWORD day, DWORD month, DWORD year)
 /* From a given point, calculate the row (weekpos), column(daypos)
    and day in the calendar. day== 0 mean the last day of tha last month
 */
-static int MONTHCAL_CalcDayFromPos(MONTHCAL_INFO *infoPtr, int x, int y,
+static int MONTHCAL_CalcDayFromPos(const MONTHCAL_INFO *infoPtr, int x, int y,
 				   int *daypos,int *weekpos)
 {
   int retval, firstDay;
@@ -214,7 +215,7 @@ static int MONTHCAL_CalcDayFromPos(MONTHCAL_INFO *infoPtr, int x, int y,
 /* day is the day of the month, 1 == 1st day of the month */
 /* sets x and y to be the position of the day */
 /* x == day, y == week where(0,0) == firstDay, 1st week */
-static void MONTHCAL_CalcDayXY(MONTHCAL_INFO *infoPtr, int day, int month,
+static void MONTHCAL_CalcDayXY(const MONTHCAL_INFO *infoPtr, int day, int month,
                                  int *x, int *y)
 {
   int firstDay, prevMonth;
@@ -243,7 +244,7 @@ static void MONTHCAL_CalcDayXY(MONTHCAL_INFO *infoPtr, int day, int month,
 
 
 /* x: column(day), y: row(week) */
-static void MONTHCAL_CalcDayRect(MONTHCAL_INFO *infoPtr, RECT *r, int x, int y)
+static void MONTHCAL_CalcDayRect(const MONTHCAL_INFO *infoPtr, RECT *r, int x, int y)
 {
   r->left = infoPtr->days.left + x * infoPtr->width_increment;
   r->right = r->left + infoPtr->width_increment;
@@ -255,7 +256,7 @@ static void MONTHCAL_CalcDayRect(MONTHCAL_INFO *infoPtr, RECT *r, int x, int y)
 /* sets the RECT struct r to the rectangle around the day and month */
 /* day is the day value of the month(1 == 1st), month is the month */
 /* value(january == 1, december == 12) */
-static inline void MONTHCAL_CalcPosFromDay(MONTHCAL_INFO *infoPtr,
+static inline void MONTHCAL_CalcPosFromDay(const MONTHCAL_INFO *infoPtr,
                                             int day, int month, RECT *r)
 {
   int x, y;
@@ -267,7 +268,7 @@ static inline void MONTHCAL_CalcPosFromDay(MONTHCAL_INFO *infoPtr,
 
 /* day is the day in the month(1 == 1st of the month) */
 /* month is the month value(1 == january, 12 == december) */
-static void MONTHCAL_CircleDay(MONTHCAL_INFO *infoPtr, HDC hdc, int day, int month)
+static void MONTHCAL_CircleDay(const MONTHCAL_INFO *infoPtr, HDC hdc, int day, int month)
 {
   HPEN hRedPen = CreatePen(PS_SOLID, 2, RGB(255, 0, 0));
   HPEN hOldPen2 = SelectObject(hdc, hRedPen);
@@ -318,7 +319,7 @@ static void MONTHCAL_CircleDay(MONTHCAL_INFO *infoPtr, HDC hdc, int day, int mon
 }
 
 
-static void MONTHCAL_DrawDay(MONTHCAL_INFO *infoPtr, HDC hdc, int day, int month,
+static void MONTHCAL_DrawDay(const MONTHCAL_INFO *infoPtr, HDC hdc, int day, int month,
                              int x, int y, int bold)
 {
   static const WCHAR fmtW[] = { '%','d',0 };
@@ -387,7 +388,7 @@ static void MONTHCAL_DrawDay(MONTHCAL_INFO *infoPtr, HDC hdc, int day, int month
 }
 
 
-static void paint_button (MONTHCAL_INFO *infoPtr, HDC hdc, BOOL btnNext, 
+static void paint_button (const MONTHCAL_INFO *infoPtr, HDC hdc, BOOL btnNext,
                           BOOL pressed, RECT* r)
 {
     HTHEME theme = GetWindowTheme (infoPtr->hwndSelf);
@@ -426,7 +427,7 @@ static void paint_button (MONTHCAL_INFO *infoPtr, HDC hdc, BOOL btnNext,
 }
 
 
-static void MONTHCAL_Refresh(MONTHCAL_INFO *infoPtr, HDC hdc, PAINTSTRUCT* ps)
+static void MONTHCAL_Refresh(MONTHCAL_INFO *infoPtr, HDC hdc, const PAINTSTRUCT *ps)
 {
   static const WCHAR todayW[] = { 'T','o','d','a','y',':',0 };
   static const WCHAR fmt1W[] = { '%','s',' ','%','l','d',0 };
@@ -773,7 +774,7 @@ static void MONTHCAL_Refresh(MONTHCAL_INFO *infoPtr, HDC hdc, PAINTSTRUCT* ps)
 
 
 static LRESULT
-MONTHCAL_GetMinReqRect(MONTHCAL_INFO *infoPtr, LPARAM lParam)
+MONTHCAL_GetMinReqRect(const MONTHCAL_INFO *infoPtr, LPARAM lParam)
 {
   LPRECT lpRect = (LPRECT) lParam;
 
@@ -796,7 +797,7 @@ MONTHCAL_GetMinReqRect(MONTHCAL_INFO *infoPtr, LPARAM lParam)
 
 
 static LRESULT
-MONTHCAL_GetColor(MONTHCAL_INFO *infoPtr, WPARAM wParam)
+MONTHCAL_GetColor(const MONTHCAL_INFO *infoPtr, WPARAM wParam)
 {
   TRACE("\n");
 
@@ -824,7 +825,7 @@ MONTHCAL_SetColor(MONTHCAL_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 {
   int prev = -1;
 
-  TRACE("%d: color %08lx\n", wParam, lParam);
+  TRACE("%ld: color %08lx\n", wParam, lParam);
 
   switch((int)wParam) {
     case MCSC_BACKGROUND:
@@ -859,7 +860,7 @@ MONTHCAL_SetColor(MONTHCAL_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 
 
 static LRESULT
-MONTHCAL_GetMonthDelta(MONTHCAL_INFO *infoPtr)
+MONTHCAL_GetMonthDelta(const MONTHCAL_INFO *infoPtr)
 {
   TRACE("\n");
 
@@ -875,7 +876,7 @@ MONTHCAL_SetMonthDelta(MONTHCAL_INFO *infoPtr, WPARAM wParam)
 {
   int prev = infoPtr->delta;
 
-  TRACE("delta %d\n", wParam);
+  TRACE("delta %ld\n", wParam);
 
   infoPtr->delta = (int)wParam;
   return prev;
@@ -883,9 +884,9 @@ MONTHCAL_SetMonthDelta(MONTHCAL_INFO *infoPtr, WPARAM wParam)
 
 
 static LRESULT
-MONTHCAL_GetFirstDayOfWeek(MONTHCAL_INFO *infoPtr)
+MONTHCAL_GetFirstDayOfWeek(const MONTHCAL_INFO *infoPtr)
 {
-  return infoPtr->firstDay;
+  return MAKELONG(infoPtr->firstDay, infoPtr->firstDayHighWord);
 }
 
 
@@ -896,26 +897,39 @@ MONTHCAL_GetFirstDayOfWeek(MONTHCAL_INFO *infoPtr)
 static LRESULT
 MONTHCAL_SetFirstDayOfWeek(MONTHCAL_INFO *infoPtr, LPARAM lParam)
 {
-  int prev = infoPtr->firstDay;
+  int prev = MAKELONG(infoPtr->firstDay, infoPtr->firstDayHighWord);
+  int localFirstDay;
   WCHAR buf[40];
 
   TRACE("day %ld\n", lParam);
 
-  if((lParam >= 0) && (lParam < 7)) {
-    infoPtr->firstDay = (int)lParam;
+  GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK, buf, countof(buf));
+  TRACE("%s %d\n", debugstr_w(buf), strlenW(buf));
+
+  localFirstDay = atoiW(buf);
+
+  if(lParam == -1)
+  {
+    infoPtr->firstDay = localFirstDay;
+    infoPtr->firstDayHighWord = FALSE;
+  }
+  else if(lParam >= 7)
+  {
+    infoPtr->firstDay = localFirstDay;
+    infoPtr->firstDayHighWord = TRUE;
   }
   else
-    {
-      GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK, buf, countof(buf));
-      TRACE("%s %d\n", debugstr_w(buf), strlenW(buf));
-      infoPtr->firstDay = (atoiW(buf)+1)%7;
-    }
+  {
+    infoPtr->firstDay = lParam;
+    infoPtr->firstDayHighWord = TRUE;
+  }
+
   return prev;
 }
 
 
 static LRESULT
-MONTHCAL_GetMonthRange(MONTHCAL_INFO *infoPtr)
+MONTHCAL_GetMonthRange(const MONTHCAL_INFO *infoPtr)
 {
   TRACE("\n");
 
@@ -924,7 +938,7 @@ MONTHCAL_GetMonthRange(MONTHCAL_INFO *infoPtr)
 
 
 static LRESULT
-MONTHCAL_GetMaxTodayWidth(MONTHCAL_INFO *infoPtr)
+MONTHCAL_GetMaxTodayWidth(const MONTHCAL_INFO *infoPtr)
 {
   return(infoPtr->todayrect.right - infoPtr->todayrect.left);
 }
@@ -936,7 +950,7 @@ MONTHCAL_SetRange(MONTHCAL_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
     SYSTEMTIME *lprgSysTimeArray=(SYSTEMTIME *)lParam;
     FILETIME ft_min, ft_max;
 
-    TRACE("%x %lx\n", wParam, lParam);
+    TRACE("%lx %lx\n", wParam, lParam);
 
     if ((wParam & GDTR_MIN && !MONTHCAL_ValidateTime(lprgSysTimeArray[0])) ||
         (wParam & GDTR_MAX && !MONTHCAL_ValidateTime(lprgSysTimeArray[1])))
@@ -999,13 +1013,13 @@ MONTHCAL_GetRange(HWND hwnd, WPARAM wParam, LPARAM lParam)
 
 
 static LRESULT
-MONTHCAL_SetDayState(MONTHCAL_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
+MONTHCAL_SetDayState(const MONTHCAL_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 
 {
   int i, iMonths = (int)wParam;
   MONTHDAYSTATE *dayStates = (LPMONTHDAYSTATE)lParam;
 
-  TRACE("%x %lx\n", wParam, lParam);
+  TRACE("%lx %lx\n", wParam, lParam);
   if(iMonths!=infoPtr->monthRange) return 0;
 
   for(i=0; i<iMonths; i++)
@@ -1014,7 +1028,7 @@ MONTHCAL_SetDayState(MONTHCAL_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 }
 
 static LRESULT
-MONTHCAL_GetCurSel(MONTHCAL_INFO *infoPtr, LPARAM lParam)
+MONTHCAL_GetCurSel(const MONTHCAL_INFO *infoPtr, LPARAM lParam)
 {
   SYSTEMTIME *lpSel = (SYSTEMTIME *) lParam;
 
@@ -1038,6 +1052,8 @@ MONTHCAL_SetCurSel(MONTHCAL_INFO *infoPtr, LPARAM lParam)
   if((infoPtr==NULL) ||(lpSel==NULL)) return FALSE;
   if(GetWindowLongW(infoPtr->hwndSelf, GWL_STYLE) & MCS_MULTISELECT) return FALSE;
 
+  if(!MONTHCAL_ValidateTime(*lpSel)) return FALSE;
+
   infoPtr->currentMonth=lpSel->wMonth;
   infoPtr->currentYear=lpSel->wYear;
 
@@ -1051,7 +1067,7 @@ MONTHCAL_SetCurSel(MONTHCAL_INFO *infoPtr, LPARAM lParam)
 
 
 static LRESULT
-MONTHCAL_GetMaxSelCount(MONTHCAL_INFO *infoPtr)
+MONTHCAL_GetMaxSelCount(const MONTHCAL_INFO *infoPtr)
 {
   return infoPtr->maxSelCount;
 }
@@ -1060,7 +1076,7 @@ MONTHCAL_GetMaxSelCount(MONTHCAL_INFO *infoPtr)
 static LRESULT
 MONTHCAL_SetMaxSelCount(MONTHCAL_INFO *infoPtr, WPARAM wParam)
 {
-  TRACE("%x\n", wParam);
+  TRACE("%lx\n", wParam);
 
   if(GetWindowLongW(infoPtr->hwndSelf, GWL_STYLE) & MCS_MULTISELECT)  {
     infoPtr->maxSelCount = wParam;
@@ -1071,7 +1087,7 @@ MONTHCAL_SetMaxSelCount(MONTHCAL_INFO *infoPtr, WPARAM wParam)
 
 
 static LRESULT
-MONTHCAL_GetSelRange(MONTHCAL_INFO *infoPtr, LPARAM lParam)
+MONTHCAL_GetSelRange(const MONTHCAL_INFO *infoPtr, LPARAM lParam)
 {
   SYSTEMTIME *lprgSysTimeArray = (SYSTEMTIME *) lParam;
 
@@ -1117,7 +1133,7 @@ MONTHCAL_SetSelRange(MONTHCAL_INFO *infoPtr, LPARAM lParam)
 
 
 static LRESULT
-MONTHCAL_GetToday(MONTHCAL_INFO *infoPtr, LPARAM lParam)
+MONTHCAL_GetToday(const MONTHCAL_INFO *infoPtr, LPARAM lParam)
 {
   SYSTEMTIME *lpToday = (SYSTEMTIME *) lParam;
 
@@ -1148,7 +1164,7 @@ MONTHCAL_SetToday(MONTHCAL_INFO *infoPtr, LPARAM lParam)
 
 
 static LRESULT
-MONTHCAL_HitTest(MONTHCAL_INFO *infoPtr, LPARAM lParam)
+MONTHCAL_HitTest(const MONTHCAL_INFO *infoPtr, LPARAM lParam)
 {
   PMCHITTESTINFO lpht = (PMCHITTESTINFO)lParam;
   UINT x,y;
@@ -1569,7 +1585,7 @@ MONTHCAL_Timer(MONTHCAL_INFO *infoPtr, WPARAM wParam)
 {
   BOOL redraw = FALSE;
 
-  TRACE("%d\n", wParam);
+  TRACE("%ld\n", wParam);
 
   switch(wParam) {
   case MC_NEXTMONTHTIMER:
@@ -1687,7 +1703,7 @@ MONTHCAL_Paint(MONTHCAL_INFO *infoPtr, WPARAM wParam)
 
 
 static LRESULT
-MONTHCAL_KillFocus(MONTHCAL_INFO *infoPtr)
+MONTHCAL_KillFocus(const MONTHCAL_INFO *infoPtr)
 {
   TRACE("\n");
 
@@ -1698,7 +1714,7 @@ MONTHCAL_KillFocus(MONTHCAL_INFO *infoPtr)
 
 
 static LRESULT
-MONTHCAL_SetFocus(MONTHCAL_INFO *infoPtr)
+MONTHCAL_SetFocus(const MONTHCAL_INFO *infoPtr)
 {
   TRACE("\n");
 
@@ -1815,7 +1831,7 @@ static LRESULT MONTHCAL_Size(MONTHCAL_INFO *infoPtr, int Width, int Height)
   return 0;
 }
 
-static LRESULT MONTHCAL_GetFont(MONTHCAL_INFO *infoPtr)
+static LRESULT MONTHCAL_GetFont(const MONTHCAL_INFO *infoPtr)
 {
     return (LRESULT)infoPtr->hFont;
 }
@@ -1841,7 +1857,7 @@ static LRESULT MONTHCAL_SetFont(MONTHCAL_INFO *infoPtr, HFONT hFont, BOOL redraw
 }
 
 /* update theme after a WM_THEMECHANGED message */
-static LRESULT theme_changed (MONTHCAL_INFO* infoPtr)
+static LRESULT theme_changed (const MONTHCAL_INFO* infoPtr)
 {
     HTHEME theme = GetWindowTheme (infoPtr->hwndSelf);
     CloseThemeData (theme);
@@ -1873,6 +1889,7 @@ MONTHCAL_Create(HWND hwnd, WPARAM wParam, LPARAM lParam)
   /* FIXME: calculate systemtime ->> localtime(substract timezoneinfo) */
 
   GetLocalTime(&infoPtr->todaysDate);
+  infoPtr->firstDayHighWord = FALSE;
   MONTHCAL_SetFirstDayOfWeek(infoPtr, (LPARAM)-1);
   infoPtr->currentMonth = infoPtr->todaysDate.wMonth;
   infoPtr->currentYear = infoPtr->todaysDate.wYear;
@@ -1891,6 +1908,10 @@ MONTHCAL_Create(HWND hwnd, WPARAM wParam, LPARAM lParam)
   infoPtr->bk          = GetSysColor(COLOR_WINDOW);
   infoPtr->txt	       = GetSysColor(COLOR_WINDOWTEXT);
 
+  /* set the current day for highlighing */
+  infoPtr->minSel.wDay = infoPtr->todaysDate.wDay;
+  infoPtr->maxSel.wDay = infoPtr->todaysDate.wDay;
+
   /* call MONTHCAL_UpdateSize to set all of the dimensions */
   /* of the control */
   MONTHCAL_UpdateSize(infoPtr);
@@ -1905,10 +1926,9 @@ static LRESULT
 MONTHCAL_Destroy(MONTHCAL_INFO *infoPtr)
 {
   /* free month calendar info data */
-  if(infoPtr->monthdayState)
-      Free(infoPtr->monthdayState);
+  Free(infoPtr->monthdayState);
   SetWindowLongPtrW(infoPtr->hwndSelf, 0, 0);
-  
+
   CloseThemeData (GetWindowTheme (infoPtr->hwndSelf));
   
   Free(infoPtr);
@@ -1921,7 +1941,7 @@ MONTHCAL_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
   MONTHCAL_INFO *infoPtr;
 
-  TRACE("hwnd=%p msg=%x wparam=%x lparam=%lx\n", hwnd, uMsg, wParam, lParam);
+  TRACE("hwnd=%p msg=%x wparam=%lx lparam=%lx\n", hwnd, uMsg, wParam, lParam);
 
   infoPtr = MONTHCAL_GetInfoPtr(hwnd);
   if (!infoPtr && (uMsg != WM_CREATE))
@@ -2039,7 +2059,7 @@ MONTHCAL_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
   default:
     if ((uMsg >= WM_USER) && (uMsg < WM_APP))
-      ERR( "unknown msg %04x wp=%08x lp=%08lx\n", uMsg, wParam, lParam);
+      ERR( "unknown msg %04x wp=%08lx lp=%08lx\n", uMsg, wParam, lParam);
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
   }
 }

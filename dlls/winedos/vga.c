@@ -595,7 +595,7 @@ void VGA_SetQuadPalette(RGBQUAD*color,int start,int len)
     IDirectDrawPalette_SetEntries(lpddpal,0,start,len,pal);
 }
 
-LPSTR VGA_Lock(unsigned*Pitch,unsigned*Height,unsigned*Width,unsigned*Depth)
+static LPSTR VGA_Lock(unsigned*Pitch,unsigned*Height,unsigned*Width,unsigned*Depth)
 {
     if (!lpddraw) return NULL;
     if (!lpddsurf) return NULL;
@@ -610,7 +610,7 @@ LPSTR VGA_Lock(unsigned*Pitch,unsigned*Height,unsigned*Width,unsigned*Depth)
     return sdesc.lpSurface;
 }
 
-void VGA_Unlock(void)
+static void VGA_Unlock(void)
 {
     IDirectDrawSurface_Unlock(lpddsurf,sdesc.lpSurface);
 }
@@ -646,7 +646,7 @@ void VGA_SetWindowStart(int start)
  * Get start of 64k window at 0xa0000 in bytes.
  * Value is -1 in color plane modes.
  */
-int VGA_GetWindowStart()
+int VGA_GetWindowStart(void)
 {
     return vga_fb_window;
 }

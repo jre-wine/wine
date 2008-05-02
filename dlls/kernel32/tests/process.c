@@ -31,8 +31,14 @@
 #include "wincon.h"
 #include "winnls.h"
 
+static HINSTANCE hkernel32;
+static LPVOID (WINAPI *pVirtualAllocEx)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD);
+static BOOL   (WINAPI *pVirtualFreeEx)(HANDLE, LPVOID, SIZE_T, DWORD);
+
+/* ############################### */
 static char     base[MAX_PATH];
 static char     selfname[MAX_PATH];
+static char*    exename;
 static char     resfile[MAX_PATH];
 
 static int      myARGC;
@@ -47,7 +53,7 @@ static char**   myARGV;
 
 /* ---------------- portable memory allocation thingie */
 
-static char     memory[1024*32];
+static char     memory[1024*256];
 static char*    memory_index = memory;
 
 static char*    grab_memory(size_t len)
@@ -147,12 +153,26 @@ static WCHAR*   decodeW(const char* str)
  * generates basic information like:
  *      base:           absolute path to curr dir
  *      selfname:       the way to reinvoke ourselves
+ *      exename:        executable without the path
+ * function-pointers, which are not implemented in all windows versions
  */
 static int     init(void)
 {
+    char *p;
+
     myARGC = winetest_get_mainargs( &myARGV );
     if (!GetCurrentDirectoryA(sizeof(base), base)) return 0;
     strcpy(selfname, myARGV[0]);
+
+    /* Strip the path of selfname */
+    if ((p = strrchr(selfname, '\\')) != NULL) exename = p + 1;
+    else exename = selfname;
+
+    if ((p = strrchr(exename, '/')) != NULL) exename = p + 1;
+
+    hkernel32 = GetModuleHandleA("kernel32");
+    pVirtualAllocEx = (void *) GetProcAddress(hkernel32, "VirtualAllocEx");
+    pVirtualFreeEx = (void *) GetProcAddress(hkernel32, "VirtualFreeEx");
     return 1;
 }
 
@@ -701,6 +721,7 @@ static void test_CommandLine(void)
     PROCESS_INFORMATION	info;
     STARTUPINFOA	startup;
     DWORD               len;
+    BOOL                ret;
 
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(startup);
@@ -748,25 +769,31 @@ static void test_CommandLine(void)
 
     /* Test for Bug1330 to show that XP doesn't change '/' to '\\' in argv[0]*/
     get_file_name(resfile);
-    sprintf(buffer, "./%s tests/process.c %s \"a\\\"b\\\\\" c\\\" d", selfname, resfile);
-    ok(CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info), "CreateProcess\n");
+    /* Use exename to avoid buffer containing things like 'C:' */
+    sprintf(buffer, "./%s tests/process.c %s \"a\\\"b\\\\\" c\\\" d", exename, resfile);
+    SetLastError(0xdeadbeef);
+    ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info);
+    ok(ret, "CreateProcess (%s) failed : %d\n", buffer, GetLastError());
     /* wait for child to terminate */
     ok(WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0, "Child process termination\n");
     /* child process has changed result file, so let profile functions know about it */
     WritePrivateProfileStringA(NULL, NULL, NULL, resfile);
-    sprintf(buffer, "./%s", selfname);
+    sprintf(buffer, "./%s", exename);
     okChildString("Arguments", "argvA0", buffer);
     release_memory();
     assert(DeleteFileA(resfile) != 0);
 
     get_file_name(resfile);
-    sprintf(buffer, ".\\%s tests/process.c %s \"a\\\"b\\\\\" c\\\" d", selfname, resfile);
-    ok(CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info), "CreateProcess\n");
+    /* Use exename to avoid buffer containing things like 'C:' */
+    sprintf(buffer, ".\\%s tests/process.c %s \"a\\\"b\\\\\" c\\\" d", exename, resfile);
+    SetLastError(0xdeadbeef);
+    ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info);
+    ok(ret, "CreateProcess (%s) failed : %d\n", buffer, GetLastError());
     /* wait for child to terminate */
     ok(WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0, "Child process termination\n");
     /* child process has changed result file, so let profile functions know about it */
     WritePrivateProfileStringA(NULL, NULL, NULL, resfile);
-    sprintf(buffer, ".\\%s", selfname);
+    sprintf(buffer, ".\\%s", exename);
     okChildString("Arguments", "argvA0", buffer);
     release_memory();
     assert(DeleteFileA(resfile) != 0);
@@ -777,13 +804,16 @@ static void test_CommandLine(void)
     *(lpFilePart -1 ) = 0;
     p = strrchr(fullpath, '\\');
     assert (p);
-    sprintf(buffer, "..%s/%s tests/process.c %s \"a\\\"b\\\\\" c\\\" d", p, selfname, resfile);
-    ok(CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info), "CreateProcess\n");
+    /* Use exename to avoid buffer containing things like 'C:' */
+    sprintf(buffer, "..%s/%s tests/process.c %s \"a\\\"b\\\\\" c\\\" d", p, exename, resfile);
+    SetLastError(0xdeadbeef);
+    ret = CreateProcessA(NULL, buffer, NULL, NULL, FALSE, 0L, NULL, NULL, &startup, &info);
+    ok(ret, "CreateProcess (%s) failed : %d\n", buffer, GetLastError());
     /* wait for child to terminate */
     ok(WaitForSingleObject(info.hProcess, 30000) == WAIT_OBJECT_0, "Child process termination\n");
     /* child process has changed result file, so let profile functions know about it */
     WritePrivateProfileStringA(NULL, NULL, NULL, resfile);
-    sprintf(buffer, "..%s/%s", p, selfname);
+    sprintf(buffer, "..%s/%s", p, exename);
     okChildString("Arguments", "argvA0", buffer);
     release_memory();
     assert(DeleteFileA(resfile) != 0);
@@ -1145,6 +1175,20 @@ static void test_Console(void)
 
     cpInC = GetConsoleCP();
     cpOutC = GetConsoleOutputCP();
+
+    /* Try to set invalid CP */
+    SetLastError(0xdeadbeef);
+    ok(!SetConsoleCP(0), "Shouldn't succeed\n");
+    ok(GetLastError()==ERROR_INVALID_PARAMETER,
+       "GetLastError: expecting %u got %u\n",
+       ERROR_INVALID_PARAMETER, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ok(!SetConsoleOutputCP(0), "Shouldn't succeed\n");
+    ok(GetLastError()==ERROR_INVALID_PARAMETER,
+       "GetLastError: expecting %u got %u\n",
+       ERROR_INVALID_PARAMETER, GetLastError());
+
     SetConsoleCP(cpIn);
     SetConsoleOutputCP(cpOut);
 
@@ -1183,8 +1227,8 @@ static void test_Console(void)
     okChildInt("Console", "InputMode", modeIn);
     okChildInt("Console", "OutputMode", modeOut);
 
-    todo_wine ok(cpInC == 1252, "Wrong console CP (expected 1252 got %d/%d)\n", cpInC, cpIn);
-    todo_wine ok(cpOutC == 1252, "Wrong console-SB CP (expected 1252 got %d/%d)\n", cpOutC, cpOut);
+    ok(cpInC == 1252, "Wrong console CP (expected 1252 got %d/%d)\n", cpInC, cpIn);
+    ok(cpOutC == 1252, "Wrong console-SB CP (expected 1252 got %d/%d)\n", cpOutC, cpOut);
     ok(modeInC == (modeIn ^ 1), "Wrong console mode\n");
     ok(modeOutC == (modeOut ^ 1), "Wrong console-SB mode\n");
     ok(sbiC.dwCursorPosition.X == (sbi.dwCursorPosition.X ^ 1), "Wrong cursor position\n");
@@ -1273,16 +1317,26 @@ static void test_OpenProcess(void)
     MEMORY_BASIC_INFORMATION info;
     SIZE_T dummy, read_bytes;
 
+    /* not exported in all windows versions */
+    if ((!pVirtualAllocEx) || (!pVirtualFreeEx)) {
+        skip("VirtualAllocEx not found\n");
+        return;
+    }
+
     /* without PROCESS_VM_OPERATION */
     hproc = OpenProcess(PROCESS_ALL_ACCESS & ~PROCESS_VM_OPERATION, FALSE, GetCurrentProcessId());
     ok(hproc != NULL, "OpenProcess error %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
-    addr1 = VirtualAllocEx(hproc, 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
-todo_wine {
+    addr1 = pVirtualAllocEx(hproc, 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
     ok(!addr1, "VirtualAllocEx should fail\n");
+    if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {   /* Win9x */
+        CloseHandle(hproc);
+        skip("VirtualAllocEx not implemented\n");
+        return;
+    }
     ok(GetLastError() == ERROR_ACCESS_DENIED, "wrong error %d\n", GetLastError());
-}
 
     read_bytes = 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -1295,12 +1349,8 @@ todo_wine {
     hproc = OpenProcess(PROCESS_VM_OPERATION, FALSE, GetCurrentProcessId());
     ok(hproc != NULL, "OpenProcess error %d\n", GetLastError());
 
-    addr1 = VirtualAllocEx(hproc, 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
-todo_wine {
+    addr1 = pVirtualAllocEx(hproc, 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
     ok(addr1 != NULL, "VirtualAllocEx error %d\n", GetLastError());
-}
-    if (addr1 == NULL) /* FIXME: remove once Wine is fixed */
-        addr1 = VirtualAllocEx(GetCurrentProcess(), 0, 0xFFFC, MEM_RESERVE, PAGE_NOACCESS);
 
     /* without PROCESS_QUERY_INFORMATION */
     SetLastError(0xdeadbeef);
@@ -1336,17 +1386,13 @@ todo_wine {
     ok(info.Type == MEM_PRIVATE, "%x != MEM_PRIVATE\n", info.Type);
 
     SetLastError(0xdeadbeef);
-todo_wine {
-    ok(!VirtualFreeEx(hproc, addr1, 0, MEM_RELEASE),
+    ok(!pVirtualFreeEx(hproc, addr1, 0, MEM_RELEASE),
        "VirtualFreeEx without PROCESS_VM_OPERATION rights should fail\n");
     ok(GetLastError() == ERROR_ACCESS_DENIED, "wrong error %d\n", GetLastError());
-}
 
     CloseHandle(hproc);
 
-todo_wine {
     ok(VirtualFree(addr1, 0, MEM_RELEASE), "VirtualFree failed\n");
-}
 }
 
 START_TEST(process)

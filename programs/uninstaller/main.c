@@ -180,7 +180,7 @@ static int cmp_by_name(const void *a, const void *b)
 
 
 /**
- * Fetch informations from the uninstall key.
+ * Fetch information from the uninstall key.
  */
 static int FetchUninstallInformation(void)
 {
@@ -329,7 +329,7 @@ static INT_PTR CALLBACK DlgProc(HWND hwnd, UINT Message, WPARAM wParam, LPARAM l
                        }
                        entries[sel].active ^= 1; /* toggle */
                        WINE_TRACE("toggling %d %s\n", entries[sel].active,
-                       wine_dbgstr_w(entries[oldsel].descr));
+                       wine_dbgstr_w(entries[sel].descr));
                        oldsel = sel;
                    }
                     break;

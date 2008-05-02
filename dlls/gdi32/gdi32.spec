@@ -21,7 +21,7 @@
 @ stdcall BeginPath(long)
 @ stdcall BitBlt(long long long long long long long long long)
 @ stub ByeByeGDI
-@ stub CancelDC
+@ stdcall CancelDC(long)
 @ stub CheckColorsInGamut
 @ stdcall ChoosePixelFormat(long ptr)
 @ stdcall Chord(long long long long long long long long long)
@@ -178,8 +178,8 @@
 @ stdcall GdiFlush()
 # @ stub GdiFullscreenControl
 @ stdcall GdiGetBatchLimit()
-@ stdcall GdiGetCharDimensions(ptr ptr ptr)
-# @ stub GdiGetCodePage
+@ stdcall GdiGetCharDimensions(long ptr ptr)
+@ stdcall GdiGetCodePage(long)
 # @ stub GdiGetDC
 # @ stub GdiGetDevmodeForPage
 @ stub GdiGetLocalBitmap
@@ -528,9 +528,3 @@
 
 # GDI objects
 @ cdecl __wine_make_gdi_object_system(long long)
-
-################################################################
-# Wine dll separation hacks, these will go away, don't use them
-#
-@ cdecl GDI_GetObjPtr(long long)
-@ cdecl GDI_ReleaseObj(long)

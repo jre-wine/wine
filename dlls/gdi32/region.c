@@ -100,7 +100,6 @@ SOFTWARE.
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -121,7 +120,7 @@ typedef struct
 } RGNOBJ;
 
 
-static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, void *obj, HDC hdc );
+static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, HDC hdc );
 static BOOL REGION_DeleteObject( HGDIOBJ handle, void *obj );
 
 static const struct gdi_obj_funcs region_funcs =
@@ -455,7 +454,7 @@ static void REGION_UnionRectWithRegion(const RECT *rect, WINEREGION *rgn);
 /***********************************************************************
  *            get_region_type
  */
-inline static INT get_region_type( const RGNOBJ *obj )
+static inline INT get_region_type( const RGNOBJ *obj )
 {
     switch(obj->rgn->numRects)
     {
@@ -550,9 +549,9 @@ static BOOL REGION_DeleteObject( HGDIOBJ handle, void *obj )
 /***********************************************************************
  *           REGION_SelectObject
  */
-static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
+static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, HDC hdc )
 {
-    return (HGDIOBJ)SelectClipRgn( hdc, handle );
+    return ULongToHandle(SelectClipRgn( hdc, handle ));
 }
 
 

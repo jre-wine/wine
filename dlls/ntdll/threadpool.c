@@ -61,12 +61,12 @@ struct work_item
     PVOID context;
 };
 
-inline static LONG interlocked_inc( PLONG dest )
+static inline LONG interlocked_inc( PLONG dest )
 {
     return interlocked_xchg_add( (int *)dest, 1 ) + 1;
 }
 
-inline static LONG interlocked_dec( PLONG dest )
+static inline LONG interlocked_dec( PLONG dest )
 {
     return interlocked_xchg_add( (int *)dest, -1 ) - 1;
 }
@@ -181,11 +181,13 @@ NTSTATUS WINAPI RtlQueueWorkItem(PRTL_WORK_ITEM_ROUTINE Function, PVOID Context,
     work_item->function = Function;
     work_item->context = Context;
 
-    if (Flags != WT_EXECUTEDEFAULT)
+    if (Flags & ~WT_EXECUTELONGFUNCTION)
         FIXME("Flags 0x%x not supported\n", Flags);
 
     status = add_work_item_to_queue(work_item);
 
+    /* FIXME: tune this algorithm to not be as aggressive with creating threads
+     * if WT_EXECUTELONGFUNCTION isn't specified */
     if ((status == STATUS_SUCCESS) &&
         ((num_workers == 0) || (num_workers == num_busy_workers)))
     {

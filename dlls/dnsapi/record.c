@@ -38,7 +38,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winerror.h"
 #include "winnls.h"
 #include "windns.h"
 
@@ -444,8 +443,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
 
             if (!dst->Data.TXT.pStringArray[i])
             {
-                for (--i; i >= 0; i--)
-                    dns_free( dst->Data.TXT.pStringArray[i] );
+                while (i > 0) dns_free( dst->Data.TXT.pStringArray[--i] );
                 goto error;
             }
         }
@@ -541,7 +539,7 @@ error:
  * DnsRecordListFree                       [DNSAPI.@]
  *
  */
-void WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
+VOID WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
 {
     DNS_RECORD *r, *next;
     unsigned int i;

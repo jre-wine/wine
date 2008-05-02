@@ -60,6 +60,40 @@ static struct wine_test *wine_tests;
 static int nr_of_files, nr_of_tests;
 static struct rev_info *rev_infos = NULL;
 static const char whitespace[] = " \t\r\n";
+static const char testexe[] = "_test.exe";
+
+static char * get_file_version(char * file_name)
+{
+    static char version[32];
+    DWORD size;
+    DWORD handle;
+
+    size = GetFileVersionInfoSizeA(file_name, &handle);
+    if (size) {
+        char * data = xmalloc(size);
+        if (data) {
+            if (GetFileVersionInfoA(file_name, handle, size, data)) {
+                static char backslash[] = "\\";
+                VS_FIXEDFILEINFO *pFixedVersionInfo;
+                UINT len;
+                if (VerQueryValueA(data, backslash, (LPVOID *)&pFixedVersionInfo, &len)) {
+                    sprintf(version, "%d.%d.%d.%d",
+                            pFixedVersionInfo->dwFileVersionMS >> 16,
+                            pFixedVersionInfo->dwFileVersionMS & 0xffff,
+                            pFixedVersionInfo->dwFileVersionLS >> 16,
+                            pFixedVersionInfo->dwFileVersionLS & 0xffff);
+                } else
+                    sprintf(version, "version not available");
+            } else
+                sprintf(version, "unknown");
+            free(data);
+        } else
+            sprintf(version, "failed");
+    } else
+        sprintf(version, "version not available");
+
+    return version;
+}
 
 static int running_under_wine (void)
 {
@@ -165,10 +199,7 @@ static void remove_dir (const char *dir)
 static const char* get_test_source_file(const char* test, const char* subtest)
 {
     static const char* special_dirs[][2] = {
-	{ "gdi32", "gdi"}, { "kernel32", "kernel" },
-        { "msacm32", "msacm" },
-	{ "user32", "user" }, { "winspool.drv", "winspool" },
-	{ "ws2_32", "winsock" }, { 0, 0 }
+	{ 0, 0 }
     };
     static char buffer[MAX_PATH];
     int i;
@@ -248,9 +279,8 @@ extract_test (struct wine_test *test, const char *dir, LPTSTR res_name)
     if (!code) report (R_FATAL, "Can't find test resource %s: %d",
                        res_name, GetLastError ());
     test->name = xstrdup( res_name );
-    CharLowerA( test->name );
     test->exename = strmake (NULL, "%s/%s", dir, test->name);
-    exepos = strstr (test->name, "_test.exe");
+    exepos = strstr (test->name, testexe);
     if (!exepos) report (R_FATAL, "Not an .exe file: %s", test->name);
     *exepos = 0;
     test->name = xrealloc (test->name, exepos - test->name + 1);
@@ -269,7 +299,7 @@ extract_test (struct wine_test *test, const char *dir, LPTSTR res_name)
    value of WaitForSingleObject.
  */
 static int
-run_ex (char *cmd, const char *out, DWORD ms)
+run_ex (char *cmd, const char *out, const char *tempdir, DWORD ms)
 {
     STARTUPINFO si;
     PROCESS_INFORMATION pi;
@@ -292,7 +322,7 @@ run_ex (char *cmd, const char *out, DWORD ms)
     }
 
     if (!CreateProcessA (NULL, cmd, NULL, NULL, TRUE, 0,
-                         NULL, NULL, &si, &pi)) {
+                         NULL, tempdir, &si, &pi)) {
         status = -2;
     } else {
         CloseHandle (pi.hThread);
@@ -361,7 +391,7 @@ get_subtests (const char *tempdir, struct wine_test *test, LPTSTR res_name)
 
     extract_test (test, tempdir, res_name);
     cmd = strmake (NULL, "%s --list", test->exename);
-    run_ex (cmd, subname, 5000);
+    run_ex (cmd, subname, tempdir, 5000);
     free (cmd);
 
     subfile = fopen (subname, "r");
@@ -410,7 +440,7 @@ get_subtests (const char *tempdir, struct wine_test *test, LPTSTR res_name)
 }
 
 static void
-run_test (struct wine_test* test, const char* subtest)
+run_test (struct wine_test* test, const char* subtest, const char *tempdir)
 {
     int status;
     const char* file = get_test_source_file(test->name, subtest);
@@ -418,7 +448,7 @@ run_test (struct wine_test* test, const char* subtest)
     char *cmd = strmake (NULL, "%s %s", test->exename, subtest);
 
     xprintf ("%s:%s start %s %s\n", test->name, subtest, file, rev);
-    status = run_ex (cmd, NULL, 120000);
+    status = run_ex (cmd, NULL, tempdir, 120000);
     free (cmd);
     xprintf ("%s:%s done (%d)\n", test->name, subtest, status);
 }
@@ -436,6 +466,23 @@ extract_test_proc (HMODULE hModule, LPCTSTR lpszType,
                    LPTSTR lpszName, LONG_PTR lParam)
 {
     const char *tempdir = (const char *)lParam;
+    char dllname[MAX_PATH];
+    HMODULE dll;
+
+    /* Check if the main dll is present on this system */
+    CharLowerA(lpszName);
+    strcpy(dllname, lpszName);
+    *strstr(dllname, testexe) = 0;
+
+    dll = LoadLibraryExA(dllname, NULL, LOAD_LIBRARY_AS_DATAFILE);
+    if (!dll) {
+        xprintf ("    %s=dll is missing\n", dllname);
+        return TRUE;
+    }
+    FreeLibrary(dll);
+
+    xprintf ("    %s=%s\n", dllname, get_file_version(dllname));
+
     get_subtests( tempdir, &wine_tests[nr_of_files], lpszName );
     nr_of_tests += wine_tests[nr_of_files].subtest_count;
     nr_of_files++;
@@ -485,7 +532,7 @@ run_tests (char *logname)
         report (R_FATAL, "Could not create directory: %s", tempdir);
     report (R_DIR, tempdir);
 
-    xprintf ("Version 3\n");
+    xprintf ("Version 4\n");
     strres = extract_rcdata (MAKEINTRESOURCE(WINE_BUILD), STRINGRES, &strsize);
     xprintf ("Tests from build ");
     if (strres) xprintf ("%.*s", strsize, strres);
@@ -512,7 +559,7 @@ run_tests (char *logname)
     }
     xprintf ("Operating system version:\n");
     print_version ();
-    xprintf ("Test output:\n" );
+    xprintf ("Dll info:\n" );
 
     report (R_STATUS, "Counting tests");
     if (!EnumResourceNames (NULL, MAKEINTRESOURCE(TESTRES),
@@ -530,6 +577,8 @@ run_tests (char *logname)
         report (R_FATAL, "Can't enumerate test files: %d",
                 GetLastError ());
 
+    xprintf ("Test output:\n" );
+
     report (R_DELTA, 0, "Extracting: Done");
 
     report (R_STATUS, "Running tests");
@@ -541,7 +590,7 @@ run_tests (char *logname)
 	for (j = 0; j < test->subtest_count; j++) {
             report (R_STEP, "Running: %s:%s", test->name,
                     test->subtests[j]);
-	    run_test (test, test->subtests[j]);
+	    run_test (test, test->subtests[j], tempdir);
         }
     }
     report (R_DELTA, 0, "Running: Done");
@@ -558,15 +607,15 @@ run_tests (char *logname)
 static void
 usage (void)
 {
-    fprintf (stderr, "\
-Usage: winetest [OPTION]...\n\n\
-  -c       console mode, no GUI\n\
-  -e       preserve the environment\n\
-  -h       print this message and exit\n\
-  -q       quiet mode, no output at all\n\
-  -o FILE  put report into FILE, do not submit\n\
-  -s FILE  submit FILE, do not run tests\n\
-  -t TAG   include TAG of characters [-.0-9a-zA-Z] in the report\n");
+    fprintf (stderr,
+"Usage: winetest [OPTION]...\n\n"
+"  -c       console mode, no GUI\n"
+"  -e       preserve the environment\n"
+"  -h       print this message and exit\n"
+"  -q       quiet mode, no output at all\n"
+"  -o FILE  put report into FILE, do not submit\n"
+"  -s FILE  submit FILE, do not run tests\n"
+"  -t TAG   include TAG of characters [-.0-9a-zA-Z] in the report\n");
 }
 
 int WINAPI WinMain (HINSTANCE hInst, HINSTANCE hPrevInst,
@@ -632,16 +681,20 @@ int WINAPI WinMain (HINSTANCE hInst, HINSTANCE hPrevInst,
     }
     if (!submit) {
         static CHAR platform_windows[]  = "WINETEST_PLATFORM=windows",
+                    platform_wine[]     = "WINETEST_PLATFORM=wine",
                     debug_yes[]         = "WINETEST_DEBUG=1",
                     interactive_no[]    = "WINETEST_INTERACTIVE=0",
                     report_success_no[] = "WINETEST_REPORT_SUCCESS=0";
+        CHAR *platform;
 
         report (R_STATUS, "Starting up");
 
         if (!running_on_visible_desktop ())
             report (R_FATAL, "Tests must be run on a visible desktop");
 
-        if (reset_env && (putenv (platform_windows) ||
+        platform = running_under_wine () ? platform_wine : platform_windows;
+
+        if (reset_env && (putenv (platform) ||
                           putenv (debug_yes)        ||
                           putenv (interactive_no)   ||
                           putenv (report_success_no)))

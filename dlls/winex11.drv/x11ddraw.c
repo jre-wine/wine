@@ -20,6 +20,7 @@
 
 #include "config.h"
 
+#include <stdarg.h>
 #include <string.h>
 #include <X11/Xlib.h>
 
@@ -28,7 +29,8 @@
 #include "x11drv.h"
 
 #include "windef.h"
-#include "gdi.h"
+#include "winbase.h"
+#include "wingdi.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
@@ -43,8 +45,6 @@ typedef struct _X11DRIVERINFO {
 typedef struct _X11DEVICE {
   LPX11DRIVERINFO	lpInfo;
 } X11DEVICE,*LPX11DEVICE;
-
-extern int dxgrab;
 
 static LPDDRAWI_DDRAWSURFACE_LCL X11DRV_DD_Primary;
 static LPDDRAWI_DDRAWSURFACE_GBL X11DRV_DD_PrimaryGbl;
@@ -75,7 +75,7 @@ static LRESULT WINAPI GrabWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
   if(message != X11DRV_DD_GrabMessage)
     return CallWindowProcA(X11DRV_DD_GrabOldProcedure, hWnd, message, wParam, lParam);
 
-  TRACE("hwnd=%p, grab=%d\n", hWnd, wParam);
+  TRACE("hwnd=%p, grab=%ld\n", hWnd, wParam);
 
   if (wParam)
   {
@@ -397,9 +397,6 @@ INT X11DRV_DCICommand(INT cbInput, const DCICMD *lpCmd, LPVOID lpOutData)
 
       /* FIXME: get x11drv's hInstance */
       X11DRV_Settings_CreateDriver(&hal_info);
-#ifdef HAVE_OPENGL
-      /*X11DRV_GLX_CreateDriver(&hal_info);*/
-#endif
 
       (ddraw_fns->lpSetInfo)(&hal_info, FALSE);
       *lpInstance = hal_info.hInstance;

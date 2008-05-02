@@ -149,7 +149,7 @@ typedef struct tagMSFT_TypeInfoBase {
 /*050*/ INT     size;           /* size in bytes, at least for structures */
         /* FIXME: name of this field */
         INT     datatype1;      /* position in type description table */
-                                /* or in base intefaces */
+                                /* or in base interfaces */
                                 /* if coclass: offset in reftable */
                                 /* if interface: reference to inherited if */
                                 /* if module: offset to dllname in name table */
@@ -285,7 +285,7 @@ typedef struct {
 			   lower-middle 8 bits are unknown (flags?),
 			   upper 16 bits are hash code */
 } MSFT_NameIntro;
-/* the custom data table directory has enties like this */
+/* the custom data table directory has entries like this */
 typedef struct {
     INT   GuidOffset;
     INT   DataOffset;
@@ -599,7 +599,6 @@ WORD typeofarray
 HRESULT ITypeInfoImpl_GetInternalFuncDesc( ITypeInfo *iface, UINT index, const FUNCDESC **ppFuncDesc );
 
 extern DWORD _invoke(FARPROC func,CALLCONV callconv, int nrargs, DWORD *args);
-extern void dump_Variant(const VARIANT * pvar);
 
 HRESULT TMARSHAL_DllGetClassObject(REFCLSID rclsid, REFIID iid,LPVOID *ppv);
 

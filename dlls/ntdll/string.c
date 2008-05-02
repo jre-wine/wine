@@ -98,17 +98,18 @@ void * __cdecl NTDLL_bsearch( const void *key, const void *base, size_t nmemb,
 void __cdecl NTDLL_qsort( void *base, size_t nmemb, size_t size,
                           int(*compar)(const void *, const void *) )
 {
-    return qsort( base, nmemb, size, compar );
+    qsort( base, nmemb, size, compar );
 }
 
 
 /*********************************************************************
  *                  _lfind   (NTDLL.@)
  */
-void * __cdecl _lfind( const void *key, const void *base, size_t *nmemb,
+void * __cdecl _lfind( const void *key, const void *base, unsigned int *nmemb,
                        size_t size, int(*compar)(const void *, const void *) )
 {
-    return lfind( key, base, nmemb, size, compar );
+    size_t n = *nmemb;
+    return lfind( key, base, &n, size, compar );
 }
 
 
@@ -448,7 +449,7 @@ int __cdecl NTDLL_isxdigit( int c )
 /*********************************************************************
  *                  strtol   (NTDLL.@)
  */
-long __cdecl NTDLL_strtol( const char *nptr, char **endptr, int base )
+LONG __cdecl NTDLL_strtol( const char *nptr, char **endptr, int base )
 {
     return strtol( nptr, endptr, base );
 }
@@ -457,7 +458,7 @@ long __cdecl NTDLL_strtol( const char *nptr, char **endptr, int base )
 /*********************************************************************
  *                  strtoul   (NTDLL.@)
  */
-unsigned long __cdecl NTDLL_strtoul( const char *nptr, char **endptr, int base )
+ULONG __cdecl NTDLL_strtoul( const char *nptr, char **endptr, int base )
 {
     return strtoul( nptr, endptr, base );
 }
@@ -475,7 +476,7 @@ int __cdecl NTDLL_atoi( const char *nptr )
 /*********************************************************************
  *                  atol   (NTDLL.@)
  */
-long __cdecl NTDLL_atol( const char *nptr )
+LONG __cdecl NTDLL_atol( const char *nptr )
 {
     return atol( nptr );
 }
@@ -496,7 +497,7 @@ long __cdecl NTDLL_atol( const char *nptr )
  *  - If str is NULL it crashes, as the native function does.
  */
 char * __cdecl _ultoa(
-    unsigned long value, /* [I] Value to be converted */
+    ULONG value,         /* [I] Value to be converted */
     char *str,           /* [O] Destination for the converted value */
     int radix)           /* [I] Number base for conversion */
 {
@@ -538,11 +539,11 @@ char * __cdecl _ultoa(
  *  - If str is NULL it crashes, as the native function does.
  */
 char * __cdecl _ltoa(
-    long value, /* [I] Value to be converted */
+    LONG value, /* [I] Value to be converted */
     char *str,  /* [O] Destination for the converted value */
     int radix)  /* [I] Number base for conversion */
 {
-    unsigned long val;
+    ULONG val;
     int negative;
     char buffer[33];
     char *pos;

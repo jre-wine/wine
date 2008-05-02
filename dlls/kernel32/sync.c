@@ -51,7 +51,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(sync);
 
 /* check if current version is NT or Win95 */
-inline static int is_version_nt(void)
+static inline int is_version_nt(void)
 {
     return !(GetVersion() & 0x80000000);
 }
@@ -82,6 +82,14 @@ HANDLE get_BaseNamedObjects_handle(void)
     return handle;
 }
 
+/* helper for kernel32->ntdll timeout format conversion */
+static inline PLARGE_INTEGER get_nt_timeout( PLARGE_INTEGER pTime, DWORD timeout )
+{
+    if (timeout == INFINITE) return NULL;
+    pTime->QuadPart = (ULONGLONG)timeout * -10000;
+    return pTime;
+}
+
 /***********************************************************************
  *              Sleep  (KERNEL32.@)
  */
@@ -96,18 +104,11 @@ VOID WINAPI Sleep( DWORD timeout )
 DWORD WINAPI SleepEx( DWORD timeout, BOOL alertable )
 {
     NTSTATUS status;
+    LARGE_INTEGER time;
 
-    if (timeout == INFINITE) status = NtDelayExecution( alertable, NULL );
-    else
-    {
-        LARGE_INTEGER time;
-
-        time.QuadPart = timeout * (ULONGLONG)10000;
-        time.QuadPart = -time.QuadPart;
-        status = NtDelayExecution( alertable, &time );
-    }
-    if (status != STATUS_USER_APC) status = STATUS_SUCCESS;
-    return status;
+    status = NtDelayExecution( alertable, get_nt_timeout( &time, timeout ) );
+    if (status == STATUS_USER_APC) return WAIT_IO_COMPLETION;
+    return 0;
 }
 
 
@@ -158,6 +159,7 @@ DWORD WINAPI WaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
 {
     NTSTATUS status;
     HANDLE hloc[MAXIMUM_WAIT_OBJECTS];
+    LARGE_INTEGER time;
     unsigned int i;
 
     if (count > MAXIMUM_WAIT_OBJECTS)
@@ -170,7 +172,7 @@ DWORD WINAPI WaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
         if ((handles[i] == (HANDLE)STD_INPUT_HANDLE) ||
             (handles[i] == (HANDLE)STD_OUTPUT_HANDLE) ||
             (handles[i] == (HANDLE)STD_ERROR_HANDLE))
-            hloc[i] = GetStdHandle( (DWORD)handles[i] );
+            hloc[i] = GetStdHandle( HandleToULong(handles[i]) );
         else
             hloc[i] = handles[i];
 
@@ -187,18 +189,8 @@ DWORD WINAPI WaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
         }
     }
 
-    if (timeout == INFINITE)
-    {
-        status = NtWaitForMultipleObjects( count, hloc, wait_all, alertable, NULL );
-    }
-    else
-    {
-        LARGE_INTEGER time;
-
-        time.QuadPart = timeout * (ULONGLONG)10000;
-        time.QuadPart = -time.QuadPart;
-        status = NtWaitForMultipleObjects( count, hloc, wait_all, alertable, &time );
-    }
+    status = NtWaitForMultipleObjects( count, hloc, wait_all, alertable,
+                                       get_nt_timeout( &time, timeout ) );
 
     if (HIWORD(status))  /* is it an error code? */
     {
@@ -302,20 +294,13 @@ DWORD WINAPI SignalObjectAndWait( HANDLE hObjectToSignal, HANDLE hObjectToWaitOn
                                   DWORD dwMilliseconds, BOOL bAlertable )
 {
     NTSTATUS status;
-    LARGE_INTEGER timeout, *ptimeout = NULL;
+    LARGE_INTEGER timeout;
 
     TRACE("%p %p %d %d\n", hObjectToSignal,
           hObjectToWaitOn, dwMilliseconds, bAlertable);
 
-    if (dwMilliseconds != INFINITE)
-    {
-        timeout.QuadPart = dwMilliseconds * (ULONGLONG)10000;
-        timeout.QuadPart = -timeout.QuadPart;
-        ptimeout = &timeout;
-    }
-
-    status = NtSignalAndWaitForSingleObject( hObjectToSignal, hObjectToWaitOn,
-                                             bAlertable, ptimeout );
+    status = NtSignalAndWaitForSingleObject( hObjectToSignal, hObjectToWaitOn, bAlertable,
+                                             get_nt_timeout( &timeout, dwMilliseconds ) );
     if (HIWORD(status))
     {
         SetLastError( RtlNtStatusToDosError(status) );
@@ -1114,7 +1099,7 @@ HANDLE WINAPI CreateNamedPipeW( LPCWSTR name, DWORD dwOpenMode,
     HANDLE handle;
     UNICODE_STRING nt_name;
     OBJECT_ATTRIBUTES attr;
-    DWORD options;
+    DWORD access, options;
     BOOLEAN pipe_type, read_mode, non_block;
     NTSTATUS status;
     IO_STATUS_BLOCK iosb;
@@ -1144,24 +1129,38 @@ HANDLE WINAPI CreateNamedPipeW( LPCWSTR name, DWORD dwOpenMode,
     attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
     attr.SecurityQualityOfService = NULL;
 
-    options = 0;
+    switch(dwOpenMode & 3)
+    {
+    case PIPE_ACCESS_INBOUND:
+        options = FILE_PIPE_INBOUND;
+        access  = GENERIC_READ;
+        break;
+    case PIPE_ACCESS_OUTBOUND:
+        options = FILE_PIPE_OUTBOUND;
+        access  = GENERIC_WRITE;
+        break;
+    case PIPE_ACCESS_DUPLEX:
+        options = FILE_PIPE_FULL_DUPLEX;
+        access  = GENERIC_READ | GENERIC_WRITE;
+        break;
+    default:
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return INVALID_HANDLE_VALUE;
+    }
+    access |= SYNCHRONIZE;
     if (dwOpenMode & FILE_FLAG_WRITE_THROUGH) options |= FILE_WRITE_THROUGH;
     if (!(dwOpenMode & FILE_FLAG_OVERLAPPED)) options |= FILE_SYNCHRONOUS_IO_ALERT;
-    if ((dwOpenMode & PIPE_ACCESS_DUPLEX) == PIPE_ACCESS_DUPLEX)
-        options |= FILE_PIPE_FULL_DUPLEX;
-    else if (dwOpenMode & PIPE_ACCESS_INBOUND) options |= FILE_PIPE_INBOUND;
-    else if (dwOpenMode & PIPE_ACCESS_OUTBOUND) options |= FILE_PIPE_OUTBOUND;
     pipe_type = (dwPipeMode & PIPE_TYPE_MESSAGE) ? TRUE : FALSE;
     read_mode = (dwPipeMode & PIPE_READMODE_MESSAGE) ? TRUE : FALSE;
     non_block = (dwPipeMode & PIPE_NOWAIT) ? TRUE : FALSE;
-    if (nMaxInstances >= PIPE_UNLIMITED_INSTANCES) nMaxInstances = ~0UL;
+    if (nMaxInstances >= PIPE_UNLIMITED_INSTANCES) nMaxInstances = ~0U;
 
     timeout.QuadPart = (ULONGLONG)nDefaultTimeOut * -10000;
 
     SetLastError(0);
-        
-    status = NtCreateNamedPipeFile(&handle, GENERIC_READ|GENERIC_WRITE, &attr, &iosb,
-                                   0, FILE_OVERWRITE_IF, options, pipe_type,
+
+    status = NtCreateNamedPipeFile(&handle, access, &attr, &iosb, 0,
+                                   FILE_OVERWRITE_IF, options, pipe_type,
                                    read_mode, non_block, nMaxInstances,
                                    nInBufferSize, nOutBufferSize, &timeout);
 
@@ -1287,7 +1286,10 @@ BOOL WINAPI WaitNamedPipeW (LPCWSTR name, DWORD nTimeOut)
     }
 
     pipe_wait->TimeoutSpecified = !(nTimeOut == NMPWAIT_USE_DEFAULT_WAIT);
-    pipe_wait->Timeout.QuadPart = nTimeOut * -10000L;
+    if (nTimeOut == NMPWAIT_WAIT_FOREVER)
+        pipe_wait->Timeout.QuadPart = ((ULONGLONG)0x7fffffff << 32) | 0xffffffff;
+    else
+        pipe_wait->Timeout.QuadPart = (ULONGLONG)nTimeOut * -10000;
     pipe_wait->NameLength = nt_name.Length - sizeof(leadin);
     memcpy(pipe_wait->Name, nt_name.Buffer + sizeof(leadin)/sizeof(WCHAR),
            pipe_wait->NameLength);
@@ -1326,13 +1328,18 @@ BOOL WINAPI ConnectNamedPipe(HANDLE hPipe, LPOVERLAPPED overlapped)
 {
     NTSTATUS status;
     IO_STATUS_BLOCK status_block;
+    LPVOID   cvalue = NULL;
 
     TRACE("(%p,%p)\n", hPipe, overlapped);
 
     if(overlapped)
+    {
         overlapped->Internal = STATUS_PENDING;
+        overlapped->InternalHigh = 0;
+        if (((ULONG_PTR)overlapped->hEvent & 1) == 0) cvalue = overlapped;
+    }
 
-    status = NtFsControlFile(hPipe, overlapped ? overlapped->hEvent : NULL, NULL, NULL,
+    status = NtFsControlFile(hPipe, overlapped ? overlapped->hEvent : NULL, NULL, cvalue,
                              overlapped ? (IO_STATUS_BLOCK *)overlapped : &status_block,
                              FSCTL_PIPE_LISTEN, NULL, 0, NULL, 0);
 
@@ -1374,25 +1381,25 @@ BOOL WINAPI DisconnectNamedPipe(HANDLE hPipe)
  *  should be done as a single operation in the wineserver or kernel
  */
 BOOL WINAPI TransactNamedPipe(
-    HANDLE handle, LPVOID lpInput, DWORD dwInputSize, LPVOID lpOutput,
-    DWORD dwOutputSize, LPDWORD lpBytesRead, LPOVERLAPPED lpOverlapped)
+    HANDLE handle, LPVOID write_buf, DWORD write_size, LPVOID read_buf,
+    DWORD read_size, LPDWORD bytes_read, LPOVERLAPPED overlapped)
 {
     BOOL r;
     DWORD count;
 
     TRACE("%p %p %d %p %d %p %p\n",
-          handle, lpInput, dwInputSize, lpOutput,
-          dwOutputSize, lpBytesRead, lpOverlapped);
+          handle, write_buf, write_size, read_buf,
+          read_size, bytes_read, overlapped);
 
-    if (lpOverlapped)
+    if (overlapped)
     {
         FIXME("Doesn't support overlapped operation as yet\n");
         return FALSE;
     }
 
-    r = WriteFile(handle, lpOutput, dwOutputSize, &count, NULL);
+    r = WriteFile(handle, write_buf, write_size, &count, NULL);
     if (r)
-        r = ReadFile(handle, lpInput, dwInputSize, lpBytesRead, NULL);
+        r = ReadFile(handle, read_buf, read_size, bytes_read, NULL);
 
     return r;
 }
@@ -1515,10 +1522,43 @@ BOOL WINAPI CallNamedPipeW(
     LPVOID lpOutput, DWORD lpOutputSize,
     LPDWORD lpBytesRead, DWORD nTimeout)
 {
-    FIXME("%s %p %d %p %d %p %d\n",
-           debugstr_w(lpNamedPipeName), lpInput, lpInputSize,
-           lpOutput, lpOutputSize, lpBytesRead, nTimeout);
-    return FALSE;
+    HANDLE pipe;
+    BOOL ret;
+    DWORD mode;
+
+    TRACE("%s %p %d %p %d %p %d\n",
+          debugstr_w(lpNamedPipeName), lpInput, lpInputSize,
+          lpOutput, lpOutputSize, lpBytesRead, nTimeout);
+
+    pipe = CreateFileW(lpNamedPipeName, GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+    if (pipe == INVALID_HANDLE_VALUE)
+    {
+        ret = WaitNamedPipeW(lpNamedPipeName, nTimeout);
+        if (!ret)
+            return FALSE;
+        pipe = CreateFileW(lpNamedPipeName, GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+        if (pipe == INVALID_HANDLE_VALUE)
+            return FALSE;
+    }
+
+    mode = PIPE_READMODE_MESSAGE;
+    ret = SetNamedPipeHandleState(pipe, &mode, NULL, NULL);
+
+    /* Currently SetNamedPipeHandleState() is a stub returning FALSE */
+    if (ret) FIXME("Now that SetNamedPipeHandleState() is more than a stub, please update CallNamedPipeW\n");
+    /*
+    if (!ret)
+    {
+        CloseHandle(pipe);
+        return FALSE;
+    }*/
+
+    ret = TransactNamedPipe(pipe, lpInput, lpInputSize, lpOutput, lpOutputSize, lpBytesRead, NULL);
+    CloseHandle(pipe);
+    if (!ret)
+        return FALSE;
+
+    return TRUE;
 }
 
 /******************************************************************
@@ -1672,7 +1712,7 @@ HANDLE WINAPI CreateMailslotW( LPCWSTR lpName, DWORD nMaxMessageSize,
     else
         timeout.QuadPart = ((LONGLONG)0x7fffffff << 32) | 0xffffffff;
 
-    status = NtCreateMailslotFile( &handle, GENERIC_READ | GENERIC_WRITE, &attr,
+    status = NtCreateMailslotFile( &handle, GENERIC_READ | SYNCHRONIZE, &attr,
                                    &iosb, 0, 0, nMaxMessageSize, &timeout );
     if (status)
     {
@@ -1728,8 +1768,12 @@ BOOL WINAPI GetMailslotInfo( HANDLE hMailslot, LPDWORD lpMaxMessageSize,
     if( lpMessageCount )
         *lpMessageCount = info.MessagesAvailable;
     if( lpReadTimeout )
-        *lpReadTimeout = info.ReadTimeout.QuadPart / -10000;
-
+    {
+        if (info.ReadTimeout.QuadPart == (((LONGLONG)0x7fffffff << 32) | 0xffffffff))
+            *lpReadTimeout = MAILSLOT_WAIT_FOREVER;
+        else
+            *lpReadTimeout = info.ReadTimeout.QuadPart / -10000;
+    }
     return TRUE;
 }
 
@@ -1755,7 +1799,10 @@ BOOL WINAPI SetMailslotInfo( HANDLE hMailslot, DWORD dwReadTimeout)
 
     TRACE("%p %d\n", hMailslot, dwReadTimeout);
 
-    info.ReadTimeout.QuadPart = dwReadTimeout * -10000;
+    if (dwReadTimeout != MAILSLOT_WAIT_FOREVER)
+        info.ReadTimeout.QuadPart = (ULONGLONG)dwReadTimeout * -10000;
+    else
+        info.ReadTimeout.QuadPart = ((LONGLONG)0x7fffffff << 32) | 0xffffffff;
     status = NtSetInformationFile( hMailslot, &iosb, &info, sizeof info,
                                    FileMailslotSetInformation );
     if( status != STATUS_SUCCESS )
@@ -1773,12 +1820,45 @@ BOOL WINAPI SetMailslotInfo( HANDLE hMailslot, DWORD dwReadTimeout)
 HANDLE WINAPI CreateIoCompletionPort(HANDLE hFileHandle, HANDLE hExistingCompletionPort,
                                      ULONG_PTR CompletionKey, DWORD dwNumberOfConcurrentThreads)
 {
-    FIXME("(%p, %p, %08lx, %08x): stub.\n",
-          hFileHandle, hExistingCompletionPort, CompletionKey, dwNumberOfConcurrentThreads);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return NULL;
-}
+    NTSTATUS status;
+    HANDLE ret = 0;
 
+    TRACE("(%p, %p, %08lx, %08x)\n",
+          hFileHandle, hExistingCompletionPort, CompletionKey, dwNumberOfConcurrentThreads);
+
+    if (hExistingCompletionPort && hFileHandle == INVALID_HANDLE_VALUE)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    if (hExistingCompletionPort)
+        ret = hExistingCompletionPort;
+    else
+    {
+        status = NtCreateIoCompletion( &ret, IO_COMPLETION_ALL_ACCESS, NULL, dwNumberOfConcurrentThreads );
+        if (status != STATUS_SUCCESS) goto fail;
+    }
+
+    if (hFileHandle != INVALID_HANDLE_VALUE)
+    {
+        FILE_COMPLETION_INFORMATION info;
+        IO_STATUS_BLOCK iosb;
+
+        info.CompletionPort = ret;
+        info.CompletionKey = CompletionKey;
+        status = NtSetInformationFile( hFileHandle, &iosb, &info, sizeof(info), FileCompletionInformation );
+        if (status != STATUS_SUCCESS) goto fail;
+    }
+
+    return ret;
+
+fail:
+    if (ret && !hExistingCompletionPort)
+        CloseHandle( ret );
+    SetLastError( RtlNtStatusToDosError(status) );
+    return 0;
+}
 
 /******************************************************************************
  *		GetQueuedCompletionStatus (KERNEL32.@)
@@ -1787,16 +1867,52 @@ BOOL WINAPI GetQueuedCompletionStatus( HANDLE CompletionPort, LPDWORD lpNumberOf
                                        PULONG_PTR pCompletionKey, LPOVERLAPPED *lpOverlapped,
                                        DWORD dwMilliseconds )
 {
-    FIXME("(%p,%p,%p,%p,%d), stub!\n",
+    NTSTATUS status;
+    IO_STATUS_BLOCK iosb;
+    LARGE_INTEGER wait_time;
+
+    TRACE("(%p,%p,%p,%p,%d)\n",
           CompletionPort,lpNumberOfBytesTransferred,pCompletionKey,lpOverlapped,dwMilliseconds);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+
+    *lpOverlapped = NULL;
+
+    status = NtRemoveIoCompletion( CompletionPort, pCompletionKey, (PULONG_PTR)lpOverlapped,
+                                   &iosb, get_nt_timeout( &wait_time, dwMilliseconds ) );
+    if (status == STATUS_SUCCESS)
+    {
+        *lpNumberOfBytesTransferred = iosb.Information;
+        return TRUE;
+    }
+
+    SetLastError( RtlNtStatusToDosError(status) );
     return FALSE;
 }
 
+
+/******************************************************************************
+ *		PostQueuedCompletionStatus (KERNEL32.@)
+ */
 BOOL WINAPI PostQueuedCompletionStatus( HANDLE CompletionPort, DWORD dwNumberOfBytes,
                                         ULONG_PTR dwCompletionKey, LPOVERLAPPED lpOverlapped)
 {
-    FIXME("%p %d %08lx %p\n", CompletionPort, dwNumberOfBytes, dwCompletionKey, lpOverlapped );
+    NTSTATUS status;
+
+    TRACE("%p %d %08lx %p\n", CompletionPort, dwNumberOfBytes, dwCompletionKey, lpOverlapped );
+
+    status = NtSetIoCompletion( CompletionPort, dwCompletionKey, (ULONG_PTR)lpOverlapped,
+                                STATUS_SUCCESS, dwNumberOfBytes );
+
+    if (status == STATUS_SUCCESS) return TRUE;
+    SetLastError( RtlNtStatusToDosError(status) );
+    return FALSE;
+}
+
+/******************************************************************************
+ *		BindIoCompletionCallback (KERNEL32.@)
+ */
+BOOL WINAPI BindIoCompletionCallback( HANDLE FileHandle, LPOVERLAPPED_COMPLETION_ROUTINE Function, ULONG Flags)
+{
+    FIXME("%p, %p, %d, stub!\n", FileHandle, Function, Flags);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }

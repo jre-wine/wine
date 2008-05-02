@@ -31,11 +31,9 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "winreg.h"
 #include "ole2.h"
-
-#include "uuids.h"
+#include "advpub.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -50,12 +48,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(itss);
 static HRESULT ITSS_create(IUnknown *pUnkOuter, LPVOID *ppObj);
 
 LONG dll_count = 0;
+static HINSTANCE hInst;
 
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 {
     switch(fdwReason) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hInstDLL);
+        hInst = hInstDLL;
         break;
     case DLL_PROCESS_DETACH:
         break;
@@ -90,13 +90,13 @@ ITSSCF_QueryInterface(LPCLASSFACTORY iface,REFIID riid,LPVOID *ppobj)
 
 static ULONG WINAPI ITSSCF_AddRef(LPCLASSFACTORY iface)
 {
-    InterlockedIncrement(&dll_count);
+    ITSS_LockModule();
     return 2;
 }
 
 static ULONG WINAPI ITSSCF_Release(LPCLASSFACTORY iface)
 {
-    InterlockedDecrement(&dll_count);
+    ITSS_UnlockModule();
     return 1;
 }
 
@@ -124,9 +124,9 @@ static HRESULT WINAPI ITSSCF_LockServer(LPCLASSFACTORY iface, BOOL dolock)
     TRACE("(%p)->(%d)\n", iface, dolock);
 
     if (dolock)
-        InterlockedIncrement(&dll_count);
+        ITSS_LockModule();
     else
-        InterlockedDecrement(&dll_count);
+        ITSS_UnlockModule();
 
     return S_OK;
 }
@@ -141,7 +141,8 @@ static const IClassFactoryVtbl ITSSCF_Vtbl =
 };
 
 static const IClassFactoryImpl ITStorage_factory = { &ITSSCF_Vtbl, ITSS_create };
-static const IClassFactoryImpl ITSProtocol_factory = { &ITSSCF_Vtbl, ITS_IParseDisplayName_create };
+static const IClassFactoryImpl MSITStore_factory = { &ITSSCF_Vtbl, ITS_IParseDisplayName_create };
+static const IClassFactoryImpl ITSProtocol_factory = { &ITSSCF_Vtbl, ITSProtocol_create };
 
 /***********************************************************************
  *		DllGetClassObject	(ITSS.@)
@@ -154,6 +155,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
 
     if (IsEqualGUID(&CLSID_ITStorage, rclsid))
         factory = &ITStorage_factory;
+    else if (IsEqualGUID(&CLSID_MSITStore, rclsid))
+        factory = &MSITStore_factory;
     else if (IsEqualGUID(&CLSID_ITSProtocol, rclsid))
         factory = &ITSProtocol_factory;
     else
@@ -207,7 +210,7 @@ static ULONG WINAPI ITStorageImpl_Release(
 
     if (ref == 0) {
         HeapFree(GetProcessHeap(), 0, This);
-        InterlockedDecrement(&dll_count);
+        ITSS_UnlockModule();
     }
 
     return ref;
@@ -361,8 +364,8 @@ static HRESULT ITSS_create(IUnknown *pUnkOuter, LPVOID *ppObj)
 
     TRACE("-> %p\n", its);
     *ppObj = (LPVOID) its;
-    InterlockedIncrement(&dll_count);
 
+    ITSS_LockModule();
     return S_OK;
 }
 
@@ -372,4 +375,73 @@ HRESULT WINAPI DllCanUnloadNow(void)
 {
     TRACE("dll_count = %u\n", dll_count);
     return dll_count ? S_FALSE : S_OK;
+}
+
+#define INF_SET_ID(id)            \
+    do                            \
+    {                             \
+        static CHAR name[] = #id; \
+                                  \
+        pse[i].pszName = name;    \
+        clsids[i++] = &id;        \
+    } while (0)
+
+#define INF_SET_CLSID(clsid) INF_SET_ID(CLSID_ ## clsid)
+
+static HRESULT register_server(BOOL do_register)
+{
+    HRESULT hres;
+    HMODULE hAdvpack;
+    typeof(RegInstallA) *pRegInstall;
+    STRTABLEA strtable;
+    STRENTRYA pse[4];
+    static CLSID const *clsids[4];
+    int i = 0;
+
+    static const WCHAR wszAdvpack[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
+
+    INF_SET_CLSID(ITStorage);
+    INF_SET_CLSID(MSFSStore);
+    INF_SET_CLSID(MSITStore);
+    INF_SET_CLSID(ITSProtocol);
+
+    strtable.cEntries = sizeof(pse)/sizeof(pse[0]);
+    strtable.pse = pse;
+
+    for(i=0; i < strtable.cEntries; i++) {
+        pse[i].pszValue = HeapAlloc(GetProcessHeap(), 0, 39);
+        sprintf(pse[i].pszValue, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                clsids[i]->Data1, clsids[i]->Data2, clsids[i]->Data3, clsids[i]->Data4[0],
+                clsids[i]->Data4[1], clsids[i]->Data4[2], clsids[i]->Data4[3], clsids[i]->Data4[4],
+                clsids[i]->Data4[5], clsids[i]->Data4[6], clsids[i]->Data4[7]);
+    }
+
+    hAdvpack = LoadLibraryW(wszAdvpack);
+    pRegInstall = (typeof(RegInstallA)*)GetProcAddress(hAdvpack, "RegInstall");
+
+    hres = pRegInstall(hInst, do_register ? "RegisterDll" : "UnregisterDll", &strtable);
+
+    for(i=0; i < sizeof(pse)/sizeof(pse[0]); i++)
+        HeapFree(GetProcessHeap(), 0, pse[i].pszValue);
+
+    return hres;
+}
+
+#undef INF_SET_CLSID
+#undef INF_SET_ID
+
+/***********************************************************************
+ *          DllRegisterServer (ITSS.@)
+ */
+HRESULT WINAPI DllRegisterServer(void)
+{
+    return register_server(TRUE);
+}
+
+/***********************************************************************
+ *          DllUnregisterServer (ITSS.@)
+ */
+HRESULT WINAPI DllUnregisterServer(void)
+{
+    return register_server(FALSE);
 }

@@ -73,14 +73,14 @@ static	BOOL JOY_LoadDriver(DWORD dwJoyID)
     if (JOY_Sticks[dwJoyID].hDriver)
 	return TRUE;
 
-    JOY_Sticks[dwJoyID].hDriver = OpenDriverA("joystick.drv", 0, dwJoyID);
+    JOY_Sticks[dwJoyID].hDriver = OpenDriverA("winejoystick.drv", 0, dwJoyID);
     return (JOY_Sticks[dwJoyID].hDriver != 0);
 }
 
 /**************************************************************************
  * 				JOY_Timer		[internal]
  */
-static	void	CALLBACK	JOY_Timer(HWND hWnd, UINT wMsg, UINT wTimer, DWORD dwTime)
+static	void	CALLBACK	JOY_Timer(HWND hWnd, UINT wMsg, UINT_PTR wTimer, DWORD dwTime)
 {
     int			i;
     WINE_JOYSTICK*	joy;

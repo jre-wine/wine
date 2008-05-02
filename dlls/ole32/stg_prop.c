@@ -233,6 +233,7 @@ static ULONG WINAPI IPropertyStorage_fnRelease(
         if (This->dirty)
             IPropertyStorage_Commit(iface, STGC_DEFAULT);
         IStream_Release(This->stm);
+        This->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->cs);
         PropertyStorage_DestroyDictionaries(This);
         HeapFree(GetProcessHeap(), 0, This);
@@ -1616,7 +1617,7 @@ end:
 }
 
 static HRESULT PropertyStorage_WritePropertyToStream(PropertyStorage_impl *This,
- DWORD propNum, DWORD propid, PROPVARIANT *var, DWORD *sectionOffset)
+ DWORD propNum, DWORD propid, const PROPVARIANT *var, DWORD *sectionOffset)
 {
     HRESULT hr;
     LARGE_INTEGER seek;
@@ -1716,7 +1717,7 @@ static HRESULT PropertyStorage_WritePropertyToStream(PropertyStorage_impl *This,
         FILETIME temp;
 
         StorageUtl_WriteULargeInteger((BYTE *)&temp, 0,
-         (ULARGE_INTEGER *)&var->u.filetime);
+         (const ULARGE_INTEGER *)&var->u.filetime);
         hr = IStream_Write(This->stm, &temp, sizeof(FILETIME), &count);
         bytesWritten = count;
         break;
@@ -1774,8 +1775,8 @@ static BOOL PropertyStorage_PropertiesWriter(const void *key, const void *value,
     assert(value);
     assert(extra);
     assert(closure);
-    c->hr = PropertyStorage_WritePropertyToStream(This,
-     c->propNum++, (DWORD)key, (PROPVARIANT *)value, c->sectionOffset);
+    c->hr = PropertyStorage_WritePropertyToStream(This, c->propNum++,
+     (DWORD)key, value, c->sectionOffset);
     return SUCCEEDED(c->hr);
 }
 
@@ -1978,6 +1979,7 @@ static HRESULT PropertyStorage_BaseConstruct(IStream *stm,
     (*pps)->vtbl = &IPropertyStorage_Vtbl;
     (*pps)->ref = 1;
     InitializeCriticalSection(&(*pps)->cs);
+    (*pps)->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": PropertyStorage_impl.cs");
     (*pps)->stm = stm;
     memcpy(&(*pps)->fmtid, rfmtid, sizeof((*pps)->fmtid));
     (*pps)->grfMode = grfMode;
@@ -1986,6 +1988,7 @@ static HRESULT PropertyStorage_BaseConstruct(IStream *stm,
     if (FAILED(hr))
     {
         IStream_Release(stm);
+        (*pps)->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&(*pps)->cs);
         HeapFree(GetProcessHeap(), 0, *pps);
         *pps = NULL;

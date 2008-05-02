@@ -23,7 +23,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#ifdef HAVE_LIBXRANDR
+#ifdef SONAME_LIBXRANDR
 
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
@@ -41,20 +41,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(xrandr);
 
 static void *xrandr_handle;
-
-/* some default values just in case */
-#ifndef SONAME_LIBX11
-#define SONAME_LIBX11 "libX11.so"
-#endif
-#ifndef SONAME_LIBXEXT
-#define SONAME_LIBXEXT "libXext.so"
-#endif
-#ifndef SONAME_LIBXRENDER
-#define SONAME_LIBXRENDER "libXrender.so"
-#endif
-#ifndef SONAME_LIBXRANDR
-#define SONAME_LIBXRANDR "libXrandr.so"
-#endif
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f;
 MAKE_FUNCPTR(XRRConfigCurrentConfiguration)
@@ -162,6 +148,8 @@ static int X11DRV_XRandR_GetCurrentMode(void)
     sc = pXRRGetScreenInfo (gdi_display, root);
     size = pXRRConfigCurrentConfiguration (sc, &rot);
     rate = pXRRConfigCurrentRate (sc);
+    pXRRFreeScreenConfigInfo(sc);
+    wine_tsx11_unlock();
     for (i = 0; i < real_xrandr_modes_count; i++)
     {
         if ( (dd_modes[i].dwWidth      == real_xrandr_sizes[size].width ) &&
@@ -169,10 +157,9 @@ static int X11DRV_XRandR_GetCurrentMode(void)
              (dd_modes[i].wRefreshRate == rate                          ) )
           {
               res = i;
+              break;
           }
     }
-    pXRRFreeScreenConfigInfo(sc);
-    wine_tsx11_unlock();
     if (res == -1)
     {
         ERR("In unknown mode, returning default\n");
@@ -181,7 +168,7 @@ static int X11DRV_XRandR_GetCurrentMode(void)
     return res;
 }
 
-static void X11DRV_XRandR_SetCurrentMode(int mode)
+static LONG X11DRV_XRandR_SetCurrentMode(int mode)
 {
     SizeID size;
     Rotation rot;
@@ -226,6 +213,7 @@ static void X11DRV_XRandR_SetCurrentMode(int mode)
                               dd_modes[mode].dwWidth, dd_modes[mode].dwHeight, rate);
                         stat = pXRRSetScreenConfigAndRate (gdi_display, sc, root, 
                                                           size, rot, rate, CurrentTime);
+                        break;
                     }
                 }
             }
@@ -235,14 +223,19 @@ static void X11DRV_XRandR_SetCurrentMode(int mode)
 		      dd_modes[mode].dwWidth, dd_modes[mode].dwHeight);
                 stat = pXRRSetScreenConfig (gdi_display, sc, root, size, rot, CurrentTime);
             }
+            break;
         }
     }
     pXRRFreeScreenConfigInfo(sc);
     wine_tsx11_unlock();
     if (stat == RRSetConfigSuccess)
+    {
         X11DRV_handle_desktop_resize( dd_modes[mode].dwWidth, dd_modes[mode].dwHeight );
-    else
-        ERR("Resolution change not successful -- perhaps display has changed?\n");
+        return DISP_CHANGE_SUCCESSFUL;
+    }
+
+    ERR("Resolution change not successful -- perhaps display has changed?\n");
+    return DISP_CHANGE_FAILED;
 }
 
 void X11DRV_XRandR_Init(void)
@@ -325,4 +318,4 @@ void X11DRV_XRandR_Cleanup(void)
     real_xrandr_rates_count = NULL;
 }
 
-#endif /* HAVE_LIBXRANDR */
+#endif /* SONAME_LIBXRANDR */

@@ -1,5 +1,5 @@
 /*
- * Copyright 2006 Jacek Caban for CodeWeavers
+ * Copyright 2006-2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,6 +19,8 @@
 #include "config.h"
 
 #include <stdarg.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #define COBJMACROS
 #define NONAMELESSUNION
@@ -31,14 +33,24 @@
 #include "ole2.h"
 #include "commctrl.h"
 #include "advpub.h"
+#include "wininet.h"
+#include "shellapi.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
+#include "wine/library.h"
 
 #include "mshtml_private.h"
 #include "resource.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
+
+#define GECKO_FILE_NAME "wine_gecko-" GECKO_VERSION ".cab"
+
+static const WCHAR mshtml_keyW[] =
+    {'S','o','f','t','w','a','r','e',
+     '\\','W','i','n','e',
+     '\\','M','S','H','T','M','L',0};
 
 static HWND install_dialog = NULL;
 static LPWSTR tmp_file_name = NULL;
@@ -76,20 +88,24 @@ static void set_status(DWORD id)
 
 static void set_registry(LPCSTR install_dir)
 {
+    WCHAR mshtml_key[100];
     LPWSTR gecko_path;
     HKEY hkey;
     DWORD res, len, size;
 
-    static const WCHAR wszMshtmlKey[] = {
-        'S','o','f','t','w','a','r','e','\\','W','i','n','e',
-        '\\','M','S','H','T','M','L',0};
     static const WCHAR wszGeckoPath[] = {'G','e','c','k','o','P','a','t','h',0};
     static const WCHAR wszWineGecko[] = {'w','i','n','e','_','g','e','c','k','o',0};
 
-    /* @@ Wine registry key: HKCU\Software\Wine\MSHTML */
-    res = RegOpenKeyW(HKEY_CURRENT_USER, wszMshtmlKey, &hkey);
+    memcpy(mshtml_key, mshtml_keyW, sizeof(mshtml_keyW));
+    mshtml_key[sizeof(mshtml_keyW)/sizeof(WCHAR)-1] = '\\';
+    MultiByteToWideChar(CP_ACP, 0, GECKO_VERSION, sizeof(GECKO_VERSION),
+            mshtml_key+sizeof(mshtml_keyW)/sizeof(WCHAR),
+            (sizeof(mshtml_key)-sizeof(mshtml_keyW))/sizeof(WCHAR));
+
+    /* @@ Wine registry key: HKCU\Software\Wine\MSHTML\<version> */
+    res = RegCreateKeyW(HKEY_CURRENT_USER, mshtml_key, &hkey);
     if(res != ERROR_SUCCESS) {
-        ERR("Faild to open MSHTML key: %d\n", res);
+        ERR("Faild to create MSHTML key: %d\n", res);
         return;
     }
 
@@ -109,6 +125,151 @@ static void set_registry(LPCSTR install_dir)
     RegCloseKey(hkey);
     if(res != ERROR_SUCCESS)
         ERR("Failed to set GeckoPath value: %08x\n", res);
+}
+
+static BOOL install_cab(LPCWSTR file_name)
+{
+    HMODULE advpack;
+    char install_dir[MAX_PATH];
+    typeof(ExtractFilesA) *pExtractFilesA;
+    LPSTR file_name_a;
+    DWORD res, len;
+    HRESULT hres;
+
+    static const WCHAR wszAdvpack[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
+
+    TRACE("(%s)\n", debugstr_w(file_name));
+
+    GetWindowsDirectoryA(install_dir, sizeof(install_dir));
+    strcat(install_dir, "\\gecko\\");
+    res = CreateDirectoryA(install_dir, NULL);
+    if(!res && GetLastError() != ERROR_ALREADY_EXISTS) {
+        ERR("Could not create directory: %08u\n", GetLastError());
+        return FALSE;
+    }
+
+    strcat(install_dir, GECKO_VERSION);
+    res = CreateDirectoryA(install_dir, NULL);
+    if(!res && GetLastError() != ERROR_ALREADY_EXISTS) {
+        ERR("Could not create directory: %08u\n", GetLastError());
+        return FALSE;
+    }
+
+    advpack = LoadLibraryW(wszAdvpack);
+    pExtractFilesA = (typeof(ExtractFilesA)*)GetProcAddress(advpack, "ExtractFiles");
+
+    len = WideCharToMultiByte(CP_ACP, 0, file_name, -1, NULL, 0, NULL, NULL);
+    file_name_a = mshtml_alloc(len);
+    WideCharToMultiByte(CP_ACP, 0, file_name, -1, file_name_a, -1, NULL, NULL);
+
+    /* FIXME: Use unicode version (not yet implemented) */
+    hres = pExtractFilesA(file_name_a, install_dir, 0, NULL, NULL, 0);
+    FreeLibrary(advpack);
+    mshtml_free(file_name_a);
+    if(FAILED(hres)) {
+        ERR("Could not extract package: %08x\n", hres);
+        clean_up();
+        return FALSE;
+    }
+
+    set_registry(install_dir);
+    clean_up();
+
+    return TRUE;
+}
+
+static BOOL install_from_unix_file(const char *file_name)
+{
+    LPWSTR dos_file_name;
+    int fd;
+    BOOL ret;
+
+    static WCHAR *(*wine_get_dos_file_name)(const char*);
+    static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
+
+    fd = open(file_name, O_RDONLY);
+    if(fd == -1) {
+        TRACE("%s not found\n", debugstr_a(file_name));
+        return FALSE;
+    }
+
+    close(fd);
+
+    if(!wine_get_dos_file_name) {
+        wine_get_dos_file_name = (void*)GetProcAddress(GetModuleHandleW(kernel32W), "wine_get_dos_file_name");
+        if(!wine_get_dos_file_name) {
+            ERR("Could not get wine_get_dos_file_name function.\n");
+            return FALSE;
+        }
+    }
+
+    dos_file_name = wine_get_dos_file_name(file_name);
+    if(!file_name) {
+        ERR("Could not get dos file name of %s\n", debugstr_a(file_name));
+        return FALSE;
+    }
+
+    ret = install_cab(dos_file_name);
+
+    mshtml_free(dos_file_name);
+    return ret;
+}
+
+static BOOL install_from_registered_dir(void)
+{
+    char *file_name;
+    HKEY hkey;
+    DWORD res, type, size = MAX_PATH;
+    BOOL ret;
+
+    /* @@ Wine registry key: HKCU\Software\Wine\MSHTML */
+    res = RegOpenKeyW(HKEY_CURRENT_USER, mshtml_keyW, &hkey);
+    if(res != ERROR_SUCCESS)
+        return FALSE;
+
+    file_name = mshtml_alloc(size+sizeof(GECKO_FILE_NAME));
+    res = RegQueryValueExA(hkey, "GeckoCabDir", NULL, &type, (PBYTE)file_name, &size);
+    if(res == ERROR_MORE_DATA) {
+        file_name = mshtml_realloc(file_name, size+sizeof(GECKO_FILE_NAME));
+        res = RegQueryValueExA(hkey, "GeckoCabDir", NULL, &type, (PBYTE)file_name, &size);
+    }
+    RegCloseKey(hkey);
+    if(res != ERROR_SUCCESS || type != REG_SZ)
+        return FALSE;
+
+    strcat(file_name, GECKO_FILE_NAME);
+
+    TRACE("Trying %s\n", debugstr_a(file_name));
+
+    ret = install_from_unix_file(file_name);
+
+    mshtml_free(file_name);
+    return ret;
+}
+
+static BOOL install_from_default_dir(void)
+{
+    const char *data_dir;
+    char *file_name;
+    int len;
+    BOOL ret;
+
+    static const char gecko_dir[] = "/gecko/";
+
+    data_dir = wine_get_data_dir();
+    if(!data_dir) return FALSE;
+
+    len = strlen(data_dir);
+
+    file_name = mshtml_alloc(len+sizeof(gecko_dir)+sizeof(GECKO_FILE_NAME));
+    memcpy(file_name, data_dir, len);
+    memcpy(file_name+len, gecko_dir, sizeof(gecko_dir));
+    memcpy(file_name+len+sizeof(gecko_dir)-1, GECKO_FILE_NAME, sizeof(GECKO_FILE_NAME));
+
+    ret = install_from_unix_file(file_name);
+
+    mshtml_free(file_name);
+    return ret;
 }
 
 static HRESULT WINAPI InstallCallback_QueryInterface(IBindStatusCallback *iface,
@@ -186,15 +347,6 @@ static HRESULT WINAPI InstallCallback_OnProgress(IBindStatusCallback *iface, ULO
 static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
         HRESULT hresult, LPCWSTR szError)
 {
-    LPSTR file_name;
-    DWORD len;
-    HMODULE advpack;
-    char program_files[MAX_PATH];
-    typeof(ExtractFilesA) *pExtractFilesA;
-    HRESULT hres;
-
-    static const WCHAR wszAdvpack[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
-
     if(FAILED(hresult)) {
         ERR("Binding failed %08x\n", hresult);
         clean_up();
@@ -206,26 +358,7 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
 
     set_status(IDS_INSTALLING);
 
-    advpack = LoadLibraryW(wszAdvpack);
-    pExtractFilesA = (typeof(ExtractFilesA)*)GetProcAddress(advpack, "ExtractFiles");
-
-    len = WideCharToMultiByte(CP_ACP, 0, tmp_file_name, -1, NULL, 0, NULL, NULL);
-    file_name = mshtml_alloc(len);
-    WideCharToMultiByte(CP_ACP, 0, tmp_file_name, -1, file_name, -1, NULL, NULL);
-
-    GetEnvironmentVariableA("ProgramFiles", program_files, sizeof(program_files));
-
-    /* FIXME: Use unicode version (not yet implemented) */
-    hres = pExtractFilesA(file_name, program_files, 0, NULL, NULL, 0);
-    FreeLibrary(advpack);
-    mshtml_free(file_name);
-    if(FAILED(hres)) {
-        ERR("Could not extract package: %08x\n", hres);
-        clean_up();
-    }
-
-    set_registry(program_files);
-    clean_up();
+    install_cab(tmp_file_name);
 
     return S_OK;
 }
@@ -263,7 +396,7 @@ static HRESULT WINAPI InstallCallback_OnObjectAvailable(IBindStatusCallback *ifa
     return E_NOTIMPL;
 }
 
-static IBindStatusCallbackVtbl InstallCallbackVtbl = {
+static const IBindStatusCallbackVtbl InstallCallbackVtbl = {
     InstallCallback_QueryInterface,
     InstallCallback_AddRef,
     InstallCallback_Release,
@@ -283,16 +416,15 @@ static LPWSTR get_url(void)
 {
     HKEY hkey;
     DWORD res, type;
-    DWORD size = 512*sizeof(WCHAR);
+    DWORD size = INTERNET_MAX_URL_LENGTH*sizeof(WCHAR);
     LPWSTR url;
 
-    static const WCHAR wszMshtmlKey[] = {
-        'S','o','f','t','w','a','r','e','\\','W','i','n','e',
-        '\\','M','S','H','T','M','L',0};
     static const WCHAR wszGeckoUrl[] = {'G','e','c','k','o','U','r','l',0};
+    static const WCHAR httpW[] = {'h','t','t','p'};
+    static const WCHAR v_formatW[] = {'?','v','=',0};
 
     /* @@ Wine registry key: HKCU\Software\Wine\MSHTML */
-    res = RegOpenKeyW(HKEY_CURRENT_USER, wszMshtmlKey, &hkey);
+    res = RegOpenKeyW(HKEY_CURRENT_USER, mshtml_keyW, &hkey);
     if(res != ERROR_SUCCESS)
         return NULL;
 
@@ -305,6 +437,12 @@ static LPWSTR get_url(void)
         return NULL;
     }
 
+    if(size > sizeof(httpW) && !memcmp(url, httpW, sizeof(httpW))) {
+        strcatW(url, v_formatW);
+        MultiByteToWideChar(CP_ACP, 0, GECKO_VERSION, -1, url+strlenW(url), -1);
+    }
+
+    TRACE("Got URL %s\n", debugstr_w(url));
     return url;
 }
 
@@ -338,6 +476,7 @@ static INT_PTR CALLBACK installer_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 {
     switch(msg) {
     case WM_INITDIALOG:
+        ShowWindow(GetDlgItem(hwnd, ID_DWL_PROGRESS), SW_HIDE);
         install_dialog = hwnd;
         return TRUE;
 
@@ -348,6 +487,7 @@ static INT_PTR CALLBACK installer_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             return FALSE;
 
         case ID_DWL_INSTALL:
+            ShowWindow(GetDlgItem(hwnd, ID_DWL_PROGRESS), SW_SHOW);
             EnableWindow(GetDlgItem(hwnd, ID_DWL_INSTALL), 0);
             EnableWindow(GetDlgItem(hwnd, IDCANCEL), 0); /* FIXME */
             CreateThread(NULL, 0, download_proc, NULL, 0, NULL);
@@ -358,7 +498,7 @@ static INT_PTR CALLBACK installer_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
     return FALSE;
 }
 
-void install_wine_gecko(void)
+BOOL install_wine_gecko(void)
 {
     HANDLE hsem;
 
@@ -368,10 +508,20 @@ void install_wine_gecko(void)
     if(GetLastError() == ERROR_ALREADY_EXISTS) {
         WaitForSingleObject(hsem, INFINITE);
     }else {
-        if((url = get_url()))
-           DialogBoxW(hInst, MAKEINTRESOURCEW(ID_DWL_DIALOG), 0, installer_proc);
+        /*
+         * Try to find Gecko .cab file in following order:
+         * - directory stored in GeckoCabDir value of HKCU/Software/MSHTML key
+         * - $datadir/gecko
+         * - download from URL stored in GeckoUrl value of HKCU/Software/MSHTML key
+         */
+        if(!install_from_registered_dir()
+           && !install_from_default_dir()
+           && (url = get_url()))
+            DialogBoxW(hInst, MAKEINTRESOURCEW(ID_DWL_DIALOG), 0, installer_proc);
     }
 
     ReleaseSemaphore(hsem, 1, NULL);
     CloseHandle(hsem);
+
+    return TRUE;
 }

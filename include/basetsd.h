@@ -32,7 +32,7 @@ extern "C" {
  * and pointer are 32-bit.
  *
  * Win64, however, will cause some problems when implemented under Unix.
- * Linux/{Alpha, Sparc64} and most (all?) other 64-bit Unices uses
+ * Linux/{Alpha, Sparc64} and most (all?) other 64-bit Unices use
  * the LP64 type model where int is 32-bit and long and pointer are
  * 64-bit. Win64 on the other hand uses the P64 (sometimes called LLP64)
  * type model where int and long are 32 bit and pointer is 64-bit.
@@ -123,11 +123,85 @@ typedef unsigned int UHALF_PTR, *PUHALF_PTR;
 #define MINHALF_PTR 0x80000000
 #define MAXUHALF_PTR 0xffffffff
 
+#if !defined(__midl) && !defined(__WIDL__)
+
+static inline ULONG32 HandleToULong(const void *h)
+{
+    return (ULONG_PTR)h;
+}
+
+static inline LONG32 HandleToLong(const void *h)
+{
+    return (LONG_PTR)h;
+}
+
+static inline void *ULongToHandle(ULONG32 ul)
+{
+    return (void *)(ULONG_PTR)ul;
+}
+
+static inline void *LongToHandle(LONG32 l)
+{
+    return (void *)(LONG_PTR)l;
+}
+
+static inline ULONG32 PtrToUlong(const void *p)
+{
+    return (ULONG_PTR)p;
+}
+
+static inline LONG32 PtrToLong(const void *p)
+{
+    return (LONG_PTR)p;
+}
+
+static inline UINT32 PtrToUint(const void *p)
+{
+    return (UINT_PTR)p;
+}
+
+static inline INT32 PtrToInt(const void *p)
+{
+    return (INT_PTR)p;
+}
+
+static inline UINT16 PtrToUshort(const void *p)
+{
+    return (ULONG_PTR)p;
+}
+
+static inline INT16 PtrToShort(const void *p)
+{
+    return (LONG_PTR)p;
+}
+
+static inline void *IntToPtr(INT32 i)
+{
+    return (void *)(INT_PTR)i;
+}
+
+static inline void *UIntToPtr(UINT32 ui)
+{
+    return (void *)(UINT_PTR)ui;
+}
+
+static inline void *LongToPtr(LONG32 l)
+{
+    return (void *)(LONG_PTR)l;
+}
+
+static inline void *ULongToPtr(ULONG32 ul)
+{
+    return (void *)(ULONG_PTR)ul;
+}
+
+#endif  /* !__midl && !__WIDL__ */
+
 #else /* FIXME: defined(_WIN32) */
 
-typedef int INT_PTR, *PINT_PTR;
+typedef long INT_PTR, *PINT_PTR;
+typedef unsigned long UINT_PTR, *PUINT_PTR;
 typedef long LONG_PTR, *PLONG_PTR;
-typedef unsigned int UINT_PTR, *PUINT_PTR;
 typedef unsigned long ULONG_PTR, *PULONG_PTR;
 typedef ULONG_PTR DWORD_PTR, *PDWORD_PTR;
 
@@ -142,7 +216,27 @@ typedef unsigned short UHALF_PTR, *PUHALF_PTR;
 #define MAXHALF_PTR 0x7fff
 #define MINHALF_PTR 0x8000
 
+#define HandleToULong(h)        ((ULONG)(ULONG_PTR)(h))
+#define HandleToLong(h)         ((LONG)(LONG_PTR)(h))
+#define ULongToHandle(ul)       ((HANDLE)(ULONG_PTR)(ul))
+#define LongToHandle(l)         ((HANDLE)(LONG_PTR)(l))
+#define PtrToUlong(p)           ((ULONG)(ULONG_PTR)(p))
+#define PtrToLong(p)            ((LONG)(LONG_PTR)(p))
+#define PtrToUint(p)            ((UINT)(UINT_PTR)(p))
+#define PtrToInt(p)             ((INT)(INT_PTR)(p))
+#define PtrToUshort(p)          ((USHORT)(ULONG_PTR)(p))
+#define PtrToShort(p)           ((SHORT)(LONG_PTR)(p))
+#define IntToPtr(i)             ((void *)(INT_PTR)((INT)i))
+#define UIntToPtr(ui)           ((void *)(UINT_PTR)((UINT)ui))
+#define LongToPtr(l)            ((void *)(LONG_PTR)((LONG)l))
+#define ULongToPtr(ul)          ((void *)(ULONG_PTR)((ULONG)ul))
+
 #endif /* defined(_WIN64) || defined(_WIN32) */
+
+#define HandleToUlong(h)        HandleToULong(h)
+#define UlongToHandle(ul)       ULongToHandle(ul)
+#define UintToPtr(ui)           UIntToPtr(ui)
+#define UlongToPtr(ul)          ULongToPtr(ul)
 
 typedef LONG_PTR SSIZE_T, *PSSIZE_T;
 typedef ULONG_PTR SIZE_T, *PSIZE_T;

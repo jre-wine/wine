@@ -30,13 +30,12 @@
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
+#include "wingdi.h"
 #include "winuser.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
 
-#include "gdi.h"
 #include "d3d9.h"
-#include "ddraw.h"
 #include "wine/wined3d_interface.h"
 
 /* ===========================================================================
@@ -45,6 +44,7 @@
 extern HRESULT vdecl_convert_fvf(
     DWORD FVF,
     D3DVERTEXELEMENT9** ppVertexElements);
+extern CRITICAL_SECTION d3d9_cs;
 
 /* ===========================================================================
     Macros
@@ -155,6 +155,8 @@ typedef struct IDirect3D9Impl
 
 } IDirect3D9Impl;
 
+void filter_caps(D3DCAPS9* pCaps);
+
 /* ---------------- */
 /* IDirect3DDevice9 */
 /* ---------------- */
@@ -175,6 +177,12 @@ typedef struct IDirect3DDevice9Impl
 
     /* IDirect3DDevice9 fields */
     IWineD3DDevice               *WineD3DDevice;
+
+    /* Avoids recursion with nested ReleaseRef to 0 */
+    BOOL                          inDestruction;
+
+    IDirect3DVertexDeclaration9  **convertedDecls;
+    unsigned int                 numConvertedDecls, declArraySize;
 
 } IDirect3DDevice9Impl;
 
@@ -235,7 +243,12 @@ typedef struct IDirect3DVolume9Impl
 
     /* IDirect3DVolume9 fields */
     IWineD3DVolume         *wineD3DVolume;
-    
+
+    /* The volume container */
+    IUnknown                    *container;
+
+    /* If set forward refcounting to this object */
+    IUnknown                    *forwardReference;
 } IDirect3DVolume9Impl;
 
 /* ------------------- */
@@ -256,6 +269,9 @@ typedef struct IDirect3DSwapChain9Impl
 
     /* Parent reference */
     LPDIRECT3DDEVICE9       parentDevice;
+
+    /* Flags an implicit swap chain */
+    BOOL                        isImplicit;
 } IDirect3DSwapChain9Impl;
 
 /* ------------------ */
@@ -301,6 +317,15 @@ typedef struct IDirect3DSurface9Impl
 
     /* Parent reference */
     LPDIRECT3DDEVICE9       parentDevice;
+
+    /* The surface container */
+    IUnknown                    *container;
+
+    /* If set forward refcounting to this object */
+    IUnknown                    *forwardReference;
+
+    /* Flags an implicit surface */
+    BOOL                        isImplicit;
 } IDirect3DSurface9Impl;
 
 /* ---------------------- */
@@ -456,12 +481,18 @@ typedef struct IDirect3DVertexDeclaration9Impl {
   const IDirect3DVertexDeclaration9Vtbl *lpVtbl;
   LONG    ref;
 
+  D3DVERTEXELEMENT9 *elements;
+  size_t element_count;
+
   /* IDirect3DVertexDeclaration9 fields */
   IWineD3DVertexDeclaration *wineD3DVertexDeclaration;
-  
+  DWORD convFVF;
+
   /* Parent reference */
   LPDIRECT3DDEVICE9 parentDevice;
 } IDirect3DVertexDeclaration9Impl;
+
+void IDirect3DVertexDeclaration9Impl_Destroy(LPDIRECT3DVERTEXDECLARATION9 iface);
 
 /* ---------------------- */
 /* IDirect3DVertexShader9 */
@@ -522,23 +553,34 @@ typedef struct IDirect3DQuery9Impl {
 
 
 /* Callbacks */
-extern HRESULT WINAPI D3D9CB_CreateSurface(IUnknown *device, UINT Width, UINT Height, 
+extern HRESULT WINAPI D3D9CB_CreateSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, DWORD Usage, WINED3DPOOL Pool, UINT Level,
-                                         IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
+                                         WINED3DCUBEMAP_FACES Face, IWineD3DSurface** ppSurface,
+                                         HANDLE* pSharedHandle);
 
-extern HRESULT WINAPI D3D9CB_CreateVolume(IUnknown  *pDevice, UINT Width, UINT Height, UINT Depth, 
+extern HRESULT WINAPI D3D9CB_CreateVolume(IUnknown  *pDevice, IUnknown *pSuperior, UINT Width, UINT Height, UINT Depth,
                                           WINED3DFORMAT  Format, WINED3DPOOL Pool, DWORD Usage,
-                                          IWineD3DVolume **ppVolume, 
+                                          IWineD3DVolume **ppVolume,
                                           HANDLE   * pSharedHandle);
 
-extern HRESULT WINAPI D3D9CB_CreateDepthStencilSurface(IUnknown *device, UINT Width, UINT Height,
+extern HRESULT WINAPI D3D9CB_CreateDepthStencilSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
                                          DWORD MultisampleQuality, BOOL Discard,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
 
-extern HRESULT WINAPI D3D9CB_CreateRenderTarget(IUnknown *device, UINT Width, UINT Height,
+extern HRESULT WINAPI D3D9CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
                                          WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
-                                         DWORD MultisampleQuality, BOOL Lockable, 
+                                         DWORD MultisampleQuality, BOOL Lockable,
                                          IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
+
+extern ULONG WINAPI D3D9CB_DestroySwapChain (IWineD3DSwapChain *pSwapChain);
+
+extern ULONG WINAPI D3D9CB_DestroyDepthStencilSurface (IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3D9CB_DestroyRenderTarget (IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3D9CB_DestroySurface(IWineD3DSurface *pSurface);
+
+extern ULONG WINAPI D3D9CB_DestroyVolume(IWineD3DVolume *pVolume);
 
 #endif /* __WINE_D3D9_PRIVATE_H */

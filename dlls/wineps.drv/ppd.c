@@ -31,7 +31,6 @@
 #include "winbase.h"
 #include "wine/debug.h"
 #include "psdrv.h"
-#include "winspool.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
@@ -467,25 +466,19 @@ static BOOL PSDRV_PPDGetNextTuple(FILE *fp, PPDTuple *tuple)
  * entry which is appended to the list if name is not found.
  *
  */
-PAGESIZE *PSDRV_PPDGetPageSizeInfo(PPD *ppd, char *name)
+static PAGESIZE *PSDRV_PPDGetPageSizeInfo(PPD *ppd, char *name)
 {
-    PAGESIZE *page = ppd->PageSizes, *lastpage;
+    PAGESIZE *page;
 
-    if(!page) {
-       page = ppd->PageSizes = HeapAlloc( PSDRV_Heap,
-					    HEAP_ZERO_MEMORY, sizeof(*page) );
-       return page;
-    } else {
-        for( ; page; page = page->next) {
-	    if(!strcmp(page->Name, name))
-	         return page;
-	    lastpage = page;
-	}
-
-	lastpage->next = HeapAlloc( PSDRV_Heap,
-					   HEAP_ZERO_MEMORY, sizeof(*page) );
-	return lastpage->next;
+    LIST_FOR_EACH_ENTRY(page, &ppd->PageSizes, PAGESIZE, entry)
+    {
+        if(!strcmp(page->Name, name))
+            return page;
     }
+
+    page = HeapAlloc( PSDRV_Heap,  HEAP_ZERO_MEMORY, sizeof(*page) );
+    list_add_tail(&ppd->PageSizes, &page->entry);
+    return page;
 }
 
 /**********************************************************************
@@ -520,6 +513,70 @@ static char *PSDRV_PPDGetWord(char *str, char **next)
         *next = NULL;
 
     return ret;
+}
+
+/************************************************************
+ *           parse_resolution
+ *
+ * Helper to extract x and y resolutions from a resolution entry.
+ * Returns TRUE on successful parsing, otherwise FALSE.
+ *
+ * The ppd spec says that entries can either be:
+ *    "nnndpi"
+ * or
+ *    "nnnxmmmdpi"
+ * in the former case return sz.cx == cx.cy == nnn.
+ *
+ * There are broken ppd files out there (notably from Samsung) that
+ * use the form "nnnmmmdpi", so we have to work harder to spot these.
+ * We use a transition from a zero to a non-zero digit as separator
+ * (and fail if we find more than one of these).  We also don't bother
+ * trying to parse "dpi" in case that's missing.
+ */
+static BOOL parse_resolution(const char *str, SIZE *sz)
+{
+    int tmp[2];
+    int *cur;
+    BOOL had_zero;
+    const char *c;
+
+    if(sscanf(str, "%dx%d", tmp, tmp + 1) == 2)
+    {
+        sz->cx = tmp[0];
+        sz->cy = tmp[1];
+        return TRUE;
+    }
+
+    tmp[0] = 0;
+    tmp[1] = -1;
+    cur = tmp;
+    had_zero = FALSE;
+    for(c = str; isdigit(*c); c++)
+    {
+        if(!had_zero || *c == '0')
+        {
+            *cur *= 10;
+            *cur += *c - '0';
+            if(*c == '0')
+                had_zero = TRUE;
+        }
+        else if(cur != tmp)
+            return FALSE;
+        else
+        {
+            cur++;
+            *cur = *c - '0';
+            had_zero = FALSE;
+        }
+    }
+    if(tmp[0] == 0) return FALSE;
+
+    sz->cx = tmp[0];
+    if(tmp[1] != -1)
+        sz->cy = tmp[1];
+    else
+        sz->cy = sz->cx;
+    return TRUE;
 }
 
 /*******************************************************************************
@@ -557,6 +614,7 @@ PPD *PSDRV_ParsePPD(char *fname)
     PPD *ppd;
     PPDTuple tuple;
     char *default_pagesize = NULL, *default_duplex = NULL;
+    PAGESIZE *page, *page_cursor2;
 
     TRACE("file '%s'\n", fname);
 
@@ -571,6 +629,9 @@ PPD *PSDRV_ParsePPD(char *fname)
 	fclose(fp);
 	return NULL;
     }
+
+    ppd->ColorDevice = CD_NotSpecified;
+    list_init(&ppd->PageSizes);
 
     /*
      *	The Windows PostScript drivers create the following "virtual bin" for
@@ -599,14 +660,22 @@ PPD *PSDRV_ParsePPD(char *fname)
 
 	else if(!strcmp("*ColorDevice", tuple.key)) {
 	    if(!strcasecmp(tuple.value, "true"))
-	        ppd->ColorDevice = TRUE;
-	    TRACE("ColorDevice = %d\n", (int)ppd->ColorDevice);
+                ppd->ColorDevice = CD_True;
+            else
+                ppd->ColorDevice = CD_False;
+            TRACE("ColorDevice = %s\n", ppd->ColorDevice == CD_True ? "True" : "False");
 	}
 
 	else if((!strcmp("*DefaultResolution", tuple.key)) ||
 		(!strcmp("*DefaultJCLResolution", tuple.key))) {
-	    sscanf(tuple.value, "%d", &(ppd->DefaultResolution));
-	    TRACE("DefaultResolution = %d\n", ppd->DefaultResolution);
+            SIZE sz;
+            if(parse_resolution(tuple.value, &sz))
+            {
+                TRACE("DefaultResolution %dx%d\n", sz.cx, sz.cy);
+                ppd->DefaultResolution = sz.cx;
+            }
+            else
+                WARN("failed to parse DefaultResolution %s\n", debugstr_a(tuple.value));
 	}
 
 	else if(!strcmp("*Font", tuple.key)) {
@@ -648,7 +717,6 @@ PPD *PSDRV_ParsePPD(char *fname)
 	}
 
 	else if(!strcmp("*PageSize", tuple.key)) {
-	    PAGESIZE *page;
 	    page = PSDRV_PPDGetPageSizeInfo(ppd, tuple.option);
 
 	    if(!page->Name) {
@@ -695,7 +763,6 @@ PPD *PSDRV_ParsePPD(char *fname)
         }
 
         else if(!strcmp("*ImageableArea", tuple.key)) {
-	    PAGESIZE *page;
 	    page = PSDRV_PPDGetPageSizeInfo(ppd, tuple.option);
 
 	    if(!page->Name) {
@@ -720,7 +787,6 @@ PPD *PSDRV_ParsePPD(char *fname)
 
 
 	else if(!strcmp("*PaperDimension", tuple.key)) {
-	    PAGESIZE *page;
 	    page = PSDRV_PPDGetPageSizeInfo(ppd, tuple.option);
 
 	    if(!page->Name) {
@@ -860,11 +926,26 @@ PPD *PSDRV_ParsePPD(char *fname)
 
     }
 
+    /* Remove any partial page size entries, that is any without a PageSize or a PaperDimension (we can
+       cope with a missing ImageableArea). */
+    LIST_FOR_EACH_ENTRY_SAFE(page, page_cursor2, &ppd->PageSizes, PAGESIZE, entry)
+    {
+        if(!page->InvocationString || !page->PaperDimension)
+        {
+            WARN("Removing page %s since it has a missing %s entry\n", debugstr_a(page->FullName),
+                 page->InvocationString ? "PaperDimension" : "InvocationString");
+            HeapFree(PSDRV_Heap, 0, page->Name);
+            HeapFree(PSDRV_Heap, 0, page->FullName);
+            HeapFree(PSDRV_Heap, 0, page->InvocationString);
+            HeapFree(PSDRV_Heap, 0, page->ImageableArea);
+            HeapFree(PSDRV_Heap, 0, page->PaperDimension);
+            list_remove(&page->entry);
+        }
+    }
 
     ppd->DefaultPageSize = NULL;
     if(default_pagesize) {
-	PAGESIZE *page;
-	for(page = ppd->PageSizes; page; page = page->next) {
+	LIST_FOR_EACH_ENTRY(page, &ppd->PageSizes, PAGESIZE, entry) {
             if(!strcmp(page->Name, default_pagesize)) {
                 ppd->DefaultPageSize = page;
                 TRACE("DefaultPageSize: %s\n", page->Name);
@@ -874,7 +955,7 @@ PPD *PSDRV_ParsePPD(char *fname)
         HeapFree(PSDRV_Heap, 0, default_pagesize);
     }
     if(!ppd->DefaultPageSize) {
-        ppd->DefaultPageSize = ppd->PageSizes;
+        ppd->DefaultPageSize = LIST_ENTRY(list_head(&ppd->PageSizes), PAGESIZE, entry);
         TRACE("Setting DefaultPageSize to first in list\n");
     }
 
@@ -907,7 +988,7 @@ PPD *PSDRV_ParsePPD(char *fname)
 	for(fn = ppd->InstalledFonts; fn; fn = fn->next)
 	    TRACE("'%s'\n", fn->Name);
 
-	for(page = ppd->PageSizes; page; page = page->next) {
+	LIST_FOR_EACH_ENTRY(page, &ppd->PageSizes, PAGESIZE, entry) {
 	    TRACE("'%s' aka '%s' (%d) invoked by '%s'\n", page->Name,
 	      page->FullName, page->WinPage, page->InvocationString);
 	    if(page->ImageableArea)

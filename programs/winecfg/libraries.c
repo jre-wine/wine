@@ -21,6 +21,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #define NONAMELESSUNION
 #define WIN32_LEAN_AND_MEAN
@@ -55,7 +56,6 @@ static const char * const builtin_only[] =
     "glu32",
     "icmp",
     "iphlpapi",
-    "joystick.drv",
     "kernel32",
     "mswsock",
     "ntdll",
@@ -68,12 +68,12 @@ static const char * const builtin_only[] =
     "vdmdbg",
     "w32skrnl",
     "winealsa.drv",
-    "winearts.drv",
     "wineaudioio.drv",
     "wined3d",
     "winedos",
     "wineesd.drv",
     "winejack.drv",
+    "winejoystick.drv",
     "winemp3.acm",
     "winenas.drv",
     "wineoss.drv",

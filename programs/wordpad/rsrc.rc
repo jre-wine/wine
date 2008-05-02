@@ -1,5 +1,6 @@
 /*
  * Copyright 2004 by Krzysztof Foltman
+ * Copyright 2007 by Alexander N. Sørnes <alex@thehandofagony.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,7 +17,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <windows.h>
+#include <windef.h>
+#include <winuser.h>
+
 #include "resource.h"
 
 MAINACCELTABLE ACCELERATORS
@@ -26,6 +29,9 @@ BEGIN
     "L",          ID_ALIGN_LEFT,      VIRTKEY, CONTROL    
     "E",          ID_ALIGN_CENTER,    VIRTKEY, CONTROL    
     "R",          ID_ALIGN_RIGHT,     VIRTKEY, CONTROL    
+    "F",          ID_FIND,            VIRTKEY, CONTROL
+    VK_F3,        ID_FIND_NEXT,       VIRTKEY
+    "H",          ID_REPLACE,         VIRTKEY, CONTROL
     "A",          ID_EDIT_SELECTALL,  VIRTKEY, CONTROL    
     "X",          ID_EDIT_CUT,        VIRTKEY, CONTROL    
     "C",          ID_EDIT_COPY,       VIRTKEY, CONTROL    
@@ -37,44 +43,26 @@ BEGIN
     "N",          ID_FILE_NEW,        VIRTKEY, CONTROL    
     "O",          ID_FILE_OPEN,       VIRTKEY, CONTROL    
     "S",          ID_FILE_SAVE,       VIRTKEY, CONTROL    
+    "P",          ID_PRINT,           VIRTKEY, CONTROL
 END
 
-/* BINRES toolbar.bmp */
+/* @makedep: toolbar.bmp */
 IDB_TOOLBAR BITMAP "toolbar.bmp"
-/* {
- '42 4D F6 01 00 00 00 00 00 00 76 00 00 00 28 00'
- '00 00 30 00 00 00 10 00 00 00 01 00 04 00 00 00'
- '00 00 80 01 00 00 00 00 00 00 00 00 00 00 00 00'
- '00 00 00 00 00 00 00 00 00 00 00 00 80 00 00 80'
- '00 00 00 80 80 00 80 00 00 00 80 00 80 00 80 80'
- '00 00 80 80 80 00 C0 C0 C0 00 00 00 FF 00 00 FF'
- '00 00 00 FF FF 00 FF 00 00 00 FF 00 FF 00 FF FF'
- '00 00 FF FF FF 00 88 88 88 88 88 88 88 88 88 88'
- '88 88 88 88 88 88 88 88 88 88 88 88 88 88 88 88'
- '88 88 88 88 88 88 88 88 88 88 88 88 88 88 88 88'
- '00 00 00 00 88 88 88 88 88 88 88 88 88 88 88 88'
- '88 88 88 88 88 88 88 88 88 88 88 88 88 88 88 80'
- '00 00 00 88 88 88 88 88 00 00 08 88 88 88 88 88'
- '80 00 00 08 88 88 88 80 08 88 80 08 88 88 88 88'
- '88 08 88 88 88 88 88 88 08 88 88 80 88 88 88 80'
- '08 88 80 08 88 88 88 88 88 08 88 88 88 88 88 88'
- '08 88 88 80 88 88 88 80 08 88 80 08 88 88 88 88'
- '88 08 88 88 88 88 88 88 08 88 88 80 88 88 88 80'
- '08 88 80 08 88 88 88 88 88 80 88 88 88 88 88 88'
- '08 88 88 80 88 88 88 80 00 00 00 88 88 88 88 88'
- '88 80 88 88 88 88 88 88 08 88 88 80 88 88 88 80'
- '08 88 80 08 88 88 88 88 88 80 88 88 88 88 88 88'
- '08 88 88 80 88 88 88 80 08 88 80 08 88 88 88 88'
- '88 88 08 88 88 88 88 88 08 88 88 80 88 88 88 80'
- '08 88 80 08 88 88 88 88 88 88 08 88 88 88 88 88'
- '08 88 88 80 88 88 88 80 00 00 00 88 88 88 88 88'
- '88 00 00 08 88 88 88 88 08 88 88 80 88 88 88 88'
- '88 88 88 88 88 88 88 88 88 88 88 88 88 88 88 88'
- '88 88 88 88 88 88 88 88 88 88 88 88 88 88 88 88'
- '88 88 88 88 88 88 88 88 88 88 88 88 88 88 88 88'
- '88 88 88 88 88 88 88 88 88 88 88 88 88 88 88 88'
- '88 88 88 88 88 88'
-} */
+
+/* @makedep: formatbar.bmp */
+IDB_FORMATBAR BITMAP "formatbar.bmp"
+
+/* @makedep: wordpad.ico */
+IDI_WORDPAD ICON "wordpad.ico"
+
+/* @makedep: rtf.ico */
+IDI_RTF ICON "rtf.ico"
+
+/* @makedep: wri.ico */
+IDI_WRI ICON "wri.ico"
+
+/* @makedep: txt.ico */
+IDI_TXT ICON "txt.ico"
 
 #include "De.rc"
 #include "En.rc"
@@ -83,5 +71,6 @@ IDB_TOOLBAR BITMAP "toolbar.bmp"
 #include "Ko.rc"
 #include "Nl.rc"
 #include "No.rc"
+#include "Pl.rc"
 #include "Ru.rc"
 #include "Tr.rc"

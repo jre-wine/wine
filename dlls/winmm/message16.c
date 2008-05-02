@@ -25,8 +25,6 @@
 #include "wine/winbase16.h"
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
-#include "winver.h"
 #include "wownt32.h"
 #include "winemm16.h"
 #include "digitalv.h"
@@ -968,11 +966,10 @@ static  WINMM_MapType	MMDRV_WaveIn_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DWO
 		/* FIXME: nothing on wh32->lpNext */
 		/* could link the wh32->lpNext at this level for memory house keeping */
 		wh32->lpNext = wh16; /* for reuse in unprepare and write */
-		TRACE("wh16=%08x wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
-		      seg_ptr + sizeof(LPWAVEHDR), wh16->lpData,
-		      wh32->dwBufferLength, wh32->lpData);
 		*lpParam1 = seg_ptr + sizeof(LPWAVEHDR);
 		*lpParam2 = sizeof(WAVEHDR);
+		TRACE("wh16=%08lx wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
+		      *lpParam1, wh16->lpData, wh32->dwBufferLength, wh32->lpData);
 
 		ret = WINMM_MAP_OKMEM;
 	    } else {
@@ -990,14 +987,14 @@ static  WINMM_MapType	MMDRV_WaveIn_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DWO
 
 	    assert(*(LPWAVEHDR*)ptr == wh32);
 
-	    TRACE("wh16=%08x wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
-		  seg_ptr + sizeof(LPWAVEHDR), wh16->lpData, wh32->dwBufferLength, wh32->lpData);
-
 	    if (wMsg == WIDM_ADDBUFFER)
 		memcpy((LPSTR)wh16 + sizeof(WAVEHDR), wh32->lpData, wh32->dwBufferLength);
 
 	    *lpParam1 = seg_ptr + sizeof(LPWAVEHDR);
 	    *lpParam2 = sizeof(WAVEHDR);
+	    TRACE("wh16=%08lx wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
+		  *lpParam1, wh16->lpData, wh32->dwBufferLength, wh32->lpData);
+
 	    /* dwBufferLength can be reduced between prepare & write */
 	    if (wMsg == WIDM_ADDBUFFER && wh16->dwBufferLength < wh32->dwBufferLength) {
 		ERR("Size of buffer has been increased from %d to %d, keeping initial value\n",
@@ -1528,11 +1525,10 @@ static  WINMM_MapType	MMDRV_WaveOut_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DW
 		/* FIXME: nothing on wh32->lpNext */
 		/* could link the wh32->lpNext at this level for memory house keeping */
 		wh32->lpNext = wh16; /* for reuse in unprepare and write */
-		TRACE("wh16=%08x wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
-		      seg_ptr + sizeof(LPWAVEHDR), wh16->lpData,
-		      wh32->dwBufferLength, wh32->lpData);
 		*lpParam1 = seg_ptr + sizeof(LPWAVEHDR);
 		*lpParam2 = sizeof(WAVEHDR);
+		TRACE("wh16=%08lx wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
+		      *lpParam1, wh16->lpData, wh32->dwBufferLength, wh32->lpData);
 
 		ret = WINMM_MAP_OKMEM;
 	    } else {
@@ -1550,15 +1546,14 @@ static  WINMM_MapType	MMDRV_WaveOut_Map32WTo16  (UINT wMsg, LPDWORD lpdwUser, DW
 
 	    assert(*(LPWAVEHDR*)ptr == wh32);
 
-	    TRACE("wh16=%08x wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
-		  seg_ptr + sizeof(LPWAVEHDR), wh16->lpData,
-		  wh32->dwBufferLength, wh32->lpData);
-
 	    if (wMsg == WODM_WRITE)
 		memcpy((LPSTR)wh16 + sizeof(WAVEHDR), wh32->lpData, wh32->dwBufferLength);
 
 	    *lpParam1 = seg_ptr + sizeof(LPWAVEHDR);
 	    *lpParam2 = sizeof(WAVEHDR);
+	    TRACE("wh16=%08lx wh16->lpData=%p wh32->buflen=%u wh32->lpData=%p\n",
+		  *lpParam1, wh16->lpData, wh32->dwBufferLength, wh32->lpData);
+
 	    /* dwBufferLength can be reduced between prepare & write */
 	    if (wMsg == WODM_WRITE && wh16->dwBufferLength < wh32->dwBufferLength) {
 		ERR("Size of buffer has been increased from %d to %d, keeping initial value\n",
@@ -1796,9 +1791,9 @@ theEnd:
  *		MMDRV_LoadMMDrvFunc16
  *
  */
-unsigned   MMDRV_LoadMMDrvFunc16(LPCSTR drvName, LPWINE_DRIVER d, 
-                                 LPWINE_MM_DRIVER lpDrv)
-{        
+static unsigned MMDRV_LoadMMDrvFunc16(LPCSTR drvName, LPWINE_DRIVER d,
+                                      LPWINE_MM_DRIVER lpDrv)
+{
     WINEMM_msgFunc16	func;
     unsigned            count = 0;
     char    		buffer[128];

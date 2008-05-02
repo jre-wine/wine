@@ -29,7 +29,6 @@
 #include "winbase.h"
 #include "winreg.h"
 
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -193,6 +192,7 @@ static struct graphics_driver *create_driver( HMODULE module )
         GET_FUNC(StrokeAndFillPath);
         GET_FUNC(StrokePath);
         GET_FUNC(SwapBuffers);
+        GET_FUNC(UnrealizePalette);
         GET_FUNC(WidenPath);
 
         /* OpenGL32 */
@@ -497,7 +497,6 @@ INT WINAPI GDI_CallExtDeviceMode16( HWND hwnd,
     HDC hdc;
     DC *dc;
     INT ret = -1;
-    INT (*pExtDeviceMode)(LPSTR,HWND,LPDEVMODEA,LPSTR,LPSTR,LPDEVMODEA,LPSTR,DWORD);
 
     TRACE("(%p, %p, %s, %s, %p, %s, %d)\n",
           hwnd, lpdmOutput, lpszDevice, lpszPort, lpdmInput, lpszProfile, fwMode );
@@ -511,13 +510,12 @@ INT WINAPI GDI_CallExtDeviceMode16( HWND hwnd,
 
     if (!(hdc = CreateICA( buf, lpszDevice, lpszPort, NULL ))) return -1;
 
-    if ((dc = DC_GetDCPtr( hdc )))
+    if ((dc = get_dc_ptr( hdc )))
     {
-	pExtDeviceMode = dc->funcs->pExtDeviceMode;
-	GDI_ReleaseObj( hdc );
-	if (pExtDeviceMode)
-	    ret = pExtDeviceMode(buf, hwnd, lpdmOutput, lpszDevice, lpszPort,
-                                            lpdmInput, lpszProfile, fwMode);
+        if (dc->funcs->pExtDeviceMode)
+	    ret = dc->funcs->pExtDeviceMode( buf, hwnd, lpdmOutput, lpszDevice, lpszPort,
+                                             lpdmInput, lpszProfile, fwMode );
+	release_dc_ptr( dc );
     }
     DeleteDC( hdc );
     return ret;
@@ -566,12 +564,12 @@ DWORD WINAPI GDI_CallDeviceCapabilities16( LPCSTR lpszDevice, LPCSTR lpszPort,
 
     if (!(hdc = CreateICA( buf, lpszDevice, lpszPort, NULL ))) return -1;
 
-    if ((dc = DC_GetDCPtr( hdc )))
+    if ((dc = get_dc_ptr( hdc )))
     {
         if (dc->funcs->pDeviceCapabilities)
             ret = dc->funcs->pDeviceCapabilities( buf, lpszDevice, lpszPort,
                                                   fwCapability, lpszOutput, lpdm );
-        GDI_ReleaseObj( hdc );
+        release_dc_ptr( dc );
     }
     DeleteDC( hdc );
     return ret;
@@ -695,12 +693,12 @@ INT WINAPI ExtEscape( HDC hdc, INT nEscape, INT cbInput, LPCSTR lpszInData,
                       INT cbOutput, LPSTR lpszOutData )
 {
     INT ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         if (dc->funcs->pExtEscape)
             ret = dc->funcs->pExtEscape( dc->physDev, nEscape, cbInput, lpszInData, cbOutput, lpszOutData );
-        GDI_ReleaseObj( hdc );
+        release_dc_ptr( dc );
     }
     return ret;
 }

@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA 
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #include "main.h"
@@ -37,12 +37,11 @@ static const WCHAR wszComponentCategories[] = { 'C','o','m','p','o','n','e','n',
     ' ','C','a','t','e','g','o','r','i','e','s','\\','\0' };
 static const WCHAR wszGetPath[] = { '0','\\','w','i','n','3','2','\0' };
 
-LPARAM CreateITEM_INFO(INT flag, const WCHAR *info, const WCHAR *clsid, const WCHAR *path)
+static LPARAM CreateITEM_INFO(INT flag, const WCHAR *info, const WCHAR *clsid, const WCHAR *path)
 {
     ITEM_INFO *reg;
 
-    reg = HeapAlloc(GetProcessHeap(), 0, sizeof(ITEM_INFO));
-    memset(reg, 0, sizeof(ITEM_INFO));
+    reg = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ITEM_INFO));
 
     reg->cFlag = flag;
     lstrcpyW(reg->info, info);
@@ -248,7 +247,7 @@ BOOL CreateRegPath(HTREEITEM item, WCHAR *buffer, int bufSize)
     return ret;
 }
 
-void AddCOMandAll(void)
+static void AddCOMandAll(void)
 {
     TVINSERTSTRUCT tvis;
     TVITEM tvi;
@@ -336,7 +335,7 @@ void AddCOMandAll(void)
     SendMessage(globals.hTree, TVM_SORTCHILDREN, FALSE, (LPARAM)tree.hAO);
 }
 
-void AddApplicationID(void)
+static void AddApplicationID(void)
 {
     TVINSERTSTRUCT tvis;
     HKEY hKey, hCurKey;
@@ -376,7 +375,7 @@ void AddApplicationID(void)
     SendMessage(globals.hTree, TVM_SORTCHILDREN, FALSE, (LPARAM)tree.hAID);
 }
 
-void AddTypeLib(void)
+static void AddTypeLib(void)
 {
     TVINSERTSTRUCT tvis;
     HKEY hKey, hCurKey, hInfoKey, hPath;
@@ -447,7 +446,7 @@ void AddTypeLib(void)
     SendMessage(globals.hTree, TVM_SORTCHILDREN, FALSE, (LPARAM)tree.hTL);
 }
 
-void AddInterfaces(void)
+static void AddInterfaces(void)
 {
     TVINSERTSTRUCT tvis;
     HKEY hKey, hCurKey;
@@ -488,7 +487,7 @@ void AddInterfaces(void)
     SendMessage(globals.hTree, TVM_SORTCHILDREN, FALSE, (LPARAM)tree.hI);
 }
 
-void AddComponentCategories(void)
+static void AddComponentCategories(void)
 {
     TVINSERTSTRUCT tvis;
     HKEY hKey, hCurKey;
@@ -537,7 +536,7 @@ void AddComponentCategories(void)
     SendMessage(globals.hTree, TVM_SORTCHILDREN, FALSE, (LPARAM)tree.hGBCC);
 }
 
-void AddBaseEntries(void)
+static void AddBaseEntries(void)
 {
     TVINSERTSTRUCT tvis;
     WCHAR name[MAX_LOAD_STRING];

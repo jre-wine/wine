@@ -62,11 +62,12 @@ static const struct object_creation_info object_creation[] =
 {
     { &CLSID_FilterGraph, FilterGraph_create },
     { &CLSID_FilterGraphNoThread, FilterGraphNoThread_create },
-    { &CLSID_FilterMapper, FilterMapper2_create },
+    { &CLSID_FilterMapper, FilterMapper_create },
     { &CLSID_FilterMapper2, FilterMapper2_create },
     { &CLSID_AsyncReader, AsyncReader_create },
     { &CLSID_MemoryAllocator, StdMemAllocator_create },
     { &CLSID_AviSplitter, AVISplitter_create },
+    { &CLSID_MPEG1Splitter, MPEGSplitter_create },
     { &CLSID_VideoRenderer, VideoRenderer_create },
     { &CLSID_DSoundRender, DSoundRender_create },
     { &CLSID_AVIDec, AVIDec_create },
@@ -105,7 +106,7 @@ static ULONG WINAPI DSCF_Release(LPCLASSFACTORY iface)
     ULONG ref = InterlockedDecrement(&This->ref);
 
     if (ref == 0)
-	HeapFree(GetProcessHeap(), 0, This);
+	CoTaskMemFree(This);
 
     return ref;
 }
@@ -185,7 +186,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 	return CLASS_E_CLASSNOTAVAILABLE;
     }
 
-    factory = HeapAlloc(GetProcessHeap(), 0, sizeof(*factory));
+    factory = CoTaskMemAlloc(sizeof(*factory));
     if (factory == NULL) return E_OUTOFMEMORY;
 
     factory->ITF_IClassFactory.lpVtbl = &DSCF_Vtbl;
@@ -200,7 +201,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 /***********************************************************************
  *              DllCanUnloadNow (QUARTZ.@)
  */
-HRESULT WINAPI DllCanUnloadNow()
+HRESULT WINAPI DllCanUnloadNow(void)
 {
     return dll_ref != 0 ? S_FALSE : S_OK;
 }
@@ -209,7 +210,7 @@ HRESULT WINAPI DllCanUnloadNow()
 #define OUR_GUID_ENTRY(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
     { { l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } } , #name },
 
-static struct {
+static const struct {
 	const GUID	riid;
 	const char 	*name;
 } InterfaceDesc[] =
@@ -269,7 +270,10 @@ LONG WINAPI DBToAmpFactor(LONG db)
     return 100;
 }
 
-DWORD WINAPI AMGetErrorTextA(HRESULT hr, char *buffer, DWORD maxlen)
+/***********************************************************************
+ *              AMGetErrorTextA (QUARTZ.@)
+ */
+DWORD WINAPI AMGetErrorTextA(HRESULT hr, LPSTR buffer, DWORD maxlen)
 {
     int len;
     static const char format[] = "Error: 0x%x";
@@ -284,7 +288,10 @@ DWORD WINAPI AMGetErrorTextA(HRESULT hr, char *buffer, DWORD maxlen)
     return len;
 }
 
-DWORD WINAPI AMGetErrorTextW(HRESULT hr, WCHAR *buffer, DWORD maxlen)
+/***********************************************************************
+ *              AMGetErrorTextW (QUARTZ.@)
+ */
+DWORD WINAPI AMGetErrorTextW(HRESULT hr, LPWSTR buffer, DWORD maxlen)
 {
     int len;
     static const WCHAR format[] = {'E','r','r','o','r',':',' ','0','x','%','l','x',0};

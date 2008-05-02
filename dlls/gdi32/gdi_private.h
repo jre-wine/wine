@@ -21,6 +21,9 @@
 #ifndef __WINE_GDI_PRIVATE_H
 #define __WINE_GDI_PRIVATE_H
 
+#include <math.h>
+#include "wine/wingdi16.h"
+
 /* Metafile defines */
 #define META_EOF 0x0000
 /* values of mtType in METAHEADER.  Note however that the disk image of a disk
@@ -39,9 +42,36 @@ typedef struct {
 /* extra stock object: default 1x1 bitmap for memory DCs */
 #define DEFAULT_BITMAP (STOCK_LAST+1)
 
+  /* GDI objects magic numbers */
+#define FIRST_MAGIC           0x4f47
+#define PEN_MAGIC             0x4f47
+#define BRUSH_MAGIC           0x4f48
+#define FONT_MAGIC            0x4f49
+#define PALETTE_MAGIC         0x4f4a
+#define BITMAP_MAGIC          0x4f4b
+#define REGION_MAGIC          0x4f4c
+#define DC_MAGIC              0x4f4d
+#define DISABLED_DC_MAGIC     0x4f4e
+#define META_DC_MAGIC         0x4f4f
+#define METAFILE_MAGIC        0x4f50
+#define METAFILE_DC_MAGIC     0x4f51
+#define ENHMETAFILE_MAGIC     0x4f52
+#define ENHMETAFILE_DC_MAGIC  0x4f53
+#define MEMORY_DC_MAGIC       0x4f54
+#define EXT_PEN_MAGIC         0x4f55
+#define LAST_MAGIC            0x4f55
+
+#define MAGIC_DONTCARE	      0xffff
+
+/* GDI constants for making objects private/system (naming undoc. !) */
+#define OBJECT_PRIVATE        0x2000
+#define OBJECT_NOSYSTEM       0x8000
+
+#define GDIMAGIC(magic) ((magic) & ~(OBJECT_PRIVATE|OBJECT_NOSYSTEM))
+
 struct gdi_obj_funcs
 {
-    HGDIOBJ (*pSelectObject)( HGDIOBJ handle, void *obj, HDC hdc );
+    HGDIOBJ (*pSelectObject)( HGDIOBJ handle, HDC hdc );
     INT     (*pGetObject16)( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
     INT     (*pGetObjectA)( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
     INT     (*pGetObjectW)( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
@@ -54,6 +84,14 @@ struct hdc_list
     HDC hdc;
     struct hdc_list *next;
 };
+
+typedef struct tagGDIOBJHDR
+{
+    WORD        wMagic;
+    DWORD       dwCount;
+    const struct gdi_obj_funcs *funcs;
+    struct hdc_list *hdcs;
+} GDIOBJHDR;
 
 /* Device functions for the Wine driver interface */
 
@@ -181,6 +219,7 @@ typedef struct tagDC_FUNCS
     BOOL     (*pStrokeAndFillPath)(PHYSDEV);
     BOOL     (*pStrokePath)(PHYSDEV);
     BOOL     (*pSwapBuffers)(PHYSDEV);
+    BOOL     (*pUnrealizePalette)(HPALETTE);
     BOOL     (*pWidenPath)(PHYSDEV);
 
     /* OpenGL32 */
@@ -230,9 +269,12 @@ typedef struct tagDC
     HDC          hSelf;            /* Handle to this DC */
     const struct tagDC_FUNCS *funcs; /* DC function table */
     PHYSDEV      physDev;         /* Physical device (driver-specific) */
+    DWORD        thread;          /* thread owning the DC */
+    LONG         refcount;        /* thread refcount */
+    LONG         dirty;           /* dirty flag */
     INT          saveLevel;
     HDC          saved_dc;
-    DWORD        dwHookData;
+    DWORD_PTR    dwHookData;
     FARPROC16    hookProc;         /* the original SEGPTR ... */
     DCHOOKPROC   hookThunk;        /* ... and the thunk to call it */
 
@@ -296,7 +338,6 @@ typedef struct tagDC
 
   /* DC flags */
 #define DC_SAVED         0x0002   /* It is a saved DC */
-#define DC_DIRTY         0x0004   /* hVisRgn has to be updated */
 #define DC_BOUNDS_ENABLE 0x0008   /* Bounding rectangle tracking is enabled */
 #define DC_BOUNDS_SET    0x0010   /* Bounding rectangle has been set */
 
@@ -332,17 +373,18 @@ typedef struct tagBITMAPOBJ
 
 /* Wine_GCPW Flags */
 /* Directionality -
- * LOOSE means that the paragraph dir is only set if there is no strong character.
- * FORCE means override the characters in the paragraph.
+ * LOOSE means taking the directionality of the first strong character, if there is found one.
+ * FORCE means the paragraph direction is forced. (RLE/LRE)
  */
 #define WINE_GCPW_FORCE_LTR 0
 #define WINE_GCPW_FORCE_RTL 1
 #define WINE_GCPW_LOOSE_LTR 2
 #define WINE_GCPW_LOOSE_RTL 3
 #define WINE_GCPW_DIR_MASK 3
+#define WINE_GCPW_LOOSE_MASK 2
+
 extern BOOL BIDI_Reorder( LPCWSTR lpString, INT uCount, DWORD dwFlags, DWORD dwWineGCP_Flags,
                           LPWSTR lpOutString, INT uCountOut, UINT *lpOrder );
-extern BOOL BidiAvail;
 
 /* bitmap.c */
 extern HBITMAP BITMAP_CopyBitmap( HBITMAP hbitmap );
@@ -353,9 +395,14 @@ extern INT BITMAP_GetWidthBytes( INT bmWidth, INT bpp );
 extern void CLIPPING_UpdateGCRegion( DC * dc );
 
 /* dc.c */
-extern DC * DC_AllocDC( const DC_FUNCTIONS *funcs, WORD magic );
+extern DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic );
 extern DC * DC_GetDCUpdate( HDC hdc );
 extern DC * DC_GetDCPtr( HDC hdc );
+extern void DC_ReleaseDCPtr( DC *dc );
+extern BOOL free_dc_ptr( DC *dc );
+extern DC *get_dc_ptr( HDC hdc );
+extern void release_dc_ptr( DC *dc );
+extern void update_dc( DC *dc );
 extern void DC_InitDC( DC * dc );
 extern void DC_UpdateXforms( DC * dc );
 
@@ -375,6 +422,7 @@ extern HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk );
 
 /* freetype.c */
 extern INT WineEngAddFontResourceEx(LPCWSTR, DWORD, PVOID);
+extern HANDLE WineEngAddFontMemResourceEx(PVOID, DWORD, PVOID, LPDWORD);
 extern GdiFont* WineEngCreateFontInstance(DC*, HFONT);
 extern BOOL WineEngDestroyFontInstance(HFONT handle);
 extern DWORD WineEngEnumFonts(LPLOGFONTW, FONTENUMPROCW, LPARAM);
@@ -384,6 +432,7 @@ extern BOOL WineEngGetCharABCWidthsI(GdiFont *font, UINT firstChar,
                                     UINT count, LPWORD pgi, LPABC buffer);
 extern BOOL WineEngGetCharWidth(GdiFont*, UINT, UINT, LPINT);
 extern DWORD WineEngGetFontData(GdiFont*, DWORD, DWORD, LPVOID, DWORD);
+extern DWORD WineEngGetFontUnicodeRanges(GdiFont *, LPGLYPHSET);
 extern DWORD WineEngGetGlyphIndices(GdiFont *font, LPCWSTR lpstr, INT count,
                                     LPWORD pgi, DWORD flags);
 extern DWORD WineEngGetGlyphOutline(GdiFont*, UINT glyph, UINT format,
@@ -397,6 +446,7 @@ extern BOOL WineEngGetTextExtentExPoint(GdiFont*, LPCWSTR, INT, INT, LPINT, LPIN
 extern BOOL WineEngGetTextExtentPointI(GdiFont*, const WORD *, INT, LPSIZE);
 extern INT  WineEngGetTextFace(GdiFont*, INT, LPWSTR);
 extern BOOL WineEngGetTextMetrics(GdiFont*, LPTEXTMETRICW);
+extern BOOL WineEngFontIsLinked(GdiFont*);
 extern BOOL WineEngInit(void);
 extern BOOL WineEngRemoveFontResourceEx(LPCWSTR, DWORD, PVOID);
 
@@ -405,7 +455,11 @@ extern BOOL GDI_Init(void);
 extern void *GDI_AllocObject( WORD, WORD, HGDIOBJ *, const struct gdi_obj_funcs *funcs );
 extern void *GDI_ReallocObject( WORD, HGDIOBJ, void *obj );
 extern BOOL GDI_FreeObject( HGDIOBJ, void *obj );
+extern void *GDI_GetObjPtr( HGDIOBJ, WORD );
+extern void GDI_ReleaseObj( HGDIOBJ );
 extern void GDI_CheckNotLock(void);
+extern BOOL GDI_inc_ref_count( HGDIOBJ handle );
+extern BOOL GDI_dec_ref_count( HGDIOBJ handle );
 extern BOOL GDI_hdc_using_object(HGDIOBJ obj, HDC hdc);
 extern BOOL GDI_hdc_not_using_object(HGDIOBJ obj, HDC hdc);
 
@@ -439,6 +493,7 @@ extern BOOL PATH_Arc(DC *dc, INT x1, INT y1, INT x2, INT y2,
                      INT xStart, INT yStart, INT xEnd, INT yEnd, INT lines);
 extern BOOL PATH_PolyBezierTo(DC *dc, const POINT *pt, DWORD cbCount);
 extern BOOL PATH_PolyBezier(DC *dc, const POINT *pt, DWORD cbCount);
+extern BOOL PATH_PolyDraw(DC *dc, const POINT *pts, const BYTE *types, DWORD cbCount);
 extern BOOL PATH_PolylineTo(DC *dc, const POINT *pt, DWORD cbCount);
 extern BOOL PATH_Polyline(DC *dc, const POINT *pt, DWORD cbCount);
 extern BOOL PATH_Polygon(DC *dc, const POINT *pt, DWORD cbCount);
@@ -458,7 +513,7 @@ extern HPALETTE PALETTE_Init(void);
 /* region.c */
 extern BOOL REGION_FrameRgn( HRGN dest, HRGN src, INT x, INT y );
 
-/* Undocumented value for DIB's iUsage: Indicates a mono DIB w/o pal enties */
+/* Undocumented value for DIB's iUsage: Indicates a mono DIB w/o pal entries */
 #define DIB_PAL_MONO 2
 #endif /* __WINE_GDI_PRIVATE_H */
 

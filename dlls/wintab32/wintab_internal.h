@@ -136,7 +136,7 @@ typedef struct tagWTPACKET {
 typedef struct tagOPENCONTEXT
 {
     HCTX        handle;
-    LOGCONTEXTA context;
+    LOGCONTEXTW context;
     HWND        hwndOwner;
     BOOL        enabled;
     INT         ActiveCursor;
@@ -155,7 +155,7 @@ LPOPENCONTEXT FindOpenContext(HWND hwnd);
 extern int (*pLoadTabletInfo)(HWND hwnddefault);
 extern int (*pGetCurrentPacket)(LPWTPACKET packet);
 extern int (*pAttachEventQueueToTablet)(HWND hOwner);
-extern UINT (*pWTInfoA)(UINT wCategory, UINT nIndex, LPVOID lpOutput);
+extern UINT (*pWTInfoW)(UINT wCategory, UINT nIndex, LPVOID lpOutput);
 
 extern HWND hwndDefault;
 extern CRITICAL_SECTION csTablet;

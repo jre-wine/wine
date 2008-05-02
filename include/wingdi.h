@@ -88,6 +88,7 @@ typedef struct tagPIXELFORMATDESCRIPTOR {
 #define PFD_SWAP_COPY             0x00000400
 #define PFD_SWAP_LAYER_BUFFERS    0x00000800
 #define PFD_GENERIC_ACCELERATED   0x00001000
+#define PFD_SUPPORT_COMPOSITION   0x00008000 /* Vista stuff */
 
 #define PFD_DEPTH_DONTCARE        0x20000000
 #define PFD_DOUBLEBUFFER_DONTCARE 0x40000000
@@ -1287,6 +1288,10 @@ typedef struct
 #define GGO_GRAY8_BITMAP    6
 #define GGO_GLYPH_INDEX     0x80
 
+#ifdef __WINESRC__
+#define WINE_GGO_GRAY16_BITMAP 0x7f
+#endif
+
 typedef struct
 {
     WORD    fract;
@@ -1409,6 +1414,10 @@ typedef struct
 
 #define TT_AVAILABLE        0x0001
 #define TT_ENABLED          0x0002
+
+#ifdef __WINESRC__
+#define WINE_TT_HINTER_ENABLED 0x8000
+#endif
 
 #define TT_PRIM_LINE    1
 #define TT_PRIM_QSPLINE 2
@@ -1843,8 +1852,8 @@ typedef struct {
     DWORD        bV5Reserved;
 } BITMAPV5HEADER, *LPBITMAPV5HEADER, *PBITMAPV5HEADER;
 
-#define PROFILE_LINKED   'LINK'
-#define PROFILE_EMBEDDED 'MBED'
+#define PROFILE_LINKED   0x4c494e4b     /* 'LINK' */
+#define PROFILE_EMBEDDED 0x4d424544     /* 'MBED' */
 
 
   /* biCompression */
@@ -3265,6 +3274,7 @@ INT         WINAPI AddFontResourceW(LPCWSTR);
 INT         WINAPI AddFontResourceExA(LPCSTR, DWORD, PVOID);
 INT         WINAPI AddFontResourceExW(LPCWSTR, DWORD, PVOID);
 #define     AddFontResourceEx WINELIB_NAME_AW(AddFontResourceEx)
+HANDLE      WINAPI AddFontMemResourceEx(PVOID, DWORD, PVOID, DWORD *);
 BOOL        WINAPI AlphaBlend(HDC,int,int,int,int,HDC,int,int,int,int,BLENDFUNCTION);
 BOOL        WINAPI AngleArc(HDC, INT, INT, DWORD, FLOAT, FLOAT);
 BOOL        WINAPI AnimatePalette(HPALETTE,UINT,UINT,const PALETTEENTRY*);
@@ -3388,6 +3398,7 @@ BOOL      WINAPI GdiComment(HDC,UINT,const BYTE *);
 DEVMODEW * WINAPI GdiConvertToDevmodeW(const DEVMODEA *);
 BOOL      WINAPI GdiFlush(void);
 LONG      WINAPI GdiGetCharDimensions(HDC, LPTEXTMETRICW, LONG *);
+DWORD     WINAPI GdiGetCodePage(HDC);
 BOOL      WINAPI GdiGradientFill(HDC,PTRIVERTEX,ULONG,PVOID,ULONG,ULONG);
 BOOL      WINAPI GdiIsMetaFileDC(HDC);
 BOOL      WINAPI GdiIsMetaPrintDC(HDC);
@@ -3415,6 +3426,7 @@ BOOL        WINAPI GetCharWidth32A(HDC,UINT,UINT,LPINT);
 BOOL        WINAPI GetCharWidth32W(HDC,UINT,UINT,LPINT);
 #define     GetCharWidth32 WINELIB_NAME_AW(GetCharWidth32)
 BOOL        WINAPI GetCharWidthA(HDC,UINT,UINT,LPINT);
+BOOL        WINAPI GetCharWidthI(HDC,UINT,UINT,LPWORD,LPINT);
 BOOL        WINAPI GetCharWidthW(HDC,UINT,UINT,LPINT);
 #define     GetCharWidth WINELIB_NAME_AW(GetCharWidth)
 BOOL        WINAPI GetCharWidthFloatA(HDC,UINT,UINT,PFLOAT);
@@ -3444,6 +3456,7 @@ UINT      WINAPI GetEnhMetaFileHeader(HENHMETAFILE,UINT,LPENHMETAHEADER);
 UINT      WINAPI GetEnhMetaFilePaletteEntries(HENHMETAFILE,UINT,LPPALETTEENTRY);
 DWORD     WINAPI GetFontData(HDC,DWORD,DWORD,LPVOID,DWORD);
 DWORD     WINAPI GetFontLanguageInfo(HDC);
+DWORD     WINAPI GetFontUnicodeRanges(HDC,LPGLYPHSET);
 DWORD     WINAPI GetGlyphIndicesA(HDC,LPCSTR,INT,LPWORD,DWORD);
 DWORD     WINAPI GetGlyphIndicesW(HDC,LPCWSTR,INT,LPWORD,DWORD);
 #define   GetGlyphIndices WINELIB_NAME_AW(GetGlyphIndices)
@@ -3649,8 +3662,8 @@ BOOL      WINAPI UpdateICMRegKeyA(DWORD,LPSTR,LPSTR,UINT);
 BOOL      WINAPI UpdateICMRegKeyW(DWORD,LPWSTR,LPWSTR,UINT);
 #define     UpdateICMRegKey WINELIB_NAME_AW(UpdateICMRegKey)
 BOOL      WINAPI WidenPath(HDC);
-BOOL      WINAPI PolyTextOutA(HDC,PPOLYTEXTA,INT);
-BOOL      WINAPI PolyTextOutW(HDC,PPOLYTEXTW,INT);
+BOOL      WINAPI PolyTextOutA(HDC,const POLYTEXTA*,INT);
+BOOL      WINAPI PolyTextOutW(HDC,const POLYTEXTW*,INT);
 #define   PolyTextOut WINELIB_NAME_AW(PolyTextOut)
 
 /* These defines are used by wglSwapLayerBuffers */

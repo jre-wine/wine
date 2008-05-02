@@ -3,19 +3,19 @@
  * Copyright (C) 2003-2004 Rok Mandeljc
  * Copyright (C) 2003-2004 Raphael Junqueira
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Library General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #include "dmime_private.h"
@@ -71,7 +71,6 @@ static DWORD WINAPI ProcessMsgThread(LPVOID lpParam) {
   DWORD timeOut = INFINITE;
   MSG msg;
   HRESULT hr;
-  REFERENCE_TIME rtLastTime;
   REFERENCE_TIME rtCurTime;
   DMUS_PMSGItem* it = NULL;
   DMUS_PMSGItem* cur = NULL;
@@ -84,7 +83,6 @@ static DWORD WINAPI ProcessMsgThread(LPVOID lpParam) {
     timeOut = INFINITE;
 
     EnterCriticalSection(&This->safe);
-    rtLastTime = rtCurTime;
     hr = IDirectMusicPerformance8_GetTime((IDirectMusicPerformance8*) This, &rtCurTime, NULL);
     if (FAILED(hr)) {
       goto outrefresh;
@@ -198,6 +196,7 @@ static ULONG WINAPI IDirectMusicPerformance8Impl_Release (LPDIRECTMUSICPERFORMAN
   TRACE("(%p): ReleaseRef to %d\n", This, ref);
   
   if (ref == 0) {
+    This->safe.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&This->safe);
     HeapFree(GetProcessHeap(), 0, This);
   }
@@ -1042,6 +1041,7 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicPerformanceImpl (LPCGUID lpcGUID, LPVOID 
 	obj->pDirectSound = NULL;
 	obj->pDefaultPath = NULL;
 	InitializeCriticalSection(&obj->safe);
+	obj->safe.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IDirectMusicPerformance8Impl*->safe");
 
 	/**
 	 * @see http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/htm/latencyandbumpertime.asp

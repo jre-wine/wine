@@ -113,9 +113,9 @@ static BOOL copy_files_callback( HINF hinf, PCWSTR field, void *arg )
     struct files_callback_info *info = arg;
 
     if (field[0] == '@')  /* special case: copy single file */
-        SetupQueueDefaultCopyW( info->queue, info->layout, info->src_root, NULL, field, info->copy_flags );
+        SetupQueueDefaultCopyW( info->queue, info->layout ? info->layout : hinf, info->src_root, NULL, field+1, info->copy_flags );
     else
-        SetupQueueCopySectionW( info->queue, info->src_root, info->layout, hinf, field, info->copy_flags );
+        SetupQueueCopySectionW( info->queue, info->src_root, info->layout ? info->layout : hinf, hinf, field, info->copy_flags );
     return TRUE;
 }
 
@@ -276,7 +276,7 @@ static BOOL do_reg_operation( HKEY hkey, const WCHAR *value, INFCONTEXT *context
             }
             else RegDeleteValueW( hkey, value );
         }
-        else RegDeleteKeyW( hkey, NULL );
+        else NtDeleteKey( hkey );
         return TRUE;
     }
 
@@ -995,15 +995,15 @@ void WINAPI InstallHinfSectionW( HWND hwnd, HINSTANCE handle, LPCWSTR cmdline, I
 #ifdef __i386__
     static const WCHAR nt_platformW[] = {'.','n','t','x','8','6',0};
 #elif defined(__x86_64)
-    static const WCHAR nt_platformW[] = {'.','n','t','i','a','6','4',0};
+    static const WCHAR nt_platformW[] = {'.','n','t','a','m','d','6','4',0};
 #else  /* FIXME: other platforms */
     static const WCHAR nt_platformW[] = {'.','n','t',0};
 #endif
     static const WCHAR nt_genericW[] = {'.','n','t',0};
 
-    WCHAR *s, *d, *path, section[MAX_PATH + sizeof(nt_platformW)/sizeof(WCHAR)];
+    WCHAR *s, *path, section[MAX_PATH + sizeof(nt_platformW)/sizeof(WCHAR)];
     void *callback_context;
-    UINT mode, in_quotes, bcount;
+    UINT mode;
     HINF hinf;
 
     TRACE("hwnd %p, handle %p, cmdline %s\n", hwnd, handle, debugstr_w(cmdline));
@@ -1015,47 +1015,10 @@ void WINAPI InstallHinfSectionW( HWND hwnd, HINSTANCE handle, LPCWSTR cmdline, I
     while (*s == ' ') s++;
     mode = atoiW( s );
 
+    /* quoted paths are not allowed on native, the rest of the command line is taken as the path */
     if (!(s = strchrW( s, ' ' ))) return;
     while (*s == ' ') s++;
-
-    /* The inf path may be quoted. Code adapted from CommandLineToArgvW() */
-    bcount=0;
-    in_quotes=0;
-    path=d=s;
-    while (*s)
-    {
-        if (*s==0 || ((*s=='\t' || *s==' ') && !in_quotes)) {
-            /* end of this command line argument */
-            break;
-        } else if (*s=='\\') {
-            /* '\\' */
-            *d++=*s++;
-            bcount++;
-        } else if (*s=='"') {
-            /* '"' */
-            if ((bcount & 1)==0) {
-                /* Preceded by an even number of '\', this is half that
-                 * number of '\', plus a quote which we erase.
-                 */
-                d-=bcount/2;
-                in_quotes=!in_quotes;
-                s++;
-            } else {
-                /* Preceded by an odd number of '\', this is half that
-                 * number of '\' followed by a '"'
-                 */
-                d=d-bcount/2-1;
-                *d++='"';
-                s++;
-            }
-            bcount=0;
-        } else {
-            /* a regular character */
-            *d++=*s++;
-            bcount=0;
-        }
-    }
-    *d=0;
+    path = s;
 
     hinf = SetupOpenInfFileW( path, NULL, INF_STYLE_WIN4, NULL );
     if (hinf == INVALID_HANDLE_VALUE) return;

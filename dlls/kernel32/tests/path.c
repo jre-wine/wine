@@ -1,7 +1,8 @@
 /*
- * Unit test suite for Get*PathNamesA and (Get|Set)CurrentDirectoryA.
+ * Unit test suite for various Path and Directory Functions
  *
  * Copyright 2002 Geoffrey Hausheer
+ * Copyright 2006 Detlef Riekenberg
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -51,6 +52,10 @@ static const CHAR is_char_ok[] ="11111110111111111011";
 
 static DWORD (WINAPI *pGetLongPathNameA)(LPCSTR,LPSTR,DWORD);
 static DWORD (WINAPI *pGetLongPathNameW)(LPWSTR,LPWSTR,DWORD);
+
+/* Present in Win2003+ */
+static BOOL  (WINAPI *pNeedCurrentDirectoryForExePathA)(LPCSTR);
+static BOOL  (WINAPI *pNeedCurrentDirectoryForExePathW)(LPCWSTR);
 
 /* a structure to deal with wine todos somewhat cleanly */
 typedef struct {
@@ -935,19 +940,214 @@ static void test_GetLongPathNameW(void)
     DWORD length; 
     WCHAR empty[MAX_PATH];
 
-    SetLastError(0xdeadbeef); 
-    length = pGetLongPathNameW(NULL,NULL,0);
+    /* Not present in all windows versions */
     if(pGetLongPathNameW) 
     {
+    SetLastError(0xdeadbeef); 
+    length = pGetLongPathNameW(NULL,NULL,0);
+    if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("GetLongPathNameW is not implemented\n");
+        return;
+    }
     ok(0==length,"GetLongPathNameW returned %d but expected 0\n",length);
-    ok(GetLastError()==ERROR_INVALID_PARAMETER,"GetLastError returned %x but expected ERROR_INVALID_PARAMETER\n",GetLastError());
+    ok(GetLastError()==ERROR_INVALID_PARAMETER,"GetLastError returned %d but expected ERROR_INVALID_PARAMETER\n",GetLastError());
 
     SetLastError(0xdeadbeef); 
     empty[0]=0;
     length = pGetLongPathNameW(empty,NULL,0);
     ok(0==length,"GetLongPathNameW returned %d but expected 0\n",length);
-    ok(GetLastError()==ERROR_PATH_NOT_FOUND,"GetLastError returned %x but expected ERROR_PATH_NOT_FOUND\n",GetLastError());
+    ok(GetLastError()==ERROR_PATH_NOT_FOUND,"GetLastError returned %d but expected ERROR_PATH_NOT_FOUND\n",GetLastError());
     }
+}
+
+static void test_GetShortPathNameW(void)
+{
+    WCHAR test_path[] = { 'L', 'o', 'n', 'g', 'D', 'i', 'r', 'e', 'c', 't', 'o', 'r', 'y', 'N', 'a', 'm', 'e',  0 };
+    WCHAR path[MAX_PATH];
+    WCHAR short_path[MAX_PATH];
+    DWORD length;
+    HANDLE file;
+    int ret;
+    WCHAR name[] = { 't', 'e', 's', 't', 0 };
+    WCHAR backSlash[] = { '\\', 0 };
+
+    GetTempPathW( MAX_PATH, path );
+    lstrcatW( path, test_path );
+    lstrcatW( path, backSlash );
+    ret = CreateDirectoryW( path, NULL );
+    ok( ret, "Directory was not created. LastError = %d\n", GetLastError() );
+
+    /* Starting a main part of test */
+    length = GetShortPathNameW( path, short_path, 0 );
+    ok( length, "GetShortPathNameW returned 0.\n" );
+    ret = GetShortPathNameW( path, short_path, length );
+    ok( ret, "GetShortPathNameW returned 0.\n" );
+    lstrcatW( short_path, name );
+    file = CreateFileW( short_path, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "File was not created.\n" );
+
+    /* End test */
+    CloseHandle( file );
+    ret = DeleteFileW( short_path );
+    ok( ret, "Cannot delete file.\n" );
+    ret = RemoveDirectoryW( path );
+    ok( ret, "Cannot delete directory.\n" );
+}
+
+static void test_GetSystemDirectory(void)
+{
+    CHAR    buffer[MAX_PATH + 4];
+    DWORD   res;
+    DWORD   total;
+
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(NULL, 0);
+    /* res includes the terminating Zero */
+    ok(res > 0, "returned %d with %d (expected '>0')\n", res, GetLastError());
+
+    total = res;
+
+    /* this crashes on XP */
+    if (0) res = GetSystemDirectory(NULL, total);
+
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(NULL, total-1);
+    /* 95+NT: total (includes the terminating Zero)
+       98+ME: 0 with ERROR_INVALID_PARAMETER */
+    ok( (res == total) || (!res && (GetLastError() == ERROR_INVALID_PARAMETER)),
+        "returned %d with %d (expected '%d' or: '0' with "
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError(), total);
+
+    if (total > MAX_PATH) return;
+
+    buffer[0] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(buffer, total);
+    /* res does not include the terminating Zero */
+    ok( (res == (total-1)) && (buffer[0]),
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
+        res, GetLastError(), buffer, total-1);
+
+    buffer[0] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(buffer, total + 1);
+    /* res does not include the terminating Zero */
+    ok( (res == (total-1)) && (buffer[0]),
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
+        res, GetLastError(), buffer, total-1);
+
+    memset(buffer, '#', total + 1);
+    buffer[total + 2] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(buffer, total-1);
+    /* res includes the terminating Zero) */
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
+        res, GetLastError(), buffer, total);
+
+    memset(buffer, '#', total + 1);
+    buffer[total + 2] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetSystemDirectory(buffer, total-2);
+    /* res includes the terminating Zero) */
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
+        res, GetLastError(), buffer, total);
+}
+
+static void test_GetWindowsDirectory(void)
+{
+    CHAR    buffer[MAX_PATH + 4];
+    DWORD   res;
+    DWORD   total;
+
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(NULL, 0);
+    /* res includes the terminating Zero */
+    ok(res > 0, "returned %d with %d (expected '>0')\n", res, GetLastError());
+
+    total = res;
+    /* this crashes on XP */
+    if (0) res = GetWindowsDirectory(NULL, total);
+
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(NULL, total-1);
+    /* 95+NT: total (includes the terminating Zero)
+       98+ME: 0 with ERROR_INVALID_PARAMETER */
+    ok( (res == total) || (!res && (GetLastError() == ERROR_INVALID_PARAMETER)),
+        "returned %d with %d (expected '%d' or: '0' with "
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError(), total);
+
+    if (total > MAX_PATH) return;
+
+    buffer[0] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(buffer, total);
+    /* res does not include the terminating Zero */
+    ok( (res == (total-1)) && (buffer[0]),
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
+        res, GetLastError(), buffer, total-1);
+
+    buffer[0] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(buffer, total + 1);
+    /* res does not include the terminating Zero */
+    ok( (res == (total-1)) && (buffer[0]),
+        "returned %d with %d and '%s' (expected '%d' and a string)\n",
+        res, GetLastError(), buffer, total-1);
+
+    memset(buffer, '#', total + 1);
+    buffer[total + 2] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(buffer, total-1);
+    /* res includes the terminating Zero) */
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
+        res, GetLastError(), buffer, total);
+
+    memset(buffer, '#', total + 1);
+    buffer[total + 2] = '\0';
+    SetLastError(0xdeadbeef);
+    res = GetWindowsDirectory(buffer, total-2);
+    /* res includes the terminating Zero) */
+    ok( res == total, "returned %d with %d and '%s' (expected '%d')\n",
+        res, GetLastError(), buffer, total);
+}
+
+static void test_NeedCurrentDirectoryForExePathA(void)
+{
+    /* Crashes in Windows */
+    if (0)
+        ok(pNeedCurrentDirectoryForExePathA(NULL), "returned FALSE for NULL\n");
+
+    SetEnvironmentVariableA("NoDefaultCurrentDirectoryInExePath", NULL);
+    ok(pNeedCurrentDirectoryForExePathA("."), "returned FALSE for \".\"\n");
+    ok(pNeedCurrentDirectoryForExePathA("c:\\"), "returned FALSE for \"c:\\\"\n");
+    ok(pNeedCurrentDirectoryForExePathA("cmd.exe"), "returned FALSE for \"cmd.exe\"\n");
+
+    SetEnvironmentVariableA("NoDefaultCurrentDirectoryInExePath", "nya");
+    ok(!pNeedCurrentDirectoryForExePathA("."), "returned TRUE for \".\"\n");
+    ok(pNeedCurrentDirectoryForExePathA("c:\\"), "returned FALSE for \"c:\\\"\n");
+    ok(!pNeedCurrentDirectoryForExePathA("cmd.exe"), "returned TRUE for \"cmd.exe\"\n");
+}
+
+static void test_NeedCurrentDirectoryForExePathW(void)
+{
+    const WCHAR thispath[] = {'.', 0};
+    const WCHAR fullpath[] = {'c', ':', '\\', 0};
+    const WCHAR cmdname[] = {'c', 'm', 'd', '.', 'e', 'x', 'e', 0};
+
+    /* Crashes in Windows */
+    if (0)
+        ok(pNeedCurrentDirectoryForExePathW(NULL), "returned FALSE for NULL\n");
+
+    SetEnvironmentVariableA("NoDefaultCurrentDirectoryInExePath", NULL);
+    ok(pNeedCurrentDirectoryForExePathW(thispath), "returned FALSE for \".\"\n");
+    ok(pNeedCurrentDirectoryForExePathW(fullpath), "returned FALSE for \"c:\\\"\n");
+    ok(pNeedCurrentDirectoryForExePathW(cmdname), "returned FALSE for \"cmd.exe\"\n");
+
+    SetEnvironmentVariableA("NoDefaultCurrentDirectoryInExePath", "nya");
+    ok(!pNeedCurrentDirectoryForExePathW(thispath), "returned TRUE for \".\"\n");
+    ok(pNeedCurrentDirectoryForExePathW(fullpath), "returned FALSE for \"c:\\\"\n");
+    ok(!pNeedCurrentDirectoryForExePathW(cmdname), "returned TRUE for \"cmd.exe\"\n");
 }
 
 START_TEST(path)
@@ -957,10 +1157,28 @@ START_TEST(path)
                                                "GetLongPathNameA" );
     pGetLongPathNameW = (void*)GetProcAddress(GetModuleHandleA("kernel32.dll") ,
                                                "GetLongPathNameW" );
+    pNeedCurrentDirectoryForExePathA =
+        (void*)GetProcAddress( GetModuleHandleA("kernel32.dll"),
+                               "NeedCurrentDirectoryForExePathA" );
+    pNeedCurrentDirectoryForExePathW =
+        (void*)GetProcAddress( GetModuleHandleA("kernel32.dll"),
+                               "NeedCurrentDirectoryForExePathW" );
+
     test_InitPathA(curdir, &curDrive, &otherDrive);
     test_CurrentDirectoryA(origdir,curdir);
     test_PathNameA(curdir, curDrive, otherDrive);
     test_CleanupPathA(origdir,curdir);
     test_GetTempPath();
     test_GetLongPathNameW();
+    test_GetShortPathNameW();
+    test_GetSystemDirectory();
+    test_GetWindowsDirectory();
+    if (pNeedCurrentDirectoryForExePathA)
+    {
+        test_NeedCurrentDirectoryForExePathA();
+    }
+    if (pNeedCurrentDirectoryForExePathW)
+    {
+        test_NeedCurrentDirectoryForExePathW();
+    }
 }

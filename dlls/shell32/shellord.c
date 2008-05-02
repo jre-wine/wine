@@ -338,6 +338,12 @@ BOOL WINAPI RegisterShellHook(
  * ShellMessageBoxW				[SHELL32.182]
  *
  * See ShellMessageBoxA.
+ *
+ * NOTE:
+ * shlwapi.ShellMessageBoxWrapW is a duplicate of shell32.ShellMessageBoxW
+ * because we can't forward to it in the .spec file since it's exported by
+ * ordinal. If you change the implementation here please update the code in
+ * shlwapi as well.
  */
 int WINAPIV ShellMessageBoxW(
 	HINSTANCE hInstance,
@@ -603,7 +609,7 @@ static INT CALLBACK SHADD_compare_mru(LPCVOID data1, LPCVOID data2, DWORD cbData
  * RETURNS
  *   position within MRU list that data was added.
  */
-static INT SHADD_create_add_mru_data(HANDLE mruhandle, LPSTR doc_name, LPSTR new_lnk_name,
+static INT SHADD_create_add_mru_data(HANDLE mruhandle, LPCSTR doc_name, LPCSTR new_lnk_name,
                                      LPSTR buffer, INT *len)
 {
     LPSTR ptr;
@@ -837,7 +843,7 @@ void WINAPI SHAddToRecentDocs (UINT uFlags,LPCVOID pv)
 	mymru.dwFlags = MRUF_BINARY_LIST | MRUF_DELAYED_SAVE;
 	mymru.hKey = HCUbasekey;
 	mymru.lpszSubKey = "RecentDocs";
-	mymru.lpfnCompare = &SHADD_compare_mru;
+	mymru.lpfnCompare = (PROC)SHADD_compare_mru;
 	mruhandle = CreateMRUListA(&mymru);
 	if (!mruhandle) {
 	    /* MRU failed */
@@ -1063,7 +1069,7 @@ VOID WINAPI SHSetInstanceExplorer (LPUNKNOWN lpUnknown)
  * NOTES
  *  gets the interface pointer of the explorer and a reference
  */
-HRESULT WINAPI SHGetInstanceExplorer (LPUNKNOWN * lpUnknown)
+HRESULT WINAPI SHGetInstanceExplorer (IUnknown **lpUnknown)
 {	TRACE("%p\n", lpUnknown);
 
 	*lpUnknown = SHELL32_IExplorerInterface;
@@ -1319,14 +1325,14 @@ HRESULT WINAPI SetAppStartingCursor(HWND u, DWORD v)
 /*************************************************************************
  * SHLoadOLE					[SHELL32.151]
  *
- * To reduce the memory usage of Windows 95 it's shell32 contained an
+ * To reduce the memory usage of Windows 95, its shell32 contained an
  * internal implementation of a part of COM (see e.g. SHGetMalloc, SHCoCreateInstance,
  * SHRegisterDragDrop etc.) that allowed to use in-process STA objects without
  * the need to load OLE32.DLL. If OLE32.DLL was already loaded, the SH* function
  * would just call the Co* functions.
  *
  * The SHLoadOLE was called when OLE32.DLL was being loaded to transfer all the
- * informations from the shell32 "mini-COM" to ole32.dll.
+ * information from the shell32 "mini-COM" to ole32.dll.
  *
  * See http://blogs.msdn.com/oldnewthing/archive/2004/07/05/173226.aspx for a
  * detailed description.
@@ -1513,40 +1519,231 @@ DWORD WINAPI SHELL32_714(LPVOID x)
 	return 0;
 }
 
+typedef struct _PSXA
+{
+    UINT uiCount;
+    UINT uiAllocated;
+    IShellPropSheetExt *pspsx[1];
+} PSXA, *PPSXA;
+
+typedef struct _PSXA_CALL
+{
+    LPFNADDPROPSHEETPAGE lpfnAddReplaceWith;
+    LPARAM lParam;
+    BOOL bCalled;
+    BOOL bMultiple;
+    UINT uiCount;
+} PSXA_CALL, *PPSXA_CALL;
+
+static BOOL CALLBACK PsxaCall(HPROPSHEETPAGE hpage, LPARAM lParam)
+{
+    PPSXA_CALL Call = (PPSXA_CALL)lParam;
+
+    if (Call != NULL)
+    {
+        if ((Call->bMultiple || !Call->bCalled) &&
+            Call->lpfnAddReplaceWith(hpage, Call->lParam))
+        {
+            Call->bCalled = TRUE;
+            Call->uiCount++;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 /*************************************************************************
  *      SHAddFromPropSheetExtArray	[SHELL32.167]
  */
-DWORD WINAPI SHAddFromPropSheetExtArray(DWORD a, DWORD b, DWORD c)
+UINT WINAPI SHAddFromPropSheetExtArray(HPSXA hpsxa, LPFNADDPROPSHEETPAGE lpfnAddPage, LPARAM lParam)
 {
- 	FIXME("(%08x,%08x,%08x)stub\n", a, b, c);
-	return 0;
+    PSXA_CALL Call;
+    UINT i;
+    PPSXA psxa = (PPSXA)hpsxa;
+
+    TRACE("(%p,%p,%08lx)\n", hpsxa, lpfnAddPage, lParam);
+
+    if (psxa)
+    {
+        ZeroMemory(&Call, sizeof(Call));
+        Call.lpfnAddReplaceWith = lpfnAddPage;
+        Call.lParam = lParam;
+        Call.bMultiple = TRUE;
+
+        /* Call the AddPage method of all registered IShellPropSheetExt interfaces */
+        for (i = 0; i != psxa->uiCount; i++)
+        {
+            psxa->pspsx[i]->lpVtbl->AddPages(psxa->pspsx[i], PsxaCall, (LPARAM)&Call);
+        }
+
+        return Call.uiCount;
+    }
+
+    return 0;
 }
 
 /*************************************************************************
  *      SHCreatePropSheetExtArray	[SHELL32.168]
  */
-DWORD WINAPI SHCreatePropSheetExtArray(DWORD a, LPCSTR b, DWORD c)
+HPSXA WINAPI SHCreatePropSheetExtArray(HKEY hKey, LPCWSTR pszSubKey, UINT max_iface)
 {
- 	FIXME("(%08x,%s,%08x)stub\n", a, debugstr_a(b), c);
-	return 0;
+    return SHCreatePropSheetExtArrayEx(hKey, pszSubKey, max_iface, NULL);
+}
+
+/*************************************************************************
+ *      SHCreatePropSheetExtArrayEx	[SHELL32.194]
+ */
+HPSXA WINAPI SHCreatePropSheetExtArrayEx(HKEY hKey, LPCWSTR pszSubKey, UINT max_iface, IDataObject *pDataObj)
+{
+    static const WCHAR szPropSheetSubKey[] = {'s','h','e','l','l','e','x','\\','P','r','o','p','e','r','t','y','S','h','e','e','t','H','a','n','d','l','e','r','s',0};
+    WCHAR szHandler[64];
+    DWORD dwHandlerLen;
+    WCHAR szClsidHandler[39];
+    DWORD dwClsidSize;
+    CLSID clsid;
+    LONG lRet;
+    DWORD dwIndex;
+    IShellExtInit *psxi;
+    IShellPropSheetExt *pspsx;
+    HKEY hkBase, hkPropSheetHandlers;
+    PPSXA psxa = NULL;
+
+    TRACE("(%p,%s,%u)\n", hKey, debugstr_w(pszSubKey), max_iface);
+
+    if (max_iface == 0)
+        return NULL;
+
+    /* Open the registry key */
+    lRet = RegOpenKeyW(hKey, pszSubKey, &hkBase);
+    if (lRet != ERROR_SUCCESS)
+        return NULL;
+
+    lRet = RegOpenKeyExW(hkBase, szPropSheetSubKey, 0, KEY_ENUMERATE_SUB_KEYS, &hkPropSheetHandlers);
+    RegCloseKey(hkBase);
+    if (lRet == ERROR_SUCCESS)
+    {
+        /* Create and initialize the Property Sheet Extensions Array */
+        psxa = (PPSXA)LocalAlloc(LMEM_FIXED, FIELD_OFFSET(PSXA, pspsx[max_iface]));
+        if (psxa)
+        {
+            ZeroMemory(psxa, FIELD_OFFSET(PSXA, pspsx[max_iface]));
+            psxa->uiAllocated = max_iface;
+
+            /* Enumerate all subkeys and attempt to load the shell extensions */
+            dwIndex = 0;
+            do
+            {
+                dwHandlerLen = sizeof(szHandler) / sizeof(szHandler[0]);
+                lRet = RegEnumKeyExW(hkPropSheetHandlers, dwIndex++, szHandler, &dwHandlerLen, NULL, NULL, NULL, NULL);
+                if (lRet != ERROR_SUCCESS)
+                {
+                    if (lRet == ERROR_MORE_DATA)
+                        continue;
+
+                    if (lRet == ERROR_NO_MORE_ITEMS)
+                        lRet = ERROR_SUCCESS;
+                    break;
+                }
+
+                dwClsidSize = sizeof(szClsidHandler);
+                if (SHGetValueW(hkPropSheetHandlers, szHandler, NULL, NULL, szClsidHandler, &dwClsidSize) == ERROR_SUCCESS)
+                {
+                    /* Force a NULL-termination and convert the string */
+                    szClsidHandler[(sizeof(szClsidHandler) / sizeof(szClsidHandler[0])) - 1] = 0;
+                    if (SUCCEEDED(SHCLSIDFromStringW(szClsidHandler, &clsid)))
+                    {
+                        /* Attempt to get an IShellPropSheetExt and an IShellExtInit instance.
+                           Only if both interfaces are supported it's a real shell extension.
+                           Then call IShellExtInit's Initialize method. */
+                        if (SUCCEEDED(CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER/* | CLSCTX_NO_CODE_DOWNLOAD */, &IID_IShellPropSheetExt, (LPVOID *)&pspsx)))
+                        {
+                            if (SUCCEEDED(pspsx->lpVtbl->QueryInterface(pspsx, &IID_IShellExtInit, (PVOID *)&psxi)))
+                            {
+                                if (SUCCEEDED(psxi->lpVtbl->Initialize(psxi, NULL, pDataObj, hKey)))
+                                {
+                                    /* Add the IShellPropSheetExt instance to the array */
+                                    psxa->pspsx[psxa->uiCount++] = pspsx;
+                                }
+                                else
+                                {
+                                    psxi->lpVtbl->Release(psxi);
+                                    pspsx->lpVtbl->Release(pspsx);
+                                }
+                            }
+                            else
+                                pspsx->lpVtbl->Release(pspsx);
+                        }
+                    }
+                }
+
+            } while (psxa->uiCount != psxa->uiAllocated);
+        }
+        else
+            lRet = ERROR_NOT_ENOUGH_MEMORY;
+
+        RegCloseKey(hkPropSheetHandlers);
+    }
+
+    if (lRet != ERROR_SUCCESS && psxa)
+    {
+        SHDestroyPropSheetExtArray((HPSXA)psxa);
+        psxa = NULL;
+    }
+
+    return (HPSXA)psxa;
 }
 
 /*************************************************************************
  *      SHReplaceFromPropSheetExtArray	[SHELL32.170]
  */
-DWORD WINAPI SHReplaceFromPropSheetExtArray(DWORD a, DWORD b, DWORD c, DWORD d)
+UINT WINAPI SHReplaceFromPropSheetExtArray(HPSXA hpsxa, UINT uPageID, LPFNADDPROPSHEETPAGE lpfnReplaceWith, LPARAM lParam)
 {
- 	FIXME("(%08x,%08x,%08x,%08x)stub\n", a, b, c, d);
-	return 0;
+    PSXA_CALL Call;
+    UINT i;
+    PPSXA psxa = (PPSXA)hpsxa;
+
+    TRACE("(%p,%u,%p,%08lx)\n", hpsxa, uPageID, lpfnReplaceWith, lParam);
+
+    if (psxa)
+    {
+        ZeroMemory(&Call, sizeof(Call));
+        Call.lpfnAddReplaceWith = lpfnReplaceWith;
+        Call.lParam = lParam;
+
+        /* Call the ReplacePage method of all registered IShellPropSheetExt interfaces.
+           Each shell extension is only allowed to call the callback once during the callback. */
+        for (i = 0; i != psxa->uiCount; i++)
+        {
+            Call.bCalled = FALSE;
+            psxa->pspsx[i]->lpVtbl->ReplacePage(psxa->pspsx[i], uPageID, PsxaCall, (LPARAM)&Call);
+        }
+
+        return Call.uiCount;
+    }
+
+    return 0;
 }
 
 /*************************************************************************
  *      SHDestroyPropSheetExtArray	[SHELL32.169]
  */
-DWORD WINAPI SHDestroyPropSheetExtArray(DWORD a)
+void WINAPI SHDestroyPropSheetExtArray(HPSXA hpsxa)
 {
- 	FIXME("(%08x)stub\n", a);
-	return 0;
+    UINT i;
+    PPSXA psxa = (PPSXA)hpsxa;
+
+    TRACE("(%p)\n", hpsxa);
+
+    if (psxa)
+    {
+        for (i = 0; i != psxa->uiCount; i++)
+        {
+            psxa->pspsx[i]->lpVtbl->Release(psxa->pspsx[i]);
+        }
+
+        LocalFree((HLOCAL)psxa);
+    }
 }
 
 /*************************************************************************

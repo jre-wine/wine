@@ -337,8 +337,13 @@ static HRESULT WINAPI DocHostUIHandler_HideUI(IDocHostUIHandler2 *iface)
 static HRESULT WINAPI DocHostUIHandler_UpdateUI(IDocHostUIHandler2 *iface)
 {
     DocHost *This = DOCHOSTUI_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    if(!This->hostui)
+        return S_FALSE;
+
+    return IDocHostUIHandler_UpdateUI(This->hostui);
 }
 
 static HRESULT WINAPI DocHostUIHandler_EnableModeless(IDocHostUIHandler2 *iface,
@@ -406,7 +411,13 @@ static HRESULT WINAPI DocHostUIHandler_GetExternal(IDocHostUIHandler2 *iface,
         IDispatch **ppDispatch)
 {
     DocHost *This = DOCHOSTUI_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, ppDispatch);
+
+    TRACE("(%p)->(%p)\n", This, ppDispatch);
+
+    if(This->hostui)
+        return IDocHostUIHandler_GetExternal(This->hostui, ppDispatch);
+
+    FIXME("default action not implemented\n");
     return E_NOTIMPL;
 }
 
@@ -486,12 +497,18 @@ void DocHost_Init(DocHost *This, IDispatch *disp)
 
     This->disp = disp;
 
+    This->client_disp = NULL;
+
     This->document = NULL;
     This->hostui = NULL;
+    This->frame = NULL;
 
     This->hwnd = NULL;
     This->frame_hwnd = NULL;
     This->url = NULL;
+
+    This->silent = VARIANT_FALSE;
+    This->offline = VARIANT_FALSE;
 
     DocHost_ClientSite_Init(This);
     DocHost_Frame_Init(This);
@@ -501,6 +518,11 @@ void DocHost_Init(DocHost *This, IDispatch *disp)
 
 void DocHost_Release(DocHost *This)
 {
+    if(This->client_disp)
+        IDispatch_Release(This->client_disp);
+    if(This->frame)
+        IOleInPlaceFrame_Release(This->frame);
+
     DocHost_ClientSite_Release(This);
 
     ConnectionPointContainer_Destroy(&This->cps);

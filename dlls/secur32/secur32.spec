@@ -35,12 +35,12 @@
 @ stdcall LsaCallAuthenticationPackage(long long ptr long ptr ptr ptr)
 @ stdcall LsaConnectUntrusted(long)
 @ stdcall LsaDeregisterLogonProcess(long)
-@ stub LsaEnumerateLogonSessions
-@ stub LsaFreeReturnBuffer
-@ stub LsaGetLogonSessionData
-@ stub LsaLogonUser
-@ stub LsaLookupAuthenticationPackage
-@ stub LsaRegisterLogonProcess
+@ stdcall LsaEnumerateLogonSessions(ptr ptr)
+@ stdcall LsaFreeReturnBuffer(ptr)
+@ stdcall LsaGetLogonSessionData(ptr ptr)
+@ stdcall LsaLogonUser(ptr ptr long long ptr long ptr ptr ptr ptr ptr ptr ptr ptr)
+@ stdcall LsaLookupAuthenticationPackage(ptr ptr ptr)
+@ stdcall LsaRegisterLogonProcess(ptr ptr ptr)
 @ stub LsaRegisterPolicyChangeNotification
 @ stub LsaUnregisterPolicyChangeNotification
 @ stdcall MakeSignature(ptr long ptr long)
@@ -61,7 +61,7 @@
 @ stub SaslIdentifyPackageW
 @ stub SaslInitializeSecurityContextA
 @ stub SaslInitializeSecurityContextW
-@ stub SealMessage
+@ stdcall SealMessage(ptr long ptr long) EncryptMessage
 @ stub SecCacheSspiPackages
 @ stub SecGetLocaleSpecificEncryptionRules
 @ stub SecpFreeMemory
@@ -69,5 +69,5 @@
 @ stub SecpTranslateNameEx
 @ stdcall TranslateNameA(str long long ptr ptr)
 @ stdcall TranslateNameW(wstr long long ptr ptr)
-@ stub UnsealMessage
+@ stdcall UnsealMessage(ptr ptr long ptr) DecryptMessage
 @ stdcall VerifySignature(ptr ptr long ptr)

@@ -84,11 +84,13 @@ typedef struct PullPin
 	HANDLE hEventStateChanged;
 	REFERENCE_TIME rtStart;
 	REFERENCE_TIME rtStop;
+	REFERENCE_TIME rtCurrent;
 } PullPin;
 
 /*** Initializers ***/
 HRESULT InputPin_Init(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, InputPin * pPinImpl);
-HRESULT OutputPin_Init(const PIN_INFO * pPinInfo, ALLOCATOR_PROPERTIES *props, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, OutputPin * pPinImpl);
+HRESULT OutputPin_Init(const PIN_INFO * pPinInfo, const ALLOCATOR_PROPERTIES *props, LPVOID pUserData,
+                       QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, OutputPin * pPinImpl);
 HRESULT PullPin_Init(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, PullPin * pPinImpl);
 
 /*** Constructors ***/
@@ -133,7 +135,7 @@ HRESULT WINAPI OutputPin_EndFlush(IPin * iface);
 HRESULT WINAPI OutputPin_NewSegment(IPin * iface, REFERENCE_TIME tStart, REFERENCE_TIME tStop, double dRate);
 
 HRESULT OutputPin_CommitAllocator(OutputPin * This);
-HRESULT OutputPin_GetDeliveryBuffer(OutputPin * This, IMediaSample ** ppSample, const REFERENCE_TIME * tStart, const REFERENCE_TIME * tStop, DWORD dwFlags);
+HRESULT OutputPin_GetDeliveryBuffer(OutputPin * This, IMediaSample ** ppSample, REFERENCE_TIME * tStart, REFERENCE_TIME * tStop, DWORD dwFlags);
 HRESULT OutputPin_SendSample(OutputPin * This, IMediaSample * pSample);
 HRESULT OutputPin_DeliverDisconnect(OutputPin * This);
 HRESULT OutputPin_DeliverNewSegment(OutputPin * This, REFERENCE_TIME tStart, REFERENCE_TIME tStop, double dRate);

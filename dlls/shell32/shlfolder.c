@@ -193,13 +193,15 @@ HRESULT SHELL32_ParseNextElement (IShellFolder2 * psf, HWND hwndOwner, LPBC pbc,
  *   In this case the absolute path is built from pidlChild (eg. C:)
  */
 static HRESULT SHELL32_CoCreateInitSF (LPCITEMIDLIST pidlRoot, LPCWSTR pathRoot,
-    LPCITEMIDLIST pidlChild, REFCLSID clsid, REFIID riid, LPVOID * ppvOut)
+                LPCITEMIDLIST pidlChild, REFCLSID clsid, LPVOID * ppvOut)
 {
     HRESULT hr;
 
     TRACE ("%p %s %p\n", pidlRoot, debugstr_w(pathRoot), pidlChild);
 
-    if (SUCCEEDED ((hr = SHCoCreateInstance (NULL, clsid, NULL, riid, ppvOut)))) {
+    hr = SHCoCreateInstance(NULL, clsid, NULL, &IID_IShellFolder, ppvOut);
+    if (SUCCEEDED (hr))
+    {
 	LPITEMIDLIST pidlAbsolute = ILCombine (pidlRoot, pidlChild);
 	IPersistFolder *pPF;
 	IPersistFolder3 *ppf;
@@ -222,13 +224,10 @@ static HRESULT SHELL32_CoCreateInitSF (LPCITEMIDLIST pidlRoot, LPCWSTR pathRoot,
 	    }
 
 	    if (pidlChild) {
-		LPCSTR pszChild = _ILGetTextPointer(pidlChild);
                 int len = lstrlenW(ppfti.szTargetParsingName);
 
-		if (pszChild)
-		    MultiByteToWideChar (CP_ACP, 0, pszChild, -1, ppfti.szTargetParsingName + len, MAX_PATH - len);
-		else
-		    hr = E_INVALIDARG;
+		if (!_ILSimpleGetTextW(pidlChild, ppfti.szTargetParsingName + len, MAX_PATH - len))
+			hr = E_INVALIDARG;
 	    }
 
 	    IPersistFolder3_InitializeEx (ppf, NULL, pidlAbsolute, &ppfti);
@@ -278,7 +277,7 @@ HRESULT SHELL32_BindToChild (LPCITEMIDLIST pidlRoot,
 
     if ((clsid = _ILGetGUIDPointer (pidlChild))) {
         /* virtual folder */
-        hr = SHELL32_CoCreateInitSF (pidlRoot, pathRoot, pidlChild, clsid, &IID_IShellFolder, (LPVOID *) & pSF);
+        hr = SHELL32_CoCreateInitSF (pidlRoot, pathRoot, pidlChild, clsid, (LPVOID *)&pSF);
     } else {
         /* file system folder */
         CLSID clsidFolder = CLSID_ShellFSFolder;
@@ -290,13 +289,15 @@ HRESULT SHELL32_BindToChild (LPCITEMIDLIST pidlRoot,
             lstrcpynW(wszFolderPath, pathRoot, MAX_PATH);
             pwszPathTail = PathAddBackslashW(wszFolderPath);
         }
-        MultiByteToWideChar(CP_ACP, 0, _ILGetTextPointer(pidlChild), -1, pwszPathTail, MAX_PATH - (int)(pwszPathTail - wszFolderPath));
+
+        _ILSimpleGetTextW(pidlChild,pwszPathTail,MAX_PATH - (int)(pwszPathTail - wszFolderPath));
+
         if (SHELL32_GetCustomFolderAttributeFromPath (wszFolderPath,
             wszDotShellClassInfo, wszCLSID, wszCLSIDValue, CHARS_IN_GUID))
             CLSIDFromString (wszCLSIDValue, &clsidFolder);
 
-		hr = SHELL32_CoCreateInitSF (pidlRoot, pathRoot, pidlChild,
-            &clsidFolder, &IID_IShellFolder, (LPVOID *)&pSF);
+        hr = SHELL32_CoCreateInitSF (pidlRoot, pathRoot, pidlChild,
+                                     &clsidFolder, (LPVOID *)&pSF);
     }
     ILFree (pidlChild);
 

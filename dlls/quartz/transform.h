@@ -22,8 +22,9 @@ typedef struct TransformFilterImpl TransformFilterImpl;
 
 typedef struct TransformFuncsTable {
     HRESULT (*pfnProcessBegin) (TransformFilterImpl* This);
-    HRESULT (*pfnProcessSampleData) (TransformFilterImpl* This, LPBYTE data, DWORD size);
+    HRESULT (*pfnProcessSampleData) (TransformFilterImpl* This, IMediaSample *pSample);
     HRESULT (*pfnProcessEnd) (TransformFilterImpl* This);
+    HRESULT (*pfnQueryConnect) (TransformFilterImpl* This, const AM_MEDIA_TYPE * pmt);
     HRESULT (*pfnConnectInput) (TransformFilterImpl* This, const AM_MEDIA_TYPE * pmt);
     HRESULT (*pfnCleanup) (TransformFilterImpl* This);
 } TransformFuncsTable;
@@ -42,7 +43,7 @@ struct TransformFilterImpl
 
     IPin ** ppPins;
 
-    TransformFuncsTable * pFuncsTable;
+    const TransformFuncsTable * pFuncsTable;
 };
 
-HRESULT TransformFilter_Create(TransformFilterImpl*, const CLSID*, TransformFuncsTable* pFuncsTable);
+HRESULT TransformFilter_Create(TransformFilterImpl*, const CLSID*, const TransformFuncsTable* pFuncsTable);

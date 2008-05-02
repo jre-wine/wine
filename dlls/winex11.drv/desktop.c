@@ -22,7 +22,6 @@
 #include <X11/cursorfont.h>
 #include <X11/Xlib.h>
 
-#include "wine/winuser16.h"
 #include "win.h"
 #include "ddrawi.h"
 #include "x11drv.h"
@@ -46,7 +45,7 @@ static void make_modes(void)
 {
     int i;
     /* original specified desktop size */
-    X11DRV_Settings_AddOneMode(screen_width, screen_height, 0, 0);
+    X11DRV_Settings_AddOneMode(screen_width, screen_height, 0, 60);
     for (i=0; i<NUM_DESKTOP_MODES; i++)
     {
         if ( (widths[i] <= max_width) && (heights[i] <= max_height) )
@@ -55,14 +54,14 @@ static void make_modes(void)
                  ( (widths[i] != screen_width) || (heights[i] != screen_height) ) )
             {
                 /* only add them if they are smaller than the root window and unique */
-                X11DRV_Settings_AddOneMode(widths[i], heights[i], 0, 0);
+                X11DRV_Settings_AddOneMode(widths[i], heights[i], 0, 60);
             }
         }
     }
     if ((max_width != screen_width) && (max_height != screen_height))
     {
         /* root window size (if different from desktop window) */
-        X11DRV_Settings_AddOneMode(max_width, max_height, 0, 0);
+        X11DRV_Settings_AddOneMode(max_width, max_height, 0, 60);
     }
 }
 
@@ -117,16 +116,22 @@ static int X11DRV_desktop_GetCurrentMode(void)
     return 0;
 }
 
-static void X11DRV_desktop_SetCurrentMode(int mode)
+static LONG X11DRV_desktop_SetCurrentMode(int mode)
 {
     DWORD dwBpp = screen_depth;
     if (dwBpp == 24) dwBpp = 32;
-    TRACE("Resizing Wine desktop window to %dx%d\n", dd_modes[mode].dwWidth, dd_modes[mode].dwHeight);
-    X11DRV_resize_desktop(dd_modes[mode].dwWidth, dd_modes[mode].dwHeight);
     if (dwBpp != dd_modes[mode].dwBPP)
     {
         FIXME("Cannot change screen BPP from %d to %d\n", dwBpp, dd_modes[mode].dwBPP);
+        /* Ignore the depth missmatch
+         *
+         * Some (older) applications require a specific bit depth, this will allow them
+         * to run. X11drv performs a color depth conversion if needed.
+         */
     }
+    TRACE("Resizing Wine desktop window to %dx%d\n", dd_modes[mode].dwWidth, dd_modes[mode].dwHeight);
+    X11DRV_resize_desktop(dd_modes[mode].dwWidth, dd_modes[mode].dwHeight);
+    return DISP_CHANGE_SUCCESSFUL;
 }
 
 /***********************************************************************

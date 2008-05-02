@@ -550,7 +550,7 @@ BOOL WINAPI PathYetAnotherMakeUniqueName(
 /*************************************************************************
  * PathFindOnPath	[SHELL32.145]
  */
-BOOL WINAPI PathFindOnPathAW(LPVOID sFile, LPCVOID sOtherDirs)
+BOOL WINAPI PathFindOnPathAW(LPVOID sFile, LPCVOID *sOtherDirs)
 {
 	if (SHELL_OsIsUnicode())
 	  return PathFindOnPathW(sFile, (LPCWSTR *)sOtherDirs);
@@ -1734,12 +1734,12 @@ HRESULT WINAPI SHGetFolderPathW(
     ret = SHCreateDirectoryExW(hwndOwner, szBuildPath, NULL);
     if (ret && ret != ERROR_ALREADY_EXISTS)
     {
-        ERR("Failed to create directory '%s'.\n", debugstr_w(szBuildPath));
+        ERR("Failed to create directory %s.\n", debugstr_w(szBuildPath));
         hr = E_FAIL;
         goto end;
     }
 
-    TRACE("Created missing system directory '%s'\n", debugstr_w(szBuildPath));
+    TRACE("Created missing system directory %s\n", debugstr_w(szBuildPath));
 end:
     TRACE("returning 0x%08x (final path is %s)\n", hr, debugstr_w(szBuildPath));
     return hr;
@@ -2040,7 +2040,7 @@ static void _SHCreateSymbolicLinks(void)
             for (i = 0; i < sizeof(aidsMyStuff)/sizeof(aidsMyStuff[0]); i++) {
                 strcpy(szMyStuffTarget, szPersonalTarget);
                 if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])))
-                    mkdir(szMyStuffTarget, S_IRWXU|S_IRWXG|S_IRWXO);
+                    mkdir(szMyStuffTarget, 0777);
             }
         } 
         else
@@ -2061,7 +2061,7 @@ static void _SHCreateSymbolicLinks(void)
         for (i = 0; i < sizeof(aidsMyStuff)/sizeof(aidsMyStuff[0]); i++) {
             strcpy(szMyStuffTarget, szPersonalTarget);
             if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])))
-                mkdir(szMyStuffTarget, S_IRWXU|S_IRWXG|S_IRWXO);
+                mkdir(szMyStuffTarget, 0777);
         }
     }
 

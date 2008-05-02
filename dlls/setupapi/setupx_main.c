@@ -63,9 +63,7 @@
 #include "winbase.h"
 #include "winreg.h"
 #include "winerror.h"
-#include "wine/winuser16.h"
 #include "wownt32.h"
-#include "wingdi.h"
 #include "winuser.h"
 #include "winnls.h"
 #include "setupapi.h"
@@ -280,7 +278,7 @@ static LDD_LIST *pFirstLDD = NULL;
 
 static BOOL std_LDDs_done = FALSE;
 
-void SETUPX_CreateStandardLDDs(void)
+static void SETUPX_CreateStandardLDDs(void)
 {
     HKEY hKey = 0;
     WORD n;
@@ -350,7 +348,7 @@ void SETUPX_CreateStandardLDDs(void)
  * RETURN
  *   ERR_VCP_LDDINVALID if ldid < LDID_ASSIGN_START.
  */
-RETERR16 SETUPX_DelLdd(LOGDISKID16 ldid)
+static RETERR16 SETUPX_DelLdd(LOGDISKID16 ldid)
 {
     LDD_LIST *pCurr, *pPrev = NULL;
 

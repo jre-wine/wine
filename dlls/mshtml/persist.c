@@ -39,42 +39,52 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
-/**********************************************************
- * IPersistMoniker implementation
- */
+#define USER_AGENT "User-Agent:"
+#define CONTENT_TYPE "Content-Type:"
 
-#define PERSISTMON_THIS(iface) DEFINE_THIS(HTMLDocument, PersistMoniker, iface)
-
-static HRESULT WINAPI PersistMoniker_QueryInterface(IPersistMoniker *iface, REFIID riid,
-                                                            void **ppvObject)
+static int fix_headers(char *buf, DWORD post_len)
 {
-    HTMLDocument *This = PERSISTMON_THIS(iface);
-    return IHTMLDocument2_QueryInterface(HTMLDOC(This), riid, ppvObject);
-}
+    char *ptr = NULL;
 
-static ULONG WINAPI PersistMoniker_AddRef(IPersistMoniker *iface)
-{
-    HTMLDocument *This = PERSISTMON_THIS(iface);
-    return IHTMLDocument2_AddRef(HTMLDOC(This));
-}
+    if(!strncasecmp(USER_AGENT, buf, sizeof(USER_AGENT)-1)) {
+        ptr = buf;
+    }else {
+        ptr = strstr(buf, "\r\n" USER_AGENT);
+        if(ptr)
+            ptr += 2;
+    }
 
-static ULONG WINAPI PersistMoniker_Release(IPersistMoniker *iface)
-{
-    HTMLDocument *This = PERSISTMON_THIS(iface);
-    return IHTMLDocument2_Release(HTMLDOC(This));
-}
+    if(ptr) {
+        const char *ptr2;
 
-static HRESULT WINAPI PersistMoniker_GetClassID(IPersistMoniker *iface, CLSID *pClassID)
-{
-    HTMLDocument *This = PERSISTMON_THIS(iface);
-    return IPersist_GetClassID(PERSIST(This), pClassID);
-}
+        FIXME("Ignoring User-Agent header\n");
 
-static HRESULT WINAPI PersistMoniker_IsDirty(IPersistMoniker *iface)
-{
-    HTMLDocument *This = PERSISTMON_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+        ptr2 = strstr(ptr, "\r\n");
+        if(ptr2)
+            memmove(ptr, ptr2, strlen(ptr2)+1);
+    }
+
+    if(!post_len) {
+        if(!strncasecmp(CONTENT_TYPE, buf, sizeof(CONTENT_TYPE)-1)) {
+            ptr = buf;
+        }else {
+            ptr = strstr(buf, "\r\n" CONTENT_TYPE);
+            if(ptr)
+                ptr += 2;
+        }
+
+        if(ptr) {
+            const char *ptr2;
+
+            TRACE("Ignoring Content-Type header\n");
+
+            ptr2 = strstr(ptr, "\r\n");
+            if(ptr2)
+                memmove(ptr, ptr2, strlen(ptr2)+1);
+        }
+    }
+
+    return strlen(buf);
 }
 
 static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
@@ -122,7 +132,7 @@ static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
         post_len = bindinfo.cbstgmedData;
 
     if(headers_len || post_len) {
-        int len = headers_len ? headers_len-1 : 0;
+        int len = 0;
 
         static const char content_length[] = "Content-Length: %u\r\n\r\n";
 
@@ -131,9 +141,13 @@ static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
         if(headers_len) {
             WideCharToMultiByte(CP_ACP, 0, headers, -1, data, -1, NULL, NULL);
             CoTaskMemFree(headers);
+            len = fix_headers(data, post_len);
         }
 
         if(post_len) {
+            if(len >= 4 && !strcmp(data+len-4, "\r\n\r\n"))
+                len -= 2;
+
             sprintf(data+len, content_length, post_len);
             len = strlen(data);
 
@@ -151,17 +165,38 @@ static nsIInputStream *get_post_data_stream(IBindCtx *bctx)
     return ret;
 }
 
-static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAvailable,
-        IMoniker *pimkName, LPBC pibc, DWORD grfMode)
+void set_current_mon(HTMLDocument *This, IMoniker *mon)
 {
-    HTMLDocument *This = PERSISTMON_THIS(iface);
+    HRESULT hres;
+
+    if(This->mon) {
+        IMoniker_Release(This->mon);
+        This->mon = NULL;
+    }
+
+    if(This->url) {
+        CoTaskMemFree(This->url);
+        This->url = NULL;
+    }
+
+    if(!mon)
+        return;
+
+    IMoniker_AddRef(mon);
+    This->mon = mon;
+
+    hres = IMoniker_GetDisplayName(mon, NULL, NULL, &This->url);
+    if(FAILED(hres))
+        WARN("GetDisplayName failed: %08x\n", hres);
+}
+
+static HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, BOOL *bind_complete)
+{
     BSCallback *bscallback;
     LPOLESTR url = NULL;
     task_t *task;
     HRESULT hres;
     nsresult nsres;
-
-    TRACE("(%p)->(%x %p %p %08x)\n", This, fFullyAvailable, pimkName, pibc, grfMode);
 
     if(pibc) {
         IUnknown *unk = NULL;
@@ -194,11 +229,12 @@ static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAva
     }
 
     This->readystate = READYSTATE_LOADING;
-    call_property_onchanged(This->cp_propnotif, DISPID_READYSTATE);
+    call_property_onchanged(&This->cp_propnotif, DISPID_READYSTATE);
+    update_doc(This, UPDATE_TITLE);
 
     HTMLDocument_LockContainer(This, TRUE);
     
-    hres = IMoniker_GetDisplayName(pimkName, pibc, NULL, &url);
+    hres = IMoniker_GetDisplayName(mon, pibc, NULL, &url);
     if(FAILED(hres)) {
         WARN("GetDiaplayName failed: %08x\n", hres);
         return hres;
@@ -206,22 +242,11 @@ static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAva
 
     TRACE("got url: %s\n", debugstr_w(url));
 
-    if(This->client) {
-        IOleCommandTarget *cmdtrg = NULL;
-
-        hres = IOleClientSite_QueryInterface(This->client, &IID_IOleCommandTarget,
-                (void**)&cmdtrg);
-        if(SUCCEEDED(hres)) {
-            VARIANT var;
-
-            V_VT(&var) = VT_I4;
-            V_I4(&var) = 0;
-            IOleCommandTarget_Exec(cmdtrg, &CGID_ShellDocView, 37, 0, &var, NULL);
-        }
-    }
+    set_current_mon(This, mon);
 
     if(This->client) {
         VARIANT silent, offline;
+        IOleCommandTarget *cmdtrg = NULL;
 
         hres = get_client_disp_property(This->client, DISPID_AMBIENT_SILENT, &silent);
         if(SUCCEEDED(hres)) {
@@ -239,9 +264,21 @@ static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAva
             else if(V_BOOL(&silent))
                 FIXME("offline == true\n");
         }
+
+        hres = IOleClientSite_QueryInterface(This->client, &IID_IOleCommandTarget,
+                (void**)&cmdtrg);
+        if(SUCCEEDED(hres)) {
+            VARIANT var;
+
+            V_VT(&var) = VT_I4;
+            V_I4(&var) = 0;
+            IOleCommandTarget_Exec(cmdtrg, &CGID_ShellDocView, 37, 0, &var, NULL);
+
+            IOleCommandTarget_Release(cmdtrg);
+        }
     }
 
-    bscallback = create_bscallback(pimkName);
+    bscallback = create_bscallback(mon);
 
     if(This->frame) {
         task = mshtml_alloc(sizeof(task_t));
@@ -277,6 +314,9 @@ static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAva
 
             IBindStatusCallback_Release(STATUSCLB(bscallback));
             CoTaskMemFree(url);
+
+            if(bind_complete)
+                *bind_complete = TRUE;
             return S_OK;
         }else if(nsres != WINE_NS_LOAD_FROM_MONIKER) {
             WARN("LoadURI failed: %08x\n", nsres);
@@ -284,12 +324,114 @@ static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAva
     }
 
     set_document_bscallback(This, bscallback);
-    hres = start_binding(bscallback);
-
     IBindStatusCallback_Release(STATUSCLB(bscallback));
     CoTaskMemFree(url);
 
-    return hres;
+    if(bind_complete)
+        *bind_complete = FALSE;
+    return S_OK;
+}
+
+static HRESULT get_doc_string(HTMLDocument *This, char **str, DWORD *len)
+{
+    nsIDOMDocument *nsdoc;
+    nsIDOMNode *nsnode;
+    LPCWSTR strw;
+    nsAString nsstr;
+    nsresult nsres;
+
+    if(!This->nscontainer) {
+        WARN("no nscontainer, returning NULL\n");
+        return S_OK;
+    }
+
+    nsres = nsIWebNavigation_GetDocument(This->nscontainer->navigation, &nsdoc);
+    if(NS_FAILED(nsres)) {
+        ERR("GetDocument failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDOMNode, (void**)&nsnode);
+    nsIDOMDocument_Release(nsdoc);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMNode failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsAString_Init(&nsstr, NULL);
+    nsnode_to_nsstring(nsnode, &nsstr);
+    nsIDOMNode_Release(nsnode);
+
+    nsAString_GetData(&nsstr, &strw, NULL);
+    TRACE("%s\n", debugstr_w(strw));
+
+    *len = WideCharToMultiByte(CP_ACP, 0, strw, -1, NULL, 0, NULL, NULL);
+    *str = mshtml_alloc(*len);
+    WideCharToMultiByte(CP_ACP, 0, strw, -1, *str, *len, NULL, NULL);
+
+    nsAString_Finish(&nsstr);
+
+    return S_OK;
+}
+
+
+/**********************************************************
+ * IPersistMoniker implementation
+ */
+
+#define PERSISTMON_THIS(iface) DEFINE_THIS(HTMLDocument, PersistMoniker, iface)
+
+static HRESULT WINAPI PersistMoniker_QueryInterface(IPersistMoniker *iface, REFIID riid,
+                                                            void **ppvObject)
+{
+    HTMLDocument *This = PERSISTMON_THIS(iface);
+    return IHTMLDocument2_QueryInterface(HTMLDOC(This), riid, ppvObject);
+}
+
+static ULONG WINAPI PersistMoniker_AddRef(IPersistMoniker *iface)
+{
+    HTMLDocument *This = PERSISTMON_THIS(iface);
+    return IHTMLDocument2_AddRef(HTMLDOC(This));
+}
+
+static ULONG WINAPI PersistMoniker_Release(IPersistMoniker *iface)
+{
+    HTMLDocument *This = PERSISTMON_THIS(iface);
+    return IHTMLDocument2_Release(HTMLDOC(This));
+}
+
+static HRESULT WINAPI PersistMoniker_GetClassID(IPersistMoniker *iface, CLSID *pClassID)
+{
+    HTMLDocument *This = PERSISTMON_THIS(iface);
+    return IPersist_GetClassID(PERSIST(This), pClassID);
+}
+
+static HRESULT WINAPI PersistMoniker_IsDirty(IPersistMoniker *iface)
+{
+    HTMLDocument *This = PERSISTMON_THIS(iface);
+
+    TRACE("(%p)\n", This);
+
+    return IPersistStreamInit_IsDirty(PERSTRINIT(This));
+}
+
+static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAvailable,
+        IMoniker *pimkName, LPBC pibc, DWORD grfMode)
+{
+    HTMLDocument *This = PERSISTMON_THIS(iface);
+    BOOL bind_complete = FALSE;
+    HRESULT hres;
+
+    TRACE("(%p)->(%x %p %p %08x)\n", This, fFullyAvailable, pimkName, pibc, grfMode);
+
+    hres = set_moniker(This, pimkName, pibc, &bind_complete);
+    if(FAILED(hres))
+        return hres;
+
+    if(!bind_complete)
+        return start_binding(This->bscallback);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI PersistMoniker_Save(IPersistMoniker *iface, IMoniker *pimkName,
@@ -310,8 +452,15 @@ static HRESULT WINAPI PersistMoniker_SaveCompleted(IPersistMoniker *iface, IMoni
 static HRESULT WINAPI PersistMoniker_GetCurMoniker(IPersistMoniker *iface, IMoniker **ppimkName)
 {
     HTMLDocument *This = PERSISTMON_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, ppimkName);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, ppimkName);
+
+    if(!This->mon)
+        return E_UNEXPECTED;
+
+    IMoniker_AddRef(This->mon);
+    *ppimkName = This->mon;
+    return S_OK;
 }
 
 static const IPersistMonikerVtbl PersistMonikerVtbl = {
@@ -404,8 +553,10 @@ static HRESULT WINAPI PersistFile_GetClassID(IPersistFile *iface, CLSID *pClassI
 static HRESULT WINAPI PersistFile_IsDirty(IPersistFile *iface)
 {
     HTMLDocument *This = PERSISTFILE_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    return IPersistStreamInit_IsDirty(PERSTRINIT(This));
 }
 
 static HRESULT WINAPI PersistFile_Load(IPersistFile *iface, LPCOLESTR pszFileName, DWORD dwMode)
@@ -418,8 +569,27 @@ static HRESULT WINAPI PersistFile_Load(IPersistFile *iface, LPCOLESTR pszFileNam
 static HRESULT WINAPI PersistFile_Save(IPersistFile *iface, LPCOLESTR pszFileName, BOOL fRemember)
 {
     HTMLDocument *This = PERSISTFILE_THIS(iface);
-    FIXME("(%p)->(%s %x)\n", This, debugstr_w(pszFileName), fRemember);
-    return E_NOTIMPL;
+    char *str;
+    DWORD len, written=0;
+    HANDLE file;
+    HRESULT hres;
+
+    TRACE("(%p)->(%s %x)\n", This, debugstr_w(pszFileName), fRemember);
+
+    file = CreateFileW(pszFileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                       FILE_ATTRIBUTE_NORMAL, NULL);
+    if(file == INVALID_HANDLE_VALUE) {
+        WARN("Could not create file: %u\n", GetLastError());
+        return E_FAIL;
+    }
+
+    hres = get_doc_string(This, &str, &len);
+    if(FAILED(hres))
+        return hres;
+
+    WriteFile(file, str, len, &written, NULL);
+    CloseHandle(file);
+    return S_OK;
 }
 
 static HRESULT WINAPI PersistFile_SaveCompleted(IPersistFile *iface, LPCOLESTR pszFileName)
@@ -466,7 +636,7 @@ static ULONG WINAPI PersistStreamInit_AddRef(IPersistStreamInit *iface)
 static ULONG WINAPI PersistStreamInit_Release(IPersistStreamInit *iface)
 {
     HTMLDocument *This = PERSTRINIT_THIS(iface);
-    return IHTMLDocument2_AddRef(HTMLDOC(This));
+    return IHTMLDocument2_Release(HTMLDOC(This));
 }
 
 static HRESULT WINAPI PersistStreamInit_GetClassID(IPersistStreamInit *iface, CLSID *pClassID)
@@ -478,68 +648,59 @@ static HRESULT WINAPI PersistStreamInit_GetClassID(IPersistStreamInit *iface, CL
 static HRESULT WINAPI PersistStreamInit_IsDirty(IPersistStreamInit *iface)
 {
     HTMLDocument *This = PERSTRINIT_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    if(This->usermode == EDITMODE)
+        return editor_is_dirty(This);
+
+    return S_FALSE;
 }
 
 static HRESULT WINAPI PersistStreamInit_Load(IPersistStreamInit *iface, LPSTREAM pStm)
 {
     HTMLDocument *This = PERSTRINIT_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, pStm);
-    return E_NOTIMPL;
+    IMoniker *mon;
+    HRESULT hres;
+
+    static const WCHAR about_blankW[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
+
+    TRACE("(%p)->(%p)\n", This, pStm);
+
+    hres = CreateURLMoniker(NULL, about_blankW, &mon);
+    if(FAILED(hres)) {
+        WARN("CreateURLMoniker failed: %08x\n", hres);
+        return hres;
+    }
+
+    hres = set_moniker(This, mon, NULL, NULL);
+    IMoniker_Release(mon);
+    if(FAILED(hres))
+        return hres;
+
+    return load_stream(This->bscallback, pStm);
 }
 
 static HRESULT WINAPI PersistStreamInit_Save(IPersistStreamInit *iface, LPSTREAM pStm,
                                              BOOL fClearDirty)
 {
     HTMLDocument *This = PERSTRINIT_THIS(iface);
-    nsIDOMDocument *nsdoc;
-    nsIDOMNode *nsnode;
-    nsAString nsstr;
-    LPCWSTR strw;
     char *str;
     DWORD len, written=0;
-    nsresult nsres;
     HRESULT hres;
 
     WARN("(%p)->(%p %x) needs more work\n", This, pStm, fClearDirty);
 
-    if(!This->nscontainer)
-        return S_OK;
+    hres = get_doc_string(This, &str, &len);
+    if(FAILED(hres))
+        return hres;
 
-    nsres = nsIWebNavigation_GetDocument(This->nscontainer->navigation, &nsdoc);
-    if(NS_FAILED(nsres)) {
-        ERR("GetDocument failed: %08x\n", nsres);
-        return E_FAIL;
-    }
-
-    nsres = nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDOMNode, (void**)&nsnode);
-    nsIDOMDocument_Release(nsdoc);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNode failed: %08x\n", nsres);
-        return E_FAIL;
-    }
-
-    nsAString_Init(&nsstr, NULL);
-    nsnode_to_nsstring(nsnode, &nsstr);
-    nsIDOMNode_Release(nsnode);
-
-    nsAString_GetData(&nsstr, &strw, NULL);
-
-    len = WideCharToMultiByte(CP_ACP, 0, strw, -1, NULL, 0, NULL, NULL);
-    str = mshtml_alloc(len);
-    WideCharToMultiByte(CP_ACP, 0, strw, -1, str, len, NULL, NULL);
-
-    nsAString_Finish(&nsstr);
-
-    ERR("%s\n", debugstr_a(str));
 
     hres = IStream_Write(pStm, str, len, &written);
     if(FAILED(hres))
         FIXME("Write failed: %08x\n", hres);
 
     mshtml_free(str);
-
     return S_OK;
 }
 
@@ -580,4 +741,6 @@ void HTMLDocument_Persist_Init(HTMLDocument *This)
     This->lpPersistStreamInitVtbl = &PersistStreamInitVtbl;
 
     This->bscallback = NULL;
+    This->mon = NULL;
+    This->url = NULL;
 }

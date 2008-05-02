@@ -180,7 +180,7 @@ static void str_array_init(struct array* a)
  *		str_array_push
  * Adding a new string to an array
  */
-static void str_array_push(struct parsed_symbol* sym, const char* ptr, size_t len, 
+static void str_array_push(struct parsed_symbol* sym, const char* ptr, int len,
                            struct array* a)
 {
     assert(ptr);
@@ -254,7 +254,7 @@ static char* str_printf(struct parsed_symbol* sym, const char* format, ...)
         else len++;
     }
     va_end(args);
-    if (!(tmp = (char*)und_alloc(sym, len))) return NULL;
+    if (!(tmp = und_alloc(sym, len))) return NULL;
     va_start(args, format);
     for (p = tmp, i = 0; format[i]; i++)
     {
@@ -366,10 +366,10 @@ static BOOL get_modifier(char ch, const char** ret)
     return TRUE;
 }
 
-static const char* get_modified_type(struct parsed_symbol* sym, char modif)
+static BOOL get_modified_type(struct datatype_t *ct, struct parsed_symbol* sym,
+                              struct array *pmt_ref, char modif)
 {
     const char* modifier;
-    const char* ret = NULL;
     const char* str_modif;
 
     switch (modif)
@@ -381,7 +381,7 @@ static const char* get_modified_type(struct parsed_symbol* sym, char modif)
     case 'R': str_modif = " * volatile"; break;
     case 'S': str_modif = " * const volatile"; break;
     case '?': str_modif = ""; break;
-    default: return NULL;
+    default: return FALSE;
     }
 
     if (get_modifier(*sym->current++, &modifier))
@@ -390,14 +390,21 @@ static const char* get_modified_type(struct parsed_symbol* sym, char modif)
         struct datatype_t   sub_ct;
 
         /* Recurse to get the referred-to type */
-        if (!demangle_datatype(sym, &sub_ct, NULL, FALSE))
-            return NULL;
-        ret = str_printf(sym, "%s%s%s%s%s", 
-                         sub_ct.left, sub_ct.left && modifier ? " " : NULL, 
-                         modifier, sub_ct.right, str_modif);
+        if (!demangle_datatype(sym, &sub_ct, pmt_ref, FALSE))
+            return FALSE;
+        if (modifier)
+            ct->left = str_printf(sym, "%s %s%s", sub_ct.left, modifier, str_modif );
+        else
+        {
+            /* don't insert a space between duplicate '*' */
+            if (str_modif[0] && str_modif[1] == '*' && sub_ct.left[strlen(sub_ct.left)-1] == '*')
+                str_modif++;
+            ct->left = str_printf(sym, "%s%s", sub_ct.left, str_modif );
+        }
+        ct->right = sub_ct.right;
         sym->stack.num = mark;
     }
-    return ret;
+    return TRUE;
 }
 
 /******************************************************************
@@ -424,6 +431,37 @@ static char* get_literal_string(struct parsed_symbol* sym)
     str_array_push(sym, ptr, sym->current - 1 - ptr, &sym->names);
 
     return str_array_get_ref(&sym->names, sym->names.num - sym->names.start - 1);
+}
+
+/******************************************************************
+ *		get_template_name
+ * Parses a name with a template argument list and returns it as
+ * a string.
+ * In a template argument list the back reference to the names
+ * table is separately created. '0' points to the class component
+ * name with the template arguments.  We use the same stack array
+ * to hold the names but save/restore the stack state before/after
+ * parsing the template argument list.
+ */
+static char* get_template_name(struct parsed_symbol* sym)
+{
+    char *name, *args;
+    unsigned num_mark = sym->names.num;
+    unsigned start_mark = sym->names.start;
+    unsigned stack_mark = sym->stack.num;
+    struct array array_pmt;
+
+    sym->names.start = sym->names.num;
+    if (!(name = get_literal_string(sym)))
+        return FALSE;
+    str_array_init(&array_pmt);
+    args = get_args(sym, &array_pmt, FALSE, '<', '>');
+    if (args != NULL)
+        name = str_printf(sym, "%s%s", name, args);
+    sym->names.num = num_mark;
+    sym->names.start = start_mark;
+    sym->stack.num = stack_mark;
+    return name;
 }
 
 /******************************************************************
@@ -457,29 +495,8 @@ static BOOL get_class(struct parsed_symbol* sym)
         case '?':
             if (*++sym->current == '$') 
             {
-                /* In a template argument list the back reference to names
-                   table is separately created. '0' points to the class
-                   component name with the template arguments. We use the same
-                   stack array to hold the names but save/restore the stack
-                   state before/after parsing the template argument list. */
-                char*           args = NULL;
-                unsigned        num_mark = sym->names.num;
-                unsigned        start_mark = sym->names.start;
-                unsigned        stack_mark = sym->stack.num;
-
-                sym->names.start = sym->names.num;
                 sym->current++;
-                if (!(name = get_literal_string(sym)))
-                    return FALSE;
-                args = get_args(sym, NULL, FALSE, '<', '>');
-                if (args != NULL)
-                    name = str_printf(sym, "%s%s", name, args);
-                sym->names.num = num_mark;
-                sym->names.start = start_mark;
-                sym->stack.num = stack_mark;
-                /* Now that we are back to the standard name scope push
-                   the class component with all its template arguments
-                   to the names array for back reference. */
+                name = get_template_name(sym);
                 str_array_push(sym, name, -1, &sym->names);
             }
             break;
@@ -697,16 +714,16 @@ static BOOL demangle_datatype(struct parsed_symbol* sym, struct datatype_t* ct,
         break;
     case '?':
         /* not all the time is seems */
-        if (!(ct->left = get_modified_type(sym, '?'))) goto done;
+        if (!get_modified_type(ct, sym, pmt_ref, '?')) goto done;
         break;
     case 'A': /* reference */
     case 'B': /* volatile reference */
-        if (!(ct->left = get_modified_type(sym, dt))) goto done;
+        if (!get_modified_type(ct, sym, pmt_ref, dt)) goto done;
         break;
     case 'Q': /* const pointer */
     case 'R': /* volatile pointer */
     case 'S': /* const volatile pointer */
-        if (!(ct->left = get_modified_type(sym, in_args ? dt : 'P'))) goto done;
+        if (!get_modified_type(ct, sym, pmt_ref, in_args ? dt : 'P')) goto done;
         break;
     case 'P': /* Pointer */
         if (isdigit(*sym->current))
@@ -736,7 +753,7 @@ static BOOL demangle_datatype(struct parsed_symbol* sym, struct datatype_t* ct,
             }
             else goto done;
 	}
-	else if (!(ct->left = get_modified_type(sym, 'P'))) goto done;
+	else if (!get_modified_type(ct, sym, pmt_ref, 'P')) goto done;
         break;
     case 'W':
         if (*sym->current == '4')
@@ -755,7 +772,9 @@ static BOOL demangle_datatype(struct parsed_symbol* sym, struct datatype_t* ct,
     case '0': case '1': case '2': case '3': case '4':
     case '5': case '6': case '7': case '8': case '9':
         /* Referring back to previously parsed type */
-        ct->left = str_array_get_ref(pmt_ref, dt - '0');
+        /* left and right are pushed as two separate strings */
+        ct->left = str_array_get_ref(pmt_ref, (dt - '0') * 2);
+        ct->right = str_array_get_ref(pmt_ref, (dt - '0') * 2 + 1);
         if (!ct->left) goto done;
         add_pmt = FALSE;
         break;
@@ -794,8 +813,11 @@ static BOOL demangle_datatype(struct parsed_symbol* sym, struct datatype_t* ct,
         break;
     }
     if (add_pmt && pmt_ref && in_args)
-        str_array_push(sym, str_printf(sym, "%s%s", ct->left, ct->right), 
-                       -1, pmt_ref);
+    {
+        /* left and right are pushed as two separate strings */
+        str_array_push(sym, ct->left ? ct->left : "", -1, pmt_ref);
+        str_array_push(sym, ct->right ? ct->right : "", -1, pmt_ref);
+    }
 done:
     
     return ct->left != NULL;
@@ -1147,6 +1169,15 @@ static BOOL symbol_demangle(struct parsed_symbol* sym)
             break;
         }
         sym->stack.start = 1;
+    }
+    else if (*sym->current == '$')
+    {
+        /* Strange construct, it's a name with a template argument list
+           and that's all. */
+        sym->current++;
+        sym->result = get_template_name(sym);
+        ret = TRUE;
+        goto done;
     }
 
     /* Either a class name, or '@' if the symbol is not a class member */

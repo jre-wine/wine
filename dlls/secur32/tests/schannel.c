@@ -32,6 +32,8 @@ static SECURITY_STATUS (SEC_ENTRY * pAcquireCredentialsHandleA)(SEC_CHAR*, SEC_C
                             ULONG, PLUID, PVOID, SEC_GET_KEY_FN, PVOID, PCredHandle, PTimeStamp);
 static SECURITY_STATUS (SEC_ENTRY * pFreeCredentialsHandle)(PCredHandle);
 
+static BOOL (WINAPI * pCryptAcquireContextW)(HCRYPTPROV*, LPCWSTR, LPCWSTR, DWORD, DWORD);
+
 static const BYTE bigCert[] = { 0x30, 0x7a, 0x02, 0x01, 0x01, 0x30, 0x02, 0x06,
  0x00, 0x30, 0x15, 0x31, 0x13, 0x30, 0x11, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13,
  0x0a, 0x4a, 0x75, 0x61, 0x6e, 0x20, 0x4c, 0x61, 0x6e, 0x67, 0x00, 0x30, 0x22,
@@ -42,9 +44,9 @@ static const BYTE bigCert[] = { 0x30, 0x7a, 0x02, 0x01, 0x01, 0x30, 0x02, 0x06,
  0x4c, 0x61, 0x6e, 0x67, 0x00, 0x30, 0x07, 0x30, 0x02, 0x06, 0x00, 0x03, 0x01,
  0x00, 0xa3, 0x16, 0x30, 0x14, 0x30, 0x12, 0x06, 0x03, 0x55, 0x1d, 0x13, 0x01,
  0x01, 0xff, 0x04, 0x08, 0x30, 0x06, 0x01, 0x01, 0xff, 0x02, 0x01, 0x01 };
-static const WCHAR cspNameW[] = { 'W','i','n','e','C','r','y','p','t','T','e',
+static WCHAR cspNameW[] = { 'W','i','n','e','C','r','y','p','t','T','e',
  'm','p',0 };
-static const BYTE privKey[] = {
+static BYTE privKey[] = {
  0x07, 0x02, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x52, 0x53, 0x41, 0x32, 0x00,
  0x02, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x79, 0x10, 0x1c, 0xd0, 0x6b, 0x10,
  0x18, 0x30, 0x94, 0x61, 0xdc, 0x0e, 0xcb, 0x96, 0x4e, 0x21, 0x3f, 0x79, 0xcd,
@@ -97,6 +99,8 @@ static const BYTE selfSignedCert[] = {
 
 static void InitFunctionPtrs(void)
 {
+    HMODULE advapi32dll = GetModuleHandleA("advapi32.dll");
+
     secdll = LoadLibraryA("secur32.dll");
     if(!secdll)
         secdll = LoadLibraryA("security.dll");
@@ -105,6 +109,8 @@ static void InitFunctionPtrs(void)
         pAcquireCredentialsHandleA = (PVOID)GetProcAddress(secdll, "AcquireCredentialsHandleA");
         pFreeCredentialsHandle = (PVOID)GetProcAddress(secdll, "FreeCredentialsHandle");
     }
+
+    pCryptAcquireContextW = (void *)GetProcAddress(advapi32dll, "CryptAcquireContextW");
 }
 
 static void testAcquireSecurityContext(void)
@@ -116,12 +122,15 @@ static void testAcquireSecurityContext(void)
     PCCERT_CONTEXT certs[2];
     HCRYPTPROV csp;
     static CHAR unisp_name_a[] = UNISP_NAME_A;
+    WCHAR ms_def_prov_w[MAX_PATH];
     BOOL ret;
     HCRYPTKEY key;
     CRYPT_KEY_PROV_INFO keyProvInfo;
 
-    keyProvInfo.pwszContainerName = (LPWSTR)cspNameW;
-    keyProvInfo.pwszProvName = (LPWSTR)MS_DEF_PROV_W;
+    lstrcpyW(ms_def_prov_w, MS_DEF_PROV_W);
+
+    keyProvInfo.pwszContainerName = cspNameW;
+    keyProvInfo.pwszProvName = ms_def_prov_w;
     keyProvInfo.dwProvType = PROV_RSA_FULL;
     keyProvInfo.dwFlags = 0;
     keyProvInfo.cProvParam = 0;
@@ -133,7 +142,7 @@ static void testAcquireSecurityContext(void)
     certs[1] = CertCreateCertificateContext(X509_ASN_ENCODING, selfSignedCert,
      sizeof(selfSignedCert));
 
-    CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
 
     st = pAcquireCredentialsHandleA(NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL,
@@ -250,10 +259,10 @@ static void testAcquireSecurityContext(void)
     ok(st == SEC_E_UNKNOWN_CREDENTIALS,
      "Expected SEC_E_UNKNOWN_CREDENTIALS, got %08x\n", st);
 
-    ret = CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    ret = pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_NEWKEYSET);
     ok(ret, "CryptAcquireContextW failed: %08x\n", GetLastError());
-    ret = CryptImportKey(csp, (LPBYTE)privKey, sizeof(privKey), 0, 0, &key);
+    ret = CryptImportKey(csp, privKey, sizeof(privKey), 0, 0, &key);
     ok(ret, "CryptImportKey failed: %08x\n", GetLastError());
     if (ret)
     {
@@ -333,7 +342,7 @@ static void testAcquireSecurityContext(void)
     }
 
     CryptReleaseContext(csp, 0);
-    CryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
+    pCryptAcquireContextW(&csp, cspNameW, MS_DEF_PROV_W, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
 
     CertFreeCertificateContext(certs[0]);
@@ -344,8 +353,10 @@ START_TEST(schannel)
 {
     InitFunctionPtrs();
 
-    if (pAcquireCredentialsHandleA && pFreeCredentialsHandle)
+    if (pAcquireCredentialsHandleA && pFreeCredentialsHandle && pCryptAcquireContextW)
         testAcquireSecurityContext();
+    else
+        skip("Needed functions are not available\n");
 
     if(secdll)
         FreeLibrary(secdll);

@@ -32,7 +32,7 @@ WINE_DECLARE_DEBUG_CHANNEL(richedit_lists);
  *
  * Returns 1 if two runs can be safely merged into one, 0 otherwise.
  */ 
-int ME_CanJoinRuns(ME_Run *run1, ME_Run *run2)
+int ME_CanJoinRuns(const ME_Run *run1, const ME_Run *run2)
 {
   if ((run1->nFlags | run2->nFlags) & MERF_NOJOIN)
     return 0;
@@ -634,11 +634,10 @@ int ME_PointFromChar(ME_TextEditor *editor, ME_Run *pRun, int nOffset)
 
 /******************************************************************************
  * ME_GetTextExtent
- * 
- * Finds a width and a height of the text using a specified style    
- */     
-void ME_GetTextExtent(ME_Context *c, LPCWSTR szText, int nChars, ME_Style *s,
-  SIZE *size)
+ *
+ * Finds a width and a height of the text using a specified style
+ */
+static void ME_GetTextExtent(ME_Context *c, LPCWSTR szText, int nChars, ME_Style *s, SIZE *size)
 {
   HDC hDC = c->hDC;
   HGDIOBJ hOldFont;
@@ -650,10 +649,11 @@ void ME_GetTextExtent(ME_Context *c, LPCWSTR szText, int nChars, ME_Style *s,
 /******************************************************************************
  * ME_GetRunSizeCommon
  * 
- * Finds width, height, ascent and descent of a run, up to given character 
- * (nLen).    
- */     
-SIZE ME_GetRunSizeCommon(ME_Context *c, ME_Paragraph *para, ME_Run *run, int nLen, int *pAscent, int *pDescent)
+ * Finds width, height, ascent and descent of a run, up to given character
+ * (nLen).
+ */
+static SIZE ME_GetRunSizeCommon(ME_Context *c, const ME_Paragraph *para, ME_Run *run, int nLen,
+                                int *pAscent, int *pDescent)
 {
   SIZE size;
   int nMaxLen = ME_StrVLen(run->strText);
@@ -728,7 +728,7 @@ SIZE ME_GetRunSizeCommon(ME_Context *c, ME_Paragraph *para, ME_Run *run, int nLe
  * Finds width and height (but not ascent and descent) of a part of the run
  * up to given character.    
  */     
-SIZE ME_GetRunSize(ME_Context *c, ME_Paragraph *para, ME_Run *run, int nLen)
+SIZE ME_GetRunSize(ME_Context *c, const ME_Paragraph *para, ME_Run *run, int nLen)
 {
   int asc, desc;
   return ME_GetRunSizeCommon(c, para, run, nLen, &asc, &desc);
@@ -741,7 +741,7 @@ SIZE ME_GetRunSize(ME_Context *c, ME_Paragraph *para, ME_Run *run, int nLen)
  * is calculated based on whole row's ascent and descent anyway, so no need
  * to use it here.        
  */     
-void ME_CalcRunExtent(ME_Context *c, ME_Paragraph *para, ME_Run *run)
+void ME_CalcRunExtent(ME_Context *c, const ME_Paragraph *para, ME_Run *run)
 {
   if (run->nFlags & MERF_HIDDEN)
     run->nWidth = 0;
@@ -865,7 +865,7 @@ void ME_SetDefaultCharFormat(ME_TextEditor *editor, CHARFORMAT2W *mod)
   /*  pcf = editor->pBuffer->pDefaultStyle->fmt; */
 }
 
-void ME_GetRunCharFormat(ME_TextEditor *editor, ME_DisplayItem *run, CHARFORMAT2W *pFmt)
+static void ME_GetRunCharFormat(ME_TextEditor *editor, ME_DisplayItem *run, CHARFORMAT2W *pFmt)
 {
   ME_CopyCharFormat(pFmt, &run->member.run.style->fmt);
 }

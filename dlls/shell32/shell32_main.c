@@ -37,7 +37,6 @@
 #include "winuser.h"
 #include "wingdi.h"
 #include "shlobj.h"
-#include "shlguid.h"
 #include "shlwapi.h"
 
 #include "undocshell.h"
@@ -120,7 +119,7 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
         return argv;
     }
 
-    /* to get a writeable copy */
+    /* to get a writable copy */
     argc=0;
     bcount=0;
     in_quotes=0;
@@ -275,6 +274,9 @@ static DWORD shgfi_get_exe_type(LPCWSTR szFullPath)
         SetFilePointer( hfile, mz_header.e_lfanew, NULL, SEEK_SET );
         ReadFile( hfile, &nt, sizeof(nt), &len, NULL );
         CloseHandle( hfile );
+        /* DLL files are not executable and should return 0 */
+        if (nt.FileHeader.Characteristics & IMAGE_FILE_DLL)
+            return 0;
         if (nt.OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
         {
              return IMAGE_NT_SIGNATURE | 
@@ -356,7 +358,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
          (flags & (SHGFI_ATTRIBUTES|SHGFI_EXETYPE|SHGFI_PIDL)))
         return FALSE;
 
-    /* windows initializes this values regardless of the flags */
+    /* windows initializes these values regardless of the flags */
     if (psfi != NULL)
     {
         psfi->szDisplayName[0] = '\0';
@@ -511,21 +513,56 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
     {
         UINT uDummy,uFlags;
 
-        hr = IShellFolder_GetUIObjectOf(psfParent, 0, 1,
-               (LPCITEMIDLIST*)&pidlLast, &IID_IExtractIconW,
-               &uDummy, (LPVOID*)&pei);
-        if (SUCCEEDED(hr))
+        if (flags & SHGFI_USEFILEATTRIBUTES)
         {
-            hr = IExtractIconW_GetIconLocation(pei, uGilFlags,
-                    szLocation, MAX_PATH, &iIndex, &uFlags);
-            psfi->iIcon = iIndex;
-
-            if (!(uFlags & GIL_NOTFILENAME))
-                lstrcpyW (psfi->szDisplayName, szLocation);
+            if (dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            {
+                lstrcpyW(psfi->szDisplayName, swShell32Name);
+                psfi->iIcon = -IDI_SHELL_FOLDER;
+            }
             else
-                ret = FALSE;
+            {
+                WCHAR* szExt;
+                static const WCHAR p1W[] = {'%','1',0};
+                WCHAR sTemp [MAX_PATH];
 
-            IExtractIconW_Release(pei);
+                szExt = (LPWSTR) PathFindExtensionW(szFullPath);
+                TRACE("szExt=%s\n", debugstr_w(szExt));
+                if ( szExt &&
+                     HCR_MapTypeToValueW(szExt, sTemp, MAX_PATH, TRUE) &&
+                     HCR_GetDefaultIconW(sTemp, sTemp, MAX_PATH, &psfi->iIcon))
+                {
+                    if (lstrcmpW(p1W, sTemp))
+                        strcpyW(psfi->szDisplayName, sTemp);
+                    else
+                    {
+                        /* the icon is in the file */
+                        strcpyW(psfi->szDisplayName, szFullPath);
+                    }
+                }
+                else
+                    ret = FALSE;
+            }
+        }
+        else
+        {
+            hr = IShellFolder_GetUIObjectOf(psfParent, 0, 1,
+                (LPCITEMIDLIST*)&pidlLast, &IID_IExtractIconW,
+                &uDummy, (LPVOID*)&pei);
+            if (SUCCEEDED(hr))
+            {
+                hr = IExtractIconW_GetIconLocation(pei, uGilFlags,
+                    szLocation, MAX_PATH, &iIndex, &uFlags);
+
+                if (uFlags & GIL_NOTFILENAME)
+                    ret = FALSE;
+                else
+                {
+                    lstrcpyW (psfi->szDisplayName, szLocation);
+                    psfi->iIcon = iIndex;
+                }
+                IExtractIconW_Release(pei);
+            }
         }
     }
 
@@ -1076,6 +1113,14 @@ void WINAPI FreeIconList( DWORD dw )
     FIXME("%x: stub\n",dw);
 }
 
+/*************************************************************************
+ * SHLoadNonloadedIconOverlayIdentifiers (SHELL32.@)
+ */
+HRESULT WINAPI SHLoadNonloadedIconOverlayIdentifiers( VOID )
+{
+    FIXME("stub\n");
+    return S_OK;
+}
 
 /***********************************************************************
  * DllGetVersion [SHELL32.@]

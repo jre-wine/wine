@@ -86,7 +86,7 @@ static SecurePackageTable *packageTable = NULL;
 static SecureProviderTable *providerTable = NULL;
 
 static SecurityFunctionTableA securityFunctionTableA = {
-    SECURITY_SUPPORT_PROVIDER_INTERFACE_VERSION_2,
+    SECURITY_SUPPORT_PROVIDER_INTERFACE_VERSION,
     EnumerateSecurityPackagesA,
     QueryCredentialsAttributesA,
     AcquireCredentialsHandleA,
@@ -117,7 +117,7 @@ static SecurityFunctionTableA securityFunctionTableA = {
 };
 
 static SecurityFunctionTableW securityFunctionTableW = {
-    SECURITY_SUPPORT_PROVIDER_INTERFACE_VERSION_2,
+    SECURITY_SUPPORT_PROVIDER_INTERFACE_VERSION,
     EnumerateSecurityPackagesW,
     QueryCredentialsAttributesW,
     AcquireCredentialsHandleW,
@@ -389,7 +389,7 @@ static void _copyPackageInfo(PSecPkgInfoW info, const SecPkgInfoA *inInfoA,
 }
 
 SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
- const SecurityFunctionTableW *fnTableW, const PWSTR moduleName)
+ const SecurityFunctionTableW *fnTableW, PCWSTR moduleName)
 {
     SecureProvider *ret;
 
@@ -543,6 +543,7 @@ static void SECUR32_initializeProviders(void)
 
     TRACE("\n");
     InitializeCriticalSection(&cs);
+    cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": cs");
     /* First load built-in providers */
     SECUR32_initSchannelSP();
     /* Do not load Negotiate yet. This breaks for some user on the wine-users
@@ -587,7 +588,7 @@ static void SECUR32_initializeProviders(void)
     }
 }
 
-SecurePackage *SECUR32_findPackageW(PWSTR packageName)
+SecurePackage *SECUR32_findPackageW(PCWSTR packageName)
 {
     SecurePackage *ret = NULL;
     BOOL matched = FALSE;
@@ -633,7 +634,7 @@ SecurePackage *SECUR32_findPackageW(PWSTR packageName)
     return ret;
 }
 
-SecurePackage *SECUR32_findPackageA(PSTR packageName)
+SecurePackage *SECUR32_findPackageA(PCSTR packageName)
 {
     SecurePackage *ret;
 
@@ -684,6 +685,7 @@ static void SECUR32_freeProviders(void)
     }
 
     LeaveCriticalSection(&cs);
+    cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&cs);
 }
 
@@ -776,7 +778,7 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesW(PULONG pcPackages,
  * structures) into an array of SecPkgInfoA structures, which it returns.
  */
 static PSecPkgInfoA thunk_PSecPkgInfoWToA(ULONG cPackages,
- const PSecPkgInfoW info)
+ const SecPkgInfoW *info)
 {
     PSecPkgInfoA ret;
 
@@ -943,7 +945,7 @@ BOOLEAN WINAPI GetComputerObjectNameW(
     if (ntStatus != STATUS_SUCCESS)
     {
         SetLastError(LsaNtStatusToWinError(ntStatus));
-        WARN("LsaOpenPolicy failed with NT status %x\n", GetLastError());
+        WARN("LsaOpenPolicy failed with NT status %u\n", GetLastError());
         return FALSE;
     }
 
@@ -953,7 +955,7 @@ BOOLEAN WINAPI GetComputerObjectNameW(
     if (ntStatus != STATUS_SUCCESS)
     {
         SetLastError(LsaNtStatusToWinError(ntStatus));
-        WARN("LsaQueryInformationPolicy failed with NT status %x\n",
+        WARN("LsaQueryInformationPolicy failed with NT status %u\n",
              GetLastError());
         LsaClose(policyHandle);
         return FALSE;
@@ -1031,6 +1033,9 @@ BOOLEAN WINAPI GetComputerObjectNameW(
     return status;
 }
 
+/***********************************************************************
+ *		GetUserNameExA (SECUR32.@)
+ */
 BOOLEAN WINAPI GetUserNameExA(
   EXTENDED_NAME_FORMAT NameFormat, LPSTR lpNameBuffer, PULONG nSize)
 {
@@ -1043,29 +1048,6 @@ BOOLEAN WINAPI GetUserNameExW(
 {
     FIXME("%d %p %p\n", NameFormat, lpNameBuffer, nSize);
     return FALSE;
-}
-
-NTSTATUS WINAPI LsaCallAuthenticationPackage(
-  HANDLE LsaHandle, ULONG AuthenticationPackage, PVOID ProtocolSubmitBuffer,
-  ULONG SubmitBufferLength, PVOID* ProtocolReturnBuffer, PULONG ReturnBufferLength,
-  PNTSTATUS ProtocolStatus)
-{
-    FIXME("%p %d %p %d %p %p %p\n", LsaHandle, AuthenticationPackage,
-          ProtocolSubmitBuffer, SubmitBufferLength, ProtocolReturnBuffer,
-          ReturnBufferLength, ProtocolStatus);
-    return 0;
-}
-
-NTSTATUS WINAPI LsaConnectUntrusted(PHANDLE LsaHandle)
-{
-    FIXME("%p\n", LsaHandle);
-    return 0;
-}
-
-NTSTATUS WINAPI LsaDeregisterLogonProcess(HANDLE LsaHandle)
-{
-    FIXME("%p\n", LsaHandle);
-    return 0;
 }
 
 BOOLEAN WINAPI TranslateNameA(

@@ -2,7 +2,7 @@
 @ stub AddMiniIconToList
 @ stub AddTagToGroupOrderListEntry
 @ stub AppendStringToMultiSz
-@ stub AssertFail
+@ stdcall AssertFail(str long str)
 @ stub CMP_Init_Detection
 @ stub CMP_RegisterNotification
 @ stub CMP_Report_LogOn
@@ -208,7 +208,7 @@
 @ stub GetSetFileTimestamp
 @ stub GetVersionInfoFromImage
 @ stub InfIsFromOemLocation
-@ stub InstallCatalog
+@ stdcall InstallCatalog(str str ptr)
 @ stdcall InstallHinfSection(long long str long) InstallHinfSectionA
 @ stdcall InstallHinfSectionA(long long str long)
 @ stdcall InstallHinfSectionW(long long wstr long)
@@ -257,8 +257,8 @@
 @ stdcall SetupCopyOEMInfW(wstr wstr long long ptr long ptr ptr)
 @ stdcall SetupCreateDiskSpaceListA(ptr long long)
 @ stdcall SetupCreateDiskSpaceListW(ptr long long)
-@ stub SetupDecompressOrCopyFileA
-@ stub SetupDecompressOrCopyFileW
+@ stdcall SetupDecompressOrCopyFileA(str str ptr)
+@ stdcall SetupDecompressOrCopyFileW(wstr wstr ptr)
 @ stub SetupDefaultQueueCallback
 @ stdcall SetupDefaultQueueCallbackA(ptr long long long)
 @ stdcall SetupDefaultQueueCallbackW(ptr long long long)
@@ -281,16 +281,21 @@
 @ stdcall SetupDiClassNameFromGuidExA(ptr str long ptr wstr ptr)
 @ stdcall SetupDiClassNameFromGuidExW(ptr wstr long ptr wstr ptr)
 @ stdcall SetupDiClassNameFromGuidW(ptr wstr long ptr)
-@ stub SetupDiCreateDevRegKeyA
-@ stub SetupDiCreateDevRegKeyW
+@ stdcall SetupDiCreateDevRegKeyA(ptr ptr long long long ptr str)
+@ stdcall SetupDiCreateDevRegKeyW(ptr ptr long long long ptr wstr)
 @ stdcall SetupDiCreateDeviceInfoA(long str ptr str long long ptr)
 @ stdcall SetupDiCreateDeviceInfoList(ptr ptr)
 @ stdcall SetupDiCreateDeviceInfoListExA(ptr long str ptr)
 @ stdcall SetupDiCreateDeviceInfoListExW(ptr long str ptr)
 @ stdcall SetupDiCreateDeviceInfoW(long wstr ptr wstr long long ptr)
+@ stdcall SetupDiCreateDeviceInterfaceA(ptr ptr ptr str long ptr)
+@ stdcall SetupDiCreateDeviceInterfaceW(ptr ptr ptr wstr long ptr)
+@ stdcall SetupDiCreateDeviceInterfaceRegKeyA(ptr ptr long long ptr ptr)
+@ stdcall SetupDiCreateDeviceInterfaceRegKeyW(ptr ptr long long ptr ptr)
 @ stub SetupDiDeleteDevRegKey
 @ stub SetupDiDeleteDeviceInfo
 @ stub SetupDiDeleteDeviceInterfaceData
+@ stdcall SetupDiDeleteDeviceInterfaceRegKey(ptr ptr long)
 @ stub SetupDiDeleteDeviceRegKey
 @ stub SetupDiDestroyClassImageList
 @ stdcall SetupDiDestroyDeviceInfoList(long)
@@ -324,13 +329,13 @@
 @ stdcall SetupDiGetDeviceInfoListDetailW(ptr ptr)
 @ stdcall SetupDiGetDeviceInstallParamsA(ptr ptr ptr)
 @ stub SetupDiGetDeviceInstallParamsW
-@ stub SetupDiGetDeviceInstanceIdA
-@ stub SetupDiGetDeviceInstanceIdW
+@ stdcall SetupDiGetDeviceInstanceIdA(ptr ptr ptr long ptr)
+@ stdcall SetupDiGetDeviceInstanceIdW(ptr ptr ptr long ptr)
 @ stub SetupDiGetDeviceInterfaceAlias
 @ stdcall SetupDiGetDeviceInterfaceDetailA(long ptr ptr long ptr ptr)
 @ stdcall SetupDiGetDeviceInterfaceDetailW(long ptr ptr long ptr ptr)
 @ stdcall SetupDiGetDeviceRegistryPropertyA(long ptr long ptr ptr long ptr)
-@ stub SetupDiGetDeviceRegistryPropertyW
+@ stdcall SetupDiGetDeviceRegistryPropertyW(long ptr long ptr ptr long ptr)
 @ stub SetupDiGetDriverInfoDetailA
 @ stub SetupDiGetDriverInfoDetailW
 @ stub SetupDiGetDriverInstallParamsA
@@ -342,8 +347,8 @@
 @ stub SetupDiGetHwProfileList
 @ stub SetupDiGetHwProfileListExA
 @ stub SetupDiGetHwProfileListExW
-@ stub SetupDiGetINFClassA
-@ stub SetupDiGetINFClassW
+@ stdcall SetupDiGetINFClassA(str ptr ptr long ptr)
+@ stdcall SetupDiGetINFClassW(wstr ptr ptr long ptr)
 @ stub SetupDiGetSelectedDevice
 @ stub SetupDiGetSelectedDriverA
 @ stub SetupDiGetSelectedDriverW
@@ -365,7 +370,7 @@
 @ stdcall SetupDiOpenDeviceInterfaceA(ptr str long ptr)
 @ stub SetupDiOpenDeviceInterfaceRegKey
 @ stdcall SetupDiOpenDeviceInterfaceW(ptr wstr long ptr)
-@ stub SetupDiRegisterDeviceInfo
+@ stdcall SetupDiRegisterDeviceInfo(ptr ptr long ptr ptr ptr)
 @ stub SetupDiRemoveDevice
 @ stub SetupDiRemoveDeviceInterface
 @ stub SetupDiSelectDevice
@@ -374,8 +379,8 @@
 @ stub SetupDiSetClassInstallParamsW
 @ stub SetupDiSetDeviceInstallParamsA
 @ stub SetupDiSetDeviceInstallParamsW
-@ stub SetupDiSetDeviceRegistryPropertyA
-@ stub SetupDiSetDeviceRegistryPropertyW
+@ stdcall SetupDiSetDeviceRegistryPropertyA(ptr ptr long ptr ptr)
+@ stdcall SetupDiSetDeviceRegistryPropertyW(ptr ptr long ptr ptr)
 @ stub SetupDiSetDriverInstallParamsA
 @ stub SetupDiSetDriverInstallParamsW
 @ stub SetupDiSetSelectedDevice
@@ -395,8 +400,10 @@
 @ stub SetupGetBackupInformationW
 @ stdcall SetupGetBinaryField(ptr long ptr long ptr)
 @ stdcall SetupGetFieldCount(ptr)
-@ stub SetupGetFileCompressionInfoA
-@ stub SetupGetFileCompressionInfoW
+@ stdcall SetupGetFileCompressionInfoA(str ptr ptr ptr ptr)
+@ stdcall SetupGetFileCompressionInfoExA(str ptr long ptr ptr ptr ptr)
+@ stdcall SetupGetFileCompressionInfoExW(wstr ptr long ptr ptr ptr ptr)
+@ stdcall SetupGetFileCompressionInfoW(wstr ptr ptr ptr ptr)
 @ stdcall SetupGetFileQueueCount(long long ptr)
 @ stdcall SetupGetFileQueueFlags(long ptr)
 @ stub SetupGetInfFileListA
@@ -413,16 +420,16 @@
 @ stdcall SetupGetLineTextW(ptr long wstr wstr ptr long ptr)
 @ stdcall SetupGetMultiSzFieldA(ptr long ptr long ptr)
 @ stdcall SetupGetMultiSzFieldW(ptr long ptr long ptr)
-@ stub SetupGetSourceFileLocationA
-@ stub SetupGetSourceFileLocationW
+@ stdcall SetupGetSourceFileLocationA(ptr ptr str ptr ptr long ptr)
+@ stdcall SetupGetSourceFileLocationW(ptr ptr wstr ptr ptr long ptr)
 @ stub SetupGetSourceFileSizeA
 @ stub SetupGetSourceFileSizeW
-@ stdcall SetupGetSourceInfoA(ptr long long str long ptr)
-@ stdcall SetupGetSourceInfoW(ptr long long wstr long ptr)
+@ stdcall SetupGetSourceInfoA(ptr long long ptr long ptr)
+@ stdcall SetupGetSourceInfoW(ptr long long ptr long ptr)
 @ stdcall SetupGetStringFieldA(ptr long ptr long ptr)
 @ stdcall SetupGetStringFieldW(ptr long ptr long ptr)
-@ stub SetupGetTargetPathA
-@ stub SetupGetTargetPathW
+@ stdcall SetupGetTargetPathA(ptr ptr str ptr long ptr)
+@ stdcall SetupGetTargetPathW(ptr ptr wstr ptr long ptr)
 @ stdcall SetupInitDefaultQueueCallback(long)
 @ stdcall SetupInitDefaultQueueCallbackEx(long long long long ptr)
 @ stdcall SetupInitializeFileLogA (str long)
@@ -454,15 +461,15 @@
 @ stdcall SetupOpenMasterInf()
 @ stub SetupPromptForDiskA
 @ stub SetupPromptForDiskW
-@ stub SetupPromptReboot
+@ stdcall SetupPromptReboot(ptr ptr long)
 @ stub SetupQueryDrivesInDiskSpaceListA
 @ stub SetupQueryDrivesInDiskSpaceListW
 @ stub SetupQueryFileLogA
 @ stub SetupQueryFileLogW
 @ stdcall SetupQueryInfFileInformationA(ptr long str long ptr)
 @ stdcall SetupQueryInfFileInformationW(ptr long wstr long ptr)
-@ stub SetupQueryInfOriginalFileInformationA
-@ stub SetupQueryInfOriginalFileInformationW
+@ stdcall SetupQueryInfOriginalFileInformationA(ptr long ptr ptr)
+@ stdcall SetupQueryInfOriginalFileInformationW(ptr long ptr ptr)
 @ stub SetupQueryInfVersionInformationA
 @ stub SetupQueryInfVersionInformationW
 @ stub SetupQuerySourceListA
@@ -509,8 +516,8 @@
 @ stdcall SetupSetFileQueueFlags(long long long)
 @ stub SetupSetPlatformPathOverrideA
 @ stub SetupSetPlatformPathOverrideW
-@ stub SetupSetSourceListA
-@ stub SetupSetSourceListW
+@ stdcall SetupSetSourceListA(long ptr long)
+@ stdcall SetupSetSourceListW(long ptr long)
 @ stdcall SetupTermDefaultQueueCallback(ptr)
 @ stdcall SetupTerminateFileLog(long)
 @ stub ShouldDeviceBeExcluded
@@ -543,13 +550,13 @@
 @ stdcall pSetupGetField(ptr long)
 @ stdcall pSetupGetGlobalFlags()
 @ stub pSetupGetOsLoaderDriveAndPath
-@ stub pSetupGetQueueFlags
+@ stdcall pSetupGetQueueFlags(ptr)
 @ stub pSetupGetVersionDatum
 @ stub pSetupGuidFromString
 @ stub pSetupIsGuidNull
 @ stub pSetupMakeSurePathExists
 @ stdcall pSetupSetGlobalFlags(long)
-@ stub pSetupSetQueueFlags
+@ stdcall pSetupSetQueueFlags(ptr long)
 @ stub pSetupSetSystemSourceFlags
 @ stub pSetupStringFromGuid
 @ stdcall pSetupStringTableAddString(ptr wstr long) StringTableAddString

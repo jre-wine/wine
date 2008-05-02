@@ -63,7 +63,7 @@ int CDECL MSVCRT_rand(void)
 /*********************************************************************
  *		_sleep (MSVCRT.@)
  */
-void CDECL _sleep(unsigned long timeout)
+void CDECL MSVCRT__sleep(unsigned long timeout)
 {
   TRACE("_sleep for %ld milliseconds\n",timeout);
   Sleep((timeout)?timeout:1);
@@ -148,7 +148,7 @@ __ASM_GLOBAL_FUNC(_chkesp,
                   "popl %ecx\n\t"
                   "popl %eax\n\t"
                   "leave\n\t"
-                  "ret");
+                  "ret")
 
 void CDECL MSVCRT_chkesp_fail(void)
 {

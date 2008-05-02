@@ -40,6 +40,10 @@
 #include <olectl.h>
 #include <ocidl.h>
 
+static WCHAR MSSansSerif_font[] = {'M','S',' ','S','a','n','s',' ','S','e','r','i','f',0};
+static WCHAR system_font[] = { 'S','y','s','t','e','m',0 };
+static WCHAR arial_font[] = { 'A','r','i','a','l',0 };
+
 static HMODULE hOleaut32;
 
 static HRESULT (WINAPI *pOleCreateFontIndirect)(LPFONTDESC,REFIID,LPVOID*);
@@ -56,7 +60,6 @@ static void test_ifont_sizes(long lo_size, long hi_size,
 	long hfont_height, const char * test_name)
 {
 	FONTDESC fd;
-	static const WCHAR fname[] = { 'S','y','s','t','e','m',0 };
 	LPVOID pvObj = NULL;
 	IFont* ifnt = NULL;
 	HFONT hfont;
@@ -65,7 +68,7 @@ static void test_ifont_sizes(long lo_size, long hi_size,
 	HRESULT hres;
 
 	fd.cbSizeofstruct = sizeof(FONTDESC);
-	fd.lpstrName      = (WCHAR*)fname;
+	fd.lpstrName      = system_font;
 	S(fd.cySize).Lo   = lo_size;
 	S(fd.cySize).Hi   = hi_size;
 	fd.sWeight        = 0;
@@ -114,7 +117,7 @@ static void test_ifont_sizes(long lo_size, long hi_size,
 	IFont_Release(ifnt);
 }
 
-void test_QueryInterface(void)
+static void test_QueryInterface(void)
 {
         LPVOID pvObj = NULL;
         HRESULT hres;
@@ -143,7 +146,7 @@ void test_QueryInterface(void)
         IFont_Release(font);
 }
 
-void test_type_info(void)
+static void test_type_info(void)
 {
         LPVOID pvObj = NULL;
         HRESULT hres;
@@ -262,12 +265,11 @@ static void test_font_events_disp(void)
     HRESULT hr;
     DWORD dwCookie;
     IFontDisp *pFontDisp;
-    static const WCHAR wszMSSansSerif[] = {'M','S',' ','S','a','n','s',' ','S','e','r','i','f',0};
     DISPPARAMS dispparams;
     VARIANTARG vararg;
 
     fontdesc.cbSizeofstruct = sizeof(fontdesc);
-    fontdesc.lpstrName = (LPOLESTR)wszMSSansSerif;
+    fontdesc.lpstrName = MSSansSerif_font;
     fontdesc.cySize.int64 = 12 * 10000; /* 12 pt */
     fontdesc.sWeight = FW_NORMAL;
     fontdesc.sCharset = 0;
@@ -324,7 +326,7 @@ static void test_font_events_disp(void)
     IFont_Release(pFont2);
 }
 
-void test_names_ids(WCHAR* w_name_1, const char* a_name_1,
+static void test_names_ids(WCHAR* w_name_1, const char* a_name_1,
                     WCHAR* w_name_2, const char* a_name_2,
                     LCID lcid, DISPID id_1, DISPID id_2,
                     HRESULT hres_expect, int numnames)
@@ -362,7 +364,7 @@ void test_names_ids(WCHAR* w_name_1, const char* a_name_1,
    IFontDisp_Release(fontdisp);
 }
 
-void test_GetIDsOfNames(void)
+static void test_GetIDsOfNames(void)
 {
     WCHAR name_Name[] = {'N','a','m','e',0};
     WCHAR name_Italic[] = {'I','t','a','l','i','c',0};
@@ -481,11 +483,9 @@ static void test_Invoke(void)
     IFontDisp_Release(fontdisp);
 }
 
-static void test_IsEqual()
+static void test_IsEqual(void)
 {
     FONTDESC fd;
-    static const WCHAR system_font[] = { 'S','y','s','t','e','m',0 };
-    static const WCHAR arial_font[] = { 'A','r','i','a','l',0 };
     LPVOID pvObj = NULL;
     LPVOID pvObj2 = NULL;
     IFont* ifnt = NULL;
@@ -494,7 +494,7 @@ static void test_IsEqual()
 
     /* Basic font description */
     fd.cbSizeofstruct = sizeof(FONTDESC);
-    fd.lpstrName      = (WCHAR*)system_font;
+    fd.lpstrName      = system_font;
     S(fd.cySize).Lo   = 100;
     S(fd.cySize).Hi   = 100;
     fd.sWeight        = 0;
@@ -521,12 +521,12 @@ static void test_IsEqual()
         "IFont_IsEqual: (NULL) Expected 0x80004003 but got 0x%08x\n",hres);
 
     /* Test strName */
-    fd.lpstrName = (WCHAR*)arial_font;
+    fd.lpstrName = arial_font;
     pOleCreateFontIndirect(&fd, &IID_IFont, &pvObj2);
     hres = IFont_IsEqual(ifnt,ifnt2);
     ok(hres == S_FALSE,
         "IFont_IsEqual: (strName) Expected S_FALSE but got 0x%08x\n",hres);
-    fd.lpstrName = (WCHAR*)system_font;
+    fd.lpstrName = system_font;
     IFont_Release(ifnt2);
 
     /* Test lo font size */
@@ -602,8 +602,6 @@ static void test_IsEqual()
 static void test_ReleaseHfont(void)
 {
     FONTDESC fd;
-    static const WCHAR system_font[] = { 'S','y','s','t','e','m',0 };
-    static const WCHAR arial_font[] = { 'A','r','i','a','l',0 };
     LPVOID pvObj1 = NULL;
     LPVOID pvObj2 = NULL;
     IFont* ifnt1 = NULL;
@@ -614,7 +612,7 @@ static void test_ReleaseHfont(void)
 
     /* Basic font description */
     fd.cbSizeofstruct = sizeof(FONTDESC);
-    fd.lpstrName      = (WCHAR*)system_font;
+    fd.lpstrName      = system_font;
     S(fd.cySize).Lo   = 100;
     S(fd.cySize).Hi   = 100;
     fd.sWeight        = 0;
@@ -627,7 +625,7 @@ static void test_ReleaseHfont(void)
     pOleCreateFontIndirect(&fd, &IID_IFont, &pvObj1);
     ifnt1 = pvObj1;
     IFont_get_hFont(ifnt1,&hfnt1);
-    fd.lpstrName = (WCHAR*)arial_font;
+    fd.lpstrName = arial_font;
     pOleCreateFontIndirect(&fd, &IID_IFont, &pvObj2);
     ifnt2 = pvObj2;
     IFont_get_hFont(ifnt2,&hfnt2);
@@ -640,9 +638,9 @@ static void test_ReleaseHfont(void)
 
     /* Try to add a bad HFONT */
     hres = IFont_ReleaseHfont(ifnt1,(HFONT)32);
-    todo_wine {ok(hres == S_FALSE,
+    ok(hres == S_FALSE,
         "IFont_ReleaseHfont: (Bad HFONT) Expected S_FALSE but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* Release all refs */
     hres = IFont_ReleaseHfont(ifnt1,hfnt1);
@@ -657,15 +655,15 @@ static void test_ReleaseHfont(void)
 
     /* Check that both lists are empty */
     hres = IFont_ReleaseHfont(ifnt1,hfnt1);
-    todo_wine {ok(hres == S_FALSE,
+    ok(hres == S_FALSE,
         "IFont_AddRefHfont: (Release ref) Expected S_FALSE but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* The list should be empty */
     hres = IFont_ReleaseHfont(ifnt2,hfnt2);
-    todo_wine {ok(hres == S_FALSE,
+    ok(hres == S_FALSE,
         "IFont_AddRefHfont: (Release ref) Expected S_FALSE but got 0x%08x\n",
-        hres);}
+        hres);
 
     IFont_Release(ifnt1);
     IFont_Release(ifnt2);
@@ -674,11 +672,6 @@ static void test_ReleaseHfont(void)
 static void test_AddRefHfont(void)
 {
     FONTDESC fd;
-    static const WCHAR system_font[] = { 'S','y','s','t','e','m',0 };
-    static const WCHAR arial_font[] = { 'A','r','i','a','l',0 };
-    LPVOID pvObj1 = NULL;
-    LPVOID pvObj2 = NULL;
-    LPVOID pvObj3 = NULL;
     IFont* ifnt1 = NULL;
     IFont* ifnt2 = NULL;
     IFont* ifnt3 = NULL;
@@ -689,7 +682,7 @@ static void test_AddRefHfont(void)
 
     /* Basic font description */
     fd.cbSizeofstruct = sizeof(FONTDESC);
-    fd.lpstrName      = (WCHAR*)system_font;
+    fd.lpstrName      = system_font;
     S(fd.cySize).Lo   = 100;
     S(fd.cySize).Hi   = 100;
     fd.sWeight        = 0;
@@ -699,12 +692,10 @@ static void test_AddRefHfont(void)
     fd.fStrikethrough = 0;
 
     /* Create HFONTs and IFONTs */
-    pOleCreateFontIndirect(&fd, &IID_IFont, &pvObj1);
-    ifnt1 = pvObj1;
+    pOleCreateFontIndirect(&fd, &IID_IFont, (void **)&ifnt1);
     IFont_get_hFont(ifnt1,&hfnt1);
-    fd.lpstrName = (WCHAR*)arial_font;
-    pOleCreateFontIndirect(&fd, &IID_IFont, &pvObj2);
-    ifnt2 = pvObj2;
+    fd.lpstrName = arial_font;
+    pOleCreateFontIndirect(&fd, &IID_IFont, (void **)&ifnt2);
     IFont_get_hFont(ifnt2,&hfnt2);
 
     /* Try invalid HFONT */
@@ -715,9 +706,9 @@ static void test_AddRefHfont(void)
 
     /* Try to add a bad HFONT */
     hres = IFont_AddRefHfont(ifnt1,(HFONT)32);
-    todo_wine{ ok(hres == S_FALSE,
+    ok(hres == S_FALSE,
         "IFont_AddRefHfont: (Bad HFONT) Expected S_FALSE but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* Add simple IFONT HFONT pair */
     hres = IFont_AddRefHfont(ifnt1,hfnt1);
@@ -727,9 +718,9 @@ static void test_AddRefHfont(void)
 
     /* IFONT and HFONT do not have to be the same (always looks at HFONT) */
     hres = IFont_AddRefHfont(ifnt2,hfnt1);
-    todo_wine {ok(hres == S_OK,
+    ok(hres == S_OK,
         "IFont_AddRefHfont: (Add ref) Expected S_OK but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* Release all hfnt1 refs */
     hres = IFont_ReleaseHfont(ifnt1,hfnt1);
@@ -738,20 +729,20 @@ static void test_AddRefHfont(void)
         hres);
 
     hres = IFont_ReleaseHfont(ifnt1,hfnt1);
-    todo_wine {ok(hres == S_OK,
+    ok(hres == S_OK,
         "IFont_AddRefHfont: (Release ref) Expected S_OK but got 0x%08x\n",
-        hres);}
+        hres);
 
     hres = IFont_ReleaseHfont(ifnt1,hfnt1);
-    todo_wine {ok(hres == S_OK,
+    ok(hres == S_OK,
         "IFont_AddRefHfont: (Release ref) Expected S_OK but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* Check if hfnt1 is empty */
     hres = IFont_ReleaseHfont(ifnt1,hfnt1);
-    todo_wine {ok(hres == S_FALSE,
+    ok(hres == S_FALSE,
         "IFont_AddRefHfont: (Release ref) Expected S_FALSE but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* Release all hfnt2 refs */
     hres = IFont_ReleaseHfont(ifnt2,hfnt2);
@@ -761,9 +752,9 @@ static void test_AddRefHfont(void)
 
     /* Check if hfnt2 is empty */
     hres = IFont_ReleaseHfont(ifnt2,hfnt2);
-    todo_wine {ok(hres == S_FALSE,
+    ok(hres == S_FALSE,
         "IFont_AddRefHfont: (Release ref) Expected S_FALSE but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* Show that releasing an IFONT does not always release it from the HFONT cache. */
 
@@ -771,15 +762,15 @@ static void test_AddRefHfont(void)
 
     /* Add a reference for destroyed hfnt1 */
     hres = IFont_AddRefHfont(ifnt2,hfnt1);
-    todo_wine {ok(hres == S_OK,
+    ok(hres == S_OK,
         "IFont_AddRefHfont: (Add ref) Expected S_OK but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* Decrement reference for destroyed hfnt1 */
     hres = IFont_ReleaseHfont(ifnt2,hfnt1);
-    todo_wine {ok(hres == S_OK,
+    ok(hres == S_OK,
         "IFont_AddRefHfont: (Release ref) Expected S_OK but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* Shows that releasing all IFONT's does clear the HFONT cache. */
 
@@ -787,31 +778,33 @@ static void test_AddRefHfont(void)
 
     /* Need to make a new IFONT for testing */
     fd.fUnderline = 1;
-    pOleCreateFontIndirect(&fd, &IID_IFont, &pvObj3);
-    ifnt3 = pvObj3;
+    pOleCreateFontIndirect(&fd, &IID_IFont, (void **)&ifnt3);
     IFont_get_hFont(ifnt3,&hfnt3);
 
     /* Add a reference for destroyed hfnt1 */
     hres = IFont_AddRefHfont(ifnt3,hfnt1);
-    todo_wine {ok(hres == S_FALSE,
+    ok(hres == S_FALSE,
         "IFont_AddRefHfont: (Add ref) Expected S_OK but got 0x%08x\n",
-        hres);}
+        hres);
 
     /* Decrement reference for destroyed hfnt1 */
     hres = IFont_ReleaseHfont(ifnt3,hfnt1);
-    todo_wine {ok(hres == S_FALSE,
+    ok(hres == S_FALSE,
         "IFont_AddRefHfont: (Release ref) Expected S_OK but got 0x%08x\n",
-        hres);}
+        hres);
 
-    hres = IFont_Release(ifnt3);
+    IFont_Release(ifnt3);
 }
 
 START_TEST(olefont)
 {
-	hOleaut32 = LoadLibraryA("oleaut32.dll");    
+	hOleaut32 = GetModuleHandleA("oleaut32.dll");
 	pOleCreateFontIndirect = (void*)GetProcAddress(hOleaut32, "OleCreateFontIndirect");
 	if (!pOleCreateFontIndirect)
+	{
+	    skip("OleCreateFontIndirect not available\n");
 	    return;
+	}
 
 	test_QueryInterface();
 	test_type_info();

@@ -44,7 +44,6 @@ void minidump_write(const char* file, const EXCEPTION_RECORD* rec)
     HANDLE                              hFile;
     MINIDUMP_EXCEPTION_INFORMATION      mei;
     EXCEPTION_POINTERS                  ep;
-    DWORD                               wine_opt;
 
     hFile = CreateFile(file, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                        FILE_ATTRIBUTE_NORMAL, NULL);
@@ -59,14 +58,9 @@ void minidump_write(const char* file, const EXCEPTION_RECORD* rec)
         ep.ContextRecord = &dbg_context;
         mei.ClientPointers = FALSE;
     }
-    /* this is a wine specific options to return also ELF modules in the
-     * dumping
-     */
-    SymSetOptions((wine_opt = SymGetOptions()) | 0x40000000);
     MiniDumpWriteDump(dbg_curr_process->handle, dbg_curr_process->pid,
                       hFile, MiniDumpNormal/*|MiniDumpWithDataSegs*/,
                       rec ? &mei : NULL, NULL, NULL);
-    SymSetOptions(wine_opt);
     CloseHandle(hFile);
 }
 
@@ -85,7 +79,7 @@ static inline struct tgt_process_minidump_data* PRIVATE(struct dbg_process* pcs)
 }
 
 static BOOL WINAPI tgt_process_minidump_read(HANDLE hProcess, const void* addr, 
-                                             void* buffer, DWORD len, DWORD* rlen)
+                                             void* buffer, SIZE_T len, SIZE_T* rlen)
 {
     ULONG               size;
     MINIDUMP_DIRECTORY* dir;
@@ -127,14 +121,37 @@ static BOOL WINAPI tgt_process_minidump_read(HANDLE hProcess, const void* addr,
 }
 
 static BOOL WINAPI tgt_process_minidump_write(HANDLE hProcess, void* addr,
-                                             const void* buffer, DWORD len, DWORD* wlen)
+                                             const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
     return FALSE;
 }
 
-BOOL CALLBACK validate_file(PSTR name, void* user)
+BOOL CALLBACK validate_file(PCWSTR name, void* user)
 {
     return FALSE; /* get the first file we find !! */
+}
+
+static BOOL is_pe_module_embedded(struct tgt_process_minidump_data* data,
+                                  MINIDUMP_MODULE* pe_mm)
+{
+    ULONG                       size;
+    MINIDUMP_DIRECTORY*         dir;
+    MINIDUMP_MODULE_LIST*       mml;
+
+    if (MiniDumpReadDumpStream(data->mapping, Wine_ElfModuleListStream, &dir,
+                               (void**)&mml, &size))
+    {
+        MINIDUMP_MODULE*        mm;
+        unsigned                i;
+
+        for (i = 0, mm = &mml->Modules[0]; i < mml->NumberOfModules; i++, mm++)
+        {
+            if (mm->BaseOfImage <= pe_mm->BaseOfImage &&
+                mm->BaseOfImage + mm->SizeOfImage >= pe_mm->BaseOfImage + pe_mm->SizeOfImage)
+                return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
@@ -149,7 +166,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
     MINIDUMP_MODULE*            mm;
     MINIDUMP_STRING*            mds;
     char                        exec_name[1024];
-    char                        name[1024];
+    WCHAR                       nameW[1024];
     unsigned                    len;
 
     /* fetch PID */
@@ -172,18 +189,17 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             mm = &mml->Modules[0];
             mds = (MINIDUMP_STRING*)((char*)data->mapping + mm->ModuleNameRva);
             len = WideCharToMultiByte(CP_ACP, 0, mds->Buffer,
-                                      mds->Length / sizeof(WCHAR), 
-                                      name, sizeof(name) - 1, NULL, NULL);
-            name[len] = 0;
-            for (ptr = name + len - 1; ptr >= name; ptr--)
+                                      mds->Length / sizeof(WCHAR),
+                                      exec_name, sizeof(exec_name) - 1, NULL, NULL);
+            exec_name[len] = 0;
+            for (ptr = exec_name + len - 1; ptr >= exec_name; ptr--)
             {
                 if (*ptr == '/' || *ptr == '\\')
                 {
-                    strcpy(exec_name, ptr + 1);
+                    memmove(exec_name, ptr + 1, strlen(ptr + 1) + 1);
                     break;
                 }
             }
-            if (ptr < name) strcpy(exec_name, name);
         }
     }
 
@@ -193,35 +209,36 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
         const char *str;
         char tmp[128];
 
-        dbg_printf("WineDbg starting on minidump on pid %lu\n", pid);
+        dbg_printf("WineDbg starting on minidump on pid %04x\n", pid);
         switch (msi->ProcessorArchitecture)
         {
-        case PROCESSOR_ARCHITECTURE_UNKNOWN: 
+        case PROCESSOR_ARCHITECTURE_UNKNOWN:
             str = "Unknown";
             break;
         case PROCESSOR_ARCHITECTURE_INTEL:
             strcpy(tmp, "Intel ");
             switch (msi->ProcessorLevel)
             {
-            case 3: str = "80386"; break;
-            case 4: str = "80486"; break;
-            case 5: str = "Pentium"; break;
-            case 6: str = "Pentium Pro/II"; break;
+            case  3: str = "80386"; break;
+            case  4: str = "80486"; break;
+            case  5: str = "Pentium"; break;
+            case  6: str = "Pentium Pro/II or AMD Athlon"; break;
+            case 15: str = "Pentium 4 or AMD Athlon64"; break;
             default: str = "???"; break;
             }
             strcat(tmp, str);
             if (msi->ProcessorLevel == 3 || msi->ProcessorLevel == 4)
             {
                 if (HIWORD(msi->ProcessorRevision) == 0xFF)
-                    sprintf(tmp + strlen(tmp), "-%c%d",
+                    sprintf(tmp + strlen(tmp), " (%c%d)",
                             'A' + HIBYTE(LOWORD(msi->ProcessorRevision)),
                             LOBYTE(LOWORD(msi->ProcessorRevision)));
                 else
-                    sprintf(tmp + strlen(tmp), "-%c%d",
+                    sprintf(tmp + strlen(tmp), " (%c%d)",
                             'A' + HIWORD(msi->ProcessorRevision),
                             LOWORD(msi->ProcessorRevision));
             }
-            else sprintf(tmp + strlen(tmp), "-%d.%d",
+            else sprintf(tmp + strlen(tmp), " (%d.%d)",
                          HIWORD(msi->ProcessorRevision),
                          LOWORD(msi->ProcessorRevision));
             str = tmp;
@@ -240,7 +257,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             break;
         }
         dbg_printf("  %s was running on #%d %s CPU%s",
-                   exec_name, msi->u.s.NumberOfProcessors, str, 
+                   exec_name, msi->u.s.NumberOfProcessors, str,
                    msi->u.s.NumberOfProcessors < 2 ? "" : "s");
         switch (msi->MajorVersion)
         {
@@ -271,7 +288,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             break;
         default: str = "???"; break;
         }
-        dbg_printf(" on Windows %s (%lu)\n", str, msi->BuildNumber);
+        dbg_printf(" on Windows %s (%u)\n", str, msi->BuildNumber);
         /* FIXME CSD: msi->CSDVersionRva */
     }
 
@@ -284,46 +301,56 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
 
     if (MiniDumpReadDumpStream(data->mapping, ThreadListStream, &dir, &stream, &size))
     {
-        MINIDUMP_THREAD_LIST*     mtl = (MINIDUMP_THREAD_LIST*)stream;
-        MINIDUMP_THREAD*          mt = &mtl->Threads[0];
+        MINIDUMP_THREAD_LIST*   mtl = (MINIDUMP_THREAD_LIST*)stream;
+        ULONG                   i;
 
-        dbg_add_thread(dbg_curr_process, mt->ThreadId, NULL, 
-                       (void*)(DWORD_PTR)mt->Teb);
+        for (i = 0; i < mtl->NumberOfThreads; i++)
+        {
+            dbg_add_thread(dbg_curr_process, mtl->Threads[i].ThreadId, NULL,
+                           (void*)(DWORD_PTR)mtl->Threads[i].Teb);
+        }
     }
     /* first load ELF modules, then do the PE ones */
     if (MiniDumpReadDumpStream(data->mapping, Wine_ElfModuleListStream, &dir,
                                &stream, &size))
     {
-        char    buffer[MAX_PATH];
+        WCHAR   buffer[MAX_PATH];
 
         mml = (MINIDUMP_MODULE_LIST*)stream;
         for (i = 0, mm = &mml->Modules[0]; i < mml->NumberOfModules; i++, mm++)
         {
             mds = (MINIDUMP_STRING*)((char*)data->mapping + mm->ModuleNameRva);
-            len = WideCharToMultiByte(CP_ACP, 0, mds->Buffer,
-                                      mds->Length / sizeof(WCHAR), 
-                                      name, sizeof(name) - 1, NULL, NULL);
-            name[len] = 0;
-            if (SymFindFileInPath(hProc, NULL, name, (void*)(DWORD_PTR)mm->CheckSum,
-                                  0, 0, SSRVOPT_DWORD, buffer, validate_file, NULL))
-                SymLoadModule(hProc, NULL, buffer, NULL, mm->BaseOfImage, mm->SizeOfImage);
+            memcpy(nameW, mds->Buffer, mds->Length);
+            nameW[mds->Length / sizeof(WCHAR)] = 0;
+            if (SymFindFileInPathW(hProc, NULL, nameW, (void*)(DWORD_PTR)mm->CheckSum,
+                                   0, 0, SSRVOPT_DWORD, buffer, validate_file, NULL))
+                SymLoadModuleExW(hProc, NULL, buffer, NULL, mm->BaseOfImage, mm->SizeOfImage,
+                                 NULL, 0);
             else
-                SymLoadModuleEx(hProc, NULL, name, NULL, mm->BaseOfImage, mm->SizeOfImage,
-                                NULL, SLMFLAG_VIRTUAL);
+                SymLoadModuleExW(hProc, NULL, nameW, NULL, mm->BaseOfImage, mm->SizeOfImage,
+                                 NULL, SLMFLAG_VIRTUAL);
         }
     }
     if (MiniDumpReadDumpStream(data->mapping, ModuleListStream, &dir, &stream, &size))
     {
+        WCHAR   buffer[MAX_PATH];
+
         mml = (MINIDUMP_MODULE_LIST*)stream;
         for (i = 0, mm = &mml->Modules[0]; i < mml->NumberOfModules; i++, mm++)
         {
             mds = (MINIDUMP_STRING*)((char*)data->mapping + mm->ModuleNameRva);
-            len = WideCharToMultiByte(CP_ACP, 0, mds->Buffer,
-                                      mds->Length / sizeof(WCHAR), 
-                                      name, sizeof(name) - 1, NULL, NULL);
-            name[len] = 0;
-            SymLoadModule(hProc, NULL, name, NULL, 
-                          mm->BaseOfImage, mm->SizeOfImage);
+            memcpy(nameW, mds->Buffer, mds->Length);
+            nameW[mds->Length / sizeof(WCHAR)] = 0;
+            if (SymFindFileInPathW(hProc, NULL, nameW, (void*)(DWORD_PTR)mm->TimeDateStamp,
+                                   mm->SizeOfImage, 0, SSRVOPT_DWORD, buffer, validate_file, NULL))
+                SymLoadModuleExW(hProc, NULL, buffer, NULL, mm->BaseOfImage, mm->SizeOfImage,
+                                 NULL, 0);
+            else if (is_pe_module_embedded(data, mm))
+                SymLoadModuleExW(hProc, NULL, nameW, NULL, mm->BaseOfImage, mm->SizeOfImage,
+                                 NULL, 0);
+            else
+                SymLoadModuleExW(hProc, NULL, nameW, NULL, mm->BaseOfImage, mm->SizeOfImage,
+                                 NULL, SLMFLAG_VIRTUAL);
         }
     }
     if (MiniDumpReadDumpStream(data->mapping, ExceptionStream, &dir, &stream, &size))

@@ -44,16 +44,20 @@ static void test_findAttribute(void)
     ok(ret == NULL, "Expected failure\n");
     ok(GetLastError() == 0xdeadbeef, "Last error was set to %08x\n",
      GetLastError());
-    /* crashes
-    SetLastError(0xdeadbeef);
-    ret = CertFindAttribute(NULL, 1, NULL);
-     */
-    /* returns NULL, last error is ERROR_INVALID_PARAMETER */
-    SetLastError(0xdeadbeef);
-    ret = CertFindAttribute(NULL, 1, &attr);
-    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-     "Expected ERROR_INVALID_PARAMETER, got %d (%08x)\n", GetLastError(),
-     GetLastError());
+    if (0)
+    {
+        /* crashes */
+        SetLastError(0xdeadbeef);
+        ret = CertFindAttribute(NULL, 1, NULL);
+        /* returns NULL, last error is ERROR_INVALID_PARAMETER
+         * crashes on Vista
+         */
+        SetLastError(0xdeadbeef);
+        ret = CertFindAttribute(NULL, 1, &attr);
+        ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+         "Expected ERROR_INVALID_PARAMETER, got %d (%08x)\n", GetLastError(),
+         GetLastError());
+    }
     /* returns NULL, last error not set */
     SetLastError(0xdeadbeef);
     ret = CertFindAttribute("bogus", 1, &attr);
@@ -85,16 +89,20 @@ static void test_findExtension(void)
     ok(ret == NULL, "Expected failure\n");
     ok(GetLastError() == 0xdeadbeef, "Last error was set to %08x\n",
      GetLastError());
-    /* crashes
-    SetLastError(0xdeadbeef);
-    ret = CertFindExtension(NULL, 1, NULL);
-     */
-    /* returns NULL, last error is ERROR_INVALID_PARAMETER */
-    SetLastError(0xdeadbeef);
-    ret = CertFindExtension(NULL, 1, &ext);
-    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-     "Expected ERROR_INVALID_PARAMETER, got %d (%08x)\n", GetLastError(),
-     GetLastError());
+    if (0)
+    {
+        /* crashes */
+        SetLastError(0xdeadbeef);
+        ret = CertFindExtension(NULL, 1, NULL);
+        /* returns NULL, last error is ERROR_INVALID_PARAMETER
+         * crashes on Vista
+         */
+        SetLastError(0xdeadbeef);
+        ret = CertFindExtension(NULL, 1, &ext);
+        ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+         "Expected ERROR_INVALID_PARAMETER, got %d (%08x)\n", GetLastError(),
+         GetLastError());
+    }
     /* returns NULL, last error not set */
     SetLastError(0xdeadbeef);
     ret = CertFindExtension("bogus", 1, &ext);
@@ -126,16 +134,20 @@ static void test_findRDNAttr(void)
     };
     CERT_NAME_INFO nameInfo = { sizeof(rdns) / sizeof(rdns[0]), rdns };
 
-    /* crashes
-    SetLastError(0xdeadbeef);
-    ret = CertFindRDNAttr(NULL, NULL);
-     */
-    /* returns NULL, last error is ERROR_INVALID_PARAMETER */
-    SetLastError(0xdeadbeef);
-    ret = CertFindRDNAttr(NULL, &nameInfo);
-    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-     "Expected ERROR_INVALID_PARAMETER, got %d (%08x)\n", GetLastError(),
-     GetLastError());
+    if (0)
+    {
+        /* crashes */
+        SetLastError(0xdeadbeef);
+        ret = CertFindRDNAttr(NULL, NULL);
+        /* returns NULL, last error is ERROR_INVALID_PARAMETER
+         * crashes on Vista
+         */
+        SetLastError(0xdeadbeef);
+        ret = CertFindRDNAttr(NULL, &nameInfo);
+        ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+         "Expected ERROR_INVALID_PARAMETER, got %d (%08x)\n", GetLastError(),
+         GetLastError());
+    }
     /* returns NULL, last error not set */
     SetLastError(0xdeadbeef);
     ret = CertFindRDNAttr("bogus", &nameInfo);
@@ -213,8 +225,6 @@ static void test_cryptTls(void)
     DWORD index;
     BOOL ret;
 
-    if (!hCrypt) return;
-
     pI_CryptAllocTls = (I_CryptAllocTlsFunc)GetProcAddress(hCrypt,
      "I_CryptAllocTls");
     pI_CryptDetachTls = (I_CryptDetachTlsFunc)GetProcAddress(hCrypt,
@@ -278,8 +288,6 @@ static void test_readTrustedPublisherDWORD(void)
 {
     I_CryptReadTrustedPublisherDWORDValueFromRegistryFunc pReadDWORD;
 
-    if (!hCrypt) return;
-
     pReadDWORD = 
      (I_CryptReadTrustedPublisherDWORDValueFromRegistryFunc)GetProcAddress(
      hCrypt, "I_CryptReadTrustedPublisherDWORDValueFromRegistry");
@@ -323,8 +331,6 @@ static void test_getDefaultCryptProv(void)
     I_CryptGetDefaultCryptProvFunc pI_CryptGetDefaultCryptProv;
     HCRYPTPROV prov;
 
-    if (!hCrypt) return;
-
     pI_CryptGetDefaultCryptProv = (I_CryptGetDefaultCryptProvFunc)
      GetProcAddress(hCrypt, "I_CryptGetDefaultCryptProv");
     if (!pI_CryptGetDefaultCryptProv) return;
@@ -343,9 +349,26 @@ static void test_getDefaultCryptProv(void)
     CryptReleaseContext(prov, 0);
 }
 
+typedef int (WINAPI *I_CryptInstallOssGlobal)(DWORD,DWORD,DWORD);
+
+static void test_CryptInstallOssGlobal(void)
+{
+    int ret,i;
+    I_CryptInstallOssGlobal pI_CryptInstallOssGlobal;
+
+    pI_CryptInstallOssGlobal= (I_CryptInstallOssGlobal)GetProcAddress(hCrypt,"I_CryptInstallOssGlobal");
+    /* passing in some random values to I_CryptInstallOssGlobal, it always returns 9 the first time, then 10, 11 etc.*/
+    for(i=0;i<30;i++)
+    {
+      ret =  pI_CryptInstallOssGlobal(rand(),rand(),rand());
+      ok((9+i) == ret,"Expected %d, got %d\n",(9+i),ret);
+    }
+}
+
 START_TEST(main)
 {
-    hCrypt = LoadLibraryA("crypt32.dll");
+    hCrypt = GetModuleHandleA("crypt32.dll");
+
     test_findAttribute();
     test_findExtension();
     test_findRDNAttr();
@@ -354,4 +377,5 @@ START_TEST(main)
     test_cryptTls();
     test_readTrustedPublisherDWORD();
     test_getDefaultCryptProv();
+    test_CryptInstallOssGlobal();
 }

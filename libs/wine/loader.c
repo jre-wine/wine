@@ -24,6 +24,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,10 +60,11 @@ char **__wine_main_environ = NULL;
 
 struct dll_path_context
 {
-    int   index;    /* current index in the dll path list */
-    char *buffer;   /* buffer used for storing path names */
-    char *name;     /* start of file name part in buffer (including leading slash) */
-    int   namelen;  /* length of file name without .so extension */
+    unsigned int index; /* current index in the dll path list */
+    char *buffer;       /* buffer used for storing path names */
+    char *name;         /* start of file name part in buffer (including leading slash) */
+    int   namelen;      /* length of file name without .so extension */
+    int   win16;        /* 16-bit dll search */
 };
 
 #define MAX_DLLS 100
@@ -82,11 +84,10 @@ static load_dll_callback_t load_dll_callback;
 static const char *build_dir;
 static const char *default_dlldir;
 static const char **dll_paths;
-static int nb_dll_paths;
+static unsigned int nb_dll_paths;
 static int dll_path_maxlen;
 
 extern void mmap_init(void);
-extern void debug_init(void);
 extern const char *get_dlldir( const char **default_dlldir );
 
 /* build the dll load path from the WINEDLLPATH variable */
@@ -147,14 +148,14 @@ static void build_dll_path(void)
 }
 
 /* check if a given file can be opened */
-inline static int file_exists( const char *name )
+static inline int file_exists( const char *name )
 {
     int fd = open( name, O_RDONLY );
     if (fd != -1) close( fd );
     return (fd != -1);
 }
 
-inline static char *prepend( char *buffer, const char *str, size_t len )
+static inline char *prepend( char *buffer, const char *str, size_t len )
 {
     return memcpy( buffer - len, str, len );
 }
@@ -162,14 +163,14 @@ inline static char *prepend( char *buffer, const char *str, size_t len )
 /* get a filename from the next entry in the dll path */
 static char *next_dll_path( struct dll_path_context *context )
 {
-    int index = context->index++;
+    unsigned int index = context->index++;
     int namelen = context->namelen;
     char *path = context->name;
 
     switch(index)
     {
     case 0:  /* try programs dir for .exe files */
-        if (namelen > 4 && !memcmp( context->name + namelen - 4, ".exe", 4 ))
+        if (!context->win16 && namelen > 4 && !memcmp( context->name + namelen - 4, ".exe", 4 ))
         {
             path = prepend( path, context->name, namelen - 4 );
             path = prepend( path, "/programs", sizeof("/programs") - 1 );
@@ -180,14 +181,12 @@ static char *next_dll_path( struct dll_path_context *context )
         /* fall through */
     case 1:  /* try dlls dir with subdir prefix */
         if (namelen > 4 && !memcmp( context->name + namelen - 4, ".dll", 4 )) namelen -= 4;
-        path = prepend( path, context->name, namelen );
-        /* fall through */
-    case 2:  /* try dlls dir without prefix */
+        if (!context->win16) path = prepend( path, context->name, namelen );
         path = prepend( path, "/dlls", sizeof("/dlls") - 1 );
         path = prepend( path, build_dir, strlen(build_dir) );
         return path;
     default:
-        index -= 3;
+        index -= 2;
         if (index < nb_dll_paths)
             return prepend( context->name, dll_paths[index], strlen( dll_paths[index] ));
         break;
@@ -197,15 +196,17 @@ static char *next_dll_path( struct dll_path_context *context )
 
 
 /* get a filename from the first entry in the dll path */
-static char *first_dll_path( const char *name, const char *ext, struct dll_path_context *context )
+static char *first_dll_path( const char *name, int win16, struct dll_path_context *context )
 {
     char *p;
     int namelen = strlen( name );
+    const char *ext = win16 ? "16" : ".so";
 
     context->buffer = malloc( dll_path_maxlen + 2 * namelen + strlen(ext) + 3 );
-    context->index = build_dir ? 0 : 3;  /* if no build dir skip all the build dir magic cases */
+    context->index = build_dir ? 0 : 2;  /* if no build dir skip all the build dir magic cases */
     context->name = context->buffer + dll_path_maxlen + namelen + 1;
     context->namelen = namelen + 1;
+    context->win16 = win16;
 
     /* store the name at the end of the buffer, followed by extension */
     p = context->name;
@@ -217,7 +218,7 @@ static char *first_dll_path( const char *name, const char *ext, struct dll_path_
 
 
 /* free the dll path context created by first_dll_path */
-inline static void free_dll_path( struct dll_path_context *context )
+static inline void free_dll_path( struct dll_path_context *context )
 {
     free( context->buffer );
 }
@@ -233,7 +234,7 @@ static void *dlopen_dll( const char *name, char *error, int errorsize,
     void *ret = NULL;
 
     *exists = 0;
-    for (path = first_dll_path( name, ".so", &context ); path; path = next_dll_path( &context ))
+    for (path = first_dll_path( name, 0, &context ); path; path = next_dll_path( &context ))
     {
         if (!test_only && (ret = wine_dlopen( path, RTLD_NOW, error, errorsize ))) break;
         if ((*exists = file_exists( path ))) break; /* exists but cannot be loaded, return the error */
@@ -331,7 +332,8 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     DWORD code_start, data_start, data_end;
     const size_t page_size = getpagesize();
     const size_t page_mask = page_size - 1;
-    int i, delta, nb_sections = 2;  /* code + data */
+    int delta, nb_sections = 2;  /* code + data */
+    unsigned int i;
 
     size_t size = (sizeof(IMAGE_DOS_HEADER)
                    + sizeof(IMAGE_NT_HEADERS)
@@ -350,8 +352,8 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
     /* Build the DOS and NT headers */
 
     dos->e_magic    = IMAGE_DOS_SIGNATURE;
-    dos->e_cblp     = sizeof(*dos);
-    dos->e_cp       = 1;
+    dos->e_cblp     = 0x90;
+    dos->e_cp       = 3;
     dos->e_cparhdr  = (sizeof(*dos)+0xf)/0x10;
     dos->e_minalloc = 0;
     dos->e_maxalloc = 0xffff;
@@ -562,7 +564,7 @@ int wine_dll_get_owner( const char *name, char *buffer, int size, int *exists )
 
     *exists = 0;
 
-    for (path = first_dll_path( name, "16", &context ); path; path = next_dll_path( &context ))
+    for (path = first_dll_path( name, 1, &context ); path; path = next_dll_path( &context ))
     {
         int fd = open( path, O_RDONLY );
         if (fd != -1)
@@ -575,26 +577,6 @@ int wine_dll_get_owner( const char *name, char *buffer, int size, int *exists )
             ret = 0;
             break;
         }
-    }
-    free_dll_path( &context );
-    if (ret != -1) return ret;
-
-    /* try old method too for backwards compatibility; will be removed later on */
-    for (path = first_dll_path( name, ".so", &context ); path; path = next_dll_path( &context ))
-    {
-        int res = readlink( path, buffer, size );
-        if (res != -1) /* got a symlink */
-        {
-            *exists = 1;
-            if (res < 4 || res >= size) break;
-            buffer[res] = 0;
-            if (strchr( buffer, '/' )) break;  /* contains a path, not valid */
-            if (strcmp( buffer + res - 3, ".so" )) break;  /* does not end in .so, not valid */
-            buffer[res - 3] = 0;  /* remove .so */
-            ret = 0;
-            break;
-        }
-        if ((*exists = file_exists( path ))) break; /* exists but not a symlink, return the error */
     }
     free_dll_path( &context );
     return ret;
@@ -646,14 +628,13 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
     __wine_main_argv = argv;
     __wine_main_environ = environ;
     mmap_init();
-    debug_init();
 
-    for (path = first_dll_path( "ntdll.dll", ".so", &context ); path; path = next_dll_path( &context ))
+    for (path = first_dll_path( "ntdll.dll", 0, &context ); path; path = next_dll_path( &context ))
     {
         if ((ntdll = wine_dlopen( path, RTLD_NOW, error, error_size )))
         {
             /* if we didn't use the default dll dir, remove it from the search path */
-            if (default_dlldir[0] && context.index < nb_dll_paths) nb_dll_paths--;
+            if (default_dlldir[0] && context.index < nb_dll_paths + 2) nb_dll_paths--;
             break;
         }
     }
@@ -688,6 +669,16 @@ void *wine_dlopen( const char *filename, int flag, char *error, size_t errorsize
     void *ret;
     const char *s;
     dlerror(); dlerror();
+#ifdef __sun
+    if (strchr( filename, ':' ))
+    {
+        char path[PATH_MAX];
+        /* Solaris' brain damaged dlopen() treats ':' as a path separator */
+        realpath( filename, path );
+        ret = dlopen( path, flag | RTLD_FIRST );
+    }
+    else
+#endif
     ret = dlopen( filename, flag | RTLD_FIRST );
     s = dlerror();
     if (error && errorsize)

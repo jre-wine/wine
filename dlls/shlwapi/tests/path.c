@@ -68,6 +68,7 @@ const TEST_URL_CANONICALIZE TEST_CANONICALIZE[] = {
     {"http://www.winehq.org/tests/foo%20bar", URL_UNESCAPE , S_OK, "http://www.winehq.org/tests/foo bar"},
     {"file:///c:/tests/foo%20bar", URL_UNESCAPE , S_OK, "file:///c:/tests/foo bar"},
     {"file:///c:/tests\\foo%20bar", URL_UNESCAPE , S_OK, "file:///c:/tests/foo bar"},
+    {"file:///c:/tests/foo%20bar", 0, S_OK, "file:///c:/tests/foo%20bar"},
     {"file:///c:/tests/foo%20bar", URL_FILE_USE_PATHURL, S_OK, "file://c:\\tests\\foo bar"},
     {"file://c:/tests/../tests/foo%20bar", URL_FILE_USE_PATHURL, S_OK, "file://c:\\tests\\foo bar"},
     {"file://c:/tests\\../tests/foo%20bar", URL_FILE_USE_PATHURL, S_OK, "file://c:\\tests\\foo bar"},
@@ -80,6 +81,8 @@ const TEST_URL_CANONICALIZE TEST_CANONICALIZE[] = {
     {"c:\\dir\\file", 0, S_OK, "file:///c:/dir/file"},
     {"file:///c:\\dir\\file", 0, S_OK, "file:///c:/dir/file"},
     {"c:dir\\file", 0, S_OK, "file:///c:dir/file"},
+    {"c:\\tests\\foo bar", URL_FILE_USE_PATHURL, S_OK, "file://c:\\tests\\foo bar"},
+    {"c:\\tests\\foo bar", 0, S_OK, "file:///c:/tests/foo%20bar"},
     {"A", 0, S_OK, "A"},
     {"", 0, S_OK, ""}
 };
@@ -195,7 +198,17 @@ const TEST_URL_COMBINE TEST_COMBINE[] = {
     {"http://www.winehq.org/tests/#example", "tests9", 0, S_OK, "http://www.winehq.org/tests/tests9"},
     {"http://www.winehq.org/tests/../tests/", "/tests10/..", URL_DONT_SIMPLIFY, S_OK, "http://www.winehq.org/tests10/.."},
     {"http://www.winehq.org/tests/../", "tests11", URL_DONT_SIMPLIFY, S_OK, "http://www.winehq.org/tests/../tests11"},
-    {"file:///C:\\dir\\file.txt", "test.txt", 0, S_OK, "file:///C:/dir/test.txt"}
+    {"file:///C:\\dir\\file.txt", "test.txt", 0, S_OK, "file:///C:/dir/test.txt"},
+    {"http://www.winehq.org/test/", "test%20file.txt", 0, S_OK, "http://www.winehq.org/test/test%20file.txt"},
+    {"http://www.winehq.org/test/", "test%20file.txt", URL_FILE_USE_PATHURL, S_OK, "http://www.winehq.org/test/test%20file.txt"},
+    {"http://www.winehq.org%2ftest/", "test%20file.txt", URL_FILE_USE_PATHURL, S_OK, "http://www.winehq.org%2ftest/test%20file.txt"},
+    {"xxx:@MSITStore:file.chm/file.html", "dir/file", 0, S_OK, "xxx:dir/file"},
+    {"mk:@MSITStore:file.chm::/file.html", "/dir/file", 0, S_OK, "mk:@MSITStore:file.chm::/dir/file"},
+    {"mk:@MSITStore:file.chm::/file.html", "mk:@MSITStore:file.chm::/dir/file", 0, S_OK, "mk:@MSITStore:file.chm::/dir/file"},
+    {"foo:today", "foo:calendar", 0, S_OK, "foo:calendar"},
+    {"foo:today", "bar:calendar", 0, S_OK, "bar:calendar"},
+    {"foo:/today", "foo:calendar", 0, S_OK, "foo:/calendar"},
+    {"foo:/today/", "foo:calendar", 0, S_OK, "foo:/today/calendar"},
 };
 
 struct {
@@ -476,7 +489,13 @@ static void test_url_canonicalize(const char *szUrl, DWORD dwFlags, HRESULT dwEx
 
 static void test_UrlEscape(void)
 {
+    DWORD size;
+    HRESULT ret;
     unsigned int i;
+
+    ret = UrlEscapeA("/woningplan/woonkamer basis.swf", NULL, &size, URL_ESCAPE_SPACES_ONLY);
+    ok(ret == E_INVALIDARG, "got %x, expected %x\n", ret, E_INVALIDARG);
+
     for(i=0; i<sizeof(TEST_ESCAPE)/sizeof(TEST_ESCAPE[0]); i++) {
         test_url_escape(TEST_ESCAPE[i].url, TEST_ESCAPE[i].flags,
                               TEST_ESCAPE[i].expectret, TEST_ESCAPE[i].expecturl);
@@ -496,12 +515,6 @@ static void test_UrlCanonicalize(void)
     }
 
     /* move to TEST_CANONICALIZE when fixed */
-    dwSize = sizeof szReturnUrl;
-    ok(UrlCanonicalizeA("c:\\tests\\foo bar", szReturnUrl, &dwSize, 0) == S_OK, "UrlCanonicalizeA didn't return 0x%08x\n", S_OK);
-    todo_wine {
-        ok(strcmp(szReturnUrl,"file:///c:/tests/foo%20bar")==0, "UrlCanonicalizeA got %s\n", szReturnUrl);
-    }
-
     dwSize = sizeof szReturnUrl;
     /*LimeWire online installer calls this*/
     hr = UrlCanonicalizeA("/uri-res/N2R?urn:sha1:B3K", szReturnUrl, &dwSize,URL_DONT_ESCAPE_EXTRA_INFO | URL_WININET_COMPATIBILITY /*0x82000000*/);
@@ -661,13 +674,13 @@ static void test_UrlUnescape(void)
 
     for(i=0; i<sizeof(TEST_URL_UNESCAPE)/sizeof(TEST_URL_UNESCAPE[0]); i++) { 
         dwEscaped=INTERNET_MAX_URL_LENGTH;
-        ok(UrlUnescapeA(TEST_URL_UNESCAPE[i].url, szReturnUrl, &dwEscaped, 0) == S_OK, "UrlEscapeA didn't return 0x%08x from \"%s\"\n", S_OK, TEST_URL_UNESCAPE[i].url);
+        ok(UrlUnescapeA(TEST_URL_UNESCAPE[i].url, szReturnUrl, &dwEscaped, 0) == S_OK, "UrlUnescapeA didn't return 0x%08x from \"%s\"\n", S_OK, TEST_URL_UNESCAPE[i].url);
         ok(strcmp(szReturnUrl,TEST_URL_UNESCAPE[i].expect)==0, "Expected \"%s\", but got \"%s\" from \"%s\"\n", TEST_URL_UNESCAPE[i].expect, szReturnUrl, TEST_URL_UNESCAPE[i].url);
 
         dwEscaped = INTERNET_MAX_URL_LENGTH;
         urlW = GetWideString(TEST_URL_UNESCAPE[i].url);
         expected_urlW = GetWideString(TEST_URL_UNESCAPE[i].expect);
-        ok(UrlUnescapeW(urlW, ret_urlW, &dwEscaped, 0) == S_OK, "UrlEscapeW didn't return 0x%08x from \"%s\"\n", S_OK, TEST_URL_UNESCAPE[i].url);
+        ok(UrlUnescapeW(urlW, ret_urlW, &dwEscaped, 0) == S_OK, "UrlUnescapeW didn't return 0x%08x from \"%s\"\n", S_OK, TEST_URL_UNESCAPE[i].url);
         WideCharToMultiByte(CP_ACP,0,ret_urlW,-1,szReturnUrl,INTERNET_MAX_URL_LENGTH,0,0);
         ok(lstrcmpW(ret_urlW, expected_urlW)==0, "Expected \"%s\", but got \"%s\" from \"%s\" flags %08lx\n", TEST_URL_UNESCAPE[i].expect, szReturnUrl, TEST_URL_UNESCAPE[i].url, 0L);
         FreeWideString(urlW);
@@ -940,6 +953,9 @@ static void test_PathMatchSpec(void)
 static void test_PathCombineW(void)
 {
     LPWSTR wszString, wszString2;
+    WCHAR wbuf[MAX_PATH+1], wstr1[MAX_PATH] = {'C',':','\\',0}, wstr2[MAX_PATH];
+    static const WCHAR expout[] = {'C',':','\\','A','A',0};
+    int i;
    
     wszString2 = HeapAlloc(GetProcessHeap(), 0, MAX_PATH * sizeof(WCHAR));
 
@@ -948,11 +964,31 @@ static void test_PathCombineW(void)
     ok (wszString == NULL, "Expected a NULL return\n");
 
     /* Some NULL */
+    wszString2[0] = 'a';
     wszString = pPathCombineW(wszString2, NULL, NULL);
     ok (wszString == NULL, "Expected a NULL return\n");
- 
+    ok (wszString2[0] == 0, "Destination string not empty\n");
+
     HeapFree(GetProcessHeap(), 0, wszString2);
+
+    /* overflow test */
+    wstr2[0] = wstr2[1] = wstr2[2] = 'A';
+    for (i=3; i<MAX_PATH/2; i++)
+        wstr1[i] = wstr2[i] = 'A';
+    wstr1[(MAX_PATH/2) - 1] = wstr2[MAX_PATH/2] = 0;
+    memset(wbuf, 0xbf, sizeof(wbuf));
+
+    wszString = pPathCombineW(wbuf, wstr1, wstr2);
+    ok(wszString == NULL, "Expected a NULL return\n");
+    ok(wbuf[0] == 0, "Buffer contains data\n");
+
+    /* PathCombineW can be used in place */
+    wstr1[3] = 0;
+    wstr2[2] = 0;
+    ok(PathCombineW(wstr1, wstr1, wstr2) == wstr1, "Expected a wstr1 return\n");
+    ok(StrCmpW(wstr1, expout) == 0, "Unexpected PathCombine output\n");
 }
+
 
 #define LONG_LEN (MAX_PATH * 2)
 #define HALF_LEN (MAX_PATH / 2 + 1)
@@ -1027,10 +1063,7 @@ static void test_PathCombineA(void)
     lstrcpyA(dest, "control");
     str = PathCombineA(dest, NULL, NULL);
     ok(str == NULL, "Expected str == NULL, got %p\n", str);
-    todo_wine
-    {
-        ok(lstrlenA(dest) == 0, "Expected 0 length, got %i\n", lstrlenA(dest));
-    }
+    ok(lstrlenA(dest) == 0, "Expected 0 length, got %i\n", lstrlenA(dest));
     ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
 
     /* try directory without backslash */
@@ -1113,23 +1146,17 @@ static void test_PathCombineA(void)
     SetLastError(0xdeadbeef);
     lstrcpyA(dest, "control");
     str = PathCombineA(dest, "C:\\", too_long);
-    todo_wine
-    {
-        ok(str == NULL, "Expected str == NULL, got %p\n", str);
-        ok(lstrlenA(dest) == 0, "Expected 0 length, got %i\n", lstrlenA(dest));
-        ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
-    }
+    ok(str == NULL, "Expected str == NULL, got %p\n", str);
+    ok(lstrlenA(dest) == 0, "Expected 0 length, got %i\n", lstrlenA(dest));
+    todo_wine ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
 
     /* try a directory longer than MAX_PATH */
     SetLastError(0xdeadbeef);
     lstrcpyA(dest, "control");
     str = PathCombineA(dest, too_long, "one\\two\\three");
-    todo_wine
-    {
-        ok(str == NULL, "Expected str == NULL, got %p\n", str);
-        ok(lstrlenA(dest) == 0, "Expected 0 length, got %i\n", lstrlenA(dest));
-        ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
-    }
+    ok(str == NULL, "Expected str == NULL, got %p\n", str);
+    ok(lstrlenA(dest) == 0, "Expected 0 length, got %i\n", lstrlenA(dest));
+    todo_wine ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
 
     memset(one, 'b', HALF_LEN);
     memset(two, 'c', HALF_LEN);
@@ -1140,11 +1167,8 @@ static void test_PathCombineA(void)
     SetLastError(0xdeadbeef);
     lstrcpyA(dest, "control");
     str = PathCombineA(dest, one, two);
-    todo_wine
-    {
-        ok(str == NULL, "Expected str == NULL, got %p\n", str);
-        ok(lstrlenA(dest) == 0, "Expected 0 length, got %i\n", lstrlenA(dest));
-    }
+    ok(str == NULL, "Expected str == NULL, got %p\n", str);
+    ok(lstrlenA(dest) == 0, "Expected 0 length, got %i\n", lstrlenA(dest));
     ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
 }
 
@@ -1308,12 +1332,9 @@ static void test_PathAppendA(void)
     too_long[LONG_LEN - 1] = '\0';
     SetLastError(0xdeadbeef);
     res = PathAppendA(too_long, "two\\three");
-    todo_wine
-    {
-        ok(!res, "Expected failure\n");
-        ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
-        ok(lstrlen(too_long) == 0, "Expected length of too_long to be zero, got %i\n", lstrlen(too_long));
-    }
+    ok(!res, "Expected failure\n");
+    todo_wine ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
+    ok(lstrlen(too_long) == 0, "Expected length of too_long to be zero, got %i\n", lstrlen(too_long));
 
     /* pszMore is too long */
     lstrcpy(path, "C:\\one");
@@ -1321,12 +1342,9 @@ static void test_PathAppendA(void)
     too_long[LONG_LEN - 1] = '\0';
     SetLastError(0xdeadbeef);
     res = PathAppendA(path, too_long);
-    todo_wine
-    {
-        ok(!res, "Expected failure\n");
-        ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
-        ok(lstrlen(path) == 0, "Expected length of path to be zero, got %i\n", lstrlen(path));
-    }
+    ok(!res, "Expected failure\n");
+    todo_wine ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
+    ok(lstrlen(path) == 0, "Expected length of path to be zero, got %i\n", lstrlen(path));
 
     /* both params combined are too long */
     memset(one, 'a', HALF_LEN);
@@ -1335,11 +1353,8 @@ static void test_PathAppendA(void)
     two[HALF_LEN - 1] = '\0';
     SetLastError(0xdeadbeef);
     res = PathAppendA(one, two);
-    todo_wine
-    {
-        ok(!res, "Expected failure\n");
-        ok(lstrlen(one) == 0, "Expected length of one to be zero, got %i\n", lstrlen(one));
-    }
+    ok(!res, "Expected failure\n");
+    ok(lstrlen(one) == 0, "Expected length of one to be zero, got %i\n", lstrlen(one));
     ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %d\n", GetLastError());
 }
 
@@ -1822,8 +1837,7 @@ static void test_PathUnquoteSpaces(void)
 
 START_TEST(path)
 {
-  hShlwapi = LoadLibraryA("shlwapi.dll");
-  if (!hShlwapi) return;
+  hShlwapi = GetModuleHandleA("shlwapi.dll");
 
   test_UrlHash();
   test_UrlGetPart();

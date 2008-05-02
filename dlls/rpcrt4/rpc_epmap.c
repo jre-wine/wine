@@ -29,7 +29,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "winreg.h"
 
 #include "rpc.h"
 
@@ -254,8 +253,11 @@ typedef struct twr_t
     /* [size_is] */ BYTE tower_octet_string[ 1 ];
     } 	twr_t;
 
+/***********************************************************************
+ *             TowerExplode (RPCRT4.@)
+ */
 RPC_STATUS WINAPI TowerExplode(
-    const twr_t *tower, RPC_SYNTAX_IDENTIFIER *object, RPC_SYNTAX_IDENTIFIER *syntax,
+    const twr_t *tower, PRPC_SYNTAX_IDENTIFIER object, PRPC_SYNTAX_IDENTIFIER syntax,
     char **protseq, char **endpoint, char **address)
 {
     size_t tower_size;
@@ -320,6 +322,9 @@ RPC_STATUS WINAPI TowerExplode(
     return status;
 }
 
+/***********************************************************************
+ *             TowerConstruct (RPCRT4.@)
+ */
 RPC_STATUS WINAPI TowerConstruct(
     const RPC_SYNTAX_IDENTIFIER *object, const RPC_SYNTAX_IDENTIFIER *syntax,
     const char *protseq, const char *endpoint, const char *address,

@@ -63,7 +63,6 @@ static void* be_i386_linearize(HANDLE hThread, const ADDRESS64* addr)
         return (void*)((le.HighWord.Bits.BaseHi << 24) + 
                        (le.HighWord.Bits.BaseMid << 16) + le.BaseLow +
                        (DWORD)addr->Offset);
-        break;
     case AddrModeFlat:
         return (void*)(DWORD)addr->Offset;
     }
@@ -111,6 +110,17 @@ static unsigned be_i386_get_addr(HANDLE hThread, const CONTEXT* ctx,
     return FALSE;
 }
 
+static unsigned be_i386_get_register_info(int regno, enum be_cpu_addr* kind)
+{
+    switch (regno)
+    {
+    case CV_REG_EIP: *kind = be_cpu_addr_pc; return TRUE;
+    case CV_REG_EBP: *kind = be_cpu_addr_frame; return TRUE;
+    case CV_REG_ESP: *kind = be_cpu_addr_stack; return TRUE;
+    }
+    return FALSE;
+}
+
 static void be_i386_single_step(CONTEXT* ctx, unsigned enable)
 {
     if (enable) ctx->EFlags |= STEP_FLAG;
@@ -130,10 +140,10 @@ static void be_i386_all_print_context(HANDLE hThread, const CONTEXT* ctx)
     dbg_printf(" FLSW:%04x", LOWORD(ctx->FloatSave.StatusWord));
 
     /* Isolate the condition code bits - note they are not contiguous */
-    dbg_printf("(CC:%ld%ld%ld%ld", (ctx->FloatSave.StatusWord & 0x00004000) >> 14, 
-                                   (ctx->FloatSave.StatusWord & 0x00000400) >> 10,
-                                   (ctx->FloatSave.StatusWord & 0x00000200) >> 9,
-                                   (ctx->FloatSave.StatusWord & 0x00000100) >> 8);
+    dbg_printf("(CC:%d%d%d%d", (ctx->FloatSave.StatusWord & 0x00004000) >> 14,
+               (ctx->FloatSave.StatusWord & 0x00000400) >> 10,
+               (ctx->FloatSave.StatusWord & 0x00000200) >> 9,
+               (ctx->FloatSave.StatusWord & 0x00000100) >> 8);
 
     /* Now pull out hte 3 bit of the TOP stack pointer */
     dbg_printf(" TOP:%01x", (unsigned int) (ctx->FloatSave.StatusWord & 0x00003800) >> 11);
@@ -233,11 +243,11 @@ static void be_i386_print_context(HANDLE hThread, const CONTEXT* ctx, int all_re
         break;
     case AddrModeFlat:
     case AddrMode1632:
-        dbg_printf("\n EIP:%08lx ESP:%08lx EBP:%08lx EFLAGS:%08lx(%s)\n",
+        dbg_printf("\n EIP:%08x ESP:%08x EBP:%08x EFLAGS:%08x(%s)\n",
                    ctx->Eip, ctx->Esp, ctx->Ebp, ctx->EFlags, buf);
-	dbg_printf(" EAX:%08lx EBX:%08lx ECX:%08lx EDX:%08lx\n",
+        dbg_printf(" EAX:%08x EBX:%08x ECX:%08x EDX:%08x\n",
                    ctx->Eax, ctx->Ebx, ctx->Ecx, ctx->Edx);
-	dbg_printf(" ESI:%08lx EDI:%08lx\n",
+        dbg_printf(" ESI:%08x EDI:%08x\n",
                    ctx->Esi, ctx->Edi);
         break;
     }
@@ -486,7 +496,25 @@ static unsigned be_i386_is_func_call(const void* insn, ADDRESS64* callee)
             WINE_FIXME("Unsupported yet call insn (0xFF 0x%02x) (SIB bytes) at %p\n", ch, insn);
             return FALSE;
         case 0x05: /* addr32 */
-            WINE_FIXME("Unsupported yet call insn (0xFF 0x%02x) (addr32) at %p\n", ch, insn);
+            if ((ch & 0x38) == 0x10 || /* call */
+                (ch & 0x38) == 0x18)   /* lcall */
+            {
+                void *addr;
+                if (!dbg_read_memory((const char *)insn + 2, &addr, sizeof(addr)))
+                    return FALSE;
+                if ((ch & 0x38) == 0x18)   /* lcall */
+                {
+                    if (!dbg_read_memory((const char*)addr + operand_size, &segment, sizeof(segment)))
+                        return FALSE;
+                }
+                else segment = dbg_context.SegCs;
+                if (!dbg_read_memory((const char*)addr, &dst, sizeof(dst)))
+                    return FALSE;
+                callee->Mode = get_selector_type(dbg_curr_thread->handle, &dbg_context, segment);
+                callee->Segment = segment;
+                callee->Offset = dst;
+                return TRUE;
+            }
             return FALSE;
         default:
             switch (ch & 0x07)
@@ -563,7 +591,7 @@ static unsigned be_i386_is_func_call(const void* insn, ADDRESS64* callee)
 #define	DR7_ENABLE_MASK(dr)	(1<<(DR7_LOCAL_ENABLE_SHIFT+DR7_ENABLE_SIZE*(dr)))
 #define	IS_DR7_SET(ctrl,dr) 	((ctrl)&DR7_ENABLE_MASK(dr))
 
-static inline int be_i386_get_unused_DR(CONTEXT* ctx, unsigned long** r)
+static inline int be_i386_get_unused_DR(CONTEXT* ctx, DWORD** r)
 {
     if (!IS_DR7_SET(ctx->Dr7, 0))
     {
@@ -596,7 +624,7 @@ static unsigned be_i386_insert_Xpoint(HANDLE hProcess, const struct be_process_i
 {
     unsigned char       ch;
     SIZE_T              sz;
-    unsigned long*      pr;
+    DWORD              *pr;
     int                 reg;
     unsigned long       bits;
 
@@ -619,7 +647,7 @@ static unsigned be_i386_insert_Xpoint(HANDLE hProcess, const struct be_process_i
         bits = DR7_RW_WRITE;
     hw_bp:
         if ((reg = be_i386_get_unused_DR(ctx, &pr)) == -1) return 0;
-        *pr = (unsigned long)addr;
+        *pr = (DWORD)addr;
         if (type != be_xpoint_watch_exec) switch (size)
         {
         case 4: bits |= DR7_LEN_4; break;
@@ -739,6 +767,7 @@ struct backend_cpu be_i386 =
     be_i386_linearize,
     be_i386_build_addr,
     be_i386_get_addr,
+    be_i386_get_register_info,
     be_i386_single_step,
     be_i386_print_context,
     be_i386_print_segment_info,

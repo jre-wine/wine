@@ -44,7 +44,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(variant);
 
-const char* wine_vtypes[VT_CLSID+1] =
+const char * const wine_vtypes[VT_CLSID+1] =
 {
   "VT_EMPTY","VT_NULL","VT_I2","VT_I4","VT_R4","VT_R8","VT_CY","VT_DATE",
   "VT_BSTR","VT_DISPATCH","VT_ERROR","VT_BOOL","VT_VARIANT","VT_UNKNOWN",
@@ -57,7 +57,7 @@ const char* wine_vtypes[VT_CLSID+1] =
   "VT_STREAMED_OBJECT","VT_STORED_OBJECT","VT_BLOB_OBJECT","VT_CF","VT_CLSID"
 };
 
-const char* wine_vflags[16] =
+const char * const wine_vflags[16] =
 {
  "",
  "|VT_VECTOR",
@@ -1465,7 +1465,7 @@ HRESULT WINAPI VarUdateFromDate(DATE dateIn, ULONG dwFlags, UDATE *lpUdate)
   TRACE("lcid 0x%x, " #name "=%d '%c'\n", lcid, lpChars->name, lpChars->name)
 
 /* Get the valid number characters for an lcid */
-void VARIANT_GetLocalisedNumberChars(VARIANT_NUMBER_CHARS *lpChars, LCID lcid, DWORD dwFlags)
+static void VARIANT_GetLocalisedNumberChars(VARIANT_NUMBER_CHARS *lpChars, LCID lcid, DWORD dwFlags)
 {
   static const VARIANT_NUMBER_CHARS defaultChars = { '-','+','.',',','$',0,'.',',' };
   LCTYPE lctype = dwFlags & LOCALE_NOUSEROVERRIDE;
@@ -2019,7 +2019,7 @@ HRESULT WINAPI VarNumFromParseNum(NUMPARSE *pNumprs, BYTE *rgbDig,
       V_UI8(pVarDst) = ul64;
       return S_OK;
     }
-    else if ((dwVtBits & REAL_VTBITS) == VTBIT_DECIMAL)
+    else if ((dwVtBits & VTBIT_DECIMAL) == VTBIT_DECIMAL)
     {
       V_VT(pVarDst) = VT_DECIMAL;
       DEC_SIGNSCALE(&V_DECIMAL(pVarDst)) = SIGNSCALE(DECIMAL_POS,0);
@@ -2856,6 +2856,22 @@ HRESULT WINAPI VarCmp(LPVARIANT left, LPVARIANT right, LCID lcid, DWORD flags)
 #undef _VARCMP
 }
 
+static HRESULT VARIANT_FetchDispatchValue(LPVARIANT pvDispatch, LPVARIANT pValue)
+{
+    HRESULT hres;
+    static DISPPARAMS emptyParams = { NULL, NULL, 0, 0 };
+
+    if ((V_VT(pvDispatch) & VT_TYPEMASK) == VT_DISPATCH) {
+        if (NULL == V_DISPATCH(pvDispatch)) return DISP_E_TYPEMISMATCH;
+        hres = IDispatch_Invoke(V_DISPATCH(pvDispatch), DISPID_VALUE, &IID_NULL,
+            LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET, &emptyParams, pValue,
+            NULL, NULL);
+    } else {
+        hres = DISP_E_TYPEMISMATCH;
+    }
+    return hres;
+}
+
 /**********************************************************************
  *              VarAnd [OLEAUT32.142]
  *
@@ -2877,12 +2893,29 @@ HRESULT WINAPI VarAnd(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     VARTYPE leftvt,rightvt;
     VARTYPE rightExtraFlags,leftExtraFlags,ExtraFlags;
     VARIANT varLeft, varRight;
+    VARIANT tempLeft, tempRight;
 
     VariantInit(&varLeft);
     VariantInit(&varRight);
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
 
     TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
           debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), result);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(left) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hres = VARIANT_FetchDispatchValue(left, &tempLeft);
+        if (FAILED(hres)) goto VarAnd_Exit;
+        left = &tempLeft;
+    }
+    if ((V_VT(right) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hres = VARIANT_FetchDispatchValue(right, &tempRight);
+        if (FAILED(hres)) goto VarAnd_Exit;
+        right = &tempRight;
+    }
 
     leftvt = V_VT(left)&VT_TYPEMASK;
     rightvt = V_VT(right)&VT_TYPEMASK;
@@ -2890,16 +2923,22 @@ HRESULT WINAPI VarAnd(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     rightExtraFlags = V_VT(right)&(~VT_TYPEMASK);
 
     if (leftExtraFlags != rightExtraFlags)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto VarAnd_Exit;
+    }
     ExtraFlags = leftExtraFlags;
 
-    /* Native VarAnd always returns a error when using any extra
+    /* Native VarAnd always returns an error when using extra
      * flags or if the variant combination is I8 and INT.
      */
     if ((leftvt == VT_I8 && rightvt == VT_INT) ||
         (leftvt == VT_INT && rightvt == VT_I8) ||
         ExtraFlags != 0)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto VarAnd_Exit;
+    }
 
     /* Determine return type */
     else if (leftvt == VT_I8 || rightvt == VT_I8)
@@ -2934,7 +2973,10 @@ HRESULT WINAPI VarAnd(LPVARIANT left, LPVARIANT right, LPVARIANT result)
         leftvt == VT_BSTR || rightvt == VT_BSTR)
         resvt = VT_NULL;
     else
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto VarAnd_Exit;
+    }
 
     if (leftvt == VT_NULL || rightvt == VT_NULL)
     {
@@ -3052,6 +3094,8 @@ HRESULT WINAPI VarAnd(LPVARIANT left, LPVARIANT right, LPVARIANT result)
 VarAnd_Exit:
     VariantClear(&varLeft);
     VariantClear(&varRight);
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
 
     return hres;
 }
@@ -3086,6 +3130,7 @@ HRESULT WINAPI VarAdd(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     HRESULT hres;
     VARTYPE lvt, rvt, resvt, tvt;
     VARIANT lv, rv, tv;
+    VARIANT tempLeft, tempRight;
     double r8res;
 
     /* Variant priority for coercion. Sorted from lowest to highest.
@@ -3094,12 +3139,12 @@ HRESULT WINAPI VarAdd(LPVARIANT left, LPVARIANT right, LPVARIANT result)
                       vt_R8, vt_CY, vt_DATE, vt_DECIMAL, vt_DISPATCH, vt_NULL,
                       vt_ERROR };
     /* Mapping from priority to variant type. Keep in sync with coerceprio! */
-    VARTYPE prio2vt[] = { VT_EMPTY, VT_UI1, VT_I2, VT_I4, VT_I8, VT_BSTR, VT_R4,
+    static const VARTYPE prio2vt[] = { VT_EMPTY, VT_UI1, VT_I2, VT_I4, VT_I8, VT_BSTR, VT_R4,
                           VT_R8, VT_CY, VT_DATE, VT_DECIMAL, VT_DISPATCH,
                           VT_NULL, VT_ERROR };
 
     /* Mapping for coercion from input variant to priority of result variant. */
-    static VARTYPE coerce[] = {
+    static const VARTYPE coerce[] = {
         /* VT_EMPTY, VT_NULL, VT_I2, VT_I4, VT_R4 */
         vt_EMPTY, vt_NULL, vt_I2, vt_I4, vt_R4,
         /* VT_R8, VT_CY, VT_DATE, VT_BSTR, VT_DISPATCH */
@@ -3117,6 +3162,26 @@ HRESULT WINAPI VarAdd(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     VariantInit(&lv);
     VariantInit(&rv);
     VariantInit(&tv);
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(left) & VT_TYPEMASK) != VT_NULL && (V_VT(right) & VT_TYPEMASK) != VT_NULL)
+    {
+        if ((V_VT(left) & VT_TYPEMASK) == VT_DISPATCH)
+        {
+            hres = VARIANT_FetchDispatchValue(left, &tempLeft);
+            if (FAILED(hres)) goto end;
+            left = &tempLeft;
+        }
+        if ((V_VT(right) & VT_TYPEMASK) == VT_DISPATCH)
+        {
+            hres = VARIANT_FetchDispatchValue(right, &tempRight);
+            if (FAILED(hres)) goto end;
+            right = &tempRight;
+        }
+    }
+
     lvt = V_VT(left)&VT_TYPEMASK;
     rvt = V_VT(right)&VT_TYPEMASK;
 
@@ -3244,6 +3309,8 @@ end:
     VariantClear(&lv);
     VariantClear(&rv);
     VariantClear(&tv);
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
     TRACE("returning 0x%8x (variant type %s)\n", hres, debugstr_VT(result));
     return hres;
 }
@@ -3278,6 +3345,7 @@ HRESULT WINAPI VarMul(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     HRESULT hres;
     VARTYPE lvt, rvt, resvt, tvt;
     VARIANT lv, rv, tv;
+    VARIANT tempLeft, tempRight;
     double r8res;
 
     /* Variant priority for coercion. Sorted from lowest to highest.
@@ -3285,11 +3353,11 @@ HRESULT WINAPI VarMul(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     enum coerceprio { vt_UI1 = 0, vt_I2, vt_I4, vt_I8, vt_CY, vt_R4, vt_R8,
                       vt_DECIMAL, vt_NULL, vt_ERROR };
     /* Mapping from priority to variant type. Keep in sync with coerceprio! */
-    VARTYPE prio2vt[] = { VT_UI1, VT_I2, VT_I4, VT_I8, VT_CY, VT_R4, VT_R8,
+    static const VARTYPE prio2vt[] = { VT_UI1, VT_I2, VT_I4, VT_I8, VT_CY, VT_R4, VT_R8,
                           VT_DECIMAL, VT_NULL, VT_ERROR };
 
     /* Mapping for coercion from input variant to priority of result variant. */
-    static VARTYPE coerce[] = {
+    static const VARTYPE coerce[] = {
         /* VT_EMPTY, VT_NULL, VT_I2, VT_I4, VT_R4 */
         vt_UI1, vt_NULL, vt_I2, vt_I4, vt_R4,
         /* VT_R8, VT_CY, VT_DATE, VT_BSTR, VT_DISPATCH */
@@ -3307,6 +3375,23 @@ HRESULT WINAPI VarMul(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     VariantInit(&lv);
     VariantInit(&rv);
     VariantInit(&tv);
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(left) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hres = VARIANT_FetchDispatchValue(left, &tempLeft);
+        if (FAILED(hres)) goto end;
+        left = &tempLeft;
+    }
+    if ((V_VT(right) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hres = VARIANT_FetchDispatchValue(right, &tempRight);
+        if (FAILED(hres)) goto end;
+        right = &tempRight;
+    }
+
     lvt = V_VT(left)&VT_TYPEMASK;
     rvt = V_VT(right)&VT_TYPEMASK;
 
@@ -3415,6 +3500,8 @@ end:
     VariantClear(&lv);
     VariantClear(&rv);
     VariantClear(&tv);
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
     TRACE("returning 0x%8x (variant type %s)\n", hres, debugstr_VT(result));
     return hres;
 }
@@ -3440,6 +3527,29 @@ HRESULT WINAPI VarDiv(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     VARTYPE leftvt,rightvt;
     VARTYPE rightExtraFlags,leftExtraFlags,ExtraFlags;
     VARIANT lv,rv;
+    VARIANT tempLeft, tempRight;
+
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
+    VariantInit(&lv);
+    VariantInit(&rv);
+
+    TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
+          debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), result);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(left) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hres = VARIANT_FetchDispatchValue(left, &tempLeft);
+        if (FAILED(hres)) goto end;
+        left = &tempLeft;
+    }
+    if ((V_VT(right) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hres = VARIANT_FetchDispatchValue(right, &tempRight);
+        if (FAILED(hres)) goto end;
+        right = &tempRight;
+    }
 
     leftvt = V_VT(left)&VT_TYPEMASK;
     rightvt = V_VT(right)&VT_TYPEMASK;
@@ -3447,15 +3557,18 @@ HRESULT WINAPI VarDiv(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     rightExtraFlags = V_VT(right)&(~VT_TYPEMASK);
 
     if (leftExtraFlags != rightExtraFlags)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
     ExtraFlags = leftExtraFlags;
 
-    TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
-          debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), result);
-
-    /* Native VarPow always returns a error when using any extra flags */
+    /* Native VarDiv always returns an error when using extra flags */
     if (ExtraFlags != 0)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
 
     /* Determine return type */
     if (!(rightvt == VT_EMPTY))
@@ -3463,7 +3576,8 @@ HRESULT WINAPI VarDiv(LPVARIANT left, LPVARIANT right, LPVARIANT result)
         if (leftvt == VT_NULL || rightvt == VT_NULL)
         {
             V_VT(result) = VT_NULL;
-            return S_OK;
+            hres = S_OK;
+            goto end;
         }
         else if (leftvt == VT_DECIMAL || rightvt == VT_DECIMAL)
             resvt = VT_DECIMAL;
@@ -3493,30 +3607,21 @@ HRESULT WINAPI VarDiv(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     else if (leftvt == VT_NULL && rightvt == VT_EMPTY)
     {
         V_VT(result) = VT_NULL;
-        return S_OK;
+        hres = S_OK;
+        goto end;
     }
     else
-        return DISP_E_BADVARTYPE;
-
-    VariantInit(&lv);
-    VariantInit(&rv);
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
 
     /* coerce to the result type */
     hres = VariantChangeType(&lv, left, 0, resvt);
-    if (hres != S_OK)
-    {
-        VariantClear(&lv);
-        VariantClear(&rv);
-        return hres;
-    }
+    if (hres != S_OK) goto end;
 
     hres = VariantChangeType(&rv, right, 0, resvt);
-    if (hres != S_OK)
-    {
-        VariantClear(&lv);
-        VariantClear(&rv);
-        return hres;
-    }
+    if (hres != S_OK) goto end;
 
     /* do the math */
     V_VT(result) = resvt;
@@ -3555,9 +3660,12 @@ HRESULT WINAPI VarDiv(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     break;
     }
 
+end:
     VariantClear(&lv);
     VariantClear(&rv);
-
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
+    TRACE("returning 0x%8x (variant type %s)\n", hres, debugstr_VT(result));
     return hres;
 }
 
@@ -3582,9 +3690,69 @@ HRESULT WINAPI VarSub(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     VARTYPE leftvt,rightvt;
     VARTYPE rightExtraFlags,leftExtraFlags,ExtraFlags;
     VARIANT lv,rv;
+    VARIANT tempLeft, tempRight;
+
+    VariantInit(&lv);
+    VariantInit(&rv);
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
 
     TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
           debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), result);
+
+    if ((V_VT(left) & VT_TYPEMASK) == VT_DISPATCH &&
+        (V_VT(left)&(~VT_TYPEMASK)) == 0 &&
+        (V_VT(right) & VT_TYPEMASK) != VT_NULL)
+    {
+        if (NULL == V_DISPATCH(left)) {
+            if ((V_VT(right) & VT_TYPEMASK) >= VT_INT_PTR)
+                hres = DISP_E_BADVARTYPE;
+            else if ((V_VT(right) & VT_TYPEMASK) >= VT_UI8 &&
+                (V_VT(right) & VT_TYPEMASK) < VT_RECORD)
+                hres = DISP_E_BADVARTYPE;
+            else switch (V_VT(right) & VT_TYPEMASK)
+            {
+            case VT_VARIANT:
+            case VT_UNKNOWN:
+            case 15:
+            case VT_I1:
+            case VT_UI2:
+            case VT_UI4:
+                hres = DISP_E_BADVARTYPE;
+            }
+            if (FAILED(hres)) goto end;
+        }
+        hres = VARIANT_FetchDispatchValue(left, &tempLeft);
+        if (FAILED(hres)) goto end;
+        left = &tempLeft;
+    }
+    if ((V_VT(right) & VT_TYPEMASK) == VT_DISPATCH &&
+        (V_VT(right)&(~VT_TYPEMASK)) == 0 &&
+        (V_VT(left) & VT_TYPEMASK) != VT_NULL)
+    {
+        if (NULL == V_DISPATCH(right))
+        {
+            if ((V_VT(left) & VT_TYPEMASK) >= VT_INT_PTR)
+                hres = DISP_E_BADVARTYPE;
+            else if ((V_VT(left) & VT_TYPEMASK) >= VT_UI8 &&
+                (V_VT(left) & VT_TYPEMASK) < VT_RECORD)
+                hres = DISP_E_BADVARTYPE;
+            else switch (V_VT(left) & VT_TYPEMASK)
+            {
+            case VT_VARIANT:
+            case VT_UNKNOWN:
+            case 15:
+            case VT_I1:
+            case VT_UI2:
+            case VT_UI4:
+                hres = DISP_E_BADVARTYPE;
+            }
+            if (FAILED(hres)) goto end;
+        }
+        hres = VARIANT_FetchDispatchValue(right, &tempRight);
+        if (FAILED(hres)) goto end;
+        right = &tempRight;
+    }
 
     leftvt = V_VT(left)&VT_TYPEMASK;
     rightvt = V_VT(right)&VT_TYPEMASK;
@@ -3592,7 +3760,10 @@ HRESULT WINAPI VarSub(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     rightExtraFlags = V_VT(right)&(~VT_TYPEMASK);
 
     if (leftExtraFlags != rightExtraFlags)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
     ExtraFlags = leftExtraFlags;
 
     /* determine return type and return code */
@@ -3604,9 +3775,15 @@ HRESULT WINAPI VarSub(LPVARIANT left, LPVARIANT right, LPVARIANT result)
         ExtraFlags == VT_VECTOR ||
         ExtraFlags == VT_BYREF ||
         ExtraFlags == VT_RESERVED)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
     else if (ExtraFlags >= VT_ARRAY)
-        return DISP_E_TYPEMISMATCH;
+    {
+        hres = DISP_E_TYPEMISMATCH;
+        goto end;
+    }
     /* Native VarSub cannot handle: VT_I1, VT_UI2, VT_UI4,
        VT_INT, VT_UINT and VT_UI8. Tested with WinXP */
     else if (leftvt == VT_CLSID || rightvt == VT_CLSID ||
@@ -3621,34 +3798,44 @@ HRESULT WINAPI VarSub(LPVARIANT left, LPVARIANT right, LPVARIANT result)
         leftvt == VT_RECORD || rightvt == VT_RECORD)
     {
         if (leftvt == VT_RECORD && rightvt == VT_I8)
-            return DISP_E_TYPEMISMATCH;
+            hres = DISP_E_TYPEMISMATCH;
         else if (leftvt < VT_UI1 && rightvt == VT_RECORD)
-            return DISP_E_TYPEMISMATCH;
+            hres = DISP_E_TYPEMISMATCH;
         else if (leftvt >= VT_UI1 && rightvt == VT_RECORD)
-            return DISP_E_TYPEMISMATCH;
+            hres = DISP_E_TYPEMISMATCH;
         else if (leftvt == VT_RECORD && rightvt <= VT_UI1)
-            return DISP_E_TYPEMISMATCH;
+            hres = DISP_E_TYPEMISMATCH;
         else if (leftvt == VT_RECORD && rightvt > VT_UI1)
-            return DISP_E_BADVARTYPE;
+            hres = DISP_E_BADVARTYPE;
         else
-            return DISP_E_BADVARTYPE;
+            hres = DISP_E_BADVARTYPE;
+        goto end;
     }
     /*  The following flags/types are invalid for left variant */
     else if (!((leftvt <= VT_LPWSTR || leftvt == VT_RECORD ||
         leftvt == VT_CLSID) && leftvt != (VARTYPE)15 /* undefined vt */ &&
         (leftvt < VT_VOID || leftvt > VT_LPWSTR)))
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
     /*  The following flags/types are invalid for right variant */
     else if (!((rightvt <= VT_LPWSTR || rightvt == VT_RECORD ||
         rightvt == VT_CLSID) && rightvt != (VARTYPE)15 /* undefined vt */ &&
         (rightvt < VT_VOID || rightvt > VT_LPWSTR)))
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
     else if ((leftvt == VT_NULL && rightvt == VT_DISPATCH) ||
         (leftvt == VT_DISPATCH && rightvt == VT_NULL))
         resvt = VT_NULL;
     else if (leftvt == VT_DISPATCH || rightvt == VT_DISPATCH ||
         leftvt == VT_ERROR || rightvt == VT_ERROR)
-        return DISP_E_TYPEMISMATCH;
+    {
+        hres = DISP_E_TYPEMISMATCH;
+        goto end;
+    }
     else if (leftvt == VT_NULL || rightvt == VT_NULL)
         resvt = VT_NULL;
     else if ((leftvt == VT_EMPTY && rightvt == VT_BSTR) ||
@@ -3685,32 +3872,22 @@ HRESULT WINAPI VarSub(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     else if (leftvt == VT_UI1 || rightvt == VT_UI1)
         resvt = VT_UI1;
     else
-        return DISP_E_TYPEMISMATCH;
-
-    VariantInit(&lv);
-    VariantInit(&rv);
+    {
+        hres = DISP_E_TYPEMISMATCH;
+        goto end;
+    }
 
     /* coerce to the result type */
     if (leftvt == VT_BSTR && rightvt == VT_DATE)
         hres = VariantChangeType(&lv, left, 0, VT_R8);
     else
         hres = VariantChangeType(&lv, left, 0, resvt);
-    if (hres != S_OK)
-    {
-        VariantClear(&lv);
-        VariantClear(&rv);
-        return hres;
-    }
+    if (hres != S_OK) goto end;
     if (leftvt == VT_DATE && rightvt == VT_BSTR)
         hres = VariantChangeType(&rv, right, 0, VT_R8);
     else
         hres = VariantChangeType(&rv, right, 0, resvt);
-    if (hres != S_OK)
-    {
-        VariantClear(&lv);
-        VariantClear(&rv);
-        return hres;
-    }
+    if (hres != S_OK) goto end;
 
     /* do the math */
     V_VT(result) = resvt;
@@ -3750,9 +3927,12 @@ HRESULT WINAPI VarSub(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     break;
     }
 
+end:
     VariantClear(&lv);
     VariantClear(&rv);
-
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
+    TRACE("returning 0x%8x (variant type %s)\n", hres, debugstr_VT(result));
     return hres;
 }
 
@@ -3780,16 +3960,40 @@ HRESULT WINAPI VarOr(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut)
     VARTYPE vt = VT_I4;
     VARIANT varLeft, varRight, varStr;
     HRESULT hRet;
+    VARIANT tempLeft, tempRight;
+
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
+    VariantInit(&varLeft);
+    VariantInit(&varRight);
+    VariantInit(&varStr);
 
     TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", pVarLeft, debugstr_VT(pVarLeft),
           debugstr_VF(pVarLeft), pVarRight, debugstr_VT(pVarRight),
           debugstr_VF(pVarRight), pVarOut);
 
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(pVarLeft) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarLeft, &tempLeft);
+        if (FAILED(hRet)) goto VarOr_Exit;
+        pVarLeft = &tempLeft;
+    }
+    if ((V_VT(pVarRight) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarRight, &tempRight);
+        if (FAILED(hRet)) goto VarOr_Exit;
+        pVarRight = &tempRight;
+    }
+
     if (V_EXTRA_TYPE(pVarLeft) || V_EXTRA_TYPE(pVarRight) ||
         V_VT(pVarLeft) == VT_UNKNOWN || V_VT(pVarRight) == VT_UNKNOWN ||
         V_VT(pVarLeft) == VT_DISPATCH || V_VT(pVarRight) == VT_DISPATCH ||
         V_VT(pVarLeft) == VT_RECORD || V_VT(pVarRight) == VT_RECORD)
-        return DISP_E_BADVARTYPE;
+    {
+        hRet = DISP_E_BADVARTYPE;
+        goto VarOr_Exit;
+    }
 
     V_VT(&varLeft) = V_VT(&varRight) = V_VT(&varStr) = VT_EMPTY;
 
@@ -3807,49 +4011,62 @@ HRESULT WINAPI VarOr(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut)
         case VT_DATE: case VT_R8:
             if (V_R8(pVarLeft))
                 goto VarOr_AsEmpty;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         case VT_BOOL:
             if (V_BOOL(pVarLeft))
                 *pVarOut = *pVarLeft;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
          case VT_I2: case VT_UI2:
             if (V_I2(pVarLeft))
                 goto VarOr_AsEmpty;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         case VT_I1:
             if (V_I1(pVarLeft))
                 goto VarOr_AsEmpty;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         case VT_UI1:
             if (V_UI1(pVarLeft))
                 *pVarOut = *pVarLeft;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         case VT_R4:
             if (V_R4(pVarLeft))
                 goto VarOr_AsEmpty;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         case VT_I4: case VT_UI4: case VT_INT: case VT_UINT:
             if (V_I4(pVarLeft))
                 goto VarOr_AsEmpty;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         case VT_CY:
             if (V_CY(pVarLeft).int64)
                 goto VarOr_AsEmpty;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         case VT_I8: case VT_UI8:
             if (V_I8(pVarLeft))
                 goto VarOr_AsEmpty;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         case VT_DECIMAL:
             if (DEC_HI32(&V_DECIMAL(pVarLeft)) || DEC_LO64(&V_DECIMAL(pVarLeft)))
                 goto VarOr_AsEmpty;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         case VT_BSTR:
         {
             VARIANT_BOOL b;
 
             if (!V_BSTR(pVarLeft))
-                return DISP_E_BADVARTYPE;
+            {
+                hRet = DISP_E_BADVARTYPE;
+                goto VarOr_Exit;
+            }
 
             hRet = VarBoolFromStr(V_BSTR(pVarLeft), LOCALE_USER_DEFAULT, VAR_LOCALBOOL, &b);
             if (SUCCEEDED(hRet) && b)
@@ -3857,13 +4074,15 @@ HRESULT WINAPI VarOr(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut)
                 V_VT(pVarOut) = VT_BOOL;
                 V_BOOL(pVarOut) = b;
             }
-            return hRet;
+            goto VarOr_Exit;
         }
         case VT_NULL: case VT_EMPTY:
             V_VT(pVarOut) = VT_NULL;
-            return S_OK;
+            hRet = S_OK;
+            goto VarOr_Exit;
         default:
-            return DISP_E_BADVARTYPE;
+            hRet = DISP_E_BADVARTYPE;
+            goto VarOr_Exit;
         }
     }
 
@@ -3881,7 +4100,10 @@ VarOr_AsEmpty:
         {
         case VT_BSTR:
             if (!V_BSTR(pVarLeft))
-                return DISP_E_BADVARTYPE;
+            {
+                hRet = DISP_E_BADVARTYPE;
+                goto VarOr_Exit;
+            }
 
             hRet = VariantCopy(&varStr, pVarLeft);
             if (FAILED(hRet))
@@ -3903,7 +4125,8 @@ VarOr_AsEmpty:
             V_VT(pVarOut) = VT_I8;
             break;
         default:
-            return DISP_E_BADVARTYPE;
+            hRet = DISP_E_BADVARTYPE;
+            goto VarOr_Exit;
         }
         hRet = VariantCopy(&varLeft, pVarLeft);
         if (FAILED(hRet))
@@ -3917,14 +4140,16 @@ VarOr_AsEmpty:
     {
         V_VT(pVarOut) = VT_BOOL;
         V_BOOL(pVarOut) = V_BOOL(pVarLeft) | V_BOOL(pVarRight);
-        return S_OK;
+        hRet = S_OK;
+        goto VarOr_Exit;
     }
 
     if (V_VT(pVarLeft) == VT_UI1 && V_VT(pVarRight) == VT_UI1)
     {
         V_VT(pVarOut) = VT_UI1;
         V_UI1(pVarOut) = V_UI1(pVarLeft) | V_UI1(pVarRight);
-        return S_OK;
+        hRet = S_OK;
+        goto VarOr_Exit;
     }
 
     if (V_VT(pVarLeft) == VT_BSTR)
@@ -3953,7 +4178,10 @@ VarOr_AsEmpty:
     else if (V_VT(pVarLeft) == VT_I8 || V_VT(pVarRight) == VT_I8)
     {
         if (V_VT(pVarLeft) == VT_INT || V_VT(pVarRight) == VT_INT)
-            return DISP_E_TYPEMISMATCH;
+        {
+            hRet = DISP_E_TYPEMISMATCH;
+            goto VarOr_Exit;
+        }
         vt = VT_I8;
     }
 
@@ -4013,6 +4241,8 @@ VarOr_Exit:
     VariantClear(&varStr);
     VariantClear(&varLeft);
     VariantClear(&varRight);
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
     return hRet;
 }
 
@@ -4043,15 +4273,28 @@ HRESULT WINAPI VarAbs(LPVARIANT pVarIn, LPVARIANT pVarOut)
 {
     VARIANT varIn;
     HRESULT hRet = S_OK;
+    VARIANT temp;
+
+    VariantInit(&temp);
 
     TRACE("(%p->(%s%s),%p)\n", pVarIn, debugstr_VT(pVarIn),
           debugstr_VF(pVarIn), pVarOut);
 
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(pVarIn) & VT_TYPEMASK) == VT_DISPATCH && ((V_VT(pVarIn) & ~VT_TYPEMASK) == 0))
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarIn, &temp);
+        if (FAILED(hRet)) goto VarAbs_Exit;
+        pVarIn = &temp;
+    }
+
     if (V_ISARRAY(pVarIn) || V_VT(pVarIn) == VT_UNKNOWN ||
         V_VT(pVarIn) == VT_DISPATCH || V_VT(pVarIn) == VT_RECORD ||
         V_VT(pVarIn) == VT_ERROR)
-        return DISP_E_TYPEMISMATCH;
-
+    {
+        hRet = DISP_E_TYPEMISMATCH;
+        goto VarAbs_Exit;
+    }
     *pVarOut = *pVarIn; /* Shallow copy the value, and invert it if needed */
 
 #define ABS_CASE(typ,min) \
@@ -4101,6 +4344,8 @@ HRESULT WINAPI VarAbs(LPVARIANT pVarIn, LPVARIANT pVarOut)
         hRet = DISP_E_BADVARTYPE;
     }
 
+VarAbs_Exit:
+    VariantClear(&temp);
     return hRet;
 }
 
@@ -4132,10 +4377,20 @@ HRESULT WINAPI VarAbs(LPVARIANT pVarIn, LPVARIANT pVarOut)
 HRESULT WINAPI VarFix(LPVARIANT pVarIn, LPVARIANT pVarOut)
 {
     HRESULT hRet = S_OK;
+    VARIANT temp;
+
+    VariantInit(&temp);
 
     TRACE("(%p->(%s%s),%p)\n", pVarIn, debugstr_VT(pVarIn),
           debugstr_VF(pVarIn), pVarOut);
 
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(pVarIn) & VT_TYPEMASK) == VT_DISPATCH && ((V_VT(pVarIn) & ~VT_TYPEMASK) == 0))
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarIn, &temp);
+        if (FAILED(hRet)) goto VarFix_Exit;
+        pVarIn = &temp;
+    }
     V_VT(pVarOut) = V_VT(pVarIn);
 
     switch (V_VT(pVarIn))
@@ -4193,8 +4448,10 @@ HRESULT WINAPI VarFix(LPVARIANT pVarIn, LPVARIANT pVarOut)
         else
             hRet = DISP_E_TYPEMISMATCH;
     }
+VarFix_Exit:
     if (FAILED(hRet))
       V_VT(pVarOut) = VT_EMPTY;
+    VariantClear(&temp);
 
     return hRet;
 }
@@ -4227,10 +4484,20 @@ HRESULT WINAPI VarFix(LPVARIANT pVarIn, LPVARIANT pVarOut)
 HRESULT WINAPI VarInt(LPVARIANT pVarIn, LPVARIANT pVarOut)
 {
     HRESULT hRet = S_OK;
+    VARIANT temp;
+
+    VariantInit(&temp);
 
     TRACE("(%p->(%s%s),%p)\n", pVarIn, debugstr_VT(pVarIn),
           debugstr_VF(pVarIn), pVarOut);
 
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(pVarIn) & VT_TYPEMASK) == VT_DISPATCH && ((V_VT(pVarIn) & ~VT_TYPEMASK) == 0))
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarIn, &temp);
+        if (FAILED(hRet)) goto VarInt_Exit;
+        pVarIn = &temp;
+    }
     V_VT(pVarOut) = V_VT(pVarIn);
 
     switch (V_VT(pVarIn))
@@ -4254,8 +4521,10 @@ HRESULT WINAPI VarInt(LPVARIANT pVarIn, LPVARIANT pVarOut)
         hRet = VarDecInt(&V_DECIMAL(pVarIn), &V_DECIMAL(pVarOut));
         break;
     default:
-        return VarFix(pVarIn, pVarOut);
+        hRet = VarFix(pVarIn, pVarOut);
     }
+VarInt_Exit:
+    VariantClear(&temp);
 
     return hRet;
 }
@@ -4290,6 +4559,7 @@ HRESULT WINAPI VarXor(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut
 {
     VARTYPE vt;
     VARIANT varLeft, varRight;
+    VARIANT tempLeft, tempRight;
     double d;
     HRESULT hRet;
 
@@ -4310,6 +4580,23 @@ HRESULT WINAPI VarXor(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut
         /* NULL XOR anything valid is NULL */
         V_VT(pVarOut) = VT_NULL;
         return S_OK;
+    }
+
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(pVarLeft) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarLeft, &tempLeft);
+        if (FAILED(hRet)) goto VarXor_Exit;
+        pVarLeft = &tempLeft;
+    }
+    if ((V_VT(pVarRight) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarRight, &tempRight);
+        if (FAILED(hRet)) goto VarXor_Exit;
+        pVarRight = &tempRight;
     }
 
     /* Copy our inputs so we don't disturb anything */
@@ -4346,7 +4633,10 @@ HRESULT WINAPI VarXor(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut
     if (V_VT(&varLeft) == VT_I8 || V_VT(&varRight) == VT_I8)
     {
         if (V_VT(pVarLeft) == VT_INT || V_VT(pVarRight) == VT_INT)
-            return DISP_E_TYPEMISMATCH;
+        {
+            hRet = DISP_E_TYPEMISMATCH;
+            goto VarXor_Exit;
+        }
         vt = VT_I8;
     }
     else
@@ -4424,6 +4714,8 @@ HRESULT WINAPI VarXor(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut
 VarXor_Exit:
     VariantClear(&varLeft);
     VariantClear(&varRight);
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
     return hRet;
 }
 
@@ -4505,10 +4797,20 @@ HRESULT WINAPI VarEqv(LPVARIANT pVarLeft, LPVARIANT pVarRight, LPVARIANT pVarOut
 HRESULT WINAPI VarNeg(LPVARIANT pVarIn, LPVARIANT pVarOut)
 {
     HRESULT hRet = S_OK;
+    VARIANT temp;
+
+    VariantInit(&temp);
 
     TRACE("(%p->(%s%s),%p)\n", pVarIn, debugstr_VT(pVarIn),
           debugstr_VF(pVarIn), pVarOut);
 
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(pVarIn) & VT_TYPEMASK) == VT_DISPATCH && ((V_VT(pVarIn) & ~VT_TYPEMASK) == 0))
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarIn, &temp);
+        if (FAILED(hRet)) goto VarNeg_Exit;
+        pVarIn = &temp;
+    }
     V_VT(pVarOut) = V_VT(pVarIn);
 
     switch (V_VT(pVarIn))
@@ -4580,8 +4882,10 @@ HRESULT WINAPI VarNeg(LPVARIANT pVarIn, LPVARIANT pVarOut)
         else
             hRet = DISP_E_TYPEMISMATCH;
     }
+VarNeg_Exit:
     if (FAILED(hRet))
       V_VT(pVarOut) = VT_EMPTY;
+    VariantClear(&temp);
 
     return hRet;
 }
@@ -4623,9 +4927,20 @@ HRESULT WINAPI VarNot(LPVARIANT pVarIn, LPVARIANT pVarOut)
 {
     VARIANT varIn;
     HRESULT hRet = S_OK;
+    VARIANT temp;
+
+    VariantInit(&temp);
 
     TRACE("(%p->(%s%s),%p)\n", pVarIn, debugstr_VT(pVarIn),
           debugstr_VF(pVarIn), pVarOut);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(pVarIn) & VT_TYPEMASK) == VT_DISPATCH && ((V_VT(pVarIn) & ~VT_TYPEMASK) == 0))
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarIn, &temp);
+        if (FAILED(hRet)) goto VarNot_Exit;
+        pVarIn = &temp;
+    }
 
     V_VT(pVarOut) = V_VT(pVarIn);
 
@@ -4698,8 +5013,10 @@ HRESULT WINAPI VarNot(LPVARIANT pVarIn, LPVARIANT pVarOut)
         else
             hRet = DISP_E_TYPEMISMATCH;
     }
+VarNot_Exit:
     if (FAILED(hRet))
       V_VT(pVarOut) = VT_EMPTY;
+    VariantClear(&temp);
 
     return hRet;
 }
@@ -4728,8 +5045,19 @@ HRESULT WINAPI VarRound(LPVARIANT pVarIn, int deci, LPVARIANT pVarOut)
     VARIANT varIn;
     HRESULT hRet = S_OK;
     float factor;
+    VARIANT temp;
+
+    VariantInit(&temp);
 
     TRACE("(%p->(%s%s),%d)\n", pVarIn, debugstr_VT(pVarIn), debugstr_VF(pVarIn), deci);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(pVarIn) & VT_TYPEMASK) == VT_DISPATCH && ((V_VT(pVarIn) & ~VT_TYPEMASK) == 0))
+    {
+        hRet = VARIANT_FetchDispatchValue(pVarIn, &temp);
+        if (FAILED(hRet)) goto VarRound_Exit;
+        pVarIn = &temp;
+    }
 
     switch (V_VT(pVarIn))
     {
@@ -4821,9 +5149,10 @@ HRESULT WINAPI VarRound(LPVARIANT pVarIn, int deci, LPVARIANT pVarOut)
 		V_VT(pVarIn) & VT_TYPEMASK, deci);
 	hRet = DISP_E_BADVARTYPE;
     }
-
+VarRound_Exit:
     if (FAILED(hRet))
       V_VT(pVarOut) = VT_EMPTY;
+    VariantClear(&temp);
 
     TRACE("returning 0x%08x (%s%s),%f\n", hRet, debugstr_VT(pVarOut),
 	debugstr_VF(pVarOut), (V_VT(pVarOut) == VT_R4) ? V_R4(pVarOut) :
@@ -4856,6 +5185,15 @@ HRESULT WINAPI VarIdiv(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     VARTYPE leftvt,rightvt;
     VARTYPE rightExtraFlags,leftExtraFlags,ExtraFlags;
     VARIANT lv,rv;
+    VARIANT tempLeft, tempRight;
+
+    TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
+          debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), result);
+
+    VariantInit(&lv);
+    VariantInit(&rv);
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
 
     leftvt = V_VT(left)&VT_TYPEMASK;
     rightvt = V_VT(right)&VT_TYPEMASK;
@@ -4863,26 +5201,30 @@ HRESULT WINAPI VarIdiv(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     rightExtraFlags = V_VT(right)&(~VT_TYPEMASK);
 
     if (leftExtraFlags != rightExtraFlags)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
     ExtraFlags = leftExtraFlags;
 
-    TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
-          debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), result);
-
-    /* Native VarIdiv always returns a error when using any extra
+    /* Native VarIdiv always returns an error when using extra
      * flags or if the variant combination is I8 and INT.
      */
     if ((leftvt == VT_I8 && rightvt == VT_INT) ||
         (leftvt == VT_INT && rightvt == VT_I8) ||
         (rightvt == VT_EMPTY && leftvt != VT_NULL) ||
         ExtraFlags != 0)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
 
     /* Determine variant type */
     else if (leftvt == VT_NULL || rightvt == VT_NULL)
     {
         V_VT(result) = VT_NULL;
-        return S_OK;
+        hres = S_OK;
+        goto end;
     }
     else if (leftvt == VT_I8 || rightvt == VT_I8)
         resvt = VT_I8;
@@ -4907,26 +5249,16 @@ HRESULT WINAPI VarIdiv(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     else if (leftvt == VT_UI1 || rightvt == VT_UI1)
         resvt = VT_UI1;
     else
-        return DISP_E_BADVARTYPE;
-
-    VariantInit(&lv);
-    VariantInit(&rv);
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto end;
+    }
 
     /* coerce to the result type */
     hres = VariantChangeType(&lv, left, 0, resvt);
-    if (hres != S_OK)
-    {
-        VariantClear(&lv);
-        VariantClear(&rv);
-        return hres;
-    }
+    if (hres != S_OK) goto end;
     hres = VariantChangeType(&rv, right, 0, resvt);
-    if (hres != S_OK)
-    {
-        VariantClear(&lv);
-        VariantClear(&rv);
-        return hres;
-    }
+    if (hres != S_OK) goto end;
 
     /* do the math */
     V_VT(result) = resvt;
@@ -4973,8 +5305,11 @@ HRESULT WINAPI VarIdiv(LPVARIANT left, LPVARIANT right, LPVARIANT result)
             leftvt,rightvt);
     }
 
+end:
     VariantClear(&lv);
     VariantClear(&rv);
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
 
     return hres;
 }
@@ -5005,12 +5340,29 @@ HRESULT WINAPI VarMod(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     HRESULT      rc         = E_FAIL;
     int          resT = 0;
     VARIANT      lv,rv;
+    VARIANT tempLeft, tempRight;
 
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
     VariantInit(&lv);
     VariantInit(&rv);
 
     TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
 		  debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), result);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(left) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        rc = VARIANT_FetchDispatchValue(left, &tempLeft);
+        if (FAILED(rc)) goto end;
+        left = &tempLeft;
+    }
+    if ((V_VT(right) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        rc = VARIANT_FetchDispatchValue(right, &tempRight);
+        if (FAILED(rc)) goto end;
+        right = &tempRight;
+    }
 
     /* check for invalid inputs */
     lOk = TRUE;
@@ -5032,24 +5384,26 @@ HRESULT WINAPI VarMod(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     case VT_EMPTY:
     case VT_DATE :
     case VT_BSTR :
+    case VT_DECIMAL:
       break;
     case VT_VARIANT:
     case VT_UNKNOWN:
       V_VT(result) = VT_EMPTY;
-      return DISP_E_TYPEMISMATCH;
-    case VT_DECIMAL:
-      V_VT(result) = VT_EMPTY;
-      return E_INVALIDARG;
+      rc = DISP_E_TYPEMISMATCH;
+      goto end;
     case VT_ERROR:
-      return DISP_E_TYPEMISMATCH;
+      rc = DISP_E_TYPEMISMATCH;
+      goto end;
     case VT_RECORD:
       V_VT(result) = VT_EMPTY;
-      return DISP_E_TYPEMISMATCH;
+      rc = DISP_E_TYPEMISMATCH;
+      goto end;
     case VT_NULL:
       break;
     default:
       V_VT(result) = VT_EMPTY;
-      return DISP_E_BADVARTYPE;
+      rc = DISP_E_BADVARTYPE;
+      goto end;
     }
 
 
@@ -5063,13 +5417,15 @@ HRESULT WINAPI VarMod(LPVARIANT left, LPVARIANT right, LPVARIANT result)
       if((V_VT(left) == VT_INT) && (V_VT(right) == VT_I8))
       {
 	V_VT(result) = VT_EMPTY;
-	return DISP_E_TYPEMISMATCH;
+        rc = DISP_E_TYPEMISMATCH;
+        goto end;
       }
     case VT_INT  :
       if((V_VT(right) == VT_INT) && (V_VT(left) == VT_I8))
       {
 	V_VT(result) = VT_EMPTY;
-	return DISP_E_TYPEMISMATCH;
+        rc = DISP_E_TYPEMISMATCH;
+        goto end;
       }
     case VT_UI1  :
     case VT_UI2  :
@@ -5082,65 +5438,70 @@ HRESULT WINAPI VarMod(LPVARIANT left, LPVARIANT right, LPVARIANT result)
       if(V_VT(left) == VT_EMPTY)
       {
 	V_VT(result) = VT_I4;
-	return S_OK;
+        rc = S_OK;
+        goto end;
       }
     case VT_EMPTY:
     case VT_DATE :
+    case VT_DECIMAL:
+      if(V_VT(left) == VT_ERROR)
+      {
+	V_VT(result) = VT_EMPTY;
+        rc = DISP_E_TYPEMISMATCH;
+        goto end;
+      }
     case VT_BSTR:
       if(V_VT(left) == VT_NULL)
       {
 	V_VT(result) = VT_NULL;
-	return S_OK;
+        rc = S_OK;
+        goto end;
       }
       break;
 
     case VT_VOID:
       V_VT(result) = VT_EMPTY;
-      return DISP_E_BADVARTYPE;
+      rc = DISP_E_BADVARTYPE;
+      goto end;
     case VT_NULL:
       if(V_VT(left) == VT_VOID)
       {
 	V_VT(result) = VT_EMPTY;
-	return DISP_E_BADVARTYPE;
+        rc = DISP_E_BADVARTYPE;
       } else if((V_VT(left) == VT_NULL) || (V_VT(left) == VT_EMPTY) || (V_VT(left) == VT_ERROR) ||
 		lOk)
       {
         V_VT(result) = VT_NULL;
-	return S_OK;
+        rc = S_OK;
       } else
       {
 	V_VT(result) = VT_NULL;
-	return DISP_E_BADVARTYPE;
+        rc = DISP_E_BADVARTYPE;
       }
+      goto end;
     case VT_VARIANT:
     case VT_UNKNOWN:
       V_VT(result) = VT_EMPTY;
-      return DISP_E_TYPEMISMATCH;
-    case VT_DECIMAL:
-      if(V_VT(left) == VT_ERROR)
-      {
-	V_VT(result) = VT_EMPTY;
-	return DISP_E_TYPEMISMATCH;
-      } else
-      {
-	V_VT(result) = VT_EMPTY;
-        return E_INVALIDARG;
-      }
+      rc = DISP_E_TYPEMISMATCH;
+      goto end;
     case VT_ERROR:
-      return DISP_E_TYPEMISMATCH;
+      rc = DISP_E_TYPEMISMATCH;
+      goto end;
     case VT_RECORD:
       if((V_VT(left) == 15) || ((V_VT(left) >= 24) && (V_VT(left) <= 35)) || !lOk)
       {
 	V_VT(result) = VT_EMPTY;
-	return DISP_E_BADVARTYPE;
+        rc = DISP_E_BADVARTYPE;
       } else
       {
 	V_VT(result) = VT_EMPTY;
-	return DISP_E_TYPEMISMATCH;
+        rc = DISP_E_TYPEMISMATCH;
       }
+      goto end;
     default:
       V_VT(result) = VT_EMPTY;
-      return DISP_E_BADVARTYPE;
+      rc = DISP_E_BADVARTYPE;
+      goto end;
     }
 
     /* determine the result type */
@@ -5161,21 +5522,22 @@ HRESULT WINAPI VarMod(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     if(FAILED(rc))
     {
       FIXME("Could not convert left type %d to %d? rc == 0x%X\n", V_VT(left), VT_I8, rc);
-      return rc;
+      goto end;
     }
 
     rc = VariantChangeType(&rv, right, 0, VT_I8);
     if(FAILED(rc))
     {
       FIXME("Could not convert right type %d to %d? rc == 0x%X\n", V_VT(right), VT_I8, rc);
-      return rc;
+      goto end;
     }
 
     /* if right is zero set VT_EMPTY and return divide by zero */
     if(V_I8(&rv) == 0)
     {
       V_VT(result) = VT_EMPTY;
-      return DISP_E_DIVBYZERO;
+      rc = DISP_E_DIVBYZERO;
+      goto end;
     }
 
     /* perform the modulo operation */
@@ -5189,10 +5551,15 @@ HRESULT WINAPI VarMod(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     if(FAILED(rc))
     {
       FIXME("Could not convert 0x%x to %d?\n", V_VT(result), resT);
-      return rc;
+      /* fall to end of function */
     }
 
-    return S_OK;
+end:
+    VariantClear(&lv);
+    VariantClear(&rv);
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
+    return rc;
 }
 
 /**********************************************************************
@@ -5211,17 +5578,34 @@ HRESULT WINAPI VarMod(LPVARIANT left, LPVARIANT right, LPVARIANT result)
  */
 HRESULT WINAPI VarPow(LPVARIANT left, LPVARIANT right, LPVARIANT result)
 {
-    HRESULT hr;
+    HRESULT hr = S_OK;
     VARIANT dl,dr;
     VARTYPE resvt = VT_EMPTY;
     VARTYPE leftvt,rightvt;
     VARTYPE rightExtraFlags,leftExtraFlags,ExtraFlags;
+    VARIANT tempLeft, tempRight;
 
     TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left), debugstr_VF(left),
           right, debugstr_VT(right), debugstr_VF(right), result);
 
     VariantInit(&dl);
     VariantInit(&dr);
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(left) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hr = VARIANT_FetchDispatchValue(left, &tempLeft);
+        if (FAILED(hr)) goto end;
+        left = &tempLeft;
+    }
+    if ((V_VT(right) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hr = VARIANT_FetchDispatchValue(right, &tempRight);
+        if (FAILED(hr)) goto end;
+        right = &tempRight;
+    }
 
     leftvt = V_VT(left)&VT_TYPEMASK;
     rightvt = V_VT(right)&VT_TYPEMASK;
@@ -5229,17 +5613,24 @@ HRESULT WINAPI VarPow(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     rightExtraFlags = V_VT(right)&(~VT_TYPEMASK);
 
     if (leftExtraFlags != rightExtraFlags)
-        return DISP_E_BADVARTYPE;
+    {
+        hr = DISP_E_BADVARTYPE;
+        goto end;
+    }
     ExtraFlags = leftExtraFlags;
 
-    /* Native VarPow always returns a error when using any extra flags */
+    /* Native VarPow always returns an error when using extra flags */
     if (ExtraFlags != 0)
-        return DISP_E_BADVARTYPE;
+    {
+        hr = DISP_E_BADVARTYPE;
+        goto end;
+    }
 
     /* Determine return type */
     else if (leftvt == VT_NULL || rightvt == VT_NULL) {
         V_VT(result) = VT_NULL;
-        return S_OK;
+        hr = S_OK;
+        goto end;
     }
     else if ((leftvt == VT_EMPTY || leftvt == VT_I2 ||
         leftvt == VT_I4 || leftvt == VT_R4 ||
@@ -5255,30 +5646,35 @@ HRESULT WINAPI VarPow(LPVARIANT left, LPVARIANT right, LPVARIANT result)
         (rightvt >= VT_I1 && rightvt <= VT_UINT)))
         resvt = VT_R8;
     else
-        return DISP_E_BADVARTYPE;
+    {
+        hr = DISP_E_BADVARTYPE;
+        goto end;
+    }
 
     hr = VariantChangeType(&dl,left,0,resvt);
     if (!SUCCEEDED(hr)) {
         ERR("Could not change passed left argument to VT_R8, handle it differently.\n");
-        VariantClear(&dl);
-        return E_FAIL;
+        hr = E_FAIL;
+        goto end;
     }
 
     hr = VariantChangeType(&dr,right,0,resvt);
     if (!SUCCEEDED(hr)) {
         ERR("Could not change passed right argument to VT_R8, handle it differently.\n");
-        VariantClear(&dl);
-        VariantClear(&dr);
-        return E_FAIL;
+        hr = E_FAIL;
+        goto end;
     }
 
     V_VT(result) = VT_R8;
     V_R8(result) = pow(V_R8(&dl),V_R8(&dr));
 
+end:
     VariantClear(&dl);
     VariantClear(&dr);
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
 
-    return S_OK;
+    return hr;
 }
 
 /**********************************************************************
@@ -5303,6 +5699,29 @@ HRESULT WINAPI VarImp(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     VARTYPE rightExtraFlags,leftExtraFlags,ExtraFlags;
     VARIANT lv,rv;
     double d;
+    VARIANT tempLeft, tempRight;
+
+    VariantInit(&lv);
+    VariantInit(&rv);
+    VariantInit(&tempLeft);
+    VariantInit(&tempRight);
+
+    TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
+          debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), result);
+
+    /* Handle VT_DISPATCH by storing and taking address of returned value */
+    if ((V_VT(left) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hres = VARIANT_FetchDispatchValue(left, &tempLeft);
+        if (FAILED(hres)) goto VarImp_Exit;
+        left = &tempLeft;
+    }
+    if ((V_VT(right) & VT_TYPEMASK) == VT_DISPATCH)
+    {
+        hres = VARIANT_FetchDispatchValue(right, &tempRight);
+        if (FAILED(hres)) goto VarImp_Exit;
+        right = &tempRight;
+    }
 
     leftvt = V_VT(left)&VT_TYPEMASK;
     rightvt = V_VT(right)&VT_TYPEMASK;
@@ -5310,25 +5729,29 @@ HRESULT WINAPI VarImp(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     rightExtraFlags = V_VT(right)&(~VT_TYPEMASK);
 
     if (leftExtraFlags != rightExtraFlags)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto VarImp_Exit;
+    }
     ExtraFlags = leftExtraFlags;
 
-    TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
-          debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), result);
-
-    /* Native VarImp always returns a error when using any extra
+    /* Native VarImp always returns an error when using extra
      * flags or if the variants are I8 and INT.
      */
     if ((leftvt == VT_I8 && rightvt == VT_INT) ||
         ExtraFlags != 0)
-        return DISP_E_BADVARTYPE;
+    {
+        hres = DISP_E_BADVARTYPE;
+        goto VarImp_Exit;
+    }
 
     /* Determine result type */
     else if ((leftvt == VT_NULL && rightvt == VT_NULL) ||
         (leftvt == VT_NULL && rightvt == VT_EMPTY))
     {
         V_VT(result) = VT_NULL;
-        return S_OK;
+        hres = S_OK;
+        goto VarImp_Exit;
     }
     else if (leftvt == VT_I8 || rightvt == VT_I8)
         resvt = VT_I8;
@@ -5356,9 +5779,6 @@ HRESULT WINAPI VarImp(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     else if (leftvt == VT_BOOL || rightvt == VT_BOOL ||
         leftvt == VT_BSTR || rightvt == VT_BSTR)
         resvt = VT_BOOL;
-
-    VariantInit(&lv);
-    VariantInit(&rv);
 
     /* VT_NULL requires special handling for when the opposite
      * variant is equal to something other than -1.
@@ -5504,6 +5924,8 @@ VarImp_Exit:
 
     VariantClear(&lv);
     VariantClear(&rv);
+    VariantClear(&tempLeft);
+    VariantClear(&tempRight);
 
     return hres;
 }

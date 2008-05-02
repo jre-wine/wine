@@ -46,13 +46,13 @@ typedef struct {
 
 static void dump_BINDINFO(BINDINFO *bi)
 {
-    static const char *BINDINFOF_str[] = {
+    static const char * const BINDINFOF_str[] = {
         "#0",
         "BINDINFOF_URLENCODESTGMEDDATA",
         "BINDINFOF_URLENCODEDEXTRAINFO"
     };
 
-    static const char *BINDVERB_str[] = {
+    static const char * const BINDVERB_str[] = {
         "BINDVERB_GET",
         "BINDVERB_POST",
         "BINDVERB_PUT",
@@ -317,8 +317,8 @@ static IBindStatusCallback *create_callback(DocHost *This, PBYTE post_data,
     return BINDSC(ret);
 }
 
-static void on_before_navigate2(DocHost *This, LPWSTR url, PBYTE post_data, ULONG post_data_len,
-                                LPWSTR headers, VARIANT_BOOL *cancel)
+static void on_before_navigate2(DocHost *This, LPCWSTR url, const BYTE *post_data,
+                                ULONG post_data_len, LPWSTR headers, VARIANT_BOOL *cancel)
 {
     VARIANT var_url, var_flags, var_frame_name, var_post_data, var_post_data2, var_headers;
     DISPPARAMS dispparams;
@@ -413,8 +413,7 @@ static BOOL try_application_url(LPCWSTR url)
     return ShellExecuteExW(&exec_info);
 }
 
-static HRESULT navigate(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
-                        IBindStatusCallback *callback)
+static HRESULT navigate(DocHost *This, IMoniker *mon, IBindCtx *bindctx)
 {
     IOleObject *oleobj;
     IPersistMoniker *persist;
@@ -451,13 +450,19 @@ static HRESULT navigate(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
     if(FAILED(hres))
         return hres;
 
-    if(FAILED(hres)) {
-        IPersistMoniker_Release(persist);
-        return hres;
-    }
+    if(This->frame)
+        IOleInPlaceFrame_EnableModeless(This->frame, FALSE); /* FIXME */
 
     hres = IPersistMoniker_Load(persist, FALSE, mon, bindctx, 0);
     IPersistMoniker_Release(persist);
+
+    if(This->frame) {
+        static const WCHAR empty[] = {0};
+
+        IOleInPlaceFrame_SetStatusText(This->frame, empty); /* FIXME */
+        IOleInPlaceFrame_EnableModeless(This->frame, TRUE); /* FIXME */
+    }
+
     if(FAILED(hres)) {
         WARN("Load failed: %08x\n", hres);
         return hres;
@@ -499,16 +504,18 @@ static HRESULT bind_url_to_object(DocHost *This, LPCWSTR url, PBYTE post_data, U
 
     callback = create_callback(This, post_data, post_data_len, (LPWSTR)headers, &cancel);
     CreateAsyncBindCtx(0, callback, 0, &bindctx);
+    IBindStatusCallback_Release(callback);
 
-    hres = navigate(This, mon, bindctx, callback);
+    hres = navigate(This, mon, bindctx);
 
+    IBindCtx_Release(bindctx);
     IMoniker_Release(mon);
 
     return hres;
 }
 
-HRESULT navigate_url(DocHost *This, BSTR url, VARIANT *Flags, VARIANT *TargetFrameName,
-        VARIANT *PostData, VARIANT *Headers)
+HRESULT navigate_url(DocHost *This, LPCWSTR url, const VARIANT *Flags,
+                     const VARIANT *TargetFrameName, VARIANT *PostData, VARIANT *Headers)
 {
     PBYTE post_data = NULL;
     ULONG post_data_len = 0;
@@ -521,15 +528,13 @@ HRESULT navigate_url(DocHost *This, BSTR url, VARIANT *Flags, VARIANT *TargetFra
        || (TargetFrameName && V_VT(TargetFrameName) != VT_EMPTY))
         FIXME("Unsupported arguments\n");
 
-    if(PostData && V_VT(PostData) != VT_EMPTY && V_VT(PostData) != VT_ERROR) {
-        if(V_VT(PostData) != (VT_ARRAY | VT_UI1)
-           || V_ARRAY(PostData)->cDims != 1) {
-            WARN("Invalid PostData\n");
-            return E_INVALIDARG;
-        }
+    if(PostData) {
+        TRACE("PostData vt=%d\n", V_VT(PostData));
 
-        SafeArrayAccessData(V_ARRAY(PostData), (void**)&post_data);
-        post_data_len = V_ARRAY(PostData)->rgsabound[0].cElements;
+        if(V_VT(PostData) == (VT_ARRAY | VT_UI1)) {
+            SafeArrayAccessData(V_ARRAY(PostData), (void**)&post_data);
+            post_data_len = V_ARRAY(PostData)->rgsabound[0].cElements;
+        }
     }
 
     if(Headers && V_VT(Headers) != VT_EMPTY && V_VT(Headers) != VT_ERROR) {
@@ -548,8 +553,8 @@ HRESULT navigate_url(DocHost *This, BSTR url, VARIANT *Flags, VARIANT *TargetFra
     return hres;
 }
 
-HRESULT navigate_hlink(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
-                       IBindStatusCallback *callback)
+static HRESULT navigate_hlink(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
+                              IBindStatusCallback *callback)
 {
     IHttpNegotiate *http_negotiate;
     LPWSTR url = NULL;
@@ -602,7 +607,16 @@ HRESULT navigate_hlink(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
 
     This->url = url;
 
-    return navigate(This, mon, bindctx, callback);
+    return navigate(This, mon, bindctx);
+}
+
+HRESULT go_home(DocHost *This)
+{
+    static const WCHAR wszAboutBlank[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
+
+    FIXME("stub\n");
+
+    return navigate_url(This, wszAboutBlank, NULL, NULL, NULL, NULL);
 }
 
 #define HLINKFRAME_THIS(iface) DEFINE_THIS(WebBrowser, HlinkFrame, iface)

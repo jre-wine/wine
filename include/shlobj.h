@@ -34,22 +34,36 @@ extern "C" {
 #include <shtypes.h>
 #include <shobjidl.h>
 
+#ifndef HPSXA_DEFINED
+#define HPSXA_DEFINED
+DECLARE_HANDLE(HPSXA);
+#endif
+
+UINT         WINAPI SHAddFromPropSheetExtArray(HPSXA,LPFNADDPROPSHEETPAGE,LPARAM);
 LPVOID       WINAPI SHAlloc(ULONG);
 HRESULT      WINAPI SHCoCreateInstance(LPCWSTR,const CLSID*,IUnknown*,REFIID,LPVOID*);
+HPSXA        WINAPI SHCreatePropSheetExtArray(HKEY,LPCWSTR,UINT);
+HPSXA        WINAPI SHCreatePropSheetExtArrayEx(HKEY,LPCWSTR,UINT,IDataObject*);
 DWORD        WINAPI SHCLSIDFromStringA(LPCSTR,CLSID*);
 DWORD        WINAPI SHCLSIDFromStringW(LPCWSTR,CLSID*);
 #define             SHCLSIDFromString WINELIB_NAME_AW(SHCLSIDFromString)
 HRESULT      WINAPI SHCreateStdEnumFmtEtc(DWORD,const FORMATETC *,IEnumFORMATETC**);
+void         WINAPI SHDestroyPropSheetExtArray(HPSXA);
 BOOL         WINAPI SHFindFiles(LPCITEMIDLIST,LPCITEMIDLIST);
 DWORD        WINAPI SHFormatDrive(HWND,UINT,UINT,UINT);
 void         WINAPI SHFree(LPVOID);
 BOOL         WINAPI GetFileNameFromBrowse(HWND,LPSTR,DWORD,LPCSTR,LPCSTR,LPCSTR,LPCSTR);
+HRESULT      WINAPI SHGetInstanceExplorer(IUnknown**);
 BOOL         WINAPI SHGetPathFromIDListA(LPCITEMIDLIST,LPSTR);
 BOOL         WINAPI SHGetPathFromIDListW(LPCITEMIDLIST,LPWSTR);
 #define             SHGetPathFromIDList WINELIB_NAME_AW(SHGetPathFromIDList)
 INT          WINAPI SHHandleUpdateImage(LPCITEMIDLIST);
 HRESULT      WINAPI SHILCreateFromPath(LPCWSTR,LPITEMIDLIST*,DWORD*);
 HRESULT      WINAPI SHLoadOLE(LPARAM);
+HRESULT      WINAPI SHPathPrepareForWriteA(HWND,IUnknown*,LPCSTR,DWORD);
+HRESULT      WINAPI SHPathPrepareForWriteW(HWND,IUnknown*,LPCWSTR,DWORD);
+#define             SHPathPrepareForWrite WINELIB_NAME_AW(SHPathPrepareForWrite);
+UINT         WINAPI SHReplaceFromPropSheetExtArray(HPSXA,UINT,LPFNADDPROPSHEETPAGE,LPARAM);
 LPITEMIDLIST WINAPI SHSimpleIDListFromPath(LPCWSTR);
 int          WINAPI SHMapPIDLToSystemImageListIndex(IShellFolder*,LPCITEMIDLIST,int*);
 HRESULT      WINAPI SHStartNetConnectionDialog(HWND,LPCSTR,DWORD);
@@ -67,6 +81,15 @@ int          WINAPI RestartDialogEx(HWND,LPCWSTR,DWORD,DWORD);
 #define SHFMT_ID_DEFAULT	0xFFFF
 #define SHFMT_OPT_FULL		1
 #define SHFMT_OPT_SYSONLY	2
+
+/* SHPathPrepareForWrite flags */
+#define SHPPFW_NONE             0x00000000
+#define SHPPFW_DIRCREATE        0x00000001
+#define SHPPFW_DEFAULT          SHPPFW_DIRCREATE
+#define SHPPFW_ASKDIRCREATE     0x00000002
+#define SHPPFW_IGNOREFILENAME   0x00000004
+#define SHPPFW_NOWRITECHECK     0x00000008
+#define SHPPFW_MEDIACHECKONLY   0x00000010
 
 /* SHObjectProperties flags */
 #define SHOP_PRINTERNAME 0x01
@@ -127,7 +150,6 @@ typedef struct
 */
 
 typedef GUID SHELLVIEWID;
-#define SV_CLASS_NAME   ("SHELLDLL_DefView")
 
 #define FCIDM_SHVIEWFIRST       0x0000
 /* undocumented */
@@ -291,6 +313,53 @@ DECLARE_INTERFACE_(IInputObjectSite,IUnknown)
 #define IInputObjectSite_OnFocusChangeIS(p,a,b) (p)->lpVtbl->OnFocusChangeIS(p,a,b)
 #endif
 
+/* IObjMgr interface */
+#define INTERFACE IObjMgr
+DECLARE_INTERFACE_(IObjMgr,IUnknown)
+{
+    /*** IUnknown methods ***/
+    STDMETHOD_(HRESULT,QueryInterface) (THIS_ REFIID riid, void** ppvObject) PURE;
+    STDMETHOD_(ULONG,AddRef) (THIS) PURE;
+    STDMETHOD_(ULONG,Release) (THIS) PURE;
+    /*** IObjMgr methods ***/
+    STDMETHOD(Append)(THIS_ LPUNKNOWN punk) PURE;
+    STDMETHOD(Remove)(THIS_ LPUNKNOWN punk) PURE;
+};
+#undef INTERFACE
+
+#if !defined(__cplusplus) || defined(CINTERFACE)
+/*** IUnknown methods ***/
+#define IObjMgr_QueryInterface(p,a,b)  (p)->lpVtbl->QueryInterface(p,a,b)
+#define IObjMgr_AddRef(p)              (p)->lpVtbl->AddRef(p)
+#define IObjMgr_Release(p)             (p)->lpVtbl->Release(p)
+/*** IObjMgr methods ***/
+#define IObjMgr_Append(p,a) (p)->lpVtbl->Append(p,a)
+#define IObjMgr_Remove(p,a) (p)->lpVtbl->Remove(p,a)
+#endif
+
+/* IACList interface */
+#define INTERFACE IACList
+DECLARE_INTERFACE_(IACList,IUnknown)
+{
+    /*** IUnknown methods ***/
+    STDMETHOD_(HRESULT,QueryInterface) (THIS_ REFIID riid, void** ppvObject) PURE;
+    STDMETHOD_(ULONG,AddRef) (THIS) PURE;
+    STDMETHOD_(ULONG,Release) (THIS) PURE;
+    /*** IACList methods ***/
+    STDMETHOD(Expand)(THIS_ LPCOLESTR str) PURE;
+};
+#undef INTERFACE
+
+#if !defined(__cplusplus) || defined(CINTERFACE)
+/*** IUnknown methods ***/
+#define IACList_QueryInterface(p,a,b)  (p)->lpVtbl->QueryInterface(p,a,b)
+#define IACList_AddRef(p)              (p)->lpVtbl->AddRef(p)
+#define IACList_Release(p)             (p)->lpVtbl->Release(p)
+/*** IACList methods ***/
+#define IACList_Expand(p,a)             (p)->lpVtbl->Expand(p,a)
+#endif
+
+
 /****************************************************************************
 * SHAddToRecentDocs API
 */
@@ -344,6 +413,11 @@ typedef struct tagBROWSEINFOW {
 #define BIF_EDITBOX            0x0010
 #define BIF_VALIDATE           0x0020
 #define BIF_NEWDIALOGSTYLE     0x0040
+#define BIF_USENEWUI           (BIF_NEWDIALOGSTYLE | BIF_EDITBOX)
+#define BIF_BROWSEINCLUDEURLS  0x0080
+#define BIF_UAHINT             0x0100
+#define BIF_NONEWFOLDERBUTTON  0x0200
+#define BIF_NOTRANSLATETARGETS 0x0400
 
 #define BIF_BROWSEFORCOMPUTER  0x1000
 #define BIF_BROWSEFORPRINTER   0x2000
@@ -352,8 +426,9 @@ typedef struct tagBROWSEINFOW {
 /* message from browser */
 #define BFFM_INITIALIZED        1
 #define BFFM_SELCHANGED         2
-#define BFFM_VALIDATEFAILEDA    3   /* lParam:szPath ret:1(cont),0(EndDialog) */
-#define BFFM_VALIDATEFAILEDW    4   /* lParam:wzPath ret:1(cont),0(EndDialog) */
+#define BFFM_VALIDATEFAILEDA    3
+#define BFFM_VALIDATEFAILEDW    4
+#define BFFM_IUNKNOWN           5
 
 /* messages to browser */
 #define BFFM_SETSTATUSTEXTA     (WM_USER+100)
@@ -1001,7 +1076,7 @@ HRESULT WINAPI SHGetFolderPathW(HWND hwnd, int nFolder, HANDLE hToken, DWORD dwF
 #define CSIDL_SENDTO		0x0009
 #define CSIDL_BITBUCKET		0x000a
 #define CSIDL_STARTMENU		0x000b
-#define CSIDL_MYDOCUMENTS	0x000c
+#define CSIDL_MYDOCUMENTS	CSIDL_PERSONAL
 #define CSIDL_MYMUSIC		0x000d
 #define CSIDL_MYVIDEO		0x000e
 #define CSIDL_DESKTOPDIRECTORY	0x0010

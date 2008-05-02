@@ -25,7 +25,6 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "winreg.h"
 #include "setupapi.h"
 
@@ -48,35 +47,6 @@ DWORD WINAPI suErrorToIds16( WORD w1, WORD w2 )
 {
     FIXME( "%x %x: stub\n", w1, w2 );
     return 0;
-}
-
-/***********************************************************************
- *		SetupDiGetDeviceInfoListDetailA  (SETUPAPI.@)
- */
-BOOL WINAPI SetupDiGetDeviceInfoListDetailA(HDEVINFO devinfo, PSP_DEVINFO_LIST_DETAIL_DATA_A devinfo_data )
-{
-  FIXME("\n");
-  return FALSE;
-}
-
-/***********************************************************************
- *		SetupDiGetDeviceInfoListDetailW  (SETUPAPI.@)
- */
-BOOL WINAPI SetupDiGetDeviceInfoListDetailW(HDEVINFO devinfo, PSP_DEVINFO_LIST_DETAIL_DATA_W devinfo_data )
-{
-  FIXME("\n");
-  return FALSE;
-}
-
-/***********************************************************************
- *		  (SETUPAPI.@)
- *
- * NO WINAPI in description given
- */
-HDEVINFO WINAPI SetupDiGetClassDevsExA(const GUID *class, PCSTR filter, HWND parent, DWORD flags, HDEVINFO deviceset, PCSTR machine, PVOID reserved)
-{
-  FIXME("filter %s machine %s\n",debugstr_a(filter),debugstr_a(machine));
-  return FALSE;
 }
 
 /***********************************************************************
@@ -112,59 +82,10 @@ DWORD WINAPI CM_Get_Device_ID_ListA(
     return CR_SUCCESS;
 }
 
-
-/***********************************************************************
- *		SetupCopyOEMInfA  (SETUPAPI.@)
- */
-BOOL WINAPI SetupCopyOEMInfA(PCSTR sourceinffile, PCSTR sourcemedialoc,
-			    DWORD mediatype, DWORD copystyle, PSTR destinfname,
-			    DWORD destnamesize, PDWORD required,
-			    PSTR *destinfnamecomponent)
-{
-  FIXME("stub: source %s location %s ...\n", debugstr_a(sourceinffile),
-        debugstr_a(sourcemedialoc));
-  return FALSE;
-}
-
-/***********************************************************************
- *      SetupCopyOEMInfW  (SETUPAPI.@)
- */
-BOOL WINAPI SetupCopyOEMInfW(PCWSTR sourceinffile, PCWSTR sourcemedialoc,
-                DWORD mediatype, DWORD copystyle, PWSTR destinfname,
-                DWORD destnamesize, PDWORD required,
-                PWSTR *destinfnamecomponent)
-{
-  FIXME("stub: source %s location %s ...\n", debugstr_w(sourceinffile),
-        debugstr_w(sourcemedialoc));
-  return FALSE;
-}
-
-/***********************************************************************
- *      SetupGetSourceInfoA  (SETUPAPI.@)
- */
-BOOL WINAPI SetupGetSourceInfoA(HINF InfHandle, UINT SourceId, UINT InfoDesired,
-                PSTR ReturnBuffer, DWORD ReturnBufferSize, LPDWORD RequiredSize)
-{
-  FIXME("(%p, %d, %d, %p, %d, %p): stub\n", InfHandle, SourceId, InfoDesired,
-        ReturnBuffer, ReturnBufferSize, RequiredSize);
-  return FALSE;
-}
-
-/***********************************************************************
- *      SetupGetSourceInfoW  (SETUPAPI.@)
- */
-BOOL WINAPI SetupGetSourceInfoW(HINF InfHandle, UINT SourceId, UINT InfoDesired,
-                PWSTR ReturnBuffer, DWORD ReturnBufferSize, LPDWORD RequiredSize)
-{
-  FIXME("(%p, %d, %d, %p, %d, %p): stub\n", InfHandle, SourceId, InfoDesired,
-        ReturnBuffer, ReturnBufferSize, RequiredSize);
-  return FALSE;
-}
-
 /***********************************************************************
  *		SetupInitializeFileLogW(SETUPAPI.@)
  */
-HANDLE WINAPI SetupInitializeFileLogW(LPWSTR LogFileName, DWORD Flags)
+HSPFILELOG WINAPI SetupInitializeFileLogW(LPCWSTR LogFileName, DWORD Flags)
 {
     FIXME("Stub %s, 0x%x\n",debugstr_w(LogFileName),Flags);
     return INVALID_HANDLE_VALUE;
@@ -173,7 +94,7 @@ HANDLE WINAPI SetupInitializeFileLogW(LPWSTR LogFileName, DWORD Flags)
 /***********************************************************************
  *		SetupInitializeFileLogA(SETUPAPI.@)
  */
-HANDLE WINAPI SetupInitializeFileLogA(LPSTR LogFileName, DWORD Flags)
+HSPFILELOG WINAPI SetupInitializeFileLogA(LPCSTR LogFileName, DWORD Flags)
 {
     FIXME("Stub %s, 0x%x\n",debugstr_a(LogFileName),Flags);
     return INVALID_HANDLE_VALUE;
@@ -200,7 +121,7 @@ BOOL WINAPI RegistryDelnode(DWORD x, DWORD y)
 /***********************************************************************
  *      SetupCloseLog(SETUPAPI.@)
  */
-void WINAPI SetupCloseLog()
+void WINAPI SetupCloseLog(void)
 {
     FIXME("() stub\n");
 }
@@ -208,7 +129,7 @@ void WINAPI SetupCloseLog()
 /***********************************************************************
  *      SetupLogErrorW(SETUPAPI.@)
  */
-BOOL WINAPI SetupLogErrorW(PCWSTR MessageString, LogSeverity Severity)
+BOOL WINAPI SetupLogErrorW(LPCWSTR MessageString, LogSeverity Severity)
 {
     FIXME("(%s, %d) stub\n", debugstr_w(MessageString), Severity);
     return TRUE;
@@ -221,4 +142,51 @@ BOOL WINAPI SetupOpenLog(BOOL Reserved)
 {
     FIXME("(%d) stub\n", Reserved);
     return TRUE;
+}
+
+/***********************************************************************
+ *      SetupPromptReboot(SETUPAPI.@)
+ */
+INT WINAPI SetupPromptReboot( HSPFILEQ file_queue, HWND owner, BOOL scan_only )
+{
+    FIXME("%p, %p, %d\n", file_queue, owner, scan_only);
+    return 0;
+}
+
+/***********************************************************************
+ *      SetupSetSourceListA (SETUPAPI.@)
+ */
+BOOL WINAPI SetupSetSourceListA(DWORD flags, PCSTR *list, UINT count)
+{
+    FIXME("0x%08x %p %d\n", flags, list, count);
+    return FALSE;
+}
+
+/***********************************************************************
+ *      SetupSetSourceListW (SETUPAPI.@)
+ */
+BOOL WINAPI SetupSetSourceListW(DWORD flags, PCWSTR *list, UINT count)
+{
+    FIXME("0x%08x %p %d\n", flags, list, count);
+    return FALSE;
+}
+
+/***********************************************************************
+ *      SetupDiGetINFClassA (SETUPAPI.@)
+ */
+BOOL WINAPI SetupDiGetINFClassA(PCSTR inf, LPGUID class_guid, PSTR class_name,
+        DWORD size, PDWORD required_size)
+{
+    FIXME("%s %p %p %d %p\n", debugstr_a(inf), class_guid, class_name, size, required_size);
+    return FALSE;
+}
+
+/***********************************************************************
+ *      SetupDiGetINFClassW (SETUPAPI.@)
+ */
+BOOL WINAPI SetupDiGetINFClassW(PCWSTR inf, LPGUID class_guid, PWSTR class_name,
+        DWORD size, PDWORD required_size)
+{
+    FIXME("%s %p %p %d %p\n", debugstr_w(inf), class_guid, class_name, size, required_size);
+    return FALSE;
 }

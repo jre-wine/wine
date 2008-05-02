@@ -130,6 +130,7 @@ static void test_GetSetEnvironmentVariableW(void)
     if (ret == FALSE && GetLastError()==ERROR_CALL_NOT_IMPLEMENTED)
     {
         /* Must be Win9x which doesn't support the Unicode functions */
+        skip("SetEnvironmentVariableW is not implemented\n");
         return;
     }
     ok(ret == TRUE,
@@ -200,15 +201,18 @@ static void test_GetSetEnvironmentVariableW(void)
        "should not find variable but ret_size=%d GetLastError=%d\n",
        ret_size, GetLastError());
 
-    ret_size = GetEnvironmentVariableW(NULL, buf, lstrlenW(value) + 1);
-    ok(ret_size == 0 && GetLastError() == ERROR_ENVVAR_NOT_FOUND,
-       "should not find variable but ret_size=%d GetLastError=%d\n",
-       ret_size, GetLastError());
+    if (0) /* Both tests crash on Vista */
+    {
+        ret_size = GetEnvironmentVariableW(NULL, buf, lstrlenW(value) + 1);
+        ok(ret_size == 0 && GetLastError() == ERROR_ENVVAR_NOT_FOUND,
+           "should not find variable but ret_size=%d GetLastError=%d\n",
+           ret_size, GetLastError());
 
-    ret = SetEnvironmentVariableW(NULL, NULL);
-    ok(ret == FALSE && (GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == ERROR_ENVVAR_NOT_FOUND),
-       "should fail with NULL, NULL but ret=%d and GetLastError=%d\n",
-       ret, GetLastError());
+        ret = SetEnvironmentVariableW(NULL, NULL);
+        ok(ret == FALSE && (GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == ERROR_ENVVAR_NOT_FOUND),
+           "should fail with NULL, NULL but ret=%d and GetLastError=%d\n",
+           ret, GetLastError());
+    }
 }
 
 static void test_ExpandEnvironmentStringsA(void)
@@ -229,9 +233,161 @@ static void test_ExpandEnvironmentStringsA(void)
     ok(!strcmp(buf, buf1), "ExpandEnvironmentStrings failed %s vs %s. ret_size = %d\n", buf, buf1, ret_size);
 }
 
+static BOOL (WINAPI *pGetComputerNameExA)(COMPUTER_NAME_FORMAT,LPSTR,LPDWORD);
+static BOOL (WINAPI *pGetComputerNameExW)(COMPUTER_NAME_FORMAT,LPWSTR,LPDWORD);
+
+static void test_GetComputerName(void)
+{
+    DWORD size;
+    BOOL ret;
+    LPSTR name;
+    LPWSTR nameW;
+    DWORD error;
+    int name_len;
+
+    size = 0;
+    ret = GetComputerNameA((LPSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    todo_wine
+    ok(!ret && error == ERROR_BUFFER_OVERFLOW, "GetComputerNameA should have failed with ERROR_BUFFER_OVERFLOW instead of %d\n", error);
+    size++; /* nul terminating character */
+    name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
+    ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = GetComputerNameA(name, &size);
+    ok(ret, "GetComputerNameA failed with error %d\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, name);
+
+    size = MAX_COMPUTERNAME_LENGTH + 1;
+    name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
+    ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = GetComputerNameA(name, &size);
+    ok(ret, "GetComputerNameA failed with error %d\n", GetLastError());
+    trace("computer name is \"%s\"\n", name);
+    name_len = strlen(name);
+    ok(size == name_len, "size should be same as length, name_len=%d, size=%d\n", name_len, size);
+    HeapFree(GetProcessHeap(), 0, name);
+
+    size = 0;
+    SetLastError(0xdeadbeef);
+    ret = GetComputerNameW((LPWSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    if (error == ERROR_CALL_NOT_IMPLEMENTED)
+        skip("GetComputerNameW is not implemented\n");
+    else
+    {
+        todo_wine
+        ok(!ret && error == ERROR_BUFFER_OVERFLOW, "GetComputerNameW should have failed with ERROR_BUFFER_OVERFLOW instead of %d\n", error);
+        size++; /* nul terminating character */
+        nameW = HeapAlloc(GetProcessHeap(), 0, size * sizeof(nameW[0]));
+        ok(nameW != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+        ret = GetComputerNameW(nameW, &size);
+        ok(ret, "GetComputerNameW failed with error %d\n", GetLastError());
+        HeapFree(GetProcessHeap(), 0, nameW);
+    }
+
+    pGetComputerNameExA = (void *)GetProcAddress(GetModuleHandle("kernel32.dll"), "GetComputerNameExA");
+    if (!pGetComputerNameExA)
+    {
+        skip("GetComputerNameExA function not implemented, so not testing\n");
+        return;
+    }
+
+    size = 0;
+    ret = pGetComputerNameExA(ComputerNameDnsDomain, (LPSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExA should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
+    ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = pGetComputerNameExA(ComputerNameDnsDomain, name, &size);
+    ok(ret, "GetComputerNameExA(ComputerNameDnsDomain) failed with error %d\n", GetLastError());
+    trace("domain name is \"%s\"\n", name);
+    HeapFree(GetProcessHeap(), 0, name);
+
+    size = 0;
+    ret = pGetComputerNameExA(ComputerNameDnsFullyQualified, (LPSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExA should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
+    ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = pGetComputerNameExA(ComputerNameDnsFullyQualified, name, &size);
+    ok(ret, "GetComputerNameExA(ComputerNameDnsFullyQualified) failed with error %d\n", GetLastError());
+    trace("fully qualified hostname is \"%s\"\n", name);
+    HeapFree(GetProcessHeap(), 0, name);
+
+    size = 0;
+    ret = pGetComputerNameExA(ComputerNameDnsHostname, (LPSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExA should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
+    ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = pGetComputerNameExA(ComputerNameDnsHostname, name, &size);
+    ok(ret, "GetComputerNameExA(ComputerNameDnsHostname) failed with error %d\n", GetLastError());
+    trace("hostname is \"%s\"\n", name);
+    HeapFree(GetProcessHeap(), 0, name);
+
+    size = 0;
+    ret = pGetComputerNameExA(ComputerNameNetBIOS, (LPSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExA should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
+    ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = pGetComputerNameExA(ComputerNameNetBIOS, name, &size);
+    ok(ret, "GetComputerNameExA(ComputerNameNetBIOS) failed with error %d\n", GetLastError());
+    trace("NetBIOS name is \"%s\"\n", name);
+    HeapFree(GetProcessHeap(), 0, name);
+
+    pGetComputerNameExW = (void *)GetProcAddress(GetModuleHandle("kernel32.dll"), "GetComputerNameExW");
+    if (!pGetComputerNameExW)
+    {
+        skip("GetComputerNameExW function not implemented, so not testing\n");
+        return;
+    }
+
+    size = 0;
+    ret = pGetComputerNameExW(ComputerNameDnsDomain, (LPWSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExW should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    nameW = HeapAlloc(GetProcessHeap(), 0, size * sizeof(nameW[0]));
+    ok(nameW != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = pGetComputerNameExW(ComputerNameDnsDomain, nameW, &size);
+    ok(ret, "GetComputerNameExW(ComputerNameDnsDomain) failed with error %d\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, nameW);
+
+    size = 0;
+    ret = pGetComputerNameExW(ComputerNameDnsFullyQualified, (LPWSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExW should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    nameW = HeapAlloc(GetProcessHeap(), 0, size * sizeof(nameW[0]));
+    ok(nameW != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = pGetComputerNameExW(ComputerNameDnsFullyQualified, nameW, &size);
+    ok(ret, "GetComputerNameExW(ComputerNameDnsFullyQualified) failed with error %d\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, nameW);
+
+    size = 0;
+    ret = pGetComputerNameExW(ComputerNameDnsHostname, (LPWSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExW should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    nameW = HeapAlloc(GetProcessHeap(), 0, size * sizeof(nameW[0]));
+    ok(nameW != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = pGetComputerNameExW(ComputerNameDnsHostname, nameW, &size);
+    ok(ret, "GetComputerNameExW(ComputerNameDnsHostname) failed with error %d\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, nameW);
+
+    size = 0;
+    ret = pGetComputerNameExW(ComputerNameNetBIOS, (LPWSTR)0xdeadbeef, &size);
+    error = GetLastError();
+    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExW should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    nameW = HeapAlloc(GetProcessHeap(), 0, size * sizeof(nameW[0]));
+    ok(nameW != NULL, "HeapAlloc failed with error %d\n", GetLastError());
+    ret = pGetComputerNameExW(ComputerNameNetBIOS, nameW, &size);
+    ok(ret, "GetComputerNameExW(ComputerNameNetBIOS) failed with error %d\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, nameW);
+}
+
 START_TEST(environ)
 {
     test_GetSetEnvironmentVariableA();
     test_GetSetEnvironmentVariableW();
     test_ExpandEnvironmentStringsA();
+    test_GetComputerName();
 }

@@ -19,6 +19,11 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
+/* With Visual Studio >= 2005,  swprintf() takes an extra parameter unless
+ * the following macro is defined.
+ */
+#define _CRT_NON_CONFORMING_SWPRINTFS
  
 #include <stdio.h>
 
@@ -187,6 +192,18 @@ static void test_sprintf( void )
     r = sprintf(buffer,format,(LONGLONG)100);
     ok(!strcmp(buffer,"+00100  ") && r==8,"#-+ 08.5I64d failed: '%s'\n", buffer);
 
+    format = "%.80I64d";
+    r = sprintf(buffer,format,(LONGLONG)1);
+    ok(r==80,"%s format failed\n", format);
+
+    format = "% .80I64d";
+    r = sprintf(buffer,format,(LONGLONG)1);
+    ok(r==81,"%s format failed\n", format);
+
+    format = "% .80d";
+    r = sprintf(buffer,format,1);
+    ok(r==81,"%s format failed\n", format);
+
     format = "%lld";
     r = sprintf(buffer,format,((ULONGLONG)0xffffffff)*0xffffffff);
     ok(!strcmp(buffer, "1"), "Problem with \"ll\" interpretation\n");
@@ -266,6 +283,11 @@ static void test_sprintf( void )
     r = sprintf(buffer,format,1,"foo");
     ok(!strcmp(buffer,"f"),"Precision ignored \"%s\"\n",buffer);
     ok( r==1, "return count wrong\n");
+
+    format = "%*s";
+    r = sprintf(buffer,format,-5,"foo");
+    ok(!strcmp(buffer,"foo  "),"Negative field width ignored \"%s\"\n",buffer);
+    ok( r==5, "return count wrong\n");
 
     format = "%#-012p";
     r = sprintf(buffer,format,(void *)57);
@@ -492,7 +514,8 @@ static void test_fwprintf( void )
     const char *string="not a wide string";
     todo_wine
       {
-        ok(fwprintf(fopen("nul","r+"),(wchar_t *)string) == -1,"Non-wide string should not be printed by fwprintf\n");
+        ok(fwprintf(fopen("nul","r+"),(const wchar_t *)string) == -1,
+           "Non-wide string should not be printed by fwprintf\n");
       }
 }
 
@@ -529,47 +552,96 @@ static void test_fcvt(void)
     char *str;
     int dec=100, sign=100;
     
+    /* Numbers less than 1.0 with different precisions */
     str = _fcvt(0.0001, 1, &dec, &sign );
-    todo_wine {
-    ok( 0 == strcmp(str,""), "bad return\n");
-    ok( -3 == dec, "dec wrong\n");
-    }
-    ok( 0 == sign, "dec wrong\n");
+    ok( 0 == strcmp(str,""), "bad return '%s'\n", str);
+    ok( -3 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
 
     str = _fcvt(0.0001, -10, &dec, &sign );
-    todo_wine {
-    ok( 0 == strcmp(str,""), "bad return\n");
-    ok( -3 == dec, "dec wrong\n");
-    }
-    ok( 0 == sign, "dec wrong\n");
+    ok( 0 == strcmp(str,""), "bad return '%s'\n", str);
+    ok( -3 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
 
     str = _fcvt(0.0001, 10, &dec, &sign );
-    todo_wine {
-    ok( 0 == strcmp(str,"1000000"), "bad return\n");
-    ok( -3 == dec, "dec wrong\n");
-    }
-    ok( 0 == sign, "dec wrong\n");
+    ok( 0 == strcmp(str,"1000000"), "bad return '%s'\n", str);
+    ok( -3 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
 
+    /* Basic sign test */
     str = _fcvt(-111.0001, 5, &dec, &sign );
-    todo_wine {
-    ok( 0 == strcmp(str,"11100010"), "bad return\n");
-    ok( 3 == dec, "dec wrong\n");
-    }
-    ok( 1 == sign, "dec wrong\n");
+    ok( 0 == strcmp(str,"11100010"), "bad return '%s'\n", str);
+    ok( 3 == dec, "dec wrong %d\n", dec);
+    ok( 1 == sign, "sign wrong\n");
 
     str = _fcvt(111.0001, 5, &dec, &sign );
-    todo_wine {
-    ok( 0 == strcmp(str,"11100010"), "bad return\n");
+    ok( 0 == strcmp(str,"11100010"), "bad return '%s'\n", str);
     ok( 3 == dec, "dec wrong\n");
-    }
-    ok( 0 == sign, "dec wrong\n");
+    ok( 0 == sign, "sign wrong\n");
 
+    /* 0.0 with different precisions */
     str = _fcvt(0.0, 5, &dec, &sign );
-    todo_wine {
-    ok( 0 == strcmp(str,"00000"), "bad return\n");
-    ok( 0 == dec, "dec wrong\n");
-    }
-    ok( 0 == sign, "dec wrong\n");
+    ok( 0 == strcmp(str,"00000"), "bad return '%s'\n", str);
+    ok( 0 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
+
+    str = _fcvt(0.0, 0, &dec, &sign );
+    ok( 0 == strcmp(str,""), "bad return '%s'\n", str);
+    ok( 0 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
+
+    str = _fcvt(0.0, -1, &dec, &sign );
+    ok( 0 == strcmp(str,""), "bad return '%s'\n", str);
+    ok( 0 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
+
+    /* Numbers > 1.0 with 0 or -ve precision */
+    str = _fcvt(-123.0001, 0, &dec, &sign );
+    ok( 0 == strcmp(str,"123"), "bad return '%s'\n", str);
+    ok( 3 == dec, "dec wrong %d\n", dec);
+    ok( 1 == sign, "sign wrong\n");
+
+    str = _fcvt(-123.0001, -1, &dec, &sign );
+    ok( 0 == strcmp(str,"12"), "bad return '%s'\n", str);
+    ok( 3 == dec, "dec wrong %d\n", dec);
+    ok( 1 == sign, "sign wrong\n");
+
+    str = _fcvt(-123.0001, -2, &dec, &sign );
+    ok( 0 == strcmp(str,"1"), "bad return '%s'\n", str);
+    ok( 3 == dec, "dec wrong %d\n", dec);
+    ok( 1 == sign, "sign wrong\n");
+
+    str = _fcvt(-123.0001, -3, &dec, &sign );
+    ok( 0 == strcmp(str,""), "bad return '%s'\n", str);
+    ok( 3 == dec, "dec wrong %d\n", dec);
+    ok( 1 == sign, "sign wrong\n");
+
+    /* Numbers > 1.0, but with rounding at the point of precision */
+    str = _fcvt(99.99, 1, &dec, &sign );
+    ok( 0 == strcmp(str,"1000"), "bad return '%s'\n", str);
+    ok( 3 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
+
+    /* Numbers < 1.0 where rounding occurs at the point of precision */
+    str = _fcvt(0.00636, 2, &dec, &sign );
+    ok( 0 == strcmp(str,"1"), "bad return '%s'\n", str);
+    ok( -1 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
+
+    str = _fcvt(0.00636, 3, &dec, &sign );
+    ok( 0 == strcmp(str,"6"), "bad return '%s'\n", str);
+    ok( -2 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
+
+    str = _fcvt(0.09999999996, 2, &dec, &sign );
+    ok( 0 == strcmp(str,"10"), "bad return '%s'\n", str);
+    ok( 0 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
+
+    str = _fcvt(0.6, 0, &dec, &sign );
+    ok( 0 == strcmp(str,"1"), "bad return '%s'\n", str);
+    ok( 1 == dec, "dec wrong %d\n", dec);
+    ok( 0 == sign, "sign wrong\n");
 }
 
 START_TEST(printf)

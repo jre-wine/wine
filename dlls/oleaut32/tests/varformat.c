@@ -83,7 +83,7 @@ static void test_VarFormatNumber(void)
   GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, buff, sizeof(buff)/sizeof(char));
   if (buff[0] != '.' || buff[1])
   {
-    trace("Skipping VarFormatNumber tests as decimal separator is '%s'\n", buff);
+    skip("Skipping VarFormatNumber tests as decimal separator is '%s'\n", buff);
     return;
   }
 
@@ -241,19 +241,19 @@ static void test_VarFormat(void)
 
   if (PRIMARYLANGID(LANGIDFROMLCID(GetUserDefaultLCID())) != LANG_ENGLISH)
   {
-    trace("Skipping VarFormat tests for non english language\n");
+    skip("Skipping VarFormat tests for non english language\n");
     return;
   }
   GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, buff, sizeof(buff)/sizeof(char));
   if (buff[0] != '.' || buff[1])
   {
-    trace("Skipping VarFormat tests as decimal separator is '%s'\n", buff);
+    skip("Skipping VarFormat tests as decimal separator is '%s'\n", buff);
     return;
   }
   GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_IDIGITS, buff, sizeof(buff)/sizeof(char));
   if (buff[0] != '2' || buff[1])
   {
-    trace("Skipping VarFormat tests as decimal places is '%s'\n", buff);
+    skip("Skipping VarFormat tests as decimal places is '%s'\n", buff);
     return;
   }
 
@@ -394,7 +394,7 @@ static void test_VarFormat(void)
 
 START_TEST(varformat)
 {
-  hOleaut32 = LoadLibraryA("oleaut32.dll");
+  hOleaut32 = GetModuleHandleA("oleaut32.dll");
 
   test_VarFormatNumber();
   test_VarFormat();

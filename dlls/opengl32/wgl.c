@@ -28,7 +28,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winerror.h"
 #include "winreg.h"
 #include "wingdi.h"
 #include "winternl.h"
@@ -50,6 +49,8 @@ typedef struct wine_wgl_s {
     PROC WINAPI  (*p_wglGetProcAddress)(LPCSTR  lpszProc);
 
     void WINAPI  (*p_wglGetIntegerv)(GLenum pname, GLint* params);
+    void WINAPI  (*p_wglFinish)(void);
+    void WINAPI  (*p_wglFlush)(void);
 } wine_wgl_t;
 
 /** global wgl object */
@@ -81,13 +82,11 @@ static char* internal_gl_extensions = NULL;
 
 typedef struct wine_glcontext {
   HDC hdc;
-  Display *display;
   XVisualInfo *vis;
   GLXFBConfig fb_conf;
   GLXContext ctx;
   BOOL do_escape;
-  struct wine_glcontext *next;
-  struct wine_glcontext *prev;
+  /* ... more stuff here */
 } Wine_GLContext;
 
 void enter_gl(void)
@@ -103,6 +102,8 @@ void enter_gl(void)
     wine_tsx11_lock_ptr();
     return;
 }
+
+const GLubyte * WINAPI wine_glGetString( GLenum name );
 
 /***********************************************************************
  *		wglCreateLayerContext (OPENGL32.@)
@@ -156,9 +157,6 @@ int WINAPI wglGetLayerPaletteEntries(HDC hdc,
   return 0;
 }
 
-/***********************************************************************
- *		wglGetProcAddress (OPENGL32.@)
- */
 static int compar(const void *elt_a, const void *elt_b) {
   return strcmp(((const OpenGL_extension *) elt_a)->name,
 		((const OpenGL_extension *) elt_b)->name);
@@ -167,7 +165,7 @@ static int compar(const void *elt_a, const void *elt_b) {
 /* Check if a GL extension is supported */
 static BOOL is_extension_supported(const char* extension)
 {
-    const char *gl_ext_string = (const char*)internal_glGetString(GL_EXTENSIONS);
+    const char *gl_ext_string = (const char*)wine_glGetString(GL_EXTENSIONS);
 
     TRACE("Checking for extension '%s'\n", extension);
 
@@ -193,7 +191,7 @@ static BOOL is_extension_supported(const char* extension)
     if(strncmp(extension, "GL_VERSION_", 11) == 0)
     {
         const GLubyte *gl_version = glGetString(GL_VERSION);
-        const const char *version = extension + 11; /* Move past 'GL_VERSION_' */
+        const char *version = extension + 11; /* Move past 'GL_VERSION_' */
 
         if(!gl_version) {
             ERR("Error no OpenGL version found,\n");
@@ -211,12 +209,18 @@ static BOOL is_extension_supported(const char* extension)
     return FALSE;
 }
 
+/***********************************************************************
+ *		wglGetProcAddress (OPENGL32.@)
+ */
 PROC WINAPI wglGetProcAddress(LPCSTR  lpszProc) {
   void *local_func;
   OpenGL_extension  ext;
   const OpenGL_extension *ext_ret;
 
   TRACE("(%s)\n", lpszProc);
+
+  if(lpszProc == NULL)
+    return NULL;
 
   /* First, look if it's not already defined in the 'standard' OpenGL functions */
   if ((local_func = GetProcAddress(opengl32_handle, lpszProc)) != NULL) {
@@ -229,16 +233,20 @@ PROC WINAPI wglGetProcAddress(LPCSTR  lpszProc) {
   ext_ret = (const OpenGL_extension *) bsearch(&ext, extension_registry,
 					 extension_registry_size, sizeof(OpenGL_extension), compar);
 
-  /* If nothing was found, we are looking for a WGL extension */
+  /* If nothing was found, we are looking for a WGL extension or an unknown GL extension. */
   if (ext_ret == NULL) {
+    /* If the function name starts with a w it is a WGL extension */
+    if(lpszProc[0] == 'w')
+      return wine_wgl.p_wglGetProcAddress(lpszProc);
+
+    /* We are dealing with an unknown GL extension. */
     WARN("Extension '%s' not defined in opengl32.dll's function table!\n", lpszProc);
-    return wine_wgl.p_wglGetProcAddress(lpszProc);
+    return NULL;
   } else { /* We are looking for an OpenGL extension */
 
     /* Check if the GL extension required by the function is available */
     if(!is_extension_supported(ext_ret->extension)) {
         WARN("Extension '%s' required by function '%s' not supported!\n", ext_ret->extension, lpszProc);
-        return NULL;
     }
 
     local_func = wine_wgl.p_wglGetProcAddress(ext_ret->name);
@@ -350,7 +358,7 @@ static void tess_callback_end(void)
 /***********************************************************************
  *		wglUseFontOutlines_common
  */
-BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
+static BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
                                       DWORD first,
                                       DWORD count,
                                       DWORD listBase,
@@ -511,7 +519,7 @@ error_in_list:
 
 #else /* HAVE_GL_GLU_H */
 
-BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
+static BOOL WINAPI wglUseFontOutlines_common(HDC hdc,
                                       DWORD first,
                                       DWORD count,
                                       DWORD listBase,
@@ -557,33 +565,58 @@ BOOL WINAPI wglUseFontOutlinesW(HDC hdc,
     return wglUseFontOutlines_common(hdc, first, count, listBase, deviation, extrusion, format, lpgmf, TRUE);
 }
 
-const GLubyte * internal_glGetString(GLenum name) {
+/***********************************************************************
+ *              glFinish (OPENGL32.@)
+ */
+void WINAPI wine_glFinish( void )
+{
+    TRACE("()\n");
+    wine_wgl.p_wglFinish();
+}
+
+/***********************************************************************
+ *              glFlush (OPENGL32.@)
+ */
+void WINAPI wine_glFlush( void )
+{
+    TRACE("()\n");
+    wine_wgl.p_wglFlush();
+}
+
+/***********************************************************************
+ *              glGetString (OPENGL32.@)
+ */
+const GLubyte * WINAPI wine_glGetString( GLenum name )
+{
+  const GLubyte *ret;
   const char* GL_Extensions = NULL;
-  
+
   if (GL_EXTENSIONS != name) {
-    return glGetString(name);
+    ENTER_GL();
+    ret = glGetString(name);
+    LEAVE_GL();
+    return ret;
   }
 
   if (NULL == internal_gl_extensions) {
+    ENTER_GL();
     GL_Extensions = (const char *) glGetString(GL_EXTENSIONS);
 
-    TRACE("GL_EXTENSIONS reported:\n");  
-    if (NULL == GL_Extensions) {
-      ERR("GL_EXTENSIONS returns NULL\n");      
-      return NULL;
-    } else {
+    if (GL_Extensions)
+    {
       size_t len = strlen(GL_Extensions);
       internal_gl_extensions = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len + 2);
 
+      TRACE("GL_EXTENSIONS reported:\n");
       while (*GL_Extensions != 0x00) {
 	const char* Start = GL_Extensions;
 	char        ThisExtn[256];
-	 
-	memset(ThisExtn, 0x00, sizeof(ThisExtn));
+
 	while (*GL_Extensions != ' ' && *GL_Extensions != 0x00) {
 	  GL_Extensions++;
 	}
 	memcpy(ThisExtn, Start, (GL_Extensions - Start));
+        ThisExtn[GL_Extensions - Start] = 0;
 	TRACE("- %s:", ThisExtn);
 	
 	/* test if supported API is disabled by config */
@@ -598,24 +631,19 @@ const GLubyte * internal_glGetString(GLenum name) {
 	if (*GL_Extensions == ' ') GL_Extensions++;
       }
     }
+    LEAVE_GL();
   }
   return (const GLubyte *) internal_gl_extensions;
 }
 
-void internal_glGetIntegerv(GLenum pname, GLint* params) {
-  TRACE("pname: 0x%x, params %p\n", pname, params);
-  glGetIntegerv(pname, params);
-  /* A few parameters like GL_DEPTH_BITS differ between WGL and GLX, the wglGetIntegerv helper function handles those */
-  wine_wgl.p_wglGetIntegerv(pname, params);
+/***********************************************************************
+ *              glGetIntegerv (OPENGL32.@)
+ */
+void WINAPI wine_glGetIntegerv( GLenum pname, GLint* params )
+{
+    wine_wgl.p_wglGetIntegerv(pname, params);
 }
 
-
-/* No need to load any other libraries as according to the ABI, libGL should be self-sufficient and
-   include all dependencies
-*/
-#ifndef SONAME_LIBGL
-#define SONAME_LIBGL "libGL.so"
-#endif
 
 /* This is for brain-dead applications that use OpenGL functions before even
    creating a rendering context.... */
@@ -642,6 +670,8 @@ static BOOL process_attach(void)
 
   /* Interal WGL function */
   wine_wgl.p_wglGetIntegerv = (void *)wine_wgl.p_wglGetProcAddress("wglGetIntegerv");
+  wine_wgl.p_wglFinish = (void *)wine_wgl.p_wglGetProcAddress("wglFinish");
+  wine_wgl.p_wglFlush = (void *)wine_wgl.p_wglGetProcAddress("wglFlush");
 
   internal_gl_disabled_extensions[0] = 0;
   if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\OpenGL", &hkey)) {

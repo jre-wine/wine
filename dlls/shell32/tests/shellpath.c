@@ -35,6 +35,11 @@
 #include "shlwapi.h"
 #include "wine/test.h"
 
+/* CSIDL_MYDOCUMENTS is now the same as CSIDL_PERSONAL, but what we want
+ * here is its original value.
+ */
+#define OLD_CSIDL_MYDOCUMENTS  0x000c
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) ( sizeof(x) / sizeof((x)[0]) )
 #endif
@@ -73,7 +78,7 @@ struct shellExpectedValues {
     BYTE pidlType;
 };
 
-static HMODULE hShell32;
+static HRESULT (WINAPI *pDllGetVersion)(DLLVERSIONINFO *);
 static HRESULT (WINAPI *pSHGetFolderPathA)(HWND, int, HANDLE, DWORD, LPSTR);
 static HRESULT (WINAPI *pSHGetFolderLocation)(HWND, int, HANDLE, DWORD,
  LPITEMIDLIST *);
@@ -129,7 +134,7 @@ static const struct shellExpectedValues optionalShellValues[] = {
  { CSIDL_ADMINTOOLS, PT_FOLDER },
  { CSIDL_COMMON_APPDATA, PT_FOLDER },
  { CSIDL_LOCAL_APPDATA, PT_FOLDER },
- { CSIDL_MYDOCUMENTS, PT_FOLDER },
+ { OLD_CSIDL_MYDOCUMENTS, PT_FOLDER },
  { CSIDL_MYMUSIC, PT_FOLDER },
  { CSIDL_MYPICTURES, PT_FOLDER },
  { CSIDL_MYVIDEO, PT_FOLDER },
@@ -152,45 +157,42 @@ static const struct shellExpectedValues optionalShellValues[] = {
 
 static void loadShell32(void)
 {
-    hShell32 = LoadLibraryA("shell32");
-    if (hShell32)
+    HMODULE hShell32 = GetModuleHandleA("shell32");
+
+#define GET_PROC(func) \
+    p ## func = (void*)GetProcAddress(hShell32, #func); \
+    if(!p ## func) \
+      trace("GetProcAddress(%s) failed\n", #func);
+
+    GET_PROC(DllGetVersion)
+    GET_PROC(SHGetFolderPathA)
+    GET_PROC(SHGetFolderLocation)
+    GET_PROC(SHGetSpecialFolderPathA)
+    GET_PROC(SHGetSpecialFolderLocation)
+    GET_PROC(ILFindLastID)
+    if (!pILFindLastID)
+        pILFindLastID = (void *)GetProcAddress(hShell32, (LPCSTR)16);
+    GET_PROC(SHFileOperationA)
+    GET_PROC(SHGetMalloc)
+
+    ok(pSHGetMalloc != NULL, "shell32 is missing SHGetMalloc\n");
+    if (pSHGetMalloc)
     {
-        HRESULT (WINAPI *pDllGetVersion)(DLLVERSIONINFO *);
+        HRESULT hr = pSHGetMalloc(&pMalloc);
 
-        pSHGetFolderPathA = (void *)GetProcAddress(hShell32,
-         "SHGetFolderPathA");
-        pSHGetFolderLocation = (void *)GetProcAddress(hShell32,
-         "SHGetFolderLocation");
-        pSHGetSpecialFolderPathA = (void *)GetProcAddress(hShell32,
-         "SHGetSpecialFolderPathA");
-        pSHGetSpecialFolderLocation = (void *)GetProcAddress(hShell32,
-         "SHGetSpecialFolderLocation");
-        pDllGetVersion = (void *)GetProcAddress(hShell32, "DllGetVersion");
-        pILFindLastID = (void *)GetProcAddress(hShell32, "ILFindLastID");
-        if (!pILFindLastID)
-            pILFindLastID = (void *)GetProcAddress(hShell32, (LPCSTR)16);
-        pSHFileOperationA = (void *)GetProcAddress(hShell32,
-         "SHFileOperationA");
-        pSHGetMalloc = (void *)GetProcAddress(hShell32, "SHGetMalloc");
-
-        ok(pSHGetMalloc != NULL, "shell32 is missing SHGetMalloc\n");
-        if (pSHGetMalloc)
-        {
-            HRESULT hr = pSHGetMalloc(&pMalloc);
-
-            ok(SUCCEEDED(hr), "SHGetMalloc failed: 0x%08x\n", hr);
-            ok(pMalloc != NULL, "SHGetMalloc returned a NULL IMalloc\n");
-        }
-
-        if (pDllGetVersion)
-        {
-            shellVersion.cbSize = sizeof(shellVersion);
-            pDllGetVersion(&shellVersion);
-            if (winetest_interactive)
-                printf("shell32 version is %d.%d\n",
-                 shellVersion.dwMajorVersion, shellVersion.dwMinorVersion);
-        }
+        ok(SUCCEEDED(hr), "SHGetMalloc failed: 0x%08x\n", hr);
+        ok(pMalloc != NULL, "SHGetMalloc returned a NULL IMalloc\n");
     }
+
+    if (pDllGetVersion)
+    {
+        shellVersion.cbSize = sizeof(shellVersion);
+        pDllGetVersion(&shellVersion);
+        if (winetest_interactive)
+            printf("shell32 version is %d.%d\n",
+             shellVersion.dwMajorVersion, shellVersion.dwMinorVersion);
+    }
+#undef GET_PROC
 }
 
 #ifndef CSIDL_PROFILES
@@ -200,7 +202,7 @@ static void loadShell32(void)
 /* A couple utility printing functions */
 static const char *getFolderName(int folder)
 {
-    static char unknown[17];
+    static char unknown[32];
 
 #define CSIDL_TO_STR(x) case x: return#x;
     switch (folder)
@@ -217,7 +219,7 @@ static const char *getFolderName(int folder)
     CSIDL_TO_STR(CSIDL_SENDTO);
     CSIDL_TO_STR(CSIDL_BITBUCKET);
     CSIDL_TO_STR(CSIDL_STARTMENU);
-    CSIDL_TO_STR(CSIDL_MYDOCUMENTS);
+    CSIDL_TO_STR(OLD_CSIDL_MYDOCUMENTS);
     CSIDL_TO_STR(CSIDL_MYMUSIC);
     CSIDL_TO_STR(CSIDL_MYVIDEO);
     CSIDL_TO_STR(CSIDL_DESKTOPDIRECTORY);
@@ -265,7 +267,7 @@ static const char *getFolderName(int folder)
     CSIDL_TO_STR(CSIDL_COMPUTERSNEARME);
 #undef CSIDL_TO_STR
     default:
-        wnsprintfA(unknown, sizeof(unknown), "unknown (0x%04x)", folder);
+        sprintf(unknown, "unknown (0x%04x)", folder);
         return unknown;
     }
 }
@@ -276,8 +278,7 @@ static const char *printGUID(const GUID *guid)
 
     if (!guid) return NULL;
 
-    wnsprintfA(guidSTR, sizeof(guidSTR),
-     "{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
+    sprintf(guidSTR, "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
      guid->Data1, guid->Data2, guid->Data3,
      guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
      guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
@@ -830,13 +831,12 @@ static void testNonExistentPath(void)
             if (!RegSetValueExA(key, "Favorites", 0, type,
              (LPBYTE)modifiedPath, len))
             {
-                char buffer[MAX_PATH];
+                char buffer[MAX_PATH+20];
                 STARTUPINFOA startup;
                 PROCESS_INFORMATION info;
                 HRESULT hr;
 
-                wnsprintfA(buffer, sizeof(buffer), "%s tests/shellpath.c 1",
-                 selfname);
+                sprintf(buffer, "%s tests/shellpath.c 1", selfname);
                 memset(&startup, 0, sizeof(startup));
                 startup.cb = sizeof(startup);
                 startup.dwFlags = STARTF_USESHOWWINDOW;
@@ -858,8 +858,7 @@ static void testNonExistentPath(void)
                  strlen(originalPath) + 1);
                 RegFlushKey(key);
 
-                wnsprintfA(buffer, sizeof(buffer), "%s tests/shellpath.c 2",
-                 selfname);
+                sprintf(buffer, "%s tests/shellpath.c 2", selfname);
                 memset(&startup, 0, sizeof(startup));
                 startup.cb = sizeof(startup);
                 startup.dwFlags = STARTF_USESHOWWINDOW;
@@ -890,7 +889,6 @@ START_TEST(shellpath)
     if (!init()) return;
 
     loadShell32();
-    if (!hShell32) return;
 
     if (myARGC >= 3)
         doChild(myARGV[2]);

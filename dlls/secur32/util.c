@@ -21,14 +21,12 @@
 #include <stdio.h>
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "rpc.h"
 #include "sspi.h"
-#include "lm.h"
 #include "secur32_priv.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(secur32);
+WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 
 /* The CRC32 code is copyright (C) 1986 Gary S. Brown and was placed in the
  * public domain.
@@ -145,13 +143,13 @@ SECURITY_STATUS SECUR32_CreateNTLMv1SessionKey(PBYTE password, int len, PBYTE se
     return SEC_E_OK;
 }
 
-void SECUR32_CalcNTLMv2Subkey(PBYTE session_key, const char *magic, PBYTE subkey)
+static void SECUR32_CalcNTLMv2Subkey(const BYTE *session_key, const char *magic, PBYTE subkey)
 {
     MD5_CTX ctx;
 
     MD5Init(&ctx);
     MD5Update(&ctx, session_key, 16);
-    MD5Update(&ctx, (unsigned char*)magic, lstrlenA(magic)+1);
+    MD5Update(&ctx, (const unsigned char*)magic, lstrlenA(magic)+1);
     MD5Final(&ctx);
     memcpy(subkey, ctx.digest, 16);
 }

@@ -27,7 +27,7 @@
 
 #define COBJMACROS
 
-#include <wine/test.h>
+#include "wine/test.h"
 #include <windef.h>
 #include <winbase.h>
 #include <winuser.h>
@@ -40,9 +40,19 @@
 #include <olectl.h>
 #include <objidl.h>
 
+#define expect_eq(expr, value, type, format) { type ret = (expr); ok((value) == ret, #expr " expected " format " got " format "\n", value, ret); }
+
+#define ole_expect(expr, expect) { \
+    HRESULT r = expr; \
+    ok(r == (expect), #expr " returned %x, expected %s (%x)\n", r, #expect, expect); \
+}
+
+#define ole_check(expr) ole_expect(expr, S_OK);
+
 static HMODULE hOleaut32;
 
 static HRESULT (WINAPI *pOleLoadPicture)(LPSTREAM,LONG,BOOL,REFIID,LPVOID*);
+static HRESULT (WINAPI *pOleCreatePictureIndirect)(PICTDESC*,REFIID,BOOL,LPVOID*);
 
 #define ok_ole_success(hr, func) ok(hr == S_OK, func " failed with error 0x%08x\n", hr)
 
@@ -75,7 +85,6 @@ static const unsigned char jpgimage[285] = {
 0x00,0x02,0x11,0x03,0x11,0x00,0x3f,0x00,0xb2,0xc0,0x07,0xff,0xd9
 };
 
-#if 0 /* no png support yet */
 /* 1x1 pixel png */
 static const unsigned char pngimage[285] = {
 0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,0x00,0x00,0x00,0x0d,0x49,0x48,0x44,0x52,
@@ -86,7 +95,6 @@ static const unsigned char pngimage[285] = {
 0x54,0x08,0xd7,0x63,0xf8,0xff,0xff,0x3f,0x00,0x05,0xfe,0x02,0xfe,0xdc,0xcc,0x59,
 0xe7,0x00,0x00,0x00,0x00,0x49,0x45,0x4e,0x44,0xae,0x42,0x60,0x82
 };
-#endif
 
 /* 1x1 pixel bmp */
 static const unsigned char bmpimage[66] = {
@@ -102,6 +110,15 @@ static const unsigned char gif4pixel[42] = {
 0x47,0x49,0x46,0x38,0x37,0x61,0x02,0x00,0x02,0x00,0xa1,0x00,0x00,0x00,0x00,0x00,
 0x39,0x62,0xfc,0xff,0x1a,0xe5,0xff,0xff,0xff,0x2c,0x00,0x00,0x00,0x00,0x02,0x00,
 0x02,0x00,0x00,0x02,0x03,0x14,0x16,0x05,0x00,0x3b
+};
+
+/* APM with an empty metafile with some padding zeros - looks like under Window the
+ * metafile data should be at least 20 bytes */
+static const unsigned char apmdata[] = {
+0xd7,0xcd,0xc6,0x9a, 0x00,0x00,0x00,0x00, 0x00,0x00,0xee,0x02, 0xb1,0x03,0xa0,0x05,
+0x00,0x00,0x00,0x00, 0xee,0x53,0x01,0x00, 0x09,0x00,0x00,0x03, 0x13,0x00,0x00,0x00,
+0x01,0x00,0x05,0x00, 0x00,0x00,0x00,0x00, 0x03,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00
 };
 
 struct NoStatStreamImpl
@@ -191,12 +208,13 @@ test_pic(const unsigned char *imgdata, unsigned int imgsize)
 	LARGE_INTEGER	seekto;
 	ULARGE_INTEGER	newpos1;
 	DWORD * 	header;
-	unsigned int 	i;
+	unsigned int 	i,j;
 
 	/* Let the fun begin */
 	hglob = GlobalAlloc (0, imgsize);
 	data = GlobalLock (hglob);
 	memcpy(data, imgdata, imgsize);
+	GlobalUnlock(hglob); data = NULL;
 
 	hres = CreateStreamOnHGlobal (hglob, FALSE, &stream);
 	ok (hres == S_OK, "createstreamonhglobal failed? doubt it... hres 0x%08x\n", hres);
@@ -210,34 +228,29 @@ test_pic(const unsigned char *imgdata, unsigned int imgsize)
 
 	/* again with Non Statable and Non Seekable stream */
 	stream = (LPSTREAM)NoStatStreamImpl_Construct(hglob);
+	hglob = 0;  /* Non-statable impl always deletes on release */
 	test_pic_with_stream(stream, 0);
 
 	IStream_Release(stream);
-	
-	/* free memory */
-	GlobalUnlock(hglob);
-	GlobalFree(hglob);
-
-	/* more fun!!! */
-	hglob = GlobalAlloc (0, imgsize + 8 * (2 * sizeof(DWORD)));
-	data = GlobalLock (hglob);
-	header = (DWORD *)data;
-	
-	/* multiple copies of header */
-	memcpy(data,"lt\0\0",4);
-	header[1] = imgsize;
-	memcpy(&(header[2]), header, 2 * sizeof(DWORD));
-	memcpy(&(header[4]), header, 4 * sizeof(DWORD));
-	memcpy(&(header[8]), header, 8 * sizeof(DWORD));
-
-	memcpy(data + 8 * (2 * sizeof(DWORD)), imgdata, imgsize);
-	
 	for (i = 1; i <= 8; i++) {
+		/* more fun!!! */
+		hglob = GlobalAlloc (0, imgsize + i * (2 * sizeof(DWORD)));
+		data = GlobalLock (hglob);
+		header = (DWORD *)data;
+
+		/* multiple copies of header */
+		memcpy(data,"lt\0\0",4);
+		header[1] = imgsize;
+		for (j = 2; j <= i; j++) {
+			memcpy(&(header[2 * (j - 1)]), header, 2 * sizeof(DWORD));
+		}
+		memcpy(data + i * (2 * sizeof(DWORD)), imgdata, imgsize);
+		GlobalUnlock(hglob); data = NULL;
+
 		hres = CreateStreamOnHGlobal (hglob, FALSE, &stream);
 		ok (hres == S_OK, "createstreamonhglobal failed? doubt it... hres 0x%08x\n", hres);
 
 		memset(&seekto,0,sizeof(seekto));
-		seekto.u.LowPart = (8 - i) * (2 * sizeof(DWORD));
 		hres = IStream_Seek(stream,seekto,SEEK_CUR,&newpos1);
 		ok (hres == S_OK, "istream seek failed? doubt it... hres 0x%08x\n", hres);
 		test_pic_with_stream(stream, imgsize);
@@ -246,14 +259,11 @@ test_pic(const unsigned char *imgdata, unsigned int imgsize)
 
 		/* again with Non Statable and Non Seekable stream */
 		stream = (LPSTREAM)NoStatStreamImpl_Construct(hglob);
+		hglob = 0;  /* Non-statable impl always deletes on release */
 		test_pic_with_stream(stream, 0);
 
-		IStream_Release(stream);		
+		IStream_Release(stream);
 	}
-
-	/* free memory */
-	GlobalUnlock(hglob);
-	GlobalFree(hglob);
 }
 
 static void test_empty_image(void) {
@@ -405,25 +415,95 @@ static void test_Invoke(void)
     IPictureDisp_Release(picdisp);
 }
 
+static void test_OleCreatePictureIndirect(void)
+{
+    IPicture *pict;
+    HRESULT hr;
+    short type;
+    OLE_HANDLE handle;
+
+    if(!pOleCreatePictureIndirect)
+    {
+        skip("Skipping OleCreatePictureIndirect tests\n");
+        return;
+    }
+
+    hr = pOleCreatePictureIndirect(NULL, &IID_IPicture, TRUE, (void**)&pict);
+    ok(hr == S_OK, "hr %08x\n", hr);
+
+    hr = IPicture_get_Type(pict, &type);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(type == PICTYPE_UNINITIALIZED, "type %d\n", type);
+
+    hr = IPicture_get_Handle(pict, &handle);
+    ok(hr == S_OK, "hr %08x\n", hr);
+    ok(handle == 0, "handle %08x\n", handle);
+
+    IPicture_Release(pict);
+}
+
+static void test_apm()
+{
+    OLE_HANDLE handle;
+    LPSTREAM stream;
+    IPicture *pict;
+    HGLOBAL hglob;
+    LPBYTE *data;
+    LONG cxy;
+    BOOL keep;
+    short type;
+
+    hglob = GlobalAlloc (0, sizeof(apmdata));
+    data = GlobalLock(hglob);
+    memcpy(data, apmdata, sizeof(apmdata));
+
+    ole_check(CreateStreamOnHGlobal(hglob, TRUE, &stream));
+    ole_check(OleLoadPictureEx(stream, sizeof(apmdata), TRUE, &IID_IPicture, 100, 100, 0, (LPVOID *)&pict));
+
+    ole_check(IPicture_get_Handle(pict, &handle));
+    ok(handle != 0, "handle is null\n");
+
+    ole_check(IPicture_get_Type(pict, &type));
+    expect_eq(type, PICTYPE_METAFILE, short, "%d");
+
+    ole_check(IPicture_get_Height(pict, &cxy));
+    expect_eq(cxy,  1667, LONG, "%d");
+
+    ole_check(IPicture_get_Width(pict, &cxy));
+    expect_eq(cxy,  1323, LONG, "%d");
+
+    ole_check(IPicture_get_KeepOriginalFormat(pict, &keep));
+    todo_wine expect_eq(keep, FALSE, LONG, "%d");
+
+    ole_expect(IPicture_get_hPal(pict, &handle), E_FAIL);
+    IPicture_Release(pict);
+    IStream_Release(stream);
+}
+
 START_TEST(olepicture)
 {
-	hOleaut32 = LoadLibraryA("oleaut32.dll");
+	hOleaut32 = GetModuleHandleA("oleaut32.dll");
 	pOleLoadPicture = (void*)GetProcAddress(hOleaut32, "OleLoadPicture");
+	pOleCreatePictureIndirect = (void*)GetProcAddress(hOleaut32, "OleCreatePictureIndirect");
 	if (!pOleLoadPicture)
+	{
+	    skip("OleLoadPicture is not available\n");
 	    return;
+	}
 
 	/* Test regular 1x1 pixel images of gif, jpg, bmp type */
         test_pic(gifimage, sizeof(gifimage));
 	test_pic(jpgimage, sizeof(jpgimage));
 	test_pic(bmpimage, sizeof(bmpimage));
         test_pic(gif4pixel, sizeof(gif4pixel));
-	/* No PNG support yet here or in older Windows...
-	test_pic(pngimage, sizeof(pngimage));
-	 */
+	/* FIXME: No PNG support yet in Wine or in older Windows... */
+	if (0) test_pic(pngimage, sizeof(pngimage));
 	test_empty_image();
 	test_empty_image_2();
+        test_apm();
 
 	test_Invoke();
+        test_OleCreatePictureIndirect();
 }
 
 
@@ -670,6 +750,13 @@ static HRESULT WINAPI NoStatStreamImpl_Clone(
 }
 static const IStreamVtbl NoStatStreamImpl_Vtbl;
 
+/*
+    Build an object that implements IStream, without IStream_Stat capabilities.
+    Receives a memory handle with data buffer. If memory handle is non-null,
+    it is assumed to be unlocked, otherwise an internal memory handle is allocated.
+    In any case the object takes ownership of memory handle and will free it on
+    object release.
+ */
 static NoStatStreamImpl* NoStatStreamImpl_Construct(HGLOBAL hGlobal)
 {
   NoStatStreamImpl* newStream;
@@ -678,7 +765,7 @@ static NoStatStreamImpl* NoStatStreamImpl_Construct(HGLOBAL hGlobal)
   if (newStream!=0)
   {
     newStream->lpVtbl = &NoStatStreamImpl_Vtbl;
-    newStream->ref    = 0;
+    newStream->ref    = 1;
     newStream->supportHandle = hGlobal;
 
     if (!newStream->supportHandle)
