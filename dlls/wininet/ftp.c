@@ -4,6 +4,7 @@
  * Copyright 1999 Corel Corporation
  * Copyright 2004 Mike McCormack for CodeWeavers
  * Copyright 2004 Kevin Koltzau
+ * Copyright 2007 Hans Leidekker
  *
  * Ulrich Czekalla
  * Noureddine Jemmali
@@ -225,6 +226,12 @@ BOOL WINAPI FtpPutFileW(HINTERNET hConnect, LPCWSTR lpszLocalFile,
         goto lend;
     }
 
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
+        goto lend;
+    }
+
     if ((dwFlags & FTP_CONDITION_MASK) > FTP_TRANSFER_TYPE_BINARY)
     {
         INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
@@ -392,6 +399,12 @@ BOOL WINAPI FtpSetCurrentDirectoryW(HINTERNET hConnect, LPCWSTR lpszDirectory)
         goto lend;
     }
 
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
+        goto lend;
+    }
+
     TRACE("lpszDirectory(%s)\n", debugstr_w(lpszDirectory));
 
     hIC = lpwfs->lpAppInfo;
@@ -529,6 +542,12 @@ BOOL WINAPI FtpCreateDirectoryW(HINTERNET hConnect, LPCWSTR lpszDirectory)
     if (WH_HFTPSESSION != lpwfs->hdr.htype)
     {
         INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+        goto lend;
+    }
+
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
         goto lend;
     }
 
@@ -673,6 +692,12 @@ HINTERNET WINAPI FtpFindFirstFileW(HINTERNET hConnect,
     if (NULL == lpwfs || WH_HFTPSESSION != lpwfs->hdr.htype)
     {
         INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+        goto lend;
+    }
+
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
         goto lend;
     }
 
@@ -866,6 +891,12 @@ BOOL WINAPI FtpGetCurrentDirectoryW(HINTERNET hFtpSession, LPWSTR lpszCurrentDir
         goto lend;
     }
 
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
+        goto lend;
+    }
+
     hIC = lpwfs->lpAppInfo;
     if (hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC)
     {
@@ -1044,10 +1075,12 @@ HINTERNET WINAPI FtpOpenFileW(HINTERNET hFtpSession,
         goto lend;
     }
 
-    if (lpwfs->download_in_progress != NULL) {
-	INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
-	goto lend;
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
+        goto lend;
     }
+
     hIC = lpwfs->lpAppInfo;
     if (hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC)
     {
@@ -1255,8 +1288,9 @@ BOOL WINAPI FtpGetFileW(HINTERNET hInternet, LPCWSTR lpszRemoteFile, LPCWSTR lps
         goto lend;
     }
 
-    if (lpwfs->download_in_progress != NULL) {
-	INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
         goto lend;
     }
     
@@ -1332,15 +1366,16 @@ BOOL WINAPI FTP_FtpGetFileW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszRemoteFile, 
 
             /* Receive data */
             FTP_RetrieveFileData(lpwfs, nDataSocket, hFile);
+            closesocket(nDataSocket);
+
             nResCode = FTP_ReceiveResponse(lpwfs, dwContext);
             if (nResCode)
             {
                 if (nResCode == 226)
                     bSuccess = TRUE;
-		else
+                else
                     FTP_SetResponseError(nResCode);
             }
-	    closesocket(nDataSocket);
         }
     }
 
@@ -1434,6 +1469,12 @@ BOOL WINAPI FtpDeleteFileW(HINTERNET hFtpSession, LPCWSTR lpszFileName)
     if (WH_HFTPSESSION != lpwfs->hdr.htype)
     {
         INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+        goto lend;
+    }
+
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
         goto lend;
     }
 
@@ -1573,6 +1614,12 @@ BOOL WINAPI FtpRemoveDirectoryW(HINTERNET hFtpSession, LPCWSTR lpszDirectory)
     if (WH_HFTPSESSION != lpwfs->hdr.htype)
     {
         INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+        goto lend;
+    }
+
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
         goto lend;
     }
 
@@ -1720,6 +1767,12 @@ BOOL WINAPI FtpRenameFileW(HINTERNET hFtpSession, LPCWSTR lpszSrc, LPCWSTR lpszD
         goto lend;
     }
 
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
+        goto lend;
+    }
+
     if (!lpszSrc || !lpszDest)
     {
         INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
@@ -1811,10 +1864,34 @@ lend:
 BOOL WINAPI FtpCommandA( HINTERNET hConnect, BOOL fExpectResponse, DWORD dwFlags,
                          LPCSTR lpszCommand, DWORD_PTR dwContext, HINTERNET* phFtpCommand )
 {
-    FIXME("%p %d 0x%08x %s 0x%08lx %p\n", hConnect, fExpectResponse, dwFlags,
+    BOOL r;
+    WCHAR *cmdW;
+
+    TRACE("%p %d 0x%08x %s 0x%08lx %p\n", hConnect, fExpectResponse, dwFlags,
           debugstr_a(lpszCommand), dwContext, phFtpCommand);
 
-    return TRUE;
+    if (fExpectResponse)
+    {
+        FIXME("data connection not supported\n");
+        return FALSE;
+    }
+
+    if (!lpszCommand || !lpszCommand[0])
+    {
+        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!(cmdW = WININET_strdup_AtoW(lpszCommand)))
+    {
+        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+        return FALSE;
+    }
+
+    r = FtpCommandW(hConnect, fExpectResponse, dwFlags, cmdW, dwContext, phFtpCommand);
+
+    HeapFree(GetProcessHeap(), 0, cmdW);
+    return r;
 }
 
 /***********************************************************************
@@ -1823,10 +1900,82 @@ BOOL WINAPI FtpCommandA( HINTERNET hConnect, BOOL fExpectResponse, DWORD dwFlags
 BOOL WINAPI FtpCommandW( HINTERNET hConnect, BOOL fExpectResponse, DWORD dwFlags,
                          LPCWSTR lpszCommand, DWORD_PTR dwContext, HINTERNET* phFtpCommand )
 {
-    FIXME("%p %d 0x%08x %s 0x%08lx %p\n", hConnect, fExpectResponse, dwFlags,
-          debugstr_w(lpszCommand), dwContext, phFtpCommand);
+    BOOL r = FALSE;
+    LPWININETFTPSESSIONW lpwfs;
+    LPSTR cmd = NULL;
+    DWORD len, nBytesSent= 0;
+    INT nResCode, nRC = 0;
 
-    return TRUE;
+    TRACE("%p %d 0x%08x %s 0x%08lx %p\n", hConnect, fExpectResponse, dwFlags,
+           debugstr_w(lpszCommand), dwContext, phFtpCommand);
+
+    if (!lpszCommand || !lpszCommand[0])
+    {
+        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (fExpectResponse)
+    {
+        FIXME("data connection not supported\n");
+        return FALSE;
+    }
+
+    lpwfs = (LPWININETFTPSESSIONW) WININET_GetObject( hConnect );
+    if (!lpwfs)
+    {
+        INTERNET_SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    if (WH_HFTPSESSION != lpwfs->hdr.htype)
+    {
+        INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+        goto lend;
+    }
+
+    if (lpwfs->download_in_progress != NULL)
+    {
+        INTERNET_SetLastError(ERROR_FTP_TRANSFER_IN_PROGRESS);
+        goto lend;
+    }
+
+    len = WideCharToMultiByte(CP_ACP, 0, lpszCommand, -1, NULL, 0, NULL, NULL) + strlen(szCRLF);
+    if ((cmd = HeapAlloc(GetProcessHeap(), 0, len )))
+        WideCharToMultiByte(CP_ACP, 0, lpszCommand, -1, cmd, len, NULL, NULL);
+    else
+    {
+        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+        goto lend;
+    }
+
+    strcat(cmd, szCRLF);
+    len--;
+
+    TRACE("Sending (%s) len(%d)\n", cmd, len);
+    while ((nBytesSent < len) && (nRC != -1))
+    {
+        nRC = send(lpwfs->sndSocket, cmd + nBytesSent, len - nBytesSent, 0);
+        if (nRC != -1)
+        {
+            nBytesSent += nRC;
+            TRACE("Sent %d bytes\n", nRC);
+        }
+    }
+
+    if (nBytesSent)
+    {
+        nResCode = FTP_ReceiveResponse(lpwfs, lpwfs->hdr.dwContext);
+        if (nResCode > 0 && nResCode < 400)
+            r = TRUE;
+        else
+            FTP_SetResponseError(nResCode);
+    }
+
+lend:
+    WININET_Release( &lpwfs->hdr );
+    HeapFree(GetProcessHeap(), 0, cmd);
+    return r;
 }
 
 /***********************************************************************
@@ -1900,6 +2049,9 @@ HINTERNET FTP_Connect(LPWININETAPPINFOW hIC, LPCWSTR lpszServerName,
     lpwfs->hdr.destroy = FTP_CloseSessionHandle;
     lpwfs->hdr.lpfnStatusCB = hIC->hdr.lpfnStatusCB;
     lpwfs->download_in_progress = NULL;
+    lpwfs->sndSocket = -1;
+    lpwfs->lstnSocket = -1;
+    lpwfs->pasvSocket = -1;
 
     WININET_AddRef( &hIC->hdr );
     lpwfs->lpAppInfo = hIC;
@@ -2010,7 +2162,6 @@ lerror:
 
     if (!bSuccess && handle)
     {
-        WININET_Release( &hIC->hdr );
         WININET_FreeHandle( handle );
         handle = NULL;
     }
@@ -2957,7 +3108,7 @@ static void FTP_CloseFindNextHandle(LPWININETHANDLEHEADER hdr)
  *           FTP_CloseFileTransferHandle (internal)
  *
  * Closes the file transfer handle. This also 'cleans' the data queue of
- * the 'transfer conplete' message (this is a bit of a hack though :-/ )
+ * the 'transfer complete' message (this is a bit of a hack though :-/ )
  *
  */
 static void FTP_CloseFileTransferHandle(LPWININETHANDLEHEADER hdr)
@@ -2971,17 +3122,13 @@ static void FTP_CloseFileTransferHandle(LPWININETHANDLEHEADER hdr)
     WININET_Release(&lpwh->lpFtpSession->hdr);
 
     if (!lpwh->session_deleted)
-	lpwfs->download_in_progress = NULL;
+        lpwfs->download_in_progress = NULL;
 
-    /* This just serves to flush the control socket of any spurrious lines written
-       to it (like '226 Transfer complete.').
-
-       Wonder what to do if the server sends us an error code though...
-    */
-    nResCode = FTP_ReceiveResponse(lpwfs, lpwfs->hdr.dwContext);
-    
     if (lpwh->nDataSocket != -1)
         closesocket(lpwh->nDataSocket);
+
+    nResCode = FTP_ReceiveResponse(lpwfs, lpwfs->hdr.dwContext);
+    if (nResCode > 0 && nResCode != 226) WARN("server reports failed transfer\n");
 
     HeapFree(GetProcessHeap(), 0, lpwh);
 }
@@ -3390,45 +3537,36 @@ static DWORD FTP_SetResponseError(DWORD dwResponse)
 
     switch(dwResponse)
     {
-	case 421: /* Service not available - Server may be shutting down. */
-	    dwCode = ERROR_INTERNET_EXTENDED_ERROR;
-	    break;
+    case 425: /* Cannot open data connection. */
+        dwCode = ERROR_INTERNET_CANNOT_CONNECT;
+        break;
 
-	case 425: /* Cannot open data connection. */
-	    dwCode = ERROR_INTERNET_CANNOT_CONNECT;
-	    break;
+    case 426: /* Connection closed, transer aborted. */
+        dwCode = ERROR_INTERNET_CONNECTION_ABORTED;
+        break;
 
-	case 426: /* Connection closed, transer aborted. */
-	    dwCode = ERROR_INTERNET_CONNECTION_ABORTED;
-	    break;
+    case 530: /* Not logged in. Login incorrect. */
+        dwCode = ERROR_INTERNET_LOGIN_FAILURE;
+        break;
 
-	case 500: /* Syntax error. Command unrecognized. */
-	case 501: /* Syntax error. Error in parameters or arguments. */
-	    dwCode = ERROR_INTERNET_INCORRECT_FORMAT;
-	    break;
+    case 421: /* Service not available - Server may be shutting down. */
+    case 450: /* File action not taken. File may be busy. */
+    case 451: /* Action aborted. Server error. */
+    case 452: /* Action not taken. Insufficient storage space on server. */
+    case 500: /* Syntax error. Command unrecognized. */
+    case 501: /* Syntax error. Error in parameters or arguments. */
+    case 502: /* Command not implemented. */
+    case 503: /* Bad sequence of commands. */
+    case 504: /* Command not implemented for that parameter. */
+    case 532: /* Need account for storing files */
+    case 550: /* File action not taken. File not found or no access. */
+    case 551: /* Requested action aborted. Page type unknown */
+    case 552: /* Action aborted. Exceeded storage allocation */
+    case 553: /* Action not taken. File name not allowed. */
 
-	case 530: /* Not logged in. Login incorrect. */
-	    dwCode = ERROR_INTERNET_LOGIN_FAILURE;
-	    break;
-
-	case 550: /* File action not taken. File not found or no access. */
-	    dwCode = ERROR_INTERNET_ITEM_NOT_FOUND;
-	    break;
-
-	case 450: /* File action not taken. File may be busy. */
-	case 451: /* Action aborted. Server error. */
-	case 452: /* Action not taken. Insufficient storage space on server. */
-	case 502: /* Command not implemented. */
-	case 503: /* Bad sequence of commands. */
-	case 504: /* Command not implemented for that parameter. */
-	case 532: /* Need account for storing files */
-	case 551: /* Requested action aborted. Page type unknown */
-	case 552: /* Action aborted. Exceeded storage allocation */
-	case 553: /* Action not taken. File name not allowed. */
-
-	default:
-            dwCode = ERROR_INTERNET_EXTENDED_ERROR;
-	    break;
+    default:
+        dwCode = ERROR_INTERNET_EXTENDED_ERROR;
+        break;
     }
 
     INTERNET_SetLastError(dwCode);

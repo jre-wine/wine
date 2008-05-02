@@ -387,7 +387,7 @@
 @ stdcall FindResourceExW(long wstr wstr long)
 @ stdcall FindResourceW(long wstr wstr)
 @ stub FindVolumeClose
-@ stub FindVolumeMountPointClose
+@ stdcall FindVolumeMountPointClose(ptr)
 @ stdcall FlushConsoleInputBuffer(long)
 @ stdcall FlushFileBuffers(long)
 @ stdcall FlushInstructionCache(long long long)
@@ -576,7 +576,7 @@
 @ stdcall GetProcAddress(long str)
 @ stdcall GetProcessAffinityMask(long ptr ptr)
 @ stdcall GetProcessFlags(long)
-# @ stub GetProcessHandleCount
+@ stdcall GetProcessHandleCount(long ptr)
 @ stdcall GetProcessHeap()
 @ stdcall GetProcessHeaps(long ptr)
 @ stdcall GetProcessId(long)
@@ -740,6 +740,7 @@
 @ stdcall IsWow64Process(ptr ptr)
 @ stdcall -i386 -register K32Thk1632Epilog()
 @ stdcall -i386 -register K32Thk1632Prolog()
+@ stdcall LCIDToLocaleName(long ptr long long)
 @ stdcall LCMapStringA(long long str long ptr long)
 @ stdcall LCMapStringW(long long wstr long ptr long)
 @ stdcall LZClose(long)
@@ -771,6 +772,7 @@
 @ stdcall LocalShrink(long long)
 @ stdcall LocalSize(long)
 @ stdcall LocalUnlock(long)
+@ stdcall LocaleNameToLCID(wstr long)
 @ stdcall LockFile(long long long long long)
 @ stdcall LockFileEx(long long long long long ptr)
 @ stdcall LockResource(long)

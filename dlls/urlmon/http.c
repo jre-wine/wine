@@ -228,7 +228,7 @@ static void CALLBACK HTTPPROTOCOL_InternetStatusCallback(
     IInternetProtocolSink_ReportProgress(This->protocol_sink, ulStatusCode, (LPWSTR)lpvStatusInformation);
 }
 
-static inline LPWSTR strndupW(LPWSTR string, int len)
+static inline LPWSTR strndupW(LPCWSTR string, int len)
 {
     LPWSTR ret = NULL;
     if (string &&
@@ -942,4 +942,10 @@ HRESULT HttpProtocol_Construct(IUnknown *pUnkOuter, LPVOID *ppobj)
     *ppobj = PROTOCOL(ret);
     
     return S_OK;
+}
+
+HRESULT HttpSProtocol_Construct(IUnknown *pUnkOuter, LPVOID *ppobj)
+{
+    FIXME("(%p %p)\n", pUnkOuter, ppobj);
+    return E_NOINTERFACE;
 }

@@ -221,6 +221,7 @@ struct object_attributes
 {
     obj_handle_t rootdir;
     data_size_t sd_len;
+    data_size_t name_len;
 
 
 };
@@ -1010,6 +1011,7 @@ struct create_file_request
     int          create;
     unsigned int options;
     unsigned int attrs;
+    /* VARARG(objattr,object_attributes); */
     /* VARARG(filename,string); */
 };
 struct create_file_reply
@@ -2744,6 +2746,7 @@ struct create_window_request
     user_handle_t  owner;
     atom_t         atom;
     void*          instance;
+    /* VARARG(class,unicode_str); */
 };
 struct create_window_reply
 {
@@ -2885,6 +2888,7 @@ struct get_window_children_request
     user_handle_t  parent;
     atom_t         atom;
     thread_id_t    tid;
+    /* VARARG(class,unicode_str); */
 };
 struct get_window_children_reply
 {
@@ -2944,6 +2948,7 @@ struct set_window_pos_reply
 {
     struct reply_header __header;
     unsigned int   new_style;
+    unsigned int   new_ex_style;
 };
 
 
@@ -3591,10 +3596,12 @@ struct create_class_request
     int            extra;
     int            win_extra;
     void*          client_ptr;
+    /* VARARG(name,unicode_str); */
 };
 struct create_class_reply
 {
     struct reply_header __header;
+    atom_t         atom;
 };
 
 
@@ -3604,6 +3611,7 @@ struct destroy_class_request
     struct request_header __header;
     atom_t         atom;
     void*          instance;
+    /* VARARG(name,unicode_str); */
 };
 struct destroy_class_reply
 {
@@ -4877,6 +4885,6 @@ union generic_reply
     struct set_completion_info_reply set_completion_info_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 321
+#define SERVER_PROTOCOL_VERSION 328
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

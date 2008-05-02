@@ -361,8 +361,18 @@ static inline VOID IWineD3DPixelShaderImpl_GenerateShader(
         shader_generate_glsl_declarations( (IWineD3DBaseShader*) This, reg_maps, &buffer, &GLINFO_LOCATION);
 
         /* Pack 3.0 inputs */
-        if (This->baseShader.hex_version >= WINED3DPS_VERSION(3,0))
-            pshader_glsl_input_pack(&buffer, This->semantics_in);
+        if (This->baseShader.hex_version >= WINED3DPS_VERSION(3,0)) {
+
+            if(((IWineD3DDeviceImpl *) This->baseShader.device)->strided_streams.u.s.position_transformed) {
+                This->vertexprocessing = pretransformed;
+                pshader_glsl_input_pack(&buffer, This->semantics_in, iface);
+            } else if(!use_vs((IWineD3DDeviceImpl *) This->baseShader.device)) {
+                This->vertexprocessing = fixedfunction;
+                pshader_glsl_input_pack(&buffer, This->semantics_in, iface);
+            } else {
+                This->vertexprocessing = vertexshader;
+            }
+        }
 
         /* Base Shader Body */
         shader_generate_main( (IWineD3DBaseShader*) This, &buffer, reg_maps, pFunction);
@@ -532,6 +542,7 @@ static HRESULT WINAPI IWineD3DPixelShaderImpl_SetFunction(IWineD3DPixelShader *i
     if (WINED3DSHADER_VERSION_MAJOR(This->baseShader.hex_version) > 1) {
         shader_reg_maps *reg_maps = &This->baseShader.reg_maps;
         HRESULT hr;
+        unsigned int i, j, highest_reg_used = 0, num_regs_used = 0;
 
         /* Second pass: figure out which registers are used, what the semantics are, etc.. */
         memset(reg_maps, 0, sizeof(shader_reg_maps));
@@ -539,6 +550,41 @@ static HRESULT WINAPI IWineD3DPixelShaderImpl_SetFunction(IWineD3DPixelShader *i
             This->semantics_in, NULL, pFunction, NULL);
         if (FAILED(hr)) return hr;
         /* FIXME: validate reg_maps against OpenGL */
+
+        for(i = 0; i < MAX_REG_INPUT; i++) {
+            if(This->input_reg_used[i]) {
+                num_regs_used++;
+                highest_reg_used = i;
+            }
+        }
+
+        /* Don't do any register mapping magic if it is not needed, or if we can't
+         * achive anything anyway
+         */
+        if(highest_reg_used < (GL_LIMITS(glsl_varyings) / 4) ||
+           num_regs_used > (GL_LIMITS(glsl_varyings) / 4) ) {
+            if(num_regs_used > (GL_LIMITS(glsl_varyings) / 4)) {
+                /* This happens with relative addressing. The input mapper function
+                 * warns about this if the higher registers are declared too, so
+                 * don't write a FIXME here
+                 */
+                WARN("More varying registers used than supported\n");
+            }
+
+            for(i = 0; i < MAX_REG_INPUT; i++) {
+                This->input_reg_map[i] = i;
+            }
+        } else {
+            j = 0;
+            for(i = 0; i < MAX_REG_INPUT; i++) {
+                if(This->input_reg_used[i]) {
+                    This->input_reg_map[i] = j;
+                    j++;
+                } else {
+                    This->input_reg_map[i] = -1;
+                }
+            }
+        }
     }
 
     This->baseShader.shader_mode = deviceImpl->ps_selected_mode;
@@ -602,6 +648,20 @@ static HRESULT WINAPI IWineD3DPixelShaderImpl_CompileShader(IWineD3DPixelShader 
         if(This->baseShader.reg_maps.usesdsy && !This->vpos_uniform) {
             if(This->render_offscreen ? 0 : 1 != deviceImpl->render_offscreen ? 0 : 1) {
                 WARN("Recompiling shader because dsy is used, hard compiled and render_offscreen changed\n");
+                goto recompile;
+            }
+        }
+        if(This->baseShader.hex_version >= WINED3DPS_VERSION(3,0)) {
+            if(((IWineD3DDeviceImpl *) This->baseShader.device)->strided_streams.u.s.position_transformed &&
+                 This->vertexprocessing != pretransformed) {
+                WARN("Recompiling shader because pretransformed vertices are provided, which wasn't the case before\n");
+                goto recompile;
+            } else if(!use_vs((IWineD3DDeviceImpl *) This->baseShader.device) &&
+                       This->vertexprocessing != fixedfunction) {
+                WARN("Recompiling shader because fixed function vp is in use, which wasn't the case before\n");
+                goto recompile;
+            } else if(This->vertexprocessing != vertexshader) {
+                WARN("Recompiling shader because vertex shaders are in use, which wasn't the case before\n");
                 goto recompile;
             }
         }

@@ -130,14 +130,14 @@ static const WELLKNOWNSID WellKnownSids[] =
     { {0,0}, WinBuiltinDCOMUsersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_DCOM_USERS } } },
 };
 
-/* these SIDs must be constructed as relative to some domain - only the RID is well-kown */
-typedef struct WELLKOWNRID
+/* these SIDs must be constructed as relative to some domain - only the RID is well-known */
+typedef struct WELLKNOWNRID
 {
     WELL_KNOWN_SID_TYPE Type;
     DWORD Rid;
 } WELLKNOWNRID;
 
-WELLKNOWNRID WellKnownRids[] = {
+static const WELLKNOWNRID WellKnownRids[] = {
     { WinAccountAdministratorSid,    DOMAIN_USER_RID_ADMIN },
     { WinAccountGuestSid,            DOMAIN_USER_RID_GUEST },
     { WinAccountKrbtgtSid,           DOMAIN_USER_RID_KRBTGT },

@@ -790,14 +790,16 @@ static void dump_varargs_object_attributes( data_size_t size )
     {
         const WCHAR *str;
         fprintf( stderr, "rootdir=%p,sd=", objattr->rootdir );
-        if (objattr->sd_len > size - sizeof(*objattr)) return;
+        if (objattr->sd_len > size - sizeof(*objattr) ||
+            objattr->name_len > size - sizeof(*objattr) - objattr->sd_len)
+            return;
         dump_inline_security_descriptor( (const struct security_descriptor *)(objattr + 1), objattr->sd_len );
-        str = (const WCHAR *)cur_data + (sizeof(*objattr) + objattr->sd_len) / sizeof(WCHAR);
+        str = (const WCHAR *)objattr + (sizeof(*objattr) + objattr->sd_len) / sizeof(WCHAR);
         fprintf( stderr, ",name=L\"" );
-        dump_strW( str, (size - sizeof(*objattr) - objattr->sd_len) / sizeof(WCHAR),
-                   stderr, "\"\"" );
+        dump_strW( str, objattr->name_len / sizeof(WCHAR), stderr, "\"\"" );
         fputc( '\"', stderr );
-        remove_data( size );
+        remove_data( ((sizeof(*objattr) + objattr->sd_len) / sizeof(WCHAR)) * sizeof(WCHAR) +
+                     objattr->name_len );
     }
     fputc( '}', stderr );
 }
@@ -1273,6 +1275,9 @@ static void dump_create_file_request( const struct create_file_request *req )
     fprintf( stderr, " create=%d,", req->create );
     fprintf( stderr, " options=%08x,", req->options );
     fprintf( stderr, " attrs=%08x,", req->attrs );
+    fprintf( stderr, " objattr=" );
+    dump_varargs_object_attributes( cur_size );
+    fputc( ',', stderr );
     fprintf( stderr, " filename=" );
     dump_varargs_string( cur_size );
 }
@@ -2521,7 +2526,9 @@ static void dump_create_window_request( const struct create_window_request *req 
     fprintf( stderr, " parent=%p,", req->parent );
     fprintf( stderr, " owner=%p,", req->owner );
     fprintf( stderr, " atom=%04x,", req->atom );
-    fprintf( stderr, " instance=%p", req->instance );
+    fprintf( stderr, " instance=%p,", req->instance );
+    fprintf( stderr, " class=" );
+    dump_varargs_unicode_str( cur_size );
 }
 
 static void dump_create_window_reply( const struct create_window_reply *req )
@@ -2628,7 +2635,9 @@ static void dump_get_window_children_request( const struct get_window_children_r
 {
     fprintf( stderr, " parent=%p,", req->parent );
     fprintf( stderr, " atom=%04x,", req->atom );
-    fprintf( stderr, " tid=%04x", req->tid );
+    fprintf( stderr, " tid=%04x,", req->tid );
+    fprintf( stderr, " class=" );
+    dump_varargs_unicode_str( cur_size );
 }
 
 static void dump_get_window_children_reply( const struct get_window_children_reply *req )
@@ -2686,7 +2695,8 @@ static void dump_set_window_pos_request( const struct set_window_pos_request *re
 
 static void dump_set_window_pos_reply( const struct set_window_pos_reply *req )
 {
-    fprintf( stderr, " new_style=%08x", req->new_style );
+    fprintf( stderr, " new_style=%08x,", req->new_style );
+    fprintf( stderr, " new_ex_style=%08x", req->new_ex_style );
 }
 
 static void dump_get_window_rectangles_request( const struct get_window_rectangles_request *req )
@@ -3186,13 +3196,22 @@ static void dump_create_class_request( const struct create_class_request *req )
     fprintf( stderr, " instance=%p,", req->instance );
     fprintf( stderr, " extra=%d,", req->extra );
     fprintf( stderr, " win_extra=%d,", req->win_extra );
-    fprintf( stderr, " client_ptr=%p", req->client_ptr );
+    fprintf( stderr, " client_ptr=%p,", req->client_ptr );
+    fprintf( stderr, " name=" );
+    dump_varargs_unicode_str( cur_size );
+}
+
+static void dump_create_class_reply( const struct create_class_reply *req )
+{
+    fprintf( stderr, " atom=%04x", req->atom );
 }
 
 static void dump_destroy_class_request( const struct destroy_class_request *req )
 {
     fprintf( stderr, " atom=%04x,", req->atom );
-    fprintf( stderr, " instance=%p", req->instance );
+    fprintf( stderr, " instance=%p,", req->instance );
+    fprintf( stderr, " name=" );
+    dump_varargs_unicode_str( cur_size );
 }
 
 static void dump_destroy_class_reply( const struct destroy_class_reply *req )
@@ -4100,7 +4119,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_start_hook_chain_reply,
     (dump_func)0,
     (dump_func)dump_get_hook_info_reply,
-    (dump_func)0,
+    (dump_func)dump_create_class_reply,
     (dump_func)dump_destroy_class_reply,
     (dump_func)dump_set_class_info_reply,
     (dump_func)dump_set_clipboard_info_reply,

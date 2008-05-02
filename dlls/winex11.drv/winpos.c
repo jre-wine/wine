@@ -181,6 +181,7 @@ static void update_wm_states( Display *display, struct x11drv_win_data *data, BO
     static const unsigned int state_atoms[NB_WM_STATES] =
     {
         XATOM__NET_WM_STATE_FULLSCREEN,
+        XATOM__NET_WM_STATE_ABOVE,
         XATOM__NET_WM_STATE_SKIP_PAGER,
         XATOM__NET_WM_STATE_SKIP_TASKBAR
     };
@@ -195,6 +196,8 @@ static void update_wm_states( Display *display, struct x11drv_win_data *data, BO
         new_state |= (1 << WM_STATE_FULLSCREEN);
 
     ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
+    if (ex_style & WS_EX_TOPMOST)
+        new_state |= (1 << WM_STATE_ABOVE);
     if (ex_style & WS_EX_TOOLWINDOW)
         new_state |= (1 << WM_STATE_SKIP_TASKBAR) | (1 << WM_STATE_SKIP_PAGER);
 
@@ -240,7 +243,7 @@ BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
     struct x11drv_win_data *data;
     RECT new_whole_rect, old_client_rect;
     WND *win;
-    DWORD old_style, new_style;
+    DWORD old_style, new_style, new_ex_style;
     BOOL ret, make_managed = FALSE;
 
     if (!(data = X11DRV_get_win_data( hwnd ))) return FALSE;
@@ -293,6 +296,7 @@ BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
         }
         ret = !wine_server_call( req );
         new_style = reply->new_style;
+        new_ex_style = reply->new_ex_style;
     }
     SERVER_END_REQ;
 
@@ -304,6 +308,7 @@ BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
             win->rectWindow   = *rectWindow;
             win->rectClient   = *rectClient;
             win->dwStyle      = new_style;
+            win->dwExStyle    = new_ex_style;
             WIN_ReleasePtr( win );
         }
         return ret;
@@ -325,6 +330,7 @@ BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
         win->rectClient   = *rectClient;
         old_style         = win->dwStyle;
         win->dwStyle      = new_style;
+        win->dwExStyle    = new_ex_style;
         data->window_rect = *rectWindow;
 
         TRACE( "win %p window %s client %s style %08x\n",

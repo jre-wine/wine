@@ -2034,7 +2034,7 @@ static const BYTE constraintWithDomainName[] = { 0x30, 0x32, 0x03, 0x01, 0x00,
 static void test_encodeBasicConstraints(DWORD dwEncoding)
 {
     DWORD i, bufSize = 0;
-    CERT_BASIC_CONSTRAINTS_INFO info;
+    CERT_BASIC_CONSTRAINTS_INFO info = { { 0 } };
     CERT_NAME_BLOB nameBlob = { sizeof(encodedDomainName),
      (LPBYTE)encodedDomainName };
     BOOL ret;
@@ -4269,7 +4269,7 @@ static void test_decodeCRLToBeSigned(DWORD dwEncoding)
     ret = CryptDecodeObjectEx(dwEncoding, X509_CERT_CRL_TO_BE_SIGNED,
      v1CRLWithIssuerAndEmptyEntry, v1CRLWithIssuerAndEmptyEntry[1] + 2,
      CRYPT_DECODE_ALLOC_FLAG, NULL, (BYTE *)&buf, &size);
-    todo_wine ok(!ret && GetLastError() == CRYPT_E_ASN1_CORRUPT,
+    ok(!ret && GetLastError() == CRYPT_E_ASN1_CORRUPT,
      "Expected CRYPT_E_ASN1_CORRUPT, got %08x\n", GetLastError());
     /* with a real CRL entry */
     ret = CryptDecodeObjectEx(dwEncoding, X509_CERT_CRL_TO_BE_SIGNED,
@@ -4296,6 +4296,7 @@ static void test_decodeCRLToBeSigned(DWORD dwEncoding)
          "Wrong issuer size %d\n", info->Issuer.cbData);
         ok(!memcmp(info->Issuer.pbData, encodedCommonName, info->Issuer.cbData),
          "Unexpected issuer\n");
+        LocalFree(buf);
     }
     /* a real CRL from verisign that has extensions */
     ret = CryptDecodeObjectEx(dwEncoding, X509_CERT_CRL_TO_BE_SIGNED,
@@ -4359,6 +4360,7 @@ static void test_decodeCRLToBeSigned(DWORD dwEncoding)
          "Unexpected issuer\n");
         ok(info->cExtension == 1, "Expected 1 extensions, got %d\n",
          info->cExtension);
+        LocalFree(buf);
     }
     ret = CryptDecodeObjectEx(dwEncoding, X509_CERT_CRL_TO_BE_SIGNED,
      v2CRLWithExt, sizeof(v2CRLWithExt), CRYPT_DECODE_ALLOC_FLAG,
@@ -5034,6 +5036,7 @@ static void test_decodePKCSAttribute(DWORD dwEncoding)
          "Unexpected size %d\n", attr->rgValue[0].cbData);
         ok(!memcmp(attr->rgValue[0].pbData, ints[0].encoded,
          attr->rgValue[0].cbData), "Unexpected value\n");
+        LocalFree(buf);
     }
 }
 
@@ -5746,6 +5749,7 @@ static void testExportPublicKey(HCRYPTPROV csp, PCERT_PUBLIC_KEY_INFO *pInfo)
             }
         }
     }
+    CryptDestroyKey(key);
 }
 
 static const BYTE expiredCert[] = { 0x30, 0x82, 0x01, 0x33, 0x30, 0x81, 0xe2,

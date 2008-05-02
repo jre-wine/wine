@@ -395,7 +395,7 @@
 @ stdcall RpcBindingToStringBindingW(ptr ptr)
 @ stdcall RpcBindingVectorFree(ptr)
 @ stub RpcCancelAsyncCall
-@ stub RpcCancelThread
+@ stdcall RpcCancelThread(ptr)
 @ stub RpcCancelThreadEx
 @ stub RpcCertGeneratePrincipalNameA
 @ stub RpcCertGeneratePrincipalNameW
@@ -414,7 +414,7 @@
 @ stub RpcErrorNumberOfRecords # wxp
 @ stub RpcErrorResetEnumeration # wxp
 @ stub RpcErrorSaveErrorInfo # wxp
-@ stub RpcErrorStartEnumeration # wxp
+@ stdcall RpcErrorStartEnumeration(ptr)
 @ stub RpcFreeAuthorizationContext # wxp
 @ stub RpcGetAsyncCallStatus
 @ stub RpcIfIdVectorFree
@@ -438,7 +438,7 @@
 @ stub RpcMgmtInqStats
 @ stdcall RpcMgmtIsServerListening(ptr)
 @ stub RpcMgmtSetAuthorizationFn
-@ stub RpcMgmtSetCancelTimeout
+@ stdcall RpcMgmtSetCancelTimeout(long)
 @ stdcall RpcMgmtSetComTimeout(ptr long)
 @ stub RpcMgmtSetParameter # win9x
 @ stdcall RpcMgmtSetServerStackSize(long)

@@ -93,13 +93,6 @@ typedef struct _WINE_MEMSTORE
     struct ContextList *crls;
 } WINE_MEMSTORE, *PWINE_MEMSTORE;
 
-typedef struct _WINE_MSGSTOREINFO
-{
-    DWORD      dwOpenFlags;
-    HCERTSTORE memStore;
-    HCRYPTMSG  msg;
-} WINE_MSGSTOREINFO, *PWINE_MSGSTOREINFO;
-
 void CRYPT_InitStore(WINECRYPT_CERTSTORE *store, DWORD dwFlags,
  CertStoreType type)
 {
@@ -528,29 +521,14 @@ static PWINECRYPT_CERTSTORE CRYPT_SysOpenStoreA(HCRYPTPROV hCryptProv,
 
 static void WINAPI CRYPT_MsgCloseStore(HCERTSTORE hCertStore, DWORD dwFlags)
 {
-    PWINE_MSGSTOREINFO store = (PWINE_MSGSTOREINFO)hCertStore;
+    HCRYPTMSG msg = (HCRYPTMSG)hCertStore;
 
-    TRACE("(%p, %08x)\n", store, dwFlags);
-    CertCloseStore(store->memStore, dwFlags);
-    CryptMsgClose(store->msg);
-    CryptMemFree(store);
+    TRACE("(%p, %08x)\n", msg, dwFlags);
+    CryptMsgClose(msg);
 }
 
 static void *msgProvFuncs[] = {
     CRYPT_MsgCloseStore,
-    NULL, /* CERT_STORE_PROV_READ_CERT_FUNC */
-    NULL, /* CERT_STORE_PROV_WRITE_CERT_FUNC */
-    NULL, /* CERT_STORE_PROV_DELETE_CERT_FUNC */
-    NULL, /* CERT_STORE_PROV_SET_CERT_PROPERTY_FUNC */
-    NULL, /* CERT_STORE_PROV_READ_CRL_FUNC */
-    NULL, /* CERT_STORE_PROV_WRITE_CRL_FUNC */
-    NULL, /* CERT_STORE_PROV_DELETE_CRL_FUNC */
-    NULL, /* CERT_STORE_PROV_SET_CRL_PROPERTY_FUNC */
-    NULL, /* CERT_STORE_PROV_READ_CTL_FUNC */
-    NULL, /* CERT_STORE_PROV_WRITE_CTL_FUNC */
-    NULL, /* CERT_STORE_PROV_DELETE_CTL_FUNC */
-    NULL, /* CERT_STORE_PROV_SET_CTL_PROPERTY_FUNC */
-    NULL, /* CERT_STORE_PROV_CONTROL_FUNC */
 };
 
 static PWINECRYPT_CERTSTORE CRYPT_MsgOpenStore(HCRYPTPROV hCryptProv,
@@ -613,28 +591,17 @@ static PWINECRYPT_CERTSTORE CRYPT_MsgOpenStore(HCRYPTPROV hCryptProv,
         }
         if (ret)
         {
-            PWINE_MSGSTOREINFO info = CryptMemAlloc(sizeof(WINE_MSGSTOREINFO));
+            CERT_STORE_PROV_INFO provInfo = { 0 };
 
-            if (info)
-            {
-                CERT_STORE_PROV_INFO provInfo = { 0 };
-
-                info->dwOpenFlags = dwFlags;
-                info->memStore = memStore;
-                info->msg = CryptMsgDuplicate(msg);
-                provInfo.cbSize = sizeof(provInfo);
-                provInfo.cStoreProvFunc = sizeof(msgProvFuncs) /
-                 sizeof(msgProvFuncs[0]);
-                provInfo.rgpvStoreProvFunc = msgProvFuncs;
-                provInfo.hStoreProv = info;
-                store = CRYPT_ProvCreateStore(dwFlags, memStore,
-                 &provInfo);
-                /* Msg store doesn't need crypto provider, so close it */
-                if (hCryptProv && !(dwFlags & CERT_STORE_NO_CRYPT_RELEASE_FLAG))
-                    CryptReleaseContext(hCryptProv, 0);
-            }
-            else
-                CertCloseStore(memStore, 0);
+            provInfo.cbSize = sizeof(provInfo);
+            provInfo.cStoreProvFunc = sizeof(msgProvFuncs) /
+             sizeof(msgProvFuncs[0]);
+            provInfo.rgpvStoreProvFunc = msgProvFuncs;
+            provInfo.hStoreProv = CryptMsgDuplicate(msg);
+            store = CRYPT_ProvCreateStore(dwFlags, memStore, &provInfo);
+            /* Msg store doesn't need crypto provider, so close it */
+            if (hCryptProv && !(dwFlags & CERT_STORE_NO_CRYPT_RELEASE_FLAG))
+                CryptReleaseContext(hCryptProv, 0);
         }
         else
             CertCloseStore(memStore, 0);

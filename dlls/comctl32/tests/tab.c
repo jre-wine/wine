@@ -233,6 +233,40 @@ static const struct message getset_tooltip_parent_seq[] = {
     { 0 }
 };
 
+static const struct message insert_focus_seq[] = {
+    { TCM_GETITEMCOUNT, sent|wparam|lparam, 0, 0 },
+    { TCM_GETCURFOCUS, sent|wparam|lparam, 0, 0 },
+    { TCM_INSERTITEM, sent|wparam, 1 },
+    { TCM_GETITEMCOUNT, sent|wparam|lparam, 0, 0 },
+    { TCM_GETCURFOCUS, sent|wparam|lparam, 0, 0 },
+    { TCM_INSERTITEM, sent|wparam, 2 },
+    { WM_NOTIFYFORMAT, sent|defwinproc, },
+    { WM_QUERYUISTATE, sent|defwinproc, },
+    { WM_PARENTNOTIFY, sent|defwinproc, },
+    { TCM_GETITEMCOUNT, sent|wparam|lparam, 0, 0 },
+    { TCM_GETCURFOCUS, sent|wparam|lparam, 0, 0 },
+    { TCM_SETCURFOCUS, sent|wparam|lparam, -1, 0 },
+    { TCM_GETCURFOCUS, sent|wparam|lparam, 0, 0 },
+    { TCM_INSERTITEM, sent|wparam, 3 },
+    { TCM_GETCURFOCUS, sent|wparam|lparam, 0, 0 },
+    { 0 }
+};
+
+static const struct message delete_focus_seq[] = {
+    { TCM_GETITEMCOUNT, sent|wparam|lparam, 0, 0 },
+    { TCM_GETCURFOCUS, sent|wparam|lparam, 0, 0 },
+    { TCM_DELETEITEM, sent|wparam|lparam, 1, 0 },
+    { TCM_GETITEMCOUNT, sent|wparam|lparam, 0, 0 },
+    { TCM_GETCURFOCUS, sent|wparam|lparam, 0, 0 },
+    { TCM_SETCURFOCUS, sent|wparam|lparam, -1, 0 },
+    { TCM_GETCURFOCUS, sent|wparam|lparam, 0, 0 },
+    { TCM_DELETEITEM, sent|wparam|lparam, 0, 0 },
+    { TCM_GETITEMCOUNT, sent|wparam|lparam, 0, 0 },
+    { TCM_GETCURFOCUS, sent|wparam|lparam, 0, 0 },
+    { 0 }
+};
+
+
 static HWND
 create_tabcontrol (DWORD style, DWORD mask)
 {
@@ -593,16 +627,14 @@ static void test_tab(INT nMinTabWidth)
     DeleteObject(hFont);
 }
 
-static void test_getters_setters(INT nTabs)
+static void test_getters_setters(HWND parent_wnd, INT nTabs)
 {
     HWND hTab;
-    HWND parent_wnd;
     RECT rTab;
     INT nTabsRetrieved;
     INT rowCount;
 
-    parent_wnd = createParentWindow();
-    ok(parent_wnd != NULL, "Failed to create parent window!\n");
+    ok(parent_wnd != NULL, "no parent window!\n");
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     hTab = createFilledTabControl(parent_wnd, TCS_FIXEDWIDTH, TCIF_TEXT|TCIF_IMAGE, nTabs);
@@ -810,11 +842,123 @@ static void test_getters_setters(INT nTabs)
     }
 
     DestroyWindow(hTab);
-    DestroyWindow(parent_wnd);
+}
+
+static void test_insert_focus(HWND parent_wnd)
+{
+    HWND hTab;
+    INT nTabsRetrieved;
+    INT r;
+    TCITEM tcNewTab;
+    DWORD mask = TCIF_TEXT|TCIF_IMAGE;
+    static char tabName[] = "TAB";
+    tcNewTab.mask = mask;
+    tcNewTab.pszText = tabName;
+
+    ok(parent_wnd != NULL, "no parent window!\n");
+
+    hTab = createFilledTabControl(parent_wnd, TCS_FIXEDWIDTH, mask, 0);
+    ok(hTab != NULL, "Failed to create tab control\n");
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    nTabsRetrieved = SendMessage(hTab, TCM_GETITEMCOUNT, 0, 0);
+    expect(0, nTabsRetrieved);
+
+    r = SendMessage(hTab, TCM_GETCURFOCUS, 0, 0);
+    expect(-1, r);
+
+    tcNewTab.iImage = 1;
+    r = SendMessage(hTab, TCM_INSERTITEM, 1, (LPARAM) &tcNewTab);
+    expect(0, r);
+
+    nTabsRetrieved = SendMessage(hTab, TCM_GETITEMCOUNT, 0, 0);
+    expect(1, nTabsRetrieved);
+
+    r = SendMessage(hTab, TCM_GETCURFOCUS, 0, 0);
+    expect(0, r);
+
+    tcNewTab.iImage = 2;
+    r = SendMessage(hTab, TCM_INSERTITEM, 2, (LPARAM) &tcNewTab);
+    expect(1, r);
+
+    nTabsRetrieved = SendMessage(hTab, TCM_GETITEMCOUNT, 0, 0);
+    expect(2, nTabsRetrieved);
+
+    r = SendMessage(hTab, TCM_GETCURFOCUS, 0, 0);
+    expect(0, r);
+
+    r = SendMessage(hTab, TCM_SETCURFOCUS, -1, 0);
+    expect(0, r);
+
+    r = SendMessage(hTab, TCM_GETCURFOCUS, 0, 0);
+    expect(-1, r);
+
+    tcNewTab.iImage = 3;
+    r = SendMessage(hTab, TCM_INSERTITEM, 3, (LPARAM) &tcNewTab);
+    expect(2, r);
+
+    r = SendMessage(hTab, TCM_GETCURFOCUS, 0, 0);
+    expect(2, r);
+
+    ok_sequence(sequences, TAB_SEQ_INDEX, insert_focus_seq, "insert_focus test sequence", TRUE);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_sequence, "insert_focus parent test sequence", FALSE);
+
+    DestroyWindow(hTab);
+}
+
+static void test_delete_focus(HWND parent_wnd)
+{
+    HWND hTab;
+    INT nTabsRetrieved;
+    INT r;
+
+    ok(parent_wnd != NULL, "no parent window!\n");
+
+    hTab = createFilledTabControl(parent_wnd, TCS_FIXEDWIDTH, TCIF_TEXT|TCIF_IMAGE, 2);
+    ok(hTab != NULL, "Failed to create tab control\n");
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    nTabsRetrieved = SendMessage(hTab, TCM_GETITEMCOUNT, 0, 0);
+    expect(2, nTabsRetrieved);
+
+    r = SendMessage(hTab, TCM_GETCURFOCUS, 0, 0);
+    expect(0, r);
+
+    r = SendMessage(hTab, TCM_DELETEITEM, 1, 0);
+    expect(1, r);
+
+    nTabsRetrieved = SendMessage(hTab, TCM_GETITEMCOUNT, 0, 0);
+    expect(1, nTabsRetrieved);
+
+    r = SendMessage(hTab, TCM_GETCURFOCUS, 0, 0);
+    expect(0, r);
+
+    r = SendMessage(hTab, TCM_SETCURFOCUS, -1, 0);
+    expect(0, r);
+
+    r = SendMessage(hTab, TCM_GETCURFOCUS, 0, 0);
+    expect(-1, r);
+
+    r = SendMessage(hTab, TCM_DELETEITEM, 0, 0);
+    expect(1, r);
+
+    nTabsRetrieved = SendMessage(hTab, TCM_GETITEMCOUNT, 0, 0);
+    expect(0, nTabsRetrieved);
+
+    r = SendMessage(hTab, TCM_GETCURFOCUS, 0, 0);
+    expect(-1, r);
+
+    ok_sequence(sequences, TAB_SEQ_INDEX, delete_focus_seq, "delete_focus test sequence", FALSE);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_sequence, "delete_focus parent test sequence", FALSE);
+
+    DestroyWindow(hTab);
 }
 
 START_TEST(tab)
 {
+    HWND parent_wnd;
     LOGFONTA logfont;
 
     lstrcpyA(logfont.lfFaceName, "Arial");
@@ -839,6 +983,14 @@ START_TEST(tab)
 
     init_msg_sequences(sequences, NUM_MSG_SEQUENCES);
 
+    parent_wnd = createParentWindow();
+    ok(parent_wnd != NULL, "Failed to create parent window!\n");
+
     /* Testing getters and setters with 5 tabs */
-    test_getters_setters(5);
+    test_getters_setters(parent_wnd, 5);
+
+    test_insert_focus(parent_wnd);
+    test_delete_focus(parent_wnd);
+
+    DestroyWindow(parent_wnd);
 }

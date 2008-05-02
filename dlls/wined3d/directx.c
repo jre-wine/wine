@@ -44,6 +44,8 @@ static const struct {
     /* APPLE */
     {"GL_APPLE_client_storage",             APPLE_CLIENT_STORAGE},
     {"GL_APPLE_fence",                      APPLE_FENCE},
+    {"GL_APPLE_flush_render",               APPLE_FLUSH_RENDER},
+    {"GL_APPLE_ycbcr_422",                  APPLE_YCBCR_422},
 
     /* ATI */
     {"GL_ATI_separate_stencil",             ATI_SEPARATE_STENCIL},
@@ -335,7 +337,13 @@ static void select_shader_mode(
     if (wined3d_settings.vs_mode == VS_NONE) {
         *vs_selected = SHADER_NONE;
     } else if (gl_info->supported[ARB_VERTEX_SHADER] && wined3d_settings.glslRequested) {
-        *vs_selected = SHADER_GLSL;
+        /* Geforce4 cards support GLSL but for vertex shaders only. Further its reported GLSL caps are
+         * wrong. This combined with the fact that glsl won't offer more features or performance, use ARB
+         * shaders only on this card. */
+        if(gl_info->vs_nv_version && gl_info->vs_nv_version < VS_VERSION_20)
+            *vs_selected = SHADER_ARB;
+        else
+            *vs_selected = SHADER_GLSL;
     } else if (gl_info->supported[ARB_VERTEX_PROGRAM]) {
         *vs_selected = SHADER_ARB;
     } else {
@@ -401,6 +409,38 @@ static void select_shader_max_constants(
  **********************************************************/
 
 #define GLINFO_LOCATION (*gl_info)
+static inline BOOL test_arb_vs_offset_limit(WineD3D_GL_Info *gl_info) {
+    GLuint prog;
+    BOOL ret = FALSE;
+    const char *testcode =
+        "!!ARBvp1.0\n"
+        "PARAM C[66] = { program.env[0..65] };\n"
+        "ADDRESS A0;"
+        "ARL A0.x, 0.0;\n"
+        "MOV result.position, C[A0.x + 65];\n"
+        "END\n";
+
+    while(glGetError());
+    GL_EXTCALL(glGenProgramsARB(1, &prog));
+    if(!prog) {
+        ERR("Failed to create an ARB offset limit test program\n");
+    }
+    GL_EXTCALL(glBindProgramARB(GL_VERTEX_PROGRAM_ARB, prog));
+    GL_EXTCALL(glProgramStringARB(GL_VERTEX_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB,
+                                  strlen(testcode), testcode));
+    if(glGetError() != 0) {
+        TRACE("OpenGL implementation does not allow indirect addressing offsets > 63\n");
+        TRACE("error: %s\n", debugstr_a((const char *)glGetString(GL_PROGRAM_ERROR_STRING_ARB)));
+        ret = TRUE;
+    } else TRACE("OpenGL implementation allows offsets > 63\n");
+
+    GL_EXTCALL(glBindProgramARB(GL_VERTEX_PROGRAM_ARB, 0));
+    GL_EXTCALL(glDeleteProgramsARB(1, &prog));
+    checkGLcall("ARB vp offset limit test cleanup\n");
+
+    return ret;
+}
+
 BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     const char *GL_Extensions    = NULL;
     const char *WGL_Extensions   = NULL;
@@ -603,6 +643,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     TRACE_(d3d_caps)("Maximum texture size support - max texture size=%d\n", gl_max);
 
     glGetFloatv(GL_POINT_SIZE_RANGE, gl_floatv);
+    gl_info->max_pointsizemin = gl_floatv[0];
     gl_info->max_pointsize = gl_floatv[1];
     TRACE_(d3d_caps)("Maximum point size support - max point size=%f\n", gl_floatv[1]);
 
@@ -685,7 +726,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             if (gl_info->supported[ARB_FRAGMENT_PROGRAM]) {
                 GLint tmp;
                 glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS_ARB, &tmp);
-                gl_info->max_fragment_samplers = min(MAX_FRAGMENT_SAMPLERS, tmp);
+                gl_info->max_fragment_samplers = min(8, tmp);
             } else {
                 gl_info->max_fragment_samplers = max(gl_info->max_fragment_samplers, gl_max);
             }
@@ -697,6 +738,29 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
                 gl_info->max_vertex_samplers = tmp;
                 glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS_ARB, &tmp);
                 gl_info->max_combined_samplers = tmp;
+
+                /* Loading GLSL sampler uniforms is much simpler if we can assume that the sampler setup
+                 * is known at shader link time. In a vertex shader + pixel shader combination this isn't
+                 * an issue because then the sampler setup only depends on the two shaders. If a pixel
+                 * shader is used with fixed function vertex processing we're fine too because fixed function
+                 * vertex processing doesn't use any samplers. If fixed function fragment processing is
+                 * used we have to make sure that all vertex sampler setups are valid together with all
+                 * possible fixed function fragment processing setups. This is true if vsamplers + MAX_TEXTURES
+                 * <= max_samplers. This is true on all d3d9 cards that support vtf(gf 6 and gf7 cards).
+                 * dx9 radeon cards do not support vertex texture fetch. DX10 cards have 128 samplers, and
+                 * dx9 is limited to 8 fixed function texture stages and 4 vertex samplers. DX10 does not have
+                 * a fixed function pipeline anymore.
+                 *
+                 * So this is just a check to check that our assumption holds true. If not, write a warning
+                 * and reduce the number of vertex samplers or propably disable vertex texture fetch.
+                 */
+                if(gl_info->max_vertex_samplers &&
+                   MAX_TEXTURES + gl_info->max_vertex_samplers > gl_info->max_combined_samplers) {
+                    FIXME("OpenGL implementation supports %u vertex samplers and %u total samplers\n",
+                          gl_info->max_vertex_samplers, gl_info->max_combined_samplers);
+                    FIXME("Expected vertex samplers + MAX_TEXTURES(=8) > combined_samplers\n");
+                    gl_info->max_vertex_samplers = max(0, gl_info->max_combined_samplers - MAX_TEXTURES);
+                }
             } else {
                 gl_info->max_combined_samplers = gl_info->max_fragment_samplers;
             }
@@ -723,24 +787,26 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_ENV_PARAMETERS_ARB, &gl_max));
             gl_info->ps_arb_constantsF = gl_max;
             TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM float constants: %d\n", gl_info->ps_arb_constantsF);
-            GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_TEMPORARIES_ARB, &gl_max));
+            GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_NATIVE_TEMPORARIES_ARB, &gl_max));
             gl_info->ps_arb_max_temps = gl_max;
-            TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM temporaries: %d\n", gl_info->ps_arb_max_temps);
-            GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_INSTRUCTIONS_ARB, &gl_max));
+            TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM native temporaries: %d\n", gl_info->ps_arb_max_temps);
+            GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_NATIVE_INSTRUCTIONS_ARB, &gl_max));
             gl_info->ps_arb_max_instructions = gl_max;
-            TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM instructions: %d\n", gl_info->ps_arb_max_instructions);
+            TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM native instructions: %d\n", gl_info->ps_arb_max_instructions);
         }
         if (gl_info->supported[ARB_VERTEX_PROGRAM]) {
             gl_info->vs_arb_version = VS_VERSION_11;
             GL_EXTCALL(glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_MAX_PROGRAM_ENV_PARAMETERS_ARB, &gl_max));
             gl_info->vs_arb_constantsF = gl_max;
             TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM float constants: %d\n", gl_info->vs_arb_constantsF);
-            GL_EXTCALL(glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_MAX_PROGRAM_TEMPORARIES_ARB, &gl_max));
+            GL_EXTCALL(glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_MAX_PROGRAM_NATIVE_TEMPORARIES_ARB, &gl_max));
             gl_info->vs_arb_max_temps = gl_max;
-            TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM temporaries: %d\n", gl_info->vs_arb_max_temps);
-            GL_EXTCALL(glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_MAX_PROGRAM_INSTRUCTIONS_ARB, &gl_max));
+            TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM native temporaries: %d\n", gl_info->vs_arb_max_temps);
+            GL_EXTCALL(glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_MAX_PROGRAM_NATIVE_INSTRUCTIONS_ARB, &gl_max));
             gl_info->vs_arb_max_instructions = gl_max;
-            TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM instructions: %d\n", gl_info->vs_arb_max_instructions);
+            TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM native instructions: %d\n", gl_info->vs_arb_max_instructions);
+
+            gl_info->arb_vs_offset_limit = test_arb_vs_offset_limit(gl_info);
         }
         if (gl_info->supported[ARB_VERTEX_SHADER]) {
             glGetIntegerv(GL_MAX_VERTEX_UNIFORM_COMPONENTS_ARB, &gl_max);
@@ -751,6 +817,9 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS_ARB, &gl_max);
             gl_info->ps_glsl_constantsF = gl_max / 4;
             TRACE_(d3d_caps)("Max ARB_FRAGMENT_SHADER float constants: %u\n", gl_info->ps_glsl_constantsF);
+            glGetIntegerv(GL_MAX_VARYING_FLOATS_ARB, &gl_max);
+            gl_info->max_glsl_varyings = gl_max;
+            TRACE_(d3d_caps)("Max GLSL varyings: %u (%u 4 component varyings)\n", gl_max, gl_max / 4);
         }
         if (gl_info->supported[EXT_VERTEX_SHADER]) {
             gl_info->vs_ati_version = VS_VERSION_11;
@@ -2367,14 +2436,17 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
 
     if (vs_selected_mode == SHADER_GLSL) {
         /* Nvidia Geforce6/7 or Ati R4xx/R5xx cards with GLSL support, support VS 3.0 but older Nvidia/Ati
-           models with GLSL support only support 2.0. In case of nvidia we can detect VS 2.0 support using
-           vs_nv_version which is based on NV_vertex_program. For Ati cards there's no easy way, so for
-           now only support 2.0/3.0 detection on Nvidia GeforceFX cards and default to 3.0 for everything else */
-        if(GLINFO_LOCATION.vs_nv_version == VS_VERSION_20)
+         * models with GLSL support only support 2.0. In case of nvidia we can detect VS 2.0 support using
+         * vs_nv_version which is based on NV_vertex_program.
+         * For Ati cards there's no way using glsl (it abstracts the lowlevel info away) and also not
+         * using ARB_vertex_program. It is safe to assume that when a card supports pixel shader 2.0 it
+         * supports vertex shader 2.0 too and the way around. We can detect ps2.0 using the maximum number
+         * of native instructions, so use that here. For more info see the pixel shader versioning code below. */
+        if((GLINFO_LOCATION.vs_nv_version == VS_VERSION_20) || (GLINFO_LOCATION.ps_arb_max_instructions <= 512))
             *pCaps->VertexShaderVersion = WINED3DVS_VERSION(2,0);
         else
             *pCaps->VertexShaderVersion = WINED3DVS_VERSION(3,0);
-        TRACE_(d3d_caps)("Hardware vertex shader version 3.0 enabled (GLSL)\n");
+        TRACE_(d3d_caps)("Hardware vertex shader version %d.%d enabled (GLSL)\n", (*pCaps->VertexShaderVersion >> 8) & 0xff, *pCaps->VertexShaderVersion & 0xff);
     } else if (vs_selected_mode == SHADER_ARB) {
         *pCaps->VertexShaderVersion = WINED3DVS_VERSION(1,1);
         TRACE_(d3d_caps)("Hardware vertex shader version 1.1 enabled (ARB_PROGRAM)\n");
@@ -2386,9 +2458,18 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     *pCaps->MaxVertexShaderConst = GL_LIMITS(vshader_constantsF);
 
     if (ps_selected_mode == SHADER_GLSL) {
-        /* See the comment about VS2.0/VS3.0 detection as we do the same here but then based on NV_fragment_program
-           in case of GeforceFX cards. */
-        if(GLINFO_LOCATION.ps_nv_version == PS_VERSION_20)
+        /* Older DX9-class videocards (GeforceFX / Radeon >9500/X*00) only support pixel shader 2.0/2.0a/2.0b.
+         * In OpenGL the extensions related to GLSL abstract lowlevel GL info away which is needed
+         * to distinguish between 2.0 and 3.0 (and 2.0a/2.0b). In case of Nvidia we use their fragment
+         * program extensions. On other hardware including ATI GL_ARB_fragment_program offers the info
+         * in max native instructions. Intel and others also offer the info in this extension but they
+         * don't support GLSL (at least on Windows).
+         *
+         * PS2.0 requires at least 96 instructions, 2.0a/2.0b go upto 512. Assume that if the number
+         * of instructions is 512 or less we have to do with ps2.0 hardware.
+         * NOTE: ps3.0 hardware requires 512 or more instructions but ati and nvidia offer 'enough' (1024 vs 4096) on their most basic ps3.0 hardware.
+         */
+        if((GLINFO_LOCATION.ps_nv_version == PS_VERSION_20) || (GLINFO_LOCATION.ps_arb_max_instructions <= 512))
             *pCaps->PixelShaderVersion = WINED3DPS_VERSION(2,0);
         else
             *pCaps->PixelShaderVersion = WINED3DPS_VERSION(3,0);
@@ -2405,7 +2486,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
          * offer a way to query this.
          */
         *pCaps->PixelShader1xMaxValue = 8.0;
-        TRACE_(d3d_caps)("Hardware pixel shader version 3.0 enabled (GLSL)\n");
+        TRACE_(d3d_caps)("Hardware pixel shader version %d.%d enabled (GLSL)\n", (*pCaps->PixelShaderVersion >> 8) & 0xff, *pCaps->PixelShaderVersion & 0xff);
     } else if (ps_selected_mode == SHADER_ARB) {
         *pCaps->PixelShaderVersion    = WINED3DPS_VERSION(1,4);
         *pCaps->PixelShader1xMaxValue = 8.0;
@@ -2587,6 +2668,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     } else {
         object->surface_alignment = 4;
     }
+    object->posFixup[0] = 1.0; /* This is needed to get the x coord unmodified through a MAD */
 
     /* Set the state up as invalid until the device is fully created */
     object->state   = WINED3DERR_DRIVERINTERNALERROR;
@@ -2656,6 +2738,66 @@ ULONG WINAPI D3DCB_DefaultDestroyVolume(IWineD3DVolume *pVolume) {
     IWineD3DVolume_GetParent(pVolume, &volumeParent);
     IUnknown_Release(volumeParent);
     return IUnknown_Release(volumeParent);
+}
+
+static BOOL implementation_is_apple(WineD3D_GL_Info *gl_info) {
+    /* MacOS has various specialities in the extensions it advertises. Some have to be loaded from
+     * the opengl 1.2+ core, while other extensions are advertised, but software emulated. So try to
+     * detect the Apple OpenGL implementation to apply some extension fixups afterwards.
+     *
+     * Detecting this isn't really easy. The vendor string doesn't mention Apple. Compile-time checks
+     * aren't sufficient either because a Linux binary may display on a macos X server via remote X11.
+     * So try to detect the GL implementation by looking at certain Apple extensions. Some extensions
+     * like client storage might be supported on other implementations too, but GL_APPLE_flush_render
+     * is specific to the MacOS window management, and GL_APPLE_ycbcr_422 is a Quicktime specific, so
+     * it the chance that other implementations support it is rather rare since Win32 Quicktime uses
+     * DirectDraw, not OpenGL.
+     */
+    if(gl_info->supported[APPLE_FENCE] &&
+       gl_info->supported[APPLE_CLIENT_STORAGE] &&
+       gl_info->supported[APPLE_FLUSH_RENDER] &&
+       gl_info->supported[APPLE_YCBCR_422]) {
+        TRACE_(d3d_caps)("GL_APPLE_fence, GL_APPLE_client_storage, GL_APPLE_flush_render and GL_ycbcr_422 are supported\n");
+        TRACE_(d3d_caps)("Activating MacOS fixups\n");
+        return TRUE;
+    } else {
+        TRACE_(d3d_caps)("Apple extensions are not supported\n");
+        TRACE_(d3d_caps)("Not activating MacOS fixups\n");
+        return FALSE;
+    }
+}
+
+static void fixup_extensions(WineD3D_GL_Info *gl_info) {
+    if(implementation_is_apple(gl_info)) {
+        /* MacOS advertises more GLSL vertex shader uniforms than support on hardware, and if more are
+         * used it falls back to software. While the compiler can detect if the shader uses all declared
+         * uniforms, the optimization fails if the shader uses relative addressing. So any GLSL shader
+         * using relative addressing falls back to software.
+         *
+         * ARB vp gives the correct amount of uniforms, so use it instead of GLSL
+         */
+        if(gl_info->vs_glsl_constantsF <= gl_info->vs_arb_constantsF) {
+            FIXME("GLSL doesn't advertise more vertex shader uniforms than ARB. Driver fixup outdated?\n");
+        } else {
+            TRACE("Driver claims %u GLSL vs uniforms, replacing with %u ARB vp uniforms\n",
+                  gl_info->vs_glsl_constantsF, gl_info->vs_arb_constantsF);
+            gl_info->vs_glsl_constantsF = gl_info->vs_arb_constantsF;
+        }
+
+        /* MacOS advertises GL_ARB_texture_non_power_of_two on ATI r500 and earlier cards, although
+         * these cards only support GL_ARB_texture_rectangle(D3DPTEXTURECAPS_NONPOW2CONDITIONAL).
+         * If real NP2 textures are used, the driver falls back to software. So remove the supported
+         * flag for this extension
+         */
+        if(gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] && gl_info->gl_vendor == VENDOR_ATI) {
+            if(gl_info->gl_card == CARD_ATI_RADEON_X700 || gl_info->gl_card == CARD_ATI_RADEON_X1600 ||
+               gl_info->gl_card == CARD_ATI_RADEON_9500 || gl_info->gl_card == CARD_ATI_RADEON_8500  ||
+               gl_info->gl_card == CARD_ATI_RADEON_7200 || gl_info->gl_card == CARD_ATI_RAGE_128PRO) {
+                TRACE("GL_ARB_texture_non_power_of_two advertised on R500 or earlier card, removing\n");
+                gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] = FALSE;
+            }
+        }
+    }
 }
 
 #define PUSH1(att)        attribs[nAttribs++] = (att);
@@ -2756,7 +2898,7 @@ BOOL InitAdapters(void) {
         else
             Adapters[0].TextureRam = Adapters[0].gl_info.vidmem;
         Adapters[0].UsedTextureRam = 0;
-        TRACE("Emulating %dMB of texture ram\n", Adapters[0].TextureRam);
+        TRACE("Emulating %dMB of texture ram\n", Adapters[0].TextureRam/(1024*1024));
 
         /* Initialize the Adapter's DeviceName which is required for ChangeDisplaySettings and friends */
         DisplayDevice.cb = sizeof(DisplayDevice);
@@ -2795,6 +2937,8 @@ BOOL InitAdapters(void) {
             cfgs++;
         }
         WineD3D_ReleaseFakeGLContext();
+
+        fixup_extensions(&Adapters[0].gl_info);
 
         select_shader_mode(&Adapters[0].gl_info, WINED3DDEVTYPE_HAL, &ps_selected_mode, &vs_selected_mode);
         select_shader_max_constants(ps_selected_mode, vs_selected_mode, &Adapters[0].gl_info);

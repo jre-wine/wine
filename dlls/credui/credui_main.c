@@ -45,7 +45,7 @@ struct pending_credentials
 
 static HINSTANCE hinstCredUI;
 
-struct list pending_credentials_list = LIST_INIT(pending_credentials_list);
+static struct list pending_credentials_list = LIST_INIT(pending_credentials_list);
 
 static CRITICAL_SECTION csPendingCredentials;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -170,7 +170,10 @@ static INT_PTR CALLBACK CredDialogProc(HWND hwndDlg, UINT uMsg, WPARAM wParam,
                     GetWindowTextW(hwndUsername, user, len + 1);
 
                     if (!user[0])
+                    {
+                        HeapFree(GetProcessHeap(), 0, user);
                         return TRUE;
+                    }
 
                     if (!strchrW(user, '\\') && !strchrW(user, '@'))
                     {

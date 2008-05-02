@@ -858,108 +858,190 @@ static HCRYPTKEY new_key(HCRYPTPROV hProv, ALG_ID aiAlgid, DWORD dwFlags, CRYPTK
 }
 
 /******************************************************************************
+ * store_key_pair [Internal]
+ *
+ * Stores a key pair to the registry
+ * 
+ * PARAMS
+ *  hCryptKey     [I] Handle to the key to be stored
+ *  hKey          [I] Registry key where the key pair is to be stored
+ *  szValueName   [I] Registry value where key pair's value is to be stored
+ *  dwFlags       [I] Flags for protecting the key
+ */
+static void store_key_pair(HCRYPTKEY hCryptKey, HKEY hKey, LPCSTR szValueName, DWORD dwFlags)
+{
+    DATA_BLOB blobIn, blobOut;
+    CRYPTKEY *pKey;
+    DWORD dwLen;
+    BYTE *pbKey;
+
+    if (lookup_handle(&handle_table, hCryptKey, RSAENH_MAGIC_KEY,
+                      (OBJECTHDR**)&pKey))
+    {
+        if (RSAENH_CPExportKey(pKey->hProv, hCryptKey, 0, PRIVATEKEYBLOB, 0, 0,
+            &dwLen))
+        {
+            pbKey = HeapAlloc(GetProcessHeap(), 0, dwLen);
+            if (pbKey)
+            {
+                if (RSAENH_CPExportKey(pKey->hProv, hCryptKey, 0,
+                                       PRIVATEKEYBLOB, 0, pbKey, &dwLen))
+                {
+                    blobIn.pbData = pbKey;
+                    blobIn.cbData = dwLen;
+
+                    if (CryptProtectData(&blobIn, NULL, NULL, NULL, NULL,
+                        dwFlags, &blobOut))
+                    {
+                        RegSetValueExA(hKey, szValueName, 0, REG_BINARY,
+                                       blobOut.pbData, blobOut.cbData);
+                        LocalFree(blobOut.pbData);
+                    }
+                }
+                HeapFree(GetProcessHeap(), 0, pbKey);
+            }
+        }
+        release_handle(&handle_table, hCryptKey, RSAENH_MAGIC_KEY);
+    }
+}
+
+/******************************************************************************
+ * create_container_key [Internal]
+ *
+ * Creates the registry key for a key container's persistent storage.
+ * 
+ * PARAMS
+ *  pKeyContainer [I] Pointer to the key container
+ *  sam           [I] Desired registry access
+ *  phKey         [O] Returned key
+ */
+static BOOL create_container_key(KEYCONTAINER *pKeyContainer, REGSAM sam, HKEY *phKey)
+{
+    CHAR szRSABase[MAX_PATH];
+    HKEY hRootKey;
+
+    sprintf(szRSABase, RSAENH_REGKEY, pKeyContainer->szName);
+
+    if (pKeyContainer->dwFlags & CRYPT_MACHINE_KEYSET)
+        hRootKey = HKEY_LOCAL_MACHINE;
+    else
+        hRootKey = HKEY_CURRENT_USER;
+
+    /* @@ Wine registry key: HKLM\Software\Wine\Crypto\RSA */
+    /* @@ Wine registry key: HKCU\Software\Wine\Crypto\RSA */
+    return RegCreateKeyExA(hRootKey, szRSABase, 0, NULL,
+                           REG_OPTION_NON_VOLATILE, sam, NULL, phKey, NULL)
+                           == ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * open_container_key [Internal]
+ *
+ * Opens a key container's persistent storage for reading.
+ *
+ * PARAMS
+ *  pszContainerName [I] Name of the container to be opened.  May be the empty
+ *                       string if the parent key of all containers is to be
+ *                       opened.
+ *  dwFlags          [I] Flags indicating which keyset to be opened.
+ *  phKey            [O] Returned key
+ */
+static BOOL open_container_key(LPCSTR pszContainerName, DWORD dwFlags, HKEY *phKey)
+{
+    CHAR szRSABase[MAX_PATH];
+    HKEY hRootKey;
+
+    sprintf(szRSABase, RSAENH_REGKEY, pszContainerName);
+
+    if (dwFlags & CRYPT_MACHINE_KEYSET)
+        hRootKey = HKEY_LOCAL_MACHINE;
+    else
+        hRootKey = HKEY_CURRENT_USER;
+
+    /* @@ Wine registry key: HKLM\Software\Wine\Crypto\RSA */
+    /* @@ Wine registry key: HKCU\Software\Wine\Crypto\RSA */
+    return RegOpenKeyExA(hRootKey, szRSABase, 0, KEY_READ, phKey) ==
+                         ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * delete_container_key [Internal]
+ *
+ * Deletes a key container's persistent storage.
+ *
+ * PARAMS
+ *  pszContainerName [I] Name of the container to be opened.
+ *  dwFlags          [I] Flags indicating which keyset to be opened.
+ */
+static BOOL delete_container_key(LPCSTR pszContainerName, DWORD dwFlags)
+{
+    CHAR szRegKey[MAX_PATH];
+
+    if (snprintf(szRegKey, MAX_PATH, RSAENH_REGKEY, pszContainerName) >= MAX_PATH) {
+        SetLastError(NTE_BAD_KEYSET_PARAM);
+        return FALSE;
+    } else {
+        HKEY hRootKey;
+        if (dwFlags & CRYPT_MACHINE_KEYSET)
+            hRootKey = HKEY_LOCAL_MACHINE;
+        else
+            hRootKey = HKEY_CURRENT_USER;
+        if (!RegDeleteKeyA(hRootKey, szRegKey)) {
+            SetLastError(ERROR_SUCCESS);
+            return TRUE;
+        } else {
+            SetLastError(NTE_BAD_KEYSET);
+            return FALSE;
+        }
+    }
+}
+
+/******************************************************************************
+ * store_key_container_keys [Internal]
+ *
+ * Stores key container's keys in a persistent location.
+ *
+ * PARAMS
+ *  pKeyContainer [I] Pointer to the key container whose keys are to be saved
+ */
+static void store_key_container_keys(KEYCONTAINER *pKeyContainer)
+{
+    HKEY hKey;
+    DWORD dwFlags;
+
+    /* On WinXP, persistent keys are stored in a file located at:
+     * $AppData$\\Microsoft\\Crypto\\RSA\\$SID$\\some_hex_string
+     */
+
+    if (pKeyContainer->dwFlags & CRYPT_MACHINE_KEYSET)
+        dwFlags = CRYPTPROTECT_LOCAL_MACHINE;
+    else
+        dwFlags = 0;
+
+    if (create_container_key(pKeyContainer, KEY_WRITE, &hKey))
+    {
+        store_key_pair(pKeyContainer->hKeyExchangeKeyPair, hKey,
+                       "KeyExchangeKeyPair", dwFlags);
+        store_key_pair(pKeyContainer->hSignatureKeyPair, hKey,
+                       "SignatureKeyPair", dwFlags);
+        RegCloseKey(hKey);
+    }
+}
+
+/******************************************************************************
  * destroy_key_container [Internal]
  *
  * Destructor for key containers.
- * 
+ *
  * PARAMS
  *  pObjectHdr [I] Pointer to the key container to be destroyed.
  */
 static void destroy_key_container(OBJECTHDR *pObjectHdr)
 {
     KEYCONTAINER *pKeyContainer = (KEYCONTAINER*)pObjectHdr;
-    DATA_BLOB blobIn, blobOut;
-    CRYPTKEY *pKey;
-    CHAR szRSABase[MAX_PATH];
-    HKEY hKey, hRootKey;
-    DWORD dwLen;
-    BYTE *pbKey;
 
-    if (!(pKeyContainer->dwFlags & CRYPT_VERIFYCONTEXT)) {
-        /* On WinXP, persistent keys are stored in a file located at: 
-         * $AppData$\\Microsoft\\Crypto\\RSA\\$SID$\\some_hex_string 
-         */
-        sprintf(szRSABase, RSAENH_REGKEY, pKeyContainer->szName);
-
-        if (pKeyContainer->dwFlags & CRYPT_MACHINE_KEYSET) {
-            hRootKey = HKEY_LOCAL_MACHINE;
-        } else {
-            hRootKey = HKEY_CURRENT_USER;
-        }
-        
-        /* @@ Wine registry key: HKLM\Software\Wine\Crypto\RSA */
-        /* @@ Wine registry key: HKCU\Software\Wine\Crypto\RSA */
-        if (RegCreateKeyExA(hRootKey, szRSABase, 0, NULL, REG_OPTION_NON_VOLATILE, 
-                            KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS)
-        {
-            if (lookup_handle(&handle_table, pKeyContainer->hKeyExchangeKeyPair, RSAENH_MAGIC_KEY, 
-                              (OBJECTHDR**)&pKey))
-            {
-                if (RSAENH_CPExportKey(pKey->hProv, pKeyContainer->hKeyExchangeKeyPair, 0, 
-                                       PRIVATEKEYBLOB, 0, 0, &dwLen)) 
-                {
-                    pbKey = HeapAlloc(GetProcessHeap(), 0, dwLen);
-                    if (pbKey) 
-                    {
-                        if (RSAENH_CPExportKey(pKey->hProv, pKeyContainer->hKeyExchangeKeyPair, 0,
-                                               PRIVATEKEYBLOB, 0, pbKey, &dwLen))
-                        {
-                            blobIn.pbData = pbKey;
-                            blobIn.cbData = dwLen;
-                                    
-                            if (CryptProtectData(&blobIn, NULL, NULL, NULL, NULL, 
-                                 (pKeyContainer->dwFlags & CRYPT_MACHINE_KEYSET) ? 
-                                   CRYPTPROTECT_LOCAL_MACHINE : 0, 
-                                 &blobOut)) 
-                            {
-                                RegSetValueExA(hKey, "KeyExchangeKeyPair", 0, REG_BINARY,
-                                               blobOut.pbData, blobOut.cbData);
-                                HeapFree(GetProcessHeap(), 0, blobOut.pbData);
-                            }
-                        }
-                        HeapFree(GetProcessHeap(), 0, pbKey);
-                    }
-                }
-                release_handle(&handle_table, pKeyContainer->hKeyExchangeKeyPair,
-                               RSAENH_MAGIC_KEY);
-            }
-
-            if (lookup_handle(&handle_table, pKeyContainer->hSignatureKeyPair, RSAENH_MAGIC_KEY, 
-                              (OBJECTHDR**)&pKey))
-            {
-                if (RSAENH_CPExportKey(pKey->hProv, pKeyContainer->hSignatureKeyPair, 0, 
-                                       PRIVATEKEYBLOB, 0, 0, &dwLen)) 
-                {
-                    pbKey = HeapAlloc(GetProcessHeap(), 0, dwLen);
-                    if (pbKey) 
-                    {
-                        if (RSAENH_CPExportKey(pKey->hProv, pKeyContainer->hSignatureKeyPair, 0, 
-                                               PRIVATEKEYBLOB, 0, pbKey, &dwLen))
-                        {
-                            blobIn.pbData = pbKey;
-                            blobIn.cbData = dwLen;
-                                    
-                            if (CryptProtectData(&blobIn, NULL, NULL, NULL, NULL, 
-                                 (pKeyContainer->dwFlags & CRYPT_MACHINE_KEYSET) ? 
-                                   CRYPTPROTECT_LOCAL_MACHINE : 0, 
-                                 &blobOut)) 
-                            {
-                                RegSetValueExA(hKey, "SignatureKeyPair", 0, REG_BINARY, 
-                                               blobOut.pbData, blobOut.cbData);
-                                HeapFree(GetProcessHeap(), 0, blobOut.pbData);
-                            }
-                        }
-                        HeapFree(GetProcessHeap(), 0, pbKey);
-                    }
-                }
-                release_handle(&handle_table, pKeyContainer->hSignatureKeyPair,
-                               RSAENH_MAGIC_KEY);
-            }
-        
-            RegCloseKey(hKey);
-        }
-    }
-    
+    if (!(pKeyContainer->dwFlags & CRYPT_VERIFYCONTEXT))
+        store_key_container_keys(pKeyContainer);
     HeapFree( GetProcessHeap(), 0, pKeyContainer );
 }
 
@@ -1007,25 +1089,59 @@ static HCRYPTPROV new_key_container(PCCH pszContainerName, DWORD dwFlags, const 
         /* The new key container has to be inserted into the CSP immediately 
          * after creation to be available for CPGetProvParam's PP_ENUMCONTAINERS. */
         if (!(dwFlags & CRYPT_VERIFYCONTEXT)) {
-            CHAR szRSABase[MAX_PATH];
-            HKEY hRootKey, hKey;
+            HKEY hKey;
 
-            sprintf(szRSABase, RSAENH_REGKEY, pKeyContainer->szName);
-
-            if (pKeyContainer->dwFlags & CRYPT_MACHINE_KEYSET) {
-                hRootKey = HKEY_LOCAL_MACHINE;
-            } else {
-                hRootKey = HKEY_CURRENT_USER;
-            }
-
-            /* @@ Wine registry key: HKLM\Software\Wine\Crypto\RSA */
-            /* @@ Wine registry key: HKCU\Software\Wine\Crypto\RSA */
-            RegCreateKeyA(hRootKey, szRSABase, &hKey);
-            RegCloseKey(hKey);
+            if (create_container_key(pKeyContainer, KEY_WRITE, &hKey))
+                RegCloseKey(hKey);
         }
     }
 
     return hKeyContainer;
+}
+
+/******************************************************************************
+ * read_key_value [Internal]
+ *
+ * Reads a key pair value from the registry
+ *
+ * PARAMS
+ *  hKeyContainer [I] Crypt provider to use to import the key
+ *  hKey          [I] Registry key from which to read the key pair
+ *  szValueName   [I] Registry value from which to read the key pair's value
+ *  dwFlags       [I] Flags for unprotecting the key
+ *  phCryptKey    [O] Returned key
+ */
+static BOOL read_key_value(HCRYPTPROV hKeyContainer, HKEY hKey, LPCSTR szValueName, DWORD dwFlags, HCRYPTKEY *phCryptKey)
+{
+    DWORD dwValueType, dwLen;
+    BYTE *pbKey;
+    DATA_BLOB blobIn, blobOut;
+    BOOL ret = FALSE;
+
+    if (RegQueryValueExA(hKey, szValueName, 0, &dwValueType, NULL, &dwLen) ==
+        ERROR_SUCCESS)
+    {
+        pbKey = HeapAlloc(GetProcessHeap(), 0, dwLen);
+        if (pbKey)
+        {
+            if (RegQueryValueExA(hKey, szValueName, 0, &dwValueType, pbKey, &dwLen) ==
+                ERROR_SUCCESS)
+            {
+                blobIn.pbData = pbKey;
+                blobIn.cbData = dwLen;
+
+                if (CryptUnprotectData(&blobIn, NULL, NULL, NULL, NULL,
+                    dwFlags, &blobOut))
+                {
+                    ret = RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
+                                             phCryptKey);
+                    LocalFree(blobOut.pbData);
+                }
+            }
+            HeapFree(GetProcessHeap(), 0, pbKey);
+        }
+    }
+    return ret;
 }
 
 /******************************************************************************
@@ -1044,26 +1160,12 @@ static HCRYPTPROV new_key_container(PCCH pszContainerName, DWORD dwFlags, const 
  */
 static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, const VTableProvStruc *pVTable)
 {
-    CHAR szRSABase[MAX_PATH];
-    BYTE *pbKey;
-    HKEY hKey, hRootKey;
-    DWORD dwValueType, dwLen;
+    HKEY hKey;
     KEYCONTAINER *pKeyContainer;
     HCRYPTPROV hKeyContainer;
-    DATA_BLOB blobIn, blobOut;
     HCRYPTKEY hCryptKey;
 
-    sprintf(szRSABase, RSAENH_REGKEY, pszContainerName);
-
-    if (dwFlags & CRYPT_MACHINE_KEYSET) {
-        hRootKey = HKEY_LOCAL_MACHINE;
-    } else {
-        hRootKey = HKEY_CURRENT_USER;
-    }
-
-    /* @@ Wine registry key: HKLM\Software\Wine\Crypto\RSA */
-    /* @@ Wine registry key: HKCU\Software\Wine\Crypto\RSA */
-    if (RegOpenKeyExA(hRootKey, szRSABase, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+    if (!open_container_key(pszContainerName, dwFlags, &hKey))
     {
         SetLastError(NTE_BAD_KEYSET);
         return (HCRYPTPROV)INVALID_HANDLE_VALUE;
@@ -1072,59 +1174,19 @@ static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, cons
     hKeyContainer = new_key_container(pszContainerName, dwFlags, pVTable);
     if (hKeyContainer != (HCRYPTPROV)INVALID_HANDLE_VALUE)
     {
+        DWORD dwProtectFlags = (dwFlags & CRYPT_MACHINE_KEYSET) ?
+            CRYPTPROTECT_LOCAL_MACHINE : 0;
+
         if (!lookup_handle(&handle_table, hKeyContainer, RSAENH_MAGIC_CONTAINER, 
                            (OBJECTHDR**)&pKeyContainer))
             return (HCRYPTPROV)INVALID_HANDLE_VALUE;
     
-        if (RegQueryValueExA(hKey, "KeyExchangeKeyPair", 0, &dwValueType, NULL, &dwLen) == 
-            ERROR_SUCCESS) 
-        {
-            pbKey = HeapAlloc(GetProcessHeap(), 0, dwLen);
-            if (pbKey) 
-            {
-                if (RegQueryValueExA(hKey, "KeyExchangeKeyPair", 0, &dwValueType, pbKey, &dwLen) ==
-                    ERROR_SUCCESS)
-                {
-                    blobIn.pbData = pbKey;
-                    blobIn.cbData = dwLen;
-
-                    if (CryptUnprotectData(&blobIn, NULL, NULL, NULL, NULL, 
-                         (dwFlags & CRYPT_MACHINE_KEYSET) ? CRYPTPROTECT_LOCAL_MACHINE : 0, &blobOut))
-                    {
-                        if(RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
-                                           &hCryptKey))
-                            pKeyContainer->hKeyExchangeKeyPair = hCryptKey;
-                        HeapFree(GetProcessHeap(), 0, blobOut.pbData);
-                    }
-                }
-                HeapFree(GetProcessHeap(), 0, pbKey);
-            }
-        }
-
-        if (RegQueryValueExA(hKey, "SignatureKeyPair", 0, &dwValueType, NULL, &dwLen) == 
-            ERROR_SUCCESS) 
-        {
-            pbKey = HeapAlloc(GetProcessHeap(), 0, dwLen);
-            if (pbKey) 
-            {
-                if (RegQueryValueExA(hKey, "SignatureKeyPair", 0, &dwValueType, pbKey, &dwLen) == 
-                    ERROR_SUCCESS)
-                {
-                    blobIn.pbData = pbKey;
-                    blobIn.cbData = dwLen;
-
-                    if (CryptUnprotectData(&blobIn, NULL, NULL, NULL, NULL, 
-                         (dwFlags & CRYPT_MACHINE_KEYSET) ? CRYPTPROTECT_LOCAL_MACHINE : 0, &blobOut))
-                    {
-                        if(RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
-                                           &hCryptKey))
-                            pKeyContainer->hSignatureKeyPair = hCryptKey;
-                        HeapFree(GetProcessHeap(), 0, blobOut.pbData);
-                    }
-                }
-                HeapFree(GetProcessHeap(), 0, pbKey);
-            }
-        }
+        if (read_key_value(hKeyContainer, hKey, "KeyExchangeKeyPair",
+            dwProtectFlags, &hCryptKey))
+            pKeyContainer->hKeyExchangeKeyPair = hCryptKey;
+        if (read_key_value(hKeyContainer, hKey, "SignatureKeyPair",
+            dwProtectFlags, &hCryptKey))
+            pKeyContainer->hSignatureKeyPair = hCryptKey;
     }
 
     return hKeyContainer;
@@ -1451,7 +1513,6 @@ BOOL WINAPI RSAENH_CPAcquireContext(HCRYPTPROV *phProv, LPSTR pszContainer,
                    DWORD dwFlags, PVTableProvStruc pVTable)
 {
     CHAR szKeyContainerName[MAX_PATH];
-    CHAR szRegKey[MAX_PATH];
 
     TRACE("(phProv=%p, pszContainer=%s, dwFlags=%08x, pVTable=%p)\n", phProv,
           debugstr_a(pszContainer), dwFlags, pVTable);
@@ -1473,24 +1534,7 @@ BOOL WINAPI RSAENH_CPAcquireContext(HCRYPTPROV *phProv, LPSTR pszContainer,
             break;
 
         case CRYPT_DELETEKEYSET:
-            if (snprintf(szRegKey, MAX_PATH, RSAENH_REGKEY, szKeyContainerName) >= MAX_PATH) {
-                SetLastError(NTE_BAD_KEYSET_PARAM);
-                return FALSE;
-            } else {
-                HKEY hRootKey;
-                if (dwFlags & CRYPT_MACHINE_KEYSET)
-                    hRootKey = HKEY_LOCAL_MACHINE;
-                else
-                    hRootKey = HKEY_CURRENT_USER;
-                if (!RegDeleteKeyA(hRootKey, szRegKey)) {
-                    SetLastError(ERROR_SUCCESS);
-                    return TRUE;
-                } else {
-                    SetLastError(NTE_BAD_KEYSET);
-                    return FALSE;
-                }
-            }
-            break;
+            return delete_container_key(szKeyContainerName, dwFlags);
 
         case CRYPT_NEWKEYSET:
             *phProv = read_key_container(szKeyContainerName, dwFlags, pVTable);
@@ -2904,8 +2948,7 @@ BOOL WINAPI RSAENH_CPGetProvParam(HCRYPTPROV hProv, DWORD dwParam, BYTE *pbData,
     KEYCONTAINER *pKeyContainer;
     PROV_ENUMALGS provEnumalgs;
     DWORD dwTemp;
-    CHAR szRSABase[MAX_PATH];
-    HKEY hKey, hRootKey;
+    HKEY hKey;
    
     /* This is for dwParam 41, which does not seem to be documented
      * on MSDN. IE6 SP1 asks for it in the 'About' dialog, however.
@@ -2991,15 +3034,7 @@ BOOL WINAPI RSAENH_CPGetProvParam(HCRYPTPROV hProv, DWORD dwParam, BYTE *pbData,
                 return TRUE;
             }
  
-            sprintf(szRSABase, RSAENH_REGKEY, "");
-
-            if (dwFlags & CRYPT_MACHINE_KEYSET) {
-                hRootKey = HKEY_LOCAL_MACHINE;
-            } else {
-                hRootKey = HKEY_CURRENT_USER;
-            }
-
-            if (RegOpenKeyExA(hRootKey, szRSABase, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+            if (!open_container_key("", dwFlags, &hKey))
             {
                 SetLastError(ERROR_NO_MORE_ITEMS);
                 return FALSE;

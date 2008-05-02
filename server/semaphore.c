@@ -180,16 +180,17 @@ DECL_HANDLER(create_semaphore)
         return;
 
     sd = objattr->sd_len ? (const struct security_descriptor *)(objattr + 1) : NULL;
+    objattr_get_name( objattr, &name );
 
-    /* get unicode string */
-    name.len = ((get_req_data_size() - sizeof(*objattr) - objattr->sd_len) / sizeof(WCHAR)) * sizeof(WCHAR);
-    name.str = (const WCHAR *)get_req_data() + (sizeof(*objattr) + objattr->sd_len) / sizeof(WCHAR);
     if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 )))
         return;
 
     if ((sem = create_semaphore( root, &name, req->attributes, req->initial, req->max, sd )))
     {
-        reply->handle = alloc_handle( current->process, sem, req->access, req->attributes );
+        if (get_error() == STATUS_OBJECT_NAME_EXISTS)
+            reply->handle = alloc_handle( current->process, sem, req->access, req->attributes );
+        else
+            reply->handle = alloc_handle_no_access_check( current->process, sem, req->access, req->attributes );
         release_object( sem );
     }
 

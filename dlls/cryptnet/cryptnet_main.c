@@ -23,6 +23,7 @@
 #include <stdio.h>
 
 #define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 
 #include "windef.h"
 #include "wine/debug.h"
@@ -30,6 +31,7 @@
 #include "winnt.h"
 #include "winnls.h"
 #include "wininet.h"
+#include "objbase.h"
 #define CERT_REVOCATION_PARA_HAS_EXTRA_FIELDS
 #include "wincrypt.h"
 
@@ -353,7 +355,7 @@ static BOOL CRYPT_GetObjectFromFile(HANDLE hFile, PCRYPT_BLOB_ARRAY pObject)
 
     if ((ret = GetFileSizeEx(hFile, &size)))
     {
-        if (size.HighPart)
+        if (size.u.HighPart)
         {
             WARN("file too big\n");
             SetLastError(ERROR_INVALID_DATA);
@@ -363,11 +365,11 @@ static BOOL CRYPT_GetObjectFromFile(HANDLE hFile, PCRYPT_BLOB_ARRAY pObject)
         {
             CRYPT_DATA_BLOB blob;
 
-            blob.pbData = CryptMemAlloc(size.LowPart);
+            blob.pbData = CryptMemAlloc(size.u.LowPart);
             if (blob.pbData)
             {
-                blob.cbData = size.LowPart;
-                ret = ReadFile(hFile, blob.pbData, size.LowPart, &blob.cbData,
+                blob.cbData = size.u.LowPart;
+                ret = ReadFile(hFile, blob.pbData, size.u.LowPart, &blob.cbData,
                  NULL);
                 if (ret)
                 {

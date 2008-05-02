@@ -83,14 +83,15 @@ static void test_widenpath(void)
 
     AbortPath(hdc);
 
-    /* Test when the pen width is equal to 1. The path should not change */
+    /* Test when the pen width is equal to 1. The path should change too */
     narrowPen = CreatePen(PS_SOLID, 1, RGB(0,0,0));
     oldPen = SelectObject(hdc, narrowPen);
     BeginPath(hdc);
     Polyline(hdc, pnt, 6);
     EndPath(hdc);
+    ret = WidenPath(hdc);
     nSize = GetPath(hdc, NULL, NULL, 0);
-    ok(nSize == 6, "WidenPath fails detecting 1px wide pen. Path length is %d, should be 6\n", nSize);
+    ok(nSize > 6, "WidenPath should compute a widdened path with a 1px wide pen. Path length is %d, should be more than 6\n", nSize);
 
     ReleaseDC(0, hdc);
     return;
@@ -391,10 +392,41 @@ done:
     ReleaseDC(0, hdc);
 }
 
+static void test_closefigure(void) {
+    BOOL retb;
+    int nSize, nSizeWitness;
+    HDC hdc = GetDC(0);
+
+    BeginPath(hdc);
+    MoveToEx(hdc, 95, 95, NULL);
+    LineTo(hdc, 95,  0);
+    LineTo(hdc,  0, 95);
+
+    retb = CloseFigure(hdc);
+    EndPath(hdc);
+    nSize = GetPath(hdc, NULL, NULL, 0);
+
+    AbortPath(hdc);
+
+    BeginPath(hdc);
+    MoveToEx(hdc, 95, 95, NULL);
+    LineTo(hdc, 95,  0);
+    LineTo(hdc,  0, 95);
+
+    EndPath(hdc);
+    nSizeWitness = GetPath(hdc, NULL, NULL, 0);
+
+    /* This test shows CloseFigure does not have to add a point at the end of the path */
+    ok(nSize == nSizeWitness, "Wrong number of points, no point should be added by CloseFigure\n");
+
+    ReleaseDC(0, hdc);
+}
+
 START_TEST(path)
 {
     test_widenpath();
     test_arcto();
     test_anglearc();
     test_polydraw();
+    test_closefigure();
 }

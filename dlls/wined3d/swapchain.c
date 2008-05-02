@@ -103,6 +103,7 @@ static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface, D3DCB
                 FIXME("(%p) Something's still holding the back buffer\n",This);
             }
         }
+        HeapFree(GetProcessHeap(), 0, This->backBuffer);
     }
 
     /* Restore the screen resolution if we rendered in fullscreen
@@ -322,6 +323,10 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
                 tmp = front->resource.allocatedMemory;
                 front->resource.allocatedMemory = back->resource.allocatedMemory;
                 back->resource.allocatedMemory = tmp;
+
+                tmp = front->resource.heapMemory;
+                front->resource.heapMemory = back->resource.heapMemory;
+                back->resource.heapMemory = tmp;
             }
 
             /* Flip the PBO */

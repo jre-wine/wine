@@ -77,7 +77,8 @@ struct window
     unsigned int     ex_style;        /* window extended style */
     unsigned int     id;              /* window id */
     void*            instance;        /* creator instance */
-    int              is_unicode;      /* ANSI or unicode */
+    unsigned int     is_unicode : 1;  /* ANSI or unicode */
+    unsigned int     is_linked : 1;   /* is it linked into the parent z-order list? */
     unsigned long    user_data;       /* user-specific data */
     WCHAR           *text;            /* window caption text */
     unsigned int     paint_flags;     /* various painting flags */
@@ -107,6 +108,12 @@ static struct window *shell_listview;
 static struct window *progman_window;
 static struct window *taskman_window;
 
+/* magic HWND_TOP etc. pointers */
+#define WINPTR_TOP       ((struct window *)1L)
+#define WINPTR_BOTTOM    ((struct window *)2L)
+#define WINPTR_TOPMOST   ((struct window *)3L)
+#define WINPTR_NOTOPMOST ((struct window *)4L)
+
 /* retrieve a pointer to a window from its handle */
 static inline struct window *get_window( user_handle_t handle )
 {
@@ -119,6 +126,81 @@ static inline struct window *get_window( user_handle_t handle )
 static inline int is_desktop_window( const struct window *win )
 {
     return !win->parent;  /* only desktop windows have no parent */
+}
+
+/* get next window in Z-order list */
+static inline struct window *get_next_window( struct window *win )
+{
+    struct list *ptr = list_next( &win->parent->children, &win->entry );
+    return ptr ? LIST_ENTRY( ptr, struct window, entry ) : NULL;
+}
+
+/* get previous window in Z-order list */
+static inline struct window *get_prev_window( struct window *win )
+{
+    struct list *ptr = list_prev( &win->parent->children, &win->entry );
+    return ptr ? LIST_ENTRY( ptr, struct window, entry ) : NULL;
+}
+
+/* get first child in Z-order list */
+static inline struct window *get_first_child( struct window *win )
+{
+    struct list *ptr = list_head( &win->children );
+    return ptr ? LIST_ENTRY( ptr, struct window, entry ) : NULL;
+}
+
+/* get last child in Z-order list */
+static inline struct window *get_last_child( struct window *win )
+{
+    struct list *ptr = list_tail( &win->children );
+    return ptr ? LIST_ENTRY( ptr, struct window, entry ) : NULL;
+}
+
+/* link a window at the right place in the siblings list */
+static void link_window( struct window *win, struct window *previous )
+{
+    if (previous == WINPTR_NOTOPMOST)
+    {
+        if (!(win->ex_style & WS_EX_TOPMOST) && win->is_linked) return;  /* nothing to do */
+        win->ex_style &= ~WS_EX_TOPMOST;
+        previous = WINPTR_TOP;  /* fallback to the HWND_TOP case */
+    }
+
+    list_remove( &win->entry );  /* unlink it from the previous location */
+
+    if (previous == WINPTR_BOTTOM)
+    {
+        list_add_tail( &win->parent->children, &win->entry );
+        win->ex_style &= ~WS_EX_TOPMOST;
+    }
+    else if (previous == WINPTR_TOPMOST)
+    {
+        list_add_head( &win->parent->children, &win->entry );
+        win->ex_style |= WS_EX_TOPMOST;
+    }
+    else if (previous == WINPTR_TOP)
+    {
+        struct list *entry = win->parent->children.next;
+        if (!(win->ex_style & WS_EX_TOPMOST))  /* put it above the first non-topmost window */
+        {
+            while (entry != &win->parent->children &&
+                   LIST_ENTRY( entry, struct window, entry )->ex_style & WS_EX_TOPMOST)
+                entry = entry->next;
+        }
+        list_add_before( entry, &win->entry );
+    }
+    else
+    {
+        list_add_after( &previous->entry, &win->entry );
+        if (!(previous->ex_style & WS_EX_TOPMOST)) win->ex_style &= ~WS_EX_TOPMOST;
+        else
+        {
+            struct window *next = get_next_window( win );
+            if (next && (next->ex_style & WS_EX_TOPMOST)) win->ex_style |= WS_EX_TOPMOST;
+        }
+    }
+
+    win->is_linked = 1;
 }
 
 /* change the parent of a window (or unlink the window if the new parent is NULL) */
@@ -136,12 +218,10 @@ static int set_parent_window( struct window *win, struct window *parent )
         }
     }
 
-    list_remove( &win->entry );  /* unlink it from the previous location */
-
     if (parent)
     {
         win->parent = parent;
-        list_add_head( &parent->children, &win->entry );
+        link_window( win, WINPTR_TOP );
 
         /* if parent belongs to a different thread and the window isn't */
         /* top-level, attach the two threads */
@@ -150,39 +230,11 @@ static int set_parent_window( struct window *win, struct window *parent )
     }
     else  /* move it to parent unlinked list */
     {
+        list_remove( &win->entry );  /* unlink it from the previous location */
         list_add_head( &win->parent->unlinked, &win->entry );
+        win->is_linked = 0;
     }
     return 1;
-}
-
-/* get next window in Z-order list */
-static inline struct window *get_next_window( struct window *win )
-{
-    struct list *ptr = list_next( &win->parent->children, &win->entry );
-    if (ptr == &win->parent->unlinked) ptr = NULL;
-    return ptr ? LIST_ENTRY( ptr, struct window, entry ) : NULL;
-}
-
-/* get previous window in Z-order list */
-static inline struct window *get_prev_window( struct window *win )
-{
-    struct list *ptr = list_prev( &win->parent->children, &win->entry );
-    if (ptr == &win->parent->unlinked) ptr = NULL;
-    return ptr ? LIST_ENTRY( ptr, struct window, entry ) : NULL;
-}
-
-/* get first child in Z-order list */
-static inline struct window *get_first_child( struct window *win )
-{
-    struct list *ptr = list_head( &win->children );
-    return ptr ? LIST_ENTRY( ptr, struct window, entry ) : NULL;
-}
-
-/* get last child in Z-order list */
-static inline struct window *get_last_child( struct window *win )
-{
-    struct list *ptr = list_tail( &win->children );
-    return ptr ? LIST_ENTRY( ptr, struct window, entry ) : NULL;
 }
 
 /* append a user handle to a handle array */
@@ -402,6 +454,7 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->id             = 0;
     win->instance       = NULL;
     win->is_unicode     = 1;
+    win->is_linked      = 0;
     win->user_data      = 0;
     win->text           = NULL;
     win->paint_flags    = 0;
@@ -1373,12 +1426,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     win->window_rect  = *window_rect;
     win->visible_rect = *visible_rect;
     win->client_rect  = *client_rect;
-    if (!(swp_flags & SWP_NOZORDER) && win->parent)
-    {
-        list_remove( &win->entry );  /* unlink it from the previous location */
-        if (previous) list_add_after( &previous->entry, &win->entry );
-        else list_add_head( &win->parent->children, &win->entry );
-    }
+    if (!(swp_flags & SWP_NOZORDER) && win->parent) link_window( win, previous );
     if (swp_flags & SWP_SHOWWINDOW) win->style |= WS_VISIBLE;
     else if (swp_flags & SWP_HIDEWINDOW) win->style &= ~WS_VISIBLE;
 
@@ -1513,6 +1561,7 @@ static void set_window_region( struct window *win, struct region *region, int re
 DECL_HANDLER(create_window)
 {
     struct window *win, *parent, *owner = NULL;
+    atom_t atom;
 
     reply->handle = 0;
 
@@ -1532,7 +1581,13 @@ DECL_HANDLER(create_window)
         else /* owner must be a top-level window */
             while (!is_desktop_window(owner->parent)) owner = owner->parent;
     }
-    if (!(win = create_window( parent, owner, req->atom, req->instance ))) return;
+
+    if (get_req_data_size())
+        atom = find_global_atom( NULL, get_req_data(), get_req_data_size() / sizeof(WCHAR) );
+    else
+        atom = req->atom;
+
+    if (!(win = create_window( parent, owner, atom, req->instance ))) return;
 
     reply->handle    = win->handle;
     reply->parent    = win->parent ? win->parent->handle : 0;
@@ -1657,7 +1712,12 @@ DECL_HANDLER(set_window_info)
     reply->old_instance  = win->instance;
     reply->old_user_data = win->user_data;
     if (req->flags & SET_WIN_STYLE) win->style = req->style;
-    if (req->flags & SET_WIN_EXSTYLE) win->ex_style = req->ex_style;
+    if (req->flags & SET_WIN_EXSTYLE)
+    {
+        /* WS_EX_TOPMOST can only be changed for unlinked windows */
+        if (!win->is_linked) win->ex_style = req->ex_style;
+        else win->ex_style = (req->ex_style & ~WS_EX_TOPMOST) | (win->ex_style & WS_EX_TOPMOST);
+    }
     if (req->flags & SET_WIN_ID) win->id = req->id;
     if (req->flags & SET_WIN_INSTANCE) win->instance = req->instance;
     if (req->flags & SET_WIN_UNICODE) win->is_unicode = req->is_unicode;
@@ -1697,12 +1757,19 @@ DECL_HANDLER(get_window_children)
     int total = 0;
     user_handle_t *data;
     data_size_t len;
+    atom_t atom = req->atom;
+
+    if (get_req_data_size())
+    {
+        atom = find_global_atom( NULL, get_req_data(), get_req_data_size() / sizeof(WCHAR) );
+        if (!atom) return;
+    }
 
     if (parent)
     {
         LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
         {
-            if (req->atom && get_class_atom(ptr->class) != req->atom) continue;
+            if (atom && get_class_atom(ptr->class) != atom) continue;
             if (req->tid && get_thread_id(ptr->thread) != req->tid) continue;
             total++;
         }
@@ -1714,7 +1781,7 @@ DECL_HANDLER(get_window_children)
         LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
         {
             if (len < sizeof(*data)) break;
-            if (req->atom && get_class_atom(ptr->class) != req->atom) continue;
+            if (atom && get_class_atom(ptr->class) != atom) continue;
             if (req->tid && get_thread_id(ptr->thread) != req->tid) continue;
             *data++ = ptr->handle;
             len -= sizeof(*data);
@@ -1765,8 +1832,11 @@ DECL_HANDLER(get_window_tree)
         struct window *parent = win->parent;
         reply->parent = parent->handle;
         reply->owner  = win->owner;
-        if ((ptr = get_next_window( win ))) reply->next_sibling = ptr->handle;
-        if ((ptr = get_prev_window( win ))) reply->prev_sibling = ptr->handle;
+        if (win->is_linked)
+        {
+            if ((ptr = get_next_window( win ))) reply->next_sibling = ptr->handle;
+            if ((ptr = get_prev_window( win ))) reply->prev_sibling = ptr->handle;
+        }
         if ((ptr = get_first_child( parent ))) reply->first_sibling = ptr->handle;
         if ((ptr = get_last_child( parent ))) reply->last_sibling = ptr->handle;
     }
@@ -1788,16 +1858,21 @@ DECL_HANDLER(set_window_pos)
 
     if (!(flags & SWP_NOZORDER))
     {
-        if (!req->previous)  /* special case: HWND_TOP */
+        switch ((int)(unsigned long)req->previous)
         {
-            if (get_first_child(win->parent) == win) flags |= SWP_NOZORDER;
-        }
-        else if (req->previous == (user_handle_t)1)  /* special case: HWND_BOTTOM */
-        {
-            previous = get_last_child( win->parent );
-        }
-        else
-        {
+        case 0:   /* HWND_TOP */
+            previous = WINPTR_TOP;
+            break;
+        case 1:   /* HWND_BOTTOM */
+            previous = WINPTR_BOTTOM;
+            break;
+        case -1:  /* HWND_TOPMOST */
+            previous = WINPTR_TOPMOST;
+            break;
+        case -2:  /* HWND_NOTOPMOST */
+            previous = WINPTR_NOTOPMOST;
+            break;
+        default:
             if (!(previous = get_window( req->previous ))) return;
             /* previous must be a sibling */
             if (previous->parent != win->parent)
@@ -1805,6 +1880,7 @@ DECL_HANDLER(set_window_pos)
                 set_error( STATUS_INVALID_PARAMETER );
                 return;
             }
+            break;
         }
         if (previous == win) flags |= SWP_NOZORDER;  /* nothing to do */
     }
@@ -1822,6 +1898,7 @@ DECL_HANDLER(set_window_pos)
     if (!visible_rect) visible_rect = &req->window;
     set_window_pos( win, previous, flags, &req->window, &req->client, visible_rect, valid_rects );
     reply->new_style = win->style;
+    reply->new_ex_style = win->ex_style;
 }
 
 
@@ -2059,8 +2136,12 @@ DECL_HANDLER(update_window_zorder)
         if (!intersect_rect( &tmp, &ptr->visible_rect, &req->rect )) continue;
         if (ptr->win_region && !rect_in_region( ptr->win_region, &req->rect )) continue;
         /* found a window obscuring the rectangle, now move win above this one */
-        list_remove( &win->entry );
-        list_add_before( &ptr->entry, &win->entry );
+        /* making sure to not violate the topmost rule */
+        if (!(ptr->ex_style & WS_EX_TOPMOST) || (win->ex_style & WS_EX_TOPMOST))
+        {
+            list_remove( &win->entry );
+            list_add_before( &ptr->entry, &win->entry );
+        }
         break;
     }
 }

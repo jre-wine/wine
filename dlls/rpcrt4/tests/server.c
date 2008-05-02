@@ -472,6 +472,32 @@ s_hash_bstr(bstr_t b)
 }
 
 void
+s_get_name(name_t *name)
+{
+  const char bossman[] = "Jeremy White";
+  memcpy(name->name, bossman, min(name->size, sizeof(bossman)));
+  /* ensure nul-termination */
+  if (name->size < sizeof(bossman))
+    name->name[name->size - 1] = 0;
+}
+
+int
+s_sum_pcarr2(int n, int **pa)
+{
+  return s_sum_conf_array(*pa, n);
+}
+
+int
+s_sum_L1_norms(int n, vector_t *vs)
+{
+  int i;
+  int sum = 0;
+  for (i = 0; i < n; ++i)
+    sum += abs(vs[i].x) + abs(vs[i].y) + abs(vs[i].z);
+  return sum;
+}
+
+void
 s_stop(void)
 {
   ok(RPC_S_OK == RpcMgmtStopServerListening(NULL), "RpcMgmtStopServerListening\n");
@@ -800,6 +826,9 @@ pointer_tests(void)
   cpuints_t cpus;
   short bstr_data[] = { 5, 'H', 'e', 'l', 'l', 'o' };
   bstr_t bstr = &bstr_data[1];
+  name_t name;
+  void *buffer;
+  int *pa2;
 
   ok(test_list_length(list) == 3, "RPC test_list_length\n");
   ok(square_puint(p1) == 121, "RPC square_puint\n");
@@ -843,6 +872,16 @@ pointer_tests(void)
   ok(hash_bstr(bstr) == s_hash_bstr(bstr), "RPC hash_bstr_data\n");
 
   free_list(list);
+
+  name.size = 10;
+  name.name = buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, name.size);
+  get_name(&name);
+  todo_wine
+  ok(name.name == buffer, "[in,out] pointer should have stayed as %p but instead changed to %p\n", name.name, buffer);
+  HeapFree(GetProcessHeap(), 0, name.name);
+
+  pa2 = a;
+  ok(sum_pcarr2(4, &pa2) == 10, "RPC sum_pcarr2\n");
 }
 
 static int
@@ -954,6 +993,8 @@ array_tests(void)
   make_pyramid_doub_carr(4, &dc);
   ok(check_pyramid_doub_carr(dc), "RPC make_pyramid_doub_carr\n");
   free_pyramid_doub_carr(dc);
+
+  ok(sum_L1_norms(2, vs) == 21, "RPC sum_L1_norms\n");
 }
 
 static void

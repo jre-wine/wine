@@ -976,8 +976,10 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
 
   if (pointer_needs_unmarshaling) {
     if (attr & RPC_FC_P_DEREF) {
-      if (!*pPointer || fMustAlloc)
+      if (!*pPointer || fMustAlloc) {
         *pPointer = NdrAllocate(pStubMsg, sizeof(void *));
+        *(unsigned char**) *pPointer = NULL;
+      }
       pPointer = *(unsigned char***)pPointer;
       TRACE("deref => %p\n", pPointer);
     }
@@ -5353,6 +5355,8 @@ static unsigned char *WINAPI NdrBaseTypeMarshall(
         pStubMsg->Buffer += sizeof(USHORT);
         TRACE("value: 0x%04x\n", *(UINT *)pMemory);
         break;
+    case RPC_FC_IGNORE:
+        break;
     default:
         FIXME("Unhandled base type: 0x%02x\n", *pFormat);
     }
@@ -5426,6 +5430,8 @@ static unsigned char *WINAPI NdrBaseTypeUnmarshall(
         pStubMsg->Buffer += sizeof(USHORT);
         TRACE("value: 0x%08x\n", **(UINT **)ppMemory);
         break;
+    case RPC_FC_IGNORE:
+        break;
     default:
         FIXME("Unhandled base type: 0x%02x\n", *pFormat);
     }
@@ -5483,6 +5489,8 @@ static void WINAPI NdrBaseTypeBufferSize(
         ALIGN_LENGTH(pStubMsg->BufferLength, sizeof(error_status_t));
         pStubMsg->BufferLength += sizeof(error_status_t);
         break;
+    case RPC_FC_IGNORE:
+        break;
     default:
         FIXME("Unhandled base type: 0x%02x\n", *pFormat);
     }
@@ -5536,6 +5544,9 @@ static ULONG WINAPI NdrBaseTypeMemorySize(
         pStubMsg->Buffer += sizeof(INT);
         pStubMsg->MemorySize += sizeof(INT);
         return sizeof(INT);
+    case RPC_FC_IGNORE:
+        pStubMsg->MemorySize += sizeof(void *);
+        return sizeof(void *);
     default:
         FIXME("Unhandled base type: 0x%02x\n", *pFormat);
        return 0;

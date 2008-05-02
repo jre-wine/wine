@@ -279,6 +279,7 @@ static void test_ScriptGetCMap(HDC hdc, unsigned short pwOutGlyphs[256])
     ok( hr == S_OK, "ScriptGetCMap(NULL,&psc,NULL,0,0,NULL), expected S_OK, "
                     "got %08x\n", hr);
     ok( psc != NULL, "ScritpGetCMap expected psc to be not NULL\n");
+    ScriptFreeCache( &psc);
 
     /* Set psc to NULL, to be able to check if a pointer is returned in psc */
     psc = NULL;
@@ -336,10 +337,11 @@ static void test_ScriptGetFontProperties(HDC hdc)
     ok( hr == E_INVALIDARG, "(hdc,&psc,NULL), expected E_INVALIDARG, got %08x\n", hr);
     ok( psc == NULL, "Expected psc to be NULL, got %p\n", psc);
 
-    /* Pass an uninitialized sfp */
+    /* Pass an invalid sfp */
     psc = NULL;
+    sfp.cBytes = sizeof(SCRIPT_FONTPROPERTIES) - 1;
     hr = ScriptGetFontProperties(hdc,&psc,&sfp);
-    ok( hr == E_INVALIDARG, "(hdc,&psc,&sfp) partly uninitialized, expected E_INVALIDARG, got %08x\n", hr);
+    ok( hr == E_INVALIDARG, "(hdc,&psc,&sfp) invalid, expected E_INVALIDARG, got %08x\n", hr);
     ok( psc != NULL, "Expected a pointer in psc, got NULL\n");
     ScriptFreeCache(&psc);
     ok( psc == NULL, "Expected psc to be NULL, got %p\n", psc);
@@ -638,6 +640,7 @@ static void test_ScriptString(HDC hdc)
                               ReqWidth, &Control, &State, Dx, &Tabdef,
                               &InClass, &ssa);
     ok(hr == S_OK, "ScriptStringAnalyse should return S_OK not %08x\n", hr);
+    ScriptStringFree(&ssa);
 
     /* test makes sure that a call with a valid pssa still works */
     hr = ScriptStringAnalyse( hdc, teststr, len, Glyphs, Charset, Flags,
@@ -842,8 +845,9 @@ static void test_ScriptCacheGetHeight(HDC hdc)
 
     hr = ScriptCacheGetHeight(hdc, &sc, &height);
     ok(hr == S_OK, "expected S_OK, got 0x%08x\n", hr);
-
     ok(height > 0, "expected height > 0\n");
+
+    ScriptFreeCache(&sc);
 }
 
 static void test_ScriptGetGlyphABCWidth(HDC hdc)
@@ -865,6 +869,8 @@ static void test_ScriptGetGlyphABCWidth(HDC hdc)
 
     hr = ScriptGetGlyphABCWidth(hdc, &sc, 'a', &abc);
     ok(hr == S_OK, "expected S_OK, got 0x%08x\n", hr);
+
+    ScriptFreeCache(&sc);
 }
 
 static void test_ScriptLayout(void)
@@ -1216,7 +1222,7 @@ START_TEST(usp10)
     hdc = GetDC(hwnd);                                      /* We now have a hdc             */
     ok( hdc != NULL, "HDC failed to be created %p\n", hdc);
 
-    memset(&lf, 0, sizeof(HFONT));
+    memset(&lf, 0, sizeof(LOGFONTA));
     lstrcpyA(lf.lfFaceName, "Symbol");
     lf.lfHeight = 10;
     lf.lfWeight = 3;

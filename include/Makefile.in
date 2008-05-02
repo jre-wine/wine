@@ -24,9 +24,12 @@ IDL_H_SRCS = \
 	htiframe.idl \
 	iads.idl \
 	icftypes.idl \
+	imnact.idl \
+	imnxport.idl \
 	indexsrv.idl \
 	mediaobj.idl \
 	mimeinfo.idl \
+	mimeole.idl \
 	mlang.idl \
 	mmstream.idl \
 	mscoree.idl \
@@ -125,6 +128,7 @@ SRCDIR_INCLUDES = \
 	ddk/ntddser.h \
 	ddk/ntddtape.h \
 	ddk/wdm.h \
+	ddk/winddiui.h \
 	ddk/winsplp.h \
 	ddraw.h \
 	ddrawi.h \
@@ -230,6 +234,7 @@ SRCDIR_INCLUDES = \
 	mciavi.h \
 	mcx.h \
 	mediaerr.h \
+	midles.h \
 	minmax.h \
 	mmddk.h \
 	mmreg.h \

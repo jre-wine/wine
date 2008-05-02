@@ -231,6 +231,14 @@ static BOOL CRYPT_DecodeEnsureSpace(DWORD dwFlags,
     return ret;
 }
 
+static void CRYPT_FreeSpace(PCRYPT_DECODE_PARA pDecodePara, LPVOID pv)
+{
+    if (pDecodePara && pDecodePara->pfnFree)
+        pDecodePara->pfnFree(pv);
+    else
+        LocalFree(pv);
+}
+
 /* Helper function to check *pcbStructInfo and set it to the required size.
  * Assumes pvStructInfo is not NULL.
  */
@@ -540,6 +548,8 @@ static BOOL CRYPT_AsnDecodeSequence(struct AsnDecodeSequenceItem items[],
                     ret = CRYPT_AsnDecodeSequenceItems(items, cItem,
                      ptr, dataLen, dwFlags, pvStructInfo, nextData,
                      &cbDecoded);
+                    if (!ret && (dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+                        CRYPT_FreeSpace(pDecodePara, pvStructInfo);
                 }
             }
         }
@@ -617,15 +627,12 @@ static BOOL CRYPT_AsnDecodeArray(const struct AsnArrayDescriptor *arrayDesc,
 
                 for (ptr = pbEncoded + 1 + lenBytes; ret && !doneDecoding; )
                 {
-                    DWORD itemLenBytes;
-
-                    itemLenBytes = GET_LEN_BYTES(ptr[1]);
                     if (dataLen == CMSG_INDEFINITE_LENGTH)
                     {
                         if (ptr[0] == 0)
                         {
                             doneDecoding = TRUE;
-                            if (itemLenBytes != 1 || ptr[1] != 0)
+                            if (ptr[1] != 0)
                             {
                                 SetLastError(CRYPT_E_ASN1_CORRUPT);
                                 ret = FALSE;
@@ -649,7 +656,8 @@ static BOOL CRYPT_AsnDecodeArray(const struct AsnArrayDescriptor *arrayDesc,
                             if (itemDataLen == CMSG_INDEFINITE_LENGTH)
                                 itemEncoded = cbEncoded - (ptr - pbEncoded);
                             else
-                                itemEncoded = 1 + itemLenBytes + itemDataLen;
+                                itemEncoded = 1 + GET_LEN_BYTES(ptr[1]) +
+                                 itemDataLen;
                         }
                         if (ret)
                             ret = arrayDesc->decodeFunc(ptr, itemEncoded,
@@ -729,6 +737,8 @@ static BOOL CRYPT_AsnDecodeArray(const struct AsnArrayDescriptor *arrayDesc,
                             ptr += itemDecoded;
                         }
                     }
+                    if (!ret && (dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+                        CRYPT_FreeSpace(pDecodePara, pvStructInfo);
                 }
             }
             if (itemSizes != &itemSize)
@@ -1067,6 +1077,12 @@ static BOOL CRYPT_AsnDecodeCRLEntry(const BYTE *pbEncoded, DWORD cbEncoded,
     ret = CRYPT_AsnDecodeSequence(items, sizeof(items) / sizeof(items[0]),
      pbEncoded, cbEncoded, dwFlags, NULL, entry, pcbStructInfo, pcbDecoded,
      entry ? entry->SerialNumber.pbData : NULL);
+    if (ret && entry && !entry->SerialNumber.cbData)
+    {
+        WARN("empty CRL entry serial number\n");
+        SetLastError(CRYPT_E_ASN1_CORRUPT);
+        ret = FALSE;
+    }
     return ret;
 }
 

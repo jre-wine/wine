@@ -293,19 +293,3 @@ DWORD WINAPI CommandLineFromMsiDescriptor( WCHAR *szDescriptor,
     FreeLibrary( hmsi );
     return r;
 }
-
-BOOL WINAPI CredEnumerateA(LPCSTR filter, DWORD flags, DWORD *count,
- PCREDENTIALA **credentials)
-{
-    FIXME("(%s, %08x, %p, %p)\n", debugstr_a(filter), flags, count,
-            credentials);
-    return FALSE;
-}
-
-BOOL WINAPI CredEnumerateW(LPCWSTR filter, DWORD flags, DWORD *count,
- PCREDENTIALW **credentials)
-{
-    FIXME("(%s, %08x, %p, %p)\n", debugstr_w(filter), flags, count,
-            credentials);
-    return FALSE;
-}

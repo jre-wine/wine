@@ -6332,7 +6332,7 @@ static LRESULT TOOLBAR_TTGetDispInfo (TOOLBAR_INFO *infoPtr, NMTTDISPINFOW *lpnm
                 return 0;
             }
         }
-        else if (len > 0)
+        else if (tbgit.pszText[0])
         {
             MultiByteToWideChar(CP_ACP, 0, tbgit.pszText, -1,
                                 lpnmtdi->lpszText, sizeof(lpnmtdi->szText)/sizeof(lpnmtdi->szText[0]));
@@ -6374,7 +6374,7 @@ static LRESULT TOOLBAR_TTGetDispInfo (TOOLBAR_INFO *infoPtr, NMTTDISPINFOW *lpnm
 
     /* last resort: send notification on to app */
     /* FIXME: find out what is really used here */
-    return SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, 0, (LPARAM)lpnmtdi);
+    return SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, (WPARAM)lpnmtdi->hdr.idFrom, (LPARAM)lpnmtdi);
 }
 
 

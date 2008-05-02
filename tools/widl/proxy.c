@@ -65,14 +65,14 @@ static void write_stubdescproto(void)
   print_proxy( "\n");
 }
 
-static void write_stubdesc(void)
+static void write_stubdesc(int expr_eval_routines)
 {
   print_proxy( "static const MIDL_STUB_DESC Object_StubDesc =\n{\n");
   indent++;
   print_proxy( "0,\n");
   print_proxy( "NdrOleAllocate,\n");
   print_proxy( "NdrOleFree,\n");
-  print_proxy( "{0}, 0, 0, 0, 0,\n");
+  print_proxy( "{0}, 0, 0, %s, 0,\n", expr_eval_routines ? "ExprEvalRoutines" : "0");
   print_proxy( "__MIDL_TypeFormatString.Format,\n");
   print_proxy( "1, /* -error bounds_check flag */\n");
   print_proxy( "0x10001, /* Ndr library version */\n");
@@ -189,13 +189,11 @@ static void free_variable( const var_t *arg )
 {
   unsigned int type_offset = arg->type->typestring_offset;
   var_t *constraint;
-  type_t *type;
-  expr_list_t *expr;
+  type_t *type = arg->type;
+  expr_t *size = get_size_is_expr(type, arg->name);
 
-  expr = get_attrp( arg->attrs, ATTR_SIZEIS );
-  if (expr)
+  if (size)
   {
-    const expr_t *size = LIST_ENTRY( list_head(expr), const expr_t, entry );
     print_proxy( "_StubMsg.MaxCount = " );
     write_expr(proxy, size, 0);
     fprintf(proxy, ";\n\n");
@@ -205,7 +203,6 @@ static void free_variable( const var_t *arg )
     return;
   }
 
-  type = arg->type;
   switch( type->type )
   {
   case RPC_FC_BYTE:
@@ -598,6 +595,7 @@ int need_stub_files(const ifref_list_t *ifaces)
 void write_proxies(ifref_list_t *ifaces)
 {
   ifref_t *cur;
+  int expr_eval_routines;
   char *file_id = proxy_token;
   int c;
   unsigned int proc_offset = 0;
@@ -613,8 +611,11 @@ void write_proxies(ifref_list_t *ifaces)
           if (need_proxy(cur->iface))
               write_proxy(cur->iface, &proc_offset);
 
+  expr_eval_routines = write_expr_eval_routines(proxy, proxy_token);
+  if (expr_eval_routines)
+      write_expr_eval_routine_list(proxy, proxy_token);
   write_user_quad_list(proxy);
-  write_stubdesc();
+  write_stubdesc(expr_eval_routines);
 
   print_proxy( "#if !defined(__RPC_WIN32__)\n");
   print_proxy( "#error Currently only Wine and WIN32 are supported.\n");

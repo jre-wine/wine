@@ -549,10 +549,10 @@ static void CRYPT_KeynameKeeperFromTokenW(struct KeynameKeeper *keeper,
     TRACE("Keyname is %s\n", debugstr_w(keeper->keyName));
 }
 
-static DWORD CRYPT_GetNextKeyW(LPCWSTR str, struct X500TokenW *token,
+static BOOL CRYPT_GetNextKeyW(LPCWSTR str, struct X500TokenW *token,
  LPCWSTR *ppszError)
 {
-    DWORD ret = ERROR_SUCCESS;
+    BOOL ret = TRUE;
 
     while (*str && isspaceW(*str))
         str++;
@@ -568,7 +568,8 @@ static DWORD CRYPT_GetNextKeyW(LPCWSTR str, struct X500TokenW *token,
             TRACE("missing equals char at %s\n", debugstr_w(token->start));
             if (ppszError)
                 *ppszError = token->start;
-            ret = CRYPT_E_INVALID_X500_STRING;
+            SetLastError(CRYPT_E_INVALID_X500_STRING);
+            ret = FALSE;
         }
     }
     else
@@ -577,10 +578,10 @@ static DWORD CRYPT_GetNextKeyW(LPCWSTR str, struct X500TokenW *token,
 }
 
 /* Assumes separators are characters in the 0-255 range */
-static DWORD CRYPT_GetNextValueW(LPCWSTR str, DWORD dwFlags, LPCWSTR separators,
+static BOOL CRYPT_GetNextValueW(LPCWSTR str, DWORD dwFlags, LPCWSTR separators,
  struct X500TokenW *token, LPCWSTR *ppszError)
 {
-    DWORD ret = ERROR_SUCCESS;
+    BOOL ret = TRUE;
 
     TRACE("(%s, %s, %p, %p)\n", debugstr_w(str), debugstr_w(separators), token,
      ppszError);
@@ -594,7 +595,7 @@ static DWORD CRYPT_GetNextValueW(LPCWSTR str, DWORD dwFlags, LPCWSTR separators,
         {
             token->end = NULL;
             str++;
-            while (!token->end && !ret)
+            while (!token->end && ret)
             {
                 while (*str && *str != '"')
                     str++;
@@ -610,7 +611,8 @@ static DWORD CRYPT_GetNextValueW(LPCWSTR str, DWORD dwFlags, LPCWSTR separators,
                     TRACE("unterminated quote at %s\n", debugstr_w(str));
                     if (ppszError)
                         *ppszError = str;
-                    ret = CRYPT_E_INVALID_X500_STRING;
+                    SetLastError(CRYPT_E_INVALID_X500_STRING);
+                    ret = FALSE;
                 }
             }
         }
@@ -630,7 +632,8 @@ static DWORD CRYPT_GetNextValueW(LPCWSTR str, DWORD dwFlags, LPCWSTR separators,
         TRACE("missing value at %s\n", debugstr_w(str));
         if (ppszError)
             *ppszError = str;
-        ret = CRYPT_E_INVALID_X500_STRING;
+        SetLastError(CRYPT_E_INVALID_X500_STRING);
+        ret = FALSE;
     }
     return ret;
 }
@@ -749,9 +752,12 @@ static BOOL CRYPT_ValueToRDN(DWORD dwCertEncodingType, PCERT_NAME_INFO info,
             ret = CRYPT_EncodeValue(dwCertEncodingType, value,
              &info->rgRDN[info->cRDN].rgRDNAttr[0].Value, types, ppszError);
         }
-    }
-    if (ret)
+        else
+            SetLastError(ERROR_OUTOFMEMORY);
         info->cRDN++;
+    }
+    else
+        SetLastError(ERROR_OUTOFMEMORY);
     return ret;
 }
 
@@ -762,7 +768,7 @@ BOOL WINAPI CertStrToNameW(DWORD dwCertEncodingType, LPCWSTR pszX500,
     CERT_NAME_INFO info = { 0, NULL };
     LPCWSTR str;
     struct KeynameKeeper keeper;
-    DWORD i, error = ERROR_SUCCESS;
+    DWORD i;
     BOOL ret = TRUE;
 
     TRACE("(%08x, %s, %08x, %p, %p, %p, %p)\n", dwCertEncodingType,
@@ -771,12 +777,12 @@ BOOL WINAPI CertStrToNameW(DWORD dwCertEncodingType, LPCWSTR pszX500,
 
     CRYPT_InitializeKeynameKeeper(&keeper);
     str = pszX500;
-    while (str && *str && !error && ret)
+    while (str && *str && ret)
     {
         struct X500TokenW token;
 
-        error = CRYPT_GetNextKeyW(str, &token, ppszError);
-        if (!error && token.start)
+        ret = CRYPT_GetNextKeyW(str, &token, ppszError);
+        if (ret && token.start)
         {
             PCCRYPT_OID_INFO keyOID;
 
@@ -787,7 +793,8 @@ BOOL WINAPI CertStrToNameW(DWORD dwCertEncodingType, LPCWSTR pszX500,
             {
                 if (ppszError)
                     *ppszError = token.start;
-                error = CRYPT_E_INVALID_X500_STRING;
+                SetLastError(CRYPT_E_INVALID_X500_STRING);
+                ret = FALSE;
             }
             else
             {
@@ -798,7 +805,8 @@ BOOL WINAPI CertStrToNameW(DWORD dwCertEncodingType, LPCWSTR pszX500,
                 {
                     if (ppszError)
                         *ppszError = str;
-                    error = CRYPT_E_INVALID_X500_STRING;
+                    SetLastError(CRYPT_E_INVALID_X500_STRING);
+                    ret = FALSE;
                 }
                 else
                 {
@@ -817,9 +825,9 @@ BOOL WINAPI CertStrToNameW(DWORD dwCertEncodingType, LPCWSTR pszX500,
                         sep = crlfSep;
                     else
                         sep = allSeps;
-                    error = CRYPT_GetNextValueW(str, dwStrType, sep, &token,
+                    ret = CRYPT_GetNextValueW(str, dwStrType, sep, &token,
                      ppszError);
-                    if (!error)
+                    if (ret)
                     {
                         str = token.end;
                         ret = CRYPT_ValueToRDN(dwCertEncodingType, &info,
@@ -830,27 +838,22 @@ BOOL WINAPI CertStrToNameW(DWORD dwCertEncodingType, LPCWSTR pszX500,
         }
     }
     CRYPT_FreeKeynameKeeper(&keeper);
-    if (!error)
+    if (ret)
     {
         if (ppszError)
             *ppszError = NULL;
         ret = CryptEncodeObjectEx(dwCertEncodingType, X509_NAME, &info,
          0, NULL, pbEncoded, pcbEncoded);
-        for (i = 0; i < info.cRDN; i++)
-        {
-            DWORD j;
-
-            for (j = 0; j < info.rgRDN[i].cRDNAttr; j++)
-                LocalFree(info.rgRDN[i].rgRDNAttr[j].Value.pbData);
-            CryptMemFree(info.rgRDN[i].rgRDNAttr);
-        }
-        CryptMemFree(info.rgRDN);
     }
-    else
+    for (i = 0; i < info.cRDN; i++)
     {
-        SetLastError(error);
-        ret = FALSE;
+        DWORD j;
+
+        for (j = 0; j < info.rgRDN[i].cRDNAttr; j++)
+            LocalFree(info.rgRDN[i].rgRDNAttr[j].Value.pbData);
+        CryptMemFree(info.rgRDN[i].rgRDNAttr);
     }
+    CryptMemFree(info.rgRDN);
     return ret;
 }
 

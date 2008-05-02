@@ -190,6 +190,7 @@ ALL_MAKEFILES = \
 	dlls/cryptdll/Makefile \
 	dlls/cryptnet/Makefile \
 	dlls/cryptnet/tests/Makefile \
+	dlls/ctapi32/Makefile \
 	dlls/ctl3d32/Makefile \
 	dlls/d3d10/Makefile \
 	dlls/d3d8/Makefile \
@@ -256,6 +257,8 @@ ALL_MAKEFILES = \
 	dlls/imaadp32.acm/Makefile \
 	dlls/imagehlp/Makefile \
 	dlls/imm32/Makefile \
+	dlls/inetcomm/Makefile \
+	dlls/inetcomm/tests/Makefile \
 	dlls/infosoft/Makefile \
 	dlls/infosoft/tests/Makefile \
 	dlls/inkobj/Makefile \
@@ -289,6 +292,7 @@ ALL_MAKEFILES = \
 	dlls/msacm32/Makefile \
 	dlls/msacm32/tests/Makefile \
 	dlls/msadp32.acm/Makefile \
+	dlls/mscat32/Makefile \
 	dlls/mscms/Makefile \
 	dlls/mscms/tests/Makefile \
 	dlls/mscoree/Makefile \
@@ -566,6 +570,7 @@ dlls/crypt32/tests/Makefile: dlls/crypt32/tests/Makefile.in dlls/Maketest.rules
 dlls/cryptdll/Makefile: dlls/cryptdll/Makefile.in dlls/Makedll.rules
 dlls/cryptnet/Makefile: dlls/cryptnet/Makefile.in dlls/Makedll.rules
 dlls/cryptnet/tests/Makefile: dlls/cryptnet/tests/Makefile.in dlls/Maketest.rules
+dlls/ctapi32/Makefile: dlls/ctapi32/Makefile.in dlls/Makedll.rules
 dlls/ctl3d32/Makefile: dlls/ctl3d32/Makefile.in dlls/Makedll.rules
 dlls/d3d10/Makefile: dlls/d3d10/Makefile.in dlls/Makedll.rules
 dlls/d3d8/Makefile: dlls/d3d8/Makefile.in dlls/Makedll.rules
@@ -632,6 +637,8 @@ dlls/ifsmgr.vxd/Makefile: dlls/ifsmgr.vxd/Makefile.in dlls/Makedll.rules
 dlls/imaadp32.acm/Makefile: dlls/imaadp32.acm/Makefile.in dlls/Makedll.rules
 dlls/imagehlp/Makefile: dlls/imagehlp/Makefile.in dlls/Makedll.rules
 dlls/imm32/Makefile: dlls/imm32/Makefile.in dlls/Makedll.rules
+dlls/inetcomm/Makefile: dlls/inetcomm/Makefile.in dlls/Makedll.rules
+dlls/inetcomm/tests/Makefile: dlls/inetcomm/tests/Makefile.in dlls/Maketest.rules
 dlls/infosoft/Makefile: dlls/infosoft/Makefile.in dlls/Makedll.rules
 dlls/infosoft/tests/Makefile: dlls/infosoft/tests/Makefile.in dlls/Maketest.rules
 dlls/inkobj/Makefile: dlls/inkobj/Makefile.in dlls/Makedll.rules
@@ -665,6 +672,7 @@ dlls/msacm32.drv/Makefile: dlls/msacm32.drv/Makefile.in dlls/Makedll.rules
 dlls/msacm32/Makefile: dlls/msacm32/Makefile.in dlls/Makedll.rules
 dlls/msacm32/tests/Makefile: dlls/msacm32/tests/Makefile.in dlls/Maketest.rules
 dlls/msadp32.acm/Makefile: dlls/msadp32.acm/Makefile.in dlls/Makedll.rules
+dlls/mscat32/Makefile: dlls/mscat32/Makefile.in dlls/Makedll.rules
 dlls/mscms/Makefile: dlls/mscms/Makefile.in dlls/Makedll.rules
 dlls/mscms/tests/Makefile: dlls/mscms/tests/Makefile.in dlls/Maketest.rules
 dlls/mscoree/Makefile: dlls/mscoree/Makefile.in dlls/Makedll.rules

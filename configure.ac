@@ -857,7 +857,11 @@ then
 	ldap_count_references \
 	ldap_first_reference \
 	ldap_next_reference \
-	ldap_parse_reference,
+	ldap_parse_reference \
+	ldap_parse_sort_control \
+	ldap_parse_sortresponse_control \
+	ldap_parse_vlv_control \
+	ldap_parse_vlvresponse_control,
         [$LDAPLIBS $LIBPTHREAD])
 fi
 WINE_NOTICE_IF([test "x$LDAPLIBS" = "x"],[libldap (OpenLDAP) development files not found.
@@ -1611,6 +1615,7 @@ AC_CONFIG_FILES([dlls/crypt32/tests/Makefile])
 AC_CONFIG_FILES([dlls/cryptdll/Makefile])
 AC_CONFIG_FILES([dlls/cryptnet/Makefile])
 AC_CONFIG_FILES([dlls/cryptnet/tests/Makefile])
+AC_CONFIG_FILES([dlls/ctapi32/Makefile])
 AC_CONFIG_FILES([dlls/ctl3d32/Makefile])
 AC_CONFIG_FILES([dlls/d3d10/Makefile])
 AC_CONFIG_FILES([dlls/d3d8/Makefile])
@@ -1677,6 +1682,8 @@ AC_CONFIG_FILES([dlls/ifsmgr.vxd/Makefile])
 AC_CONFIG_FILES([dlls/imaadp32.acm/Makefile])
 AC_CONFIG_FILES([dlls/imagehlp/Makefile])
 AC_CONFIG_FILES([dlls/imm32/Makefile])
+AC_CONFIG_FILES([dlls/inetcomm/Makefile])
+AC_CONFIG_FILES([dlls/inetcomm/tests/Makefile])
 AC_CONFIG_FILES([dlls/infosoft/Makefile])
 AC_CONFIG_FILES([dlls/infosoft/tests/Makefile])
 AC_CONFIG_FILES([dlls/inkobj/Makefile])
@@ -1710,6 +1717,7 @@ AC_CONFIG_FILES([dlls/msacm32.drv/Makefile])
 AC_CONFIG_FILES([dlls/msacm32/Makefile])
 AC_CONFIG_FILES([dlls/msacm32/tests/Makefile])
 AC_CONFIG_FILES([dlls/msadp32.acm/Makefile])
+AC_CONFIG_FILES([dlls/mscat32/Makefile])
 AC_CONFIG_FILES([dlls/mscms/Makefile])
 AC_CONFIG_FILES([dlls/mscms/tests/Makefile])
 AC_CONFIG_FILES([dlls/mscoree/Makefile])

@@ -101,13 +101,14 @@ static void WINAPI IWineD3DDeviceImpl_AddResource(IWineD3DDevice *iface, IWineD3
         } \
         WineD3DAdapterChangeGLRam(This, _size); \
     } \
-    object->resource.allocatedMemory = (0 == _size ? NULL : Pool == WINED3DPOOL_DEFAULT ? NULL : HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, _size)); \
-    if (object->resource.allocatedMemory == NULL && _size != 0 && Pool != WINED3DPOOL_DEFAULT) { \
+    object->resource.heapMemory = (0 == _size ? NULL : HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, _size + RESOURCE_ALIGNMENT)); \
+    if (object->resource.heapMemory == NULL && _size != 0) { \
         FIXME("Out of memory!\n"); \
         HeapFree(GetProcessHeap(), 0, object); \
         *pp##type = NULL; \
         return WINED3DERR_OUTOFVIDEOMEMORY; \
     } \
+    object->resource.allocatedMemory = (BYTE *)(((ULONG_PTR) object->resource.heapMemory + (RESOURCE_ALIGNMENT - 1)) & ~(RESOURCE_ALIGNMENT - 1)); \
     *pp##type = (IWineD3D##type *) object; \
     IWineD3DDeviceImpl_AddResource(iface, (IWineD3DResource *)object) ;\
     TRACE("(%p) : Created resource %p\n", This, object); \
@@ -303,6 +304,13 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexBuffer(IWineD3DDevice *ifac
         WARN("Size 0 requested, returning WINED3DERR_INVALIDCALL\n");
         *ppVertexBuffer = NULL;
         return WINED3DERR_INVALIDCALL;
+    } else if(Pool == WINED3DPOOL_SCRATCH) {
+        /* The d3d9 testsuit shows that this is not allowed. It doesn't make much sense
+         * anyway, SCRATCH vertex buffers aren't useable anywhere
+         */
+        WARN("Vertex buffer in D3DPOOL_SCRATCH requested, returning WINED3DERR_INVALIDCALL\n");
+        *ppVertexBuffer = NULL;
+        return WINED3DERR_INVALIDCALL;
     }
 
     D3DCREATERESOURCEOBJECTINSTANCE(object, VertexBuffer, WINED3DRTYPE_VERTEXBUFFER, Size)
@@ -310,9 +318,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexBuffer(IWineD3DDevice *ifac
     TRACE("(%p) : Size=%d, Usage=%d, FVF=%x, Pool=%d - Memory@%p, Iface@%p\n", This, Size, Usage, FVF, Pool, object->resource.allocatedMemory, object);
     *ppVertexBuffer = (IWineD3DVertexBuffer *)object;
 
-    if (Pool == WINED3DPOOL_DEFAULT ) { /* Allocate some system memory for now */
-        object->resource.allocatedMemory  = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, object->resource.size);
-    }
     object->fvf = FVF;
 
     /* Observations show that drawStridedSlow is faster on dynamic VBs than converting +
@@ -397,10 +402,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateIndexBuffer(IWineD3DDevice *iface
 
     /* Allocate the storage for the device */
     D3DCREATERESOURCEOBJECTINSTANCE(object,IndexBuffer,WINED3DRTYPE_INDEXBUFFER, Length)
-
-    if (Pool == WINED3DPOOL_DEFAULT ) { /* We need a local copy for drawStridedSlow */
-        object->resource.allocatedMemory = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,object->resource.size);
-    }
 
     if(Pool != WINED3DPOOL_SYSTEMMEM && !(Usage & WINED3DUSAGE_DYNAMIC) && GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT)) {
         CreateIndexBufferVBO(This, object);
@@ -951,12 +952,17 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVolumeTexture(IWineD3DDevice *ifa
     UINT                       tmpH;
     UINT                       tmpD;
     const GlPixelFormatDesc *glDesc;
+
     getFormatDescEntry(Format, &GLINFO_LOCATION, &glDesc);
 
     /* TODO: It should only be possible to create textures for formats 
              that are reported as supported */
     if (WINED3DFMT_UNKNOWN >= Format) {
         WARN("(%p) : Texture cannot be created with a format of WINED3DFMT_UNKNOWN\n", This);
+        return WINED3DERR_INVALIDCALL;
+    }
+    if(!GL_SUPPORT(EXT_TEXTURE3D)) {
+        WARN("(%p) : Texture cannot be created - no volume texture support\n", This);
         return WINED3DERR_INVALIDCALL;
     }
 
@@ -1039,6 +1045,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVolume(IWineD3DDevice *iface,
     IWineD3DDeviceImpl        *This = (IWineD3DDeviceImpl *)iface;
     IWineD3DVolumeImpl        *object; /** NOTE: impl ref allowed since this is a create function **/
     const StaticPixelFormatDesc *formatDesc  = getFormatDescEntry(Format, NULL, NULL);
+
+    if(!GL_SUPPORT(EXT_TEXTURE3D)) {
+        WARN("(%p) : Volume cannot be created - no volume texture support\n", This);
+        return WINED3DERR_INVALIDCALL;
+    }
 
     D3DCREATERESOURCEOBJECTINSTANCE(object, Volume, WINED3DRTYPE_VOLUME, ((Width * formatDesc->bpp) * Height * Depth))
 
@@ -1357,6 +1368,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
     IWineD3DSwapChainImpl  *object; /** NOTE: impl ref allowed since this is a create function **/
     HRESULT                 hr = WINED3D_OK;
     IUnknown               *bufferParent;
+    BOOL                    displaymode_set = FALSE;
 
     TRACE("(%p) : Created Aditional Swap Chain\n", This);
 
@@ -1384,6 +1396,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
     if (!object->win_handle) {
         object->win_handle = This->createParms.hFocusWindow;
     }
+    if(!This->ddraw_window) IWineD3DDevice_SetHWND(iface, object->win_handle);
 
     hDc                = GetDC(object->win_handle);
     TRACE("Using hDc %p\n", hDc);
@@ -1448,30 +1461,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         goto error;
     }
 
-    /**
-    * Create an opengl context for the display visual
-    *  NOTE: the visual is chosen as the window is created and the glcontext cannot
-    *     use different properties after that point in time. FIXME: How to handle when requested format
-    *     doesn't match actual visual? Cannot choose one here - code removed as it ONLY works if the one
-    *     it chooses is identical to the one already being used!
-     **********************************/
-    /** FIXME: Handle stencil appropriately via EnableAutoDepthStencil / AutoDepthStencilFormat **/
-
-    object->context = HeapAlloc(GetProcessHeap(), 0, sizeof(object->context));
-    if(!object->context)
-	return E_OUTOFMEMORY;
-    object->num_contexts = 1;
-
-    object->context[0] = CreateContext(This, (IWineD3DSurfaceImpl *) object->frontBuffer, object->win_handle, FALSE /* pbuffer */, pPresentationParameters);
-    if (!object->context[0]) {
-        ERR("Failed to create a new context\n");
-        hr = WINED3DERR_NOTAVAILABLE;
-        goto error;
-    } else {
-        TRACE("Context created (HWND=%p, glContext=%p)\n",
-               object->win_handle, object->context[0]->glCtx);
-    }
-
    /*********************
    * Windowed / Fullscreen
    *******************/
@@ -1502,6 +1491,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         devmode.dmPelsWidth  = pPresentationParameters->BackBufferWidth;
         devmode.dmPelsHeight = pPresentationParameters->BackBufferHeight;
         ChangeDisplaySettingsExW(This->adapter->DeviceName, &devmode, NULL, CDS_FULLSCREEN, NULL);
+        displaymode_set = TRUE;
 
         /* For GetDisplayMode */
         This->ddraw_width = devmode.dmPelsWidth;
@@ -1513,6 +1503,30 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         /* And finally clip mouse to our screen */
         SetRect(&clip_rc, 0, 0, devmode.dmPelsWidth, devmode.dmPelsHeight);
         ClipCursor(&clip_rc);
+    }
+
+        /**
+     * Create an opengl context for the display visual
+     *  NOTE: the visual is chosen as the window is created and the glcontext cannot
+     *     use different properties after that point in time. FIXME: How to handle when requested format
+     *     doesn't match actual visual? Cannot choose one here - code removed as it ONLY works if the one
+     *     it chooses is identical to the one already being used!
+         **********************************/
+    /** FIXME: Handle stencil appropriately via EnableAutoDepthStencil / AutoDepthStencilFormat **/
+
+    object->context = HeapAlloc(GetProcessHeap(), 0, sizeof(object->context));
+    if(!object->context)
+        return E_OUTOFMEMORY;
+    object->num_contexts = 1;
+
+    object->context[0] = CreateContext(This, (IWineD3DSurfaceImpl *) object->frontBuffer, object->win_handle, FALSE /* pbuffer */, pPresentationParameters);
+    if (!object->context[0]) {
+        ERR("Failed to create a new context\n");
+        hr = WINED3DERR_NOTAVAILABLE;
+        goto error;
+    } else {
+        TRACE("Context created (HWND=%p, glContext=%p)\n",
+              object->win_handle, object->context[0]->glCtx);
     }
 
    /*********************
@@ -1592,6 +1606,30 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
     return WINED3D_OK;
 
 error:
+    if (displaymode_set) {
+        DEVMODEW devmode;
+        HDC      hdc;
+        int      bpp = 0;
+        RECT     clip_rc;
+
+        SetRect(&clip_rc, 0, 0, object->orig_width, object->orig_height);
+        ClipCursor(NULL);
+
+        /* Get info on the current display setup */
+        hdc = GetDC(0);
+        bpp = GetDeviceCaps(hdc, BITSPIXEL);
+        ReleaseDC(0, hdc);
+
+        /* Change the display settings */
+        memset(&devmode, 0, sizeof(devmode));
+        devmode.dmSize       = sizeof(devmode);
+        devmode.dmFields     = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
+        devmode.dmBitsPerPel = (bpp >= 24) ? 32 : bpp; /* Stupid XVidMode cannot change bpp */
+        devmode.dmPelsWidth  = object->orig_width;
+        devmode.dmPelsHeight = object->orig_height;
+        ChangeDisplaySettingsExW(This->adapter->DeviceName, &devmode, NULL, CDS_FULLSCREEN, NULL);
+    }
+
     if (object->backBuffer) {
         int i;
         for(i = 0; i < object->presentParms.BackBufferCount; i++) {
@@ -2001,8 +2039,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     }
     This->swapchains[0] = (IWineD3DSwapChain *) swapchain;
 
-    if(!This->ddraw_window) IWineD3DDevice_SetHWND(iface, swapchain->win_handle);
-
     if(swapchain->backBuffer && swapchain->backBuffer[0]) {
         TRACE("Setting rendertarget to %p\n", swapchain->backBuffer);
         This->render_targets[0] = swapchain->backBuffer[0];
@@ -2127,6 +2163,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
     /* Delete the palette conversion shader if it is around */
     if(This->paletteConversionShader) {
         GL_EXTCALL(glDeleteProgramsARB(1, &This->paletteConversionShader));
+        This->paletteConversionShader = 0;
     }
 
     /* Delete the pbuffer context if there is any */
@@ -4790,7 +4827,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
                curRect[0].x2 < target->currentDesc.Width ||
                curRect[0].y2 < target->currentDesc.Height) {
                 TRACE("Partial clear, and surface not in drawable. Blitting texture to drawable\n");
-                blt_to_drawable(This, target);
+                IWineD3DSurface_LoadLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, NULL);
             }
         }
 

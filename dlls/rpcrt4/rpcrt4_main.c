@@ -828,3 +828,30 @@ DWORD WINAPI I_RpcMapWin32Status(RPC_STATUS status)
     FIXME("(%ld): stub\n", status);
     return 0;
 }
+
+/******************************************************************************
+ * RpcErrorStartEnumeration   (rpcrt4.@)
+ */
+RPC_STATUS RPC_ENTRY RpcErrorStartEnumeration(void** EnumHandle)
+{
+    FIXME("(%p): stub\n", EnumHandle);
+    return RPC_S_ENTRY_NOT_FOUND;
+}
+
+/******************************************************************************
+ * RpcMgmtSetCancelTimeout   (rpcrt4.@)
+ */
+RPC_STATUS RPC_ENTRY RpcMgmtSetCancelTimeout(LONG Timeout)
+{
+    FIXME("(%d): stub\n", Timeout);
+    return RPC_S_OK;
+}
+
+/******************************************************************************
+ * RpcCancelThread   (rpcrt4.@)
+ */
+RPC_STATUS RPC_ENTRY RpcCancelThread(HANDLE ThreadHandle)
+{
+    FIXME("(%p): stub\n", ThreadHandle);
+    return RPC_S_OK;
+}

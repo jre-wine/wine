@@ -29,6 +29,7 @@
 #include "winuser.h"
 #include "ole2.h"
 #include "hlguids.h"
+#include "shlguid.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -222,7 +223,7 @@ static HRESULT read_stream_data(BSCallback *This, IStream *stream)
                 FIXME("OnStartRequest failed: %08x\n", nsres);
 
             /* events are reset when a new document URI is loaded, so re-initialise them here */
-            if(This->doc && This->doc->nscontainer)
+            if(This->doc && This->doc->bscallback == This && This->doc->nscontainer)
                 init_nsevents(This->doc->nscontainer);
         }
 
@@ -328,6 +329,7 @@ static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallback *iface)
             IMoniker_Release(This->mon);
         if(This->binding)
             IBinding_Release(This->binding);
+        list_remove(&This->entry);
         mshtml_free(This->headers);
         mshtml_free(This);
     }
@@ -344,6 +346,9 @@ static HRESULT WINAPI BindStatusCallback_OnStartBinding(IBindStatusCallback *ifa
 
     IBinding_AddRef(pbind);
     This->binding = pbind;
+
+    if(This->doc)
+        list_add_head(&This->doc->bindings, &This->entry);
 
     add_nsrequest(This);
 
@@ -414,7 +419,12 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
         }
     }
 
-    if(This->doc && !This->doc->nscontainer) {
+    list_remove(&This->entry);
+
+    if(FAILED(hresult))
+        return S_OK;
+
+    if(This->doc && This->doc->bscallback == This && !This->doc->nscontainer) {
         task_t *task = mshtml_alloc(sizeof(task_t));
 
         task->doc = This->doc;
@@ -670,11 +680,34 @@ BSCallback *create_bscallback(IMoniker *mon)
     ret->binding = NULL;
     ret->doc = NULL;
 
+    list_init(&ret->entry);
+
     if(mon)
         IMoniker_AddRef(mon);
     ret->mon = mon;
 
     return ret;
+}
+
+/* Calls undocumented 84 cmd of CGID_ShellDocView */
+static void call_docview_84(HTMLDocument *doc)
+{
+    IOleCommandTarget *olecmd;
+    VARIANT var;
+    HRESULT hres;
+
+    if(!doc->client)
+        return;
+
+    hres = IOleClientSite_QueryInterface(doc->client, &IID_IOleCommandTarget, (void**)&olecmd);
+    if(FAILED(hres))
+        return;
+
+    VariantInit(&var);
+    hres = IOleCommandTarget_Exec(olecmd, &CGID_ShellDocView, 84, 0, NULL, &var);
+    IOleCommandTarget_Release(olecmd);
+    if(SUCCEEDED(hres) && V_VT(&var) != VT_NULL)
+        FIXME("handle result\n");
 }
 
 static void parse_post_data(nsIInputStream *post_data_stream, LPWSTR *headers_ret,
@@ -796,11 +829,14 @@ void hlink_frame_navigate(HTMLDocument *doc, IHlinkFrame *hlink_frame,
     IBindStatusCallback_Release(STATUSCLB(callback));
 }
 
-HRESULT start_binding(BSCallback *bscallback)
+HRESULT start_binding(HTMLDocument *doc, BSCallback *bscallback)
 {
     IStream *str = NULL;
     IBindCtx *bctx;
     HRESULT hres;
+
+    bscallback->doc = doc;
+    call_docview_84(bscallback->doc);
 
     hres = CreateAsyncBindCtx(0, STATUSCLB(bscallback), NULL, &bctx);
     if(FAILED(hres)) {
@@ -828,11 +864,18 @@ HRESULT start_binding(BSCallback *bscallback)
 
 void set_document_bscallback(HTMLDocument *doc, BSCallback *callback)
 {
+    BSCallback *iter;
+
     if(doc->bscallback) {
         if(doc->bscallback->binding)
             IBinding_Abort(doc->bscallback->binding);
         doc->bscallback->doc = NULL;
         IBindStatusCallback_Release(STATUSCLB(doc->bscallback));
+    }
+
+    LIST_FOR_EACH_ENTRY(iter, &doc->bindings, BSCallback, entry) {
+        iter->doc = NULL;
+        list_remove(&iter->entry);
     }
 
     doc->bscallback = callback;

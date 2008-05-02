@@ -324,33 +324,34 @@ static VOID IWineD3DVertexShaderImpl_GenerateShader(
         shader_generate_main( (IWineD3DBaseShader*) This, &buffer, reg_maps, pFunction);
 
         /* Unpack 3.0 outputs */
-        if (This->baseShader.hex_version >= WINED3DVS_VERSION(3,0))
-            vshader_glsl_output_unpack(&buffer, This->semantics_out);
+        if (This->baseShader.hex_version >= WINED3DVS_VERSION(3,0)) {
+            shader_addline(&buffer, "order_ps_input(OUT);\n");
+        } else {
+            shader_addline(&buffer, "order_ps_input();\n");
+        }
 
         /* If this shader doesn't use fog copy the z coord to the fog coord so that we can use table fog */
         if (!reg_maps->fog)
             shader_addline(&buffer, "gl_FogFragCoord = gl_Position.z;\n");
-        
+
         /* Write the final position.
          *
          * OpenGL coordinates specify the center of the pixel while d3d coords specify
-         * the corner. The offsets are stored in z and w in the 2nd row of the projection
-         * matrix to avoid wasting a free shader constant. Add them to the w and z coord
-         * of the 2nd row
+         * the corner. The offsets are stored in z and w in posFixup. posFixup.y contains
+         * 1.0 or -1.0 to turn the rendering upside down for offscreen rendering. PosFixup.x
+         * contains 1.0 to allow a mad.
          */
-        shader_addline(&buffer, "gl_Position.x = gl_Position.x + posFixup[2];\n");
-        shader_addline(&buffer, "gl_Position.y = gl_Position.y + posFixup[3];\n");
-        /* Account for any inverted textures (render to texture case) by reversing the y coordinate
-         *  (this is handled in drawPrim() when it sets the MODELVIEW and PROJECTION matrices)
-         */
-        shader_addline(&buffer, "gl_Position.y = gl_Position.y * posFixup[1];\n");
+        shader_addline(&buffer, "gl_Position.xy = gl_Position.xy * posFixup.xy + posFixup.zw;\n");
+
         /* Z coord [0;1]->[-1;1] mapping, see comment in transform_projection in state.c
          *
          * Basically we want(in homogenous coordinates) z = z * 2 - 1. However, shaders are run
          * before the homogenous divide, so we have to take the w into account: z = ((z / w) * 2 - 1) * w,
          * which is the same as z = z / 2 - w.
          */
-        shader_addline(&buffer, "gl_Position.z = gl_Position.z * 2.0 - gl_Position.w;\n");
+        shader_addline(&buffer, "tmp0 = gl_Position;\n");
+        shader_addline(&buffer, "gl_Position.z = tmp0.z * 2.0;\n");
+        shader_addline(&buffer, "gl_Position.z = gl_Position.z - gl_Position.w;\n");
 
         shader_addline(&buffer, "}\n");
 
@@ -366,7 +367,7 @@ static VOID IWineD3DVertexShaderImpl_GenerateShader(
 
         /*  Create the hw ARB shader */
         shader_addline(&buffer, "!!ARBvp1.0\n");
-        shader_addline(&buffer, "PARAM zfixup = { 2.0, -1.0, 0.0, 0.0 };\n");
+        shader_addline(&buffer, "PARAM helper_const = { 2.0, -1.0, %d.0, 0.0 };\n", This->rel_offset);
 
         /* Mesa supports only 95 constants */
         if (GL_VEND(MESA) || GL_VEND(WINE))
@@ -374,7 +375,7 @@ static VOID IWineD3DVertexShaderImpl_GenerateShader(
                 min(95, This->baseShader.limits.constant_float);
 
         /* Some instructions need a temporary register. Add it if needed, but only if it is really needed */
-        if(reg_maps->usesnrm) {
+        if(reg_maps->usesnrm || This->rel_offset) {
             shader_addline(&buffer, "TEMP TMP;\n");
         }
 
@@ -394,19 +395,17 @@ static VOID IWineD3DVertexShaderImpl_GenerateShader(
         /* Write the final position.
          *
          * OpenGL coordinates specify the center of the pixel while d3d coords specify
-         * the corner. The offsets are stored in the 2nd row of the projection matrix,
-         * the x offset in z and the y offset in w. Add them to the resulting position
+         * the corner. The offsets are stored in z and w in posFixup. posFixup.y contains
+         * 1.0 or -1.0 to turn the rendering upside down for offscreen rendering. PosFixup.x
+         * contains 1.0 to allow a mad, but arb vs swizzles are too restricted for that.
          */
-        shader_addline(&buffer, "ADD TMP_OUT.x, TMP_OUT.x, posFixup.z;\n");
-        shader_addline(&buffer, "ADD TMP_OUT.y, TMP_OUT.y, posFixup.w;\n");
-        /* Account for any inverted textures (render to texture case) by reversing the y coordinate
-         *  (this is handled in drawPrim() when it sets the MODELVIEW and PROJECTION matrices)
-         */
-        shader_addline(&buffer, "MUL TMP_OUT.y, TMP_OUT.y, posFixup.y;\n");
+        shader_addline(&buffer, "ADD TMP_OUT.x, TMP_OUT.x, posFixup.z;");
+        shader_addline(&buffer, "MAD TMP_OUT.y, TMP_OUT.y, posFixup.y, posFixup.w;");
+
         /* Z coord [0;1]->[-1;1] mapping, see comment in transform_projection in state.c
          * and the glsl equivalent
          */
-        shader_addline(&buffer, "MAD TMP_OUT.z, TMP_OUT.z, zfixup.x, -TMP_OUT.w;\n");
+        shader_addline(&buffer, "MAD TMP_OUT.z, TMP_OUT.z, helper_const.x, -TMP_OUT.w;\n");
 
         shader_addline(&buffer, "MOV result.position, TMP_OUT;\n");
         
@@ -563,12 +562,31 @@ static HRESULT WINAPI IWineD3DVertexShaderImpl_SetFunction(IWineD3DVertexShader 
     list_init(&This->baseShader.constantsI);
 
     /* Second pass: figure out registers used, semantics, etc.. */
+    This->min_rel_offset = GL_LIMITS(vshader_constantsF);
+    This->max_rel_offset = 0;
     memset(reg_maps, 0, sizeof(shader_reg_maps));
     hr = shader_get_registers_used((IWineD3DBaseShader*) This, reg_maps,
        This->semantics_in, This->semantics_out, pFunction, NULL);
     if (hr != WINED3D_OK) return hr;
 
     This->baseShader.shader_mode = deviceImpl->vs_selected_mode;
+
+    if(deviceImpl->vs_selected_mode == SHADER_ARB &&
+       (GLINFO_LOCATION).arb_vs_offset_limit      &&
+       This->min_rel_offset <= This->max_rel_offset) {
+
+        if(This->max_rel_offset - This->min_rel_offset > 127) {
+            FIXME("The difference between the minimum and maximum relative offset is > 127\n");
+            FIXME("Which this OpenGL implementation does not support. Try using GLSL\n");
+            FIXME("Min: %d, Max: %d\n", This->min_rel_offset, This->max_rel_offset);
+        } else if(This->max_rel_offset - This->min_rel_offset > 63) {
+            This->rel_offset = This->min_rel_offset + 63;
+        } else if(This->max_rel_offset > 63) {
+            This->rel_offset = This->min_rel_offset;
+        } else {
+            This->rel_offset = 0;
+        }
+    }
 
     /* copy the function ... because it will certainly be released by application */
     if (NULL != pFunction) {

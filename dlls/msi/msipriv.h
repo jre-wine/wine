@@ -359,6 +359,7 @@ typedef struct tagMSICOMPONENT
     LPWSTR FullKeypath;
     LPWSTR AdvertiseString;
 
+    unsigned int anyAbsent:1;
     unsigned int hasAdvertiseFeature:1;
     unsigned int hasLocalFeature:1;
     unsigned int hasSourceFeature:1;
@@ -752,6 +753,7 @@ extern UINT MSIREG_OpenLocalSystemComponentKey(LPCWSTR szComponent, HKEY *key, B
 extern UINT MSIREG_OpenLocalClassesProductKey(LPCWSTR szProductCode, HKEY *key, BOOL create);
 extern UINT MSIREG_OpenLocalManagedProductKey(LPCWSTR szProductCode, HKEY *key, BOOL create);
 extern UINT MSIREG_DeleteUserFeaturesKey(LPCWSTR szProduct);
+extern UINT MSIREG_DeleteUserDataComponentKey(LPCWSTR szComponent);
 
 extern LPWSTR msi_reg_get_val_str( HKEY hkey, LPCWSTR name );
 extern BOOL msi_reg_get_val_dword( HKEY hkey, LPCWSTR name, DWORD *val);
@@ -827,6 +829,7 @@ static inline void msi_component_set_state( MSICOMPONENT *comp, INSTALLSTATE sta
 
 /* actions in other modules */
 extern UINT ACTION_AppSearch(MSIPACKAGE *package);
+extern UINT ACTION_CCPSearch(MSIPACKAGE *package);
 extern UINT ACTION_FindRelatedProducts(MSIPACKAGE *package);
 extern UINT ACTION_InstallFiles(MSIPACKAGE *package);
 extern UINT ACTION_RemoveFiles(MSIPACKAGE *package);

@@ -159,9 +159,10 @@ static WORD checkBoxWidth = 0, checkBoxHeight = 0;
 /*********************************************************************
  * button class descriptor
  */
+static const WCHAR buttonW[] = {'B','u','t','t','o','n',0};
 const struct builtin_class_descr BUTTON_builtin_class =
 {
-    "Button",            /* name */
+    buttonW,             /* name */
     CS_DBLCLKS | CS_VREDRAW | CS_HREDRAW | CS_PARENTDC, /* style  */
     ButtonWndProcA,      /* procA */
     ButtonWndProcW,      /* procW */
@@ -722,7 +723,7 @@ static BOOL CALLBACK BUTTON_DrawTextCallback(HDC hdc, LPARAM lp, WPARAM wp, int 
  *
  *   Common function for drawing button label.
  */
-static void BUTTON_DrawLabel(HWND hwnd, HDC hdc, UINT dtFlags, RECT *rc)
+static void BUTTON_DrawLabel(HWND hwnd, HDC hdc, UINT dtFlags, const RECT *rc)
 {
    DRAWSTATEPROC lpOutputProc = NULL;
    LPARAM lp;

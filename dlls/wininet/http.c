@@ -245,7 +245,7 @@ static void HTTP_FixURL( LPWININETHTTPREQW lpwhr)
     }
 
     if(CSTR_EQUAL != CompareStringW( LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE,
-                       lpwhr->lpszPath, strlenW(szHttp), szHttp, strlenW(szHttp) )
+                       lpwhr->lpszPath, strlenW(lpwhr->lpszPath), szHttp, strlenW(szHttp) )
        && lpwhr->lpszPath[0] != '/') /* not an absolute path ?? --> fix it !! */
     {
         WCHAR *fixurl = HeapAlloc(GetProcessHeap(), 0, 
@@ -2121,7 +2121,7 @@ BOOL WINAPI HttpSendRequestExW(HINTERNET hRequest,
                    LPINTERNET_BUFFERSW lpBuffersOut,
                    DWORD dwFlags, DWORD_PTR dwContext)
 {
-    BOOL ret;
+    BOOL ret = FALSE;
     LPWININETHTTPREQW lpwhr;
     LPWININETHTTPSESSIONW lpwhs;
     LPWININETAPPINFOW hIC;
@@ -2134,7 +2134,7 @@ BOOL WINAPI HttpSendRequestExW(HINTERNET hRequest,
     if (NULL == lpwhr || lpwhr->hdr.htype != WH_HHTTPREQ)
     {
         INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-    	return FALSE;
+        goto lend;
     }
 
     lpwhs = lpwhr->lpHttpSession;
@@ -2178,7 +2178,6 @@ BOOL WINAPI HttpSendRequestExW(HINTERNET hRequest,
          * This is from windows.
          */
         INTERNET_SetLastError(ERROR_IO_PENDING);
-        ret = FALSE;
     }
     else
     {
@@ -2189,8 +2188,11 @@ BOOL WINAPI HttpSendRequestExW(HINTERNET hRequest,
         else
             ret = HTTP_HttpSendRequestW(lpwhr, NULL, 0, NULL, 0, 0, FALSE);
     }
- 
-    WININET_Release(&lpwhr->hdr);
+
+lend:
+    if ( lpwhr )
+        WININET_Release( &lpwhr->hdr );
+
     TRACE("<---\n");
     return ret;
 }
@@ -2589,6 +2591,9 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
     BOOL loop_next;
     INTERNET_ASYNC_RESULT iar;
     static const WCHAR szClose[] = { 'C','l','o','s','e',0 };
+    static const WCHAR szContentLength[] =
+        { 'C','o','n','t','e','n','t','-','L','e','n','g','t','h',':',' ','%','l','i','\r','\n',0 };
+    WCHAR contentLengthStr[sizeof szContentLength/2 /* includes \r\n */ + 20 /* int */ ];
 
     TRACE("--> %p\n", lpwhr);
 
@@ -2599,16 +2604,8 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
 
     HTTP_FixVerb(lpwhr);
     
-    /* if we are using optional stuff, we must add the fixed header of that option length */
-    if (dwContentLength > 0)
-    {
-        static const WCHAR szContentLength[] = {
-            'C','o','n','t','e','n','t','-','L','e','n','g','t','h',':',' ','%','l','i','\r','\n',0};
-        WCHAR contentLengthStr[sizeof szContentLength/2 /* includes \n\r */ + 20 /* int */ ];
-        sprintfW(contentLengthStr, szContentLength, dwContentLength);
-        HTTP_HttpAddRequestHeadersW(lpwhr, contentLengthStr, -1L,
-                HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REPLACE);
-    }
+    sprintfW(contentLengthStr, szContentLength, dwContentLength);
+    HTTP_HttpAddRequestHeadersW(lpwhr, contentLengthStr, -1L, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REPLACE);
 
     do
     {
@@ -3206,7 +3203,7 @@ static LPWSTR * HTTP_InterpretHttpHeader(LPCWSTR buffer)
  *
  */
 
-#define COALESCEFLASG (HTTP_ADDHDR_FLAG_COALESCE|HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA|HTTP_ADDHDR_FLAG_COALESCE_WITH_SEMICOLON)
+#define COALESCEFLAGS (HTTP_ADDHDR_FLAG_COALESCE|HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA|HTTP_ADDHDR_FLAG_COALESCE_WITH_SEMICOLON)
 
 static BOOL HTTP_ProcessHeader(LPWININETHTTPREQW lpwhr, LPCWSTR field, LPCWSTR value, DWORD dwModifier)
 {
@@ -3275,7 +3272,7 @@ static BOOL HTTP_ProcessHeader(LPWININETHTTPREQW lpwhr, LPCWSTR field, LPCWSTR v
 
         return TRUE;
     }
-    else if (dwModifier & COALESCEFLASG)
+    else if (dwModifier & COALESCEFLAGS)
     {
         LPWSTR lpsztmp;
         WCHAR ch = 0;
@@ -3296,7 +3293,7 @@ static BOOL HTTP_ProcessHeader(LPWININETHTTPREQW lpwhr, LPCWSTR field, LPCWSTR v
 
         len = origlen + valuelen + ((ch > 0) ? 2 : 0);
 
-        lpsztmp = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,  lphttpHdr->lpszValue, (len+1)*sizeof(WCHAR));
+        lpsztmp = HeapReAlloc(GetProcessHeap(), 0, lphttpHdr->lpszValue, (len+1)*sizeof(WCHAR));
         if (lpsztmp)
         {
             lphttpHdr->lpszValue = lpsztmp;

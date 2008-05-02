@@ -340,6 +340,8 @@ static HRESULT WINAPI xmlelem_get_text(IXMLElement *iface, BSTR *p)
     content = xmlNodeGetContent(This->node);
     *p = bstr_from_xmlChar(content);
     TRACE("returning %s\n", debugstr_w(*p));
+
+    xmlFree(content);
     return S_OK;
 }
 
@@ -356,6 +358,9 @@ static HRESULT WINAPI xmlelem_put_text(IXMLElement *iface, BSTR p)
 
     content = xmlChar_from_wchar(p);
     xmlNodeSetContent(This->node, content);
+
+    HeapFree( GetProcessHeap(), 0, content);
+
     return S_OK;
 }
 

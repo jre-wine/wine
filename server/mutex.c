@@ -205,17 +205,17 @@ DECL_HANDLER(create_mutex)
         return;
 
     sd = objattr->sd_len ? (const struct security_descriptor *)(objattr + 1) : NULL;
-
-    /* get unicode string */
-    name.len = ((get_req_data_size() - sizeof(*objattr) - objattr->sd_len) / sizeof(WCHAR)) * sizeof(WCHAR);
-    name.str = (const WCHAR *)get_req_data() + (sizeof(*objattr) + objattr->sd_len) / sizeof(WCHAR);
+    objattr_get_name( objattr, &name );
 
     if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 )))
         return;
 
     if ((mutex = create_mutex( root, &name, req->attributes, req->owned, sd )))
     {
-        reply->handle = alloc_handle( current->process, mutex, req->access, req->attributes );
+        if (get_error() == STATUS_OBJECT_NAME_EXISTS)
+            reply->handle = alloc_handle( current->process, mutex, req->access, req->attributes );
+        else
+            reply->handle = alloc_handle_no_access_check( current->process, mutex, req->access, req->attributes );
         release_object( mutex );
     }
 

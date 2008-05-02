@@ -1137,6 +1137,7 @@ void (WINE_GLAPI *glVertex4s) (GLshort x, GLshort y, GLshort z, GLshort w);
 void (WINE_GLAPI *glVertex4sv) (const GLshort* v);
 void (WINE_GLAPI *glVertexPointer) (GLint size, GLenum type, GLsizei stride, const GLvoid* pointer);
 void (WINE_GLAPI *glViewport) (GLint x, GLint y, GLsizei width, GLsizei height);
+void (WINE_GLAPI *glPointParameterfv) (GLenum pname, const GLfloat *params);
 
 /* WGL functions */
 HGLRC   (WINAPI *pwglCreateContext)(HDC);
@@ -1483,7 +1484,8 @@ BOOL    (WINAPI *pwglShareLists)(HGLRC,HGLRC);
     USE_GL_FUNC(glVertex4s) \
     USE_GL_FUNC(glVertex4sv) \
     USE_GL_FUNC(glVertexPointer) \
-    USE_GL_FUNC(glViewport)
+    USE_GL_FUNC(glViewport) \
+    USE_GL_FUNC(glPointParameterfv) \
 
 #define WGL_FUNCS_GEN \
     USE_WGL_FUNC(wglCreateContext) \
@@ -2852,6 +2854,18 @@ typedef int (WINE_GLAPI * PGLXFNWAITVIDEOSYNCSGIPROC) (int, int, unsigned int *)
 #define GL_DEPTH_CLAMP_NV                   0x864F
 #endif
 
+/* GL_APPLE_flush_render */
+typedef void (WINE_GLAPI * PGLFNFLUSHRENDERAPPLEPROC) (void);
+typedef void (WINE_GLAPI * PGLFNFINISHRENDERAPPLEPROC) (void);
+
+/* GL_APPLE_ycbcr_422 */
+#ifndef GL_APPLE_ycbcr_422
+#define GL_APPLE_ycbcr_422
+#define GL_YCBCR_422_APPLE                  0x85B9
+#define UNSIGNED_SHORT_8_8_APPLE            0x85BA
+#define UNSIGNED_SHORT_8_8_REV_APPLE        0x85BB
+#endif
+
 /* GL_VERSION_2_0 */
 #ifndef GL_VERSION_2_0
 #define GL_VERSION_2_0 1
@@ -3204,6 +3218,8 @@ typedef enum _GL_SupportedExt {
   /* APPLE */
   APPLE_FENCE,
   APPLE_CLIENT_STORAGE,
+  APPLE_FLUSH_RENDER,
+  APPLE_YCBCR_422,
   /* SGI */
   SGI_VIDEO_SYNC,
   SGIS_GENERATE_MIPMAP,
@@ -3486,6 +3502,9 @@ typedef enum _GL_SupportedExt {
     /* GLX_SGI_video_sync */ \
     USE_GL_FUNC(PGLXFNGETVIDEOSYNCSGIPROC,                      glXGetVideoSyncSGI); \
     USE_GL_FUNC(PGLXFNWAITVIDEOSYNCSGIPROC,                     glXWaitVideoSyncSGI); \
+    /* GL_APPLE_flush_render */ \
+    USE_GL_FUNC(PGLFNFLUSHRENDERAPPLEPROC,                      glFlushRenderApple); \
+    USE_GL_FUNC(PGLFNFINISHRENDERAPPLEPROC,                     glFinishRenderApple); \
 
 /* OpenGL 2.0 functions */
 #define GL2_FUNCS_GEN \
@@ -3719,10 +3738,11 @@ typedef struct _WineD3D_GL_Info {
   UINT   max_clipplanes;
   UINT   max_texture_size;
   UINT   max_texture3d_size;
-  float  max_pointsize;
+  float  max_pointsize, max_pointsizemin;
   UINT   max_blends;
   UINT   max_anisotropy;
   UINT   max_aux_buffers;
+  UINT   max_glsl_varyings;
 
   unsigned max_vshader_constantsF;
   unsigned max_pshader_constantsF;
@@ -3742,6 +3762,8 @@ typedef struct _WineD3D_GL_Info {
   GL_VSVersion vs_arb_version;
   GL_VSVersion vs_nv_version;
   GL_VSVersion vs_ati_version;
+
+  BOOL arb_vs_offset_limit;
 
   BOOL supported[OPENGL_SUPPORTED_EXT_END + 1];
 

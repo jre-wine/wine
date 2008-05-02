@@ -251,7 +251,7 @@ static BOOL WINAPI CertContext_GetProperty(void *context, DWORD dwPropId,
             if (ext)
             {
                 CRYPT_DATA_BLOB value;
-                DWORD size;
+                DWORD size = sizeof(value);
 
                 ret = CryptDecodeObjectEx(X509_ASN_ENCODING,
                  szOID_SUBJECT_KEY_IDENTIFIER, ext->Value.pbData,
@@ -1242,7 +1242,7 @@ typedef BOOL (WINAPI *CertVerifyRevocationFunc)(DWORD, DWORD, DWORD,
  void **, DWORD, PCERT_REVOCATION_PARA, PCERT_REVOCATION_STATUS);
 
 BOOL WINAPI CertVerifyRevocation(DWORD dwEncodingType, DWORD dwRevType,
- DWORD cContext, void *rgpvContext[], DWORD dwFlags,
+ DWORD cContext, PVOID rgpvContext[], DWORD dwFlags,
  PCERT_REVOCATION_PARA pRevPara, PCERT_REVOCATION_STATUS pRevStatus)
 {
     BOOL ret;
@@ -2123,7 +2123,7 @@ BOOL WINAPI CertGetValidUsages(DWORD cCerts, PCCERT_CONTEXT *rghCerts,
                             {
                                 if (j < validUsages.cUsageIdentifier - 1)
                                 {
-                                    memcpy(&validUsages.rgpszUsageIdentifier[j],
+                                    memmove(&validUsages.rgpszUsageIdentifier[j],
                                      &validUsages.rgpszUsageIdentifier[j +
                                      numRemoved + 1],
                                      (validUsages.cUsageIdentifier - numRemoved

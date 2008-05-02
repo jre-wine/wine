@@ -226,7 +226,7 @@ static obj_handle_t alloc_entry( struct handle_table *table, void *obj, unsigned
 
 /* allocate a handle for an object, incrementing its refcount */
 /* return the handle, or 0 on error */
-static obj_handle_t alloc_handle_no_access_check( struct process *process, void *ptr, unsigned int access, unsigned int attr )
+obj_handle_t alloc_handle_no_access_check( struct process *process, void *ptr, unsigned int access, unsigned int attr )
 {
     struct object *obj = ptr;
 
@@ -641,10 +641,14 @@ DECL_HANDLER(get_security_object)
         owner = sd_get_owner( sd );
         if (req->security_info & OWNER_SECURITY_INFORMATION)
             req_sd.owner_len = sd->owner_len;
+        else
+            req_sd.owner_len = 0;
 
         group = sd_get_group( sd );
         if (req->security_info & GROUP_SECURITY_INFORMATION)
             req_sd.group_len = sd->group_len;
+        else
+            req_sd.group_len = 0;
 
         req_sd.control |= SE_SACL_PRESENT;
         sacl = sd_get_sacl( sd, &present );

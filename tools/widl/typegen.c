@@ -1420,7 +1420,7 @@ static void write_pointer_description(FILE *file, type_t *type,
             &offset_in_memory, &offset_in_buffer, typestring_offset);
 }
 
-static int is_declptr(const type_t *t)
+int is_declptr(const type_t *t)
 {
   return is_ptr(t) || (is_conformant_array(t) && !t->declarray);
 }
@@ -1535,9 +1535,7 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
         has_pointer = TRUE;
 
     align = 0;
-    size = type_memsize(type, &align);
-    if (size == 0)              /* conformant array */
-        size = type_memsize(type->ref, &align);
+    size = type_memsize((is_conformant_array(type) ? type->ref : type), &align);
 
     start_offset = *typestring_offset;
     update_tfsoff(type, start_offset, file);
@@ -2083,6 +2081,14 @@ static size_t write_typeformatstring_var(FILE *file, int indent, const func_t *f
         size_t off;
         off = write_array_tfs(file, var->attrs, type, var->name, typeformat_offset);
         ptr_type = get_attrv(var->attrs, ATTR_POINTERTYPE);
+        /* Top level pointers to conformant arrays may be handled specially
+           since we can bypass the pointer, but if the array is burried
+           beneath another pointer (e.g., "[size_is(,n)] int **p" then we
+           always need to write the pointer.  */
+        if (!ptr_type && var->type != type)
+          /* FIXME:  This should use pointer_default, but the information
+             isn't kept around for arrays.  */
+          ptr_type = RPC_FC_UP;
         if (ptr_type && ptr_type != RPC_FC_RP)
         {
             unsigned int absoff = type->typestring_offset;
@@ -2601,6 +2607,24 @@ static int needs_freeing(const attr_list_t *attrs, const type_t *t, int out)
                     || is_array(t)));
 }
 
+expr_t *get_size_is_expr(const type_t *t, const char *name)
+{
+    expr_t *x = NULL;
+
+    for ( ; is_ptr(t) || is_array(t); t = t->ref)
+        if (t->size_is)
+        {
+            if (!x)
+                x = t->size_is;
+            else
+                error("%s: multidimensional conformant"
+                      " arrays not supported at the top level\n",
+                      name);
+        }
+
+    return x;
+}
+
 void write_remoting_arguments(FILE *file, int indent, const func_t *func,
                               enum pass pass, enum remoting_phase phase)
 {
@@ -2711,6 +2735,13 @@ void write_remoting_arguments(FILE *file, int indent, const func_t *func,
         {
             unsigned char tc = type->type;
             const char *array_type = "FixedArray";
+
+            /* We already have the size_is expression since it's at the
+               top level, but do checks for multidimensional conformant
+               arrays.  When we handle them, we'll need to extend this
+               function to return a list, and then we'll actually use
+               the return value.  */
+            get_size_is_expr(type, var->name);
 
             if (tc == RPC_FC_SMVARRAY || tc == RPC_FC_LGVARRAY)
             {
@@ -2826,8 +2857,16 @@ void write_remoting_arguments(FILE *file, int indent, const func_t *func,
             else
             {
                 const var_t *iid;
+                expr_t *sx = get_size_is_expr(type, var->name);
+
                 if ((iid = get_attrp( var->attrs, ATTR_IIDIS )))
                     print_file( file, indent, "_StubMsg.MaxCount = (unsigned long)%s;\n", iid->name );
+                else if (sx)
+                {
+                    print_file(file, indent, "_StubMsg.MaxCount = (unsigned long) ");
+                    write_expr(file, sx, 1);
+                    fprintf(file, ";\n\n");
+                }
                 if (var->type->ref->type == RPC_FC_IP)
                     print_phase_function(file, indent, "InterfacePointer", phase, var, start_offset);
                 else

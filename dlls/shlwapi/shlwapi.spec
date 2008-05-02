@@ -391,7 +391,7 @@
 391 stdcall -noname WNetGetLastErrorWrapW(ptr ptr long ptr long)
 392 stdcall -noname EndDialogWrap(ptr ptr) user32.EndDialog
 393 stdcall -noname CreateDialogIndirectParamWrapW(long ptr long ptr long) user32.CreateDialogIndirectParamW
-394 stdcall -noname SHChangeNotify(long long ptr ptr)
+394 stdcall -noname SHChangeNotifyWrap(long long ptr ptr)
 395 stub -noname MLWinHelpA
 396 stub -noname MLHtmlHelpA
 397 stub -noname MLWinHelpW
@@ -422,7 +422,7 @@
 422 stdcall -noname SHGlobalCounterCreateNamedA(str long)
 423 stdcall -noname SHGlobalCounterCreateNamedW(wstr long)
 424 stdcall -noname SHGlobalCounterDecrement(long)
-425 stdcall -noname DeleteMenuWrap(ptr long long) user32.DeleteMenuW
+425 stdcall -noname DeleteMenuWrap(ptr long long) user32.DeleteMenu
 426 stdcall -noname DestroyMenuWrap(long) user32.DestroyMenu
 427 stdcall -noname TrackPopupMenuWrap(long long long long long long ptr) user32.TrackPopupMenu
 428 stdcall -noname TrackPopupMenuExWrap(long long long long long ptr) user32.TrackPopupMenuEx
