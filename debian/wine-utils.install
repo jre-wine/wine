@@ -1,36 +1,24 @@
 debian/tmp/usr/bin/fnt2bdf
 debian/tmp/usr/bin/notepad
 debian/tmp/usr/bin/progman
-debian/tmp/usr/bin/uninstaller
 debian/tmp/usr/bin/winedbg
 debian/tmp/usr/bin/winedump
 debian/tmp/usr/bin/winefile
 debian/tmp/usr/bin/winemaker
 debian/tmp/usr/bin/winemine
-debian/tmp/usr/bin/winepath
-debian/tmp/usr/bin/winhelp
-debian/tmp/usr/lib/wine/cmd.exe.so
 debian/tmp/usr/lib/wine/control.exe.so
 debian/tmp/usr/lib/wine/hh.exe.so
-debian/tmp/usr/lib/wine/iexplore.exe.so
-debian/tmp/usr/lib/wine/net.exe.so
 debian/tmp/usr/lib/wine/notepad.exe.so
 debian/tmp/usr/lib/wine/oleview.exe.so
 debian/tmp/usr/lib/wine/progman.exe.so
 debian/tmp/usr/lib/wine/taskmgr.exe.so
-debian/tmp/usr/lib/wine/uninstaller.exe.so
 debian/tmp/usr/lib/wine/winedbg.exe.so
 debian/tmp/usr/lib/wine/winefile.exe.so
 debian/tmp/usr/lib/wine/winemine.exe.so
-debian/tmp/usr/lib/wine/winepath.exe.so
-debian/tmp/usr/lib/wine/winhelp.exe.so
 debian/tmp/usr/lib/wine/winver.exe.so
 debian/tmp/usr/lib/wine/wordpad.exe.so
-debian/tmp/usr/lib/wine/xcopy.exe.so
 debian/tmp/usr/share/man/man1/winedbg.1
 debian/tmp/usr/share/man/man1/winedump.1
 debian/tmp/usr/share/man/man1/winemaker.1
 debian/tmp/usr/share/doc/wine/README.winedump usr/share/doc/wine-utils
-debian/uninstaller.desktop usr/share/applications
-debian/winecfg.desktop usr/share/applications
 tools/font_convert.sh usr/bin

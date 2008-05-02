@@ -1,3 +1,24 @@
+wine (0.9.50-1) unstable; urgency=low
+
+  * New upstream release 0.9.50.
+    - Completed I/O completion.
+    - Improved user credentials management, including Mac Keychain support.
+    - More Valgrinding.
+    - Lots of bug fixes.
+  * This version was released Nov 30, 2007.
+  * Apparently I'd put winecfg.desktop into wine-utils by mistake.
+    Moved it to wine-bin.
+  * Also moved cmd, iexplore, net, uninstaller, winepath, winhelp, and
+    xcopy from wine-utils to wine-bin. There are three types of Wine
+    programs: "essential", "useful to most", and "not useful to most".
+    Where clearly the first category should go into wine-bin, and the last
+    into wine-utils, previously I've also put much from the middle category
+    into wine-utils. I'm thinking I should perhaps put that into wine-bin
+    instead, to make wine-utils a little more useless, and hence, the
+    package split a little more useful.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 17 Dec 2007 03:38:47 +0100
+
 wine (0.9.49-2) unstable; urgency=low
 
   * When creating the diff to update the source package, suppress
