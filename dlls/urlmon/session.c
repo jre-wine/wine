@@ -31,7 +31,16 @@ typedef struct name_space {
     struct name_space *next;
 } name_space;
 
+typedef struct mime_filter {
+    IClassFactory *cf;
+    CLSID clsid;
+    LPWSTR mime;
+
+    struct mime_filter *next;
+} mime_filter;
+
 static name_space *name_space_list = NULL;
+static mime_filter *mime_filter_list = NULL;
 
 static name_space *find_name_space(LPCWSTR protocol)
 {
@@ -184,7 +193,6 @@ static HRESULT WINAPI InternetSession_RegisterNameSpace(IInternetSession *iface,
         const LPCWSTR *ppwzPatterns, DWORD dwReserved)
 {
     name_space *new_name_space;
-    int size;
 
     TRACE("(%p %s %s %d %p %d)\n", pCF, debugstr_guid(rclsid), debugstr_w(pwzProtocol),
           cPatterns, ppwzPatterns, dwReserved);
@@ -199,13 +207,10 @@ static HRESULT WINAPI InternetSession_RegisterNameSpace(IInternetSession *iface,
 
     new_name_space = heap_alloc(sizeof(name_space));
 
-    size = (strlenW(pwzProtocol)+1)*sizeof(WCHAR);
-    new_name_space->protocol = heap_alloc(size);
-    memcpy(new_name_space->protocol, pwzProtocol, size);
-
     IClassFactory_AddRef(pCF);
     new_name_space->cf = pCF;
     new_name_space->clsid = *rclsid;
+    new_name_space->protocol = heap_strdupW(pwzProtocol);
 
     new_name_space->next = name_space_list;
     name_space_list = new_name_space;
@@ -246,15 +251,49 @@ static HRESULT WINAPI InternetSession_UnregisterNameSpace(IInternetSession *ifac
 static HRESULT WINAPI InternetSession_RegisterMimeFilter(IInternetSession *iface,
         IClassFactory *pCF, REFCLSID rclsid, LPCWSTR pwzType)
 {
-    FIXME("(%p %s %s)\n", pCF, debugstr_guid(rclsid), debugstr_w(pwzType));
-    return E_NOTIMPL;
+    mime_filter *filter;
+
+    TRACE("(%p %s %s)\n", pCF, debugstr_guid(rclsid), debugstr_w(pwzType));
+
+    filter = heap_alloc(sizeof(mime_filter));
+
+    IClassFactory_AddRef(pCF);
+    filter->cf = pCF;
+    filter->clsid = *rclsid;
+    filter->mime = heap_strdupW(pwzType);
+
+    filter->next = mime_filter_list;
+    mime_filter_list = filter;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI InternetSession_UnregisterMimeFilter(IInternetSession *iface,
         IClassFactory *pCF, LPCWSTR pwzType)
 {
-    FIXME("(%p %s)\n", pCF, debugstr_w(pwzType));
-    return E_NOTIMPL;
+    mime_filter *iter, *prev = NULL;
+
+    TRACE("(%p %s)\n", pCF, debugstr_w(pwzType));
+
+    for(iter = mime_filter_list; iter; iter = iter->next) {
+        if(iter->cf == pCF && !strcmpW(iter->mime, pwzType))
+            break;
+        prev = iter;
+    }
+
+    if(!iter)
+        return S_OK;
+
+    if(prev)
+        prev->next = iter->next;
+    else
+        mime_filter_list = iter->next;
+
+    IClassFactory_Release(iter->cf);
+    heap_free(iter->mime);
+    heap_free(iter);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI InternetSession_CreateBinding(IInternetSession *iface,

@@ -178,9 +178,8 @@ static LONG X11DRV_XRandR_SetCurrentMode(int mode)
     short rate;
     unsigned int i;
     int j;
-    DWORD dwBpp = screen_depth;
-    if (dwBpp == 24) dwBpp = 32;
-    
+    DWORD dwBpp = screen_bpp;
+
     wine_tsx11_lock();
     root = RootWindow (gdi_display, DefaultScreen(gdi_display));
     sc = pXRRGetScreenInfo (gdi_display, root);

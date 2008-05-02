@@ -44,7 +44,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11settings);
 static LPDDHALMODEINFO dd_modes = NULL;
 static unsigned int dd_mode_count = 0;
 static unsigned int dd_max_modes = 0;
-static const unsigned int depths[]  = {8, 16, 32};
+/* All Windows drivers seen so far either support 32 bit depths, or 24 bit depths, but never both. So if we have
+ * a 32 bit framebuffer, report 32 bit bpps, otherwise 24 bit ones.
+ */
+static const unsigned int depths_24[]  = {8, 16, 24};
+static const unsigned int depths_32[]  = {8, 16, 32};
 
 /* pointers to functions that actually do the hard stuff */
 static int (*pGetCurrentMode)(void);
@@ -86,13 +90,12 @@ LPDDHALMODEINFO X11DRV_Settings_SetHandlers(const char *name,
 void X11DRV_Settings_AddOneMode(unsigned int width, unsigned int height, unsigned int bpp, unsigned int freq)
 {
     LPDDHALMODEINFO info = &(dd_modes[dd_mode_count]);
-    DWORD dwBpp = screen_depth;
+    DWORD dwBpp = screen_bpp;
     if (dd_mode_count >= dd_max_modes)
     {
         ERR("Maximum modes (%d) exceeded\n", dd_max_modes);
         return;
     }
-    if (dwBpp == 24) dwBpp = 32;
     if (bpp == 0) bpp = dwBpp;
     info->dwWidth        = width;
     info->dwHeight       = height;
@@ -114,8 +117,9 @@ void X11DRV_Settings_AddDepthModes(void)
 {
     int i, j;
     int existing_modes = dd_mode_count;
-    DWORD dwBpp = screen_depth;
-    if (dwBpp == 24) dwBpp = 32;
+    DWORD dwBpp = screen_bpp;
+    const DWORD *depths = screen_bpp == 32 ? depths_32 : depths_24;
+
     for (j=0; j<3; j++)
     {
         if (depths[j] != dwBpp)
@@ -354,12 +358,16 @@ LONG X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
     TRACE("flags=%s\n",_CDS_flags(flags));
     if (devmode)
     {
+        /* this is the minimal dmSize that XP accepts */
+        if (devmode->dmSize < FIELD_OFFSET(DEVMODEW, dmFields))
+            return DISP_CHANGE_FAILED;
+
         TRACE("DM_fields=%s\n",_DM_fields(devmode->dmFields));
         TRACE("width=%d height=%d bpp=%d freq=%d (%s)\n",
               devmode->dmPelsWidth,devmode->dmPelsHeight,
               devmode->dmBitsPerPel,devmode->dmDisplayFrequency, handler_name);
 
-        dwBpp = (devmode->dmBitsPerPel == 24) ? 32 : devmode->dmBitsPerPel;
+        dwBpp = devmode->dmBitsPerPel;
         if (devmode->dmFields & DM_BITSPERPEL) def_mode &= !dwBpp;
         if (devmode->dmFields & DM_PELSWIDTH)  def_mode &= !devmode->dmPelsWidth;
         if (devmode->dmFields & DM_PELSHEIGHT) def_mode &= !devmode->dmPelsHeight;

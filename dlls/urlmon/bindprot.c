@@ -25,6 +25,7 @@ typedef struct {
     const IInternetProtocolVtbl *lpInternetProtocolVtbl;
     const IInternetBindInfoVtbl *lpInternetBindInfoVtbl;
     const IInternetPriorityVtbl *lpInternetPriorityVtbl;
+    const IServiceProviderVtbl  *lpServiceProviderVtbl;
     const IInternetProtocolSinkVtbl *lpInternetProtocolSinkVtbl;
 
     LONG ref;
@@ -32,6 +33,7 @@ typedef struct {
     IInternetProtocol *protocol;
     IInternetBindInfo *bind_info;
     IInternetProtocolSink *protocol_sink;
+    IServiceProvider *service_provider;
 
     LONG priority;
 } BindProtocol;
@@ -39,6 +41,7 @@ typedef struct {
 #define PROTOCOL(x)  ((IInternetProtocol*) &(x)->lpInternetProtocolVtbl)
 #define BINDINFO(x)  ((IInternetBindInfo*) &(x)->lpInternetBindInfoVtbl)
 #define PRIORITY(x)  ((IInternetPriority*) &(x)->lpInternetPriorityVtbl)
+#define SERVPROV(x)  ((IServiceProvider*)  &(x)->lpServiceProviderVtbl)
 #define PROTSINK(x)  ((IInternetProtocolSink*) &(x)->lpInternetProtocolSinkVtbl)
 
 #define PROTOCOL_THIS(iface) DEFINE_THIS(BindProtocol, InternetProtocol, iface)
@@ -66,7 +69,8 @@ static HRESULT WINAPI BindProtocol_QueryInterface(IInternetProtocol *iface, REFI
     }else if(IsEqualGUID(&IID_IAuthenticate, riid)) {
         FIXME("(%p)->(IID_IAuthenticate %p)\n", This, ppv);
     }else if(IsEqualGUID(&IID_IServiceProvider, riid)) {
-        FIXME("(%p)->(IID_IServiceProvider %p)\n", This, ppv);
+        TRACE("(%p)->(IID_IServiceProvider %p)\n", This, ppv);
+        *ppv = SERVPROV(This);
     }else if(IsEqualGUID(&IID_IInternetProtocolSink, riid)) {
         TRACE("(%p)->(IID_IInternetProtocolSink %p)\n", This, ppv);
         *ppv = PROTSINK(This);
@@ -171,6 +175,8 @@ static HRESULT WINAPI BindProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
     IInternetProtocolSink_AddRef(pOIProtSink);
     This->protocol_sink = pOIProtSink;
 
+    IInternetProtocolSink_QueryInterface(pOIProtSink, &IID_IServiceProvider, (void**)&This->service_provider);
+
     hres = IInternetProtocol_QueryInterface(protocol, &IID_IInternetPriority, (void**)&priority);
     if(SUCCEEDED(hres)) {
         IInternetPriority_SetPriority(priority, This->priority);
@@ -183,8 +189,10 @@ static HRESULT WINAPI BindProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl
 static HRESULT WINAPI BindProtocol_Continue(IInternetProtocol *iface, PROTOCOLDATA *pProtocolData)
 {
     BindProtocol *This = PROTOCOL_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, pProtocolData);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, pProtocolData);
+
+    return IInternetProtocol_Continue(This->protocol, pProtocolData);
 }
 
 static HRESULT WINAPI BindProtocol_Abort(IInternetProtocol *iface, HRESULT hrReason,
@@ -245,15 +253,19 @@ static HRESULT WINAPI BindProtocol_Seek(IInternetProtocol *iface, LARGE_INTEGER 
 static HRESULT WINAPI BindProtocol_LockRequest(IInternetProtocol *iface, DWORD dwOptions)
 {
     BindProtocol *This = PROTOCOL_THIS(iface);
-    FIXME("(%p)->(%08x)\n", This, dwOptions);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%08x)\n", This, dwOptions);
+
+    return IInternetProtocol_LockRequest(This->protocol, dwOptions);
 }
 
 static HRESULT WINAPI BindProtocol_UnlockRequest(IInternetProtocol *iface)
 {
     BindProtocol *This = PROTOCOL_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    return IInternetProtocol_UnlockRequest(This->protocol);
 }
 
 #undef PROTOCOL_THIS
@@ -317,8 +329,10 @@ static HRESULT WINAPI BindInfo_GetBindString(IInternetBindInfo *iface,
         ULONG ulStringType, LPOLESTR *ppwzStr, ULONG cEl, ULONG *pcElFetched)
 {
     BindProtocol *This = BINDINFO_THIS(iface);
-    FIXME("(%p)->(%d %p %d %p)\n", This, ulStringType, ppwzStr, cEl, pcElFetched);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d %p %d %p)\n", This, ulStringType, ppwzStr, cEl, pcElFetched);
+
+    return IInternetBindInfo_GetBindString(This->bind_info, ulStringType, ppwzStr, cEl, pcElFetched);
 }
 
 #undef BINDFO_THIS
@@ -385,34 +399,36 @@ static const IInternetPriorityVtbl InternetPriorityVtbl = {
 
 #define PROTSINK_THIS(iface) DEFINE_THIS(BindProtocol, InternetProtocolSink, iface)
 
-static HRESULT WINAPI InternetProtocolSink_QueryInterface(IInternetProtocolSink *iface,
+static HRESULT WINAPI BPInternetProtocolSink_QueryInterface(IInternetProtocolSink *iface,
         REFIID riid, void **ppv)
 {
     BindProtocol *This = PROTSINK_THIS(iface);
     return IInternetProtocol_QueryInterface(PROTOCOL(This), riid, ppv);
 }
 
-static ULONG WINAPI InternetProtocolSink_AddRef(IInternetProtocolSink *iface)
+static ULONG WINAPI BPInternetProtocolSink_AddRef(IInternetProtocolSink *iface)
 {
     BindProtocol *This = PROTSINK_THIS(iface);
     return IInternetProtocol_AddRef(PROTOCOL(This));
 }
 
-static ULONG WINAPI InternetProtocolSink_Release(IInternetProtocolSink *iface)
+static ULONG WINAPI BPInternetProtocolSink_Release(IInternetProtocolSink *iface)
 {
     BindProtocol *This = PROTSINK_THIS(iface);
     return IInternetProtocol_Release(PROTOCOL(This));
 }
 
-static HRESULT WINAPI InternetProtocolSink_Switch(IInternetProtocolSink *iface,
+static HRESULT WINAPI BPInternetProtocolSink_Switch(IInternetProtocolSink *iface,
         PROTOCOLDATA *pProtocolData)
 {
     BindProtocol *This = PROTSINK_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, pProtocolData);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, pProtocolData);
+
+    return IInternetProtocolSink_Switch(This->protocol_sink, pProtocolData);
 }
 
-static HRESULT WINAPI InternetProtocolSink_ReportProgress(IInternetProtocolSink *iface,
+static HRESULT WINAPI BPInternetProtocolSink_ReportProgress(IInternetProtocolSink *iface,
         ULONG ulStatusCode, LPCWSTR szStatusText)
 {
     BindProtocol *This = PROTSINK_THIS(iface);
@@ -420,13 +436,14 @@ static HRESULT WINAPI InternetProtocolSink_ReportProgress(IInternetProtocolSink 
     TRACE("(%p)->(%u %s)\n", This, ulStatusCode, debugstr_w(szStatusText));
 
     switch(ulStatusCode) {
+    case BINDSTATUS_FINDINGRESOURCE:
+    case BINDSTATUS_CONNECTING:
     case BINDSTATUS_SENDINGREQUEST:
-        return IInternetProtocolSink_ReportProgress(This->protocol_sink,
-                ulStatusCode, NULL);
     case BINDSTATUS_CACHEFILENAMEAVAILABLE:
         return IInternetProtocolSink_ReportProgress(This->protocol_sink,
                 ulStatusCode, szStatusText);
     case BINDSTATUS_VERIFIEDMIMETYPEAVAILABLE:
+    case BINDSTATUS_MIMETYPEAVAILABLE:
         return IInternetProtocolSink_ReportProgress(This->protocol_sink,
                 BINDSTATUS_MIMETYPEAVAILABLE, szStatusText);
     default:
@@ -436,17 +453,17 @@ static HRESULT WINAPI InternetProtocolSink_ReportProgress(IInternetProtocolSink 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI InternetProtocolSink_ReportData(IInternetProtocolSink *iface,
+static HRESULT WINAPI BPInternetProtocolSink_ReportData(IInternetProtocolSink *iface,
         DWORD grfBSCF, ULONG ulProgress, ULONG ulProgressMax)
 {
     BindProtocol *This = PROTSINK_THIS(iface);
 
     TRACE("(%p)->(%d %u %u)\n", This, grfBSCF, ulProgress, ulProgressMax);
 
-    return S_OK;
+    return IInternetProtocolSink_ReportData(This->protocol_sink, grfBSCF, ulProgress, ulProgressMax);
 }
 
-static HRESULT WINAPI InternetProtocolSink_ReportResult(IInternetProtocolSink *iface,
+static HRESULT WINAPI BPInternetProtocolSink_ReportResult(IInternetProtocolSink *iface,
         HRESULT hrResult, DWORD dwError, LPCWSTR szResult)
 {
     BindProtocol *This = PROTSINK_THIS(iface);
@@ -459,29 +476,69 @@ static HRESULT WINAPI InternetProtocolSink_ReportResult(IInternetProtocolSink *i
 #undef PROTSINK_THIS
 
 static const IInternetProtocolSinkVtbl InternetProtocolSinkVtbl = {
-    InternetProtocolSink_QueryInterface,
-    InternetProtocolSink_AddRef,
-    InternetProtocolSink_Release,
-    InternetProtocolSink_Switch,
-    InternetProtocolSink_ReportProgress,
-    InternetProtocolSink_ReportData,
-    InternetProtocolSink_ReportResult
+    BPInternetProtocolSink_QueryInterface,
+    BPInternetProtocolSink_AddRef,
+    BPInternetProtocolSink_Release,
+    BPInternetProtocolSink_Switch,
+    BPInternetProtocolSink_ReportProgress,
+    BPInternetProtocolSink_ReportData,
+    BPInternetProtocolSink_ReportResult
+};
+
+#define SERVPROV_THIS(iface) DEFINE_THIS(BindProtocol, ServiceProvider, iface)
+
+static HRESULT WINAPI BPServiceProvider_QueryInterface(IServiceProvider *iface,
+        REFIID riid, void **ppv)
+{
+    BindProtocol *This = SERVPROV_THIS(iface);
+    return IInternetProtocol_QueryInterface(PROTOCOL(This), riid, ppv);
+}
+
+static ULONG WINAPI BPServiceProvider_AddRef(IServiceProvider *iface)
+{
+    BindProtocol *This = SERVPROV_THIS(iface);
+    return IInternetProtocol_AddRef(PROTOCOL(This));
+}
+
+static ULONG WINAPI BPServiceProvider_Release(IServiceProvider *iface)
+{
+    BindProtocol *This = SERVPROV_THIS(iface);
+    return IInternetProtocol_Release(PROTOCOL(This));
+}
+
+static HRESULT WINAPI BPServiceProvider_QueryService(IServiceProvider *iface,
+        REFGUID guidService, REFIID riid, void **ppv)
+{
+    BindProtocol *This = SERVPROV_THIS(iface);
+
+    TRACE("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
+
+    if(!This->service_provider)
+        return E_NOINTERFACE;
+
+    return IServiceProvider_QueryService(This->service_provider, guidService, riid, ppv);
+}
+
+#undef SERVPROV_THIS
+
+static const IServiceProviderVtbl ServiceProviderVtbl = {
+    BPServiceProvider_QueryInterface,
+    BPServiceProvider_AddRef,
+    BPServiceProvider_Release,
+    BPServiceProvider_QueryService
 };
 
 HRESULT create_binding_protocol(LPCWSTR url, IInternetProtocol **protocol)
 {
-    BindProtocol *ret = heap_alloc(sizeof(BindProtocol));
+    BindProtocol *ret = heap_alloc_zero(sizeof(BindProtocol));
 
     ret->lpInternetProtocolVtbl = &BindProtocolVtbl;
     ret->lpInternetBindInfoVtbl = &InternetBindInfoVtbl;
     ret->lpInternetPriorityVtbl = &InternetPriorityVtbl;
+    ret->lpServiceProviderVtbl  = &ServiceProviderVtbl;
     ret->lpInternetProtocolSinkVtbl = &InternetProtocolSinkVtbl;
 
     ret->ref = 1;
-    ret->protocol = NULL;
-    ret->bind_info = NULL;
-    ret->protocol_sink = NULL;
-    ret->priority = 0;
 
     URLMON_LockModule();
 

@@ -408,11 +408,11 @@ void nsfree(void*);
 
 void nsACString_Init(nsACString*,const char*);
 void nsACString_SetData(nsACString*,const char*);
-PRUint32 nsACString_GetData(const nsACString*,const char**,PRBool*);
+PRUint32 nsACString_GetData(const nsACString*,const char**);
 void nsACString_Finish(nsACString*);
 
 void nsAString_Init(nsAString*,const PRUnichar*);
-PRUint32 nsAString_GetData(const nsAString*,const PRUnichar**,PRBool*);
+PRUint32 nsAString_GetData(const nsAString*,const PRUnichar**);
 void nsAString_Finish(nsAString*);
 
 nsIInputStream *create_nsstream(const char*,PRInt32);
@@ -425,7 +425,7 @@ void init_nsevents(NSContainer*);
 nsresult get_nsinterface(nsISupports*,REFIID,void**);
 
 BSCallback *create_bscallback(IMoniker*);
-HRESULT start_binding(HTMLDocument*,BSCallback*);
+HRESULT start_binding(HTMLDocument*,BSCallback*,IBindCtx*);
 HRESULT load_stream(BSCallback*,IStream*);
 void set_document_bscallback(HTMLDocument*,BSCallback*);
 void set_current_mon(HTMLDocument*,IMoniker*);

@@ -286,6 +286,7 @@ static UINT STRCMP_Evaluate( MSIWHEREVIEW *wv, UINT row, const struct expr *cond
         sr = lstrcmpW( l_str, r_str );
 
     *val = ( cond->u.expr.op == OP_EQ && ( sr == 0 ) ) ||
+           ( cond->u.expr.op == OP_NE && ( sr != 0 ) ) ||
            ( cond->u.expr.op == OP_LT && ( sr < 0 ) ) ||
            ( cond->u.expr.op == OP_GT && ( sr > 0 ) );
 
@@ -532,6 +533,14 @@ static UINT WHERE_find_matching_rows( struct tagMSIVIEW *view, UINT col,
     return find_entry_in_hash(wv->reorder, *row, row);
 }
 
+static UINT WHERE_sort(struct tagMSIVIEW *view, column_info *columns)
+{
+    MSIWHEREVIEW *wv = (MSIWHEREVIEW *)view;
+
+    TRACE("%p %p\n", view, columns);
+
+    return wv->table->ops->sort(wv->table, columns);
+}
 
 static const MSIVIEWOPS where_ops =
 {
@@ -552,6 +561,7 @@ static const MSIVIEWOPS where_ops =
     NULL,
     NULL,
     NULL,
+    WHERE_sort,
 };
 
 static UINT WHERE_VerifyCondition( MSIDATABASE *db, MSIVIEW *table, struct expr *cond,
@@ -608,6 +618,7 @@ static UINT WHERE_VerifyCondition( MSIDATABASE *db, MSIVIEW *table, struct expr 
             case OP_EQ:
             case OP_GT:
             case OP_LT:
+            case OP_NE:
                 break;
             default:
                 *valid = FALSE;

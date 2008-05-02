@@ -277,6 +277,8 @@ static void CreateVBO(IWineD3DVertexBufferImpl *object) {
         WARN("glBufferDataARB failed with error %s (%#x)\n", debug_glerror(error), error);
         goto error;
     }
+    object->vbo_size = object->resource.size;
+    object->vbo_usage = glUsage;
 
     LEAVE_GL();
 
@@ -315,7 +317,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexBuffer(IWineD3DDevice *ifac
 
     D3DCREATERESOURCEOBJECTINSTANCE(object, VertexBuffer, WINED3DRTYPE_VERTEXBUFFER, Size)
 
-    TRACE("(%p) : Size=%d, Usage=%d, FVF=%x, Pool=%d - Memory@%p, Iface@%p\n", This, Size, Usage, FVF, Pool, object->resource.allocatedMemory, object);
+    TRACE("(%p) : Size=%d, Usage=0x%08x, FVF=%x, Pool=%d - Memory@%p, Iface@%p\n", This, Size, Usage, FVF, Pool, object->resource.allocatedMemory, object);
     *ppVertexBuffer = (IWineD3DVertexBuffer *)object;
 
     object->fvf = FVF;
@@ -336,8 +338,15 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexBuffer(IWineD3DDevice *ifac
      * more. In this call we can convert dx7 buffers too.
      */
     conv = ((FVF & WINED3DFVF_POSITION_MASK) == WINED3DFVF_XYZRHW ) || (FVF & (WINED3DFVF_DIFFUSE | WINED3DFVF_SPECULAR));
-    if( GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT) && Pool != WINED3DPOOL_SYSTEMMEM && !(Usage & WINED3DUSAGE_DYNAMIC) && 
-        (dxVersion > 7 || !conv) ) {
+    if(!GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT)) {
+        TRACE("Not creating a vbo because GL_ARB_vertex_buffer is not supported\n");
+    } else if(Pool == WINED3DPOOL_SYSTEMMEM) {
+        TRACE("Not creating a vbo because the vertex buffer is in system memory\n");
+    } else if(Usage & WINED3DUSAGE_DYNAMIC) {
+        TRACE("Not creating a vbo because the buffer has dynamic usage\n");
+    } else if(dxVersion <= 7 && conv) {
+        TRACE("Not creating a vbo because dxVersion is 7 and the fvf needs conversion\n");
+    } else {
         CreateVBO(object);
     }
     return WINED3D_OK;
@@ -1707,11 +1716,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclaration(IWineD3DDevice*
     D3DCREATEOBJECTINSTANCE(object, VertexDeclaration)
 
     hr = IWineD3DVertexDeclaration_SetDeclaration((IWineD3DVertexDeclaration *)object, elements, element_count);
+    if(FAILED(hr)) {
+        *ppVertexDeclaration = NULL;
+        HeapFree(GetProcessHeap(), 0, object);
+    }
 
     return hr;
 }
 
-static size_t ConvertFvfToDeclaration(DWORD fvf, WINED3DVERTEXELEMENT** ppVertexElements) {
+static size_t ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the GL info, which has the type table */
+                                      DWORD fvf, WINED3DVERTEXELEMENT** ppVertexElements) {
 
     unsigned int idx, idx2;
     unsigned int offset;
@@ -1839,10 +1853,11 @@ static size_t ConvertFvfToDeclaration(DWORD fvf, WINED3DVERTEXELEMENT** ppVertex
 
 static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclarationFromFVF(IWineD3DDevice* iface, IWineD3DVertexDeclaration** ppVertexDeclaration, IUnknown *Parent, DWORD Fvf) {
     WINED3DVERTEXELEMENT* elements = NULL;
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
     size_t size;
     DWORD hr;
 
-    size = ConvertFvfToDeclaration(Fvf, &elements);
+    size = ConvertFvfToDeclaration(This, Fvf, &elements);
     if (size == 0) return WINED3DERR_OUTOFVIDEOMEMORY;
 
     hr = IWineD3DDevice_CreateVertexDeclaration(iface, ppVertexDeclaration, Parent, elements, size);
@@ -2414,6 +2429,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetStreamSource(IWineD3DDevice *iface, 
 
     if (StreamNumber >= MAX_STREAMS) {
         WARN("Stream out of range %d\n", StreamNumber);
+        return WINED3DERR_INVALIDCALL;
+    } else if(OffsetInBytes & 0x3) {
+        WARN("OffsetInBytes is not 4 byte aligned: %d\n", OffsetInBytes);
         return WINED3DERR_INVALIDCALL;
     }
 
@@ -4757,26 +4775,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Present(IWineD3DDevice *iface,
     return WINED3D_OK;
 }
 
-static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Count, CONST WINED3DRECT* pRects,
-                                        DWORD Flags, WINED3DCOLOR Color, float Z, DWORD Stencil) {
-    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    IWineD3DSurfaceImpl *target = (IWineD3DSurfaceImpl *)This->render_targets[0];
-
+/* Not called from the VTable (internal subroutine) */
+HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfaceImpl *target, DWORD Count,
+                                        CONST WINED3DRECT* pRects, DWORD Flags, WINED3DCOLOR Color,
+                                        float Z, DWORD Stencil) {
     GLbitfield     glMask = 0;
     unsigned int   i;
     WINED3DRECT curRect;
     RECT vp_rect;
     WINED3DVIEWPORT *vp = &This->stateBlock->viewport;
     UINT drawable_width, drawable_height;
-
-    TRACE("(%p) Count (%d), pRects (%p), Flags (%x), Color (0x%08x), Z (%f), Stencil (%d)\n", This,
-          Count, pRects, Flags, Color, Z, Stencil);
-
-    if(Flags & (WINED3DCLEAR_ZBUFFER | WINED3DCLEAR_STENCIL) && This->stencilBufferTarget == NULL) {
-        WARN("Clearing depth and/or stencil without a depth stencil buffer attached, returning WINED3DERR_INVALIDCALL\n");
-        /* TODO: What about depth stencil buffers without stencil bits? */
-        return WINED3DERR_INVALIDCALL;
-    }
 
     /* When we're clearing parts of the drawable, make sure that the target surface is well up to date in the
      * drawable. After the clear we'll mark the drawable up to date, so we have to make sure that this is true
@@ -4814,14 +4822,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
 
     target->get_drawable_size(target, &drawable_width, &drawable_height);
 
-    /* This is for offscreen rendering as well as for multithreading, thus activate the set render target
-     * and not the last active one.
-     */
-    ActivateContext(This, This->render_targets[0], CTXUSAGE_CLEAR);
+    ActivateContext(This, (IWineD3DSurface *) target, CTXUSAGE_CLEAR);
     ENTER_GL();
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
-        apply_fbo_state(iface);
+        apply_fbo_state((IWineD3DDevice *) This);
     }
 
     /* Only set the values up once, as they are not changing */
@@ -4930,6 +4935,23 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
     LEAVE_GL();
 
     return WINED3D_OK;
+}
+
+static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Count, CONST WINED3DRECT* pRects,
+                                        DWORD Flags, WINED3DCOLOR Color, float Z, DWORD Stencil) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    IWineD3DSurfaceImpl *target = (IWineD3DSurfaceImpl *)This->render_targets[0];
+
+    TRACE("(%p) Count (%d), pRects (%p), Flags (%x), Color (0x%08x), Z (%f), Stencil (%d)\n", This,
+          Count, pRects, Flags, Color, Z, Stencil);
+
+    if(Flags & (WINED3DCLEAR_ZBUFFER | WINED3DCLEAR_STENCIL) && This->stencilBufferTarget == NULL) {
+        WARN("Clearing depth and/or stencil without a depth stencil buffer attached, returning WINED3DERR_INVALIDCALL\n");
+        /* TODO: What about depth stencil buffers without stencil bits? */
+        return WINED3DERR_INVALIDCALL;
+    }
+
+    return IWineD3DDeviceImpl_ClearSurface(This, target, Count, pRects, Flags, Color, Z, Stencil);
 }
 
 /*****
@@ -6192,25 +6214,22 @@ static void check_fbo_status(IWineD3DDevice *iface) {
     if (status == GL_FRAMEBUFFER_COMPLETE_EXT) {
         TRACE("FBO complete\n");
     } else {
+        IWineD3DSurfaceImpl *attachment;
+        int i;
         FIXME("FBO status %s (%#x)\n", debug_fbostatus(status), status);
 
         /* Dump the FBO attachments */
-        if (status == GL_FRAMEBUFFER_UNSUPPORTED_EXT) {
-            IWineD3DSurfaceImpl *attachment;
-            int i;
-
-            for (i = 0; i < GL_LIMITS(buffers); ++i) {
-                attachment = (IWineD3DSurfaceImpl *)This->fbo_color_attachments[i];
-                if (attachment) {
-                    FIXME("\tColor attachment %d: (%p) %s %ux%u\n", i, attachment, debug_d3dformat(attachment->resource.format),
-                            attachment->pow2Width, attachment->pow2Height);
-                }
-            }
-            attachment = (IWineD3DSurfaceImpl *)This->fbo_depth_attachment;
+        for (i = 0; i < GL_LIMITS(buffers); ++i) {
+            attachment = (IWineD3DSurfaceImpl *)This->fbo_color_attachments[i];
             if (attachment) {
-                FIXME("\tDepth attachment: (%p) %s %ux%u\n", attachment, debug_d3dformat(attachment->resource.format),
+                FIXME("\tColor attachment %d: (%p) %s %ux%u\n", i, attachment, debug_d3dformat(attachment->resource.format),
                         attachment->pow2Width, attachment->pow2Height);
             }
+        }
+        attachment = (IWineD3DSurfaceImpl *)This->fbo_depth_attachment;
+        if (attachment) {
+            FIXME("\tDepth attachment: (%p) %s %ux%u\n", attachment, debug_d3dformat(attachment->resource.format),
+                    attachment->pow2Width, attachment->pow2Height);
         }
     }
 }

@@ -35,7 +35,6 @@
 #include "winternl.h"
 #include "lmcons.h"
 #include "lmserver.h"
-#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(advapi);
 
@@ -73,16 +72,11 @@ typedef struct service_start_info_t
 
 typedef struct service_data_t
 {
-    struct list entry;
-    union {
-        LPHANDLER_FUNCTION handler;
-        LPHANDLER_FUNCTION_EX handler_ex;
-    } handler;
+    LPHANDLER_FUNCTION_EX handler;
     LPVOID context;
     SERVICE_STATUS_PROCESS status;
     HANDLE thread;
     BOOL unicode : 1;
-    BOOL extended : 1; /* uses handler_ex instead of handler? */
     union {
         LPSERVICE_MAIN_FUNCTIONA a;
         LPSERVICE_MAIN_FUNCTIONW w;
@@ -101,7 +95,9 @@ static CRITICAL_SECTION_DEBUG service_cs_debug =
 };
 static CRITICAL_SECTION service_cs = { &service_cs_debug, -1, 0, 0, 0, 0 };
 
-static struct list service_list = LIST_INIT(service_list);
+static service_data **services;
+static unsigned int nb_services;
+static HANDLE service_event;
 
 extern HANDLE __wine_make_process_system(void);
 
@@ -461,6 +457,7 @@ static BOOL service_handle_start(HANDLE pipe, service_data *service, DWORD count
     args = NULL;
     service->thread = CreateThread( NULL, 0, service_thread,
                                     service, 0, NULL );
+    SetEvent( service_event );  /* notify the main loop */
 
 end:
     HeapFree(GetProcessHeap(), 0, args);
@@ -606,11 +603,6 @@ static BOOL service_accepts_control(const service_data *service, DWORD dwControl
     case SERVICE_CONTROL_NETBINDDISABLE:
         if (a&SERVICE_ACCEPT_NETBINDCHANGE)
             return TRUE;
-    }
-    if (!service->extended)
-        return FALSE;
-    switch (dwControl)
-    {
     case SERVICE_CONTROL_HARDWAREPROFILECHANGE:
         if (a&SERVICE_ACCEPT_HARDWAREPROFILECHANGE)
             return TRUE;
@@ -639,36 +631,10 @@ static BOOL service_handle_control(HANDLE pipe, service_data *service,
     
     if (service_accepts_control(service, dwControl))
     {
-        if (service->extended && service->handler.handler_ex)
-        {
-            service->handler.handler_ex(dwControl, 0, NULL, service->context);
-            ret = ERROR_SUCCESS;
-        }
-        else if (service->handler.handler)
-        {
-            service->handler.handler(dwControl);
-            ret = ERROR_SUCCESS;
-        }
+        if (service->handler)
+            ret = service->handler(dwControl, 0, NULL, service->context);
     }
     return WriteFile(pipe, &ret, sizeof ret, &count, NULL);
-}
-
-/******************************************************************************
- * service_reap_thread
- */
-static DWORD service_reap_thread(service_data *service)
-{
-    DWORD exitcode = 0;
-
-    if (!service->thread)
-        return 0;
-    GetExitCodeThread(service->thread, &exitcode);
-    if (exitcode!=STILL_ACTIVE)
-    {
-        CloseHandle(service->thread);
-        service->thread = 0;
-    }
-    return exitcode;
 }
 
 /******************************************************************************
@@ -720,8 +686,6 @@ static DWORD WINAPI service_control_dispatcher(LPVOID arg)
             break;
         }
 
-        service_reap_thread(service);
-
         /* handle the request */
         switch (req[0])
         {
@@ -751,53 +715,57 @@ static DWORD WINAPI service_control_dispatcher(LPVOID arg)
  */
 static BOOL service_run_threads(void)
 {
-    service_data *service;
-    DWORD count, n = 0;
-    HANDLE *handles;
+    DWORD i, n, ret;
+    HANDLE wait_handles[MAXIMUM_WAIT_OBJECTS];
+    UINT wait_services[MAXIMUM_WAIT_OBJECTS];
+
+    service_event = CreateEventW( NULL, FALSE, FALSE, NULL );
+
+    wait_handles[0] = __wine_make_process_system();
+    wait_handles[1] = service_event;
+
+    TRACE("Starting %d pipe listener threads. Services running as process %d\n",
+          nb_services, GetCurrentProcessId());
 
     EnterCriticalSection( &service_cs );
-
-    count = list_count( &service_list );
-
-    TRACE("Starting %d pipe listener threads. Services running as process %d\n", count, GetCurrentProcessId());
-
-    handles = HeapAlloc(GetProcessHeap(), 0, sizeof(HANDLE) * (count + 1));
-
-    handles[n++] = __wine_make_process_system();
-
-    LIST_FOR_EACH_ENTRY( service, &service_list, service_data, entry )
+    for (i = 0; i < nb_services; i++)
     {
-        service->status.dwProcessId = GetCurrentProcessId();
-        handles[n++] = CreateThread( NULL, 0, service_control_dispatcher,
-                                     service, 0, NULL );
+        services[i]->status.dwProcessId = GetCurrentProcessId();
+        CloseHandle( CreateThread( NULL, 0, service_control_dispatcher, services[i], 0, NULL ));
     }
-    assert(n == count + 1);
-
     LeaveCriticalSection( &service_cs );
 
     /* wait for all the threads to pack up and exit */
-    while (n > 1)
+    for (;;)
     {
-        DWORD ret = WaitForMultipleObjects( min(n,MAXIMUM_WAIT_OBJECTS), handles, FALSE, INFINITE );
+        EnterCriticalSection( &service_cs );
+        for (i = 0, n = 2; i < nb_services && n < MAXIMUM_WAIT_OBJECTS; i++)
+        {
+            if (!services[i]->thread) continue;
+            wait_services[n] = i;
+            wait_handles[n++] = services[i]->thread;
+        }
+        LeaveCriticalSection( &service_cs );
+
+        ret = WaitForMultipleObjects( n, wait_handles, FALSE, INFINITE );
         if (!ret)  /* system process event */
         {
             TRACE( "last user process exited, shutting down\n" );
             /* FIXME: we should maybe send a shutdown control to running services */
             ExitProcess(0);
         }
-        if (ret < MAXIMUM_WAIT_OBJECTS)
+        else if (ret == 1)
         {
-            CloseHandle( handles[ret] );
-            memmove( &handles[ret], &handles[ret+1], (n - ret - 1) * sizeof(HANDLE) );
-            n--;
+            continue;  /* rebuild the list */
         }
-        else break;
+        else if (ret < n)
+        {
+            services[wait_services[ret]]->thread = 0;
+            CloseHandle( wait_handles[ret] );
+            if (n == 3) return TRUE; /* it was the last running thread */
+        }
+        else return FALSE;
     }
-
-    while (n) CloseHandle( handles[--n] );
-    HeapFree(GetProcessHeap(), 0, handles);
-
-    return TRUE;
 }
 
 /******************************************************************************
@@ -808,26 +776,29 @@ static BOOL service_run_threads(void)
 BOOL WINAPI StartServiceCtrlDispatcherA( const SERVICE_TABLE_ENTRYA *servent )
 {
     service_data *info;
-    DWORD sz, len;
+    unsigned int i;
     BOOL ret = TRUE;
 
     TRACE("%p\n", servent);
 
-    EnterCriticalSection( &service_cs );
-    while (servent->lpServiceName)
+    if (nb_services)
     {
-        LPSTR name = servent->lpServiceName;
-
-        len = MultiByteToWideChar(CP_ACP, 0, name, -1, NULL, 0);
-        sz = len*sizeof(WCHAR) + sizeof *info;
-        info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sz );
-        MultiByteToWideChar(CP_ACP, 0, name, -1, info->name, len);
-        info->proc.a = servent->lpServiceProc;
-        info->unicode = FALSE;
-        list_add_head( &service_list, &info->entry );
-        servent++;
+        SetLastError( ERROR_SERVICE_ALREADY_RUNNING );
+        return FALSE;
     }
-    LeaveCriticalSection( &service_cs );
+    while (servent[nb_services].lpServiceName) nb_services++;
+    services = HeapAlloc( GetProcessHeap(), 0, nb_services * sizeof(*services) );
+
+    for (i = 0; i < nb_services; i++)
+    {
+        DWORD len = MultiByteToWideChar(CP_ACP, 0, servent[i].lpServiceName, -1, NULL, 0);
+        DWORD sz = FIELD_OFFSET( service_data, name[len] );
+        info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sz );
+        MultiByteToWideChar(CP_ACP, 0, servent[i].lpServiceName, -1, info->name, len);
+        info->proc.a = servent[i].lpServiceProc;
+        info->unicode = FALSE;
+        services[i] = info;
+    }
 
     service_run_threads();
 
@@ -850,26 +821,29 @@ BOOL WINAPI StartServiceCtrlDispatcherA( const SERVICE_TABLE_ENTRYA *servent )
 BOOL WINAPI StartServiceCtrlDispatcherW( const SERVICE_TABLE_ENTRYW *servent )
 {
     service_data *info;
-    DWORD sz, len;
+    unsigned int i;
     BOOL ret = TRUE;
 
     TRACE("%p\n", servent);
 
-    EnterCriticalSection( &service_cs );
-    while (servent->lpServiceName)
+    if (nb_services)
     {
-        LPWSTR name = servent->lpServiceName;
-
-        len = strlenW(name);
-        sz = len*sizeof(WCHAR) + sizeof *info;
-        info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sz );
-        strcpyW(info->name, name);
-        info->proc.w = servent->lpServiceProc;
-        info->unicode = TRUE;
-        list_add_head( &service_list, &info->entry );
-        servent++;
+        SetLastError( ERROR_SERVICE_ALREADY_RUNNING );
+        return FALSE;
     }
-    LeaveCriticalSection( &service_cs );
+    while (servent[nb_services].lpServiceName) nb_services++;
+    services = HeapAlloc( GetProcessHeap(), 0, nb_services * sizeof(*services) );
+
+    for (i = 0; i < nb_services; i++)
+    {
+        DWORD len = strlenW(servent[i].lpServiceName) + 1;
+        DWORD sz = FIELD_OFFSET( service_data, name[len] );
+        info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sz );
+        strcpyW(info->name, servent[i].lpServiceName);
+        info->proc.w = servent[i].lpServiceProc;
+        info->unicode = TRUE;
+        services[i] = info;
+    }
 
     service_run_threads();
 
@@ -909,48 +883,6 @@ BOOL WINAPI UnlockServiceDatabase (SC_LOCK ScLock)
 }
 
 /******************************************************************************
- * RegisterServiceCtrlHandlerA [ADVAPI32.@]
- */
-SERVICE_STATUS_HANDLE WINAPI
-RegisterServiceCtrlHandlerA( LPCSTR lpServiceName, LPHANDLER_FUNCTION lpfHandler )
-{
-    LPWSTR lpServiceNameW;
-    SERVICE_STATUS_HANDLE ret;
-
-    lpServiceNameW = SERV_dup(lpServiceName);
-    ret = RegisterServiceCtrlHandlerW( lpServiceNameW, lpfHandler );
-    HeapFree(GetProcessHeap(), 0, lpServiceNameW);
-    return ret;
-}
-
-/******************************************************************************
- * RegisterServiceCtrlHandlerW [ADVAPI32.@]
- *
- * PARAMS
- *   lpServiceName []
- *   lpfHandler    []
- */
-SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerW( LPCWSTR lpServiceName,
-                             LPHANDLER_FUNCTION lpfHandler )
-{
-    service_data *service;
-    SERVICE_STATUS_HANDLE handle = 0;
-
-    EnterCriticalSection( &service_cs );
-    LIST_FOR_EACH_ENTRY( service, &service_list, service_data, entry )
-    {
-        if(!strcmpW(lpServiceName, service->name))
-        {
-            service->handler.handler = lpfHandler;
-            handle = (SERVICE_STATUS_HANDLE)service;
-            break;
-        }
-    }
-    LeaveCriticalSection( &service_cs );
-    return handle;
-}
-
-/******************************************************************************
  * SetServiceStatus [ADVAPI32.@]
  *
  * PARAMS
@@ -960,7 +892,7 @@ SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerW( LPCWSTR lpServiceName,
 BOOL WINAPI
 SetServiceStatus( SERVICE_STATUS_HANDLE hService, LPSERVICE_STATUS lpStatus )
 {
-    service_data *service;
+    ULONG_PTR index = HandleToULong(hService) - 1;
     BOOL r = FALSE;
 
     TRACE("%p %x %x %x %x %x %x %x\n", hService,
@@ -970,15 +902,11 @@ SetServiceStatus( SERVICE_STATUS_HANDLE hService, LPSERVICE_STATUS lpStatus )
           lpStatus->dwWaitHint);
 
     EnterCriticalSection( &service_cs );
-    LIST_FOR_EACH_ENTRY( service, &service_list, service_data, entry )
+    if (index < nb_services)
     {
-        if(service == (service_data*)hService)
-        {
-            memcpy( &service->status, lpStatus, sizeof(SERVICE_STATUS) );
-            TRACE("Set service status to %d\n",service->status.dwCurrentState);
-            r = TRUE;
-            break;
-        }
+        memcpy( &services[index]->status, lpStatus, sizeof(SERVICE_STATUS) );
+        TRACE("Set service status to %d\n",services[index]->status.dwCurrentState);
+        r = TRUE;
     }
     LeaveCriticalSection( &service_cs );
 
@@ -1650,6 +1578,12 @@ static DWORD service_start_process(struct sc_service *hsvc, LPDWORD ppid)
     handles[0] = service_get_event_handle( hsvc->name );
     ZeroMemory(&si, sizeof(STARTUPINFOW));
     si.cb = sizeof(STARTUPINFOW);
+    if (!(svc_type & SERVICE_INTERACTIVE_PROCESS))
+    {
+        static WCHAR desktopW[] = {'_','_','w','i','n','e','s','e','r','v','i','c','e','_','w','i','n','s','t','a','t','i','o','n','\\','D','e','f','a','u','l','t',0};
+        si.lpDesktop = desktopW;
+    }
+
     r = CreateProcessW(NULL, path, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     if (r)
     {
@@ -1679,7 +1613,7 @@ static BOOL service_wait_for_startup(SC_HANDLE hService)
 
     TRACE("%p\n", hService);
 
-    for (i=0; i<30; i++)
+    for (i=0; i<20; i++)
     {
         status.dwCurrentState = 0;
         r = QueryServiceStatus(hService, &status);
@@ -1691,7 +1625,7 @@ static BOOL service_wait_for_startup(SC_HANDLE hService)
             break;
         }
         r = FALSE;
-        Sleep(1000);
+        Sleep(100 * i);
     }
     return r;
 }
@@ -2577,34 +2511,96 @@ BOOL WINAPI SetServiceBits( SERVICE_STATUS_HANDLE hServiceStatus,
     return TRUE;
 }
 
-SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerExA( LPCSTR lpServiceName,
-        LPHANDLER_FUNCTION_EX lpHandlerProc, LPVOID lpContext )
+/* thunk for calling the RegisterServiceCtrlHandler handler function */
+static DWORD WINAPI ctrl_handler_thunk( DWORD control, DWORD type, void *data, void *context )
 {
-    FIXME("%s %p %p\n", debugstr_a(lpServiceName), lpHandlerProc, lpContext);
-    return 0;
+    LPHANDLER_FUNCTION func = context;
+
+    func( control );
+    return ERROR_SUCCESS;
 }
 
+/******************************************************************************
+ * RegisterServiceCtrlHandlerA [ADVAPI32.@]
+ */
+SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerA( LPCSTR name, LPHANDLER_FUNCTION handler )
+{
+    return RegisterServiceCtrlHandlerExA( name, ctrl_handler_thunk, handler );
+}
+
+/******************************************************************************
+ * RegisterServiceCtrlHandlerW [ADVAPI32.@]
+ */
+SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerW( LPCWSTR name, LPHANDLER_FUNCTION handler )
+{
+    return RegisterServiceCtrlHandlerExW( name, ctrl_handler_thunk, handler );
+}
+
+/******************************************************************************
+ * RegisterServiceCtrlHandlerExA [ADVAPI32.@]
+ */
+SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerExA( LPCSTR name, LPHANDLER_FUNCTION_EX handler, LPVOID context )
+{
+    LPWSTR nameW;
+    SERVICE_STATUS_HANDLE ret;
+
+    nameW = SERV_dup(name);
+    ret = RegisterServiceCtrlHandlerExW( nameW, handler, context );
+    HeapFree( GetProcessHeap(), 0, nameW );
+    return ret;
+}
+
+/******************************************************************************
+ * RegisterServiceCtrlHandlerExW [ADVAPI32.@]
+ */
 SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerExW( LPCWSTR lpServiceName,
         LPHANDLER_FUNCTION_EX lpHandlerProc, LPVOID lpContext )
 {
-    service_data *service;
     SERVICE_STATUS_HANDLE handle = 0;
+    unsigned int i;
 
     TRACE("%s %p %p\n", debugstr_w(lpServiceName), lpHandlerProc, lpContext);
 
     EnterCriticalSection( &service_cs );
-    LIST_FOR_EACH_ENTRY( service, &service_list, service_data, entry )
+    for (i = 0; i < nb_services; i++)
     {
-        if(!strcmpW(lpServiceName, service->name))
+        if(!strcmpW(lpServiceName, services[i]->name))
         {
-            service->handler.handler_ex = lpHandlerProc;
-            service->context = lpContext;
-            service->extended = TRUE;
-            handle = (SERVICE_STATUS_HANDLE)service;
+            services[i]->handler = lpHandlerProc;
+            services[i]->context = lpContext;
+            handle = ULongToHandle( i + 1 );
             break;
         }
     }
     LeaveCriticalSection( &service_cs );
 
     return handle;
+}
+
+/******************************************************************************
+ * EnumDependentServicesA [ADVAPI32.@]
+ */
+BOOL WINAPI EnumDependentServicesA( SC_HANDLE hService, DWORD dwServiceState,
+                                    LPENUM_SERVICE_STATUSA lpServices, DWORD cbBufSize,
+        LPDWORD pcbBytesNeeded, LPDWORD lpServicesReturned )
+{
+    FIXME("%p 0x%08x %p 0x%08x %p %p - stub\n", hService, dwServiceState,
+          lpServices, cbBufSize, pcbBytesNeeded, lpServicesReturned);
+
+    *lpServicesReturned = 0;
+    return TRUE;
+}
+
+/******************************************************************************
+ * EnumDependentServicesW [ADVAPI32.@]
+ */
+BOOL WINAPI EnumDependentServicesW( SC_HANDLE hService, DWORD dwServiceState,
+                                    LPENUM_SERVICE_STATUSW lpServices, DWORD cbBufSize,
+                                    LPDWORD pcbBytesNeeded, LPDWORD lpServicesReturned )
+{
+    FIXME("%p 0x%08x %p 0x%08x %p %p - stub\n", hService, dwServiceState,
+          lpServices, cbBufSize, pcbBytesNeeded, lpServicesReturned);
+
+    *lpServicesReturned = 0;
+    return TRUE;
 }

@@ -154,6 +154,44 @@ int is_union(unsigned char type)
     }
 }
 
+static int type_has_pointers(const type_t *type)
+{
+    if (is_user_type(type))
+        return FALSE;
+    else if (is_ptr(type))
+        return TRUE;
+    else if (is_array(type))
+        return type_has_pointers(type->ref);
+    else if (is_struct(type->type))
+    {
+        const var_t *field;
+        if (type->fields) LIST_FOR_EACH_ENTRY( field, type->fields, const var_t, entry )
+        {
+            if (type_has_pointers(field->type))
+                return TRUE;
+        }
+    }
+    else if (is_union(type->type))
+    {
+        var_list_t *fields;
+        const var_t *field;
+        if (type->type == RPC_FC_ENCAPSULATED_UNION)
+        {
+            const var_t *uv = LIST_ENTRY(list_tail(type->fields), const var_t, entry);
+            fields = uv->type->fields;
+        }
+        else
+            fields = type->fields;
+        if (fields) LIST_FOR_EACH_ENTRY( field, fields, const var_t, entry )
+        {
+            if (field->type && type_has_pointers(field->type))
+                return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 static unsigned short user_type_offset(const char *name)
 {
     user_type_t *ut;
@@ -1534,9 +1572,10 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
     if (!pointer_type)
         pointer_type = RPC_FC_RP;
 
-    has_pointer = FALSE;
     if (write_embedded_types(file, attrs, type->ref, name, FALSE, typestring_offset))
         has_pointer = TRUE;
+    else
+        has_pointer = type_has_pointers(type->ref);
 
     align = 0;
     size = type_memsize((is_conformant_array(type) ? type->ref : type), &align);
@@ -1716,6 +1755,7 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
     if (type->fields) LIST_FOR_EACH_ENTRY(f, type->fields, var_t, entry)
         has_pointers |= write_embedded_types(file, f->attrs, f->type, f->name,
                                              FALSE, tfsoff);
+    if (!has_pointers) has_pointers = type_has_pointers(type);
 
     array = find_array_or_string_in_struct(type);
     if (array && !processed(array->type))
@@ -2553,6 +2593,8 @@ void print_phase_basetype(FILE *file, int indent, enum remoting_phase phase,
             size = 0;
     }
 
+    if (phase == PHASE_MARSHAL)
+        print_file(file, indent, "MIDL_memset(_StubMsg.Buffer, 0, (0x%x - (long)_StubMsg.Buffer) & 0x%x);\n", alignment, alignment - 1);
     print_file(file, indent, "_StubMsg.Buffer = (unsigned char *)(((long)_StubMsg.Buffer + %u) & ~0x%x);\n",
                 alignment - 1, alignment - 1);
 
@@ -2594,19 +2636,6 @@ static inline int is_size_needed_for_phase(enum remoting_phase phase)
     return (phase != PHASE_UNMARSHAL);
 }
 
-static int needs_freeing(const attr_list_t *attrs, const type_t *t, int out)
-{
-    return
-        (is_user_type(t)
-         || (is_ptr(t)
-             && (t->ref->type == RPC_FC_IP
-                 || (is_struct(t->ref->type) && t->ref->type != RPC_FC_STRUCT)
-                 || is_ptr(t->ref)
-                 || is_user_type(t->ref))))
-         || (out && is_string_type(attrs, t))
-         || is_array(t);
-}
-
 expr_t *get_size_is_expr(const type_t *t, const char *name)
 {
     expr_t *x = NULL;
@@ -2643,12 +2672,7 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
     if (!in_attr && !out_attr)
         in_attr = 1;
 
-    if (phase == PHASE_FREE)
-    {
-        if (!needs_freeing(var->attrs, type, out_attr))
-            return;
-    }
-    else
+    if (phase != PHASE_FREE)
         switch (pass)
         {
         case PASS_IN:
@@ -2781,9 +2805,10 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
         {
             /* these are all unmarshalled by pointing into the buffer on the
              * server side */
-            if (type->type != RPC_FC_SMFARRAY &&
-                type->type != RPC_FC_LGFARRAY &&
-                type->type != RPC_FC_CARRAY)
+            if (type->type == RPC_FC_BOGUS_ARRAY ||
+                type->type == RPC_FC_CVARRAY ||
+                (type->type == RPC_FC_SMVARRAY && type->type == RPC_FC_LGVARRAY && in_attr) ||
+                (type->type == RPC_FC_CARRAY && type->type == RPC_FC_CARRAY && !in_attr))
             {
                 print_file(file, indent, "if (%s)\n", var->name);
                 indent++;
@@ -2793,7 +2818,8 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
     }
     else if (!is_ptr(var->type) && is_base_type(rtype))
     {
-        print_phase_basetype(file, indent, phase, pass, var, var->name);
+        if (phase != PHASE_FREE)
+            print_phase_basetype(file, indent, phase, pass, var, var->name);
     }
     else if (!is_ptr(var->type))
     {
@@ -2843,7 +2869,8 @@ static void write_remoting_arg(FILE *file, int indent, const func_t *func,
     {
         if (last_ptr(var->type) && (pointer_type == RPC_FC_RP) && is_base_type(rtype))
         {
-            print_phase_basetype(file, indent, phase, pass, var, var->name);
+            if (phase != PHASE_FREE)
+                print_phase_basetype(file, indent, phase, pass, var, var->name);
         }
         else if (last_ptr(var->type) && (pointer_type == RPC_FC_RP) && (rtype == RPC_FC_STRUCT))
         {
@@ -3086,7 +3113,8 @@ void declare_stub_args( FILE *file, int indent, const func_t *func )
             if (!in_attr && !var->type->size_is && !is_string)
             {
                 print_file(file, indent, "");
-                write_type_decl(file, var->type->ref, "_W%u", i++);
+                write_type_decl(file, var->type->declarray ? var->type : var->type->ref,
+                                "_W%u", i++);
                 fprintf(file, ";\n");
             }
 
@@ -3132,7 +3160,14 @@ void assign_stub_out_args( FILE *file, int indent, const func_t *func )
             print_file(file, indent, "");
             write_name(file, var);
 
-            if (var->type->size_is)
+            if (is_context_handle(var->type))
+            {
+                fprintf(file, " = NdrContextHandleInitialize(\n");
+                print_file(file, indent + 1, "&_StubMsg,\n");
+                print_file(file, indent + 1, "(PFORMAT_STRING)&__MIDL_TypeFormatString.Format[%d]);\n",
+                           var->type->typestring_offset);
+            }
+            else if (var->type->size_is)
             {
                 unsigned int size, align = 0;
                 type_t *type = var->type;

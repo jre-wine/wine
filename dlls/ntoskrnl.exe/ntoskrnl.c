@@ -172,7 +172,7 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
         DPRINTF( "%04x:Ret  driver dispatch %p (device=%p,irp=%p) retval=%08x\n",
                  GetCurrentThreadId(), dispatch, device, &irp, status );
 
-    *out_size = irp.IoStatus.u.Status ? 0 : irp.IoStatus.Information;
+    *out_size = (irp.IoStatus.u.Status >= 0) ? irp.IoStatus.Information : 0;
     return irp.IoStatus.u.Status;
 }
 
@@ -264,6 +264,53 @@ PIO_WORKITEM WINAPI IoAllocateWorkItem( PDEVICE_OBJECT DeviceObject )
 {
     FIXME( "stub: %p\n", DeviceObject );
     return NULL;
+}
+
+
+/***********************************************************************
+ *           IoCreateDriver   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoCreateDriver( UNICODE_STRING *name, PDRIVER_INITIALIZE init )
+{
+    DRIVER_OBJECT *driver;
+    DRIVER_EXTENSION *extension;
+    NTSTATUS status;
+
+    if (!(driver = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                    sizeof(*driver) + sizeof(*extension) )))
+        return STATUS_NO_MEMORY;
+
+    if ((status = RtlDuplicateUnicodeString( 1, name, &driver->DriverName )))
+    {
+        RtlFreeHeap( GetProcessHeap(), 0, driver );
+        return status;
+    }
+
+    extension = (DRIVER_EXTENSION *)(driver + 1);
+    driver->Size            = sizeof(*driver);
+    driver->DriverInit      = init;
+    driver->DriverExtension = extension;
+    extension->DriverObject   = driver;
+    extension->ServiceKeyName = driver->DriverName;
+
+    status = driver->DriverInit( driver, name );
+
+    if (status)
+    {
+        RtlFreeUnicodeString( &driver->DriverName );
+        RtlFreeHeap( GetProcessHeap(), 0, driver );
+    }
+    return status;
+}
+
+
+/***********************************************************************
+ *           IoDeleteDriver   (NTOSKRNL.EXE.@)
+ */
+void WINAPI IoDeleteDriver( DRIVER_OBJECT *driver )
+{
+    RtlFreeUnicodeString( &driver->DriverName );
+    RtlFreeHeap( GetProcessHeap(), 0, driver );
 }
 
 

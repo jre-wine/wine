@@ -107,6 +107,7 @@ typedef struct MimeBody
     ENCODINGTYPE encoding;
     void *data;
     IID data_iid;
+    BODYOFFSETS body_offsets;
 } MimeBody;
 
 static inline MimeBody *impl_from_IMimeBody( IMimeBody *iface )
@@ -268,6 +269,39 @@ static void unfold_header(char *header, int len)
     *(start - 1) = '\0';
 }
 
+static char *unquote_string(const char *str)
+{
+    int quoted = 0;
+    char *ret, *cp;
+
+    while(*str == ' ' || *str == '\t') str++;
+
+    if(*str == '"')
+    {
+        quoted = 1;
+        str++;
+    }
+    ret = strdupA(str);
+    for(cp = ret; *cp; cp++)
+    {
+        if(*cp == '\\')
+            memmove(cp, cp + 1, strlen(cp + 1) + 1);
+        else if(*cp == '"')
+        {
+            if(!quoted)
+            {
+                WARN("quote in unquoted string\n");
+            }
+            else
+            {
+                *cp = '\0';
+                break;
+            }
+        }
+    }
+    return ret;
+}
+
 static void add_param(header_t *header, const char *p)
 {
     const char *key = p, *value, *cp = p;
@@ -293,7 +327,7 @@ static void add_param(header_t *header, const char *p)
 
     param = HeapAlloc(GetProcessHeap(), 0, sizeof(*param));
     param->name = name;
-    param->value = strdupA(value);
+    param->value = unquote_string(value);
     list_add_tail(&header->params, &param->entry);
 }
 
@@ -396,7 +430,7 @@ static HRESULT parse_headers(MimeBody *body, IStream *stm)
     return hr;
 }
 
-static void emptry_param_list(struct list *list)
+static void empty_param_list(struct list *list)
 {
     param_t *param, *cursor2;
 
@@ -417,7 +451,7 @@ static void empty_header_list(struct list *list)
     {
         list_remove(&header->entry);
         PropVariantClear(&header->value);
-        emptry_param_list(&header->params);
+        empty_param_list(&header->params);
         HeapFree(GetProcessHeap(), 0, header);
     }
 }
@@ -442,6 +476,24 @@ static void release_data(REFIID riid, void *data)
         IStream_Release((IStream *)data);
     else
         FIXME("Unhandled data format %s\n", debugstr_guid(riid));
+}
+
+static HRESULT find_prop(MimeBody *body, const char *name, header_t **prop)
+{
+    header_t *header;
+
+    *prop = NULL;
+
+    LIST_FOR_EACH_ENTRY(header, &body->headers, header_t, entry)
+    {
+        if(!strcasecmp(name, header->prop->name))
+        {
+            *prop = header;
+            return S_OK;
+        }
+    }
+
+    return MIME_E_NOT_FOUND;
 }
 
 static HRESULT WINAPI MimeBody_QueryInterface(IMimeBody* iface,
@@ -670,8 +722,43 @@ static HRESULT WINAPI MimeBody_GetParameters(
                                     ULONG* pcParams,
                                     LPMIMEPARAMINFO* pprgParam)
 {
-    FIXME("stub\n");
-    return E_NOTIMPL;
+    MimeBody *This = impl_from_IMimeBody(iface);
+    HRESULT hr;
+    header_t *header;
+
+    TRACE("(%p)->(%s, %p, %p)\n", iface, debugstr_a(pszName), pcParams, pprgParam);
+
+    *pprgParam = NULL;
+    *pcParams = 0;
+
+    hr = find_prop(This, pszName, &header);
+    if(hr != S_OK) return hr;
+
+    *pcParams = list_count(&header->params);
+    if(*pcParams)
+    {
+        IMimeAllocator *alloc;
+        param_t *param;
+        MIMEPARAMINFO *info;
+
+        MimeOleGetAllocator(&alloc);
+
+        *pprgParam = info = IMimeAllocator_Alloc(alloc, *pcParams * sizeof(**pprgParam));
+        LIST_FOR_EACH_ENTRY(param, &header->params, param_t, entry)
+        {
+            int len;
+
+            len = strlen(param->name) + 1;
+            info->pszName = IMimeAllocator_Alloc(alloc, len);
+            memcpy(info->pszName, param->name, len);
+            len = strlen(param->value) + 1;
+            info->pszData = IMimeAllocator_Alloc(alloc, len);
+            memcpy(info->pszData, param->value, len);
+            info++;
+        }
+        IMimeAllocator_Release(alloc);
+    }
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeBody_IsContentType(
@@ -771,8 +858,13 @@ static HRESULT WINAPI MimeBody_GetOffsets(
                                  IMimeBody* iface,
                                  LPBODYOFFSETS pOffsets)
 {
-    FIXME("stub\n");
-    return E_NOTIMPL;
+    MimeBody *This = impl_from_IMimeBody(iface);
+    TRACE("(%p)->(%p)\n", This, pOffsets);
+
+    *pOffsets = This->body_offsets;
+
+    if(This->body_offsets.cbBodyEnd == 0) return MIME_E_NO_DATA;
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeBody_GetCurrentEncoding(
@@ -951,11 +1043,21 @@ static IMimeBodyVtbl body_vtbl =
     MimeBody_GetHandle
 };
 
+static HRESULT MimeBody_set_offsets(MimeBody *body, const BODYOFFSETS *offsets)
+{
+    TRACE("setting offsets to %d, %d, %d, %d\n", offsets->cbBoundaryStart,
+          offsets->cbHeaderStart, offsets->cbBodyStart, offsets->cbBodyEnd);
+
+    body->body_offsets = *offsets;
+    return S_OK;
+}
+
 #define FIRST_CUSTOM_PROP_ID 0x100
 
 HRESULT MimeBody_create(IUnknown *outer, void **obj)
 {
     MimeBody *This;
+    BODYOFFSETS body_offsets;
 
     *obj = NULL;
 
@@ -975,6 +1077,10 @@ HRESULT MimeBody_create(IUnknown *outer, void **obj)
     This->encoding = IET_7BIT;
     This->data = NULL;
     This->data_iid = IID_NULL;
+
+    body_offsets.cbBoundaryStart = body_offsets.cbHeaderStart = 0;
+    body_offsets.cbBodyStart     = body_offsets.cbBodyEnd     = 0;
+    MimeBody_set_offsets(This, &body_offsets);
 
     *obj = (IMimeBody *)&This->lpVtbl;
     return S_OK;
@@ -1823,4 +1929,209 @@ HRESULT WINAPI MimeOleCreateSecurity(IMimeSecurity **ppSecurity)
 
     *ppSecurity = (IMimeSecurity *)&This->lpVtbl;
     return S_OK;
+}
+
+
+typedef struct
+{
+    IMimeAllocatorVtbl *lpVtbl;
+} MimeAllocator;
+
+static HRESULT WINAPI MimeAlloc_QueryInterface(
+        IMimeAllocator* iface,
+        REFIID riid,
+        void **obj)
+{
+    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IMalloc) ||
+        IsEqualIID(riid, &IID_IMimeAllocator))
+    {
+        *obj = iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+
+    FIXME("no interface for %s\n", debugstr_guid(riid));
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI MimeAlloc_AddRef(
+        IMimeAllocator* iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI MimeAlloc_Release(
+        IMimeAllocator* iface)
+{
+    return 1;
+}
+
+static LPVOID WINAPI MimeAlloc_Alloc(
+        IMimeAllocator* iface,
+        ULONG cb)
+{
+    return CoTaskMemAlloc(cb);
+}
+
+static LPVOID WINAPI MimeAlloc_Realloc(
+        IMimeAllocator* iface,
+        LPVOID pv,
+        ULONG cb)
+{
+    return CoTaskMemRealloc(pv, cb);
+}
+
+static void WINAPI MimeAlloc_Free(
+        IMimeAllocator* iface,
+        LPVOID pv)
+{
+    return CoTaskMemFree(pv);
+}
+
+static ULONG WINAPI MimeAlloc_GetSize(
+        IMimeAllocator* iface,
+        LPVOID pv)
+{
+    FIXME("stub\n");
+    return 0;
+}
+
+static int WINAPI MimeAlloc_DidAlloc(
+        IMimeAllocator* iface,
+        LPVOID pv)
+{
+    FIXME("stub\n");
+    return 0;
+}
+
+static void WINAPI MimeAlloc_HeapMinimize(
+        IMimeAllocator* iface)
+{
+    FIXME("stub\n");
+    return;
+}
+
+static HRESULT WINAPI MimeAlloc_FreeParamInfoArray(
+        IMimeAllocator* iface,
+        ULONG cParams,
+        LPMIMEPARAMINFO prgParam,
+        boolean fFreeArray)
+{
+    ULONG i;
+    TRACE("(%p)->(%d, %p, %d)\n", iface, cParams, prgParam, fFreeArray);
+
+    for(i = 0; i < cParams; i++)
+    {
+        IMimeAllocator_Free(iface, prgParam[i].pszName);
+        IMimeAllocator_Free(iface, prgParam[i].pszData);
+    }
+    if(fFreeArray) IMimeAllocator_Free(iface, prgParam);
+    return S_OK;
+}
+
+static HRESULT WINAPI MimeAlloc_FreeAddressList(
+        IMimeAllocator* iface,
+        LPADDRESSLIST pList)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeAlloc_FreeAddressProps(
+        IMimeAllocator* iface,
+        LPADDRESSPROPS pAddress)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeAlloc_ReleaseObjects(
+        IMimeAllocator* iface,
+        ULONG cObjects,
+        IUnknown **prgpUnknown,
+        boolean fFreeArray)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+
+static HRESULT WINAPI MimeAlloc_FreeEnumHeaderRowArray(
+        IMimeAllocator* iface,
+        ULONG cRows,
+        LPENUMHEADERROW prgRow,
+        boolean fFreeArray)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeAlloc_FreeEnumPropertyArray(
+        IMimeAllocator* iface,
+        ULONG cProps,
+        LPENUMPROPERTY prgProp,
+        boolean fFreeArray)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MimeAlloc_FreeThumbprint(
+        IMimeAllocator* iface,
+        THUMBBLOB *pthumbprint)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+
+static HRESULT WINAPI MimeAlloc_PropVariantClear(
+        IMimeAllocator* iface,
+        LPPROPVARIANT pProp)
+{
+    FIXME("stub\n");
+    return E_NOTIMPL;
+}
+
+static IMimeAllocatorVtbl mime_alloc_vtbl =
+{
+    MimeAlloc_QueryInterface,
+    MimeAlloc_AddRef,
+    MimeAlloc_Release,
+    MimeAlloc_Alloc,
+    MimeAlloc_Realloc,
+    MimeAlloc_Free,
+    MimeAlloc_GetSize,
+    MimeAlloc_DidAlloc,
+    MimeAlloc_HeapMinimize,
+    MimeAlloc_FreeParamInfoArray,
+    MimeAlloc_FreeAddressList,
+    MimeAlloc_FreeAddressProps,
+    MimeAlloc_ReleaseObjects,
+    MimeAlloc_FreeEnumHeaderRowArray,
+    MimeAlloc_FreeEnumPropertyArray,
+    MimeAlloc_FreeThumbprint,
+    MimeAlloc_PropVariantClear
+};
+
+static MimeAllocator mime_allocator =
+{
+    &mime_alloc_vtbl
+};
+
+HRESULT MimeAllocator_create(IUnknown *outer, void **obj)
+{
+    if(outer) return CLASS_E_NOAGGREGATION;
+
+    *obj = &mime_allocator;
+    return S_OK;
+}
+
+HRESULT WINAPI MimeOleGetAllocator(IMimeAllocator **alloc)
+{
+    return MimeAllocator_create(NULL, (void**)alloc);
 }

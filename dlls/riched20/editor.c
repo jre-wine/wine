@@ -228,6 +228,7 @@
 #include "shlwapi.h"
 #include "rtf.h"
 #include "imm.h"
+#include "res.h"
 
 #define STACK_SIZE_DEFAULT  100
 #define STACK_SIZE_MAX     1000
@@ -242,6 +243,8 @@ static const WCHAR RichEdit20W[] = {'R', 'i', 'c', 'h', 'E', 'd', 'i', 't', '2',
 static const WCHAR RichEdit50W[] = {'R', 'i', 'c', 'h', 'E', 'd', 'i', 't', '5', '0', 'W', 0};
 static const WCHAR REListBox20W[] = {'R','E','L','i','s','t','B','o','x','2','0','W', 0};
 static const WCHAR REComboBox20W[] = {'R','E','C','o','m','b','o','B','o','x','2','0','W', 0};
+static HCURSOR hLeft;
+static HCURSOR hBeam;
 
 int me_debug = 0;
 HANDLE me_heap = NULL;
@@ -1088,6 +1091,14 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
   return FALSE;
 }
 
+static void ME_SetCursor(ME_TextEditor *editor, int x)
+{
+    if (x < editor->selofs || editor->linesel)
+      SetCursor(hLeft);
+    else
+      SetCursor(hBeam);
+}
+
 static BOOL ME_ShowContextMenu(ME_TextEditor *editor, int x, int y)
 {
   CHARRANGE selrange;
@@ -1124,7 +1135,7 @@ ME_TextEditor *ME_MakeEditor(HWND hWnd) {
   ME_MakeFirstParagraph(hDC, ed->pBuffer);
   ReleaseDC(hWnd, hDC);
   ed->bCaretShown = FALSE;
-  ed->nCursors = 2;
+  ed->nCursors = 4;
   ed->pCursors = ALLOC_N_OBJ(ME_Cursor, ed->nCursors);
   ed->pCursors[0].pRun = ME_FindItemFwd(ed->pBuffer->pFirst, diRun);
   ed->pCursors[0].nOffset = 0;
@@ -1165,7 +1176,12 @@ ME_TextEditor *ME_MakeEditor(HWND hWnd) {
   }
   
   ME_CheckCharOffsets(ed);
-  
+  if (GetWindowLongW(hWnd, GWL_STYLE) & ES_SELECTIONBAR)
+    ed->selofs = 16;
+  else
+    ed->selofs = 0;
+  ed->linesel = 0;
+
   if (GetWindowLongW(hWnd, GWL_STYLE) & ES_PASSWORD)
     ed->cPasswordMask = '*';
   else
@@ -1254,6 +1270,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
       DisableThreadLibraryCalls(hinstDLL);
       me_heap = HeapCreate (0, 0x10000, 0);
       if (!ME_RegisterEditorClass(hinstDLL)) return FALSE;
+      hLeft = LoadCursorW(hinstDLL, MAKEINTRESOURCEW(OCR_REVERSE));
+      hBeam = LoadCursorW(NULL, MAKEINTRESOURCEW(IDC_IBEAM));
       LookupInit();
       break;
 
@@ -1551,7 +1569,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
      * setting the bit to work                                        
      */
     DWORD mask = ECO_VERTICAL | ECO_AUTOHSCROLL | ECO_AUTOVSCROLL |
-                 ECO_NOHIDESEL | ECO_READONLY | ECO_WANTRETURN;
+                 ECO_NOHIDESEL | ECO_READONLY | ECO_WANTRETURN | ECO_SELECTIONBAR;
     DWORD raw = GetWindowLongW(hWnd, GWL_STYLE);
     DWORD settings = mask & raw;
 
@@ -1571,19 +1589,23 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     }
     SetWindowLongW(hWnd, GWL_STYLE, (raw & ~mask) | (settings & mask));
 
-    if (lParam & ECO_AUTOWORDSELECTION)
+    if (settings & ECO_AUTOWORDSELECTION)
       FIXME("ECO_AUTOWORDSELECTION not implemented yet!\n");
-    if (lParam & ECO_SELECTIONBAR)
-      FIXME("ECO_SELECTIONBAR not implemented yet!\n");
-    if (lParam & ECO_VERTICAL)
+    if (settings & ECO_SELECTIONBAR)
+        editor->selofs = 16;
+    else
+        editor->selofs = 0;
+    ME_WrapMarkedParagraphs(editor);
+
+    if (settings & ECO_VERTICAL)
       FIXME("ECO_VERTICAL not implemented yet!\n");
-    if (lParam & ECO_AUTOHSCROLL)
+    if (settings & ECO_AUTOHSCROLL)
       FIXME("ECO_AUTOHSCROLL not implemented yet!\n");
-    if (lParam & ECO_AUTOVSCROLL)
+    if (settings & ECO_AUTOVSCROLL)
       FIXME("ECO_AUTOVSCROLL not implemented yet!\n");
-    if (lParam & ECO_NOHIDESEL)
+    if (settings & ECO_NOHIDESEL)
       FIXME("ECO_NOHIDESEL not implemented yet!\n");
-    if (lParam & ECO_WANTRETURN)
+    if (settings & ECO_WANTRETURN)
       FIXME("ECO_WANTRETURN not implemented yet!\n");
 
     return settings;
@@ -2356,15 +2378,19 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     ME_LButtonDown(editor, (short)LOWORD(lParam), (short)HIWORD(lParam));
     SetCapture(hWnd);
     ME_LinkNotify(editor,msg,wParam,lParam);
+    ME_SetCursor(editor, LOWORD(lParam));
     break;
   case WM_MOUSEMOVE:
     if (GetCapture() == hWnd)
       ME_MouseMove(editor, (short)LOWORD(lParam), (short)HIWORD(lParam));
     ME_LinkNotify(editor,msg,wParam,lParam);
+    ME_SetCursor(editor, LOWORD(lParam));
     break;
   case WM_LBUTTONUP:
     if (GetCapture() == hWnd)
       ReleaseCapture();
+    editor->linesel = 0;
+    ME_SetCursor(editor, LOWORD(lParam));
     ME_LinkNotify(editor,msg,wParam,lParam);
     break;
   case WM_LBUTTONDBLCLK:
@@ -2878,7 +2904,7 @@ static BOOL ME_RegisterEditorClass(HINSTANCE hInstance)
   wcW.cbWndExtra = sizeof(ME_TextEditor *);
   wcW.hInstance = NULL; /* hInstance would register DLL-local class */
   wcW.hIcon = NULL;
-  wcW.hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(IDC_IBEAM));
+  wcW.hCursor = hBeam;
   wcW.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
   wcW.lpszMenuName = NULL;
 

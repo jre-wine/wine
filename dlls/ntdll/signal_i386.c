@@ -936,7 +936,9 @@ static EXCEPTION_RECORD *setup_exception( SIGCONTEXT *sigcontext, raise_func fun
     }
 
     stack--;  /* push the stack_layout structure */
-#ifdef HAVE_VALGRIND_MEMCHECK_H
+#if defined(VALGRIND_MAKE_MEM_UNDEFINED)
+    VALGRIND_MAKE_MEM_UNDEFINED(stack, sizeof(*stack));
+#elif defined(VALGRIND_MAKE_WRITABLE)
     VALGRIND_MAKE_WRITABLE(stack, sizeof(*stack));
 #endif
     stack->ret_addr     = (void *)0xdeadbabe;  /* raise_func must not return */
@@ -1289,11 +1291,11 @@ static void abrt_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 
 
 /**********************************************************************
- *		term_handler
+ *		quit_handler
  *
- * Handler for SIGTERM.
+ * Handler for SIGQUIT.
  */
-static void term_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+static void quit_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     WORD fs, gs;
     init_handler( sigcontext, &fs, &gs );
@@ -1392,8 +1394,8 @@ BOOL SIGNAL_Init(void)
     if (sigaction( SIGFPE, &sig_act, NULL ) == -1) goto error;
     sig_act.sa_sigaction = abrt_handler;
     if (sigaction( SIGABRT, &sig_act, NULL ) == -1) goto error;
-    sig_act.sa_sigaction = term_handler;
-    if (sigaction( SIGTERM, &sig_act, NULL ) == -1) goto error;
+    sig_act.sa_sigaction = quit_handler;
+    if (sigaction( SIGQUIT, &sig_act, NULL ) == -1) goto error;
     sig_act.sa_sigaction = usr1_handler;
     if (sigaction( SIGUSR1, &sig_act, NULL ) == -1) goto error;
 

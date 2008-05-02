@@ -202,6 +202,24 @@ typedef struct tagWTI_DEVICES_INFO
         /* a null-terminated string containing the devices Plug and Play ID.*/
 }   WTI_DEVICES_INFO, *LPWTI_DEVICES_INFO;
 
+
+/***********************************************************************
+ * WACOM WINTAB EXTENSIONS TO SUPPORT CSR_TYPE
+ *   In Wintab 1.2, a CSR_TYPE feature was added.  This adds the
+ *   ability to return a type of cursor on a tablet.
+ *   Unfortunately, we cannot get the cursor type directly from X,
+ *   and it is not specified directly anywhere.  So we virtualize
+ *   the type here.  (This is unfortunate, the kernel module has
+ *   the exact type, but we have no way of getting that module to
+ *   pass us that type).
+ */
+
+#define CSR_TYPE_PEN        0x822
+#define CSR_TYPE_ERASER     0x82a
+#define CSR_TYPE_MOUSE_2D   0x007
+#define CSR_TYPE_MOUSE_4D   0x094
+
+
 typedef struct tagWTPACKET {
         HCTX pkContext;
         UINT pkStatus;
@@ -286,6 +304,64 @@ static int Tablet_ErrorHandler(Display *dpy, XErrorEvent *event, void* arg)
     return 1;
 }
 
+static int find_cursor_by_type(int cursor_type, int exclude)
+{
+    int i;
+    for (i = 0; i < gNumCursors; i++)
+        if (i != exclude)
+            if (gSysCursor[i].TYPE == cursor_type)
+                return i;
+
+    return -1;
+}
+
+static void swap_cursors(int a, int b)
+{
+    WTI_CURSORS_INFO temp;
+    temp = gSysCursor[a];
+    gSysCursor[a] = gSysCursor[b];
+    gSysCursor[b] = temp;
+}
+
+/* Adobe Photoshop 7.0 relies on the eraser being cursor #2 or #5, and it assumes the stylus is 1.
+**   If the X configuration is not set up that way, make it
+*/
+static void Tablet_FixupCursors(void)
+{
+    if (gNumCursors >= 1)
+        if (gSysCursor[1].TYPE != CSR_TYPE_PEN)
+        {
+            int stylus;
+            stylus = find_cursor_by_type(CSR_TYPE_PEN, 1);
+            if (stylus >= 0)
+            {
+                swap_cursors(1, stylus);
+                TRACE("Swapped cursor %d with stylus slot (1) for compatibility with older programs\n", stylus);
+            }
+        }
+
+    if (gNumCursors >= 2)
+        if (gSysCursor[2].TYPE != CSR_TYPE_ERASER)
+        {
+            int eraser;
+            eraser = find_cursor_by_type(CSR_TYPE_ERASER, 2);
+            if (eraser >= 0)
+            {
+                swap_cursors(2, eraser);
+                TRACE("Swapped cursor %d with eraser slot (2) for compatibility with older programs\n", eraser);
+            }
+        }
+}
+
+static void trace_axes(XValuatorInfoPtr val)
+{
+    int i;
+    XAxisInfoPtr axis;
+
+    for (i = 0, axis = val->axes ; i < val->num_axes; i++, axis++)
+        TRACE("        Axis %d: [resolution %d|min_value %d|max_value %d]\n", i, axis->resolution, axis->min_value, axis->max_value);
+}
+
 void X11DRV_LoadTabletInfo(HWND hwnddefault)
 {
     const WCHAR SZ_CONTEXT_NAME[] = {'W','i','n','e',' ','T','a','b','l','e','t',' ','C','o','n','t','e','x','t',0};
@@ -364,7 +440,15 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
     {
         int class_loop;
 
-        TRACE("Trying device %i(%s)\n",loop,devices[loop].name);
+        TRACE("Device %i:  [id %d|name %s|type %s|num_classes %d|use %s]\n",
+                loop, (int) devices[loop].id, devices[loop].name,
+                XGetAtomName(data->display, devices[loop].type),
+                devices[loop].num_classes,
+                devices[loop].use == IsXKeyboard ? "IsXKeyboard" :
+                    devices[loop].use == IsXPointer ? "IsXPointer" :
+                    devices[loop].use == IsXExtensionDevice ? "IsXExtensionDevice" :
+                    "Unknown"
+                );
         if (devices[loop].use == IsXExtensionDevice)
         {
             LPWTI_CURSORS_INFO cursor;
@@ -390,8 +474,8 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
                 int shft = 0;
 
                 X11DRV_expect_error(data->display,Tablet_ErrorHandler,NULL);
-                pXGetDeviceButtonMapping(data->display, opendevice, map, 32);
-                if (X11DRV_check_error())
+                cursor->BUTTONS = pXGetDeviceButtonMapping(data->display, opendevice, map, 32);
+                if (X11DRV_check_error() || cursor->BUTTONS <= 0)
                 {
                     TRACE("No buttons, Non Tablet Device\n");
                     pXCloseDevice(data->display, opendevice);
@@ -419,15 +503,15 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
                               PK_NORMAL_PRESSURE | PK_TANGENT_PRESSURE |
                               PK_ORIENTATION;
 
-            cursor->PHYSID = cursor_target;
+            cursor->PHYSID = target->id;
             cursor->NPBUTTON = 1;
             cursor->NPBTNMARKS[0] = 0 ;
             cursor->NPBTNMARKS[1] = 1 ;
             cursor->CAPABILITIES = CRC_MULTIMODE;
             if (strcasecmp(target->name,"stylus")==0)
-                cursor->TYPE = 0x4825;
+                cursor->TYPE = CSR_TYPE_PEN;
             if (strcasecmp(target->name,"eraser")==0)
-                cursor->TYPE = 0xc85a;
+                cursor->TYPE = CSR_TYPE_ERASER;
 
 
             any = (XAnyClassPtr) (target->inputclassinfo);
@@ -436,10 +520,22 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
             {
                 switch (any->class)
                 {
+
                     case ValuatorClass:
-                        if (!axis_read_complete)
+                        Val = (XValuatorInfoPtr) any;
+                        TRACE("    ValidatorInput %d: [class %d|length %d|num_axes %d|mode %d|motion_buffer %ld]\n",
+                                class_loop, (int) Val->class, Val->length, Val->num_axes, Val->mode, Val->motion_buffer);
+                        if (TRACE_ON(wintab32))
+                            trace_axes(Val);
+
+                        /* FIXME:  This is imperfect; we compute our devices capabilities based upon the
+                        **         first pen type device we find.  However, a more correct implementation
+                        **         would require acquiring a wide variety of tablets and running through
+                        **         the various inputs to see what the values are.  Odds are that a
+                        **         more 'correct' algorithm would condense to this one anyway.
+                        */
+                        if (!axis_read_complete && Val->num_axes >= 5 && cursor->TYPE == CSR_TYPE_PEN)
                         {
-                            Val = (XValuatorInfoPtr) any;
                             Axis = (XAxisInfoPtr) ((char *) Val + sizeof
                                 (XValuatorInfo));
 
@@ -510,7 +606,8 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
                         int i;
 
                         Button = (XButtonInfoPtr) any;
-                        cursor->BUTTONS = Button->num_buttons;
+                        TRACE("    ButtonInput %d: [class %d|length %d|num_buttons %d]\n",
+                                class_loop, (int) Button->class, Button->length, Button->num_buttons);
                         cursor->BTNNAMES = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*cchBuf);
                         for (i = 0; i < cursor->BUTTONS; i++)
                         {
@@ -536,9 +633,10 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
         }
     }
     pXFreeDeviceList(devices);
-    wine_tsx11_unlock();
     gSysDevice.NCSRTYPES = cursor_target+1;
     gNumCursors = cursor_target+1;
+    Tablet_FixupCursors();
+    wine_tsx11_unlock();
 }
 
 static int figure_deg(int x, int y)
@@ -574,12 +672,12 @@ static int figure_deg(int x, int y)
     return rc;
 }
 
-static int get_button_state(int deviceid)
+static int get_button_state(int curnum)
 {
-    return button_state[deviceid];
+    return button_state[curnum];
 }
 
-static void set_button_state(XID deviceid)
+static void set_button_state(int curnum, XID deviceid)
 {
     struct x11drv_thread_data *data = x11drv_thread_data();
     XDevice *device;
@@ -614,23 +712,40 @@ static void set_button_state(XID deviceid)
     }
     pXFreeDeviceState(state);
     wine_tsx11_unlock();
-    button_state[deviceid] = rc;
+    button_state[curnum] = rc;
+}
+
+static int cursor_from_device(DWORD deviceid, LPWTI_CURSORS_INFO *cursorp)
+{
+    int i;
+    for (i = 0; i < gNumCursors; i++)
+        if (gSysCursor[i].PHYSID == deviceid)
+        {
+            *cursorp = &gSysCursor[i];
+            return i;
+        }
+
+    ERR("Could not map device id %d to a cursor\n", (int) deviceid);
+    return -1;
 }
 
 static void motion_event( HWND hwnd, XEvent *event )
 {
     XDeviceMotionEvent *motion = (XDeviceMotionEvent *)event;
-    LPWTI_CURSORS_INFO cursor = &gSysCursor[motion->deviceid];
+    LPWTI_CURSORS_INFO cursor;
+    int curnum = cursor_from_device(motion->deviceid, &cursor);
+    if (curnum < 0)
+        return;
 
     memset(&gMsgPacket,0,sizeof(WTPACKET));
 
-    TRACE("Received tablet motion event (%p)\n",hwnd);
+    TRACE("Received tablet motion event (%p); device id %d, cursor num %d\n",hwnd, (int) motion->deviceid, curnum);
 
     /* Set cursor to inverted if cursor is the eraser */
-    gMsgPacket.pkStatus = (cursor->TYPE == 0xc85a ?TPS_INVERT:0);
+    gMsgPacket.pkStatus = (cursor->TYPE  == CSR_TYPE_ERASER ? TPS_INVERT:0);
     gMsgPacket.pkTime = EVENT_x11_time_to_win32_time(motion->time);
     gMsgPacket.pkSerialNumber = gSerial++;
-    gMsgPacket.pkCursor = motion->deviceid;
+    gMsgPacket.pkCursor = curnum;
     gMsgPacket.pkX = motion->axis_data[0];
     gMsgPacket.pkY = motion->axis_data[1];
     gMsgPacket.pkOrientation.orAzimuth = figure_deg(motion->axis_data[3],motion->axis_data[4]);
@@ -639,25 +754,28 @@ static void motion_event( HWND hwnd, XEvent *event )
                                              abs(motion->axis_data[4])))
                                            * (gMsgPacket.pkStatus & TPS_INVERT?-1:1));
     gMsgPacket.pkNormalPressure = motion->axis_data[2];
-    gMsgPacket.pkButtons = get_button_state(motion->deviceid);
+    gMsgPacket.pkButtons = get_button_state(curnum);
     SendMessageW(hwndTabletDefault,WT_PACKET,0,(LPARAM)hwnd);
 }
 
 static void button_event( HWND hwnd, XEvent *event )
 {
     XDeviceButtonEvent *button = (XDeviceButtonEvent *) event;
-    LPWTI_CURSORS_INFO cursor = &gSysCursor[button->deviceid];
+    LPWTI_CURSORS_INFO cursor;
+    int curnum = cursor_from_device(button->deviceid, &cursor);
+    if (curnum < 0)
+        return;
 
     memset(&gMsgPacket,0,sizeof(WTPACKET));
 
     TRACE("Received tablet button %s event\n", (event->type == button_press_type)?"press":"release");
 
     /* Set cursor to inverted if cursor is the eraser */
-    gMsgPacket.pkStatus = (cursor->TYPE == 0xc85a ?TPS_INVERT:0);
-    set_button_state(button->deviceid);
+    gMsgPacket.pkStatus = (cursor->TYPE == CSR_TYPE_ERASER ? TPS_INVERT:0);
+    set_button_state(curnum, button->deviceid);
     gMsgPacket.pkTime = EVENT_x11_time_to_win32_time(button->time);
     gMsgPacket.pkSerialNumber = gSerial++;
-    gMsgPacket.pkCursor = button->deviceid;
+    gMsgPacket.pkCursor = curnum;
     gMsgPacket.pkX = button->axis_data[0];
     gMsgPacket.pkY = button->axis_data[1];
     gMsgPacket.pkOrientation.orAzimuth = figure_deg(button->axis_data[3],button->axis_data[4]);
@@ -665,7 +783,7 @@ static void button_event( HWND hwnd, XEvent *event )
                                                             abs(button->axis_data[4])))
                                            * (gMsgPacket.pkStatus & TPS_INVERT?-1:1));
     gMsgPacket.pkNormalPressure = button->axis_data[2];
-    gMsgPacket.pkButtons = get_button_state(button->deviceid);
+    gMsgPacket.pkButtons = get_button_state(curnum);
     SendMessageW(hwndTabletDefault,WT_PACKET,0,(LPARAM)hwnd);
 }
 
@@ -680,17 +798,20 @@ static void key_event( HWND hwnd, XEvent *event )
 static void proximity_event( HWND hwnd, XEvent *event )
 {
     XProximityNotifyEvent *proximity = (XProximityNotifyEvent *) event;
-    LPWTI_CURSORS_INFO cursor = &gSysCursor[proximity->deviceid];
+    LPWTI_CURSORS_INFO cursor;
+    int curnum = cursor_from_device(proximity->deviceid, &cursor);
+    if (curnum < 0)
+        return;
 
     memset(&gMsgPacket,0,sizeof(WTPACKET));
 
     TRACE("Received tablet proximity event\n");
     /* Set cursor to inverted if cursor is the eraser */
-    gMsgPacket.pkStatus = (cursor->TYPE == 0xc85a ?TPS_INVERT:0);
+    gMsgPacket.pkStatus = (cursor->TYPE == CSR_TYPE_ERASER ? TPS_INVERT:0);
     gMsgPacket.pkStatus |= (event->type==proximity_out_type)?TPS_PROXIMITY:0;
     gMsgPacket.pkTime = EVENT_x11_time_to_win32_time(proximity->time);
     gMsgPacket.pkSerialNumber = gSerial++;
-    gMsgPacket.pkCursor = proximity->deviceid;
+    gMsgPacket.pkCursor = curnum;
     gMsgPacket.pkX = proximity->axis_data[0];
     gMsgPacket.pkY = proximity->axis_data[1];
     gMsgPacket.pkOrientation.orAzimuth = figure_deg(proximity->axis_data[3],proximity->axis_data[4]);
@@ -698,7 +819,7 @@ static void proximity_event( HWND hwnd, XEvent *event )
                                                             abs(proximity->axis_data[4])))
                                            * (gMsgPacket.pkStatus & TPS_INVERT?-1:1));
     gMsgPacket.pkNormalPressure = proximity->axis_data[2];
-    gMsgPacket.pkButtons = get_button_state(proximity->deviceid);
+    gMsgPacket.pkButtons = get_button_state(curnum);
 
     SendMessageW(hwndTabletDefault, WT_PROXIMITY, (event->type == proximity_in_type), (LPARAM)hwnd);
 }
@@ -747,19 +868,19 @@ int X11DRV_AttachEventQueueToTablet(HWND hOwner)
         if (the_device->num_classes > 0)
         {
             DeviceKeyPress(the_device, key_press_type, event_list[event_number]);
-            if (event_list[event_number]) event_number++;
+            if (key_press_type) event_number++;
             DeviceKeyRelease(the_device, key_release_type, event_list[event_number]);
-            if (event_list[event_number]) event_number++;
+            if (key_release_type) event_number++;
             DeviceButtonPress(the_device, button_press_type, event_list[event_number]);
-            if (event_list[event_number]) event_number++;
+            if (button_press_type) event_number++;
             DeviceButtonRelease(the_device, button_release_type, event_list[event_number]);
-            if (event_list[event_number]) event_number++;
+            if (button_release_type) event_number++;
             DeviceMotionNotify(the_device, motion_type, event_list[event_number]);
-            if (event_list[event_number]) event_number++;
+            if (motion_type) event_number++;
             ProximityIn(the_device, proximity_in_type, event_list[event_number]);
-            if (event_list[event_number]) event_number++;
+            if (proximity_in_type) event_number++;
             ProximityOut(the_device, proximity_out_type, event_list[event_number]);
-            if (event_list[event_number]) event_number++;
+            if (proximity_out_type) event_number++;
 
             if (key_press_type) X11DRV_register_event_handler( key_press_type, key_event );
             if (key_release_type) X11DRV_register_event_handler( key_release_type, key_event );
@@ -830,6 +951,7 @@ UINT X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
             switch (nIndex)
             {
                 WORD version;
+                UINT num;
                 case IFC_WINTABID:
                 {
                     static const WCHAR driver[] = {'W','i','n','e',' ','W','i','n','t','a','b',' ','1','.','1',0};
@@ -843,6 +965,14 @@ UINT X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
                 case IFC_IMPLVERSION:
                     version = (0x00) | (0x01 << 8);
                     rc = CopyTabletData(lpOutput, &version,sizeof(WORD));
+                    break;
+                case IFC_NDEVICES:
+                    num = 1;
+                    rc = CopyTabletData(lpOutput, &num,sizeof(num));
+                    break;
+                case IFC_NCURSORS:
+                    num = gNumCursors;
+                    rc = CopyTabletData(lpOutput, &num,sizeof(num));
                     break;
                 default:
                     FIXME("WTI_INTERFACE unhandled index %i\n",nIndex);
@@ -1009,96 +1139,104 @@ UINT X11DRV_WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
         case WTI_CURSORS+7:
         case WTI_CURSORS+8:
         case WTI_CURSORS+9:
-            tgtcursor = &gSysCursor[wCategory - WTI_CURSORS];
-            switch (nIndex)
+            if (wCategory - WTI_CURSORS >= gNumCursors)
             {
-                case CSR_NAME:
-                    rc = CopyTabletData(lpOutput, &tgtcursor->NAME,
-                                        (strlenW(tgtcursor->NAME)+1) * sizeof(WCHAR));
-                    break;
-                case CSR_ACTIVE:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->ACTIVE,
-                                        sizeof(BOOL));
-                    break;
-                case CSR_PKTDATA:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->PKTDATA,
-                                        sizeof(WTPKT));
-                    break;
-                case CSR_BUTTONS:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->BUTTONS,
-                                        sizeof(BYTE));
-                    break;
-                case CSR_BUTTONBITS:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->BUTTONBITS,
-                                        sizeof(BYTE));
-                    break;
-                case CSR_BTNNAMES:
-                    FIXME("Button Names not returned correctly\n");
-                    rc = CopyTabletData(lpOutput,&tgtcursor->BTNNAMES,
-                                        tgtcursor->cchBTNNAMES*sizeof(WCHAR));
-                    break;
-                case CSR_BUTTONMAP:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->BUTTONMAP,
-                                        sizeof(BYTE)*32);
-                    break;
-                case CSR_SYSBTNMAP:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->SYSBTNMAP,
-                                        sizeof(BYTE)*32);
-                    break;
-                case CSR_NPBTNMARKS:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->NPBTNMARKS,
-                                        sizeof(UINT)*2);
-                    break;
-                case CSR_NPBUTTON:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->NPBUTTON,
-                                        sizeof(BYTE));
-                    break;
-                case CSR_NPRESPONSE:
-                    FIXME("Not returning CSR_NPRESPONSE correctly\n");
-                    rc = 0;
-                    break;
-                case CSR_TPBUTTON:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->TPBUTTON,
-                                        sizeof(BYTE));
-                    break;
-                case CSR_TPBTNMARKS:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->TPBTNMARKS,
-                                        sizeof(UINT)*2);
-                    break;
-                case CSR_TPRESPONSE:
-                    FIXME("Not returning CSR_TPRESPONSE correctly\n");
-                    rc = 0;
-                    break;
-                case CSR_PHYSID:
+                rc = 0;
+                WARN("Requested cursor information for non existent cursor %d; only %d cursors\n",
+                        wCategory - WTI_CURSORS, gNumCursors);
+            }
+            else
+            {
+                tgtcursor = &gSysCursor[wCategory - WTI_CURSORS];
+                switch (nIndex)
                 {
-                    DWORD id;
-                    id = tgtcursor->PHYSID;
-                    id += (wCategory - WTI_CURSORS);
-                    rc = CopyTabletData(lpOutput,&id,sizeof(DWORD));
+                    case CSR_NAME:
+                        rc = CopyTabletData(lpOutput, &tgtcursor->NAME,
+                                            (strlenW(tgtcursor->NAME)+1) * sizeof(WCHAR));
+                        break;
+                    case CSR_ACTIVE:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->ACTIVE,
+                                            sizeof(BOOL));
+                        break;
+                    case CSR_PKTDATA:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->PKTDATA,
+                                            sizeof(WTPKT));
+                        break;
+                    case CSR_BUTTONS:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->BUTTONS,
+                                            sizeof(BYTE));
+                        break;
+                    case CSR_BUTTONBITS:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->BUTTONBITS,
+                                            sizeof(BYTE));
+                        break;
+                    case CSR_BTNNAMES:
+                        FIXME("Button Names not returned correctly\n");
+                        rc = CopyTabletData(lpOutput,&tgtcursor->BTNNAMES,
+                                            tgtcursor->cchBTNNAMES*sizeof(WCHAR));
+                        break;
+                    case CSR_BUTTONMAP:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->BUTTONMAP,
+                                            sizeof(BYTE)*32);
+                        break;
+                    case CSR_SYSBTNMAP:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->SYSBTNMAP,
+                                            sizeof(BYTE)*32);
+                        break;
+                    case CSR_NPBTNMARKS:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->NPBTNMARKS,
+                                            sizeof(UINT)*2);
+                        break;
+                    case CSR_NPBUTTON:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->NPBUTTON,
+                                            sizeof(BYTE));
+                        break;
+                    case CSR_NPRESPONSE:
+                        FIXME("Not returning CSR_NPRESPONSE correctly\n");
+                        rc = 0;
+                        break;
+                    case CSR_TPBUTTON:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->TPBUTTON,
+                                            sizeof(BYTE));
+                        break;
+                    case CSR_TPBTNMARKS:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->TPBTNMARKS,
+                                            sizeof(UINT)*2);
+                        break;
+                    case CSR_TPRESPONSE:
+                        FIXME("Not returning CSR_TPRESPONSE correctly\n");
+                        rc = 0;
+                        break;
+                    case CSR_PHYSID:
+                    {
+                        DWORD id;
+                        id = tgtcursor->PHYSID;
+                        rc = CopyTabletData(lpOutput,&id,sizeof(DWORD));
+                    }
+                        break;
+                    case CSR_MODE:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->MODE,sizeof(UINT));
+                        break;
+                    case CSR_MINPKTDATA:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->MINPKTDATA,
+                            sizeof(UINT));
+                        break;
+                    case CSR_MINBUTTONS:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->MINBUTTONS,
+                            sizeof(UINT));
+                        break;
+                    case CSR_CAPABILITIES:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->CAPABILITIES,
+                            sizeof(UINT));
+                        break;
+                    case CSR_TYPE:
+                        rc = CopyTabletData(lpOutput,&tgtcursor->TYPE,
+                            sizeof(UINT));
+                        break;
+                    default:
+                        FIXME("WTI_CURSORS unhandled index %i\n",nIndex);
+                        rc = 0;
                 }
-                    break;
-                case CSR_MODE:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->MODE,sizeof(UINT));
-                    break;
-                case CSR_MINPKTDATA:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->MINPKTDATA,
-                        sizeof(UINT));
-                    break;
-                case CSR_MINBUTTONS:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->MINBUTTONS,
-                        sizeof(UINT));
-                    break;
-                case CSR_CAPABILITIES:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->CAPABILITIES,
-                        sizeof(UINT));
-                    break;
-                case CSR_TYPE:
-                    rc = CopyTabletData(lpOutput,&tgtcursor->TYPE,
-                        sizeof(UINT));
-                    break;
-                default:
-                    FIXME("WTI_CURSORS unhandled index %i\n",nIndex);
-                    rc = 0;
             }
             break;
         case WTI_DEVICES:

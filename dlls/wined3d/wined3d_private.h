@@ -114,42 +114,30 @@ extern DWORD *stateLookup[MAX_LOOKUPS];
 
 extern DWORD minMipLookup[WINED3DTEXF_ANISOTROPIC + 1][WINED3DTEXF_LINEAR + 1];
 
-typedef struct _WINED3DGLTYPE {
-    int         d3dType;
-    GLint       size;
-    GLenum      glType;
-    GLboolean   normalized;
-    int         typesize;
-} WINED3DGLTYPE;
+void init_type_lookup(WineD3D_GL_Info *gl_info);
+#define WINED3D_ATR_TYPE(type)          GLINFO_LOCATION.glTypeLookup[type].d3dType
+#define WINED3D_ATR_SIZE(type)          GLINFO_LOCATION.glTypeLookup[type].size
+#define WINED3D_ATR_GLTYPE(type)        GLINFO_LOCATION.glTypeLookup[type].glType
+#define WINED3D_ATR_NORMALIZED(type)    GLINFO_LOCATION.glTypeLookup[type].normalized
+#define WINED3D_ATR_TYPESIZE(type)      GLINFO_LOCATION.glTypeLookup[type].typesize
 
-/* NOTE: Make sure these are in the correct numerical order. (see /include/wined3d_types.h) */
-static WINED3DGLTYPE const glTypeLookup[WINED3DDECLTYPE_UNUSED] = {
-                                  {WINED3DDECLTYPE_FLOAT1,    1, GL_FLOAT           , GL_FALSE ,sizeof(float)},
-                                  {WINED3DDECLTYPE_FLOAT2,    2, GL_FLOAT           , GL_FALSE ,sizeof(float)},
-                                  {WINED3DDECLTYPE_FLOAT3,    3, GL_FLOAT           , GL_FALSE ,sizeof(float)},
-                                  {WINED3DDECLTYPE_FLOAT4,    4, GL_FLOAT           , GL_FALSE ,sizeof(float)},
-                                  {WINED3DDECLTYPE_D3DCOLOR,  4, GL_UNSIGNED_BYTE   , GL_TRUE  ,sizeof(BYTE)},
-                                  {WINED3DDECLTYPE_UBYTE4,    4, GL_UNSIGNED_BYTE   , GL_FALSE ,sizeof(BYTE)},
-                                  {WINED3DDECLTYPE_SHORT2,    2, GL_SHORT           , GL_FALSE ,sizeof(short int)},
-                                  {WINED3DDECLTYPE_SHORT4,    4, GL_SHORT           , GL_FALSE ,sizeof(short int)},
-                                  {WINED3DDECLTYPE_UBYTE4N,   4, GL_UNSIGNED_BYTE   , GL_TRUE  ,sizeof(BYTE)},
-                                  {WINED3DDECLTYPE_SHORT2N,   2, GL_SHORT           , GL_TRUE  ,sizeof(short int)},
-                                  {WINED3DDECLTYPE_SHORT4N,   4, GL_SHORT           , GL_TRUE  ,sizeof(short int)},
-                                  {WINED3DDECLTYPE_USHORT2N,  2, GL_UNSIGNED_SHORT  , GL_TRUE  ,sizeof(short int)},
-                                  {WINED3DDECLTYPE_USHORT4N,  4, GL_UNSIGNED_SHORT  , GL_TRUE  ,sizeof(short int)},
-                                  {WINED3DDECLTYPE_UDEC3,     3, GL_UNSIGNED_SHORT  , GL_FALSE ,sizeof(short int)},
-                                  {WINED3DDECLTYPE_DEC3N,     3, GL_SHORT           , GL_TRUE  ,sizeof(short int)},
-                                  /* We should do an extension check for NV_HALF_FLOAT. However, without NV_HALF_FLOAT
-                                   * we won't be able to load the data at all, so at least for the moment it wouldn't
-                                   * gain us much. */
-                                  {WINED3DDECLTYPE_FLOAT16_2, 2, GL_HALF_FLOAT_NV   , GL_FALSE ,sizeof(GLhalfNV)},
-                                  {WINED3DDECLTYPE_FLOAT16_4, 4, GL_HALF_FLOAT_NV   , GL_FALSE ,sizeof(GLhalfNV)}};
+/* See GL_NV_half_float for reference */
+static inline float float_16_to_32(const unsigned short *in) {
+    const unsigned short s = ((*in) & 0x8000);
+    const unsigned short e = ((*in) & 0x7C00) >> 10;
+    const unsigned short m = (*in) & 0x3FF;
+    const float sgn = (s ? -1.0 : 1.0);
 
-#define WINED3D_ATR_TYPE(type)          glTypeLookup[type].d3dType
-#define WINED3D_ATR_SIZE(type)          glTypeLookup[type].size
-#define WINED3D_ATR_GLTYPE(type)        glTypeLookup[type].glType
-#define WINED3D_ATR_NORMALIZED(type)    glTypeLookup[type].normalized
-#define WINED3D_ATR_TYPESIZE(type)      glTypeLookup[type].typesize
+    if(e == 0) {
+        if(m == 0) return sgn * 0.0; /* +0.0 or -0.0 */
+        else return sgn * pow(2, -14.0) * ( (float) m / 1024.0);
+    } else if(e < 31) {
+        return sgn * pow(2, (float) e-15.0) * (1.0 + ((float) m / 1024.0));
+    } else {
+        if(m == 0) return sgn / 0.0; /* +INF / -INF */
+        else return 0.0 / 0.0; /* NAN */
+    }
+}
 
 /**
  * Settings 
@@ -409,6 +397,13 @@ void primitiveDeclarationConvertToStridedData(
      BOOL *fixup);
 
 DWORD get_flexible_vertex_size(DWORD d3dvtVertexType);
+
+typedef void (*glAttribFunc)(void *data);
+typedef void (*glTexAttribFunc)(GLuint unit, void *data);
+extern glAttribFunc position_funcs[WINED3DDECLTYPE_UNUSED];
+extern glAttribFunc diffuse_funcs[WINED3DDECLTYPE_UNUSED];
+extern glAttribFunc specular_funcs[WINED3DDECLTYPE_UNUSED];
+extern glAttribFunc normal_funcs[WINED3DDECLTYPE_UNUSED];
 
 #define eps 1e-8
 
@@ -774,6 +769,9 @@ struct IWineD3DDeviceImpl
 
 extern const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl;
 
+HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfaceImpl *target, DWORD Count,
+                                        CONST WINED3DRECT* pRects, DWORD Flags, WINED3DCOLOR Color,
+                                        float Z, DWORD Stencil);
 void IWineD3DDeviceImpl_FindTexUnitMap(IWineD3DDeviceImpl *This);
 void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state);
 static inline BOOL isStateDirty(WineD3DContext *context, DWORD state) {
@@ -836,6 +834,17 @@ typedef struct IWineD3DResourceImpl
 /*****************************************************************************
  * IWineD3DVertexBuffer implementation structure (extends IWineD3DResourceImpl)
  */
+enum vbo_conversion_type {
+    CONV_NONE               = 0,
+    CONV_D3DCOLOR           = 1,
+    CONV_POSITIONT          = 2,
+    CONV_FLOAT16_2          = 3 /* Also handles FLOAT16_4 */
+
+    /* TODO: Add tests and support for FLOAT16_4 POSITIONT, D3DCOLOR position, other
+     * fixed function semantics as D3DCOLOR or FLOAT16
+     */
+};
+
 typedef struct IWineD3DVertexBufferImpl
 {
     /* IUnknown & WineD3DResource Information     */
@@ -849,13 +858,20 @@ typedef struct IWineD3DVertexBufferImpl
     GLuint                    vbo;
     BYTE                      Flags;
     LONG                      bindCount;
+    LONG                      vbo_size;
+    GLenum                    vbo_usage;
 
     UINT                      dirtystart, dirtyend;
     LONG                      lockcount;
 
     LONG                      declChanges, draws;
     /* Last description of the buffer */
-    WineDirect3DVertexStridedData strided;
+    DWORD                     stride;       /* 0 if no conversion               */
+    enum vbo_conversion_type  *conv_map;    /* NULL if no conversion            */
+
+    /* Extra load offsets, for FLOAT16 conversion */
+    DWORD                     *conv_shift;  /* NULL if no shifted conversion    */
+    DWORD                     conv_stride;  /* 0 if no shifted conversion       */
 } IWineD3DVertexBufferImpl;
 
 extern const IWineD3DVertexBufferVtbl IWineD3DVertexBuffer_Vtbl;
@@ -1238,7 +1254,8 @@ typedef enum {
     CONVERT_V16U16,
     CONVERT_A4L4,
     CONVERT_R32F,
-    CONVERT_R16F
+    CONVERT_R16F,
+    CONVERT_G16R16,
 } CONVERT_TYPES;
 
 HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_texturing, GLenum *format, GLenum *internal, GLenum *type, CONVERT_TYPES *convert, int *target_bpp, BOOL srgb_mode);
@@ -1267,6 +1284,7 @@ typedef struct IWineD3DVertexDeclarationImpl {
     DWORD                   streams[MAX_STREAMS];
     UINT                    num_streams;
     BOOL                    position_transformed;
+    BOOL                    half_float_conv_needed;
 
     /* Ordered array of declaration types that need swizzling in a vshader */
     attrib_declaration      swizzled_attribs[MAX_ATTRIBS];

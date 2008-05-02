@@ -89,11 +89,11 @@
 @ stub GdipCreateFontFromDC
 @ stdcall GdipCreateFontFromLogfontA(ptr ptr ptr)
 @ stdcall GdipCreateFontFromLogfontW(ptr ptr ptr)
-@ stub GdipCreateFromHDC2
+@ stdcall GdipCreateFromHDC2(long long ptr)
 @ stdcall GdipCreateFromHDC(long ptr)
 @ stdcall GdipCreateFromHWND(long ptr)
 @ stub GdipCreateFromHWNDICM
-@ stub GdipCreateHBITMAPFromBitmap
+@ stdcall GdipCreateHBITMAPFromBitmap(ptr ptr long)
 @ stub GdipCreateHICONFromBitmap
 @ stub GdipCreateHalftonePalette
 @ stub GdipCreateHatchBrush

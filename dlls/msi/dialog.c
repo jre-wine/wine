@@ -714,9 +714,6 @@ MSIText_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     info = GetPropW(hWnd, szButtonData);
 
-    if ( info->font )
-        SetTextColor( (HDC)wParam, info->font->color );
-
     if( msg == WM_CTLCOLORSTATIC &&
        ( info->attributes & msidbControlAttributesTransparent ) )
     {
@@ -725,6 +722,8 @@ MSIText_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     }
 
     r = CallWindowProcW(info->oldproc, hWnd, msg, wParam, lParam);
+    if ( info->font )
+        SetTextColor( (HDC)wParam, info->font->color );
 
     switch( msg )
     {
@@ -871,12 +870,60 @@ static UINT msi_dialog_checkbox_control( msi_dialog *dialog, MSIRECORD *rec )
 
 static UINT msi_dialog_line_control( msi_dialog *dialog, MSIRECORD *rec )
 {
+    DWORD attributes;
+    LPCWSTR name;
+    DWORD style, exstyle = 0;
+    DWORD x, y, width, height;
+    msi_control *control;
+
     TRACE("%p %p\n", dialog, rec);
 
-    /* line is exactly 2 units in height */
-    MSI_RecordSetInteger( rec, 7, 2 );
+    style = WS_CHILD | SS_ETCHEDHORZ | SS_SUNKEN;
 
-    msi_dialog_add_control( dialog, rec, szStatic, SS_ETCHEDHORZ | SS_SUNKEN );
+    name = MSI_RecordGetString( rec, 2 );
+    attributes = MSI_RecordGetInteger( rec, 8 );
+
+    if( attributes & msidbControlAttributesVisible )
+        style |= WS_VISIBLE;
+    if( ~attributes & msidbControlAttributesEnabled )
+        style |= WS_DISABLED;
+    if( attributes & msidbControlAttributesSunken )
+        exstyle |= WS_EX_CLIENTEDGE;
+
+    msi_dialog_map_events(dialog, name);
+
+    control = msi_alloc( sizeof(*control) + strlenW(name) * sizeof(WCHAR) );
+    if (!control)
+        return ERROR_OUTOFMEMORY;
+
+    strcpyW( control->name, name );
+    list_add_head( &dialog->controls, &control->entry );
+    control->handler = NULL;
+    control->property = NULL;
+    control->value = NULL;
+    control->hBitmap = NULL;
+    control->hIcon = NULL;
+    control->hDll = NULL;
+    control->tabnext = strdupW( MSI_RecordGetString( rec, 11) );
+    control->type = strdupW( MSI_RecordGetString( rec, 3 ) );
+    control->progress_current = 0;
+    control->progress_max = 100;
+
+    x = MSI_RecordGetInteger( rec, 4 );
+    y = MSI_RecordGetInteger( rec, 5 );
+    width = MSI_RecordGetInteger( rec, 6 );
+
+    x = msi_dialog_scale_unit( dialog, x );
+    y = msi_dialog_scale_unit( dialog, y );
+    width = msi_dialog_scale_unit( dialog, width );
+    height = 2; /* line is exactly 2 units in height */
+
+    control->hwnd = CreateWindowExW( exstyle, szStatic, NULL, style,
+                          x, y, width, height, dialog->hwnd, NULL, NULL, NULL );
+
+    TRACE("Dialog %s control %s hwnd %p\n",
+           debugstr_w(dialog->name), debugstr_w(name), control->hwnd );
+
     return ERROR_SUCCESS;
 }
 
@@ -1703,13 +1750,20 @@ static UINT msi_dialog_radiogroup_control( msi_dialog *dialog, MSIRECORD *rec )
     radio_button_group_descr group;
     MSIPACKAGE *package = dialog->package;
     WNDPROC oldproc;
+    DWORD attr, style = WS_GROUP;
 
     prop = MSI_RecordGetString( rec, 9 );
 
     TRACE("%p %p %s\n", dialog, rec, debugstr_w( prop ));
 
+    attr = MSI_RecordGetInteger( rec, 8 );
+    if (attr & msidbControlAttributesHasBorder)
+        style |= BS_GROUPBOX;
+    else
+        style |= BS_OWNERDRAW;
+
     /* Create parent group box to hold radio buttons */
-    control = msi_dialog_add_control( dialog, rec, szButton, BS_GROUPBOX|WS_GROUP );
+    control = msi_dialog_add_control( dialog, rec, szButton, style );
     if( !control )
         return ERROR_FUNCTION_FAILED;
 
@@ -2464,7 +2518,7 @@ static void msi_dialog_vcl_add_columns( msi_dialog *dialog, msi_control *control
 {
     LPCWSTR text = MSI_RecordGetString( rec, 10 );
     LPCWSTR begin = text, end;
-    WCHAR num[10];
+    WCHAR *num;
     LVCOLUMNW lvc;
     DWORD count = 0;
 
@@ -2478,6 +2532,10 @@ static void msi_dialog_vcl_add_columns( msi_dialog *dialog, msi_control *control
         if (!(end = strchrW( begin, '}' )))
             return;
 
+        num = msi_alloc( (end-begin+1)*sizeof(WCHAR) );
+        if (!num)
+            return;
+
         lstrcpynW( num, begin + 1, end - begin );
         begin += end - begin + 1;
 
@@ -2485,14 +2543,17 @@ static void msi_dialog_vcl_add_columns( msi_dialog *dialog, msi_control *control
         if ( !num[0] || !lstrcmpW( num, zero ) )
         {
             count++;
+            msi_free( num );
             continue;
         }
 
         /* the width must be a positive number
          * if a width is invalid, all remaining columns are hidden
          */
-        if ( !strncmpW( num, negative, 1 ) || !str_is_number( num ) )
+        if ( !strncmpW( num, negative, 1 ) || !str_is_number( num ) ) {
+            msi_free( num );
             return;
+        }
 
         ZeroMemory( &lvc, sizeof(lvc) );
         lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
@@ -2501,6 +2562,7 @@ static void msi_dialog_vcl_add_columns( msi_dialog *dialog, msi_control *control
 
         SendMessageW( control->hwnd,  LVM_INSERTCOLUMNW, count++, (LPARAM)&lvc );
         msi_free( lvc.pszText );
+        msi_free( num );
     }
 }
 
@@ -3012,7 +3074,7 @@ static UINT msi_dialog_set_property( msi_dialog *dialog, LPCWSTR event, LPCWSTR 
     prop = msi_alloc( len*sizeof(WCHAR));
     strcpyW( prop, &event[1] );
     p = strchrW( prop, ']' );
-    if( p && p[1] == 0 )
+    if( p && (p[1] == 0 || p[1] == ' ') )
     {
         *p = 0;
         if( strcmpW( szNullArg, arg ) )

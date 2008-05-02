@@ -1284,6 +1284,9 @@ UINT WINAPI MsiEnumClientsA(LPCSTR szComponent, DWORD index, LPSTR szProduct)
 
     TRACE("%s %d %p\n", debugstr_a(szComponent), index, szProduct);
 
+    if ( !szProduct )
+        return ERROR_INVALID_PARAMETER;
+
     if( szComponent )
     {
         szwComponent = strdupAtoW( szComponent );
@@ -1311,9 +1314,25 @@ UINT WINAPI MsiEnumClientsW(LPCWSTR szComponent, DWORD index, LPWSTR szProduct)
 
     TRACE("%s %d %p\n", debugstr_w(szComponent), index, szProduct);
 
-    r = MSIREG_OpenComponentsKey(szComponent,&hkeyComp,FALSE);
-    if( r != ERROR_SUCCESS )
-        return ERROR_NO_MORE_ITEMS;
+    if (!szComponent || !*szComponent || !szProduct)
+        return ERROR_INVALID_PARAMETER;
+
+    if (MSIREG_OpenUserDataComponentKey(szComponent, &hkeyComp, FALSE) != ERROR_SUCCESS &&
+        MSIREG_OpenLocalSystemComponentKey(szComponent, &hkeyComp, FALSE) != ERROR_SUCCESS)
+        return ERROR_UNKNOWN_COMPONENT;
+
+    /* see if there are any products at all */
+    sz = SQUISH_GUID_SIZE;
+    r = RegEnumValueW(hkeyComp, 0, szValName, &sz, NULL, NULL, NULL, NULL);
+    if (r != ERROR_SUCCESS)
+    {
+        RegCloseKey(hkeyComp);
+
+        if (index != 0)
+            return ERROR_INVALID_PARAMETER;
+
+        return ERROR_UNKNOWN_COMPONENT;
+    }
 
     sz = SQUISH_GUID_SIZE;
     r = RegEnumValueW(hkeyComp, index, szValName, &sz, NULL, NULL, NULL, NULL);

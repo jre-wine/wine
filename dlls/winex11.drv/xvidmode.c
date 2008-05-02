@@ -94,8 +94,7 @@ static int X11DRV_XF86VM_GetCurrentMode(void)
   int dotclock;
   unsigned int i;
   DDHALMODEINFO cmode;
-  DWORD dwBpp = screen_depth;
-  if (dwBpp == 24) dwBpp = 32;
+  DWORD dwBpp = screen_bpp;
 
   TRACE("Querying XVidMode current mode\n");
   wine_tsx11_lock();
@@ -113,8 +112,7 @@ static int X11DRV_XF86VM_GetCurrentMode(void)
 
 static LONG X11DRV_XF86VM_SetCurrentMode(int mode)
 {
-  DWORD dwBpp = screen_depth;
-  if (dwBpp == 24) dwBpp = 32;
+  DWORD dwBpp = screen_bpp;
   /* only set modes from the original color depth */
   if (dwBpp != dd_modes[mode].dwBPP)
   {

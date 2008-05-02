@@ -472,9 +472,9 @@ void nsACString_SetData(nsACString *str, const char *data)
     NS_CStringSetData(str, data, PR_UINT32_MAX);
 }
 
-PRUint32 nsACString_GetData(const nsACString *str, const char **data, PRBool *termited)
+PRUint32 nsACString_GetData(const nsACString *str, const char **data)
 {
-    return NS_CStringGetData(str, data, termited);
+    return NS_CStringGetData(str, data, NULL);
 }
 
 void nsACString_Finish(nsACString *str)
@@ -489,9 +489,9 @@ void nsAString_Init(nsAString *str, const PRUnichar *data)
         NS_StringSetData(str, data, PR_UINT32_MAX);
 }
 
-PRUint32 nsAString_GetData(const nsAString *str, const PRUnichar **data, PRBool *termited)
+PRUint32 nsAString_GetData(const nsAString *str, const PRUnichar **data)
 {
-    return NS_StringGetData(str, data, termited);
+    return NS_StringGetData(str, data, NULL);
 }
 
 void nsAString_Finish(nsAString *str)
@@ -1104,7 +1104,7 @@ static nsresult NSAPI nsURIContentListener_OnStartURIOpen(nsIURIContentListener 
 
     nsACString_Init(&spec_str, NULL);
     nsIURI_GetSpec(aURI, &spec_str);
-    nsACString_GetData(&spec_str, &spec, NULL);
+    nsACString_GetData(&spec_str, &spec);
 
     TRACE("(%p)->(%p(%s) %p)\n", This, aURI, debugstr_a(spec), _retval);
 

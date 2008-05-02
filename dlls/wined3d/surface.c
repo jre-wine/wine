@@ -47,6 +47,10 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
     if(myDevice->createParms.BehaviorFlags & WINED3DCREATE_MULTITHREADED) {
         ActivateContext(myDevice, myDevice->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
     }
+    if(This->Flags & SFLAG_CONVERTED) {
+        FIXME("Read back converted textures unsupported, format=%s\n", debug_d3dformat(This->resource.format));
+        return;
+    }
 
     ENTER_GL();
             /* Make sure that a proper texture unit is selected, bind the texture
@@ -85,12 +89,6 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
         void *mem;
         int src_pitch = 0;
         int dst_pitch = 0;
-
-         if(This->Flags & SFLAG_CONVERTED) {
-             FIXME("Read back converted textures unsupported\n");
-             LEAVE_GL();
-             return;
-         }
 
         if (This->Flags & SFLAG_NONPOW2) {
             unsigned char alignment = This->resource.wineD3DDevice->surface_alignment;
@@ -1404,7 +1402,7 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
                     *convert = CONVERT_PALETTED;
                 }
             }
-            else if(GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
+            else if(!GL_SUPPORT(EXT_PALETTED_TEXTURE) && GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
                 *format = GL_RED;
                 *internal = GL_RGBA;
                 *type = GL_UNSIGNED_BYTE;
@@ -1564,6 +1562,14 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
             *format = GL_RGB;
             *internal = GL_RGB16F_ARB;
             *type = GL_HALF_FLOAT_ARB;
+            *target_bpp = 6;
+            break;
+
+        case WINED3DFMT_G16R16:
+            *convert = CONVERT_G16R16;
+            *format = GL_RGB;
+            *internal = GL_RGB16_EXT;
+            *type = GL_UNSIGNED_SHORT;
             *target_bpp = 6;
             break;
 
@@ -1883,6 +1889,28 @@ HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UIN
             }
             break;
         }
+
+        case CONVERT_G16R16:
+        {
+            unsigned int x, y;
+            WORD *Source;
+            WORD *Dest;
+
+            for(y = 0; y < height; y++) {
+                Source = (WORD *) (src + y * pitch);
+                Dest = (WORD *) (dst + y * outpitch);
+                for (x = 0; x < width; x++ ) {
+                    WORD green = (*Source++);
+                    WORD red = (*Source++);
+                    Dest[0] = green;
+                    Dest[1] = red;
+                    Dest[2] = 0xffff;
+                    Dest += 3;
+                }
+            }
+            break;
+        }
+
         default:
             ERR("Unsupported conversation type %d\n", convert);
     }
@@ -1903,7 +1931,7 @@ static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4]
     if (device->render_targets && device->render_targets[0]) {
         IWineD3DSurfaceImpl* render_target = (IWineD3DSurfaceImpl*)device->render_targets[0];
 
-        if(render_target->resource.usage & WINED3DUSAGE_RENDERTARGET)
+        if((render_target->resource.usage & WINED3DUSAGE_RENDERTARGET) && (render_target->resource.format == WINED3DFMT_P8))
             index_in_alpha = TRUE;
     }
 
@@ -2937,13 +2965,25 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
 
         TRACE("Unsupported blit between buffers on the same swapchain\n");
         return WINED3DERR_INVALIDCALL;
-    } else if((dstSwapchain || This == (IWineD3DSurfaceImpl *) myDevice->render_targets[0]) &&
-              (srcSwapchain || SrcSurface == myDevice->render_targets[0]) ) {
-        ERR("Can't perform hardware blit between 2 different swapchains, falling back to software\n");
+    } else if(dstSwapchain && dstSwapchain == srcSwapchain) {
+        FIXME("Implement hardware blit between two surfaces on the same swapchain\n");
+        return WINED3DERR_INVALIDCALL;
+    } else if(dstSwapchain && srcSwapchain) {
+        FIXME("Implement hardware blit between two different swapchains\n");
+        return WINED3DERR_INVALIDCALL;
+    } else if(dstSwapchain) {
+        if(SrcSurface != myDevice->render_targets[0]) {
+            ERR("Unexpected render target -> render target blit\n");
+            return 0;
+        }
+        TRACE("Blit from active render target to a swapchain\n");
+        /* Handled with regular texture -> swapchain blit */
+    } else if(srcSwapchain && This == (IWineD3DSurfaceImpl *) myDevice->render_targets[0]) {
+        FIXME("Implement blit from a swapchain to the active render target\n");
         return WINED3DERR_INVALIDCALL;
     }
 
-    if(srcSwapchain || SrcSurface == myDevice->render_targets[0]) {
+    if((srcSwapchain || SrcSurface == myDevice->render_targets[0]) && !dstSwapchain) {
         /* Blit from render target to texture */
         WINED3DRECT srect;
         BOOL upsideDown, stretchx;
@@ -3052,6 +3092,16 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
             SourceRectangle.right = Src->currentDesc.Width;
             SourceRectangle.top = 0;
             SourceRectangle.bottom = Src->currentDesc.Height;
+        }
+        if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && GL_SUPPORT(EXT_FRAMEBUFFER_BLIT) &&
+            (Flags & (WINEDDBLT_KEYSRC | WINEDDBLT_KEYSRCOVERRIDE)) == 0) {
+            TRACE("Using stretch_rect_fbo\n");
+            /* The source is always a texture, but never the currently active render target, and the texture
+             * contents are never upside down
+             */
+            stretch_rect_fbo((IWineD3DDevice *)myDevice, SrcSurface, (WINED3DRECT *) &SourceRectangle,
+                              (IWineD3DSurface *)This, &rect, Filter, FALSE);
+            return WINED3D_OK;
         }
 
         if(!CalculateTexRect(Src, &SourceRectangle, glTexCoord)) {
@@ -3201,6 +3251,15 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
 
             TRACE("Colorfill\n");
 
+            /* This == (IWineD3DSurfaceImpl *) myDevice->render_targets[0] || dstSwapchain
+                must be true if we are here */
+            if (This != (IWineD3DSurfaceImpl *) myDevice->render_targets[0] &&
+                    !(This == (IWineD3DSurfaceImpl*) dstSwapchain->frontBuffer ||
+                      (dstSwapchain->backBuffer && This == (IWineD3DSurfaceImpl*) dstSwapchain->backBuffer[0]))) {
+                TRACE("Surface is higher back buffer, falling back to software\n");
+                return WINED3DERR_INVALIDCALL;
+            }
+
             /* The color as given in the Blt function is in the format of the frame-buffer...
              * 'clear' expect it in ARGB format => we need to do some conversion :-)
              */
@@ -3236,44 +3295,12 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
                 return WINED3DERR_INVALIDCALL;
             }
 
-            ActivateContext(myDevice, (IWineD3DSurface *) This, CTXUSAGE_RESOURCELOAD);
-            ENTER_GL();
-
-            TRACE("Calling GetSwapChain with mydevice = %p\n", myDevice);
-            if(dstSwapchain && dstSwapchain->backBuffer && This == (IWineD3DSurfaceImpl*) dstSwapchain->backBuffer[0]) {
-                glDrawBuffer(GL_BACK);
-                checkGLcall("glDrawBuffer(GL_BACK)");
-            } else if (dstSwapchain && This == (IWineD3DSurfaceImpl*) dstSwapchain->frontBuffer) {
-                glDrawBuffer(GL_FRONT);
-                checkGLcall("glDrawBuffer(GL_FRONT)");
-            } else if(This == (IWineD3DSurfaceImpl *) myDevice->render_targets[0]) {
-                glDrawBuffer(myDevice->offscreenBuffer);
-                checkGLcall("glDrawBuffer(myDevice->offscreenBuffer3)");
-            } else {
-                LEAVE_GL();
-                TRACE("Surface is higher back buffer, falling back to software\n");
-                return WINED3DERR_INVALIDCALL;
-            }
-
             TRACE("(%p) executing Render Target override, color = %x\n", This, color);
-
-            IWineD3DDevice_Clear( (IWineD3DDevice *) myDevice,
-                                1 /* Number of rectangles */,
-                                &rect,
-                                WINED3DCLEAR_TARGET,
-                                color,
-                                0.0 /* Z */,
-                                0 /* Stencil */);
-
-            /* Restore the original draw buffer */
-            if(!dstSwapchain) {
-                glDrawBuffer(myDevice->offscreenBuffer);
-            } else if(dstSwapchain->backBuffer && dstSwapchain->backBuffer[0]) {
-                glDrawBuffer(GL_BACK);
-            }
-            vcheckGLcall("glDrawBuffer");
-            LEAVE_GL();
-
+            IWineD3DDeviceImpl_ClearSurface(myDevice, This,
+                                            1, /* Number of rectangles */
+                                            &rect, WINED3DCLEAR_TARGET, color,
+                                            0.0 /* Z */,
+                                            0 /* Stencil */);
             return WINED3D_OK;
         }
     }

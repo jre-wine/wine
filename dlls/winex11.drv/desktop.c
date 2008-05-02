@@ -23,8 +23,11 @@
 #include <X11/Xlib.h>
 
 #include "win.h"
-#include "ddrawi.h"
 #include "x11drv.h"
+
+/* avoid conflict with field names in included win32 headers */
+#undef Status
+#include "ddrawi.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
@@ -103,8 +106,7 @@ static int X11DRV_resize_desktop( unsigned int width, unsigned int height )
 static int X11DRV_desktop_GetCurrentMode(void)
 {
     unsigned int i;
-    DWORD dwBpp = screen_depth;
-    if (dwBpp == 24) dwBpp = 32;
+    DWORD dwBpp = screen_bpp;
     for (i=0; i<dd_mode_count; i++)
     {
         if ( (screen_width == dd_modes[i].dwWidth) &&
@@ -118,8 +120,7 @@ static int X11DRV_desktop_GetCurrentMode(void)
 
 static LONG X11DRV_desktop_SetCurrentMode(int mode)
 {
-    DWORD dwBpp = screen_depth;
-    if (dwBpp == 24) dwBpp = 32;
+    DWORD dwBpp = screen_bpp;
     if (dwBpp != dd_modes[mode].dwBPP)
     {
         FIXME("Cannot change screen BPP from %d to %d\n", dwBpp, dd_modes[mode].dwBPP);

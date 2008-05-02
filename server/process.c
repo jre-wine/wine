@@ -601,7 +601,7 @@ static void process_killed( struct process *process )
 
     assert( list_empty( &process->thread_list ));
     process->end_time = current_time;
-    close_process_desktop( process );
+    if (!process->is_system) close_process_desktop( process );
     handles = process->handles;
     process->handles = NULL;
     if (handles) release_object( handles );
@@ -1185,12 +1185,13 @@ DECL_HANDLER(make_process_system)
         make_object_static( (struct object *)user_process_event );
     }
 
-    if (!(reply->event = alloc_handle( current->process, user_process_event, EVENT_ALL_ACCESS, 0 )))
+    if (!(reply->event = alloc_handle( current->process, user_process_event, SYNCHRONIZE, 0 )))
         return;
 
     if (!process->is_system)
     {
         process->is_system = 1;
+        close_process_desktop( process );
         if (!--user_processes) set_event( user_process_event );
     }
 }

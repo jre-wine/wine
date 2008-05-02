@@ -56,6 +56,14 @@ void print_glsl_info_log(WineD3D_GL_Info *gl_info, GLhandleARB obj) {
     
     int infologLength = 0;
     char *infoLog;
+    int i;
+    BOOL is_spam;
+
+    const char *spam[] = {
+        "Vertex shader was successfully compiled to run on hardware.\n",    /* fglrx        */
+        "Fragment shader was successfully compiled to run on hardware.\n",  /* fglrx        */
+        "Fragment shader(s) linked, vertex shader(s) linked."               /* fglrx, no \n */
+    };
 
     GL_EXTCALL(glGetObjectParameterivARB(obj,
                GL_OBJECT_INFO_LOG_LENGTH_ARB,
@@ -67,7 +75,19 @@ void print_glsl_info_log(WineD3D_GL_Info *gl_info, GLhandleARB obj) {
     {
         infoLog = HeapAlloc(GetProcessHeap(), 0, infologLength);
         GL_EXTCALL(glGetInfoLogARB(obj, infologLength, NULL, infoLog));
-        FIXME("Error received from GLSL shader #%u: %s\n", obj, debugstr_a(infoLog));
+        is_spam = FALSE;
+
+        for(i = 0; i < sizeof(spam) / sizeof(spam[0]); i++) {
+            if(strcmp(infoLog, spam[i]) == 0) {
+                is_spam = TRUE;
+                break;
+            }
+        }
+        if(is_spam) {
+            TRACE("Spam received from GLSL shader #%u: %s\n", obj, debugstr_a(infoLog));
+        } else {
+            FIXME("Error received from GLSL shader #%u: %s\n", obj, debugstr_a(infoLog));
+        }
         HeapFree(GetProcessHeap(), 0, infoLog);
     }
 }
@@ -612,7 +632,7 @@ void shader_generate_glsl_declarations(
     /* Declare input register varyings. Only pixel shader, vertex shaders have that declared in the
      * helper function shader that is linked in at link time
      */
-    if(pshader && This->baseShader.hex_version >= WINED3DVS_VERSION(3, 0)) {
+    if(pshader && This->baseShader.hex_version >= WINED3DPS_VERSION(3, 0)) {
         if(use_vs(device)) {
             shader_addline(buffer, "varying vec4 IN[%u];\n", GL_LIMITS(glsl_varyings) / 4);
         } else {

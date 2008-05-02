@@ -42,6 +42,7 @@
 #include "wine/exception.h"
 
 #include "rpc_server.h"
+#include "rpc_assoc.h"
 #include "rpc_message.h"
 #include "rpc_defs.h"
 #include "ncastatus.h"
@@ -172,17 +173,29 @@ static void RPCRT4_process_packet(RpcConnection* conn, RpcPktHdr* hdr, RPC_MESSA
   RPC_STATUS status;
   BOOL exception;
 
+  msg->Handle = (RPC_BINDING_HANDLE)conn->server_binding;
+
   switch (hdr->common.ptype) {
     case PKT_BIND:
       TRACE("got bind packet\n");
 
       /* FIXME: do more checks! */
       if (hdr->bind.max_tsize < RPC_MIN_PACKET_SIZE ||
-          !UuidIsNil(&conn->ActiveInterface.SyntaxGUID, &status)) {
+          !UuidIsNil(&conn->ActiveInterface.SyntaxGUID, &status) ||
+          conn->server_binding) {
         TRACE("packet size less than min size, or active interface syntax guid non-null\n");
         sif = NULL;
       } else {
-        sif = RPCRT4_find_interface(NULL, &hdr->bind.abstract, FALSE);
+        /* create temporary binding */
+        if (RPCRT4_MakeBinding(&conn->server_binding, conn) == RPC_S_OK &&
+            RpcServerAssoc_GetAssociation(rpcrt4_conn_get_name(conn),
+                                          conn->NetworkAddr, conn->Endpoint,
+                                          conn->NetworkOptions,
+                                          hdr->bind.assoc_gid,
+                                          &conn->server_binding->Assoc) == RPC_S_OK)
+          sif = RPCRT4_find_interface(NULL, &hdr->bind.abstract, FALSE);
+        else
+          sif = NULL;
       }
       if (sif == NULL) {
         TRACE("rejecting bind request on connection %p\n", conn);
@@ -197,6 +210,7 @@ static void RPCRT4_process_packet(RpcConnection* conn, RpcPktHdr* hdr, RPC_MESSA
         response = RPCRT4_BuildBindAckHeader(NDR_LOCAL_DATA_REPRESENTATION,
                                              RPC_MAX_PACKET_SIZE,
                                              RPC_MAX_PACKET_SIZE,
+                                             conn->server_binding->Assoc->assoc_group_id,
                                              conn->Endpoint,
                                              RESULT_ACCEPT, REASON_NONE,
                                              &sif->If->TransferSyntax);
@@ -279,6 +293,7 @@ static void RPCRT4_process_packet(RpcConnection* conn, RpcPktHdr* hdr, RPC_MESSA
       exception = FALSE;
 
       /* dispatch */
+      RPCRT4_SetThreadCurrentCallHandle(msg->Handle);
       __TRY {
         if (func) func(msg);
       } __EXCEPT(rpc_filter) {
@@ -290,6 +305,7 @@ static void RPCRT4_process_packet(RpcConnection* conn, RpcPktHdr* hdr, RPC_MESSA
         response = RPCRT4_BuildFaultHeader(msg->DataRepresentation,
                                            RPC2NCA_STATUS(status));
       } __ENDTRY
+      RPCRT4_SetThreadCurrentCallHandle(NULL);
 
       if (!exception)
         response = RPCRT4_BuildResponseHeader(msg->DataRepresentation,
@@ -318,7 +334,6 @@ fail:
   if (msg->Buffer == buf) msg->Buffer = NULL;
   TRACE("freeing Buffer=%p\n", buf);
   HeapFree(GetProcessHeap(), 0, buf);
-  RPCRT4_DestroyBinding(msg->Handle);
   msg->Handle = 0;
   I_RpcFreeBuffer(msg);
   msg->Buffer = NULL;
@@ -338,7 +353,6 @@ static DWORD CALLBACK RPCRT4_io_thread(LPVOID the_arg)
 {
   RpcConnection* conn = (RpcConnection*)the_arg;
   RpcPktHdr *hdr;
-  RpcBinding *pbind;
   RPC_MESSAGE *msg;
   RPC_STATUS status;
   RpcPacket *packet;
@@ -347,11 +361,6 @@ static DWORD CALLBACK RPCRT4_io_thread(LPVOID the_arg)
 
   for (;;) {
     msg = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(RPC_MESSAGE));
-
-    /* create temporary binding for dispatch, it will be freed in
-     * RPCRT4_process_packet */
-    RPCRT4_MakeBinding(&pbind, conn);
-    msg->Handle = (RPC_BINDING_HANDLE)pbind;
 
     status = RPCRT4_Receive(conn, &hdr, msg);
     if (status != RPC_S_OK) {
@@ -1113,4 +1122,13 @@ RPC_STATUS WINAPI RpcMgmtSetServerStackSize(ULONG ThreadStackSize)
 {
   FIXME("(0x%x): stub\n", ThreadStackSize);
   return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             I_RpcGetCurrentCallHandle (RPCRT4.@)
+ */
+RPC_BINDING_HANDLE WINAPI I_RpcGetCurrentCallHandle(void)
+{
+    TRACE("\n");
+    return RPCRT4_GetThreadCurrentCallHandle();
 }

@@ -70,6 +70,7 @@ Screen *screen;
 Visual *visual;
 unsigned int screen_width;
 unsigned int screen_height;
+unsigned int screen_bpp;
 unsigned int screen_depth;
 RECT virtual_screen_rect;
 Window root_window;
@@ -489,6 +490,38 @@ static BOOL process_attach(void)
         screen       = ScreenOfDisplay(display, desktop_vi->screen);
         screen_depth = desktop_vi->depth;
         XFree(desktop_vi);
+    }
+
+    switch(screen_depth) {
+        case 8:
+            screen_bpp = 8;
+            break;
+
+        case 15:
+            /* Out tests suggest that windows does not support 15 bpp color depth.
+             * X11 does, what should we do with these situations?
+             */
+            FIXME("The X server is running at 15 bpp color depth\n");
+            screen_bpp = 15;
+            break;
+
+        case 16:
+            screen_bpp = 16;
+            break;
+
+        case 24:
+            /* This is not necessarily right. X11 always has 24 bits per pixel, but it can run
+             * with 24 bit framebuffers and 32 bit framebuffers. It doesn't make any difference
+             * for windowing, but gl applications can get visuals with alpha channels. So we
+             * should check the framebuffer and/or opengl formats available to find out what the
+             * framebuffer actually does
+             */
+            screen_bpp = 32;
+            break;
+
+        default:
+            FIXME("Unexpected X11 depth %d bpp, what to report to app?\n", screen_depth);
+            screen_bpp = screen_depth;
     }
 
     XInternAtoms( display, (char **)atom_names, NB_XATOMS - FIRST_XATOM, False, X11DRV_Atoms );
