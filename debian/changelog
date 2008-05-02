@@ -1,3 +1,21 @@
+wine (0.9.45-1) unstable; urgency=low
+
+  * New upstream release 0.9.45.
+    - Many improvements to the crypto dlls (should make iTunes work).
+    - The usual assortment of Direct3D improvements.
+    - A number of fixes to sound support.
+    - Many more WordPad features.
+    - Lots of bug fixes.
+  * This version was released Sep 14, 2007.
+  * After losing access to my other workstations, I haven't had
+    access to a Debian system for a while. However, now I've
+    installed a VMware virtual machine with Debian on a Windows
+    laptop, and appear to be able to build packages inside it...
+  * Fixed grep-dctrl build-dependency (that package was renamed
+    to dctrl-tools long ago).
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 26 Nov 2007 01:57:43 +0100
+
 wine (0.9.44-1) unstable; urgency=low
 
   * New upstream release 0.9.44. (Closes: #421510, #433064.)
