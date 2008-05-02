@@ -1,3 +1,11 @@
+wine (0.9.60-2) unstable; urgency=low
+
+  * Made libwine-print depend on cupsys-bsd. Closes: #475138.
+  * Made debian/winelauncher use dpkg --print-architecture instead
+    of uname -m.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Tue, 22 Apr 2008 13:33:13 +0200
+
 wine (0.9.60-1) unstable; urgency=low
 
   * New upstream release 0.9.60.
