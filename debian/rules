@@ -122,7 +122,7 @@ build: build-indep build-arch
 clean-arch32:
 	dh_testdir
 	dh_testroot
-	rm -f build-arch32-stamp configure-arch32-stamp
+	rm -f install-arch32-stamp build-arch32-stamp configure-arch32-stamp
 #	-$(MAKE) -C build32 distclean
 ifeq (,$(DEB_SAVEBUILD))
 	rm -rf build32
@@ -133,7 +133,7 @@ endif
 clean-arch64:
 	dh_testdir
 	dh_testroot
-	rm -f build-arch64-stamp configure-arch64-stamp
+	rm -f install-arch64-stamp build-arch64-stamp configure-arch64-stamp
 #	-$(MAKE) -C build64 distclean
 ifeq (,$(DEB_SAVEBUILD))
 	rm -rf build64
@@ -144,7 +144,7 @@ endif
 clean: $(subst build,clean-arch,$(BUILDS))
 	dh_testdir
 	dh_testroot
-	rm -f build-indep-stamp
+	rm -f install-arch-stamp build-indep-stamp
 	dh_clean
 
 install-indep: build-indep
@@ -152,7 +152,8 @@ install-indep: build-indep
 	dh_testroot
 	dh_installdirs -i
 
-install-arch32: build-arch32
+install-arch32: install-arch32-stamp
+install-arch32-stamp: build-arch32-stamp
 	dh_testdir
 	dh_testroot
 
@@ -172,10 +173,14 @@ install-arch32: build-arch32
 	# install winelib programs
 	$(MAKE) -C build32/programs install prefix=`pwd`/debian/tmp/usr
 	install build32/tools/fnt2bdf debian/tmp/usr/bin
+	rm -f debian/tmp/usr/bin/winelauncher
+
+	touch install-arch32-stamp
 
 # I still have to work out how to install 32-bit and 64-bit Wine side by side.
 # This version only works if the 32-bit version isn't installed...
-install-arch64: build-arch64
+install-arch64: install-arch64-stamp
+install-arch64-stamp: build-arch64-stamp
 	dh_testdir
 	dh_testroot
 
@@ -192,8 +197,12 @@ install-arch64: build-arch64
 	# install winelib programs
 	$(MAKE) -C build64/programs install prefix=`pwd`/debian/tmp/usr
 	install build64/tools/fnt2bdf debian/tmp/usr/bin
+	rm -f debian/tmp/usr/bin/winelauncher
 
-install-arch: $(subst build,install-arch,$(BUILDS))
+	touch install-arch64-stamp
+
+install-arch: install-arch-stamp
+install-arch-stamp: $(subst build,install-arch,$(BUILDS))-stamp
 	dh_testdir
 	dh_testroot
 
@@ -205,6 +214,8 @@ install-arch: $(subst build,install-arch,$(BUILDS))
 	mkdir -p debian/tmp/usr/share/doc/wine
 	cp dlls/twain_32/README		debian/tmp/usr/share/doc/wine/README.twain
 	cp tools/winedump/README	debian/tmp/usr/share/doc/wine/README.winedump
+
+	touch install-arch-stamp
 
 install: install-arch
 
@@ -223,7 +234,7 @@ binary-indep: build-indep install-indep
 	dh_builddeb -i
 
 # Build architecture-dependent files here.
-binary-arch: install-arch
+binary-arch: install-arch-stamp
 	dh_testdir
 	dh_testroot
 	# create installation directories
@@ -232,10 +243,11 @@ binary-arch: install-arch
 ifeq (,$(AMD64_COPY))
 	# distribute files into debian/<packagename>
 	# according to the <packagename>.install files
-	dh_install -s
+	dh_install -s --list-missing
 
 	# patch marlett.ttf due to fontforge bug #458234
 	mensis -script debian/marlett.mensis debian/libwine/usr/share/wine/fonts/marlett.ttf
+	rm -f debian/libwine/usr/share/wine/fonts/marlett.ttf~
 
 	# split up libwine
 ifeq ($(DEB_HOST_GNU_SYSTEM),linux-gnu)

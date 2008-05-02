@@ -1,3 +1,26 @@
+wine (0.9.57-1) unstable; urgency=low
+
+  * New upstream release 0.9.57.
+    - Support for multiple OpenGL pixel formats.
+    - Improved support for color profiles.
+    - Many window management fixes.
+    - Better fullscreen support.
+    - Lots of bug fixes.
+  * This version was released Mar 7, 2008.
+  * Added --list-missing option to the dh_install invocation.
+  * Installed the translated wine and wineserver man pages.
+  * Installed *.mod16 and *.sys.so (i.e., winoldap.mod16 and mountmgr.sys.so)
+    into libwine.
+  * Installed secedit.exe, svchost.exe, and write.exe into wine-bin.
+  * Delete marlett.ttf~ (a backup file created by the workaround I currently
+    use for a fontforge bug)
+  * Removed empty directories /etc and /usr/share/man/man5 from wine-bin.
+  * The install-arch* rules (in debian/rules) now uses install-arch*-stamp
+    to remember if they're already complete, so binary-arch can be rerun
+    (for testing purposes) without having to wait for install-arch.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Thu, 13 Mar 2008 21:01:52 +0100
+
 wine (0.9.56-1) unstable; urgency=low
 
   * New upstream release 0.9.56.

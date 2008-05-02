@@ -1,6 +1,7 @@
 debian/tmp/usr/lib/libwine*.so.*
 debian/tmp/usr/lib/wine/*.dll.so
 debian/tmp/usr/lib/wine/*.drv.so
+debian/tmp/usr/lib/wine/*.sys.so
 debian/tmp/usr/lib/wine/*.acm.so
 debian/tmp/usr/lib/wine/*.ocx.so
 debian/tmp/usr/lib/wine/*.tlb.so
@@ -9,6 +10,7 @@ debian/tmp/usr/lib/wine/ntoskrnl.exe.so
 debian/tmp/usr/lib/wine/*.dll16
 debian/tmp/usr/lib/wine/*.drv16
 debian/tmp/usr/lib/wine/*.exe16
+debian/tmp/usr/lib/wine/*.mod16
 debian/tmp/usr/lib/wine/wine.bin
 debian/tmp/usr/lib/wine/wine-kthread
 debian/tmp/usr/lib/wine/wine-pthread
@@ -17,4 +19,5 @@ debian/tmp/usr/lib/wine/wineserver
 debian/tmp/usr/share/wine/generic.ppd
 debian/tmp/usr/share/wine/fonts
 debian/tmp/usr/share/man/man1/wineserver.1
+debian/tmp/usr/share/man/*/man1/wineserver.1
 debian/tmp/usr/share/doc/wine/README.twain usr/share/doc/libwine
