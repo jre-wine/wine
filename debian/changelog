@@ -1,3 +1,33 @@
+wine (0.9.54-1) unstable; urgency=low
+
+  * New upstream release
+    - Photoshop CS/CS2 should now work, please help us testing it.
+      See http://wiki.winehq.org/AdobePhotoshop for details.
+    - A number of RPC fixes.
+    - Various improvements to the debugger support.
+    - Lots of bug fixes.
+  * This version was released Jan 25, 2008.
+  * Added unixodbc-dev to Build-Depends. Along with the new upstream
+    check for libodbc soname from Wine 0.9.53, this should make
+    Wine able to find unixodbc without the need for symlinks or
+    environment variables. Closes: #259710.
+  * Removed libungif4-dev from Build-Depends. In Wine 0.9.21, they
+    copied the ungif source files they needed into the Wine source code
+    itself, so an external ungif isn't needed anymore.
+  * Installed README.Debian into wine-bin and libwine.
+  * Fixed spelling error in wine-safe message (intented => intended).
+  * Patched winelauncher to allow the user to override WINEDLLPATH
+    WINESERVER, and WINELOADER. Closes: #323198.
+  * Patched winelauncher to only redirect stderr to the debug log,
+    not stdout. This should allow stdout to be independently
+    redirected by the user even while capturing a log. (This was
+    accomplished with bashisms, so winelauncher's interpreter is
+    no longer /bin/sh, it's now explicitly /bin/bash.)
+  * Commented out the echo "Wine exited with a successful status"
+    line in winelauncher. It was a bit annoying and unnecessary...
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 16 Feb 2008 04:47:59 +0100
+
 wine (0.9.53-1) unstable; urgency=low
 
   * New upstream release 0.9.53.
