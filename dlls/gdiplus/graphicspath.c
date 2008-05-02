@@ -97,6 +97,12 @@ GpStatus WINGDIPAPI GdipAddPathArc(GpPath *path, REAL x1, REAL y1, REAL x2,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipAddPathArcI(GpPath *path, INT x1, INT y1, INT x2,
+   INT y2, REAL startAngle, REAL sweepAngle)
+{
+    return GdipAddPathArc(path,(REAL)x1,(REAL)y1,(REAL)x2,(REAL)y2,startAngle,sweepAngle);
+}
+
 GpStatus WINGDIPAPI GdipAddPathBezierI(GpPath *path, INT x1, INT y1, INT x2,
     INT y2, INT x3, INT y3, INT x4, INT y4)
 {
@@ -215,6 +221,30 @@ GpStatus WINGDIPAPI GdipAddPathLine2(GpPath *path, GDIPCONST GpPointF *points,
     path->pathdata.Count += count;
 
     return Ok;
+}
+
+GpStatus WINGDIPAPI GdipAddPathLine2I(GpPath *path, GDIPCONST GpPoint *points, INT count)
+{
+    GpPointF *pointsF;
+    INT i;
+    GpStatus stat;
+
+    if(count <= 0)
+        return InvalidParameter;
+
+    pointsF = GdipAlloc(sizeof(GpPointF) * count);
+    if(!pointsF)    return OutOfMemory;
+
+    for(i = 0;i < count; i++){
+        pointsF[i].X = (REAL)points[i].X;
+        pointsF[i].Y = (REAL)points[i].Y;
+    }
+
+    stat = GdipAddPathLine2(path, pointsF, count);
+
+    GdipFree(pointsF);
+
+    return stat;
 }
 
 GpStatus WINGDIPAPI GdipAddPathLineI(GpPath *path, INT x1, INT y1, INT x2, INT y2)
@@ -371,6 +401,27 @@ GpStatus WINGDIPAPI GdipCreatePath2(GDIPCONST GpPointF* points,
     (*path)->newfigure = TRUE;
 
     return Ok;
+}
+
+GpStatus WINGDIPAPI GdipCreatePath2I(GDIPCONST GpPoint* points,
+    GDIPCONST BYTE* types, INT count, GpFillMode fill, GpPath **path)
+{
+    GpPointF *ptF;
+    GpStatus ret;
+    INT i;
+
+    ptF = GdipAlloc(sizeof(GpPointF)*count);
+
+    for(i = 0;i < count; i++){
+        ptF[i].X = (REAL)points[i].X;
+        ptF[i].Y = (REAL)points[i].Y;
+    }
+
+    ret = GdipCreatePath2(ptF, types, count, fill, path);
+
+    GdipFree(ptF);
+
+    return ret;
 }
 
 GpStatus WINGDIPAPI GdipDeletePath(GpPath *path)

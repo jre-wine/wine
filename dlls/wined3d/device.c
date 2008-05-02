@@ -790,6 +790,14 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface, U
     object->width  = Width;
     object->height = Height;
 
+    if(glDesc->Flags & WINED3DFMT_FLAG_FILTERING) {
+        object->baseTexture.minMipLookup = &minMipLookup;
+        object->baseTexture.magLookup    = &magLookup;
+    } else {
+        object->baseTexture.minMipLookup = &minMipLookup_noFilter;
+        object->baseTexture.magLookup    = &magLookup_noFilter;
+    }
+
     /** Non-power2 support **/
     if (GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO)) {
         pow2Width = Width;
@@ -933,6 +941,14 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVolumeTexture(IWineD3DDevice *ifa
     object->baseTexture.pow2Matrix[ 5] = 1.0;
     object->baseTexture.pow2Matrix[10] = 1.0;
     object->baseTexture.pow2Matrix[15] = 1.0;
+
+    if(glDesc->Flags & WINED3DFMT_FLAG_FILTERING) {
+        object->baseTexture.minMipLookup = &minMipLookup;
+        object->baseTexture.magLookup    = &magLookup;
+    } else {
+        object->baseTexture.minMipLookup = &minMipLookup_noFilter;
+        object->baseTexture.magLookup    = &magLookup_noFilter;
+    }
 
     /* Calculate levels for mip mapping */
     if (Usage & WINED3DUSAGE_AUTOGENMIPMAP) {
@@ -1080,6 +1096,14 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
     object->baseTexture.pow2Matrix[ 5] = ((float)EdgeLength) / ((float)pow2EdgeLength);
     object->baseTexture.pow2Matrix[10] = ((float)EdgeLength) / ((float)pow2EdgeLength);
     object->baseTexture.pow2Matrix[15] = 1.0;
+
+    if(glDesc->Flags & WINED3DFMT_FLAG_FILTERING) {
+        object->baseTexture.minMipLookup = &minMipLookup;
+        object->baseTexture.magLookup    = &magLookup;
+    } else {
+        object->baseTexture.minMipLookup = &minMipLookup_noFilter;
+        object->baseTexture.magLookup    = &magLookup_noFilter;
+    }
 
     /* Calculate levels for mip mapping */
     if (Usage & WINED3DUSAGE_AUTOGENMIPMAP) {
@@ -2121,11 +2145,13 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
     }
 
     /* Set up some starting GL setup */
-    ENTER_GL();
 
     /* Setup all the devices defaults */
     IWineD3DStateBlock_InitStartupStateBlock((IWineD3DStateBlock *)This->stateBlock);
     create_dummy_textures(This);
+
+    ENTER_GL();
+
 #if 0
     IWineD3DImpl_CheckGraphicsMemory();
 #endif
@@ -2155,7 +2181,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface, WINED3DPR
 
         case ORM_BACKBUFFER:
         {
-            if(GL_LIMITS(aux_buffers) > 0) {
+            if(This->activeContext->aux_buffers > 0) {
                 TRACE("Using auxilliary buffer for offscreen rendering\n");
                 This->offscreenBuffer = GL_AUX0;
             } else {
@@ -2232,7 +2258,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface, D3DCB_D
 
     /* Delete the palette conversion shader if it is around */
     if(This->paletteConversionShader) {
+        ENTER_GL();
         GL_EXTCALL(glDeleteProgramsARB(1, &This->paletteConversionShader));
+        LEAVE_GL();
         This->paletteConversionShader = 0;
     }
 
@@ -2562,6 +2590,20 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetStreamSourceFreq(IWineD3DDevice *ifa
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     UINT oldFlags = This->updateStateBlock->streamFlags[StreamNumber];
     UINT oldFreq = This->updateStateBlock->streamFreq[StreamNumber];
+
+    /* Verify input at least in d3d9 this is invalid*/
+    if( (Divider & WINED3DSTREAMSOURCE_INSTANCEDATA) && (Divider & WINED3DSTREAMSOURCE_INDEXEDDATA)){
+        WARN("INSTANCEDATA and INDEXEDDATA were set, returning D3DERR_INVALIDCALL\n");
+        return WINED3DERR_INVALIDCALL;
+    }
+    if( (Divider & WINED3DSTREAMSOURCE_INSTANCEDATA) && StreamNumber == 0 ){
+        WARN("INSTANCEDATA used on stream 0, returning D3DERR_INVALIDCALL\n");
+        return WINED3DERR_INVALIDCALL;
+    }
+    if( Divider == 0 ){
+        WARN("Divider is 0, returning D3DERR_INVALIDCALL\n");
+        return WINED3DERR_INVALIDCALL;
+    }
 
     TRACE("(%p) StreamNumber(%d), Divider(%d)\n", This, StreamNumber, Divider);
     This->updateStateBlock->streamFlags[StreamNumber] = Divider & (WINED3DSTREAMSOURCE_INSTANCEDATA  | WINED3DSTREAMSOURCE_INDEXEDDATA );
@@ -5123,6 +5165,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawPrimitive(IWineD3DDevice *iface, WI
                                debug_d3dprimitivetype(PrimitiveType),
                                StartVertex, PrimitiveCount);
 
+    if(!This->stateBlock->vertexDecl) {
+        WARN("(%p) : Called without a valid vertex declaration set\n", This);
+        return WINED3DERR_INVALIDCALL;
+    }
+
     /* The index buffer is not needed here, but restore it, otherwise it is hell to keep track of */
     if(This->stateBlock->streamIsUP) {
         IWineD3DDeviceImpl_MarkStateDirty(This, STATE_INDEXBUFFER);
@@ -5157,6 +5204,11 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_DrawIndexedPrimitive(IWineD3DDevice *
          * D3D8 simply dies, but I doubt it can do much harm to return
          * D3DERR_INVALIDCALL there as well. */
         ERR("(%p) : Called without a valid index buffer set, returning WINED3DERR_INVALIDCALL\n", This);
+        return WINED3DERR_INVALIDCALL;
+    }
+
+    if(!This->stateBlock->vertexDecl) {
+        WARN("(%p) : Called without a valid vertex declaration set\n", This);
         return WINED3DERR_INVALIDCALL;
     }
 
@@ -5198,6 +5250,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawPrimitiveUP(IWineD3DDevice *iface, 
              debug_d3dprimitivetype(PrimitiveType),
              PrimitiveCount, pVertexStreamZeroData, VertexStreamZeroStride);
 
+    if(!This->stateBlock->vertexDecl) {
+        WARN("(%p) : Called without a valid vertex declaration set\n", This);
+        return WINED3DERR_INVALIDCALL;
+    }
+
     /* Note in the following, it's not this type, but that's the purpose of streamIsUP */
     vb = This->stateBlock->streamSource[0];
     This->stateBlock->streamSource[0] = (IWineD3DVertexBuffer *)pVertexStreamZeroData;
@@ -5237,6 +5294,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DrawIndexedPrimitiveUP(IWineD3DDevice *
              This, PrimitiveType, debug_d3dprimitivetype(PrimitiveType),
              MinVertexIndex, NumVertices, PrimitiveCount, pIndexData,
              IndexDataFormat, pVertexStreamZeroData, VertexStreamZeroStride);
+
+    if(!This->stateBlock->vertexDecl) {
+        WARN("(%p) : Called without a valid vertex declaration set\n", This);
+        return WINED3DERR_INVALIDCALL;
+    }
 
     if (IndexDataFormat == WINED3DFMT_INDEX16) {
         idxStride = 2;
@@ -5555,7 +5617,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_GetPaletteEntries(IWineD3DDevice *ifa
     if (PaletteNumber >= This->NumberOfPalettes || !This->palettes[PaletteNumber]) {
         /* What happens in such situation isn't documented; Native seems to silently abort
            on such conditions. Return Invalid Call. */
-        ERR("(%p) : (%u) Non-existent palette. NumberOfPalettes %u\n", This, PaletteNumber, This->NumberOfPalettes);
+        ERR("(%p) : (%u) Nonexistent palette. NumberOfPalettes %u\n", This, PaletteNumber, This->NumberOfPalettes);
         return WINED3DERR_INVALIDCALL;
     }
     for (j = 0; j < 256; ++j) {
@@ -5574,7 +5636,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCurrentTexturePalette(IWineD3DDevi
     /* Native appears to silently abort on attempt to make an uninitialized palette current and render.
        (tested with reference rasterizer). Return Invalid Call. */
     if (PaletteNumber >= This->NumberOfPalettes || !This->palettes[PaletteNumber]) {
-        ERR("(%p) : (%u) Non-existent palette. NumberOfPalettes %u\n", This, PaletteNumber, This->NumberOfPalettes);
+        ERR("(%p) : (%u) Nonexistent palette. NumberOfPalettes %u\n", This, PaletteNumber, This->NumberOfPalettes);
         return WINED3DERR_INVALIDCALL;
     }
     /*TODO: stateblocks */
@@ -6206,7 +6268,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ColorFill(IWineD3DDevice *iface, IWineD
     }
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+        ENTER_GL();
         color_fill_fbo(iface, pSurface, pRect, color);
+        LEAVE_GL();
         return WINED3D_OK;
     } else {
         /* Just forward this to the DirectDraw blitting engine */
@@ -6982,6 +7046,8 @@ static void updateSurfaceDesc(IWineD3DSurfaceImpl *surface, WINED3DPRESENT_PARAM
     surface->resource.allocatedMemory = NULL;
     surface->resource.heapMemory = NULL;
     surface->resource.size = IWineD3DSurface_GetPitch((IWineD3DSurface *) surface) * surface->pow2Width;
+    /* INDRAWABLE is a sane place for implicit targets / depth stencil after the reset */
+    IWineD3DSurface_ModifyLocation((IWineD3DSurface *) surface, SFLAG_INDRAWABLE, TRUE);
 }
 
 static HRESULT WINAPI reset_unload_resources(IWineD3DResource *resource, void *data) {
@@ -7358,6 +7424,7 @@ static void WINAPI IWineD3DDeviceImpl_ResourceReleased(IWineD3DDevice *iface, IW
                     }
                 }
 
+                ENTER_GL();
                 for (i = 0; i < GL_LIMITS(buffers); ++i) {
                     if (This->fbo_color_attachments[i] == (IWineD3DSurface *)resource) {
                         bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->fbo);
@@ -7370,6 +7437,7 @@ static void WINAPI IWineD3DDeviceImpl_ResourceReleased(IWineD3DDevice *iface, IW
                     set_depth_stencil_fbo(iface, NULL);
                     This->fbo_depth_attachment = NULL;
                 }
+                LEAVE_GL();
             }
 
             break;

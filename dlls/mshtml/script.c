@@ -27,6 +27,7 @@
 #include "winuser.h"
 #include "ole2.h"
 #include "activscp.h"
+#include "activdbg.h"
 #include "objsafe.h"
 
 #include "wine/debug.h"
@@ -44,11 +45,13 @@ typedef struct {
     const IActiveScriptSiteVtbl               *lpIActiveScriptSiteVtbl;
     const IActiveScriptSiteInterruptPollVtbl  *lpIActiveScriptSiteInterruptPollVtbl;
     const IActiveScriptSiteWindowVtbl         *lpIActiveScriptSiteWindowVtbl;
+    const IActiveScriptSiteDebug32Vtbl        *lpIActiveScriptSiteDebug32Vtbl;
 
     LONG ref;
 
     IActiveScript *script;
     IActiveScriptParse *parse;
+    IActiveScriptParseProcedure *parse_proc;
 
     SCRIPTSTATE script_state;
 
@@ -61,6 +64,7 @@ typedef struct {
 #define ACTSCPSITE(x)  ((IActiveScriptSite*)               &(x)->lpIActiveScriptSiteVtbl)
 #define ACTSCPPOLL(x)  ((IActiveScriptSiteInterruptPoll*)  &(x)->lpIActiveScriptSiteInterruptPollVtbl)
 #define ACTSCPWIN(x)   ((IActiveScriptSiteWindow*)         &(x)->lpIActiveScriptSiteWindowVtbl)
+#define ACTSCPDBG32(x) ((IActiveScriptSiteDebug32*)        &(x)->lpIActiveScriptSiteDebug32Vtbl)
 
 static BOOL init_script_engine(ScriptHost *script_host)
 {
@@ -144,7 +148,12 @@ static BOOL init_script_engine(ScriptHost *script_host)
     if(FAILED(hres))
        WARN("AddNamedItem failed: %08x\n", hres);
 
-    /* FIXME: QI for IActiveScriptParseProcedure2 and IActiveScriptParseProcedure */
+    hres = IActiveScript_QueryInterface(script_host->script, &IID_IActiveScriptParseProcedure2,
+                                        (void**)&script_host->parse_proc);
+    if(FAILED(hres)) {
+        /* FIXME: QI for IActiveScriptParseProcedure */
+        WARN("Could not get IActiveScriptParseProcedure iface: %08x\n", hres);
+    }
 
     return TRUE;
 }
@@ -164,6 +173,11 @@ static void release_script_engine(ScriptHost *This)
         IActiveScript_Close(This->script);
 
     default:
+        if(This->parse_proc) {
+            IActiveScriptParseProcedure_Release(This->parse_proc);
+            This->parse_proc = NULL;
+        }
+
         if(This->parse) {
             IActiveScriptParse_Release(This->parse);
             This->parse = NULL;
@@ -205,6 +219,9 @@ static HRESULT WINAPI ActiveScriptSite_QueryInterface(IActiveScriptSite *iface, 
     }else if(IsEqualGUID(&IID_IActiveScriptSiteWindow, riid)) {
         TRACE("(%p)->(IID_IActiveScriptSiteWindow %p)\n", This, ppv);
         *ppv = ACTSCPWIN(This);
+    }else if(IsEqualGUID(&IID_IActiveScriptSiteDebug32, riid)) {
+        TRACE("(%p)->(IID_IActiveScriptSiteDebug32 %p)\n", This, ppv);
+        *ppv = ACTSCPDBG32(This);
     }else {
         FIXME("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
         return E_NOINTERFACE;
@@ -426,6 +443,70 @@ static const IActiveScriptSiteWindowVtbl ActiveScriptSiteWindowVtbl = {
     ActiveScriptSiteWindow_EnableModeless
 };
 
+#define ACTSCPDBG32_THIS(iface) DEFINE_THIS(ScriptHost, IActiveScriptSiteDebug32, iface)
+
+static HRESULT WINAPI ActiveScriptSiteDebug32_QueryInterface(IActiveScriptSiteDebug32 *iface,
+        REFIID riid, void **ppv)
+{
+    ScriptHost *This = ACTSCPDBG32_THIS(iface);
+    return IActiveScriptSite_QueryInterface(ACTSCPSITE(This), riid, ppv);
+}
+
+static ULONG WINAPI ActiveScriptSiteDebug32_AddRef(IActiveScriptSiteDebug32 *iface)
+{
+    ScriptHost *This = ACTSCPDBG32_THIS(iface);
+    return IActiveScriptSite_AddRef(ACTSCPSITE(This));
+}
+
+static ULONG WINAPI ActiveScriptSiteDebug32_Release(IActiveScriptSiteDebug32 *iface)
+{
+    ScriptHost *This = ACTSCPDBG32_THIS(iface);
+    return IActiveScriptSite_Release(ACTSCPSITE(This));
+}
+
+static HRESULT WINAPI ActiveScriptSiteDebug32_GetDocumentContextFromPosition(IActiveScriptSiteDebug32 *iface,
+            DWORD dwSourceContext, ULONG uCharacterOffset, ULONG uNumChars, IDebugDocumentContext **ppsc)
+{
+    ScriptHost *This = ACTSCPDBG32_THIS(iface);
+    FIXME("(%p)->(%x %u %u %p)\n", This, dwSourceContext, uCharacterOffset, uNumChars, ppsc);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ActiveScriptSiteDebug32_GetApplication(IActiveScriptSiteDebug32 *iface, IDebugApplication32 **ppda)
+{
+    ScriptHost *This = ACTSCPDBG32_THIS(iface);
+    FIXME("(%p)->(%p)\n", This, ppda);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ActiveScriptSiteDebug32_GetRootApplicationNode(IActiveScriptSiteDebug32 *iface,
+            IDebugApplicationNode **ppdanRoot)
+{
+    ScriptHost *This = ACTSCPDBG32_THIS(iface);
+    FIXME("(%p)->(%p)\n", This, ppdanRoot);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ActiveScriptSiteDebug32_OnScriptErrorDebug(IActiveScriptSiteDebug32 *iface,
+            IActiveScriptErrorDebug *pErrorDebug, BOOL *pfEnterDebugger, BOOL *pfCallOnScriptErrorWhenContinuing)
+{
+    ScriptHost *This = ACTSCPDBG32_THIS(iface);
+    FIXME("(%p)->(%p %p %p)\n", This, pErrorDebug, pfEnterDebugger, pfCallOnScriptErrorWhenContinuing);
+    return E_NOTIMPL;
+}
+
+#undef ACTSCPDBG32_THIS
+
+static const IActiveScriptSiteDebug32Vtbl ActiveScriptSiteDebug32Vtbl = {
+    ActiveScriptSiteDebug32_QueryInterface,
+    ActiveScriptSiteDebug32_AddRef,
+    ActiveScriptSiteDebug32_Release,
+    ActiveScriptSiteDebug32_GetDocumentContextFromPosition,
+    ActiveScriptSiteDebug32_GetApplication,
+    ActiveScriptSiteDebug32_GetRootApplicationNode,
+    ActiveScriptSiteDebug32_OnScriptErrorDebug
+};
+
 static ScriptHost *create_script_host(HTMLDocument *doc, GUID *guid)
 {
     ScriptHost *ret;
@@ -435,6 +516,7 @@ static ScriptHost *create_script_host(HTMLDocument *doc, GUID *guid)
     ret->lpIActiveScriptSiteVtbl               = &ActiveScriptSiteVtbl;
     ret->lpIActiveScriptSiteInterruptPollVtbl  = &ActiveScriptSiteInterruptPollVtbl;
     ret->lpIActiveScriptSiteWindowVtbl         = &ActiveScriptSiteWindowVtbl;
+    ret->lpIActiveScriptSiteDebug32Vtbl        = &ActiveScriptSiteDebug32Vtbl;
     ret->ref = 1;
     ret->doc = doc;
     ret->script_state = SCRIPTSTATE_UNINITIALIZED;
@@ -477,6 +559,7 @@ static void parse_extern_script(ScriptHost *script_host, LPCWSTR src)
     IMoniker *mon;
     char *buf;
     WCHAR *text;
+    DWORD len, size=0;
     HRESULT hres;
 
     static const WCHAR wine_schemaW[] = {'w','i','n','e',':'};
@@ -488,13 +571,16 @@ static void parse_extern_script(ScriptHost *script_host, LPCWSTR src)
     if(FAILED(hres))
         return;
 
-    hres = bind_mon_to_buffer(script_host->doc, mon, (void**)&buf);
+    hres = bind_mon_to_buffer(script_host->doc, mon, (void**)&buf, &size);
     IMoniker_Release(mon);
     if(FAILED(hres))
         return;
 
-    text = heap_strdupAtoW(buf);
+    len = MultiByteToWideChar(CP_ACP, 0, buf, size, NULL, 0);
+    text = heap_alloc((len+1)*sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, buf, size, text, len);
     heap_free(buf);
+    text[len] = 0;
 
     parse_text(script_host, text);
 

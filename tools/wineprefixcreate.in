@@ -79,21 +79,7 @@ then
         LD_LIBRARY_PATH="$topdir/libs/wine"
     fi
     export LD_LIBRARY_PATH
-
-    # find the source directory
-    link=`readlink "$WINELOADER"`
-    if [ -z "$link" ]
-    then
-        topsrcdir="$topdir"
-    else
-        link=`dirname "$link"`
-        case "$link" in
-            /*) topsrcdir=`cd "$link/.." && pwd` ;;
-             *) topsrcdir=`cd "$topdir/$link/.." && pwd` ;;
-        esac
-    fi
-    dlldir="$topdir/programs"
-    datadir="$topsrcdir/tools"
+    datadir="$topdir/tools"
 fi
 
 while [ $# -gt 0 ]
@@ -153,15 +139,7 @@ CROOT="$WINEPREFIX/dosdevices/c:"
 
 for i in \
     "$CROOT/windows" \
-    "$CROOT/windows/command" \
-    "$CROOT/windows/fonts" \
-    "$CROOT/windows/inf" \
-    "$CROOT/windows/system" \
-    "$CROOT/windows/system32" \
-    "$CROOT/windows/system32/spool" \
-    "$CROOT/windows/system32/spool/drivers" \
-    "$CROOT/windows/system32/spool/drivers/color" \
-    "$CROOT/windows/temp"
+    "$CROOT/windows/inf"
 do
     [ -d "$i" ] || mkdir "$i"
 done

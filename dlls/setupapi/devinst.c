@@ -3110,6 +3110,11 @@ BOOL WINAPI SetupDiGetDeviceRegistryPropertyA(
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
+    if (PropertyBufferSize && PropertyBuffer == NULL)
+    {
+        SetLastError(ERROR_INVALID_DATA);
+        return FALSE;
+    }
     devInfo = (struct DeviceInfo *)DeviceInfoData->Reserved;
     if (Property < sizeof(PropertyMap) / sizeof(PropertyMap[0])
         && PropertyMap[Property].nameA)
@@ -3118,14 +3123,14 @@ BOOL WINAPI SetupDiGetDeviceRegistryPropertyA(
         LONG l = RegQueryValueExA(devInfo->key, PropertyMap[Property].nameA,
                 NULL, PropertyRegDataType, PropertyBuffer, &size);
 
-        if (RequiredSize)
-            *RequiredSize = size;
-        if (!PropertyBuffer)
-            ; /* do nothing, ret is already FALSE, last error is already set */
+        if (l == ERROR_MORE_DATA || !PropertyBufferSize)
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
         else if (!l)
             ret = TRUE;
         else
             SetLastError(l);
+        if (RequiredSize)
+            *RequiredSize = size;
     }
     return ret;
 }
@@ -3166,6 +3171,11 @@ BOOL WINAPI SetupDiGetDeviceRegistryPropertyW(
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
+    if (PropertyBufferSize && PropertyBuffer == NULL)
+    {
+        SetLastError(ERROR_INVALID_DATA);
+        return FALSE;
+    }
     devInfo = (struct DeviceInfo *)DeviceInfoData->Reserved;
     if (Property < sizeof(PropertyMap) / sizeof(PropertyMap[0])
         && PropertyMap[Property].nameW)
@@ -3174,14 +3184,14 @@ BOOL WINAPI SetupDiGetDeviceRegistryPropertyW(
         LONG l = RegQueryValueExW(devInfo->key, PropertyMap[Property].nameW,
                 NULL, PropertyRegDataType, PropertyBuffer, &size);
 
-        if (RequiredSize)
-            *RequiredSize = size;
-        if (!PropertyBuffer)
-            ; /* do nothing, ret is already FALSE, last error is already set */
+        if (l == ERROR_MORE_DATA || !PropertyBufferSize)
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
         else if (!l)
             ret = TRUE;
         else
             SetLastError(l);
+        if (RequiredSize)
+            *RequiredSize = size;
     }
     return ret;
 }

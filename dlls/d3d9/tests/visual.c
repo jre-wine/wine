@@ -162,10 +162,13 @@ static IDirect3DDevice9 *init_d3d9(void)
     present_parameters.EnableAutoDepthStencil = TRUE;
     present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
 
-    hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
+    hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
     if(FAILED(hr)) {
         present_parameters.AutoDepthStencilFormat = D3DFMT_D16;
-        hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
+        hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
+        if(FAILED(hr)) {
+            hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
+        }
     }
     ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "IDirect3D_CreateDevice returned: %s\n", DXGetErrorString9(hr));
 
@@ -2040,8 +2043,8 @@ static void fill_surface(IDirect3DSurface9 *surface, DWORD color)
 static void stretchrect_test(IDirect3DDevice9 *device)
 {
     HRESULT hr;
-    IDirect3DTexture9 *tex_rt32 = NULL, *tex_rt64 = NULL, *tex_rt_dest64;
-    IDirect3DSurface9 *surf_tex_rt32 = NULL, *surf_tex_rt64 = NULL, *surf_tex_rt_dest64;
+    IDirect3DTexture9 *tex_rt32 = NULL, *tex_rt64 = NULL, *tex_rt_dest64 = NULL;
+    IDirect3DSurface9 *surf_tex_rt32 = NULL, *surf_tex_rt64 = NULL, *surf_tex_rt_dest64 = NULL;
     IDirect3DTexture9 *tex32 = NULL, *tex64 = NULL, *tex_dest64 = NULL;
     IDirect3DSurface9 *surf_tex32 = NULL, *surf_tex64 = NULL, *surf_tex_dest64 = NULL;
     IDirect3DSurface9 *surf_rt32 = NULL, *surf_rt64 = NULL, *surf_rt_dest64 = NULL;
@@ -2758,9 +2761,9 @@ static void release_buffer_test(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
 
     hr = IDirect3DDevice9_SetIndices(device, ib);
-    ok(hr == D3D_OK, "IDirect3DIndexBuffer8_Unlock failed with %s\n", DXGetErrorString9(hr));
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetIndices failed with %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetStreamSource(device, 0, vb, 0, sizeof(quad[0]));
-    ok(hr == D3D_OK, "IDirect3DIndexBuffer8_Unlock failed with %s\n", DXGetErrorString9(hr));
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %s\n", DXGetErrorString9(hr));
 
@@ -4798,31 +4801,37 @@ static void cnd_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 158, 358);
     ok(color == 0x00ffffff, "pixel 158, 358 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 162, 358);
-    ok(color == 0x00000000, "pixel 162, 358 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 162, 358 has color %08x, expected 0x00000000\n", color);
     color = getPixelColor(device, 158, 362);
     ok(color == 0x00ffffff, "pixel 158, 362 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 162, 362);
-    ok(color == 0x00000000, "pixel 162, 362 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 162, 362 has color %08x, expected 0x00000000\n", color);
 
     /* 1.2 shader */
     color = getPixelColor(device, 478, 358);
     ok(color == 0x00ffffff, "pixel 478, 358 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 482, 358);
-    ok(color == 0x00000000, "pixel 482, 358 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 358 has color %08x, expected 0x00000000\n", color);
     color = getPixelColor(device, 478, 362);
     ok(color == 0x00ffffff, "pixel 478, 362 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 482, 362);
-    ok(color == 0x00000000, "pixel 482, 362 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 362 has color %08x, expected 0x00000000\n", color);
 
     /* 1.3 shader */
     color = getPixelColor(device, 478, 118);
     ok(color == 0x00ffffff, "pixel 478, 118 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 482, 118);
-    ok(color == 0x00000000, "pixel 482, 118 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 118 has color %08x, expected 0x00000000\n", color);
     color = getPixelColor(device, 478, 122);
     ok(color == 0x00ffffff, "pixel 478, 122 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 482, 122);
-    ok(color == 0x00000000, "pixel 482, 122 has color %08x, expected 0x00000000\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) <= 0x01) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 122 has color %08x, expected 0x00000000\n", color);
 
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff00ffff, 0.0, 0);
     ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
@@ -4875,33 +4884,45 @@ static void cnd_test(IDirect3DDevice9 *device)
 
     /* 1.1 shader. coissue flag changed the semantic of cnd, c1 is always selected */
     color = getPixelColor(device, 158, 358);
-    ok(color == 0x0000ff00, "pixel 158, 358 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 158, 358 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 162, 358);
-    ok(color == 0x0000ff00, "pixel 162, 358 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 162, 358 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 158, 362);
-    ok(color == 0x0000ff00, "pixel 158, 362 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 158, 362 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 162, 362);
-    ok(color == 0x0000ff00, "pixel 162, 362 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 162, 362 has color %08x, expected 0x0000ff00\n", color);
 
     /* 1.2 shader */
     color = getPixelColor(device, 478, 358);
-    ok(color == 0x0000ff00, "pixel 478, 358 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 478, 358 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 482, 358);
-    ok(color == 0x0000ff00, "pixel 482, 358 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 358 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 478, 362);
-    ok(color == 0x0000ff00, "pixel 478, 362 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 478, 362 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 482, 362);
-    ok(color == 0x0000ff00, "pixel 482, 362 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 362 has color %08x, expected 0x0000ff00\n", color);
 
     /* 1.3 shader */
     color = getPixelColor(device, 478, 118);
-    ok(color == 0x0000ff00, "pixel 478, 118 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 478, 118 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 482, 118);
-    ok(color == 0x0000ff00, "pixel 482, 118 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 118 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 478, 122);
-    ok(color == 0x0000ff00, "pixel 478, 122 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 478, 122 has color %08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 482, 122);
-    ok(color == 0x0000ff00, "pixel 482, 122 has color %08x, expected 0x0000ff00\n", color);
+    ok( (((color & 0x00ff0000) >> 16) <= 0x01) && (((color & 0x0000ff00) >> 8) == 0xff) && ((color & 0x000000ff) <= 0x01),
+        "pixel 482, 122 has color %08x, expected 0x0000ff00\n", color);
 
     IDirect3DPixelShader9_Release(shader_14_coissue);
     IDirect3DPixelShader9_Release(shader_13_coissue);
@@ -5160,6 +5181,7 @@ static void fixed_function_varying_test(IDirect3DDevice9 *device) {
     HRESULT hr;
     unsigned int i;
     DWORD color, r, g, b, r_e, g_e, b_e;
+    BOOL drawok;
 
     memcpy(data2, data, sizeof(data2));
     data2[0].pos_x = 0;     data2[0].pos_y = 0;
@@ -5191,15 +5213,24 @@ static void fixed_function_varying_test(IDirect3DDevice9 *device) {
 
         hr = IDirect3DDevice9_BeginScene(device);
         ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene returned %s\n", DXGetErrorString9(hr));
+        drawok = FALSE;
         if(SUCCEEDED(hr))
         {
             hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, data, sizeof(data[0]));
-            ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "DrawPrimitiveUP failed (%08x)\n", hr);
+            drawok = SUCCEEDED(hr);
             hr = IDirect3DDevice9_EndScene(device);
             ok(hr == D3D_OK, "IDirect3DDevice9_EndScene returned %s\n", DXGetErrorString9(hr));
         }
         hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
         ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
+
+        /* Some drivers reject the combination of ps_3_0 and fixed function vertex processing. Accept
+         * the failure and do not check the color if it failed
+         */
+        if(!drawok) {
+            continue;
+        }
 
         color = getPixelColor(device, 360, 240);
         r = color & 0x00ff0000 >> 16;
@@ -5421,18 +5452,18 @@ static void vshader_version_varying_test(IDirect3DDevice9 *device) {
     color = getPixelColor(device, 160, 120);
     ok((color & 0x00ff0000) >= 0x00190000 && (color & 0x00ff0000) <= 0x00210000 &&
        (color & 0x0000ff00) >= 0x00003300 && (color & 0x0000ff00) <= 0x00003500 &&
-       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00210068,
+       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00000068,
        "vs_3_0 returned color 0x%08x, expected 0x00203366\n", color);
     color = getPixelColor(device, 160, 360);
     ok((color & 0x00ff0000) >= 0x003c0000 && (color & 0x00ff0000) <= 0x004e0000 &&
        (color & 0x0000ff00) >= 0x00000000 && (color & 0x0000ff00) <= 0x00000000 &&
-       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00210068,
-       "vs_1_1 returned color 0x%08x, expected 0x00808080\n", color);
+       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00000068,
+       "vs_1_1 returned color 0x%08x, expected 0x004c0066\n", color);
     color = getPixelColor(device, 480, 360);
     ok((color & 0x00ff0000) >= 0x003c0000 && (color & 0x00ff0000) <= 0x004e0000 &&
        (color & 0x0000ff00) >= 0x00000000 && (color & 0x0000ff00) <= 0x00000000 &&
-       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00210068,
-       "vs_2_0 returned color 0x%08x, expected 0x00000000\n", color);
+       (color & 0x000000ff) >= 0x00000066 && (color & 0x000000ff) <= 0x00000068,
+       "vs_2_0 returned color 0x%08x, expected 0x004c0066\n", color);
 
     /* cleanup */
     hr = IDirect3DDevice9_SetPixelShader(device, NULL);
@@ -5625,9 +5656,10 @@ static void pshader_version_varying_test(IDirect3DDevice9 *device) {
        (color & 0x000000ff) == 0x00000000,
        "ps_2_0 returned color 0x%08x, expected 0x00203300\n", color);
     color = getPixelColor(device, 480, 160);
-    ok((color & 0x00ff0000) >= 0x00190000 && (color & 0x00ff0000) <= 0x00210000 &&
+    ok( color == 0x00ffffff /* Nvidia driver garbage with HW vp */ || (
+       (color & 0x00ff0000) >= 0x00190000 && (color & 0x00ff0000) <= 0x00210000 &&
        (color & 0x0000ff00) >= 0x00003200 && (color & 0x0000ff00) <= 0x00003400 &&
-       (color & 0x000000ff) == 0x00000000,
+       (color & 0x000000ff) == 0x00000000),
        "fixed function fragment processing returned color 0x%08x, expected 0x00203300\n", color);
 
     /* cleanup */
@@ -6046,11 +6078,13 @@ void test_vshader_input(IDirect3DDevice9 *device)
             ok(color == 0x00FFFF80 || color == 0x00FFFF7f || color == 0x00FFFF81,
                "Input test: Quad 1(2crd) returned color 0x%08x, expected 0x00FFFF80\n", color);
 
-            /* The last value of the read but undefined stream is used */
+            /* The last value of the read but undefined stream is used, it is 0x00. The defined input is vec4(1, 0, 0, 0) */
             color = getPixelColor(device, 480, 360);
-            ok(color == 0x00FFFF00, "Input test: Quad 2(1crd) returned color 0x%08x, expected 0x00FFFF00\n", color);
+            ok(color == 0x00FFFF00 || color ==0x00FF0000,
+               "Input test: Quad 2(1crd) returned color 0x%08x, expected 0x00FFFF00\n", color);
             color = getPixelColor(device, 160, 120);
-            ok(color == 0x00FF0080 || color == 0x00FF007f || color == 0x00FF0081,
+            /* Same as above, accept both the last used value and 0.0 for the undefined streams */
+            ok(color == 0x00FF0080 || color == 0x00FF007f || color == 0x00FF0081 || color == 0x00FF0000,
                "Input test: Quad 3(2crd-wrongidx) returned color 0x%08x, expected 0x00FF0080\n", color);
 
             color = getPixelColor(device, 480, 160);
@@ -6116,8 +6150,9 @@ void test_vshader_input(IDirect3DDevice9 *device)
         hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
         ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
 
-        color = getPixelColor(device, 480, 360);
-        /* vs_1_1 may fail, accept the clear color
+        color = getPixelColor(device, 480, 350);
+        /* vs_1_1 may fail, accept the clear color. Some drivers also set the undefined streams to 0, accept that
+         * as well.
          *
          * NOTE: This test fails on the reference rasterizer. In the refrast, the 4 vertices have different colors,
          * i.e., the whole old stream is read, and not just the last used attribute. Some games require that this
@@ -6126,8 +6161,8 @@ void test_vshader_input(IDirect3DDevice9 *device)
          *
          * A test app for this behavior is Half Life 2 Episode 2 in dxlevel 95, and related games(Portal, TF2).
          */
-        ok(color == 0x000000FF || color == 0x00808080,
-           "Input test: Quad 2(different colors) returned color 0x%08x, expected 0x000000FF\n", color);
+        ok(color == 0x000000FF || color == 0x00808080 || color == 0x00000000,
+           "Input test: Quad 2(different colors) returned color 0x%08x, expected 0x000000FF, 0x00808080 or 0x00000000\n", color);
         color = getPixelColor(device, 160, 120);
 
         IDirect3DDevice9_SetVertexShader(device, NULL);
@@ -6314,7 +6349,7 @@ static void srgbtexture_test(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
 
     color = getPixelColor(device, 320, 240);
-    ok(color == 0x00363636, "srgb quad has color %08x, expected 0x00363636\n", color);
+    ok(color == 0x00363636 || color == 0x00373737, "srgb quad has color %08x, expected 0x00363636\n", color);
 
 out:
     if(texture) IDirect3DTexture9_Release(texture);
@@ -7320,7 +7355,7 @@ static void test_vshader_float16(IDirect3DDevice9 *device)
     ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexDeclaration failed hr=%s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_CreateVertexShader(device, shader_code, &shader);
     ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexShader failed hr=%s\n", DXGetErrorString9(hr));
-    IDirect3DDevice9_SetVertexShader(device, shader);
+    hr = IDirect3DDevice9_SetVertexShader(device, shader);
     ok(SUCCEEDED(hr), "IDirect3DDevice9_SetVertexShader failed hr=%s\n", DXGetErrorString9(hr));
 
     hr = IDirect3DDevice9_BeginScene(device);
@@ -8533,14 +8568,12 @@ static void pixelshader_blending_test(IDirect3DDevice9 *device)
         if(IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING, D3DRTYPE_TEXTURE, fmt) == D3D_OK) {
             /* Compare the color of the center quad with our expectation */
             color = getPixelColor(device, 320, 240);
-            trace("[Blending] %s: expected=%x, result=%x\n", test_formats[fmt_index].fmtName, test_formats[fmt_index].resultColorBlending, color);
             ok(color == test_formats[fmt_index].resultColorBlending, "Offscreen failed for %s: Got color %#08x, expected %#08x.\n", test_formats[fmt_index].fmtName, color, test_formats[fmt_index].resultColorBlending);
         } else {
             /* No pixel shader blending is supported so expected garbage.The type of 'garbage' depends on the driver version and OS.
              * E.g. on G16R16 ati reports (on old r9600 drivers) 0x00ffffff and on modern ones 0x002010ff which is also what Nvidia
              * reports. On Vista Nvidia seems to report 0x00ffffff on Geforce7 cards. */
             color = getPixelColor(device, 320, 240);
-            trace("[No blending] %s: expected %x  or 0x00ffffff, result=%x\n", test_formats[fmt_index].fmtName, test_formats[fmt_index].resultColorNoBlending, color);
             ok((color == 0x00ffffff) || (color == test_formats[fmt_index].resultColorNoBlending), "Offscreen failed for %s: expected no color blending but received it anyway.\n", test_formats[fmt_index].fmtName);
         }
 
@@ -8635,6 +8668,287 @@ static void tssargtemp_test(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetTextureStageState(device, 3, D3DTSS_COLOROP, D3DTOP_DISABLE);
     ok(hr == D3D_OK, "SetTextureStageState failed, hr = %s\n", DXGetErrorString9(hr));
+}
+
+struct testdata
+{
+    DWORD idxVertex; /* number of instances in the first stream */
+    DWORD idxColor; /* number of instances in the second stream */
+    DWORD idxInstance; /* should be 1 ?? */
+    DWORD color1; /* color 1 instance */
+    DWORD color2; /* color 2 instance */
+    DWORD color3; /* color 3 instance */
+    DWORD color4; /* color 4 instance */
+    WORD strVertex; /* specify which stream to use 0-2*/
+    WORD strColor;
+    WORD strInstance;
+};
+
+static const struct testdata testcases[]=
+{
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  0 */
+    {3, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ffffff, 0, 1, 2}, /*  1 */
+    {2, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ffffff, 0x00ffffff, 0, 1, 2}, /*  2 */
+    {1, 4, 1, 0x00ff0000, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0, 1, 2}, /*  3 */
+    {0, 4, 1, 0x00ff0000, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0, 1, 2}, /*  4 */
+    {4, 3, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  5 */
+    {4, 2, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  6 */
+    {4, 1, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  7 */
+    {4, 0, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 1, 2}, /*  8 */
+    {3, 3, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ffffff, 0, 1, 2}, /*  9 */
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 1, 0, 2}, /* 10 */
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0, 2, 1}, /* 11 */
+    {4, 4, 1, 0x00ff0000, 0x00ffffff, 0x00ffffff, 0x00ffffff, 2, 3, 1}, /* 12 */
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 2, 0, 1}, /* 13 */
+    {4, 4, 1, 0x00ff0000, 0x00ff0000, 0x00ff0000, 0x00ff0000, 1, 2, 3}, /* 14 */
+/*
+    This case is handled in a stand alone test, SetStreamSourceFreq(0,(D3DSTREAMSOURCE_INSTANCEDATA | 1))  has to return D3DERR_INVALIDCALL!
+    {4, 4, 1, 0x00ffffff, 0x00ffffff, 0x00ffffff, 0x00ffffff, 2, 1, 0, D3DERR_INVALIDCALL},
+*/
+};
+
+/* Drawing Indexed Geometry with instances*/
+static void stream_test(IDirect3DDevice9 *device)
+{
+    IDirect3DVertexBuffer9 *vb = NULL;
+    IDirect3DVertexBuffer9 *vb2 = NULL;
+    IDirect3DVertexBuffer9 *vb3 = NULL;
+    IDirect3DIndexBuffer9 *ib = NULL;
+    IDirect3DVertexDeclaration9 *pDecl = NULL;
+    IDirect3DVertexShader9 *shader = NULL;
+    HRESULT hr;
+    BYTE *data;
+    DWORD color;
+    DWORD ind;
+    int i;
+
+    const DWORD shader_code[] =
+    {
+        0xfffe0101,                                     /* vs_1_1 */
+        0x0000001f, 0x80000000, 0x900f0000,             /* dcl_position v0 */
+        0x0000001f, 0x8000000a, 0x900f0001,             /* dcl_color0 v1 */
+        0x0000001f, 0x80000005, 0x900f0002,             /* dcl_texcoord v2 */
+        0x00000001, 0x800f0000, 0x90e40000,             /* mov r0, v0 */
+        0x00000002, 0xc00f0000, 0x80e40000, 0x90e40002, /* add oPos, r0, v2 */
+        0x00000001, 0xd00f0000, 0x90e40001,             /* mov oD0, v1 */
+        0x0000ffff
+    };
+
+    const float quad[][3] =
+    {
+        {-0.5f, -0.5f,  1.1f}, /*0 */
+        {-0.5f,  0.5f,  1.1f}, /*1 */
+        { 0.5f, -0.5f,  1.1f}, /*2 */
+        { 0.5f,  0.5f,  1.1f}, /*3 */
+    };
+
+    const float vertcolor[][4] =
+    {
+        {1.0f, 0.0f, 0.0f, 1.0f}, /*0 */
+        {1.0f, 0.0f, 0.0f, 1.0f}, /*1 */
+        {1.0f, 0.0f, 0.0f, 1.0f}, /*2 */
+        {1.0f, 0.0f, 0.0f, 1.0f}, /*3 */
+    };
+
+    /* 4 position for 4 instances */
+    const float instancepos[][3] =
+    {
+        {-0.6f,-0.6f, 0.0f},
+        { 0.6f,-0.6f, 0.0f},
+        { 0.6f, 0.6f, 0.0f},
+        {-0.6f, 0.6f, 0.0f},
+    };
+
+    short indices[] = {0, 1, 2, 1, 2, 3};
+
+    D3DVERTEXELEMENT9 decl[] =
+    {
+        {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {1, 0,  D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_COLOR, 0},
+        {2, 0,  D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+        D3DDECL_END()
+    };
+
+    /* set the default value because it isn't done in wine? */
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+
+    /* check for D3DSTREAMSOURCE_INDEXEDDATA at stream0 */
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 0, (D3DSTREAMSOURCE_INSTANCEDATA | 1));
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+
+    /* check wrong cases */
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 0);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == 1, "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 2);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == 2, "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INDEXEDDATA | 0));
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == (D3DSTREAMSOURCE_INDEXEDDATA | 0), "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INSTANCEDATA | 0));
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == (0 | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, (D3DSTREAMSOURCE_INSTANCEDATA | D3DSTREAMSOURCE_INDEXEDDATA | 0));
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_GetStreamSourceFreq(device, 1, &ind);
+    ok(hr == D3D_OK && ind == (0 | D3DSTREAMSOURCE_INSTANCEDATA), "IDirect3DDevice9_GetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+
+    /* set the default value back */
+    hr = IDirect3DDevice9_SetStreamSourceFreq(device, 1, 1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s\n", DXGetErrorString9(hr));
+
+    /* create all VertexBuffers*/
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(quad), 0, 0, D3DPOOL_MANAGED, &vb, NULL);
+    ok(hr == D3D_OK, "CreateVertexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!vb) {
+        skip("Failed to create a vertex buffer\n");
+        return;
+    }
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(vertcolor), 0, 0, D3DPOOL_MANAGED, &vb2, NULL);
+    ok(hr == D3D_OK, "CreateVertexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!vb2) {
+        skip("Failed to create a vertex buffer\n");
+        goto out;
+    }
+    hr = IDirect3DDevice9_CreateVertexBuffer(device, sizeof(instancepos), 0, 0, D3DPOOL_MANAGED, &vb3, NULL);
+    ok(hr == D3D_OK, "CreateVertexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!vb3) {
+        skip("Failed to create a vertex buffer\n");
+        goto out;
+    }
+
+    /* create IndexBuffer*/
+    hr = IDirect3DDevice9_CreateIndexBuffer(device, sizeof(indices), 0, D3DFMT_INDEX16, D3DPOOL_DEFAULT, &ib, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateIndexBuffer failed with %s\n", DXGetErrorString9(hr));
+    if(!ib) {
+        skip("Failed to create a index buffer\n");
+        goto out;
+    }
+
+    /* copy all Buffers (Vertex + Index)*/
+    hr = IDirect3DVertexBuffer9_Lock(vb, 0, sizeof(quad), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, quad, sizeof(quad));
+    hr = IDirect3DVertexBuffer9_Unlock(vb);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DVertexBuffer9_Lock(vb2, 0, sizeof(vertcolor), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, vertcolor, sizeof(vertcolor));
+    hr = IDirect3DVertexBuffer9_Unlock(vb2);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DVertexBuffer9_Lock(vb3, 0, sizeof(instancepos), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, instancepos, sizeof(instancepos));
+    hr = IDirect3DVertexBuffer9_Unlock(vb3);
+    ok(hr == D3D_OK, "IDirect3DVertexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DIndexBuffer9_Lock(ib, 0, sizeof(indices), (void **) &data, 0);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Lock failed with %s\n", DXGetErrorString9(hr));
+    memcpy(data, indices, sizeof(indices));
+    hr = IDirect3DIndexBuffer9_Unlock(ib);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+
+    /* create VertexShader */
+    hr = IDirect3DDevice9_CreateVertexShader(device, shader_code, &shader);
+    ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexShader failed hr=%s\n", DXGetErrorString9(hr));
+    if(!shader) {
+        skip("Failed to create a vetex shader\n");
+        goto out;
+    }
+
+    hr = IDirect3DDevice9_SetVertexShader(device, shader);
+    ok(SUCCEEDED(hr), "IDirect3DDevice9_SetVertexShader failed hr=%s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetIndices(device, ib);
+    ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s\n", DXGetErrorString9(hr));
+
+    /* run all tests */
+    for( i = 0; i < sizeof(testcases)/sizeof(testcases[0]); ++i)
+    {
+        struct testdata act = testcases[i];
+        decl[0].Stream = act.strVertex;
+        decl[1].Stream = act.strColor;
+        decl[2].Stream = act.strInstance;
+        /* create VertexDeclarations */
+        hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl, &pDecl);
+        ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexDeclaration failed hr=%s (case %i)\n", DXGetErrorString9(hr), i);
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
+        ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed with %08x (case %i)\n", hr, i);
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %08x (case %i)\n", hr, i);
+        if(SUCCEEDED(hr))
+        {
+            hr = IDirect3DDevice9_SetVertexDeclaration(device, pDecl);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %08x (case %i)\n", hr, i);
+
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.strVertex, (D3DSTREAMSOURCE_INDEXEDDATA | act.idxVertex));
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.strVertex, vb, 0, sizeof(quad[0]));
+            ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.strColor, (D3DSTREAMSOURCE_INDEXEDDATA | act.idxColor));
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.strColor, vb2, 0, sizeof(vertcolor[0]));
+            ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.strInstance, (D3DSTREAMSOURCE_INSTANCEDATA | act.idxInstance));
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.strInstance, vb3, 0, sizeof(instancepos[0]));
+            ok(hr == D3D_OK, "IDirect3DIndexBuffer9_Unlock failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+
+            /* don't know if this is right (1*3 and 4*1)*/
+            hr = IDirect3DDevice9_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, 0, 0, 1 * 3 , 0, 4*1);
+            ok(hr == D3D_OK, "IDirect3DDevice9_DrawIndexedPrimitive failed with %08x (case %i)\n", hr, i);
+            hr = IDirect3DDevice9_EndScene(device);
+            ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %08x (case %i)\n", hr, i);
+
+            /* set all StreamSource && StreamSourceFreq back to default */
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.strVertex, 1);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.strVertex, NULL, 0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %08x (case %i)\n", hr, i);
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.idxColor, 1);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.idxColor, NULL, 0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %08x (case %i)\n", hr, i);
+            hr = IDirect3DDevice9_SetStreamSourceFreq(device, act.idxInstance, 1);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSourceFreq failed with %s (case %i)\n", DXGetErrorString9(hr), i);
+            hr = IDirect3DDevice9_SetStreamSource(device, act.idxInstance, NULL, 0, 0);
+            ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %08x (case %i)\n", hr, i);
+        }
+
+        hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+        ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %08x (case %i)\n", hr, i);
+
+        hr = IDirect3DVertexDeclaration9_Release(pDecl);
+        ok(hr == D3D_OK, "IDirect3DVertexDeclaration9_Release failed with %08x (case %i)\n", hr, i);
+
+        color = getPixelColor(device, 160, 360);
+        ok(color == act.color1, "has color 0x%08x, expected 0x%08x (case %i)\n", color, act.color1, i);
+        color = getPixelColor(device, 480, 360);
+        ok(color == act.color2, "has color 0x%08x, expected 0x%08x (case %i)\n", color, act.color2, i);
+        color = getPixelColor(device, 480, 120);
+        ok(color == act.color3, "has color 0x%08x, expected 0x%08x (case %i)\n", color, act.color3, i);
+        color = getPixelColor(device, 160, 120);
+        ok(color == act.color4, "has color 0x%08x, expected 0x%08x (case %i)\n", color, act.color4, i);
+    }
+
+    hr = IDirect3DDevice9_SetIndices(device, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetIndices failed with %08x\n", hr);
+
+out:
+    if(vb) IDirect3DVertexBuffer9_Release(vb);
+    if(vb2)IDirect3DVertexBuffer9_Release(vb2);
+    if(vb3)IDirect3DVertexBuffer9_Release(vb3);
+    if(ib)IDirect3DIndexBuffer9_Release(ib);
+    if(shader)IDirect3DVertexShader9_Release(shader);
 }
 
 START_TEST(visual)
@@ -8745,6 +9059,7 @@ START_TEST(visual)
         if (caps.VertexShaderVersion >= D3DVS_VERSION(3, 0)) {
             test_vshader_input(device_ptr);
             test_vshader_float16(device_ptr);
+            stream_test(device_ptr);
         } else {
             skip("No vs_3_0 support\n");
         }

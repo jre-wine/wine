@@ -25,6 +25,17 @@
 #include "winbase.h"
 #include "winerror.h"
 
+static BOOL (WINAPI *pGetComputerNameExA)(COMPUTER_NAME_FORMAT,LPSTR,LPDWORD);
+static BOOL (WINAPI *pGetComputerNameExW)(COMPUTER_NAME_FORMAT,LPWSTR,LPDWORD);
+
+static void init_functionpointers(void)
+{
+    HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
+
+    pGetComputerNameExA = (void *)GetProcAddress(hkernel32, "GetComputerNameExA");
+    pGetComputerNameExW = (void *)GetProcAddress(hkernel32, "GetComputerNameExW");
+}
+
 static void test_GetSetEnvironmentVariableA(void)
 {
     char buf[256];
@@ -231,12 +242,11 @@ static void test_ExpandEnvironmentStringsA(void)
     /* Try to get the required buffer size 'the natural way' */
     strcpy(buf, "%EnvVar%");
     ret_size = ExpandEnvironmentStringsA(buf, NULL, 0);
-    /* v5.1.2600.2945 (XP SP2) returns len + 2 here! */
-    ok(ret_size == strlen(value)+1 || ret_size == strlen(value)+2 || ret_size == 0 /* Win95 */,
-       "ExpandEnvironmentStrings returned %d instead of %d\n",
-       ret_size, lstrlenA(value)+1);
-    if (ret_size == strlen(value)+2)
-        trace("ExpandEnvironmentStrings is buggy: it returned len + 2\n");
+    ok(ret_size == strlen(value)+1 || /* win98 */
+       ret_size == strlen(value)+2 || /* win2k, XP, win2k3 */
+       ret_size == 0 /* Win95 */,
+       "ExpandEnvironmentStrings returned %d instead of %d, %d or %d\n",
+       ret_size, lstrlenA(value)+1, lstrlenA(value)+2, 0);
 
     /* Again, side-stepping the Win95 bug */
     ret_size = ExpandEnvironmentStringsA(buf, buf1, 0);
@@ -291,9 +301,6 @@ static void test_ExpandEnvironmentStringsA(void)
     SetEnvironmentVariableA("EnvVar", NULL);
 }
 
-static BOOL (WINAPI *pGetComputerNameExA)(COMPUTER_NAME_FORMAT,LPSTR,LPDWORD);
-static BOOL (WINAPI *pGetComputerNameExW)(COMPUTER_NAME_FORMAT,LPWSTR,LPDWORD);
-
 static void test_GetComputerName(void)
 {
     DWORD size;
@@ -347,18 +354,31 @@ static void test_GetComputerName(void)
         ok(ret, "GetComputerNameW failed with error %d\n", GetLastError());
         HeapFree(GetProcessHeap(), 0, nameW);
     }
+}
 
-    pGetComputerNameExA = (void *)GetProcAddress(GetModuleHandle("kernel32.dll"), "GetComputerNameExA");
+static void test_GetComputerNameExA(void)
+{
+    DWORD size;
+    BOOL ret;
+    LPSTR name;
+    DWORD error;
+
+    static const int MAX_COMP_NAME = 32767;
+
     if (!pGetComputerNameExA)
     {
-        skip("GetComputerNameExA function not implemented, so not testing\n");
+        skip("GetComputerNameExA function not implemented\n");
         return;
     }
 
     size = 0;
     ret = pGetComputerNameExA(ComputerNameDnsDomain, (LPSTR)0xdeadbeef, &size);
     error = GetLastError();
-    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExA should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    ok(ret == 0, "Expected 0, got %d\n", ret);
+    ok(error == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", error);
+
+    /* size is not set in win2k */
+    size = MAX_COMP_NAME;
     name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
     ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
     ret = pGetComputerNameExA(ComputerNameDnsDomain, name, &size);
@@ -369,7 +389,11 @@ static void test_GetComputerName(void)
     size = 0;
     ret = pGetComputerNameExA(ComputerNameDnsFullyQualified, (LPSTR)0xdeadbeef, &size);
     error = GetLastError();
-    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExA should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    ok(ret == 0, "Expected 0, got %d\n", ret);
+    ok(error == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", error);
+
+    /* size is not set in win2k */
+    size = MAX_COMP_NAME;
     name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
     ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
     ret = pGetComputerNameExA(ComputerNameDnsFullyQualified, name, &size);
@@ -380,7 +404,11 @@ static void test_GetComputerName(void)
     size = 0;
     ret = pGetComputerNameExA(ComputerNameDnsHostname, (LPSTR)0xdeadbeef, &size);
     error = GetLastError();
-    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExA should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    ok(ret == 0, "Expected 0, got %d\n", ret);
+    ok(error == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", error);
+
+    /* size is not set in win2k */
+    size = MAX_COMP_NAME;
     name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
     ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
     ret = pGetComputerNameExA(ComputerNameDnsHostname, name, &size);
@@ -391,18 +419,29 @@ static void test_GetComputerName(void)
     size = 0;
     ret = pGetComputerNameExA(ComputerNameNetBIOS, (LPSTR)0xdeadbeef, &size);
     error = GetLastError();
-    ok(!ret && error == ERROR_MORE_DATA, "GetComputerNameExA should have failed with ERROR_MORE_DATA instead of %d\n", error);
+    ok(ret == 0, "Expected 0, got %d\n", ret);
+    ok(error == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", error);
+
+    /* size is not set in win2k */
+    size = MAX_COMP_NAME;
     name = HeapAlloc(GetProcessHeap(), 0, size * sizeof(name[0]));
     ok(name != NULL, "HeapAlloc failed with error %d\n", GetLastError());
     ret = pGetComputerNameExA(ComputerNameNetBIOS, name, &size);
     ok(ret, "GetComputerNameExA(ComputerNameNetBIOS) failed with error %d\n", GetLastError());
     trace("NetBIOS name is \"%s\"\n", name);
     HeapFree(GetProcessHeap(), 0, name);
+}
 
-    pGetComputerNameExW = (void *)GetProcAddress(GetModuleHandle("kernel32.dll"), "GetComputerNameExW");
+static void test_GetComputerNameExW(void)
+{
+    DWORD size;
+    BOOL ret;
+    LPWSTR nameW;
+    DWORD error;
+
     if (!pGetComputerNameExW)
     {
-        skip("GetComputerNameExW function not implemented, so not testing\n");
+        skip("GetComputerNameExW function not implemented\n");
         return;
     }
 
@@ -449,8 +488,12 @@ static void test_GetComputerName(void)
 
 START_TEST(environ)
 {
+    init_functionpointers();
+
     test_GetSetEnvironmentVariableA();
     test_GetSetEnvironmentVariableW();
     test_ExpandEnvironmentStringsA();
     test_GetComputerName();
+    test_GetComputerNameExA();
+    test_GetComputerNameExW();
 }

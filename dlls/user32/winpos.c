@@ -983,11 +983,9 @@ static BOOL show_window( HWND hwnd, INT cmd )
 	    break;
 
 	case SW_SHOWMINNOACTIVE:
-            swp |= SWP_NOACTIVATE | SWP_NOZORDER;
-            /* fall through */
         case SW_MINIMIZE:
         case SW_FORCEMINIMIZE: /* FIXME: Does not work if thread is hung. */
-            if (style & WS_CHILD) swp |= SWP_NOACTIVATE | SWP_NOZORDER;
+            swp |= SWP_NOACTIVATE | SWP_NOZORDER;
             /* fall through */
 	case SW_SHOWMINIMIZED:
             swp |= SWP_SHOWWINDOW | SWP_FRAMECHANGED;
@@ -2382,8 +2380,6 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
 
     TRACE("hwnd %p command %04lx, hittest %d, pos %d,%d\n",
           hwnd, syscommand, hittest, pt.x, pt.y);
-
-    if (USER_Driver->pSysCommandSizeMove( hwnd, wParam )) return;
 
     if (syscommand == SC_MOVE)
     {

@@ -607,7 +607,6 @@ programs/winedbg/winedbg
 programs/winedbg/winedbg.man
 programs/winedevice/winedevice
 programs/winefile/winefile
-programs/winelauncher
 programs/winemenubuilder/winemenubuilder
 programs/winemine/winemine
 programs/winepath/winepath
@@ -713,6 +712,7 @@ tools/widl/parser.tab.h
 tools/widl/parser.yy.c
 tools/widl/widl
 tools/widl/widl.man
+tools/wine.inf
 tools/winebuild/winebuild
 tools/winebuild/winebuild.man
 tools/winedump/winedump

@@ -89,6 +89,23 @@ GpStatus WINGDIPAPI GdipCreateMatrix3(GDIPCONST GpRectF *rect,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipCreateMatrix3I(GDIPCONST GpRect *rect, GDIPCONST GpPoint *pt,
+    GpMatrix **matrix)
+{
+    GpRectF rectF;
+    GpPointF ptF;
+
+    rectF.X = (REAL)rect->X;
+    rectF.Y = (REAL)rect->Y;
+    rectF.Width = (REAL)rect->Width;
+    rectF.Height = (REAL)rect->Height;
+
+    ptF.X = (REAL)pt->X;
+    ptF.Y = (REAL)pt->Y;
+
+    return GdipCreateMatrix3(&rectF, &ptF, matrix);
+}
+
 GpStatus WINGDIPAPI GdipCloneMatrix(GpMatrix *matrix, GpMatrix **clone)
 {
     if(!matrix || !clone)
@@ -261,6 +278,26 @@ GpStatus WINGDIPAPI GdipTranslateMatrix(GpMatrix *matrix, REAL offsetX,
         matrix_multiply(matrix->matrix, translate, matrix->matrix);
     else
         matrix_multiply(translate, matrix->matrix, matrix->matrix);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipVectorTransformMatrixPoints(GpMatrix *matrix, GpPointF *pts, INT count)
+{
+    REAL x, y;
+    INT i;
+
+    if(!matrix || !pts)
+        return InvalidParameter;
+
+    for(i = 0; i < count; i++)
+    {
+        x = pts[i].X;
+        y = pts[i].Y;
+
+        pts[i].X = x * matrix->matrix[0] + y * matrix->matrix[2];
+        pts[i].Y = x * matrix->matrix[1] + y * matrix->matrix[3];
+    }
 
     return Ok;
 }

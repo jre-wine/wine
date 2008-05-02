@@ -51,6 +51,7 @@
 #include "shlobj.h"  /* DROPFILES */
 #include "shellapi.h"
 
+#include "wine/server.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(event);
@@ -72,10 +73,12 @@ extern BOOL ximInComposeMode;
 #define DndURL          128   /* KDE drag&drop */
 
   /* Event handlers */
-static void EVENT_FocusIn( HWND hwnd, XEvent *event );
-static void EVENT_FocusOut( HWND hwnd, XEvent *event );
-static void EVENT_PropertyNotify( HWND hwnd, XEvent *event );
-static void EVENT_ClientMessage( HWND hwnd, XEvent *event );
+static void X11DRV_FocusIn( HWND hwnd, XEvent *event );
+static void X11DRV_FocusOut( HWND hwnd, XEvent *event );
+static void X11DRV_Expose( HWND hwnd, XEvent *event );
+static void X11DRV_MapNotify( HWND hwnd, XEvent *event );
+static void X11DRV_PropertyNotify( HWND hwnd, XEvent *event );
+static void X11DRV_ClientMessage( HWND hwnd, XEvent *event );
 
 struct event_handler
 {
@@ -95,8 +98,8 @@ static struct event_handler handlers[MAX_EVENT_HANDLERS] =
     { MotionNotify,     X11DRV_MotionNotify },
     { EnterNotify,      X11DRV_EnterNotify },
     /* LeaveNotify */
-    { FocusIn,          EVENT_FocusIn },
-    { FocusOut,         EVENT_FocusOut },
+    { FocusIn,          X11DRV_FocusIn },
+    { FocusOut,         X11DRV_FocusOut },
     { KeymapNotify,     X11DRV_KeymapNotify },
     { Expose,           X11DRV_Expose },
     /* GraphicsExpose */
@@ -114,12 +117,12 @@ static struct event_handler handlers[MAX_EVENT_HANDLERS] =
     /* ResizeRequest */
     /* CirculateNotify */
     /* CirculateRequest */
-    { PropertyNotify,   EVENT_PropertyNotify },
+    { PropertyNotify,   X11DRV_PropertyNotify },
     { SelectionClear,   X11DRV_SelectionClear },
     { SelectionRequest, X11DRV_SelectionRequest },
     /* SelectionNotify */
     /* ColormapNotify */
-    { ClientMessage,    EVENT_ClientMessage },
+    { ClientMessage,    X11DRV_ClientMessage },
     { MappingNotify,    X11DRV_MappingNotify },
 };
 
@@ -568,9 +571,9 @@ static const char * const focus_details[] =
 };
 
 /**********************************************************************
- *              EVENT_FocusIn
+ *              X11DRV_FocusIn
  */
-static void EVENT_FocusIn( HWND hwnd, XEvent *xev )
+static void X11DRV_FocusIn( HWND hwnd, XEvent *xev )
 {
     XFocusChangeEvent *event = &xev->xfocus;
     XIC xic;
@@ -602,11 +605,11 @@ static void EVENT_FocusIn( HWND hwnd, XEvent *xev )
 
 
 /**********************************************************************
- *              EVENT_FocusOut
+ *              X11DRV_FocusOut
  *
  * Note: only top-level windows get FocusOut events.
  */
-static void EVENT_FocusOut( HWND hwnd, XEvent *xev )
+static void X11DRV_FocusOut( HWND hwnd, XEvent *xev )
 {
     XFocusChangeEvent *event = &xev->xfocus;
     HWND hwnd_tmp;
@@ -659,6 +662,75 @@ static void EVENT_FocusOut( HWND hwnd, XEvent *xev )
 
 
 /***********************************************************************
+ *           X11DRV_Expose
+ */
+static void X11DRV_Expose( HWND hwnd, XEvent *xev )
+{
+    XExposeEvent *event = &xev->xexpose;
+    RECT rect;
+    struct x11drv_win_data *data;
+    int flags = RDW_INVALIDATE | RDW_ERASE;
+
+    TRACE( "win %p (%lx) %d,%d %dx%d\n",
+           hwnd, event->window, event->x, event->y, event->width, event->height );
+
+    if (!(data = X11DRV_get_win_data( hwnd ))) return;
+
+    if (event->window == data->whole_window)
+    {
+        rect.left = data->whole_rect.left + event->x;
+        rect.top  = data->whole_rect.top + event->y;
+        flags |= RDW_FRAME;
+    }
+    else
+    {
+        rect.left = data->client_rect.left + event->x;
+        rect.top  = data->client_rect.top + event->y;
+    }
+    rect.right  = rect.left + event->width;
+    rect.bottom = rect.top + event->height;
+
+    if (event->window != root_window)
+    {
+        SERVER_START_REQ( update_window_zorder )
+        {
+            req->window      = hwnd;
+            req->rect.left   = rect.left;
+            req->rect.top    = rect.top;
+            req->rect.right  = rect.right;
+            req->rect.bottom = rect.bottom;
+            wine_server_call( req );
+        }
+        SERVER_END_REQ;
+
+        /* make position relative to client area instead of parent */
+        OffsetRect( &rect, -data->client_rect.left, -data->client_rect.top );
+        flags |= RDW_ALLCHILDREN;
+    }
+
+    RedrawWindow( hwnd, &rect, 0, flags );
+}
+
+
+/**********************************************************************
+ *		X11DRV_MapNotify
+ */
+static void X11DRV_MapNotify( HWND hwnd, XEvent *event )
+{
+    struct x11drv_win_data *data;
+
+    if (!(data = X11DRV_get_win_data( hwnd ))) return;
+    if (!data->mapped) return;
+
+    if (!data->managed)
+    {
+        HWND hwndFocus = GetFocus();
+        if (hwndFocus && IsChild( hwnd, hwndFocus )) X11DRV_SetFocus(hwndFocus);  /* FIXME */
+    }
+}
+
+
+/***********************************************************************
  *           get_window_wm_state
  */
 int get_window_wm_state( Display *display, struct x11drv_win_data *data )
@@ -677,7 +749,7 @@ int get_window_wm_state( Display *display, struct x11drv_win_data *data )
                              sizeof(*state)/sizeof(CARD32), False, x11drv_atom(WM_STATE),
                              &type, &format, &count, &remaining, (unsigned char **)&state ))
     {
-        if (type == x11drv_atom(WM_STATE) && format && count >= sizeof(*state)/(format/8))
+        if (type == x11drv_atom(WM_STATE) && get_property_size( format, count ) >= sizeof(*state))
             ret = state->state;
         XFree( state );
     }
@@ -755,9 +827,9 @@ static void handle_wm_state_notify( struct x11drv_win_data *data, XPropertyEvent
 
 
 /***********************************************************************
- *           EVENT_PropertyNotify
+ *           X11DRV_PropertyNotify
  */
-static void EVENT_PropertyNotify( HWND hwnd, XEvent *xev )
+static void X11DRV_PropertyNotify( HWND hwnd, XEvent *xev )
 {
     XPropertyEvent *event = &xev->xproperty;
     struct x11drv_win_data *data;
@@ -1130,9 +1202,9 @@ static const struct client_message_handler client_messages[] =
 
 
 /**********************************************************************
- *           EVENT_ClientMessage
+ *           X11DRV_ClientMessage
  */
-static void EVENT_ClientMessage( HWND hwnd, XEvent *xev )
+static void X11DRV_ClientMessage( HWND hwnd, XEvent *xev )
 {
     XClientMessageEvent *event = &xev->xclient;
     unsigned int i;

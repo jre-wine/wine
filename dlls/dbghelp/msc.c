@@ -1322,6 +1322,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
         const union codeview_symbol* sym = (const union codeview_symbol*)(root + i);
         length = sym->generic.len + 2;
         if (i + length > size) break;
+        if (!sym->generic.id || length < 4) break;
         if (length & 3) FIXME("unpadded len %u\n", length);
 
         switch (sym->generic.id)
@@ -1574,7 +1575,7 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
                 while (*ptr1)
                 {
                     ptr2 = ptr1 + strlen(ptr1) + 1;
-                    TRACE("\t%s => %s\n", ptr1, ptr2); 
+                    TRACE("\t%s => %s\n", ptr1, debugstr_a(ptr2));
                     ptr1 = ptr2 + strlen(ptr2) + 1;
                 }
             }

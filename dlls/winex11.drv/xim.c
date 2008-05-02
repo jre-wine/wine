@@ -35,25 +35,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
-/* this must match with imm32/imm.c */
-#define FROM_IME 0xcafe1337
+#ifndef HAVE_XICCALLBACK_CALLBACK
+#define XICCallback XIMCallback
+#define XICProc XIMProc
+#endif
 
 BOOL ximInComposeMode=FALSE;
-
-typedef struct tagInputContextData
-{
-    BOOL            bInternalState;
-    BOOL            bRead;
-    BOOL            bInComposition;
-    HFONT           textfont;
-
-    DWORD           dwLock;
-    INPUTCONTEXT    IMC;
-} InputContextData;
-
-static HIMC root_context;
-static XIMStyle ximStyle = 0;
-static XIMStyle ximStyleRoot = 0;
 
 /* moved here from imm32 for dll separation */
 static DWORD dwCompStringLength = 0;
@@ -61,18 +48,6 @@ static LPBYTE CompositionString = NULL;
 static DWORD dwCompStringSize = 0;
 static LPBYTE ResultString = NULL;
 static DWORD dwResultStringSize = 0;
-static DWORD dwPreeditPos = 0;
-
-static HMODULE hImmDll = NULL;
-static HIMC (WINAPI *pImmAssociateContext)(HWND,HIMC);
-static HIMC (WINAPI *pImmCreateContext)(void);
-static VOID (WINAPI *pImmSetOpenStatus)(HIMC,BOOL);
-static BOOL (WINAPI *pImmSetCompositionString)(HIMC, DWORD, LPWSTR,
-                                               DWORD, LPWSTR, DWORD);
-static LONG (WINAPI *pImmGetCompositionString)(HIMC, DWORD, LPVOID, DWORD);
-static VOID (WINAPI *pImmNotifyIME)(HIMC, DWORD, DWORD, DWORD);
-
-/* WINE specific messages from the xim in x11drv level */
 
 #define STYLE_OFFTHESPOT (XIMPreeditArea | XIMStatusArea)
 #define STYLE_OVERTHESPOT (XIMPreeditPosition | XIMStatusNothing)
@@ -82,40 +57,9 @@ static VOID (WINAPI *pImmNotifyIME)(HIMC, DWORD, DWORD, DWORD);
 /* inorder to enable deadkey support */
 #define STYLE_NONE (XIMPreeditNothing | XIMStatusNothing)
 
-/*
- * here are the functions that sort of marshall calls into IMM32.DLL
- */
-static void LoadImmDll(void)
-{
-    hImmDll = LoadLibraryA("imm32.dll");
-
-    pImmAssociateContext = (void *)GetProcAddress(hImmDll, "ImmAssociateContext");
-    if (!pImmAssociateContext)
-        WARN("IMM: pImmAssociateContext not found in DLL\n");
-
-    pImmCreateContext = (void *)GetProcAddress(hImmDll, "ImmCreateContext");
-    if (!pImmCreateContext)
-        WARN("IMM: pImmCreateContext not found in DLL\n");
-
-    pImmSetOpenStatus = (void *)GetProcAddress( hImmDll, "ImmSetOpenStatus");
-    if (!pImmSetOpenStatus)
-        WARN("IMM: pImmSetOpenStatus not found in DLL\n");
-
-    pImmSetCompositionString =(void *)GetProcAddress(hImmDll, "ImmSetCompositionStringW");
-
-    if (!pImmSetCompositionString)
-        WARN("IMM: pImmSetCompositionStringW not found in DLL\n");
-
-    pImmGetCompositionString =(void *)GetProcAddress(hImmDll, "ImmGetCompositionStringW");
-
-    if (!pImmGetCompositionString)
-        WARN("IMM: pImmGetCompositionStringW not found in DLL\n");
-
-    pImmNotifyIME = (void *)GetProcAddress( hImmDll, "ImmNotifyIME");
-
-    if (!pImmNotifyIME)
-        WARN("IMM: pImmNotifyIME not found in DLL\n");
-}
+static XIMStyle ximStyle = 0;
+static XIMStyle ximStyleRoot = 0;
+static XIMStyle ximStyleRequest = STYLE_CALLBACK;
 
 static BOOL X11DRV_ImmSetInternalString(DWORD dwIndex, DWORD dwOffset,
                                         DWORD selLength, LPWSTR lpComp, DWORD dwCompLen)
@@ -211,10 +155,8 @@ static BOOL X11DRV_ImmSetInternalString(DWORD dwIndex, DWORD dwOffset,
             }
         }
 
-        if (pImmSetCompositionString)
-            rc = pImmSetCompositionString((HIMC)FROM_IME, SCS_SETSTR,
-                                 (LPWSTR)CompositionString, dwCompStringLength,
-                                  NULL, 0);
+        rc = IME_SetCompositionString(SCS_SETSTR, (LPWSTR)CompositionString,
+                                      dwCompStringLength, NULL, 0);
     }
     else if ((dwIndex == GCS_RESULTSTR) && (lpComp) && (dwCompLen))
     {
@@ -224,13 +166,10 @@ static BOOL X11DRV_ImmSetInternalString(DWORD dwIndex, DWORD dwOffset,
         ResultString= HeapAlloc(GetProcessHeap(),0,byte_length);
         memcpy(ResultString,lpComp,byte_length);
 
-        if (pImmSetCompositionString)
-            rc = pImmSetCompositionString((HIMC)FROM_IME, SCS_SETSTR,
-                                 (LPWSTR)ResultString, dwResultStringSize,
-                                  NULL, 0);
+        rc = IME_SetCompositionString(SCS_SETSTR, (LPWSTR)ResultString,
+                                     dwResultStringSize, NULL, 0);
 
-        if (pImmNotifyIME)
-            pImmNotifyIME((HIMC)FROM_IME, NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
+        IME_NotifyIME( NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
     }
 
     return rc;
@@ -244,8 +183,8 @@ void X11DRV_XIMLookupChars( const char *str, DWORD count )
 
     dwOutput = MultiByteToWideChar(CP_UNIXCP, 0, str, count, wcOutput, sizeof(wcOutput)/sizeof(WCHAR));
 
-    if (pImmAssociateContext && (focus = GetFocus()))
-        pImmAssociateContext(focus,root_context);
+    if ((focus = GetFocus()))
+        IME_UpdateAssociation(focus);
 
     X11DRV_ImmSetInternalString(GCS_RESULTSTR,0,0,wcOutput,dwOutput);
 }
@@ -268,8 +207,7 @@ static void X11DRV_ImmSetOpenStatus(BOOL fOpen)
         ResultString = NULL;
     }
 
-    if (pImmSetOpenStatus)
-        pImmSetOpenStatus((HIMC)FROM_IME,fOpen);
+    IME_SetOpenStatus(fOpen);
 }
 
 static int XIMPreEditStartCallback(XIC ic, XPointer client_data, XPointer call_data)
@@ -277,8 +215,6 @@ static int XIMPreEditStartCallback(XIC ic, XPointer client_data, XPointer call_d
     TRACE("PreEditStartCallback %p\n",ic);
     X11DRV_ImmSetOpenStatus(TRUE);
     ximInComposeMode = TRUE;
-    SendMessageW(((InputContextData*)root_context)->IMC.hWnd,
-                 EM_GETSEL, 0, (LPARAM)&dwPreeditPos);
     return -1;
 }
 
@@ -287,7 +223,6 @@ static void XIMPreEditDoneCallback(XIC ic, XPointer client_data, XPointer call_d
     TRACE("PreeditDoneCallback %p\n",ic);
     ximInComposeMode = FALSE;
     X11DRV_ImmSetOpenStatus(FALSE);
-    dwPreeditPos = 0;
 }
 
 static void XIMPreEditDrawCallback(XIM ic, XPointer client_data,
@@ -333,6 +268,7 @@ static void XIMPreEditDrawCallback(XIM ic, XPointer client_data,
         }
         else
             X11DRV_ImmSetInternalString (GCS_COMPSTR, sel, len, NULL, 0);
+        IME_SetCursorPos(P_DR->caret);
     }
     TRACE("Finished\n");
 }
@@ -344,7 +280,7 @@ static void XIMPreEditCaretCallback(XIC ic, XPointer client_data,
 
     if (P_C)
     {
-        int pos = pImmGetCompositionString(root_context, GCS_CURSORPOS, NULL, 0);
+        int pos = IME_GetCursorPos();
         TRACE("pos: %d\n", pos);
         switch(P_C->direction)
         {
@@ -373,8 +309,7 @@ static void XIMPreEditCaretCallback(XIC ic, XPointer client_data,
                 FIXME("Not implemented\n");
                 break;
         }
-        SendMessageW(((InputContextData*)root_context)->IMC.hWnd,
-                     EM_SETSEL, dwPreeditPos + pos, dwPreeditPos + pos);
+        IME_SetCursorPos(pos);
         P_C->position = pos;
     }
     TRACE("Finished\n");
@@ -395,16 +330,13 @@ void X11DRV_ForceXIMReset(HWND hwnd)
 }
 
 /***********************************************************************
-*           X11DRV Ime creation
-*/
-XIM X11DRV_SetupXIM(Display *display, const char *input_style)
+ *           X11DRV_InitXIM
+ *
+ * Process-wide XIM initialization.
+ */
+BOOL X11DRV_InitXIM( const char *input_style )
 {
-    XIMStyle ximStyleRequest, ximStyleCallback, ximStyleNone;
-    XIMStyles *ximStyles = NULL;
-    INT i;
-    XIM xim;
-
-    ximStyleRequest = STYLE_CALLBACK;
+    BOOL ret;
 
     if (!strcasecmp(input_style, "offthespot"))
         ximStyleRequest = STYLE_OFFTHESPOT;
@@ -414,25 +346,64 @@ XIM X11DRV_SetupXIM(Display *display, const char *input_style)
         ximStyleRequest = STYLE_ROOT;
 
     wine_tsx11_lock();
-
-    if(!XSupportsLocale())
+    if (!(ret = XSupportsLocale()))
     {
         WARN("X does not support locale.\n");
-        goto err;
     }
-    if(XSetLocaleModifiers("") == NULL)
+    else if (XSetLocaleModifiers("") == NULL)
     {
         WARN("Could not set locale modifiers.\n");
-        goto err;
+        ret = FALSE;
     }
+    wine_tsx11_unlock();
+    return ret;
+}
+
+
+static void X11DRV_OpenIM(Display *display, XPointer p, XPointer data);
+
+static void X11DRV_DestroyIM(XIM xim, XPointer p, XPointer data)
+{
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+
+    TRACE("xim = %p, p = %p\n", xim, p);
+    thread_data->xim = NULL;
+    ximStyle = 0;
+    wine_tsx11_lock();
+    XRegisterIMInstantiateCallback( thread_data->display, NULL, NULL, NULL, X11DRV_OpenIM, NULL );
+    wine_tsx11_unlock();
+}
+
+/***********************************************************************
+*           X11DRV Ime creation
+*/
+static void X11DRV_OpenIM(Display *display, XPointer ptr, XPointer data)
+{
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+    XIMStyle ximStyleCallback, ximStyleNone;
+    XIMStyles *ximStyles = NULL;
+    INT i;
+    XIM xim;
+    XIMCallback destroy;
+
+    wine_tsx11_lock();
 
     xim = XOpenIM(display, NULL, NULL, NULL);
     if (xim == NULL)
     {
         WARN("Could not open input method.\n");
-        goto err;
+        wine_tsx11_unlock();
+        return;
     }
 
+    destroy.client_data = NULL;
+    destroy.callback = X11DRV_DestroyIM;
+    if (XSetIMValues(xim, XNDestroyCallback, &destroy, NULL))
+    {
+        WARN("Could not set destroy callback.\n");
+    }
+
+    TRACE("xim = %p\n", xim);
     TRACE("X display of IM = %p\n", XDisplayOfIM(xim));
     TRACE("Using %s locale of Input Method\n", XLocaleOfIM(xim));
 
@@ -440,6 +411,9 @@ XIM X11DRV_SetupXIM(Display *display, const char *input_style)
     if (ximStyles == 0)
     {
         WARN("Could not find supported input style.\n");
+        XCloseIM(xim);
+        wine_tsx11_unlock();
+        return;
     }
     else
     {
@@ -499,39 +473,42 @@ XIM X11DRV_SetupXIM(Display *display, const char *input_style)
 
     }
 
+    thread_data->xim = xim;
+    XUnregisterIMInstantiateCallback(display, NULL, NULL, NULL, X11DRV_OpenIM, NULL);
     wine_tsx11_unlock();
-
-    if(!hImmDll)
-    {
-        LoadImmDll();
-
-        if (pImmCreateContext)
-        {
-            root_context = pImmCreateContext();
-            if (pImmAssociateContext)
-                pImmAssociateContext(0,root_context);
-        }
-    }
-
-    return xim;
-
-err:
-    wine_tsx11_unlock();
-    return NULL;
+    IME_XIMPresent(TRUE);
+    IME_UpdateAssociation(NULL);
 }
 
 
-XIC X11DRV_CreateIC(XIM xim, Display *display, Window win)
+void X11DRV_SetupXIM(void)
+{
+    wine_tsx11_lock();
+    XRegisterIMInstantiateCallback(thread_display(), NULL, NULL, NULL, X11DRV_OpenIM, NULL);
+    wine_tsx11_unlock();
+}
+
+static BOOL X11DRV_DestroyIC(XIC xic, XPointer p, XPointer data)
+{
+    struct x11drv_win_data *win_data = (struct x11drv_win_data *)p;
+    TRACE("xic = %p, win = %lx\n", xic, win_data->whole_window);
+    win_data->xic = NULL;
+    return TRUE;
+}
+
+
+XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data)
 {
     XPoint spot = {0};
     XVaNestedList preedit = NULL;
     XVaNestedList status = NULL;
     XIC xic;
-    XIMCallback P_StartCB;
-    XIMCallback P_DoneCB;
-    XIMCallback P_DrawCB;
-    XIMCallback P_CaretCB;
+    XICCallback destroy = {(XPointer)data, (XICProc)X11DRV_DestroyIC};
+    XICCallback P_StartCB, P_DoneCB, P_DrawCB, P_CaretCB;
     LANGID langid = PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale()));
+    Window win = data->whole_window;
+
+    TRACE("xim = %p\n", xim);
 
     wine_tsx11_lock();
 
@@ -544,20 +521,22 @@ XIC X11DRV_CreateIC(XIM xim, Display *display, Window win)
                         XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
                         XNClientWindow, win,
                         XNFocusWindow, win,
+                        XNDestroyCallback, &destroy,
                         NULL);
         wine_tsx11_unlock();
+        data->xic = xic;
         return xic;
     }
 
     /* create callbacks */
     P_StartCB.client_data = NULL;
-    P_StartCB.callback = (XIMProc)XIMPreEditStartCallback;
     P_DoneCB.client_data = NULL;
-    P_DoneCB.callback = (XIMProc)XIMPreEditDoneCallback;
     P_DrawCB.client_data = NULL;
-    P_DrawCB.callback = (XIMProc)XIMPreEditDrawCallback;
     P_CaretCB.client_data = NULL;
-    P_CaretCB.callback = (XIMProc)XIMPreEditCaretCallback;
+    P_StartCB.callback = (XICProc)XIMPreEditStartCallback;
+    P_DoneCB.callback = (XICProc)XIMPreEditDoneCallback;
+    P_DrawCB.callback = (XICProc)XIMPreEditDrawCallback;
+    P_CaretCB.callback = (XICProc)XIMPreEditCaretCallback;
 
     if ((ximStyle & (XIMPreeditNothing | XIMPreeditNone)) == 0)
     {
@@ -597,6 +576,7 @@ XIC X11DRV_CreateIC(XIM xim, Display *display, Window win)
               XNStatusAttributes, status,
               XNClientWindow, win,
               XNFocusWindow, win,
+              XNDestroyCallback, &destroy,
               NULL);
      }
     else if (preedit != NULL)
@@ -606,6 +586,7 @@ XIC X11DRV_CreateIC(XIM xim, Display *display, Window win)
               XNPreeditAttributes, preedit,
               XNClientWindow, win,
               XNFocusWindow, win,
+              XNDestroyCallback, &destroy,
               NULL);
     }
     else if (status != NULL)
@@ -615,6 +596,7 @@ XIC X11DRV_CreateIC(XIM xim, Display *display, Window win)
               XNStatusAttributes, status,
               XNClientWindow, win,
               XNFocusWindow, win,
+              XNDestroyCallback, &destroy,
               NULL);
     }
     else
@@ -623,10 +605,12 @@ XIC X11DRV_CreateIC(XIM xim, Display *display, Window win)
               XNInputStyle, ximStyle,
               XNClientWindow, win,
               XNFocusWindow, win,
+              XNDestroyCallback, &destroy,
               NULL);
     }
 
     TRACE("xic = %p\n", xic);
+    data->xic = xic;
 
     if (preedit != NULL)
         XFree(preedit);

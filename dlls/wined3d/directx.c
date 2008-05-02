@@ -155,6 +155,17 @@ int maxLookup[MAX_LOOKUPS];
 DWORD *stateLookup[MAX_LOOKUPS];
 
 DWORD minMipLookup[WINED3DTEXF_ANISOTROPIC + 1][WINED3DTEXF_LINEAR + 1];
+DWORD minMipLookup_noFilter[WINED3DTEXF_ANISOTROPIC + 1][WINED3DTEXF_LINEAR + 1] = {
+    {GL_NEAREST, GL_NEAREST, GL_NEAREST},
+    {GL_NEAREST, GL_NEAREST, GL_NEAREST},
+    {GL_NEAREST, GL_NEAREST, GL_NEAREST},
+    {GL_NEAREST, GL_NEAREST, GL_NEAREST},
+};
+
+DWORD magLookup[WINED3DTEXF_ANISOTROPIC + 1];
+DWORD magLookup_noFilter[WINED3DTEXF_ANISOTROPIC + 1] = {
+    GL_NEAREST, GL_NEAREST, GL_NEAREST, GL_NEAREST
+};
 
 /* drawStridedSlow attributes */
 glAttribFunc position_funcs[WINED3DDECLTYPE_UNUSED];
@@ -724,10 +735,6 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     gl_info->max_pointsize = gl_floatv[1];
     TRACE_(d3d_caps)("Maximum point size support - max point size=%f\n", gl_floatv[1]);
 
-    glGetIntegerv(GL_AUX_BUFFERS, &gl_max);
-    gl_info->max_aux_buffers = gl_max;
-    TRACE_(d3d_caps)("Offscreen rendering support - number of aux buffers=%d\n", gl_max);
-
     /* Parse the gl supported features, in theory enabling parts of our code appropriately */
     GL_Extensions = (const char *) glGetString(GL_EXTENSIONS);
     TRACE_(d3d_caps)("GL_Extensions reported:\n");
@@ -983,7 +990,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
         }
         if(gl_info->supported[ATI_FRAGMENT_SHADER]) {
             /* Disable NV_register_combiners and fragment shader if this is supported.
-             * generally the NV extensions are prefered over the ATI one, and this
+             * generally the NV extensions are preferred over the ATI ones, and this
              * extension is disabled if register_combiners and texture_shader2 are both
              * supported. So we reach this place only if we have incomplete NV dxlevel 8
              * fragment processing support
@@ -1300,10 +1307,6 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     minLookup[WINELOOKUP_WARPPARAM] = WINED3DTADDRESS_WRAP;
     maxLookup[WINELOOKUP_WARPPARAM] = WINED3DTADDRESS_MIRRORONCE;
 
-    minLookup[WINELOOKUP_MAGFILTER] = WINED3DTEXF_NONE;
-    maxLookup[WINELOOKUP_MAGFILTER] = WINED3DTEXF_ANISOTROPIC;
-
-
     for (i = 0; i < MAX_LOOKUPS; i++) {
         stateLookup[i] = HeapAlloc(GetProcessHeap(), 0, sizeof(*stateLookup[i]) * (1 + maxLookup[i] - minLookup[i]) );
     }
@@ -1319,10 +1322,10 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     stateLookup[WINELOOKUP_WARPPARAM][WINED3DTADDRESS_MIRRORONCE - minLookup[WINELOOKUP_WARPPARAM]] =
              gl_info->supported[ATI_TEXTURE_MIRROR_ONCE] ? GL_MIRROR_CLAMP_TO_EDGE_ATI : GL_REPEAT;
 
-    stateLookup[WINELOOKUP_MAGFILTER][WINED3DTEXF_NONE        - minLookup[WINELOOKUP_MAGFILTER]]  = GL_NEAREST;
-    stateLookup[WINELOOKUP_MAGFILTER][WINED3DTEXF_POINT       - minLookup[WINELOOKUP_MAGFILTER]] = GL_NEAREST;
-    stateLookup[WINELOOKUP_MAGFILTER][WINED3DTEXF_LINEAR      - minLookup[WINELOOKUP_MAGFILTER]] = GL_LINEAR;
-    stateLookup[WINELOOKUP_MAGFILTER][WINED3DTEXF_ANISOTROPIC - minLookup[WINELOOKUP_MAGFILTER]] =
+    magLookup[WINED3DTEXF_NONE        - WINED3DTEXF_NONE]  = GL_NEAREST;
+    magLookup[WINED3DTEXF_POINT       - WINED3DTEXF_NONE] = GL_NEAREST;
+    magLookup[WINED3DTEXF_LINEAR      - WINED3DTEXF_NONE] = GL_LINEAR;
+    magLookup[WINED3DTEXF_ANISOTROPIC - WINED3DTEXF_NONE] =
              gl_info->supported[EXT_TEXTURE_FILTER_ANISOTROPIC] ? GL_LINEAR : GL_NEAREST;
 
 
@@ -1972,7 +1975,7 @@ static BOOL CheckRenderTargetCapability(WINED3DFORMAT AdapterFormat, WINED3DFORM
             }
         }
     } else if(wined3d_settings.offscreen_rendering_mode == ORM_PBUFFER) {
-        /* We can propably use this function in FBO mode too on some drivers to get some basic indication of the capabilities. */
+        /* We can probably use this function in FBO mode too on some drivers to get some basic indication of the capabilities. */
         WineD3D_PixelFormat *cfgs = Adapters[Adapter].cfgs;
         int it;
 
@@ -2055,6 +2058,19 @@ static BOOL CheckPostPixelShaderBlendingCapability(UINT Adapter, WINED3DFORMAT C
         return TRUE;
 
     return FALSE;
+}
+
+static BOOL CheckWrapAndMipCapability(UINT Adapter, WINED3DFORMAT CheckFormat) {
+    /* OpenGL supports mipmapping on all formats basically. Wrapping is unsupported,
+     * but we have to report mipmapping so we cannot reject this flag. Tests show that
+     * windows reports WRAPANDMIP on unfilterable surfaces as well, apparently to show
+     * that wrapping is supported. The lack of filtering will sort out the mipmapping
+     * capability anyway.
+     *
+     * For now lets report this on all formats, but in the future we may want to
+     * restrict it to some should games need that
+     */
+    return TRUE;
 }
 
 /* Check if a texture format is supported on the given adapter */
@@ -2316,6 +2332,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          *                    - D3DUSAGE_NONSECURE (d3d9ex)
          *                    - D3DUSAGE_RENDERTARGET
          *                    - D3DUSAGE_SOFTWAREPROCESSING
+         *                    - D3DUSAGE_QUERY_WRAPANDMIP
          */
         if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
             /* Check if the texture format is around */
@@ -2396,6 +2413,16 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                         return WINED3DERR_NOTAVAILABLE;
                     }
                 }
+
+                /* Check QUERY_WRAPANDMIP support */
+                if(Usage & WINED3DUSAGE_QUERY_WRAPANDMIP) {
+                    if(CheckWrapAndMipCapability(Adapter, CheckFormat)) {
+                        UsageCaps |= WINED3DUSAGE_QUERY_WRAPANDMIP;
+                    } else {
+                        TRACE_(d3d_caps)("[FAILED] - No wrapping and mipmapping support\n");
+                        return WINED3DERR_NOTAVAILABLE;
+                    }
+                }
             } else {
                 TRACE_(d3d_caps)("[FAILED] - Cube texture format not supported\n");
                 return WINED3DERR_NOTAVAILABLE;
@@ -2448,6 +2475,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          *                - D3DUSAGE_RENDERTARGET
          *                - D3DUSAGE_SOFTWAREPROCESSING
          *                - D3DUSAGE_TEXTAPI (d3d9ex)
+         *                - D3DUSAGE_QUERY_WRAPANDMIP
          */
 
         /* Check if the texture format is around */
@@ -2538,6 +2566,16 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                     return WINED3DERR_NOTAVAILABLE;
                 }
             }
+
+            /* Check QUERY_WRAPANDMIP support */
+            if(Usage & WINED3DUSAGE_QUERY_WRAPANDMIP) {
+                if(CheckWrapAndMipCapability(Adapter, CheckFormat)) {
+                    UsageCaps |= WINED3DUSAGE_QUERY_WRAPANDMIP;
+                } else {
+                    TRACE_(d3d_caps)("[FAILED] - No wrapping and mipmapping support\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+            }
         } else if(CheckDepthStencilCapability(Adapter, AdapterFormat, CheckFormat)) {
             if(Usage & WINED3DUSAGE_DEPTHSTENCIL)
                 UsageCaps |= WINED3DUSAGE_DEPTHSTENCIL;
@@ -2553,6 +2591,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
          *                      - D3DUSAGE_DYNAMIC
          *                      - D3DUSAGE_NONSECURE (d3d9ex)
          *                      - D3DUSAGE_SOFTWAREPROCESSING
+         *                      - D3DUSAGE_QUERY_WRAPANDMIP
          */
 
         /* Check volume texture and volume usage caps */
@@ -2616,6 +2655,16 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                     UsageCaps |= WINED3DUSAGE_QUERY_VERTEXTEXTURE;
                 } else {
                     TRACE_(d3d_caps)("[FAILED] - No query vertextexture support\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+            }
+
+            /* Check QUERY_WRAPANDMIP support */
+            if(Usage & WINED3DUSAGE_QUERY_WRAPANDMIP) {
+                if(CheckWrapAndMipCapability(Adapter, CheckFormat)) {
+                    UsageCaps |= WINED3DUSAGE_QUERY_WRAPANDMIP;
+                } else {
+                    TRACE_(d3d_caps)("[FAILED] - No wrapping and mipmapping support\n");
                     return WINED3DERR_NOTAVAILABLE;
                 }
             }

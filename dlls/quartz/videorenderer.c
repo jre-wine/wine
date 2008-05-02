@@ -35,7 +35,9 @@
 #include "evcode.h"
 #include "strmif.h"
 #include "ddraw.h"
+#include "dvdmedia.h"
 
+#include "assert.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
@@ -261,39 +263,8 @@ static const IMemInputPinVtbl MemInputPin_Vtbl =
     MemInputPin_ReceiveCanBlock
 };
 
-static HRESULT VideoRenderer_InputPin_Construct(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
-{
-    InputPin * pPinImpl;
-
-    *ppPin = NULL;
-
-    if (pPinInfo->dir != PINDIR_INPUT)
-    {
-        ERR("Pin direction(%x) != PINDIR_INPUT\n", pPinInfo->dir);
-        return E_INVALIDARG;
-    }
-
-    pPinImpl = CoTaskMemAlloc(sizeof(*pPinImpl));
-
-    if (!pPinImpl)
-        return E_OUTOFMEMORY;
-
-    if (SUCCEEDED(InputPin_Init(pPinInfo, pSampleProc, pUserData, pQueryAccept, pCritSec, pPinImpl)))
-    {
-        pPinImpl->pin.lpVtbl = &VideoRenderer_InputPin_Vtbl;
-        pPinImpl->lpVtblMemInput = &MemInputPin_Vtbl;
-
-        *ppPin = (IPin *)(&pPinImpl->pin.lpVtbl);
-        return S_OK;
-    }
-
-    CoTaskMemFree(pPinImpl);
-    return E_FAIL;
-}
-
 static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, DWORD size)
 {
-    VIDEOINFOHEADER* format;
     AM_MEDIA_TYPE amt;
     HRESULT hr = S_OK;
     DDSURFACEDESC sdesc;
@@ -301,6 +272,7 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
     int height;
     LPBYTE palette = NULL;
     HDC hDC;
+    BITMAPINFOHEADER *bmiHeader;
 
     TRACE("%p %p %d\n", This, data, size);
 
@@ -310,23 +282,39 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
         ERR("Unable to retrieve media type\n");
         return hr;
     }
-    format = (VIDEOINFOHEADER*)amt.pbFormat;
 
-    TRACE("biSize = %d\n", format->bmiHeader.biSize);
-    TRACE("biWidth = %d\n", format->bmiHeader.biWidth);
-    TRACE("biHeight = %d\n", format->bmiHeader.biHeight);
-    TRACE("biPlanes = %d\n", format->bmiHeader.biPlanes);
-    TRACE("biBitCount = %d\n", format->bmiHeader.biBitCount);
-    TRACE("biCompression = %s\n", debugstr_an((LPSTR)&(format->bmiHeader.biCompression), 4));
-    TRACE("biSizeImage = %d\n", format->bmiHeader.biSizeImage);
+    if (IsEqualIID(&amt.formattype, &FORMAT_VideoInfo))
+    {
+        bmiHeader = &((VIDEOINFOHEADER *)amt.pbFormat)->bmiHeader;
+    }
+    else if (IsEqualIID(&amt.formattype, &FORMAT_VideoInfo2))
+    {
+        bmiHeader = &((VIDEOINFOHEADER2 *)amt.pbFormat)->bmiHeader;
+    }
+    else
+    {
+        FIXME("Unknown type %s\n", debugstr_guid(&amt.subtype));
+        return VFW_E_RUNTIME_ERROR;
+    }
 
-    width = format->bmiHeader.biWidth;
-    height = format->bmiHeader.biHeight;
-    palette = ((LPBYTE)&format->bmiHeader) + format->bmiHeader.biSize;
+
+    TRACE("biSize = %d\n", bmiHeader->biSize);
+    TRACE("biWidth = %d\n", bmiHeader->biWidth);
+    TRACE("biHeight = %d\n", bmiHeader->biHeight);
+    TRACE("biPlanes = %d\n", bmiHeader->biPlanes);
+    TRACE("biBitCount = %d\n", bmiHeader->biBitCount);
+    TRACE("biCompression = %s\n", debugstr_an((LPSTR)&(bmiHeader->biCompression), 4));
+    TRACE("biSizeImage = %d\n", bmiHeader->biSizeImage);
+
+    width = bmiHeader->biWidth;
+    height = bmiHeader->biHeight;
+    palette = ((LPBYTE)bmiHeader) + bmiHeader->biSize;
  
     if (!This->init)
     {
-        /* Honor previously set WindowPos */
+        if (!This->WindowPos.right || !This->WindowPos.bottom)
+            This->WindowPos = This->SourceRect;
+
         TRACE("WindowPos: %d %d %d %d\n", This->WindowPos.left, This->WindowPos.top, This->WindowPos.right, This->WindowPos.bottom);
         SetWindowPos(This->hWnd, NULL,
             This->WindowPos.left,
@@ -334,8 +322,9 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
             This->WindowPos.right - This->WindowPos.left,
             This->WindowPos.bottom - This->WindowPos.top,
             SWP_NOZORDER|SWP_NOMOVE);
+
         GetClientRect(This->hWnd, &This->DestRect);
-        This->init  = TRUE;
+        This->init = TRUE;
     }
 
     hDC = GetDC(This->hWnd);
@@ -351,10 +340,9 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
     StretchDIBits(hDC, This->DestRect.left, This->DestRect.top, This->DestRect.right -This->DestRect.left,
                   This->DestRect.bottom - This->DestRect.top, This->SourceRect.left, This->SourceRect.top,
                   This->SourceRect.right - This->SourceRect.left, This->SourceRect.bottom - This->SourceRect.top,
-                  data, (BITMAPINFO*)&format->bmiHeader, DIB_RGB_COLORS, SRCCOPY);
+                  data, (BITMAPINFO *)bmiHeader, DIB_RGB_COLORS, SRCCOPY);
 
     ReleaseDC(This->hWnd, hDC);
-    
     if (This->AutoShow)
         ShowWindow(This->hWnd, SW_SHOW);
 
@@ -369,8 +357,11 @@ static HRESULT VideoRenderer_Sample(LPVOID iface, IMediaSample * pSample)
     REFERENCE_TIME tStart, tStop;
     HRESULT hr;
 
+    if (This->state == State_Stopped)
+        return S_FALSE;
+
     TRACE("%p %p\n", iface, pSample);
-    
+
     hr = IMediaSample_GetPointer(pSample, &pbSrcStream);
     if (FAILED(hr))
     {
@@ -415,17 +406,29 @@ static HRESULT VideoRenderer_QueryAccept(LPVOID iface, const AM_MEDIA_TYPE * pmt
         IsEqualIID(&pmt->subtype, &MEDIASUBTYPE_RGB8))
     {
         VideoRendererImpl* This = (VideoRendererImpl*) iface;
-        VIDEOINFOHEADER* format = (VIDEOINFOHEADER*)pmt->pbFormat;
 
-        if (!IsEqualIID(&pmt->formattype, &FORMAT_VideoInfo))
+        if (IsEqualIID(&pmt->formattype, &FORMAT_VideoInfo))
+        {
+            VIDEOINFOHEADER *format = (VIDEOINFOHEADER *)pmt->pbFormat;
+            This->SourceRect.left = 0;
+            This->SourceRect.top = 0;
+            This->SourceRect.right = This->VideoWidth = format->bmiHeader.biWidth;
+            This->SourceRect.bottom = This->VideoHeight = format->bmiHeader.biHeight;
+        }
+        else if (IsEqualIID(&pmt->formattype, &FORMAT_VideoInfo2))
+        {
+            VIDEOINFOHEADER2 *format2 = (VIDEOINFOHEADER2 *)pmt->pbFormat;
+
+            This->SourceRect.left = 0;
+            This->SourceRect.top = 0;
+            This->SourceRect.right = This->VideoWidth = format2->bmiHeader.biWidth;
+            This->SourceRect.bottom = This->VideoHeight = format2->bmiHeader.biHeight;
+        }
+        else
         {
             WARN("Format type %s not supported\n", debugstr_guid(&pmt->formattype));
             return S_FALSE;
         }
-        This->SourceRect.left = 0;
-        This->SourceRect.top = 0;
-        This->SourceRect.right = This->VideoWidth = format->bmiHeader.biWidth;
-        This->SourceRect.bottom = This->VideoHeight = format->bmiHeader.biHeight;
         return S_OK;
     }
     return S_FALSE;
@@ -467,7 +470,7 @@ HRESULT VideoRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv)
     piInput.pFilter = (IBaseFilter *)pVideoRenderer;
     lstrcpynW(piInput.achName, wcsInputPinName, sizeof(piInput.achName) / sizeof(piInput.achName[0]));
 
-    hr = VideoRenderer_InputPin_Construct(&piInput, VideoRenderer_Sample, (LPVOID)pVideoRenderer, VideoRenderer_QueryAccept, &pVideoRenderer->csFilter, (IPin **)&pVideoRenderer->pInputPin);
+    hr = InputPin_Construct(&VideoRenderer_InputPin_Vtbl, &piInput, VideoRenderer_Sample, (LPVOID)pVideoRenderer, VideoRenderer_QueryAccept, NULL, &pVideoRenderer->csFilter, (IPin **)&pVideoRenderer->pInputPin);
 
     if (SUCCEEDED(hr))
     {
@@ -490,7 +493,7 @@ HRESULT VideoRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv)
 
 HRESULT VideoRendererDefault_create(IUnknown * pUnkOuter, LPVOID * ppv)
 {
-    /* TODO: Attenmpt to use the VMR-7 renderer instead when possible */
+    /* TODO: Attempt to use the VMR-7 renderer instead when possible */
     return VideoRenderer_create(pUnkOuter, ppv);
 }
 
@@ -675,6 +678,9 @@ static HRESULT WINAPI VideoRenderer_Pause(IBaseFilter * iface)
 
     EnterCriticalSection(&This->csFilter);
     {
+        if (This->state == State_Stopped)
+            This->pInputPin->end_of_stream = 0;
+
         This->state = State_Paused;
     }
     LeaveCriticalSection(&This->csFilter);
@@ -690,6 +696,9 @@ static HRESULT WINAPI VideoRenderer_Run(IBaseFilter * iface, REFERENCE_TIME tSta
 
     EnterCriticalSection(&This->csFilter);
     {
+        if (This->state == State_Stopped)
+            This->pInputPin->end_of_stream = 0;
+
         This->rtStreamStart = tStart;
         This->state = State_Running;
     }

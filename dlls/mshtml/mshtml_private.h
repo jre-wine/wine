@@ -21,6 +21,7 @@
 #include "mshtml.h"
 #include "mshtmhst.h"
 #include "hlink.h"
+#include "dispex.h"
 
 #include "wine/list.h"
 #include "wine/unicode.h"
@@ -56,8 +57,23 @@ typedef struct ConnectionPoint ConnectionPoint;
 typedef struct BSCallback BSCallback;
 typedef struct nsChannelBSC nsChannelBSC;
 
+/* NOTE: make sure to keep in sync with dispex.c */
+typedef enum {
+    IHTMLWindow2_tid,
+    LAST_tid
+} tid_t;
+
+typedef struct {
+    const IDispatchExVtbl  *lpIDispatchExVtbl;
+
+    IUnknown *outer;
+} DispatchEx;
+
+void init_dispex(DispatchEx*,IUnknown*);
+
 typedef struct {
     const IHTMLWindow2Vtbl *lpHTMLWindow2Vtbl;
+    const IHTMLWindow3Vtbl *lpHTMLWindow3Vtbl;
 
     LONG ref;
 
@@ -281,6 +297,7 @@ typedef struct {
 } HTMLTextContainer;
 
 #define HTMLWINDOW2(x)   ((IHTMLWindow2*)                 &(x)->lpHTMLWindow2Vtbl)
+#define HTMLWINDOW3(x)   ((IHTMLWindow3*)                 &(x)->lpHTMLWindow3Vtbl)
 
 #define HTMLDOC(x)       ((IHTMLDocument2*)               &(x)->lpHTMLDocument2Vtbl)
 #define HTMLDOC3(x)      ((IHTMLDocument3*)               &(x)->lpHTMLDocument3Vtbl)
@@ -334,6 +351,8 @@ typedef struct {
 #define HTMLOPTFACTORY(x)  ((IHTMLOptionElementFactory*)  &(x)->lpHTMLOptionElementFactoryVtbl)
 #define HTMLLOCATION(x)  ((IHTMLLocation*) &(x)->lpHTMLLocationVtbl)
 
+#define DISPATCHEX(x)    ((IDispatchEx*) &(x)->lpIDispatchExVtbl)
+
 #define DEFINE_THIS2(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,ifc)))
 #define DEFINE_THIS(cls,ifc,iface) DEFINE_THIS2(cls,lp ## ifc ## Vtbl,iface)
 
@@ -344,6 +363,7 @@ HTMLWindow *HTMLWindow_Create(HTMLDocument*);
 HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
 HTMLOptionElementFactory *HTMLOptionElementFactory_Create(HTMLDocument*);
 HTMLLocation *HTMLLocation_Create(HTMLDocument*);
+IOmNavigator *OmNavigator_Create(void);
 void setup_nswindow(HTMLWindow*);
 
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
@@ -410,7 +430,7 @@ void set_document_bscallback(HTMLDocument*,nsChannelBSC*);
 void set_current_mon(HTMLDocument*,IMoniker*);
 HRESULT start_binding(HTMLDocument*,BSCallback*,IBindCtx*);
 
-HRESULT bind_mon_to_buffer(HTMLDocument*,IMoniker*,void**);
+HRESULT bind_mon_to_buffer(HTMLDocument*,IMoniker*,void**,DWORD*);
 
 nsChannelBSC *create_channelbsc(IMoniker*);
 HRESULT channelbsc_load_stream(nsChannelBSC*,IStream*);
@@ -446,7 +466,7 @@ void HTMLDOMNode_destructor(HTMLDOMNode*);
 HRESULT HTMLElement_QI(HTMLDOMNode*,REFIID,void**);
 void HTMLElement_destructor(HTMLDOMNode*);
 
-HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*);
+HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*,BOOL);
 void release_nodes(HTMLDocument*);
 
 void release_script_hosts(HTMLDocument*);
@@ -512,13 +532,8 @@ HWND get_thread_hwnd(void);
 void push_task(task_t*);
 void remove_doc_tasks(const HTMLDocument*);
 
-/* typelibs */
-enum tid_t {
-    IHTMLWindow2_tid,
-    LAST_tid
-};
-
-HRESULT get_typeinfo(enum tid_t, ITypeInfo**);
+HRESULT get_typeinfo(tid_t,ITypeInfo**);
+void release_typelib(void);
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);

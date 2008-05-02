@@ -511,6 +511,39 @@ void WINAPI KeInitializeTimer( PKTIMER Timer )
 }
 
 
+/**********************************************************************
+ *           KeQueryActiveProcessors   (NTOSKRNL.EXE.@)
+ *
+ * Return the active Processors as bitmask
+ *
+ * RETURNS
+ *   active Processors as bitmask
+ *
+ */
+KAFFINITY WINAPI KeQueryActiveProcessors( void )
+{
+    DWORD_PTR AffinityMask;
+
+    GetProcessAffinityMask( GetCurrentProcess(), &AffinityMask, NULL);
+    return AffinityMask;
+}
+
+
+/**********************************************************************
+ *           KeQueryInterruptTime   (NTOSKRNL.EXE.@)
+ *
+ * Return the interrupt time count
+ *
+ */
+ULONGLONG WINAPI KeQueryInterruptTime( void )
+{
+    LARGE_INTEGER totaltime;
+
+    KeQueryTickCount(&totaltime);
+    return totaltime.QuadPart;
+}
+
+
 /***********************************************************************
  *           KeQuerySystemTime   (NTOSKRNL.EXE.@)
  */

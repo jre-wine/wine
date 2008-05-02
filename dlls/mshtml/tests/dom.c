@@ -169,6 +169,13 @@ static REFIID const location_iids[] = {
     NULL
 };
 
+static REFIID const window_iids[] = {
+    &IID_IDispatch,
+    &IID_IHTMLWindow2,
+    &IID_IHTMLWindow3,
+    NULL
+};
+
 typedef struct {
     const char *tag;
     REFIID *iids;
@@ -1029,6 +1036,31 @@ static void test_location(IHTMLDocument2 *doc)
     ok(!ref, "location chould be destroyed here\n");
 }
 
+static void test_navigator(IHTMLDocument2 *doc)
+{
+    IHTMLWindow2 *window;
+    IOmNavigator *navigator, *navigator2;
+    ULONG ref;
+    HRESULT hres;
+
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok(hres == S_OK, "parentWidnow failed: %08x\n", hres);
+    test_ifaces((IUnknown*)window, window_iids);
+
+    hres = IHTMLWindow2_get_navigator(window, &navigator);
+    ok(hres == S_OK, "get_navigator failed: %08x\n", hres);
+    ok(navigator != NULL, "navigator == NULL\n");
+
+    hres = IHTMLWindow2_get_navigator(window, &navigator2);
+    ok(hres == S_OK, "get_navigator failed: %08x\n", hres);
+    ok(navigator != navigator2, "navigator2 != navihgator\n");
+
+    IHTMLWindow2_Release(window);
+    IOmNavigator_Release(navigator2);
+    ref = IOmNavigator_Release(navigator);
+    ok(!ref, "navigator should be destroyed here\n");
+}
+
 static void test_default_style(IHTMLStyle *style)
 {
     VARIANT_BOOL b;
@@ -1142,6 +1174,7 @@ static void test_defaults(IHTMLDocument2 *doc)
     test_default_style(style);
     test_compatmode(doc);
     test_location(doc);
+    test_navigator(doc);
 
     IHTMLStyle_Release(style);
 

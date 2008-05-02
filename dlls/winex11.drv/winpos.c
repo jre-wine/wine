@@ -42,18 +42,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 #define SWP_AGG_NOPOSCHANGE \
     (SWP_NOSIZE | SWP_NOMOVE | SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE | SWP_NOZORDER)
 
-#define _NET_WM_MOVERESIZE_SIZE_TOPLEFT      0
-#define _NET_WM_MOVERESIZE_SIZE_TOP          1
-#define _NET_WM_MOVERESIZE_SIZE_TOPRIGHT     2
-#define _NET_WM_MOVERESIZE_SIZE_RIGHT        3
-#define _NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT  4
-#define _NET_WM_MOVERESIZE_SIZE_BOTTOM       5
-#define _NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT   6
-#define _NET_WM_MOVERESIZE_SIZE_LEFT         7
-#define _NET_WM_MOVERESIZE_MOVE              8   /* movement only */
-#define _NET_WM_MOVERESIZE_SIZE_KEYBOARD     9   /* size via keyboard */
-#define _NET_WM_MOVERESIZE_MOVE_KEYBOARD    10   /* move via keyboard */
-
 #define _NET_WM_STATE_REMOVE  0
 #define _NET_WM_STATE_ADD     1
 #define _NET_WM_STATE_TOGGLE  2
@@ -61,54 +49,179 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 static const char managed_prop[] = "__wine_x11_managed";
 
 /***********************************************************************
- *           X11DRV_Expose
+ *     update_net_wm_states
  */
-void X11DRV_Expose( HWND hwnd, XEvent *xev )
+static void update_net_wm_states( Display *display, struct x11drv_win_data *data )
 {
-    XExposeEvent *event = &xev->xexpose;
-    RECT rect;
-    struct x11drv_win_data *data;
-    int flags = RDW_INVALIDATE | RDW_ERASE;
-
-    TRACE( "win %p (%lx) %d,%d %dx%d\n",
-           hwnd, event->window, event->x, event->y, event->width, event->height );
-
-    if (!(data = X11DRV_get_win_data( hwnd ))) return;
-
-    if (event->window == data->whole_window)
+    static const unsigned int state_atoms[NB_NET_WM_STATES] =
     {
-        rect.left = data->whole_rect.left + event->x;
-        rect.top  = data->whole_rect.top + event->y;
-        flags |= RDW_FRAME;
+        XATOM__NET_WM_STATE_FULLSCREEN,
+        XATOM__NET_WM_STATE_ABOVE,
+        XATOM__NET_WM_STATE_MAXIMIZED_VERT,
+        XATOM__NET_WM_STATE_SKIP_PAGER,
+        XATOM__NET_WM_STATE_SKIP_TASKBAR
+    };
+
+    DWORD i, style, ex_style, new_state = 0;
+
+    if (!data->managed) return;
+    if (data->whole_window == root_window) return;
+
+    style = GetWindowLongW( data->hwnd, GWL_STYLE );
+    if (data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
+        data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height)
+    {
+        if ((style & WS_MAXIMIZE) && (style & WS_CAPTION) == WS_CAPTION)
+            new_state |= (1 << NET_WM_STATE_MAXIMIZED);
+        else if (!(style & WS_MINIMIZE))
+            new_state |= (1 << NET_WM_STATE_FULLSCREEN);
+    }
+    else if (style & WS_MAXIMIZE)
+        new_state |= (1 << NET_WM_STATE_MAXIMIZED);
+
+    ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
+    if (ex_style & WS_EX_TOPMOST)
+        new_state |= (1 << NET_WM_STATE_ABOVE);
+    if (ex_style & WS_EX_TOOLWINDOW)
+        new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);
+    if (!(ex_style & WS_EX_APPWINDOW) && GetWindow( data->hwnd, GW_OWNER ))
+        new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR);
+
+    if (!data->mapped)  /* set the _NET_WM_STATE atom directly */
+    {
+        Atom atoms[NB_NET_WM_STATES+1];
+        DWORD count;
+
+        for (i = count = 0; i < NB_NET_WM_STATES; i++)
+        {
+            if (!(new_state & (1 << i))) continue;
+            TRACE( "setting wm state %u for unmapped window %p/%lx\n",
+                   i, data->hwnd, data->whole_window );
+            atoms[count++] = X11DRV_Atoms[state_atoms[i] - FIRST_XATOM];
+            if (state_atoms[i] == XATOM__NET_WM_STATE_MAXIMIZED_VERT)
+                atoms[count++] = x11drv_atom(_NET_WM_STATE_MAXIMIZED_HORZ);
+        }
+        wine_tsx11_lock();
+        XChangeProperty( display, data->whole_window, x11drv_atom(_NET_WM_STATE), XA_ATOM,
+                         32, PropModeReplace, (unsigned char *)atoms, count );
+        wine_tsx11_unlock();
+    }
+    else  /* ask the window manager to do it for us */
+    {
+        XEvent xev;
+
+        xev.xclient.type = ClientMessage;
+        xev.xclient.window = data->whole_window;
+        xev.xclient.message_type = x11drv_atom(_NET_WM_STATE);
+        xev.xclient.serial = 0;
+        xev.xclient.display = display;
+        xev.xclient.send_event = True;
+        xev.xclient.format = 32;
+        xev.xclient.data.l[3] = 1;
+
+        for (i = 0; i < NB_NET_WM_STATES; i++)
+        {
+            if (!((data->net_wm_state ^ new_state) & (1 << i))) continue;  /* unchanged */
+
+            TRACE( "setting wm state %u for window %p/%lx to %u prev %u\n",
+                   i, data->hwnd, data->whole_window,
+                   (new_state & (1 << i)) != 0, (data->net_wm_state & (1 << i)) != 0 );
+
+            xev.xclient.data.l[0] = (new_state & (1 << i)) ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE;
+            xev.xclient.data.l[1] = X11DRV_Atoms[state_atoms[i] - FIRST_XATOM];
+            xev.xclient.data.l[2] = ((state_atoms[i] == XATOM__NET_WM_STATE_MAXIMIZED_VERT) ?
+                                     x11drv_atom(_NET_WM_STATE_MAXIMIZED_HORZ) : 0);
+            wine_tsx11_lock();
+            XSendEvent( display, root_window, False,
+                        SubstructureRedirectMask | SubstructureNotifyMask, &xev );
+            wine_tsx11_unlock();
+        }
+    }
+    data->net_wm_state = new_state;
+}
+
+
+/***********************************************************************
+ *     set_xembed_flags
+ */
+static void set_xembed_flags( Display *display, struct x11drv_win_data *data, unsigned long flags )
+{
+    unsigned long info[2];
+
+    info[0] = 0; /* protocol version */
+    info[1] = flags;
+    wine_tsx11_lock();
+    XChangeProperty( display, data->whole_window, x11drv_atom(_XEMBED_INFO),
+                     x11drv_atom(_XEMBED_INFO), 32, PropModeReplace, (unsigned char*)info, 2 );
+    wine_tsx11_unlock();
+}
+
+
+/***********************************************************************
+ *     map_window
+ */
+static void map_window( Display *display, struct x11drv_win_data *data, DWORD new_style )
+{
+    TRACE( "win %p/%lx\n", data->hwnd, data->whole_window );
+
+    wait_for_withdrawn_state( display, data, TRUE );
+
+    if (!data->embedded)
+    {
+        update_net_wm_states( display, data );
+        X11DRV_sync_window_style( display, data );
+        wine_tsx11_lock();
+        XMapWindow( display, data->whole_window );
+        wine_tsx11_unlock();
+    }
+    else set_xembed_flags( display, data, XEMBED_MAPPED );
+
+    data->mapped = TRUE;
+    data->iconic = (new_style & WS_MINIMIZE) != 0;
+}
+
+
+/***********************************************************************
+ *     unmap_window
+ */
+static void unmap_window( Display *display, struct x11drv_win_data *data )
+{
+    TRACE( "win %p/%lx\n", data->hwnd, data->whole_window );
+
+    if (!data->embedded)
+    {
+        wait_for_withdrawn_state( display, data, FALSE );
+        wine_tsx11_lock();
+        if (data->managed) XWithdrawWindow( display, data->whole_window, DefaultScreen(display) );
+        else XUnmapWindow( display, data->whole_window );
+        wine_tsx11_unlock();
+    }
+    else set_xembed_flags( display, data, 0 );
+
+    data->mapped = FALSE;
+    data->net_wm_state = 0;
+}
+
+
+/***********************************************************************
+ *     make_window_embedded
+ */
+void make_window_embedded( Display *display, struct x11drv_win_data *data )
+{
+    if (data->mapped)
+    {
+        /* the window cannot be mapped before being embedded */
+        unmap_window( display, data );
+        data->embedded = TRUE;
+        map_window( display, data, 0 );
     }
     else
     {
-        rect.left = data->client_rect.left + event->x;
-        rect.top  = data->client_rect.top + event->y;
+        data->embedded = TRUE;
+        set_xembed_flags( display, data, 0 );
     }
-    rect.right  = rect.left + event->width;
-    rect.bottom = rect.top + event->height;
-
-    if (event->window != root_window)
-    {
-        SERVER_START_REQ( update_window_zorder )
-        {
-            req->window      = hwnd;
-            req->rect.left   = rect.left;
-            req->rect.top    = rect.top;
-            req->rect.right  = rect.right;
-            req->rect.bottom = rect.bottom;
-            wine_server_call( req );
-        }
-        SERVER_END_REQ;
-
-        /* make position relative to client area instead of parent */
-        OffsetRect( &rect, -data->client_rect.left, -data->client_rect.top );
-        flags |= RDW_ALLCHILDREN;
-    }
-
-    RedrawWindow( hwnd, &rect, 0, flags );
 }
+
 
 /***********************************************************************
  *		SetWindowStyle   (X11DRV.@)
@@ -134,17 +247,7 @@ void X11DRV_SetWindowStyle( HWND hwnd, DWORD old_style )
         if (data->whole_window && X11DRV_is_window_rect_mapped( &data->window_rect ))
         {
             X11DRV_set_wm_hints( display, data );
-            if (!data->mapped)
-            {
-                TRACE( "mapping win %p/%lx\n", hwnd, data->whole_window );
-                wait_for_withdrawn_state( display, data, TRUE );
-                X11DRV_sync_window_style( display, data );
-                wine_tsx11_lock();
-                XMapWindow( display, data->whole_window );
-                wine_tsx11_unlock();
-                data->mapped = TRUE;
-                data->iconic = (new_style & WS_MINIMIZE) != 0;
-            }
+            if (!data->mapped) map_window( display, data, new_style );
         }
     }
 
@@ -159,75 +262,6 @@ void X11DRV_SetWindowStyle( HWND hwnd, DWORD old_style )
             wine_tsx11_unlock();
         }
     }
-}
-
-
-/***********************************************************************
- *     update_net_wm_states
- */
-static void update_net_wm_states( Display *display, struct x11drv_win_data *data )
-{
-    static const unsigned int state_atoms[NB_NET_WM_STATES] =
-    {
-        XATOM__NET_WM_STATE_FULLSCREEN,
-        XATOM__NET_WM_STATE_ABOVE,
-        XATOM__NET_WM_STATE_MAXIMIZED_VERT,
-        XATOM__NET_WM_STATE_SKIP_PAGER,
-        XATOM__NET_WM_STATE_SKIP_TASKBAR
-    };
-
-    DWORD i, style, ex_style, new_state = 0;
-    XEvent xev;
-
-    if (!data->managed) return;
-    if (!data->mapped) return;
-
-    style = GetWindowLongW( data->hwnd, GWL_STYLE );
-    if (data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
-        data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height)
-    {
-        if ((style & WS_MAXIMIZE) && (style & WS_CAPTION) == WS_CAPTION)
-            new_state |= (1 << NET_WM_STATE_MAXIMIZED);
-        else
-            new_state |= (1 << NET_WM_STATE_FULLSCREEN);
-    }
-    else if (style & WS_MAXIMIZE)
-        new_state |= (1 << NET_WM_STATE_MAXIMIZED);
-
-    ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
-    if (ex_style & WS_EX_TOPMOST)
-        new_state |= (1 << NET_WM_STATE_ABOVE);
-    if (ex_style & WS_EX_TOOLWINDOW)
-        new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);
-    if (!(ex_style & WS_EX_APPWINDOW) && GetWindow( data->hwnd, GW_OWNER ))
-        new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR);
-
-    xev.xclient.type = ClientMessage;
-    xev.xclient.window = data->whole_window;
-    xev.xclient.message_type = x11drv_atom(_NET_WM_STATE);
-    xev.xclient.serial = 0;
-    xev.xclient.display = display;
-    xev.xclient.send_event = True;
-    xev.xclient.format = 32;
-    xev.xclient.data.l[3] = 1;
-
-    for (i = 0; i < NB_NET_WM_STATES; i++)
-    {
-        if (!((data->net_wm_state ^ new_state) & (1 << i))) continue;  /* unchanged */
-
-        TRACE( "setting wm state %u for window %p/%lx to %u prev %u\n",
-               i, data->hwnd, data->whole_window,
-               (new_state & (1 << i)) != 0, (data->net_wm_state & (1 << i)) != 0 );
-
-        xev.xclient.data.l[0] = (new_state & (1 << i)) ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE;
-        xev.xclient.data.l[1] = X11DRV_Atoms[state_atoms[i] - FIRST_XATOM];
-        xev.xclient.data.l[2] = ((state_atoms[i] == XATOM__NET_WM_STATE_MAXIMIZED_VERT) ?
-                                 x11drv_atom(_NET_WM_STATE_MAXIMIZED_HORZ) : 0);
-        wine_tsx11_lock();
-        XSendEvent( display, root_window, False, SubstructureRedirectMask | SubstructureNotifyMask, &xev );
-        wine_tsx11_unlock();
-    }
-    data->net_wm_state = new_state;
 }
 
 
@@ -318,15 +352,9 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
     if (!data->managed && data->whole_window && is_window_managed( hwnd, swp_flags, rectWindow ))
     {
         TRACE( "making win %p/%lx managed\n", hwnd, data->whole_window );
+        if (data->mapped) unmap_window( display, data );
         data->managed = TRUE;
         SetPropA( hwnd, managed_prop, (HANDLE)1 );
-        if (data->mapped)
-        {
-            wine_tsx11_lock();
-            XUnmapWindow( display, data->whole_window );
-            wine_tsx11_unlock();
-            data->mapped = FALSE;
-        }
     }
 
     old_window_rect = data->window_rect;
@@ -379,6 +407,10 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
             move_window_bits( data, &valid_rects[1], &valid_rects[0], &old_client_rect );
     }
 
+    wine_tsx11_lock();
+    XFlush( gdi_display );  /* make sure painting is done before we move the window */
+    wine_tsx11_unlock();
+
     X11DRV_sync_client_position( display, data, swp_flags, &old_client_rect, &old_whole_rect );
 
     if (!data->whole_window) return;
@@ -393,16 +425,7 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
 
     if (data->mapped && (!(new_style & WS_VISIBLE) ||
                          (!event_type && !X11DRV_is_window_rect_mapped( rectWindow ))))
-    {
-        TRACE( "unmapping win %p/%lx\n", hwnd, data->whole_window );
-        wait_for_withdrawn_state( display, data, FALSE );
-        wine_tsx11_lock();
-        if (data->managed) XWithdrawWindow( display, data->whole_window, DefaultScreen(display) );
-        else XUnmapWindow( display, data->whole_window );
-        wine_tsx11_unlock();
-        data->mapped = FALSE;
-        data->net_wm_state = 0;
-    }
+        unmap_window( display, data );
 
     /* don't change position if we are about to minimize or maximize a managed window */
     if (!event_type &&
@@ -417,16 +440,7 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
 
         if (!data->mapped)
         {
-            TRACE( "mapping win %p/%lx\n", hwnd, data->whole_window );
-            wait_for_withdrawn_state( display, data, TRUE );
-            X11DRV_sync_window_style( display, data );
-            wine_tsx11_lock();
-            XMapWindow( display, data->whole_window );
-            XFlush( display );
-            wine_tsx11_unlock();
-            data->mapped = TRUE;
-            data->iconic = (new_style & WS_MINIMIZE) != 0;
-            update_net_wm_states( display, data );
+            map_window( display, data, new_style );
         }
         else if ((swp_flags & SWP_STATECHANGED) && (!data->iconic != !(new_style & WS_MINIMIZE)))
         {
@@ -445,24 +459,10 @@ void X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, UINT swp_flags,
             update_net_wm_states( display, data );
         }
     }
-}
 
-
-/**********************************************************************
- *		X11DRV_MapNotify
- */
-void X11DRV_MapNotify( HWND hwnd, XEvent *event )
-{
-    struct x11drv_win_data *data;
-
-    if (!(data = X11DRV_get_win_data( hwnd ))) return;
-    if (!data->mapped) return;
-
-    if (!data->managed)
-    {
-        HWND hwndFocus = GetFocus();
-        if (hwndFocus && IsChild( hwnd, hwndFocus )) X11DRV_SetFocus(hwndFocus);  /* FIXME */
-    }
+    wine_tsx11_lock();
+    XFlush( display );  /* make sure changes are done before we start painting again */
+    wine_tsx11_unlock();
 }
 
 
@@ -549,7 +549,7 @@ void X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
 
     if (!hwnd) return;
     if (!(data = X11DRV_get_win_data( hwnd ))) return;
-    if (!data->mapped) return;
+    if (!data->mapped || data->iconic) return;
 
     /* Get geometry */
 
@@ -586,7 +586,6 @@ void X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
                hwnd, rect.left, rect.top, x, y );
 
     if ((rect.right - rect.left == cx && rect.bottom - rect.top == cy) ||
-        IsIconic(hwnd) ||
         (IsRectEmpty( &rect ) && event->width == 1 && event->height == 1))
     {
         if (flags & SWP_NOMOVE) return;  /* if nothing changed, don't do anything */
@@ -597,112 +596,4 @@ void X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
                hwnd, rect.right - rect.left, rect.bottom - rect.top, cx, cy );
 
     SetWindowPos( hwnd, 0, x, y, cx, cy, flags );
-}
-
-
-/***********************************************************************
- *              is_netwm_supported
- */
-static BOOL is_netwm_supported( Display *display, Atom atom )
-{
-    static Atom *net_supported;
-    static int net_supported_count = -1;
-    int i;
-
-    wine_tsx11_lock();
-    if (net_supported_count == -1)
-    {
-        Atom type;
-        int format;
-        unsigned long count, remaining;
-
-        if (!XGetWindowProperty( display, DefaultRootWindow(display), x11drv_atom(_NET_SUPPORTED), 0,
-                                 ~0UL, False, XA_ATOM, &type, &format, &count,
-                                 &remaining, (unsigned char **)&net_supported ))
-            net_supported_count = count * (format / 8) / sizeof(Atom);
-        else
-            net_supported_count = 0;
-    }
-    wine_tsx11_unlock();
-
-    for (i = 0; i < net_supported_count; i++)
-        if (net_supported[i] == atom) return TRUE;
-    return FALSE;
-}
-
-
-/***********************************************************************
- *           SysCommandSizeMove   (X11DRV.@)
- *
- * Perform SC_MOVE and SC_SIZE commands.
- */
-BOOL X11DRV_SysCommandSizeMove( HWND hwnd, WPARAM wparam )
-{
-    WPARAM syscommand = wparam & 0xfff0;
-    WPARAM hittest = wparam & 0x0f;
-    DWORD dwPoint;
-    int x, y, dir;
-    XEvent xev;
-    Display *display = thread_display();
-    struct x11drv_win_data *data;
-
-    if (!(data = X11DRV_get_win_data( hwnd ))) return FALSE;
-    if (!data->whole_window || !data->managed) return FALSE;
-
-    if (!is_netwm_supported( display, x11drv_atom(_NET_WM_MOVERESIZE) ))
-    {
-        TRACE( "_NET_WM_MOVERESIZE not supported\n" );
-        return FALSE;
-    }
-
-    if (syscommand == SC_MOVE)
-    {
-        if (!hittest) dir = _NET_WM_MOVERESIZE_MOVE_KEYBOARD;
-        else dir = _NET_WM_MOVERESIZE_MOVE;
-    }
-    else
-    {
-        /* windows without WS_THICKFRAME are not resizable through the window manager */
-        if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_THICKFRAME)) return FALSE;
-
-        switch (hittest)
-        {
-        case WMSZ_LEFT:        dir = _NET_WM_MOVERESIZE_SIZE_LEFT; break;
-        case WMSZ_RIGHT:       dir = _NET_WM_MOVERESIZE_SIZE_RIGHT; break;
-        case WMSZ_TOP:         dir = _NET_WM_MOVERESIZE_SIZE_TOP; break;
-        case WMSZ_TOPLEFT:     dir = _NET_WM_MOVERESIZE_SIZE_TOPLEFT; break;
-        case WMSZ_TOPRIGHT:    dir = _NET_WM_MOVERESIZE_SIZE_TOPRIGHT; break;
-        case WMSZ_BOTTOM:      dir = _NET_WM_MOVERESIZE_SIZE_BOTTOM; break;
-        case WMSZ_BOTTOMLEFT:  dir = _NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT; break;
-        case WMSZ_BOTTOMRIGHT: dir = _NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT; break;
-        default:               dir = _NET_WM_MOVERESIZE_SIZE_KEYBOARD; break;
-        }
-    }
-
-    dwPoint = GetMessagePos();
-    x = (short)LOWORD(dwPoint);
-    y = (short)HIWORD(dwPoint);
-
-    TRACE("hwnd %p, x %d, y %d, dir %d\n", hwnd, x, y, dir);
-
-    xev.xclient.type = ClientMessage;
-    xev.xclient.window = X11DRV_get_whole_window(hwnd);
-    xev.xclient.message_type = x11drv_atom(_NET_WM_MOVERESIZE);
-    xev.xclient.serial = 0;
-    xev.xclient.display = display;
-    xev.xclient.send_event = True;
-    xev.xclient.format = 32;
-    xev.xclient.data.l[0] = x; /* x coord */
-    xev.xclient.data.l[1] = y; /* y coord */
-    xev.xclient.data.l[2] = dir; /* direction */
-    xev.xclient.data.l[3] = 1; /* button */
-    xev.xclient.data.l[4] = 0; /* unused */
-
-    /* need to ungrab the pointer that may have been automatically grabbed
-     * with a ButtonPress event */
-    wine_tsx11_lock();
-    XUngrabPointer( display, CurrentTime );
-    XSendEvent(display, root_window, False, SubstructureNotifyMask, &xev);
-    wine_tsx11_unlock();
-    return TRUE;
 }

@@ -50,6 +50,18 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
+#define _NET_WM_MOVERESIZE_SIZE_TOPLEFT      0
+#define _NET_WM_MOVERESIZE_SIZE_TOP          1
+#define _NET_WM_MOVERESIZE_SIZE_TOPRIGHT     2
+#define _NET_WM_MOVERESIZE_SIZE_RIGHT        3
+#define _NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT  4
+#define _NET_WM_MOVERESIZE_SIZE_BOTTOM       5
+#define _NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT   6
+#define _NET_WM_MOVERESIZE_SIZE_LEFT         7
+#define _NET_WM_MOVERESIZE_MOVE              8
+#define _NET_WM_MOVERESIZE_SIZE_KEYBOARD     9
+#define _NET_WM_MOVERESIZE_MOVE_KEYBOARD    10
+
 /* X context to associate a hwnd to an X window */
 XContext winContext = 0;
 
@@ -63,9 +75,6 @@ static const char fbconfig_id_prop[]  = "__wine_x11_fbconfig_id";
 static const char gl_drawable_prop[]  = "__wine_x11_gl_drawable";
 static const char pixmap_prop[]       = "__wine_x11_pixmap";
 static const char managed_prop[]      = "__wine_x11_managed";
-
-/* for XDG systray icons */
-#define SYSTEM_TRAY_REQUEST_DOCK    0
 
 extern int usexcomposite;
 
@@ -116,9 +125,6 @@ BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rect )
  */
 BOOL X11DRV_is_window_rect_mapped( const RECT *rect )
 {
-    /* don't map if rect is empty */
-    if (IsRectEmpty( rect )) return FALSE;
-
     /* don't map if rect is off-screen */
     if (rect->left >= virtual_screen_rect.right ||
         rect->top >= virtual_screen_rect.bottom ||
@@ -147,9 +153,14 @@ static inline BOOL is_window_resizable( struct x11drv_win_data *data, DWORD styl
 /***********************************************************************
  *              get_mwm_decorations
  */
-static unsigned long get_mwm_decorations( DWORD style, DWORD ex_style )
+static unsigned long get_mwm_decorations( struct x11drv_win_data *data,
+                                          DWORD style, DWORD ex_style )
 {
     unsigned long ret = 0;
+
+    if (!decorated_mode) return 0;
+
+    if (IsRectEmpty( &data->window_rect )) return 0;
 
     if (ex_style & WS_EX_TOOLWINDOW) return 0;
 
@@ -181,7 +192,7 @@ static void get_x11_rect_offset( struct x11drv_win_data *data, RECT *rect )
 
     style = GetWindowLongW( data->hwnd, GWL_STYLE );
     ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
-    decor = get_mwm_decorations( style, ex_style );
+    decor = get_mwm_decorations( data, style, ex_style );
 
     if (decor & MWM_DECOR_TITLE) style_mask |= WS_CAPTION;
     if (decor & MWM_DECOR_BORDER)
@@ -552,6 +563,7 @@ static void sync_gl_drawable(Display *display, struct x11drv_win_data *data)
     data->pixmap = pix;
     data->gl_drawable = glxp;
 
+    XFlush( display );
     wine_tsx11_unlock();
 
     SetPropA(data->hwnd, gl_drawable_prop, (HANDLE)data->gl_drawable);
@@ -613,6 +625,7 @@ static Window create_icon_window( Display *display, struct x11drv_win_data *data
                                        InputOutput, visual,
                                        CWEventMask | CWBitGravity | CWBackingStore | CWColormap, &attr );
     XSaveContext( display, data->icon_window, winContext, (char *)data->hwnd );
+    XFlush( display );  /* make sure the window exists before we start painting to it */
     wine_tsx11_unlock();
 
     TRACE( "created %lx\n", data->icon_window );
@@ -692,104 +705,6 @@ static void set_icon_hints( Display *display, struct x11drv_win_data *data, HICO
     }
 }
 
-/***********************************************************************
- *              wine_make_systray_window   (X11DRV.@)
- *
- * Docks the given X window with the NETWM system tray.
- */
-void X11DRV_make_systray_window( HWND hwnd )
-{
-    static Atom systray_atom;
-    Display *display = thread_display();
-    struct x11drv_win_data *data;
-    Window systray_window;
-
-    if (root_window != DefaultRootWindow(display)) return;
-
-    if (!(data = X11DRV_get_win_data( hwnd )) &&
-        !(data = X11DRV_create_win_data( hwnd ))) return;
-
-    wine_tsx11_lock();
-    if (!systray_atom)
-    {
-        if (DefaultScreen( display ) == 0)
-            systray_atom = x11drv_atom(_NET_SYSTEM_TRAY_S0);
-        else
-        {
-            char systray_buffer[29]; /* strlen(_NET_SYSTEM_TRAY_S4294967295)+1 */
-            sprintf( systray_buffer, "_NET_SYSTEM_TRAY_S%u", DefaultScreen( display ) );
-            systray_atom = XInternAtom( display, systray_buffer, False );
-        }
-    }
-    systray_window = XGetSelectionOwner( display, systray_atom );
-    wine_tsx11_unlock();
-
-    TRACE("Docking tray icon %p\n", data->hwnd);
-
-    if (systray_window != None)
-    {
-        XEvent ev;
-        unsigned long info[2];
-                
-        /* Put the window offscreen so it isn't mapped. The window _cannot_ be 
-         * mapped if we intend to dock with an XEMBED tray. If the window is 
-         * mapped when we dock, it may become visible as a child of the root 
-         * window after it docks, which isn't the proper behavior. 
-         *
-         * For more information on this problem, see
-         * http://standards.freedesktop.org/xembed-spec/latest/ar01s04.html */
-        
-        SetWindowPos( data->hwnd, NULL, virtual_screen_rect.right + 1, virtual_screen_rect.bottom + 1,
-                      0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE );
-
-        /* set XEMBED protocol data on the window */
-        info[0] = 0; /* protocol version */
-        info[1] = 1; /* mapped = true */
-        
-        wine_tsx11_lock();
-        XChangeProperty( display, data->whole_window,
-                         x11drv_atom(_XEMBED_INFO),
-                         x11drv_atom(_XEMBED_INFO), 32, PropModeReplace,
-                         (unsigned char*)info, 2 );
-        wine_tsx11_unlock();
-    
-        /* send the docking request message */
-        ZeroMemory( &ev, sizeof(ev) ); 
-        ev.xclient.type = ClientMessage;
-        ev.xclient.window = systray_window;
-        ev.xclient.message_type = x11drv_atom( _NET_SYSTEM_TRAY_OPCODE );
-        ev.xclient.format = 32;
-        ev.xclient.data.l[0] = CurrentTime;
-        ev.xclient.data.l[1] = SYSTEM_TRAY_REQUEST_DOCK;
-        ev.xclient.data.l[2] = data->whole_window;
-        ev.xclient.data.l[3] = 0;
-        ev.xclient.data.l[4] = 0;
-        
-        wine_tsx11_lock();
-        XSendEvent( display, systray_window, False, NoEventMask, &ev );
-        wine_tsx11_unlock();
-
-    }
-    else
-    {
-        int val = 1;
-
-        /* fall back to he KDE hints if the WM doesn't support XEMBED'ed
-         * systrays */
-        
-        wine_tsx11_lock();
-        XChangeProperty( display, data->whole_window, 
-                         x11drv_atom(KWM_DOCKWINDOW),
-                         x11drv_atom(KWM_DOCKWINDOW), 32, PropModeReplace,
-                         (unsigned char*)&val, 1 );
-        XChangeProperty( display, data->whole_window,
-                         x11drv_atom(_KDE_NET_WM_SYSTEM_TRAY_WINDOW_FOR),
-                         XA_WINDOW, 32, PropModeReplace,
-                         (unsigned char*)&data->whole_window, 1 );
-       wine_tsx11_unlock();
-    }
-}
-
 
 /***********************************************************************
  *              set_size_hints
@@ -866,7 +781,7 @@ static char *get_process_name(void)
  */
 static void set_initial_wm_hints( Display *display, struct x11drv_win_data *data )
 {
-    int i;
+    long i;
     Atom protocols[3];
     Atom dndVersion = 4;
     XClassHint *class_hints;
@@ -926,15 +841,21 @@ void X11DRV_set_wm_hints( Display *display, struct x11drv_win_data *data )
     Window group_leader;
     Atom window_type;
     MwmHints mwm_hints;
-    DWORD style = GetWindowLongW( data->hwnd, GWL_STYLE );
-    DWORD ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
-    HWND owner = GetWindow( data->hwnd, GW_OWNER );
+    DWORD style, ex_style;
+    HWND owner;
 
     if (data->hwnd == GetDesktopWindow())
     {
         /* force some styles for the desktop to get the correct decorations */
-        style |= WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        style = WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        ex_style = WS_EX_APPWINDOW;
         owner = 0;
+    }
+    else
+    {
+        style = GetWindowLongW( data->hwnd, GWL_STYLE );
+        ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
+        owner = GetWindow( data->hwnd, GW_OWNER );
     }
 
     /* transient for hint */
@@ -954,17 +875,20 @@ void X11DRV_set_wm_hints( Display *display, struct x11drv_win_data *data )
     set_size_hints( display, data, style );
 
     /* set the WM_WINDOW_TYPE */
-    window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
-    if (ex_style & WS_EX_TOOLWINDOW) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_UTILITY);
-    else if (style & WS_THICKFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
+    if (style & WS_THICKFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
+    else if (ex_style & WS_EX_APPWINDOW) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
     else if (style & WS_DLGFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_DIALOG);
     else if (ex_style & WS_EX_DLGMODALFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_DIALOG);
+#if 0  /* many window managers don't handle utility windows very well */
+    else if (ex_style & WS_EX_TOOLWINDOW) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_UTILITY);
+#endif
+    else window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
 
     XChangeProperty(display, data->whole_window, x11drv_atom(_NET_WM_WINDOW_TYPE),
 		    XA_ATOM, 32, PropModeReplace, (unsigned char*)&window_type, 1);
 
     mwm_hints.flags = MWM_HINTS_FUNCTIONS | MWM_HINTS_DECORATIONS;
-    mwm_hints.decorations = get_mwm_decorations( style, ex_style );
+    mwm_hints.decorations = get_mwm_decorations( data, style, ex_style );
     mwm_hints.functions = MWM_FUNC_MOVE;
     if (is_window_resizable( data, style )) mwm_hints.functions |= MWM_FUNC_RESIZE;
     if (style & WS_MINIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MINIMIZE;
@@ -1118,14 +1042,6 @@ void X11DRV_sync_client_position( Display *display, struct x11drv_win_data *data
     }
 
     if (data->gl_drawable && (mask & (CWWidth|CWHeight))) sync_gl_drawable( display, data );
-
-    /* make sure the changes get to the server before we start painting */
-    if (data->client_window || data->gl_drawable)
-    {
-        wine_tsx11_lock();
-        XFlush(display);
-        wine_tsx11_unlock();
-    }
 }
 
 
@@ -1138,7 +1054,6 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
 {
     int cx, cy, mask;
     XSetWindowAttributes attr;
-    XIM xim;
     WCHAR text[1024];
     HRGN hrgn;
 
@@ -1178,9 +1093,6 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
         return 0;
     }
 
-    xim = x11drv_thread_data()->xim;
-    if (xim) data->xic = X11DRV_CreateIC( xim, display, data->whole_window );
-
     set_initial_wm_hints( display, data );
     X11DRV_set_wm_hints( display, data );
 
@@ -1196,6 +1108,9 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
         if (GetWindowRgn( data->hwnd, hrgn ) != ERROR) sync_window_region( display, data, hrgn );
         DeleteObject( hrgn );
     }
+    wine_tsx11_lock();
+    XFlush( display );  /* make sure the window exists before we start painting to it */
+    wine_tsx11_unlock();
     return data->whole_window;
 }
 
@@ -1499,9 +1414,12 @@ Window X11DRV_get_client_window( HWND hwnd )
 XIC X11DRV_get_ic( HWND hwnd )
 {
     struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
+    XIM xim;
 
     if (!data) return 0;
-    return data->xic;
+    if (data->xic) return data->xic;
+    if (!(xim = x11drv_thread_data()->xim)) return 0;
+    return X11DRV_CreateIC( xim, data );
 }
 
 
@@ -1733,4 +1651,126 @@ int X11DRV_SetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
     }
 
     return TRUE;
+}
+
+
+/***********************************************************************
+ *              is_netwm_supported
+ */
+static BOOL is_netwm_supported( Display *display, Atom atom )
+{
+    static Atom *net_supported;
+    static int net_supported_count = -1;
+    int i;
+
+    wine_tsx11_lock();
+    if (net_supported_count == -1)
+    {
+        Atom type;
+        int format;
+        unsigned long count, remaining;
+
+        if (!XGetWindowProperty( display, DefaultRootWindow(display), x11drv_atom(_NET_SUPPORTED), 0,
+                                 ~0UL, False, XA_ATOM, &type, &format, &count,
+                                 &remaining, (unsigned char **)&net_supported ))
+            net_supported_count = get_property_size( format, count ) / sizeof(Atom);
+        else
+            net_supported_count = 0;
+    }
+    wine_tsx11_unlock();
+
+    for (i = 0; i < net_supported_count; i++)
+        if (net_supported[i] == atom) return TRUE;
+    return FALSE;
+}
+
+
+/***********************************************************************
+ *           SysCommand   (X11DRV.@)
+ *
+ * Perform WM_SYSCOMMAND handling.
+ */
+LRESULT X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
+{
+    WPARAM hittest = wparam & 0x0f;
+    DWORD dwPoint;
+    int x, y, dir;
+    XEvent xev;
+    Display *display = thread_display();
+    struct x11drv_win_data *data;
+
+    if (!(data = X11DRV_get_win_data( hwnd ))) return -1;
+    if (!data->whole_window || !data->managed || !data->mapped) return -1;
+
+    switch (wparam & 0xfff0)
+    {
+    case SC_MOVE:
+        if (!hittest) dir = _NET_WM_MOVERESIZE_MOVE_KEYBOARD;
+        else dir = _NET_WM_MOVERESIZE_MOVE;
+        break;
+    case SC_SIZE:
+        /* windows without WS_THICKFRAME are not resizable through the window manager */
+        if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_THICKFRAME)) return -1;
+
+        switch (hittest)
+        {
+        case WMSZ_LEFT:        dir = _NET_WM_MOVERESIZE_SIZE_LEFT; break;
+        case WMSZ_RIGHT:       dir = _NET_WM_MOVERESIZE_SIZE_RIGHT; break;
+        case WMSZ_TOP:         dir = _NET_WM_MOVERESIZE_SIZE_TOP; break;
+        case WMSZ_TOPLEFT:     dir = _NET_WM_MOVERESIZE_SIZE_TOPLEFT; break;
+        case WMSZ_TOPRIGHT:    dir = _NET_WM_MOVERESIZE_SIZE_TOPRIGHT; break;
+        case WMSZ_BOTTOM:      dir = _NET_WM_MOVERESIZE_SIZE_BOTTOM; break;
+        case WMSZ_BOTTOMLEFT:  dir = _NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT; break;
+        case WMSZ_BOTTOMRIGHT: dir = _NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT; break;
+        default:               dir = _NET_WM_MOVERESIZE_SIZE_KEYBOARD; break;
+        }
+        break;
+
+    case SC_KEYMENU:
+        /* prevent a simple ALT press+release from activating the system menu,
+         * as that can get confusing on managed windows */
+        if ((WCHAR)lparam) return -1;  /* got an explicit char */
+        if (GetMenu( hwnd )) return -1;  /* window has a real menu */
+        if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_SYSMENU)) return -1;  /* no system menu */
+        TRACE( "ignoring SC_KEYMENU wp %lx lp %lx\n", wparam, lparam );
+        return 0;
+
+    default:
+        return -1;
+    }
+
+    if (IsZoomed(hwnd)) return -1;
+
+    if (!is_netwm_supported( display, x11drv_atom(_NET_WM_MOVERESIZE) ))
+    {
+        TRACE( "_NET_WM_MOVERESIZE not supported\n" );
+        return -1;
+    }
+
+    dwPoint = GetMessagePos();
+    x = (short)LOWORD(dwPoint);
+    y = (short)HIWORD(dwPoint);
+
+    TRACE("hwnd %p, x %d, y %d, dir %d\n", hwnd, x, y, dir);
+
+    xev.xclient.type = ClientMessage;
+    xev.xclient.window = X11DRV_get_whole_window(hwnd);
+    xev.xclient.message_type = x11drv_atom(_NET_WM_MOVERESIZE);
+    xev.xclient.serial = 0;
+    xev.xclient.display = display;
+    xev.xclient.send_event = True;
+    xev.xclient.format = 32;
+    xev.xclient.data.l[0] = x; /* x coord */
+    xev.xclient.data.l[1] = y; /* y coord */
+    xev.xclient.data.l[2] = dir; /* direction */
+    xev.xclient.data.l[3] = 1; /* button */
+    xev.xclient.data.l[4] = 0; /* unused */
+
+    /* need to ungrab the pointer that may have been automatically grabbed
+     * with a ButtonPress event */
+    wine_tsx11_lock();
+    XUngrabPointer( display, CurrentTime );
+    XSendEvent(display, root_window, False, SubstructureNotifyMask, &xev);
+    wine_tsx11_unlock();
+    return 0;
 }

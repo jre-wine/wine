@@ -362,6 +362,9 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
     }
 
     ENTER_GL();
+
+    glGetIntegerv(GL_AUX_BUFFERS, &ret->aux_buffers);
+
     TRACE("Setting up the screen\n");
     /* Clear the screen */
     glClearColor(1.0, 0.0, 0.0, 0.0);
@@ -993,6 +996,12 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
                     checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
                 }
             }
+
+            /* Blending and clearing should be orthogonal, but tests on the nvidia driver show that disabling
+             * blending when clearing improves the clearing performance increadibly
+             */
+            glDisable(GL_BLEND);
+            Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHABLENDENABLE), StateTable);
 
             glEnable(GL_SCISSOR_TEST);
             checkGLcall("glEnable GL_SCISSOR_TEST");

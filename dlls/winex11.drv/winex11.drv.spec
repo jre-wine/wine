@@ -112,7 +112,7 @@
 @ cdecl SetWindowRgn(long long long) X11DRV_SetWindowRgn
 @ cdecl SetWindowStyle(ptr long) X11DRV_SetWindowStyle
 @ cdecl SetWindowText(long wstr) X11DRV_SetWindowText
-@ cdecl SysCommandSizeMove(long long) X11DRV_SysCommandSizeMove
+@ cdecl SysCommand(long long) X11DRV_SysCommand
 @ cdecl WindowMessage(long long long long) X11DRV_WindowMessage
 
 # WinTab32
@@ -129,7 +129,7 @@
 @ cdecl wine_create_desktop(long long) X11DRV_create_desktop
 
 # System tray
-@ cdecl wine_make_systray_window(long) X11DRV_make_systray_window
+@ cdecl wine_notify_icon(long ptr)
 
 # XIM
 @ cdecl ForceXIMReset(long) X11DRV_ForceXIMReset
@@ -145,3 +145,21 @@
 @ cdecl wglShareLists(long long) X11DRV_wglShareLists
 @ cdecl wglUseFontBitmapsA(ptr long long long) X11DRV_wglUseFontBitmapsA
 @ cdecl wglUseFontBitmapsW(ptr long long long) X11DRV_wglUseFontBitmapsW
+
+#IME Interface
+@ stdcall ImeInquire(ptr wstr wstr)
+@ stdcall ImeConfigure(long long long ptr)
+@ stdcall ImeDestroy(long)
+@ stdcall ImeEscape(long long ptr)
+@ stdcall ImeSelect(long long)
+@ stdcall ImeSetActiveContext(long long)
+@ stdcall ImeToAsciiEx(long long ptr ptr long long)
+@ stdcall NotifyIME(long long long long)
+@ stdcall ImeRegisterWord(wstr long wstr)
+@ stdcall ImeUnregisterWord(wstr long wstr)
+@ stdcall ImeEnumRegisterWord(ptr wstr long wstr ptr)
+@ stdcall ImeSetCompositionString(long long ptr long ptr long)
+@ stdcall ImeConversionList(long wstr ptr long long)
+@ stdcall ImeProcessKey(long long long ptr)
+@ stdcall ImeGetRegisterWordStyle(wstr long wstr)
+@ stdcall ImeGetImeMenuItems(long long long ptr ptr long)

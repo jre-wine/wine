@@ -29,6 +29,8 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
+#include "winreg.h"
+#include "shlwapi.h"
 #include "dshow.h"
 #include "wine/debug.h"
 #include "quartz_private.h"
@@ -201,6 +203,7 @@ typedef struct _IFilterGraphImpl {
     GUID timeformatseek;
     LONGLONG start_time;
     LONGLONG position;
+    LONGLONG stop_position;
 } IFilterGraphImpl;
 
 static HRESULT WINAPI Filtergraph_QueryInterface(IFilterGraphImpl *This,
@@ -1199,6 +1202,63 @@ static HRESULT WINAPI FilterGraph2_RenderFile(IFilterGraph2 *iface,
     return hr;
 }
 
+/* Some filters implement their own asynchronous reader (Theoretically they all should, try to load it first */
+static HRESULT GetFileSourceFilter(LPCOLESTR pszFileName, IBaseFilter **filter)
+{
+    static const WCHAR wszReg[] = {'M','e','d','i','a',' ','T','y','p','e','\\','E','x','t','e','n','s','i','o','n','s',0};
+    HRESULT hr = S_OK;
+    HKEY extkey;
+    LONG lRet;
+
+    lRet = RegOpenKeyExW(HKEY_CLASSES_ROOT, wszReg, 0, KEY_READ, &extkey);
+    hr = HRESULT_FROM_WIN32(lRet);
+
+    if (SUCCEEDED(hr))
+    {
+        static const WCHAR filtersource[] = {'S','o','u','r','c','e',' ','F','i','l','t','e','r',0};
+        WCHAR *ext = PathFindExtensionW(pszFileName);
+        WCHAR clsid_key[39];
+        GUID clsid;
+        DWORD size = sizeof(clsid_key);
+        HKEY pathkey;
+
+        if (!ext)
+        {
+            CloseHandle(extkey);
+            return E_FAIL;
+        }
+
+        lRet = RegOpenKeyExW(extkey, ext, 0, KEY_READ, &pathkey);
+        hr = HRESULT_FROM_WIN32(lRet);
+        CloseHandle(extkey);
+        if (FAILED(hr))
+            return hr;
+
+        lRet = RegQueryValueExW(pathkey, filtersource, NULL, NULL, (LPBYTE)clsid_key, &size);
+        hr = HRESULT_FROM_WIN32(lRet);
+        CloseHandle(pathkey);
+        if (FAILED(hr))
+            return hr;
+
+        CLSIDFromString(clsid_key, &clsid);
+
+        TRACE("CLSID: %s\n", debugstr_guid(&clsid));
+        hr = CoCreateInstance(&clsid, NULL, CLSCTX_INPROC_SERVER, &IID_IBaseFilter, (LPVOID*)filter);
+        if (SUCCEEDED(hr))
+        {
+            IFileSourceFilter *source = NULL;
+            hr = IBaseFilter_QueryInterface(*filter, &IID_IFileSourceFilter, (LPVOID*)&source);
+            if (SUCCEEDED(hr))
+                IFileSourceFilter_Release(source);
+            else
+                IBaseFilter_Release(*filter);
+        }
+    }
+    if (FAILED(hr))
+        *filter = NULL;
+    return hr;
+}
+
 static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface,
 						   LPCWSTR lpcwstrFileName,
 						   LPCWSTR lpcwstrFilterName,
@@ -1212,8 +1272,11 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface,
 
     TRACE("(%p/%p)->(%s, %s, %p)\n", This, iface, debugstr_w(lpcwstrFileName), debugstr_w(lpcwstrFilterName), ppFilter);
 
-    /* Instantiate a file source filter */ 
-    hr = CoCreateInstance(&CLSID_AsyncReader, NULL, CLSCTX_INPROC_SERVER, &IID_IBaseFilter, (LPVOID*)&preader);
+    /* Try from file name first, then fall back to default asynchronous reader */
+    hr = GetFileSourceFilter(lpcwstrFileName, &preader);
+
+    if (FAILED(hr))
+        hr = CoCreateInstance(&CLSID_AsyncReader, NULL, CLSCTX_INPROC_SERVER, &IID_IBaseFilter, (LPVOID*)&preader);
     if (FAILED(hr)) {
         ERR("Unable to create file source filter (%x)\n", hr);
         return hr;
@@ -1238,12 +1301,13 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface,
         ERR("Load (%x)\n", hr);
         goto error;
     }
-    
+
     IFileSourceFilter_GetCurFile(pfile, &filename, &mt);
     if (FAILED(hr)) {
         ERR("GetCurFile (%x)\n", hr);
         goto error;
     }
+
     TRACE("File %s\n", debugstr_w(filename));
     TRACE("MajorType %s\n", debugstr_guid(&mt.majortype));
     TRACE("SubType %s\n", debugstr_guid(&mt.subtype));
@@ -1472,9 +1536,8 @@ static HRESULT ExploreGraph(IFilterGraphImpl* pGraph, IPin* pOutputPin, fnFoundF
             CoTaskMemFree(ppPins);
         }
         TRACE("Doing stuff with filter %p\n", PinInfo.pFilter);
-        LeaveCriticalSection(&pGraph->cs);
+
         FoundFilter(PinInfo.pFilter);
-        EnterCriticalSection(&pGraph->cs);
     }
 
     if (PinInfo.pFilter) IBaseFilter_Release(PinInfo.pFilter);
@@ -1571,6 +1634,9 @@ static HRESULT WINAPI MediaControl_Run(IMediaControl *iface) {
     if (This->state == State_Running) return S_OK;
 
     EnterCriticalSection(&This->cs);
+    if (This->state == State_Stopped)
+        This->EcCompleteCount = 0;
+
     if (This->refClock)
     {
         IReferenceClock_GetTime(This->refClock, &This->start_time);
@@ -1591,6 +1657,9 @@ static HRESULT WINAPI MediaControl_Pause(IMediaControl *iface) {
     if (This->state == State_Paused) return S_OK;
 
     EnterCriticalSection(&This->cs);
+    if (This->state == State_Stopped)
+        This->EcCompleteCount = 0;
+
     if (This->state == State_Running && This->refClock)
     {
         LONGLONG time = This->start_time;
@@ -1778,9 +1847,9 @@ static HRESULT all_renderers_seek(IFilterGraphImpl *This, fnFoundSeek FoundSeek,
             IBaseFilter_QueryInterface(pfilter, &IID_IMediaSeeking, (void**)&seek);
             if (!seek)
                 continue;
-            LeaveCriticalSection(&This->cs);
+
             hr = FoundSeek(This, seek, arg);
-            EnterCriticalSection(&This->cs);
+
             IMediaSeeking_Release(seek);
             if (hr_return != E_NOTIMPL)
                 allnotimpl = FALSE;
@@ -1970,10 +2039,23 @@ static HRESULT WINAPI MediaSeeking_GetDuration(IMediaSeeking *iface,
 static HRESULT WINAPI MediaSeeking_GetStopPosition(IMediaSeeking *iface,
 						   LONGLONG *pStop) {
     ICOM_THIS_MULTI(IFilterGraphImpl, IMediaSeeking_vtbl, iface);
+    HRESULT hr = S_OK;
 
-    FIXME("(%p/%p)->(%p): stub !!!\n", This, iface, pStop);
+    TRACE("(%p/%p)->(%p)\n", This, iface, pStop);
 
-    return S_OK;
+    if (!pStop)
+        return E_POINTER;
+
+    EnterCriticalSection(&This->cs);
+    if (This->stop_position < 0)
+        /* Stop position not set, use duration instead */
+        hr = IMediaSeeking_GetDuration(iface, pStop);
+    else
+        *pStop = This->stop_position;
+
+    LeaveCriticalSection(&This->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI MediaSeeking_GetCurrentPosition(IMediaSeeking *iface,
@@ -2044,11 +2126,15 @@ static HRESULT WINAPI MediaSeeking_SetPositions(IMediaSeeking *iface,
     TRACE("State: %s\n", state == State_Running ? "Running" : (state == State_Paused ? "Paused" : (state == State_Stopped ? "Stopped" : "UNKNOWN")));
 
     if ((dwCurrentFlags & 0x7) == AM_SEEKING_AbsolutePositioning)
+    {
         This->position = *pCurrent;
+    }
     else if ((dwCurrentFlags & 0x7) != AM_SEEKING_NoPositioning)
         FIXME("Adjust method %x not handled yet!\n", dwCurrentFlags & 0x7);
 
-    if ((dwStopFlags & 0x7) != AM_SEEKING_NoPositioning)
+    if ((dwStopFlags & 0x7) == AM_SEEKING_AbsolutePositioning)
+        This->stop_position = *pStop;
+    else if ((dwStopFlags & 0x7) != AM_SEEKING_NoPositioning)
         FIXME("Stop position not handled yet!\n");
 
     args.current = pCurrent;
@@ -2056,6 +2142,12 @@ static HRESULT WINAPI MediaSeeking_SetPositions(IMediaSeeking *iface,
     args.curflags = dwCurrentFlags;
     args.stopflags = dwStopFlags;
     hr = all_renderers_seek(This, found_setposition, (DWORD_PTR)&args);
+
+    if (This->refClock && ((dwCurrentFlags & 0x7) != AM_SEEKING_NoPositioning))
+    {
+        /* Update start time, prevents weird jumps */
+        IReferenceClock_GetTime(This->refClock, &This->start_time);
+    }
     LeaveCriticalSection(&This->cs);
 
     return hr;
@@ -5016,6 +5108,7 @@ HRESULT FilterGraph_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     fimpl->nItfCacheEntries = 0;
     memcpy(&fimpl->timeformatseek, &TIME_FORMAT_MEDIA_TIME, sizeof(GUID));
     fimpl->start_time = fimpl->position = 0;
+    fimpl->stop_position = -1;
 
     hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER, &IID_IFilterMapper2, (LPVOID*)&fimpl->pFilterMapper2);
     if (FAILED(hr)) {

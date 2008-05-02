@@ -38,4 +38,5 @@
 #include "wineboot_Pl.rc"
 #include "wineboot_Ro.rc"
 #include "wineboot_Ru.rc"
+#include "wineboot_Si.rc"
 #include "wineboot_Sv.rc"

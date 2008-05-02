@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 Maarten Lankhorst
+ * Copyright 2008 Rok Mandeljc
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,31 +16,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
+#pragma code_page(65001)
 
-#include <stdarg.h>
+LANGUAGE LANG_SLOVENIAN, SUBLANG_DEFAULT
 
-#include "windef.h"
-#include "winbase.h"
-#include "wine/debug.h"
-
-WINE_DEFAULT_DEBUG_CHANNEL(softpub);
-
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+STRINGTABLE DISCARDABLE
 {
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
-
-    switch (fdwReason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinstDLL);
-            break;
-        case DLL_PROCESS_DETACH:
-            break;
-        default:
-            break;
-    }
-    return TRUE;
+    IDS_NAME "MS-CRAM"
+    IDS_DESCRIPTION "Wine Video 1 video kodek"
 }
+
+#pragma code_page(default)

@@ -82,6 +82,7 @@ int use_xkb = 1;
 int use_take_focus = 1;
 int use_primary_selection = 0;
 int managed_mode = 1;
+int decorated_mode = 1;
 int private_color_map = 0;
 int primary_monitor = 0;
 int client_side_with_core = 1;
@@ -125,12 +126,10 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "WM_DELETE_WINDOW",
     "WM_STATE",
     "WM_TAKE_FOCUS",
-    "KWM_DOCKWINDOW",
     "DndProtocol",
     "DndSelection",
     "_ICC_PROFILE",
     "_MOTIF_WM_HINTS",
-    "_KDE_NET_WM_SYSTEM_TRAY_WINDOW_FOR",
     "_NET_SUPPORTED",
     "_NET_SYSTEM_TRAY_OPCODE",
     "_NET_SYSTEM_TRAY_S0",
@@ -362,6 +361,9 @@ static void setup_options(void)
     if (!get_config_key( hkey, appkey, "Managed", buffer, sizeof(buffer) ))
         managed_mode = IS_OPTION_TRUE( buffer[0] );
 
+    if (!get_config_key( hkey, appkey, "Decorated", buffer, sizeof(buffer) ))
+        decorated_mode = IS_OPTION_TRUE( buffer[0] );
+
     if (!get_config_key( hkey, appkey, "DXGrab", buffer, sizeof(buffer) ))
         dxgrab = IS_OPTION_TRUE( buffer[0] );
 
@@ -540,6 +542,7 @@ static BOOL process_attach(void)
 
     X11DRV_InitKeyboard( gdi_display );
     X11DRV_InitClipboard();
+    if (use_xim) use_xim = X11DRV_InitXIM( input_style );
 
     return TRUE;
 }
@@ -651,12 +654,12 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     if (TRACE_ON(synchronous)) XSynchronize( data->display, True );
     wine_tsx11_unlock();
 
-    if (use_xim && !(data->xim = X11DRV_SetupXIM( data->display, input_style )))
-        WARN("Input Method is not available\n");
-
     set_queue_display_fd( data->display );
     TlsSetValue( thread_data_tls_index, data );
+
+    if (use_xim) X11DRV_SetupXIM();
     X11DRV_SetCursor( NULL );
+
     return data;
 }
 
@@ -672,12 +675,14 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     {
     case DLL_PROCESS_ATTACH:
         ret = process_attach();
+        IME_RegisterClasses(hinst);
         break;
     case DLL_THREAD_DETACH:
         thread_detach();
         break;
     case DLL_PROCESS_DETACH:
         process_detach();
+        IME_UnregisterClasses(hinst);
         break;
     }
     return ret;

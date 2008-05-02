@@ -2552,7 +2552,10 @@ static void test_publish_registeruser(void)
     ok(pf_exists("msitest"), "File not installed\n");
 
     state = MsiQueryProductState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}");
-    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    todo_wine
+    {
+        ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    }
 
     state = MsiQueryFeatureState("{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}", "feature");
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -3509,7 +3512,7 @@ static void set_transform_summary_info(void)
     UINT r;
     MSIHANDLE suminfo = 0;
 
-    /* build summmary info */
+    /* build summary info */
     r = MsiGetSummaryInformation(0, mstfile, 3, &suminfo);
     todo_wine
     {

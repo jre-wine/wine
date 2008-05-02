@@ -691,6 +691,12 @@ then
         WINE_NOTICE_WITH(xcomposite,[test "x$ac_cv_lib_soname_Xcomposite" = "x"],
                          [libxcomposite development files not found, Xcomposite won't be supported.])
 
+        dnl *** Check for XICCallback struct
+        AC_CHECK_MEMBERS([XICCallback.callback],,,
+[#ifdef HAVE_X11_XLIB_H
+#include <X11/Xlib.h>
+#endif])
+
     dnl *** End of X11/Xlib.h check
 
     dnl Check for the presence of OpenGL
@@ -813,17 +819,24 @@ then
         ac_xslt_libs="`xslt-config --libs 2>/dev/null`"
         ac_xslt_cflags="`xslt-config --cflags 2>/dev/null`"
     fi
+    ac_save_CPPFLAGS="$CPPFLAGS"
     CPPFLAGS="$CPPFLAGS $ac_xslt_cflags"
-    AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],
-            [AC_CHECK_LIB(xslt, xsltCompilePattern,
-                [AC_DEFINE(HAVE_LIBXSLT, 1, [Define if you have the libxslt library])
-                 XSLTLIBS="$ac_xslt_libs"
-                 XSLTINCL="$ac_xslt_cflags"],,$ac_xslt_libs)
-            ],,
+    AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],,,
     [#ifdef HAVE_LIBXSLT_PATTERN_H
 # include <libxslt/pattern.h>
 #endif])
     CPPFLAGS="$ac_save_CPPFLAGS"
+    if test "$ac_cv_header_libxslt_transform_h" = "yes"
+    then
+        AC_CHECK_LIB(xslt, xsltCompilePattern,
+            [AC_DEFINE(HAVE_LIBXSLT, 1, [Define if you have the libxslt library])
+             XSLTLIBS="$ac_xslt_libs"
+             XSLTINCL="$ac_xslt_cflags"
+             ac_save_LIBS="$LIBS"
+             LIBS="$LIBS $ac_xslt_libs"
+             AC_CHECK_FUNCS(xsltInit)
+             LIBS="$ac_save_LIBS"],,$ac_xslt_libs)
+    fi
 fi
 WINE_NOTICE_WITH(xslt,[test "$ac_cv_lib_xslt_xsltCompilePattern" != "yes"],
                  [libxslt development files not found, xslt won't be supported.])
@@ -1709,6 +1722,7 @@ AC_CONFIG_FILES([dlls/cryptdlg/Makefile])
 AC_CONFIG_FILES([dlls/cryptdll/Makefile])
 AC_CONFIG_FILES([dlls/cryptnet/Makefile])
 AC_CONFIG_FILES([dlls/cryptnet/tests/Makefile])
+AC_CONFIG_FILES([dlls/cryptui/Makefile])
 AC_CONFIG_FILES([dlls/ctapi32/Makefile])
 AC_CONFIG_FILES([dlls/ctl3d32/Makefile])
 AC_CONFIG_FILES([dlls/d3d10/Makefile])

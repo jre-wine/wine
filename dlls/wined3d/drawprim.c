@@ -838,15 +838,15 @@ static inline void drawStridedInstanced(IWineD3DDevice *iface, WineDirect3DVerte
 
     /* First, figure out how many instances we have to draw */
     for(i = 0; i < MAX_STREAMS; i++) {
-        /* Look at all non-instanced streams */
-        if(!(stateblock->streamFlags[i] & WINED3DSTREAMSOURCE_INSTANCEDATA) &&
-           stateblock->streamSource[i]) {
-            int inst = stateblock->streamFreq[i];
-
-            if(numInstances && inst != numInstances) {
-                ERR("Two streams specify a different number of instances. Got %d, new is %d\n", numInstances, inst);
+        /* Look at the streams and take the first one which matches */
+        if(((stateblock->streamFlags[i] & WINED3DSTREAMSOURCE_INSTANCEDATA) || (stateblock->streamFlags[i] & WINED3DSTREAMSOURCE_INDEXEDDATA)) && stateblock->streamSource[i]) {
+            /* D3d9 could set StreamFreq 0 with (INSTANCEDATA or INDEXEDDATA) and then it is handled as 1. See d3d9/tests/visual.c-> stream_test() */
+            if(stateblock->streamFreq[i] == 0){
+                numInstances = 1;
+            } else {
+                numInstances = stateblock->streamFreq[i]; /* use the specified number of instances from the first matched stream. See d3d9/tests/visual.c-> stream_test() */
             }
-            numInstances = inst;
+            break; /* break, bacause only the first suitable value is interesting */
         }
     }
 
@@ -986,9 +986,6 @@ void drawPrimitive(IWineD3DDevice *iface,
 
     if (NumPrimitives == 0) return;
 
-    /* Signals other modules that a drawing is in progress and the stateblock finalized */
-    This->isInDraw = TRUE;
-
     /* Invalidate the back buffer memory so LockRect will read it the next time */
     for(i = 0; i < GL_LIMITS(buffers); i++) {
         target = (IWineD3DSurfaceImpl *) This->render_targets[i];
@@ -1031,6 +1028,9 @@ void drawPrimitive(IWineD3DDevice *iface,
             }
         }
     }
+
+    /* Signals other modules that a drawing is in progress and the stateblock finalized */
+    This->isInDraw = TRUE;
 
     /* Ok, we will be updating the screen from here onwards so grab the lock */
 
@@ -1372,11 +1372,13 @@ HRESULT tesselate_rectpatch(IWineD3DDeviceImpl *This,
 
     i = glRenderMode(GL_RENDER);
     if(i == -1) {
+        LEAVE_GL();
         ERR("Feedback failed. Expected %d elements back\n", buffer_size);
         Sleep(10000);
         HeapFree(GetProcessHeap(), 0, feedbuffer);
         return WINED3DERR_DRIVERINTERNALERROR;
     } else if(i != buffer_size) {
+        LEAVE_GL();
         ERR("Unexpected amount of elements returned. Expected %d, got %d\n", buffer_size, i);
         Sleep(10000);
         HeapFree(GetProcessHeap(), 0, feedbuffer);

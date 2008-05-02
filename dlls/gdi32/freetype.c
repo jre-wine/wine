@@ -256,11 +256,9 @@ typedef struct tagFace {
     void *font_data_ptr;
     DWORD font_data_size;
     FT_Long face_index;
-    BOOL Italic;
-    BOOL Bold;
     FONTSIGNATURE fs;
     FONTSIGNATURE fs_links;
-    DWORD ntmFlags;  /* Only some bits stored here. Others are computed on the fly */
+    DWORD ntmFlags;
     FT_Fixed font_version;
     BOOL scalable;
     Bitmap_Size size;     /* set if face is a bitmap */
@@ -1380,8 +1378,12 @@ static INT AddFontToList(const char *file, void *font_data_ptr, DWORD font_data_
                 face->font_data_size = font_data_size;
             }
             face->face_index = face_index;
-            face->Italic = (ft_face->style_flags & FT_STYLE_FLAG_ITALIC) ? 1 : 0;
-            face->Bold = (ft_face->style_flags & FT_STYLE_FLAG_BOLD) ? 1 : 0;
+            face->ntmFlags = 0;
+            if (ft_face->style_flags & FT_STYLE_FLAG_ITALIC)
+                face->ntmFlags |= NTM_ITALIC;
+            if (ft_face->style_flags & FT_STYLE_FLAG_BOLD)
+                face->ntmFlags |= NTM_BOLD;
+            if (face->ntmFlags == 0) face->ntmFlags = NTM_REGULAR;
             face->font_version = pHeader ? pHeader->Font_Revision : 0;
             face->family = family;
             face->external = (flags & ADDFONT_EXTERNAL_FONT) ? TRUE : FALSE;
@@ -1409,10 +1411,8 @@ static INT AddFontToList(const char *file, void *font_data_ptr, DWORD font_data_
             if (pFT_Load_Sfnt_Table && !pFT_Load_Sfnt_Table(ft_face, FT_MAKE_TAG('C','F','F',' '), 0, NULL, &tmp_size))
             {
                 TRACE("Font %s/%p is OTF Type1\n", wine_dbgstr_a(file), font_data_ptr);
-                face->ntmFlags = NTM_PS_OPENTYPE;
+                face->ntmFlags |= NTM_PS_OPENTYPE;
             }
-            else
-                face->ntmFlags = 0;
 
             TRACE("fsCsb = %08x %08x/%08x %08x %08x %08x\n",
                   face->fs.fsCsb[0], face->fs.fsCsb[1],
@@ -3120,6 +3120,8 @@ GdiFont *WineEngCreateFontInstance(DC *dc, HFONT hfont)
         LeaveCriticalSection( &freetype_cs );
         return NULL;
     }
+    lf.lfWidth = abs(lf.lfWidth);
+
     can_use_bitmap = GetDeviceCaps(dc->hSelf, TEXTCAPS) & TC_RA_ABLE;
 
     TRACE("%s, h=%d, it=%d, weight=%d, PandF=%02x, charset=%d orient %d escapement %d\n",
@@ -3335,11 +3337,15 @@ found:
     {
         if((csi.fs.fsCsb[0] & (face->fs.fsCsb[0] | face->fs_links.fsCsb[0])) || !csi.fs.fsCsb[0])
         {
-            new_score = (face->Italic ^ it) + (face->Bold ^ bd);
+            BOOL italic, bold;
+
+            italic = (face->ntmFlags & NTM_ITALIC) ? 1 : 0;
+            bold = (face->ntmFlags & NTM_BOLD) ? 1 : 0;
+            new_score = (italic ^ it) + (bold ^ bd);
             if(!best || new_score <= score)
             {
                 TRACE("(it=%d, bd=%d) is selected for (it=%d, bd=%d)\n",
-                      face->Italic, face->Bold, it, bd);
+                      italic, bold, it, bd);
                 score = new_score;
                 best = face;
                 if(best->scalable  && score == 0) break;
@@ -3363,8 +3369,8 @@ found:
     }
     if(best)
         face = best->scalable ? best : best_bitmap;
-    ret->fake_italic = (it && !face->Italic);
-    ret->fake_bold = (bd && !face->Bold);
+    ret->fake_italic = (it && !(face->ntmFlags & NTM_ITALIC));
+    ret->fake_bold = (bd && !(face->ntmFlags & NTM_BOLD));
 
     ret->fs = face->fs;
 
@@ -3378,7 +3384,7 @@ found:
     TRACE("Chosen: %s %s (%s/%p:%ld)\n", debugstr_w(family->FamilyName),
 	  debugstr_w(face->StyleName), face->file, face->font_data_ptr, face->face_index);
 
-    ret->aveWidth = height ? abs(lf.lfWidth) : 0;
+    ret->aveWidth = height ? lf.lfWidth : 0;
 
     if(!face->scalable) {
         /* Windows uses integer scaling factors for bitmap fonts */
@@ -4058,7 +4064,7 @@ static FT_UInt get_glyph_index(const GdiFont *font, UINT glyph)
         return get_GSUB_vert_glyph(font,ret);
     }
 
-    if(font->charset == SYMBOL_CHARSET && glyph < 0x100)
+    if(font->ft_face->charmap->encoding == FT_ENCODING_MS_SYMBOL && glyph < 0x100)
         glyph = glyph + 0xf000;
     glyphId = pFT_Get_Char_Index(font->ft_face, glyph);
     return get_GSUB_vert_glyph(font,glyphId);
@@ -4378,7 +4384,12 @@ DWORD WineEngGetGlyphOutline(GdiFont *incoming_font, UINT glyph, UINT format,
             INT x;
             while(h--) {
                 for(x = 0; x < pitch; x++)
-                    dst[x] = (src[x / 8] & (1 << ( (7 - (x % 8))))) ? 0xff : 0;
+                {
+                    if(x < ft_face->glyph->bitmap.width)
+                        dst[x] = (src[x / 8] & (1 << ( (7 - (x % 8))))) ? 0xff : 0;
+                    else
+                        dst[x] = 0;
+                }
                 src += ft_face->glyph->bitmap.pitch;
                 dst += pitch;
             }

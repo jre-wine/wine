@@ -127,6 +127,7 @@ SRCDIR_INCLUDES = \
 	d3dx9core.h \
 	d3dx9math.h \
 	d3dx9math.inl \
+	d3dx9tex.h \
 	dbghelp.h \
 	dbinit.idl \
 	dbprop.idl \
@@ -180,6 +181,7 @@ SRCDIR_INCLUDES = \
 	dshow.h \
 	dsound.h \
 	dsrole.h \
+	dvdmedia.h \
 	dwmapi.h \
 	dxdiag.h \
 	dxerr8.h \
@@ -195,6 +197,7 @@ SRCDIR_INCLUDES = \
 	fci.h \
 	fdi.h \
 	gdiplus.h \
+	gdipluscolor.h \
 	gdipluscolormatrix.h \
 	gdiplusenums.h \
 	gdiplusflat.h \

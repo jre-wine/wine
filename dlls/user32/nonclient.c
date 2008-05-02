@@ -33,7 +33,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
 
 #define SC_ABOUTWINE            (SC_SCREENSAVE+1)
-#define SC_PUTMARK              (SC_SCREENSAVE+2)
 
   /* Some useful macros */
 #define HAS_DLGFRAME(style,exStyle) \
@@ -1534,6 +1533,9 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
     if (HOOK_CallHooks( WH_CBT, HCBT_SYSCOMMAND, wParam, lParam, TRUE ))
         return 0;
 
+    if (!USER_Driver->pSysCommand( hwnd, wParam, lParam ))
+        return 0;
+
     switch (wParam & 0xfff0)
     {
     case SC_SIZE:
@@ -1600,9 +1602,6 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
                 FreeLibrary( hmodule );
             }
         }
-        else
-          if (wParam == SC_PUTMARK)
-            DPRINTF("Debug mark requested by user\n");
         break;
 
     case SC_HOTKEY:

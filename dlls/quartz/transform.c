@@ -54,6 +54,9 @@ static HRESULT TransformFilter_Sample(LPVOID iface, IMediaSample * pSample)
 
     TRACE("%p %p\n", iface, pSample);
 
+    if (This->state == State_Stopped)
+        return S_FALSE;
+
     return This->pFuncsTable->pfnProcessSampleData(This, pSample);
 }
 
@@ -80,67 +83,6 @@ static HRESULT TransformFilter_Output_QueryAccept(LPVOID iface, const AM_MEDIA_T
     if (IsEqualIID(&pmt->majortype, &outpmt->majortype) && IsEqualIID(&pmt->subtype, &outpmt->subtype))
         return S_OK;
     return S_FALSE;
-}
-
-static HRESULT TransformFilter_InputPin_Construct(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
-{
-    InputPin * pPinImpl;
-
-    *ppPin = NULL;
-
-    if (pPinInfo->dir != PINDIR_INPUT)
-    {
-        ERR("Pin direction(%x) != PINDIR_INPUT\n", pPinInfo->dir);
-        return E_INVALIDARG;
-    }
-
-    pPinImpl = CoTaskMemAlloc(sizeof(*pPinImpl));
-
-    if (!pPinImpl)
-        return E_OUTOFMEMORY;
-
-    if (SUCCEEDED(InputPin_Init(pPinInfo, pSampleProc, pUserData, pQueryAccept, pCritSec, pPinImpl)))
-    {
-        pPinImpl->pin.lpVtbl = &TransformFilter_InputPin_Vtbl;
-        pPinImpl->lpVtblMemInput = &MemInputPin_Vtbl;
-
-        *ppPin = (IPin *)(&pPinImpl->pin.lpVtbl);
-        return S_OK;
-    }
-
-    CoTaskMemFree(pPinImpl);
-    return E_FAIL;
-}
-
-static HRESULT TransformFilter_OutputPin_Construct(const PIN_INFO * pPinInfo, const ALLOCATOR_PROPERTIES *props,
-                                                   LPVOID pUserData, QUERYACCEPTPROC pQueryAccept,
-                                                   LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
-{
-    OutputPin * pPinImpl;
-
-    *ppPin = NULL;
-
-    if (pPinInfo->dir != PINDIR_OUTPUT)
-    {
-        ERR("Pin direction(%x) != PINDIR_OUTPUT\n", pPinInfo->dir);
-        return E_INVALIDARG;
-    }
-
-    pPinImpl = CoTaskMemAlloc(sizeof(*pPinImpl));
-
-    if (!pPinImpl)
-        return E_OUTOFMEMORY;
-
-    if (SUCCEEDED(OutputPin_Init(pPinInfo, props, pUserData, pQueryAccept, pCritSec, pPinImpl)))
-    {
-        pPinImpl->pin.lpVtbl = &TransformFilter_OutputPin_Vtbl;
-
-        *ppPin = (IPin *)(&pPinImpl->pin.lpVtbl);
-        return S_OK;
-    }
-
-    CoTaskMemFree(pPinImpl);
-    return E_FAIL;
 }
 
 
@@ -194,21 +136,25 @@ static const IMediaSeekingVtbl TransformFilter_Seeking_Vtbl =
     MediaSeekingImpl_GetPreroll
 };
 
+/* These shouldn't be implemented by default.
+ * Usually only source filters should implement these
+ * and even it's not needed all of the time
+ */
 static HRESULT TransformFilter_ChangeCurrent(IBaseFilter *iface)
 {
-    FIXME("(%p) filter hasn't implemented current position change!\n", iface);
+    TRACE("(%p) filter hasn't implemented current position change!\n", iface);
     return S_OK;
 }
 
 static HRESULT TransformFilter_ChangeStop(IBaseFilter *iface)
 {
-    FIXME("(%p) filter hasn't implemented stop position change!\n", iface);
+    TRACE("(%p) filter hasn't implemented stop position change!\n", iface);
     return S_OK;
 }
 
 static HRESULT TransformFilter_ChangeRate(IBaseFilter *iface)
 {
-    FIXME("(%p) filter hasn't implemented rate change!\n", iface);
+    TRACE("(%p) filter hasn't implemented rate change!\n", iface);
     return S_OK;
 }
 
@@ -241,7 +187,7 @@ HRESULT TransformFilter_Create(TransformFilterImpl* pTransformFilter, const CLSI
     piOutput.pFilter = (IBaseFilter *)pTransformFilter;
     lstrcpynW(piOutput.achName, wcsOutputPinName, sizeof(piOutput.achName) / sizeof(piOutput.achName[0]));
 
-    hr = TransformFilter_InputPin_Construct(&piInput, TransformFilter_Sample, pTransformFilter, TransformFilter_Input_QueryAccept, &pTransformFilter->csFilter, &pTransformFilter->ppPins[0]);
+    hr = InputPin_Construct(&TransformFilter_InputPin_Vtbl, &piInput, TransformFilter_Sample, pTransformFilter, TransformFilter_Input_QueryAccept, NULL, &pTransformFilter->csFilter, &pTransformFilter->ppPins[0]);
 
     if (SUCCEEDED(hr))
     {
@@ -251,7 +197,7 @@ HRESULT TransformFilter_Create(TransformFilterImpl* pTransformFilter, const CLSI
         props.cbBuffer = 0; /* Will be updated at connection time */
         props.cBuffers = 2;
 
-        hr = TransformFilter_OutputPin_Construct(&piOutput, &props, pTransformFilter, TransformFilter_Output_QueryAccept, &pTransformFilter->csFilter, &pTransformFilter->ppPins[1]);
+        hr = OutputPin_Construct(&TransformFilter_OutputPin_Vtbl, sizeof(OutputPin), &piOutput, &props, pTransformFilter, TransformFilter_Output_QueryAccept, &pTransformFilter->csFilter, &pTransformFilter->ppPins[1]);
 
         if (FAILED(hr))
             ERR("Cannot create output pin (%x)\n", hr);
@@ -303,7 +249,7 @@ static HRESULT WINAPI TransformFilter_QueryInterface(IBaseFilter * iface, REFIID
         return S_OK;
     }
 
-    if (!IsEqualIID(riid, &IID_IPin))
+    if (!IsEqualIID(riid, &IID_IPin) && !IsEqualIID(riid, &IID_IVideoWindow))
         FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
 
     return E_NOINTERFACE;
@@ -402,6 +348,9 @@ static HRESULT WINAPI TransformFilter_Pause(IBaseFilter * iface)
 
     EnterCriticalSection(&This->csFilter);
     {
+        if (This->state == State_Stopped)
+            ((InputPin *)This->ppPins[0])->end_of_stream = 0;
+
         This->state = State_Paused;
     }
     LeaveCriticalSection(&This->csFilter);
@@ -418,6 +367,9 @@ static HRESULT WINAPI TransformFilter_Run(IBaseFilter * iface, REFERENCE_TIME tS
 
     EnterCriticalSection(&This->csFilter);
     {
+        if (This->state == State_Stopped)
+            ((InputPin *)This->ppPins[0])->end_of_stream = 0;
+
         This->rtStreamStart = tStart;
         This->state = State_Running;
         OutputPin_CommitAllocator((OutputPin *)This->ppPins[1]);

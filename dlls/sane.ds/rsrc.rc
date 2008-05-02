@@ -34,4 +34,7 @@
 #include "sane_Nl.rc"
 #include "sane_No.rc"
 #include "sane_Pl.rc"
+#include "sane_Ro.rc"
+#include "sane_Ru.rc"
+#include "sane_Si.rc"
 #include "sane_Sv.rc"

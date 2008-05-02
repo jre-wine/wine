@@ -16,17 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <stdio.h>
 
 #define COBJMACROS
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "ole2.h"
 
 #include "wine/debug.h"
@@ -371,10 +367,10 @@ static HTMLDOMNode *create_node(HTMLDocument *doc, nsIDOMNode *nsnode)
 /*
  * FIXME
  * List looks really ugly here. We should use a better data structure or
- * (better) find a way to store HTMLDOMelement poiner in nsIDOMNode.
+ * (better) find a way to store HTMLDOMelement pointer in nsIDOMNode.
  */
 
-HTMLDOMNode *get_node(HTMLDocument *This, nsIDOMNode *nsnode)
+HTMLDOMNode *get_node(HTMLDocument *This, nsIDOMNode *nsnode, BOOL create)
 {
     HTMLDOMNode *iter = This->nodes, *ret;
 
@@ -384,7 +380,7 @@ HTMLDOMNode *get_node(HTMLDocument *This, nsIDOMNode *nsnode)
         iter = iter->next;
     }
 
-    if(iter)
+    if(iter || !create)
         return iter;
 
     ret = create_node(This, nsnode);

@@ -16,17 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <stdio.h>
 
 #define COBJMACROS
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "ole2.h"
 
 #include "wine/debug.h"
@@ -473,7 +469,7 @@ static HRESULT WINAPI HTMLOptionElementFactory_create(IHTMLOptionElementFactory 
         return E_FAIL;
     }
 
-    hres = IHTMLDOMNode_QueryInterface(HTMLDOMNODE(get_node(This->doc, (nsIDOMNode*)nselem)),
+    hres = IHTMLDOMNode_QueryInterface(HTMLDOMNODE(get_node(This->doc, (nsIDOMNode*)nselem, TRUE)),
             &IID_IHTMLOptionElement, (void**)optelem);
     nsIDOMElement_Release(nselem);
 

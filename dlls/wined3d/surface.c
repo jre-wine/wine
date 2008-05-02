@@ -36,6 +36,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d_surface);
 HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UINT height, UINT outpitch, CONVERT_TYPES convert, IWineD3DSurfaceImpl *surf);
 static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4], BOOL colorkey);
 static inline void clear_unused_channels(IWineD3DSurfaceImpl *This);
+static void surface_remove_pbo(IWineD3DSurfaceImpl *This);
 
 static void surface_bind_and_dirtify(IWineD3DSurfaceImpl *This) {
     GLint active_texture;
@@ -562,14 +563,21 @@ static void WINAPI IWineD3DSurfaceImpl_UnLoad(IWineD3DSurface *iface) {
          * Implicit resources stay however. So this means we have an implicit render target
          * or depth stencil. The content may be destroyed, but we still have to tear down
          * opengl resources, so we cannot leave early.
+         *
+         * Put the most up to date surface location into the drawable. D3D-wise this content
+         * is undefined, so it would be nowhere, but that would make the location management
+         * more complicated. The drawable is a sane location, because if we mark sysmem or
+         * texture up to date, drawPrim will copy the uninitialized texture or sysmem to the
+         * uninitialized drawable. That's pointless and we'd have to allocate the texture /
+         * sysmem copy here.
          */
-        IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
+        IWineD3DSurface_ModifyLocation(iface, SFLAG_INDRAWABLE, TRUE);
     } else {
         /* Load the surface into system memory */
         IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+        IWineD3DSurface_ModifyLocation(iface, SFLAG_INDRAWABLE, FALSE);
     }
     IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
-    IWineD3DSurface_ModifyLocation(iface, SFLAG_INDRAWABLE, FALSE);
     This->Flags &= ~SFLAG_ALLOCATED;
 
     /* Destroy PBOs, but load them into real sysmem before */
@@ -1798,6 +1806,29 @@ HRESULT d3dfmt_convert_surface(BYTE *src, BYTE *dst, UINT pitch, UINT width, UIN
         }
         break;
 
+        case CONVERT_RGB32_888:
+        {
+            /* Converting X8R8G8B8 format to R8G8B8A8 with color-keying. */
+            unsigned int x, y;
+            for (y = 0; y < height; y++)
+            {
+                source = src + pitch * y;
+                dest = dst + outpitch * y;
+                for (x = 0; x < width; x++) {
+                    DWORD color = 0xffffff & *(DWORD*)source;
+                    DWORD dstcolor = color << 8;
+                    if ((color < This->SrcBltCKey.dwColorSpaceLowValue) ||
+                        (color > This->SrcBltCKey.dwColorSpaceHighValue)) {
+                        dstcolor |= 0xff;
+                    }
+                    *(DWORD*)dest = dstcolor;
+                    source += 4;
+                    dest += 4;
+                }
+            }
+        }
+        break;
+
         case CONVERT_V8U8:
         {
             unsigned int x, y;
@@ -2618,8 +2649,8 @@ static inline void fb_copy_to_texture_direct(IWineD3DSurfaceImpl *This, IWineD3D
 
 
     ActivateContext(myDevice, SrcSurface, CTXUSAGE_BLIT);
-    ENTER_GL();
     IWineD3DSurface_PreLoad((IWineD3DSurface *) This);
+    ENTER_GL();
 
     /* TODO: Do we need GL_TEXTURE_2D enabled fpr copyteximage? */
     glEnable(This->glDescription.target);
@@ -2709,26 +2740,32 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
     UINT fbheight = Src->currentDesc.Height;
     GLenum drawBuffer = GL_BACK;
     GLenum texture_target;
+    BOOL noBackBufferBackup;
 
     TRACE("Using hwstretch blit\n");
     /* Activate the Proper context for reading from the source surface, set it up for blitting */
     ActivateContext(myDevice, SrcSurface, CTXUSAGE_BLIT);
-    ENTER_GL();
-
     IWineD3DSurface_PreLoad((IWineD3DSurface *) This);
+
+    noBackBufferBackup = !swapchain && wined3d_settings.offscreen_rendering_mode == ORM_FBO;
+    if(!noBackBufferBackup && Src->glDescription.textureName == 0) {
+        /* Get it a description */
+        IWineD3DSurface_PreLoad(SrcSurface);
+    }
+    ENTER_GL();
 
     /* Try to use an aux buffer for drawing the rectangle. This way it doesn't need restoring.
      * This way we don't have to wait for the 2nd readback to finish to leave this function.
      */
-    if(GL_LIMITS(aux_buffers) >= 2) {
+    if(myDevice->activeContext->aux_buffers >= 2) {
         /* Got more than one aux buffer? Use the 2nd aux buffer */
         drawBuffer = GL_AUX1;
-    } else if((swapchain || myDevice->offscreenBuffer == GL_BACK) && GL_LIMITS(aux_buffers) >= 1) {
+    } else if((swapchain || myDevice->offscreenBuffer == GL_BACK) && myDevice->activeContext->aux_buffers >= 1) {
         /* Only one aux buffer, but it isn't used (Onscreen rendering, or non-aux orm)? Use it! */
         drawBuffer = GL_AUX0;
     }
 
-    if(!swapchain && wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+    if(noBackBufferBackup) {
         glGenTextures(1, &backup);
         checkGLcall("glGenTextures\n");
         glBindTexture(GL_TEXTURE_2D, backup);
@@ -2738,10 +2775,6 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
         /* Backup the back buffer and copy the source buffer into a texture to draw an upside down stretched quad. If
          * we are reading from the back buffer, the backup can be used as source texture
          */
-        if(Src->glDescription.textureName == 0) {
-            /* Get it a description */
-            IWineD3DSurface_PreLoad(SrcSurface);
-        }
         texture_target = Src->glDescription.target;
         glBindTexture(texture_target, Src->glDescription.textureName);
         checkGLcall("glBindTexture(texture_target, Src->glDescription.textureName)");
@@ -2766,7 +2799,7 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
 
     /* No issue with overriding these - the sampler is dirty due to blit usage */
     glTexParameteri(texture_target, GL_TEXTURE_MAG_FILTER,
-                    stateLookup[WINELOOKUP_MAGFILTER][Filter - minLookup[WINELOOKUP_MAGFILTER]]);
+                    magLookup[Filter - WINED3DTEXF_NONE]);
     checkGLcall("glTexParameteri");
     glTexParameteri(texture_target, GL_TEXTURE_MIN_FILTER,
                     minMipLookup[Filter][WINED3DTEXF_NONE]);
@@ -3093,6 +3126,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
         /* Blit from render target to texture */
         WINED3DRECT srect;
         BOOL upsideDown, stretchx;
+        BOOL paletteOverride = FALSE;
 
         if(Flags & (WINEDDBLT_KEYSRC | WINEDDBLT_KEYSRCOVERRIDE)) {
             TRACE("Color keying not supported by frame buffer to texture blit\n");
@@ -3139,6 +3173,14 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
             stretchx = FALSE;
         }
 
+        /* When blitting from a render target a texture, the texture isn't required to have a palette.
+         * In this case grab the palette from the render target. */
+        if((This->resource.format == WINED3DFMT_P8) && (This->palette == NULL)) {
+            paletteOverride = TRUE;
+            TRACE("Source surface (%p) lacks palette, overriding palette with palette %p of destination surface (%p)\n", Src, This->palette, This);
+            This->palette = Src->palette;
+        }
+
         /* Blt is a pretty powerful call, while glCopyTexSubImage2D is not. glCopyTexSubImage cannot
          * flip the image nor scale it.
          *
@@ -3165,6 +3207,10 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
             TRACE("Using hardware stretching to flip / stretch the texture\n");
             fb_copy_to_texture_hwstretch(This, SrcSurface, srcSwapchain, &srect, &rect, upsideDown, Filter);
         }
+
+        /* Clear the palette as the surface didn't have a palette attached, it would confuse GetPalette and other calls */
+        if(paletteOverride)
+            This->palette = NULL;
 
         if(!(This->Flags & SFLAG_DONOTFREE)) {
             HeapFree(GetProcessHeap(), 0, This->resource.heapMemory);
@@ -3275,7 +3321,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
 
         /* Filtering for StretchRect */
         glTexParameteri(Src->glDescription.target, GL_TEXTURE_MAG_FILTER,
-                        stateLookup[WINELOOKUP_MAGFILTER][Filter - minLookup[WINELOOKUP_MAGFILTER]]);
+                        magLookup[Filter - WINED3DTEXF_NONE]);
         checkGLcall("glTexParameteri");
         glTexParameteri(Src->glDescription.target, GL_TEXTURE_MIN_FILTER,
                         minMipLookup[Filter][WINED3DTEXF_NONE]);
@@ -4006,7 +4052,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
 
         /* Download the surface to system memory */
         if(This->Flags & SFLAG_INTEXTURE) {
-            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+            if(!device->isInDraw) ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
             surface_bind_and_dirtify(This);
 
             surface_download_data(This);
@@ -4024,6 +4070,13 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
             /* The width is in 'length' not in bytes */
             width = This->currentDesc.Width;
             pitch = IWineD3DSurface_GetPitch(iface);
+
+            /* Don't use PBOs for converted surfaces. During PBO conversion we look at SFLAG_CONVERTED
+             * but it isn't set (yet) in all cases it is getting called. */
+            if((convert != NO_CONVERSION) && (This->Flags & SFLAG_PBO)) {
+                TRACE("Removing the pbo attached to surface %p\n", This);
+                surface_remove_pbo(This);
+            }
 
             if((convert != NO_CONVERSION) && This->resource.allocatedMemory) {
                 int height = This->currentDesc.Height;
@@ -4057,7 +4110,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
         } else { /* Upload from system memory */
             d3dfmt_get_conv(This, TRUE /* We need color keying */, TRUE /* We will use textures */, &format, &internal, &type, &convert, &bpp, This->srgb);
 
-            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+            if(!device->isInDraw) ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
             surface_bind_and_dirtify(This);
             ENTER_GL();
 
@@ -4078,6 +4131,13 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
             /* The width is in 'length' not in bytes */
             width = This->currentDesc.Width;
             pitch = IWineD3DSurface_GetPitch(iface);
+
+            /* Don't use PBOs for converted surfaces. During PBO conversion we look at SFLAG_CONVERTED
+             * but it isn't set (yet) in all cases it is getting called. */
+            if((convert != NO_CONVERSION) && (This->Flags & SFLAG_PBO)) {
+                TRACE("Removing the pbo attached to surface %p\n", This);
+                surface_remove_pbo(This);
+            }
 
             if((convert != NO_CONVERSION) && This->resource.allocatedMemory) {
                 int height = This->currentDesc.Height;

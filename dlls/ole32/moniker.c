@@ -56,14 +56,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
 static LONG WINAPI rpc_filter(EXCEPTION_POINTERS *eptr)
 {
-    switch (eptr->ExceptionRecord->ExceptionCode)
-    {
-    case EXCEPTION_ACCESS_VIOLATION:
-    case EXCEPTION_ILLEGAL_INSTRUCTION:
-        return EXCEPTION_CONTINUE_SEARCH;
-    default:
-        return EXCEPTION_EXECUTE_HANDLER;
-    }
+    return I_RpcExceptionFilter(eptr->ExceptionRecord->ExceptionCode);
 }
 
 /* define the structure of the running object table elements */
@@ -1220,9 +1213,9 @@ HRESULT WINAPI GetClassFile(LPCOLESTR filePathName,CLSID *pclsid)
 
         return res;
     }
-    /* if the file is not a storage object then attemps to match various bits in the file against a
-       pattern in the registry. this case is not frequently used ! so I present only the psodocode for
-       this case
+    /* If the file is not a storage object then attempt to match various bits in the file against a
+       pattern in the registry. This case is not frequently used, so I present only the psodocode for
+       this case.
 
      for(i=0;i<nFileTypes;i++)
 
@@ -1249,7 +1242,7 @@ HRESULT WINAPI GetClassFile(LPCOLESTR filePathName,CLSID *pclsid)
     nbElm=FileMonikerImpl_DecomposePath(filePathName,&pathDec);
     absFile=pathDec[nbElm-1];
 
-    /* failed if the path represente a directory and not an absolute file name*/
+    /* failed if the path represents a directory and not an absolute file name*/
     if (!lstrcmpW(absFile, bkslashW))
         return MK_E_INVALIDEXTENSION;
 

@@ -1728,6 +1728,11 @@ static BOOL X11DRV_CLIPBOARD_QueryTargets(Display *display, Window w, Atom selec
 }
 
 
+static int is_atom_error( Display *display, XErrorEvent *event, void *arg )
+{
+    return (event->error_code == BadAtom);
+}
+
 /**************************************************************************
  *		X11DRV_CLIPBOARD_InsertSelectionProperties
  *
@@ -1759,7 +1764,7 @@ static VOID X11DRV_CLIPBOARD_InsertSelectionProperties(Display *display, Atom* p
                  lpFormat = X11DRV_CLIPBOARD_LookupProperty(lpFormat, properties[i]);
              }
          }
-         else
+         else if (properties[i])
          {
              /* add it to the list of atoms that we don't know about yet */
              if (!atoms) atoms = HeapAlloc( GetProcessHeap(), 0,
@@ -1774,13 +1779,13 @@ static VOID X11DRV_CLIPBOARD_InsertSelectionProperties(Display *display, Atom* p
          char **names = HeapAlloc( GetProcessHeap(), 0, nb_atoms * sizeof(*names) );
          if (names)
          {
-             wine_tsx11_lock();
-             /* FIXME: we're at the mercy of the app sending the event here.
-              * Currently if they send a bogus atom, we will crash.
-              * We should handle BadAtom errors gracefully in this call.
-              */
-             XGetAtomNames( display, atoms, nb_atoms, names );
-             wine_tsx11_unlock();
+             X11DRV_expect_error( display, is_atom_error, NULL );
+             if (!XGetAtomNames( display, atoms, nb_atoms, names )) nb_atoms = 0;
+             if (X11DRV_check_error())
+             {
+                 WARN( "got some bad atoms, ignoring\n" );
+                 nb_atoms = 0;
+             }
              for (i = 0; i < nb_atoms; i++)
              {
                  WINE_CLIPFORMAT *lpFormat;
@@ -1903,7 +1908,21 @@ static int X11DRV_CLIPBOARD_QueryAvailableData(LPCLIPBOARDINFO lpcbinfo)
         * corresponding to each selection target format supported.
         */
        if (atype == XA_ATOM || atype == x11drv_atom(TARGETS))
-           X11DRV_CLIPBOARD_InsertSelectionProperties(display, targetList, (cSelectionTargets * aformat / (8 * sizeof(Atom))));
+       {
+           if (aformat == 32)
+           {
+               X11DRV_CLIPBOARD_InsertSelectionProperties(display, targetList, cSelectionTargets);
+           }
+           else if (aformat == 8)  /* work around quartz-wm brain damage */
+           {
+               unsigned long i, count = cSelectionTargets / sizeof(CARD32);
+               Atom *atoms = HeapAlloc( GetProcessHeap(), 0, count * sizeof(Atom) );
+               for (i = 0; i < count; i++)
+                   atoms[i] = ((CARD32 *)targetList)[i];  /* FIXME: byte swapping */
+               X11DRV_CLIPBOARD_InsertSelectionProperties( display, atoms, count );
+               HeapFree( GetProcessHeap(), 0, atoms );
+           }
+       }
 
        /* Free the list of targets */
        wine_tsx11_lock();
@@ -2027,7 +2046,7 @@ static BOOL X11DRV_CLIPBOARD_ReadProperty(Window w, Atom prop,
             return FALSE;
         }
 
-        count = nitems * (aformat / 8);
+        count = get_property_size( aformat, nitems );
         if (!val) *data = HeapAlloc( GetProcessHeap(), 0, pos * sizeof(int) + count + 1 );
         else *data = HeapReAlloc( GetProcessHeap(), 0, val, pos * sizeof(int) + count + 1 );
 

@@ -2767,7 +2767,7 @@ static void ACTION_RefCountComponent( MSIPACKAGE* package, MSICOMPONENT *comp )
         }
     }
     
-    /* add a count for permenent */
+    /* add a count for permanent */
     if (comp->Attributes & msidbComponentAttributesPermanent)
         count ++;
     
@@ -2826,7 +2826,7 @@ static UINT ACTION_ProcessComponents(MSIPACKAGE *package)
                             comp->RefCount);
         /*
          * Write the keypath out if the component is to be registered
-         * and delete the key if the component is to be deregistered
+         * and delete the key if the component is to be unregistered
          */
         if (ACTION_VerifyComponentForAction( comp, INSTALLSTATE_LOCAL))
         {
@@ -3101,7 +3101,7 @@ static UINT ITERATE_CreateShortcuts(MSIRECORD *row, LPVOID param)
     buffer = MSI_RecordGetString(row,2);
     target_folder = resolve_folder(package, buffer,FALSE,FALSE,TRUE,NULL);
 
-    /* may be needed because of a bug somehwere else */
+    /* may be needed because of a bug somewhere else */
     create_full_pathW(target_folder);
 
     filename = msi_dup_record_field( row, 3 );
@@ -3345,13 +3345,30 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
 
     /* ok there is a lot more done here but i need to figure out what */
 
-    rc = MSIREG_OpenProductsKey(package->ProductCode,&hkey,TRUE);
-    if (rc != ERROR_SUCCESS)
-        goto end;
+    if (package->Context == MSIINSTALLCONTEXT_MACHINE)
+    {
+        rc = MSIREG_OpenLocalClassesProductKey(package->ProductCode, &hukey, TRUE);
+        if (rc != ERROR_SUCCESS)
+            goto end;
 
-    rc = MSIREG_OpenUserProductsKey(package->ProductCode,&hukey,TRUE);
-    if (rc != ERROR_SUCCESS)
-        goto end;
+        rc = MSIREG_OpenLocalSystemInstallProps(package->ProductCode, &props, TRUE);
+        if (rc != ERROR_SUCCESS)
+            goto end;
+    }
+    else
+    {
+        rc = MSIREG_OpenProductsKey(package->ProductCode,&hkey,TRUE);
+        if (rc != ERROR_SUCCESS)
+            goto end;
+
+        rc = MSIREG_OpenUserProductsKey(package->ProductCode,&hukey,TRUE);
+        if (rc != ERROR_SUCCESS)
+            goto end;
+
+        rc = MSIREG_OpenCurrentUserInstallProps(package->ProductCode, &props, TRUE);
+        if (rc != ERROR_SUCCESS)
+            goto end;
+    }
 
     rc = RegCreateKeyW(hukey, szSourceList, &source);
     if (rc != ERROR_SUCCESS)
@@ -3360,10 +3377,6 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
     RegCloseKey(source);
 
     rc = MSIREG_OpenUserDataProductKey(package->ProductCode,&hudkey,TRUE);
-    if (rc != ERROR_SUCCESS)
-        goto end;
-
-    rc = MSIREG_OpenInstallPropertiesKey(package->ProductCode,&props,TRUE);
     if (rc != ERROR_SUCCESS)
         goto end;
 
@@ -3400,19 +3413,19 @@ static UINT ACTION_PublishProduct(MSIPACKAGE *package)
 
     buffer = strrchrW( package->PackagePath, '\\') + 1;
     rc = MsiSourceListSetInfoW( package->ProductCode, NULL,
-                                MSIINSTALLCONTEXT_USERUNMANAGED, MSICODE_PRODUCT,
+                                package->Context, MSICODE_PRODUCT,
                                 INSTALLPROPERTY_PACKAGENAMEW, buffer );
     if (rc != ERROR_SUCCESS)
         goto end;
 
     rc = MsiSourceListSetInfoW( package->ProductCode, NULL,
-                                MSIINSTALLCONTEXT_USERUNMANAGED, MSICODE_PRODUCT,
+                                package->Context, MSICODE_PRODUCT,
                                 INSTALLPROPERTY_MEDIAPACKAGEPATHW, szEmpty );
     if (rc != ERROR_SUCCESS)
         goto end;
 
     rc = MsiSourceListSetInfoW( package->ProductCode, NULL,
-                                MSIINSTALLCONTEXT_USERUNMANAGED, MSICODE_PRODUCT,
+                                package->Context, MSICODE_PRODUCT,
                                 INSTALLPROPERTY_DISKPROMPTW, szEmpty );
     if (rc != ERROR_SUCCESS)
         goto end;
@@ -3896,7 +3909,7 @@ static UINT msi_make_package_local( MSIPACKAGE *package, HKEY hkey )
 
     msi_reg_set_val_str( hkey, INSTALLPROPERTY_LOCALPACKAGEW, packagefile );
 
-    r = MSIREG_OpenInstallPropertiesKey(package->ProductCode, &props, TRUE);
+    r = MSIREG_OpenCurrentUserInstallProps(package->ProductCode, &props, TRUE);
     if (r != ERROR_SUCCESS)
         return r;
 
@@ -3986,9 +3999,18 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
     if (rc != ERROR_SUCCESS)
         return rc;
 
-    rc = MSIREG_OpenInstallPropertiesKey(package->ProductCode, &props, TRUE);
-    if (rc != ERROR_SUCCESS)
-        return rc;
+    if (package->Context == MSIINSTALLCONTEXT_MACHINE)
+    {
+        rc = MSIREG_OpenLocalSystemInstallProps(package->ProductCode, &props, TRUE);
+        if (rc != ERROR_SUCCESS)
+            return rc;
+    }
+    else
+    {
+        rc = MSIREG_OpenCurrentUserInstallProps(package->ProductCode, &props, TRUE);
+        if (rc != ERROR_SUCCESS)
+            return rc;
+    }
 
     /* dump all the info i can grab */
     /* FIXME: Flesh out more information */
@@ -4060,7 +4082,7 @@ static UINT ACTION_RegisterProduct(MSIPACKAGE *package)
 
         msi_free(upgrade_code);
     }
-    
+
     RegCloseKey(hkey);
 
     rc = MSIREG_OpenUserDataProductKey(package->ProductCode, &hudkey, TRUE);
@@ -4221,13 +4243,13 @@ static UINT ACTION_ResolveSource(MSIPACKAGE* package)
         DWORD size = 0;
 
         rc = MsiSourceListGetInfoW(package->ProductCode, NULL, 
-                MSIINSTALLCONTEXT_USERUNMANAGED, MSICODE_PRODUCT,
+                package->Context, MSICODE_PRODUCT,
                 INSTALLPROPERTY_DISKPROMPTW,NULL,&size);
         if (rc == ERROR_MORE_DATA)
         {
             prompt = msi_alloc(size * sizeof(WCHAR));
             MsiSourceListGetInfoW(package->ProductCode, NULL, 
-                    MSIINSTALLCONTEXT_USERUNMANAGED, MSICODE_PRODUCT,
+                    package->Context, MSICODE_PRODUCT,
                     INSTALLPROPERTY_DISKPROMPTW,prompt,&size);
         }
         else
@@ -4286,7 +4308,7 @@ static UINT ACTION_RegisterUser(MSIPACKAGE *package)
     if (!productid)
         return ERROR_SUCCESS;
 
-    rc = MSIREG_OpenInstallPropertiesKey(package->ProductCode, &hkey, TRUE);
+    rc = MSIREG_OpenCurrentUserInstallProps(package->ProductCode, &hkey, TRUE);
     if (rc != ERROR_SUCCESS)
         goto end;
 

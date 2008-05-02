@@ -96,6 +96,7 @@ static HRESULT process_extensions(HKEY hkeyExtensions, LPCOLESTR pszFileName, GU
     size = sizeof(keying);
     if (!l)
         l = RegQueryValueExW(hsub, subtype_name, NULL, NULL, (LPBYTE)keying, &size);
+
     if (!l)
         CLSIDFromString(keying, minorType);
 
@@ -393,7 +394,7 @@ static HRESULT WINAPI AsyncReader_QueryInterface(IBaseFilter * iface, REFIID rii
         return S_OK;
     }
 
-    if (!IsEqualIID(riid, &IID_IPin) && !IsEqualIID(riid, &IID_IMediaSeeking))
+    if (!IsEqualIID(riid, &IID_IPin) && !IsEqualIID(riid, &IID_IMediaSeeking) && !IsEqualIID(riid, &IID_IVideoWindow))
         FIXME("No interface for %s!\n", qzdebugstr_guid(riid));
 
     return E_NOINTERFACE;
@@ -432,6 +433,9 @@ static ULONG WINAPI AsyncReader_Release(IBaseFilter * iface)
         This->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->csFilter);
         This->lpVtbl = NULL;
+        CoTaskMemFree(This->pszFileName);
+        if (This->pmt)
+            FreeMediaType(This->pmt);
         CoTaskMemFree(This);
         return 0;
     }
@@ -639,8 +643,13 @@ static HRESULT WINAPI FileSource_Load(IFileSourceFilter * iface, LPCOLESTR pszFi
     /* store file name & media type */
     if (SUCCEEDED(hr))
     {
+        CoTaskMemFree(This->pszFileName);
+        if (This->pmt)
+            FreeMediaType(This->pmt);
+
         This->pszFileName = CoTaskMemAlloc((strlenW(pszFileName) + 1) * sizeof(WCHAR));
         strcpyW(This->pszFileName, pszFileName);
+
         This->pmt = CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE));
         if (!pmt)
         {
@@ -674,7 +683,10 @@ static HRESULT WINAPI FileSource_Load(IFileSourceFilter * iface, LPCOLESTR pszFi
         }
 
         CoTaskMemFree(This->pszFileName);
+        if (This->pmt)
+            FreeMediaType(This->pmt);
         This->pszFileName = NULL;
+        This->pmt = NULL;
 
         CloseHandle(hFile);
     }
@@ -771,7 +783,7 @@ static HRESULT AcceptProcAFR(LPVOID iface, const AM_MEDIA_TYPE *pmt)
     return S_FALSE;
 }
 
-/* overriden pin functions */
+/* overridden pin functions */
 
 static HRESULT WINAPI FileAsyncReaderPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * ppv)
 {
@@ -893,23 +905,18 @@ static HRESULT FileAsyncReaderPin_ConnectSpecific(IPin * iface, IPin * pReceiveP
 
 static HRESULT FileAsyncReader_Construct(HANDLE hFile, IBaseFilter * pBaseFilter, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
 {
-    FileAsyncReader * pPinImpl;
     PIN_INFO piOutput;
+    HRESULT hr;
 
     *ppPin = NULL;
-
-    pPinImpl = CoTaskMemAlloc(sizeof(*pPinImpl));
-
-    if (!pPinImpl)
-        return E_OUTOFMEMORY;
-
     piOutput.dir = PINDIR_OUTPUT;
     piOutput.pFilter = pBaseFilter;
     strcpyW(piOutput.achName, wszOutputPinName);
+    hr = OutputPin_Construct(&FileAsyncReaderPin_Vtbl, sizeof(FileAsyncReader), &piOutput, NULL, pBaseFilter, AcceptProcAFR, pCritSec, ppPin);
 
-    if (SUCCEEDED(OutputPin_Init(&piOutput, NULL, pBaseFilter, AcceptProcAFR, pCritSec, &pPinImpl->pin)))
+    if (SUCCEEDED(hr))
     {
-        pPinImpl->pin.pin.lpVtbl = &FileAsyncReaderPin_Vtbl;
+        FileAsyncReader *pPinImpl =  (FileAsyncReader *)*ppPin;
         pPinImpl->lpVtblAR = &FileAsyncReader_Vtbl;
         pPinImpl->hFile = hFile;
         pPinImpl->hEvent = CreateEventW(NULL, 0, 0, NULL);
@@ -918,13 +925,8 @@ static HRESULT FileAsyncReader_Construct(HANDLE hFile, IBaseFilter * pBaseFilter
         pPinImpl->pin.pConnectSpecific = FileAsyncReaderPin_ConnectSpecific;
         InitializeCriticalSection(&pPinImpl->csList);
         pPinImpl->csList.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": FileAsyncReader.csList");
-
-        *ppPin = (IPin *)(&pPinImpl->pin.pin.lpVtbl);
-        return S_OK;
     }
-
-    CoTaskMemFree(pPinImpl);
-    return E_FAIL;
+    return hr;
 }
 
 /* IAsyncReader */
@@ -1103,16 +1105,13 @@ static HRESULT WINAPI FileAsyncReader_WaitForNext(IAsyncReader * iface, DWORD dw
     *ppSample = NULL;
     *pdwUser = 0;
 
-    /* we return immediately if flushing */
-    if (This->bFlushing)
-        hr = VFW_E_WRONG_STATE;
-
-    if (SUCCEEDED(hr))
+    if (!This->bFlushing)
     {
         /* wait for the read to finish or timeout */
         if (WaitForSingleObject(This->hEvent, dwTimeout) == WAIT_TIMEOUT)
             hr = VFW_E_TIMEOUT;
     }
+
     if (SUCCEEDED(hr))
     {
         EnterCriticalSection(&This->csList);
@@ -1126,7 +1125,7 @@ static HRESULT WINAPI FileAsyncReader_WaitForNext(IAsyncReader * iface, DWORD dw
         LeaveCriticalSection(&This->csList);
     }
 
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(hr) && !This->bFlushing)
     {
         /* get any errors */
         if (!GetOverlappedResult(This->hFile, &pDataRq->ovl, &dwBytes, FALSE))
@@ -1142,7 +1141,14 @@ static HRESULT WINAPI FileAsyncReader_WaitForNext(IAsyncReader * iface, DWORD dw
 
     /* no need to close event handle since we will close it when the pin is destroyed */
     CoTaskMemFree(pDataRq);
-    
+
+    /* Return the sample if flushing so it can be destroyed */
+    if (This->bFlushing && SUCCEEDED(hr))
+    {
+        hr = VFW_E_WRONG_STATE;
+        IMediaSample_SetActualDataLength(pDataRq->pSample, 0);
+    }
+
     TRACE("-- %x\n", hr);
     return hr;
 }

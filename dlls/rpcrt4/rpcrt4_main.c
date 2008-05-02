@@ -265,7 +265,7 @@ int WINAPI UuidEqual(UUID *Uuid1, UUID *Uuid2, RPC_STATUS *Status)
  *
  * PARAMS
  *     UUID *Uuid         [I] Uuid to compare
- *     RPC_STATUS *Status [O] retuns RPC_S_OK
+ *     RPC_STATUS *Status [O] returns RPC_S_OK
  *
  * RETURNS
  *     TRUE/FALSE
@@ -933,6 +933,28 @@ LONG WINAPI I_RpcMapWin32Status(RPC_STATUS status)
     case ERROR_PASSWORD_MUST_CHANGE: return STATUS_PASSWORD_MUST_CHANGE;
     case ERROR_ACCOUNT_LOCKED_OUT: return STATUS_ACCOUNT_LOCKED_OUT;
     default: return status;
+    }
+}
+
+/******************************************************************************
+ * I_RpcExceptionFilter   (rpcrt4.@)
+ */
+int WINAPI I_RpcExceptionFilter(ULONG ExceptionCode)
+{
+    TRACE("0x%x\n", ExceptionCode);
+    switch (ExceptionCode)
+    {
+    case STATUS_DATATYPE_MISALIGNMENT:
+    case STATUS_BREAKPOINT:
+    case STATUS_ACCESS_VIOLATION:
+    case STATUS_ILLEGAL_INSTRUCTION:
+    case STATUS_PRIVILEGED_INSTRUCTION:
+    case STATUS_INSTRUCTION_MISALIGNMENT:
+    case STATUS_STACK_OVERFLOW:
+    case STATUS_POSSIBLE_DEADLOCK:
+        return EXCEPTION_CONTINUE_SEARCH;
+    default:
+        return EXCEPTION_EXECUTE_HANDLER;
     }
 }
 

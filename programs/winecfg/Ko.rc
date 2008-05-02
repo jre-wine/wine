@@ -64,8 +64,10 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 9, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " 창 설정 ",IDC_STATIC,8,4,244,180
+    CONTROL         "DirectX 프로그램 창에서 마우스가 떠나면 정지하게 함(&M)",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,20,230,8
 
-    CONTROL	    "DirectX 프로그램들이 마우스 커서를 그들의 창안에 잡아두게 함(&M)",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,14,230,8
+    CONTROL         "원래 창 관리자가 창을 꾸미도록 함(&D)",IDC_ENABLE_DECORATED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,30,230,8
+    CONTROL         " 원래 창 관리자가 창을 제어하도록 함(&W)",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,40,230,8
     LTEXT 	    "Wine창들이 창관리자에 의해서 관리된다면, Wine창들은 표준 창틀을 가질 것이며, 작업공간 관리자와 잘 어울릴 것입니다. 그리고 창목록에도 나타날 것입니다.\n\n만약에 Wine창들이 창관리자에 의해 관리되지 않는다면, Wine창들은 창관리자와 연결되지 않을 것입니다. 이것은 Wine창들이 데스크탑과 밀접하게 통합되지 않는다는 것을 의미합니다. 하지만 Wine의 윈도우즈 흉내내기가 더 정밀해져서 몇몇 프로그램들이 좀 더 잘 동작할 수 있도록 도와줍니다.",
     		    IDC_STATIC,15,37,228,80
     CONTROL	    "창관리자가 Wine창을 관리하도록 함(&W)",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,111,230,8
@@ -309,4 +311,19 @@ BEGIN
    IDC_SYSPARAMS_INACTIVE_TITLE    "비활성된 제목 막대"
    IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "비활성된 제목 문자"
    IDC_SYSPARAMS_MSGBOX_TEXT       "메세지 상자 텍스트"
+   IDC_SYSPARAMS_APPWORKSPACE      "어플리케이션 작업공간"
+   IDC_SYSPARAMS_WINDOW_FRAME      "창 프레임"
+   IDC_SYSPARAMS_ACTIVE_BORDER     "활성화된 창틀"
+   IDC_SYSPARAMS_INACTIVE_BORDER   "비 활성화된 창틀"
+   IDC_SYSPARAMS_BUTTON_SHADOW     "컨트롤 그함지"
+   IDC_SYSPARAMS_GRAY_TEXT         "회색 문자"
+   IDC_SYSPARAMS_BUTTON_HILIGHT    "컨트롤 하이라이트"
+   IDC_SYSPARAMS_BUTTON_DARK_SHADOW "컨트롤 어두운 그림자"
+   IDC_SYSPARAMS_BUTTON_LIGHT      "컨트롤 밝음"
+   IDC_SYSPARAMS_BUTTON_ALTERNATE  "컨트롤 바뀔때 배경"
+   IDC_SYSPARAMS_HOT_TRACKING      "핫 트랙된 아이템"
+   IDC_SYSPARAMS_ACTIVE_TITLE_GRADIENT "활성화된  제목 바  색깔 변화"
+   IDC_SYSPARAMS_INACTIVE_TITLE_GRADIENT "비활성화된 제목바 색깔 변화"
+   IDC_SYSPARAMS_MENU_HILIGHT      "메뉴 하이라이트"
+   IDC_SYSPARAMS_MENUBAR           "메뉴바"
 END

@@ -120,7 +120,8 @@ static HRESULT SendFurther( IPin *from, SendPinFunc fnMiddle, LPVOID arg, SendPi
             }
             IPin_Release( pin );
         }
-    } while (hr == S_OK);
+    }
+
     if (!foundend)
         hr = hr_return;
     else if (fnEnd) {
@@ -225,38 +226,8 @@ static HRESULT OutputPin_ConnectSpecific(IPin * iface, IPin * pReceivePin, const
     return hr;
 }
 
-HRESULT InputPin_Construct(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
-{
-    InputPin * pPinImpl;
-
-    *ppPin = NULL;
-
-    if (pPinInfo->dir != PINDIR_INPUT)
-    {
-        ERR("Pin direction(%x) != PINDIR_INPUT\n", pPinInfo->dir);
-        return E_INVALIDARG;
-    }
-
-    pPinImpl = CoTaskMemAlloc(sizeof(*pPinImpl));
-
-    if (!pPinImpl)
-        return E_OUTOFMEMORY;
-
-    if (SUCCEEDED(InputPin_Init(pPinInfo, pSampleProc, pUserData, pQueryAccept, pCritSec, pPinImpl)))
-    {
-        pPinImpl->pin.lpVtbl = &InputPin_Vtbl;
-        pPinImpl->lpVtblMemInput = &MemInputPin_Vtbl;
-
-        *ppPin = (IPin *)(&pPinImpl->pin.lpVtbl);
-        return S_OK;
-    }
-
-    CoTaskMemFree(pPinImpl);
-    return E_FAIL;
-}
-
-/* Note that we don't init the vtables here (like C++ constructor) */
-HRESULT InputPin_Init(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, InputPin * pPinImpl)
+static HRESULT InputPin_Init(const IPinVtbl *InputPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData,
+                             QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, LPCRITICAL_SECTION pCritSec, InputPin * pPinImpl)
 {
     TRACE("\n");
 
@@ -271,21 +242,25 @@ HRESULT InputPin_Init(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID 
 
     /* Input pin attributes */
     pPinImpl->fnSampleProc = pSampleProc;
+    pPinImpl->fnCleanProc = pCleanUp;
     pPinImpl->pAllocator = NULL;
     pPinImpl->tStart = 0;
     pPinImpl->tStop = 0;
-    pPinImpl->dRate = 0;
+    pPinImpl->dRate = 1.0;
+    pPinImpl->pin.lpVtbl = InputPin_Vtbl;
+    pPinImpl->lpVtblMemInput = &MemInputPin_Vtbl;
+    pPinImpl->flushing = pPinImpl->end_of_stream = 0;
 
     return S_OK;
 }
 
-HRESULT OutputPin_Init(const PIN_INFO * pPinInfo, const ALLOCATOR_PROPERTIES * props, LPVOID pUserData,
-                       QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, OutputPin * pPinImpl)
+static HRESULT OutputPin_Init(const IPinVtbl *OutputPin_Vtbl, const PIN_INFO * pPinInfo, const ALLOCATOR_PROPERTIES * props, LPVOID pUserData,
+                              QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, OutputPin * pPinImpl)
 {
     TRACE("\n");
 
     /* Common attributes */
-    pPinImpl->pin.lpVtbl = &OutputPin_Vtbl;
+    pPinImpl->pin.lpVtbl = OutputPin_Vtbl;
     pPinImpl->pin.refCount = 1;
     pPinImpl->pin.pConnectedTo = NULL;
     pPinImpl->pin.fnQueryAccept = pQueryAccept;
@@ -309,7 +284,34 @@ HRESULT OutputPin_Init(const PIN_INFO * pPinInfo, const ALLOCATOR_PROPERTIES * p
     return S_OK;
 }
 
-HRESULT OutputPin_Construct(const PIN_INFO * pPinInfo, ALLOCATOR_PROPERTIES *props, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
+HRESULT InputPin_Construct(const IPinVtbl *InputPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
+{
+    InputPin * pPinImpl;
+
+    *ppPin = NULL;
+
+    if (pPinInfo->dir != PINDIR_INPUT)
+    {
+        ERR("Pin direction(%x) != PINDIR_INPUT\n", pPinInfo->dir);
+        return E_INVALIDARG;
+    }
+
+    pPinImpl = CoTaskMemAlloc(sizeof(*pPinImpl));
+
+    if (!pPinImpl)
+        return E_OUTOFMEMORY;
+
+    if (SUCCEEDED(InputPin_Init(InputPin_Vtbl, pPinInfo, pSampleProc, pUserData, pQueryAccept, pCleanUp, pCritSec, pPinImpl)))
+    {
+        *ppPin = (IPin *)pPinImpl;
+        return S_OK;
+    }
+
+    CoTaskMemFree(pPinImpl);
+    return E_FAIL;
+}
+
+HRESULT OutputPin_Construct(const IPinVtbl *OutputPin_Vtbl, long outputpin_size, const PIN_INFO * pPinInfo, ALLOCATOR_PROPERTIES *props, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
 {
     OutputPin * pPinImpl;
 
@@ -321,15 +323,15 @@ HRESULT OutputPin_Construct(const PIN_INFO * pPinInfo, ALLOCATOR_PROPERTIES *pro
         return E_INVALIDARG;
     }
 
-    pPinImpl = CoTaskMemAlloc(sizeof(*pPinImpl));
+    assert(outputpin_size >= sizeof(OutputPin));
+
+    pPinImpl = CoTaskMemAlloc(outputpin_size);
 
     if (!pPinImpl)
         return E_OUTOFMEMORY;
 
-    if (SUCCEEDED(OutputPin_Init(pPinInfo, props, pUserData, pQueryAccept, pCritSec, pPinImpl)))
+    if (SUCCEEDED(OutputPin_Init(OutputPin_Vtbl, pPinInfo, props, pUserData, pQueryAccept, pCritSec, pPinImpl)))
     {
-        pPinImpl->pin.lpVtbl = &OutputPin_Vtbl;
-
         *ppPin = (IPin *)(&pPinImpl->pin.lpVtbl);
         return S_OK;
     }
@@ -598,12 +600,10 @@ static HRESULT deliver_endofstream(IPin* pin, LPVOID unused)
 
 HRESULT WINAPI InputPin_EndOfStream(IPin * iface)
 {
-    FIXME("() stub\n");
+    InputPin *This = (InputPin *)iface;
+    TRACE("(%p)\n", This);
 
-    /* Should do an end of stream notification?
-     * Also, don't accept any more samples from now!
-     * TODO: Don't accept any more packets
-     */
+    This->end_of_stream = 1;
 
     return SendFurther( iface, deliver_endofstream, NULL, NULL );
 }
@@ -615,10 +615,20 @@ static HRESULT deliver_beginflush(IPin* pin, LPVOID unused)
 
 HRESULT WINAPI InputPin_BeginFlush(IPin * iface)
 {
-    FIXME("() stub\n");
+    InputPin *This = (InputPin *)iface;
+    HRESULT hr;
+    TRACE("() semi-stub\n");
 
-    /* TODO: Drop all cached packets, and don't accept any more samples! */
-    return SendFurther( iface, deliver_beginflush, NULL, NULL );
+    EnterCriticalSection(This->pin.pCritSec);
+    This->flushing = 1;
+
+    if (This->fnCleanProc)
+        This->fnCleanProc(This->pin.pUserData);
+
+    hr = SendFurther( iface, deliver_beginflush, NULL, NULL );
+    LeaveCriticalSection(This->pin.pCritSec);
+
+    return hr;
 }
 
 static HRESULT deliver_endflush(IPin* pin, LPVOID unused)
@@ -628,10 +638,17 @@ static HRESULT deliver_endflush(IPin* pin, LPVOID unused)
 
 HRESULT WINAPI InputPin_EndFlush(IPin * iface)
 {
-    FIXME("() stub\n");
+    InputPin *This = (InputPin *)iface;
+    HRESULT hr;
+    TRACE("(%p)\n", This);
 
-    /* TODO: Accept any samples again */
-    return SendFurther( iface, deliver_endflush, NULL, NULL );
+    EnterCriticalSection(This->pin.pCritSec);
+    This->flushing = 0;
+
+    hr = SendFurther( iface, deliver_endflush, NULL, NULL );
+    LeaveCriticalSection(This->pin.pCritSec);
+
+    return hr;
 }
 
 typedef struct newsegmentargs
@@ -747,11 +764,18 @@ HRESULT WINAPI MemInputPin_GetAllocatorRequirements(IMemInputPin * iface, ALLOCA
 HRESULT WINAPI MemInputPin_Receive(IMemInputPin * iface, IMediaSample * pSample)
 {
     InputPin *This = impl_from_IMemInputPin(iface);
+    HRESULT hr;
 
     /* this trace commented out for performance reasons */
     /*TRACE("(%p/%p)->(%p)\n", This, iface, pSample);*/
 
-    return This->fnSampleProc(This->pin.pUserData, pSample);
+    EnterCriticalSection(This->pin.pCritSec);
+    if (!This->end_of_stream && !This->flushing && !This->end_of_stream)
+        hr = This->fnSampleProc(This->pin.pUserData, pSample);
+    else
+        hr = S_FALSE;
+    LeaveCriticalSection(This->pin.pCritSec);
+    return hr;
 }
 
 HRESULT WINAPI MemInputPin_ReceiveMultiple(IMemInputPin * iface, IMediaSample ** pSamples, long nSamples, long *nSamplesProcessed)
@@ -941,7 +965,7 @@ HRESULT WINAPI OutputPin_Disconnect(IPin * iface)
             hr = S_FALSE;
     }
     LeaveCriticalSection(This->pin.pCritSec);
-    
+
     return hr;
 }
 
@@ -1149,7 +1173,41 @@ HRESULT OutputPin_DeliverDisconnect(OutputPin * This)
 }
 
 
-HRESULT PullPin_Construct(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
+static HRESULT PullPin_Init(const IPinVtbl *PullPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData,
+                            QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, LPCRITICAL_SECTION pCritSec, PullPin * pPinImpl)
+{
+    /* Common attributes */
+    pPinImpl->pin.lpVtbl = PullPin_Vtbl;
+    pPinImpl->pin.refCount = 1;
+    pPinImpl->pin.pConnectedTo = NULL;
+    pPinImpl->pin.fnQueryAccept = pQueryAccept;
+    pPinImpl->pin.pUserData = pUserData;
+    pPinImpl->pin.pCritSec = pCritSec;
+    Copy_PinInfo(&pPinImpl->pin.pinInfo, pPinInfo);
+    ZeroMemory(&pPinImpl->pin.mtCurrent, sizeof(AM_MEDIA_TYPE));
+
+    /* Input pin attributes */
+    pPinImpl->fnSampleProc = pSampleProc;
+    pPinImpl->fnCleanProc = pCleanUp;
+    pPinImpl->fnPreConnect = NULL;
+    pPinImpl->pAlloc = NULL;
+    pPinImpl->pReader = NULL;
+    pPinImpl->hThread = NULL;
+    pPinImpl->hEventStateChanged = CreateEventW(NULL, TRUE, TRUE, NULL);
+
+    pPinImpl->rtStart = 0;
+    pPinImpl->rtCurrent = 0;
+    pPinImpl->rtStop = ((LONGLONG)0x7fffffff << 32) | 0xffffffff;
+    pPinImpl->dRate = 1.0;
+    pPinImpl->state = State_Stopped;
+
+    InitializeCriticalSection(&pPinImpl->thread_lock);
+    pPinImpl->thread_lock.DebugInfo->Spare[0] = (DWORD_PTR)( __FILE__ ": PullPin.thread_lock");
+
+    return S_OK;
+}
+
+HRESULT PullPin_Construct(const IPinVtbl *PullPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, LPCRITICAL_SECTION pCritSec, IPin ** ppPin)
 {
     PullPin * pPinImpl;
 
@@ -1166,43 +1224,14 @@ HRESULT PullPin_Construct(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPV
     if (!pPinImpl)
         return E_OUTOFMEMORY;
 
-    if (SUCCEEDED(PullPin_Init(pPinInfo, pSampleProc, pUserData, pQueryAccept, pCritSec, pPinImpl)))
+    if (SUCCEEDED(PullPin_Init(PullPin_Vtbl, pPinInfo, pSampleProc, pUserData, pQueryAccept, pCleanUp, pCritSec, pPinImpl)))
     {
-        pPinImpl->pin.lpVtbl = &PullPin_Vtbl;
-
         *ppPin = (IPin *)(&pPinImpl->pin.lpVtbl);
         return S_OK;
     }
 
     CoTaskMemFree(pPinImpl);
     return E_FAIL;
-}
-
-HRESULT PullPin_Init(const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, PullPin * pPinImpl)
-{
-    /* Common attributes */
-    pPinImpl->pin.refCount = 1;
-    pPinImpl->pin.pConnectedTo = NULL;
-    pPinImpl->pin.fnQueryAccept = pQueryAccept;
-    pPinImpl->pin.pUserData = pUserData;
-    pPinImpl->pin.pCritSec = pCritSec;
-    Copy_PinInfo(&pPinImpl->pin.pinInfo, pPinInfo);
-    ZeroMemory(&pPinImpl->pin.mtCurrent, sizeof(AM_MEDIA_TYPE));
-
-    /* Input pin attributes */
-    pPinImpl->fnSampleProc = pSampleProc;
-    pPinImpl->fnPreConnect = NULL;
-    pPinImpl->pAlloc = NULL;
-    pPinImpl->pReader = NULL;
-    pPinImpl->hThread = NULL;
-    pPinImpl->hEventStateChanged = CreateEventW(NULL, TRUE, TRUE, NULL);
-
-    pPinImpl->rtStart = 0;
-    pPinImpl->rtCurrent = 0;
-    pPinImpl->rtStop = ((LONGLONG)0x7fffffff << 32) | 0xffffffff;
-    pPinImpl->state = State_Stopped;
-
-    return S_OK;
 }
 
 HRESULT WINAPI PullPin_ReceiveConnection(IPin * iface, IPin * pReceivePin, const AM_MEDIA_TYPE * pmt)
@@ -1318,6 +1347,8 @@ ULONG WINAPI PullPin_Release(IPin * iface)
         if(This->pReader)
             IAsyncReader_Release(This->pReader);
         CloseHandle(This->hEventStateChanged);
+        This->thread_lock.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->thread_lock);
         CoTaskMemFree(This);
         return 0;
     }
@@ -1351,7 +1382,11 @@ static void CALLBACK PullPin_Thread_Process(ULONG_PTR iface)
 
     TRACE("Start\n");
 
-    while (This->rtCurrent < This->rtStop && hr == S_OK && !This->stop_playback)
+    if (This->rtCurrent >= This->rtStop)
+    {
+        FIXME("Send an EndOfStream?\n");
+    }
+    else do
     {
         /* FIXME: to improve performance by quite a bit this should be changed
          * so that one sample is processed while one sample is fetched. However,
@@ -1396,7 +1431,7 @@ static void CALLBACK PullPin_Thread_Process(ULONG_PTR iface)
 
         if (pSample)
             IMediaSample_Release(pSample);
-    }
+    } while (This->rtCurrent < This->rtStop && hr == S_OK && !This->stop_playback);
 
     CoUninitialize();
     EnterCriticalSection(This->pin.pCritSec);
@@ -1530,6 +1565,8 @@ HRESULT PullPin_PauseProcessing(PullPin * This)
 
 HRESULT PullPin_StopProcessing(PullPin * This)
 {
+    TRACE("(%p)->()\n", This);
+
     /* if we are connected */
     if (This->pAlloc && This->hThread)
     {
@@ -1562,24 +1599,55 @@ HRESULT WINAPI PullPin_EndOfStream(IPin * iface)
 HRESULT WINAPI PullPin_BeginFlush(IPin * iface)
 {
     PullPin *This = (PullPin *)iface;
-    FIXME("(%p)->() stub\n", iface);
+    TRACE("(%p)->()\n", iface);
 
-    SendFurther( iface, deliver_beginflush, NULL, NULL );
+    EnterCriticalSection(This->pin.pCritSec);
+    {
+        SendFurther( iface, deliver_beginflush, NULL, NULL );
+    }
+    LeaveCriticalSection(This->pin.pCritSec);
 
-    if (This->state == State_Running)
-        return PullPin_PauseProcessing(This);
+    EnterCriticalSection(&This->thread_lock);
+    {
+        if (This->state == State_Running)
+            PullPin_PauseProcessing(This);
+
+        PullPin_WaitForStateChange(This, INFINITE);
+    }
+    LeaveCriticalSection(&This->thread_lock);
+
+    EnterCriticalSection(This->pin.pCritSec);
+    {
+        This->fnCleanProc(This->pin.pUserData);
+    }
+    LeaveCriticalSection(This->pin.pCritSec);
+
     return S_OK;
 }
 
 HRESULT WINAPI PullPin_EndFlush(IPin * iface)
 {
-    FILTER_STATE state;
     PullPin *This = (PullPin *)iface;
 
-    FIXME("(%p)->() stub\n", iface);
-    SendFurther( iface, deliver_endflush, NULL, NULL );
+    TRACE("(%p)->()\n", iface);
 
-    return IBaseFilter_GetState(This->pin.pinInfo.pFilter, INFINITE, &state);
+    EnterCriticalSection(&This->thread_lock);
+    {
+        FILTER_STATE state;
+        IBaseFilter_GetState(This->pin.pinInfo.pFilter, INFINITE, &state);
+
+        if (state == State_Running && This->state == State_Paused)
+            PullPin_StartProcessing(This);
+
+        PullPin_WaitForStateChange(This, INFINITE);
+    }
+    LeaveCriticalSection(&This->thread_lock);
+
+    EnterCriticalSection(This->pin.pCritSec);
+    SendFurther( iface, deliver_endflush, NULL, NULL );
+    LeaveCriticalSection(This->pin.pCritSec);
+
+    return S_OK;
 }
 
 HRESULT WINAPI PullPin_NewSegment(IPin * iface, REFERENCE_TIME tStart, REFERENCE_TIME tStop, double dRate)
@@ -1599,7 +1667,7 @@ static const IPinVtbl PullPin_Vtbl =
     PullPin_QueryInterface,
     IPinImpl_AddRef,
     PullPin_Release,
-    OutputPin_Connect,
+    InputPin_Connect,
     PullPin_ReceiveConnection,
     IPinImpl_Disconnect,
     IPinImpl_ConnectedTo,

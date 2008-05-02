@@ -1280,7 +1280,7 @@ TOOLBAR_WrapToolbar( HWND hwnd, DWORD dwStyle )
     TBUTTON_INFO *btnPtr;
     INT x, cx, i, j;
     RECT rc;
-    BOOL bWrap, bButtonWrap;
+    BOOL bButtonWrap;
 
     /* 	When the toolbar window style is not TBSTYLE_WRAPABLE,	*/
     /*	no layout is necessary. Applications may use this style */
@@ -1314,7 +1314,6 @@ TOOLBAR_WrapToolbar( HWND hwnd, DWORD dwStyle )
 
     for (i = 0; i < infoPtr->nNumButtons; i++ )
     {
-	bWrap = FALSE;
 	btnPtr[i].fsState &= ~TBSTATE_WRAP;
 
 	if (btnPtr[i].fsState & TBSTATE_HIDDEN)
@@ -5779,7 +5778,6 @@ TOOLBAR_LButtonUp (HWND hwnd, WPARAM wParam, LPARAM lParam)
     POINT pt;
     INT   nHit;
     INT   nOldIndex = -1;
-    BOOL  bSendMessage = TRUE;
     NMHDR hdr;
     NMMOUSE nmmouse;
     NMTOOLBARA nmtb;
@@ -5866,8 +5864,6 @@ TOOLBAR_LButtonUp (HWND hwnd, WPARAM wParam, LPARAM lParam)
 		if (btnPtr->fsStyle & BTNS_GROUP) {
 		    nOldIndex = TOOLBAR_GetCheckedGroupButtonIndex (infoPtr,
 			nHit);
-		    if (nOldIndex == nHit)
-			bSendMessage = FALSE;
 		    if ((nOldIndex != nHit) &&
 			(nOldIndex != -1))
 			infoPtr->buttons[nOldIndex].fsState &= ~TBSTATE_CHECKED;
