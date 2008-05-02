@@ -143,8 +143,6 @@ void X11DRV_XF86VM_Init(void)
   Bool ok;
   int nmodes;
   unsigned int i;
-  DWORD dwBpp = screen_depth;
-  if (dwBpp == 24) dwBpp = 32;
 
   if (xf86vm_major) return; /* already initialized? */
 
@@ -197,10 +195,6 @@ void X11DRV_XF86VM_Init(void)
   dd_mode_count = X11DRV_Settings_GetModeCount();
 
   TRACE("Available DD modes: count=%d\n", dd_mode_count);
-
-  /* the first mode in the list seems to be the default */
-  X11DRV_Settings_SetDefaultMode(0);
-  
   TRACE("Enabling XVidMode\n");
 }
 

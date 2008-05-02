@@ -104,6 +104,7 @@ static const struct object_ops handle_table_ops =
 {
     sizeof(struct handle_table),     /* size */
     handle_table_dump,               /* dump */
+    no_get_type,                     /* get_type */
     no_add_queue,                    /* add_queue */
     NULL,                            /* remove_queue */
     NULL,                            /* signaled */
@@ -442,6 +443,27 @@ obj_handle_t find_inherited_handle( struct process *process, const struct object
         if (!ptr->ptr) continue;
         if (ptr->ptr->ops != ops) continue;
         if (ptr->access & RESERVED_INHERIT) return index_to_handle(i);
+    }
+    return 0;
+}
+
+/* enumerate handles of a given type */
+/* this is needed for window stations and desktops */
+obj_handle_t enumerate_handles( struct process *process, const struct object_ops *ops,
+                                unsigned int *index )
+{
+    struct handle_table *table = process->handles;
+    unsigned int i;
+    struct handle_entry *entry;
+
+    if (!table) return 0;
+
+    for (i = *index, entry = &table->entries[i]; i <= table->last; i++, entry++)
+    {
+        if (!entry->ptr) continue;
+        if (entry->ptr->ops != ops) continue;
+        *index = i + 1;
+        return index_to_handle(i);
     }
     return 0;
 }

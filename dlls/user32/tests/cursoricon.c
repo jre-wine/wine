@@ -3,6 +3,7 @@
  *
  * Copyright 2006 Michael Kaufmann
  * Copyright 2007 Dmitry Timoshkov
+ * Copyright 2007 Andrew Riedi
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -237,6 +238,23 @@ static void test_CopyImage_Bitmap(int depth)
     HeapFree(GetProcessHeap(), 0, info);
 }
 
+static void test_initial_cursor(void)
+{
+    HCURSOR cursor, cursor2;
+    DWORD error;
+
+    cursor = GetCursor();
+
+    /* Check what handle GetCursor() returns if a cursor is not set yet. */
+    SetLastError(0xdeadbeef);
+    cursor2 = LoadCursor(NULL, IDC_WAIT);
+    todo_wine {
+        ok(cursor == cursor2, "cursor (%p) is not IDC_WAIT (%p).\n", cursor, cursor2);
+    }
+    error = GetLastError();
+    ok(error == 0xdeadbeef, "Last error: 0x%08x\n", error);
+}
+
 static void test_icon_info_dbg(HICON hIcon, UINT exp_cx, UINT exp_cy, UINT exp_bpp, int line)
 {
     ICONINFO info;
@@ -411,12 +429,44 @@ static void test_DestroyCursor(void)
 
     SetCursor(NULL);
 
-    /* Trying to destroy the cursor properly fails now for some reason with ERROR_INVALID_CURSOR_HANDLE */
+    /* Trying to destroy the cursor properly fails now with
+     * ERROR_INVALID_CURSOR_HANDLE.  This happens because we called
+     * DestroyCursor() 2+ times after calling SetCursor().  The calls to
+     * GetCursor() and SetCursor(NULL) in between make no difference. */
     ret = DestroyCursor(cursor);
-    /* ok(ret, "DestroyCursor failed, GetLastError=%d\n", GetLastError()); */
+    todo_wine {
+        ok(!ret, "DestroyCursor succeeded.\n");
+        error = GetLastError();
+        ok(error == ERROR_INVALID_CURSOR_HANDLE, "Last error: 0x%08x\n", error);
+    }
 
     DeleteObject(cursorInfo.hbmMask);
     DeleteObject(cursorInfo.hbmColor);
+
+    /* Try testing DestroyCursor() now using LoadCursor() cursors. */
+    cursor = LoadCursor(NULL, IDC_ARROW);
+
+    SetLastError(0xdeadbeef);
+    ret = DestroyCursor(cursor);
+    ok(ret, "DestroyCursor on the active cursor failed.\n");
+    error = GetLastError();
+    ok(error == 0xdeadbeef, "Last error: 0x%08x\n", error);
+
+    /* Try setting the cursor to a destroyed OEM cursor. */
+    SetLastError(0xdeadbeef);
+    SetCursor(cursor);
+    error = GetLastError();
+    todo_wine {
+        ok(error == 0xdeadbeef, "Last error: 0x%08x\n", error);
+    }
+
+    /* Check if LoadCursor() returns the same handle with the same icon. */
+    cursor2 = LoadCursor(NULL, IDC_ARROW);
+    ok(cursor2 == cursor, "cursor == %p, cursor2 == %p\n", cursor, cursor2);
+
+    /* Check if LoadCursor() returns the same handle with a different icon. */
+    cursor2 = LoadCursor(NULL, IDC_WAIT);
+    ok(cursor2 != cursor, "cursor == %p, cursor2 == %p\n", cursor, cursor2);
 }
 
 START_TEST(cursoricon)
@@ -427,6 +477,7 @@ START_TEST(cursoricon)
     test_CopyImage_Bitmap(16);
     test_CopyImage_Bitmap(24);
     test_CopyImage_Bitmap(32);
+    test_initial_cursor();
     test_CreateIcon();
     test_DestroyCursor();
 }

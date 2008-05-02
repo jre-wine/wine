@@ -1996,19 +1996,47 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     return 0;
   }
   case WM_GETTEXTLENGTH:
-    return ME_GetTextLength(editor);
+  {
+    GETTEXTLENGTHEX how;
+
+    how.flags = GTL_CLOSE | (editor->bEmulateVersion10 ? 0 : GTL_USECRLF) | GTL_NUMCHARS;
+    how.codepage = unicode ? 1200 : CP_ACP;
+    return ME_GetTextLengthEx(editor, &how);
+  }
   case EM_GETTEXTLENGTHEX:
     return ME_GetTextLengthEx(editor, (GETTEXTLENGTHEX *)wParam);
   case WM_GETTEXT:
   {
     GETTEXTEX ex;
+    LRESULT rc;
+    LPSTR bufferA = NULL;
+    LPWSTR bufferW = NULL;
 
-    ex.cb = wParam;
+    if (unicode)
+        bufferW = heap_alloc((wParam + 2) * sizeof(WCHAR));
+    else
+        bufferA = heap_alloc(wParam + 2);
+
+    ex.cb = wParam + (unicode ? 2*sizeof(WCHAR) : 2);
     ex.flags = GT_USECRLF;
     ex.codepage = unicode ? 1200 : CP_ACP;
     ex.lpDefaultChar = NULL;
     ex.lpUsedDefaultChar = NULL;
-    return RichEditWndProc_common(hWnd, EM_GETTEXTEX, (WPARAM)&ex, lParam, unicode);
+    rc = RichEditWndProc_common(hWnd, EM_GETTEXTEX, (WPARAM)&ex, unicode ? (LPARAM)bufferW : (LPARAM)bufferA, unicode);
+
+    if (unicode)
+    {
+        memcpy((LPWSTR)lParam, bufferW, wParam);
+        if (lstrlenW(bufferW) >= wParam / sizeof(WCHAR)) rc = 0;
+    }
+    else
+    {
+        memcpy((LPSTR)lParam, bufferA, wParam);
+        if (strlen(bufferA) >= wParam) rc = 0;
+    }
+    heap_free(bufferA);
+    heap_free(bufferW);
+    return rc;
   }
   case EM_GETTEXTEX:
   {
@@ -2039,7 +2067,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
       /* potentially each char may be a CR, why calculate the exact value with O(N) when
         we can just take a bigger buffer? :) */
       int crlfmul = (ex->flags & GT_USECRLF) ? 2 : 1;
-      LPWSTR buffer = richedit_alloc((crlfmul*nCount + 1) * sizeof(WCHAR));
+      LPWSTR buffer = heap_alloc((crlfmul*nCount + 1) * sizeof(WCHAR));
       DWORD buflen = ex->cb;
       LRESULT rc;
       DWORD flags = 0;
@@ -2048,7 +2076,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
       rc = WideCharToMultiByte(ex->codepage, flags, buffer, -1, (LPSTR)lParam, ex->cb, ex->lpDefaultChar, ex->lpUsedDefaultChar);
       if (rc) rc--; /* do not count 0 terminator */
 
-      richedit_free(buffer);
+      heap_free(buffer);
       return rc;
     }
   }
@@ -2804,7 +2832,10 @@ int ME_GetTextW(ME_TextEditor *editor, WCHAR *buffer, int nStart, int nChars, in
       if (!ME_FindItemFwd(item, diRun))
         /* No '\r' is appended to the last paragraph. */
         nLen = 0;
-      else {
+      else if (bCRLF && nChars == 1) {
+        nLen = 0;
+        nChars = 0;
+      } else {
         *buffer = '\r';
         if (bCRLF)
         {

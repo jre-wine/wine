@@ -31,8 +31,6 @@
 #include <alloca.h>
 #endif
 
-#include "windef.h"
-
 #include "widl.h"
 #include "utils.h"
 #include "parser.h"
@@ -280,6 +278,7 @@ static void check_all_user_types(ifref_list_t *ifaces);
 %right CAST
 %right PPTR
 %right NEG
+%right ADDRESSOF
 
 %%
 
@@ -469,7 +468,7 @@ attribute:					{ $$ = NULL; }
 	| tHIDDEN				{ $$ = make_attr(ATTR_HIDDEN); }
 	| tID '(' expr_const ')'		{ $$ = make_attrp(ATTR_ID, $3); }
 	| tIDEMPOTENT				{ $$ = make_attr(ATTR_IDEMPOTENT); }
-	| tIIDIS '(' ident ')'			{ $$ = make_attrp(ATTR_IIDIS, $3); }
+	| tIIDIS '(' expr ')'			{ $$ = make_attrp(ATTR_IIDIS, $3); }
 	| tIMMEDIATEBIND			{ $$ = make_attr(ATTR_IMMEDIATEBIND); }
 	| tIMPLICITHANDLE '(' tHANDLET aIDENTIFIER ')'	{ $$ = make_attrp(ATTR_IMPLICIT_HANDLE, $4); }
 	| tIN					{ $$ = make_attr(ATTR_IN); }
@@ -612,6 +611,7 @@ expr:	  aNUM					{ $$ = make_exprl(EXPR_NUM, $1); }
 	| expr SHR expr				{ $$ = make_expr2(EXPR_SHR, $1, $3); }
 	| '~' expr				{ $$ = make_expr1(EXPR_NOT, $2); }
 	| '-' expr %prec NEG			{ $$ = make_expr1(EXPR_NEG, $2); }
+	| '&' expr %prec ADDRESSOF      { $$ = make_expr1(EXPR_ADDRESSOF, $2); }
 	| '*' expr %prec PPTR			{ $$ = make_expr1(EXPR_PPTR, $2); }
 	| '(' type ')' expr %prec CAST		{ $$ = make_exprt(EXPR_CAST, $2, $4); }
 	| tSIZEOF '(' type ')'			{ $$ = make_exprt(EXPR_SIZEOF, $3, NULL); }
@@ -927,8 +927,8 @@ uniondef: tUNION t_ident '{' fields '}'		{ $$ = get_typev(RPC_FC_NON_ENCAPSULATE
 	;
 
 version:
-	  aNUM					{ $$ = MAKELONG($1, 0); }
-	| aNUM '.' aNUM				{ $$ = MAKELONG($1, $3); }
+	  aNUM					{ $$ = MAKEVERSION($1, 0); }
+	| aNUM '.' aNUM				{ $$ = MAKEVERSION($1, $3); }
 	;
 
 %%
@@ -1138,6 +1138,8 @@ static expr_t *make_exprt(enum expr_type type, type_t *tref, expr_t *expr)
 static expr_t *make_expr1(enum expr_type type, expr_t *expr)
 {
   expr_t *e;
+  if (type == EXPR_ADDRESSOF && expr->type != EXPR_IDENTIFIER)
+    error("address-of operator applied to invalid expression\n");
   e = xmalloc(sizeof(expr_t));
   e->type = type;
   e->ref = expr;
@@ -1329,7 +1331,7 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr,
     }
   }
 
-  if (ptr_type)
+  if (ptr_type && !arr)
   {
     if (is_ptr(v->type))
     {

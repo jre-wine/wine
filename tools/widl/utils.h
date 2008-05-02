@@ -46,4 +46,10 @@ size_t widl_getline(char **linep, size_t *lenp, FILE *fp);
 UUID *parse_uuid(const char *u);
 int is_valid_uuid(const char *s);
 
+/* typelibs expect the minor version to be stored in the higher bits and
+ * major to be stored in the lower bits */
+#define MAKEVERSION(major, minor) ((((minor) & 0xffff) << 16) | ((major) & 0xffff))
+#define MAJORVERSION(version) ((version) & 0xffff)
+#define MINORVERSION(version) (((version) >> 16) & 0xffff)
+
 #endif

@@ -9,6 +9,7 @@ IDL_H_SRCS = \
 	amstream.idl \
 	amvideo.idl \
 	austream.idl \
+	bits.idl \
 	comcat.idl \
 	control.idl \
 	d3d10.idl \
@@ -44,6 +45,7 @@ IDL_H_SRCS = \
 	objsafe.idl \
 	ocidl.idl \
 	ocmm.idl \
+	oleacc.idl \
 	oledb.idl \
 	oleidl.idl \
 	optary.idl \
@@ -83,6 +85,7 @@ SRCDIR_INCLUDES = \
 	basetsd.h \
 	basetyps.h \
 	bcrypt.h \
+	bitsmsg.h \
 	cderr.h \
 	cfgmgr32.h \
 	cguid.h \

@@ -508,6 +508,8 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
         apc_call_t call;
         apc_result_t result;
 
+        memset( &call, 0, sizeof(call) );
+
         call.create_thread.type    = APC_CREATE_THREAD;
         call.create_thread.func    = start;
         call.create_thread.arg     = param;
@@ -820,8 +822,13 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
                         ret = wine_server_call( req );
                     }
                     SERVER_END_REQ;
-                    if (ret != STATUS_PENDING) break;
-                    NtYieldExecution();
+                    if (ret == STATUS_PENDING)
+                    {
+                        LARGE_INTEGER timeout;
+                        timeout.QuadPart = -10000;
+                        NtDelayExecution( FALSE, &timeout );
+                    }
+                    else break;
                 }
                 NtResumeThread( handle, &dummy );
             }
@@ -1110,8 +1117,13 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
                         ret = wine_server_call( req );
                     }
                     SERVER_END_REQ;
-                    if (ret != STATUS_PENDING) break;
-                    NtYieldExecution();
+                    if (ret == STATUS_PENDING)
+                    {
+                        LARGE_INTEGER timeout;
+                        timeout.QuadPart = -10000;
+                        NtDelayExecution( FALSE, &timeout );
+                    }
+                    else break;
                 }
                 NtResumeThread( handle, &dummy );
             }

@@ -1080,7 +1080,7 @@ static HRESULT WINAPI statusclb_OnDataAvailable(IBindStatusCallback *iface, DWOR
 
     ok(pformatetc != NULL, "pformatetx == NULL\n");
     if(pformatetc) {
-        if (mime_type[0]) todo_wine {
+        if (mime_type[0]) {
             clipfmt[0] = 0;
             ok(GetClipboardFormatName(pformatetc->cfFormat, clipfmt, sizeof(clipfmt)-1),
                "GetClipboardFormatName failed, error %d\n", GetLastError());
@@ -1496,6 +1496,7 @@ static void test_BindToStorage(int protocol, BOOL emul)
     hres = IMoniker_GetDisplayName(mon, bctx, NULL, &display_name);
     ok(hres == S_OK, "GetDisplayName failed %08x\n", hres);
     ok(!lstrcmpW(display_name, urls[test_protocol]), "GetDisplayName got wrong name\n");
+    CoTaskMemFree(display_name);
 
     SET_EXPECT(GetBindInfo);
     SET_EXPECT(QueryInterface_IInternetProtocol);

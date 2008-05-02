@@ -58,13 +58,10 @@ enum fs_type
 {
     FS_ERROR,    /* error accessing the device */
     FS_UNKNOWN,  /* unknown file system */
-    FS_PLACEHOLDER,  /* Wine placeholder for drive device */
     FS_FAT1216,
     FS_FAT32,
     FS_ISO9660
 };
-
-static const char wine_placeholder[] = "Wine device placeholder";
 
 static const WCHAR drive_types[][8] =
 {
@@ -308,11 +305,7 @@ static enum fs_type VOLUME_ReadFATSuperblock( HANDLE handle, BYTE *buff )
         !ReadFile( handle, buff, SUPERBLOCK_SIZE, &size, NULL ))
         return FS_ERROR;
 
-    if (size >= sizeof(wine_placeholder)-1 &&
-        !memcmp( buff, wine_placeholder, sizeof(wine_placeholder)-1 ))
-        return FS_PLACEHOLDER;
-
-    if (size != SUPERBLOCK_SIZE) return FS_ERROR;
+    if (size < SUPERBLOCK_SIZE) return FS_UNKNOWN;
 
     /* FIXME: do really all FAT have their name beginning with
      * "FAT" ? (At least FAT12, FAT16 and FAT32 have :)
@@ -395,12 +388,11 @@ static void VOLUME_GetSuperblockLabel( const WCHAR *device, enum fs_type type, c
     switch(type)
     {
     case FS_ERROR:
-    case FS_UNKNOWN:
         label_len = 0;
         break;
-    case FS_PLACEHOLDER:
+    case FS_UNKNOWN:
         get_filesystem_label( device, label, len );
-        break;
+        return;
     case FS_FAT1216:
         label_ptr = superblock + 0x2b;
         label_len = 11;
@@ -446,9 +438,8 @@ static DWORD VOLUME_GetSuperblockSerial( const WCHAR *device, enum fs_type type,
     switch(type)
     {
     case FS_ERROR:
-    case FS_UNKNOWN:
         break;
-    case FS_PLACEHOLDER:
+    case FS_UNKNOWN:
         return get_filesystem_serial( device );
     case FS_FAT1216:
         return GETLONG( superblock, 0x27 );

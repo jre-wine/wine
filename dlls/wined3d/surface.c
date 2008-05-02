@@ -3236,6 +3236,9 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
                 return WINED3DERR_INVALIDCALL;
             }
 
+            ActivateContext(myDevice, (IWineD3DSurface *) This, CTXUSAGE_RESOURCELOAD);
+            ENTER_GL();
+
             TRACE("Calling GetSwapChain with mydevice = %p\n", myDevice);
             if(dstSwapchain && dstSwapchain->backBuffer && This == (IWineD3DSurfaceImpl*) dstSwapchain->backBuffer[0]) {
                 glDrawBuffer(GL_BACK);
@@ -3247,6 +3250,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
                 glDrawBuffer(myDevice->offscreenBuffer);
                 checkGLcall("glDrawBuffer(myDevice->offscreenBuffer3)");
             } else {
+                LEAVE_GL();
                 TRACE("Surface is higher back buffer, falling back to software\n");
                 return WINED3DERR_INVALIDCALL;
             }
@@ -3268,6 +3272,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, RECT *
                 glDrawBuffer(GL_BACK);
             }
             vcheckGLcall("glDrawBuffer");
+            LEAVE_GL();
 
             return WINED3D_OK;
         }
@@ -3478,6 +3483,14 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_PrivateSetup(IWineD3DSurface *iface) {
         This->glRect.top = 0;
         This->glRect.right = This->pow2Width;
         This->glRect.bottom = This->pow2Height;
+    }
+
+    if(This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
+        switch(wined3d_settings.offscreen_rendering_mode) {
+            case ORM_FBO:        This->get_drawable_size = get_drawable_size_fbo;        break;
+            case ORM_PBUFFER:    This->get_drawable_size = get_drawable_size_pbuffer;    break;
+            case ORM_BACKBUFFER: This->get_drawable_size = get_drawable_size_backbuffer; break;
+        }
     }
 
     This->Flags |= SFLAG_INSYSMEM;
@@ -3703,9 +3716,9 @@ static inline void surface_blt_to_drawable(IWineD3DSurfaceImpl *This, const RECT
  * Copies the current surface data from wherever it is to the requested
  * location. The location is one of the surface flags, SFLAG_INSYSMEM,
  * SFLAG_INTEXTURE and SFLAG_INDRAWABLE. When the surface is current in
- * multiple locations, the gl texture is prefered over the drawable, which is
- * prefered over system memory. The PBO counts as system memory. If rect is
- * not NULL, only the specified rectangle is copied(only supported for
+ * multiple locations, the gl texture is preferred over the drawable, which is
+ * preferred over system memory. The PBO counts as system memory. If rect is
+ * not NULL, only the specified rectangle is copied (only supported for
  * sysmem<->drawable copies at the moment). If rect is NULL, the destination
  * location is marked up to date after the copy.
  *
@@ -3877,6 +3890,28 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
     return WINED3D_OK;
 }
 
+HRESULT WINAPI IWineD3DSurfaceImpl_SetContainer(IWineD3DSurface *iface, IWineD3DBase *container) {
+    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *) iface;
+    IWineD3DSwapChain *swapchain = NULL;
+
+    /* Update the drawable size method */
+    if(container) {
+        IWineD3DBase_QueryInterface(container, &IID_IWineD3DSwapChain, (void **) &swapchain);
+    }
+    if(swapchain) {
+        This->get_drawable_size = get_drawable_size_swapchain;
+        IWineD3DSwapChain_Release(swapchain);
+    } else if(This->resource.usage & WINED3DUSAGE_RENDERTARGET) {
+        switch(wined3d_settings.offscreen_rendering_mode) {
+            case ORM_FBO:        This->get_drawable_size = get_drawable_size_fbo;        break;
+            case ORM_PBUFFER:    This->get_drawable_size = get_drawable_size_pbuffer;    break;
+            case ORM_BACKBUFFER: This->get_drawable_size = get_drawable_size_backbuffer; break;
+        }
+    }
+
+    return IWineD3DBaseSurfaceImpl_SetContainer(iface, container);
+}
+
 const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl =
 {
     /* IUnknown */
@@ -3924,7 +3959,7 @@ const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl =
     IWineD3DSurfaceImpl_LoadTexture,
     IWineD3DSurfaceImpl_BindTexture,
     IWineD3DSurfaceImpl_SaveSnapshot,
-    IWineD3DBaseSurfaceImpl_SetContainer,
+    IWineD3DSurfaceImpl_SetContainer,
     IWineD3DSurfaceImpl_SetGlTextureDesc,
     IWineD3DSurfaceImpl_GetGlDesc,
     IWineD3DSurfaceImpl_GetData,

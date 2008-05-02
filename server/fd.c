@@ -191,6 +191,7 @@ static const struct object_ops fd_ops =
 {
     sizeof(struct fd),        /* size */
     fd_dump,                  /* dump */
+    no_get_type,              /* get_type */
     no_add_queue,             /* add_queue */
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
@@ -227,6 +228,7 @@ static const struct object_ops device_ops =
 {
     sizeof(struct device),    /* size */
     device_dump,              /* dump */
+    no_get_type,              /* get_type */
     no_add_queue,             /* add_queue */
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
@@ -262,6 +264,7 @@ static const struct object_ops inode_ops =
 {
     sizeof(struct inode),     /* size */
     inode_dump,               /* dump */
+    no_get_type,              /* get_type */
     no_add_queue,             /* add_queue */
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
@@ -299,6 +302,7 @@ static const struct object_ops file_lock_ops =
 {
     sizeof(struct file_lock),   /* size */
     file_lock_dump,             /* dump */
+    no_get_type,                /* get_type */
     add_queue,                  /* add_queue */
     remove_queue,               /* remove_queue */
     file_lock_signaled,         /* signaled */
@@ -427,6 +431,11 @@ static int allocated_users;                 /* count of allocated entries in the
 static struct fd **freelist;                /* list of free entries in the array */
 
 static int get_next_timeout(void);
+
+static inline void fd_poll_event( struct fd *fd, int event )
+{
+    fd->fd_ops->poll_event( fd, event );
+}
 
 #ifdef USE_EPOLL
 
@@ -1687,12 +1696,6 @@ void set_fd_signaled( struct fd *fd, int signaled )
 int fd_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
 {
     return (!current || current->process == process);
-}
-
-/* callback for event happening in the main poll() loop */
-void fd_poll_event( struct fd *fd, int event )
-{
-    return fd->fd_ops->poll_event( fd, event );
 }
 
 /* check if events are pending and if yes return which one(s) */

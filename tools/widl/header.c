@@ -31,7 +31,6 @@
 #include <ctype.h>
 #include <signal.h>
 
-#include "windef.h"
 #include "widl.h"
 #include "utils.h"
 #include "parser.h"
@@ -482,6 +481,10 @@ void write_expr(FILE *h, const expr_t *e, int brackets)
     fprintf(h, " : ");
     write_expr(h, e->ext2, 1);
     if (brackets) fprintf(h, ")");
+    break;
+  case EXPR_ADDRESSOF:
+    fprintf(h, "&");
+    write_expr(h, e->ref, 1);
     break;
   }
 }
@@ -938,7 +941,7 @@ static void write_com_interface(type_t *iface)
 
 static void write_rpc_interface(const type_t *iface)
 {
-  unsigned long ver = get_attrv(iface->attrs, ATTR_VERSION);
+  unsigned int ver = get_attrv(iface->attrs, ATTR_VERSION);
   const char *var = get_attrp(iface->attrs, ATTR_IMPLICIT_HANDLE);
   static int allocate_written = 0;
 
@@ -950,7 +953,7 @@ static void write_rpc_interface(const type_t *iface)
   }
 
   fprintf(header, "/*****************************************************************************\n");
-  fprintf(header, " * %s interface (v%d.%d)\n", iface->name, LOWORD(ver), HIWORD(ver));
+  fprintf(header, " * %s interface (v%d.%d)\n", iface->name, MAJORVERSION(ver), MINORVERSION(ver));
   fprintf(header, " */\n");
   fprintf(header,"#ifndef __%s_INTERFACE_DEFINED__\n", iface->name);
   fprintf(header,"#define __%s_INTERFACE_DEFINED__\n\n", iface->name);
@@ -966,9 +969,9 @@ static void write_rpc_interface(const type_t *iface)
     else
     {
         fprintf(header, "extern RPC_IF_HANDLE %s%s_v%d_%d_c_ifspec;\n",
-                prefix_client, iface->name, LOWORD(ver), HIWORD(ver));
+                prefix_client, iface->name, MAJORVERSION(ver), MINORVERSION(ver));
         fprintf(header, "extern RPC_IF_HANDLE %s%s_v%d_%d_s_ifspec;\n",
-                prefix_server, iface->name, LOWORD(ver), HIWORD(ver));
+                prefix_server, iface->name, MAJORVERSION(ver), MINORVERSION(ver));
     }
     write_function_protos(iface);
   }

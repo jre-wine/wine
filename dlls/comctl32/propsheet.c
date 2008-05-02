@@ -1527,7 +1527,7 @@ static VOID PROPSHEET_LoadWizardBitmaps(PropSheetInfo *psInfo)
     if ((psInfo->ppshheader.dwFlags & PSH_WATERMARK) &&
         !(psInfo->ppshheader.dwFlags & PSH_USEHBMWATERMARK))
     {
-      ((PropSheetInfo *)psInfo)->ppshheader.u4.hbmWatermark = 
+      psInfo->ppshheader.u4.hbmWatermark =
         CreateMappedBitmap(psInfo->ppshheader.hInstance, (INT_PTR)psInfo->ppshheader.u4.pszbmWatermark, 0, NULL, 0);
     }
 
@@ -1535,7 +1535,7 @@ static VOID PROPSHEET_LoadWizardBitmaps(PropSheetInfo *psInfo)
     if ((psInfo->ppshheader.dwFlags & PSH_HEADER) &&
         !(psInfo->ppshheader.dwFlags & PSH_USEHBMHEADER))
     {
-      ((PropSheetInfo *)psInfo)->ppshheader.u5.hbmHeader = 
+      psInfo->ppshheader.u5.hbmHeader =
         CreateMappedBitmap(psInfo->ppshheader.hInstance, (INT_PTR)psInfo->ppshheader.u5.pszbmHeader, 0, NULL, 0);
     }
   }
@@ -2081,7 +2081,7 @@ static BOOL PROPSHEET_SetCurSel(HWND hwndDlg,
       index = PROPSHEET_FindPageByResId(psInfo, result);
       if(index >= psInfo->nPages) {
         index = old_index;
-        WARN("Tried to skip to nonexistant page by res id\n");
+        WARN("Tried to skip to nonexistent page by res id\n");
         break;
       }
       continue;
@@ -3520,6 +3520,8 @@ PROPSHEET_DialogProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
        * as some programs call TCM_GETCURSEL to get the current selection
        * from which to switch to the next page */
       SendMessageW(hwndTabCtrl, TCM_SETCURSEL, psInfo->active_page, 0);
+
+      PROPSHEET_UnChanged(hwnd, (HWND)wParam);
 
       return TRUE;
     }

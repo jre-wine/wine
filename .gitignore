@@ -10,10 +10,14 @@
 /tags
 /wine
 Makefile
+dlldata.c
 dlls/Makedll.rules
 dlls/Makeimplib.rules
 dlls/Maketest.rules
 dlls/activeds/libactiveds.def
+dlls/actxprxy/actxprxy_servprov.h
+dlls/actxprxy/actxprxy_servprov_i.c
+dlls/actxprxy/actxprxy_servprov_p.c
 dlls/advapi32/libadvapi32.def
 dlls/advapi32/tests/*.ok
 dlls/advapi32/tests/advapi32_crosstest.exe
@@ -377,6 +381,9 @@ dlls/psapi/tests/*.ok
 dlls/psapi/tests/psapi_crosstest.exe
 dlls/psapi/tests/testlist.c
 dlls/qcap/version.res
+dlls/qmgrprxy/qmgrprxy.h
+dlls/qmgrprxy/qmgrprxy_i.c
+dlls/qmgrprxy/qmgrprxy_p.c
 dlls/quartz/libquartz.def
 dlls/quartz/tests/*.ok
 dlls/quartz/tests/quartz_crosstest.exe
@@ -405,6 +412,7 @@ dlls/rpcrt4/version.res
 dlls/rsabase/tests/*.ok
 dlls/rsabase/tests/rsabase_crosstest.exe
 dlls/rsabase/tests/testlist.c
+dlls/rsabase/version.res
 dlls/rsaenh/librsaenh.def
 dlls/rsaenh/tests/*.ok
 dlls/rsaenh/tests/rsaenh_crosstest.exe
@@ -414,6 +422,7 @@ dlls/sane.ds/rsrc.res
 dlls/schannel/tests/*.ok
 dlls/schannel/tests/schannel_crosstest.exe
 dlls/schannel/tests/testlist.c
+dlls/schannel/version.res
 dlls/secur32/libsecur32.def
 dlls/secur32/tests/*.ok
 dlls/secur32/tests/secur32_crosstest.exe
@@ -564,6 +573,7 @@ include/activscp.h
 include/amstream.h
 include/amvideo.h
 include/austream.h
+include/bits.h
 include/comcat.h
 include/config.h
 include/control.h
@@ -600,6 +610,7 @@ include/objidl.h
 include/objsafe.h
 include/ocidl.h
 include/ocmm.h
+include/oleacc.h
 include/oledb.h
 include/oleidl.h
 include/optary.h
@@ -636,6 +647,7 @@ loader/wine-preloader
 loader/wine-preloader-installed
 loader/wine-pthread
 loader/wine-pthread-installed
+loader/wine.de.man
 loader/wine.man
 programs/Makeprog.rules
 programs/clock/clock
@@ -673,6 +685,7 @@ programs/rundll32/rundll32
 programs/spoolsv/spoolsv
 programs/start/rsrc.res
 programs/start/start
+programs/svchost/svchost
 programs/taskmgr/taskmgr
 programs/taskmgr/taskmgr.res
 programs/uninstaller/rsrc.res

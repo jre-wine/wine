@@ -2359,6 +2359,15 @@ enum message_type
 @END
 
 
+/* Enumerate window stations */
+@REQ(enum_winstation)
+    unsigned int index;           /* current index */
+@REPLY
+    unsigned int next;            /* next index */
+    VARARG(name,unicode_str);     /* window station name */
+@END
+
+
 /* Create a desktop */
 @REQ(create_desktop)
     unsigned int flags;           /* desktop flags */
@@ -2398,6 +2407,16 @@ enum message_type
 /* Set the thread current desktop */
 @REQ(set_thread_desktop)
     obj_handle_t handle;          /* handle to the desktop */
+@END
+
+
+/* Enumerate desktops */
+@REQ(enum_desktop)
+    obj_handle_t winstation;      /* handle to the window station */
+    unsigned int index;           /* current index */
+@REPLY
+    unsigned int next;            /* next index */
+    VARARG(name,unicode_str);     /* window station name */
 @END
 
 
@@ -2829,6 +2848,17 @@ enum message_type
     VARARG(directory_name,unicode_str); /* Directory name */
 @REPLY
     obj_handle_t   handle;        /* handle to the directory */
+@END
+
+
+/* Get a directory entry by index */
+@REQ(get_directory_entry)
+    obj_handle_t   handle;             /* handle to the directory */
+    unsigned int   index;              /* entry index */
+@REPLY
+    size_t         name_len;           /* length of the entry name in bytes */
+    VARARG(name,unicode_str,name_len); /* entry name */
+    VARARG(type,unicode_str);          /* entry type */
 @END
 
 

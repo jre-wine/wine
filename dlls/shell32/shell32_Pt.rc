@@ -124,6 +124,7 @@ MENU_SHV_FILE MENU DISCARDABLE
 BEGIN
 	POPUP ""
 	BEGIN
+	  MENUITEM "&Select"		FCIDM_SHVIEW_OPEN
 	  MENUITEM "&Explorar",		FCIDM_SHVIEW_EXPLORE
 	  MENUITEM "A&brir",		FCIDM_SHVIEW_OPEN
 	  MENUITEM SEPARATOR
@@ -371,4 +372,6 @@ STRINGTABLE DISCARDABLE
 	IDS_COMMON_PICTURES         "Os Meus Documentos\\As Minhas Imagens"
 	IDS_COMMON_VIDEO            "Os Meus Documentos\\Os Meus Vídeos"
 	IDS_CDBURN_AREA             "Definições locais\\Application Data\\Microsoft\\CD Burning"
+
+	IDS_NEWFOLDER		"New Folder"
 }

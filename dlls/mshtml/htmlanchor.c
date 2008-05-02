@@ -484,7 +484,9 @@ static const NodeImplVtbl HTMLAnchorElementImplVtbl = {
 
 HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement *nselem)
 {
-    HTMLAnchorElement *ret = mshtml_alloc(sizeof(HTMLAnchorElement));
+    HTMLAnchorElement *ret = heap_alloc(sizeof(HTMLAnchorElement));
+
+    HTMLElement_Init(&ret->element);
 
     ret->lpHTMLAnchorElementVtbl = &HTMLAnchorElementVtbl;
     ret->element.node.vtbl = &HTMLAnchorElementImplVtbl;

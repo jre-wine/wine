@@ -2340,6 +2340,7 @@ typedef struct {
 typedef struct {
     LPPAGESETUPDLGW	dlga;
     PRINTDLGW		pdlg;
+    PAGESETUPDLGW	curdlg; /* Current dialog state */
 } PageSetupDataW;
 
 
@@ -2791,21 +2792,30 @@ PRINTDLG_PS_WMCommandA(
         }
 	return TRUE;
     case rad1:
-	    if (pda->curdlg.ptPaperSize.x > pda->curdlg.ptPaperSize.y){
-	        DWORD tmp = pda->curdlg.ptPaperSize.x;
-		pda->curdlg.ptPaperSize.x = pda->curdlg.ptPaperSize.y;
-		pda->curdlg.ptPaperSize.y = tmp;
-	    }
-	    PRINTDLG_PS_ChangePaperPrev(pda);
-	break;
     case rad2:
-	    if (pda->curdlg.ptPaperSize.y > pda->curdlg.ptPaperSize.x){
-	        DWORD tmp = pda->curdlg.ptPaperSize.x;
-		pda->curdlg.ptPaperSize.x = pda->curdlg.ptPaperSize.y;
-		pda->curdlg.ptPaperSize.y = tmp;
-	    }
+	if((id == rad1 && pda->curdlg.ptPaperSize.x > pda->curdlg.ptPaperSize.y) ||
+	   (id == rad2 && pda->curdlg.ptPaperSize.y > pda->curdlg.ptPaperSize.x))
+	{
+	    char TmpText[25];
+	    char TmpText2[25];
+	    DWORD tmp = pda->curdlg.ptPaperSize.x;
+
+	    pda->curdlg.ptPaperSize.x = pda->curdlg.ptPaperSize.y;
+	    pda->curdlg.ptPaperSize.y = tmp;
+
+	    GetDlgItemTextA(hDlg, edt4, TmpText, sizeof(TmpText));
+	    GetDlgItemTextA(hDlg, edt5, TmpText2, sizeof(TmpText2));
+	    SetDlgItemTextA(hDlg, edt5, TmpText);
+	    SetDlgItemTextA(hDlg, edt4, TmpText2);
+
+	    GetDlgItemTextA(hDlg, edt6, TmpText, sizeof(TmpText));
+	    GetDlgItemTextA(hDlg, edt7, TmpText2, sizeof(TmpText2));
+	    SetDlgItemTextA(hDlg, edt7, TmpText);
+	    SetDlgItemTextA(hDlg, edt6, TmpText2);
+
 	    PRINTDLG_PS_ChangePaperPrev(pda);
-	    break;
+	}
+	break;
     case cmb1: /* Printer combo */
 	    if(msg == CBN_SELCHANGE){
 		char crPrinterName[256];
@@ -2890,10 +2900,10 @@ PRINTDLG_PS_WMCommandA(
     	GETVAL(id, pda->curdlg.rtMargin.left);
 	break;
     case edt5:
-    	GETVAL(id, pda->curdlg.rtMargin.right);
+	GETVAL(id, pda->curdlg.rtMargin.top);
 	break;
     case edt6:
-    	GETVAL(id, pda->curdlg.rtMargin.top);
+	GETVAL(id, pda->curdlg.rtMargin.right);
 	break;
     case edt7:
     	GETVAL(id, pda->curdlg.rtMargin.bottom);
@@ -2920,6 +2930,30 @@ PRINTDLG_PS_WMCommandW(
     case IDCANCEL:
         EndDialog(hDlg, FALSE);
 	return FALSE ;
+
+    case rad1:
+    case rad2:
+	if((LOWORD(wParam) == rad1 && pda->curdlg.ptPaperSize.x > pda->curdlg.ptPaperSize.y) ||
+	   (LOWORD(wParam) == rad2 && pda->curdlg.ptPaperSize.y > pda->curdlg.ptPaperSize.x))
+	{
+	    WCHAR tmpText[25];
+	    WCHAR tmpText2[25];
+	    DWORD tmp = pda->curdlg.ptPaperSize.y;
+
+	    pda->curdlg.ptPaperSize.y = pda->curdlg.ptPaperSize.x;
+	    pda->curdlg.ptPaperSize.x = tmp;
+
+	    GetDlgItemTextW(hDlg, edt4, tmpText, sizeof(tmpText)/sizeof(WCHAR));
+	    GetDlgItemTextW(hDlg, edt5, tmpText2, sizeof(tmpText2)/sizeof(WCHAR));
+	    SetDlgItemTextW(hDlg, edt5, tmpText);
+	    SetDlgItemTextW(hDlg, edt4, tmpText2);
+
+	    GetDlgItemTextW(hDlg, edt6, tmpText, sizeof(tmpText)/sizeof(WCHAR));
+	    GetDlgItemTextW(hDlg, edt7, tmpText2, sizeof(tmpText2)/sizeof(WCHAR));
+	    SetDlgItemTextW(hDlg, edt7, tmpText);
+	    SetDlgItemTextW(hDlg, edt6, tmpText2);
+	}
+	break;
 
     case psh3: {
 	pda->pdlg.Flags		= 0;
@@ -3069,12 +3103,12 @@ PRINTDLG_PagePaintProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     scalx = rcClient.right  / (double)pda->curdlg.ptPaperSize.x;
     scaly = rcClient.bottom / (double)pda->curdlg.ptPaperSize.y; 
     rcMargin = rcClient;
- 
-    rcMargin.left   += (LONG)pda->curdlg.rtMargin.left   * scalx;
-    rcMargin.top    += (LONG)pda->curdlg.rtMargin.top    * scalx;
-    rcMargin.right  -= (LONG)pda->curdlg.rtMargin.right  * scaly;
-    rcMargin.bottom -= (LONG)pda->curdlg.rtMargin.bottom * scaly;
-    
+
+    rcMargin.left   += pda->curdlg.rtMargin.left   * scalx;
+    rcMargin.top    += pda->curdlg.rtMargin.top    * scalx;
+    rcMargin.right  -= pda->curdlg.rtMargin.right  * scaly;
+    rcMargin.bottom -= pda->curdlg.rtMargin.bottom * scaly;
+
     /* if the space is too small then we make sure to not draw anything */
     rcMargin.left = min(rcMargin.left, rcMargin.right);
     rcMargin.top = min(rcMargin.top, rcMargin.bottom);
@@ -3274,6 +3308,7 @@ PageDlgProcW(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
     if (uMsg==WM_INITDIALOG) {
 	res = TRUE;
         pda = (PageSetupDataW*)lParam;
+	memcpy(&pda->curdlg, pda, sizeof(pda->curdlg));
 	SetPropW(hDlg, __WINE_PAGESETUPDLGDATA, pda);
 	if (pda->dlga->Flags & PSD_ENABLEPAGESETUPHOOK) {
 	    res = pda->dlga->lpfnPageSetupHook(hDlg,uMsg,wParam,(LPARAM)pda->dlga);
@@ -3295,15 +3330,31 @@ PageDlgProcW(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
             EnableWindow(GetDlgItem(hDlg, edt7), FALSE);
 	}
 
+        PRINTDLG_PS_ChangePrinterW(hDlg,pda);
+
         if(pda->dlga->hDevMode)
         {
+            WCHAR PaperName[64];
+
             dm = GlobalLock(pda->dlga->hDevMode);
             /* Landscape orientation */
             if (dm->u1.s1.dmOrientation == DMORIENT_LANDSCAPE)
                 CheckRadioButton(hDlg, rad1, rad2, rad2);
             else /* this is default if papersize is not set */
                 CheckRadioButton(hDlg, rad1, rad2, rad1);
+
+            GetDlgItemTextW(hDlg, cmb2, PaperName, sizeof(PaperName)/sizeof(WCHAR));
+            PRINTDLG_PaperSizeW(&pda->pdlg, PaperName, &pda->curdlg.ptPaperSize);
+            pda->curdlg.ptPaperSize.x = _c_10mm2size((LPPAGESETUPDLGA)pda->dlga, pda->curdlg.ptPaperSize.x);
+            pda->curdlg.ptPaperSize.y = _c_10mm2size((LPPAGESETUPDLGA)pda->dlga, pda->curdlg.ptPaperSize.y);
             GlobalUnlock(pda->dlga->hDevMode);
+
+            if(IsDlgButtonChecked(hDlg, rad2))
+            {
+                DWORD tmp = pda->curdlg.ptPaperSize.x;
+                pda->curdlg.ptPaperSize.x = pda->curdlg.ptPaperSize.y;
+                pda->curdlg.ptPaperSize.y = tmp;
+	    }
         }
 
 	if (pda->dlga->Flags & PSD_DISABLEORIENTATION) {
@@ -3331,7 +3382,7 @@ PageDlgProcW(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	    SetDlgItemTextW(hDlg,edt6,str);
 	    SetDlgItemTextW(hDlg,edt7,str);
 	}
-	PRINTDLG_PS_ChangePrinterW(hDlg,pda);
+
 	if (pda->dlga->Flags & PSD_DISABLEPAPER) {
 	    EnableWindow(GetDlgItem(hDlg,cmb2),FALSE);
 	    EnableWindow(GetDlgItem(hDlg,cmb3),FALSE);

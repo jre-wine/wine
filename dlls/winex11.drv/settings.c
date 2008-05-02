@@ -44,7 +44,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11settings);
 static LPDDHALMODEINFO dd_modes = NULL;
 static unsigned int dd_mode_count = 0;
 static unsigned int dd_max_modes = 0;
-static int dd_mode_default = 0;
 static const unsigned int depths[]  = {8, 16, 32};
 
 /* pointers to functions that actually do the hard stuff */
@@ -130,12 +129,6 @@ void X11DRV_Settings_AddDepthModes(void)
     }
 }
 
-/* set the default mode */
-void X11DRV_Settings_SetDefaultMode(int mode)
-{
-    dd_mode_default = mode;
-}
-
 /* return the number of modes that are initialized */
 unsigned int X11DRV_Settings_GetModeCount(void)
 {
@@ -197,6 +190,8 @@ static BOOL read_registry_settings(DEVMODEW *dm)
     DWORD type, size;
     BOOL ret = TRUE;
 
+    dm->dmFields = 0;
+
     if (!get_display_device_reg_key(wine_x11_reg_key, sizeof(wine_x11_reg_key)))
         return FALSE;
 
@@ -210,10 +205,15 @@ static BOOL read_registry_settings(DEVMODEW *dm)
         ret = FALSE
 
     query_value("DefaultSettings.BitsPerPel", &dm->dmBitsPerPel);
+    dm->dmFields |= DM_BITSPERPEL;
     query_value("DefaultSettings.XResolution", &dm->dmPelsWidth);
+    dm->dmFields |= DM_PELSWIDTH;
     query_value("DefaultSettings.YResolution", &dm->dmPelsHeight);
+    dm->dmFields |= DM_PELSHEIGHT;
     query_value("DefaultSettings.VRefresh", &dm->dmDisplayFrequency);
+    dm->dmFields |= DM_DISPLAYFREQUENCY;
     query_value("DefaultSettings.Flags", &dm->u2.dmDisplayFlags);
+    dm->dmFields |= DM_DISPLAYFLAGS;
     query_value("DefaultSettings.XPanning", &dm->u1.s2.dmPosition.x);
     query_value("DefaultSettings.YPanning", &dm->u1.s2.dmPosition.y);
     query_value("DefaultSettings.Orientation", &dm->u1.s2.dmDisplayOrientation);
@@ -266,10 +266,6 @@ BOOL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DW
 {
     static const WCHAR dev_name[CCHDEVICENAME] =
         { 'W','i','n','e',' ','X','1','1',' ','d','r','i','v','e','r',0 };
-    DWORD dwBpp;
-
-    dwBpp = screen_depth;
-    if (dwBpp == 24) dwBpp = 32;
 
     devmode->dmSize = sizeof(DEVMODEW);
     devmode->dmSpecVersion = MAKEWORD(1,4);
@@ -370,20 +366,26 @@ LONG X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
         if (devmode->dmFields & DM_DISPLAYFREQUENCY) def_mode &= !devmode->dmDisplayFrequency;
     }
 
-    if (def_mode)
+    if (def_mode || !dwBpp)
     {
-        TRACE("Return to original display mode (%s)\n", handler_name);
-        if (!X11DRV_EnumDisplaySettingsEx(devname, dd_mode_default, &dm, 0))
+        if (!X11DRV_EnumDisplaySettingsEx(devname, ENUM_REGISTRY_SETTINGS, &dm, 0))
         {
             ERR("Default mode not found!\n");
             return DISP_CHANGE_BADMODE;
         }
-        devmode = &dm;
+        if (def_mode)
+        {
+            TRACE("Return to original display mode (%s)\n", handler_name);
+            devmode = &dm;
+        }
+        dwBpp = dm.dmBitsPerPel;
     }
-    dwBpp = !dwBpp ? dd_modes[dd_mode_default].dwBPP : dwBpp;
 
     if ((devmode->dmFields & (DM_PELSWIDTH | DM_PELSHEIGHT)) != (DM_PELSWIDTH | DM_PELSHEIGHT))
+    {
+        WARN("devmode doesn't specify the resolution: %04x\n", devmode->dmFields);
         return DISP_CHANGE_BADMODE;
+    }
 
     for (i = 0; i < dd_mode_count; i++)
     {
@@ -416,13 +418,14 @@ LONG X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
 
         if (!(flags & (CDS_TEST | CDS_NORESET)))
             return pSetCurrentMode(i);
+
         return DISP_CHANGE_SUCCESSFUL;
     }
 
     /* no valid modes found */
-    ERR("No matching mode found(%dx%dx%d)! (%s)\n",
+    ERR("No matching mode found %ux%ux%u @%u! (%s)\n",
         devmode->dmPelsWidth, devmode->dmPelsHeight,
-        devmode->dmBitsPerPel, handler_name);
+        devmode->dmBitsPerPel, devmode->dmDisplayFrequency, handler_name);
     return DISP_CHANGE_BADMODE;
 }
 

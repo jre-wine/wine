@@ -3996,7 +3996,7 @@ TREEVIEW_LButtonDown(TREEVIEW_INFO *infoPtr, LPARAM lParam)
     if(ht.hItem && (ht.flags & TVHT_ONITEM))
     {
         infoPtr->focusedItem = ht.hItem;
-        InvalidateRect(hwnd, &(((HTREEITEM)(ht.hItem))->rect), TRUE);
+        InvalidateRect(hwnd, &ht.hItem->rect, TRUE);
 
         if(infoPtr->selectedItem)
             InvalidateRect(hwnd, &(infoPtr->selectedItem->rect), TRUE);
@@ -4160,6 +4160,21 @@ TREEVIEW_RButtonDown(TREEVIEW_INFO *infoPtr, LPARAM lParam)
 static LRESULT
 TREEVIEW_RButtonUp(const TREEVIEW_INFO *infoPtr, const POINT *pPt)
 {
+    TVHITTESTINFO ht;
+
+    ht.pt = *pPt;
+
+    TREEVIEW_HitTest(infoPtr, &ht);
+
+    if (ht.hItem)
+    {
+        /* Change to screen coordinate for WM_CONTEXTMENU */
+        ClientToScreen(infoPtr->hwnd, &ht.pt);
+
+        /* Send a WM_CONTEXTMENU message in response to the RBUTTONUP */
+        SendMessageW(infoPtr->hwnd, WM_CONTEXTMENU,
+            (WPARAM)infoPtr->hwnd, MAKELPARAM(ht.pt.x, ht.pt.y));
+    }
     return 0;
 }
 

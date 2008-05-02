@@ -28,5 +28,8 @@
 #include "resource.h"
 
 #include "wineboot_En.rc"
+#include "wineboot_Es.rc"
+#include "wineboot_Fr.rc"
 #include "wineboot_Ko.rc"
+#include "wineboot_No.rc"
 #include "wineboot_Sv.rc"

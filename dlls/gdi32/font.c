@@ -1144,34 +1144,40 @@ BOOL WINAPI GetTextExtentPoint32W(
 }
 
 /***********************************************************************
- * GetTextExtentPointI [GDI32.@]
+ * GetTextExtentExPointI [GDI32.@]
  *
  * Computes width and height of the array of glyph indices.
+ *
+ * PARAMS
+ *    hdc     [I] Handle of device context.
+ *    indices [I] Glyph index array.
+ *    count   [I] Number of glyphs in array.
+ *    max_ext [I] Maximum width in glyphs.
+ *    nfit    [O] Maximum number of characters.
+ *    dxs     [O] Partial string widths.
+ *    size    [O] Returned string size.
  *
  * RETURNS
  *    Success: TRUE
  *    Failure: FALSE
  */
-BOOL WINAPI GetTextExtentPointI(
-    HDC hdc,     /* [in]  Handle of device context */
-    const WORD *indices,   /* [in]  Address of glyph index array */
-    INT count,   /* [in]  Number of glyphs in array */
-    LPSIZE size) /* [out] Address of structure for string size */
+BOOL WINAPI GetTextExtentExPointI( HDC hdc, const WORD *indices, INT count, INT max_ext,
+                                   LPINT nfit, LPINT dxs, LPSIZE size )
 {
     BOOL ret = FALSE;
     DC * dc = DC_GetDCPtr( hdc );
     if (!dc) return FALSE;
 
     if(dc->gdiFont) {
-        ret = WineEngGetTextExtentPointI(dc->gdiFont, indices, count, size);
-	size->cx = abs(INTERNAL_XDSTOWS(dc, size->cx));
-	size->cy = abs(INTERNAL_YDSTOWS(dc, size->cy));
+        ret = WineEngGetTextExtentExPointI(dc->gdiFont, indices, count, max_ext, nfit, dxs, size);
+        size->cx = abs(INTERNAL_XDSTOWS(dc, size->cx));
+        size->cy = abs(INTERNAL_YDSTOWS(dc, size->cy));
         size->cx += count * dc->charExtra;
     }
     else if(dc->funcs->pGetTextExtentExPoint) {
         FIXME("calling GetTextExtentExPoint\n");
         ret = dc->funcs->pGetTextExtentExPoint( dc->physDev, (LPCWSTR)indices,
-                                                count, 0, NULL, NULL, size );
+                                                count, max_ext, nfit, dxs, size );
     }
 
     DC_ReleaseDCPtr( dc );
@@ -1179,6 +1185,26 @@ BOOL WINAPI GetTextExtentPointI(
     TRACE("(%p %p %d %p): returning %d x %d\n",
           hdc, indices, count, size, size->cx, size->cy );
     return ret;
+}
+
+/***********************************************************************
+ * GetTextExtentPointI [GDI32.@]
+ *
+ * Computes width and height of the array of glyph indices.
+ *
+ * PARAMS
+ *    hdc     [I] Handle of device context.
+ *    indices [I] Glyph index array.
+ *    count   [I] Number of glyphs in array.
+ *    size    [O] Returned string size.
+ *
+ * RETURNS
+ *    Success: TRUE
+ *    Failure: FALSE
+ */
+BOOL WINAPI GetTextExtentPointI( HDC hdc, const WORD *indices, INT count, LPSIZE size )
+{
+    return GetTextExtentExPointI( hdc, indices, count, 0, NULL, NULL, size );
 }
 
 
@@ -2484,6 +2510,12 @@ BOOL WINAPI GetCharABCWidthsW( HDC hdc, UINT firstChar, UINT lastChar,
 
     if (!dc) return FALSE;
 
+    if (!abc)
+    {
+        DC_ReleaseDCPtr( dc );
+        return FALSE;
+    }
+
     if(dc->gdiFont)
         ret = WineEngGetCharABCWidths( dc->gdiFont, firstChar, lastChar, abc );
     else
@@ -2532,6 +2564,12 @@ BOOL WINAPI GetCharABCWidthsI( HDC hdc, UINT firstChar, UINT count,
     BOOL ret = FALSE;
 
     if (!dc) return FALSE;
+
+    if (!abc)
+    {
+        DC_ReleaseDCPtr( dc );
+        return FALSE;
+    }
 
     if(dc->gdiFont)
         ret = WineEngGetCharABCWidthsI( dc->gdiFont, firstChar, count, pgi, abc );
@@ -2754,7 +2792,7 @@ DWORD WINAPI GetKerningPairsW( HDC hDC, DWORD cPairs,
  * TranslateCharsetInfo [GDI32.@]
  *
  * Fills a CHARSETINFO structure for a character set, code page, or
- * font. This allows making the correspondance between different labelings
+ * font. This allows making the correspondence between different labelings
  * (character set, Windows, ANSI, and OEM codepages, and Unicode ranges)
  * of the same encoding.
  *

@@ -3126,7 +3126,8 @@ typedef enum _GL_Cards {
   CARD_INTEL_I855G                = 0x3582,
   CARD_INTEL_I865G                = 0x2572,
   CARD_INTEL_I915G                = 0x2582,
-  CARD_INTEL_I915GM               = 0x2592
+  CARD_INTEL_I915GM               = 0x2592,
+  CARD_INTEL_I945GM               = 0x27a2, /* Same as GMA 950?? */
 } GL_Cards;
 
 #define WINE_DEFAULT_VIDMEM 64*1024*1024
@@ -3684,6 +3685,7 @@ typedef struct _WineD3D_GL_Info {
   GL_VSVersion vs_ati_version;
 
   BOOL arb_vs_offset_limit;
+  BOOL set_texcoord_w;
 
   BOOL supported[OPENGL_SUPPORTED_EXT_END + 1];
 

@@ -1,10 +1,7 @@
 /*
- * Implementation of qmgr.dll
+ * msvcrt40 main file
  *
- * Background Intelligent Transfer Service (BITS) interface.  Dll is named
- * qmgr for backwards compatibility with early versions of BITS.
- *
- * Copyright 2007 Google (Roy Shea)
+ * Copyright (C) 2007 Louis Lenders
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,24 +23,20 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wine/debug.h"
-#include "objbase.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(bits);
+WINE_DEFAULT_DEBUG_CHANNEL(msvcrt40);
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 {
-    TRACE("(%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
-
-    switch (fdwReason)
-    {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls(hinstDLL);
-        break;
+   switch (reason)
+   {
+   case DLL_WINE_PREATTACH:
+       return FALSE;  /* prefer native version */
+   case DLL_PROCESS_ATTACH:
+       DisableThreadLibraryCalls( inst );
+       break;
     case DLL_PROCESS_DETACH:
         break;
-    }
-
-    return TRUE;
+   }
+   return TRUE;
 }

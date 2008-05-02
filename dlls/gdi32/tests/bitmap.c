@@ -119,8 +119,10 @@ static void test_createdibitmap(void)
 {
     HDC hdc, hdcmem;
     BITMAPINFOHEADER bmih;
+    BITMAPINFO bm;
     HBITMAP hbm, hbm_colour, hbm_old;
     INT screen_depth;
+    DWORD pixel;
 
     hdc = GetDC(0);
     screen_depth = GetDeviceCaps(hdc, BITSPIXEL);
@@ -182,7 +184,8 @@ static void test_createdibitmap(void)
 
     /* Now select a polychrome bitmap into the dc and we expect
        screen_depth bitmaps again */
-    hbm_colour = CreateCompatibleBitmap(hdc, 1, 1);
+    hbm_colour = CreateCompatibleBitmap(hdc, bmih.biWidth, bmih.biHeight);
+    test_bitmap_info(hbm_colour, screen_depth, &bmih);
     hbm_old = SelectObject(hdcmem, hbm_colour);
 
     /* First try 32 bits */
@@ -218,7 +221,30 @@ static void test_createdibitmap(void)
         test_bitmap_info(hbm, 1, &bmih);
         DeleteObject(hbm);
     }
-    
+
+    /* Test how formats are converted */
+    pixel = 0xffffffff;
+    bmih.biBitCount = 1;
+    bmih.biWidth = 1;
+    bmih.biHeight = 1;
+
+    memset(&bm, 0, sizeof(bm));
+    bm.bmiHeader.biSize = sizeof(bm.bmiHeader);
+    bm.bmiHeader.biWidth = 1;
+    bm.bmiHeader.biHeight = 1;
+    bm.bmiHeader.biPlanes = 1;
+    bm.bmiHeader.biBitCount= 24;
+    bm.bmiHeader.biCompression= BI_RGB;
+    bm.bmiHeader.biSizeImage = 0;
+    hbm = CreateDIBitmap(hdc, &bmih, CBM_INIT, &pixel, &bm, DIB_RGB_COLORS);
+    ok(hbm != NULL, "CreateDIBitmap failed\n");
+
+    pixel = 0xdeadbeef;
+    bm.bmiHeader.biBitCount= 32;
+    GetDIBits(hdc, hbm, 0, 1, &pixel, &bm, DIB_RGB_COLORS);
+    ok(pixel == 0x00ffffff, "Reading a 32 bit pixel from a DDB returned %08x\n", pixel);
+    DeleteObject(hbm);
+
     ReleaseDC(0, hdc);
 }
 
@@ -1555,7 +1581,10 @@ static void test_select_object(void)
 {
     HDC hdc;
     HBITMAP hbm, hbm_old;
-    INT planes, bpp;
+    INT planes, bpp, i;
+    DWORD depths[] = {8, 15, 16, 24, 32};
+    BITMAP bm;
+    DWORD bytes;
 
     hdc = GetDC(0);
     ok(hdc != 0, "GetDC(0) failed\n");
@@ -1594,17 +1623,45 @@ static void test_select_object(void)
 
     DeleteObject(hbm);
 
-    /* test a color bitmap that doesn't match the dc's bpp */
-    planes = GetDeviceCaps(hdc, PLANES);
-    bpp = GetDeviceCaps(hdc, BITSPIXEL) == 24 ? 8 : 24;
+    for(i = 0; i < sizeof(depths)/sizeof(depths[0]); i++) {
+        /* test a color bitmap to dc bpp matching */
+        planes = GetDeviceCaps(hdc, PLANES);
+        bpp = GetDeviceCaps(hdc, BITSPIXEL);
 
-    hbm = CreateBitmap(10, 10, planes, bpp, NULL);
-    ok(hbm != 0, "CreateBitmap failed\n");
+        hbm = CreateBitmap(10, 10, planes, depths[i], NULL);
+        ok(hbm != 0, "CreateBitmap failed\n");
 
-    hbm_old = SelectObject(hdc, hbm);
-    ok(hbm_old == 0, "SelectObject should fail\n");
+        hbm_old = SelectObject(hdc, hbm);
+        if(depths[i] == bpp ||
+          (bpp == 16 && depths[i] == 15)        /* 16 and 15 bpp are compatible */
+          ) {
+            ok(hbm_old != 0, "SelectObject failed, BITSPIXEL: %d, created depth: %d\n", bpp, depths[i]);
+            SelectObject(hdc, hbm_old);
+        } else {
+            if(bpp == 24 && depths[i] == 32) {
+                todo_wine ok(hbm_old == 0, "SelectObject should fail. BITSPIXELS: %d, created depth: %d\n", bpp, depths[i]);
+            } else {
+                ok(hbm_old == 0, "SelectObject should fail. BITSPIXELS: %d, created depth: %d\n", bpp, depths[i]);
+            }
+        }
 
-    DeleteObject(hbm);
+        memset(&bm, 0xAA, sizeof(bm));
+        bytes = GetObject(hbm, sizeof(bm), &bm);
+        ok(bytes == sizeof(bm), "GetObject returned %d\n", bytes);
+        ok(bm.bmType == 0, "wrong bmType %d\n", bm.bmType);
+        ok(bm.bmWidth == 10, "wrong bmWidth %d\n", bm.bmWidth);
+        ok(bm.bmHeight == 10, "wrong bmHeight %d\n", bm.bmHeight);
+        ok(bm.bmWidthBytes == BITMAP_GetWidthBytes(bm.bmWidth, bm.bmBitsPixel), "wrong bmWidthBytes %d\n", bm.bmWidthBytes);
+        ok(bm.bmPlanes == planes, "wrong bmPlanes %u\n", bm.bmPlanes);
+        if(depths[i] == 15) {
+            ok(bm.bmBitsPixel == 16, "wrong bmBitsPixel %d(15 bpp special)\n", bm.bmBitsPixel);
+        } else {
+            ok(bm.bmBitsPixel == depths[i], "wrong bmBitsPixel %d\n", bm.bmBitsPixel);
+        }
+        ok(!bm.bmBits, "wrong bmBits %p\n", bm.bmBits);
+
+        DeleteObject(hbm);
+    }
 
     DeleteDC(hdc);
 }
@@ -1644,6 +1701,7 @@ static void test_CreateBitmap(void)
     BITMAP bmp;
     HDC screenDC = GetDC(0);
     HDC hdc = CreateCompatibleDC(screenDC);
+    UINT i, expect = 0;
 
     /* all of these are the stock monochrome bitmap */
     HBITMAP bm = CreateCompatibleBitmap(hdc, 0, 0);
@@ -1702,6 +1760,42 @@ static void test_CreateBitmap(void)
     ok(bm != 0, "CreateBitmapIndirect error %u\n", GetLastError());
     test_mono_1x1_bmp(bm);
     DeleteObject(bm);
+
+    /* Test how the bmBitsPixel field is treated */
+    for(i = 1; i <= 33; i++) {
+        bmp.bmType = 0;
+        bmp.bmWidth = 1;
+        bmp.bmHeight = 1;
+        bmp.bmWidthBytes = 28;
+        bmp.bmPlanes = 1;
+        bmp.bmBitsPixel = i;
+        bmp.bmBits = NULL;
+        bm = CreateBitmapIndirect(&bmp);
+        if(i > 32) {
+            DWORD error = GetLastError();
+            ok(bm == 0, "CreateBitmapIndirect for %d bpp succeeded\n", i);
+            ok(error == ERROR_INVALID_PARAMETER, "Got error %d, expected ERROR_INVALID_PARAMETER\n", error);
+            continue;
+        }
+        ok(bm != 0, "CreateBitmapIndirect error %u\n", GetLastError());
+        GetObject(bm, sizeof(bmp), &bmp);
+        if(i == 1) {
+            expect = 1;
+        } else if(i <= 4) {
+            expect = 4;
+        } else if(i <= 8) {
+            expect = 8;
+        } else if(i <= 16) {
+            expect = 16;
+        } else if(i <= 24) {
+            expect = 24;
+        } else if(i <= 32) {
+            expect = 32;
+        }
+        ok(bmp.bmBitsPixel == expect, "CreateBitmapIndirect for a %d bpp bitmap created a %d bpp bitmap, expected %d\n",
+           i, bmp.bmBitsPixel, expect);
+        DeleteObject(bm);
+    }
 }
 
 static void test_bitmapinfoheadersize(void)

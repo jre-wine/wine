@@ -259,6 +259,11 @@ typedef struct tagFace {
     Bitmap_Size size;     /* set if face is a bitmap */
     BOOL external; /* TRUE if we should manually add this font to the registry */
     struct tagFamily *family;
+    /* Cached data for Enum */
+    BOOL cache_valid;
+    ENUMLOGFONTEXW elf;
+    NEWTEXTMETRICEXW ntm;
+    DWORD type;
 } Face;
 
 typedef struct tagFamily {
@@ -1234,6 +1239,7 @@ static INT AddFontToList(const char *file, void *font_data_ptr, DWORD font_data_
                 }
             }
             face = HeapAlloc(GetProcessHeap(), 0, sizeof(*face));
+            face->cache_valid = FALSE;
             list_add_tail(&family->faces, &face->entry);
             face->StyleName = StyleW;
             if (file)
@@ -3253,6 +3259,15 @@ static void GetEnumStructs(Face *face, LPENUMLOGFONTEXW pelf,
     GdiFont *font = alloc_font();
     LONG width, height;
 
+    if (face->cache_valid)
+    {
+        TRACE("Cached\n");
+        memcpy(pelf,&face->elf,sizeof(ENUMLOGFONTEXW));
+        memcpy(pntm,&face->ntm,sizeof(NEWTEXTMETRICEXW));
+        *ptype = face->type;
+        return;
+    }
+
     if(face->scalable) {
         height = 100;
         width = 0;
@@ -3347,6 +3362,11 @@ static void GetEnumStructs(Face *face, LPENUMLOGFONTEXW pelf,
     }
 
     pelf->elfScript[0] = '\0'; /* This will get set in WineEngEnumFonts */
+
+    memcpy(&face->elf,pelf,sizeof(ENUMLOGFONTEXW));
+    memcpy(&face->ntm,pntm,sizeof(NEWTEXTMETRICEXW));
+    face->type = *ptype;
+    face->cache_valid = TRUE;
 
     free_font(font);
 }
@@ -4512,7 +4532,7 @@ BOOL WineEngGetCharABCWidthsI(GdiFont *font, UINT firstChar, UINT count, LPWORD 
     FT_UInt glyph_index;
     GdiFont *linked_font;
 
-    if(!FT_IS_SCALABLE(font->ft_face))
+    if(!FT_HAS_HORIZONTAL(font->ft_face))
         return FALSE;
 
     get_glyph_index_linked(font, 'a', &linked_font, &glyph_index);
@@ -4580,17 +4600,18 @@ BOOL WineEngGetTextExtentExPoint(GdiFont *font, LPCWSTR wstr, INT count,
 }
 
 /*************************************************************
- * WineEngGetTextExtentPointI
+ * WineEngGetTextExtentExPointI
  *
  */
-BOOL WineEngGetTextExtentPointI(GdiFont *font, const WORD *indices, INT count,
-				LPSIZE size)
+BOOL WineEngGetTextExtentExPointI(GdiFont *font, const WORD *indices, INT count,
+                                  INT max_ext, LPINT pnfit, LPINT dxs, LPSIZE size)
 {
     INT idx;
+    INT nfit = 0, ext;
     GLYPHMETRICS gm;
     TEXTMETRICW tm;
 
-    TRACE("%p, %p, %d, %p\n", font, indices, count, size);
+    TRACE("%p, %p, %d, %d, %p\n", font, indices, count, max_ext, size);
 
     size->cx = 0;
     WineEngGetTextMetrics(font, &tm);
@@ -4600,9 +4621,19 @@ BOOL WineEngGetTextExtentPointI(GdiFont *font, const WORD *indices, INT count,
         WineEngGetGlyphOutline(font, indices[idx],
 			       GGO_METRICS | GGO_GLYPH_INDEX, &gm, 0, NULL,
 			       NULL);
-	size->cx += FONT_GM(font,indices[idx])->adv;
+        size->cx += FONT_GM(font,indices[idx])->adv;
+        ext = size->cx;
+        if (! pnfit || ext <= max_ext) {
+            ++nfit;
+            if (dxs)
+                dxs[idx] = ext;
+        }
     }
-    TRACE("return %d,%d\n", size->cx, size->cy);
+
+    if (pnfit)
+        *pnfit = nfit;
+
+    TRACE("return %d, %d, %d\n", size->cx, size->cy, nfit);
     return TRUE;
 }
 
@@ -5129,8 +5160,8 @@ BOOL WineEngGetTextExtentExPoint(GdiFont *font, LPCWSTR wstr, INT count,
     return FALSE;
 }
 
-BOOL WineEngGetTextExtentPointI(GdiFont *font, const WORD *indices, INT count,
-				LPSIZE size)
+BOOL WineEngGetTextExtentExPointI(GdiFont *font, const WORD *indices, INT count,
+                                  INT max_ext, LPINT nfit, LPINT dx, LPSIZE size)
 {
     ERR("called but we don't have FreeType\n");
     return FALSE;

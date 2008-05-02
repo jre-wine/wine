@@ -114,7 +114,7 @@ IDL_GEN_C_SRCS  = $(IDL_C_SRCS:.idl=_c.c) $(IDL_I_SRCS:.idl=_i.c) \
 IDL_GEN_HEADERS = $(IDL_H_SRCS:.idl=.h) $(IDL_C_SRCS:.idl=.h) $(IDL_I_SRCS:.idl=.h) \
                   $(IDL_P_SRCS:.idl=.h) $(IDL_S_SRCS:.idl=.h)
 
-CLEAN_TARGETS = $(IDL_GEN_C_SRCS) $(IDL_GEN_HEADERS) $(IDL_TLB_SRCS:.idl=.tlb) \
+CLEAN_TARGETS = $(IDL_GEN_C_SRCS) $(IDL_GEN_HEADERS) $(IDL_TLB_SRCS:.idl=.tlb) $(IDL_P_SRCS:%=dlldata.c) \
                 $(BISON_SRCS:.y=.tab.c) $(BISON_SRCS:.y=.tab.h) $(LEX_SRCS:.l=.yy.c) \
                 $(MC_SRCS:.mc=.mc.rc) $(RC_SRCS:.rc=.res) $(RC_SRCS16:.rc=.res)
 
@@ -182,7 +182,7 @@ LINTS  = $(C_SRCS:.c=.ln)
 	$(FONTFORGE) -script $(TOPSRCDIR)/fonts/genttf.ff $< $@
 
 .man.in.man:
-	sed -e 's,@bindir\@,$(bindir),g' -e 's,@dlldir\@,$(dlldir),g' -e 's,@PACKAGE_STRING\@,@PACKAGE_STRING@,g' $< >$@ || ($(RM) $@ && false)
+	LC_ALL=C sed -e 's,@bindir\@,$(bindir),g' -e 's,@dlldir\@,$(dlldir),g' -e 's,@PACKAGE_STRING\@,@PACKAGE_STRING@,g' $< >$@ || ($(RM) $@ && false)
 
 # 'all' target first in case the enclosing Makefile didn't define any target
 
@@ -192,6 +192,11 @@ filter: dummy
 	@$(TOPSRCDIR)/tools/winapi/make_filter --make $(MAKE) all
 
 .PHONY: all filter
+
+# Rules for IDL files
+
+dlldata.c: $(WIDL) Makefile.in
+	$(WIDL) $(IDLFLAGS) --dlldata-only --dlldata=$@ $(IDL_P_SRCS)
 
 # Rules for resources
 

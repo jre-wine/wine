@@ -174,7 +174,7 @@ static int numeric_leaf(int* value, const unsigned short int* leaf)
 
         case LF_USHORT:
             length += 2;
-            *value = *(const unsigned short*)leaf;
+            *value = *leaf;
             break;
 
         case LF_LONG:
@@ -355,7 +355,7 @@ static int codeview_add_type(unsigned int typeno, struct symt* dt)
     if (cv_current_module->defined_types[typeno - FIRST_DEFINABLE_TYPE])
     {
         if (cv_current_module->defined_types[typeno - FIRST_DEFINABLE_TYPE] != dt)
-            FIXME("Overwritting at %x\n", typeno);
+            FIXME("Overwriting at %x\n", typeno);
     }
     cv_current_module->defined_types[typeno - FIRST_DEFINABLE_TYPE] = dt;
     return TRUE;

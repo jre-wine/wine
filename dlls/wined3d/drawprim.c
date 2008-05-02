@@ -133,7 +133,7 @@ static BOOL fixed_get_input(
     else if (usage == WINED3DDECLUSAGE_SAMPLE && usage_idx == 0)
         *regnum = 14 + WINED3DDP_MAXTEXCOORD;
 
-    if (*regnum < 0) {
+    if (*regnum == -1) {
         FIXME("Unsupported input stream [usage=%s, usage_idx=%u]\n",
             debug_d3ddeclusage(usage), usage_idx);
         return FALSE;
@@ -197,7 +197,7 @@ void primitiveDeclarationConvertToStridedData(
                 WARN("loadBaseVertexIndex is < 0 (%d), not using vbos\n", This->stateBlock->loadBaseVertexIndex);
                 streamVBO = 0;
                 data = ((IWineD3DVertexBufferImpl *) This->stateBlock->streamSource[element->Stream])->resource.allocatedMemory;
-                if(data + This->stateBlock->loadBaseVertexIndex * stride < 0) {
+                if((UINT_PTR)data < -This->stateBlock->loadBaseVertexIndex * stride) {
                     FIXME("System memory vertex data load offset is negative!\n");
                 }
             }

@@ -4179,7 +4179,7 @@ IDirect3DDeviceImpl_7_GetTexture(IDirect3DDevice7 *iface,
     }
 
     EnterCriticalSection(&ddraw_cs);
-    hr = IWineD3DDevice_GetTexture(This->wineD3DDevice, Stage, (IWineD3DBaseTexture **) &Surf);
+    hr = IWineD3DDevice_GetTexture(This->wineD3DDevice, Stage, &Surf);
     if( (hr != D3D_OK) || (!Surf) ) 
     {
         *Texture = NULL;
@@ -5477,8 +5477,8 @@ const IDirect3DDeviceVtbl IDirect3DDevice1_Vtbl =
     IDirect3DDeviceImpl_1_SetMatrix,
     IDirect3DDeviceImpl_1_GetMatrix,
     IDirect3DDeviceImpl_1_DeleteMatrix,
-    Thunk_IDirect3DDeviceImpl_1_EndScene,
     Thunk_IDirect3DDeviceImpl_1_BeginScene,
+    Thunk_IDirect3DDeviceImpl_1_EndScene,
     Thunk_IDirect3DDeviceImpl_1_GetDirect3D
 };
 

@@ -78,9 +78,9 @@ static void test_WM_SETTEXT()
   result = SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) a); \
   ok (result == 1, "WM_SETTEXT returned %ld instead of 1\n", result); \
   result = SendMessage(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM) buf); \
-  ok (result == strlen(buf), \
+  ok (result == lstrlen(buf), \
 	"WM_GETTEXT returned %ld instead of expected %u\n", \
-	result, strlen(buf)); \
+	result, lstrlen(buf)); \
   result = strcmp(b, buf); \
   if (is_todo) todo_wine { \
   ok(result == 0, \
@@ -108,6 +108,29 @@ static void test_WM_SETTEXT()
   DestroyWindow(hwndRichEdit);
 }
 
+static void test_WM_GETTEXTLENGTH(void)
+{
+    HWND hwndRichEdit = new_richedit(NULL);
+    static const char text3[] = "aaa\r\nbbb\r\nccc\r\nddd\r\neee";
+    static const char text4[] = "aaa\r\nbbb\r\nccc\r\nddd\r\neee\r\n";
+    int result;
+
+    /* Test for WM_GETTEXTLENGTH */
+    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text3);
+    result = SendMessage(hwndRichEdit, WM_GETTEXTLENGTH, 0, 0);
+    ok(result == lstrlen(text3),
+        "WM_GETTEXTLENGTH reports incorrect length %d, expected %d\n",
+        result, lstrlen(text3));
+
+    SendMessage(hwndRichEdit, WM_SETTEXT, 0, (LPARAM) text4);
+    result = SendMessage(hwndRichEdit, WM_GETTEXTLENGTH, 0, 0);
+    ok(result == lstrlen(text4),
+        "WM_GETTEXTLENGTH reports incorrect length %d, expected %d\n",
+        result, lstrlen(text4));
+
+    DestroyWindow(hwndRichEdit);
+}
+
 START_TEST( editor )
 {
   MSG msg;
@@ -119,6 +142,7 @@ START_TEST( editor )
   ok(hmoduleRichEdit != NULL, "error: %d\n", (int) GetLastError());
 
   test_WM_SETTEXT();
+  test_WM_GETTEXTLENGTH();
 
   /* Set the environment variable WINETEST_RICHED32 to keep windows
    * responsive and open for 30 seconds. This is useful for debugging.

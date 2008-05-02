@@ -3237,6 +3237,20 @@ struct set_process_winstation_reply
 
 
 
+struct enum_winstation_request
+{
+    struct request_header __header;
+    unsigned int index;
+};
+struct enum_winstation_reply
+{
+    struct reply_header __header;
+    unsigned int next;
+    /* VARARG(name,unicode_str); */
+};
+
+
+
 struct create_desktop_request
 {
     struct request_header __header;
@@ -3302,6 +3316,21 @@ struct set_thread_desktop_request
 struct set_thread_desktop_reply
 {
     struct reply_header __header;
+};
+
+
+
+struct enum_desktop_request
+{
+    struct request_header __header;
+    obj_handle_t winstation;
+    unsigned int index;
+};
+struct enum_desktop_reply
+{
+    struct reply_header __header;
+    unsigned int next;
+    /* VARARG(name,unicode_str); */
 };
 
 
@@ -3921,6 +3950,22 @@ struct open_directory_reply
 
 
 
+struct get_directory_entry_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    unsigned int   index;
+};
+struct get_directory_entry_reply
+{
+    struct reply_header __header;
+    size_t         name_len;
+    /* VARARG(name,unicode_str,name_len); */
+    /* VARARG(type,unicode_str); */
+};
+
+
+
 struct create_symlink_request
 {
     struct request_header __header;
@@ -4376,11 +4421,13 @@ enum request
     REQ_close_winstation,
     REQ_get_process_winstation,
     REQ_set_process_winstation,
+    REQ_enum_winstation,
     REQ_create_desktop,
     REQ_open_desktop,
     REQ_close_desktop,
     REQ_get_thread_desktop,
     REQ_set_thread_desktop,
+    REQ_enum_desktop,
     REQ_set_user_object_info,
     REQ_attach_thread_input,
     REQ_get_thread_input,
@@ -4417,6 +4464,7 @@ enum request
     REQ_set_mailslot_info,
     REQ_create_directory,
     REQ_open_directory,
+    REQ_get_directory_entry,
     REQ_create_symlink,
     REQ_open_symlink,
     REQ_query_symlink,
@@ -4611,11 +4659,13 @@ union generic_request
     struct close_winstation_request close_winstation_request;
     struct get_process_winstation_request get_process_winstation_request;
     struct set_process_winstation_request set_process_winstation_request;
+    struct enum_winstation_request enum_winstation_request;
     struct create_desktop_request create_desktop_request;
     struct open_desktop_request open_desktop_request;
     struct close_desktop_request close_desktop_request;
     struct get_thread_desktop_request get_thread_desktop_request;
     struct set_thread_desktop_request set_thread_desktop_request;
+    struct enum_desktop_request enum_desktop_request;
     struct set_user_object_info_request set_user_object_info_request;
     struct attach_thread_input_request attach_thread_input_request;
     struct get_thread_input_request get_thread_input_request;
@@ -4652,6 +4702,7 @@ union generic_request
     struct set_mailslot_info_request set_mailslot_info_request;
     struct create_directory_request create_directory_request;
     struct open_directory_request open_directory_request;
+    struct get_directory_entry_request get_directory_entry_request;
     struct create_symlink_request create_symlink_request;
     struct open_symlink_request open_symlink_request;
     struct query_symlink_request query_symlink_request;
@@ -4844,11 +4895,13 @@ union generic_reply
     struct close_winstation_reply close_winstation_reply;
     struct get_process_winstation_reply get_process_winstation_reply;
     struct set_process_winstation_reply set_process_winstation_reply;
+    struct enum_winstation_reply enum_winstation_reply;
     struct create_desktop_reply create_desktop_reply;
     struct open_desktop_reply open_desktop_reply;
     struct close_desktop_reply close_desktop_reply;
     struct get_thread_desktop_reply get_thread_desktop_reply;
     struct set_thread_desktop_reply set_thread_desktop_reply;
+    struct enum_desktop_reply enum_desktop_reply;
     struct set_user_object_info_reply set_user_object_info_reply;
     struct attach_thread_input_reply attach_thread_input_reply;
     struct get_thread_input_reply get_thread_input_reply;
@@ -4885,6 +4938,7 @@ union generic_reply
     struct set_mailslot_info_reply set_mailslot_info_reply;
     struct create_directory_reply create_directory_reply;
     struct open_directory_reply open_directory_reply;
+    struct get_directory_entry_reply get_directory_entry_reply;
     struct create_symlink_reply create_symlink_reply;
     struct open_symlink_reply open_symlink_reply;
     struct query_symlink_reply query_symlink_reply;
@@ -4906,6 +4960,6 @@ union generic_reply
     struct add_fd_completion_reply add_fd_completion_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 332
+#define SERVER_PROTOCOL_VERSION 334
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

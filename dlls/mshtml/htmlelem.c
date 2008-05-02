@@ -50,7 +50,7 @@ static void elem_vector_add(elem_vector *buf, HTMLElement *elem)
 {
     if(buf->len == buf->size) {
         buf->size <<= 1;
-        buf->buf = mshtml_realloc(buf->buf, buf->size*sizeof(HTMLElement**));
+        buf->buf = heap_realloc(buf->buf, buf->size*sizeof(HTMLElement**));
     }
 
     buf->buf[buf->len++] = elem;
@@ -59,10 +59,10 @@ static void elem_vector_add(elem_vector *buf, HTMLElement *elem)
 static void elem_vector_normalize(elem_vector *buf)
 {
     if(!buf->len) {
-        mshtml_free(buf->buf);
+        heap_free(buf->buf);
         buf->buf = NULL;
     }else if(buf->size > buf->len) {
-        buf->buf = mshtml_realloc(buf->buf, buf->len*sizeof(HTMLElement**));
+        buf->buf = heap_realloc(buf->buf, buf->len*sizeof(HTMLElement**));
     }
 
     buf->size = buf->len;
@@ -1059,7 +1059,7 @@ static void create_child_list(HTMLDocument *doc, HTMLElement *elem, elem_vector 
         return;
 
     buf->size = list_len;
-    buf->buf = mshtml_alloc(buf->size*sizeof(HTMLElement**));
+    buf->buf = heap_alloc(buf->size*sizeof(HTMLElement**));
 
     for(i=0; i<list_len; i++) {
         nsres = nsIDOMNodeList_Item(nsnode_list, i, &iter);
@@ -1129,7 +1129,7 @@ static HRESULT WINAPI HTMLElement_get_all(IHTMLElement *iface, IDispatch **p)
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    buf.buf = mshtml_alloc(buf.size*sizeof(HTMLElement**));
+    buf.buf = heap_alloc(buf.size*sizeof(HTMLElement**));
 
     create_all_list(This->node.doc, &This->node, &buf);
     elem_vector_normalize(&buf);
@@ -1255,6 +1255,9 @@ HRESULT HTMLElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
     }else if(IsEqualGUID(&IID_IHTMLElement2, riid)) {
         TRACE("(%p)->(IID_IHTMLElement2 %p)\n", This, ppv);
         *ppv = HTMLELEM2(This);
+    }else if(IsEqualGUID(&IID_IConnectionPointContainer, riid)) {
+        TRACE("(%p)->(IID_IConnectionPointContainer %p)\n", This, ppv);
+        *ppv = CONPTCONT(&This->cp_container);
     }
 
     if(*ppv) {
@@ -1269,6 +1272,8 @@ void HTMLElement_destructor(HTMLDOMNode *iface)
 {
     HTMLElement *This = HTMLELEM_NODE_THIS(iface);
 
+    ConnectionPointContainer_Destroy(&This->cp_container);
+
     if(This->nselem)
         nsIDOMHTMLElement_Release(This->nselem);
 
@@ -1279,6 +1284,16 @@ static const NodeImplVtbl HTMLElementImplVtbl = {
     HTMLElement_QI,
     HTMLElement_destructor
 };
+
+void HTMLElement_Init(HTMLElement *This)
+{
+    This->node.vtbl = &HTMLElementImplVtbl;
+    This->lpHTMLElementVtbl = &HTMLElementVtbl;
+
+    ConnectionPointContainer_Init(&This->cp_container, (IUnknown*)HTMLELEM(This));
+
+    HTMLElement2_Init(This);
+}
 
 HTMLElement *HTMLElement_Create(nsIDOMNode *nsnode)
 {
@@ -1321,16 +1336,13 @@ HTMLElement *HTMLElement_Create(nsIDOMNode *nsnode)
         ret = HTMLTextAreaElement_Create(nselem);
 
     if(!ret) {
-        ret = mshtml_alloc(sizeof(HTMLElement));
-        ret->node.vtbl = &HTMLElementImplVtbl;
+        ret = heap_alloc(sizeof(HTMLElement));
+        HTMLElement_Init(ret);
     }
 
     nsAString_Finish(&class_name_str);
 
-    ret->lpHTMLElementVtbl = &HTMLElementVtbl;
     ret->nselem = nselem;
-
-    HTMLElement2_Init(ret);
 
     return ret;
 }
@@ -1395,8 +1407,8 @@ static ULONG WINAPI HTMLElementCollection_Release(IHTMLElementCollection *iface)
 
     if(!ref) {
         IUnknown_Release(This->ref_unk);
-        mshtml_free(This->elems);
-        mshtml_free(This);
+        heap_free(This->elems);
+        heap_free(This);
     }
 
     return ref;
@@ -1551,7 +1563,7 @@ static HRESULT WINAPI HTMLElementCollection_item(IHTMLElementCollection *iface,
         }else {
             elem_vector buf = {NULL, 0, 8};
 
-            buf.buf = mshtml_alloc(buf.size*sizeof(HTMLElement*));
+            buf.buf = heap_alloc(buf.size*sizeof(HTMLElement*));
 
             for(i=0; i<This->len; i++) {
                 if(is_elem_name(This->elems[i], V_BSTR(&name)))
@@ -1567,7 +1579,7 @@ static HRESULT WINAPI HTMLElementCollection_item(IHTMLElementCollection *iface,
                     IDispatch_AddRef(*pdisp);
                 }
 
-                mshtml_free(buf.buf);
+                heap_free(buf.buf);
             }
 
             return S_OK;
@@ -1594,7 +1606,7 @@ static HRESULT WINAPI HTMLElementCollection_tags(IHTMLElementCollection *iface,
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(V_BSTR(&tagName)), pdisp);
 
-    buf.buf = mshtml_alloc(buf.size*sizeof(HTMLElement*));
+    buf.buf = heap_alloc(buf.size*sizeof(HTMLElement*));
 
     nsAString_Init(&tag_str, NULL);
 
@@ -1641,7 +1653,7 @@ IHTMLElementCollection *create_all_collection(HTMLDOMNode *node)
 {
     elem_vector buf = {NULL, 0, 8};
 
-    buf.buf = mshtml_alloc(buf.size*sizeof(HTMLElement**));
+    buf.buf = heap_alloc(buf.size*sizeof(HTMLElement**));
 
     elem_vector_add(&buf, HTMLELEM_NODE_THIS(node));
     create_all_list(node->doc, node, &buf);
@@ -1653,7 +1665,7 @@ IHTMLElementCollection *create_all_collection(HTMLDOMNode *node)
 static IHTMLElementCollection *HTMLElementCollection_Create(IUnknown *ref_unk,
             HTMLElement **elems, DWORD len)
 {
-    HTMLElementCollection *ret = mshtml_alloc(sizeof(HTMLElementCollection));
+    HTMLElementCollection *ret = heap_alloc(sizeof(HTMLElementCollection));
 
     ret->lpHTMLElementCollectionVtbl = &HTMLElementCollectionVtbl;
     ret->ref = 1;

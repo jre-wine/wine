@@ -549,6 +549,7 @@ struct PLIGHTINFOEL {
     LONG         glIndex;
     BOOL         changed;
     BOOL         enabledChanged;
+    BOOL         enabled;
 
     /* Converted parms to speed up swapping lights */
     float                         lightPosn[4];
@@ -573,6 +574,7 @@ typedef struct WineD3D_PixelFormat
 typedef struct GLPixelFormatDesc GLPixelFormatDesc;
 struct WineD3DAdapter
 {
+    UINT                    num;
     POINT                   monitorPoint;
     WineD3D_GL_Info         gl_info;
     const char              *driver;
@@ -1086,6 +1088,9 @@ struct IWineD3DSurfaceImpl
     UINT                      pow2Width;
     UINT                      pow2Height;
 
+    /* A method to retrieve the drawable size. Not in the Vtable to make it changeable */
+    void (*get_drawable_size)(IWineD3DSurfaceImpl *This, UINT *width, UINT *height);
+
     /* Oversized texture */
     RECT                      glRect;
 
@@ -1160,6 +1165,11 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED3DL
 void WINAPI IWineD3DBaseSurfaceImpl_BindTexture(IWineD3DSurface *iface);
 
 const void *WINAPI IWineD3DSurfaceImpl_GetData(IWineD3DSurface *iface);
+
+void get_drawable_size_swapchain(IWineD3DSurfaceImpl *This, UINT *width, UINT *height);
+void get_drawable_size_backbuffer(IWineD3DSurfaceImpl *This, UINT *width, UINT *height);
+void get_drawable_size_pbuffer(IWineD3DSurfaceImpl *This, UINT *width, UINT *height);
+void get_drawable_size_fbo(IWineD3DSurfaceImpl *This, UINT *width, UINT *height);
 
 /* Surface flags: */
 #define SFLAG_OVERSIZE    0x00000001 /* Surface is bigger than gl size, blts only */
@@ -1434,6 +1444,15 @@ extern void stateblock_copy(
 
 extern const IWineD3DStateBlockVtbl IWineD3DStateBlock_Vtbl;
 
+/* Direct3D terminology with little modifications. We do not have an issued state
+ * because only the driver knows about it, but we have a created state because d3d
+ * allows GetData on a created issue, but opengl doesn't
+ */
+enum query_state {
+    QUERY_CREATED,
+    QUERY_SIGNALLED,
+    QUERY_BUILDING
+};
 /*****************************************************************************
  * IWineD3DQueryImpl implementation structure (extends IUnknown)
  */
@@ -1451,6 +1470,7 @@ typedef struct IWineD3DQueryImpl
 #endif
 
     /* IWineD3DQuery fields */
+    enum query_state         state;
     WINED3DQUERYTYPE         type;
     /* TODO: Think about using a IUnknown instead of a void* */
     void                     *extendedData;
@@ -1663,6 +1683,7 @@ typedef struct shader_reg_maps {
     char packed_output[MAX_REG_OUTPUT];     /* vertex >= 3.0 */
     char attributes[MAX_ATTRIBS];           /* vertex */
     char labels[MAX_LABELS];                /* pixel, vertex */
+    DWORD texcoord_mask[MAX_REG_TEXCRD];    /* vertex < 3.0 */
 
     /* Sampler usage tokens 
      * Use 0 as default (bit 31 is always 1 on a valid token) */
@@ -2001,6 +2022,10 @@ extern void print_glsl_info_log(
 static inline int shader_get_regtype(const DWORD param) {
     return (((param & WINED3DSP_REGTYPE_MASK) >> WINED3DSP_REGTYPE_SHIFT) |
             ((param & WINED3DSP_REGTYPE_MASK2) >> WINED3DSP_REGTYPE_SHIFT2));
+}
+
+static inline int shader_get_writemask(const DWORD param) {
+    return param & WINED3DSP_WRITEMASK_ALL;
 }
 
 extern unsigned int shader_get_float_offset(const DWORD reg);

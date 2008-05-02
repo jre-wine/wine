@@ -40,9 +40,7 @@ typedef struct {
 
     const IHTMLBodyElementVtbl *lpHTMLBodyElementVtbl;
 
-    ConnectionPointContainer cp_container;
     ConnectionPoint cp_propnotif;
-    ConnectionPoint cp_txtcontevents;
 
     nsIDOMHTMLBodyElement *nsbody;
 } HTMLBodyElement;
@@ -129,7 +127,7 @@ static HRESULT WINAPI HTMLBodyElement_get_background(IHTMLBodyElement *iface, BS
     if(NS_SUCCEEDED(nsres)) {
         const PRUnichar *background;
         nsAString_GetData(&background_str, &background, NULL);
-        *p = SysAllocString(background);
+        *p = *background ? SysAllocString(background) : NULL;
     }else {
         ERR("GetBackground failed: %08x\n", nsres);
         *p = NULL;
@@ -464,9 +462,6 @@ static HRESULT HTMLBodyElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
     }else if(IsEqualGUID(&IID_IHTMLTextContainer, riid)) {
         TRACE("(%p)->(IID_IHTMLTextContainer %p)\n", &This->textcont, ppv);
         *ppv = HTMLTEXTCONT(&This->textcont);
-    }else if(IsEqualGUID(&IID_IConnectionPointContainer, riid)) {
-        TRACE("(%p)->(IID_IConnectionPointContainer %p)\n", This, ppv);
-        *ppv = CONPTCONT(&This->cp_container);
     }
 
     if(*ppv) {
@@ -481,7 +476,6 @@ static void HTMLBodyElement_destructor(HTMLDOMNode *iface)
 {
     HTMLBodyElement *This = HTMLBODY_NODE_THIS(iface);
 
-    ConnectionPointContainer_Destroy(&This->cp_container);
     nsIDOMHTMLBodyElement_Release(This->nsbody);
 
     HTMLElement_destructor(&This->textcont.element.node);
@@ -496,21 +490,17 @@ static const NodeImplVtbl HTMLBodyElementImplVtbl = {
 
 HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement *nselem)
 {
-    HTMLBodyElement *ret = mshtml_alloc(sizeof(HTMLBodyElement));
+    HTMLBodyElement *ret = heap_alloc(sizeof(HTMLBodyElement));
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", ret, nselem);
 
+    HTMLTextContainer_Init(&ret->textcont);
+
     ret->lpHTMLBodyElementVtbl = &HTMLBodyElementVtbl;
     ret->textcont.element.node.vtbl = &HTMLBodyElementImplVtbl;
 
-    HTMLTextContainer_Init(&ret->textcont);
-
-    ConnectionPoint_Init(&ret->cp_propnotif, CONPTCONT(&ret->cp_container),
-            &IID_IPropertyNotifySink, NULL);
-    ConnectionPoint_Init(&ret->cp_txtcontevents, CONPTCONT(&ret->cp_container),
-            &DIID_HTMLTextContainerEvents, &ret->cp_propnotif);
-    ConnectionPointContainer_Init(&ret->cp_container, &ret->cp_propnotif, (IUnknown*)HTMLBODY(ret));
+    ConnectionPoint_Init(&ret->cp_propnotif, &ret->textcont.element.cp_container, &IID_IPropertyNotifySink);
 
     nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLBodyElement,
                                              (void**)&ret->nsbody);

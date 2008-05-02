@@ -188,7 +188,7 @@ static void proxy_check_pointers( const var_list_t *args )
 static void free_variable( const var_t *arg )
 {
   unsigned int type_offset = arg->type->typestring_offset;
-  var_t *constraint;
+  expr_t *iid;
   type_t *type = arg->type;
   expr_t *size = get_size_is_expr(type, arg->name);
 
@@ -219,9 +219,13 @@ static void free_variable( const var_t *arg )
 
   case RPC_FC_FP:
   case RPC_FC_IP:
-    constraint = get_attrp( arg->attrs, ATTR_IIDIS );
-    if( constraint )
-      print_proxy( "_StubMsg.MaxCount = (unsigned long) ( %s );\n",constraint->name);
+    iid = get_attrp( arg->attrs, ATTR_IIDIS );
+    if( iid )
+    {
+      print_proxy( "_StubMsg.MaxCount = (unsigned long) " );
+      write_expr(proxy, iid, 1);
+      print_proxy( ";\n\n" );
+    }
     print_proxy( "NdrClearOutParameters( &_StubMsg, ");
     fprintf(proxy, "&__MIDL_TypeFormatString.Format[%u], ", type_offset );
     fprintf(proxy, "(void*)%s );\n", arg->name );
@@ -268,6 +272,11 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
   }
   print_proxy( "RPC_MESSAGE _RpcMessage;\n" );
   print_proxy( "MIDL_STUB_MESSAGE _StubMsg;\n" );
+  if (has_ret) {
+    if (decl_indirect(def->type))
+      print_proxy("void *_p_%s = &%s;\n",
+                 "_RetVal", "_RetVal");
+  }
   print_proxy( "\n");
 
   /* FIXME: trace */
@@ -303,7 +312,13 @@ static void gen_proxy(type_t *iface, const func_t *cur, int idx,
   write_remoting_arguments(proxy, indent, cur, PASS_OUT, PHASE_UNMARSHAL);
 
   if (has_ret)
-      print_phase_basetype(proxy, indent, PHASE_UNMARSHAL, PASS_RETURN, def, "_RetVal");
+  {
+      if (decl_indirect(def->type))
+          print_proxy("MIDL_memset(&%s, 0, sizeof(%s));\n", "_RetVal", "_RetVal");
+      else if (is_ptr(def->type) || is_array(def->type))
+          print_proxy("%s = 0;\n", "_RetVal");
+      write_remoting_arguments(proxy, indent, cur, PASS_RETURN, PHASE_UNMARSHAL);
+  }
 
   indent--;
   print_proxy( "}\n");

@@ -191,6 +191,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
                 ERR("tdata->connection should be NULL but is still set to %p\n", tdata);
             HeapFree(GetProcessHeap(), 0, tdata);
         }
+        break;
 
     case DLL_PROCESS_DETACH:
         CloseHandle(master_mutex);
@@ -238,10 +239,12 @@ RPC_STATUS WINAPI RpcStringFreeW(RPC_WSTR* String)
  *
  * Raises an exception.
  */
-void WINAPI RpcRaiseException(RPC_STATUS exception)
+void DECLSPEC_NORETURN WINAPI RpcRaiseException(RPC_STATUS exception)
 {
-  /* FIXME: translate exception? */
+  /* shouldn't return */
   RaiseException(exception, 0, 0, NULL);
+  ERR("handler continued execution\n");
+  ExitProcess(1);
 }
 
 /*************************************************************************

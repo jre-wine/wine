@@ -25,8 +25,7 @@
  *  - transmit_as/represent as
  *  - Multi-dimensional arrays
  *  - Conversion functions (NdrConvert)
- *  - Checks for integer addition overflow
- *  - Checks for out-of-memory conditions
+ *  - Checks for integer addition overflow in base type and user marshall functions
  */
 
 #include <stdarg.h>
@@ -331,15 +330,68 @@ const NDR_FREE NdrFreer[NDR_TABLE_SIZE] = {
   NdrRangeFree
 };
 
+typedef struct _NDR_MEMORY_LIST
+{
+    ULONG magic;
+    ULONG size;
+    ULONG reserved;
+    struct _NDR_MEMORY_LIST *next;
+} NDR_MEMORY_LIST;
+
+#define MEML_MAGIC  ('M' << 24 | 'E' << 16 | 'M' << 8 | 'L')
+
+/***********************************************************************
+ *            NdrAllocate [RPCRT4.@]
+ *
+ * Allocates a block of memory using pStubMsg->pfnAllocate.
+ *
+ * PARAMS
+ *  pStubMsg [I/O] MIDL_STUB_MESSAGE structure.
+ *  len      [I]   Size of memory block to allocate.
+ *
+ * RETURNS
+ *  The memory block of size len that was allocated.
+ *
+ * NOTES
+ *  The memory block is always 8-byte aligned.
+ *  If the function is unable to allocate memory an ERROR_OUTOFMEMORY
+ *  exception is raised.
+ */
 void * WINAPI NdrAllocate(MIDL_STUB_MESSAGE *pStubMsg, size_t len)
 {
-  /* hmm, this is probably supposed to do more? */
-  return pStubMsg->pfnAllocate(len);
+    size_t aligned_len;
+    size_t adjusted_len;
+    void *p;
+    NDR_MEMORY_LIST *mem_list;
+
+    aligned_len = ALIGNED_LENGTH(len, 8);
+    adjusted_len = aligned_len + sizeof(NDR_MEMORY_LIST);
+    /* check for overflow */
+    if (adjusted_len < len)
+    {
+        ERR("overflow of adjusted_len %d, len %d\n", adjusted_len, len);
+        RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    }
+
+    p = pStubMsg->pfnAllocate(adjusted_len);
+    if (!p) RpcRaiseException(ERROR_OUTOFMEMORY);
+
+    mem_list = (NDR_MEMORY_LIST *)((char *)p + aligned_len);
+    mem_list->magic = MEML_MAGIC;
+    mem_list->size = aligned_len;
+    mem_list->reserved = 0;
+    mem_list->next = pStubMsg->pMemoryList;
+    pStubMsg->pMemoryList = mem_list;
+
+    TRACE("-- %p\n", p);
+    return p;
 }
 
 static void WINAPI NdrFree(MIDL_STUB_MESSAGE *pStubMsg, unsigned char *Pointer)
 {
-  pStubMsg->pfnFree(Pointer);
+    TRACE("(%p, %p)\n", pStubMsg, Pointer);
+
+    pStubMsg->pfnFree(Pointer);
 }
 
 static inline BOOL IsConformanceOrVariancePresent(PFORMAT_STRING pFormat)
@@ -988,7 +1040,7 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
     if (!fMustAlloc && pSrcPointer)
     {
         FIXME("free object pointer %p\n", pSrcPointer);
-        pSrcPointer = NULL;
+        fMustAlloc = TRUE;
     }
     if (pointer_id)
       pointer_needs_unmarshaling = 1;
@@ -1020,8 +1072,8 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
        * unmarshalling routine for the benefit of the deref code below */
       if (!fMustAlloc) {
         if (pSrcPointer) {
-          TRACE("pSrcPointer = %p\n", pSrcPointer);
-          base_ptr_val = pSrcPointer;
+          TRACE("setting *pPointer to %p\n", pSrcPointer);
+          *pPointer = base_ptr_val = pSrcPointer;
         } else
           fMustAlloc = TRUE;
       }
@@ -1030,11 +1082,9 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
       /* the memory in a stub is never initialised, so we have to work out here
        * whether we have to initialise it so we can use the optimisation of
        * setting the pointer to the buffer, if possible, or set fMustAlloc to
-       * TRUE. As there is no space used in the buffer for pointers when using
-       * reference pointers we must allocate memory in this case */
-      if (type == RPC_FC_RP || attr & RPC_FC_P_DEREF) {
+       * TRUE. */
+      if (attr & RPC_FC_P_DEREF) {
         fMustAlloc = TRUE;
-        base_ptr_val = NULL;
       } else {
         base_ptr_val = NULL;
         *current_ptr = NULL;
@@ -1044,6 +1094,7 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
     if (attr & RPC_FC_P_DEREF) {
       if (fMustAlloc) {
         base_ptr_val = NdrAllocate(pStubMsg, sizeof(void *));
+        *pPointer = base_ptr_val;
         current_ptr = (unsigned char **)base_ptr_val;
       } else
         current_ptr = *(unsigned char***)current_ptr;
@@ -1057,12 +1108,6 @@ static void PointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
     if (type == RPC_FC_FP)
       NdrFullPointerInsertRefId(pStubMsg->FullPtrXlatTables, pointer_id,
                                 base_ptr_val);
-
-    /* this must be done after the call to the unmarshaller, since when we are
-     * unmarshalling reference pointers on the server side *pPointer will be
-     * pointing to valid data */
-    if (base_ptr_val && (!fMustAlloc || attr & RPC_FC_P_DEREF))
-      *pPointer = base_ptr_val;
   }
 
   TRACE("pointer=%p\n", *pPointer);
@@ -1133,8 +1178,10 @@ static unsigned long PointerMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
   unsigned type = pFormat[0], attr = pFormat[1];
   PFORMAT_STRING desc;
   NDR_MEMORYSIZE m;
+  DWORD pointer_id = 0;
+  int pointer_needs_sizing;
 
-  FIXME("(%p,%p,%p): stub\n", pStubMsg, Buffer, pFormat);
+  TRACE("(%p,%p,%p)\n", pStubMsg, Buffer, pFormat);
   TRACE("type=0x%x, attr=", type); dump_pointer_attr(attr);
   pFormat += 2;
   if (attr & RPC_FC_P_SIMPLEPOINTER) desc = pFormat;
@@ -1142,21 +1189,43 @@ static unsigned long PointerMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
 
   switch (type) {
   case RPC_FC_RP: /* ref pointer (always non-null) */
+    pointer_needs_sizing = 1;
     break;
+  case RPC_FC_UP: /* unique pointer */
+  case RPC_FC_OP: /* object pointer - we must free data before overwriting it */
+    pointer_id = NDR_LOCAL_UINT32_READ(Buffer);
+    TRACE("pointer_id is 0x%08x\n", pointer_id);
+    if (pointer_id)
+      pointer_needs_sizing = 1;
+    else
+      pointer_needs_sizing = 0;
+    break;
+  case RPC_FC_FP:
+  {
+    void *pointer;
+    pointer_id = NDR_LOCAL_UINT32_READ(Buffer);
+    TRACE("pointer_id is 0x%08x\n", pointer_id);
+    pointer_needs_sizing = !NdrFullPointerQueryRefId(
+      pStubMsg->FullPtrXlatTables, pointer_id, 1, &pointer);
+    break;
+  }
   default:
     FIXME("unhandled ptr type=%02x\n", type);
     RpcRaiseException(RPC_X_BAD_STUB_DATA);
+    return 0;
   }
 
   if (attr & RPC_FC_P_DEREF) {
     TRACE("deref\n");
   }
 
-  m = NdrMemorySizer[*desc & NDR_TABLE_MASK];
-  if (m) m(pStubMsg, desc);
-  else FIXME("no memorysizer for data type=%02x\n", *desc);
+  if (pointer_needs_sizing) {
+    m = NdrMemorySizer[*desc & NDR_TABLE_MASK];
+    if (m) m(pStubMsg, desc);
+    else FIXME("no memorysizer for data type=%02x\n", *desc);
+  }
 
-  return 0;
+  return pStubMsg->MemorySize;
 }
 
 /***********************************************************************
@@ -1169,6 +1238,7 @@ static void PointerFree(PMIDL_STUB_MESSAGE pStubMsg,
   unsigned type = pFormat[0], attr = pFormat[1];
   PFORMAT_STRING desc;
   NDR_FREE m;
+  unsigned char *current_pointer = Pointer;
 
   TRACE("(%p,%p,%p)\n", pStubMsg, Pointer, pFormat);
   TRACE("type=0x%x, attr=", type); dump_pointer_attr(attr);
@@ -1187,35 +1257,22 @@ static void PointerFree(PMIDL_STUB_MESSAGE pStubMsg,
   }
 
   if (attr & RPC_FC_P_DEREF) {
-    Pointer = *(unsigned char**)Pointer;
-    TRACE("deref => %p\n", Pointer);
+    current_pointer = *(unsigned char**)Pointer;
+    TRACE("deref => %p\n", current_pointer);
   }
 
   m = NdrFreer[*desc & NDR_TABLE_MASK];
-  if (m) m(pStubMsg, Pointer, desc);
+  if (m) m(pStubMsg, current_pointer, desc);
 
-  /* hmm... is this sensible?
-   * perhaps we should check if the memory comes from NdrAllocate,
-   * and deallocate only if so - checking if the pointer is between
-   * BufferStart and BufferEnd is probably no good since the buffer
-   * may be reallocated when the server wants to marshal the reply */
-  switch (*desc) {
-  case RPC_FC_BOGUS_STRUCT:
-  case RPC_FC_BOGUS_ARRAY:
-  case RPC_FC_USER_MARSHAL:
-  case RPC_FC_CARRAY:
-  case RPC_FC_CVARRAY:
-    break;
-  default:
-    FIXME("unhandled data type=%02x\n", *desc);
-    break;
-  case RPC_FC_C_CSTRING:
-  case RPC_FC_C_WSTRING:
-    if (pStubMsg->ReuseBuffer) goto notfree;
-    break;
-  case RPC_FC_IP:
-    goto notfree;
-  }
+  /* this check stops us from trying to free buffer memory. we don't have to
+   * worry about clients, since they won't call this function.
+   * we don't have to check for the buffer being reallocated because
+   * BufferStart and BufferEnd won't be reset when allocating memory for
+   * sending the response. we don't have to check for the new buffer here as
+   * it won't be used a type memory, only for buffer memory */
+  if (Pointer >= (unsigned char *)pStubMsg->BufferStart &&
+      Pointer < (unsigned char *)pStubMsg->BufferEnd)
+      goto notfree;
 
   if (attr & RPC_FC_P_ONSTACK) {
     TRACE("not freeing stack ptr %p\n", Pointer);
@@ -1462,12 +1519,18 @@ static unsigned long EmbeddedPointerMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
   unsigned char *Mark = pStubMsg->BufferMark;
   unsigned rep, count, stride;
   unsigned i;
+  unsigned char *saved_buffer = NULL;
 
   TRACE("(%p,%p)\n", pStubMsg, pFormat);
 
   if (pStubMsg->IgnoreEmbeddedPointers) return 0;
 
-  FIXME("(%p,%p): stub\n", pStubMsg, pFormat);
+  if (pStubMsg->PointerBufferMark)
+  {
+    saved_buffer = pStubMsg->Buffer;
+    pStubMsg->Buffer = pStubMsg->PointerBufferMark;
+    pStubMsg->PointerBufferMark = NULL;
+  }
 
   if (*pFormat != RPC_FC_PP) return 0;
   pFormat += 2;
@@ -1505,6 +1568,12 @@ static unsigned long EmbeddedPointerMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
       }
     }
     pFormat += 8 * count;
+  }
+
+  if (saved_buffer)
+  {
+    pStubMsg->PointerBufferMark = pStubMsg->Buffer;
+    pStubMsg->Buffer = saved_buffer;
   }
 
   return 0;
@@ -1774,7 +1843,7 @@ ULONG WINAPI NdrSimpleStructMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
 
   if (pFormat[0] != RPC_FC_STRUCT)
     EmbeddedPointerMemorySize(pStubMsg, pFormat+4);
-  return size;
+  return pStubMsg->MemorySize;
 }
 
 /***********************************************************************
@@ -2607,6 +2676,7 @@ unsigned char * WINAPI NdrConformantArrayUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
 {
   DWORD size, esize = *(const WORD*)(pFormat+2);
   unsigned char alignment = pFormat[1] + 1;
+  unsigned char *saved_buffer;
 
   TRACE("(%p,%p,%p,%d)\n", pStubMsg, ppMemory, pFormat, fMustAlloc);
   if (pFormat[0] != RPC_FC_CARRAY) FIXME("format=%d\n", pFormat[0]);
@@ -2614,16 +2684,24 @@ unsigned char * WINAPI NdrConformantArrayUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
   pFormat = ReadConformance(pStubMsg, pFormat+4);
 
   size = safe_multiply(esize, pStubMsg->MaxCount);
-
-  if (fMustAlloc || !*ppMemory)
-    *ppMemory = NdrAllocate(pStubMsg, size);
-
   ALIGN_POINTER(pStubMsg->Buffer, alignment);
 
-  pStubMsg->BufferMark = pStubMsg->Buffer;
-  safe_copy_from_buffer(pStubMsg, *ppMemory, size);
+  if (fMustAlloc)
+    *ppMemory = NdrAllocate(pStubMsg, size);
+  else
+  {
+    if (!pStubMsg->IsClient && !*ppMemory)
+      /* for servers, we just point straight into the RPC buffer */
+      *ppMemory = pStubMsg->Buffer;
+  }
 
-  EmbeddedPointerUnmarshall(pStubMsg, *ppMemory, *ppMemory, pFormat, TRUE /* FIXME */);
+  saved_buffer = pStubMsg->BufferMark = pStubMsg->Buffer;
+  safe_buffer_increment(pStubMsg, size);
+  EmbeddedPointerUnmarshall(pStubMsg, saved_buffer, *ppMemory, pFormat, fMustAlloc);
+
+  TRACE("copying %p to %p\n", saved_buffer, *ppMemory);
+  if (*ppMemory != saved_buffer)
+      memcpy(*ppMemory, saved_buffer, size);
 
   return NULL;
 }
@@ -2836,8 +2914,33 @@ void WINAPI NdrConformantVaryingArrayBufferSize( PMIDL_STUB_MESSAGE pStubMsg,
 ULONG WINAPI NdrConformantVaryingArrayMemorySize( PMIDL_STUB_MESSAGE pStubMsg,
                                                   PFORMAT_STRING pFormat )
 {
-    FIXME( "stub\n" );
-    return 0;
+    ULONG bufsize, memsize;
+    unsigned char alignment = pFormat[1] + 1;
+    DWORD esize = *(const WORD*)(pFormat+2);
+
+    TRACE("(%p, %p)\n", pStubMsg, pFormat);
+
+    if (pFormat[0] != RPC_FC_CVARRAY)
+    {
+        ERR("invalid format type %x\n", pFormat[0]);
+        RpcRaiseException(RPC_S_INTERNAL_ERROR);
+        return pStubMsg->MemorySize;
+    }
+
+    pFormat = ReadConformance(pStubMsg, pFormat+4);
+    pFormat = ReadVariance(pStubMsg, pFormat, pStubMsg->MaxCount);
+
+    ALIGN_POINTER(pStubMsg->Buffer, alignment);
+
+    bufsize = safe_multiply(esize, pStubMsg->ActualCount);
+    memsize = safe_multiply(esize, pStubMsg->MaxCount);
+
+    safe_buffer_increment(pStubMsg, bufsize);
+    pStubMsg->MemorySize += memsize;
+
+    EmbeddedPointerMemorySize(pStubMsg, pFormat);
+
+    return pStubMsg->MemorySize;
 }
 
 
@@ -3153,10 +3256,18 @@ void WINAPI NdrComplexArrayFree(PMIDL_STUB_MESSAGE pStubMsg,
     pMemory = ComplexFree(pStubMsg, pMemory, pFormat, NULL);
 }
 
-static ULONG UserMarshalFlags(const MIDL_STUB_MESSAGE *pStubMsg)
+static void UserMarshalCB(PMIDL_STUB_MESSAGE pStubMsg,
+                          USER_MARSHAL_CB_TYPE cbtype, PFORMAT_STRING pFormat,
+                          USER_MARSHAL_CB *umcb)
 {
-  return MAKELONG(pStubMsg->dwDestContext,
-                  pStubMsg->RpcMsg->DataRepresentation);
+  umcb->Flags = MAKELONG(pStubMsg->dwDestContext,
+                         pStubMsg->RpcMsg->DataRepresentation);
+  umcb->pStubMsg = pStubMsg;
+  umcb->pReserve = NULL;
+  umcb->Signature = USER_MARSHAL_CB_SIGNATURE;
+  umcb->CBType = cbtype;
+  umcb->pFormat = pFormat;
+  umcb->pTypeFormat = NULL /* FIXME */;
 }
 
 #define USER_MARSHAL_PTR_PREFIX \
@@ -3173,9 +3284,12 @@ unsigned char * WINAPI NdrUserMarshalMarshall(PMIDL_STUB_MESSAGE pStubMsg,
   unsigned flags = pFormat[1];
   unsigned index = *(const WORD*)&pFormat[2];
   unsigned char *saved_buffer = NULL;
-  ULONG uflag = UserMarshalFlags(pStubMsg);
+  USER_MARSHAL_CB umcb;
+
   TRACE("(%p,%p,%p)\n", pStubMsg, pMemory, pFormat);
   TRACE("index=%d\n", index);
+
+  UserMarshalCB(pStubMsg, USER_MARSHAL_CB_MARSHALL, pFormat, &umcb);
 
   if (flags & USER_MARSHAL_POINTER)
   {
@@ -3195,7 +3309,7 @@ unsigned char * WINAPI NdrUserMarshalMarshall(PMIDL_STUB_MESSAGE pStubMsg,
 
   pStubMsg->Buffer =
     pStubMsg->StubDesc->aUserMarshalQuadruple[index].pfnMarshall(
-      &uflag, pStubMsg->Buffer, pMemory);
+      &umcb.Flags, pStubMsg->Buffer, pMemory);
 
   if (saved_buffer)
   {
@@ -3221,9 +3335,12 @@ unsigned char * WINAPI NdrUserMarshalUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
   unsigned index = *(const WORD*)&pFormat[2];
   DWORD memsize = *(const WORD*)&pFormat[4];
   unsigned char *saved_buffer = NULL;
-  ULONG uflag = UserMarshalFlags(pStubMsg);
+  USER_MARSHAL_CB umcb;
+
   TRACE("(%p,%p,%p,%d)\n", pStubMsg, ppMemory, pFormat, fMustAlloc);
   TRACE("index=%d\n", index);
+
+  UserMarshalCB(pStubMsg, USER_MARSHAL_CB_UNMARSHALL, pFormat, &umcb);
 
   if (flags & USER_MARSHAL_POINTER)
   {
@@ -3246,7 +3363,7 @@ unsigned char * WINAPI NdrUserMarshalUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
 
   pStubMsg->Buffer =
     pStubMsg->StubDesc->aUserMarshalQuadruple[index].pfnUnmarshall(
-      &uflag, pStubMsg->Buffer, *ppMemory);
+      &umcb.Flags, pStubMsg->Buffer, *ppMemory);
 
   if (saved_buffer)
   {
@@ -3268,10 +3385,13 @@ void WINAPI NdrUserMarshalBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
   unsigned flags = pFormat[1];
   unsigned index = *(const WORD*)&pFormat[2];
   DWORD bufsize = *(const WORD*)&pFormat[6];
-  ULONG uflag = UserMarshalFlags(pStubMsg);
+  USER_MARSHAL_CB umcb;
   unsigned long saved_buffer_length = 0;
+
   TRACE("(%p,%p,%p)\n", pStubMsg, pMemory, pFormat);
   TRACE("index=%d\n", index);
+
+  UserMarshalCB(pStubMsg, USER_MARSHAL_CB_BUFFER_SIZE, pFormat, &umcb);
 
   if (flags & USER_MARSHAL_POINTER)
   {
@@ -3298,7 +3418,7 @@ void WINAPI NdrUserMarshalBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
   else
     pStubMsg->BufferLength =
         pStubMsg->StubDesc->aUserMarshalQuadruple[index].pfnBufferSize(
-                             &uflag, pStubMsg->BufferLength, pMemory);
+                             &umcb.Flags, pStubMsg->BufferLength, pMemory);
 
   if (saved_buffer_length)
   {
@@ -3353,12 +3473,15 @@ void WINAPI NdrUserMarshalFree(PMIDL_STUB_MESSAGE pStubMsg,
 {
 /*  unsigned flags = pFormat[1]; */
   unsigned index = *(const WORD*)&pFormat[2];
-  ULONG uflag = UserMarshalFlags(pStubMsg);
+  USER_MARSHAL_CB umcb;
+
   TRACE("(%p,%p,%p)\n", pStubMsg, pMemory, pFormat);
   TRACE("index=%d\n", index);
 
+  UserMarshalCB(pStubMsg, USER_MARSHAL_CB_FREE, pFormat, &umcb);
+
   pStubMsg->StubDesc->aUserMarshalQuadruple[index].pfnFree(
-    &uflag, pMemory);
+    &umcb.Flags, pMemory);
 }
 
 /***********************************************************************
@@ -3470,6 +3593,7 @@ unsigned char *  WINAPI NdrConformantStructUnmarshall(PMIDL_STUB_MESSAGE pStubMs
     const NDR_CSTRUCT_FORMAT *pCStructFormat = (const NDR_CSTRUCT_FORMAT *)pFormat;
     PFORMAT_STRING pCArrayFormat;
     ULONG esize, bufsize;
+    unsigned char *saved_buffer;
 
     TRACE("(%p, %p, %p, %d)\n", pStubMsg, ppMemory, pFormat, fMustAlloc);
 
@@ -3503,19 +3627,27 @@ unsigned char *  WINAPI NdrConformantStructUnmarshall(PMIDL_STUB_MESSAGE pStubMs
             pCStructFormat->memory_size, bufsize);
         RpcRaiseException(RPC_X_BAD_STUB_DATA);
     }
-    /* work out how much memory to allocate if we need to do so */
-    if (!*ppMemory || fMustAlloc)
+
+    if (fMustAlloc)
     {
         SIZE_T size = pCStructFormat->memory_size + bufsize;
         *ppMemory = NdrAllocate(pStubMsg, size);
     }
+    else
+    {
+        if (!pStubMsg->IsClient && !*ppMemory)
+            /* for servers, we just point straight into the RPC buffer */
+            *ppMemory = pStubMsg->Buffer;
+    }
 
-    /* now copy the data */
-    pStubMsg->BufferMark = pStubMsg->Buffer;
-    safe_copy_from_buffer(pStubMsg, *ppMemory, pCStructFormat->memory_size + bufsize);
-
+    saved_buffer = pStubMsg->BufferMark = pStubMsg->Buffer;
+    safe_buffer_increment(pStubMsg, pCStructFormat->memory_size + bufsize);
     if (pCStructFormat->type == RPC_FC_CPSTRUCT)
-        EmbeddedPointerUnmarshall(pStubMsg, *ppMemory, *ppMemory, pFormat, TRUE /* FIXME */);
+        EmbeddedPointerUnmarshall(pStubMsg, saved_buffer, *ppMemory, pFormat, fMustAlloc);
+
+    TRACE("copying %p to %p\n", saved_buffer, *ppMemory);
+    if (*ppMemory != saved_buffer)
+        memcpy(*ppMemory, saved_buffer, pCStructFormat->memory_size + bufsize);
 
     return NULL;
 }
@@ -3581,7 +3713,40 @@ void WINAPI NdrConformantStructFree(PMIDL_STUB_MESSAGE pStubMsg,
                                 unsigned char *pMemory,
                                 PFORMAT_STRING pFormat)
 {
-    FIXME("stub\n");
+    const NDR_CSTRUCT_FORMAT *pCStructFormat = (const NDR_CSTRUCT_FORMAT *)pFormat;
+    PFORMAT_STRING pCArrayFormat;
+    ULONG esize;
+
+    TRACE("(%p, %p, %p)\n", pStubMsg, pMemory, pFormat);
+
+    pFormat += sizeof(NDR_CSTRUCT_FORMAT);
+    if ((pCStructFormat->type != RPC_FC_CPSTRUCT) && (pCStructFormat->type != RPC_FC_CSTRUCT))
+    {
+        ERR("invalid format type %x\n", pCStructFormat->type);
+        RpcRaiseException(RPC_S_INTERNAL_ERROR);
+        return;
+    }
+
+    pCArrayFormat = (const unsigned char *)&pCStructFormat->offset_to_array_description +
+        pCStructFormat->offset_to_array_description;
+    if (*pCArrayFormat != RPC_FC_CARRAY)
+    {
+        ERR("invalid array format type %x\n", pCStructFormat->type);
+        RpcRaiseException(RPC_S_INTERNAL_ERROR);
+        return;
+    }
+    esize = *(const WORD*)(pCArrayFormat+2);
+
+    ComputeConformance(pStubMsg, pMemory + pCStructFormat->memory_size,
+                       pCArrayFormat + 4, 0);
+
+    TRACE("memory_size = %d\n", pCStructFormat->memory_size);
+
+    /* copy constant sized part of struct */
+    pStubMsg->BufferMark = pStubMsg->Buffer;
+
+    if (pCStructFormat->type == RPC_FC_CPSTRUCT)
+        EmbeddedPointerFree(pStubMsg, pMemory, pFormat);
 }
 
 /***********************************************************************
@@ -4039,6 +4204,7 @@ unsigned char *  WINAPI NdrFixedArrayUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
 {
     const NDR_SMFARRAY_FORMAT *pSmFArrayFormat = (const NDR_SMFARRAY_FORMAT *)pFormat;
     unsigned long total_size;
+    unsigned char *saved_buffer;
 
     TRACE("(%p, %p, %p, %d)\n", pStubMsg, ppMemory, pFormat, fMustAlloc);
 
@@ -4064,12 +4230,22 @@ unsigned char *  WINAPI NdrFixedArrayUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
         pFormat = (const unsigned char *)(pLgFArrayFormat + 1);
     }
 
-    if (fMustAlloc || !*ppMemory)
+    if (fMustAlloc)
         *ppMemory = NdrAllocate(pStubMsg, total_size);
-    pStubMsg->BufferMark = pStubMsg->Buffer;
-    safe_copy_from_buffer(pStubMsg, *ppMemory, total_size);
+    else
+    {
+        if (!pStubMsg->IsClient && !*ppMemory)
+            /* for servers, we just point straight into the RPC buffer */
+            *ppMemory = pStubMsg->Buffer;
+    }
 
-    pFormat = EmbeddedPointerUnmarshall(pStubMsg, *ppMemory, *ppMemory, pFormat, TRUE /* FIXME */);
+    saved_buffer = pStubMsg->BufferMark = pStubMsg->Buffer;
+    safe_buffer_increment(pStubMsg, total_size);
+    pFormat = EmbeddedPointerUnmarshall(pStubMsg, saved_buffer, *ppMemory, pFormat, fMustAlloc);
+
+    TRACE("copying %p to %p\n", saved_buffer, *ppMemory);
+    if (*ppMemory != saved_buffer)
+        memcpy(*ppMemory, saved_buffer, total_size);
 
     return NULL;
 }
@@ -5470,10 +5646,18 @@ static unsigned char *WINAPI NdrBaseTypeUnmarshall(
 
 #define BASE_TYPE_UNMARSHALL(type) \
         ALIGN_POINTER(pStubMsg->Buffer, sizeof(type)); \
-        if (fMustAlloc || !*ppMemory) \
-            *ppMemory = NdrAllocate(pStubMsg, sizeof(type)); \
-        TRACE("*ppMemory: %p\n", *ppMemory); \
-        **(type **)ppMemory = *(type *)pStubMsg->Buffer; \
+        if (!fMustAlloc && !pStubMsg->IsClient && !*ppMemory) \
+        { \
+            *ppMemory = pStubMsg->Buffer; \
+            TRACE("*ppMemory: %p\n", *ppMemory); \
+        } \
+        else \
+        {  \
+            if (fMustAlloc) \
+                *ppMemory = NdrAllocate(pStubMsg, sizeof(type)); \
+            TRACE("*ppMemory: %p\n", *ppMemory); \
+            **(type **)ppMemory = *(type *)pStubMsg->Buffer; \
+        } \
         pStubMsg->Buffer += sizeof(type);
 
     switch(*pFormat)
@@ -5595,6 +5779,8 @@ static ULONG WINAPI NdrBaseTypeMemorySize(
     PMIDL_STUB_MESSAGE pStubMsg,
     PFORMAT_STRING pFormat)
 {
+    TRACE("pStubMsg %p, type 0x%02x\n", pStubMsg, *pFormat);
+
     switch(*pFormat)
     {
     case RPC_FC_BYTE:

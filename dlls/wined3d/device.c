@@ -1259,6 +1259,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateQuery(IWineD3DDevice *iface, WINE
 
     D3DCREATEOBJECTINSTANCE(object, Query)
     object->type         = Type;
+    object->state        = QUERY_CREATED;
     /* allocated the 'extended' data based on the type of query requested */
     switch(Type){
     case WINED3DQUERYTYPE_OCCLUSION:
@@ -1401,6 +1402,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
     HRESULT                 hr = WINED3D_OK;
     IUnknown               *bufferParent;
     BOOL                    displaymode_set = FALSE;
+    WINED3DDISPLAYMODE      Mode;
+    const StaticPixelFormatDesc *formatDesc;
 
     TRACE("(%p) : Created Aditional Swap Chain\n", This);
 
@@ -1438,10 +1441,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
         return WINED3DERR_NOTAVAILABLE;
     }
 
-    object->orig_width = GetSystemMetrics(SM_CXSCREEN);
-    object->orig_height = GetSystemMetrics(SM_CYSCREEN);
-    object->orig_fmt = pixelformat_for_depth(GetDeviceCaps(hDc, BITSPIXEL) * GetDeviceCaps(hDc, PLANES));
-    ReleaseDC(object->win_handle, hDc);
+    /* Get info on the current display setup */
+    IWineD3D_GetAdapterDisplayMode(This->wineD3D, This->adapter->num, &Mode);
+    object->orig_width = Mode.Width;
+    object->orig_height = Mode.Height;
+    object->orig_fmt = Mode.Format;
+    formatDesc  = getFormatDescEntry(Mode.Format, NULL, NULL);
 
     /** MSDN: If Windowed is TRUE and either of the BackBufferWidth/Height values is zero,
      *  then the corresponding dimension of the client area of the hDeviceWindow
@@ -1504,37 +1509,18 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
     **************************************/
 
    if (!pPresentationParameters->Windowed) {
+        WINED3DDISPLAYMODE mode;
 
-        DEVMODEW devmode;
-        HDC      hdc;
-        int      bpp = 0;
-        RECT     clip_rc;
-
-        /* Get info on the current display setup */
-        hdc = GetDC(0);
-        bpp = GetDeviceCaps(hdc, BITSPIXEL);
-        ReleaseDC(0, hdc);
 
         /* Change the display settings */
-        memset(&devmode, 0, sizeof(devmode));
-        devmode.dmSize       = sizeof(devmode);
-        devmode.dmFields     = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
-        devmode.dmBitsPerPel = (bpp >= 24) ? 32 : bpp; /* Stupid XVidMode cannot change bpp */
-        devmode.dmPelsWidth  = pPresentationParameters->BackBufferWidth;
-        devmode.dmPelsHeight = pPresentationParameters->BackBufferHeight;
-        ChangeDisplaySettingsExW(This->adapter->DeviceName, &devmode, NULL, CDS_FULLSCREEN, NULL);
+        mode.Width = pPresentationParameters->BackBufferWidth;
+        mode.Height = pPresentationParameters->BackBufferHeight;
+        mode.Format = pPresentationParameters->BackBufferFormat;
+        mode.RefreshRate = pPresentationParameters->FullScreen_RefreshRateInHz;
+
+        IWineD3DDevice_SetDisplayMode(iface, 0, &mode);
         displaymode_set = TRUE;
-
-        /* For GetDisplayMode */
-        This->ddraw_width = devmode.dmPelsWidth;
-        This->ddraw_height = devmode.dmPelsHeight;
-        This->ddraw_format = pPresentationParameters->BackBufferFormat;
-
         IWineD3DDevice_SetFullscreen(iface, TRUE);
-
-        /* And finally clip mouse to our screen */
-        SetRect(&clip_rc, 0, 0, devmode.dmPelsWidth, devmode.dmPelsHeight);
-        ClipCursor(&clip_rc);
     }
 
         /**
@@ -1640,23 +1626,16 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateAdditionalSwapChain(IWineD3DDevic
 error:
     if (displaymode_set) {
         DEVMODEW devmode;
-        HDC      hdc;
-        int      bpp = 0;
         RECT     clip_rc;
 
         SetRect(&clip_rc, 0, 0, object->orig_width, object->orig_height);
         ClipCursor(NULL);
 
-        /* Get info on the current display setup */
-        hdc = GetDC(0);
-        bpp = GetDeviceCaps(hdc, BITSPIXEL);
-        ReleaseDC(0, hdc);
-
         /* Change the display settings */
         memset(&devmode, 0, sizeof(devmode));
         devmode.dmSize       = sizeof(devmode);
         devmode.dmFields     = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
-        devmode.dmBitsPerPel = (bpp >= 24) ? 32 : bpp; /* Stupid XVidMode cannot change bpp */
+        devmode.dmBitsPerPel = formatDesc->bpp * 8;
         devmode.dmPelsWidth  = object->orig_width;
         devmode.dmPelsHeight = object->orig_height;
         ChangeDisplaySettingsExW(This->adapter->DeviceName, &devmode, NULL, CDS_FULLSCREEN, NULL);
@@ -2333,7 +2312,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetDisplayMode(IWineD3DDevice *iface, U
     devmode.dmSize = sizeof(devmode);
     devmode.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
     devmode.dmBitsPerPel = formatDesc->bpp * 8;
-    if(devmode.dmBitsPerPel == 24) devmode.dmBitsPerPel = 32;
     devmode.dmPelsWidth  = pMode->Width;
     devmode.dmPelsHeight = pMode->Height;
 
@@ -2845,7 +2823,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetLightEnable(IWineD3DDevice *iface, D
         } else {
             TRACE("Light already disabled, nothing to do\n");
         }
+        lightInfo->enabled = FALSE;
     } else {
+        lightInfo->enabled = TRUE;
         if (lightInfo->glIndex != -1) {
             /* nop */
             TRACE("Nothing to do as light was enabled\n");
@@ -2860,8 +2840,15 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetLightEnable(IWineD3DDevice *iface, D
                 }
             }
             if(lightInfo->glIndex == -1) {
-                ERR("Too many concurrently active lights\n");
-                return WINED3DERR_INVALIDCALL;
+                /* Our tests show that Windows returns D3D_OK in this situation, even with
+                 * D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE devices. This
+                 * is consistent among ddraw, d3d8 and d3d9. GetLightEnable returns TRUE
+                 * as well for those lights.
+                 *
+                 * TODO: Test how this affects rendering
+                 */
+                FIXME("Too many concurrently active lights\n");
+                return WINED3D_OK;
             }
 
             /* i == lightInfo->glIndex */
@@ -2893,7 +2880,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetLightEnable(IWineD3DDevice *iface, D
         return WINED3DERR_INVALIDCALL;
     }
     /* true is 128 according to SetLightEnable */
-    *pEnable = lightInfo->glIndex != -1 ? 128 : 0;
+    *pEnable = lightInfo->enabled ? 128 : 0;
     return WINED3D_OK;
 }
 
@@ -4777,7 +4764,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
 
     GLbitfield     glMask = 0;
     unsigned int   i;
-    CONST WINED3DRECT* curRect;
+    WINED3DRECT curRect;
+    RECT vp_rect;
+    WINED3DVIEWPORT *vp = &This->stateBlock->viewport;
+    UINT drawable_width, drawable_height;
 
     TRACE("(%p) Count (%d), pRects (%p), Flags (%x), Color (0x%08x), Z (%f), Stencil (%d)\n", This,
           Count, pRects, Flags, Color, Z, Stencil);
@@ -4788,6 +4778,42 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
         return WINED3DERR_INVALIDCALL;
     }
 
+    /* When we're clearing parts of the drawable, make sure that the target surface is well up to date in the
+     * drawable. After the clear we'll mark the drawable up to date, so we have to make sure that this is true
+     * for the cleared parts, and the untouched parts.
+     *
+     * If we're clearing the whole target there is no need to copy it into the drawable, it will be overwritten
+     * anyway. If we're not clearing the color buffer we don't have to copy either since we're not going to set
+     * the drawable up to date. We have to check all settings that limit the clear area though. Do not bother
+     * checking all this if the dest surface is in the drawable anyway.
+     */
+    if((Flags & WINED3DCLEAR_TARGET) && !(target->Flags & SFLAG_INDRAWABLE)) {
+        while(1) {
+            if(vp->X != 0 || vp->Y != 0 ||
+               vp->Width < target->currentDesc.Width || vp->Height < target->currentDesc.Height) {
+                IWineD3DSurface_LoadLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, NULL);
+                break;
+            }
+            if(This->stateBlock->renderState[WINED3DRS_SCISSORTESTENABLE] && (
+               This->stateBlock->scissorRect.left > 0 || This->stateBlock->scissorRect.top > 0 ||
+               This->stateBlock->scissorRect.right < target->currentDesc.Width ||
+               This->stateBlock->scissorRect.bottom < target->currentDesc.Height)) {
+                IWineD3DSurface_LoadLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, NULL);
+                break;
+            }
+            if(Count > 0 && pRects && (
+               pRects[0].x1 > 0 || pRects[0].y1 > 0 ||
+               pRects[0].x2 < target->currentDesc.Width ||
+               pRects[0].y2 < target->currentDesc.Height)) {
+                IWineD3DSurface_LoadLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, NULL);
+                break;
+            }
+            break;
+        }
+    }
+
+    target->get_drawable_size(target, &drawable_width, &drawable_height);
+
     /* This is for offscreen rendering as well as for multithreading, thus activate the set render target
      * and not the last active one.
      */
@@ -4796,12 +4822,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
         apply_fbo_state(iface);
-    }
-
-    if (Count > 0 && pRects) {
-        curRect = pRects;
-    } else {
-        curRect = NULL;
     }
 
     /* Only set the values up once, as they are not changing */
@@ -4833,59 +4853,52 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
         glMask = glMask | GL_COLOR_BUFFER_BIT;
     }
 
-    if (!curRect) {
-        /* In drawable flag is set below */
-
-        if (This->render_offscreen) {
-            glScissor(This->stateBlock->viewport.X,
-                       This->stateBlock->viewport.Y,
-                       This->stateBlock->viewport.Width,
-                       This->stateBlock->viewport.Height);
+    vp_rect.left = vp->X;
+    vp_rect.top = vp->Y;
+    vp_rect.right = vp->X + vp->Width;
+    vp_rect.bottom = vp->Y + vp->Height;
+    if (!(Count > 0 && pRects)) {
+        if(This->stateBlock->renderState[WINED3DRS_SCISSORTESTENABLE]) {
+            IntersectRect(&vp_rect, &vp_rect, &This->stateBlock->scissorRect);
+        }
+        if(This->render_offscreen) {
+            glScissor(vp_rect.left, vp_rect.top,
+                        vp_rect.right - vp_rect.left, vp_rect.bottom - vp_rect.top);
         } else {
-            glScissor(This->stateBlock->viewport.X,
-                      (((IWineD3DSurfaceImpl *)This->render_targets[0])->currentDesc.Height -
-                      (This->stateBlock->viewport.Y + This->stateBlock->viewport.Height)),
-                       This->stateBlock->viewport.Width,
-                       This->stateBlock->viewport.Height);
+            glScissor(vp_rect.left, drawable_height - vp_rect.bottom,
+                        vp_rect.right - vp_rect.left, vp_rect.bottom - vp_rect.top);
         }
         checkGLcall("glScissor");
         glClear(glMask);
         checkGLcall("glClear");
     } else {
-        if(!(target->Flags & SFLAG_INDRAWABLE) &&
-           !(wined3d_settings.offscreen_rendering_mode == ORM_FBO && This->render_offscreen && target->Flags & SFLAG_INTEXTURE)) {
-
-            if(curRect[0].x1 > 0 || curRect[0].y1 > 0 ||
-               curRect[0].x2 < target->currentDesc.Width ||
-               curRect[0].y2 < target->currentDesc.Height) {
-                TRACE("Partial clear, and surface not in drawable. Blitting texture to drawable\n");
-                IWineD3DSurface_LoadLocation((IWineD3DSurface *) target, SFLAG_INDRAWABLE, NULL);
-            }
-        }
-
         /* Now process each rect in turn */
         for (i = 0; i < Count; i++) {
             /* Note gl uses lower left, width/height */
-            TRACE("(%p) %p Rect=(%d,%d)->(%d,%d) glRect=(%d,%d), len=%d, hei=%d\n", This, curRect,
-                  curRect[i].x1, curRect[i].y1, curRect[i].x2, curRect[i].y2,
-                  curRect[i].x1, (target->currentDesc.Height - curRect[i].y2),
-                  curRect[i].x2 - curRect[i].x1, curRect[i].y2 - curRect[i].y1);
+            IntersectRect((RECT *) &curRect, &vp_rect, (RECT *) &pRects[i]);
+            if(This->stateBlock->renderState[WINED3DRS_SCISSORTESTENABLE]) {
+                IntersectRect((RECT *) &curRect, (RECT *) &curRect, &This->stateBlock->scissorRect);
+            }
+            TRACE("(%p) Rect=(%d,%d)->(%d,%d) glRect=(%d,%d), len=%d, hei=%d\n", This,
+                  pRects[i].x1, pRects[i].y1, pRects[i].x2, pRects[i].y2,
+                  curRect.x1, (target->currentDesc.Height - curRect.y2),
+                  curRect.x2 - curRect.x1, curRect.y2 - curRect.y1);
 
             /* Tests show that rectangles where x1 > x2 or y1 > y2 are ignored silently.
              * The rectangle is not cleared, no error is returned, but further rectanlges are
              * still cleared if they are valid
              */
-            if(curRect[i].x1 > curRect[i].x2 || curRect[i].y1 > curRect[i].y2) {
+            if(curRect.x1 > curRect.x2 || curRect.y1 > curRect.y2) {
                 TRACE("Rectangle with negative dimensions, ignoring\n");
                 continue;
             }
 
             if(This->render_offscreen) {
-                glScissor(curRect[i].x1, curRect[i].y1,
-                          curRect[i].x2 - curRect[i].x1, curRect[i].y2 - curRect[i].y1);
+                glScissor(curRect.x1, curRect.y1,
+                          curRect.x2 - curRect.x1, curRect.y2 - curRect.y1);
             } else {
-                glScissor(curRect[i].x1, target->currentDesc.Height - curRect[i].y2,
-                          curRect[i].x2 - curRect[i].x1, curRect[i].y2 - curRect[i].y1);
+                glScissor(curRect.x1, drawable_height - curRect.y2,
+                          curRect.x2 - curRect.x1, curRect.y2 - curRect.y1);
             }
             checkGLcall("glScissor");
 
@@ -4904,18 +4917,18 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Clear(IWineD3DDevice *iface, DWORD Coun
                     mask & WINED3DCOLORWRITEENABLE_GREEN ? GL_TRUE : GL_FALSE,
                     mask & WINED3DCOLORWRITEENABLE_BLUE  ? GL_TRUE : GL_FALSE,
                     mask & WINED3DCOLORWRITEENABLE_ALPHA ? GL_TRUE : GL_FALSE);
-    }
 
+        /* Dirtify the target surface for now. If the surface is locked regularly, and an up to date sysmem copy exists,
+         * it is most likely more efficient to perform a clear on the sysmem copy too instead of downloading it
+         */
+        IWineD3DSurface_ModifyLocation(This->lastActiveRenderTarget, SFLAG_INDRAWABLE, TRUE);
+        /* TODO: Move the fbo logic into ModifyLocation() */
+        if(This->render_offscreen && wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+            target->Flags |= SFLAG_INTEXTURE;
+        }
+    }
     LEAVE_GL();
 
-    /* Dirtify the target surface for now. If the surface is locked regularly, and an up to date sysmem copy exists,
-     * it is most likely more efficient to perform a clear on the sysmem copy too instead of downloading it
-     */
-    IWineD3DSurface_ModifyLocation(This->lastActiveRenderTarget, SFLAG_INDRAWABLE, TRUE);
-    /* TODO: Move the fbo logic into ModifyLocation() */
-    if(This->render_offscreen && wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
-        target->Flags |= SFLAG_INTEXTURE;
-    }
     return WINED3D_OK;
 }
 
@@ -5725,7 +5738,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_DeletePatch(IWineD3DDevice *iface, UINT
     }
 
     /* TODO: Write a test for the return value */
-    FIXME("Attempt to destroy nonexistant patch\n");
+    FIXME("Attempt to destroy nonexistent patch\n");
     return WINED3DERR_INVALIDCALL;
 }
 
@@ -6393,7 +6406,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderTarget(IWineD3DDevice *iface, 
         FIXME("Trying to set render target 0 to NULL\n");
         return WINED3DERR_INVALIDCALL;
     }
-    if (pRenderTarget && !((IWineD3DSurfaceImpl *)pRenderTarget)->resource.usage & WINED3DUSAGE_RENDERTARGET) {
+    if (pRenderTarget && !(((IWineD3DSurfaceImpl *)pRenderTarget)->resource.usage & WINED3DUSAGE_RENDERTARGET)) {
         FIXME("(%p)Trying to set the render target to a surface(%p) that wasn't created with a usage of WINED3DUSAGE_RENDERTARGET\n",This ,pRenderTarget);
         return WINED3DERR_INVALIDCALL;
     }
@@ -7352,4 +7365,30 @@ void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state) {
         shift = rep & 0x1f;
         context->isStateDirty[idx] |= (1 << shift);
     }
+}
+
+void get_drawable_size_pbuffer(IWineD3DSurfaceImpl *This, UINT *width, UINT *height) {
+    IWineD3DDeviceImpl *dev = This->resource.wineD3DDevice;
+    /* The drawable size of a pbuffer render target is the current pbuffer size
+     */
+    *width = dev->pbufferWidth;
+    *height = dev->pbufferHeight;
+}
+
+void get_drawable_size_fbo(IWineD3DSurfaceImpl *This, UINT *width, UINT *height) {
+    /* The drawable size of a fbo target is the opengl texture size, which is the power of two size
+     */
+    *width = This->pow2Width;
+    *height = This->pow2Height;
+}
+
+void get_drawable_size_backbuffer(IWineD3DSurfaceImpl *This, UINT *width, UINT *height) {
+    IWineD3DDeviceImpl *dev = This->resource.wineD3DDevice;
+    /* The drawable size of a backbuffer / aux buffer offscreen target is the size of the
+     * current context's drawable, which is the size of the back buffer of the swapchain
+     * the active context belongs to. The back buffer of the swapchain is stored as the
+     * surface the context belongs to.
+     */
+    *width = ((IWineD3DSurfaceImpl *) dev->activeContext->surface)->currentDesc.Width;
+    *height = ((IWineD3DSurfaceImpl *) dev->activeContext->surface)->currentDesc.Height;
 }

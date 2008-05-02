@@ -2424,6 +2424,7 @@ static void _test_readyState(unsigned line, IUnknown *unk)
     ok_(__FILE__, line)
         (!lstrcmpW(state, expected_state[load_state]), "unexpected state \"%s\", expected %d\n",
          debugstr_w(state), load_state);
+    SysFreeString(state);
 
     IHTMLDocument_Release(htmldoc);
 }
@@ -2506,7 +2507,7 @@ static void test_GetCurMoniker(IUnknown *unk, IMoniker *exmon, LPCWSTR exurl)
     IPersistMoniker_Release(permon);
 
     if(exmon) {
-        BSTR url;
+        LPOLESTR url;
         BOOL exb = expect_GetDisplayName;
         BOOL clb = called_GetDisplayName;
 
@@ -2520,10 +2521,10 @@ static void test_GetCurMoniker(IUnknown *unk, IMoniker *exmon, LPCWSTR exurl)
         expect_GetDisplayName = exb;
         called_GetDisplayName = clb;
 
-        SysFreeString(url);
         ok(!lstrcmpW(url, doc_url), "url != doc_url\n");
+        CoTaskMemFree(url);
     }else if(exurl) {
-        BSTR url;
+        LPOLESTR url;
 
         ok(hres == S_OK, "GetCurrentMoniker failed: %08x\n", hres);
 
@@ -2533,7 +2534,7 @@ static void test_GetCurMoniker(IUnknown *unk, IMoniker *exmon, LPCWSTR exurl)
         ok(!lstrcmpW(url, exurl), "unexpected url\n");
         ok(!lstrcmpW(url, doc_url), "url != doc_url\n");
 
-        SysFreeString(url);
+        CoTaskMemFree(url);
     }else {
         ok(hres == E_UNEXPECTED,
            "GetCurrentMoniker failed: %08x, expected E_UNEXPECTED\n", hres);

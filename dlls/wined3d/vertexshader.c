@@ -296,6 +296,9 @@ static inline void find_swizzled_attribs(IWineD3DVertexDeclaration *declaration,
 
     for(i = 0; i < decl->num_swizzled_attribs; i++) {
         for(j = 0; j < MAX_ATTRIBS; j++) {
+
+            if(!This->baseShader.reg_maps.attributes[j]) continue;
+
             usage_token = This->semantics_in[j].usage;
             usage = (usage_token & WINED3DSP_DCL_USAGE_MASK) >> WINED3DSP_DCL_USAGE_SHIFT;
             usage_idx = (usage_token & WINED3DSP_DCL_USAGEINDEX_MASK) >> WINED3DSP_DCL_USAGEINDEX_SHIFT;
@@ -451,6 +454,16 @@ static VOID IWineD3DVertexShaderImpl_GenerateShader(
 
         /* We need a constant to fixup the final position */
         shader_addline(&buffer, "PARAM posFixup = program.env[%d];\n", ARB_SHADER_PRIVCONST_POS);
+
+        if((GLINFO_LOCATION).set_texcoord_w) {
+            int i;
+            for(i = 0; i < min(8, MAX_REG_TEXCRD); i++) {
+                if(This->baseShader.reg_maps.texcoord_mask[i] != 0 &&
+                   This->baseShader.reg_maps.texcoord_mask[i] != WINED3DSP_WRITEMASK_ALL) {
+                    shader_addline(&buffer, "MOV result.texcoord[%u].w, -helper_const.y;\n", i);
+                   }
+            }
+        }
 
         /* Base Shader Body */
         shader_generate_main( (IWineD3DBaseShader*) This, &buffer, reg_maps, pFunction);
@@ -679,7 +692,7 @@ static inline BOOL swizzled_attribs_differ(IWineD3DVertexShaderImpl *This, IWine
 
     for(i = 0; i < vdecl->declarationWNumElements; i++) {
         for(j = 0; j < MAX_ATTRIBS; j++) {
-            if(!This->baseShader.reg_maps.attributes) continue;
+            if(!This->baseShader.reg_maps.attributes[j]) continue;
 
             usage_token = This->semantics_in[j].usage;
             usage = (usage_token & WINED3DSP_DCL_USAGE_MASK) >> WINED3DSP_DCL_USAGE_SHIFT;

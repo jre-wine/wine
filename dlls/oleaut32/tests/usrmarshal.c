@@ -208,6 +208,7 @@ static void test_marshal_LPSAFEARRAY(void)
         LPSAFEARRAY_UserFree(&umcb.Flags, &lpsa2);
     }
     HeapFree(GetProcessHeap(), 0, buffer);
+    lpsa->cLocks = 0;
     SafeArrayDestroy(lpsa);
 
     /* test NULL safe array */
@@ -244,6 +245,7 @@ static void test_marshal_LPSAFEARRAY(void)
     check_safearray(buffer, lpsa);
 
     HeapFree(GetProcessHeap(), 0, buffer);
+    lpsa->cLocks = 0;
     SafeArrayDestroy(lpsa);
 
     /* VARTYPE-less arrays can be marshaled if cbElements is 1,2,4 or 8 as type SF_In */
@@ -607,11 +609,15 @@ static void test_marshal_VARIANT(void)
     ok(*(short*)wirev == s, "wv[6] %08x\n", *wirev);
     if (VARIANT_UNMARSHAL_WORKS)
     {
+        void *mem;
         VariantInit(&v2);
+        V_VT(&v2) = VT_I2 | VT_BYREF;
+        V_BYREF(&v2) = mem = CoTaskMemAlloc(sizeof(V_I2(&v2)));
         stubMsg.Buffer = buffer;
         next = VARIANT_UserUnmarshal(&umcb.Flags, buffer, &v2);
         ok(next == buffer + stubMsg.BufferLength, "got %p expect %p\n", next, buffer + stubMsg.BufferLength);
         ok(V_VT(&v) == V_VT(&v2), "got vt %d expect %d\n", V_VT(&v), V_VT(&v2));
+        ok(V_BYREF(&v2) == mem, "didn't reuse existing memory\n");
         ok(*V_I2REF(&v) == *V_I2REF(&v2), "got i2 ref %x expect ui4 ref %x\n", *V_I2REF(&v), *V_I2REF(&v2));
 
         VARIANT_UserFree(&umcb.Flags, &v2);
@@ -1121,6 +1127,7 @@ static void test_marshal_VARIANT(void)
         VARIANT_UserFree(&umcb.Flags, &v2);
     }
     HeapFree(GetProcessHeap(), 0, buffer);
+    lpsa->cLocks = 0;
     SafeArrayDestroy(lpsa);
 
     /*** VARIANT BYREF ***/

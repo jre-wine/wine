@@ -75,6 +75,7 @@ MENU_SHV_FILE MENU DISCARDABLE
 BEGIN
 	POPUP ""
 	BEGIN
+	  MENUITEM "&Select"			FCIDM_SHVIEW_OPEN
 	  MENUITEM "&Selaa",			FCIDM_SHVIEW_EXPLORE
 	  MENUITEM "&Avaa",			FCIDM_SHVIEW_OPEN
 	  MENUITEM SEPARATOR
@@ -205,4 +206,6 @@ STRINGTABLE DISCARDABLE
 	IDS_COMMON_PICTURES         "Dokumentit\\Omat kuvatiedostot"
 	IDS_COMMON_VIDEO            "Dokumentit\\Omat videotiedostot"
 	IDS_CDBURN_AREA             "Paikalliset asetukset\\Ohjelmien tiedot\\Microsoft\\CD Burning"
+
+	IDS_NEWFOLDER		"New Folder"
 }

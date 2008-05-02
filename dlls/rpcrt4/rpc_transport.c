@@ -604,8 +604,16 @@ static int rpcrt4_protseq_np_wait_for_new_connection(RpcServerProtseq *protseq, 
     
     if (!objs)
         return -1;
-    
-    res = WaitForMultipleObjects(count, objs, FALSE, INFINITE);
+
+    do
+    {
+        /* an alertable wait isn't strictly necessary, but due to our
+         * overlapped I/O implementation in Wine we need to free some memory
+         * by the file user APC being called, even if no completion routine was
+         * specified at the time of starting the async operation */
+        res = WaitForMultipleObjectsEx(count, objs, FALSE, INFINITE, TRUE);
+    } while (res == WAIT_IO_COMPLETION);
+
     if (res == WAIT_OBJECT_0)
         return 0;
     else if (res == WAIT_FAILED)
@@ -969,7 +977,7 @@ static int rpcrt4_conn_tcp_read(RpcConnection *Connection,
       pfds[0].fd = tcpc->sock;
       pfds[0].events = POLLIN;
       pfds[1].fd = tcpc->cancel_fds[0];
-      pfds[1].fd = POLLIN;
+      pfds[1].events = POLLIN;
       if (poll(pfds, 2, -1 /* infinite */) == -1 && errno != EINTR)
       {
         ERR("poll() failed: %s\n", strerror(errno));
@@ -1541,6 +1549,8 @@ ULONG RpcAssoc_Release(RpcAssoc *assoc)
     HeapFree(GetProcessHeap(), 0, assoc->NetworkAddr);
     HeapFree(GetProcessHeap(), 0, assoc->Protseq);
 
+    DeleteCriticalSection(&assoc->cs);
+
     HeapFree(GetProcessHeap(), 0, assoc);
   }
 
@@ -1667,6 +1677,7 @@ static RPC_STATUS RpcAssoc_BindConnection(const RpcAssoc *assoc, RpcConnection *
     break;
   }
 
+  I_RpcFreeBuffer(&msg);
   RPCRT4_FreeHeader(response_hdr);
   return status;
 }

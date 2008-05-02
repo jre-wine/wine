@@ -651,7 +651,7 @@ void shader_generate_glsl_declarations(
     shader_addline(buffer, "vec4 tmp0;\n");
     shader_addline(buffer, "vec4 tmp1;\n");
 
-    /* Hardcodeable local constants */
+    /* Hardcodable local constants */
     if(!This->baseShader.load_local_constsF) {
         LIST_FOR_EACH_ENTRY(lconst, &This->baseShader.constantsF, local_constant, entry) {
             float *value = (float *) lconst->value;
@@ -1322,8 +1322,15 @@ void shader_glsl_mov(SHADER_OPCODE_ARG* arg) {
      * shader versions WINED3DSIO_MOVA is used for this. */
     if ((WINED3DSHADER_VERSION_MAJOR(shader->baseShader.hex_version) == 1 &&
             !shader_is_pshader_version(shader->baseShader.hex_version) &&
-            shader_get_regtype(arg->dst) == WINED3DSPR_ADDR) ||
-            arg->opcode->opcode == WINED3DSIO_MOVA) {
+            shader_get_regtype(arg->dst) == WINED3DSPR_ADDR)) {
+        /* This is a simple floor() */
+        size_t mask_size = shader_glsl_get_write_mask_size(write_mask);
+        if (mask_size > 1) {
+            shader_addline(buffer, "ivec%d(floor(%s)));\n", mask_size, src0_param.param_str);
+        } else {
+            shader_addline(buffer, "int(floor(%s)));\n", src0_param.param_str);
+        }
+    } else if(arg->opcode->opcode == WINED3DSIO_MOVA) {
         /* We need to *round* to the nearest int here. */
         size_t mask_size = shader_glsl_get_write_mask_size(write_mask);
         if (mask_size > 1) {
@@ -1574,7 +1581,7 @@ void shader_glsl_compare(SHADER_OPCODE_ARG* arg) {
             case WINED3DSIO_SLT:
                 /* Step(src0, src1) is not suitable here because if src0 == src1 SLT is supposed,
                  * to return 0.0 but step returns 1.0 because step is not < x
-                 * An alternative is a bvec compare padded with an unused secound component.
+                 * An alternative is a bvec compare padded with an unused second component.
                  * step(src1 * -1.0, src0 * -1.0) is not an option because it suffers from the same
                  * issue. Playing with not() is not possible either because not() does not accept
                  * a scalar.
@@ -2863,7 +2870,7 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
     SHADER_BUFFER buffer;
     DWORD usage_token;
     DWORD register_token;
-    DWORD usage, usage_idx;
+    DWORD usage, usage_idx, writemask;
     char reg_mask[6];
     semantic *semantics_out, *semantics_in;
 
@@ -2873,8 +2880,21 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
     buffer.newline = TRUE;
 
     if(vs_major < 3 && ps_major < 3) {
-        /* That one is easy: The vertex shader writes to the builtin varyings, the pixel shader reads from them */
-        shader_addline(&buffer, "void order_ps_input() { /* do nothing */ }\n");
+        /* That one is easy: The vertex shader writes to the builtin varyings, the pixel shader reads from them.
+         * Take care about the texcoord .w fixup though if we're using the fixed function fragment pipeline
+         */
+        if((GLINFO_LOCATION).set_texcoord_w && ps_major == 0 && vs_major > 0) {
+            shader_addline(&buffer, "void order_ps_input() {\n");
+            for(i = 0; i < min(8, MAX_REG_TEXCRD); i++) {
+                if(vs->baseShader.reg_maps.texcoord_mask[i] != 0 &&
+                   vs->baseShader.reg_maps.texcoord_mask[i] != WINED3DSP_WRITEMASK_ALL) {
+                    shader_addline(&buffer, "gl_TexCoord[%u].w = 1.0;\n", i);
+                }
+            }
+            shader_addline(&buffer, "}\n");
+        } else {
+            shader_addline(&buffer, "void order_ps_input() { /* do nothing */ }\n");
+        }
     } else if(ps_major < 3 && vs_major >= 3) {
         /* The vertex shader writes to its own varyings, the pixel shader needs them in the builtin ones */
         semantics_out = vs->semantics_out;
@@ -2887,7 +2907,7 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
 
             usage = (usage_token & WINED3DSP_DCL_USAGE_MASK) >> WINED3DSP_DCL_USAGE_SHIFT;
             usage_idx = (usage_token & WINED3DSP_DCL_USAGEINDEX_MASK) >> WINED3DSP_DCL_USAGEINDEX_SHIFT;
-            shader_glsl_get_write_mask(register_token, reg_mask);
+            writemask = shader_glsl_get_write_mask(register_token, reg_mask);
 
             switch(usage) {
                 case WINED3DDECLUSAGE_COLOR:
@@ -2903,8 +2923,13 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
 
                 case WINED3DDECLUSAGE_TEXCOORD:
                     if (usage_idx < 8) {
+                        if(!(GLINFO_LOCATION).set_texcoord_w || ps_major > 0) writemask |= WINED3DSP_WRITEMASK_3;
+
                         shader_addline(&buffer, "gl_TexCoord[%u]%s = OUT[%u]%s;\n",
-                                       usage_idx, reg_mask, i, reg_mask);
+                                        usage_idx, reg_mask, i, reg_mask);
+                        if(!(writemask & WINED3DSP_WRITEMASK_3)) {
+                            shader_addline(&buffer, "gl_TexCoord[%u].w = 1.0;\n", usage_idx);
+                        }
                     }
                     break;
 

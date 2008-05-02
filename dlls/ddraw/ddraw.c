@@ -599,7 +599,7 @@ IDirectDrawImpl_SetDisplayMode(IDirectDraw7 *iface,
         case 15: Mode.Format = WINED3DFMT_X1R5G5B5; break;
         case 16: Mode.Format = WINED3DFMT_R5G6B5;   break;
         case 24: Mode.Format = WINED3DFMT_R8G8B8;   break;
-        case 32: Mode.Format = WINED3DFMT_A8R8G8B8; break;
+        case 32: Mode.Format = WINED3DFMT_X8R8G8B8; break;
     }
 
     /* TODO: The possible return values from msdn suggest that
@@ -910,7 +910,6 @@ IDirectDrawImpl_GetAvailableVidMem(IDirectDraw7 *iface, DDSCAPS2 *Caps, DWORD *t
     {
         TRACE("(%p) Asked for memory with description: ", This);
         DDRAW_dump_DDSCAPS2(Caps);
-        TRACE("\n");
     }
     EnterCriticalSection(&ddraw_cs);
 
@@ -1725,7 +1724,7 @@ ULONG WINAPI D3D7CB_DestroyDepthStencilSurface(IWineD3DSurface *pSurface) {
     IUnknown* surfaceParent;
     TRACE("(%p) call back\n", pSurface);
 
-    IWineD3DSurface_GetParent(pSurface, (IUnknown **) &surfaceParent);
+    IWineD3DSurface_GetParent(pSurface, &surfaceParent);
     IUnknown_Release(surfaceParent);
     return IUnknown_Release(surfaceParent);
 }

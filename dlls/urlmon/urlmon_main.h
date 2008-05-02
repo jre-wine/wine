@@ -21,8 +21,17 @@
 
 #include <stdarg.h>
 
+#define COBJMACROS
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
+
 #include "windef.h"
 #include "winbase.h"
+#include "winuser.h"
+#include "ole2.h"
+#include "urlmon.h"
+
+#include "wine/unicode.h"
 
 extern HINSTANCE URLMON_hInstance;
 extern HRESULT SecManagerImpl_Construct(IUnknown *pUnkOuter, LPVOID *ppobj);
@@ -81,6 +90,21 @@ static inline void *heap_realloc(void *mem, size_t len)
 static inline BOOL heap_free(void *mem)
 {
     return HeapFree(GetProcessHeap(), 0, mem);
+}
+
+static inline LPWSTR heap_strdupW(LPCWSTR str)
+{
+    LPWSTR ret = NULL;
+
+    if(str) {
+        DWORD size;
+
+        size = (strlenW(str)+1)*sizeof(WCHAR);
+        ret = heap_alloc(size);
+        memcpy(ret, str, size);
+    }
+
+    return ret;
 }
 
 #endif /* __WINE_URLMON_MAIN_H */

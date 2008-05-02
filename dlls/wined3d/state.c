@@ -234,6 +234,8 @@ static void state_ambient(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD
 static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     int srcBlend = GL_ZERO;
     int dstBlend = GL_ZERO;
+    const StaticPixelFormatDesc *rtFormat;
+    IWineD3DSurfaceImpl *target = (IWineD3DSurfaceImpl *) stateblock->wineD3DDevice->render_targets[0];
 
     /* GL_LINE_SMOOTH needs GL_BLEND to work, according to the red book, and special blending params */
     if (stateblock->renderState[WINED3DRS_ALPHABLENDENABLE]      ||
@@ -255,10 +257,22 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
         case WINED3DBLEND_INVSRCCOLOR        : dstBlend = GL_ONE_MINUS_SRC_COLOR;  break;
         case WINED3DBLEND_SRCALPHA           : dstBlend = GL_SRC_ALPHA;  break;
         case WINED3DBLEND_INVSRCALPHA        : dstBlend = GL_ONE_MINUS_SRC_ALPHA;  break;
-        case WINED3DBLEND_DESTALPHA          : dstBlend = GL_DST_ALPHA;  break;
-        case WINED3DBLEND_INVDESTALPHA       : dstBlend = GL_ONE_MINUS_DST_ALPHA;  break;
         case WINED3DBLEND_DESTCOLOR          : dstBlend = GL_DST_COLOR;  break;
         case WINED3DBLEND_INVDESTCOLOR       : dstBlend = GL_ONE_MINUS_DST_COLOR;  break;
+
+        /* To compensate the lack of format switching with backbuffer offscreen rendering,
+         * and with onscreen rendering, we modify the alpha test parameters for (INV)DESTALPHA
+         * if the render target doesn't support alpha blending. A nonexistent alpha channel
+         * returns 1.0, so D3DBLEND_DESTALPHA is GL_ONE, and D3DBLEND_INVDESTALPHA is GL_ZERO
+         */
+        case WINED3DBLEND_DESTALPHA          :
+            rtFormat = getFormatDescEntry(target->resource.format, NULL, NULL);
+            dstBlend = rtFormat->alphaMask ? GL_DST_ALPHA : GL_ONE;
+            break;
+        case WINED3DBLEND_INVDESTALPHA       :
+            rtFormat = getFormatDescEntry(target->resource.format, NULL, NULL);
+            dstBlend = rtFormat->alphaMask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
+            break;
 
         case WINED3DBLEND_SRCALPHASAT        :
             dstBlend = GL_SRC_ALPHA_SATURATE;
@@ -291,11 +305,18 @@ static void state_blend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
         case WINED3DBLEND_INVSRCCOLOR        : srcBlend = GL_ONE_MINUS_SRC_COLOR;  break;
         case WINED3DBLEND_SRCALPHA           : srcBlend = GL_SRC_ALPHA;  break;
         case WINED3DBLEND_INVSRCALPHA        : srcBlend = GL_ONE_MINUS_SRC_ALPHA;  break;
-        case WINED3DBLEND_DESTALPHA          : srcBlend = GL_DST_ALPHA;  break;
-        case WINED3DBLEND_INVDESTALPHA       : srcBlend = GL_ONE_MINUS_DST_ALPHA;  break;
         case WINED3DBLEND_DESTCOLOR          : srcBlend = GL_DST_COLOR;  break;
         case WINED3DBLEND_INVDESTCOLOR       : srcBlend = GL_ONE_MINUS_DST_COLOR;  break;
         case WINED3DBLEND_SRCALPHASAT        : srcBlend = GL_SRC_ALPHA_SATURATE;  break;
+
+        case WINED3DBLEND_DESTALPHA          :
+            rtFormat = getFormatDescEntry(target->resource.format, NULL, NULL);
+            srcBlend = rtFormat->alphaMask ? GL_DST_ALPHA : GL_ONE;
+            break;
+        case WINED3DBLEND_INVDESTALPHA       :
+            rtFormat = getFormatDescEntry(target->resource.format, NULL, NULL);
+            srcBlend = rtFormat->alphaMask ? GL_ONE_MINUS_DST_ALPHA : GL_ZERO;
+            break;
 
         case WINED3DBLEND_BOTHSRCALPHA       : srcBlend = GL_SRC_ALPHA;
             dstBlend = GL_ONE_MINUS_SRC_ALPHA;
@@ -1957,7 +1978,7 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, W
         return;
     }
 
-    if (mapped_stage < 0) return;
+    if (mapped_stage == -1) return;
 
     if (GL_SUPPORT(ARB_MULTITEXTURE)) {
         if(mapped_stage >= GL_LIMITS(textures)) {
@@ -3484,7 +3505,7 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
             }
             if(wasrhw) {
                 /* Apply the transform matrices when switching from rhw drawing to vertex shaders. Vertex
-                 * shaders themselves do not need it it, but the matrices are not reapplied automatically when
+                 * shaders themselves do not need it, but the matrices are not reapplied automatically when
                  * switching back from vertex shaders to fixed function processing. So make sure we leave the
                  * fixed function vertex processing states back in a sane state before switching to shaders
                  */
@@ -3525,6 +3546,9 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
 }
 
 static void viewport(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    UINT width, height;
+    IWineD3DSurfaceImpl *target;
+
     glDepthRange(stateblock->viewport.MinZ, stateblock->viewport.MaxZ);
     checkGLcall("glDepthRange");
     /* Note: GL requires lower left, DirectX supplies upper left. This is reversed when using offscreen rendering
@@ -3534,8 +3558,11 @@ static void viewport(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCon
                    stateblock->viewport.Y,
                    stateblock->viewport.Width, stateblock->viewport.Height);
     } else {
+        target = (IWineD3DSurfaceImpl *) stateblock->wineD3DDevice->render_targets[0];
+        target->get_drawable_size(target, &width, &height);
+
         glViewport(stateblock->viewport.X,
-                   (((IWineD3DSurfaceImpl *)stateblock->wineD3DDevice->render_targets[0])->currentDesc.Height - (stateblock->viewport.Y + stateblock->viewport.Height)),
+                   (height - (stateblock->viewport.Y + stateblock->viewport.Height)),
                    stateblock->viewport.Width, stateblock->viewport.Height);
     }
 
@@ -3668,25 +3695,21 @@ static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContex
 
 static void scissorrect(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     RECT *pRect = &stateblock->scissorRect;
-    RECT windowRect;
-    UINT winHeight;
+    UINT height;
+    UINT width;
+    IWineD3DSurfaceImpl *target = (IWineD3DSurfaceImpl *) stateblock->wineD3DDevice->render_targets[0];
 
-    windowRect.left = 0;
-    windowRect.top = 0;
-    windowRect.right = ((IWineD3DSurfaceImpl *) stateblock->wineD3DDevice->render_targets[0])->currentDesc.Width;
-    windowRect.bottom = ((IWineD3DSurfaceImpl *) stateblock->wineD3DDevice->render_targets[0])->currentDesc.Height;
-
+    target->get_drawable_size(target, &width, &height);
     /* Warning: glScissor uses window coordinates, not viewport coordinates, so our viewport correction does not apply
      * Warning2: Even in windowed mode the coords are relative to the window, not the screen
      */
-    winHeight = windowRect.bottom - windowRect.top;
-    TRACE("(%p) Setting new Scissor Rect to %d:%d-%d:%d\n", stateblock->wineD3DDevice, pRect->left, pRect->bottom - winHeight,
+    TRACE("(%p) Setting new Scissor Rect to %d:%d-%d:%d\n", stateblock->wineD3DDevice, pRect->left, pRect->bottom - height,
           pRect->right - pRect->left, pRect->bottom - pRect->top);
 
     if (stateblock->wineD3DDevice->render_offscreen) {
         glScissor(pRect->left, pRect->top, pRect->right - pRect->left, pRect->bottom - pRect->top);
     } else {
-        glScissor(pRect->left, winHeight - pRect->bottom, pRect->right - pRect->left, pRect->bottom - pRect->top);
+        glScissor(pRect->left, height - pRect->bottom, pRect->right - pRect->left, pRect->bottom - pRect->top);
     }
     checkGLcall("glScissor");
 }

@@ -90,7 +90,7 @@ struct ConnectionPoint {
     } *sinks;
     DWORD sinks_size;
 
-    IID iid;
+    const IID *iid;
 
     ConnectionPoint *next;
 };
@@ -285,6 +285,7 @@ struct HTMLDOMNode {
 
 typedef struct {
     HTMLDOMNode node;
+    ConnectionPointContainer cp_container;
 
     const IHTMLElementVtbl   *lpHTMLElementVtbl;
     const IHTMLElement2Vtbl  *lpHTMLElement2Vtbl;
@@ -296,6 +297,8 @@ typedef struct {
     HTMLElement element;
 
     const IHTMLTextContainerVtbl *lpHTMLTextContainerVtbl;
+
+    ConnectionPoint cp;
 } HTMLTextContainer;
 
 #define HTMLWINDOW2(x)   ((IHTMLWindow2*)                 &(x)->lpHTMLWindow2Vtbl)
@@ -372,8 +375,8 @@ void HTMLDocument_Window_Init(HTMLDocument*);
 void HTMLDocument_Service_Init(HTMLDocument*);
 void HTMLDocument_Hlink_Init(HTMLDocument*);
 
-void ConnectionPoint_Init(ConnectionPoint*,IConnectionPointContainer*,REFIID,ConnectionPoint*);
-void ConnectionPointContainer_Init(ConnectionPointContainer*,ConnectionPoint*,IUnknown*);
+void ConnectionPoint_Init(ConnectionPoint*,ConnectionPointContainer*,REFIID);
+void ConnectionPointContainer_Init(ConnectionPointContainer*,IUnknown*);
 void ConnectionPointContainer_Destroy(ConnectionPointContainer*);
 
 NSContainer *NSContainer_Create(HTMLDocument*,NSContainer*);
@@ -445,6 +448,7 @@ HTMLElement *HTMLSelectElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLTable_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLTextAreaElement_Create(nsIDOMHTMLElement*);
 
+void HTMLElement_Init(HTMLElement*);
 void HTMLElement2_Init(HTMLElement*);
 void HTMLTextContainer_Init(HTMLTextContainer*);
 
@@ -537,22 +541,22 @@ extern LONG module_ref;
 
 /* memory allocation functions */
 
-static inline void *mshtml_alloc(size_t len)
+static inline void *heap_alloc(size_t len)
 {
     return HeapAlloc(GetProcessHeap(), 0, len);
 }
 
-static inline void *mshtml_alloc_zero(size_t len)
+static inline void *heap_alloc_zero(size_t len)
 {
     return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len);
 }
 
-static inline void *mshtml_realloc(void *mem, size_t len)
+static inline void *heap_realloc(void *mem, size_t len)
 {
     return HeapReAlloc(GetProcessHeap(), 0, mem, len);
 }
 
-static inline BOOL mshtml_free(void *mem)
+static inline BOOL heap_free(void *mem)
 {
     return HeapFree(GetProcessHeap(), 0, mem);
 }

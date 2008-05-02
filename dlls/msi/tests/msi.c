@@ -976,6 +976,618 @@ static void test_MsiQueryComponentState(void)
     RegCloseKey(compkey);
 }
 
+static void test_MsiGetComponentPath(void)
+{
+    HKEY compkey, prodkey, installprop;
+    CHAR prodcode[MAX_PATH];
+    CHAR prod_squashed[MAX_PATH];
+    CHAR component[MAX_PATH];
+    CHAR comp_base85[MAX_PATH];
+    CHAR comp_squashed[MAX_PATH];
+    CHAR keypath[MAX_PATH];
+    CHAR path[MAX_PATH];
+    INSTALLSTATE state;
+    LPSTR usersid;
+    DWORD size, val;
+    LONG res;
+
+    create_test_guid(prodcode, prod_squashed);
+    compose_base85_guid(component, comp_base85, comp_squashed);
+    get_user_sid(&usersid);
+
+    /* NULL szProduct */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(NULL, component, path, &size);
+    ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    /* NULL szComponent */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, NULL, path, &size);
+    ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    /* NULL lpPathBuf */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, NULL, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    /* NULL pcchBuf */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, NULL);
+    ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    /* all params valid */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Components\\");
+    lstrcatA(keypath, comp_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &compkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* local system component key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* product value exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+    lstrcatA(keypath, "\\InstallProperties");
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &installprop);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    val = 1;
+    res = RegSetValueExA(installprop, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&val, sizeof(DWORD));
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* install properties key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    create_file("C:\\imapath", "C:\\imapath", 11);
+
+    /* file exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    RegDeleteValueA(compkey, prod_squashed);
+    RegDeleteKeyA(compkey, "");
+    RegDeleteValueA(installprop, "WindowsInstaller");
+    RegDeleteKeyA(installprop, "");
+    RegCloseKey(compkey);
+    RegCloseKey(installprop);
+    DeleteFileA("C:\\imapath");
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Components\\");
+    lstrcatA(keypath, comp_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &compkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user managed component key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* product value exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+    lstrcatA(keypath, "\\InstallProperties");
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &installprop);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    val = 1;
+    res = RegSetValueExA(installprop, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&val, sizeof(DWORD));
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* install properties key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    create_file("C:\\imapath", "C:\\imapath", 11);
+
+    /* file exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    RegDeleteValueA(compkey, prod_squashed);
+    RegDeleteKeyA(compkey, "");
+    RegDeleteValueA(installprop, "WindowsInstaller");
+    RegDeleteKeyA(installprop, "");
+    RegCloseKey(compkey);
+    RegCloseKey(installprop);
+    DeleteFileA("C:\\imapath");
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\Managed\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user managed product key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Components\\");
+    lstrcatA(keypath, comp_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &compkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user managed component key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* product value exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+    lstrcatA(keypath, "\\InstallProperties");
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &installprop);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    val = 1;
+    res = RegSetValueExA(installprop, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&val, sizeof(DWORD));
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* install properties key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    create_file("C:\\imapath", "C:\\imapath", 11);
+
+    /* file exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    RegDeleteValueA(compkey, prod_squashed);
+    RegDeleteKeyA(prodkey, "");
+    RegDeleteKeyA(compkey, "");
+    RegDeleteValueA(installprop, "WindowsInstaller");
+    RegDeleteKeyA(installprop, "");
+    RegCloseKey(prodkey);
+    RegCloseKey(compkey);
+    RegCloseKey(installprop);
+    DeleteFileA("C:\\imapath");
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user unmanaged product key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Components\\");
+    lstrcatA(keypath, comp_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &compkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user unmanaged component key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* product value exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    create_file("C:\\imapath", "C:\\imapath", 11);
+
+    /* file exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    RegDeleteValueA(compkey, prod_squashed);
+    RegDeleteKeyA(prodkey, "");
+    RegDeleteKeyA(compkey, "");
+    RegCloseKey(prodkey);
+    RegCloseKey(compkey);
+    RegCloseKey(installprop);
+    DeleteFileA("C:\\imapath");
+
+    lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* local classes product key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Components\\");
+    lstrcatA(keypath, comp_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &compkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* local user component key exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* product value exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    create_file("C:\\imapath", "C:\\imapath", 11);
+
+    /* file exists */
+    size = MAX_PATH;
+    state = MsiGetComponentPathA(prodcode, component, path, &size);
+    ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
+    ok(size == 10, "Expected 10, got %d\n", size);
+
+    RegDeleteValueA(compkey, prod_squashed);
+    RegDeleteKeyA(prodkey, "");
+    RegDeleteKeyA(compkey, "");
+    RegCloseKey(prodkey);
+    RegCloseKey(compkey);
+    DeleteFileA("C:\\imapath");
+}
+
+static void test_MsiGetProductCode(void)
+{
+    HKEY compkey, prodkey;
+    CHAR prodcode[MAX_PATH];
+    CHAR prod_squashed[MAX_PATH];
+    CHAR prodcode2[MAX_PATH];
+    CHAR prod2_squashed[MAX_PATH];
+    CHAR component[MAX_PATH];
+    CHAR comp_base85[MAX_PATH];
+    CHAR comp_squashed[MAX_PATH];
+    CHAR keypath[MAX_PATH];
+    CHAR product[MAX_PATH];
+    LPSTR usersid;
+    LONG res;
+    UINT r;
+
+    create_test_guid(prodcode, prod_squashed);
+    create_test_guid(prodcode2, prod2_squashed);
+    compose_base85_guid(component, comp_base85, comp_squashed);
+    get_user_sid(&usersid);
+
+    /* szComponent is NULL */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(NULL, product);
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
+
+    /* szComponent is empty */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA("", product);
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
+
+    /* garbage szComponent */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA("garbage", product);
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
+
+    /* guid without brackets */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA("6700E8CF-95AB-4D9C-BC2C-15840DEA7A5D", product);
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
+
+    /* guid with brackets */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA("{6700E8CF-95AB-4D9C-BC2C-15840DEA7A5D}", product);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
+
+    /* same length as guid, but random */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA("A938G02JF-2NF3N93-VN3-2NNF-3KGKALDNF93", product);
+    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
+    ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
+
+    /* all params correct, szComponent not published */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Components\\");
+    lstrcatA(keypath, comp_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &compkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user unmanaged component key exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* product value exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
+
+    res = RegSetValueExA(compkey, prod2_squashed, 0, REG_SZ, (const BYTE *)"C:\\another", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\Managed\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user managed product key of first product exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user unmanaged product key exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* local classes product key exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\Managed\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Installer\\Products\\");
+    lstrcatA(keypath, prod2_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user managed product key of second product exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode2), "Expected %s, got %s\n", prodcode2, product);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+    RegDeleteValueA(compkey, prod_squashed);
+    RegDeleteValueA(compkey, prod2_squashed);
+    RegDeleteKeyA(compkey, "");
+    RegCloseKey(compkey);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Components\\");
+    lstrcatA(keypath, comp_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &compkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* local user component key exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
+    ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
+
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* product value exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
+
+    res = RegSetValueExA(compkey, prod2_squashed, 0, REG_SZ, (const BYTE *)"C:\\another", 10);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\Managed\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user managed product key of first product exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user unmanaged product key exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
+    lstrcatA(keypath, prod_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* local classes product key exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+
+    lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
+    lstrcatA(keypath, "Installer\\Managed\\");
+    lstrcatA(keypath, usersid);
+    lstrcatA(keypath, "\\Installer\\Products\\");
+    lstrcatA(keypath, prod2_squashed);
+
+    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+
+    /* user managed product key of second product exists */
+    lstrcpyA(product, "prod");
+    r = MsiGetProductCodeA(component, product);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(product, prodcode2), "Expected %s, got %s\n", prodcode2, product);
+
+    RegDeleteKeyA(prodkey, "");
+    RegCloseKey(prodkey);
+    RegDeleteValueA(compkey, prod_squashed);
+    RegDeleteValueA(compkey, prod2_squashed);
+    RegDeleteKeyA(compkey, "");
+    RegCloseKey(compkey);
+}
+
 START_TEST(msi)
 {
     init_functionpointers();
@@ -987,4 +1599,6 @@ START_TEST(msi)
     test_MsiQueryProductState();
     test_MsiQueryFeatureState();
     test_MsiQueryComponentState();
+    test_MsiGetComponentPath();
+    test_MsiGetProductCode();
 }

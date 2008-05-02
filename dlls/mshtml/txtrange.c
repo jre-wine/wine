@@ -28,6 +28,7 @@
 #include "winuser.h"
 #include "winnls.h"
 #include "ole2.h"
+#include "mshtmcid.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -160,20 +161,20 @@ static inline void wstrbuf_init(wstrbuf_t *buf)
 {
     buf->len = 0;
     buf->size = 16;
-    buf->buf = mshtml_alloc(buf->size * sizeof(WCHAR));
+    buf->buf = heap_alloc(buf->size * sizeof(WCHAR));
     *buf->buf = 0;
 }
 
 static inline void wstrbuf_finish(wstrbuf_t *buf)
 {
-    mshtml_free(buf->buf);
+    heap_free(buf->buf);
 }
 
 static void wstrbuf_append_len(wstrbuf_t *buf, LPCWSTR str, int len)
 {
     if(buf->len+len >= buf->size) {
         buf->size = 2*buf->len+len;
-        buf->buf = mshtml_realloc(buf->buf, buf->size * sizeof(WCHAR));
+        buf->buf = heap_realloc(buf->buf, buf->size * sizeof(WCHAR));
     }
 
     memcpy(buf->buf+buf->len, str, len*sizeof(WCHAR));
@@ -195,7 +196,7 @@ static void wstrbuf_append_nodetxt(wstrbuf_t *buf, LPCWSTR str, int len)
 
     if(buf->len+len >= buf->size) {
         buf->size = 2*buf->len+len;
-        buf->buf = mshtml_realloc(buf->buf, buf->size * sizeof(WCHAR));
+        buf->buf = heap_realloc(buf->buf, buf->size * sizeof(WCHAR));
     }
 
     if(buf->len && isspaceW(buf->buf[buf->len-1])) {
@@ -979,7 +980,7 @@ static ULONG WINAPI HTMLTxtRange_Release(IHTMLTxtRange *iface)
             nsISelection_Release(This->nsrange);
         if(This->doc)
             list_remove(&This->entry);
-        mshtml_free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -1729,15 +1730,61 @@ static HRESULT WINAPI RangeCommandTarget_QueryStatus(IOleCommandTarget *iface, c
     return E_NOTIMPL;
 }
 
+static HRESULT exec_indent(HTMLTxtRange *This, VARIANT *in, VARIANT *out)
+{
+    nsIDOMDocumentFragment *fragment;
+    nsIDOMElement *blockquote_elem, *p_elem;
+    nsIDOMDocument *nsdoc;
+    nsIDOMNode *tmp;
+    nsAString tag_str;
+
+    static const PRUnichar blockquoteW[] = {'B','L','O','C','K','Q','U','O','T','E',0};
+    static const PRUnichar pW[] = {'P',0};
+
+    TRACE("(%p)->(%p %p)\n", This, in, out);
+
+    nsIWebNavigation_GetDocument(This->doc->nscontainer->navigation, &nsdoc);
+
+    nsAString_Init(&tag_str, blockquoteW);
+    nsIDOMDocument_CreateElement(nsdoc, &tag_str, &blockquote_elem);
+    nsAString_Finish(&tag_str);
+
+    nsAString_Init(&tag_str, pW);
+    nsIDOMDocument_CreateElement(nsdoc, &tag_str, &p_elem);
+    nsAString_Finish(&tag_str);
+
+    nsIDOMDocument_Release(nsdoc);
+
+    nsIDOMRange_ExtractContents(This->nsrange, &fragment);
+    nsIDOMElement_AppendChild(p_elem, (nsIDOMNode*)fragment, &tmp);
+    nsIDOMDocumentFragment_Release(fragment);
+    nsIDOMNode_Release(tmp);
+
+    nsIDOMElement_AppendChild(blockquote_elem, (nsIDOMNode*)p_elem, &tmp);
+    nsIDOMElement_Release(p_elem);
+    nsIDOMNode_Release(tmp);
+
+    nsIDOMRange_InsertNode(This->nsrange, (nsIDOMNode*)blockquote_elem);
+    nsIDOMElement_Release(blockquote_elem);
+
+    return S_OK;
+}
+
 static HRESULT WINAPI RangeCommandTarget_Exec(IOleCommandTarget *iface, const GUID *pguidCmdGroup,
         DWORD nCmdID, DWORD nCmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
 {
     HTMLTxtRange *This = OLECMDTRG_THIS(iface);
+
     TRACE("(%p)->(%s %d %x %p %p)\n", This, debugstr_guid(pguidCmdGroup), nCmdID,
           nCmdexecopt, pvaIn, pvaOut);
 
     if(pguidCmdGroup && IsEqualGUID(&CGID_MSHTML, pguidCmdGroup)) {
-        FIXME("Unsupported cmdid %d of CGID_MSHTML\n", nCmdID);
+        switch(nCmdID) {
+        case IDM_INDENT:
+            return exec_indent(This, pvaIn, pvaOut);
+        default:
+            FIXME("Unsupported cmdid %d of CGID_MSHTML\n", nCmdID);
+        }
     }else {
         FIXME("Unsupported cmd %d of group %s\n", nCmdID, debugstr_guid(pguidCmdGroup));
     }
@@ -1757,7 +1804,7 @@ static const IOleCommandTargetVtbl OleCommandTargetVtbl = {
 
 IHTMLTxtRange *HTMLTxtRange_Create(HTMLDocument *doc, nsIDOMRange *nsrange)
 {
-    HTMLTxtRange *ret = mshtml_alloc(sizeof(HTMLTxtRange));
+    HTMLTxtRange *ret = heap_alloc(sizeof(HTMLTxtRange));
 
     ret->lpHTMLTxtRangeVtbl = &HTMLTxtRangeVtbl;
     ret->lpOleCommandTargetVtbl = &OleCommandTargetVtbl;

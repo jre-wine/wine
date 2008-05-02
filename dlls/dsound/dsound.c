@@ -1318,7 +1318,7 @@ HRESULT DirectSoundDevice_GetCaps(
     if (TRACE_ON(dsound)) {
         TRACE("(flags=0x%08x:\n",lpDSCaps->dwFlags);
         _dump_DSCAPS(lpDSCaps->dwFlags);
-        DPRINTF(")\n");
+        TRACE(")\n");
     }
     lpDSCaps->dwMinSecondarySampleRate          = device->drvcaps.dwMinSecondarySampleRate;
     lpDSCaps->dwMaxSecondarySampleRate          = device->drvcaps.dwMaxSecondarySampleRate;
@@ -1538,7 +1538,7 @@ HRESULT DirectSoundDevice_CreateSoundBuffer(
         TRACE("(structsize=%d)\n",dsbd->dwSize);
         TRACE("(flags=0x%08x:\n",dsbd->dwFlags);
         _dump_DSBCAPS(dsbd->dwFlags);
-        DPRINTF(")\n");
+        TRACE(")\n");
         TRACE("(bufferbytes=%d)\n",dsbd->dwBufferBytes);
         TRACE("(lpwfxFormat=%p)\n",dsbd->lpwfxFormat);
     }
@@ -1587,13 +1587,13 @@ HRESULT DirectSoundDevice_CreateSoundBuffer(
         {
             if (pwfxe->Format.cbSize < (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)))
             {
-                WARN("Too small a cbSize (%d/%d)\n", pwfxe->Format.cbSize, (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)));
+                WARN("Too small a cbSize %u\n", pwfxe->Format.cbSize);
                 return DSERR_INVALIDPARAM;
             }
 
             if (pwfxe->Format.cbSize > (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)))
             {
-                WARN("Too big a cbSize (%d/%d)\n", pwfxe->Format.cbSize, (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)));
+                WARN("Too big a cbSize %u\n", pwfxe->Format.cbSize);
                 return DSERR_CONTROLUNAVAIL;
             }
 

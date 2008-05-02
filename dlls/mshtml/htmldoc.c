@@ -194,7 +194,7 @@ static ULONG WINAPI HTMLDocument_Release(IHTMLDocument2 *iface)
         if(This->nscontainer)
             NSContainer_Release(This->nscontainer);
 
-        mshtml_free(This);
+        heap_free(This);
 
         UNLOCK_MODULE();
     }
@@ -1176,7 +1176,7 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
 
     TRACE("(%p %s %p)\n", pUnkOuter, debugstr_guid(riid), ppvObject);
 
-    ret = mshtml_alloc(sizeof(HTMLDocument));
+    ret = heap_alloc(sizeof(HTMLDocument));
     ret->lpHTMLDocument2Vtbl = &HTMLDocumentVtbl;
     ret->ref = 0;
     ret->nscontainer = NULL;
@@ -1191,7 +1191,7 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
 
     hres = IHTMLDocument_QueryInterface(HTMLDOC(ret), riid, ppvObject);
     if(FAILED(hres)) {
-        mshtml_free(ret);
+        heap_free(ret);
         return hres;
     }
 
@@ -1207,13 +1207,10 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
     HTMLDocument_Service_Init(ret);
     HTMLDocument_Hlink_Init(ret);
 
-    ConnectionPoint_Init(&ret->cp_propnotif, CONPTCONT(&ret->cp_container),
-            &IID_IPropertyNotifySink, NULL);
-    ConnectionPoint_Init(&ret->cp_htmldocevents, CONPTCONT(&ret->cp_container),
-            &DIID_HTMLDocumentEvents, &ret->cp_propnotif);
-    ConnectionPoint_Init(&ret->cp_htmldocevents2, CONPTCONT(&ret->cp_container),
-            &DIID_HTMLDocumentEvents2, &ret->cp_htmldocevents);
-    ConnectionPointContainer_Init(&ret->cp_container, &ret->cp_propnotif, (IUnknown*)HTMLDOC(ret));
+    ConnectionPointContainer_Init(&ret->cp_container, (IUnknown*)HTMLDOC(ret));
+    ConnectionPoint_Init(&ret->cp_propnotif, &ret->cp_container, &IID_IPropertyNotifySink);
+    ConnectionPoint_Init(&ret->cp_htmldocevents, &ret->cp_container, &DIID_HTMLDocumentEvents);
+    ConnectionPoint_Init(&ret->cp_htmldocevents2, &ret->cp_container, &DIID_HTMLDocumentEvents2);
 
     ret->nscontainer = NSContainer_Create(ret, NULL);
     ret->window = HTMLWindow_Create(ret);

@@ -497,6 +497,12 @@ s_sum_L1_norms(int n, vector_t *vs)
   return sum;
 }
 
+str_t
+s_get_filename(void)
+{
+    return (char *)__FILE__;
+}
+
 void
 s_stop(void)
 {
@@ -558,6 +564,7 @@ basic_tests(void)
   int x;
   str_struct_t ss = {string};
   wstr_struct_t ws = {wstring};
+  str_t str;
 
   ok(int_return() == INT_CODE, "RPC int_return\n");
 
@@ -652,6 +659,9 @@ basic_tests(void)
   ok(sum_bogus(&bogus) == 12, "RPC sum_bogus\n");
 
   check_null(NULL);
+
+  str = get_filename();
+  ok(!strcmp(str, __FILE__), "get_filename() returned %s instead of %s\n", str, __FILE__);
 }
 
 static void
@@ -877,6 +887,7 @@ pointer_tests(void)
   name.name = buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, name.size);
   get_name(&name);
   ok(name.name == buffer, "[in,out] pointer should have stayed as %p but instead changed to %p\n", name.name, buffer);
+  ok(!strcmp(name.name, "Jeremy Wh"), "name didn't unmarshall properly, expected \"Jeremy Wh\", but got \"%s\"\n", name.name);
   HeapFree(GetProcessHeap(), 0, name.name);
 
   pa2 = a;

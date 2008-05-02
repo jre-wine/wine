@@ -2911,6 +2911,18 @@ static void dump_set_process_winstation_request( const struct set_process_winsta
     fprintf( stderr, " handle=%p", req->handle );
 }
 
+static void dump_enum_winstation_request( const struct enum_winstation_request *req )
+{
+    fprintf( stderr, " index=%08x", req->index );
+}
+
+static void dump_enum_winstation_reply( const struct enum_winstation_reply *req )
+{
+    fprintf( stderr, " next=%08x,", req->next );
+    fprintf( stderr, " name=" );
+    dump_varargs_unicode_str( cur_size );
+}
+
 static void dump_create_desktop_request( const struct create_desktop_request *req )
 {
     fprintf( stderr, " flags=%08x,", req->flags );
@@ -2957,6 +2969,19 @@ static void dump_get_thread_desktop_reply( const struct get_thread_desktop_reply
 static void dump_set_thread_desktop_request( const struct set_thread_desktop_request *req )
 {
     fprintf( stderr, " handle=%p", req->handle );
+}
+
+static void dump_enum_desktop_request( const struct enum_desktop_request *req )
+{
+    fprintf( stderr, " winstation=%p,", req->winstation );
+    fprintf( stderr, " index=%08x", req->index );
+}
+
+static void dump_enum_desktop_reply( const struct enum_desktop_reply *req )
+{
+    fprintf( stderr, " next=%08x,", req->next );
+    fprintf( stderr, " name=" );
+    dump_varargs_unicode_str( cur_size );
 }
 
 static void dump_set_user_object_info_request( const struct set_user_object_info_request *req )
@@ -3475,6 +3500,22 @@ static void dump_open_directory_reply( const struct open_directory_reply *req )
     fprintf( stderr, " handle=%p", req->handle );
 }
 
+static void dump_get_directory_entry_request( const struct get_directory_entry_request *req )
+{
+    fprintf( stderr, " handle=%p,", req->handle );
+    fprintf( stderr, " index=%08x", req->index );
+}
+
+static void dump_get_directory_entry_reply( const struct get_directory_entry_reply *req )
+{
+    fprintf( stderr, " name_len=%lu,", (unsigned long)req->name_len );
+    fprintf( stderr, " name=" );
+    dump_varargs_unicode_str( min(cur_size,req->name_len) );
+    fputc( ',', stderr );
+    fprintf( stderr, " type=" );
+    dump_varargs_unicode_str( cur_size );
+}
+
 static void dump_create_symlink_request( const struct create_symlink_request *req )
 {
     fprintf( stderr, " access=%08x,", req->access );
@@ -3876,11 +3917,13 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_close_winstation_request,
     (dump_func)dump_get_process_winstation_request,
     (dump_func)dump_set_process_winstation_request,
+    (dump_func)dump_enum_winstation_request,
     (dump_func)dump_create_desktop_request,
     (dump_func)dump_open_desktop_request,
     (dump_func)dump_close_desktop_request,
     (dump_func)dump_get_thread_desktop_request,
     (dump_func)dump_set_thread_desktop_request,
+    (dump_func)dump_enum_desktop_request,
     (dump_func)dump_set_user_object_info_request,
     (dump_func)dump_attach_thread_input_request,
     (dump_func)dump_get_thread_input_request,
@@ -3917,6 +3960,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_mailslot_info_request,
     (dump_func)dump_create_directory_request,
     (dump_func)dump_open_directory_request,
+    (dump_func)dump_get_directory_entry_request,
     (dump_func)dump_create_symlink_request,
     (dump_func)dump_open_symlink_request,
     (dump_func)dump_query_symlink_request,
@@ -4107,11 +4151,13 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)0,
     (dump_func)dump_get_process_winstation_reply,
     (dump_func)0,
+    (dump_func)dump_enum_winstation_reply,
     (dump_func)dump_create_desktop_reply,
     (dump_func)dump_open_desktop_reply,
     (dump_func)0,
     (dump_func)dump_get_thread_desktop_reply,
     (dump_func)0,
+    (dump_func)dump_enum_desktop_reply,
     (dump_func)dump_set_user_object_info_reply,
     (dump_func)0,
     (dump_func)dump_get_thread_input_reply,
@@ -4148,6 +4194,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_mailslot_info_reply,
     (dump_func)dump_create_directory_reply,
     (dump_func)dump_open_directory_reply,
+    (dump_func)dump_get_directory_entry_reply,
     (dump_func)dump_create_symlink_reply,
     (dump_func)dump_open_symlink_reply,
     (dump_func)dump_query_symlink_reply,
@@ -4338,11 +4385,13 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "close_winstation",
     "get_process_winstation",
     "set_process_winstation",
+    "enum_winstation",
     "create_desktop",
     "open_desktop",
     "close_desktop",
     "get_thread_desktop",
     "set_thread_desktop",
+    "enum_desktop",
     "set_user_object_info",
     "attach_thread_input",
     "get_thread_input",
@@ -4379,6 +4428,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_mailslot_info",
     "create_directory",
     "open_directory",
+    "get_directory_entry",
     "create_symlink",
     "open_symlink",
     "query_symlink",

@@ -213,5 +213,9 @@ static const IHTMLTextContainerVtbl HTMLTextContainerVtbl = {
 
 void HTMLTextContainer_Init(HTMLTextContainer *This)
 {
+    HTMLElement_Init(&This->element);
+
     This->lpHTMLTextContainerVtbl = &HTMLTextContainerVtbl;
+
+    ConnectionPoint_Init(&This->cp, &This->element.cp_container, &DIID_HTMLTextContainerEvents);
 }

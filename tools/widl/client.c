@@ -29,16 +29,12 @@
 #include <ctype.h>
 #include <signal.h>
 
-#include "windef.h"
-
 #include "widl.h"
 #include "utils.h"
 #include "parser.h"
 #include "header.h"
 
 #include "widltypes.h"
-#include "typelib.h"
-#include "typelib_struct.h"
 #include "typegen.h"
 
 static FILE* client;
@@ -139,6 +135,11 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset)
 
         print_client("RPC_MESSAGE _RpcMessage;\n");
         print_client("MIDL_STUB_MESSAGE _StubMsg;\n");
+        if (!is_void(def->type) && decl_indirect(def->type))
+        {
+            print_client("void *_p_%s = &%s;\n",
+                         "_RetVal", "_RetVal");
+        }
         fprintf(client, "\n");
 
         /* check pointers */
@@ -216,7 +217,13 @@ static void write_function_stubs(type_t *iface, unsigned int *proc_offset)
 
         /* unmarshal return value */
         if (!is_void(def->type))
-            print_phase_basetype(client, indent, PHASE_UNMARSHAL, PASS_RETURN, def, "_RetVal");
+        {
+            if (decl_indirect(def->type))
+                print_client("MIDL_memset(&%s, 0, sizeof(%s));\n", "_RetVal", "_RetVal");
+            else if (is_ptr(def->type) || is_array(def->type))
+                print_client("%s = 0;\n", "_RetVal");
+            write_remoting_arguments(client, indent, func, PASS_RETURN, PHASE_UNMARSHAL);
+        }
 
         /* update proc_offset */
         if (func->args)
@@ -326,7 +333,7 @@ static void write_clientinterfacedecl(type_t *iface)
     print_client("{{0x%08lx,0x%04x,0x%04x,{0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x,0x%02x}},{%d,%d}},\n",
                  uuid->Data1, uuid->Data2, uuid->Data3, uuid->Data4[0], uuid->Data4[1],
                  uuid->Data4[2], uuid->Data4[3], uuid->Data4[4], uuid->Data4[5], uuid->Data4[6],
-                 uuid->Data4[7], LOWORD(ver), HIWORD(ver));
+                 uuid->Data4[7], MAJORVERSION(ver), MINORVERSION(ver));
     print_client("{{0x8a885d04,0x1ceb,0x11c9,{0x9f,0xe8,0x08,0x00,0x2b,0x10,0x48,0x60}},{2,0}},\n"); /* FIXME */
     print_client("0,\n");
     if (endpoints)
@@ -349,7 +356,7 @@ static void write_clientinterfacedecl(type_t *iface)
                      iface->name, iface->name);
     else
         print_client("RPC_IF_HANDLE %s%s_v%d_%d_c_ifspec = (RPC_IF_HANDLE)& %s___RpcClientInterface;\n",
-                     prefix_client, iface->name, LOWORD(ver), HIWORD(ver), iface->name);
+                     prefix_client, iface->name, MAJORVERSION(ver), MINORVERSION(ver), iface->name);
     fprintf(client, "\n");
 }
 

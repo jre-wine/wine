@@ -464,7 +464,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     GLfloat     gl_floatv[2];
     int         major = 1, minor = 0;
     BOOL        return_value = TRUE;
-    int         i;
+    unsigned    i;
     HDC         hdc;
     unsigned int vidmem=0;
 
@@ -485,8 +485,9 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             gl_info->gl_vendor = VENDOR_NVIDIA;
         } else if (strstr(gl_string, "ATI")) {
             gl_info->gl_vendor = VENDOR_ATI;
-        } else if (strstr(gl_string, "Intel(R)") || 
-		   strstr(gl_info->gl_renderer, "Intel(R)")) {
+        } else if (strstr(gl_string, "Intel(R)") ||
+                   strstr(gl_info->gl_renderer, "Intel(R)") ||
+                   strstr(gl_string, "Intel Inc.")) {
             gl_info->gl_vendor = VENDOR_INTEL;
         } else if (strstr(gl_string, "Mesa")) {
             gl_info->gl_vendor = VENDOR_MESA;
@@ -573,7 +574,28 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             }
             break;
 
-	case VENDOR_INTEL:
+        case VENDOR_INTEL:
+            /* Apple and Mesa version strings look differently, but both provide intel drivers */
+            if(strstr(gl_string, "APPLE")) {
+                /* [0-9]+.[0-9]+ APPLE-[0-9]+.[0.9]+.[0.9]+
+                 * We only need the first part, and use the APPLE as identification
+                 * "1.2 APPLE-1.4.56"
+                 */
+                gl_string_cursor = gl_string;
+                major = atoi(gl_string_cursor);
+                while (*gl_string_cursor <= '9' && *gl_string_cursor >= '0') {
+                    ++gl_string_cursor;
+                }
+
+                if (*gl_string_cursor++ != '.') {
+                    ERR_(d3d_caps)("Invalid MacOS-Intel version string: %s\n", debugstr_a(gl_string));
+                    break;
+                }
+
+                minor = atoi(gl_string_cursor);
+                break;
+            }
+
         case VENDOR_MESA:
             gl_string_cursor = strstr(gl_string, "Mesa");
             gl_string_cursor = strstr(gl_string_cursor, " ");
@@ -792,7 +814,11 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
                     FIXME("OpenGL implementation supports %u vertex samplers and %u total samplers\n",
                           gl_info->max_vertex_samplers, gl_info->max_combined_samplers);
                     FIXME("Expected vertex samplers + MAX_TEXTURES(=8) > combined_samplers\n");
-                    gl_info->max_vertex_samplers = max(0, gl_info->max_combined_samplers - MAX_TEXTURES);
+                    if( gl_info->max_combined_samplers > MAX_TEXTURES )
+                        gl_info->max_vertex_samplers =
+                            gl_info->max_combined_samplers - MAX_TEXTURES;
+                    else
+                        gl_info->max_vertex_samplers = 0;
                 }
             } else {
                 gl_info->max_combined_samplers = gl_info->max_fragment_samplers;
@@ -950,17 +976,17 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
                     gl_info->gl_card = CARD_NVIDIA_GEFORCE_8800GTS;
                     vidmem = 320; /* The 8800GTS uses 320MB, a 8800GTX can have 768MB */
                 }
+                /* Geforce8 - midend mobile */
+                else if(strstr(gl_info->gl_renderer, "8600 M")) {
+                    gl_info->gl_card = CARD_NVIDIA_GEFORCE_8600MGT;
+                    vidmem = 512;
+                }
                 /* Geforce8 - midend */
                 else if(strstr(gl_info->gl_renderer, "8600") ||
                         strstr(gl_info->gl_renderer, "8700"))
                 {
                     gl_info->gl_card = CARD_NVIDIA_GEFORCE_8600GT;
                     vidmem = 256;
-                }
-                /* Geforce8 - midend mobile */
-                else if(strstr(gl_info->gl_renderer, "8600 M")) {
-                    gl_info->gl_card = CARD_NVIDIA_GEFORCE_8600MGT;
-                    vidmem = 512;
                 }
                 /* Geforce8 - lowend */
                 else if(strstr(gl_info->gl_renderer, "8300") ||
@@ -1128,7 +1154,11 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             }
             break;
         case VENDOR_INTEL:
-            if (strstr(gl_info->gl_renderer, "915GM")) {
+            if (strstr(gl_info->gl_renderer, "GMA 950")) {
+                /* MacOS calls the card GMA 950, but everywhere else the PCI ID is named 945GM */
+                gl_info->gl_card = CARD_INTEL_I945GM;
+                vidmem = 64;
+            } else if (strstr(gl_info->gl_renderer, "915GM")) {
                 gl_info->gl_card = CARD_INTEL_I915GM;
             } else if (strstr(gl_info->gl_renderer, "915G")) {
                 gl_info->gl_card = CARD_INTEL_I915G;
@@ -1161,7 +1191,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             else
                 gl_info->gl_card = CARD_NVIDIA_RIVA_128;
     }
-    TRACE("FOUND (fake) card: 0x%x (vendor id), 0x%x (device id)\n", gl_info->gl_vendor, gl_info->gl_card);
+    TRACE_(d3d_caps)("FOUND (fake) card: 0x%x (vendor id), 0x%x (device id)\n", gl_info->gl_vendor, gl_info->gl_card);
 
     /* If we have an estimate use it, else default to 64MB;  */
     if(vidmem)
@@ -1406,23 +1436,8 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
             if (DevModeW.dmFields & DM_DISPLAYFREQUENCY)
                 pMode->RefreshRate = DevModeW.dmDisplayFrequency;
 
-            if (Format == WINED3DFMT_UNKNOWN)
-            {
-                switch (DevModeW.dmBitsPerPel)
-                {
-                    case 8:
-                        pMode->Format = WINED3DFMT_P8;
-                        break;
-                    case 16:
-                        pMode->Format = WINED3DFMT_R5G6B5;
-                        break;
-                    case 32:
-                        pMode->Format = WINED3DFMT_X8R8G8B8;
-                        break;
-                    default:
-                        pMode->Format = WINED3DFMT_UNKNOWN;
-                        ERR("Unhandled bit depth (%u) in mode list!\n", DevModeW.dmBitsPerPel);
-                }
+            if (Format == WINED3DFMT_UNKNOWN) {
+                pMode->Format = pixelformat_for_depth(DevModeW.dmBitsPerPel);
             } else {
                 pMode->Format = Format;
             }
@@ -1475,14 +1490,7 @@ static HRESULT WINAPI IWineD3DImpl_GetAdapterDisplayMode(IWineD3D *iface, UINT A
             pMode->RefreshRate = DevModeW.dmDisplayFrequency;
         }
 
-        switch (bpp) {
-        case  8: pMode->Format       = WINED3DFMT_R3G3B2;   break;
-        case 16: pMode->Format       = WINED3DFMT_R5G6B5;   break;
-        case 24: pMode->Format       = WINED3DFMT_X8R8G8B8; break; /* Robots needs 24bit to be X8R8G8B8 */
-        case 32: pMode->Format       = WINED3DFMT_X8R8G8B8; break; /* EVE online and the Fur demo need 32bit AdapterDisplatMode to return X8R8G8B8 */
-        default: pMode->Format       = WINED3DFMT_UNKNOWN;
-        }
-
+        pMode->Format = pixelformat_for_depth(bpp);
     } else {
         FIXME_(d3d_caps)("Adapter not primary display\n");
     }
@@ -2518,7 +2526,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
          * in max native instructions. Intel and others also offer the info in this extension but they
          * don't support GLSL (at least on Windows).
          *
-         * PS2.0 requires at least 96 instructions, 2.0a/2.0b go upto 512. Assume that if the number
+         * PS2.0 requires at least 96 instructions, 2.0a/2.0b go up to 512. Assume that if the number
          * of instructions is 512 or less we have to do with ps2.0 hardware.
          * NOTE: ps3.0 hardware requires 512 or more instructions but ati and nvidia offer 'enough' (1024 vs 4096) on their most basic ps3.0 hardware.
          */
@@ -2690,7 +2698,7 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
 
     IWineD3DDeviceImpl *object  = NULL;
     IWineD3DImpl       *This    = (IWineD3DImpl *)iface;
-    HDC hDC;
+    WINED3DDISPLAYMODE  mode;
     int i;
 
     /* Validate the adapter number. If no adapters are available(no GL), ignore the adapter
@@ -2754,11 +2762,11 @@ static HRESULT  WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter, 
     object->state = WINED3D_OK;
 
     /* Get the initial screen setup for ddraw */
-    object->ddraw_width = GetSystemMetrics(SM_CXSCREEN);
-    object->ddraw_height = GetSystemMetrics(SM_CYSCREEN);
-    hDC = GetDC(0);
-    object->ddraw_format = pixelformat_for_depth(GetDeviceCaps(hDC, BITSPIXEL) * GetDeviceCaps(hDC, PLANES));
-    ReleaseDC(0, hDC);
+    IWineD3DImpl_GetAdapterDisplayMode(iface, Adapter, &mode);
+
+    object->ddraw_width = mode.Width;
+    object->ddraw_height = mode.Height;
+    object->ddraw_format = mode.Format;
 
     for(i = 0; i < PATCHMAP_SIZE; i++) {
         list_init(&object->patches[i]);
@@ -2803,8 +2811,8 @@ static BOOL implementation_is_apple(WineD3D_GL_Info *gl_info) {
      * aren't sufficient either because a Linux binary may display on a macos X server via remote X11.
      * So try to detect the GL implementation by looking at certain Apple extensions. Some extensions
      * like client storage might be supported on other implementations too, but GL_APPLE_flush_render
-     * is specific to the MacOS window management, and GL_APPLE_ycbcr_422 is a Quicktime specific, so
-     * it the chance that other implementations support it is rather rare since Win32 Quicktime uses
+     * is specific to the Mac OS X window management, and GL_APPLE_ycbcr_422 is QuickTime specific. So
+     * the chance that other implementations support them is rather small since Win32 QuickTime uses
      * DirectDraw, not OpenGL.
      */
     if(gl_info->supported[APPLE_FENCE] &&
@@ -2823,7 +2831,7 @@ static BOOL implementation_is_apple(WineD3D_GL_Info *gl_info) {
 
 static void fixup_extensions(WineD3D_GL_Info *gl_info) {
     if(implementation_is_apple(gl_info)) {
-        /* MacOS advertises more GLSL vertex shader uniforms than support on hardware, and if more are
+        /* MacOS advertises more GLSL vertex shader uniforms than supported by the hardware, and if more are
          * used it falls back to software. While the compiler can detect if the shader uses all declared
          * uniforms, the optimization fails if the shader uses relative addressing. So any GLSL shader
          * using relative addressing falls back to software.
@@ -2851,6 +2859,20 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
                 gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO] = FALSE;
                 gl_info->supported[ARB_TEXTURE_RECTANGLE] = TRUE;
             }
+        }
+
+        /* The Intel GPUs on MacOS set the .w register of texcoords to 0.0 by default, which causes problems
+         * with fixed function fragment processing. Ideally this flag should be detected with a test shader
+         * and opengl feedback mode, but some GL implementations(MacOS ATI at least, propably all macos ones)
+         * do not like vertex shaders in feedback mode and return an error, even though it should be valid
+         * according to the spec.
+         *
+         * We don't want to enable this on all cards, as it adds an extra instruction per texcoord used. This
+         * makes the shader slower and eats instruction slots which should be available to the d3d app.
+         */
+        if(gl_info->gl_vendor == VENDOR_INTEL) {
+            TRACE("Enabling vertex texture coord fixes in vertex shaders\n");
+            gl_info->set_texcoord_w = TRUE;
         }
     }
 }
@@ -2911,6 +2933,7 @@ BOOL InitAdapters(void) {
         HDC hdc;
 
         TRACE("Initializing default adapter\n");
+        Adapters[0].num = 0;
         Adapters[0].monitorPoint.x = -1;
         Adapters[0].monitorPoint.y = -1;
 
