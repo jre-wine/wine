@@ -25,11 +25,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
- * There's a decent overview of property set storage here:
- * http://msdn.microsoft.com/archive/en-us/dnarolegen/html/msdn_propset.asp
- * It's a little bit out of date, and more definitive references are given
- * below, but it gives the best "big picture" that I've found.
- *
  * TODO:
  * - I don't honor the maximum property set size.
  * - Certain bogus files could result in reading past the end of a buffer.
@@ -68,9 +63,7 @@ static inline StorageImpl *impl_from_IPropertySetStorage( IPropertySetStorage *i
     return (StorageImpl *)((char*)iface - FIELD_OFFSET(StorageImpl, base.pssVtbl));
 }
 
-/* These are documented in MSDN, e.g.
- * http://msdn.microsoft.com/library/en-us/stg/stg/property_set_header.asp
- * http://msdn.microsoft.com/library/library/en-us/stg/stg/section.asp
+/* These are documented in MSDN,
  * but they don't seem to be in any header file.
  */
 #define PROPSETHDR_BYTEORDER_MAGIC      0xfffe
@@ -87,9 +80,6 @@ static inline StorageImpl *impl_from_IPropertySetStorage( IPropertySetStorage *i
 #define CFTAG_FMTID     (-3L)
 #define CFTAG_NODATA      0L
 
-/* The format version (and what it implies) is described here:
- * http://msdn.microsoft.com/library/en-us/stg/stg/format_version.asp
- */
 typedef struct tagPROPERTYSETHEADER
 {
     WORD  wByteOrder; /* always 0xfffe */
@@ -200,7 +190,7 @@ static HRESULT WINAPI IPropertyStorage_fnQueryInterface(
         IsEqualGUID(&IID_IPropertyStorage, riid))
     {
         IPropertyStorage_AddRef(iface);
-        *ppvObject = (IPropertyStorage*)iface;
+        *ppvObject = iface;
         return S_OK;
     }
 
@@ -233,6 +223,7 @@ static ULONG WINAPI IPropertyStorage_fnRelease(
         if (This->dirty)
             IPropertyStorage_Commit(iface, STGC_DEFAULT);
         IStream_Release(This->stm);
+        This->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->cs);
         PropertyStorage_DestroyDictionaries(This);
         HeapFree(GetProcessHeap(), 0, This);
@@ -262,7 +253,7 @@ static PROPVARIANT *PropertyStorage_FindPropertyByName(
     if (This->codePage == CP_UNICODE)
     {
         if (dictionary_find(This->name_to_propid, name, (void **)&propid))
-            ret = PropertyStorage_FindProperty(This, (PROPID)propid);
+            ret = PropertyStorage_FindProperty(This, propid);
     }
     else
     {
@@ -274,7 +265,7 @@ static PROPVARIANT *PropertyStorage_FindPropertyByName(
         {
             if (dictionary_find(This->name_to_propid, ansiName,
              (void **)&propid))
-                ret = PropertyStorage_FindProperty(This, (PROPID)propid);
+                ret = PropertyStorage_FindProperty(This, propid);
             CoTaskMemFree(ansiName);
         }
     }
@@ -527,7 +518,7 @@ static HRESULT PropertyStorage_StoreNameWithId(PropertyStorage_impl *This,
 
     assert(srcName);
 
-    hr = PropertyStorage_StringCopy((LPCSTR)srcName, cp, &name, This->codePage);
+    hr = PropertyStorage_StringCopy(srcName, cp, &name, This->codePage);
     if (SUCCEEDED(hr))
     {
         if (This->codePage == CP_UNICODE)
@@ -1058,7 +1049,7 @@ static HRESULT PropertyStorage_ReadProperty(PropertyStorage_impl *This,
         TRACE("Read char 0x%x ('%c')\n", prop->u.cVal, prop->u.cVal);
         break;
     case VT_UI1:
-        prop->u.bVal = *(const UCHAR *)data;
+        prop->u.bVal = *data;
         TRACE("Read byte 0x%x\n", prop->u.bVal);
         break;
     case VT_I2:
@@ -1420,9 +1411,7 @@ static HRESULT PropertyStorage_ReadFromStream(PropertyStorage_impl *This)
     }
     if (!This->codePage)
     {
-        /* default to Unicode unless told not to, as specified here:
-         * http://msdn.microsoft.com/library/en-us/stg/stg/names_in_istorage.asp
-         */
+        /* default to Unicode unless told not to, as specified on msdn */
         if (This->grfFlags & PROPSETFLAG_ANSI)
             This->codePage = GetACP();
         else
@@ -1616,7 +1605,7 @@ end:
 }
 
 static HRESULT PropertyStorage_WritePropertyToStream(PropertyStorage_impl *This,
- DWORD propNum, DWORD propid, PROPVARIANT *var, DWORD *sectionOffset)
+ DWORD propNum, DWORD propid, const PROPVARIANT *var, DWORD *sectionOffset)
 {
     HRESULT hr;
     LARGE_INTEGER seek;
@@ -1716,7 +1705,7 @@ static HRESULT PropertyStorage_WritePropertyToStream(PropertyStorage_impl *This,
         FILETIME temp;
 
         StorageUtl_WriteULargeInteger((BYTE *)&temp, 0,
-         (ULARGE_INTEGER *)&var->u.filetime);
+         (const ULARGE_INTEGER *)&var->u.filetime);
         hr = IStream_Write(This->stm, &temp, sizeof(FILETIME), &count);
         bytesWritten = count;
         break;
@@ -1774,8 +1763,8 @@ static BOOL PropertyStorage_PropertiesWriter(const void *key, const void *value,
     assert(value);
     assert(extra);
     assert(closure);
-    c->hr = PropertyStorage_WritePropertyToStream(This,
-     c->propNum++, (DWORD)key, (PROPVARIANT *)value, c->sectionOffset);
+    c->hr = PropertyStorage_WritePropertyToStream(This, c->propNum++,
+     (DWORD)key, value, c->sectionOffset);
     return SUCCEEDED(c->hr);
 }
 
@@ -1978,6 +1967,7 @@ static HRESULT PropertyStorage_BaseConstruct(IStream *stm,
     (*pps)->vtbl = &IPropertyStorage_Vtbl;
     (*pps)->ref = 1;
     InitializeCriticalSection(&(*pps)->cs);
+    (*pps)->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": PropertyStorage_impl.cs");
     (*pps)->stm = stm;
     memcpy(&(*pps)->fmtid, rfmtid, sizeof((*pps)->fmtid));
     (*pps)->grfMode = grfMode;
@@ -1986,6 +1976,7 @@ static HRESULT PropertyStorage_BaseConstruct(IStream *stm,
     if (FAILED(hr))
     {
         IStream_Release(stm);
+        (*pps)->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&(*pps)->cs);
         HeapFree(GetProcessHeap(), 0, *pps);
         *pps = NULL;
@@ -2034,9 +2025,7 @@ static HRESULT PropertyStorage_ConstructEmpty(IStream *stm,
         ps->grfFlags = grfFlags;
         if (ps->grfFlags & PROPSETFLAG_CASE_SENSITIVE)
             ps->format = 1;
-        /* default to Unicode unless told not to, as specified here:
-         * http://msdn.microsoft.com/library/en-us/stg/stg/names_in_istorage.asp
-         */
+        /* default to Unicode unless told not to, as specified here on mdsn */
         if (ps->grfFlags & PROPSETFLAG_ANSI)
             ps->codePage = GetACP();
         else
@@ -2504,8 +2493,6 @@ static const WCHAR szDocSummaryInfo[] = { 5,'D','o','c','u','m','e','n','t',
  *
  * NOTES
  * str must be at least CCH_MAX_PROPSTG_NAME characters in length.
- * Based on the algorithm described here:
- * http://msdn.microsoft.com/library/en-us/stg/stg/names_in_istorage.asp
  */
 HRESULT WINAPI FmtIdToPropStgName(const FMTID *rfmtid, LPOLESTR str)
 {
@@ -2571,10 +2558,6 @@ HRESULT WINAPI FmtIdToPropStgName(const FMTID *rfmtid, LPOLESTR str)
  * RETURNS
  *  E_INVALIDARG if rfmtid or str is NULL or if str can't be converted to
  *  a format ID, S_OK otherwise.
- *
- * NOTES
- * Based on the algorithm described here:
- * http://msdn.microsoft.com/library/en-us/stg/stg/names_in_istorage.asp
  */
 HRESULT WINAPI PropStgNameToFmtId(const LPOLESTR str, FMTID *rfmtid)
 {

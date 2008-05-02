@@ -27,7 +27,6 @@
 #include "winreg.h"
 #include "objbase.h"
 #include "oaidl.h"
-#include "shlwapi.h"
 
 #define ATL_INITGUID
 #include "atliface.h"
@@ -38,13 +37,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(atl);
 
-LONG dll_count = 0;
+static LONG dll_count;
 
 /**************************************************************
  * ATLRegistrar implementation
  */
 
-static struct {
+static const struct {
     WCHAR name[22];
     HKEY  key;
 } root_keys[] = {
@@ -149,7 +148,7 @@ static HRESULT get_word(LPCOLESTR *str, strbuf *buf)
     return S_OK;
 }
 
-static HRESULT do_preprocess(Registrar *This, LPCOLESTR data, strbuf *buf)
+static HRESULT do_preprocess(const Registrar *This, LPCOLESTR data, strbuf *buf)
 {
     LPCOLESTR iter, iter2 = data;
     rep_list *rep_iter;
@@ -243,10 +242,10 @@ static HRESULT do_process_key(LPCOLESTR *pstr, HKEY parent_key, strbuf *buf, BOO
                 strbuf_write(buf->str, &name, -1);
             }else if(key_type == DO_DELETE) {
                 TRACE("Deleting %s\n", debugstr_w(buf->str));
-                lres = SHDeleteKeyW(parent_key, buf->str);
+                lres = RegDeleteTreeW(parent_key, buf->str);
             }else {
                 if(key_type == FORCE_REMOVE)
-                    SHDeleteKeyW(parent_key, buf->str);
+                    RegDeleteTreeW(parent_key, buf->str);
                 lres = RegCreateKeyW(parent_key, buf->str, &hkey);
                 if(lres != ERROR_SUCCESS) {
                     WARN("Could not create(open) key: %08x\n", lres);
@@ -360,7 +359,7 @@ static HRESULT do_process_root_key(LPCOLESTR data, BOOL do_register)
     LPCOLESTR iter = data;
     strbuf buf;
     HRESULT hres = S_OK;
-    int i;
+    unsigned int i;
 
     strbuf_init(&buf);
     hres = get_word(&iter, &buf);
@@ -479,7 +478,7 @@ static HRESULT file_register(Registrar *This, LPCOLESTR fileName, BOOL do_regist
     HRESULT hres;
 
     file = CreateFileW(fileName, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
-    if(file) {
+    if(file != INVALID_HANDLE_VALUE) {
         filelen = GetFileSize(file, NULL);
         regstra = HeapAlloc(GetProcessHeap(), 0, filelen);
         lres = ReadFile(file, regstra, filelen, NULL, NULL);
@@ -663,7 +662,7 @@ static const IRegistrarVtbl RegistrarVtbl = {
     Registrar_ResourceUnregister,
 };
 
-static HRESULT Registrar_create(LPUNKNOWN pUnkOuter, REFIID riid, void **ppvObject)
+static HRESULT Registrar_create(const IUnknown *pUnkOuter, REFIID riid, void **ppvObject)
 {
     Registrar *ret;
 
@@ -756,19 +755,26 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID riid, LPVOID *ppvObject)
 
 extern HINSTANCE hInst;
 
-static HRESULT do_register_dll_server(LPCOLESTR wszDll, LPCOLESTR wszId, BOOL do_register)
+static HRESULT do_register_dll_server(IRegistrar *pRegistrar, LPCOLESTR wszDll,
+                                      LPCOLESTR wszId, BOOL do_register,
+                                      const struct _ATL_REGMAP_ENTRY* pMapEntries)
 {
     WCHAR buf[MAX_PATH];
     HRESULT hres;
-    IRegistrar *pRegistrar;
+    const struct _ATL_REGMAP_ENTRY *pMapEntry;
 
     static const WCHAR wszModule[] = {'M','O','D','U','L','E',0};
     static const WCHAR wszRegistry[] = {'R','E','G','I','S','T','R','Y',0};
     static const WCHAR wszCLSID_ATLRegistrar[] =
             {'C','L','S','I','D','_','A','T','L','R','e','g','i','s','t','r','a','r',0};
 
-    Registrar_create(NULL, &IID_IRegistrar, (void**)&pRegistrar);
+    if (!pRegistrar)
+        Registrar_create(NULL, &IID_IRegistrar, (void**)&pRegistrar);
+
     IRegistrar_AddReplacement(pRegistrar, wszModule, wszDll);
+
+    for (pMapEntry = pMapEntries; pMapEntry && pMapEntry->szKey; pMapEntry++)
+        IRegistrar_AddReplacement(pRegistrar, pMapEntry->szKey, pMapEntry->szData);
 
     StringFromGUID2(&CLSID_ATLRegistrar, buf, sizeof(buf)/sizeof(buf[0]));
     IRegistrar_AddReplacement(pRegistrar, wszCLSID_ATLRegistrar, buf);
@@ -785,7 +791,7 @@ static HRESULT do_register_dll_server(LPCOLESTR wszDll, LPCOLESTR wszId, BOOL do
 static HRESULT do_register_server(BOOL do_register)
 {
     static const WCHAR wszDll[] = {'a','t','l','.','d','l','l',0};
-    return do_register_dll_server(wszDll, MAKEINTRESOURCEW(101), do_register);
+    return do_register_dll_server(NULL, wszDll, MAKEINTRESOURCEW(101), do_register, NULL);
 }
 
 /***********************************************************************
@@ -801,11 +807,6 @@ HRESULT WINAPI AtlModuleUpdateRegistryFromResourceD(_ATL_MODULEW* pM, LPCOLESTR 
      */
     WCHAR module_name[MAX_PATH];
 
-    if(pMapEntries || pReg) {
-        FIXME("MapEntries and Registrar parameter not supported\n");
-        return E_FAIL;
-    }
-
     if(!GetModuleFileNameW(lhInst, module_name, MAX_PATH)) {
         FIXME("hinst %p: did not get module name\n",
         lhInst);
@@ -815,7 +816,7 @@ HRESULT WINAPI AtlModuleUpdateRegistryFromResourceD(_ATL_MODULEW* pM, LPCOLESTR 
     TRACE("%p (%s), %s, %d, %p, %p\n", hInst, debugstr_w(module_name),
 	debugstr_w(lpszRes), bRegister, pMapEntries, pReg);
 
-    return do_register_dll_server(module_name, lpszRes, bRegister);
+    return do_register_dll_server(pReg, module_name, lpszRes, bRegister, pMapEntries);
 }
 
 /***********************************************************************

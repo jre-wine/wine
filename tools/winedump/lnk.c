@@ -38,16 +38,41 @@
 
 #include "pshpack1.h"
 
-#define SCF_PIDL 1
-#define SCF_LOCATION 2
-#define SCF_DESCRIPTION 4
-#define SCF_RELATIVE 8
-#define SCF_WORKDIR 0x10
-#define SCF_ARGS 0x20
-#define SCF_CUSTOMICON 0x40
-#define SCF_UNICODE 0x80
-#define SCF_PRODUCT 0x800
-#define SCF_COMPONENT 0x1000
+typedef enum {
+    SLDF_HAS_ID_LIST = 0x00000001,
+    SLDF_HAS_LINK_INFO = 0x00000002,
+    SLDF_HAS_NAME = 0x00000004,
+    SLDF_HAS_RELPATH = 0x00000008,
+    SLDF_HAS_WORKINGDIR = 0x00000010,
+    SLDF_HAS_ARGS = 0x00000020,
+    SLDF_HAS_ICONLOCATION = 0x00000040,
+    SLDF_UNICODE = 0x00000080,
+    SLDF_FORCE_NO_LINKINFO = 0x00000100,
+    SLDF_HAS_EXP_SZ = 0x00000200,
+    SLDF_RUN_IN_SEPARATE = 0x00000400,
+    SLDF_HAS_LOGO3ID = 0x00000800,
+    SLDF_HAS_DARWINID = 0x00001000,
+    SLDF_RUNAS_USER = 0x00002000,
+    SLDF_HAS_EXP_ICON_SZ = 0x00004000,
+    SLDF_NO_PIDL_ALIAS = 0x00008000,
+    SLDF_FORCE_UNCNAME = 0x00010000,
+    SLDF_RUN_WITH_SHIMLAYER = 0x00020000,
+    SLDF_FORCE_NO_LINKTRACK = 0x00040000,
+    SLDF_ENABLE_TARGET_METADATA = 0x00080000,
+    SLDF_DISABLE_KNOWNFOLDER_RELATIVE_TRACKING = 0x00200000,
+    SLDF_RESERVED = 0x80000000,
+} SHELL_LINK_DATA_FLAGS;
+
+#define EXP_SZ_LINK_SIG         0xa0000001
+#define EXP_SPECIAL_FOLDER_SIG  0xa0000005
+#define EXP_DARWIN_ID_SIG       0xa0000006
+#define EXP_SZ_ICON_SIG         0xa0000007
+
+typedef struct tagDATABLOCKHEADER
+{
+    DWORD cbSize;
+    DWORD dwSignature;
+} DATABLOCK_HEADER;
 
 typedef struct _LINK_HEADER
 {
@@ -66,13 +91,13 @@ typedef struct _LINK_HEADER
     DWORD   Unknown6;       /* 0x48 */
 } LINK_HEADER, * PLINK_HEADER;
 
-typedef struct tagLINK_ADVERTISEINFO
+typedef struct tagLINK_SZ_BLOCK
 {
     DWORD size;
     DWORD magic;
     CHAR  bufA[MAX_PATH];
     WCHAR bufW[MAX_PATH];
-} LINK_ADVERTISEINFO;
+} LINK_SZ_BLOCK;
 
 typedef struct _LOCATION_INFO
 {
@@ -93,7 +118,16 @@ typedef struct _LOCAL_VOLUME_INFO
     DWORD dwVolLabelOfs;
 } LOCAL_VOLUME_INFO;
 
-typedef struct lnk_string_tag {
+typedef struct
+{
+    DWORD cbSize;
+    DWORD dwSignature;
+    DWORD idSpecialFolder;
+    DWORD cbOffset;
+} EXP_SPECIAL_FOLDER;
+
+typedef struct lnk_string_tag
+{
     unsigned short size;
     union {
         unsigned short w[1];
@@ -103,99 +137,37 @@ typedef struct lnk_string_tag {
 
 #include "poppack.h"
 
-static void guid_to_string(LPGUID guid, char *str)
+static unsigned offset;
+
+static const void* fetch_block(void)
 {
-    sprintf(str, "{%08x-%04x-%04x-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-            guid->Data1, guid->Data2, guid->Data3,
-            guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
-            guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
+    const unsigned*     u;
+    const void*         ret;
+
+    if (!(u = PRD(offset, sizeof(*u)))) return 0;
+    if ((ret = PRD(offset, *u)))   offset += *u;
+    return ret;
 }
 
-/* the size is a short integer */
-static void* load_pidl(int fd)
+static const lnk_string* fetch_string(int unicode)
 {
-    int r;
-    unsigned char *data;
-    unsigned short size = 0;
+    const unsigned short*       s;
+    unsigned short              len;
+    const void*                 ret;
 
-    r = read( fd, &size, sizeof size );
-    if (r != sizeof size)
-        return NULL;
-    if (size<sizeof size)
-        return NULL;
-
-    data = malloc(size + sizeof size);
-    memcpy(data, &size, sizeof size);
-    r = read( fd, data + sizeof size, size );
-    if (r != size)
-    {
-        free(data);
-        return NULL;
-    }
-    return (void*)data;
-}
-
-/* size is an integer */
-static void* load_long_section(int fd)
-{
-    int r, size = 0;
-    unsigned char *data;
-
-    r = read( fd, &size, sizeof size );
-    if (r != sizeof size)
-        return NULL;
-    if (size<sizeof size)
-        return NULL;
-
-    data = malloc(size);
-    memcpy(data, &size, sizeof size);
-    r = read( fd, data + sizeof size, size - sizeof size);
-    if (r != (size - sizeof size))
-    {
-        free(data);
-        return NULL;
-    }
-    return (void*)data;
-}
-
-/* the size is a character count in a short integer */
-static lnk_string* load_string(int fd, int unicode)
-{
-    int r;
-    lnk_string *data;
-    unsigned short size = 0, bytesize;
-
-    r = read( fd, &size, sizeof size );
-    if (r != sizeof size)
-        return NULL;
-    if ( size == 0 )
-        return NULL;
-
-    bytesize = size;
-    if (unicode)
-        bytesize *= sizeof(WCHAR);
-    data = malloc(sizeof *data + bytesize);
-    data->size = size;
-    if (unicode)
-        data->str.w[size] = 0;
-    else
-        data->str.a[size] = 0;
-    r = read(fd, &data->str, bytesize);
-    if (r != bytesize)
-    {
-        free(data);
-        return NULL;
-    }
-    return data;
+    if (!(s = PRD(offset, sizeof(*s)))) return 0;
+    len = *s * (unicode ? sizeof(WCHAR) : sizeof(char));
+    if ((ret = PRD(offset, sizeof(*s) + len)))  offset += sizeof(*s) + len;
+    return ret;
 }
 
 
-static int dump_pidl(int fd)
+static int dump_pidl(void)
 {
-    lnk_string *pidl;
+    const lnk_string *pidl;
     int i, n = 0, sz = 0;
 
-    pidl = load_pidl(fd);
+    pidl = fetch_string(FALSE);
     if (!pidl)
         return -1;
 
@@ -204,7 +176,7 @@ static int dump_pidl(int fd)
 
     while(sz<pidl->size)
     {
-        lnk_string *segment = (lnk_string*) &pidl->str.a[sz];
+        const lnk_string *segment = (const lnk_string*) &pidl->str.a[sz];
 
         if(!segment->size)
             break;
@@ -222,47 +194,37 @@ static int dump_pidl(int fd)
     }
     printf("\n");
 
-    free(pidl);
-
     return 0;
 }
 
-static void print_unicode_string(const unsigned short *str)
+static int dump_string(const char *what, int unicode)
 {
-    while(*str)
-    {
-        printf("%c", *str);
-        str++;
-    }
-    printf("\n");
-}
+    const lnk_string *data;
+    unsigned sz;
 
-static int dump_string(int fd, const char *what, int unicode)
-{
-    lnk_string *data;
-
-    data = load_string(fd, unicode);
+    data = fetch_string(unicode);
     if (!data)
         return -1;
     printf("%s : ", what);
+    sz = data->size;
     if (unicode)
-        print_unicode_string(data->str.w);
+        while (sz) printf("%c", data->str.w[data->size - sz--]);
     else
-        printf("%s",data->str.a);
+        while (sz) printf("%c", data->str.a[data->size - sz--]);
     printf("\n");
-    free(data);
+
     return 0;
 }
 
-static int dump_location(int fd)
+static int dump_location(void)
 {
-    LOCATION_INFO *loc;
-    char *p;
+    const LOCATION_INFO *loc;
+    const char *p;
 
-    loc = load_long_section(fd);
+    loc = fetch_block();
     if (!loc)
         return -1;
-    p = (char*)loc;
+    p = (const char*)loc;
 
     printf("Location\n");
     printf("--------\n\n");
@@ -274,7 +236,7 @@ static int dump_location(int fd)
     printf("Volume ofs    = %08x ", loc->dwVolTableOfs);
     if (loc->dwVolTableOfs && (loc->dwVolTableOfs<loc->dwTotalSize))
     {
-        LOCAL_VOLUME_INFO *vol = (LOCAL_VOLUME_INFO *) &p[loc->dwVolTableOfs];
+        const LOCAL_VOLUME_INFO *vol = (const LOCAL_VOLUME_INFO *)&p[loc->dwVolTableOfs];
 
         printf("size %d  type %d  serial %08x  label %d ",
                vol->dwSize, vol->dwType, vol->dwVolSerial, vol->dwVolLabelOfs);
@@ -295,8 +257,6 @@ static int dump_location(int fd)
         printf("(\"%s\")", &p[loc->dwFinalPathOfs]);
     printf("\n");
     printf("\n");
-
-    free(loc);
 
     return 0;
 }
@@ -338,72 +298,140 @@ static int base85_to_guid( const char *str, LPGUID guid )
     return 1;
 }
 
-static int dump_advertise_info(int fd, const char *type)
+static int dump_special_folder_block(const DATABLOCK_HEADER* bhdr)
 {
-    LINK_ADVERTISEINFO *avt;
+    const EXP_SPECIAL_FOLDER *sfb = (const EXP_SPECIAL_FOLDER*)bhdr;
+    printf("Special folder block\n");
+    printf("--------------------\n\n");
+    printf("folder  = 0x%04x\n", sfb->idSpecialFolder);
+    printf("offset  = %d\n", sfb->cbOffset);
+    printf("\n");
+    return 0;
+}
 
-    avt = load_long_section(fd);
-    if (!avt)
-        return -1;
+static int dump_sz_block(const DATABLOCK_HEADER* bhdr, const char* label)
+{
+    const LINK_SZ_BLOCK *szp = (const LINK_SZ_BLOCK*)bhdr;
+    printf("String block\n");
+    printf("-----------\n\n");
+    printf("magic   = %x\n", szp->magic);
+    printf("%s    = %s\n", label, szp->bufA);
+    printf("\n");
+    return 0;
+}
+
+static int dump_darwin_id(const DATABLOCK_HEADER* bhdr)
+{
+    const LINK_SZ_BLOCK *szp = (const LINK_SZ_BLOCK*)bhdr;
+    char comp_str[40];
+    const char *feat, *comp, *prod_str, *feat_str;
+    GUID guid;
 
     printf("Advertise Info\n");
     printf("--------------\n\n");
-    printf("magic   = %x\n", avt->magic);
-    printf("%s = %s\n", type, avt->bufA);
-    if (avt->magic == 0xa0000006)
+    printf("msi string = %s\n", szp->bufA);
+
+    if (base85_to_guid(szp->bufA, &guid))
+        prod_str = get_guid_str(&guid);
+    else
+        prod_str = "?";
+
+    comp = &szp->bufA[20];
+    feat = strchr(comp, '>');
+    if (!feat)
+        feat = strchr(comp, '<');
+    if (feat)
     {
-        char prod_str[40], comp_str[40], feat_str[40];
-        char *feat, *comp;
-        GUID guid;
-
-        if (base85_to_guid(avt->bufA, &guid))
-            guid_to_string( &guid, prod_str );
-        else
-            strcpy( prod_str, "?" );
-
-        comp = &avt->bufA[20];
-        feat = strchr(comp,'>');
-        if (!feat)
-            feat = strchr(comp,'<');
-        if (feat)
-        {
-            memcpy( comp_str, comp, feat - comp );
-            comp_str[feat-comp] = 0;
-        }
-        else
-        {
-            strcpy( comp_str, "?" );
-        }
-
-        if (feat && feat[0] == '>' && base85_to_guid( &feat[1], &guid ))
-            guid_to_string( &guid, feat_str );
-        else
-            feat_str[0] = 0;
-
-        printf("  product:   %s\n", prod_str);
-        printf("  component: %s\n", comp_str );
-        printf("  feature:   %s\n", feat_str);
+        memcpy(comp_str, comp, feat - comp);
+        comp_str[feat-comp] = 0;
     }
+    else
+    {
+        strcpy(comp_str, "?");
+    }
+
+    if (feat && feat[0] == '>' && base85_to_guid( &feat[1], &guid ))
+        feat_str = get_guid_str( &guid );
+    else
+        feat_str = "";
+
+    printf("  product:   %s\n", prod_str);
+    printf("  component: %s\n", comp_str );
+    printf("  feature:   %s\n", feat_str);
     printf("\n");
 
     return 0;
 }
 
-static int dump_lnk_fd(int fd)
+static int dump_raw_block(const DATABLOCK_HEADER* bhdr)
 {
-    LINK_HEADER *hdr;
-    char guid[40];
+    int data_size;
 
-    hdr = load_long_section( fd );
+    printf("Raw Block\n");
+    printf("---------\n\n");
+    printf("size    = %d\n", bhdr->cbSize);
+    printf("magic   = %x\n", bhdr->dwSignature);
+
+    data_size=bhdr->cbSize-sizeof(*bhdr);
+    if (data_size > 0)
+    {
+        unsigned int i;
+        const unsigned char *data;
+
+        printf("data    = ");
+        data=(const unsigned char*)bhdr+sizeof(*bhdr);
+        while (data_size > 0)
+        {
+            for (i=0; i < 16; i++)
+            {
+                if (i < data_size)
+                    printf("%02x ", data[i]);
+                else
+                    printf("   ");
+            }
+            for (i=0; i < data_size && i < 16; i++)
+                printf("%c", (data[i] >= 32 && data[i] < 128 ? data[i] : '.'));
+            printf("\n");
+            data_size-=16;
+            if (data_size <= 0)
+                break;
+            data+=16;
+            printf("          ");
+        }
+    }
+    printf("\n");
+
+    return 1;
+}
+
+static const GUID CLSID_ShellLink = {0x00021401L, 0, 0, {0xC0,0,0,0,0,0,0,0x46}};
+
+enum FileSig get_kind_lnk(void)
+{
+    const LINK_HEADER*        hdr;
+
+    hdr = PRD(0, sizeof(*hdr));
+    if (hdr && hdr->dwSize == sizeof(LINK_HEADER) &&
+        !memcmp(&hdr->MagicGuid, &CLSID_ShellLink, sizeof(GUID)))
+        return SIG_LNK;
+    return SIG_UNKNOWN;
+}
+
+void lnk_dump(void)
+{
+    const LINK_HEADER*        hdr;
+    const DATABLOCK_HEADER*   bhdr;
+    DWORD dwFlags;
+
+    offset = 0;
+    hdr = fetch_block();
     if (!hdr)
-        return -1;
-
-    guid_to_string(&hdr->MagicGuid, guid);
+        return;
 
     printf("Header\n");
     printf("------\n\n");
     printf("Size:    %04x\n", hdr->dwSize);
-    printf("GUID:    %s\n", guid);
+    printf("GUID:    %s\n", get_guid_str(&hdr->MagicGuid));
 
     printf("FileAttr: %08x\n", hdr->dwFileAttr);
     printf("FileLength: %08x\n", hdr->dwFileLength);
@@ -415,53 +443,82 @@ static int dump_lnk_fd(int fd)
 
     /* dump out all the flags */
     printf("Flags:   %04x ( ", hdr->dwFlags);
-#define FLAG(x) if(hdr->dwFlags & SCF_##x) printf("%s ",#x);
-    FLAG(PIDL)
-    FLAG(LOCATION)
-    FLAG(DESCRIPTION)
-    FLAG(RELATIVE)
-    FLAG(WORKDIR)
-    FLAG(ARGS)
-    FLAG(CUSTOMICON)
-    FLAG(UNICODE)
-    FLAG(PRODUCT)
-    FLAG(COMPONENT)
+    dwFlags=hdr->dwFlags;
+#define FLAG(x) do \
+                { \
+                    if (dwFlags & SLDF_##x) \
+                    { \
+                        printf("%s ", #x); \
+                        dwFlags&=~SLDF_##x; \
+                    } \
+                } while (0)
+    FLAG(HAS_ID_LIST);
+    FLAG(HAS_LINK_INFO);
+    FLAG(HAS_NAME);
+    FLAG(HAS_RELPATH);
+    FLAG(HAS_WORKINGDIR);
+    FLAG(HAS_ARGS);
+    FLAG(HAS_ICONLOCATION);
+    FLAG(UNICODE);
+    FLAG(FORCE_NO_LINKINFO);
+    FLAG(HAS_EXP_SZ);
+    FLAG(RUN_IN_SEPARATE);
+    FLAG(HAS_LOGO3ID);
+    FLAG(HAS_DARWINID);
+    FLAG(RUNAS_USER);
+    FLAG(HAS_EXP_ICON_SZ);
+    FLAG(NO_PIDL_ALIAS);
+    FLAG(FORCE_UNCNAME);
+    FLAG(RUN_WITH_SHIMLAYER);
+    FLAG(FORCE_NO_LINKTRACK);
+    FLAG(ENABLE_TARGET_METADATA);
+    FLAG(DISABLE_KNOWNFOLDER_RELATIVE_TRACKING);
+    FLAG(RESERVED);
 #undef FLAG
+    if (dwFlags)
+        printf("+%04x", dwFlags);
     printf(")\n");
 
     printf("Length:  %04x\n", hdr->dwFileLength);
     printf("\n");
 
-    if (hdr->dwFlags & SCF_PIDL)
-        dump_pidl(fd);
-    if (hdr->dwFlags & SCF_LOCATION)
-        dump_location(fd);
-    if (hdr->dwFlags & SCF_DESCRIPTION)
-        dump_string(fd, "Description", hdr->dwFlags & SCF_UNICODE);
-    if (hdr->dwFlags & SCF_RELATIVE)
-        dump_string(fd, "Relative path", hdr->dwFlags & SCF_UNICODE);
-    if (hdr->dwFlags & SCF_WORKDIR)
-        dump_string(fd, "Working directory", hdr->dwFlags & SCF_UNICODE);
-    if (hdr->dwFlags & SCF_ARGS)
-        dump_string(fd, "Arguments", hdr->dwFlags & SCF_UNICODE);
-    if (hdr->dwFlags & SCF_CUSTOMICON)
-        dump_string(fd, "Icon path", hdr->dwFlags & SCF_UNICODE);
-    if (hdr->dwFlags & SCF_PRODUCT)
-        dump_advertise_info(fd, "product");
-    if (hdr->dwFlags & SCF_COMPONENT)
-        dump_advertise_info(fd, "msi string");
+    if (hdr->dwFlags & SLDF_HAS_ID_LIST)
+        dump_pidl();
+    if (hdr->dwFlags & SLDF_HAS_LINK_INFO)
+        dump_location();
+    if (hdr->dwFlags & SLDF_HAS_NAME)
+        dump_string("Description", hdr->dwFlags & SLDF_UNICODE);
+    if (hdr->dwFlags & SLDF_HAS_RELPATH)
+        dump_string("Relative path", hdr->dwFlags & SLDF_UNICODE);
+    if (hdr->dwFlags & SLDF_HAS_WORKINGDIR)
+        dump_string("Working directory", hdr->dwFlags & SLDF_UNICODE);
+    if (hdr->dwFlags & SLDF_HAS_ARGS)
+        dump_string("Arguments", hdr->dwFlags & SLDF_UNICODE);
+    if (hdr->dwFlags & SLDF_HAS_ICONLOCATION)
+        dump_string("Icon path", hdr->dwFlags & SLDF_UNICODE);
 
-    return 0;
-}
-
-int dump_lnk(const char *emf)
-{
-    int fd;
-
-    fd = open(emf,O_RDONLY);
-    if (fd<0)
-        return -1;
-    dump_lnk_fd(fd);
-    close(fd);
-    return 0;
+    bhdr=fetch_block();
+    while (bhdr)
+    {
+        if (!bhdr->cbSize)
+            break;
+        switch (bhdr->dwSignature)
+        {
+        case EXP_SZ_LINK_SIG:
+            dump_sz_block(bhdr, "exp.link");
+            break;
+        case EXP_SPECIAL_FOLDER_SIG:
+            dump_special_folder_block(bhdr);
+            break;
+        case EXP_SZ_ICON_SIG:
+            dump_sz_block(bhdr, "icon");
+            break;
+        case EXP_DARWIN_ID_SIG:
+            dump_darwin_id(bhdr);
+            break;
+        default:
+            dump_raw_block(bhdr);
+        }
+        bhdr=fetch_block();
+    }
 }

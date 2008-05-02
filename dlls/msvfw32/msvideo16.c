@@ -693,7 +693,7 @@ static  LRESULT CALLBACK  IC_Callback3216(HIC hic, HDRVR hdrv, UINT msg, DWORD l
         args[2] = LOWORD(lp1);
         args[1] = HIWORD(lp2);
         args[0] = LOWORD(lp2);
-        WOWCallback16Ex( (DWORD)whic->driverproc16, WCB16_PASCAL, sizeof(args), args, &ret );
+        WOWCallback16Ex( whic->driverproc16, WCB16_PASCAL, sizeof(args), args, &ret );
 
         switch (msg)
         {
@@ -745,7 +745,7 @@ LRESULT VFWAPI ICSendMessage16(HIC16 hic, UINT16 msg, DWORD lParam1, DWORD lPara
             args[2] = LOWORD(lParam1);
             args[1] = HIWORD(lParam2);
             args[0] = LOWORD(lParam2);
-            WOWCallback16Ex( (DWORD)whic->driverproc16, WCB16_PASCAL, sizeof(args), args, &result );
+            WOWCallback16Ex( whic->driverproc16, WCB16_PASCAL, sizeof(args), args, &result );
             ret = result;
         }
         else
@@ -767,11 +767,11 @@ LRESULT VFWAPI ICSendMessage16(HIC16 hic, UINT16 msg, DWORD lParam1, DWORD lPara
 DWORD WINAPI VideoCapDriverDescAndVer16(WORD nr, LPSTR buf1, WORD buf1len,
                                         LPSTR buf2, WORD buf2len)
 {
+    static const char version_info_spec[] = "\\StringFileInfo\\040904E4\\FileDescription";
     DWORD	verhandle;
     DWORD	infosize;
     UINT	subblocklen;
     char	*s, buf[2048], fn[260];
-    static char version_info_spec[] = "\\StringFileInfo\\040904E4\\FileDescription";
     LPBYTE	infobuf;
     LPVOID	subblock;
     DWORD	i, cnt = 0, lRet;
@@ -813,7 +813,7 @@ DWORD WINAPI VideoCapDriverDescAndVer16(WORD nr, LPSTR buf1, WORD buf1len,
 	}
     }
 
-    if (nr || !found) 
+    if (!found)
     {
         TRACE("No more VID* entries found nr=%d\n", nr);
         return 20;

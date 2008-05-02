@@ -7,6 +7,7 @@ IMPORTS   = ole32 advapi32 kernel32
 EXTRALIBS = -luuid
 
 CTESTS = \
+	cred.c \
 	crypt.c \
 	crypt_lmhash.c \
 	crypt_md4.c \
@@ -14,7 +15,8 @@ CTESTS = \
 	crypt_sha.c \
 	lsa.c \
 	registry.c \
-	security.c
+	security.c \
+	service.c
 
 @MAKE_TEST_RULES@
 

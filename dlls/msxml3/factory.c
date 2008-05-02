@@ -21,12 +21,20 @@
 
 #define COBJMACROS
 
+#include "config.h"
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
+#include "msxml.h"
+#include "xmldom.h"
 #include "msxml2.h"
+
+/* undef the #define in msxml2 so that we can access the v.2 version
+   independent CLSID as well as the v.3 one. */
+#undef CLSID_DOMDocument
 
 #include "wine/debug.h"
 
@@ -101,8 +109,6 @@ static HRESULT WINAPI xmlcf_CreateInstance(
         return r;
 
     r = IUnknown_QueryInterface( punk, riid, ppobj );
-    if (FAILED(r))
-        return r;
     IUnknown_Release( punk );
     return r;
 }
@@ -125,6 +131,8 @@ static const struct IClassFactoryVtbl xmlcf_vtbl =
 };
 
 static xmlcf domdoccf = { &xmlcf_vtbl, DOMDocument_create };
+static xmlcf schemacf = { &xmlcf_vtbl, SchemaCache_create };
+static xmlcf xmldoccf = { &xmlcf_vtbl, XMLDocument_create };
 
 /******************************************************************
  *		DllGetClassObject (MSXML3.@)
@@ -135,8 +143,25 @@ HRESULT WINAPI DllGetClassObject( REFCLSID rclsid, REFIID iid, LPVOID *ppv )
 
     TRACE("%s %s %p\n", debugstr_guid(rclsid), debugstr_guid(iid), ppv );
 
-    if( IsEqualGUID( rclsid, &CLSID_DOMDocument ) )
+    if( IsEqualCLSID( rclsid, &CLSID_DOMDocument ) ||   /* Version indep. v 2.x */
+        IsEqualCLSID( rclsid, &CLSID_DOMDocument2 ) ||  /* Version indep. v 3.0 */
+        IsEqualCLSID( rclsid, &CLSID_DOMDocument30 ) )  /* Version dep.   v 3.0 */
+    {
         cf = (IClassFactory*) &domdoccf.lpVtbl;
+    }
+    else if( IsEqualCLSID( rclsid, &CLSID_XMLSchemaCache ) ||
+             IsEqualCLSID( rclsid, &CLSID_XMLSchemaCache30 ) )
+    {
+        cf = (IClassFactory*) &schemacf.lpVtbl;
+    }
+    else if( IsEqualCLSID( rclsid, &CLSID_XMLDocument ) )
+    {
+        cf = (IClassFactory*) &xmldoccf.lpVtbl;
+    }
+    else if( IsEqualCLSID( rclsid, &CLSID_FreeThreadedDOMDocument ) )
+    {
+        cf = (IClassFactory*) &domdoccf.lpVtbl;
+    }
 
     if ( !cf )
         return CLASS_E_CLASSNOTAVAILABLE;

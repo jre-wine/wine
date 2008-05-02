@@ -4,39 +4,54 @@ SRCDIR    = @srcdir@
 VPATH	  = @srcdir@
 MODULE	  = none
 
-WINDOWS_IDL_SRCS = \
+IDL_H_SRCS = \
 	activscp.idl \
 	amstream.idl \
 	amvideo.idl \
 	austream.idl \
+	bits.idl \
 	comcat.idl \
 	control.idl \
+	d3d10.idl \
 	ddstream.idl \
+	dimm.idl \
 	dispex.idl \
 	docobj.idl \
 	downloadmgr.idl \
+	dxgi.idl \
+	dxgitype.idl \
 	exdisp.idl \
 	hlink.idl \
 	htiframe.idl \
 	iads.idl \
+	icftypes.idl \
+	imnact.idl \
+	imnxport.idl \
 	indexsrv.idl \
 	mediaobj.idl \
 	mimeinfo.idl \
+	mimeole.idl \
 	mlang.idl \
 	mmstream.idl \
+	mscoree.idl \
 	mshtmhst.idl \
 	mshtml.idl \
+	msinkaut.idl \
 	msxml.idl \
 	msxml2.idl \
+	netfw.idl \
 	oaidl.idl \
 	objidl.idl \
 	objsafe.idl \
 	ocidl.idl \
+	ocmm.idl \
+	oleacc.idl \
 	oledb.idl \
 	oleidl.idl \
 	optary.idl \
 	propidl.idl \
 	pstore.idl \
+	qedit.idl \
 	richole.idl \
 	sensevts.idl \
 	servprov.idl \
@@ -48,6 +63,7 @@ WINDOWS_IDL_SRCS = \
 	unknwn.idl \
 	urlhist.idl \
 	urlmon.idl \
+	wine/itss.idl \
 	wtypes.idl \
 	xmldom.idl \
 	xmldso.idl
@@ -55,27 +71,22 @@ WINDOWS_IDL_SRCS = \
 IDL_TLB_SRCS = \
 	stdole2.idl
 
-WINDOWS_IDL_INCLUDES = \
+SRCDIR_INCLUDES = \
 	$(IDL_TLB_SRCS) \
-	$(WINDOWS_IDL_SRCS) \
-	axcore.idl \
-	axextend.idl \
-	dbinit.idl \
-	dbprop.idl \
-	dbs.idl \
-	devenum.idl \
-	dyngraph.idl
-
-WINDOWS_INCLUDES = \
-	$(WINDOWS_IDL_INCLUDES) \
+	$(IDL_H_SRCS) \
 	accctrl.h \
 	aclapi.h \
+	adshlp.h \
 	advpub.h \
 	appmgmt.h \
 	audevcod.h \
 	aviriff.h \
+	axcore.idl \
+	axextend.idl \
 	basetsd.h \
 	basetyps.h \
+	bcrypt.h \
+	bitsmsg.h \
 	cderr.h \
 	cfgmgr32.h \
 	cguid.h \
@@ -84,6 +95,7 @@ WINDOWS_INCLUDES = \
 	commctrl.h \
 	commdlg.h \
 	compobj.h \
+	cor.h \
 	cpl.h \
 	custcntl.h \
 	cvconst.h \
@@ -97,23 +109,41 @@ WINDOWS_INCLUDES = \
 	d3dcaps.h \
 	d3dhal.h \
 	d3drm.h \
+	d3drmdef.h \
 	d3dtypes.h \
 	d3dvec.inl \
+	d3dx8.h \
 	d3dx8core.h \
+	d3dx8math.h \
+	d3dx8math.inl \
+	d3dx8mesh.h \
+	d3dx9.h \
+	d3dx9core.h \
+	d3dx9math.h \
+	d3dx9math.inl \
 	dbghelp.h \
+	dbinit.idl \
+	dbprop.idl \
+	dbs.idl \
 	dbt.h \
 	dciddi.h \
 	dciman.h \
 	dde.h \
 	ddeml.h \
 	ddk/compstui.h \
+	ddk/hidsdi.h \
+	ddk/imm.h \
+	ddk/mountmgr.h \
 	ddk/ntddcdvd.h \
+	ddk/ntddk.h \
 	ddk/ntddser.h \
 	ddk/ntddtape.h \
 	ddk/wdm.h \
+	ddk/winddiui.h \
 	ddk/winsplp.h \
 	ddraw.h \
 	ddrawi.h \
+	devenum.idl \
 	devguid.h \
 	digitalv.h \
 	dinput.h \
@@ -144,10 +174,13 @@ WINDOWS_INCLUDES = \
 	dshow.h \
 	dsound.h \
 	dsrole.h \
+	dwmapi.h \
 	dxdiag.h \
 	dxerr8.h \
 	dxerr9.h \
 	dxfile.h \
+	dyngraph.idl \
+	errorrep.h \
 	errors.h \
 	evcode.h \
 	evntrace.h \
@@ -155,20 +188,34 @@ WINDOWS_INCLUDES = \
 	exdispid.h \
 	fci.h \
 	fdi.h \
+	gdiplus.h \
+	gdipluscolormatrix.h \
+	gdiplusenums.h \
+	gdiplusflat.h \
+	gdiplusgpstubs.h \
+	gdiplusimaging.h \
+	gdiplusinit.h \
+	gdiplusmem.h \
+	gdiplusmetaheader.h \
+	gdipluspixelformats.h \
+	gdiplustypes.h \
 	guiddef.h \
 	hlguids.h \
 	htmlhelp.h \
+	i_cryptasn1tls.h \
 	icm.h \
 	icmpapi.h \
 	idispids.h \
 	imagehlp.h \
 	imm.h \
 	initguid.h \
+	intshcut.h \
 	ipexport.h \
 	iphlpapi.h \
 	ipifcons.h \
 	iprtrmib.h \
 	iptypes.h \
+	isguids.h \
 	ks.h \
 	ksguid.h \
 	ksmedia.h \
@@ -183,11 +230,14 @@ WINDOWS_INCLUDES = \
 	lmserver.h \
 	lmshare.h \
 	lmstats.h \
+	lmuse.h \
+	lmuseflg.h \
 	lmwksta.h \
 	lzexpand.h \
 	mapi.h \
 	mapicode.h \
 	mapidefs.h \
+	mapiform.h \
 	mapiguid.h \
 	mapitags.h \
 	mapiutil.h \
@@ -196,6 +246,7 @@ WINDOWS_INCLUDES = \
 	mciavi.h \
 	mcx.h \
 	mediaerr.h \
+	midles.h \
 	minmax.h \
 	mmddk.h \
 	mmreg.h \
@@ -211,126 +262,6 @@ WINDOWS_INCLUDES = \
 	msidefs.h \
 	msiquery.h \
 	mssip.h \
-	mswsock.h \
-	msxml2did.h \
-	msxmldid.h \
-	nb30.h \
-	ndrtypes.h \
-	npapi.h \
-	nspapi.h \
-	ntddcdrm.h \
-	ntddscsi.h \
-	ntddstor.h \
-	ntdsapi.h \
-	ntquery.h \
-	ntsecapi.h \
-	ntstatus.h \
-	objbase.h \
-	objsel.h \
-	odbcinst.h \
-	ole2.h \
-	ole2ver.h \
-	oleauto.h \
-	olectl.h \
-	oledlg.h \
-	pktdef.h \
-	poppack.h \
-	powrprof.h \
-	profinfo.h \
-	prsht.h \
-	psapi.h \
-	pshpack1.h \
-	pshpack2.h \
-	pshpack4.h \
-	pshpack8.h \
-	ras.h \
-	reason.h \
-	regstr.h \
-	richedit.h \
-	rpc.h \
-	rpcdce.h \
-	rpcdcep.h \
-	rpcndr.h \
-	rpcnterr.h \
-	rpcproxy.h \
-	schannel.h \
-	schemadef.h \
-	schnlsp.h \
-	sddl.h \
-	secext.h \
-	security.h \
-	sensapi.h \
-	setupapi.h \
-	sfc.h \
-	shellapi.h \
-	shlguid.h \
-	shlobj.h \
-	shlwapi.h \
-	sipbase.h \
-	snmp.h \
-	softpub.h \
-	sql.h \
-	sqlext.h \
-	sqltypes.h \
-	sspi.h \
-	storage.h \
-	svrapi.h \
-	tapi.h \
-	tchar.h \
-	textserv.h \
-	tlhelp32.h \
-	tmschema.h \
-	twain.h \
-	usp10.h \
-	uuids.h \
-	uxtheme.h \
-	ver.h \
-	vfw.h \
-	vfwmsgs.h \
-	winbase.h \
-	wincon.h \
-	wincrypt.h \
-	windef.h \
-	windns.h \
-	windows.h \
-	windowsx.h \
-	winerror.h \
-	wingdi.h \
-	wininet.h \
-	winioctl.h \
-	winldap.h \
-	winnetwk.h \
-	winnls.h \
-	winnls32.h \
-	winnt.h \
-	winreg.h \
-	winres.h \
-	winresrc.h \
-	winsock.h \
-	winsock2.h \
-	winspool.h \
-	winsvc.h \
-	wintab.h \
-	wintabx.h \
-	winternl.h \
-	wintrust.h \
-	winuser.h \
-	winver.h \
-	wmistr.h \
-	wnaspi32.h \
-	wownt32.h \
-	ws2spi.h \
-	ws2tcpip.h \
-	wshisotp.h \
-	wsipx.h \
-	wsnwlink.h \
-	wtsapi32.h \
-	xcmc.h \
-	xmldomdid.h \
-	xmldsodid.h \
-	zmouse.h
-
-MSVCRT_INCLUDES = \
 	msvcrt/conio.h \
 	msvcrt/crtdbg.h \
 	msvcrt/ctype.h \
@@ -366,19 +297,146 @@ MSVCRT_INCLUDES = \
 	msvcrt/time.h \
 	msvcrt/unistd.h \
 	msvcrt/wchar.h \
-	msvcrt/wctype.h
-
-WINE_IDL_SRCS = \
-	itss.idl
-
-WINE_INCLUDES = \
-	$(WINE_IDL_SRCS) \
-	debug.h \
-	exception.h \
-	library.h \
-	unicode.h
-
-IDL_H_SRCS = $(WINDOWS_IDL_SRCS) $(WINE_IDL_SRCS:%=wine/%)
+	msvcrt/wctype.h \
+	mswsock.h \
+	msxml2did.h \
+	msxmldid.h \
+	nb30.h \
+	ndrtypes.h \
+	npapi.h \
+	nspapi.h \
+	ntddcdrm.h \
+	ntddscsi.h \
+	ntddstor.h \
+	ntdsapi.h \
+	ntquery.h \
+	ntsecapi.h \
+	ntsecpkg.h \
+	ntstatus.h \
+	objbase.h \
+	objsel.h \
+	odbcinst.h \
+	ole2.h \
+	ole2ver.h \
+	oleauto.h \
+	olectl.h \
+	oledlg.h \
+	pdh.h \
+	pdhmsg.h \
+	pktdef.h \
+	poppack.h \
+	powrprof.h \
+	profinfo.h \
+	propvarutil.h \
+	prsht.h \
+	psapi.h \
+	pshpack1.h \
+	pshpack2.h \
+	pshpack4.h \
+	pshpack8.h \
+	ras.h \
+	reason.h \
+	regstr.h \
+	richedit.h \
+	rmxfguid.h \
+	rpc.h \
+	rpcasync.h \
+	rpcdce.h \
+	rpcdcep.h \
+	rpcndr.h \
+	rpcnterr.h \
+	rpcproxy.h \
+	scarderr.h \
+	schannel.h \
+	schemadef.h \
+	schnlsp.h \
+	sddl.h \
+	secext.h \
+	security.h \
+	sensapi.h \
+	setupapi.h \
+	sfc.h \
+	shellapi.h \
+	shlguid.h \
+	shlobj.h \
+	shlwapi.h \
+	sipbase.h \
+	slerror.h \
+	slpublic.h \
+	snmp.h \
+	softpub.h \
+	sql.h \
+	sqlext.h \
+	sqltypes.h \
+	sspi.h \
+	storage.h \
+	svrapi.h \
+	tapi.h \
+	tchar.h \
+	textserv.h \
+	tlhelp32.h \
+	tmschema.h \
+	twain.h \
+	userenv.h \
+	usp10.h \
+	uuids.h \
+	uxtheme.h \
+	vdmdbg.h \
+	ver.h \
+	vfw.h \
+	vfwmsgs.h \
+	wfext.h \
+	winbase.h \
+	wincon.h \
+	wincred.h \
+	wincrypt.h \
+	windef.h \
+	windns.h \
+	windows.h \
+	windowsx.h \
+	wine/debug.h \
+	wine/exception.h \
+	wine/library.h \
+	wine/unicode.h \
+	winerror.h \
+	wingdi.h \
+	winhttp.h \
+	wininet.h \
+	winineti.h \
+	winioctl.h \
+	winldap.h \
+	winnetwk.h \
+	winnls.h \
+	winnls32.h \
+	winnt.h \
+	winperf.h \
+	winreg.h \
+	winresrc.h \
+	winscard.h \
+	winsmcrd.h \
+	winsock.h \
+	winsock2.h \
+	winspool.h \
+	winsvc.h \
+	wintab.h \
+	wintabx.h \
+	winternl.h \
+	wintrust.h \
+	winuser.h \
+	winver.h \
+	wmistr.h \
+	wnaspi32.h \
+	wownt32.h \
+	ws2spi.h \
+	ws2tcpip.h \
+	wshisotp.h \
+	wsipx.h \
+	wsnwlink.h \
+	wtsapi32.h \
+	xcmc.h \
+	xmldomdid.h \
+	xmldsodid.h \
+	zmouse.h
 
 EXTRASUBDIRS = ddk msvcrt msvcrt/sys wine
 
@@ -391,25 +449,30 @@ INSTALLDIRS = \
 
 @MAKE_RULES@
 
-WINDOWS_IDL_HEADERS = $(WINDOWS_IDL_SRCS:.idl=.h)
-WINE_IDL_HEADERS = $(WINE_IDL_SRCS:.idl=.h)
-IDL_HEADERS = $(IDL_H_SRCS:.idl=.h)
-IDL_TLBS = $(IDL_TLB_SRCS:.idl=.tlb)
+OBJDIR_INCLUDES = $(IDL_H_SRCS:.idl=.h) $(IDL_TLB_SRCS:.idl=.tlb)
 
-all: $(IDL_HEADERS) $(IDL_TLBS)
+all: $(OBJDIR_INCLUDES)
 
-install:: $(IDL_HEADERS) $(IDL_TLBS) $(INSTALLDIRS)
-	for f in $(WINDOWS_INCLUDES); do $(INSTALL_DATA) $(SRCDIR)/$$f $(DESTDIR)$(includedir)/windows/$$f; done
-	for f in $(WINDOWS_IDL_HEADERS) $(IDL_TLBS); do $(INSTALL_DATA) $$f $(DESTDIR)$(includedir)/windows/$$f; done
-	for f in $(MSVCRT_INCLUDES); do $(INSTALL_DATA) $(SRCDIR)/$$f $(DESTDIR)$(includedir)/$$f; done
-	for f in $(WINE_INCLUDES); do $(INSTALL_DATA) $(SRCDIR)/wine/$$f $(DESTDIR)$(includedir)/$$f; done
-	for f in $(WINE_IDL_HEADERS); do $(INSTALL_DATA) wine/$$f $(DESTDIR)$(includedir)/$$f; done
+install:: $(OBJDIR_INCLUDES) $(INSTALLDIRS)
+	for f in $(SRCDIR_INCLUDES); do case $$f in \
+	  wine/*)   $(INSTALL_DATA) $(SRCDIR)/$$f $(DESTDIR)$(includedir)/`expr $$f : 'wine/\(.*\)'` ;; \
+	  msvcrt/*) $(INSTALL_DATA) $(SRCDIR)/$$f $(DESTDIR)$(includedir)/$$f ;; \
+	  *)        $(INSTALL_DATA) $(SRCDIR)/$$f $(DESTDIR)$(includedir)/windows/$$f ;; \
+	esac; done
+	for f in $(OBJDIR_INCLUDES); do case $$f in \
+	  wine/*)   $(INSTALL_DATA) $$f $(DESTDIR)$(includedir)/`expr $$f : 'wine/\(.*\)'` ;; \
+	  msvcrt/*) $(INSTALL_DATA) $$f $(DESTDIR)$(includedir)/$$f ;; \
+	  *)        $(INSTALL_DATA) $$f $(DESTDIR)$(includedir)/windows/$$f ;; \
+	esac; done
 
 # Don't just do a rm -rf on $(includedir) -- don't want to wipe out
 # anything extra the user may have put there.
 uninstall::
-	-cd $(DESTDIR)$(includedir)/windows && $(RM) $(WINDOWS_INCLUDES) $(WINDOWS_IDL_HEADERS) $(IDL_TLBS)
-	-cd $(DESTDIR)$(includedir) && $(RM) $(MSVCRT_INCLUDES) $(WINE_INCLUDES) $(WINE_IDL_HEADERS)
+	for f in $(SRCDIR_INCLUDES) $(OBJDIR_INCLUDES); do case $$f in \
+	  wine/*)   $(RM) $(DESTDIR)$(includedir)/`expr $$f : 'wine/\(.*\)'` ;; \
+	  msvcrt/*) $(RM) $(DESTDIR)$(includedir)/$$f ;; \
+	  *)        $(RM) $(DESTDIR)$(includedir)/windows/$$f ;; \
+	esac; done
 	-rmdir $(INSTALLDIRS)
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend

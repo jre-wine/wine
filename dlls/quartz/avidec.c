@@ -21,20 +21,15 @@
 #include "config.h"
 
 #include "quartz_private.h"
-#include "control_private.h"
 #include "pin.h"
 
 #include "uuids.h"
-#include "aviriff.h"
-#include "mmreg.h"
-#include "vfwmsgs.h"
 #include "amvideo.h"
 #include "windef.h"
 #include "winbase.h"
 #include "dshow.h"
 #include "strmif.h"
 #include "vfwmsgs.h"
-#include "evcode.h"
 #include "vfw.h"
 
 #include <assert.h>
@@ -72,19 +67,30 @@ static HRESULT AVIDec_ProcessBegin(TransformFilterImpl* pTransformFilter)
     return S_OK;
 }
 
-static HRESULT AVIDec_ProcessSampleData(TransformFilterImpl* pTransformFilter, LPBYTE data, DWORD size)
+static HRESULT AVIDec_ProcessSampleData(TransformFilterImpl* pTransformFilter, IMediaSample *pSample)
 {
     AVIDecImpl* This = (AVIDecImpl*)pTransformFilter;
     VIDEOINFOHEADER* format;
     AM_MEDIA_TYPE amt;
     HRESULT hr;
     DWORD res;
-    IMediaSample* pSample = NULL;
+    IMediaSample* pOutSample = NULL;
     DWORD cbDstStream;
     LPBYTE pbDstStream;
+    DWORD cbSrcStream;
+    LPBYTE pbSrcStream;
 
-    TRACE("(%p)->(%p,%d)\n", This, data, size);
-    
+    hr = IMediaSample_GetPointer(pSample, &pbSrcStream);
+    if (FAILED(hr))
+    {
+        ERR("Cannot get pointer to sample data (%x)\n", hr);
+	return hr;
+    }
+
+    cbSrcStream = IMediaSample_GetActualDataLength(pSample);
+
+    TRACE("Sample data ptr = %p, size = %ld\n", pbSrcStream, (long)cbSrcStream);
+
     hr = IPin_ConnectionMediaType(This->tf.ppPins[0], &amt);
     if (FAILED(hr)) {
 	ERR("Unable to retrieve media type\n");
@@ -93,42 +99,42 @@ static HRESULT AVIDec_ProcessSampleData(TransformFilterImpl* pTransformFilter, L
     format = (VIDEOINFOHEADER*)amt.pbFormat;
 
     /* Update input size to match sample size */
-    This->pBihIn->biSizeImage = size;
+    This->pBihIn->biSizeImage = cbSrcStream;
 
-    hr = OutputPin_GetDeliveryBuffer((OutputPin*)This->tf.ppPins[1], &pSample, NULL, NULL, 0);
+    hr = OutputPin_GetDeliveryBuffer((OutputPin*)This->tf.ppPins[1], &pOutSample, NULL, NULL, 0);
     if (FAILED(hr)) {
 	ERR("Unable to get delivery buffer (%x)\n", hr);
 	goto error;
     }
 
-    hr = IMediaSample_SetActualDataLength(pSample, 0);
+    hr = IMediaSample_SetActualDataLength(pOutSample, 0);
     assert(hr == S_OK);
 
-    hr = IMediaSample_GetPointer(pSample, &pbDstStream);
+    hr = IMediaSample_GetPointer(pOutSample, &pbDstStream);
     if (FAILED(hr)) {
 	ERR("Unable to get pointer to buffer (%x)\n", hr);
 	goto error;
     }
-    cbDstStream = IMediaSample_GetSize(pSample);
+    cbDstStream = IMediaSample_GetSize(pOutSample);
     if (cbDstStream < This->pBihOut->biSizeImage) {
         ERR("Sample size is too small %d < %d\n", cbDstStream, This->pBihOut->biSizeImage);
 	hr = E_FAIL;
 	goto error;
     }
 
-    res = ICDecompress(This->hvid, 0, This->pBihIn, data, This->pBihOut, pbDstStream);
+    res = ICDecompress(This->hvid, 0, This->pBihIn, pbSrcStream, This->pBihOut, pbDstStream);
     if (res != ICERR_OK)
         ERR("Error occurred during the decompression (%x)\n", res);
 
-    hr = OutputPin_SendSample((OutputPin*)This->tf.ppPins[1], pSample);
+    hr = OutputPin_SendSample((OutputPin*)This->tf.ppPins[1], pOutSample);
     if (hr != S_OK && hr != VFW_E_NOT_CONNECTED) {
         ERR("Error sending sample (%x)\n", hr);
 	goto error;
     }
 
 error:
-    if (pSample)
-        IMediaSample_Release(pSample);
+    if (pOutSample)
+        IMediaSample_Release(pOutSample);
 
     return hr;
 }
@@ -152,7 +158,7 @@ static HRESULT AVIDec_ProcessEnd(TransformFilterImpl* pTransformFilter)
 static HRESULT AVIDec_ConnectInput(TransformFilterImpl* pTransformFilter, const AM_MEDIA_TYPE * pmt)
 {
     AVIDecImpl* This = (AVIDecImpl*)pTransformFilter;
-    HRESULT hr = S_FALSE;
+    HRESULT hr = VFW_E_TYPE_NOT_ACCEPTED;
 
     TRACE("(%p)->(%p)\n", This, pmt);
 
@@ -189,13 +195,13 @@ static HRESULT AVIDec_ConnectInput(TransformFilterImpl* pTransformFilter, const 
 
             /* Copy bitmap header from media type to 1 for input and 1 for output */
             bih_size = format->bmiHeader.biSize + format->bmiHeader.biClrUsed * 4;
-            This->pBihIn = (BITMAPINFOHEADER*)CoTaskMemAlloc(bih_size);
+            This->pBihIn = CoTaskMemAlloc(bih_size);
             if (!This->pBihIn)
             {
                 hr = E_OUTOFMEMORY;
                 goto failed;
             }
-            This->pBihOut = (BITMAPINFOHEADER*)CoTaskMemAlloc(bih_size);
+            This->pBihOut = CoTaskMemAlloc(bih_size);
             if (!This->pBihOut)
             {
                 hr = E_OUTOFMEMORY;
@@ -257,10 +263,11 @@ static HRESULT AVIDec_Cleanup(TransformFilterImpl* pTransformFilter)
     return S_OK;
 }
 
-TransformFuncsTable AVIDec_FuncsTable = {
+static const TransformFuncsTable AVIDec_FuncsTable = {
     AVIDec_ProcessBegin,
     AVIDec_ProcessSampleData,
     AVIDec_ProcessEnd,
+    NULL,
     AVIDec_ConnectInput,
     AVIDec_Cleanup
 };

@@ -43,7 +43,6 @@
 #include "wingdi.h"
 #include "winnls.h"
 #include "winerror.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -251,9 +250,20 @@ static inline BOOL is_dib_monochrome( const BITMAPINFO* info )
 HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk )
 {
     HENHMETAFILE hmf = 0;
-    ENHMETAFILEOBJ *metaObj = GDI_AllocObject( sizeof(ENHMETAFILEOBJ),
-                                               ENHMETAFILE_MAGIC,
-					       (HGDIOBJ *)&hmf, NULL );
+    ENHMETAFILEOBJ *metaObj;
+
+    if (emh->iType != EMR_HEADER || emh->dSignature != ENHMETA_SIGNATURE ||
+        (emh->nBytes & 3)) /* refuse to load unaligned EMF as Windows does */
+    {
+        WARN("Invalid emf header type 0x%08x sig 0x%08x.\n",
+             emh->iType, emh->dSignature);
+        SetLastError(ERROR_INVALID_DATA);
+        return 0;
+    }
+
+    metaObj = GDI_AllocObject( sizeof(ENHMETAFILEOBJ),
+                               ENHMETAFILE_MAGIC,
+                               (HGDIOBJ *)&hmf, NULL );
     if (metaObj)
     {
         metaObj->emh = emh;
@@ -305,6 +315,7 @@ static HENHMETAFILE EMF_GetEnhMetaFile( HANDLE hFile )
 {
     ENHMETAHEADER *emh;
     HANDLE hMapping;
+    HENHMETAFILE hemf;
 
     hMapping = CreateFileMappingA( hFile, NULL, PAGE_READONLY, 0, 0, NULL );
     emh = MapViewOfFile( hMapping, FILE_MAP_READ, 0, 0, 0 );
@@ -312,24 +323,10 @@ static HENHMETAFILE EMF_GetEnhMetaFile( HANDLE hFile )
 
     if (!emh) return 0;
 
-    if (emh->iType != EMR_HEADER || emh->dSignature != ENHMETA_SIGNATURE) {
-        WARN("Invalid emf header type 0x%08x sig 0x%08x.\n",
-	     emh->iType, emh->dSignature);
-        goto err;
-    }
-
-    /* refuse to load unaligned EMF as Windows does */
-    if (emh->nBytes & 3)
-    {
-        WARN("Refusing to load unaligned EMF\n");
-        goto err;
-    }
-
-    return EMF_Create_HENHMETAFILE( emh, TRUE );
-
-err:
-    UnmapViewOfFile( emh );
-    return 0;
+    hemf = EMF_Create_HENHMETAFILE( emh, TRUE );
+    if (!hemf)
+        UnmapViewOfFile( emh );
+    return hemf;
 }
 
 
@@ -517,7 +514,7 @@ typedef struct enum_emh_data
 
 #define IS_WIN9X() (GetVersion()&0x80000000)
 
-static void EMF_Update_MF_Xform(HDC hdc, enum_emh_data *info)
+static void EMF_Update_MF_Xform(HDC hdc, const enum_emh_data *info)
 {
     XFORM mapping_mode_trans, final_trans;
     FLOAT scaleX, scaleY;
@@ -1175,6 +1172,7 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 
     case EMR_EXTSELECTCLIPRGN:
       {
+        static int extselectcliprgn_cases;
 #if 0
 	const EMREXTSELECTCLIPRGN lpRgn = (const EMREXTSELECTCLIPRGN *)mr;
 	HRGN hRgn = ExtCreateRegion(NULL, lpRgn->cbRgnData, (RGNDATA *)lpRgn->RgnData);
@@ -1183,7 +1181,8 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 	/* ExtSelectClipRgn created a copy of the region */
 	DeleteObject(hRgn);
 #endif
-        FIXME("ExtSelectClipRgn\n");
+        if(!(extselectcliprgn_cases++))
+            FIXME("ExtSelectClipRgn\n");
         break;
       }
 
@@ -1670,11 +1669,13 @@ BOOL WINAPI PlayEnhMetaFileRecord(
         const EMRCREATEDIBPATTERNBRUSHPT *lpCreate = (const EMRCREATEDIBPATTERNBRUSHPT *)mr;
         LPVOID lpPackedStruct;
 
-        /* check that offsets and data are contained within the record */
-        if ( !( (lpCreate->cbBmi>=0) && (lpCreate->cbBits>=0) &&
-                (lpCreate->offBmi>=0) && (lpCreate->offBits>=0) &&
-                ((lpCreate->offBmi +lpCreate->cbBmi ) <= mr->nSize) &&
-                ((lpCreate->offBits+lpCreate->cbBits) <= mr->nSize) ) )
+        /* Check that offsets and data are contained within the record
+         * (including checking for wrap arounds).
+         */
+        if (    lpCreate->offBmi  + lpCreate->cbBmi  > mr->nSize
+             || lpCreate->offBits + lpCreate->cbBits > mr->nSize
+             || lpCreate->offBmi  + lpCreate->cbBmi  < lpCreate->offBmi
+             || lpCreate->offBits + lpCreate->cbBits < lpCreate->offBits )
         {
             ERR("Invalid EMR_CREATEDIBPATTERNBRUSHPT record\n");
             break;
@@ -2546,7 +2547,7 @@ static INT CALLBACK cbEnhPaletteCopy( HDC a,
 
     /* Update the passed data as a return code */
     info->lpPe     = NULL; /* Palettes were copied! */
-    info->cEntries = (UINT)dwNumPalToCopy;
+    info->cEntries = dwNumPalToCopy;
 
     return FALSE; /* That's all we need */
   }
@@ -2577,7 +2578,7 @@ UINT WINAPI GetEnhMetaFilePaletteEntries( HENHMETAFILE hEmf,
   if ( enhHeader->nPalEntries == 0 ) return 0;
 
   /* Is the user requesting the number of palettes? */
-  if ( lpPe == NULL ) return (UINT)enhHeader->nPalEntries;
+  if ( lpPe == NULL ) return enhHeader->nPalEntries;
 
   /* Copy cEntries worth of PALETTEENTRY structs into the buffer */
   infoForCallBack.cEntries = cEntries;

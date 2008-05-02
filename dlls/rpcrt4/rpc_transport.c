@@ -29,35 +29,48 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-#include <errno.h>
-
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-#include <fcntl.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_SOCKET_H
-# include <sys/socket.h>
-#endif
-#ifdef HAVE_NETINET_IN_H
-# include <netinet/in.h>
-#endif
-#ifdef HAVE_ARPA_INET_H
-# include <arpa/inet.h>
-#endif
-#ifdef HAVE_NETDB_H
-#include <netdb.h>
-#endif
-#ifdef HAVE_SYS_POLL_H
-#include <sys/poll.h>
-#endif
+
+#if defined(__MINGW32__) || defined (_MSC_VER)
+# include <ws2tcpip.h>
+# ifndef EADDRINUSE
+#  define EADDRINUSE WSAEADDRINUSE
+# endif
+# ifndef EAGAIN
+#  define EAGAIN WSAEWOULDBLOCK
+# endif
+#else
+# include <errno.h>
+# ifdef HAVE_UNISTD_H
+#  include <unistd.h>
+# endif
+# include <fcntl.h>
+# ifdef HAVE_SYS_SOCKET_H
+#  include <sys/socket.h>
+# endif
+# ifdef HAVE_NETINET_IN_H
+#  include <netinet/in.h>
+# endif
+# ifdef HAVE_NETINET_TCP_H
+#  include <netinet/tcp.h>
+# endif
+# ifdef HAVE_ARPA_INET_H
+#  include <arpa/inet.h>
+# endif
+# ifdef HAVE_NETDB_H
+#  include <netdb.h>
+# endif
+# ifdef HAVE_SYS_POLL_H
+#  include <sys/poll.h>
+# endif
+# define closesocket close
+#endif /* defined(__MINGW32__) || defined (_MSC_VER) */
 
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
 #include "winerror.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wine/unicode.h"
 
@@ -71,18 +84,11 @@
 #include "rpc_server.h"
 #include "epm_towers.h"
 
+#ifndef SOL_TCP
+# define SOL_TCP IPPROTO_TCP
+#endif
+
 WINE_DEFAULT_DEBUG_CHANNEL(rpc);
-
-static CRITICAL_SECTION connection_pool_cs;
-static CRITICAL_SECTION_DEBUG connection_pool_cs_debug =
-{
-    0, 0, &connection_pool_cs,
-    { &connection_pool_cs_debug.ProcessLocksList, &connection_pool_cs_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": connection_pool") }
-};
-static CRITICAL_SECTION connection_pool_cs = { &connection_pool_cs_debug, -1, 0, 0, 0, 0 };
-
-static struct list connection_pool = LIST_INIT(connection_pool);
 
 /**** ncacn_np support ****/
 
@@ -115,16 +121,16 @@ static RPC_STATUS rpcrt4_conn_listen_pipe(RpcConnection_np *npc)
   if (ConnectNamedPipe(npc->pipe, &npc->ovl))
     return RPC_S_OK;
 
-  WARN("Couldn't ConnectNamedPipe (error was %d)\n", GetLastError());
   if (GetLastError() == ERROR_PIPE_CONNECTED) {
     SetEvent(npc->ovl.hEvent);
     return RPC_S_OK;
   }
   if (GetLastError() == ERROR_IO_PENDING) {
-    /* FIXME: looks like we need to GetOverlappedResult here? */
+    /* will be completed in rpcrt4_protseq_np_wait_for_new_connection */
     return RPC_S_OK;
   }
   npc->listening = FALSE;
+  WARN("Couldn't ConnectNamedPipe (error was %d)\n", GetLastError());
   return RPC_S_OUT_OF_RESOURCES;
 }
 
@@ -162,8 +168,33 @@ static RPC_STATUS rpcrt4_conn_open_pipe(RpcConnection *Connection, LPCSTR pname,
   TRACE("connecting to %s\n", pname);
 
   while (TRUE) {
+    DWORD dwFlags = 0;
+    if (Connection->QOS)
+    {
+        dwFlags = SECURITY_SQOS_PRESENT;
+        switch (Connection->QOS->qos->ImpersonationType)
+        {
+            case RPC_C_IMP_LEVEL_DEFAULT:
+                /* FIXME: what to do here? */
+                break;
+            case RPC_C_IMP_LEVEL_ANONYMOUS:
+                dwFlags |= SECURITY_ANONYMOUS;
+                break;
+            case RPC_C_IMP_LEVEL_IDENTIFY:
+                dwFlags |= SECURITY_IDENTIFICATION;
+                break;
+            case RPC_C_IMP_LEVEL_IMPERSONATE:
+                dwFlags |= SECURITY_IMPERSONATION;
+                break;
+            case RPC_C_IMP_LEVEL_DELEGATE:
+                dwFlags |= SECURITY_DELEGATION;
+                break;
+        }
+        if (Connection->QOS->qos->IdentityTracking == RPC_C_QOS_IDENTIFY_DYNAMIC)
+            dwFlags |= SECURITY_CONTEXT_TRACKING;
+    }
     pipe = CreateFileA(pname, GENERIC_READ|GENERIC_WRITE, 0, NULL,
-                       OPEN_EXISTING, 0, 0);
+                       OPEN_EXISTING, dwFlags, 0);
     if (pipe != INVALID_HANDLE_VALUE) break;
     err = GetLastError();
     if (err == ERROR_PIPE_BUSY) {
@@ -193,7 +224,7 @@ static RPC_STATUS rpcrt4_conn_open_pipe(RpcConnection *Connection, LPCSTR pname,
 static RPC_STATUS rpcrt4_ncalrpc_open(RpcConnection* Connection)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  static LPCSTR prefix = "\\\\.\\pipe\\lrpc\\";
+  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
   RPC_STATUS r;
   LPSTR pname;
 
@@ -213,7 +244,7 @@ static RPC_STATUS rpcrt4_ncalrpc_open(RpcConnection* Connection)
 
 static RPC_STATUS rpcrt4_protseq_ncalrpc_open_endpoint(RpcServerProtseq* protseq, LPSTR endpoint)
 {
-  static LPCSTR prefix = "\\\\.\\pipe\\lrpc\\";
+  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
   RPC_STATUS r;
   LPSTR pname;
   RpcConnection *Connection;
@@ -241,7 +272,7 @@ static RPC_STATUS rpcrt4_protseq_ncalrpc_open_endpoint(RpcServerProtseq* protseq
 static RPC_STATUS rpcrt4_ncacn_np_open(RpcConnection* Connection)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  static LPCSTR prefix = "\\\\.";
+  static const char prefix[] = "\\\\.";
   RPC_STATUS r;
   LPSTR pname;
 
@@ -260,7 +291,7 @@ static RPC_STATUS rpcrt4_ncacn_np_open(RpcConnection* Connection)
 
 static RPC_STATUS rpcrt4_protseq_ncacn_np_open_endpoint(RpcServerProtseq *protseq, LPSTR endpoint)
 {
-  static LPCSTR prefix = "\\\\.";
+  static const char prefix[] = "\\\\.";
   RPC_STATUS r;
   LPSTR pname;
   RpcConnection *Connection;
@@ -275,7 +306,12 @@ static RPC_STATUS rpcrt4_protseq_ncacn_np_open_endpoint(RpcServerProtseq *protse
   strcat(strcpy(pname, prefix), Connection->Endpoint);
   r = rpcrt4_conn_create_pipe(Connection, pname);
   I_RpcFree(pname);
-    
+
+  EnterCriticalSection(&protseq->cs);
+  Connection->Next = protseq->conn;
+  protseq->conn = Connection;
+  LeaveCriticalSection(&protseq->cs);
+
   return r;
 }
 
@@ -295,7 +331,7 @@ static RPC_STATUS rpcrt4_ncacn_np_handoff(RpcConnection *old_conn, RpcConnection
 {
   RPC_STATUS status;
   LPSTR pname;
-  static LPCSTR prefix = "\\\\.";
+  static const char prefix[] = "\\\\.";
 
   rpcrt4_conn_np_handoff((RpcConnection_np *)old_conn, (RpcConnection_np *)new_conn);
 
@@ -311,7 +347,7 @@ static RPC_STATUS rpcrt4_ncalrpc_handoff(RpcConnection *old_conn, RpcConnection 
 {
   RPC_STATUS status;
   LPSTR pname;
-  static LPCSTR prefix = "\\\\.\\pipe\\lrpc\\";
+  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
 
   TRACE("%s\n", old_conn->Endpoint);
 
@@ -329,21 +365,40 @@ static int rpcrt4_conn_np_read(RpcConnection *Connection,
                         void *buffer, unsigned int count)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  DWORD dwRead = 0;
-  if (!ReadFile(npc->pipe, buffer, count, &dwRead, NULL) &&
-      (GetLastError() != ERROR_MORE_DATA))
-    return -1;
-  return dwRead;
+  char *buf = buffer;
+  BOOL ret = TRUE;
+  unsigned int bytes_left = count;
+
+  while (bytes_left)
+  {
+    DWORD bytes_read;
+    ret = ReadFile(npc->pipe, buf, bytes_left, &bytes_read, NULL);
+    if (!ret || !bytes_read)
+        break;
+    bytes_left -= bytes_read;
+    buf += bytes_read;
+  }
+  return ret ? count : -1;
 }
 
 static int rpcrt4_conn_np_write(RpcConnection *Connection,
                              const void *buffer, unsigned int count)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  DWORD dwWritten = 0;
-  if (!WriteFile(npc->pipe, buffer, count, &dwWritten, NULL))
-    return -1;
-  return dwWritten;
+  const char *buf = buffer;
+  BOOL ret = TRUE;
+  unsigned int bytes_left = count;
+
+  while (bytes_left)
+  {
+    DWORD bytes_written;
+    ret = WriteFile(npc->pipe, buf, count, &bytes_written, NULL);
+    if (!ret || !bytes_written)
+        break;
+    bytes_left -= bytes_written;
+    buf += bytes_written;
+  }
+  return ret ? count : -1;
 }
 
 static int rpcrt4_conn_np_close(RpcConnection *Connection)
@@ -361,6 +416,17 @@ static int rpcrt4_conn_np_close(RpcConnection *Connection)
   return 0;
 }
 
+static void rpcrt4_conn_np_cancel_call(RpcConnection *Connection)
+{
+    /* FIXME: implement when named pipe writes use overlapped I/O */
+}
+
+static int rpcrt4_conn_np_wait_for_incoming_data(RpcConnection *Connection)
+{
+    /* FIXME: implement when named pipe writes use overlapped I/O */
+    return -1;
+}
+
 static size_t rpcrt4_ncacn_np_get_top_of_tower(unsigned char *tower_data,
                                                const char *networkaddr,
                                                const char *endpoint)
@@ -373,8 +439,8 @@ static size_t rpcrt4_ncacn_np_get_top_of_tower(unsigned char *tower_data,
 
     TRACE("(%p, %s, %s)\n", tower_data, networkaddr, endpoint);
 
-    networkaddr_size = strlen(networkaddr) + 1;
-    endpoint_size = strlen(endpoint) + 1;
+    networkaddr_size = networkaddr ? strlen(networkaddr) + 1 : 1;
+    endpoint_size = endpoint ? strlen(endpoint) + 1 : 1;
     size = sizeof(*smb_floor) + endpoint_size + sizeof(*nb_floor) + networkaddr_size;
 
     if (!tower_data)
@@ -388,7 +454,10 @@ static size_t rpcrt4_ncacn_np_get_top_of_tower(unsigned char *tower_data,
     smb_floor->protid = EPM_PROTOCOL_SMB;
     smb_floor->count_rhs = endpoint_size;
 
-    memcpy(tower_data, endpoint, endpoint_size);
+    if (endpoint)
+        memcpy(tower_data, endpoint, endpoint_size);
+    else
+        tower_data[0] = 0;
     tower_data += endpoint_size;
 
     nb_floor = (twr_empty_floor_t *)tower_data;
@@ -399,7 +468,10 @@ static size_t rpcrt4_ncacn_np_get_top_of_tower(unsigned char *tower_data,
     nb_floor->protid = EPM_PROTOCOL_NETBIOS;
     nb_floor->count_rhs = networkaddr_size;
 
-    memcpy(tower_data, networkaddr, networkaddr_size);
+    if (networkaddr)
+        memcpy(tower_data, networkaddr, networkaddr_size);
+    else
+        tower_data[0] = 0;
     tower_data += networkaddr_size;
 
     return size;
@@ -544,8 +616,16 @@ static int rpcrt4_protseq_np_wait_for_new_connection(RpcServerProtseq *protseq, 
     
     if (!objs)
         return -1;
-    
-    res = WaitForMultipleObjects(count, objs, FALSE, INFINITE);
+
+    do
+    {
+        /* an alertable wait isn't strictly necessary, but due to our
+         * overlapped I/O implementation in Wine we need to free some memory
+         * by the file user APC being called, even if no completion routine was
+         * specified at the time of starting the async operation */
+        res = WaitForMultipleObjectsEx(count, objs, FALSE, INFINITE, TRUE);
+    } while (res == WAIT_IO_COMPLETION);
+
     if (res == WAIT_OBJECT_0)
         return 0;
     else if (res == WAIT_FAILED)
@@ -648,6 +728,7 @@ typedef struct _RpcConnection_tcp
 {
   RpcConnection common;
   int sock;
+  int cancel_fds[2];
 } RpcConnection_tcp;
 
 static RpcConnection *rpcrt4_conn_tcp_alloc(void)
@@ -657,6 +738,12 @@ static RpcConnection *rpcrt4_conn_tcp_alloc(void)
   if (tcpc == NULL)
     return NULL;
   tcpc->sock = -1;
+  if (socketpair(PF_UNIX, SOCK_STREAM, 0, tcpc->cancel_fds) < 0)
+  {
+    ERR("socketpair() failed: %s\n", strerror(errno));
+    HeapFree(GetProcessHeap(), 0, tcpc);
+    return NULL;
+  }
   return &tcpc->common;
 }
 
@@ -693,6 +780,8 @@ static RPC_STATUS rpcrt4_ncacn_ip_tcp_open(RpcConnection* Connection)
 
   for (ai_cur = ai; ai_cur; ai_cur = ai_cur->ai_next)
   {
+    int val;
+
     if (TRACE_ON(rpc))
     {
       char host[256];
@@ -704,7 +793,7 @@ static RPC_STATUS rpcrt4_ncacn_ip_tcp_open(RpcConnection* Connection)
     }
 
     sock = socket(ai_cur->ai_family, ai_cur->ai_socktype, ai_cur->ai_protocol);
-    if (sock < 0)
+    if (sock == -1)
     {
       WARN("socket() failed: %s\n", strerror(errno));
       continue;
@@ -713,9 +802,15 @@ static RPC_STATUS rpcrt4_ncacn_ip_tcp_open(RpcConnection* Connection)
     if (0>connect(sock, ai_cur->ai_addr, ai_cur->ai_addrlen))
     {
       WARN("connect() failed: %s\n", strerror(errno));
-      close(sock);
+      closesocket(sock);
       continue;
     }
+
+    /* RPC depends on having minimal latency so disable the Nagle algorithm */
+    val = 1;
+    setsockopt(sock, SOL_TCP, TCP_NODELAY, &val, sizeof(val));
+    fcntl(sock, F_SETFL, O_NONBLOCK); /* make socket nonblocking */
+
     tcpc->sock = sock;
 
     freeaddrinfo(ai);
@@ -775,7 +870,7 @@ static RPC_STATUS rpcrt4_protseq_ncacn_ip_tcp_open_endpoint(RpcServerProtseq *pr
         }
 
         sock = socket(ai_cur->ai_family, ai_cur->ai_socktype, ai_cur->ai_protocol);
-        if (sock < 0)
+        if (sock == -1)
         {
             WARN("socket() failed: %s\n", strerror(errno));
             status = RPC_S_CANT_CREATE_ENDPOINT;
@@ -786,7 +881,7 @@ static RPC_STATUS rpcrt4_protseq_ncacn_ip_tcp_open_endpoint(RpcServerProtseq *pr
         if (ret < 0)
         {
             WARN("bind failed: %s\n", strerror(errno));
-            close(sock);
+            closesocket(sock);
             if (errno == EADDRINUSE)
               status = RPC_S_DUPLICATE_ENDPOINT;
             else
@@ -798,7 +893,7 @@ static RPC_STATUS rpcrt4_protseq_ncacn_ip_tcp_open_endpoint(RpcServerProtseq *pr
                                                 endpoint, NULL, NULL, NULL);
         if (create_status != RPC_S_OK)
         {
-            close(sock);
+            closesocket(sock);
             status = create_status;
             continue;
         }
@@ -880,18 +975,69 @@ static int rpcrt4_conn_tcp_read(RpcConnection *Connection,
                                 void *buffer, unsigned int count)
 {
   RpcConnection_tcp *tcpc = (RpcConnection_tcp *) Connection;
-  int r = recv(tcpc->sock, buffer, count, MSG_WAITALL);
-  TRACE("%d %p %u -> %d\n", tcpc->sock, buffer, count, r);
-  return r;
+  int bytes_read = 0;
+  do
+  {
+    int r = recv(tcpc->sock, (char *)buffer + bytes_read, count - bytes_read, 0);
+    if (!r)
+      return -1;
+    else if (r > 0)
+      bytes_read += r;
+    else if (errno != EAGAIN)
+    {
+      WARN("recv() failed: %s\n", strerror(errno));
+      return -1;
+    }
+    else
+    {
+      struct pollfd pfds[2];
+      pfds[0].fd = tcpc->sock;
+      pfds[0].events = POLLIN;
+      pfds[1].fd = tcpc->cancel_fds[0];
+      pfds[1].events = POLLIN;
+      if (poll(pfds, 2, -1 /* infinite */) == -1 && errno != EINTR)
+      {
+        ERR("poll() failed: %s\n", strerror(errno));
+        return -1;
+      }
+      if (pfds[1].revents & POLLIN) /* canceled */
+      {
+        char dummy;
+        read(pfds[1].fd, &dummy, sizeof(dummy));
+        return -1;
+      }
+    }
+  } while (bytes_read != count);
+  TRACE("%d %p %u -> %d\n", tcpc->sock, buffer, count, bytes_read);
+  return bytes_read;
 }
 
 static int rpcrt4_conn_tcp_write(RpcConnection *Connection,
                                  const void *buffer, unsigned int count)
 {
   RpcConnection_tcp *tcpc = (RpcConnection_tcp *) Connection;
-  int r = write(tcpc->sock, buffer, count);
-  TRACE("%d %p %u -> %d\n", tcpc->sock, buffer, count, r);
-  return r;
+  int bytes_written = 0;
+  do
+  {
+    int r = send(tcpc->sock, (const char *)buffer + bytes_written, count - bytes_written, 0);
+    if (r >= 0)
+      bytes_written += r;
+    else if (errno != EAGAIN)
+      return -1;
+    else
+    {
+      struct pollfd pfd;
+      pfd.fd = tcpc->sock;
+      pfd.events = POLLOUT;
+      if (poll(&pfd, 1, -1 /* infinite */) == -1 && errno != EINTR)
+      {
+        ERR("poll() failed: %s\n", strerror(errno));
+        return -1;
+      }
+    }
+  } while (bytes_written != count);
+  TRACE("%d %p %u -> %d\n", tcpc->sock, buffer, count, bytes_written);
+  return bytes_written;
 }
 
 static int rpcrt4_conn_tcp_close(RpcConnection *Connection)
@@ -901,9 +1047,47 @@ static int rpcrt4_conn_tcp_close(RpcConnection *Connection)
   TRACE("%d\n", tcpc->sock);
 
   if (tcpc->sock != -1)
-    close(tcpc->sock);
+    closesocket(tcpc->sock);
   tcpc->sock = -1;
+  close(tcpc->cancel_fds[0]);
+  close(tcpc->cancel_fds[1]);
   return 0;
+}
+
+static void rpcrt4_conn_tcp_cancel_call(RpcConnection *Connection)
+{
+    RpcConnection_tcp *tcpc = (RpcConnection_tcp *) Connection;
+    char dummy = 1;
+
+    TRACE("%p\n", Connection);
+
+    write(tcpc->cancel_fds[1], &dummy, 1);
+}
+
+static int rpcrt4_conn_tcp_wait_for_incoming_data(RpcConnection *Connection)
+{
+    RpcConnection_tcp *tcpc = (RpcConnection_tcp *) Connection;
+    struct pollfd pfds[2];
+
+    TRACE("%p\n", Connection);
+
+    pfds[0].fd = tcpc->sock;
+    pfds[0].events = POLLIN;
+    pfds[1].fd = tcpc->cancel_fds[0];
+    pfds[1].events = POLLIN;
+    if (poll(pfds, 2, -1 /* infinite */) == -1 && errno != EINTR)
+    {
+      ERR("poll() failed: %s\n", strerror(errno));
+      return -1;
+    }
+    if (pfds[1].revents & POLLIN) /* canceled */
+    {
+      char dummy;
+      read(pfds[1].fd, &dummy, sizeof(dummy));
+      return -1;
+    }
+
+    return 0;
 }
 
 static size_t rpcrt4_ncacn_ip_tcp_get_top_of_tower(unsigned char *tower_data,
@@ -1188,6 +1372,8 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_np_read,
     rpcrt4_conn_np_write,
     rpcrt4_conn_np_close,
+    rpcrt4_conn_np_cancel_call,
+    rpcrt4_conn_np_wait_for_incoming_data,
     rpcrt4_ncacn_np_get_top_of_tower,
     rpcrt4_ncacn_np_parse_top_of_tower,
   },
@@ -1199,6 +1385,8 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_np_read,
     rpcrt4_conn_np_write,
     rpcrt4_conn_np_close,
+    rpcrt4_conn_np_cancel_call,
+    rpcrt4_conn_np_wait_for_incoming_data,
     rpcrt4_ncalrpc_get_top_of_tower,
     rpcrt4_ncalrpc_parse_top_of_tower,
   },
@@ -1210,6 +1398,8 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_tcp_read,
     rpcrt4_conn_tcp_write,
     rpcrt4_conn_tcp_close,
+    rpcrt4_conn_tcp_cancel_call,
+    rpcrt4_conn_tcp_wait_for_incoming_data,
     rpcrt4_ncacn_ip_tcp_get_top_of_tower,
     rpcrt4_ncacn_ip_tcp_parse_top_of_tower,
   }
@@ -1280,74 +1470,58 @@ RPC_STATUS RPCRT4_OpenClientConnection(RpcConnection* Connection)
 RPC_STATUS RPCRT4_CloseConnection(RpcConnection* Connection)
 {
   TRACE("(Connection == ^%p)\n", Connection);
+  if (SecIsValidHandle(&Connection->ctx))
+  {
+    DeleteSecurityContext(&Connection->ctx);
+    SecInvalidateHandle(&Connection->ctx);
+  }
   rpcrt4_conn_close(Connection);
   return RPC_S_OK;
 }
 
 RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
     LPCSTR Protseq, LPCSTR NetworkAddr, LPCSTR Endpoint,
-    LPCSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcBinding* Binding)
+    LPCWSTR NetworkOptions, RpcAuthInfo* AuthInfo, RpcQualityOfService *QOS)
 {
   const struct connection_ops *ops;
   RpcConnection* NewConnection;
 
   ops = rpcrt4_get_conn_protseq_ops(Protseq);
   if (!ops)
+  {
+    FIXME("not supported for protseq %s\n", Protseq);
     return RPC_S_PROTSEQ_NOT_SUPPORTED;
+  }
 
   NewConnection = ops->alloc();
   NewConnection->Next = NULL;
+  NewConnection->server_binding = NULL;
   NewConnection->server = server;
   NewConnection->ops = ops;
   NewConnection->NetworkAddr = RPCRT4_strdupA(NetworkAddr);
   NewConnection->Endpoint = RPCRT4_strdupA(Endpoint);
-  NewConnection->Used = Binding;
+  NewConnection->NetworkOptions = RPCRT4_strdupW(NetworkOptions);
   NewConnection->MaxTransmissionSize = RPC_MAX_PACKET_SIZE;
   memset(&NewConnection->ActiveInterface, 0, sizeof(NewConnection->ActiveInterface));
   NewConnection->NextCallId = 1;
 
-  memset(&NewConnection->ctx, 0, sizeof(NewConnection->ctx));
+  SecInvalidateHandle(&NewConnection->ctx);
+  memset(&NewConnection->exp, 0, sizeof(NewConnection->exp));
+  NewConnection->attr = 0;
   if (AuthInfo) RpcAuthInfo_AddRef(AuthInfo);
   NewConnection->AuthInfo = AuthInfo;
+  NewConnection->encryption_auth_len = 0;
+  NewConnection->signature_auth_len = 0;
+  if (QOS) RpcQualityOfService_AddRef(QOS);
+  NewConnection->QOS = QOS;
+
   list_init(&NewConnection->conn_pool_entry);
+  NewConnection->async_state = NULL;
 
   TRACE("connection: %p\n", NewConnection);
   *Connection = NewConnection;
 
   return RPC_S_OK;
-}
-
-RpcConnection *RPCRT4_GetIdleConnection(const RPC_SYNTAX_IDENTIFIER *InterfaceId,
-    const RPC_SYNTAX_IDENTIFIER *TransferSyntax, LPCSTR Protseq, LPCSTR NetworkAddr,
-    LPCSTR Endpoint, RpcAuthInfo* AuthInfo)
-{
-  RpcConnection *Connection;
-  /* try to find a compatible connection from the connection pool */
-  EnterCriticalSection(&connection_pool_cs);
-  LIST_FOR_EACH_ENTRY(Connection, &connection_pool, RpcConnection, conn_pool_entry)
-    if ((Connection->AuthInfo == AuthInfo) &&
-        !memcmp(&Connection->ActiveInterface, InterfaceId,
-           sizeof(RPC_SYNTAX_IDENTIFIER)) &&
-        !strcmp(rpcrt4_conn_get_name(Connection), Protseq) &&
-        !strcmp(Connection->NetworkAddr, NetworkAddr) &&
-        !strcmp(Connection->Endpoint, Endpoint))
-    {
-      list_remove(&Connection->conn_pool_entry);
-      LeaveCriticalSection(&connection_pool_cs);
-      TRACE("got connection from pool %p\n", Connection);
-      return Connection;
-    }
-
-  LeaveCriticalSection(&connection_pool_cs);
-  return NULL;
-}
-
-void RPCRT4_ReleaseIdleConnection(RpcConnection *Connection)
-{
-  assert(!Connection->server);
-  EnterCriticalSection(&connection_pool_cs);
-  list_add_head(&connection_pool, &Connection->conn_pool_entry);
-  LeaveCriticalSection(&connection_pool_cs);
 }
 
 
@@ -1359,7 +1533,7 @@ RPC_STATUS RPCRT4_SpawnConnection(RpcConnection** Connection, RpcConnection* Old
                                 rpcrt4_conn_get_name(OldConnection),
                                 OldConnection->NetworkAddr,
                                 OldConnection->Endpoint, NULL,
-                                OldConnection->AuthInfo, NULL);
+                                OldConnection->AuthInfo, OldConnection->QOS);
   if (err == RPC_S_OK)
     rpcrt4_conn_handoff(OldConnection, *Connection);
   return err;
@@ -1372,7 +1546,13 @@ RPC_STATUS RPCRT4_DestroyConnection(RpcConnection* Connection)
   RPCRT4_CloseConnection(Connection);
   RPCRT4_strfree(Connection->Endpoint);
   RPCRT4_strfree(Connection->NetworkAddr);
+  HeapFree(GetProcessHeap(), 0, Connection->NetworkOptions);
   if (Connection->AuthInfo) RpcAuthInfo_Release(Connection->AuthInfo);
+  if (Connection->QOS) RpcQualityOfService_Release(Connection->QOS);
+
+  /* server-only */
+  if (Connection->server_binding) RPCRT4_DestroyBinding(Connection->server_binding);
+
   HeapFree(GetProcessHeap(), 0, Connection);
   return RPC_S_OK;
 }

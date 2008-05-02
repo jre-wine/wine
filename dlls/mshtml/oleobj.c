@@ -66,6 +66,7 @@ static HRESULT WINAPI OleObject_SetClientSite(IOleObject *iface, IOleClientSite 
     HTMLDocument *This = OLEOBJ_THIS(iface);
     IDocHostUIHandler *pDocHostUIHandler = NULL;
     IOleCommandTarget *cmdtrg = NULL;
+    VARIANT silent;
     HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, pClientSite);
@@ -84,6 +85,8 @@ static HRESULT WINAPI OleObject_SetClientSite(IOleObject *iface, IOleClientSite 
         This->hostui = NULL;
     }
 
+    memset(&This->hostinfo, 0, sizeof(DOCHOSTUIINFO));
+
     if(!pClientSite)
         return S_OK;
 
@@ -96,11 +99,12 @@ static HRESULT WINAPI OleObject_SetClientSite(IOleObject *iface, IOleClientSite 
         memset(&hostinfo, 0, sizeof(DOCHOSTUIINFO));
         hostinfo.cbSize = sizeof(DOCHOSTUIINFO);
         hres = IDocHostUIHandler_GetHostInfo(pDocHostUIHandler, &hostinfo);
-        if(SUCCEEDED(hres))
-            /* FIXME: use hostinfo */
+        if(SUCCEEDED(hres)) {
             TRACE("hostinfo = {%u %08x %08x %s %s}\n",
                     hostinfo.cbSize, hostinfo.dwFlags, hostinfo.dwDoubleClick,
                     debugstr_w(hostinfo.pchHostCss), debugstr_w(hostinfo.pchHostNS));
+            This->hostinfo = hostinfo;
+        }
 
         if(!This->has_key_path) {
             hres = IDocHostUIHandler_GetOptionKeyPath(pDocHostUIHandler, &key_path, 0);
@@ -168,7 +172,15 @@ static HRESULT WINAPI OleObject_SetClientSite(IOleObject *iface, IOleClientSite 
         IOleControl_OnAmbientPropertyChange(CONTROL(This), DISPID_AMBIENT_USERMODE);
 
     IOleControl_OnAmbientPropertyChange(CONTROL(This), DISPID_AMBIENT_OFFLINEIFNOTCONNECTED); 
-    IOleControl_OnAmbientPropertyChange(CONTROL(This), DISPID_AMBIENT_SILENT);
+
+    hres = get_client_disp_property(This->client, DISPID_AMBIENT_SILENT, &silent);
+    if(SUCCEEDED(hres)) {
+        if(V_VT(&silent) != VT_BOOL)
+            WARN("V_VT(silent) = %d\n", V_VT(&silent));
+        else if(V_BOOL(&silent))
+            FIXME("silent == true\n");
+    }
+
     IOleControl_OnAmbientPropertyChange(CONTROL(This), DISPID_AMBIENT_USERAGENT);
     IOleControl_OnAmbientPropertyChange(CONTROL(This), DISPID_AMBIENT_PALETTE);
 
@@ -273,7 +285,7 @@ static HRESULT WINAPI OleObject_DoVerb(IOleObject *iface, LONG iVerb, LPMSG lpms
         if(SUCCEEDED(hres)) {
             if(lprcPosRect) {
                 RECT rect; /* We need to pass rect as not const pointer */
-                memcpy(&rect, lprcPosRect, sizeof(RECT));
+                rect = *lprcPosRect;
                 IOleDocumentView_SetRect(DOCVIEW(This), &rect);
             }
             IOleDocumentView_Show(DOCVIEW(This), TRUE);
@@ -313,7 +325,7 @@ static HRESULT WINAPI OleObject_GetUserClassID(IOleObject *iface, CLSID *pClsid)
     if(!pClsid)
         return E_INVALIDARG;
 
-    memcpy(pClsid, &CLSID_HTMLDocument, sizeof(GUID));
+    *pClsid = CLSID_HTMLDocument;
     return S_OK;
 }
 
@@ -664,6 +676,46 @@ static const IOleControlVtbl OleControlVtbl = {
     OleControl_FreezeEvents
 };
 
+/**********************************************************
+ * ICustomDoc implementation
+ */
+
+#define CUSTOMDOC_THIS(iface) DEFINE_THIS(HTMLDocument, CustomDoc, iface)
+
+static HRESULT WINAPI CustomDoc_QueryInterface(ICustomDoc *iface, REFIID riid, void **ppv)
+{
+    HTMLDocument *This = CUSTOMDOC_THIS(iface);
+    return IHTMLDocument2_QueryInterface(HTMLDOC(This), riid, ppv);
+}
+
+static ULONG WINAPI CustomDoc_AddRef(ICustomDoc *iface)
+{
+    HTMLDocument *This = CUSTOMDOC_THIS(iface);
+    return IHTMLDocument2_AddRef(HTMLDOC(This));
+}
+
+static ULONG WINAPI CustomDoc_Release(ICustomDoc *iface)
+{
+    HTMLDocument *This = CUSTOMDOC_THIS(iface);
+    return IHTMLDocument_Release(HTMLDOC(This));
+}
+
+static HRESULT WINAPI CustomDoc_SetUIHandler(ICustomDoc *iface, IDocHostUIHandler *pUIHandler)
+{
+    HTMLDocument *This = CUSTOMDOC_THIS(iface);
+    FIXME("(%p)->(%p)\n", This, pUIHandler);
+    return E_NOTIMPL;
+}
+
+#undef CUSTOMDOC_THIS
+
+static const ICustomDocVtbl CustomDocVtbl = {
+    CustomDoc_QueryInterface,
+    CustomDoc_AddRef,
+    CustomDoc_Release,
+    CustomDoc_SetUIHandler
+};
+
 void HTMLDocument_LockContainer(HTMLDocument *This, BOOL fLock)
 {
     IOleContainer *container;
@@ -685,6 +737,7 @@ void HTMLDocument_OleObj_Init(HTMLDocument *This)
     This->lpOleObjectVtbl = &OleObjectVtbl;
     This->lpOleDocumentVtbl = &OleDocumentVtbl;
     This->lpOleControlVtbl = &OleControlVtbl;
+    This->lpCustomDocVtbl = &CustomDocVtbl;
 
     This->usermode = UNKNOWN_USERMODE;
 
@@ -693,4 +746,6 @@ void HTMLDocument_OleObj_Init(HTMLDocument *This)
 
     This->has_key_path = FALSE;
     This->container_locked = FALSE;
+
+    memset(&This->hostinfo, 0, sizeof(DOCHOSTUIINFO));
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2005-2006 Jacek Caban for CodeWeavers
+ * Copyright 2005-2007 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -42,6 +42,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 #define NS_STRINGSTREAM_CONTRACTID "@mozilla.org/io/string-input-stream;1"
 #define NS_COMMANDPARAMS_CONTRACTID "@mozilla.org/embedcomp/command-params;1"
 #define NS_HTMLSERIALIZER_CONTRACTID "@mozilla.org/layout/contentserializer;1?mimetype=text/html"
+#define NS_EDITORCONTROLLER_CONTRACTID "@mozilla.org/editor/editorcontroller;1"
+#define NS_ARRAY_CONTRACTID "@mozilla.org/array;1"
+#define NS_VARIANT_CONTRACTID "@mozilla.org/variant;1"
+#define NS_PREFERENCES_CONTRACTID "@mozilla.org/preferences;1"
 
 #define APPSTARTUP_TOPIC "app-startup"
 
@@ -77,6 +81,8 @@ static const WCHAR wszNsContainer[] = {'N','s','C','o','n','t','a','i','n','e','
 
 static ATOM nscontainer_class;
 
+#define WM_RESETFOCUS_HACK WM_USER+600
+
 static LRESULT WINAPI nsembed_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     NSContainer *This;
@@ -92,13 +98,30 @@ static LRESULT WINAPI nsembed_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     }
 
     switch(msg) {
-        case WM_SIZE:
-            TRACE("(%p)->(WM_SIZE)\n", This);
+    case WM_SIZE:
+        TRACE("(%p)->(WM_SIZE)\n", This);
 
-            nsres = nsIBaseWindow_SetSize(This->window,
-                    LOWORD(lParam), HIWORD(lParam), TRUE);
-            if(NS_FAILED(nsres))
-                WARN("SetSize failed: %08x\n", nsres);
+        nsres = nsIBaseWindow_SetSize(This->window,
+                LOWORD(lParam), HIWORD(lParam), TRUE);
+        if(NS_FAILED(nsres))
+            WARN("SetSize failed: %08x\n", nsres);
+        break;
+
+    case WM_RESETFOCUS_HACK:
+        /*
+         * FIXME
+         * Gecko grabs focus in edit mode and some apps don't like it.
+         * We should somehow prevent grabbing focus.
+         */
+
+        TRACE("WM_RESETFOCUS_HACK\n");
+
+        if(This->reset_focus) {
+            SetFocus(This->reset_focus);
+            This->reset_focus = NULL;
+            if(This->doc)
+                This->doc->focus = FALSE;
+        }
     }
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -119,7 +142,7 @@ static void register_nscontainer_class(void)
     nscontainer_class = RegisterClassExW(&wndclass);
 }
 
-static BOOL load_xpcom(PRUnichar *gre_path)
+static BOOL load_xpcom(const PRUnichar *gre_path)
 {
     WCHAR path_env[MAX_PATH];
     int len;
@@ -143,7 +166,7 @@ static BOOL load_xpcom(PRUnichar *gre_path)
     }
 
 #define NS_DLSYM(func) \
-    func = (typeof(func))GetProcAddress(hXPCOM, #func); \
+    func = (void *)GetProcAddress(hXPCOM, #func); \
     if(!func) \
         ERR("Could not GetProcAddress(" #func ") failed\n")
 
@@ -165,81 +188,7 @@ static BOOL load_xpcom(PRUnichar *gre_path)
     return TRUE;
 }
 
-static BOOL load_mozilla(PRUnichar *gre_path)
-{
-    DWORD res, type, i, size = MAX_PATH;
-    HKEY mozilla_key, hkey;
-    WCHAR key_name[100];
-    BOOL ret = FALSE;
-
-    static const WCHAR wszGreKey[] =
-        {'S','o','f','t','w','a','r','e','\\',
-            'm','o','z','i','l','l','a','.','o','r','g','\\',
-                'G','R','E',0};
-
-    static const WCHAR wszGreHome[] = {'G','r','e','H','o','m','e',0};
-
-    res = RegOpenKeyW(HKEY_LOCAL_MACHINE, wszGreKey, &mozilla_key);
-    if(res != ERROR_SUCCESS) {
-        TRACE("Could not open key %s\n", debugstr_w(wszGreKey));
-        return FALSE;
-    }
-
-    for(i=0; !ret && RegEnumKeyW(mozilla_key, i, key_name, sizeof(key_name)/sizeof(WCHAR)) == ERROR_SUCCESS; i++) {
-        RegOpenKeyW(mozilla_key, key_name, &hkey);
-        res = RegQueryValueExW(hkey, wszGreHome, NULL, &type, (LPBYTE)gre_path, &size);
-        if(res == ERROR_SUCCESS)
-            ret = TRUE;
-        RegCloseKey(hkey);
-    }
-
-    RegCloseKey(mozilla_key);
-    return ret ? load_xpcom(gre_path) : FALSE;
-}
-
-static BOOL load_mozctl(PRUnichar *gre_path)
-{
-    HKEY hkey;
-    DWORD res, type, size = MAX_PATH;
-
-    static const WCHAR wszMozCtlKey[] =
-        {'S','o','f','t','w','a','r','e','\\','M','o','z','i','l','l','a',0};
-    static const WCHAR wszBinDirectoryPath[] =
-        {'B','i','n','D','i','r','e','c','t','o','r','y','P','a','t','h',0};
-    static const WCHAR wszMozCtlClsidKey[] =
-        {'C','L','S','I','D','\\',
-         '{','1','3','3','9','B','5','4','C','-','3','4','5','3','-','1','1','D','2',
-         '-','9','3','B','9','-','0','0','0','0','0','0','0','0','0','0','0','0','}','\\',
-         'I','n','p','r','o','c','S','e','r','v','e','r','3','2',0};
-
-    res = RegOpenKeyW(HKEY_LOCAL_MACHINE, wszMozCtlKey, &hkey);
-    if(res == ERROR_SUCCESS) {
-        res = RegQueryValueExW(hkey, wszBinDirectoryPath, NULL, &type, (LPBYTE)gre_path, &size);
-        if(res == ERROR_SUCCESS)
-            return load_xpcom(gre_path);
-        else
-            ERR("Could not get value %s\n", debugstr_w(wszBinDirectoryPath));
-    }
-
-    res = RegOpenKeyW(HKEY_CLASSES_ROOT, wszMozCtlClsidKey, &hkey);
-    if(res == ERROR_SUCCESS) {
-        res = RegQueryValueExW(hkey, NULL, NULL, &type, (LPBYTE)gre_path, &size);
-        if(res == ERROR_SUCCESS) {
-            WCHAR *ptr;
-            if((ptr = strrchrW(gre_path, '\\')))
-                ptr[1] = 0;
-            return load_xpcom(gre_path);
-        }else {
-            ERR("Could not get value of %s\n", debugstr_w(wszMozCtlClsidKey));
-        }
-    }
-
-    TRACE("Could not find Mozilla ActiveX Control\n");
-
-    return FALSE;
-}
-
-static void check_version(LPCWSTR gre_path)
+static BOOL check_version(LPCWSTR gre_path, const char *version_string)
 {
     WCHAR file_name[MAX_PATH];
     char version[128];
@@ -254,54 +203,126 @@ static void check_version(LPCWSTR gre_path)
     hfile = CreateFileW(file_name, GENERIC_READ, FILE_SHARE_READ, NULL,
                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if(hfile == INVALID_HANDLE_VALUE) {
-        TRACE("unknown version\n");
-        return;
+        ERR("Could not open VERSION file\n");
+        return FALSE;
     }
 
     ReadFile(hfile, version, sizeof(version), &read, NULL);
     version[read] = 0;
+    CloseHandle(hfile);
 
     TRACE("%s\n", debugstr_a(version));
 
-    CloseHandle(hfile);
+    if(strcmp(version, version_string)) {
+        ERR("Unexpected version %s, expected %s\n", debugstr_a(version),
+            debugstr_a(version_string));
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static BOOL load_wine_gecko_v(PRUnichar *gre_path, HKEY mshtml_key,
+        const char *version, const char *version_string)
+{
+    DWORD res, type, size = MAX_PATH;
+    HKEY hkey = mshtml_key;
+
+    static const WCHAR wszGeckoPath[] =
+        {'G','e','c','k','o','P','a','t','h',0};
+
+    if(version) {
+        /* @@ Wine registry key: HKCU\Software\Wine\MSHTML\<version> */
+        res = RegOpenKeyA(mshtml_key, version, &hkey);
+        if(res != ERROR_SUCCESS)
+            return FALSE;
+    }
+
+    res = RegQueryValueExW(hkey, wszGeckoPath, NULL, &type, (LPBYTE)gre_path, &size);
+    if(hkey != mshtml_key)
+        RegCloseKey(hkey);
+    if(res != ERROR_SUCCESS || type != REG_SZ)
+        return FALSE;
+
+    if(!check_version(gre_path, version_string))
+        return FALSE;
+
+    return load_xpcom(gre_path);
 }
 
 static BOOL load_wine_gecko(PRUnichar *gre_path)
 {
     HKEY hkey;
-    DWORD res, type, size = MAX_PATH;
+    DWORD res;
+    BOOL ret;
 
     static const WCHAR wszMshtmlKey[] = {
         'S','o','f','t','w','a','r','e','\\','W','i','n','e',
         '\\','M','S','H','T','M','L',0};
-    static const WCHAR wszGeckoPath[] =
-        {'G','e','c','k','o','P','a','t','h',0};
 
     /* @@ Wine registry key: HKCU\Software\Wine\MSHTML */
     res = RegOpenKeyW(HKEY_CURRENT_USER, wszMshtmlKey, &hkey);
     if(res != ERROR_SUCCESS)
         return FALSE;
 
-    res = RegQueryValueExW(hkey, wszGeckoPath, NULL, &type, (LPBYTE)gre_path, &size);
+    ret = load_wine_gecko_v(gre_path, hkey, GECKO_VERSION, GECKO_VERSION_STRING)
+        || load_wine_gecko_v(gre_path, hkey, "0.0.1", "Wine Gecko 0.0.1\n")
+        || load_wine_gecko_v(gre_path, hkey, NULL, "Wine Gecko 0.0.1\n");
+
+    RegCloseKey(hkey);
+    return ret;
+}
+
+static void set_lang(nsIPrefBranch *pref)
+{
+    char langs[100];
+    DWORD res, size, type;
+    HKEY hkey;
+    nsresult nsres;
+
+    static const WCHAR international_keyW[] =
+        {'S','o','f','t','w','a','r','e',
+         '\\','M','i','c','r','o','s','o','f','t',
+         '\\','I','n','t','e','r','n','e','t',' ','E','x','p','l','o','r','e','r',
+         '\\','I','n','t','e','r','n','a','t','i','o','n','a','l',0};
+
+    res = RegOpenKeyW(HKEY_CURRENT_USER, international_keyW, &hkey);
+    if(res != ERROR_SUCCESS)
+        return;
+
+    size = sizeof(langs);
+    res = RegQueryValueExA(hkey, "AcceptLanguage", 0, &type, (LPBYTE)langs, &size);
+    RegCloseKey(hkey);
     if(res != ERROR_SUCCESS || type != REG_SZ)
-        return FALSE;
+        return;
 
-    if(TRACE_ON(mshtml))
-        check_version(gre_path);
+    TRACE("Setting lang %s\n", debugstr_a(langs));
 
-    return load_xpcom(gre_path);
+    nsres = nsIPrefBranch_SetCharPref(pref, "intl.accept_languages", langs);
+    if(NS_FAILED(nsres))
+        ERR("SetCharPref failed: %08x\n", nsres);
+}
+
+static void set_bool_pref(nsIPrefBranch *pref, const char *pref_name, BOOL val)
+{
+    nsresult nsres;
+
+    nsres = nsIPrefBranch_SetBoolPref(pref, pref_name, val);
+    if(NS_FAILED(nsres))
+        ERR("Could not set pref %s\n", debugstr_a(pref_name));
 }
 
 static void set_profile(void)
 {
+    nsIPrefBranch *pref;
     nsIProfile *profile;
     PRBool exists = FALSE;
     nsresult nsres;
 
     static const WCHAR wszMSHTML[] = {'M','S','H','T','M','L',0};
 
-    nsres = nsIServiceManager_GetServiceByContactID(pServMgr, NS_PROFILE_CONTRACTID,
-                                         &IID_nsIProfile, (void**)&profile);
+    nsres = nsIServiceManager_GetServiceByContractID(pServMgr, NS_PROFILE_CONTRACTID,
+            &IID_nsIProfile, (void**)&profile);
     if(NS_FAILED(nsres)) {
         ERR("Could not get profile service: %08x\n", nsres);
         return;
@@ -319,32 +340,28 @@ static void set_profile(void)
         ERR("SetCurrentProfile failed: %08x\n", nsres);
 
     nsIProfile_Release(profile);
+
+    nsres = nsIServiceManager_GetServiceByContractID(pServMgr, NS_PREFERENCES_CONTRACTID,
+            &IID_nsIPrefBranch, (void**)&pref);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get preference service: %08x\n", nsres);
+        return;
+    }
+
+    set_lang(pref);
+    set_bool_pref(pref, "security.warn_entering_secure", FALSE);
+    set_bool_pref(pref, "security.warn_submit_insecure", FALSE);
+
+    nsIPrefBranch_Release(pref);
 }
 
-static BOOL load_gecko(void)
+static BOOL init_xpcom(const PRUnichar *gre_path)
 {
     nsresult nsres;
     nsIObserver *pStartNotif;
     nsIComponentRegistrar *registrar = NULL;
     nsAString path;
     nsIFile *gre_dir;
-    PRUnichar gre_path[MAX_PATH];
-
-    static BOOL tried_load = FALSE;
-
-    TRACE("()\n");
-
-    if(tried_load)
-        return pCompMgr != NULL;
-    tried_load = TRUE;
-
-    if(!load_wine_gecko(gre_path) && !load_mozctl(gre_path) && !load_mozilla(gre_path)) {
-        install_wine_gecko();
-        if(!load_wine_gecko(gre_path)) {
-            MESSAGE("Could not load Mozilla. HTML rendering will be disabled.\n");
-            return FALSE;
-        }
-    }
 
     nsAString_Init(&path, gre_path);
     nsres = NS_NewLocalFile(&path, FALSE, &gre_dir);
@@ -408,6 +425,47 @@ static BOOL load_gecko(void)
     return TRUE;
 }
 
+static CRITICAL_SECTION cs_load_gecko;
+static CRITICAL_SECTION_DEBUG cs_load_gecko_dbg =
+{
+    0, 0, &cs_load_gecko,
+    { &cs_load_gecko_dbg.ProcessLocksList, &cs_load_gecko_dbg.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": load_gecko") }
+};
+static CRITICAL_SECTION cs_load_gecko = { &cs_load_gecko_dbg, -1, 0, 0, 0, 0 };
+
+BOOL load_gecko(BOOL silent)
+{
+    PRUnichar gre_path[MAX_PATH];
+    BOOL ret = FALSE;
+
+    static LONG loading_thread;
+
+    TRACE("()\n");
+
+    /* load_gecko may be called recursively */
+    if(loading_thread == GetCurrentThreadId())
+        return pCompMgr != NULL;
+
+    EnterCriticalSection(&cs_load_gecko);
+
+    if(!loading_thread) {
+        loading_thread = GetCurrentThreadId();
+
+        if(load_wine_gecko(gre_path)
+           || (install_wine_gecko(silent) && load_wine_gecko(gre_path)))
+            ret = init_xpcom(gre_path);
+        else
+           MESSAGE("Could not load Mozilla. HTML rendering will be disabled.\n");
+    }else {
+        ret = pCompMgr != NULL;
+    }
+
+    LeaveCriticalSection(&cs_load_gecko);
+
+    return ret;
+}
+
 void *nsalloc(size_t size)
 {
     return nsIMemory_Alloc(nsmem, size);
@@ -422,12 +480,17 @@ void nsACString_Init(nsACString *str, const char *data)
 {
     NS_CStringContainerInit(str);
     if(data)
-        NS_CStringSetData(str, data, PR_UINT32_MAX);
+        nsACString_SetData(str, data);
 }
 
-PRUint32 nsACString_GetData(const nsACString *str, const char **data, PRBool *termited)
+void nsACString_SetData(nsACString *str, const char *data)
 {
-    return NS_CStringGetData(str, data, termited);
+    NS_CStringSetData(str, data, PR_UINT32_MAX);
+}
+
+PRUint32 nsACString_GetData(const nsACString *str, const char **data)
+{
+    return NS_CStringGetData(str, data, NULL);
 }
 
 void nsACString_Finish(nsACString *str)
@@ -442,9 +505,9 @@ void nsAString_Init(nsAString *str, const PRUnichar *data)
         NS_StringSetData(str, data, PR_UINT32_MAX);
 }
 
-PRUint32 nsAString_GetData(const nsAString *str, const PRUnichar **data, PRBool *termited)
+PRUint32 nsAString_GetData(const nsAString *str, const PRUnichar **data)
 {
-    return NS_StringGetData(str, data, termited);
+    return NS_StringGetData(str, data, NULL);
 }
 
 void nsAString_Finish(nsAString *str)
@@ -478,6 +541,44 @@ nsIInputStream *create_nsstream(const char *data, PRInt32 data_len)
     return (nsIInputStream*)ret;
 }
 
+nsIMutableArray *create_nsarray(void)
+{
+    nsIMutableArray *ret;
+    nsresult nsres;
+
+    if(!pCompMgr)
+        return NULL;
+
+    nsres = nsIComponentManager_CreateInstanceByContractID(pCompMgr,
+            NS_ARRAY_CONTRACTID, NULL, &IID_nsIMutableArray,
+            (void**)&ret);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIArray: %08x\n", nsres);
+        return NULL;
+    }
+
+    return ret;
+}
+
+nsIWritableVariant *create_nsvariant(void)
+{
+    nsIWritableVariant *ret;
+    nsresult nsres;
+
+    if(!pCompMgr)
+        return NULL;
+
+    nsres = nsIComponentManager_CreateInstanceByContractID(pCompMgr,
+            NS_VARIANT_CONTRACTID, NULL, &IID_nsIWritableVariant,
+            (void**)&ret);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIWritableVariant: %08x\n", nsres);
+        return NULL;
+    }
+
+    return ret;
+}
+
 nsICommandParams *create_nscommand_params(void)
 {
     nsICommandParams *ret = NULL;
@@ -493,6 +594,21 @@ nsICommandParams *create_nscommand_params(void)
         ERR("Could not get nsICommandParams\n");
 
     return ret;
+}
+
+nsresult get_nsinterface(nsISupports *iface, REFIID riid, void **ppv)
+{
+    nsIInterfaceRequestor *iface_req;
+    nsresult nsres;
+
+    nsres = nsISupports_QueryInterface(iface, &IID_nsIInterfaceRequestor, (void**)&iface_req);
+    if(NS_FAILED(nsres))
+        return nsres;
+
+    nsres = nsIInterfaceRequestor_GetInterface(iface_req, riid, ppv);
+    nsIInterfaceRequestor_Release(iface_req);
+
+    return nsres;
 }
 
 static void nsnode_to_nsstring_rec(nsIContentSerializer *serializer, nsIDOMNode *nsnode, nsAString *str)
@@ -525,12 +641,21 @@ static void nsnode_to_nsstring_rec(nsIContentSerializer *serializer, nsIDOMNode 
         nsIDOMText_Release(nstext);
         break;
     }
+    case COMMENT_NODE: {
+        nsIDOMComment *nscomment;
+        nsres = nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMComment, (void**)&nscomment);
+        nsres = nsIContentSerializer_AppendComment(serializer, nscomment, 0, -1, str);
+        break;
+    }
     case DOCUMENT_NODE: {
         nsIDOMDocument *nsdoc;
         nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMDocument, (void**)&nsdoc);
         nsIContentSerializer_AppendDocumentStart(serializer, nsdoc, str);
         nsIDOMDocument_Release(nsdoc);
+        break;
     }
+    case DOCUMENT_FRAGMENT_NODE:
+        break;
     default:
         FIXME("Unhandled type %u\n", type);
     }
@@ -592,7 +717,93 @@ void nsnode_to_nsstring(nsIDOMNode *nsdoc, nsAString *str)
     nsIContentSerializer_Release(serializer);
 }
 
-void close_gecko()
+void get_editor_controller(NSContainer *This)
+{
+    nsIEditingSession *editing_session = NULL;
+    nsIControllerContext *ctrlctx;
+    nsresult nsres;
+
+    if(This->editor) {
+        nsIEditor_Release(This->editor);
+        This->editor = NULL;
+    }
+
+    if(This->editor_controller) {
+        nsIController_Release(This->editor_controller);
+        This->editor_controller = NULL;
+    }
+
+    nsres = get_nsinterface((nsISupports*)This->webbrowser, &IID_nsIEditingSession,
+            (void**)&editing_session);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIEditingSession: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIEditingSession_GetEditorForWindow(editing_session,
+            This->doc->window->nswindow, &This->editor);
+    nsIEditingSession_Release(editing_session);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get editor: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIComponentManager_CreateInstanceByContractID(pCompMgr,
+            NS_EDITORCONTROLLER_CONTRACTID, NULL, &IID_nsIControllerContext, (void**)&ctrlctx);
+    if(NS_SUCCEEDED(nsres)) {
+        nsres = nsIControllerContext_SetCommandContext(ctrlctx, (nsISupports *)This->editor);
+        if(NS_FAILED(nsres))
+            ERR("SetCommandContext failed: %08x\n", nsres);
+        nsres = nsIControllerContext_QueryInterface(ctrlctx, &IID_nsIController,
+                (void**)&This->editor_controller);
+        nsIControllerContext_Release(ctrlctx);
+        if(NS_FAILED(nsres))
+            ERR("Could not get nsIController interface: %08x\n", nsres);
+    }else {
+        ERR("Could not create edit controller: %08x\n", nsres);
+    }
+}
+
+void set_ns_editmode(NSContainer *This)
+{
+    nsIEditingSession *editing_session = NULL;
+    nsIURIContentListener *listener = NULL;
+    nsIDOMWindow *dom_window = NULL;
+    nsresult nsres;
+
+    nsres = get_nsinterface((nsISupports*)This->webbrowser, &IID_nsIEditingSession,
+            (void**)&editing_session);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIEditingSession: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIWebBrowser_GetContentDOMWindow(This->webbrowser, &dom_window);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get content DOM window: %08x\n", nsres);
+        nsIEditingSession_Release(editing_session);
+        return;
+    }
+
+    nsres = nsIEditingSession_MakeWindowEditable(editing_session, dom_window, NULL, FALSE);
+    nsIEditingSession_Release(editing_session);
+    nsIDOMWindow_Release(dom_window);
+    if(NS_FAILED(nsres)) {
+        ERR("MakeWindowEditable failed: %08x\n", nsres);
+        return;
+    }
+
+    /* MakeWindowEditable changes WebBrowser's parent URI content listener.
+     * It seams to be a bug in Gecko. To workaround it we set our content
+     * listener again and Gecko's one as its parent.
+     */
+    nsIWebBrowser_GetParentURIContentListener(This->webbrowser, &listener);
+    nsIURIContentListener_SetParentContentListener(NSURICL(This), listener);
+    nsIURIContentListener_Release(listener);
+    nsIWebBrowser_SetParentURIContentListener(This->webbrowser, NSURICL(This));
+}
+
+void close_gecko(void)
 {
     TRACE("()\n");
 
@@ -679,7 +890,7 @@ static nsrefcnt NSAPI nsWebBrowserChrome_Release(nsIWebBrowserChrome *iface)
     if(!ref) {
         if(This->parent)
             nsIWebBrowserChrome_Release(NSWBCHROME(This->parent));
-        mshtml_free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -859,7 +1070,7 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
         FIXME("aContextFlags=%08x\n", aContextFlags);
     };
 
-    HTMLDocument_ShowContextMenu(This->doc, dwID, &pt);
+    show_context_menu(This->doc, dwID, &pt, (IDispatch*)HTMLDOMNODE(get_node(This->doc, aNode)));
 
     return NS_OK;
 }
@@ -909,7 +1120,7 @@ static nsresult NSAPI nsURIContentListener_OnStartURIOpen(nsIURIContentListener 
 
     nsACString_Init(&spec_str, NULL);
     nsIURI_GetSpec(aURI, &spec_str);
-    nsACString_GetData(&spec_str, &spec, NULL);
+    nsACString_GetData(&spec_str, &spec);
 
     TRACE("(%p)->(%p(%s) %p)\n", This, aURI, debugstr_a(spec), _retval);
 
@@ -922,22 +1133,16 @@ static nsresult NSAPI nsURIContentListener_OnStartURIOpen(nsIURIContentListener 
     }
 
     nsIWineURI_SetNSContainer(wine_uri, This);
+    nsIWineURI_SetIsDocumentURI(wine_uri, TRUE);
 
     if(This->bscallback && This->bscallback->mon) {
-        LPWSTR url = NULL;
+        LPWSTR wine_url;
         HRESULT hres;
 
-        hres = IMoniker_GetDisplayName(This->bscallback->mon, NULL, 0, &url);
+        hres = IMoniker_GetDisplayName(This->bscallback->mon, NULL, 0, &wine_url);
         if(SUCCEEDED(hres)) {
-            IMoniker *mon = NULL;
-
-            hres = CreateURLMoniker(NULL, url, &mon);
-            if(SUCCEEDED(hres)) {
-                nsIWineURI_SetMoniker(wine_uri, mon);
-                IMoniker_Release(mon);
-            }else {
-                WARN("CreateURLMoniker failed: %08x\n", hres);
-            }
+            nsIWineURI_SetWineURL(wine_uri, wine_url);
+            CoTaskMemFree(wine_url);
         }else {
             WARN("GetDisplayName failed: %08x\n", hres);
         }
@@ -1115,24 +1320,34 @@ static nsresult NSAPI nsEmbeddingSiteWindow_GetDimensions(nsIEmbeddingSiteWindow
 static nsresult NSAPI nsEmbeddingSiteWindow_SetFocus(nsIEmbeddingSiteWindow *iface)
 {
     NSContainer *This = NSEMBWNDS_THIS(iface);
-    WARN("(%p)\n", This);
-    return NS_ERROR_NOT_IMPLEMENTED;
+
+    TRACE("(%p)\n", This);
+
+    if(This->reset_focus)
+        PostMessageW(This->hwnd, WM_RESETFOCUS_HACK, 0, 0);
+
+    return nsIBaseWindow_SetFocus(This->window);
 }
 
 static nsresult NSAPI nsEmbeddingSiteWindow_GetVisibility(nsIEmbeddingSiteWindow *iface,
         PRBool *aVisibility)
 {
     NSContainer *This = NSEMBWNDS_THIS(iface);
-    WARN("(%p)->(%p)\n", This, aVisibility);
-    return NS_ERROR_NOT_IMPLEMENTED;
+
+    TRACE("(%p)->(%p)\n", This, aVisibility);
+
+    *aVisibility = This->doc && This->doc->hwnd && IsWindowVisible(This->doc->hwnd);
+    return NS_OK;
 }
 
 static nsresult NSAPI nsEmbeddingSiteWindow_SetVisibility(nsIEmbeddingSiteWindow *iface,
         PRBool aVisibility)
 {
     NSContainer *This = NSEMBWNDS_THIS(iface);
-    WARN("(%p)->(%x)\n", This, aVisibility);
-    return NS_ERROR_NOT_IMPLEMENTED;
+
+    TRACE("(%p)->(%x)\n", This, aVisibility);
+
+    return NS_OK;
 }
 
 static nsresult NSAPI nsEmbeddingSiteWindow_GetTitle(nsIEmbeddingSiteWindow *iface,
@@ -1341,7 +1556,7 @@ static nsresult NSAPI nsSupportsWeakReference_GetWeakReference(nsISupportsWeakRe
 
 #undef NSWEAKREF_THIS
 
-const nsISupportsWeakReferenceVtbl nsSupportsWeakReferenceVtbl = {
+static const nsISupportsWeakReferenceVtbl nsSupportsWeakReferenceVtbl = {
     nsSupportsWeakReference_QueryInterface,
     nsSupportsWeakReference_AddRef,
     nsSupportsWeakReference_Release,
@@ -1352,13 +1567,14 @@ const nsISupportsWeakReferenceVtbl nsSupportsWeakReferenceVtbl = {
 NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
 {
     nsIWebBrowserSetup *wbsetup;
+    nsIScrollable *scrollable;
     NSContainer *ret;
     nsresult nsres;
 
-    if(!load_gecko())
+    if(!load_gecko(FALSE))
         return NULL;
 
-    ret = mshtml_alloc(sizeof(NSContainer));
+    ret = heap_alloc(sizeof(NSContainer));
 
     ret->lpWebBrowserChromeVtbl      = &nsWebBrowserChromeVtbl;
     ret->lpContextMenuListenerVtbl   = &nsContextMenuListenerVtbl;
@@ -1369,11 +1585,13 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
     ret->lpWeakReferenceVtbl         = &nsWeakReferenceVtbl;
     ret->lpSupportsWeakReferenceVtbl = &nsSupportsWeakReferenceVtbl;
 
-
     ret->doc = doc;
     ret->ref = 1;
     ret->bscallback = NULL;
     ret->content_listener = NULL;
+    ret->editor_controller = NULL;
+    ret->editor = NULL;
+    ret->reset_focus = NULL;
 
     if(parent)
         nsIWebBrowserChrome_AddRef(NSWBCHROME(parent));
@@ -1396,7 +1614,7 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
     nsres = nsIWebBrowser_QueryInterface(ret->webbrowser, &IID_nsIWebBrowserSetup,
                                          (void**)&wbsetup);
     if(NS_SUCCEEDED(nsres)) {
-        nsres = nsIWebBrowserSetup_SetProperty(wbsetup, SETUP_IS_CHROME_WRAPPER, TRUE);
+        nsres = nsIWebBrowserSetup_SetProperty(wbsetup, SETUP_IS_CHROME_WRAPPER, FALSE);
         nsIWebBrowserSetup_Release(wbsetup);
         if(NS_FAILED(nsres))
             ERR("SetProperty(SETUP_IS_CHROME_WRAPPER) failed: %08x\n", nsres);
@@ -1437,6 +1655,25 @@ NSContainer *NSContainer_Create(HTMLDocument *doc, NSContainer *parent)
     if(NS_FAILED(nsres))
         ERR("SetParentURIContentListener failed: %08x\n", nsres);
 
+    init_nsevents(ret);
+
+    nsres = nsIWebBrowser_QueryInterface(ret->webbrowser, &IID_nsIScrollable, (void**)&scrollable);
+    if(NS_SUCCEEDED(nsres)) {
+        nsres = nsIScrollable_SetDefaultScrollbarPreferences(scrollable,
+                ScrollOrientation_Y, Scrollbar_Always);
+        if(NS_FAILED(nsres))
+            ERR("Could not set default Y scrollbar prefs: %08x\n", nsres);
+
+        nsres = nsIScrollable_SetDefaultScrollbarPreferences(scrollable,
+                ScrollOrientation_X, Scrollbar_Auto);
+        if(NS_FAILED(nsres))
+            ERR("Could not set default X scrollbar prefs: %08x\n", nsres);
+
+        nsIScrollable_Release(scrollable);
+    }else {
+        ERR("Could not get nsIScrollable: %08x\n", nsres);
+    }
+
     return ret;
 }
 
@@ -1463,6 +1700,16 @@ void NSContainer_Release(NSContainer *This)
 
     nsIWebBrowserFocus_Release(This->focus);
     This->focus = NULL;
+
+    if(This->editor_controller) {
+        nsIController_Release(This->editor_controller);
+        This->editor_controller = NULL;
+    }
+
+    if(This->editor) {
+        nsIEditor_Release(This->editor);
+        This->editor = NULL;
+    }
 
     if(This->content_listener) {
         nsIURIContentListener_Release(This->content_listener);

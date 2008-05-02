@@ -16,7 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
 #include <stdarg.h>
 
 #define COBJMACROS
@@ -25,23 +24,21 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "winerror.h"
-
 #include "ole2.h"
+
+#include "initguid.h"
 #include "vfw.h"
+#include "avifile_private.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(avifile);
 
-#include "initguid.h"
-#include "avifile_private.h"
-
 HMODULE AVIFILE_hModule   = NULL;
 
-BOOL    AVIFILE_bLocked   = FALSE;
-UINT    AVIFILE_uUseCount = 0;
+static BOOL    AVIFILE_bLocked;
+static UINT    AVIFILE_uUseCount;
 
 static HRESULT WINAPI IClassFactory_fnQueryInterface(LPCLASSFACTORY iface,REFIID riid,LPVOID *ppobj);
 static ULONG   WINAPI IClassFactory_fnAddRef(LPCLASSFACTORY iface);
@@ -80,7 +77,7 @@ static HRESULT AVIFILE_CreateClassFactory(const CLSID *pclsid, const IID *riid,
 
   pClassFactory->lpVtbl    = &iclassfact;
   pClassFactory->dwRef     = 0;
-  memcpy(&pClassFactory->clsid, pclsid, sizeof(pClassFactory->clsid));
+  pClassFactory->clsid     = *pclsid;
 
   hr = IClassFactory_QueryInterface((IClassFactory*)pClassFactory, riid, ppv);
   if (FAILED(hr)) {
@@ -211,7 +208,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstDll, DWORD fdwReason, LPVOID lpvReserved)
   switch (fdwReason) {
   case DLL_PROCESS_ATTACH:
     DisableThreadLibraryCalls(hInstDll);
-    AVIFILE_hModule = (HMODULE)hInstDll;
+    AVIFILE_hModule = hInstDll;
     break;
   case DLL_PROCESS_DETACH:
     break;

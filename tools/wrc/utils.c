@@ -26,7 +26,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
-#include <assert.h>
 #include <ctype.h>
 
 #include "wine/unicode.h"
@@ -64,7 +63,6 @@ static void generic_msg(const char *s, const char *t, const char *n, va_list ap)
 		}
 	}
 #endif
-	fprintf(stderr, "\n");
 }
 
 
@@ -93,7 +91,6 @@ void internal_error(const char *file, int line, const char *s, ...)
 	va_start(ap, s);
 	fprintf(stderr, "Internal error (please report) %s %d: ", file, line);
 	vfprintf(stderr, s, ap);
-	fprintf(stderr, "\n");
 	va_end(ap);
 	exit(3);
 }
@@ -104,7 +101,6 @@ void error(const char *s, ...)
 	va_start(ap, s);
 	fprintf(stderr, "Error: ");
 	vfprintf(stderr, s, ap);
-	fprintf(stderr, "\n");
 	va_end(ap);
 	exit(2);
 }
@@ -115,7 +111,6 @@ void warning(const char *s, ...)
 	va_start(ap, s);
 	fprintf(stderr, "Warning: ");
 	vfprintf(stderr, s, ap);
-	fprintf(stderr, "\n");
 	va_end(ap);
 }
 
@@ -127,7 +122,6 @@ void chat(const char *s, ...)
 		va_start(ap, s);
 		fprintf(stderr, "FYI: ");
 		vfprintf(stderr, s, ap);
-		fprintf(stderr, "\n");
 		va_end(ap);
 	}
 }
@@ -226,7 +220,7 @@ int compare_name_id(const name_id_t *n1, const name_id_t *n2)
 		}
 		else
 		{
-			internal_error(__FILE__, __LINE__, "Can't yet compare strings of mixed type");
+			internal_error(__FILE__, __LINE__, "Can't yet compare strings of mixed type\n");
 		}
 	}
 	else if(n1->type == name_ord && n2->type == name_str)
@@ -234,7 +228,7 @@ int compare_name_id(const name_id_t *n1, const name_id_t *n2)
 	else if(n1->type == name_str && n2->type == name_ord)
 		return -1;
 	else
-		internal_error(__FILE__, __LINE__, "Comparing name-ids with unknown types (%d, %d)",
+		internal_error(__FILE__, __LINE__, "Comparing name-ids with unknown types (%d, %d)\n",
 				n1->type, n2->type);
 
 	return 0; /* Keep the compiler happy */
@@ -244,26 +238,38 @@ string_t *convert_string(const string_t *str, enum str_e type, int codepage)
 {
     const union cptable *cptable = codepage ? wine_cp_get_table( codepage ) : NULL;
     string_t *ret = xmalloc(sizeof(*ret));
+    int res;
 
-    if (!cptable && str->type != type)
-        error( "Current language is Unicode only, cannot convert strings" );
+    if (!codepage && str->type != type)
+        parser_error( "Current language is Unicode only, cannot convert string\n" );
 
     if((str->type == str_char) && (type == str_unicode))
     {
-        ret->type     = str_unicode;
-        ret->size     = wine_cp_mbstowcs( cptable, 0, str->str.cstr, str->size, NULL, 0 );
+        ret->type = str_unicode;
+        ret->size = cptable ? wine_cp_mbstowcs( cptable, 0, str->str.cstr, str->size, NULL, 0 )
+                            : wine_utf8_mbstowcs( 0, str->str.cstr, str->size, NULL, 0 );
         ret->str.wstr = xmalloc( (ret->size+1) * sizeof(WCHAR) );
-        wine_cp_mbstowcs( cptable, 0, str->str.cstr, str->size, ret->str.wstr, ret->size );
+        if (cptable)
+            res = wine_cp_mbstowcs( cptable, MB_ERR_INVALID_CHARS, str->str.cstr, str->size,
+                                    ret->str.wstr, ret->size );
+        else
+            res = wine_utf8_mbstowcs( MB_ERR_INVALID_CHARS, str->str.cstr, str->size,
+                                      ret->str.wstr, ret->size );
+        if (res == -2)
+            parser_error( "Invalid character in string '%.*s' for codepage %u\n",
+                   str->size, str->str.cstr, codepage );
         ret->str.wstr[ret->size] = 0;
     }
     else if((str->type == str_unicode) && (type == str_char))
     {
-        ret->type     = str_char;
-        ret->size     = wine_cp_wcstombs( cptable, 0, str->str.wstr, str->size,
-                                          NULL, 0, NULL, NULL );
+        ret->type = str_char;
+        ret->size = cptable ? wine_cp_wcstombs( cptable, 0, str->str.wstr, str->size, NULL, 0, NULL, NULL )
+                            : wine_utf8_wcstombs( 0, str->str.wstr, str->size, NULL, 0 );
         ret->str.cstr = xmalloc( ret->size + 1 );
-        wine_cp_wcstombs( cptable, 0, str->str.wstr, str->size, ret->str.cstr, ret->size,
-                     NULL, NULL );
+        if (cptable)
+            wine_cp_wcstombs( cptable, 0, str->str.wstr, str->size, ret->str.cstr, ret->size, NULL, NULL );
+        else
+            wine_utf8_wcstombs( 0, str->str.wstr, str->size, ret->str.cstr, ret->size );
         ret->str.cstr[ret->size] = 0;
     }
     else if(str->type == str_unicode)

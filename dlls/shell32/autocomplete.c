@@ -51,7 +51,6 @@
 #include "objbase.h"
 
 #include "pidl.h"
-#include "shlguid.h"
 #include "shlobj.h"
 #include "shldisp.h"
 #include "debughlp.h"
@@ -508,7 +507,7 @@ static LRESULT APIENTRY ACEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 		    if ( (This->options & (ACO_AUTOSUGGEST | ACO_UPDOWNKEYDROPSLIST)) 
 			 && (!IsWindowVisible(This->hwndListBox) && (! *hwndText)) )
 		    {
-			 /* We must dispays all the entries */
+			 /* We must display all the entries */
 			 displayall = TRUE;
 		    } else {
 			if (IsWindowVisible(This->hwndListBox)) {
@@ -579,8 +578,7 @@ static LRESULT APIENTRY ACEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 		if (hr != S_OK)
 		    break;
 
-		if ((LPWSTR)strstrW(strs, hwndText) == strs) {
-		    
+		if (strstrW(strs, hwndText) == strs) {
 		    if (This->options & ACO_AUTOAPPEND) {
 			SetWindowTextW(hwnd, strs);
 			SendMessageW(hwnd, EM_SETSEL, lstrlenW(hwndText), lstrlenW(strs));
@@ -624,7 +622,7 @@ static LRESULT APIENTRY ACLBoxSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 {
     IAutoCompleteImpl *This = (IAutoCompleteImpl *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
     WCHAR *msg;
-    int sel = -1, len;
+    int sel, len;
 
     switch (uMsg) {
 	case WM_MOUSEMOVE:
@@ -632,9 +630,11 @@ static LRESULT APIENTRY ACLBoxSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 	    SendMessageW(hwnd, LB_SETCURSEL, (WPARAM)sel, (LPARAM)0);
 	    break;
 	case WM_LBUTTONDOWN:
-	    len = SendMessageW(This->hwndListBox, LB_GETTEXTLEN, sel, (LPARAM)NULL);
+	    sel = SendMessageW(hwnd, LB_GETCURSEL, 0, 0);
+	    if (sel < 0)
+		break;
+	    len = SendMessageW(This->hwndListBox, LB_GETTEXTLEN, sel, 0);
 	    msg = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (len+1)*sizeof(WCHAR));
-	    sel = (INT)SendMessageW(hwnd, LB_GETCURSEL, 0, 0);
 	    SendMessageW(hwnd, LB_GETTEXT, sel, (LPARAM)msg);
 	    SendMessageW(This->hwndEdit, WM_SETTEXT, 0, (LPARAM)msg);
 	    SendMessageW(This->hwndEdit, EM_SETSEL, 0, lstrlenW(msg));

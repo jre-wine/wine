@@ -21,7 +21,6 @@
 #include "config.h"
 
 #include "quartz_private.h"
-#include "control_private.h"
 #include "pin.h"
 
 #include "uuids.h"
@@ -31,7 +30,6 @@
 #include "dshow.h"
 #include "strmif.h"
 #include "vfwmsgs.h"
-#include "evcode.h"
 #include "msacm.h"
 
 #include <assert.h>
@@ -59,58 +57,69 @@ typedef struct ACMWrapperImpl
     BOOL reinit_codec; /* FIXME: Should use sync points instead */
 } ACMWrapperImpl;
 
-static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilter, LPBYTE data, DWORD size)
+static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilter, IMediaSample *pSample)
 {
     ACMWrapperImpl* This = (ACMWrapperImpl*)pTransformFilter;
     AM_MEDIA_TYPE amt;
-    HRESULT hr;
-    IMediaSample* pSample = NULL;
+    IMediaSample* pOutSample = NULL;
     DWORD cbDstStream;
     LPBYTE pbDstStream;
+    DWORD cbSrcStream = 0;
+    LPBYTE pbSrcStream = NULL;
     ACMSTREAMHEADER ash;
     DWORD offset = 0;
     BOOL stop = FALSE;
     BOOL unprepare_header = FALSE;
     MMRESULT res;
+    HRESULT hr;
 
-    TRACE("(%p)->(%p,%d)\n", This, data, size);
+    hr = IMediaSample_GetPointer(pSample, &pbSrcStream);
+    if (FAILED(hr))
+    {
+        ERR("Cannot get pointer to sample data (%x)\n", hr);
+	return hr;
+    }
+
+    cbSrcStream = IMediaSample_GetActualDataLength(pSample);
+
+    TRACE("Sample data ptr = %p, size = %ld\n", pbSrcStream, (long)cbSrcStream);
 
     hr = IPin_ConnectionMediaType(This->tf.ppPins[0], &amt);
     if (FAILED(hr)) {
 	ERR("Unable to retrieve media type\n");
-	goto error;
+	return hr;
     }
 
-    while(!stop)
+    while(hr == S_OK && !stop)
     {
 	DWORD rem_buf = This->max_size - This->current_size;
-	DWORD rem_smp = size - offset;
+	DWORD rem_smp = cbSrcStream - offset;
 	DWORD copy_size = min(rem_buf, rem_smp);
 
-	memcpy(This->buffer + This->current_size, data + offset, copy_size);
+	memcpy(This->buffer + This->current_size, pbSrcStream + offset, copy_size);
 	This->current_size += copy_size;
 	offset += copy_size;
 
-	if (offset == size)
+	if (offset >= cbSrcStream)
 	    stop = TRUE;
 	if (This->current_size < This->max_size)
 	    break;
   
-	hr = OutputPin_GetDeliveryBuffer((OutputPin*)This->tf.ppPins[1], &pSample, NULL, NULL, 0);
+	hr = OutputPin_GetDeliveryBuffer((OutputPin*)This->tf.ppPins[1], &pOutSample, NULL, NULL, 0);
 	if (FAILED(hr)) {
 	    ERR("Unable to get delivery buffer (%x)\n", hr);
-	    goto error;
+	    return hr;
 	}
 
-	hr = IMediaSample_SetActualDataLength(pSample, 0);
+	hr = IMediaSample_SetActualDataLength(pOutSample, 0);
 	assert(hr == S_OK);
 
-	hr = IMediaSample_GetPointer(pSample, &pbDstStream);
+	hr = IMediaSample_GetPointer(pOutSample, &pbDstStream);
 	if (FAILED(hr)) {
 	    ERR("Unable to get pointer to buffer (%x)\n", hr);
 	    goto error;
 	}
-	cbDstStream = IMediaSample_GetSize(pSample);
+	cbDstStream = IMediaSample_GetSize(pOutSample);
 
 	ash.cbStruct = sizeof(ash);
 	ash.fdwStatus = 0;
@@ -135,7 +144,7 @@ static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilte
 
 	TRACE("used in %u, used out %u\n", ash.cbSrcLengthUsed, ash.cbDstLengthUsed);
 
-	hr = IMediaSample_SetActualDataLength(pSample, ash.cbDstLengthUsed);
+	hr = IMediaSample_SetActualDataLength(pOutSample, ash.cbDstLengthUsed);
 	assert(hr == S_OK);
 
 	if (ash.cbSrcLengthUsed < ash.cbSrcLength) {
@@ -145,18 +154,20 @@ static HRESULT ACMWrapper_ProcessSampleData(TransformFilterImpl* pTransformFilte
 	else
 	    This->current_size = 0;
 
-	hr = OutputPin_SendSample((OutputPin*)This->tf.ppPins[1], pSample);
+	hr = OutputPin_SendSample((OutputPin*)This->tf.ppPins[1], pOutSample);
 	if (hr != S_OK && hr != VFW_E_NOT_CONNECTED) {
 	    ERR("Error sending sample (%x)\n", hr);
 	    goto error;
         }
 
 error:
-	if (unprepare_header && (res = acmStreamUnprepareHeader(This->has, &ash, 0)))
-	    ERR("Cannot unprepare header %d\n", res);
+        if (unprepare_header && (res = acmStreamUnprepareHeader(This->has, &ash, 0)))
+            ERR("Cannot unprepare header %d\n", res);
+        unprepare_header = FALSE;
 
-	if (pSample)
-	    IMediaSample_Release(pSample);
+        if (pOutSample)
+            IMediaSample_Release(pOutSample);
+        pOutSample = NULL;
     }
 
     return hr;
@@ -217,7 +228,7 @@ static HRESULT ACMWrapper_ConnectInput(TransformFilterImpl* pTransformFilter, co
     }
 
     TRACE("Connection refused\n");
-    return S_FALSE;
+    return VFW_E_TYPE_NOT_ACCEPTED;
 }
 
 static HRESULT ACMWrapper_Cleanup(TransformFilterImpl* pTransformFilter)
@@ -234,9 +245,10 @@ static HRESULT ACMWrapper_Cleanup(TransformFilterImpl* pTransformFilter)
     return S_OK;
 }
 
-TransformFuncsTable ACMWrapper_FuncsTable = {
+static const TransformFuncsTable ACMWrapper_FuncsTable = {
     NULL,
     ACMWrapper_ProcessSampleData,
+    NULL,
     NULL,
     ACMWrapper_ConnectInput,
     ACMWrapper_Cleanup
@@ -256,8 +268,8 @@ HRESULT ACMWrapper_create(IUnknown * pUnkOuter, LPVOID * ppv)
 
     /* Note: This memory is managed by the transform filter once created */
     This = CoTaskMemAlloc(sizeof(ACMWrapperImpl));
+    ZeroMemory(This, sizeof(ACMWrapperImpl));
 
-    This->has = 0;
     This->reinit_codec = TRUE;
 
     hr = TransformFilter_Create(&(This->tf), &CLSID_ACMWrapper, &ACMWrapper_FuncsTable);

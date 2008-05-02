@@ -72,6 +72,9 @@ void X11DRV_BITMAP_Init(void)
 HBITMAP X11DRV_SelectBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap )
 {
     X_PHYSBITMAP *physBitmap;
+    BITMAP bitmap;
+
+    if (!GetObjectW( hbitmap, sizeof(bitmap), &bitmap )) return 0;
 
     if(physDev->xrender)
         X11DRV_XRender_UpdateDrawable( physDev );
@@ -81,6 +84,8 @@ HBITMAP X11DRV_SelectBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap )
 
     physDev->bitmap = physBitmap;
     physDev->drawable = physBitmap->pixmap;
+    SetRect( &physDev->drawable_rect, 0, 0, bitmap.bmWidth, bitmap.bmHeight );
+    physDev->dc_rect = physDev->drawable_rect;
 
       /* Change GC depth if needed */
 
@@ -116,7 +121,8 @@ BOOL X11DRV_CreateBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, LPVOID bmBit
       /* Check parameters */
     if (bitmap.bmPlanes != 1) return FALSE;
 
-    if ((bitmap.bmBitsPixel != 1) && (bitmap.bmBitsPixel != screen_depth))
+    /* check if bpp is compatible with screen depth */
+    if (!((bitmap.bmBitsPixel == 1) || (bitmap.bmBitsPixel == screen_bpp)))
     {
         ERR("Trying to make bitmap with planes=%d, bpp=%d\n",
             bitmap.bmPlanes, bitmap.bmBitsPixel);
@@ -134,9 +140,9 @@ BOOL X11DRV_CreateBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, LPVOID bmBit
 
       /* Create the pixmap */
     wine_tsx11_lock();
-    physBitmap->pixmap_depth = bitmap.bmBitsPixel;
+    physBitmap->pixmap_depth = (bitmap.bmBitsPixel == 1) ? 1 : screen_depth;
     physBitmap->pixmap = XCreatePixmap(gdi_display, root_window,
-                                       bitmap.bmWidth, bitmap.bmHeight, bitmap.bmBitsPixel);
+                                       bitmap.bmWidth, bitmap.bmHeight, physBitmap->pixmap_depth);
     wine_tsx11_unlock();
     if (!physBitmap->pixmap)
     {
@@ -173,7 +179,7 @@ LONG X11DRV_GetBitmapBits( HBITMAP hbitmap, void *buffer, LONG count )
 {
     BITMAP bitmap;
     X_PHYSBITMAP *physBitmap = X11DRV_get_phys_bitmap( hbitmap );
-    LONG old_height, height;
+    LONG height;
     XImage *image;
     LPBYTE tbuf, startline;
     int	h, w;
@@ -183,21 +189,14 @@ LONG X11DRV_GetBitmapBits( HBITMAP hbitmap, void *buffer, LONG count )
     TRACE("(bmp=%p, buffer=%p, count=0x%x)\n", hbitmap, buffer, count);
 
     wine_tsx11_lock();
-
-    /* Hack: change the bitmap height temporarily to avoid */
-    /*       getting unnecessary bitmap rows. */
-
-    old_height = bitmap.bmHeight;
-    height = bitmap.bmHeight = count / bitmap.bmWidthBytes;
-
+    height = count / bitmap.bmWidthBytes;
     image = XGetImage( gdi_display, physBitmap->pixmap, 0, 0,
-                       bitmap.bmWidth, bitmap.bmHeight, AllPlanes, ZPixmap );
-    bitmap.bmHeight = old_height;
+                       bitmap.bmWidth, height, AllPlanes, ZPixmap );
 
     /* copy XImage to 16 bit padded image buffer with real bitsperpixel */
 
     startline = buffer;
-    switch (physBitmap->pixmap_depth)
+    switch (bitmap.bmBitsPixel)
     {
     case 1:
         for (h=0;h<height;h++)
@@ -283,7 +282,7 @@ LONG X11DRV_GetBitmapBits( HBITMAP hbitmap, void *buffer, LONG count )
 	}
         break;
     default:
-        FIXME("Unhandled bits:%d\n", physBitmap->pixmap_depth);
+        FIXME("Unhandled bits:%d\n", bitmap.bmBitsPixel);
     }
     XDestroyImage( image );
     wine_tsx11_unlock();
@@ -329,7 +328,7 @@ LONG X11DRV_SetBitmapBits( HBITMAP hbitmap, const void *bits, LONG count )
 
     startline = bits;
 
-    switch (physBitmap->pixmap_depth)
+    switch (bitmap.bmBitsPixel)
     {
     case 1:
         for (h=0;h<height;h++)
@@ -403,7 +402,7 @@ LONG X11DRV_SetBitmapBits( HBITMAP hbitmap, const void *bits, LONG count )
         }
         break;
     default:
-      FIXME("Unhandled bits:%d\n", physBitmap->pixmap_depth);
+      FIXME("Unhandled bits:%d\n", bitmap.bmBitsPixel);
 
     }
     XPutImage( gdi_display, physBitmap->pixmap, BITMAP_GC(physBitmap),
@@ -427,7 +426,8 @@ BOOL X11DRV_DeleteBitmap( HBITMAP hbitmap )
         if (GetObjectW( hbitmap, sizeof(dib), &dib ) == sizeof(dib))
             X11DRV_DIB_DeleteDIBSection( physBitmap, &dib );
 
-        if (physBitmap->glxpixmap) destroy_glxpixmap(physBitmap->glxpixmap); 
+        if (physBitmap->glxpixmap)
+            destroy_glxpixmap( gdi_display, physBitmap->glxpixmap );
         wine_tsx11_lock();
         if (physBitmap->pixmap) XFreePixmap( gdi_display, physBitmap->pixmap );
         XDeleteContext( gdi_display, (XID)hbitmap, bitmap_context );

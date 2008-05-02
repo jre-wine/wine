@@ -76,20 +76,7 @@ static const IServiceProviderVtbl IShellBrowserImpl_IServiceProvider_Vtbl;
 *   Local Prototypes
 */
 
-static HRESULT IShellBrowserImpl_ICommDlgBrowser_OnSelChange(ICommDlgBrowser *iface, IShellView *ppshv);
-
-/**************************************************************************
-*   External Prototypes
-*/
-extern const char *FileOpenDlgInfosStr;
-
-extern IShellFolder*    GetShellFolderFromPidl(LPITEMIDLIST pidlAbs);
-extern LPITEMIDLIST     GetParentPidl(LPITEMIDLIST pidl);
-extern LPITEMIDLIST     GetPidlFromName(IShellFolder *psf,LPCSTR lpcstrFileName);
-
-extern int     FILEDLG95_LOOKIN_SelectItem(HWND hwnd,LPITEMIDLIST pidl);
-extern LRESULT SendCustomDlgNotificationMessage(HWND hwndParentDlg, UINT uCode);
-
+static HRESULT IShellBrowserImpl_ICommDlgBrowser_OnSelChange(ICommDlgBrowser *iface, const IShellView *ppshv);
 
 /*
  *   Helper functions
@@ -130,15 +117,15 @@ static void COMDLG32_DumpSBSPFlags(UINT uflags)
             FE(SBSP_INITIATEDBYHLINKFRAME),
         };
 #undef FE
-        DPRINTF("SBSP Flags: %08x =", uflags);
+        TRACE("SBSP Flags: %08x =", uflags);
 	for (i = 0; i < (sizeof(flags) / sizeof(flags[0])); i++)
 	    if (flags[i].mask & uflags)
-		DPRINTF("%s ", flags[i].name);
-	DPRINTF("\n");
+		TRACE("%s ", flags[i].name);
+	TRACE("\n");
     }
 }
 
-static void COMDLG32_UpdateCurrentDir(FileOpenDlgInfos *fodInfos)
+static void COMDLG32_UpdateCurrentDir(const FileOpenDlgInfos *fodInfos)
 {
     LPSHELLFOLDER psfDesktop;
     STRRET strret;
@@ -388,8 +375,7 @@ static HRESULT WINAPI IShellBrowserImpl_BrowseObject(IShellBrowser *iface,
 	    return hRes;
         }
         /* create an absolute pidl */
-        pidlTmp = COMDLG32_PIDL_ILCombine(fodInfos->ShellInfos.pidlAbsCurrent,
-                                                        (LPCITEMIDLIST)pidl);
+        pidlTmp = COMDLG32_PIDL_ILCombine(fodInfos->ShellInfos.pidlAbsCurrent, pidl);
     }
     else if(wFlags & SBSP_PARENT)
     {
@@ -401,7 +387,7 @@ static HRESULT WINAPI IShellBrowserImpl_BrowseObject(IShellBrowser *iface,
     else /* SBSP_ABSOLUTE is 0x0000 */
     {
         /* An absolute pidl (relative from the desktop) */
-        pidlTmp =  COMDLG32_PIDL_ILClone((LPCITEMIDLIST)pidl);
+        pidlTmp =  COMDLG32_PIDL_ILClone(pidl);
         psfTmp = GetShellFolderFromPidl(pidlTmp);
     }
 
@@ -622,7 +608,7 @@ static HRESULT WINAPI IShellBrowserImpl_SendControlMsg(IShellBrowser *iface,
     IShellBrowserImpl *This = (IShellBrowserImpl *)iface;
     LRESULT lres;
 
-    TRACE("(%p)->(0x%08x 0x%08x 0x%08x 0x%08lx %p)\n", This, id, uMsg, wParam, lParam, pret);
+    TRACE("(%p)->(0x%08x 0x%08x 0x%08lx 0x%08lx %p)\n", This, id, uMsg, wParam, lParam, pret);
 
     switch (id)
     {
@@ -881,8 +867,8 @@ static HRESULT WINAPI IShellBrowserImpl_ICommDlgBrowser_IncludeObject(ICommDlgBr
     ulAttr = SFGAO_HIDDEN | SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR | SFGAO_LINK;
     IShellFolder_GetAttributesOf(fodInfos->Shell.FOIShellFolder, 1, &pidl, &ulAttr);
 
-    if( (ulAttr & SFGAO_HIDDEN)                                         /* hidden */
-      | !(ulAttr & (SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR))) /* special folder */
+    if( (ulAttr & SFGAO_HIDDEN) ||                                      /* hidden */
+        !(ulAttr & (SFGAO_FILESYSTEM | SFGAO_FILESYSANCESTOR))) /* special folder */
         return S_FALSE;
 
     /* always include directories and links */
@@ -908,7 +894,7 @@ static HRESULT WINAPI IShellBrowserImpl_ICommDlgBrowser_IncludeObject(ICommDlgBr
 /**************************************************************************
 *  IShellBrowserImpl_ICommDlgBrowser_OnSelChange
 */
-static HRESULT IShellBrowserImpl_ICommDlgBrowser_OnSelChange(ICommDlgBrowser *iface, IShellView *ppshv)
+static HRESULT IShellBrowserImpl_ICommDlgBrowser_OnSelChange(ICommDlgBrowser *iface, const IShellView *ppshv)
 {
     FileOpenDlgInfos *fodInfos;
 

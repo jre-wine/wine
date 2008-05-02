@@ -37,7 +37,6 @@
 #include "wownt32.h"
 #include "winternl.h"
 #include "toolhelp.h"
-#include "excpt.h"
 #include "kernel_private.h"
 #include "kernel16_private.h"
 #include "wine/exception.h"
@@ -91,7 +90,7 @@ static HMODULE16 NE_GetModuleByFilename( LPCSTR name );
 
 
 /* patch all the flat cs references of the code segment if necessary */
-inline static void patch_code_segment( NE_MODULE *pModule )
+static inline void patch_code_segment( NE_MODULE *pModule )
 {
 #ifdef __i386__
     int i;
@@ -530,7 +529,7 @@ FARPROC16 NE_GetEntryPointEx( HMODULE16 hModule, WORD ordinal, BOOL16 snoop )
     if (!snoop)
         return (FARPROC16)MAKESEGPTR( sel, offset );
     else
-        return (FARPROC16)SNOOP16_GetProcAddress16(hModule,ordinal,(FARPROC16)MAKESEGPTR( sel, offset ));
+        return SNOOP16_GetProcAddress16(hModule,ordinal,(FARPROC16)MAKESEGPTR( sel, offset ));
 }
 
 
@@ -1050,7 +1049,7 @@ static HINSTANCE16 MODULE_LoadModule16( LPCSTR libname, BOOL implicit, BOOL lib_
     const char *file_name = NULL;
     char dllname[20], owner[20], *p;
     const char *basename;
-    int owner_exists;
+    int owner_exists = FALSE;
 
     /* strip path information */
 
@@ -1194,9 +1193,11 @@ HINSTANCE16 WINAPI LoadModule16( LPCSTR name, LPVOID paramBlock )
     HMODULE16 hModule;
     NE_MODULE *pModule;
     LPSTR cmdline;
-    WORD cmdShow;
+    WORD cmdShow = 1; /* SW_SHOWNORMAL but we don't want to include winuser.h here */
 
     if (name == NULL) return 0;
+
+    TRACE("name %s, paramBlock %p\n", name, paramBlock);
 
     /* Load module */
 
@@ -1236,7 +1237,8 @@ HINSTANCE16 WINAPI LoadModule16( LPCSTR name, LPVOID paramBlock )
      *  information.
      */
     params = (LOADPARAMS16 *)paramBlock;
-    cmdShow = ((WORD *)MapSL(params->showCmd))[1];
+    if (params->showCmd)
+        cmdShow = ((WORD *)MapSL( params->showCmd ))[1];
     cmdline = MapSL( params->cmdLine );
     return NE_CreateThread( pModule, cmdShow, cmdline );
 }
@@ -1707,10 +1709,24 @@ HINSTANCE16 WINAPI WinExec16( LPCSTR lpCmdLine, UINT16 nCmdShow )
 
     if (ret == 21 || ret == ERROR_BAD_FORMAT)  /* 32-bit module or unknown executable*/
     {
-        DWORD count;
-        ReleaseThunkLock( &count );
-        ret = LOWORD( WinExec( lpCmdLine, nCmdShow ) );
-        RestoreThunkLock( count );
+        LOADPARAMS16 params;
+        WORD showCmd[2];
+        showCmd[0] = 2;
+        showCmd[1] = nCmdShow;
+
+        arglen = strlen( lpCmdLine );
+        cmdline = HeapAlloc( GetProcessHeap(), 0, arglen + 1 );
+        cmdline[0] = (BYTE)arglen;
+        memcpy( cmdline + 1, lpCmdLine, arglen );
+
+        params.hEnvironment = 0;
+        params.cmdLine = MapLS( cmdline );
+        params.showCmd = MapLS( showCmd );
+        params.reserved = 0;
+
+        ret = LoadModule16( "winoldap.mod", &params );
+        UnMapLS( params.cmdLine );
+        UnMapLS( params.showCmd );
     }
     return ret;
 }
@@ -2052,7 +2068,7 @@ static HMODULE16 create_dummy_module( HMODULE module32 )
     pStr += len+2;
 
     /* All tables zero terminated */
-    pModule->ne_rsrctab = pModule->ne_imptab = pModule->ne_enttab = (char *)pStr - (char *)pModule;
+    pModule->ne_rsrctab = pModule->ne_imptab = pModule->ne_enttab = pStr - (char *)pModule;
 
     NE_RegisterModule( pModule );
     pModule->owner32 = LoadLibraryA( filename );  /* increment the ref count of the 32-bit module */
@@ -2161,7 +2177,7 @@ void WINAPI MapHInstSL16( CONTEXT86 *context )
 __ASM_GLOBAL_FUNC( MapHInstLS,
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("MapHModuleLS") "\n\t"
-                   "ret" );
+                   "ret" )
 
 /***************************************************************************
  *		MapHInstSL			(KERNEL32.@)
@@ -2169,7 +2185,7 @@ __ASM_GLOBAL_FUNC( MapHInstLS,
 __ASM_GLOBAL_FUNC( MapHInstSL,
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("MapHModuleSL") "\n\t"
-                   "ret" );
+                   "ret" )
 
 /***************************************************************************
  *		MapHInstLS_PN			(KERNEL32.@)
@@ -2179,7 +2195,7 @@ __ASM_GLOBAL_FUNC( MapHInstLS_PN,
                    "jz 1f\n\t"
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("MapHModuleLS") "\n"
-                   "1:\tret" );
+                   "1:\tret" )
 
 /***************************************************************************
  *		MapHInstSL_PN			(KERNEL32.@)
@@ -2189,6 +2205,6 @@ __ASM_GLOBAL_FUNC( MapHInstSL_PN,
                    "jz 1f\n\t"
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("MapHModuleSL") "\n"
-                   "1:\tret" );
+                   "1:\tret" )
 
 #endif  /* __i386__ */

@@ -39,7 +39,6 @@
 
 #include "shellapi.h"
 #include "objbase.h"
-#include "shlguid.h"
 #include "pidl.h"
 #include "shell32_main.h"
 #include "undocshell.h"
@@ -54,7 +53,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(shell);
 typedef struct
 {
 	LPWSTR sSourceFile;	/* file (not path!) containing the icon */
-	DWORD dwSourceIndex;	/* index within the file, if it is a resoure ID it will be negated */
+	DWORD dwSourceIndex;	/* index within the file, if it is a resource ID it will be negated */
 	DWORD dwListIndex;	/* index within the iconlist */
 	DWORD dwFlags;		/* GIL_* flags */
 	DWORD dwAccessTime;
@@ -614,6 +613,19 @@ int WINAPI SHMapPIDLToSystemImageListIndex(
 	    return -1;
 
 	return Index;
+}
+
+/*************************************************************************
+ * SHMapIDListToImageListIndexAsync  [SHELL32.148]
+ */
+HRESULT WINAPI SHMapIDListToImageListIndexAsync(IUnknown *pts, IShellFolder *psf,
+                                                LPCITEMIDLIST pidl, UINT flags,
+                                                void *pfn, void *pvData, void *pvHint,
+                                                int *piIndex, int *piIndexSel)
+{
+    FIXME("(%p, %p, %p, 0x%08x, %p, %p, %p, %p, %p)\n",
+            pts, psf, pidl, flags, pfn, pvData, pvHint, piIndex, piIndexSel);
+    return E_FAIL;
 }
 
 /*************************************************************************

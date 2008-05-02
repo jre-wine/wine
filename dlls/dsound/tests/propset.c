@@ -19,14 +19,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #define COBJMACROS
 #include <windows.h>
 
 #include "wine/test.h"
 #include "dsound.h"
-#include "initguid.h"
 #include "dsconf.h"
 #include "dxerr8.h"
 
@@ -37,21 +34,25 @@
         DSBCAPS_CTRLFREQUENCY|DSBCAPS_CTRLPAN|DSBCAPS_CTRLVOLUME
 #endif
 
-DEFINE_GUID(DSPROPSETID_VoiceManager, \
+#include "initguid.h"
+
+DEFINE_GUID(DSPROPSETID_VoiceManager,
             0x62A69BAE,0xDF9D,0x11D1,0x99,0xA6,0x00,0xC0,0x4F,0xC9,0x9D,0x46);
-DEFINE_GUID(DSPROPSETID_EAX20_ListenerProperties, \
+DEFINE_GUID(DSPROPSETID_EAX20_ListenerProperties,
             0x306a6a8,0xb224,0x11d2,0x99,0xe5,0x0,0x0,0xe8,0xd8,0xc7,0x22);
-DEFINE_GUID(DSPROPSETID_EAX20_BufferProperties, \
+DEFINE_GUID(DSPROPSETID_EAX20_BufferProperties,
             0x306a6a7,0xb224,0x11d2,0x99,0xe5,0x0,0x0,0xe8,0xd8,0xc7,0x22);
-DEFINE_GUID(DSPROPSETID_I3DL2_ListenerProperties, \
+DEFINE_GUID(DSPROPSETID_I3DL2_ListenerProperties,
             0xDA0F0520,0x300A,0x11D3,0x8A,0x2B,0x00,0x60,0x97,0x0D,0xB0,0x11);
-DEFINE_GUID(DSPROPSETID_I3DL2_BufferProperties, \
+DEFINE_GUID(DSPROPSETID_I3DL2_BufferProperties,
             0xDA0F0521,0x300A,0x11D3,0x8A,0x2B,0x00,0x60,0x97,0x0D,0xB0,0x11);
-DEFINE_GUID(DSPROPSETID_ZOOMFX_BufferProperties, \
+DEFINE_GUID(DSPROPSETID_ZOOMFX_BufferProperties,
             0xCD5368E0,0x3450,0x11D3,0x8B,0x6E,0x00,0x10,0x5A,0x9B,0x7B,0xBC);
 
-typedef HRESULT  (CALLBACK * MYPROC)(REFCLSID, REFIID, LPVOID *);
-
+static HRESULT (WINAPI *pDirectSoundEnumerateA)(LPDSENUMCALLBACKA,LPVOID)=NULL;
+static HRESULT (WINAPI *pDllGetClassObject)(REFCLSID,REFIID,LPVOID*)=NULL;
+static HRESULT (WINAPI *pDirectSoundCreate)(LPCGUID,LPDIRECTSOUND*,
+    LPUNKNOWN)=NULL;
 static HRESULT (WINAPI *pDirectSoundCreate8)(LPCGUID,LPDIRECTSOUND8*,
     LPUNKNOWN)=NULL;
 static HRESULT (WINAPI *pDirectSoundCaptureCreate)(LPCGUID,
@@ -62,7 +63,7 @@ static HRESULT (WINAPI *pDirectSoundFullDuplexCreate)(LPCGUID,LPCGUID,
     LPCDSCBUFFERDESC,LPCDSBUFFERDESC,HWND,DWORD,LPDIRECTSOUNDFULLDUPLEX*,
     LPDIRECTSOUNDCAPTUREBUFFER8*,LPDIRECTSOUNDBUFFER8*,LPUNKNOWN)=NULL;
 
-BOOL CALLBACK callback(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_DATA data,
+static BOOL CALLBACK callback(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_DATA data,
                        LPVOID context)
 {
     trace("  found device:\n");
@@ -88,7 +89,7 @@ BOOL CALLBACK callback(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_DATA data,
     return TRUE;
 }
 
-BOOL CALLBACK callback1(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_1_DATA data,
+static BOOL CALLBACK callback1(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_1_DATA data,
                         LPVOID context)
 {
     char descriptionA[0x100];
@@ -120,7 +121,7 @@ BOOL CALLBACK callback1(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_1_DATA data,
     return TRUE;
 }
 
-BOOL CALLBACK callbackA(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_A_DATA data,
+static BOOL CALLBACK callbackA(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_A_DATA data,
                         LPVOID context)
 {
     trace("  found device:\n");
@@ -146,7 +147,7 @@ BOOL CALLBACK callbackA(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_A_DATA data,
     return TRUE;
 }
 
-BOOL CALLBACK callbackW(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_W_DATA data,
+static BOOL CALLBACK callbackW(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_W_DATA data,
                         LPVOID context)
 {
     char descriptionA[0x100];
@@ -181,41 +182,32 @@ BOOL CALLBACK callbackW(PDSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_W_DATA data,
 
 static void propset_private_tests(void)
 {
-    HMODULE hDsound;
     HRESULT rc;
     IClassFactory * pcf;
     IKsPropertySet * pps;
-    MYPROC fProc;
     ULONG support;
-
-    hDsound = LoadLibrary("dsound.dll");
-    ok(hDsound!=0,"LoadLibrary(dsound.dll) failed\n");
-    if (hDsound==0)
-        return;
-
-    fProc = (MYPROC)GetProcAddress(hDsound, "DllGetClassObject");
 
     /* try direct sound first */
     /* DSOUND: Error: Invalid interface buffer */
-    rc = (fProc)(&CLSID_DirectSound, &IID_IClassFactory, (void **)0);
+    rc = (pDllGetClassObject)(&CLSID_DirectSound, &IID_IClassFactory, (void **)0);
     ok(rc==DSERR_INVALIDPARAM,"DllGetClassObject(CLSID_DirectSound, "
        "IID_IClassFactory) should have returned DSERR_INVALIDPARAM, "
        "returned: %s\n",DXGetErrorString8(rc));
 
-    rc = (fProc)(&CLSID_DirectSound, &IID_IDirectSound, (void **)(&pcf));
+    rc = (pDllGetClassObject)(&CLSID_DirectSound, &IID_IDirectSound, (void **)(&pcf));
     ok(rc==E_NOINTERFACE,"DllGetClassObject(CLSID_DirectSound, "
        "IID_IDirectSound) should have returned E_NOINTERFACE, "
        "returned: %s\n",DXGetErrorString8(rc));
 
-    rc = (fProc)(&CLSID_DirectSound, &IID_IUnknown, (void **)(&pcf));
+    rc = (pDllGetClassObject)(&CLSID_DirectSound, &IID_IUnknown, (void **)(&pcf));
     ok(rc==DS_OK,"DllGetClassObject(CLSID_DirectSound, "
        "IID_IUnknown) failed: %s\n",DXGetErrorString8(rc));
 
-    rc = (fProc)(&CLSID_DirectSound, &IID_IClassFactory, (void **)(&pcf));
+    rc = (pDllGetClassObject)(&CLSID_DirectSound, &IID_IClassFactory, (void **)(&pcf));
     ok(pcf!=0, "DllGetClassObject(CLSID_DirectSound, IID_IClassFactory) "
        "failed: %s\n",DXGetErrorString8(rc));
     if (pcf==0)
-        goto error;
+        return;
 
     /* direct sound doesn't have an IKsPropertySet */
     /* DSOUND: Error: Invalid interface buffer */
@@ -231,11 +223,11 @@ static void propset_private_tests(void)
 
     /* and the direct sound 8 version */
     if (pDirectSoundCreate8) {
-        rc = (fProc)(&CLSID_DirectSound8, &IID_IClassFactory, (void **)(&pcf));
+        rc = (pDllGetClassObject)(&CLSID_DirectSound8, &IID_IClassFactory, (void **)(&pcf));
         ok(pcf!=0, "DllGetClassObject(CLSID_DirectSound8, IID_IClassFactory) "
            "failed: %s\n",DXGetErrorString8(rc));
         if (pcf==0)
-            goto error;
+            return;
 
         /* direct sound 8 doesn't have an IKsPropertySet */
         rc = IClassFactory_CreateInstance(pcf, NULL, &IID_IKsPropertySet,
@@ -246,12 +238,12 @@ static void propset_private_tests(void)
 
     /* try direct sound capture next */
     if (pDirectSoundCaptureCreate) {
-        rc = (fProc)(&CLSID_DirectSoundCapture, &IID_IClassFactory,
+        rc = (pDllGetClassObject)(&CLSID_DirectSoundCapture, &IID_IClassFactory,
                      (void **)(&pcf));
         ok(pcf!=0, "DllGetClassObject(CLSID_DirectSoundCapture, IID_IClassFactory) "
            "failed: %s\n",DXGetErrorString8(rc));
         if (pcf==0)
-            goto error;
+            return;
 
         /* direct sound capture doesn't have an IKsPropertySet */
         rc = IClassFactory_CreateInstance(pcf, NULL, &IID_IKsPropertySet,
@@ -262,12 +254,12 @@ static void propset_private_tests(void)
 
     /* and the direct sound capture 8 version */
     if (pDirectSoundCaptureCreate8) {
-        rc = (fProc)(&CLSID_DirectSoundCapture8, &IID_IClassFactory,
+        rc = (pDllGetClassObject)(&CLSID_DirectSoundCapture8, &IID_IClassFactory,
                      (void **)(&pcf));
         ok(pcf!=0, "DllGetClassObject(CLSID_DirectSoundCapture8, "
            "IID_IClassFactory) failed: %s\n",DXGetErrorString8(rc));
         if (pcf==0)
-            goto error;
+            return;
 
         /* direct sound capture 8 doesn't have an IKsPropertySet */
         rc = IClassFactory_CreateInstance(pcf, NULL, &IID_IKsPropertySet,
@@ -278,12 +270,12 @@ static void propset_private_tests(void)
 
     /* try direct sound full duplex next */
     if (pDirectSoundFullDuplexCreate) {
-        rc = (fProc)(&CLSID_DirectSoundFullDuplex, &IID_IClassFactory,
+        rc = (pDllGetClassObject)(&CLSID_DirectSoundFullDuplex, &IID_IClassFactory,
                      (void **)(&pcf));
         ok(pcf!=0, "DllGetClassObject(CLSID_DirectSoundFullDuplex, "
            "IID_IClassFactory) failed: %s\n",DXGetErrorString8(rc));
         if (pcf==0)
-            goto error;
+            return;
 
         /* direct sound full duplex doesn't have an IKsPropertySet */
         rc = IClassFactory_CreateInstance(pcf, NULL, &IID_IKsPropertySet,
@@ -293,12 +285,12 @@ static void propset_private_tests(void)
     }
 
     /* try direct sound private last */
-    rc = (fProc)(&CLSID_DirectSoundPrivate, &IID_IClassFactory,
+    rc = (pDllGetClassObject)(&CLSID_DirectSoundPrivate, &IID_IClassFactory,
                  (void **)(&pcf));
 
     /* some early versions of Direct Sound do not have this */
-    if (pcf==0)
-        goto error;
+    if (rc==CLASS_E_CLASSNOTAVAILABLE)
+        return;
 
     /* direct sound private does have an IKsPropertySet */
     rc = IClassFactory_CreateInstance(pcf, NULL, &IID_IKsPropertySet,
@@ -306,7 +298,7 @@ static void propset_private_tests(void)
     ok(rc==DS_OK, "CreateInstance(IID_IKsPropertySet) failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
-        goto error;
+        return;
 
     /* test generic DSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION */
     rc = IKsPropertySet_QuerySupport(pps, &DSPROPSETID_DirectSoundDevice,
@@ -319,7 +311,7 @@ static void propset_private_tests(void)
     if (rc!=DS_OK) {
         if (rc==E_INVALIDARG)
             trace("  Not Supported\n");
-        goto error;
+        return;
     }
 
     ok(support & KSPROPERTY_SUPPORT_GET,
@@ -340,7 +332,7 @@ static void propset_private_tests(void)
     if (rc!=DS_OK) {
         if (rc==E_INVALIDARG)
             trace("  Not Supported\n");
-        goto error;
+        return;
     }
 
     ok(support & KSPROPERTY_SUPPORT_GET,
@@ -361,7 +353,7 @@ static void propset_private_tests(void)
     if (rc!=DS_OK) {
         if (rc==E_INVALIDARG)
             trace("  Not Supported\n");
-        goto error;
+        return;
     }
 
     ok(support & KSPROPERTY_SUPPORT_GET,
@@ -382,7 +374,7 @@ static void propset_private_tests(void)
     if (rc!=DS_OK) {
         if (rc==E_INVALIDARG)
             trace("  Not Supported\n");
-        goto error;
+        return;
     }
 
     ok(support & KSPROPERTY_SUPPORT_GET,
@@ -399,7 +391,7 @@ static void propset_private_tests(void)
        "DSPROPERTY_DIRECTSOUNDDEVICE_WAVEDEVICEMAPPING) failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
-        goto error;
+        return;
 
     ok(support & KSPROPERTY_SUPPORT_GET,
        "Couldn't get DSPROPERTY_DIRECTSOUNDDEVICE_WAVEDEVICEMAPPING: "
@@ -415,7 +407,7 @@ static void propset_private_tests(void)
        "DSPROPERTY_DIRECTSOUNDDEVICE_WAVEDEVICEMAPPING_A) failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
-        goto error;
+        return;
 
     ok(support & KSPROPERTY_SUPPORT_GET,
        "Couldn't get DSPROPERTY_DIRECTSOUNDDEVICE_WAVEDEVICEMAPPING_A: "
@@ -431,7 +423,7 @@ static void propset_private_tests(void)
        "DSPROPERTY_DIRECTSOUNDDEVICE_WAVEDEVICEMAPPING_W) failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
-        goto error;
+        return;
 
     ok(support & KSPROPERTY_SUPPORT_GET,
        "Couldn't get DSPROPERTY_DIRECTSOUNDDEVICE_WAVEDEVICEMAPPING_W: "
@@ -449,7 +441,7 @@ static void propset_private_tests(void)
        "DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE) failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
-        goto error;
+        return;
 
     ok(support & KSPROPERTY_SUPPORT_GET,
        "Couldn't get DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE: "
@@ -468,7 +460,7 @@ static void propset_private_tests(void)
                               DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE,
                               NULL, 0, &data, sizeof(data), &bytes);
         ok(rc==DS_OK, "Couldn't enumerate: 0x%x\n",rc);
-   }
+    }
 
     /* test DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE_1 */
     trace("*** Testing DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE_1 ***\n");
@@ -479,7 +471,7 @@ static void propset_private_tests(void)
        "DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE_1) failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
-        goto error;
+        return;
 
     ok(support & KSPROPERTY_SUPPORT_GET,
        "Couldn't get DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE_1: "
@@ -509,7 +501,7 @@ static void propset_private_tests(void)
        "DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE_A) failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
-        goto error;
+        return;
 
     ok(support & KSPROPERTY_SUPPORT_GET,
        "Couldn't get DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE_A: "
@@ -539,7 +531,7 @@ static void propset_private_tests(void)
        "DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE_W) failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
-        goto error;
+        return;
 
     ok(support & KSPROPERTY_SUPPORT_GET,
        "Couldn't get DSPROPERTY_DIRECTSOUNDDEVICE_ENUMERATE_W: "
@@ -559,9 +551,6 @@ static void propset_private_tests(void)
                               NULL, 0, &data, sizeof(data), &bytes);
         ok(rc==DS_OK, "Couldn't enumerate: 0x%x\n",rc);
     }
-
-error:
-    FreeLibrary(hDsound);
 }
 
 static BOOL WINAPI dsenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
@@ -576,7 +565,7 @@ static BOOL WINAPI dsenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
 
     trace("*** Testing %s - %s ***\n",lpcstrDescription,lpcstrModule);
 
-    rc=DirectSoundCreate(lpGuid,&dso,NULL);
+    rc=pDirectSoundCreate(lpGuid,&dso,NULL);
     ok(rc==DS_OK||rc==DSERR_NODRIVER||rc==DSERR_ALLOCATED||rc==E_FAIL,
        "DirectSoundCreate() failed: %s\n",DXGetErrorString8(rc));
     if (rc!=DS_OK) {
@@ -713,7 +702,7 @@ EXIT:
 static void propset_buffer_tests(void)
 {
     HRESULT rc;
-    rc=DirectSoundEnumerateA(&dsenum_callback,NULL);
+    rc=pDirectSoundEnumerateA(&dsenum_callback,NULL);
     ok(rc==DS_OK,"DirectSoundEnumerateA() failed: %s\n",DXGetErrorString8(rc));
 }
 
@@ -723,21 +712,33 @@ START_TEST(propset)
 
     CoInitialize(NULL);
 
-    hDsound = LoadLibraryA("dsound.dll");
-    if (!hDsound) {
-        trace("dsound.dll not found\n");
-        return;
+    hDsound = LoadLibrary("dsound.dll");
+    if (hDsound)
+    {
+        trace("DLL Version: %s\n", get_file_version("dsound.dll"));
+
+        pDirectSoundEnumerateA = (void*)GetProcAddress(hDsound,
+            "DirectSoundEnumerateA");
+        pDllGetClassObject = (void *)GetProcAddress(hDsound,
+            "DllGetClassObject");
+        pDirectSoundCreate = (void*)GetProcAddress(hDsound,
+            "DirectSoundCreate");
+        pDirectSoundCreate8 = (void*)GetProcAddress(hDsound,
+            "DirectSoundCreate8");
+        pDirectSoundCaptureCreate=(void*)GetProcAddress(hDsound,
+            "DirectSoundCaptureCreate");
+        pDirectSoundCaptureCreate8=(void*)GetProcAddress(hDsound,
+            "DirectSoundCaptureCreate8");
+        pDirectSoundFullDuplexCreate=(void*)GetProcAddress(hDsound,
+            "DirectSoundFullDuplexCreate");
+
+        propset_private_tests();
+        propset_buffer_tests();
+
+        FreeLibrary(hDsound);
     }
-
-    trace("DLL Version: %s\n", get_file_version("dsound.dll"));
-
-    pDirectSoundCreate8 = (void*)GetProcAddress(hDsound, "DirectSoundCreate8");
-    pDirectSoundCaptureCreate=(void*)GetProcAddress(hDsound,"DirectSoundCaptureCreate");
-    pDirectSoundCaptureCreate8=(void*)GetProcAddress(hDsound,"DirectSoundCaptureCreate8");
-    pDirectSoundFullDuplexCreate=(void*)GetProcAddress(hDsound,"DirectSoundFullDuplexCreate");
-
-    propset_private_tests();
-    propset_buffer_tests();
+    else
+        skip("dsound.dll not found!\n");
 
     CoUninitialize();
 }

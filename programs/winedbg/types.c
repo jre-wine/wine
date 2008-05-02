@@ -48,15 +48,14 @@ BOOL types_get_real_type(struct dbg_type* type, DWORD* tag)
 }
 
 /******************************************************************
- *		types_extract_as_integer
+ *		types_extract_as_longlong
  *
  * Given a lvalue, try to get an integral (or pointer/address) value
  * out of it
  */
-long int types_extract_as_integer(const struct dbg_lvalue* lvalue)
+LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue)
 {
-    long int            rtn;
-    LONGLONG            val;
+    LONGLONG            rtn;
     DWORD               tag, bt;
     DWORD64             size;
     struct dbg_type     type = lvalue->type;
@@ -87,44 +86,52 @@ long int types_extract_as_integer(const struct dbg_lvalue* lvalue)
         {
         case btChar:
         case btInt:
-            if (!be_cpu->fetch_integer(lvalue, (unsigned)size, TRUE, &val))
+            if (!be_cpu->fetch_integer(lvalue, (unsigned)size, TRUE, &rtn))
                 RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
-            rtn = (long)val;
             break;
         case btUInt:
-            if (!be_cpu->fetch_integer(lvalue, (unsigned)size, FALSE, &val))
+            if (!be_cpu->fetch_integer(lvalue, (unsigned)size, FALSE, &rtn))
                 RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
-            rtn = (DWORD)(DWORD64)val;
             break;
         case btFloat:
             RaiseException(DEBUG_STATUS_NOT_AN_INTEGER, 0, 0, NULL);
         }
         break;
     case SymTagPointerType:
-        if (!memory_read_value(lvalue, sizeof(void*), &rtn))
+        if (!be_cpu->fetch_integer(lvalue, sizeof(void*), FALSE, &rtn))
             RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
         break;
     case SymTagArrayType:
     case SymTagUDT:
-        assert(lvalue->cookie == DLV_TARGET);
-        if (!memory_read_value(lvalue, sizeof(rtn), &rtn))
+        if (!be_cpu->fetch_integer(lvalue, sizeof(unsigned), FALSE, &rtn))
             RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
         break;
     case SymTagEnum:
-        assert(lvalue->cookie == DLV_TARGET);
-        if (!memory_read_value(lvalue, sizeof(rtn), &rtn))
+        /* FIXME: we don't handle enum size */
+        if (!be_cpu->fetch_integer(lvalue, sizeof(unsigned), FALSE, &rtn))
             RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
         break;
     case SymTagFunctionType:
         rtn = (unsigned)memory_to_linear_addr(&lvalue->addr);
         break;
     default:
-        WINE_FIXME("Unsupported tag %lu\n", tag);
+        WINE_FIXME("Unsupported tag %u\n", tag);
         RaiseException(DEBUG_STATUS_NOT_AN_INTEGER, 0, 0, NULL);
         break;
     }
 
     return rtn;
+}
+
+/******************************************************************
+ *		types_extract_as_integer
+ *
+ * Given a lvalue, try to get an integral (or pointer/address) value
+ * out of it
+ */
+long int types_extract_as_integer(const struct dbg_lvalue* lvalue)
+{
+    return types_extract_as_longlong(lvalue);
 }
 
 /******************************************************************
@@ -141,7 +148,7 @@ void types_extract_as_address(const struct dbg_lvalue* lvalue, ADDRESS64* addr)
     else
     {
         addr->Mode = AddrModeFlat;
-        addr->Offset = types_extract_as_integer( lvalue );
+        addr->Offset = types_extract_as_longlong( lvalue );
     }
 }
 
@@ -252,7 +259,6 @@ BOOL types_udt_find_element(struct dbg_lvalue* lvalue, const char* name, long in
     TI_FINDCHILDREN_PARAMS*     fcp = (TI_FINDCHILDREN_PARAMS*)buffer;
     WCHAR*                      ptr;
     char                        tmp[256];
-    int                         i;
     struct dbg_type             type;
 
     if (!types_get_info(&lvalue->type, TI_GET_SYMTAG, &tag) ||
@@ -267,6 +273,7 @@ BOOL types_udt_find_element(struct dbg_lvalue* lvalue, const char* name, long in
             fcp->Count = min(count, 256);
             if (types_get_info(&lvalue->type, TI_FINDCHILDREN, fcp))
             {
+                unsigned i;
                 type.module = lvalue->type.module;
                 for (i = 0; i < min(fcp->Count, count); i++)
                 {
@@ -538,7 +545,7 @@ void print_value(const struct dbg_lvalue* lvalue, char format, int level)
         print_value(&lvalue_field, format, level);
         break;
     default:
-        WINE_FIXME("Unknown tag (%lu)\n", tag);
+        WINE_FIXME("Unknown tag (%u)\n", tag);
         RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
         break;
     }
@@ -553,19 +560,24 @@ static BOOL CALLBACK print_types_cb(PSYMBOL_INFO sym, ULONG size, void* ctx)
     struct dbg_type     type;
     type.module = sym->ModBase;
     type.id = sym->TypeIndex;
-    dbg_printf("Mod: %08lx ID: %08lx \n", type.module, type.id);
+    dbg_printf("Mod: %08x ID: %08lx \n", type.module, type.id);
     types_print_type(&type, TRUE);
     dbg_printf("\n");
     return TRUE;
 }
 
-static BOOL CALLBACK print_types_mod_cb(PSTR mod_name, DWORD base, void* ctx)
+static BOOL CALLBACK print_types_mod_cb(PCSTR mod_name, ULONG base, PVOID ctx)
 {
     return SymEnumTypes(dbg_curr_process->handle, base, print_types_cb, ctx);
 }
 
 int print_types(void)
 {
+    if (!dbg_curr_process)
+    {
+        dbg_printf("No known process, cannot print types\n");
+        return 0;
+    }
     SymEnumerateModules(dbg_curr_process->handle, print_types_mod_cb, NULL);
     return 0;
 }
@@ -610,7 +622,7 @@ int types_print_type(const struct dbg_type* type, BOOL details)
         case UdtStruct: dbg_printf("struct %s", name); break;
         case UdtUnion:  dbg_printf("union %s", name); break;
         case UdtClass:  dbg_printf("class %s", name); break;
-        default:        WINE_ERR("Unsupported UDT type (%ld) for %s\n", udt, name); break;
+        default:        WINE_ERR("Unsupported UDT type (%d) for %s\n", udt, name); break;
         }
         if (details &&
             types_get_info(type, TI_GET_CHILDRENCOUNT, &count))
@@ -664,8 +676,16 @@ int types_print_type(const struct dbg_type* type, BOOL details)
         break;
     case SymTagFunctionType:
         types_get_info(type, TI_GET_TYPE, &subtype.id);
-        subtype.module = type->module;
-        types_print_type(&subtype, FALSE);
+        /* is the returned type the same object as function sig itself ? */
+        if (subtype.id != type->id)
+        {
+            subtype.module = type->module;
+            types_print_type(&subtype, FALSE);
+        }
+        else
+        {
+            dbg_printf("<ret_type=self>");
+        }
         dbg_printf(" (*%s)(", name);
         if (types_get_info(type, TI_GET_CHILDRENCOUNT, &count))
         {
@@ -697,7 +717,7 @@ int types_print_type(const struct dbg_type* type, BOOL details)
         dbg_printf(name);
         break;
     default:
-        WINE_ERR("Unknown type %lu for %s\n", tag, name);
+        WINE_ERR("Unknown type %u for %s\n", tag, name);
         break;
     }
     
@@ -743,7 +763,7 @@ BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, v
             case btLong:        name = longW; break;
             case btULong:       name = ulongW; break;
             case btComplex:     name = complexW; break;
-            default:            WINE_FIXME("Unsupported basic type %ld\n", bt); return FALSE;
+            default:            WINE_FIXME("Unsupported basic type %u\n", bt); return FALSE;
             }
             X(WCHAR*) = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(name) + 1) * sizeof(WCHAR));
             if (X(WCHAR*))

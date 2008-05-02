@@ -100,7 +100,6 @@ SOFTWARE.
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -121,13 +120,12 @@ typedef struct
 } RGNOBJ;
 
 
-static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, void *obj, HDC hdc );
+static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, HDC hdc );
 static BOOL REGION_DeleteObject( HGDIOBJ handle, void *obj );
 
 static const struct gdi_obj_funcs region_funcs =
 {
     REGION_SelectObject,  /* pSelectObject */
-    NULL,                 /* pGetObject16 */
     NULL,                 /* pGetObjectA */
     NULL,                 /* pGetObjectW */
     NULL,                 /* pUnrealizeObject */
@@ -455,7 +453,7 @@ static void REGION_UnionRectWithRegion(const RECT *rect, WINEREGION *rgn);
 /***********************************************************************
  *            get_region_type
  */
-inline static INT get_region_type( const RGNOBJ *obj )
+static inline INT get_region_type( const RGNOBJ *obj )
 {
     switch(obj->rgn->numRects)
     {
@@ -550,9 +548,9 @@ static BOOL REGION_DeleteObject( HGDIOBJ handle, void *obj )
 /***********************************************************************
  *           REGION_SelectObject
  */
-static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
+static HGDIOBJ REGION_SelectObject( HGDIOBJ handle, HDC hdc )
 {
-    return (HGDIOBJ)SelectClipRgn( hdc, handle );
+    return ULongToHandle(SelectClipRgn( hdc, handle ));
 }
 
 
@@ -895,7 +893,7 @@ HRGN WINAPI CreateRoundRectRgn( INT left, INT top,
  *
  * NOTES
  *   This is a special case of CreateRoundRectRgn() where the width of the
- *   ellipse at each corner is equal to the width the the rectangle and
+ *   ellipse at each corner is equal to the width the rectangle and
  *   the same for the height.
  */
 HRGN WINAPI CreateEllipticRgn( INT left, INT top,
@@ -920,7 +918,7 @@ HRGN WINAPI CreateEllipticRgn( INT left, INT top,
  *
  * NOTES
  *   This is a special case of CreateRoundRectRgn() where the width of the
- *   ellipse at each corner is equal to the width the the rectangle and
+ *   ellipse at each corner is equal to the width the rectangle and
  *   the same for the height.
  */
 HRGN WINAPI CreateEllipticRgnIndirect( const RECT *rect )
@@ -1684,7 +1682,7 @@ static void REGION_RegionOp(
 	    top = max(r1->top,ybot);
 	    bot = min(r1->bottom,r2->top);
 
-	    if ((top != bot) && (nonOverlap1Func != (void (*)())NULL))
+            if ((top != bot) && (nonOverlap1Func != NULL))
 	    {
 		(* nonOverlap1Func) (newReg, r1, r1BandEnd, top, bot);
 	    }
@@ -1696,7 +1694,7 @@ static void REGION_RegionOp(
 	    top = max(r2->top,ybot);
 	    bot = min(r2->bottom,r1->top);
 
-	    if ((top != bot) && (nonOverlap2Func != (void (*)())NULL))
+            if ((top != bot) && (nonOverlap2Func != NULL))
 	    {
 		(* nonOverlap2Func) (newReg, r2, r2BandEnd, top, bot);
 	    }
@@ -1756,7 +1754,7 @@ static void REGION_RegionOp(
     curBand = newReg->numRects;
     if (r1 != r1End)
     {
-	if (nonOverlap1Func != (void (*)())NULL)
+        if (nonOverlap1Func != NULL)
 	{
 	    do
 	    {
@@ -1771,7 +1769,7 @@ static void REGION_RegionOp(
 	    } while (r1 != r1End);
 	}
     }
-    else if ((r2 != r2End) && (nonOverlap2Func != (void (*)())NULL))
+    else if ((r2 != r2End) && (nonOverlap2Func != NULL))
     {
 	do
 	{

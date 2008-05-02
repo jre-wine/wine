@@ -391,8 +391,6 @@ static void one_ultow_test(int test_num, const ulong2str_t *ulong2str)
 static void test_ulongtow(void)
 {
     int test_num;
-    int pos;
-    WCHAR expected_wstr[LARGE_STRI_BUFFER_LENGTH + 1];
     LPWSTR result;
 
     for (test_num = 0; test_num < NB_ULONG2STR; test_num++) {
@@ -407,32 +405,29 @@ static void test_ulongtow(void)
 	} /* if */
     } /* for */
 
-    for (pos = 0; pos < LARGE_STRI_BUFFER_LENGTH; pos++) {
-	expected_wstr[pos] = ulong2str[0].Buffer[pos];
-    } /* for */
-    expected_wstr[LARGE_STRI_BUFFER_LENGTH] = '\0';
-    result = p_itow(ulong2str[0].value, NULL, 10);
-    ok(result == NULL,
-       "(test a): _itow(%d, NULL, 10) has result %p, expected: NULL\n",
-       ulong2str[0].value, result);
+    if (0) {
+        /* Crashes on XP and W2K3 */
+        result = p_itow(ulong2str[0].value, NULL, 10);
+        ok(result == NULL,
+           "(test a): _itow(%d, NULL, 10) has result %p, expected: NULL\n",
+           ulong2str[0].value, result);
+    }
 
-    for (pos = 0; pos < LARGE_STRI_BUFFER_LENGTH; pos++) {
-	expected_wstr[pos] = ulong2str[0].Buffer[pos];
-    } /* for */
-    expected_wstr[LARGE_STRI_BUFFER_LENGTH] = '\0';
-    result = p_ltow(ulong2str[0].value, NULL, 10);
-    ok(result == NULL,
-       "(test b): _ltow(%d, NULL, 10) has result %p, expected: NULL\n",
-       ulong2str[0].value, result);
+    if (0) {
+        /* Crashes on XP and W2K3 */
+        result = p_ltow(ulong2str[0].value, NULL, 10);
+        ok(result == NULL,
+           "(test b): _ltow(%d, NULL, 10) has result %p, expected: NULL\n",
+           ulong2str[0].value, result);
+    }
 
-    for (pos = 0; pos < LARGE_STRI_BUFFER_LENGTH; pos++) {
-	expected_wstr[pos] = ulong2str[0].Buffer[pos];
-    } /* for */
-    expected_wstr[LARGE_STRI_BUFFER_LENGTH] = '\0';
-    result = p_ultow(ulong2str[0].value, NULL, 10);
-    ok(result == NULL,
-       "(test c): _ultow(%d, NULL, 10) has result %p, expected: NULL\n",
-       ulong2str[0].value, result);
+    if (0) {
+        /* Crashes on XP and W2K3 */
+        result = p_ultow(ulong2str[0].value, NULL, 10);
+        ok(result == NULL,
+           "(test c): _ultow(%d, NULL, 10) has result %p, expected: NULL\n",
+           ulong2str[0].value, result);
+    }
 }
 
 #define ULL(a,b) (((ULONGLONG)(a) << 32) | (b))
@@ -738,8 +733,6 @@ static void one_ui64tow_test(int test_num, const ulonglong2str_t *ulonglong2str)
 static void test_ulonglongtow(void)
 {
     int test_num;
-    int pos;
-    WCHAR expected_wstr[LARGE_STRI_BUFFER_LENGTH + 1];
     LPWSTR result;
 
     for (test_num = 0; test_num < NB_ULONGLONG2STR; test_num++) {
@@ -753,24 +746,22 @@ static void test_ulonglongtow(void)
 	} /* if */
     } /* for */
 
-    for (pos = 0; pos < LARGE_STRI_BUFFER_LENGTH; pos++) {
-	expected_wstr[pos] = ulong2str[0].Buffer[pos];
-    } /* for */
-    expected_wstr[LARGE_STRI_BUFFER_LENGTH] = '\0';
-    result = p_i64tow(ulong2str[0].value, NULL, 10);
-    ok(result == NULL,
-       "(test d): _i64tow(0x%x%08x, NULL, 10) has result %p, expected: NULL\n",
-       (DWORD)(ulonglong2str[0].value >> 32), (DWORD)ulonglong2str[0].value, result);
+    if (0) {
+        /* Crashes on XP and W2K3 */
+        result = p_i64tow(ulonglong2str[0].value, NULL, 10);
+        ok(result == NULL,
+           "(test d): _i64tow(0x%x%08x, NULL, 10) has result %p, expected: NULL\n",
+           (DWORD)(ulonglong2str[0].value >> 32), (DWORD)ulonglong2str[0].value, result);
+    }
 
     if (p_ui64tow) {
-        for (pos = 0; pos < LARGE_STRI_BUFFER_LENGTH; pos++) {
-	    expected_wstr[pos] = ulong2str[0].Buffer[pos];
-	} /* for */
-	expected_wstr[LARGE_STRI_BUFFER_LENGTH] = '\0';
-	result = p_ui64tow(ulong2str[0].value, NULL, 10);
-	ok(result == NULL,
-           "(test e): _ui64tow(0x%x%08x, NULL, 10) has result %p, expected: NULL\n",
-	   (DWORD)(ulonglong2str[0].value >> 32), (DWORD)ulonglong2str[0].value, result);
+        if (0) {
+            /* Crashes on XP and W2K3 */
+	    result = p_ui64tow(ulonglong2str[0].value, NULL, 10);
+	    ok(result == NULL,
+               "(test e): _ui64tow(0x%x%08x, NULL, 10) has result %p, expected: NULL\n",
+	       (DWORD)(ulonglong2str[0].value >> 32), (DWORD)ulonglong2str[0].value, result);
+        }
     } /* if */
 }
 

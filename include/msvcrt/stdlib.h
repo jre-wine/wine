@@ -11,6 +11,8 @@
 #define __WINE_USE_MSVCRT
 #endif
 
+#include <pshpack8.h>
+
 #ifndef NULL
 #ifdef __cplusplus
 #define NULL  0
@@ -26,8 +28,32 @@ typedef unsigned short wchar_t;
 #endif
 #endif
 
+
+typedef struct
+{
+    float f;
+} _CRT_FLOAT;
+
+typedef struct
+{
+    double x;
+} _CRT_DOUBLE;
+
+typedef struct
+{
+    unsigned char ld[10];
+} _LDOUBLE;
+
+#if defined(__x86_64__) && !defined(_WIN64)
+#define _WIN64
+#endif
+
 #if !defined(_MSC_VER) && !defined(__int64)
-#define __int64 long long
+# ifdef _WIN64
+#   define __int64 long
+# else
+#   define __int64 long long
+# endif
 #endif
 
 #define EXIT_SUCCESS        0
@@ -118,8 +144,11 @@ extern int*           _errno(void);
 typedef int (*_onexit_t)(void);
 
 
+int         _atodbl(_CRT_DOUBLE*,char*);
+int         _atoflt(_CRT_FLOAT*,char*);
 __int64     _atoi64(const char*);
 long double _atold(const char*);
+int         _atoldbl(_LDOUBLE*,char*);
 void        _beep(unsigned int,unsigned int);
 char*       _ecvt(double,int,int*,int*);
 char*       _fcvt(double,int,int*,int*);
@@ -245,5 +274,7 @@ static inline ldiv_t __wine_msvcrt_ldiv(long num, long denom)
 #define div(num,denom) __wine_msvcrt_div(num,denom)
 #define ldiv(num,denom) __wine_msvcrt_ldiv(num,denom)
 #endif
+
+#include <poppack.h>
 
 #endif /* __WINE_STDLIB_H */

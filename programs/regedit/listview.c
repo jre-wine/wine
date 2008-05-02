@@ -61,7 +61,10 @@ static LPTSTR get_item_text(HWND hwndLV, int item)
 
     curStr = HeapAlloc(GetProcessHeap(), 0, maxLen);
     if (!curStr) return NULL;
-    if (item == 0) return NULL; /* first item is ALWAYS a default */
+    if (item == 0) { /* first item is ALWAYS a default */
+        HeapFree(GetProcessHeap(), 0, curStr);
+        return NULL;
+    }
     do {
         ListView_GetItemText(hwndLV, item, 0, curStr, maxLen);
 	if (_tcslen(curStr) < maxLen - 1) return curStr;
@@ -154,7 +157,6 @@ static void AddEntryToList(HWND hwndLV, LPTSTR Name, DWORD dwValType,
 
     index = ListView_InsertItem(hwndLV, &item);
     if (index != -1) {
-        /*        LPTSTR pszText = NULL; */
         switch (dwValType) {
         case REG_SZ:
         case REG_EXPAND_SZ:
@@ -166,10 +168,9 @@ static void AddEntryToList(HWND hwndLV, LPTSTR Name, DWORD dwValType,
             break;
         case REG_DWORD: {
                 TCHAR buf[64];
-                wsprintf(buf, _T("0x%08X (%d)"), *(DWORD*)ValBuf, *(DWORD*)ValBuf);
+                wsprintf(buf, _T("0x%08x (%u)"), *(DWORD*)ValBuf, *(DWORD*)ValBuf);
                 ListView_SetItemText(hwndLV, index, 2, buf);
             }
-            /*            lpsRes = convertHexToDWORDStr(lpbData, dwLen); */
             break;
         case REG_BINARY: {
                 unsigned int i;
@@ -188,7 +189,6 @@ static void AddEntryToList(HWND hwndLV, LPTSTR Name, DWORD dwValType,
             break;
         default:
           {
-            /*            lpsRes = convertHexToHexCSV(lpbData, dwLen); */
             TCHAR szText[128];
             LoadString(hInst, IDS_REGISTRY_VALUE_CANT_DISPLAY, szText, COUNT_OF(szText));
             ListView_SetItemText(hwndLV, index, 2, szText);
@@ -449,7 +449,6 @@ static LRESULT CALLBACK ListWndProc(HWND hWnd, UINT message, WPARAM wParam, LPAR
     }
     default:
         return CallWindowProc(g_orgListWndProc, hWnd, message, wParam, lParam);
-        break;
     }
     return 0;
 }

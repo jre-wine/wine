@@ -63,7 +63,7 @@ static BYTE dma_buffer[DMATRFSIZE*2];
 /* Direct Sound playback stuff */
 static HMODULE hmodule;
 typedef HRESULT (WINAPI* fnDirectSoundCreate) (LPGUID,LPDIRECTSOUND*,LPUNKNOWN);
-fnDirectSoundCreate lpDirectSoundCreate;
+static fnDirectSoundCreate lpDirectSoundCreate;
 static LPDIRECTSOUND lpdsound;
 static LPDIRECTSOUNDBUFFER lpdsbuf;
 static DSBUFFERDESC buf_desc;
@@ -94,7 +94,7 @@ static DWORD CALLBACK SB_Poll( void *dummy )
         } else
             continue;
 
-        result = IDirectSoundBuffer_Lock(lpdsbuf,buf_off,size,&lpbuf1,&dwsize1,&lpbuf2,&dwsize2,0);
+        result = IDirectSoundBuffer_Lock(lpdsbuf,buf_off,size,(LPVOID *)&lpbuf1,&dwsize1,(LPVOID *)&lpbuf2,&dwsize2,0);
         if (result != DS_OK) {
 	  ERR("Unable to lock sound buffer !\n");
           continue;
@@ -220,7 +220,7 @@ static void SB_Reset(void)
         /* All right, let's put the magic value for autodetection */
         DSP_OutBuffer[0] = 0xaa;
     else
-        /* Something is wrong, put 0 to failed audetection */
+        /* Something is wrong, put 0 to failed autodetection */
         DSP_OutBuffer[0] = 0x00;
 }
 

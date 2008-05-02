@@ -67,7 +67,7 @@ typedef	struct tagWAVEMAPDATA {
     DWORD       nSamplesPerSecInner;
 } WAVEMAPDATA;
 
-static	BOOL	WAVEMAP_IsData(WAVEMAPDATA* wm)
+static	BOOL	WAVEMAP_IsData(const WAVEMAPDATA* wm)
 {
     return (!IsBadReadPtr(wm, sizeof(WAVEMAPDATA)) && wm->self == wm);
 }
@@ -434,7 +434,7 @@ static	DWORD	wodGetPosition(WAVEMAPDATA* wom, LPMMTIME lpTime, DWORD dwParam2)
     MMTIME      timepos;
     TRACE("(%p %p %08x)\n", wom, lpTime, dwParam2);
 
-    memcpy(&timepos, lpTime, sizeof(timepos));
+    timepos = *lpTime;
 
     /* For TIME_MS, we're going to recalculate using TIME_BYTES */
     if (lpTime->wType == TIME_MS)
@@ -988,7 +988,7 @@ static	DWORD	widGetPosition(WAVEMAPDATA* wim, LPMMTIME lpTime, DWORD dwParam2)
     MMTIME      timepos;
     TRACE("(%p %p %08x)\n", wim, lpTime, dwParam2);
 
-    memcpy(&timepos, lpTime, sizeof(timepos));
+    timepos = *lpTime;
 
     /* For TIME_MS, we're going to recalculate using TIME_BYTES */
     if (lpTime->wType == TIME_MS)

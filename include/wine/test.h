@@ -57,6 +57,7 @@ extern void winetest_start_todo( const char* platform );
 extern int winetest_loop_todo(void);
 extern void winetest_end_todo( const char* platform );
 extern int winetest_get_mainargs( char*** pargv );
+extern void winetest_wait_child_process( HANDLE process );
 
 #ifdef STANDALONE
 #define START_TEST(name) \
@@ -70,19 +71,23 @@ extern int winetest_get_mainargs( char*** pargv );
 #ifdef __GNUC__
 
 extern int winetest_ok( int condition, const char *msg, ... ) __attribute__((format (printf,2,3) ));
+extern void winetest_skip( const char *msg, ... ) __attribute__((format (printf,1,2)));
 extern void winetest_trace( const char *msg, ... ) __attribute__((format (printf,1,2)));
 
 #else /* __GNUC__ */
 
 extern int winetest_ok( int condition, const char *msg, ... );
+extern void winetest_skip( const char *msg, ... );
 extern void winetest_trace( const char *msg, ... );
 
 #endif /* __GNUC__ */
 
 #define ok_(file, line)     (winetest_set_location(file, line), 0) ? 0 : winetest_ok
+#define skip_(file, line)  (winetest_set_location(file, line), 0) ? (void)0 : winetest_skip
 #define trace_(file, line)  (winetest_set_location(file, line), 0) ? (void)0 : winetest_trace
 
 #define ok     ok_(__FILE__, __LINE__)
+#define skip   skip_(__FILE__, __LINE__)
 #define trace  trace_(__FILE__, __LINE__)
 
 #define todo(platform) for (winetest_start_todo(platform); \
@@ -169,6 +174,7 @@ static const struct test *current_test; /* test currently being run */
 
 static LONG successes;       /* number of successful tests */
 static LONG failures;        /* number of failures */
+static LONG skipped;         /* number of skipped test chunks */
 static LONG todo_successes;  /* number of successful tests inside todo block */
 static LONG todo_failures;   /* number of failures inside todo block */
 
@@ -292,6 +298,18 @@ void winetest_trace( const char *msg, ... )
     }
 }
 
+void winetest_skip( const char *msg, ... )
+{
+    va_list valist;
+    tls_data* data=get_tls_data();
+
+    fprintf( stdout, "%s:%d: Tests skipped: ", data->current_file, data->current_line );
+    va_start(valist, msg);
+    vfprintf(stdout, msg, valist);
+    va_end(valist);
+    skipped++;
+}
+
 void winetest_start_todo( const char* platform )
 {
     tls_data* data=get_tls_data();
@@ -323,12 +341,30 @@ int winetest_get_mainargs( char*** pargv )
     return winetest_argc;
 }
 
+void winetest_wait_child_process( HANDLE process )
+{
+    DWORD exit_code = 1;
+
+    if (WaitForSingleObject( process, 30000 ))
+        fprintf( stdout, "%s: child process wait failed\n", current_test->name );
+    else
+        GetExitCodeProcess( process, &exit_code );
+
+    if (exit_code)
+    {
+        fprintf( stdout, "%s: %u failures in child process\n",
+                 current_test->name, exit_code );
+        while (exit_code-- > 0)
+            InterlockedIncrement(&failures);
+    }
+}
+
 /* Find a test by name */
 static const struct test *find_test( const char *name )
 {
     const struct test *test;
     const char *p;
-    int len;
+    size_t len;
 
     if ((p = strrchr( name, '/' ))) name = p + 1;
     if ((p = strrchr( name, '\\' ))) name = p + 1;
@@ -371,14 +407,11 @@ static int run_test( const char *name )
 
     if (winetest_debug)
     {
-#if defined(WINE_NO_LONG_AS_INT) && !defined(_WIN64)
-        fprintf( stdout, "%s: %ld tests executed, %ld marked as todo, %ld %s.\n",
-#else
-        fprintf( stdout, "%s: %d tests executed, %d marked as todo, %d %s.\n",
-#endif
-                 name, successes + failures + todo_successes + todo_failures,
+        fprintf( stdout, "%s: %d tests executed (%d marked as todo, %d %s), %d skipped.\n",
+                 test->name, successes + failures + todo_successes + todo_failures,
                  todo_successes, failures + todo_failures,
-                 (failures + todo_failures != 1) ? "failures" : "failure" );
+                 (failures + todo_failures != 1) ? "failures" : "failure",
+                 skipped );
     }
     status = (failures + todo_failures < 255) ? failures + todo_failures : 255;
     return status;

@@ -23,8 +23,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include <windows.h>
 
 #include <math.h>
@@ -32,10 +30,16 @@
 #include "wine/test.h"
 #include "dsound.h"
 #include "dxerr8.h"
-
+#include "mmreg.h"
 #include "dsound_test.h"
 
 #define PI 3.14159265358979323846
+
+
+static HRESULT (WINAPI *pDirectSoundEnumerateA)(LPDSENUMCALLBACKA,LPVOID)=NULL;
+static HRESULT (WINAPI *pDirectSoundCreate)(LPCGUID,LPDIRECTSOUND*,
+    LPUNKNOWN)=NULL;
+
 char* wave_generate_la(WAVEFORMATEX* wfx, double duration, DWORD* size)
 {
     int i;
@@ -53,7 +57,7 @@ char* wave_generate_la(WAVEFORMATEX* wfx, double duration, DWORD* size)
             *b++=sample;
             if (wfx->nChannels==2)
                 *b++=sample;
-        } else {
+        } else if (wfx->wBitsPerSample == 16) {
             signed short sample=(signed short)((double)32767.5*y-0.5);
             b[0]=sample & 0xff;
             b[1]=sample >> 8;
@@ -62,6 +66,32 @@ char* wave_generate_la(WAVEFORMATEX* wfx, double duration, DWORD* size)
                 b[0]=sample & 0xff;
                 b[1]=sample >> 8;
                 b+=2;
+            }
+        } else if (wfx->wBitsPerSample == 24) {
+            signed int sample=(signed int)((double)8388607.5*y-0.5);
+            b[0]=sample & 0xff;
+            b[1]=(sample >> 8)&0xff;
+            b[2]=sample >> 16;
+            b+=3;
+            if (wfx->nChannels==2) {
+                b[0]=sample & 0xff;
+                b[1]=(sample >> 8)&0xff;
+                b[2]=sample >> 16;
+                b+=3;
+            }
+        } else if (wfx->wBitsPerSample == 32) {
+            signed int sample=(signed int)((double)2147483647.5*y-0.5);
+            b[0]=sample & 0xff;
+            b[1]=(sample >> 8)&0xff;
+            b[2]=(sample >> 16)&0xff;
+            b[3]=sample >> 24;
+            b+=4;
+            if (wfx->nChannels==2) {
+                b[0]=sample & 0xff;
+                b[1]=(sample >> 8)&0xff;
+                b[2]=(sample >> 16)&0xff;
+                b[3]=sample >> 24;
+                b+=4;
             }
         }
     }
@@ -108,7 +138,7 @@ const char * getDSBCAPS(DWORD xmask) {
     return buffer;
 }
 
-HWND get_hwnd()
+HWND get_hwnd(void)
 {
     HWND hwnd=GetForegroundWindow();
     if (!hwnd)
@@ -319,15 +349,25 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
               dsbcaps.dwBufferBytes);
     }
 
-    /* Query the format size. Note that it may not match sizeof(wfx) */
+    /* Query the format size. */
     size=0;
     rc=IDirectSoundBuffer_GetFormat(*dsbo,NULL,0,&size);
     ok(rc==DS_OK && size!=0,"IDirectSoundBuffer_GetFormat() should have "
        "returned the needed size: rc=%s size=%d\n",DXGetErrorString8(rc),size);
 
-    rc=IDirectSoundBuffer_GetFormat(*dsbo,&wfx,sizeof(wfx),NULL);
-    ok(rc==DS_OK,"IDirectSoundBuffer_GetFormat() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(size == sizeof(WAVEFORMATEX) || size == sizeof(WAVEFORMATEXTENSIBLE),
+       "Expected a correct structure size, got %d\n", size);
+
+    if (size == sizeof(WAVEFORMATEX)) {
+        rc=IDirectSoundBuffer_GetFormat(*dsbo,&wfx,size,NULL);
+    }
+    else if (size == sizeof(WAVEFORMATEXTENSIBLE)) {
+        WAVEFORMATEXTENSIBLE wfxe;
+        rc=IDirectSoundBuffer_GetFormat(*dsbo,(WAVEFORMATEX*)&wfxe,size,NULL);
+        wfx = wfxe.Format;
+    }
+    ok(rc==DS_OK,
+        "IDirectSoundBuffer_GetFormat() failed: %s\n", DXGetErrorString8(rc));
     if (rc==DS_OK && winetest_debug > 1) {
         trace("    Format: %s tag=0x%04x %dx%dx%d avg.B/s=%d align=%d\n",
               is_primary ? "Primary" : "Secondary",
@@ -416,6 +456,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
            "    buffer size changed after SetFormat() - "
            "previous size was %u, current size is %u\n",
            dsbcaps.dwBufferBytes, new_dsbcaps.dwBufferBytes);
+        dsbcaps.dwBufferBytes = new_dsbcaps.dwBufferBytes;
 
         /* Check for primary buffer flags change */
         ok(new_dsbcaps.dwFlags == dsbcaps.dwFlags,
@@ -604,8 +645,8 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
             ok(rc==DS_OK,"IDirectSound3dListener_GetAllParameters() "
                "failed: %s\n",DXGetErrorString8(rc));
             if (move_listener) {
-                listener_param.vPosition.x = -5.0;
-                listener_param.vVelocity.x = 10.0/duration;
+                listener_param.vPosition.x = -5.0f;
+                listener_param.vVelocity.x = (float)(10.0/duration);
             }
             rc=IDirectSound3DListener_SetAllParameters(listener,
                                                        &listener_param,
@@ -615,8 +656,8 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
         }
         if (buffer3d) {
             if (move_sound) {
-                buffer_param.vPosition.x = 100.0;
-                buffer_param.vVelocity.x = -200.0/duration;
+                buffer_param.vPosition.x = 100.0f;
+                buffer_param.vVelocity.x = (float)(-200.0/duration);
             }
             buffer_param.flMinDistance = 10;
             rc=IDirectSound3DBuffer_SetAllParameters(buffer,&buffer_param,
@@ -630,8 +671,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
             WaitForSingleObject(GetCurrentProcess(),TIME_SLICE);
             now=GetTickCount();
             if (listener && move_listener) {
-                listener_param.vPosition.x = -5.0+10.0*(now-start_time)/
-                    1000/duration;
+                listener_param.vPosition.x = (float)(-5.0+10.0*(now-start_time)/1000/duration);
                 if (winetest_debug>2)
                     trace("listener position=%g\n",listener_param.vPosition.x);
                 rc=IDirectSound3DListener_SetPosition(listener,
@@ -641,8 +681,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
                    "%s\n",DXGetErrorString8(rc));
             }
             if (buffer3d && move_sound) {
-                buffer_param.vPosition.x = 100-200.0*(now-start_time)/
-                    1000/duration;
+                buffer_param.vPosition.x = (float)(100-200.0*(now-start_time)/1000/duration);
                 if (winetest_debug>2)
                     trace("sound position=%g\n",buffer_param.vPosition.x);
                 rc=IDirectSound3DBuffer_SetPosition(buffer,
@@ -688,7 +727,7 @@ static HRESULT test_secondary(LPGUID lpGuid, int play,
     int ref;
 
     /* Create the DirectSound object */
-    rc=DirectSoundCreate(lpGuid,&dso,NULL);
+    rc=pDirectSoundCreate(lpGuid,&dso,NULL);
     ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
@@ -956,7 +995,7 @@ static HRESULT test_for_driver(LPGUID lpGuid)
     int ref;
 
     /* Create the DirectSound object */
-    rc=DirectSoundCreate(lpGuid,&dso,NULL);
+    rc=pDirectSoundCreate(lpGuid,&dso,NULL);
     ok(rc==DS_OK||rc==DSERR_NODRIVER||rc==DSERR_ALLOCATED||rc==E_FAIL,
        "DirectSoundCreate() failed: %s\n",DXGetErrorString8(rc));
     if (rc!=DS_OK)
@@ -980,7 +1019,7 @@ static HRESULT test_primary(LPGUID lpGuid)
     int ref, i;
 
     /* Create the DirectSound object */
-    rc=DirectSoundCreate(lpGuid,&dso,NULL);
+    rc=pDirectSoundCreate(lpGuid,&dso,NULL);
     ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
@@ -1067,7 +1106,7 @@ static HRESULT test_primary_3d(LPGUID lpGuid)
     int ref;
 
     /* Create the DirectSound object */
-    rc=DirectSoundCreate(lpGuid,&dso,NULL);
+    rc=pDirectSoundCreate(lpGuid,&dso,NULL);
     ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
@@ -1141,7 +1180,7 @@ static HRESULT test_primary_3d_with_listener(LPGUID lpGuid)
     int ref;
 
     /* Create the DirectSound object */
-    rc=DirectSoundCreate(lpGuid,&dso,NULL);
+    rc=pDirectSoundCreate(lpGuid,&dso,NULL);
     ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %s\n",
        DXGetErrorString8(rc));
     if (rc!=DS_OK)
@@ -1282,17 +1321,32 @@ static BOOL WINAPI dsenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
 static void ds3d_tests(void)
 {
     HRESULT rc;
-    rc=DirectSoundEnumerateA(&dsenum_callback,NULL);
+    rc=pDirectSoundEnumerateA(&dsenum_callback,NULL);
     ok(rc==DS_OK,"DirectSoundEnumerateA() failed: %s\n",DXGetErrorString8(rc));
 }
 
 START_TEST(ds3d)
 {
+    HMODULE hDsound;
+
     CoInitialize(NULL);
 
-    trace("DLL Version: %s\n", get_file_version("dsound.dll"));
+    hDsound = LoadLibrary("dsound.dll");
+    if (hDsound)
+    {
+        trace("DLL Version: %s\n", get_file_version("dsound.dll"));
 
-    ds3d_tests();
+        pDirectSoundEnumerateA = (void*)GetProcAddress(hDsound,
+            "DirectSoundEnumerateA");
+        pDirectSoundCreate = (void*)GetProcAddress(hDsound,
+            "DirectSoundCreate");
+
+        ds3d_tests();
+
+        FreeLibrary(hDsound);
+    }
+    else
+        skip("dsound.dll not found!\n");
 
     CoUninitialize();
 }

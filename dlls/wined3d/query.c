@@ -25,15 +25,13 @@
 #include "wined3d_private.h"
 
 /*
- * http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directx/graphics/programmingguide/advancedtopics/Queries.asp
- *
  * Occlusion Queries:
  * http://www.gris.uni-tuebingen.de/~bartz/Publications/paper/hww98.pdf
  * http://oss.sgi.com/projects/ogl-sample/registry/ARB/occlusion_query.txt
  */
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION ((IWineD3DImpl *)(((IWineD3DDeviceImpl *)This->wineD3DDevice)->wineD3D))->gl_info
+#define GLINFO_LOCATION This->wineD3DDevice->adapter->gl_info
 
 /* *******************************************
    IWineD3DQuery IUnknown parts follow
@@ -65,6 +63,19 @@ static ULONG  WINAPI IWineD3DQueryImpl_Release(IWineD3DQuery *iface) {
     TRACE("(%p) : Releasing from %d\n", This, This->ref);
     ref = InterlockedDecrement(&This->ref);
     if (ref == 0) {
+        if(This->type == WINED3DQUERYTYPE_EVENT) {
+            if(GL_SUPPORT(APPLE_FENCE)) {
+                GL_EXTCALL(glDeleteFencesAPPLE(1, &((WineQueryEventData *)(This->extendedData))->fenceId));
+                checkGLcall("glDeleteFencesAPPLE");
+            } else if(GL_SUPPORT(NV_FENCE)) {
+                GL_EXTCALL(glDeleteFencesNV(1, &((WineQueryEventData *)(This->extendedData))->fenceId));
+                checkGLcall("glDeleteFencesNV");
+            }
+        } else if(This->type == WINED3DQUERYTYPE_OCCLUSION && GL_SUPPORT(ARB_OCCLUSION_QUERY)) {
+            GL_EXTCALL(glDeleteQueriesARB(1, &((WineQueryOcclusionData *)(This->extendedData))->queryId));
+            checkGLcall("glDeleteQueriesARB");
+        }
+
         HeapFree(GetProcessHeap(), 0, This->extendedData);
         HeapFree(GetProcessHeap(), 0, This);
     }
@@ -98,20 +109,15 @@ static HRESULT  WINAPI IWineD3DQueryImpl_GetData(IWineD3DQuery* iface, void* pDa
 
     TRACE("(%p) : type %#x, pData %p, dwSize %#x, dwGetDataFlags %#x\n", This, This->type, pData, dwSize, dwGetDataFlags);
 
-    if(dwSize == 0){
-        /*you can use this method to poll the resource for the query status*/
-        /*We return success(S_OK) if we support a feature, and faikure(S_FALSE) if we don't, just return success and fluff it for now*/
-        return S_OK;
-    }else{
-    }
-
     switch (This->type){
 
     case WINED3DQUERYTYPE_VCACHE:
     {
 
         WINED3DDEVINFO_VCACHE *data = (WINED3DDEVINFO_VCACHE *)pData;
-        data->Pattern     = MAKEFOURCC('C','A','C','H');
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_VCACHE\n", This);
+        if(pData == NULL || dwSize == 0) break;
+        data->Pattern     = WINEMAKEFOURCC('C','A','C','H');
         data->OptMethod   = 0; /*0 get longest strips, 1 optimize vertex cache*/
         data->CacheSize   = 0; /*cache size, only required if OptMethod == 1*/
         data->MagicNumber = 0; /*only required if OptMethod == 1 (used internally)*/
@@ -122,9 +128,11 @@ static HRESULT  WINAPI IWineD3DQueryImpl_GetData(IWineD3DQuery* iface, void* pDa
     {
         WINED3DDEVINFO_RESOURCEMANAGER *data = (WINED3DDEVINFO_RESOURCEMANAGER *)pData;
         int i;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_RESOURCEMANAGER\n", This);
+        if(pData == NULL || dwSize == 0) break;
         for(i = 0; i < WINED3DRTYPECOUNT; i++){
             /*I'm setting the default values to 1 so as to reduce the risk of a div/0 in the caller*/
-            /*  isTextureResident could be used to get some of this infomration  */
+            /*  isTextureResident could be used to get some of this information  */
             data->stats[i].bThrashing            = FALSE;
             data->stats[i].ApproxBytesDownloaded = 1;
             data->stats[i].NumEvicts             = 1;
@@ -143,66 +151,42 @@ static HRESULT  WINAPI IWineD3DQueryImpl_GetData(IWineD3DQuery* iface, void* pDa
     case WINED3DQUERYTYPE_VERTEXSTATS:
     {
         WINED3DDEVINFO_VERTEXSTATS *data = (WINED3DDEVINFO_VERTEXSTATS *)pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_VERTEXSTATS\n", This);
+        if(pData == NULL || dwSize == 0) break;
         data->NumRenderedTriangles      = 1;
         data->NumExtraClippingTriangles = 1;
 
     }
     break;
-    case WINED3DQUERYTYPE_EVENT:
-    {
-        BOOL* data = pData;
-        *data = TRUE; /*Don't know what this is supposed to be*/
-    }
-    break;
-    case WINED3DQUERYTYPE_OCCLUSION:
-    {
-        DWORD* data = pData;
-        if (GL_SUPPORT(ARB_OCCLUSION_QUERY)) {
-            GLuint available;
-            GLuint samples;
-            GLuint queryId = ((WineQueryOcclusionData *)This->extendedData)->queryId;
-
-            GL_EXTCALL(glGetQueryObjectuivARB(queryId, GL_QUERY_RESULT_AVAILABLE_ARB, &available));
-            checkGLcall("glGetQueryObjectuivARB(GL_QUERY_RESULT_AVAILABLE)\n");
-            TRACE("(%p) : available %d.\n", This, available);
-
-            if (available || dwGetDataFlags & WINED3DGETDATA_FLUSH) {
-                GL_EXTCALL(glGetQueryObjectuivARB(queryId, GL_QUERY_RESULT_ARB, &samples));
-                checkGLcall("glGetQueryObjectuivARB(GL_QUERY_RESULT)\n");
-                TRACE("(%p) : Returning %d samples.\n", This, samples);
-                *data = samples;
-                res = S_OK;
-            } else {
-                res = S_FALSE;
-            }
-        } else {
-            FIXME("(%p) : Occlusion queries not supported. Returning 1.\n", This);
-            *data = 1;
-            res = S_OK;
-        }
-    }
-    break;
     case WINED3DQUERYTYPE_TIMESTAMP:
     {
         UINT64* data = pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_TIMESTAMP\n", This);
+        if(pData == NULL || dwSize == 0) break;
         *data = 1; /*Don't know what this is supposed to be*/
     }
     break;
     case WINED3DQUERYTYPE_TIMESTAMPDISJOINT:
     {
         BOOL* data = pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_TIMESTAMPDISJOINT\n", This);
+        if(pData == NULL || dwSize == 0) break;
         *data = FALSE; /*Don't know what this is supposed to be*/
     }
     break;
     case WINED3DQUERYTYPE_TIMESTAMPFREQ:
     {
         UINT64* data = pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_TIMESTAMPFREQ\n", This);
+        if(pData == NULL || dwSize == 0) break;
         *data = 1; /*Don't know what this is supposed to be*/
     }
     break;
     case WINED3DQUERYTYPE_PIPELINETIMINGS:
     {
         WINED3DDEVINFO_PIPELINETIMINGS *data = (WINED3DDEVINFO_PIPELINETIMINGS *)pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_PIPELINETIMINGS\n", This);
+        if(pData == NULL || dwSize == 0) break;
 
         data->VertexProcessingTimePercent    =   1.0f;
         data->PixelProcessingTimePercent     =   1.0f;
@@ -213,7 +197,9 @@ static HRESULT  WINAPI IWineD3DQueryImpl_GetData(IWineD3DQuery* iface, void* pDa
     case WINED3DQUERYTYPE_INTERFACETIMINGS:
     {
         WINED3DDEVINFO_INTERFACETIMINGS *data = (WINED3DDEVINFO_INTERFACETIMINGS *)pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_INTERFACETIMINGS\n", This);
 
+        if(pData == NULL || dwSize == 0) break;
         data->WaitingForGPUToUseApplicationResourceTimePercent =   1.0f;
         data->WaitingForGPUToAcceptMoreCommandsTimePercent     =   1.0f;
         data->WaitingForGPUToStayWithinLatencyTimePercent      =   1.0f;
@@ -225,6 +211,9 @@ static HRESULT  WINAPI IWineD3DQueryImpl_GetData(IWineD3DQuery* iface, void* pDa
     case WINED3DQUERYTYPE_VERTEXTIMINGS:
     {
         WINED3DDEVINFO_STAGETIMINGS *data = (WINED3DDEVINFO_STAGETIMINGS *)pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_VERTEXTIMINGS\n", This);
+
+        if(pData == NULL || dwSize == 0) break;
         data->MemoryProcessingPercent      = 50.0f;
         data->ComputationProcessingPercent = 50.0f;
 
@@ -233,6 +222,9 @@ static HRESULT  WINAPI IWineD3DQueryImpl_GetData(IWineD3DQuery* iface, void* pDa
     case WINED3DQUERYTYPE_PIXELTIMINGS:
     {
         WINED3DDEVINFO_STAGETIMINGS *data = (WINED3DDEVINFO_STAGETIMINGS *)pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_PIXELTIMINGS\n", This);
+
+        if(pData == NULL || dwSize == 0) break;
         data->MemoryProcessingPercent      = 50.0f;
         data->ComputationProcessingPercent = 50.0f;
     }
@@ -240,6 +232,9 @@ static HRESULT  WINAPI IWineD3DQueryImpl_GetData(IWineD3DQuery* iface, void* pDa
     case WINED3DQUERYTYPE_BANDWIDTHTIMINGS:
     {
         WINED3DDEVINFO_BANDWIDTHTIMINGS *data = (WINED3DDEVINFO_BANDWIDTHTIMINGS *)pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_BANDWIDTHTIMINGS\n", This);
+
+        if(pData == NULL || dwSize == 0) break;
         data->MaxBandwidthUtilized                =  1.0f;
         data->FrontEndUploadMemoryUtilizedPercent =  1.0f;
         data->VertexRateUtilizedPercent           =  1.0f;
@@ -250,7 +245,9 @@ static HRESULT  WINAPI IWineD3DQueryImpl_GetData(IWineD3DQuery* iface, void* pDa
     case WINED3DQUERYTYPE_CACHEUTILIZATION:
     {
         WINED3DDEVINFO_CACHEUTILIZATION *data = (WINED3DDEVINFO_CACHEUTILIZATION *)pData;
+        FIXME("(%p): Unimplemented query WINED3DQUERYTYPE_CACHEUTILIZATION\n", This);
 
+        if(pData == NULL || dwSize == 0) break;
         data->TextureCacheHitRate             = 1.0f;
         data->PostTransformVertexCacheHitRate = 1.0f;
     }
@@ -265,10 +262,80 @@ static HRESULT  WINAPI IWineD3DQueryImpl_GetData(IWineD3DQuery* iface, void* pDa
     /*dwGetDataFlags = 0 || D3DGETDATA_FLUSH
     D3DGETDATA_FLUSH may return WINED3DERR_DEVICELOST if the device is lost
     */
-    FIXME("(%p) : type %#x, Partial stub\n", This, This->type);
     return res; /* S_OK if the query data is available*/
 }
 
+static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_GetData(IWineD3DQuery* iface, void* pData, DWORD dwSize, DWORD dwGetDataFlags) {
+    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *) iface;
+    DWORD* data = pData;
+    HRESULT res;
+    TRACE("(%p) : type D3DQUERY_OCCLUSION, pData %p, dwSize %#x, dwGetDataFlags %#x\n", This, pData, dwSize, dwGetDataFlags);
+
+    if(This->state == QUERY_CREATED) {
+        /* D3D allows GetData on a new query, OpenGL doesn't. So just invent the data ourselves */
+        TRACE("Query wasn't yet started, returning S_OK\n");
+        res = S_OK;
+        if(data) *data = 0;
+    } else if(This->state == QUERY_BUILDING) {
+        /* Msdn says this returns an error, but our tests show that S_FALSE is returned */
+        TRACE("Query is building, returning S_FALSE\n");
+        res = S_FALSE;
+    } else if (GL_SUPPORT(ARB_OCCLUSION_QUERY) &&
+        ((WineQueryOcclusionData *)This->extendedData)->ctx == This->wineD3DDevice->activeContext &&
+                This->wineD3DDevice->activeContext->tid == GetCurrentThreadId()) {
+        GLuint available;
+        GLuint samples;
+        GLuint queryId = ((WineQueryOcclusionData *)This->extendedData)->queryId;
+
+        GL_EXTCALL(glGetQueryObjectuivARB(queryId, GL_QUERY_RESULT_AVAILABLE_ARB, &available));
+        checkGLcall("glGetQueryObjectuivARB(GL_QUERY_RESULT_AVAILABLE)\n");
+        TRACE("(%p) : available %d.\n", This, available);
+
+        if (available) {
+            if(data) {
+                GL_EXTCALL(glGetQueryObjectuivARB(queryId, GL_QUERY_RESULT_ARB, &samples));
+                checkGLcall("glGetQueryObjectuivARB(GL_QUERY_RESULT)\n");
+                TRACE("(%p) : Returning %d samples.\n", This, samples);
+                *data = samples;
+            }
+            res = S_OK;
+        } else {
+            res = S_FALSE;
+        }
+    } else {
+        WARN("(%p) : Occlusion queries not supported, or wrong context. Returning 1.\n", This);
+        *data = 1;
+        res = S_OK;
+    }
+    return res;
+}
+
+static HRESULT  WINAPI IWineD3DEventQueryImpl_GetData(IWineD3DQuery* iface, void* pData, DWORD dwSize, DWORD dwGetDataFlags) {
+    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *) iface;
+    BOOL* data = pData;
+    WineD3DContext *ctx;
+    TRACE("(%p) : type D3DQUERY_EVENT, pData %p, dwSize %#x, dwGetDataFlags %#x\n", This, pData, dwSize, dwGetDataFlags);
+
+    ctx = ((WineQueryEventData *)This->extendedData)->ctx;
+    if(pData == NULL || dwSize == 0) {
+        return S_OK;
+    } if(ctx != This->wineD3DDevice->activeContext || ctx->tid != GetCurrentThreadId()) {
+        /* See comment in IWineD3DQuery::Issue, event query codeblock */
+        WARN("Query context not active, reporting GPU idle\n");
+        *data = TRUE;
+    } else if(GL_SUPPORT(APPLE_FENCE)) {
+        *data = GL_EXTCALL(glTestFenceAPPLE(((WineQueryEventData *)This->extendedData)->fenceId));
+        checkGLcall("glTestFenceAPPLE");
+    } else if(GL_SUPPORT(NV_FENCE)) {
+        *data = GL_EXTCALL(glTestFenceNV(((WineQueryEventData *)This->extendedData)->fenceId));
+        checkGLcall("glTestFenceNV");
+    } else {
+        WARN("(%p): reporting GPU idle\n", This);
+        *data = TRUE;
+    }
+
+    return S_OK;
+}
 
 static DWORD  WINAPI IWineD3DQueryImpl_GetDataSize(IWineD3DQuery* iface){
     IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
@@ -286,9 +353,6 @@ static DWORD  WINAPI IWineD3DQueryImpl_GetDataSize(IWineD3DQuery* iface){
         break;
     case WINED3DQUERYTYPE_EVENT:
         dataSize = sizeof(BOOL);
-        break;
-    case WINED3DQUERYTYPE_OCCLUSION:
-        dataSize = sizeof(DWORD);
         break;
     case WINED3DQUERYTYPE_TIMESTAMP:
         dataSize = sizeof(UINT64);
@@ -324,6 +388,17 @@ static DWORD  WINAPI IWineD3DQueryImpl_GetDataSize(IWineD3DQuery* iface){
     return dataSize;
 }
 
+static DWORD  WINAPI IWineD3DEventQueryImpl_GetDataSize(IWineD3DQuery* iface){
+    TRACE("(%p) : type D3DQUERY_EVENT\n", iface);
+
+    return sizeof(BOOL);
+}
+
+static DWORD  WINAPI IWineD3DOcclusionQueryImpl_GetDataSize(IWineD3DQuery* iface){
+    TRACE("(%p) : type D3DQUERY_OCCLUSION\n", iface);
+
+    return sizeof(DWORD);
+}
 
 static WINED3DQUERYTYPE  WINAPI IWineD3DQueryImpl_GetType(IWineD3DQuery* iface){
     IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
@@ -331,30 +406,96 @@ static WINED3DQUERYTYPE  WINAPI IWineD3DQueryImpl_GetType(IWineD3DQuery* iface){
 }
 
 
+static HRESULT  WINAPI IWineD3DEventQueryImpl_Issue(IWineD3DQuery* iface,  DWORD dwIssueFlags) {
+    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
+
+    TRACE("(%p) : dwIssueFlags %#x, type D3DQUERY_EVENT\n", This, dwIssueFlags);
+    if (dwIssueFlags & WINED3DISSUE_END) {
+        WineD3DContext *ctx = ((WineQueryEventData *)This->extendedData)->ctx;
+        if(ctx != This->wineD3DDevice->activeContext || ctx->tid != GetCurrentThreadId()) {
+            /* GL fences can be used only from the context that created them,
+             * so if a different context is active, don't bother setting the query. The penalty
+             * of a context switch is most likely higher than the gain of a correct query result
+             *
+             * If the query is used from a different thread, don't bother creating a multithread
+             * context - there's no point in doing that as the query would be unusable anyway
+             */
+            WARN("Query context not active\n");
+        } else if(GL_SUPPORT(APPLE_FENCE)) {
+            GL_EXTCALL(glSetFenceAPPLE(((WineQueryEventData *)This->extendedData)->fenceId));
+            checkGLcall("glSetFenceAPPLE");
+        } else if (GL_SUPPORT(NV_FENCE)) {
+            GL_EXTCALL(glSetFenceNV(((WineQueryEventData *)This->extendedData)->fenceId, GL_ALL_COMPLETED_NV));
+            checkGLcall("glSetFenceNV");
+        }
+    } else if(dwIssueFlags & WINED3DISSUE_BEGIN) {
+        /* Started implicitly at device creation */
+        ERR("Event query issued with START flag - what to do?\n");
+    }
+
+    if(dwIssueFlags & WINED3DISSUE_BEGIN) {
+        This->state = QUERY_BUILDING;
+    } else {
+        This->state = QUERY_SIGNALLED;
+    }
+
+    return WINED3D_OK;
+}
+
+static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_Issue(IWineD3DQuery* iface,  DWORD dwIssueFlags) {
+    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
+
+    if (GL_SUPPORT(ARB_OCCLUSION_QUERY)) {
+        WineD3DContext *ctx = ((WineQueryOcclusionData *)This->extendedData)->ctx;
+
+        if(ctx != This->wineD3DDevice->activeContext || ctx->tid != GetCurrentThreadId()) {
+            WARN("Not the owning context, can't start query\n");
+        } else {
+            /* This is allowed according to msdn and our tests. Reset the query and restart */
+            if (dwIssueFlags & WINED3DISSUE_BEGIN) {
+                if(This->state == QUERY_BUILDING) {
+                    GL_EXTCALL(glEndQueryARB(GL_SAMPLES_PASSED_ARB));
+                    checkGLcall("glEndQuery()");
+                }
+
+                GL_EXTCALL(glBeginQueryARB(GL_SAMPLES_PASSED_ARB, ((WineQueryOcclusionData *)This->extendedData)->queryId));
+                checkGLcall("glBeginQuery()");
+            }
+            if (dwIssueFlags & WINED3DISSUE_END) {
+                /* Msdn says _END on a non-building occlusion query returns an error, but
+                 * our tests show that it returns OK. But OpenGL doesn't like it, so avoid
+                 * generating an error
+                 */
+                if(This->state == QUERY_BUILDING) {
+                    GL_EXTCALL(glEndQueryARB(GL_SAMPLES_PASSED_ARB));
+                    checkGLcall("glEndQuery()");
+                }
+            }
+        }
+    } else {
+        FIXME("(%p) : Occlusion queries not supported\n", This);
+    }
+
+    if(dwIssueFlags & WINED3DISSUE_BEGIN) {
+        This->state = QUERY_BUILDING;
+    } else {
+        This->state = QUERY_SIGNALLED;
+    }
+    return WINED3D_OK; /* can be WINED3DERR_INVALIDCALL.    */
+}
+
 static HRESULT  WINAPI IWineD3DQueryImpl_Issue(IWineD3DQuery* iface,  DWORD dwIssueFlags){
     IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
 
     TRACE("(%p) : dwIssueFlags %#x, type %#x\n", This, dwIssueFlags, This->type);
 
-    switch (This->type) {
-        case WINED3DQUERYTYPE_OCCLUSION:
-            if (GL_SUPPORT(ARB_OCCLUSION_QUERY)) {
-                if (dwIssueFlags & D3DISSUE_BEGIN) {
-                    GL_EXTCALL(glBeginQueryARB(GL_SAMPLES_PASSED_ARB, ((WineQueryOcclusionData *)This->extendedData)->queryId));
-                    checkGLcall("glBeginQuery()");
-                }
-                if (dwIssueFlags & D3DISSUE_END) {
-                    GL_EXTCALL(glEndQueryARB(GL_SAMPLES_PASSED_ARB));
-                    checkGLcall("glEndQuery()");
-                }
-            } else {
-                FIXME("(%p) : Occlusion queries not supported\n", This);
-            }
-            break;
+    /* The fixme is printed when the app asks for the resulting data */
+    WARN("(%p) : Unhandled query type %#x\n", This, This->type);
 
-        default:
-            FIXME("(%p) : Unhandled query type %#x\n", This, This->type);
-            break;
+    if(dwIssueFlags & WINED3DISSUE_BEGIN) {
+        This->state = QUERY_BUILDING;
+    } else {
+        This->state = QUERY_SIGNALLED;
     }
 
     return WINED3D_OK; /* can be WINED3DERR_INVALIDCALL.    */
@@ -378,4 +519,34 @@ const IWineD3DQueryVtbl IWineD3DQuery_Vtbl =
     IWineD3DQueryImpl_GetDataSize,
     IWineD3DQueryImpl_GetType,
     IWineD3DQueryImpl_Issue
+};
+
+const IWineD3DQueryVtbl IWineD3DEventQuery_Vtbl =
+{
+    /*** IUnknown methods ***/
+    IWineD3DQueryImpl_QueryInterface,
+    IWineD3DQueryImpl_AddRef,
+    IWineD3DQueryImpl_Release,
+    /*** IWineD3Dquery methods ***/
+    IWineD3DQueryImpl_GetParent,
+    IWineD3DQueryImpl_GetDevice,
+    IWineD3DEventQueryImpl_GetData,
+    IWineD3DEventQueryImpl_GetDataSize,
+    IWineD3DQueryImpl_GetType,
+    IWineD3DEventQueryImpl_Issue
+};
+
+const IWineD3DQueryVtbl IWineD3DOcclusionQuery_Vtbl =
+{
+    /*** IUnknown methods ***/
+    IWineD3DQueryImpl_QueryInterface,
+    IWineD3DQueryImpl_AddRef,
+    IWineD3DQueryImpl_Release,
+    /*** IWineD3Dquery methods ***/
+    IWineD3DQueryImpl_GetParent,
+    IWineD3DQueryImpl_GetDevice,
+    IWineD3DOcclusionQueryImpl_GetData,
+    IWineD3DOcclusionQueryImpl_GetDataSize,
+    IWineD3DQueryImpl_GetType,
+    IWineD3DOcclusionQueryImpl_Issue
 };

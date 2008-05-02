@@ -175,7 +175,7 @@ BOOL WINAPI SymSetSearchPath(HANDLE hProcess, PCSTR searchPath)
 /***********************************************************************
  *		SymGetSearchPathW (DBGHELP.@)
  */
-BOOL WINAPI SymGetSearchPathW(HANDLE hProcess, LPWSTR szSearchPath, 
+BOOL WINAPI SymGetSearchPathW(HANDLE hProcess, PWSTR szSearchPath,
                               DWORD SearchPathLength)
 {
     struct process* pcs = process_find_by_handle(hProcess);
@@ -188,16 +188,15 @@ BOOL WINAPI SymGetSearchPathW(HANDLE hProcess, LPWSTR szSearchPath,
 /***********************************************************************
  *		SymGetSearchPath (DBGHELP.@)
  */
-BOOL WINAPI SymGetSearchPath(HANDLE hProcess, LPSTR szSearchPath, 
+BOOL WINAPI SymGetSearchPath(HANDLE hProcess, PSTR szSearchPath,
                              DWORD SearchPathLength)
 {
-    WCHAR*      buffer = HeapAlloc(GetProcessHeap(), 0, SearchPathLength);
+    WCHAR*      buffer = HeapAlloc(GetProcessHeap(), 0, SearchPathLength * sizeof(WCHAR));
     BOOL        ret = FALSE;
 
     if (buffer)
     {
-        ret = SymGetSearchPathW(hProcess, buffer,
-                                SearchPathLength * sizeof(WCHAR));
+        ret = SymGetSearchPathW(hProcess, buffer, SearchPathLength);
         if (ret)
             WideCharToMultiByte(CP_ACP, 0, buffer, SearchPathLength,
                                 szSearchPath, SearchPathLength, NULL, NULL);
@@ -212,10 +211,10 @@ BOOL WINAPI SymGetSearchPath(HANDLE hProcess, LPSTR szSearchPath,
  * SymInitialize helper: loads in dbghelp all known (and loaded modules)
  * this assumes that hProcess is a handle on a valid process
  */
-static BOOL WINAPI process_invade_cb(char* name, DWORD base, DWORD size, void* user)
+static BOOL WINAPI process_invade_cb(PCSTR name, ULONG base, ULONG size, PVOID user)
 {
     char        tmp[MAX_PATH];
-    HANDLE      hProcess = (HANDLE)user;
+    HANDLE      hProcess = user;
 
     if (!GetModuleFileNameExA(hProcess, (HMODULE)base, 
                               tmp, sizeof(tmp)))
@@ -269,8 +268,14 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
 
     TRACE("(%p %s %u)\n", hProcess, debugstr_w(UserSearchPath), fInvadeProcess);
 
-    if (process_find_by_handle(hProcess))
-        FIXME("what to do ??\n");
+    if (process_find_by_handle(hProcess)){
+        WARN("the symbols for this process have already been initialized!\n");
+
+        /* MSDN says to only call this function once unless SymCleanup() has been called since the last call.
+           It also says to call SymRefreshModuleList() instead if you just want the module list refreshed.
+           Native still returns TRUE even if the process has already been initialized. */
+        return TRUE;
+    }
 
     pcs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*pcs));
     if (!pcs) return FALSE;
@@ -321,7 +326,7 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
     if (check_live_target(pcs))
     {
         if (fInvadeProcess)
-            EnumerateLoadedModules(hProcess, process_invade_cb, (void*)hProcess);
+            EnumerateLoadedModules(hProcess, process_invade_cb, hProcess);
         elf_synchronize_module_list(pcs);
     }
     else if (fInvadeProcess)
@@ -380,6 +385,8 @@ BOOL WINAPI SymCleanup(HANDLE hProcess)
             return TRUE;
         }
     }
+
+    ERR("this process has not had SymInitialize() called for it!\n");
     return FALSE;
 }
 
@@ -436,6 +443,7 @@ BOOL WINAPI SymSetContext(HANDLE hProcess, PIMAGEHLP_STACK_FRAME StackFrame,
               wine_dbgstr_longlong(pcs->ctx_frame.ReturnOffset),
               wine_dbgstr_longlong(pcs->ctx_frame.FrameOffset),
               wine_dbgstr_longlong(pcs->ctx_frame.StackOffset));
+        pcs->ctx_frame.InstructionOffset = StackFrame->InstructionOffset;
         SetLastError(ERROR_ACCESS_DENIED); /* latest MSDN says ERROR_SUCCESS */
         return FALSE;
     }
@@ -485,10 +493,10 @@ static BOOL CALLBACK reg_cb64to32(HANDLE hProcess, ULONG action, ULONG64 data, U
     case CBA_EVENT:
     case CBA_READ_MEMORY:
     default:
-        FIXME("No mapping for action %lu\n", action);
+        FIXME("No mapping for action %u\n", action);
         return FALSE;
     }
-    return cb32(hProcess, action, (PVOID)data32, (PVOID)user32);
+    return cb32(hProcess, action, data32, (PVOID)user32);
 }
 
 /******************************************************************
@@ -496,13 +504,13 @@ static BOOL CALLBACK reg_cb64to32(HANDLE hProcess, ULONG action, ULONG64 data, U
  */
 BOOL pcs_callback(const struct process* pcs, ULONG action, void* data)
 {
-    TRACE("%p %lu %p\n", pcs, action, data);
+    TRACE("%p %u %p\n", pcs, action, data);
 
     if (!pcs->reg_cb) return FALSE;
-    if (pcs->reg_is_unicode)
+    if (!pcs->reg_is_unicode)
     {
-        IMAGEHLP_DEFERRED_SYMBOL_LOAD64*    idsl;
-        IMAGEHLP_DEFERRED_SYMBOL_LOADW64    idslW;
+        IMAGEHLP_DEFERRED_SYMBOL_LOAD64     idsl;
+        IMAGEHLP_DEFERRED_SYMBOL_LOADW64*   idslW;
 
         switch (action)
         {
@@ -515,21 +523,21 @@ BOOL pcs_callback(const struct process* pcs, ULONG action, void* data)
         case CBA_DEFERRED_SYMBOL_LOAD_FAILURE:
         case CBA_DEFERRED_SYMBOL_LOAD_PARTIAL:
         case CBA_DEFERRED_SYMBOL_LOAD_START:
-            idsl = (IMAGEHLP_DEFERRED_SYMBOL_LOAD64*)(DWORD)data;
-            idslW.SizeOfStruct = sizeof(idslW);
-            idslW.BaseOfImage = idsl->BaseOfImage;
-            idslW.CheckSum = idsl->CheckSum;
-            idslW.TimeDateStamp = idsl->TimeDateStamp;
-            MultiByteToWideChar(CP_ACP, 0, idsl->FileName, -1, 
-                                idslW.FileName, sizeof(idslW.FileName) / sizeof(WCHAR));
-            idslW.Reparse = idsl->Reparse;
-            data = &idslW;
+            idslW = (IMAGEHLP_DEFERRED_SYMBOL_LOADW64*)(DWORD)data;
+            idsl.SizeOfStruct = sizeof(idsl);
+            idsl.BaseOfImage = idslW->BaseOfImage;
+            idsl.CheckSum = idslW->CheckSum;
+            idsl.TimeDateStamp = idslW->TimeDateStamp;
+            WideCharToMultiByte(CP_ACP, 0, idslW->FileName, -1,
+                                idsl.FileName, sizeof(idsl.FileName), NULL, NULL);
+            idsl.Reparse = idslW->Reparse;
+            data = &idsl;
             break;
         case CBA_DUPLICATE_SYMBOL:
         case CBA_EVENT:
         case CBA_READ_MEMORY:
         default:
-            FIXME("No mapping for action %lu\n", action);
+            FIXME("No mapping for action %u\n", action);
             return FALSE;
         }
     }

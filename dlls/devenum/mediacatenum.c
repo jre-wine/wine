@@ -23,7 +23,6 @@
  */
 
 #include "devenum_private.h"
-#include "vfwmsgs.h"
 #include "oleauto.h"
 #include "ocidl.h"
 
@@ -679,7 +678,7 @@ static const IMonikerVtbl IMoniker_Vtbl =
     DEVENUM_IMediaCatMoniker_IsSystemMoniker
 };
 
-MediaCatMoniker * DEVENUM_IMediaCatMoniker_Construct()
+MediaCatMoniker * DEVENUM_IMediaCatMoniker_Construct(void)
 {
     MediaCatMoniker * pMoniker = NULL;
     pMoniker = CoTaskMemAlloc(sizeof(MediaCatMoniker));
@@ -801,8 +800,20 @@ static HRESULT WINAPI DEVENUM_IEnumMoniker_Next(LPENUMMONIKER iface, ULONG celt,
 static HRESULT WINAPI DEVENUM_IEnumMoniker_Skip(LPENUMMONIKER iface, ULONG celt)
 {
     EnumMonikerImpl *This = (EnumMonikerImpl *)iface;
+    DWORD subKeys;
 
     TRACE("(%p)->(%d)\n", iface, celt);
+
+    /* Before incrementing, check if there are any more values to run thru.
+       Some programs use the Skip() function to get the amount of devices */
+    if(RegQueryInfoKeyW(This->hkey, NULL, NULL, NULL, &subKeys, NULL, NULL, NULL, NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+    {
+        return S_FALSE;
+    }
+    if((This->index + celt) >= subKeys)
+    {
+        return S_FALSE;
+    }
 
     This->index += celt;
 

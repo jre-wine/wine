@@ -4,20 +4,20 @@
 @ stdcall ImmConfigureIMEA(long long long ptr)
 @ stdcall ImmConfigureIMEW(long long long ptr)
 @ stdcall ImmCreateContext()
-@ stub ImmCreateIMCC
+@ stdcall ImmCreateIMCC(long)
 @ stub ImmCreateSoftKeyboard
 @ stdcall ImmDestroyContext(long)
-@ stub ImmDestroyIMCC
+@ stdcall ImmDestroyIMCC(long)
 @ stub ImmDestroySoftKeyboard
 @ stdcall ImmDisableIME(long)
-@ stub ImmDisableIme
+@ stdcall ImmDisableIme(long) ImmDisableIME
 @ stub ImmEnumInputContext
 @ stdcall ImmEnumRegisterWordA(long ptr str long str ptr)
 @ stdcall ImmEnumRegisterWordW(long ptr wstr long wstr ptr)
 @ stdcall ImmEscapeA(long long long ptr)
 @ stdcall ImmEscapeW(long long long ptr)
 @ stub ImmFreeLayout
-@ stub ImmGenerateMessage
+@ stdcall ImmGenerateMessage(ptr)
 @ stdcall ImmGetCandidateListA(long long ptr long)
 @ stdcall ImmGetCandidateListCountA(long ptr)
 @ stdcall ImmGetCandidateListCountW(long ptr)
@@ -39,14 +39,14 @@
 @ stdcall ImmGetGuideLineA(long long ptr long)
 @ stdcall ImmGetGuideLineW(long long ptr long)
 @ stub ImmGetHotKey
-@ stub ImmGetIMCCLockCount
-@ stub ImmGetIMCCSize
-@ stub ImmGetIMCLockCount
+@ stdcall ImmGetIMCCLockCount(long)
+@ stdcall ImmGetIMCCSize(long)
+@ stdcall ImmGetIMCLockCount(long)
 @ stdcall ImmGetIMEFileNameA(long ptr long)
-@ stdcall ImmGetIMEFileNameW(long ptr long) 
+@ stdcall ImmGetIMEFileNameW(long ptr long)
 @ stub ImmGetImeInfoEx
-@ stub ImmGetImeMenuItemsA
-@ stub ImmGetImeMenuItemsW
+@ stdcall ImmGetImeMenuItemsA(long long long ptr ptr long)
+@ stdcall ImmGetImeMenuItemsW(long long long ptr ptr long)
 @ stdcall ImmGetOpenStatus(long)
 @ stdcall ImmGetProperty(long long)
 @ stdcall ImmGetRegisterWordStyleA(long long ptr)
@@ -67,14 +67,14 @@
 @ stub ImmLoadIME
 @ stub ImmLoadLayout
 @ stub ImmLockClientImc
-@ stub ImmLockIMC
-@ stub ImmLockIMCC
+@ stdcall ImmLockIMC(long)
+@ stdcall ImmLockIMCC(long)
 @ stub ImmLockImeDpi
 @ stdcall ImmNotifyIME(long long long long)
 @ stub ImmPenAuxInput
 @ stub ImmProcessKey
 @ stub ImmPutImeMenuItemsIntoMappedFile
-@ stub ImmReSizeIMCC
+@ stdcall ImmReSizeIMCC(long long)
 @ stub ImmRegisterClient
 @ stdcall ImmRegisterWordA(long str long str)
 @ stdcall ImmRegisterWordW(long wstr long wstr)
@@ -93,7 +93,7 @@
 @ stdcall ImmSetCompositionStringW(long long ptr long ptr long)
 @ stdcall ImmSetCompositionWindow(long ptr)
 @ stdcall ImmSetConversionStatus(long long long)
-@ stdcall ImmSetHotKey(long long long ptr) user32.CliImmSetHotKey
+#@ stdcall ImmSetHotKey(long long long ptr) user32.CliImmSetHotKey
 @ stdcall ImmSetOpenStatus(long long)
 @ stdcall ImmSetStatusWindowPos(long ptr)
 @ stub ImmShowSoftKeyboard
@@ -101,8 +101,8 @@
 @ stub ImmSystemHandler
 @ stub ImmTranslateMessage
 @ stub ImmUnlockClientImc
-@ stub ImmUnlockIMC
-@ stub ImmUnlockIMCC
+@ stdcall ImmUnlockIMC(long)
+@ stdcall ImmUnlockIMCC(long)
 @ stub ImmUnlockImeDpi
 @ stdcall ImmUnregisterWordA(long str long str)
 @ stdcall ImmUnregisterWordW(long wstr long wstr)

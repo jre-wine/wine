@@ -330,9 +330,21 @@ static void test_RtlUniform(void)
     seed = 2;
     expected = seed * 0xffffffed + 0x7fffffc3;
     result = pRtlUniform(&seed);
+
+/*
+ * Windows Vista uses different algorithms, so skip the rest of the tests
+ * until that is figured out. Trace output for the failures is about 10.5 MB!
+ */
+
+    if (result == 0x7fffff9f) {
+        skip("Most likely running on Windows Vista which uses a different algorithm\n");
+        return;
+    }
+
     ok(result == expected,
         "RtlUniform(&seed (seed == 2)) returns %x, expected %x\n",
         result, expected);
+
 /*
  * More tests show that if seed is odd the result must be incremented by 1:
  */
@@ -340,7 +352,7 @@ static void test_RtlUniform(void)
     expected = seed * 0xffffffed + 0x7fffffc3 + (seed & 1);
     result = pRtlUniform(&seed);
     ok(result == expected,
-        "RtlUniform(&seed (seed == 2)) returns %x, expected %x\n",
+        "RtlUniform(&seed (seed == 3)) returns %x, expected %x\n",
         result, expected);
 
     seed = 0x6bca1aa;
@@ -616,6 +628,17 @@ static void test_RtlRandom(void)
     result_expected = 0x320a1743;
     seed_expected =0x44b;
     result = pRtlRandom(&seed);
+
+/*
+ * Windows Vista uses different algorithms, so skip the rest of the tests
+ * until that is figured out. Trace output for the failures is about 10.5 MB!
+ */
+
+    if (seed == 0x3fc) {
+        skip("Most likely running on Windows Vista which uses a different algorithm\n");
+        return;
+    }
+
     ok(result == result_expected,
         "pRtlRandom(&seed (seed == 0)) returns %x, expected %x\n",
         result, result_expected);
@@ -844,7 +867,7 @@ static void test_RtlComputeCrc32(void)
   if (!pRtlComputeCrc32)
     return;
 
-  crc = pRtlComputeCrc32(crc, (LPBYTE)src, LEN);
+  crc = pRtlComputeCrc32(crc, (const BYTE *)src, LEN);
   ok(crc == 0x40861dc2,"Expected 0x40861dc2, got %8x\n", crc);
 }
 

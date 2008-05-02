@@ -46,8 +46,8 @@
 @ stdcall AddMonitorA(str long ptr)
 @ stdcall AddMonitorW(wstr long ptr)
 @ stdcall AddPortA(str ptr str)
-@ stdcall AddPortExA(ptr str long ptr str)
-@ stdcall AddPortExW(ptr wstr long ptr wstr)
+@ stdcall AddPortExA(str long ptr str)
+@ stdcall AddPortExW(wstr long ptr wstr)
 @ stdcall AddPortW(wstr long wstr)
 @ stdcall AddPrintProcessorA(str str str str)
 @ stdcall AddPrintProcessorW(wstr wstr wstr wstr)
@@ -166,6 +166,7 @@
 @ stdcall SetPrinterW(long long ptr long)
 @ stub SpoolerDevQueryPrintW
 @ stub SpoolerInit
+@ stub SpoolerPrinterEvent
 @ stdcall StartDocDlgA(ptr ptr)
 @ stdcall StartDocDlgW(ptr ptr)
 @ stdcall StartDocPrinterA(long long ptr)

@@ -71,7 +71,7 @@ void init_layer2(void)
 }
 
 
-void II_step_one(unsigned int *bit_alloc,int *scale,struct frame *fr)
+static void II_step_one(unsigned int *bit_alloc,int *scale,struct frame *fr)
 {
     int stereo = fr->stereo-1;
     int sblimit = fr->II_sblimit;
@@ -144,7 +144,8 @@ void II_step_one(unsigned int *bit_alloc,int *scale,struct frame *fr)
 
 }
 
-void II_step_two(unsigned int *bit_alloc,real fraction[2][4][SBLIMIT],int *scale,struct frame *fr,int x1)
+static void II_step_two(unsigned int *bit_alloc, real fraction[2][4][SBLIMIT],
+                        int *scale, struct frame *fr, int x1)
 {
     int i,j,k,ba;
     int stereo = fr->stereo;
@@ -173,7 +174,7 @@ void II_step_two(unsigned int *bit_alloc,real fraction[2][4][SBLIMIT],int *scale
           {
             static int *table[] = { 0,0,0,grp_3tab,0,grp_5tab,0,0,0,grp_9tab };
             unsigned int idx,*tab,m=scale[x1];
-            idx = (unsigned int) getbits(k);
+            idx = getbits(k);
             tab = (unsigned int *) (table[d1] + idx + idx + idx);
             fraction[j][0][i] = muls[*tab++][m];
             fraction[j][1][i] = muls[*tab++][m];
@@ -208,7 +209,7 @@ void II_step_two(unsigned int *bit_alloc,real fraction[2][4][SBLIMIT],int *scale
           static int *table[] = { 0,0,0,grp_3tab,0,grp_5tab,0,0,0,grp_9tab };
           unsigned int idx,*tab,m1,m2;
           m1 = scale[x1]; m2 = scale[x1+3];
-          idx = (unsigned int) getbits(k);
+          idx = getbits(k);
           tab = (unsigned int *) (table[d1] + idx + idx + idx);
           fraction[0][0][i] = muls[*tab][m1]; fraction[1][0][i] = muls[*tab++][m2];
           fraction[0][1][i] = muls[*tab][m1]; fraction[1][1][i] = muls[*tab++][m2];
@@ -285,12 +286,12 @@ int do_layer2(struct frame *fr,unsigned char *pcm_sample,int *pcm_point)
     II_step_two(bit_alloc,fraction,scale,fr,i>>2);
     for (j=0;j<3;j++) {
       if(single >= 0) {
-        clip += synth_1to1_mono(fraction[0][j],pcm_sample,pcm_point);
+        clip += synth_1to1_mono(fr->mp,fraction[0][j],pcm_sample,pcm_point);
       }
       else {
         int p1 = *pcm_point;
-        clip += synth_1to1(fraction[0][j],0,pcm_sample,&p1);
-        clip += synth_1to1(fraction[1][j],1,pcm_sample,pcm_point);
+        clip += synth_1to1(fr->mp,fraction[0][j],0,pcm_sample,&p1);
+        clip += synth_1to1(fr->mp,fraction[1][j],1,pcm_sample,pcm_point);
       }
 
     }

@@ -191,9 +191,11 @@ int symbol_demangle (parsed_symbol *sym)
     /* Class the function is associated with, terminated by '@@' */
     class_name = name;
     while (*name && *name++ != '@') ;
-    if (*name++ != '@')
+    if (*name++ != '@') {
+      free (function_name);
       return -1;
-    class_name = str_substring (class_name, name - 2);
+    }
+    class_name = str_substring (class_name, name - 2); /* Allocates a new string */
   }
 
   /* Function/Data type and access level */
@@ -215,6 +217,8 @@ int symbol_demangle (parsed_symbol *sym)
     {
       if (VERBOSE)
         printf ("/*FIXME: %s: unknown data*/\n", sym->symbol);
+      free (function_name);
+      free (class_name);
       return -1;
     }
     sym->flags |= SYM_DATA;
@@ -223,8 +227,9 @@ int symbol_demangle (parsed_symbol *sym)
                                   is_static ? "static_" : "_", function_name);
     sym->arg_text[0] = str_create (3, ct.expression, " ", sym->arg_name[0]);
     FREE_CT (ct);
+    free (function_name);
+    free (class_name);
     return 0;
-    break;
 
   case '6' : /* compiler generated static */
   case '7' : /* compiler generated static */
@@ -238,10 +243,13 @@ int symbol_demangle (parsed_symbol *sym)
 
       if (VERBOSE)
         puts ("Demangled symbol OK [vtable]");
+      free (function_name);
+      free (class_name);
       return 0;
     }
+    free (function_name);
+    free (class_name);
     return -1;
-    break;
 
   /* Functions */
 
@@ -284,6 +292,8 @@ int symbol_demangle (parsed_symbol *sym)
     break;
   /* FIXME: G,H / O,P / W,X are private / protected / public thunks */
   default:
+    free (function_name);
+    free (class_name);
     return -1;
   }
 
@@ -297,6 +307,8 @@ int symbol_demangle (parsed_symbol *sym)
    case 'C': is_const = CT_VOLATILE; break;
    case 'D': is_const = (CT_CONST | CT_VOLATILE); break;
    default:
+    free (function_name);
+    free (class_name);
      return -1;
    }
   }
@@ -327,6 +339,8 @@ int symbol_demangle (parsed_symbol *sym)
       sym->flags |= SYM_STDCALL;
     break;
   default:
+    free (function_name);
+    free (class_name);
     return -1;
   }
 
@@ -340,8 +354,11 @@ int symbol_demangle (parsed_symbol *sym)
   else
   {
     INIT_CT (ct);
-    if (!demangle_datatype (&name, &ct, sym))
+    if (!demangle_datatype (&name, &ct, sym)) {
+      free (function_name);
+      free (class_name);
       return -1;
+    }
     sym->return_text = ct.expression;
     sym->return_type = get_type_constant(ct.dest_type, ct.flags);
     ct.expression = NULL;
@@ -355,8 +372,11 @@ int symbol_demangle (parsed_symbol *sym)
     if (*name != '@')
     {
       INIT_CT (ct);
-      if (!demangle_datatype(&name, &ct, sym))
+      if (!demangle_datatype(&name, &ct, sym)) {
+        free (function_name);
+        free (class_name);
         return -1;
+      }
 
       if (strcmp (ct.expression, "void"))
       {
@@ -381,8 +401,11 @@ int symbol_demangle (parsed_symbol *sym)
   /* Functions are always terminated by 'Z'. If we made it this far and
    * Don't find it, we have incorrectly identified a data type.
    */
-  if (*name != 'Z')
+  if (*name != 'Z') {
+    free (function_name);
+    free (class_name);
     return -1;
+  }
 
   /* Note: '()' after 'Z' means 'throws', but we don't care here */
 
@@ -571,17 +594,17 @@ static char *demangle_datatype (char **str, compound_type *ct,
 
 
 /* Constraints:
- * There are two conventions for specifying data type constaints. I
+ * There are two conventions for specifying data type constants. I
  * don't know how the compiler chooses between them, but I suspect it
  * is based on ensuring that linker names are unique.
  * Convention 1. The data type modifier is given first, followed
  *   by the data type it operates on. '?' means passed by value,
  *   'A' means passed by reference. Note neither of these characters
  *   is a valid base data type. This is then followed by a character
- *   specifying constness or volatilty.
+ *   specifying constness or volatility.
  * Convention 2. The base data type (which is never '?' or 'A') is
  *   given first. The character modifier is optionally given after
- *   the base type character. If a valid character mofifier is present,
+ *   the base type character. If a valid character modifier is present,
  *   then it only applies to the current data type if the character
  *   after that is not 'A' 'B' or 'C' (Because this makes a convention 1
  *   constraint for the next data type).
@@ -589,9 +612,9 @@ static char *demangle_datatype (char **str, compound_type *ct,
  * The conventions are usually mixed within the same symbol.
  * Since 'C' is both a qualifier and a data type, I suspect that
  * convention 1 allows specifying e.g. 'volatile signed char*'. In
- * convention 2 this would be 'CC' which is ambigious (i.e. Is it two
+ * convention 2 this would be 'CC' which is ambiguous (i.e. Is it two
  * pointers, or a single pointer + modifier?). In convention 1 it
- * is encoded as '?CC' which is not ambigious. This probably
+ * is encoded as '?CC' which is not ambiguous. This probably
  * holds true for some other types as well.
  */
 

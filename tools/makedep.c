@@ -242,24 +242,6 @@ static INCL_FILE *find_src_file( const char *name )
 }
 
 /*******************************************************************
- *         add_src_file
- *
- * Add a source file to the list.
- */
-static INCL_FILE *add_src_file( const char *name )
-{
-    INCL_FILE *file;
-
-    if (find_src_file( name )) return NULL;  /* we already have it */
-    file = xmalloc( sizeof(*file) );
-    memset( file, 0, sizeof(*file) );
-    file->name = xstrdup(name);
-    list_add_tail( &sources, &file->entry );
-    return file;
-}
-
-
-/*******************************************************************
  *         add_include
  *
  * Add an include file if it doesn't already exists.
@@ -629,6 +611,63 @@ static void parse_c_file( INCL_FILE *pFile, FILE *file )
 
 
 /*******************************************************************
+ *         parse_rc_file
+ */
+static void parse_rc_file( INCL_FILE *pFile, FILE *file )
+{
+    char *buffer, *include;
+
+    input_line = 0;
+    while ((buffer = get_line( file )))
+    {
+        char quote;
+        char *p = buffer;
+        while (*p && isspace(*p)) p++;
+
+        if (p[0] == '/' && p[1] == '*')  /* check for magic makedep comment */
+        {
+            p += 2;
+            while (*p && isspace(*p)) p++;
+            if (strncmp( p, "@makedep:", 9 )) continue;
+            p += 9;
+            while (*p && isspace(*p)) p++;
+            quote = '"';
+            if (*p == quote)
+            {
+                include = ++p;
+                while (*p && *p != quote) p++;
+            }
+            else
+            {
+                include = p;
+                while (*p && !isspace(*p) && *p != '*') p++;
+            }
+            if (!*p)
+                fatal_error( "%s:%d: Malformed makedep comment\n", pFile->filename, input_line );
+            *p = 0;
+        }
+        else  /* check for #include */
+        {
+            if (*p++ != '#') continue;
+            while (*p && isspace(*p)) p++;
+            if (strncmp( p, "include", 7 )) continue;
+            p += 7;
+            while (*p && isspace(*p)) p++;
+            if (*p != '\"' && *p != '<' ) continue;
+            quote = *p++;
+            if (quote == '<') quote = '>';
+            include = p;
+            while (*p && (*p != quote)) p++;
+            if (!*p) fatal_error( "%s:%d: Malformed #include directive\n",
+                                  pFile->filename, input_line );
+            *p = 0;
+        }
+        add_include( pFile, include, input_line, (quote == '>') );
+    }
+}
+
+
+/*******************************************************************
  *         parse_generated_idl
  */
 static void parse_generated_idl( INCL_FILE *source )
@@ -652,12 +691,18 @@ static void parse_generated_idl( INCL_FILE *source )
     }
     else if (strendswith( source->name, "_p.c" ))
     {
+        add_include( source, "objbase.h", 0, 1 );
         add_include( source, "rpcproxy.h", 0, 1 );
         add_include( source, header, 0, 0 );
     }
     else if (strendswith( source->name, "_s.c" ))
     {
         add_include( source, header, 0, 0 );
+    }
+    else if (!strcmp( source->name, "dlldata.c" ))
+    {
+        add_include( source, "objbase.h", 0, 1 );
+        add_include( source, "rpcproxy.h", 0, 1 );
     }
 
     free( header );
@@ -675,7 +720,8 @@ static void parse_file( INCL_FILE *pFile, int src )
     if (strendswith( pFile->name, "_c.c" ) ||
         strendswith( pFile->name, "_i.c" ) ||
         strendswith( pFile->name, "_p.c" ) ||
-        strendswith( pFile->name, "_s.c" ))
+        strendswith( pFile->name, "_s.c" ) ||
+        !strcmp( pFile->name, "dlldata.c" ))
     {
         parse_generated_idl( pFile );
         return;
@@ -688,9 +734,33 @@ static void parse_file( INCL_FILE *pFile, int src )
         parse_idl_file( pFile, file, 1 );
     else if (strendswith( pFile->filename, ".idl" ))
         parse_idl_file( pFile, file, 0 );
-    else
+    else if (strendswith( pFile->filename, ".c" ) ||
+             strendswith( pFile->filename, ".h" ) ||
+             strendswith( pFile->filename, ".l" ) ||
+             strendswith( pFile->filename, ".y" ))
         parse_c_file( pFile, file );
+    else if (strendswith( pFile->filename, ".rc" ))
+        parse_rc_file( pFile, file );
     fclose(file);
+}
+
+
+/*******************************************************************
+ *         add_src_file
+ *
+ * Add a source file to the list.
+ */
+static INCL_FILE *add_src_file( const char *name )
+{
+    INCL_FILE *file;
+
+    if (find_src_file( name )) return NULL;  /* we already have it */
+    file = xmalloc( sizeof(*file) );
+    memset( file, 0, sizeof(*file) );
+    file->name = xstrdup(name);
+    list_add_tail( &sources, &file->entry );
+    parse_file( file, 1 );
+    return file;
 }
 
 
@@ -882,8 +952,8 @@ int main( int argc, char *argv[] )
         if (path->name[0] != '/') continue;
         if (top_src_dir)
         {
-            if (!strncmp( path->name, top_src_dir, strlen(top_src_dir) )) continue;
-            if (path->name[strlen(top_src_dir)] == '/') continue;
+            if (!strncmp( path->name, top_src_dir, strlen(top_src_dir) ) &&
+                path->name[strlen(top_src_dir)] == '/') continue;
         }
         list_remove( &path->entry );
         free( path );
@@ -891,7 +961,8 @@ int main( int argc, char *argv[] )
 
     for (i = 1; i < argc; i++)
     {
-        if ((pFile = add_src_file( argv[i] ))) parse_file( pFile, 1 );
+        add_src_file( argv[i] );
+        if (strendswith( argv[i], "_p.c" )) add_src_file( "dlldata.c" );
     }
     LIST_FOR_EACH_ENTRY( pFile, &includes, INCL_FILE, entry ) parse_file( pFile, 0 );
     output_dependencies();

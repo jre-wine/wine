@@ -49,7 +49,7 @@ struct reserved_area
 };
 
 static struct list reserved_areas = LIST_INIT(reserved_areas);
-static const int granularity_mask = 0xffff;  /* reserved areas have 64k granularity */
+static const unsigned int granularity_mask = 0xffff;  /* reserved areas have 64k granularity */
 
 #ifdef HAVE_MMAP
 
@@ -90,7 +90,7 @@ static inline int get_fdzero(void)
  * the address argument in this case.
  *
  * As Wine code occasionally relies on the Linux behaviour, e.g. to
- * be able to map non-relocateable PE executables to their proper
+ * be able to map non-relocatable PE executables to their proper
  * start addresses, or to map the DOS memory to 0, this routine
  * emulates the Linux behaviour by checking whether the desired
  * address range is still available, and placing the mapping there
@@ -243,6 +243,7 @@ static inline int mmap_reserve( void *addr, size_t size )
  *
  * Reserve as much memory as possible in the given area.
  */
+#if defined(__i386__) && !defined(__FreeBSD__) && !defined(__FreeBSD_kernel__)  /* commented out until FreeBSD gets fixed */
 static void reserve_area( void *addr, void *end )
 {
     size_t size = (char *)end - (char *)addr;
@@ -285,6 +286,7 @@ static void reserve_area( void *addr, void *end )
     }
 #endif
 }
+#endif
 
 
 /***********************************************************************

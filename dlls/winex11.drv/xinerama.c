@@ -66,7 +66,7 @@ static inline int monitor_to_index( HMONITOR handle )
 }
 
 
-#ifdef HAVE_LIBXINERAMA
+#ifdef SONAME_LIBXINERAMA
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 
@@ -125,27 +125,28 @@ static int query_screens(void)
     return count;
 }
 
-#else  /* HAVE_LIBXINERAMA */
+#else  /* SONAME_LIBXINERAMA */
 
 static inline int query_screens(void)
 {
     return 0;
 }
 
-#endif  /* HAVE_LIBXINERAMA */
+#endif  /* SONAME_LIBXINERAMA */
 
-void xinerama_init(void)
+void xinerama_init( unsigned int width, unsigned int height )
 {
     MONITORINFOEXW *primary;
     int i;
+    RECT rect;
 
     wine_tsx11_lock();
 
-    SetRect( &virtual_screen_rect, 0, 0, screen_width, screen_height );
+    SetRect( &rect, 0, 0, width, height );
 
     if (root_window != DefaultRootWindow( gdi_display ) || !query_screens())
     {
-        default_monitor.rcWork = default_monitor.rcMonitor = virtual_screen_rect;
+        default_monitor.rcWork = default_monitor.rcMonitor = rect;
         nb_monitors = 1;
         monitors = &default_monitor;
     }
@@ -153,22 +154,24 @@ void xinerama_init(void)
     primary = get_primary();
 
     /* coordinates (0,0) have to point to the primary monitor origin */
-    OffsetRect( &virtual_screen_rect, -primary->rcMonitor.left, -primary->rcMonitor.top );
+    OffsetRect( &rect, -primary->rcMonitor.left, -primary->rcMonitor.top );
     for (i = 0; i < nb_monitors; i++)
     {
-        OffsetRect( &monitors[i].rcMonitor, virtual_screen_rect.left, virtual_screen_rect.top );
-        OffsetRect( &monitors[i].rcWork, virtual_screen_rect.left, virtual_screen_rect.top );
+        OffsetRect( &monitors[i].rcMonitor, rect.left, rect.top );
+        OffsetRect( &monitors[i].rcWork, rect.left, rect.top );
         TRACE( "monitor %p: %s%s\n",
                index_to_monitor(i), wine_dbgstr_rect(&monitors[i].rcMonitor),
                (monitors[i].dwFlags & MONITORINFOF_PRIMARY) ? " (primary)" : "" );
     }
 
+    virtual_screen_rect = rect;
     screen_width = primary->rcMonitor.right - primary->rcMonitor.left;
     screen_height = primary->rcMonitor.bottom - primary->rcMonitor.top;
     TRACE( "virtual size: %s primary size: %dx%d\n",
-           wine_dbgstr_rect(&virtual_screen_rect), screen_width, screen_height );
+           wine_dbgstr_rect(&rect), screen_width, screen_height );
 
     wine_tsx11_unlock();
+    ClipCursor( NULL );  /* reset the cursor clip rectangle */
 }
 
 

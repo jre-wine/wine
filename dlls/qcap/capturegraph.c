@@ -30,7 +30,6 @@
 #include "winbase.h"
 #include "winerror.h"
 #include "objbase.h"
-#include "uuids.h"
 
 #include "evcode.h"
 #include "strmif.h"
@@ -105,6 +104,7 @@ IUnknown * CALLBACK QCAP_createCaptureGraphBuilder2(IUnknown *pUnkOuter,
         pCapture->ref = 1;
         pCapture->mygraph = NULL;
         InitializeCriticalSection(&pCapture->csFilter);
+        pCapture->csFilter.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": CaptureGraphImpl.csFilter");
         *phr = S_OK;
         ObjectRefCount(TRUE);
     }
@@ -160,11 +160,12 @@ fnCaptureGraphBuilder2_Release(ICaptureGraphBuilder2 * iface)
     if (!ref)
     {
         FIXME("Release IGraphFilter or w/e\n");
+        This->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->csFilter);
         This->lpVtbl = NULL;
         This->lpVtbl2 = NULL;
         if (This->mygraph != NULL)
-            IGraphBuilder_Release((IGraphBuilder *)This->mygraph);
+            IGraphBuilder_Release(This->mygraph);
         CoTaskMemFree(This);
         ObjectRefCount(FALSE);
     }
@@ -190,7 +191,7 @@ fnCaptureGraphBuilder2_SetFilterGraph(ICaptureGraphBuilder2 * iface,
         return E_POINTER;
 
     This->mygraph = pfg;
-    IGraphBuilder_AddRef((IGraphBuilder *)This->mygraph);
+    IGraphBuilder_AddRef(This->mygraph);
     if (SUCCEEDED(IUnknown_QueryInterface(This->mygraph,
                                           &IID_IMediaEvent, (LPVOID *)&pmev)))
     {
@@ -218,7 +219,7 @@ fnCaptureGraphBuilder2_GetFilterGraph(ICaptureGraphBuilder2 * iface,
         return E_UNEXPECTED;
     }
 
-    IGraphBuilder_AddRef((IGraphBuilder *)This->mygraph);
+    IGraphBuilder_AddRef(This->mygraph);
    
     TRACE("(%p) return filtergraph %p\n", iface, *pfg);
     return S_OK;

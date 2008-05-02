@@ -52,8 +52,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(time);
 
-/* maximum time adjustment in seconds for SetLocalTime and SetSystemTime */
-#define SETTIME_MAX_ADJUST 120
 #define CALINFO_MAX_YEAR 2029
 
 #define LL2FILETIME( ll, pft )\
@@ -101,7 +99,10 @@ static int TIME_DayLightCompareDate( const SYSTEMTIME *date,
     if (date->wMonth > compareDate->wMonth)
         return 1; /* We are in a month after the date limit. */
 
-    if (compareDate->wDayOfWeek <= 6)
+    /* if year is 0 then date is in day-of-week format, otherwise
+     * it's absolute date.
+     */
+    if (compareDate->wYear == 0)
     {
         WORD First;
         /* compareDate->wDay is interpreted as number of the week in the month
@@ -148,7 +149,7 @@ static int TIME_DayLightCompareDate( const SYSTEMTIME *date,
  *      TIME_ZONE_ID_STANDARD   Current time is standard time
  *      TIME_ZONE_ID_DAYLIGHT   Current time is dayligh saving time
  */
-static BOOL TIME_CompTimeZoneID ( const TIME_ZONE_INFORMATION *pTZinfo,
+static DWORD TIME_CompTimeZoneID ( const TIME_ZONE_INFORMATION *pTZinfo,
     FILETIME *lpFileTime, BOOL islocal )
 {
     int ret;
@@ -160,11 +161,15 @@ static BOOL TIME_CompTimeZoneID ( const TIME_ZONE_INFORMATION *pTZinfo,
 
     if (pTZinfo->DaylightDate.wMonth != 0)
     {
+        /* if year is 0 then date is in day-of-week format, otherwise
+         * it's absolute date.
+         */
         if (pTZinfo->StandardDate.wMonth == 0 ||
-            pTZinfo->StandardDate.wDay<1 ||
+            (pTZinfo->StandardDate.wYear == 0 &&
+            (pTZinfo->StandardDate.wDay<1 ||
             pTZinfo->StandardDate.wDay>5 ||
             pTZinfo->DaylightDate.wDay<1 ||
-            pTZinfo->DaylightDate.wDay>5)
+            pTZinfo->DaylightDate.wDay>5)))
         {
             SetLastError(ERROR_INVALID_PARAMETER);
             return TIME_ZONE_ID_INVALID;
@@ -448,7 +453,7 @@ BOOL WINAPI SystemTimeToTzSpecificLocalTime(
 
     if (lpTimeZoneInformation != NULL)
     {
-        memcpy(&tzinfo, lpTimeZoneInformation, sizeof(TIME_ZONE_INFORMATION));
+        tzinfo = *lpTimeZoneInformation;
     }
     else
     {
@@ -494,7 +499,7 @@ BOOL WINAPI TzSpecificLocalTimeToSystemTime(
 
     if (lpTimeZoneInformation != NULL)
     {
-        memcpy(&tzinfo, lpTimeZoneInformation, sizeof(TIME_ZONE_INFORMATION));
+        tzinfo = *lpTimeZoneInformation;
     }
     else
     {
@@ -542,13 +547,11 @@ VOID WINAPI GetSystemTimeAsFileTime(
  *          2) Time is relative. There is no 'starting date', so there is
  *             no need for offset correction, like in UnixTimeToFileTime
  */
-#ifndef CLK_TCK
-# define CLK_TCK CLOCKS_PER_SEC
-#endif
 static void TIME_ClockTimeToFileTime(clock_t unix_time, LPFILETIME filetime)
 {
+    long clocksPerSec = sysconf(_SC_CLK_TCK);
     ULONGLONG secs = RtlEnlargedUnsignedMultiply( unix_time, 10000000 );
-    secs = RtlExtendedLargeIntegerDivide( secs, CLK_TCK, NULL );
+    secs = RtlExtendedLargeIntegerDivide( secs, clocksPerSec, NULL );
     filetime->dwLowDateTime  = (DWORD)secs;
     filetime->dwHighDateTime = (DWORD)(secs >> 32);
 }
@@ -602,8 +605,6 @@ int WINAPI GetCalendarInfoA(LCID lcid, CALID Calendar, CALTYPE CalType,
 {
     int ret;
     LPWSTR lpCalDataW = NULL;
-
-    lcid = ConvertDefaultLocale(lcid);
 
     if (NLS_IsUnicodeOnlyLcid(lcid))
     {
@@ -974,6 +975,7 @@ BOOL WINAPI DosDateTimeToFileTime( WORD fatdate, WORD fattime, LPFILETIME ft)
     newtm.tm_mday = (fatdate & 0x1f);
     newtm.tm_mon  = ((fatdate >> 5) & 0x0f) - 1;
     newtm.tm_year = (fatdate >> 9) + 80;
+    newtm.tm_isdst = -1;
 #ifdef HAVE_TIMEGM
     RtlSecondsSince1970ToTime( timegm(&newtm), (LARGE_INTEGER *)ft );
 #else

@@ -21,6 +21,12 @@
 #ifndef __WINE_TAPI_H
 #define __WINE_TAPI_H
 
+#ifndef __WINESRC__
+# include <windows.h>
+#endif
+#include <basetsd.h>
+#include <oaidl.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -626,6 +632,18 @@ typedef struct linegeneratetone_tag {
     DWORD dwVolume;
 } LINEGENERATETONE, *LPLINEGENERATETONE;
 
+typedef struct lineinitializeexparams_tag {
+    DWORD dwTotalSize;
+    DWORD dwNeededSize;
+    DWORD dwUsedSize;
+    DWORD dwOptions;
+    union {
+    HANDLE hEvent;
+    HANDLE hCompletionPort;
+    } Handles;
+    DWORD dwCompletionKey;
+} LINEINITIALIZEEXPARAMS, *LPLINEINITIALIZEEXPARAMS;
+
 typedef struct linemediacontrolcallstate_tag {
     DWORD dwCallStates;
     DWORD dwMediaControl;
@@ -882,6 +900,9 @@ DWORD WINAPI lineGetTranslateCaps(HLINEAPP,DWORD,LPLINETRANSLATECAPS);
 DWORD WINAPI lineHandoff(HCALL,LPCSTR,DWORD);
 DWORD WINAPI lineHold(HCALL);
 DWORD WINAPI lineInitialize(LPHLINEAPP,HINSTANCE,LINECALLBACK,LPCSTR,LPDWORD);
+LONG  WINAPI lineInitializeExA(LPHLINEAPP,HINSTANCE,LINECALLBACK,LPCSTR,LPDWORD,LPDWORD,LPLINEINITIALIZEEXPARAMS);
+LONG  WINAPI lineInitializeExW(LPHLINEAPP,HINSTANCE,LINECALLBACK,LPCWSTR,LPDWORD,LPDWORD,LPLINEINITIALIZEEXPARAMS);
+#define      lineInitializeEx WINELIB_NAME_AW(lineInitializeEx)
 DWORD WINAPI lineMakeCall(HLINE,LPHCALL,LPCSTR,DWORD,LPLINECALLPARAMS);
 DWORD WINAPI lineMonitorDigits(HCALL,DWORD);
 DWORD WINAPI lineMonitorMedia(HCALL,DWORD);

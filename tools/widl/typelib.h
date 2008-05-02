@@ -22,7 +22,7 @@
 #define __WIDL_TYPELIB_H
 
 extern int in_typelib;
-extern void start_typelib(char *name, attr_t *attrs);
+extern void start_typelib(char *name, attr_list_t *attrs);
 extern void end_typelib(void);
 extern void add_typelib_entry(type_t *t);
 extern void add_importlib(const char *name);
@@ -82,7 +82,6 @@ enum VARENUM {
     VT_TYPEMASK = 0xfff
 };
 extern unsigned short get_type_vt(type_t *t);
-extern unsigned short get_var_vt(var_t *v);
 
 extern int create_msft_typelib(typelib_t *typelib);
 #endif

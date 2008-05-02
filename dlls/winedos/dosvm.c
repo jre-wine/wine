@@ -42,13 +42,13 @@
 #include "wine/exception.h"
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "wingdi.h"
 #include "winuser.h"
 #include "wownt32.h"
 #include "winnt.h"
 #include "wincon.h"
 
-#include "thread.h"
 #include "dosexe.h"
 #include "dosvm.h"
 #include "wine/debug.h"
@@ -222,7 +222,7 @@ void DOSVM_SendQueuedEvents( CONTEXT86 *context )
          * We disable it here because this prevents some
          * unnecessary calls to this function.
          */
-        NtCurrentTeb()->vm86_pending = 0;
+        get_vm86_teb_info()->vm86_pending = 0;
     }
 
 #ifdef MZ_SUPPORTED
@@ -234,7 +234,7 @@ void DOSVM_SendQueuedEvents( CONTEXT86 *context )
          * pending events, make sure that pending flag is turned on.
          */
         TRACE( "Another event is pending, setting VIP flag.\n" );
-        NtCurrentTeb()->vm86_pending |= VIP_MASK;
+        get_vm86_teb_info()->vm86_pending |= VIP_MASK;
     }
 
 #else
@@ -352,7 +352,7 @@ static void DOSVM_ProcessMessage(MSG *msg)
 {
   BYTE scan = 0;
 
-  TRACE("got message %04x, wparam=%08x, lparam=%08lx\n",msg->message,msg->wParam,msg->lParam);
+  TRACE("got message %04x, wparam=%08lx, lparam=%08lx\n",msg->message,msg->wParam,msg->lParam);
   if ((msg->message>=WM_MOUSEFIRST)&&
       (msg->message<=WM_MOUSELAST)) {
     DOSVM_Int33Message(msg->message,msg->wParam,msg->lParam);
@@ -503,7 +503,7 @@ DWORD WINAPI DOSVM_Loop( HANDLE hThread )
                           DOS_SPC *spc = (DOS_SPC *)msg.lParam;
                           TRACE_(int)("calling %p with arg %08lx\n", spc->proc, spc->arg);
                           (spc->proc)(spc->arg);
-                          TRACE_(int)("done, signalling event %x\n", msg.wParam);
+                          TRACE_(int)("done, signalling event %lx\n", msg.wParam);
                           SetEvent( (HANDLE)msg.wParam );
                       }
                       break;
@@ -521,10 +521,10 @@ DWORD WINAPI DOSVM_Loop( HANDLE hThread )
   }
 }
 
-static WINE_EXCEPTION_FILTER(exception_handler)
+static LONG WINAPI exception_handler(EXCEPTION_POINTERS *eptr)
 {
-  EXCEPTION_RECORD *rec = GetExceptionInformation()->ExceptionRecord;
-  CONTEXT *context = GetExceptionInformation()->ContextRecord;
+  EXCEPTION_RECORD *rec = eptr->ExceptionRecord;
+  CONTEXT *context = eptr->ContextRecord;
   int arg = rec->ExceptionInformation[0];
   BOOL ret;
 
@@ -623,7 +623,7 @@ void WINAPI DOSVM_PIC_ioport_out( WORD port, BYTE val)
             if (DOSVM_HasPendingEvents()) 
             {
                 TRACE( "Another event pending, setting pending flag\n" );
-                NtCurrentTeb()->vm86_pending |= VIP_MASK;
+                get_vm86_teb_info()->vm86_pending |= VIP_MASK;
             }
         }
 
@@ -691,7 +691,7 @@ void WINAPI DOSVM_AcknowledgeIRQ( CONTEXT86 *context )
      * to turn VIF flag on before they return.
      */
     if (!ISV86(context))
-        NtCurrentTeb()->dpmi_vif = 1;
+        get_vm86_teb_info()->dpmi_vif = 1;
 }
 
 

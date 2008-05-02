@@ -8,7 +8,6 @@ EXTRAINCL = @FREETYPEINCL@
 FREETYPELIBS = @FREETYPELIBS@
 
 PROGRAMS = \
-	bin2res$(EXEEXT) \
 	fnt2bdf$(EXEEXT) \
 	fnt2fon$(EXEEXT) \
 	make_ctests$(EXEEXT) \
@@ -22,7 +21,6 @@ MANPAGES = \
 	wineprefixcreate.man
 
 C_SRCS = \
-	bin2res.c \
 	fnt2bdf.c \
 	fnt2fon.c \
 	make_ctests.c \
@@ -69,11 +67,8 @@ fnt2fon$(EXEEXT): fnt2fon.o
 relpath$(EXEEXT): relpath.o
 	$(CC) $(CFLAGS) -o $@ relpath.o $(LIBPORT) $(LDFLAGS)
 
-sfnt2fnt$(EXEEXT): sfnt2fnt.o
-	$(CC) $(CFLAGS) -o $@ sfnt2fnt.o $(LIBWINE) $(LIBPORT) $(LDFLAGS) $(FREETYPELIBS)
-
-bin2res$(EXEEXT): bin2res.o
-	$(CC) $(CFLAGS) -o $@ bin2res.o $(LIBPORT) $(LDFLAGS)
+sfnt2fnt$(EXEEXT): sfnt2fnt.o relpath$(EXEEXT)
+	$(CC) $(CFLAGS) -o $@ sfnt2fnt.o $(LIBWINE) $(LIBPORT) $(LDFLAGS) $(FREETYPELIBS) $(LDRPATH_LOCAL)
 
 wineprefixcreate: wineprefixcreate.in relpath$(EXEEXT)
 	sed -e "s,@bintodlldir\@,`$(RELPATH) $(bindir) $(dlldir)`,g" -e "s,@bintodatadir\@,`$(RELPATH) $(bindir) $(datadir)/wine`,g" $(SRCDIR)/wineprefixcreate.in >$@ || ($(RM) $@ && false)
@@ -93,6 +88,8 @@ install install-dev:: $(INSTALLSUBDIRS:%=%/__install__) $(DESTDIR)$(bindir) $(DE
 uninstall::
 	$(RM) $(DESTDIR)$(bindir)/winemaker $(DESTDIR)$(bindir)/wineprefixcreate $(DESTDIR)$(mandir)/man$(prog_manext)/winemaker.$(prog_manext) $(DESTDIR)$(mandir)/man$(prog_manext)/wineprefixcreate.$(prog_manext) $(DESTDIR)$(datadir)/wine/wine.inf $(DESTDIR)$(datadir)/applications/wine.desktop
 	-$(UPDATE_DESKTOP_DATABASE)
+
+wmc wrc: relpath$(EXEEXT)
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend
 

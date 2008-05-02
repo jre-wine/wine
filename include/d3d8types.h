@@ -40,11 +40,6 @@
 #define D3DCOLOR_RGBA(r,g,b,a)        D3DCOLOR_ARGB(a,r,g,b)
 #define D3DCOLOR_XRGB(r,g,b)          D3DCOLOR_ARGB(0xff,r,g,b)
 
-#define D3DCOLORWRITEENABLED_RED     1
-#define D3DCOLORWRITEENABLED_GREEN   2
-#define D3DCOLORWRITEENABLED_BLUE    4
-#define D3DCOLORWRITEENABLED_ALPHA   8
-
 #define D3DCS_LEFT                 0x001
 #define D3DCS_RIGHT                0x002
 #define D3DCS_TOP                  0x004
@@ -175,7 +170,7 @@ typedef enum _D3DVSD_TOKENTYPE {
   D3DVSD_FORCE_DWORD       = 0x7FFFFFFF
 } D3DVSD_TOKENTYPE;
 
-/** input registers for vertes shaders functions */
+/** input registers for vertex shaders functions */
 /*
 #define D3DVSDE_POSITION      0
 #define D3DVSDE_BLENDWEIGHT   1
@@ -613,6 +608,8 @@ typedef enum _D3DFORMAT {
     D3DFMT_A8                   =  28,
     D3DFMT_A8R3G3B2             =  29,
     D3DFMT_X4R4G4B4             =  30,
+    D3DFMT_A2B10G10R10          =  31,
+    D3DFMT_G16R16               =  34,
 
     D3DFMT_A8P8                 =  40,
     D3DFMT_P8                   =  41,
@@ -627,6 +624,7 @@ typedef enum _D3DFORMAT {
     D3DFMT_Q8W8V8U8             =  63,
     D3DFMT_V16U16               =  64,
     D3DFMT_W11V11U10            =  65,
+    D3DFMT_A2W10V10U10          =  67,
 
     D3DFMT_UYVY                 =  MAKEFOURCC('U', 'Y', 'V', 'Y'),
     D3DFMT_YUY2                 =  MAKEFOURCC('Y', 'U', 'Y', '2'),

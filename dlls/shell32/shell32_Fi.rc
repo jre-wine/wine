@@ -75,6 +75,7 @@ MENU_SHV_FILE MENU DISCARDABLE
 BEGIN
 	POPUP ""
 	BEGIN
+	  MENUITEM "&Select"			FCIDM_SHVIEW_OPEN
 	  MENUITEM "&Selaa",			FCIDM_SHVIEW_EXPLORE
 	  MENUITEM "&Avaa",			FCIDM_SHVIEW_OPEN
 	  MENUITEM SEPARATOR
@@ -164,8 +165,12 @@ STRINGTABLE DISCARDABLE
 	IDS_DELETEFOLDER_CAPTION "Vahvista kansion tuhoaminen"
 	IDS_DELETEITEM_TEXT "Haluatko varmasti tuhota '%1':n?"
 	IDS_DELETEMULTIPLE_TEXT "Haluatko varmasti tuhota nämä %1?"
-	IDS_OVERWRITEFILE_TEXT "Ylikirjoita tiedosto %1?"
+	IDS_OVERWRITEFILE_TEXT "This folder already contains a file called '%1'.\n\nDo you want to replace it?"
 	IDS_OVERWRITEFILE_CAPTION "Vahvista tiedoston ylikirjoitus"
+	IDS_OVERWRITEFOLDER_TEXT "This folder already contains a folder named '%1'.\n\n"\
+	    "If the files in the destination folder have the same names as files in the\n"\
+	    "selected folder they will be replaced. Do you still want to move or copy\n"\
+	    "the folder?"
 
         /* message box strings */
         IDS_RESTART_TITLE       "Käynnistä uudelleen"
@@ -201,4 +206,6 @@ STRINGTABLE DISCARDABLE
 	IDS_COMMON_PICTURES         "Dokumentit\\Omat kuvatiedostot"
 	IDS_COMMON_VIDEO            "Dokumentit\\Omat videotiedostot"
 	IDS_CDBURN_AREA             "Paikalliset asetukset\\Ohjelmien tiedot\\Microsoft\\CD Burning"
+
+	IDS_NEWFOLDER		"New Folder"
 }

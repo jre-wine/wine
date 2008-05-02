@@ -81,8 +81,20 @@
 #define HRESULT_SEVERITY(hr)    (((hr) >> 31) & 0x1)
 #define SCODE_SEVERITY(sc)      (((sc) >> 31) & 0x1)
 
+#define __HRESULT_FROM_WIN32(x)   ((HRESULT)(x) > 0 ? ((HRESULT) (((x) & 0x0000FFFF) | (FACILITY_WIN32 << 16) | 0x80000000)) : (HRESULT)(x) )
+#ifndef _HRESULT_DEFINED
+#define _HRESULT_DEFINED
+# ifdef _MSC_VER
+typedef long            HRESULT;
+# else
+typedef int             HRESULT;
+# endif
+#endif
+static inline HRESULT HRESULT_FROM_WIN32(unsigned long x)
+{
+    return (HRESULT)x > 0 ? ((HRESULT) ((x & 0x0000FFFF) | (FACILITY_WIN32 << 16) | 0x80000000)) : (HRESULT)x;
+}
 #define FACILITY_NT_BIT         0x10000000
-#define HRESULT_FROM_WIN32(x)   ((x) ? ((HRESULT) (((x) & 0x0000FFFF) | (FACILITY_WIN32 << 16) | 0x80000000)) : 0 )
 #define HRESULT_FROM_NT(x)      ((HRESULT) ((x) | FACILITY_NT_BIT))
 
 /* SCODE <-> HRESULT functions */
@@ -695,6 +707,7 @@
 #define ERROR_INVALID_COMMAND_LINE                         1639
 #define ERROR_INSTALL_REMOTE_DISALLOWED                    1640
 #define ERROR_SUCCESS_REBOOT_INITIATED                     1641
+#define ERROR_UNKNOWN_PATCH                                1647
 #define RPC_S_INVALID_STRING_BINDING                       1700
 #define RPC_S_WRONG_KIND_OF_BINDING                        1701
 #define RPC_S_INVALID_BINDING                              1702
@@ -2265,6 +2278,26 @@
 #define TRUST_E_SUBJECT_FORM_UNKNOWN                       _HRESULT_TYPEDEF_(0x800B0003L)
 #define TRUST_E_SUBJECT_NOT_TRUSTED                        _HRESULT_TYPEDEF_(0x800B0004L)
 #define TRUST_E_NOSIGNATURE                                _HRESULT_TYPEDEF_(0x800B0100L)
+#define CERT_E_EXPIRED                                     _HRESULT_TYPEDEF_(0x800B0101)
+#define CERT_E_VALIDITYPERIODNESTING                       _HRESULT_TYPEDEF_(0x800B0102)
+#define CERT_E_ROLE                                        _HRESULT_TYPEDEF_(0x800B0103)
+#define CERT_E_PATHLENCONST                                _HRESULT_TYPEDEF_(0x800B0104)
+#define CERT_E_CRITICAL                                    _HRESULT_TYPEDEF_(0x800B0105)
+#define CERT_E_PURPOSE                                     _HRESULT_TYPEDEF_(0x800B0106)
+#define CERT_E_ISSUERCHAINING                              _HRESULT_TYPEDEF_(0x800B0107)
+#define CERT_E_MALFORMED                                   _HRESULT_TYPEDEF_(0x800B0108)
+#define CERT_E_UNTRUSTEDROOT                               _HRESULT_TYPEDEF_(0x800B0109)
+#define CERT_E_CHAINING                                    _HRESULT_TYPEDEF_(0x800B010A)
+#define TRUST_E_FAIL                                       _HRESULT_TYPEDEF_(0x800B010B)
+#define CERT_E_REVOKED                                     _HRESULT_TYPEDEF_(0x800B010C)
+#define CERT_E_UNTRUSTEDTESTROOT                           _HRESULT_TYPEDEF_(0x800B010D)
+#define CERT_E_REVOCATION_FAILURE                          _HRESULT_TYPEDEF_(0x800B010E)
+#define CERT_E_CN_NO_MATCH                                 _HRESULT_TYPEDEF_(0x800B010F)
+#define CERT_E_WRONG_USAGE                                 _HRESULT_TYPEDEF_(0x800B0110)
+#define TRUST_E_EXPLICIT_DISTRUST                          _HRESULT_TYPEDEF_(0x800B0111)
+#define CERT_E_UNTRUSTEDCA                                 _HRESULT_TYPEDEF_(0x800B0112)
+#define CERT_E_INVALID_POLICY                              _HRESULT_TYPEDEF_(0x800B0113)
+#define CERT_E_INVALID_NAME                                _HRESULT_TYPEDEF_(0x800B0114)
 
 #define SPAPI_E_EXPECTED_SECTION_NAME                      _HRESULT_TYPEDEF_(0x800F0000L)
 #define SPAPI_E_BAD_SECTION_NAME_LINE                      _HRESULT_TYPEDEF_(0x800F0001L)
@@ -2334,13 +2367,70 @@
 #define SPAPI_E_ERROR_NOT_INSTALLED                        _HRESULT_TYPEDEF_(0x800F1000L)
 
 /* Smart card management error codes */
+#define SCARD_S_SUCCESS                                    NO_ERROR
+#define SCARD_F_INTERNAL_ERROR                             _HRESULT_TYPEDEF_(0x80100001L)
+#define SCARD_E_CANCELLED                                  _HRESULT_TYPEDEF_(0x80100002L)
+#define SCARD_E_INVALID_HANDLE                             _HRESULT_TYPEDEF_(0x80100003L)
+#define SCARD_E_INVALID_PARAMETER                          _HRESULT_TYPEDEF_(0x80100004L)
+#define SCARD_E_INVALID_TARGET                             _HRESULT_TYPEDEF_(0x80100005L)
+#define SCARD_E_NO_MEMORY                                  _HRESULT_TYPEDEF_(0x80100006L)
+#define SCARD_F_WAITED_TOO_LONG                            _HRESULT_TYPEDEF_(0x80100007L)
+#define SCARD_E_INSUFFICIENT_BUFFER                        _HRESULT_TYPEDEF_(0x80100008L)
+#define SCARD_E_UNKNOWN_READER                             _HRESULT_TYPEDEF_(0x80100009L)
+#define SCARD_E_TIMEOUT                                    _HRESULT_TYPEDEF_(0x8010000AL)
+#define SCARD_E_SHARING_VIOLATION                          _HRESULT_TYPEDEF_(0x8010000BL)
 #define SCARD_E_NO_SMARTCARD                               _HRESULT_TYPEDEF_(0x8010000CL)
+#define SCARD_E_UNKNOWN_CARD                               _HRESULT_TYPEDEF_(0x8010000DL)
+#define SCARD_E_CANT_DISPOSE                               _HRESULT_TYPEDEF_(0x8010000EL)
+#define SCARD_E_PROTO_MISMATCH                             _HRESULT_TYPEDEF_(0x8010000FL)
+#define SCARD_E_NOT_READY                                  _HRESULT_TYPEDEF_(0x80100010L)
+#define SCARD_E_INVALID_VALUE                              _HRESULT_TYPEDEF_(0x80100011L)
+#define SCARD_E_SYSTEM_CANCELLED                           _HRESULT_TYPEDEF_(0x80100012L)
+#define SCARD_F_COMM_ERROR                                 _HRESULT_TYPEDEF_(0x80100013L)
+#define SCARD_F_UNKNOWN_ERROR                              _HRESULT_TYPEDEF_(0x80100014L)
+#define SCARD_E_INVALID_ATR                                _HRESULT_TYPEDEF_(0x80100015L)
+#define SCARD_E_NOT_TRANSACTED                             _HRESULT_TYPEDEF_(0x80100016L)
+#define SCARD_E_READER_UNAVAILABLE                         _HRESULT_TYPEDEF_(0x80100017L)
+#define SCARD_P_SHUTDOWN                                   _HRESULT_TYPEDEF_(0x80100018L)
+#define SCARD_E_PCI_TOO_SMALL                              _HRESULT_TYPEDEF_(0x80100019L)
+#define SCARD_E_READER_UNSUPPORTED                         _HRESULT_TYPEDEF_(0x8010001AL)
+#define SCARD_E_DUPLICATE_READER                           _HRESULT_TYPEDEF_(0x8010001BL)
+#define SCARD_E_CARD_UNSUPPORTED                           _HRESULT_TYPEDEF_(0x8010001CL)
+#define SCARD_E_NO_SERVICE                                 _HRESULT_TYPEDEF_(0x8010001DL)
+#define SCARD_E_SERVICE_STOPPED                            _HRESULT_TYPEDEF_(0x8010001EL)
+#define SCARD_E_UNEXPECTED                                 _HRESULT_TYPEDEF_(0x8010001FL)
+#define SCARD_E_ICC_INSTALLATION                           _HRESULT_TYPEDEF_(0x80100020L)
+#define SCARD_E_ICC_CREATEORDER                            _HRESULT_TYPEDEF_(0x80100021L)
+#define SCARD_E_UNSUPPORTED_FEATURE                        _HRESULT_TYPEDEF_(0x80100022L)
+#define SCARD_E_DIR_NOT_FOUND                              _HRESULT_TYPEDEF_(0x80100023L)
+#define SCARD_E_FILE_NOT_FOUND                             _HRESULT_TYPEDEF_(0x80100024L)
+#define SCARD_E_NO_DIR                                     _HRESULT_TYPEDEF_(0x80100025L)
+#define SCARD_E_NO_FILE                                    _HRESULT_TYPEDEF_(0x80100026L)
+#define SCARD_E_NO_ACCESS                                  _HRESULT_TYPEDEF_(0x80100027L)
+#define SCARD_E_WRITE_TOO_MANY                             _HRESULT_TYPEDEF_(0x80100028L)
+#define SCARD_E_BAD_SEEK                                   _HRESULT_TYPEDEF_(0x80100029L)
+#define SCARD_E_INVALID_CHV                                _HRESULT_TYPEDEF_(0x8010002AL)
+#define SCARD_E_UNKNOWN_RES_MNG                            _HRESULT_TYPEDEF_(0x8010002BL)
 #define SCARD_E_NO_SUCH_CERTIFICATE                        _HRESULT_TYPEDEF_(0x8010002CL)
+#define SCARD_E_CERTIFICATE_UNAVAILABLE                    _HRESULT_TYPEDEF_(0x8010002DL)
+#define SCARD_E_NO_READERS_AVAILABLE                       _HRESULT_TYPEDEF_(0x8010002EL)
 #define SCARD_E_COMM_DATA_LOST                             _HRESULT_TYPEDEF_(0x8010002FL)
-
+#define SCARD_E_NO_KEY_CONTAINER                           _HRESULT_TYPEDEF_(0x80100030L)
+#define SCARD_E_SERVER_TOO_BUSY                            _HRESULT_TYPEDEF_(0x80100031L)
+#define SCARD_W_UNSUPPORTED_CARD                           _HRESULT_TYPEDEF_(0x80100065L)
+#define SCARD_W_UNRESPONSIVE_CARD                          _HRESULT_TYPEDEF_(0x80100066L)
+#define SCARD_W_UNPOWERED_CARD                             _HRESULT_TYPEDEF_(0x80100067L)
+#define SCARD_W_RESET_CARD                                 _HRESULT_TYPEDEF_(0x80100068L)
+#define SCARD_W_REMOVED_CARD                               _HRESULT_TYPEDEF_(0x80100069L)
+#define SCARD_W_SECURITY_VIOLATION                         _HRESULT_TYPEDEF_(0x8010006AL)
 #define SCARD_W_WRONG_CHV                                  _HRESULT_TYPEDEF_(0x8010006BL)
 #define SCARD_W_CHV_BLOCKED                                _HRESULT_TYPEDEF_(0x8010006CL)
+#define SCARD_W_EOF                                        _HRESULT_TYPEDEF_(0x8010006DL)
+#define SCARD_W_CANCELLED_BY_USER                          _HRESULT_TYPEDEF_(0x8010006EL)
 #define SCARD_W_CARD_NOT_AUTHENTICATED                     _HRESULT_TYPEDEF_(0x8010006FL)
+#define SCARD_W_CACHE_ITEM_NOT_FOUND                       _HRESULT_TYPEDEF_(0x80100070L)
+#define SCARD_W_CACHE_ITEM_STALE                           _HRESULT_TYPEDEF_(0x80100071L)
+#define SCARD_W_CACHE_ITEM_TOO_BIG                         _HRESULT_TYPEDEF_(0x80100072L)
 
 #define ERROR_AUDITING_DISABLED                            _HRESULT_TYPEDEF_(0xC0090001L)
 #define ERROR_ALL_SIDS_FILTERED                            _HRESULT_TYPEDEF_(0xC0090002L)

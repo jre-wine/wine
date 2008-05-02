@@ -113,8 +113,8 @@
  *    };
  *    struct IDirect3DVtbl {
  *        HRESULT (*QueryInterface)(IDirect3D* me, REFIID riid, LPVOID* ppvObj);
- *        ULONG (*QueryInterface)(IDirect3D* me);
- *        ULONG (*QueryInterface)(IDirect3D* me);
+ *        ULONG (*AddRef)(IDirect3D* me);
+ *        ULONG (*Release)(IDirect3D* me);
  *        HRESULT (*Initialize)(IDirect3D* me, REFIID a);
  *        HRESULT (*EnumDevices)(IDirect3D* me, LPD3DENUMDEVICESCALLBACK a, LPVOID b);
  *        HRESULT (*CreateLight)(IDirect3D* me, LPDIRECT3DLIGHT* a, IUnknown* b);
@@ -329,6 +329,7 @@ HINSTANCE WINAPI CoLoadLibrary(LPOLESTR lpszLibName, BOOL bAutoFree);
 void WINAPI CoFreeAllLibraries(void);
 void WINAPI CoFreeLibrary(HINSTANCE hLibrary);
 void WINAPI CoFreeUnusedLibraries(void);
+void WINAPI CoFreeUnusedLibrariesEx(DWORD dwUnloadDelay, DWORD dwReserved);
 
 HRESULT WINAPI CoCreateInstance(REFCLSID rclsid, LPUNKNOWN pUnkOuter, DWORD dwClsContext, REFIID iid, LPVOID *ppv);
 HRESULT WINAPI CoCreateInstanceEx(REFCLSID      rclsid,
@@ -349,13 +350,16 @@ LPVOID WINAPI CoTaskMemRealloc(LPVOID ptr, ULONG size);
 HRESULT WINAPI CoRegisterMallocSpy(LPMALLOCSPY pMallocSpy);
 HRESULT WINAPI CoRevokeMallocSpy(void);
 
+HRESULT WINAPI CoGetContextToken( ULONG_PTR *token );
+
 /* class registration flags; passed to CoRegisterClassObject */
 typedef enum tagREGCLS
 {
     REGCLS_SINGLEUSE = 0,
     REGCLS_MULTIPLEUSE = 1,
     REGCLS_MULTI_SEPARATE = 2,
-    REGCLS_SUSPENDED = 4
+    REGCLS_SUSPENDED = 4,
+    REGCLS_SURROGATE = 8
 } REGCLS;
 
 HRESULT WINAPI CoGetClassObject(REFCLSID rclsid, DWORD dwClsContext, COSERVERINFO *pServerInfo, REFIID iid, LPVOID *ppv);
@@ -363,6 +367,7 @@ HRESULT WINAPI CoRegisterClassObject(REFCLSID rclsid,LPUNKNOWN pUnk,DWORD dwClsC
 HRESULT WINAPI CoRevokeClassObject(DWORD dwRegister);
 HRESULT WINAPI CoGetPSClsid(REFIID riid,CLSID *pclsid);
 HRESULT WINAPI CoRegisterPSClsid(REFIID riid, REFCLSID rclsid);
+HRESULT WINAPI CoRegisterSurrogate(LPSURROGATE pSurrogate);
 HRESULT WINAPI CoSuspendClassObjects(void);
 HRESULT WINAPI CoResumeClassObjects(void);
 ULONG WINAPI CoAddRefServerProcess(void);
@@ -399,6 +404,8 @@ HRESULT WINAPI CoRevertToSelf(void);
 /* misc */
 HRESULT WINAPI CoGetTreatAsClass(REFCLSID clsidOld, LPCLSID pClsidNew);
 HRESULT WINAPI CoTreatAsClass(REFCLSID clsidOld, REFCLSID clsidNew);
+HRESULT WINAPI CoAllowSetForegroundWindow(IUnknown *pUnk, LPVOID lpvReserved);
+HRESULT WINAPI CoGetObjectContext(REFIID riid, LPVOID *ppv);
 
 HRESULT WINAPI CoCreateGuid(GUID* pguid);
 BOOL WINAPI CoIsOle1Class(REFCLSID rclsid);
@@ -407,6 +414,7 @@ BOOL WINAPI CoDosDateTimeToFileTime(WORD nDosDate, WORD nDosTime, FILETIME* lpFi
 BOOL WINAPI CoFileTimeToDosDateTime(FILETIME* lpFileTime, WORD* lpDosDate, WORD* lpDosTime);
 HRESULT WINAPI CoFileTimeNow(FILETIME* lpFileTime);
 HRESULT WINAPI CoRegisterMessageFilter(LPMESSAGEFILTER lpMessageFilter,LPMESSAGEFILTER *lplpMessageFilter);
+HRESULT WINAPI CoRegisterChannelHook(REFGUID ExtensionGuid, IChannelHook *pChannelHook);
 
 typedef enum tagCOWAIT_FLAGS
 {
@@ -414,7 +422,7 @@ typedef enum tagCOWAIT_FLAGS
     COWAIT_ALERTABLE = 0x00000002
 } COWAIT_FLAGS;
 
-HRESULT WINAPI CoWaitForMultipleHandles(DWORD dwFlags,DWORD dwTimeout,ULONG cHandles,const HANDLE* pHandles,LPDWORD lpdwindex);
+HRESULT WINAPI CoWaitForMultipleHandles(DWORD dwFlags,DWORD dwTimeout,ULONG cHandles,LPHANDLE pHandles,LPDWORD lpdwindex);
 
 /*****************************************************************************
  *	GUID API

@@ -30,7 +30,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
 
-void DDRAW_dump_flags_(DWORD flags, const flag_info* names, size_t num_names, int newline);
 
 /*****************************************************************************
  * PixelFormat_WineD3DtoDD
@@ -251,12 +250,13 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
 
         case WINED3DFMT_UYVY:
         case WINED3DFMT_YUY2:
+        case WINED3DFMT_YV12:
         case WINED3DFMT_DXT1:
         case WINED3DFMT_DXT2:
         case WINED3DFMT_DXT3:
         case WINED3DFMT_DXT4:
         case WINED3DFMT_DXT5:
-        case WINED3DFMT_MULTI2_ARGB:
+        case WINED3DFMT_MULTI2_ARGB8:
         case WINED3DFMT_G8R8_G8B8:
         case WINED3DFMT_R8G8_B8G8:
             DDPixelFormat->dwFlags = DDPF_FOURCC;
@@ -322,7 +322,6 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
     if(TRACE_ON(ddraw)) {
         TRACE("Returning: ");
         DDRAW_dump_pixelformat(DDPixelFormat);
-        TRACE("\n");
     }
 }
 /*****************************************************************************
@@ -338,13 +337,12 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
  *  WINED3DFMT_UNKNOWN if a matching format wasn't found
  *****************************************************************************/
 WINED3DFORMAT
-PixelFormat_DD2WineD3D(DDPIXELFORMAT *DDPixelFormat)
+PixelFormat_DD2WineD3D(const DDPIXELFORMAT *DDPixelFormat)
 {
     TRACE("Convert a DirectDraw Pixelformat to a WineD3D Pixelformat\n");    
     if(TRACE_ON(ddraw))
     {
         DDRAW_dump_pixelformat(DDPixelFormat);
-        TRACE("\n");
     }
 
     if(DDPixelFormat->dwFlags & DDPF_PALETTEINDEXED8)
@@ -556,6 +554,10 @@ PixelFormat_DD2WineD3D(DDPIXELFORMAT *DDPixelFormat)
         {
             return WINED3DFMT_YUY2;
         }
+        if(DDPixelFormat->dwFourCC == MAKEFOURCC('Y', 'V', '1', '2'))
+        {
+            return WINED3DFMT_YV12;
+        }
         if(DDPixelFormat->dwFourCC == MAKEFOURCC('D', 'X', 'T', '1'))
         {
             return WINED3DFMT_DXT1;
@@ -584,7 +586,7 @@ PixelFormat_DD2WineD3D(DDPIXELFORMAT *DDPixelFormat)
         {
             return WINED3DFMT_R8G8_B8G8;
         }
-        return WINED3DFMT_UNKNOWN;  /* Abuse this as a error value */
+        return WINED3DFMT_UNKNOWN;  /* Abuse this as an error value */
     }
     else if(DDPixelFormat->dwFlags & DDPF_BUMPDUDV)
     {
@@ -611,24 +613,42 @@ PixelFormat_DD2WineD3D(DDPIXELFORMAT *DDPixelFormat)
 /*****************************************************************************
  * Various dumping functions.
  *
- * They write the contents of a specific function to a DPRINTF.
+ * They write the contents of a specific function to a TRACE.
  *
  *****************************************************************************/
 static void
 DDRAW_dump_DWORD(const void *in)
 {
-    DPRINTF("%d", *((const DWORD *) in));
+    TRACE("%d\n", *((const DWORD *) in));
 }
 static void
 DDRAW_dump_PTR(const void *in)
 {
-    DPRINTF("%p", *((const void * const*) in));
+    TRACE("%p\n", *((const void * const*) in));
 }
-void
+static void
 DDRAW_dump_DDCOLORKEY(const DDCOLORKEY *ddck)
 {
-    DPRINTF(" Low : %d  - High : %d", ddck->dwColorSpaceLowValue, ddck->dwColorSpaceHighValue);
+    TRACE("Low : %d  - High : %d\n", ddck->dwColorSpaceLowValue, ddck->dwColorSpaceHighValue);
 }
+
+static void DDRAW_dump_flags_nolf(DWORD flags, const flag_info* names,
+                                  size_t num_names)
+{
+    unsigned int	i;
+
+    for (i=0; i < num_names; i++)
+        if ((flags & names[i].val) ||      /* standard flag value */
+            ((!flags) && (!names[i].val))) /* zero value only */
+            TRACE("%s\n", names[i].name);
+}
+
+static void DDRAW_dump_flags(DWORD flags, const flag_info* names, size_t num_names)
+{
+    DDRAW_dump_flags_nolf(flags, names, num_names);
+    TRACE("\n");
+}
+
 void DDRAW_dump_DDSCAPS2(const DDSCAPS2 *in)
 {
     static const flag_info flags[] = {
@@ -685,8 +705,8 @@ void DDRAW_dump_DDSCAPS2(const DDSCAPS2 *in)
         FE(DDSCAPS2_STEREOSURFACELEFT)
     };
 
-    DDRAW_dump_flags_(in->dwCaps, flags, sizeof(flags)/sizeof(flags[0]), 0);
-    DDRAW_dump_flags_(in->dwCaps2, flags2, sizeof(flags2)/sizeof(flags2[0]), 0);
+    DDRAW_dump_flags_nolf(in->dwCaps, flags, sizeof(flags)/sizeof(flags[0]));
+    DDRAW_dump_flags(in->dwCaps2, flags2, sizeof(flags2)/sizeof(flags2[0]));
 }
 
 void
@@ -702,24 +722,7 @@ DDRAW_dump_DDSCAPS(const DDSCAPS *in)
     DDRAW_dump_DDSCAPS2(&in_bis);
 }
 
-void
-DDRAW_dump_flags_(DWORD flags,
-                  const flag_info* names,
-                  size_t num_names,
-                  int newline)
-{
-    unsigned int	i;
-
-    for (i=0; i < num_names; i++)
-        if ((flags & names[i].val) ||      /* standard flag value */
-            ((!flags) && (!names[i].val))) /* zero value only */
-            DPRINTF("%s ", names[i].name);
-
-    if (newline)
-        DPRINTF("\n");
-}
-
-void
+static void
 DDRAW_dump_pixelformat_flag(DWORD flagmask)
 {
     static const flag_info flags[] =
@@ -740,10 +743,10 @@ DDRAW_dump_pixelformat_flag(DWORD flagmask)
             FE(DDPF_ZPIXELS)
     };
 
-    DDRAW_dump_flags_(flagmask, flags, sizeof(flags)/sizeof(flags[0]), 0);
+    DDRAW_dump_flags_nolf(flagmask, flags, sizeof(flags)/sizeof(flags[0]));
 }
 
-void
+static void
 DDRAW_dump_members(DWORD flags,
                    const void* data,
                    const member_info* mems,
@@ -755,9 +758,8 @@ DDRAW_dump_members(DWORD flags,
     {
         if (mems[i].val & flags)
         {
-            DPRINTF(" - %s : ", mems[i].name);
+            TRACE(" - %s : ", mems[i].name);
             mems[i].func((const char *)data + mems[i].offset);
-            DPRINTF("\n");
         }
     }
 }
@@ -765,11 +767,11 @@ DDRAW_dump_members(DWORD flags,
 void
 DDRAW_dump_pixelformat(const DDPIXELFORMAT *pf)
 {
-    DPRINTF("( ");
+    TRACE("( ");
     DDRAW_dump_pixelformat_flag(pf->dwFlags);
     if (pf->dwFlags & DDPF_FOURCC)
     {
-        DPRINTF(", dwFourCC code '%c%c%c%c' (0x%08x) - %d bits per pixel",
+        TRACE(", dwFourCC code '%c%c%c%c' (0x%08x) - %d bits per pixel",
                 (unsigned char)( pf->dwFourCC     &0xff),
                 (unsigned char)((pf->dwFourCC>> 8)&0xff),
                 (unsigned char)((pf->dwFourCC>>16)&0xff),
@@ -781,7 +783,7 @@ DDRAW_dump_pixelformat(const DDPIXELFORMAT *pf)
     if (pf->dwFlags & DDPF_RGB)
     {
         const char *cmd;
-        DPRINTF(", RGB bits: %d, ", pf->u1.dwRGBBitCount);
+        TRACE(", RGB bits: %d, ", pf->u1.dwRGBBitCount);
         switch (pf->u1.dwRGBBitCount)
         {
         case 4: cmd = "%1lx"; break;
@@ -791,35 +793,35 @@ DDRAW_dump_pixelformat(const DDPIXELFORMAT *pf)
         case 32: cmd = "%08lx"; break;
         default: ERR("Unexpected bit depth !\n"); cmd = "%d"; break;
         }
-        DPRINTF(" R "); DPRINTF(cmd, pf->u2.dwRBitMask);
-        DPRINTF(" G "); DPRINTF(cmd, pf->u3.dwGBitMask);
-        DPRINTF(" B "); DPRINTF(cmd, pf->u4.dwBBitMask);
+        TRACE(" R "); TRACE(cmd, pf->u2.dwRBitMask);
+        TRACE(" G "); TRACE(cmd, pf->u3.dwGBitMask);
+        TRACE(" B "); TRACE(cmd, pf->u4.dwBBitMask);
         if (pf->dwFlags & DDPF_ALPHAPIXELS)
         {
-            DPRINTF(" A "); DPRINTF(cmd, pf->u5.dwRGBAlphaBitMask);
+            TRACE(" A "); TRACE(cmd, pf->u5.dwRGBAlphaBitMask);
         }
         if (pf->dwFlags & DDPF_ZPIXELS)
         {
-            DPRINTF(" Z "); DPRINTF(cmd, pf->u5.dwRGBZBitMask);
+            TRACE(" Z "); TRACE(cmd, pf->u5.dwRGBZBitMask);
         }
     }
     if (pf->dwFlags & DDPF_ZBUFFER)
     {
-        DPRINTF(", Z bits : %d", pf->u1.dwZBufferBitDepth);
+        TRACE(", Z bits : %d", pf->u1.dwZBufferBitDepth);
     }
     if (pf->dwFlags & DDPF_ALPHA)
     {
-        DPRINTF(", Alpha bits : %d", pf->u1.dwAlphaBitDepth);
+        TRACE(", Alpha bits : %d", pf->u1.dwAlphaBitDepth);
     }
     if (pf->dwFlags & DDPF_BUMPDUDV)
     {
         const char *cmd = "%08lx";
-        DPRINTF(", Bump bits: %d, ", pf->u1.dwBumpBitCount);
-        DPRINTF(" U "); DPRINTF(cmd, pf->u2.dwBumpDuBitMask);
-        DPRINTF(" V "); DPRINTF(cmd, pf->u3.dwBumpDvBitMask);
-        DPRINTF(" L "); DPRINTF(cmd, pf->u4.dwBumpLuminanceBitMask);
+        TRACE(", Bump bits: %d, ", pf->u1.dwBumpBitCount);
+        TRACE(" U "); TRACE(cmd, pf->u2.dwBumpDuBitMask);
+        TRACE(" V "); TRACE(cmd, pf->u3.dwBumpDvBitMask);
+        TRACE(" L "); TRACE(cmd, pf->u4.dwBumpLuminanceBitMask);
     }
-    DPRINTF(")");
+    TRACE(")\n");
 }
 
 void DDRAW_dump_surface_desc(const DDSURFACEDESC2 *lpddsd)
@@ -855,7 +857,7 @@ void DDRAW_dump_surface_desc(const DDSURFACEDESC2 *lpddsd)
 
     if (NULL == lpddsd)
     {
-        DPRINTF("(null)\n");
+        TRACE("(null)\n");
     }
     else
     {
@@ -873,12 +875,12 @@ void DDRAW_dump_surface_desc(const DDSURFACEDESC2 *lpddsd)
 }
 
 void
-dump_D3DMATRIX(D3DMATRIX *mat)
+dump_D3DMATRIX(const D3DMATRIX *mat)
 {
-    DPRINTF("  %f %f %f %f\n", mat->_11, mat->_12, mat->_13, mat->_14);
-    DPRINTF("  %f %f %f %f\n", mat->_21, mat->_22, mat->_23, mat->_24);
-    DPRINTF("  %f %f %f %f\n", mat->_31, mat->_32, mat->_33, mat->_34);
-    DPRINTF("  %f %f %f %f\n", mat->_41, mat->_42, mat->_43, mat->_44);
+    TRACE("  %f %f %f %f\n", mat->_11, mat->_12, mat->_13, mat->_14);
+    TRACE("  %f %f %f %f\n", mat->_21, mat->_22, mat->_23, mat->_24);
+    TRACE("  %f %f %f %f\n", mat->_31, mat->_32, mat->_33, mat->_34);
+    TRACE("  %f %f %f %f\n", mat->_41, mat->_42, mat->_43, mat->_44);
 }
 
 DWORD
@@ -893,9 +895,14 @@ get_flexible_vertex_size(DWORD d3dvtVertexType)
     if (d3dvtVertexType & D3DFVF_RESERVED1) size += sizeof(DWORD);
     switch (d3dvtVertexType & D3DFVF_POSITION_MASK)
     {
-        case D3DFVF_XYZ: size += 3 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZ:    size += 3 * sizeof(D3DVALUE); break;
         case D3DFVF_XYZRHW: size += 4 * sizeof(D3DVALUE); break;
-        default: TRACE(" matrix weighting not handled yet...\n");
+        case D3DFVF_XYZB1:  size += 4 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZB2:  size += 5 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZB3:  size += 6 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZB4:  size += 7 * sizeof(D3DVALUE); break;
+        case D3DFVF_XYZB5:  size += 8 * sizeof(D3DVALUE); break;
+        default: ERR("Unexpected position mask\n");
     }
     for (i = 0; i < GET_TEXCOUNT_FROM_FVF(d3dvtVertexType); i++)
     {
@@ -939,7 +946,7 @@ void DDRAW_dump_cooperativelevel(DWORD cooplevel)
 
     if (TRACE_ON(ddraw))
     {
-        DPRINTF(" - ");
+        TRACE(" - ");
         DDRAW_dump_flags(cooplevel, flags, sizeof(flags)/sizeof(flags[0]));
     }
 }
@@ -1098,21 +1105,21 @@ void DDRAW_dump_DDCAPS(const DDCAPS *lpcaps)
       FE(DDSVCAPS_STEREOSEQUENTIAL),
     };
 
-    DPRINTF(" - dwSize : %d\n", lpcaps->dwSize);
-    DPRINTF(" - dwCaps : "); DDRAW_dump_flags(lpcaps->dwCaps, flags1, sizeof(flags1)/sizeof(flags1[0]));
-    DPRINTF(" - dwCaps2 : "); DDRAW_dump_flags(lpcaps->dwCaps2, flags2, sizeof(flags2)/sizeof(flags2[0]));
-    DPRINTF(" - dwCKeyCaps : "); DDRAW_dump_flags(lpcaps->dwCKeyCaps, flags3, sizeof(flags3)/sizeof(flags3[0]));
-    DPRINTF(" - dwFXCaps : "); DDRAW_dump_flags(lpcaps->dwFXCaps, flags4, sizeof(flags4)/sizeof(flags4[0]));
-    DPRINTF(" - dwFXAlphaCaps : "); DDRAW_dump_flags(lpcaps->dwFXAlphaCaps, flags5, sizeof(flags5)/sizeof(flags5[0]));
-    DPRINTF(" - dwPalCaps : "); DDRAW_dump_flags(lpcaps->dwPalCaps, flags6, sizeof(flags6)/sizeof(flags6[0]));
-    DPRINTF(" - dwSVCaps : "); DDRAW_dump_flags(lpcaps->dwSVCaps, flags7, sizeof(flags7)/sizeof(flags7[0]));
-    DPRINTF("...\n");
-    DPRINTF(" - dwNumFourCCCodes : %d\n", lpcaps->dwNumFourCCCodes);
-    DPRINTF(" - dwCurrVisibleOverlays : %d\n", lpcaps->dwCurrVisibleOverlays);
-    DPRINTF(" - dwMinOverlayStretch : %d\n", lpcaps->dwMinOverlayStretch);
-    DPRINTF(" - dwMaxOverlayStretch : %d\n", lpcaps->dwMaxOverlayStretch);
-    DPRINTF("...\n");
-    DPRINTF(" - ddsCaps : "); DDRAW_dump_DDSCAPS2(&lpcaps->ddsCaps); DPRINTF("\n");
+    TRACE(" - dwSize : %d\n", lpcaps->dwSize);
+    TRACE(" - dwCaps : "); DDRAW_dump_flags(lpcaps->dwCaps, flags1, sizeof(flags1)/sizeof(flags1[0]));
+    TRACE(" - dwCaps2 : "); DDRAW_dump_flags(lpcaps->dwCaps2, flags2, sizeof(flags2)/sizeof(flags2[0]));
+    TRACE(" - dwCKeyCaps : "); DDRAW_dump_flags(lpcaps->dwCKeyCaps, flags3, sizeof(flags3)/sizeof(flags3[0]));
+    TRACE(" - dwFXCaps : "); DDRAW_dump_flags(lpcaps->dwFXCaps, flags4, sizeof(flags4)/sizeof(flags4[0]));
+    TRACE(" - dwFXAlphaCaps : "); DDRAW_dump_flags(lpcaps->dwFXAlphaCaps, flags5, sizeof(flags5)/sizeof(flags5[0]));
+    TRACE(" - dwPalCaps : "); DDRAW_dump_flags(lpcaps->dwPalCaps, flags6, sizeof(flags6)/sizeof(flags6[0]));
+    TRACE(" - dwSVCaps : "); DDRAW_dump_flags(lpcaps->dwSVCaps, flags7, sizeof(flags7)/sizeof(flags7[0]));
+    TRACE("...\n");
+    TRACE(" - dwNumFourCCCodes : %d\n", lpcaps->dwNumFourCCCodes);
+    TRACE(" - dwCurrVisibleOverlays : %d\n", lpcaps->dwCurrVisibleOverlays);
+    TRACE(" - dwMinOverlayStretch : %d\n", lpcaps->dwMinOverlayStretch);
+    TRACE(" - dwMaxOverlayStretch : %d\n", lpcaps->dwMaxOverlayStretch);
+    TRACE("...\n");
+    TRACE(" - ddsCaps : "); DDRAW_dump_DDSCAPS2(&lpcaps->ddsCaps);
 }
 
 /*****************************************************************************
@@ -1128,8 +1135,8 @@ void DDRAW_dump_DDCAPS(const DDCAPS *lpcaps)
  *****************************************************************************/
 void
 multiply_matrix(D3DMATRIX *dest,
-                D3DMATRIX *src1,
-                D3DMATRIX *src2)
+                const D3DMATRIX *src1,
+                const D3DMATRIX *src2)
 {
     D3DMATRIX temp;
 

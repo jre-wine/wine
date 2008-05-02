@@ -22,6 +22,7 @@
 #include "config.h"
 #include "wine/port.h"
 
+#include <stdarg.h>
 #include <string.h>
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
@@ -33,25 +34,21 @@
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 
-#include "wine/debug.h"
+#include "windef.h"
+#include "winbase.h"
 #include "winerror.h"
-#include "wownt32.h"
-#include "heap.h"
 #include "winreg.h"
 #include "psdrv.h"
 #include "winspool.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
-#ifndef SONAME_LIBCUPS
-#define SONAME_LIBCUPS "libcups.so"
-#endif
-
-#ifdef HAVE_CUPS_CUPS_H
+#ifdef SONAME_LIBCUPS
 static void *cupshandle = NULL;
 #endif
 
-static PSDRV_DEVMODEA DefaultDevmode =
+static const PSDRV_DEVMODEA DefaultDevmode =
 {
   { /* dmPublic */
 /* dmDeviceName */	"Wine PostScript Driver",
@@ -67,13 +64,13 @@ static PSDRV_DEVMODEA DefaultDevmode =
 /* dmOrientation */	DMORIENT_PORTRAIT,
 /* dmPaperSize */	DMPAPER_LETTER,
 /* dmPaperLength */	2794,
-/* dmPaperWidth */      2159
-     }
-   },
+/* dmPaperWidth */      2159,
 /* dmScale */		100, /* ?? */
 /* dmCopies */		1,
 /* dmDefaultSource */	DMBIN_AUTO,
-/* dmPrintQuality */	0,
+/* dmPrintQuality */	0
+     }
+   },
 /* dmColor */		DMCOLOR_COLOR,
 /* dmDuplex */		DMDUP_SIMPLEX,
 /* dmYResolution */	0,
@@ -84,7 +81,9 @@ static PSDRV_DEVMODEA DefaultDevmode =
 /* dmBitsPerPel */	0,
 /* dmPelsWidth */	0,
 /* dmPelsHeight */	0,
-/* dmDisplayFlags */	0,
+   { /* u2 */
+/* dmDisplayFlags */	0
+   },
 /* dmDisplayFrequency */ 0,
 /* dmICMMethod */       0,
 /* dmICMIntent */       0,
@@ -107,7 +106,7 @@ HINSTANCE PSDRV_hInstance = 0;
 HANDLE PSDRV_Heap = 0;
 
 static HFONT PSDRV_DefaultFont = 0;
-static LOGFONTA DefaultLogFont = {
+static const LOGFONTA DefaultLogFont = {
     100, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, ANSI_CHARSET, 0, 0,
     DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, ""
 };
@@ -142,7 +141,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 		HeapDestroy(PSDRV_Heap);
 		return FALSE;
 	    }
-#ifdef HAVE_CUPS_CUPS_H
+#ifdef SONAME_LIBCUPS
 	    /* dynamically load CUPS if not yet loaded */
 	    if (!cupshandle) {
 		cupshandle = wine_dlopen(SONAME_LIBCUPS, RTLD_NOW, NULL, 0);
@@ -155,7 +154,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 
 	    DeleteObject( PSDRV_DefaultFont );
 	    HeapDestroy( PSDRV_Heap );
-#ifdef HAVE_CUPS_CUPS_H
+#ifdef SONAME_LIBCUPS
 	    if (cupshandle && (cupshandle != (void*)-1)) {
 		wine_dlclose(cupshandle, NULL, 0);
 		cupshandle = NULL;
@@ -174,12 +173,12 @@ static void PSDRV_UpdateDevCaps( PSDRV_PDEVICE *physDev )
     INT width = 0, height = 0;
 
     if(physDev->Devmode->dmPublic.dmFields & DM_PAPERSIZE) {
-        for(page = physDev->pi->ppd->PageSizes; page; page = page->next) {
+        LIST_FOR_EACH_ENTRY(page, &physDev->pi->ppd->PageSizes, PAGESIZE, entry) {
 	    if(page->WinPage == physDev->Devmode->dmPublic.u1.s1.dmPaperSize)
 	        break;
 	}
 
-	if(!page) {
+	if(&page->entry == &physDev->pi->ppd->PageSizes) {
 	    FIXME("Can't find page\n");
 	    physDev->ImageableArea.left = 0;
 	    physDev->ImageableArea.right = 0;
@@ -330,8 +329,14 @@ BOOL PSDRV_CreateDC( HDC hdc, PSDRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR devi
     if(!pi) return FALSE;
 
     if(!pi->Fonts) {
-        MESSAGE("To use WINEPS you need to install some AFM files.\n");
-	return FALSE;
+        RASTERIZER_STATUS status;
+        if(!GetRasterizerCaps(&status, sizeof(status)) ||
+           !(status.wFlags & TT_AVAILABLE) ||
+           !(status.wFlags & TT_ENABLED)) {
+            MESSAGE("Disabling printer %s since it has no builtin fonts and there are no TrueType fonts available.\n",
+                    debugstr_w(device));
+            return FALSE;
+        }
     }
 
     physDev = HeapAlloc( PSDRV_Heap, HEAP_ZERO_MEMORY, sizeof(*physDev) );
@@ -352,8 +357,10 @@ BOOL PSDRV_CreateDC( HDC hdc, PSDRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR devi
     physDev->logPixelsX = physDev->pi->ppd->DefaultResolution;
     physDev->logPixelsY = physDev->pi->ppd->DefaultResolution;
 
-    if (output) {
-        physDev->job.output = HEAP_strdupWtoA( PSDRV_Heap, 0, output );
+    if (output && *output) {
+        INT len = WideCharToMultiByte( CP_ACP, 0, output, -1, NULL, 0, NULL, NULL );
+        if ((physDev->job.output = HeapAlloc( PSDRV_Heap, 0, len )))
+            WideCharToMultiByte( CP_ACP, 0, output, -1, physDev->job.output, len, NULL, NULL );
     } else
         physDev->job.output = NULL;
     physDev->job.hJob = 0;
@@ -398,7 +405,7 @@ HDC PSDRV_ResetDC( PSDRV_PDEVICE *physDev, const DEVMODEW *lpInitData )
         HeapFree(PSDRV_Heap, 0, devmodeA);
         PSDRV_UpdateDevCaps(physDev);
         hrgn = CreateRectRgn(0, 0, physDev->horzRes, physDev->vertRes);
-        SelectVisRgn16(HDC_16(physDev->hdc), HRGN_16(hrgn));
+        SelectVisRgn( physDev->hdc, hrgn );
         DeleteObject(hrgn);
     }
     return physDev->hdc;
@@ -417,16 +424,18 @@ INT PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
         return DT_RASPRINTER;
     case HORZSIZE:
         return MulDiv(physDev->horzSize, 100,
-		      physDev->Devmode->dmPublic.dmScale);
+		      physDev->Devmode->dmPublic.u1.s1.dmScale);
     case VERTSIZE:
         return MulDiv(physDev->vertSize, 100,
-		      physDev->Devmode->dmPublic.dmScale);
+		      physDev->Devmode->dmPublic.u1.s1.dmScale);
     case HORZRES:
+    case DESKTOPHORZRES:
         return physDev->horzRes;
     case VERTRES:
+    case DESKTOPVERTRES:
         return physDev->vertRes;
     case BITSPIXEL:
-        return physDev->pi->ppd->ColorDevice ? 8 : 1;
+        return (physDev->pi->ppd->ColorDevice != CD_False) ? 8 : 1;
     case PLANES:
         return 1;
     case NUMBRUSHES:
@@ -438,7 +447,7 @@ INT PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
     case NUMFONTS:
         return 39;
     case NUMCOLORS:
-        return (physDev->pi->ppd->ColorDevice ? 256 : -1);
+        return (physDev->pi->ppd->ColorDevice != CD_False) ? 256 : -1;
     case PDEVICESIZE:
         return sizeof(PSDRV_PDEVICE);
     case CURVECAPS:
@@ -467,10 +476,10 @@ INT PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
                            (double)physDev->pi->ppd->DefaultResolution );
     case LOGPIXELSX:
         return MulDiv(physDev->logPixelsX,
-		      physDev->Devmode->dmPublic.dmScale, 100);
+		      physDev->Devmode->dmPublic.u1.s1.dmScale, 100);
     case LOGPIXELSY:
         return MulDiv(physDev->logPixelsY,
-		      physDev->Devmode->dmPublic.dmScale, 100);
+		      physDev->Devmode->dmPublic.u1.s1.dmScale, 100);
     case SIZEPALETTE:
         return 0;
     case NUMRESERVED:
@@ -504,8 +513,6 @@ INT PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
     case SCALINGFACTORX:
     case SCALINGFACTORY:
     case VREFRESH:
-    case DESKTOPVERTRES:
-    case DESKTOPHORZRES:
     case BLTALIGNMENT:
         return 0;
     default:
@@ -576,7 +583,7 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
 	goto cleanup;
     }
 
-#ifdef HAVE_CUPS_CUPS_H
+#ifdef SONAME_LIBCUPS
     if (cupshandle != (void*)-1) {
 	typeof(cupsGetPPD) * pcupsGetPPD = NULL;
 
@@ -623,6 +630,7 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
             value_name=NULL;
         }
         if (value_name) {
+            HeapFree(PSDRV_Heap, 0, ppdFileName);
             ppdFileName=HeapAlloc(PSDRV_Heap, 0, needed);
             RegQueryValueExA(hkey, value_name, 0, &ppdType, (LPBYTE)ppdFileName, &needed);
         }

@@ -79,7 +79,7 @@ extern void FILE_SetDosError(void);
 extern WCHAR *FILE_name_AtoW( LPCSTR name, BOOL alloc );
 extern DWORD FILE_name_WtoA( LPCWSTR src, INT srclen, LPSTR dest, INT destlen );
 
-extern DWORD INSTR_EmulateInstruction( EXCEPTION_RECORD *rec, CONTEXT86 *context );
+extern DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context );
 extern LONG CALLBACK INSTR_vectored_handler( EXCEPTION_POINTERS *ptrs );
 extern void INSTR_CallBuiltinHandler( CONTEXT86 *context, BYTE intnum );
 
@@ -135,7 +135,7 @@ extern struct winedos_exports
     BOOL     (*FreeDosBlock)(void* ptr);
     UINT     (*ResizeDosBlock)(void *ptr, UINT size, BOOL exact);
     /* for instr.c */
-    void (WINAPI *EmulateInterruptPM)( CONTEXT86 *context, BYTE intnum );
+    BOOL (WINAPI *EmulateInterruptPM)( CONTEXT86 *context, BYTE intnum );
     void (WINAPI *CallBuiltinHandler)( CONTEXT86 *context, BYTE intnum );
     DWORD (WINAPI *inport)( int port, int size );
     void (WINAPI *outport)( int port, int size, DWORD val );

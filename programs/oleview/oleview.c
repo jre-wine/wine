@@ -25,13 +25,6 @@ static WCHAR wszRegEdit[] = { 'r','e','g','e','d','i','t','.','e','x','e','\0' }
 static WCHAR wszFormat[] = { '<','o','b','j','e','c','t','\n',' ',' ',' ',
     'c','l','a','s','s','i','d','=','\"','c','l','s','i','d',':','%','s','\"','\n',
     '>','\n','<','/','o','b','j','e','c','t','>','\0' };
-WCHAR wszFilter[] = { 'T','y','p','e','L','i','b',' ','F','i','l','e','s',' ',
-    '(','*','t','l','b',';','*','o','l','b',';','*','.','d','l','l',';',
-    '*','.','o','c','x',';','*','.','e','x','e',')','\0',
-    '*','.','t','l','b',';','*','.','o','l','b',';','*','.','d','l','l',';',
-    '*','.','o','c','x','*','.','e','x','e','\0',
-    'A','l','l',' ','F','i','l','e','s',' ','(','*','.','*',')','\0',
-    '*','.','*','\0','\0' };
 
 INT_PTR CALLBACK SysConfProc(HWND hDlgWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -131,7 +124,7 @@ INT_PTR CALLBACK CreateInstOnProc(HWND hDlgWnd, UINT uMsg, WPARAM wParam, LPARAM
     return FALSE;
 }
 
-void InitOpenFileName(HWND hWnd, OPENFILENAME *pofn, WCHAR *wszFilter,
+static void InitOpenFileName(HWND hWnd, OPENFILENAME *pofn, WCHAR *wszFilter,
         WCHAR *wszTitle, WCHAR *wszFileName)
 {
     memset(pofn, 0, sizeof(OPENFILENAME));
@@ -147,7 +140,7 @@ void InitOpenFileName(HWND hWnd, OPENFILENAME *pofn, WCHAR *wszFilter,
     pofn->Flags = OFN_HIDEREADONLY;
 }
 
-void CopyClsid(HTREEITEM item)
+static void CopyClsid(HTREEITEM item)
 {
     TVITEM tvi;
 
@@ -168,7 +161,7 @@ void CopyClsid(HTREEITEM item)
     }
 }
 
-void CopyHTMLTag(HTREEITEM item)
+static void CopyHTMLTag(HTREEITEM item)
 {
     TVITEM tvi;
 
@@ -193,7 +186,7 @@ void CopyHTMLTag(HTREEITEM item)
     }
 }
 
-void ResizeChild(void)
+static void ResizeChild(void)
 {
     RECT client, stat, tool;
 
@@ -280,7 +273,7 @@ void RefreshMenu(HTREEITEM item)
         EnableMenuItem(hMenu, IDM_COPYCLSID, MF_ENABLED);
 }
 
-int MenuCommand(WPARAM wParam, HWND hWnd)
+static int MenuCommand(WPARAM wParam, HWND hWnd)
 {
     BOOL vis;
     HTREEITEM hSelect;
@@ -380,7 +373,7 @@ int MenuCommand(WPARAM wParam, HWND hWnd)
 
             memset(&si, 0, sizeof(si));
             si.cb = sizeof(si);
-            CreateProcess(NULL, wszRegEdit, NULL, NULL, FALSE, 0,\
+            CreateProcess(NULL, wszRegEdit, NULL, NULL, FALSE, 0,
                     NULL, NULL, &si, &pi);
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
@@ -408,8 +401,10 @@ int MenuCommand(WPARAM wParam, HWND hWnd)
             OPENFILENAME ofn;
             static WCHAR wszTitle[MAX_LOAD_STRING];
             static WCHAR wszName[MAX_LOAD_STRING];
+            static WCHAR wszFilter[MAX_LOAD_STRING];
 
             LoadString(globals.hMainInst, IDS_OPEN, wszTitle, sizeof(wszTitle));
+            LoadString(globals.hMainInst, IDS_OPEN_TYPELIB_FILTER, wszFilter, sizeof(wszFilter));
             InitOpenFileName(hWnd, &ofn, wszFilter, wszTitle, wszName);
             if(GetOpenFileName(&ofn)) CreateTypeLibWindow(globals.hMainInst, wszName);
             break;
@@ -426,7 +421,7 @@ int MenuCommand(WPARAM wParam, HWND hWnd)
     return 0;
 }
 
-void UpdateStatusBar(int itemID)
+static void UpdateStatusBar(int itemID)
 {
     WCHAR info[MAX_LOAD_STRING];
 
@@ -475,7 +470,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg,
     return 0;
 }
 
-BOOL InitApplication(HINSTANCE hInst)
+static BOOL InitApplication(HINSTANCE hInst)
 {
     WNDCLASS wc;
     WCHAR wszAppName[MAX_LOAD_STRING];
@@ -494,7 +489,7 @@ BOOL InitApplication(HINSTANCE hInst)
     return TRUE;
 }
 
-BOOL InitInstance(HINSTANCE hInst, int nCmdShow)
+static BOOL InitInstance(HINSTANCE hInst, int nCmdShow)
 {
     HWND hWnd;
     WCHAR wszAppName[MAX_LOAD_STRING];

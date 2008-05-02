@@ -32,7 +32,6 @@
 #include "uxtheme.h"
 #include "tmschema.h"
 
-#include "uxthemedll.h"
 #include "msstyles.h"
 
 #include "wine/unicode.h"
@@ -47,7 +46,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(uxtheme);
 BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, int *value);
 BOOL MSSTYLES_GetNextToken(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LPWSTR lpBuff, DWORD buffSize);
 void MSSTYLES_ParseThemeIni(PTHEME_FILE tf, BOOL setMetrics);
-HRESULT MSSTYLES_GetFont (LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LOGFONTW* logfont);
+static HRESULT MSSTYLES_GetFont (LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LOGFONTW* logfont);
 
 extern HINSTANCE hDllInst;
 extern int alphaBlendMode;
@@ -58,7 +57,7 @@ static const WCHAR szThemesIniResource[] = {
     't','h','e','m','e','s','_','i','n','i','\0'
 };
 
-PTHEME_FILE tfActiveTheme = NULL;
+static PTHEME_FILE tfActiveTheme;
 
 /***********************************************************************/
 
@@ -142,7 +141,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
     }
     pszSizes = (LPWSTR)LoadResource(hTheme, hrsc);
 
-    /* Validate requested color against whats available from the theme */
+    /* Validate requested color against what's available from the theme */
     if(pszColorName) {
         tmp = pszColors;
         while(*tmp) {
@@ -156,7 +155,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
     else
         pszSelectedColor = pszColors; /* Use the default color */
 
-    /* Validate requested size against whats available from the theme */
+    /* Validate requested size against what's available from the theme */
     if(pszSizeName) {
         tmp = pszSizes;
         while(*tmp) {
@@ -403,7 +402,7 @@ static BOOL MSSTYLES_ParseIniSectionName(LPCWSTR lpSection, DWORD dwLen, LPWSTR 
  * RETURNS
  *  The class found, or NULL
  */
-PTHEME_CLASS MSSTYLES_FindClass(PTHEME_FILE tf, LPCWSTR pszAppName, LPCWSTR pszClassName)
+static PTHEME_CLASS MSSTYLES_FindClass(PTHEME_FILE tf, LPCWSTR pszAppName, LPCWSTR pszClassName)
 {
     PTHEME_CLASS cur = tf->classes;
     while(cur) {
@@ -675,7 +674,7 @@ struct PARSECOLORSTATE
     int captionColors;
 };
 
-inline void parse_init_color (struct PARSECOLORSTATE* state)
+static inline void parse_init_color (struct PARSECOLORSTATE* state)
 {
     memset (state, 0, sizeof (*state));
 }
@@ -729,7 +728,7 @@ struct PARSENONCLIENTSTATE
     LOGFONTW iconTitleFont;
 };
 
-inline void parse_init_nonclient (struct PARSENONCLIENTSTATE* state)
+static inline void parse_init_nonclient (struct PARSENONCLIENTSTATE* state)
 {
     memset (state, 0, sizeof (*state));
     state->metrics.cbSize = sizeof (NONCLIENTMETRICSW);
@@ -1226,8 +1225,8 @@ HRESULT MSSTYLES_GetPropertyColor(PTHEME_PROPERTY tp, COLORREF *pColor)
  *
  * Retrieve a color value for a property 
  */
-HRESULT MSSTYLES_GetFont (LPCWSTR lpCur, LPCWSTR lpEnd, 
-			  LPCWSTR *lpValEnd, LOGFONTW* pFont)
+static HRESULT MSSTYLES_GetFont (LPCWSTR lpCur, LPCWSTR lpEnd,
+                                 LPCWSTR *lpValEnd, LOGFONTW* pFont)
 {
     static const WCHAR szBold[] = {'b','o','l','d','\0'};
     static const WCHAR szItalic[] = {'i','t','a','l','i','c','\0'};
@@ -1348,10 +1347,10 @@ HRESULT MSSTYLES_GetPropertyRect(PTHEME_PROPERTY tp, RECT *pRect)
     LPCWSTR lpCur = tp->lpValue;
     LPCWSTR lpEnd = tp->lpValue + tp->dwValueLen;
 
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, (int*)&pRect->left);
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, (int*)&pRect->top);
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, (int*)&pRect->right);
-    if(!MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, (int*)&pRect->bottom)) {
+    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->left);
+    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->top);
+    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->right);
+    if(!MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->bottom)) {
         TRACE("Could not parse rect property\n");
         return E_PROP_ID_UNSUPPORTED;
     }

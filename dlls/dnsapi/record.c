@@ -38,7 +38,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winerror.h"
 #include "winnls.h"
 #include "windns.h"
 
@@ -417,7 +416,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     TRACE( "(%p,%d,%d)\n", src, in, out );
 
     size = FIELD_OFFSET(DNS_RECORD, Data) + src->wDataLength;
-    dst = dns_zero_alloc( size );
+    dst = heap_alloc_zero( size );
     if (!dst) return NULL;
 
     memcpy( dst, src, size );
@@ -444,8 +443,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
 
             if (!dst->Data.TXT.pStringArray[i])
             {
-                for (--i; i >= 0; i--)
-                    dns_free( dst->Data.TXT.pStringArray[i] );
+                while (i > 0) heap_free( dst->Data.TXT.pStringArray[--i] );
                 goto error;
             }
         }
@@ -462,7 +460,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
             dns_strcpyX( src->Data.MINFO.pNameErrorsMailbox, in, out );
         if (!dst->Data.MINFO.pNameErrorsMailbox)
         {
-            dns_free( dst->Data.MINFO.pNameMailbox );
+            heap_free( dst->Data.MINFO.pNameMailbox );
             goto error;
         }
         break;
@@ -514,7 +512,7 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
             dns_strcpyX( src->Data.SOA.pNameAdministrator, in, out );
         if (!dst->Data.SOA.pNameAdministrator)
         {
-            dns_free( dst->Data.SOA.pNamePrimaryServer );
+            heap_free( dst->Data.SOA.pNamePrimaryServer );
             goto error;
         }
         break;
@@ -532,8 +530,8 @@ PDNS_RECORD WINAPI DnsRecordCopyEx( PDNS_RECORD src, DNS_CHARSET in, DNS_CHARSET
     return dst;
 
 error:
-    dns_free( dst->pName );
-    dns_free( dst );
+    heap_free( dst->pName );
+    heap_free( dst );
     return NULL;
 }
 
@@ -541,7 +539,7 @@ error:
  * DnsRecordListFree                       [DNSAPI.@]
  *
  */
-void WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
+VOID WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
 {
     DNS_RECORD *r, *next;
     unsigned int i;
@@ -556,7 +554,7 @@ void WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
     {
         for (r = list; (list = r); r = next)
         {
-            dns_free( r->pName );
+            heap_free( r->pName );
 
             switch (r->wType)
             {
@@ -566,27 +564,27 @@ void WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
             case DNS_TYPE_X25:
             {
                 for (i = 0; i < r->Data.TXT.dwStringCount; i++)
-                    dns_free( r->Data.TXT.pStringArray[i] );
+                    heap_free( r->Data.TXT.pStringArray[i] );
 
                 break;
             }
             case DNS_TYPE_MINFO:
             case DNS_TYPE_RP:
             {
-                dns_free( r->Data.MINFO.pNameMailbox );
-                dns_free( r->Data.MINFO.pNameErrorsMailbox );
+                heap_free( r->Data.MINFO.pNameMailbox );
+                heap_free( r->Data.MINFO.pNameErrorsMailbox );
                 break;
             }
             case DNS_TYPE_AFSDB:
             case DNS_TYPE_RT:
             case DNS_TYPE_MX:
             {
-                dns_free( r->Data.MX.pNameExchange );
+                heap_free( r->Data.MX.pNameExchange );
                 break;
             }
             case DNS_TYPE_NXT:
             {
-                dns_free( r->Data.NXT.pNameNext );
+                heap_free( r->Data.NXT.pNameNext );
                 break;
             }
             case DNS_TYPE_CNAME:
@@ -598,23 +596,23 @@ void WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
             case DNS_TYPE_NS:
             case DNS_TYPE_PTR:
             {
-                dns_free( r->Data.PTR.pNameHost );
+                heap_free( r->Data.PTR.pNameHost );
                 break;
             }
             case DNS_TYPE_SIG:
             {
-                dns_free( r->Data.SIG.pNameSigner );
+                heap_free( r->Data.SIG.pNameSigner );
                 break;
             }
             case DNS_TYPE_SOA:
             {
-                dns_free( r->Data.SOA.pNamePrimaryServer );
-                dns_free( r->Data.SOA.pNameAdministrator );
+                heap_free( r->Data.SOA.pNamePrimaryServer );
+                heap_free( r->Data.SOA.pNameAdministrator );
                 break;
             }
             case DNS_TYPE_SRV:
             {
-                dns_free( r->Data.SRV.pNameTarget );
+                heap_free( r->Data.SRV.pNameTarget );
                 break;
             }
             default:
@@ -622,7 +620,7 @@ void WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
             }
 
             next = r->pNext;
-            dns_free( r );
+            heap_free( r );
         }
         break;
     }
@@ -682,7 +680,7 @@ BOOL WINAPI DnsRecordSetCompare( PDNS_RECORD set1, PDNS_RECORD set2,
                 DNS_RRSET_ADD( rr1, u );
                 ret = FALSE;
             }
-            else dns_free( u );
+            else heap_free( u );
         }
     }
 
@@ -698,7 +696,7 @@ BOOL WINAPI DnsRecordSetCompare( PDNS_RECORD set1, PDNS_RECORD set2,
                 DNS_RRSET_ADD( rr2, u );
                 ret = FALSE;
             }
-            else dns_free( u );
+            else heap_free( u );
         }
     }
 

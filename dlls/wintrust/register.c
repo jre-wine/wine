@@ -26,12 +26,13 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "winnls.h"
+#include "objbase.h"
 
 #include "guiddef.h"
 #include "wintrust.h"
 #include "softpub.h"
 #include "mssip.h"
-
+#include "wintrust_priv.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wintrust);
@@ -89,9 +90,9 @@ static void WINTRUST_InitRegStructs(void)
 {
 #define WINTRUST_INITREGENTRY( action, dllname, functionname ) \
     action.cbStruct = sizeof(CRYPT_TRUST_REG_ENTRY); \
-    action.pwszDLLName = HeapAlloc(GetProcessHeap(), 0, sizeof(dllname)); \
+    action.pwszDLLName = WINTRUST_Alloc(sizeof(dllname)); \
     lstrcpyW(action.pwszDLLName, dllname); \
-    action.pwszFunctionName = HeapAlloc(GetProcessHeap(), 0, sizeof(functionname)); \
+    action.pwszFunctionName = WINTRUST_Alloc(sizeof(functionname)); \
     lstrcpyW(action.pwszFunctionName, functionname);
 
     WINTRUST_INITREGENTRY(SoftpubInitialization, SP_POLICY_PROVIDER_DLL_NAME, SP_INIT_FUNCTION)
@@ -125,8 +126,8 @@ static void WINTRUST_InitRegStructs(void)
 static void WINTRUST_FreeRegStructs(void)
 {
 #define WINTRUST_FREEREGENTRY( action ) \
-    HeapFree(GetProcessHeap(), 0, action.pwszDLLName); \
-    HeapFree(GetProcessHeap(), 0, action.pwszFunctionName);
+    WINTRUST_Free(action.pwszDLLName); \
+    WINTRUST_Free(action.pwszFunctionName);
 
     WINTRUST_FREEREGENTRY(SoftpubInitialization);
     WINTRUST_FREEREGENTRY(SoftpubMessage);
@@ -380,11 +381,11 @@ static LONG WINTRUST_WriteSingleUsageEntry(LPCSTR OID,
 
     /* Turn OID into a wide-character string */
     Len = MultiByteToWideChar( CP_ACP, 0, OID, -1, NULL, 0 );
-    OIDW = HeapAlloc( GetProcessHeap(), 0, Len * sizeof(WCHAR) );
+    OIDW = WINTRUST_Alloc( Len * sizeof(WCHAR) );
     MultiByteToWideChar( CP_ACP, 0, OID, -1, OIDW, Len );
 
     /* Allocate the needed space for UsageKey */
-    UsageKey = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(Trust) + lstrlenW(Usages) + Len) * sizeof(WCHAR));
+    UsageKey = WINTRUST_Alloc((lstrlenW(Trust) + lstrlenW(Usages) + Len) * sizeof(WCHAR));
     /* Create the key string */
     lstrcpyW(UsageKey, Trust);
     lstrcatW(UsageKey, Usages);
@@ -399,8 +400,8 @@ static LONG WINTRUST_WriteSingleUsageEntry(LPCSTR OID,
     }
     RegCloseKey(Key);
 
-    HeapFree(GetProcessHeap(), 0, OIDW);
-    HeapFree(GetProcessHeap(), 0, UsageKey);
+    WINTRUST_Free(OIDW);
+    WINTRUST_Free(UsageKey);
 
     return Res;
 }
@@ -586,7 +587,7 @@ static BOOL WINTRUST_RegisterHttpsProv(void)
                                             SoftpubLoadUsage,
                                             SoftpubFreeUsage };
 
-    DefUsage.pwszDllName = HeapAlloc(GetProcessHeap(), 0, sizeof(SP_POLICY_PROVIDER_DLL_NAME));
+    DefUsage.pwszDllName = WINTRUST_Alloc(sizeof(SP_POLICY_PROVIDER_DLL_NAME));
     lstrcpyW(DefUsage.pwszDllName, SP_POLICY_PROVIDER_DLL_NAME);
 
     if (!WintrustAddDefaultForUsage(szOID_PKIX_KP_SERVER_AUTH, &DefUsage))
@@ -598,7 +599,7 @@ static BOOL WINTRUST_RegisterHttpsProv(void)
     if (!WintrustAddDefaultForUsage(szOID_SGC_NETSCAPE, &DefUsage))
         RegisteredOK = FALSE;
 
-    HeapFree(GetProcessHeap(), 0, DefUsage.pwszDllName);
+    WINTRUST_Free(DefUsage.pwszDllName);
 
     if (!WintrustAddActionID(&ProvGUID, 0, &ProvInfo))
         RegisteredOK = FALSE;
@@ -707,7 +708,7 @@ static BOOL WINTRUST_RegisterGenChainVerify(void)
  *   WintrustAddDefaultForUsage will only return TRUE or FALSE, no last 
  *   error is set, not even when the registry cannot be written to.
  */
-BOOL WINAPI WintrustAddDefaultForUsage(const CHAR *pszUsageOID,
+BOOL WINAPI WintrustAddDefaultForUsage(const char *pszUsageOID,
                                        CRYPT_PROVIDER_REGDEFUSAGE *psDefUsage)
 {
     static const WCHAR CBAlloc[]    = {'C','a','l','l','b','a','c','k','A','l','l','o','c','F','u','n','c','t','i','o','n', 0};
@@ -739,26 +740,26 @@ BOOL WINAPI WintrustAddDefaultForUsage(const CHAR *pszUsageOID,
         WCHAR* CallbackW;
 
         Len = MultiByteToWideChar( CP_ACP, 0, psDefUsage->pwszLoadCallbackDataFunctionName, -1, NULL, 0 );
-        CallbackW = HeapAlloc( GetProcessHeap(), 0, Len * sizeof(WCHAR) );
+        CallbackW = WINTRUST_Alloc( Len * sizeof(WCHAR) );
         MultiByteToWideChar( CP_ACP, 0, psDefUsage->pwszLoadCallbackDataFunctionName, -1, CallbackW, Len );
 
         Res = WINTRUST_WriteSingleUsageEntry(pszUsageOID, CBAlloc, CallbackW);
         if (Res != ERROR_SUCCESS) WriteUsageError = Res;
 
-        HeapFree(GetProcessHeap(), 0, CallbackW);
+        WINTRUST_Free(CallbackW);
     }
     if (psDefUsage->pwszFreeCallbackDataFunctionName)
     {
         WCHAR* CallbackW;
 
         Len = MultiByteToWideChar( CP_ACP, 0, psDefUsage->pwszFreeCallbackDataFunctionName, -1, NULL, 0 );
-        CallbackW = HeapAlloc( GetProcessHeap(), 0, Len * sizeof(WCHAR) );
+        CallbackW = WINTRUST_Alloc( Len * sizeof(WCHAR) );
         MultiByteToWideChar( CP_ACP, 0, psDefUsage->pwszFreeCallbackDataFunctionName, -1, CallbackW, Len );
 
         Res = WINTRUST_WriteSingleUsageEntry(pszUsageOID, CBFree, CallbackW);
         if (Res != ERROR_SUCCESS) WriteUsageError = Res;
 
-        HeapFree(GetProcessHeap(), 0, CallbackW);
+        WINTRUST_Free(CallbackW);
     }
 
     WINTRUST_Guid2Wstr(psDefUsage->pgActionID, GuidString);
@@ -767,6 +768,88 @@ BOOL WINAPI WintrustAddDefaultForUsage(const CHAR *pszUsageOID,
 
     if (WriteUsageError != ERROR_SUCCESS)
         return FALSE;
+
+    return TRUE;
+}
+
+static FARPROC WINTRUST_ReadProviderFromReg(WCHAR *GuidString, const WCHAR *FunctionType)
+{
+    WCHAR ProvKey[MAX_PATH], DllName[MAX_PATH];
+    char FunctionName[MAX_PATH];
+    HKEY Key;
+    LONG Res = ERROR_SUCCESS;
+    DWORD Size;
+    HMODULE Lib;
+    FARPROC Func = NULL;
+
+    /* Create the needed key string */
+    ProvKey[0]='\0';
+    lstrcatW(ProvKey, Trust);
+    lstrcatW(ProvKey, FunctionType);
+    lstrcatW(ProvKey, GuidString);
+
+    Res = RegOpenKeyExW(HKEY_LOCAL_MACHINE, ProvKey, 0, KEY_READ, &Key);
+    if (Res != ERROR_SUCCESS) goto error_close_key;
+
+    /* Read the $DLL entry */
+    Size = sizeof(DllName);
+    Res = RegQueryValueExW(Key, Dll, NULL, NULL, (LPBYTE)DllName, &Size);
+    if (Res != ERROR_SUCCESS) goto error_close_key;
+
+    /* Read the $Function entry */
+    Size = sizeof(FunctionName);
+    Res = RegQueryValueExA(Key, "$Function", NULL, NULL, (LPBYTE)FunctionName, &Size);
+    if (Res != ERROR_SUCCESS) goto error_close_key;
+
+    /* Load the library - there appears to be no way to close a provider, so
+     * just leak the module handle.
+     */
+    Lib = LoadLibraryW(DllName);
+    Func = GetProcAddress(Lib, FunctionName);
+
+error_close_key:
+    RegCloseKey(Key);
+
+    return Func;
+}
+
+/***********************************************************************
+ *              WintrustLoadFunctionPointers (WINTRUST.@)
+ */
+BOOL WINAPI WintrustLoadFunctionPointers( GUID* pgActionID,
+                                          CRYPT_PROVIDER_FUNCTIONS* pPfns )
+{
+    WCHAR GuidString[39];
+
+    TRACE("(%s %p)\n", debugstr_guid(pgActionID), pPfns);
+
+    if (!pPfns) return FALSE;
+    if (!pgActionID)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    if (pPfns->cbStruct != sizeof(CRYPT_PROVIDER_FUNCTIONS)) return FALSE;
+
+    /* Create this string only once, instead of in the helper function */
+    WINTRUST_Guid2Wstr( pgActionID, GuidString);
+
+    /* Get the function pointers from the registry, where applicable */
+    pPfns->pfnAlloc = WINTRUST_Alloc;
+    pPfns->pfnFree = WINTRUST_Free;
+    pPfns->pfnAddStore2Chain = WINTRUST_AddStore;
+    pPfns->pfnAddSgnr2Chain = WINTRUST_AddSgnr;
+    pPfns->pfnAddCert2Chain = WINTRUST_AddCert;
+    pPfns->pfnAddPrivData2Chain = NULL;
+    pPfns->psUIpfns = NULL;
+    pPfns->pfnInitialize = (PFN_PROVIDER_INIT_CALL)WINTRUST_ReadProviderFromReg(GuidString, Initialization);
+    pPfns->pfnObjectTrust = (PFN_PROVIDER_OBJTRUST_CALL)WINTRUST_ReadProviderFromReg(GuidString, Message);
+    pPfns->pfnSignatureTrust = (PFN_PROVIDER_SIGTRUST_CALL)WINTRUST_ReadProviderFromReg(GuidString, Signature);
+    pPfns->pfnCertificateTrust = (PFN_PROVIDER_CERTTRUST_CALL)WINTRUST_ReadProviderFromReg(GuidString, Certificate);
+    pPfns->pfnCertCheckPolicy = (PFN_PROVIDER_CERTCHKPOLICY_CALL)WINTRUST_ReadProviderFromReg(GuidString, CertCheck);
+    pPfns->pfnFinalPolicy = (PFN_PROVIDER_FINALPOLICY_CALL)WINTRUST_ReadProviderFromReg(GuidString, FinalPolicy);
+    pPfns->pfnTestFinalPolicy = (PFN_PROVIDER_TESTFINALPOLICY_CALL)WINTRUST_ReadProviderFromReg(GuidString, DiagnosticPolicy);
+    pPfns->pfnCleanupPolicy = (PFN_PROVIDER_CLEANUP_CALL)WINTRUST_ReadProviderFromReg(GuidString, Cleanup);
 
     return TRUE;
 }
@@ -794,7 +877,7 @@ static BOOL WINTRUST_SIPPAddProvider(GUID* Subject, WCHAR* MagicNumber)
     /* Clear and initialize the structure */
     memset(&NewProv, 0, sizeof(SIP_ADD_NEWPROVIDER));
     NewProv.cbStruct = sizeof(SIP_ADD_NEWPROVIDER);
-    NewProv.pwszDLLFileName = HeapAlloc(GetProcessHeap(), 0, sizeof(SP_POLICY_PROVIDER_DLL_NAME));
+    NewProv.pwszDLLFileName = WINTRUST_Alloc(sizeof(SP_POLICY_PROVIDER_DLL_NAME));
     /* Fill the structure */
     NewProv.pgSubject              = Subject;
     lstrcpyW(NewProv.pwszDLLFileName, SP_POLICY_PROVIDER_DLL_NAME);
@@ -809,7 +892,7 @@ static BOOL WINTRUST_SIPPAddProvider(GUID* Subject, WCHAR* MagicNumber)
 
     Ret = CryptSIPAddProvider(&NewProv);
 
-    HeapFree(GetProcessHeap(), 0, NewProv.pwszDLLFileName);
+    WINTRUST_Free(NewProv.pwszDLLFileName);
  
     return Ret;
 }

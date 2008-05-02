@@ -4,6 +4,7 @@
  *
  * Copyright 2004 Rein Klazes
  * Copyright 2005-2006 Paul Vriens
+ * Copyright 2007 Maarten Lankhorst
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,7 +28,7 @@ IDR_WINECFG MENU DISCARDABLE
 BEGIN
     POPUP ""
     BEGIN
-        MENUITEM "Configure", IDC_AUDIO_CONFIGURE
+        MENUITEM "Instellen", IDC_AUDIO_CONFIGURE
     END
 END
 
@@ -64,7 +65,6 @@ BEGIN
     GROUPBOX        " Venster-instellingen ",IDC_STATIC,8,4,244,180
 
     CONTROL	    "Een DirectX programma kan de muis in een venster vasthouden.",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,14,230,8
-    CONTROL	    "Schakel \"double buffering\" in.",IDC_DOUBLE_BUFFER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,24,230,8
     
     LTEXT           "Wanneer de vensters door de window manager worden beheerd hebben deze de standaard kaders, er wordt rekening gehouden met de virtuele desktop en ze staan in de lijst met vensters.\n\nAls de vensters niet worden beheerd, worden ze losgekoppeld van de window manager. Dit betekent dat vensters niet perfect met uw desktop integreren. De 'emulatie' is echter exacter en kan ervoor zorgen dat programma's beter werken.",
                     IDC_STATIC,15,37,228,80
@@ -86,6 +86,10 @@ BEGIN
     COMBOBOX	    IDC_D3D_VSHADER_MODE,120,197,130,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
     CONTROL         "Pixel Shader toestaan (indien ondersteund door de hardware)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,216,230,10
+    GROUPBOX        " Screen Resolution ",IDC_STATIC,8,242,244,25
+    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
+    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT           "dpi",IDC_STATIC,235,252,10,8
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -160,10 +164,11 @@ IDD_AUDIOCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Stuurprograma selectie ",IDC_STATIC,8,4,244,195
+    GROUPBOX        " Stuurprogramma selectie ",IDC_STATIC,8,4,244,195
     LTEXT           "Selecteer een geluids-stuurprogramma door het aanvinken van het gewenste stuurprogramma. Zet het geluid uit door geen stuurprogramma te selecteren. Het selecteren van meerdere stuurprogramma's wordt niet aanbevolen. Configureer een stuurprogramma d.m.v. een rechter muisklik hierop.",IDC_STATIC,15,20,227,45
     CONTROL         "Apparaten",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,65,140,125
     PUSHBUTTON	    "Configuratiescherm",IDC_AUDIO_CONTROL_PANEL,170,65,79,14
+    PUSHBUTTON      "Geluidstest",IDC_AUDIO_TEST,170,85,79,14
     GROUPBOX        " DirectSound ",IDC_STATIC,8,205,244,60
     LTEXT	    "Hardwareversnelling: ",IDC_STATIC,15,215,90,10
     COMBOBOX	    IDC_DSOUND_HW_ACCEL,100,213,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
@@ -179,13 +184,21 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Uiterlijk ",IDC_STATIC,8,4,244,106
-    LTEXT           "Thema:",IDC_STATIC,15,16,230,8
-    COMBOBOX        IDC_THEME_THEMECOMBO,15,24,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Thema installeren...",IDC_THEME_INSTALL,152,38,93,14
-    LTEXT           "Kleuren:",IDC_THEME_COLORTEXT,15,54,230,8
-    COMBOBOX        IDC_THEME_COLORCOMBO,15,62,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Tekstgrootte:",IDC_THEME_SIZETEXT,15,80,230,8
-    COMBOBOX        IDC_THEME_SIZECOMBO,15,88,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Thema:",IDC_STATIC,15,16,130,8
+    COMBOBOX        IDC_THEME_THEMECOMBO,15,24,130,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Thema installeren...",IDC_THEME_INSTALL,152,23,93,14
+    LTEXT           "Kleuren:",IDC_THEME_COLORTEXT,15,40,112,8
+    COMBOBOX        IDC_THEME_COLORCOMBO,15,48,112,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Tekstgrootte:",IDC_THEME_SIZETEXT,135,40,110,8
+    COMBOBOX        IDC_THEME_SIZECOMBO,135,48,110,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Item:",IDC_STATIC,15,64,112,8
+    COMBOBOX        IDC_SYSPARAM_COMBO,15,74,112,120,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP | CBS_SORT
+    LTEXT           "Color:",IDC_SYSPARAM_COLOR_TEXT,135,64,25,8,WS_DISABLED
+    PUSHBUTTON      "",IDC_SYSPARAM_COLOR,135,74,25,13,WS_DISABLED | BS_OWNERDRAW
+    LTEXT           "Size:",IDC_SYSPARAM_SIZE_TEXT,166,64,30,8,WS_DISABLED
+    EDITTEXT        IDC_SYSPARAM_SIZE,166,74,23,13,ES_AUTOHSCROLL | WS_TABSTOP | WS_DISABLED
+    CONTROL         "",IDC_SYSPARAM_SIZE_UD,UPDOWN_CLASS,UDS_SETBUDDYINT | WS_DISABLED,187,74,15,13
+    PUSHBUTTON      "Font",IDC_SYSPARAM_FONT,208,74,37,13,WS_DISABLED
     GROUPBOX        " Shell Folder ",IDC_STATIC,8,114,244,100 /* FIXME */
     CONTROL         "Listview",IDC_LIST_SFPATHS,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                      LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,126,230,64
@@ -204,17 +217,17 @@ BEGIN
     IDS_HIDE_ADVANCED       "Verberg uitgebreid"
     IDS_SHOW_ADVANCED       "Toon uitgebreid"
     IDS_NOTHEME             "(Geen Thema)"
-    IDS_TAB_GRAPHICS        "Graphics" /* FIXME */
+    IDS_TAB_GRAPHICS        "Grafisch"
     IDS_TAB_DESKTOP_INTEGRATION "Desktop Integratie"
-    IDS_TAB_AUDIO           "Audio"
-    IDS_TAB_ABOUT           "Info"
+    IDS_TAB_AUDIO           "Geluid"
+    IDS_TAB_ABOUT           "Over wine"
     IDS_WINECFG_TITLE       "Wine configuratie"
     IDS_WINECFG_TITLE_APP   "Wine configuratie voor %s"
     IDS_THEMEFILE           "Thema-bestanden"
     IDS_THEMEFILE_SELECT    "Thema-bestanden kiezen"
-    IDS_AUDIO_MISSING       "Op dit moment is er geen audio stuurbestand gespecificeerd in de registry.\n\nEen aanbevolen stuurbestand is voor u geselecteerd.\nU kunt dit stuurbestand gebruiken of (indien beschikbaar) een ander selecteren.\n\nKlik op 'Toepassen' om deze selectie te activeren."
-    IDS_SHELL_FOLDER        "Shell Folder"
-    IDS_LINKS_TO            "Links to"
+    IDS_AUDIO_MISSING       "Op dit moment is er geen stuurprogramma voor geluid gespecificeerd in de registry.\n\nEen aanbevolen stuurbestand is voor u geselecteerd.\nU kunt dit stuurbestand gebruiken of (indien beschikbaar) een ander selecteren.\n\nKlik op 'Toepassen' om deze selectie te activeren."
+    IDS_SHELL_FOLDER        "Persoonlijke map"
+    IDS_LINKS_TO            "Verwijst naar"
 END
 
 STRINGTABLE DISCARDABLE
@@ -236,7 +249,6 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_SHADER_MODE_HARDWARE    "Hardware"
     IDS_SHADER_MODE_NONE        "Geen"
-    IDS_SHADER_MODE_EMULATION   "Emulatie"
 END
 
 STRINGTABLE DISCARDABLE
@@ -244,7 +256,7 @@ BEGIN
     IDS_DRIVE_UNKNOWN           "Automatisch detecteren"
     IDS_DRIVE_FIXED             "Lokaal station"
     IDS_DRIVE_REMOTE            "Netwerkverbinding"
-    IDS_DRIVE_REMOVABLE         "Floppy disk"
+    IDS_DRIVE_REMOVABLE         "Diskettestation"
     IDS_DRIVE_CDROM             "CD-ROM"
     IDS_DRIVE_LETTERS_EXCEEDED  "U kunt geen stations meer toevoegen.\n\nElk station moet een letter, van A tot Z, hebben zodat er niet meer dan 26 kunnen zijn"
     IDS_SYSTEM_DRIVE_LABEL      "Systeem station"
@@ -261,7 +273,6 @@ BEGIN
     IDS_ACCEL_BASIC             "Eenvoudig"
     IDS_ACCEL_EMULATION         "Emulatie"
     IDS_DRIVER_ALSA             "ALSA Stuurprogramma"
-    IDS_DRIVER_ARTS             "aRts Stuurprogramma"
     IDS_DRIVER_ESOUND           "EsounD Stuurprogramma"
     IDS_DRIVER_OSS              "OSS Stuurprogramma"
     IDS_DRIVER_JACK             "JACK Stuurprogramma"
@@ -278,4 +289,25 @@ BEGIN
     IDS_DEVICES_MIXER           "Mixer apparaten"
     IDS_UNAVAILABLE_DRIVER      "Stuurprogramma in de registry is niet beschikbaar!\n\nVerwijder \"%s\" uit de registry?"
     IDS_WARNING                 "Waarschuwing"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    IDC_SYSPARAMS_BUTTON            "Instellingen Achtergrond"
+    IDC_SYSPARAMS_BUTTON_TEXT       "Instellingen Tekst"
+    IDC_SYSPARAMS_DESKTOP           "Bureaublad"
+    IDC_SYSPARAMS_MENU              "Menu Achtergrond"
+    IDC_SYSPARAMS_MENU_TEXT         "Menu Tekst"
+    IDC_SYSPARAMS_SCROLLBAR         "Scrollbar"
+    IDC_SYSPARAMS_SELECTION         "Selectie Achtergrond"
+    IDC_SYSPARAMS_SELECTION_TEXT    "Selectie Tekst"
+    IDC_SYSPARAMS_TOOLTIP           "ToolTip Achtergrond"
+    IDC_SYSPARAMS_TOOLTIP_TEXT      "ToolTip Tekst"
+    IDC_SYSPARAMS_WINDOW            "Window Achtergrond"
+    IDC_SYSPARAMS_WINDOW_TEXT       "Window Tekst"
+    IDC_SYSPARAMS_ACTIVE_TITLE      "Actieve Titel Balk"
+    IDC_SYSPARAMS_ACTIVE_TITLE_TEXT "Actieve Titel Tekst"
+    IDC_SYSPARAMS_INACTIVE_TITLE    "Inactieve Titel Balk"
+    IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "Inactieve Title Tekst"
+    IDC_SYSPARAMS_MSGBOX_TEXT       "Melding Window Tekst"
 END

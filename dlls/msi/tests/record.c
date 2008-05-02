@@ -250,6 +250,10 @@ static void test_msirecord(void)
     /* same record, try converting integers to strings */
     r = MsiRecordSetInteger(h, 0, 32);
     ok(r == ERROR_SUCCESS, "Failed to set integer at 0 to 32\n");
+    sz = 1;
+    r = MsiRecordGetString(h, 0, NULL, &sz);
+    ok(r == ERROR_SUCCESS, "failed to get string from integer\n");
+    ok(sz == 2, "length wrong\n");
     buf[0]=0;
     sz = sizeof buf;
     r = MsiRecordGetString(h, 0, buf, &sz);
@@ -258,10 +262,15 @@ static void test_msirecord(void)
     r = MsiRecordSetInteger(h, 0, -32);
     ok(r == ERROR_SUCCESS, "Failed to set integer at 0 to 32\n");
     buf[0]=0;
+    sz = 1;
+    r = MsiRecordGetString(h, 0, NULL, &sz);
+    ok(r == ERROR_SUCCESS, "failed to get string from integer\n");
+    ok(sz == 3, "length wrong\n");
     sz = sizeof buf;
     r = MsiRecordGetString(h, 0, buf, &sz);
     ok(r == ERROR_SUCCESS, "failed to get string from integer\n");
     ok(0==strcmp(buf,"-32"), "failed to get string from integer\n");
+    buf[0]=0;
 
     /* same record, now try streams */
     r = MsiRecordSetStream(h, 0, NULL);
@@ -342,7 +351,35 @@ static void test_msirecord(void)
     DeleteFile(filename); /* Delete it for sure, when everything else is closed. */
 }
 
+static void test_MsiRecordGetString(void)
+{
+    MSIHANDLE rec;
+    CHAR buf[MAX_PATH];
+    DWORD sz;
+    UINT r;
+
+    rec = MsiCreateRecord(2);
+    ok(rec != 0, "Expected a valid handle\n");
+
+    sz = MAX_PATH;
+    lstrcpyA(buf, "apple");
+    r = MsiRecordGetString(rec, 1, buf, &sz);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
+
+    sz = MAX_PATH;
+    lstrcpyA(buf, "apple");
+    r = MsiRecordGetString(rec, 10, buf, &sz);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
+
+    MsiCloseHandle(rec);
+}
+
 START_TEST(record)
 {
     test_msirecord();
+    test_MsiRecordGetString();
 }

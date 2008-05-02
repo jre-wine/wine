@@ -106,8 +106,11 @@ static ULONG WINAPI IDirectDrawClipperImpl_Release(IDirectDrawClipper *iface) {
 
     if (ref == 0)
     {
-	HeapFree(GetProcessHeap(), 0, This);
-	return 0;
+        EnterCriticalSection(&ddraw_cs);
+        IWineD3DClipper_Release(This->wineD3DClipper);
+        HeapFree(GetProcessHeap(), 0, This);
+        LeaveCriticalSection(&ddraw_cs);
+        return 0;
     }
     else return ref;
 }
@@ -131,15 +134,19 @@ static HRESULT WINAPI IDirectDrawClipperImpl_SetHwnd(
     LPDIRECTDRAWCLIPPER iface, DWORD dwFlags, HWND hWnd
 ) {
     IDirectDrawClipperImpl *This = (IDirectDrawClipperImpl *)iface;
+    HRESULT hr;
+    TRACE("(%p)->(%08x,%p)\n", This, dwFlags, hWnd);
 
-    TRACE("(%p)->(0x%08x,0x%08x)\n", This, dwFlags, (DWORD)hWnd);
-    if( dwFlags ) {
-	FIXME("dwFlags = 0x%08x, not supported.\n",dwFlags);
-	return DDERR_INVALIDPARAMS;
+    EnterCriticalSection(&ddraw_cs);
+    hr = IWineD3DClipper_SetHWnd(This->wineD3DClipper,
+                                 dwFlags,
+                                 hWnd);
+    LeaveCriticalSection(&ddraw_cs);
+    switch(hr)
+    {
+        case WINED3DERR_INVALIDCALL:        return DDERR_INVALIDPARAMS;
+        default:                            return hr;
     }
-
-    This->hWnd = hWnd;
-    return DD_OK;
 }
 
 /*****************************************************************************
@@ -165,46 +172,16 @@ static HRESULT WINAPI IDirectDrawClipperImpl_GetClipList(
     LPDWORD lpdwSize)
 {
     IDirectDrawClipperImpl *This = (IDirectDrawClipperImpl *)iface;
-
+    HRESULT hr;
     TRACE("(%p,%p,%p,%p)\n", This, lpRect, lpClipList, lpdwSize);
 
-    if (This->hWnd)
-    {
-        HDC hDC = GetDCEx(This->hWnd, NULL, DCX_WINDOW);
-        if (hDC)
-        {
-            HRGN hRgn = CreateRectRgn(0,0,0,0);
-            if (GetRandomRgn(hDC, hRgn, SYSRGN))
-            {
-                if (GetVersion() & 0x80000000)
-                {
-                    /* map region to screen coordinates */
-                    POINT org;
-                    GetDCOrgEx( hDC, &org );
-                    OffsetRgn( hRgn, org.x, org.y );
-                }
-                if (lpRect)
-                {
-                    HRGN hRgnClip = CreateRectRgn(lpRect->left, lpRect->top,
-                        lpRect->right, lpRect->bottom);
-                    CombineRgn(hRgn, hRgn, hRgnClip, RGN_AND);
-                    DeleteObject(hRgnClip);
-                }
-                *lpdwSize = GetRegionData(hRgn, *lpdwSize, lpClipList);
-            }
-            DeleteObject(hRgn);
-            ReleaseDC(This->hWnd, hDC);
-        }
-        return DD_OK;
-    }
-    else
-    {
-        static int warned = 0;
-        if (warned++ < 10)
-            FIXME("(%p,%p,%p,%p),stub!\n",This,lpRect,lpClipList,lpdwSize);
-        if (lpdwSize) *lpdwSize=0;
-        return DDERR_NOCLIPLIST;
-    }
+    EnterCriticalSection(&ddraw_cs);
+    hr = IWineD3DClipper_GetClipList(This->wineD3DClipper,
+                                     lpRect,
+                                     lpClipList,
+                                     lpdwSize);
+    LeaveCriticalSection(&ddraw_cs);
+    return hr;
 }
 
 /*****************************************************************************
@@ -225,10 +202,14 @@ static HRESULT WINAPI IDirectDrawClipperImpl_SetClipList(
     LPDIRECTDRAWCLIPPER iface,LPRGNDATA lprgn,DWORD dwFlag
 ) {
     IDirectDrawClipperImpl *This = (IDirectDrawClipperImpl *)iface;
-    static int warned = 0;
-    if (warned++ < 10 || lprgn == NULL)
-        FIXME("(%p,%p,%d),stub!\n",This,lprgn,dwFlag);
-    return DD_OK;
+    HRESULT hr;
+
+    EnterCriticalSection(&ddraw_cs);
+    hr = IWineD3DClipper_SetClipList(This->wineD3DClipper,
+                                     lprgn,
+                                     dwFlag);
+    LeaveCriticalSection(&ddraw_cs);
+    return hr;
 }
 
 /*****************************************************************************
@@ -246,11 +227,14 @@ static HRESULT WINAPI IDirectDrawClipperImpl_GetHWnd(
     LPDIRECTDRAWCLIPPER iface, HWND* hWndPtr
 ) {
     IDirectDrawClipperImpl *This = (IDirectDrawClipperImpl *)iface;
+    HRESULT hr;
     TRACE("(%p)->(%p)\n", This, hWndPtr);
 
-    *hWndPtr = This->hWnd;
-
-    return DD_OK;
+    EnterCriticalSection(&ddraw_cs);
+    hr =  IWineD3DClipper_GetHWnd(This->wineD3DClipper,
+                                  hWndPtr);
+    LeaveCriticalSection(&ddraw_cs);
+    return hr;
 }
 
 /*****************************************************************************
@@ -274,11 +258,17 @@ static HRESULT WINAPI IDirectDrawClipperImpl_Initialize(
     IDirectDrawClipperImpl *This = (IDirectDrawClipperImpl *)iface;
     TRACE("(%p)->(%p,0x%08x)\n", This, lpDD, dwFlags);
 
-    if (This->ddraw_owner != NULL) return DDERR_ALREADYINITIALIZED;
+    EnterCriticalSection(&ddraw_cs);
+    if (This->ddraw_owner != NULL)
+    {
+        LeaveCriticalSection(&ddraw_cs);
+        return DDERR_ALREADYINITIALIZED;
+    }
 
     pOwner = ICOM_OBJECT(IDirectDrawImpl, IDirectDraw, lpDD);
     This->ddraw_owner = pOwner;
 
+    LeaveCriticalSection(&ddraw_cs);
     return DD_OK;
 }
 

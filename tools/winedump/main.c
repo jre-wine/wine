@@ -80,20 +80,6 @@ static void do_dump (const char *arg)
 }
 
 
-static void do_dumpemf(void)
-{
-    if (globals.mode != NONE) fatal("Only one mode can be specified\n");
-    globals.mode = EMF;
-}
-
-
-static void do_dumplnk(void)
-{
-    if (globals.mode != NONE) fatal("Only one mode can be specified\n");
-    globals.mode = LNK;
-}
-
-
 static void do_code (void)
 {
   globals.do_code = 1;
@@ -200,6 +186,7 @@ static void do_rawdebug (void)
 static void do_dumpall(void)
 {
     globals.do_dumpheader = 1;
+    globals.do_dump_rawdata = 1;
     globals.dumpsect = "ALL";
 }
 
@@ -230,21 +217,19 @@ static const struct my_option option_table[] = {
   {"-S",    SPEC, 1, do_symfile,  "-S symfile   Search only prototype names found in 'symfile'"},
   {"-q",    SPEC, 0, do_quiet,    "-q           Don't show progress (quiet)."},
   {"-v",    SPEC, 0, do_verbose,  "-v           Show lots of detail while working (verbose)."},
-  {"dump",  DUMP, 0, do_dump,     "dump <mod>   Dumps the content of the module (dll, exe...) named <mod>"},
+  {"dump",  DUMP, 0, do_dump,     "dump <file>  Dumps the contents of a file (dll, exe, lib...)"},
   {"-C",    DUMP, 0, do_symdmngl, "-C           Turns on symbol demangling"},
   {"-f",    DUMP, 0, do_dumphead, "-f           Dumps file header information"},
   {"-G",    DUMP, 0, do_rawdebug, "-G           Dumps raw debug information"},
-  {"-j",    DUMP, 1, do_dumpsect, "-j sect_name Dumps only the content of section sect_name (import, export, debug, resource, tls)"},
+  {"-j",    DUMP, 1, do_dumpsect, "-j sect_name Dumps only the content of section sect_name (import, export, debug, resource, tls, clr)"},
   {"-x",    DUMP, 0, do_dumpall,  "-x           Dumps everything"},
-  {"emf",   EMF,  0, do_dumpemf,  "emf          Dumps an Enhanced Meta File"},
-  {"lnk",   LNK,  0, do_dumplnk,  "lnk          Dumps a shortcut (.lnk) file"},
   {NULL,    NONE, 0, NULL,        NULL}
 };
 
 void do_usage (void)
 {
     const struct my_option *opt;
-    printf ("Usage: winedump [-h | sym <sym> | spec <dll> | dump <dll> | emf <emf> | lnk <lnk>]\n");
+    printf ("Usage: winedump [-h | sym <sym> | spec <dll> | dump <file>]\n");
     printf ("Mode options (can be put as the mode (sym/spec/dump...) is declared):\n");
     printf ("\tWhen used in --help mode\n");
     for (opt = option_table; opt->name; opt++)
@@ -261,14 +246,6 @@ void do_usage (void)
     printf ("\tWhen used in dump mode\n");
     for (opt = option_table; opt->name; opt++)
 	if (opt->mode == DUMP)
-	    printf ("\t   %s\n", opt->usage);
-    printf ("\tWhen used in emf mode\n");
-    for (opt = option_table; opt->name; opt++)
-	if (opt->mode == EMF)
-	    printf ("\t   %s\n", opt->usage);
-    printf ("\tWhen used in lnk mode\n");
-    for (opt = option_table; opt->name; opt++)
-	if (opt->mode == LNK)
 	    printf ("\t   %s\n", opt->usage);
 
     puts ("");
@@ -330,6 +307,9 @@ static void parse_options (char *argv[])
 
   if (VERBOSE && QUIET)
     fatal ("Options -v and -q are mutually exclusive");
+
+  if (globals.mode == NONE)
+      do_dump("");
 }
 
 static void set_module_name(unsigned setUC)
@@ -418,6 +398,7 @@ int   main (int argc, char *argv[])
     globals.mode = NONE;
     globals.forward_dll = NULL;
     globals.input_name = NULL;
+    globals.dumpsect = NULL;
 
     parse_options (argv);
 
@@ -426,19 +407,11 @@ int   main (int argc, char *argv[])
     switch (globals.mode)
     {
     case DMGL:
-	globals.uc_dll_name = "";
 	VERBOSE = 1;
 
-	symbol_init (&symbol, globals.input_name);
-	globals.input_module = "";
-	if (symbol_demangle (&symbol) == -1)
-	    fatal( "Symbol hasn't got a mangled name\n");
-	if (symbol.flags & SYM_DATA)
-	    printf (symbol.arg_text[0]);
-	else
-	    output_prototype (stdout, &symbol);
-	fputc ('\n', stdout);
-	symbol_clear(&symbol);
+        if (globals.input_name == NULL)
+            fatal("No symbol name has been given\n");
+        printf("%s\n", get_symbol_str(globals.input_name));
 	break;
 
     case SPEC:
@@ -501,16 +474,6 @@ int   main (int argc, char *argv[])
 	set_module_name(0);
 	dump_file(globals.input_name);
 	break;
-    case EMF:
-        if (globals.input_name == NULL)
-            fatal("No file name has been given\n");
-        dump_emf(globals.input_name);
-        break;
-    case LNK:
-        if (globals.input_name == NULL)
-            fatal("No file name has been given\n");
-        dump_lnk(globals.input_name);
-        break;
     }
 
     return 0;

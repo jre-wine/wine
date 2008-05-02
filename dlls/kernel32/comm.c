@@ -477,8 +477,10 @@ BOOL WINAPI BuildCommDCBAndTimeoutsW(
 	COMMTIMEOUTS timeouts;
 	BOOL result;
 	LPCWSTR ptr = devid;
-	
+
 	TRACE("(%s,%p,%p)\n",debugstr_w(devid),lpdcb,lptimeouts);
+
+	memset(&timeouts, 0, sizeof timeouts);
 
 	/* Set DCBlength. (Windows NT does not do this, but 9x does) */
 	lpdcb->DCBlength = sizeof(DCB);
@@ -486,8 +488,8 @@ BOOL WINAPI BuildCommDCBAndTimeoutsW(
 	/* Make a copy of the original data structures to work with since if
 	   if there is an error in the device control string the originals
 	   should not be modified (except possibly DCBlength) */
-	memcpy(&dcb, lpdcb, sizeof(DCB));
-	if(lptimeouts) memcpy(&timeouts, lptimeouts, sizeof(COMMTIMEOUTS));
+	dcb = *lpdcb;
+	if(lptimeouts) timeouts = *lptimeouts;
 
 	ptr = COMM_ParseStart(ptr);
 
@@ -500,8 +502,8 @@ BOOL WINAPI BuildCommDCBAndTimeoutsW(
 
 	if(result)
 	{
-		memcpy(lpdcb, &dcb, sizeof(DCB));
-		if(lptimeouts) memcpy(lptimeouts, &timeouts, sizeof(COMMTIMEOUTS));
+		*lpdcb = dcb;
+		if(lptimeouts) *lptimeouts = timeouts;
 		return TRUE;
 	}
 	else
@@ -1194,23 +1196,20 @@ BOOL WINAPI CommConfigDialogA(
     HWND hWnd,                 /* [in] parent window for the dialog */
     LPCOMMCONFIG lpCommConfig) /* [out] pointer to struct to fill */
 {
-    FARPROC lpfnCommDialog;
-    HMODULE hConfigModule;
-    BOOL r = FALSE;
+    LPWSTR  lpDeviceW = NULL;
+    DWORD   len;
+    BOOL    r;
 
-    TRACE("(%p %p %p)\n",lpszDevice, hWnd, lpCommConfig);
+    TRACE("(%s, %p, %p)\n", debugstr_a(lpszDevice), hWnd, lpCommConfig);
 
-    hConfigModule = LoadLibraryW(lpszSerialUI);
-    if(!hConfigModule)
-        return FALSE;
-
-    lpfnCommDialog = GetProcAddress(hConfigModule, "drvCommConfigDialogA");
-
-    if(lpfnCommDialog)
-        r = lpfnCommDialog(lpszDevice,hWnd,lpCommConfig);
-
-    FreeLibrary(hConfigModule);
-
+    if (lpszDevice)
+    {
+        len = MultiByteToWideChar( CP_ACP, 0, lpszDevice, -1, NULL, 0 );
+        lpDeviceW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        MultiByteToWideChar( CP_ACP, 0, lpszDevice, -1, lpDeviceW, len );
+    }
+    r = CommConfigDialogW(lpDeviceW, hWnd, lpCommConfig);
+    HeapFree( GetProcessHeap(), 0, lpDeviceW );
     return r;
 }
 
@@ -1224,24 +1223,23 @@ BOOL WINAPI CommConfigDialogW(
     HWND hWnd,                 /* [in] parent window for the dialog */
     LPCOMMCONFIG lpCommConfig) /* [out] pointer to struct to fill */
 {
-    FARPROC lpfnCommDialog;
+    FARPROC pCommConfigDialog;
     HMODULE hConfigModule;
-    BOOL r = FALSE;
+    DWORD   res = ERROR_INVALID_PARAMETER;
 
-    TRACE("(%p %p %p)\n",lpszDevice, hWnd, lpCommConfig);
-
+    TRACE("(%s, %p, %p)\n", debugstr_w(lpszDevice), hWnd, lpCommConfig);
     hConfigModule = LoadLibraryW(lpszSerialUI);
-    if(!hConfigModule)
-        return FALSE;
 
-    lpfnCommDialog = GetProcAddress(hConfigModule, "drvCommConfigDialogW");
+    if (hConfigModule) {
+        pCommConfigDialog = GetProcAddress(hConfigModule, "drvCommConfigDialogW");
+        if (pCommConfigDialog) {
+            res = pCommConfigDialog(lpszDevice, hWnd, lpCommConfig);
+        }
+        FreeLibrary(hConfigModule);
+    }
 
-    if(lpfnCommDialog)
-        r = lpfnCommDialog(lpszDevice,hWnd,lpCommConfig);
-
-    FreeLibrary(hConfigModule);
-
-    return r;
+    if (res) SetLastError(res);
+    return (res == ERROR_SUCCESS);
 }
 
 /***********************************************************************
@@ -1266,7 +1264,7 @@ BOOL WINAPI GetCommConfig(
 {
     BOOL r;
 
-    TRACE("(%p %p)\n",hFile,lpCommConfig);
+    TRACE("(%p, %p, %p) *lpdwSize: %u\n", hFile, lpCommConfig, lpdwSize, lpdwSize ? *lpdwSize : 0 );
 
     if(lpCommConfig == NULL)
         return FALSE;
@@ -1300,30 +1298,32 @@ BOOL WINAPI SetCommConfig(
     LPCOMMCONFIG lpCommConfig,	/* [in] The desired configuration. */
     DWORD dwSize) 		/* [in] size of the lpCommConfig struct */
 {
-    TRACE("(%p %p)\n",hFile,lpCommConfig);
+    TRACE("(%p, %p, %u)\n", hFile, lpCommConfig, dwSize);
     return SetCommState(hFile,&lpCommConfig->dcb);
 }
 
 /***********************************************************************
- *           SetDefaultCommConfigA   (KERNEL32.@)
+ *           SetDefaultCommConfigW  (KERNEL32.@)
  *
- *  Initializes the default configuration for the specified communication
- *  device. (ascii)
+ * Initializes the default configuration for a communication device.
+ *
+ * PARAMS
+ *  lpszDevice   [I] Name of the device targeted for configuration
+ *  lpCommConfig [I] PTR to a buffer with the configuration for the device
+ *  dwSize       [I] Number of bytes in the buffer
  *
  * RETURNS
+ *  Failure: FALSE
+ *  Success: TRUE, and default configuration saved
  *
- *  True if the device was found and the defaults set, false otherwise
  */
-BOOL WINAPI SetDefaultCommConfigW(
-    LPCWSTR       lpszDevice,  /* [in] The ascii name of the device targeted for configuration. */
-    LPCOMMCONFIG lpCommConfig, /* [in] The default configuration for the device. */
-    DWORD        dwSize)       /* [in] The number of bytes in the configuration structure. */
+BOOL WINAPI SetDefaultCommConfigW(LPCWSTR lpszDevice, LPCOMMCONFIG lpCommConfig, DWORD dwSize)
 {
     FARPROC lpfnSetDefaultCommConfig;
     HMODULE hConfigModule;
     BOOL r = FALSE;
 
-    TRACE("(%p %p %x)\n",lpszDevice, lpCommConfig, dwSize);
+    TRACE("(%s, %p, %u)\n", debugstr_w(lpszDevice), lpCommConfig, dwSize);
 
     hConfigModule = LoadLibraryW(lpszSerialUI);
     if(!hConfigModule)
@@ -1340,24 +1340,20 @@ BOOL WINAPI SetDefaultCommConfigW(
 
 
 /***********************************************************************
- *           SetDefaultCommConfigW     (KERNEL32.@)
+ *           SetDefaultCommConfigA     (KERNEL32.@)
  *
- *  Initializes the default configuration for the specified
- *  communication device. (unicode)
+ * Initializes the default configuration for a communication device.
  *
- * RETURNS
+ * See SetDefaultCommConfigW.
  *
  */
-BOOL WINAPI SetDefaultCommConfigA(
-    LPCSTR      lpszDevice,    /* [in] The unicode name of the device targeted for configuration. */
-    LPCOMMCONFIG lpCommConfig, /* [in] The default configuration for the device. */
-    DWORD        dwSize)       /* [in] The number of bytes in the configuration structure. */
+BOOL WINAPI SetDefaultCommConfigA(LPCSTR lpszDevice, LPCOMMCONFIG lpCommConfig, DWORD dwSize)
 {
     BOOL r;
     LPWSTR lpDeviceW = NULL;
     DWORD len;
 
-    TRACE("(%s %p %x)\n",debugstr_a(lpszDevice),lpCommConfig,dwSize);
+    TRACE("(%s, %p, %u)\n", debugstr_a(lpszDevice), lpCommConfig, dwSize);
 
     if (lpszDevice)
     {
@@ -1388,34 +1384,23 @@ BOOL WINAPI GetDefaultCommConfigW(
                               afterwards the number of bytes copied to the buffer or
                               the needed size of the buffer. */
 {
-     LPDCB lpdcb = &(lpCC->dcb);
-     WCHAR temp[40];
-     static const WCHAR comW[] = {'C','O','M',0};
-     static const WCHAR formatW[] = {'C','O','M','%','c',':','3','8','4','0','0',',','n',',','8',',','1',0};
+    FARPROC pGetDefaultCommConfig;
+    HMODULE hConfigModule;
+    DWORD   res = ERROR_INVALID_PARAMETER;
 
-     if (strncmpiW(lpszName,comW,3)) {
-        ERR("not implemented for <%s>\n", debugstr_w(lpszName));
-        return FALSE;
-     }
+    TRACE("(%s, %p, %p)  *lpdwSize: %u\n", debugstr_w(lpszName), lpCC, lpdwSize, lpdwSize ? *lpdwSize : 0 );
+    hConfigModule = LoadLibraryW(lpszSerialUI);
 
-     TRACE("(%s %p %d)\n", debugstr_w(lpszName), lpCC, *lpdwSize );
-     if (*lpdwSize < sizeof(COMMCONFIG)) {
-         *lpdwSize = sizeof(COMMCONFIG);
-         return FALSE;
-       }
+    if (hConfigModule) {
+        pGetDefaultCommConfig = GetProcAddress(hConfigModule, "drvGetDefaultCommConfigW");
+        if (pGetDefaultCommConfig) {
+            res = pGetDefaultCommConfig(lpszName, lpCC, lpdwSize);
+        }
+        FreeLibrary(hConfigModule);
+    }
 
-     *lpdwSize = sizeof(COMMCONFIG);
-
-     lpCC->dwSize = sizeof(COMMCONFIG);
-     lpCC->wVersion = 1;
-     lpCC->dwProviderSubType = PST_RS232;
-     lpCC->dwProviderOffset = 0L;
-     lpCC->dwProviderSize = 0L;
-
-     sprintfW( temp, formatW, lpszName[3]);
-     FIXME("setting %s as default\n", debugstr_w(temp));
-
-     return BuildCommDCBW( temp, lpdcb);
+    if (res) SetLastError(res);
+    return (res == ERROR_SUCCESS);
 }
 
 /**************************************************************************
@@ -1438,11 +1423,11 @@ BOOL WINAPI GetDefaultCommConfigA(
 	BOOL ret = FALSE;
 	UNICODE_STRING lpszNameW;
 
-	TRACE("(%s,%p,%d)\n",lpszName,lpCC,*lpdwSize);
+	TRACE("(%s, %p, %p)  *lpdwSize: %u\n", debugstr_a(lpszName), lpCC, lpdwSize, lpdwSize ? *lpdwSize : 0 );
 	if(lpszName) RtlCreateUnicodeStringFromAsciiz(&lpszNameW,lpszName);
 	else lpszNameW.Buffer = NULL;
 
-	if(lpszNameW.Buffer) ret = GetDefaultCommConfigW(lpszNameW.Buffer,lpCC,lpdwSize);
+	ret = GetDefaultCommConfigW(lpszNameW.Buffer,lpCC,lpdwSize);
 
 	RtlFreeUnicodeString(&lpszNameW);
 	return ret;

@@ -82,7 +82,7 @@ static void test_comboboxex(void) {
                  out_of_range_item[] = {'O','u','t',' ','o','f',' ','R','a','n','g','e',' ','I','t','e','m',0};
 
     /* Allocate space for result */
-    textBuffer = malloc(MAX_CHARS);
+    textBuffer = HeapAlloc(GetProcessHeap(), 0, MAX_CHARS);
 
     /* Basic comboboxex test */
     myHwnd = createComboEx(WS_BORDER | WS_VISIBLE | WS_CHILD | CBS_DROPDOWN);
@@ -168,14 +168,14 @@ static void test_comboboxex(void) {
 
 
     /* Cleanup */
-    free(textBuffer);
+    HeapFree(GetProcessHeap(), 0, textBuffer);
 
 }
 
-LRESULT CALLBACK ComboExTestWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+static LRESULT CALLBACK ComboExTestWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch(msg) {
-    
+
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
@@ -187,20 +187,30 @@ LRESULT CALLBACK ComboExTestWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
     return 0L;
 }
 
-static void init(void) {
+static int init(void)
+{
+    HMODULE hComctl32;
+    BOOL (WINAPI *pInitCommonControlsEx)(const INITCOMMONCONTROLSEX*);
     WNDCLASSA wc;
-    INITCOMMONCONTROLSEX icex;
+    INITCOMMONCONTROLSEX iccex;
 
-    icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
-    icex.dwICC   = ICC_USEREX_CLASSES;
-    InitCommonControlsEx(&icex);
+    hComctl32 = GetModuleHandleA("comctl32.dll");
+    pInitCommonControlsEx = (void*)GetProcAddress(hComctl32, "InitCommonControlsEx");
+    if (!pInitCommonControlsEx)
+    {
+        skip("InitCommonControlsEx() is missing. Skipping the tests\n");
+        return 0;
+    }
+    iccex.dwSize = sizeof(iccex);
+    iccex.dwICC  = ICC_USEREX_CLASSES;
+    pInitCommonControlsEx(&iccex);
 
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.cbClsExtra = 0;
     wc.cbWndExtra = 0;
     wc.hInstance = GetModuleHandleA(NULL);
     wc.hIcon = NULL;
-    wc.hCursor = LoadCursorA(NULL, MAKEINTRESOURCEA(IDC_ARROW));
+    wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
     wc.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
     wc.lpszMenuName = NULL;
     wc.lpszClassName = ComboExTestClass;
@@ -212,7 +222,7 @@ static void init(void) {
     assert(hComboExParentWnd != NULL);
 
     hMainHinst = GetModuleHandleA(NULL);
-
+    return 1;
 }
 
 static void cleanup(void)
@@ -230,7 +240,8 @@ static void cleanup(void)
 
 START_TEST(comboex)
 {
-    init();
+    if (!init())
+        return;
 
     test_comboboxex();
 

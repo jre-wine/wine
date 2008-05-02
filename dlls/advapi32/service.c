@@ -3,6 +3,7 @@
  *
  * Copyright 1995 Sven Verdoolaege
  * Copyright 2005 Mike McCormack
+ * Copyright 2007 Rolf Kalbermatter
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -37,11 +38,26 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(advapi);
 
+static const WCHAR szLocalSystem[] = {'L','o','c','a','l','S','y','s','t','e','m',0};
 static const WCHAR szServiceManagerKey[] = { 'S','y','s','t','e','m','\\',
       'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-      'S','e','r','v','i','c','e','s','\\',0 };
+      'S','e','r','v','i','c','e','s',0 };
 static const WCHAR  szSCMLock[] = {'A','D','V','A','P','I','_','S','C','M',
                                    'L','O','C','K',0};
+
+static const GENERIC_MAPPING scm_generic = {
+    (STANDARD_RIGHTS_READ | SC_MANAGER_ENUMERATE_SERVICE | SC_MANAGER_QUERY_LOCK_STATUS),
+    (STANDARD_RIGHTS_WRITE | SC_MANAGER_CREATE_SERVICE | SC_MANAGER_MODIFY_BOOT_CONFIG),
+    (STANDARD_RIGHTS_EXECUTE | SC_MANAGER_CONNECT | SC_MANAGER_LOCK),
+    SC_MANAGER_ALL_ACCESS
+};
+
+static const GENERIC_MAPPING svc_generic = {
+    (STANDARD_RIGHTS_READ | SERVICE_QUERY_CONFIG | SERVICE_QUERY_STATUS | SERVICE_INTERROGATE | SERVICE_ENUMERATE_DEPENDENTS),
+    (STANDARD_RIGHTS_WRITE | SERVICE_CHANGE_CONFIG),
+    (STANDARD_RIGHTS_EXECUTE | SERVICE_START | SERVICE_STOP | SERVICE_PAUSE_CONTINUE | SERVICE_USER_DEFINED_CONTROL),
+    SERVICE_ALL_ACCESS
+};
 
 typedef struct service_start_info_t
 {
@@ -56,16 +72,11 @@ typedef struct service_start_info_t
 
 typedef struct service_data_t
 {
-    struct service_data_t *next;
-    union {
-        LPHANDLER_FUNCTION handler;
-        LPHANDLER_FUNCTION_EX handler_ex;
-    } handler;
+    LPHANDLER_FUNCTION_EX handler;
     LPVOID context;
-    SERVICE_STATUS status;
+    SERVICE_STATUS_PROCESS status;
     HANDLE thread;
     BOOL unicode : 1;
-    BOOL extended : 1; /* uses handler_ex instead of handler? */
     union {
         LPSERVICE_MAIN_FUNCTIONA a;
         LPSERVICE_MAIN_FUNCTIONW w;
@@ -84,7 +95,11 @@ static CRITICAL_SECTION_DEBUG service_cs_debug =
 };
 static CRITICAL_SECTION service_cs = { &service_cs_debug, -1, 0, 0, 0, 0 };
 
-static service_data *service_list;
+static service_data **services;
+static unsigned int nb_services;
+static HANDLE service_event;
+
+extern HANDLE __wine_make_process_system(void);
 
 /******************************************************************************
  * SC_HANDLEs
@@ -108,12 +123,14 @@ struct sc_manager       /* service control manager handle */
 {
     struct sc_handle hdr;
     HKEY   hkey;   /* handle to services database in the registry */
+    DWORD  dwAccess;
 };
 
 struct sc_service       /* service handle */
 {
     struct sc_handle hdr;
     HKEY   hkey;          /* handle to service entry in the registry (under hkey) */
+    DWORD  dwAccess;
     struct sc_manager *scm;  /* pointer to SCM handle */
     WCHAR  name[1];
 };
@@ -177,7 +194,9 @@ static void sc_handle_destroy_service(struct sc_handle *handle)
 }
 
 /******************************************************************************
- * String management functions
+ * String management functions (same behaviour as strdup)
+ * NOTE: the caller of those functions is responsible for calling HeapFree
+ * in order to release the memory allocated by those functions.
  */
 static inline LPWSTR SERV_dup( LPCSTR str )
 {
@@ -211,11 +230,6 @@ static inline LPWSTR SERV_dupmulti(LPCSTR str)
     return wstr;
 }
 
-static inline VOID SERV_free( LPWSTR wstr )
-{
-    HeapFree( GetProcessHeap(), 0, wstr );
-}
-
 /******************************************************************************
  * registry access functions and data
  */
@@ -231,6 +245,10 @@ static const WCHAR szDependencies[] = {
        'D','e','p','e','n','d','e','n','c','i','e','s',0};
 static const WCHAR szDependOnService[] = {
        'D','e','p','e','n','d','O','n','S','e','r','v','i','c','e',0};
+static const WCHAR szObjectName[] = {
+       'O','b','j','e','c','t','N','a','m','e',0};
+static const WCHAR szTag[] = {
+       'T','a','g',0};
 
 struct reg_value {
     DWORD type;
@@ -249,7 +267,7 @@ static inline void service_set_value( struct reg_value *val,
 }
 
 static inline void service_set_dword( struct reg_value *val, 
-                                      LPCWSTR name, DWORD *data )
+                                      LPCWSTR name, const DWORD *data )
 {
     service_set_value( val, REG_DWORD, name, data, sizeof (DWORD));
 }
@@ -276,7 +294,7 @@ static inline void service_set_multi_string( struct reg_value *val,
 }
 
 static inline LONG service_write_values( HKEY hKey,
-                                         struct reg_value *val, int n )
+                                         const struct reg_value *val, int n )
 {
     LONG r = ERROR_SUCCESS;
     int i;
@@ -294,7 +312,7 @@ static inline LONG service_write_values( HKEY hKey,
 /******************************************************************************
  * Service IPC functions
  */
-static LPWSTR service_get_pipe_name(LPWSTR service)
+static LPWSTR service_get_pipe_name(LPCWSTR service)
 {
     static const WCHAR prefix[] = { '\\','\\','.','\\','p','i','p','e','\\',
                    '_','_','w','i','n','e','s','e','r','v','i','c','e','_',0};
@@ -308,7 +326,7 @@ static LPWSTR service_get_pipe_name(LPWSTR service)
     return name;
 }
 
-static HANDLE service_open_pipe(LPWSTR service)
+static HANDLE service_open_pipe(LPCWSTR service)
 {
     LPWSTR szPipe = service_get_pipe_name( service );
     HANDLE handle = INVALID_HANDLE_VALUE;
@@ -321,7 +339,7 @@ static HANDLE service_open_pipe(LPWSTR service)
         if (GetLastError() != ERROR_PIPE_BUSY)
             break;
     } while (WaitNamedPipeW(szPipe, NMPWAIT_WAIT_FOREVER));
-    SERV_free(szPipe);
+    HeapFree(GetProcessHeap(), 0, szPipe);
 
     return handle;
 }
@@ -329,7 +347,7 @@ static HANDLE service_open_pipe(LPWSTR service)
 /******************************************************************************
  * service_get_event_handle
  */
-static HANDLE service_get_event_handle(LPWSTR service)
+static HANDLE service_get_event_handle(LPCWSTR service)
 {
     static const WCHAR prefix[] = { 
            '_','_','w','i','n','e','s','e','r','v','i','c','e','_',0};
@@ -342,7 +360,7 @@ static HANDLE service_get_event_handle(LPWSTR service)
     strcpyW(name, prefix);
     strcatW(name, service);
     handle = CreateEventW(NULL, TRUE, FALSE, name);
-    SERV_free(name);
+    HeapFree(GetProcessHeap(), 0, name);
     return handle;
 }
 
@@ -429,15 +447,18 @@ static BOOL service_handle_start(HANDLE pipe, service_data *service, DWORD count
 
     if (service->thread)
     {
-        ERR("service is not stopped\n");
+        WARN("service is not stopped\n");
+        result = ERROR_SERVICE_ALREADY_RUNNING;
         goto end;
     }
 
-    SERV_free(service->args);
+    HeapFree(GetProcessHeap(), 0, service->args);
     service->args = args;
     args = NULL;
+    service->status.dwCurrentState = SERVICE_START_PENDING;
     service->thread = CreateThread( NULL, 0, service_thread,
                                     service, 0, NULL );
+    SetEvent( service_event );  /* notify the main loop */
 
 end:
     HeapFree(GetProcessHeap(), 0, args);
@@ -463,7 +484,7 @@ static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
     for (i=0; i<argc; i++)
         len += strlenW(argv[i])+1;
 
-    ssi = HeapAlloc(GetProcessHeap(),0,sizeof *ssi + (len-1)*sizeof(WCHAR));
+    ssi = HeapAlloc(GetProcessHeap(),0,FIELD_OFFSET(service_start_info, str[len]));
     ssi->cmd = WINESERV_STARTINFO;
     ssi->size = len;
 
@@ -476,9 +497,16 @@ static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
     }
     *p=0;
 
-    r = WriteFile(pipe, ssi, sizeof *ssi + len*sizeof(WCHAR), &count, NULL);
+    r = WriteFile(pipe, ssi, FIELD_OFFSET(service_start_info, str[len]), &count, NULL);
     if (r)
+    {
         r = ReadFile(pipe, &result, sizeof result, &count, NULL);
+        if (r && result)
+        {
+            SetLastError(result);
+            r = FALSE;
+        }
+    }
 
     HeapFree(GetProcessHeap(),0,ssi);
 
@@ -488,7 +516,7 @@ static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
 /******************************************************************************
  * service_handle_get_status
  */
-static BOOL service_handle_get_status(HANDLE pipe, service_data *service)
+static BOOL service_handle_get_status(HANDLE pipe, const service_data *service)
 {
     DWORD count = 0;
     TRACE("\n");
@@ -499,7 +527,7 @@ static BOOL service_handle_get_status(HANDLE pipe, service_data *service)
 /******************************************************************************
  * service_get_status
  */
-static BOOL service_get_status(HANDLE pipe, LPSERVICE_STATUS status)
+static BOOL service_get_status(HANDLE pipe, LPSERVICE_STATUS_PROCESS status)
 {
     DWORD cmd[2], count = 0;
     BOOL r;
@@ -545,7 +573,7 @@ static BOOL service_send_control(HANDLE pipe, DWORD dwControl, DWORD *result)
 /******************************************************************************
  * service_accepts_control
  */
-static BOOL service_accepts_control(service_data *service, DWORD dwControl)
+static BOOL service_accepts_control(const service_data *service, DWORD dwControl)
 {
     DWORD a = service->status.dwControlsAccepted;
 
@@ -576,11 +604,6 @@ static BOOL service_accepts_control(service_data *service, DWORD dwControl)
     case SERVICE_CONTROL_NETBINDDISABLE:
         if (a&SERVICE_ACCEPT_NETBINDCHANGE)
             return TRUE;
-    }
-    if (!service->extended)
-        return FALSE;
-    switch (dwControl)
-    {
     case SERVICE_CONTROL_HARDWAREPROFILECHANGE:
         if (a&SERVICE_ACCEPT_HARDWAREPROFILECHANGE)
             return TRUE;
@@ -609,36 +632,10 @@ static BOOL service_handle_control(HANDLE pipe, service_data *service,
     
     if (service_accepts_control(service, dwControl))
     {
-        if (service->extended && service->handler.handler_ex)
-        {
-            service->handler.handler_ex(dwControl, 0, NULL, service->context);
-            ret = ERROR_SUCCESS;
-        }
-        else if (service->handler.handler)
-        {
-            service->handler.handler(dwControl);
-            ret = ERROR_SUCCESS;
-        }
+        if (service->handler)
+            ret = service->handler(dwControl, 0, NULL, service->context);
     }
     return WriteFile(pipe, &ret, sizeof ret, &count, NULL);
-}
-
-/******************************************************************************
- * service_reap_thread
- */
-static DWORD service_reap_thread(service_data *service)
-{
-    DWORD exitcode = 0;
-
-    if (!service->thread)
-        return 0;
-    GetExitCodeThread(service->thread, &exitcode);
-    if (exitcode!=STILL_ACTIVE)
-    {
-        CloseHandle(service->thread);
-        service->thread = 0;
-    }
-    return exitcode;
 }
 
 /******************************************************************************
@@ -656,19 +653,19 @@ static DWORD WINAPI service_control_dispatcher(LPVOID arg)
     name = service_get_pipe_name(service->name);
     pipe = CreateNamedPipeW(name, PIPE_ACCESS_DUPLEX,
                   PIPE_TYPE_BYTE|PIPE_WAIT, 1, 256, 256, 10000, NULL );
-    SERV_free(name);
+
+    if (pipe==INVALID_HANDLE_VALUE)
+        ERR("failed to create pipe for %s, error = %d\n",
+            debugstr_w(service->name), GetLastError());
+
+    HeapFree(GetProcessHeap(), 0, name);
 
     /* let the process who started us know we've tried to create a pipe */
     event = service_get_event_handle(service->name);
     SetEvent(event);
     CloseHandle(event);
 
-    if (pipe==INVALID_HANDLE_VALUE)
-    {
-        ERR("failed to create pipe for %s, error = %d\n",
-            debugstr_w(service->name), GetLastError());
-        return 0;
-    }
+    if (pipe==INVALID_HANDLE_VALUE) return 0;
 
     /* dispatcher loop */
     while (1)
@@ -689,8 +686,6 @@ static DWORD WINAPI service_control_dispatcher(LPVOID arg)
             ERR("pipe read failed\n");
             break;
         }
-
-        service_reap_thread(service);
 
         /* handle the request */
         switch (req[0])
@@ -721,33 +716,57 @@ static DWORD WINAPI service_control_dispatcher(LPVOID arg)
  */
 static BOOL service_run_threads(void)
 {
-    service_data *service;
-    DWORD count = 0, n = 0;
-    HANDLE *handles;
+    DWORD i, n, ret;
+    HANDLE wait_handles[MAXIMUM_WAIT_OBJECTS];
+    UINT wait_services[MAXIMUM_WAIT_OBJECTS];
+
+    service_event = CreateEventW( NULL, FALSE, FALSE, NULL );
+
+    wait_handles[0] = __wine_make_process_system();
+    wait_handles[1] = service_event;
+
+    TRACE("Starting %d pipe listener threads. Services running as process %d\n",
+          nb_services, GetCurrentProcessId());
 
     EnterCriticalSection( &service_cs );
-
-    /* count how many services there are */
-    for (service = service_list; service; service = service->next)
-        count++;
-
-    TRACE("starting %d pipe listener threads\n", count);
-
-    handles = HeapAlloc(GetProcessHeap(), 0, sizeof(HANDLE)*count);
-
-    for (n=0, service = service_list; service; service = service->next, n++)
-        handles[n] = CreateThread( NULL, 0, service_control_dispatcher,
-                                   service, 0, NULL );
-    assert(n==count);
-
+    for (i = 0; i < nb_services; i++)
+    {
+        services[i]->status.dwProcessId = GetCurrentProcessId();
+        CloseHandle( CreateThread( NULL, 0, service_control_dispatcher, services[i], 0, NULL ));
+    }
     LeaveCriticalSection( &service_cs );
 
     /* wait for all the threads to pack up and exit */
-    WaitForMultipleObjectsEx(count, handles, TRUE, INFINITE, FALSE);
+    for (;;)
+    {
+        EnterCriticalSection( &service_cs );
+        for (i = 0, n = 2; i < nb_services && n < MAXIMUM_WAIT_OBJECTS; i++)
+        {
+            if (!services[i]->thread) continue;
+            wait_services[n] = i;
+            wait_handles[n++] = services[i]->thread;
+        }
+        LeaveCriticalSection( &service_cs );
 
-    HeapFree(GetProcessHeap(), 0, handles);
-
-    return TRUE;
+        ret = WaitForMultipleObjects( n, wait_handles, FALSE, INFINITE );
+        if (!ret)  /* system process event */
+        {
+            TRACE( "last user process exited, shutting down\n" );
+            /* FIXME: we should maybe send a shutdown control to running services */
+            ExitProcess(0);
+        }
+        else if (ret == 1)
+        {
+            continue;  /* rebuild the list */
+        }
+        else if (ret < n)
+        {
+            services[wait_services[ret]]->thread = 0;
+            CloseHandle( wait_handles[ret] );
+            if (n == 3) return TRUE; /* it was the last running thread */
+        }
+        else return FALSE;
+    }
 }
 
 /******************************************************************************
@@ -755,33 +774,32 @@ static BOOL service_run_threads(void)
  *
  * See StartServiceCtrlDispatcherW.
  */
-BOOL WINAPI StartServiceCtrlDispatcherA( LPSERVICE_TABLE_ENTRYA servent )
+BOOL WINAPI StartServiceCtrlDispatcherA( const SERVICE_TABLE_ENTRYA *servent )
 {
     service_data *info;
-    DWORD sz, len;
+    unsigned int i;
     BOOL ret = TRUE;
 
     TRACE("%p\n", servent);
 
-    EnterCriticalSection( &service_cs );
-    while (servent->lpServiceName)
+    if (nb_services)
     {
-        LPSTR name = servent->lpServiceName;
-
-        len = MultiByteToWideChar(CP_ACP, 0, name, -1, NULL, 0);
-        sz = len*sizeof(WCHAR) + sizeof *info;
-        info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sz );
-        MultiByteToWideChar(CP_ACP, 0, name, -1, info->name, len);
-        info->proc.a = servent->lpServiceProc;
-        info->unicode = FALSE;
-        
-        /* insert into the list */
-        info->next = service_list;
-        service_list = info;
-
-        servent++;
+        SetLastError( ERROR_SERVICE_ALREADY_RUNNING );
+        return FALSE;
     }
-    LeaveCriticalSection( &service_cs );
+    while (servent[nb_services].lpServiceName) nb_services++;
+    services = HeapAlloc( GetProcessHeap(), 0, nb_services * sizeof(*services) );
+
+    for (i = 0; i < nb_services; i++)
+    {
+        DWORD len = MultiByteToWideChar(CP_ACP, 0, servent[i].lpServiceName, -1, NULL, 0);
+        DWORD sz = FIELD_OFFSET( service_data, name[len] );
+        info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sz );
+        MultiByteToWideChar(CP_ACP, 0, servent[i].lpServiceName, -1, info->name, len);
+        info->proc.a = servent[i].lpServiceProc;
+        info->unicode = FALSE;
+        services[i] = info;
+    }
 
     service_run_threads();
 
@@ -801,33 +819,32 @@ BOOL WINAPI StartServiceCtrlDispatcherA( LPSERVICE_TABLE_ENTRYA servent )
  *  Success: TRUE.
  *  Failure: FALSE.
  */
-BOOL WINAPI StartServiceCtrlDispatcherW( LPSERVICE_TABLE_ENTRYW servent )
+BOOL WINAPI StartServiceCtrlDispatcherW( const SERVICE_TABLE_ENTRYW *servent )
 {
     service_data *info;
-    DWORD sz, len;
+    unsigned int i;
     BOOL ret = TRUE;
 
     TRACE("%p\n", servent);
 
-    EnterCriticalSection( &service_cs );
-    while (servent->lpServiceName)
+    if (nb_services)
     {
-        LPWSTR name = servent->lpServiceName;
-
-        len = strlenW(name);
-        sz = len*sizeof(WCHAR) + sizeof *info;
-        info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sz );
-        strcpyW(info->name, name);
-        info->proc.w = servent->lpServiceProc;
-        info->unicode = TRUE;
-        
-        /* insert into the list */
-        info->next = service_list;
-        service_list = info;
-
-        servent++;
+        SetLastError( ERROR_SERVICE_ALREADY_RUNNING );
+        return FALSE;
     }
-    LeaveCriticalSection( &service_cs );
+    while (servent[nb_services].lpServiceName) nb_services++;
+    services = HeapAlloc( GetProcessHeap(), 0, nb_services * sizeof(*services) );
+
+    for (i = 0; i < nb_services; i++)
+    {
+        DWORD len = strlenW(servent[i].lpServiceName) + 1;
+        DWORD sz = FIELD_OFFSET( service_data, name[len] );
+        info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sz );
+        strcpyW(info->name, servent[i].lpServiceName);
+        info->proc.w = servent[i].lpServiceProc;
+        info->unicode = TRUE;
+        services[i] = info;
+    }
 
     service_run_threads();
 
@@ -867,44 +884,6 @@ BOOL WINAPI UnlockServiceDatabase (SC_LOCK ScLock)
 }
 
 /******************************************************************************
- * RegisterServiceCtrlHandlerA [ADVAPI32.@]
- */
-SERVICE_STATUS_HANDLE WINAPI
-RegisterServiceCtrlHandlerA( LPCSTR lpServiceName, LPHANDLER_FUNCTION lpfHandler )
-{
-    LPWSTR lpServiceNameW;
-    SERVICE_STATUS_HANDLE ret;
-
-    lpServiceNameW = SERV_dup(lpServiceName);
-    ret = RegisterServiceCtrlHandlerW( lpServiceNameW, lpfHandler );
-    SERV_free(lpServiceNameW);
-    return ret;
-}
-
-/******************************************************************************
- * RegisterServiceCtrlHandlerW [ADVAPI32.@]
- *
- * PARAMS
- *   lpServiceName []
- *   lpfHandler    []
- */
-SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerW( LPCWSTR lpServiceName,
-                             LPHANDLER_FUNCTION lpfHandler )
-{
-    service_data *service;
-
-    EnterCriticalSection( &service_cs );
-    for(service = service_list; service; service = service->next)
-        if(!strcmpW(lpServiceName, service->name))
-            break;
-    if (service)
-        service->handler.handler = lpfHandler;
-    LeaveCriticalSection( &service_cs );
-
-    return (SERVICE_STATUS_HANDLE)service;
-}
-
-/******************************************************************************
  * SetServiceStatus [ADVAPI32.@]
  *
  * PARAMS
@@ -914,8 +893,8 @@ SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerW( LPCWSTR lpServiceName,
 BOOL WINAPI
 SetServiceStatus( SERVICE_STATUS_HANDLE hService, LPSERVICE_STATUS lpStatus )
 {
-    service_data *service;
-    BOOL r = TRUE;
+    ULONG_PTR index = HandleToULong(hService) - 1;
+    BOOL r = FALSE;
 
     TRACE("%p %x %x %x %x %x %x %x\n", hService,
           lpStatus->dwServiceType, lpStatus->dwCurrentState,
@@ -924,16 +903,12 @@ SetServiceStatus( SERVICE_STATUS_HANDLE hService, LPSERVICE_STATUS lpStatus )
           lpStatus->dwWaitHint);
 
     EnterCriticalSection( &service_cs );
-    for (service = service_list; service; service = service->next)
-        if(service == (service_data*)hService)
-            break;
-    if (service)
+    if (index < nb_services)
     {
-        memcpy( &service->status, lpStatus, sizeof(SERVICE_STATUS) );
-        TRACE("Set service status to %d\n",service->status.dwCurrentState);
+        memcpy( &services[index]->status, lpStatus, sizeof(SERVICE_STATUS) );
+        TRACE("Set service status to %d\n",services[index]->status.dwCurrentState);
+        r = TRUE;
     }
-    else
-        r = FALSE;
     LeaveCriticalSection( &service_cs );
 
     return r;
@@ -963,8 +938,8 @@ SC_HANDLE WINAPI OpenSCManagerA( LPCSTR lpMachineName, LPCSTR lpDatabaseName,
     lpMachineNameW = SERV_dup(lpMachineName);
     lpDatabaseNameW = SERV_dup(lpDatabaseName);
     ret = OpenSCManagerW(lpMachineNameW, lpDatabaseNameW, dwDesiredAccess);
-    SERV_free(lpDatabaseNameW);
-    SERV_free(lpMachineNameW);
+    HeapFree(GetProcessHeap(), 0, lpDatabaseNameW);
+    HeapFree(GetProcessHeap(), 0, lpMachineNameW);
     return ret;
 }
 
@@ -979,6 +954,7 @@ SC_HANDLE WINAPI OpenSCManagerW( LPCWSTR lpMachineName, LPCWSTR lpDatabaseName,
     struct sc_manager *manager;
     HKEY hReg;
     LONG r;
+    DWORD new_mask = dwDesiredAccess;
 
     TRACE("(%s,%s,0x%08x)\n", debugstr_w(lpMachineName),
           debugstr_w(lpDatabaseName), dwDesiredAccess);
@@ -1010,13 +986,14 @@ SC_HANDLE WINAPI OpenSCManagerW( LPCWSTR lpMachineName, LPCWSTR lpDatabaseName,
     if (r!=ERROR_SUCCESS)
         goto error;
 
-    r = RegOpenKeyExW(hReg, szServiceManagerKey,
-                      0, KEY_ALL_ACCESS, &manager->hkey);
+    r = RegCreateKeyW(hReg, szServiceManagerKey, &manager->hkey);
     RegCloseKey( hReg );
     if (r!=ERROR_SUCCESS)
         goto error;
 
-    TRACE("returning %p\n", manager);
+    RtlMapGenericMask(&new_mask, &scm_generic);
+    manager->dwAccess = new_mask;
+    TRACE("returning %p (access : 0x%08x)\n", manager, manager->dwAccess);
 
     return (SC_HANDLE) &manager->hdr;
 
@@ -1060,26 +1037,29 @@ BOOL WINAPI ControlService( SC_HANDLE hService, DWORD dwControl,
         return FALSE;
     }
 
-    ret = QueryServiceStatus(hService, lpServiceStatus);
-    if (!ret)
+    if (lpServiceStatus)
     {
-        ERR("failed to query service status\n");
-        SetLastError(ERROR_SERVICE_NOT_ACTIVE);
-        return FALSE;
-    }
+        ret = QueryServiceStatus(hService, lpServiceStatus);
+        if (!ret)
+        {
+            ERR("failed to query service status\n");
+            SetLastError(ERROR_SERVICE_NOT_ACTIVE);
+            return FALSE;
+        }
 
-    switch (lpServiceStatus->dwCurrentState)
-    {
-    case SERVICE_STOPPED:
-        SetLastError(ERROR_SERVICE_NOT_ACTIVE);
-        return FALSE;
-    case SERVICE_START_PENDING:
-        if (dwControl==SERVICE_CONTROL_STOP)
-            break;
-        /* fall thru */
-    case SERVICE_STOP_PENDING:
-        SetLastError(ERROR_SERVICE_CANNOT_ACCEPT_CTRL);
-        return FALSE;
+        switch (lpServiceStatus->dwCurrentState)
+        {
+        case SERVICE_STOPPED:
+            SetLastError(ERROR_SERVICE_NOT_ACTIVE);
+            return FALSE;
+        case SERVICE_START_PENDING:
+            if (dwControl==SERVICE_CONTROL_STOP)
+                break;
+            /* fall thru */
+        case SERVICE_STOP_PENDING:
+            SetLastError(ERROR_SERVICE_CANNOT_ACCEPT_CTRL);
+            return FALSE;
+        }
     }
 
     handle = service_open_pipe(hsvc->name);
@@ -1145,7 +1125,7 @@ SC_HANDLE WINAPI OpenServiceA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
 
     lpServiceNameW = SERV_dup(lpServiceName);
     ret = OpenServiceW( hSCManager, lpServiceNameW, dwDesiredAccess);
-    SERV_free(lpServiceNameW);
+    HeapFree(GetProcessHeap(), 0, lpServiceNameW);
     return ret;
 }
 
@@ -1163,20 +1143,21 @@ SC_HANDLE WINAPI OpenServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     HKEY hKey;
     long r;
     DWORD len;
+    DWORD new_mask = dwDesiredAccess;
 
     TRACE("%p %s %d\n", hSCManager, debugstr_w(lpServiceName), dwDesiredAccess);
-
-    if (!lpServiceName)
-    {
-        SetLastError(ERROR_INVALID_ADDRESS);
-        return NULL;
-    }
 
     hscm = sc_handle_get_handle_data( hSCManager, SC_HTYPE_MANAGER );
     if (!hscm)
     {
         SetLastError( ERROR_INVALID_HANDLE );
         return FALSE;
+    }
+
+    if (!lpServiceName)
+    {
+        SetLastError(ERROR_INVALID_ADDRESS);
+        return NULL;
     }
 
     r = RegOpenKeyExW( hscm->hkey, lpServiceName, 0, KEY_ALL_ACCESS, &hKey );
@@ -1191,9 +1172,15 @@ SC_HANDLE WINAPI OpenServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
                             sizeof (struct sc_service) + len*sizeof(WCHAR),
                             sc_handle_destroy_service );
     if (!hsvc)
+    {
+        RegCloseKey(hKey);
         return NULL;
+    }
     strcpyW( hsvc->name, lpServiceName );
     hsvc->hkey = hKey;
+
+    RtlMapGenericMask(&new_mask, &svc_generic);
+    hsvc->dwAccess = new_mask;
 
     /* add reference to SCM handle */
     hscm->hdr.ref_count++;
@@ -1223,6 +1210,10 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     DWORD dp, len;
     struct reg_value val[10];
     int n = 0;
+    DWORD new_mask = dwDesiredAccess;
+    DWORD index = 0;
+    WCHAR buffer[MAX_PATH];
+    BOOL displayname_exists = FALSE;
 
     TRACE("%p %s %s\n", hSCManager, 
           debugstr_w(lpServiceName), debugstr_w(lpDisplayName));
@@ -1234,15 +1225,122 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         return NULL;
     }
 
+    if (!lpServiceName || !lpBinaryPathName)
+    {
+        SetLastError(ERROR_INVALID_ADDRESS);
+        return NULL;
+    }
+
+    if (!(hscm->dwAccess & SC_MANAGER_CREATE_SERVICE))
+    {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return NULL;
+    }
+
+    if (!lpServiceName[0])
+    {
+        SetLastError(ERROR_INVALID_NAME);
+        return NULL;
+    }
+
+    if (!lpBinaryPathName[0])
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    /* ServiceType can only be one value (except for SERVICE_INTERACTIVE_PROCESS which can be used
+     * together with SERVICE_WIN32_OWN_PROCESS or SERVICE_WIN32_SHARE_PROCESS when the service
+     * runs under the LocalSystem account)
+     */
+    switch (dwServiceType)
+    {
+    case SERVICE_KERNEL_DRIVER:
+    case SERVICE_FILE_SYSTEM_DRIVER:
+    case SERVICE_WIN32_OWN_PROCESS:
+    case SERVICE_WIN32_SHARE_PROCESS:
+        /* No problem */
+        break;
+    case SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS:
+    case SERVICE_WIN32_SHARE_PROCESS | SERVICE_INTERACTIVE_PROCESS:
+        /* FIXME : Do we need a more thorough check? */
+        if (lpServiceStartName)
+        {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return NULL;
+        }
+        break;
+    default:
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    if (!lpServiceStartName && (dwServiceType & SERVICE_WIN32))
+            lpServiceStartName = szLocalSystem;
+
+    /* StartType can only be a single value (if several values are mixed the result is probably not what was intended) */
+    if (dwStartType > SERVICE_DISABLED)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    /* SERVICE_BOOT_START and SERVICE_SYSTEM_START or only allowed for driver services */
+    if (((dwStartType == SERVICE_BOOT_START) || (dwStartType == SERVICE_SYSTEM_START)) &&
+        ((dwServiceType & SERVICE_WIN32_OWN_PROCESS) || (dwServiceType & SERVICE_WIN32_SHARE_PROCESS)))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    /* Loop through the registry to check if the service already exists and to
+     * check if we can use the given displayname.
+     * FIXME: Should we use EnumServicesStatusEx?
+     */
+    len = sizeof(buffer);
+    while (RegEnumKeyExW(hscm->hkey, index, buffer, &len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS)
+    {
+        HKEY service_key;
+
+        /* Open service first before deciding whether it already exists or not
+         * It could be that it's not a valid service, but only the registry key itself exists
+         */
+        if (RegOpenKeyExW(hscm->hkey, buffer, 0, KEY_READ, &service_key) == ERROR_SUCCESS)
+        {
+            WCHAR name[MAX_PATH];
+            DWORD size = sizeof(name);
+
+            if (RegQueryValueExW(service_key, szDisplayName, NULL, NULL, (LPBYTE)name, &size) == ERROR_SUCCESS)
+            {
+                if (lpDisplayName && (!lstrcmpiW(lpDisplayName, name)
+                                   || !lstrcmpiW(lpDisplayName, buffer)))
+                    displayname_exists = TRUE;
+
+                if (!lstrcmpiW(lpServiceName, buffer))
+                {
+                    RegCloseKey(service_key);
+                    SetLastError(ERROR_SERVICE_EXISTS);
+                    return NULL;
+                }
+            }
+            RegCloseKey(service_key);
+        }
+        index++;
+        len = sizeof(buffer);
+    }
+
+    if (displayname_exists)
+    {
+        SetLastError(ERROR_DUPLICATE_SERVICE_NAME);
+        return NULL;
+    }
+
     r = RegCreateKeyExW(hscm->hkey, lpServiceName, 0, NULL,
                        REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hKey, &dp);
     if (r!=ERROR_SUCCESS)
-        return NULL;
-
-    if (dp != REG_CREATED_NEW_KEY)
     {
-        SetLastError(ERROR_SERVICE_EXISTS);
-        goto error;
+        /* FIXME: Should we set an error? */
+        return NULL;
     }
 
     if( lpDisplayName )
@@ -1252,12 +1350,13 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
     service_set_dword( &val[n++], szStart, &dwStartType );
     service_set_dword( &val[n++], szError, &dwErrorControl );
 
-    if( lpBinaryPathName )
-        service_set_string( &val[n++], szImagePath, lpBinaryPathName );
+    service_set_string( &val[n++], szImagePath, lpBinaryPathName );
 
     if( lpLoadOrderGroup )
         service_set_string( &val[n++], szGroup, lpLoadOrderGroup );
 
+    /* FIXME: lpDependencies is used to create both DependOnService and DependOnGroup
+     * There is no such key as what szDependencies refers to */
     if( lpDependencies )
         service_set_multi_string( &val[n++], szDependencies, lpDependencies );
 
@@ -1265,7 +1364,7 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         FIXME("Don't know how to add a Password for a service.\n");
 
     if( lpServiceStartName )
-        service_set_string( &val[n++], szDependOnService, lpServiceStartName );
+        service_set_string( &val[n++], szObjectName, lpServiceStartName );
 
     r = service_write_values( hKey, val, n );
     if( r != ERROR_SUCCESS )
@@ -1278,6 +1377,10 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         goto error;
     lstrcpyW( hsvc->name, lpServiceName );
     hsvc->hkey = hKey;
+
+    RtlMapGenericMask(&new_mask, &svc_generic);
+    hsvc->dwAccess = new_mask;
+
     hsvc->scm = hscm;
     hscm->hdr.ref_count++;
 
@@ -1321,13 +1424,13 @@ CreateServiceA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
             lpBinaryPathNameW, lpLoadOrderGroupW, lpdwTagId,
             lpDependenciesW, lpServiceStartNameW, lpPasswordW );
 
-    SERV_free( lpServiceNameW );
-    SERV_free( lpDisplayNameW );
-    SERV_free( lpBinaryPathNameW );
-    SERV_free( lpLoadOrderGroupW );
-    SERV_free( lpDependenciesW );
-    SERV_free( lpServiceStartNameW );
-    SERV_free( lpPasswordW );
+    HeapFree( GetProcessHeap(), 0, lpServiceNameW );
+    HeapFree( GetProcessHeap(), 0, lpDisplayNameW );
+    HeapFree( GetProcessHeap(), 0, lpBinaryPathNameW );
+    HeapFree( GetProcessHeap(), 0, lpLoadOrderGroupW );
+    HeapFree( GetProcessHeap(), 0, lpDependenciesW );
+    HeapFree( GetProcessHeap(), 0, lpServiceStartNameW );
+    HeapFree( GetProcessHeap(), 0, lpPasswordW );
 
     return r;
 }
@@ -1348,11 +1451,6 @@ CreateServiceA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
 BOOL WINAPI DeleteService( SC_HANDLE hService )
 {
     struct sc_service *hsvc;
-    HKEY hKey;
-    WCHAR valname[MAX_PATH+1];
-    INT index = 0;
-    LONG rc;
-    DWORD size;
 
     hsvc = sc_handle_get_handle_data(hService, SC_HTYPE_SERVICE);
     if (!hsvc)
@@ -1360,24 +1458,20 @@ BOOL WINAPI DeleteService( SC_HANDLE hService )
         SetLastError( ERROR_INVALID_HANDLE );
         return FALSE;
     }
-    hKey = hsvc->hkey;
 
-    size = MAX_PATH+1; 
-    /* Clean out the values */
-    rc = RegEnumValueW(hKey, index, valname,&size,0,0,0,0);
-    while (rc == ERROR_SUCCESS)
+    if (!(hsvc->dwAccess & DELETE))
     {
-        RegDeleteValueW(hKey,valname);
-        index++;
-        size = MAX_PATH+1; 
-        rc = RegEnumValueW(hKey, index, valname, &size,0,0,0,0);
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
     }
 
-    RegCloseKey(hKey);
-    hsvc->hkey = NULL;
+    /* Close the key to the service */
+    RegCloseKey(hsvc->hkey);
 
-    /* delete the key */
-    RegDeleteKeyW(hsvc->scm->hkey, hsvc->name);
+    /* Delete the service under the Service Control Manager key */
+    RegDeleteTreeW(hsvc->scm->hkey, hsvc->name);
+
+    hsvc->hkey = NULL;
 
     return TRUE;
 }
@@ -1427,7 +1521,7 @@ BOOL WINAPI StartServiceA( SC_HANDLE hService, DWORD dwNumServiceArgs,
     if (dwNumServiceArgs)
     {
         for(i=0; i<dwNumServiceArgs; i++)
-            SERV_free(lpwstr[i]);
+            HeapFree(GetProcessHeap(), 0, lpwstr[i]);
         HeapFree(GetProcessHeap(), 0, lpwstr);
     }
 
@@ -1437,40 +1531,65 @@ BOOL WINAPI StartServiceA( SC_HANDLE hService, DWORD dwNumServiceArgs,
 /******************************************************************************
  * service_start_process    [INTERNAL]
  */
-static DWORD service_start_process(struct sc_service *hsvc)
+static DWORD service_start_process(struct sc_service *hsvc, LPDWORD ppid)
 {
     static const WCHAR _ImagePathW[] = {'I','m','a','g','e','P','a','t','h',0};
     PROCESS_INFORMATION pi;
     STARTUPINFOW si;
     LPWSTR path = NULL, str;
-    DWORD type, size, ret;
+    DWORD type, size, ret, svc_type;
     HANDLE handles[2];
     BOOL r;
 
-    /* read the executable path from memory */
-    size = 0;
-    ret = RegQueryValueExW(hsvc->hkey, _ImagePathW, NULL, &type, NULL, &size);
-    if (ret!=ERROR_SUCCESS)
-        return FALSE;
-    str = HeapAlloc(GetProcessHeap(),0,size);
-    ret = RegQueryValueExW(hsvc->hkey, _ImagePathW, NULL, &type, (LPBYTE)str, &size);
-    if (ret==ERROR_SUCCESS)
+    size = sizeof(svc_type);
+    if (RegQueryValueExW(hsvc->hkey, szType, NULL, &type, (LPBYTE)&svc_type, &size) || type != REG_DWORD)
+        svc_type = 0;
+
+    if (svc_type == SERVICE_KERNEL_DRIVER)
     {
-        size = ExpandEnvironmentStringsW(str,NULL,0);
-        path = HeapAlloc(GetProcessHeap(),0,size*sizeof(WCHAR));
-        ExpandEnvironmentStringsW(str,path,size);
+        static const WCHAR winedeviceW[] = {'\\','w','i','n','e','d','e','v','i','c','e','.','e','x','e',' ',0};
+        DWORD len = GetSystemDirectoryW( NULL, 0 ) + sizeof(winedeviceW)/sizeof(WCHAR) + strlenW(hsvc->name);
+
+        if (!(path = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return FALSE;
+        GetSystemDirectoryW( path, len );
+        lstrcatW( path, winedeviceW );
+        lstrcatW( path, hsvc->name );
     }
-    HeapFree(GetProcessHeap(),0,str);
-    if (!path)
-        return FALSE;
+    else
+    {
+        /* read the executable path from the registry */
+        size = 0;
+        ret = RegQueryValueExW(hsvc->hkey, _ImagePathW, NULL, &type, NULL, &size);
+        if (ret!=ERROR_SUCCESS)
+            return FALSE;
+        str = HeapAlloc(GetProcessHeap(),0,size);
+        ret = RegQueryValueExW(hsvc->hkey, _ImagePathW, NULL, &type, (LPBYTE)str, &size);
+        if (ret==ERROR_SUCCESS)
+        {
+            size = ExpandEnvironmentStringsW(str,NULL,0);
+            path = HeapAlloc(GetProcessHeap(),0,size*sizeof(WCHAR));
+            ExpandEnvironmentStringsW(str,path,size);
+        }
+        HeapFree(GetProcessHeap(),0,str);
+        if (!path)
+            return FALSE;
+    }
 
     /* wait for the process to start and set an event or terminate */
     handles[0] = service_get_event_handle( hsvc->name );
     ZeroMemory(&si, sizeof(STARTUPINFOW));
     si.cb = sizeof(STARTUPINFOW);
+    if (!(svc_type & SERVICE_INTERACTIVE_PROCESS))
+    {
+        static WCHAR desktopW[] = {'_','_','w','i','n','e','s','e','r','v','i','c','e','_','w','i','n','s','t','a','t','i','o','n','\\','D','e','f','a','u','l','t',0};
+        si.lpDesktop = desktopW;
+    }
+
     r = CreateProcessW(NULL, path, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     if (r)
     {
+        if (ppid) *ppid = pi.dwProcessId;
+
         handles[1] = pi.hProcess;
         ret = WaitForMultipleObjectsEx(2, handles, FALSE, 30000, FALSE);
         if(ret != WAIT_OBJECT_0)
@@ -1495,7 +1614,7 @@ static BOOL service_wait_for_startup(SC_HANDLE hService)
 
     TRACE("%p\n", hService);
 
-    for (i=0; i<30; i++)
+    for (i=0; i<20; i++)
     {
         status.dwCurrentState = 0;
         r = QueryServiceStatus(hService, &status);
@@ -1507,7 +1626,8 @@ static BOOL service_wait_for_startup(SC_HANDLE hService)
             break;
         }
         r = FALSE;
-        Sleep(1000);
+        if (status.dwCurrentState != SERVICE_START_PENDING) break;
+        Sleep(100 * i);
     }
     return r;
 }
@@ -1542,15 +1662,14 @@ BOOL WINAPI StartServiceW(SC_HANDLE hService, DWORD dwNumServiceArgs,
     if (handle==INVALID_HANDLE_VALUE)
     {
         /* start the service process */
-        if (service_start_process(hsvc))
+        if (service_start_process(hsvc, NULL))
             handle = service_open_pipe(hsvc->name);
     }
 
     if (handle != INVALID_HANDLE_VALUE)
     {
-        service_send_start_message(handle, lpServiceArgVectors, dwNumServiceArgs);
+        r = service_send_start_message(handle, lpServiceArgVectors, dwNumServiceArgs);
         CloseHandle(handle);
-        r = TRUE;
     }
 
     UnlockServiceDatabase( hLock );
@@ -1567,54 +1686,24 @@ BOOL WINAPI StartServiceW(SC_HANDLE hService, DWORD dwNumServiceArgs,
  * QueryServiceStatus [ADVAPI32.@]
  *
  * PARAMS
- *   hService        []
- *   lpservicestatus []
+ *   hService        [I] Handle to service to get information about
+ *   lpservicestatus [O] buffer to receive the status information for the service
  *
  */
 BOOL WINAPI QueryServiceStatus(SC_HANDLE hService,
                                LPSERVICE_STATUS lpservicestatus)
 {
-    struct sc_service *hsvc;
-    DWORD size, type, val;
-    HANDLE pipe;
-    LONG r;
+    SERVICE_STATUS_PROCESS SvcStatusData;
+    BOOL ret;
 
     TRACE("%p %p\n", hService, lpservicestatus);
 
-    hsvc = sc_handle_get_handle_data(hService, SC_HTYPE_SERVICE);
-    if (!hsvc)
-    {
-        SetLastError( ERROR_INVALID_HANDLE );
-        return FALSE;
-    }
-
-    pipe = service_open_pipe(hsvc->name);
-    if (pipe != INVALID_HANDLE_VALUE)
-    {
-        r = service_get_status(pipe, lpservicestatus);
-        CloseHandle(pipe);
-        if (r)
-            return TRUE;
-    }
-
-    TRACE("Failed to read service status\n");
-
-    /* read the service type from the registry */
-    size = sizeof(val);
-    r = RegQueryValueExA(hsvc->hkey, "Type", NULL, &type, (LPBYTE)&val, &size);
-    if(r!=ERROR_SUCCESS || type!=REG_DWORD)
-        val = 0;
-
-    lpservicestatus->dwServiceType = val;
-    lpservicestatus->dwCurrentState            = SERVICE_STOPPED;  /* stopped */
-    lpservicestatus->dwControlsAccepted        = 0;
-    lpservicestatus->dwWin32ExitCode           = ERROR_SERVICE_NEVER_STARTED;
-    lpservicestatus->dwServiceSpecificExitCode = 0;
-    lpservicestatus->dwCheckPoint              = 0;
-    lpservicestatus->dwWaitHint                = 0;
-
-    return TRUE;
+    ret = QueryServiceStatusEx(hService, SC_STATUS_PROCESS_INFO, (LPBYTE)&SvcStatusData,
+                                sizeof(SERVICE_STATUS_PROCESS), NULL);
+    if (ret) memcpy(lpservicestatus, &SvcStatusData, sizeof(SERVICE_STATUS)) ;
+    return ret;
 }
+
 
 /******************************************************************************
  * QueryServiceStatusEx [ADVAPI32.@]
@@ -1636,35 +1725,35 @@ BOOL WINAPI QueryServiceStatusEx(SC_HANDLE hService, SC_STATUS_TYPE InfoLevel,
                         LPBYTE lpBuffer, DWORD cbBufSize,
                         LPDWORD pcbBytesNeeded)
 {
-    FIXME("stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/******************************************************************************
- * QueryServiceConfigA [ADVAPI32.@]
- */
-BOOL WINAPI 
-QueryServiceConfigA( SC_HANDLE hService,
-                     LPQUERY_SERVICE_CONFIGA lpServiceConfig,
-                     DWORD cbBufSize, LPDWORD pcbBytesNeeded)
-{
-    static const CHAR szDisplayName[] = "DisplayName";
-    static const CHAR szType[] = "Type";
-    static const CHAR szStart[] = "Start";
-    static const CHAR szError[] = "ErrorControl";
-    static const CHAR szImagePath[] = "ImagePath";
-    static const CHAR szGroup[] = "Group";
-    static const CHAR szDependencies[] = "Dependencies";
     struct sc_service *hsvc;
-    HKEY hKey;
-    CHAR str_buffer[ MAX_PATH ];
+    DWORD size, type, val;
+    HANDLE pipe;
     LONG r;
-    DWORD type, val, sz, total, n;
-    LPSTR p;
+    LPSERVICE_STATUS_PROCESS pSvcStatusData;
 
-    TRACE("%p %p %d %p\n", hService, lpServiceConfig,
-           cbBufSize, pcbBytesNeeded);
+    TRACE("%p %d %p %d %p\n", hService, InfoLevel, lpBuffer, cbBufSize, pcbBytesNeeded);
+
+    if (InfoLevel != SC_STATUS_PROCESS_INFO)
+    {
+        SetLastError( ERROR_INVALID_LEVEL);
+        return FALSE;
+    }
+
+    pSvcStatusData = (LPSERVICE_STATUS_PROCESS) lpBuffer;
+    if (pSvcStatusData == NULL)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (cbBufSize < sizeof(SERVICE_STATUS_PROCESS))
+    {
+        if( pcbBytesNeeded != NULL)
+            *pcbBytesNeeded = sizeof(SERVICE_STATUS_PROCESS);
+
+        SetLastError( ERROR_INSUFFICIENT_BUFFER);
+        return FALSE;
+    }
 
     hsvc = sc_handle_get_handle_data(hService, SC_HTYPE_SERVICE);
     if (!hsvc)
@@ -1672,118 +1761,96 @@ QueryServiceConfigA( SC_HANDLE hService,
         SetLastError( ERROR_INVALID_HANDLE );
         return FALSE;
     }
-    hKey = hsvc->hkey;
 
-    /* calculate the size required first */
-    total = sizeof (QUERY_SERVICE_CONFIGA);
-
-    sz = sizeof(str_buffer);
-    r = RegQueryValueExA( hKey, szImagePath, 0, &type, (LPBYTE)str_buffer, &sz );
-    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ || type == REG_EXPAND_SZ ) )
+    pipe = service_open_pipe(hsvc->name);
+    if (pipe != INVALID_HANDLE_VALUE)
     {
-        sz = ExpandEnvironmentStringsA(str_buffer,NULL,0);
-        if( 0 == sz ) return FALSE;
-
-        total += sz;
-    }
-    else
-    {
-        /* FIXME: set last error */
-        return FALSE;
+        r = service_get_status(pipe, pSvcStatusData);
+        CloseHandle(pipe);
+        if (r)
+            return TRUE;
     }
 
-    sz = 0;
-    r = RegQueryValueExA( hKey, szGroup, 0, &type, NULL, &sz );
-    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
-        total += sz;
+    TRACE("Failed to read service status\n");
 
-    sz = 0;
-    r = RegQueryValueExA( hKey, szDependencies, 0, &type, NULL, &sz );
-    if( ( r == ERROR_SUCCESS ) && ( type == REG_MULTI_SZ ) )
-        total += sz;
+    /* read the service type from the registry */
+    size = sizeof(val);
+    r = RegQueryValueExA(hsvc->hkey, "Type", NULL, &type, (LPBYTE)&val, &size);
+    if (r != ERROR_SUCCESS || type != REG_DWORD)
+        val = 0;
 
-    sz = 0;
-    r = RegQueryValueExA( hKey, szStart, 0, &type, NULL, &sz );
-    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
-        total += sz;
-
-    sz = 0;
-    r = RegQueryValueExA( hKey, szDisplayName, 0, &type, NULL, &sz );
-    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
-        total += sz;
-
-    *pcbBytesNeeded = total;
-
-    /* if there's not enough memory, return an error */
-    if( total > cbBufSize )
-    {
-        SetLastError( ERROR_INSUFFICIENT_BUFFER );
-        return FALSE;
-    }
-
-    ZeroMemory( lpServiceConfig, total );
-
-    sz = sizeof val;
-    r = RegQueryValueExA( hKey, szType, 0, &type, (LPBYTE)&val, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_DWORD ) )
-        lpServiceConfig->dwServiceType = val;
-
-    sz = sizeof val;
-    r = RegQueryValueExA( hKey, szStart, 0, &type, (LPBYTE)&val, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_DWORD ) )
-        lpServiceConfig->dwStartType = val;
-
-    sz = sizeof val;
-    r = RegQueryValueExA( hKey, szError, 0, &type, (LPBYTE)&val, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_DWORD ) )
-        lpServiceConfig->dwErrorControl = val;
-
-    /* now do the strings */
-    p = (LPSTR) &lpServiceConfig[1];
-    n = total - sizeof (QUERY_SERVICE_CONFIGA);
-
-    sz = sizeof(str_buffer);
-    r = RegQueryValueExA( hKey, szImagePath, 0, &type, (LPBYTE)str_buffer, &sz );
-    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ || type == REG_EXPAND_SZ ) )
-    {
-        sz = ExpandEnvironmentStringsA(str_buffer, p, n);
-        if( 0 == sz || sz > n ) return FALSE;
-
-        lpServiceConfig->lpBinaryPathName = p;
-        p += sz;
-        n -= sz;
-    }
-    else
-    {
-        /* FIXME: set last error */
-        return FALSE;
-    }
-
-    sz = n;
-    r = RegQueryValueExA( hKey, szGroup, 0, &type, (LPBYTE)p, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_SZ ) )
-    {
-        lpServiceConfig->lpLoadOrderGroup = p;
-        p += sz;
-        n -= sz;
-    }
-
-    sz = n;
-    r = RegQueryValueExA( hKey, szDependencies, 0, &type, (LPBYTE)p, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_SZ ) )
-    {
-        lpServiceConfig->lpDependencies = p;
-        p += sz;
-        n -= sz;
-    }
-
-    if( n < 0 )
-        ERR("Buffer overflow!\n");
-
-    TRACE("Image path = %s\n", lpServiceConfig->lpBinaryPathName );
-    TRACE("Group      = %s\n", lpServiceConfig->lpLoadOrderGroup );
+    pSvcStatusData->dwServiceType = val;
+    pSvcStatusData->dwCurrentState            = SERVICE_STOPPED;  /* stopped */
+    pSvcStatusData->dwControlsAccepted        = 0;
+    pSvcStatusData->dwWin32ExitCode           = ERROR_SERVICE_NEVER_STARTED;
+    pSvcStatusData->dwServiceSpecificExitCode = 0;
+    pSvcStatusData->dwCheckPoint              = 0;
+    pSvcStatusData->dwWaitHint                = 0;
 
     return TRUE;
+}
+
+/******************************************************************************
+ * QueryServiceConfigA [ADVAPI32.@]
+ */
+BOOL WINAPI QueryServiceConfigA( SC_HANDLE hService, LPQUERY_SERVICE_CONFIGA config,
+                                 DWORD size, LPDWORD needed )
+{
+    DWORD n;
+    LPSTR p, buffer;
+    BOOL ret;
+    QUERY_SERVICE_CONFIGW *configW;
+
+    TRACE("%p %p %d %p\n", hService, config, size, needed);
+
+    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, 2 * size )))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return FALSE;
+    }
+    configW = (QUERY_SERVICE_CONFIGW *)buffer;
+    ret = QueryServiceConfigW( hService, configW, 2 * size, needed );
+    if (!ret) goto done;
+
+    config->dwServiceType      = configW->dwServiceType;
+    config->dwStartType        = configW->dwStartType;
+    config->dwErrorControl     = configW->dwErrorControl;
+    config->lpBinaryPathName   = NULL;
+    config->lpLoadOrderGroup   = NULL;
+    config->dwTagId            = configW->dwTagId;
+    config->lpDependencies     = NULL;
+    config->lpServiceStartName = NULL;
+    config->lpDisplayName      = NULL;
+
+    p = (LPSTR)(config + 1);
+    n = size - sizeof(*config);
+    ret = FALSE;
+
+#define MAP_STR(str) \
+    do { \
+        if (configW->str) \
+        { \
+            DWORD sz = WideCharToMultiByte( CP_ACP, 0, configW->str, -1, p, n, NULL, NULL ); \
+            if (!sz) goto done; \
+            config->str = p; \
+            p += sz; \
+            n -= sz; \
+        } \
+    } while (0)
+
+    MAP_STR( lpBinaryPathName );
+    MAP_STR( lpLoadOrderGroup );
+    MAP_STR( lpDependencies );
+    MAP_STR( lpServiceStartName );
+    MAP_STR( lpDisplayName );
+#undef MAP_STR
+
+    *needed = p - (LPSTR)config;
+    ret = TRUE;
+
+done:
+    HeapFree( GetProcessHeap(), 0, buffer );
+    return ret;
 }
 
 /******************************************************************************
@@ -1812,6 +1879,11 @@ QueryServiceConfigW( SC_HANDLE hService,
     }
     hKey = hsvc->hkey;
 
+    /* TODO: Check which members are mandatory and what the registry types
+     * should be. This should of course also be tested when a service is
+     * created.
+     */
+
     /* calculate the size required first */
     total = sizeof (QUERY_SERVICE_CONFIGW);
 
@@ -1834,6 +1906,8 @@ QueryServiceConfigW( SC_HANDLE hService,
     r = RegQueryValueExW( hKey, szGroup, 0, &type, NULL, &sz );
     if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
         total += sz;
+    else
+	total += sizeof(WCHAR);
 
     sz = 0;
     r = RegQueryValueExW( hKey, szDependencies, 0, &type, NULL, &sz );
@@ -1843,14 +1917,18 @@ QueryServiceConfigW( SC_HANDLE hService,
 	total += sizeof(WCHAR);
 
     sz = 0;
-    r = RegQueryValueExW( hKey, szStart, 0, &type, NULL, &sz );
+    r = RegQueryValueExW( hKey, szObjectName, 0, &type, NULL, &sz );
     if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
         total += sz;
+    else
+	total += sizeof(WCHAR);
 
     sz = 0;
     r = RegQueryValueExW( hKey, szDisplayName, 0, &type, NULL, &sz );
     if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
         total += sz;
+    else
+	total += sizeof(WCHAR);
 
     *pcbBytesNeeded = total;
 
@@ -1865,18 +1943,23 @@ QueryServiceConfigW( SC_HANDLE hService,
 
     sz = sizeof val;
     r = RegQueryValueExW( hKey, szType, 0, &type, (LPBYTE)&val, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_DWORD ) )
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_DWORD ) )
         lpServiceConfig->dwServiceType = val;
 
     sz = sizeof val;
     r = RegQueryValueExW( hKey, szStart, 0, &type, (LPBYTE)&val, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_DWORD ) )
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_DWORD ) )
         lpServiceConfig->dwStartType = val;
 
     sz = sizeof val;
     r = RegQueryValueExW( hKey, szError, 0, &type, (LPBYTE)&val, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_DWORD ) )
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_DWORD ) )
         lpServiceConfig->dwErrorControl = val;
+
+    sz = sizeof val;
+    r = RegQueryValueExW( hKey, szTag, 0, &type, (LPBYTE)&val, &sz );
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_DWORD ) )
+        lpServiceConfig->dwTagId = val;
 
     /* now do the strings */
     p = (LPBYTE) &lpServiceConfig[1];
@@ -1902,17 +1985,8 @@ QueryServiceConfigW( SC_HANDLE hService,
 
     sz = n;
     r = RegQueryValueExW( hKey, szGroup, 0, &type, p, &sz );
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_SZ ) )
-    {
-        lpServiceConfig->lpLoadOrderGroup = (LPWSTR) p;
-        p += sz;
-        n -= sz;
-    }
-
-    sz = n;
-    r = RegQueryValueExW( hKey, szDependencies, 0, &type, p, &sz );
-    lpServiceConfig->lpDependencies = (LPWSTR) p;
-    if( ( r == ERROR_SUCCESS ) || ( type == REG_SZ ) )
+    lpServiceConfig->lpLoadOrderGroup = (LPWSTR) p;
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
     {
         p += sz;
         n -= sz;
@@ -1924,11 +1998,56 @@ QueryServiceConfigW( SC_HANDLE hService,
 	n -= sizeof(WCHAR);
     }
 
-    if( n < 0 )
-        ERR("Buffer overflow!\n");
+    sz = n;
+    r = RegQueryValueExW( hKey, szDependencies, 0, &type, p, &sz );
+    lpServiceConfig->lpDependencies = (LPWSTR) p;
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
+    {
+        p += sz;
+        n -= sz;
+    }
+    else
+    {
+	*(WCHAR *) p = 0;
+	p += sizeof(WCHAR);
+	n -= sizeof(WCHAR);
+    }
 
-    TRACE("Image path = %s\n", debugstr_w(lpServiceConfig->lpBinaryPathName) );
-    TRACE("Group      = %s\n", debugstr_w(lpServiceConfig->lpLoadOrderGroup) );
+    sz = n;
+    r = RegQueryValueExW( hKey, szObjectName, 0, &type, p, &sz );
+    lpServiceConfig->lpServiceStartName = (LPWSTR) p;
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
+    {
+        p += sz;
+        n -= sz;
+    }
+    else
+    {
+        *(WCHAR *) p = 0;
+        p += sizeof(WCHAR);
+        n -= sizeof(WCHAR);
+    }
+
+    sz = n;
+    r = RegQueryValueExW( hKey, szDisplayName, 0, &type, p, &sz );
+    lpServiceConfig->lpDisplayName = (LPWSTR) p;
+    if( ( r == ERROR_SUCCESS ) && ( type == REG_SZ ) )
+    {
+        p += sz;
+        n -= sz;
+    }
+    else
+    {
+        *(WCHAR *) p = 0;
+        p += sizeof(WCHAR);
+        n -= sizeof(WCHAR);
+    }
+
+    TRACE("Image path           = %s\n", debugstr_w(lpServiceConfig->lpBinaryPathName) );
+    TRACE("Group                = %s\n", debugstr_w(lpServiceConfig->lpLoadOrderGroup) );
+    TRACE("Dependencies         = %s\n", debugstr_w(lpServiceConfig->lpDependencies) );
+    TRACE("Service account name = %s\n", debugstr_w(lpServiceConfig->lpServiceStartName) );
+    TRACE("Display name         = %s\n", debugstr_w(lpServiceConfig->lpDisplayName) );
 
     return TRUE;
 }
@@ -1961,6 +2080,37 @@ EnumServicesStatusW( SC_HANDLE hSCManager, DWORD dwServiceType,
     FIXME("%p type=%x state=%x %p %x %p %p %p\n", hSCManager,
           dwServiceType, dwServiceState, lpServices, cbBufSize,
           pcbBytesNeeded, lpServicesReturned,  lpResumeHandle);
+    SetLastError (ERROR_ACCESS_DENIED);
+    return FALSE;
+}
+
+/******************************************************************************
+ * EnumServicesStatusExA [ADVAPI32.@]
+ */
+BOOL WINAPI
+EnumServicesStatusExA(SC_HANDLE hSCManager, SC_ENUM_TYPE InfoLevel, DWORD dwServiceType,
+                      DWORD dwServiceState, LPBYTE lpServices, DWORD cbBufSize, LPDWORD pcbBytesNeeded,
+                      LPDWORD lpServicesReturned, LPDWORD lpResumeHandle, LPCSTR pszGroupName)
+{
+    FIXME("%p level=%d type=%x state=%x %p %x %p %p %p %s\n", hSCManager, InfoLevel,
+          dwServiceType, dwServiceState, lpServices, cbBufSize,
+          pcbBytesNeeded, lpServicesReturned,  lpResumeHandle, debugstr_a(pszGroupName));
+    *lpServicesReturned = 0;
+    SetLastError (ERROR_ACCESS_DENIED);
+    return FALSE;
+}
+
+/******************************************************************************
+ * EnumServicesStatusExW [ADVAPI32.@]
+ */
+BOOL WINAPI
+EnumServicesStatusExW(SC_HANDLE hSCManager, SC_ENUM_TYPE InfoLevel, DWORD dwServiceType,
+                      DWORD dwServiceState, LPBYTE lpServices, DWORD cbBufSize, LPDWORD pcbBytesNeeded,
+                      LPDWORD lpServicesReturned, LPDWORD lpResumeHandle, LPCWSTR pszGroupName)
+{
+    FIXME("%p level=%d type=%x state=%x %p %x %p %p %p %s\n", hSCManager, InfoLevel,
+          dwServiceType, dwServiceState, lpServices, cbBufSize,
+          pcbBytesNeeded, lpServicesReturned,  lpResumeHandle, debugstr_w(pszGroupName));
     SetLastError (ERROR_ACCESS_DENIED);
     return FALSE;
 }
@@ -2015,9 +2165,41 @@ BOOL WINAPI QueryServiceLockStatusW( SC_HANDLE hSCManager,
 BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
   LPSTR lpDisplayName, LPDWORD lpcchBuffer)
 {
-    FIXME("%p %s %p %p\n", hSCManager,
+    LPWSTR lpServiceNameW, lpDisplayNameW;
+    DWORD sizeW;
+    BOOL ret = FALSE;
+
+    TRACE("%p %s %p %p\n", hSCManager,
           debugstr_a(lpServiceName), lpDisplayName, lpcchBuffer);
-    return FALSE;
+
+    lpServiceNameW = SERV_dup(lpServiceName);
+    if (lpDisplayName)
+        lpDisplayNameW = HeapAlloc(GetProcessHeap(), 0, *lpcchBuffer * sizeof(WCHAR));
+    else
+        lpDisplayNameW = NULL;
+
+    sizeW = *lpcchBuffer;
+    if (!GetServiceDisplayNameW(hSCManager, lpServiceNameW, lpDisplayNameW, &sizeW))
+    {
+        *lpcchBuffer = sizeW*2;  /* we can only provide an upper estimation of string length */
+        goto cleanup;
+    }
+
+    if (!WideCharToMultiByte(CP_ACP, 0, lpDisplayNameW, (sizeW + 1), lpDisplayName,
+                        *lpcchBuffer, NULL, NULL ))
+    {
+        *lpcchBuffer = WideCharToMultiByte(CP_ACP, 0, lpDisplayNameW, -1, NULL, 0, NULL, NULL);
+        goto cleanup;
+    }
+
+    /* probably due to a bug GetServiceDisplayNameA doesn't modify lpcchBuffer on success.
+     * (but if the function succeeded it means that is a good upper estimation of the size) */
+    ret = TRUE;
+
+cleanup:
+    HeapFree(GetProcessHeap(), 0, lpDisplayNameW);
+    HeapFree(GetProcessHeap(), 0, lpServiceNameW);
+    return ret;
 }
 
 /******************************************************************************
@@ -2026,9 +2208,76 @@ BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
 BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
   LPWSTR lpDisplayName, LPDWORD lpcchBuffer)
 {
-    FIXME("%p %s %p %p\n", hSCManager,
+    struct sc_manager *hscm;
+    DWORD type, size;
+    LONG ret;
+
+    TRACE("%p %s %p %p\n", hSCManager,
           debugstr_w(lpServiceName), lpDisplayName, lpcchBuffer);
-    return FALSE;
+
+    hscm = sc_handle_get_handle_data(hSCManager, SC_HTYPE_MANAGER);
+    if (!hscm)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    if (!lpServiceName)
+    {
+        SetLastError(ERROR_INVALID_ADDRESS);
+        return FALSE;
+    }
+
+    size = *lpcchBuffer * sizeof(WCHAR);
+    ret = RegGetValueW(hscm->hkey, lpServiceName, szDisplayName, RRF_RT_REG_SZ, &type, lpDisplayName, &size);
+    if (!ret && !lpDisplayName && size)
+        ret = ERROR_MORE_DATA;
+
+    if (ret)
+    {
+        if (lpDisplayName && *lpcchBuffer) *lpDisplayName = 0;
+
+        if (ret == ERROR_MORE_DATA)
+        {
+            SetLastError(ERROR_INSUFFICIENT_BUFFER);
+            *lpcchBuffer = (size / sizeof(WCHAR)) - 1;
+        }
+        else if (ret == ERROR_FILE_NOT_FOUND)
+        {
+            HKEY hkey;
+
+            if (!RegOpenKeyW(hscm->hkey, lpServiceName, &hkey))
+            {
+                UINT len = lstrlenW(lpServiceName);
+                BOOL r = FALSE;
+
+                if ((*lpcchBuffer <= len) || (!lpDisplayName && *lpcchBuffer))
+                    SetLastError(ERROR_INSUFFICIENT_BUFFER);
+                else if (lpDisplayName && *lpcchBuffer)
+                {
+                    /* No displayname, but the service exists and the buffer
+                     * is big enough. We should return the servicename.
+                     */
+                    lstrcpyW(lpDisplayName, lpServiceName);
+                    r = TRUE;
+                }
+
+                *lpcchBuffer = len;
+                RegCloseKey(hkey);
+                return r;
+            }
+            else
+                SetLastError(ERROR_SERVICE_DOES_NOT_EXIST);
+        }
+        else
+            SetLastError(ret);
+        return FALSE;
+    }
+
+    /* Always return the correct needed size on success */
+    *lpcchBuffer = (size / sizeof(WCHAR)) - 1;
+
+    return TRUE;
 }
 
 /******************************************************************************
@@ -2074,6 +2323,8 @@ BOOL WINAPI ChangeServiceConfigW( SC_HANDLE hService, DWORD dwServiceType,
     if( lpLoadOrderGroup )
         service_set_string( &val[n++], szGroup, lpLoadOrderGroup );
 
+    /* FIXME: lpDependencies is used to create/change both DependOnService and DependOnGroup
+     * There is no such key as what szDependencies refers to */
     if( lpDependencies )
         service_set_multi_string( &val[n++], szDependencies, lpDependencies );
 
@@ -2081,7 +2332,7 @@ BOOL WINAPI ChangeServiceConfigW( SC_HANDLE hService, DWORD dwServiceType,
         FIXME("ignoring password\n");
 
     if( lpServiceStartName )
-        service_set_string( &val[n++], szDependOnService, lpServiceStartName );
+        service_set_string( &val[n++], szObjectName, lpServiceStartName );
 
     r = service_write_values( hsvc->hkey, val, n );
 
@@ -2118,12 +2369,12 @@ BOOL WINAPI ChangeServiceConfigA( SC_HANDLE hService, DWORD dwServiceType,
             wLoadOrderGroup, lpdwTagId, wDependencies,
             wServiceStartName, wPassword, wDisplayName);
 
-    SERV_free( wBinaryPathName );
-    SERV_free( wLoadOrderGroup );
-    SERV_free( wDependencies );
-    SERV_free( wServiceStartName );
-    SERV_free( wPassword );
-    SERV_free( wDisplayName );
+    HeapFree( GetProcessHeap(), 0, wBinaryPathName );
+    HeapFree( GetProcessHeap(), 0, wLoadOrderGroup );
+    HeapFree( GetProcessHeap(), 0, wDependencies );
+    HeapFree( GetProcessHeap(), 0, wServiceStartName );
+    HeapFree( GetProcessHeap(), 0, wPassword );
+    HeapFree( GetProcessHeap(), 0, wDisplayName );
 
     return r;
 }
@@ -2147,7 +2398,7 @@ BOOL WINAPI ChangeServiceConfig2A( SC_HANDLE hService, DWORD dwInfoLevel,
 
         r = ChangeServiceConfig2W( hService, dwInfoLevel, &sdw );
 
-        SERV_free( sdw.lpDescription );
+        HeapFree( GetProcessHeap(), 0, sdw.lpDescription );
     }
     else if (dwInfoLevel == SERVICE_CONFIG_FAILURE_ACTIONS)
     {
@@ -2162,8 +2413,8 @@ BOOL WINAPI ChangeServiceConfig2A( SC_HANDLE hService, DWORD dwInfoLevel,
 
         r = ChangeServiceConfig2W( hService, dwInfoLevel, &faw );
 
-        SERV_free( faw.lpRebootMsg );
-        SERV_free( faw.lpCommand );
+        HeapFree( GetProcessHeap(), 0, faw.lpRebootMsg );
+        HeapFree( GetProcessHeap(), 0, faw.lpCommand );
     }
     else
         SetLastError( ERROR_INVALID_PARAMETER );
@@ -2216,17 +2467,26 @@ BOOL WINAPI QueryServiceObjectSecurity(SC_HANDLE hService,
        PSECURITY_DESCRIPTOR lpSecurityDescriptor,
        DWORD cbBufSize, LPDWORD pcbBytesNeeded)
 {
-    PACL pACL = NULL;
+    SECURITY_DESCRIPTOR descriptor;
+    DWORD size;
+    BOOL succ;
+    ACL acl;
 
-    FIXME("%p %d %p %u %p\n", hService, dwSecurityInformation,
+    FIXME("%p %d %p %u %p - semi-stub\n", hService, dwSecurityInformation,
           lpSecurityDescriptor, cbBufSize, pcbBytesNeeded);
 
-    InitializeSecurityDescriptor(lpSecurityDescriptor, SECURITY_DESCRIPTOR_REVISION);
+    if (dwSecurityInformation != DACL_SECURITY_INFORMATION)
+        FIXME("information %d not supported\n", dwSecurityInformation);
 
-    pACL = HeapAlloc( GetProcessHeap(), 0, sizeof(ACL) );
-    InitializeAcl(pACL, sizeof(ACL), ACL_REVISION);
-    SetSecurityDescriptorDacl(lpSecurityDescriptor, TRUE, pACL, TRUE);
-    return TRUE;
+    InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION);
+
+    InitializeAcl(&acl, sizeof(ACL), ACL_REVISION);
+    SetSecurityDescriptorDacl(&descriptor, TRUE, &acl, TRUE);
+
+    size = cbBufSize;
+    succ = MakeSelfRelativeSD(&descriptor, lpSecurityDescriptor, &size);
+    *pcbBytesNeeded = size;
+    return succ;
 }
 
 /******************************************************************************
@@ -2253,31 +2513,96 @@ BOOL WINAPI SetServiceBits( SERVICE_STATUS_HANDLE hServiceStatus,
     return TRUE;
 }
 
-SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerExA( LPCSTR lpServiceName,
-        LPHANDLER_FUNCTION_EX lpHandlerProc, LPVOID lpContext )
+/* thunk for calling the RegisterServiceCtrlHandler handler function */
+static DWORD WINAPI ctrl_handler_thunk( DWORD control, DWORD type, void *data, void *context )
 {
-    FIXME("%s %p %p\n", debugstr_a(lpServiceName), lpHandlerProc, lpContext);
-    return 0;
+    LPHANDLER_FUNCTION func = context;
+
+    func( control );
+    return ERROR_SUCCESS;
 }
 
+/******************************************************************************
+ * RegisterServiceCtrlHandlerA [ADVAPI32.@]
+ */
+SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerA( LPCSTR name, LPHANDLER_FUNCTION handler )
+{
+    return RegisterServiceCtrlHandlerExA( name, ctrl_handler_thunk, handler );
+}
+
+/******************************************************************************
+ * RegisterServiceCtrlHandlerW [ADVAPI32.@]
+ */
+SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerW( LPCWSTR name, LPHANDLER_FUNCTION handler )
+{
+    return RegisterServiceCtrlHandlerExW( name, ctrl_handler_thunk, handler );
+}
+
+/******************************************************************************
+ * RegisterServiceCtrlHandlerExA [ADVAPI32.@]
+ */
+SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerExA( LPCSTR name, LPHANDLER_FUNCTION_EX handler, LPVOID context )
+{
+    LPWSTR nameW;
+    SERVICE_STATUS_HANDLE ret;
+
+    nameW = SERV_dup(name);
+    ret = RegisterServiceCtrlHandlerExW( nameW, handler, context );
+    HeapFree( GetProcessHeap(), 0, nameW );
+    return ret;
+}
+
+/******************************************************************************
+ * RegisterServiceCtrlHandlerExW [ADVAPI32.@]
+ */
 SERVICE_STATUS_HANDLE WINAPI RegisterServiceCtrlHandlerExW( LPCWSTR lpServiceName,
         LPHANDLER_FUNCTION_EX lpHandlerProc, LPVOID lpContext )
 {
-    service_data *service;
+    SERVICE_STATUS_HANDLE handle = 0;
+    unsigned int i;
 
     TRACE("%s %p %p\n", debugstr_w(lpServiceName), lpHandlerProc, lpContext);
 
     EnterCriticalSection( &service_cs );
-    for(service = service_list; service; service = service->next)
-        if(!strcmpW(lpServiceName, service->name))
-            break;
-    if (service)
+    for (i = 0; i < nb_services; i++)
     {
-        service->handler.handler_ex = lpHandlerProc;
-        service->context = lpContext;
-        service->extended = TRUE;
+        if(!strcmpW(lpServiceName, services[i]->name))
+        {
+            services[i]->handler = lpHandlerProc;
+            services[i]->context = lpContext;
+            handle = ULongToHandle( i + 1 );
+            break;
+        }
     }
     LeaveCriticalSection( &service_cs );
 
-    return (SERVICE_STATUS_HANDLE)service;
+    return handle;
+}
+
+/******************************************************************************
+ * EnumDependentServicesA [ADVAPI32.@]
+ */
+BOOL WINAPI EnumDependentServicesA( SC_HANDLE hService, DWORD dwServiceState,
+                                    LPENUM_SERVICE_STATUSA lpServices, DWORD cbBufSize,
+        LPDWORD pcbBytesNeeded, LPDWORD lpServicesReturned )
+{
+    FIXME("%p 0x%08x %p 0x%08x %p %p - stub\n", hService, dwServiceState,
+          lpServices, cbBufSize, pcbBytesNeeded, lpServicesReturned);
+
+    *lpServicesReturned = 0;
+    return TRUE;
+}
+
+/******************************************************************************
+ * EnumDependentServicesW [ADVAPI32.@]
+ */
+BOOL WINAPI EnumDependentServicesW( SC_HANDLE hService, DWORD dwServiceState,
+                                    LPENUM_SERVICE_STATUSW lpServices, DWORD cbBufSize,
+                                    LPDWORD pcbBytesNeeded, LPDWORD lpServicesReturned )
+{
+    FIXME("%p 0x%08x %p 0x%08x %p %p - stub\n", hService, dwServiceState,
+          lpServices, cbBufSize, pcbBytesNeeded, lpServicesReturned);
+
+    *lpServicesReturned = 0;
+    return TRUE;
 }

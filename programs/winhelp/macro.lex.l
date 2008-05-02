@@ -1,4 +1,4 @@
-%{
+%{ /* -*-C-*- */
 /*
  * Help Viewer
  *
@@ -23,7 +23,13 @@
 %option nounput interactive 8bit
 %x quote
 %{
+#include "config.h"
 #include <assert.h>
+
+#ifndef HAVE_UNISTD_H
+#define YY_NO_UNISTD_H
+#endif
+
 #include "macro.h"
 
 #include "wine/debug.h"
@@ -33,7 +39,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(winhelp);
 static LPCSTR  macroptr;
 static LPSTR   strptr;
 static int     quote_stack[32];
-static int     quote_stk_idx = 0;
+static unsigned int quote_stk_idx = 0;
 struct lexret  yylval;
 
 #define YY_INPUT(buf,result,max_size)\
@@ -143,8 +149,8 @@ static int MACRO_CallBoolFunc(FARPROC fn, const char* args, void** ret);
  */
 static int MACRO_CheckArgs(void* pa[], unsigned max, const char* args)
 {
-    int         t;
-    int         len = 0, idx = 0;
+    int t;
+    unsigned int len = 0, idx = 0;
 
     WINE_TRACE("Checking %s\n", args);
 

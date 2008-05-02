@@ -192,7 +192,7 @@ void WINAPI __regs_LogApiThkLSF( LPSTR func, CONTEXT86 *context )
     TRACE( "%s\n", debugstr_a(func) );
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( LogApiThkLSF, 4, 4 );
+DEFINE_REGS_ENTRYPOINT( LogApiThkLSF, 4, 4 )
 #endif
 
 /***********************************************************************
@@ -205,7 +205,7 @@ void WINAPI __regs_LogApiThkSL( LPSTR func, CONTEXT86 *context )
     TRACE( "%s\n", debugstr_a(func) );
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( LogApiThkSL, 4, 4 );
+DEFINE_REGS_ENTRYPOINT( LogApiThkSL, 4, 4 )
 #endif
 
 /***********************************************************************
@@ -218,7 +218,7 @@ void WINAPI __regs_LogCBThkSL( LPSTR func, CONTEXT86 *context )
     TRACE( "%s\n", debugstr_a(func) );
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( LogCBThkSL, 4, 4 );
+DEFINE_REGS_ENTRYPOINT( LogCBThkSL, 4, 4 )
 #endif
 
 /***********************************************************************
@@ -454,7 +454,7 @@ void WINAPI __regs_QT_Thunk( CONTEXT86 *context )
     CONTEXT86 context16;
     DWORD argsize;
 
-    memcpy(&context16,context,sizeof(context16));
+    context16 = *context;
 
     context16.SegFs = wine_get_fs();
     context16.SegGs = wine_get_gs();
@@ -462,7 +462,7 @@ void WINAPI __regs_QT_Thunk( CONTEXT86 *context )
     context16.Eip   = LOWORD(context->Edx);
     /* point EBP to the STACK16FRAME on the stack
      * for the call_to_16 to set up the register content on calling */
-    context16.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + (WORD)&((STACK16FRAME*)0)->bp;
+    context16.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + FIELD_OFFSET(STACK16FRAME,bp);
 
     /*
      * used to be (problematic):
@@ -487,7 +487,7 @@ void WINAPI __regs_QT_Thunk( CONTEXT86 *context )
                         ( OFFSETOF(NtCurrentTeb()->WOW32Reserved) - argsize );
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( QT_Thunk, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( QT_Thunk, 0, 0 )
 #endif
 
 
@@ -555,7 +555,7 @@ void WINAPI __regs_FT_Prolog( CONTEXT86 *context )
     *(DWORD *)(context->Ebp - 52) = context->Edx;
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( FT_Prolog, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( FT_Prolog, 0, 0 )
 #endif
 
 /**********************************************************************
@@ -588,13 +588,13 @@ void WINAPI __regs_FT_Thunk( CONTEXT86 *context )
     DWORD newstack[32];
     LPBYTE oldstack;
 
-    memcpy(&context16,context,sizeof(context16));
+    context16 = *context;
 
     context16.SegFs = wine_get_fs();
     context16.SegGs = wine_get_gs();
     context16.SegCs = HIWORD(callTarget);
     context16.Eip   = LOWORD(callTarget);
-    context16.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + (WORD)&((STACK16FRAME*)0)->bp;
+    context16.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + FIELD_OFFSET(STACK16FRAME,bp);
 
     argsize  = context->Ebp-context->Esp-0x40;
     if (argsize > sizeof(newstack)) argsize = sizeof(newstack);
@@ -623,7 +623,7 @@ void WINAPI __regs_FT_Thunk( CONTEXT86 *context )
     memcpy( oldstack, newstack, argsize );
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( FT_Thunk, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( FT_Thunk, 0, 0 )
 #endif
 
 #ifdef __i386__
@@ -661,23 +661,23 @@ DEFINE_REGS_ENTRYPOINT( FT_Thunk, 0, 0 );
     "leave\n\t"
 
 #define DEFINE_FT_Exit(n) \
-    __ASM_GLOBAL_FUNC( FT_Exit ## n, FT_EXIT_RESTORE_REGS "ret $" #n );
+    __ASM_GLOBAL_FUNC( FT_Exit ## n, FT_EXIT_RESTORE_REGS "ret $" #n )
 
-DEFINE_FT_Exit(0);
-DEFINE_FT_Exit(4);
-DEFINE_FT_Exit(8);
-DEFINE_FT_Exit(12);
-DEFINE_FT_Exit(16);
-DEFINE_FT_Exit(20);
-DEFINE_FT_Exit(24);
-DEFINE_FT_Exit(28);
-DEFINE_FT_Exit(32);
-DEFINE_FT_Exit(36);
-DEFINE_FT_Exit(40);
-DEFINE_FT_Exit(44);
-DEFINE_FT_Exit(48);
-DEFINE_FT_Exit(52);
-DEFINE_FT_Exit(56);
+DEFINE_FT_Exit(0)
+DEFINE_FT_Exit(4)
+DEFINE_FT_Exit(8)
+DEFINE_FT_Exit(12)
+DEFINE_FT_Exit(16)
+DEFINE_FT_Exit(20)
+DEFINE_FT_Exit(24)
+DEFINE_FT_Exit(28)
+DEFINE_FT_Exit(32)
+DEFINE_FT_Exit(36)
+DEFINE_FT_Exit(40)
+DEFINE_FT_Exit(44)
+DEFINE_FT_Exit(48)
+DEFINE_FT_Exit(52)
+DEFINE_FT_Exit(56)
 
 #endif /* __i386__ */
 
@@ -709,7 +709,7 @@ DWORD WINAPI ThunkInitLS(
 
 	if (!addr[1])
 		return 0;
-	*(DWORD*)thunk = addr[1];
+	*thunk = addr[1];
 
 	return addr[1];
 }
@@ -753,14 +753,14 @@ void WINAPI __regs_Common32ThkLS( CONTEXT86 *context )
     CONTEXT86 context16;
     DWORD argsize;
 
-    memcpy(&context16,context,sizeof(context16));
+    context16 = *context;
 
     context16.SegFs = wine_get_fs();
     context16.SegGs = wine_get_gs();
     context16.Edi   = LOWORD(context->Ecx);
     context16.SegCs = HIWORD(context->Eax);
     context16.Eip   = LOWORD(context->Eax);
-    context16.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + (WORD)&((STACK16FRAME*)0)->bp;
+    context16.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + FIELD_OFFSET(STACK16FRAME,bp);
 
     argsize = HIWORD(context->Edx) * 4;
 
@@ -779,7 +779,7 @@ void WINAPI __regs_Common32ThkLS( CONTEXT86 *context )
     context->Esp += LOBYTE(context16.Ebx);
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( Common32ThkLS, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( Common32ThkLS, 0, 0 )
 #endif
 
 /***********************************************************************
@@ -814,13 +814,13 @@ void WINAPI __regs_OT_32ThkLSF( CONTEXT86 *context )
     CONTEXT86 context16;
     DWORD argsize;
 
-    memcpy(&context16,context,sizeof(context16));
+    context16 = *context;
 
     context16.SegFs = wine_get_fs();
     context16.SegGs = wine_get_gs();
     context16.SegCs = HIWORD(context->Edx);
     context16.Eip   = LOWORD(context->Edx);
-    context16.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + (WORD)&((STACK16FRAME*)0)->bp;
+    context16.Ebp   = OFFSETOF(NtCurrentTeb()->WOW32Reserved) + FIELD_OFFSET(STACK16FRAME,bp);
 
     argsize = 2 * *(WORD *)context->Esp + 2;
 
@@ -836,7 +836,7 @@ void WINAPI __regs_OT_32ThkLSF( CONTEXT86 *context )
                         ( OFFSETOF(NtCurrentTeb()->WOW32Reserved) - argsize );
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( OT_32ThkLSF, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( OT_32ThkLSF, 0, 0 )
 #endif
 
 /***********************************************************************
@@ -938,7 +938,7 @@ void WINAPI __regs_FT_PrologPrime( CONTEXT86 *context )
     context->Eip = (DWORD)relayCode;
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( FT_PrologPrime, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( FT_PrologPrime, 0, 0 )
 #endif
 
 /***********************************************************************
@@ -970,7 +970,7 @@ void WINAPI __regs_QT_ThunkPrime( CONTEXT86 *context )
     context->Eip = (DWORD)relayCode;
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( QT_ThunkPrime, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( QT_ThunkPrime, 0, 0 )
 #endif
 
 /***********************************************************************
@@ -1113,7 +1113,7 @@ void WINAPI __regs_W32S_BackTo32( CONTEXT86 *context )
     context->Eip = stack32_pop(context);
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( W32S_BackTo32, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( W32S_BackTo32, 0, 0 )
 #endif
 
 /**********************************************************************
@@ -1291,7 +1291,7 @@ void WINAPI __regs_K32Thk1632Prolog( CONTEXT86 *context )
    ReleaseThunkLock(&CURRENT_STACK16->entry_point);
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( K32Thk1632Prolog, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( K32Thk1632Prolog, 0, 0 )
 #endif
 
 /***********************************************************************
@@ -1328,7 +1328,7 @@ void WINAPI __regs_K32Thk1632Epilog( CONTEXT86 *context )
    }
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( K32Thk1632Epilog, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( K32Thk1632Epilog, 0, 0 )
 #endif
 
 /*********************************************************************
@@ -1629,7 +1629,7 @@ static SEGPTR    ThunkletCallbackGlueSL = 0;
 
 
 /* map a thunk allocated on ThunkletHeap to a 16-bit pointer */
-inline static SEGPTR get_segptr( void *thunk )
+static inline SEGPTR get_segptr( void *thunk )
 {
     if (!thunk) return 0;
     return MAKESEGPTR( ThunkletCodeSel, (char *)thunk - (char *)ThunkletHeap );
@@ -1645,7 +1645,7 @@ static BOOL THUNK_Init(void)
     ThunkletHeap = HeapCreate( 0, 0x10000, 0x10000 );
     if (!ThunkletHeap) return FALSE;
 
-    ThunkletCodeSel = SELECTOR_AllocBlock( (void *)ThunkletHeap, 0x10000, WINE_LDT_FLAGS_CODE );
+    ThunkletCodeSel = SELECTOR_AllocBlock( ThunkletHeap, 0x10000, WINE_LDT_FLAGS_CODE );
 
     thunk = HeapAlloc( ThunkletHeap, 0, 5 );
     if (!thunk) return FALSE;
@@ -1712,7 +1712,7 @@ static FARPROC THUNK_AllocLSThunklet( SEGPTR target, DWORD relay,
         thunk->jmp_glue = 0xE9;
 
         thunk->target  = (DWORD)target;
-        thunk->relay   = (DWORD)relay;
+        thunk->relay   = relay;
         thunk->glue    = (DWORD)glue - (DWORD)&thunk->type;
 
         thunk->type    = THUNKLET_TYPE_LS;
@@ -1746,7 +1746,7 @@ static SEGPTR THUNK_AllocSLThunklet( FARPROC target, DWORD relay,
         thunk->jmp_glue = 0xEA;
 
         thunk->target  = (DWORD)target;
-        thunk->relay   = (DWORD)relay;
+        thunk->relay   = relay;
         thunk->glue    = (DWORD)glue;
 
         thunk->type    = THUNKLET_TYPE_SL;
@@ -2076,7 +2076,7 @@ SEGPTR WINAPI Get16DLLAddress(HMODULE16 handle, LPSTR func_name)
     if (!code_sel32)
     {
         if (!ThunkletHeap) THUNK_Init();
-        code_sel32 = SELECTOR_AllocBlock( (void *)ThunkletHeap, 0x10000,
+        code_sel32 = SELECTOR_AllocBlock( ThunkletHeap, 0x10000,
                                           WINE_LDT_FLAGS_CODE | WINE_LDT_FLAGS_32BIT );
         if (!code_sel32) return 0;
     }
@@ -2140,7 +2140,7 @@ void WINAPI __regs_CommonUnimpStub( CONTEXT86 *context )
     context->Esp += (context->Ecx & 0x0f) * 4;
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( CommonUnimpStub, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( CommonUnimpStub, 0, 0 )
 #endif
 
 /**********************************************************************

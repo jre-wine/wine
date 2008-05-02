@@ -12,9 +12,9 @@
 @ stub AddPrinterDriverW
 @ stub AddPrinterExW
 @ stub AddPrinterW
-@ stub AllocSplStr
+@ stdcall AllocSplStr(wstr)
 @ stub AppendPrinterNotifyInfoData
-@ stub BuildOtherNamesFromMachineName
+@ stdcall BuildOtherNamesFromMachineName(ptr ptr)
 @ stub CallDrvDevModeConversion
 @ stub CallRouterFindFirstPrinterChangeNotification
 @ stub ClosePrinter
@@ -40,14 +40,14 @@
 @ stub DeletePrinterKeyW
 @ stdcall DllAllocSplMem(long)
 @ stdcall DllFreeSplMem(ptr)
-@ stub DllFreeSplStr
+@ stdcall DllFreeSplStr(wstr)
 @ stub EndDocPrinter
 @ stub EndPagePrinter
 @ stub EnumFormsW
 @ stub EnumJobsW
 @ stub EnumMonitorsW
 @ stub EnumPerMachineConnectionsW
-@ stub EnumPortsW
+@ stdcall EnumPortsW(wstr long ptr ptr ptr ptr) winspool.drv.EnumPortsW
 @ stub EnumPrintProcessorDatatypesW
 @ stub EnumPrintProcessorsW
 @ stub EnumPrinterDataExW
@@ -72,7 +72,7 @@
 @ stub GetPrinterDriverExW
 @ stub GetPrinterDriverW
 @ stub GetPrinterW
-@ stub ImpersonatePrinterClient
+@ stdcall ImpersonatePrinterClient(long)
 @ stub InitializeRouter
 @ stub IsLocalCall
 @ stub IsNamedPipeRpcCall
@@ -101,7 +101,7 @@
 @ stub ReplyOpenPrinter
 @ stub ReplyPrinterChangeNotification
 @ stub ResetPrinterW
-@ stub RevertToPrinterSelf
+@ stdcall RevertToPrinterSelf()
 @ stub RouterAllocPrinterNotifyInfo
 @ stub RouterFindFirstPrinterChangeNotification
 @ stub RouterFindNextPrinterChangeNotification
@@ -121,8 +121,8 @@
 @ stub SplCommitSpoolData
 @ stub SplDriverUnloadComplete
 @ stub SplGetSpoolFileInfo
-@ stub SplInitializeWinSpoolDrv
-@ stub SplIsUpgrade
+@ stdcall SplInitializeWinSpoolDrv(ptr)
+@ stdcall SplIsUpgrade()
 @ stub SplProcessPnPEvent
 @ stub SplReadPrinter
 @ stub SplRegisterForDeviceEvents
@@ -132,8 +132,8 @@
 @ stub SpoolerFindFirstPrinterChangeNotification
 @ stub SpoolerFindNextPrinterChangeNotification
 @ stub SpoolerFreePrinterNotifyInfo
-@ stub SpoolerHasInitialized
-@ stub SpoolerInit
+@ stdcall SpoolerHasInitialized()
+@ stdcall SpoolerInit()
 @ stub StartDocPrinterW
 @ stub StartPagePrinter
 @ stub UnloadDriver

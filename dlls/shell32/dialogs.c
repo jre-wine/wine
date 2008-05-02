@@ -52,8 +52,8 @@ typedef struct
 typedef BOOL (*LPFNOFN) (OPENFILENAMEA *) ;
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
-INT_PTR CALLBACK RunDlgProc (HWND, UINT, WPARAM, LPARAM) ;
-void FillList (HWND, char *) ;
+static INT_PTR CALLBACK RunDlgProc (HWND, UINT, WPARAM, LPARAM) ;
+static void FillList (HWND, char *) ;
 
 
 /*************************************************************************
@@ -103,7 +103,7 @@ void WINAPI RunFileDlg(
         MessageBoxA (hwndOwner, "Couldn't find dialog.", "Nix", MB_OK) ;
         return;
         }
-    if(!(template = (LPVOID)LoadResource(shell32_hInstance, hRes)))
+    if(!(template = LoadResource(shell32_hInstance, hRes)))
         {
         MessageBoxA (hwndOwner, "Couldn't load dialog.", "Nix", MB_OK) ;
         return;
@@ -116,7 +116,7 @@ void WINAPI RunFileDlg(
 }
 
 /* Dialog procedure for RunFileDlg */
-INT_PTR CALLBACK RunDlgProc (HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+static INT_PTR CALLBACK RunDlgProc (HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
     int ic ;
     char *psz, szMsg[256] ;
@@ -235,7 +235,7 @@ INT_PTR CALLBACK RunDlgProc (HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
     }
 
 /* This grabs the MRU list from the registry and fills the combo for the "Run" dialog above */
-void FillList (HWND hCb, char *pszLatest)
+static void FillList (HWND hCb, char *pszLatest)
     {
     HKEY hkey ;
 /*    char szDbgMsg[256] = "" ; */
@@ -384,14 +384,13 @@ int WINAPI RestartDialogEx(HWND hWndOwner, LPCWSTR lpwstrReason, DWORD uFlags, D
 {
     TRACE("(%p)\n", hWndOwner);
 
-    /*FIXME: use uReason */
-
+    /* FIXME: use lpwstrReason */
     if (ConfirmDialog(hWndOwner, IDS_RESTART_PROMPT, IDS_RESTART_TITLE))
     {
         HANDLE hToken;
         TOKEN_PRIVILEGES npr;
 
-        /* enable shutdown privilege for current process */
+        /* enable the shutdown privilege for the current process */
         if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &hToken))
         {
             LookupPrivilegeValueA(0, "SeShutdownPrivilege", &npr.Privileges[0].Luid);
@@ -400,7 +399,7 @@ int WINAPI RestartDialogEx(HWND hWndOwner, LPCWSTR lpwstrReason, DWORD uFlags, D
             AdjustTokenPrivileges(hToken, FALSE, &npr, 0, 0, 0);
             CloseHandle(hToken);
         }
-        ExitWindowsEx(EWX_REBOOT, 0);
+        ExitWindowsEx(EWX_REBOOT, uReason);
     }
 
     return 0;

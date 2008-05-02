@@ -25,11 +25,6 @@
  *  All the cool functionality (prototyping, call tracing, forwarding)
  *  relies on Patrik Stridvall's 'function_grep.pl' script to work.
  *
- *  http://msdn.microsoft.com/library/periodic/period96/msj/S330.htm
- *  This article provides both a description and freely downloadable
- *  implementation, in source code form, of how to extract symbols
- *  from Win32 PE executables/DLLs.
- *
  *  http://www.kegel.com/mangle.html
  *  Gives information on the name mangling scheme used by MS compilers,
  *  used as the starting point for the code here. Contains a few
@@ -46,6 +41,11 @@
 #include <errno.h>
 #include <assert.h>
 #include <stdarg.h>
+
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
+#include "windef.h"
+#include "winbase.h"
 
 /* Argument type constants */
 #define MAX_FUNCTION_ARGS   32
@@ -72,7 +72,7 @@
 #define SYM_THISCALL        0x4
 #define SYM_DATA            0x8 /* Data, not a function */
 
-typedef enum {NONE, DMGL, SPEC, DUMP, EMF, LNK} Mode;
+typedef enum {NONE, DMGL, SPEC, DUMP} Mode;
 
 /* Structure holding a parsed symbol */
 typedef struct __parsed_symbol
@@ -89,8 +89,6 @@ typedef struct __parsed_symbol
   char  arg_flag [MAX_FUNCTION_ARGS];
   char *arg_text [MAX_FUNCTION_ARGS];
   char *arg_name [MAX_FUNCTION_ARGS];
-  unsigned int n_u_refs;
-  char *u_ref    [MAX_FUNCTION_ARGS];
 } parsed_symbol;
 
 /* FIXME: Replace with some hash such as GHashTable */
@@ -123,6 +121,7 @@ typedef struct __globals
   /* Options: dump mode */
   int   do_demangle;        /* -d */
   int   do_dumpheader;      /* -f */
+  int   do_dump_rawdata;    /* -x */
   int   do_debug;           /* -G == 1, -g == 2 */
 
   /* Option arguments: spec mode */
@@ -155,12 +154,6 @@ extern _globals globals;
 
 /* Default calling convention */
 #define CALLING_CONVENTION (globals.do_cdecl ? SYM_CDECL : SYM_STDCALL)
-
-/* EMF functions */
-int   dump_emf (const char *emf);
-
-/* LNK functions */
-int   dump_lnk (const char *lnk);
 
 /* Image functions */
 void	dump_file(const char* name);
@@ -221,25 +214,52 @@ const char *str_find_set (const char *str, const char *findset);
 
 char *str_toupper (char *str);
 
+const char *get_machine_str(int mach);
+
 /* file dumping functions */
-enum FileSig {SIG_UNKNOWN, SIG_DOS, SIG_PE, SIG_DBG, SIG_NE, SIG_LE, SIG_MDMP};
+enum FileSig {SIG_UNKNOWN, SIG_DOS, SIG_PE, SIG_DBG, SIG_PDB, SIG_NE, SIG_LE, SIG_MDMP, SIG_COFFLIB, SIG_LNK, SIG_EMF};
 
 const void*	PRD(unsigned long prd, unsigned long len);
 unsigned long	Offset(const void* ptr);
 
-typedef void (*file_dumper)(enum FileSig, const void*);
+typedef void (*file_dumper)(void);
 int             dump_analysis(const char*, file_dumper, enum FileSig);
 
 void            dump_data( const unsigned char *ptr, unsigned int size, const char *prefix );
 const char*	get_time_str( unsigned long );
 unsigned int    strlenW( const unsigned short *str );
 void            dump_unicode_str( const unsigned short *str, int len );
+const char*     get_guid_str(const GUID* guid);
+const char*     get_symbol_str(const char* symname);
+void            dump_file_header(const IMAGE_FILE_HEADER *);
+void            dump_optional_header(const IMAGE_OPTIONAL_HEADER32 *, UINT);
+void            dump_section(const IMAGE_SECTION_HEADER *);
 
-void            ne_dump( const void *exe, size_t exe_size );
-void            le_dump( const void *exe, size_t exe_size );
+enum FileSig    get_kind_exec(void);
+void            dos_dump( void );
+void            pe_dump( void );
+void            ne_dump( void );
+void            le_dump( void );
+enum FileSig    get_kind_mdmp(void);
 void            mdmp_dump( void );
+enum FileSig    get_kind_lib(void);
+void            lib_dump( void );
+enum FileSig    get_kind_dbg(void);
+void	        dbg_dump( void );
+enum FileSig    get_kind_lnk(void);
+void	        lnk_dump( void );
+enum FileSig    get_kind_emf(void);
+void            emf_dump( void );
+enum FileSig    get_kind_pdb(void);
+void            pdb_dump(void);
+int             codeview_dump_symbols(const void* root, unsigned long size);
+int             codeview_dump_types_from_offsets(const void* table, const DWORD* offsets, unsigned num_types);
+int             codeview_dump_types_from_block(const void* table, unsigned long len);
 
-void dump_stabs(const void* pv_stabs, unsigned szstabs, const char* stabstr, unsigned szstr);
+void            dump_stabs(const void* pv_stabs, unsigned szstabs, const char* stabstr, unsigned szstr);
+void		dump_codeview(unsigned long ptr, unsigned long len);
+void		dump_coff(unsigned long coffbase, unsigned long len, const void* sect_map);
+void		dump_frame_pointer_omission(unsigned long base, unsigned long len);
 
 FILE *open_file (const char *name, const char *ext, const char *mode);
 

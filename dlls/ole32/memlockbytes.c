@@ -43,7 +43,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(ole);
 /******************************************************************************
  * HGLOBALLockBytesImpl definition.
  *
- * This class imlements the ILockBytes inteface and represents a byte array
+ * This class implements the ILockBytes interface and represents a byte array
  * object supported by an HGLOBAL pointer.
  */
 struct HGLOBALLockBytesImpl
@@ -81,11 +81,11 @@ typedef struct HGLOBALLockBytesImpl HGLOBALLockBytesImpl;
 /*
  * Method definition for the HGLOBALLockBytesImpl class.
  */
-HGLOBALLockBytesImpl* HGLOBALLockBytesImpl_Construct(
+static HGLOBALLockBytesImpl* HGLOBALLockBytesImpl_Construct(
     HGLOBAL  hGlobal,
     BOOL     fDeleteOnRelease);
 
-void HGLOBALLockBytesImpl_Destroy(HGLOBALLockBytesImpl* This);
+static void HGLOBALLockBytesImpl_Destroy(HGLOBALLockBytesImpl* This);
 
 static HRESULT WINAPI HGLOBALLockBytesImpl_SetSize( ILockBytes* iface, ULARGE_INTEGER libNewSize );
 
@@ -196,8 +196,8 @@ HRESULT WINAPI GetHGlobalFromILockBytes(ILockBytes* plkbyt, HGLOBAL* phglobal)
  *    fDeleteOnRelease [ I] Flag set to TRUE if the HGLOBAL will be released
  *                          when the IStream object is destroyed.
  */
-HGLOBALLockBytesImpl* HGLOBALLockBytesImpl_Construct(HGLOBAL hGlobal,
-                                                     BOOL    fDeleteOnRelease)
+static HGLOBALLockBytesImpl* HGLOBALLockBytesImpl_Construct(HGLOBAL hGlobal,
+                                                            BOOL    fDeleteOnRelease)
 {
   HGLOBALLockBytesImpl* newLockBytes;
   newLockBytes = HeapAlloc(GetProcessHeap(), 0, sizeof(HGLOBALLockBytesImpl));
@@ -244,7 +244,7 @@ HGLOBALLockBytesImpl* HGLOBALLockBytesImpl_Construct(HGLOBAL hGlobal,
  * HGLOBALLockBytesImpl class. The pointer passed-in to this function will be
  * freed and will not be valid anymore.
  */
-void HGLOBALLockBytesImpl_Destroy(HGLOBALLockBytesImpl* This)
+static void HGLOBALLockBytesImpl_Destroy(HGLOBALLockBytesImpl* This)
 {
   /*
    * Release the HGlobal if the constructor asked for that.
@@ -286,11 +286,8 @@ static HRESULT WINAPI HGLOBALLockBytesImpl_QueryInterface(
   /*
    * Compare the riid with the interface IDs implemented by this object.
    */
-  if (memcmp(&IID_IUnknown, riid, sizeof(IID_IUnknown)) == 0)
-  {
-    *ppvObject = (ILockBytes*)This;
-  }
-  else if (memcmp(&IID_ILockBytes, riid, sizeof(IID_ILockBytes)) == 0)
+  if (IsEqualIID(riid, &IID_IUnknown) ||
+      IsEqualIID(riid, &IID_ILockBytes))
   {
     *ppvObject = (ILockBytes*)This;
   }

@@ -77,12 +77,14 @@ static const Format PCM_Formats[] =
     {1,  8, 11025}, {2,  8, 11025}, {1, 16, 11025}, {2, 16, 11025},
     {1,  8, 22050}, {2,  8, 22050}, {1, 16, 22050}, {2, 16, 22050},
     {1,  8, 44100}, {2,  8, 44100}, {1, 16, 44100}, {2, 16, 44100},
+    {1,  8, 48000}, {2,  8, 48000}, {1, 16, 48000}, {2, 16, 48000},
 };
 
 static const Format MPEG3_Formats[] =
 {
     {1,  0,  8000}, {2,	0,  8000},  {1,  0, 11025}, {2,	 0, 11025},
     {1,  0, 22050}, {2,	0, 22050},  {1,  0, 44100}, {2,	 0, 44100},
+    {1,  0, 48000}, {2,	0, 48000},
 };
 
 #define	NUM_PCM_FORMATS		(sizeof(PCM_Formats) / sizeof(PCM_Formats[0]))
@@ -119,27 +121,6 @@ static	DWORD	MPEG3_GetFormatIndex(LPWAVEFORMATEX wfx)
     }
 
     return 0xFFFFFFFF;
-}
-
-/***********************************************************************
- *           R16
- *
- * Read a 16 bit sample (correctly handles endianess)
- */
-static inline short  R16(const unsigned char* src)
-{
-    return (short)((unsigned short)src[0] | ((unsigned short)src[1] << 8));
-}
-
-/***********************************************************************
- *           W16
- *
- * Write a 16 bit sample (correctly handles endianess)
- */
-static inline void  W16(unsigned char* dst, short s)
-{
-    dst[0] = LOBYTE(s);
-    dst[1] = HIBYTE(s);
 }
 
 static DWORD get_num_buffered_bytes(struct mpstr *mp)
@@ -182,6 +163,9 @@ static void mp3_horse(PACMDRVSTREAMINSTANCE adsi,
 
     buffered_after = get_num_buffered_bytes(&amd->mp);
     TRACE("before %d put %d during %d after %d\n", buffered_before, *nsrc, buffered_during, buffered_after);
+
+    *nsrc -= buffered_after;
+    ClearMP3Buffer(&amd->mp);
 }
 
 /***********************************************************************
@@ -395,6 +379,8 @@ static	LRESULT	MPEG3_FormatSuggest(PACMDRVFORMATSUGGEST adfs)
  */
 static	void	MPEG3_Reset(PACMDRVSTREAMINSTANCE adsi, AcmMpeg3Data* aad)
 {
+    ClearMP3Buffer(&aad->mp);
+    InitMP3(&aad->mp);
 }
 
 /***********************************************************************
@@ -455,20 +441,9 @@ static	LRESULT	MPEG3_StreamOpen(PACMDRVSTREAMINSTANCE adsi)
  */
 static	LRESULT	MPEG3_StreamClose(PACMDRVSTREAMINSTANCE adsi)
 {
-    ExitMP3(&((AcmMpeg3Data*)adsi->dwDriver)->mp);
+    ClearMP3Buffer(&((AcmMpeg3Data*)adsi->dwDriver)->mp);
     HeapFree(GetProcessHeap(), 0, (void*)adsi->dwDriver);
     return MMSYSERR_NOERROR;
-}
-
-/***********************************************************************
- *           MPEG3_round
- *
- */
-static	inline DWORD	MPEG3_round(DWORD a, DWORD b, DWORD c)
-{
-    assert(a && b && c);
-    /* to be sure, always return an entire number of c... */
-    return ((double)a * (double)b + (double)c - 1) / (double)c;
 }
 
 /***********************************************************************

@@ -29,17 +29,38 @@
 #include "lmaccess.h"
 #include "lmapibuf.h"
 #include "lmerr.h"
-#include "winreg.h"
+#include "lmuse.h"
 #include "ntsecapi.h"
-#include "netapi32_misc.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
+#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(netapi32);
 
-static const WCHAR sAdminUserName[] = {'A','d','m','i','n','i','s','t','r','a','t',
-                                'o','r',0};
-static const WCHAR sGuestUserName[] = {'G','u','e','s','t',0};
+/* NOTE: So far, this is implemented to support tests that require user logins,
+ *       but not designed to handle real user databases. Those should probably
+ *       be synced with either the host's user database or with Samba.
+ *
+ * FIXME: The user database should hold all the information the USER_INFO_4 struct
+ * needs, but for the first try, I will just implement the USER_INFO_1 fields.
+ */
+
+struct sam_user
+{
+    struct list entry;
+    WCHAR user_name[LM20_UNLEN+1];
+    WCHAR user_password[PWLEN + 1];
+    DWORD sec_since_passwd_change;
+    DWORD user_priv;
+    LPWSTR home_dir;
+    LPWSTR user_comment;
+    DWORD user_flags;
+    LPWSTR user_logon_script_path;
+};
+
+static struct list user_list = LIST_INIT( user_list );
+
+BOOL NETAPI_IsLocalComputer(LPCWSTR ServerName);
 
 /************************************************************
  *                NETAPI_ValidateServername
@@ -66,35 +87,23 @@ static NET_API_STATUS NETAPI_ValidateServername(LPCWSTR ServerName)
 }
 
 /************************************************************
- *                NETAPI_IsKnownUser
+ *                NETAPI_FindUser
  *
- * Checks whether the user name indicates current user.
+ * Looks for a user in the user database.
+ * Returns a pointer to the entry in the user list when the user
+ * is found, NULL otherwise.
  */
-static BOOL NETAPI_IsKnownUser(LPCWSTR UserName)
+static struct sam_user* NETAPI_FindUser(LPCWSTR UserName)
 {
-    DWORD dwSize = UNLEN + 1;
-    BOOL Result;
-    LPWSTR buf;
+    struct sam_user *user;
 
-    if (!lstrcmpW(UserName, sAdminUserName) ||
-        !lstrcmpW(UserName, sGuestUserName))
-        return TRUE;
-    NetApiBufferAllocate(dwSize * sizeof(WCHAR), (LPVOID *) &buf);
-    Result = GetUserNameW(buf, &dwSize);
-
-    Result = Result && !lstrcmpW(UserName, buf);
-    NetApiBufferFree(buf);
-
-    return Result;
-}
-
-#define NETAPI_ForceKnownUser(UserName, FailureCode) \
-    if (!NETAPI_IsKnownUser(UserName)) \
-    { \
-        FIXME("Can't find information for user %s\n", \
-              debugstr_w(UserName)); \
-        return FailureCode; \
+    LIST_FOR_EACH_ENTRY(user, &user_list, struct sam_user, entry)
+    {
+        if(lstrcmpW(user->user_name, UserName) == 0)
+            return user;
     }
+    return NULL;
+}
 
 /************************************************************
  *                NetUserAdd (NETAPI32.@)
@@ -103,19 +112,70 @@ NET_API_STATUS WINAPI NetUserAdd(LPCWSTR servername,
                   DWORD level, LPBYTE bufptr, LPDWORD parm_err)
 {
     NET_API_STATUS status;
+    struct sam_user * su = NULL;
+
     FIXME("(%s, %d, %p, %p) stub!\n", debugstr_w(servername), level, bufptr, parm_err);
 
-    status = NETAPI_ValidateServername(servername);
-    if (status != NERR_Success)
+    if((status = NETAPI_ValidateServername(servername)) != NERR_Success)
         return status;
-    
-    if ((bufptr != NULL) && (level > 0) && (level <= 4))
+
+    switch(level)
+    {
+    /* Level 3 and 4 are identical for the purposes of NetUserAdd */
+    case 4:
+    case 3:
+        FIXME("Level 3 and 4 not implemented.\n");
+        /* Fall through */
+    case 2:
+        FIXME("Level 2 not implemented.\n");
+        /* Fall through */
+    case 1:
     {
         PUSER_INFO_1 ui = (PUSER_INFO_1) bufptr;
-        TRACE("usri%d_name: %s\n", level, debugstr_w(ui->usri1_name));
-        TRACE("usri%d_password: %s\n", level, debugstr_w(ui->usri1_password));
-        TRACE("usri%d_comment: %s\n", level, debugstr_w(ui->usri1_comment));
+        su = HeapAlloc(GetProcessHeap(), 0, sizeof(struct sam_user));
+        if(!su)
+        {
+            status = NERR_InternalError;
+            break;
+        }
+
+        if(lstrlenW(ui->usri1_name) > LM20_UNLEN)
+        {
+            status = NERR_BadUsername;
+            break;
+        }
+
+        /*FIXME: do other checks for a valid username */
+        lstrcpyW(su->user_name, ui->usri1_name);
+
+        if(lstrlenW(ui->usri1_password) > PWLEN)
+        {
+            /* Always return PasswordTooShort on invalid passwords. */
+            status = NERR_PasswordTooShort;
+            break;
+        }
+        lstrcpyW(su->user_password, ui->usri1_password);
+
+        su->sec_since_passwd_change = ui->usri1_password_age;
+        su->user_priv = ui->usri1_priv;
+        su->user_flags = ui->usri1_flags;
+
+        /*FIXME: set the other LPWSTRs to NULL for now */
+        su->home_dir = NULL;
+        su->user_comment = NULL;
+        su->user_logon_script_path = NULL;
+
+        list_add_head(&user_list, &su->entry);
+        return NERR_Success;
     }
+    default:
+        TRACE("Invalid level %d specified.\n", level);
+        status = ERROR_INVALID_LEVEL;
+        break;
+    }
+
+    HeapFree(GetProcessHeap(), 0, su);
+
     return status;
 }
 
@@ -125,17 +185,24 @@ NET_API_STATUS WINAPI NetUserAdd(LPCWSTR servername,
 NET_API_STATUS WINAPI NetUserDel(LPCWSTR servername, LPCWSTR username)
 {
     NET_API_STATUS status;
-    FIXME("(%s, %s) stub!\n", debugstr_w(servername), debugstr_w(username));
+    struct sam_user *user;
 
-    status = NETAPI_ValidateServername(servername);
-    if (status != NERR_Success)
+    TRACE("(%s, %s)\n", debugstr_w(servername), debugstr_w(username));
+
+    if((status = NETAPI_ValidateServername(servername))!= NERR_Success)
         return status;
 
-    if (!NETAPI_IsKnownUser(username))
+    if ((user = NETAPI_FindUser(username)) == NULL)
         return NERR_UserNotFound;
 
-    /* Delete the user here */
-    return status;
+    list_remove(&user->entry);
+
+    HeapFree(GetProcessHeap(), 0, user->home_dir);
+    HeapFree(GetProcessHeap(), 0, user->user_comment);
+    HeapFree(GetProcessHeap(), 0, user->user_logon_script_path);
+    HeapFree(GetProcessHeap(), 0, user);
+
+    return NERR_Success;
 }
 
 /************************************************************
@@ -151,8 +218,19 @@ NetUserGetInfo(LPCWSTR servername, LPCWSTR username, DWORD level,
     status = NETAPI_ValidateServername(servername);
     if (status != NERR_Success)
         return status;
-    NETAPI_ForceLocalComputer(servername, NERR_InvalidComputer);
-    NETAPI_ForceKnownUser(username, NERR_UserNotFound);
+
+    if(!NETAPI_IsLocalComputer(servername))
+    {
+        FIXME("Only implemented for local computer, but remote server"
+              "%s was requested.\n", debugstr_w(servername));
+        return NERR_InvalidComputer;
+    }
+
+    if(!NETAPI_FindUser(username))
+    {
+        TRACE("User %s is unknown.\n", debugstr_w(username));
+        return NERR_UserNotFound;
+    }
 
     switch (level)
     {
@@ -296,7 +374,7 @@ NetUserGetInfo(LPCWSTR servername, LPCWSTR username, DWORD level,
         return NERR_InternalError;
     }
     default:
-        ERR("Invalid level %d is specified\n", level);
+        TRACE("Invalid level %d is specified\n", level);
         return ERROR_INVALID_LEVEL;
     }
     return NERR_Success;
@@ -310,10 +388,24 @@ NetUserGetLocalGroups(LPCWSTR servername, LPCWSTR username, DWORD level,
                       DWORD flags, LPBYTE* bufptr, DWORD prefmaxlen,
                       LPDWORD entriesread, LPDWORD totalentries)
 {
+    NET_API_STATUS status;
+
     FIXME("(%s, %s, %d, %08x, %p %d, %p, %p) stub!\n",
           debugstr_w(servername), debugstr_w(username), level, flags, bufptr,
           prefmaxlen, entriesread, totalentries);
-    return NERR_InternalError;
+
+    status = NETAPI_ValidateServername(servername);
+    if (status != NERR_Success)
+        return status;
+
+    if (!NETAPI_FindUser(username))
+        return NERR_UserNotFound;
+
+    if (bufptr) *bufptr = NULL;
+    if (entriesread) *entriesread = 0;
+    if (totalentries) *totalentries = 0;
+
+    return NERR_Success;
 }
 
 /************************************************************
@@ -410,10 +502,9 @@ static void ACCESS_QueryGuestDisplayInformation(PNET_DISPLAY_USER *buf, PDWORD p
 }
 
 /************************************************************
- *                NetQueryDisplayInformation  (NETAPI32.@)
  * Copies NET_DISPLAY_USER record.
  */
-static void ACCESS_CopyDisplayUser(PNET_DISPLAY_USER dest, LPWSTR *dest_buf,
+static void ACCESS_CopyDisplayUser(const NET_DISPLAY_USER *dest, LPWSTR *dest_buf,
                             PNET_DISPLAY_USER src)
 {
     LPWSTR str = *dest_buf;
@@ -456,7 +547,14 @@ NetQueryDisplayInformation(
     TRACE("(%s, %d, %d, %d, %d, %p, %p)\n", debugstr_w(ServerName),
           Level, Index, EntriesRequested, PreferredMaximumLength,
           ReturnedEntryCount, SortedBuffer);
-    NETAPI_ForceLocalComputer(ServerName, ERROR_ACCESS_DENIED);
+
+    if(!NETAPI_IsLocalComputer(ServerName))
+    {
+        FIXME("Only implemented on local computer, but requested for "
+              "remote server %s\n", debugstr_w(ServerName));
+        return ERROR_ACCESS_DENIED;
+    }
+
     switch (Level)
     {
     case 1:
@@ -502,7 +600,7 @@ NetQueryDisplayInformation(
         NetApiBufferAllocate(dwSize +
                              admin_size - sizeof(NET_DISPLAY_USER) +
                              guest_size - sizeof(NET_DISPLAY_USER),
-                             (LPVOID *) SortedBuffer);
+                             SortedBuffer);
         inf = (PNET_DISPLAY_USER) *SortedBuffer;
         str = (LPWSTR) ((PBYTE) inf + sizeof(NET_DISPLAY_USER) * records);
         inf->usri1_name = str;
@@ -543,7 +641,7 @@ NetQueryDisplayInformation(
     }
 
     default:
-        ERR("Invalid level %d is specified\n", Level);
+        TRACE("Invalid level %d is specified\n", Level);
         return ERROR_INVALID_LEVEL;
     }
     return NERR_Success;
@@ -680,10 +778,55 @@ NET_API_STATUS WINAPI NetUserModalsGet(
             *pbuffer = NULL;
             return NERR_InternalError;
         default:
-            WARN("Invalid level %d is specified\n", level);
+            TRACE("Invalid level %d is specified\n", level);
             *pbuffer = NULL;
             return ERROR_INVALID_LEVEL;
     }
 
+    return NERR_Success;
+}
+
+/******************************************************************************
+ *                NetUserChangePassword  (NETAPI32.@)
+ * PARAMS
+ *  domainname  [I] Optional. Domain on which the user resides or the logon
+ *                  domain of the current user if NULL.
+ *  username    [I] Optional. Username to change the password for or the name
+ *                  of the current user if NULL.
+ *  oldpassword [I] The user's current password.
+ *  newpassword [I] The password that the user will be changed to using.
+ *
+ * RETURNS
+ *  Success: NERR_Success.
+ *  Failure: NERR_* failure code or win error code.
+ *
+ */
+NET_API_STATUS WINAPI NetUserChangePassword(LPCWSTR domainname, LPCWSTR username,
+    LPCWSTR oldpassword, LPCWSTR newpassword)
+{
+    struct sam_user *user;
+
+    TRACE("(%s, %s, ..., ...)\n", debugstr_w(domainname), debugstr_w(username));
+
+    if(domainname)
+        FIXME("Ignoring domainname %s.\n", debugstr_w(domainname));
+
+    if((user = NETAPI_FindUser(username)) == NULL)
+        return NERR_UserNotFound;
+
+    if(lstrcmpW(user->user_password, oldpassword) != 0)
+        return ERROR_INVALID_PASSWORD;
+
+    if(lstrlenW(newpassword) > PWLEN)
+        return ERROR_PASSWORD_RESTRICTION;
+
+    lstrcpyW(user->user_password, newpassword);
+
+    return NERR_Success;
+}
+
+NET_API_STATUS WINAPI NetUseAdd(LMSTR servername, DWORD level, LPBYTE bufptr, LPDWORD parm_err)
+{
+    FIXME("%s %d %p %p stub\n", debugstr_w(servername), level, bufptr, parm_err);
     return NERR_Success;
 }

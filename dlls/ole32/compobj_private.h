@@ -43,7 +43,9 @@ typedef struct apartment APARTMENT;
 
 DEFINE_OLEGUID( CLSID_DfMarshal, 0x0000030b, 0, 0 );
 DEFINE_OLEGUID( CLSID_PSFactoryBuffer, 0x00000320, 0, 0 );
-DEFINE_OLEGUID( CLSID_InProcFreeMarshaler, 0x0000033a, 0, 0 );
+
+/* signal to stub manager that this is a rem unknown object */
+#define MSHLFLAGSP_REMUNKNOWN   0x80000000
 
 /* Thread-safety Annotation Legend:
  *
@@ -51,7 +53,7 @@ DEFINE_OLEGUID( CLSID_InProcFreeMarshaler, 0x0000033a, 0, 0 );
  *         locking is required.
  * LOCK  - The value is written to only using Interlocked* functions.
  * CS    - The value is read or written to inside a critical section.
- *         The identifier following "CS" is the specific critical setion that
+ *         The identifier following "CS" is the specific critical section that
  *         must be used.
  * MUTEX - The value is read or written to with a mutex held.
  *         The identifier following "MUTEX" is the specific mutex that
@@ -93,6 +95,7 @@ struct stub_manager
     OID               oid;        /* apartment-scoped unique identifier (RO) */
     IUnknown         *object;     /* the object we are managing the stub for (RO) */
     ULONG             next_ipid;  /* currently unused (LOCK) */
+    OXID_INFO         oxid_info;  /* string binding, ipid of rem unknown and other information (RO) */
 
     /* We need to keep a count of the outstanding marshals, so we can enforce the
      * marshalling rules (ie, you can only unmarshal normal marshals once). Note
@@ -112,7 +115,7 @@ struct ifproxy
   STDOBJREF stdobjref;     /* marshal data that represents this object (RO) */
   IID iid;                 /* interface ID (RO) */
   LPRPCPROXYBUFFER proxy;  /* interface proxy (RO) */
-  DWORD refs;              /* imported (public) references (MUTEX parent->remoting_mutex) */
+  ULONG refs;              /* imported (public) references (LOCK) */
   IRpcChannelBuffer *chan; /* channel to object (CS parent->cs) */
 };
 
@@ -121,9 +124,11 @@ struct proxy_manager
 {
   const IMultiQIVtbl *lpVtbl;
   const IMarshalVtbl *lpVtblMarshal;
+  const IClientSecurityVtbl *lpVtblCliSec;
   struct apartment *parent; /* owning apartment (RO) */
   struct list entry;        /* entry in apartment (CS parent->cs) */
   OXID oxid;                /* object exported ID (RO) */
+  OXID_INFO oxid_info;      /* string binding, ipid of rem unknown and other information (RO) */
   OID oid;                  /* object ID (RO) */
   struct list interfaces;   /* imported interfaces (CS cs) */
   LONG refs;                /* proxy reference count (LOCK) */
@@ -135,7 +140,6 @@ struct proxy_manager
   void *dest_context_data;  /* reserved context value (LOCK) */
 };
 
-/* this needs to become a COM object that implements IRemUnknown */
 struct apartment
 {
   struct list entry;
@@ -151,6 +155,9 @@ struct apartment
   BOOL remunk_exported;    /* has the IRemUnknown interface for this apartment been created yet? (CS cs) */
   LONG remoting_started;   /* has the RPC system been started for this apartment? (LOCK) */
   struct list psclsids;    /* list of registered PS CLSIDs (CS cs) */
+  struct list loaded_dlls; /* list of dlls loaded by this apartment (CS cs) */
+  DWORD host_apt_tid;      /* thread ID of apartment hosting objects of differing threading model (CS cs) */
+  HWND host_apt_hwnd;      /* handle to apartment window of host apartment (CS cs) */
 
   /* FIXME: OID's should be given out by RPCSS */
   OID oidc;                /* object ID counter, starts at 1, zero is invalid OID (CS cs) */
@@ -168,6 +175,10 @@ struct oletls
     IErrorInfo       *errorinfo;   /* see errorinfo.c */
     IUnknown         *state;       /* see CoSetState */
     DWORD            inits;        /* number of times CoInitializeEx called */
+    DWORD            ole_inits;    /* number of times OleInitialize called */
+    GUID             causality_id; /* unique identifier for each COM call */
+    LONG             pending_call_count_client; /* number of client calls pending */
+    LONG             pending_call_count_server; /* number of server calls pending */
 };
 
 
@@ -200,7 +211,7 @@ BOOL stub_manager_notify_unmarshal(struct stub_manager *m, const IPID *ipid);
 BOOL stub_manager_is_table_marshaled(struct stub_manager *m, const IPID *ipid);
 void stub_manager_release_marshal_data(struct stub_manager *m, ULONG refs, const IPID *ipid);
 HRESULT ipid_to_stub_manager(const IPID *ipid, APARTMENT **stub_apt, struct stub_manager **stubmgr_ret);
-HRESULT ipid_get_dispatch_params(const IPID *ipid, APARTMENT **stub_apt, IRpcStubBuffer **stub, IRpcChannelBuffer **chan);
+HRESULT ipid_get_dispatch_params(const IPID *ipid, APARTMENT **stub_apt, IRpcStubBuffer **stub, IRpcChannelBuffer **chan, IID *iid, IUnknown **iface);
 HRESULT start_apartment_remote_unknown(void);
 
 HRESULT marshal_object(APARTMENT *apt, STDOBJREF *stdobjref, REFIID riid, IUnknown *obj, MSHLFLAGS mshlflags);
@@ -211,14 +222,19 @@ struct dispatch_params;
 
 void    RPC_StartRemoting(struct apartment *apt);
 HRESULT RPC_CreateClientChannel(const OXID *oxid, const IPID *ipid,
+                                const OXID_INFO *oxid_info,
                                 DWORD dest_context, void *dest_context_data,
                                 IRpcChannelBuffer **chan);
 HRESULT RPC_CreateServerChannel(IRpcChannelBuffer **chan);
 void    RPC_ExecuteCall(struct dispatch_params *params);
 HRESULT RPC_RegisterInterface(REFIID riid);
 void    RPC_UnregisterInterface(REFIID riid);
-void    RPC_StartLocalServer(REFCLSID clsid, IStream *stream);
+HRESULT RPC_StartLocalServer(REFCLSID clsid, IStream *stream, BOOL multi_use, void **registration);
+void    RPC_StopLocalServer(void *registration);
 HRESULT RPC_GetLocalClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv);
+HRESULT RPC_RegisterChannelHook(REFGUID rguid, IChannelHook *hook);
+void    RPC_UnregisterAllChannelHooks(void);
+HRESULT RPC_ResolveOxid(OXID oxid, OXID_INFO *oxid_info);
 
 /* This function initialize the Running Object Table */
 HRESULT WINAPI RunningObjectTableImpl_Initialize(void);
@@ -226,9 +242,8 @@ HRESULT WINAPI RunningObjectTableImpl_Initialize(void);
 /* This function uninitialize the Running Object Table */
 HRESULT WINAPI RunningObjectTableImpl_UnInitialize(void);
 
-/* This function decomposes a String path to a String Table containing all the elements ("\" or "subDirectory" or "Directory" or "FileName") of the path */
-int FileMonikerImpl_DecomposePath(LPCOLESTR str, LPOLESTR** stringTable);
-
+/* Drag and drop */
+void OLEDD_UnInitialize(void);
 
 /* Apartment Functions */
 
@@ -238,13 +253,13 @@ DWORD apartment_addref(struct apartment *apt);
 DWORD apartment_release(struct apartment *apt);
 HRESULT apartment_disconnectproxies(struct apartment *apt);
 void apartment_disconnectobject(struct apartment *apt, void *object);
-static inline HRESULT apartment_getoxid(struct apartment *apt, OXID *oxid)
+static inline HRESULT apartment_getoxid(const struct apartment *apt, OXID *oxid)
 {
     *oxid = apt->oxid;
     return S_OK;
 }
 HRESULT apartment_createwindowifneeded(struct apartment *apt);
-HWND apartment_getwindow(struct apartment *apt);
+HWND apartment_getwindow(const struct apartment *apt);
 void apartment_joinmta(void);
 
 
@@ -253,8 +268,7 @@ void apartment_joinmta(void);
 #define DM_HOSTOBJECT   (WM_USER + 1) /* WPARAM = 0, LPARAM = (struct host_object_params *) */
 
 /*
- * Per-thread values are stored in the TEB on offset 0xF80,
- * see http://www.microsoft.com/msj/1099/bugslayer/bugslayer1099.htm
+ * Per-thread values are stored in the TEB on offset 0xF80
  */
 
 /* will create if necessary */
@@ -271,6 +285,16 @@ static inline APARTMENT* COM_CurrentApt(void)
     return COM_CurrentInfo()->apt;
 }
 
+static inline GUID COM_CurrentCausalityId(void)
+{
+    struct oletls *info = COM_CurrentInfo();
+    if (!info)
+        return GUID_NULL;
+    if (IsEqualGUID(&info->causality_id, &GUID_NULL))
+        CoCreateGuid(&info->causality_id);
+    return info->causality_id;
+}
+
 #define ICOM_THIS_MULTI(impl,field,iface) impl* const This=(impl*)((char*)(iface) - offsetof(impl,field))
 
 /* helpers for debugging */
@@ -280,6 +304,8 @@ static inline APARTMENT* COM_CurrentApt(void)
 extern HINSTANCE OLE32_hInstance; /* FIXME: make static */
 
 #define CHARS_IN_GUID 39 /* including NULL */
+
+#define WINE_CLSCTX_DONT_HOST   0x80000000
 
 /* Exported non-interface Data Advise Holder functions */
 HRESULT DataAdviseHolder_OnConnect(IDataAdviseHolder *iface, IDataObject *pDelegate);

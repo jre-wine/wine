@@ -4,9 +4,9 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = rpcrt4.dll
-IMPORTLIB = librpcrt4.$(IMPLIBEXT)
+IMPORTLIB = rpcrt4
 IMPORTS   = iphlpapi advapi32 kernel32 ntdll
-DELAYIMPORTS = secur32
+DELAYIMPORTS = secur32 user32
 EXTRALIBS = -luuid
 
 C_SRCS = \
@@ -14,10 +14,13 @@ C_SRCS = \
 	cpsf.c \
 	cstub.c \
 	ndr_clientserver.c \
+	ndr_contexthandle.c \
 	ndr_fullpointer.c \
 	ndr_marshall.c \
 	ndr_ole.c \
 	ndr_stubless.c \
+	rpc_assoc.c \
+	rpc_async.c \
 	rpc_binding.c \
 	rpc_epmap.c \
 	rpc_message.c \
@@ -25,6 +28,8 @@ C_SRCS = \
 	rpc_transport.c \
 	rpcrt4_main.c \
 	rpcss_np_client.c
+
+RC_SRCS = version.rc
 
 @MAKE_DLL_RULES@
 

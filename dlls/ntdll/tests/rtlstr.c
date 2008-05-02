@@ -62,6 +62,7 @@ static NTSTATUS (WINAPI *pRtlUpperString)(STRING *, const STRING *);
 static NTSTATUS (WINAPI *pRtlValidateUnicodeString)(long, UNICODE_STRING *);
 static NTSTATUS (WINAPI *pRtlGUIDFromString)(const UNICODE_STRING*,GUID*);
 static NTSTATUS (WINAPI *pRtlStringFromGUID)(const GUID*, UNICODE_STRING*);
+static BOOLEAN (WINAPI *pRtlIsTextUnicode)(LPVOID, INT, INT *);
 
 /*static VOID (WINAPI *pRtlFreeOemString)(PSTRING);*/
 /*static VOID (WINAPI *pRtlFreeUnicodeString)(PUNICODE_STRING);*/
@@ -82,7 +83,6 @@ static NTSTATUS (WINAPI *pRtlStringFromGUID)(const GUID*, UNICODE_STRING*);
 /*static NTSTATUS (WINAPI *pRtlUpcaseUnicodeToOemN)(LPSTR, DWORD, LPDWORD, LPCWSTR, DWORD);*/
 /*static UINT (WINAPI *pRtlOemToUnicodeSize)(const STRING *);*/
 /*static DWORD (WINAPI *pRtlAnsiStringToUnicodeSize)(const STRING *);*/
-/*static DWORD (WINAPI *pRtlIsTextUnicode)(LPVOID, DWORD, DWORD *);*/
 
 
 static WCHAR* AtoW( const char* p )
@@ -130,6 +130,7 @@ static void InitFunctionPtrs(void)
 	pRtlValidateUnicodeString = (void *)GetProcAddress(hntdll, "RtlValidateUnicodeString");
 	pRtlGUIDFromString = (void *)GetProcAddress(hntdll, "RtlGUIDFromString");
 	pRtlStringFromGUID = (void *)GetProcAddress(hntdll, "RtlStringFromGUID");
+	pRtlIsTextUnicode = (void *)GetProcAddress(hntdll, "RtlIsTextUnicode");
     }
 }
 
@@ -246,12 +247,12 @@ static void test_RtlInitUnicodeStringEx(void)
     uni.MaximumLength = 12345;
     uni.Buffer = (void *) 0xdeadbeef;
     pRtlInitUnicodeString(&uni, teststring2);
-    ok(uni.Length == 33920,
+    ok(uni.Length == 33920 /* <= Win2000 */ || uni.Length == 65532 /* >= Win XP */,
        "pRtlInitUnicodeString(&uni, 0) sets Length to %u, expected %u\n",
-       uni.Length, 33920);
-    ok(uni.MaximumLength == 33922,
+       uni.Length, 65532);
+    ok(uni.MaximumLength == 33922 /* <= Win2000 */ || uni.MaximumLength == 65534 /* >= Win XP */,
        "pRtlInitUnicodeString(&uni, 0) sets MaximumLength to %u, expected %u\n",
-       uni.MaximumLength, 33922);
+       uni.MaximumLength, 65534);
     ok(uni.Buffer == teststring2,
        "pRtlInitUnicodeString(&uni, 0) sets Buffer to %p, expected %p\n",
        uni.Buffer, teststring2);
@@ -288,6 +289,8 @@ static void test_RtlInitUnicodeStringEx(void)
     ok(uni.Buffer == NULL,
        "pRtlInitUnicodeString(&uni, 0) sets Buffer to %p, expected %p\n",
        uni.Buffer, NULL);
+
+    free(teststring2);
 }
 
 
@@ -637,7 +640,7 @@ static void test_RtlDowncaseUnicodeString(void)
     UNICODE_STRING result_str;
     UNICODE_STRING lower_str;
 
-    for (i = 0; i <= 1024; i++) {
+    for (i = 0; i < 1024; i++) {
 	ch = (WCHAR) i;
 	if (ch >= 'A' && ch <= 'Z') {
 	    lower_ch = ch - 'A' + 'a';
@@ -678,7 +681,6 @@ static void test_RtlDowncaseUnicodeString(void)
 		case 0x38c: lower_ch = 0x3cc; break;
 		case 0x38e: lower_ch = 0x3cd; break;
 		case 0x38f: lower_ch = 0x3ce; break;
-		case 0x400: lower_ch = 0x0; break;
 		default: lower_ch = ch; break;
 	    } /* switch */
 	}
@@ -1669,6 +1671,56 @@ static void test_RtlIntegerToChar(void)
        int2str[0].value, int2str[0].base, int2str[0].MaximumLength, result, STATUS_ACCESS_VIOLATION);
 }
 
+static void test_RtlIsTextUnicode(void)
+{
+    char ascii[] = "A simple string";
+    WCHAR unicode[] = {'A',' ','U','n','i','c','o','d','e',' ','s','t','r','i','n','g',0};
+    WCHAR *be_unicode;
+    int flags;
+    int i;
+
+    ok(!pRtlIsTextUnicode(ascii, sizeof(ascii), NULL), "ASCII text detected as Unicode\n");
+
+    ok(pRtlIsTextUnicode(unicode, sizeof(unicode), NULL), "Text should be Unicode\n");
+    ok(!pRtlIsTextUnicode(unicode, sizeof(unicode) - 1, NULL), "Text should be Unicode\n");
+
+    flags =  IS_TEXT_UNICODE_UNICODE_MASK;
+    ok(pRtlIsTextUnicode(unicode, sizeof(unicode), &flags), "Text should not pass a Unicode\n");
+    todo_wine
+    ok(flags == (IS_TEXT_UNICODE_STATISTICS | IS_TEXT_UNICODE_CONTROLS),
+       "Expected flags 0x6, obtained %x\n", flags);
+
+    flags =  IS_TEXT_UNICODE_REVERSE_MASK;
+    ok(!pRtlIsTextUnicode(unicode, sizeof(unicode), &flags), "Text should not pass reverse Unicode tests\n");
+    ok(flags == 0, "Expected flags 0, obtained %x\n", flags);
+
+    flags = IS_TEXT_UNICODE_ODD_LENGTH;
+    ok(!pRtlIsTextUnicode(unicode, sizeof(unicode) - 1, &flags), "Odd length test should have passed\n");
+    ok(flags == IS_TEXT_UNICODE_ODD_LENGTH, "Expected flags 0x200, obtained %x\n", flags);
+
+    be_unicode = HeapAlloc(GetProcessHeap(), 0, sizeof(unicode) + sizeof(WCHAR));
+    be_unicode[0] = 0xfffe;
+    for (i = 0; i < sizeof(unicode)/sizeof(unicode[0]); i++)
+    {
+        be_unicode[i + 1] = (unicode[i] >> 8) | ((unicode[i] & 0xff) << 8);
+    }
+    ok(!pRtlIsTextUnicode(be_unicode, sizeof(unicode) + 2, NULL), "Reverse endian should not be Unicode\n");
+    todo_wine ok(!pRtlIsTextUnicode(&be_unicode[1], sizeof(unicode), NULL), "Reverse endian should not be Unicode\n");
+
+    flags = IS_TEXT_UNICODE_REVERSE_MASK;
+    ok(!pRtlIsTextUnicode(&be_unicode[1], sizeof(unicode), &flags), "Reverse endian should be Unicode\n");
+    todo_wine
+    ok(flags == (IS_TEXT_UNICODE_REVERSE_ASCII16 | IS_TEXT_UNICODE_REVERSE_STATISTICS | IS_TEXT_UNICODE_REVERSE_CONTROLS),
+       "Expected flags 0x70, obtained %x\n", flags);
+
+    flags = IS_TEXT_UNICODE_REVERSE_MASK;
+    ok(!pRtlIsTextUnicode(be_unicode, sizeof(unicode) + 2, &flags), "Reverse endian should be Unicode\n");
+    todo_wine
+    ok(flags == (IS_TEXT_UNICODE_REVERSE_CONTROLS | IS_TEXT_UNICODE_REVERSE_SIGNATURE),
+       "Expected flags 0xc0, obtained %x\n", flags);
+    HeapFree(GetProcessHeap(), 0, be_unicode);
+}
+
 static const WCHAR szGuid[] = { '{','0','1','0','2','0','3','0','4','-',
   '0','5','0','6','-'  ,'0','7','0','8','-','0','9','0','A','-',
   '0','B','0','C','0','D','0','E','0','F','0','A','}','\0' };
@@ -1684,14 +1736,14 @@ static void test_RtlGUIDFromString(void)
   UNICODE_STRING str;
   NTSTATUS ret;
 
-  str.Length = str.MaximumLength = (sizeof(szGuid) - 1) / sizeof(WCHAR);
+  str.Length = str.MaximumLength = sizeof(szGuid) - sizeof(WCHAR);
   str.Buffer = (LPWSTR)szGuid;
 
   ret = pRtlGUIDFromString(&str, &guid);
   ok(ret == 0, "expected ret=0, got 0x%0x\n", ret);
   ok(memcmp(&guid, &IID_Endianess, sizeof(guid)) == 0, "Endianess broken\n");
 
-  str.Length = str.MaximumLength = (sizeof(szGuid2) - 1) / sizeof(WCHAR);
+  str.Length = str.MaximumLength = sizeof(szGuid2) - sizeof(WCHAR);
   str.Buffer = (LPWSTR)szGuid2;
 
   ret = pRtlGUIDFromString(&str, &guid);
@@ -1708,7 +1760,7 @@ static void test_RtlStringFromGUID(void)
 
   ret = pRtlStringFromGUID(&IID_Endianess, &str);
   ok(ret == 0, "expected ret=0, got 0x%0x\n", ret);
-  ok(str.Buffer && !lstrcmpW(str.Buffer, szGuid), "Endianess broken\n");
+  ok(str.Buffer && !lstrcmpiW(str.Buffer, szGuid), "Endianess broken\n");
 }
 
 START_TEST(rtlstr)
@@ -1741,6 +1793,8 @@ START_TEST(rtlstr)
         test_RtlGUIDFromString();
     if (pRtlStringFromGUID)
         test_RtlStringFromGUID();
+    if (pRtlIsTextUnicode)
+        test_RtlIsTextUnicode();
     if(0)
     {
 	test_RtlUpcaseUnicodeChar();

@@ -63,6 +63,7 @@ static const struct object_ops handler_ops =
 {
     sizeof(struct handler),   /* size */
     handler_dump,             /* dump */
+    no_get_type,              /* get_type */
     no_add_queue,             /* add_queue */
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
@@ -70,7 +71,10 @@ static const struct object_ops handler_ops =
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
     no_map_access,            /* map_access */
+    default_get_sd,           /* get_sd */
+    default_set_sd,           /* set_sd */
     no_lookup_name,           /* lookup_name */
+    no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
     handler_destroy           /* destroy */
 };
@@ -81,10 +85,12 @@ static const struct fd_ops handler_fd_ops =
 {
     NULL,                     /* get_poll_events */
     handler_poll_event,       /* poll_event */
-    no_flush,                 /* flush */
-    no_get_file_info,         /* get_file_info */
-    no_queue_async,           /* queue_async */
-    no_cancel_async           /* cancel_async */
+    NULL,                     /* flush */
+    NULL,                     /* get_fd_type */
+    NULL,                     /* ioctl */
+    NULL,                     /* queue_async */
+    NULL,                     /* reselect_async */
+    NULL                      /* cancel_async */
 };
 
 static struct handler *handler_sighup;
@@ -112,7 +118,7 @@ static struct handler *create_handler( signal_callback callback )
     handler->pending    = 0;
     handler->callback   = callback;
 
-    if (!(handler->fd = create_anonymous_fd( &handler_fd_ops, fd[0], &handler->obj )))
+    if (!(handler->fd = create_anonymous_fd( &handler_fd_ops, fd[0], &handler->obj, 0 )))
     {
         release_object( handler );
         return NULL;
@@ -184,8 +190,6 @@ static void sigterm_callback(void)
 /* SIGINT callback */
 static void sigint_callback(void)
 {
-    kill_all_processes( NULL, 1 );
-    flush_registry();
     shutdown_master_socket();
 }
 
@@ -222,7 +226,7 @@ static void do_sigchld( int signum )
 /* SIGSEGV handler */
 static void do_sigsegv( int signum )
 {
-    fprintf( stderr, "wineserver crashed, please report this.\n");
+    fprintf( stderr, "wineserver crashed, please enable coredumps (ulimit -c unlimited) and restart.\n");
     abort();
 }
 

@@ -76,27 +76,15 @@ static void	RTFPutCodePageChar(RTF_Info *info, int c);
 
 /* ---------------------------------------------------------------------- */
 
-/*
- * Memory allocation routines
- */
-
-
-/*
- * Return pointer to block of size bytes, or NULL if there's
- * not enough memory available.
- */
-#define RTFAlloc(size) richedit_alloc(size)
-#define RTFReAlloc(ptr, size) richedit_realloc(ptr, size)
-#define RTFFree(ptr) richedit_free(ptr)
 
 /*
  * Saves a string on the heap and returns a pointer to it.
  */
-static inline char *RTFStrSave(char *s)
+static inline char *RTFStrSave(const char *s)
 {
 	char	*p;
 
-	p = RTFAlloc (lstrlenA(s) + 1);
+	p = heap_alloc (lstrlenA(s) + 1);
 	if (p == NULL)
 		return NULL;
 	return lstrcpyA (p, s);
@@ -110,8 +98,6 @@ int _RTFGetChar(RTF_Info *info)
 {
 	int ch;
         ME_InStream *stream = info->stream;
-
-	TRACE("\n");
 
 	if (stream->dwSize <= stream->dwUsed)
 	{
@@ -131,8 +117,6 @@ int _RTFGetChar(RTF_Info *info)
 
 void RTFSetEditStream(RTF_Info *info, ME_InStream *stream)
 {
-	TRACE("\n");
-
         info->stream = stream;
 }
 
@@ -147,14 +131,14 @@ RTFDestroyAttrs(RTF_Info *info)
 	while (info->fontList)
 	{
 		fp = info->fontList->rtfNextFont;
-		RTFFree (info->fontList->rtfFName);
-		RTFFree (info->fontList);
+		heap_free (info->fontList->rtfFName);
+		heap_free (info->fontList);
 		info->fontList = fp;
 	}
 	while (info->colorList)
 	{
 		cp = info->colorList->rtfNextColor;
-		RTFFree (info->colorList);
+		heap_free (info->colorList);
 		info->colorList = cp;
 	}
 	while (info->styleList)
@@ -164,12 +148,12 @@ RTFDestroyAttrs(RTF_Info *info)
 		while (eltList)
 		{
 			ep = eltList->rtfNextSE;
-			RTFFree (eltList->rtfSEText);
-			RTFFree (eltList);
+			heap_free (eltList->rtfSEText);
+			heap_free (eltList);
 			eltList = ep;
 		}
-		RTFFree (info->styleList->rtfSName);
-		RTFFree (info->styleList);
+		heap_free (info->styleList->rtfSName);
+		heap_free (info->styleList);
 		info->styleList = sp;
 	}
 }
@@ -180,11 +164,11 @@ RTFDestroy(RTF_Info *info)
 {
 	if (info->rtfTextBuf)
 	{
-		RTFFree(info->rtfTextBuf);
-		RTFFree(info->pushedTextBuf);
+		heap_free(info->rtfTextBuf);
+		heap_free(info->pushedTextBuf);
 	}
 	RTFDestroyAttrs(info);
-	RTFFree(info->cpOutputBuffer);
+	heap_free(info->cpOutputBuffer);
 }
 
 
@@ -198,19 +182,17 @@ void RTFInit(RTF_Info *info)
 {
 	int	i;
 
-	TRACE("\n");
-
 	if (info->rtfTextBuf == NULL)	/* initialize the text buffers */
 	{
-		info->rtfTextBuf = RTFAlloc (rtfBufSiz);
-		info->pushedTextBuf = RTFAlloc (rtfBufSiz);
+		info->rtfTextBuf = heap_alloc (rtfBufSiz);
+		info->pushedTextBuf = heap_alloc (rtfBufSiz);
 		if (info->rtfTextBuf == NULL || info->pushedTextBuf == NULL)
 			ERR ("Cannot allocate text buffers.\n");
 		info->rtfTextBuf[0] = info->pushedTextBuf[0] = '\0';
 	}
 
-	RTFFree (info->inputName);
-	RTFFree (info->outputName);
+	heap_free (info->inputName);
+	heap_free (info->outputName);
 	info->inputName = info->outputName = NULL;
 
 	for (i = 0; i < rtfMaxClass; i++)
@@ -251,7 +233,7 @@ void RTFInit(RTF_Info *info)
         if (!info->cpOutputBuffer)
 	{
 		info->dwMaxCPOutputCount = 0x1000;
-		info->cpOutputBuffer = RTFAlloc(info->dwMaxCPOutputCount);
+		info->cpOutputBuffer = heap_alloc(info->dwMaxCPOutputCount);
 	}
 }
 
@@ -260,33 +242,29 @@ void RTFInit(RTF_Info *info)
  * to be accurate, only insofar as the calling program makes them so.
  */
 
-void RTFSetInputName(RTF_Info *info, char *name)
+void RTFSetInputName(RTF_Info *info, const char *name)
 {
-	TRACE("\n");
-
 	info->inputName = RTFStrSave (name);
 	if (info->inputName == NULL)
 		ERR ("RTFSetInputName: out of memory\n");
 }
 
 
-char *RTFGetInputName(RTF_Info *info)
+char *RTFGetInputName(const RTF_Info *info)
 {
 	return (info->inputName);
 }
 
 
-void RTFSetOutputName(RTF_Info *info, char *name)
+void RTFSetOutputName(RTF_Info *info, const char *name)
 {
-	TRACE("\n");
-
 	info->outputName = RTFStrSave (name);
 	if (info->outputName == NULL)
 		ERR ("RTFSetOutputName: out of memory\n");
 }
 
 
-char *RTFGetOutputName(RTF_Info *info)
+char *RTFGetOutputName(const RTF_Info *info)
 {
 	return (info->outputName);
 }
@@ -311,7 +289,7 @@ void RTFSetClassCallback(RTF_Info *info, int class, RTFFuncPtr callback)
 }
 
 
-RTFFuncPtr RTFGetClassCallback(RTF_Info *info, int class)
+RTFFuncPtr RTFGetClassCallback(const RTF_Info *info, int class)
 {
 	if (class >= 0 && class < rtfMaxClass)
 		return info->ccb[class];
@@ -330,7 +308,7 @@ void RTFSetDestinationCallback(RTF_Info *info, int dest, RTFFuncPtr callback)
 }
 
 
-RTFFuncPtr RTFGetDestinationCallback(RTF_Info *info, int dest)
+RTFFuncPtr RTFGetDestinationCallback(const RTF_Info *info, int dest)
 {
 	if (dest >= 0 && dest < rtfMaxDestination)
 		return info->dcb[dest];
@@ -367,8 +345,6 @@ void RTFRouteToken(RTF_Info *info)
 {
 	RTFFuncPtr	p;
 
-	TRACE("\n");
-
 	if (info->rtfClass < 0 || info->rtfClass >= rtfMaxClass)	/* watchdog */
 	{
 		ERR( "Unknown class %d: %s (reader malfunction)\n",
@@ -402,8 +378,6 @@ void RTFSkipGroup(RTF_Info *info)
 {
 	int	level = 1;
 
-	TRACE("\n");
-
 	while (RTFGetToken (info) != rtfEOF)
 	{
 		if (info->rtfClass == rtfGroup)
@@ -430,7 +404,6 @@ int RTFGetToken(RTF_Info *info)
 {
 	RTFFuncPtr	p;
 
-	TRACE("\n");
 	/* don't try to return anything once EOF is reached */
 	if (info->rtfClass == rtfEOF) {
 		return rtfEOF;
@@ -462,7 +435,7 @@ void RTFSetReadHook(RTF_Info *info, RTFFuncPtr f)
 }
 
 
-RTFFuncPtr RTFGetReadHook(RTF_Info *info)
+RTFFuncPtr RTFGetReadHook(const RTF_Info *info)
 {
 	return (info->readHook);
 }
@@ -470,8 +443,6 @@ RTFFuncPtr RTFGetReadHook(RTF_Info *info)
 
 void RTFUngetToken(RTF_Info *info)
 {
-	TRACE("\n");
-
 	if (info->pushedClass >= 0)	/* there's already an ungotten token */
 		ERR ("cannot unget two tokens\n");
 	if (info->rtfClass < 0)
@@ -494,8 +465,6 @@ int RTFPeekToken(RTF_Info *info)
 
 static void _RTFGetToken(RTF_Info *info)
 {
-	TRACE("\n");
-
 	if (info->rtfFormat == SF_TEXT)
 	{
 		info->rtfMajor = GetChar (info);
@@ -583,7 +552,7 @@ RTFCharSetToCodePage(RTF_Info *info, int charset)
                         /* FIXME: TranslateCharsetInfo does not work as good as it
                          * should, so let's use it only when all else fails */
                         if (!TranslateCharsetInfo(&n, &csi, TCI_SRCCHARSET))
-				ERR("%s: unknown charset %u\n", __FUNCTION__, charset);
+                                ERR("unknown charset %d\n", charset);
 			else
                                 return csi.ciACP;
 		}
@@ -598,8 +567,6 @@ static void _RTFGetToken2(RTF_Info *info)
 {
 	int	sign;
 	int	c;
-
-	TRACE("\n");
 
 	/* initialize token vars */
 
@@ -770,8 +737,6 @@ static int GetChar(RTF_Info *info)
 	int	c;
 	int	oldBumpLine;
 
-	TRACE("\n");
-
 	if ((c = _RTFGetChar(info)) != EOF)
 	{
 		info->rtfTextBuf[info->rtfTextLen++] = c;
@@ -811,8 +776,6 @@ static int GetChar(RTF_Info *info)
 
 void RTFSetToken(RTF_Info *info, int class, int major, int minor, int param, const char *text)
 {
-	TRACE("\n");
-
 	info->rtfClass = class;
 	info->rtfMajor = major;
 	info->rtfMinor = minor;
@@ -859,8 +822,6 @@ static void ReadFontTbl(RTF_Info *info)
 	char		buf[rtfBufSiz], *bp;
 	int		old = -1;
 	const char	*fn = "ReadFontTbl";
-
-	TRACE("\n");
 
 	for (;;)
 	{
@@ -1041,8 +1002,6 @@ static void ReadColorTbl(RTF_Info *info)
 	const char	*fn = "ReadColorTbl";
         int group_level = 1;
 
-	TRACE("\n");
-
 	for (;;)
 	{
 		RTFGetToken (info);
@@ -1099,8 +1058,6 @@ static void ReadStyleSheet(RTF_Info *info)
 	char		buf[rtfBufSiz], *bp;
 	const char	*fn = "ReadStyleSheet";
 	int             real_style;
-
-	TRACE("\n");
 
 	for (;;)
 	{
@@ -1289,7 +1246,7 @@ static void ReadObjGroup(RTF_Info *info)
  */
 
 
-RTFStyle *RTFGetStyle(RTF_Info *info, int num)
+RTFStyle *RTFGetStyle(const RTF_Info *info, int num)
 {
 	RTFStyle	*s;
 
@@ -1304,7 +1261,7 @@ RTFStyle *RTFGetStyle(RTF_Info *info, int num)
 }
 
 
-RTFFont *RTFGetFont(RTF_Info *info, int num)
+RTFFont *RTFGetFont(const RTF_Info *info, int num)
 {
 	RTFFont	*f;
 
@@ -1319,7 +1276,7 @@ RTFFont *RTFGetFont(RTF_Info *info, int num)
 }
 
 
-RTFColor *RTFGetColor(RTF_Info *info, int num)
+RTFColor *RTFGetColor(const RTF_Info *info, int num)
 {
 	RTFColor	*c;
 
@@ -1345,8 +1302,6 @@ void RTFExpandStyle(RTF_Info *info, int n)
 {
 	RTFStyle	*s;
 	RTFStyleElt	*se;
-
-	TRACE("\n");
 
 	if (n == -1)
 		return;
@@ -2325,7 +2280,7 @@ void LookupInit(void)
 {
 	RTFKey	*rp;
 
-	memset(rtfHashTable, 0, RTF_KEY_COUNT * 2 * sizeof(*rtfHashTable));
+	memset(rtfHashTable, 0, sizeof rtfHashTable);
 	for (rp = rtfKey; rp->rtfKStr != NULL; rp++)
 	{
 		int index;
@@ -2333,9 +2288,9 @@ void LookupInit(void)
 		rp->rtfKHash = Hash (rp->rtfKStr);
 		index = rp->rtfKHash % (RTF_KEY_COUNT * 2);
 		if (!rtfHashTable[index].count)
-			rtfHashTable[index].value = RTFAlloc(sizeof(RTFKey *));
+			rtfHashTable[index].value = heap_alloc(sizeof(RTFKey *));
 		else
-			rtfHashTable[index].value = RTFReAlloc(rtfHashTable[index].value, sizeof(RTFKey *) * (rtfHashTable[index].count + 1));
+			rtfHashTable[index].value = heap_realloc(rtfHashTable[index].value, sizeof(RTFKey *) * (rtfHashTable[index].count + 1));
 		rtfHashTable[index].value[rtfHashTable[index].count++] = rp;
 	}
 }
@@ -2346,7 +2301,7 @@ void LookupCleanup(void)
 
 	for (i=0; i<RTF_KEY_COUNT*2; i++)
 	{
-		RTFFree( rtfHashTable[i].value );
+		heap_free( rtfHashTable[i].value );
 		rtfHashTable[i].value = NULL;
 		rtfHashTable[i].count = 0;
 	}
@@ -2365,7 +2320,6 @@ static void Lookup(RTF_Info *info, char *s)
         RTFHashTableEntry *entry;
         int i;
 
-	TRACE("\n");
 	++s;			/* skip over the leading \ character */
 	hash = Hash (s);
         entry = &rtfHashTable[hash % (RTF_KEY_COUNT * 2)];
@@ -2407,19 +2361,19 @@ static int Hash(const char *s)
  * Token comparison routines
  */
 
-int RTFCheckCM(RTF_Info *info, int class, int major)
+int RTFCheckCM(const RTF_Info *info, int class, int major)
 {
 	return (info->rtfClass == class && info->rtfMajor == major);
 }
 
 
-int RTFCheckCMM(RTF_Info *info, int class, int major, int minor)
+int RTFCheckCMM(const RTF_Info *info, int class, int major, int minor)
 {
 	return (info->rtfClass == class && info->rtfMajor == major && info->rtfMinor == minor);
 }
 
 
-int RTFCheckMM(RTF_Info *info, int major, int minor)
+int RTFCheckMM(const RTF_Info *info, int major, int minor)
 {
 	return (info->rtfMajor == major && info->rtfMinor == minor);
 }
@@ -2498,8 +2452,6 @@ TextClass (RTF_Info *info)
 static void
 ControlClass (RTF_Info *info)
 {
-	TRACE("\n");
-
 	switch (info->rtfMajor)
 	{
         case rtfCharAttr:
@@ -2581,7 +2533,6 @@ CharSet(RTF_Info *info)
 static void
 Destination (RTF_Info *info)
 {
-	TRACE("\n");
 	if (!RTFGetDestinationCallback(info, info->rtfMinor))
 		RTFSkipGroup (info);    
 }
@@ -2614,9 +2565,6 @@ DocAttr(RTF_Info *info)
 
 static void SpecialChar (RTF_Info *info)
 {
-
-	TRACE("\n");
-
 	switch (info->rtfMinor)
 	{
 	case rtfOptDest:
@@ -2701,7 +2649,7 @@ RTFFlushUnicodeOutputBuffer(RTF_Info *info)
 }
 
 static void
-RTFPutUnicodeString(RTF_Info *info, WCHAR *string, int length)
+RTFPutUnicodeString(RTF_Info *info, const WCHAR *string, int length)
 {
         if (info->dwCPOutputCount)
                 RTFFlushCPOutputBuffer(info);
@@ -2722,7 +2670,7 @@ static void
 RTFFlushCPOutputBuffer(RTF_Info *info)
 {
         int bufferMax = info->dwCPOutputCount * 2 * sizeof(WCHAR);
-        WCHAR *buffer = (WCHAR *)RTFAlloc(bufferMax);
+        WCHAR *buffer = heap_alloc(bufferMax);
         int length;
 
         length = MultiByteToWideChar(info->codePage, 0, info->cpOutputBuffer,
@@ -2730,7 +2678,7 @@ RTFFlushCPOutputBuffer(RTF_Info *info)
         info->dwCPOutputCount = 0;
 
         RTFPutUnicodeString(info, buffer, length);
-        RTFFree((char *)buffer);
+        heap_free((char *)buffer);
 }
 
 void
@@ -2759,7 +2707,7 @@ RTFPutCodePageChar(RTF_Info *info, int c)
         if (info->dwCPOutputCount >= info->dwMaxCPOutputCount)
         {
                 info->dwMaxCPOutputCount *= 2;
-                info->cpOutputBuffer = RTFReAlloc(info->cpOutputBuffer, info->dwMaxCPOutputCount);
+                info->cpOutputBuffer = heap_realloc(info->cpOutputBuffer, info->dwMaxCPOutputCount);
         }
         info->cpOutputBuffer[info->dwCPOutputCount++] = c;
 }

@@ -24,6 +24,8 @@
 #include "iccvid_Fr.rc"
 #include "iccvid_Hu.rc"
 #include "iccvid_Ko.rc"
+#include "iccvid_Nl.rc"
 #include "iccvid_No.rc"
 #include "iccvid_Pl.rc"
+#include "iccvid_Sv.rc"
 #include "iccvid_Tr.rc"

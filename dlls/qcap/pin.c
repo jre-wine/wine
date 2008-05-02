@@ -132,7 +132,7 @@ HRESULT WINAPI IPinImpl_QueryId(IPin * iface, LPWSTR * Id)
     TRACE("(%p/%p)->(%p)\n", This, iface, Id);
 
     *Id = CoTaskMemAlloc((strlenW(This->pinInfo.achName) + 1) * sizeof(WCHAR));
-    if (!Id)
+    if (!*Id)
         return E_OUTOFMEMORY;
 
     strcpyW(*Id, This->pinInfo.achName);
@@ -223,7 +223,9 @@ static HRESULT OutputPin_ConnectSpecific(IPin * iface, IPin * pReceivePin, const
     return hr;
 }
 
-HRESULT OutputPin_Init(const PIN_INFO * pPinInfo, ALLOCATOR_PROPERTIES * props, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, OutputPin * pPinImpl)
+HRESULT OutputPin_Init(const PIN_INFO * pPinInfo, const ALLOCATOR_PROPERTIES * props,
+                       LPVOID pUserData, QUERYACCEPTPROC pQueryAccept,
+                       LPCRITICAL_SECTION pCritSec, OutputPin * pPinImpl)
 {
     TRACE("\n");
 
@@ -357,7 +359,7 @@ HRESULT WINAPI OutputPin_Disconnect(IPin * iface)
     return hr;
 }
 
-HRESULT OutputPin_GetDeliveryBuffer(OutputPin * This, IMediaSample ** ppSample, const REFERENCE_TIME * tStart, const REFERENCE_TIME * tStop, DWORD dwFlags)
+HRESULT OutputPin_GetDeliveryBuffer(OutputPin * This, IMediaSample ** ppSample, REFERENCE_TIME * tStart, REFERENCE_TIME * tStop, DWORD dwFlags)
 {
     HRESULT hr;
 
@@ -374,10 +376,10 @@ HRESULT OutputPin_GetDeliveryBuffer(OutputPin * This, IMediaSample ** ppSample, 
             hr = IMemInputPin_GetAllocator(This->pMemInputPin, &pAlloc);
 
             if (SUCCEEDED(hr))
-                hr = IMemAllocator_GetBuffer(pAlloc, ppSample, (REFERENCE_TIME *)tStart, (REFERENCE_TIME *)tStop, dwFlags);
+                hr = IMemAllocator_GetBuffer(pAlloc, ppSample, tStart, tStop, dwFlags);
 
             if (SUCCEEDED(hr))
-                hr = IMediaSample_SetTime(*ppSample, (REFERENCE_TIME *)tStart, (REFERENCE_TIME *)tStop);
+                hr = IMediaSample_SetTime(*ppSample, tStart, tStop);
 
             if (pAlloc)
                 IMemAllocator_Release(pAlloc);

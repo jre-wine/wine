@@ -29,13 +29,25 @@
 #define REGPART_RENAME "\\Rename"
 #define REG_VERSIONCONFLICT "Software\\Microsoft\\VersionConflictManager"
 
+static inline WCHAR *strdupAtoW( const char *str )
+{
+    WCHAR *ret = NULL;
+    if (str)
+    {
+        DWORD len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
+        if ((ret = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+            MultiByteToWideChar( CP_ACP, 0, str, -1, ret, len );
+    }
+    return ret;
+}
+
 /* string substitutions */
 
 struct inf_file;
 extern const WCHAR *DIRID_get_string( int dirid );
-extern unsigned int PARSER_string_substA( struct inf_file *file, const WCHAR *text,
+extern unsigned int PARSER_string_substA( const struct inf_file *file, const WCHAR *text,
                                           char *buffer, unsigned int size );
-extern unsigned int PARSER_string_substW( struct inf_file *file, const WCHAR *text,
+extern unsigned int PARSER_string_substW( const struct inf_file *file, const WCHAR *text,
                                           WCHAR *buffer, unsigned int size );
 extern const WCHAR *PARSER_get_inf_filename( HINF hinf );
 extern WCHAR *PARSER_get_src_root( HINF hinf );

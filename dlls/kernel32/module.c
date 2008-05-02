@@ -36,7 +36,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
-#include "thread.h"
 #include "kernel_private.h"
 
 #include "wine/exception.h"
@@ -501,6 +500,12 @@ BOOL WINAPI GetModuleHandleExW( DWORD flags, LPCWSTR name, HMODULE *module )
 {
     NTSTATUS status = STATUS_SUCCESS;
     HMODULE ret;
+    ULONG magic;
+
+    /* if we are messing with the refcount, grab the loader lock */
+    if ((flags & GET_MODULE_HANDLE_EX_FLAG_PIN) ||
+        !(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
+        LdrLockLoaderLock( 0, NULL, &magic );
 
     if (!name)
     {
@@ -515,21 +520,24 @@ BOOL WINAPI GetModuleHandleExW( DWORD flags, LPCWSTR name, HMODULE *module )
     {
         UNICODE_STRING wstr;
         RtlInitUnicodeString( &wstr, name );
-        status = LdrGetDllHandle( 0, 0, &wstr, &ret );
+        status = LdrGetDllHandle( NULL, 0, &wstr, &ret );
     }
 
-    if (status != STATUS_SUCCESS)
+    if (status == STATUS_SUCCESS)
     {
-        SetLastError( RtlNtStatusToDosError( status ) );
-        return FALSE;
+        if (flags & GET_MODULE_HANDLE_EX_FLAG_PIN)
+            FIXME( "should pin refcount for %p\n", ret );
+        else if (!(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
+            LdrAddRefDll( 0, ret );
     }
+    else SetLastError( RtlNtStatusToDosError( status ) );
 
     if ((flags & GET_MODULE_HANDLE_EX_FLAG_PIN) ||
         !(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
-        FIXME( "should update refcount, flags %x\n", flags );
+        LdrUnlockLoaderLock( 0, magic );
 
     if (module) *module = ret;
-    return TRUE;
+    return (status == STATUS_SUCCESS);
 }
 
 /***********************************************************************
@@ -678,6 +686,24 @@ static const WCHAR *get_dll_system_path(void)
     return cached_path;
 }
 
+/******************************************************************
+ *		get_module_path_end
+ *
+ * Returns the end of the directory component of the module path.
+ */
+static inline const WCHAR *get_module_path_end(const WCHAR *module)
+{
+    const WCHAR *p;
+    const WCHAR *mod_end = module;
+    if (!module) return mod_end;
+
+    if ((p = strrchrW( mod_end, '\\' ))) mod_end = p;
+    if ((p = strrchrW( mod_end, '/' ))) mod_end = p;
+    if (mod_end == module + 2 && module[1] == ':') mod_end++;
+    if (mod_end == module && module[0] && module[1] == ':') mod_end += 2;
+
+    return mod_end;
+}
 
 /******************************************************************
  *		MODULE_get_dll_load_path
@@ -697,16 +723,17 @@ WCHAR *MODULE_get_dll_load_path( LPCWSTR module )
 
     /* adjust length for module name */
 
-    if (!module) module = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
     if (module)
+        mod_end = get_module_path_end( module );
+    /* if module is NULL or doesn't contain a path, fall back to directory
+     * process was loaded from */
+    if (module == mod_end)
     {
-        mod_end = module;
-        if ((p = strrchrW( mod_end, '\\' ))) mod_end = p;
-        if ((p = strrchrW( mod_end, '/' ))) mod_end = p;
-        if (mod_end == module + 2 && module[1] == ':') mod_end++;
-        if (mod_end == module && module[0] && module[1] == ':') mod_end += 2;
-        len += (mod_end - module) + 1;
+        module = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+        mod_end = get_module_path_end( module );
     }
+    len += (mod_end - module) + 1;
+
     len += strlenW( system_path ) + 2;
 
     /* get the PATH variable */
@@ -778,7 +805,7 @@ static BOOL load_library_as_datafile( LPCWSTR name, HMODULE* hmod)
 
     *hmod = 0;
 
-    if (SearchPathW( NULL, (LPCWSTR)name, dotDLL, sizeof(filenameW) / sizeof(filenameW[0]),
+    if (SearchPathW( NULL, name, dotDLL, sizeof(filenameW) / sizeof(filenameW[0]),
                      filenameW, NULL ))
     {
         hFile = CreateFileW( filenameW, GENERIC_READ, FILE_SHARE_READ,
@@ -816,24 +843,37 @@ static HMODULE load_library( const UNICODE_STRING *libname, DWORD flags )
     HMODULE hModule;
     WCHAR *load_path;
 
+    load_path = MODULE_get_dll_load_path( flags & LOAD_WITH_ALTERED_SEARCH_PATH ? libname->Buffer : NULL );
+
     if (flags & LOAD_LIBRARY_AS_DATAFILE)
     {
+        ULONG magic;
+
+        LdrLockLoaderLock( 0, NULL, &magic );
+        if (!(nts = LdrGetDllHandle( load_path, flags, libname, &hModule )))
+        {
+            LdrAddRefDll( 0, hModule );
+            LdrUnlockLoaderLock( 0, magic );
+            goto done;
+        }
+        LdrUnlockLoaderLock( 0, magic );
+
         /* The method in load_library_as_datafile allows searching for the
          * 'native' libraries only
          */
-        if (load_library_as_datafile( libname->Buffer, &hModule )) return hModule;
+        if (load_library_as_datafile( libname->Buffer, &hModule )) goto done;
         flags |= DONT_RESOLVE_DLL_REFERENCES; /* Just in case */
         /* Fallback to normal behaviour */
     }
 
-    load_path = MODULE_get_dll_load_path( flags & LOAD_WITH_ALTERED_SEARCH_PATH ? libname->Buffer : NULL );
     nts = LdrLoadDll( load_path, flags, libname, &hModule );
-    HeapFree( GetProcessHeap(), 0, load_path );
     if (nts != STATUS_SUCCESS)
     {
         hModule = 0;
         SetLastError( RtlNtStatusToDosError( nts ) );
     }
+done:
+    HeapFree( GetProcessHeap(), 0, load_path );
     return hModule;
 }
 

@@ -550,7 +550,7 @@ BOOL WINAPI PathYetAnotherMakeUniqueName(
 /*************************************************************************
  * PathFindOnPath	[SHELL32.145]
  */
-BOOL WINAPI PathFindOnPathAW(LPVOID sFile, LPCVOID sOtherDirs)
+BOOL WINAPI PathFindOnPathAW(LPVOID sFile, LPCVOID *sOtherDirs)
 {
 	if (SHELL_OsIsUnicode())
 	  return PathFindOnPathW(sFile, (LPCWSTR *)sOtherDirs);
@@ -784,7 +784,7 @@ static const WCHAR HistoryW[] = {'H','i','s','t','o','r','y','\0'};
 static const WCHAR Local_AppDataW[] = {'L','o','c','a','l',' ','A','p','p','D','a','t','a','\0'};
 static const WCHAR My_MusicW[] = {'M','y',' ','M','u','s','i','c','\0'};
 static const WCHAR My_PicturesW[] = {'M','y',' ','P','i','c','t','u','r','e','s','\0'};
-static const WCHAR My_VideoW[] = {'M','y',' ','V','i','d','e','o','\0'};
+static const WCHAR My_VideoW[] = {'M','y',' ','V','i','d','e','o','s','\0'};
 static const WCHAR NetHoodW[] = {'N','e','t','H','o','o','d','\0'};
 static const WCHAR PersonalW[] = {'P','e','r','s','o','n','a','l','\0'};
 static const WCHAR PrintHoodW[] = {'P','r','i','n','t','H','o','o','d','\0'};
@@ -1164,7 +1164,7 @@ static HRESULT _SHGetUserShellFolderPath(HKEY rootKey, LPCWSTR userPrefix,
     HRESULT hr;
     WCHAR shellFolderPath[MAX_PATH], userShellFolderPath[MAX_PATH];
     LPCWSTR pShellFolderPath, pUserShellFolderPath;
-    DWORD dwDisp, dwType, dwPathLen = MAX_PATH;
+    DWORD dwType, dwPathLen = MAX_PATH;
     HKEY userShellFolderKey, shellFolderKey;
 
     TRACE("%p,%s,%s,%p\n",rootKey, debugstr_w(userPrefix), debugstr_w(value),
@@ -1187,14 +1187,12 @@ static HRESULT _SHGetUserShellFolderPath(HKEY rootKey, LPCWSTR userPrefix,
         pShellFolderPath = szSHFolders;
     }
 
-    if (RegCreateKeyExW(rootKey, pShellFolderPath, 0, NULL, 0, KEY_ALL_ACCESS,
-     NULL, &shellFolderKey, &dwDisp))
+    if (RegCreateKeyW(rootKey, pShellFolderPath, &shellFolderKey))
     {
         TRACE("Failed to create %s\n", debugstr_w(pShellFolderPath));
         return E_FAIL;
     }
-    if (RegCreateKeyExW(rootKey, pUserShellFolderPath, 0, NULL, 0,
-     KEY_ALL_ACCESS, NULL, &userShellFolderKey, &dwDisp))
+    if (RegCreateKeyW(rootKey, pUserShellFolderPath, &userShellFolderKey))
     {
         TRACE("Failed to create %s\n",
          debugstr_w(pUserShellFolderPath));
@@ -1329,10 +1327,8 @@ static HRESULT _SHGetCurrentVersionPath(DWORD dwFlags, BYTE folder,
     else
     {
         HKEY hKey;
-        DWORD dwDisp;
 
-        if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, szCurrentVersion, 0,
-         NULL, 0, KEY_ALL_ACCESS, NULL, &hKey, &dwDisp))
+        if (RegCreateKeyW(HKEY_LOCAL_MACHINE, szCurrentVersion, &hKey))
             hr = E_FAIL;
         else
         {
@@ -1624,17 +1620,12 @@ end:
  * Most values can be overridden in either
  * HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders
  * or in the same location in HKLM.
- * The registry usage is explained by the following tech note:
- * http://www.microsoft.com/windows2000/techinfo/reskit/en-us/default.asp?url=/windows2000/techinfo/reskit/en-us/regentry/36173.asp
  * The "Shell Folders" registry key was used in NT4 and earlier systems.
  * Beginning with Windows 2000, the "User Shell Folders" key is used, so
  * changes made to it are made to the former key too.  This synchronization is
  * done on-demand: not until someone requests the value of one of these paths
  * (by calling one of the SHGet functions) is the value synchronized.
- * Furthermore, as explained here:
- * http://www.microsoft.com/windows2000/techinfo/reskit/en-us/default.asp?url=/windows2000/techinfo/reskit/en-us/regentry/36276.asp
- * the HKCU paths take precedence over the HKLM paths.
- *
+ * Furthermore, the HKCU paths take precedence over the HKLM paths.
  */
 HRESULT WINAPI SHGetFolderPathW(
 	HWND hwndOwner,    /* [I] owner window */
@@ -1734,12 +1725,12 @@ HRESULT WINAPI SHGetFolderPathW(
     ret = SHCreateDirectoryExW(hwndOwner, szBuildPath, NULL);
     if (ret && ret != ERROR_ALREADY_EXISTS)
     {
-        ERR("Failed to create directory '%s'.\n", debugstr_w(szBuildPath));
+        ERR("Failed to create directory %s.\n", debugstr_w(szBuildPath));
         hr = E_FAIL;
         goto end;
     }
 
-    TRACE("Created missing system directory '%s'\n", debugstr_w(szBuildPath));
+    TRACE("Created missing system directory %s\n", debugstr_w(szBuildPath));
 end:
     TRACE("returning 0x%08x (final path is %s)\n", hr, debugstr_w(szBuildPath));
     return hr;
@@ -1788,20 +1779,18 @@ static HRESULT _SHRegisterFolders(HKEY hRootKey, HANDLE hToken,
     WCHAR path[MAX_PATH];
     HRESULT hr = S_OK;
     HKEY hUserKey = NULL, hKey = NULL;
-    DWORD dwDisp, dwType, dwPathLen;
+    DWORD dwType, dwPathLen;
     LONG ret;
 
     TRACE("%p,%p,%s,%p,%u\n", hRootKey, hToken,
      debugstr_w(szUserShellFolderPath), folders, foldersLen);
 
-    ret = RegCreateKeyExW(hRootKey, szUserShellFolderPath, 0, NULL, 0,
-     KEY_ALL_ACCESS, NULL, &hUserKey, &dwDisp);
+    ret = RegCreateKeyW(hRootKey, szUserShellFolderPath, &hUserKey);
     if (ret)
         hr = HRESULT_FROM_WIN32(ret);
     else
     {
-        ret = RegCreateKeyExW(hRootKey, szShellFolderPath, 0, NULL, 0,
-         KEY_ALL_ACCESS, NULL, &hKey, &dwDisp);
+        ret = RegCreateKeyW(hRootKey, szShellFolderPath, &hKey);
         if (ret)
             hr = HRESULT_FROM_WIN32(ret);
     }
@@ -2040,7 +2029,7 @@ static void _SHCreateSymbolicLinks(void)
             for (i = 0; i < sizeof(aidsMyStuff)/sizeof(aidsMyStuff[0]); i++) {
                 strcpy(szMyStuffTarget, szPersonalTarget);
                 if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])))
-                    mkdir(szMyStuffTarget, S_IRWXU|S_IRWXG|S_IRWXO);
+                    mkdir(szMyStuffTarget, 0777);
             }
         } 
         else
@@ -2061,11 +2050,9 @@ static void _SHCreateSymbolicLinks(void)
         for (i = 0; i < sizeof(aidsMyStuff)/sizeof(aidsMyStuff[0]); i++) {
             strcpy(szMyStuffTarget, szPersonalTarget);
             if (_SHAppendToUnixPath(szMyStuffTarget, MAKEINTRESOURCEW(aidsMyStuff[i])))
-                mkdir(szMyStuffTarget, S_IRWXU|S_IRWXG|S_IRWXO);
+                mkdir(szMyStuffTarget, 0777);
         }
     }
-
-    HeapFree(GetProcessHeap(), 0, pszPersonal);
 
     /* Create symbolic links for 'My Pictures', 'My Video' and 'My Music'. */
     for (i=0; i < sizeof(aidsMyStuff)/sizeof(aidsMyStuff[0]); i++) {
@@ -2094,7 +2081,12 @@ static void _SHCreateSymbolicLinks(void)
     }
 
     /* Last but not least, the Desktop folder */
-    strcpy(szDesktopTarget, pszHome);
+    if (pszHome)
+        strcpy(szDesktopTarget, pszHome);
+    else
+        strcpy(szDesktopTarget, pszPersonal);
+    HeapFree(GetProcessHeap(), 0, pszPersonal);
+
     if (_SHAppendToUnixPath(szDesktopTarget, DesktopW) &&
         !stat(szDesktopTarget, &statFolder) && S_ISDIR(statFolder.st_mode))
     {

@@ -45,7 +45,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 #define MAX_LOCALE_LENGTH 256
 char MSVCRT_current_lc_all[MAX_LOCALE_LENGTH];
 LCID MSVCRT_current_lc_all_lcid;
-int msvcrt_current_lc_all_cp;
+int MSVCRT___lc_codepage;
+int MSVCRT___lc_collate_cp;
+HANDLE MSVCRT___lc_handle[MSVCRT_LC_MAX - MSVCRT_LC_MIN + 1];
 
 /* MT */
 #define LOCK_LOCALE   _mlock(_SETLOCALE_LOCK);
@@ -58,14 +60,13 @@ extern WORD* MSVCRT__pctype;
 
 /* mbctype data modified when the locale changes */
 extern int MSVCRT___mb_cur_max;
-extern unsigned char MSVCRT_mbctype[257];
 
 #define MSVCRT_LEADBYTE  0x8000
 
 /* Friendly country strings & iso codes for synonym support.
  * Based on MS documentation for setlocale().
  */
-static const char* _country_synonyms[] =
+static const char * const _country_synonyms[] =
 {
   "Hong Kong","HK",
   "Hong-Kong","HK",
@@ -275,7 +276,8 @@ static void msvcrt_set_ctype(unsigned int codepage, LCID lcid)
     unsigned char *traverse = (unsigned char *)cp.LeadByte;
 
     memset(MSVCRT_current_ctype, 0, sizeof(MSVCRT__ctype));
-    msvcrt_current_lc_all_cp = codepage;
+    MSVCRT___lc_codepage = codepage;
+    MSVCRT___lc_collate_cp = codepage;
 
     /* Switch ctype macros to MBCS if needed */
     MSVCRT___mb_cur_max = cp.MaxCharSize;
@@ -342,7 +344,8 @@ char* CDECL MSVCRT_setlocale(int category, const char* locale)
   {
     MSVCRT_current_lc_all[0] = 'C';
     MSVCRT_current_lc_all[1] = '\0';
-    msvcrt_current_lc_all_cp = GetACP();
+    MSVCRT___lc_codepage = GetACP();
+    MSVCRT___lc_collate_cp = GetACP();
 
     switch (category) {
     case MSVCRT_LC_ALL:
@@ -353,7 +356,6 @@ char* CDECL MSVCRT_setlocale(int category, const char* locale)
       /* Restore C locale ctype info */
       MSVCRT___mb_cur_max = 1;
       memcpy(MSVCRT_current_ctype, MSVCRT__ctype, sizeof(MSVCRT__ctype));
-      memset(MSVCRT_mbctype, 0, sizeof(MSVCRT_mbctype));
       if (!lc_all) break;
     case MSVCRT_LC_MONETARY:
       if (!lc_all) break;
@@ -484,7 +486,7 @@ MSVCRT_wchar_t* CDECL MSVCRT__wsetlocale(int category, const MSVCRT_wchar_t* loc
  */
 const char* CDECL _Getdays(void)
 {
-  static const char *MSVCRT_days = ":Sun:Sunday:Mon:Monday:Tue:Tuesday:Wed:"
+  static const char MSVCRT_days[] = ":Sun:Sunday:Mon:Monday:Tue:Tuesday:Wed:"
                             "Wednesday:Thu:Thursday:Fri:Friday:Sat:Saturday";
   /* FIXME: Use locale */
   TRACE("(void) semi-stub\n");
@@ -496,7 +498,7 @@ const char* CDECL _Getdays(void)
  */
 const char* CDECL _Getmonths(void)
 {
-  static const char *MSVCRT_months = ":Jan:January:Feb:February:Mar:March:Apr:"
+  static const char MSVCRT_months[] = ":Jan:January:Feb:February:Mar:March:Apr:"
                 "April:May:May:Jun:June:Jul:July:Aug:August:Sep:September:Oct:"
                 "October:Nov:November:Dec:December";
   /* FIXME: Use locale */
@@ -525,54 +527,6 @@ const char* CDECL _Strftime(char *out, unsigned int len, const char *fmt,
   return "";
 }
 
-/* FIXME: MBCP probably belongs in mbcs.c */
-
-/*********************************************************************
- *		_setmbcp (MSVCRT.@)
- */
-int CDECL _setmbcp(int cp)
-{
-  LOCK_LOCALE;
-  if ( cp > _MB_CP_SBCS)
-  {
-    if( msvcrt_current_lc_all_cp != cp)
-      /* FIXME: set ctype behaviour for this cp */
-      msvcrt_current_lc_all_cp = cp;
-  }
-  else if(cp == _MB_CP_ANSI)
-  {
-    msvcrt_current_lc_all_cp = GetACP();
-  }
-  else if(cp == _MB_CP_OEM)
-  {
-    msvcrt_current_lc_all_cp = GetOEMCP();
-  }
-  else if(cp == _MB_CP_LOCALE)
-  {
-    GetLocaleInfoW( GetUserDefaultLCID(), LOCALE_IDEFAULTANSICODEPAGE|LOCALE_RETURN_NUMBER, 
-                    (WCHAR *)&msvcrt_current_lc_all_cp, sizeof(INT)/sizeof(WCHAR) );
-  }
-  else if(cp == _MB_CP_SBCS)
-  {
-    FIXME ("SBCS codepages not implemented\n");
-  }
-  else
-  {
-    FIXME ("Unreal codepages (e.g. %d) not implemented\n", cp);
-  }
-  UNLOCK_LOCALE;
-  TRACE("(%d) -> %d\n", cp, msvcrt_current_lc_all_cp);
-  return 0;
-}
-
-/*********************************************************************
- *		_getmbcp (MSVCRT.@)
- */
-int CDECL _getmbcp(void)
-{
-  return msvcrt_current_lc_all_cp;
-}
-
 /*********************************************************************
  *		__crtLCMapStringA (MSVCRT.@)
  */
@@ -586,6 +540,40 @@ int CDECL __crtLCMapStringA(
    * arguments to wide strings and then calls LCMapStringW
    */
   return LCMapStringA(lcid,mapflags,src,srclen,dst,dstlen);
+}
+
+/*********************************************************************
+ *		__crtCompareStringA (MSVCRT.@)
+ */
+int CDECL __crtCompareStringA( LCID lcid, DWORD flags, const char *src1, int len1,
+                               const char *src2, int len2 )
+{
+    FIXME("(lcid %x, flags %x, %s(%d), %s(%d), partial stub\n",
+          lcid, flags, debugstr_a(src1), len1, debugstr_a(src2), len2 );
+    /* FIXME: probably not entirely right */
+    return CompareStringA( lcid, flags, src1, len1, src2, len2 );
+}
+
+/*********************************************************************
+ *		__crtCompareStringW (MSVCRT.@)
+ */
+int CDECL __crtCompareStringW( LCID lcid, DWORD flags, const MSVCRT_wchar_t *src1, int len1,
+                               const MSVCRT_wchar_t *src2, int len2 )
+{
+    FIXME("(lcid %x, flags %x, %s(%d), %s(%d), partial stub\n",
+          lcid, flags, debugstr_w(src1), len1, debugstr_w(src2), len2 );
+    /* FIXME: probably not entirely right */
+    return CompareStringW( lcid, flags, src1, len1, src2, len2 );
+}
+
+/*********************************************************************
+ *		__crtGetLocaleInfoW (MSVCRT.@)
+ */
+int CDECL __crtGetLocaleInfoW( LCID lcid, LCTYPE type, MSVCRT_wchar_t *buffer, int len )
+{
+    FIXME("(lcid %x, type %x, %p(%d), partial stub\n", lcid, type, buffer, len );
+    /* FIXME: probably not entirely right */
+    return GetLocaleInfoW( lcid, type, buffer, len );
 }
 
 /*********************************************************************

@@ -233,7 +233,7 @@ void CALLBACK MACRO_BackFlush(void)
 
     if (win)
     {
-        int     i;
+        unsigned int i;
 
         for (i = 0; i < win->backIndex; i++)
         {
@@ -523,7 +523,7 @@ void CALLBACK MACRO_Find(void)
 
 void CALLBACK MACRO_Finder(void)
 {
-    WINE_FIXME("()\n");
+    WINHELP_CreateIndexWindow();
 }
 
 void CALLBACK MACRO_FloatingMenu(void)

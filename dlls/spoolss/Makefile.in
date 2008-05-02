@@ -3,7 +3,8 @@ TOPOBJDIR   = ../..
 SRCDIR      = @srcdir@
 VPATH       = @srcdir@
 MODULE      = spoolss.dll
-IMPORTS     = kernel32
+IMPORTLIB   = spoolss
+IMPORTS     = winspool kernel32
 
 C_SRCS  = \
         spoolss_main.c

@@ -23,10 +23,8 @@
 #include <math.h>
 
 #include "windef.h"
-#include "winbase.h"
 #include "wingdi.h"
 #include "psdrv.h"
-#include "winspool.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
@@ -48,6 +46,8 @@ BOOL PSDRV_ExtTextOut( PSDRV_PDEVICE *physDev, INT x, INT y, UINT flags,
 
     TRACE("(x=%d, y=%d, flags=0x%08x, str=%s, count=%d, lpDx=%p)\n", x, y,
 	  flags, debugstr_wn(str, count), count, lpDx);
+
+    if(physDev->job.hJob == 0) return FALSE;
 
     /* write font if not already written */
     PSDRV_SetFont(physDev);

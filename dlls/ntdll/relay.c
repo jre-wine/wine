@@ -27,19 +27,21 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
-#include "excpt.h"
 #include "wine/exception.h"
 #include "ntdll_misc.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(relay);
-WINE_DECLARE_DEBUG_CHANNEL(snoop);
-WINE_DECLARE_DEBUG_CHANNEL(seh);
 
 #ifdef __i386__
+
+WINE_DECLARE_DEBUG_CHANNEL(snoop);
+WINE_DECLARE_DEBUG_CHANNEL(seh);
 
 struct relay_descr  /* descriptor for a module */
 {
@@ -82,14 +84,14 @@ static const WCHAR **debug_from_snoop_includelist;
 static BOOL init_done;
 
 /* compare an ASCII and a Unicode string without depending on the current codepage */
-inline static int strcmpAW( const char *strA, const WCHAR *strW )
+static inline int strcmpAW( const char *strA, const WCHAR *strW )
 {
     while (*strA && ((unsigned char)*strA == *strW)) { strA++; strW++; }
     return (unsigned char)*strA - *strW;
 }
 
 /* compare an ASCII and a Unicode string without depending on the current codepage */
-inline static int strncmpiAW( const char *strA, const WCHAR *strW, int n )
+static inline int strncmpiAW( const char *strA, const WCHAR *strW, int n )
 {
     int ret = 0;
     for ( ; n > 0; n--, strA++, strW++)
@@ -133,6 +135,37 @@ static const WCHAR **build_list( const WCHAR *buffer )
     return ret;
 }
 
+/***********************************************************************
+ *           load_list_value
+ *
+ * Load a function list from a registry value.
+ */
+static const WCHAR **load_list( HKEY hkey, const WCHAR *value )
+{
+    char initial_buffer[4096];
+    char *buffer = initial_buffer;
+    DWORD count;
+    NTSTATUS status;
+    UNICODE_STRING name;
+    const WCHAR **list = NULL;
+
+    RtlInitUnicodeString( &name, value );
+    status = NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, sizeof(buffer), &count );
+    if (status == STATUS_BUFFER_OVERFLOW)
+    {
+        buffer = RtlAllocateHeap( GetProcessHeap(), 0, count );
+        status = NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, count, &count );
+    }
+    if (status == STATUS_SUCCESS)
+    {
+        WCHAR *str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)buffer)->Data;
+        list = build_list( str );
+        if (list) TRACE( "%s = %s\n", debugstr_w(value), debugstr_w(str) );
+    }
+
+    if (buffer != initial_buffer) RtlFreeHeap( GetProcessHeap(), 0, buffer );
+    return list;
+}
 
 /***********************************************************************
  *           init_debug_lists
@@ -143,10 +176,7 @@ static void init_debug_lists(void)
 {
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING name;
-    char buffer[1024];
     HANDLE root, hkey;
-    DWORD count;
-    WCHAR *str;
     static const WCHAR configW[] = {'S','o','f','t','w','a','r','e','\\',
                                     'W','i','n','e','\\',
                                     'D','e','b','u','g',0};
@@ -176,62 +206,14 @@ static void init_debug_lists(void)
     NtClose( root );
     if (!hkey) return;
 
-    str = (WCHAR *)((KEY_VALUE_PARTIAL_INFORMATION *)buffer)->Data;
-    RtlInitUnicodeString( &name, RelayIncludeW );
-    if (!NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, sizeof(buffer), &count ))
-    {
-        TRACE("RelayInclude = %s\n", debugstr_w(str) );
-        debug_relay_includelist = build_list( str );
-    }
-
-    RtlInitUnicodeString( &name, RelayExcludeW );
-    if (!NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, sizeof(buffer), &count ))
-    {
-        TRACE( "RelayExclude = %s\n", debugstr_w(str) );
-        debug_relay_excludelist = build_list( str );
-    }
-
-    RtlInitUnicodeString( &name, SnoopIncludeW );
-    if (!NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, sizeof(buffer), &count ))
-    {
-        TRACE_(snoop)( "SnoopInclude = %s\n", debugstr_w(str) );
-        debug_snoop_includelist = build_list( str );
-    }
-
-    RtlInitUnicodeString( &name, SnoopExcludeW );
-    if (!NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, sizeof(buffer), &count ))
-    {
-        TRACE_(snoop)( "SnoopExclude = %s\n", debugstr_w(str) );
-        debug_snoop_excludelist = build_list( str );
-    }
-
-    RtlInitUnicodeString( &name, RelayFromIncludeW );
-    if (!NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, sizeof(buffer), &count ))
-    {
-        TRACE("RelayFromInclude = %s\n", debugstr_w(str) );
-        debug_from_relay_includelist = build_list( str );
-    }
-
-    RtlInitUnicodeString( &name, RelayFromExcludeW );
-    if (!NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, sizeof(buffer), &count ))
-    {
-        TRACE( "RelayFromExclude = %s\n", debugstr_w(str) );
-        debug_from_relay_excludelist = build_list( str );
-    }
-
-    RtlInitUnicodeString( &name, SnoopFromIncludeW );
-    if (!NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, sizeof(buffer), &count ))
-    {
-        TRACE_(snoop)("SnoopFromInclude = %s\n", debugstr_w(str) );
-        debug_from_snoop_includelist = build_list( str );
-    }
-
-    RtlInitUnicodeString( &name, SnoopFromExcludeW );
-    if (!NtQueryValueKey( hkey, &name, KeyValuePartialInformation, buffer, sizeof(buffer), &count ))
-    {
-        TRACE_(snoop)( "SnoopFromExclude = %s\n", debugstr_w(str) );
-        debug_from_snoop_excludelist = build_list( str );
-    }
+    debug_relay_includelist = load_list( hkey, RelayIncludeW );
+    debug_relay_excludelist = load_list( hkey, RelayExcludeW );
+    debug_snoop_includelist = load_list( hkey, SnoopIncludeW );
+    debug_snoop_excludelist = load_list( hkey, SnoopExcludeW );
+    debug_from_relay_includelist = load_list( hkey, RelayFromIncludeW );
+    debug_from_relay_excludelist = load_list( hkey, RelayFromExcludeW );
+    debug_from_snoop_includelist = load_list( hkey, SnoopFromIncludeW );
+    debug_from_snoop_excludelist = load_list( hkey, SnoopFromExcludeW );
 
     NtClose( hkey );
 }
@@ -242,7 +224,7 @@ static void init_debug_lists(void)
  *
  * Check if a given module and function is in the list.
  */
-static BOOL check_list( const char *module, int ordinal, const char *func, const WCHAR **list )
+static BOOL check_list( const char *module, int ordinal, const char *func, const WCHAR *const *list )
 {
     char ord_str[10];
 
@@ -320,14 +302,14 @@ static BOOL check_from_module( const WCHAR **includelist, const WCHAR **excludel
 /***********************************************************************
  *           RELAY_PrintArgs
  */
-static inline void RELAY_PrintArgs( int *args, int nb_args, unsigned int typemask )
+static inline void RELAY_PrintArgs( const int *args, int nb_args, unsigned int typemask )
 {
     while (nb_args--)
     {
 	if ((typemask & 3) && HIWORD(*args))
         {
 	    if (typemask & 2)
-                DPRINTF( "%08x %s", *args, debugstr_w((LPWSTR)*args) );
+                DPRINTF( "%08x %s", *args, debugstr_w((LPCWSTR)*args) );
             else
                 DPRINTF( "%08x %s", *args, debugstr_a((LPCSTR)*args) );
 	}
@@ -359,7 +341,7 @@ __ASM_GLOBAL_FUNC( call_entry_point,
                    "\tpopl %edi\n"
                    "\tpopl %esi\n"
                    "\tpopl %ebp\n"
-                   "\tret" );
+                   "\tret" )
 
 
 /***********************************************************************
@@ -367,7 +349,7 @@ __ASM_GLOBAL_FUNC( call_entry_point,
  *
  * stack points to the return address, i.e. the first argument is stack[1].
  */
-static LONGLONG WINAPI relay_call_from_32( struct relay_descr *descr, unsigned int idx, int *stack )
+static LONGLONG WINAPI relay_call_from_32( struct relay_descr *descr, unsigned int idx, const int *stack )
 {
     LONGLONG ret;
     WORD ordinal = LOWORD(idx);
@@ -471,7 +453,7 @@ void WINAPI __regs_relay_call_from_32_regs( struct relay_descr *descr, unsigned 
     }
 }
 extern void WINAPI relay_call_from_32_regs(void);
-DEFINE_REGS_ENTRYPOINT( relay_call_from_32_regs, 16, 16 );
+DEFINE_REGS_ENTRYPOINT( relay_call_from_32_regs, 16, 16 )
 
 
 /***********************************************************************
@@ -544,7 +526,7 @@ void RELAY_SetupDLL( HMODULE module )
     /* patch the functions in the export table to point to the relay thunks */
 
     funcs = (DWORD *)((char *)module + exports->AddressOfFunctions);
-    entry_point_rva = (const char *)descr->entry_point_base - (const char *)module;
+    entry_point_rva = descr->entry_point_base - (const char *)module;
     for (i = 0; i < exports->NumberOfFunctions; i++, funcs++)
     {
         if (!descr->entry_point_offsets[i]) continue;   /* not a normal function */
@@ -650,7 +632,7 @@ void SNOOP_SetupDLL(HMODULE hmod)
     if (!init_done) init_debug_lists();
 
     exports = RtlImageDirectoryEntryToData( hmod, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &size32 );
-    if (!exports) return;
+    if (!exports || !exports->NumberOfFunctions) return;
     name = (char *)hmod + exports->Name;
     size = size32;
 
@@ -944,8 +926,8 @@ void WINAPI __regs_SNOOP_Return( CONTEXT86 *context )
 }
 
 /* assembly wrappers that save the context */
-DEFINE_REGS_ENTRYPOINT( SNOOP_Entry, 0, 0 );
-DEFINE_REGS_ENTRYPOINT( SNOOP_Return, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( SNOOP_Entry, 0, 0 )
+DEFINE_REGS_ENTRYPOINT( SNOOP_Return, 0, 0 )
 
 #else  /* __i386__ */
 

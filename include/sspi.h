@@ -54,7 +54,7 @@ typedef struct _SecHandle
 #define SecInvalidateHandle(x) do { \
  ((PSecHandle)(x))->dwLower = ((ULONG_PTR)((INT_PTR)-1)); \
  ((PSecHandle)(x))->dwUpper = ((ULONG_PTR)((INT_PTR)-1)); \
- while (0)
+ } while (0)
 
 #define SecIsValidHandle(x) \
  ((((PSecHandle)(x))->dwLower != ((ULONG_PTR)(INT_PTR)-1)) && \
@@ -63,8 +63,11 @@ typedef struct _SecHandle
 typedef SecHandle CredHandle;
 typedef PSecHandle PCredHandle;
 
+#ifndef __WINE_CTXTHANDLE_DEFINED__
+#define __WINE_CTXTHANDLE_DEFINED__
 typedef SecHandle CtxtHandle;
 typedef PSecHandle PCtxtHandle;
+#endif
 
 typedef struct _SECURITY_INTEGER
 {

@@ -53,13 +53,82 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
-#include "thread.h"
+#include "winternl.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+/* creates a struct security_descriptor and contained information in one contiguous piece of memory */
+NTSTATUS NTDLL_create_struct_sd(PSECURITY_DESCRIPTOR nt_sd, struct security_descriptor **server_sd,
+                                data_size_t *server_sd_len)
+{
+    unsigned int len;
+    PSID owner, group;
+    ACL *dacl, *sacl;
+    BOOLEAN owner_present, group_present, dacl_present, sacl_present;
+    BOOLEAN defaulted;
+    NTSTATUS status;
+    unsigned char *ptr;
+
+    if (!nt_sd)
+    {
+        *server_sd = NULL;
+        *server_sd_len = 0;
+        return STATUS_SUCCESS;
+    }
+
+    len = sizeof(struct security_descriptor);
+
+    status = RtlGetOwnerSecurityDescriptor(nt_sd, &owner, &owner_present);
+    if (status != STATUS_SUCCESS) return status;
+    status = RtlGetGroupSecurityDescriptor(nt_sd, &group, &group_present);
+    if (status != STATUS_SUCCESS) return status;
+    status = RtlGetSaclSecurityDescriptor(nt_sd, &sacl_present, &sacl, &defaulted);
+    if (status != STATUS_SUCCESS) return status;
+    status = RtlGetDaclSecurityDescriptor(nt_sd, &dacl_present, &dacl, &defaulted);
+    if (status != STATUS_SUCCESS) return status;
+
+    if (owner_present)
+        len += RtlLengthSid(owner);
+    if (group_present)
+        len += RtlLengthSid(group);
+    if (sacl_present && sacl)
+        len += sacl->AclSize;
+    if (dacl_present && dacl)
+        len += dacl->AclSize;
+
+    /* fix alignment for the Unicode name that follows the structure */
+    len = (len + sizeof(WCHAR) - 1) & ~(sizeof(WCHAR) - 1);
+    *server_sd = RtlAllocateHeap(GetProcessHeap(), 0, len);
+    if (!*server_sd) return STATUS_NO_MEMORY;
+
+    (*server_sd)->control = ((SECURITY_DESCRIPTOR *)nt_sd)->Control & ~SE_SELF_RELATIVE;
+    (*server_sd)->owner_len = owner_present ? RtlLengthSid(owner) : 0;
+    (*server_sd)->group_len = group_present ? RtlLengthSid(group) : 0;
+    (*server_sd)->sacl_len = (sacl_present && sacl) ? sacl->AclSize : 0;
+    (*server_sd)->dacl_len = (dacl_present && dacl) ? dacl->AclSize : 0;
+
+    ptr = (unsigned char *)(*server_sd + 1);
+    memcpy(ptr, owner, (*server_sd)->owner_len);
+    ptr += (*server_sd)->owner_len;
+    memcpy(ptr, group, (*server_sd)->group_len);
+    ptr += (*server_sd)->group_len;
+    memcpy(ptr, sacl, (*server_sd)->sacl_len);
+    ptr += (*server_sd)->sacl_len;
+    memcpy(ptr, dacl, (*server_sd)->dacl_len);
+
+    *server_sd_len = len;
+
+    return STATUS_SUCCESS;
+}
+
+/* frees a struct security_descriptor allocated by NTDLL_create_struct_sd */
+void NTDLL_free_struct_sd(struct security_descriptor *server_sd)
+{
+    RtlFreeHeap(GetProcessHeap(), 0, server_sd);
+}
 
 /*
  *	Semaphores
@@ -76,23 +145,38 @@ NTSTATUS WINAPI NtCreateSemaphore( OUT PHANDLE SemaphoreHandle,
 {
     DWORD len = attr && attr->ObjectName ? attr->ObjectName->Length : 0;
     NTSTATUS ret;
+    struct object_attributes objattr;
+    struct security_descriptor *sd = NULL;
 
     if (MaximumCount <= 0 || InitialCount < 0 || InitialCount > MaximumCount)
         return STATUS_INVALID_PARAMETER;
     if (len >= MAX_PATH * sizeof(WCHAR)) return STATUS_NAME_TOO_LONG;
 
+    objattr.rootdir =  attr ? attr->RootDirectory : 0;
+    objattr.sd_len = 0;
+    objattr.name_len = len;
+    if (attr)
+    {
+        ret = NTDLL_create_struct_sd( attr->SecurityDescriptor, &sd, &objattr.sd_len );
+        if (ret != STATUS_SUCCESS) return ret;
+    }
+
     SERVER_START_REQ( create_semaphore )
     {
         req->access  = access;
         req->attributes = (attr) ? attr->Attributes : 0;
-        req->rootdir = attr ? attr->RootDirectory : 0;
         req->initial = InitialCount;
         req->max     = MaximumCount;
+        wine_server_add_data( req, &objattr, sizeof(objattr) );
+        if (objattr.sd_len) wine_server_add_data( req, sd, objattr.sd_len );
         if (len) wine_server_add_data( req, attr->ObjectName->Buffer, len );
         ret = wine_server_call( req );
         *SemaphoreHandle = reply->handle;
     }
     SERVER_END_REQ;
+
+    NTDLL_free_struct_sd( sd );
+
     return ret;
 }
 
@@ -172,21 +256,36 @@ NTSTATUS WINAPI NtCreateEvent(
 {
     DWORD len = attr && attr->ObjectName ? attr->ObjectName->Length : 0;
     NTSTATUS ret;
+    struct security_descriptor *sd = NULL;
+    struct object_attributes objattr;
 
     if (len >= MAX_PATH * sizeof(WCHAR)) return STATUS_NAME_TOO_LONG;
+
+    objattr.rootdir = attr ? attr->RootDirectory : 0;
+    objattr.sd_len = 0;
+    objattr.name_len = len;
+    if (attr)
+    {
+        ret = NTDLL_create_struct_sd( attr->SecurityDescriptor, &sd, &objattr.sd_len );
+        if (ret != STATUS_SUCCESS) return ret;
+    }
 
     SERVER_START_REQ( create_event )
     {
         req->access = DesiredAccess;
         req->attributes = (attr) ? attr->Attributes : 0;
-        req->rootdir = attr ? attr->RootDirectory : 0;
         req->manual_reset = ManualReset;
         req->initial_state = InitialState;
+        wine_server_add_data( req, &objattr, sizeof(objattr) );
+        if (objattr.sd_len) wine_server_add_data( req, sd, objattr.sd_len );
         if (len) wine_server_add_data( req, attr->ObjectName->Buffer, len );
         ret = wine_server_call( req );
         *EventHandle = reply->handle;
     }
     SERVER_END_REQ;
+
+    NTDLL_free_struct_sd( sd );
+
     return ret;
 }
 
@@ -297,7 +396,7 @@ NTSTATUS WINAPI NtPulseEvent( HANDLE handle, PULONG PulseCount )
  */
 NTSTATUS WINAPI NtQueryEvent (
 	IN  HANDLE EventHandle,
-	IN  UINT EventInformationClass,
+	IN  EVENT_INFORMATION_CLASS EventInformationClass,
 	OUT PVOID EventInformation,
 	IN  ULONG EventInformationLength,
 	OUT PULONG  ReturnLength)
@@ -319,22 +418,37 @@ NTSTATUS WINAPI NtCreateMutant(OUT HANDLE* MutantHandle,
                                IN const OBJECT_ATTRIBUTES* attr OPTIONAL,
                                IN BOOLEAN InitialOwner)
 {
-    NTSTATUS    status;
-    DWORD       len = attr && attr->ObjectName ? attr->ObjectName->Length : 0;
+    NTSTATUS status;
+    DWORD len = attr && attr->ObjectName ? attr->ObjectName->Length : 0;
+    struct security_descriptor *sd = NULL;
+    struct object_attributes objattr;
 
     if (len >= MAX_PATH * sizeof(WCHAR)) return STATUS_NAME_TOO_LONG;
+
+    objattr.rootdir = attr ? attr->RootDirectory : 0;
+    objattr.sd_len = 0;
+    objattr.name_len = len;
+    if (attr)
+    {
+        status = NTDLL_create_struct_sd( attr->SecurityDescriptor, &sd, &objattr.sd_len );
+        if (status != STATUS_SUCCESS) return status;
+    }
 
     SERVER_START_REQ( create_mutex )
     {
         req->access  = access;
         req->attributes = (attr) ? attr->Attributes : 0;
-        req->rootdir = attr ? attr->RootDirectory : 0;
         req->owned   = InitialOwner;
+        wine_server_add_data( req, &objattr, sizeof(objattr) );
+        if (objattr.sd_len) wine_server_add_data( req, sd, objattr.sd_len );
         if (len) wine_server_add_data( req, attr->ObjectName->Buffer, len );
         status = wine_server_call( req );
         *MutantHandle = reply->handle;
     }
     SERVER_END_REQ;
+
+    NTDLL_free_struct_sd( sd );
+
     return status;
 }
 
@@ -478,16 +592,9 @@ NTSTATUS WINAPI NtSetTimer(IN HANDLE handle,
 
     SERVER_START_REQ( set_timer )
     {
-        if (!when->u.LowPart && !when->u.HighPart)
-        {
-            /* special case to start timeout on now+period without too many calculations */
-            req->expire.sec  = 0;
-            req->expire.usec = 0;
-        }
-        else NTDLL_get_server_abstime( &req->expire, when );
-
         req->handle   = handle;
         req->period   = period;
+        req->expire   = when->QuadPart;
         req->callback = callback;
         req->arg      = callback_arg;
         status = wine_server_call( req );
@@ -564,7 +671,7 @@ NTSTATUS WINAPI NtQueryTimer(
             status = wine_server_call(req);
 
             /* convert server time to absolute NTDLL time */
-            NTDLL_from_server_abstime(&basic_info->RemainingTime, &reply->when);
+            basic_info->RemainingTime.QuadPart = reply->when;
             basic_info->TimerState = reply->signaled;
         }
         SERVER_END_REQ;
@@ -653,51 +760,191 @@ static int wait_reply( void *cookie )
 
 
 /***********************************************************************
- *              call_apcs
+ *              invoke_apc
  *
- * Call outstanding APCs.
+ * Invoke a single APC. Return TRUE if a user APC has been run.
  */
-static void call_apcs( BOOL alertable )
+static BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
 {
-    FARPROC proc;
-    LARGE_INTEGER time;
-    void *arg1, *arg2, *arg3;
+    BOOL user_apc = FALSE;
 
+    memset( result, 0, sizeof(*result) );
+
+    switch (call->type)
+    {
+    case APC_NONE:
+        break;
+    case APC_USER:
+        call->user.func( call->user.args[0], call->user.args[1], call->user.args[2] );
+        user_apc = TRUE;
+        break;
+    case APC_TIMER:
+        call->timer.func( call->timer.arg, (DWORD)call->timer.time, (DWORD)(call->timer.time >> 32) );
+        user_apc = TRUE;
+        break;
+    case APC_ASYNC_IO:
+        result->type = call->type;
+        result->async_io.status = call->async_io.func( call->async_io.user,
+                                                       call->async_io.sb,
+                                                       call->async_io.status,
+                                                       &result->async_io.total );
+        break;
+    case APC_VIRTUAL_ALLOC:
+        result->type = call->type;
+        result->virtual_alloc.addr = call->virtual_alloc.addr;
+        result->virtual_alloc.size = call->virtual_alloc.size;
+        result->virtual_alloc.status = NtAllocateVirtualMemory( NtCurrentProcess(),
+                                                                &result->virtual_alloc.addr,
+                                                                call->virtual_alloc.zero_bits,
+                                                                &result->virtual_alloc.size,
+                                                                call->virtual_alloc.op_type,
+                                                                call->virtual_alloc.prot );
+        break;
+    case APC_VIRTUAL_FREE:
+        result->type = call->type;
+        result->virtual_free.addr = call->virtual_free.addr;
+        result->virtual_free.size = call->virtual_free.size;
+        result->virtual_free.status = NtFreeVirtualMemory( NtCurrentProcess(),
+                                                           &result->virtual_free.addr,
+                                                           &result->virtual_free.size,
+                                                           call->virtual_free.op_type );
+        break;
+    case APC_VIRTUAL_QUERY:
+    {
+        MEMORY_BASIC_INFORMATION info;
+        result->type = call->type;
+        result->virtual_query.status = NtQueryVirtualMemory( NtCurrentProcess(),
+                                                             call->virtual_query.addr,
+                                                             MemoryBasicInformation, &info,
+                                                             sizeof(info), NULL );
+        if (result->virtual_query.status == STATUS_SUCCESS)
+        {
+            result->virtual_query.base       = info.BaseAddress;
+            result->virtual_query.alloc_base = info.AllocationBase;
+            result->virtual_query.size       = info.RegionSize;
+            result->virtual_query.state      = info.State;
+            result->virtual_query.prot       = info.Protect;
+            result->virtual_query.alloc_prot = info.AllocationProtect;
+            result->virtual_query.alloc_type = info.Type;
+        }
+        break;
+    }
+    case APC_VIRTUAL_PROTECT:
+        result->type = call->type;
+        result->virtual_protect.addr = call->virtual_protect.addr;
+        result->virtual_protect.size = call->virtual_protect.size;
+        result->virtual_protect.status = NtProtectVirtualMemory( NtCurrentProcess(),
+                                                                 &result->virtual_protect.addr,
+                                                                 &result->virtual_protect.size,
+                                                                 call->virtual_protect.prot,
+                                                                 &result->virtual_protect.prot );
+        break;
+    case APC_VIRTUAL_FLUSH:
+        result->type = call->type;
+        result->virtual_flush.addr = call->virtual_flush.addr;
+        result->virtual_flush.size = call->virtual_flush.size;
+        result->virtual_flush.status = NtFlushVirtualMemory( NtCurrentProcess(),
+                                                             &result->virtual_flush.addr,
+                                                             &result->virtual_flush.size, 0 );
+        break;
+    case APC_VIRTUAL_LOCK:
+        result->type = call->type;
+        result->virtual_lock.addr = call->virtual_lock.addr;
+        result->virtual_lock.size = call->virtual_lock.size;
+        result->virtual_lock.status = NtLockVirtualMemory( NtCurrentProcess(),
+                                                           &result->virtual_lock.addr,
+                                                           &result->virtual_lock.size, 0 );
+        break;
+    case APC_VIRTUAL_UNLOCK:
+        result->type = call->type;
+        result->virtual_unlock.addr = call->virtual_unlock.addr;
+        result->virtual_unlock.size = call->virtual_unlock.size;
+        result->virtual_unlock.status = NtUnlockVirtualMemory( NtCurrentProcess(),
+                                                               &result->virtual_unlock.addr,
+                                                               &result->virtual_unlock.size, 0 );
+        break;
+    case APC_MAP_VIEW:
+    {
+        LARGE_INTEGER offset;
+        result->type = call->type;
+        result->map_view.addr   = call->map_view.addr;
+        result->map_view.size   = call->map_view.size;
+        offset.QuadPart         = call->map_view.offset;
+        result->map_view.status = NtMapViewOfSection( call->map_view.handle, NtCurrentProcess(),
+                                                      &result->map_view.addr, call->map_view.zero_bits,
+                                                      0, &offset, &result->map_view.size, ViewShare,
+                                                      call->map_view.alloc_type, call->map_view.prot );
+        NtClose( call->map_view.handle );
+        break;
+    }
+    case APC_UNMAP_VIEW:
+        result->type = call->type;
+        result->unmap_view.status = NtUnmapViewOfSection( NtCurrentProcess(), call->unmap_view.addr );
+        break;
+    case APC_CREATE_THREAD:
+    {
+        CLIENT_ID id;
+        result->type = call->type;
+        result->create_thread.status = RtlCreateUserThread( NtCurrentProcess(), NULL,
+                                                            call->create_thread.suspend, NULL,
+                                                            call->create_thread.reserve,
+                                                            call->create_thread.commit,
+                                                            call->create_thread.func,
+                                                            call->create_thread.arg,
+                                                            &result->create_thread.handle, &id );
+        result->create_thread.tid = HandleToULong(id.UniqueThread);
+        break;
+    }
+    default:
+        server_protocol_error( "get_apc_request: bad type %d\n", call->type );
+        break;
+    }
+    return user_apc;
+}
+
+/***********************************************************************
+ *           NTDLL_queue_process_apc
+ */
+NTSTATUS NTDLL_queue_process_apc( HANDLE process, const apc_call_t *call, apc_result_t *result )
+{
     for (;;)
     {
-        int type = APC_NONE;
-        SERVER_START_REQ( get_apc )
+        NTSTATUS ret;
+        HANDLE handle = 0;
+        BOOL self = FALSE;
+
+        SERVER_START_REQ( queue_apc )
         {
-            req->alertable = alertable;
-            if (!wine_server_call( req )) type = reply->type;
-            proc = reply->func;
-            arg1 = reply->arg1;
-            arg2 = reply->arg2;
-            arg3 = reply->arg3;
+            req->process = process;
+            req->call = *call;
+            if (!(ret = wine_server_call( req )))
+            {
+                handle = reply->handle;
+                self = reply->self;
+            }
         }
         SERVER_END_REQ;
+        if (ret != STATUS_SUCCESS) return ret;
 
-        switch (type)
+        if (self)
         {
-        case APC_NONE:
-            return;  /* no more APCs */
-        case APC_USER:
-            proc( arg1, arg2, arg3 );
-            break;
-        case APC_TIMER:
-            /* convert sec/usec to NT time */
-            RtlSecondsSince1970ToTime( (time_t)arg1, &time );
-            time.QuadPart += (DWORD)arg2 * 10;
-            proc( arg3, time.u.LowPart, time.u.HighPart );
-            break;
-        case APC_ASYNC_IO:
-            NtCurrentTeb()->num_async_io--;
-            proc( arg1, (IO_STATUS_BLOCK*)arg2, (ULONG)arg3 );
-            break;
-        default:
-            server_protocol_error( "get_apc_request: bad type %d\n", type );
-            break;
+            invoke_apc( call, result );
         }
+        else
+        {
+            NtWaitForSingleObject( handle, FALSE, NULL );
+
+            SERVER_START_REQ( get_apc_result )
+            {
+                req->handle = handle;
+                if (!(ret = wine_server_call( req ))) *result = reply->result;
+            }
+            SERVER_END_REQ;
+
+            if (!ret && result->type == APC_NONE) continue;  /* APC didn't run, try again */
+            if (ret) NtClose( handle );
+        }
+        return ret;
     }
 }
 
@@ -712,31 +959,49 @@ NTSTATUS NTDLL_wait_for_multiple_objects( UINT count, const HANDLE *handles, UIN
 {
     NTSTATUS ret;
     int cookie;
+    BOOL user_apc = FALSE;
+    obj_handle_t apc_handle = 0;
+    apc_call_t call;
+    apc_result_t result;
+    timeout_t abs_timeout = timeout ? timeout->QuadPart : TIMEOUT_INFINITE;
 
-    if (timeout) flags |= SELECT_TIMEOUT;
+    memset( &result, 0, sizeof(result) );
+
     for (;;)
     {
         SERVER_START_REQ( select )
         {
-            req->flags   = flags;
-            req->cookie  = &cookie;
-            req->signal  = signal_object;
-            NTDLL_get_server_abstime( &req->timeout, timeout );
+            req->flags    = flags;
+            req->cookie   = &cookie;
+            req->signal   = signal_object;
+            req->prev_apc = apc_handle;
+            req->timeout  = abs_timeout;
+            wine_server_add_data( req, &result, sizeof(result) );
             wine_server_add_data( req, handles, count * sizeof(HANDLE) );
             ret = wine_server_call( req );
+            abs_timeout = reply->timeout;
+            apc_handle  = reply->apc_handle;
+            call        = reply->call;
         }
         SERVER_END_REQ;
         if (ret == STATUS_PENDING) ret = wait_reply( &cookie );
         if (ret != STATUS_USER_APC) break;
-        call_apcs( (flags & SELECT_ALERTABLE) != 0 );
-        if (flags & SELECT_ALERTABLE) break;
+        if (invoke_apc( &call, &result ))
+        {
+            /* if we ran a user apc we have to check once more if an object got signaled,
+             * but we don't want to wait */
+            abs_timeout = 0;
+            user_apc = TRUE;
+        }
         signal_object = 0;  /* don't signal it multiple times */
     }
+
+    if (ret == STATUS_TIMEOUT && user_apc) ret = STATUS_USER_APC;
 
     /* A test on Windows 2000 shows that Windows always yields during
        a wait, but a wait that is hit by an event gets a priority
        boost as well.  This seems to model that behavior the closest.  */
-    if (ret == WAIT_TIMEOUT) NtYieldExecution();
+    if (ret == STATUS_TIMEOUT) NtYieldExecution();
 
     return ret;
 }
@@ -803,40 +1068,38 @@ NTSTATUS WINAPI NtYieldExecution(void)
  */
 NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeout )
 {
-    /* if alertable or async I/O in progress, we need to query the server */
-    if (alertable || NtCurrentTeb()->num_async_io)
-    {
-        UINT flags = SELECT_INTERRUPTIBLE;
-        if (alertable) flags |= SELECT_ALERTABLE;
-        return NTDLL_wait_for_multiple_objects( 0, NULL, flags, timeout, 0 );
-    }
+    /* if alertable, we need to query the server */
+    if (alertable)
+        return NTDLL_wait_for_multiple_objects( 0, NULL, SELECT_INTERRUPTIBLE | SELECT_ALERTABLE,
+                                                timeout, 0 );
 
-    if (!timeout)  /* sleep forever */
+    if (!timeout || timeout->QuadPart == TIMEOUT_INFINITE)  /* sleep forever */
     {
         for (;;) select( 0, NULL, NULL, NULL, NULL );
     }
     else
     {
-        abs_time_t when;
+        LARGE_INTEGER now;
+        timeout_t when, diff;
 
-        NTDLL_get_server_abstime( &when, timeout );
+        if ((when = timeout->QuadPart) < 0)
+        {
+            NtQuerySystemTime( &now );
+            when = now.QuadPart - when;
+        }
 
         /* Note that we yield after establishing the desired timeout */
         NtYieldExecution();
+        if (!when) return STATUS_SUCCESS;
 
         for (;;)
         {
             struct timeval tv;
-            gettimeofday( &tv, 0 );
-            tv.tv_sec = when.sec - tv.tv_sec;
-            if ((tv.tv_usec = when.usec - tv.tv_usec) < 0)
-            {
-                tv.tv_usec += 1000000;
-                tv.tv_sec--;
-            }
-            /* if our yield already passed enough time, we're done */
-            if (tv.tv_sec < 0) break;
-
+            NtQuerySystemTime( &now );
+            diff = (when - now.QuadPart + 9) / 10;
+            if (diff <= 0) break;
+            tv.tv_sec  = diff / 1000000;
+            tv.tv_usec = diff % 1000000;
             if (select( 0, NULL, NULL, NULL, &tv ) != -1) break;
         }
     }
@@ -844,30 +1107,223 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
 }
 
 /******************************************************************
- *		NtCreateIoCompletion (NTDLL.@)
+ *              NtCreateIoCompletion (NTDLL.@)
+ *              ZwCreateIoCompletion (NTDLL.@)
+ *
+ * Creates I/O completion object.
+ *
+ * PARAMS
+ *      CompletionPort            [O] created completion object handle will be placed there
+ *      DesiredAccess             [I] desired access to a handle (combination of IO_COMPLETION_*)
+ *      ObjectAttributes          [I] completion object attributes
+ *      NumberOfConcurrentThreads [I] desired number of concurrent active worker threads
+ *
  */
 NTSTATUS WINAPI NtCreateIoCompletion( PHANDLE CompletionPort, ACCESS_MASK DesiredAccess,
                                       POBJECT_ATTRIBUTES ObjectAttributes, ULONG NumberOfConcurrentThreads )
 {
-    FIXME("(%p, %x, %p, %d)\n", CompletionPort, DesiredAccess,
+    NTSTATUS status;
+
+    TRACE("(%p, %x, %p, %d)\n", CompletionPort, DesiredAccess,
           ObjectAttributes, NumberOfConcurrentThreads);
-    return STATUS_NOT_IMPLEMENTED;
+
+    if (!CompletionPort)
+        return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( create_completion )
+    {
+        req->access     = DesiredAccess;
+        req->attributes = ObjectAttributes ? ObjectAttributes->Attributes : 0;
+        req->rootdir    = ObjectAttributes ? ObjectAttributes->RootDirectory : NULL;
+        req->concurrent = NumberOfConcurrentThreads;
+        if (ObjectAttributes && ObjectAttributes->ObjectName)
+            wine_server_add_data( req, ObjectAttributes->ObjectName->Buffer,
+                                       ObjectAttributes->ObjectName->Length );
+        if (!(status = wine_server_call( req )))
+            *CompletionPort = reply->handle;
+    }
+    SERVER_END_REQ;
+    return status;
 }
 
+/******************************************************************
+ *              NtSetIoCompletion (NTDLL.@)
+ *              ZwSetIoCompletion (NTDLL.@)
+ *
+ * Inserts completion message into queue
+ *
+ * PARAMS
+ *      CompletionPort           [I] HANDLE to completion object
+ *      CompletionKey            [I] completion key
+ *      CompletionValue          [I] completion value (usually pointer to OVERLAPPED)
+ *      Status                   [I] operation status
+ *      NumberOfBytesTransferred [I] number of bytes transferred
+ */
 NTSTATUS WINAPI NtSetIoCompletion( HANDLE CompletionPort, ULONG_PTR CompletionKey,
-                                   PIO_STATUS_BLOCK iosb, ULONG NumberOfBytesTransferred,
-                                   ULONG NumberOfBytesToTransfer )
+                                   ULONG_PTR CompletionValue, NTSTATUS Status,
+                                   ULONG NumberOfBytesTransferred )
 {
-    FIXME("(%p, %lx, %p, %d, %d)\n", CompletionPort, CompletionKey,
-          iosb, NumberOfBytesTransferred, NumberOfBytesToTransfer);
-    return STATUS_NOT_IMPLEMENTED;
+    NTSTATUS status;
+
+    TRACE("(%p, %lx, %lx, %x, %d)\n", CompletionPort, CompletionKey,
+          CompletionValue, Status, NumberOfBytesTransferred);
+
+    SERVER_START_REQ( add_completion )
+    {
+        req->handle      = CompletionPort;
+        req->ckey        = CompletionKey;
+        req->cvalue      = CompletionValue;
+        req->status      = Status;
+        req->information = NumberOfBytesTransferred;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
 }
 
+/******************************************************************
+ *              NtRemoveIoCompletion (NTDLL.@)
+ *              ZwRemoveIoCompletion (NTDLL.@)
+ *
+ * (Wait for and) retrieve first completion message from completion object's queue
+ *
+ * PARAMS
+ *      CompletionPort  [I] HANDLE to I/O completion object
+ *      CompletionKey   [O] completion key
+ *      CompletionValue [O] Completion value given in NtSetIoCompletion or in async operation
+ *      iosb            [O] IO_STATUS_BLOCK of completed asynchronous operation
+ *      WaitTime        [I] optional wait time in NTDLL format
+ *
+ */
 NTSTATUS WINAPI NtRemoveIoCompletion( HANDLE CompletionPort, PULONG_PTR CompletionKey,
-                                      PIO_STATUS_BLOCK iosb, PULONG OperationStatus,
+                                      PULONG_PTR CompletionValue, PIO_STATUS_BLOCK iosb,
                                       PLARGE_INTEGER WaitTime )
 {
-    FIXME("(%p, %p, %p, %p, %p)\n", CompletionPort, CompletionKey,
-          iosb, OperationStatus, WaitTime);
-    return STATUS_NOT_IMPLEMENTED;
+    NTSTATUS status;
+
+    TRACE("(%p, %p, %p, %p, %p)\n", CompletionPort, CompletionKey,
+          CompletionValue, iosb, WaitTime);
+
+    for(;;)
+    {
+        SERVER_START_REQ( remove_completion )
+        {
+            req->handle = CompletionPort;
+            if (!(status = wine_server_call( req )))
+            {
+                *CompletionKey    = reply->ckey;
+                *CompletionValue  = reply->cvalue;
+                iosb->Information = reply->information;
+                iosb->u.Status    = reply->status;
+            }
+        }
+        SERVER_END_REQ;
+        if (status != STATUS_PENDING) break;
+
+        status = NtWaitForSingleObject( CompletionPort, FALSE, WaitTime );
+        if (status != WAIT_OBJECT_0) break;
+    }
+    return status;
+}
+
+/******************************************************************
+ *              NtOpenIoCompletion (NTDLL.@)
+ *              ZwOpenIoCompletion (NTDLL.@)
+ *
+ * Opens I/O completion object
+ *
+ * PARAMS
+ *      CompletionPort     [O] completion object handle will be placed there
+ *      DesiredAccess      [I] desired access to a handle (combination of IO_COMPLETION_*)
+ *      ObjectAttributes   [I] completion object name
+ *
+ */
+NTSTATUS WINAPI NtOpenIoCompletion( PHANDLE CompletionPort, ACCESS_MASK DesiredAccess,
+                                    POBJECT_ATTRIBUTES ObjectAttributes )
+{
+    NTSTATUS status;
+
+    TRACE("(%p, 0x%x, %p)\n", CompletionPort, DesiredAccess, ObjectAttributes);
+
+    if (!CompletionPort || !ObjectAttributes || !ObjectAttributes->ObjectName)
+        return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( open_completion )
+    {
+        req->access     = DesiredAccess;
+        req->rootdir    = ObjectAttributes->RootDirectory;
+        wine_server_add_data( req, ObjectAttributes->ObjectName->Buffer,
+                                   ObjectAttributes->ObjectName->Length );
+        if (!(status = wine_server_call( req )))
+            *CompletionPort = reply->handle;
+    }
+    SERVER_END_REQ;
+    return status;
+}
+
+/******************************************************************
+ *              NtQueryIoCompletion (NTDLL.@)
+ *              ZwQueryIoCompletion (NTDLL.@)
+ *
+ * Requests information about given I/O completion object
+ *
+ * PARAMS
+ *      CompletionPort        [I] HANDLE to completion port to request
+ *      InformationClass      [I] information class
+ *      CompletionInformation [O] user-provided buffer for data
+ *      BufferLength          [I] buffer length
+ *      RequiredLength        [O] required buffer length
+ *
+ */
+NTSTATUS WINAPI NtQueryIoCompletion( HANDLE CompletionPort, IO_COMPLETION_INFORMATION_CLASS InformationClass,
+                                     PVOID CompletionInformation, ULONG BufferLength, PULONG RequiredLength )
+{
+    NTSTATUS status;
+
+    TRACE("(%p, %d, %p, 0x%x, %p)\n", CompletionPort, InformationClass, CompletionInformation,
+          BufferLength, RequiredLength);
+
+    if (!CompletionInformation) return STATUS_INVALID_PARAMETER;
+    switch( InformationClass )
+    {
+        case IoCompletionBasicInformation:
+            {
+                ULONG *info = (ULONG *)CompletionInformation;
+
+                if (RequiredLength) *RequiredLength = sizeof(*info);
+                if (BufferLength != sizeof(*info))
+                    status = STATUS_INFO_LENGTH_MISMATCH;
+                else
+                {
+                    SERVER_START_REQ( query_completion )
+                    {
+                        req->handle = CompletionPort;
+                        if (!(status = wine_server_call( req )))
+                            *info = reply->depth;
+                    }
+                    SERVER_END_REQ;
+                }
+            }
+            break;
+        default:
+            status = STATUS_INVALID_PARAMETER;
+            break;
+    }
+    return status;
+}
+
+NTSTATUS NTDLL_AddCompletion( HANDLE hFile, ULONG_PTR CompletionValue, NTSTATUS CompletionStatus, ULONG_PTR Information )
+{
+    NTSTATUS status;
+
+    SERVER_START_REQ( add_fd_completion )
+    {
+        req->handle      = hFile;
+        req->cvalue      = CompletionValue;
+        req->status      = CompletionStatus;
+        req->information = Information;
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    return status;
 }

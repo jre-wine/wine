@@ -19,8 +19,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 #include <windows.h>
 
 #include <stdio.h>
@@ -38,7 +36,7 @@
 static HRESULT (WINAPI *pDirectSoundCaptureCreate)(LPCGUID,LPDIRECTSOUNDCAPTURE*,LPUNKNOWN)=NULL;
 static HRESULT (WINAPI *pDirectSoundCaptureEnumerateA)(LPDSENUMCALLBACKA,LPVOID)=NULL;
 
-const char * get_format_str(WORD format)
+static const char * get_format_str(WORD format)
 {
     static char msg[32];
 #define WAVE_FORMAT(f) case f: return #f
@@ -127,7 +125,7 @@ static void IDirectSoundCapture_test(LPDIRECTSOUNDCAPTURE dsco,
         IDirectSoundCapture_Release(dsc);
 
     if (initialized == FALSE) {
-        /* try unitialized object */
+        /* try uninitialized object */
         rc=IDirectSoundCapture_GetCaps(dsco,0);
         ok(rc==DSERR_UNINITIALIZED||rc==E_INVALIDARG,
            "IDirectSoundCapture_GetCaps(NULL) should have returned "
@@ -605,7 +603,7 @@ static BOOL WINAPI dscenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
 	    trace("  Testing the capture buffer at %s\n", format_string(&wfx));
 	rc=IDirectSoundCapture_CreateCaptureBuffer(dsco,&bufdesc,&dscbo,NULL);
 	ok(((rc==DS_OK)&&(dscbo!=NULL))||(rc==DSERR_BADFORMAT)||
-           ((rc==DSERR_NODRIVER))||(rc==DSERR_ALLOCATED)||(rc==E_INVALIDARG),
+           ((rc==DSERR_NODRIVER))||(rc==DSERR_ALLOCATED)||(rc==E_INVALIDARG)||(rc==E_FAIL),
            "IDirectSoundCapture_CreateCaptureBuffer() failed to create a "
            "%s capture buffer: %s\n",format_string(&wfx),DXGetErrorString8(rc));
 	if (rc==DS_OK) {
@@ -643,11 +641,19 @@ static BOOL WINAPI dscenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
 	        ok(ref==0,"IDirectSoundCaptureBuffer_Release() has %d "
                    "references, should have 0\n",ref);
             }
+        } else if (rc==E_FAIL) {
+            /* WAVE_FORMAT_PCM only allows 8 and 16 bits per sample, so only
+             * report a failure if the bits per sample is 8 or 16
+             */
+            if (wfx.wBitsPerSample == 8 || wfx.wBitsPerSample == 16)
+                ok(FALSE,"Should not fail for 8 or 16 bits per sample\n");
         }
     }
 
     /* try a non PCM format */
-#if 0
+    if (0)
+    {
+    /* FIXME: Why is this commented out? */
     init_format(&wfx,WAVE_FORMAT_MULAW,8000,8,1);
     ZeroMemory(&bufdesc, sizeof(bufdesc));
     bufdesc.dwSize=sizeof(bufdesc);
@@ -666,10 +672,12 @@ static BOOL WINAPI dscenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
 	ok(ref==0,"IDirectSoundCaptureBuffer_Release() has %d references, "
            "should have 0\n",ref);
     }
-#endif
+    }
 
     /* Try an invalid format to test error handling */
-#if 0
+    if (0)
+    {
+    /* FIXME: Remove this test altogether? */
     init_format(&wfx,WAVE_FORMAT_PCM,2000000,16,2);
     ZeroMemory(&bufdesc, sizeof(bufdesc));
     bufdesc.dwSize=sizeof(bufdesc);
@@ -682,7 +690,7 @@ static BOOL WINAPI dscenum_callback(LPGUID lpGuid, LPCSTR lpcstrDescription,
     rc=IDirectSoundCapture_CreateCaptureBuffer(dsco,&bufdesc,&dscbo,NULL);
     ok(rc!=DS_OK,"IDirectSoundCapture_CreateCaptureBuffer() should have failed "
        "at 2 MHz %s\n",DXGetErrorString8(rc));
-#endif
+    }
 
 EXIT:
     if (dsco!=NULL) {
@@ -708,24 +716,27 @@ START_TEST(capture)
 
     CoInitialize(NULL);
 
-    hDsound = LoadLibraryA("dsound.dll");
-    if (!hDsound) {
-        trace("dsound.dll not found\n");
-        return;
-    }
-
-    trace("DLL Version: %s\n", get_file_version("dsound.dll"));
-
-    pDirectSoundCaptureCreate=(void*)GetProcAddress(hDsound,"DirectSoundCaptureCreate");
-    pDirectSoundCaptureEnumerateA=(void*)GetProcAddress(hDsound,"DirectSoundCaptureEnumerateA");
-    if (!pDirectSoundCaptureCreate || !pDirectSoundCaptureEnumerateA)
+    hDsound = LoadLibrary("dsound.dll");
+    if (hDsound)
     {
-        trace("capture test skipped\n");
-        return;
-    }
+        trace("DLL Version: %s\n", get_file_version("dsound.dll"));
 
-    IDirectSoundCapture_tests();
-    capture_tests();
+        pDirectSoundCaptureCreate=(void*)GetProcAddress(hDsound,
+            "DirectSoundCaptureCreate");
+        pDirectSoundCaptureEnumerateA=(void*)GetProcAddress(hDsound,
+            "DirectSoundCaptureEnumerateA");
+        if (pDirectSoundCaptureCreate && pDirectSoundCaptureEnumerateA)
+        {
+            IDirectSoundCapture_tests();
+            capture_tests();
+        }
+        else
+            skip("capture test skipped\n");
+
+        FreeLibrary(hDsound);
+    }
+    else
+        skip("dsound.dll not found!\n");
 
     CoUninitialize();
 }

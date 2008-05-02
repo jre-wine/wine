@@ -446,10 +446,10 @@ static BOOL INT10_FillModeInformation( struct _ModeInfoBlock *mib, WORD mode )
      * 32,34,36 - BYTE: red/green/blue field position 
      * Bit position of the least significant bit of red/green/blue color
      * component.
-     * Both should be only used when memory model is direct color or YUV but
-     * "Imperium Romanum" uses this fields even when memory model is planar.
-     * So always fill this fields when we have a depth bigger then 8, otherwise
-     * set them to zero.
+     * Both should be only used when the memory model is direct color or YUV
+     * but "Imperium Romanum" uses this field even when the memory model is
+     * planar. So always fill this field when we have a depth bigger than 8,
+     * otherwise set them to zero.
      */
     switch (ptr->Depth) {
         case 24:
@@ -927,7 +927,7 @@ static void INT10_HandleVESA( CONTEXT86 *context )
     case 0x05: /* VESA SuperVGA BIOS - CPU VIDEO MEMORY CONTROL */
         /*
          * This subfunction supports only Window A (BL_reg == 0) and
-         * is assumes that window granularity is 64k.
+         * it assumes that window granularity is 64k.
          */
         switch(BH_reg(context)) {
         case 0x00: /* select video memory window */
@@ -1386,7 +1386,7 @@ void WINAPI DOSVM_Int10Handler( CONTEXT86 *context )
         case 0x20: /* ALTERNATE PRTSC */
             FIXME("Install Alternate Print Screen - Not Supported\n");
             break;
-        case 0x30: /* SELECT VERTICAL RESOULTION */
+        case 0x30: /* SELECT VERTICAL RESOLUTION */
             FIXME("Select vertical resolution - not supported\n");
             break;
         case 0x31: /* ENABLE/DISABLE DEFAULT PALETTE LOADING */
@@ -1395,7 +1395,7 @@ void WINAPI DOSVM_Int10Handler( CONTEXT86 *context )
                 (data->VGASettings & 0xf7) |
                 ((AL_reg(context) == 1) << 3);
             break;
-        case 0x32: /* ENABLE/DISABLE VIDEO ADDRERSSING */
+        case 0x32: /* ENABLE/DISABLE VIDEO ADDRESSING */
             FIXME("Video Addressing - Not Supported\n");
             break;
         case 0x33: /* ENABLE/DISABLE GRAY SCALE SUMMING */

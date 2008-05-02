@@ -13,9 +13,11 @@ CTESTS = \
 	font.c \
 	gdiobj.c \
 	generated.c \
+	icm.c \
 	mapping.c \
 	metafile.c \
 	palette.c \
+	path.c \
 	pen.c
 
 @MAKE_TEST_RULES@

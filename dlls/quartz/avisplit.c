@@ -29,7 +29,6 @@
 
 #include "uuids.h"
 #include "aviriff.h"
-#include "mmreg.h"
 #include "vfwmsgs.h"
 #include "amvideo.h"
 
@@ -482,11 +481,6 @@ static HRESULT AVISplitter_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
         ERR("Input stream not a RIFF file\n");
         return E_FAIL;
     }
-    if (list.cb > 1 * 1024 * 1024 * 1024) /* cannot be more than 1Gb in size */
-    {
-        ERR("Input stream violates RIFF spec\n");
-        return E_FAIL;
-    }
     if (list.fccListType != ckidAVI)
     {
         ERR("Input stream not an AVI RIFF file\n");
@@ -582,6 +576,19 @@ static HRESULT AVISplitter_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
     return hr;
 }
 
+static HRESULT AVISplitter_Cleanup(LPVOID iface)
+{
+    AVISplitterImpl *This = (AVISplitterImpl*)iface;
+
+    TRACE("(%p)->()\n", This);
+
+    if (This->pCurrentSample)
+        IMediaSample_Release(This->pCurrentSample);
+    This->pCurrentSample = NULL;
+
+    return S_OK;
+}
+
 HRESULT AVISplitter_create(IUnknown * pUnkOuter, LPVOID * ppv)
 {
     HRESULT hr;
@@ -599,7 +606,7 @@ HRESULT AVISplitter_create(IUnknown * pUnkOuter, LPVOID * ppv)
 
     This->pCurrentSample = NULL;
 
-    hr = Parser_Create(&(This->Parser), &CLSID_AviSplitter, AVISplitter_Sample, AVISplitter_QueryAccept, AVISplitter_InputPin_PreConnect);
+    hr = Parser_Create(&(This->Parser), &CLSID_AviSplitter, AVISplitter_Sample, AVISplitter_QueryAccept, AVISplitter_InputPin_PreConnect, AVISplitter_Cleanup);
 
     if (FAILED(hr))
         return hr;

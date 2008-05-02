@@ -32,17 +32,26 @@
 #define FOF_NORECURSION 0x1000
 #endif
 
-CHAR CURR_DIR[MAX_PATH];
+static CHAR CURR_DIR[MAX_PATH];
+static const WCHAR UNICODE_PATH[] = {'c',':','\\',0x00c4,'\0','\0'};
+    /* "c:\Ä", or "c:\A" with diaeresis */
+    /* Double-null termination needed for pFrom field of SHFILEOPSTRUCT */
 
 static HMODULE hshell32;
 static int (WINAPI *pSHCreateDirectoryExA)(HWND, LPCSTR, LPSECURITY_ATTRIBUTES);
+static int (WINAPI *pSHCreateDirectoryExW)(HWND, LPCWSTR, LPSECURITY_ATTRIBUTES);
+static int (WINAPI *pSHFileOperationW)(LPSHFILEOPSTRUCTW);
+static int (WINAPI *pSHPathPrepareForWriteA)(HWND, IUnknown*, LPCSTR, DWORD);
+static int (WINAPI *pSHPathPrepareForWriteW)(HWND, IUnknown*, LPCWSTR, DWORD);
 
 static void InitFunctionPointers(void)
 {
     hshell32 = GetModuleHandleA("shell32.dll");
-
-    if(hshell32)
-	pSHCreateDirectoryExA = (void*)GetProcAddress(hshell32, "SHCreateDirectoryExA");
+    pSHCreateDirectoryExA = (void*)GetProcAddress(hshell32, "SHCreateDirectoryExA");
+    pSHCreateDirectoryExW = (void*)GetProcAddress(hshell32, "SHCreateDirectoryExW");
+    pSHFileOperationW = (void*)GetProcAddress(hshell32, "SHFileOperationW");
+    pSHPathPrepareForWriteA = (void*)GetProcAddress(hshell32, "SHPathPrepareForWriteA");
+    pSHPathPrepareForWriteW = (void*)GetProcAddress(hshell32, "SHPathPrepareForWriteW");
 }
 
 /* creates a file with the specified name for tests */
@@ -58,9 +67,38 @@ static void createTestFile(const CHAR *name)
     CloseHandle(file);
 }
 
+static void createTestFileW(const WCHAR *name)
+{
+    HANDLE file;
+
+    file = CreateFileW(name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "Failure to open file\n");
+    CloseHandle(file);
+}
+
 static BOOL file_exists(const CHAR *name)
 {
     return GetFileAttributesA(name) != INVALID_FILE_ATTRIBUTES;
+}
+
+static BOOL file_existsW(LPCWSTR name)
+{
+  return GetFileAttributesW(name) != INVALID_FILE_ATTRIBUTES;
+}
+
+static BOOL file_has_content(const CHAR *name, const CHAR *content)
+{
+    CHAR buf[MAX_PATH];
+    HANDLE file;
+    DWORD read;
+
+    file = CreateFileA(name, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+        return FALSE;
+    ReadFile(file, buf, MAX_PATH - 1, &read, NULL);
+    buf[read] = 0;
+    CloseHandle(file);
+    return strcmp(buf, content)==0;
 }
 
 /* initializes the tests */
@@ -92,6 +130,7 @@ static void clean_after_shfo_tests(void)
     DeleteFileA("test2.txt");
     DeleteFileA("test3.txt");
     DeleteFileA("test_5.txt");
+    DeleteFileA("one.txt");
     DeleteFileA("test4.txt\\test1.txt");
     DeleteFileA("test4.txt\\test2.txt");
     DeleteFileA("test4.txt\\test3.txt");
@@ -110,6 +149,87 @@ static void clean_after_shfo_tests(void)
     RemoveDirectoryA("nonexistent\\notreal");
     RemoveDirectoryA("nonexistent");
 }
+
+
+static void test_get_file_info(void)
+{
+    DWORD rc, rc2;
+    SHFILEINFO shfi, shfi2;
+    char notepad[MAX_PATH];
+
+    /* Test some flag combinations that MSDN claims are not allowed,
+     * but which work anyway
+     */
+    shfi.dwAttributes=0xdeadbeef;
+    rc=SHGetFileInfoA("c:\\nonexistent", FILE_ATTRIBUTE_DIRECTORY,
+                      &shfi, sizeof(shfi),
+                      SHGFI_ATTRIBUTES | SHGFI_USEFILEATTRIBUTES);
+    todo_wine ok(rc, "SHGetFileInfoA(c:\\nonexistent | SHGFI_ATTRIBUTES) failed\n");
+    if (rc)
+        ok(shfi.dwAttributes != 0xdeadbeef, "dwFileAttributes is not set\n");
+
+    rc=SHGetFileInfoA("c:\\nonexistent", FILE_ATTRIBUTE_DIRECTORY,
+                      &shfi, sizeof(shfi),
+                      SHGFI_EXETYPE | SHGFI_USEFILEATTRIBUTES);
+    todo_wine ok(rc == 1, "SHGetFileInfoA(c:\\nonexistent | SHGFI_EXETYPE) returned %d\n", rc);
+
+    /* Test SHGFI_USEFILEATTRIBUTES support */
+    strcpy(shfi.szDisplayName, "dummy");
+    shfi.iIcon=0xdeadbeef;
+    rc=SHGetFileInfoA("c:\\nonexistent", FILE_ATTRIBUTE_DIRECTORY,
+                      &shfi, sizeof(shfi),
+                      SHGFI_ICONLOCATION | SHGFI_USEFILEATTRIBUTES);
+    ok(rc, "SHGetFileInfoA(c:\\nonexistent) failed\n");
+    if (rc)
+    {
+        ok(strcpy(shfi.szDisplayName, "dummy") != 0, "SHGetFileInfoA(c:\\nonexistent) displayname is not set\n");
+        ok(shfi.iIcon != 0xdeadbeef, "SHGetFileInfoA(c:\\nonexistent) iIcon is not set\n");
+    }
+
+    /* Wine does not have a default icon for text files, and Windows 98 fails
+     * if we give it an empty executable. So use notepad.exe as the test
+     */
+    if (SearchPath(NULL, "notepad.exe", NULL, sizeof(notepad), notepad, NULL))
+    {
+        strcpy(shfi.szDisplayName, "dummy");
+        shfi.iIcon=0xdeadbeef;
+        rc=SHGetFileInfoA(notepad, GetFileAttributes(notepad),
+                          &shfi, sizeof(shfi),
+                          SHGFI_ICONLOCATION | SHGFI_USEFILEATTRIBUTES);
+        ok(rc, "SHGetFileInfoA(%s, SHGFI_USEFILEATTRIBUTES) failed\n", notepad);
+        strcpy(shfi2.szDisplayName, "dummy");
+        shfi2.iIcon=0xdeadbeef;
+        rc2=SHGetFileInfoA(notepad, 0,
+                           &shfi2, sizeof(shfi2),
+                           SHGFI_ICONLOCATION);
+        ok(rc2, "SHGetFileInfoA(%s) failed\n", notepad);
+        if (rc && rc2)
+        {
+            ok(lstrcmpi(shfi2.szDisplayName, shfi.szDisplayName) == 0, "wrong display name %s != %s\n", shfi.szDisplayName, shfi2.szDisplayName);
+            ok(shfi2.iIcon == shfi.iIcon, "wrong icon index %d != %d\n", shfi.iIcon, shfi2.iIcon);
+        }
+    }
+
+    /* with a directory now */
+    strcpy(shfi.szDisplayName, "dummy");
+    shfi.iIcon=0xdeadbeef;
+    rc=SHGetFileInfoA("test4.txt", GetFileAttributes("test4.txt"),
+                      &shfi, sizeof(shfi),
+                      SHGFI_ICONLOCATION | SHGFI_USEFILEATTRIBUTES);
+    ok(rc, "SHGetFileInfoA(test4.txt/, SHGFI_USEFILEATTRIBUTES) failed\n");
+    strcpy(shfi2.szDisplayName, "dummy");
+    shfi2.iIcon=0xdeadbeef;
+    rc2=SHGetFileInfoA("test4.txt", 0,
+                      &shfi2, sizeof(shfi2),
+                      SHGFI_ICONLOCATION);
+    ok(rc2, "SHGetFileInfoA(test4.txt/) failed\n");
+    if (rc && rc2)
+    {
+        ok(lstrcmpi(shfi2.szDisplayName, shfi.szDisplayName) == 0, "wrong display name %s != %s\n", shfi.szDisplayName, shfi2.szDisplayName);
+        ok(shfi2.iIcon == shfi.iIcon, "wrong icon index %d != %d\n", shfi.iIcon, shfi2.iIcon);
+    }
+}
+
 
 /*
  puts into the specified buffer file names with current directory.
@@ -138,7 +258,7 @@ static void test_delete(void)
 {
     SHFILEOPSTRUCTA shfo;
     DWORD ret;
-    CHAR buf[MAX_PATH];
+    CHAR buf[sizeof(CURR_DIR)+sizeof("/test?.txt")+1];
 
     sprintf(buf, "%s\\%s", CURR_DIR, "test?.txt");
     buf[strlen(buf) + 1] = '\0';
@@ -151,18 +271,18 @@ static void test_delete(void)
     shfo.hNameMappings = NULL;
     shfo.lpszProgressTitle = NULL;
 
-    ok(!SHFileOperationA(&shfo), "Deletion was successful\n");
-    ok(file_exists("test4.txt"), "Directory should not be removed\n");
-    ok(!file_exists("test1.txt"), "File should be removed\n");
+    ok(!SHFileOperationA(&shfo), "Deletion was not successful\n");
+    ok(file_exists("test4.txt"), "Directory should not have been removed\n");
+    ok(!file_exists("test1.txt"), "File should have been removed\n");
 
     ret = SHFileOperationA(&shfo);
     ok(!ret, "Directory exists, but is not removed, ret=%d\n", ret);
-    ok(file_exists("test4.txt"), "Directory should not be removed\n");
+    ok(file_exists("test4.txt"), "Directory should not have been removed\n");
 
     shfo.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
 
-    ok(!SHFileOperationA(&shfo), "Directory removed\n");
-    ok(!file_exists("test4.txt"), "Directory should be removed\n");
+    ok(!SHFileOperationA(&shfo), "Directory is not removed\n");
+    ok(!file_exists("test4.txt"), "Directory should have been removed\n");
 
     ret = SHFileOperationA(&shfo);
     ok(!ret, "The requested file does not exist, ret=%d\n", ret);
@@ -170,33 +290,33 @@ static void test_delete(void)
     init_shfo_tests();
     sprintf(buf, "%s\\%s", CURR_DIR, "test4.txt");
     buf[strlen(buf) + 1] = '\0';
-    ok(MoveFileA("test1.txt", "test4.txt\\test1.txt"), "Fill the subdirectory\n");
-    ok(!SHFileOperationA(&shfo), "Directory removed\n");
-    ok(!file_exists("test4.txt"), "Directory is removed\n");
+    ok(MoveFileA("test1.txt", "test4.txt\\test1.txt"), "Filling the subdirectory failed\n");
+    ok(!SHFileOperationA(&shfo), "Directory is not removed\n");
+    ok(!file_exists("test4.txt"), "Directory is not removed\n");
 
     init_shfo_tests();
     shfo.pFrom = "test1.txt\0test4.txt\0";
-        ok(!SHFileOperationA(&shfo), "Directory and a file removed\n");
-        ok(!file_exists("test1.txt"), "The file should be removed\n");
-        ok(!file_exists("test4.txt"), "Directory should be removed\n");
-    ok(file_exists("test2.txt"), "This file should not be removed\n");
+    ok(!SHFileOperationA(&shfo), "Directory and a file are not removed\n");
+    ok(!file_exists("test1.txt"), "The file should have been removed\n");
+    ok(!file_exists("test4.txt"), "Directory should have been removed\n");
+    ok(file_exists("test2.txt"), "This file should not have been removed\n");
 
     /* FOF_FILESONLY does not delete a dir matching a wildcard */
     init_shfo_tests();
     shfo.fFlags |= FOF_FILESONLY;
     shfo.pFrom = "*.txt\0";
-        ok(!SHFileOperation(&shfo), "Failed to delete files\n");
-        ok(!file_exists("test1.txt"), "test1.txt should be removed\n");
-        ok(!file_exists("test_5.txt"), "test_5.txt should be removed\n");
-    ok(file_exists("test4.txt"), "test4.txt should not be removed\n");
+    ok(!SHFileOperation(&shfo), "Failed to delete files\n");
+    ok(!file_exists("test1.txt"), "test1.txt should have been removed\n");
+    ok(!file_exists("test_5.txt"), "test_5.txt should have been removed\n");
+    ok(file_exists("test4.txt"), "test4.txt should not have been removed\n");
 
     /* FOF_FILESONLY only deletes a dir if explicitly specified */
     init_shfo_tests();
     shfo.pFrom = "test_?.txt\0test4.txt\0";
-        ok(!SHFileOperation(&shfo), "Failed to delete files\n");
-        ok(!file_exists("test4.txt"), "test4.txt should be removed\n");
-        ok(!file_exists("test_5.txt"), "test_5.txt should be removed\n");
-    ok(file_exists("test1.txt"), "test1.txt should not be removed\n");
+    ok(!SHFileOperation(&shfo), "Failed to delete files and directory\n");
+    ok(!file_exists("test4.txt"), "test4.txt should have been removed\n");
+    ok(!file_exists("test_5.txt"), "test_5.txt should have been removed\n");
+    ok(file_exists("test1.txt"), "test1.txt should not have been removed\n");
 
     /* try to delete an invalid filename */
     init_shfo_tests();
@@ -204,7 +324,7 @@ static void test_delete(void)
     shfo.fFlags &= ~FOF_FILESONLY;
     shfo.fAnyOperationsAborted = FALSE;
     ret = SHFileOperation(&shfo);
-        ok(ret == ERROR_ACCESS_DENIED, "Expected ERROR_ACCESS_DENIED, got %d\n", ret);
+    ok(ret == ERROR_ACCESS_DENIED, "Expected ERROR_ACCESS_DENIED, got %d\n", ret);
     ok(!shfo.fAnyOperationsAborted, "Expected no aborted operations\n");
     ok(file_exists("test1.txt"), "Expected test1.txt to exist\n");
 
@@ -213,7 +333,7 @@ static void test_delete(void)
     shfo.pFrom = "test1.txt\0";
     shfo.wFunc = 0;
     ret = SHFileOperation(&shfo);
-        ok(ret == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", ret);
+    ok(ret == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", ret);
     ok(file_exists("test1.txt"), "Expected test1.txt to exist\n");
 
     /* try an invalid list, only one null terminator */
@@ -221,7 +341,7 @@ static void test_delete(void)
     shfo.pFrom = "";
     shfo.wFunc = FO_DELETE;
     ret = SHFileOperation(&shfo);
-        ok(ret == ERROR_ACCESS_DENIED, "Expected ERROR_ACCESS_DENIED, got %d\n", ret);
+    ok(ret == ERROR_ACCESS_DENIED, "Expected ERROR_ACCESS_DENIED, got %d\n", ret);
     ok(file_exists("test1.txt"), "Expected test1.txt to exist\n");
 
     /* delete a dir, and then a file inside the dir, same as
@@ -230,8 +350,8 @@ static void test_delete(void)
     init_shfo_tests();
     shfo.pFrom = "testdir2\0testdir2\\one.txt\0";
     ret = SHFileOperation(&shfo);
-        ok(ret == ERROR_PATH_NOT_FOUND, "Expected ERROR_PATH_NOT_FOUND, got %d\n", ret);
-        ok(!file_exists("testdir2"), "Expected testdir2 to not exist\n");
+    ok(ret == ERROR_PATH_NOT_FOUND, "Expected ERROR_PATH_NOT_FOUND, got %d\n", ret);
+    ok(!file_exists("testdir2"), "Expected testdir2 to not exist\n");
     ok(!file_exists("testdir2\\one.txt"), "Expected testdir2\\one.txt to not exist\n");
 
     /* try the FOF_NORECURSION flag, continues deleting subdirs */
@@ -239,17 +359,17 @@ static void test_delete(void)
     shfo.pFrom = "testdir2\0";
     shfo.fFlags |= FOF_NORECURSION;
     ret = SHFileOperation(&shfo);
-        ok(ret == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", ret);
-        ok(!file_exists("testdir2\\one.txt"), "Expected testdir2\\one.txt to not exist\n");
-        ok(!file_exists("testdir2\\nested"), "Expected testdir2\\nested to exist\n");
+    ok(ret == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", ret);
+    ok(!file_exists("testdir2\\one.txt"), "Expected testdir2\\one.txt to not exist\n");
+    ok(!file_exists("testdir2\\nested"), "Expected testdir2\\nested to exist\n");
 }
 
 /* tests the FO_RENAME action */
 static void test_rename(void)
 {
     SHFILEOPSTRUCTA shfo, shfo2;
-    CHAR from[MAX_PATH];
-    CHAR to[MAX_PATH];
+    CHAR from[5*MAX_PATH];
+    CHAR to[5*MAX_PATH];
     DWORD retval;
 
     shfo.hwnd = NULL;
@@ -357,8 +477,8 @@ static void test_rename(void)
 static void test_copy(void)
 {
     SHFILEOPSTRUCTA shfo, shfo2;
-    CHAR from[MAX_PATH];
-    CHAR to[MAX_PATH];
+    CHAR from[5*MAX_PATH];
+    CHAR to[5*MAX_PATH];
     FILEOP_FLAGS tmp_flags;
     DWORD retval;
 
@@ -680,14 +800,53 @@ static void test_copy(void)
     ok(retval == 1026, "Expected 1026, got %d\n", retval);
     ok(!file_exists("nonexistent\\e.txt"), "Expected nonexistent\\e.txt to not exist\n");
     ok(!file_exists("nonexistent"), "Expected nonexistent to not exist\n");
+
+    /* Overwrite tests */
+    clean_after_shfo_tests();
+    init_shfo_tests();
+    shfo.fFlags = FOF_NOCONFIRMATION;
+    shfo.pFrom = "test1.txt\0";
+    shfo.pTo = "test2.txt\0";
+    shfo.fAnyOperationsAborted = FALSE;
+    /* without FOF_NOCOFIRMATION the confirmation is Yes/No */
+    retval = SHFileOperation(&shfo);
+    ok(retval == 0, "Expected 0, got %d\n", retval);
+    ok(file_has_content("test2.txt", "test1.txt\n"), "The file was not copied\n");
+
+    shfo.pFrom = "test3.txt\0test1.txt\0";
+    shfo.pTo = "test2.txt\0one.txt\0";
+    shfo.fFlags = FOF_NOCONFIRMATION | FOF_MULTIDESTFILES;
+    /* without FOF_NOCOFIRMATION the confirmation is Yes/Yes to All/No/Cancel */
+    retval = SHFileOperation(&shfo);
+    ok(retval == 0, "Expected 0, got %d\n", retval);
+    ok(file_has_content("test2.txt", "test3.txt\n"), "The file was not copied\n");
+
+    shfo.pFrom = "one.txt\0";
+    shfo.pTo = "testdir2\0";
+    shfo.fFlags = FOF_NOCONFIRMATION;
+    /* without FOF_NOCOFIRMATION the confirmation is Yes/No */
+    retval = SHFileOperation(&shfo);
+    ok(retval == 0, "Expected 0, got %d\n", retval);
+    ok(file_has_content("testdir2\\one.txt", "test1.txt\n"), "The file was not copied\n");
+
+    createTestFile("test4.txt\\test1.txt");
+    shfo.pFrom = "test4.txt\0";
+    shfo.pTo = "testdir2\0";
+    shfo.fFlags = FOF_NOCONFIRMATION;
+    ok(!SHFileOperation(&shfo), "First SHFileOperation failed\n");
+    createTestFile("test4.txt\\.\\test1.txt"); /* modify the content of the file */
+    /* without FOF_NOCOFIRMATION the confirmation is "This folder already contains a folder named ..." */
+    retval = SHFileOperation(&shfo);
+    ok(retval == 0, "Expected 0, got %d\n", retval);
+    ok(file_has_content("testdir2\\test4.txt\\test1.txt", "test4.txt\\.\\test1.txt\n"), "The file was not copied\n");
 }
 
 /* tests the FO_MOVE action */
 static void test_move(void)
 {
     SHFILEOPSTRUCTA shfo, shfo2;
-    CHAR from[MAX_PATH];
-    CHAR to[MAX_PATH];
+    CHAR from[5*MAX_PATH];
+    CHAR to[5*MAX_PATH];
     DWORD retval;
 
     shfo.hwnd = NULL;
@@ -849,10 +1008,194 @@ static void test_sh_create_dir(void)
     ok(file_exists("c:\\testdir3"), "The directory is not created\n");
 }
 
+static void test_sh_path_prepare(void)
+{
+    HRESULT res;
+    CHAR path[MAX_PATH];
+
+    if(!pSHPathPrepareForWriteA)
+    {
+	trace("skipping SHPathPrepareForWriteA tests\n");
+	    return;
+    }
+
+    /* directory exists, SHPPFW_NONE */
+    set_curr_dir_path(path, "testdir2\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_NONE);
+    ok(res == S_OK, "res == 0x%08x, expected S_OK\n", res);
+
+    /* directory exists, SHPPFW_IGNOREFILENAME */
+    set_curr_dir_path(path, "testdir2\\test4.txt\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_IGNOREFILENAME);
+    ok(res == S_OK, "res == 0x%08x, expected S_OK\n", res);
+
+    /* directory exists, SHPPFW_DIRCREATE */
+    set_curr_dir_path(path, "testdir2\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_DIRCREATE);
+    ok(res == S_OK, "res == 0x%08x, expected S_OK\n", res);
+
+    /* directory exists, SHPPFW_IGNOREFILENAME|SHPPFW_DIRCREATE */
+    set_curr_dir_path(path, "testdir2\\test4.txt\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_IGNOREFILENAME|SHPPFW_DIRCREATE);
+    ok(res == S_OK, "res == 0x%08x, expected S_OK\n", res);
+    ok(!file_exists("nonexistent\\"), "nonexistent\\ exists but shouldn't\n");
+
+    /* file exists, SHPPFW_NONE */
+    set_curr_dir_path(path, "test1.txt\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_NONE);
+    ok(res == HRESULT_FROM_WIN32(ERROR_DIRECTORY), "res == 0x%08x, expected HRESULT_FROM_WIN32(ERROR_DIRECTORY)\n", res);
+
+    /* file exists, SHPPFW_DIRCREATE */
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_DIRCREATE);
+    ok(res == HRESULT_FROM_WIN32(ERROR_DIRECTORY), "res == 0x%08x, expected HRESULT_FROM_WIN32(ERROR_DIRECTORY)\n", res);
+
+    /* file exists, SHPPFW_NONE, trailing \ */
+    set_curr_dir_path(path, "test1.txt\\\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_NONE);
+    ok(res == HRESULT_FROM_WIN32(ERROR_DIRECTORY), "res == 0x%08x, expected HRESULT_FROM_WIN32(ERROR_DIRECTORY)\n", res);
+
+    /* relative path exists, SHPPFW_DIRCREATE */
+    res = pSHPathPrepareForWriteA(0, 0, ".\\testdir2", SHPPFW_DIRCREATE);
+    ok(res == S_OK, "res == 0x%08x, expected S_OK\n", res);
+
+    /* relative path doesn't exist, SHPPFW_DIRCREATE -- Windows does not create the directory in this case */
+    res = pSHPathPrepareForWriteA(0, 0, ".\\testdir2\\test4.txt", SHPPFW_DIRCREATE);
+    ok(res == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), "res == 0x%08x, expected HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)\n", res);
+    ok(!file_exists(".\\testdir2\\test4.txt\\"), ".\\testdir2\\test4.txt\\ exists but shouldn't\n");
+
+    /* directory doesn't exist, SHPPFW_NONE */
+    set_curr_dir_path(path, "nonexistent\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_NONE);
+    ok(res == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), "res == 0x%08x, expected HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)\n", res);
+
+    /* directory doesn't exist, SHPPFW_IGNOREFILENAME */
+    set_curr_dir_path(path, "nonexistent\\notreal\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_IGNOREFILENAME);
+    ok(res == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), "res == 0x%08x, expected HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)\n", res);
+    ok(!file_exists("nonexistent\\notreal"), "nonexistent\\notreal exists but shouldn't\n");
+    ok(!file_exists("nonexistent\\"), "nonexistent\\ exists but shouldn't\n");
+
+    /* directory doesn't exist, SHPPFW_IGNOREFILENAME|SHPPFW_DIRCREATE */
+    set_curr_dir_path(path, "testdir2\\test4.txt\\\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_IGNOREFILENAME|SHPPFW_DIRCREATE);
+    ok(res == S_OK, "res == 0x%08x, expected S_OK\n", res);
+    ok(file_exists("testdir2\\test4.txt\\"), "testdir2\\test4.txt doesn't exist but should\n");
+
+    /* nested directory doesn't exist, SHPPFW_DIRCREATE */
+    set_curr_dir_path(path, "nonexistent\\notreal\0");
+    res = pSHPathPrepareForWriteA(0, 0, path, SHPPFW_DIRCREATE);
+    ok(res == S_OK, "res == 0x%08x, expected S_OK\n", res);
+    ok(file_exists("nonexistent\\notreal"), "nonexistent\\notreal doesn't exist but should\n");
+
+    /* SHPPFW_ASKDIRCREATE, SHPPFW_NOWRITECHECK, and SHPPFW_MEDIACHECKONLY are untested */
+
+    if(!pSHPathPrepareForWriteW)
+    {
+        skip("Skipping SHPathPrepareForWriteW tests\n");
+        return;
+    }
+    /* unicode directory doesn't exist, SHPPFW_NONE */
+    res = pSHPathPrepareForWriteW(0, 0, UNICODE_PATH, SHPPFW_NONE);
+    ok(res == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), "res == %08x, expected HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)\n", res);
+    ok(!file_existsW(UNICODE_PATH), "unicode path was created but shouldn't be\n");
+    RemoveDirectoryW(UNICODE_PATH);
+
+    /* unicode directory doesn't exist, SHPPFW_DIRCREATE */
+    res = pSHPathPrepareForWriteW(0, 0, UNICODE_PATH, SHPPFW_DIRCREATE);
+    ok(res == S_OK, "res == %08x, expected S_OK\n", res);
+    ok(file_existsW(UNICODE_PATH), "unicode path should've been created\n");
+
+    /* unicode directory exists, SHPPFW_NONE */
+    res = pSHPathPrepareForWriteW(0, 0, UNICODE_PATH, SHPPFW_NONE);
+    ok(res == S_OK, "ret == %08x, expected S_OK\n", res);
+
+    /* unicode directory exists, SHPPFW_DIRCREATE */
+    res = pSHPathPrepareForWriteW(0, 0, UNICODE_PATH, SHPPFW_DIRCREATE);
+    ok(res == S_OK, "ret == %08x, expected S_OK\n", res);
+    RemoveDirectoryW(UNICODE_PATH);
+}
+
+static void test_unicode(void)
+{
+    SHFILEOPSTRUCTW shfoW;
+    int ret;
+    HANDLE file;
+
+    if (!pSHFileOperationW)
+    {
+        skip("SHFileOperationW() is missing\n");
+        return;
+    }
+
+    shfoW.hwnd = NULL;
+    shfoW.wFunc = FO_DELETE;
+    shfoW.pFrom = UNICODE_PATH;
+    shfoW.pTo = '\0';
+    shfoW.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    shfoW.hNameMappings = NULL;
+    shfoW.lpszProgressTitle = NULL;
+
+    /* Clean up before start test */
+    DeleteFileW(UNICODE_PATH);
+    RemoveDirectoryW(UNICODE_PATH);
+
+    /* Make sure we are on a system that supports unicode */
+    SetLastError(0xdeadbeef);
+    file = CreateFileW(UNICODE_PATH, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    if (GetLastError()==ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("Unicode tests skipped on non-unicode system\n");
+        return;
+    }
+    CloseHandle(file);
+
+    /* Try to delete a file with unicode filename */
+    ok(file_existsW(UNICODE_PATH), "The file does not exist\n");
+    ret = pSHFileOperationW(&shfoW);
+    ok(!ret, "File is not removed, ErrorCode: %d\n", ret);
+    ok(!file_existsW(UNICODE_PATH), "The file should have been removed\n");
+
+    /* Try to trash a file with unicode filename */
+    createTestFileW(UNICODE_PATH);
+    shfoW.fFlags |= FOF_ALLOWUNDO;
+    ok(file_existsW(UNICODE_PATH), "The file does not exist\n");
+    ret = pSHFileOperationW(&shfoW);
+    ok(!ret, "File is not removed, ErrorCode: %d\n", ret);
+    ok(!file_existsW(UNICODE_PATH), "The file should have been removed\n");
+
+    if(!pSHCreateDirectoryExW)
+    {
+        skip("Skipping SHCreateDirectoryExW tests\n");
+        return;
+    }
+
+    /* Try to delete a directory with unicode filename */
+    ret = pSHCreateDirectoryExW(NULL, UNICODE_PATH, NULL);
+    ok(!ret, "SHCreateDirectoryExW returned %d\n", ret);
+    ok(file_existsW(UNICODE_PATH), "The directory is not created\n");
+    shfoW.fFlags &= ~FOF_ALLOWUNDO;
+    ret = pSHFileOperationW(&shfoW);
+    ok(!ret, "Directory is not removed, ErrorCode: %d\n", ret);
+    ok(!file_existsW(UNICODE_PATH), "The directory should have been removed\n");
+
+    /* Try to trash a directory with unicode filename */
+    ret = pSHCreateDirectoryExW(NULL, UNICODE_PATH, NULL);
+    ok(!ret, "SHCreateDirectoryExW returned %d\n", ret);
+    ok(file_existsW(UNICODE_PATH), "The directory was not created\n");
+    shfoW.fFlags |= FOF_ALLOWUNDO;
+    ret = pSHFileOperationW(&shfoW);
+    ok(!ret, "Directory is not removed, ErrorCode: %d\n", ret);
+    ok(!file_existsW(UNICODE_PATH), "The directory should have been removed\n");
+}
+
 START_TEST(shlfileop)
 {
     InitFunctionPointers();
 
+    clean_after_shfo_tests();
+
+    init_shfo_tests();
+    test_get_file_info();
     clean_after_shfo_tests();
 
     init_shfo_tests();
@@ -873,4 +1216,10 @@ START_TEST(shlfileop)
 
     test_sh_create_dir();
     clean_after_shfo_tests();
+
+    init_shfo_tests();
+    test_sh_path_prepare();
+    clean_after_shfo_tests();
+
+    test_unicode();
 }

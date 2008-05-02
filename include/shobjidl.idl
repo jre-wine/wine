@@ -22,12 +22,18 @@
 import "objidl.idl";
 import "oleidl.idl";
 import "oaidl.idl";
+import "docobj.idl";
 import "shtypes.idl";
 import "servprov.idl";
 import "comcat.idl";
 import "propidl.idl";
-/*import "prsht.idl";*/
-/*import "msxml.idl";*/
+/* FIXME: import "prsht.idl";*/
+import "msxml.idl";
+import "wtypes.idl";
+/* FIXME: import "propsys.idl"; */
+/* FIXME: import "structuredquery.idl"; */
+
+cpp_quote("/* FIXME: #include <sherrors.h> */")
 
 
 /*****************************************************************************
@@ -84,6 +90,38 @@ interface IEnumIDList : IUnknown
     HRESULT Clone( [out] IEnumIDList **ppenum );
 }
 
+/*****************************************************************************
+ * IShellPropSheetExt interface
+ */
+cpp_quote("#if 0")
+    typedef LPARAM LPFNSVADDPROPSHEETPAGE;
+cpp_quote("#else")
+cpp_quote("#include <prsht.h>")
+cpp_quote("typedef LPFNADDPROPSHEETPAGE LPFNSVADDPROPSHEETPAGE;")
+cpp_quote("#endif")
+
+[
+    object,
+    uuid(000214E9-0000-0000-C000-000000000046),
+    pointer_default(unique)
+]
+interface IShellPropSheetExt : IUnknown
+{
+    enum tagSHELLPROPSHEETEXTPAGEID {
+        EXPPS_FILETYPES = 0x1
+    };
+
+    typedef UINT EXPPS;
+
+    HRESULT AddPages(
+        [in] LPFNSVADDPROPSHEETPAGE pfnAddPage,
+        [in] LPARAM lParam);
+    HRESULT ReplacePage(
+        [in] EXPPS uPageID,
+        [in] LPFNSVADDPROPSHEETPAGE pfnReplaceWith,
+        [in] LPARAM lParam);
+}
+typedef IShellPropSheetExt *LPSHELLPROPSHEETEXT;
 
 /*****************************************************************************
  * IShellFolder interface
@@ -393,13 +431,6 @@ interface IShellView : IOleWindow
         SVUIA_ACTIVATE_FOCUS   = 2,
         SVUIA_INPLACEACTIVATE  = 3
     } SVUIA_STATUS;
-
-cpp_quote("#if 0")
-    typedef LPARAM LPFNSVADDPROPSHEETPAGE;
-cpp_quote("#else")
-cpp_quote("#include <prsht.h>")
-cpp_quote("typedef LPFNADDPROPSHEETPAGE LPFNSVADDPROPSHEETPAGE;")
-cpp_quote("#endif")
 
     HRESULT TranslateAccelerator( [in] MSG *pmsg );
     HRESULT EnableModeless( [in] BOOL fEnable );
@@ -1265,6 +1296,22 @@ interface INewShortcutHookW : IUnknown
                 [in] int cchExtension);
 } 
 
+/*****************************************************************************
+ * IRunnableTask interface
+ */
+[
+    object,
+    uuid(85788d00-6807-11d0-b810-00c04fd706ec),
+    pointer_default(unique)
+]
+interface IRunnableTask : IUnknown
+{
+    HRESULT Run();
+    HRESULT Kill([in] BOOL fWait);
+    HRESULT Suspend();
+    HRESULT Resume();
+    ULONG IsRunning();
+}
 
 /*****************************************************************************
  * IShellChangeNotify interface

@@ -145,6 +145,7 @@ typedef struct tagME_Run
   int nAscent, nDescent; /* pixels above/below baseline */
   POINT pt; /* relative to para's position */
   struct tagME_TableCell *pCell; /* for MERF_CELL: points to respective cell in ME_Paragraph */
+  REOBJECT *ole_obj; /* FIXME: should be a union with strText (at least) */
 } ME_Run;
 
 typedef struct tagME_Document {
@@ -167,7 +168,6 @@ typedef struct tagME_Paragraph
   struct tagME_TableCell *pCells;    /* list of cells and their properties */
   struct tagME_TableCell *pLastCell; /* points to the last cell in the list */
 
-  int nLeftMargin, nRightMargin, nFirstMargin;
   int nCharOfs;
   int nFlags;
   int nYPos, nHeight;
@@ -291,6 +291,7 @@ typedef struct tagME_TextEditor
   int nCursors;
   SIZE sizeWindow;
   int nTotalLength, nLastTotalLength;
+  int nHeight;
   int nUDArrowX;
   int nSequence;
   COLORREF rgbBackColor;
@@ -321,6 +322,10 @@ typedef struct tagME_TextEditor
   BOOL bHideSelection;
   BOOL AutoURLDetect_bEnable;
   WCHAR cPasswordMask;
+  BOOL bHaveFocus;
+  /*for IME */
+  int imeStartIndex;
+  DWORD selofs, linesel, sely;
 } ME_TextEditor;
 
 typedef struct tagME_Context
@@ -330,6 +335,7 @@ typedef struct tagME_Context
   POINT ptRowOffset;
   RECT rcView;
   HBRUSH hbrMargin;
+  SIZE dpi;
 
   /* those are valid inside ME_WrapTextParagraph and related */
   POINT ptFirstRun;

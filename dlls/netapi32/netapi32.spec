@@ -190,19 +190,19 @@
 @ stub NetSessionGetInfo
 @ stub NetShareAdd
 @ stub NetShareCheck
-@ stub NetShareDel
+@ stdcall NetShareDel(wstr wstr long)
 @ stub NetShareDelSticky
 @ stdcall NetShareEnum(wstr long ptr long ptr ptr ptr)
 @ stub NetShareEnumSticky
 @ stub NetShareGetInfo
 @ stub NetShareSetInfo
 @ stdcall NetStatisticsGet(wstr wstr long long ptr)
-@ stub NetUseAdd
+@ stdcall NetUseAdd(wstr long ptr ptr)
 @ stub NetUseDel
-@ stub NetUseEnum
+@ stdcall NetUseEnum(wstr long ptr long ptr ptr ptr)
 @ stub NetUseGetInfo
 @ stdcall NetUserAdd(wstr long ptr ptr)
-@ stub NetUserChangePassword
+@ stdcall NetUserChangePassword(wstr wstr wstr wstr)
 @ stdcall NetUserDel(wstr wstr)
 @ stdcall NetUserEnum(wstr long long ptr long ptr ptr ptr)
 @ stub NetUserGetGroups

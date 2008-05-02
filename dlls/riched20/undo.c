@@ -48,7 +48,7 @@ void ME_EmptyUndoStack(ME_TextEditor *editor)
   } 
 }
 
-ME_UndoItem *ME_AddUndoItem(ME_TextEditor *editor, ME_DIType type, ME_DisplayItem *pdi) {
+ME_UndoItem *ME_AddUndoItem(ME_TextEditor *editor, ME_DIType type, const ME_DisplayItem *pdi) {
   if (editor->nUndoMode == umIgnore)
     return NULL;
   else if (editor->nUndoLimit == 0)
@@ -71,6 +71,12 @@ ME_UndoItem *ME_AddUndoItem(ME_TextEditor *editor, ME_DIType type, ME_DisplayIte
       CopyMemory(&pItem->member.run, &pdi->member.run, sizeof(ME_Run));
       pItem->member.run.strText = ME_StrDup(pItem->member.run.strText);
       ME_AddRefStyle(pItem->member.run.style);
+      if (pdi->member.run.ole_obj)
+      {
+        pItem->member.run.ole_obj = ALLOC_OBJ(*pItem->member.run.ole_obj);
+        ME_CopyReObject(pItem->member.run.ole_obj, pdi->member.run.ole_obj);
+      }
+      else pItem->member.run.ole_obj = NULL;
       break;
     case diUndoSetCharFormat:
     case diUndoSetDefaultCharFormat:
@@ -163,10 +169,9 @@ void ME_CommitUndo(ME_TextEditor *editor) {
     
   ME_AddUndoItem(editor, diUndoEndTransaction, NULL);
   ME_SendSelChange(editor);
-  editor->nModifyStep++;
 }
 
-void ME_PlayUndoItem(ME_TextEditor *editor, ME_DisplayItem *pItem)
+static void ME_PlayUndoItem(ME_TextEditor *editor, ME_DisplayItem *pItem)
 {
   ME_UndoItem *pUItem = (ME_UndoItem *)pItem;
 
@@ -260,7 +265,6 @@ void ME_Undo(ME_TextEditor *editor) {
   if (p)
     p->prev = NULL;
   editor->nUndoMode = nMode;
-  editor->nModifyStep--;
   ME_UpdateRepaint(editor);
 }
 
@@ -293,6 +297,5 @@ void ME_Redo(ME_TextEditor *editor) {
   if (p)
     p->prev = NULL;
   editor->nUndoMode = nMode;
-  editor->nModifyStep++;
   ME_UpdateRepaint(editor);
 }

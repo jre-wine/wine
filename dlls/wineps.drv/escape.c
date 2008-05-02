@@ -23,12 +23,10 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "wine/wingdi16.h"
-#include "wine/winuser16.h"
 #include "wownt32.h"
 #include "psdrv.h"
 #include "wine/debug.h"
 #include "winspool.h"
-#include "heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
@@ -382,7 +380,7 @@ INT PSDRV_EndPage( PSDRV_PDEVICE *physDev )
 /************************************************************************
  *           PSDRV_StartDocA
  */
-INT PSDRV_StartDocA( PSDRV_PDEVICE *physDev, const DOCINFOA *doc )
+static INT PSDRV_StartDocA( PSDRV_PDEVICE *physDev, const DOCINFOA *doc )
 {
     LPCSTR output = "LPT1:";
     BYTE buf[300];
@@ -434,22 +432,38 @@ INT PSDRV_StartDocA( PSDRV_PDEVICE *physDev, const DOCINFOA *doc )
 INT PSDRV_StartDoc( PSDRV_PDEVICE *physDev, const DOCINFOW *doc )
 {
     DOCINFOA docA;
-    INT ret;
+    INT ret, len;
+    LPSTR docname = NULL, output = NULL, datatype = NULL;
 
     docA.cbSize = doc->cbSize;
-    docA.lpszDocName = doc->lpszDocName ?
-      HEAP_strdupWtoA( GetProcessHeap(), 0, doc->lpszDocName ) : NULL;
-    docA.lpszOutput = doc->lpszOutput ?
-      HEAP_strdupWtoA( GetProcessHeap(), 0, doc->lpszOutput ) : NULL;
-    docA.lpszDatatype = doc->lpszDatatype ?
-      HEAP_strdupWtoA( GetProcessHeap(), 0, doc->lpszDatatype ) : NULL;
+    if (doc->lpszDocName)
+    {
+        len = WideCharToMultiByte( CP_ACP, 0, doc->lpszDocName, -1, NULL, 0, NULL, NULL );
+        if ((docname = HeapAlloc( GetProcessHeap(), 0, len )))
+            WideCharToMultiByte( CP_ACP, 0, doc->lpszDocName, -1, docname, len, NULL, NULL );
+    }
+    if (doc->lpszOutput)
+    {
+        len = WideCharToMultiByte( CP_ACP, 0, doc->lpszOutput, -1, NULL, 0, NULL, NULL );
+        if ((output = HeapAlloc( GetProcessHeap(), 0, len )))
+            WideCharToMultiByte( CP_ACP, 0, doc->lpszOutput, -1, output, len, NULL, NULL );
+    }
+    if (doc->lpszDatatype)
+    {
+        len = WideCharToMultiByte( CP_ACP, 0, doc->lpszDatatype, -1, NULL, 0, NULL, NULL );
+        if ((datatype = HeapAlloc( GetProcessHeap(), 0, len )))
+            WideCharToMultiByte( CP_ACP, 0, doc->lpszDatatype, -1, datatype, len, NULL, NULL );
+    }
+    docA.lpszDocName = docname;
+    docA.lpszOutput = output;
+    docA.lpszDatatype = datatype;
     docA.fwType = doc->fwType;
 
     ret = PSDRV_StartDocA(physDev, &docA);
 
-    HeapFree( GetProcessHeap(), 0, (LPSTR)docA.lpszDocName );
-    HeapFree( GetProcessHeap(), 0, (LPSTR)docA.lpszOutput );
-    HeapFree( GetProcessHeap(), 0, (LPSTR)docA.lpszDatatype );
+    HeapFree( GetProcessHeap(), 0, docname );
+    HeapFree( GetProcessHeap(), 0, output );
+    HeapFree( GetProcessHeap(), 0, datatype );
 
     return ret;
 }

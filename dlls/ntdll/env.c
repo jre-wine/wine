@@ -263,7 +263,7 @@ done:
  *		RtlExpandEnvironmentStrings_U (NTDLL.@)
  *
  */
-NTSTATUS WINAPI RtlExpandEnvironmentStrings_U(PWSTR renv, const UNICODE_STRING* us_src,
+NTSTATUS WINAPI RtlExpandEnvironmentStrings_U(PCWSTR renv, const UNICODE_STRING* us_src,
                                               PUNICODE_STRING us_dst, PULONG plen)
 {
     DWORD src_len, len, count, total_size = 1;  /* 1 for terminating '\0' */
@@ -367,9 +367,9 @@ PRTL_USER_PROCESS_PARAMETERS WINAPI RtlNormalizeProcessParams( RTL_USER_PROCESS_
 }
 
 
-static inline void denormalize( void *base, WCHAR **ptr )
+static inline void denormalize( const void *base, WCHAR **ptr )
 {
-    if (*ptr) *ptr = (WCHAR *)(UINT_PTR)((char *)*ptr - (char *)base);
+    if (*ptr) *ptr = (WCHAR *)(UINT_PTR)((char *)*ptr - (const char *)base);
 }
 
 /******************************************************************************
@@ -431,7 +431,13 @@ NTSTATUS WINAPI RtlCreateProcessParameters( RTL_USER_PROCESS_PARAMETERS **result
     RtlAcquirePebLock();
     cur_params = NtCurrentTeb()->Peb->ProcessParameters;
     if (!DllPath) DllPath = &cur_params->DllPath;
-    if (!CurrentDirectoryName) CurrentDirectoryName = &cur_params->CurrentDirectory.DosPath;
+    if (!CurrentDirectoryName)
+    {
+        if (NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
+            CurrentDirectoryName = &((WIN16_SUBSYSTEM_TIB *)NtCurrentTeb()->Tib.SubSystemTib)->curdir.DosPath;
+        else
+            CurrentDirectoryName = &cur_params->CurrentDirectory.DosPath;
+    }
     if (!CommandLine) CommandLine = ImagePathName;
     if (!Environment) Environment = cur_params->Environment;
     if (!WindowTitle) WindowTitle = &empty_str;

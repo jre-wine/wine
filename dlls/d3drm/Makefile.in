@@ -3,10 +3,12 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = d3drm.dll
-IMPORTLIB = libd3drm.$(IMPLIBEXT)
+IMPORTLIB = d3drm
 IMPORTS   = kernel32
 
-C_SRCS = d3drm_main.c
+C_SRCS = \
+	d3drm_main.c \
+	math.c
 
 RC_SRCS = version.rc
 

@@ -3,8 +3,8 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = sfc.dll
-IMPORTLIB = libsfc.$(IMPLIBEXT)
-IMPORTS   = kernel32
+IMPORTLIB = sfc
+IMPORTS   = sfc_os kernel32
 
 C_SRCS = sfc_main.c
 

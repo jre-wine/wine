@@ -27,6 +27,7 @@
 #include <string.h>
 #include <time.h>
 
+#define NONAMELESSUNION
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "wine/debug.h"
@@ -60,6 +61,16 @@ NTSTATUS WINAPI NtDuplicateToken(
         ExistingToken, DesiredAccess, ObjectAttributes,
         ImpersonationLevel, TokenType, NewToken);
         dump_ObjectAttributes(ObjectAttributes);
+
+    if (ObjectAttributes && ObjectAttributes->SecurityQualityOfService)
+    {
+        SECURITY_QUALITY_OF_SERVICE *SecurityQOS = ObjectAttributes->SecurityQualityOfService;
+        TRACE("ObjectAttributes->SecurityQualityOfService = {%d, %d, %d, %s}\n",
+            SecurityQOS->Length, SecurityQOS->ImpersonationLevel,
+            SecurityQOS->ContextTrackingMode,
+            SecurityQOS->EffectiveOnly ? "TRUE" : "FALSE");
+        ImpersonationLevel = SecurityQOS->ImpersonationLevel;
+    }
 
     SERVER_START_REQ( duplicate_token )
     {
@@ -217,10 +228,12 @@ NTSTATUS WINAPI NtQueryInformationToken(
     case TokenType:
         len = sizeof (TOKEN_TYPE);
         break;
-#if 0
     case TokenImpersonationLevel:
+        len = sizeof(SECURITY_IMPERSONATION_LEVEL);
+        break;
     case TokenStatistics:
-#endif /* 0 */
+        len = sizeof(TOKEN_STATISTICS);
+        break;
     default:
         len = 0;
     }
@@ -351,6 +364,57 @@ NTSTATUS WINAPI NtQueryInformationToken(
             *(RtlSubAuthoritySid(sid, 0)) = SECURITY_INTERACTIVE_RID;
             owner->Owner = sid;
         }
+        break;
+    case TokenImpersonationLevel:
+        SERVER_START_REQ( get_token_impersonation_level )
+        {
+            SECURITY_IMPERSONATION_LEVEL *impersonation_level = tokeninfo;
+            req->handle = token;
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+                *impersonation_level = reply->impersonation_level;
+        }
+        SERVER_END_REQ;
+        break;
+    case TokenStatistics:
+        SERVER_START_REQ( get_token_statistics )
+        {
+            TOKEN_STATISTICS *statistics = tokeninfo;
+            req->handle = token;
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+            {
+                statistics->TokenId.LowPart  = reply->token_id.low_part;
+                statistics->TokenId.HighPart = reply->token_id.high_part;
+                statistics->AuthenticationId.LowPart  = 0; /* FIXME */
+                statistics->AuthenticationId.HighPart = 0; /* FIXME */
+                statistics->ExpirationTime.u.HighPart = 0x7fffffff;
+                statistics->ExpirationTime.u.LowPart  = 0xffffffff;
+                statistics->TokenType = reply->primary ? TokenPrimary : TokenImpersonation;
+                statistics->ImpersonationLevel = reply->impersonation_level;
+
+                /* kernel information not relevant to us */
+                statistics->DynamicCharged = 0;
+                statistics->DynamicAvailable = 0;
+
+                statistics->GroupCount = reply->group_count;
+                statistics->PrivilegeCount = reply->privilege_count;
+                statistics->ModifiedId.LowPart  = reply->modified_id.low_part;
+                statistics->ModifiedId.HighPart = reply->modified_id.high_part;
+            }
+        }
+        SERVER_END_REQ;
+        break;
+    case TokenType:
+        SERVER_START_REQ( get_token_statistics )
+        {
+            TOKEN_TYPE *token_type = tokeninfo;
+            req->handle = token;
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+                *token_type = reply->primary ? TokenPrimary : TokenImpersonation;
+        }
+        SERVER_END_REQ;
         break;
     default:
         {
@@ -674,6 +738,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 else memcpy( SystemInformation, &spi, len);
             }
             else ret = STATUS_INFO_LENGTH_MISMATCH;
+            FIXME("info_class SYSTEM_PERFORMANCE_INFORMATION\n");
         }
         break;
     case SystemTimeOfDayInformation:
@@ -683,7 +748,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
             memset(&sti, 0 , sizeof(sti));
 
             /* liKeSystemTime, liExpTimeZoneBias, uCurrentTimeZoneId */
-            NTDLL_from_server_abstime( &sti.liKeBootTime, &server_start_time );
+            sti.liKeBootTime.QuadPart = server_start_time;
 
             if (Length <= sizeof(sti))
             {
@@ -828,22 +893,13 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 else memcpy( SystemInformation, &sppi, len);
             }
             else ret = STATUS_INFO_LENGTH_MISMATCH;
+            FIXME("info_class SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION\n");
         }
         break;
     case SystemModuleInformation:
-        {
-            SYSTEM_MODULE_INFORMATION smi;
-
-            memset(&smi, 0, sizeof(smi));
-            len = sizeof(smi);
-
-            if ( Length >= len)
-            {
-                if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
-                else memcpy( SystemInformation, &smi, len);
-            }
-            else ret = STATUS_INFO_LENGTH_MISMATCH;
-        }
+        /* FIXME: should be system-wide */
+        if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
+        else ret = LdrQueryProcessModuleInformation( SystemInformation, Length, &len );
         break;
     case SystemHandleInformation:
         {
@@ -858,6 +914,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 else memcpy( SystemInformation, &shi, len);
             }
             else ret = STATUS_INFO_LENGTH_MISMATCH;
+            FIXME("info_class SYSTEM_HANDLE_INFORMATION\n");
         }
         break;
     case SystemCacheInformation:
@@ -873,6 +930,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 else memcpy( SystemInformation, &sci, len);
             }
             else ret = STATUS_INFO_LENGTH_MISMATCH;
+            FIXME("info_class SYSTEM_CACHE_INFORMATION\n");
         }
         break;
     case SystemInterruptInformation:
@@ -888,6 +946,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 else memcpy( SystemInformation, &sii, len);
             }
             else ret = STATUS_INFO_LENGTH_MISMATCH;
+            FIXME("info_class SYSTEM_INTERRUPT_INFORMATION\n");
         }
         break;
     case SystemKernelDebuggerInformation:
@@ -1077,25 +1136,28 @@ NTSTATUS WINAPI NtShutdownSystem(SHUTDOWN_ACTION Action)
 
 /******************************************************************************
  *  NtAllocateLocallyUniqueId (NTDLL.@)
- *
- * FIXME: the server should do that
  */
 NTSTATUS WINAPI NtAllocateLocallyUniqueId(PLUID Luid)
 {
-    static LUID luid = { SE_MAX_WELL_KNOWN_PRIVILEGE, 0 };
+    NTSTATUS status;
 
-    FIXME("%p\n", Luid);
+    TRACE("%p\n", Luid);
 
     if (!Luid)
         return STATUS_ACCESS_VIOLATION;
 
-    luid.LowPart++;
-    if (luid.LowPart==0)
-        luid.HighPart++;
-    Luid->HighPart = luid.HighPart;
-    Luid->LowPart = luid.LowPart;
+    SERVER_START_REQ( allocate_locally_unique_id )
+    {
+        status = wine_server_call( req );
+        if (!status)
+        {
+            Luid->LowPart = reply->luid.low_part;
+            Luid->HighPart = reply->luid.high_part;
+        }
+    }
+    SERVER_END_REQ;
 
-    return STATUS_SUCCESS;
+    return status;
 }
 
 /******************************************************************************

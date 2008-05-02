@@ -45,6 +45,7 @@ struct async;
 struct async_queue;
 struct winstation;
 struct directory;
+struct object_type;
 
 
 struct unicode_str
@@ -60,6 +61,8 @@ struct object_ops
     size_t size;
     /* dump the object (for debugging) */
     void (*dump)(struct object *,int);
+    /* return the object type */
+    struct object_type *(*get_type)(struct object *);
     /* add a thread to the object wait queue */
     int  (*add_queue)(struct object *,struct wait_queue_entry *);
     /* remove a thread from the object wait queue */
@@ -74,8 +77,15 @@ struct object_ops
     struct fd *(*get_fd)(struct object *);
     /* map access rights to the specific rights for this object */
     unsigned int (*map_access)(struct object *, unsigned int);
+    /* returns the security descriptor of the object */
+    struct security_descriptor *(*get_sd)( struct object * );
+    /* sets the security descriptor of the object */
+    int (*set_sd)( struct object *, const struct security_descriptor *, unsigned int );
     /* lookup a name if an object has a namespace */
     struct object *(*lookup_name)(struct object *, struct unicode_str *,unsigned int);
+    /* open a file object to access this object */
+    struct object *(*open_file)(struct object *, unsigned int access, unsigned int sharing,
+                                unsigned int options);
     /* close a handle to this object */
     int (*close_handle)(struct object *,struct process *,obj_handle_t);
     /* destroy on refcount == 0 */
@@ -88,6 +98,7 @@ struct object
     const struct object_ops  *ops;
     struct list               wait_queue;
     struct object_name       *name;
+    struct security_descriptor *sd;
 #ifdef DEBUG_OBJECTS
     struct list               obj_list;
 #endif
@@ -118,12 +129,18 @@ extern struct object *grab_object( void *obj );
 extern void release_object( void *obj );
 extern struct object *find_object( const struct namespace *namespace, const struct unicode_str *name,
                                    unsigned int attributes );
+extern struct object *find_object_index( const struct namespace *namespace, unsigned int index );
+extern struct object_type *no_get_type( struct object *obj );
 extern int no_add_queue( struct object *obj, struct wait_queue_entry *entry );
 extern int no_satisfied( struct object *obj, struct thread *thread );
 extern int no_signal( struct object *obj, unsigned int access );
 extern struct fd *no_get_fd( struct object *obj );
 extern unsigned int no_map_access( struct object *obj, unsigned int access );
+extern struct security_descriptor *default_get_sd( struct object *obj );
+extern int default_set_sd( struct object *obj, const struct security_descriptor *sd, unsigned int set_info );
 extern struct object *no_lookup_name( struct object *obj, struct unicode_str *name, unsigned int attributes );
+extern struct object *no_open_file( struct object *obj, unsigned int access, unsigned int sharing,
+                                    unsigned int options );
 extern int no_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 extern void no_destroy( struct object *obj );
 #ifdef DEBUG_OBJECTS
@@ -136,7 +153,8 @@ extern void close_objects(void);
 struct event;
 
 extern struct event *create_event( struct directory *root, const struct unicode_str *name,
-                                   unsigned int attr, int manual_reset, int initial_state );
+                                   unsigned int attr, int manual_reset, int initial_state,
+                                   const struct security_descriptor *sd );
 extern struct event *get_event_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern void pulse_event( struct event *event );
 extern void set_event( struct event *event );
@@ -193,6 +211,7 @@ extern void *create_named_object_dir( struct directory *root, const struct unico
                                       unsigned int attr, const struct object_ops *ops );
 extern void *open_object_dir( struct directory *root, const struct unicode_str *name,
                               unsigned int attr, const struct object_ops *ops );
+extern struct object_type *get_object_type( const struct unicode_str *name );
 extern void init_directories(void);
 
 /* symbolic link functions */
@@ -208,11 +227,11 @@ extern void create_mailslot_device( struct directory *root, const struct unicode
 
   /* command-line options */
 extern int debug_level;
-extern int master_socket_timeout;
 extern int foreground;
+extern timeout_t master_socket_timeout;
 extern const char *server_argv0;
 
   /* server start time used for GetTickCount() */
-extern struct timeval server_start_time;
+extern timeout_t server_start_time;
 
 #endif  /* __WINE_SERVER_OBJECT_H */

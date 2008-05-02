@@ -556,7 +556,7 @@ static void MSCDEX_Request(BYTE *driver_request, BOOL dorealmode)
      * the following tests are wrong because lots of functions don't require the
      * tray to be closed with a CD inside
      */
-    TRACE("CDROM device driver -> command <%d>\n", (unsigned char)driver_request[2]);
+    TRACE("CDROM device driver -> command <%d>\n", driver_request[2]);
 
     MSCDEX_Dump("Beg", driver_request, dorealmode);
 
@@ -564,7 +564,7 @@ static void MSCDEX_Request(BYTE *driver_request, BOOL dorealmode)
     PTR_AT(driver_request, 3, WORD) = 0;
     devName[4] = 'A' + CDROM_GetHeap()->hdr.drive + driver_request[1];
     h = CreateFileA(devName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
-    if (!h) {
+    if (h == INVALID_HANDLE_VALUE) {
         WARN("Couldn't open cdrom handle\n");
         driver_request[4] |= 0x80;
         driver_request[3] = 1;  /* unknown unit */
@@ -846,8 +846,7 @@ static void MSCDEX_Request(BYTE *driver_request, BOOL dorealmode)
 
         at = PTR_AT(driver_request, 20, DWORD);
 
-        TRACE(" --> SEEK AUDIO mode :<0x%02X>, [%d]\n",
-              (BYTE)driver_request[13], at);
+        TRACE(" --> SEEK AUDIO mode :<0x%02X>, [%d]\n", driver_request[13], at);
 
         switch (driver_request[13]) {
         case 1: /* Red book addressing mode = 0:m:s:f */
@@ -881,8 +880,7 @@ static void MSCDEX_Request(BYTE *driver_request, BOOL dorealmode)
         beg = end = PTR_AT(driver_request, 14, DWORD);
         end += PTR_AT(driver_request, 18, DWORD);
 
-        TRACE(" --> PLAY AUDIO mode :<0x%02X>, [%d-%d]\n",
-              (BYTE)driver_request[13], beg, end);
+        TRACE(" --> PLAY AUDIO mode :<0x%02X>, [%d-%d]\n", driver_request[13], beg, end);
 
         switch (driver_request[13]) {
         case 1:

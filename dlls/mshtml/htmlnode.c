@@ -43,38 +43,33 @@ static HRESULT WINAPI HTMLDOMNode_QueryInterface(IHTMLDOMNode *iface,
                                                  REFIID riid, void **ppv)
 {
     HTMLDOMNode *This = HTMLDOMNODE_THIS(iface);
-    HRESULT hres;
 
-    if(This->impl.unk)
-        return IUnknown_QueryInterface(This->impl.unk, riid, ppv);
-
-    hres = HTMLDOMNode_QI(This, riid, ppv);
-    if(FAILED(hres))
-        WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
-
-    return hres;
+    return This->vtbl->qi(This, riid, ppv);
 }
 
 static ULONG WINAPI HTMLDOMNode_AddRef(IHTMLDOMNode *iface)
 {
     HTMLDOMNode *This = HTMLDOMNODE_THIS(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
 
-    if(This->impl.unk)
-        return IUnknown_AddRef(This->impl.unk);
+    TRACE("(%p) ref=%d\n", This, ref);
 
-    TRACE("(%p)\n", This);
-    return IHTMLDocument2_AddRef(HTMLDOC(This->doc));
+    return ref;
 }
 
 static ULONG WINAPI HTMLDOMNode_Release(IHTMLDOMNode *iface)
 {
     HTMLDOMNode *This = HTMLDOMNODE_THIS(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
 
-    if(This->impl.unk)
-        return IUnknown_Release(This->impl.unk);
+    TRACE("(%p) ref=%d\n", This, ref);
 
-    TRACE("(%p)\n", This);
-    return IHTMLDocument2_Release(HTMLDOC(This->doc));
+    if(!ref) {
+        This->vtbl->destructor(This);
+        heap_free(This);
+    }
+
+    return ref;
 }
 
 static HRESULT WINAPI HTMLDOMNode_GetTypeInfoCount(IHTMLDOMNode *iface, UINT *pctinfo)
@@ -214,8 +209,30 @@ static HRESULT WINAPI HTMLDOMNode_appendChild(IHTMLDOMNode *iface, IHTMLDOMNode 
 static HRESULT WINAPI HTMLDOMNode_get_nodeName(IHTMLDOMNode *iface, BSTR *p)
 {
     HTMLDOMNode *This = HTMLDOMNODE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    *p = NULL;
+
+    if(This->nsnode) {
+        nsAString name_str;
+        const PRUnichar *name;
+        nsresult nsres;
+
+        nsAString_Init(&name_str, NULL);
+        nsres = nsIDOMNode_GetNodeName(This->nsnode, &name_str);
+
+        if(NS_SUCCEEDED(nsres)) {
+            nsAString_GetData(&name_str, &name);
+            *p = SysAllocString(name);
+        }else {
+            ERR("GetNodeName failed: %08x\n", nsres);
+        }
+
+        nsAString_Finish(&name_str);
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDOMNode_put_nodeValue(IHTMLDOMNode *iface, VARIANT v)
@@ -310,7 +327,45 @@ HRESULT HTMLDOMNode_QI(HTMLDOMNode *This, REFIID riid, void **ppv)
         return S_OK;
     }
 
+    WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
     return E_NOINTERFACE;
+}
+
+void HTMLDOMNode_destructor(HTMLDOMNode *This)
+{
+    if(This->nsnode)
+        nsIDOMNode_Release(This->nsnode);
+}
+
+static const NodeImplVtbl HTMLDOMNodeImplVtbl = {
+    HTMLDOMNode_QI,
+    HTMLDOMNode_destructor
+};
+
+static HTMLDOMNode *create_node(HTMLDocument *doc, nsIDOMNode *nsnode)
+{
+    HTMLDOMNode *ret;
+    PRUint16 node_type;
+
+    nsIDOMNode_GetNodeType(nsnode, &node_type);
+
+    switch(node_type) {
+    case ELEMENT_NODE:
+        ret = &HTMLElement_Create(nsnode)->node;
+        break;
+    default:
+        ret = heap_alloc(sizeof(HTMLDOMNode));
+        ret->vtbl = &HTMLDOMNodeImplVtbl;
+    }
+
+    ret->lpHTMLDOMNodeVtbl = &HTMLDOMNodeVtbl;
+    ret->ref = 1;
+    ret->doc = doc;
+
+    nsIDOMNode_AddRef(nsnode);
+    ret->nsnode = nsnode;
+
+    return ret;
 }
 
 /*
@@ -322,7 +377,6 @@ HRESULT HTMLDOMNode_QI(HTMLDOMNode *This, REFIID riid, void **ppv)
 HTMLDOMNode *get_node(HTMLDocument *This, nsIDOMNode *nsnode)
 {
     HTMLDOMNode *iter = This->nodes, *ret;
-    PRUint16 node_type;
 
     while(iter) {
         if(iter->nsnode == nsnode)
@@ -333,24 +387,10 @@ HTMLDOMNode *get_node(HTMLDocument *This, nsIDOMNode *nsnode)
     if(iter)
         return iter;
 
-    ret = mshtml_alloc(sizeof(HTMLDOMNode));
-    ret->lpHTMLDOMNodeVtbl = &HTMLDOMNodeVtbl;
-    ret->node_type = NT_UNKNOWN;
-    ret->impl.unk = NULL;
-    ret->destructor = NULL;
-    ret->doc = This;
-
-    nsIDOMNode_AddRef(nsnode);
-    ret->nsnode = nsnode;
+    ret = create_node(This, nsnode);
 
     ret->next = This->nodes;
     This->nodes = ret;
-
-    nsIDOMNode_GetNodeType(nsnode, &node_type);
-
-    if(node_type == NS_ELEMENT_NODE
-       || node_type == NS_DOCUMENT_NODE)
-        HTMLElement_Create(ret);
 
     return ret;
 }
@@ -364,9 +404,7 @@ void release_nodes(HTMLDocument *This)
 
     for(iter = This->nodes; iter; iter = next) {
         next = iter->next;
-        if(iter->destructor)
-            iter->destructor(iter->impl.unk);
-        nsIDOMNode_Release(iter->nsnode);
-        mshtml_free(iter);
+        iter->doc = NULL;
+        IHTMLDOMNode_Release(HTMLDOMNODE(iter));
     }
 }

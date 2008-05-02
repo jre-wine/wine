@@ -20,7 +20,6 @@
 
 #include <stdarg.h>
 
-#include <wine/test.h>
 #include <windef.h>
 #include <winbase.h>
 #include <winerror.h>
@@ -28,14 +27,31 @@
 #include <lmerr.h>
 #include <lmapibuf.h>
 
+#include "wine/test.h"
+
 WCHAR user_name[UNLEN + 1];
 WCHAR computer_name[MAX_COMPUTERNAME_LENGTH + 1];
 
-static const WCHAR sAdminUserName[] = {'A','d','m','i','n','i','s','t','r','a','t',
-                                'o','r',0};
-static const WCHAR sGuestUserName[] = {'G','u','e','s','t',0};
 static const WCHAR sNonexistentUser[] = {'N','o','n','e','x','i','s','t','e','n','t',' ',
                                 'U','s','e','r',0};
+static WCHAR sTooLongName[] = {'T','h','i','s',' ','i','s',' ','a',' ','b','a','d',
+    ' ','u','s','e','r','n','a','m','e',0};
+static WCHAR sTooLongPassword[] = {'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h','a','b','c','d','e','f','g','h',
+    'a', 0};
+
+static WCHAR sTestUserName[] = {'t', 'e', 's', 't', 'u', 's', 'e', 'r', 0};
+static WCHAR sTestUserOldPass[] = {'o', 'l', 'd', 'p', 'a', 's', 's', 0};
+static WCHAR sTestUserNewPass[] = {'n', 'e', 'w', 'p', 'a', 's', 's', 0};
 static const WCHAR sBadNetPath[] = {'\\','\\','B','a',' ',' ','p','a','t','h',0};
 static const WCHAR sInvalidName[] = {'\\',0};
 static const WCHAR sInvalidName2[] = {'\\','\\',0};
@@ -46,6 +62,9 @@ static NET_API_STATUS (WINAPI *pNetApiBufferSize)(LPVOID,LPDWORD)=NULL;
 static NET_API_STATUS (WINAPI *pNetQueryDisplayInformation)(LPWSTR,DWORD,DWORD,DWORD,DWORD,LPDWORD,PVOID*)=NULL;
 static NET_API_STATUS (WINAPI *pNetUserGetInfo)(LPCWSTR,LPCWSTR,DWORD,LPBYTE*)=NULL;
 static NET_API_STATUS (WINAPI *pNetUserModalsGet)(LPCWSTR,DWORD,LPBYTE*)=NULL;
+static NET_API_STATUS (WINAPI *pNetUserAdd)(LPCWSTR,DWORD,LPBYTE,LPDWORD)=NULL;
+static NET_API_STATUS (WINAPI *pNetUserChangePassword)(LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR)=NULL;
+static NET_API_STATUS (WINAPI *pNetUserDel)(LPCWSTR,LPCWSTR)=NULL;
 
 static int init_access_tests(void)
 {
@@ -56,13 +75,36 @@ static int init_access_tests(void)
     dwSize = sizeof(user_name);
     rc=GetUserNameW(user_name, &dwSize);
     if (rc==FALSE && GetLastError()==ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("GetUserNameW is not available.\n");
         return 0;
+    }
     ok(rc, "User Name Retrieved\n");
 
     computer_name[0] = 0;
     dwSize = sizeof(computer_name);
     ok(GetComputerNameW(computer_name, &dwSize), "Computer Name Retrieved\n");
     return 1;
+}
+
+static NET_API_STATUS create_test_user(void)
+{
+    USER_INFO_1 usri;
+
+    usri.usri1_name = sTestUserName;
+    usri.usri1_password = sTestUserOldPass;
+    usri.usri1_priv = USER_PRIV_USER;
+    usri.usri1_home_dir = NULL;
+    usri.usri1_comment = NULL;
+    usri.usri1_flags = UF_SCRIPT;
+    usri.usri1_script_path = NULL;
+
+    return pNetUserAdd(NULL, 1, (LPBYTE)&usri, NULL);
+}
+
+static NET_API_STATUS delete_test_user(void)
+{
+    return pNetUserDel(NULL, sTestUserName);
 }
 
 static void run_usergetinfo_tests(void)
@@ -72,26 +114,25 @@ static void run_usergetinfo_tests(void)
     PUSER_INFO_10 ui10 = NULL;
     DWORD dwSize;
 
-    /* If this one is not defined then none of the others will be defined */
-    if (!pNetUserGetInfo)
+    if((rc = create_test_user()) != NERR_Success )
+    {
+        skip("Skipping usergetinfo_tests, create_test_user failed: 0x%08x\n", rc);
         return;
+    }
 
     /* Level 0 */
-    rc=pNetUserGetInfo(NULL, sAdminUserName, 0, (LPBYTE *)&ui0);
-    if (rc != NERR_Success) {
-        trace ("Aborting usergetinfo_tests().   NetUserGetInfo: rc=%d\n", rc);
-	return;
-    }
-    ok(!lstrcmpW(sAdminUserName, ui0->usri0_name), "This is really user name\n");
+    rc=pNetUserGetInfo(NULL, sTestUserName, 0, (LPBYTE *)&ui0);
+    ok(rc == NERR_Success, "NetUserGetInfo level 0 failed: 0x%08x.\n", rc);
+    ok(!lstrcmpW(sTestUserName, ui0->usri0_name),"Username mismatch for level 0.\n");
     pNetApiBufferSize(ui0, &dwSize);
     ok(dwSize >= (sizeof(USER_INFO_0) +
                   (lstrlenW(ui0->usri0_name) + 1) * sizeof(WCHAR)),
        "Is allocated with NetApiBufferAllocate\n");
 
     /* Level 10 */
-    rc=pNetUserGetInfo(NULL, sAdminUserName, 10, (LPBYTE *)&ui10);
-    ok(rc == NERR_Success, "NetUserGetInfo: rc=%d\n", rc);
-    ok(!lstrcmpW(sAdminUserName, ui10->usri10_name), "This is really user name\n");
+    rc=pNetUserGetInfo(NULL, sTestUserName, 10, (LPBYTE *)&ui10);
+    ok(rc == NERR_Success, "NetUserGetInfo level 10 failed: 0x%08x.\n", rc);
+    ok(!lstrcmpW(sTestUserName, ui10->usri10_name), "Username mismatch for level 10.\n");
     pNetApiBufferSize(ui10, &dwSize);
     ok(dwSize >= (sizeof(USER_INFO_10) +
                   (lstrlenW(ui10->usri10_name) + 1 +
@@ -104,26 +145,31 @@ static void run_usergetinfo_tests(void)
     pNetApiBufferFree(ui10);
 
     /* errors handling */
-    rc=pNetUserGetInfo(NULL, sAdminUserName, 10000, (LPBYTE *)&ui0);
+    rc=pNetUserGetInfo(NULL, sTestUserName, 10000, (LPBYTE *)&ui0);
     ok(rc == ERROR_INVALID_LEVEL,"Invalid Level: rc=%d\n",rc);
     rc=pNetUserGetInfo(NULL, sNonexistentUser, 0, (LPBYTE *)&ui0);
     ok(rc == NERR_UserNotFound,"Invalid User Name: rc=%d\n",rc);
     todo_wine {
         /* FIXME - Currently Wine can't verify whether the network path is good or bad */
-        rc=pNetUserGetInfo(sBadNetPath, sAdminUserName, 0, (LPBYTE *)&ui0);
+        rc=pNetUserGetInfo(sBadNetPath, sTestUserName, 0, (LPBYTE *)&ui0);
         ok(rc == ERROR_BAD_NETPATH || rc == ERROR_NETWORK_UNREACHABLE,
            "Bad Network Path: rc=%d\n",rc);
     }
-    rc=pNetUserGetInfo(sEmptyStr, sAdminUserName, 0, (LPBYTE *)&ui0);
+    rc=pNetUserGetInfo(sEmptyStr, sTestUserName, 0, (LPBYTE *)&ui0);
     ok(rc == ERROR_BAD_NETPATH || rc == NERR_Success,
        "Bad Network Path: rc=%d\n",rc);
-    rc=pNetUserGetInfo(sInvalidName, sAdminUserName, 0, (LPBYTE *)&ui0);
+    rc=pNetUserGetInfo(sInvalidName, sTestUserName, 0, (LPBYTE *)&ui0);
     ok(rc == ERROR_INVALID_NAME,"Invalid Server Name: rc=%d\n",rc);
-    rc=pNetUserGetInfo(sInvalidName2, sAdminUserName, 0, (LPBYTE *)&ui0);
+    rc=pNetUserGetInfo(sInvalidName2, sTestUserName, 0, (LPBYTE *)&ui0);
     ok(rc == ERROR_INVALID_NAME,"Invalid Server Name: rc=%d\n",rc);
+
+    if(delete_test_user() != NERR_Success)
+        trace("Deleting the test user failed. You might have to manually delete it.\n");
 }
 
-/* checks Level 1 of NetQueryDisplayInformation */
+/* checks Level 1 of NetQueryDisplayInformation
+ * FIXME: Needs to be rewritten to not depend on the spelling of the users,
+ * ideally based on the admin and guest user SIDs/RIDs.*/
 static void run_querydisplayinformation1_tests(void)
 {
     PNET_DISPLAY_USER Buffer, rec;
@@ -131,9 +177,9 @@ static void run_querydisplayinformation1_tests(void)
     DWORD i = 0;
     BOOL hasAdmin = FALSE;
     BOOL hasGuest = FALSE;
-
-    if (!pNetQueryDisplayInformation)
-        return;
+    static const WCHAR sAdminUserName[] = {'A','d','m','i','n','i','s','t','r','a',
+        't','o','r',0};
+    static const WCHAR sGuestUserName[] = {'G','u','e','s','t',0};
 
     do
     {
@@ -183,21 +229,130 @@ static void run_usermodalsget_tests(void)
         pNetApiBufferFree(umi2);
 }
 
+static void run_userhandling_tests(void)
+{
+    NET_API_STATUS ret;
+    USER_INFO_1 usri;
+
+    usri.usri1_priv = USER_PRIV_USER;
+    usri.usri1_home_dir = NULL;
+    usri.usri1_comment = NULL;
+    usri.usri1_flags = UF_SCRIPT;
+    usri.usri1_script_path = NULL;
+
+    usri.usri1_name = sTooLongName;
+    usri.usri1_password = sTestUserOldPass;
+
+    ret = pNetUserAdd(NULL, 1, (LPBYTE)&usri, NULL);
+    if (ret == NERR_Success || ret == NERR_UserExists)
+    {
+        /* Windows NT4 does create the user. Delete the user and also if it already existed
+         * due to a previous test run on NT4.
+         */
+        trace("We are on NT4, we have to delete the user with the too long username\n");
+        ret = pNetUserDel(NULL, sTooLongName);
+        ok(ret == NERR_Success, "Deleting the user failed : %d\n", ret);
+    }
+    else
+        ok(ret == NERR_BadUsername, "Adding user with too long username returned 0x%08x\n", ret);
+
+    usri.usri1_name = sTestUserName;
+    usri.usri1_password = sTooLongPassword;
+
+    ret = pNetUserAdd(NULL, 1, (LPBYTE)&usri, NULL);
+    ok(ret == NERR_PasswordTooShort, "Adding user with too long password returned 0x%08x\n", ret);
+
+    usri.usri1_name = sTooLongName;
+    usri.usri1_password = sTooLongPassword;
+
+    ret = pNetUserAdd(NULL, 1, (LPBYTE)&usri, NULL);
+    /* NT4 doesn't have a problem with the username so it will report the too long password
+     * as the error. NERR_PasswordTooShort is reported for all kind of password related errors.
+     */
+    ok(ret == NERR_BadUsername || ret == NERR_PasswordTooShort,
+            "Adding user with too long username/password returned 0x%08x\n", ret);
+
+    usri.usri1_name = sTestUserName;
+    usri.usri1_password = sTestUserOldPass;
+
+    ret = pNetUserAdd(NULL, 5, (LPBYTE)&usri, NULL);
+    ok(ret == ERROR_INVALID_LEVEL, "Adding user with level 5 returned 0x%08x\n", ret);
+
+    ret = pNetUserAdd(NULL, 1, (LPBYTE)&usri, NULL);
+    if(ret == ERROR_ACCESS_DENIED)
+    {
+        skip("Insufficient permissions to add users. Skipping test.\n");
+        return;
+    }
+    if(ret == NERR_UserExists)
+    {
+        skip("User already exists, skipping test to not mess up the system\n");
+        return;
+    }
+
+    ok(ret == NERR_Success, "Adding user failed with error 0x%08x\n", ret);
+    if(ret != NERR_Success)
+        return;
+
+    ret = pNetUserChangePassword(NULL, sNonexistentUser, sTestUserOldPass,
+            sTestUserNewPass);
+    ok(ret == NERR_UserNotFound || ret == ERROR_INVALID_PASSWORD,
+            "Changing password for nonexistent user returned 0x%08x.\n", ret);
+
+    ret = pNetUserChangePassword(NULL, sTestUserName, sTestUserOldPass,
+            sTestUserOldPass);
+    ok(ret == NERR_Success,
+            "Changing old password to old password returned 0x%08x.\n", ret);
+
+    ret = pNetUserChangePassword(NULL, sTestUserName, sTestUserNewPass,
+            sTestUserOldPass);
+    ok(ret == ERROR_INVALID_PASSWORD,
+            "Trying to change password giving an invalid password returned 0x%08x.\n", ret);
+
+    ret = pNetUserChangePassword(NULL, sTestUserName, sTestUserOldPass,
+            sTooLongPassword);
+    ok(ret == ERROR_PASSWORD_RESTRICTION,
+            "Changing to a password that's too long returned 0x%08x.\n", ret);
+
+    ret = pNetUserChangePassword(NULL, sTestUserName, sTestUserOldPass,
+            sTestUserNewPass);
+    ok(ret == NERR_Success, "Changing the password correctly returned 0x%08x.\n", ret);
+
+    ret = pNetUserDel(NULL, sTestUserName);
+    ok(ret == NERR_Success, "Deleting the user failed.\n");
+
+    ret = pNetUserDel(NULL, sTestUserName);
+    ok(ret == NERR_UserNotFound, "Deleting a nonexistent user returned 0x%08x\n",ret);
+}
+
 START_TEST(access)
 {
     HMODULE hnetapi32=LoadLibraryA("netapi32.dll");
+
     pNetApiBufferFree=(void*)GetProcAddress(hnetapi32,"NetApiBufferFree");
     pNetApiBufferSize=(void*)GetProcAddress(hnetapi32,"NetApiBufferSize");
     pNetQueryDisplayInformation=(void*)GetProcAddress(hnetapi32,"NetQueryDisplayInformation");
     pNetUserGetInfo=(void*)GetProcAddress(hnetapi32,"NetUserGetInfo");
     pNetUserModalsGet=(void*)GetProcAddress(hnetapi32,"NetUserModalsGet");
+    pNetUserAdd=(void*)GetProcAddress(hnetapi32, "NetUserAdd");
+    pNetUserChangePassword=(void*)GetProcAddress(hnetapi32, "NetUserChangePassword");
+    pNetUserDel=(void*)GetProcAddress(hnetapi32, "NetUserDel");
 
-    if (!pNetApiBufferSize)
-        trace("It appears there is no netapi32 functionality on this platform\n");
+    /* These functions were introduced with NT. It's safe to assume that
+     * if one is not available, none are.
+     */
+    if (!pNetApiBufferFree) {
+        skip("Needed functions are not available\n");
+        FreeLibrary(hnetapi32);
+        return;
+    }
 
     if (init_access_tests()) {
+        run_userhandling_tests();
         run_usergetinfo_tests();
         run_querydisplayinformation1_tests();
         run_usermodalsget_tests();
     }
+
+    FreeLibrary(hnetapi32);
 }

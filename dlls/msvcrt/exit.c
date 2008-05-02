@@ -33,7 +33,7 @@ static MSVCRT__onexit_t *MSVCRT_atexit_table = NULL;
 static int MSVCRT_atexit_table_size = 0;
 static int MSVCRT_atexit_registered = 0; /* Points to free slot */
 
-static LPCSTR szMsgBoxTitle = "Wine C++ Runtime Library";
+static const char szMsgBoxTitle[] = "Wine C++ Runtime Library";
 
 extern int MSVCRT_app_type;
 extern char *MSVCRT__pgmptr;
@@ -41,7 +41,7 @@ extern char *MSVCRT__pgmptr;
 void (*_aexit_rtn)(int) = MSVCRT__exit;
 
 /* INTERNAL: call atexit functions */
-void __MSVCRT__call_atexit(void)
+static void __MSVCRT__call_atexit(void)
 {
   /* Note: should only be called with the exit lock held */
   TRACE("%d atext functions to call\n", MSVCRT_atexit_registered);
@@ -79,7 +79,7 @@ MSVCRT__onexit_t CDECL __dllonexit(MSVCRT__onexit_t func, MSVCRT__onexit_t **sta
   if (++len <= 0)
     return NULL;
 
-  tmp = (MSVCRT__onexit_t *)MSVCRT_realloc(*start, len * sizeof(tmp));
+  tmp = MSVCRT_realloc(*start, len * sizeof(tmp));
   if (!tmp)
     return NULL;
   *start = tmp;
@@ -155,6 +155,8 @@ void CDECL MSVCRT_abort(void)
   }
   else
     _cputs("\nabnormal program termination\n");
+  MSVCRT_raise(MSVCRT_SIGABRT);
+  /* in case raise() returns */
   MSVCRT__exit(3);
 }
 
@@ -172,6 +174,8 @@ void CDECL MSVCRT__assert(const char* str, const char* file, unsigned int line)
   }
   else
     _cprintf("Assertion failed: %s, file %s, line %d\n\n",str, file, line);
+  MSVCRT_raise(MSVCRT_SIGABRT);
+  /* in case raise() returns */
   MSVCRT__exit(3);
 }
 
