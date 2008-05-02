@@ -13,7 +13,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * Lesser General Public License for more details.
  *
- * You should have receuved a copy of the GNU Lesser General Public
+ * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
@@ -138,7 +138,7 @@ static UINT UPDATE_get_column_info( struct tagMSIVIEW *view,
 }
 
 static UINT UPDATE_modify( struct tagMSIVIEW *view, MSIMODIFY eModifyMode,
-                MSIRECORD *rec )
+                           MSIRECORD *rec, UINT row )
 {
     MSIUPDATEVIEW *uv = (MSIUPDATEVIEW*)view;
 
@@ -171,9 +171,11 @@ static UINT UPDATE_find_matching_rows( struct tagMSIVIEW *view, UINT col, UINT v
 }
 
 
-static MSIVIEWOPS update_ops =
+static const MSIVIEWOPS update_ops =
 {
     UPDATE_fetch_int,
+    NULL,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -183,10 +185,14 @@ static MSIVIEWOPS update_ops =
     UPDATE_get_column_info,
     UPDATE_modify,
     UPDATE_delete,
-    UPDATE_find_matching_rows
+    UPDATE_find_matching_rows,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
-UINT UPDATE_CreateView( MSIDATABASE *db, MSIVIEW **view, LPWSTR table,
+UINT UPDATE_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR table,
                         column_info *columns, struct expr *expr )
 {
     MSIUPDATEVIEW *uv = NULL;

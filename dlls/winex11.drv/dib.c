@@ -111,7 +111,7 @@ static void X11DRV_DIB_Unlock(X_PHYSBITMAP *,BOOL);
  *
  * Return the width of an X image in bytes
  */
-inline static int X11DRV_DIB_GetXImageWidthBytes( int width, int depth )
+static inline int X11DRV_DIB_GetXImageWidthBytes( int width, int depth )
 {
     if (!depth || depth > 32) goto error;
 
@@ -312,7 +312,7 @@ static int *X11DRV_DIB_GenColorMap( X11DRV_PDEVICE *physDev, int *colorMapping,
             }
             else
                 for (i = start; i < end; i++, rgb++)
-                    colorMapping[i] = X11DRV_PALETTE_ToPhysical( physDev, RGB(rgb->rgbRed,
+                    colorMapping[i] = X11DRV_PALETTE_ToPhysical( NULL, RGB(rgb->rgbRed,
                                                                 rgb->rgbGreen,
                                                                 rgb->rgbBlue));
         }
@@ -336,7 +336,7 @@ static int *X11DRV_DIB_GenColorMap( X11DRV_PDEVICE *physDev, int *colorMapping,
             }
             else
                 for (i = start; i < end; i++, rgb++)
-                    colorMapping[i] = X11DRV_PALETTE_ToPhysical( physDev, RGB(rgb->rgbtRed,
+                    colorMapping[i] = X11DRV_PALETTE_ToPhysical( NULL, RGB(rgb->rgbtRed,
                                                                rgb->rgbtGreen,
                                                                rgb->rgbtBlue));
         }
@@ -3462,7 +3462,7 @@ static void X11DRV_DIB_SetImageBits_GetSubImage(
              descr->xDest + descr->width , descr->yDest + descr->height );
     GetRgnBox( descr->physDev->region, &rc );
     /* convert from dc to drawable origin */
-    OffsetRect( &rc, descr->physDev->org.x, descr->physDev->org.y);
+    OffsetRect( &rc, descr->physDev->dc_rect.left, descr->physDev->dc_rect.top);
     /* clip visible rect with bitmap */
     if( IntersectRect( &rc, &rc, &bmprc))
     {
@@ -3618,7 +3618,11 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
     }
 
 #ifdef HAVE_LIBXXSHM
-    if (descr->image && descr->useShm)
+
+    /* We must not call XShmGetImage() with a bitmap which is bigger than the avilable area.
+       If we do, XShmGetImage() will fail (X exception), as it checks for this internally. */
+    if((descr->image && descr->useShm) && (bmpImage->width <= (descr->width - descr->xSrc))
+      && (bmpImage->height <= (descr->height - descr->ySrc)))
     {
         int saveRed, saveGreen, saveBlue;
 
@@ -3833,8 +3837,8 @@ INT X11DRV_SetDIBitsToDevice( X11DRV_PDEVICE *physDev, INT xDest, INT yDest, DWO
     descr.gc        = physDev->gc;
     descr.xSrc      = xSrc;
     descr.ySrc      = ySrc;
-    descr.xDest     = physDev->org.x + pt.x;
-    descr.yDest     = physDev->org.y + pt.y;
+    descr.xDest     = physDev->dc_rect.left + pt.x;
+    descr.yDest     = physDev->dc_rect.top + pt.y;
     descr.width     = cx;
     descr.height    = cy;
     descr.useShm    = FALSE;
@@ -4229,7 +4233,7 @@ void X11DRV_DIB_CopyDIBSection(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physD
     /* perform the copy */
     X11DRV_DIB_DoCopyDIBSection(physBitmap, FALSE, colorMap, nColorMap,
 				physDevDst->drawable, physDevDst->gc, xSrc, ySrc,
-                                physDevDst->org.x + xDest, physDevDst->org.y + yDest,
+                                physDevDst->dc_rect.left + xDest, physDevDst->dc_rect.top + yDest,
 				width, height);
     /* free color mapping */
     if (aColorMap)
@@ -4608,6 +4612,7 @@ HBITMAP X11DRV_CreateDIBSection( X11DRV_PDEVICE *physDev, HBITMAP hbitmap,
 
       /* install fault handler */
     InitializeCriticalSection( &physBitmap->lock );
+    physBitmap->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": X_PHYSBITMAP.lock");
 
     physBitmap->base   = dib.dsBm.bmBits;
     physBitmap->size   = dib.dsBmih.biSizeImage;
@@ -4663,6 +4668,7 @@ void X11DRV_DIB_DeleteDIBSection(X_PHYSBITMAP *physBitmap, DIBSECTION *dib)
   }
 
   HeapFree(GetProcessHeap(), 0, physBitmap->colorMap);
+  physBitmap->lock.DebugInfo->Spare[0] = 0;
   DeleteCriticalSection(&physBitmap->lock);
 }
 

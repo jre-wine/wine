@@ -50,7 +50,7 @@ typedef struct IDirectPlayLobby3Impl IDirectPlayLobby3WImpl;
 HRESULT DPL_CreateCompoundAddress ( LPCDPCOMPOUNDADDRESSELEMENT lpElements, DWORD dwElementCount,
                                     LPVOID lpAddress, LPDWORD lpdwAddressSize, BOOL bAnsiInterface );
 
-HRESULT DPL_CreateAddress( REFGUID guidSP, REFGUID guidDataType, LPCVOID lpData, DWORD dwDataSize,
+static HRESULT DPL_CreateAddress( REFGUID guidSP, REFGUID guidDataType, LPCVOID lpData, DWORD dwDataSize,
                            LPVOID lpAddress, LPDWORD lpdwAddressSize, BOOL bAnsiInterface );
 
 
@@ -62,7 +62,7 @@ static HRESULT WINAPI DPL_ConnectEx( IDirectPlayLobbyAImpl* This,
                                      DWORD dwFlags, REFIID riid,
                                      LPVOID* lplpDP, IUnknown* pUnk );
 
-BOOL DPL_CreateAndSetLobbyHandles( DWORD dwDestProcessId, HANDLE hDestProcess,
+static BOOL DPL_CreateAndSetLobbyHandles( DWORD dwDestProcessId, HANDLE hDestProcess,
                                    LPHANDLE lphStart, LPHANDLE lphDeath,
                                    LPHANDLE lphRead );
 
@@ -154,6 +154,7 @@ static BOOL DPL_CreateIUnknown( LPVOID lpDPL )
   }
 
   InitializeCriticalSection( &This->unk->DPL_lock );
+  This->unk->DPL_lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IDirectPlayLobbyAImpl*->DirectPlayLobbyIUnknownData*->DPL_lock");
 
   return TRUE;
 }
@@ -162,6 +163,7 @@ static BOOL DPL_DestroyIUnknown( LPVOID lpDPL )
 {
   IDirectPlayLobbyAImpl *This = (IDirectPlayLobbyAImpl *)lpDPL;
 
+  This->unk->DPL_lock.DebugInfo->Spare[0] = 0;
   DeleteCriticalSection( &This->unk->DPL_lock );
   HeapFree( GetProcessHeap(), 0, This->unk );
 
@@ -610,7 +612,7 @@ static HRESULT WINAPI IDirectPlayLobbyWImpl_CreateAddress
                             lpAddress, lpdwAddressSize, FALSE );
 }
 
-HRESULT DPL_CreateAddress(
+static HRESULT DPL_CreateAddress(
   REFGUID guidSP,
   REFGUID guidDataType,
   LPCVOID lpData,
@@ -692,7 +694,7 @@ extern HRESULT DPL_EnumAddress( LPDPENUMADDRESSCALLBACK lpEnumAddressCallback, L
     /* Invoke the enum method. If false is returned, stop enumeration */
     if ( !lpEnumAddressCallback( &lpElements->guidDataType,
                                  lpElements->dwDataSize,
-                                 (BYTE*)lpElements + sizeof( DPADDRESS ),
+                                 (const BYTE *)lpElements + sizeof( DPADDRESS ),
                                  lpContext ) )
     {
       break;
@@ -1143,7 +1145,7 @@ static BOOL CALLBACK RunApplicationA_EnumLocalApplications
   return TRUE; /* Keep enumerating, haven't found the application yet */
 }
 
-BOOL DPL_CreateAndSetLobbyHandles( DWORD dwDestProcessId, HANDLE hDestProcess,
+static BOOL DPL_CreateAndSetLobbyHandles( DWORD dwDestProcessId, HANDLE hDestProcess,
                                    LPHANDLE lphStart, LPHANDLE lphDeath,
                                    LPHANDLE lphRead )
 {

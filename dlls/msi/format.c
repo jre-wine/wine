@@ -33,8 +33,12 @@ http://msdn.microsoft.com/library/default.asp?url=/library/en-us/msi/setup/msifo
 #include "winerror.h"
 #include "wine/debug.h"
 #include "msi.h"
-#include "msipriv.h"
 #include "winnls.h"
+#include "objbase.h"
+#include "oleauto.h"
+
+#include "msipriv.h"
+#include "msiserver.h"
 #include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msi);
@@ -45,7 +49,7 @@ static DWORD deformat_string_internal(MSIPACKAGE *package, LPCWSTR ptr,
                                      BOOL* in_group);
 
 
-static LPWSTR build_default_format(MSIRECORD* record)
+static LPWSTR build_default_format(const MSIRECORD* record)
 {
     int i;  
     int count;
@@ -113,16 +117,17 @@ static LPWSTR deformat_component(MSIPACKAGE* package, LPCWSTR key, DWORD* sz)
 {
     LPWSTR value = NULL;
     MSICOMPONENT *comp;
+    BOOL source;
 
     *sz = 0;
     if (!package)
         return NULL;
 
-    FIXME("component key %s\n", debugstr_w(key));
     comp = get_loaded_component(package,key);
     if (comp)
     {
-        value = resolve_folder(package, comp->Directory, FALSE, FALSE, NULL);
+        source = (comp->Action == INSTALLSTATE_SOURCE) ? TRUE : FALSE;
+        value = resolve_folder(package, comp->Directory, source, FALSE, TRUE, NULL);
         *sz = (strlenW(value)) * sizeof(WCHAR);
     }
 
@@ -162,8 +167,6 @@ static LPWSTR deformat_file(MSIPACKAGE* package, LPCWSTR key, DWORD* sz,
             }
             else
             {
-                ERR("Unable to get ShortPath size (%s)\n",
-                    debugstr_w( file->TargetPath) );
                 value = strdupW( file->TargetPath );
                 *sz = (lstrlenW(value)) * sizeof(WCHAR);
             }
@@ -608,7 +611,7 @@ static DWORD deformat_string_internal(MSIPACKAGE *package, LPCWSTR ptr,
 
 
 UINT MSI_FormatRecordW( MSIPACKAGE* package, MSIRECORD* record, LPWSTR buffer,
-                        DWORD *size )
+                        LPDWORD size )
 {
     LPWSTR deformated;
     LPWSTR rec;
@@ -654,65 +657,65 @@ UINT MSI_FormatRecordW( MSIPACKAGE* package, MSIRECORD* record, LPWSTR buffer,
     return rc;
 }
 
-UINT MSI_FormatRecordA( MSIPACKAGE* package, MSIRECORD* record, LPSTR buffer,
-                        DWORD *size )
-{
-    LPWSTR deformated;
-    LPWSTR rec;
-    DWORD len,lenA;
-    UINT rc = ERROR_INVALID_PARAMETER;
-
-    TRACE("%p %p %p %i\n", package, record ,buffer, *size);
-
-    rec = msi_dup_record_field(record,0);
-    if (!rec)
-        rec = build_default_format(record);
-
-    TRACE("(%s)\n",debugstr_w(rec));
-
-    len = deformat_string_internal(package,rec,&deformated,strlenW(rec),
-                                   record, NULL);
-    /* If len is zero then WideCharToMultiByte will return 0 indicating 
-     * failure, but that will do just as well since we are ignoring
-     * possible errors.
-     */
-    lenA = WideCharToMultiByte(CP_ACP,0,deformated,len,NULL,0,NULL,NULL);
-
-    if (buffer)
-    {
-        /* Ditto above */
-        WideCharToMultiByte(CP_ACP,0,deformated,len,buffer,*size,NULL, NULL);
-        if (*size>lenA)
-        {
-            rc = ERROR_SUCCESS;
-            buffer[lenA] = 0;
-        }
-        else
-        {
-            rc = ERROR_MORE_DATA;
-            if (*size)
-                buffer[(*size)-1] = 0;
-        }
-    }
-    else
-        rc = ERROR_SUCCESS;
-
-    *size = lenA;
-
-    msi_free(rec);
-    msi_free(deformated);
-    return rc;
-}
-
-
 UINT WINAPI MsiFormatRecordW( MSIHANDLE hInstall, MSIHANDLE hRecord, 
-                              LPWSTR szResult, DWORD *sz )
+                              LPWSTR szResult, LPDWORD sz )
 {
     UINT r = ERROR_INVALID_HANDLE;
     MSIPACKAGE *package;
     MSIRECORD *record;
 
     TRACE("%ld %ld %p %p\n", hInstall, hRecord, szResult, sz);
+
+    package = msihandle2msiinfo( hInstall, MSIHANDLETYPE_PACKAGE );
+    if (!package)
+    {
+        HRESULT hr;
+        IWineMsiRemotePackage *remote_package;
+        BSTR value = NULL;
+        DWORD len;
+        awstring wstr;
+
+        remote_package = (IWineMsiRemotePackage *)msi_get_remote( hInstall );
+        if (remote_package)
+        {
+            len = 0;
+            hr = IWineMsiRemotePackage_FormatRecord( remote_package, hRecord,
+                                                     NULL, &len );
+            if (FAILED(hr))
+                goto done;
+
+            len++;
+            value = SysAllocStringLen( NULL, len );
+            if (!value)
+            {
+                r = ERROR_OUTOFMEMORY;
+                goto done;
+            }
+
+            hr = IWineMsiRemotePackage_FormatRecord( remote_package, hRecord,
+                                                     value, &len );
+            if (FAILED(hr))
+                goto done;
+
+            wstr.unicode = TRUE;
+            wstr.str.w = szResult;
+            r = msi_strcpy_to_awstring( value, &wstr, sz );
+
+done:
+            IWineMsiRemotePackage_Release( remote_package );
+            SysFreeString( value );
+
+            if (FAILED(hr))
+            {
+                if (HRESULT_FACILITY(hr) == FACILITY_WIN32)
+                    return HRESULT_CODE(hr);
+
+                return ERROR_FUNCTION_FAILED;
+            }
+
+            return r;
+        }
+    }
 
     record = msihandle2msiinfo( hRecord, MSIHANDLETYPE_RECORD );
 
@@ -726,8 +729,6 @@ UINT WINAPI MsiFormatRecordW( MSIHANDLE hInstall, MSIHANDLE hRecord,
         else
             return ERROR_SUCCESS;
     }
-
-    package = msihandle2msiinfo( hInstall, MSIHANDLETYPE_PACKAGE );
 
     r = MSI_FormatRecordW( package, record, szResult, sz );
     msiobj_release( &record->hdr );
@@ -737,32 +738,50 @@ UINT WINAPI MsiFormatRecordW( MSIHANDLE hInstall, MSIHANDLE hRecord,
 }
 
 UINT WINAPI MsiFormatRecordA( MSIHANDLE hInstall, MSIHANDLE hRecord,
-                              LPSTR szResult, DWORD *sz )
+                              LPSTR szResult, LPDWORD sz )
 {
-    UINT r = ERROR_INVALID_HANDLE;
-    MSIPACKAGE *package = NULL;
-    MSIRECORD *record = NULL;
+    UINT r;
+    DWORD len, save;
+    LPWSTR value;
 
     TRACE("%ld %ld %p %p\n", hInstall, hRecord, szResult, sz);
 
-    record = msihandle2msiinfo( hRecord, MSIHANDLETYPE_RECORD );
-
-    if (!record)
+    if (!hRecord)
         return ERROR_INVALID_HANDLE;
+
     if (!sz)
     {
-        msiobj_release( &record->hdr );
         if (szResult)
             return ERROR_INVALID_PARAMETER;
         else
             return ERROR_SUCCESS;
     }
 
-    package = msihandle2msiinfo( hInstall, MSIHANDLETYPE_PACKAGE );
+    r = MsiFormatRecordW( hInstall, hRecord, NULL, &len );
+    if (r != ERROR_SUCCESS)
+        return r;
 
-    r = MSI_FormatRecordA( package, record, szResult, sz );
-    msiobj_release( &record->hdr );
-    if (package)
-        msiobj_release( &package->hdr );
+    value = msi_alloc(++len * sizeof(WCHAR));
+    if (!value)
+        return ERROR_OUTOFMEMORY;
+
+    r = MsiFormatRecordW( hInstall, hRecord, value, &len );
+    if (r != ERROR_SUCCESS)
+        goto done;
+
+    save = len + 1;
+    len = WideCharToMultiByte(CP_ACP, 0, value, -1, NULL, 0, NULL, NULL);
+    WideCharToMultiByte(CP_ACP, 0, value, -1, szResult, *sz, NULL, NULL);
+
+    if (szResult && len > *sz)
+    {
+        if (*sz) szResult[*sz - 1] = '\0';
+        r = ERROR_MORE_DATA;
+    }
+
+    *sz = save - 1;
+
+done:
+    msi_free(value);
     return r;
 }

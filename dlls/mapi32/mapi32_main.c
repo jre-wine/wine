@@ -25,6 +25,7 @@
 #include "winerror.h"
 #include "objbase.h"
 #include "mapix.h"
+#include "mapiform.h"
 #include "mapi.h"
 #include "wine/debug.h"
 
@@ -109,4 +110,11 @@ HRESULT WINAPI MAPIOpenLocalFormContainer(LPVOID *ppfcnt)
 VOID WINAPI MAPIUninitialize(void)
 {
     FIXME("Stub\n");
+}
+
+HRESULT WINAPI MAPIAdminProfiles(ULONG ulFlags,  LPPROFADMIN *lppProfAdmin)
+{
+    FIXME("(%u, %p): stub\n", ulFlags, lppProfAdmin);
+    *lppProfAdmin = NULL;
+    return E_FAIL;
 }

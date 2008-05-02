@@ -19,6 +19,11 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
+/* With Visual Studio >= 2005,  swprintf() takes an extra parameter unless
+ * the following macro is defined.
+ */
+#define _CRT_NON_CONFORMING_SWPRINTFS
  
 #include <stdio.h>
 
@@ -187,6 +192,18 @@ static void test_sprintf( void )
     r = sprintf(buffer,format,(LONGLONG)100);
     ok(!strcmp(buffer,"+00100  ") && r==8,"#-+ 08.5I64d failed: '%s'\n", buffer);
 
+    format = "%.80I64d";
+    r = sprintf(buffer,format,(LONGLONG)1);
+    ok(r==80,"%s format failed\n", format);
+
+    format = "% .80I64d";
+    r = sprintf(buffer,format,(LONGLONG)1);
+    ok(r==81,"%s format failed\n", format);
+
+    format = "% .80d";
+    r = sprintf(buffer,format,1);
+    ok(r==81,"%s format failed\n", format);
+
     format = "%lld";
     r = sprintf(buffer,format,((ULONGLONG)0xffffffff)*0xffffffff);
     ok(!strcmp(buffer, "1"), "Problem with \"ll\" interpretation\n");
@@ -266,6 +283,11 @@ static void test_sprintf( void )
     r = sprintf(buffer,format,1,"foo");
     ok(!strcmp(buffer,"f"),"Precision ignored \"%s\"\n",buffer);
     ok( r==1, "return count wrong\n");
+
+    format = "%*s";
+    r = sprintf(buffer,format,-5,"foo");
+    ok(!strcmp(buffer,"foo  "),"Negative field width ignored \"%s\"\n",buffer);
+    ok( r==5, "return count wrong\n");
 
     format = "%#-012p";
     r = sprintf(buffer,format,(void *)57);
@@ -492,7 +514,8 @@ static void test_fwprintf( void )
     const char *string="not a wide string";
     todo_wine
       {
-        ok(fwprintf(fopen("nul","r+"),(wchar_t *)string) == -1,"Non-wide string should not be printed by fwprintf\n");
+        ok(fwprintf(fopen("nul","r+"),(const wchar_t *)string) == -1,
+           "Non-wide string should not be printed by fwprintf\n");
       }
 }
 

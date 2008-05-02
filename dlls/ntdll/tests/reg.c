@@ -301,16 +301,18 @@ static void test_NtOpenKey(void)
     OBJECT_ATTRIBUTES attr;
     ACCESS_MASK am = KEY_READ;
 
-#if 0 /* Crashes Wine */
+    if (0)
+    {
+    /* Crashes Wine */
     /* All NULL */
     status = pNtOpenKey(NULL, 0, NULL);
-    ok(status == STATUS_ACCESS_VIOLATION, "Expected STATUS_ACCESS_VIOLATION, got: 0x%08lx\n", status);
+    ok(status == STATUS_ACCESS_VIOLATION, "Expected STATUS_ACCESS_VIOLATION, got: 0x%08x\n", status);
 
     /* NULL attributes */
     status = pNtOpenKey(&key, 0, NULL);
     ok(status == STATUS_ACCESS_VIOLATION /* W2K3/XP/W2K */ || status == STATUS_INVALID_PARAMETER /* NT4 */,
-        "Expected STATUS_ACCESS_VIOLATION or STATUS_INVALID_PARAMETER(NT4), got: 0x%08lx\n", status);
-#endif 
+        "Expected STATUS_ACCESS_VIOLATION or STATUS_INVALID_PARAMETER(NT4), got: 0x%08x\n", status);
+    }
 
     InitializeObjectAttributes(&attr, &winetestpath, 0, 0, 0);
 
@@ -366,7 +368,7 @@ static void test_NtCreateKey(void)
     status = pNtCreateKey(&key, am, &attr, 0, 0, 0, 0);
     ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got: 0x%08x\n", status);
 
-    pNtClose(&key);
+    pNtClose(key);
 }
 
 static void test_NtSetValueKey(void)
@@ -388,7 +390,7 @@ static void test_NtSetValueKey(void)
     ok(status == STATUS_SUCCESS, "NtSetValueKey Failed: 0x%08x\n", status);
 
     pRtlFreeUnicodeString(&ValName);
-    pNtClose(&key);
+    pNtClose(key);
 }
 
 static void test_RtlOpenCurrentUser(void)
@@ -397,7 +399,7 @@ static void test_RtlOpenCurrentUser(void)
     HKEY handle;
     status=pRtlOpenCurrentUser(KEY_READ, &handle);
     ok(status == STATUS_SUCCESS, "RtlOpenCurrentUser Failed: 0x%08x\n", status);
-    pNtClose(&handle);
+    pNtClose(handle);
 }
 
 static void test_RtlCheckRegistryKey(void)

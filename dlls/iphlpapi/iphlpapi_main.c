@@ -50,6 +50,18 @@ WINE_DEFAULT_DEBUG_CHANNEL(iphlpapi);
 #define INADDR_NONE ~0UL
 #endif
 
+static int resolver_initialised;
+
+/* call res_init() just once because of a bug in Mac OS X 10.4 */
+static void initialise_resolver(void)
+{
+    if (!resolver_initialised)
+    {
+        res_init();
+        resolver_initialised = 1;
+    }
+}
+
 BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
   switch (fdwReason) {
@@ -284,13 +296,15 @@ static int TcpTableSorter(const void *a, const void *b)
     const MIB_TCPROW* rowA = a;
     const MIB_TCPROW* rowB = b;
 
-    ret = rowA->dwLocalAddr - rowB->dwLocalAddr;
+    ret = ntohl (rowA->dwLocalAddr) - ntohl (rowB->dwLocalAddr);
     if (ret == 0) {
-      ret = rowA->dwLocalPort - rowB->dwLocalPort;
+       ret = ntohs ((unsigned short)rowA->dwLocalPort) -
+          ntohs ((unsigned short)rowB->dwLocalPort);
       if (ret == 0) {
-        ret = rowA->dwRemoteAddr - rowB->dwRemoteAddr;
+         ret = ntohl (rowA->dwRemoteAddr) - ntohl (rowB->dwRemoteAddr);
         if (ret == 0)
-          ret = rowA->dwRemotePort - rowB->dwRemotePort;
+           ret = ntohs ((unsigned short)rowA->dwRemotePort) -
+              ntohs ((unsigned short)rowB->dwRemotePort);
       }
     }
   }
@@ -324,7 +338,9 @@ DWORD WINAPI AllocateAndGetTcpTableFromStack(PMIB_TCPTABLE *ppTcpTable,
 
   TRACE("ppTcpTable %p, bOrder %d, heap %p, flags 0x%08x\n",
    ppTcpTable, bOrder, heap, flags);
-  ret = getTcpTable(ppTcpTable, heap, flags);
+
+  *ppTcpTable = NULL;
+  ret = getTcpTable(ppTcpTable, 0, heap, flags);
   if (!ret && bOrder)
     qsort((*ppTcpTable)->table, (*ppTcpTable)->dwNumEntries,
      sizeof(MIB_TCPROW), TcpTableSorter);
@@ -1340,7 +1356,7 @@ DWORD WINAPI GetNetworkParams(PFIXED_INFO pFixedInfo, PULONG pOutBufLen)
   if (!pOutBufLen)
     return ERROR_INVALID_PARAMETER;
 
-  res_init();
+  initialise_resolver();
   size = sizeof(FIXED_INFO) + (_res.nscount > 0 ? (_res.nscount  - 1) *
    sizeof(IP_ADDR_STRING) : 0);
   if (!pFixedInfo || *pOutBufLen < size) {
@@ -1533,25 +1549,16 @@ DWORD WINAPI GetTcpTable(PMIB_TCPTABLE pTcpTable, PDWORD pdwSize, BOOL bOrder)
       ret = ERROR_INSUFFICIENT_BUFFER;
     }
     else {
-      PMIB_TCPTABLE table;
-
-      ret = getTcpTable(&table, GetProcessHeap(), 0);
+      ret = getTcpTable(&pTcpTable, numEntries, 0, 0);
       if (!ret) {
-        size = sizeof(MIB_TCPTABLE) + (table->dwNumEntries - 1) *
+        size = sizeof(MIB_TCPTABLE) + (pTcpTable->dwNumEntries - 1) *
          sizeof(MIB_TCPROW);
-        if (*pdwSize < size) {
-          *pdwSize = size;
-          ret = ERROR_INSUFFICIENT_BUFFER;
-        }
-        else {
-          *pdwSize = size;
-          memcpy(pTcpTable, table, size);
+        *pdwSize = size;
+
           if (bOrder)
-            qsort(pTcpTable->table, pTcpTable->dwNumEntries,
-             sizeof(MIB_TCPROW), TcpTableSorter);
+             qsort(pTcpTable->table, pTcpTable->dwNumEntries,
+                   sizeof(MIB_TCPROW), TcpTableSorter);
           ret = NO_ERROR;
-        }
-        HeapFree(GetProcessHeap(), 0, table);
       }
       else
         ret = ERROR_OUTOFMEMORY;

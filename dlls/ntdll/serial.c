@@ -259,7 +259,6 @@ static NTSTATUS get_line_control(int fd, SERIAL_LINE_CONTROL* slc)
 #ifdef CMSPAR
     case PARENB|CMSPAR:         slc->Parity = MARKPARITY;       break;
     case PARENB|PARODD|CMSPAR:  slc->Parity = SPACEPARITY;      break;
-        break;
 #endif
     }
     switch (port.c_cflag & CSIZE)
@@ -493,9 +492,10 @@ static NTSTATUS set_baud_rate(int fd, const SERIAL_BAUD_RATE* sbr)
             port.c_cflag |= B38400;
         }
         break;
-#endif    /* Don't have linux/serial.h or lack TIOCSSERIAL */
+#else     /* Don't have linux/serial.h or lack TIOCSSERIAL */
         ERR("baudrate %d\n", sbr->BaudRate);
         return STATUS_NOT_SUPPORTED;
+#endif    /* Don't have linux/serial.h or lack TIOCSSERIAL */
     }
 #elif !defined(__EMX__)
     switch (sbr->BaudRate)
@@ -595,13 +595,13 @@ static NTSTATUS set_handflow(int fd, const SERIAL_HANDFLOW* shf)
     if (shf->ControlHandShake & SERIAL_DTR_HANDSHAKE)
     {
         WARN("DSR/DTR flow control not supported\n");
-    } else if (shf->ControlHandShake & SERIAL_DTR_CONTROL)
+    } else if (!(shf->ControlHandShake & SERIAL_DTR_CONTROL))
         whack_modem(fd, ~TIOCM_DTR, 0);
-    else    
+    else
         whack_modem(fd, 0, TIOCM_DTR);
 #endif
 #ifdef TIOCM_RTS
-    if (!(shf->ControlHandShake & SERIAL_DSR_HANDSHAKE))
+    if (!(shf->ControlHandShake & SERIAL_CTS_HANDSHAKE))
     {
         if ((shf->FlowReplace & (SERIAL_RTS_CONTROL|SERIAL_RTS_HANDSHAKE)) == 0)
             whack_modem(fd, ~TIOCM_RTS, 0);
@@ -911,9 +911,10 @@ static NTSTATUS get_irq_info(int fd, serial_irq_info *irq_info)
     }
     TRACE("TIOCGICOUNT err %s\n", strerror(errno));
     return FILE_GetNtStatus();
-#endif
+#else
     memset(irq_info,0, sizeof(serial_irq_info));
     return STATUS_NOT_IMPLEMENTED;
+#endif
 }
 
 
@@ -982,7 +983,7 @@ static DWORD CALLBACK wait_for_event(LPVOID arg)
     async_commio *commio = (async_commio*) arg;
     int fd, needs_close;
 
-    if (!server_get_unix_fd( commio->hDevice, FILE_READ_DATA | FILE_WRITE_DATA, &fd, &needs_close, NULL ))
+    if (!server_get_unix_fd( commio->hDevice, FILE_READ_DATA | FILE_WRITE_DATA, &fd, &needs_close, NULL, NULL ))
     {
         serial_irq_info new_irq_info;
         DWORD new_mstat, new_evtmask;
@@ -1097,7 +1098,7 @@ out_now:
     return status;
 }
 
-static NTSTATUS xmit_immediate(HANDLE hDevice, int fd, char* ptr)
+static NTSTATUS xmit_immediate(HANDLE hDevice, int fd, const char* ptr)
 {
     /* FIXME: not perfect as it should bypass the in-queue */
     WARN("(%p,'%c') not perfect!\n", hDevice, *ptr);
@@ -1130,7 +1131,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     piosb->Information = 0;
 
     if (dwIoControlCode != IOCTL_SERIAL_GET_TIMEOUTS)
-        if ((status = server_get_unix_fd( hDevice, access, &fd, &needs_close, NULL )))
+        if ((status = server_get_unix_fd( hDevice, access, &fd, &needs_close, NULL, NULL )))
             goto error;
 
     switch (dwIoControlCode)

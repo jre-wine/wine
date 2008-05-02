@@ -27,7 +27,6 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "wine/wingdi16.h"
-#include "gdi.h"
 #include "wownt32.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
@@ -58,7 +57,7 @@ static const struct gdi_obj_funcs brush_funcs =
     BRUSH_DeleteObject   /* pDeleteObject */
 };
 
-static HGLOBAL16 dib_copy(BITMAPINFO *info, UINT coloruse)
+static HGLOBAL16 dib_copy(const BITMAPINFO *info, UINT coloruse)
 {
     BITMAPINFO  *newInfo;
     HGLOBAL16   hmem;
@@ -347,7 +346,7 @@ BOOL WINAPI SetBrushOrgEx( HDC hdc, INT x, INT y, LPPOINT oldorg )
     }
     dc->brushOrgX = x;
     dc->brushOrgY = y;
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return TRUE;
 }
 
@@ -384,7 +383,7 @@ static HGDIOBJ BRUSH_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
     if (dc->funcs->pSelectBrush) handle = dc->funcs->pSelectBrush( dc->physDev, handle );
     if (handle) dc->hBrush = handle;
     else ret = 0;
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 

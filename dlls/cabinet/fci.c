@@ -173,7 +173,11 @@ HFCI __cdecl FCICreate(
   int err;
   PFCI_Int p_fci_internal;
 
-  if ((!perf) || (!pfnalloc) || (!pfnfree) || (!pfnopen) || (!pfnread) ||
+  if (!perf) {
+    SetLastError(ERROR_BAD_ARGUMENTS);
+    return NULL;
+  }
+  if ((!pfnalloc) || (!pfnfree) || (!pfnopen) || (!pfnread) ||
       (!pfnwrite) || (!pfnclose) || (!pfnseek) || (!pfndelete) ||
       (!pfnfcigtf) || (!pccab)) {
     perf->erfOper = FCIERR_NONE;
@@ -430,12 +434,12 @@ static BOOL fci_flush_data_block (HFCI hfci, int* err,
 
 
 
-static cab_ULONG fci_get_checksum(void *pv, UINT cb, CHECKSUM seed)
+static cab_ULONG fci_get_checksum(const void *pv, UINT cb, CHECKSUM seed)
 {
-  cab_ULONG csum;
-  cab_ULONG ul;
-  int       cUlong;
-  BYTE      *pb;
+  cab_ULONG     csum;
+  cab_ULONG     ul;
+  int           cUlong;
+  const BYTE    *pb;
 
   csum = seed;
   cUlong = cb / 4;
@@ -1343,7 +1347,7 @@ static BOOL fci_flush_folder(
       return FALSE;
     }
 
-    /* Skip a few lines of code. This is catched by the next if. */
+    /* Skip a few lines of code. This is caught by the next if. */
     p_fci_internal->fGetNextCabInVain=TRUE;
   }
 
@@ -2251,7 +2255,7 @@ static BOOL fci_flush_cabinet(
         fci_set_error( FCIERR_NONE, ERROR_FUNCTION_FAILED, TRUE );
         return FALSE;
       }
-      /* Skip a few lines of code. This is catched by the next if. */
+      /* Skip a few lines of code. This is caught by the next if. */
       p_fci_internal->fGetNextCabInVain=TRUE;
     }
 
@@ -2480,7 +2484,7 @@ BOOL __cdecl FCIAddFile(
       fci_set_error( FCIERR_NONE, ERROR_FUNCTION_FAILED, TRUE );
       return FALSE;
     }
-    /* Skip a few lines of code. This is catched by the next if. */
+    /* Skip a few lines of code. This is caught by the next if. */
     p_fci_internal->fGetNextCabInVain=TRUE;
   }
 
@@ -2647,7 +2651,7 @@ BOOL __cdecl FCIAddFile(
       fci_set_error( FCIERR_NONE, ERROR_FUNCTION_FAILED, TRUE );
       return FALSE;
     }
-    /* Skip a few lines of code. This is catched by the next if. */
+    /* Skip a few lines of code. This is caught by the next if. */
     p_fci_internal->fGetNextCabInVain=TRUE;
   }
 

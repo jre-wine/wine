@@ -33,6 +33,7 @@
 #include <stdlib.h>
 
 #ifdef __APPLE__
+# include <CoreFoundation/CFBundle.h>
 # include <CoreFoundation/CFLocale.h>
 # include <CoreFoundation/CFString.h>
 #endif
@@ -130,20 +131,30 @@ static const struct charset_entry
     { "UTF8", CP_UTF8 }
 };
 
-#define NLS_MAX_LANGUAGES 20
-typedef struct {
-    WCHAR lang[128];
-    WCHAR country[4];
-    LANGID found_lang_id[NLS_MAX_LANGUAGES];
-    int n_found;
-} LANG_FIND_DATA;
 
-
-/* copy Unicode string to Ascii without using codepages */
-static inline void strcpyWtoA( char *dst, const WCHAR *src )
+struct locale_name
 {
-    while ((*dst++ = *src++));
-}
+    WCHAR  win_name[128];   /* Windows name ("en-US") */
+    WCHAR  lang[128];       /* language ("en") (note: buffer contains the other strings too) */
+    WCHAR *country;         /* country ("US") */
+    WCHAR *charset;         /* charset ("UTF-8") for Unix format only */
+    WCHAR *script;          /* script ("Latn") for Windows format only */
+    WCHAR *modifier;        /* modifier or sort order */
+    LCID   lcid;            /* corresponding LCID */
+    int    matches;         /* number of elements matching LCID (0..4) */
+    UINT   codepage;        /* codepage corresponding to charset */
+};
+
+/* locale ids corresponding to the various Unix locale parameters */
+static LCID lcid_LC_COLLATE;
+static LCID lcid_LC_CTYPE;
+static LCID lcid_LC_MESSAGES;
+static LCID lcid_LC_MONETARY;
+static LCID lcid_LC_NUMERIC;
+static LCID lcid_LC_TIME;
+static LCID lcid_LC_PAPER;
+static LCID lcid_LC_MEASUREMENT;
+static LCID lcid_LC_TELEPHONE;
 
 /* Copy Ascii string to Unicode without using codepages */
 static inline void strcpynAtoW( WCHAR *dst, const char *src, size_t n )
@@ -156,27 +167,13 @@ static inline void strcpynAtoW( WCHAR *dst, const char *src, size_t n )
     if (n) *dst = 0;
 }
 
-/* return a printable string for a language id */
-static const char *debugstr_lang( LANGID lang )
-{
-    WCHAR langW[4], countryW[4];
-    char buffer[8];
-    LCID lcid = MAKELCID( lang, SORT_DEFAULT );
-
-    GetLocaleInfoW(lcid, LOCALE_SISO639LANGNAME|LOCALE_NOUSEROVERRIDE, langW, sizeof(langW)/sizeof(WCHAR));
-    GetLocaleInfoW(lcid, LOCALE_SISO3166CTRYNAME|LOCALE_NOUSEROVERRIDE, countryW, sizeof(countryW)/sizeof(WCHAR));
-    strcpyWtoA( buffer, langW );
-    strcat( buffer, "_" );
-    strcpyWtoA( buffer + strlen(buffer), countryW );
-    return wine_dbg_sprintf( "%s", buffer );
-}
 
 /***********************************************************************
  *		get_lcid_codepage
  *
  * Retrieve the ANSI codepage for a given locale.
  */
-inline static UINT get_lcid_codepage( LCID lcid )
+static inline UINT get_lcid_codepage( LCID lcid )
 {
     UINT ret;
     if (!GetLocaleInfoW( lcid, LOCALE_IDEFAULTANSICODEPAGE|LOCALE_RETURN_NUMBER, (WCHAR *)&ret,
@@ -220,12 +217,353 @@ static const union cptable *get_codepage_table( unsigned int codepage )
     return ret;
 }
 
+
+/***********************************************************************
+ *              charset_cmp (internal)
+ */
+static int charset_cmp( const void *name, const void *entry )
+{
+    const struct charset_entry *charset = (const struct charset_entry *)entry;
+    return strcasecmp( (const char *)name, charset->charset_name );
+}
+
+/***********************************************************************
+ *		find_charset
+ */
+static UINT find_charset( const WCHAR *name )
+{
+    const struct charset_entry *entry;
+    char charset_name[16];
+    size_t i, j;
+
+    /* remove punctuation characters from charset name */
+    for (i = j = 0; name[i] && j < sizeof(charset_name)-1; i++)
+        if (isalnum((unsigned char)name[i])) charset_name[j++] = name[i];
+    charset_name[j] = 0;
+
+    entry = bsearch( charset_name, charset_names,
+                     sizeof(charset_names)/sizeof(charset_names[0]),
+                     sizeof(charset_names[0]), charset_cmp );
+    if (entry) return entry->codepage;
+    return 0;
+}
+
+
+/***********************************************************************
+ *           find_locale_id_callback
+ */
+static BOOL CALLBACK find_locale_id_callback( HMODULE hModule, LPCWSTR type,
+                                              LPCWSTR name, WORD LangID, LPARAM lParam )
+{
+    struct locale_name *data = (struct locale_name *)lParam;
+    WCHAR buffer[128];
+    int matches = 0;
+    LCID lcid = MAKELCID( LangID, SORT_DEFAULT );  /* FIXME: handle sort order */
+
+    if (PRIMARYLANGID(LangID) == LANG_NEUTRAL) return TRUE; /* continue search */
+
+    /* first check exact name */
+    if (data->win_name[0] &&
+        GetLocaleInfoW( lcid, LOCALE_SNAME | LOCALE_NOUSEROVERRIDE,
+                        buffer, sizeof(buffer)/sizeof(WCHAR) ))
+    {
+        if (!strcmpW( data->win_name, buffer ))
+        {
+            matches = 4;  /* everything matches */
+            goto done;
+        }
+    }
+
+    if (!GetLocaleInfoW( lcid, LOCALE_SISO639LANGNAME | LOCALE_NOUSEROVERRIDE,
+                         buffer, sizeof(buffer)/sizeof(WCHAR) ))
+        return TRUE;
+    if (strcmpW( buffer, data->lang )) return TRUE;
+    matches++;  /* language name matched */
+
+    if (data->country)
+    {
+        if (GetLocaleInfoW( lcid, LOCALE_SISO3166CTRYNAME|LOCALE_NOUSEROVERRIDE,
+                            buffer, sizeof(buffer)/sizeof(WCHAR) ))
+        {
+            if (strcmpW( buffer, data->country )) goto done;
+            matches++;  /* country name matched */
+        }
+    }
+    else  /* match default language */
+    {
+        if (SUBLANGID(LangID) == SUBLANG_DEFAULT) matches++;
+    }
+
+    if (data->codepage)
+    {
+        UINT unix_cp;
+        if (GetLocaleInfoW( lcid, LOCALE_IDEFAULTUNIXCODEPAGE | LOCALE_RETURN_NUMBER,
+                            (LPWSTR)&unix_cp, sizeof(unix_cp)/sizeof(WCHAR) ))
+        {
+            if (unix_cp == data->codepage) matches++;
+        }
+    }
+
+    /* FIXME: check sort order */
+
+done:
+    if (matches > data->matches)
+    {
+        data->lcid = lcid;
+        data->matches = matches;
+    }
+    return (data->matches < 4);  /* no need to continue for perfect match */
+}
+
+
+/***********************************************************************
+ *		parse_locale_name
+ *
+ * Parse a locale name into a struct locale_name, handling both Windows and Unix formats.
+ * Unix format is: lang[_country][.charset][@modifier]
+ * Windows format is: lang[-script][-country][_modifier]
+ */
+static void parse_locale_name( const WCHAR *str, struct locale_name *name )
+{
+    static const WCHAR sepW[] = {'-','_','.','@',0};
+    static const WCHAR winsepW[] = {'-','_',0};
+    static const WCHAR posixW[] = {'P','O','S','I','X',0};
+    static const WCHAR cW[] = {'C',0};
+    static const WCHAR latinW[] = {'l','a','t','i','n',0};
+    static const WCHAR latnW[] = {'-','L','a','t','n',0};
+    WCHAR *p;
+
+    name->country = name->charset = name->script = name->modifier = NULL;
+    name->lcid = MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT );
+    name->matches = 0;
+    name->codepage = 0;
+    name->win_name[0] = 0;
+    lstrcpynW( name->lang, str, sizeof(name->lang)/sizeof(WCHAR) );
+
+    if (!(p = strpbrkW( name->lang, sepW )))
+    {
+        if (!strcmpW( name->lang, posixW ) || !strcmpW( name->lang, cW ))
+        {
+            name->matches = 4;  /* perfect match for default English lcid */
+            return;
+        }
+        strcpyW( name->win_name, name->lang );
+    }
+    else if (*p == '-')  /* Windows format */
+    {
+        strcpyW( name->win_name, name->lang );
+        *p++ = 0;
+        name->country = p;
+        if (!(p = strpbrkW( p, winsepW ))) goto done;
+        if (*p == '-')
+        {
+            *p++ = 0;
+            name->script = name->country;
+            name->country = p;
+            if (!(p = strpbrkW( p, winsepW ))) goto done;
+        }
+        *p++ = 0;
+        name->modifier = p;
+    }
+    else  /* Unix format */
+    {
+        if (*p == '_')
+        {
+            *p++ = 0;
+            name->country = p;
+            p = strpbrkW( p, sepW + 2 );
+        }
+        if (p && *p == '.')
+        {
+            *p++ = 0;
+            name->charset = p;
+            name->codepage = find_charset( name->charset );
+            p = strchrW( p, '@' );
+        }
+        if (p)
+        {
+            *p++ = 0;
+            name->modifier = p;
+        }
+
+        /* rebuild a Windows name if possible */
+
+        if (name->charset) goto done;  /* can't specify charset in Windows format */
+        if (name->modifier && strcmpW( name->modifier, latinW ))
+            goto done;  /* only Latn script supported for now */
+        strcpyW( name->win_name, name->lang );
+        if (name->modifier) strcatW( name->win_name, latnW );
+        if (name->country)
+        {
+            p = name->win_name + strlenW(name->win_name);
+            *p++ = '-';
+            strcpyW( p, name->country );
+        }
+    }
+done:
+    EnumResourceLanguagesW( kernel32_handle, (LPCWSTR)RT_STRING, (LPCWSTR)LOCALE_ILANGUAGE,
+                            find_locale_id_callback, (LPARAM)name );
+}
+
+
+/***********************************************************************
+ *           convert_default_lcid
+ *
+ * Get the default LCID to use for a given lctype in GetLocaleInfo.
+ */
+static LCID convert_default_lcid( LCID lcid, LCTYPE lctype )
+{
+    if (lcid == LOCALE_SYSTEM_DEFAULT ||
+        lcid == LOCALE_USER_DEFAULT ||
+        lcid == LOCALE_NEUTRAL)
+    {
+        LCID default_id = 0;
+
+        switch(lctype & 0xffff)
+        {
+        case LOCALE_SSORTNAME:
+            default_id = lcid_LC_COLLATE;
+            break;
+
+        case LOCALE_FONTSIGNATURE:
+        case LOCALE_IDEFAULTANSICODEPAGE:
+        case LOCALE_IDEFAULTCODEPAGE:
+        case LOCALE_IDEFAULTEBCDICCODEPAGE:
+        case LOCALE_IDEFAULTMACCODEPAGE:
+        case LOCALE_IDEFAULTUNIXCODEPAGE:
+            default_id = lcid_LC_CTYPE;
+            break;
+
+        case LOCALE_ICURRDIGITS:
+        case LOCALE_ICURRENCY:
+        case LOCALE_IINTLCURRDIGITS:
+        case LOCALE_INEGCURR:
+        case LOCALE_INEGSEPBYSPACE:
+        case LOCALE_INEGSIGNPOSN:
+        case LOCALE_INEGSYMPRECEDES:
+        case LOCALE_IPOSSEPBYSPACE:
+        case LOCALE_IPOSSIGNPOSN:
+        case LOCALE_IPOSSYMPRECEDES:
+        case LOCALE_SCURRENCY:
+        case LOCALE_SINTLSYMBOL:
+        case LOCALE_SMONDECIMALSEP:
+        case LOCALE_SMONGROUPING:
+        case LOCALE_SMONTHOUSANDSEP:
+        case LOCALE_SNATIVECURRNAME:
+            default_id = lcid_LC_MONETARY;
+            break;
+
+        case LOCALE_IDIGITS:
+        case LOCALE_IDIGITSUBSTITUTION:
+        case LOCALE_ILZERO:
+        case LOCALE_INEGNUMBER:
+        case LOCALE_SDECIMAL:
+        case LOCALE_SGROUPING:
+        case LOCALE_SNAN:
+        case LOCALE_SNATIVEDIGITS:
+        case LOCALE_SNEGATIVESIGN:
+        case LOCALE_SNEGINFINITY:
+        case LOCALE_SPOSINFINITY:
+        case LOCALE_SPOSITIVESIGN:
+        case LOCALE_STHOUSAND:
+            default_id = lcid_LC_NUMERIC;
+            break;
+
+        case LOCALE_ICALENDARTYPE:
+        case LOCALE_ICENTURY:
+        case LOCALE_IDATE:
+        case LOCALE_IDAYLZERO:
+        case LOCALE_IFIRSTDAYOFWEEK:
+        case LOCALE_IFIRSTWEEKOFYEAR:
+        case LOCALE_ILDATE:
+        case LOCALE_IMONLZERO:
+        case LOCALE_IOPTIONALCALENDAR:
+        case LOCALE_ITIME:
+        case LOCALE_ITIMEMARKPOSN:
+        case LOCALE_ITLZERO:
+        case LOCALE_S1159:
+        case LOCALE_S2359:
+        case LOCALE_SABBREVDAYNAME1:
+        case LOCALE_SABBREVDAYNAME2:
+        case LOCALE_SABBREVDAYNAME3:
+        case LOCALE_SABBREVDAYNAME4:
+        case LOCALE_SABBREVDAYNAME5:
+        case LOCALE_SABBREVDAYNAME6:
+        case LOCALE_SABBREVDAYNAME7:
+        case LOCALE_SABBREVMONTHNAME1:
+        case LOCALE_SABBREVMONTHNAME2:
+        case LOCALE_SABBREVMONTHNAME3:
+        case LOCALE_SABBREVMONTHNAME4:
+        case LOCALE_SABBREVMONTHNAME5:
+        case LOCALE_SABBREVMONTHNAME6:
+        case LOCALE_SABBREVMONTHNAME7:
+        case LOCALE_SABBREVMONTHNAME8:
+        case LOCALE_SABBREVMONTHNAME9:
+        case LOCALE_SABBREVMONTHNAME10:
+        case LOCALE_SABBREVMONTHNAME11:
+        case LOCALE_SABBREVMONTHNAME12:
+        case LOCALE_SABBREVMONTHNAME13:
+        case LOCALE_SDATE:
+        case LOCALE_SDAYNAME1:
+        case LOCALE_SDAYNAME2:
+        case LOCALE_SDAYNAME3:
+        case LOCALE_SDAYNAME4:
+        case LOCALE_SDAYNAME5:
+        case LOCALE_SDAYNAME6:
+        case LOCALE_SDAYNAME7:
+        case LOCALE_SDURATION:
+        case LOCALE_SLONGDATE:
+        case LOCALE_SMONTHNAME1:
+        case LOCALE_SMONTHNAME2:
+        case LOCALE_SMONTHNAME3:
+        case LOCALE_SMONTHNAME4:
+        case LOCALE_SMONTHNAME5:
+        case LOCALE_SMONTHNAME6:
+        case LOCALE_SMONTHNAME7:
+        case LOCALE_SMONTHNAME8:
+        case LOCALE_SMONTHNAME9:
+        case LOCALE_SMONTHNAME10:
+        case LOCALE_SMONTHNAME11:
+        case LOCALE_SMONTHNAME12:
+        case LOCALE_SMONTHNAME13:
+        case LOCALE_SSHORTDATE:
+        case LOCALE_SSHORTESTDAYNAME1:
+        case LOCALE_SSHORTESTDAYNAME2:
+        case LOCALE_SSHORTESTDAYNAME3:
+        case LOCALE_SSHORTESTDAYNAME4:
+        case LOCALE_SSHORTESTDAYNAME5:
+        case LOCALE_SSHORTESTDAYNAME6:
+        case LOCALE_SSHORTESTDAYNAME7:
+        case LOCALE_STIME:
+        case LOCALE_STIMEFORMAT:
+        case LOCALE_SYEARMONTH:
+            default_id = lcid_LC_TIME;
+            break;
+
+        case LOCALE_IPAPERSIZE:
+            default_id = lcid_LC_PAPER;
+            break;
+
+        case LOCALE_IMEASURE:
+            default_id = lcid_LC_MEASUREMENT;
+            break;
+
+        case LOCALE_ICOUNTRY:
+            default_id = lcid_LC_TELEPHONE;
+            break;
+        }
+        if (default_id) lcid = default_id;
+    }
+    return ConvertDefaultLocale( lcid );
+}
+
+
 /***********************************************************************
  *		create_registry_key
  *
  * Create the Control Panel\\International registry key.
  */
-inline static HANDLE create_registry_key(void)
+static inline HANDLE create_registry_key(void)
 {
     static const WCHAR intlW[] = {'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\',
                                   'I','n','t','e','r','n','a','t','i','o','n','a','l',0};
@@ -249,6 +587,41 @@ inline static HANDLE create_registry_key(void)
 }
 
 
+/* update the registry settings for a given locale parameter */
+/* return TRUE if an update was needed */
+static BOOL locale_update_registry( HKEY hkey, const WCHAR *name, LCID lcid,
+                                    const LCTYPE *values, UINT nb_values )
+{
+    static const WCHAR formatW[] = { '%','0','8','x',0 };
+    WCHAR bufferW[40];
+    UNICODE_STRING nameW;
+    DWORD count, i;
+
+    RtlInitUnicodeString( &nameW, name );
+    count = sizeof(bufferW);
+    if (!NtQueryValueKey(hkey, &nameW, KeyValuePartialInformation, (LPBYTE)bufferW, count, &count))
+    {
+        const KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)bufferW;
+        LPCWSTR text = (LPCWSTR)info->Data;
+
+        if (strtoulW( text, NULL, 16 ) == lcid) return FALSE; /* already set correctly */
+        TRACE( "updating registry, locale %s changed %s -> %08x\n",
+               debugstr_w(name), debugstr_w(text), lcid );
+    }
+    else TRACE( "updating registry, locale %s changed none -> %08x\n", debugstr_w(name), lcid );
+    sprintfW( bufferW, formatW, lcid );
+    NtSetValueKey( hkey, &nameW, 0, REG_SZ, bufferW, (strlenW(bufferW) + 1) * sizeof(WCHAR) );
+
+    for (i = 0; i < nb_values; i++)
+    {
+        GetLocaleInfoW( lcid, values[i] | LOCALE_NOUSEROVERRIDE, bufferW,
+                        sizeof(bufferW)/sizeof(WCHAR) );
+        SetLocaleInfoW( lcid, values[i], bufferW );
+    }
+    return TRUE;
+}
+
+
 /***********************************************************************
  *		LOCALE_InitRegistry
  *
@@ -261,6 +634,13 @@ void LOCALE_InitRegistry(void)
     static const WCHAR acpW[] = {'A','C','P',0};
     static const WCHAR oemcpW[] = {'O','E','M','C','P',0};
     static const WCHAR maccpW[] = {'M','A','C','C','P',0};
+    static const WCHAR localeW[] = {'L','o','c','a','l','e',0};
+    static const WCHAR lc_ctypeW[] = { 'L','C','_','C','T','Y','P','E',0 };
+    static const WCHAR lc_monetaryW[] = { 'L','C','_','M','O','N','E','T','A','R','Y',0 };
+    static const WCHAR lc_numericW[] = { 'L','C','_','N','U','M','E','R','I','C',0 };
+    static const WCHAR lc_timeW[] = { 'L','C','_','T','I','M','E',0 };
+    static const WCHAR lc_measurementW[] = { 'L','C','_','M','E','A','S','U','R','E','M','E','N','T',0 };
+    static const WCHAR lc_telephoneW[] = { 'L','C','_','T','E','L','E','P','H','O','N','E',0 };
     static const struct
     {
         LPCWSTR name;
@@ -270,32 +650,37 @@ void LOCALE_InitRegistry(void)
         { oemcpW, LOCALE_IDEFAULTCODEPAGE },
         { maccpW, LOCALE_IDEFAULTMACCODEPAGE }
     };
-    static const USHORT updateValues[] = {
+    static const LCTYPE lc_messages_values[] = {
       LOCALE_SLANGUAGE,
-      LOCALE_SCOUNTRY, LOCALE_ICOUNTRY,
-      LOCALE_S1159, LOCALE_S2359,
-      LOCALE_STIME, LOCALE_ITIME,
+      LOCALE_SCOUNTRY,
+      LOCALE_SLIST };
+    static const LCTYPE lc_monetary_values[] = {
+      LOCALE_SCURRENCY,
+      LOCALE_ICURRENCY,
+      LOCALE_INEGCURR,
+      LOCALE_ICURRDIGITS,
+      LOCALE_ILZERO };
+    static const LCTYPE lc_numeric_values[] = {
+      LOCALE_SDECIMAL,
+      LOCALE_STHOUSAND,
+      LOCALE_IDIGITS,
+      LOCALE_IDIGITSUBSTITUTION,
+      LOCALE_SNATIVEDIGITS };
+    static const LCTYPE lc_time_values[] = {
+      LOCALE_S1159,
+      LOCALE_S2359,
+      LOCALE_STIME,
+      LOCALE_ITIME,
       LOCALE_ITLZERO,
       LOCALE_SSHORTDATE,
       LOCALE_SLONGDATE,
       LOCALE_SDATE,
-      LOCALE_SCURRENCY, LOCALE_ICURRENCY,
-      LOCALE_INEGCURR,
-      LOCALE_ICURRDIGITS,
-      LOCALE_SDECIMAL,
-      LOCALE_SLIST,
-      LOCALE_STHOUSAND,
-      LOCALE_IDIGITS,
-      LOCALE_IDIGITSUBSTITUTION,
-      LOCALE_SNATIVEDIGITS,
       LOCALE_ITIMEMARKPOSN,
-      LOCALE_ICALENDARTYPE,
-      LOCALE_ILZERO,
-      LOCALE_IMEASURE
-    };
-    static const WCHAR LocaleW[] = {'L','o','c','a','l','e',0};
+      LOCALE_ICALENDARTYPE };
+    static const LCTYPE lc_measurement_values[] = { LOCALE_IMEASURE };
+    static const LCTYPE lc_telephone_values[] = { LOCALE_ICOUNTRY };
+
     UNICODE_STRING nameW;
-    char buffer[20];
     WCHAR bufferW[80];
     DWORD count, i;
     HANDLE hkey;
@@ -304,43 +689,31 @@ void LOCALE_InitRegistry(void)
     if (!(hkey = create_registry_key()))
         return;  /* don't do anything if we can't create the registry key */
 
-    RtlInitUnicodeString( &nameW, LocaleW );
-    count = sizeof(bufferW);
-    if (!NtQueryValueKey(hkey, &nameW, KeyValuePartialInformation, (LPBYTE)bufferW, count, &count))
-    {
-        const KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)bufferW;
-        LPCWSTR szValueText = (LPCWSTR)info->Data;
+    locale_update_registry( hkey, localeW, lcid_LC_MESSAGES, lc_messages_values,
+                            sizeof(lc_messages_values)/sizeof(lc_messages_values[0]) );
+    locale_update_registry( hkey, lc_monetaryW, lcid_LC_MONETARY, lc_monetary_values,
+                            sizeof(lc_monetary_values)/sizeof(lc_monetary_values[0]) );
+    locale_update_registry( hkey, lc_numericW, lcid_LC_NUMERIC, lc_numeric_values,
+                            sizeof(lc_numeric_values)/sizeof(lc_numeric_values[0]) );
+    locale_update_registry( hkey, lc_timeW, lcid_LC_TIME, lc_time_values,
+                            sizeof(lc_time_values)/sizeof(lc_time_values[0]) );
+    locale_update_registry( hkey, lc_measurementW, lcid_LC_MEASUREMENT, lc_measurement_values,
+                            sizeof(lc_measurement_values)/sizeof(lc_measurement_values[0]) );
+    locale_update_registry( hkey, lc_telephoneW, lcid_LC_TELEPHONE, lc_telephone_values,
+                            sizeof(lc_telephone_values)/sizeof(lc_telephone_values[0]) );
 
-        if (strtoulW( szValueText, NULL, 16 ) == lcid)  /* already set correctly */
+    if (locale_update_registry( hkey, lc_ctypeW, lcid_LC_CTYPE, NULL, 0 ))
+    {
+        HKEY nls_key = NLS_RegOpenSubKey( NLS_RegOpenKey( 0, szNlsKeyName ), CodepageW );
+
+        for (i = 0; i < sizeof(update_cp_values)/sizeof(update_cp_values[0]); i++)
         {
-            NtClose( hkey );
-            return;
+            count = GetLocaleInfoW( lcid, update_cp_values[i].value | LOCALE_NOUSEROVERRIDE,
+                                    bufferW, sizeof(bufferW)/sizeof(WCHAR) );
+            RtlInitUnicodeString( &nameW, update_cp_values[i].name );
+            NtSetValueKey( nls_key, &nameW, 0, REG_SZ, bufferW, count * sizeof(WCHAR) );
         }
-        TRACE( "updating registry, locale changed %s -> %08x\n", debugstr_w(szValueText), lcid );
-    }
-    else TRACE( "updating registry, locale changed none -> %08x\n", lcid );
-
-    sprintf( buffer, "%08x", lcid );
-    /* Note: '9' constant below is strlen(buffer) + 1 */
-    RtlMultiByteToUnicodeN( bufferW, sizeof(bufferW), NULL, buffer, 9 );
-    NtSetValueKey( hkey, &nameW, 0, REG_SZ, bufferW, 9 * sizeof(WCHAR) );
-    NtClose( hkey );
-
-    for (i = 0; i < sizeof(updateValues)/sizeof(updateValues[0]); i++)
-    {
-        GetLocaleInfoW( lcid, updateValues[i] | LOCALE_NOUSEROVERRIDE, bufferW,
-                        sizeof(bufferW)/sizeof(WCHAR) );
-        SetLocaleInfoW( lcid, updateValues[i], bufferW );
-    }
-
-    hkey = NLS_RegOpenSubKey( NLS_RegOpenKey( 0, szNlsKeyName ), CodepageW );
-
-    for (i = 0; i < sizeof(update_cp_values)/sizeof(update_cp_values[0]); i++)
-    {
-        count = GetLocaleInfoW( lcid, update_cp_values[i].value | LOCALE_NOUSEROVERRIDE,
-                                bufferW, sizeof(bufferW)/sizeof(WCHAR) );
-        RtlInitUnicodeString( &nameW, update_cp_values[i].name );
-        NtSetValueKey( hkey, &nameW, 0, REG_SZ, bufferW, count * sizeof(WCHAR) );
+        NtClose( nls_key );
     }
 
     NtClose( hkey );
@@ -348,217 +721,59 @@ void LOCALE_InitRegistry(void)
 
 
 /***********************************************************************
- *           find_language_id_proc
+ *           setup_unix_locales
  */
-static BOOL CALLBACK find_language_id_proc( HMODULE hModule, LPCWSTR type,
-                                            LPCWSTR name, WORD LangID, LPARAM lParam )
+static UINT setup_unix_locales(void)
 {
-    LANG_FIND_DATA *l_data = (LANG_FIND_DATA *)lParam;
-    LCID lcid = MAKELCID(LangID, SORT_DEFAULT);
-    WCHAR buf_language[128];
-    WCHAR buf_country[128];
-    WCHAR buf_en_language[128];
+    struct locale_name locale_name;
+    WCHAR buffer[128], ctype_buff[128];
+    char *locale;
+    UINT unix_cp = 0;
 
-    if(PRIMARYLANGID(LangID) == LANG_NEUTRAL)
-        return TRUE; /* continue search */
-
-    buf_language[0] = 0;
-    buf_country[0] = 0;
-
-    GetLocaleInfoW(lcid, LOCALE_SISO639LANGNAME|LOCALE_NOUSEROVERRIDE,
-                   buf_language, sizeof(buf_language)/sizeof(WCHAR));
-    GetLocaleInfoW(lcid, LOCALE_SISO3166CTRYNAME|LOCALE_NOUSEROVERRIDE,
-                   buf_country, sizeof(buf_country)/sizeof(WCHAR));
-
-    if(l_data->lang[0] && !strcmpiW(l_data->lang, buf_language))
+    if ((locale = setlocale( LC_CTYPE, NULL )))
     {
-        if(l_data->country[0])
-        {
-            if(!strcmpiW(l_data->country, buf_country))
-            {
-                l_data->found_lang_id[0] = LangID;
-                l_data->n_found = 1;
-                TRACE("Found id %04X for lang %s country %s\n",
-                      LangID, debugstr_w(l_data->lang), debugstr_w(l_data->country));
-                return FALSE; /* stop enumeration */
-            }
-        }
-        else goto found; /* l_data->country not specified */
+        strcpynAtoW( ctype_buff, locale, sizeof(ctype_buff)/sizeof(WCHAR) );
+        parse_locale_name( ctype_buff, &locale_name );
+        lcid_LC_CTYPE = locale_name.lcid;
+        unix_cp = locale_name.codepage;
     }
+    if (!lcid_LC_CTYPE)  /* this one needs a default value */
+        lcid_LC_CTYPE = MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT );
 
-    /* Just in case, check LOCALE_SENGLANGUAGE too,
-     * in hope that possible alias name might have that value.
-     */
-    buf_en_language[0] = 0;
-    GetLocaleInfoW(lcid, LOCALE_SENGLANGUAGE|LOCALE_NOUSEROVERRIDE,
-                   buf_en_language, sizeof(buf_en_language)/sizeof(WCHAR));
+    TRACE( "got lcid %04x (%d matches) for LC_CTYPE=%s\n",
+           locale_name.lcid, locale_name.matches, debugstr_a(locale) );
 
-    if(l_data->lang[0] && !strcmpiW(l_data->lang, buf_en_language)) goto found;
-    return TRUE;  /* not found, continue search */
+#define GET_UNIX_LOCALE(cat) do \
+    if ((locale = setlocale( cat, NULL ))) \
+    { \
+        strcpynAtoW( buffer, locale, sizeof(buffer)/sizeof(WCHAR) ); \
+        if (!strcmpW( buffer, ctype_buff )) lcid_##cat = lcid_LC_CTYPE; \
+        else { \
+            parse_locale_name( buffer, &locale_name );  \
+            lcid_##cat = locale_name.lcid; \
+            TRACE( "got lcid %04x (%d matches) for " #cat "=%s\n",        \
+                   locale_name.lcid, locale_name.matches, debugstr_a(locale) ); \
+        } \
+    } while (0)
 
-found:
-    l_data->found_lang_id[l_data->n_found] = LangID;
-    l_data->n_found++;
-    TRACE("Found id %04X for lang %s\n", LangID, debugstr_w(l_data->lang));
-    return (l_data->n_found < NLS_MAX_LANGUAGES); /* continue search, unless we have enough */
-}
+    GET_UNIX_LOCALE( LC_COLLATE );
+    GET_UNIX_LOCALE( LC_MESSAGES );
+    GET_UNIX_LOCALE( LC_MONETARY );
+    GET_UNIX_LOCALE( LC_NUMERIC );
+    GET_UNIX_LOCALE( LC_TIME );
+#ifdef LC_PAPER
+    GET_UNIX_LOCALE( LC_PAPER );
+#endif
+#ifdef LC_MEASUREMENT
+    GET_UNIX_LOCALE( LC_MEASUREMENT );
+#endif
+#ifdef LC_TELEPHONE
+    GET_UNIX_LOCALE( LC_TELEPHONE );
+#endif
 
+#undef GET_UNIX_LOCALE
 
-/***********************************************************************
- *           get_language_id
- *
- * INPUT:
- *	Lang: a string whose two first chars are the iso name of a language.
- *	Country: a string whose two first chars are the iso name of country
- *	Charset: a string defining the chosen charset encoding
- *	Dialect: a string defining a variation of the locale
- *
- *	all those values are from the standardized format of locale
- *	name in unix which is: Lang[_Country][.Charset][@Dialect]
- *
- * RETURNS:
- *	the numeric code of the language used by Windows
- *
- * FIXME: Charset and Dialect are not handled
- */
-static LANGID get_language_id(LPCSTR Lang, LPCSTR Country, LPCSTR Charset, LPCSTR Dialect)
-{
-    LANG_FIND_DATA l_data;
-
-    if(!Lang)
-    {
-        l_data.found_lang_id[0] = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
-        goto END;
-    }
-
-    l_data.n_found = 0;
-    strcpynAtoW(l_data.lang, Lang, sizeof(l_data.lang)/sizeof(WCHAR));
-
-    if (Country) strcpynAtoW(l_data.country, Country, sizeof(l_data.country)/sizeof(WCHAR));
-    else l_data.country[0] = 0;
-
-    EnumResourceLanguagesW(kernel32_handle, (LPCWSTR)RT_STRING, (LPCWSTR)LOCALE_ILANGUAGE,
-                           find_language_id_proc, (LPARAM)&l_data);
-
-    if (l_data.n_found == 1) goto END;
-
-    if(!l_data.n_found)
-    {
-        if(l_data.country[0])
-        {
-            /* retry without country name */
-            l_data.country[0] = 0;
-            EnumResourceLanguagesW(kernel32_handle, (LPCWSTR)RT_STRING, (LPCWSTR)LOCALE_ILANGUAGE,
-                                   find_language_id_proc, (LONG_PTR)&l_data);
-            if (!l_data.n_found)
-            {
-                MESSAGE("Warning: Language '%s_%s' was not recognized, defaulting to English.\n",
-                        Lang, Country);
-                l_data.found_lang_id[0] = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
-            }
-            else MESSAGE("Warning: Language '%s_%s' was not recognized, defaulting to '%s'.\n",
-                         Lang, Country, debugstr_lang(l_data.found_lang_id[0]) );
-        }
-        else
-        {
-            MESSAGE("Warning: Language '%s' was not recognized, defaulting to English.\n", Lang);
-            l_data.found_lang_id[0] = MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT);
-        }
-    }
-    else
-    {
-        int i;
-
-        if (Country && Country[0])
-            MESSAGE("For language '%s_%s' several language ids were found:\n", Lang, Country);
-        else
-            MESSAGE("For language '%s' several language ids were found:\n", Lang);
-
-        /* print a list of languages with their description */
-        for (i = 0; i < l_data.n_found; i++)
-        {
-            WCHAR buffW[128];
-            char buffA[128];
-            GetLocaleInfoW( MAKELCID( l_data.found_lang_id[i], SORT_DEFAULT ),
-                           LOCALE_SLANGUAGE|LOCALE_NOUSEROVERRIDE, buffW, sizeof(buffW)/sizeof(WCHAR));
-            strcpyWtoA( buffA, buffW );
-            MESSAGE( "   %s (%04X) - %s\n", debugstr_lang(l_data.found_lang_id[i]),
-                     l_data.found_lang_id[i], buffA );
-        }
-        MESSAGE("Defaulting to '%s'. You should specify the exact language you want\n"
-                "by defining your LANG environment variable like this: LANG=%s\n",
-                debugstr_lang(l_data.found_lang_id[0]), debugstr_lang(l_data.found_lang_id[0]) );
-    }
-END:
-    TRACE("Returning %04X (%s)\n", l_data.found_lang_id[0], debugstr_lang(l_data.found_lang_id[0]));
-    return l_data.found_lang_id[0];
-}
-
-
-/***********************************************************************
- *              charset_cmp (internal)
- */
-static int charset_cmp( const void *name, const void *entry )
-{
-    const struct charset_entry *charset = (const struct charset_entry *)entry;
-    return strcasecmp( (const char *)name, charset->charset_name );
-}
-
-/***********************************************************************
- *		get_env_lcid
- */
-static LCID get_env_lcid( UINT *unix_cp, int category )
-{
-    char *buf, *lang,*country,*charset,*dialect,*next;
-    LCID ret = 0;
-
-    if ((lang = setlocale( category, NULL )) && *lang)
-    {
-        if (!strcmp(lang,"POSIX") || !strcmp(lang,"C")) goto done;
-
-        buf = RtlAllocateHeap( GetProcessHeap(), 0, strlen(lang) + 1 );
-        strcpy( buf, lang );
-        lang=buf;
-
-        do {
-            next=strchr(lang,':'); if (next) *next++='\0';
-            dialect=strchr(lang,'@'); if (dialect) *dialect++='\0';
-            charset=strchr(lang,'.'); if (charset) *charset++='\0';
-            country=strchr(lang,'_'); if (country) *country++='\0';
-
-            ret = get_language_id(lang, country, charset, dialect);
-            if (ret && charset && unix_cp)
-            {
-                const struct charset_entry *entry;
-                char charset_name[16];
-                size_t i, j;
-
-                /* remove punctuation characters from charset name */
-                for (i = j = 0; charset[i] && j < sizeof(charset_name)-1; i++)
-                    if (isalnum(charset[i])) charset_name[j++] = charset[i];
-                charset_name[j] = 0;
-
-                entry = bsearch( charset_name, charset_names,
-                                 sizeof(charset_names)/sizeof(charset_names[0]),
-                                 sizeof(charset_names[0]), charset_cmp );
-                if (entry)
-                {
-                    *unix_cp = entry->codepage;
-                    TRACE("charset %s was mapped to cp %u\n", charset, *unix_cp);
-                }
-                else
-                    FIXME("charset %s was not recognized\n", charset);
-            }
-            lang=next;
-        } while (lang && !ret);
-
-        if (!ret) MESSAGE("Warning: language '%s' not recognized, defaulting to English\n", buf);
-        RtlFreeHeap( GetProcessHeap(), 0, buf );
-    }
-
- done:
-    if (!ret) ret = MAKELCID( MAKELANGID(LANG_ENGLISH,SUBLANG_DEFAULT), SORT_DEFAULT) ;
-    return ret;
+    return unix_cp;
 }
 
 
@@ -670,6 +885,41 @@ LANGID WINAPI GetSystemDefaultUILanguage(void)
     LANGID lang;
     NtQueryInstallUILanguage( &lang );
     return lang;
+}
+
+
+/***********************************************************************
+ *           LocaleNameToLCID  (KERNEL32.@)
+ */
+LCID WINAPI LocaleNameToLCID( LPCWSTR name, DWORD flags )
+{
+    struct locale_name locale_name;
+
+    if (flags) FIXME( "unsupported flags %x\n", flags );
+
+    parse_locale_name( name, &locale_name );
+
+    TRACE( "found lcid %x for %s, matches %d\n",
+           locale_name.lcid, debugstr_w(name), locale_name.matches );
+
+    if (!locale_name.matches)
+        WARN( "locale %s not recognized, defaulting to English\n", debugstr_w(name) );
+    else if (locale_name.matches == 1)
+        WARN( "locale %s not recognized, defaulting to %s\n",
+              debugstr_w(name), debugstr_w(locale_name.lang) );
+
+    return locale_name.lcid;
+}
+
+
+/***********************************************************************
+ *           LCIDToLocaleName  (KERNEL32.@)
+ */
+INT WINAPI LCIDToLocaleName( LCID lcid, LPWSTR name, INT count, DWORD flags )
+{
+    if (flags) FIXME( "unsupported flags %x\n", flags );
+
+    return GetLocaleInfoW( lcid, LOCALE_SNAME | LOCALE_NOUSEROVERRIDE, name, count );
 }
 
 
@@ -936,7 +1186,7 @@ INT WINAPI GetLocaleInfoW( LCID lcid, LCTYPE lctype, LPWSTR buffer, INT len )
     }
     if (!len) buffer = NULL;
 
-    lcid = ConvertDefaultLocale(lcid);
+    lcid = convert_default_lcid( lcid, lctype );
 
     lcflags = lctype & LOCALE_LOCALEINFOFLAGSMASK;
     lctype &= 0xffff;
@@ -945,7 +1195,8 @@ INT WINAPI GetLocaleInfoW( LCID lcid, LCTYPE lctype, LPWSTR buffer, INT len )
 
     /* first check for overrides in the registry */
 
-    if (!(lcflags & LOCALE_NOUSEROVERRIDE) && lcid == GetUserDefaultLCID())
+    if (!(lcflags & LOCALE_NOUSEROVERRIDE) &&
+        lcid == convert_default_lcid( LOCALE_USER_DEFAULT, lctype ))
     {
         const WCHAR *value = get_locale_value_name(lctype);
 
@@ -989,7 +1240,7 @@ INT WINAPI GetLocaleInfoW( LCID lcid, LCTYPE lctype, LPWSTR buffer, INT len )
         lang_id = MAKELANGID(PRIMARYLANGID(lang_id), SUBLANG_DEFAULT);
 
     if (!(hrsrc = FindResourceExW( kernel32_handle, (LPWSTR)RT_STRING,
-                                   (LPCWSTR)((lctype >> 4) + 1), lang_id )))
+                                   ULongToPtr((lctype >> 4) + 1), lang_id )))
     {
         SetLastError( ERROR_INVALID_FLAGS );  /* no such lctype */
         return 0;
@@ -1074,8 +1325,6 @@ BOOL WINAPI SetLocaleInfoA(LCID lcid, LCTYPE lctype, LPCSTR data)
     DWORD len;
     BOOL ret;
 
-    lcid = ConvertDefaultLocale(lcid);
-
     if (!(lctype & LOCALE_USE_CP_ACP)) codepage = get_lcid_codepage( lcid );
 
     if (!data)
@@ -1109,8 +1358,6 @@ BOOL WINAPI SetLocaleInfoW( LCID lcid, LCTYPE lctype, LPCWSTR data )
     NTSTATUS status;
     HANDLE hkey;
 
-    lcid = ConvertDefaultLocale(lcid);
-
     lctype &= 0xffff;
     value = get_locale_value_name( lctype );
 
@@ -1124,13 +1371,6 @@ BOOL WINAPI SetLocaleInfoW( LCID lcid, LCTYPE lctype, LPCWSTR data )
     {
         SetLastError( ERROR_INVALID_FLAGS );
         return FALSE;
-    }
-
-    if (lcid != GetUserDefaultLCID())
-    {
-        /* Windows does not check that the lcid matches the current lcid */
-        WARN("locale 0x%08x isn't the current locale (0x%08x), setting anyway!\n",
-             lcid, GetUserDefaultLCID());
     }
 
     TRACE("setting %x (%s) to %s\n", lctype, debugstr_w(value), debugstr_w(data) );
@@ -1350,7 +1590,7 @@ BOOL WINAPI GetCPInfo( UINT codepage, LPCPINFO cpinfo )
     }
     if (table->info.def_char & 0xff00)
     {
-        cpinfo->DefaultChar[0] = table->info.def_char & 0xff00;
+        cpinfo->DefaultChar[0] = (table->info.def_char & 0xff00) >> 8;
         cpinfo->DefaultChar[1] = table->info.def_char & 0x00ff;
     }
     else
@@ -1505,9 +1745,9 @@ BOOL WINAPI EnumSystemCodePagesW( CODEPAGE_ENUMPROCW lpfnCodePageEnum, DWORD fla
  *   page   [I] Codepage character set to convert from
  *   flags  [I] Character mapping flags
  *   src    [I] Source string buffer
- *   srclen [I] Length of src, or -1 if src is NUL terminated
+ *   srclen [I] Length of src (in bytes), or -1 if src is NUL terminated
  *   dst    [O] Destination buffer
- *   dstlen [I] Length of dst, or 0 to compute the required length
+ *   dstlen [I] Length of dst (in WCHARs), or 0 to compute the required length
  *
  * RETURNS
  *   Success: If dstlen > 0, the number of characters written to dst.
@@ -1532,8 +1772,6 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
     }
 
     if (srclen < 0) srclen = strlen(src) + 1;
-
-    if (flags & MB_USEGLYPHCHARS) FIXME("MB_USEGLYPHCHARS not supported\n");
 
     switch(page)
     {
@@ -1578,6 +1816,8 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
         }
         ret = 0;
     }
+    TRACE("cp %d %s -> %s, ret = %d\n",
+          page, debugstr_an(src, srclen), debugstr_wn(dst, ret), ret);
     return ret;
 }
 
@@ -1591,9 +1831,9 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
  *   page    [I] Code page character set to convert to
  *   flags   [I] Mapping Flags (MB_ constants from "winnls.h").
  *   src     [I] Source string buffer
- *   srclen  [I] Length of src, or -1 if src is NUL terminated
+ *   srclen  [I] Length of src (in WCHARs), or -1 if src is NUL terminated
  *   dst     [O] Destination buffer
- *   dstlen  [I] Length of dst, or 0 to compute the required length
+ *   dstlen  [I] Length of dst (in bytes), or 0 to compute the required length
  *   defchar [I] Default character to use for conversion if no exact
  *		    conversion can be made
  *   used    [O] Set if default character was used in the conversion
@@ -1645,7 +1885,7 @@ INT WINAPI WideCharToMultiByte( UINT page, DWORD flags, LPCWSTR src, INT srclen,
         /* fall through */
     case CP_UTF8:
         if (used) *used = FALSE;  /* all chars are valid for UTF-8 */
-        ret = wine_utf8_wcstombs( src, srclen, dst, dstlen );
+        ret = wine_utf8_wcstombs( flags, src, srclen, dst, dstlen );
         break;
     default:
         if (!(table = get_codepage_table( page )))
@@ -2574,12 +2814,14 @@ void LOCALE_Init(void)
     extern void __wine_init_codepages( const union cptable *ansi_cp, const union cptable *oem_cp,
                                        const union cptable *unix_cp );
 
-    UINT ansi_cp = 1252, oem_cp = 437, mac_cp = 10000, unix_cp = ~0U;
-    LCID lcid;
+    UINT ansi_cp = 1252, oem_cp = 437, mac_cp = 10000, unix_cp;
 
 #ifdef __APPLE__
     /* MacOS doesn't set the locale environment variables so we have to do it ourselves */
+    CFArrayRef preferred_locales, all_locales;
+    CFStringRef user_language_string_ref = NULL;
     char user_locale[50];
+
     CFLocaleRef user_locale_ref = CFLocaleCopyCurrent();
     CFStringRef user_locale_string_ref = CFLocaleGetIdentifier( user_locale_ref );
 
@@ -2589,26 +2831,50 @@ void LOCALE_Init(void)
     unix_cp = CP_UTF8;  /* default to utf-8 even if we don't get a valid locale */
     setenv( "LANG", user_locale, 0 );
     TRACE( "setting locale to '%s'\n", user_locale );
-#endif
+
+    /* We still want to set the retrieve the preferred language as chosen in
+       System Preferences.app, because it can differ from CFLocaleCopyCurrent().
+    */
+    all_locales = CFLocaleCopyAvailableLocaleIdentifiers();
+    preferred_locales = CFBundleCopyLocalizationsForPreferences( all_locales, NULL );
+    if (preferred_locales && CFArrayGetCount( preferred_locales ))
+        user_language_string_ref = CFArrayGetValueAtIndex( preferred_locales, 0 );
+    CFRelease( all_locales );
+#endif /* __APPLE__ */
+
     setlocale( LC_ALL, "" );
 
-    lcid = get_env_lcid( NULL, LC_ALL );
-    NtSetDefaultLocale( TRUE, lcid );
+    unix_cp = setup_unix_locales();
+    if (!lcid_LC_MESSAGES) lcid_LC_MESSAGES = lcid_LC_CTYPE;
 
-    lcid = get_env_lcid( NULL, LC_MESSAGES );
-    NtSetDefaultUILanguage( LANGIDFROMLCID(lcid) );
+#ifdef __APPLE__
+    /* Override lcid_LC_MESSAGES with user_language if LC_MESSAGES is set to default */
+    if (lcid_LC_MESSAGES == lcid_LC_CTYPE && user_language_string_ref)
+    {
+        struct locale_name locale_name;
+        WCHAR buffer[128];
+        CFStringGetCString( user_language_string_ref, user_locale, sizeof(user_locale), kCFStringEncodingUTF8 );
+        strcpynAtoW( buffer, user_locale, sizeof(buffer)/sizeof(WCHAR) );
+        parse_locale_name( buffer, &locale_name );
+        lcid_LC_MESSAGES = locale_name.lcid;
+        TRACE( "setting lcid_LC_MESSAGES to '%s'\n", user_locale );
+    }
+    if (preferred_locales)
+        CFRelease( preferred_locales );
+#endif
 
-    lcid = get_env_lcid( &unix_cp, LC_CTYPE );
-    NtSetDefaultLocale( FALSE, lcid );
+    NtSetDefaultUILanguage( LANGIDFROMLCID(lcid_LC_MESSAGES) );
+    NtSetDefaultLocale( TRUE, lcid_LC_MESSAGES );
+    NtSetDefaultLocale( FALSE, lcid_LC_CTYPE );
 
-    ansi_cp = get_lcid_codepage(lcid);
-    GetLocaleInfoW( lcid, LOCALE_IDEFAULTMACCODEPAGE | LOCALE_RETURN_NUMBER,
+    ansi_cp = get_lcid_codepage( LOCALE_USER_DEFAULT );
+    GetLocaleInfoW( LOCALE_USER_DEFAULT, LOCALE_IDEFAULTMACCODEPAGE | LOCALE_RETURN_NUMBER,
                     (LPWSTR)&mac_cp, sizeof(mac_cp)/sizeof(WCHAR) );
-    GetLocaleInfoW( lcid, LOCALE_IDEFAULTCODEPAGE | LOCALE_RETURN_NUMBER,
+    GetLocaleInfoW( LOCALE_USER_DEFAULT, LOCALE_IDEFAULTCODEPAGE | LOCALE_RETURN_NUMBER,
                     (LPWSTR)&oem_cp, sizeof(oem_cp)/sizeof(WCHAR) );
-    if (unix_cp == ~0U)
-        GetLocaleInfoW( lcid, LOCALE_IDEFAULTUNIXCODEPAGE | LOCALE_RETURN_NUMBER,
-                    (LPWSTR)&unix_cp, sizeof(unix_cp)/sizeof(WCHAR) );
+    if (!unix_cp)
+        GetLocaleInfoW( LOCALE_USER_DEFAULT, LOCALE_IDEFAULTUNIXCODEPAGE | LOCALE_RETURN_NUMBER,
+                        (LPWSTR)&unix_cp, sizeof(unix_cp)/sizeof(WCHAR) );
 
     if (!(ansi_cptable = wine_cp_get_table( ansi_cp )))
         ansi_cptable = wine_cp_get_table( 1252 );
@@ -2627,6 +2893,8 @@ void LOCALE_Init(void)
     TRACE( "ansi=%03d oem=%03d mac=%03d unix=%03d\n",
            ansi_cptable->info.codepage, oem_cptable->info.codepage,
            mac_cptable->info.codepage, unix_cp );
+
+    setlocale(LC_NUMERIC, "C");  /* FIXME: oleaut32 depends on this */
 }
 
 static HANDLE NLS_RegOpenKey(HANDLE hRootKey, LPCWSTR szKeyName)

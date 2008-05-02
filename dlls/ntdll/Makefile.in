@@ -9,6 +9,7 @@ EXTRALIBS = @IOKITLIB@
 BASEADDRESS = 0x7bc00000
 
 C_SRCS = \
+	actctx.c \
 	atom.c \
 	cdrom.c \
 	critsection.c \
@@ -45,12 +46,14 @@ C_SRCS = \
 	string.c \
 	sync.c \
 	tape.c \
-	version.c \
 	thread.c \
 	threadpool.c \
 	time.c \
+	version.c \
 	virtual.c \
 	wcstring.c
+
+RC_SRCS = version.rc
 
 EXTRA_OBJS = relay32.o
 

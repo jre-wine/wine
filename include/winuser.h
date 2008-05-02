@@ -444,6 +444,48 @@ typedef struct tagINPUT
 } INPUT, *PINPUT, *LPINPUT;
 
 
+typedef struct tagRAWINPUTDEVICE {
+    USHORT usUsagePage;
+    USHORT usUsage;
+    DWORD dwFlags;
+    HWND hwndTarget;
+} RAWINPUTDEVICE, *PRAWINPUTDEVICE, *LPRAWINPUTDEVICE;
+
+typedef struct tagRID_DEVICE_INFO_MOUSE {
+    DWORD dwId;
+    DWORD dwNumberOfButtons;
+    DWORD dwSampleRate;
+    BOOL fHasHorizontalWheel;
+} RID_DEVICE_INFO_MOUSE, *PRID_DEVICE_INFO_MOUSE;
+
+typedef struct tagRID_DEVICE_INFO_KEYBOARD {
+    DWORD dwType;
+    DWORD dwSubType;
+    DWORD dwKeyboardMode;
+    DWORD dwNumberOfFunctionKeys;
+    DWORD dwNumberOfIndicators;
+    DWORD dwNumberOfKeysTotal;
+} RID_DEVICE_INFO_KEYBOARD, *PRID_DEVICE_INFO_KEYBOARD;
+
+typedef struct tagRID_DEVICE_INFO_HID {
+    DWORD dwVendorId;
+    DWORD dwProductId;
+    DWORD dwVersionNumber;
+    USHORT usUsagePage;
+    USHORT usUsage;
+} RID_DEVICE_INFO_HID, *PRID_DEVICE_INFO_HID;
+
+typedef struct tagRID_DEVICE_INFO {
+    DWORD    cbSize;
+    DWORD    dwType;
+    union {
+        RID_DEVICE_INFO_MOUSE     mouse;
+        RID_DEVICE_INFO_KEYBOARD  keyboard;
+        RID_DEVICE_INFO_HID       hid;
+    } DUMMYUNIONNAME;
+} RID_DEVICE_INFO, *PRID_DEVICE_INFO, *LPRID_DEVICE_INFO;
+
+
 typedef struct tagGUITHREADINFO
 {
     DWORD   cbSize;
@@ -567,8 +609,22 @@ typedef struct tagWINDOWPLACEMENT
 #define RT_ANICURSOR      MAKEINTRESOURCE(21)
 #define RT_ANIICON        MAKEINTRESOURCE(22)
 #define RT_HTML           MAKEINTRESOURCE(23)
-#define RT_MANIFEST       MAKEINTRESOURCE(24)
 
+#ifndef RC_INVOKED
+#define RT_MANIFEST                                        MAKEINTRESOURCE(24)
+#define CREATEPROCESS_MANIFEST_RESOURCE_ID                 MAKEINTRESOURCE(1)
+#define ISOLATIONAWARE_MANIFEST_RESOURCE_ID                MAKEINTRESOURCE(2)
+#define ISOLATIONAWARE_NOSTATICIMPORT_MANIFEST_RESOURCE_ID MAKEINTRESOURCE(3)
+#define MINIMUM_RESERVED_MANIFEST_RESOURCE_ID              MAKEINTRESOURCE(1)
+#define MAXIMUM_RESERVED_MANIFEST_RESOURCE_ID              MAKEINTRESOURCE(16)
+#else
+#define RT_MANIFEST                                        24
+#define CREATEPROCESS_MANIFEST_RESOURCE_ID                 1
+#define ISOLATIONAWARE_MANIFEST_RESOURCE_ID                2
+#define ISOLATIONAWARE_NOSTATICIMPORT_MANIFEST_RESOURCE_ID 3
+#define MINIMUM_RESERVED_MANIFEST_RESOURCE_ID              1
+#define MAXIMUM_RESERVED_MANIFEST_RESOURCE_ID              16
+#endif
 
   /* cbWndExtra bytes for dialog class */
 #define DLGWINDOWEXTRA      30
@@ -1082,6 +1138,9 @@ BOOL        WINAPI SetSysColors(INT,const INT*,const COLORREF*);
 #define WM_NCXBUTTONDOWN    0x00ab
 #define WM_NCXBUTTONUP      0x00ac
 #define WM_NCXBUTTONDBLCLK  0x00ad
+
+  /* Raw input */
+#define WM_INPUT            0x00ff
 
   /* Keyboard messages */
 #define WM_KEYDOWN          0x0100
@@ -3615,7 +3674,27 @@ typedef struct tagCOMPAREITEMSTRUCT
 #define VK_RCONTROL         0xA3
 #define VK_LMENU            0xA4
 #define VK_RMENU            0xA5
-/*                          0xA6-0xB9  Unassigned */
+
+#define VK_BROWSER_BACK        0xA6
+#define VK_BROWSER_FORWARD     0xA7
+#define VK_BROWSER_REFRESH     0xA8
+#define VK_BROWSER_STOP        0xA9
+#define VK_BROWSER_SEARCH      0xAA
+#define VK_BROWSER_FAVORITES   0xAB
+#define VK_BROWSER_HOME        0xAC
+#define VK_VOLUME_MUTE         0xAD
+#define VK_VOLUME_DOWN         0xAE
+#define VK_VOLUME_UP           0xAF
+#define VK_MEDIA_NEXT_TRACK    0xB0
+#define VK_MEDIA_PREV_TRACK    0xB1
+#define VK_MEDIA_STOP          0xB2
+#define VK_MEDIA_PLAY_PAUSE    0xB3
+#define VK_LAUNCH_MAIL         0xB4
+#define VK_LAUNCH_MEDIA_SELECT 0xB5
+#define VK_LAUNCH_APP1         0xB6
+#define VK_LAUNCH_APP2         0xB7
+
+/*                          0xB8-0xB9  Unassigned */
 #define VK_OEM_1            0xBA
 #define VK_OEM_PLUS         0xBB
 #define VK_OEM_COMMA        0xBC
@@ -3722,6 +3801,88 @@ typedef struct tagTRACKMOUSEEVENT {
 #define HSHELL_WINDOWCREATED       1
 #define HSHELL_WINDOWDESTROYED     2
 #define HSHELL_ACTIVATESHELLWINDOW 3
+#define HSHELL_WINDOWACTIVATED     4
+#define HSHELL_GETMINRECT          5
+#define HSHELL_REDRAW              6
+#define HSHELL_TASKMAN             7
+#define HSHELL_LANGUAGE            8
+#define HSHELL_SYSMENU             9
+#define HSHELL_ENDTASK             10
+#define HSHELL_ACCESSIBILITYSTATE  11
+#define HSHELL_APPCOMMAND          12
+#define HSHELL_WINDOWREPLACED      13
+#define HSHELL_WINDOWREPLACING     14
+
+#define HSHELL_HIGHBIT             0x8000
+#define HSHELL_FLASH               (HSHELL_REDRAW|HSHELL_HIGHBIT)
+#define HSHELL_RUDEAPPACTIVATED    (HSHELL_WINDOWACTIVATED|HSHELL_HIGHBIT)
+
+/* App commands */
+#define APPCOMMAND_BROWSER_BACKWARD                  1
+#define APPCOMMAND_BROWSER_FORWARD                   2
+#define APPCOMMAND_BROWSER_REFRESH                   3
+#define APPCOMMAND_BROWSER_STOP                      4
+#define APPCOMMAND_BROWSER_SEARCH                    5
+#define APPCOMMAND_BROWSER_FAVORITES                 6
+#define APPCOMMAND_BROWSER_HOME                      7
+#define APPCOMMAND_VOLUME_MUTE                       8
+#define APPCOMMAND_VOLUME_DOWN                       9
+#define APPCOMMAND_VOLUME_UP                         10
+#define APPCOMMAND_MEDIA_NEXTTRACK                   11
+#define APPCOMMAND_MEDIA_PREVIOUSTRACK               12
+#define APPCOMMAND_MEDIA_STOP                        13
+#define APPCOMMAND_MEDIA_PLAY_PAUSE                  14
+#define APPCOMMAND_LAUNCH_MAIL                       15
+#define APPCOMMAND_LAUNCH_MEDIA_SELECT               16
+#define APPCOMMAND_LAUNCH_APP1                       17
+#define APPCOMMAND_LAUNCH_APP2                       18
+#define APPCOMMAND_BASS_DOWN                         19
+#define APPCOMMAND_BASS_BOOST                        20
+#define APPCOMMAND_BASS_UP                           21
+#define APPCOMMAND_TREBLE_DOWN                       22
+#define APPCOMMAND_TREBLE_UP                         23
+#define APPCOMMAND_MICROPHONE_VOLUME_MUTE            24
+#define APPCOMMAND_MICROPHONE_VOLUME_DOWN            25
+#define APPCOMMAND_MICROPHONE_VOLUME_UP              26
+#define APPCOMMAND_HELP                              27
+#define APPCOMMAND_FIND                              28
+#define APPCOMMAND_NEW                               29
+#define APPCOMMAND_OPEN                              30
+#define APPCOMMAND_CLOSE                             31
+#define APPCOMMAND_SAVE                              32
+#define APPCOMMAND_PRINT                             33
+#define APPCOMMAND_UNDO                              34
+#define APPCOMMAND_REDO                              35
+#define APPCOMMAND_COPY                              36
+#define APPCOMMAND_CUT                               37
+#define APPCOMMAND_PASTE                             38
+#define APPCOMMAND_REPLY_TO_MAIL                     39
+#define APPCOMMAND_FORWARD_MAIL                      40
+#define APPCOMMAND_SEND_MAIL                         41
+#define APPCOMMAND_SPELL_CHECK                       42
+#define APPCOMMAND_DICTATE_OR_COMMAND_CONTROL_TOGGLE 43
+#define APPCOMMAND_MIC_ON_OFF_TOGGLE                 44
+#define APPCOMMAND_CORRECTION_LIST                   45
+#define APPCOMMAND_MEDIA_PLAY                        46
+#define APPCOMMAND_MEDIA_PAUSE                       47
+#define APPCOMMAND_MEDIA_RECORD                      48
+#define APPCOMMAND_MEDIA_FAST_FORWARD                49
+#define APPCOMMAND_MEDIA_REWIND                      50
+#define APPCOMMAND_MEDIA_CHANNEL_UP                  51
+#define APPCOMMAND_MEDIA_CHANNEL_DOWN                52
+#define APPCOMMAND_DELETE                            53
+#define APPCOMMAND_DWM_FLIP3D                        54
+
+#define FAPPCOMMAND_MOUSE 0x8000
+#define FAPPCOMMAND_KEY   0
+#define FAPPCOMMAND_OEM   0x1000
+#define FAPPCOMMAND_MASK  0xF000
+
+#define GET_APPCOMMAND_LPARAM(lParam) ((short)(HIWORD(lParam) & ~FAPPCOMMAND_MASK))
+#define GET_DEVICE_LPARAM(lParam)     ((WORD)(HIWORD(lParam) & FAPPCOMMAND_MASK))
+#define GET_MOUSEORKEY_LPARAM         GET_DEVICE_LPARAM
+#define GET_FLAGS_LPARAM(lParam)      (LOWORD(lParam))
+#define GET_KEYSTATE_LPARAM(lParam)   GET_FLAGS_LPARAM(lParam)
 
 /* Predefined Clipboard Formats */
 #define CF_TEXT              1
@@ -4038,7 +4199,7 @@ BOOL        WINAPI UpdateLayeredWindowIndirect(HWND,UPDATELAYEREDWINDOWINFO CONS
 #endif /* defined(_WINGDI_) && !defined(NOGDI) */
 
 HKL         WINAPI ActivateKeyboardLayout(HKL,UINT);
-WORD        WINAPI CascadeWindows(HWND, UINT, const LPRECT, UINT, const HWND *);
+WORD        WINAPI CascadeWindows(HWND, UINT, const RECT *, UINT, const HWND *);
 INT       WINAPI CopyAcceleratorTableA(HACCEL,LPACCEL,INT);
 INT       WINAPI CopyAcceleratorTableW(HACCEL,LPACCEL,INT);
 #define     CopyAcceleratorTable WINELIB_NAME_AW(CopyAcceleratorTable)
@@ -4112,7 +4273,7 @@ BOOL      WINAPI SetMenuItemInfoW(HMENU,UINT,BOOL,const MENUITEMINFOW*);
 #define     SetMenuItemInfo WINELIB_NAME_AW(SetMenuItemInfo)
 BOOL      WINAPI SetWindowContextHelpId(HWND,DWORD);
 HWINEVENTHOOK WINAPI SetWinEventHook(DWORD,DWORD,HMODULE,WINEVENTPROC,DWORD,DWORD,DWORD);
-WORD        WINAPI TileWindows (HWND, UINT, const LPRECT,
+WORD        WINAPI TileWindows (HWND, UINT, const RECT *,
                                 UINT, const HWND *);
 INT         WINAPI ToUnicode(UINT,UINT,PBYTE,LPWSTR,int,UINT);
 INT         WINAPI ToUnicodeEx(UINT,UINT,LPBYTE,LPWSTR,int,UINT,HKL);
@@ -4314,8 +4475,8 @@ INT_PTR   WINAPI DialogBoxIndirectParamW(HINSTANCE,LPCDLGTEMPLATEW,HWND,DLGPROC,
 INT_PTR   WINAPI DialogBoxParamA(HINSTANCE,LPCSTR,HWND,DLGPROC,LPARAM);
 INT_PTR   WINAPI DialogBoxParamW(HINSTANCE,LPCWSTR,HWND,DLGPROC,LPARAM);
 #define     DialogBoxParam WINELIB_NAME_AW(DialogBoxParam)
-LONG        WINAPI DispatchMessageA(const MSG*);
-LONG        WINAPI DispatchMessageW(const MSG*);
+LRESULT     WINAPI DispatchMessageA(const MSG*);
+LRESULT     WINAPI DispatchMessageW(const MSG*);
 #define     DispatchMessage WINELIB_NAME_AW(DispatchMessage)
 INT       WINAPI DlgDirListA(HWND,LPSTR,INT,INT,UINT);
 INT       WINAPI DlgDirListW(HWND,LPWSTR,INT,INT,UINT);
@@ -4652,6 +4813,7 @@ UINT        WINAPI PrivateExtractIconExW(LPCWSTR,int,HICON*,HICON*,UINT);
 UINT        WINAPI PrivateExtractIconsA(LPCSTR,int,int,int,HICON*,UINT*,UINT,UINT);
 UINT        WINAPI PrivateExtractIconsW(LPCWSTR,int,int,int,HICON*,UINT*,UINT,UINT);
 BOOL        WINAPI PtInRect(const RECT*,POINT);
+HWND        WINAPI RealChildWindowFromPoint(HWND,POINT);
 UINT        WINAPI RealGetWindowClassA(HWND,LPSTR,UINT);
 UINT        WINAPI RealGetWindowClassW(HWND,LPWSTR,UINT);
 #define     RealGetWindowClass WINELIB_NAME_AW(RealGetWindowClass)

@@ -59,6 +59,7 @@ typedef unsigned int   MSVCRT__dev_t;
 typedef int  MSVCRT__off_t;
 typedef long MSVCRT_clock_t;
 typedef long MSVCRT_time_t;
+typedef __int64 MSVCRT___time64_t;
 typedef __int64 MSVCRT_fpos_t;
 
 typedef void (*MSVCRT_terminate_handler)(void);
@@ -69,6 +70,8 @@ typedef void (*MSVCRT__se_translator_function)(unsigned int code, struct _EXCEPT
 typedef void (*MSVCRT__beginthread_start_routine_t)(void *);
 typedef unsigned int (__stdcall *MSVCRT__beginthreadex_start_routine_t)(void *);
 typedef int (*MSVCRT__onexit_t)(void);
+
+typedef struct {long double x;} _LDOUBLE;
 
 struct MSVCRT_tm {
     int tm_sec;
@@ -109,11 +112,9 @@ typedef struct __thread_data thread_data_t;
 
 extern thread_data_t *msvcrt_get_thread_data(void);
 
-extern int msvcrt_current_lc_all_cp;
+extern int MSVCRT___lc_codepage;
 
 void   msvcrt_set_errno(int);
-char*  msvcrt_strndup(const char*,unsigned int);
-MSVCRT_wchar_t *msvcrt_wstrndup(const MSVCRT_wchar_t*, unsigned int);
 
 void   _purecall(void);
 void   _amsg_exit(int errnum);
@@ -364,10 +365,24 @@ struct MSVCRT__stati64 {
   short          st_uid;
   short          st_gid;
   MSVCRT__dev_t  st_rdev;
-  __int64        st_size;
+  __int64 DECLSPEC_ALIGN(8) st_size;
   MSVCRT_time_t  st_atime;
   MSVCRT_time_t  st_mtime;
   MSVCRT_time_t  st_ctime;
+};
+
+struct MSVCRT__stat64 {
+  MSVCRT__dev_t     st_dev;
+  MSVCRT__ino_t     st_ino;
+  unsigned short    st_mode;
+  short             st_nlink;
+  short             st_uid;
+  short             st_gid;
+  MSVCRT__dev_t     st_rdev;
+  __int64 DECLSPEC_ALIGN(8) st_size;
+  MSVCRT___time64_t st_atime;
+  MSVCRT___time64_t st_mtime;
+  MSVCRT___time64_t st_ctime;
 };
 
 #define MSVCRT_WEOF (MSVCRT_wint_t)(0xFFFF)
@@ -609,6 +624,7 @@ MSVCRT_FILE*   MSVCRT__fdopen(int, const char *);
 int            MSVCRT_vsnprintf(char *str, unsigned int len, const char *format, va_list valist);
 int            MSVCRT_vsnwprintf(MSVCRT_wchar_t *str, unsigned int len,
                                  const MSVCRT_wchar_t *format, va_list valist );
+int            MSVCRT_raise(int sig);
 
 #ifndef __WINE_MSVCRT_TEST
 int            _write(int,const void*,unsigned int);

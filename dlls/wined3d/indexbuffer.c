@@ -25,7 +25,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION ((IWineD3DImpl *)(((IWineD3DDeviceImpl *)This->resource.wineD3DDevice)->wineD3D))->gl_info
+#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 /* *******************************************
    IWineD3DIndexBuffer IUnknown parts follow
@@ -58,6 +58,21 @@ static ULONG WINAPI IWineD3DIndexBufferImpl_Release(IWineD3DIndexBuffer *iface) 
     ULONG ref = InterlockedDecrement(&This->resource.ref);
     TRACE("(%p) : Releasing from %d\n", This, ref + 1);
     if (ref == 0) {
+        if(This->vbo) {
+            IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+
+            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+            ENTER_GL();
+            /* No need to manually unset the buffer. glDeleteBuffers unsets it for the current context,
+             * but not for other contexts. However, because the d3d buffer is destroyed the app has to
+             * unset it before doing the next draw, thus dirtifying the index buffer state and forcing
+             * binding a new buffer
+             */
+            GL_EXTCALL(glDeleteBuffersARB(1, &This->vbo));
+            checkGLcall("glDeleteBuffersARB");
+            LEAVE_GL();
+        }
+
         IWineD3DResourceImpl_CleanUp((IWineD3DResource *)iface);
         HeapFree(GetProcessHeap(), 0, This);
     }
@@ -92,7 +107,7 @@ static DWORD WINAPI IWineD3DIndexBufferImpl_GetPriority(IWineD3DIndexBuffer *ifa
 }
 
 static void WINAPI IWineD3DIndexBufferImpl_PreLoad(IWineD3DIndexBuffer *iface) {
-    return IWineD3DResourceImpl_PreLoad((IWineD3DResource *)iface);
+    IWineD3DResourceImpl_PreLoad((IWineD3DResource *)iface);
 }
 
 static WINED3DRESOURCETYPE WINAPI IWineD3DIndexBufferImpl_GetType(IWineD3DIndexBuffer *iface) {
@@ -108,13 +123,57 @@ static HRESULT WINAPI IWineD3DIndexBufferImpl_GetParent(IWineD3DIndexBuffer *ifa
    ****************************************************** */
 static HRESULT WINAPI IWineD3DIndexBufferImpl_Lock(IWineD3DIndexBuffer *iface, UINT OffsetToLock, UINT SizeToLock, BYTE** ppbData, DWORD Flags) {
     IWineD3DIndexBufferImpl *This = (IWineD3DIndexBufferImpl *)iface;
-    TRACE("(%p) : no real locking yet, offset %d, size %d, Flags=%x\n", This, OffsetToLock, SizeToLock, Flags);
+    TRACE("(%p) : offset %d, size %d, Flags=%x\n", This, OffsetToLock, SizeToLock, Flags);
+
+    InterlockedIncrement(&This->lockcount);
     *ppbData = (BYTE *)This->resource.allocatedMemory + OffsetToLock;
+
+    if(Flags & (WINED3DLOCK_READONLY | WINED3DLOCK_NO_DIRTY_UPDATE) || This->vbo == 0) {
+        return WINED3D_OK;
+    }
+
+    if(This->dirtystart != This->dirtyend) {
+        if(This->dirtystart > OffsetToLock) This->dirtystart = OffsetToLock;
+        if(SizeToLock) {
+            if(This->dirtyend < OffsetToLock + SizeToLock) This->dirtyend = OffsetToLock + SizeToLock;
+        } else {
+            This->dirtyend = This->resource.size;
+        }
+    } else {
+        This->dirtystart = OffsetToLock;
+        if(SizeToLock)
+            This->dirtyend = OffsetToLock + SizeToLock;
+        else
+            This->dirtyend = This->resource.size;
+    }
+
     return WINED3D_OK;
 }
 static HRESULT WINAPI IWineD3DIndexBufferImpl_Unlock(IWineD3DIndexBuffer *iface) {
     IWineD3DIndexBufferImpl *This = (IWineD3DIndexBufferImpl *)iface;
-    TRACE("(%p) : stub\n", This);
+    unsigned long locks = InterlockedDecrement(&This->lockcount);
+    TRACE("(%p)\n", This);
+
+    /* For now load in unlock */
+    if(locks == 0 && This->vbo && (This->dirtyend - This->dirtystart) > 0) {
+        IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+
+        if(device->createParms.BehaviorFlags & WINED3DCREATE_MULTITHREADED) {
+            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        }
+
+        ENTER_GL();
+        GL_EXTCALL(glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, This->vbo));
+        checkGLcall("glBindBufferARB");
+        GL_EXTCALL(glBufferSubDataARB(GL_ELEMENT_ARRAY_BUFFER_ARB,
+                This->dirtystart, This->dirtyend - This->dirtystart, This->resource.allocatedMemory + This->dirtystart));
+        checkGLcall("glBufferSubDataARB");
+        LEAVE_GL();
+        This->dirtystart = 0;
+        This->dirtyend = 0;
+        /* TODO: Move loading into preload when the buffer is used, that avoids dirtifying the state */
+        IWineD3DDeviceImpl_MarkStateDirty(device, STATE_INDEXBUFFER);
+    }
     return WINED3D_OK;
 }
 static HRESULT WINAPI IWineD3DIndexBufferImpl_GetDesc(IWineD3DIndexBuffer *iface, WINED3DINDEXBUFFER_DESC *pDesc) {

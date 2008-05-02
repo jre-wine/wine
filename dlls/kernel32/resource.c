@@ -3,6 +3,7 @@
  *
  * Copyright 1993 Robert J. Amstadt
  * Copyright 1995, 2003 Alexandre Julliard
+ * Copyright 2006 Mike McCormack
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,10 +32,8 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
-#include "wownt32.h"
 #include "wine/winbase16.h"
 #include "wine/debug.h"
-#include "excpt.h"
 #include "wine/exception.h"
 #include "wine/unicode.h"
 #include "wine/list.h"
@@ -61,7 +60,7 @@ static NTSTATUS get_res_nameA( LPCSTR name, UNICODE_STRING *str )
         ULONG value;
         if (RtlCharToInteger( name + 1, 10, &value ) != STATUS_SUCCESS || HIWORD(value))
             return STATUS_INVALID_PARAMETER;
-        str->Buffer = (LPWSTR)value;
+        str->Buffer = ULongToPtr(value);
         return STATUS_SUCCESS;
     }
     RtlCreateUnicodeStringFromAsciiz( str, name );
@@ -83,7 +82,7 @@ static NTSTATUS get_res_nameW( LPCWSTR name, UNICODE_STRING *str )
         RtlInitUnicodeString( str, name + 1 );
         if (RtlUnicodeStringToInteger( str, 10, &value ) != STATUS_SUCCESS || HIWORD(value))
             return STATUS_INVALID_PARAMETER;
-        str->Buffer = (LPWSTR)value;
+        str->Buffer = ULongToPtr(value);
         return STATUS_SUCCESS;
     }
     RtlCreateUnicodeString( str, name );
@@ -289,7 +288,7 @@ BOOL WINAPI EnumResourceTypesA( HMODULE hmod, ENUMRESTYPEPROCA lpfun, LONG_PTR l
         }
         else
         {
-            ret = lpfun( hmod, (LPSTR)(int)et[i].u1.s2.Id, lparam );
+            ret = lpfun( hmod, UIntToPtr(et[i].u1.s2.Id), lparam );
         }
         if (!ret) break;
     }
@@ -338,7 +337,7 @@ BOOL WINAPI EnumResourceTypesW( HMODULE hmod, ENUMRESTYPEPROCW lpfun, LONG_PTR l
         }
         else
         {
-            ret = lpfun( hmod, (LPWSTR)(int)et[i].u1.s2.Id, lparam );
+            ret = lpfun( hmod, UIntToPtr(et[i].u1.s2.Id), lparam );
         }
         if (!ret) break;
     }
@@ -371,7 +370,7 @@ BOOL WINAPI EnumResourceNamesA( HMODULE hmod, LPCSTR type, ENUMRESNAMEPROCA lpfu
         goto done;
     if ((status = get_res_nameA( type, &typeW )) != STATUS_SUCCESS)
         goto done;
-    info.Type = (ULONG)typeW.Buffer;
+    info.Type = (ULONG_PTR)typeW.Buffer;
     if ((status = LdrFindResourceDirectory_U( hmod, &info, 1, &resdir )) != STATUS_SUCCESS)
         goto done;
 
@@ -398,7 +397,7 @@ BOOL WINAPI EnumResourceNamesA( HMODULE hmod, LPCSTR type, ENUMRESNAMEPROCA lpfu
         }
         else
         {
-            ret = lpfun( hmod, type, (LPSTR)(int)et[i].u1.s2.Id, lparam );
+            ret = lpfun( hmod, type, UIntToPtr(et[i].u1.s2.Id), lparam );
         }
         if (!ret) break;
     }
@@ -433,7 +432,7 @@ BOOL WINAPI EnumResourceNamesW( HMODULE hmod, LPCWSTR type, ENUMRESNAMEPROCW lpf
         goto done;
     if ((status = get_res_nameW( type, &typeW )) != STATUS_SUCCESS)
         goto done;
-    info.Type = (ULONG)typeW.Buffer;
+    info.Type = (ULONG_PTR)typeW.Buffer;
     if ((status = LdrFindResourceDirectory_U( hmod, &info, 1, &resdir )) != STATUS_SUCCESS)
         goto done;
 
@@ -459,7 +458,7 @@ BOOL WINAPI EnumResourceNamesW( HMODULE hmod, LPCWSTR type, ENUMRESNAMEPROCW lpf
         }
         else
         {
-            ret = lpfun( hmod, type, (LPWSTR)(int)et[i].u1.s2.Id, lparam );
+            ret = lpfun( hmod, type, UIntToPtr(et[i].u1.s2.Id), lparam );
         }
         if (!ret) break;
     }
@@ -616,60 +615,943 @@ DWORD WINAPI SizeofResource( HINSTANCE hModule, HRSRC hRsrc )
     return ((PIMAGE_RESOURCE_DATA_ENTRY)hRsrc)->Size;
 }
 
+/*
+ *  Data structure for updating resources.
+ *  Type/Name/Language is a keyset for accessing resource data.
+ *
+ *  QUEUEDUPDATES (root) ->
+ *    list of struct resource_dir_entry    (Type) ->
+ *      list of struct resource_dir_entry  (Name)   ->
+ *         list of struct resource_data    Language + Data
+ */
 
 typedef struct
 {
     LPWSTR pFileName;
-    struct list resources_list;
+    BOOL bDeleteExistingResources;
+    struct list root;
 } QUEUEDUPDATES;
 
-typedef struct
-{
+/* this structure is shared for types and names */
+struct resource_dir_entry {
     struct list entry;
-    LPWSTR lpType;
-    LPWSTR lpName;
-    WORD wLanguage;
-    LPVOID lpData;
+    LPWSTR id;
+    struct list children;
+};
+
+/* this structure is the leaf */
+struct resource_data {
+    struct list entry;
+    LANGID lang;
+    DWORD codepage;
     DWORD cbData;
-} QUEUEDRESOURCE;
+    void *lpData;
+};
 
-static BOOL CALLBACK enum_resources_languages_delete_all(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wLang, LONG_PTR lParam)
+static int resource_strcmp( LPCWSTR a, LPCWSTR b )
 {
-    return UpdateResourceW((HANDLE)lParam, lpType, lpName, wLang, NULL, 0);
+    if ( a == b )
+        return 0;
+    if (HIWORD( a ) && HIWORD( b ) )
+        return lstrcmpW( a, b );
+    /* strings come before ids */
+    if (HIWORD( a ) && !HIWORD( b ))
+        return -1;
+    if (HIWORD( b ) && !HIWORD( a ))
+        return 1;
+    return ( a < b ) ? -1 : 1;
 }
 
-static BOOL CALLBACK enum_resources_names_delete_all(HMODULE hModule, LPCWSTR lpType, LPWSTR lpName, LONG_PTR lParam)
+static struct resource_dir_entry *find_resource_dir_entry( struct list *dir, LPCWSTR id )
 {
-    return EnumResourceLanguagesW(hModule, lpType, lpName, enum_resources_languages_delete_all, lParam);
+    struct resource_dir_entry *ent;
+
+    /* match either IDs or strings */
+    LIST_FOR_EACH_ENTRY( ent, dir, struct resource_dir_entry, entry )
+        if (!resource_strcmp( id, ent->id ))
+            return ent;
+
+    return NULL;
 }
 
-static BOOL CALLBACK enum_resources_types_delete_all(HMODULE hModule, LPWSTR lpType, LONG_PTR lParam)
+static struct resource_data *find_resource_data( struct list *dir, LANGID lang )
 {
-    return EnumResourceNamesW(hModule, lpType, enum_resources_names_delete_all, lParam);
+    struct resource_data *res_data;
+
+    /* match only languages here */
+    LIST_FOR_EACH_ENTRY( res_data, dir, struct resource_data, entry )
+        if ( lang == res_data->lang )
+             return res_data;
+
+    return NULL;
 }
 
-static BOOL CALLBACK enum_resources_languages_add_all(HMODULE hModule, LPCWSTR lpType, LPCWSTR lpName, WORD wLang, LONG_PTR lParam)
+static void add_resource_dir_entry( struct list *dir, struct resource_dir_entry *resdir )
 {
+    struct resource_dir_entry *ent;
+
+    LIST_FOR_EACH_ENTRY( ent, dir, struct resource_dir_entry, entry )
+    {
+        if (0>resource_strcmp( ent->id, resdir->id ))
+            continue;
+
+        list_add_before( &ent->entry, &resdir->entry );
+        return;
+    }
+    list_add_tail( dir, &resdir->entry );
+}
+
+static void add_resource_data_entry( struct list *dir, struct resource_data *resdata )
+{
+    struct resource_data *ent;
+
+    LIST_FOR_EACH_ENTRY( ent, dir, struct resource_data, entry )
+    {
+        if (ent->lang < resdata->lang)
+            continue;
+
+        list_add_before( &ent->entry, &resdata->entry );
+        return;
+    }
+    list_add_tail( dir, &resdata->entry );
+}
+
+static LPWSTR res_strdupW( LPCWSTR str )
+{
+    LPWSTR ret;
+    UINT len;
+
+    if (HIWORD(str) == 0)
+        return (LPWSTR) (UINT_PTR) LOWORD(str);
+    len = (lstrlenW( str ) + 1) * sizeof (WCHAR);
+    ret = HeapAlloc( GetProcessHeap(), 0, len );
+    memcpy( ret, str, len );
+    return ret;
+}
+
+static void res_free_str( LPWSTR str )
+{
+    if (HIWORD(str))
+        HeapFree( GetProcessHeap(), 0, str );
+}
+
+static BOOL update_add_resource( QUEUEDUPDATES *updates, LPCWSTR Type, LPCWSTR Name,
+                                 struct resource_data *resdata, BOOL overwrite_existing )
+{
+    struct resource_dir_entry *restype, *resname;
+    struct resource_data *existing;
+
+    TRACE("%p %s %s %p %d\n", updates,
+          debugstr_w(Type), debugstr_w(Name), resdata, overwrite_existing );
+
+    restype = find_resource_dir_entry( &updates->root, Type );
+    if (!restype)
+    {
+        restype = HeapAlloc( GetProcessHeap(), 0, sizeof *restype );
+        restype->id = res_strdupW( Type );
+        list_init( &restype->children );
+        add_resource_dir_entry( &updates->root, restype );
+    }
+
+    resname = find_resource_dir_entry( &restype->children, Name );
+    if (!resname)
+    {
+        resname = HeapAlloc( GetProcessHeap(), 0, sizeof *resname );
+        resname->id = res_strdupW( Name );
+        list_init( &resname->children );
+        add_resource_dir_entry( &restype->children, resname );
+    }
+
+    /*
+     * If there's an existing resource entry with matching (Type,Name,Language)
+     *  it needs to be removed before adding the new data.
+     */
+    existing = find_resource_data( &resname->children, resdata->lang );
+    if (existing)
+    {
+        if (!overwrite_existing)
+            return TRUE;
+        list_remove( &existing->entry );
+        HeapFree( GetProcessHeap(), 0, existing );
+    }
+
+    add_resource_data_entry( &resname->children, resdata );
+
+    return TRUE;
+}
+
+static struct resource_data *allocate_resource_data( WORD Language, DWORD codepage,
+                                                     LPVOID lpData, DWORD cbData, BOOL copy_data )
+{
+    struct resource_data *resdata;
+
+    if (!lpData || !cbData)
+        return NULL;
+
+    resdata = HeapAlloc( GetProcessHeap(), 0, sizeof *resdata + (copy_data ? cbData : 0) );
+    if (resdata)
+    {
+        resdata->lang = Language;
+        resdata->codepage = codepage;
+        resdata->cbData = cbData;
+        if (copy_data)
+        {
+            resdata->lpData = &resdata[1];
+            memcpy( resdata->lpData, lpData, cbData );
+        }
+        else
+            resdata->lpData = lpData;
+    }
+
+    return resdata;
+}
+
+static void free_resource_directory( struct list *head, int level )
+{
+    struct list *ptr = NULL;
+
+    while ((ptr = list_head( head )))
+    {
+        list_remove( ptr );
+        if (level)
+        {
+            struct resource_dir_entry *ent;
+
+            ent = LIST_ENTRY( ptr, struct resource_dir_entry, entry );
+            res_free_str( ent->id );
+            free_resource_directory( &ent->children, level - 1 );
+            HeapFree(GetProcessHeap(), 0, ent);
+        }
+        else
+        {
+            struct resource_data *data;
+
+            data = LIST_ENTRY( ptr, struct resource_data, entry );
+            HeapFree( GetProcessHeap(), 0, data );
+        }
+    }
+}
+
+static IMAGE_NT_HEADERS *get_nt_header( void *base, DWORD mapping_size )
+{
+    IMAGE_NT_HEADERS *nt;
+    IMAGE_DOS_HEADER *dos;
+
+    if (mapping_size<sizeof (*dos))
+        return NULL;
+
+    dos = base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+        return NULL;
+
+    if ((dos->e_lfanew + sizeof (*nt)) > mapping_size)
+        return NULL;
+
+    nt = (void*) ((BYTE*)base + dos->e_lfanew);
+
+    if (nt->Signature != IMAGE_NT_SIGNATURE)
+        return NULL;
+
+    return nt;
+}
+
+static IMAGE_SECTION_HEADER *get_section_header( void *base, DWORD mapping_size, DWORD *num_sections )
+{
+    IMAGE_NT_HEADERS *nt;
+    IMAGE_SECTION_HEADER *sec;
+    DWORD section_ofs;
+
+    nt = get_nt_header( base, mapping_size );
+    if (!nt)
+        return NULL;
+
+    /* check that we don't go over the end of the file accessing the sections */
+    section_ofs = FIELD_OFFSET(IMAGE_NT_HEADERS, OptionalHeader) + nt->FileHeader.SizeOfOptionalHeader;
+    if ((nt->FileHeader.NumberOfSections * sizeof (*sec) + section_ofs) > mapping_size)
+        return NULL;
+
+    if (num_sections)
+        *num_sections = nt->FileHeader.NumberOfSections;
+
+    /* from here we have a valid PE exe to update */
+    return (void*) ((BYTE*)nt + section_ofs);
+}
+
+static BOOL check_pe_exe( HANDLE file, QUEUEDUPDATES *updates )
+{
+    const IMAGE_NT_HEADERS *nt;
+    const IMAGE_SECTION_HEADER *sec;
+    BOOL ret = FALSE;
+    HANDLE mapping;
+    DWORD mapping_size, num_sections = 0;
+    void *base = NULL;
+
+    mapping_size = GetFileSize( file, NULL );
+
+    mapping = CreateFileMappingW( file, NULL, PAGE_READONLY, 0, 0, NULL );
+    if (!mapping)
+        goto done;
+
+    base = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, mapping_size );
+    if (!base)
+        goto done;
+
+    nt = get_nt_header( base, mapping_size );
+    if (!nt)
+        goto done;
+
+    TRACE("resources: %08x %08x\n",
+          nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress,
+          nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].Size);
+
+    sec = get_section_header( base, mapping_size, &num_sections );
+    if (!sec)
+        goto done;
+
+    ret = TRUE;
+
+done:
+    if (base)
+        UnmapViewOfFile( base );
+    if (mapping)
+        CloseHandle( mapping );
+
+    return ret;
+}
+
+struct resource_size_info {
+    DWORD types_ofs;
+    DWORD names_ofs;
+    DWORD langs_ofs;
+    DWORD data_entry_ofs;
+    DWORD strings_ofs;
+    DWORD data_ofs;
+    DWORD total_size;
+};
+
+struct mapping_info {
+    HANDLE file;
+    HANDLE mapping;
+    void *base;
     DWORD size;
-    HRSRC hResource = FindResourceExW(hModule, lpType, lpName, wLang);
-    HGLOBAL hGlobal;
-    LPVOID lpData;
+    BOOL read_write;
+};
 
-    if(hResource == NULL) return FALSE;
-    if(!(hGlobal = LoadResource(hModule, hResource))) return FALSE;
-    if(!(lpData = LockResource(hGlobal))) return FALSE;
-    if(!(size = SizeofResource(hModule, hResource))) return FALSE;
-    return UpdateResourceW((HANDLE)lParam, lpType, lpName, wLang, lpData, size);
+static const IMAGE_SECTION_HEADER *section_from_rva( void *base, DWORD mapping_size, DWORD rva )
+{
+    const IMAGE_SECTION_HEADER *sec;
+    DWORD num_sections = 0;
+    int i;
+
+    sec = get_section_header( base, mapping_size, &num_sections );
+    if (!sec)
+        return NULL;
+
+    for (i=num_sections-1; i>=0; i--)
+    {
+        if (sec[i].VirtualAddress <= rva &&
+            rva <= (DWORD)sec[i].VirtualAddress + sec[i].SizeOfRawData)
+        {
+            return &sec[i];
+        }
+    }
+
+    return NULL;
 }
 
-static BOOL CALLBACK enum_resources_names_add_all(HMODULE hModule, LPCWSTR lpType, LPWSTR lpName, LONG_PTR lParam)
+static void *address_from_rva( void *base, DWORD mapping_size, DWORD rva, DWORD len )
 {
-    return EnumResourceLanguagesW(hModule, lpType, lpName, enum_resources_languages_add_all, lParam);
+    const IMAGE_SECTION_HEADER *sec;
+
+    sec = section_from_rva( base, mapping_size, rva );
+    if (!sec)
+        return NULL;
+
+    if (rva + len <= (DWORD)sec->VirtualAddress + sec->SizeOfRawData)
+        return (void*)((LPBYTE) base + (sec->PointerToRawData + rva - sec->VirtualAddress));
+
+    return NULL;
 }
 
-static BOOL CALLBACK enum_resources_types_add_all(HMODULE hModule, LPWSTR lpType, LONG_PTR lParam)
+static LPWSTR resource_dup_string( const IMAGE_RESOURCE_DIRECTORY *root, const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry )
 {
-    return EnumResourceNamesW(hModule, lpType, enum_resources_names_add_all, lParam);
+    const IMAGE_RESOURCE_DIR_STRING_U* string;
+    LPWSTR s;
+
+    if (!entry->u1.s1.NameIsString)
+        return UIntToPtr(entry->u1.s2.Id);
+
+    string = (const IMAGE_RESOURCE_DIR_STRING_U*) (((const char *)root) + entry->u1.s1.NameOffset);
+    s = HeapAlloc(GetProcessHeap(), 0, (string->Length + 1)*sizeof (WCHAR) );
+    memcpy( s, string->NameString, (string->Length + 1)*sizeof (WCHAR) );
+    s[string->Length] = 0;
+
+    return s;
+}
+
+/* this function is based on the code in winedump's pe.c */
+static BOOL enumerate_mapped_resources( QUEUEDUPDATES *updates,
+                             void *base, DWORD mapping_size,
+                             const IMAGE_RESOURCE_DIRECTORY *root )
+{
+    const IMAGE_RESOURCE_DIRECTORY *namedir, *langdir;
+    const IMAGE_RESOURCE_DIRECTORY_ENTRY *e1, *e2, *e3;
+    const IMAGE_RESOURCE_DATA_ENTRY *data;
+    DWORD i, j, k;
+
+    TRACE("version (%d.%d) %d named %d id entries\n",
+          root->MajorVersion, root->MinorVersion, root->NumberOfNamedEntries, root->NumberOfIdEntries);
+
+    for (i = 0; i< root->NumberOfNamedEntries + root->NumberOfIdEntries; i++)
+    {
+        LPWSTR Type;
+
+        e1 = (const IMAGE_RESOURCE_DIRECTORY_ENTRY*)(root + 1) + i;
+
+        Type = resource_dup_string( root, e1 );
+
+        namedir = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + e1->u2.s3.OffsetToDirectory);
+        for (j = 0; j < namedir->NumberOfNamedEntries + namedir->NumberOfIdEntries; j++)
+        {
+            LPWSTR Name;
+
+            e2 = (const IMAGE_RESOURCE_DIRECTORY_ENTRY*)(namedir + 1) + j;
+
+            Name = resource_dup_string( root, e2 );
+
+            langdir = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + e2->u2.s3.OffsetToDirectory);
+            for (k = 0; k < langdir->NumberOfNamedEntries + langdir->NumberOfIdEntries; k++)
+            {
+                LANGID Lang;
+                void *p;
+                struct resource_data *resdata;
+
+                e3 = (const IMAGE_RESOURCE_DIRECTORY_ENTRY*)(langdir + 1) + k;
+
+                Lang = e3->u1.s2.Id;
+
+                data = (const IMAGE_RESOURCE_DATA_ENTRY *)((const char *)root + e3->u2.OffsetToData);
+
+                p = address_from_rva( base, mapping_size, data->OffsetToData, data->Size );
+
+                resdata = allocate_resource_data( Lang, data->CodePage, p, data->Size, FALSE );
+                if (resdata)
+                    update_add_resource( updates, Type, Name, resdata, FALSE );
+            }
+            res_free_str( Name );
+        }
+        res_free_str( Type );
+    }
+
+    return TRUE;
+}
+
+static BOOL read_mapped_resources( QUEUEDUPDATES *updates, void *base, DWORD mapping_size )
+{
+    const IMAGE_RESOURCE_DIRECTORY *root;
+    const IMAGE_NT_HEADERS *nt;
+    const IMAGE_SECTION_HEADER *sec;
+    DWORD num_sections = 0, i;
+
+    nt = get_nt_header( base, mapping_size );
+    if (!nt)
+        return FALSE;
+
+    sec = get_section_header( base, mapping_size, &num_sections );
+    if (!sec)
+        return FALSE;
+
+    for (i=0; i<num_sections; i++)
+        if (!memcmp(sec[i].Name, ".rsrc", 6))
+            break;
+
+    if (i == num_sections)
+        return TRUE;
+
+    /* check the resource data is inside the mapping */
+    if (sec[i].PointerToRawData > mapping_size ||
+        (sec[i].PointerToRawData + sec[i].SizeOfRawData) > mapping_size)
+        return TRUE;
+
+    TRACE("found .rsrc at %08x, size %08x\n", sec[i].PointerToRawData, sec[i].SizeOfRawData);
+
+    root = (void*) ((BYTE*)base + sec[i].PointerToRawData);
+    enumerate_mapped_resources( updates, base, mapping_size, root );
+
+    return TRUE;
+}
+
+static BOOL map_file_into_memory( struct mapping_info *mi )
+{
+    DWORD page_attr, perm;
+
+    if (mi->read_write)
+    {
+        page_attr = PAGE_READWRITE;
+        perm = FILE_MAP_WRITE | FILE_MAP_READ;
+    }
+    else
+    {
+        page_attr = PAGE_READONLY;
+        perm = FILE_MAP_READ;
+    }
+
+    mi->mapping = CreateFileMappingW( mi->file, NULL, page_attr, 0, 0, NULL );
+    if (!mi->mapping)
+        return FALSE;
+
+    mi->base = MapViewOfFile( mi->mapping, perm, 0, 0, mi->size );
+    if (!mi->base)
+        return FALSE;
+
+    return TRUE;
+}
+
+static BOOL unmap_file_from_memory( struct mapping_info *mi )
+{
+    if (mi->base)
+        UnmapViewOfFile( mi->base );
+    mi->base = NULL;
+    if (mi->mapping)
+        CloseHandle( mi->mapping );
+    mi->mapping = NULL;
+    return TRUE;
+}
+
+static void destroy_mapping( struct mapping_info *mi )
+{
+    if (!mi)
+        return;
+    unmap_file_from_memory( mi );
+    if (mi->file)
+        CloseHandle( mi->file );
+    HeapFree( GetProcessHeap(), 0, mi );
+}
+
+static struct mapping_info *create_mapping( LPCWSTR name, BOOL rw )
+{
+    struct mapping_info *mi;
+
+    mi = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof *mi );
+    if (!mi)
+        return NULL;
+
+    mi->read_write = rw;
+
+    mi->file = CreateFileW( name, GENERIC_READ | (rw ? GENERIC_WRITE : 0),
+                            0, NULL, OPEN_EXISTING, 0, 0 );
+
+    if (mi->file != INVALID_HANDLE_VALUE)
+    {
+        mi->size = GetFileSize( mi->file, NULL );
+
+        if (map_file_into_memory( mi ))
+            return mi;
+    }
+
+    unmap_file_from_memory( mi );
+
+    return NULL;
+}
+
+static BOOL resize_mapping( struct mapping_info *mi, DWORD new_size )
+{
+    if (!unmap_file_from_memory( mi ))
+        return FALSE;
+
+    /* change the file size */
+    SetFilePointer( mi->file, new_size, NULL, FILE_BEGIN );
+    if (!SetEndOfFile( mi->file ))
+    {
+        ERR("failed to set file size to %08x\n", new_size );
+        return FALSE;
+    }
+
+    mi->size = new_size;
+
+    return map_file_into_memory( mi );
+}
+
+static void get_resource_sizes( QUEUEDUPDATES *updates, struct resource_size_info *si )
+{
+    struct resource_dir_entry *types, *names;
+    struct resource_data *data;
+    DWORD num_types = 0, num_names = 0, num_langs = 0, strings_size = 0, data_size = 0;
+
+    memset( si, 0, sizeof *si );
+
+    LIST_FOR_EACH_ENTRY( types, &updates->root, struct resource_dir_entry, entry )
+    {
+        num_types++;
+        if (HIWORD( types->id ))
+            strings_size += sizeof (WORD) + lstrlenW( types->id )*sizeof (WCHAR);
+
+        LIST_FOR_EACH_ENTRY( names, &types->children, struct resource_dir_entry, entry )
+        {
+            num_names++;
+
+            if (HIWORD( names->id ))
+                strings_size += sizeof (WORD) + lstrlenW( names->id )*sizeof (WCHAR);
+
+            LIST_FOR_EACH_ENTRY( data, &names->children, struct resource_data, entry )
+            {
+                num_langs++;
+                data_size += (data->cbData + 3) & ~3;
+            }
+        }
+    }
+
+    /* names are at the end of the types */
+    si->names_ofs = sizeof (IMAGE_RESOURCE_DIRECTORY) +
+            num_types * sizeof (IMAGE_RESOURCE_DIRECTORY_ENTRY);
+
+    /* language directories are at the end of the names */
+    si->langs_ofs = si->names_ofs +
+            num_types * sizeof (IMAGE_RESOURCE_DIRECTORY) +
+            num_names * sizeof (IMAGE_RESOURCE_DIRECTORY_ENTRY);
+
+    si->data_entry_ofs = si->langs_ofs +
+            num_names * sizeof (IMAGE_RESOURCE_DIRECTORY) +
+            num_langs * sizeof (IMAGE_RESOURCE_DIRECTORY_ENTRY);
+
+    si->strings_ofs = si->data_entry_ofs +
+            num_langs * sizeof (IMAGE_RESOURCE_DATA_ENTRY);
+
+    si->data_ofs = si->strings_ofs + ((strings_size + 3) & ~3);
+
+    si->total_size = si->data_ofs + data_size;
+
+    TRACE("names %08x langs %08x data entries %08x strings %08x data %08x total %08x\n",
+          si->names_ofs, si->langs_ofs, si->data_entry_ofs,
+          si->strings_ofs, si->data_ofs, si->total_size);
+}
+
+static void res_write_padding( BYTE *res_base, DWORD size )
+{
+    static const BYTE pad[] = {
+        'P','A','D','D','I','N','G','X','X','P','A','D','D','I','N','G' };
+    DWORD i;
+
+    for ( i = 0; i < size / sizeof pad; i++ )
+        memcpy( &res_base[i*sizeof pad], pad, sizeof pad );
+    memcpy( &res_base[i*sizeof pad], pad, size%sizeof pad );
+}
+
+static BOOL write_resources( QUEUEDUPDATES *updates, LPBYTE base, struct resource_size_info *si, DWORD rva )
+{
+    struct resource_dir_entry *types, *names;
+    struct resource_data *data;
+    IMAGE_RESOURCE_DIRECTORY *root;
+
+    TRACE("%p %p %p %08x\n", updates, base, si, rva );
+
+    memset( base, 0, si->total_size );
+
+    /* the root entry always exists */
+    root = (IMAGE_RESOURCE_DIRECTORY*) base;
+    memset( root, 0, sizeof *root );
+    root->MajorVersion = 4;
+    si->types_ofs = sizeof *root;
+    LIST_FOR_EACH_ENTRY( types, &updates->root, struct resource_dir_entry, entry )
+    {
+        IMAGE_RESOURCE_DIRECTORY_ENTRY *e1;
+        IMAGE_RESOURCE_DIRECTORY *namedir;
+
+        e1 = (IMAGE_RESOURCE_DIRECTORY_ENTRY*) &base[si->types_ofs];
+        memset( e1, 0, sizeof *e1 );
+        if (HIWORD( types->id ))
+        {
+            WCHAR *strings;
+            DWORD len;
+
+            root->NumberOfNamedEntries++;
+            e1->u1.s1.NameIsString = 1;
+            e1->u1.s1.NameOffset = si->strings_ofs;
+
+            strings = (WCHAR*) &base[si->strings_ofs];
+            len = lstrlenW( types->id );
+            strings[0] = len;
+            memcpy( &strings[1], types->id, len * sizeof (WCHAR) );
+            si->strings_ofs += (len + 1) * sizeof (WCHAR);
+        }
+        else
+        {
+            root->NumberOfIdEntries++;
+            e1->u1.s2.Id = LOWORD( types->id );
+        }
+        e1->u2.s3.OffsetToDirectory = si->names_ofs;
+        e1->u2.s3.DataIsDirectory = TRUE;
+        si->types_ofs += sizeof (IMAGE_RESOURCE_DIRECTORY_ENTRY);
+
+        namedir = (IMAGE_RESOURCE_DIRECTORY*) &base[si->names_ofs];
+        memset( namedir, 0, sizeof *namedir );
+        namedir->MajorVersion = 4;
+        si->names_ofs += sizeof (IMAGE_RESOURCE_DIRECTORY);
+
+        LIST_FOR_EACH_ENTRY( names, &types->children, struct resource_dir_entry, entry )
+        {
+            IMAGE_RESOURCE_DIRECTORY_ENTRY *e2;
+            IMAGE_RESOURCE_DIRECTORY *langdir;
+
+            e2 = (IMAGE_RESOURCE_DIRECTORY_ENTRY*) &base[si->names_ofs];
+            memset( e2, 0, sizeof *e2 );
+            if (HIWORD( names->id ))
+            {
+                WCHAR *strings;
+                DWORD len;
+
+                namedir->NumberOfNamedEntries++;
+                e2->u1.s1.NameIsString = 1;
+                e2->u1.s1.NameOffset = si->strings_ofs;
+
+                strings = (WCHAR*) &base[si->strings_ofs];
+                len = lstrlenW( names->id );
+                strings[0] = len;
+                memcpy( &strings[1], names->id, len * sizeof (WCHAR) );
+                si->strings_ofs += (len + 1) * sizeof (WCHAR);
+            }
+            else
+            {
+                namedir->NumberOfIdEntries++;
+                e2->u1.s2.Id = LOWORD( names->id );
+            }
+            e2->u2.s3.OffsetToDirectory = si->langs_ofs;
+            e2->u2.s3.DataIsDirectory = TRUE;
+            si->names_ofs += sizeof (IMAGE_RESOURCE_DIRECTORY_ENTRY);
+
+            langdir = (IMAGE_RESOURCE_DIRECTORY*) &base[si->langs_ofs];
+            memset( langdir, 0, sizeof *langdir );
+            langdir->MajorVersion = 4;
+            si->langs_ofs += sizeof (IMAGE_RESOURCE_DIRECTORY);
+
+            LIST_FOR_EACH_ENTRY( data, &names->children, struct resource_data, entry )
+            {
+                IMAGE_RESOURCE_DIRECTORY_ENTRY *e3;
+                IMAGE_RESOURCE_DATA_ENTRY *de;
+                int pad_size;
+
+                e3 = (IMAGE_RESOURCE_DIRECTORY_ENTRY*) &base[si->langs_ofs];
+                memset( e3, 0, sizeof *e3 );
+                langdir->NumberOfIdEntries++;
+                e3->u1.s2.Id = LOWORD( data->lang );
+                e3->u2.OffsetToData = si->data_entry_ofs;
+
+                si->langs_ofs += sizeof (IMAGE_RESOURCE_DIRECTORY_ENTRY);
+
+                /* write out all the data entries */
+                de = (IMAGE_RESOURCE_DATA_ENTRY*) &base[si->data_entry_ofs];
+                memset( de, 0, sizeof *de );
+                de->OffsetToData = si->data_ofs + rva;
+                de->Size = data->cbData;
+                de->CodePage = data->codepage;
+                si->data_entry_ofs += sizeof (IMAGE_RESOURCE_DATA_ENTRY);
+
+                /* write out the resource data */
+                memcpy( &base[si->data_ofs], data->lpData, data->cbData );
+                si->data_ofs += data->cbData;
+
+                pad_size = (-si->data_ofs)&3;
+                res_write_padding( &base[si->data_ofs], pad_size );
+                si->data_ofs += pad_size;
+            }
+        }
+    }
+
+    return TRUE;
+}
+
+/*
+ *  FIXME:
+ *  Assumes that the resources are in .rsrc
+ *   and .rsrc is the last section in the file.
+ *  Not sure whether updating resources will other cases on Windows.
+ *  If the resources lie in a section containing other data,
+ *   resizing that section could possibly cause trouble.
+ *  If the section with the resources isn't last, the remaining
+ *   sections need to be moved down in the file, and the section header
+ *   would need to be adjusted.
+ *  If we needed to add a section, what would we name it?
+ *  If we needed to add a section and there wasn't space in the file
+ *   header, how would that work?
+ *  Seems that at least some of these cases can't be handled properly.
+ */
+static IMAGE_SECTION_HEADER *get_resource_section( void *base, DWORD mapping_size )
+{
+    IMAGE_SECTION_HEADER *sec;
+    IMAGE_NT_HEADERS *nt;
+    DWORD i, num_sections = 0;
+
+    nt = get_nt_header( base, mapping_size );
+    if (!nt)
+        return NULL;
+
+    sec = get_section_header( base, mapping_size, &num_sections );
+    if (!sec)
+        return NULL;
+
+    /* find the resources section */
+    for (i=0; i<num_sections; i++)
+        if (!memcmp(sec[i].Name, ".rsrc", 6))
+            break;
+
+    if (i == num_sections)
+    {
+        FIXME(".rsrc doesn't exist\n");
+        return NULL;
+    }
+
+    /* check that the resources section is last */
+    if (i != num_sections - 1)
+    {
+        FIXME(".rsrc isn't the last section\n");
+        return NULL;
+    }
+
+    return &sec[i];
+}
+
+static DWORD get_init_data_size( void *base, DWORD mapping_size )
+{
+    DWORD i, sz = 0, num_sections = 0;
+    IMAGE_SECTION_HEADER *s;
+
+    s = get_section_header( base, mapping_size, &num_sections );
+
+    for (i=0; i<num_sections; i++)
+        if (s[i].Characteristics & IMAGE_SCN_CNT_INITIALIZED_DATA)
+            sz += s[i].SizeOfRawData;
+
+    TRACE("size = %08x\n", sz);
+
+    return sz;
+}
+
+static BOOL write_raw_resources( QUEUEDUPDATES *updates )
+{
+    static const WCHAR prefix[] = { 'r','e','s','u',0 };
+    WCHAR tempdir[MAX_PATH], tempfile[MAX_PATH];
+    DWORD mapping_size, section_size, old_size;
+    BOOL ret = FALSE;
+    IMAGE_SECTION_HEADER *sec;
+    IMAGE_NT_HEADERS *nt;
+    struct resource_size_info res_size;
+    BYTE *res_base;
+    struct mapping_info *read_map = NULL, *write_map = NULL;
+
+    /* copy the exe to a temp file then update the temp file... */
+    tempdir[0] = 0;
+    if (!GetTempPathW( MAX_PATH, tempdir ))
+        return ret;
+
+    if (!GetTempFileNameW( tempdir, prefix, 0, tempfile ))
+        return ret;
+
+    if (!CopyFileW( updates->pFileName, tempfile, FALSE ))
+        goto done;
+
+    TRACE("tempfile %s\n", debugstr_w(tempfile));
+
+    if (!updates->bDeleteExistingResources)
+    {
+        read_map = create_mapping( updates->pFileName, FALSE );
+        if (!read_map)
+            goto done;
+
+        ret = read_mapped_resources( updates, read_map->base, read_map->size );
+        if (!ret)
+        {
+            ERR("failed to read existing resources\n");
+            goto done;
+        }
+    }
+
+    write_map = create_mapping( tempfile, TRUE );
+    if (!write_map)
+        goto done;
+
+    nt = get_nt_header( write_map->base, write_map->size );
+    if (!nt)
+        goto done;
+
+    if (nt->OptionalHeader.SectionAlignment <= 0)
+    {
+        ERR("invalid section alignment %04x\n", nt->OptionalHeader.SectionAlignment);
+        goto done;
+    }
+
+    sec = get_resource_section( write_map->base, write_map->size );
+    if (!sec)
+        goto done;
+
+    if ((sec->SizeOfRawData + sec->PointerToRawData) != write_map->size)
+    {
+        FIXME(".rsrc isn't at the end of the image %08x + %08x != %08x\n",
+            sec->SizeOfRawData, sec->PointerToRawData, write_map->size);
+        goto done;
+    }
+
+    TRACE("before .rsrc at %08x, size %08x\n", sec->PointerToRawData, sec->SizeOfRawData);
+
+    get_resource_sizes( updates, &res_size );
+
+    /* round up the section size */
+    section_size = res_size.total_size;
+    section_size += (-section_size) % nt->OptionalHeader.SectionAlignment;
+
+    mapping_size = sec->PointerToRawData + section_size;
+
+    TRACE("requires %08x (%08x) bytes\n", res_size.total_size, section_size );
+
+    /* check if the file size needs to be changed */
+    if (section_size != sec->SizeOfRawData)
+    {
+        old_size = write_map->size;
+
+        TRACE("file size %08x -> %08x\n", old_size, mapping_size);
+
+        /* unmap the file before changing the file size */
+        ret = resize_mapping( write_map, mapping_size );
+
+        /* get the pointers again - they might be different after remapping */
+        nt = get_nt_header( write_map->base, mapping_size );
+        if (!nt)
+        {
+            ERR("couldn't get NT header\n");
+            goto done;
+        }
+
+        sec = get_resource_section( write_map->base, mapping_size );
+        if (!sec)
+             goto done;
+
+        /* adjust the PE header information */
+        nt->OptionalHeader.SizeOfImage += (mapping_size - old_size);
+        sec->SizeOfRawData = section_size;
+        sec->Misc.VirtualSize = section_size;
+        nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].Size = res_size.total_size;
+        nt->OptionalHeader.SizeOfInitializedData = get_init_data_size( write_map->base, mapping_size );
+    }
+
+    res_base = (LPBYTE) write_map->base + sec->PointerToRawData;
+
+    TRACE("base = %p offset = %08x\n", write_map->base, sec->PointerToRawData);
+
+    ret = write_resources( updates, res_base, &res_size, sec->VirtualAddress );
+
+    res_write_padding( res_base + res_size.total_size, section_size - res_size.total_size );
+
+    TRACE("after  .rsrc at %08x, size %08x\n", sec->PointerToRawData, sec->SizeOfRawData);
+
+done:
+    destroy_mapping( read_map );
+    destroy_mapping( write_map );
+
+    if (ret)
+        ret = CopyFileW( tempfile, updates->pFileName, FALSE );
+
+    DeleteFileW( tempfile );
+
+    return ret;
 }
 
 /***********************************************************************
@@ -677,76 +1559,43 @@ static BOOL CALLBACK enum_resources_types_add_all(HMODULE hModule, LPWSTR lpType
  */
 HANDLE WINAPI BeginUpdateResourceW( LPCWSTR pFileName, BOOL bDeleteExistingResources )
 {
-    HANDLE hFile = NULL;
-    WIN32_FIND_DATAW fd;
-    HANDLE hModule = NULL;
-    HANDLE hUpdate = NULL;
-    QUEUEDUPDATES *current_updates = NULL;
-    HANDLE ret = NULL;
+    QUEUEDUPDATES *updates = NULL;
+    HANDLE hUpdate, file, ret = NULL;
 
-    TRACE("%s, %d\n",debugstr_w(pFileName),bDeleteExistingResources);
+    TRACE("%s, %d\n", debugstr_w(pFileName), bDeleteExistingResources);
 
-    hFile = FindFirstFileW(pFileName, &fd);
-    if(hFile == INVALID_HANDLE_VALUE)
-    {
-        hFile = NULL;
-        SetLastError(ERROR_FILE_NOT_FOUND);
-        goto done;
-    }
-    if(fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
-    {
-        SetLastError(ERROR_FILE_READ_ONLY);
-        goto done;
-    }
+    hUpdate = GlobalAlloc(GHND, sizeof(QUEUEDUPDATES));
+    if (!hUpdate)
+        return ret;
 
-    hModule = LoadLibraryW(pFileName);
-    if(hModule == NULL)
+    updates = GlobalLock(hUpdate);
+    if (updates)
     {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        goto done;
-    }
+        list_init( &updates->root );
+        updates->bDeleteExistingResources = bDeleteExistingResources;
+        updates->pFileName = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(pFileName)+1)*sizeof(WCHAR));
+        if (updates->pFileName)
+        {
+            lstrcpyW(updates->pFileName, pFileName);
 
-    if(!(hUpdate = GlobalAlloc(GHND, sizeof(QUEUEDUPDATES))))
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        goto done;
-    }
-    if(!(current_updates = GlobalLock(hUpdate)))
-    {
-        SetLastError(ERROR_INVALID_HANDLE);
-        goto done;
-    }
-    if(!(current_updates->pFileName = HeapAlloc(GetProcessHeap(), 0, (strlenW(pFileName)+1)*sizeof(WCHAR))))
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        goto done;
-    }
-    strcpyW(current_updates->pFileName, pFileName);
-    list_init(&current_updates->resources_list);
+            file = CreateFileW( pFileName, GENERIC_READ | GENERIC_WRITE,
+                                0, NULL, OPEN_EXISTING, 0, 0 );
 
-    if(bDeleteExistingResources)
-    {
-        if(!EnumResourceTypesW(hModule, enum_resources_types_delete_all, (LONG_PTR)hUpdate))
-            goto done;
-    }
-    else
-    {
-        if(!EnumResourceTypesW(hModule, enum_resources_types_add_all, (LONG_PTR)hUpdate))
-            goto done;
-    }
-    ret = hUpdate;
+            /* if resources are deleted, only the file's presence is checked */
+            if (file != INVALID_HANDLE_VALUE &&
+                (bDeleteExistingResources || check_pe_exe( file, updates )))
+                ret = hUpdate;
+            else
+                HeapFree( GetProcessHeap(), 0, updates->pFileName );
 
-done:
-    if(!ret && current_updates)
-    {
-        HeapFree(GetProcessHeap(), 0, current_updates->pFileName);
+            CloseHandle( file );
+        }
         GlobalUnlock(hUpdate);
-        GlobalFree(hUpdate);
-        hUpdate = NULL;
     }
-    if(hUpdate) GlobalUnlock(hUpdate);
-    if(hModule) FreeLibrary(hModule);
-    if(hFile) FindClose(hFile);
+
+    if (!ret)
+        GlobalFree(hUpdate);
+
     return ret;
 }
 
@@ -770,46 +1619,23 @@ HANDLE WINAPI BeginUpdateResourceA( LPCSTR pFileName, BOOL bDeleteExistingResour
  */
 BOOL WINAPI EndUpdateResourceW( HANDLE hUpdate, BOOL fDiscard )
 {
-    QUEUEDUPDATES *current_updates = NULL;
-    BOOL found = TRUE;
-    BOOL ret = FALSE;
-    struct list *ptr = NULL;
-    QUEUEDRESOURCE *current_resource = NULL;
+    QUEUEDUPDATES *updates;
+    BOOL ret;
 
-    FIXME("(%p,%d): stub\n",hUpdate,fDiscard);
+    TRACE("%p %d\n", hUpdate, fDiscard);
 
-    if(!(current_updates = GlobalLock(hUpdate)))
-    {
-        SetLastError(ERROR_INVALID_HANDLE);
-        found = FALSE;
-        goto done;
-    }
+    updates = GlobalLock(hUpdate);
+    if (!updates)
+        return FALSE;
 
-    if(fDiscard)
-        ret = TRUE;
-    else
-    {
-        /* FIXME: This is the only missing part, an actual implementation */
-        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-        ret = FALSE;
-    }
+    ret = fDiscard || write_raw_resources( updates );
 
-done:
-    if(found)
-    {
-        while ((ptr = list_head(&current_updates->resources_list)) != NULL)
-        {
-            current_resource = LIST_ENTRY(ptr, QUEUEDRESOURCE, entry);
-            list_remove(&current_resource->entry);
-            if(HIWORD(current_resource->lpType)) HeapFree(GetProcessHeap(), 0, current_resource->lpType);
-            if(HIWORD(current_resource->lpName)) HeapFree(GetProcessHeap(), 0, current_resource->lpName);
-            HeapFree(GetProcessHeap(), 0, current_resource->lpData);
-            HeapFree(GetProcessHeap(), 0, current_resource);
-        }
-        HeapFree(GetProcessHeap(), 0, current_updates->pFileName);
-        GlobalUnlock(hUpdate);
-        GlobalFree(hUpdate);
-    }
+    free_resource_directory( &updates->root, 2 );
+
+    HeapFree( GetProcessHeap(), 0, updates->pFileName );
+    GlobalUnlock( hUpdate );
+    GlobalFree( hUpdate );
+
     return ret;
 }
 
@@ -829,63 +1655,21 @@ BOOL WINAPI EndUpdateResourceA( HANDLE hUpdate, BOOL fDiscard )
 BOOL WINAPI UpdateResourceW( HANDLE hUpdate, LPCWSTR lpType, LPCWSTR lpName,
                              WORD wLanguage, LPVOID lpData, DWORD cbData)
 {
-    QUEUEDUPDATES *current_updates = NULL;
-    BOOL found = TRUE;
-    QUEUEDRESOURCE *current_resource = NULL;
+    QUEUEDUPDATES *updates;
     BOOL ret = FALSE;
 
-    TRACE("%p %s %s %08x %p %d\n",hUpdate,debugstr_w(lpType),debugstr_w(lpName),wLanguage,lpData,cbData);
+    TRACE("%p %s %s %08x %p %d\n", hUpdate,
+          debugstr_w(lpType), debugstr_w(lpName), wLanguage, lpData, cbData);
 
-    if(!(current_updates = GlobalLock(hUpdate)))
+    updates = GlobalLock(hUpdate);
+    if (updates)
     {
-        SetLastError(ERROR_INVALID_HANDLE);
-        found = FALSE;
-        goto done;
+        struct resource_data *data;
+        data = allocate_resource_data( wLanguage, 0, lpData, cbData, TRUE );
+        if (data)
+            ret = update_add_resource( updates, lpType, lpName, data, TRUE );
+        GlobalUnlock(hUpdate);
     }
-
-    if(!(current_resource = HeapAlloc(GetProcessHeap(), 0, sizeof(QUEUEDRESOURCE))))
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        goto done;
-    }
-    if(!HIWORD(lpType))
-        current_resource->lpType = (LPWSTR)lpType;
-    else if((current_resource->lpType = HeapAlloc(GetProcessHeap(), 0, (strlenW(lpType)+1)*sizeof(WCHAR))))
-        strcpyW(current_resource->lpType, lpType);
-    else
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        goto done;
-    }
-    if(!HIWORD(lpName))
-        current_resource->lpName = (LPWSTR)lpName;
-    else if((current_resource->lpName = HeapAlloc(GetProcessHeap(), 0, (strlenW(lpName)+1)*sizeof(WCHAR))))
-        strcpyW(current_resource->lpName, lpName);
-    else
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        goto done;
-    }
-    if(!(current_resource->lpData = HeapAlloc(GetProcessHeap(), 0, cbData)))
-    {
-        SetLastError(ERROR_OUTOFMEMORY);
-        goto done;
-    }
-    current_resource->wLanguage = wLanguage;
-    memcpy(current_resource->lpData, lpData, cbData);
-    current_resource->cbData = cbData;
-    list_add_tail(&current_updates->resources_list, &current_resource->entry);
-    ret = TRUE;
-
-done:
-    if(!ret && current_resource)
-    {
-        if(HIWORD(current_resource->lpType)) HeapFree(GetProcessHeap(), 0, current_resource->lpType);
-        if(HIWORD(current_resource->lpName)) HeapFree(GetProcessHeap(), 0, current_resource->lpName);
-        HeapFree(GetProcessHeap(), 0, current_resource->lpData);
-        HeapFree(GetProcessHeap(), 0, current_resource);
-    }
-    if(found) GlobalUnlock(hUpdate);
     return ret;
 }
 

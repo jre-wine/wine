@@ -2,19 +2,19 @@
  *
  * Copyright (C) 2003-2004 Rok Mandeljc
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Library General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
 #include "dmloader_private.h"
@@ -805,7 +805,8 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicLoaderImpl (LPCGUID lpcGUID, LPVOID *ppob
 	obj->dwRef = 0; /* will be inited with QueryInterface */
 	/* init critical section */
 	/* init cache/alias list */
-	/*InitializeCriticalSection (&obj->CritSect); */
+	/*InitializeCriticalSection (&obj->CritSect);
+	obj->CritSect.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IDirectMusicLoaderImpl.CritSect"); */
 	obj->pObjects = HeapAlloc (GetProcessHeap (), HEAP_ZERO_MEMORY, sizeof(struct list));
 	list_init (obj->pObjects);
 	/* init settings */
@@ -846,7 +847,8 @@ HRESULT WINAPI DMUSIC_DestroyDirectMusicLoaderImpl (LPDIRECTMUSICLOADER8 iface) 
 	IDirectMusicLoader8_ClearCache (iface, &GUID_DirectMusicAllTypes);
 	/* FIXME: release all allocated entries */
 	/* destroy critical section */
-	/*DeleteCriticalSection (&This->CritSect); */
+	/*This->CritSect.DebugInfo->Spare[0] = 0;
+	DeleteCriticalSection (&This->CritSect); */
 	
 	/* decrease number of instances */
 	InterlockedDecrement (&dwDirectMusicLoader);

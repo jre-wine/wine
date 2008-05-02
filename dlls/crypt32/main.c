@@ -25,10 +25,7 @@
 #include "winbase.h"
 #include "wincrypt.h"
 #include "winreg.h"
-#include "winnls.h"
-#include "mssip.h"
 #include "winuser.h"
-#include "advpub.h"
 #include "crypt32_private.h"
 #include "wine/debug.h"
 
@@ -46,6 +43,8 @@ BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD fdwReason, PVOID pvReserved)
             break;
         case DLL_PROCESS_DETACH:
             crypt_oid_free();
+            crypt_sip_free();
+            default_chain_engine_free();
             if (hDefProv) CryptReleaseContext(hDefProv, 0);
             break;
     }
@@ -188,10 +187,12 @@ BOOL WINAPI I_CryptReadTrustedPublisherDWORDValueFromRegistry(LPCWSTR name,
     return ret;
 }
 
-BOOL WINAPI I_CryptInstallOssGlobal(DWORD x, DWORD y, DWORD z)
+DWORD WINAPI I_CryptInstallOssGlobal(DWORD x, DWORD y, DWORD z)
 {
-    FIXME("%08x %08x %08x\n", x, y, z);
-    return FALSE;
+    static int ret = 8;
+    ret++;
+    FIXME("%08x %08x %08x, return value %d\n", x, y, z,ret);
+    return ret;
 }
 
 BOOL WINAPI I_CryptInstallAsn1Module(void *x, DWORD y, DWORD z)
@@ -204,6 +205,12 @@ BOOL WINAPI I_CryptUninstallAsn1Module(void *x)
 {
     FIXME("%p\n", x);
     return TRUE;
+}
+
+void *WINAPI I_CryptGetAsn1Decoder(long x)
+{
+    FIXME("%08lx\n", x);
+    return NULL;
 }
 
 BOOL WINAPI CryptFormatObject(DWORD dwCertEncodingType, DWORD dwFormatType,
@@ -226,15 +233,5 @@ BOOL WINAPI CryptQueryObject(DWORD dwObjectType, const void* pvObject,
            pvObject, dwExpectedContentTypeFlags, dwExpectedFormatTypeFlags,
            dwFlags, pdwMsgAndCertEncodingType, pdwContentType, pdwFormatType,
            phCertStore, phMsg, ppvContext);
-    return FALSE;
-}
-
-BOOL WINAPI CryptVerifyMessageSignature(PCRYPT_VERIFY_MESSAGE_PARA pVerifyPara,
-          DWORD dwSignerIndex, const BYTE* pbSignedBlob, DWORD cbSignedBlob,
-          BYTE* pbDecoded, DWORD* pcbDecoded, PCCERT_CONTEXT* ppSignerCert)
-{
-    FIXME("stub: %p, %d, %p, %d, %p, %p, %p\n",
-        pVerifyPara, dwSignerIndex, pbSignedBlob, cbSignedBlob,
-        pbDecoded, pcbDecoded, ppSignerCert);
     return FALSE;
 }

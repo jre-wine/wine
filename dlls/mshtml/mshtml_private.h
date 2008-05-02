@@ -21,6 +21,8 @@
 #include "mshtmhst.h"
 #include "hlink.h"
 
+#include "wine/list.h"
+
 #ifdef INIT_GUID
 #include "initguid.h"
 #endif
@@ -45,18 +47,52 @@
 
 #define NSAPI WINAPI
 
-#define NS_ELEMENT_NODE   1
-#define NS_DOCUMENT_NODE  9
+#define MSHTML_E_NODOC    0x800a025c
 
 typedef struct HTMLDOMNode HTMLDOMNode;
 typedef struct ConnectionPoint ConnectionPoint;
 typedef struct BSCallback BSCallback;
+
+typedef struct {
+    const IHTMLWindow2Vtbl *lpHTMLWindow2Vtbl;
+
+    LONG ref;
+
+    HTMLDocument *doc;
+    nsIDOMWindow *nswindow;
+
+    struct list entry;
+} HTMLWindow;
 
 typedef enum {
     UNKNOWN_USERMODE,
     BROWSEMODE,
     EDITMODE        
 } USERMODE;
+
+typedef struct {
+    const IConnectionPointContainerVtbl  *lpConnectionPointContainerVtbl;
+
+    ConnectionPoint *cp_list;
+    IUnknown *outer;
+} ConnectionPointContainer;
+
+struct ConnectionPoint {
+    const IConnectionPointVtbl *lpConnectionPointVtbl;
+
+    IConnectionPointContainer *container;
+
+    union {
+        IUnknown *unk;
+        IDispatch *disp;
+        IPropertyNotifySink *propnotif;
+    } *sinks;
+    DWORD sinks_size;
+
+    IID iid;
+
+    ConnectionPoint *next;
+};
 
 struct HTMLDocument {
     const IHTMLDocument2Vtbl              *lpHTMLDocument2Vtbl;
@@ -74,22 +110,28 @@ struct HTMLDocument {
     const IOleCommandTargetVtbl           *lpOleCommandTargetVtbl;
     const IOleControlVtbl                 *lpOleControlVtbl;
     const IHlinkTargetVtbl                *lpHlinkTargetVtbl;
-    const IConnectionPointContainerVtbl   *lpConnectionPointContainerVtbl;
     const IPersistStreamInitVtbl          *lpPersistStreamInitVtbl;
+    const ICustomDocVtbl                  *lpCustomDocVtbl;
 
     LONG ref;
 
     NSContainer *nscontainer;
+    HTMLWindow *window;
 
     IOleClientSite *client;
     IDocHostUIHandler *hostui;
     IOleInPlaceSite *ipsite;
     IOleInPlaceFrame *frame;
+    IOleInPlaceUIWindow *ip_window;
 
     BSCallback *bscallback;
+    IMoniker *mon;
+    BSTR url;
 
     HWND hwnd;
     HWND tooltips_hwnd;
+
+    DOCHOSTUIINFO hostinfo;
 
     USERMODE usermode;
     READYSTATE readystate;
@@ -98,13 +140,25 @@ struct HTMLDocument {
     BOOL window_active;
     BOOL has_key_path;
     BOOL container_locked;
+    BOOL focus;
 
-    ConnectionPoint *cp_htmldocevents;
-    ConnectionPoint *cp_htmldocevents2;
-    ConnectionPoint *cp_propnotif;
+    DWORD update;
+
+    ConnectionPointContainer cp_container;
+    ConnectionPoint cp_htmldocevents;
+    ConnectionPoint cp_htmldocevents2;
+    ConnectionPoint cp_propnotif;
+
+    struct list selection_list;
+    struct list range_list;
 
     HTMLDOMNode *nodes;
 };
+
+typedef struct {
+    const nsIDOMEventListenerVtbl      *lpDOMEventListenerVtbl;
+    NSContainer *This;
+} nsEventListener;
 
 struct NSContainer {
     const nsIWebBrowserChromeVtbl       *lpWebBrowserChromeVtbl;
@@ -116,10 +170,17 @@ struct NSContainer {
     const nsIWeakReferenceVtbl          *lpWeakReferenceVtbl;
     const nsISupportsWeakReferenceVtbl  *lpSupportsWeakReferenceVtbl;
 
+    nsEventListener blur_listener;
+    nsEventListener focus_listener;
+    nsEventListener keypress_listener;
+    nsEventListener load_listener;
+
     nsIWebBrowser *webbrowser;
     nsIWebNavigation *navigation;
     nsIBaseWindow *window;
     nsIWebBrowserFocus *focus;
+
+    nsIController *editor_controller;
 
     LONG ref;
 
@@ -148,6 +209,7 @@ typedef struct {
     nsLoadFlags load_flags;
     nsIURI *original_uri;
     char *content;
+    char *charset;
 } nsChannel;
 
 typedef struct {
@@ -223,6 +285,8 @@ typedef struct {
     HTMLElement *element;
 } HTMLTextContainer;
 
+#define HTMLWINDOW2(x)   ((IHTMLWindow2*)                 &(x)->lpHTMLWindow2Vtbl)
+
 #define HTMLDOC(x)       ((IHTMLDocument2*)               &(x)->lpHTMLDocument2Vtbl)
 #define HTMLDOC3(x)      ((IHTMLDocument3*)               &(x)->lpHTMLDocument3Vtbl)
 #define PERSIST(x)       ((IPersist*)                     &(x)->lpPersistFileVtbl)
@@ -244,6 +308,7 @@ typedef struct {
 #define HLNKTARGET(x)    ((IHlinkTarget*)                 &(x)->lpHlinkTargetVtbl)
 #define CONPTCONT(x)     ((IConnectionPointContainer*)    &(x)->lpConnectionPointContainerVtbl)
 #define PERSTRINIT(x)    ((IPersistStreamInit*)           &(x)->lpPersistStreamInitVtbl)
+#define CUSTOMDOC(x)     ((ICustomDoc*)                   &(x)->lpCustomDocVtbl)
 
 #define NSWBCHROME(x)    ((nsIWebBrowserChrome*)          &(x)->lpWebBrowserChromeVtbl)
 #define NSCML(x)         ((nsIContextMenuListener*)       &(x)->lpContextMenuListenerVtbl)
@@ -251,6 +316,7 @@ typedef struct {
 #define NSEMBWNDS(x)     ((nsIEmbeddingSiteWindow*)       &(x)->lpEmbeddingSiteWindowVtbl)
 #define NSIFACEREQ(x)    ((nsIInterfaceRequestor*)        &(x)->lpInterfaceRequestorVtbl)
 #define NSTOOLTIP(x)     ((nsITooltipListener*)           &(x)->lpTooltipListenerVtbl)
+#define NSEVENTLIST(x)   ((nsIDOMEventListener*)          &(x)->lpDOMEventListenerVtbl)
 #define NSWEAKREF(x)     ((nsIWeakReference*)             &(x)->lpWeakReferenceVtbl)
 #define NSSUPWEAKREF(x)  ((nsISupportsWeakReference*)     &(x)->lpSupportsWeakReferenceVtbl)
 
@@ -273,6 +339,10 @@ typedef struct {
 HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**);
 HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**);
 
+HTMLWindow *HTMLWindow_Create(HTMLDocument*);
+HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
+void setup_nswindow(HTMLWindow*);
+
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
 void HTMLDocument_Persist_Init(HTMLDocument*);
 void HTMLDocument_OleCmd_Init(HTMLDocument*);
@@ -281,15 +351,17 @@ void HTMLDocument_View_Init(HTMLDocument*);
 void HTMLDocument_Window_Init(HTMLDocument*);
 void HTMLDocument_Service_Init(HTMLDocument*);
 void HTMLDocument_Hlink_Init(HTMLDocument*);
-void HTMLDocument_ConnectionPoints_Init(HTMLDocument*);
 
-void HTMLDocument_ConnectionPoints_Destroy(HTMLDocument*);
+void ConnectionPoint_Init(ConnectionPoint*,IConnectionPointContainer*,REFIID,ConnectionPoint*);
+void ConnectionPointContainer_Init(ConnectionPointContainer*,ConnectionPoint*,IUnknown*);
+void ConnectionPointContainer_Destroy(ConnectionPointContainer*);
 
 NSContainer *NSContainer_Create(HTMLDocument*,NSContainer*);
 void NSContainer_Release(NSContainer*);
 
 void HTMLDocument_LockContainer(HTMLDocument*,BOOL);
-void HTMLDocument_ShowContextMenu(HTMLDocument*,DWORD,POINT*);
+void show_context_menu(HTMLDocument*,DWORD,POINT*);
+void notif_focus(HTMLDocument*);
 
 void show_tooltip(HTMLDocument*,DWORD,DWORD,LPCWSTR);
 void hide_tooltip(HTMLDocument*);
@@ -309,6 +381,7 @@ void *nsalloc(size_t);
 void nsfree(void*);
 
 void nsACString_Init(nsACString*,const char*);
+void nsACString_SetData(nsACString*,const char*);
 PRUint32 nsACString_GetData(const nsACString*,const char**,PRBool*);
 void nsACString_Finish(nsACString*);
 
@@ -318,15 +391,25 @@ void nsAString_Finish(nsAString*);
 
 nsIInputStream *create_nsstream(const char*,PRInt32);
 nsICommandParams *create_nscommand_params(void);
+nsIMutableArray *create_nsarray(void);
+nsIWritableVariant *create_nsvariant(void);
 void nsnode_to_nsstring(nsIDOMNode*,nsAString*);
+nsIController *get_editor_controller(NSContainer*);
+void init_nsevents(NSContainer*);
 
 BSCallback *create_bscallback(IMoniker*);
 HRESULT start_binding(BSCallback*);
+HRESULT load_stream(BSCallback*,IStream*);
 void set_document_bscallback(HTMLDocument*,BSCallback*);
+void set_current_mon(HTMLDocument*,IMoniker*);
 
-IHlink *Hlink_Create(void);
-IHTMLSelectionObject *HTMLSelectionObject_Create(nsISelection*);
-IHTMLTxtRange *HTMLTxtRange_Create(nsISelection*);
+IHTMLSelectionObject *HTMLSelectionObject_Create(HTMLDocument*,nsISelection*);
+IHTMLTxtRange *HTMLTxtRange_Create(HTMLDocument*,nsIDOMRange*);
+IHTMLStyle *HTMLStyle_Create(nsIDOMCSSStyleDeclaration*);
+IHTMLStyleSheet *HTMLStyleSheet_Create(void);
+
+void detach_selection(HTMLDocument*);
+void detach_ranges(HTMLDocument*);
 
 void HTMLElement_Create(HTMLDOMNode*);
 void HTMLBodyElement_Create(HTMLElement*);
@@ -344,7 +427,32 @@ HRESULT HTMLElement_QI(HTMLElement*,REFIID,void**);
 HTMLDOMNode *get_node(HTMLDocument*,nsIDOMNode*);
 void release_nodes(HTMLDocument*);
 
-void install_wine_gecko(void);
+BOOL install_wine_gecko(void);
+
+/* commands */
+typedef struct {
+    DWORD id;
+    HRESULT (*query)(HTMLDocument*,OLECMD*);
+    HRESULT (*exec)(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+} cmdtable_t;
+
+extern const cmdtable_t editmode_cmds[];
+
+/* timer */
+#define UPDATE_UI       0x0001
+#define UPDATE_TITLE    0x0002
+
+void update_doc(HTMLDocument *This, DWORD flags);
+void update_title(HTMLDocument*);
+
+/* editor */
+void init_editor(HTMLDocument*);
+void set_ns_editmode(NSContainer*);
+void handle_edit_event(HTMLDocument*,nsIDOMEvent*);
+HRESULT editor_exec_copy(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+HRESULT editor_exec_cut(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+HRESULT editor_exec_paste(HTMLDocument*,DWORD,VARIANT*,VARIANT*);
+void handle_edit_load(HTMLDocument *This);
 
 extern DWORD mshtml_tls;
 
@@ -354,8 +462,11 @@ typedef struct task_t {
     enum {
         TASK_SETDOWNLOADSTATE,
         TASK_PARSECOMPLETE,
-        TASK_SETPROGRESS
+        TASK_SETPROGRESS,
+        TASK_START_BINDING
     } task_id;
+
+    BSCallback *bscallback;
 
     struct task_t *next;
 } task_t;
@@ -369,7 +480,15 @@ typedef struct {
 thread_data_t *get_thread_data(BOOL);
 HWND get_thread_hwnd(void);
 void push_task(task_t*);
-void remove_doc_tasks(HTMLDocument*);
+void remove_doc_tasks(const HTMLDocument*);
+
+/* typelibs */
+enum tid_t {
+    IHTMLWindow2_tid,
+    LAST_tid
+};
+
+HRESULT get_typeinfo(enum tid_t, ITypeInfo**);
 
 DEFINE_GUID(CLSID_AboutProtocol, 0x3050F406, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_JSProtocol, 0x3050F3B2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);

@@ -76,21 +76,18 @@ static void test_get(void)
 
 START_TEST(ds)
 {
-    HMODULE hnetapi32;
+    HMODULE hnetapi32 = LoadLibrary("netapi32.dll");
 
-    hnetapi32 = LoadLibraryA("netapi32.dll");
-    if (!hnetapi32)
-        return;
-
-    SetLastError(0xdeadbeef);
     pDsRoleGetPrimaryDomainInformation=(void*)GetProcAddress(hnetapi32,"DsRoleGetPrimaryDomainInformation");
-    if (!pDsRoleGetPrimaryDomainInformation)
+    if (pDsRoleGetPrimaryDomainInformation)
     {
-        trace("DsRoleGetPrimaryDomainInformation not implemented : (%d), stop testing\n", GetLastError());
-        return;
-    }
-    pDsRoleFreeMemory=(void*)GetProcAddress(hnetapi32,"DsRoleFreeMemory");
+        pDsRoleFreeMemory=(void*)GetProcAddress(hnetapi32,"DsRoleFreeMemory");
 
-    test_params();
-    test_get();
+        test_params();
+        test_get();
+    }
+    else
+        skip("DsRoleGetPrimaryDomainInformation is not available\n");
+
+    FreeLibrary(hnetapi32);
 }

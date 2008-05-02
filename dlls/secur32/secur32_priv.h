@@ -61,16 +61,15 @@ typedef struct tag_arc4_info {
 typedef struct _NegoHelper {
     pid_t helper_pid;
     HelperMode mode;
-    SEC_CHAR *password;
-    int pwlen;
     int pipe_in;
     int pipe_out;
-    int version;
+    int major;
+    int minor;
+    int micro;
     char *com_buf;
     int com_buf_size;
     int com_buf_offset;
     BYTE *session_key;
-    BOOL valid_session_key;
     unsigned long neg_flags;
     struct {
         struct {
@@ -101,7 +100,7 @@ typedef enum _sign_direction {
  * Returns a pointer to the stored provider entry, for use adding packages.
  */
 SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
- const SecurityFunctionTableW *fnTableW, const PWSTR moduleName);
+ const SecurityFunctionTableW *fnTableW, PCWSTR moduleName);
 
 /* Allocates space for and adds toAdd packages with the given provider.
  * provider must not be NULL, and either infoA or infoW may be NULL, but not

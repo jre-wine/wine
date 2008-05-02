@@ -63,6 +63,28 @@ NTSTATUS WINAPI NtQueryObject(IN HANDLE handle,
 
     switch (info_class)
     {
+    case ObjectBasicInformation:
+        {
+            POBJECT_BASIC_INFORMATION p = (POBJECT_BASIC_INFORMATION)ptr;
+
+            if (len < sizeof(*p)) return STATUS_INVALID_BUFFER_SIZE;
+
+            SERVER_START_REQ( get_object_info )
+            {
+                req->handle = handle;
+                status = wine_server_call( req );
+                if (status == STATUS_SUCCESS)
+                {
+                    memset( p, 0, sizeof(*p) );
+                    p->GrantedAccess = reply->access;
+                    p->PointerCount = reply->ref_count;
+                    p->HandleCount = 1; /* at least one */
+                    if (used_len) *used_len = sizeof(*p);
+                }
+            }
+            SERVER_END_REQ;
+        }
+        break;
     case ObjectDataInformation:
         {
             OBJECT_DATA_INFORMATION* p = (OBJECT_DATA_INFORMATION*)ptr;
@@ -155,8 +177,8 @@ NtQuerySecurityObject(
 	IN ULONG Length,
 	OUT PULONG ResultLength)
 {
-	static SID_IDENTIFIER_AUTHORITY localSidAuthority = {SECURITY_NT_AUTHORITY};
-	static SID_IDENTIFIER_AUTHORITY worldSidAuthority = {SECURITY_WORLD_SID_AUTHORITY};
+	static const SID_IDENTIFIER_AUTHORITY localSidAuthority = {SECURITY_NT_AUTHORITY};
+	static const SID_IDENTIFIER_AUTHORITY worldSidAuthority = {SECURITY_WORLD_SID_AUTHORITY};
 	BYTE Buffer[256];
 	PISECURITY_DESCRIPTOR_RELATIVE psd = (PISECURITY_DESCRIPTOR_RELATIVE)Buffer;
 	UINT BufferIndex = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
@@ -165,8 +187,6 @@ NtQuerySecurityObject(
 	Object, RequestedInformation, pSecurityDesriptor, Length, ResultLength);
 
 	RequestedInformation &= 0x0000000f;
-
-	if (RequestedInformation & SACL_SECURITY_INFORMATION) return STATUS_ACCESS_DENIED;
 
 	ZeroMemory(Buffer, 256);
 	RtlCreateSecurityDescriptor((PSECURITY_DESCRIPTOR)psd, SECURITY_DESCRIPTOR_REVISION);
@@ -225,7 +245,7 @@ NtQuerySecurityObject(
 	  pace->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
 	  pace->Header.AceFlags = CONTAINER_INHERIT_ACE;
 	  pace->Header.AceSize = sizeof(ACCESS_ALLOWED_ACE)-sizeof(DWORD) + RtlLengthRequiredSid(1);
-	  pace->Mask = DELETE | READ_CONTROL | WRITE_DAC | WRITE_OWNER  | 0x3f;
+          pace->Mask = STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL;
 	  pace->SidStart = BufferIndex;
 
 	  /* SID S-1-5-12 (System) */
@@ -245,7 +265,7 @@ NtQuerySecurityObject(
 	  pace->Header.AceType = ACCESS_ALLOWED_ACE_TYPE;
 	  pace->Header.AceFlags = CONTAINER_INHERIT_ACE;
 	  pace->Header.AceSize = sizeof(ACCESS_ALLOWED_ACE)-sizeof(DWORD) + RtlLengthRequiredSid(2);
-	  pace->Mask = DELETE | READ_CONTROL | WRITE_DAC | WRITE_OWNER  | 0x3f;
+          pace->Mask = STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL;
 	  pace->SidStart = BufferIndex;
 
 	  /* S-1-5-12 (Administrators) */
@@ -313,7 +333,13 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source,
         {
             if (dest) *dest = reply->handle;
             if (reply->closed)
-                server_remove_fd_from_cache( source );
+            {
+                if (reply->self)
+                {
+                    int fd = server_remove_fd_from_cache( source );
+                    if (fd != -1) close( fd );
+                }
+            }
             else if (options & DUPLICATE_CLOSE_SOURCE)
                 WARN( "failed to close handle %p in process %p\n", source, source_process );
         }
@@ -337,13 +363,15 @@ NTSTATUS WINAPI NtDuplicateObject( HANDLE source_process, HANDLE source,
 NTSTATUS WINAPI NtClose( HANDLE Handle )
 {
     NTSTATUS ret;
+    int fd = server_remove_fd_from_cache( Handle );
+
     SERVER_START_REQ( close_handle )
     {
         req->handle = Handle;
         ret = wine_server_call( req );
-        if (!ret) server_remove_fd_from_cache( Handle );
     }
     SERVER_END_REQ;
+    if (fd != -1) close( fd );
     return ret;
 }
 
@@ -554,7 +582,7 @@ NTSTATUS WINAPI NtCreateSymbolicLinkObject(OUT PHANDLE SymbolicLinkHandle,IN ACC
         req->access = DesiredAccess;
         req->attributes = ObjectAttributes ? ObjectAttributes->Attributes : 0;
         req->rootdir = ObjectAttributes ? ObjectAttributes->RootDirectory : 0;
-        if (ObjectAttributes->ObjectName)
+        if (ObjectAttributes && ObjectAttributes->ObjectName)
         {
             req->name_len = ObjectAttributes->ObjectName->Length;
             wine_server_add_data(req, ObjectAttributes->ObjectName->Buffer,

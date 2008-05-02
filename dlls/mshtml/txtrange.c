@@ -41,10 +41,41 @@ typedef struct {
 
     LONG ref;
 
-    nsISelection *nsselection;
+    nsIDOMRange *nsrange;
+    HTMLDocument *doc;
+
+    struct list entry;
 } HTMLTxtRange;
 
 #define HTMLTXTRANGE(x)  ((IHTMLTxtRange*)  &(x)->lpHTMLTxtRangeVtbl)
+
+static HTMLTxtRange *get_range_object(HTMLDocument *doc, IHTMLTxtRange *iface)
+{
+    HTMLTxtRange *iter;
+
+    LIST_FOR_EACH_ENTRY(iter, &doc->range_list, HTMLTxtRange, entry) {
+        if(HTMLTXTRANGE(iter) == iface)
+            return iter;
+    }
+
+    ERR("Could not find range in document\n");
+    return NULL;
+}
+
+static int string_to_nscmptype(LPCWSTR str)
+{
+    static const WCHAR seW[] = {'S','t','a','r','t','T','o','E','n','d',0};
+    static const WCHAR ssW[] = {'S','t','a','r','t','T','o','S','t','a','r','t',0};
+    static const WCHAR esW[] = {'E','n','d','T','o','S','t','a','r','t',0};
+    static const WCHAR eeW[] = {'E','n','d','T','o','E','n','d',0};
+
+    if(!strcmpiW(str, seW))  return NS_START_TO_END;
+    if(!strcmpiW(str, ssW))  return NS_START_TO_START;
+    if(!strcmpiW(str, esW))  return NS_END_TO_START;
+    if(!strcmpiW(str, eeW))  return NS_END_TO_END;
+
+    return -1;
+}
 
 #define HTMLTXTRANGE_THIS(iface) DEFINE_THIS(HTMLTxtRange, HTMLTxtRange, iface)
 
@@ -92,8 +123,10 @@ static ULONG WINAPI HTMLTxtRange_Release(IHTMLTxtRange *iface)
     TRACE("(%p) ref=%d\n", This, ref);
 
     if(!ref) {
-        if(This->nsselection)
-            nsISelection_Release(This->nsselection);
+        if(This->nsrange)
+            nsISelection_Release(This->nsrange);
+        if(This->doc)
+            list_remove(&This->entry);
         mshtml_free(This);
     }
 
@@ -138,39 +171,109 @@ static HRESULT WINAPI HTMLTxtRange_Invoke(IHTMLTxtRange *iface, DISPID dispIdMem
 static HRESULT WINAPI HTMLTxtRange_get_htmlText(IHTMLTxtRange *iface, BSTR *p)
 {
     HTMLTxtRange *This = HTMLTXTRANGE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    *p = NULL;
+
+    if(This->nsrange) {
+        nsIDOMDocumentFragment *fragment;
+        nsresult nsres;
+
+        nsres = nsIDOMRange_CloneContents(This->nsrange, &fragment);
+        if(NS_SUCCEEDED(nsres)) {
+            const PRUnichar *nstext;
+            nsAString nsstr;
+
+            nsAString_Init(&nsstr, NULL);
+            nsnode_to_nsstring((nsIDOMNode*)fragment, &nsstr);
+            nsIDOMDocumentFragment_Release(fragment);
+
+            nsAString_GetData(&nsstr, &nstext, NULL);
+            *p = SysAllocString(nstext);
+
+            nsAString_Finish(&nsstr);
+        }
+    }
+
+    if(!*p) {
+        const WCHAR emptyW[] = {0};
+        *p = SysAllocString(emptyW);
+    }
+
+    TRACE("return %s\n", debugstr_w(*p));
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLTxtRange_put_text(IHTMLTxtRange *iface, BSTR v)
 {
     HTMLTxtRange *This = HTMLTXTRANGE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsIDOMDocument *nsdoc;
+    nsIDOMText *text_node;
+    nsAString text_str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    if(!This->doc)
+        return MSHTML_E_NODOC;
+
+    nsres = nsIWebNavigation_GetDocument(This->doc->nscontainer->navigation, &nsdoc);
+    if(NS_FAILED(nsres)) {
+        ERR("GetDocument failed: %08x\n", nsres);
+        return S_OK;
+    }
+
+    nsAString_Init(&text_str, v);
+    nsres = nsIDOMDocument_CreateTextNode(nsdoc, &text_str, &text_node);
+    nsAString_Finish(&text_str);
+    if(NS_FAILED(nsres)) {
+        ERR("CreateTextNode failed: %08x\n", nsres);
+        return S_OK;
+    }
+    nsres = nsIDOMRange_DeleteContents(This->nsrange);
+    if(NS_FAILED(nsres))
+        ERR("DeleteContents failed: %08x\n", nsres);
+
+    nsres = nsIDOMRange_InsertNode(This->nsrange, (nsIDOMNode*)text_node);
+    if(NS_FAILED(nsres))
+        ERR("InsertNode failed: %08x\n", nsres);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLTxtRange_get_text(IHTMLTxtRange *iface, BSTR *p)
 {
     HTMLTxtRange *This = HTMLTXTRANGE_THIS(iface);
-    PRUnichar *nstext = NULL;
-    nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(!This->nsselection) {
+    *p = NULL;
+
+    if(This->nsrange) {
+        nsAString text_str;
+        nsresult nsres;
+
+        nsAString_Init(&text_str, NULL);
+
+        nsres = nsIDOMRange_ToString(This->nsrange, &text_str);
+        if(NS_SUCCEEDED(nsres)) {
+            const PRUnichar *nstext;
+
+            nsAString_GetData(&text_str, &nstext, NULL);
+            *p = SysAllocString(nstext);
+        }else {
+            ERR("ToString failed: %08x\n", nsres);
+        }
+
+        nsAString_Finish(&text_str);
+    }
+
+    if(!*p) {
         static const WCHAR empty[] = {0};
         *p = SysAllocString(empty);
-        return S_OK;
     }
 
-    nsres = nsISelection_ToString(This->nsselection, &nstext);
-    if(NS_FAILED(nsres) || !nstext) {
-        ERR("toString failed: %08x\n", nsres);
-        return E_FAIL;
-    }
-
-    *p = SysAllocString(nstext);
-    nsfree(nstext);
     return S_OK;
 }
 
@@ -184,8 +287,15 @@ static HRESULT WINAPI HTMLTxtRange_parentElement(IHTMLTxtRange *iface, IHTMLElem
 static HRESULT WINAPI HTMLTxtRange_duplicate(IHTMLTxtRange *iface, IHTMLTxtRange **Duplicate)
 {
     HTMLTxtRange *This = HTMLTXTRANGE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, Duplicate);
-    return E_NOTIMPL;
+    nsIDOMRange *nsrange = NULL;
+
+    TRACE("(%p)->(%p)\n", This, Duplicate);
+
+    nsIDOMRange_CloneRange(This->nsrange, &nsrange);
+    *Duplicate = HTMLTxtRange_Create(This->doc, nsrange);
+    nsIDOMRange_Release(nsrange);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLTxtRange_inRange(IHTMLTxtRange *iface, IHTMLTxtRange *Range,
@@ -200,7 +310,7 @@ static HRESULT WINAPI HTMLTxtRange_isEqual(IHTMLTxtRange *iface, IHTMLTxtRange *
         VARIANT_BOOL *IsEqual)
 {
     HTMLTxtRange *This = HTMLTXTRANGE_THIS(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%p %p)\n", This, Range, IsEqual);
     return E_NOTIMPL;
 }
 
@@ -214,8 +324,11 @@ static HRESULT WINAPI HTMLTxtRange_scrollIntoView(IHTMLTxtRange *iface, VARIANT_
 static HRESULT WINAPI HTMLTxtRange_collapse(IHTMLTxtRange *iface, VARIANT_BOOL Start)
 {
     HTMLTxtRange *This = HTMLTXTRANGE_THIS(iface);
-    FIXME("(%p)->(%x)\n", This, Start);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%x)\n", This, Start);
+
+    nsIDOMRange_Collapse(This->nsrange, Start != VARIANT_FALSE);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLTxtRange_expand(IHTMLTxtRange *iface, BSTR Unit, VARIANT_BOOL *Success)
@@ -252,8 +365,24 @@ static HRESULT WINAPI HTMLTxtRange_moveEnd(IHTMLTxtRange *iface, BSTR Unit,
 static HRESULT WINAPI HTMLTxtRange_select(IHTMLTxtRange *iface)
 {
     HTMLTxtRange *This = HTMLTXTRANGE_THIS(iface);
-    FIXME("(%p)->()\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    if(This->doc->nscontainer) {
+        nsIDOMWindow *dom_window = NULL;
+        nsISelection *nsselection;
+
+        nsIWebBrowser_GetContentDOMWindow(This->doc->nscontainer->webbrowser, &dom_window);
+        nsIDOMWindow_GetSelection(dom_window, &nsselection);
+        nsIDOMWindow_Release(dom_window);
+
+        nsISelection_RemoveAllRanges(nsselection);
+        nsISelection_AddRange(nsselection, This->nsrange);
+
+        nsISelection_Release(nsselection);
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLTxtRange_pasteHTML(IHTMLTxtRange *iface, BSTR html)
@@ -282,8 +411,27 @@ static HRESULT WINAPI HTMLTxtRange_compareEndPoints(IHTMLTxtRange *iface, BSTR h
         IHTMLTxtRange *SourceRange, long *ret)
 {
     HTMLTxtRange *This = HTMLTXTRANGE_THIS(iface);
-    FIXME("(%p)->(%s %p %p)\n", This, debugstr_w(how), SourceRange, ret);
-    return E_NOTIMPL;
+    HTMLTxtRange *src_range;
+    PRInt16 nsret = 0;
+    int nscmpt;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s %p %p)\n", This, debugstr_w(how), SourceRange, ret);
+
+    nscmpt = string_to_nscmptype(how);
+    if(nscmpt == -1)
+        return E_INVALIDARG;
+
+    src_range = get_range_object(This->doc, SourceRange);
+    if(!src_range)
+        return E_FAIL;
+
+    nsres = nsIDOMRange_CompareBoundaryPoints(This->nsrange, nscmpt, src_range->nsrange, &nsret);
+    if(NS_FAILED(nsres))
+        ERR("CompareBoundaryPoints failed: %08x\n", nsres);
+
+    *ret = nsret;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLTxtRange_findText(IHTMLTxtRange *iface, BSTR String,
@@ -422,16 +570,28 @@ static const IHTMLTxtRangeVtbl HTMLTxtRangeVtbl = {
     HTMLTxtRange_execCommandShowHelp
 };
 
-IHTMLTxtRange *HTMLTxtRange_Create(nsISelection *nsselection)
+IHTMLTxtRange *HTMLTxtRange_Create(HTMLDocument *doc, nsIDOMRange *nsrange)
 {
     HTMLTxtRange *ret = mshtml_alloc(sizeof(HTMLTxtRange));
 
     ret->lpHTMLTxtRangeVtbl = &HTMLTxtRangeVtbl;
     ret->ref = 1;
 
-    if(nsselection)
-        nsISelection_AddRef(nsselection);
-    ret->nsselection = nsselection;
+    if(nsrange)
+        nsIDOMRange_AddRef(nsrange);
+    ret->nsrange = nsrange;
+
+    ret->doc = doc;
+    list_add_head(&doc->range_list, &ret->entry);
 
     return HTMLTXTRANGE(ret);
+}
+
+void detach_ranges(HTMLDocument *This)
+{
+    HTMLTxtRange *iter;
+
+    LIST_FOR_EACH_ENTRY(iter, &This->range_list, HTMLTxtRange, entry) {
+        iter->doc = NULL;
+    }
 }

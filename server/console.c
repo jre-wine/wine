@@ -35,12 +35,37 @@
 #include "process.h"
 #include "request.h"
 #include "unicode.h"
-#include "console.h"
+#include "wincon.h"
 #include "winternl.h"
 
 /* specific access rights (FIXME: should use finer-grained access rights) */
 #define CONSOLE_READ   0x01
 #define CONSOLE_WRITE  0x02
+
+struct screen_buffer;
+struct console_input_events;
+
+struct console_input
+{
+    struct object                obj;           /* object header */
+    int                          num_proc;      /* number of processes attached to this console */
+    struct thread               *renderer;      /* console renderer thread */
+    int                          mode;          /* input mode */
+    struct screen_buffer        *active;        /* active screen buffer */
+    int                          recnum;        /* number of input records */
+    INPUT_RECORD                *records;       /* input records */
+    struct console_input_events *evt;           /* synchronization event with renderer */
+    WCHAR                       *title;         /* console title */
+    WCHAR                      **history;       /* lines history */
+    int                          history_size;  /* number of entries in history array */
+    int                          history_index; /* number of used entries in history array */
+    int                          history_mode;  /* mode of history (non zero means remove doubled strings */
+    int                          edition_mode;  /* index to edition mode flavors */
+    int                          input_cp;      /* console input codepage */
+    int                          output_cp;     /* console output codepage */
+    user_handle_t                win;           /* window handle if backend supports it */
+    struct event                *event;         /* event to wait on for input queue */
+};
 
 static unsigned int console_map_access( struct object *obj, unsigned int access );
 
@@ -59,6 +84,7 @@ static const struct object_ops console_input_ops =
     no_get_fd,                        /* get_fd */
     console_map_access,               /* map_access */
     no_lookup_name,                   /* lookup_name */
+    no_open_file,                     /* open_file */
     no_close_handle,                  /* close_handle */
     console_input_destroy             /* destroy */
 };
@@ -87,6 +113,7 @@ static const struct object_ops console_input_events_ops =
     no_get_fd,                        /* get_fd */
     console_map_access,               /* map_access */
     no_lookup_name,                   /* lookup_name */
+    no_open_file,                     /* open_file */
     no_close_handle,                  /* close_handle */
     console_input_events_destroy      /* destroy */
 };
@@ -126,6 +153,7 @@ static const struct object_ops screen_buffer_ops =
     no_get_fd,                        /* get_fd */
     console_map_access,               /* map_access */
     no_lookup_name,                   /* lookup_name */
+    no_open_file,                     /* open_file */
     no_close_handle,                  /* close_handle */
     screen_buffer_destroy             /* destroy */
 };
@@ -252,6 +280,9 @@ static struct object *create_console_input( struct thread* renderer )
     console_input->history_index = 0;
     console_input->history_mode  = 0;
     console_input->edition_mode  = 0;
+    console_input->input_cp      = 0;
+    console_input->output_cp     = 0;
+    console_input->win           = 0;
     console_input->event         = create_event( NULL, NULL, 0, 1, 0 );
 
     if (!console_input->history || !console_input->evt)
@@ -398,6 +429,11 @@ void inherit_console(struct thread *parent_thread, struct process *process, obj_
 	process->console = (struct console_input*)grab_object( parent->console );
 	process->console->num_proc++;
     }
+}
+
+struct thread *console_get_renderer( struct console_input *console )
+{
+    return console->renderer;
 }
 
 static struct console_input* console_input_get( obj_handle_t handle, unsigned access )
@@ -608,10 +644,10 @@ static int set_console_input_info( const struct set_console_input_info_request *
 	struct screen_buffer *screen_buffer;
 
 	screen_buffer = (struct screen_buffer *)get_handle_obj( current->process, req->active_sb,
-								CONSOLE_READ, &screen_buffer_ops );
+								CONSOLE_WRITE, &screen_buffer_ops );
 	if (!screen_buffer || screen_buffer->input != console)
 	{
-	    set_error( STATUS_INVALID_PARAMETER );
+	    set_error( STATUS_INVALID_HANDLE );
 	    if (screen_buffer) release_object( screen_buffer );
 	    goto error;
 	}
@@ -676,6 +712,18 @@ static int set_console_input_info( const struct set_console_input_info_request *
     if (req->mask & SET_CONSOLE_INPUT_INFO_EDITION_MODE)
     {
         console->edition_mode = req->edition_mode;
+    }
+    if (req->mask & SET_CONSOLE_INPUT_INFO_INPUT_CODEPAGE)
+    {
+        console->input_cp = req->input_cp;
+    }
+    if (req->mask & SET_CONSOLE_INPUT_INFO_OUTPUT_CODEPAGE)
+    {
+        console->output_cp = req->output_cp;
+    }
+    if (req->mask & SET_CONSOLE_INPUT_INFO_WIN)
+    {
+        console->win = req->win;
     }
     release_object( console );
     return 1;
@@ -1252,12 +1300,20 @@ DECL_HANDLER(alloc_console)
     struct process *renderer = current->process;
     struct console_input *console;
 
-    process = (req->pid) ? get_process_from_id( req->pid ) :
-              (struct process *)grab_object( renderer->parent );
+    if (req->pid)
+    {
+        if (!(process = get_process_from_id( req->pid ))) return;
+    }
+    else
+    {
+        if (!(process = renderer->parent))
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            return;
+        }
+        grab_object( process );
+    }
 
-    reply->handle_in = 0;
-    reply->event = 0;
-    if (!process) return;
     if (process != renderer && process->console)
     {
         set_error( STATUS_ACCESS_DENIED );
@@ -1361,6 +1417,9 @@ DECL_HANDLER(get_console_input_info)
     reply->history_size  = console->history_size;
     reply->history_index = console->history_index;
     reply->edition_mode  = console->edition_mode;
+    reply->input_cp      = console->input_cp;
+    reply->output_cp     = console->output_cp;
+    reply->win           = console->win;
 
     release_object( console );
 }

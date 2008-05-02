@@ -109,11 +109,11 @@ static void testLoadLibraryA(void)
     SetLastError(0xdeadbeef);
     hModule = LoadLibraryA("kernel32.dll");
     ok( hModule != NULL, "kernel32.dll should be loadable\n");
-    ok( GetLastError() == 0xdeadbeef, "GetLastError should be 0xdeadbeef but is %08x\n", GetLastError());
+    ok( GetLastError() == 0xdeadbeef, "GetLastError should be 0xdeadbeef but is %d\n", GetLastError());
 
     fp = GetProcAddress(hModule, "CreateFileA");
     ok( fp != NULL, "CreateFileA should be there\n");
-    ok( GetLastError() == 0xdeadbeef, "GetLastError should be 0xdeadbeef but is %08x\n", GetLastError());
+    ok( GetLastError() == 0xdeadbeef, "GetLastError should be 0xdeadbeef but is %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     hModule1 = LoadLibraryA("kernel32   ");
@@ -121,11 +121,67 @@ static void testLoadLibraryA(void)
     if (GetLastError() != ERROR_DLL_NOT_FOUND)
     {
         ok( hModule1 != NULL, "\"kernel32   \" should be loadable\n");
-        ok( GetLastError() == 0xdeadbeef, "GetLastError should be 0xdeadbeef but is %08x\n", GetLastError());
+        ok( GetLastError() == 0xdeadbeef, "GetLastError should be 0xdeadbeef but is %d\n", GetLastError());
         ok( hModule == hModule1, "Loaded wrong module\n");
         FreeLibrary(hModule1);
     }
     FreeLibrary(hModule);
+}
+
+static void testNestedLoadLibraryA(void)
+{
+    static const char dllname[] = "shell32.dll";
+    char path1[MAX_PATH], path2[MAX_PATH];
+    HMODULE hModule1, hModule2, hModule3;
+
+    /* This is not really a Windows conformance test, but more a Wine
+     * regression test. Wine's builtin dlls can be loaded from multiple paths,
+     * and this test tries to make sure that Wine does not get confused and
+     * really unloads the Unix .so file at the right time. Failure to do so
+     * will result in the dll being unloadable.
+     * This test must be done with a dll that can be unloaded, which means:
+     * - it must not already be loaded
+     * - it must not have a 16-bit counterpart
+     */
+    GetWindowsDirectory(path1, sizeof(path1));
+    strcat(path1, "\\system\\");
+    strcat(path1, dllname);
+    hModule1 = LoadLibraryA(path1);
+    if (!hModule1)
+    {
+        /* We must be on Windows NT, so we cannot test */
+        return;
+    }
+
+    GetWindowsDirectory(path2, sizeof(path2));
+    strcat(path2, "\\system32\\");
+    strcat(path2, dllname);
+    hModule2 = LoadLibraryA(path2);
+    if (!hModule2)
+    {
+        /* We must be on Windows 9x, so we cannot test */
+        ok(FreeLibrary(hModule1), "FreeLibrary() failed\n");
+        return;
+    }
+
+    /* The first LoadLibrary() call may have registered the dll under the
+     * system32 path. So load it, again, under the '...\system\...' path so
+     * Wine does not immediately notice that it is already loaded.
+     */
+    hModule3 = LoadLibraryA(path1);
+    ok(hModule3 != NULL, "LoadLibrary(%s) failed\n", path1);
+
+    /* Now fully unload the dll */
+    ok(FreeLibrary(hModule3), "FreeLibrary() failed\n");
+    ok(FreeLibrary(hModule2), "FreeLibrary() failed\n");
+    ok(FreeLibrary(hModule1), "FreeLibrary() failed\n");
+    ok(GetModuleHandle(dllname) == NULL, "%s was not fully unloaded\n", dllname);
+
+    /* Try to load the dll again, if refcounting is ok, this should work */
+    hModule1 = LoadLibraryA(path1);
+    ok(hModule1 != NULL, "LoadLibrary(%s) failed\n", path1);
+    if (hModule1 != NULL)
+        ok(FreeLibrary(hModule1), "FreeLibrary() failed\n");
 }
 
 static void testLoadLibraryA_Wrong(void)
@@ -137,7 +193,7 @@ static void testLoadLibraryA_Wrong(void)
     hModule = LoadLibraryA("non_ex_pv.dll");
     ok( !hModule, "non_ex_pv.dll should be not loadable\n");
     ok( GetLastError() == ERROR_MOD_NOT_FOUND || GetLastError() == ERROR_DLL_NOT_FOUND, 
-        "Expected ERROR_MOD_NOT_FOUND or ERROR_DLL_NOT_FOUND (win9x), got %08x\n", GetLastError());
+        "Expected ERROR_MOD_NOT_FOUND or ERROR_DLL_NOT_FOUND (win9x), got %d\n", GetLastError());
 
     /* Just in case */
     FreeLibrary(hModule);
@@ -151,13 +207,13 @@ static void testGetProcAddress_Wrong(void)
     fp = GetProcAddress(NULL, "non_ex_call");
     ok( !fp, "non_ex_call should not be found\n");
     ok( GetLastError() == ERROR_PROC_NOT_FOUND || GetLastError() == ERROR_INVALID_HANDLE,
-        "Expected ERROR_PROC_NOT_FOUND or ERROR_INVALID_HANDLE(win9x), got %08x\n", GetLastError());
+        "Expected ERROR_PROC_NOT_FOUND or ERROR_INVALID_HANDLE(win9x), got %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     fp = GetProcAddress((HMODULE)0xdeadbeef, "non_ex_call");
     ok( !fp, "non_ex_call should not be found\n");
     ok( GetLastError() == ERROR_MOD_NOT_FOUND || GetLastError() == ERROR_INVALID_HANDLE,
-        "Expected ERROR_MOD_NOT_FOUND or ERROR_INVALID_HANDLE(win9x), got %08x\n", GetLastError());
+        "Expected ERROR_MOD_NOT_FOUND or ERROR_INVALID_HANDLE(win9x), got %d\n", GetLastError());
 }
 
 START_TEST(module)
@@ -179,6 +235,7 @@ START_TEST(module)
     testGetModuleFileName_Wrong();
 
     testLoadLibraryA();
+    testNestedLoadLibraryA();
     testLoadLibraryA_Wrong();
     testGetProcAddress_Wrong();
 }

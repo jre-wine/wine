@@ -136,6 +136,7 @@
  145 stdcall -noname PathFindOnPath(ptr ptr) PathFindOnPathAW
  146 stdcall -noname RLBuildListOfPaths()
  147 stdcall -noname SHCLSIDFromString(long long) SHCLSIDFromStringAW
+ 148 stdcall -noname SHMapIDListToImageListIndexAsync(ptr ptr ptr long ptr ptr ptr ptr ptr)
  149 stdcall -noname SHFind_InitMenuPopup(long long long long)
 
  151 stdcall -noname SHLoadOLE(long)
@@ -299,9 +300,9 @@
 @ stub InternalExtractIconListA
 @ stub InternalExtractIconListW
 @ stub OCInstall
-@ stub OpenAs_RunDLL
-@ stub OpenAs_RunDLLA
-@ stub OpenAs_RunDLLW
+@ stdcall OpenAs_RunDLL(long long str long) OpenAs_RunDLLA
+@ stdcall OpenAs_RunDLLA(long long str long)
+@ stdcall OpenAs_RunDLLW(long long wstr long)
 @ stub PrintersGetCommand_RunDLL
 @ stub PrintersGetCommand_RunDLLA
 @ stub PrintersGetCommand_RunDLLW
@@ -361,13 +362,13 @@
 @ stub SHInvokePrinterCommandW
 @ stdcall SHIsFileAvailableOffline(wstr ptr)
 @ stdcall SHLoadInProc(long)
-@ stub SHLoadNonloadedIconOverlayIdentifiers
-@ stub SHPathPrepareForWriteA
-@ stub SHPathPrepareForWriteW
+@ stdcall SHLoadNonloadedIconOverlayIdentifiers()
+@ stdcall SHPathPrepareForWriteA(long ptr str long)
+@ stdcall SHPathPrepareForWriteW(long ptr wstr long)
 @ stdcall SHQueryRecycleBinA(str ptr)
 @ stdcall SHQueryRecycleBinW(wstr ptr)
 @ stdcall SHSetLocalizedName(wstr wstr long)
-@ stub SHUpdateRecycleBinIcon
+@ stdcall SHUpdateRecycleBinIcon()
 @ stdcall SheChangeDirA(str)
 @ stub SheChangeDirExA
 @ stub SheChangeDirExW

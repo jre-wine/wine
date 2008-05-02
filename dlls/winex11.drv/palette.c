@@ -20,12 +20,12 @@
 
 #include "config.h"
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "gdi.h"
 #include "windef.h"
-#include "winreg.h"
+#include "winbase.h"
 #include "x11drv.h"
 #include "wine/debug.h"
 
@@ -47,6 +47,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(palette);
  * Windows palette manager is described in the
  * http://premium.microsoft.com/msdn/library/techart/f30/f34/f40/d4d/sa942.htm
  */
+
+#define NB_RESERVED_COLORS     20   /* number of fixed colors in system palette */
+
+#define PC_SYS_USED            0x80 /* palentry is used (both system and logical) */
+#define PC_SYS_RESERVED        0x40 /* system palentry is not to be mapped to */
 
 static PALETTEENTRY *COLOR_sysPal; /* current system palette */
 
@@ -78,6 +83,8 @@ static int palette_size;
 static int           X11DRV_PALETTE_firstFree = 0;
 static unsigned char X11DRV_PALETTE_freeList[256];
 
+static XContext palette_context;  /* X context to associate a color mapping to a palette */
+
 /**********************************************************************/
 
    /* Map an EGA index (0..15) to a pixel value in the system color space.  */
@@ -107,6 +114,31 @@ static int X11DRV_PALETTE_LookupSystemXPixel(COLORREF col);
 
 
 /***********************************************************************
+ *           palette_get_mapping
+ */
+static int *palette_get_mapping( HPALETTE hpal )
+{
+    int *mapping;
+
+    wine_tsx11_lock();
+    if (XFindContext( gdi_display, (XID)hpal, palette_context, (char **)&mapping )) mapping = NULL;
+    wine_tsx11_unlock();
+    return mapping;
+}
+
+
+/***********************************************************************
+ *           palette_set_mapping
+ */
+static void palette_set_mapping( HPALETTE hpal, int *mapping )
+{
+    wine_tsx11_lock();
+    XSaveContext( gdi_display, (XID)hpal, palette_context, (char *)mapping );
+    wine_tsx11_unlock();
+}
+
+
+/***********************************************************************
  *           COLOR_Init
  *
  * Initialize color management.
@@ -115,10 +147,14 @@ int X11DRV_PALETTE_Init(void)
 {
     int	mask, white, black;
     int monoPlane;
+    int *mapping;
     PALETTEENTRY sys_pal_template[NB_RESERVED_COLORS];
 
     TRACE("initializing palette manager...\n");
 
+    wine_tsx11_lock();
+    palette_context = XUniqueContext();
+    wine_tsx11_unlock();
     white = WhitePixel( gdi_display, DefaultScreen(gdi_display) );
     black = BlackPixel( gdi_display, DefaultScreen(gdi_display) );
     monoPlane = 1;
@@ -205,6 +241,9 @@ int X11DRV_PALETTE_Init(void)
     TRACE(" visual class %i (%i)\n",  visual->class, monoPlane);
 
     GetPaletteEntries( GetStockObject(DEFAULT_PALETTE), 0, NB_RESERVED_COLORS, sys_pal_template );
+
+    if ((mapping = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(int) * NB_RESERVED_COLORS )))
+        palette_set_mapping( GetStockObject(DEFAULT_PALETTE), mapping );
 
     if( X11DRV_PALETTE_PaletteFlags & X11DRV_PALETTE_VIRTUAL )
     {
@@ -825,10 +864,8 @@ int X11DRV_PALETTE_ToPhysical( X11DRV_PDEVICE *physDev, COLORREF color )
     WORD 		 index = 0;
     HPALETTE hPal = physDev ? GetCurrentObject(physDev->hdc, OBJ_PAL ) : GetStockObject(DEFAULT_PALETTE);
     unsigned char	 spec_type = color >> 24;
-    PALETTEOBJ* 	 palPtr = (PALETTEOBJ *) GDI_GetObjPtr( hPal, PALETTE_MAGIC );
-
-    /* palPtr can be NULL when DC is being destroyed */
-    if( !palPtr ) return 0;
+    int *mapping = palette_get_mapping( hPal );
+    PALETTEENTRY entry;
 
     if ( X11DRV_PALETTE_PaletteFlags & X11DRV_PALETTE_FIXED )
     {
@@ -845,28 +882,19 @@ int X11DRV_PALETTE_ToPhysical( X11DRV_PDEVICE *physDev, COLORREF color )
           case 0x10: /* DIBINDEX */
             if( GetDIBColorTable( physDev->hdc, idx, 1, &quad ) != 1 ) {
                 WARN("DIBINDEX(%x) : idx %d is out of bounds, assuming black\n", color , idx);
-                GDI_ReleaseObj( hPal );
                 return 0;
             }
             color = RGB( quad.rgbRed, quad.rgbGreen, quad.rgbBlue );
             break;
                 
           case 1: /* PALETTEINDEX */
-
-            if( idx >= palPtr->logpalette.palNumEntries)
+            if (!GetPaletteEntries( hPal, idx, 1, &entry ))
             {
                 WARN("PALETTEINDEX(%x) : idx %d is out of bounds, assuming black\n", color, idx);
-		GDI_ReleaseObj( hPal );
                 return 0;
             }
-
-            if( palPtr->mapping )
-	    {
-                int ret = palPtr->mapping[idx];
-		GDI_ReleaseObj( hPal );
-		return ret;
-	    }
-	    color = *(COLORREF*)(palPtr->logpalette.palPalEntry + idx);
+            if (mapping) return mapping[idx];
+            color = RGB( entry.peRed, entry.peGreen, entry.peBlue );
 	    break;
 
 	  default:
@@ -879,7 +907,6 @@ int X11DRV_PALETTE_ToPhysical( X11DRV_PDEVICE *physDev, COLORREF color )
                 int white = 1;
                 RGBQUAD table[2];
 
-		GDI_ReleaseObj( hPal );
                 if (GetDIBColorTable( physDev->hdc, 0, 2, table ) == 2)
                 {
                     if(!colour_is_brighter(table[1], table[0])) white = 0;
@@ -895,7 +922,6 @@ int X11DRV_PALETTE_ToPhysical( X11DRV_PDEVICE *physDev, COLORREF color )
 	if (X11DRV_PALETTE_Graymax)
         {
 	    /* grayscale only; return scaled value */
-	    GDI_ReleaseObj( hPal );
             return ( (red * 30 + green * 59 + blue * 11) * X11DRV_PALETTE_Graymax) / 25500;
 	}
 	else
@@ -917,14 +943,12 @@ int X11DRV_PALETTE_ToPhysical( X11DRV_PDEVICE *physDev, COLORREF color )
 		blue =  blue  << (X11DRV_PALETTE_PBlue.scale-8) |
                         blue  >> (16-X11DRV_PALETTE_PBlue.scale);
 
-	    GDI_ReleaseObj( hPal );
             return (red << X11DRV_PALETTE_PRed.shift) | (green << X11DRV_PALETTE_PGreen.shift) | (blue << X11DRV_PALETTE_PBlue.shift);
         }
     }
     else
     {
-
-	if( !palPtr->mapping )
+        if (!mapping)
             WARN("Palette %p is not realized\n", hPal);
 
 	switch(spec_type)	/* we have to peruse DC and system palette */
@@ -939,7 +963,6 @@ int X11DRV_PALETTE_ToPhysical( X11DRV_PDEVICE *physDev, COLORREF color )
                     int white = 1;
                     RGBQUAD table[2];
 
-		    GDI_ReleaseObj( hPal );	
                     if (GetDIBColorTable( physDev->hdc, 0, 2, table ) == 2)
                     {
                         if(!colour_is_brighter(table[1], table[0]))
@@ -957,24 +980,21 @@ int X11DRV_PALETTE_ToPhysical( X11DRV_PDEVICE *physDev, COLORREF color )
 	    	break;
        	    case 1:  /* PALETTEINDEX */
 		index = color & 0xffff;
-
-	        if( index >= palPtr->logpalette.palNumEntries )
+                if (!GetPaletteEntries( hPal, index, 1, &entry ))
 		    WARN("PALETTEINDEX(%x) : index %i is out of bounds\n", color, index);
-		else if( palPtr->mapping ) index = palPtr->mapping[index];
+		else if (mapping) index = mapping[index];
 
 		/*  TRACE(palette,"PALETTEINDEX(%04x) -> pixel %i\n", (WORD)color, index);
 		 */
 		break;
             case 2:  /* PALETTERGB */
                 index = GetNearestPaletteIndex( hPal, color );
-                if (palPtr->mapping) index = palPtr->mapping[index];
+                if (mapping) index = mapping[index];
 		/* TRACE(palette,"PALETTERGB(%lx) -> pixel %i\n", color, index);
 		 */
 		break;
 	}
     }
-
-    GDI_ReleaseObj( hPal );
     return index;
 }
 
@@ -1045,10 +1065,9 @@ static BOOL X11DRV_PALETTE_CheckSysColor( const PALETTEENTRY *sys_pal_template, 
 /***********************************************************************
  *	     X11DRV_LookupSysPaletteExact
  */
-static int X11DRV_LookupSysPaletteExact( COLORREF col )
+static int X11DRV_LookupSysPaletteExact( BYTE r, BYTE g, BYTE b )
 {
     int i;
-    BYTE r = GetRValue(col), g = GetGValue(col), b = GetBValue(col);
     for( i = 0; i < palette_size; i++ )
     {
         if( COLOR_sysPal[i].peFlags & PC_SYS_USED )  /* skips gap */
@@ -1062,44 +1081,47 @@ static int X11DRV_LookupSysPaletteExact( COLORREF col )
 
 
 /***********************************************************************
- *           X11DRV_PALETTE_SetMapping
- *
- * Set the color-mapping table for selected palette.
- * Return number of entries which mapping has changed.
+ *              RealizePalette    (X11DRV.@)
  */
-static UINT X11DRV_PALETTE_SetMapping( PALETTEOBJ* palPtr, UINT uStart, UINT uNum, BOOL mapOnly )
+UINT X11DRV_RealizePalette( X11DRV_PDEVICE *physDev, HPALETTE hpal, BOOL primary )
 {
     char flag;
-    int  prevMapping = (palPtr->mapping) ? 1 : 0;
     int  index;
-    UINT iRemapped = 0;
-    int* mapping;
+    UINT i, iRemapped = 0;
+    int *prev_mapping, *mapping;
+    PALETTEENTRY entries[256];
+    WORD num_entries;
+
+    if (X11DRV_PALETTE_PaletteFlags & X11DRV_PALETTE_VIRTUAL) return 0;
+
+    if (!GetObjectW( hpal, sizeof(num_entries), &num_entries )) return 0;
 
     /* reset dynamic system palette entries */
 
-    if( !mapOnly && X11DRV_PALETTE_firstFree != -1)
+    if( primary && X11DRV_PALETTE_firstFree != -1)
          X11DRV_PALETTE_FormatSystemPalette();
 
     /* initialize palette mapping table */
-    if (palPtr->mapping) 
-	mapping = HeapReAlloc( GetProcessHeap(), 0, palPtr->mapping,
-                           sizeof(int)*palPtr->logpalette.palNumEntries);
+    prev_mapping = palette_get_mapping( hpal );
+    if (prev_mapping)
+        mapping = HeapReAlloc( GetProcessHeap(), 0, prev_mapping, sizeof(int)*num_entries);
     else 
-	mapping = HeapAlloc( GetProcessHeap(), 0, 
-                           sizeof(int)*palPtr->logpalette.palNumEntries);
+	mapping = HeapAlloc( GetProcessHeap(), 0, sizeof(int)*num_entries);
 
     if(mapping == NULL) {
         ERR("Unable to allocate new mapping -- memory exhausted!\n");
         return 0;
     }
-    palPtr->mapping = mapping;
+    palette_set_mapping( hpal, mapping );
 
-    if (uStart >= palPtr->logpalette.palNumEntries) return 0;
+    if (num_entries > 256)
+    {
+        FIXME( "more than 256 entries not supported\n" );
+        num_entries = 256;
+    }
+    if (!(num_entries = GetPaletteEntries( hpal, 0, num_entries, entries ))) return 0;
 
-    if (uStart + uNum > palPtr->logpalette.palNumEntries)
-        uNum = palPtr->logpalette.palNumEntries - uStart;
-
-    for( uNum += uStart; uStart < uNum; uStart++ )
+    for (i = 0; i < num_entries; i++)
     {
         index = -1;
         flag = PC_SYS_USED;
@@ -1107,9 +1129,9 @@ static UINT X11DRV_PALETTE_SetMapping( PALETTEOBJ* palPtr, UINT uStart, UINT uNu
         /* Even though the docs say that only one flag is to be set,
          * they are a bitmask. At least one app sets more than one at
          * the same time. */
-	if ( palPtr->logpalette.palPalEntry[uStart].peFlags & PC_EXPLICIT ) {
+        if ( entries[i].peFlags & PC_EXPLICIT ) {
 	    /* palette entries are indices into system palette */
-            index = *(WORD*)(palPtr->logpalette.palPalEntry + uStart);
+            index = *(WORD*)&entries[i];
             if( index > 255 || (index >= COLOR_gapStart && index <= COLOR_gapEnd) )
             {
                 WARN("PC_EXPLICIT: idx %d out of system palette, assuming black.\n", index);
@@ -1117,14 +1139,14 @@ static UINT X11DRV_PALETTE_SetMapping( PALETTEOBJ* palPtr, UINT uStart, UINT uNu
             }
             if( X11DRV_PALETTE_PaletteToXPixel ) index = X11DRV_PALETTE_PaletteToXPixel[index];
         } else {
-	    if ( palPtr->logpalette.palPalEntry[uStart].peFlags & PC_RESERVED ) {
+            if ( entries[i].peFlags & PC_RESERVED ) {
 	        /* forbid future mappings to this entry */
                 flag |= PC_SYS_RESERVED;
             }
             
-	    if (! (palPtr->logpalette.palPalEntry[uStart].peFlags & PC_NOCOLLAPSE) ) {
+            if (! (entries[i].peFlags & PC_NOCOLLAPSE) ) {
 	        /* try to collapse identical colors */
-                index = X11DRV_LookupSysPaletteExact(*(COLORREF*)(palPtr->logpalette.palPalEntry + uStart));
+                index = X11DRV_LookupSysPaletteExact( entries[i].peRed, entries[i].peGreen, entries[i].peBlue );
             }
 
             if( index < 0 )
@@ -1136,15 +1158,15 @@ static UINT X11DRV_PALETTE_SetMapping( PALETTEOBJ* palPtr, UINT uStart, UINT uNu
                     X11DRV_PALETTE_firstFree = X11DRV_PALETTE_freeList[index];
 
                     color.pixel = (X11DRV_PALETTE_PaletteToXPixel) ? X11DRV_PALETTE_PaletteToXPixel[index] : index;
-                    color.red = palPtr->logpalette.palPalEntry[uStart].peRed << 8;
-                    color.green = palPtr->logpalette.palPalEntry[uStart].peGreen << 8;
-                    color.blue = palPtr->logpalette.palPalEntry[uStart].peBlue << 8;
+                    color.red = entries[i].peRed << 8;
+                    color.green = entries[i].peGreen << 8;
+                    color.blue = entries[i].peBlue << 8;
                     color.flags = DoRed | DoGreen | DoBlue;
                     wine_tsx11_lock();
                     XStoreColor(gdi_display, X11DRV_PALETTE_PaletteXColormap, &color);
                     wine_tsx11_unlock();
 
-                    COLOR_sysPal[index] = palPtr->logpalette.palPalEntry[uStart];
+                    COLOR_sysPal[index] = entries[i];
                     COLOR_sysPal[index].peFlags = flag;
 		    X11DRV_PALETTE_freeList[index] = 0;
 
@@ -1152,28 +1174,46 @@ static UINT X11DRV_PALETTE_SetMapping( PALETTEOBJ* palPtr, UINT uStart, UINT uNu
                 }
                 else if ( X11DRV_PALETTE_PaletteFlags & X11DRV_PALETTE_VIRTUAL )
                 {
-                    index = X11DRV_PALETTE_ToPhysical( NULL, 0x00ffffff &
-                             *(COLORREF*)(palPtr->logpalette.palPalEntry + uStart));
+                    index = X11DRV_PALETTE_ToPhysical( NULL,
+                                                       RGB( entries[i].peRed, entries[i].peGreen, entries[i].peBlue ));
                 }
 
                 /* we have to map to existing entry in the system palette */
 
-                index = X11DRV_SysPaletteLookupPixel( *(COLORREF*)(palPtr->logpalette.palPalEntry + uStart), TRUE);
+                index = X11DRV_SysPaletteLookupPixel( RGB( entries[i].peRed, entries[i].peGreen, entries[i].peBlue ),
+                                                      TRUE );
             }
-	    palPtr->logpalette.palPalEntry[uStart].peFlags |= PC_SYS_USED;
 
             if( X11DRV_PALETTE_PaletteToXPixel ) index = X11DRV_PALETTE_PaletteToXPixel[index];
         }
 
-        if( !prevMapping || palPtr->mapping[uStart] != index ) iRemapped++;
-        palPtr->mapping[uStart] = index;
+        if( !prev_mapping || mapping[i] != index ) iRemapped++;
+        mapping[i] = index;
 
-        TRACE("entry %i (%x) -> pixel %i\n", uStart,
-              *(COLORREF*)(palPtr->logpalette.palPalEntry + uStart), index);
+        TRACE("entry %i (%x) -> pixel %i\n", i, *(COLORREF*)&entries[i], index);
 
     }
     return iRemapped;
 }
+
+
+/***********************************************************************
+ *              UnrealizePalette    (X11DRV.@)
+ */
+BOOL X11DRV_UnrealizePalette( HPALETTE hpal )
+{
+    int *mapping = palette_get_mapping( hpal );
+
+    if (mapping)
+    {
+        wine_tsx11_lock();
+        XDeleteContext( gdi_display, (XID)hpal, palette_context );
+        wine_tsx11_unlock();
+        HeapFree( GetProcessHeap(), 0, mapping );
+    }
+    return TRUE;
+}
+
 
 /***********************************************************************
  *              GetSystemPaletteEntries   (X11DRV.@)
@@ -1240,23 +1280,6 @@ COLORREF X11DRV_GetNearestColor( X11DRV_PDEVICE *physDev, COLORREF color )
 
 
 /***********************************************************************
- *              RealizePalette    (X11DRV.@)
- */
-UINT X11DRV_RealizePalette( X11DRV_PDEVICE *physDev, HPALETTE hpal, BOOL primary )
-{
-    UINT ret;
-    PALETTEOBJ *palPtr;
-
-    if (X11DRV_PALETTE_PaletteFlags & X11DRV_PALETTE_VIRTUAL) return 0;
-
-    if (!(palPtr = GDI_GetObjPtr( hpal, PALETTE_MAGIC ))) return 0;
-    ret = X11DRV_PALETTE_SetMapping( palPtr, 0, palPtr->logpalette.palNumEntries, !primary );
-    GDI_ReleaseObj( hpal );
-    return ret;
-}
-
-
-/***********************************************************************
  *              RealizeDefaultPalette    (X11DRV.@)
  */
 UINT X11DRV_RealizeDefaultPalette( X11DRV_PDEVICE *physDev )
@@ -1265,23 +1288,22 @@ UINT X11DRV_RealizeDefaultPalette( X11DRV_PDEVICE *physDev )
 
     if (palette_size && GetObjectType(physDev->hdc) != OBJ_MEMDC)
     {
-        PALETTEOBJ*  palPtr = GDI_GetObjPtr( GetStockObject(DEFAULT_PALETTE), PALETTE_MAGIC );
-        if (palPtr)
-        {
-            /* lookup is needed to account for SetSystemPaletteUse() stuff */
-            int i, index;
+        /* lookup is needed to account for SetSystemPaletteUse() stuff */
+        int i, index, *mapping = palette_get_mapping( GetStockObject(DEFAULT_PALETTE) );
+        PALETTEENTRY entries[NB_RESERVED_COLORS];
 
-            for( i = 0; i < 20; i++ )
+        GetPaletteEntries( GetStockObject(DEFAULT_PALETTE), 0, NB_RESERVED_COLORS, entries );
+        for( i = 0; i < NB_RESERVED_COLORS; i++ )
+        {
+            index = X11DRV_PALETTE_LookupSystemXPixel( RGB(entries[i].peRed,
+                                                           entries[i].peGreen,
+                                                           entries[i].peBlue) );
+            /* mapping is allocated in COLOR_InitPalette() */
+            if( index != mapping[i] )
             {
-                index = X11DRV_PALETTE_LookupSystemXPixel(*(COLORREF*)(palPtr->logpalette.palPalEntry + i));
-                /* mapping is allocated in COLOR_InitPalette() */
-                if( index != palPtr->mapping[i] )
-                {
-                    palPtr->mapping[i]=index;
-                    ret++;
-                }
+                mapping[i]=index;
+                ret++;
             }
-            GDI_ReleaseObj( GetStockObject(DEFAULT_PALETTE) );
         }
     }
     return ret;

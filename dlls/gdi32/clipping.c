@@ -25,7 +25,6 @@
 #include "wingdi.h"
 #include "wownt32.h"
 #include "wine/winuser16.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -87,9 +86,22 @@ void CLIPPING_UpdateGCRegion( DC * dc )
  */
 static inline void create_default_clip_region( DC * dc )
 {
-    dc->hClipRgn = CreateRectRgn(0, 0,
-        GetDeviceCaps( dc->hSelf, HORZRES ),
-        GetDeviceCaps( dc->hSelf, VERTRES ));
+    UINT width, height;
+
+    if (GDIMAGIC( dc->header.wMagic ) == MEMORY_DC_MAGIC)
+    {
+        BITMAP bitmap;
+
+        GetObjectW( dc->hBitmap, sizeof(bitmap), &bitmap );
+        width = bitmap.bmWidth;
+        height = bitmap.bmHeight;
+    }
+    else
+    {
+        width = GetDeviceCaps( dc->hSelf, DESKTOPHORZRES );
+        height = GetDeviceCaps( dc->hSelf, DESKTOPVERTRES );
+    }
+    dc->hClipRgn = CreateRectRgn( 0, 0, width, height );
 }
 
 
@@ -117,7 +129,7 @@ INT WINAPI ExtSelectClipRgn( HDC hdc, HRGN hrgn, INT fnMode )
     if (dc->funcs->pExtSelectClipRgn)
     {
         retval = dc->funcs->pExtSelectClipRgn( dc->physDev, hrgn, fnMode );
-        GDI_ReleaseObj( hdc );
+        DC_ReleaseDCPtr( dc );
         return retval;
     }
 
@@ -131,7 +143,7 @@ INT WINAPI ExtSelectClipRgn( HDC hdc, HRGN hrgn, INT fnMode )
         else
         {
             FIXME("Unimplemented: hrgn NULL in mode: %d\n", fnMode);
-            GDI_ReleaseObj( hdc );
+            DC_ReleaseDCPtr( dc );
             return ERROR;
         }
     }
@@ -147,7 +159,7 @@ INT WINAPI ExtSelectClipRgn( HDC hdc, HRGN hrgn, INT fnMode )
     }
 
     CLIPPING_UpdateGCRegion( dc );
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
 
     return GetClipBox(hdc, &rect);
 }
@@ -170,7 +182,7 @@ INT16 WINAPI SelectVisRgn16( HDC16 hdc16, HRGN16 hrgn )
 
     retval = CombineRgn( dc->hVisRgn, HRGN_32(hrgn), 0, RGN_COPY );
     CLIPPING_UpdateGCRegion( dc );
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return retval;
 }
 
@@ -196,7 +208,7 @@ INT WINAPI OffsetClipRgn( HDC hdc, INT x, INT y )
                          MulDiv( y, dc->vportExtY, dc->wndExtY ) );
 	CLIPPING_UpdateGCRegion( dc );
     }
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 
@@ -213,7 +225,7 @@ INT16 WINAPI OffsetVisRgn16( HDC16 hdc16, INT16 x, INT16 y )
     TRACE("%p %d,%d\n", hdc, x, y );
     retval = OffsetRgn( dc->hVisRgn, x, y );
     CLIPPING_UpdateGCRegion( dc );
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return retval;
 }
 
@@ -255,7 +267,7 @@ INT WINAPI ExcludeClipRect( HDC hdc, INT left, INT top,
         }
         if (ret != ERROR) CLIPPING_UpdateGCRegion( dc );
     }
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 
@@ -305,7 +317,7 @@ INT WINAPI IntersectClipRect( HDC hdc, INT left, INT top, INT right, INT bottom 
         }
         if (ret != ERROR) CLIPPING_UpdateGCRegion( dc );
     }
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 
@@ -338,7 +350,7 @@ INT16 WINAPI ExcludeVisRect16( HDC16 hdc16, INT16 left, INT16 top, INT16 right, 
         DeleteObject( tempRgn );
     }
     if (ret != ERROR) CLIPPING_UpdateGCRegion( dc );
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 
@@ -372,7 +384,7 @@ INT16 WINAPI IntersectVisRect16( HDC16 hdc16, INT16 left, INT16 top, INT16 right
         DeleteObject( tempRgn );
     }
     if (ret != ERROR) CLIPPING_UpdateGCRegion( dc );
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 
@@ -395,7 +407,7 @@ BOOL WINAPI PtVisible( HDC hdc, INT x, INT y )
     LPtoDP( hdc, &pt, 1 );
     ret = PtInRegion( dc->hVisRgn, pt.x, pt.y );
     if (ret && (clip = get_clip_region(dc))) ret = PtInRegion( clip, pt.x, pt.y );
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 
@@ -423,7 +435,7 @@ BOOL WINAPI RectVisible( HDC hdc, const RECT* rect )
         DeleteObject( hrgn );
     }
     else ret = RectInRegion( dc->hVisRgn, &tmpRect );
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 
@@ -446,7 +458,7 @@ INT WINAPI GetClipBox( HDC hdc, LPRECT rect )
     }
     else ret = GetRgnBox( dc->hVisRgn, rect );
     DPtoLP( hdc, (LPPOINT)rect, 2 );
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 
@@ -465,7 +477,7 @@ INT WINAPI GetClipRgn( HDC hdc, HRGN hRgn )
           if( CombineRgn(hRgn, dc->hClipRgn, 0, RGN_COPY) != ERROR ) ret = 1;
       }
       else ret = 0;
-      GDI_ReleaseObj( hdc );
+      DC_ReleaseDCPtr( dc );
     }
     return ret;
 }
@@ -483,7 +495,7 @@ INT WINAPI GetMetaRgn( HDC hdc, HRGN hRgn )
     {
         if (dc->hMetaRgn && CombineRgn( hRgn, dc->hMetaRgn, 0, RGN_COPY ) != ERROR)
             ret = 1;
-        GDI_ReleaseObj( hdc );
+        DC_ReleaseDCPtr( dc );
     }
     return ret;
 }
@@ -506,11 +518,11 @@ HRGN16 WINAPI SaveVisRgn16( HDC16 hdc16 )
     CombineRgn( saved->hrgn, dc->hVisRgn, 0, RGN_COPY );
     saved->next = dc->saved_visrgn;
     dc->saved_visrgn = saved;
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return HRGN_16(saved->hrgn);
 
 error:
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     HeapFree( GetProcessHeap(), 0, saved );
     return 0;
 }
@@ -539,7 +551,7 @@ INT16 WINAPI RestoreVisRgn16( HDC16 hdc16 )
     dc->flags &= ~DC_DIRTY;
     CLIPPING_UpdateGCRegion( dc );
  done:
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 
@@ -583,11 +595,11 @@ INT WINAPI GetRandomRgn(HDC hDC, HRGN hRgn, INT iCode)
         break;
     default:
         WARN("Unknown code %d\n", iCode);
-        GDI_ReleaseObj( hDC );
+        DC_ReleaseDCPtr( dc );
         return -1;
     }
     if (rgn) CombineRgn( hRgn, rgn, 0, RGN_COPY );
-    GDI_ReleaseObj( hDC );
+    DC_ReleaseDCPtr( dc );
 
     /* On Windows NT/2000, the SYSRGN returned is in screen coordinates */
     if (iCode == SYSRGN && !(GetVersion() & 0x80000000))
@@ -630,6 +642,6 @@ INT WINAPI SetMetaRgn( HDC hdc )
     /* Note: no need to call CLIPPING_UpdateGCRegion, the overall clip region hasn't changed */
 
     ret = GetRgnBox( dc->hMetaRgn, &dummy );
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }

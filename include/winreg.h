@@ -77,6 +77,7 @@ typedef ACCESS_MASK REGSAM;
 #define RRF_RT_REG_QWORD        (1 << 6)
 #define RRF_RT_DWORD            (RRF_RT_REG_BINARY | RRF_RT_REG_DWORD)
 #define RRF_RT_QWORD            (RRF_RT_REG_BINARY | RRF_RT_REG_QWORD)
+#define RRF_RT_ANY              0xffff
 #define RRF_NOEXPAND            (1 << 28)
 #define RRF_ZEROONFAILURE       (1 << 29)
 
@@ -154,6 +155,12 @@ LONG        WINAPI RegCreateKeyW(HKEY,LPCWSTR,PHKEY);
 LONG        WINAPI RegDeleteKeyA(HKEY,LPCSTR);
 LONG        WINAPI RegDeleteKeyW(HKEY,LPCWSTR);
 #define     RegDeleteKey WINELIB_NAME_AW(RegDeleteKey)
+LONG        WINAPI RegDeleteKeyValueA(HKEY,LPCSTR,LPCSTR);
+LONG        WINAPI RegDeleteKeyValueW(HKEY,LPCWSTR,LPCWSTR);
+#define     RegDeleteKeyValue WINELIB_NAME_AW(RegDeleteKeyValue)
+LONG        WINAPI RegDeleteTreeA(HKEY,LPCSTR);
+LONG        WINAPI RegDeleteTreeW(HKEY,LPCWSTR);
+#define     RegDeleteTree WINELIB_NAME_AW(RegDeleteTree)
 LONG        WINAPI RegDeleteValueA(HKEY,LPCSTR);
 LONG        WINAPI RegDeleteValueW(HKEY,LPCWSTR);
 #define     RegDeleteValue WINELIB_NAME_AW(RegDeleteValue)

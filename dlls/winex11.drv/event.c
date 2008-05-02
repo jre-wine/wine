@@ -40,7 +40,6 @@
 #include "shlobj.h"  /* DROPFILES */
 
 #include "win.h"
-#include "winreg.h"
 #include "x11drv.h"
 #include "shellapi.h"
 #include "wine/debug.h"
@@ -278,32 +277,26 @@ static int process_events( Display *display, ULONG_PTR mask )
 DWORD X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles,
                                           DWORD timeout, DWORD mask, DWORD flags )
 {
-    DWORD i, ret;
+    DWORD ret;
     struct x11drv_thread_data *data = TlsGetValue( thread_data_tls_index );
 
-    if (!data || data->process_event_count)
+    if (!data)
     {
         if (!count && !timeout) return WAIT_TIMEOUT;
         return WaitForMultipleObjectsEx( count, handles, flags & MWMO_WAITALL,
                                          timeout, flags & MWMO_ALERTABLE );
     }
 
-    /* check whether only server queue handle was passed in */
-    if (count < 2) flags &= ~MWMO_WAITALL;
+    if (data->process_event_count) mask = 0;  /* don't process nested events */
 
     data->process_event_count++;
 
-    if (process_events( data->display, mask )) ret = count;
+    if (process_events( data->display, mask )) ret = count - 1;
     else if (count || timeout)
     {
-        HANDLE new_handles[MAXIMUM_WAIT_OBJECTS+1];  /* FIXME! */
-
-        for (i = 0; i < count; i++) new_handles[i] = handles[i];
-        new_handles[count] = data->display_fd;
-
-        ret = WaitForMultipleObjectsEx( count+1, new_handles, flags & MWMO_WAITALL,
+        ret = WaitForMultipleObjectsEx( count, handles, flags & MWMO_WAITALL,
                                         timeout, flags & MWMO_ALERTABLE );
-        if (ret == count) process_events( data->display, mask );
+        if (ret == count - 1) process_events( data->display, mask );
     }
     else ret = WAIT_TIMEOUT;
 
@@ -351,11 +344,12 @@ DWORD EVENT_x11_time_to_win32_time(Time time)
  *
  * Check if we can activate the specified window.
  */
-inline static BOOL can_activate_window( HWND hwnd )
+static inline BOOL can_activate_window( HWND hwnd )
 {
     LONG style = GetWindowLongW( hwnd, GWL_STYLE );
     if (!(style & WS_VISIBLE)) return FALSE;
     if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return FALSE;
+    if (hwnd == GetDesktopWindow()) return FALSE;
     return !(style & WS_DISABLED);
 }
 
@@ -412,6 +406,27 @@ static void handle_wm_protocols( HWND hwnd, XClientMessageEvent *event )
                 if (state == 0xFFFFFFFF || (state & (MF_DISABLED | MF_GRAYED)))
                     return;
             }
+            if (GetActiveWindow() != hwnd)
+            {
+                LRESULT ma = SendMessageW( hwnd, WM_MOUSEACTIVATE,
+                                           (WPARAM)GetAncestor( hwnd, GA_ROOT ),
+                                           MAKELONG(HTCLOSE,WM_LBUTTONDOWN) );
+                switch(ma)
+                {
+                    case MA_NOACTIVATEANDEAT:
+                    case MA_ACTIVATEANDEAT:
+                        return;
+                    case MA_NOACTIVATE:
+                        break;
+                    case MA_ACTIVATE:
+                    case 0:
+                        SetActiveWindow(hwnd);
+                        break;
+                    default:
+                        WARN( "unknown WM_MOUSEACTIVATE code %d\n", (int) ma );
+                        break;
+                }
+            }
             PostMessageW( hwnd, WM_X11DRV_DELETE_WINDOW, 0, 0 );
         }
     }
@@ -431,17 +446,18 @@ static void handle_wm_protocols( HWND hwnd, XClientMessageEvent *event )
             LRESULT ma = SendMessageW( hwnd, WM_MOUSEACTIVATE,
                                        (WPARAM)GetAncestor( hwnd, GA_ROOT ),
                                        MAKELONG(HTCAPTION,WM_LBUTTONDOWN) );
-            if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE) set_focus( hwnd, event_time );
-            else TRACE( "not setting focus to %p (%lx), ma=%ld\n", hwnd, event->window, ma );
+            if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
+            {
+                set_focus( hwnd, event_time );
+                return;
+            }
         }
-        else
-        {
-            hwnd = GetFocus();
-            if (hwnd) hwnd = GetAncestor( hwnd, GA_ROOT );
-            if (!hwnd) hwnd = GetActiveWindow();
-            if (!hwnd) hwnd = last_focus;
-            if (hwnd && can_activate_window(hwnd)) set_focus( hwnd, event_time );
-        }
+        /* try to find some other window to give the focus to */
+        hwnd = GetFocus();
+        if (hwnd) hwnd = GetAncestor( hwnd, GA_ROOT );
+        if (!hwnd) hwnd = GetActiveWindow();
+        if (!hwnd) hwnd = last_focus;
+        if (hwnd && can_activate_window(hwnd)) set_focus( hwnd, event_time );
     }
     else if (protocol == x11drv_atom(_NET_WM_PING))
     {
@@ -555,8 +571,8 @@ static void EVENT_FocusOut( HWND hwnd, XEvent *xev )
            case we don't have to change the foreground window to 0 */
         if (hwnd == GetForegroundWindow())
         {
-            TRACE( "lost focus, setting fg to 0\n" );
-            SetForegroundWindow( 0 );
+            TRACE( "lost focus, setting fg to desktop\n" );
+            SetForegroundWindow( GetDesktopWindow() );
         }
     }
 }
@@ -943,7 +959,7 @@ LRESULT X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
     case WM_X11DRV_DELETE_WINDOW:
         return SendMessageW( hwnd, WM_SYSCOMMAND, SC_CLOSE, 0 );
     default:
-        FIXME( "got window msg %x hwnd %p wp %x lp %lx\n", msg, hwnd, wp, lp );
+        FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp );
         return 0;
     }
 }

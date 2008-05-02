@@ -19,7 +19,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <windows.h>
+#include <windef.h>
+#include <winuser.h>
+#include <commctrl.h>
+
 #include "resource.h"
 
 /* Language resources */
@@ -27,6 +30,7 @@
 #include "De.rc"
 #include "En.rc"
 #include "Fr.rc"
+#include "Ja.rc"
 #include "Ko.rc"
 #include "Nl.rc"
 #include "No.rc"

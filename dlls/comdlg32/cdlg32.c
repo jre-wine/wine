@@ -38,8 +38,8 @@ HINSTANCE	COMDLG32_hInstance = 0;
 
 static DWORD COMDLG32_TlsIndex = TLS_OUT_OF_INDEXES;
 
-HINSTANCE	SHELL32_hInstance = 0;
-HINSTANCE	SHFOLDER_hInstance = 0;
+static HINSTANCE	SHELL32_hInstance;
+static HINSTANCE	SHFOLDER_hInstance;
 
 /* ITEMIDLIST */
 LPITEMIDLIST (WINAPI *COMDLG32_PIDL_ILClone) (LPCITEMIDLIST);
@@ -63,7 +63,7 @@ BOOL (WINAPI *COMDLG32_SHGetFolderPathW)(HWND,int,HANDLE,DWORD,LPWSTR);
  *	FALSE if sibling could not be loaded or instantiated twice, TRUE
  *	otherwise.
  */
-static const char * GPA_string = "Failed to get entry point %s for hinst = 0x%08x\n";
+static const char GPA_string[] = "Failed to get entry point %s for hinst = %p\n";
 #define GPA(dest, hinst, name) \
 	if(!(dest = (void*)GetProcAddress(hinst,name)))\
 	{ \

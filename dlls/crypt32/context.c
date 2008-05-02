@@ -71,6 +71,7 @@ void *Context_CreateDataContext(size_t contextSize)
             ret = NULL;
         }
     }
+    TRACE("returning %p\n", ret);
     return ret;
 }
 
@@ -96,6 +97,7 @@ void *Context_CreateLinkContext(unsigned int contextSize, void *linked, unsigned
             InterlockedIncrement(&linkedBase->ref);
         TRACE("%p's ref count is %d\n", context, linkContext->ref);
     }
+    TRACE("returning %p\n", context);
     return context;
 }
 
@@ -192,6 +194,7 @@ struct ContextList *ContextList_Create(
         list->contextInterface = contextInterface;
         list->contextSize = contextSize;
         InitializeCriticalSection(&list->cs);
+        list->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ContextList.cs");
         list_init(&list->contexts);
     }
     return list;
@@ -303,6 +306,7 @@ void ContextList_Empty(struct ContextList *list)
 void ContextList_Free(struct ContextList *list)
 {
     ContextList_Empty(list);
+    list->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&list->cs);
     CryptMemFree(list);
 }

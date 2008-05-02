@@ -24,6 +24,7 @@
 #include "wine/port.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -59,7 +60,6 @@
 #include "winerror.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "excpt.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
 
@@ -77,7 +77,7 @@ static HANDLE systemHeap;   /* globally shared heap */
  *
  * Create the system heap.
  */
-inline static HANDLE HEAP_CreateSystemHeap(void)
+static inline HANDLE HEAP_CreateSystemHeap(void)
 {
     int created;
     void *base;
@@ -268,6 +268,9 @@ DWORD WINAPI GetProcessHeaps( DWORD count, HANDLE *heaps )
 
 /* These are needed so that we can call the functions from inside kernel itself */
 
+/***********************************************************************
+ *           HeapAlloc    (KERNEL32.@)
+ */
 LPVOID WINAPI HeapAlloc( HANDLE heap, DWORD flags, SIZE_T size )
 {
     return RtlAllocateHeap( heap, flags, size );
@@ -283,7 +286,7 @@ LPVOID WINAPI HeapReAlloc( HANDLE heap, DWORD flags, LPVOID ptr, SIZE_T size )
     return RtlReAllocateHeap( heap, flags, ptr, size );
 }
 
-SIZE_T WINAPI HeapSize( HANDLE heap, DWORD flags, LPVOID ptr )
+SIZE_T WINAPI HeapSize( HANDLE heap, DWORD flags, LPCVOID ptr )
 {
     return RtlSizeHeap( heap, flags, ptr );
 }
@@ -362,6 +365,12 @@ HGLOBAL WINAPI GlobalAlloc(
    }
    else  /* HANDLE */
    {
+      if (size > INT_MAX-HGLOBAL_STORAGE)
+      {
+          SetLastError(ERROR_OUTOFMEMORY);
+          return 0;
+      }
+
       RtlLockHeap(GetProcessHeap());
 
       pintern = HeapAlloc(GetProcessHeap(), 0, sizeof(GLOBAL32_INTERN));
@@ -655,7 +664,12 @@ HGLOBAL WINAPI GlobalReAlloc(
             hnew=hmem;
             if(pintern->Pointer)
             {
-               if((palloc = HeapReAlloc(GetProcessHeap(), heap_flags,
+               if(size > INT_MAX-HGLOBAL_STORAGE)
+               {
+                   SetLastError(ERROR_OUTOFMEMORY);
+                   hnew = 0;
+               }
+               else if((palloc = HeapReAlloc(GetProcessHeap(), heap_flags,
                                    (char *) pintern->Pointer-HGLOBAL_STORAGE,
                                    size+HGLOBAL_STORAGE)) == NULL)
                    hnew = 0; /* Block still valid */
@@ -664,7 +678,12 @@ HGLOBAL WINAPI GlobalReAlloc(
             }
             else
             {
-                if((palloc=HeapAlloc(GetProcessHeap(), heap_flags, size+HGLOBAL_STORAGE))
+                if(size > INT_MAX-HGLOBAL_STORAGE)
+                {
+                    SetLastError(ERROR_OUTOFMEMORY);
+                    hnew = 0;
+                }
+                else if((palloc=HeapAlloc(GetProcessHeap(), heap_flags, size+HGLOBAL_STORAGE))
                    == NULL)
                     hnew = 0;
                 else
@@ -1135,7 +1154,7 @@ void WINAPI __regs_AllocMappedBuffer(
     }
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( AllocMappedBuffer, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( AllocMappedBuffer, 0, 0 )
 #endif
 
 /**********************************************************************
@@ -1160,7 +1179,7 @@ void WINAPI __regs_FreeMappedBuffer(
     }
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( FreeMappedBuffer, 0, 0 );
+DEFINE_REGS_ENTRYPOINT( FreeMappedBuffer, 0, 0 )
 #endif
 
 /***********************************************************************
@@ -1242,14 +1261,6 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
                 lpmemex->ullAvailPhys += cached*1024;
         }
         fclose( f );
-
-        if (lpmemex->ullTotalPhys)
-        {
-            DWORDLONG TotalPhysical = lpmemex->ullTotalPhys+lpmemex->ullTotalPageFile;
-            DWORDLONG AvailPhysical = lpmemex->ullAvailPhys+lpmemex->ullAvailPageFile;
-            lpmemex->dwMemoryLoad = (TotalPhysical-AvailPhysical)
-                                      / (TotalPhysical / 100);
-        }
     }
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__APPLE__)
     mib[0] = CTL_HW;
@@ -1264,7 +1275,6 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     lpmemex->ullAvailPhys = val;
     lpmemex->ullTotalPageFile = val;
     lpmemex->ullAvailPageFile = val;
-    lpmemex->dwMemoryLoad = lpmemex->ullTotalPhys - lpmemex->ullAvailPhys;
 #elif defined ( sun )
     pagesize=sysconf(_SC_PAGESIZE);
     maxpages=sysconf(_SC_PHYS_PAGES);
@@ -1285,14 +1295,28 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     lpmemex->ullAvailPhys = pagesize*freepages;
     lpmemex->ullTotalPageFile = swapspace;
     lpmemex->ullAvailPageFile = swapfree;
-    lpmemex->dwMemoryLoad =  lpmemex->ullTotalPhys - lpmemex->ullAvailPhys;
 #endif
 
-    /* Project2k refuses to start if it sees less than 1Mb of free swap */
-    if (lpmemex->ullTotalPageFile < lpmemex->ullTotalPhys)
-        lpmemex->ullTotalPageFile = lpmemex->ullTotalPhys;
-    if (lpmemex->ullAvailPageFile < lpmemex->ullAvailPhys)
-        lpmemex->ullAvailPageFile = lpmemex->ullAvailPhys;
+    if (lpmemex->ullTotalPhys)
+    {
+        lpmemex->dwMemoryLoad = (lpmemex->ullTotalPhys-lpmemex->ullAvailPhys)
+                                  / (lpmemex->ullTotalPhys / 100);
+    }
+
+    /* Win98 returns only the swapsize in ullTotalPageFile/ullAvailPageFile,
+       WinXP returns the size of physical memory + swapsize;
+       mimic the behavior of XP.
+       Note: Project2k refuses to start if it sees less than 1Mb of free swap.
+    */
+    lpmemex->ullTotalPageFile += lpmemex->ullTotalPhys;
+    lpmemex->ullAvailPageFile += lpmemex->ullAvailPhys;
+
+    /* Titan Quest refuses to run if TotalPageFile <= ullTotalPhys */
+    if(lpmemex->ullTotalPageFile == lpmemex->ullTotalPhys)
+    {
+        lpmemex->ullTotalPhys -= 1;
+        lpmemex->ullAvailPhys -= 1;
+    }
 
     /* FIXME: should do something for other systems */
     GetSystemInfo(&si);

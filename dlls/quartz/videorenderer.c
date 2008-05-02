@@ -27,10 +27,8 @@
 #include "pin.h"
 
 #include "uuids.h"
-#include "mmreg.h"
 #include "vfwmsgs.h"
 #include "amvideo.h"
-#include "fourcc.h"
 #include "windef.h"
 #include "winbase.h"
 #include "dshow.h"
@@ -128,6 +126,20 @@ static LRESULT CALLBACK VideoWndProcA(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
             /* TRACE("WM_SIZING %d %d %d %d\n", lprect->left, lprect->top, lprect->right, lprect->bottom); */
             SetWindowPos(hwnd, NULL, lprect->left, lprect->top, lprect->right - lprect->left, lprect->bottom - lprect->top, SWP_NOZORDER);
             GetClientRect(hwnd, &pVideoRenderer->DestRect);
+            TRACE("WM_SIZING: DestRect=(%d,%d),(%d,%d)\n",
+                pVideoRenderer->DestRect.left,
+                pVideoRenderer->DestRect.top,
+                pVideoRenderer->DestRect.right - pVideoRenderer->DestRect.left,
+                pVideoRenderer->DestRect.bottom - pVideoRenderer->DestRect.top);
+            return TRUE;
+        case WM_SIZE:
+            TRACE("WM_SIZE %d %d\n", LOWORD(lParam), HIWORD(lParam));
+            GetClientRect(hwnd, &pVideoRenderer->DestRect);
+            TRACE("WM_SIZING: DestRect=(%d,%d),(%d,%d)\n",
+                pVideoRenderer->DestRect.left,
+                pVideoRenderer->DestRect.top,
+                pVideoRenderer->DestRect.right - pVideoRenderer->DestRect.left,
+                pVideoRenderer->DestRect.bottom - pVideoRenderer->DestRect.top);
             return TRUE;
         default:
             return DefWindowProcA(hwnd, uMsg, wParam, lParam);
@@ -156,7 +168,7 @@ static BOOL CreateRenderingWindow(VideoRendererImpl* This)
     {
         if (!RegisterClassA(&winclass))
         {
-            ERR("Unable to register window %x\n", GetLastError());
+            ERR("Unable to register window %u\n", GetLastError());
             return FALSE;
         }
         wnd_class_registered = TRUE;
@@ -307,18 +319,14 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
  
     if (!This->init)
     {
-        /* Compute the size of the whole window so the client area size matches video one */
-        RECT wrect, crect;
-        int h, v;
-        GetWindowRect(This->hWnd, &wrect);
-        GetClientRect(This->hWnd, &crect);
-        h = (wrect.right - wrect.left) - (crect.right - crect.left);
-        v = (wrect.bottom - wrect.top) - (crect.bottom - crect.top);
-        SetWindowPos(This->hWnd, NULL, 0, 0, width + h +20, height + v+20, SWP_NOZORDER|SWP_NOMOVE);
-        This->WindowPos.left = 0;
-        This->WindowPos.top = 0;
-        This->WindowPos.right = width;
-        This->WindowPos.bottom = abs(height);
+        /* Honor previously set WindowPos */
+        TRACE("WindowPos: %d %d %d %d\n", This->WindowPos.left, This->WindowPos.top, This->WindowPos.right, This->WindowPos.bottom);
+        SetWindowPos(This->hWnd, NULL,
+            This->WindowPos.left,
+            This->WindowPos.top,
+            This->WindowPos.right - This->WindowPos.left,
+            This->WindowPos.bottom - This->WindowPos.top,
+            SWP_NOZORDER|SWP_NOMOVE);
         GetClientRect(This->hWnd, &This->DestRect);
         This->init  = TRUE;
     }
@@ -437,6 +445,7 @@ HRESULT VideoRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv)
     
     pVideoRenderer->refCount = 1;
     InitializeCriticalSection(&pVideoRenderer->csFilter);
+    pVideoRenderer->csFilter.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": VideoRendererImpl.csFilter");
     pVideoRenderer->state = State_Stopped;
     pVideoRenderer->pClock = NULL;
     pVideoRenderer->init = 0;
@@ -460,6 +469,7 @@ HRESULT VideoRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv)
     else
     {
         CoTaskMemFree(pVideoRenderer->ppPins);
+        pVideoRenderer->csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&pVideoRenderer->csFilter);
         CoTaskMemFree(pVideoRenderer);
     }
@@ -520,7 +530,7 @@ static ULONG WINAPI VideoRenderer_Release(IBaseFilter * iface)
 
     if (!refCount)
     {
-        DeleteCriticalSection(&This->csFilter);
+        IPin *pConnectedTo;
 
         DestroyWindow(This->hWnd);
         PostThreadMessageA(This->ThreadID, WM_QUIT, 0, 0);
@@ -530,11 +540,21 @@ static ULONG WINAPI VideoRenderer_Release(IBaseFilter * iface)
         if (This->pClock)
             IReferenceClock_Release(This->pClock);
         
+        if (SUCCEEDED(IPin_ConnectedTo(This->ppPins[0], &pConnectedTo)))
+        {
+            IPin_Disconnect(pConnectedTo);
+            IPin_Release(pConnectedTo);
+        }
+        IPin_Disconnect(This->ppPins[0]);
+
         IPin_Release(This->ppPins[0]);
         
-        HeapFree(GetProcessHeap(), 0, This->ppPins);
+        CoTaskMemFree(This->ppPins);
         This->lpVtbl = NULL;
         
+        This->csFilter.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->csFilter);
+
         TRACE("Destroying Video Renderer\n");
         CoTaskMemFree(This);
         

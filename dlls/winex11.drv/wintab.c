@@ -213,7 +213,7 @@ typedef struct tagWTPACKET {
 } WTPACKET, *LPWTPACKET;
 
 
-#ifdef HAVE_X11_EXTENSIONS_XINPUT_H
+#ifdef SONAME_LIBXI
 
 #include <X11/Xlib.h>
 #include <X11/extensions/XInput.h>
@@ -238,10 +238,6 @@ static WTI_DEVICES_INFO gSysDevice;
 static WTI_CURSORS_INFO gSysCursor[CURSORMAX];
 static INT              gNumCursors;
 
-
-#ifndef SONAME_LIBXI
-#define SONAME_LIBXI "libXi.so"
-#endif
 
 /* XInput stuff */
 static void *xinput_handle;
@@ -367,8 +363,9 @@ void X11DRV_LoadTabletInfo(HWND hwnddefault)
             target = &devices[loop];
             cursor = &gSysCursor[cursor_target];
 
+            X11DRV_expect_error(data->display, Tablet_ErrorHandler, NULL);
             opendevice = pXOpenDevice(data->display,target->id);
-            if (opendevice)
+            if (!X11DRV_check_error() && opendevice)
             {
                 unsigned char map[32];
                 int i;
@@ -757,7 +754,7 @@ int X11DRV_GetCurrentPacket(LPWTPACKET *packet)
 }
 
 
-inline static int CopyTabletData(LPVOID target, LPVOID src, INT size)
+static inline int CopyTabletData(LPVOID target, LPVOID src, INT size)
 {
     /*
      * It is valid to call CopyTabletData with NULL.
@@ -1167,7 +1164,7 @@ UINT X11DRV_WTInfoA(UINT wCategory, UINT nIndex, LPVOID lpOutput)
     return rc;
 }
 
-#else /* HAVE_X11_EXTENSIONS_XINPUT_H */
+#else /* SONAME_LIBXI */
 
 /***********************************************************************
  *		AttachEventQueueToTablet (X11DRV.@)
@@ -1200,4 +1197,4 @@ UINT X11DRV_WTInfoA(UINT wCategory, UINT nIndex, LPVOID lpOutput)
     return 0;
 }
 
-#endif /* HAVE_X11_EXTENSIONS_XINPUT_H */
+#endif /* SONAME_LIBXI */

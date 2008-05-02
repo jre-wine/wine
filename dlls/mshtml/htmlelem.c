@@ -26,8 +26,10 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
+#include "winreg.h"
 #include "winnls.h"
 #include "ole2.h"
+#include "shlwapi.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -133,8 +135,40 @@ static HRESULT WINAPI HTMLElement_setAttribute(IHTMLElement *iface, BSTR strAttr
                                                VARIANT AttributeValue, LONG lFlags)
 {
     HTMLElement *This = HTMLELEM_THIS(iface);
-    FIXME("(%p)->(%s . %08x)\n", This, debugstr_w(strAttributeName), lFlags);
-    return E_NOTIMPL;
+    nsAString attr_str;
+    nsAString value_str;
+    nsresult nsres;
+    HRESULT hres;
+    VARIANT AttributeValueChanged;
+
+    WARN("(%p)->(%s . %08x)\n", This, debugstr_w(strAttributeName), lFlags);
+
+    VariantInit(&AttributeValueChanged);
+
+    hres = VariantChangeType(&AttributeValueChanged, &AttributeValue, 0, VT_BSTR);
+    if (FAILED(hres)) {
+        WARN("couldn't convert input attribute value %d to VT_BSTR\n", V_VT(&AttributeValue));
+        return hres;
+    }
+
+    nsAString_Init(&attr_str, strAttributeName);
+    nsAString_Init(&value_str, V_BSTR(&AttributeValueChanged));
+
+    TRACE("setting %s to %s\n", debugstr_w(strAttributeName),
+        debugstr_w(V_BSTR(&AttributeValueChanged)));
+
+    nsres = nsIDOMHTMLElement_SetAttribute(This->nselem, &attr_str, &value_str);
+    nsAString_Finish(&attr_str);
+    nsAString_Finish(&value_str);
+
+    if(NS_SUCCEEDED(nsres)) {
+        hres = S_OK;
+    }else {
+        ERR("SetAttribute failed: %08x\n", nsres);
+        hres = E_FAIL;
+    }
+
+    return hres;
 }
 
 static HRESULT WINAPI HTMLElement_getAttribute(IHTMLElement *iface, BSTR strAttributeName,
@@ -149,6 +183,8 @@ static HRESULT WINAPI HTMLElement_getAttribute(IHTMLElement *iface, BSTR strAttr
 
     WARN("(%p)->(%s %08x %p)\n", This, debugstr_w(strAttributeName), lFlags, AttributeValue);
 
+    VariantInit(AttributeValue);
+
     nsAString_Init(&attr_str, strAttributeName);
     nsAString_Init(&value_str, NULL);
 
@@ -156,10 +192,30 @@ static HRESULT WINAPI HTMLElement_getAttribute(IHTMLElement *iface, BSTR strAttr
     nsAString_Finish(&attr_str);
 
     if(NS_SUCCEEDED(nsres)) {
+        static const WCHAR wszSRC[] = {'s','r','c',0};
         nsAString_GetData(&value_str, &value, NULL);
-        V_VT(AttributeValue) = VT_BSTR;
-        V_BSTR(AttributeValue) = SysAllocString(value);
-        TRACE("attr_value=%s\n", debugstr_w(V_BSTR(AttributeValue)));
+        if(!strcmpiW(strAttributeName, wszSRC))
+        {
+            WCHAR buffer[256];
+            DWORD len;
+            BSTR bstrBaseUrl;
+            hres = IHTMLDocument2_get_URL(HTMLDOC(This->node->doc), &bstrBaseUrl);
+            if(SUCCEEDED(hres)) {
+                hres = CoInternetCombineUrl(bstrBaseUrl, value,
+                                            URL_ESCAPE_SPACES_ONLY|URL_DONT_ESCAPE_EXTRA_INFO,
+                                            buffer, sizeof(buffer)/sizeof(WCHAR), &len, 0);
+                SysFreeString(bstrBaseUrl);
+                if(SUCCEEDED(hres)) {
+                    V_VT(AttributeValue) = VT_BSTR;
+                    V_BSTR(AttributeValue) = SysAllocString(buffer);
+                    TRACE("attr_value=%s\n", debugstr_w(V_BSTR(AttributeValue)));
+                }
+            }
+        }else {
+            V_VT(AttributeValue) = VT_BSTR;
+            V_BSTR(AttributeValue) = SysAllocString(value);
+            TRACE("attr_value=%s\n", debugstr_w(V_BSTR(AttributeValue)));
+        }
     }else {
         ERR("GetAttribute failed: %08x\n", nsres);
         hres = E_FAIL;
@@ -243,8 +299,31 @@ static HRESULT WINAPI HTMLElement_get_parentElement(IHTMLElement *iface, IHTMLEl
 static HRESULT WINAPI HTMLElement_get_style(IHTMLElement *iface, IHTMLStyle **p)
 {
     HTMLElement *This = HTMLELEM_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsIDOMElementCSSInlineStyle *nselemstyle;
+    nsIDOMCSSStyleDeclaration *nsstyle;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsres = nsIDOMHTMLElement_QueryInterface(This->nselem, &IID_nsIDOMElementCSSInlineStyle,
+                                             (void**)&nselemstyle);
+    if(NS_FAILED(nsres)) {
+        ERR("Coud not get nsIDOMCSSStyleDeclaration interface: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIDOMElementCSSInlineStyle_GetStyle(nselemstyle, &nsstyle);
+    nsIDOMElementCSSInlineStyle_Release(nselemstyle);
+    if(NS_FAILED(nsres)) {
+        ERR("GetStyle failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    /* FIXME: Store style instead of creating a new instance in each call */
+    *p = HTMLStyle_Create(nsstyle);
+
+    nsIDOMCSSStyleDeclaration_Release(nsstyle);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLElement_put_onhelp(IHTMLElement *iface, VARIANT v)
@@ -604,20 +683,171 @@ static HRESULT WINAPI HTMLElement_get_outerText(IHTMLElement *iface, BSTR *p)
     return E_NOTIMPL;
 }
 
+static HRESULT HTMLElement_InsertAdjacentNode(HTMLElement *This, BSTR where, nsIDOMNode *nsnode)
+{
+    static const WCHAR wszBeforeBegin[] = {'b','e','f','o','r','e','B','e','g','i','n',0};
+    static const WCHAR wszAfterBegin[] = {'a','f','t','e','r','B','e','g','i','n',0};
+    static const WCHAR wszBeforeEnd[] = {'b','e','f','o','r','e','E','n','d',0};
+    static const WCHAR wszAfterEnd[] = {'a','f','t','e','r','E','n','d',0};
+    nsresult nsres;
+
+    if (!strcmpiW(where, wszBeforeBegin))
+    {
+        nsIDOMNode *unused;
+        nsIDOMNode *parent;
+        nsres = nsIDOMNode_GetParentNode(This->nselem, &parent);
+        if (!parent) return E_INVALIDARG;
+        nsres = nsIDOMNode_InsertBefore(parent, nsnode,
+                                        (nsIDOMNode *)This->nselem, &unused);
+        if (unused) nsIDOMNode_Release(unused);
+        nsIDOMNode_Release(parent);
+    }
+    else if (!strcmpiW(where, wszAfterBegin))
+    {
+        nsIDOMNode *unused;
+        nsIDOMNode *first_child;
+        nsIDOMNode_GetFirstChild(This->nselem, &first_child);
+        nsres = nsIDOMNode_InsertBefore(This->nselem, nsnode, first_child, &unused);
+        if (unused) nsIDOMNode_Release(unused);
+        if (first_child) nsIDOMNode_Release(first_child);
+    }
+    else if (!strcmpiW(where, wszBeforeEnd))
+    {
+        nsIDOMNode *unused;
+        nsres = nsIDOMNode_AppendChild(This->nselem, nsnode, &unused);
+        if (unused) nsIDOMNode_Release(unused);
+    }
+    else if (!strcmpiW(where, wszAfterEnd))
+    {
+        nsIDOMNode *unused;
+        nsIDOMNode *next_sibling;
+        nsIDOMNode *parent;
+        nsIDOMNode_GetParentNode(This->nselem, &parent);
+        if (!parent) return E_INVALIDARG;
+
+        nsIDOMNode_GetNextSibling(This->nselem, &next_sibling);
+        if (next_sibling)
+        {
+            nsres = nsIDOMNode_InsertBefore(parent, nsnode, next_sibling, &unused);
+            nsIDOMNode_Release(next_sibling);
+        }
+        else
+            nsres = nsIDOMNode_AppendChild(parent, nsnode, &unused);
+        nsIDOMNode_Release(parent);
+        if (unused) nsIDOMNode_Release(unused);
+    }
+    else
+    {
+        ERR("invalid where: %s\n", debugstr_w(where));
+        return E_INVALIDARG;
+    }
+
+    if (NS_FAILED(nsres))
+        return E_FAIL;
+    else
+        return S_OK;
+}
+
 static HRESULT WINAPI HTMLElement_insertAdjacentHTML(IHTMLElement *iface, BSTR where,
                                                      BSTR html)
 {
     HTMLElement *This = HTMLELEM_THIS(iface);
-    FIXME("(%p)->(%s %s)\n", This, debugstr_w(where), debugstr_w(html));
-    return E_NOTIMPL;
+    nsresult nsres;
+    nsIDOMDocument *nsdoc;
+    nsIDOMDocumentRange *nsdocrange;
+    nsIDOMRange *range;
+    nsIDOMNSRange *nsrange;
+    nsIDOMNode *nsnode;
+    nsAString ns_html;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %s)\n", This, debugstr_w(where), debugstr_w(html));
+
+    nsres = nsIWebNavigation_GetDocument(This->node->doc->nscontainer->navigation, &nsdoc);
+    if(NS_FAILED(nsres))
+    {
+        ERR("GetDocument failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDOMDocumentRange, (void **)&nsdocrange);
+    nsIDOMDocument_Release(nsdoc);
+    if(NS_FAILED(nsres))
+    {
+        ERR("getting nsIDOMDocumentRange failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+    nsres = nsIDOMDocumentRange_CreateRange(nsdocrange, &range);
+    nsIDOMDocumentRange_Release(nsdocrange);
+    if(NS_FAILED(nsres))
+    {
+        ERR("CreateRange failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsIDOMRange_SetStartBefore(range, (nsIDOMNode *)This->nselem);
+
+    nsIDOMRange_QueryInterface(range, &IID_nsIDOMNSRange, (void **)&nsrange);
+    nsIDOMRange_Release(range);
+    if(NS_FAILED(nsres))
+    {
+        ERR("getting nsIDOMNSRange failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsAString_Init(&ns_html, html);
+
+    nsres = nsIDOMNSRange_CreateContextualFragment(nsrange, &ns_html, (nsIDOMDocumentFragment **)&nsnode);
+    nsIDOMNSRange_Release(nsrange);
+    nsAString_Finish(&ns_html);
+
+    if(NS_FAILED(nsres) || !nsnode)
+    {
+        ERR("CreateTextNode failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    hr = HTMLElement_InsertAdjacentNode(This, where, nsnode);
+    nsIDOMNode_Release(nsnode);
+
+    return hr;
 }
 
 static HRESULT WINAPI HTMLElement_insertAdjacentText(IHTMLElement *iface, BSTR where,
                                                      BSTR text)
 {
     HTMLElement *This = HTMLELEM_THIS(iface);
-    FIXME("(%p)->(%s %s)\n", This, debugstr_w(where), debugstr_w(text));
-    return E_NOTIMPL;
+    nsresult nsres;
+    nsIDOMDocument *nsdoc;
+    nsIDOMNode *nsnode;
+    nsAString ns_text;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %s)\n", This, debugstr_w(where), debugstr_w(text));
+
+    nsres = nsIWebNavigation_GetDocument(This->node->doc->nscontainer->navigation, &nsdoc);
+    if(NS_FAILED(nsres) || !nsdoc)
+    {
+        ERR("GetDocument failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsAString_Init(&ns_text, text);
+
+    nsres = nsIDOMDocument_CreateTextNode(nsdoc, &ns_text, (nsIDOMText **)&nsnode);
+    nsIDOMDocument_Release(nsdoc);
+    nsAString_Finish(&ns_text);
+
+    if(NS_FAILED(nsres) || !nsnode)
+    {
+        ERR("CreateTextNode failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    hr = HTMLElement_InsertAdjacentNode(This, where, nsnode);
+    nsIDOMNode_Release(nsnode);
+
+    return hr;
 }
 
 static HRESULT WINAPI HTMLElement_get_parentTextEdit(IHTMLElement *iface, IHTMLElement **p)
@@ -796,11 +1026,52 @@ static HRESULT WINAPI HTMLElement_get_onfilterchange(IHTMLElement *iface, VARIAN
     return E_NOTIMPL;
 }
 
+static void create_child_list(HTMLDocument *doc, HTMLElement *elem, elem_vector *buf)
+{
+    nsIDOMNodeList *nsnode_list;
+    nsIDOMNode *iter;
+    PRUint32 list_len = 0, i;
+    HTMLDOMNode *node;
+    nsresult nsres;
+
+    nsres = nsIDOMNode_GetChildNodes(elem->node->nsnode, &nsnode_list);
+    if(NS_FAILED(nsres)) {
+        ERR("GetChildNodes failed: %08x\n", nsres);
+        return;
+    }
+
+    nsIDOMNodeList_GetLength(nsnode_list, &list_len);
+    if(!list_len)
+        return;
+
+    buf->size = list_len;
+    buf->buf = mshtml_alloc(buf->size*sizeof(HTMLElement**));
+
+    for(i=0; i<list_len; i++) {
+        nsres = nsIDOMNodeList_Item(nsnode_list, i, &iter);
+        if(NS_FAILED(nsres)) {
+            ERR("Item failed: %08x\n", nsres);
+            continue;
+        }
+
+        node = get_node(doc, iter);
+        if(node->node_type != NT_HTMLELEM)
+            continue;
+
+        elem_vector_add(buf, (HTMLElement*)node->impl.elem);
+    }
+}
+
 static HRESULT WINAPI HTMLElement_get_children(IHTMLElement *iface, IDispatch **p)
 {
     HTMLElement *This = HTMLELEM_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    elem_vector buf = {NULL, 0, 0};
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    create_child_list(This->node->doc, This, &buf);
+
+    return HTMLElementCollection_Create((IUnknown*)HTMLELEM(This), buf.buf, buf.len, p);
 }
 
 static void create_all_list(HTMLDocument *doc, HTMLElement *elem, elem_vector *buf)
@@ -1183,22 +1454,73 @@ static HRESULT WINAPI HTMLElementCollection_item(IHTMLElementCollection *iface,
 {
     HTMLElementCollection *This = ELEMCOL_THIS(iface);
 
-    if(V_VT(&index) != VT_I4) {
-        WARN("Invalid index vt=%d\n", V_VT(&index));
-        return E_INVALIDARG;
+    TRACE("(%p)->(v(%d) v(%d) %p)\n", This, V_VT(&name), V_VT(&index), pdisp);
+
+    if(V_VT(&name) == VT_I4) {
+        TRACE("name is VT_I4: %d\n", V_I4(&name));
+        if(V_I4(&name) < 0 || V_I4(&name) >= This->len) {
+            ERR("Invalid name! name=%d\n", V_I4(&name));
+            return E_INVALIDARG;
+        }
+
+        *pdisp = (IDispatch*)This->elems[V_I4(&name)];
+        IDispatch_AddRef(*pdisp);
+        TRACE("Returning pdisp=%p\n", pdisp);
+        return S_OK;
     }
 
-    if(V_VT(&name) != VT_I4 || V_I4(&name) != V_I4(&index))
-        FIXME("Unsupproted name vt=%d\n", V_VT(&name));
+    if(V_VT(&name) == VT_BSTR) {
+        DWORD i;
+        nsAString tag_str;
+        const PRUnichar *tag;
+        elem_vector buf = {NULL, 0, 8};
 
-    TRACE("(%p)->(%d %d %p)\n", This, V_I4(&name), V_I4(&index), pdisp);
+        TRACE("name is VT_BSTR: %s\n", debugstr_w(V_BSTR(&name)));
 
-    if(V_I4(&index) < 0 || V_I4(&index) >= This->len)
-        return E_INVALIDARG;
+        nsAString_Init(&tag_str, NULL);
+        buf.buf = mshtml_alloc(buf.size*sizeof(HTMLElement*));
 
-    *pdisp = (IDispatch*)This->elems[V_I4(&index)];
-    IDispatch_AddRef(*pdisp);
-    return S_OK;
+        for(i=0; i<This->len; i++) {
+            if(!This->elems[i]->nselem) continue;
+
+            nsIDOMHTMLElement_GetId(This->elems[i]->nselem, &tag_str);
+            nsAString_GetData(&tag_str, &tag, NULL);
+
+            if(CompareStringW(LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE, tag, -1,
+                                V_BSTR(&name), -1) == CSTR_EQUAL) {
+                TRACE("Found name. elem=%d\n", i);
+                if (V_VT(&index) == VT_I4)
+                    if (buf.len == V_I4(&index)) {
+                        nsAString_Finish(&tag_str);
+                        mshtml_free(buf.buf);
+                        buf.buf = NULL;
+                        *pdisp = (IDispatch*)This->elems[i];
+                        TRACE("Returning element %d pdisp=%p\n", i, pdisp);
+                        IDispatch_AddRef(*pdisp);
+                        return S_OK;
+                    }
+                elem_vector_add(&buf, This->elems[i]);
+            }
+        }
+        nsAString_Finish(&tag_str);
+        if (V_VT(&index) == VT_I4) {
+            mshtml_free(buf.buf);
+            buf.buf = NULL;
+            ERR("Invalid index. index=%d >= buf.len=%d\n",V_I4(&index), buf.len);
+            return E_INVALIDARG;
+        }
+        if(!buf.len) {
+            mshtml_free(buf.buf);
+            buf.buf = NULL;
+        } else if(buf.size > buf.len) {
+            buf.buf = mshtml_realloc(buf.buf, buf.len*sizeof(HTMLElement*));
+        }
+        TRACE("Returning %d element(s).\n", buf.len);
+        return HTMLElementCollection_Create(This->ref_unk, buf.buf, buf.len, pdisp);
+    }
+
+    FIXME("unsupported arguments\n");
+    return E_INVALIDARG;
 }
 
 static HRESULT WINAPI HTMLElementCollection_tags(IHTMLElementCollection *iface,

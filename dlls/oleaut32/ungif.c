@@ -65,6 +65,11 @@ static void *ungif_calloc( size_t num, size_t sz )
     return HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, num*sz );
 }
 
+static void *ungif_realloc( void *ptr, size_t sz )
+{
+    return HeapReAlloc( GetProcessHeap(), 0, ptr, sz );
+}
+
 static void ungif_free( void *ptr )
 {
     HeapFree( GetProcessHeap(), 0, ptr );
@@ -102,7 +107,7 @@ typedef struct GifFilePrivateType {
 static int DGifGetWord(GifFileType *GifFile, GifWord *Word);
 static int DGifSetupDecompress(GifFileType *GifFile);
 static int DGifDecompressLine(GifFileType *GifFile, GifPixelType *Line, int LineLen);
-static int DGifGetPrefixChar(GifPrefixType *Prefix, int Code, int ClearCode);
+static int DGifGetPrefixChar(const GifPrefixType *Prefix, int Code, int ClearCode);
 static int DGifDecompressInput(GifFileType *GifFile, int *Code);
 static int DGifBufferedInput(GifFileType *GifFile, GifByteType *Buf,
                              GifByteType *NextByte);
@@ -187,14 +192,14 @@ FreeMapObject(ColorMapObject * Object) {
 static int
 AddExtensionBlock(SavedImage * New,
                   int Len,
-                  unsigned char ExtData[]) {
+                  const unsigned char ExtData[]) {
 
     ExtensionBlock *ep;
 
     if (New->ExtensionBlocks == NULL)
         New->ExtensionBlocks = ungif_alloc(sizeof(ExtensionBlock));
     else
-        New->ExtensionBlocks = realloc(New->ExtensionBlocks,
+        New->ExtensionBlocks = ungif_realloc(New->ExtensionBlocks,
                                       sizeof(ExtensionBlock) *
                                       (New->ExtensionBlockCount + 1));
 
@@ -387,7 +392,7 @@ DGifGetImageDesc(GifFileType * GifFile) {
     }
 
     if (GifFile->SavedImages) {
-        if ((GifFile->SavedImages = realloc(GifFile->SavedImages,
+        if ((GifFile->SavedImages = ungif_realloc(GifFile->SavedImages,
                                       sizeof(SavedImage) *
                                       (GifFile->ImageCount + 1))) == NULL) {
             return GIF_ERROR;
@@ -718,7 +723,7 @@ DGifDecompressLine(GifFileType * GifFile,
  * the maximum possible if image O.k. - LZ_MAX_CODE times.
  *****************************************************************************/
 static int
-DGifGetPrefixChar(GifPrefixType *Prefix,
+DGifGetPrefixChar(const GifPrefixType *Prefix,
                   int Code,
                   int ClearCode) {
 
@@ -742,7 +747,7 @@ DGifDecompressInput(GifFileType * GifFile,
     GifFilePrivateType *Private = (GifFilePrivateType *)GifFile->Private;
 
     GifByteType NextByte;
-    static unsigned short CodeMasks[] = {
+    static const unsigned short CodeMasks[] = {
         0x0000, 0x0001, 0x0003, 0x0007,
         0x000f, 0x001f, 0x003f, 0x007f,
         0x00ff, 0x01ff, 0x03ff, 0x07ff,

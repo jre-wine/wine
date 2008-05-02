@@ -33,7 +33,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "winreg.h"
 
 #include "objbase.h"
 #include "rpc.h"
@@ -122,6 +121,7 @@ static inline unsigned long call_memory_sizer(PMIDL_STUB_MESSAGE pStubMsg, PFORM
 #define STUBLESS_CALCSIZE   3
 #define STUBLESS_GETBUFFER  4
 #define STUBLESS_MARSHAL    5
+#define STUBLESS_FREE       6
 
 /* From http://msdn.microsoft.com/library/default.asp?url=/library/en-us/rpc/rpc/parameter_descriptors.asp */
 typedef struct _NDR_PROC_HEADER
@@ -812,7 +812,7 @@ LONG_PTR WINAPIV NdrClientCall2(PMIDL_STUB_DESC pStubDesc, PFORMAT_STRING pForma
     if (pProcHeader->Oi_flags & RPC_FC_PROC_OIF_OBJECT)
     {
         /* object is always the first argument */
-        This = **(void ***)(&pFormat+1);
+        This = **(void *const **)(&pFormat+1);
         NdrProxyInitialize(This, &rpcMsg, &stubMsg, pStubDesc, procedure_number);
     }
     else
@@ -1024,7 +1024,7 @@ __ASM_GLOBAL_FUNC(call_server_func,
     "pushl %esi\n\t"
     "movl 16(%ebp), %eax\n\t"   /* Get stack size */
     "subl %eax, %esp\n\t"       /* Make room in stack for arguments */
-    "andl $~15, %esp\n\t"	/* Make sure stack has 16-byte alignment for MacOS X */
+    "andl $~15, %esp\n\t"	/* Make sure stack has 16-byte alignment for Mac OS X */
     "movl %esp, %edi\n\t"
     "movl %eax, %ecx\n\t"
     "movl 12(%ebp), %esi\n\t"
@@ -1036,7 +1036,7 @@ __ASM_GLOBAL_FUNC(call_server_func,
     "popl %esi\n\t"             /* Restore registers */
     "popl %edi\n\t"
     "popl %ebp\n\t"
-    "ret\n" );
+    "ret\n" )
 #else
 #warning call_server_func not implemented for your architecture
 LONG_PTR __cdecl call_server_func(SERVER_ROUTINE func, unsigned char * args, unsigned short stack_size)
@@ -1259,7 +1259,7 @@ LONG WINAPI NdrStubCall2(
      * 4. STUBLESS_GETBUFFER - allocate [out] buffer
      * 5. STUBLESS_MARHSAL - marshal [out] params to buffer
      */
-    for (phase = STUBLESS_UNMARSHAL; phase <= STUBLESS_MARSHAL; phase++)
+    for (phase = STUBLESS_UNMARSHAL; phase <= STUBLESS_FREE; phase++)
     {
         TRACE("phase = %d\n", phase);
         switch (phase)
@@ -1317,6 +1317,7 @@ LONG WINAPI NdrStubCall2(
         case STUBLESS_MARSHAL:
         case STUBLESS_UNMARSHAL:
         case STUBLESS_CALCSIZE:
+        case STUBLESS_FREE:
             current_offset = parameter_start_offset;
             current_stack_offset = 0;
 
@@ -1340,10 +1341,6 @@ LONG WINAPI NdrStubCall2(
                     TRACE("\tstack_offset: 0x%x\n", current_stack_offset);
                     TRACE("\tmemory addr (before): %p -> %p\n", pArg, *(unsigned char **)pArg);
 
-                    if (pParam->param_attributes.ServerAllocSize)
-                        FIXME("ServerAllocSize of %d ignored for parameter %d\n",
-                            pParam->param_attributes.ServerAllocSize * 8, i);
-
                     if (pParam->param_attributes.IsBasetype)
                     {
                         const unsigned char *pTypeFormat =
@@ -1361,9 +1358,16 @@ LONG WINAPI NdrStubCall2(
                                 else
                                     call_marshaller(&stubMsg, pArg, pTypeFormat);
                             }
-                            /* FIXME: call call_freer here */
+                            break;
+                        case STUBLESS_FREE:
+                            if (pParam->param_attributes.ServerAllocSize)
+                                HeapFree(GetProcessHeap(), 0, *(void **)pArg);
                             break;
                         case STUBLESS_UNMARSHAL:
+                            if (pParam->param_attributes.ServerAllocSize)
+                                *(void **)pArg = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                    pParam->param_attributes.ServerAllocSize * 8);
+
                             if (pParam->param_attributes.IsIn)
                             {
                                 if (pParam->param_attributes.IsSimpleRef)
@@ -1410,14 +1414,35 @@ LONG WINAPI NdrStubCall2(
                                 if (pParam->param_attributes.IsByValue)
                                     call_marshaller(&stubMsg, pArg, pTypeFormat);
                                 else
-                                {
                                     call_marshaller(&stubMsg, *(unsigned char **)pArg, pTypeFormat);
-                                    stubMsg.pfnFree(*(void **)pArg);
-                                }
                             }
-                            /* FIXME: call call_freer here for IN types */
+                            break;
+                        case STUBLESS_FREE:
+                            if (pParam->param_attributes.MustFree)
+                            {
+                                if (pParam->param_attributes.IsByValue)
+                                    call_freer(&stubMsg, pArg, pTypeFormat);
+                                else
+                                    call_freer(&stubMsg, *(unsigned char **)pArg, pTypeFormat);
+                            }
+
+                            if (pParam->param_attributes.IsOut &&
+                                !pParam->param_attributes.IsIn &&
+                                !pParam->param_attributes.IsByValue &&
+                                !pParam->param_attributes.ServerAllocSize)
+                            {
+                                stubMsg.pfnFree(*(void **)pArg);
+                            }
+
+                            if (pParam->param_attributes.ServerAllocSize)
+                                HeapFree(GetProcessHeap(), 0, *(void **)pArg);
+                            /* FIXME: call call_freer here for IN types with MustFree set */
                             break;
                         case STUBLESS_UNMARSHAL:
+                            if (pParam->param_attributes.ServerAllocSize)
+                                *(void **)pArg = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                                    pParam->param_attributes.ServerAllocSize * 8);
+
                             if (pParam->param_attributes.IsIn)
                             {
                                 if (pParam->param_attributes.IsByValue)
@@ -1426,6 +1451,7 @@ LONG WINAPI NdrStubCall2(
                                     call_unmarshaller(&stubMsg, (unsigned char **)pArg, pTypeFormat, 0);
                             }
                             else if (pParam->param_attributes.IsOut &&
+                                     !pParam->param_attributes.ServerAllocSize &&
                                      !pParam->param_attributes.IsByValue)
                             {
                                 DWORD size = calc_arg_size(&stubMsg, pTypeFormat);
@@ -1486,6 +1512,10 @@ LONG WINAPI NdrStubCall2(
                             if (pParam->param_direction == RPC_FC_RETURN_PARAM_BASETYPE)
                                 call_marshaller(&stubMsg, pArg, pTypeFormat);
                             break;
+                        case STUBLESS_FREE:
+                            if (pParam->param_direction == RPC_FC_IN_PARAM_BASETYPE)
+                                call_freer(&stubMsg, pArg, pTypeFormat);
+                            break;
                         case STUBLESS_UNMARSHAL:
                             if (pParam->param_direction == RPC_FC_IN_PARAM_BASETYPE)
                                 call_unmarshaller(&stubMsg, &pArg, pTypeFormat, 0);
@@ -1520,6 +1550,13 @@ LONG WINAPI NdrStubCall2(
                                 pParam->param_direction == RPC_FC_IN_OUT_PARAM ||
                                 pParam->param_direction == RPC_FC_RETURN_PARAM)
                                 call_marshaller(&stubMsg, *(unsigned char **)pArg, pTypeFormat);
+                            break;
+                        case STUBLESS_FREE:
+                            if (pParam->param_direction == RPC_FC_IN_OUT_PARAM ||
+                                pParam->param_direction == RPC_FC_IN_PARAM)
+                                call_freer(&stubMsg, *(unsigned char **)pArg, pTypeFormat);
+                            else if (pParam->param_direction == RPC_FC_OUT_PARAM)
+                                stubMsg.pfnFree(*(void **)pArg);
                             break;
                         case STUBLESS_UNMARSHAL:
                             if (pParam->param_direction == RPC_FC_IN_OUT_PARAM ||

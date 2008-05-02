@@ -33,7 +33,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wininet.h"
-#include "winerror.h"
 #include "winnls.h"
 
 #include "wine/debug.h"
@@ -50,7 +49,7 @@ time_t ConvertTimeString(LPCWSTR asctime)
     struct tm t;
     int timelen = strlenW(asctime);
 
-    if(!asctime || !timelen)
+    if(!timelen)
         return 0;
 
     /* FIXME: the atoiWs below rely on that tmpChar is \0 padded */
@@ -231,13 +230,25 @@ VOID INTERNET_SendCallback(LPWININETHANDLEHEADER hdr, DWORD dwContext,
         case INTERNET_STATUS_CONNECTING_TO_SERVER:
         case INTERNET_STATUS_CONNECTED_TO_SERVER:
             lpvNewInfo = WININET_strdup_AtoW(lpvStatusInfo);
+            break;
+        case INTERNET_STATUS_RESOLVING_NAME:
+        case INTERNET_STATUS_REDIRECT:
+            lpvNewInfo = WININET_strdupW(lpvStatusInfo);
+            break;
         }
     }else {
         switch(dwInternetStatus)
         {
+        case INTERNET_STATUS_NAME_RESOLVED:
+        case INTERNET_STATUS_CONNECTING_TO_SERVER:
+        case INTERNET_STATUS_CONNECTED_TO_SERVER:
+            lpvNewInfo = HeapAlloc(GetProcessHeap(), 0, strlen(lpvStatusInfo) + 1);
+            if (lpvNewInfo) strcpy(lpvNewInfo, lpvStatusInfo);
+            break;
         case INTERNET_STATUS_RESOLVING_NAME:
         case INTERNET_STATUS_REDIRECT:
             lpvNewInfo = WININET_strdup_WtoA(lpvStatusInfo);
+            break;
         }
     }
     
@@ -254,7 +265,19 @@ VOID INTERNET_SendCallback(LPWININETHANDLEHEADER hdr, DWORD dwContext,
         HeapFree(GetProcessHeap(), 0, lpvNewInfo);
 }
 
+static void SendAsyncCallbackProc(WORKREQUEST *workRequest)
+{
+    struct WORKREQ_SENDCALLBACK const *req = &workRequest->u.SendCallback;
 
+    TRACE("%p\n", workRequest->hdr);
+
+    INTERNET_SendCallback(workRequest->hdr,
+                          req->dwContext, req->dwInternetStatus, req->lpvStatusInfo,
+                          req->dwStatusInfoLength);
+
+    /* And frees the copy of the status info */
+    HeapFree(GetProcessHeap(), 0, req->lpvStatusInfo);
+}
 
 VOID SendAsyncCallback(LPWININETHANDLEHEADER hdr, DWORD dwContext,
                        DWORD dwInternetStatus, LPVOID lpvStatusInfo,
@@ -281,7 +304,7 @@ VOID SendAsyncCallback(LPWININETHANDLEHEADER hdr, DWORD dwContext,
 	    memcpy(lpvStatusInfo_copy, lpvStatusInfo, dwStatusInfoLength);
 	}
 
-	workRequest.asyncall = SENDCALLBACK;
+	workRequest.asyncproc = SendAsyncCallbackProc;
 	workRequest.hdr = WININET_AddRef( hdr );
 	req = &workRequest.u.SendCallback;
 	req->dwContext = dwContext;

@@ -74,14 +74,20 @@ typedef struct {
 
     IDispatch *disp;
 
+    IDispatch *client_disp;
+    IDocHostUIHandler *hostui;
+    IOleInPlaceFrame *frame;
+
     IUnknown *document;
     IOleDocumentView *view;
-    IDocHostUIHandler *hostui;
 
     HWND hwnd;
     HWND frame_hwnd;
 
     LPOLESTR url;
+
+    VARIANT_BOOL silent;
+    VARIANT_BOOL offline;
 
     ConnectionPointContainer cps;
 } DocHost;
@@ -112,7 +118,6 @@ struct WebBrowser {
     /* window context */
 
     HWND frame_hwnd;
-    IOleInPlaceFrame *frame;
     IOleInPlaceUIWindow *uiwindow;
     RECT pos_rect;
     RECT clip_rect;
@@ -126,8 +131,6 @@ struct WebBrowser {
     VARIANT_BOOL address_bar;
     VARIANT_BOOL status_bar;
     VARIANT_BOOL tool_bar;
-    VARIANT_BOOL silent;
-    VARIANT_BOOL offline;
 
     DocHost doc_host;
 };

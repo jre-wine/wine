@@ -425,12 +425,11 @@ sub _generate_dsp($$) {
     my @header_files = @{$modules{$module}{header_files}};
     my @resource_files = @{$modules{$module}{resource_files}};
 
-    if ($project !~ /^wine(?:_unicode|build|runtests|test)?$/ &&
+    if ($project !~ /^wine(?:build|runtests|test)?$/ &&
         $project !~ /^(?:gdi32)_.+?$/ &&
         $project !~ /_test$/)
     {
 	push @source_files, "$project.spec";
-	# push @source_files, "$project.spec.c";
 	@source_files = sort(@source_files);
     }
 
@@ -519,6 +518,7 @@ sub _generate_dsp($$) {
     print OUT "CPP=cl.exe\r\n";
     print OUT "MTL=midl.exe\r\n" if !$lib && !$exe;
     print OUT "RSC=rc.exe\r\n";
+    print OUT "\r\n";
 
     my $n = 0;
 
@@ -577,7 +577,7 @@ sub _generate_dsp($$) {
 		print OUT "# ADD BASE CPP /nologo /W3 /Gm /GX /Zi /Od";
 		@defines = (qw(WINVER=0x0501 _WIN32_WINNT=0x0501 _WIN32_IE=0x0600 WIN32 _DEBUG _MBCS _LIB));
 	    } else {
-		print OUT "# ADD BASE CPP /nologo /MTd /W3 /Gm /GX /Zi /Od";
+		print OUT "# ADD BASE CPP /nologo /MDd /W3 /Gm /GX /Zi /Od";
 		@defines = (qw(WINVER=0x0501 _WIN32_WINNT=0x0501 _WIN32_IE=0x0600 WIN32 _DEBUG _WINDOWS _MBCS _USRDLL), ("\U${project}\E_EXPORTS"));
 	    }
 	} else {
@@ -585,36 +585,39 @@ sub _generate_dsp($$) {
 		print OUT "# ADD BASE CPP /nologo /W3 /GX /O2";
 		@defines = (qw(WINVER=0x0501 _WIN32_WINNT=0x0501 _WIN32_IE=0x0600 WIN32 NDEBUG _MBCS _LIB));
 	    } else {
-		print OUT "# ADD BASE CPP /nologo /MT /W3 /GX /O2";
+		print OUT "# ADD BASE CPP /nologo /MD /W3 /GX /O2";
 		@defines = (qw(WINVER=0x0501 _WIN32_WINNT=0x0501 _WIN32_IE=0x0600 WIN32 NDEBUG _WINDOWS _MBCS _USRDLL), ("\U${project}\E_EXPORTS"));
 	    }
 	}
 
 	foreach my $define (@defines) {
-	    print OUT " /D \"$define\"";
+	    if ($define !~ /=/) {
+		print OUT " /D \"$define\"";
+	    } else {
+		print OUT " /D $define";
+	    }
 	}
 	print OUT " /YX" if $lib || $exe;
 	print OUT " /FD";
 	print OUT " /GZ" if $debug;
-	print OUT " " if $debug && ($lib || $exe);
 	print OUT " /c";
 	print OUT "\r\n";
 
 	my @defines2;
 	if($debug) {
 	    if($lib) {
-		print OUT "# ADD CPP /nologo /MTd /W3 /Gm /GX /Zi /Od";
+		print OUT "# ADD CPP /nologo /MDd /W3 /Gm /GX /Zi /Od";
 		@defines2 = qw(WINVER=0x0501 _WIN32_WINNT=0x0501 _WIN32_IE=0x0600 WIN32 _DEBUG _WINDOWS _MBCS _LIB);
 	    } else {
-		print OUT "# ADD CPP /nologo /MTd /W3 /Gm /GX /Zi /Od";
+		print OUT "# ADD CPP /nologo /MDd /W3 /Gm /GX /Zi /Od";
 		@defines2 = qw(WINVER=0x0501 _WIN32_WINNT=0x0501 _WIN32_IE=0x0600 _DEBUG WIN32 _WINDOWS _MBCS _USRDLL);
 	    }
 	} else {
 	    if($lib) {
-		print OUT "# ADD CPP /nologo /MT /W3 /GX /O2";
+		print OUT "# ADD CPP /nologo /MD /W3 /GX /O2";
 		@defines2 = qw(WINVER=0x0501 _WIN32_WINNT=0x0501 _WIN32_IE=0x0600 WIN32 NDEBUG _WINDOWS _MBCS _LIB);
 	    } else {
-		print OUT "# ADD CPP /nologo /MT /W3 /GX /O2";
+		print OUT "# ADD CPP /nologo /MD /W3 /GX /O2";
 		@defines2 = qw(WINVER=0x0501 _WIN32_WINNT=0x0501 _WIN32_IE=0x0600 NDEBUG WIN32 _WINDOWS _MBCS _USRDLL);
 	    }
 	}
@@ -627,13 +630,9 @@ sub _generate_dsp($$) {
 	    	push @defines2, qw(__WINE_USE_NATIVE_HEADERS);
 	    }
 	    my $output_dir2 = $output_dir;
-	    $output_dir =~ s/\\/\\\\/g;
-	    push @defines2, "__WINETEST_OUTPUT_DIR=\\\"$output_dir\\\"";
+	    $output_dir2 =~ s/\\/\\\\/g;
+	    push @defines2, "__WINETEST_OUTPUT_DIR=\\\"$output_dir2\\\"";
 	    push @defines2, qw(__i386__ _X86_);
-
-	    if($project eq "msvcrt_test") {
-		push @includes, "..";
-	    }
 
 	    if ($project =~ /_test$/) {
 		push @includes, "$msvc_wine_dir\\$output_dir";
@@ -651,7 +650,7 @@ sub _generate_dsp($$) {
 	}
 
 	foreach my $define (@defines2) {
-	    if ($define !~ /[\\\"]/) {
+	    if ($define !~ /=/) {
 		print OUT " /D \"$define\"";
 	    } else {
 		print OUT " /D $define";
@@ -664,7 +663,6 @@ sub _generate_dsp($$) {
 	print OUT " /FR" if !$lib;
 	print OUT " /FD";
 	print OUT " /GZ" if $debug;
-	print OUT " " if $debug && $lib;
 	print OUT " /c";
 	print OUT " /TP" if !$no_cpp;
 	print OUT "\r\n";
@@ -700,12 +698,12 @@ sub _generate_dsp($$) {
 
 	if($exe || $dll) {
 	    print OUT "LINK32=link.exe\r\n";
-	    print OUT "# ADD BASE LINK32 ";
+	    print OUT "# ADD BASE LINK32";
 	    my @libraries = qw(kernel32.lib user32.lib gdi32.lib winspool.lib
 			       comdlg32.lib advapi32.lib shell32.lib ole32.lib
 			       oleaut32.lib uuid.lib odbc32.lib odbccp32.lib);
 	    foreach my $library (@libraries) {
-		print OUT "$library ";
+		print OUT " $library";
 	    }
 	    print OUT " /nologo";
 	    print OUT " /dll" if $dll;
@@ -716,11 +714,11 @@ sub _generate_dsp($$) {
 	    print OUT "\r\n";
 
 	    print OUT "# ADD LINK32";
-	    print OUT " /nologo";
 	    print OUT " libcmt.lib" if $project =~ /^ntdll$/; # FIXME: Kludge
 	    foreach my $import (@imports) {
 		print OUT " $import.lib" if ($import ne "msvcrt");
 	    }
+	    print OUT " /nologo";
 	    print OUT " /dll" if $dll;
             print OUT " /subsystem:console" if $console;
 	    print OUT " /debug" if $debug;
@@ -747,10 +745,9 @@ sub _generate_dsp($$) {
     if ($project eq "winebuild") {
 	print OUT "# Begin Special Build Tool\r\n";
 	print OUT "SOURCE=\"\$(InputPath)\"\r\n";
-        print OUT "PostBuild_Desc=Copying wine.lib and wine_unicode.lib ...\r\n";
+        print OUT "PostBuild_Desc=Copying wine.lib ...\r\n";
 	print OUT "PostBuild_Cmds=";
-	print OUT "copy ..\\..\\libs\\wine\\$output_dir\\wine.lib \$(OutDir)\t";
-	print OUT "copy ..\\..\\libs\\unicode\\$output_dir\\wine_unicode.lib \$(OutDir)\r\n";
+	print OUT "copy ..\\..\\libs\\wine\\$output_dir\\wine.lib \$(OutDir)\r\n";
 	print OUT "# End Special Build Tool\r\n";
     }
     print OUT "# Begin Target\r\n";
@@ -979,14 +976,14 @@ sub _generate_wine_dsw($) {
 	my $dsp_file = $modules{$module}{dsp_file};
 
 	my @dependencies;
-	if($project =~ /^wine(?:_unicode)?$/) {
+	if($project eq "wine") {
 	    @dependencies = ();
-	} elsif($project =~ /^winebuild$/) {
-	    @dependencies = ("wine", "wine_unicode");
+	} elsif($project eq "winebuild") {
+	    @dependencies = ("wine");
 	} elsif($project =~ /^(?:gdi32)_.+?$/) {
 	    @dependencies = ();
 	} else {
-	    @dependencies = ("wine", "wine_unicode", "winebuild");
+	    @dependencies = ("wine", "winebuild");
 	}
 
         if($project =~ /^gdi32$/) {

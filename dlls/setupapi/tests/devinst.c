@@ -39,14 +39,11 @@ static HKEY     (WINAPI *pSetupDiOpenClassRegKeyExA)(GUID*,REGSAM,DWORD,PCSTR,PV
 
 static void init_function_pointers(void)
 {
-    hSetupAPI = LoadLibraryA("setupapi.dll");
+    hSetupAPI = GetModuleHandleA("setupapi.dll");
 
-    if (hSetupAPI)
-    {
-        pSetupDiCreateDeviceInfoListExW = (void *)GetProcAddress(hSetupAPI, "SetupDiCreateDeviceInfoListExW");
-        pSetupDiDestroyDeviceInfoList = (void *)GetProcAddress(hSetupAPI, "SetupDiDestroyDeviceInfoList");
-        pSetupDiOpenClassRegKeyExA = (void *)GetProcAddress(hSetupAPI, "SetupDiOpenClassRegKeyExA");
-    }
+    pSetupDiCreateDeviceInfoListExW = (void *)GetProcAddress(hSetupAPI, "SetupDiCreateDeviceInfoListExW");
+    pSetupDiDestroyDeviceInfoList = (void *)GetProcAddress(hSetupAPI, "SetupDiDestroyDeviceInfoList");
+    pSetupDiOpenClassRegKeyExA = (void *)GetProcAddress(hSetupAPI, "SetupDiOpenClassRegKeyExA");
 }
 
 static void test_SetupDiCreateDeviceInfoListEx(void) 
@@ -62,6 +59,11 @@ static void test_SetupDiCreateDeviceInfoListEx(void)
     devlist = pSetupDiCreateDeviceInfoListExW(NULL, NULL, NULL, notnull);
 
     error = GetLastError();
+    if (error == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        skip("SetupDiCreateDeviceInfoListExW is not implemented\n");
+        return;
+    }
     ok(devlist == INVALID_HANDLE_VALUE, "SetupDiCreateDeviceInfoListExW failed : %p %d (expected %p)\n", devlist, error, INVALID_HANDLE_VALUE);
     ok(error == ERROR_INVALID_PARAMETER, "GetLastError returned wrong value : %d, (expected %d)\n", error, ERROR_INVALID_PARAMETER);
 
@@ -124,8 +126,6 @@ static void test_SetupDiOpenClassRegKeyExA(void)
 START_TEST(devinst)
 {
     init_function_pointers();
-    if (!hSetupAPI)
-        return;
 
     if (pSetupDiCreateDeviceInfoListExW && pSetupDiDestroyDeviceInfoList)
         test_SetupDiCreateDeviceInfoListEx();

@@ -60,30 +60,33 @@ IDD_GRAPHCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Vinduinnstillinger ",IDC_STATIC,8,25,244,180
+    GROUPBOX        " Vinduinnstillinger ",IDC_STATIC,8,5,244,180
 
-    CONTROL	    "Tillat DirectX-programmer å hindre musen fra å forlate vinduet",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,35,230,8
-    CONTROL	    "Aktiver dobbelt hurtigminne for skrivebordet",IDC_DOUBLE_BUFFER,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,45,230,8
+    CONTROL	    "Tillat DirectX-programmer å hindre musen fra å forlate vinduet",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,15,230,8
     LTEXT 	    "Hvis vinduer kontrolleres av din standardvindusbehandler, får de vanlige rammer, og respekterer det virtuelle skrivebordet ditt og vises i vinduslisten.\n\nHvis de er ukontrollerte er de koblet fra vindusbehandleren. Dette betyr at de ikke integreres like godt med skrivebordet ditt, men emuleringen blir mer presis sånn at noen programmer virker bedre.",
-    		    IDC_STATIC,15,58,228,80
-    CONTROL	    "Tillat vindusbehandleren å kontrollere vinduene",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,132,230,8
+		    IDC_STATIC,15,38,228,80
+    CONTROL	    "Tillat vindusbehandleren å kontrollere vinduene",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,112,230,8
     
     LTEXT           "Du kan velge å emulere et Windows-skrivebord, der alle vinduene er bundet i en virtuell skjerm, eller du kan få vinduene til å oppføre seg som andre programmer på skrivebordet.",
-                    IDC_STATIC,15,146,228,28
-    LTEXT           "Skrivebordsstrrelse:",IDC_DESKTOP_SIZE,15,188,44,8,WS_DISABLED
-    LTEXT           "X",IDC_DESKTOP_BY,108,188,8,8,WS_DISABLED
+                    IDC_STATIC,15,126,228,28
+    LTEXT           "Skrivebordsstrrelse:",IDC_DESKTOP_SIZE,15,168,44,8,WS_DISABLED
+    LTEXT           "X",IDC_DESKTOP_BY,108,168,8,8,WS_DISABLED
     CONTROL         "Emuler et virtuelt skrivebord",IDC_ENABLE_DESKTOP,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,15,173,230,10
+                    BS_AUTOCHECKBOX | WS_TABSTOP,15,153,230,10
 		    
-    EDITTEXT        IDC_DESKTOP_WIDTH,64,188,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_HEIGHT,117,188,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
+    EDITTEXT        IDC_DESKTOP_WIDTH,64,168,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
+    EDITTEXT        IDC_DESKTOP_HEIGHT,117,168,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
 
-    GROUPBOX        " Direct3D ",IDC_STATIC,8,210,244,50
+    GROUPBOX        " Direct3D ",IDC_STATIC,8,190,244,50
 
-    LTEXT	    "Verteks-skyggelegging: ",IDC_STATIC,15,220,80,30
-    COMBOBOX	    IDC_D3D_VSHADER_MODE,100,218,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT	    "Verteks-skyggelegging: ",IDC_STATIC,15,200,80,30
+    COMBOBOX	    IDC_D3D_VSHADER_MODE,100,198,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 
-    CONTROL         "Tillat piksel-skyggelegger (hvis maskinvaren støtter det)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,237,230,10
+    CONTROL         "Tillat piksel-skyggelegger (hvis maskinvaren støtter det)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,217,230,10
+    GROUPBOX        " Screen Resolution ",IDC_STATIC,8,242,244,25
+    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
+    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT           "dpi",IDC_STATIC,235,252,10,8
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -177,15 +180,23 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Appearance ",IDC_STATIC,8,4,244,106
-    LTEXT           "Tema:",IDC_STATIC,15,16,230,8
-    COMBOBOX        IDC_THEME_THEMECOMBO,15,24,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON      "Installer tema . . .",IDC_THEME_INSTALL,152,38,93,14
-    LTEXT           "Farge:",IDC_THEME_COLORTEXT,15,54,230,8
-    COMBOBOX        IDC_THEME_COLORCOMBO,15,62,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Størrelse:",IDC_THEME_SIZETEXT,15,80,230,8
-    COMBOBOX        IDC_THEME_SIZECOMBO,15,88,230,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Tema:",IDC_STATIC,15,16,130,8
+    COMBOBOX        IDC_THEME_THEMECOMBO,15,24,130,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON      "Installer tema . . .",IDC_THEME_INSTALL,152,23,93,14
+    LTEXT           "Farge:",IDC_THEME_COLORTEXT,15,40,112,8
+    COMBOBOX        IDC_THEME_COLORCOMBO,15,48,112,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Størrelse:",IDC_THEME_SIZETEXT,135,40,110,8
+    COMBOBOX        IDC_THEME_SIZECOMBO,135,48,110,14,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Element:",IDC_STATIC,15,64,112,8
+    COMBOBOX        IDC_SYSPARAM_COMBO,15,74,112,120,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP | CBS_SORT
+    LTEXT           "Farge:",IDC_SYSPARAM_COLOR_TEXT,135,64,25,8,WS_DISABLED
+    PUSHBUTTON      "",IDC_SYSPARAM_COLOR,135,74,25,13,WS_DISABLED | BS_OWNERDRAW
+    LTEXT           "Størrelse:",IDC_SYSPARAM_SIZE_TEXT,166,64,30,8,WS_DISABLED
+    EDITTEXT        IDC_SYSPARAM_SIZE,166,74,23,13,ES_AUTOHSCROLL | WS_TABSTOP | WS_DISABLED
+    CONTROL         "",IDC_SYSPARAM_SIZE_UD,UPDOWN_CLASS,UDS_SETBUDDYINT | WS_DISABLED,187,74,15,13
+    PUSHBUTTON      "Skrift",IDC_SYSPARAM_FONT,208,74,37,13,WS_DISABLED
     GROUPBOX        " Skallkatalog ",IDC_STATIC,8,114,244,100
-    CONTROL         "Listview",IDC_LIST_SFPATHS,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
+    CONTROL         "Listevisning",IDC_LIST_SFPATHS,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                      LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,126,230,64
     CONTROL         "Pek til:",IDC_LINK_SFPATH,"Button",BS_AUTOCHECKBOX|WS_TABSTOP|WS_DISABLED,15,195,50,13
     EDITTEXT         IDC_EDIT_SFPATH,65,195,145,13,ES_AUTOHSCROLL|WS_TABSTOP|WS_DISABLED
@@ -234,7 +245,6 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_SHADER_MODE_HARDWARE    "Maskinvare"
     IDS_SHADER_MODE_NONE        "Ingen"
-    IDS_SHADER_MODE_EMULATION   "Emulering"
 END
 
 STRINGTABLE DISCARDABLE
@@ -259,7 +269,6 @@ BEGIN
     IDS_ACCEL_BASIC             "Grunnleggende"
     IDS_ACCEL_EMULATION         "Emulering"
     IDS_DRIVER_ALSA             "ALSA-driver"
-    IDS_DRIVER_ARTS             "aRts-driver"
     IDS_DRIVER_ESOUND           "EsounD-driver"
     IDS_DRIVER_OSS              "OSS-driver"
     IDS_DRIVER_JACK             "JACK-driver"
@@ -276,4 +285,25 @@ BEGIN
     IDS_DEVICES_MIXER           "Mikserenheter"
     IDS_UNAVAILABLE_DRIVER      "Fant driver i registeret som ikke er tilgjengelig.\n\nFjerne «%s» fra registeret?"
     IDS_WARNING                 "Advarsel"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    IDC_SYSPARAMS_BUTTON            "Styrer bakgrunnen"
+    IDC_SYSPARAMS_BUTTON_TEXT       "Styrer tekst"
+    IDC_SYSPARAMS_DESKTOP           "Skrivebord"
+    IDC_SYSPARAMS_MENU              "Menybakgrunn"
+    IDC_SYSPARAMS_MENU_TEXT         "Menytekst"
+    IDC_SYSPARAMS_SCROLLBAR         "Rullefelt"
+    IDC_SYSPARAMS_SELECTION         "Bakgrunn for merking"
+    IDC_SYSPARAMS_SELECTION_TEXT    "Merket tekst"
+    IDC_SYSPARAMS_TOOLTIP           "Bakgrunn for verktøytips"
+    IDC_SYSPARAMS_TOOLTIP_TEXT      "Tekst i verktøytips"
+    IDC_SYSPARAMS_WINDOW            "Vindubakgrunn"
+    IDC_SYSPARAMS_WINDOW_TEXT       "Vinduteksts"
+    IDC_SYSPARAMS_ACTIVE_TITLE      "Aktiv tittellinje"
+    IDC_SYSPARAMS_ACTIVE_TITLE_TEXT "Aktiv titteltekst"
+    IDC_SYSPARAMS_INACTIVE_TITLE    "Inaktiv tittellinje"
+    IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "Inaktiv titteltekst"
+    IDC_SYSPARAMS_MSGBOX_TEXT       "Message Box Text"
 END

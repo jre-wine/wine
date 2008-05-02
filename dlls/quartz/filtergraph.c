@@ -72,21 +72,24 @@ static int EventsQueue_Init(EventsQueue* omr)
     omr->msg_tosave = 0;
     omr->msg_event = CreateEventW(NULL, TRUE, FALSE, NULL);
     omr->ring_buffer_size = EVENTS_RING_BUFFER_INCREMENT;
-    omr->messages = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,omr->ring_buffer_size * sizeof(Event));
+    omr->messages = CoTaskMemAlloc(omr->ring_buffer_size * sizeof(Event));
+    ZeroMemory(omr->messages, omr->ring_buffer_size * sizeof(Event));
 
     InitializeCriticalSection(&omr->msg_crst);
+    omr->msg_crst.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": EventsQueue.msg_crst");
     return TRUE;
 }
 
 static int EventsQueue_Destroy(EventsQueue* omr)
 {
     CloseHandle(omr->msg_event);
-    HeapFree(GetProcessHeap(),0,omr->messages);
+    CoTaskMemFree(omr->messages);
+    omr->msg_crst.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&omr->msg_crst);
     return TRUE;
 }
 
-static int EventsQueue_PutEvent(EventsQueue* omr, Event* evt)
+static int EventsQueue_PutEvent(EventsQueue* omr, const Event* evt)
 {
     EnterCriticalSection(&omr->msg_crst);
     if ((omr->msg_toget == ((omr->msg_tosave + 1) % omr->ring_buffer_size)))
@@ -157,6 +160,7 @@ typedef struct _IFilterGraphImpl {
     const IMediaFilterVtbl *IMediaFilter_vtbl;
     const IMediaEventSinkVtbl *IMediaEventSink_vtbl;
     const IGraphConfigVtbl *IGraphConfig_vtbl;
+    const IMediaPositionVtbl *IMediaPosition_vtbl;
     /* IAMGraphStreams */
     /* IAMStats */
     /* IBasicVideo2 */
@@ -164,7 +168,6 @@ typedef struct _IFilterGraphImpl {
     /* IFilterGraph2 */
     /* IFilterMapper2 */
     /* IGraphVersion */
-    /* IMediaPosition */
     /* IQueueCommand */
     /* IRegisterServiceProvider */
     /* IResourceMananger */
@@ -178,6 +181,7 @@ typedef struct _IFilterGraphImpl {
     int nFilters;
     int filterCapacity;
     long nameIndex;
+    IReferenceClock *refClock;
     EventsQueue evqueue;
     HANDLE hEventCompletion;
     int CompletionStatus;
@@ -186,6 +190,7 @@ typedef struct _IFilterGraphImpl {
     int EcCompleteCount;
     int HandleEcComplete;
     int HandleEcRepaint;
+    int HandleEcClockChanged;
     OAFilterState state;
     CRITICAL_SECTION cs;
     ITF_CACHE_ENTRY ItfCacheEntries[MAX_ITF_CACHE_ENTRIES];
@@ -232,6 +237,9 @@ static HRESULT Filtergraph_QueryInterface(IFilterGraphImpl *This,
     } else if (IsEqualGUID(&IID_IGraphConfig, riid)) {
         *ppvObj = &(This->IGraphConfig_vtbl);
         TRACE("   returning IGraphConfig interface (%p)\n", *ppvObj);
+    } else if (IsEqualGUID(&IID_IMediaPosition, riid)) {
+        *ppvObj = &(This->IMediaPosition_vtbl);
+        TRACE("   returning IMediaPosition interface (%p)\n", *ppvObj);
     } else {
         *ppvObj = NULL;
 	FIXME("unknown interface %s\n", debugstr_guid(riid));
@@ -257,17 +265,28 @@ static ULONG Filtergraph_Release(IFilterGraphImpl *This) {
     
     if (ref == 0) {
         int i;
+
+        if (This->refClock)
+            IReferenceClock_Release(This->refClock);
+
         for (i = 0; i < This->nFilters; i++)
+        {
+            IBaseFilter_SetSyncSource(This->ppFiltersInGraph[i], NULL);
             IBaseFilter_Release(This->ppFiltersInGraph[i]);
+        }
         for (i = 0; i < This->nItfCacheEntries; i++)
-            IUnknown_Release(This->ItfCacheEntries[i].iface);
+        {
+            if (This->ItfCacheEntries[i].iface)
+                IUnknown_Release(This->ItfCacheEntries[i].iface);
+        }
 	IFilterMapper2_Release(This->pFilterMapper2);
 	CloseHandle(This->hEventCompletion);
 	EventsQueue_Destroy(&This->evqueue);
+        This->cs.DebugInfo->Spare[0] = 0;
 	DeleteCriticalSection(&This->cs);
-	HeapFree(GetProcessHeap(), 0, This->ppFiltersInGraph);
-	HeapFree(GetProcessHeap(), 0, This->pFilterNames);
-	HeapFree(GetProcessHeap(), 0, This);
+	CoTaskMemFree(This->ppFiltersInGraph);
+	CoTaskMemFree(This->pFilterNames);
+	CoTaskMemFree(This);
     }
     return ref;
 }
@@ -308,11 +327,11 @@ static HRESULT WINAPI GraphBuilder_AddFilter(IGraphBuilder *iface,
     int i,j;
     WCHAR* wszFilterName = NULL;
     int duplicate_name = FALSE;
-    
+
     TRACE("(%p/%p)->(%p, %s (%p))\n", This, iface, pFilter, debugstr_w(pName), pName);
 
-    wszFilterName = (WCHAR*) CoTaskMemAlloc( (pName ? strlenW(pName) + 6 : 5) * sizeof(WCHAR) );
-    
+    wszFilterName = CoTaskMemAlloc( (pName ? strlenW(pName) + 6 : 5) * sizeof(WCHAR) );
+
     if (pName)
     {
 	/* Check if name already exists */
@@ -385,6 +404,7 @@ static HRESULT WINAPI GraphBuilder_AddFilter(IGraphBuilder *iface,
         This->ppFiltersInGraph[This->nFilters] = pFilter;
         This->pFilterNames[This->nFilters] = wszFilterName;
         This->nFilters++;
+        IBaseFilter_SetSyncSource(pFilter, This->refClock);
     }
     else
 	CoTaskMemFree(wszFilterName);
@@ -409,11 +429,22 @@ static HRESULT WINAPI GraphBuilder_RemoveFilter(IGraphBuilder *iface,
     {
         if (This->ppFiltersInGraph[i] == pFilter)
         {
-            /* FIXME: disconnect pins */
+            IEnumPins *penumpins;
+            hr = IBaseFilter_EnumPins(pFilter, &penumpins);
+            if (SUCCEEDED(hr)) {
+                IPin *ppin;
+                while(IEnumPins_Next(penumpins, 1, &ppin, NULL) == S_OK) {
+                    IPin_Disconnect(ppin);
+                    IPin_Release(ppin);
+                }
+                IEnumPins_Release(penumpins);
+            }
+
             hr = IBaseFilter_JoinFilterGraph(pFilter, NULL, This->pFilterNames[i]);
             if (SUCCEEDED(hr))
             {
-                IPin_Release(pFilter);
+                IBaseFilter_SetSyncSource(pFilter, NULL);
+                IBaseFilter_Release(pFilter);
                 CoTaskMemFree(This->pFilterNames[i]);
                 memmove(This->ppFiltersInGraph+i, This->ppFiltersInGraph+i+1, sizeof(IBaseFilter*)*(This->nFilters - 1 - i));
                 memmove(This->pFilterNames+i, This->pFilterNames+i+1, sizeof(LPWSTR)*(This->nFilters - 1 - i));
@@ -633,12 +664,12 @@ static HRESULT GetInternalConnections(IBaseFilter* pfilter, IPin* pinputpin, IPi
             else
                 IPin_Release(ppin);
         }
+        IEnumPins_Release(penumpins);
         nb = i;
         if (FAILED(hr)) {
             ERR("Next failed (%x)\n", hr);
             return hr;
         }
-        IEnumPins_Release(penumpins);
     } else if (FAILED(hr)) {
         ERR("Cannot get internal connection (%x)\n", hr);
         return hr;
@@ -697,10 +728,9 @@ static HRESULT WINAPI GraphBuilder_Connect(IGraphBuilder *iface,
        return hr;
 
     hr = IBaseFilter_GetClassID(PinInfo.pFilter, &FilterCLSID);
+    IBaseFilter_Release(PinInfo.pFilter);
     if (FAILED(hr))
        return hr;
-
-    IBaseFilter_Release(PinInfo.pFilter);
 
     /* Find the appropriate transform filter than can transform the minor media type of output pin of the upstream 
      * filter to the minor mediatype of input pin of the renderer */
@@ -758,7 +788,7 @@ static HRESULT WINAPI GraphBuilder_Connect(IGraphBuilder *iface,
             goto error;
         }
 
-        hr = IGraphBuilder_AddFilter(iface, pfilter, NULL);
+        hr = IGraphBuilder_AddFilter(iface, pfilter, V_UNION(&var, bstrVal));
         if (FAILED(hr)) {
             ERR("Unable to add filter (%x)\n", hr);
             IBaseFilter_Release(pfilter);
@@ -773,6 +803,8 @@ static HRESULT WINAPI GraphBuilder_Connect(IGraphBuilder *iface,
         }
 
         hr = IEnumPins_Next(penumpins, 1, &ppinfilter, &pin);
+        IEnumPins_Release(penumpins);
+
         if (FAILED(hr)) {
             ERR("Next (%x)\n", hr);
             goto error;
@@ -781,7 +813,6 @@ static HRESULT WINAPI GraphBuilder_Connect(IGraphBuilder *iface,
             ERR("No Pin\n");
             goto error;
         }
-        IEnumPins_Release(penumpins);
 
         hr = IPin_Connect(ppinOut, ppinfilter, NULL);
         if (FAILED(hr)) {
@@ -795,6 +826,10 @@ static HRESULT WINAPI GraphBuilder_Connect(IGraphBuilder *iface,
 
         if (SUCCEEDED(hr)) {
             int i;
+            if (nb == 0) {
+                IPin_Disconnect(ppinOut);
+                goto error;
+            }
             TRACE("pins to consider: %d\n", nb);
             for(i = 0; i < nb; i++) {
                 TRACE("Processing pin %d\n", i);
@@ -807,8 +842,8 @@ static HRESULT WINAPI GraphBuilder_Connect(IGraphBuilder *iface,
             }
             while (++i < nb) IPin_Release(ppins[i]);
             CoTaskMemFree(ppins);
-            IBaseFilter_Release(pfilter);
             IPin_Release(ppinfilter);
+            IBaseFilter_Release(pfilter);
             break;
         }
 
@@ -902,9 +937,10 @@ static HRESULT WINAPI GraphBuilder_Render(IGraphBuilder *iface,
                goto error;
             }
 
-            hr = IGraphBuilder_AddFilter(iface, pfilter, NULL);
+            hr = IGraphBuilder_AddFilter(iface, pfilter, V_UNION(&var, bstrVal));
             if (FAILED(hr)) {
                 ERR("Unable to add filter (%x)\n", hr);
+                IBaseFilter_Release(pfilter);
                 pfilter = NULL;
                 goto error;
             }
@@ -915,6 +951,7 @@ static HRESULT WINAPI GraphBuilder_Render(IGraphBuilder *iface,
                 goto error;
             }
             hr = IEnumPins_Next(penumpins, 1, &ppinfilter, &pin);
+            IEnumPins_Release(penumpins);
             if (FAILED(hr)) {
                ERR("Next (%x)\n", hr);
                goto error;
@@ -923,14 +960,17 @@ static HRESULT WINAPI GraphBuilder_Render(IGraphBuilder *iface,
                ERR("No Pin\n");
                goto error;
             }
-            IEnumPins_Release(penumpins);
 
 	    /* Connect the pin to render to the renderer */
             hr = IGraphBuilder_Connect(iface, ppinOut, ppinfilter);
             if (FAILED(hr)) {
                 TRACE("Unable to connect to renderer (%x)\n", hr);
+                IPin_Release(ppinfilter);
                 goto error;
             }
+            IPin_Release(ppinfilter);
+            IBaseFilter_Release(pfilter);
+            pfilter = NULL;
             break;
 
 error:
@@ -955,15 +995,15 @@ static HRESULT WINAPI GraphBuilder_RenderFile(IGraphBuilder *iface,
     ICOM_THIS_MULTI(IFilterGraphImpl, IGraphBuilder_vtbl, iface);
     static const WCHAR string[] = {'R','e','a','d','e','r',0};
     IBaseFilter* preader = NULL;
-    IBaseFilter* psplitter;
-    IPin* ppinreader;
-    IPin* ppinsplitter;
+    IBaseFilter* psplitter = NULL;
+    IPin* ppinreader = NULL;
+    IPin* ppinsplitter = NULL;
     IEnumPins* penumpins;
     ULONG pin;
     HRESULT hr;
-    IEnumMoniker* pEnumMoniker;
+    IEnumMoniker* pEnumMoniker = NULL;
     GUID tab[2];
-    IPin** ppins;
+    IPin** ppins = NULL;
     ULONG nb;
     IMoniker* pMoniker;
     IFileSourceFilter* pfile = NULL;
@@ -971,6 +1011,9 @@ static HRESULT WINAPI GraphBuilder_RenderFile(IGraphBuilder *iface,
     WCHAR* filename;
 
     TRACE("(%p/%p)->(%s, %s)\n", This, iface, debugstr_w(lpcwstrFile), debugstr_w(lpcwstrPlayList));
+
+    if (lpcwstrPlayList != NULL)
+        return E_INVALIDARG;
 
     hr = IGraphBuilder_AddSourceFilter(iface, lpcwstrFile, string, &preader);
 
@@ -982,6 +1025,13 @@ static HRESULT WINAPI GraphBuilder_RenderFile(IGraphBuilder *iface,
         IFileSourceFilter_Release(pfile);
     }
 
+    if (SUCCEEDED(hr))
+        hr = IBaseFilter_EnumPins(preader, &penumpins);
+    if (SUCCEEDED(hr)) {
+        hr = IEnumPins_Next(penumpins, 1, &ppinreader, &pin);
+        IEnumPins_Release(penumpins);
+    }
+
     if (SUCCEEDED(hr)) {
         tab[0] = mt.majortype;
         tab[1] = mt.subtype;
@@ -990,6 +1040,10 @@ static HRESULT WINAPI GraphBuilder_RenderFile(IGraphBuilder *iface,
 
     if (FAILED(hr))
     {
+        if (ppinreader)
+            IPin_Release(ppinreader);
+        if (pEnumMoniker)
+            IEnumMoniker_Release(pEnumMoniker);
         if (preader) {
              IGraphBuilder_RemoveFilter(iface, preader);
              IBaseFilter_Release(preader);
@@ -997,7 +1051,7 @@ static HRESULT WINAPI GraphBuilder_RenderFile(IGraphBuilder *iface,
         return hr;
     }
 
-    hr = E_FAIL;
+    hr = VFW_E_CANNOT_RENDER;
     while(IEnumMoniker_Next(pEnumMoniker, 1, &pMoniker, &nb) == S_OK)
     {
         VARIANT var;
@@ -1016,62 +1070,59 @@ static HRESULT WINAPI GraphBuilder_RenderFile(IGraphBuilder *iface,
            continue;
         }
 
-        hr = IGraphBuilder_AddFilter(iface, psplitter, NULL);
+        hr = IGraphBuilder_AddFilter(iface, psplitter, V_UNION(&var, bstrVal));
         if (FAILED(hr)) {
             ERR("Unable add filter (%x)\n", hr);
-            return hr;
+            IBaseFilter_Release(psplitter);
+            continue;
         }
 
         /* Connect file source and splitter filters together */
         /* Make the splitter analyze incoming data */
-        hr = IBaseFilter_EnumPins(preader, &penumpins);
-        if (FAILED(hr)) {
-            ERR("Enumpins (%x)\n", hr);
-            return hr;
-        }
-        hr = IEnumPins_Next(penumpins, 1, &ppinreader, &pin);
-        if (FAILED(hr)) {
-            ERR("Next (%x)\n", hr);
-            return hr;
-        }
-        if (pin == 0) {
-            ERR("No Pin\n");
-            return E_FAIL;
-        }
-        IEnumPins_Release(penumpins);
 
         hr = IBaseFilter_EnumPins(psplitter, &penumpins);
-        if (FAILED(hr)) {
-            ERR("Splitter Enumpins (%x)\n", hr);
-            return hr;
+        if (SUCCEEDED(hr)) {
+            hr = IEnumPins_Next(penumpins, 1, &ppinsplitter, &pin);
+            IEnumPins_Release(penumpins);
         }
-        hr = IEnumPins_Next(penumpins, 1, &ppinsplitter, &pin);
-        if (FAILED(hr)) {
-            ERR("Next (%x)\n", hr);
-            return hr;
-        }
-        if (pin == 0) {
-            ERR("No Pin\n");
-            return E_FAIL;
-        }
-        IEnumPins_Release(penumpins);
 
-        hr = IPin_Connect(ppinreader, ppinsplitter, NULL);
-        if (FAILED(hr)) {
-            IBaseFilter_Release(ppinsplitter);
-            ppinsplitter = NULL;
-            TRACE("Cannot connect to filter (%x), trying next one\n", hr);
+        if (SUCCEEDED(hr))
+            hr = IPin_Connect(ppinreader, ppinsplitter, NULL);
+
+        /* Make sure there's some output pins in the filter */
+        if (SUCCEEDED(hr))
+            hr = GetInternalConnections(psplitter, ppinsplitter, &ppins, &nb);
+        if (SUCCEEDED(hr)) {
+            if(nb == 0) {
+                IPin_Disconnect(ppinreader);
+                TRACE("No output pins found in filter\n");
+                hr = VFW_E_CANNOT_RENDER;
+            }
+        }
+
+        if (ppinsplitter)
+            IPin_Release(ppinsplitter);
+        ppinsplitter = NULL;
+
+        if (SUCCEEDED(hr)) {
+            TRACE("Successfully connected to filter\n");
             break;
         }
-        TRACE("Successfully connected to filter\n");
-        break;
+
+        TRACE("Cannot connect to filter (%x), trying next one\n", hr);
+
+        if (ppins) {
+            CoTaskMemFree(ppins);
+            ppins = NULL;
+        }
+        IGraphBuilder_RemoveFilter(iface, psplitter);
+        IBaseFilter_Release(psplitter);
+        psplitter = NULL;
     }
 
     /* Render all output pin of the splitter by calling IGraphBuilder_Render on each of them */
-    if (SUCCEEDED(hr))
-        hr = GetInternalConnections(psplitter, ppinsplitter, &ppins, &nb);
-    
     if (SUCCEEDED(hr)) {
+        int partial = 0;
         int i;
         TRACE("pins to consider: %d\n", nb);
         for(i = 0; i < nb; i++) {
@@ -1079,13 +1130,20 @@ static HRESULT WINAPI GraphBuilder_RenderFile(IGraphBuilder *iface,
             hr = IGraphBuilder_Render(iface, ppins[i]);
             if (FAILED(hr)) {
                 ERR("Cannot render pin %p (%x)\n", ppins[i], hr);
-                /* FIXME: We should clean created things properly */
-                break;
+                partial = 1;
             }
+            IPin_Release(ppins[i]);
         }
         CoTaskMemFree(ppins);
+
+        hr = (partial ? VFW_S_PARTIAL_RENDER : S_OK);
     }
-    
+
+    IPin_Release(ppinreader);
+    IBaseFilter_Release(preader);
+    if (psplitter)
+        IBaseFilter_Release(psplitter);
+
     return hr;
 }
 
@@ -1140,6 +1198,7 @@ static HRESULT WINAPI GraphBuilder_AddSourceFilter(IGraphBuilder *iface,
 
     if (ppFilter)
         *ppFilter = preader;
+    IFileSourceFilter_Release(pfile);
 
     return S_OK;
     
@@ -1295,10 +1354,12 @@ static HRESULT ExploreGraph(IFilterGraphImpl* pGraph, IPin* pOutputPin, fnFoundF
     hr = IPin_ConnectedTo(pOutputPin, &pInputPin);
 
     if (SUCCEEDED(hr))
+    {
         hr = IPin_QueryPinInfo(pInputPin, &PinInfo);
-
-    if (SUCCEEDED(hr))
-        hr = GetInternalConnections(PinInfo.pFilter, pInputPin, &ppPins, &nb);
+        if (SUCCEEDED(hr))
+            hr = GetInternalConnections(PinInfo.pFilter, pInputPin, &ppPins, &nb);
+        IPin_Release(pInputPin);
+    }
 
     if (SUCCEEDED(hr))
     {
@@ -1733,6 +1794,131 @@ static const IMediaSeekingVtbl IMediaSeeking_VTable =
     MediaSeeking_SetRate,
     MediaSeeking_GetRate,
     MediaSeeking_GetPreroll
+};
+
+/*** IUnknown methods ***/
+static HRESULT WINAPI MediaPosition_QueryInterface(IMediaPosition* iface, REFIID riid, void** ppvObj){
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaPosition_vtbl, iface);
+
+    TRACE("(%p/%p)->(%s (%p), %p)\n", This, iface, debugstr_guid(riid), riid, ppvObj);
+
+    return Filtergraph_QueryInterface(This, riid, ppvObj);
+}
+
+static ULONG WINAPI MediaPosition_AddRef(IMediaPosition *iface){
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaPosition_vtbl, iface);
+
+    TRACE("(%p/%p)->()\n", This, iface);
+
+    return Filtergraph_AddRef(This);
+}
+
+static ULONG WINAPI MediaPosition_Release(IMediaPosition *iface){
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaPosition_vtbl, iface);
+
+    TRACE("(%p/%p)->()\n", This, iface);
+
+    return Filtergraph_Release(This);
+}
+
+/*** IDispatch methods ***/
+static HRESULT WINAPI MediaPosition_GetTypeInfoCount(IMediaPosition *iface, UINT* pctinfo){
+    FIXME("(%p) stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_GetTypeInfo(IMediaPosition *iface, UINT iTInfo, LCID lcid, ITypeInfo** ppTInfo){
+    FIXME("(%p) stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_GetIDsOfNames(IMediaPosition* iface, REFIID riid, LPOLESTR* rgszNames, UINT cNames, LCID lcid, DISPID* rgDispId){
+    FIXME("(%p) stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_Invoke(IMediaPosition* iface, DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS* pDispParams, VARIANT* pVarResult, EXCEPINFO* pExcepInfo, UINT* puArgErr){
+    FIXME("(%p) stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+/*** IMediaPosition methods ***/
+static HRESULT WINAPI MediaPosition_get_Duration(IMediaPosition * iface, REFTIME *plength){
+    FIXME("(%p)->(%p) stub!\n", iface, plength);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_put_CurrentPosition(IMediaPosition * iface, REFTIME llTime){
+    FIXME("(%p)->(%f) stub!\n", iface, llTime);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_get_CurrentPosition(IMediaPosition * iface, REFTIME *pllTime){
+    FIXME("(%p)->(%p) stub!\n", iface, pllTime);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_get_StopTime(IMediaPosition * iface, REFTIME *pllTime){
+    FIXME("(%p)->(%p) stub!\n", iface, pllTime);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_put_StopTime(IMediaPosition * iface, REFTIME llTime){
+    FIXME("(%p)->(%f) stub!\n", iface, llTime);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_get_PrerollTime(IMediaPosition * iface, REFTIME *pllTime){
+    FIXME("(%p)->(%p) stub!\n", iface, pllTime);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_put_PrerollTime(IMediaPosition * iface, REFTIME llTime){
+    FIXME("(%p)->(%f) stub!\n", iface, llTime);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_put_Rate(IMediaPosition * iface, double dRate){
+    FIXME("(%p)->(%f) stub!\n", iface, dRate);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_get_Rate(IMediaPosition * iface, double *pdRate){
+    FIXME("(%p)->(%p) stub!\n", iface, pdRate);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_CanSeekForward(IMediaPosition * iface, LONG *pCanSeekForward){
+    FIXME("(%p)->(%p) stub!\n", iface, pCanSeekForward);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MediaPosition_CanSeekBackward(IMediaPosition * iface, LONG *pCanSeekBackward){
+    FIXME("(%p)->(%p) stub!\n", iface, pCanSeekBackward);
+    return E_NOTIMPL;
+}
+
+
+static const IMediaPositionVtbl IMediaPosition_VTable =
+{
+    MediaPosition_QueryInterface,
+    MediaPosition_AddRef,
+    MediaPosition_Release,
+    MediaPosition_GetTypeInfoCount,
+    MediaPosition_GetTypeInfo,
+    MediaPosition_GetIDsOfNames,
+    MediaPosition_Invoke,
+    MediaPosition_get_Duration,
+    MediaPosition_put_CurrentPosition,
+    MediaPosition_get_CurrentPosition,
+    MediaPosition_get_StopTime,
+    MediaPosition_put_StopTime,
+    MediaPosition_get_PrerollTime,
+    MediaPosition_put_PrerollTime,
+    MediaPosition_put_Rate,
+    MediaPosition_get_Rate,
+    MediaPosition_CanSeekForward,
+    MediaPosition_CanSeekBackward
 };
 
 static HRESULT GetTargetInterface(IFilterGraphImpl* pGraph, REFIID riid, LPVOID* ppvObj)
@@ -3924,6 +4110,8 @@ static HRESULT WINAPI MediaEvent_CancelDefaultHandling(IMediaEventEx *iface,
 	This->HandleEcComplete = FALSE;
     else if (lEvCode == EC_REPAINT)
 	This->HandleEcRepaint = FALSE;
+    else if (lEvCode == EC_CLOCK_CHANGED)
+        This->HandleEcClockChanged = FALSE;
     else
 	return S_FALSE;
 
@@ -3940,6 +4128,8 @@ static HRESULT WINAPI MediaEvent_RestoreDefaultHandling(IMediaEventEx *iface,
 	This->HandleEcComplete = TRUE;
     else if (lEvCode == EC_REPAINT)
 	This->HandleEcRepaint = TRUE;
+    else if (lEvCode == EC_CLOCK_CHANGED)
+        This->HandleEcClockChanged = TRUE;
     else
 	return S_FALSE;
 
@@ -4025,21 +4215,21 @@ static const IMediaEventExVtbl IMediaEventEx_VTable =
 
 static HRESULT WINAPI MediaFilter_QueryInterface(IMediaFilter *iface, REFIID riid, LPVOID *ppv)
 {
-    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaEventEx_vtbl, iface);
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaFilter_vtbl, iface);
 
     return Filtergraph_QueryInterface(This, riid, ppv);
 }
 
 static ULONG WINAPI MediaFilter_AddRef(IMediaFilter *iface)
 {
-    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaEventEx_vtbl, iface);
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaFilter_vtbl, iface);
 
     return Filtergraph_AddRef(This);
 }
 
 static ULONG WINAPI MediaFilter_Release(IMediaFilter *iface)
 {
-    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaEventEx_vtbl, iface);
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaFilter_vtbl, iface);
 
     return Filtergraph_Release(This);
 }
@@ -4081,16 +4271,71 @@ static HRESULT WINAPI MediaFilter_GetState(IMediaFilter *iface, DWORD dwMsTimeou
 
 static HRESULT WINAPI MediaFilter_SetSyncSource(IMediaFilter *iface, IReferenceClock *pClock)
 {
-    FIXME("(%p): stub\n", pClock);
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaFilter_vtbl, iface);
+    HRESULT hr = S_OK;
+    int i;
 
-    return E_NOTIMPL;
+    TRACE("(%p/%p)->(%p)\n", iface, This, pClock);
+
+    EnterCriticalSection(&This->cs);
+    {
+        for (i = 0;i < This->nFilters;i++)
+        {
+            hr = IBaseFilter_SetSyncSource(This->ppFiltersInGraph[i], pClock);
+            if (FAILED(hr))
+                break;
+        }
+
+        if (FAILED(hr))
+        {
+            for(;i >= 0;i--)
+                IBaseFilter_SetSyncSource(This->ppFiltersInGraph[i], This->refClock);
+        }
+        else
+        {
+            if (This->refClock)
+                IReferenceClock_Release(This->refClock);
+            This->refClock = pClock;
+            if (This->refClock)
+                IReferenceClock_AddRef(This->refClock);
+
+            if (This->HandleEcClockChanged)
+            {
+                IMediaEventSink *pEventSink;
+                HRESULT eshr;
+
+                eshr = IMediaFilter_QueryInterface(iface, &IID_IMediaEventSink, (LPVOID)&pEventSink);
+                if (SUCCEEDED(eshr))
+                {
+                    IMediaEventSink_Notify(pEventSink, EC_CLOCK_CHANGED, 0, 0);
+                    IMediaEventSink_Release(pEventSink);
+                }
+            }
+        }
+    }
+    LeaveCriticalSection(&This->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI MediaFilter_GetSyncSource(IMediaFilter *iface, IReferenceClock **ppClock)
 {
-    FIXME("(%p): stub\n", ppClock);
+    ICOM_THIS_MULTI(IFilterGraphImpl, IMediaFilter_vtbl, iface);
 
-    return E_NOTIMPL;
+    TRACE("(%p/%p)->(%p)\n", iface, This, ppClock);
+
+    if (!ppClock)
+        return E_POINTER;
+
+    EnterCriticalSection(&This->cs);
+    {
+        *ppClock = This->refClock;
+        if (*ppClock)
+            IReferenceClock_AddRef(*ppClock);
+    }
+    LeaveCriticalSection(&This->cs);
+
+    return S_OK;
 }
 
 static const IMediaFilterVtbl IMediaFilter_VTable =
@@ -4345,7 +4590,7 @@ HRESULT FilterGraph_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     if( pUnkOuter )
         return CLASS_E_NOAGGREGATION;
 
-    fimpl = HeapAlloc(GetProcessHeap(), 0, sizeof(*fimpl));
+    fimpl = CoTaskMemAlloc(sizeof(*fimpl));
     fimpl->IGraphBuilder_vtbl = &IGraphBuilder_VTable;
     fimpl->IMediaControl_vtbl = &IMediaControl_VTable;
     fimpl->IMediaSeeking_vtbl = &IMediaSeeking_VTable;
@@ -4356,15 +4601,18 @@ HRESULT FilterGraph_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     fimpl->IMediaFilter_vtbl = &IMediaFilter_VTable;
     fimpl->IMediaEventSink_vtbl = &IMediaEventSink_VTable;
     fimpl->IGraphConfig_vtbl = &IGraphConfig_VTable;
+    fimpl->IMediaPosition_vtbl = &IMediaPosition_VTable;
     fimpl->ref = 1;
     fimpl->ppFiltersInGraph = NULL;
     fimpl->pFilterNames = NULL;
     fimpl->nFilters = 0;
     fimpl->filterCapacity = 0;
     fimpl->nameIndex = 1;
+    fimpl->refClock = NULL;
     fimpl->hEventCompletion = CreateEventW(0, TRUE, FALSE, 0);
     fimpl->HandleEcComplete = TRUE;
     fimpl->HandleEcRepaint = TRUE;
+    fimpl->HandleEcClockChanged = TRUE;
     fimpl->notif.hWnd = 0;
     fimpl->notif.disabled = FALSE;
     fimpl->nRenderers = 0;
@@ -4372,9 +4620,10 @@ HRESULT FilterGraph_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     fimpl->state = State_Stopped;
     EventsQueue_Init(&fimpl->evqueue);
     InitializeCriticalSection(&fimpl->cs);
+    fimpl->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IFilterGraphImpl.cs");
     fimpl->nItfCacheEntries = 0;
 
-    hr = CoCreateInstance(&CLSID_FilterMapper, NULL, CLSCTX_INPROC_SERVER, &IID_IFilterMapper2, (LPVOID*)&fimpl->pFilterMapper2);
+    hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC_SERVER, &IID_IFilterMapper2, (LPVOID*)&fimpl->pFilterMapper2);
     if (FAILED(hr)) {
         ERR("Unable to create filter mapper (%x)\n", hr);
 	return hr;

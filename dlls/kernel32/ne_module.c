@@ -37,7 +37,6 @@
 #include "wownt32.h"
 #include "winternl.h"
 #include "toolhelp.h"
-#include "excpt.h"
 #include "kernel_private.h"
 #include "kernel16_private.h"
 #include "wine/exception.h"
@@ -91,7 +90,7 @@ static HMODULE16 NE_GetModuleByFilename( LPCSTR name );
 
 
 /* patch all the flat cs references of the code segment if necessary */
-inline static void patch_code_segment( NE_MODULE *pModule )
+static inline void patch_code_segment( NE_MODULE *pModule )
 {
 #ifdef __i386__
     int i;
@@ -1050,7 +1049,7 @@ static HINSTANCE16 MODULE_LoadModule16( LPCSTR libname, BOOL implicit, BOOL lib_
     const char *file_name = NULL;
     char dllname[20], owner[20], *p;
     const char *basename;
-    int owner_exists;
+    int owner_exists = FALSE;
 
     /* strip path information */
 
@@ -2161,7 +2160,7 @@ void WINAPI MapHInstSL16( CONTEXT86 *context )
 __ASM_GLOBAL_FUNC( MapHInstLS,
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("MapHModuleLS") "\n\t"
-                   "ret" );
+                   "ret" )
 
 /***************************************************************************
  *		MapHInstSL			(KERNEL32.@)
@@ -2169,7 +2168,7 @@ __ASM_GLOBAL_FUNC( MapHInstLS,
 __ASM_GLOBAL_FUNC( MapHInstSL,
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("MapHModuleSL") "\n\t"
-                   "ret" );
+                   "ret" )
 
 /***************************************************************************
  *		MapHInstLS_PN			(KERNEL32.@)
@@ -2179,7 +2178,7 @@ __ASM_GLOBAL_FUNC( MapHInstLS_PN,
                    "jz 1f\n\t"
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("MapHModuleLS") "\n"
-                   "1:\tret" );
+                   "1:\tret" )
 
 /***************************************************************************
  *		MapHInstSL_PN			(KERNEL32.@)
@@ -2189,6 +2188,6 @@ __ASM_GLOBAL_FUNC( MapHInstSL_PN,
                    "jz 1f\n\t"
                    "pushl %eax\n\t"
                    "call " __ASM_NAME("MapHModuleSL") "\n"
-                   "1:\tret" );
+                   "1:\tret" )
 
 #endif  /* __i386__ */

@@ -22,11 +22,21 @@
  *
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
+#ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
+#endif
+#ifdef HAVE_UNISTD_H
 #include <unistd.h>
+#endif
+#ifdef HAVE_DIRECT_H
+#include <direct.h>
+#endif
 
 #define COBJMACROS
 
@@ -36,6 +46,7 @@
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <wine/debug.h>
+#include <wine/unicode.h>
 
 #include "resource.h"
 #include "winecfg.h"
@@ -58,9 +69,9 @@ typedef BOOL (CALLBACK *EnumThemeProc)(LPVOID lpReserved,
 				       LPCWSTR pszToolTip, LPVOID lpReserved2,
                                        LPVOID lpData);
 
-HRESULT WINAPI EnumThemeColors (LPWSTR pszThemeFileName, LPWSTR pszSizeName,
+HRESULT WINAPI EnumThemeColors (LPCWSTR pszThemeFileName, LPWSTR pszSizeName,
 				DWORD dwColorNum, PTHEMENAMES pszColorNames);
-HRESULT WINAPI EnumThemeSizes (LPWSTR pszThemeFileName, LPWSTR pszColorName,
+HRESULT WINAPI EnumThemeSizes (LPCWSTR pszThemeFileName, LPWSTR pszColorName,
 			       DWORD dwSizeNum, PTHEMENAMES pszSizeNames);
 HRESULT WINAPI ApplyTheme (HTHEMEFILE hThemeFile, char* unknown, HWND hWnd);
 HRESULT WINAPI OpenThemeFile (LPCWSTR pszThemeFileName, LPCWSTR pszColorName,
@@ -170,7 +181,7 @@ static void free_theme_files(void)
     themeFilesCount = 0;
 }
 
-typedef HRESULT (WINAPI * EnumTheme) (LPWSTR, LPWSTR, DWORD, PTHEMENAMES);
+typedef HRESULT (WINAPI * EnumTheme) (LPCWSTR, LPWSTR, DWORD, PTHEMENAMES);
 
 /* fill a string list with either colors or sizes of a theme */
 static void fill_theme_string_array (const WCHAR* filename, 
@@ -182,7 +193,7 @@ static void fill_theme_string_array (const WCHAR* filename,
 
     WINE_TRACE ("%s %p %p\n", wine_dbgstr_w (filename), wdsa, enumTheme);
 
-    while (SUCCEEDED (enumTheme ((WCHAR*)filename, NULL, index++, &names)))
+    while (SUCCEEDED (enumTheme (filename, NULL, index++, &names)))
     {
 	WINE_TRACE ("%s: %s\n", wine_dbgstr_w (names.szName), 
             wine_dbgstr_w (names.szDisplayName));
@@ -444,7 +455,10 @@ static void init_dialog (HWND dialog)
         enable_size_and_color_controls (dialog, TRUE);
     }
     theme_dirty = FALSE;
-    
+
+    SendDlgItemMessageW(dialog, IDC_SYSPARAM_SIZE_UD, UDM_SETBUDDY, (WPARAM)GetDlgItem(dialog, IDC_SYSPARAM_SIZE), 0);
+    SendDlgItemMessageW(dialog, IDC_SYSPARAM_SIZE_UD, UDM_SETRANGE, 0, MAKELONG(100, 8));
+
     updating_ui = FALSE;
 }
 
@@ -482,9 +496,111 @@ static void apply_theme(HWND dialog)
     theme_dirty = FALSE;
 }
 
+static struct
+{
+    int sm_idx, color_idx;
+    const char *color_reg;
+    int size;
+    COLORREF color;
+    LOGFONTW lf;
+} metrics[] =
+{
+    {-1,                COLOR_BTNFACE,          "ButtonFace"    }, /* IDC_SYSPARAMS_BUTTON */
+    {-1,                COLOR_BTNTEXT,          "ButtonText"    }, /* IDC_SYSPARAMS_BUTTON_TEXT */
+    {-1,                COLOR_BACKGROUND,       "Background"    }, /* IDC_SYSPARAMS_DESKTOP */
+    {SM_CXMENUSIZE,     COLOR_MENU,             "Menu"          }, /* IDC_SYSPARAMS_MENU */
+    {-1,                COLOR_MENUTEXT,         "MenuText"      }, /* IDC_SYSPARAMS_MENU_TEXT */
+    {SM_CXVSCROLL,      COLOR_SCROLLBAR,        "Scrollbar"     }, /* IDC_SYSPARAMS_SCROLLBAR */
+    {-1,                COLOR_HIGHLIGHT,        "Hilight"       }, /* IDC_SYSPARAMS_SELECTION */
+    {-1,                COLOR_HIGHLIGHTTEXT,    "HilightText"   }, /* IDC_SYSPARAMS_SELECTION_TEXT */
+    {-1,                COLOR_INFOBK,           "InfoWindow"    }, /* IDC_SYSPARAMS_TOOLTIP */
+    {-1,                COLOR_INFOTEXT,         "InfoText"      }, /* IDC_SYSPARAMS_TOOLTIP_TEXT */
+    {-1,                COLOR_WINDOW,           "Window"        }, /* IDC_SYSPARAMS_WINDOW */
+    {-1,                COLOR_WINDOWTEXT,       "WindowText"    }, /* IDC_SYSPARAMS_WINDOW_TEXT */
+    {SM_CXSIZE,         COLOR_ACTIVECAPTION,    "ActiveTitle"   }, /* IDC_SYSPARAMS_ACTIVE_TITLE */
+    {-1,                COLOR_CAPTIONTEXT,      "TitleText"     }, /* IDC_SYSPARAMS_ACTIVE_TITLE_TEXT */
+    {-1,                COLOR_INACTIVECAPTION,  "InactiveTitle" }, /* IDC_SYSPARAMS_INACTIVE_TITLE */
+    {-1,                COLOR_INACTIVECAPTIONTEXT,"InactiveTitleText" }, /* IDC_SYSPARAMS_INACTIVE_TITLE_TEXT */
+    {-1,                -1,                     "MsgBoxText"    }, /* IDC_SYSPARAMS_MSGBOX_TEXT */
+};
+
+static void save_sys_color(int idx, COLORREF clr)
+{
+    char buffer[13];
+
+    sprintf(buffer, "%d %d %d",  GetRValue (clr), GetGValue (clr), GetBValue (clr));
+    set_reg_key(HKEY_CURRENT_USER, "Control Panel\\Colors", metrics[idx].color_reg, buffer);
+}
+
+static void set_color_from_theme(WCHAR *keyName, COLORREF color)
+{
+    char *keyNameA = NULL;
+    int keyNameSize=0, i=0;
+
+    keyNameSize = WideCharToMultiByte(CP_ACP, 0, keyName, -1, keyNameA, 0, NULL, NULL);
+    keyNameA = HeapAlloc(GetProcessHeap(), 0, keyNameSize);
+    WideCharToMultiByte(CP_ACP, 0, keyName, -1, keyNameA, -1, NULL, NULL);
+
+    for (i=0; i<sizeof(metrics)/sizeof(metrics[0]); i++)
+    {
+        if (strcmp(metrics[i].color_reg, keyNameA)==0)
+        {
+            metrics[i].color = color;
+            save_sys_color(i, color);
+            break;
+        }
+    }
+    HeapFree(GetProcessHeap(), 0, keyNameA);
+}
+
+static void do_parse_theme(WCHAR *file)
+{
+    static const WCHAR colorSect[] = {
+        'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\',
+        'C','o','l','o','r','s',0};
+    WCHAR keyName[MAX_PATH], keyNameValue[MAX_PATH];
+    WCHAR *keyNamePtr = NULL;
+    char *keyNameValueA = NULL;
+    int keyNameValueSize = 0;
+    int red = 0, green = 0, blue = 0;
+    COLORREF color;
+
+    WINE_TRACE("%s\n", wine_dbgstr_w(file));
+
+    GetPrivateProfileStringW(colorSect, NULL, NULL, keyName,
+                             MAX_PATH*sizeof(WCHAR), file);
+
+    keyNamePtr = keyName;
+    while (*keyNamePtr!=0) {
+        GetPrivateProfileStringW(colorSect, keyNamePtr, NULL, keyNameValue,
+                                 MAX_PATH*sizeof(WCHAR), file);
+
+        keyNameValueSize = WideCharToMultiByte(CP_ACP, 0, keyNameValue, -1,
+                                               keyNameValueA, 0, NULL, NULL);
+        keyNameValueA = HeapAlloc(GetProcessHeap(), 0, keyNameValueSize);
+        WideCharToMultiByte(CP_ACP, 0, keyNameValue, -1, keyNameValueA, -1, NULL, NULL);
+
+        WINE_TRACE("parsing key: %s with value: %s\n",
+                   wine_dbgstr_w(keyNamePtr), wine_dbgstr_w(keyNameValue));
+
+        sscanf(keyNameValueA, "%d %d %d", &red, &green, &blue);
+
+        color = RGB((BYTE)red, (BYTE)blue, (BYTE)green);
+
+        HeapFree(GetProcessHeap(), 0, keyNameValueA);
+
+        set_color_from_theme(keyNamePtr, color);
+
+        keyNamePtr+=lstrlenW(keyNamePtr);
+        keyNamePtr++;
+    }
+}
+
 static void on_theme_install(HWND dialog)
 {
-  static const WCHAR filterMask[] = {0,'*','.','m','s','s','t','y','l','e','s',0,0};
+  static const WCHAR filterMask[] = {0,'*','.','m','s','s','t','y','l','e','s',';',
+      '*','.','t','h','e','m','e',0,0};
+  static const WCHAR themeExt[] = {'.','T','h','e','m','e',0};
   const int filterMaskLen = sizeof(filterMask)/sizeof(filterMask[0]);
   OPENFILENAMEW ofn;
   WCHAR filetitle[MAX_PATH];
@@ -531,6 +647,13 @@ static void on_theme_install(HWND dialog)
 
       if (FAILED (SHGetFolderPathW (NULL, CSIDL_RESOURCES|CSIDL_FLAG_CREATE, NULL, 
           SHGFP_TYPE_CURRENT, themeFilePath))) return;
+
+      if (lstrcmpiW(PathFindExtensionW(filetitle), themeExt)==0)
+      {
+          do_parse_theme(file);
+          SendMessage(GetParent(dialog), PSM_CHANGED, 0, 0);
+          return;
+      }
 
       PathRemoveExtensionW (filetitle);
 
@@ -625,7 +748,7 @@ static void init_shell_folder_listview_headers(HWND dialog) {
 }
 
 /* Reads the currently set shell folder symbol link targets into asfiInfo. */
-static void read_shell_folder_link_targets() {
+static void read_shell_folder_link_targets(void) {
     WCHAR wszPath[MAX_PATH];
     HRESULT hr;
     int i;
@@ -759,7 +882,7 @@ static void on_shell_folder_edit_changed(HWND hDlg) {
     SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
 }
 
-static void apply_shell_folder_changes() {
+static void apply_shell_folder_changes(void) {
     WCHAR wszPath[MAX_PATH];
     char szBackupPath[FILENAME_MAX], szUnixPath[FILENAME_MAX], *pszUnixPath = NULL;
     int i, cUnixPathLen;
@@ -809,10 +932,165 @@ static void apply_shell_folder_changes() {
             if (!lstat(szBackupPath, &statPath) && S_ISDIR(statPath.st_mode)) {
                 rename(szBackupPath, szUnixPath);
             } else {
-                mkdir(szUnixPath, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
+                mkdir(szUnixPath, 0777);
             }
         }
     }
+}
+
+static void read_sysparams(HWND hDlg)
+{
+    WCHAR buffer[256];
+    HWND list = GetDlgItem(hDlg, IDC_SYSPARAM_COMBO);
+    NONCLIENTMETRICSW nonclient_metrics;
+    int i, idx;
+
+    for (i = 0; i < sizeof(metrics) / sizeof(metrics[0]); i++)
+    {
+        LoadStringW(GetModuleHandle(NULL), i + IDC_SYSPARAMS_BUTTON, buffer,
+                    sizeof(buffer) / sizeof(buffer[0]));
+        idx = SendMessageW(list, CB_ADDSTRING, 0, (LPARAM)buffer);
+        if (idx != CB_ERR) SendMessageW(list, CB_SETITEMDATA, idx, i);
+
+        if (metrics[i].sm_idx != -1)
+            metrics[i].size = GetSystemMetrics(metrics[i].sm_idx);
+        if (metrics[i].color_idx != -1)
+            metrics[i].color = GetSysColor(metrics[i].color_idx);
+    }
+
+    nonclient_metrics.cbSize = sizeof(NONCLIENTMETRICSW);
+    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(NONCLIENTMETRICSW), &nonclient_metrics, 0);
+
+    memcpy(&(metrics[IDC_SYSPARAMS_MENU_TEXT - IDC_SYSPARAMS_BUTTON].lf),
+           &(nonclient_metrics.lfMenuFont), sizeof(LOGFONTW));
+    memcpy(&(metrics[IDC_SYSPARAMS_ACTIVE_TITLE_TEXT - IDC_SYSPARAMS_BUTTON].lf),
+           &(nonclient_metrics.lfCaptionFont), sizeof(LOGFONTW));
+    memcpy(&(metrics[IDC_SYSPARAMS_TOOLTIP_TEXT - IDC_SYSPARAMS_BUTTON].lf),
+           &(nonclient_metrics.lfStatusFont), sizeof(LOGFONTW));
+    memcpy(&(metrics[IDC_SYSPARAMS_MSGBOX_TEXT - IDC_SYSPARAMS_BUTTON].lf),
+           &(nonclient_metrics.lfMessageFont), sizeof(LOGFONTW));
+}
+
+static void apply_sysparams(void)
+{
+    NONCLIENTMETRICSW nonclient_metrics;
+    int i, cnt = 0;
+    int colors_idx[sizeof(metrics) / sizeof(metrics[0])];
+    COLORREF colors[sizeof(metrics) / sizeof(metrics[0])];
+
+    nonclient_metrics.cbSize = sizeof(nonclient_metrics);
+    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(nonclient_metrics), &nonclient_metrics, 0);
+
+    nonclient_metrics.iMenuWidth = nonclient_metrics.iMenuHeight =
+            metrics[IDC_SYSPARAMS_MENU - IDC_SYSPARAMS_BUTTON].size;
+    nonclient_metrics.iCaptionWidth = nonclient_metrics.iCaptionHeight =
+            metrics[IDC_SYSPARAMS_ACTIVE_TITLE - IDC_SYSPARAMS_BUTTON].size;
+    nonclient_metrics.iScrollWidth = nonclient_metrics.iScrollHeight =
+            metrics[IDC_SYSPARAMS_SCROLLBAR - IDC_SYSPARAMS_BUTTON].size;
+
+    memcpy(&(nonclient_metrics.lfMenuFont),
+           &(metrics[IDC_SYSPARAMS_MENU_TEXT - IDC_SYSPARAMS_BUTTON].lf),
+           sizeof(LOGFONTW));
+    memcpy(&(nonclient_metrics.lfCaptionFont),
+           &(metrics[IDC_SYSPARAMS_ACTIVE_TITLE_TEXT - IDC_SYSPARAMS_BUTTON].lf),
+           sizeof(LOGFONTW));
+    memcpy(&(nonclient_metrics.lfStatusFont),
+           &(metrics[IDC_SYSPARAMS_TOOLTIP_TEXT - IDC_SYSPARAMS_BUTTON].lf),
+           sizeof(LOGFONTW));
+    memcpy(&(nonclient_metrics.lfMessageFont),
+           &(metrics[IDC_SYSPARAMS_MSGBOX_TEXT - IDC_SYSPARAMS_BUTTON].lf),
+           sizeof(LOGFONTW));
+
+    SystemParametersInfoW(SPI_SETNONCLIENTMETRICS, sizeof(nonclient_metrics), &nonclient_metrics,
+                          SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+
+    for (i = 0; i < sizeof(metrics) / sizeof(metrics[0]); i++)
+        if (metrics[i].color_idx != -1)
+        {
+            colors_idx[cnt] = metrics[i].color_idx;
+            colors[cnt++] = metrics[i].color;
+        }
+    SetSysColors(cnt, colors_idx, colors);
+}
+
+static void on_sysparam_change(HWND hDlg)
+{
+    int index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETCURSEL, 0, 0);
+
+    index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETITEMDATA, index, 0);
+
+    updating_ui = TRUE;
+
+    EnableWindow(GetDlgItem(hDlg, IDC_SYSPARAM_COLOR_TEXT), metrics[index].color_idx != -1);
+    EnableWindow(GetDlgItem(hDlg, IDC_SYSPARAM_COLOR), metrics[index].color_idx != -1);
+    InvalidateRect(GetDlgItem(hDlg, IDC_SYSPARAM_COLOR), NULL, TRUE);
+
+    EnableWindow(GetDlgItem(hDlg, IDC_SYSPARAM_SIZE_TEXT), metrics[index].sm_idx != -1);
+    EnableWindow(GetDlgItem(hDlg, IDC_SYSPARAM_SIZE), metrics[index].sm_idx != -1);
+    EnableWindow(GetDlgItem(hDlg, IDC_SYSPARAM_SIZE_UD), metrics[index].sm_idx != -1);
+    if (metrics[index].sm_idx != -1)
+        SendDlgItemMessageW(hDlg, IDC_SYSPARAM_SIZE_UD, UDM_SETPOS, 0, MAKELONG(metrics[index].size, 0));
+    else
+        set_text(hDlg, IDC_SYSPARAM_SIZE, "");
+
+    EnableWindow(GetDlgItem(hDlg, IDC_SYSPARAM_FONT),
+        index == IDC_SYSPARAMS_MENU_TEXT-IDC_SYSPARAMS_BUTTON ||
+        index == IDC_SYSPARAMS_ACTIVE_TITLE_TEXT-IDC_SYSPARAMS_BUTTON ||
+        index == IDC_SYSPARAMS_TOOLTIP_TEXT-IDC_SYSPARAMS_BUTTON ||
+        index == IDC_SYSPARAMS_MSGBOX_TEXT-IDC_SYSPARAMS_BUTTON
+    );
+
+    updating_ui = FALSE;
+}
+
+static void on_draw_item(HWND hDlg, WPARAM wParam, LPARAM lParam)
+{
+    static HBRUSH black_brush = 0;
+    LPDRAWITEMSTRUCT draw_info = (LPDRAWITEMSTRUCT)lParam;
+
+    if (!black_brush) black_brush = CreateSolidBrush(0);
+
+    if (draw_info->CtlID == IDC_SYSPARAM_COLOR)
+    {
+        UINT state = DFCS_ADJUSTRECT | DFCS_BUTTONPUSH;
+
+        if (draw_info->itemState & ODS_DISABLED)
+            state |= DFCS_INACTIVE;
+        else
+            state |= draw_info->itemState & ODS_SELECTED ? DFCS_PUSHED : 0;
+
+        DrawFrameControl(draw_info->hDC, &draw_info->rcItem, DFC_BUTTON, state);
+
+        if (!(draw_info->itemState & ODS_DISABLED))
+        {
+            HBRUSH brush;
+            int index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETCURSEL, 0, 0);
+
+            index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETITEMDATA, index, 0);
+            brush = CreateSolidBrush(metrics[index].color);
+
+            InflateRect(&draw_info->rcItem, -1, -1);
+            FrameRect(draw_info->hDC, &draw_info->rcItem, black_brush);
+            InflateRect(&draw_info->rcItem, -1, -1);
+            FillRect(draw_info->hDC, &draw_info->rcItem, brush);
+            DeleteObject(brush);
+        }
+    }
+}
+
+static void on_select_font(HWND hDlg)
+{
+    CHOOSEFONTW cf;
+    int index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETCURSEL, 0, 0);
+    index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETITEMDATA, index, 0);
+
+    ZeroMemory(&cf, sizeof(cf));
+    cf.lStructSize = sizeof(CHOOSEFONTW);
+    cf.hwndOwner = hDlg;
+    cf.lpLogFont = &(metrics[index].lf);
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_NOSCRIPTSEL;
+
+    ChooseFontW(&cf);
 }
 
 INT_PTR CALLBACK
@@ -823,6 +1101,7 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
             read_shell_folder_link_targets();
             init_shell_folder_listview_headers(hDlg);
             update_shell_folder_listview(hDlg);
+            read_sysparams(hDlg);
             break;
         
         case WM_DESTROY:
@@ -837,18 +1116,34 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
             switch(HIWORD(wParam)) {
                 case CBN_SELCHANGE: {
                     if (updating_ui) break;
-                    SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
                     switch (LOWORD(wParam))
                     {
                         case IDC_THEME_THEMECOMBO: on_theme_changed(hDlg); break;
                         case IDC_THEME_COLORCOMBO: /* fall through */
                         case IDC_THEME_SIZECOMBO: theme_dirty = TRUE; break;
+                        case IDC_SYSPARAM_COMBO: on_sysparam_change(hDlg); return FALSE;
                     }
+                    SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
                     break;
                 }
                 case EN_CHANGE: {
-                    if (LOWORD(wParam) == IDC_EDIT_SFPATH) 
-                        on_shell_folder_edit_changed(hDlg);
+                    if (updating_ui) break;
+                    switch (LOWORD(wParam))
+                    {
+                        case IDC_EDIT_SFPATH: on_shell_folder_edit_changed(hDlg); break;
+                        case IDC_SYSPARAM_SIZE:
+                        {
+                            char *text = get_text(hDlg, IDC_SYSPARAM_SIZE);
+                            int index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETCURSEL, 0, 0);
+
+                            index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETITEMDATA, index, 0);
+                            metrics[index].size = atoi(text);
+                            HeapFree(GetProcessHeap(), 0, text);
+
+                            SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
+                            break;
+                        }
+                    }
                     break;
                 }
                 case BN_CLICKED:
@@ -856,6 +1151,10 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     {
                         case IDC_THEME_INSTALL:
                             on_theme_install (hDlg);
+                            break;
+
+                        case IDC_SYSPARAM_FONT:
+                            on_select_font(hDlg);
                             break;
 
                         case IDC_BROWSE_SFPATH:
@@ -879,6 +1178,30 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                                 SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
                             }
                             break;    
+
+                        case IDC_SYSPARAM_COLOR:
+                        {
+                            static COLORREF user_colors[16];
+                            CHOOSECOLORW c_color;
+                            int index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETCURSEL, 0, 0);
+
+                            index = SendDlgItemMessageW(hDlg, IDC_SYSPARAM_COMBO, CB_GETITEMDATA, index, 0);
+
+                            memset(&c_color, 0, sizeof(c_color));
+                            c_color.lStructSize = sizeof(c_color);
+                            c_color.lpCustColors = user_colors;
+                            c_color.rgbResult = metrics[index].color;
+                            c_color.Flags = CC_ANYCOLOR | CC_RGBINIT;
+                            c_color.hwndOwner = hDlg;
+                            if (ChooseColorW(&c_color))
+                            {
+                                metrics[index].color = c_color.rgbResult;
+                                save_sys_color(index, metrics[index].color);
+                                InvalidateRect(GetDlgItem(hDlg, IDC_SYSPARAM_COLOR), NULL, TRUE);
+                                SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
+                            }
+                            break;
+                        }
                     }
                     break;
             }
@@ -894,6 +1217,7 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     apply();
                     apply_theme(hDlg);
                     apply_shell_folder_changes();
+                    apply_sysparams();
                     read_shell_folder_link_targets();
                     update_shell_folder_listview(hDlg);
                     SetWindowLongPtr(hDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
@@ -909,6 +1233,10 @@ ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     break;
                 }
             }
+            break;
+
+        case WM_DRAWITEM:
+            on_draw_item(hDlg, wParam, lParam);
             break;
 
         default:

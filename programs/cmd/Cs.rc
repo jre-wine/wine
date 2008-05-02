@@ -65,7 +65,7 @@ na terminálové zaøízení.\n"
 \n\
 Syntaxe: FOR %promìnná IN (skupina souborù) DO akce\n\
 \n\
-V programu wcmd není tøeba zdvojovat znak % pøed promìnnou pøi použití pøíkazu\n\ FOR v dávkovém souboru.\n"
+V programu cmd není tøeba zdvojovat znak % pøed promìnnou pøi použití pøíkazu\n\ FOR v dávkovém souboru.\n"
 
   WCMD_GOTO,
 "Pøíkaz GOTO pøedá výkon na jiné místo\n\
@@ -107,7 +107,7 @@ Je-li pøesouván adresáø, jsou pøesunuty všechny jeho podadresáøe a soubory.\n\
 MOVE selže jsou-li zdrojová a cílová oblast na jednotkách s jinými DOS písmeny diskù.\n"
 
   WCMD_PATH,
-"PATH zobrazí èi zmìní cesty, v nichž wcmd hledá soubory.\n\
+"PATH zobrazí èi zmìní cesty, v nichž cmd hledá soubory.\n\
 \n\
 PATH bez argumentù zobrazí momentálnì platné nastavení (pøed první zmìnou\n\
 je to hodnota pøevzatá ze souboru wine.conf). Ke zmìnì pøipojte k pøíkazu\n\
@@ -134,7 +134,7 @@ Tyto znaky mají v øetìzcích speciální význam:\n\
 $$    Znak dolaru         $_    Odøádkování         $b    Znak roury (|)\n\
 $d    Datum               $e    Escape              $g    Znaménko vìtší než\n\
 $l    Znaménko menší než  $n    Písmeno disku       $p    Cesta\n\
-$q    Rovnítko            $t    Èas                 $v    Verze wcmd\n\
+$q    Rovnítko            $t    Èas                 $v    Verze cmd\n\
 \n\
 PROMPT bez parametrù resetuje prompt na defaultní,\n\
 který je složen z cesty k souèasnému adresáøi (vèetnì písmena disku\n\
@@ -154,7 +154,7 @@ nejsou vykonány. REM je proto používán jako komentáøový pøíkaz.\n"
   WCMD_RMDIR,  "Nápovìda k RMDIR\n"
 
   WCMD_SET,
-"SET zobrazí nebo zmìní promìnné prostøedí wcmd.\n\
+"SET zobrazí nebo zmìní promìnné prostøedí cmd.\n\
 \n\
 SET bez argumentù ukáže souèasné nastavení prostøedí.\n\
 \n\
@@ -169,8 +169,8 @@ Syntaxe pro nastavení a zmìnu promìnné prostøedí je:\n\
       Ve Wine jsou viditelné promìnné prostøedí operaèního\n\
       systému, ve kterém je Wine spuštìn. Proto uvidíte mnohem víc promìnných\n\
       prostøedí, než u nativní Win32 implementace. Není možné\n\
-      mìnit promìnné prostøedí hostitelského operaèního systému z wcmd.\n"
-  
+      mìnit promìnné prostøedí hostitelského operaèního systému z cmd.\n"
+
   WCMD_SHIFT,
 "SHIFT užíván v dávkových souborech k odstranìní jednoho parametru ze zaèátku\n\
 jejich seznamu, takže parametr 2 se stane parametrem 1 atd. Nemá žádný\n\
@@ -178,7 +178,7 @@ efekt, je-li zadán na pøíkazovou øádku.\n"
 
   WCMD_TIME,   "Nápovìda k TIME\n"
 
-  WCMD_TITLE,  "Nastaví titulek okna wcmd, syntaxe TITLE [øetìzec]\n"
+  WCMD_TITLE,  "Nastaví titulek okna cmd, syntaxe TITLE [øetìzec]\n"
 
   WCMD_TYPE,
 "TYPE <soubor> vypíše <soubor> na konzolové zaøízení (nebo jinam,\n\
@@ -195,16 +195,18 @@ VERIFY		Zobrazí aktuální stav.\n\
 Pøíznak verify nemá ve Wine žádnou funkci.\n"
 
   WCMD_VER,
-"VER zobrazí verzi spuštìného programu wcmd.\n"
+"VER zobrazí verzi spuštìného programu cmd.\n"
 
   WCMD_VOL,    "Nápovìda k VOL\n"
+
+  WCMD_MORE,   "MORE displays output of files or piped input in pages.\n"
 
   WCMD_EXIT,
 "EXIT ukonèí bìžící sezení a vrátí kontrolu\n\
 operaènímu systému nebo pøíkazovému interpretu,\n\
-ze kterého byl wcmd spuštìn.\n"
+ze kterého byl cmd spuštìn.\n"
 
-  1000, "Vestavìné pøíkazy WCMD jsou:\n\
+  WCMD_ALLHELP, "Vestavìné pøíkazy CMD jsou:\n\
 ATTRIB\t\tZobrazí nebo nastaví DOS-ovské souborové attributy\n\
 CALL\t\tZavolá dávkový soubor z jiného\n\
 CD (CHDIR)\tZmìní pracovní adresáø\n\
@@ -217,6 +219,7 @@ DIR\t\tVypíše obsah adresáøe\n\
 ECHO\t\tVypíše text na terminál\n\
 HELP\t\tZobrazí detailní nápovìdu k tématu\n\
 MD (MKDIR)\tVytvoøí adresáø\n\
+MORE\t\tDisplay output in pages\n\
 MOVE\t\tPøesune soubor, skupinu souborù nebo adresáøový strom\n\
 PATH\t\tNastaví nebo ukáže prohledávané cesty\n\
 PROMPT\t\tZmìní výzvu pøíkazového øádku\n\
@@ -224,10 +227,45 @@ REN (RENAME)\tPøejmenuje soubor\n\
 RD (RMDIR)\tSmaže adresáø\n\
 SET\t\tNastaví nebo zobrazí promìnnou prostøedí\n\
 TIME\t\tUkáže èi nastaví systémový èas\n\
-TITLE\t\tNastaví titulek okna bìžící WCMD instance\n\
+TITLE\t\tNastaví titulek okna bìžící CMD instance\n\
 TYPE\t\tVypíše obsah textového souboru\n\
-VER\t\tZobrazí verzi WCMD\n\
+VER\t\tZobrazí verzi CMD\n\
 VOL\t\tUkáže jmenovku disku\n\
-EXIT\t\tUkonèí WCMD\n\n\
+EXIT\t\tUkonèí CMD\n\n\
 Zadejte HELP <pøíkaz> pro podrobnìjší informace o nìkterém z výše uvedených pøíkazù\n"
+
+  WCMD_CONFIRM, "Are you sure"
+  WCMD_YES, "Y"
+  WCMD_NO, "N"
+  WCMD_NOASSOC, "File association missing for extension %s\n"
+  WCMD_NOFTYPE, "No open command associated with file type '%s'\n"
+  WCMD_OVERWRITE, "Overwrite %s"
+  WCMD_MORESTR, "More..."
+  WCMD_TRUNCATEDLINE, "Line in Batch processing possibly truncated. Using:\n"
+  WCMD_NYI, "Not Yet Implemented\n\n"
+  WCMD_NOARG, "Argument missing\n"
+  WCMD_SYNTAXERR, "Syntax error\n"
+  WCMD_FILENOTFOUND, "%s : File Not Found\n"
+  WCMD_NOCMDHELP, "No help available for %s\n"
+  WCMD_NOTARGET, "Target to GOTO not found\n"
+  WCMD_CURRENTDATE, "Current Date is %s\n"
+  WCMD_CURRENTTIME, "Current Time is %s\n"
+  WCMD_NEWDATE, "Enter new date: "
+  WCMD_NEWTIME, "Enter new time: "
+  WCMD_MISSINGENV, "Environment variable %s not defined\n"
+  WCMD_READFAIL, "Failed to open '%s'\n"
+  WCMD_CALLINSCRIPT, "Cannot call batch label outside of a batch script\n"
+  WCMD_ALL, "A"
+  WCMD_DELPROMPT, "%s, Delete"
+  WCMD_ECHOPROMPT, "Echo is %s\n"
+  WCMD_VERIFYPROMPT, "Verify is %s\n"
+  WCMD_VERIFYERR, "Verify must be ON or OFF\n";
+  WCMD_ARGERR, "Parameter error\n"
+  WCMD_VOLUMEDETAIL, "Volume in drive %c is %s\nVolume Serial Number is %04x-%04x\n\n"
+  WCMD_VOLUMEPROMPT, "Volume label (11 characters, ENTER for none)?"
+  WCMD_NOPATH, "PATH not found\n"
+  WCMD_ANYKEY,"Press Return key to continue: "
+  WCMD_CONSTITLE,"Wine Command Prompt"
+  WCMD_VERSION,"CMD Version %s\n\n"
+  WCMD_MOREPROMPT, "More? "
 }

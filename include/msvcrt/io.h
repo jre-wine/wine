@@ -11,6 +11,8 @@
 #define __WINE_USE_MSVCRT
 #endif
 
+#include <pshpack8.h>
+
 #ifndef _WCHAR_T_DEFINED
 #define _WCHAR_T_DEFINED
 #ifndef __cplusplus
@@ -18,9 +20,15 @@ typedef unsigned short wchar_t;
 #endif
 #endif
 
-#ifndef _MSC_VER
-# ifndef __int64
-#  define __int64 long long
+#if defined(__x86_64__) && !defined(_WIN64)
+#define _WIN64
+#endif
+
+#if !defined(_MSC_VER) && !defined(__int64)
+# ifdef _WIN64
+#   define __int64 long
+# else
+#   define __int64 long long
 # endif
 #endif
 
@@ -182,5 +190,7 @@ extern int sopen(const char*,int,int,...) __attribute__((alias("_sopen")));
 #define open _open
 #define sopen _sopen
 #endif /* __GNUC__ */
+
+#include <poppack.h>
 
 #endif /* __WINE_IO_H */

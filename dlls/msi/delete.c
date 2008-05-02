@@ -147,7 +147,7 @@ static UINT DELETE_get_column_info( struct tagMSIVIEW *view,
 }
 
 static UINT DELETE_modify( struct tagMSIVIEW *view, MSIMODIFY eModifyMode,
-                MSIRECORD *rec )
+                           MSIRECORD *rec, UINT row )
 {
     MSIDELETEVIEW *dv = (MSIDELETEVIEW*)view;
 
@@ -185,13 +185,19 @@ static const MSIVIEWOPS delete_ops =
     DELETE_fetch_stream,
     NULL,
     NULL,
+    NULL,
+    NULL,
     DELETE_execute,
     DELETE_close,
     DELETE_get_dimensions,
     DELETE_get_column_info,
     DELETE_modify,
     DELETE_delete,
-    DELETE_find_matching_rows
+    DELETE_find_matching_rows,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
 };
 
 UINT DELETE_CreateView( MSIDATABASE *db, MSIVIEW **view, MSIVIEW *table )

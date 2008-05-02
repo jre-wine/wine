@@ -83,7 +83,7 @@ static void WINAPI con_strategy(CONTEXT86*ctx);
 static void WINAPI con_interrupt(CONTEXT86*ctx);
 
 /* devices */
-static WINEDEV devs[] =
+static const WINEDEV devs[] =
 {
   { "NUL     ",
     ATTR_CHAR|ATTR_NUL|ATTR_DEVICE,
@@ -110,7 +110,7 @@ typedef struct
 
 #define DOS_DATASEG_OFF(xxx) FIELD_OFFSET(DOS_DATASEG, xxx)
 
-DWORD DOS_LOLSeg;
+static DWORD DOS_LOLSeg;
 
 static struct _DOS_LISTOFLISTS * DOSMEM_LOL(void)
 {

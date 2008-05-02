@@ -7,6 +7,7 @@ MODULE    = none
 EXTRALIBS = @LIBPOLL@
 
 C_SRCS = \
+	async.c \
 	atom.c \
 	change.c \
 	class.c \
@@ -18,12 +19,14 @@ C_SRCS = \
 	context_sparc.c \
 	context_x86_64.c \
 	debugger.c \
+	device.c \
 	directory.c \
 	event.c \
 	fd.c \
 	file.c \
 	handle.c \
 	hook.c \
+	mach.c \
 	mailslot.c \
 	main.c \
 	mapping.c \
@@ -31,6 +34,7 @@ C_SRCS = \
 	named_pipe.c \
 	object.c \
 	process.c \
+	procfs.c \
 	ptrace.c \
 	queue.c \
 	region.c \
@@ -51,7 +55,7 @@ C_SRCS = \
 	window.c \
 	winstation.c
 
-PROGRAMS = wineserver
+PROGRAMS = wineserver wineserver-installed
 MANPAGES = wineserver.man
 
 INSTALLDIRS = $(DESTDIR)$(bindir) $(DESTDIR)$(mandir)/man$(prog_manext)
@@ -61,10 +65,13 @@ all: $(PROGRAMS) $(MANPAGES)
 @MAKE_RULES@
 
 wineserver: $(OBJS)
-	$(CC) -o $@ $(OBJS) $(LIBWINE_LDFLAGS) $(LIBPORT) $(LDFLAGS) $(LIBS)
+	$(CC) -o $@ $(OBJS) $(LIBWINE) $(LIBPORT) $(LDFLAGS) $(LIBS) $(LDRPATH_LOCAL)
 
-install:: $(PROGRAMS) $(MANPAGES) $(INSTALLDIRS)
-	$(INSTALL_PROGRAM) wineserver $(DESTDIR)$(bindir)/wineserver
+wineserver-installed: $(OBJS)
+	$(CC) -o $@ $(OBJS) $(LIBWINE) $(LIBPORT) $(LDFLAGS) $(LIBS) $(LDRPATH_INSTALL)
+
+install:: wineserver-installed $(MANPAGES) $(INSTALLDIRS)
+	$(INSTALL_PROGRAM) wineserver-installed $(DESTDIR)$(bindir)/wineserver
 	$(INSTALL_DATA) wineserver.man $(DESTDIR)$(mandir)/man$(prog_manext)/wineserver.$(prog_manext)
 
 uninstall::

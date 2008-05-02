@@ -47,17 +47,16 @@ typedef struct _TEB
     ULONG        CurrentLocale;                /* 0c4 */
     ULONG        FpSoftwareStatusRegister;     /* 0c8 */
     PVOID        SystemReserved1[54];          /* 0cc */
-    PVOID        Spare1;                       /* 1a4 */
-    LONG         ExceptionCode;                /* 1a8 */
-    BYTE         SpareBytes1[40];              /* 1ac */
+    LONG         ExceptionCode;                /* 1a4 */
+    ACTIVATION_CONTEXT_STACK ActivationContextStack; /* 1a8 */
+    BYTE         SpareBytes1[24];              /* 1bc */
     PVOID        SystemReserved2[10];          /* 1d4 */
 
     /* The following are Wine-specific fields (NT: GdiTebBatch) */
-    DWORD        num_async_io;        /* 1fc number of pending async I/O in the server */
-    ULONG_PTR    dpmi_vif;            /* 200 protected mode virtual interrupt flag */
-    DWORD        vm86_pending;        /* 204 data for vm86 mode */
+    DWORD        dpmi_vif;            /* 1fc protected mode virtual interrupt flag */
+    ULONG_PTR    vm86_pending;        /* 200 data for vm86 mode */
     /* here is plenty space for wine specific fields (don't forget to change pad6!!) */
-    DWORD        pad6[309];           /* 208 */
+    DWORD        pad6[310];           /* 204 */
 
     ULONG        gdiRgn;                     /* 6dc */
     ULONG        gdiPen;                     /* 6e0 */

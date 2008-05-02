@@ -29,7 +29,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wine/unicode.h"
 #include "msvcrt.h"
@@ -420,11 +419,10 @@ char* CDECL _getcwd(char * buf, int size)
 
   if (!buf)
   {
-    if (size < 0)
-      return _strdup(dir);
-    return msvcrt_strndup(dir,size);
+      if (size <= dir_len) size = dir_len + 1;
+      if (!(buf = MSVCRT_malloc( size ))) return NULL;
   }
-  if (dir_len >= size)
+  else if (dir_len >= size)
   {
     *MSVCRT__errno() = MSVCRT_ERANGE;
     return NULL; /* buf too small */
@@ -448,9 +446,8 @@ MSVCRT_wchar_t* CDECL _wgetcwd(MSVCRT_wchar_t * buf, int size)
 
   if (!buf)
   {
-    if (size < 0)
-      return _wcsdup(dir);
-    return msvcrt_wstrndup(dir,size);
+      if (size <= dir_len) size = dir_len + 1;
+      if (!(buf = MSVCRT_malloc( size * sizeof(WCHAR) ))) return NULL;
   }
   if (dir_len >= size)
   {
@@ -768,7 +765,7 @@ MSVCRT_wchar_t * CDECL _wfullpath(MSVCRT_wchar_t * absPath, const MSVCRT_wchar_t
     return NULL;
   }
 
-  TRACE(":resolving relative path '%s'\n",debugstr_w(relPath));
+  TRACE(":resolving relative path %s\n",debugstr_w(relPath));
 
   rc = GetFullPathNameW(relPath,size,buffer,&lastpart);
 
@@ -856,7 +853,7 @@ VOID CDECL _makepath(char * path, const char * drive,
                      const char *directory, const char * filename,
                      const char * extension)
 {
-    char ch;
+    char *p = path;
 
     TRACE("(%s %s %s %s)\n", debugstr_a(drive), debugstr_a(directory),
           debugstr_a(filename), debugstr_a(extension) );
@@ -864,28 +861,30 @@ VOID CDECL _makepath(char * path, const char * drive,
     if ( !path )
         return;
 
-    path[0] = '\0';
     if (drive && drive[0])
     {
-        path[0] = drive[0];
-        path[1] = ':';
-        path[2] = 0;
+        *p++ = drive[0];
+        *p++ = ':';
+        *p = 0;
     }
     if (directory && directory[0])
     {
-        strcat(path, directory);
-        ch = path[strlen(path)-1];
-        if (ch != '/' && ch != '\\')
-            strcat(path,"\\");
+        strcpy(p, directory);
+        p += strlen(directory) - 1;
+        if (*p != '/' && *p != '\\') {
+            strcat(p, "\\");
+            p++;
+        }
+        p++;
     }
     if (filename && filename[0])
     {
-        strcat(path, filename);
+        strcpy(p, filename);
         if (extension && extension[0])
         {
             if ( extension[0] != '.' )
-                strcat(path,".");
-            strcat(path,extension);
+                strcat(p,".");
+            strcat(p,extension);
         }
     }
     TRACE("returning %s\n",path);

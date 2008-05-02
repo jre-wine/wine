@@ -10,6 +10,7 @@ EXTRADEFS = -DCOM_NO_WINDOWS_H
 
 C_SRCS = \
 	conpoint.c \
+	editor.c \
 	hlink.c \
 	htmlbody.c \
 	htmldoc.c \
@@ -19,15 +20,19 @@ C_SRCS = \
 	htmlinput.c \
 	htmlnode.c \
 	htmlselect.c \
+	htmlstyle.c \
+	htmlstylesheet.c \
 	htmltextcont.c \
 	htmltextarea.c \
+	htmlwindow.c \
 	install.c \
 	loadopts.c \
 	main.c \
 	navigate.c \
 	nsembed.c \
+	nsevents.c \
 	nsio.c \
-	nsservice.c\
+	nsservice.c \
 	olecmd.c \
 	oleobj.c \
 	olewnd.c \
@@ -44,7 +49,5 @@ RC_SRCS = rsrc.rc
 IDL_H_SRCS = nsiface.idl
 
 @MAKE_DLL_RULES@
-
-rsrc.res: mshtml.inf blank.htm
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend

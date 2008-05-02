@@ -2,7 +2,7 @@
  * Wine command prompt
  * Norwegian Bokmål Language Support
  *
- * Copyright (C) 2005 Alexander N. Sørnes <alex@thehandofagony.com>
+ * Copyright (C) 2005-2007 Alexander N. Sørnes <alex@thehandofagony.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -61,7 +61,7 @@ et @-tegn foran den.\n"
 \n\
 Syntaks: FOR %variabel IN (sett) DO kommando\n\
 \n\
-Kravet om to %-tegn når FOR brukes i en satsvis fil finnes ikke i WCMD.\n"
+Kravet om to %-tegn når FOR brukes i en satsvis fil finnes ikke i Wines CMD.\n"
 
   WCMD_GOTO,
 "GOTO-kommandoen flytter kjøringen til et annet sted i en satsvis fil.\n\
@@ -79,7 +79,7 @@ GOTO har ingen effekt når den brukes interaktivt.\n"
   WCMD_IF,
 "IF brukes til å kjøre en kommando på betingelser.\n\
 \n\
-Syntax:	IF [NOT] EXIST filnavn kommando\n\
+Bruk:	IF [NOT] EXIST filnavn kommando\n\
 	IF [NOT] streng1==streng2 kommando\n\
 	IF [NOT] ERRORLEVEL nummer kommando\n\
 \n\
@@ -104,7 +104,7 @@ MOVE feiler hvis den gamle og nye plasseringen har forskjellige\n\
 stasjonsbokstaver.\n"
 
   WCMD_PATH,
-"PATH viser eller endrer WCMDs søkesti.\n\
+"PATH viser eller endrer CMDs søkesti.\n\
 \n\
 Å skrive inn PATH viser den gjeldende PATH-innstillingen (dette er\n\
 i begynnelsen verdien oppgitt i filen «wine.conf»). Etterfølg PATH-\n\
@@ -130,7 +130,7 @@ Følgende tegnstrenger har den spesielle betydningen som vises:\n\
 $$   Dollar-tegn       $_   Linjemating         $b   Rørtegn sign (|)\n\
 $d   Gjeldende dato    $e   Escape              $g   Større enn-tegn\n\
 $l   Mindre enn-tegn   $n   Gjeldende stasjon   $p   Gjeldende sti\n\
-$q   Likhetstegn       $t   Gjeldende tid       $v   WCMD-versjon\n\
+$q   Likhetstegn       $t   Gjeldende tid       $v   CMD-versjon\n\
 \n\
 Merk at å bruke PROMPT-kommandoen uten en klartegn-streng tilbakestiller\n\
 klartegnet til standardverdien, som er arbeidskatalogen (inkludert\n\
@@ -151,7 +151,7 @@ fil.\n"
   WCMD_RMDIR,  "Hjelp til RMDIR\n"
 
   WCMD_SET,
-"SET viser eller endrer miljøvariablene i WCMD.\n\
+"SET viser eller endrer miljøvariablene i CMD.\n\
 \n\
 SET uten parametere viser alle gjeldende miljøvariabler.\n\
 \n\
@@ -165,7 +165,7 @@ mellomrom.\n\
 \n\
 I Wine er miljøvariablene i det underliggende operativsystemet\n\ inkludert i Win32-miljøet, og det er derfor vanligvis mange flere\n\
 verdier enn i et vanlig Win32-miljø. Vær oppmerksom på at det ikke går\n\
-an å endre mijøet i det underliggende operativsystemet fra WCMD.\n"
+an å endre mijøet i det underliggende operativsystemet fra CMD.\n"
 
   WCMD_SHIFT,
 "SHIFT bruker i en satsvis fil for å fjerne den første parameteren i en\n\
@@ -174,7 +174,7 @@ effekt hvis det brukes fra kommandolinjen.\n"
 
   WCMD_TIME,   "Hjelp til TIME\n"
 
-  WCMD_TITLE,  "Angir tittelen for WCMD-vinduet, syntaksen er\n\
+  WCMD_TITLE,  "Angir tittelen for CMD-vinduet, syntaksen er\n\
   TITLE [streng]\n"
 
   WCMD_TYPE,
@@ -191,15 +191,22 @@ VERIFY		Viser ON hvis på ellerr OFF hvis av.\n\
 «Verify»-flagget har ingen funksjon i Wine.\n"
 
   WCMD_VER,
-"VER viser versjonnummeret til WCMD\n"
+"VER viser versjonnummeret til CMD\n"
 
   WCMD_VOL,    "Hjelp til VOL\n"
 
+  WCMD_PUSHD,  "PUSHD <katalognavn> lagrer arbeidskatalogen i en stabel, og endrer deretter\n\
+arbeidskatalog til den som er oppgitt.\n"
+
+  WCMD_POPD,   "POPD endrer arbeidskatalog til den som sist ble brukt med PUSHD.\n"
+
+  WCMD_MORE,   "MORE lar deg bla gjennom innholdet i filer eller inndata i rør.\n"
+
   WCMD_EXIT,
 "EXIT avslutter gjeldende kommandoøkt og returnerer til operativsystemet\n\
-eller skallet WCMD ble startet fra.\n"
+eller skallet CMD ble startet fra.\n"
 
-  1000, "Innebygde kommandoer i WCMD:\n\
+  WCMD_ALLHELP, "Innebygde kommandoer i CMD:\n\
 ATTRIB\t\tViser eller endrer DOS-filattributter\n\
 CALL\t\tKall en satsvis fil inne i en annen\n\
 CD (CHDIR)\tBytter arbeidskatalog\n\
@@ -212,17 +219,55 @@ DIR\t\tViser innholdet i en katalgo\n\
 ECHO\t\tKopierer tekst direkte til konsoll-utdataen\n\
 HELP\t\tViser en kort hjelpebeskrivelse om et emne\n\
 MD (MKDIR)\tLager en underkatalog\n\
+MORE\t\tDisplay output in pages\n\
 MOVE\t\tFlytter en eller flere filer, eller en katalogtre\n\
 PATH\t\tEndrer eller viser søkestien\n\
+POPD\t\tEndrer arbeidskatalog til den sist lagret med PUSHD\n\
 PROMPT\t\tEndrer kommando-klartegnet\n\
+PUSHD\t\tEndrer arbeidskatalog og lagrer den gjeldende\n\
 REN (RENAME)\tGir nytt navn til en fil\n\
 RD (RMDIR)\tSletter en underkatalog\n\
 SET\t\tAngir eller viser miljøvariabler\n\
 TIME\t\tAngir eller viser gjeldende systemtid\n\
-TITLE\t\tAngir vindustittelen for WCMD-økten\n\
+TITLE\t\tAngir vindustittelen for CMD-økten\n\
 TYPE\t\tViser innholdet i en fil\n\
-VER\t\tViser WCMDs versjonnummer\n\
+VER\t\tViser CMDs versjonnummer\n\
 VOL\t\tViser volumnavnet til en stasjon\n\
-EXIT\t\tAvslutter WCMD\n\n\
+EXIT\t\tAvslutter CMD\n\n\
 Skriv «HELP <kommando>» for mer informasjon om kommandoene ovenfor\n"
+
+  WCMD_CONFIRM, "Er du sikker"
+  WCMD_YES, "J"
+  WCMD_NO, "N"
+  WCMD_NOASSOC, "Manglende filtilknytning for etternavnet %s\n"
+  WCMD_NOFTYPE, "Ingen åpnekommando er tilknyttet filtypene '%s'\n"
+  WCMD_OVERWRITE, "Overwrite %s"
+  WCMD_MORESTR, "Mer . . ."
+  WCMD_TRUNCATEDLINE, "Line in Batch processing possibly truncated. Using:\n"
+  WCMD_NYI, "Not Yet Implemented\n\n"
+  WCMD_NOARG, "Argument missing\n"
+  WCMD_SYNTAXERR, "Syntax error\n"
+  WCMD_FILENOTFOUND, "%s : File Not Found\n"
+  WCMD_NOCMDHELP, "No help available for %s\n"
+  WCMD_NOTARGET, "Target to GOTO not found\n"
+  WCMD_CURRENTDATE, "Current Date is %s\n"
+  WCMD_CURRENTTIME, "Current Time is %s\n"
+  WCMD_NEWDATE, "Enter new date: "
+  WCMD_NEWTIME, "Enter new time: "
+  WCMD_MISSINGENV, "Environment variable %s not defined\n"
+  WCMD_READFAIL, "Failed to open '%s'\n"
+  WCMD_CALLINSCRIPT, "Cannot call batch label outside of a batch script\n"
+  WCMD_ALL, "A"
+  WCMD_DELPROMPT, "%s, Delete"
+  WCMD_ECHOPROMPT, "Echo is %s\n"
+  WCMD_VERIFYPROMPT, "Verify is %s\n"
+  WCMD_VERIFYERR, "Verify must be ON or OFF\n";
+  WCMD_ARGERR, "Parameter error\n"
+  WCMD_VOLUMEDETAIL, "Volume in drive %c is %s\nVolume Serial Number is %04x-%04x\n\n"
+  WCMD_VOLUMEPROMPT, "Volume label (11 characters, ENTER for none)?"
+  WCMD_NOPATH, "PATH not found\n"
+  WCMD_ANYKEY,"Press Return key to continue: "
+  WCMD_CONSTITLE,"Wine Command Prompt"
+  WCMD_VERSION,"CMD Version %s\n\n"
+  WCMD_MOREPROMPT, "More? "
 }

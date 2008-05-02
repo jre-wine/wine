@@ -47,18 +47,18 @@ int ME_GetTextLength(ME_TextEditor *editor)
 }
 
 
-int ME_GetTextLengthEx(ME_TextEditor *editor, GETTEXTLENGTHEX *how)
+int ME_GetTextLengthEx(ME_TextEditor *editor, const GETTEXTLENGTHEX *how)
 {
   int length;
-  
+
   if (how->flags & GTL_PRECISE && how->flags & GTL_CLOSE)
     return E_INVALIDARG;
   if (how->flags & GTL_NUMCHARS && how->flags & GTL_NUMBYTES)
     return E_INVALIDARG;
   
   length = ME_GetTextLength(editor);
-  
-  if (how->flags & GTL_USECRLF)
+
+  if ((GetWindowLongW(editor->hWnd, GWL_STYLE) & ES_MULTILINE) && (how->flags & GTL_USECRLF))
     length += editor->nParagraphs;
   
   if (how->flags & GTL_NUMBYTES)
@@ -78,41 +78,81 @@ int ME_GetTextLengthEx(ME_TextEditor *editor, GETTEXTLENGTHEX *how)
 }
 
 
-void ME_SetSelection(ME_TextEditor *editor, int from, int to)
+int ME_SetSelection(ME_TextEditor *editor, int from, int to)
 {
+  int selectionEnd = 0;
+  const int len = ME_GetTextLength(editor);
+
+  /* all negative values are effectively the same */
+  if (from < 0)
+    from = -1;
+  if (to < 0)
+    to = -1;
+
+  /* select all */
   if (from == 0 && to == -1)
   {
-    editor->pCursors[1].pRun = ME_FindItemFwd(editor->pBuffer->pFirst, diRun); 
+    editor->pCursors[1].pRun = ME_FindItemFwd(editor->pBuffer->pFirst, diRun);
     editor->pCursors[1].nOffset = 0; 
     editor->pCursors[0].pRun = ME_FindItemBack(editor->pBuffer->pLast, diRun); 
-    editor->pCursors[0].nOffset = 0; 
+    editor->pCursors[0].nOffset = 0;
     ME_InvalidateSelection(editor);
     ME_ClearTempStyle(editor);
-    return;
+    return len + 1;
   }
-  if (from == -1 && to == -1)	/*-1,-1 means put the selection at the end of the text */
+
+  /* if both values are equal and also out of bound, that means to */
+  /* put the selection at the end of the text */
+  if ((from == to) && (to < 0 || to > len))
+  {
+    selectionEnd = 1;
+  }
+  else
+  {
+    /* if from is negative and to is positive then selection is */
+    /* deselected and caret moved to end of the current selection */
+    if (from < 0)
+    {
+      int start, end;
+      ME_GetSelection(editor, &start, &end);
+      editor->pCursors[1] = editor->pCursors[0];
+      ME_Repaint(editor);
+      ME_ClearTempStyle(editor);
+      return end;
+    }
+
+    /* adjust to if it's a negative value */
+    if (to < 0)
+      to = len + 1;
+
+    /* flip from and to if they are reversed */
+    if (from>to)
+    {
+      int tmp = from;
+      from = to;
+      to = tmp;
+    }
+
+    /* after fiddling with the values, we find from > len && to > len */
+    if (from > len)
+      selectionEnd = 1;
+    /* special case with to too big */
+    else if (to > len)
+      to = len + 1;
+  }
+
+  if (selectionEnd)
   {
     editor->pCursors[1].pRun = editor->pCursors[0].pRun = ME_FindItemBack(editor->pBuffer->pLast, diRun);
     editor->pCursors[1].nOffset = editor->pCursors[0].nOffset = 0;
     ME_InvalidateSelection(editor);
     ME_ClearTempStyle(editor);
-    return;
+    return len;
   }
-  if (from == -1)
-  {
-    editor->pCursors[1] = editor->pCursors[0]; 
-    ME_Repaint(editor);
-    ME_ClearTempStyle(editor);
-    return;
-  }
-  if (from>to)
-  {
-    int tmp = from;
-    from = to;
-    to = tmp;
-  }
+
   ME_RunOfsFromCharOfs(editor, from, &editor->pCursors[1].pRun, &editor->pCursors[1].nOffset);
-  ME_RunOfsFromCharOfs(editor, to, &editor->pCursors[0].pRun, &editor->pCursors[0].nOffset);  
+  ME_RunOfsFromCharOfs(editor, to, &editor->pCursors[0].pRun, &editor->pCursors[0].nOffset);
+  return to;
 }
 
 
@@ -190,23 +230,31 @@ ME_MoveCaret(ME_TextEditor *editor)
 {
   int x, y, height;
 
-  ME_WrapMarkedParagraphs(editor);
+  if (ME_WrapMarkedParagraphs(editor))
+    ME_UpdateScrollBar(editor);
   ME_GetCursorCoordinates(editor, &editor->pCursors[0], &x, &y, &height);
-  CreateCaret(editor->hWnd, NULL, 0, height);
-  SetCaretPos(x, y);
+  if(editor->bHaveFocus)
+  {
+    CreateCaret(editor->hWnd, NULL, 0, height);
+    SetCaretPos(x, y);
+  }
 }
 
 
 void ME_ShowCaret(ME_TextEditor *ed)
 {
   ME_MoveCaret(ed);
-  ShowCaret(ed->hWnd);
+  if(ed->bHaveFocus)
+    ShowCaret(ed->hWnd);
 }
 
 void ME_HideCaret(ME_TextEditor *ed)
 {
-  HideCaret(ed->hWnd);
-  DestroyCaret();
+  if(ed->bHaveFocus)
+  {
+    HideCaret(ed->hWnd);
+    DestroyCaret();
+  }
 }
 
 void ME_InternalDeleteText(ME_TextEditor *editor, int nOfs, 
@@ -326,6 +374,8 @@ void ME_DeleteTextAtCursor(ME_TextEditor *editor, int nCursor,
   int nChars)
 {  
   assert(nCursor>=0 && nCursor<editor->nCursors);
+  /* text operations set modified state */
+  editor->nModifyStep = 1;
   ME_InternalDeleteText(editor, ME_GetCursorOfs(editor, nCursor), nChars);
 }
 
@@ -391,15 +441,20 @@ void ME_InsertTextFromCursor(ME_TextEditor *editor, int nCursor,
 {
   const WCHAR *pos;
   ME_Cursor *p = NULL;
-  /* FIXME: is this too slow? */
-  /* Didn't affect performance for WM_SETTEXT (around 50sec/30K) */
-  int freeSpace = editor->nTextLimit - ME_GetTextLength(editor);
-
-  assert(style);
+  int freeSpace;
 
   /* FIXME really HERE ? */
   if (ME_IsSelection(editor))
     ME_DeleteSelection(editor);
+
+  /* FIXME: is this too slow? */
+  /* Didn't affect performance for WM_SETTEXT (around 50sec/30K) */
+  freeSpace = editor->nTextLimit - ME_GetTextLength(editor);
+
+  /* text operations set modified state */
+  editor->nModifyStep = 1;
+
+  assert(style);
 
   assert(nCursor>=0 && nCursor<editor->nCursors);
   if (len == -1)
@@ -1094,8 +1149,8 @@ static int ME_GetSelCursor(ME_TextEditor *editor, int dir)
   else
     return 1;
 }
-      
-BOOL ME_UpdateSelection(ME_TextEditor *editor, ME_Cursor *pTempCursor)
+
+BOOL ME_UpdateSelection(ME_TextEditor *editor, const ME_Cursor *pTempCursor)
 {
   ME_Cursor old_anchor = editor->pCursors[1];
   

@@ -51,10 +51,52 @@ DWORD mshtml_tls = 0;
 
 static HINSTANCE shdoclc = NULL;
 
+static ITypeLib *typelib;
+static ITypeInfo *typeinfos[LAST_tid];
+
+static REFIID tid_ids[] = {
+    &IID_IHTMLWindow2
+};
+
+HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo)
+{
+    HRESULT hres;
+
+    if(!typelib) {
+        ITypeLib *tl;
+
+        hres = LoadRegTypeLib(&LIBID_MSHTML, 4, 0, LOCALE_SYSTEM_DEFAULT, &tl);
+        if(FAILED(hres)) {
+            ERR("LoadRegTypeLib failed: %08x\n", hres);
+            return hres;
+        }
+
+        if(InterlockedCompareExchangePointer((void**)&typelib, tl, NULL))
+            ITypeLib_Release(tl);
+    }
+
+    if(!typeinfos[tid]) {
+        ITypeInfo *typeinfo;
+
+        hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &typeinfo);
+        if(FAILED(hres)) {
+            ERR("GetTypeInfoOfGuid failed: %08x\n", hres);
+            return hres;
+        }
+
+        if(InterlockedCompareExchangePointer((void**)(typeinfos+tid), typeinfo, NULL))
+            ITypeInfo_Release(typeinfo);
+    }
+
+    *typeinfo = typeinfos[tid];
+    return S_OK;
+}
+
 static void thread_detach(void)
 {
-    thread_data_t *thread_data = get_thread_data(FALSE);
+    thread_data_t *thread_data;
 
+    thread_data = get_thread_data(FALSE);
     if(!thread_data)
         return;
 
@@ -62,6 +104,26 @@ static void thread_detach(void)
         DestroyWindow(thread_data->thread_hwnd);
 
     mshtml_free(thread_data);
+}
+
+static void process_detach(void)
+{
+    close_gecko();
+
+    if(typelib) {
+        unsigned i;
+
+        for(i=0; i < sizeof(typeinfos)/sizeof(*typeinfos); i++)
+            if(typeinfos[i])
+                ITypeInfo_Release(typeinfos[i]);
+
+        ITypeLib_Release(typelib);
+    }
+
+    if(shdoclc)
+        FreeLibrary(shdoclc);
+    if(mshtml_tls)
+        TlsFree(mshtml_tls);
 }
 
 HINSTANCE get_shdoclc(void)
@@ -82,11 +144,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
         hInst = hInstDLL;
         break;
     case DLL_PROCESS_DETACH:
-        close_gecko();
-        if(shdoclc)
-            FreeLibrary(shdoclc);
-        if(mshtml_tls)
-            TlsFree(mshtml_tls);
+        process_detach();
         break;
     case DLL_THREAD_DETACH:
         thread_detach();
@@ -375,6 +433,26 @@ static HRESULT register_server(BOOL do_register)
 
     for(i=0; i < sizeof(pse)/sizeof(pse[0]); i++)
         mshtml_free(pse[i].pszValue);
+
+    if(FAILED(hres)) {
+        ERR("RegInstall failed: %08x\n", hres);
+        return hres;
+    }
+
+    if(do_register) {
+        ITypeLib *typelib;
+
+        static const WCHAR wszMSHTML[] = {'m','s','h','t','m','l','.','t','l','b',0};
+
+        hres = LoadTypeLibEx(wszMSHTML, REGKIND_REGISTER, &typelib);
+        if(SUCCEEDED(hres))
+            ITypeLib_Release(typelib);
+    }else {
+        hres = UnRegisterTypeLib(&LIBID_MSHTML, 4, 0, LOCALE_SYSTEM_DEFAULT, SYS_WIN32);
+    }
+
+    if(FAILED(hres))
+        ERR("typelib registration failed: %08x\n", hres);
 
     return hres;
 }

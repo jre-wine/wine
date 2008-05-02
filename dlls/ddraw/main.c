@@ -36,11 +36,9 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winnls.h"
 #include "winerror.h"
 #include "wingdi.h"
 #include "wine/exception.h"
-#include "excpt.h"
 #include "winreg.h"
 
 #include "ddraw.h"
@@ -61,15 +59,14 @@ WINED3DSURFTYPE DefaultSurfaceType = SURFACE_UNKNOWN;
 /* DDraw list and critical section */
 static struct list global_ddraw_list = LIST_INIT(global_ddraw_list);
 
-static CRITICAL_SECTION ddraw_list_cs;
-static CRITICAL_SECTION_DEBUG ddraw_list_cs_debug =
+static CRITICAL_SECTION_DEBUG ddraw_cs_debug =
 {
-    0, 0, &ddraw_list_cs,
-    { &ddraw_list_cs_debug.ProcessLocksList, 
-    &ddraw_list_cs_debug.ProcessLocksList },
-    0, 0, { (DWORD_PTR)(__FILE__ ": ddraw_list_cs") }
+    0, 0, &ddraw_cs,
+    { &ddraw_cs_debug.ProcessLocksList,
+    &ddraw_cs_debug.ProcessLocksList },
+    0, 0, { (DWORD_PTR)(__FILE__ ": ddraw_cs") }
 };
-static CRITICAL_SECTION ddraw_list_cs = { &ddraw_list_cs_debug, -1, 0, 0, 0, 0 };
+CRITICAL_SECTION ddraw_cs = { &ddraw_cs_debug, -1, 0, 0, 0, 0 };
 
 /***********************************************************************
  *
@@ -95,7 +92,7 @@ static CRITICAL_SECTION ddraw_list_cs = { &ddraw_list_cs_debug, -1, 0, 0, 0, 0 }
  *
  ***********************************************************************/
 static HRESULT
-DDRAW_Create(GUID *guid,
+DDRAW_Create(const GUID *guid,
              void **DD,
              IUnknown *UnkOuter,
              REFIID iid)
@@ -149,6 +146,7 @@ DDRAW_Create(GUID *guid,
      */
     ICOM_INIT_INTERFACE(This, IDirectDraw,  IDirectDraw1_Vtbl);
     ICOM_INIT_INTERFACE(This, IDirectDraw2, IDirectDraw2_Vtbl);
+    ICOM_INIT_INTERFACE(This, IDirectDraw3, IDirectDraw3_Vtbl);
     ICOM_INIT_INTERFACE(This, IDirectDraw4, IDirectDraw4_Vtbl);
     ICOM_INIT_INTERFACE(This, IDirectDraw7, IDirectDraw7_Vtbl);
     ICOM_INIT_INTERFACE(This, IDirect3D,  IDirect3D1_Vtbl);
@@ -163,9 +161,9 @@ DDRAW_Create(GUID *guid,
     This->ImplType = DefaultSurfaceType;
 
     /* Get the current screen settings */
-    hDC = CreateDCA("DISPLAY", NULL, NULL, NULL);
+    hDC = GetDC(0);
     This->orig_bpp = GetDeviceCaps(hDC, BITSPIXEL) * GetDeviceCaps(hDC, PLANES);
-    DeleteDC(hDC);
+    ReleaseDC(0, hDC);
     This->orig_width = GetSystemMetrics(SM_CXSCREEN);
     This->orig_height = GetSystemMetrics(SM_CYSCREEN);
 
@@ -173,7 +171,10 @@ DDRAW_Create(GUID *guid,
     {
         hWineD3D = LoadLibraryA("wined3d");
         if (hWineD3D)
+        {
             pWineDirect3DCreate = (fnWineDirect3DCreate) GetProcAddress(hWineD3D, "WineDirect3DCreate");
+            pWineDirect3DCreateClipper = (fnWineDirect3DCreateClipper) GetProcAddress(hWineD3D, "WineDirect3DCreateClipper");
+        }
     }
 
     if (!hWineD3D)
@@ -316,10 +317,7 @@ DDRAW_Create(GUID *guid,
 #undef FX_CAPS
 
     list_init(&This->surface_list);
-
-    EnterCriticalSection(&ddraw_list_cs);
     list_add_head(&global_ddraw_list, &This->ddraw_list_entry);
-    LeaveCriticalSection(&ddraw_list_cs);
 
     /* Call QueryInterface to get the pointer to the requested interface. This also initializes
      * The required refcount
@@ -331,6 +329,7 @@ err_out:
     /* Let's hope we never need this ;) */
     if(wineD3DDevice) IWineD3DDevice_Release(wineD3DDevice);
     if(wineD3D) IWineD3D_Release(wineD3D);
+    if(This) HeapFree(GetProcessHeap(), 0, This->decls);
     HeapFree(GetProcessHeap(), 0, This);
     return hr;
 }
@@ -346,12 +345,16 @@ err_out:
  ***********************************************************************/
 HRESULT WINAPI
 DirectDrawCreate(GUID *GUID,
-                 IDirectDraw **DD,
+                 LPDIRECTDRAW *DD,
                  IUnknown *UnkOuter)
 {
+    HRESULT hr;
     TRACE("(%s,%p,%p)\n", debugstr_guid(GUID), DD, UnkOuter);
 
-    return DDRAW_Create(GUID, (void **) DD, UnkOuter, &IID_IDirectDraw);
+    EnterCriticalSection(&ddraw_cs);
+    hr = DDRAW_Create(GUID, (void **) DD, UnkOuter, &IID_IDirectDraw);
+    LeaveCriticalSection(&ddraw_cs);
+    return hr;
 }
 
 /***********************************************************************
@@ -365,16 +368,20 @@ DirectDrawCreate(GUID *GUID,
  ***********************************************************************/
 HRESULT WINAPI
 DirectDrawCreateEx(GUID *GUID,
-                   void **DD,
+                   LPVOID *DD,
                    REFIID iid,
                    IUnknown *UnkOuter)
 {
+    HRESULT hr;
     TRACE("(%s,%p,%s,%p)\n", debugstr_guid(GUID), DD, debugstr_guid(iid), UnkOuter);
 
     if (!IsEqualGUID(iid, &IID_IDirectDraw7))
         return DDERR_INVALIDPARAMS;
 
-    return DDRAW_Create(GUID, DD, UnkOuter, iid);
+    EnterCriticalSection(&ddraw_cs);
+    hr = DDRAW_Create(GUID, DD, UnkOuter, iid);
+    LeaveCriticalSection(&ddraw_cs);
+    return hr;
 }
 
 /***********************************************************************
@@ -399,7 +406,7 @@ DirectDrawCreateEx(GUID *GUID,
  ***********************************************************************/
 HRESULT WINAPI
 DirectDrawEnumerateA(LPDDENUMCALLBACKA Callback,
-                     void *Context)
+                     LPVOID Context)
 {
     BOOL stop = FALSE;
 
@@ -433,7 +440,7 @@ DirectDrawEnumerateA(LPDDENUMCALLBACKA Callback,
  ***********************************************************************/
 HRESULT WINAPI
 DirectDrawEnumerateExA(LPDDENUMCALLBACKEXA Callback,
-                       void *Context,
+                       LPVOID Context,
                        DWORD Flags)
 {
     BOOL stop = FALSE;
@@ -504,7 +511,9 @@ CF_CreateDirectDraw(IUnknown* UnkOuter, REFIID iid,
 
     TRACE("(%p,%s,%p)\n", UnkOuter, debugstr_guid(iid), obj);
 
+    EnterCriticalSection(&ddraw_cs);
     hr = DDRAW_Create(NULL, obj, UnkOuter, iid);
+    LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
 
@@ -529,11 +538,18 @@ CF_CreateDirectDrawClipper(IUnknown* UnkOuter, REFIID riid,
     HRESULT hr;
     IDirectDrawClipper *Clip;
 
+    EnterCriticalSection(&ddraw_cs);
     hr = DirectDrawCreateClipper(0, &Clip, UnkOuter);
-    if (hr != DD_OK) return hr;
+    if (hr != DD_OK)
+    {
+        LeaveCriticalSection(&ddraw_cs);
+        return hr;
+    }
 
     hr = IDirectDrawClipper_QueryInterface(Clip, riid, obj);
     IDirectDrawClipper_Release(Clip);
+
+    LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
 
@@ -742,8 +758,14 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
  */
 HRESULT WINAPI DllCanUnloadNow(void)
 {
+    HRESULT hr;
     FIXME("(void): stub\n");
-    return S_FALSE;
+
+    EnterCriticalSection(&ddraw_cs);
+    hr = S_FALSE;
+    LeaveCriticalSection(&ddraw_cs);
+
+    return hr;
 }
 
 /*******************************************************************************
@@ -776,7 +798,7 @@ DestroyCallback(IDirectDrawSurface7 *surf,
      * part of a complex compound. They will get released when destroying
      * the root
      */
-    if( (Impl->first_complex != Impl) || (Impl->first_attached != Impl) )
+    if( (!Impl->is_complex_root) || (Impl->first_attached != Impl) )
         return DDENUMRET_OK;
     /* Skip our depth stencil surface, it will be released with the render target */
     if( Impl == ddraw->DepthStencilBuffer)
@@ -794,7 +816,7 @@ DestroyCallback(IDirectDrawSurface7 *surf,
  * Reads a config key from the registry. Taken from WineD3D
  *
  ***********************************************************************/
-inline static DWORD get_config_key(HKEY defkey, HKEY appkey, const char* name, char* buffer, DWORD size)
+static inline DWORD get_config_key(HKEY defkey, HKEY appkey, const char* name, char* buffer, DWORD size)
 {
     if (0 != appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE) buffer, &size )) return 0;
     if (0 != defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE) buffer, &size )) return 0;
@@ -812,7 +834,7 @@ inline static DWORD get_config_key(HKEY defkey, HKEY appkey, const char* name, c
 BOOL WINAPI
 DllMain(HINSTANCE hInstDLL,
         DWORD Reason,
-        void *lpv)
+        LPVOID lpv)
 {
     TRACE("(%p,%x,%p)\n", hInstDLL, Reason, lpv);
     if (Reason == DLL_PROCESS_ATTACH)
@@ -881,11 +903,12 @@ DllMain(HINSTANCE hInstDLL,
                 int i;
                 IDirectDrawImpl *ddraw = LIST_ENTRY(entry, IDirectDrawImpl, ddraw_list_entry);
 
-                WARN("DDraw %p has a refcount of %d\n", ddraw, ddraw->ref7 + ddraw->ref4 + ddraw->ref2 + ddraw->ref1);
+                WARN("DDraw %p has a refcount of %d\n", ddraw, ddraw->ref7 + ddraw->ref4 + ddraw->ref3 + ddraw->ref2 + ddraw->ref1);
 
                 /* Add references to each interface to avoid freeing them unexpectadely */
                 IDirectDraw_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw));
                 IDirectDraw2_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw2));
+                IDirectDraw3_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw3));
                 IDirectDraw4_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw4));
                 IDirectDraw7_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw7));
 
@@ -924,6 +947,7 @@ DllMain(HINSTANCE hInstDLL,
                     */
                 while(IDirectDraw_Release(ICOM_INTERFACE(ddraw, IDirectDraw)));
                 while(IDirectDraw2_Release(ICOM_INTERFACE(ddraw, IDirectDraw2)));
+                while(IDirectDraw3_Release(ICOM_INTERFACE(ddraw, IDirectDraw3)));
                 while(IDirectDraw4_Release(ICOM_INTERFACE(ddraw, IDirectDraw4)));
                 while(IDirectDraw7_Release(ICOM_INTERFACE(ddraw, IDirectDraw7)));
             }
@@ -931,12 +955,4 @@ DllMain(HINSTANCE hInstDLL,
     }
 
     return TRUE;
-}
-
-void
-remove_ddraw_object(IDirectDrawImpl *ddraw)
-{
-    EnterCriticalSection(&ddraw_list_cs);
-    list_remove(&ddraw->ddraw_list_entry);
-    LeaveCriticalSection(&ddraw_list_cs);
 }

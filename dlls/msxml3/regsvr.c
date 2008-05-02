@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <stdarg.h>
 #include <string.h>
 
@@ -31,6 +33,11 @@
 #include "msxml.h"
 #include "xmldom.h"
 #include "xmldso.h"
+#include "msxml2.h"
+
+/* undef the #define in msxml2 so that we can access the v.2 version
+   independent CLSID as well as the v.3 one. */
+#undef CLSID_DOMDocument
 
 #include "msxml_private.h"
 
@@ -529,6 +536,22 @@ static struct regsvr_coclass const coclass_list[] = {
 	"Microsoft.XMLDOM",
 	"1.0"
     },
+    {   &CLSID_DOMDocument2,
+        "XML DOM Document",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Msxml2.DOMDocument",
+        "3.0"
+    },
+    {   &CLSID_DOMDocument30,
+        "XML DOM Document 3.0",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Msxml2.DOMDocument",
+        "3.0"
+    },
     {   &CLSID_DOMFreeThreadedDocument,
 	"Free threaded XML DOM Document",
 	NULL,
@@ -560,6 +583,22 @@ static struct regsvr_coclass const coclass_list[] = {
 	"Both",
 	"Msxml"
     },
+    {   &CLSID_XMLSchemaCache,
+	"XML Schema Cache",
+	NULL,
+	"msxml3.dll",
+	"Both",
+	"Msxml2.XMLSchemaCache",
+        "3.0"
+    },
+    {   &CLSID_XMLSchemaCache30,
+	"XML Schema Cache 3.0",
+	NULL,
+	"msxml3.dll",
+	"Both",
+	"Msxml2.XMLSchemaCache",
+        "3.0"
+    },
     { NULL }			/* list terminator */
 };
 
@@ -588,6 +627,16 @@ static struct progid const progid_list[] = {
 	"XML DOM Document",
 	&CLSID_DOMDocument,
 	"Microsoft.XMLDOM.1.0"
+    },
+    {   "Msxml2.DOMDocument",
+        "XML DOM Document",
+        &CLSID_DOMDocument2,
+        "Msxml2.DOMDocument.3.0"
+    },
+    {   "Msxml2.DOMDocument.3.0",
+        "XML DOM Document 3.0",
+        &CLSID_DOMDocument30,
+        NULL
     },
     {   "Microsoft.FreeThreadedXMLDOM",
 	"Free threaded XML DOM Document",
@@ -629,6 +678,17 @@ static struct progid const progid_list[] = {
 	&CLSID_XMLDocument,
 	NULL
     },
+    {   "Msxml2.XMLSchemaCache",
+        "XML Schema Cache",
+        &CLSID_XMLSchemaCache,
+        "Msxml2.XMLSchemaCache.3.0"
+    },
+    {   "Msxml2.XMLSchemaCache.3.0",
+        "XML Schema Cache 3.0",
+        &CLSID_XMLSchemaCache30,
+        NULL
+    },
+
     { NULL }			/* list terminator */
 };
 

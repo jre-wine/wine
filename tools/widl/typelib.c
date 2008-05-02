@@ -69,6 +69,7 @@ type_t *alias(type_t *t, const char *name)
   a->name = xstrdup(name);
   a->kind = TKIND_ALIAS;
   a->attrs = NULL;
+  a->declarray = FALSE;
 
   return a;
 }
@@ -80,6 +81,23 @@ int is_ptr(const type_t *t)
       || c == RPC_FC_UP
       || c == RPC_FC_FP
       || c == RPC_FC_OP;
+}
+
+int is_array(const type_t *t)
+{
+    switch (t->type)
+    {
+    case RPC_FC_SMFARRAY:
+    case RPC_FC_LGFARRAY:
+    case RPC_FC_SMVARRAY:
+    case RPC_FC_LGVARRAY:
+    case RPC_FC_CARRAY:
+    case RPC_FC_CVARRAY:
+    case RPC_FC_BOGUS_ARRAY:
+        return TRUE;
+    default:
+        return FALSE;
+    }
 }
 
 /* List of oleauto types that should be recognized by name.
@@ -181,7 +199,11 @@ unsigned short get_type_vt(type_t *t)
   case RPC_FC_OP:
   case RPC_FC_FP:
     if(t->ref)
+    {
+      if (match(t->ref->name, "SAFEARRAY"))
+        return VT_SAFEARRAY;
       return VT_PTR;
+    }
 
     error("get_type_vt: unknown-deref-type: %d\n", t->ref->type);
     break;
@@ -208,20 +230,7 @@ unsigned short get_type_vt(type_t *t)
   return 0;
 }
 
-unsigned short get_var_vt(var_t *v)
-{
-  unsigned short vt;
-
-  chat("get_var_vt: %p tname %s\n", v, v->tname);
-  if (v->tname) {
-    vt = builtin_vt(v->tname);
-    if (vt) return vt;
-  }
-
-  return get_type_vt(v->type);
-}
-
-void start_typelib(char *name, attr_t *attrs)
+void start_typelib(char *name, attr_list_t *attrs)
 {
     in_typelib++;
     if (!do_typelib) return;
@@ -230,8 +239,8 @@ void start_typelib(char *name, attr_t *attrs)
     typelib->name = xstrdup(name);
     typelib->filename = xstrdup(typelib_name);
     typelib->attrs = attrs;
-    typelib->entry = NULL;
-    typelib->importlibs = NULL;
+    list_init( &typelib->entries );
+    list_init( &typelib->importlibs );
 }
 
 void end_typelib(void)
@@ -251,8 +260,7 @@ void add_typelib_entry(type_t *t)
     chat("add kind %i: %s\n", t->kind, t->name);
     entry = xmalloc(sizeof(*entry));
     entry->type = t;
-    LINK(entry, typelib->entry);
-    typelib->entry = entry;
+    list_add_tail( &typelib->entries, &entry->entry );
 }
 
 static void tlb_read(int fd, void *buf, int count)
@@ -365,10 +373,9 @@ void add_importlib(const char *name)
 
     if(!typelib) return;
 
-    for(importlib = typelib->importlibs; importlib; importlib = NEXT_LINK(importlib)) {
+    LIST_FOR_EACH_ENTRY( importlib, &typelib->importlibs, importlib_t, entry )
         if(!strcmp(name, importlib->name))
             return;
-    }
 
     chat("add_importlib: %s\n", name);
 
@@ -377,7 +384,5 @@ void add_importlib(const char *name)
     importlib->name = xstrdup(name);
 
     read_importlib(importlib);
-
-    LINK(importlib, typelib->importlibs);
-    typelib->importlibs = importlib;
+    list_add_head( &typelib->importlibs, &importlib->entry );
 }

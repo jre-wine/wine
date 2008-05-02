@@ -29,4 +29,37 @@ extern HINSTANCE LOCALSPL_hInstance;
 #define IDS_LOCALPORT       500
 #define IDS_LOCALMONITOR    507
 
+/* ## Reserved memorysize for the strings (in WCHAR) ## */
+#define IDS_LOCALMONITOR_MAXLEN 64
+#define IDS_LOCALPORT_MAXLEN 32
+
+/* ## Type of Ports ## */
+/* windows types */
+#define PORT_IS_UNKNOWN  0
+#define PORT_IS_LPT      1
+#define PORT_IS_COM      2
+#define PORT_IS_FILE     3
+#define PORT_IS_FILENAME 4
+
+/* wine extensions */
+#define PORT_IS_WINE     5
+#define PORT_IS_UNIXNAME 5
+#define PORT_IS_PIPE     6
+#define PORT_IS_CUPS     7
+#define PORT_IS_LPR      8
+
+
+/* ## Memory allocation macros ## */
+
+static inline void *spl_alloc( size_t len )
+{
+    return HeapAlloc( GetProcessHeap(), 0, len );
+}
+
+static inline BOOL spl_free( void *mem )
+{
+    return HeapFree( GetProcessHeap(), 0, mem );
+}
+
+
 #endif /* __WINE_LOCALSPL_PRIVATE__ */

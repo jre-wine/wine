@@ -40,7 +40,6 @@
 #include "wine/debug.h"
 #include "cderr.h"
 #include "winspool.h"
-#include "winerror.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(commdlg);
 
@@ -56,8 +55,8 @@ typedef struct
 
 /* Internal Functions */
 
-static BOOL PRINTDLG_CreateDevNames16(HGLOBAL16 *hmem, char* DeviceDriverName,
-				      char* DeviceName, char* OutputPort)
+static BOOL PRINTDLG_CreateDevNames16(HGLOBAL16 *hmem, const char* DeviceDriverName,
+				      const char* DeviceName, const char* OutputPort)
 {
     long size;
     char*   pDevNamesSpace;
@@ -291,7 +290,7 @@ static BOOL PRINTDLG_CreateDC16(LPPRINTDLG16 lppd)
  *      PRINTDLG_GetDlgTemplate
  *
  */
-static HGLOBAL16 PRINTDLG_GetDlgTemplate16(PRINTDLG16 *lppd)
+static HGLOBAL16 PRINTDLG_GetDlgTemplate16(const PRINTDLG16 *lppd)
 {
     HGLOBAL16 hDlgTmpl, hResInfo;
 
@@ -349,7 +348,7 @@ BOOL16 WINAPI PrintDlg16(
 
     if(TRACE_ON(commdlg)) {
         char flagstr[1000] = "";
-	struct pd_flags *pflag = pd_flags;
+	const struct pd_flags *pflag = pd_flags;
 	for( ; pflag->name; pflag++) {
 	    if(lppd->Flags & pflag->flag)
 	        strcat(flagstr, pflag->name);

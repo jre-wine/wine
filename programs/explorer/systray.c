@@ -123,7 +123,6 @@ static LRESULT WINAPI adaptor_wndproc(HWND window, UINT msg,
         case WM_LBUTTONDBLCLK:
         case WM_RBUTTONDBLCLK:
         case WM_MBUTTONDBLCLK:
-        {
             /* notify the owner hwnd of the message */
             WINE_TRACE("relaying 0x%x\n", msg);
             ret = PostMessage(icon->owner, icon->callback_message, (WPARAM) icon->id, (LPARAM) msg);
@@ -133,8 +132,7 @@ static LRESULT WINAPI adaptor_wndproc(HWND window, UINT msg,
                           "notification icon, removing automatically\n");
                 DestroyWindow(window);
             }
-            return 0;
-        }
+            break;
 
         case WM_NCDESTROY:
             SetWindowLongPtr(window, GWLP_USERDATA, 0);
@@ -143,9 +141,12 @@ static LRESULT WINAPI adaptor_wndproc(HWND window, UINT msg,
             DestroyIcon(icon->image);
             HeapFree(GetProcessHeap(), 0, icon);
             break;
+
+        default:
+            return DefWindowProc(window, msg, wparam, lparam);
     }
 
-    return DefWindowProc(window, msg, wparam, lparam);
+    return 0;
 }
 
 
@@ -289,7 +290,7 @@ static void delete_icon(const NOTIFYICONDATAW *nid)
    
     if (!icon)
     {
-        WINE_ERR("invalid tray icon ID specified: %ud\n", nid->uID);
+        WINE_ERR("invalid tray icon ID specified: %u\n", nid->uID);
         return;
     }
 
@@ -300,13 +301,18 @@ static void delete_icon(const NOTIFYICONDATAW *nid)
 static void handle_incoming(HWND hwndSource, COPYDATASTRUCT *cds)
 {
     NOTIFYICONDATAW nid;
+    DWORD cbSize;
 
-    if (cds->cbData < sizeof(nid)) return;
-    memcpy(&nid, cds->lpData, sizeof(nid));
+    if (cds->cbData < NOTIFYICONDATAW_V1_SIZE) return;
+    cbSize = ((PNOTIFYICONDATA)cds->lpData)->cbSize;
+    if (cbSize < NOTIFYICONDATAW_V1_SIZE) return;
+
+    ZeroMemory(&nid, sizeof(nid));
+    memcpy(&nid, cds->lpData, min(sizeof(nid), cbSize));
 
     /* FIXME: if statement only needed because we don't support interprocess
      * icon handles */
-    if ((nid.uFlags & NIF_ICON) && (cds->cbData >= sizeof(nid) + 2 * sizeof(BITMAP)))
+    if ((nid.uFlags & NIF_ICON) && (cds->cbData >= nid.cbSize + 2 * sizeof(BITMAP)))
     {
         LONG cbMaskBits;
         LONG cbColourBits;
@@ -314,7 +320,7 @@ static void handle_incoming(HWND hwndSource, COPYDATASTRUCT *cds)
         BITMAP bmColour;
         const char *buffer = cds->lpData;
 
-        buffer += sizeof(nid);
+        buffer += nid.cbSize;
 
         memcpy(&bmMask, buffer, sizeof(bmMask));
         buffer += sizeof(bmMask);
@@ -324,7 +330,7 @@ static void handle_incoming(HWND hwndSource, COPYDATASTRUCT *cds)
         cbMaskBits = (bmMask.bmPlanes * bmMask.bmWidth * bmMask.bmHeight * bmMask.bmBitsPixel) / 8;
         cbColourBits = (bmColour.bmPlanes * bmColour.bmWidth * bmColour.bmHeight * bmColour.bmBitsPixel) / 8;
 
-        if (cds->cbData < sizeof(nid) + 2 * sizeof(BITMAP) + cbMaskBits + cbColourBits)
+        if (cds->cbData < nid.cbSize + 2 * sizeof(BITMAP) + cbMaskBits + cbColourBits)
         {
             WINE_ERR("buffer underflow\n");
             return;

@@ -3,8 +3,9 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = cmd.exe
-APPMODE   = -mconsole
-IMPORTS   = shell32 user32 kernel32
+APPMODE   = -mconsole -municode
+EXTRADEFS = -DUNICODE
+IMPORTS   = shell32 user32 advapi32 kernel32
 
 C_SRCS = \
 	batch.c \

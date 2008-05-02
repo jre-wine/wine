@@ -50,7 +50,6 @@
 #define IDD_GRAPHCFG                    110
 #define IDD_DLLCFG                      111
 #define IDD_DRIVECFG                    112
-#define IDD_DRIVE_EDIT                  114
 #define IDD_DESKTOP_INTEGRATION         115
 #define IDB_WINE_LOGO                   200
 #define IDC_TABABOUT                    1001
@@ -114,7 +113,6 @@
 #define IDC_EDIT_LABEL                  1060
 #define IDC_EDIT_PATH                   1061
 #define IDC_EDIT_SERIAL                 1062
-#define IDC_COMBO_LETTER                1063
 #define IDC_COMBO_TYPE                  1065
 #define IDC_EDIT_DEVICE                 1066
 #define IDC_BUTTON_BROWSE_PATH          1067
@@ -153,7 +151,9 @@
 #define IDC_D3D_PSHADER_MODE            1106
 #define IDS_SHADER_MODE_HARDWARE        8100
 #define IDS_SHADER_MODE_NONE            8101
-#define IDS_SHADER_MODE_EMULATION       8102
+
+#define IDC_RES_TRACKBAR                1107
+#define IDC_RES_DPIEDIT                 1108
 
 /* applications tab */
 #define IDC_APP_LISTVIEW                1200
@@ -162,22 +162,23 @@
 
 /* audio tab */
 #define IDC_AUDIO_CONFIGURE             1300
-#define IDC_AUDIO_CONTROL_PANEL         1301
-#define IDC_DSOUND_HW_ACCEL             1302
-#define IDC_DSOUND_DRV_EMUL             1303
-#define IDC_AUDIO_TREE			1304
-#define IDR_WINECFG			1305
-#define IDB_CHECKBOX                    1306
-#define IDB_DEVICE                      1307
-#define IDS_AUDIO_MISSING               1308
-#define IDC_DSOUND_RATES                1309
-#define IDC_DSOUND_BITS                 1310
+#define IDC_AUDIO_TEST                  1301
+#define IDC_AUDIO_CONTROL_PANEL         1302
+#define IDC_DSOUND_HW_ACCEL             1303
+#define IDC_DSOUND_DRV_EMUL             1304
+#define IDC_AUDIO_TREE			1305
+#define IDR_WINECFG			1306
+#define IDB_CHECKBOX                    1307
+#define IDB_DEVICE                      1308
+#define IDS_AUDIO_MISSING               1309
+#define IDC_DSOUND_RATES                1310
+#define IDC_DSOUND_BITS                 1311
 #define IDS_ACCEL_FULL                  8300
 #define IDS_ACCEL_STANDARD              8301
 #define IDS_ACCEL_BASIC                 8302
 #define IDS_ACCEL_EMULATION             8303
 #define IDS_DRIVER_ALSA                 8304
-#define IDS_DRIVER_ARTS                 8305
+
 #define IDS_DRIVER_ESOUND               8306
 #define IDS_DRIVER_OSS                  8307
 #define IDS_DRIVER_JACK                 8308
@@ -206,3 +207,28 @@
 #define IDC_LINK_SFPATH                 1408
 #define IDC_EDIT_SFPATH                 1409
 #define IDC_BROWSE_SFPATH               1410
+#define IDC_SYSPARAM_COMBO              1411
+#define IDC_SYSPARAM_SIZE_TEXT          1412
+#define IDC_SYSPARAM_SIZE               1413
+#define IDC_SYSPARAM_SIZE_UD            1414
+#define IDC_SYSPARAM_COLOR_TEXT         1415
+#define IDC_SYSPARAM_COLOR              1416
+#define IDC_SYSPARAM_FONT               1417
+
+#define IDC_SYSPARAMS_BUTTON            8400
+#define IDC_SYSPARAMS_BUTTON_TEXT       8401
+#define IDC_SYSPARAMS_DESKTOP           8402
+#define IDC_SYSPARAMS_MENU              8403
+#define IDC_SYSPARAMS_MENU_TEXT         8404
+#define IDC_SYSPARAMS_SCROLLBAR         8405
+#define IDC_SYSPARAMS_SELECTION         8406
+#define IDC_SYSPARAMS_SELECTION_TEXT    8407
+#define IDC_SYSPARAMS_TOOLTIP           8408
+#define IDC_SYSPARAMS_TOOLTIP_TEXT      8409
+#define IDC_SYSPARAMS_WINDOW            8410
+#define IDC_SYSPARAMS_WINDOW_TEXT       8411
+#define IDC_SYSPARAMS_ACTIVE_TITLE      8412
+#define IDC_SYSPARAMS_ACTIVE_TITLE_TEXT 8413
+#define IDC_SYSPARAMS_INACTIVE_TITLE    8414
+#define IDC_SYSPARAMS_INACTIVE_TITLE_TEXT 8415
+#define IDC_SYSPARAMS_MSGBOX_TEXT       8416

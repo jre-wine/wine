@@ -42,6 +42,8 @@ static HRESULT (WINAPI *pSetPerUserSecValues)(PPERUSERSECTION pPerUser);
 static HRESULT (WINAPI *pTranslateInfString)(LPCSTR,LPCSTR,LPCSTR,LPCSTR,LPSTR,DWORD,LPDWORD,LPVOID);
 static HRESULT (WINAPI *pTranslateInfStringEx)(HINF,PCSTR,PCSTR,PCSTR,PSTR,DWORD,PDWORD,PVOID);
 
+static CHAR inf_file[MAX_PATH];
+static CHAR PROG_FILES_ROOT[MAX_PATH];
 static CHAR PROG_FILES[MAX_PATH];
 static DWORD PROG_FILES_LEN;
 
@@ -51,9 +53,10 @@ static void get_progfiles_dir(void)
     DWORD size = MAX_PATH;
 
     RegOpenKeyA(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion", &hkey);
-    RegQueryValueExA(hkey, "ProgramFilesDir", NULL, NULL, (LPBYTE)PROG_FILES, &size);
+    RegQueryValueExA(hkey, "ProgramFilesDir", NULL, NULL, (LPBYTE)PROG_FILES_ROOT, &size);
     RegCloseKey(hkey);
 
+    lstrcpyA(PROG_FILES, PROG_FILES_ROOT);
     lstrcatA(PROG_FILES, TEST_STRING1);
     PROG_FILES_LEN = lstrlenA(PROG_FILES) + 1;
 }
@@ -185,18 +188,21 @@ static void append_str(char **str, const char *data)
     *str += strlen(*str);
 }
 
-static void create_inf_file()
+static void create_inf_file(void)
 {
     char data[1024];
     char *ptr = data;
     DWORD dwNumberOfBytesWritten;
-    HANDLE hf = CreateFile("c:\\test.inf", GENERIC_WRITE, 0, NULL,
+    HANDLE hf = CreateFile(inf_file, GENERIC_WRITE, 0, NULL,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
     append_str(&ptr, "[Version]\n");
     append_str(&ptr, "Signature=\"$Chicago$\"\n");
     append_str(&ptr, "[CustInstDestSection]\n");
     append_str(&ptr, "49001=ProgramFilesDir\n");
+    append_str(&ptr, "49010=DestA,1\n");
+    append_str(&ptr, "49020=DestB\n");
+    append_str(&ptr, "49030=DestC\n");
     append_str(&ptr, "[ProgramFilesDir]\n");
     append_str(&ptr, "HKLM,\"Software\\Microsoft\\Windows\\CurrentVersion\",");
     append_str(&ptr, "\"ProgramFilesDir\",,\"%%24%%\\%%LProgramF%%\"\n");
@@ -206,16 +212,26 @@ static void create_inf_file()
     append_str(&ptr, "[Options.NTx86]\n");
     append_str(&ptr, "49001=ProgramFilesDir\n");
     append_str(&ptr, "InstallDir=%%49001%%\\%%DefaultAppPath%%\n");
+    append_str(&ptr, "Result1=%%49010%%\n");
+    append_str(&ptr, "Result2=%%49020%%\n");
+    append_str(&ptr, "Result3=%%49030%%\n");
     append_str(&ptr, "CustomHDestination=CustInstDestSection\n");
     append_str(&ptr, "[Strings]\n");
     append_str(&ptr, "DefaultAppPath=\"Application Name\"\n");
     append_str(&ptr, "LProgramF=\"Program Files\"\n");
+    append_str(&ptr, "[DestA]\n");
+    append_str(&ptr, "HKLM,\"Software\\Garbage\",\"ProgramFilesDir\",,'%%24%%\\%%LProgramF%%'\n");
+    append_str(&ptr, "[DestB]\n");
+    append_str(&ptr, "'HKLM','Software\\Microsoft\\Windows\\CurrentVersion',");
+    append_str(&ptr, "'ProgramFilesDir',,\"%%24%%\"\n");
+    append_str(&ptr, "[DestC]\n");
+    append_str(&ptr, "HKLM,\"Software\\Garbage\",\"ProgramFilesDir\",,'%%24%%'\n");
 
     WriteFile(hf, data, ptr - data, &dwNumberOfBytesWritten, NULL);
     CloseHandle(hf);
 }
 
-static void translateinfstring_test()
+static void translateinfstring_test(void)
 {
     HRESULT hr;
     char buffer[MAX_PATH];
@@ -242,7 +258,7 @@ static void translateinfstring_test()
 
     /* try a nonexistent section */
     buffer[0] = 0;
-    hr = pTranslateInfString("c:\\test.inf", "idontexist", "Options.NTx86",
+    hr = pTranslateInfString(inf_file, "idontexist", "Options.NTx86",
                              "InstallDir", buffer, MAX_PATH, &dwSize, NULL);
     ok(hr == S_OK, "Expected S_OK, got 0x%08x\n", (UINT)hr);
     ok(!strcmp(buffer, TEST_STRING2), "Expected %s, got %s\n", TEST_STRING2, buffer);
@@ -250,21 +266,21 @@ static void translateinfstring_test()
 
     buffer[0] = 0;
     /* try other nonexistent section */
-    hr = pTranslateInfString("c:\\test.inf", "Options.NTx86", "idontexist",
+    hr = pTranslateInfString(inf_file, "Options.NTx86", "idontexist",
                              "InstallDir", buffer, MAX_PATH, &dwSize, NULL);
     ok(hr == SPAPI_E_LINE_NOT_FOUND || hr == E_INVALIDARG, 
        "Expected SPAPI_E_LINE_NOT_FOUND or E_INVALIDARG, got 0x%08x\n", (UINT)hr);
 
     buffer[0] = 0;
     /* try nonexistent key */
-    hr = pTranslateInfString("c:\\test.inf", "Options.NTx86", "Options.NTx86",
+    hr = pTranslateInfString(inf_file, "Options.NTx86", "Options.NTx86",
                              "notvalid", buffer, MAX_PATH, &dwSize, NULL);
     ok(hr == SPAPI_E_LINE_NOT_FOUND || hr == E_INVALIDARG, 
        "Expected SPAPI_E_LINE_NOT_FOUND or E_INVALIDARG, got 0x%08x\n", (UINT)hr);
 
     buffer[0] = 0;
     /* test the behavior of pszInstallSection */
-    hr = pTranslateInfString("c:\\test.inf", "section", "Options.NTx86",
+    hr = pTranslateInfString(inf_file, "section", "Options.NTx86",
                              "InstallDir", buffer, MAX_PATH, &dwSize, NULL);
     ok(hr == ERROR_SUCCESS || hr == E_FAIL, 
        "Expected ERROR_SUCCESS or E_FAIL, got 0x%08x\n", (UINT)hr);
@@ -277,7 +293,7 @@ static void translateinfstring_test()
 
     buffer[0] = 0;
     /* try without a pszInstallSection */
-    hr = pTranslateInfString("c:\\test.inf", NULL, "Options.NTx86",
+    hr = pTranslateInfString(inf_file, NULL, "Options.NTx86",
                              "InstallDir", buffer, MAX_PATH, &dwSize, NULL);
     ok(hr == S_OK, "Expected S_OK, got 0x%08x\n", (UINT)hr);
     todo_wine
@@ -287,7 +303,7 @@ static void translateinfstring_test()
     }
 
     DeleteFile("c:\\a.inf");
-    DeleteFile("c:\\test.inf");
+    DeleteFile(inf_file);
 }
 
 static void translateinfstringex_test(void)
@@ -303,36 +319,38 @@ static void translateinfstringex_test(void)
 
     /* try a NULL filename */
     hr = pOpenINFEngine(NULL, "Options.NTx86", 0, &hinf, NULL);
-    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %d\n", hr);
+    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n", hr);
 
     /* try an empty filename */
     hr = pOpenINFEngine("", "Options.NTx86", 0, &hinf, NULL);
     ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND),
-        "Expected HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), got %d\n", hr);
+        "Expected HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), got %08x\n", hr);
 
     /* try a NULL hinf */
-    hr = pOpenINFEngine("c:\\test.inf", "Options.NTx86", 0, NULL, NULL);
-    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %d\n", hr);
+    hr = pOpenINFEngine(inf_file, "Options.NTx86", 0, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n", hr);
 
     /* open the INF without the Install section specified */
-    hr = pOpenINFEngine("c:\\test.inf", NULL, 0, &hinf, NULL);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    hr = pOpenINFEngine(inf_file, NULL, 0, &hinf, NULL);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
 
     /* try a NULL hinf */
-    hr = pTranslateInfStringEx(NULL, "c:\\test.inf", "Options.NTx86", "InstallDir",
+    hr = pTranslateInfStringEx(NULL, inf_file, "Options.NTx86", "InstallDir",
                               buffer, size, &size, NULL);
-    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %d\n", hr);
+    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n", hr);
 
     /* try a NULL filename */
     hr = pTranslateInfStringEx(hinf, NULL, "Options.NTx86", "InstallDir",
                               buffer, size, &size, NULL);
-    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %d\n", hr);
+    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n", hr);
 
     /* try an empty filename */
+    memset(buffer, 'a', 25);
+    buffer[24] = '\0';
     size = MAX_PATH;
     hr = pTranslateInfStringEx(hinf, "", "Options.NTx86", "InstallDir",
                               buffer, size, &size, NULL);
-    ok(hr == S_OK, "Expected S_OK, got %08x\n", (UINT)hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     todo_wine
     {
         ok(!strcmp(buffer, TEST_STRING2), "Expected %s, got %s\n", TEST_STRING2, buffer);
@@ -340,30 +358,32 @@ static void translateinfstringex_test(void)
     }
 
     /* try a NULL translate section */
-    hr = pTranslateInfStringEx(hinf, "c:\\test.inf", NULL, "InstallDir",
+    hr = pTranslateInfStringEx(hinf, inf_file, NULL, "InstallDir",
                               buffer, size, &size, NULL);
-    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %d\n", hr);
+    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n", hr);
 
     /* try an empty translate section */
-    hr = pTranslateInfStringEx(hinf, "c:\\test.inf", "", "InstallDir",
+    hr = pTranslateInfStringEx(hinf, inf_file, "", "InstallDir",
                               buffer, size, &size, NULL);
-    ok(hr == SPAPI_E_LINE_NOT_FOUND, "Expected SPAPI_E_LINE_NOT_FOUND, got %d\n", hr);
+    ok(hr == SPAPI_E_LINE_NOT_FOUND, "Expected SPAPI_E_LINE_NOT_FOUND, got %08x\n", hr);
 
     /* try a NULL translate key */
-    hr = pTranslateInfStringEx(hinf, "c:\\test.inf", "Options.NTx86", NULL,
+    hr = pTranslateInfStringEx(hinf, inf_file, "Options.NTx86", NULL,
                               buffer, size, &size, NULL);
-    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %d\n", hr);
+    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n", hr);
 
     /* try an empty translate key */
-    hr = pTranslateInfStringEx(hinf, "c:\\test.inf", "Options.NTx86", "",
+    hr = pTranslateInfStringEx(hinf, inf_file, "Options.NTx86", "",
                               buffer, size, &size, NULL);
-    ok(hr == SPAPI_E_LINE_NOT_FOUND, "Expected SPAPI_E_LINE_NOT_FOUND, got %d\n", hr);
+    ok(hr == SPAPI_E_LINE_NOT_FOUND, "Expected SPAPI_E_LINE_NOT_FOUND, got %08x\n", hr);
 
     /* successfully translate the string */
+    memset(buffer, 'a', 25);
+    buffer[24] = '\0';
     size = MAX_PATH;
-    hr = pTranslateInfStringEx(hinf, "c:\\test.inf", "Options.NTx86", "InstallDir",
+    hr = pTranslateInfStringEx(hinf, inf_file, "Options.NTx86", "InstallDir",
                               buffer, size, &size, NULL);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     todo_wine
     {
         ok(!strcmp(buffer, TEST_STRING2), "Expected %s, got %s\n", TEST_STRING2, buffer);
@@ -372,29 +392,71 @@ static void translateinfstringex_test(void)
 
     /* try a NULL hinf */
     hr = pCloseINFEngine(NULL);
-    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %d\n", hr);
+    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n", hr);
 
     /* successfully close the hinf */
     hr = pCloseINFEngine(hinf);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
 
     /* open the inf with the install section */
-    hr = pOpenINFEngine("c:\\test.inf", "section", 0, &hinf, NULL);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    hr = pOpenINFEngine(inf_file, "section", 0, &hinf, NULL);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
 
     /* translate the string with the install section specified */
+    memset(buffer, 'a', PROG_FILES_LEN);
+    buffer[PROG_FILES_LEN - 1] = '\0';
     size = MAX_PATH;
-    hr = pTranslateInfStringEx(hinf, "c:\\test.inf", "Options.NTx86", "InstallDir",
+    hr = pTranslateInfStringEx(hinf, inf_file, "Options.NTx86", "InstallDir",
                               buffer, size, &size, NULL);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(!strcmp(buffer, PROG_FILES), "Expected %s, got %s\n", PROG_FILES, buffer);
     ok(size == PROG_FILES_LEN, "Expected size %d, got %d\n", PROG_FILES_LEN, size);
 
+    /* Single quote test (Note size includes null on return from call) */
+    memset(buffer, 'a', PROG_FILES_LEN);
+    buffer[PROG_FILES_LEN - 1] = '\0';
+    size = MAX_PATH;
+    hr = pTranslateInfStringEx(hinf, inf_file, "Options.NTx86", "Result1",
+                              buffer, size, &size, NULL);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(!lstrcmpi(buffer, PROG_FILES_ROOT),
+           "Expected %s, got %s\n", PROG_FILES_ROOT, buffer);
+    ok(size == lstrlenA(PROG_FILES_ROOT)+1, "Expected size %d, got %d\n",
+           lstrlenA(PROG_FILES_ROOT)+1, size);
+
+    memset(buffer, 'a', PROG_FILES_LEN);
+    buffer[PROG_FILES_LEN - 1] = '\0';
+    size = MAX_PATH;
+    hr = pTranslateInfStringEx(hinf, inf_file, "Options.NTx86", "Result2",
+                              buffer, size, &size, NULL);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(!lstrcmpi(buffer, PROG_FILES_ROOT),
+           "Expected %s, got %s\n", PROG_FILES_ROOT, buffer);
+    ok(size == lstrlenA(PROG_FILES_ROOT)+1, "Expected size %d, got %d\n",
+           lstrlenA(PROG_FILES_ROOT)+1, size);
+
+    {
+        char drive[MAX_PATH];
+        lstrcpy(drive, PROG_FILES_ROOT);
+        drive[3] = 0x00; /* Just keep the system drive plus '\' */
+
+        memset(buffer, 'a', PROG_FILES_LEN);
+        buffer[PROG_FILES_LEN - 1] = '\0';
+        size = MAX_PATH;
+        hr = pTranslateInfStringEx(hinf, inf_file, "Options.NTx86", "Result3",
+                                  buffer, size, &size, NULL);
+        ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+        ok(!lstrcmpi(buffer, drive),
+               "Expected %s, got %s\n", drive, buffer);
+        ok(size == lstrlenA(drive)+1, "Expected size %d, got %d\n",
+               lstrlenA(drive)+1, size);
+    }
+
     /* close the INF again */
     hr = pCloseINFEngine(hinf);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
 
-    DeleteFileA("c:\\test.inf");
+    DeleteFileA(inf_file);
 }
 
 static BOOL check_reg_str(HKEY hkey, LPCSTR name, LPCSTR value)
@@ -434,10 +496,14 @@ static void setperusersecvalues_test(void)
     peruser.bRollback = FALSE;
 
     /* try a NULL pPerUser */
-    hr = pSetPerUserSecValues(NULL);
-    todo_wine
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(!OPEN_GUID_KEY(), "Expected guid key to not exist\n");
+    if (0)
+    {
+        /* This crashes on systems with IE7 */
+        hr = pSetPerUserSecValues(NULL);
+        todo_wine
+        ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+        ok(!OPEN_GUID_KEY(), "Expected guid key to not exist\n");
+    }
 
     /* at the very least, szGUID must be valid */
     peruser.szGUID[0] = '\0';
@@ -507,6 +573,12 @@ START_TEST(advpack)
 {
     if (!init_function_pointers())
         return;
+
+    /* Make sure we create the temporary file in a directory
+     * were we have enough rights
+     */
+    GetTempPath(MAX_PATH, inf_file);
+    lstrcat(inf_file,"test.inf");
 
     get_progfiles_dir();
 

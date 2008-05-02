@@ -178,6 +178,7 @@ void *alloc_object( const struct object_ops *ops )
         obj->refcount = 1;
         obj->ops      = ops;
         obj->name     = NULL;
+        obj->sd       = NULL;
         list_init( &obj->wait_queue );
 #ifdef DEBUG_OBJECTS
         list_add_head( &object_list, &obj->obj_list );
@@ -278,6 +279,7 @@ void release_object( void *ptr )
         assert( list_empty( &obj->wait_queue ));
         obj->ops->destroy( obj );
         if (obj->name) free_name( obj );
+        free( obj->sd );
 #ifdef DEBUG_OBJECTS
         list_remove( &obj->obj_list );
         memset( obj, 0xaa, obj->ops->size );
@@ -290,14 +292,15 @@ void release_object( void *ptr )
 struct object *find_object( const struct namespace *namespace, const struct unicode_str *name,
                             unsigned int attributes )
 {
-    const struct list *list, *p;
+    const struct list *list;
+    struct list *p;
 
     if (!name || !name->len) return NULL;
 
     list = &namespace->names[ get_name_hash( namespace, name->str, name->len ) ];
     LIST_FOR_EACH( p, list )
     {
-        const struct object_name *ptr = LIST_ENTRY( p, const struct object_name, entry );
+        const struct object_name *ptr = LIST_ENTRY( p, struct object_name, entry );
         if (ptr->len != name->len) continue;
         if (attributes & OBJ_CASE_INSENSITIVE)
         {
@@ -365,6 +368,13 @@ unsigned int no_map_access( struct object *obj, unsigned int access )
 struct object *no_lookup_name( struct object *obj, struct unicode_str *name,
                                unsigned int attr )
 {
+    return NULL;
+}
+
+struct object *no_open_file( struct object *obj, unsigned int access, unsigned int sharing,
+                             unsigned int options )
+{
+    set_error( STATUS_OBJECT_TYPE_MISMATCH );
     return NULL;
 }
 

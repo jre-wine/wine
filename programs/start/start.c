@@ -107,12 +107,21 @@ static char *build_args( int argc, char **argv )
 	char *ret, *p;
 
 	for (i = 0; i < argc; i++ )
+	{
 		len += strlen(argv[i]) + 1;
+		if (strchr(argv[i], ' '))
+			len += 2;
+	}
 	ret = HeapAlloc( GetProcessHeap(), 0, len );
 	ret[0] = 0;
 
 	for (i = 0, p = ret; i < argc; i++ )
-		p += sprintf(p, " %s", argv[i]);
+	{
+		if (strchr(argv[i], ' '))
+			p += sprintf(p, " \"%s\"", argv[i]);
+		else
+			p += sprintf(p, " %s", argv[i]);
+	}
 	return ret;
 }
 
@@ -127,7 +136,9 @@ int main(int argc, char *argv[])
 	sei.lpVerb = "open";
 	sei.nShow = SW_SHOWNORMAL;
 	/* Dunno what these mean, but it looks like winMe's start uses them */
-	sei.fMask = SEE_MASK_FLAG_DDEWAIT|SEE_MASK_FLAG_NO_UI;
+	sei.fMask = SEE_MASK_FLAG_DDEWAIT|
+	            SEE_MASK_FLAG_NO_UI|
+	            SEE_MASK_NO_CONSOLE;
 
 	/* Canonical Microsoft commandline flag processing:
 	 * flags start with /, are case insensitive,

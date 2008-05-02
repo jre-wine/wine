@@ -21,6 +21,7 @@ typedef unsigned short atom_t;
 typedef unsigned int process_id_t;
 typedef unsigned int thread_id_t;
 typedef unsigned int data_size_t;
+typedef unsigned int ioctl_code_t;
 
 struct request_header
 {
@@ -133,11 +134,8 @@ struct wake_up_reply
 };
 
 
-typedef struct
-{
-    int            sec;
-    int            usec;
-} abs_time_t;
+typedef __int64 timeout_t;
+#define TIMEOUT_INFINITE (((timeout_t)0x7fffffff) << 32 | 0xffffffff)
 
 
 typedef struct
@@ -155,6 +153,16 @@ typedef struct
     int  right;
     int  bottom;
 } rectangle_t;
+
+
+typedef struct
+{
+    void           *callback;
+    void           *iosb;
+    void           *arg;
+    void           *apc;
+    obj_handle_t    event;
+} async_data_t;
 
 
 
@@ -187,6 +195,12 @@ typedef struct
     unsigned short attr;
 } char_info_t;
 
+typedef struct
+{
+    unsigned int low_part;
+    int          high_part;
+} luid_t;
+
 #define MAX_ACL_LEN 65535
 
 struct security_descriptor
@@ -208,6 +222,206 @@ struct token_groups
 
 
 };
+
+enum apc_type
+{
+    APC_NONE,
+    APC_USER,
+    APC_TIMER,
+    APC_ASYNC_IO,
+    APC_VIRTUAL_ALLOC,
+    APC_VIRTUAL_FREE,
+    APC_VIRTUAL_QUERY,
+    APC_VIRTUAL_PROTECT,
+    APC_VIRTUAL_FLUSH,
+    APC_VIRTUAL_LOCK,
+    APC_VIRTUAL_UNLOCK,
+    APC_MAP_VIEW,
+    APC_UNMAP_VIEW,
+    APC_CREATE_THREAD
+};
+
+typedef union
+{
+    enum apc_type type;
+    struct
+    {
+        enum apc_type    type;
+        void (__stdcall *func)(unsigned long,unsigned long,unsigned long);
+        unsigned long    args[3];
+    } user;
+    struct
+    {
+        enum apc_type   type;
+        void (__stdcall *func)(void*, unsigned int, unsigned int);
+        timeout_t        time;
+        void            *arg;
+    } timer;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int   (*func)(void*, void*, unsigned int);
+        void            *user;
+        void            *sb;
+        unsigned int     status;
+    } async_io;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     zero_bits;
+        unsigned int     op_type;
+        unsigned int     prot;
+    } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     op_type;
+    } virtual_free;
+    struct
+    {
+        enum apc_type    type;
+        const void      *addr;
+    } virtual_query;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     prot;
+    } virtual_protect;
+    struct
+    {
+        enum apc_type    type;
+        const void      *addr;
+        unsigned long    size;
+    } virtual_flush;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+    } virtual_lock;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+        unsigned long    size;
+    } virtual_unlock;
+    struct
+    {
+        enum apc_type    type;
+        obj_handle_t     handle;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     offset_low;
+        unsigned int     offset_high;
+        unsigned int     zero_bits;
+        unsigned int     alloc_type;
+        unsigned int     prot;
+    } map_view;
+    struct
+    {
+        enum apc_type    type;
+        void            *addr;
+    } unmap_view;
+    struct
+    {
+        enum apc_type    type;
+        void (__stdcall *func)(void*);
+        void            *arg;
+        unsigned long    reserve;
+        unsigned long    commit;
+        int              suspend;
+    } create_thread;
+} apc_call_t;
+
+typedef union
+{
+    enum apc_type type;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+    } async_io;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } virtual_free;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *base;
+        void            *alloc_base;
+        unsigned long    size;
+        unsigned int     state;
+        unsigned int     prot;
+        unsigned int     alloc_prot;
+        unsigned int     alloc_type;
+    } virtual_query;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+        unsigned int     prot;
+    } virtual_protect;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        const void      *addr;
+        unsigned long    size;
+    } virtual_flush;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } virtual_lock;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } virtual_unlock;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        void            *addr;
+        unsigned long    size;
+    } map_view;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+    } unmap_view;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        thread_id_t      tid;
+        obj_handle_t     handle;
+    } create_thread;
+} apc_result_t;
 
 
 
@@ -323,7 +537,7 @@ struct init_thread_reply
     process_id_t pid;
     thread_id_t  tid;
     data_size_t  info_size;
-    abs_time_t   server_start;
+    timeout_t    server_start;
     int          version;
 };
 
@@ -372,8 +586,8 @@ struct get_process_info_reply
     int          priority;
     int          affinity;
     void*        peb;
-    abs_time_t   start_time;
-    abs_time_t   end_time;
+    timeout_t    start_time;
+    timeout_t    end_time;
 };
 
 
@@ -410,8 +624,8 @@ struct get_thread_info_reply
     int          exit_code;
     int          priority;
     int          affinity;
-    abs_time_t   creation_time;
-    abs_time_t   exit_time;
+    timeout_t    creation_time;
+    timeout_t    exit_time;
     int          last;
 };
 
@@ -511,35 +725,29 @@ struct unload_dll_reply
 struct queue_apc_request
 {
     struct request_header __header;
-    obj_handle_t handle;
-    int          user;
-    void*        func;
-    void*        arg1;
-    void*        arg2;
-    void*        arg3;
+    obj_handle_t thread;
+    obj_handle_t process;
+    apc_call_t   call;
 };
 struct queue_apc_reply
 {
     struct reply_header __header;
+    obj_handle_t handle;
+    int          self;
 };
 
 
 
-struct get_apc_request
+struct get_apc_result_request
 {
     struct request_header __header;
-    int          alertable;
+    obj_handle_t handle;
 };
-struct get_apc_reply
+struct get_apc_result_reply
 {
     struct reply_header __header;
-    void*        func;
-    int          type;
-    void*        arg1;
-    void*        arg2;
-    void*        arg3;
+    apc_result_t result;
 };
-enum apc_type { APC_NONE, APC_USER, APC_TIMER, APC_ASYNC_IO };
 
 
 
@@ -584,6 +792,7 @@ struct dup_handle_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
+    int          self;
     int          closed;
 };
 #define DUP_HANDLE_CLOSE_SOURCE  DUPLICATE_CLOSE_SOURCE
@@ -628,17 +837,21 @@ struct select_request
     int          flags;
     void*        cookie;
     obj_handle_t signal;
-    abs_time_t   timeout;
+    obj_handle_t prev_apc;
+    timeout_t    timeout;
+    /* VARARG(result,apc_result); */
     /* VARARG(handles,handles); */
 };
 struct select_reply
 {
     struct reply_header __header;
+    obj_handle_t apc_handle;
+    timeout_t    timeout;
+    apc_call_t   call;
 };
 #define SELECT_ALL           1
 #define SELECT_ALERTABLE     2
 #define SELECT_INTERRUPTIBLE 4
-#define SELECT_TIMEOUT       8
 
 
 
@@ -809,6 +1022,7 @@ struct open_file_object_request
     unsigned int attributes;
     obj_handle_t rootdir;
     unsigned int sharing;
+    unsigned int options;
     /* VARARG(filename,unicode_str); */
 };
 struct open_file_object_reply
@@ -838,21 +1052,29 @@ struct get_handle_fd_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    unsigned int access;
-    int          cached;
 };
 struct get_handle_fd_reply
 {
     struct reply_header __header;
-    int          flags;
+    int          type;
+    int          removable;
+    unsigned int access;
+    unsigned int options;
 };
-#define FD_FLAG_OVERLAPPED         0x01
-#define FD_FLAG_TIMEOUT            0x02
-#define FD_FLAG_RECV_SHUTDOWN      0x04
-#define FD_FLAG_SEND_SHUTDOWN      0x08
-#define FD_FLAG_AVAILABLE          0x10 /* in overlap read/write operation,
-                                         * only handle available data (don't wait) */
-#define FD_FLAG_REMOVABLE          0x20
+enum server_fd_type
+{
+    FD_TYPE_INVALID,
+    FD_TYPE_FILE,
+    FD_TYPE_DIR,
+    FD_TYPE_SOCKET,
+    FD_TYPE_SERIAL,
+    FD_TYPE_PIPE,
+    FD_TYPE_MAILSLOT,
+    FD_TYPE_CHAR,
+    FD_TYPE_DEVICE,
+    FD_TYPE_NB_TYPES
+};
+
 
 
 struct flush_file_request
@@ -898,18 +1120,6 @@ struct unlock_file_request
     unsigned int count_high;
 };
 struct unlock_file_reply
-{
-    struct reply_header __header;
-};
-
-
-
-struct unmount_device_request
-{
-    struct request_header __header;
-    obj_handle_t handle;
-};
-struct unmount_device_reply
 {
     struct reply_header __header;
 };
@@ -1149,12 +1359,15 @@ struct set_console_mode_reply
 struct set_console_input_info_request
 {
     struct request_header __header;
-    obj_handle_t handle;
-    int          mask;
-    obj_handle_t active_sb;
-    int          history_mode;
-    int          history_size;
-    int          edition_mode;
+    obj_handle_t  handle;
+    int           mask;
+    obj_handle_t  active_sb;
+    int           history_mode;
+    int           history_size;
+    int           edition_mode;
+    int           input_cp;
+    int           output_cp;
+    user_handle_t win;
     /* VARARG(title,unicode_str); */
 };
 struct set_console_input_info_reply
@@ -1166,21 +1379,27 @@ struct set_console_input_info_reply
 #define SET_CONSOLE_INPUT_INFO_HISTORY_MODE     0x04
 #define SET_CONSOLE_INPUT_INFO_HISTORY_SIZE     0x08
 #define SET_CONSOLE_INPUT_INFO_EDITION_MODE     0x10
+#define SET_CONSOLE_INPUT_INFO_INPUT_CODEPAGE   0x20
+#define SET_CONSOLE_INPUT_INFO_OUTPUT_CODEPAGE  0x40
+#define SET_CONSOLE_INPUT_INFO_WIN              0x80
 
 
 
 struct get_console_input_info_request
 {
     struct request_header __header;
-    obj_handle_t handle;
+    obj_handle_t  handle;
 };
 struct get_console_input_info_reply
 {
     struct reply_header __header;
-    int          history_mode;
-    int          history_size;
-    int          history_index;
-    int          edition_mode;
+    int           history_mode;
+    int           history_size;
+    int           history_index;
+    int           edition_mode;
+    int           input_cp;
+    int           output_cp;
+    user_handle_t win;
     /* VARARG(title,unicode_str); */
 };
 
@@ -1416,12 +1635,9 @@ struct read_directory_changes_request
     struct request_header __header;
     unsigned int filter;
     obj_handle_t handle;
-    obj_handle_t event;
     int          subtree;
     int          want_data;
-    void*        io_apc;
-    void*        io_sb;
-    void*        io_user;
+    async_data_t async;
 };
 struct read_directory_changes_reply
 {
@@ -1501,6 +1717,7 @@ struct get_mapping_info_reply
     int          protect;
     int          header_size;
     void*        base;
+    obj_handle_t mapping;
     obj_handle_t shared_file;
     int          shared_size;
 };
@@ -1959,7 +2176,7 @@ struct set_timer_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    abs_time_t   expire;
+    timeout_t    expire;
     int          period;
     void*        callback;
     void*        arg;
@@ -1991,7 +2208,7 @@ struct get_timer_info_request
 struct get_timer_info_reply
 {
     struct reply_header __header;
-    abs_time_t   when;
+    timeout_t    when;
     int          signaled;
 };
 
@@ -2155,6 +2372,18 @@ struct get_msg_queue_reply
 
 
 
+struct set_queue_fd_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct set_queue_fd_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct set_queue_mask_request
 {
     struct request_header __header;
@@ -2208,7 +2437,7 @@ struct send_message_request
     unsigned int    msg;
     unsigned long   wparam;
     unsigned long   lparam;
-    int             timeout;
+    timeout_t       timeout;
     /* VARARG(data,message_data); */
 };
 struct send_message_reply
@@ -2265,7 +2494,7 @@ struct send_hardware_message_reply
 struct get_message_request
 {
     struct request_header __header;
-    int             flags;
+    unsigned int    flags;
     user_handle_t   get_win;
     unsigned int    get_first;
     unsigned int    get_last;
@@ -2288,8 +2517,7 @@ struct get_message_reply
     data_size_t     total;
     /* VARARG(data,message_data); */
 };
-#define GET_MSG_REMOVE      1
-#define GET_MSG_SENT_ONLY   2
+
 
 
 struct reply_message_request
@@ -2409,10 +2637,8 @@ struct register_async_request
     struct request_header __header;
     obj_handle_t handle;
     int          type;
-    void*        io_apc;
-    void*        io_sb;
-    void*        io_user;
     int          count;
+    async_data_t async;
 };
 struct register_async_reply
 {
@@ -2436,6 +2662,38 @@ struct cancel_async_reply
 
 
 
+struct ioctl_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    ioctl_code_t   code;
+    async_data_t   async;
+    /* VARARG(in_data,bytes); */
+};
+struct ioctl_reply
+{
+    struct reply_header __header;
+    obj_handle_t   wait;
+    unsigned int   options;
+    /* VARARG(out_data,bytes); */
+};
+
+
+
+struct get_ioctl_result_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    void*          user_arg;
+};
+struct get_ioctl_result_reply
+{
+    struct reply_header __header;
+    /* VARARG(out_data,bytes); */
+};
+
+
+
 struct create_named_pipe_request
 {
     struct request_header __header;
@@ -2447,7 +2705,7 @@ struct create_named_pipe_request
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
-    unsigned int   timeout;
+    timeout_t      timeout;
     /* VARARG(name,unicode_str); */
 };
 struct create_named_pipe_reply
@@ -2461,64 +2719,6 @@ struct create_named_pipe_reply
 #define NAMED_PIPE_MESSAGE_STREAM_READ  0x0002
 #define NAMED_PIPE_NONBLOCKING_MODE     0x0004
 #define NAMED_PIPE_SERVER_END           0x8000
-
-
-struct open_named_pipe_request
-{
-    struct request_header __header;
-    unsigned int   access;
-    unsigned int   attributes;
-    obj_handle_t   rootdir;
-    unsigned int   flags;
-    /* VARARG(name,unicode_str); */
-};
-struct open_named_pipe_reply
-{
-    struct reply_header __header;
-    obj_handle_t   handle;
-};
-
-
-
-struct connect_named_pipe_request
-{
-    struct request_header __header;
-    obj_handle_t   handle;
-    obj_handle_t   event;
-    void*          func;
-};
-struct connect_named_pipe_reply
-{
-    struct reply_header __header;
-};
-
-
-
-struct wait_named_pipe_request
-{
-    struct request_header __header;
-    obj_handle_t   handle;
-    unsigned int   timeout;
-    obj_handle_t   event;
-    void*          func;
-    /* VARARG(name,unicode_str); */
-};
-struct wait_named_pipe_reply
-{
-    struct reply_header __header;
-};
-
-
-
-struct disconnect_named_pipe_request
-{
-    struct request_header __header;
-    obj_handle_t   handle;
-};
-struct disconnect_named_pipe_reply
-{
-    struct reply_header __header;
-};
 
 
 struct get_named_pipe_info_request
@@ -2815,10 +3015,8 @@ struct get_visible_region_reply
 {
     struct reply_header __header;
     user_handle_t  top_win;
-    int            top_org_x;
-    int            top_org_y;
-    int            win_org_x;
-    int            win_org_y;
+    rectangle_t    top_rect;
+    rectangle_t    win_rect;
     data_size_t    total_size;
     /* VARARG(region,rectangles); */
 };
@@ -2843,6 +3041,7 @@ struct set_window_region_request
 {
     struct request_header __header;
     user_handle_t  window;
+    int            redraw;
     /* VARARG(region,rectangles); */
 };
 struct set_window_region_reply
@@ -3618,6 +3817,18 @@ struct get_token_groups_reply
     /* VARARG(user,token_groups); */
 };
 
+struct set_security_object_request
+{
+    struct request_header __header;
+    obj_handle_t    handle;
+    unsigned int    security_info;
+    /* VARARG(sd,security_descriptor); */
+};
+struct set_security_object_reply
+{
+    struct reply_header __header;
+};
+
 
 struct create_mailslot_request
 {
@@ -3626,27 +3837,10 @@ struct create_mailslot_request
     unsigned int   attributes;
     obj_handle_t   rootdir;
     unsigned int   max_msgsize;
-    int            read_timeout;
+    timeout_t      read_timeout;
     /* VARARG(name,unicode_str); */
 };
 struct create_mailslot_reply
-{
-    struct reply_header __header;
-    obj_handle_t   handle;
-};
-
-
-
-struct open_mailslot_request
-{
-    struct request_header __header;
-    unsigned int   access;
-    unsigned int   attributes;
-    obj_handle_t   rootdir;
-    unsigned int   sharing;
-    /* VARARG(name,unicode_str); */
-};
-struct open_mailslot_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
@@ -3659,13 +3853,13 @@ struct set_mailslot_info_request
     struct request_header __header;
     obj_handle_t   handle;
     unsigned int   flags;
-    int            read_timeout;
+    timeout_t      read_timeout;
 };
 struct set_mailslot_info_reply
 {
     struct reply_header __header;
     unsigned int   max_msgsize;
-    int            read_timeout;
+    timeout_t      read_timeout;
 };
 #define MAILSLOT_SET_READ_TIMEOUT  1
 
@@ -3749,6 +3943,120 @@ struct query_symlink_reply
 };
 
 
+
+struct get_object_info_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+};
+struct get_object_info_reply
+{
+    struct reply_header __header;
+    unsigned int   access;
+    unsigned int   ref_count;
+};
+
+
+struct get_token_impersonation_level_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+};
+struct get_token_impersonation_level_reply
+{
+    struct reply_header __header;
+    int            impersonation_level;
+};
+
+
+struct allocate_locally_unique_id_request
+{
+    struct request_header __header;
+};
+struct allocate_locally_unique_id_reply
+{
+    struct reply_header __header;
+    luid_t         luid;
+};
+
+
+
+struct create_device_manager_request
+{
+    struct request_header __header;
+    unsigned int access;
+    unsigned int attributes;
+};
+struct create_device_manager_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+};
+
+
+
+struct create_device_request
+{
+    struct request_header __header;
+    unsigned int access;
+    unsigned int attributes;
+    obj_handle_t rootdir;
+    obj_handle_t manager;
+    void*        user_ptr;
+    /* VARARG(name,unicode_str); */
+};
+struct create_device_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+};
+
+
+
+struct delete_device_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct delete_device_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct get_next_device_request_request
+{
+    struct request_header __header;
+    obj_handle_t manager;
+    obj_handle_t prev;
+    unsigned int status;
+    /* VARARG(prev_data,bytes); */
+};
+struct get_next_device_request_reply
+{
+    struct reply_header __header;
+    obj_handle_t next;
+    ioctl_code_t code;
+    void*        user_ptr;
+    data_size_t  in_size;
+    data_size_t  out_size;
+    /* VARARG(next_data,bytes); */
+};
+
+
+
+struct make_process_system_request
+{
+    struct request_header __header;
+};
+struct make_process_system_reply
+{
+    struct reply_header __header;
+    obj_handle_t event;
+};
+
+
 enum request
 {
     REQ_new_process,
@@ -3769,7 +4077,7 @@ enum request
     REQ_load_dll,
     REQ_unload_dll,
     REQ_queue_apc,
-    REQ_get_apc,
+    REQ_get_apc_result,
     REQ_close_handle,
     REQ_set_handle_info,
     REQ_dup_handle,
@@ -3792,7 +4100,6 @@ enum request
     REQ_flush_file,
     REQ_lock_file,
     REQ_unlock_file,
-    REQ_unmount_device,
     REQ_create_socket,
     REQ_accept_socket,
     REQ_set_socket_event,
@@ -3868,6 +4175,7 @@ enum request
     REQ_empty_atom_table,
     REQ_init_atom_table,
     REQ_get_msg_queue,
+    REQ_set_queue_fd,
     REQ_set_queue_mask,
     REQ_get_queue_status,
     REQ_get_process_idle_event,
@@ -3884,11 +4192,9 @@ enum request
     REQ_set_serial_info,
     REQ_register_async,
     REQ_cancel_async,
+    REQ_ioctl,
+    REQ_get_ioctl_result,
     REQ_create_named_pipe,
-    REQ_open_named_pipe,
-    REQ_connect_named_pipe,
-    REQ_wait_named_pipe,
-    REQ_disconnect_named_pipe,
     REQ_get_named_pipe_info,
     REQ_create_window,
     REQ_destroy_window,
@@ -3956,14 +4262,22 @@ enum request
     REQ_access_check,
     REQ_get_token_user,
     REQ_get_token_groups,
+    REQ_set_security_object,
     REQ_create_mailslot,
-    REQ_open_mailslot,
     REQ_set_mailslot_info,
     REQ_create_directory,
     REQ_open_directory,
     REQ_create_symlink,
     REQ_open_symlink,
     REQ_query_symlink,
+    REQ_get_object_info,
+    REQ_get_token_impersonation_level,
+    REQ_allocate_locally_unique_id,
+    REQ_create_device_manager,
+    REQ_create_device,
+    REQ_delete_device,
+    REQ_get_next_device_request,
+    REQ_make_process_system,
     REQ_NB_REQUESTS
 };
 
@@ -3989,7 +4303,7 @@ union generic_request
     struct load_dll_request load_dll_request;
     struct unload_dll_request unload_dll_request;
     struct queue_apc_request queue_apc_request;
-    struct get_apc_request get_apc_request;
+    struct get_apc_result_request get_apc_result_request;
     struct close_handle_request close_handle_request;
     struct set_handle_info_request set_handle_info_request;
     struct dup_handle_request dup_handle_request;
@@ -4012,7 +4326,6 @@ union generic_request
     struct flush_file_request flush_file_request;
     struct lock_file_request lock_file_request;
     struct unlock_file_request unlock_file_request;
-    struct unmount_device_request unmount_device_request;
     struct create_socket_request create_socket_request;
     struct accept_socket_request accept_socket_request;
     struct set_socket_event_request set_socket_event_request;
@@ -4088,6 +4401,7 @@ union generic_request
     struct empty_atom_table_request empty_atom_table_request;
     struct init_atom_table_request init_atom_table_request;
     struct get_msg_queue_request get_msg_queue_request;
+    struct set_queue_fd_request set_queue_fd_request;
     struct set_queue_mask_request set_queue_mask_request;
     struct get_queue_status_request get_queue_status_request;
     struct get_process_idle_event_request get_process_idle_event_request;
@@ -4104,11 +4418,9 @@ union generic_request
     struct set_serial_info_request set_serial_info_request;
     struct register_async_request register_async_request;
     struct cancel_async_request cancel_async_request;
+    struct ioctl_request ioctl_request;
+    struct get_ioctl_result_request get_ioctl_result_request;
     struct create_named_pipe_request create_named_pipe_request;
-    struct open_named_pipe_request open_named_pipe_request;
-    struct connect_named_pipe_request connect_named_pipe_request;
-    struct wait_named_pipe_request wait_named_pipe_request;
-    struct disconnect_named_pipe_request disconnect_named_pipe_request;
     struct get_named_pipe_info_request get_named_pipe_info_request;
     struct create_window_request create_window_request;
     struct destroy_window_request destroy_window_request;
@@ -4176,14 +4488,22 @@ union generic_request
     struct access_check_request access_check_request;
     struct get_token_user_request get_token_user_request;
     struct get_token_groups_request get_token_groups_request;
+    struct set_security_object_request set_security_object_request;
     struct create_mailslot_request create_mailslot_request;
-    struct open_mailslot_request open_mailslot_request;
     struct set_mailslot_info_request set_mailslot_info_request;
     struct create_directory_request create_directory_request;
     struct open_directory_request open_directory_request;
     struct create_symlink_request create_symlink_request;
     struct open_symlink_request open_symlink_request;
     struct query_symlink_request query_symlink_request;
+    struct get_object_info_request get_object_info_request;
+    struct get_token_impersonation_level_request get_token_impersonation_level_request;
+    struct allocate_locally_unique_id_request allocate_locally_unique_id_request;
+    struct create_device_manager_request create_device_manager_request;
+    struct create_device_request create_device_request;
+    struct delete_device_request delete_device_request;
+    struct get_next_device_request_request get_next_device_request_request;
+    struct make_process_system_request make_process_system_request;
 };
 union generic_reply
 {
@@ -4207,7 +4527,7 @@ union generic_reply
     struct load_dll_reply load_dll_reply;
     struct unload_dll_reply unload_dll_reply;
     struct queue_apc_reply queue_apc_reply;
-    struct get_apc_reply get_apc_reply;
+    struct get_apc_result_reply get_apc_result_reply;
     struct close_handle_reply close_handle_reply;
     struct set_handle_info_reply set_handle_info_reply;
     struct dup_handle_reply dup_handle_reply;
@@ -4230,7 +4550,6 @@ union generic_reply
     struct flush_file_reply flush_file_reply;
     struct lock_file_reply lock_file_reply;
     struct unlock_file_reply unlock_file_reply;
-    struct unmount_device_reply unmount_device_reply;
     struct create_socket_reply create_socket_reply;
     struct accept_socket_reply accept_socket_reply;
     struct set_socket_event_reply set_socket_event_reply;
@@ -4306,6 +4625,7 @@ union generic_reply
     struct empty_atom_table_reply empty_atom_table_reply;
     struct init_atom_table_reply init_atom_table_reply;
     struct get_msg_queue_reply get_msg_queue_reply;
+    struct set_queue_fd_reply set_queue_fd_reply;
     struct set_queue_mask_reply set_queue_mask_reply;
     struct get_queue_status_reply get_queue_status_reply;
     struct get_process_idle_event_reply get_process_idle_event_reply;
@@ -4322,11 +4642,9 @@ union generic_reply
     struct set_serial_info_reply set_serial_info_reply;
     struct register_async_reply register_async_reply;
     struct cancel_async_reply cancel_async_reply;
+    struct ioctl_reply ioctl_reply;
+    struct get_ioctl_result_reply get_ioctl_result_reply;
     struct create_named_pipe_reply create_named_pipe_reply;
-    struct open_named_pipe_reply open_named_pipe_reply;
-    struct connect_named_pipe_reply connect_named_pipe_reply;
-    struct wait_named_pipe_reply wait_named_pipe_reply;
-    struct disconnect_named_pipe_reply disconnect_named_pipe_reply;
     struct get_named_pipe_info_reply get_named_pipe_info_reply;
     struct create_window_reply create_window_reply;
     struct destroy_window_reply destroy_window_reply;
@@ -4394,16 +4712,24 @@ union generic_reply
     struct access_check_reply access_check_reply;
     struct get_token_user_reply get_token_user_reply;
     struct get_token_groups_reply get_token_groups_reply;
+    struct set_security_object_reply set_security_object_reply;
     struct create_mailslot_reply create_mailslot_reply;
-    struct open_mailslot_reply open_mailslot_reply;
     struct set_mailslot_info_reply set_mailslot_info_reply;
     struct create_directory_reply create_directory_reply;
     struct open_directory_reply open_directory_reply;
     struct create_symlink_reply create_symlink_reply;
     struct open_symlink_reply open_symlink_reply;
     struct query_symlink_reply query_symlink_reply;
+    struct get_object_info_reply get_object_info_reply;
+    struct get_token_impersonation_level_reply get_token_impersonation_level_reply;
+    struct allocate_locally_unique_id_reply allocate_locally_unique_id_reply;
+    struct create_device_manager_reply create_device_manager_reply;
+    struct create_device_reply create_device_reply;
+    struct delete_device_reply delete_device_reply;
+    struct get_next_device_request_reply get_next_device_request_reply;
+    struct make_process_system_reply make_process_system_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 259
+#define SERVER_PROTOCOL_VERSION 309
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

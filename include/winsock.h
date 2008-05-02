@@ -441,8 +441,8 @@ typedef struct WS(fd_set)
 #define _TIMEVAL_DEFINED
 typedef struct WS(timeval)
 {
-    long    tv_sec;                /* seconds */
-    long    tv_usec;               /* and microseconds */
+    LONG    tv_sec;                /* seconds */
+    LONG    tv_usec;               /* and microseconds */
 } TIMEVAL, *PTIMEVAL, *LPTIMEVAL;
 #endif
 
@@ -516,20 +516,20 @@ int WINAPI __WSAFDIsSet(SOCKET,WS(fd_set)*);
 
 #ifdef WORDS_BIGENDIAN
 
-#define htonl(l) ((WS(u_long))(l))
-#define htons(s) ((WS(u_short))(s))
-#define ntohl(l) ((WS(u_long))(l))
-#define ntohs(s) ((WS(u_short))(s))
+#define htonl(l) ((u_long)(l))
+#define htons(s) ((u_short)(s))
+#define ntohl(l) ((u_long)(l))
+#define ntohs(s) ((u_short)(s))
 
 #else  /* WORDS_BIGENDIAN */
 
-inline static WS(u_short) __wine_ushort_swap(WS(u_short) s)
+static inline u_short __wine_ushort_swap(u_short s)
 {
     return (s >> 8) | (s << 8);
 }
-inline static WS(u_long) __wine_ulong_swap(WS(u_long) l)
+static inline u_long __wine_ulong_swap(u_long l)
 {
-    return ((WS(u_long))__wine_ushort_swap((WS(u_short))l) << 16) | __wine_ushort_swap((WS(u_short))(l >> 16));
+    return ((u_long)__wine_ushort_swap((u_short)l) << 16) | __wine_ushort_swap((u_short)(l >> 16));
 }
 #define htonl(l) __wine_ulong_swap(l)
 #define htons(s) __wine_ushort_swap(s)
@@ -549,31 +549,31 @@ inline static WS(u_long) __wine_ulong_swap(WS(u_long) l)
 #define IN_CLASSA_MAX              128
 #define IN_CLASSA_NET              0xff000000
 #define IN_CLASSA_HOST             0x00ffffff
-#define IN_CLASSA(i)               (((long)(i) & 0x80000000) == 0)
+#define IN_CLASSA(i)               (((LONG)(i) & 0x80000000) == 0)
 #define IN_CLASSB_NSHIFT           16
 #define IN_CLASSB_MAX              65536
 #define IN_CLASSB_NET              0xffff0000
 #define IN_CLASSB_HOST             0x0000ffff
-#define IN_CLASSB(i)               (((long)(i) & 0xc0000000) == 0x80000000)
+#define IN_CLASSB(i)               (((LONG)(i) & 0xc0000000) == 0x80000000)
 #define IN_CLASSC_NSHIFT           8
 #define IN_CLASSC_NET              0xffffff00
 #define IN_CLASSC_HOST             0x000000ff
-#define IN_CLASSC(i)               (((long)(i) & 0xe0000000) == 0xc0000000)
+#define IN_CLASSC(i)               (((LONG)(i) & 0xe0000000) == 0xc0000000)
 #else
 #define WS_IN_CLASSA_NSHIFT        24
 #define WS_IN_CLASSA_MAX           128
 #define WS_IN_CLASSA_NET           0xff000000
 #define WS_IN_CLASSA_HOST          0x00ffffff
-#define WS_IN_CLASSA(i)            (((long)(i) & 0x80000000) == 0)
+#define WS_IN_CLASSA(i)            (((LONG)(i) & 0x80000000) == 0)
 #define WS_IN_CLASSB_NSHIFT        16
 #define WS_IN_CLASSB_MAX           65536
 #define WS_IN_CLASSB_NET           0xffff0000
 #define WS_IN_CLASSB_HOST          0x0000ffff
-#define WS_IN_CLASSB(i)            (((long)(i) & 0xc0000000) == 0x80000000)
+#define WS_IN_CLASSB(i)            (((LONG)(i) & 0xc0000000) == 0x80000000)
 #define WS_IN_CLASSC_NSHIFT        8
 #define WS_IN_CLASSC_NET           0xffffff00
 #define WS_IN_CLASSC_HOST          0x000000ff
-#define WS_IN_CLASSC(i)            (((long)(i) & 0xe0000000) == 0xc0000000)
+#define WS_IN_CLASSC(i)            (((LONG)(i) & 0xe0000000) == 0xc0000000)
 #endif /* USE_WS_PREFIX */
 
 #ifndef USE_WS_PREFIX
@@ -663,6 +663,7 @@ typedef struct WS(WSAData)
 #define SO_DEBUG                   0x0001
 #define SO_ACCEPTCONN              0x0002
 #define SO_REUSEADDR               0x0004
+#define SO_EXCLUSIVEADDRUSE        ((u_int)(~SO_REUSEADDR))
 #define SO_KEEPALIVE               0x0008
 #define SO_DONTROUTE               0x0010
 #define SO_BROADCAST               0x0020
@@ -696,6 +697,7 @@ typedef struct WS(WSAData)
 #define WS_SO_DEBUG                0x0001
 #define WS_SO_ACCEPTCONN           0x0002
 #define WS_SO_REUSEADDR            0x0004
+#define WS_SO_EXCLUSIVEADDRUSE     ((WS_u_int)(~WS_SO_REUSEADDR))
 #define WS_SO_KEEPALIVE            0x0008
 #define WS_SO_DONTROUTE            0x0010
 #define WS_SO_BROADCAST            0x0020
@@ -719,8 +721,8 @@ typedef struct WS(WSAData)
 #define WS_IOC_INOUT               (WS_IOC_IN|WS_IOC_OUT)
 
 #define WS__IO(x,y)    (WS_IOC_VOID|((x)<<8)|(y))
-#define WS__IOR(x,y,t) (WS_IOC_OUT|(((long)sizeof(t)&WS_IOCPARM_MASK)<<16)|((x)<<8)|(y))
-#define WS__IOW(x,y,t) (WS_IOC_IN|(((long)sizeof(t)&WS_IOCPARM_MASK)<<16)|((x)<<8)|(y))
+#define WS__IOR(x,y,t) (WS_IOC_OUT|(((LONG)sizeof(t)&WS_IOCPARM_MASK)<<16)|((x)<<8)|(y))
+#define WS__IOW(x,y,t) (WS_IOC_IN|(((LONG)sizeof(t)&WS_IOCPARM_MASK)<<16)|((x)<<8)|(y))
 
 #endif
 
@@ -789,16 +791,16 @@ typedef struct WS(WSAData)
 #define MSG_OOB                    0x0001
 #define MSG_PEEK                   0x0002
 #define MSG_DONTROUTE              0x0004
-#define MSG_MAXIOVLEN              0x000a
 #define MSG_PARTIAL                0x8000
+#define MSG_MAXIOVLEN              16
 #else /* USE_WS_PREFIX */
 #define WS_SOMAXCONN               5
 
 #define WS_MSG_OOB                 0x0001
 #define WS_MSG_PEEK                0x0002
 #define WS_MSG_DONTROUTE           0x0004
-#define WS_MSG_MAXIOVLEN           0x000a
 #define WS_MSG_PARTIAL             0x8000
+#define WS_MSG_MAXIOVLEN           16
 #endif /* USE_WS_PREFIX */
 
 /*
@@ -1002,7 +1004,7 @@ HANDLE WINAPI WSAAsyncGetProtoByName(HWND,WS(u_int),const char*,char*,int);
 HANDLE WINAPI WSAAsyncGetProtoByNumber(HWND,WS(u_int),int,char*,int);
 HANDLE WINAPI WSAAsyncGetServByName(HWND,WS(u_int),const char*,const char*,char*,int);
 HANDLE WINAPI WSAAsyncGetServByPort(HWND,WS(u_int),int,const char*,char*,int);
-int WINAPI WSAAsyncSelect(SOCKET,HWND,WS(u_int),long);
+int WINAPI WSAAsyncSelect(SOCKET,HWND,WS(u_int),LONG);
 int WINAPI WSACancelAsyncRequest(HANDLE);
 int WINAPI WSACancelBlockingCall(void);
 int WINAPI WSACleanup(void);
@@ -1032,7 +1034,7 @@ int WINAPI WS(getsockname)(SOCKET,struct WS(sockaddr)*,int*);
 int WINAPI WS(getsockopt)(SOCKET,int,int,char*,int*);
 WS(u_long) WINAPI WS(inet_addr)(const char*);
 char* WINAPI WS(inet_ntoa)(struct WS(in_addr));
-int WINAPI WS(ioctlsocket)(SOCKET,long,WS(u_long)*);
+int WINAPI WS(ioctlsocket)(SOCKET,LONG,WS(u_long)*);
 int WINAPI WS(listen)(SOCKET,int);
 int WINAPI WS(recv)(SOCKET,char*,int,int);
 int WINAPI WS(recvfrom)(SOCKET,char*,int,int,struct WS(sockaddr)*,int*);

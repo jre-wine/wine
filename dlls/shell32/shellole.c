@@ -50,13 +50,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(shell);
 extern HRESULT WINAPI IFSFolder_Constructor(IUnknown * pUnkOuter, REFIID riid, LPVOID * ppv);
 
 static const WCHAR sShell32[12] = {'S','H','E','L','L','3','2','.','D','L','L','\0'};
-static const WCHAR sOLE32[10] = {'O','L','E','3','2','.','D','L','L','\0'};
 
 /**************************************************************************
  * Default ClassFactory types
  */
 typedef HRESULT (CALLBACK *LPFNCREATEINSTANCE)(IUnknown* pUnkOuter, REFIID riid, LPVOID* ppvObject);
-IClassFactory * IDefClF_fnConstructor(LPFNCREATEINSTANCE lpfnCI, PLONG pcRefDll, REFIID riidInst);
+static IClassFactory * IDefClF_fnConstructor(LPFNCREATEINSTANCE lpfnCI, PLONG pcRefDll, REFIID riidInst);
 
 /* this table contains all CLSID's of shell32 objects */
 static const struct {
@@ -122,7 +121,7 @@ HRESULT WINAPI SHCoCreateInstance(
 {
 	DWORD	hres;
 	IID	iid;
-	CLSID * myclsid = (CLSID*)clsid;
+	const	CLSID * myclsid = clsid;
 	WCHAR	sKeyName[MAX_PATH];
 	const	WCHAR sCLSID[7] = {'C','L','S','I','D','\\','\0'};
 	WCHAR	sClassID[60];
@@ -398,7 +397,7 @@ static const IClassFactoryVtbl dclfvt;
  *  IDefClF_fnConstructor
  */
 
-IClassFactory * IDefClF_fnConstructor(LPFNCREATEINSTANCE lpfnCI, PLONG pcRefDll, REFIID riidInst)
+static IClassFactory * IDefClF_fnConstructor(LPFNCREATEINSTANCE lpfnCI, PLONG pcRefDll, REFIID riidInst)
 {
 	IDefClFImpl* lpclf;
 
@@ -622,10 +621,8 @@ UINT WINAPI DragQueryFileA(
 	}
 
 	i = strlen(lpDrop);
-	i++;
 	if (!lpszFile ) goto end;   /* needed buffer size */
-	i = (lLength > i) ? i : lLength;
-	lstrcpynA (lpszFile,  lpDrop,  i);
+	lstrcpynA (lpszFile, lpDrop, lLength);
 end:
 	GlobalUnlock(hDrop);
 	return i;
@@ -680,11 +677,8 @@ UINT WINAPI DragQueryFileW(
 	}
 
 	i = strlenW(lpwDrop);
-	i++;
 	if ( !lpszwFile) goto end;   /* needed buffer size */
-
-	i = (lLength > i) ? i : lLength;
-	lstrcpynW (lpszwFile, lpwDrop, i);
+	lstrcpynW (lpszwFile, lpwDrop, lLength);
 end:
 	GlobalUnlock(hDrop);
 	return i;

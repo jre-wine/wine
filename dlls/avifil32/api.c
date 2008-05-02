@@ -17,7 +17,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
 #include <stdarg.h>
 
 #define COBJMACROS
@@ -185,7 +184,7 @@ void WINAPI AVIFileInit(void) {
  */
 void WINAPI AVIFileExit(void) {
   /* need to free ole32.dll if we are the last exit call */
-  /* OleUnitialize() */
+  /* OleUninitialize() */
   FIXME("(): stub!\n");
 }
 

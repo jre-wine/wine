@@ -30,9 +30,7 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wownt32.h"
 #include "x11drv.h"
-#include "gdi.h"
 #include "winternl.h"
 #include "wine/library.h"
 #include "wine/unicode.h"
@@ -43,13 +41,14 @@ int using_client_side_fonts = FALSE;
 
 WINE_DEFAULT_DEBUG_CHANNEL(xrender);
 
-#ifdef HAVE_X11_EXTENSIONS_XRENDER_H
+#ifdef SONAME_LIBXRENDER
 
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrender.h>
 
-static XRenderPictFormat *screen_format; /* format of screen */
-static XRenderPictFormat *mono_format; /* format of mono bitmap */
+
+enum drawable_depth_type {mono_drawable, color_drawable};
+static XRenderPictFormat *pict_formats[2];
 
 typedef struct
 {
@@ -85,9 +84,6 @@ struct tagXRENDERINFO
 {
     int                cache_index;
     Picture            pict;
-    Picture            tile_pict;
-    Pixmap             tile_xpm;
-    COLORREF           lastTextColor;
 };
 
 
@@ -100,17 +96,6 @@ static INT mru = -1;
 
 static int antialias = 1;
 
-/* some default values just in case */
-#ifndef SONAME_LIBX11
-#define SONAME_LIBX11 "libX11.so"
-#endif
-#ifndef SONAME_LIBXEXT
-#define SONAME_LIBXEXT "libXext.so"
-#endif
-#ifndef SONAME_LIBXRENDER
-#define SONAME_LIBXRENDER "libXrender.so"
-#endif
-
 static void *xrender_handle;
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f;
@@ -119,6 +104,7 @@ MAKE_FUNCPTR(XRenderComposite)
 MAKE_FUNCPTR(XRenderCompositeString8)
 MAKE_FUNCPTR(XRenderCompositeString16)
 MAKE_FUNCPTR(XRenderCompositeString32)
+MAKE_FUNCPTR(XRenderCompositeText16)
 MAKE_FUNCPTR(XRenderCreateGlyphSet)
 MAKE_FUNCPTR(XRenderCreatePicture)
 MAKE_FUNCPTR(XRenderFillRectangle)
@@ -182,6 +168,7 @@ LOAD_FUNCPTR(XRenderComposite)
 LOAD_FUNCPTR(XRenderCompositeString8)
 LOAD_FUNCPTR(XRenderCompositeString16)
 LOAD_FUNCPTR(XRenderCompositeString32)
+LOAD_FUNCPTR(XRenderCompositeText16)
 LOAD_FUNCPTR(XRenderCreateGlyphSet)
 LOAD_FUNCPTR(XRenderCreatePicture)
 LOAD_FUNCPTR(XRenderFillRectangle)
@@ -203,8 +190,8 @@ LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
         if(pXRenderQueryExtension(gdi_display, &event_base, &xrender_error_base)) {
             X11DRV_XRender_Installed = TRUE;
             TRACE("Xrender is up and running error_base = %d\n", xrender_error_base);
-            screen_format = pXRenderFindVisualFormat(gdi_display, visual);
-            if(!screen_format)
+            pict_formats[color_drawable] = pXRenderFindVisualFormat(gdi_display, visual);
+            if(!pict_formats[color_drawable])
             {
                 /* Xrender doesn't like DirectColor visuals, try to find a TrueColor one instead */
                 if (visual->class == DirectColor)
@@ -213,12 +200,12 @@ LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
                     if (XMatchVisualInfo( gdi_display, DefaultScreen(gdi_display),
                                           screen_depth, TrueColor, &info ))
                     {
-                        screen_format = pXRenderFindVisualFormat(gdi_display, info.visual);
-                        if (screen_format) visual = info.visual;
+                        pict_formats[color_drawable] = pXRenderFindVisualFormat(gdi_display, info.visual);
+                        if (pict_formats[color_drawable]) visual = info.visual;
                     }
                 }
             }
-            if(!screen_format) /* This fails in buggy versions of libXrender.so */
+            if(!pict_formats[color_drawable]) /* This fails in buggy versions of libXrender.so */
             {
                 wine_tsx11_unlock();
                 WINE_MESSAGE(
@@ -232,10 +219,10 @@ LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
             pf.depth = 1;
             pf.direct.alpha = 0;
             pf.direct.alphaMask = 1;
-            mono_format = pXRenderFindFormat(gdi_display, PictFormatType |
-                                             PictFormatDepth | PictFormatAlpha |
-                                             PictFormatAlphaMask, &pf, 0);
-            if(!mono_format) {
+            pict_formats[mono_drawable] = pXRenderFindFormat(gdi_display, PictFormatType |
+                                                             PictFormatDepth | PictFormatAlpha |
+                                                             PictFormatAlphaMask, &pf, 0);
+            if(!pict_formats[mono_drawable]) {
                 ERR("mono_format == NULL?\n");
                 X11DRV_XRender_Installed = FALSE;
             }
@@ -347,9 +334,9 @@ static void FreeEntry(int entry)
                     HeapFree(GetProcessHeap(), 0, formatEntry->bitmaps[i]);
                 HeapFree(GetProcessHeap(), 0, formatEntry->bitmaps);
                 formatEntry->bitmaps = NULL;
-                HeapFree(GetProcessHeap(), 0, formatEntry->gis);
-                formatEntry->gis = NULL;
             }
+            HeapFree(GetProcessHeap(), 0, formatEntry->gis);
+            formatEntry->gis = NULL;
             formatEntry->nrealized = 0;
         }
 
@@ -572,18 +559,7 @@ BOOL X11DRV_XRender_SelectFont(X11DRV_PDEVICE *physDev, HFONT hfont)
  */
 void X11DRV_XRender_DeleteDC(X11DRV_PDEVICE *physDev)
 {
-    wine_tsx11_lock();
-    if(physDev->xrender->tile_pict)
-        pXRenderFreePicture(gdi_display, physDev->xrender->tile_pict);
-
-    if(physDev->xrender->tile_xpm)
-        XFreePixmap(gdi_display, physDev->xrender->tile_xpm);
-
-    if(physDev->xrender->pict) {
-	TRACE("freeing pict = %lx dc = %p\n", physDev->xrender->pict, physDev->hdc);
-        pXRenderFreePicture(gdi_display, physDev->xrender->pict);
-    }
-    wine_tsx11_unlock();
+    X11DRV_XRender_UpdateDrawable(physDev);
 
     EnterCriticalSection(&xrender_cs);
     if(physDev->xrender->cache_index != -1)
@@ -599,19 +575,21 @@ void X11DRV_XRender_DeleteDC(X11DRV_PDEVICE *physDev)
  *   X11DRV_XRender_UpdateDrawable
  *
  * This gets called from X11DRV_SetDrawable and X11DRV_SelectBitmap.
- * It deletes the pict when the drawable changes.
+ * It deletes the pict and tile when the drawable changes.
  */
 void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev)
 {
-    if(physDev->xrender->pict) {
-        TRACE("freeing pict %08lx from dc %p drawable %08lx\n", physDev->xrender->pict,
-              physDev->hdc, physDev->drawable);
-        wine_tsx11_lock();
+    wine_tsx11_lock();
+
+    if(physDev->xrender->pict)
+    {
+        TRACE("freeing pict = %lx dc = %p\n", physDev->xrender->pict, physDev->hdc);
         XFlush(gdi_display);
         pXRenderFreePicture(gdi_display, physDev->xrender->pict);
-        wine_tsx11_unlock();
+        physDev->xrender->pict = 0;
     }
-    physDev->xrender->pict = 0;
+    wine_tsx11_unlock();
+
     return;
 }
 
@@ -631,6 +609,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
     gsCacheEntryFormat *formatEntry;
     UINT ggo_format = GGO_GLYPH_INDEX;
     XRenderPictFormat pf;
+    static const char zero[4];
 
     switch(format) {
     case AA_Grey:
@@ -656,7 +635,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
                                       NULL);
         }
         if(buflen == GDI_ERROR) {
-            ERR("GetGlyphOutlineW failed\n");
+            WARN("GetGlyphOutlineW failed\n");
             return FALSE;
         }
         TRACE("Turning off antialiasing for this monochrome font\n");
@@ -693,17 +672,16 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 	    formatEntry->bitmaps = HeapAlloc(GetProcessHeap(),
 				      HEAP_ZERO_MEMORY,
 				      formatEntry->nrealized * sizeof(formatEntry->bitmaps[0]));
-
-	  if (formatEntry->gis)
+        }
+        if (formatEntry->gis)
 	    formatEntry->gis = HeapReAlloc(GetProcessHeap(),
 				   HEAP_ZERO_MEMORY,
 				   formatEntry->gis,
 				   formatEntry->nrealized * sizeof(formatEntry->gis[0]));
-	  else
+        else
 	    formatEntry->gis = HeapAlloc(GetProcessHeap(),
 				   HEAP_ZERO_MEMORY,
-				   formatEntry->nrealized * sizeof(formatEntry->gis[0]));
-	}
+                                   formatEntry->nrealized * sizeof(formatEntry->gis[0]));
     }
 
 
@@ -789,6 +767,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 	}
     }
 
+
     if(formatEntry->glyphset) {
         if(format == AA_None && BitmapBitOrder(gdi_display) != MSBFirst) {
 	    unsigned char *byte = (unsigned char*) buf, c;
@@ -806,15 +785,28 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 	    }
 	}
 	gid = glyph;
+
+        /*
+          XRenderCompositeText seems to ignore 0x0 glyphs when
+          AA_None, which means we lose the advance width of glyphs
+          like the space.  We'll pretend that such glyphs are 1x1
+          bitmaps.
+        */
+
+        if(buflen == 0)
+            gi.width = gi.height = 1;
+
         wine_tsx11_lock();
 	pXRenderAddGlyphs(gdi_display, formatEntry->glyphset, &gid, &gi, 1,
-			  buf, buflen);
+                          buflen ? buf : zero, buflen ? buflen : sizeof(zero));
 	wine_tsx11_unlock();
 	HeapFree(GetProcessHeap(), 0, buf);
     } else {
         formatEntry->bitmaps[glyph] = buf;
-	memcpy(&formatEntry->gis[glyph], &gi, sizeof(gi));
     }
+
+    memcpy(&formatEntry->gis[glyph], &gi, sizeof(gi));
+
     return TRUE;
 }
 
@@ -1054,6 +1046,76 @@ static void SmoothGlyphGray(XImage *image, int x, int y, void *bitmap, XGlyphInf
     }
 }
 
+/*************************************************************
+ *                 get_tile_pict
+ *
+ * Returns an appropiate Picture for tiling the text colour.
+ * Call and use result within the xrender_cs
+ */
+static Picture get_tile_pict(enum drawable_depth_type type, int text_pixel)
+{
+    static struct
+    {
+        Pixmap xpm;
+        Picture pict;
+        int current_color;
+    } tiles[2], *tile;
+    XRenderColor col;
+
+    tile = &tiles[type];
+
+    if(!tile->xpm)
+    {
+        XRenderPictureAttributes pa;
+
+        wine_tsx11_lock();
+        tile->xpm = XCreatePixmap(gdi_display, root_window, 1, 1, pict_formats[type]->depth);
+
+        pa.repeat = True;
+        tile->pict = pXRenderCreatePicture(gdi_display, tile->xpm, pict_formats[type], CPRepeat, &pa);
+        wine_tsx11_unlock();
+
+        /* init current_color to something different from text_pixel */
+        tile->current_color = ~text_pixel;
+
+        if(type == mono_drawable)
+        {
+            /* for a 1bpp bitmap we always need a 1 in the tile */
+            col.red = col.green = col.blue = 0;
+            col.alpha = 0xffff;
+            wine_tsx11_lock();
+            pXRenderFillRectangle(gdi_display, PictOpSrc, tile->pict, &col, 0, 0, 1, 1);
+            wine_tsx11_unlock();
+        }
+    }
+
+    if(text_pixel != tile->current_color && type == color_drawable)
+    {
+        /* Map 0 -- 0xff onto 0 -- 0xffff */
+        int r_shift, r_len;
+        int g_shift, g_len;
+        int b_shift, b_len;
+
+        ExamineBitfield (visual->red_mask, &r_shift, &r_len );
+        ExamineBitfield (visual->green_mask, &g_shift, &g_len);
+        ExamineBitfield (visual->blue_mask, &b_shift, &b_len);
+
+        col.red = GetField(text_pixel, r_shift, r_len);
+        col.red |= col.red << 8;
+        col.green = GetField(text_pixel, g_shift, g_len);
+        col.green |= col.green << 8;
+        col.blue = GetField(text_pixel, b_shift, b_len);
+        col.blue |= col.blue << 8;
+        col.alpha = 0x0;
+
+        wine_tsx11_lock();
+        pXRenderFillRectangle(gdi_display, PictOpSrc, tile->pict, &col, 0, 0, 1, 1);
+        wine_tsx11_unlock();
+        tile->current_color = text_pixel;
+    }
+    return tile->pict;
+}
+
 static int XRenderErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
 {
     return 1;
@@ -1066,7 +1128,6 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 				const RECT *lprect, LPCWSTR wstr, UINT count,
 				const INT *lpDx )
 {
-    XRenderColor col;
     RGNDATA *data;
     XGCValues xgcval;
     int render_op = PictOpOver;
@@ -1077,11 +1138,13 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
     int textPixel, backgroundPixel;
     HRGN saved_region = 0;
     BOOL disable_antialias = FALSE;
-    AA_Type antialias = AA_None;
+    AA_Type aa_type = AA_None;
     DIBSECTION bmp;
     unsigned int idx;
     double cosEsc, sinEsc;
     LOGFONTW lf;
+    enum drawable_depth_type depth_type = (physDev->depth == 1) ? mono_drawable : color_drawable;
+    Picture tile_pict = 0;
 
     /* Do we need to disable antialiasing because of palette mode? */
     if( !physDev->bitmap || GetObjectW( physDev->bitmap->hbitmap, sizeof(bmp), &bmp ) != sizeof(bmp) ) {
@@ -1119,7 +1182,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
         wine_tsx11_lock();
         XSetForeground( gdi_display, physDev->gc, backgroundPixel );
         XFillRectangle( gdi_display, physDev->drawable, physDev->gc,
-                        physDev->org.x + lprect->left, physDev->org.y + lprect->top,
+                        physDev->dc_rect.left + lprect->left, physDev->dc_rect.top + lprect->top,
                         lprect->right - lprect->left, lprect->bottom - lprect->top );
         wine_tsx11_unlock();
     }
@@ -1152,6 +1215,8 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
         DeleteObject( clip_region );
     }
 
+    EnterCriticalSection(&xrender_cs);
+
     if(X11DRV_XRender_Installed) {
         if(!physDev->xrender->pict) {
 	    XRenderPictureAttributes pa;
@@ -1160,8 +1225,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 	    wine_tsx11_lock();
 	    physDev->xrender->pict = pXRenderCreatePicture(gdi_display,
 							   physDev->drawable,
-							   (physDev->depth == 1) ?
-							   mono_format : screen_format,
+                                                           pict_formats[depth_type],
 							   CPSubwindowMode, &pa);
 	    wine_tsx11_unlock();
 
@@ -1176,129 +1240,108 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 	{
 	    wine_tsx11_lock();
 	    pXRenderSetPictureClipRectangles( gdi_display, physDev->xrender->pict,
-					      physDev->org.x, physDev->org.y,
+					      physDev->dc_rect.left, physDev->dc_rect.top,
 					      (XRectangle *)data->Buffer, data->rdh.nCount );
 	    wine_tsx11_unlock();
 	    HeapFree( GetProcessHeap(), 0, data );
 	}
-    }
 
-    if(X11DRV_XRender_Installed) {
-        /* Create a 1x1 pixmap to tile over the font mask */
-        if(!physDev->xrender->tile_xpm) {
-	    XRenderPictureAttributes pa;
-
-	    XRenderPictFormat *format = (physDev->depth == 1) ? mono_format : screen_format;
-	    wine_tsx11_lock();
-	    physDev->xrender->tile_xpm = XCreatePixmap(gdi_display,
-						       physDev->drawable,
-						       1, 1,
-						       format->depth);
-	    pa.repeat = True;
-	    physDev->xrender->tile_pict = pXRenderCreatePicture(gdi_display,
-								physDev->xrender->tile_xpm,
-								format,
-								CPRepeat, &pa);
-	    wine_tsx11_unlock();
-	    TRACE("Created pixmap of depth %d\n", format->depth);
-	    /* init lastTextColor to something different from textPixel */
-	    physDev->xrender->lastTextColor = ~physDev->textPixel;
-
-	}
-
-	if(physDev->textPixel != physDev->xrender->lastTextColor) {
-	    if(physDev->depth != 1) {
-                /* Map 0 -- 0xff onto 0 -- 0xffff */
-                int             r_shift, r_len;
-                int             g_shift, g_len;
-                int             b_shift, b_len;
-
-                ExamineBitfield (visual->red_mask, &r_shift, &r_len );
-                ExamineBitfield (visual->green_mask, &g_shift, &g_len);
-                ExamineBitfield (visual->blue_mask, &b_shift, &b_len);
-
-	        col.red = GetField(physDev->textPixel, r_shift, r_len);
-		col.red |= col.red << 8;
-		col.green = GetField(physDev->textPixel, g_shift, g_len);
-		col.green |= col.green << 8;
-		col.blue = GetField(physDev->textPixel, b_shift, b_len);
-		col.blue |= col.blue << 8;
-		col.alpha = 0x0;
-	    } else { /* for a 1bpp bitmap we always need a 1 in the tile */
-	        col.red = col.green = col.blue = 0;
-		col.alpha = 0xffff;
-	    }
-	    wine_tsx11_lock();
-	    pXRenderFillRectangle(gdi_display, PictOpSrc,
-				  physDev->xrender->tile_pict,
-				  &col, 0, 0, 1, 1);
-	    wine_tsx11_unlock();
-	    physDev->xrender->lastTextColor = physDev->textPixel;
-	}
+        tile_pict = get_tile_pict(depth_type, physDev->textPixel);
 
 	/* FIXME the mapping of Text/BkColor onto 1 or 0 needs investigation.
 	 */
-	if((physDev->depth == 1) && (textPixel == 0))
+	if((depth_type == mono_drawable) && (textPixel == 0))
 	    render_op = PictOpOutReverse; /* This gives us 'black' text */
     }
 
-    EnterCriticalSection(&xrender_cs);
     entry = glyphsetCache + physDev->xrender->cache_index;
     if( disable_antialias == FALSE )
-        antialias = entry->aa_default;
-    formatEntry = entry->format[antialias];
+        aa_type = entry->aa_default;
+    formatEntry = entry->format[aa_type];
 
     for(idx = 0; idx < count; idx++) {
         if( !formatEntry ) {
-	    UploadGlyph(physDev, wstr[idx], antialias);
+	    UploadGlyph(physDev, wstr[idx], aa_type);
             /* re-evaluate antialias since aa_default may have changed */
             if( disable_antialias == FALSE )
-                antialias = entry->aa_default;
-            formatEntry = entry->format[antialias];
+                aa_type = entry->aa_default;
+            formatEntry = entry->format[aa_type];
         } else if( wstr[idx] >= formatEntry->nrealized || formatEntry->realized[wstr[idx]] == FALSE) {
-	    UploadGlyph(physDev, wstr[idx], antialias);
+	    UploadGlyph(physDev, wstr[idx], aa_type);
 	}
     }
-    assert(formatEntry);
+    if (!formatEntry)
+    {
+        WARN("could not upload requested glyphs\n");
+        LeaveCriticalSection(&xrender_cs);
+        goto done_unlock;
+    }
 
     TRACE("Writing %s at %d,%d\n", debugstr_wn(wstr,count),
-          physDev->org.x + x, physDev->org.y + y);
+          physDev->dc_rect.left + x, physDev->dc_rect.top + y);
 
-    if(X11DRV_XRender_Installed) {
-        wine_tsx11_lock();
-	if(!lpDx)
-	    pXRenderCompositeString16(gdi_display, render_op,
-				      physDev->xrender->tile_pict,
-				      physDev->xrender->pict,
-				      formatEntry->font_format, formatEntry->glyphset,
-				      0, 0, physDev->org.x + x, physDev->org.y + y,
-				      wstr, count);
-	else {
-	    INT offset = 0, xoff = 0, yoff = 0;
-	    for(idx = 0; idx < count; idx++) {
-	        pXRenderCompositeString16(gdi_display, render_op,
-					  physDev->xrender->tile_pict,
-					  physDev->xrender->pict,
-					  formatEntry->font_format, formatEntry->glyphset,
-					  0, 0, physDev->org.x + x + xoff,
-					  physDev->org.y + y + yoff,
-					  wstr + idx, 1);
+    if(X11DRV_XRender_Installed)
+    {
+        XGlyphElt16 *elts = HeapAlloc(GetProcessHeap(), 0, sizeof(XGlyphElt16) * count);
+        INT offset = 0;
+        POINT desired, current;
+
+        /* There's a bug in XRenderCompositeText that ignores the xDst and yDst parameters.
+           So we pass zeros to the function and move to our starting position using the first
+           element of the elts array. */
+
+        desired.x = physDev->dc_rect.left + x;
+        desired.y = physDev->dc_rect.top + y;
+        current.x = current.y = 0;
+
+        for(idx = 0; idx < count; idx++)
+        {
+            elts[idx].glyphset = formatEntry->glyphset;
+            elts[idx].chars = wstr + idx;
+            elts[idx].nchars = 1;
+            elts[idx].xOff = desired.x - current.x;
+            elts[idx].yOff = desired.y - current.y;
+
+            current.x += (elts[idx].xOff + formatEntry->gis[wstr[idx]].xOff);
+            current.y += (elts[idx].yOff + formatEntry->gis[wstr[idx]].yOff);
+
+            if(!lpDx)
+            {
+                desired.x += formatEntry->gis[wstr[idx]].xOff;
+                desired.y += formatEntry->gis[wstr[idx]].yOff;
+            }
+            else
+            {
                 offset += lpDx[idx];
-		xoff = offset * cosEsc;
-		yoff = offset * -sinEsc;
-	    }
-	}
-	wine_tsx11_unlock();
-
+                desired.x = physDev->dc_rect.left + x + offset * cosEsc;
+                desired.y = physDev->dc_rect.top  + y - offset * sinEsc;
+            }
+        }
+        wine_tsx11_lock();
+        pXRenderCompositeText16(gdi_display, render_op,
+                                tile_pict,
+                                physDev->xrender->pict,
+                                formatEntry->font_format,
+                                0, 0, 0, 0, elts, count);
+        wine_tsx11_unlock();
+        HeapFree(GetProcessHeap(), 0, elts);
     } else {
         INT offset = 0, xoff = 0, yoff = 0;
         wine_tsx11_lock();
 	XSetForeground( gdi_display, physDev->gc, textPixel );
 
-	if(antialias == AA_None) {
+        if(aa_type == AA_None || physDev->depth == 1)
+        {
+            void (* sharp_glyph_fn)(X11DRV_PDEVICE *, INT, INT, void *, XGlyphInfo *);
+
+            if(aa_type == AA_None)
+                sharp_glyph_fn = SharpGlyphMono;
+            else
+                sharp_glyph_fn = SharpGlyphGray;
+
 	    for(idx = 0; idx < count; idx++) {
-	        SharpGlyphMono(physDev, physDev->org.x + x + xoff,
-			       physDev->org.y + y + yoff,
+	        sharp_glyph_fn(physDev, physDev->dc_rect.left + x + xoff,
+			       physDev->dc_rect.top + y + yoff,
 			       formatEntry->bitmaps[wstr[idx]],
 			       &formatEntry->gis[wstr[idx]]);
 		if(lpDx) {
@@ -1309,35 +1352,15 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 		    xoff += formatEntry->gis[wstr[idx]].xOff;
 		    yoff += formatEntry->gis[wstr[idx]].yOff;
 		}
-	    }
-	} else if(physDev->depth == 1) {
-	    for(idx = 0; idx < count; idx++) {
-	        SharpGlyphGray(physDev, physDev->org.x + x + xoff,
-			       physDev->org.y + y + yoff,
-			       formatEntry->bitmaps[wstr[idx]],
-			       &formatEntry->gis[wstr[idx]]);
-		if(lpDx) {
-		    offset += lpDx[idx];
-		    xoff = offset * cosEsc;
-		    yoff = offset * -sinEsc;
-		} else {
-		    xoff += formatEntry->gis[wstr[idx]].xOff;
-		    yoff += formatEntry->gis[wstr[idx]].yOff;
-		}
-		    
 	    }
 	} else {
 	    XImage *image;
-	    unsigned int w, h, dummy_uint;
-	    Window dummy_window;
-	    int dummy_int;
 	    int image_x, image_y, image_off_x, image_off_y, image_w, image_h;
 	    RECT extents = {0, 0, 0, 0};
 	    POINT cur = {0, 0};
-	    
-	    
-	    XGetGeometry(gdi_display, physDev->drawable, &dummy_window, &dummy_int, &dummy_int,
-			 &w, &h, &dummy_uint, &dummy_uint);
+            int w = physDev->drawable_rect.right - physDev->drawable_rect.left;
+            int h = physDev->drawable_rect.bottom - physDev->drawable_rect.top;
+
 	    TRACE("drawable %dx%d\n", w, h);
 
 	    for(idx = 0; idx < count; idx++) {
@@ -1359,28 +1382,28 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 		}
 	    }
 	    TRACE("glyph extents %d,%d - %d,%d drawable x,y %d,%d\n", extents.left, extents.top,
-		  extents.right, extents.bottom, physDev->org.x + x, physDev->org.y + y);
+		  extents.right, extents.bottom, physDev->dc_rect.left + x, physDev->dc_rect.top + y);
 
-	    if(physDev->org.x + x + extents.left >= 0) {
-	        image_x = physDev->org.x + x + extents.left;
+	    if(physDev->dc_rect.left + x + extents.left >= 0) {
+	        image_x = physDev->dc_rect.left + x + extents.left;
 		image_off_x = 0;
 	    } else {
 	        image_x = 0;
-		image_off_x = physDev->org.x + x + extents.left;
+		image_off_x = physDev->dc_rect.left + x + extents.left;
 	    }
-	    if(physDev->org.y + y + extents.top >= 0) {
-	        image_y = physDev->org.y + y + extents.top;
+	    if(physDev->dc_rect.top + y + extents.top >= 0) {
+	        image_y = physDev->dc_rect.top + y + extents.top;
 		image_off_y = 0;
 	    } else {
 	        image_y = 0;
-		image_off_y = physDev->org.y + y + extents.top;
+		image_off_y = physDev->dc_rect.top + y + extents.top;
 	    }
-	    if(physDev->org.x + x + extents.right < w)
-	        image_w = physDev->org.x + x + extents.right - image_x;
+	    if(physDev->dc_rect.left + x + extents.right < w)
+	        image_w = physDev->dc_rect.left + x + extents.right - image_x;
 	    else
 	        image_w = w - image_x;
-	    if(physDev->org.y + y + extents.bottom < h)
-	        image_h = physDev->org.y + y + extents.bottom - image_y;
+	    if(physDev->dc_rect.top + y + extents.bottom < h)
+	        image_h = physDev->dc_rect.top + y + extents.bottom - image_y;
 	    else
 	        image_h = h - image_y;
 
@@ -1397,7 +1420,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 		  image_w, image_h, AllPlanes, ZPixmap,
 		  physDev->depth, image);
 	    if(!image) {
-	        Pixmap xpm = XCreatePixmap(gdi_display, physDev->drawable, image_w, image_h,
+	        Pixmap xpm = XCreatePixmap(gdi_display, root_window, image_w, image_h,
 					   physDev->depth);
 		GC gc;
 		XGCValues gcv;
@@ -1506,6 +1529,7 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     POINT pts[2];
     BOOL top_down = FALSE;
     RGNDATA *rgndata;
+    enum drawable_depth_type dst_depth_type = (devDst->depth == 1) ? mono_drawable : color_drawable;
 
     if(!X11DRV_XRender_Installed) {
         FIXME("Unable to AlphaBlend without Xrender\n");
@@ -1588,13 +1612,12 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     /* FIXME use devDst->xrender->pict ? */
     dst_pict = pXRenderCreatePicture(gdi_display,
                                      devDst->drawable,
-                                     (devDst->depth == 1) ?
-                                     mono_format : screen_format,
+                                     pict_formats[dst_depth_type],
                                      CPSubwindowMode, &pa);
     TRACE("dst_pict %08lx\n", dst_pict);
     TRACE("src_drawable = %08lx\n", devSrc->drawable);
     xpm = XCreatePixmap(gdi_display,
-                        devSrc->drawable,
+                        root_window,
                         widthSrc, heightSrc, 32);
     gcv.graphics_exposures = False;
     gc = XCreateGC(gdi_display, xpm, GCGraphicsExposures, &gcv);
@@ -1609,7 +1632,7 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     if ((rgndata = X11DRV_GetRegionData( devDst->region, 0 )))
     {
         pXRenderSetPictureClipRectangles( gdi_display, dst_pict,
-                                          devDst->org.x, devDst->org.y,
+                                          devDst->dc_rect.left, devDst->dc_rect.top,
                                           (XRectangle *)rgndata->Buffer, 
                                           rgndata->rdh.nCount );
         HeapFree( GetProcessHeap(), 0, rgndata );
@@ -1629,7 +1652,7 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
 #endif
     pXRenderComposite(gdi_display, PictOpOver, src_pict, 0, dst_pict,
                       0, 0, 0, 0,
-                      xDst + devDst->org.x, yDst + devDst->org.y, widthDst, heightDst);
+                      xDst + devDst->dc_rect.left, yDst + devDst->dc_rect.top, widthDst, heightDst);
 
 
     pXRenderFreePicture(gdi_display, src_pict);
@@ -1644,7 +1667,7 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     return TRUE;
 }
 
-#else /* HAVE_X11_EXTENSIONS_XRENDER_H */
+#else /* SONAME_LIBXRENDER */
 
 void X11DRV_XRender_Init(void)
 {
@@ -1693,4 +1716,4 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
   return FALSE;
 }
 
-#endif /* HAVE_X11_EXTENSIONS_XRENDER_H */
+#endif /* SONAME_LIBXRENDER */

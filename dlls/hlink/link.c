@@ -32,10 +32,22 @@
 #include "shellapi.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
+
 #include "hlink.h"
 #include "hlguids.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(hlink);
+
+#define HLINK_SAVE_MAGIC    0x00000002
+#define HLINK_SAVE_MONIKER_PRESENT      0x01
+#define HLINK_SAVE_MONIKER_IS_ABSOLUTE  0x02
+#define HLINK_SAVE_LOCATION_PRESENT     0x08
+#define HLINK_SAVE_FRIENDLY_PRESENT     0x10
+/* 0x20, 0x40 unknown */
+#define HLINK_SAVE_TARGET_FRAME_PRESENT 0x80
+/* known flags */
+#define HLINK_SAVE_ALL (HLINK_SAVE_TARGET_FRAME_PRESENT|HLINK_SAVE_FRIENDLY_PRESENT|HLINK_SAVE_LOCATION_PRESENT|0x04|HLINK_SAVE_MONIKER_IS_ABSOLUTE|HLINK_SAVE_MONIKER_PRESENT)
 
 static const IHlinkVtbl              hlvt;
 static const IPersistStreamVtbl      psvt;
@@ -56,6 +68,7 @@ typedef struct
     IMoniker            *Moniker;
     IHlinkSite          *Site;
     DWORD               SiteData;
+    BOOL                absolute;
 } HlinkImpl;
 
 
@@ -242,7 +255,13 @@ static HRESULT WINAPI IHlink_fnSetMonikerReference( IHlink* iface,
 
     This->Moniker = pmkTarget;
     if (This->Moniker)
+    {
+        LPOLESTR display_name;
         IMoniker_AddRef(This->Moniker);
+        IMoniker_GetDisplayName(This->Moniker, NULL, NULL, &display_name);
+        This->absolute = display_name && strchrW(display_name, ':');
+        CoTaskMemFree(display_name);
+    }
 
     HeapFree(GetProcessHeap(), 0, This->Location);
     This->Location = strdupW( pwzLocation );
@@ -633,18 +652,112 @@ static HRESULT WINAPI IPersistStream_fnIsDirty(IPersistStream* iface)
     return E_NOTIMPL;
 }
 
+static HRESULT write_hlink_string(IStream *pStm, LPCWSTR str)
+{
+    DWORD len;
+    HRESULT hr;
+
+    TRACE("(%p, %s)\n", pStm, debugstr_w(str));
+
+    len = strlenW(str) + 1;
+
+    hr = IStream_Write(pStm, &len, sizeof(len), NULL);
+    if (FAILED(hr)) return hr;
+
+    hr = IStream_Write(pStm, str, len * sizeof(WCHAR), NULL);
+    if (FAILED(hr)) return hr;
+
+    return S_OK;
+}
+
+static inline ULONG size_hlink_string(LPCWSTR str)
+{
+    return sizeof(DWORD) + (strlenW(str) + 1) * sizeof(WCHAR);
+}
+
+static HRESULT read_hlink_string(IStream *pStm, LPWSTR *out_str)
+{
+    LPWSTR str;
+    DWORD len;
+    ULONG read;
+    HRESULT hr;
+
+    hr = IStream_Read(pStm, &len, sizeof(len), &read);
+    if (FAILED(hr)) return hr;
+    if (read != sizeof(len)) return STG_E_READFAULT;
+
+    TRACE("read len %d\n", len);
+
+    str = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    if (!str) return E_OUTOFMEMORY;
+
+    hr = IStream_Read(pStm, str, len * sizeof(WCHAR), &read);
+    if (FAILED(hr))
+    {
+        HeapFree(GetProcessHeap(), 0, str);
+        return hr;
+    }
+    if (read != len * sizeof(WCHAR))
+    {
+        HeapFree(GetProcessHeap(), 0, str);
+        return STG_E_READFAULT;
+    }
+    TRACE("read string %s\n", debugstr_w(str));
+
+    *out_str = str;
+    return S_OK;
+}
+
 static HRESULT WINAPI IPersistStream_fnLoad(IPersistStream* iface,
         IStream* pStm)
 {
-    HRESULT r = E_NOTIMPL;
+    HRESULT r;
     DWORD hdr[2];
     DWORD read;
     HlinkImpl *This = HlinkImpl_from_IPersistStream(iface);
 
-    IStream_Read(pStm, &hdr, sizeof(hdr), &read);
-    /* FIXME: unknown header values */
+    r = IStream_Read(pStm, &hdr, sizeof(hdr), &read);
+    if (read != sizeof(hdr) || (hdr[0] != HLINK_SAVE_MAGIC))
+    {
+        r = E_FAIL;
+        goto end;
+    }
+    if (hdr[1] & ~HLINK_SAVE_ALL)
+        FIXME("unknown flag(s) 0x%x\n", hdr[1] & ~HLINK_SAVE_ALL);
 
-    r = OleLoadFromStream(pStm, &IID_IMoniker, (LPVOID*)&(This->Moniker));
+    if (hdr[1] & HLINK_SAVE_TARGET_FRAME_PRESENT)
+    {
+        TRACE("loading target frame name\n");
+        r = read_hlink_string(pStm, &This->TargetFrameName);
+        if (FAILED(r)) goto end;
+    }
+
+    if (hdr[1] & HLINK_SAVE_FRIENDLY_PRESENT)
+    {
+        TRACE("loading target friendly name\n");
+        if (!(hdr[1] & 0x4))
+            FIXME("0x4 flag not present with friendly name flag - not sure what this means\n");
+        r = read_hlink_string(pStm, &This->FriendlyName);
+        if (FAILED(r)) goto end;
+    }
+
+    if (hdr[1] & HLINK_SAVE_MONIKER_PRESENT)
+    {
+        TRACE("loading moniker\n");
+        r = OleLoadFromStream(pStm, &IID_IMoniker, (LPVOID*)&(This->Moniker));
+        if (FAILED(r))
+            goto end;
+        This->absolute = hdr[1] & HLINK_SAVE_MONIKER_IS_ABSOLUTE ? TRUE : FALSE;
+    }
+
+    if (hdr[1] & HLINK_SAVE_LOCATION_PRESENT)
+    {
+        TRACE("loading location\n");
+        r = read_hlink_string(pStm, &This->Location);
+        if (FAILED(r)) goto end;
+    }
+
+end:
     TRACE("Load Result 0x%x (%p)\n", r, This->Moniker);
 
     return r;
@@ -658,17 +771,41 @@ static HRESULT WINAPI IPersistStream_fnSave(IPersistStream* iface,
     DWORD hdr[2];
     IMoniker *moniker;
 
-    FIXME("(%p) Moniker(%p)\n", This, This->Moniker);
+    TRACE("(%p) Moniker(%p)\n", This, This->Moniker);
 
     __GetMoniker(This, &moniker);
+
+    hdr[0] = HLINK_SAVE_MAGIC;
+    hdr[1] = 0;
+
+    if (moniker)
+        hdr[1] |= HLINK_SAVE_MONIKER_PRESENT;
+    if (This->absolute)
+        hdr[1] |= HLINK_SAVE_MONIKER_IS_ABSOLUTE;
+    if (This->Location)
+        hdr[1] |= HLINK_SAVE_LOCATION_PRESENT;
+    if (This->FriendlyName)
+        hdr[1] |= HLINK_SAVE_FRIENDLY_PRESENT | 4 /* FIXME */;
+    if (This->TargetFrameName)
+        hdr[1] |= HLINK_SAVE_TARGET_FRAME_PRESENT;
+
+    IStream_Write(pStm, &hdr, sizeof(hdr), NULL);
+
+    if (This->TargetFrameName)
+    {
+        r = write_hlink_string(pStm, This->TargetFrameName);
+        if (FAILED(r)) goto end;
+    }
+
+    if (This->FriendlyName)
+    {
+        r = write_hlink_string(pStm, This->FriendlyName);
+        if (FAILED(r)) goto end;
+    }
+
     if (moniker)
     {
         IPersistStream* monstream;
-        /* FIXME: Unknown values in the header */
-        hdr[0] = 2;
-        hdr[1] = 2;
-
-        IStream_Write(pStm, &hdr, sizeof(hdr), NULL);
 
         monstream = NULL;
         IMoniker_QueryInterface(moniker, &IID_IPersistStream,
@@ -678,8 +815,17 @@ static HRESULT WINAPI IPersistStream_fnSave(IPersistStream* iface,
             r = OleSaveToStream(monstream, pStm);
             IPersistStream_Release(monstream);
         }
-        IMoniker_Release(moniker);
+        if (FAILED(r)) goto end;
     }
+
+    if (This->Location)
+    {
+        r = write_hlink_string(pStm, This->Location);
+        if (FAILED(r)) goto end;
+    }
+
+end:
+    if (moniker) IMoniker_Release(moniker);
     TRACE("Save Result 0x%x\n", r);
 
     return r;
@@ -692,7 +838,15 @@ static HRESULT WINAPI IPersistStream_fnGetSizeMax(IPersistStream* iface,
     HlinkImpl *This = HlinkImpl_from_IPersistStream(iface);
     IMoniker *moniker;
 
-    FIXME("(%p) Moniker(%p)\n", This, This->Moniker);
+    TRACE("(%p) Moniker(%p)\n", This, This->Moniker);
+
+    pcbSize->QuadPart = sizeof(DWORD)*2;
+
+    if (This->TargetFrameName)
+        pcbSize->QuadPart += size_hlink_string(This->TargetFrameName);
+
+    if (This->FriendlyName)
+        pcbSize->QuadPart += size_hlink_string(This->FriendlyName);
 
     __GetMoniker(This, &moniker);
     if (moniker)
@@ -702,13 +856,16 @@ static HRESULT WINAPI IPersistStream_fnGetSizeMax(IPersistStream* iface,
                 (LPVOID*)&monstream);
         if (monstream)
         {
-            r = IPersistStream_GetSizeMax(monstream, pcbSize);
-            /* FIXME: Handle ULARGE_INTEGER correctly */
-            pcbSize->u.LowPart += sizeof(DWORD)*2;
+            ULARGE_INTEGER mon_size;
+            r = IPersistStream_GetSizeMax(monstream, &mon_size);
+            pcbSize->QuadPart += mon_size.QuadPart;
             IPersistStream_Release(monstream);
         }
         IMoniker_Release(moniker);
     }
+
+    if (This->Location)
+        pcbSize->QuadPart += size_hlink_string(This->Location);
 
     return r;
 }

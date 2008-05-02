@@ -92,11 +92,20 @@
 #define IDS_TRASHITEM_TEXT          138
 #define IDS_TRASHMULTIPLE_TEXT      139
 #define IDS_CANTTRASH_TEXT          140
+#define IDS_OVERWRITEFOLDER_TEXT    141
 
 /* Note: this string is referenced from the registry*/
 #define IDS_RECYCLEBIN_FOLDER_NAME   8964
 
+#define IDD_ICON                0x4300
+#define IDD_MESSAGE             0x4301
+
+/* these IDs are the same as on native */
+#define IDD_YESTOALL            0x3207
 /* browse for folder dialog box */
+#define IDD_MAKENEWFOLDER       0x3746
+#define IDD_FOLDERTEXT          0x3745
+#define IDD_FOLDER              0x3744
 #define IDD_STATUS		0x3743
 #define IDD_TITLE		0x3742
 #define IDD_TREEVIEW		0x3741
@@ -118,9 +127,12 @@
 #define IDI_SHELL_PRINTER           17
 #define IDI_SHELL_MY_NETWORK_PLACES 18
 #define IDI_SHELL_COMPUTERS_NEAR_ME 19
+#define IDI_SHELL_FOLDER_SMALL_XP   20
 #define IDI_SHELL_SEARCH            23
 #define IDI_SHELL_HELP              24
+#define IDI_SHELL_FOLDER_OPEN_LARGE 29
 #define IDI_SHELL_SHORTCUT          30
+#define IDI_SHELL_FOLDER_OPEN_SMALL 31
 #define IDI_SHELL_EMPTY_RECYCLE_BIN 32
 #define IDI_SHELL_FULL_RECYCLE_BIN  33
 #define IDI_SHELL_DESKTOP           35
@@ -138,7 +150,10 @@ FIXME: Need to add them, but for now just let them use the same: searching.avi
 */
 #define IDR_AVI_SEARCH             150
 #define IDR_AVI_SEARCHING          151
+#define IDR_AVI_FINDCOMPUTER       152
 #define IDR_AVI_FILEMOVE           160
 #define IDR_AVI_FILECOPY           161
+#define IDR_AVI_FILENUKE           163
+#define IDR_AVI_FILEDELETE         164
 
 #endif

@@ -54,7 +54,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "winnls.h"
 
 #include "dbghelp_private.h"
@@ -1095,9 +1094,7 @@ struct pending_loc_var
     char                name[256];
     struct symt*        type;
     enum DataKind       kind;
-    unsigned            offset;
-    unsigned            regrel : 1,
-                        regno;
+    struct location     loc;
 };
 
 struct pending_block
@@ -1108,7 +1105,7 @@ struct pending_block
 };
 
 static inline void pending_add(struct pending_block* pending, const char* name,
-                               enum DataKind dt, int regno, BOOL regrel, long offset)
+                               enum DataKind dt, const struct location* loc)
 {
     if (pending->num == pending->allocated)
     {
@@ -1124,9 +1121,7 @@ static inline void pending_add(struct pending_block* pending, const char* name,
                 sizeof(pending->vars[pending->num].name), name);
     pending->vars[pending->num].type   = stabs_parse_type(name);
     pending->vars[pending->num].kind   = dt;
-    pending->vars[pending->num].offset = offset;
-    pending->vars[pending->num].regno  = regno;
-    pending->vars[pending->num].regrel = regrel ? 1 : 0;
+    pending->vars[pending->num].loc    = *loc;
     pending->num++;
 }
 
@@ -1138,8 +1133,7 @@ static void pending_flush(struct pending_block* pending, struct module* module,
     for (i = 0; i < pending->num; i++)
     {
         symt_add_func_local(module, func, 
-                            pending->vars[i].kind, pending->vars[i].regno,
-                            pending->vars[i].regrel, pending->vars[i].offset,
+                            pending->vars[i].kind, &pending->vars[i].loc,
                             block, pending->vars[i].type, pending->vars[i].name);
     }
     pending->num = 0;
@@ -1158,7 +1152,8 @@ static void stabs_finalize_function(struct module* module, struct symt_function*
                                     unsigned long size)
 {
     IMAGEHLP_LINE       il;
-   
+    struct location     loc;
+
     if (!func) return;
     symt_normalize_function(module, func);
     /* To define the debug-start of the function, we use the second line number.
@@ -1167,8 +1162,10 @@ static void stabs_finalize_function(struct module* module, struct symt_function*
     if (symt_fill_func_line_info(module, func, func->address, &il) &&
         symt_get_func_line_next(module, &il))
     {
+        loc.kind = loc_absolute;
+        loc.offset = il.Address - func->address;
         symt_add_function_point(module, func, SymTagFuncDebugStart, 
-                                il.Address - func->address, NULL);
+                                &loc, NULL);
     }
     if (size) func->size = size;
 }
@@ -1195,6 +1192,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
     int                         source_idx = -1;
     struct pending_block        pending;
     BOOL                        ret = TRUE;
+    struct location             loc;
 
     nstab = stablen / sizeof(struct stab_nlist);
     strs_end = strs + strtablen;
@@ -1316,9 +1314,12 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
             {
                 struct symt*    param_type = stabs_parse_type(ptr);
                 stab_strcpy(symname, sizeof(symname), ptr);
+                loc.kind = loc_regrel;
+                loc.reg = 0; /* FIXME */
+                loc.offset = stab_ptr->n_value;
                 symt_add_func_local(module, curr_func,
-                                    stab_ptr->n_value > 0 ? DataIsParam : DataIsLocal,
-                                    0, TRUE, stab_ptr->n_value, NULL, param_type, symname);
+                                    (long)stab_ptr->n_value >= 0 ? DataIsParam : DataIsLocal,
+                                    &loc, NULL, param_type, symname);
                 symt_add_function_signature_parameter(module, 
                                                       (struct symt_function_signature*)curr_func->type, 
                                                       param_type);
@@ -1328,18 +1329,19 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
             /* These are registers (as local variables) */
             if (curr_func != NULL)
             {
-                unsigned reg;
+                loc.kind = loc_register;
+                loc.offset = 0;
 
                 switch (stab_ptr->n_value)
                 {
-                case  0: reg = CV_REG_EAX; break;
-                case  1: reg = CV_REG_ECX; break;
-                case  2: reg = CV_REG_EDX; break;
-                case  3: reg = CV_REG_EBX; break;
-                case  4: reg = CV_REG_ESP; break;
-                case  5: reg = CV_REG_EBP; break;
-                case  6: reg = CV_REG_ESI; break;
-                case  7: reg = CV_REG_EDI; break;
+                case  0: loc.reg = CV_REG_EAX; break;
+                case  1: loc.reg = CV_REG_ECX; break;
+                case  2: loc.reg = CV_REG_EDX; break;
+                case  3: loc.reg = CV_REG_EBX; break;
+                case  4: loc.reg = CV_REG_ESP; break;
+                case  5: loc.reg = CV_REG_EBP; break;
+                case  6: loc.reg = CV_REG_ESI; break;
+                case  7: loc.reg = CV_REG_EDI; break;
                 case 11:
                 case 12:
                 case 13:
@@ -1348,10 +1350,10 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                 case 16:
                 case 17:
                 case 18:
-                case 19: reg = CV_REG_ST0 + stab_ptr->n_value - 12; break;
+                case 19: loc.reg = CV_REG_ST0 + stab_ptr->n_value - 12; break;
                 default:
                     FIXME("Unknown register value (%lu)\n", stab_ptr->n_value);
-                    reg = CV_REG_NONE;
+                    loc.reg = CV_REG_NONE;
                     break;
                 }
                 stab_strcpy(symname, sizeof(symname), ptr);
@@ -1359,19 +1361,22 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                 {
                     struct symt*    param_type = stabs_parse_type(ptr);
                     stab_strcpy(symname, sizeof(symname), ptr);
-                    symt_add_func_local(module, curr_func, DataIsParam, reg, FALSE, 0,
+                    symt_add_func_local(module, curr_func, DataIsParam, &loc,
                                         NULL, param_type, symname);
                     symt_add_function_signature_parameter(module, 
                                                           (struct symt_function_signature*)curr_func->type, 
                                                           param_type);
                 }
                 else
-                    pending_add(&pending, ptr, DataIsLocal, reg, FALSE, 0);
+                    pending_add(&pending, ptr, DataIsLocal, &loc);
             }
             break;
         case N_LSYM:
             /* These are local variables */
-            if (curr_func != NULL) pending_add(&pending, ptr, DataIsLocal, 0, TRUE, stab_ptr->n_value);
+            loc.kind = loc_regrel;
+            loc.reg = 0; /* FIXME */
+            loc.offset = stab_ptr->n_value;
+            if (curr_func != NULL) pending_add(&pending, ptr, DataIsLocal, &loc);
             break;
         case N_SLINE:
             /*
@@ -1451,7 +1456,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                 {
                     stabs_reset_includes();
                     source_idx = source_new(module, srcpath, ptr);
-                    compiland = symt_new_compiland(module, source_idx);
+                    compiland = symt_new_compiland(module, 0 /* FIXME */, source_idx);
                 }
                 else
                     strcpy(srcpath, ptr);

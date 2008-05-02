@@ -175,7 +175,7 @@ BOOL WINAPI SymSetSearchPath(HANDLE hProcess, PCSTR searchPath)
 /***********************************************************************
  *		SymGetSearchPathW (DBGHELP.@)
  */
-BOOL WINAPI SymGetSearchPathW(HANDLE hProcess, LPWSTR szSearchPath, 
+BOOL WINAPI SymGetSearchPathW(HANDLE hProcess, PWSTR szSearchPath,
                               DWORD SearchPathLength)
 {
     struct process* pcs = process_find_by_handle(hProcess);
@@ -188,16 +188,15 @@ BOOL WINAPI SymGetSearchPathW(HANDLE hProcess, LPWSTR szSearchPath,
 /***********************************************************************
  *		SymGetSearchPath (DBGHELP.@)
  */
-BOOL WINAPI SymGetSearchPath(HANDLE hProcess, LPSTR szSearchPath, 
+BOOL WINAPI SymGetSearchPath(HANDLE hProcess, PSTR szSearchPath,
                              DWORD SearchPathLength)
 {
-    WCHAR*      buffer = HeapAlloc(GetProcessHeap(), 0, SearchPathLength);
+    WCHAR*      buffer = HeapAlloc(GetProcessHeap(), 0, SearchPathLength * sizeof(WCHAR));
     BOOL        ret = FALSE;
 
     if (buffer)
     {
-        ret = SymGetSearchPathW(hProcess, buffer,
-                                SearchPathLength * sizeof(WCHAR));
+        ret = SymGetSearchPathW(hProcess, buffer, SearchPathLength);
         if (ret)
             WideCharToMultiByte(CP_ACP, 0, buffer, SearchPathLength,
                                 szSearchPath, SearchPathLength, NULL, NULL);
@@ -436,6 +435,7 @@ BOOL WINAPI SymSetContext(HANDLE hProcess, PIMAGEHLP_STACK_FRAME StackFrame,
               wine_dbgstr_longlong(pcs->ctx_frame.ReturnOffset),
               wine_dbgstr_longlong(pcs->ctx_frame.FrameOffset),
               wine_dbgstr_longlong(pcs->ctx_frame.StackOffset));
+        pcs->ctx_frame.InstructionOffset = StackFrame->InstructionOffset;
         SetLastError(ERROR_ACCESS_DENIED); /* latest MSDN says ERROR_SUCCESS */
         return FALSE;
     }
@@ -485,7 +485,7 @@ static BOOL CALLBACK reg_cb64to32(HANDLE hProcess, ULONG action, ULONG64 data, U
     case CBA_EVENT:
     case CBA_READ_MEMORY:
     default:
-        FIXME("No mapping for action %lu\n", action);
+        FIXME("No mapping for action %u\n", action);
         return FALSE;
     }
     return cb32(hProcess, action, (PVOID)data32, (PVOID)user32);
@@ -496,13 +496,13 @@ static BOOL CALLBACK reg_cb64to32(HANDLE hProcess, ULONG action, ULONG64 data, U
  */
 BOOL pcs_callback(const struct process* pcs, ULONG action, void* data)
 {
-    TRACE("%p %lu %p\n", pcs, action, data);
+    TRACE("%p %u %p\n", pcs, action, data);
 
     if (!pcs->reg_cb) return FALSE;
-    if (pcs->reg_is_unicode)
+    if (!pcs->reg_is_unicode)
     {
-        IMAGEHLP_DEFERRED_SYMBOL_LOAD64*    idsl;
-        IMAGEHLP_DEFERRED_SYMBOL_LOADW64    idslW;
+        IMAGEHLP_DEFERRED_SYMBOL_LOAD64     idsl;
+        IMAGEHLP_DEFERRED_SYMBOL_LOADW64*   idslW;
 
         switch (action)
         {
@@ -515,21 +515,21 @@ BOOL pcs_callback(const struct process* pcs, ULONG action, void* data)
         case CBA_DEFERRED_SYMBOL_LOAD_FAILURE:
         case CBA_DEFERRED_SYMBOL_LOAD_PARTIAL:
         case CBA_DEFERRED_SYMBOL_LOAD_START:
-            idsl = (IMAGEHLP_DEFERRED_SYMBOL_LOAD64*)(DWORD)data;
-            idslW.SizeOfStruct = sizeof(idslW);
-            idslW.BaseOfImage = idsl->BaseOfImage;
-            idslW.CheckSum = idsl->CheckSum;
-            idslW.TimeDateStamp = idsl->TimeDateStamp;
-            MultiByteToWideChar(CP_ACP, 0, idsl->FileName, -1, 
-                                idslW.FileName, sizeof(idslW.FileName) / sizeof(WCHAR));
-            idslW.Reparse = idsl->Reparse;
-            data = &idslW;
+            idslW = (IMAGEHLP_DEFERRED_SYMBOL_LOADW64*)(DWORD)data;
+            idsl.SizeOfStruct = sizeof(idsl);
+            idsl.BaseOfImage = idslW->BaseOfImage;
+            idsl.CheckSum = idslW->CheckSum;
+            idsl.TimeDateStamp = idslW->TimeDateStamp;
+            WideCharToMultiByte(CP_ACP, 0, idslW->FileName, -1,
+                                idsl.FileName, sizeof(idsl.FileName), NULL, NULL);
+            idsl.Reparse = idslW->Reparse;
+            data = &idsl;
             break;
         case CBA_DUPLICATE_SYMBOL:
         case CBA_EVENT:
         case CBA_READ_MEMORY:
         default:
-            FIXME("No mapping for action %lu\n", action);
+            FIXME("No mapping for action %u\n", action);
             return FALSE;
         }
     }

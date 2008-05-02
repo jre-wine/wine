@@ -3,6 +3,7 @@
  *
  * Copyright 1999 Ulrich Weigand
  * Copyright 2004 Juan Lang
+ * Copyright 2007 Maarten Lankhorst
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -99,7 +100,7 @@ typedef struct _WNetEnumerator
  */
 static DWORD _findProviderIndexW(LPCWSTR lpProvider);
 
-PWNetProviderTable providerTable;
+static PWNetProviderTable providerTable;
 
 /*
  * Global provider table functions
@@ -447,8 +448,8 @@ static PWNetEnumerator _createContextEnumerator(DWORD dwScope, DWORD dwType,
  * if not all members of the array could be thunked, and something else on
  * failure.
  */
-static DWORD _thunkNetResourceArrayWToA(const LPNETRESOURCEW lpNetArrayIn,
- LPDWORD lpcCount, LPVOID lpBuffer, LPDWORD lpBufferSize)
+static DWORD _thunkNetResourceArrayWToA(const NETRESOURCEW *lpNetArrayIn,
+ const DWORD *lpcCount, LPVOID lpBuffer, const DWORD *lpBufferSize)
 {
     DWORD i, numToThunk, totalBytes, ret;
     LPSTR strNext;
@@ -466,7 +467,7 @@ static DWORD _thunkNetResourceArrayWToA(const LPNETRESOURCEW lpNetArrayIn,
 
     for (i = 0, numToThunk = 0, totalBytes = 0; i < *lpcCount; i++)
     {
-        LPNETRESOURCEW lpNet = lpNetArrayIn + i;
+        const NETRESOURCEW *lpNet = lpNetArrayIn + i;
 
         totalBytes += sizeof(NETRESOURCEA);
         if (lpNet->lpLocalName)
@@ -488,7 +489,7 @@ static DWORD _thunkNetResourceArrayWToA(const LPNETRESOURCEW lpNetArrayIn,
     for (i = 0; i < numToThunk; i++)
     {
         LPNETRESOURCEA lpNetOut = (LPNETRESOURCEA)lpBuffer + i;
-        LPNETRESOURCEW lpNetIn = lpNetArrayIn + i;
+        const NETRESOURCEW *lpNetIn = lpNetArrayIn + i;
 
         memcpy(lpNetOut, lpNetIn, sizeof(NETRESOURCEA));
         /* lie about string lengths, we already verified how many
@@ -532,8 +533,8 @@ static DWORD _thunkNetResourceArrayWToA(const LPNETRESOURCEW lpNetArrayIn,
  * if not all members of the array could be thunked, and something else on
  * failure.
  */
-static DWORD _thunkNetResourceArrayAToW(const LPNETRESOURCEA lpNetArrayIn,
- LPDWORD lpcCount, LPVOID lpBuffer, LPDWORD lpBufferSize)
+static DWORD _thunkNetResourceArrayAToW(const NETRESOURCEA *lpNetArrayIn,
+ const DWORD *lpcCount, LPVOID lpBuffer, const DWORD *lpBufferSize)
 {
     DWORD i, numToThunk, totalBytes, ret;
     LPWSTR strNext;
@@ -551,7 +552,7 @@ static DWORD _thunkNetResourceArrayAToW(const LPNETRESOURCEA lpNetArrayIn,
 
     for (i = 0, numToThunk = 0, totalBytes = 0; i < *lpcCount; i++)
     {
-        LPNETRESOURCEA lpNet = lpNetArrayIn + i;
+        const NETRESOURCEA *lpNet = lpNetArrayIn + i;
 
         totalBytes += sizeof(NETRESOURCEW);
         if (lpNet->lpLocalName)
@@ -573,7 +574,7 @@ static DWORD _thunkNetResourceArrayAToW(const LPNETRESOURCEA lpNetArrayIn,
     for (i = 0; i < numToThunk; i++)
     {
         LPNETRESOURCEW lpNetOut = (LPNETRESOURCEW)lpBuffer + i;
-        LPNETRESOURCEA lpNetIn = lpNetArrayIn + i;
+        const NETRESOURCEA *lpNetIn = lpNetArrayIn + i;
 
         memcpy(lpNetOut, lpNetIn, sizeof(NETRESOURCEW));
         /* lie about string lengths, we already verified how many
@@ -819,7 +820,7 @@ DWORD WINAPI WNetEnumResourceA( HANDLE hEnum, LPDWORD lpcCount,
         ret = WN_BAD_POINTER;
     else if (!lpcCount)
         ret = WN_BAD_POINTER;
-    if (!lpBuffer)
+    else if (!lpBuffer)
         ret = WN_BAD_POINTER;
     else if (!lpBufferSize)
         ret = WN_BAD_POINTER;
@@ -875,7 +876,7 @@ static DWORD _countProviderBytesW(PWNetProvider provider)
 }
 
 static DWORD _enumerateProvidersW(PWNetEnumerator enumerator, LPDWORD lpcCount,
- LPVOID lpBuffer, LPDWORD lpBufferSize)
+ LPVOID lpBuffer, const DWORD *lpBufferSize)
 {
     DWORD ret;
 
@@ -1489,7 +1490,7 @@ DWORD WINAPI WNetCancelConnection2W( LPCWSTR lpName, DWORD dwFlags, BOOL fForce 
 /*****************************************************************
  *  WNetRestoreConnectionA [MPR.@]
  */
-DWORD WINAPI WNetRestoreConnectionA( HWND hwndOwner, LPSTR lpszDevice )
+DWORD WINAPI WNetRestoreConnectionA( HWND hwndOwner, LPCSTR lpszDevice )
 {
     FIXME( "(%p, %s), stub\n", hwndOwner, debugstr_a(lpszDevice) );
 
@@ -1500,7 +1501,7 @@ DWORD WINAPI WNetRestoreConnectionA( HWND hwndOwner, LPSTR lpszDevice )
 /*****************************************************************
  *  WNetRestoreConnectionW [MPR.@]
  */
-DWORD WINAPI WNetRestoreConnectionW( HWND hwndOwner, LPWSTR lpszDevice )
+DWORD WINAPI WNetRestoreConnectionW( HWND hwndOwner, LPCWSTR lpszDevice )
 {
     FIXME( "(%p, %s), stub\n", hwndOwner, debugstr_w(lpszDevice) );
 
@@ -1526,9 +1527,9 @@ DWORD WINAPI WNetGetConnectionA( LPCSTR lpLocalName,
 
     if (!lpLocalName)
         ret = WN_BAD_POINTER;
-    else if (!lpRemoteName)
-        ret = WN_BAD_POINTER;
     else if (!lpBufferSize)
+        ret = WN_BAD_POINTER;
+    else if (!lpRemoteName && *lpBufferSize)
         ret = WN_BAD_POINTER;
     else
     {
@@ -1622,9 +1623,9 @@ DWORD WINAPI WNetGetConnectionW( LPCWSTR lpLocalName,
 
     if (!lpLocalName)
         ret = WN_BAD_POINTER;
-    else if (!lpRemoteName)
-        ret = WN_BAD_POINTER;
     else if (!lpBufferSize)
+        ret = WN_BAD_POINTER;
+    else if (!lpRemoteName && *lpBufferSize)
         ret = WN_BAD_POINTER;
     else if (!lpLocalName[0])
         ret = WN_BAD_LOCALNAME;
@@ -1636,8 +1637,17 @@ DWORD WINAPI WNetGetConnectionW( LPCWSTR lpLocalName,
             {
             case DRIVE_REMOTE:
             {
-                WCHAR remote[MAX_PATH];
+                static const WCHAR unc[] = { 'u','n','c','\\' };
+                WCHAR rremote[MAX_PATH], *remote = rremote;
                 if (!QueryDosDeviceW( lpLocalName, remote, MAX_PATH )) remote[0] = 0;
+                else if (!strncmpW(remote, unc, 4))
+                {
+                    remote += 2;
+                    remote[0] = '\\';
+                }
+                else if (remote[0] != '\\' || remote[1] != '\\')
+                    FIXME("Don't know how to convert %s to an unc\n", debugstr_w(remote));
+
                 if (strlenW(remote) + 1 > *lpBufferSize)
                 {
                     *lpBufferSize = strlenW(remote) + 1;
@@ -1700,11 +1710,40 @@ DWORD WINAPI WNetSetConnectionW( LPCWSTR lpName, DWORD dwProperty,
 DWORD WINAPI WNetGetUniversalNameA ( LPCSTR lpLocalPath, DWORD dwInfoLevel,
                                      LPVOID lpBuffer, LPDWORD lpBufferSize )
 {
+    DWORD err, size;
+
     FIXME( "(%s, 0x%08X, %p, %p): stub\n",
            debugstr_a(lpLocalPath), dwInfoLevel, lpBuffer, lpBufferSize);
 
-    SetLastError(WN_NO_NETWORK);
-    return WN_NO_NETWORK;
+    switch (dwInfoLevel)
+    {
+    case UNIVERSAL_NAME_INFO_LEVEL:
+    {
+        LPUNIVERSAL_NAME_INFOA info = (LPUNIVERSAL_NAME_INFOA)lpBuffer;
+
+        size = sizeof(*info) + lstrlenA(lpLocalPath) + 1;
+        if (*lpBufferSize < size)
+        {
+            err = WN_MORE_DATA;
+            break;
+        }
+        info->lpUniversalName = (char *)info + sizeof(*info);
+        lstrcpyA(info->lpUniversalName, lpLocalPath);
+        *lpBufferSize = size;
+        err = WN_NO_ERROR;
+        break;
+    }
+    case REMOTE_NAME_INFO_LEVEL:
+        err = WN_NO_NETWORK;
+        break;
+
+    default:
+        err = WN_BAD_VALUE;
+        break;
+    }
+
+    SetLastError(err);
+    return err;
 }
 
 /*****************************************************************
@@ -1713,8 +1752,7 @@ DWORD WINAPI WNetGetUniversalNameA ( LPCSTR lpLocalPath, DWORD dwInfoLevel,
 DWORD WINAPI WNetGetUniversalNameW ( LPCWSTR lpLocalPath, DWORD dwInfoLevel,
                                      LPVOID lpBuffer, LPDWORD lpBufferSize )
 {
-    LPUNIVERSAL_NAME_INFOW uniw;
-    DWORD err, len;
+    DWORD err, size;
 
     FIXME( "(%s, 0x%08X, %p, %p): stub\n",
            debugstr_w(lpLocalPath), dwInfoLevel, lpBuffer, lpBufferSize);
@@ -1722,23 +1760,28 @@ DWORD WINAPI WNetGetUniversalNameW ( LPCWSTR lpLocalPath, DWORD dwInfoLevel,
     switch (dwInfoLevel)
     {
     case UNIVERSAL_NAME_INFO_LEVEL:
-        err = WN_MORE_DATA;
-        len = sizeof (*uniw) + lstrlenW(lpLocalPath);
-        if (*lpBufferSize <= len)
+    {
+        LPUNIVERSAL_NAME_INFOW info = (LPUNIVERSAL_NAME_INFOW)lpBuffer;
+
+        size = sizeof(*info) + (lstrlenW(lpLocalPath) + 1) * sizeof(WCHAR);
+        if (*lpBufferSize < size)
+        {
+            err = WN_MORE_DATA;
             break;
-        uniw = lpBuffer;
-        uniw->lpUniversalName = (LPWSTR) &uniw[1];
-        lstrcpyW(uniw->lpUniversalName, lpLocalPath);
-        *lpBufferSize = len;
+        }
+        info->lpUniversalName = (LPWSTR)((char *)info + sizeof(*info));
+        lstrcpyW(info->lpUniversalName, lpLocalPath);
+        *lpBufferSize = size;
         err = WN_NO_ERROR;
         break;
-
+    }
     case REMOTE_NAME_INFO_LEVEL:
         err = WN_NO_NETWORK;
         break;
 
     default:
         err = WN_BAD_VALUE;
+        break;
     }
 
     SetLastError(err);

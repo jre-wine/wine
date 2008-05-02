@@ -212,7 +212,7 @@ static void test_SHQUeryValueEx(void)
 
 	/*
 	 * string grows during expanding
-         * dwSize is smaller then the size of the unexpanded string
+         * dwSize is smaller than the size of the unexpanded string
 	 */
 	strcpy(buf, sEmptyBuffer);
 	dwSize = 6;
@@ -225,8 +225,9 @@ static void test_SHQUeryValueEx(void)
 
         /*
          * string grows during expanding
-         * dwSize is larger then the size of the unexpanded string but smaller than the part before the backslash
-         * if the unexpanded string fits into the buffer it can get cut when expanded
+         * dwSize is larger than the size of the unexpanded string, but
+         * smaller than the part before the backslash. If the unexpanded
+         * string fits into the buffer, it can get cut when expanded.
          */
         strcpy(buf, sEmptyBuffer);
         dwSize = strlen(sEnvvar2) - 2;
@@ -245,8 +246,9 @@ static void test_SHQUeryValueEx(void)
 
 	/*
          * string grows during expanding
-         * dwSize is larger then the size of the part before the backslash but smaller then the expanded string
-	 * if the unexpanded string fits into the buffer it can get cut when expanded
+         * dwSize is larger than the size of the part before the backslash,
+         * but smaller than the expanded string. If the unexpanded string fits
+         * into the buffer, it can get cut when expanded.
 	 */
 	strcpy(buf, sEmptyBuffer);
 	dwSize = nExpLen2 - 4;
@@ -381,11 +383,8 @@ START_TEST(shreg)
         if (!hkey) return;
 
 	hshlwapi = GetModuleHandleA("shlwapi.dll");
-	if (hshlwapi)
-	{
-		pSHCopyKeyA=(SHCopyKeyA_func)GetProcAddress(hshlwapi,"SHCopyKeyA");
-		pSHRegGetPathA=(SHRegGetPathA_func)GetProcAddress(hshlwapi,"SHRegGetPathA");
-	}
+        pSHCopyKeyA=(SHCopyKeyA_func)GetProcAddress(hshlwapi,"SHCopyKeyA");
+        pSHRegGetPathA=(SHRegGetPathA_func)GetProcAddress(hshlwapi,"SHRegGetPathA");
 	test_SHGetValue();
 	test_SHQUeryValueEx();
 	test_SHGetRegPath();

@@ -29,7 +29,6 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "wine/wingdi16.h"
-#include "gdi.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -124,14 +123,38 @@ HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
 
     if ((style & PS_STYLE_MASK) == PS_USERSTYLE)
     {
-        if (!style_count || !style_bits)
+        if(((INT)style_count) <= 0)
+            return 0;
+
+        if ((style_count > 16) || !style_bits)
         {
             SetLastError(ERROR_INVALID_PARAMETER);
             return 0;
         }
-        /* FIXME: PS_USERSTYLE workaround */
-        FIXME("PS_USERSTYLE not handled\n");
-        style = (style & ~PS_STYLE_MASK) | PS_SOLID;
+
+        if ((style & PS_TYPE_MASK) == PS_COSMETIC)
+        {
+            /* FIXME: PS_USERSTYLE workaround */
+            FIXME("PS_COSMETIC | PS_USERSTYLE not handled\n");
+            style = (style & ~PS_STYLE_MASK) | PS_SOLID;
+        }
+        else
+        {
+            UINT i;
+            BOOL has_neg = FALSE, all_zero = TRUE;
+
+            for(i = 0; (i < style_count) && !has_neg; i++)
+            {
+                has_neg = has_neg || (((INT)(style_bits[i])) < 0);
+                all_zero = all_zero && (style_bits[i] == 0);
+            }
+
+            if(all_zero || has_neg)
+            {
+                SetLastError(ERROR_INVALID_PARAMETER);
+                return 0;
+            }
+        }
     }
     else
     {
@@ -202,7 +225,7 @@ static HGDIOBJ PEN_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
     if (dc->funcs->pSelectPen) handle = dc->funcs->pSelectPen( dc->physDev, handle );
     if (handle) dc->hPen = handle;
     else ret = 0;
-    GDI_ReleaseObj( hdc );
+    DC_ReleaseDCPtr( dc );
     return ret;
 }
 

@@ -34,7 +34,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "mmsystem.h"
-#include "winreg.h"
 #include "winternl.h"
 #include "wownt32.h"
 #include "winnls.h"
@@ -78,7 +77,6 @@ BOOL WINAPI MMSYSTEM_LibMain(DWORD fdwReason, HINSTANCE hinstDLL, WORD ds,
             ERR("Could not load sibling WinMM.dll\n");
             return FALSE;
 	}
-	WINMM_IData.hWinMM16Instance = hinstDLL;
         /* hook in our 16 bit function pointers */
         pFnGetMMThread16    = WINMM_GetmmThread;
         pFnOpenDriver16     = DRIVER_OpenDriver16;
@@ -90,7 +88,6 @@ BOOL WINAPI MMSYSTEM_LibMain(DWORD fdwReason, HINSTANCE hinstDLL, WORD ds,
         MMDRV_Init16();
 	break;
     case DLL_PROCESS_DETACH:
-	WINMM_IData.hWinMM16Instance = 0;
         pFnGetMMThread16    = NULL;
         pFnOpenDriver16     = NULL;
         pFnCloseDriver16    = NULL;
@@ -1241,7 +1238,7 @@ UINT16 WINAPI waveOutGetErrorText16(UINT16 uError, LPSTR lpText, UINT16 uSize)
  *			waveOutOpen			[MMSYSTEM.404]
  */
 UINT16 WINAPI waveOutOpen16(HWAVEOUT16* lphWaveOut, UINT16 uDeviceID,
-                            const LPWAVEFORMATEX lpFormat, DWORD dwCallback,
+                            const WAVEFORMATEX *lpFormat, DWORD dwCallback,
 			    DWORD dwInstance, DWORD dwFlags)
 {
     HANDLE		hWaveOut;
@@ -1532,7 +1529,7 @@ UINT16 WINAPI waveInGetDevCaps16(UINT16 uDeviceID, LPWAVEINCAPS16 lpCaps,
  * 				waveInOpen			[MMSYSTEM.504]
  */
 UINT16 WINAPI waveInOpen16(HWAVEIN16* lphWaveIn, UINT16 uDeviceID,
-                           const LPWAVEFORMATEX lpFormat, DWORD dwCallback,
+                           const WAVEFORMATEX *lpFormat, DWORD dwCallback,
                            DWORD dwInstance, DWORD dwFlags)
 {
     HANDLE		hWaveIn;

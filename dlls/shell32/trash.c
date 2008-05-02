@@ -19,11 +19,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <stdarg.h>
-#include <sys/stat.h>
+#ifdef HAVE_SYS_STAT_H
+# include <sys/stat.h>
+#endif
 #include <sys/types.h>
 #include <stdlib.h>
-#include <unistd.h>
+#ifdef HAVE_UNISTD_H
+# include <unistd.h>
+#endif
 #include <dirent.h>
 
 #include "windef.h"
@@ -248,7 +254,7 @@ static char *create_trashinfo(const char *info_dir, const char *file_path)
     return NULL;
 }
 
-void remove_trashinfo_file(const char *info_dir, const char *base_name)
+static void remove_trashinfo_file(const char *info_dir, const char *base_name)
 {
     char *filename_buffer;
     
@@ -380,7 +386,7 @@ void TRASH_DisposeElement(TRASH_ELEMENT *element)
     SHFree(element->filename);
 }
 
-HRESULT TRASH_GetDetails(const TRASH_ELEMENT *element, WIN32_FIND_DATAW *data)
+static HRESULT TRASH_GetDetails(const TRASH_ELEMENT *element, WIN32_FIND_DATAW *data)
 {
     LPSTR path = NULL;
     XDG_PARSED_FILE *parsed = NULL;
@@ -474,7 +480,7 @@ failed:
     return ret;
 }
 
-INT CALLBACK free_item_callback(void *item, void *lParam)
+static INT CALLBACK free_item_callback(void *item, void *lParam)
 {
     SHFree(item);
     return TRUE;

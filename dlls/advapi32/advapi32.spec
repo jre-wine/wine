@@ -210,8 +210,8 @@
 @ stub EnumServiceGroupA
 @ stub EnumServiceGroupW
 @ stdcall EnumServicesStatusA (long long long ptr long ptr ptr ptr)
-# @ stub EnumServicesStatusExA
-# @ stub EnumServicesStatusExW
+@ stdcall EnumServicesStatusExA(long long long long ptr long ptr ptr ptr str)
+@ stdcall EnumServicesStatusExW(long long long long ptr long ptr ptr ptr wstr)
 @ stdcall EnumServicesStatusW (long long long ptr long ptr ptr ptr)
 # @ stub EnumerateTraceGuids
 # @ stub EqualDomainSid
@@ -473,6 +473,8 @@
 @ stdcall RegCreateKeyW(long wstr ptr)
 @ stdcall RegDeleteKeyA(long str)
 @ stdcall RegDeleteKeyW(long wstr)
+@ stdcall RegDeleteTreeA(long str)
+@ stdcall RegDeleteTreeW(long wstr)
 @ stdcall RegDeleteValueA(long str)
 @ stdcall RegDeleteValueW(long wstr)
 @ stdcall RegDisablePredefinedCache()

@@ -42,7 +42,7 @@ VOID WINAPI MD5Update( MD5_CTX *ctx, const unsigned char *buf, unsigned int len 
 VOID WINAPI MD5Final( MD5_CTX *ctx );
 /* Function prototypes copied from dlls/advapi32/crypt_sha.c */
 VOID WINAPI A_SHAInit(PSHA_CTX Context);
-VOID WINAPI A_SHAUpdate(PSHA_CTX Context, PCHAR Buffer, UINT BufferSize);
+VOID WINAPI A_SHAUpdate(PSHA_CTX Context, const unsigned char *Buffer, UINT BufferSize);
 VOID WINAPI A_SHAFinal(PSHA_CTX Context, PULONG Result);
 /* Function prototype copied from dlls/advapi32/crypt.c */
 BOOL WINAPI SystemFunction036(PVOID pbBuffer, ULONG dwLen);
@@ -89,7 +89,7 @@ BOOL update_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext, CONST BYTE *pb
             break;
         
         case CALG_SHA:
-            A_SHAUpdate(&pHashContext->sha, (PCHAR)pbData, dwDataLen);
+            A_SHAUpdate(&pHashContext->sha, pbData, dwDataLen);
             break;
         
         default:
@@ -328,7 +328,7 @@ BOOL gen_rand_impl(BYTE *pbBuffer, DWORD dwLen)
     return SystemFunction036(pbBuffer, dwLen);
 }
 
-BOOL export_public_key_impl(BYTE *pbDest, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen,DWORD *pdwPubExp)
+BOOL export_public_key_impl(BYTE *pbDest, const KEY_CONTEXT *pKeyContext, DWORD dwKeyLen,DWORD *pdwPubExp)
 {
     mp_to_unsigned_bin(&pKeyContext->rsa.N, pbDest);
     reverse_bytes(pbDest, dwKeyLen);
@@ -362,7 +362,7 @@ BOOL import_public_key_impl(CONST BYTE *pbSrc, KEY_CONTEXT *pKeyContext, DWORD d
     return TRUE;    
 }
 
-BOOL export_private_key_impl(BYTE *pbDest, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen, 
+BOOL export_private_key_impl(BYTE *pbDest, const KEY_CONTEXT *pKeyContext, DWORD dwKeyLen,
                              DWORD *pdwPubExp)
 {
     mp_to_unsigned_bin(&pKeyContext->rsa.N, pbDest);

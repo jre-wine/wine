@@ -256,7 +256,7 @@ static struct line *add_line( struct inf_file *file, int section_index )
 
 
 /* retrieve a given line from section/line index */
-inline static struct line *get_line( struct inf_file *file, unsigned int section_index,
+static inline struct line *get_line( struct inf_file *file, unsigned int section_index,
                                      unsigned int line_index )
 {
     struct section *section;
@@ -316,7 +316,8 @@ static const WCHAR *get_dirid_subst( struct inf_file *file, int dirid, unsigned 
 
 /* retrieve the string substitution for a given string, or NULL if not found */
 /* if found, len is set to the substitution length */
-static const WCHAR *get_string_subst( struct inf_file *file, const WCHAR *str, unsigned int *len )
+static const WCHAR *get_string_subst( struct inf_file *file, const WCHAR *str, unsigned int *len,
+                                      BOOL no_trailing_slash )
 {
     static const WCHAR percent = '%';
 
@@ -353,6 +354,7 @@ static const WCHAR *get_string_subst( struct inf_file *file, const WCHAR *str, u
         dirid_str[*len] = 0;
         dirid = strtolW( dirid_str, &end, 10 );
         if (!*end) ret = get_dirid_subst( file, dirid, len );
+        if (no_trailing_slash && ret && *len && ret[*len - 1] == '\\') *len -= 1;
         HeapFree( GetProcessHeap(), 0, dirid_str );
         return ret;
     }
@@ -387,7 +389,7 @@ unsigned int PARSER_string_substW( struct inf_file *file, const WCHAR *text, WCH
         else /* end of the %xx% string, find substitution */
         {
             len = p - start - 1;
-            subst = get_string_subst( file, start + 1, &len );
+            subst = get_string_subst( file, start + 1, &len, p[1] == '\\' );
             if (!subst)
             {
                 subst = start;
@@ -444,7 +446,7 @@ static WCHAR *push_string( struct inf_file *file, const WCHAR *string )
 
 
 /* push the current state on the parser stack */
-inline static void push_state( struct parser *parser, enum parser_state state )
+static inline void push_state( struct parser *parser, enum parser_state state )
 {
     assert( parser->stack_pos < sizeof(parser->stack)/sizeof(parser->stack[0]) );
     parser->stack[parser->stack_pos++] = state;
@@ -452,7 +454,7 @@ inline static void push_state( struct parser *parser, enum parser_state state )
 
 
 /* pop the current state */
-inline static void pop_state( struct parser *parser )
+static inline void pop_state( struct parser *parser )
 {
     assert( parser->stack_pos );
     parser->state = parser->stack[--parser->stack_pos];
@@ -460,7 +462,7 @@ inline static void pop_state( struct parser *parser )
 
 
 /* set the parser state and return the previous one */
-inline static enum parser_state set_state( struct parser *parser, enum parser_state state )
+static inline enum parser_state set_state( struct parser *parser, enum parser_state state )
 {
     enum parser_state ret = parser->state;
     parser->state = state;
@@ -469,14 +471,14 @@ inline static enum parser_state set_state( struct parser *parser, enum parser_st
 
 
 /* check if the pointer points to an end of file */
-inline static int is_eof( struct parser *parser, const WCHAR *ptr )
+static inline int is_eof( struct parser *parser, const WCHAR *ptr )
 {
     return (ptr >= parser->end || *ptr == CONTROL_Z);
 }
 
 
 /* check if the pointer points to an end of line */
-inline static int is_eol( struct parser *parser, const WCHAR *ptr )
+static inline int is_eol( struct parser *parser, const WCHAR *ptr )
 {
     return (ptr >= parser->end || *ptr == CONTROL_Z || *ptr == '\n');
 }
@@ -925,7 +927,7 @@ static void append_inf_file( struct inf_file *parent, struct inf_file *child )
  *
  * parse an INF file.
  */
-static struct inf_file *parse_file( HANDLE handle, const WCHAR *class, UINT *error_line )
+static struct inf_file *parse_file( HANDLE handle, const WCHAR *class, DWORD style, UINT *error_line )
 {
     void *buffer;
     DWORD err = 0;
@@ -959,10 +961,21 @@ static struct inf_file *parse_file( HANDLE handle, const WCHAR *class, UINT *err
 
     if (!RtlIsTextUnicode( buffer, size, NULL ))
     {
-        WCHAR *new_buff = HeapAlloc( GetProcessHeap(), 0, size * sizeof(WCHAR) );
-        if (new_buff)
+        static const BYTE utf8_bom[3] = { 0xef, 0xbb, 0xbf };
+        WCHAR *new_buff;
+        UINT codepage = CP_ACP;
+        UINT offset = 0;
+
+        if (size > sizeof(utf8_bom) && !memcmp( buffer, utf8_bom, sizeof(utf8_bom) ))
         {
-            DWORD len = MultiByteToWideChar( CP_ACP, 0, buffer, size, new_buff, size );
+            codepage = CP_UTF8;
+            offset = sizeof(utf8_bom);
+        }
+
+        if ((new_buff = HeapAlloc( GetProcessHeap(), 0, size * sizeof(WCHAR) )))
+        {
+            DWORD len = MultiByteToWideChar( codepage, 0, (char *)buffer + offset,
+                                             size - offset, new_buff, size );
             err = parse_buffer( file, new_buff, new_buff + len, error_line );
             HeapFree( GetProcessHeap(), 0, new_buff );
         }
@@ -991,7 +1004,7 @@ static struct inf_file *parse_file( HANDLE handle, const WCHAR *class, UINT *err
             }
         }
         if (error_line) *error_line = 0;
-        err = ERROR_WRONG_INF_STYLE;
+        if (style & INF_STYLE_WIN4) err = ERROR_WRONG_INF_STYLE;
     }
 
  done:
@@ -1134,7 +1147,7 @@ HINF WINAPI SetupOpenInfFileW( PCWSTR name, PCWSTR class, DWORD style, UINT *err
 
     if (handle != INVALID_HANDLE_VALUE)
     {
-        file = parse_file( handle, class, error );
+        file = parse_file( handle, class, style, error );
         CloseHandle( handle );
     }
     if (!file)
@@ -1220,7 +1233,7 @@ void WINAPI SetupCloseInfFile( HINF hinf )
     struct inf_file *file = hinf;
     unsigned int i;
 
-    if (!file) return;
+    if (!hinf || (hinf == INVALID_HANDLE_VALUE)) return;
 
     for (i = 0; i < file->nb_sections; i++) HeapFree( GetProcessHeap(), 0, file->sections[i] );
     HeapFree( GetProcessHeap(), 0, file->filename );

@@ -7,7 +7,7 @@
  * Copyright 2004, 2005 Michael Jung
  *
  * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public 
+ * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
  * version 2.1 of the License, or (at your option) any later version.
  *
@@ -33,7 +33,6 @@
 #include "winbase.h"
 #include "winreg.h"
 #include "wincrypt.h"
-#include "lmcons.h"
 #include "handle.h"
 #include "implglue.h"
 #include "objbase.h"
@@ -45,7 +44,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(crypt);
  */
 #define RSAENH_MAGIC_HASH           0x85938417u
 #define RSAENH_MAX_HASH_SIZE        104
-#define RSAENH_HASHSTATE_IDLE       0
 #define RSAENH_HASHSTATE_HASHING    1
 #define RSAENH_HASHSTATE_FINISHED   2
 typedef struct _RSAENH_TLS1PRF_PARAMS
@@ -156,7 +154,7 @@ typedef struct tagKEYCONTAINER
  */
 #define RSAENH_MAX_ENUMALGS 20
 #define RSAENH_PCT1_SSL2_SSL3_TLS1 (CRYPT_FLAG_PCT1|CRYPT_FLAG_SSL2|CRYPT_FLAG_SSL3|CRYPT_FLAG_TLS1)
-PROV_ENUMALGS_EX aProvEnumAlgsEx[4][RSAENH_MAX_ENUMALGS+1] =
+static const PROV_ENUMALGS_EX aProvEnumAlgsEx[4][RSAENH_MAX_ENUMALGS+1] =
 {
  {
   {CALG_RC2,       40, 40,   56,0,                    4,"RC2",     24,"RSA Data Security's RC2"},
@@ -395,7 +393,7 @@ static inline BOOL copy_param(
  *  Failure: NULL (algid not supported)
  */
 static inline const PROV_ENUMALGS_EX* get_algid_info(HCRYPTPROV hProv, ALG_ID algid) {
-    PROV_ENUMALGS_EX *iterator;
+    const PROV_ENUMALGS_EX *iterator;
     KEYCONTAINER *pKeyContainer;
 
     if (!lookup_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER, (OBJECTHDR**)&pKeyContainer)) {
@@ -523,7 +521,7 @@ static inline void free_hmac_info(PHMAC_INFO hmac_info) {
  * NOTES
  *  See Internet RFC 2104 for details on the HMAC algorithm.
  */
-static BOOL copy_hmac_info(PHMAC_INFO *dst, PHMAC_INFO src) {
+static BOOL copy_hmac_info(PHMAC_INFO *dst, const HMAC_INFO *src) {
     if (!src) return FALSE;
     *dst = HeapAlloc(GetProcessHeap(), 0, sizeof(HMAC_INFO));
     if (!*dst) return FALSE;
@@ -919,7 +917,7 @@ static void destroy_key_container(OBJECTHDR *pObjectHdr)
                         HeapFree(GetProcessHeap(), 0, pbKey);
                     }
                 }
-                release_handle(&handle_table, (unsigned int)pKeyContainer->hKeyExchangeKeyPair, 
+                release_handle(&handle_table, pKeyContainer->hKeyExchangeKeyPair,
                                RSAENH_MAGIC_KEY);
             }
 
@@ -951,7 +949,7 @@ static void destroy_key_container(OBJECTHDR *pObjectHdr)
                         HeapFree(GetProcessHeap(), 0, pbKey);
                     }
                 }
-                release_handle(&handle_table, (unsigned int)pKeyContainer->hSignatureKeyPair, 
+                release_handle(&handle_table, pKeyContainer->hSignatureKeyPair,
                                RSAENH_MAGIC_KEY);
             }
         
@@ -976,7 +974,7 @@ static void destroy_key_container(OBJECTHDR *pObjectHdr)
  *  Success: Handle to the new key container.
  *  Failure: INVALID_HANDLE_VALUE
  */
-static HCRYPTPROV new_key_container(PCCH pszContainerName, DWORD dwFlags, PVTableProvStruc pVTable)
+static HCRYPTPROV new_key_container(PCCH pszContainerName, DWORD dwFlags, const VTableProvStruc *pVTable)
 {
     KEYCONTAINER *pKeyContainer;
     HCRYPTPROV hKeyContainer;
@@ -1041,7 +1039,7 @@ static HCRYPTPROV new_key_container(PCCH pszContainerName, DWORD dwFlags, PVTabl
  *  Success: Handle to the key container read from the registry
  *  Failure: INVALID_HANDLE_VALUE
  */
-static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, PVTableProvStruc pVTable)
+static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, const VTableProvStruc *pVTable)
 {
     CHAR szRSABase[MAX_PATH];
     BYTE *pbKey;
@@ -1050,7 +1048,8 @@ static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, PVTa
     KEYCONTAINER *pKeyContainer;
     HCRYPTPROV hKeyContainer;
     DATA_BLOB blobIn, blobOut;
-    
+    HCRYPTKEY hCryptKey;
+
     sprintf(szRSABase, RSAENH_REGKEY, pszContainerName);
 
     if (dwFlags & CRYPT_MACHINE_KEYSET) {
@@ -1089,8 +1088,9 @@ static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, PVTa
                     if (CryptUnprotectData(&blobIn, NULL, NULL, NULL, NULL, 
                          (dwFlags & CRYPT_MACHINE_KEYSET) ? CRYPTPROTECT_LOCAL_MACHINE : 0, &blobOut))
                     {
-                        RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
-                                           &pKeyContainer->hKeyExchangeKeyPair);
+                        if(RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
+                                           &hCryptKey))
+                            pKeyContainer->hKeyExchangeKeyPair = hCryptKey;
                         HeapFree(GetProcessHeap(), 0, blobOut.pbData);
                     }
                 }
@@ -1113,8 +1113,9 @@ static HCRYPTPROV read_key_container(PCHAR pszContainerName, DWORD dwFlags, PVTa
                     if (CryptUnprotectData(&blobIn, NULL, NULL, NULL, NULL, 
                          (dwFlags & CRYPT_MACHINE_KEYSET) ? CRYPTPROTECT_LOCAL_MACHINE : 0, &blobOut))
                     {
-                        RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
-                                           &pKeyContainer->hSignatureKeyPair);
+                        if(RSAENH_CPImportKey(hKeyContainer, blobOut.pbData, blobOut.cbData, 0, 0,
+                                           &hCryptKey))
+                            pKeyContainer->hSignatureKeyPair = hCryptKey;
                         HeapFree(GetProcessHeap(), 0, blobOut.pbData);
                     }
                 }
@@ -1473,7 +1474,12 @@ BOOL WINAPI RSAENH_CPAcquireContext(HCRYPTPROV *phProv, LPSTR pszContainer,
                 SetLastError(NTE_BAD_KEYSET_PARAM);
                 return FALSE;
             } else {
-                if (!RegDeleteKeyA(HKEY_CURRENT_USER, szRegKey)) {
+                HKEY hRootKey;
+                if (dwFlags & CRYPT_MACHINE_KEYSET)
+                    hRootKey = HKEY_LOCAL_MACHINE;
+                else
+                    hRootKey = HKEY_CURRENT_USER;
+                if (!RegDeleteKeyA(hRootKey, szRegKey)) {
                     SetLastError(ERROR_SUCCESS);
                     return TRUE;
                 } else {
@@ -1487,7 +1493,7 @@ BOOL WINAPI RSAENH_CPAcquireContext(HCRYPTPROV *phProv, LPSTR pszContainer,
             *phProv = read_key_container(szKeyContainerName, dwFlags, pVTable);
             if (*phProv != (HCRYPTPROV)INVALID_HANDLE_VALUE) 
             {
-                release_handle(&handle_table, (unsigned int)*phProv, RSAENH_MAGIC_CONTAINER);
+                release_handle(&handle_table, *phProv, RSAENH_MAGIC_CONTAINER);
                 TRACE("Can't create new keyset, already exists\n");
                 SetLastError(NTE_EXISTS);
                 return FALSE;
@@ -1495,6 +1501,7 @@ BOOL WINAPI RSAENH_CPAcquireContext(HCRYPTPROV *phProv, LPSTR pszContainer,
             *phProv = new_key_container(szKeyContainerName, dwFlags, pVTable);
             break;
 
+        case CRYPT_VERIFYCONTEXT|CRYPT_NEWKEYSET:
         case CRYPT_VERIFYCONTEXT:
             if (pszContainer) {
                 TRACE("pszContainer should be NULL\n");
@@ -1505,12 +1512,12 @@ BOOL WINAPI RSAENH_CPAcquireContext(HCRYPTPROV *phProv, LPSTR pszContainer,
             break;
             
         default:
-            *phProv = (unsigned int)INVALID_HANDLE_VALUE;
+            *phProv = (HCRYPTPROV)INVALID_HANDLE_VALUE;
             SetLastError(NTE_BAD_FLAGS);
             return FALSE;
     }
                 
-    if (*phProv != (unsigned int)INVALID_HANDLE_VALUE) {
+    if (*phProv != (HCRYPTPROV)INVALID_HANDLE_VALUE) {
         SetLastError(ERROR_SUCCESS);
         return TRUE;
     } else {
@@ -1590,7 +1597,7 @@ BOOL WINAPI RSAENH_CPCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, 
     pCryptHash->aiAlgid = Algid;
     pCryptHash->hKey = hKey;
     pCryptHash->hProv = hProv;
-    pCryptHash->dwState = RSAENH_HASHSTATE_IDLE;
+    pCryptHash->dwState = RSAENH_HASHSTATE_HASHING;
     pCryptHash->pHMACInfo = (PHMAC_INFO)NULL;
     pCryptHash->dwHashSize = peaAlgidInfo->dwDefaultLen >> 3;
     init_data_blob(&pCryptHash->tpPRFParams.blobLabel);
@@ -2288,7 +2295,7 @@ BOOL WINAPI RSAENH_CPImportKey(HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDat
     TRACE("(hProv=%08lx, pbData=%p, dwDataLen=%d, hPubKey=%08lx, dwFlags=%08x, phKey=%p)\n",
         hProv, pbData, dwDataLen, hPubKey, dwFlags, phKey);
     
-    if (!lookup_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER, 
+    if (!lookup_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER,
                        (OBJECTHDR**)&pKeyContainer)) 
     {
         SetLastError(NTE_BAD_UID);
@@ -2328,14 +2335,14 @@ BOOL WINAPI RSAENH_CPImportKey(HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDat
                     TRACE("installing signing key\n");
                     RSAENH_CPDestroyKey(hProv, pKeyContainer->hSignatureKeyPair);
                     copy_handle(&handle_table, *phKey, RSAENH_MAGIC_KEY,
-                            (unsigned int*)&pKeyContainer->hSignatureKeyPair);
+                                &pKeyContainer->hSignatureKeyPair);
                     break;
                 case AT_KEYEXCHANGE:
                 case CALG_RSA_KEYX:
                     TRACE("installing key exchange key\n");
                     RSAENH_CPDestroyKey(hProv, pKeyContainer->hKeyExchangeKeyPair);
                     copy_handle(&handle_table, *phKey, RSAENH_MAGIC_KEY,
-                                (unsigned int*)&pKeyContainer->hKeyExchangeKeyPair);
+                                &pKeyContainer->hKeyExchangeKeyPair);
                     break;
                 }
             }
@@ -2367,7 +2374,7 @@ BOOL WINAPI RSAENH_CPImportKey(HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDat
                     TRACE("installing public key\n");
                     RSAENH_CPDestroyKey(hProv, pKeyContainer->hKeyExchangeKeyPair);
                     copy_handle(&handle_table, *phKey, RSAENH_MAGIC_KEY,
-                                (unsigned int*)&pKeyContainer->hKeyExchangeKeyPair);
+                                &pKeyContainer->hKeyExchangeKeyPair);
                     break;
                 }
             }
@@ -2444,7 +2451,7 @@ BOOL WINAPI RSAENH_CPGenKey(HCRYPTPROV hProv, ALG_ID Algid, DWORD dwFlags, HCRYP
 
     TRACE("(hProv=%08lx, aiAlgid=%d, dwFlags=%08x, phKey=%p)\n", hProv, Algid, dwFlags, phKey);
 
-    if (!lookup_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER, 
+    if (!lookup_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER,
                        (OBJECTHDR**)&pKeyContainer)) 
     {
         /* MSDN: hProv not containing valid context handle */
@@ -2463,7 +2470,7 @@ BOOL WINAPI RSAENH_CPGenKey(HCRYPTPROV hProv, ALG_ID Algid, DWORD dwFlags, HCRYP
                 if (Algid == AT_SIGNATURE) {
                     RSAENH_CPDestroyKey(hProv, pKeyContainer->hSignatureKeyPair);
                     copy_handle(&handle_table, *phKey, RSAENH_MAGIC_KEY,
-                                (unsigned int*)&pKeyContainer->hSignatureKeyPair);
+                                &pKeyContainer->hSignatureKeyPair);
                 }
             }
             break;
@@ -2477,7 +2484,7 @@ BOOL WINAPI RSAENH_CPGenKey(HCRYPTPROV hProv, ALG_ID Algid, DWORD dwFlags, HCRYP
                 if (Algid == AT_KEYEXCHANGE) {
                     RSAENH_CPDestroyKey(hProv, pKeyContainer->hKeyExchangeKeyPair);
                     copy_handle(&handle_table, *phKey, RSAENH_MAGIC_KEY,
-                                (unsigned int*)&pKeyContainer->hKeyExchangeKeyPair);
+                                &pKeyContainer->hKeyExchangeKeyPair);
                 }
             }
             break;
@@ -2515,7 +2522,7 @@ BOOL WINAPI RSAENH_CPGenKey(HCRYPTPROV hProv, ALG_ID Algid, DWORD dwFlags, HCRYP
             return FALSE;
     }
             
-    return *phKey != (unsigned int)INVALID_HANDLE_VALUE;
+    return *phKey != (HCRYPTKEY)INVALID_HANDLE_VALUE;
 }
 
 /******************************************************************************
@@ -2536,7 +2543,7 @@ BOOL WINAPI RSAENH_CPGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE *pbBuffer)
 {
     TRACE("(hProv=%08lx, dwLen=%d, pbBuffer=%p)\n", hProv, dwLen, pbBuffer);
     
-    if (!is_valid_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER)) 
+    if (!is_valid_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER))
     {
         /* MSDN: hProv not containing valid context handle */
         SetLastError(NTE_BAD_UID);
@@ -2575,7 +2582,7 @@ BOOL WINAPI RSAENH_CPGetHashParam(HCRYPTPROV hProv, HCRYPTHASH hHash, DWORD dwPa
     TRACE("(hProv=%08lx, hHash=%08lx, dwParam=%08x, pbData=%p, pdwDataLen=%p, dwFlags=%08x)\n",
         hProv, hHash, dwParam, pbData, pdwDataLen, dwFlags);
     
-    if (!is_valid_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER)) 
+    if (!is_valid_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER))
     {
         SetLastError(NTE_BAD_UID);
         return FALSE;
@@ -2587,7 +2594,7 @@ BOOL WINAPI RSAENH_CPGetHashParam(HCRYPTPROV hProv, HCRYPTHASH hHash, DWORD dwPa
         return FALSE;
     }
     
-    if (!lookup_handle(&handle_table, (unsigned int)hHash, RSAENH_MAGIC_HASH, 
+    if (!lookup_handle(&handle_table, hHash, RSAENH_MAGIC_HASH,
                        (OBJECTHDR**)&pCryptHash))
     {
         SetLastError(NTE_BAD_HASH);
@@ -2621,11 +2628,6 @@ BOOL WINAPI RSAENH_CPGetHashParam(HCRYPTPROV hProv, HCRYPTHASH hHash, DWORD dwPa
                 return TRUE;
             }
 
-            if (pCryptHash->dwState == RSAENH_HASHSTATE_IDLE) {
-                SetLastError(NTE_BAD_HASH_STATE);
-                return FALSE;
-            }
-            
             if (pbData && (pCryptHash->dwState != RSAENH_HASHSTATE_FINISHED))
             {
                 finalize_hash(pCryptHash);
@@ -2673,7 +2675,7 @@ BOOL WINAPI RSAENH_CPSetKeyParam(HCRYPTPROV hProv, HCRYPTKEY hKey, DWORD dwParam
     TRACE("(hProv=%08lx, hKey=%08lx, dwParam=%08x, pbData=%p, dwFlags=%08x)\n", hProv, hKey,
           dwParam, pbData, dwFlags);
 
-    if (!is_valid_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER))
+    if (!is_valid_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER))
     {
         SetLastError(NTE_BAD_UID);
         return FALSE;
@@ -2684,7 +2686,7 @@ BOOL WINAPI RSAENH_CPSetKeyParam(HCRYPTPROV hProv, HCRYPTKEY hKey, DWORD dwParam
         return FALSE;
     }
     
-    if (!lookup_handle(&handle_table, (unsigned int)hKey, RSAENH_MAGIC_KEY, (OBJECTHDR**)&pCryptKey))
+    if (!lookup_handle(&handle_table, hKey, RSAENH_MAGIC_KEY, (OBJECTHDR**)&pCryptKey))
     {
         SetLastError(NTE_BAD_KEY);
         return FALSE;
@@ -2773,7 +2775,7 @@ BOOL WINAPI RSAENH_CPGetKeyParam(HCRYPTPROV hProv, HCRYPTKEY hKey, DWORD dwParam
     TRACE("(hProv=%08lx, hKey=%08lx, dwParam=%08x, pbData=%p, pdwDataLen=%p dwFlags=%08x)\n",
           hProv, hKey, dwParam, pbData, pdwDataLen, dwFlags);
 
-    if (!is_valid_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER)) 
+    if (!is_valid_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER))
     {
         SetLastError(NTE_BAD_UID);
         return FALSE;
@@ -2784,7 +2786,7 @@ BOOL WINAPI RSAENH_CPGetKeyParam(HCRYPTPROV hProv, HCRYPTKEY hKey, DWORD dwParam
         return FALSE;
     }
 
-    if (!lookup_handle(&handle_table, (unsigned int)hKey, RSAENH_MAGIC_KEY, (OBJECTHDR**)&pCryptKey))
+    if (!lookup_handle(&handle_table, hKey, RSAENH_MAGIC_KEY, (OBJECTHDR**)&pCryptKey))
     {
         SetLastError(NTE_BAD_KEY);
         return FALSE;
@@ -2888,7 +2890,7 @@ BOOL WINAPI RSAENH_CPGetProvParam(HCRYPTPROV hProv, DWORD dwParam, BYTE *pbData,
         return FALSE;
     }
     
-    if (!lookup_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER, 
+    if (!lookup_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER,
                        (OBJECTHDR**)&pKeyContainer)) 
     {
         /* MSDN: hProv not containing valid context handle */
@@ -2899,12 +2901,29 @@ BOOL WINAPI RSAENH_CPGetProvParam(HCRYPTPROV hProv, DWORD dwParam, BYTE *pbData,
     switch (dwParam) 
     {
         case PP_CONTAINER:
+        case PP_UNIQUE_CONTAINER:/* MSDN says we can return the same value as PP_CONTAINER */
             return copy_param(pbData, pdwDataLen, (CONST BYTE*)pKeyContainer->szName, 
                               strlen(pKeyContainer->szName)+1);
 
         case PP_NAME:
             return copy_param(pbData, pdwDataLen, (CONST BYTE*)pKeyContainer->szProvName, 
                               strlen(pKeyContainer->szProvName)+1);
+
+        case PP_PROVTYPE:
+            dwTemp = PROV_RSA_FULL;
+            return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwTemp, sizeof(dwTemp));
+
+        case PP_KEYSPEC:
+            dwTemp = AT_SIGNATURE | AT_KEYEXCHANGE;
+            return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwTemp, sizeof(dwTemp));
+
+        case PP_KEYSET_TYPE:
+            dwTemp = pKeyContainer->dwFlags & CRYPT_MACHINE_KEYSET;
+            return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwTemp, sizeof(dwTemp));
+
+        case PP_KEYSTORAGE:
+            dwTemp = CRYPT_SEC_DESCR;
+            return copy_param(pbData, pdwDataLen, (CONST BYTE*)&dwTemp, sizeof(dwTemp));
 
         case PP_SIG_KEYSIZE_INC:
         case PP_KEYX_KEYSIZE_INC:
@@ -3042,13 +3061,13 @@ BOOL WINAPI RSAENH_CPDeriveKey(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTHASH hBaseD
     TRACE("(hProv=%08lx, Algid=%d, hBaseData=%08lx, dwFlags=%08x phKey=%p)\n", hProv, Algid,
            hBaseData, dwFlags, phKey);
     
-    if (!is_valid_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER))
+    if (!is_valid_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER))
     {
         SetLastError(NTE_BAD_UID);
         return FALSE;
     }
 
-    if (!lookup_handle(&handle_table, (unsigned int)hBaseData, RSAENH_MAGIC_HASH, 
+    if (!lookup_handle(&handle_table, hBaseData, RSAENH_MAGIC_HASH,
                        (OBJECTHDR**)&pCryptHash))
     {
         SetLastError(NTE_BAD_HASH);
@@ -3184,7 +3203,7 @@ BOOL WINAPI RSAENH_CPGetUserKey(HCRYPTPROV hProv, DWORD dwKeySpec, HCRYPTKEY *ph
 
     TRACE("(hProv=%08lx, dwKeySpec=%08x, phUserKey=%p)\n", hProv, dwKeySpec, phUserKey);
     
-    if (!lookup_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER, 
+    if (!lookup_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER,
                        (OBJECTHDR**)&pKeyContainer)) 
     {
         /* MSDN: hProv not containing valid context handle */
@@ -3196,12 +3215,12 @@ BOOL WINAPI RSAENH_CPGetUserKey(HCRYPTPROV hProv, DWORD dwKeySpec, HCRYPTKEY *ph
     {
         case AT_KEYEXCHANGE:
             copy_handle(&handle_table, pKeyContainer->hKeyExchangeKeyPair, RSAENH_MAGIC_KEY, 
-                        (unsigned int*)phUserKey);
+                        phUserKey);
             break;
 
         case AT_SIGNATURE:
             copy_handle(&handle_table, pKeyContainer->hSignatureKeyPair, RSAENH_MAGIC_KEY, 
-                        (unsigned int*)phUserKey);
+                        phUserKey);
             break;
 
         default:
@@ -3252,7 +3271,7 @@ BOOL WINAPI RSAENH_CPHashData(HCRYPTPROV hProv, HCRYPTHASH hHash, CONST BYTE *pb
         return FALSE;
     }
 
-    if (!lookup_handle(&handle_table, (unsigned int)hHash, RSAENH_MAGIC_HASH, 
+    if (!lookup_handle(&handle_table, hHash, RSAENH_MAGIC_HASH,
                        (OBJECTHDR**)&pCryptHash))
     {
         SetLastError(NTE_BAD_HASH);
@@ -3264,9 +3283,6 @@ BOOL WINAPI RSAENH_CPHashData(HCRYPTPROV hProv, HCRYPTHASH hHash, CONST BYTE *pb
         SetLastError(NTE_BAD_ALGID);
         return FALSE;
     }
-    
-    if (pCryptHash->dwState == RSAENH_HASHSTATE_IDLE)
-        pCryptHash->dwState = RSAENH_HASHSTATE_HASHING;
     
     if (pCryptHash->dwState != RSAENH_HASHSTATE_HASHING)
     {
@@ -3302,7 +3318,7 @@ BOOL WINAPI RSAENH_CPHashSessionKey(HCRYPTPROV hProv, HCRYPTHASH hHash, HCRYPTKE
 
     TRACE("(hProv=%08lx, hHash=%08lx, hKey=%08lx, dwFlags=%08x)\n", hProv, hHash, hKey, dwFlags);
 
-    if (!lookup_handle(&handle_table, (unsigned int)hKey, RSAENH_MAGIC_KEY, (OBJECTHDR**)&pKey) ||
+    if (!lookup_handle(&handle_table, hKey, RSAENH_MAGIC_KEY, (OBJECTHDR**)&pKey) ||
         (GET_ALG_CLASS(pKey->aiAlgid) != ALG_CLASS_DATA_ENCRYPT)) 
     {
         SetLastError(NTE_BAD_KEY);
@@ -3343,7 +3359,7 @@ BOOL WINAPI RSAENH_CPReleaseContext(HCRYPTPROV hProv, DWORD dwFlags)
 {
     TRACE("(hProv=%08lx, dwFlags=%08x)\n", hProv, dwFlags);
 
-    if (!release_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER)) 
+    if (!release_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER))
     {
         /* MSDN: hProv not containing valid context handle */
         SetLastError(NTE_BAD_UID);
@@ -3389,7 +3405,7 @@ BOOL WINAPI RSAENH_CPSetHashParam(HCRYPTPROV hProv, HCRYPTHASH hHash, DWORD dwPa
     TRACE("(hProv=%08lx, hHash=%08lx, dwParam=%08x, pbData=%p, dwFlags=%08x)\n",
            hProv, hHash, dwParam, pbData, dwFlags);
 
-    if (!is_valid_handle(&handle_table, (unsigned int)hProv, RSAENH_MAGIC_CONTAINER))
+    if (!is_valid_handle(&handle_table, hProv, RSAENH_MAGIC_CONTAINER))
     {
         SetLastError(NTE_BAD_UID);
         return FALSE;
@@ -3400,7 +3416,7 @@ BOOL WINAPI RSAENH_CPSetHashParam(HCRYPTPROV hProv, HCRYPTHASH hHash, DWORD dwPa
         return FALSE;
     }
     
-    if (!lookup_handle(&handle_table, (unsigned int)hHash, RSAENH_MAGIC_HASH, 
+    if (!lookup_handle(&handle_table, hHash, RSAENH_MAGIC_HASH,
                        (OBJECTHDR**)&pCryptHash))
     {
         SetLastError(NTE_BAD_HASH);
@@ -3494,7 +3510,7 @@ BOOL WINAPI RSAENH_CPSignHash(HCRYPTPROV hProv, HCRYPTHASH hHash, DWORD dwKeySpe
     
     if (!RSAENH_CPGetUserKey(hProv, dwKeySpec, &hCryptKey)) return FALSE;
             
-    if (!lookup_handle(&handle_table, (unsigned int)hCryptKey, RSAENH_MAGIC_KEY, 
+    if (!lookup_handle(&handle_table, hCryptKey, RSAENH_MAGIC_KEY,
                        (OBJECTHDR**)&pCryptKey))
     {
         SetLastError(NTE_NO_KEY);
@@ -3579,10 +3595,25 @@ BOOL WINAPI RSAENH_CPVerifySignature(HCRYPTPROV hProv, HCRYPTHASH hHash, CONST B
         return FALSE;
     }
  
-    if (!lookup_handle(&handle_table, (unsigned int)hPubKey, RSAENH_MAGIC_KEY, 
+    if (!lookup_handle(&handle_table, hPubKey, RSAENH_MAGIC_KEY,
                        (OBJECTHDR**)&pCryptKey))
     {
         SetLastError(NTE_BAD_KEY);
+        return FALSE;
+    }
+
+    /* in Microsoft implementation, the signature length is checked before
+     * the signature pointer.
+     */
+    if (dwSigLen != pCryptKey->dwKeyLen)
+    {
+        SetLastError(NTE_BAD_SIGNATURE);
+        return FALSE;
+    }
+
+    if (!hHash || !pbSignature)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
 

@@ -71,7 +71,7 @@
 71  stdcall @(long ptr long) user32.GetClassNameW
 72  stdcall @(long ptr long) user32.GetClipboardFormatNameW
 73  stdcall @(long ptr) kernel32.GetCurrentDirectoryW
-74  stdcall -noname GetDlgItemTextWrapW(long long wstr long)
+74  stdcall @(long long wstr long) user32.GetDlgItemTextW
 75  stdcall @(wstr) kernel32.GetFileAttributesW
 76  stdcall @(wstr long ptr ptr) kernel32.GetFullPathNameW
 77  stdcall @(long long ptr long) kernel32.GetLocaleInfoW
@@ -260,7 +260,7 @@
 260 stdcall -noname SHQueueUserWorkItem(long long long long long long long)
 261 stub -noname SHCreateTimerQueue
 262 stub -noname SHDeleteTimerQueue
-263 stub -noname SHSetTimerQueueTimer
+263 stdcall -noname SHSetTimerQueueTimer(long ptr ptr long long str long)
 264 stub -noname SHChangeTimerQueueTimer
 265 stub -noname SHCancelTimerQueueTimer
 266 stdcall -noname SHRestrictionLookup(long wstr ptr ptr)
@@ -281,9 +281,9 @@
 281 stdcall -noname SHPackDispParamsV(ptr ptr ptr ptr)
 282 stdcall -noname SHPackDispParams(ptr ptr ptr ptr)
 283 stub -noname IConnectionPoint_InvokeWithCancel
-284 stdcall -noname IConnectionPoint_SimpleInvoke(ptr ptr ptr)
+284 stdcall -noname IConnectionPoint_SimpleInvoke(ptr long ptr)
 285 stdcall -noname IConnectionPoint_OnChanged(ptr long)
-286 stub -noname IUnknown_CPContainerInvokeParam
+286 varargs -noname IUnknown_CPContainerInvokeParam(ptr ptr long ptr long)
 287 stdcall -noname IUnknown_CPContainerOnChanged(ptr long)
 288 stub -noname IUnknown_CPContainerInvokeIndirect
 289 stdcall -noname PlaySoundWrapW(wstr long long)
@@ -291,12 +291,12 @@
 291 stdcall -noname SHMessageBoxCheckExA(ptr ptr ptr ptr ptr long str)
 292 stdcall -noname SHMessageBoxCheckExW(ptr ptr ptr ptr ptr long wstr)
 293 stub -noname SHCancelUserWorkItems
-294 stdcall -noname SHGetIniStringW(long long long long long)
+294 stdcall -noname SHGetIniStringW(wstr wstr ptr long wstr)
 295 stdcall -noname SHSetIniStringW(wstr ptr wstr wstr)
 296 stub -noname CreateURLFileContentsW
 297 stub -noname CreateURLFileContentsA
 298 stdcall @(wstr wstr wstr wstr) kernel32.WritePrivateProfileStringW
-299 stdcall -noname ExtTextOutWrapW(long long long long ptr wstr long ptr)
+299 stdcall @(long long long long ptr wstr long ptr) gdi32.ExtTextOutW
 300 stdcall @(long long long long long long long long long long long long long wstr) gdi32.CreateFontW
 301 stdcall @(long wstr long ptr long ptr) user32.DrawTextExW
 302 stdcall @(long long long ptr) user32.GetMenuItemInfoW
@@ -334,12 +334,12 @@
 334 stdcall -noname SHGetPathFromIDListWrapW(ptr ptr)
 335 stdcall -noname ShellExecuteExWrapW(ptr)
 336 stdcall -noname SHFileOperationWrapW(ptr)
-337 stdcall -noname ExtractIconExWrapW(wstr long ptr ptr long)
+337 stdcall @(wstr long ptr ptr long) user32.PrivateExtractIconExW
 338 stdcall @(wstr long) kernel32.SetFileAttributesW
 339 stdcall @(long long wstr ptr ptr long) kernel32.GetNumberFormatW
 340 stdcall @(long wstr wstr long) user32.MessageBoxW
 341 stdcall @(long ptr) kernel32.FindNextFileW
-342 stdcall -noname SHInterlockedCompareExchange(ptr long long)
+342 stdcall -noname SHInterlockedCompareExchange(ptr ptr ptr)
 343 stdcall -noname SHRegGetCLSIDKeyA(ptr str long long ptr)
 344 stdcall -noname SHRegGetCLSIDKeyW(ptr wstr long long ptr)
 345 stdcall -noname SHAnsiToAnsi(str ptr long)
@@ -348,7 +348,7 @@
 348 stub -noname SHGetFileDescriptionW
 349 stub -noname SHGetFileDescriptionA
 350 stdcall -noname GetFileVersionInfoSizeWrapW(wstr ptr)
-351 stdcall -noname GetFileVersionInfoWrapW(wstr ptr long ptr)
+351 stdcall -noname GetFileVersionInfoWrapW(wstr long long ptr)
 352 stdcall -noname VerQueryValueWrapW(ptr wstr ptr ptr)
 353 stub -noname SHFormatDateTimeA
 354 stub -noname SHFormatDateTimeW
@@ -396,8 +396,8 @@
 396 stub -noname MLHtmlHelpA
 397 stub -noname MLWinHelpW
 398 stub -noname MLHtmlHelpW
-399 stdcall -noname StrCpyNXA(str str long)
-400 stdcall -noname StrCpyNXW(wstr wstr long)
+399 stdcall -noname StrCpyNXA(ptr str long)
+400 stdcall -noname StrCpyNXW(ptr wstr long)
 401 stdcall -noname PageSetupDlgWrapW(ptr)
 402 stdcall -noname PrintDlgWrapW(ptr)
 403 stdcall -noname GetOpenFileNameWrapW(ptr)
@@ -432,7 +432,7 @@
 432 stub -noname SHSendMessageBroadcastA
 433 stub -noname SHSendMessageBroadcastW
 434 stdcall @(long long long long long long ptr) user32.SendMessageTimeoutW
-435 stub -noname CLSIDFromProgIDWrap
+435 stdcall -noname CLSIDFromProgIDWrap(wstr ptr) ole32.CLSIDFromProgID
 436 stdcall -noname CLSIDFromStringWrap(wstr ptr)
 437 stdcall -noname IsOS(long)
 438 stub -noname SHLoadRegUIStringA
@@ -766,7 +766,7 @@
 @ stdcall StrCmpNIW (wstr wstr long)
 @ stdcall StrCmpNW (wstr wstr long)
 @ stdcall StrCmpW (wstr wstr)
-@ stdcall StrCpyNW (wstr wstr long)
+@ stdcall StrCpyNW (ptr wstr long)
 @ stdcall StrCpyW (ptr wstr)
 @ stdcall StrDupA (str)
 @ stdcall StrDupW (wstr)

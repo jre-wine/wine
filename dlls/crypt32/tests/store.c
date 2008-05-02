@@ -99,6 +99,7 @@ static void testMemStore(void)
     HCERTSTORE store1, store2;
     PCCERT_CONTEXT context;
     BOOL ret;
+    DWORD GLE;
 
     /* NULL provider */
     store1 = CertOpenStore(0, 0, 0, 0, NULL);
@@ -124,13 +125,15 @@ static void testMemStore(void)
     context = NULL;
     ret = CertAddEncodedCertificateToStore(store1, X509_ASN_ENCODING, emptyCert,
      sizeof(emptyCert), CERT_STORE_ADD_ALWAYS, &context);
-    /* Windows returns CRYPT_E_ASN1_EOD, but accept CRYPT_E_ASN1_CORRUPT as
-     * well (because matching errors is tough in this case)
+    /* Windows returns CRYPT_E_ASN1_EOD or OSS_DATA_ERROR, but accept
+     * CRYPT_E_ASN1_CORRUPT as well (because matching errors is tough in this
+     * case)
      */
-    ok(!ret && (GetLastError() == CRYPT_E_ASN1_EOD || GetLastError() ==
-     CRYPT_E_ASN1_CORRUPT),
-     "Expected CRYPT_E_ASN1_EOD or CRYPT_E_ASN1_CORRUPT, got %08x\n",
-     GetLastError());
+    GLE = GetLastError();
+    ok(!ret && (GLE == CRYPT_E_ASN1_EOD || GLE == CRYPT_E_ASN1_CORRUPT ||
+     GLE == OSS_DATA_ERROR),
+     "Expected CRYPT_E_ASN1_EOD or CRYPT_E_ASN1_CORRUPT or OSS_DATA_ERROR, got %08x\n",
+     GLE);
     /* add a "signed" cert--the signature isn't a real signature, so this adds
      * without any check of the signature's validity
      */
@@ -152,10 +155,11 @@ static void testMemStore(void)
     /* try adding a "signed" CRL as a cert */
     ret = CertAddEncodedCertificateToStore(store1, X509_ASN_ENCODING,
      signedCRL, sizeof(signedCRL), CERT_STORE_ADD_ALWAYS, &context);
-    ok(!ret && (GetLastError() == CRYPT_E_ASN1_BADTAG || GetLastError() ==
-     CRYPT_E_ASN1_CORRUPT),
-     "Expected CRYPT_E_ASN1_BADTAG or CRYPT_E_ASN1_CORRUPT, got %08x\n",
-     GetLastError());
+    GLE = GetLastError();
+    ok(!ret && (GLE == CRYPT_E_ASN1_BADTAG || GLE == CRYPT_E_ASN1_CORRUPT ||
+     GLE == OSS_DATA_ERROR),
+     "Expected CRYPT_E_ASN1_BADTAG or CRYPT_E_ASN1_CORRUPT or OSS_DATA_ERROR, got %08x\n",
+     GLE);
     /* add a cert to store1 */
     ret = CertAddEncodedCertificateToStore(store1, X509_ASN_ENCODING, bigCert,
      sizeof(bigCert), CERT_STORE_ADD_ALWAYS, &context);
@@ -591,14 +595,16 @@ static void testRegStore(void)
     HCERTSTORE store;
     LONG rc;
     HKEY key = NULL;
-    DWORD disp;
+    DWORD disp, GLE;
 
     store = CertOpenStore(CERT_STORE_PROV_REG, 0, 0, 0, NULL);
-    ok(!store && GetLastError() == ERROR_INVALID_HANDLE,
-     "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
+    GLE = GetLastError();
+    ok(!store && (GLE == ERROR_INVALID_HANDLE || GLE == ERROR_BADKEY),
+     "Expected ERROR_INVALID_HANDLE or ERROR_BADKEY, got %d\n", GLE);
     store = CertOpenStore(CERT_STORE_PROV_REG, 0, 0, 0, key);
-    ok(!store && GetLastError() == ERROR_INVALID_HANDLE,
-     "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
+    GLE = GetLastError();
+    ok(!store && (GLE == ERROR_INVALID_HANDLE || GLE == ERROR_BADKEY),
+     "Expected ERROR_INVALID_HANDLE or ERROR_BADKEY, got %d\n", GLE);
 
     /* Opening up any old key works.. */
     key = HKEY_CURRENT_USER;
@@ -667,7 +673,7 @@ static void testRegStore(void)
                     {
                         ok(hdr->cb == sizeof(bigCert2),
                            "Wrong size %d of cert property\n", hdr->cb);
-                        ok(!memcmp((BYTE *)hdr + sizeof(*hdr), bigCert2,
+                        ok(!memcmp((const BYTE *)hdr + sizeof(*hdr), bigCert2,
                          hdr->cb), "Unexpected cert in cert property\n");
                     }
                     hdr = findPropID(buf, size, CERT_HASH_PROP_ID);
@@ -676,7 +682,7 @@ static void testRegStore(void)
                     {
                         ok(hdr->cb == sizeof(hash),
                            "Wrong size %d of hash property\n", hdr->cb);
-                        ok(!memcmp((BYTE *)hdr + sizeof(*hdr), hash,
+                        ok(!memcmp((const BYTE *)hdr + sizeof(*hdr), hash,
                          hdr->cb), "Unexpected hash in cert property\n");
                     }
                 }
@@ -1185,16 +1191,6 @@ static void testFileStore(void)
     DeleteFileW(filename);
 }
 
-static void checkFileStoreFailure(LPCWSTR filename, DWORD dwEncodingType,
- DWORD dwFlags, DWORD expectedError)
-{
-    HCERTSTORE store = CertOpenStore(CERT_STORE_PROV_FILENAME_W,
-     dwEncodingType, 0, dwFlags, filename);
-
-    ok(!store && GetLastError() == expectedError,
-     "Expected %08x, got %08x\n", expectedError, GetLastError());
-}
-
 static BOOL initFileFromData(LPCWSTR filename, const BYTE *pb, DWORD cb)
 {
     HANDLE file = CreateFileW(filename, GENERIC_READ | GENERIC_WRITE, 0, NULL,
@@ -1219,45 +1215,23 @@ static void testFileNameStore(void)
     WCHAR filename[MAX_PATH];
     HCERTSTORE store;
     BOOL ret;
+    DWORD GLE;
 
-    checkFileStoreFailure(NULL, 0, 0, ERROR_PATH_NOT_FOUND);
+    store = CertOpenStore(CERT_STORE_PROV_FILENAME_W, 0, 0, 0, NULL);
+    GLE = GetLastError();
+    ok(!store && (GLE == ERROR_PATH_NOT_FOUND || GLE == ERROR_INVALID_PARAMETER),
+     "Expected ERROR_PATH_NOT_FOUND or ERROR_INVALID_PARAMETER, got %08x\n",
+     GLE);
 
     if (!GetTempFileNameW(szDot, szPrefix, 0, filename))
        return;
     DeleteFileW(filename);
 
     /* The two flags are mutually exclusive */
-    checkFileStoreFailure(filename, 0,
-     CERT_FILE_STORE_COMMIT_ENABLE_FLAG | CERT_STORE_READONLY_FLAG,
-     E_INVALIDARG);
-    /* Without an encoding type, these all fail */
-    checkFileStoreFailure(filename, 0, 0, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, 0, CERT_STORE_OPEN_EXISTING_FLAG,
-     ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, 0, CERT_STORE_CREATE_NEW_FLAG,
-     ERROR_FILE_NOT_FOUND);
-    /* Without a message encoding type, these still fail */
-    checkFileStoreFailure(filename, X509_ASN_ENCODING, 0, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, X509_ASN_ENCODING,
-     CERT_STORE_OPEN_EXISTING_FLAG, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, X509_ASN_ENCODING,
-     CERT_STORE_CREATE_NEW_FLAG, ERROR_FILE_NOT_FOUND);
-    /* Without a cert encoding type, they still fail */
-    checkFileStoreFailure(filename, PKCS_7_ASN_ENCODING, 0,
-     ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, PKCS_7_ASN_ENCODING,
-     CERT_STORE_OPEN_EXISTING_FLAG, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, PKCS_7_ASN_ENCODING,
-     CERT_STORE_CREATE_NEW_FLAG, ERROR_FILE_NOT_FOUND);
-    /* With both a message and cert encoding type, but without commit enabled,
-     * they still fail
-     */
-    checkFileStoreFailure(filename, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0,
-     ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-     CERT_STORE_OPEN_EXISTING_FLAG, ERROR_FILE_NOT_FOUND);
-    checkFileStoreFailure(filename, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-     CERT_STORE_CREATE_NEW_FLAG, ERROR_FILE_NOT_FOUND);
+    store = CertOpenStore(CERT_STORE_PROV_FILENAME_W, 0, 0,
+     CERT_FILE_STORE_COMMIT_ENABLE_FLAG | CERT_STORE_READONLY_FLAG, filename);
+    ok(!store && GetLastError() == E_INVALIDARG,
+     "Expected E_INVALIDARG, got %08x\n", GetLastError());
 
     /* In all of the following tests, the encoding type seems to be ignored */
     if (initFileFromData(filename, bigCert, sizeof(bigCert)))
@@ -1359,6 +1333,167 @@ static void testFileNameStore(void)
     DeleteFileW(filename);
 }
 
+static const BYTE signedContent[] = {
+0x30,0x81,0xb2,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x02,0xa0,
+0x81,0xa4,0x30,0x81,0xa1,0x02,0x01,0x01,0x31,0x0e,0x30,0x0c,0x06,0x08,0x2a,
+0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x13,0x06,0x09,0x2a,0x86,
+0x48,0x86,0xf7,0x0d,0x01,0x07,0x01,0xa0,0x06,0x04,0x04,0x01,0x02,0x03,0x04,
+0x31,0x77,0x30,0x75,0x02,0x01,0x01,0x30,0x1a,0x30,0x15,0x31,0x13,0x30,0x11,
+0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,
+0x67,0x00,0x02,0x01,0x01,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,
+0x02,0x05,0x05,0x00,0x30,0x04,0x06,0x00,0x05,0x00,0x04,0x40,0x81,0xa6,0x70,
+0xb3,0xef,0x59,0xd1,0x66,0xd1,0x9b,0xc0,0x9a,0xb6,0x9a,0x5e,0x6d,0x6f,0x6d,
+0x0d,0x59,0xa9,0xaa,0x6e,0xe9,0x2c,0xa0,0x1e,0xee,0xc2,0x60,0xbc,0x59,0xbe,
+0x3f,0x63,0x06,0x8d,0xc9,0x11,0x1d,0x23,0x64,0x92,0xef,0x2e,0xfc,0x57,0x29,
+0xa4,0xaf,0xe0,0xee,0x93,0x19,0x39,0x51,0xe4,0x44,0xb8,0x0b,0x28,0xf4,0xa8,
+0x0d };
+static const BYTE signedWithCertAndCrlBareContent[] = {
+0x30,0x82,0x01,0x4f,0x02,0x01,0x01,0x31,0x0e,0x30,0x0c,0x06,0x08,0x2a,0x86,
+0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x13,0x06,0x09,0x2a,0x86,0x48,
+0x86,0xf7,0x0d,0x01,0x07,0x01,0xa0,0x06,0x04,0x04,0x01,0x02,0x03,0x04,0xa0,
+0x7c,0x30,0x7a,0x02,0x01,0x01,0x30,0x02,0x06,0x00,0x30,0x15,0x31,0x13,0x30,
+0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,
+0x6e,0x67,0x00,0x30,0x22,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,0x31,
+0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,
+0x30,0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x30,0x15,0x31,0x13,0x30,0x11,
+0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,
+0x67,0x00,0x30,0x07,0x30,0x02,0x06,0x00,0x03,0x01,0x00,0xa3,0x16,0x30,0x14,
+0x30,0x12,0x06,0x03,0x55,0x1d,0x13,0x01,0x01,0xff,0x04,0x08,0x30,0x06,0x01,
+0x01,0xff,0x02,0x01,0x01,0xa1,0x2e,0x30,0x2c,0x30,0x02,0x06,0x00,0x30,0x15,
+0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,
+0x20,0x4c,0x61,0x6e,0x67,0x00,0x18,0x0f,0x31,0x36,0x30,0x31,0x30,0x31,0x30,
+0x31,0x30,0x30,0x30,0x30,0x30,0x30,0x5a,0x31,0x77,0x30,0x75,0x02,0x01,0x01,
+0x30,0x1a,0x30,0x15,0x31,0x13,0x30,0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,
+0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,0x6e,0x67,0x00,0x02,0x01,0x01,0x30,0x0c,
+0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x30,0x04,0x06,
+0x00,0x05,0x00,0x04,0x40,0x81,0xa6,0x70,0xb3,0xef,0x59,0xd1,0x66,0xd1,0x9b,
+0xc0,0x9a,0xb6,0x9a,0x5e,0x6d,0x6f,0x6d,0x0d,0x59,0xa9,0xaa,0x6e,0xe9,0x2c,
+0xa0,0x1e,0xee,0xc2,0x60,0xbc,0x59,0xbe,0x3f,0x63,0x06,0x8d,0xc9,0x11,0x1d,
+0x23,0x64,0x92,0xef,0x2e,0xfc,0x57,0x29,0xa4,0xaf,0xe0,0xee,0x93,0x19,0x39,
+0x51,0xe4,0x44,0xb8,0x0b,0x28,0xf4,0xa8,0x0d };
+static const BYTE hashContent[] = {
+0x30,0x47,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x07,0x05,0xa0,0x3a,
+0x30,0x38,0x02,0x01,0x00,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,
+0x02,0x05,0x05,0x00,0x30,0x13,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,
+0x07,0x01,0xa0,0x06,0x04,0x04,0x01,0x02,0x03,0x04,0x04,0x10,0x08,0xd6,0xc0,
+0x5a,0x21,0x51,0x2a,0x79,0xa1,0xdf,0xeb,0x9d,0x2a,0x8f,0x26,0x2f };
+static const BYTE hashBareContent[] = {
+0x30,0x38,0x02,0x01,0x00,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,
+0x02,0x05,0x05,0x00,0x30,0x13,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,
+0x07,0x01,0xa0,0x06,0x04,0x04,0x01,0x02,0x03,0x04,0x04,0x10,0x08,0xd6,0xc0,
+0x5a,0x21,0x51,0x2a,0x79,0xa1,0xdf,0xeb,0x9d,0x2a,0x8f,0x26,0x2f };
+
+static void testMessageStore(void)
+{
+    HCERTSTORE store;
+    HCRYPTMSG msg = CryptMsgOpenToDecode(PKCS_7_ASN_ENCODING, 0, 0, 0, NULL,
+     NULL);
+    CRYPT_DATA_BLOB blob = { sizeof(signedWithCertAndCrlBareContent),
+     (LPBYTE)signedWithCertAndCrlBareContent };
+    DWORD count, size;
+    BOOL ret;
+
+    /* Crashes
+    store = CertOpenStore(CERT_STORE_PROV_MSG, 0, 0, 0, NULL);
+     */
+    SetLastError(0xdeadbeef);
+    store = CertOpenStore(CERT_STORE_PROV_MSG, 0, 0, 0, msg);
+    ok(!store && GetLastError() == CRYPT_E_INVALID_MSG_TYPE,
+     "Expected CRYPT_E_INVALID_MSG_TYPE, got %08x\n", GetLastError());
+    CryptMsgUpdate(msg, signedContent, sizeof(signedContent), TRUE);
+    store = CertOpenStore(CERT_STORE_PROV_MSG, 0, 0, 0, msg);
+    ok(store != NULL, "CertOpenStore failed: %08x\n", GetLastError());
+    if (store)
+    {
+        PCCERT_CONTEXT cert = NULL;
+        PCCRL_CONTEXT crl = NULL;
+
+        count = 0;
+        do {
+            cert = CertEnumCertificatesInStore(store, cert);
+            if (cert)
+                count++;
+        } while (cert);
+        ok(count == 0, "Expected 0 certificates, got %d\n", count);
+
+        count = 0;
+        do {
+            crl = CertEnumCRLsInStore(store, crl);
+            if (crl)
+                count++;
+        } while (crl);
+        ok(count == 0, "Expected 0 CRLs, got %d\n", count);
+
+        /* Can add certs to a message store */
+        ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
+         bigCert, sizeof(bigCert), CERT_STORE_ADD_ALWAYS, NULL);
+        ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+         GetLastError());
+        count = 0;
+        do {
+            cert = CertEnumCertificatesInStore(store, cert);
+            if (cert)
+                count++;
+        } while (cert);
+        ok(count == 1, "Expected 1 certificate, got %d\n", count);
+
+        CertCloseStore(store, 0);
+    }
+    /* but the added certs weren't actually added to the message */
+    size = sizeof(count);
+    ret = CryptMsgGetParam(msg, CMSG_CERT_COUNT_PARAM, 0, &count, &size);
+    ok(ret, "CryptMsgGetParam failed: %08x\n", GetLastError());
+    ok(count == 0, "Expected 0 certificates, got %d\n", count);
+    CryptMsgClose(msg);
+
+    /* Crashes
+    store = CertOpenStore(CERT_STORE_PROV_PKCS7, 0, 0, 0, NULL);
+     */
+    store = CertOpenStore(CERT_STORE_PROV_PKCS7, 0, 0, 0, &blob);
+    ok(store != NULL, "CertOpenStore failed: %08x\n", GetLastError());
+    if (store)
+    {
+        DWORD count = 0;
+        PCCERT_CONTEXT cert = NULL;
+        PCCRL_CONTEXT crl = NULL;
+
+        do {
+            cert = CertEnumCertificatesInStore(store, cert);
+            if (cert)
+                count++;
+        } while (cert);
+        ok(count == 1, "Expected 1 certificate, got %d\n", count);
+
+        count = 0;
+        do {
+            crl = CertEnumCRLsInStore(store, crl);
+            if (crl)
+                count++;
+        } while (crl);
+        ok(count == 1, "Expected 1 CRL, got %d\n", count);
+        CertCloseStore(store, 0);
+    }
+    /* Encoding appears to be ignored */
+    store = CertOpenStore(CERT_STORE_PROV_PKCS7, X509_ASN_ENCODING, 0, 0,
+     &blob);
+    ok(store != NULL, "CertOpenStore failed: %08x\n", GetLastError());
+    if (store)
+        CertCloseStore(store, 0);
+    /* Messages other than signed messages aren't allowed */
+    blob.cbData = sizeof(hashContent);
+    blob.pbData = (LPBYTE)hashContent;
+    SetLastError(0xdeadbeef);
+    store = CertOpenStore(CERT_STORE_PROV_PKCS7, 0, 0, 0, &blob);
+    ok(!store && GetLastError() == CRYPT_E_INVALID_MSG_TYPE,
+     "Expected CRYPT_E_INVALID_MSG_TYPE, got %08x\n", GetLastError());
+    blob.cbData = sizeof(hashBareContent);
+    blob.pbData = (LPBYTE)hashBareContent;
+    SetLastError(0xdeadbeef);
+    store = CertOpenStore(CERT_STORE_PROV_PKCS7, 0, 0, 0, &blob);
+    ok(!store && GetLastError() == CRYPT_E_ASN1_BADTAG,
+     "Expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
+}
+
 static void testCertOpenSystemStore(void)
 {
     HCERTSTORE store;
@@ -1377,6 +1512,126 @@ static void testCertOpenSystemStore(void)
     store = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
      CERT_SYSTEM_STORE_CURRENT_USER | CERT_STORE_DELETE_FLAG, BogusW);
     RegDeleteKeyW(HKEY_CURRENT_USER, BogusPathW);
+}
+
+struct EnumSystemStoreInfo
+{
+    BOOL  goOn;
+    DWORD storeCount;
+};
+
+static BOOL CALLBACK enumSystemStoreCB(const void *systemStore, DWORD dwFlags,
+ PCERT_SYSTEM_STORE_INFO pStoreInfo, void *pvReserved, void *pvArg)
+{
+    struct EnumSystemStoreInfo *info = (struct EnumSystemStoreInfo *)pvArg;
+
+    info->storeCount++;
+    return info->goOn;
+}
+
+static void testCertEnumSystemStore(void)
+{
+    BOOL ret;
+    struct EnumSystemStoreInfo info = { FALSE, 0 };
+
+    SetLastError(0xdeadbeef);
+    ret = CertEnumSystemStore(0, NULL, NULL, NULL);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
+    /* Crashes
+    ret = CertEnumSystemStore(CERT_SYSTEM_STORE_LOCAL_MACHINE, NULL, NULL,
+     NULL);
+     */
+
+    SetLastError(0xdeadbeef);
+    ret = CertEnumSystemStore(CERT_SYSTEM_STORE_LOCAL_MACHINE, NULL, &info,
+     enumSystemStoreCB);
+    /* Callback returning FALSE stops enumeration */
+    ok(!ret, "Expected CertEnumSystemStore to stop\n");
+    ok(info.storeCount == 0 || info.storeCount == 1,
+     "Expected 0 or 1 stores\n");
+
+    info.goOn = TRUE;
+    info.storeCount = 0;
+    ret = CertEnumSystemStore(CERT_SYSTEM_STORE_LOCAL_MACHINE, NULL, &info,
+     enumSystemStoreCB);
+    ok(ret, "CertEnumSystemStore failed: %08x\n", GetLastError());
+    /* There should always be at least My, Root, and CA stores */
+    ok(info.storeCount == 0 || info.storeCount >= 3,
+     "Expected at least 3 stores\n");
+}
+
+static void testStoreProperty(void)
+{
+    HCERTSTORE store;
+    BOOL ret;
+    DWORD propID, size = 0, state;
+    CRYPT_DATA_BLOB blob;
+
+    /* Crash
+    ret = CertGetStoreProperty(NULL, 0, NULL, NULL);
+    ret = CertGetStoreProperty(NULL, 0, NULL, &size);
+    ret = CertGetStoreProperty(store, 0, NULL, NULL);
+     */
+
+    store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
+     CERT_STORE_CREATE_NEW_FLAG, NULL);
+    /* Check a missing prop ID */
+    SetLastError(0xdeadbeef);
+    ret = CertGetStoreProperty(store, 0, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
+     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+    /* Contrary to MSDN, CERT_ACCESS_STATE_PROP_ID is supported for stores.. */
+    size = sizeof(state);
+    ret = CertGetStoreProperty(store, CERT_ACCESS_STATE_PROP_ID, &state, &size);
+    ok(ret, "CertGetStoreProperty failed for CERT_ACCESS_STATE_PROP_ID: %08x\n",
+     GetLastError());
+    ok(!state, "Expected a non-persisted store\n");
+    /* and CERT_STORE_LOCALIZED_NAME_PROP_ID isn't supported by default. */
+    size = 0;
+    ret = CertGetStoreProperty(store, CERT_STORE_LOCALIZED_NAME_PROP_ID, NULL,
+     &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
+     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+    /* Delete an arbitrary property on a store */
+    ret = CertSetStoreProperty(store, CERT_FIRST_USER_PROP_ID, 0, NULL);
+    ok(ret, "CertSetStoreProperty failed: %08x\n", GetLastError());
+    /* Set an arbitrary property on a store */
+    blob.pbData = (LPBYTE)&state;
+    blob.cbData = sizeof(state);
+    ret = CertSetStoreProperty(store, CERT_FIRST_USER_PROP_ID, 0, &blob);
+    ok(ret, "CertSetStoreProperty failed: %08x\n", GetLastError());
+    /* Get an arbitrary property that's been set */
+    ret = CertGetStoreProperty(store, CERT_FIRST_USER_PROP_ID, NULL, &size);
+    ok(ret, "CertGetStoreProperty failed: %08x\n", GetLastError());
+    ok(size == sizeof(state), "Unexpected data size %d\n", size);
+    ret = CertGetStoreProperty(store, CERT_FIRST_USER_PROP_ID, &propID, &size);
+    ok(ret, "CertGetStoreProperty failed: %08x\n", GetLastError());
+    ok(propID == state, "CertGetStoreProperty got the wrong value\n");
+    /* Delete it again */
+    ret = CertSetStoreProperty(store, CERT_FIRST_USER_PROP_ID, 0, NULL);
+    ok(ret, "CertSetStoreProperty failed: %08x\n", GetLastError());
+    /* And check that it's missing */
+    SetLastError(0xdeadbeef);
+    ret = CertGetStoreProperty(store, CERT_FIRST_USER_PROP_ID, NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
+     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+    CertCloseStore(store, 0);
+
+    /* Recheck on the My store.. */
+    store = CertOpenSystemStoreW(0, MyW);
+    size = sizeof(state);
+    ret = CertGetStoreProperty(store, CERT_ACCESS_STATE_PROP_ID, &state, &size);
+    ok(ret, "CertGetStoreProperty failed for CERT_ACCESS_STATE_PROP_ID: %08x\n",
+     GetLastError());
+    ok(state, "Expected a persisted store\n");
+    SetLastError(0xdeadbeef);
+    size = 0;
+    ret = CertGetStoreProperty(store, CERT_STORE_LOCALIZED_NAME_PROP_ID, NULL,
+     &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
+     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+    CertCloseStore(store, 0);
 }
 
 static void testAddSerialized(void)
@@ -1543,8 +1798,11 @@ START_TEST(store)
     testSystemStore();
     testFileStore();
     testFileNameStore();
+    testMessageStore();
 
     testCertOpenSystemStore();
+    testCertEnumSystemStore();
+    testStoreProperty();
 
     testAddSerialized();
 }

@@ -89,8 +89,6 @@ int alloc_system_colors = 256;
 DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
 int xrender_error_base = 0;
 
-static BOOL desktop_dbl_buf = TRUE;
-
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
 static void *err_callback_arg;               /* error callback argument */
@@ -160,7 +158,8 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "text/html",
     "text/plain",
     "text/rtf",
-    "text/richtext"
+    "text/richtext",
+    "text/uri-list"
 };
 
 /***********************************************************************
@@ -276,7 +275,7 @@ void wine_tsx11_unlock(void)
  *
  * Get a config key from either the app-specific or the default config
  */
-inline static DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
+static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
                                     char *buffer, DWORD size )
 {
     if (appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE)buffer, &size )) return 0;
@@ -351,9 +350,6 @@ static void setup_options(void)
     if (!get_config_key( hkey, appkey, "ClientSideAntiAliasWithRender", buffer, sizeof(buffer) ))
         client_side_antialias_with_render = IS_OPTION_TRUE( buffer[0] );
 
-    if (!get_config_key( hkey, appkey, "DesktopDoubleBuffered", buffer, sizeof(buffer) ))
-        desktop_dbl_buf = IS_OPTION_TRUE( buffer[0] );
-
     if (!get_config_key( hkey, appkey, "UseXIM", buffer, sizeof(buffer) ))
         use_xim = IS_OPTION_TRUE( buffer[0] );
 
@@ -383,6 +379,7 @@ static BOOL process_attach(void)
 {
     Display *display;
     XVisualInfo *desktop_vi = NULL;
+    const char *env;
 
     setup_options();
 
@@ -390,7 +387,8 @@ static BOOL process_attach(void)
 
     /* Open display */
 
-    if (!XInitThreads()) ERR( "XInitThreads failed, trouble ahead\n" );
+    if (!(env = getenv("XMODIFIERS")) || !*env)  /* try to avoid the Xlib XIM locking bug */
+        if (!XInitThreads()) ERR( "XInitThreads failed, trouble ahead\n" );
 
     if (!(display = XOpenDisplay( NULL ))) return FALSE;
 
@@ -419,7 +417,7 @@ static BOOL process_attach(void)
     if (!screen_depth) screen_depth = DefaultDepthOfScreen( screen );
 
     /* If OpenGL is available, change the default visual, etc as necessary */
-    if (desktop_dbl_buf && (desktop_vi = X11DRV_setup_opengl_visual( display )))
+    if ((desktop_vi = X11DRV_setup_opengl_visual( display )))
     {
         visual       = desktop_vi->visual;
         screen       = ScreenOfDisplay(display, desktop_vi->screen);
@@ -441,11 +439,12 @@ static BOOL process_attach(void)
     /* initialize XVidMode */
     X11DRV_XF86VM_Init();
 #endif
-#ifdef HAVE_LIBXRANDR
+#ifdef SONAME_LIBXRANDR
     /* initialize XRandR */
     X11DRV_XRandR_Init();
 #endif
 
+    X11DRV_ClipCursor( NULL );
     X11DRV_InitKeyboard();
     X11DRV_InitClipboard();
 
@@ -463,7 +462,6 @@ static void thread_detach(void)
     if (data)
     {
         X11DRV_ResetSelectionOwner();
-        CloseHandle( data->display_fd );
         wine_tsx11_lock();
         if (data->xim) XCloseIM( data->xim );
         XCloseDisplay( data->display );
@@ -490,6 +488,32 @@ static void process_detach(void)
 
     DeleteCriticalSection( &X11DRV_CritSection );
     TlsFree( thread_data_tls_index );
+}
+
+
+/* store the display fd into the message queue */
+static void set_queue_display_fd( Display *display )
+{
+    HANDLE handle;
+    int ret;
+
+    if (wine_server_fd_to_handle( ConnectionNumber(display), GENERIC_READ | SYNCHRONIZE, 0, &handle ))
+    {
+        MESSAGE( "x11drv: Can't allocate handle for display fd\n" );
+        ExitProcess(1);
+    }
+    SERVER_START_REQ( set_queue_fd )
+    {
+        req->handle = handle;
+        ret = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+    if (ret)
+    {
+        MESSAGE( "x11drv: Can't store handle for display fd\n" );
+        ExitProcess(1);
+    }
+    CloseHandle( handle );
 }
 
 
@@ -539,12 +563,7 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     else if (!(data->xim = X11DRV_SetupXIM( data->display, input_style )))
         WARN("Input Method is not available\n");
 
-    if (wine_server_fd_to_handle( ConnectionNumber(data->display), GENERIC_READ | SYNCHRONIZE,
-                                  0, &data->display_fd ))
-    {
-        MESSAGE( "x11drv: Can't allocate handle for display fd\n" );
-        ExitProcess(1);
-    }
+    set_queue_display_fd( data->display );
     data->process_event_count = 0;
     data->cursor = None;
     data->cursor_window = None;

@@ -109,10 +109,16 @@ static HRESULT WINAPI HTMLDocument_QueryInterface(IHTMLDocument2 *iface, REFIID 
         *ppvObject = HLNKTARGET(This);
     }else if(IsEqualGUID(&IID_IConnectionPointContainer, riid)) {
         TRACE("(%p)->(IID_IConnectionPointContainer %p)\n", This, ppvObject);
-        *ppvObject = CONPTCONT(This);
+        *ppvObject = CONPTCONT(&This->cp_container);
     }else if(IsEqualGUID(&IID_IPersistStreamInit, riid)) {
         TRACE("(%p)->(IID_IPersistStreamInit %p)\n", This, ppvObject);
         *ppvObject = PERSTRINIT(This);
+    }else if(IsEqualGUID(&IID_ICustomDoc, riid)) {
+        TRACE("(%p)->(IID_ICustomDoc %p)\n", This, ppvObject);
+        *ppvObject = CUSTOMDOC(This);
+    }else if(IsEqualGUID(&DIID_DispHTMLDocument, riid)) {
+        TRACE("(%p)->(DIID_DispHTMLDocument %p)\n", This, ppvObject);
+        *ppvObject = HTMLDOC(This);
     }else if(IsEqualGUID(&CLSID_CMarkup, riid)) {
         FIXME("(%p)->(CLSID_CMarkup %p)\n", This, ppvObject);
         return E_NOINTERFACE;
@@ -156,15 +162,21 @@ static ULONG WINAPI HTMLDocument_Release(IHTMLDocument2 *iface)
             IOleDocumentView_SetInPlaceSite(DOCVIEW(This), NULL);
 
         set_document_bscallback(This, NULL);
+        set_current_mon(This, NULL);
 
         if(This->tooltips_hwnd)
             DestroyWindow(This->tooltips_hwnd);
         if(This->hwnd)
             DestroyWindow(This->hwnd);
 
+        if(This->window)
+            IHTMLWindow2_Release(HTMLWINDOW2(This->window));
+
+        detach_selection(This);
+        detach_ranges(This);
         release_nodes(This);
 
-        HTMLDocument_ConnectionPoints_Destroy(This);
+        ConnectionPointContainer_Destroy(&This->cp_container);
 
         if(This->nscontainer)
             NSContainer_Release(This->nscontainer);
@@ -366,7 +378,7 @@ static HRESULT WINAPI HTMLDocument_get_selection(IHTMLDocument2 *iface, IHTMLSel
         }
     }
 
-    *p = HTMLSelectionObject_Create(nsselection);
+    *p = HTMLSelectionObject_Create(This, nsselection);
     return S_OK;
 }
 
@@ -501,8 +513,15 @@ static HRESULT WINAPI HTMLDocument_put_URL(IHTMLDocument2 *iface, BSTR v)
 
 static HRESULT WINAPI HTMLDocument_get_URL(IHTMLDocument2 *iface, BSTR *p)
 {
-    FIXME("(%p)->(%p)\n", iface, p);
-    return E_NOTIMPL;
+    HTMLDocument *This = HTMLDOC_THIS(iface);
+
+    static const WCHAR about_blank_url[] =
+        {'a','b','o','u','t',':','b','l','a','n','k',0};
+
+    TRACE("(%p)->(%p)\n", iface, p);
+
+    *p = SysAllocString(This->url ? This->url : about_blank_url);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_put_domain(IHTMLDocument2 *iface, BSTR v)
@@ -920,8 +939,13 @@ static HRESULT WINAPI HTMLDocument_elementFromPoint(IHTMLDocument2 *iface, long 
 
 static HRESULT WINAPI HTMLDocument_get_parentWindow(IHTMLDocument2 *iface, IHTMLWindow2 **p)
 {
-    FIXME("(%p)->(%p)\n", iface, p);
-    return E_NOTIMPL;
+    HTMLDocument *This = HTMLDOC_THIS(iface);
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    *p = HTMLWINDOW2(This->window);
+    IHTMLWindow2_AddRef(*p);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_get_styleSheets(IHTMLDocument2 *iface,
@@ -964,8 +988,12 @@ static HRESULT WINAPI HTMLDocument_toString(IHTMLDocument2 *iface, BSTR *String)
 static HRESULT WINAPI HTMLDocument_createStyleSheet(IHTMLDocument2 *iface, BSTR bstrHref,
                                             long lIndex, IHTMLStyleSheet **ppnewStyleSheet)
 {
-    FIXME("(%p)->(%s %ld %p)\n", iface, debugstr_w(bstrHref), lIndex, ppnewStyleSheet);
-    return E_NOTIMPL;
+    HTMLDocument *This = HTMLDOC_THIS(iface);
+
+    FIXME("(%p)->(%s %ld %p) semi-stub\n", This, debugstr_w(bstrHref), lIndex, ppnewStyleSheet);
+
+    *ppnewStyleSheet = HTMLStyleSheet_Create();
+    return S_OK;
 }
 
 static const IHTMLDocument2Vtbl HTMLDocumentVtbl = {
@@ -1100,6 +1128,10 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
     ret->nscontainer = NULL;
     ret->nodes = NULL;
     ret->readystate = READYSTATE_UNINITIALIZED;
+    ret->window = NULL;
+
+    list_init(&ret->selection_list);
+    list_init(&ret->range_list);
 
     hres = IHTMLDocument_QueryInterface(HTMLDOC(ret), riid, ppvObject);
     if(FAILED(hres)) {
@@ -1117,9 +1149,17 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
     HTMLDocument_Window_Init(ret);
     HTMLDocument_Service_Init(ret);
     HTMLDocument_Hlink_Init(ret);
-    HTMLDocument_ConnectionPoints_Init(ret);
+
+    ConnectionPoint_Init(&ret->cp_propnotif, CONPTCONT(&ret->cp_container),
+            &IID_IPropertyNotifySink, NULL);
+    ConnectionPoint_Init(&ret->cp_htmldocevents, CONPTCONT(&ret->cp_container),
+            &DIID_HTMLDocumentEvents, &ret->cp_propnotif);
+    ConnectionPoint_Init(&ret->cp_htmldocevents2, CONPTCONT(&ret->cp_container),
+            &DIID_HTMLDocumentEvents2, &ret->cp_htmldocevents);
+    ConnectionPointContainer_Init(&ret->cp_container, &ret->cp_propnotif, (IUnknown*)HTMLDOC(ret));
 
     ret->nscontainer = NSContainer_Create(ret, NULL);
+    ret->window = HTMLWindow_Create(ret);
 
     get_thread_hwnd();
 

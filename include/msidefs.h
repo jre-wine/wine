@@ -168,6 +168,12 @@ enum msidbComponentAttributes
     msidbComponentAttributes64bit = 0x00000100
 };
 
+enum msidbODBCDataSourceRegistration
+{
+    msidbODBCDataSourceRegistrationPerMachine = 0x00000000,
+    msidbODBCDataSourceRegistrationPerUser = 0x00000001
+};
+
 enum msidbRegistryRoot
 {
     msidbRegistryRootClassesRoot = 0,
@@ -182,6 +188,16 @@ enum msidbLocatorType
     msidbLocatorTypeFileName = 0x001,
     msidbLocatorTypeRawValue = 0x002,
     msidbLocatorType64bit = 0x010,
+};
+
+enum msidbServiceControlEvent
+{
+    msidbServiceControlEventStart = 0x00000001,
+    msidbServiceControlEventStop = 0x00000002,
+    msidbServiceControlEventDelete = 0x00000008,
+    msidbServiceControlEventUninstallStart = 0x00000010,
+    msidbServiceControlEventUninstallStop = 0x00000020,
+    msidbServiceControlEventUninstallDelete = 0x00000080,
 };
 
 /*
@@ -213,7 +229,7 @@ enum msidbLocatorType
 #define PID_TEMPLATE 7
 #define PID_LASTAUTHOR 8
 #define PID_REVNUMBER 9
-#define PID_EDITTINE 10
+#define PID_EDITTIME 10
 #define PID_LASTPRINTED 11
 #define PID_CREATE_DTM 12
 #define PID_LASTSAVE_DTM 13

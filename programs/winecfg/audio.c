@@ -82,7 +82,6 @@ static const char* DSound_Bits[] = {
 
 static const AUDIO_DRIVER sAudioDrivers[] = {
   {IDS_DRIVER_ALSA,      "alsa"},
-  {IDS_DRIVER_ARTS,      "arts"},
   {IDS_DRIVER_ESOUND,    "esd"},
   {IDS_DRIVER_OSS,       "oss"},
   {IDS_DRIVER_JACK,      "jack"},
@@ -482,6 +481,7 @@ static void initAudioDeviceTree(HWND hDlg)
                     }
                 }
             }
+            CloseDriver(hdrv, 0, 0);
         }
     }
 
@@ -729,6 +729,9 @@ AudioDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
           case IDC_AUDIO_CONFIGURE:
 	     configureAudioDriver(hDlg);
 	     break;
+          case IDC_AUDIO_TEST:
+             MessageBox(NULL, "Audio Test not implemented yet!", "Fixme", MB_OK | MB_ICONERROR);
+             break;
           case IDC_AUDIO_CONTROL_PANEL:
 	     MessageBox(NULL, "Launching audio control panel not implemented yet!", "Fixme", MB_OK | MB_ICONERROR);
              break;

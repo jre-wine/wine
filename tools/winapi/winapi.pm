@@ -139,7 +139,9 @@ sub parse_api_file($$) {
 
     open(IN, "< $winapi_dir/$file") || die "$winapi_dir/$file: $!\n";
     $/ = "\n";
+    my $linenum=0;
     while(<IN>) {
+        $linenum++;
 	s/^\s*?(.*?)\s*$/$1/; # remove whitespace at begin and end of line
 	s/^(.*?)\s*#.*$/$1/;  # remove comments
 	/^$/ && next;         # skip empty lines
@@ -190,15 +192,19 @@ sub parse_api_file($$) {
 	    }
 	} elsif(defined($kind)) {
 	    my $type = $_;
+            if ($type =~ /\blong\b/)
+            {
+                $output->write("$file:$linenum: type ($type) is not Win64 compatible\n");
+            }
 	    if(!$forbidden) {
 		if(defined($module)) {
 		    if($$allowed_modules_unlimited{$type}) {
-			$output->write("$file: type ($type) already specified as an unlimited type\n");
+			$output->write("$file:$linenum: type ($type) already specified as an unlimited type\n");
 		    } elsif(!$$allowed_modules{$type}{$module}) {
 			$$allowed_modules{$type}{$module} = 1;
 			$$allowed_modules_limited{$type} = 1;
 		    } else {
-			$output->write("$file: type ($type) already specified\n");
+			$output->write("$file:$linenum: type ($type) already specified\n");
 		    }
 		} else {
 		    $$allowed_modules_unlimited{$type} = 1;
@@ -207,14 +213,14 @@ sub parse_api_file($$) {
 		$$allowed_modules_limited{$type} = 1;
 	    }
 	    if(defined($$translate_argument{$type}) && $$translate_argument{$type} ne $kind) {
-		$output->write("$file: type ($type) respecified as different kind ($kind != $$translate_argument{$type})\n");
+		$output->write("$file:$linenum: type ($type) respecified as different kind ($kind != $$translate_argument{$type})\n");
 	    } else {
 		$$translate_argument{$type} = $kind;
 	    }
 
 	    $$type_format{$module}{$type} = $format;
 	} else {
-	    $output->write("$file: file must begin with %<type> statement\n");
+	    $output->write("$file:$linenum: file must begin with %<type> statement\n");
 	    exit 1;
 	}
     }
@@ -287,7 +293,10 @@ sub parse_spec_file($$) {
 
 	    $flags =~ s/\s+/ /g;
 
-	    $internal_name = $external_name if !$internal_name;
+            if (!$internal_name)
+            {
+                $internal_name = ($flags =~ /-register/ ? "__regs_" : "") . $external_name;
+            }
 
 	    if($flags =~ /-noname/) {
 		# $external_name = "@";
@@ -297,6 +306,9 @@ sub parse_spec_file($$) {
 		if($arguments) { $arguments .= " "; }
 		$arguments .= "ptr";
 		$calling_convention .= " -register";
+	    }
+	    if($flags =~ /(?:-i386)/) {
+		$calling_convention .= " -i386";
 	    }
 
 	    if ($internal_name =~ /^(.*?)\.(.*?)$/) {
@@ -373,7 +385,7 @@ sub parse_spec_file($$) {
 		    my $name4 = $name;
 		    $name4 =~ s/^(VxDCall)\d$/$1/;
 
-		    # FIXME: This special case is becuase of a very ugly kludge that should be fixed IMHO
+		    # FIXME: This special case is because of a very ugly kludge that should be fixed IMHO
 		    my $name5 = $name;
 		    $name5 =~ s/^(.*?16)_(.*?)$/$1_fn$2/;
 

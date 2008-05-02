@@ -23,6 +23,7 @@
 #include "wine/port.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
 
@@ -147,6 +148,7 @@ extern DWORD EXC_CallHandler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_R
 void wait_suspend( CONTEXT *context )
 {
     LARGE_INTEGER timeout;
+    int saved_errno = errno;
 
     /* store the context we got at suspend time */
     SERVER_START_REQ( set_thread_context )
@@ -161,7 +163,7 @@ void wait_suspend( CONTEXT *context )
 
     /* wait with 0 timeout, will only return once the thread is no longer suspended */
     timeout.QuadPart = 0;
-    NTDLL_wait_for_multiple_objects( 0, NULL, 0, &timeout, 0 );
+    NTDLL_wait_for_multiple_objects( 0, NULL, SELECT_INTERRUPTIBLE, &timeout, 0 );
 
     /* retrieve the new context */
     SERVER_START_REQ( get_thread_context )
@@ -173,6 +175,8 @@ void wait_suspend( CONTEXT *context )
         wine_server_call( req );
     }
     SERVER_END_REQ;
+
+    errno = saved_errno;
 }
 
 
@@ -198,7 +202,7 @@ static NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, int first_chance, CONTE
     SERVER_END_REQ;
     if (!handle) return 0;
 
-    NTDLL_wait_for_multiple_objects( 1, &handle, 0, NULL, 0 );
+    NTDLL_wait_for_multiple_objects( 1, &handle, SELECT_INTERRUPTIBLE, NULL, 0 );
 
     SERVER_START_REQ( get_exception_status )
     {
@@ -336,6 +340,11 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
         if (status == DBG_CONTINUE || status == DBG_EXCEPTION_HANDLED)
             return STATUS_SUCCESS;
 
+#ifdef __i386__
+        /* fix up instruction pointer in context for EXCEPTION_BREAKPOINT */
+        if (rec->ExceptionCode == EXCEPTION_BREAKPOINT) context->Eip--;
+#endif
+
         if (call_vectored_handlers( rec, context ) == EXCEPTION_CONTINUE_EXECUTION)
             return STATUS_SUCCESS;
 
@@ -391,7 +400,7 @@ void WINAPI __regs_RtlRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context )
 /**********************************************************************/
 
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( RtlRaiseException, 4, 4 );
+DEFINE_REGS_ENTRYPOINT( RtlRaiseException, 4, 4 )
 #else
 void WINAPI RtlRaiseException( EXCEPTION_RECORD *rec )
 {
@@ -483,7 +492,7 @@ void WINAPI __regs_RtlUnwind( EXCEPTION_REGISTRATION_RECORD* pEndFrame, PVOID un
 /**********************************************************************/
 
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( RtlUnwind, 16, 16 );
+DEFINE_REGS_ENTRYPOINT( RtlUnwind, 16, 16 )
 #else
 void WINAPI RtlUnwind( PVOID pEndFrame, PVOID unusedEip,
                        PEXCEPTION_RECORD pRecord, PVOID returnEax )

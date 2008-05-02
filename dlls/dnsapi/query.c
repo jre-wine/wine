@@ -65,6 +65,17 @@ static CRITICAL_SECTION resolver_cs = { &resolver_cs_debug, -1, 0, 0, 0, 0 };
 #define LOCK_RESOLVER()     do { EnterCriticalSection( &resolver_cs ); } while (0)
 #define UNLOCK_RESOLVER()   do { LeaveCriticalSection( &resolver_cs ); } while (0)
 
+static int resolver_initialised;
+
+/* call res_init() just once because of a bug in Mac OS X 10.4 */
+static void initialise_resolver( void )
+{
+    if (!resolver_initialised)
+    {
+        res_init();
+        resolver_initialised = 1;
+    }
+}
 
 static const char *dns_section_to_str( ns_sect section )
 {
@@ -188,7 +199,7 @@ static char *dns_str_from_rdata( const unsigned char *rdata )
     return str;
 }
 
-static unsigned int dns_get_record_size( ns_rr *rr )
+static unsigned int dns_get_record_size( const ns_rr *rr )
 {
     const unsigned char *pos = rr->rdata;
     unsigned int num = 0, size = sizeof(DNS_RECORDA);
@@ -239,7 +250,7 @@ static unsigned int dns_get_record_size( ns_rr *rr )
     return size;
 }
 
-static DNS_STATUS dns_copy_rdata( ns_msg msg, ns_rr *rr, DNS_RECORDA *r, WORD *dlen )
+static DNS_STATUS dns_copy_rdata( ns_msg msg, const ns_rr *rr, DNS_RECORDA *r, WORD *dlen )
 {
     DNS_STATUS ret = ERROR_SUCCESS;
     const unsigned char *pos = rr->rdata;
@@ -407,8 +418,7 @@ static DNS_STATUS dns_copy_rdata( ns_msg msg, ns_rr *rr, DNS_RECORDA *r, WORD *d
             r->Data.TXT.pStringArray[i] = dns_str_from_rdata( pos );
             if (!r->Data.TXT.pStringArray[i])
             {
-                for (--i; i >= 0; i--)
-                    dns_free( r->Data.TXT.pStringArray[i] );
+                while (i > 0) dns_free( r->Data.TXT.pStringArray[--i] );
                 return ERROR_NOT_ENOUGH_MEMORY;
             }
             i++;
@@ -533,6 +543,7 @@ static DNS_STATUS dns_do_query_netbios( PCSTR name, DNS_RECORDA **recp )
             DNS_RRSET_ADD( rrset, (DNS_RECORD *)record );
         }
     }
+    status = ERROR_SUCCESS;
 
 exit:
     DNS_RRSET_TERMINATE( rrset );
@@ -548,7 +559,7 @@ exit:
 /*  The resolver lock must be held and res_init() must have been
  *  called before calling these three functions.
  */
-static DNS_STATUS dns_set_serverlist( PIP4_ARRAY addrs )
+static DNS_STATUS dns_set_serverlist( const IP4_ARRAY *addrs )
 {
     unsigned int i;
 
@@ -649,7 +660,7 @@ exit:
  * DnsQuery_A           [DNSAPI.@]
  *
  */
-DNS_STATUS WINAPI DnsQuery_A( PCSTR name, WORD type, DWORD options, PIP4_ARRAY servers,
+DNS_STATUS WINAPI DnsQuery_A( PCSTR name, WORD type, DWORD options, PVOID servers,
                               PDNS_RECORDA *result, PVOID *reserved )
 {
     WCHAR *nameW;
@@ -684,7 +695,7 @@ DNS_STATUS WINAPI DnsQuery_A( PCSTR name, WORD type, DWORD options, PIP4_ARRAY s
  * DnsQuery_UTF8              [DNSAPI.@]
  *
  */
-DNS_STATUS WINAPI DnsQuery_UTF8( PCSTR name, WORD type, DWORD options, PIP4_ARRAY servers,
+DNS_STATUS WINAPI DnsQuery_UTF8( PCSTR name, WORD type, DWORD options, PVOID servers,
                                  PDNS_RECORDA *result, PVOID *reserved )
 {
     DNS_STATUS ret = DNS_ERROR_RCODE_NOT_IMPLEMENTED;
@@ -698,7 +709,7 @@ DNS_STATUS WINAPI DnsQuery_UTF8( PCSTR name, WORD type, DWORD options, PIP4_ARRA
 
     LOCK_RESOLVER();
 
-    res_init();
+    initialise_resolver();
     _res.options |= dns_map_options( options );
 
     if (servers && (ret = dns_set_serverlist( servers )))
@@ -726,7 +737,7 @@ DNS_STATUS WINAPI DnsQuery_UTF8( PCSTR name, WORD type, DWORD options, PIP4_ARRA
  * DnsQuery_W              [DNSAPI.@]
  *
  */
-DNS_STATUS WINAPI DnsQuery_W( PCWSTR name, WORD type, DWORD options, PIP4_ARRAY servers,
+DNS_STATUS WINAPI DnsQuery_W( PCWSTR name, WORD type, DWORD options, PVOID servers,
                               PDNS_RECORDW *result, PVOID *reserved )
 {
     char *nameU;
@@ -758,7 +769,7 @@ DNS_STATUS WINAPI DnsQuery_W( PCWSTR name, WORD type, DWORD options, PIP4_ARRAY 
 }
 
 static DNS_STATUS dns_get_hostname_a( COMPUTER_NAME_FORMAT format,
-                                      LPSTR buffer, PDWORD len )
+                                      PSTR buffer, PDWORD len )
 {
     char name[256];
     DWORD size = sizeof(name);
@@ -777,7 +788,7 @@ static DNS_STATUS dns_get_hostname_a( COMPUTER_NAME_FORMAT format,
 }
 
 static DNS_STATUS dns_get_hostname_w( COMPUTER_NAME_FORMAT format,
-                                      LPWSTR buffer, PDWORD len )
+                                      PWSTR buffer, PDWORD len )
 {
     WCHAR name[256];
     DWORD size = sizeof(name);
@@ -816,7 +827,7 @@ DNS_STATUS WINAPI DnsQueryConfig( DNS_CONFIG_TYPE config, DWORD flag, PWSTR adap
 #ifdef HAVE_RESOLV
         LOCK_RESOLVER();
 
-        res_init();
+        initialise_resolver();
         ret = dns_get_serverlist( buffer, len );
 
         UNLOCK_RESOLVER();

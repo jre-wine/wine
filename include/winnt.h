@@ -22,11 +22,17 @@
 #define _WINNT_
 
 #include <basetsd.h>
+#include <guiddef.h>
 
 #ifndef RC_INVOKED
 #include <ctype.h>
 #include <stddef.h>
 #include <string.h>
+#endif
+
+
+#ifdef __cplusplus
+extern "C" {
 #endif
 
 #define NTAPI __stdcall
@@ -318,7 +324,7 @@ typedef VOID           *PVOID64;
 typedef BYTE            BOOLEAN,    *PBOOLEAN;
 typedef char            CHAR,       *PCHAR;
 typedef short           SHORT,      *PSHORT;
-#if defined(_MSC_VER) || (defined(WINE_NO_LONG_AS_INT) && !defined(_WIN64))
+#ifdef _MSC_VER
 typedef long            LONG,       *PLONG;
 #else
 typedef int             LONG,       *PLONG;
@@ -392,10 +398,13 @@ typedef LPCSTR          PCTSTR,      LPCTSTR;
 
 /* Misc common WIN32 types */
 typedef char            CCHAR;
-typedef LONG            HRESULT;
 typedef DWORD           LCID,       *PLCID;
 typedef WORD            LANGID;
 typedef DWORD		EXECUTION_STATE;
+#ifndef _HRESULT_DEFINED
+#define _HRESULT_DEFINED
+typedef LONG            HRESULT;
+#endif
 
 /* Handle type */
 
@@ -592,6 +601,63 @@ typedef struct _SINGLE_LIST_ENTRY {
   struct _SINGLE_LIST_ENTRY *Next;
 } SINGLE_LIST_ENTRY, *PSINGLE_LIST_ENTRY;
 
+#ifdef _WIN64
+
+typedef struct DECLSPEC_ALIGN(16) _SLIST_ENTRY *PSLIST_ENTRY;
+typedef struct DECLSPEC_ALIGN(16) _SLIST_ENTRY {
+    PSLIST_ENTRY Next;
+} SLIST_ENTRY;
+
+typedef union DECLSPEC_ALIGN(16) _SLIST_HEADER {
+    struct {
+        ULONGLONG Alignment;
+        ULONGLONG Region;
+    } DUMMYSTRUCTNAME;
+    struct {
+        ULONGLONG Depth:16;
+        ULONGLONG Sequence:9;
+        ULONGLONG NextEntry:39;
+        ULONGLONG HeaderType:1;
+        ULONGLONG Init:1;
+        ULONGLONG Reserved:59;
+        ULONGLONG Region:3;
+    } Header8;
+    struct {
+        ULONGLONG Depth:16;
+        ULONGLONG Sequence:48;
+        ULONGLONG HeaderType:1;
+        ULONGLONG Init:1;
+        ULONGLONG Reserved:2;
+        ULONGLONG NextEntry:60;
+    } Header16;
+} SLIST_HEADER, *PSLIST_HEADER;
+
+#else
+
+#undef SLIST_ENTRY /* for Mac OS */
+#define SLIST_ENTRY SINGLE_LIST_ENTRY
+#define _SLIST_ENTRY _SINGLE_LIST_ENTRY
+#define PSLIST_ENTRY PSINGLE_LIST_ENTRY
+
+typedef union _SLIST_HEADER {
+    ULONGLONG Alignment;
+    struct {
+        SLIST_ENTRY Next;
+        WORD Depth;
+        WORD Sequence;
+    } DUMMYSTRUCTNAME;
+} SLIST_HEADER, *PSLIST_HEADER;
+
+#endif
+
+PSLIST_ENTRY WINAPI RtlFirstEntrySList(const SLIST_HEADER*);
+VOID         WINAPI RtlInitializeSListHead(PSLIST_HEADER);
+PSLIST_ENTRY WINAPI RtlInterlockedFlushSList(PSLIST_HEADER);
+PSLIST_ENTRY WINAPI RtlInterlockedPopEntrySList(PSLIST_HEADER);
+PSLIST_ENTRY WINAPI RtlInterlockedPushEntrySList(PSLIST_HEADER, PSLIST_ENTRY);
+WORD         WINAPI RtlQueryDepthSList(PSLIST_HEADER);
+
+
 /* Heap flags */
 
 #define HEAP_NO_SERIALIZE               0x00000001
@@ -604,6 +670,7 @@ typedef struct _SINGLE_LIST_ENTRY {
 #define HEAP_DISABLE_COALESCE_ON_FREE   0x00000080
 #define HEAP_CREATE_ALIGN_16            0x00010000
 #define HEAP_CREATE_ENABLE_TRACING      0x00020000
+#define HEAP_CREATE_ENABLE_EXECUTE      0x00040000
 
 /* This flag allows it to create heaps shared by all processes under win95,
    FIXME: correct name */
@@ -2198,6 +2265,9 @@ typedef struct _IMAGE_VXD_HEADER {
 #define	IMAGE_SUBSYSTEM_XBOX			14
 
 /* DLL Characteristics */
+#define IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE          0x0040
+#define IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY       0x0080
+#define IMAGE_DLLCHARACTERISTICS_NX_COMPAT             0x0100
 #define IMAGE_DLLCHARACTERISTICS_NO_ISOLATION          0x0200
 #define IMAGE_DLLCHARACTERISTICS_NO_SEH                0x0400
 #define IMAGE_DLLCHARACTERISTICS_NO_BIND               0x0800
@@ -2592,6 +2662,7 @@ typedef struct _IMAGE_IMPORT_BY_NAME {
 	BYTE	Name[1];
 } IMAGE_IMPORT_BY_NAME,*PIMAGE_IMPORT_BY_NAME;
 
+#include <pshpack8.h>
 /* Import thunk */
 typedef struct _IMAGE_THUNK_DATA64 {
 	union {
@@ -2601,6 +2672,7 @@ typedef struct _IMAGE_THUNK_DATA64 {
 		ULONGLONG AddressOfData;
 	} u1;
 } IMAGE_THUNK_DATA64,*PIMAGE_THUNK_DATA64;
+#include <poppack.h>
 
 typedef struct _IMAGE_THUNK_DATA32 {
 	union {
@@ -2842,6 +2914,25 @@ typedef struct _IMAGE_RELOCATION
 #define IMAGE_REL_IA64_RESERVED_16	0x0016
 #define IMAGE_REL_IA64_ADDEND		0x001F
 
+/* AMD64 relocation types */
+#define IMAGE_REL_AMD64_ABSOLUTE        0x0000
+#define IMAGE_REL_AMD64_ADDR64          0x0001
+#define IMAGE_REL_AMD64_ADDR32          0x0002
+#define IMAGE_REL_AMD64_ADDR32NB        0x0003
+#define IMAGE_REL_AMD64_REL32           0x0004
+#define IMAGE_REL_AMD64_REL32_1         0x0005
+#define IMAGE_REL_AMD64_REL32_2         0x0006
+#define IMAGE_REL_AMD64_REL32_3         0x0007
+#define IMAGE_REL_AMD64_REL32_4         0x0008
+#define IMAGE_REL_AMD64_REL32_5         0x0009
+#define IMAGE_REL_AMD64_SECTION         0x000A
+#define IMAGE_REL_AMD64_SECREL          0x000B
+#define IMAGE_REL_AMD64_SECREL7         0x000C
+#define IMAGE_REL_AMD64_TOKEN           0x000D
+#define IMAGE_REL_AMD64_SREL32          0x000E
+#define IMAGE_REL_AMD64_PAIR            0x000F
+#define IMAGE_REL_AMD64_SSPAN32         0x0010
+
 /* archive format */
 
 #define IMAGE_ARCHIVE_START_SIZE             8
@@ -2863,6 +2954,52 @@ typedef struct _IMAGE_ARCHIVE_MEMBER_HEADER
 } IMAGE_ARCHIVE_MEMBER_HEADER, *PIMAGE_ARCHIVE_MEMBER_HEADER;
 
 #define IMAGE_SIZEOF_ARCHIVE_MEMBER_HDR 60
+
+typedef struct _IMPORT_OBJECT_HEADER
+{
+    WORD     Sig1;
+    WORD     Sig2;
+    WORD     Version;
+    WORD     Machine;
+    DWORD    TimeDateStamp;
+    DWORD    SizeOfData;
+    union
+    {
+        WORD Ordinal;
+        WORD Hint;
+    } DUMMYUNIONNAME;
+    WORD     Type : 2;
+    WORD     NameType : 3;
+    WORD     Reserved : 11;
+} IMPORT_OBJECT_HEADER;
+
+#define IMPORT_OBJECT_HDR_SIG2  0xffff
+
+typedef enum IMPORT_OBJECT_TYPE
+{
+    IMPORT_OBJECT_CODE = 0,
+    IMPORT_OBJECT_DATA = 1,
+    IMPORT_OBJECT_CONST = 2
+} IMPORT_OBJECT_TYPE;
+
+typedef enum IMPORT_OBJECT_NAME_TYPE
+{
+    IMPORT_OBJECT_ORDINAL = 0,
+    IMPORT_OBJECT_NAME = 1,
+    IMPORT_OBJECT_NAME_NO_PREFIX = 2,
+    IMPORT_OBJECT_NAME_UNDECORATE = 3
+} IMPORT_OBJECT_NAME_TYPE;
+
+typedef struct _ANON_OBJECT_HEADER
+{
+    WORD     Sig1;
+    WORD     Sig2;
+    WORD     Version;
+    WORD     Machine;
+    DWORD    TimeDateStamp;
+    CLSID    ClassID;
+    DWORD    SizeOfData;
+} ANON_OBJECT_HEADER;
 
 /*
  * Resource directory stuff
@@ -2987,6 +3124,57 @@ typedef struct _IMAGE_DEBUG_DIRECTORY {
 #define IMAGE_DEBUG_TYPE_OMAP_FROM_SRC  8
 #define IMAGE_DEBUG_TYPE_BORLAND        9
 #define IMAGE_DEBUG_TYPE_RESERVED10    10
+
+typedef enum ReplacesCorHdrNumericDefines
+{
+    COMIMAGE_FLAGS_ILONLY           = 0x00000001,
+    COMIMAGE_FLAGS_32BITREQUIRED    = 0x00000002,
+    COMIMAGE_FLAGS_IL_LIBRARY       = 0x00000004,
+    COMIMAGE_FLAGS_STRONGNAMESIGNED = 0x00000008,
+    COMIMAGE_FLAGS_TRACKDEBUGDATA   = 0x00010000,
+
+    COR_VERSION_MAJOR_V2       = 2,
+    COR_VERSION_MAJOR          = COR_VERSION_MAJOR_V2,
+    COR_VERSION_MINOR          = 0,
+    COR_DELETED_NAME_LENGTH    = 8,
+    COR_VTABLEGAP_NAME_LENGTH  = 8,
+
+    NATIVE_TYPE_MAX_CB = 1,
+    COR_ILMETHOD_SECT_SMALL_MAX_DATASIZE = 0xff,
+
+    IMAGE_COR_MIH_METHODRVA  = 0x01,
+    IMAGE_COR_MIH_EHRVA      = 0x02,
+    IMAGE_COR_MIH_BASICBLOCK = 0x08,
+
+    COR_VTABLE_32BIT             = 0x01,
+    COR_VTABLE_64BIT             = 0x02,
+    COR_VTABLE_FROM_UNMANAGED    = 0x04,
+    COR_VTABLE_CALL_MOST_DERIVED = 0x10,
+
+    IMAGE_COR_EATJ_THUNK_SIZE = 32,
+
+    MAX_CLASS_NAME   = 1024,
+    MAX_PACKAGE_NAME = 1024,
+} ReplacesCorHdrNumericDefines;
+
+typedef struct IMAGE_COR20_HEADER
+{
+    DWORD cb;
+    WORD  MajorRuntimeVersion;
+    WORD  MinorRuntimeVersion;
+
+    IMAGE_DATA_DIRECTORY MetaData;
+    DWORD Flags;
+    DWORD EntryPointToken;
+
+    IMAGE_DATA_DIRECTORY Resources;
+    IMAGE_DATA_DIRECTORY StrongNameSignature;
+    IMAGE_DATA_DIRECTORY CodeManagerTable;
+    IMAGE_DATA_DIRECTORY VTableFixups;
+    IMAGE_DATA_DIRECTORY ExportAddressTableJumps;
+    IMAGE_DATA_DIRECTORY ManagedNativeHeader;
+
+} IMAGE_COR20_HEADER, *PIMAGE_COR20_HEADER;
 
 typedef struct _IMAGE_COFF_SYMBOLS_HEADER {
   DWORD NumberOfSymbols;
@@ -4612,5 +4800,89 @@ ULONGLONG WINAPI VerSetConditionMask(ULONGLONG,DWORD,BYTE);
 #define	VER_LESS_EQUAL				5
 #define	VER_AND					6
 #define	VER_OR					7
+
+typedef struct _ACTIVATION_CONTEXT_DETAILED_INFORMATION {
+    DWORD dwFlags;
+    DWORD ulFormatVersion;
+    DWORD ulAssemblyCount;
+    DWORD ulRootManifestPathType;
+    DWORD ulRootManifestPathChars;
+    DWORD ulRootConfigurationPathType;
+    DWORD ulRootConfigurationPathChars;
+    DWORD ulAppDirPathType;
+    DWORD ulAppDirPathChars;
+    PCWSTR lpRootManifestPath;
+    PCWSTR lpRootConfigurationPath;
+    PCWSTR lpAppDirPath;
+} ACTIVATION_CONTEXT_DETAILED_INFORMATION, *PACTIVATION_CONTEXT_DETAILED_INFORMATION;
+
+typedef struct _ACTIVATION_CONTEXT_ASSEMBLY_DETAILED_INFORMATION {
+    DWORD ulFlags;
+    DWORD ulEncodedAssemblyIdentityLength;
+    DWORD ulManifestPathType;
+    DWORD ulManifestPathLength;
+    LARGE_INTEGER liManifestLastWriteTime;
+    DWORD ulPolicyPathType;
+    DWORD ulPolicyPathLength;
+    LARGE_INTEGER liPolicyLastWriteTime;
+    DWORD ulMetadataSatelliteRosterIndex;
+    DWORD ulManifestVersionMajor;
+    DWORD ulManifestVersionMinor;
+    DWORD ulPolicyVersionMajor;
+    DWORD ulPolicyVersionMinor;
+    DWORD ulAssemblyDirectoryNameLength;
+    PCWSTR lpAssemblyEncodedAssemblyIdentity;
+    PCWSTR lpAssemblyManifestPath;
+    PCWSTR lpAssemblyPolicyPath;
+    PCWSTR lpAssemblyDirectoryName;
+    DWORD  ulFileCount;
+} ACTIVATION_CONTEXT_ASSEMBLY_DETAILED_INFORMATION, *PACTIVATION_CONTEXT_ASSEMBLY_DETAILED_INFORMATION;
+
+typedef struct _ACTIVATION_CONTEXT_QUERY_INDEX {
+    DWORD ulAssemblyIndex;
+    DWORD ulFileIndexInAssembly;
+} ACTIVATION_CONTEXT_QUERY_INDEX, *PACTIVATION_CONTEXT_QUERY_INDEX;
+
+typedef const struct _ACTIVATION_CONTEXT_QUERY_INDEX *PCACTIVATION_CONTEXT_QUERY_INDEX;
+
+typedef struct _ASSEMBLY_FILE_DETAILED_INFORMATION {
+    DWORD ulFlags;
+    DWORD ulFilenameLength;
+    DWORD ulPathLength;
+    PCWSTR lpFileName;
+    PCWSTR lpFilePath;
+} ASSEMBLY_FILE_DETAILED_INFORMATION, *PASSEMBLY_FILE_DETAILED_INFORMATION;
+
+typedef const ASSEMBLY_FILE_DETAILED_INFORMATION *PCASSEMBLY_FILE_DETAILED_INFORMATION;
+
+typedef enum _ACTIVATION_CONTEXT_INFO_CLASS {
+    ActivationContextBasicInformation                       = 1,
+    ActivationContextDetailedInformation                    = 2,
+    AssemblyDetailedInformationInActivationContext          = 3,
+    FileInformationInAssemblyOfAssemblyInActivationContext  = 4,
+    MaxActivationContextInfoClass,
+
+    AssemblyDetailedInformationInActivationContxt          = 3,
+    FileInformationInAssemblyOfAssemblyInActivationContxt  = 4
+} ACTIVATION_CONTEXT_INFO_CLASS;
+
+#define ACTIVATION_CONTEXT_PATH_TYPE_NONE         1
+#define ACTIVATION_CONTEXT_PATH_TYPE_WIN32_FILE   2
+#define ACTIVATION_CONTEXT_PATH_TYPE_URL          3
+#define ACTIVATION_CONTEXT_PATH_TYPE_ASSEMBLYREF  4
+
+#define ACTIVATION_CONTEXT_SECTION_ASSEMBLY_INFORMATION          1
+#define ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION               2
+#define ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION      3
+#define ACTIVATION_CONTEXT_SECTION_COM_SERVER_REDIRECTION        4
+#define ACTIVATION_CONTEXT_SECTION_COM_INTERFACE_REDIRECTION     5
+#define ACTIVATION_CONTEXT_SECTION_COM_TYPE_LIBRARY_REDIRECTION  6
+#define ACTIVATION_CONTEXT_SECTION_COM_PROGID_REDIRECTION        7
+#define ACTIVATION_CONTEXT_SECTION_GLOBAL_OBJECT_RENAME_TABLE    8
+#define ACTIVATION_CONTEXT_SECTION_CLR_SURROGATES                9
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  /* _WINNT_ */

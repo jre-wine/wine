@@ -77,7 +77,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winreg.h"
 #include "wine/wingdi16.h"
 #include "x11drv.h"
 #include "wine/debug.h"
@@ -287,7 +286,6 @@ static WINE_CLIPFORMAT ClipFormats[]  =
 static const WCHAR wszRichTextFormat[] = {'R','i','c','h',' ','T','e','x','t',' ','F','o','r','m','a','t',0};
 static const WCHAR wszGIF[] = {'G','I','F',0};
 static const WCHAR wszHTMLFormat[] = {'H','T','M','L',' ','F','o','r','m','a','t',0};
-static const WCHAR wszRICHHTMLFormat[] = {'H','T','M','L',' ','F','o','r','m','a','t',0};
 static const struct
 {
     LPCWSTR lpszFormat;
@@ -298,18 +296,6 @@ static const struct
     { wszRichTextFormat, XATOM_text_richtext },
     { wszGIF, XATOM_image_gif },
     { wszHTMLFormat, XATOM_text_html },
-};
-
-
-/* Maps equivalent X properties. It is assumed that lpszProperty must already 
-   be in ClipFormats or PropertyFormatMap. */
-static const struct
-{
-    UINT drvDataProperty;
-    UINT drvDataAlias;
-} PropertyAliasMap[] =
-{
-    /* DataProperty,     DataAlias */
 };
 
 
@@ -511,7 +497,8 @@ static WINE_CLIPFORMAT *X11DRV_CLIPBOARD_InsertClipboardFormat(LPCWSTR FormatNam
 {
     LPWINE_CLIPFORMAT lpFormat;
     LPWINE_CLIPFORMAT lpNewFormat;
-   
+    LPWSTR new_name;
+
     /* allocate storage for new format entry */
     lpNewFormat = HeapAlloc(GetProcessHeap(), 0, sizeof(WINE_CLIPFORMAT));
 
@@ -521,14 +508,14 @@ static WINE_CLIPFORMAT *X11DRV_CLIPBOARD_InsertClipboardFormat(LPCWSTR FormatNam
         return NULL;
     }
 
-    if (!(lpNewFormat->Name = HeapAlloc(GetProcessHeap(), 0, (strlenW(FormatName)+1)*sizeof(WCHAR))))
+    if (!(new_name = HeapAlloc(GetProcessHeap(), 0, (strlenW(FormatName)+1)*sizeof(WCHAR))))
     {
         WARN("No more memory for the new format name!\n");
         HeapFree(GetProcessHeap(), 0, lpNewFormat);
         return NULL;
     }
 
-    strcpyW((LPWSTR)lpNewFormat->Name, FormatName);
+    lpNewFormat->Name = strcpyW(new_name, FormatName);
     lpNewFormat->wFlags = 0;
     lpNewFormat->wFormatID = GlobalAddAtomW(lpNewFormat->Name);
     lpNewFormat->drvData = prop;
@@ -1037,7 +1024,7 @@ static BOOL X11DRV_CLIPBOARD_RenderSynthesizedText(UINT wFormatID)
  *
  * Renders synthesized DIB
  */
-static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB()
+static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB(void)
 {
     BOOL bret = FALSE;
     LPWINE_CLIPDATA lpSource = NULL;
@@ -1079,7 +1066,7 @@ static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB()
  *
  * Renders synthesized bitmap
  */
-static BOOL X11DRV_CLIPBOARD_RenderSynthesizedBitmap()
+static BOOL X11DRV_CLIPBOARD_RenderSynthesizedBitmap(void)
 {
     BOOL bret = FALSE;
     LPWINE_CLIPDATA lpSource = NULL;

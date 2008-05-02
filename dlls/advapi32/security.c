@@ -27,7 +27,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "rpcnterr.h"
 #include "winreg.h"
 #include "winternl.h"
 #include "winioctl.h"
@@ -86,7 +85,7 @@ static const WELLKNOWNSID WellKnownSids[] =
     { {'C','G'}, WinCreatorGroupSid, { SID_REVISION, 1, { SECURITY_CREATOR_SID_AUTHORITY }, { SECURITY_CREATOR_GROUP_RID } } },
     { {0,0}, WinCreatorOwnerServerSid, { SID_REVISION, 1, { SECURITY_CREATOR_SID_AUTHORITY }, { SECURITY_CREATOR_OWNER_SERVER_RID } } },
     { {0,0}, WinCreatorGroupServerSid, { SID_REVISION, 1, { SECURITY_CREATOR_SID_AUTHORITY }, { SECURITY_CREATOR_GROUP_SERVER_RID } } },
-    { {0,0}, WinNtAuthoritySid, { SID_REVISION, 0, { SECURITY_NT_AUTHORITY }, { } } },
+    { {0,0}, WinNtAuthoritySid, { SID_REVISION, 0, { SECURITY_NT_AUTHORITY }, { SECURITY_NULL_RID } } },
     { {0,0}, WinDialupSid, { SID_REVISION, 1, { SECURITY_NT_AUTHORITY }, { SECURITY_DIALUP_RID } } },
     { {'N','U'}, WinNetworkSid, { SID_REVISION, 1, { SECURITY_NT_AUTHORITY }, { SECURITY_NETWORK_RID } } },
     { {0,0}, WinBatchSid, { SID_REVISION, 1, { SECURITY_NT_AUTHORITY }, { SECURITY_BATCH_RID } } },
@@ -1746,64 +1745,18 @@ GetFileSecurityW( LPCWSTR lpFileName,
                     PSECURITY_DESCRIPTOR pSecurityDescriptor,
                     DWORD nLength, LPDWORD lpnLengthNeeded )
 {
-    DWORD		nNeeded;
-    LPBYTE	pBuffer;
-    DWORD		iLocNow;
-    SECURITY_DESCRIPTOR_RELATIVE *pSDRelative;
+    HANDLE hfile;
+    NTSTATUS status;
 
-    if(INVALID_FILE_ATTRIBUTES == GetFileAttributesW(lpFileName))
+    hfile = CreateFileW( lpFileName, GENERIC_READ, FILE_SHARE_READ,
+                         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0 );
+    if ( hfile == INVALID_HANDLE_VALUE )
         return FALSE;
 
-    FIXME("(%s) : returns fake SECURITY_DESCRIPTOR\n", debugstr_w(lpFileName) );
-
-    nNeeded = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
-    if (RequestedInformation & OWNER_SECURITY_INFORMATION)
-	nNeeded += sizeof(sidWorld);
-    if (RequestedInformation & GROUP_SECURITY_INFORMATION)
-	nNeeded += sizeof(sidWorld);
-    if (RequestedInformation & DACL_SECURITY_INFORMATION)
-	nNeeded += WINE_SIZE_OF_WORLD_ACCESS_ACL;
-    if (RequestedInformation & SACL_SECURITY_INFORMATION)
-	nNeeded += WINE_SIZE_OF_WORLD_ACCESS_ACL;
-
-    *lpnLengthNeeded = nNeeded;
-
-    if (nNeeded > nLength)
-	    return TRUE;
-
-    if (!InitializeSecurityDescriptor(pSecurityDescriptor, SECURITY_DESCRIPTOR_REVISION))
-	return FALSE;
-
-    pSDRelative = (PISECURITY_DESCRIPTOR_RELATIVE) pSecurityDescriptor;
-    pSDRelative->Control |= SE_SELF_RELATIVE;
-    pBuffer = (LPBYTE) pSDRelative;
-    iLocNow = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
-
-    if (RequestedInformation & OWNER_SECURITY_INFORMATION)
-    {
-	memcpy(pBuffer + iLocNow, &sidWorld, sizeof(sidWorld));
-	pSDRelative->Owner = iLocNow;
-	iLocNow += sizeof(sidWorld);
-    }
-    if (RequestedInformation & GROUP_SECURITY_INFORMATION)
-    {
-	memcpy(pBuffer + iLocNow, &sidWorld, sizeof(sidWorld));
-	pSDRelative->Group = iLocNow;
-	iLocNow += sizeof(sidWorld);
-    }
-    if (RequestedInformation & DACL_SECURITY_INFORMATION)
-    {
-	GetWorldAccessACL((PACL) (pBuffer + iLocNow));
-	pSDRelative->Dacl = iLocNow;
-	iLocNow += WINE_SIZE_OF_WORLD_ACCESS_ACL;
-    }
-    if (RequestedInformation & SACL_SECURITY_INFORMATION)
-    {
-	GetWorldAccessACL((PACL) (pBuffer + iLocNow));
-	pSDRelative->Sacl = iLocNow;
-	/* iLocNow += WINE_SIZE_OF_WORLD_ACCESS_ACL; */
-    }
-    return TRUE;
+    status = NtQuerySecurityObject( hfile, RequestedInformation, pSecurityDescriptor,
+                                    nLength, lpnLengthNeeded );
+    CloseHandle( hfile );
+    return set_ntstatus( status );
 }
 
 
@@ -2911,7 +2864,8 @@ DWORD WINAPI SetEntriesInAclA( ULONG count, PEXPLICIT_ACCESSA pEntries,
                                PACL OldAcl, PACL* NewAcl )
 {
     FIXME("%d %p %p %p\n",count,pEntries,OldAcl,NewAcl);
-    return ERROR_CALL_NOT_IMPLEMENTED;
+    *NewAcl = NULL;
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************
@@ -2921,7 +2875,8 @@ DWORD WINAPI SetEntriesInAclW( ULONG count, PEXPLICIT_ACCESSW pEntries,
                                PACL OldAcl, PACL* NewAcl )
 {
     FIXME("%d %p %p %p\n",count,pEntries,OldAcl,NewAcl);
-    return ERROR_CALL_NOT_IMPLEMENTED;
+    *NewAcl = NULL;
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************
@@ -3170,10 +3125,10 @@ static DWORD ParseAceStringRights(LPCWSTR* StringAcl)
 	while (*p && *p != ';')
             p++;
 
-	if (p - szAcl <= 8)
+	if (p - szAcl <= 10 /* 8 hex digits + "0x" */ )
 	{
 	    rights = strtoulW(szAcl, NULL, 16);
-	    *StringAcl = p;
+	    szAcl = p;
 	}
 	else
             WARN("Invalid rights string format: %s\n", debugstr_wn(szAcl, p - szAcl));
@@ -3223,7 +3178,7 @@ static BOOL ParseStringAclToAcl(LPCWSTR StringAcl, LPDWORD lpdwFlags,
 	return FALSE;
 
     if (pAcl) /* pAce is only useful if we're setting values */
-        pAce = (PACCESS_ALLOWED_ACE) ((LPBYTE)pAcl + sizeof(PACL));
+        pAce = (PACCESS_ALLOWED_ACE) (pAcl + 1);
 
     /* Parse ACL flags */
     *lpdwFlags = ParseAclStringFlags(&StringAcl);
@@ -3311,7 +3266,7 @@ static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
     LPBYTE lpNext = NULL;
     DWORD len;
 
-    *cBytes = 0;
+    *cBytes = sizeof(SECURITY_DESCRIPTOR);
 
     if (SecurityDescriptor)
         lpNext = ((LPBYTE) SecurityDescriptor) + sizeof(SECURITY_DESCRIPTOR);
@@ -3496,6 +3451,7 @@ BOOL WINAPI ConvertStringSecurityDescriptorToSecurityDescriptorW(
 
     psd = *SecurityDescriptor = (SECURITY_DESCRIPTOR*) LocalAlloc(
         GMEM_ZEROINIT, cBytes);
+    if (!psd) goto lend;
 
     psd->Revision = SID_REVISION;
     psd->Control |= SE_SELF_RELATIVE;
@@ -3715,6 +3671,9 @@ BOOL WINAPI CreateProcessAsUserW(
     return TRUE;
 }
 
+/******************************************************************************
+ * DuplicateTokenEx [ADVAPI32.@]
+ */
 BOOL WINAPI DuplicateTokenEx(
         HANDLE ExistingTokenHandle, DWORD dwDesiredAccess,
         LPSECURITY_ATTRIBUTES lpTokenAttributes,
@@ -3785,9 +3744,7 @@ BOOL WINAPI EnumDependentServicesW(
  */
 static DWORD ComputeStringSidSize(LPCWSTR StringSid)
 {
-    DWORD size = sizeof(SID);
-
-    if (StringSid[0] == 'S' && StringSid[1] == '-') /* S-R-I-S-S */
+    if (StringSid[0] == 'S' && StringSid[1] == '-') /* S-R-I(-S)+ */
     {
         int ctok = 0;
         while (*StringSid)
@@ -3797,8 +3754,8 @@ static DWORD ComputeStringSidSize(LPCWSTR StringSid)
             StringSid++;
         }
 
-        if (ctok > 3)
-            size += (ctok - 3) * sizeof(DWORD);
+        if (ctok >= 3)
+            return GetSidLengthRequired(ctok - 2);
     }
     else /* String constant format  - Only available in winxp and above */
     {
@@ -3806,10 +3763,10 @@ static DWORD ComputeStringSidSize(LPCWSTR StringSid)
 
         for (i = 0; i < sizeof(WellKnownSids)/sizeof(WellKnownSids[0]); i++)
             if (!strncmpW(WellKnownSids[i].wstr, StringSid, 2))
-                size += (WellKnownSids[i].Sid.SubAuthorityCount - 1) * sizeof(DWORD);
+                return GetSidLengthRequired(WellKnownSids[i].Sid.SubAuthorityCount);
     }
 
-    return size;
+    return GetSidLengthRequired(0);
 }
 
 /******************************************************************************
@@ -3838,7 +3795,7 @@ static BOOL ParseStringSidToSid(LPCWSTR StringSid, PSID pSid, LPDWORD cBytes)
     if (StringSid[0] == 'S' && StringSid[1] == '-') /* S-R-I-S-S */
     {
         DWORD i = 0, identAuth;
-        DWORD csubauth = ((*cBytes - sizeof(SID)) / sizeof(DWORD)) + 1;
+        DWORD csubauth = ((*cBytes - GetSidLengthRequired(0)) / sizeof(DWORD));
 
         StringSid += 2; /* Advance to Revision */
         pisid->Revision = atoiW(StringSid);
@@ -3993,32 +3950,38 @@ DWORD WINAPI GetNamedSecurityInfoW( LPWSTR name, SE_OBJECT_TYPE type,
     buffer = (BYTE *)relative;
     offset = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
 
-    if (owner && (info & OWNER_SECURITY_INFORMATION))
+    if (info & OWNER_SECURITY_INFORMATION)
     {
         memcpy( buffer + offset, &sidWorld, sizeof(sidWorld) );
         relative->Owner = offset;
-        *owner = buffer + offset;
+        if (owner)
+            *owner = buffer + offset;
         offset += sizeof(sidWorld);
     }
-    if (group && (info & GROUP_SECURITY_INFORMATION))
+    if (info & GROUP_SECURITY_INFORMATION)
     {
         memcpy( buffer + offset, &sidWorld, sizeof(sidWorld) );
         relative->Group = offset;
-        *group = buffer + offset;
+        if (group)
+            *group = buffer + offset;
         offset += sizeof(sidWorld);
     }
-    if (dacl && (info & DACL_SECURITY_INFORMATION))
+    if (info & DACL_SECURITY_INFORMATION)
     {
+        relative->Control |= SE_DACL_PRESENT;
         GetWorldAccessACL( (PACL)(buffer + offset) );
         relative->Dacl = offset;
-        *dacl = (PACL)(buffer + offset);
+        if (dacl)
+            *dacl = (PACL)(buffer + offset);
         offset += WINE_SIZE_OF_WORLD_ACCESS_ACL;
     }
-    if (sacl && (info & SACL_SECURITY_INFORMATION))
+    if (info & SACL_SECURITY_INFORMATION)
     {
+        relative->Control |= SE_SACL_PRESENT;
         GetWorldAccessACL( (PACL)(buffer + offset) );
         relative->Sacl = offset;
-        *sacl = (PACL)(buffer + offset);
+        if (sacl)
+            *sacl = (PACL)(buffer + offset);
     }
     return ERROR_SUCCESS;
 }
