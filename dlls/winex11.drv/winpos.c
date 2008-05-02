@@ -403,10 +403,13 @@ BOOL X11DRV_SetWindowPos( HWND hwnd, HWND insert_after, const RECT *rectWindow,
                     TRACE( "mapping non zero size or off-screen win %p\n", hwnd );
                     mapped = TRUE;
                 }
+
+                if (mapped || (swp_flags & SWP_FRAMECHANGED))
+                    X11DRV_set_wm_hints( display, data );
+
                 if (mapped)
                 {
                     X11DRV_sync_window_style( display, data );
-                    X11DRV_set_wm_hints( display, data );
                     wine_tsx11_lock();
                     XMapWindow( display, data->whole_window );
                     XFlush( display );
@@ -1164,10 +1167,37 @@ static void set_movesize_capture( HWND hwnd )
  *  http://freedesktop.org/Standards/wm-spec/1.3/ar01s04.html
  *  or search for "_NET_WM_MOVERESIZE"
  */
-static void X11DRV_WMMoveResizeWindow( HWND hwnd, int x, int y, int dir )
+static BOOL X11DRV_WMMoveResizeWindow( HWND hwnd, int x, int y, WPARAM wparam )
 {
+    WPARAM syscommand = wparam & 0xfff0;
+    WPARAM hittest = wparam & 0x0f;
+    int dir;
     XEvent xev;
     Display *display = thread_display();
+
+    if (syscommand == SC_MOVE)
+    {
+        if (!hittest) dir = _NET_WM_MOVERESIZE_MOVE_KEYBOARD;
+        else dir = _NET_WM_MOVERESIZE_MOVE;
+    }
+    else
+    {
+        /* windows without WS_THICKFRAME are not resizable through the window manager */
+        if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_THICKFRAME)) return FALSE;
+
+        switch (hittest)
+        {
+        case WMSZ_LEFT:        dir = _NET_WM_MOVERESIZE_SIZE_LEFT; break;
+        case WMSZ_RIGHT:       dir = _NET_WM_MOVERESIZE_SIZE_RIGHT; break;
+        case WMSZ_TOP:         dir = _NET_WM_MOVERESIZE_SIZE_TOP; break;
+        case WMSZ_TOPLEFT:     dir = _NET_WM_MOVERESIZE_SIZE_TOPLEFT; break;
+        case WMSZ_TOPRIGHT:    dir = _NET_WM_MOVERESIZE_SIZE_TOPRIGHT; break;
+        case WMSZ_BOTTOM:      dir = _NET_WM_MOVERESIZE_SIZE_BOTTOM; break;
+        case WMSZ_BOTTOMLEFT:  dir = _NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT; break;
+        case WMSZ_BOTTOMRIGHT: dir = _NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT; break;
+        default:               dir = _NET_WM_MOVERESIZE_SIZE_KEYBOARD; break;
+        }
+    }
 
     TRACE("hwnd %p, x %d, y %d, dir %d\n", hwnd, x, y, dir);
 
@@ -1190,6 +1220,7 @@ static void X11DRV_WMMoveResizeWindow( HWND hwnd, int x, int y, int dir )
     XUngrabPointer( display, CurrentTime );
     XSendEvent(display, root_window, False, SubstructureNotifyMask, &xev);
     wine_tsx11_unlock();
+    return TRUE;
 }
 
 /***********************************************************************
@@ -1213,10 +1244,8 @@ void X11DRV_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
     BOOL    iconic = style & WS_MINIMIZE;
     BOOL    moved = FALSE;
     DWORD     dwPoint = GetMessagePos ();
-    BOOL DragFullWindows = FALSE;
-    BOOL grab;
+    BOOL DragFullWindows = TRUE;
     Window parent_win, whole_win;
-    Display *old_gdi_display = NULL;
     struct x11drv_thread_data *thread_data = x11drv_thread_data();
     struct x11drv_win_data *data;
 
@@ -1232,35 +1261,7 @@ void X11DRV_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
           hwnd, data->managed ? "" : "NOT ", syscommand, hittest, pt.x, pt.y);
 
     /* if we are managed then we let the WM do all the work */
-    if (data->managed)
-    {
-        int dir;
-        if (syscommand == SC_MOVE)
-        {
-            if (!hittest) dir = _NET_WM_MOVERESIZE_MOVE_KEYBOARD;
-            else dir = _NET_WM_MOVERESIZE_MOVE;
-        }
-        else if (!hittest) dir = _NET_WM_MOVERESIZE_SIZE_KEYBOARD;
-        else
-            switch (hittest)
-            {
-            case WMSZ_LEFT:        dir = _NET_WM_MOVERESIZE_SIZE_LEFT; break;
-            case WMSZ_RIGHT:       dir = _NET_WM_MOVERESIZE_SIZE_RIGHT; break;
-            case WMSZ_TOP:         dir = _NET_WM_MOVERESIZE_SIZE_TOP; break;
-            case WMSZ_TOPLEFT:     dir = _NET_WM_MOVERESIZE_SIZE_TOPLEFT; break;
-            case WMSZ_TOPRIGHT:    dir = _NET_WM_MOVERESIZE_SIZE_TOPRIGHT; break;
-            case WMSZ_BOTTOM:      dir = _NET_WM_MOVERESIZE_SIZE_BOTTOM; break;
-            case WMSZ_BOTTOMLEFT:  dir = _NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT; break;
-            case WMSZ_BOTTOMRIGHT: dir = _NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT; break;
-            default:
-                ERR("Invalid hittest value: %d\n", hittest);
-                dir = _NET_WM_MOVERESIZE_SIZE_KEYBOARD;
-            }
-        X11DRV_WMMoveResizeWindow( hwnd, pt.x, pt.y, dir );
-        return;
-    }
-
-    SystemParametersInfoA(SPI_GETDRAGFULLWINDOWS, 0, &DragFullWindows, 0);
+    if (data->managed && X11DRV_WMMoveResizeWindow( hwnd, pt.x, pt.y, wParam )) return;
 
     if (syscommand == SC_MOVE)
     {
@@ -1339,20 +1340,11 @@ void X11DRV_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
     SendMessageW( hwnd, WM_ENTERSIZEMOVE, 0, 0 );
     set_movesize_capture( hwnd );
 
-    /* grab the server only when moving top-level windows without desktop */
-    grab = (!DragFullWindows && !parent && (root_window == DefaultRootWindow(gdi_display)));
+    /* we only allow disabling the full window drag for child windows, or in desktop mode */
+    /* otherwise we'd need to grab the server and we want to avoid that */
+    if (parent || (root_window != DefaultRootWindow(gdi_display)))
+        SystemParametersInfoA(SPI_GETDRAGFULLWINDOWS, 0, &DragFullWindows, 0);
 
-    if (grab)
-    {
-        wine_tsx11_lock();
-        XSync( gdi_display, False );
-        XGrabServer( thread_data->display );
-        XSync( thread_data->display, False );
-        /* switch gdi display to the thread display, since the server is grabbed */
-        old_gdi_display = gdi_display;
-        gdi_display = thread_data->display;
-        wine_tsx11_unlock();
-    }
     whole_win = X11DRV_get_whole_window( GetAncestor(hwnd,GA_ROOT) );
     parent_win = parent ? X11DRV_get_whole_window( GetAncestor(parent,GA_ROOT) ) : root_window;
 
@@ -1462,13 +1454,6 @@ void X11DRV_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
 
     wine_tsx11_lock();
     XUngrabPointer( thread_data->display, CurrentTime );
-    if (grab)
-    {
-        XSync( thread_data->display, False );
-        XUngrabServer( thread_data->display );
-        XSync( thread_data->display, False );
-        gdi_display = old_gdi_display;
-    }
     wine_tsx11_unlock();
     thread_data->grab_window = None;
 

@@ -108,24 +108,15 @@ CONST SHADER_OPCODE IWineD3DVertexShaderImpl_shader_ins[] = {
     {WINED3DSIO_DST,    "dst",  "DST", 1, 3, vshader_hw_map2gl,   shader_glsl_dst, 0, 0},
     {WINED3DSIO_LRP,    "lrp",  "LRP", 1, 4, NULL,                shader_glsl_lrp, 0, 0},
     {WINED3DSIO_FRC,    "frc",  "FRC", 1, 2, vshader_hw_map2gl,   shader_glsl_map2gl, 0, 0},
-    {WINED3DSIO_POW,    "pow",  "POW", 1, 3, NULL,                shader_glsl_pow, 0, 0},
-    {WINED3DSIO_CRS,    "crs",  "XPS", 1, 3, NULL,                shader_glsl_cross, 0, 0},
+    {WINED3DSIO_POW,    "pow",  "POW", 1, 3, vshader_hw_map2gl,   shader_glsl_pow, 0, 0},
+    {WINED3DSIO_CRS,    "crs",  "XPD", 1, 3, vshader_hw_map2gl,   shader_glsl_cross, 0, 0},
     /* TODO: sng can possibly be performed a  s
         RCP tmp, vec
         MUL out, tmp, vec*/
     {WINED3DSIO_SGN,  "sgn",  NULL,  1, 2, NULL,                shader_glsl_map2gl, 0, 0},
-    /* TODO: xyz normalise can be performed as VS_ARB using one temporary register,
-        DP3 tmp , vec, vec;
-        RSQ tmp, tmp.x;
-        MUL vec.xyz, vec, tmp;
-    but I think this is better because it accounts for w properly.
-        DP3 tmp , vec, vec;
-        RSQ tmp, tmp.x;
-        MUL vec, vec, tmp;
-    */
-    {WINED3DSIO_NRM,    "nrm",      NULL, 1, 2, NULL, shader_glsl_map2gl, 0, 0},
-    {WINED3DSIO_SINCOS, "sincos",   NULL, 1, 4, NULL, shader_glsl_sincos, WINED3DVS_VERSION(2,0), WINED3DVS_VERSION(2,1)},
-    {WINED3DSIO_SINCOS, "sincos",   NULL, 1, 2, NULL, shader_glsl_sincos, WINED3DVS_VERSION(3,0), -1},
+    {WINED3DSIO_NRM,    "nrm",      NULL, 1, 2, shader_hw_nrm, shader_glsl_map2gl, 0, 0},
+    {WINED3DSIO_SINCOS, "sincos",   NULL, 1, 4, shader_hw_sincos, shader_glsl_sincos, WINED3DVS_VERSION(2,0), WINED3DVS_VERSION(2,1)},
+    {WINED3DSIO_SINCOS, "sincos",  "SCS", 1, 2, shader_hw_sincos, shader_glsl_sincos, WINED3DVS_VERSION(3,0), -1},
     /* Matrix */
     {WINED3DSIO_M4x4,   "m4x4", "undefined", 1, 3, vshader_hw_mnxn, shader_glsl_mnxn, 0, 0},
     {WINED3DSIO_M4x3,   "m4x3", "undefined", 1, 3, vshader_hw_mnxn, shader_glsl_mnxn, 0, 0},
@@ -381,6 +372,11 @@ static VOID IWineD3DVertexShaderImpl_GenerateShader(
         if (GL_VEND(MESA) || GL_VEND(WINE))
             This->baseShader.limits.constant_float = 
                 min(95, This->baseShader.limits.constant_float);
+
+        /* Some instructions need a temporary register. Add it if needed, but only if it is really needed */
+        if(reg_maps->usesnrm) {
+            shader_addline(&buffer, "TEMP TMP;\n");
+        }
 
         /* Base Declarations */
         shader_generate_arb_declarations( (IWineD3DBaseShader*) This, reg_maps, &buffer, &GLINFO_LOCATION);

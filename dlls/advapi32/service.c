@@ -39,6 +39,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(advapi);
 
+static const WCHAR szLocalSystem[] = {'L','o','c','a','l','S','y','s','t','e','m',0};
 static const WCHAR szServiceManagerKey[] = { 'S','y','s','t','e','m','\\',
       'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
       'S','e','r','v','i','c','e','s',0 };
@@ -1342,6 +1343,9 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
         return NULL;
     }
 
+    if (!lpServiceStartName && (dwServiceType & SERVICE_WIN32))
+            lpServiceStartName = szLocalSystem;
+
     /* StartType can only be a single value (if several values are mixed the result is probably not what was intended) */
     if (dwStartType > SERVICE_DISABLED)
     {
@@ -2227,49 +2231,40 @@ BOOL WINAPI QueryServiceLockStatusW( SC_HANDLE hSCManager,
 BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
   LPSTR lpDisplayName, LPDWORD lpcchBuffer)
 {
-    LPWSTR lpServiceNameW, lpDisplayNameW = NULL;
-    DWORD size, sizeW, GLE;
-    BOOL ret;
+    LPWSTR lpServiceNameW, lpDisplayNameW;
+    DWORD sizeW;
+    BOOL ret = FALSE;
 
     TRACE("%p %s %p %p\n", hSCManager,
           debugstr_a(lpServiceName), lpDisplayName, lpcchBuffer);
 
     lpServiceNameW = SERV_dup(lpServiceName);
-    lpDisplayNameW = HeapAlloc(GetProcessHeap(), 0, *lpcchBuffer * sizeof(WCHAR));
+    if (lpDisplayName)
+        lpDisplayNameW = HeapAlloc(GetProcessHeap(), 0, *lpcchBuffer * sizeof(WCHAR));
+    else
+        lpDisplayNameW = NULL;
 
-    size = sizeW = *lpcchBuffer;
-    ret = GetServiceDisplayNameW(hSCManager, lpServiceNameW,
-                                 lpDisplayName ? lpDisplayNameW : NULL,
-                                 &sizeW);
-    /* Last error will be set by GetServiceDisplayNameW and must be preserved */
-    GLE = GetLastError();
-
-    if (!lpDisplayName && *lpcchBuffer && !ret && (GLE == ERROR_INSUFFICIENT_BUFFER))
+    sizeW = *lpcchBuffer;
+    if (!GetServiceDisplayNameW(hSCManager, lpServiceNameW, lpDisplayNameW, &sizeW))
     {
-        /* Request for buffersize.
-         *
-         * Only set the size for ERROR_INSUFFICIENT_BUFFER
-         */
-        size = sizeW * 2;
-    }
-    else if (lpDisplayName && *lpcchBuffer && !ret)
-    {
-        /* Request for displayname.
-         *
-         * size only has to be set if this fails
-         */
-        size = sizeW * 2;
+        *lpcchBuffer = sizeW*2;  /* we can only provide an upper estimation of string length */
+        goto cleanup;
     }
 
-    WideCharToMultiByte(CP_ACP, 0, lpDisplayNameW, (sizeW + 1), lpDisplayName,
-                        *lpcchBuffer, NULL, NULL );
+    if (!WideCharToMultiByte(CP_ACP, 0, lpDisplayNameW, (sizeW + 1), lpDisplayName,
+                        *lpcchBuffer, NULL, NULL ))
+    {
+        *lpcchBuffer = WideCharToMultiByte(CP_ACP, 0, lpDisplayNameW, -1, NULL, 0, NULL, NULL);
+        goto cleanup;
+    }
 
-    *lpcchBuffer = size;
+    /* probably due to a bug GetServiceDisplayNameA doesn't modify lpcchBuffer on success.
+     * (but if the function succeeded it means that is a good upper estimation of the size) */
+    ret = TRUE;
 
+cleanup:
     HeapFree(GetProcessHeap(), 0, lpDisplayNameW);
     HeapFree(GetProcessHeap(), 0, lpServiceNameW);
-
-    SetLastError(GLE);
     return ret;
 }
 
@@ -2319,7 +2314,7 @@ BOOL WINAPI GetServiceDisplayNameW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
 
             if (!RegOpenKeyW(hscm->hkey, lpServiceName, &hkey))
             {
-                INT len = lstrlenW(lpServiceName);
+                UINT len = lstrlenW(lpServiceName);
                 BOOL r = FALSE;
 
                 if ((*lpcchBuffer <= len) || (!lpDisplayName && *lpcchBuffer))
@@ -2538,17 +2533,26 @@ BOOL WINAPI QueryServiceObjectSecurity(SC_HANDLE hService,
        PSECURITY_DESCRIPTOR lpSecurityDescriptor,
        DWORD cbBufSize, LPDWORD pcbBytesNeeded)
 {
-    PACL pACL = NULL;
+    SECURITY_DESCRIPTOR descriptor;
+    DWORD size;
+    BOOL succ;
+    ACL acl;
 
-    FIXME("%p %d %p %u %p\n", hService, dwSecurityInformation,
+    FIXME("%p %d %p %u %p - semi-stub\n", hService, dwSecurityInformation,
           lpSecurityDescriptor, cbBufSize, pcbBytesNeeded);
 
-    InitializeSecurityDescriptor(lpSecurityDescriptor, SECURITY_DESCRIPTOR_REVISION);
+    if (dwSecurityInformation != DACL_SECURITY_INFORMATION)
+        FIXME("information %d not supported\n", dwSecurityInformation);
 
-    pACL = HeapAlloc( GetProcessHeap(), 0, sizeof(ACL) );
-    InitializeAcl(pACL, sizeof(ACL), ACL_REVISION);
-    SetSecurityDescriptorDacl(lpSecurityDescriptor, TRUE, pACL, TRUE);
-    return TRUE;
+    InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION);
+
+    InitializeAcl(&acl, sizeof(ACL), ACL_REVISION);
+    SetSecurityDescriptorDacl(&descriptor, TRUE, &acl, TRUE);
+
+    size = cbBufSize;
+    succ = MakeSelfRelativeSD(&descriptor, lpSecurityDescriptor, &size);
+    *pcbBytesNeeded = size;
+    return succ;
 }
 
 /******************************************************************************

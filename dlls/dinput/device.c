@@ -32,6 +32,7 @@
 #include "wine/unicode.h"
 #include "windef.h"
 #include "winbase.h"
+#include "winreg.h"
 #include "winuser.h"
 #include "winerror.h"
 #include "dinput.h"
@@ -214,6 +215,56 @@ void _dump_DIDATAFORMAT(const DIDATAFORMAT *df) {
 	TRACE("        "); _dump_EnumObjects_flags(df->rgodf[i].dwType); TRACE("\n");
         TRACE("      * dwFlags: 0x%08x\n", df->rgodf[i].dwFlags);
     }
+}
+
+/******************************************************************************
+ * Get the default and the app-specific config keys.
+ */
+BOOL get_app_key(HKEY *defkey, HKEY *appkey)
+{
+    char buffer[MAX_PATH+16];
+    DWORD len;
+
+    *appkey = 0;
+
+    /* @@ Wine registry key: HKCU\Software\Wine\DirectInput */
+    if (RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\DirectInput", defkey))
+        *defkey = 0;
+
+    len = GetModuleFileNameA(0, buffer, MAX_PATH);
+    if (len && len < MAX_PATH)
+    {
+        HKEY tmpkey;
+
+        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\DirectInput */
+        if (!RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey))
+        {
+            char *p, *appname = buffer;
+            if ((p = strrchr(appname, '/'))) appname = p + 1;
+            if ((p = strrchr(appname, '\\'))) appname = p + 1;
+            strcat(appname, "\\DirectInput");
+
+            if (RegOpenKeyA(tmpkey, appname, appkey)) appkey = 0;
+            RegCloseKey(tmpkey);
+        }
+    }
+
+    return *defkey || *appkey;
+}
+
+/******************************************************************************
+ * Get a config key from either the app-specific or the default config
+ */
+DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
+                             char *buffer, DWORD size )
+{
+    if (appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE)buffer, &size ))
+        return 0;
+
+    if (defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE)buffer, &size ))
+        return 0;
+
+    return ERROR_FILE_NOT_FOUND;
 }
 
 /* Conversion between internal data buffer and external data buffer */

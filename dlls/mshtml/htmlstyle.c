@@ -48,10 +48,23 @@ typedef struct {
 
 static const WCHAR attrBackgroundColor[] =
     {'b','a','c','k','g','r','o','u','n','d','-','c','o','l','o','r',0};
+static const WCHAR attrColor[] =
+    {'c','o','l','o','r',0};
 static const WCHAR attrFontFamily[] =
     {'f','o','n','t','-','f','a','m','i','l','y',0};
 static const WCHAR attrFontSize[] =
     {'f','o','n','t','-','s','i','z','e',0};
+static const WCHAR attrFontStyle[] =
+    {'f','o','n','t','-','s','t','y','l','e',0};
+static const WCHAR attrFontWeight[] =
+    {'f','o','n','t','-','w','e','i','g','h','t',0};
+static const WCHAR attrTextDecoration[] =
+    {'t','e','x','t','-','d','e','c','o','r','a','t','i','o','n',0};
+
+static const WCHAR valLineThrough[] =
+    {'l','i','n','e','-','t','h','r','o','u','g','h',0};
+static const WCHAR valUnderline[] =
+    {'u','n','d','e','r','l','i','n','e',0};
 
 static HRESULT set_style_attr(HTMLStyle *This, LPCWSTR name, LPCWSTR value)
 {
@@ -77,27 +90,56 @@ static HRESULT set_style_attr(HTMLStyle *This, LPCWSTR name, LPCWSTR value)
     return S_OK;
 }
 
-static HRESULT get_style_attr(HTMLStyle *This, LPCWSTR name, BSTR *p)
+static HRESULT get_style_attr_nsval(HTMLStyle *This, LPCWSTR name, nsAString *value)
 {
-    nsAString str_name, str_value;
-    const PRUnichar *value;
+    nsAString str_name;
     nsresult nsres;
 
     nsAString_Init(&str_name, name);
-    nsAString_Init(&str_value, NULL);
 
-    nsres = nsIDOMCSSStyleDeclaration_GetPropertyValue(This->nsstyle, &str_name, &str_value);
-    if(NS_FAILED(nsres))
+    nsres = nsIDOMCSSStyleDeclaration_GetPropertyValue(This->nsstyle, &str_name, value);
+    if(NS_FAILED(nsres)) {
         ERR("SetProperty failed: %08x\n", nsres);
-
-    nsAString_GetData(&str_value, &value, NULL);
-    *p = SysAllocString(value);
+        return E_FAIL;
+    }
 
     nsAString_Finish(&str_name);
+
+    return NS_OK;
+}
+
+static HRESULT get_style_attr(HTMLStyle *This, LPCWSTR name, BSTR *p)
+{
+    nsAString str_value;
+    const PRUnichar *value;
+
+    nsAString_Init(&str_value, NULL);
+
+    get_style_attr_nsval(This, name, &str_value);
+
+    nsAString_GetData(&str_value, &value, NULL);
+    *p = *value ? SysAllocString(value) : NULL;
+
     nsAString_Finish(&str_value);
 
     TRACE("%s -> %s\n", debugstr_w(name), debugstr_w(*p));
+    return S_OK;
+}
 
+static HRESULT check_style_attr_value(HTMLStyle *This, LPCWSTR name, LPCWSTR exval, VARIANT_BOOL *p)
+{
+    nsAString str_value;
+    const PRUnichar *value;
+
+    nsAString_Init(&str_value, NULL);
+
+    get_style_attr_nsval(This, name, &str_value);
+
+    nsAString_GetData(&str_value, &value, NULL);
+    *p = strcmpW(value, exval) ? VARIANT_FALSE : VARIANT_TRUE;
+    nsAString_Finish(&str_value);
+
+    TRACE("%s -> %x\n", debugstr_w(name), *p);
     return S_OK;
 }
 
@@ -215,8 +257,10 @@ static HRESULT WINAPI HTMLStyle_put_fontStyle(IHTMLStyle *iface, BSTR v)
 static HRESULT WINAPI HTMLStyle_get_fontStyle(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_style_attr(This, attrFontStyle, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_fontVariant(IHTMLStyle *iface, BSTR v)
@@ -243,8 +287,10 @@ static HRESULT WINAPI HTMLStyle_put_fontWeight(IHTMLStyle *iface, BSTR v)
 static HRESULT WINAPI HTMLStyle_get_fontWeight(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_style_attr(This, attrFontWeight, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_fontSize(IHTMLStyle *iface, VARIANT v)
@@ -266,8 +312,11 @@ static HRESULT WINAPI HTMLStyle_put_fontSize(IHTMLStyle *iface, VARIANT v)
 static HRESULT WINAPI HTMLStyle_get_fontSize(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    V_VT(p) = VT_BSTR;
+    return get_style_attr(This, attrFontSize, &V_BSTR(p));
 }
 
 static HRESULT WINAPI HTMLStyle_put_font(IHTMLStyle *iface, BSTR v)
@@ -294,8 +343,11 @@ static HRESULT WINAPI HTMLStyle_put_color(IHTMLStyle *iface, VARIANT v)
 static HRESULT WINAPI HTMLStyle_get_color(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    V_VT(p) = VT_BSTR;
+    return get_style_attr(This, attrColor, &V_BSTR(p));
 }
 
 static HRESULT WINAPI HTMLStyle_put_background(IHTMLStyle *iface, BSTR v)
@@ -464,8 +516,10 @@ static HRESULT WINAPI HTMLStyle_put_textDecoration(IHTMLStyle *iface, BSTR v)
 static HRESULT WINAPI HTMLStyle_get_textDecoration(IHTMLStyle *iface, BSTR *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_style_attr(This, attrTextDecoration, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_textDecorationNone(IHTMLStyle *iface, VARIANT_BOOL v)
@@ -492,8 +546,10 @@ static HRESULT WINAPI HTMLStyle_put_textDecorationUnderline(IHTMLStyle *iface, V
 static HRESULT WINAPI HTMLStyle_get_textDecorationUnderline(IHTMLStyle *iface, VARIANT_BOOL *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return check_style_attr_value(This, attrTextDecoration, valUnderline, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_textDecorationOverline(IHTMLStyle *iface, VARIANT_BOOL v)
@@ -520,8 +576,10 @@ static HRESULT WINAPI HTMLStyle_put_textDecorationLineThrough(IHTMLStyle *iface,
 static HRESULT WINAPI HTMLStyle_get_textDecorationLineThrough(IHTMLStyle *iface, VARIANT_BOOL *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return check_style_attr_value(This, attrTextDecoration, valLineThrough, p);
 }
 
 static HRESULT WINAPI HTMLStyle_put_textDecorationBlink(IHTMLStyle *iface, VARIANT_BOOL v)

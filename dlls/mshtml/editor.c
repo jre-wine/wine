@@ -99,36 +99,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 static const WCHAR wszFont[] = {'f','o','n','t',0};
 static const WCHAR wszSize[] = {'s','i','z','e',0};
 
-static void do_ns_command(NSContainer *This, const char *cmd, nsICommandParams *nsparam)
-{
-    nsICommandManager *cmdmgr;
-    nsIInterfaceRequestor *iface_req;
-    nsresult nsres;
-
-    TRACE("(%p)\n", This);
-
-    nsres = nsIWebBrowser_QueryInterface(This->webbrowser,
-            &IID_nsIInterfaceRequestor, (void**)&iface_req);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIInterfaceRequestor: %08x\n", nsres);
-        return;
-    }
-
-    nsres = nsIInterfaceRequestor_GetInterface(iface_req, &IID_nsICommandManager,
-                                               (void**)&cmdmgr);
-    nsIInterfaceRequestor_Release(iface_req);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsICommandManager: %08x\n", nsres);
-        return;
-    }
-
-    nsres = nsICommandManager_DoCommand(cmdmgr, cmd, nsparam, NULL);
-    if(NS_FAILED(nsres))
-        ERR("DoCommand(%s) failed: %08x\n", debugstr_a(cmd), nsres);
-
-    nsICommandManager_Release(cmdmgr);
-}
-
 static void do_ns_editor_command(NSContainer *This, const char *cmd)
 {
     nsresult nsres;
@@ -144,19 +114,9 @@ static void do_ns_editor_command(NSContainer *This, const char *cmd)
 static nsresult get_ns_command_state(NSContainer *This, const char *cmd, nsICommandParams *nsparam)
 {
     nsICommandManager *cmdmgr;
-    nsIInterfaceRequestor *iface_req;
     nsresult nsres;
 
-    nsres = nsIWebBrowser_QueryInterface(This->webbrowser,
-            &IID_nsIInterfaceRequestor, (void**)&iface_req);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIInterfaceRequestor: %08x\n", nsres);
-        return nsres;
-    }
-
-    nsres = nsIInterfaceRequestor_GetInterface(iface_req, &IID_nsICommandManager,
-                                               (void**)&cmdmgr);
-    nsIInterfaceRequestor_Release(iface_req);
+    nsres = get_nsinterface((nsISupports*)This->webbrowser, &IID_nsICommandManager, (void**)&cmdmgr);
     if(NS_FAILED(nsres)) {
         ERR("Could not get nsICommandManager: %08x\n", nsres);
         return nsres;
@@ -780,6 +740,13 @@ static HRESULT exec_fontsize(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, 
     return S_OK;
 }
 
+static HRESULT exec_font(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
+{
+
+    FIXME("(%p)->(%p %p)\n", This, in, out);
+    return E_NOTIMPL;
+}
+
 static HRESULT exec_selectall(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
 {
     TRACE("(%p)\n", This);
@@ -1359,6 +1326,7 @@ const cmdtable_t editmode_cmds[] = {
     {IDM_JUSTIFYCENTER,   query_justify,        exec_justifycenter},
     {IDM_JUSTIFYRIGHT,    query_justify,        exec_justifyright},
     {IDM_JUSTIFYLEFT,     query_justify,        exec_justifyleft},
+    {IDM_FONT,            NULL,                 exec_font},
     {IDM_UNDERLINE,       query_edit_status,    exec_underline},
     {IDM_HORIZONTALLINE,  query_edit_status,    exec_horizontalline},
     {IDM_ORDERLIST,       query_edit_status,    exec_orderlist},

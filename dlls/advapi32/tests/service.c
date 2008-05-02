@@ -444,10 +444,17 @@ static void test_get_displayname(void)
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    tempsize = displaysize;
+
+    displaysize = 0;
+    ret = GetServiceDisplayNameA(scm_handle, spooler, NULL, &displaysize);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(displaysize == tempsize, "Buffer size mismatch (%d vs %d)\n", tempsize, displaysize);
 
     /* Buffer is too small */
     SetLastError(0xdeadbeef);
-    tempsize = displaysize;
     displaysize = (tempsize / 2);
     ret = GetServiceDisplayNameA(scm_handle, spooler, displayname, &displaysize);
     ok(!ret, "Expected failure\n");
@@ -727,7 +734,7 @@ static void test_sequence(void)
     static const CHAR servicename [] = "Winetest";
     static const CHAR displayname [] = "Winetest dummy service";
     static const CHAR pathname    [] = "we_dont_care.exe";
-    static const CHAR dependencies[] = "Master1\0Master2\0+MasterGroup1\0\0";
+    static const CHAR dependencies[] = "Master1\0Master2\0+MasterGroup1\0";
     static const CHAR password    [] = "";
     static const CHAR empty       [] = "";
     static const CHAR localsystem [] = "LocalSystem";
@@ -815,8 +822,8 @@ static void test_sequence(void)
     todo_wine
     {
     ok(!memcmp(config->lpDependencies, dependencies, sizeof(dependencies)), "Wrong string\n");
-    ok(!strcmp(config->lpServiceStartName, localsystem), "Expected 'LocalSystem', got '%s'\n", config->lpServiceStartName);
     }
+    ok(!strcmp(config->lpServiceStartName, localsystem), "Expected 'LocalSystem', got '%s'\n", config->lpServiceStartName);
     ok(!strcmp(config->lpDisplayName, displayname), "Expected '%s', got '%s'\n", displayname, config->lpDisplayName);
     
     SetLastError(0xdeadbeef);

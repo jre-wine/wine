@@ -105,6 +105,8 @@ HINTERNET WININET_AllocHandle( LPWININETHANDLEHEADER info )
     LPWININETHANDLEHEADER *p;
     UINT handle = 0, num;
 
+    list_init( &info->children );
+
     EnterCriticalSection( &WININET_cs );
     if( !WININET_dwMaxHandles )
     {
@@ -182,6 +184,8 @@ BOOL WININET_Release( LPWININETHANDLEHEADER info )
                               INTERNET_STATUS_HANDLE_CLOSING, &info->hInternet,
                               sizeof(HINTERNET));
         TRACE( "destroying object %p\n", info);
+        if ( info->htype != WH_HINIT )
+            list_remove( &info->entry );
         info->destroy( info );
     }
     return TRUE;
@@ -191,7 +195,7 @@ BOOL WININET_FreeHandle( HINTERNET hinternet )
 {
     BOOL ret = FALSE;
     UINT handle = (UINT) hinternet;
-    LPWININETHANDLEHEADER info = NULL;
+    LPWININETHANDLEHEADER info = NULL, child, next;
 
     EnterCriticalSection( &WININET_cs );
 
@@ -204,15 +208,32 @@ BOOL WININET_FreeHandle( HINTERNET hinternet )
             TRACE( "destroying handle %d for object %p\n", handle+1, info);
             WININET_Handles[handle] = NULL;
             ret = TRUE;
-            if( WININET_dwNextHandle > handle )
-                WININET_dwNextHandle = handle;
         }
     }
 
     LeaveCriticalSection( &WININET_cs );
 
+    /* As on native when the equivalent of WININET_Release is called, the handle
+     * is already invalid, but if a new handle is created at this time it does
+     * not yet get assigned the freed handle number */
     if( info )
+    {
+        /* Free all children as native does */
+        LIST_FOR_EACH_ENTRY_SAFE( child, next, &info->children, WININETHANDLEHEADER, entry )
+        {
+            TRACE( "freeing child handle %d for parent handle %d\n",
+                   (UINT)child->hInternet, handle+1);
+            WININET_FreeHandle( child->hInternet );
+        }
         WININET_Release( info );
+    }
+
+    EnterCriticalSection( &WININET_cs );
+
+    if( WININET_dwNextHandle > handle && !WININET_Handles[handle] )
+        WININET_dwNextHandle = handle;
+
+    LeaveCriticalSection( &WININET_cs );
 
     return ret;
 }
@@ -993,8 +1014,8 @@ BOOL WINAPI InternetCloseHandle(HINTERNET hInternet)
         return FALSE;
     }
 
-    WININET_FreeHandle( hInternet );
     WININET_Release( lpwh );
+    WININET_FreeHandle( hInternet );
 
     return TRUE;
 }
@@ -2739,6 +2760,7 @@ BOOL WINAPI InternetCheckConnectionW( LPCWSTR lpszUrl, DWORD dwFlags, DWORD dwRe
   CHAR *command = NULL;
   WCHAR hostW[1024];
   DWORD len;
+  INTERNET_PORT port;
   int status = -1;
 
   FIXME("\n");
@@ -2770,26 +2792,46 @@ BOOL WINAPI InternetCheckConnectionW( LPCWSTR lpszUrl, DWORD dwFlags, DWORD dwRe
        goto End;
 
      TRACE("host name : %s\n",debugstr_w(components.lpszHostName));
+     port = components.nPort;
+     TRACE("port: %d\n", port);
   }
 
-  /*
-   * Build our ping command
-   */
-  len = WideCharToMultiByte(CP_UNIXCP, 0, hostW, -1, NULL, 0, NULL, NULL);
-  command = HeapAlloc( GetProcessHeap(), 0, strlen(ping)+len+strlen(redirect) );
-  strcpy(command,ping);
-  WideCharToMultiByte(CP_UNIXCP, 0, hostW, -1, command+strlen(ping), len, NULL, NULL);
-  strcat(command,redirect);
+  if (dwFlags & FLAG_ICC_FORCE_CONNECTION)
+  {
+      struct sockaddr_in sin;
+      int fd;
 
-  TRACE("Ping command is : %s\n",command);
+      if (!GetAddress(hostW, port, &sin))
+          goto End;
+      fd = socket(sin.sin_family, SOCK_STREAM, 0);
+      if (fd != -1)
+      {
+          if (connect(fd, (struct sockaddr *)&sin, sizeof(sin)) == 0)
+              rc = TRUE;
+          close(fd);
+      }
+  }
+  else
+  {
+      /*
+       * Build our ping command
+       */
+      len = WideCharToMultiByte(CP_UNIXCP, 0, hostW, -1, NULL, 0, NULL, NULL);
+      command = HeapAlloc( GetProcessHeap(), 0, strlen(ping)+len+strlen(redirect) );
+      strcpy(command,ping);
+      WideCharToMultiByte(CP_UNIXCP, 0, hostW, -1, command+strlen(ping), len, NULL, NULL);
+      strcat(command,redirect);
 
-  status = system(command);
+      TRACE("Ping command is : %s\n",command);
 
-  TRACE("Ping returned a code of %i\n",status);
+      status = system(command);
 
-  /* Ping return code of 0 indicates success */
-  if (status == 0)
-     rc = TRUE;
+      TRACE("Ping returned a code of %i\n",status);
+
+      /* Ping return code of 0 indicates success */
+      if (status == 0)
+         rc = TRUE;
+  }
 
 End:
 

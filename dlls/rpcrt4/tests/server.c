@@ -199,6 +199,18 @@ s_sum_conf_array(int x[], int n)
 }
 
 int
+s_sum_unique_conf_array(int x[], int n)
+{
+  return s_sum_conf_array(x, n);
+}
+
+int
+s_sum_unique_conf_ptr(int *x, int n)
+{
+  return x ? s_sum_conf_array(x, n) : 0;
+}
+
+int
 s_sum_var_array(int x[20], int n)
 {
   ok(0 <= n, "RPC sum_var_array\n");
@@ -350,6 +362,46 @@ s_sum_padded(padded_t *p)
   return p->i + p->c;
 }
 
+int
+s_sum_padded2(padded_t ps[2])
+{
+  return s_sum_padded(&ps[0]) + s_sum_padded(&ps[1]);
+}
+
+int
+s_sum_padded_conf(padded_t *ps, int n)
+{
+  int sum = 0;
+  int i;
+  for (i = 0; i < n; ++i)
+    sum += s_sum_padded(&ps[i]);
+  return sum;
+}
+
+int
+s_sum_bogus(bogus_t *b)
+{
+  return *b->h.p1 + *b->p2 + *b->p3 + b->c;
+}
+
+void
+s_check_null(int *null)
+{
+  ok(!null, "RPC check_null\n");
+}
+
+int
+s_str_struct_len(str_struct_t *s)
+{
+  return lstrlenA(s->s);
+}
+
+int
+s_wstr_struct_len(wstr_struct_t *s)
+{
+  return lstrlenW(s->s);
+}
+
 void
 s_stop(void)
 {
@@ -388,17 +440,20 @@ run_client(const char *test)
 static void
 basic_tests(void)
 {
-  static char string[] = "I am a string";
-  static int f[5] = {1, 3, 0, -2, -4};
-  static vector_t a = {1, 3, 7};
-  static vector_t vec1 = {4, -2, 1}, vec2 = {-5, 2, 3}, *pvec2 = &vec2;
-  static pvectors_t pvecs = {&vec1, &pvec2};
-  static sp_inner_t spi = {42};
-  static sp_t sp = {-13, &spi};
-  static aligns_t aligns = {3, 4, 5, 6.0};
+  char string[] = "I am a string";
+  WCHAR wstring[] = {'I',' ','a','m',' ','a',' ','w','s','t','r','i','n','g', 0};
+  int f[5] = {1, 3, 0, -2, -4};
+  vector_t a = {1, 3, 7};
+  vector_t vec1 = {4, -2, 1}, vec2 = {-5, 2, 3}, *pvec2 = &vec2;
+  pvectors_t pvecs = {&vec1, &pvec2};
+  sp_inner_t spi = {42};
+  sp_t sp = {-13, &spi};
+  aligns_t aligns = {3, 4, 5, 6.0};
   pints_t pints;
   ptypes_t ptypes;
   padded_t padded;
+  padded_t padded2[2];
+  bogus_t bogus;
   int i1, i2, i3, *pi2, *pi3, **ppi3;
   double u, v;
   float s, t;
@@ -406,6 +461,8 @@ basic_tests(void)
   short h;
   char c;
   int x;
+  str_struct_t ss = {string};
+  wstr_struct_t ws = {wstring};
 
   ok(int_return() == INT_CODE, "RPC int_return\n");
 
@@ -422,6 +479,9 @@ basic_tests(void)
 
   ok(str_length(string) == strlen(string), "RPC str_length\n");
   ok(dot_self(&a) == 59, "RPC dot_self\n");
+
+  ok(str_struct_len(&ss) == lstrlenA(string), "RPC str_struct_len\n");
+  ok(wstr_struct_len(&ws) == lstrlenW(wstring), "RPC str_struct_len\n");
 
   v = 0.0;
   u = square_half(3.0, &v);
@@ -476,6 +536,27 @@ basic_tests(void)
   padded.i = -3;
   padded.c = 8;
   ok(sum_padded(&padded) == 5, "RPC sum_padded\n");
+  padded2[0].i = -5;
+  padded2[0].c = 1;
+  padded2[1].i = 3;
+  padded2[1].c = 7;
+  ok(sum_padded2(padded2) == 6, "RPC sum_padded2\n");
+  padded2[0].i = -5;
+  padded2[0].c = 1;
+  padded2[1].i = 3;
+  padded2[1].c = 7;
+  ok(sum_padded_conf(padded2, 2) == 6, "RPC sum_padded_conf\n");
+
+  i1 = 14;
+  i2 = -7;
+  i3 = -4;
+  bogus.h.p1 = &i1;
+  bogus.p2 = &i2;
+  bogus.p3 = &i3;
+  bogus.c = 9;
+  ok(sum_bogus(&bogus) == 12, "RPC sum_bogus\n");
+
+  check_null(NULL);
 }
 
 static void
@@ -609,15 +690,15 @@ us_t_UserFree(ULONG *flags, us_t *pus)
 static void
 pointer_tests(void)
 {
-  static int a[] = {1, 2, 3, 4};
-  static char p1[] = "11";
+  int a[] = {1, 2, 3, 4};
+  char p1[] = "11";
   test_list_t *list = make_list(make_list(make_list(null_list())));
-  static test_us_t tus = {{p1}};
+  test_us_t tus = {{p1}};
   int *pa[4];
 
   ok(test_list_length(list) == 3, "RPC test_list_length\n");
   ok(square_puint(p1) == 121, "RPC square_puint\n");
-  ok(square_test_us(&tus) == 121, "RPC square_test_us\n");
+  todo_wine ok(square_test_us(&tus) == 121, "RPC square_test_us\n");
 
   pa[0] = &a[0];
   pa[1] = &a[1];
@@ -636,18 +717,19 @@ pointer_tests(void)
 static void
 array_tests(void)
 {
-  static const char str1[25] = "Hello";
-  static int m[2][3][4] =
+  const char str1[25] = "Hello";
+  int m[2][3][4] =
   {
     {{1, 2, 3, 4}, {-1, -3, -5, -7}, {0, 2, 4, 6}},
     {{1, -2, 3, -4}, {2, 3, 5, 7}, {-4, -1, -14, 4114}}
   };
-  static int c[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-  static vector_t vs[2] = {{1, -2, 3}, {4, -5, -6}};
+  int c[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+  vector_t vs[2] = {{1, -2, 3}, {4, -5, -6}};
   cps_t cps;
   cpsc_t cpsc;
   cs_t *cs;
   int n;
+  int ca[5] = {1, -2, 3, -4, 5};
 
   ok(cstr_length(str1, sizeof str1) == strlen(str1), "RPC cstr_length\n");
 
@@ -657,6 +739,10 @@ array_tests(void)
   ok(sum_conf_array(&c[5], 2) == 11, "RPC sum_conf_array\n");
   ok(sum_conf_array(&c[7], 1) == 7, "RPC sum_conf_array\n");
   ok(sum_conf_array(&c[2], 0) == 0, "RPC sum_conf_array\n");
+
+  ok(sum_unique_conf_array(ca, 4) == -2, "RPC sum_unique_conf_array\n");
+  ok(sum_unique_conf_ptr(ca, 5) == 3, "RPC sum_unique_conf_array\n");
+  ok(sum_unique_conf_ptr(NULL, 10) == 0, "RPC sum_unique_conf_array\n");
 
   ok(sum_var_array(c, 10) == 45, "RPC sum_conf_array\n");
   ok(sum_var_array(&c[5], 2) == 11, "RPC sum_conf_array\n");
@@ -679,18 +765,18 @@ array_tests(void)
   cps.ca1 = &c[2];
   cps.n = 3;
   cps.ca2 = &c[3];
-  ok(sum_cps(&cps) == 53, "RPC sum_cps\n");
+  todo_wine ok(sum_cps(&cps) == 53, "RPC sum_cps\n");
 
   cpsc.a = 4;
   cpsc.b = 5;
   cpsc.c = 1;
   cpsc.ca = c;
-  ok(sum_cpsc(&cpsc) == 6, "RPC sum_cpsc\n");
+  todo_wine ok(sum_cpsc(&cpsc) == 6, "RPC sum_cpsc\n");
   cpsc.a = 4;
   cpsc.b = 5;
   cpsc.c = 0;
   cpsc.ca = c;
-  ok(sum_cpsc(&cpsc) == 10, "RPC sum_cpsc\n");
+  todo_wine ok(sum_cpsc(&cpsc) == 10, "RPC sum_cpsc\n");
 
   ok(sum_toplev_conf_2n(c, 3) == 15, "RPC sum_toplev_conf_2n\n");
   ok(sum_toplev_conf_cond(c, 5, 6, 1) == 10, "RPC sum_toplev_conf_cond\n");

@@ -33,6 +33,13 @@ typedef struct tag_vector
 ]
 interface IServer
 {
+cpp_quote("#if 0")
+  typedef wchar_t WCHAR;
+cpp_quote("#endif")
+
+  typedef [string] char *str_t;
+  typedef [string] WCHAR *wstr_t;
+
   typedef struct
   {
     int *pi;
@@ -111,6 +118,8 @@ interface IServer
   int test_list_length(test_list_t *ls);
   int sum_fixed_int_3d(int m[2][3][4]);
   int sum_conf_array([size_is(n)] int x[], int n);
+  int sum_unique_conf_array([size_is(n), unique] int x[], int n);
+  int sum_unique_conf_ptr([size_is(n), unique] int *x, int n);
   int sum_var_array([length_is(n)] int x[20], int n);
   int dot_two_vectors(vector_t vs[2]);
 
@@ -207,6 +216,37 @@ interface IServer
   } padded_t;
 
   int sum_padded(padded_t *p);
+  int sum_padded2(padded_t ps[2]);
+  int sum_padded_conf([size_is(n)] padded_t *ps, int n);
+
+  typedef struct
+  {
+    int *p1;
+  } bogus_helper_t;
+
+  typedef struct
+  {
+    bogus_helper_t h;
+    int *p2;
+    int *p3;
+    char c;
+  } bogus_t;
+
+  int sum_bogus(bogus_t *b);
+  void check_null([unique] int *null);
+
+  typedef struct
+  {
+    str_t s;
+  } str_struct_t;
+
+  typedef struct
+  {
+    wstr_t s;
+  } wstr_struct_t;
+
+  int str_struct_len(str_struct_t *s);
+  int wstr_struct_len(wstr_struct_t *s);
 
   void stop(void);
 }

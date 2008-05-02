@@ -176,10 +176,12 @@ static void test_pbuffers(HDC hdc)
     else skip("Pbuffer test for offscreen pixelformat skipped as no offscreen-only format with pbuffer capabilities has been found\n");
 }
 
-static void test_setpixelformat(void)
+static void test_setpixelformat(HDC winhdc)
 {
     int res = 0;
+    int nCfgs;
     int pf;
+    int i;
     PIXELFORMATDESCRIPTOR pfd = {
         sizeof(PIXELFORMATDESCRIPTOR),
         1,                     /* version */
@@ -211,6 +213,17 @@ static void test_setpixelformat(void)
     /* SetPixelFormat on the main device context 'X root window' should fail */
     res = SetPixelFormat(hdc, pf, &pfd);
     ok(res == 0, "SetPixelFormat on main device context should fail\n");
+
+    /* Setting the same format that was set on the HDC is allowed; other
+       formats fail */
+    nCfgs = DescribePixelFormat(winhdc, 0, 0, NULL);
+    pf = GetPixelFormat(winhdc);
+    for(i = 1;i <= nCfgs;i++)
+    {
+        int res = SetPixelFormat(winhdc, i, NULL);
+        if(i == pf) ok(res, "Failed to set the same pixel format\n");
+        else ok(!res, "Unexpectedly set an alternate pixel format\n");
+    }
 }
 
 static void test_colorbits(HDC hdc)
@@ -294,6 +307,29 @@ static void test_make_current_read(HDC hdc)
     ok(hread == hdc, "wglGetCurrentReadDCARB failed for wglMakeContextCurrent\n");
 }
 
+static void test_dc(HWND hwnd, HDC hdc)
+{
+    int pf1, pf2;
+    HDC hdc2;
+
+    /* Get another DC and make sure it has the same pixel format */
+    hdc2 = GetDC(hwnd);
+    if(hdc != hdc2)
+    {
+        pf1 = GetPixelFormat(hdc);
+        pf2 = GetPixelFormat(hdc2);
+        ok(pf1 == pf2, "Second DC does not have the same format (%d != %d)\n", pf1, pf2);
+    }
+    else
+        skip("Could not get a different DC for the window\n");
+
+    if(hdc2)
+    {
+        ReleaseDC(hwnd, hdc2);
+        hdc2 = NULL;
+    }
+}
+
 START_TEST(opengl)
 {
     HWND hwnd;
@@ -336,12 +372,14 @@ START_TEST(opengl)
         res = SetPixelFormat(hdc, iPixelFormat, &pfd);
         ok(res, "SetPixelformat failed: %x\n", GetLastError());
 
+        test_dc(hwnd, hdc);
+
         hglrc = wglCreateContext(hdc);
         res = wglMakeCurrent(hdc, hglrc);
         ok(res, "wglMakeCurrent failed!\n");
         init_functions();
 
-        test_setpixelformat();
+        test_setpixelformat(hdc);
         test_colorbits(hdc);
         test_gdi_dbuf(hdc);
 

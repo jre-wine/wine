@@ -86,7 +86,7 @@ static inline INT INTERNAL_YWSTODS(DC *dc, INT height)
     return pt[1].y - pt[0].y;
 }
 
-static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, void *obj, HDC hdc );
+static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, HDC hdc );
 static INT FONT_GetObject16( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
 static INT FONT_GetObjectA( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
 static INT FONT_GetObjectW( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
@@ -585,17 +585,27 @@ HFONT WINAPI CreateFontW( INT height, INT width, INT esc,
  * drivers that don't support vector fonts they must supply their own
  * font.
  */
-static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
+static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, HDC hdc )
 {
     HGDIOBJ ret = 0;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     if (!dc) return 0;
+
+    if (!GDI_inc_ref_count( handle ))
+    {
+        release_dc_ptr( dc );
+        return 0;
+    }
 
     if (dc->hFont != handle || dc->gdiFont == NULL)
     {
         if(GetDeviceCaps(dc->hSelf, TEXTCAPS) & TC_VA_ABLE)
+        {
+            FONTOBJ *font = GDI_GetObjPtr( handle, FONT_MAGIC );  /* to grab the GDI lock (FIXME) */
             dc->gdiFont = WineEngCreateFontInstance(dc, handle);
+            if (font) GDI_ReleaseObj( handle );
+        }
     }
 
     if (dc->funcs->pSelectFont) ret = dc->funcs->pSelectFont( dc->physDev, handle, dc->gdiFont );
@@ -603,13 +613,17 @@ static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, void *obj, HDC hdc )
     if (ret && dc->gdiFont) dc->gdiFont = 0;
 
     if (ret == HGDI_ERROR)
+    {
+        GDI_dec_ref_count( handle );
         ret = 0; /* SelectObject returns 0 on error */
+    }
     else
     {
         ret = dc->hFont;
         dc->hFont = handle;
+        GDI_dec_ref_count( ret );
     }
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1879,7 +1893,7 @@ BOOL WINAPI ExtTextOutW( HDC hdc, INT x, INT y, UINT flags,
     BOOL done_extents = FALSE;
     INT width = 0, xwidth = 0, ywidth = 0;
     DWORD type;
-    DC * dc = DC_GetDCUpdate( hdc );
+    DC * dc = get_dc_ptr( hdc );
     INT breakRem;
 
     if (!dc) return FALSE;
@@ -1891,22 +1905,23 @@ BOOL WINAPI ExtTextOutW( HDC hdc, INT x, INT y, UINT flags,
 
     if (!dc->funcs->pExtTextOut && !PATH_IsPathOpen(dc->path))
     {
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
         return ret;
     }
 
+    update_dc( dc );
     type = GetObjectType(hdc);
     if(type == OBJ_METADC || type == OBJ_ENHMETADC)
     {
         ret = dc->funcs->pExtTextOut(dc->physDev, x, y, flags, lprect, str, count, lpDx);
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
         return ret;
     }
 
     if (!lprect)
         flags &= ~ETO_CLIPPED;
         
-    if( !(flags & (ETO_GLYPH_INDEX | ETO_IGNORELANGUAGE)) && BidiAvail && count > 0 )
+    if( !(flags & (ETO_GLYPH_INDEX | ETO_IGNORELANGUAGE)) && count > 0 )
     {
         reordered_str = HeapAlloc(GetProcessHeap(), 0, count*sizeof(WCHAR));
 
@@ -2198,7 +2213,7 @@ done:
     if(reordered_str != str)
         HeapFree(GetProcessHeap(), 0, reordered_str);
 
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
 
     if (ret && (lf.lfUnderline || lf.lfStrikeOut))
     {
@@ -2996,7 +3011,7 @@ GetCharacterPlacementW(
 	/* return number of initialized fields */
 	lpResults->nGlyphs = nSet;
 
-	if((dwFlags&GCP_REORDER)==0 || !BidiAvail)
+	if((dwFlags&GCP_REORDER)==0 )
 	{
 		/* Treat the case where no special handling was requested in a fastpath way */
 		/* copy will do if the GCP_REORDER flag is not set */
@@ -3185,12 +3200,48 @@ INT WINAPI AddFontResourceExA( LPCSTR str, DWORD fl, PVOID pdv )
     return ret;
 }
 
+static BOOL CALLBACK load_enumed_resource(HMODULE hModule, LPCWSTR type, LPWSTR name, LONG_PTR lParam)
+{
+    HRSRC rsrc = FindResourceW(hModule, name, type);
+    HGLOBAL hMem = LoadResource(hModule, rsrc);
+    LPVOID *pMem = LockResource(hMem);
+    int *num_total = (int *)lParam;
+    DWORD num_in_res;
+
+    TRACE("Found resource %s - trying to load\n", wine_dbgstr_w(type));
+    if (!AddFontMemResourceEx(pMem, SizeofResource(hModule, rsrc), NULL, &num_in_res))
+    {
+        ERR("Failed to load PE font resource mod=%p ptr=%p\n", hModule, hMem);
+        return FALSE;
+    }
+
+    *num_total += num_in_res;
+    return TRUE;
+}
+
 /***********************************************************************
  *           AddFontResourceExW    (GDI32.@)
  */
 INT WINAPI AddFontResourceExW( LPCWSTR str, DWORD fl, PVOID pdv )
 {
-    return WineEngAddFontResourceEx(str, fl, pdv);
+    int ret = WineEngAddFontResourceEx(str, fl, pdv);
+    if (ret == 0)
+    {
+        /* FreeType <2.3.5 has problems reading resources wrapped in PE files. */
+        HMODULE hModule = LoadLibraryExW(str, NULL, LOAD_LIBRARY_AS_DATAFILE);
+        if (hModule != NULL)
+        {
+            int num_resources = 0;
+            LPWSTR rt_font = (LPWSTR)((ULONG_PTR)8);  /* we don't want to include winuser.h */
+
+            TRACE("WineEndAddFontResourceEx failed on PE file %s - trying to load resources manually\n",
+                wine_dbgstr_w(str));
+            if (EnumResourceNamesW(hModule, rt_font, load_enumed_resource, (LONG_PTR)&num_resources))
+                ret = num_resources;
+            FreeLibrary(hModule);
+        }
+    }
+    return ret;
 }
 
 /***********************************************************************
@@ -3214,8 +3265,7 @@ BOOL WINAPI RemoveFontResourceW( LPCWSTR str )
  */
 HANDLE WINAPI AddFontMemResourceEx( PVOID pbFont, DWORD cbFont, PVOID pdv, DWORD *pcFonts)
 {
-    FIXME("(%p,%08x,%p,%p): stub\n", pbFont, cbFont, pdv, pcFonts);
-    return NULL;
+    return WineEngAddFontMemResourceEx(pbFont, cbFont, pdv, pcFonts);
 }
 
 /***********************************************************************
@@ -3375,5 +3425,30 @@ BOOL WINAPI GetCharWidthI(HDC hdc, UINT first, UINT count, LPWORD glyphs, LPINT 
  */
 DWORD WINAPI GetFontUnicodeRanges(HDC hdc, LPGLYPHSET lpgs)
 {
-    return WineEngGetFontUnicodeRanges(hdc, lpgs);
+    DWORD ret = 0;
+    DC *dc = DC_GetDCPtr(hdc);
+
+    TRACE("(%p, %p)\n", hdc, lpgs);
+
+    if (!dc) return 0;
+
+    if (dc->gdiFont) ret = WineEngGetFontUnicodeRanges(dc->gdiFont, lpgs);
+    DC_ReleaseDCPtr(dc);
+    return ret;
+}
+
+
+/*************************************************************
+ *           FontIsLinked    (GDI32.@)
+ */
+BOOL WINAPI FontIsLinked(HDC hdc)
+{
+    DC *dc = DC_GetDCPtr(hdc);
+    BOOL ret = FALSE;
+
+    if (!dc) return FALSE;
+    if (dc->gdiFont) ret = WineEngFontIsLinked(dc->gdiFont);
+    DC_ReleaseDCPtr(dc);
+    TRACE("returning %d\n", ret);
+    return ret;
 }

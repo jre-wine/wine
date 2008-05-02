@@ -650,17 +650,17 @@ static void WINAPI event_client ( client_params *par )
     event = WSACreateEvent ();
     WSAEventSelect ( mem->s, event, FD_CONNECT );
     tmp = connect ( mem->s, (struct sockaddr*) &mem->addr, sizeof ( mem->addr ) );
-    if ( tmp != 0 && ( err = WSAGetLastError () ) != WSAEWOULDBLOCK )
-        ok ( 0, "event_client (%x): connect error: %d\n", id, err );
-
-    tmp = WaitForSingleObject ( event, INFINITE );
-    ok ( tmp == WAIT_OBJECT_0, "event_client (%x): wait for connect event failed: %d\n", id, tmp );
-    err = WSAEnumNetworkEvents ( mem->s, event, &wsa_events );
-    wsa_ok ( err, 0 ==, "event_client (%x): WSAEnumNetworkEvents error: %d\n" );
-
-    err = wsa_events.iErrorCode[ FD_CONNECT_BIT ];
-    ok ( err == 0, "event_client (%x): connect error: %d\n", id, err );
-    if ( err ) goto out;
+    if ( tmp != 0 ) {
+        err = WSAGetLastError ();
+        ok ( err == WSAEWOULDBLOCK, "event_client (%x): connect error: %d\n", id, err );
+        tmp = WaitForSingleObject ( event, INFINITE );
+        ok ( tmp == WAIT_OBJECT_0, "event_client (%x): wait for connect event failed: %d\n", id, tmp );
+        err = WSAEnumNetworkEvents ( mem->s, event, &wsa_events );
+        wsa_ok ( err, 0 ==, "event_client (%x): WSAEnumNetworkEvents error: %d\n" );
+        err = wsa_events.iErrorCode[ FD_CONNECT_BIT ];
+        ok ( err == 0, "event_client (%x): connect error: %d\n", id, err );
+        if ( err ) goto out;
+    }
 
     trace ( "event_client (%x) connected\n", id );
 
@@ -1909,6 +1909,52 @@ end:
     CloseHandle(hEvent);
 }
 
+static void test_ipv6only(void)
+{
+    SOCKET v4 = INVALID_SOCKET,
+           v6 = INVALID_SOCKET;
+    struct sockaddr_in sin4;
+    struct sockaddr_in6 sin6;
+    int ret;
+
+    memset(&sin4, 0, sizeof(sin4));
+    sin4.sin_family = AF_INET;
+    sin4.sin_port = htons(SERVERPORT);
+
+    memset(&sin6, 0, sizeof(sin6));
+    sin6.sin6_family = AF_INET6;
+    sin6.sin6_port = htons(SERVERPORT);
+
+    v6 = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    if (v6 == INVALID_SOCKET) {
+        skip("Could not create IPv6 socket (LastError: %d; %d expected if IPv6 not available).\n",
+            WSAGetLastError(), WSAEAFNOSUPPORT);
+        goto end;
+    }
+    ret = bind(v6, (struct sockaddr*)&sin6, sizeof(sin6));
+    if (ret) {
+        skip("Could not bind IPv6 address (LastError: %d).\n",
+            WSAGetLastError());
+        goto end;
+    }
+
+    v4 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (v4 == INVALID_SOCKET) {
+        skip("Could not create IPv4 socket (LastError: %d).\n",
+            WSAGetLastError());
+        goto end;
+    }
+    ret = bind(v4, (struct sockaddr*)&sin4, sizeof(sin4));
+    ok(!ret, "Could not bind IPv4 address (LastError: %d; %d expected if IPv6 binds to IPv4 as well).\n",
+        WSAGetLastError(), WSAEADDRINUSE);
+
+end:
+    if (v4 != INVALID_SOCKET)
+        closesocket(v4);
+    if (v6 != INVALID_SOCKET)
+        closesocket(v6);
+}
+
 /**************** Main program  ***************/
 
 START_TEST( sock )
@@ -1945,6 +1991,8 @@ START_TEST( sock )
 
     test_send();
     test_write_events();
+
+    test_ipv6only();
 
     Exit();
 }

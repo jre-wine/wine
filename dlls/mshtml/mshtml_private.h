@@ -97,6 +97,7 @@ struct ConnectionPoint {
 struct HTMLDocument {
     const IHTMLDocument2Vtbl              *lpHTMLDocument2Vtbl;
     const IHTMLDocument3Vtbl              *lpHTMLDocument3Vtbl;
+    const IHTMLDocument5Vtbl              *lpHTMLDocument5Vtbl;
     const IPersistMonikerVtbl             *lpPersistMonikerVtbl;
     const IPersistFileVtbl                *lpPersistFileVtbl;
     const IMonikerPropVtbl                *lpMonikerPropVtbl;
@@ -254,11 +255,6 @@ struct HTMLDOMNode {
 
     void (*destructor)(IUnknown*);
 
-    enum {
-        NT_UNKNOWN,
-        NT_HTMLELEM
-    } node_type;
-
     union {
         IUnknown *unk;
         IHTMLElement *elem;
@@ -284,15 +280,16 @@ typedef struct {
 } HTMLElement;
 
 typedef struct {
-    const IHTMLTextContainerVtbl *lpHTMLTextContainerVtbl;
+    HTMLElement element;
 
-    HTMLElement *element;
+    const IHTMLTextContainerVtbl *lpHTMLTextContainerVtbl;
 } HTMLTextContainer;
 
 #define HTMLWINDOW2(x)   ((IHTMLWindow2*)                 &(x)->lpHTMLWindow2Vtbl)
 
 #define HTMLDOC(x)       ((IHTMLDocument2*)               &(x)->lpHTMLDocument2Vtbl)
 #define HTMLDOC3(x)      ((IHTMLDocument3*)               &(x)->lpHTMLDocument3Vtbl)
+#define HTMLDOC5(x)      ((IHTMLDocument5*)               &(x)->lpHTMLDocument5Vtbl)
 #define PERSIST(x)       ((IPersist*)                     &(x)->lpPersistFileVtbl)
 #define PERSISTMON(x)    ((IPersistMoniker*)              &(x)->lpPersistMonikerVtbl)
 #define PERSISTFILE(x)   ((IPersistFile*)                 &(x)->lpPersistFileVtbl)
@@ -348,6 +345,7 @@ HTMLWindow *nswindow_to_window(const nsIDOMWindow*);
 void setup_nswindow(HTMLWindow*);
 
 void HTMLDocument_HTMLDocument3_Init(HTMLDocument*);
+void HTMLDocument_HTMLDocument5_Init(HTMLDocument*);
 void HTMLDocument_Persist_Init(HTMLDocument*);
 void HTMLDocument_OleCmd_Init(HTMLDocument*);
 void HTMLDocument_OleObj_Init(HTMLDocument*);
@@ -400,6 +398,7 @@ nsIWritableVariant *create_nsvariant(void);
 void nsnode_to_nsstring(nsIDOMNode*,nsAString*);
 void get_editor_controller(NSContainer*);
 void init_nsevents(NSContainer*);
+nsresult get_nsinterface(nsISupports*,REFIID,void**);
 
 BSCallback *create_bscallback(IMoniker*);
 HRESULT start_binding(BSCallback*);
@@ -411,20 +410,20 @@ IHTMLSelectionObject *HTMLSelectionObject_Create(HTMLDocument*,nsISelection*);
 IHTMLTxtRange *HTMLTxtRange_Create(HTMLDocument*,nsIDOMRange*);
 IHTMLStyle *HTMLStyle_Create(nsIDOMCSSStyleDeclaration*);
 IHTMLStyleSheet *HTMLStyleSheet_Create(void);
+IHTMLStyleSheetsCollection *HTMLStyleSheetsCollection_Create(nsIDOMStyleSheetList*);
 
 void detach_selection(HTMLDocument*);
 void detach_ranges(HTMLDocument*);
 
 HTMLElement *HTMLElement_Create(nsIDOMNode*);
-void HTMLAnchorElement_Create(HTMLElement*);
-void HTMLBodyElement_Create(HTMLElement*);
-void HTMLInputElement_Create(HTMLElement*);
-void HTMLSelectElement_Create(HTMLElement*);
-void HTMLTextAreaElement_Create(HTMLElement*);
+HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLBodyElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLInputElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLSelectElement_Create(nsIDOMHTMLElement*);
+HTMLElement *HTMLTextAreaElement_Create(nsIDOMHTMLElement*);
 
 void HTMLElement2_Init(HTMLElement*);
-
-void HTMLTextContainer_Init(HTMLTextContainer*,HTMLElement*);
+void HTMLTextContainer_Init(HTMLTextContainer*);
 
 HRESULT HTMLDOMNode_QI(HTMLDOMNode*,REFIID,void**);
 HRESULT HTMLElement_QI(HTMLElement*,REFIID,void**);
@@ -442,6 +441,8 @@ typedef struct {
 } cmdtable_t;
 
 extern const cmdtable_t editmode_cmds[];
+
+void do_ns_command(NSContainer*,const char*,nsICommandParams*);
 
 /* timer */
 #define UPDATE_UI       0x0001

@@ -692,7 +692,12 @@ typedef enum _HEAP_INFORMATION_CLASS {
 #define PF_RDTSC_INSTRUCTION_AVAILABLE		8
 #define PF_PAE_ENABLED				9
 #define PF_XMMI64_INSTRUCTIONS_AVAILABLE	10
+#define PF_SSE_DAZ_MODE_AVAILABLE		11
 #define PF_NX_ENABLED				12
+#define PF_SSE3_INSTRUCTIONS_AVAILABLE		13
+#define PF_COMPARE_EXCHANGE128			14
+#define PF_COMPARE64_EXCHANGE128		15
+#define PF_CHANNELS_ENABLED			16
 
 
 /* Execution state flags */
@@ -3912,7 +3917,7 @@ typedef struct _ACE_HEADER {
 #define	NO_PROPAGATE_INHERIT_ACE	0x04
 #define	INHERIT_ONLY_ACE		0x08
 #define	INHERITED_ACE		        0x10
-#define	VALID_INHERIT_FLAGS		0x0F
+#define	VALID_INHERIT_FLAGS		0x1F
 
 /* AceFlags mask for what events we (should) audit */
 #define	SUCCESSFUL_ACCESS_ACE_FLAG	0x40

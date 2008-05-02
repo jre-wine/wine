@@ -80,22 +80,14 @@ static ULONG WINAPI HTMLElement_AddRef(IHTMLElement *iface)
 {
     HTMLElement *This = HTMLELEM_THIS(iface);
 
-    if(This->impl)
-        return IUnknown_AddRef(This->impl);
-
-    TRACE("(%p)\n", This);
-    return IHTMLDocument2_AddRef(HTMLDOC(This->node.doc));
+    return IHTMLDOMNode_AddRef(HTMLDOMNODE(&This->node));
 }
 
 static ULONG WINAPI HTMLElement_Release(IHTMLElement *iface)
 {
     HTMLElement *This = HTMLELEM_THIS(iface);
 
-    if(This->impl)
-        return IUnknown_Release(This->impl);
-
-    TRACE("(%p)\n", This);
-    return IHTMLDocument2_Release(HTMLDOC(This->node.doc));
+    return IHTMLDOMNode_Release(HTMLDOMNODE(&This->node));
 }
 
 static HRESULT WINAPI HTMLElement_GetTypeInfoCount(IHTMLElement *iface, UINT *pctinfo)
@@ -1033,7 +1025,7 @@ static void create_child_list(HTMLDocument *doc, HTMLElement *elem, elem_vector 
     nsIDOMNodeList *nsnode_list;
     nsIDOMNode *iter;
     PRUint32 list_len = 0, i;
-    HTMLDOMNode *node;
+    PRUint16 node_type;
     nsresult nsres;
 
     nsres = nsIDOMNode_GetChildNodes(elem->node.nsnode, &nsnode_list);
@@ -1056,11 +1048,9 @@ static void create_child_list(HTMLDocument *doc, HTMLElement *elem, elem_vector 
             continue;
         }
 
-        node = get_node(doc, iter);
-        if(node->node_type != NT_HTMLELEM)
-            continue;
-
-        elem_vector_add(buf, HTMLELEM_NODE_THIS(node));
+        nsres = nsIDOMNode_GetNodeType(iter, &node_type);
+        if(NS_SUCCEEDED(nsres) && node_type == ELEMENT_NODE)
+            elem_vector_add(buf, HTMLELEM_NODE_THIS(get_node(doc, iter)));
     }
 }
 
@@ -1081,7 +1071,7 @@ static void create_all_list(HTMLDocument *doc, HTMLElement *elem, elem_vector *b
     nsIDOMNodeList *nsnode_list;
     nsIDOMNode *iter;
     PRUint32 list_len = 0, i;
-    HTMLDOMNode *node;
+    PRUint16 node_type;
     nsresult nsres;
 
     nsres = nsIDOMNode_GetChildNodes(elem->node.nsnode, &nsnode_list);
@@ -1101,12 +1091,13 @@ static void create_all_list(HTMLDocument *doc, HTMLElement *elem, elem_vector *b
             continue;
         }
 
-        node = get_node(doc, iter);
-        if(node->node_type != NT_HTMLELEM)
-            continue;
+        nsres = nsIDOMNode_GetNodeType(iter, &node_type);
+        if(NS_SUCCEEDED(nsres) && node_type == ELEMENT_NODE) {
+            HTMLDOMNode *node = get_node(doc, iter);
 
-        elem_vector_add(buf, HTMLELEM_NODE_THIS(node));
-        create_all_list(doc, HTMLELEM_NODE_THIS(node), buf);
+            elem_vector_add(buf, HTMLELEM_NODE_THIS(node));
+            create_all_list(doc, HTMLELEM_NODE_THIS(node), buf);
+        }
     }
 }
 
@@ -1273,7 +1264,8 @@ HRESULT HTMLElement_QI(HTMLElement *This, REFIID riid, void **ppv)
 
 HTMLElement *HTMLElement_Create(nsIDOMNode *nsnode)
 {
-    HTMLElement *ret;
+    nsIDOMHTMLElement *nselem;
+    HTMLElement *ret = NULL;
     nsAString class_name_str;
     const PRUnichar *class_name;
     nsresult nsres;
@@ -1284,38 +1276,42 @@ HTMLElement *HTMLElement_Create(nsIDOMNode *nsnode)
     static const WCHAR wszSELECT[]   = {'S','E','L','E','C','T',0};
     static const WCHAR wszTEXTAREA[] = {'T','E','X','T','A','R','E','A',0};
 
-    ret = mshtml_alloc(sizeof(HTMLElement));
-    ret->lpHTMLElementVtbl = &HTMLElementVtbl;
-    ret->impl = NULL;
-    ret->destructor = NULL;
-
-    ret->node.node_type = NT_HTMLELEM;
-    ret->node.impl.elem = HTMLELEM(ret);
-    ret->node.destructor = HTMLElement_destructor;
-
-    HTMLElement2_Init(ret);
-
-    nsres = nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMHTMLElement, (void**)&ret->nselem);
+    nsres = nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMHTMLElement, (void**)&nselem);
     if(NS_FAILED(nsres))
         return NULL;
 
     nsAString_Init(&class_name_str, NULL);
-    nsIDOMHTMLElement_GetTagName(ret->nselem, &class_name_str);
+    nsIDOMHTMLElement_GetTagName(nselem, &class_name_str);
 
     nsAString_GetData(&class_name_str, &class_name, NULL);
 
     if(!strcmpW(class_name, wszA))
-        HTMLAnchorElement_Create(ret);
+        ret = HTMLAnchorElement_Create(nselem);
     else if(!strcmpW(class_name, wszBODY))
-        HTMLBodyElement_Create(ret);
+        ret = HTMLBodyElement_Create(nselem);
     else if(!strcmpW(class_name, wszINPUT))
-        HTMLInputElement_Create(ret);
+        ret = HTMLInputElement_Create(nselem);
     else if(!strcmpW(class_name, wszSELECT))
-        HTMLSelectElement_Create(ret);
+        ret = HTMLSelectElement_Create(nselem);
     else if(!strcmpW(class_name, wszTEXTAREA))
-        HTMLTextAreaElement_Create(ret);
+        ret = HTMLTextAreaElement_Create(nselem);
+
+    if(!ret) {
+        ret = mshtml_alloc(sizeof(HTMLElement));
+
+        ret->impl = NULL;
+        ret->destructor = NULL;
+    }
 
     nsAString_Finish(&class_name_str);
+
+    ret->lpHTMLElementVtbl = &HTMLElementVtbl;
+    ret->nselem = nselem;
+
+    HTMLElement2_Init(ret);
+
+    ret->node.impl.elem = HTMLELEM(ret);
+    ret->node.destructor = HTMLElement_destructor;
 
     return ret;
 }

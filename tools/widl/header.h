@@ -52,6 +52,7 @@ extern void write_constdef(const var_t *v);
 extern void write_externdef(const var_t *v);
 extern void write_library(const char *name, const attr_list_t *attr);
 extern void write_user_types(void);
+extern void write_context_handle_rundowns(void);
 extern const var_t* get_explicit_handle_var(const func_t* func);
 extern int has_out_arg_or_return(const func_t *func);
 extern void write_guid(FILE *f, const char *guid_prefix, const char *name,
@@ -70,6 +71,15 @@ static inline int last_array(const type_t *type)
 static inline int is_string_type(const attr_list_t *attrs, const type_t *type)
 {
     return is_attr(attrs, ATTR_STRING) && (last_ptr(type) || last_array(type));
+}
+
+static inline int is_context_handle(const type_t *type)
+{
+    const type_t *t;
+    for (t = type; is_ptr(t); t = t->ref)
+        if (is_attr(t->attrs, ATTR_CONTEXTHANDLE))
+            return 1;
+    return 0;
 }
 
 #endif

@@ -381,6 +381,9 @@ HRESULT shader_get_registers_used(
                     }
                 }
             }
+            if(WINED3DSIO_NRM  == curOpcode->opcode) {
+                reg_maps->usesnrm = 1;
+            }
 
             /* This will loop over all the registers and try to
              * make a bitmask of the ones we're interested in. 
@@ -416,7 +419,7 @@ HRESULT shader_get_registers_used(
 
                 else if (WINED3DSPR_RASTOUT == regtype && reg == 1)
                     reg_maps->fog = 1;
-             }
+            }
         }
     }
 
@@ -718,6 +721,7 @@ void shader_generate_main(
     CONST DWORD* pFunction) {
 
     IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*) iface;
+    IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) This->baseShader.device; /* To access shader backend callbacks */
     const DWORD *pToken = pFunction;
     const SHADER_OPCODE *curOpcode = NULL;
     SHADER_HANDLER hw_fct = NULL;
@@ -806,6 +810,9 @@ void shader_generate_main(
 
                 /* Call appropriate function for output target */
                 hw_fct(&hw_arg);
+
+                /* Add color correction if needed */
+                device->shader_backend->shader_color_correction(&hw_arg);
 
                 /* Process instruction modifiers for GLSL apps ( _sat, etc. ) */
                 if (This->baseShader.shader_mode == SHADER_GLSL)

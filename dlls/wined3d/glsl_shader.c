@@ -443,6 +443,31 @@ void shader_glsl_load_constants(
                 GL_EXTCALL(glUniform1fvARB(pos, 1, offset));
                 checkGLcall("glUniform1fvARB");
             }
+        } else if(((IWineD3DPixelShaderImpl *) pshader)->srgb_enabled &&
+                  !((IWineD3DPixelShaderImpl *) pshader)->srgb_mode_hardcoded) {
+            float comparison[4];
+            float mul_low[4];
+
+            if(stateBlock->renderState[WINED3DRS_SRGBWRITEENABLE]) {
+                comparison[0] = srgb_cmp; comparison[1] = srgb_cmp;
+                comparison[2] = srgb_cmp; comparison[3] = srgb_cmp;
+
+                mul_low[0] = srgb_mul_low; mul_low[1] = srgb_mul_low;
+                mul_low[2] = srgb_mul_low; mul_low[3] = srgb_mul_low;
+            } else {
+                comparison[0] = 1.0 / 0.0; comparison[1] = 1.0 / 0.0;
+                comparison[2] = 1.0 / 0.0; comparison[3] = 1.0 / 0.0;
+
+                mul_low[0] = 1.0; mul_low[1] = 1.0;
+                mul_low[2] = 1.0; mul_low[3] = 1.0;
+            }
+
+            pos = GL_EXTCALL(glGetUniformLocationARB(programId, "srgb_comparison"));
+            checkGLcall("glGetUniformLocationARB");
+            GL_EXTCALL(glUniform4fvARB(pos, 1, comparison));
+            pos = GL_EXTCALL(glGetUniformLocationARB(programId, "srgb_mul_low"));
+            checkGLcall("glGetUniformLocationARB");
+            GL_EXTCALL(glUniform4fvARB(pos, 1, mul_low));
         }
     }
 }
@@ -455,7 +480,9 @@ void shader_generate_glsl_declarations(
     WineD3D_GL_Info* gl_info) {
 
     IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*) iface;
+    IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) This->baseShader.device;
     int i;
+    unsigned int extra_constants_needed = 0;
 
     /* There are some minor differences between pixel and vertex shaders */
     char pshader = shader_is_pshader_version(This->baseShader.hex_version);
@@ -480,13 +507,42 @@ void shader_generate_glsl_declarations(
     if (This->baseShader.limits.constant_bool > 0)
         shader_addline(buffer, "uniform bool %cB[%u];\n", prefix, This->baseShader.limits.constant_bool);
 
-    if(!pshader)
+    if(!pshader) {
         shader_addline(buffer, "uniform vec4 posFixup;\n");
-    else if(reg_maps->bumpmat != -1) {
-        shader_addline(buffer, "uniform mat2 bumpenvmat;\n");
-        if(reg_maps->luminanceparams) {
-            shader_addline(buffer, "uniform float luminancescale;\n");
-            shader_addline(buffer, "uniform float luminanceoffset;\n");
+    } else {
+        IWineD3DPixelShaderImpl *ps_impl = (IWineD3DPixelShaderImpl *) This;
+
+        if(reg_maps->bumpmat != -1) {
+            shader_addline(buffer, "uniform mat2 bumpenvmat;\n");
+            if(reg_maps->luminanceparams) {
+                shader_addline(buffer, "uniform float luminancescale;\n");
+                shader_addline(buffer, "uniform float luminanceoffset;\n");
+                extra_constants_needed++;
+            }
+            extra_constants_needed++;
+        }
+
+        if(device->stateBlock->renderState[WINED3DRS_SRGBWRITEENABLE]) {
+            ps_impl->srgb_enabled = 1;
+            if(This->baseShader.limits.constant_float + extra_constants_needed + 1 < GL_LIMITS(pshader_constantsF)) {
+                shader_addline(buffer, "uniform vec4 srgb_mul_low;\n");
+                shader_addline(buffer, "uniform vec4 srgb_comparison;\n");
+                ps_impl->srgb_mode_hardcoded = 0;
+            } else {
+                ps_impl->srgb_mode_hardcoded = 1;
+                shader_addline(buffer, "const vec4 srgb_mul_low = {%f, %f, %f, %f};\n",
+                               srgb_mul_low, srgb_mul_low, srgb_mul_low, srgb_mul_low);
+                shader_addline(buffer, "const vec4 srgb_comparison = {%f, %f, %f, %f};\n",
+                               srgb_cmp, srgb_cmp, srgb_cmp, srgb_cmp);
+            }
+        } else {
+            IWineD3DPixelShaderImpl *ps_impl = (IWineD3DPixelShaderImpl *) This;
+
+            /* Do not write any srgb fixup into the shader to save shader size and processing time.
+             * As a consequence, we can't toggle srgb write on without recompilation
+             */
+            ps_impl->srgb_enabled = 0;
+            ps_impl->srgb_mode_hardcoded = 1;
         }
     }
 
@@ -969,6 +1025,165 @@ static void shader_glsl_get_sample_function(DWORD sampler_type, BOOL projected, 
     }
 }
 
+static void shader_glsl_color_correction(SHADER_OPCODE_ARG* arg) {
+    IWineD3DBaseShaderImpl* shader = (IWineD3DBaseShaderImpl*) arg->shader;
+    IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) shader->baseShader.device;
+    WineD3D_GL_Info *gl_info = &deviceImpl->adapter->gl_info;
+    glsl_dst_param_t dst_param;
+    glsl_dst_param_t dst_param2;
+    WINED3DFORMAT fmt;
+    WINED3DFORMAT conversion_group;
+    IWineD3DBaseTextureImpl *texture;
+    DWORD mask, mask_size;
+    UINT i;
+    BOOL recorded = FALSE;
+    DWORD sampler_idx;
+    DWORD hex_version = shader->baseShader.hex_version;
+
+    switch(arg->opcode->opcode) {
+        case WINED3DSIO_TEX:
+            if (hex_version < WINED3DPS_VERSION(2,0)) {
+                sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
+            } else {
+                sampler_idx = arg->src[1] & WINED3DSP_REGNUM_MASK;
+            }
+            break;
+
+        case WINED3DSIO_TEXLDL:
+            FIXME("Add color fixup for vertex texture WINED3DSIO_TEXLDL\n");
+            return;
+
+        case WINED3DSIO_TEXDP3TEX:
+        case WINED3DSIO_TEXM3x3TEX:
+        case WINED3DSIO_TEXM3x3SPEC:
+        case WINED3DSIO_TEXM3x3VSPEC:
+        case WINED3DSIO_TEXBEM:
+        case WINED3DSIO_TEXREG2AR:
+        case WINED3DSIO_TEXREG2GB:
+        case WINED3DSIO_TEXREG2RGB:
+            sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
+            break;
+
+        default:
+            /* Not a texture sampling instruction, nothing to do */
+            return;
+    };
+
+    texture = (IWineD3DBaseTextureImpl *) deviceImpl->stateBlock->textures[sampler_idx];
+    if(texture) {
+        fmt = texture->resource.format;
+        conversion_group = texture->baseTexture.shader_conversion_group;
+    } else {
+        fmt = WINED3DFMT_UNKNOWN;
+        conversion_group = WINED3DFMT_UNKNOWN;
+    }
+
+    /* before doing anything, record the sampler with the format in the format conversion list,
+     * but check if it's not there already
+     */
+    for(i = 0; i < shader->baseShader.num_sampled_samplers; i++) {
+        if(shader->baseShader.sampled_samplers[i] == sampler_idx) {
+            recorded = TRUE;
+            break;
+        }
+    }
+    if(!recorded) {
+        shader->baseShader.sampled_samplers[shader->baseShader.num_sampled_samplers] = sampler_idx;
+        shader->baseShader.num_sampled_samplers++;
+        shader->baseShader.sampled_format[sampler_idx] = conversion_group;
+    }
+
+    switch(fmt) {
+        case WINED3DFMT_V8U8:
+        case WINED3DFMT_V16U16:
+            if(GL_SUPPORT(NV_TEXTURE_SHADER) ||
+              (GL_SUPPORT(ATI_ENVMAP_BUMPMAP) && fmt == WINED3DFMT_V8U8)) {
+                /* The 3rd channel returns 1.0 in d3d, but 0.0 in gl. Fix this while we're at it :-) */
+                mask = shader_glsl_add_dst_param(arg, arg->dst, WINED3DSP_WRITEMASK_2, &dst_param);
+                mask_size = shader_glsl_get_write_mask_size(mask);
+                if(mask_size >= 3) {
+                    shader_addline(arg->buffer, "%s.%c = 1.0;\n", dst_param.reg_name, dst_param.mask_str[3]);
+                }
+            } else {
+                /* Correct the sign, but leave the blue as it is - it was loaded correctly already */
+                mask = shader_glsl_add_dst_param(arg, arg->dst,
+                                          WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1,
+                                          &dst_param);
+                mask_size = shader_glsl_get_write_mask_size(mask);
+                if(mask_size >= 2) {
+                    shader_addline(arg->buffer, "%s.%c%c = %s.%c%c * 2.0 - 1.0;\n",
+                    dst_param.reg_name, dst_param.mask_str[1], dst_param.mask_str[2],
+                    dst_param.reg_name, dst_param.mask_str[1], dst_param.mask_str[2]);
+                } else if(mask_size == 1) {
+                    shader_addline(arg->buffer, "%s.%c = %s.%c * 2.0 - 1.0;\n", dst_param.reg_name, dst_param.mask_str[1],
+                    dst_param.reg_name, dst_param.mask_str[1]);
+                }
+            }
+            break;
+
+        case WINED3DFMT_X8L8V8U8:
+            if(!GL_SUPPORT(NV_TEXTURE_SHADER)) {
+                /* Red and blue are the signed channels, fix them up; Blue(=L) is correct already,
+                 * and a(X) is always 1.0
+                 */
+                mask = shader_glsl_add_dst_param(arg, arg->dst, WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1, &dst_param);
+                mask_size = shader_glsl_get_write_mask_size(mask);
+                if(mask_size >= 2) {
+                    shader_addline(arg->buffer, "%s.%c%c = %s.%c%c * 2.0 - 1.0;\n",
+                                   dst_param.reg_name, dst_param.mask_str[1], dst_param.mask_str[2],
+                                   dst_param.reg_name, dst_param.mask_str[1], dst_param.mask_str[2]);
+                } else if(mask_size == 1) {
+                    shader_addline(arg->buffer, "%s.%c = %s.%c * 2.0 - 1.0;\n",
+                                   dst_param.reg_name, dst_param.mask_str[1],
+                                   dst_param.reg_name, dst_param.mask_str[1]);
+                }
+            }
+            break;
+
+        case WINED3DFMT_L6V5U5:
+            if(!GL_SUPPORT(NV_TEXTURE_SHADER)) {
+                mask = shader_glsl_add_dst_param(arg, arg->dst, WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1, &dst_param);
+                mask_size = shader_glsl_get_write_mask_size(mask);
+                shader_glsl_add_dst_param(arg, arg->dst, WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_2, &dst_param2);
+                if(mask_size >= 3) {
+                    /* Swap y and z (U and L), and do a sign conversion on x and the new y(V and U) */
+                    shader_addline(arg->buffer, "tmp0.g = %s.%c;\n",
+                                   dst_param.reg_name, dst_param.mask_str[2]);
+                    shader_addline(arg->buffer, "%s.%c%c = %s.%c%c * 2.0 - 1.0;\n",
+                                   dst_param.reg_name, dst_param.mask_str[2], dst_param.mask_str[1],
+                                   dst_param2.reg_name, dst_param.mask_str[1], dst_param.mask_str[3]);
+                    shader_addline(arg->buffer, "%s.%c = tmp0.g;\n", dst_param.reg_name,
+                                   dst_param.mask_str[3]);
+                } else if(mask_size == 2) {
+                    /* This is bad: We have VL, but we need VU */
+                    FIXME("2 components sampled from a converted L6V5U5 texture\n");
+                } else {
+                    shader_addline(arg->buffer, "%s.%c = %s.%c * 2.0 - 1.0;\n",
+                                   dst_param.reg_name, dst_param.mask_str[1],
+                                   dst_param2.reg_name, dst_param.mask_str[1]);
+                }
+            }
+            break;
+
+        case WINED3DFMT_Q8W8V8U8:
+            if(!GL_SUPPORT(NV_TEXTURE_SHADER)) {
+                /* Correct the sign in all channels. The writemask just applies as-is, no
+                 * need for checking the mask size
+                 */
+                shader_glsl_add_dst_param(arg, arg->dst,
+                                          WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 |
+                                          WINED3DSP_WRITEMASK_2 | WINED3DSP_WRITEMASK_3,
+                                          &dst_param);
+                shader_addline(arg->buffer, "%s%s = %s%s * 2.0 - 1.0;\n", dst_param.reg_name, dst_param.mask_str,
+                               dst_param.reg_name, dst_param.mask_str);
+            }
+            break;
+
+            /* stupid compiler */
+        default:
+            break;
+    }
+}
 
 /*****************************************************************************
  * 
@@ -1071,7 +1286,7 @@ void shader_glsl_cross(SHADER_OPCODE_ARG *arg) {
     shader_glsl_append_dst(arg->buffer, arg);
     shader_glsl_add_src_param(arg, arg->src[0], arg->src_addr[0], src_mask, &src0_param);
     shader_glsl_add_src_param(arg, arg->src[1], arg->src_addr[1], src_mask, &src1_param);
-    shader_addline(arg->buffer, "cross(%s, %s).%s);\n", src0_param.param_str, src1_param.param_str, dst_mask);
+    shader_addline(arg->buffer, "cross(%s, %s)%s);\n", src0_param.param_str, src1_param.param_str, dst_mask);
 }
 
 /* Process the WINED3DSIO_POW instruction in GLSL (dst = |src0|^src1)
@@ -1593,6 +1808,7 @@ void shader_glsl_callnz(SHADER_OPCODE_ARG* arg) {
  ********************************************/
 void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
     IWineD3DPixelShaderImpl* This = (IWineD3DPixelShaderImpl*) arg->shader;
+    IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
     DWORD hex_version = This->baseShader.hex_version;
     char dst_swizzle[6];
     glsl_sample_function_t sample_function;
@@ -1607,7 +1823,6 @@ void pshader_glsl_tex(SHADER_OPCODE_ARG* arg) {
     /* 1.0-1.4: Use destination register as sampler source.
      * 2.0+: Use provided sampler source. */
     if (hex_version < WINED3DPS_VERSION(1,4)) {
-        IWineD3DDeviceImpl* deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
         DWORD flags;
 
         sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
@@ -1832,8 +2047,8 @@ void pshader_glsl_texdepth(SHADER_OPCODE_ARG* arg) {
 
     /* Tests show that texdepth never returns anything below 0.0, and that r5.y is clamped to 1.0.
      * Negative input is accepted, -0.25 / -0.5 returns 0.5. GL should clamp gl_FragDepth to [0;1], but
-     * this doesn't always work, so clamp the results manually. Wether or not the x value is clamped at 1
-     * too is irrelevant, since if x = 0, any y value < 1.0(and > 1.0 is not allowed) results in a result
+     * this doesn't always work, so clamp the results manually. Whether or not the x value is clamped at 1
+     * too is irrelevant, since if x = 0, any y value < 1.0 (and > 1.0 is not allowed) results in a result
      * >= 1.0 or < 0.0
      */
     shader_addline(arg->buffer, "gl_FragDepth = (%s.y == 0.0) ? 1.0 : clamp((%s.x / min(%s.y, 1.0)), 0.0, 1.0);\n", dst_param.reg_name, dst_param.reg_name, dst_param.reg_name);
@@ -2083,6 +2298,7 @@ void pshader_glsl_bem(SHADER_OPCODE_ARG* arg) {
 /** Process the WINED3DSIO_TEXREG2AR instruction in GLSL
  * Sample 2D texture at dst using the alpha & red (wx) components of src as texture coordinates */
 void pshader_glsl_texreg2ar(SHADER_OPCODE_ARG* arg) {
+
     glsl_src_param_t src0_param;
     DWORD sampler_idx = arg->dst & WINED3DSP_REGNUM_MASK;
     char dst_mask[6];
@@ -2483,5 +2699,6 @@ const shader_backend_t glsl_shader_backend = {
     &shader_glsl_select,
     &shader_glsl_select_depth_blt,
     &shader_glsl_load_constants,
-    &shader_glsl_cleanup
+    &shader_glsl_cleanup,
+    &shader_glsl_color_correction
 };

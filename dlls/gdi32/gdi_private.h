@@ -71,7 +71,7 @@ typedef struct {
 
 struct gdi_obj_funcs
 {
-    HGDIOBJ (*pSelectObject)( HGDIOBJ handle, void *obj, HDC hdc );
+    HGDIOBJ (*pSelectObject)( HGDIOBJ handle, HDC hdc );
     INT     (*pGetObject16)( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
     INT     (*pGetObjectA)( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
     INT     (*pGetObjectW)( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
@@ -383,7 +383,6 @@ typedef struct tagBITMAPOBJ
 #define WINE_GCPW_DIR_MASK 3
 extern BOOL BIDI_Reorder( LPCWSTR lpString, INT uCount, DWORD dwFlags, DWORD dwWineGCP_Flags,
                           LPWSTR lpOutString, INT uCountOut, UINT *lpOrder );
-extern BOOL BidiAvail;
 
 /* bitmap.c */
 extern HBITMAP BITMAP_CopyBitmap( HBITMAP hbitmap );
@@ -394,11 +393,11 @@ extern INT BITMAP_GetWidthBytes( INT bmWidth, INT bpp );
 extern void CLIPPING_UpdateGCRegion( DC * dc );
 
 /* dc.c */
-extern DC * DC_AllocDC( const DC_FUNCTIONS *funcs, WORD magic );
+extern DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic );
 extern DC * DC_GetDCUpdate( HDC hdc );
 extern DC * DC_GetDCPtr( HDC hdc );
 extern void DC_ReleaseDCPtr( DC *dc );
-extern BOOL DC_FreeDCPtr( DC *dc );
+extern BOOL free_dc_ptr( DC *dc );
 extern DC *get_dc_ptr( HDC hdc );
 extern void release_dc_ptr( DC *dc );
 extern void update_dc( DC *dc );
@@ -421,6 +420,7 @@ extern HENHMETAFILE EMF_Create_HENHMETAFILE(ENHMETAHEADER *emh, BOOL on_disk );
 
 /* freetype.c */
 extern INT WineEngAddFontResourceEx(LPCWSTR, DWORD, PVOID);
+extern HANDLE WineEngAddFontMemResourceEx(PVOID, DWORD, PVOID, LPDWORD);
 extern GdiFont* WineEngCreateFontInstance(DC*, HFONT);
 extern BOOL WineEngDestroyFontInstance(HFONT handle);
 extern DWORD WineEngEnumFonts(LPLOGFONTW, FONTENUMPROCW, LPARAM);
@@ -430,7 +430,7 @@ extern BOOL WineEngGetCharABCWidthsI(GdiFont *font, UINT firstChar,
                                     UINT count, LPWORD pgi, LPABC buffer);
 extern BOOL WineEngGetCharWidth(GdiFont*, UINT, UINT, LPINT);
 extern DWORD WineEngGetFontData(GdiFont*, DWORD, DWORD, LPVOID, DWORD);
-extern DWORD WineEngGetFontUnicodeRanges(HDC, LPGLYPHSET);
+extern DWORD WineEngGetFontUnicodeRanges(GdiFont *, LPGLYPHSET);
 extern DWORD WineEngGetGlyphIndices(GdiFont *font, LPCWSTR lpstr, INT count,
                                     LPWORD pgi, DWORD flags);
 extern DWORD WineEngGetGlyphOutline(GdiFont*, UINT glyph, UINT format,
@@ -444,6 +444,7 @@ extern BOOL WineEngGetTextExtentExPoint(GdiFont*, LPCWSTR, INT, INT, LPINT, LPIN
 extern BOOL WineEngGetTextExtentPointI(GdiFont*, const WORD *, INT, LPSIZE);
 extern INT  WineEngGetTextFace(GdiFont*, INT, LPWSTR);
 extern BOOL WineEngGetTextMetrics(GdiFont*, LPTEXTMETRICW);
+extern BOOL WineEngFontIsLinked(GdiFont*);
 extern BOOL WineEngInit(void);
 extern BOOL WineEngRemoveFontResourceEx(LPCWSTR, DWORD, PVOID);
 
@@ -455,6 +456,8 @@ extern BOOL GDI_FreeObject( HGDIOBJ, void *obj );
 extern void *GDI_GetObjPtr( HGDIOBJ, WORD );
 extern void GDI_ReleaseObj( HGDIOBJ );
 extern void GDI_CheckNotLock(void);
+extern BOOL GDI_inc_ref_count( HGDIOBJ handle );
+extern BOOL GDI_dec_ref_count( HGDIOBJ handle );
 extern BOOL GDI_hdc_using_object(HGDIOBJ obj, HDC hdc);
 extern BOOL GDI_hdc_not_using_object(HGDIOBJ obj, HDC hdc);
 

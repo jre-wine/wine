@@ -263,50 +263,17 @@ static BOOL joydev_enum_deviceW(DWORD dwDevType, DWORD dwFlags, LPDIDEVICEINSTAN
 }
 
 /*
- * Get a config key from either the app-specific or the default config
- */
-
-static inline DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
-                                    char *buffer, DWORD size )
-{
-    if (appkey && !RegQueryValueExA( appkey, name, 0, NULL, (LPBYTE)buffer, &size ))
-        return 0;
-
-    if (defkey && !RegQueryValueExA( defkey, name, 0, NULL, (LPBYTE)buffer, &size ))
-        return 0;
-
-    return ERROR_FILE_NOT_FOUND;
-}
-
-/*
  * Setup the dinput options.
  */
 
 static HRESULT setup_dinput_options(JoystickImpl * device)
 {
     char buffer[MAX_PATH+16];
-    HKEY hkey, appkey = 0;
-    DWORD len;
+    HKEY hkey, appkey;
 
     buffer[MAX_PATH]='\0';
 
-    /* @@ Wine registry key: HKCU\Software\Wine\DirectInput */
-    if (RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\DirectInput", &hkey)) hkey = 0;
-
-    len = GetModuleFileNameA( 0, buffer, MAX_PATH );
-    if (len && len < MAX_PATH) {
-        HKEY tmpkey;
-        /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\DirectInput */
-        if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\AppDefaults", &tmpkey ))
-        {
-            char *p, *appname = buffer;
-            if ((p = strrchr( appname, '/' ))) appname = p + 1;
-            if ((p = strrchr( appname, '\\' ))) appname = p + 1;
-            strcat( appname, "\\DirectInput" );
-            if (RegOpenKeyA( tmpkey, appname, &appkey )) appkey = 0;
-            RegCloseKey( tmpkey );
-        }
-    }
+    get_app_key(&hkey, &appkey);
 
     /* get options */
 

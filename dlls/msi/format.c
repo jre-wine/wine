@@ -315,13 +315,13 @@ static BOOL find_next_outermost_key(LPCWSTR source, DWORD len_remaining,
     INT total_count = 0;
     int i;
 
+    *nested = FALSE;
     *mark = scanW(source,'[',len_remaining);
     if (!*mark)
         return FALSE;
 
     count = 1;
     total_count = 1;
-    *nested = FALSE;
     for (i = 1; (*mark - source) + i < len_remaining && count > 0; i++)
     {
         if ((*mark)[i] == '[' && (*mark)[i-1] != '\\')
@@ -428,7 +428,7 @@ static DWORD deformat_string_internal(MSIPACKAGE *package, LPCWSTR ptr,
     DWORD sz;
     LPBYTE newdata = NULL;
     const WCHAR* progress = NULL;
-    BOOL nested;
+    BOOL nested = FALSE;
 
     if (ptr==NULL)
     {
@@ -626,8 +626,8 @@ UINT MSI_FormatRecordW( MSIPACKAGE* package, MSIRECORD* record, LPWSTR buffer,
 
     TRACE("(%s)\n",debugstr_w(rec));
 
-    len = deformat_string_internal(package,rec,&deformated,strlenW(rec),
-                                   record, NULL);
+    len = deformat_string_internal(package,rec,&deformated,
+                                   rec ? strlenW(rec) : 0, record, NULL);
 
     if (buffer)
     {

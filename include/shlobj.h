@@ -43,6 +43,7 @@ UINT         WINAPI SHAddFromPropSheetExtArray(HPSXA,LPFNADDPROPSHEETPAGE,LPARAM
 LPVOID       WINAPI SHAlloc(ULONG);
 HRESULT      WINAPI SHCoCreateInstance(LPCWSTR,const CLSID*,IUnknown*,REFIID,LPVOID*);
 HPSXA        WINAPI SHCreatePropSheetExtArray(HKEY,LPCWSTR,UINT);
+HPSXA        WINAPI SHCreatePropSheetExtArrayEx(HKEY,LPCWSTR,UINT,IDataObject*);
 DWORD        WINAPI SHCLSIDFromStringA(LPCSTR,CLSID*);
 DWORD        WINAPI SHCLSIDFromStringW(LPCWSTR,CLSID*);
 #define             SHCLSIDFromString WINELIB_NAME_AW(SHCLSIDFromString)
@@ -149,7 +150,6 @@ typedef struct
 */
 
 typedef GUID SHELLVIEWID;
-#define SV_CLASS_NAME   ("SHELLDLL_DefView")
 
 #define FCIDM_SHVIEWFIRST       0x0000
 /* undocumented */
@@ -1076,7 +1076,7 @@ HRESULT WINAPI SHGetFolderPathW(HWND hwnd, int nFolder, HANDLE hToken, DWORD dwF
 #define CSIDL_SENDTO		0x0009
 #define CSIDL_BITBUCKET		0x000a
 #define CSIDL_STARTMENU		0x000b
-#define CSIDL_MYDOCUMENTS	0x000c
+#define CSIDL_MYDOCUMENTS	CSIDL_PERSONAL
 #define CSIDL_MYMUSIC		0x000d
 #define CSIDL_MYVIDEO		0x000e
 #define CSIDL_DESKTOPDIRECTORY	0x0010

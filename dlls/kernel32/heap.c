@@ -480,7 +480,7 @@ BOOL WINAPI GlobalUnlock(HGLOBAL hmem)
     PGLOBAL32_INTERN pintern;
     BOOL locked;
 
-    if (ISPOINTER(hmem)) return FALSE;
+    if (ISPOINTER(hmem)) return TRUE;
 
     RtlLockHeap(GetProcessHeap());
     __TRY
@@ -741,7 +741,11 @@ HGLOBAL WINAPI GlobalFree(HGLOBAL hmem)
         hreturned = 0;
         if(ISPOINTER(hmem)) /* POINTER */
         {
-            if(!HeapFree(GetProcessHeap(), 0, (LPVOID) hmem)) hmem = 0;
+            if(!HeapFree(GetProcessHeap(), 0, (LPVOID) hmem))
+            {
+                SetLastError(ERROR_INVALID_HANDLE);
+                hreturned = hmem;
+            }
         }
         else  /* HANDLE */
         {
@@ -803,7 +807,11 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
    DWORD                retval;
    PGLOBAL32_INTERN     pintern;
 
-   if (!hmem) return 0;
+   if (!((ULONG_PTR)hmem >> 16))
+   {
+       SetLastError(ERROR_INVALID_HANDLE);
+       return 0;
+   }
 
    if(ISPOINTER(hmem))
    {

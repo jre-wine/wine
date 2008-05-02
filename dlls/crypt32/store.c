@@ -781,14 +781,6 @@ HCERTSTORE WINAPI CertOpenSystemStoreW(HCRYPTPROV_LEGACY hProv,
      CERT_SYSTEM_STORE_CURRENT_USER, szSubSystemProtocol);
 }
 
-BOOL WINAPI CertSaveStore(HCERTSTORE hCertStore, DWORD dwMsgAndCertEncodingType,
-             DWORD dwSaveAs, DWORD dwSaveTo, void* pvSaveToPara, DWORD dwFlags)
-{
-    FIXME("(%p,%d,%d,%d,%p,%08x) stub!\n", hCertStore, 
-          dwMsgAndCertEncodingType, dwSaveAs, dwSaveTo, pvSaveToPara, dwFlags);
-    return TRUE;
-}
-
 #define CertContext_CopyProperties(to, from) \
  Context_CopyProperties((to), (from), sizeof(CERT_CONTEXT))
 

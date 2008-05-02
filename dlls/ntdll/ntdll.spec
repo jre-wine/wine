@@ -104,7 +104,7 @@
 # @ stub NtAllocateUserPhysicalPages
 @ stdcall NtAllocateUuids(ptr ptr ptr)
 @ stdcall NtAllocateVirtualMemory(long ptr ptr ptr long long)
-@ stub NtAreMappedFilesTheSame
+@ stdcall NtAreMappedFilesTheSame(ptr ptr)
 # @ stub NtAssignProcessToJobObject
 @ stub NtCallbackReturn
 # @ stub NtCancelDeviceWakeupRequest
@@ -402,8 +402,8 @@
 @ stub RtlAddActionToRXact
 @ stdcall RtlAddAtomToAtomTable(ptr wstr ptr)
 @ stub RtlAddAttributeActionToRXact
-@ stdcall RtlAddAuditAccessAce(ptr long long ptr long long) 
-# @ stub RtlAddAuditAccessAceEx
+@ stdcall RtlAddAuditAccessAce(ptr long long ptr long long)
+@ stdcall RtlAddAuditAccessAceEx(ptr long long long ptr long long)
 # @ stub RtlAddAuditAccessObjectAce
 # @ stub RtlAddCompoundAce
 # @ stub RtlAddRange
@@ -948,7 +948,7 @@
 # @ stub ZwAllocateUserPhysicalPages
 @ stdcall ZwAllocateUuids(ptr ptr ptr) NtAllocateUuids
 @ stdcall ZwAllocateVirtualMemory(long ptr ptr ptr long long) NtAllocateVirtualMemory
-@ stub ZwAreMappedFilesTheSame
+@ stdcall ZwAreMappedFilesTheSame(ptr ptr) NtAreMappedFilesTheSame
 # @ stub ZwAssignProcessToJobObject
 @ stub ZwCallbackReturn
 # @ stub ZwCancelDeviceWakeupRequest

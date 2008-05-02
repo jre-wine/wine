@@ -152,7 +152,7 @@ extern void msvcrt_free_args(void);
 extern void msvcrt_init_signals(void);
 extern void msvcrt_free_signals(void);
 
-extern unsigned msvcrt_create_io_inherit_block(STARTUPINFOA*);
+extern unsigned msvcrt_create_io_inherit_block(WORD*, BYTE**);
 
 /* run-time error codes */
 #define _RT_STACK       0
@@ -627,7 +627,7 @@ int            MSVCRT_vsnwprintf(MSVCRT_wchar_t *str, unsigned int len,
 int            MSVCRT_raise(int sig);
 
 #ifndef __WINE_MSVCRT_TEST
-int            _write(int,const void*,unsigned int);
+int            MSVCRT__write(int,const void*,unsigned int);
 int            _getch(void);
 int            _ismbstrail(const unsigned char* start, const unsigned char* str);
 MSVCRT_intptr_t _spawnve(int,const char*,const char* const *,const char* const *);
@@ -647,10 +647,12 @@ MSVCRT_wchar_t*** __p__wenviron(void);
 char*         _strdate(char* date);
 char*         _strtime(char* date);
 void          _ftime(struct MSVCRT__timeb *buf);
-int           _close(int);
-int           _dup(int);
-int           _dup2(int, int);
-int           _pipe(int *, unsigned int, int);
+int           MSVCRT__close(int);
+int           MSVCRT__dup(int);
+int           MSVCRT__dup2(int, int);
+int           MSVCRT__pipe(int *, unsigned int, int);
+MSVCRT_wchar_t* _wgetenv(const MSVCRT_wchar_t*);
+void          _wsearchenv(const MSVCRT_wchar_t*, const MSVCRT_wchar_t*, MSVCRT_wchar_t*);
 #endif
 
 #endif /* __WINE_MSVCRT_H */

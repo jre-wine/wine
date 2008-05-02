@@ -36,9 +36,9 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 typedef struct {
-    const IHTMLAnchorElementVtbl *lpHTMLAnchorElementVtbl;
+    HTMLElement element;
 
-    HTMLElement *element;
+    const IHTMLAnchorElementVtbl *lpHTMLAnchorElementVtbl;
 } HTMLAnchorElement;
 
 #define HTMLANCHOR(x)  ((IHTMLAnchorElement*)  &(x)->lpHTMLAnchorElementVtbl)
@@ -69,7 +69,7 @@ static HRESULT WINAPI HTMLAnchorElement_QueryInterface(IHTMLAnchorElement *iface
         return S_OK;
     }
 
-    hres = HTMLElement_QI(This->element, riid, ppv);
+    hres = HTMLElement_QI(&This->element, riid, ppv);
     if(FAILED(hres))
         WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
 
@@ -80,18 +80,14 @@ static ULONG WINAPI HTMLAnchorElement_AddRef(IHTMLAnchorElement *iface)
 {
     HTMLAnchorElement *This = HTMLANCHOR_THIS(iface);
 
-    TRACE("(%p)\n", This);
-
-    return IHTMLDocument2_AddRef(HTMLDOC(This->element->node.doc));
+    return IHTMLDOMNode_AddRef(HTMLDOMNODE(&This->element.node));
 }
 
 static ULONG WINAPI HTMLAnchorElement_Release(IHTMLAnchorElement *iface)
 {
     HTMLAnchorElement *This = HTMLANCHOR_THIS(iface);
 
-    TRACE("(%p)\n", This);
-
-    return IHTMLDocument2_Release(HTMLDOC(This->element->node.doc));
+    return IHTMLDOMNode_Release(HTMLDOMNODE(&This->element.node));
 }
 
 static HRESULT WINAPI HTMLAnchorElement_GetTypeInfoCount(IHTMLAnchorElement *iface, UINT *pctinfo)
@@ -473,13 +469,14 @@ static const IHTMLAnchorElementVtbl HTMLAnchorElementVtbl = {
     HTMLAnchorElement_blur
 };
 
-void HTMLAnchorElement_Create(HTMLElement *element)
+HTMLElement *HTMLAnchorElement_Create(nsIDOMHTMLElement *nselem)
 {
     HTMLAnchorElement *ret = mshtml_alloc(sizeof(HTMLAnchorElement));
 
     ret->lpHTMLAnchorElementVtbl = &HTMLAnchorElementVtbl;
-    ret->element = element;
 
-    element->impl = (IUnknown*)HTMLANCHOR(ret);
-    element->destructor = HTMLAnchorElement_destructor;
+    ret->element.impl = (IUnknown*)HTMLANCHOR(ret);
+    ret->element.destructor = HTMLAnchorElement_destructor;
+
+    return &ret->element;
 }

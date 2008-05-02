@@ -71,9 +71,9 @@ static inline DC *get_dc_obj( HDC hdc )
 
 
 /***********************************************************************
- *           DC_AllocDC
+ *           alloc_dc_ptr
  */
-DC *DC_AllocDC( const DC_FUNCTIONS *funcs, WORD magic )
+DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic )
 {
     HDC hdc;
     DC *dc;
@@ -149,6 +149,7 @@ DC *DC_AllocDC( const DC_FUNCTIONS *funcs, WORD magic )
     dc->BoundsRect.bottom   = 0;
     dc->saved_visrgn        = NULL;
     PATH_InitGdiPath(&dc->path);
+    GDI_ReleaseObj( dc->hSelf );
     return dc;
 }
 
@@ -177,32 +178,6 @@ DC *DC_GetDCPtr( HDC hdc )
     return dc;
 }
 
-/***********************************************************************
- *           DC_GetDCUpdate
- *
- * Retrieve a DC ptr while making sure the visRgn is updated.
- * This function may call up to USER so the GDI lock should _not_
- * be held when calling it.
- */
-DC *DC_GetDCUpdate( HDC hdc )
-{
-    DC *dc = DC_GetDCPtr( hdc );
-    if (!dc) return NULL;
-    while (InterlockedExchange( &dc->dirty, 0 ))
-    {
-        DCHOOKPROC proc = dc->hookThunk;
-        if (proc)
-        {
-            DWORD_PTR data = dc->dwHookData;
-            DC_ReleaseDCPtr( dc );
-            proc( hdc, DCHC_INVALIDVISRGN, data, 0 );
-            if (!(dc = DC_GetDCPtr( hdc ))) break;
-            /* otherwise restart the loop in case it became dirty again in the meantime */
-        }
-    }
-    return dc;
-}
-
 
 /***********************************************************************
  *           DC_ReleaseDCPtr
@@ -215,11 +190,13 @@ void DC_ReleaseDCPtr( DC *dc )
 
 
 /***********************************************************************
- *           DC_FreeDCPtr
+ *           free_dc_ptr
  */
-BOOL DC_FreeDCPtr( DC *dc )
+BOOL free_dc_ptr( DC *dc )
 {
     assert( dc->refcount == 1 );
+    /* grab the gdi lock again */
+    if (!GDI_GetObjPtr( dc->hSelf, MAGIC_DONTCARE )) return FALSE;  /* shouldn't happen */
     return GDI_FreeObject( dc->hSelf, dc );
 }
 
@@ -389,10 +366,10 @@ HDC WINAPI GetDCState( HDC hdc )
     DC * newdc, * dc;
     HGDIOBJ handle;
 
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
     if (!(newdc = GDI_AllocObject( sizeof(DC), GDIMAGIC(dc->header.wMagic), &handle, &dc_funcs )))
     {
-      DC_ReleaseDCPtr( dc );
+      release_dc_ptr( dc );
       return 0;
     }
     TRACE("(%p): returning %p\n", hdc, handle );
@@ -444,6 +421,7 @@ HDC WINAPI GetDCState( HDC hdc )
     newdc->refcount  = 1;
     newdc->saveLevel = 0;
     newdc->saved_dc  = 0;
+    GDI_ReleaseObj( handle );
 
     PATH_InitGdiPath( &newdc->path );
 
@@ -475,8 +453,8 @@ HDC WINAPI GetDCState( HDC hdc )
     } else
         newdc->gdiFont = 0;
 
-    DC_ReleaseDCPtr( newdc );
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( newdc );
+    release_dc_ptr( dc );
     return handle;
 }
 
@@ -488,20 +466,21 @@ void WINAPI SetDCState( HDC hdc, HDC hdcs )
 {
     DC *dc, *dcs;
 
-    if (!(dc = DC_GetDCUpdate( hdc ))) return;
-    if (!(dcs = DC_GetDCPtr( hdcs )))
+    if (!(dc = get_dc_ptr( hdc ))) return;
+    if (!(dcs = get_dc_ptr( hdcs )))
     {
-      DC_ReleaseDCPtr( dc );
-      return;
+        release_dc_ptr( dc );
+        return;
     }
     if (!dcs->flags & DC_SAVED)
     {
-      DC_ReleaseDCPtr( dc );
-      DC_ReleaseDCPtr( dcs );
-      return;
+        release_dc_ptr( dc );
+        release_dc_ptr( dcs );
+        return;
     }
     TRACE("%p %p\n", hdc, hdcs );
 
+    update_dc( dc );
     dc->flags            = dcs->flags & ~DC_SAVED;
     dc->layout           = dcs->layout;
     dc->hDevice          = dcs->hDevice;
@@ -569,8 +548,8 @@ void WINAPI SetDCState( HDC hdc, HDC hdcs )
     SetBkColor( hdc, dcs->backgroundColor);
     SetTextColor( hdc, dcs->textColor);
     GDISelectPalette( hdc, dcs->hPalette, FALSE );
-    DC_ReleaseDCPtr( dcs );
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
+    release_dc_ptr( dcs );
 }
 
 
@@ -601,7 +580,7 @@ INT WINAPI SaveDC( HDC hdc )
     DC * dc, * dcs;
     INT ret;
 
-    dc = DC_GetDCPtr( hdc );
+    dc = get_dc_ptr( hdc );
     if (!dc) return 0;
 
     if(dc->funcs->pSaveDC)
@@ -609,16 +588,16 @@ INT WINAPI SaveDC( HDC hdc )
         ret = dc->funcs->pSaveDC( dc->physDev );
         if(ret)
             ret = ++dc->saveLevel;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
         return ret;
     }
 
     if (!(hdcs = GetDCState( hdc )))
     {
-      DC_ReleaseDCPtr( dc );
-      return 0;
+        release_dc_ptr( dc );
+        return 0;
     }
-    dcs = DC_GetDCPtr( hdcs );
+    dcs = get_dc_ptr( hdcs );
 
     /* Copy path. The reason why path saving / restoring is in SaveDC/
      * RestoreDC and not in GetDCState/SetDCState is that the ...DCState
@@ -628,8 +607,8 @@ INT WINAPI SaveDC( HDC hdc )
      */
     if (!PATH_AssignGdiPath( &dcs->path, &dc->path ))
     {
-        DC_ReleaseDCPtr( dc );
-	DC_ReleaseDCPtr( dcs );
+        release_dc_ptr( dc );
+        release_dc_ptr( dcs );
 	DeleteDC( hdcs );
 	return 0;
     }
@@ -638,8 +617,8 @@ INT WINAPI SaveDC( HDC hdc )
     dc->saved_dc = hdcs;
     TRACE("(%p): returning %d\n", hdc, dc->saveLevel+1 );
     ret = ++dc->saveLevel;
-    DC_ReleaseDCPtr( dcs );
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dcs );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -653,22 +632,23 @@ BOOL WINAPI RestoreDC( HDC hdc, INT level )
     BOOL success;
 
     TRACE("%p %d\n", hdc, level );
-    dc = DC_GetDCUpdate( hdc );
-    if(!dc) return FALSE;
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
 
     if(abs(level) > dc->saveLevel || level == 0)
     {
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
         return FALSE;
     }
-        
+
+    update_dc( dc );
+
     if(dc->funcs->pRestoreDC)
     {
         success = dc->funcs->pRestoreDC( dc->physDev, level );
         if(level < 0) level = dc->saveLevel + level + 1;
         if(success)
             dc->saveLevel = level - 1;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
         return success;
     }
 
@@ -677,10 +657,10 @@ BOOL WINAPI RestoreDC( HDC hdc, INT level )
     while (dc->saveLevel >= level)
     {
         HDC hdcs = dc->saved_dc;
-	if (!(dcs = DC_GetDCPtr( hdcs )))
+	if (!(dcs = get_dc_ptr( hdcs )))
 	{
-	  DC_ReleaseDCPtr( dc );
-	  return FALSE;
+            success = FALSE;
+            break;
 	}
         dc->saved_dc = dcs->saved_dc;
         dcs->saved_dc = 0;
@@ -692,12 +672,10 @@ BOOL WINAPI RestoreDC( HDC hdc, INT level )
 		 * returning FALSE but still destroying the saved DC state */
 	        success=FALSE;
 	}
-        DC_ReleaseDCPtr( dcs );
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dcs );
 	DeleteDC( hdcs );
-        if (!(dc = DC_GetDCPtr( hdc ))) return FALSE;
     }
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return success;
 }
 
@@ -730,7 +708,7 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
     }
-    if (!(dc = DC_AllocDC( funcs, DC_MAGIC ))) goto error;
+    if (!(dc = alloc_dc_ptr( funcs, DC_MAGIC ))) goto error;
     hdc = dc->hSelf;
 
     dc->hBitmap = GetStockObject( DEFAULT_BITMAP );
@@ -750,12 +728,12 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
                 GetDeviceCaps( hdc, DESKTOPHORZRES ), GetDeviceCaps( hdc, DESKTOPVERTRES ) );
 
     DC_InitDC( dc );
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return hdc;
 
 error:
     if (dc && dc->hVisRgn) DeleteObject( dc->hVisRgn );
-    if (dc) DC_FreeDCPtr( dc );
+    if (dc) free_dc_ptr( dc );
     DRIVER_release_driver( funcs );
     return 0;
 }
@@ -826,25 +804,26 @@ HDC WINAPI CreateICW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
 HDC WINAPI CreateCompatibleDC( HDC hdc )
 {
     DC *dc, *origDC;
+    HDC ret;
     const DC_FUNCTIONS *funcs = NULL;
     PHYSDEV physDev = NULL;
 
     GDI_CheckNotLock();
 
-    if ((origDC = DC_GetDCPtr( hdc )))
+    if ((origDC = get_dc_ptr( hdc )))
     {
         if (GetObjectType( hdc ) == OBJ_DC)
         {
             funcs = origDC->funcs;
             physDev = origDC->physDev;
         }
-        DC_ReleaseDCPtr( origDC ); /* can't hold the lock while loading the driver */
+        release_dc_ptr( origDC );
         if (funcs) funcs = DRIVER_get_driver( funcs );
     }
 
     if (!funcs && !(funcs = DRIVER_load_driver( displayW ))) return 0;
 
-    if (!(dc = DC_AllocDC( funcs, MEMORY_DC_MAGIC ))) goto error;
+    if (!(dc = alloc_dc_ptr( funcs, MEMORY_DC_MAGIC ))) goto error;
 
     TRACE("(%p): returning %p\n", hdc, dc->hSelf );
 
@@ -855,6 +834,7 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
      * the new DC. The driver may use this read-only info
      * while creating the compatible DC below. */
     dc->physDev = physDev;
+    ret = dc->hSelf;
 
     if (dc->funcs->pCreateDC &&
         !dc->funcs->pCreateDC( dc->hSelf, &dc->physDev, NULL, NULL, NULL, NULL ))
@@ -864,12 +844,12 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
     }
 
     DC_InitDC( dc );
-    DC_ReleaseDCPtr( dc );
-    return dc->hSelf;
+    release_dc_ptr( dc );
+    return ret;
 
 error:
     if (dc && dc->hVisRgn) DeleteObject( dc->hVisRgn );
-    if (dc) DC_FreeDCPtr( dc );
+    if (dc) free_dc_ptr( dc );
     DRIVER_release_driver( funcs );
     return 0;
 }
@@ -887,29 +867,26 @@ BOOL WINAPI DeleteDC( HDC hdc )
 
     GDI_CheckNotLock();
 
-    if (!(dc = DC_GetDCPtr( hdc ))) return FALSE;
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
     if (dc->refcount != 1)
     {
         FIXME( "not deleting busy DC %p refcount %u\n", dc->hSelf, dc->refcount );
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
         return FALSE;
     }
 
     /* Call hook procedure to check whether is it OK to delete this DC */
-    if (dc->hookThunk)
+    if (dc->hookThunk && !dc->hookThunk( hdc, DCHC_DELETEDC, dc->dwHookData, 0 ))
     {
-        DCHOOKPROC proc = dc->hookThunk;
-        DWORD_PTR data = dc->dwHookData;
-        DC_ReleaseDCPtr( dc );
-        if (!proc( hdc, DCHC_DELETEDC, data, 0 )) return FALSE;
-        if (!(dc = DC_GetDCPtr( hdc ))) return TRUE;  /* deleted by the hook */
+        release_dc_ptr( dc );
+        return FALSE;
     }
 
     while (dc->saveLevel)
     {
         DC * dcs;
         HDC hdcs = dc->saved_dc;
-        if (!(dcs = DC_GetDCPtr( hdcs ))) break;
+        if (!(dcs = get_dc_ptr( hdcs ))) break;
         dc->saved_dc = dcs->saved_dc;
         dc->saveLevel--;
         if (dcs->hClipRgn) DeleteObject( dcs->hClipRgn );
@@ -917,7 +894,7 @@ BOOL WINAPI DeleteDC( HDC hdc )
         if (dcs->hMetaClipRgn) DeleteObject( dcs->hMetaClipRgn );
         if (dcs->hVisRgn) DeleteObject( dcs->hVisRgn );
         PATH_DestroyGdiPath(&dcs->path);
-        DC_FreeDCPtr( dcs );
+        free_dc_ptr( dcs );
     }
 
     if (!(dc->flags & DC_SAVED))
@@ -944,7 +921,7 @@ BOOL WINAPI DeleteDC( HDC hdc )
     if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
     PATH_DestroyGdiPath(&dc->path);
 
-    DC_FreeDCPtr( dc );
+    free_dc_ptr( dc );
     if (funcs) DRIVER_release_driver( funcs );  /* do that after releasing the GDI lock */
     return TRUE;
 }
@@ -958,10 +935,10 @@ HDC WINAPI ResetDCW( HDC hdc, const DEVMODEW *devmode )
     DC *dc;
     HDC ret = hdc;
 
-    if ((dc = DC_GetDCPtr( hdc )))
+    if ((dc = get_dc_ptr( hdc )))
     {
         if (dc->funcs->pResetDC) ret = dc->funcs->pResetDC( dc->physDev, devmode );
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -993,7 +970,7 @@ INT WINAPI GetDeviceCaps( HDC hdc, INT cap )
     DC *dc;
     INT ret = 0;
 
-    if ((dc = DC_GetDCPtr( hdc )))
+    if ((dc = get_dc_ptr( hdc )))
     {
         if (dc->funcs->pGetDeviceCaps) ret = dc->funcs->pGetDeviceCaps( dc->physDev, cap );
         else switch(cap)  /* return meaningful values for some entries */
@@ -1010,7 +987,7 @@ INT WINAPI GetDeviceCaps( HDC hdc, INT cap )
         case LOGPIXELSY:  ret = 72; break;
         case SIZEPALETTE: ret = 2; break;
         }
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1022,11 +999,11 @@ INT WINAPI GetDeviceCaps( HDC hdc, INT cap )
 COLORREF WINAPI GetBkColor( HDC hdc )
 {
     COLORREF ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->backgroundColor;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1038,7 +1015,7 @@ COLORREF WINAPI GetBkColor( HDC hdc )
 COLORREF WINAPI SetBkColor( HDC hdc, COLORREF color )
 {
     COLORREF oldColor;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
 
     TRACE("hdc=%p color=0x%08x\n", hdc, color);
 
@@ -1054,7 +1031,7 @@ COLORREF WINAPI SetBkColor( HDC hdc, COLORREF color )
         }
     }
     dc->backgroundColor = color;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return oldColor;
 }
 
@@ -1065,11 +1042,11 @@ COLORREF WINAPI SetBkColor( HDC hdc, COLORREF color )
 COLORREF WINAPI GetTextColor( HDC hdc )
 {
     COLORREF ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->textColor;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1081,7 +1058,7 @@ COLORREF WINAPI GetTextColor( HDC hdc )
 COLORREF WINAPI SetTextColor( HDC hdc, COLORREF color )
 {
     COLORREF oldColor;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
 
     TRACE(" hdc=%p color=0x%08x\n", hdc, color);
 
@@ -1097,7 +1074,7 @@ COLORREF WINAPI SetTextColor( HDC hdc, COLORREF color )
         }
     }
     dc->textColor = color;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return oldColor;
 }
 
@@ -1108,11 +1085,11 @@ COLORREF WINAPI SetTextColor( HDC hdc, COLORREF color )
 UINT WINAPI GetTextAlign( HDC hdc )
 {
     UINT ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->textAlign;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1124,7 +1101,7 @@ UINT WINAPI GetTextAlign( HDC hdc )
 UINT WINAPI SetTextAlign( HDC hdc, UINT align )
 {
     UINT ret;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     TRACE("hdc=%p align=%d\n", hdc, align);
 
@@ -1135,7 +1112,7 @@ UINT WINAPI SetTextAlign( HDC hdc, UINT align )
             ret = GDI_ERROR;
     if (ret != GDI_ERROR)
 	dc->textAlign = align;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1147,11 +1124,11 @@ BOOL WINAPI GetDCOrgEx( HDC hDC, LPPOINT lpp )
     DC * dc;
 
     if (!lpp) return FALSE;
-    if (!(dc = DC_GetDCPtr( hDC ))) return FALSE;
+    if (!(dc = get_dc_ptr( hDC ))) return FALSE;
 
     lpp->x = lpp->y = 0;
     if (dc->funcs->pGetDCOrgEx) dc->funcs->pGetDCOrgEx( dc->physDev, lpp );
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -1163,10 +1140,10 @@ DWORD WINAPI SetDCOrg16( HDC16 hdc16, INT16 x, INT16 y )
 {
     DWORD prevOrg = 0;
     HDC hdc = HDC_32( hdc16 );
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
     if (!dc) return 0;
     if (dc->funcs->pSetDCOrg) prevOrg = dc->funcs->pSetDCOrg( dc->physDev, x, y );
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return prevOrg;
 }
 
@@ -1177,11 +1154,11 @@ DWORD WINAPI SetDCOrg16( HDC16 hdc16, INT16 x, INT16 y )
 INT WINAPI GetGraphicsMode( HDC hdc )
 {
     INT ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->GraphicsMode;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1193,7 +1170,7 @@ INT WINAPI GetGraphicsMode( HDC hdc )
 INT WINAPI SetGraphicsMode( HDC hdc, INT mode )
 {
     INT ret = 0;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     /* One would think that setting the graphics mode to GM_COMPATIBLE
      * would also reset the world transformation matrix to the unity
@@ -1206,7 +1183,7 @@ INT WINAPI SetGraphicsMode( HDC hdc, INT mode )
         ret = dc->GraphicsMode;
         dc->GraphicsMode = mode;
     }
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1217,11 +1194,11 @@ INT WINAPI SetGraphicsMode( HDC hdc, INT mode )
 INT WINAPI GetArcDirection( HDC hdc )
 {
     INT ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->ArcDirection;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1241,7 +1218,7 @@ INT WINAPI SetArcDirection( HDC hdc, INT nDirection )
 	return 0;
     }
 
-    if ((dc = DC_GetDCPtr( hdc )))
+    if ((dc = get_dc_ptr( hdc )))
     {
         if (dc->funcs->pSetArcDirection)
         {
@@ -1249,7 +1226,7 @@ INT WINAPI SetArcDirection( HDC hdc, INT nDirection )
         }
         nOldDirection = dc->ArcDirection;
         dc->ArcDirection = nDirection;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return nOldDirection;
 }
@@ -1262,9 +1239,9 @@ BOOL WINAPI GetWorldTransform( HDC hdc, LPXFORM xform )
 {
     DC * dc;
     if (!xform) return FALSE;
-    if (!(dc = DC_GetDCPtr( hdc ))) return FALSE;
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
     *xform = dc->xformWorld2Wnd;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -1286,7 +1263,7 @@ BOOL WINAPI GetTransform( HDC hdc, DWORD unknown, LPXFORM xform )
 BOOL WINAPI SetWorldTransform( HDC hdc, const XFORM *xform )
 {
     BOOL ret = FALSE;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     if (!dc) return FALSE;
     if (!xform) goto done;
@@ -1304,7 +1281,7 @@ BOOL WINAPI SetWorldTransform( HDC hdc, const XFORM *xform )
     DC_UpdateXforms( dc );
     ret = TRUE;
  done:
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1337,7 +1314,7 @@ BOOL WINAPI ModifyWorldTransform( HDC hdc, const XFORM *xform,
     DWORD iMode )
 {
     BOOL ret = FALSE;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     /* Check for illegal parameters */
     if (!dc) return FALSE;
@@ -1377,7 +1354,7 @@ BOOL WINAPI ModifyWorldTransform( HDC hdc, const XFORM *xform,
     DC_UpdateXforms( dc );
     ret = TRUE;
  done:
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1438,7 +1415,7 @@ BOOL WINAPI CombineTransform( LPXFORM xformResult, const XFORM *xform1,
  */
 BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD_PTR dwHookData )
 {
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     if (!dc) return FALSE;
 
@@ -1447,7 +1424,7 @@ BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD_PTR dwHookData )
         dc->dwHookData = dwHookData;
         dc->hookThunk = hookProc;
     }
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -1456,21 +1433,21 @@ BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD_PTR dwHookData )
 static BOOL WINAPI call_dc_hook16( HDC hdc, WORD code, DWORD_PTR data, LPARAM lParam )
 {
     WORD args[6];
-    DWORD ret;
-    FARPROC16 proc = NULL;
-    DC *dc = DC_GetDCPtr( hdc );
+    DWORD ret = 0;
+    DC *dc = get_dc_ptr( hdc );
 
     if (!dc) return FALSE;
-    proc = dc->hookProc;
-    DC_ReleaseDCPtr( dc );
-    if (!proc) return FALSE;
-    args[5] = HDC_16(hdc);
-    args[4] = code;
-    args[3] = HIWORD(data);
-    args[2] = LOWORD(data);
-    args[1] = HIWORD(lParam);
-    args[0] = LOWORD(lParam);
-    WOWCallback16Ex( (DWORD)proc, WCB16_PASCAL, sizeof(args), args, &ret );
+    if (dc->hookProc)
+    {
+        args[5] = HDC_16(hdc);
+        args[4] = code;
+        args[3] = HIWORD(data);
+        args[2] = LOWORD(data);
+        args[1] = HIWORD(lParam);
+        args[0] = LOWORD(lParam);
+        WOWCallback16Ex( (DWORD)dc->hookProc, WCB16_PASCAL, sizeof(args), args, &ret );
+    }
+    release_dc_ptr( dc );
     return LOWORD(ret);
 }
 
@@ -1479,13 +1456,17 @@ static BOOL WINAPI call_dc_hook16( HDC hdc, WORD code, DWORD_PTR data, LPARAM lP
  */
 BOOL16 WINAPI SetDCHook16( HDC16 hdc16, FARPROC16 hookProc, DWORD dwHookData )
 {
-    HDC hdc = HDC_32( hdc16 );
-    DC *dc = DC_GetDCPtr( hdc );
-    if (!dc) return FALSE;
+    DC *dc = get_dc_ptr( HDC_32(hdc16) );
 
-    dc->hookProc = hookProc;
-    DC_ReleaseDCPtr( dc );
-    return SetDCHook( hdc, call_dc_hook16, dwHookData );
+    if (!dc) return FALSE;
+    if (!(dc->flags & DC_SAVED))
+    {
+        dc->dwHookData = dwHookData;
+        dc->hookThunk = call_dc_hook16;
+        dc->hookProc = hookProc;
+    }
+    release_dc_ptr( dc );
+    return TRUE;
 }
 
 
@@ -1495,13 +1476,13 @@ BOOL16 WINAPI SetDCHook16( HDC16 hdc16, FARPROC16 hookProc, DWORD dwHookData )
 DWORD WINAPI GetDCHook16( HDC16 hdc16, FARPROC16 *phookProc )
 {
     HDC hdc = HDC_32( hdc16 );
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
     DWORD ret;
 
     if (!dc) return 0;
     *phookProc = dc->hookProc;
     ret = dc->dwHookData;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1548,13 +1529,13 @@ INT WINAPI SetICMMode(HDC hdc, INT iEnableICM)
 BOOL WINAPI GetDeviceGammaRamp(HDC hDC, LPVOID ptr)
 {
     BOOL ret = FALSE;
-    DC *dc = DC_GetDCPtr( hDC );
+    DC *dc = get_dc_ptr( hDC );
 
     if( dc )
     {
 	if (dc->funcs->pGetDeviceGammaRamp)
 	    ret = dc->funcs->pGetDeviceGammaRamp(dc->physDev, ptr);
-	DC_ReleaseDCPtr( dc );
+	release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1565,13 +1546,13 @@ BOOL WINAPI GetDeviceGammaRamp(HDC hDC, LPVOID ptr)
 BOOL WINAPI SetDeviceGammaRamp(HDC hDC, LPVOID ptr)
 {
     BOOL ret = FALSE;
-    DC *dc = DC_GetDCPtr( hDC );
+    DC *dc = get_dc_ptr( hDC );
 
     if( dc )
     {
 	if (dc->funcs->pSetDeviceGammaRamp)
 	    ret = dc->funcs->pSetDeviceGammaRamp(dc->physDev, ptr);
-	DC_ReleaseDCPtr( dc );
+	release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1629,7 +1610,7 @@ HCOLORSPACE WINAPI SetColorSpace( HDC hDC, HCOLORSPACE hColorSpace )
 UINT WINAPI GetBoundsRect(HDC hdc, LPRECT rect, UINT flags)
 {
     UINT ret;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     if ( !dc ) return 0;
 
@@ -1645,7 +1626,7 @@ UINT WINAPI GetBoundsRect(HDC hdc, LPRECT rect, UINT flags)
         dc->BoundsRect.bottom = 0;
         dc->flags &= ~DC_BOUNDS_SET;
     }
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1659,7 +1640,7 @@ UINT WINAPI SetBoundsRect(HDC hdc, const RECT* rect, UINT flags)
     DC *dc;
 
     if ((flags & DCB_ENABLE) && (flags & DCB_DISABLE)) return 0;
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
     ret = ((dc->flags & DC_BOUNDS_ENABLE) ? DCB_ENABLE : DCB_DISABLE) |
           ((dc->flags & DC_BOUNDS_SET) ? DCB_SET : DCB_RESET);
@@ -1692,7 +1673,7 @@ UINT WINAPI SetBoundsRect(HDC hdc, const RECT* rect, UINT flags)
     if (flags & DCB_ENABLE) dc->flags |= DC_BOUNDS_ENABLE;
     if (flags & DCB_DISABLE) dc->flags &= ~DC_BOUNDS_ENABLE;
 
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1703,11 +1684,11 @@ UINT WINAPI SetBoundsRect(HDC hdc, const RECT* rect, UINT flags)
 INT WINAPI GetRelAbs( HDC hdc, DWORD dwIgnore )
 {
     INT ret = 0;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->relAbsMode;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1721,11 +1702,11 @@ INT WINAPI GetRelAbs( HDC hdc, DWORD dwIgnore )
 INT WINAPI GetBkMode( HDC hdc )
 {
     INT ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->backgroundMode;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1743,7 +1724,7 @@ INT WINAPI SetBkMode( HDC hdc, INT mode )
         SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
     }
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
     ret = dc->backgroundMode;
     if (dc->funcs->pSetBkMode)
@@ -1751,7 +1732,7 @@ INT WINAPI SetBkMode( HDC hdc, INT mode )
             ret = 0;
     if (ret)
         dc->backgroundMode = mode;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1762,11 +1743,11 @@ INT WINAPI SetBkMode( HDC hdc, INT mode )
 INT WINAPI GetROP2( HDC hdc )
 {
     INT ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->ROPmode;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1784,14 +1765,14 @@ INT WINAPI SetROP2( HDC hdc, INT mode )
         SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
     }
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
     ret = dc->ROPmode;
     if (dc->funcs->pSetROP2)
         if (!dc->funcs->pSetROP2( dc->physDev, mode ))
             ret = 0;
     if (ret)
         dc->ROPmode = mode;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1808,7 +1789,7 @@ INT WINAPI SetRelAbs( HDC hdc, INT mode )
         SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
     }
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
     if (dc->funcs->pSetRelAbs)
         ret = dc->funcs->pSetRelAbs( dc->physDev, mode );
     else
@@ -1816,7 +1797,7 @@ INT WINAPI SetRelAbs( HDC hdc, INT mode )
         ret = dc->relAbsMode;
         dc->relAbsMode = mode;
     }
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1827,11 +1808,11 @@ INT WINAPI SetRelAbs( HDC hdc, INT mode )
 INT WINAPI GetPolyFillMode( HDC hdc )
 {
     INT ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->polyFillMode;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1849,14 +1830,14 @@ INT WINAPI SetPolyFillMode( HDC hdc, INT mode )
         SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
     }
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
     ret = dc->polyFillMode;
     if (dc->funcs->pSetPolyFillMode)
         if (!dc->funcs->pSetPolyFillMode( dc->physDev, mode ))
             ret = 0;
     if (ret)
         dc->polyFillMode = mode;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1867,11 +1848,11 @@ INT WINAPI SetPolyFillMode( HDC hdc, INT mode )
 INT WINAPI GetStretchBltMode( HDC hdc )
 {
     INT ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->stretchBltMode;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1889,14 +1870,14 @@ INT WINAPI SetStretchBltMode( HDC hdc, INT mode )
         SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
     }
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
     ret = dc->stretchBltMode;
     if (dc->funcs->pSetStretchBltMode)
         if (!dc->funcs->pSetStretchBltMode( dc->physDev, mode ))
             ret = 0;
     if (ret)
         dc->stretchBltMode = mode;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
@@ -1907,11 +1888,11 @@ INT WINAPI SetStretchBltMode( HDC hdc, INT mode )
 INT WINAPI GetMapMode( HDC hdc )
 {
     INT ret = 0;
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         ret = dc->MapMode;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -1922,11 +1903,11 @@ INT WINAPI GetMapMode( HDC hdc )
  */
 BOOL WINAPI GetBrushOrgEx( HDC hdc, LPPOINT pt )
 {
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (!dc) return FALSE;
     pt->x = dc->brushOrgX;
     pt->y = dc->brushOrgY;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -1936,11 +1917,11 @@ BOOL WINAPI GetBrushOrgEx( HDC hdc, LPPOINT pt )
  */
 BOOL WINAPI GetCurrentPositionEx( HDC hdc, LPPOINT pt )
 {
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (!dc) return FALSE;
     pt->x = dc->CursPosX;
     pt->y = dc->CursPosY;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -1950,11 +1931,11 @@ BOOL WINAPI GetCurrentPositionEx( HDC hdc, LPPOINT pt )
  */
 BOOL WINAPI GetViewportExtEx( HDC hdc, LPSIZE size )
 {
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (!dc) return FALSE;
     size->cx = dc->vportExtX;
     size->cy = dc->vportExtY;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -1964,11 +1945,11 @@ BOOL WINAPI GetViewportExtEx( HDC hdc, LPSIZE size )
  */
 BOOL WINAPI GetViewportOrgEx( HDC hdc, LPPOINT pt )
 {
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (!dc) return FALSE;
     pt->x = dc->vportOrgX;
     pt->y = dc->vportOrgY;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -1978,11 +1959,11 @@ BOOL WINAPI GetViewportOrgEx( HDC hdc, LPPOINT pt )
  */
 BOOL WINAPI GetWindowExtEx( HDC hdc, LPSIZE size )
 {
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (!dc) return FALSE;
     size->cx = dc->wndExtX;
     size->cy = dc->wndExtY;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -1992,11 +1973,11 @@ BOOL WINAPI GetWindowExtEx( HDC hdc, LPSIZE size )
  */
 BOOL WINAPI GetWindowOrgEx( HDC hdc, LPPOINT pt )
 {
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (!dc) return FALSE;
     pt->x = dc->wndOrgX;
     pt->y = dc->wndOrgY;
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 
@@ -2007,11 +1988,11 @@ BOOL WINAPI GetWindowOrgEx( HDC hdc, LPPOINT pt )
 HRGN16 WINAPI InquireVisRgn16( HDC16 hdc )
 {
     HRGN16 ret = 0;
-    DC * dc = DC_GetDCPtr( HDC_32(hdc) );
+    DC * dc = get_dc_ptr( HDC_32(hdc) );
     if (dc)
     {
         ret = HRGN_16(dc->hVisRgn);
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -2023,11 +2004,11 @@ HRGN16 WINAPI InquireVisRgn16( HDC16 hdc )
 HRGN16 WINAPI GetClipRgn16( HDC16 hdc )
 {
     HRGN16 ret = 0;
-    DC * dc = DC_GetDCPtr( HDC_32(hdc) );
+    DC * dc = get_dc_ptr( HDC_32(hdc) );
     if (dc)
     {
         ret = HRGN_16(dc->hClipRgn);
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
     return ret;
 }
@@ -2043,11 +2024,11 @@ DWORD WINAPI GetLayout(HDC hdc)
 {
     DWORD layout = GDI_ERROR;
 
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         layout = dc->layout;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
 
     TRACE("hdc : %p, layout : %08x\n", hdc, layout);
@@ -2065,12 +2046,12 @@ DWORD WINAPI SetLayout(HDC hdc, DWORD layout)
 {
     DWORD oldlayout = GDI_ERROR;
 
-    DC * dc = DC_GetDCPtr( hdc );
+    DC * dc = get_dc_ptr( hdc );
     if (dc)
     {
         oldlayout = dc->layout;
         dc->layout = layout;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
 
     TRACE("hdc : %p, old layout : %08x, new layout : %08x\n", hdc, oldlayout, layout);
@@ -2092,11 +2073,11 @@ COLORREF WINAPI GetDCBrushColor(HDC hdc)
 
     TRACE("hdc(%p)\n", hdc);
 
-    dc = DC_GetDCPtr( hdc );
+    dc = get_dc_ptr( hdc );
     if (dc)
     {
         dcBrushColor = dc->dcBrushColor;
-	DC_ReleaseDCPtr( dc );
+	release_dc_ptr( dc );
     }
 
     return dcBrushColor;
@@ -2117,7 +2098,7 @@ COLORREF WINAPI SetDCBrushColor(HDC hdc, COLORREF crColor)
 
     TRACE("hdc(%p) crColor(%08x)\n", hdc, crColor);
 
-    dc = DC_GetDCPtr( hdc );
+    dc = get_dc_ptr( hdc );
     if (dc)
     {
         if (dc->funcs->pSetDCBrushColor)
@@ -2136,7 +2117,7 @@ COLORREF WINAPI SetDCBrushColor(HDC hdc, COLORREF crColor)
             dc->dcBrushColor = crColor;
         }
 
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
 
     return oldClr;
@@ -2156,11 +2137,11 @@ COLORREF WINAPI GetDCPenColor(HDC hdc)
 
     TRACE("hdc(%p)\n", hdc);
 
-    dc = DC_GetDCPtr( hdc );
+    dc = get_dc_ptr( hdc );
     if (dc)
     {
         dcPenColor = dc->dcPenColor;
-	DC_ReleaseDCPtr( dc );
+	release_dc_ptr( dc );
     }
 
     return dcPenColor;
@@ -2181,7 +2162,7 @@ COLORREF WINAPI SetDCPenColor(HDC hdc, COLORREF crColor)
 
     TRACE("hdc(%p) crColor(%08x)\n", hdc, crColor);
 
-    dc = DC_GetDCPtr( hdc );
+    dc = get_dc_ptr( hdc );
     if (dc)
     {
         if (dc->funcs->pSetDCPenColor)
@@ -2201,7 +2182,7 @@ COLORREF WINAPI SetDCPenColor(HDC hdc, COLORREF crColor)
             dc->dcPenColor = crColor;
         }
 
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
     }
 
     return oldClr;
@@ -2239,13 +2220,13 @@ BOOL WINAPI GetMiterLimit(HDC hdc, PFLOAT peLimit)
 
     TRACE("(%p,%p)\n", hdc, peLimit);
 
-    dc = DC_GetDCPtr( hdc );
+    dc = get_dc_ptr( hdc );
     if (dc)
     {
         if (peLimit)
             *peLimit = dc->miterLimit;
 
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
         bRet = TRUE;
     }
     return bRet;
@@ -2263,13 +2244,13 @@ BOOL WINAPI SetMiterLimit(HDC hdc, FLOAT eNewLimit, PFLOAT peOldLimit)
 
     TRACE("(%p,%f,%p)\n", hdc, eNewLimit, peOldLimit);
 
-    dc = DC_GetDCPtr( hdc );
+    dc = get_dc_ptr( hdc );
     if (dc)
     {
         if (peOldLimit)
             *peOldLimit = dc->miterLimit;
         dc->miterLimit = eNewLimit;
-        DC_ReleaseDCPtr( dc );
+        release_dc_ptr( dc );
         bRet = TRUE;
     }
     return bRet;

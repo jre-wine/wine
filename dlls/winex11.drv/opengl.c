@@ -72,7 +72,7 @@ typedef struct wine_glextension {
     struct {
         const char *funcName;
         void *funcAddress;
-    } extEntryPoints[8];
+    } extEntryPoints[9];
 } WineGLExtension;
 
 struct WineGLInfo {
@@ -277,6 +277,8 @@ MAKE_FUNCPTR(glReadPixels)
 MAKE_FUNCPTR(glScissor)
 MAKE_FUNCPTR(glTexImage2D)
 MAKE_FUNCPTR(glViewport)
+MAKE_FUNCPTR(glFinish)
+MAKE_FUNCPTR(glFlush)
 #undef MAKE_FUNCPTR
 
 static BOOL X11DRV_WineGL_InitOpenglInfo(void)
@@ -428,6 +430,8 @@ LOAD_FUNCPTR(glReadPixels)
 LOAD_FUNCPTR(glScissor)
 LOAD_FUNCPTR(glTexImage2D)
 LOAD_FUNCPTR(glViewport)
+LOAD_FUNCPTR(glFinish)
+LOAD_FUNCPTR(glFlush)
 #undef LOAD_FUNCPTR
 
 /* It doesn't matter if these fail. They'll only be used if the driver reports
@@ -935,6 +939,20 @@ static WineGLPixelFormat* ConvertPixelFormatGLXtoWGL(Display *display, int fmt_i
     return NULL;
 }
 
+int pixelformat_from_fbconfig_id(XID fbconfig_id)
+{
+    WineGLPixelFormat *fmt;
+
+    if (!fbconfig_id) return 0;
+
+    fmt = ConvertPixelFormatGLXtoWGL(gdi_display, fbconfig_id);
+    if(fmt)
+        return fmt->iPixelFormat;
+    /* This will happen on hwnds without a pixel format set; it's ok */
+    return 0;
+}
+
+
 /**
  * X11DRV_ChoosePixelFormat
  *
@@ -1349,27 +1367,46 @@ BOOL X11DRV_SetPixelFormat(X11DRV_PDEVICE *physDev,
 			   const PIXELFORMATDESCRIPTOR *ppfd) {
   WineGLPixelFormat *fmt;
   int value;
+  HWND hwnd;
 
   TRACE("(%p,%d,%p)\n", physDev, iPixelFormat, ppfd);
 
   if (!has_opengl()) {
     ERR("No libGL on this box - disabling OpenGL support !\n");
-    return 0;
+    return FALSE;
   }
 
   /* SetPixelFormat is not allowed on the X root_window e.g. GetDC(0) */
   if(get_glxdrawable(physDev) == root_window)
   {
     ERR("Invalid operation on root_window\n");
-    return 0;
+    return FALSE;
   }
 
   /* Check if iPixelFormat is in our list of supported formats to see if it is supported. */
   fmt = ConvertPixelFormatWGLtoGLX(gdi_display, iPixelFormat, FALSE /* Offscreen */, &value);
   if(!fmt) {
     ERR("Invalid iPixelFormat: %d\n", iPixelFormat);
-    return 0;
+    return FALSE;
   }
+
+    if(physDev->current_pf)  /* cannot change it if already set */
+        return (physDev->current_pf == iPixelFormat);
+
+    pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DRAWABLE_TYPE, &value);
+
+    hwnd = WindowFromDC(physDev->hdc);
+    if(hwnd) {
+        if(!(value&GLX_WINDOW_BIT)) {
+            WARN("Pixel format %d is not compatible for window rendering\n", iPixelFormat);
+            return FALSE;
+        }
+
+        if(!SendMessageW(hwnd, WM_X11DRV_SET_WIN_FORMAT, (WPARAM)fmt->fmt_id, 0)) {
+            ERR("Couldn't set format of the window, returning failure\n");
+            return FALSE;
+        }
+    }
 
   physDev->current_pf = iPixelFormat;
 
@@ -1653,6 +1690,8 @@ BOOL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
 BOOL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* pDrawDev, X11DRV_PDEVICE* pReadDev, HGLRC hglrc)
 {
     BOOL ret;
+    int indirect = (GetObjectType(pDrawDev->hdc) == OBJ_MEMDC);
+
     TRACE("(%p,%p,%p)\n", pDrawDev, pReadDev, hglrc);
 
     if (!has_opengl()) {
@@ -1673,7 +1712,7 @@ BOOL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* pDrawDev, X11DRV_PDEVICE* p
             Drawable d_read = get_glxdrawable(pReadDev);
 
             if (ctx->ctx == NULL) {
-                ctx->ctx = pglXCreateContext(gdi_display, ctx->vis, NULL, GetObjectType(pDrawDev->hdc) == OBJ_MEMDC ? False : True);
+                ctx->ctx = pglXCreateContext(gdi_display, ctx->vis, NULL, !indirect);
                 TRACE(" created a delayed OpenGL context (%p)\n", ctx->ctx);
             }
             ctx->hdc = pDrawDev->hdc;
@@ -1710,22 +1749,24 @@ BOOL X11DRV_wglShareLists(HGLRC hglrc1, HGLRC hglrc2) {
         return FALSE;
     } else {
         if (org->ctx == NULL) {
+            int indirect = (GetObjectType(org->hdc) == OBJ_MEMDC);
             wine_tsx11_lock();
             describeContext(org);
 
             if(org->vis)
-                org->ctx = pglXCreateContext(gdi_display, org->vis, NULL, GetObjectType(org->hdc) == OBJ_MEMDC ? False : True);
+                org->ctx = pglXCreateContext(gdi_display, org->vis, NULL, !indirect);
             else /* Create a GLX Context for a pbuffer */
                 org->ctx = pglXCreateNewContext(gdi_display, org->fmt->fbconfig, org->fmt->render_type, NULL, True);
             wine_tsx11_unlock();
             TRACE(" created a delayed OpenGL context (%p) for Wine context %p\n", org->ctx, org);
         }
         if (NULL != dest) {
+            int indirect = (GetObjectType(dest->hdc) == OBJ_MEMDC);
             wine_tsx11_lock();
             describeContext(dest);
             /* Create the destination context with display lists shared */
             if(dest->vis)
-                dest->ctx = pglXCreateContext(gdi_display, dest->vis, org->ctx, GetObjectType(org->hdc) == OBJ_MEMDC ? False : True);
+                dest->ctx = pglXCreateContext(gdi_display, dest->vis, org->ctx, !indirect);
             else /* Create a GLX Context for a pbuffer */
                 dest->ctx = pglXCreateNewContext(gdi_display, dest->fmt->fbconfig, dest->fmt->render_type, org->ctx, True);
             wine_tsx11_unlock();
@@ -2019,6 +2060,20 @@ static void WINAPI X11DRV_wglViewport(GLint x, GLint y, GLsizei width, GLsizei h
 
         sync_current_drawable(TRUE);
     }
+}
+
+static void WINAPI X11DRV_wglFinish(void)
+{
+    wine_tsx11_lock();
+    pglFinish();
+    wine_tsx11_unlock();
+}
+
+static void WINAPI X11DRV_wglFlush(void)
+{
+    wine_tsx11_lock();
+    pglFlush();
+    wine_tsx11_unlock();
 }
 
 /**
@@ -3060,6 +3115,8 @@ static const WineGLExtension WGL_internal_functions =
     { "wglIsEnabled", X11DRV_wglIsEnabled },
     { "wglScissor", X11DRV_wglScissor },
     { "wglViewport", X11DRV_wglViewport },
+    { "wglFinish", X11DRV_wglFinish },
+    { "wglFlush", X11DRV_wglFlush },
   }
 };
 
@@ -3344,6 +3401,11 @@ XVisualInfo *X11DRV_setup_opengl_visual( Display *display )
 }
 
 #else  /* no OpenGL includes */
+
+int pixelformat_from_fbconfig_id(XID fbconfig_id)
+{
+    return 0;
+}
 
 /***********************************************************************
  *		ChoosePixelFormat (X11DRV.@)

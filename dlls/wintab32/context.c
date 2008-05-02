@@ -28,6 +28,7 @@
 #include "winerror.h"
 #include "winbase.h"
 #include "winuser.h"
+#include "winnls.h"
 
 #include "wintab.h"
 #include "wintab_internal.h"
@@ -44,6 +45,40 @@ WINE_DEFAULT_DEBUG_CHANNEL(wintab32);
 static BOOL gLoaded;
 static LPOPENCONTEXT gOpenContexts;
 static HCTX gTopContext = (HCTX)0xc00;
+
+static void LOGCONTEXTAtoW(const LOGCONTEXTA *in, LOGCONTEXTW *out)
+{
+    MultiByteToWideChar(CP_ACP, 0, in->lcName, -1, out->lcName, LCNAMELEN);
+    out->lcName[LCNAMELEN - 1] = 0;
+    /* we use the fact that the fields after lcName are the same in LOGCONTEXTA and W */
+    memcpy(&out->lcOptions, &in->lcOptions, sizeof(LOGCONTEXTA) - FIELD_OFFSET(LOGCONTEXTA, lcOptions));
+}
+
+static void LOGCONTEXTWtoA(const LOGCONTEXTW *in, LOGCONTEXTA *out)
+{
+    WideCharToMultiByte(CP_ACP, 0, in->lcName, LCNAMELEN, out->lcName, LCNAMELEN, NULL, NULL);
+    out->lcName[LCNAMELEN - 1] = 0;
+    /* we use the fact that the fields after lcName are the same in LOGCONTEXTA and W */
+    memcpy(&out->lcOptions, &in->lcOptions, sizeof(LOGCONTEXTW) - FIELD_OFFSET(LOGCONTEXTW, lcOptions));
+}
+
+static BOOL is_logcontext_category(UINT wCategory)
+{
+    return wCategory == WTI_DEFSYSCTX || wCategory == WTI_DEFCONTEXT || wCategory == WTI_DDCTXS;
+}
+
+static BOOL is_string_field(UINT wCategory, UINT nIndex)
+{
+    if (wCategory == WTI_INTERFACE && nIndex == IFC_WINTABID)
+        return TRUE;
+    if (is_logcontext_category(wCategory) && nIndex == CTX_NAME)
+        return TRUE;
+    if (wCategory >= WTI_CURSORS && wCategory <= WTI_CURSORS + 9)
+        return TRUE;
+    if (wCategory == WTI_DEVICES && (nIndex == DVC_NAME || nIndex == DVC_PNPID))
+        return TRUE;
+    return FALSE;
+}
 
 static char* DUMPBITS(int x, char* buf)
 {
@@ -87,7 +122,7 @@ static inline void DUMPPACKET(WTPACKET packet)
         packet.pkRotation.roRoll, packet.pkRotation.roYaw);
 }
 
-static inline void DUMPCONTEXT(LOGCONTEXTA lc)
+static inline void DUMPCONTEXT(LOGCONTEXTW lc)
 {
         CHAR mmsg[4000];
         CHAR bits[100];
@@ -95,7 +130,7 @@ static inline void DUMPCONTEXT(LOGCONTEXTA lc)
         CHAR bits2[100];
 
         sprintf(mmsg,"%s, %x, %x, %x, %x, %x, %x, %x%s, %x%s, %x%s, %x, %x, %i, %i, %i, %i ,%i, %i, %i, %i, %i,%i, %i, %i, %i, %i, %i, %i, %i, %i, %i, %i %i %i",
-    debugstr_a(lc.lcName), lc.lcOptions, lc.lcStatus, lc.lcLocks, lc.lcMsgBase,
+    wine_dbgstr_w(lc.lcName), lc.lcOptions, lc.lcStatus, lc.lcLocks, lc.lcMsgBase,
 lc.lcDevice, lc.lcPktRate, (UINT)lc.lcPktData, DUMPBITS(lc.lcPktData,bits),
 (UINT)lc.lcPktMode, DUMPBITS(lc.lcPktMode,bits1), (UINT)lc.lcMoveMask,
 DUMPBITS(lc.lcMoveMask,bits2), (INT)lc.lcBtnDnMask, (INT)lc.lcBtnUpMask,
@@ -346,10 +381,7 @@ static VOID TABLET_BlankPacketData(LPOPENCONTEXT context, LPVOID lpPkt, INT n)
 }
 
 
-/***********************************************************************
- *		WTInfoA (WINTAB32.20)
- */
-UINT WINAPI WTInfoA(UINT wCategory, UINT nIndex, LPVOID lpOutput)
+UINT WINAPI WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
 {
     UINT result;
     if (gLoaded == FALSE)
@@ -374,36 +406,63 @@ UINT WINAPI WTInfoA(UINT wCategory, UINT nIndex, LPVOID lpOutput)
         }
     }
 
-    result =  pWTInfoA( wCategory, nIndex, lpOutput );
-
-    /*
-     *  Handle system extents here, as we can use user32.dll code to set them.
-     */
-    if(wCategory == WTI_DEFSYSCTX && nIndex == 0)
+    if (is_logcontext_category(wCategory) && nIndex == 0)
     {
-        LPLOGCONTEXTA lpCtx = (LPLOGCONTEXTA)lpOutput;
-        lpCtx->lcSysExtX = GetSystemMetrics(SM_CXSCREEN);
-        lpCtx->lcSysExtY = GetSystemMetrics(SM_CYSCREEN);
+        if (lpOutput)
+        {
+            LOGCONTEXTW buf;
+            pWTInfoW(wCategory, nIndex, &buf);
+
+            /*  Handle system extents here, as we can use user32.dll code to set them */
+            if(wCategory == WTI_DEFSYSCTX && nIndex == 0)
+            {
+                buf.lcSysExtX = GetSystemMetrics(SM_CXSCREEN);
+                buf.lcSysExtY = GetSystemMetrics(SM_CYSCREEN);
+            }
+
+            if (bUnicode)
+                memcpy(lpOutput, &buf, sizeof(buf));
+            else
+                LOGCONTEXTWtoA(&buf, lpOutput);
+        }
+
+        return bUnicode ? sizeof(LOGCONTEXTW) : sizeof(LOGCONTEXTA);
     }
+    else if (is_string_field(wCategory, nIndex) && !bUnicode)
+    {
+        int size = pWTInfoW(wCategory, nIndex, NULL);
+        WCHAR *buf = HeapAlloc(GetProcessHeap(), 0, size);
+        pWTInfoW(wCategory, nIndex, buf);
+        result = WideCharToMultiByte(CP_ACP, 0, buf, size/sizeof(WCHAR), lpOutput, lpOutput ? 2*size : 0, NULL, NULL);
+        HeapFree(GetProcessHeap(), 0, buf);
+    }
+    else
+        result =  pWTInfoW(wCategory, nIndex, lpOutput);
+
     return result;
 }
+
+/***********************************************************************
+ *		WTInfoA (WINTAB32.20)
+ */
+UINT WINAPI WTInfoA(UINT wCategory, UINT nIndex, LPVOID lpOutput)
+{
+    return WTInfoT(wCategory, nIndex, lpOutput, FALSE);
+}
+
 
 /***********************************************************************
  *		WTInfoW (WINTAB32.1020)
  */
 UINT WINAPI WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
 {
-    FIXME("(%u, %u, %p): stub\n", wCategory, nIndex, lpOutput);
-
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-
-    return 0;
+    return WTInfoT(wCategory, nIndex, lpOutput, TRUE);
 }
 
 /***********************************************************************
- *		WTOpenA (WINTAB32.21)
+ *		WTOpenW (WINTAB32.2021)
  */
-HCTX WINAPI WTOpenA(HWND hWnd, LPLOGCONTEXTA lpLogCtx, BOOL fEnable)
+HCTX WINAPI WTOpenW(HWND hWnd, LPLOGCONTEXTW lpLogCtx, BOOL fEnable)
 {
     LPOPENCONTEXT newcontext;
 
@@ -411,7 +470,7 @@ HCTX WINAPI WTOpenA(HWND hWnd, LPLOGCONTEXTA lpLogCtx, BOOL fEnable)
     DUMPCONTEXT(*lpLogCtx);
 
     newcontext = HeapAlloc(GetProcessHeap(), 0 , sizeof(OPENCONTEXT));
-    memcpy(&(newcontext->context),lpLogCtx,sizeof(LOGCONTEXTA));
+    memcpy(&(newcontext->context),lpLogCtx,sizeof(LOGCONTEXTW));
     newcontext->hwndOwner = hWnd;
     newcontext->enabled = fEnable;
     newcontext->ActiveCursor = -1;
@@ -440,15 +499,14 @@ HCTX WINAPI WTOpenA(HWND hWnd, LPLOGCONTEXTA lpLogCtx, BOOL fEnable)
 }
 
 /***********************************************************************
- *		WTOpenW (WINTAB32.1021)
+ *		WTOpenA (WINTAB32.21)
  */
-HCTX WINAPI WTOpenW(HWND hWnd, LPLOGCONTEXTW lpLogCtx, BOOL fEnable)
+HCTX WINAPI WTOpenA(HWND hWnd, LPLOGCONTEXTA lpLogCtx, BOOL fEnable)
 {
-    FIXME("(%p, %p, %u): stub\n", hWnd, lpLogCtx, fEnable);
+    LOGCONTEXTW logCtxW;
 
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-
-    return NULL;
+    LOGCONTEXTAtoW(lpLogCtx, &logCtxW);
+    return WTOpenW(hWnd, &logCtxW, fEnable);
 }
 
 /***********************************************************************
@@ -635,7 +693,7 @@ BOOL WINAPI WTGetA(HCTX hCtx, LPLOGCONTEXTA lpLogCtx)
 
     EnterCriticalSection(&csTablet);
     context = TABLET_FindOpenContext(hCtx);
-    memmove(lpLogCtx,&context->context,sizeof(LOGCONTEXTA));
+    LOGCONTEXTWtoA(&context->context, lpLogCtx);
     LeaveCriticalSection(&csTablet);
 
     return TRUE;
@@ -646,11 +704,18 @@ BOOL WINAPI WTGetA(HCTX hCtx, LPLOGCONTEXTA lpLogCtx)
  */
 BOOL WINAPI WTGetW(HCTX hCtx, LPLOGCONTEXTW lpLogCtx)
 {
-    FIXME("(%p, %p): stub\n", hCtx, lpLogCtx);
+    LPOPENCONTEXT context;
 
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    TRACE("(%p, %p)\n", hCtx, lpLogCtx);
 
-    return FALSE;
+    if (!hCtx) return 0;
+
+    EnterCriticalSection(&csTablet);
+    context = TABLET_FindOpenContext(hCtx);
+    memmove(lpLogCtx,&context->context,sizeof(LOGCONTEXTW));
+    LeaveCriticalSection(&csTablet);
+
+    return TRUE;
 }
 
 /***********************************************************************

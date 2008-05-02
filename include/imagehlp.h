@@ -226,7 +226,7 @@ typedef struct _ADDRESS {
     DWORD          Offset;
     WORD           Segment;
     ADDRESS_MODE Mode;
-} ADDRESS, *PADDRESS;
+} ADDRESS, *LPADDRESS;
 
 typedef struct _ADDRESS64 {
     DWORD64        Offset;
@@ -540,6 +540,8 @@ typedef struct _IMAGEHLP_GET_TYPE_INFO_PARAMS
 #define IMAGEHLP_SYMBOL_INFO_CONSTANT              SYMF_CONSTANT
 #define IMAGEHLP_SYMBOL_FUNCTION                   SYMF_FUNCTION
 
+#define MAX_SYM_NAME                               2000
+
 typedef struct _SYMBOL_INFO {
     ULONG       SizeOfStruct;
     ULONG       TypeIndex;
@@ -576,6 +578,18 @@ typedef struct _SYMBOL_INFOW
     ULONG       MaxNameLen;
     WCHAR       Name[1];
 } SYMBOL_INFOW, *PSYMBOL_INFOW;
+
+typedef struct _SYMBOL_INFO_PACKAGE
+{
+    SYMBOL_INFO si;
+    CHAR        name[MAX_SYM_NAME+1];
+} SYMBOL_INFO_PACKAGE, *PSYMBOL_INFO_PACKAGE;
+
+typedef struct _SYMBOL_INFO_PACKAGEW
+{
+    SYMBOL_INFOW si;
+    WCHAR        name[MAX_SYM_NAME+1];
+} SYMBOL_INFO_PACKAGEW, *PSYMBOL_INFO_PACKAGEW;
 
 #define DBHHEADER_DEBUGDIRS     0x1
 typedef struct _MODLOAD_DATA
@@ -666,10 +680,10 @@ typedef BOOL (CALLBACK *PIMAGEHLP_STATUS_ROUTINE64)(
 );
 
 typedef BOOL (CALLBACK *PSYM_ENUMERATESYMBOLS_CALLBACK)(
-  PSYMBOL_INFO pSymInfo, DWORD SymbolSize, PVOID UserContext
+  PSYMBOL_INFO pSymInfo, ULONG SymbolSize, PVOID UserContext
 );
 typedef BOOL (CALLBACK *PSYM_ENUMERATESYMBOLS_CALLBACKW)(
-  PSYMBOL_INFOW pSymInfo, DWORD SymbolSize, PVOID UserContext
+  PSYMBOL_INFOW pSymInfo, ULONG SymbolSize, PVOID UserContext
 );
 
 typedef BOOL (CALLBACK* PSYM_ENUMLINES_CALLBACK)(
@@ -697,10 +711,10 @@ typedef BOOL (CALLBACK *PSYM_ENUMMODULES_CALLBACKW64)(
 );
 
 typedef BOOL (CALLBACK *PSYM_ENUMSYMBOLS_CALLBACK)(
-  PCSTR, DWORD, ULONG, PVOID
+  PCSTR, ULONG, ULONG, PVOID
 );
 typedef BOOL (CALLBACK *PSYM_ENUMSYMBOLS_CALLBACKW)(
-  PCWSTR, DWORD, ULONG, PVOID
+  PCWSTR, ULONG, ULONG, PVOID
 );
 typedef BOOL (CALLBACK *PSYM_ENUMSYMBOLS_CALLBACK64)(
   PCSTR, DWORD64, ULONG, PVOID
@@ -729,7 +743,7 @@ typedef BOOL (CALLBACK *DIGEST_FUNCTION)(
 );
 
 typedef BOOL (CALLBACK *PREAD_PROCESS_MEMORY_ROUTINE)(
-  HANDLE  hProcess, LPCVOID lpBaseAddress, PVOID lpBuffer,
+  HANDLE  hProcess, DWORD lpBaseAddress, PVOID lpBuffer,
   DWORD nSize, PDWORD lpNumberOfBytesRead
 );
 
@@ -753,7 +767,7 @@ typedef DWORD (CALLBACK *PGET_MODULE_BASE_ROUTINE64)(
   HANDLE hProcess, DWORD64 ReturnAddress);
 
 typedef DWORD (CALLBACK *PTRANSLATE_ADDRESS_ROUTINE)(
-  HANDLE hProcess, HANDLE hThread, PADDRESS lpaddr
+  HANDLE hProcess, HANDLE hThread, LPADDRESS lpaddr
 );
 
 typedef DWORD (CALLBACK *PTRANSLATE_ADDRESS_ROUTINE64)(
@@ -1280,6 +1294,9 @@ BOOL WINAPI SymSetParentWindow(
 );
 BOOL WINAPI SymSetSearchPath(
   HANDLE hProcess, PCSTR szSearchPath
+);
+BOOL WINAPI SymSetSearchPathW(
+  HANDLE hProcess, PCWSTR szSearchPath
 );
 BOOL WINAPI SymUnDName(
   PIMAGEHLP_SYMBOL sym, PSTR UnDecName, DWORD UnDecNameLength

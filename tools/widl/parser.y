@@ -1017,6 +1017,7 @@ static expr_t *make_expr(enum expr_type type)
   e->ref = NULL;
   e->u.lval = 0;
   e->is_const = FALSE;
+  e->cval = 0;
   return e;
 }
 
@@ -1248,6 +1249,7 @@ static type_t *make_type(unsigned char type, type_t *ref)
   t->size_is = NULL;
   t->length_is = NULL;
   t->typestring_offset = 0;
+  t->ptrdesc = 0;
   t->declarray = FALSE;
   t->ignore = (parse_only != 0);
   t->is_const = FALSE;
@@ -1264,6 +1266,7 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
 {
   expr_list_t *sizes = get_attrp(v->attrs, ATTR_SIZEIS);
   expr_list_t *lengs = get_attrp(v->attrs, ATTR_LENGTHIS);
+  int ptr_type = get_attrv(v->attrs, ATTR_POINTERTYPE);
   int sizeless, has_varconf;
   expr_t *dim;
   type_t *atype, **ptype;
@@ -1271,7 +1274,25 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
   v->type = type;
 
   for ( ; 0 < ptr_level; --ptr_level)
+  {
     v->type = make_type(RPC_FC_RP, v->type);
+    if (ptr_level == 1 && ptr_type && !arr)
+    {
+      v->type->type = ptr_type;
+      ptr_type = 0;
+    }
+  }
+
+  if (ptr_type)
+  {
+    if (is_ptr(v->type))
+    {
+      v->type = duptype(v->type, 1);
+      v->type->type = ptr_type;
+    }
+    else if (!arr)
+      error("%s: pointer attribute applied to non-pointer type", v->name);
+  }
 
   sizeless = FALSE;
   if (arr) LIST_FOR_EACH_ENTRY_REV(dim, arr, expr_t, entry)
@@ -1360,6 +1381,29 @@ static void set_type(var_t *v, type_t *type, int ptr_level, array_dims_t *arr)
     {
       *ptype = duptype(*ptype, 0);
       (*ptype)->type = RPC_FC_BOGUS_ARRAY;
+    }
+  }
+
+  if (is_array(v->type))
+  {
+    const type_t *rt = v->type->ref;
+    switch (rt->type)
+    {
+    case RPC_FC_BOGUS_STRUCT:
+    case RPC_FC_NON_ENCAPSULATED_UNION:
+    case RPC_FC_ENCAPSULATED_UNION:
+    case RPC_FC_ENUM16:
+      v->type->type = RPC_FC_BOGUS_ARRAY;
+      break;
+    /* FC_RP should be above, but widl overuses these, and will break things.  */
+    case RPC_FC_UP:
+    case RPC_FC_RP:
+      if (rt->ref->type == RPC_FC_IP)
+        v->type->type = RPC_FC_BOGUS_ARRAY;
+      break;
+    default:
+      if (is_user_type(rt))
+        v->type->type = RPC_FC_BOGUS_ARRAY;
     }
   }
 }
@@ -1811,6 +1855,7 @@ static int get_struct_type(var_list_t *fields)
     case RPC_FC_PAD:
     case RPC_FC_EMBEDDED_COMPLEX:
     case RPC_FC_BOGUS_STRUCT:
+    case RPC_FC_BOGUS_ARRAY:
       return RPC_FC_BOGUS_STRUCT;
     }
   }
@@ -1976,6 +2021,6 @@ static void check_all_user_types(ifref_list_t *ifrefs)
   {
     const func_list_t *fs = ifref->iface->funcs;
     if (fs) LIST_FOR_EACH_ENTRY(f, fs, const func_t, entry)
-      check_for_user_types(f->args);
+      check_for_user_types_and_context_handles(f->args);
   }
 }

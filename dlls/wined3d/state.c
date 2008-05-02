@@ -132,11 +132,9 @@ static void state_zenable(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD
 }
 
 static void state_cullmode(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    /* TODO: Put this into the offscreen / onscreen rendering block due to device->render_offscreen */
-
-    /* If we are culling "back faces with clockwise vertices" then
-       set front faces to be counter clockwise and enable culling
-       of back faces                                               */
+    /* glFrontFace() is set in context.c at context init and on an offscreen / onscreen rendering
+     * switch
+     */
     switch ((WINED3DCULL) stateblock->renderState[WINED3DRS_CULLMODE]) {
         case WINED3DCULL_NONE:
             glDisable(GL_CULL_FACE);
@@ -145,26 +143,14 @@ static void state_cullmode(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
         case WINED3DCULL_CW:
             glEnable(GL_CULL_FACE);
             checkGLcall("glEnable GL_CULL_FACE");
-            if (stateblock->wineD3DDevice->render_offscreen) {
-                glFrontFace(GL_CW);
-                checkGLcall("glFrontFace GL_CW");
-            } else {
-                glFrontFace(GL_CCW);
-                checkGLcall("glFrontFace GL_CCW");
-            }
-            glCullFace(GL_BACK);
+            glCullFace(GL_FRONT);
+            checkGLcall("glCullFace(GL_FRONT)");
             break;
         case WINED3DCULL_CCW:
             glEnable(GL_CULL_FACE);
             checkGLcall("glEnable GL_CULL_FACE");
-            if (stateblock->wineD3DDevice->render_offscreen) {
-                glFrontFace(GL_CCW);
-                checkGLcall("glFrontFace GL_CCW");
-            } else {
-                glFrontFace(GL_CW);
-                checkGLcall("glFrontFace GL_CW");
-            }
             glCullFace(GL_BACK);
+            checkGLcall("glCullFace(GL_BACK)");
             break;
         default:
             FIXME("Unrecognized/Unhandled WINED3DCULL value %d\n", stateblock->renderState[WINED3DRS_CULLMODE]);
@@ -216,6 +202,16 @@ static void state_zfunc(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     int glParm = CompareFunc(stateblock->renderState[WINED3DRS_ZFUNC]);
 
     if(glParm) {
+        if(glParm == GL_EQUAL || glParm == GL_NOTEQUAL) {
+            /* There are a few issues with this: First, our inability to
+             * select a proper Z depth, most of the time we're stuck with
+             * D24S8, even if the app selects D32 or D16. There seem to be
+             * some other precision problems which have to be debugged to
+             * make NOTEQUAL and EQUAL work properly
+             */
+            FIXME("D3DCMP_NOTEQUAL and D3DCMP_EQUAL do not work correctly yet\n");
+        }
+
         glDepthFunc(glParm);
         checkGLcall("glDepthFunc");
     }
@@ -429,9 +425,17 @@ static void state_clipping(DWORD state, IWineD3DStateBlockImpl *stateblock, Wine
     if (stateblock->renderState[WINED3DRS_CLIPPING]) {
         enable  = stateblock->renderState[WINED3DRS_CLIPPLANEENABLE];
         disable = ~stateblock->renderState[WINED3DRS_CLIPPLANEENABLE];
+        if(GL_SUPPORT(NV_DEPTH_CLAMP)) {
+            glDisable(GL_DEPTH_CLAMP_NV);
+            checkGLcall("glDisable(GL_DEPTH_CLAMP_NV)");
+        }
     } else {
         disable = 0xffffffff;
         enable  = 0x00;
+        if(GL_SUPPORT(NV_DEPTH_CLAMP)) {
+            glEnable(GL_DEPTH_CLAMP_NV);
+            checkGLcall("glEnable(GL_DEPTH_CLAMP_NV)");
+        }
     }
 
     if (enable & WINED3DCLIPPLANE0)  { glEnable(GL_CLIP_PLANE0);  checkGLcall("glEnable(clip plane 0)"); }
@@ -667,7 +671,7 @@ state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *c
     if( !( func = CompareFunc(stateblock->renderState[WINED3DRS_STENCILFUNC]) ) )
         func = GL_ALWAYS;
     if( !( func_ccw = CompareFunc(stateblock->renderState[WINED3DRS_CCW_STENCILFUNC]) ) )
-        func = GL_ALWAYS;
+        func_ccw = GL_ALWAYS;
     ref = stateblock->renderState[WINED3DRS_STENCILREF];
     mask = stateblock->renderState[WINED3DRS_STENCILMASK];
     stencilFail = StencilOp(stateblock->renderState[WINED3DRS_STENCILFAIL]);
@@ -684,29 +688,55 @@ state_stencil(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *c
     func, stencilFail, depthFail, stencilPass,
     func_ccw, stencilFail_ccw, depthFail_ccw, stencilPass_ccw);
 
-    if (twosided_enable) {
-        renderstate_stencil_twosided(stateblock, GL_FRONT, func, ref, mask, stencilFail, depthFail, stencilPass);
+    if (twosided_enable && onesided_enable) {
+        glEnable(GL_STENCIL_TEST);
+        checkGLcall("glEnable GL_STENCIL_TEST");
+
+        /* Apply back first, then front. This function calls glActiveStencilFaceEXT,
+         * which has an effect on the code below too. If we apply the front face
+         * afterwards, we are sure that the active stencil face is set to front,
+         * and other stencil functions which do not use two sided stencil do not have
+         * to set it back
+         */
         renderstate_stencil_twosided(stateblock, GL_BACK, func_ccw, ref, mask, stencilFail_ccw, depthFail_ccw, stencilPass_ccw);
-    } else {
-        if (onesided_enable) {
-            glEnable(GL_STENCIL_TEST);
-            checkGLcall("glEnable GL_STENCIL_TEST");
-            glStencilFunc(func, ref, mask);
-            checkGLcall("glStencilFunc(...)");
-            glStencilOp(stencilFail, depthFail, stencilPass);
-            checkGLcall("glStencilOp(...)");
-        } else {
-            glDisable(GL_STENCIL_TEST);
-            checkGLcall("glDisable GL_STENCIL_TEST");
+        renderstate_stencil_twosided(stateblock, GL_FRONT, func, ref, mask, stencilFail, depthFail, stencilPass);
+    } else if(onesided_enable) {
+        if(GL_SUPPORT(EXT_STENCIL_TWO_SIDE)) {
+            glDisable(GL_STENCIL_TEST_TWO_SIDE_EXT);
+            checkGLcall("glDisable(GL_STENCIL_TEST_TWO_SIDE_EXT)");
         }
+
+        glEnable(GL_STENCIL_TEST);
+        checkGLcall("glEnable GL_STENCIL_TEST");
+        glStencilFunc(func, ref, mask);
+        checkGLcall("glStencilFunc(...)");
+        glStencilOp(stencilFail, depthFail, stencilPass);
+        checkGLcall("glStencilOp(...)");
+    } else {
+        glDisable(GL_STENCIL_TEST);
+        checkGLcall("glDisable GL_STENCIL_TEST");
     }
 }
 
 static void state_stencilwrite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    DWORD mask;
+
     if(stateblock->wineD3DDevice->stencilBufferTarget) {
-        glStencilMask(stateblock->renderState[WINED3DRS_STENCILWRITEMASK]);
+        mask = stateblock->renderState[WINED3DRS_STENCILWRITEMASK];
     } else {
-        glStencilMask(0);
+        mask = 0;
+    }
+
+    if(GL_SUPPORT(EXT_STENCIL_TWO_SIDE)) {
+        GL_EXTCALL(glActiveStencilFaceEXT(GL_BACK));
+        checkGLcall("glActiveStencilFaceEXT(GL_BACK)");
+        glStencilMask(mask);
+        checkGLcall("glStencilMask");
+        GL_EXTCALL(glActiveStencilFaceEXT(GL_FRONT));
+        checkGLcall("glActiveStencilFaceEXT(GL_FRONT)");
+        glStencilMask(mask);
+    } else {
+        glStencilMask(mask);
     }
     checkGLcall("glStencilMask");
 }
@@ -1527,12 +1557,6 @@ static void state_tessellation(DWORD state, IWineD3DStateBlockImpl *stateblock, 
     TRACE("Stub\n");
     if(stateblock->renderState[WINED3DRS_ENABLEADAPTIVETESSELLATION])
         FIXME("(WINED3DRS_ENABLEADAPTIVETESSELLATION,%d) not yet implemented\n", stateblock->renderState[WINED3DRS_ENABLEADAPTIVETESSELLATION]);
-}
-
-
-static void state_srgbwrite(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    if(stateblock->renderState[WINED3DRS_SRGBWRITEENABLE])
-        FIXME("Render state WINED3DRS_SRGBWRITEENABLE not yet implemented\n");
 }
 
 static void state_separateblend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
@@ -3587,6 +3611,16 @@ static void indexbuffer(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
     }
 }
 
+static void frontface(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
+    if(stateblock->wineD3DDevice->render_offscreen) {
+        glFrontFace(GL_CCW);
+        checkGLcall("glFrontFace(GL_CCW)");
+    } else {
+        glFrontFace(GL_CW);
+        checkGLcall("glFrontFace(GL_CW)");
+    }
+}
+
 const struct StateEntry StateTable[] =
 {
       /* State name                                         representative,                                     apply function */
@@ -3787,7 +3821,7 @@ const struct StateEntry StateTable[] =
     { /*191, WINED3DRS_COLORWRITEENABLE2            */      STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    },
     { /*192, WINED3DRS_COLORWRITEENABLE3            */      STATE_RENDER(WINED3DRS_COLORWRITEENABLE),           state_colorwrite    },
     { /*193, WINED3DRS_BLENDFACTOR                  */      STATE_RENDER(WINED3DRS_BLENDFACTOR),                state_blendfactor   },
-    { /*194, WINED3DRS_SRGBWRITEENABLE              */      STATE_RENDER(WINED3DRS_SRGBWRITEENABLE),            state_srgbwrite     },
+    { /*194, WINED3DRS_SRGBWRITEENABLE              */      STATE_PIXELSHADER,                                  pixelshader         },
     { /*195, WINED3DRS_DEPTHBIAS                    */      STATE_RENDER(WINED3DRS_DEPTHBIAS),                  state_depthbias     },
     { /*196, undefined                              */      0,                                                  state_undefined     },
     { /*197, undefined                              */      0,                                                  state_undefined     },
@@ -4658,4 +4692,5 @@ const struct StateEntry StateTable[] =
     { /* STATE_CLIPPLANE(31)                        */      STATE_CLIPPLANE(31),                                clipplane           },
 
     { /* STATE_MATERIAL                             */      STATE_RENDER(WINED3DRS_SPECULARENABLE),             state_specularenable},
+    { /* STATE_FRONTFACE                            */      STATE_FRONTFACE,                                    frontface           },
 };

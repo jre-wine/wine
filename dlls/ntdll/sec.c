@@ -713,6 +713,11 @@ NTSTATUS WINAPI RtlGetOwnerSecurityDescriptor(
 	if ( !lpsd  || !Owner || !OwnerDefaulted )
 		return STATUS_INVALID_PARAMETER;
 
+        if ( lpsd->Control & SE_OWNER_DEFAULTED )
+            *OwnerDefaulted = TRUE;
+        else
+            *OwnerDefaulted = FALSE;
+
 	if (lpsd->Owner != NULL)
 	{
             if (lpsd->Control & SE_SELF_RELATIVE)
@@ -720,10 +725,6 @@ NTSTATUS WINAPI RtlGetOwnerSecurityDescriptor(
             else
                 *Owner = lpsd->Owner;
 
-            if ( lpsd->Control & SE_OWNER_DEFAULTED )
-                *OwnerDefaulted = TRUE;
-            else
-                *OwnerDefaulted = FALSE;
         }
 	else
 	    *Owner = NULL;
@@ -790,17 +791,17 @@ NTSTATUS WINAPI RtlGetGroupSecurityDescriptor(
 	if ( !lpsd || !Group || !GroupDefaulted )
 		return STATUS_INVALID_PARAMETER;
 
+        if ( lpsd->Control & SE_GROUP_DEFAULTED )
+            *GroupDefaulted = TRUE;
+        else
+            *GroupDefaulted = FALSE;
+
 	if (lpsd->Group != NULL)
 	{
             if (lpsd->Control & SE_SELF_RELATIVE)
                 *Group = (PSID)((LPBYTE)lpsd + (ULONG_PTR)lpsd->Group);
             else
                 *Group = lpsd->Group;
-
-            if ( lpsd->Control & SE_GROUP_DEFAULTED )
-                *GroupDefaulted = TRUE;
-            else
-                *GroupDefaulted = FALSE;
 	}
 	else
 	    *Group = NULL;
@@ -848,30 +849,44 @@ NTSTATUS WINAPI RtlMakeSelfRelativeSD(
     pRel->Control = pAbs->Control | SE_SELF_RELATIVE;
 
     offsetRel = sizeof(SECURITY_DESCRIPTOR);
-    pRel->Owner = (PSID) offsetRel;
-    length = RtlLengthSid(pAbs->Owner);
-    memcpy((LPBYTE)pRel + offsetRel, pAbs->Owner, length);
-
-    offsetRel += length;
-    pRel->Group = (PSID) offsetRel;
-    length = RtlLengthSid(pAbs->Group);
-    memcpy((LPBYTE)pRel + offsetRel, pAbs->Group, length);
-
-    if (pRel->Control & SE_SACL_PRESENT)
+    if (pAbs->Owner)
     {
+        pRel->Owner = (PSID) offsetRel;
+        length = RtlLengthSid(pAbs->Owner);
+        memcpy((LPBYTE)pRel + offsetRel, pAbs->Owner, length);
         offsetRel += length;
+    }
+    else
+    {
+        pRel->Owner = NULL;
+    }
+
+    if (pAbs->Group)
+    {
+        pRel->Group = (PSID) offsetRel;
+        length = RtlLengthSid(pAbs->Group);
+        memcpy((LPBYTE)pRel + offsetRel, pAbs->Group, length);
+        offsetRel += length;
+    }
+    else
+    {
+        pRel->Group = NULL;
+    }
+
+    if (pAbs->Sacl)
+    {
         pRel->Sacl = (PACL) offsetRel;
         length = pAbs->Sacl->AclSize;
         memcpy((LPBYTE)pRel + offsetRel, pAbs->Sacl, length);
+        offsetRel += length;
     }
     else
     {
         pRel->Sacl = NULL;
     }
 
-    if (pRel->Control & SE_DACL_PRESENT)
+    if (pAbs->Dacl)
     {
-        offsetRel += length;
         pRel->Dacl = (PACL) offsetRel;
         length = pAbs->Dacl->AclSize;
         memcpy((LPBYTE)pRel + offsetRel, pAbs->Dacl, length);
@@ -1213,17 +1228,16 @@ NTSTATUS WINAPI RtlAddAccessDeniedAceEx(
 /************************************************************************** 
  *  RtlAddAuditAccessAce     [NTDLL.@] 
  */ 
-NTSTATUS WINAPI RtlAddAuditAccessAce( 
+NTSTATUS WINAPI RtlAddAuditAccessAceEx(
     IN OUT PACL pAcl, 
     IN DWORD dwAceRevision, 
+    IN DWORD dwAceFlags,
     IN DWORD dwAccessMask, 
     IN PSID pSid, 
     IN BOOL bAuditSuccess, 
     IN BOOL bAuditFailure) 
 { 
-    DWORD dwAceFlags = 0;
-
-    TRACE("(%p,%d,%d,%p,%u,%u)\n",pAcl,dwAceRevision,dwAccessMask,
+    TRACE("(%p,%d,0x%08x,0x%08x,%p,%u,%u)\n",pAcl,dwAceRevision,dwAceFlags,dwAccessMask,
           pSid,bAuditSuccess,bAuditFailure);
 
     if (bAuditSuccess)
@@ -1235,6 +1249,20 @@ NTSTATUS WINAPI RtlAddAuditAccessAce(
     return add_access_ace(pAcl, dwAceRevision, dwAceFlags,
                           dwAccessMask, pSid, SYSTEM_AUDIT_ACE_TYPE);
 } 
+
+/**************************************************************************
+ *  RtlAddAuditAccessAce     [NTDLL.@]
+ */
+NTSTATUS WINAPI RtlAddAuditAccessAce(
+    IN OUT PACL pAcl,
+    IN DWORD dwAceRevision,
+    IN DWORD dwAccessMask,
+    IN PSID pSid,
+    IN BOOL bAuditSuccess,
+    IN BOOL bAuditFailure)
+{
+    return RtlAddAuditAccessAceEx(pAcl, dwAceRevision, 0, dwAccessMask, pSid, bAuditSuccess, bAuditFailure);
+}
  
 /******************************************************************************
  *  RtlValidAcl		[NTDLL.@]

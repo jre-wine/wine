@@ -42,22 +42,9 @@ wined3d_settings_t wined3d_settings =
     FALSE,          /* Use of GLSL disabled by default */
     ORM_BACKBUFFER, /* Use the backbuffer to do offscreen rendering */
     RTL_AUTO,       /* Automatically determine best locking method */
-    64*1024*1024,   /* 64MB texture memory by default */
+    0,              /* The default of memory is set in FillGLCaps */
     NULL            /* No wine logo by default */
 };
-
-WineD3DGlobalStatistics *wineD3DGlobalStatistics = NULL;
-
-long globalChangeGlRam(long glram){
-    /* FIXME: replace this function with object tracking */
-    int result;
-
-    wineD3DGlobalStatistics->glsurfaceram     += glram;
-    TRACE("Adjusted gl ram by %ld to %d\n", glram, wineD3DGlobalStatistics->glsurfaceram);
-    result = wineD3DGlobalStatistics->glsurfaceram;
-    return result;
-
-}
 
 IWineD3D* WINAPI WineDirect3DCreate(UINT SDKVersion, UINT dxVersion, IUnknown *parent) {
     IWineD3DImpl* object;
@@ -75,13 +62,6 @@ IWineD3D* WINAPI WineDirect3DCreate(UINT SDKVersion, UINT dxVersion, IUnknown *p
     object->dxVersion = dxVersion;
     object->ref = 1;
     object->parent = parent;
-
-    /*Create a structure for storing global data in*/
-    if(wineD3DGlobalStatistics == NULL){
-        TRACE("Creating global statistics store\n");
-        wineD3DGlobalStatistics = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wineD3DGlobalStatistics));
-
-    }
 
     TRACE("Created WineD3D object @ %p for d3d%d support\n", object, dxVersion);
 
@@ -112,8 +92,6 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
        HKEY appkey = 0;
        DWORD len;
        WNDCLASSA wc;
-
-       wined3d_settings.emulated_textureram = 64*1024*1024;
 
        /* We need our own window class for a fake window which we use to retrieve GL capabilities */
        /* We might need CS_OWNDC in the future if we notice strange things on Windows.

@@ -35,6 +35,8 @@
 #include "sddl.h"
 #include "winsvc.h"
 #include "aclapi.h"
+#include "objbase.h"
+#include "iads.h"
 #include "advapi32_misc.h"
 
 #include "wine/debug.h"
@@ -246,10 +248,38 @@ static const WCHAR SDDL_READ_CONTROL[]     = {'R','C',0};
 static const WCHAR SDDL_WRITE_DAC[]        = {'W','D',0};
 static const WCHAR SDDL_WRITE_OWNER[]      = {'W','O',0};
 static const WCHAR SDDL_STANDARD_DELETE[]  = {'S','D',0};
+
+static const WCHAR SDDL_READ_PROPERTY[]    = {'R','P',0};
+static const WCHAR SDDL_WRITE_PROPERTY[]   = {'W','P',0};
+static const WCHAR SDDL_CREATE_CHILD[]     = {'C','C',0};
+static const WCHAR SDDL_DELETE_CHILD[]     = {'D','C',0};
+static const WCHAR SDDL_LIST_CHILDREN[]    = {'L','C',0};
+static const WCHAR SDDL_SELF_WRITE[]       = {'S','W',0};
+static const WCHAR SDDL_LIST_OBJECT[]      = {'L','O',0};
+static const WCHAR SDDL_DELETE_TREE[]      = {'D','T',0};
+static const WCHAR SDDL_CONTROL_ACCESS[]   = {'C','R',0};
+
+static const WCHAR SDDL_FILE_ALL[]         = {'F','A',0};
+static const WCHAR SDDL_FILE_READ[]        = {'F','R',0};
+static const WCHAR SDDL_FILE_WRITE[]       = {'F','W',0};
+static const WCHAR SDDL_FILE_EXECUTE[]     = {'F','X',0};
+
+static const WCHAR SDDL_KEY_ALL[]          = {'K','A',0};
+static const WCHAR SDDL_KEY_READ[]         = {'K','R',0};
+static const WCHAR SDDL_KEY_WRITE[]        = {'K','W',0};
+static const WCHAR SDDL_KEY_EXECUTE[]      = {'K','X',0};
+
 static const WCHAR SDDL_GENERIC_ALL[]      = {'G','A',0};
 static const WCHAR SDDL_GENERIC_READ[]     = {'G','R',0};
 static const WCHAR SDDL_GENERIC_WRITE[]    = {'G','W',0};
 static const WCHAR SDDL_GENERIC_EXECUTE[]  = {'G','X',0};
+
+/*
+ * ACL flags
+ */
+static const WCHAR SDDL_PROTECTED[]             = {'P',0};
+static const WCHAR SDDL_AUTO_INHERIT_REQ[]      = {'A','R',0};
+static const WCHAR SDDL_AUTO_INHERITED[]        = {'A','I',0};
 
 /*
  * ACE types
@@ -749,7 +779,7 @@ CreateWellKnownSid( WELL_KNOWN_SID_TYPE WellKnownSidType,
                     PSID pSid,
                     DWORD* cbSid)
 {
-    int i;
+    unsigned int i;
     TRACE("(%d, %s, %p, %p)\n", WellKnownSidType, debugstr_sid(DomainSid), pSid, cbSid);
 
     if (DomainSid != NULL) {
@@ -788,7 +818,7 @@ CreateWellKnownSid( WELL_KNOWN_SID_TYPE WellKnownSidType,
 BOOL WINAPI
 IsWellKnownSid( PSID pSid, WELL_KNOWN_SID_TYPE WellKnownSidType )
 {
-    int i;
+    unsigned int i;
     TRACE("(%s, %d)\n", debugstr_sid(pSid), WellKnownSidType);
 
     for (i = 0; i < sizeof(WellKnownSids)/sizeof(WellKnownSids[0]); i++)
@@ -1093,11 +1123,51 @@ BOOL WINAPI GetPrivateObjectSecurity(
         DWORD DescriptorLength,
         PDWORD ReturnLength )
 {
+    SECURITY_DESCRIPTOR desc;
+    BOOL defaulted, present;
+    PACL pacl;
+    PSID psid;
+
     TRACE("(%p,0x%08x,%p,0x%08x,%p)\n", ObjectDescriptor, SecurityInformation,
           ResultantDescriptor, DescriptorLength, ReturnLength);
 
-    return set_ntstatus( NtQuerySecurityObject(ObjectDescriptor, SecurityInformation,
-                                               ResultantDescriptor, DescriptorLength, ReturnLength ));
+    if (!InitializeSecurityDescriptor(&desc, SECURITY_DESCRIPTOR_REVISION))
+        return FALSE;
+
+    if (SecurityInformation & OWNER_SECURITY_INFORMATION)
+    {
+        if (!GetSecurityDescriptorOwner(ObjectDescriptor, &psid, &defaulted))
+            return FALSE;
+        SetSecurityDescriptorOwner(&desc, psid, defaulted);
+    }
+
+    if (SecurityInformation & GROUP_SECURITY_INFORMATION)
+    {
+        if (!GetSecurityDescriptorGroup(ObjectDescriptor, &psid, &defaulted))
+            return FALSE;
+        SetSecurityDescriptorGroup(&desc, psid, defaulted);
+    }
+
+    if (SecurityInformation & DACL_SECURITY_INFORMATION)
+    {
+        if (!GetSecurityDescriptorDacl(ObjectDescriptor, &present, &pacl, &defaulted))
+            return FALSE;
+        SetSecurityDescriptorDacl(&desc, present, pacl, defaulted);
+    }
+
+    if (SecurityInformation & SACL_SECURITY_INFORMATION)
+    {
+        if (!GetSecurityDescriptorSacl(ObjectDescriptor, &present, &pacl, &defaulted))
+            return FALSE;
+        SetSecurityDescriptorSacl(&desc, present, pacl, defaulted);
+    }
+
+    *ReturnLength = DescriptorLength;
+    if (!MakeSelfRelativeSD(&desc, ResultantDescriptor, ReturnLength))
+        return FALSE;
+    GetSecurityDescriptorOwner(ResultantDescriptor, &psid, &defaulted);
+    FIXME("%p, sid=%p\n", &desc, psid);
+    return TRUE;
 }
 
 /******************************************************************************
@@ -1604,7 +1674,7 @@ LookupPrivilegeNameA( LPCSTR lpSystemName, PLUID lpLuid, LPSTR lpName,
         if (ret)
         {
             /* Windows crashes if cchName is NULL, so will I */
-            int len = WideCharToMultiByte(CP_ACP, 0, lpNameW, -1, lpName,
+            unsigned int len = WideCharToMultiByte(CP_ACP, 0, lpNameW, -1, lpName,
              *cchName, NULL, NULL);
 
             if (len == 0)
@@ -1847,7 +1917,7 @@ LookupAccountSidW(
 	IN OUT LPDWORD domainSize,
 	OUT PSID_NAME_USE name_use )
 {
-    int i, j;
+    unsigned int i, j;
     const WCHAR * ac = NULL;
     const WCHAR * dm = NULL;
     SID_NAME_USE use = 0;
@@ -2257,6 +2327,22 @@ BOOL WINAPI AddAuditAccessAce(
 {
     return set_ntstatus( RtlAddAuditAccessAce(pAcl, dwAceRevision, dwAccessMask, pSid, 
                                               bAuditSuccess, bAuditFailure) ); 
+}
+
+/******************************************************************************
+ *  AddAuditAccessAce [ADVAPI32.@]
+ */
+BOOL WINAPI AddAuditAccessAceEx(
+    IN OUT PACL pAcl,
+    IN DWORD dwAceRevision,
+    IN DWORD dwAceFlags,
+    IN DWORD dwAccessMask,
+    IN PSID pSid,
+    IN BOOL bAuditSuccess,
+    IN BOOL bAuditFailure)
+{
+    return set_ntstatus( RtlAddAuditAccessAceEx(pAcl, dwAceRevision, dwAceFlags, dwAccessMask, pSid,
+                                              bAuditSuccess, bAuditFailure) );
 }
 
 /******************************************************************************
@@ -3024,9 +3110,9 @@ static DWORD ParseAclStringFlags(LPCWSTR* StringAcl)
  */
 static const ACEFLAG AceType[] =
 {
-    { SDDL_ACCESS_ALLOWED, ACCESS_ALLOWED_ACE_TYPE },
     { SDDL_ALARM,          SYSTEM_ALARM_ACE_TYPE },
     { SDDL_AUDIT,          SYSTEM_AUDIT_ACE_TYPE },
+    { SDDL_ACCESS_ALLOWED, ACCESS_ALLOWED_ACE_TYPE },
     { SDDL_ACCESS_DENIED,  ACCESS_DENIED_ACE_TYPE },
     /*
     { SDDL_OBJECT_ACCESS_ALLOWED, ACCESS_ALLOWED_OBJECT_ACE_TYPE },
@@ -3107,10 +3193,31 @@ static const ACEFLAG AceRights[] =
     { SDDL_GENERIC_READ,    GENERIC_READ },
     { SDDL_GENERIC_WRITE,   GENERIC_WRITE },
     { SDDL_GENERIC_EXECUTE, GENERIC_EXECUTE },
+
     { SDDL_READ_CONTROL,    READ_CONTROL },
     { SDDL_STANDARD_DELETE, DELETE },
     { SDDL_WRITE_DAC,       WRITE_DAC },
     { SDDL_WRITE_OWNER,     WRITE_OWNER },
+
+    { SDDL_READ_PROPERTY,   ADS_RIGHT_DS_READ_PROP},
+    { SDDL_WRITE_PROPERTY,  ADS_RIGHT_DS_WRITE_PROP},
+    { SDDL_CREATE_CHILD,    ADS_RIGHT_DS_CREATE_CHILD},
+    { SDDL_DELETE_CHILD,    ADS_RIGHT_DS_DELETE_CHILD},
+    { SDDL_LIST_CHILDREN,   ADS_RIGHT_ACTRL_DS_LIST},
+    { SDDL_SELF_WRITE,      ADS_RIGHT_DS_SELF},
+    { SDDL_LIST_OBJECT,     ADS_RIGHT_DS_LIST_OBJECT},
+    { SDDL_DELETE_TREE,     ADS_RIGHT_DS_DELETE_TREE},
+    { SDDL_CONTROL_ACCESS,  ADS_RIGHT_DS_CONTROL_ACCESS},
+
+    { SDDL_FILE_ALL,        FILE_ALL_ACCESS },
+    { SDDL_FILE_READ,       FILE_GENERIC_READ },
+    { SDDL_FILE_WRITE,      FILE_GENERIC_WRITE },
+    { SDDL_FILE_EXECUTE,    FILE_GENERIC_EXECUTE },
+
+    { SDDL_KEY_ALL,         KEY_ALL_ACCESS },
+    { SDDL_KEY_READ,        KEY_READ },
+    { SDDL_KEY_WRITE,       KEY_WRITE },
+    { SDDL_KEY_EXECUTE,     KEY_EXECUTE },
     { NULL, 0 },
 };
 
@@ -3172,6 +3279,8 @@ static BOOL ParseStringAclToAcl(LPCWSTR StringAcl, LPDWORD lpdwFlags,
     DWORD val;
     DWORD sidlen;
     DWORD length = sizeof(ACL);
+    DWORD acesize = 0;
+    DWORD acecount = 0;
     PACCESS_ALLOWED_ACE pAce = NULL; /* pointer to current ACE */
 
     TRACE("%s\n", debugstr_w(StringAcl));
@@ -3241,10 +3350,32 @@ static BOOL ParseStringAclToAcl(LPCWSTR StringAcl, LPDWORD lpdwFlags,
             goto lerr;
         StringAcl++;
 
-	length += sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + sidlen;
+        acesize = sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + sidlen;
+        length += acesize;
+        if (pAce)
+        {
+            pAce->Header.AceSize = acesize;
+            pAce = (PACCESS_ALLOWED_ACE)((LPBYTE)pAce + acesize);
+        }
+        acecount++;
     }
 
     *cBytes = length;
+
+    if (length > 0xffff)
+    {
+        ERR("ACL too large\n");
+        goto lerr;
+    }
+
+    if (pAcl)
+    {
+        pAcl->AclRevision = ACL_REVISION;
+        pAcl->Sbz1 = 0;
+        pAcl->AclSize = length;
+        pAcl->AceCount = acecount++;
+        pAcl->Sbz2 = 0;
+    }
     return TRUE;
 
 lerr:
@@ -3475,6 +3606,401 @@ lend:
     return bret;
 }
 
+static void DumpString(LPCWSTR string, int cch, WCHAR **pwptr, ULONG *plen)
+{
+    if (cch == -1)
+        cch = strlenW(string);
+
+    if (plen)
+        *plen += cch;
+
+    if (pwptr)
+    {
+        memcpy(*pwptr, string, sizeof(WCHAR)*cch);
+        *pwptr += cch;
+    }
+}
+
+static BOOL DumpSidNumeric(PSID psid, WCHAR **pwptr, ULONG *plen)
+{
+    DWORD i;
+    WCHAR fmt[] = { 'S','-','%','u','-','%','d',0 };
+    WCHAR subauthfmt[] = { '-','%','u',0 };
+    WCHAR buf[26];
+    SID *pisid = psid;
+
+    if( !IsValidSid( psid ) || pisid->Revision != SDDL_REVISION)
+    {
+        SetLastError(ERROR_INVALID_SID);
+        return FALSE;
+    }
+
+    if (pisid->IdentifierAuthority.Value[0] ||
+     pisid->IdentifierAuthority.Value[1])
+    {
+        FIXME("not matching MS' bugs\n");
+        SetLastError(ERROR_INVALID_SID);
+        return FALSE;
+    }
+
+    sprintfW( buf, fmt, pisid->Revision,
+        MAKELONG(
+            MAKEWORD( pisid->IdentifierAuthority.Value[5],
+                    pisid->IdentifierAuthority.Value[4] ),
+            MAKEWORD( pisid->IdentifierAuthority.Value[3],
+                    pisid->IdentifierAuthority.Value[2] )
+        ) );
+    DumpString(buf, -1, pwptr, plen);
+
+    for( i=0; i<pisid->SubAuthorityCount; i++ )
+    {
+        sprintfW( buf, subauthfmt, pisid->SubAuthority[i] );
+        DumpString(buf, -1, pwptr, plen);
+    }
+    return TRUE;
+}
+
+static BOOL DumpSid(PSID psid, WCHAR **pwptr, ULONG *plen)
+{
+    int i;
+    for (i = 0; i < sizeof(WellKnownSids) / sizeof(WellKnownSids[0]); i++)
+    {
+        if (WellKnownSids[i].wstr[0] && EqualSid(psid, (PSID)&(WellKnownSids[i].Sid.Revision)))
+        {
+            DumpString(WellKnownSids[i].wstr, 2, pwptr, plen);
+            return TRUE;
+        }
+    }
+
+    return DumpSidNumeric(psid, pwptr, plen);
+}
+
+static const LPCWSTR AceRightBitNames[32] = {
+        SDDL_CREATE_CHILD,        /*  0 */
+        SDDL_DELETE_CHILD,
+        SDDL_LIST_CHILDREN,
+        SDDL_SELF_WRITE,
+        SDDL_READ_PROPERTY,       /*  4 */
+        SDDL_WRITE_PROPERTY,
+        SDDL_DELETE_TREE,
+        SDDL_LIST_OBJECT,
+        SDDL_CONTROL_ACCESS,      /*  8 */
+        NULL,
+        NULL,
+        NULL,
+        NULL,                     /* 12 */
+        NULL,
+        NULL,
+        NULL,
+        SDDL_STANDARD_DELETE,     /* 16 */
+        SDDL_READ_CONTROL,
+        SDDL_WRITE_DAC,
+        SDDL_WRITE_OWNER,
+        NULL,                     /* 20 */
+        NULL,
+        NULL,
+        NULL,
+        NULL,                     /* 24 */
+        NULL,
+        NULL,
+        NULL,
+        SDDL_GENERIC_ALL,         /* 28 */
+        SDDL_GENERIC_EXECUTE,
+        SDDL_GENERIC_WRITE,
+        SDDL_GENERIC_READ
+};
+
+static void DumpRights(DWORD mask, WCHAR **pwptr, ULONG *plen)
+{
+    static const WCHAR fmtW[] = {'0','x','%','x',0};
+    WCHAR buf[15];
+    int i;
+
+    if (mask == 0)
+        return;
+
+    /* first check if the right have name */
+    for (i = 0; i < sizeof(AceRights)/sizeof(AceRights[0]); i++)
+    {
+        if (AceRights[i].wstr == NULL)
+            break;
+        if (mask == AceRights[i].value)
+        {
+            DumpString(AceRights[i].wstr, -1, pwptr, plen);
+            return;
+        }
+    }
+
+    /* then check if it can be built from bit names */
+    for (i = 0; i < 32; i++)
+    {
+        if ((mask & (1 << i)) && (AceRightBitNames[i] == NULL))
+        {
+            /* can't be built from bit names */
+            sprintfW(buf, fmtW, mask);
+            DumpString(buf, -1, pwptr, plen);
+            return;
+        }
+    }
+
+    /* build from bit names */
+    for (i = 0; i < 32; i++)
+        if (mask & (1 << i))
+            DumpString(AceRightBitNames[i], -1, pwptr, plen);
+}
+
+static BOOL DumpAce(LPVOID pace, WCHAR **pwptr, ULONG *plen)
+{
+    ACCESS_ALLOWED_ACE *piace; /* all the supported ACEs have the same memory layout */
+    static const WCHAR openbr = '(';
+    static const WCHAR closebr = ')';
+    static const WCHAR semicolon = ';';
+
+    if (((PACE_HEADER)pace)->AceType > SYSTEM_ALARM_ACE_TYPE || ((PACE_HEADER)pace)->AceSize < sizeof(ACCESS_ALLOWED_ACE))
+    {
+        SetLastError(ERROR_INVALID_ACL);
+        return FALSE;
+    }
+
+    piace = (ACCESS_ALLOWED_ACE *)pace;
+    DumpString(&openbr, 1, pwptr, plen);
+    switch (piace->Header.AceType)
+    {
+        case ACCESS_ALLOWED_ACE_TYPE:
+            DumpString(SDDL_ACCESS_ALLOWED, -1, pwptr, plen);
+            break;
+        case ACCESS_DENIED_ACE_TYPE:
+            DumpString(SDDL_ACCESS_DENIED, -1, pwptr, plen);
+            break;
+        case SYSTEM_AUDIT_ACE_TYPE:
+            DumpString(SDDL_AUDIT, -1, pwptr, plen);
+            break;
+        case SYSTEM_ALARM_ACE_TYPE:
+            DumpString(SDDL_ALARM, -1, pwptr, plen);
+            break;
+    }
+    DumpString(&semicolon, 1, pwptr, plen);
+
+    if (piace->Header.AceFlags & OBJECT_INHERIT_ACE)
+        DumpString(SDDL_OBJECT_INHERIT, -1, pwptr, plen);
+    if (piace->Header.AceFlags & CONTAINER_INHERIT_ACE)
+        DumpString(SDDL_CONTAINER_INHERIT, -1, pwptr, plen);
+    if (piace->Header.AceFlags & NO_PROPAGATE_INHERIT_ACE)
+        DumpString(SDDL_NO_PROPAGATE, -1, pwptr, plen);
+    if (piace->Header.AceFlags & INHERIT_ONLY_ACE)
+        DumpString(SDDL_INHERIT_ONLY, -1, pwptr, plen);
+    if (piace->Header.AceFlags & INHERITED_ACE)
+        DumpString(SDDL_INHERITED, -1, pwptr, plen);
+    if (piace->Header.AceFlags & SUCCESSFUL_ACCESS_ACE_FLAG)
+        DumpString(SDDL_AUDIT_SUCCESS, -1, pwptr, plen);
+    if (piace->Header.AceFlags & FAILED_ACCESS_ACE_FLAG)
+        DumpString(SDDL_AUDIT_FAILURE, -1, pwptr, plen);
+    DumpString(&semicolon, 1, pwptr, plen);
+    DumpRights(piace->Mask, pwptr, plen);
+    DumpString(&semicolon, 1, pwptr, plen);
+    /* objects not supported */
+    DumpString(&semicolon, 1, pwptr, plen);
+    /* objects not supported */
+    DumpString(&semicolon, 1, pwptr, plen);
+    if (!DumpSid((PSID)&piace->SidStart, pwptr, plen))
+        return FALSE;
+    DumpString(&closebr, 1, pwptr, plen);
+    return TRUE;
+}
+
+static BOOL DumpAcl(PACL pacl, WCHAR **pwptr, ULONG *plen, BOOL protected, BOOL autoInheritReq, BOOL autoInherited)
+{
+    WORD count;
+    int i;
+
+    if (protected)
+        DumpString(SDDL_PROTECTED, -1, pwptr, plen);
+    if (autoInheritReq)
+        DumpString(SDDL_AUTO_INHERIT_REQ, -1, pwptr, plen);
+    if (autoInherited)
+        DumpString(SDDL_AUTO_INHERITED, -1, pwptr, plen);
+
+    if (pacl == NULL)
+        return TRUE;
+
+    if (!IsValidAcl(pacl))
+        return FALSE;
+
+    count = pacl->AceCount;
+    for (i = 0; i < count; i++)
+    {
+        LPVOID ace;
+        if (!GetAce(pacl, i, &ace))
+            return FALSE;
+        if (!DumpAce(ace, pwptr, plen))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+static BOOL DumpOwner(PSECURITY_DESCRIPTOR SecurityDescriptor, WCHAR **pwptr, ULONG *plen)
+{
+    static const WCHAR prefix[] = {'O',':',0};
+    BOOL bDefaulted;
+    PSID psid;
+
+    if (!GetSecurityDescriptorOwner(SecurityDescriptor, &psid, &bDefaulted))
+        return FALSE;
+
+    if (psid == NULL)
+        return TRUE;
+
+    DumpString(prefix, -1, pwptr, plen);
+    if (!DumpSid(psid, pwptr, plen))
+        return FALSE;
+    return TRUE;
+}
+
+static BOOL DumpGroup(PSECURITY_DESCRIPTOR SecurityDescriptor, WCHAR **pwptr, ULONG *plen)
+{
+    static const WCHAR prefix[] = {'G',':',0};
+    BOOL bDefaulted;
+    PSID psid;
+
+    if (!GetSecurityDescriptorGroup(SecurityDescriptor, &psid, &bDefaulted))
+        return FALSE;
+
+    if (psid == NULL)
+        return TRUE;
+
+    DumpString(prefix, -1, pwptr, plen);
+    if (!DumpSid(psid, pwptr, plen))
+        return FALSE;
+    return TRUE;
+}
+
+static BOOL DumpDacl(PSECURITY_DESCRIPTOR SecurityDescriptor, WCHAR **pwptr, ULONG *plen)
+{
+    static const WCHAR dacl[] = {'D',':',0};
+    SECURITY_DESCRIPTOR_CONTROL control;
+    BOOL present, defaulted;
+    DWORD revision;
+    PACL pacl;
+
+    if (!GetSecurityDescriptorDacl(SecurityDescriptor, &present, &pacl, &defaulted))
+        return FALSE;
+
+    if (!GetSecurityDescriptorControl(SecurityDescriptor, &control, &revision))
+        return FALSE;
+
+    if (!present)
+        return TRUE;
+
+    DumpString(dacl, 2, pwptr, plen);
+    if (!DumpAcl(pacl, pwptr, plen, control & SE_DACL_PROTECTED, control & SE_DACL_AUTO_INHERIT_REQ, control & SE_DACL_AUTO_INHERITED))
+        return FALSE;
+    return TRUE;
+}
+
+static BOOL DumpSacl(PSECURITY_DESCRIPTOR SecurityDescriptor, WCHAR **pwptr, ULONG *plen)
+{
+    static const WCHAR sacl[] = {'S',':',0};
+    SECURITY_DESCRIPTOR_CONTROL control;
+    BOOL present, defaulted;
+    DWORD revision;
+    PACL pacl;
+
+    if (!GetSecurityDescriptorSacl(SecurityDescriptor, &present, &pacl, &defaulted))
+        return FALSE;
+
+    if (!GetSecurityDescriptorControl(SecurityDescriptor, &control, &revision))
+        return FALSE;
+
+    if (!present)
+        return TRUE;
+
+    DumpString(sacl, 2, pwptr, plen);
+    if (!DumpAcl(pacl, pwptr, plen, control & SE_SACL_PROTECTED, control & SE_SACL_AUTO_INHERIT_REQ, control & SE_SACL_AUTO_INHERITED))
+        return FALSE;
+    return TRUE;
+}
+
+/******************************************************************************
+ * ConvertSecurityDescriptorToStringSecurityDescriptorA [ADVAPI32.@]
+ */
+BOOL WINAPI ConvertSecurityDescriptorToStringSecurityDescriptorW(PSECURITY_DESCRIPTOR SecurityDescriptor, DWORD SDRevision, SECURITY_INFORMATION RequestedInformation, LPWSTR *OutputString, ULONG *OutputLen)
+{
+    ULONG len;
+    WCHAR *wptr, *wstr;
+
+    if (SDRevision != SDDL_REVISION_1)
+    {
+        ERR("Pogram requested unknown SDDL revision %d\n", SDRevision);
+        SetLastError(ERROR_UNKNOWN_REVISION);
+        return FALSE;
+    }
+
+    len = 0;
+    if (RequestedInformation & OWNER_SECURITY_INFORMATION)
+        if (!DumpOwner(SecurityDescriptor, NULL, &len))
+            return FALSE;
+    if (RequestedInformation & GROUP_SECURITY_INFORMATION)
+        if (!DumpGroup(SecurityDescriptor, NULL, &len))
+            return FALSE;
+    if (RequestedInformation & DACL_SECURITY_INFORMATION)
+        if (!DumpDacl(SecurityDescriptor, NULL, &len))
+            return FALSE;
+    if (RequestedInformation & SACL_SECURITY_INFORMATION)
+        if (!DumpSacl(SecurityDescriptor, NULL, &len))
+            return FALSE;
+
+    wstr = wptr = LocalAlloc(0, (len + 1)*sizeof(WCHAR));
+    if (RequestedInformation & OWNER_SECURITY_INFORMATION)
+        if (!DumpOwner(SecurityDescriptor, &wptr, NULL))
+            return FALSE;
+    if (RequestedInformation & GROUP_SECURITY_INFORMATION)
+        if (!DumpGroup(SecurityDescriptor, &wptr, NULL))
+            return FALSE;
+    if (RequestedInformation & DACL_SECURITY_INFORMATION)
+        if (!DumpDacl(SecurityDescriptor, &wptr, NULL))
+            return FALSE;
+    if (RequestedInformation & SACL_SECURITY_INFORMATION)
+        if (!DumpSacl(SecurityDescriptor, &wptr, NULL))
+            return FALSE;
+    *wptr = 0;
+
+    TRACE("ret: %s, %d\n", wine_dbgstr_w(wstr), len);
+    *OutputString = wstr;
+    if (OutputLen)
+        *OutputLen = strlenW(*OutputString)+1;
+    return TRUE;
+}
+
+/******************************************************************************
+ * ConvertSecurityDescriptorToStringSecurityDescriptorA [ADVAPI32.@]
+ */
+BOOL WINAPI ConvertSecurityDescriptorToStringSecurityDescriptorA(PSECURITY_DESCRIPTOR SecurityDescriptor, DWORD SDRevision, SECURITY_INFORMATION Information, LPSTR *OutputString, ULONG *OutputLen)
+{
+    LPWSTR wstr;
+    ULONG len;
+    if (ConvertSecurityDescriptorToStringSecurityDescriptorW(SecurityDescriptor, SDRevision, Information, &wstr, &len))
+    {
+        int lenA;
+
+        lenA = WideCharToMultiByte(CP_ACP, 0, wstr, len, NULL, 0, NULL, NULL);
+        *OutputString = HeapAlloc(GetProcessHeap(), 0, lenA);
+        WideCharToMultiByte(CP_ACP, 0, wstr, len, *OutputString, lenA, NULL, NULL);
+        LocalFree(wstr);
+
+        if (OutputLen != NULL)
+            *OutputLen = lenA;
+        return TRUE;
+    }
+    else
+    {
+        *OutputString = NULL;
+        if (OutputLen)
+            *OutputLen = 0;
+        return FALSE;
+    }
+}
+
 /******************************************************************************
  * ConvertStringSidToSidW [ADVAPI32.@]
  */
@@ -3538,37 +4064,19 @@ BOOL WINAPI ConvertStringSidToSidA(LPCSTR StringSid, PSID* Sid)
  */
 BOOL WINAPI ConvertSidToStringSidW( PSID pSid, LPWSTR *pstr )
 {
-    DWORD sz, i;
-    LPWSTR str;
-    WCHAR fmt[] = { 'S','-','%','u','-','%','d',0 };
-    WCHAR subauthfmt[] = { '-','%','u',0 };
-    SID* pisid=pSid;
+    DWORD len = 0;
+    LPWSTR wstr, wptr;
 
     TRACE("%p %p\n", pSid, pstr );
 
-    if( !IsValidSid( pSid ) )
+    len = 0;
+    if (!DumpSidNumeric(pSid, NULL, &len))
         return FALSE;
+    wstr = wptr = LocalAlloc(0, (len+1) * sizeof(WCHAR));
+    DumpSidNumeric(pSid, &wptr, NULL);
+    *wptr = 0;
 
-    if (pisid->Revision != SDDL_REVISION)
-        return FALSE;
-    if (pisid->IdentifierAuthority.Value[0] ||
-     pisid->IdentifierAuthority.Value[1])
-    {
-        FIXME("not matching MS' bugs\n");
-        return FALSE;
-    }
-
-    sz = 14 + pisid->SubAuthorityCount * 11;
-    str = LocalAlloc( 0, sz*sizeof(WCHAR) );
-    sprintfW( str, fmt, pisid->Revision, MAKELONG(
-     MAKEWORD( pisid->IdentifierAuthority.Value[5],
-     pisid->IdentifierAuthority.Value[4] ),
-     MAKEWORD( pisid->IdentifierAuthority.Value[3],
-     pisid->IdentifierAuthority.Value[2] ) ) );
-    for( i=0; i<pisid->SubAuthorityCount; i++ )
-        sprintfW( str + strlenW(str), subauthfmt, pisid->SubAuthority[i] );
-    *pstr = str;
-
+    *pstr = wstr;
     return TRUE;
 }
 
@@ -3761,7 +4269,7 @@ static DWORD ComputeStringSidSize(LPCWSTR StringSid)
     }
     else /* String constant format  - Only available in winxp and above */
     {
-        int i;
+        unsigned int i;
 
         for (i = 0; i < sizeof(WellKnownSids)/sizeof(WellKnownSids[0]); i++)
             if (!strncmpW(WellKnownSids[i].wstr, StringSid, 2))
@@ -3840,12 +4348,12 @@ static BOOL ParseStringSidToSid(LPCWSTR StringSid, PSID pSid, LPDWORD cBytes)
 
         while (*StringSid)
         {
+            pisid->SubAuthority[i++] = atoiW(StringSid);
+
             while (*StringSid && *StringSid != '-')
                 StringSid++;
             if (*StringSid == '-')
                 StringSid++;
-
-            pisid->SubAuthority[i++] = atoiW(StringSid);
         }
 
         if (i != pisid->SubAuthorityCount)
@@ -3855,7 +4363,7 @@ static BOOL ParseStringSidToSid(LPCWSTR StringSid, PSID pSid, LPDWORD cBytes)
     }
     else /* String constant format  - Only available in winxp and above */
     {
-        int i;
+        unsigned int i;
         pisid->Revision = SDDL_REVISION;
 
         for (i = 0; i < sizeof(WellKnownSids)/sizeof(WellKnownSids[0]); i++)

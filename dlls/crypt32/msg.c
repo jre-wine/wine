@@ -113,7 +113,7 @@ static WINAPI BOOL CRYPT_EncodeContentLength(DWORD dwCertEncodingType,
  LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
  PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded)
 {
-    const CDataEncodeMsg *msg = (const CDataEncodeMsg *)pvStructInfo;
+    DWORD dataLen = *(DWORD *)pvStructInfo;
     DWORD lenBytes;
     BOOL ret = TRUE;
 
@@ -121,9 +121,9 @@ static WINAPI BOOL CRYPT_EncodeContentLength(DWORD dwCertEncodingType,
      * the message isn't available yet.  The caller will use the length
      * reported here to encode its length.
      */
-    CRYPT_EncodeLen(msg->base.stream_info.cbContent, NULL, &lenBytes);
+    CRYPT_EncodeLen(dataLen, NULL, &lenBytes);
     if (!pbEncoded)
-        *pcbEncoded = 1 + lenBytes + msg->base.stream_info.cbContent;
+        *pcbEncoded = 1 + lenBytes + dataLen;
     else
     {
         if ((ret = CRYPT_EncodeEnsureSpace(dwFlags, pEncodePara, pbEncoded,
@@ -132,7 +132,7 @@ static WINAPI BOOL CRYPT_EncodeContentLength(DWORD dwCertEncodingType,
             if (dwFlags & CRYPT_ENCODE_ALLOC_FLAG)
                 pbEncoded = *(BYTE **)pbEncoded;
             *pbEncoded++ = ASN_OCTETSTRING;
-            CRYPT_EncodeLen(msg->base.stream_info.cbContent, pbEncoded,
+            CRYPT_EncodeLen(dataLen, pbEncoded,
              &lenBytes);
         }
     }
@@ -146,15 +146,23 @@ static BOOL CRYPT_EncodeDataContentInfoHeader(CDataEncodeMsg *msg,
 
     if (msg->base.streamed && msg->base.stream_info.cbContent == 0xffffffff)
     {
-        FIXME("unimplemented for indefinite-length encoding\n");
-        header->cbData = 0;
-        header->pbData = NULL;
-        ret = TRUE;
+        static const BYTE headerValue[] = { 0x30,0x80,0x06,0x09,0x2a,0x86,0x48,
+         0x86,0xf7,0x0d,0x01,0x07,0x01,0xa0,0x80,0x24,0x80 };
+
+        header->pbData = LocalAlloc(0, sizeof(headerValue));
+        if (header->pbData)
+        {
+            header->cbData = sizeof(headerValue);
+            memcpy(header->pbData, headerValue, sizeof(headerValue));
+            ret = TRUE;
+        }
+        else
+            ret = FALSE;
     }
     else
     {
-        struct AsnConstructedItem constructed = { 0, msg,
-         CRYPT_EncodeContentLength };
+        struct AsnConstructedItem constructed = { 0,
+         &msg->base.stream_info.cbContent, CRYPT_EncodeContentLength };
         struct AsnEncodeSequenceItem items[2] = {
          { szOID_RSA_data, CRYPT_AsnEncodeOid, 0 },
          { &constructed,   CRYPT_AsnEncodeConstructed, 0 },
@@ -195,6 +203,25 @@ static BOOL CDataEncodeMsg_Update(HCRYPTMSG hCryptMsg, const BYTE *pbData,
                      msg->base.stream_info.pvArg, header.pbData, header.cbData,
                      FALSE);
                     LocalFree(header.pbData);
+                }
+            }
+            /* Curiously, every indefinite-length streamed update appears to
+             * get its own tag and length, regardless of fFinal.
+             */
+            if (msg->base.stream_info.cbContent == 0xffffffff)
+            {
+                BYTE *header;
+                DWORD headerLen;
+
+                ret = CRYPT_EncodeContentLength(X509_ASN_ENCODING, NULL,
+                 &cbData, CRYPT_ENCODE_ALLOC_FLAG, NULL, (BYTE *)&header,
+                 &headerLen);
+                if (ret)
+                {
+                    ret = msg->base.stream_info.pfnStreamOutput(
+                     msg->base.stream_info.pvArg, header, headerLen,
+                     FALSE);
+                    LocalFree(header);
                 }
             }
             if (!fFinal)
@@ -1729,8 +1756,8 @@ static inline void CRYPT_CopyAttributes(CRYPT_ATTRIBUTES *out,
     {
         DWORD i;
 
-        if ((*nextData - (LPBYTE)0) % sizeof(DWORD))
-            *nextData += (*nextData - (LPBYTE)0) % sizeof(DWORD);
+        if ((*nextData - (LPBYTE)0) % sizeof(DWORD_PTR))
+            *nextData += (*nextData - (LPBYTE)0) % sizeof(DWORD_PTR);
         out->rgAttr = (CRYPT_ATTRIBUTE *)*nextData;
         *nextData += in->cAttr * sizeof(CRYPT_ATTRIBUTE);
         for (i = 0; i < in->cAttr; i++)
@@ -1746,8 +1773,8 @@ static inline void CRYPT_CopyAttributes(CRYPT_ATTRIBUTES *out,
                 DWORD j;
 
                 out->rgAttr[i].cValue = in->rgAttr[i].cValue;
-                if ((*nextData - (LPBYTE)0) % sizeof(DWORD))
-                    *nextData += (*nextData - (LPBYTE)0) % sizeof(DWORD);
+                if ((*nextData - (LPBYTE)0) % sizeof(DWORD_PTR))
+                    *nextData += (*nextData - (LPBYTE)0) % sizeof(DWORD_PTR);
                 out->rgAttr[i].rgValue = (PCRYPT_DATA_BLOB)*nextData;
                 for (j = 0; j < in->rgAttr[i].cValue; j++)
                     CRYPT_CopyBlob(&out->rgAttr[i].rgValue[j],
@@ -1766,8 +1793,8 @@ static DWORD CRYPT_SizeOfAttributes(const CRYPT_ATTRIBUTES *attr)
         if (attr->rgAttr[i].pszObjId)
             size += strlen(attr->rgAttr[i].pszObjId) + 1;
         /* align pointer */
-        if (size % sizeof(DWORD))
-            size += size % sizeof(DWORD);
+        if (size % sizeof(DWORD_PTR))
+            size += size % sizeof(DWORD_PTR);
         size += attr->rgAttr[i].cValue * sizeof(CRYPT_DATA_BLOB);
         for (j = 0; j < attr->rgAttr[i].cValue; j++)
             size += attr->rgAttr[i].rgValue[j].cbData;
@@ -1781,6 +1808,8 @@ static BOOL CRYPT_CopySignerInfo(void *pvData, DWORD *pcbData,
     DWORD size = sizeof(CMSG_SIGNER_INFO);
     BOOL ret;
 
+    TRACE("(%p, %d, %p)\n", pvData, pvData ? *pcbData : 0, in);
+
     size += in->Issuer.cbData;
     size += in->SerialNumber.cbData;
     if (in->HashAlgorithm.pszObjId)
@@ -1791,8 +1820,8 @@ static BOOL CRYPT_CopySignerInfo(void *pvData, DWORD *pcbData,
     size += in->HashEncryptionAlgorithm.Parameters.cbData;
     size += in->EncryptedHash.cbData;
     /* align pointer */
-    if (size % sizeof(DWORD))
-        size += size % sizeof(DWORD);
+    if (size % sizeof(DWORD_PTR))
+        size += size % sizeof(DWORD_PTR);
     size += CRYPT_SizeOfAttributes(&in->AuthAttrs);
     size += CRYPT_SizeOfAttributes(&in->UnauthAttrs);
     if (!pvData)
@@ -1820,12 +1849,13 @@ static BOOL CRYPT_CopySignerInfo(void *pvData, DWORD *pcbData,
          &in->HashEncryptionAlgorithm, &nextData);
         CRYPT_CopyBlob(&out->EncryptedHash, &in->EncryptedHash, &nextData);
         /* align pointer */
-        if ((nextData - (LPBYTE)0) % sizeof(DWORD))
-            nextData += (nextData - (LPBYTE)0) % sizeof(DWORD);
+        if ((nextData - (LPBYTE)0) % sizeof(DWORD_PTR))
+            nextData += (nextData - (LPBYTE)0) % sizeof(DWORD_PTR);
         CRYPT_CopyAttributes(&out->AuthAttrs, &in->AuthAttrs, &nextData);
         CRYPT_CopyAttributes(&out->UnauthAttrs, &in->UnauthAttrs, &nextData);
         ret = TRUE;
     }
+    TRACE("returning %d\n", ret);
     return ret;
 }
 
@@ -1834,6 +1864,8 @@ static BOOL CRYPT_CopySignerCertInfo(void *pvData, DWORD *pcbData,
 {
     DWORD size = sizeof(CERT_INFO);
     BOOL ret;
+
+    TRACE("(%p, %d, %p)\n", pvData, pvData ? *pcbData : 0, in);
 
     size += in->Issuer.cbData;
     size += in->SerialNumber.cbData;
@@ -1858,6 +1890,7 @@ static BOOL CRYPT_CopySignerCertInfo(void *pvData, DWORD *pcbData,
         CRYPT_CopyBlob(&out->SerialNumber, &in->SerialNumber, &nextData);
         ret = TRUE;
     }
+    TRACE("returning %d\n", ret);
     return ret;
 }
 
@@ -2079,6 +2112,7 @@ static BOOL CDecodeHashMsg_VerifyHash(CDecodeMsg *msg)
                 if (ret)
                     ret = !memcmp(hashBlob.pbData, computedHash,
                      hashBlob.cbData);
+                CryptMemFree(computedHash);
             }
             else
                 ret = FALSE;

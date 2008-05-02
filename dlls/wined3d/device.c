@@ -99,7 +99,7 @@ static void WINAPI IWineD3DDeviceImpl_AddResource(IWineD3DDevice *iface, IWineD3
             *pp##type = NULL; \
             return WINED3DERR_OUTOFVIDEOMEMORY; \
         } \
-        globalChangeGlRam(_size); \
+        WineD3DAdapterChangeGLRam(This, _size); \
     } \
     object->resource.allocatedMemory = (0 == _size ? NULL : Pool == WINED3DPOOL_DEFAULT ? NULL : HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, _size)); \
     if (object->resource.allocatedMemory == NULL && _size != 0 && Pool != WINED3DPOOL_DEFAULT) { \
@@ -846,6 +846,8 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface, U
     HRESULT hr;
     unsigned int pow2Width;
     unsigned int pow2Height;
+    const GlPixelFormatDesc *glDesc;
+    getFormatDescEntry(Format, &GLINFO_LOCATION, &glDesc);
 
 
     TRACE("(%p) : Width %d, Height %d, Levels %d, Usage %#x\n", This, Width, Height, Levels, Usage);
@@ -928,6 +930,7 @@ static HRESULT  WINAPI IWineD3DDeviceImpl_CreateTexture(IWineD3DDevice *iface, U
         tmpW = max(1, tmpW >> 1);
         tmpH = max(1, tmpH >> 1);
     }
+    object->baseTexture.shader_conversion_group = glDesc->conversion_group;
 
     TRACE("(%p) : Created  texture %p\n", This, object);
     return WINED3D_OK;
@@ -947,6 +950,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVolumeTexture(IWineD3DDevice *ifa
     UINT                       tmpW;
     UINT                       tmpH;
     UINT                       tmpD;
+    const GlPixelFormatDesc *glDesc;
+    getFormatDescEntry(Format, &GLINFO_LOCATION, &glDesc);
 
     /* TODO: It should only be possible to create textures for formats 
              that are reported as supported */
@@ -1017,6 +1022,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVolumeTexture(IWineD3DDevice *ifa
         tmpH = max(1, tmpH >> 1);
         tmpD = max(1, tmpD >> 1);
     }
+    object->baseTexture.shader_conversion_group = glDesc->conversion_group;
 
     *ppVolumeTexture = (IWineD3DVolumeTexture *) object;
     TRACE("(%p) : Created volume texture %p\n", This, object);
@@ -1066,6 +1072,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
     UINT                     tmpW;
     HRESULT                  hr;
     unsigned int pow2EdgeLength  = EdgeLength;
+    const GlPixelFormatDesc *glDesc;
+    getFormatDescEntry(Format, &GLINFO_LOCATION, &glDesc);
 
     /* TODO: It should only be possible to create textures for formats 
              that are reported as supported */
@@ -1149,6 +1157,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateCubeTexture(IWineD3DDevice *iface
         }
         tmpW = max(1, tmpW >> 1);
     }
+    object->baseTexture.shader_conversion_group = glDesc->conversion_group;
 
     TRACE("(%p) : Created Cube Texture %p\n", This, object);
     *ppCubeTexture = (IWineD3DCubeTexture *) object;
@@ -2286,24 +2295,13 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetDirect3D(IWineD3DDevice *iface, IWin
 }
 
 static UINT WINAPI IWineD3DDeviceImpl_GetAvailableTextureMem(IWineD3DDevice *iface) {
-    /** NOTE: There's a probably  a hack-around for this one by putting as many pbuffers, VBOs (or whatever)
-    * into the video ram as possible and seeing how many fit
-    * you can also get the correct initial value from nvidia and ATI's driver via X
-    * texture memory is video memory + AGP memory
-    *******************/
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    static BOOL showfixmes = TRUE;
-    if (showfixmes) {
-        FIXME("(%p) : stub, simulating %dMB for now, returning %dMB left\n", This,
-         (wined3d_settings.emulated_textureram/(1024*1024)),
-         ((wined3d_settings.emulated_textureram - wineD3DGlobalStatistics->glsurfaceram) / (1024*1024)));
-         showfixmes = FALSE;
-    }
+
     TRACE("(%p) : simulating %dMB, returning %dMB left\n",  This,
-         (wined3d_settings.emulated_textureram/(1024*1024)),
-         ((wined3d_settings.emulated_textureram - wineD3DGlobalStatistics->glsurfaceram) / (1024*1024)));
+         (This->adapter->TextureRam/(1024*1024)),
+         ((This->adapter->TextureRam - This->adapter->UsedTextureRam) / (1024*1024)));
     /* return simulated texture memory left */
-    return (wined3d_settings.emulated_textureram - wineD3DGlobalStatistics->glsurfaceram);
+    return (This->adapter->TextureRam - This->adapter->UsedTextureRam);
 }
 
 
@@ -6869,6 +6867,37 @@ static void WINAPI IWineD3DDeviceImpl_ResourceReleased(IWineD3DDevice *iface, IW
 
             /* Cleanup any FBO attachments if d3d is enabled */
             if(This->d3d_initialized) {
+                if((IWineD3DSurface *)resource == This->lastActiveRenderTarget) {
+                    IWineD3DSwapChainImpl *swapchain = This->swapchains ? (IWineD3DSwapChainImpl *) This->swapchains[0] : NULL;
+
+                    TRACE("Last active render target destroyed\n");
+                    /* Find a replacement surface for the currently active back buffer. The context manager does not do NULL
+                     * checks, so switch to a valid target as long as the currently set surface is still valid. Use the
+                     * surface of the implicit swpchain. If that is the same as the destroyed surface the device is destroyed
+                     * and the lastActiveRenderTarget member shouldn't matter
+                     */
+                    if(swapchain) {
+                        if(swapchain->backBuffer && swapchain->backBuffer[0] != (IWineD3DSurface *)resource) {
+                            TRACE("Activating primary back buffer\n");
+                            ActivateContext(This, swapchain->backBuffer[0], CTXUSAGE_RESOURCELOAD);
+                        } else if(!swapchain->backBuffer && swapchain->frontBuffer != (IWineD3DSurface *)resource) {
+                            /* Single buffering environment */
+                            TRACE("Activating primary front buffer\n");
+                            ActivateContext(This, swapchain->frontBuffer, CTXUSAGE_RESOURCELOAD);
+                        } else {
+                            TRACE("Device is being destroyed, setting lastActiveRenderTarget = 0xdeadbabe\n");
+                            /* Implicit render target destroyed, that means the device is being destroyed
+                             * whatever we set here, it shouldn't matter
+                             */
+                            This->lastActiveRenderTarget = (IWineD3DSurface *) 0xdeadbabe;
+                        }
+                    } else {
+                        /* May happen during ddraw uninitialization */
+                        TRACE("Render target set, but swapchain does not exist!\n");
+                        This->lastActiveRenderTarget = (IWineD3DSurface *) 0xdeadcafe;
+                    }
+                }
+
                 for (i = 0; i < GL_LIMITS(buffers); ++i) {
                     if (This->fbo_color_attachments[i] == (IWineD3DSurface *)resource) {
                         bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->fbo);

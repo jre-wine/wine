@@ -27,8 +27,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
-#define GLINFO_LOCATION This->adapter->gl_info
-
 /*****************************************************************************
  * Pixel format array
  */
@@ -210,9 +208,11 @@ static inline int getFmtIdx(WINED3DFORMAT fmt) {
     return -1;
 }
 
+#define GLINFO_LOCATION (*gl_info)
 BOOL initPixelFormats(WineD3D_GL_Info *gl_info)
 {
     unsigned int src;
+    int dst;
 
     gl_info->gl_formats = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
                                     sizeof(formats) / sizeof(formats[0]) * sizeof(gl_info->gl_formats[0]));
@@ -222,15 +222,66 @@ BOOL initPixelFormats(WineD3D_GL_Info *gl_info)
      * after this loop
      */
     for(src = 0; src < sizeof(gl_formats_template) / sizeof(gl_formats_template[0]); src++) {
-        int dst = getFmtIdx(gl_formats_template[src].fmt);
+        dst = getFmtIdx(gl_formats_template[src].fmt);
         gl_info->gl_formats[dst].glInternal      = gl_formats_template[src].glInternal;
         gl_info->gl_formats[dst].glGammaInternal = gl_formats_template[src].glGammaInternal;
         gl_info->gl_formats[dst].glFormat        = gl_formats_template[src].glFormat;
         gl_info->gl_formats[dst].glType          = gl_formats_template[src].glType;
+        gl_info->gl_formats[dst].conversion_group= WINED3DFMT_UNKNOWN;
+    }
+
+    /* V8U8 is supported natively by GL_ATI_envmap_bumpmap and GL_NV_texture_shader.
+     * V16U16 is only supported by GL_NV_texture_shader. The formats need fixup if
+     * their extensions are not available.
+     *
+     * In theory, V8U8 and V16U16 need a fixup of the undefined blue channel. OpenGL
+     * returns 0.0 when sampling from it, DirectX 1.0. This is disabled until we find
+     * an application that needs this because it causes performance problems due to
+     * shader recompiling in some games.
+     */
+    if(!GL_SUPPORT(ATI_ENVMAP_BUMPMAP) && !GL_SUPPORT(NV_TEXTURE_SHADER2)) {
+        /* signed -> unsigned fixup */
+        dst = getFmtIdx(WINED3DFMT_V8U8);
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_V8U8;
+        dst = getFmtIdx(WINED3DFMT_V16U16);
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_V8U8;
+    } else if(GL_SUPPORT(ATI_ENVMAP_BUMPMAP)) {
+        /* signed -> unsigned fixup */
+        dst = getFmtIdx(WINED3DFMT_V16U16);
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_V16U16;
+    } else {
+        /* Blue = 1.0 fixup, disabled for now */
+#if 0
+        dst = getFmtIdx(WINED3DFMT_V8U8);
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_V8U8;
+        dst = getFmtIdx(WINED3DFMT_V16U16);
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_V8U8;
+#endif
+    }
+
+    if(!GL_SUPPORT(NV_TEXTURE_SHADER)) {
+        /* If GL_NV_texture_shader is not supported, those formats are converted, incompatibly
+         * with each other
+         */
+        dst = getFmtIdx(WINED3DFMT_L6V5U5);
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_L6V5U5;
+        dst = getFmtIdx(WINED3DFMT_X8L8V8U8);
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_X8L8V8U8;
+        dst = getFmtIdx(WINED3DFMT_Q8W8V8U8);
+        gl_info->gl_formats[dst].conversion_group = WINED3DFMT_Q8W8V8U8;
+    } else {
+        /* If GL_NV_texture_shader is supported, WINED3DFMT_L6V5U5 and WINED3DFMT_X8L8V8U8
+         * are converted at surface loading time, but they do not need any modification in
+         * the shader, thus they are compatible with all WINED3DFMT_UNKNOWN group formats.
+         * WINED3DFMT_Q8W8V8U8 doesn't even need load-time conversion
+         */
     }
 
     return TRUE;
 }
+#undef GLINFO_LOCATION
+
+#define GLINFO_LOCATION This->adapter->gl_info
 
 const StaticPixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt, WineD3D_GL_Info *gl_info, const GlPixelFormatDesc **glDesc)
 {

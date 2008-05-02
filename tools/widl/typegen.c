@@ -98,8 +98,13 @@ const char *string_of_type(unsigned char type)
     case RPC_FC_CARRAY: return "FC_CARRAY";
     case RPC_FC_CVARRAY: return "FC_CVARRAY";
     case RPC_FC_BOGUS_ARRAY: return "FC_BOGUS_ARRAY";
-    case RPC_FC_ALIGNM4: return "RPC_FC_ALIGNM4";
-    case RPC_FC_ALIGNM8: return "RPC_FC_ALIGNM8";
+    case RPC_FC_ALIGNM4: return "FC_ALIGNM4";
+    case RPC_FC_ALIGNM8: return "FC_ALIGNM8";
+    case RPC_FC_POINTER: return "FC_POINTER";
+    case RPC_FC_C_CSTRING: return "FC_C_CSTRING";
+    case RPC_FC_C_WSTRING: return "FC_C_WSTRING";
+    case RPC_FC_CSTRING: return "FC_CSTRING";
+    case RPC_FC_WSTRING: return "FC_WSTRING";
     default:
         error("string_of_type: unknown type 0x%02x\n", type);
         return NULL;
@@ -199,7 +204,7 @@ static type_t *get_user_type(const type_t *t, const char **pname)
     }
 }
 
-static int is_user_type(const type_t *t)
+int is_user_type(const type_t *t)
 {
     return get_user_type(t, NULL) != NULL;
 }
@@ -209,6 +214,16 @@ static int is_embedded_complex(const type_t *type)
     unsigned char tc = type->type;
     return is_struct(tc) || is_union(tc) || is_array(type) || is_user_type(type)
         || (is_ptr(type) && type->ref->type == RPC_FC_IP);
+}
+
+static const char *get_context_handle_type_name(const type_t *type)
+{
+    const type_t *t;
+    for (t = type; is_ptr(t); t = t->ref)
+        if (is_attr(t->attrs, ATTR_CONTEXTHANDLE))
+            return t->name;
+    assert(0);
+    return NULL;
 }
 
 static int compare_expr(const expr_t *a, const expr_t *b)
@@ -494,6 +509,12 @@ static size_t write_conf_or_var_desc(FILE *file, const type_t *structure,
     const char *operator_string = "no operators";
     const expr_t *subexpr;
 
+    if (!expr)
+    {
+        print_file(file, 2, "NdrFcLong(0xffffffff),\t/* -1 */\n");
+        return 4;
+    }
+
     if (!structure)
     {
         /* Top-level conformance calculations are done inline.  */
@@ -568,7 +589,6 @@ static size_t write_conf_or_var_desc(FILE *file, const type_t *structure,
         const type_t *correlation_variable = NULL;
         unsigned char correlation_variable_type;
         unsigned char param_type = 0;
-        const char *param_type_string = NULL;
         size_t offset = 0;
         const var_t *var;
 
@@ -595,46 +615,34 @@ static size_t write_conf_or_var_desc(FILE *file, const type_t *structure,
         case RPC_FC_CHAR:
         case RPC_FC_SMALL:
             param_type = RPC_FC_SMALL;
-            param_type_string = "FC_SMALL";
             break;
         case RPC_FC_BYTE:
         case RPC_FC_USMALL:
             param_type = RPC_FC_USMALL;
-            param_type_string = "FC_USMALL";
             break;
         case RPC_FC_WCHAR:
         case RPC_FC_SHORT:
         case RPC_FC_ENUM16:
             param_type = RPC_FC_SHORT;
-            param_type_string = "FC_SHORT";
             break;
         case RPC_FC_USHORT:
             param_type = RPC_FC_USHORT;
-            param_type_string = "FC_USHORT";
             break;
         case RPC_FC_LONG:
         case RPC_FC_ENUM32:
             param_type = RPC_FC_LONG;
-            param_type_string = "FC_LONG";
             break;
         case RPC_FC_ULONG:
             param_type = RPC_FC_ULONG;
-            param_type_string = "FC_ULONG";
             break;
         case RPC_FC_RP:
         case RPC_FC_UP:
         case RPC_FC_OP:
         case RPC_FC_FP:
             if (sizeof(void *) == 4)  /* FIXME */
-            {
                 param_type = RPC_FC_LONG;
-                param_type_string = "FC_LONG";
-            }
             else
-            {
                 param_type = RPC_FC_HYPER;
-                param_type_string = "FC_HYPER";
-            }
             break;
         default:
             error("write_conf_or_var_desc: conformance variable type not supported 0x%x\n",
@@ -642,7 +650,7 @@ static size_t write_conf_or_var_desc(FILE *file, const type_t *structure,
         }
 
         print_file(file, 2, "0x%x, /* Corr desc: %s */\n",
-                   RPC_FC_NORMAL_CONFORMANCE | param_type, param_type_string);
+                   RPC_FC_NORMAL_CONFORMANCE | param_type, string_of_type(param_type));
         print_file(file, 2, "0x%x, /* %s */\n", operator_type, operator_string);
         print_file(file, 2, "NdrFcShort(0x%x), /* offset = %d */\n",
                    offset, offset);
@@ -832,12 +840,30 @@ static unsigned int write_nonsimple_pointer(FILE *file, const type_t *type, size
     return 4;
 }
 
+static unsigned char conf_string_type_of_char_type(unsigned char t)
+{
+    switch (t)
+    {
+    case RPC_FC_BYTE:
+    case RPC_FC_CHAR:
+        return RPC_FC_C_CSTRING;
+    case RPC_FC_WCHAR:
+        return RPC_FC_C_WSTRING;
+    }
+
+    error("string_type_of_char_type: unrecognized type %d", t);
+    return 0;
+}
+
 static unsigned int write_simple_pointer(FILE *file, const type_t *type)
 {
+    unsigned char fc
+        = is_string_type(type->attrs, type)
+        ? conf_string_type_of_char_type(type->ref->type)
+        : type->ref->type;
     print_file(file, 2, "0x%02x, 0x8,\t/* %s [simple_pointer] */\n",
                type->type, string_of_type(type->type));
-    print_file(file, 2, "0x%02x,\t/* %s */\n", type->ref->type,
-               string_of_type(type->ref->type));
+    print_file(file, 2, "0x%02x,\t/* %s */\n", fc, string_of_type(fc));
     print_file(file, 2, "0x5c,\t/* FC_PAD */\n");
     return 4;
 }
@@ -912,7 +938,8 @@ static void write_user_tfs(FILE *file, type_t *type, unsigned int *tfsoff)
     *tfsoff += 2;
 }
 
-static void write_member_type(FILE *file, type_t *type, const var_t *field,
+static void write_member_type(FILE *file, const type_t *cont,
+                              const attr_list_t *attrs, const type_t *type,
                               unsigned int *corroff, unsigned int *tfsoff)
 {
     if (is_embedded_complex(type))
@@ -920,7 +947,7 @@ static void write_member_type(FILE *file, type_t *type, const var_t *field,
         size_t absoff;
         short reloff;
 
-        if (is_union(type->type) && is_attr(field->attrs, ATTR_SWITCHIS))
+        if (is_union(type->type) && is_attr(attrs, ATTR_SWITCHIS))
         {
             absoff = *corroff;
             *corroff += 8;
@@ -940,7 +967,10 @@ static void write_member_type(FILE *file, type_t *type, const var_t *field,
     }
     else if (is_ptr(type))
     {
-        print_file(file, 2, "0x8,\t/* FC_LONG */\n");
+        unsigned char fc = (cont->type == RPC_FC_BOGUS_STRUCT
+                            ? RPC_FC_POINTER
+                            : RPC_FC_LONG);
+        print_file(file, 2, "0x%x,\t/* %s */\n", fc, string_of_type(fc));
         *tfsoff += 1;
     }
     else if (!write_base_type(file, type, tfsoff))
@@ -1341,11 +1371,13 @@ static int is_declptr(const type_t *t)
 }
 
 static size_t write_string_tfs(FILE *file, const attr_list_t *attrs,
-                               const type_t *type,
+                               type_t *type,
                                const char *name, unsigned int *typestring_offset)
 {
     size_t start_offset = *typestring_offset;
     unsigned char rtype;
+
+    update_tfsoff(type, start_offset, file);
 
     if (is_declptr(type))
     {
@@ -1365,7 +1397,7 @@ static size_t write_string_tfs(FILE *file, const attr_list_t *attrs,
         rtype = type->ref->type;
     }
     else
-        rtype = type->type;
+        rtype = type->ref->type;
 
     if ((rtype != RPC_FC_BYTE) && (rtype != RPC_FC_CHAR) && (rtype != RPC_FC_WCHAR))
     {
@@ -1435,6 +1467,11 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
     size_t start_offset;
     int has_pointer;
     int pointer_type = get_attrv(attrs, ATTR_POINTERTYPE);
+    unsigned int baseoff
+        = type->declarray && current_structure
+        ? type_memsize(current_structure, &align)
+        : 0;
+
     if (!pointer_type)
         pointer_type = RPC_FC_RP;
 
@@ -1442,6 +1479,7 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
     if (write_embedded_types(file, attrs, type->ref, name, FALSE, typestring_offset))
         has_pointer = TRUE;
 
+    align = 0;
     size = type_memsize(type, &align);
     if (size == 0)              /* conformant array */
         size = type_memsize(type->ref, &align);
@@ -1457,10 +1495,6 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
     if (type->type != RPC_FC_BOGUS_ARRAY)
     {
         unsigned char tc = type->type;
-        unsigned int baseoff
-            = type->declarray && current_structure
-            ? type_memsize(current_structure, &align)
-            : 0;
 
         if (tc == RPC_FC_LGFARRAY || tc == RPC_FC_LGVARRAY)
         {
@@ -1513,11 +1547,23 @@ static size_t write_array_tfs(FILE *file, const attr_list_t *attrs, type_t *type
             *typestring_offset += 1;
         }
 
-        write_member_type(file, type->ref, NULL, NULL, typestring_offset);
+        write_member_type(file, type, NULL, type->ref, NULL, typestring_offset);
         write_end(file, typestring_offset);
     }
     else
-        error("%s: complex arrays unimplemented\n", name);
+    {
+        unsigned int dim = size_is ? 0 : type->dim;
+        print_file(file, 2, "NdrFcShort(0x%x),\t/* %u */\n", dim, dim);
+        *typestring_offset += 2;
+        *typestring_offset
+            += write_conf_or_var_desc(file, current_structure, baseoff,
+                                      size_is);
+        *typestring_offset
+            += write_conf_or_var_desc(file, current_structure, baseoff,
+                                      length_is);
+        write_member_type(file, type, NULL, type->ref, NULL, typestring_offset);
+        write_end(file, typestring_offset);
+    }
 
     return start_offset;
 }
@@ -1571,7 +1617,8 @@ static void write_struct_members(FILE *file, const type_t *type,
                 offset = (offset + (align - 1)) & ~(align - 1);
                 *typestring_offset += 1;
             }
-            write_member_type(file, ft, field, corroff, typestring_offset);
+            write_member_type(file, type, field->attrs, field->type, corroff,
+                              typestring_offset);
             offset += size;
         }
     }
@@ -1647,8 +1694,13 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
 
     if (type->type == RPC_FC_BOGUS_STRUCT)
     {
-
-        print_file(file, 2, "NdrFcShort(0x0),\t/* FIXME: pointer stuff */\n");
+        /* On the sizing pass, type->ptrdesc may be zero, but it's ok as
+           nothing is written to file yet.  On the actual writing pass,
+           this will have been updated.  */
+        unsigned int absoff = type->ptrdesc ? type->ptrdesc : *tfsoff;
+        short reloff = absoff - *tfsoff;
+        print_file(file, 2, "NdrFcShort(0x%hx),\t/* Offset= %hd (%u) */\n",
+                   reloff, reloff, absoff);
         *tfsoff += 2;
     }
     else if ((type->type == RPC_FC_PSTRUCT) ||
@@ -1664,6 +1716,22 @@ static size_t write_struct_tfs(FILE *file, type_t *type,
     }
 
     write_struct_members(file, type, &corroff, tfsoff);
+
+    if (type->type == RPC_FC_BOGUS_STRUCT)
+    {
+        const var_list_t *fs = type->fields;
+        const var_t *f;
+
+        type->ptrdesc = *tfsoff;
+        if (fs) LIST_FOR_EACH_ENTRY(f, fs, const var_t, entry)
+        {
+            type_t *ft = f->type;
+            if (is_ptr(ft))
+                write_pointer_tfs(file, ft, tfsoff);
+        }
+        if (type->ptrdesc == *tfsoff)
+            type->ptrdesc = 0;
+    }
 
     current_structure = save_current_structure;
     return start_offset;
@@ -1875,6 +1943,50 @@ static size_t write_ip_tfs(FILE *file, const attr_list_t *attrs, type_t *type,
     return start_offset;
 }
 
+static size_t write_contexthandle_tfs(FILE *file, const type_t *type,
+                                      const var_t *var,
+                                      unsigned int *typeformat_offset)
+{
+    size_t start_offset = *typeformat_offset;
+    unsigned char flags = 0x08 /* strict */;
+
+    if (is_ptr(type))
+    {
+        flags |= 0x80;
+        if (type->type != RPC_FC_RP)
+            flags |= 0x01;
+    }
+    if (is_attr(var->attrs, ATTR_IN))
+        flags |= 0x40;
+    if (is_attr(var->attrs, ATTR_OUT))
+        flags |= 0x20;
+
+    WRITE_FCTYPE(file, FC_BIND_CONTEXT, *typeformat_offset);
+    print_file(file, 2, "0x%x,\t/* Context flags: ", flags);
+    if (((flags & 0x21) != 0x21) && (flags & 0x01))
+        print_file(file, 0, "can't be null, ");
+    if (flags & 0x02)
+        print_file(file, 0, "serialize, ");
+    if (flags & 0x04)
+        print_file(file, 0, "no serialize, ");
+    if (flags & 0x08)
+        print_file(file, 0, "strict, ");
+    if ((flags & 0x21) == 0x20)
+        print_file(file, 0, "out, ");
+    if ((flags & 0x21) == 0x21)
+        print_file(file, 0, "return, ");
+    if (flags & 0x40)
+        print_file(file, 0, "in, ");
+    if (flags & 0x80)
+        print_file(file, 0, "via ptr, ");
+    print_file(file, 0, "*/\n");
+    print_file(file, 2, "0, /* FIXME: rundown routine index*/\n");
+    print_file(file, 2, "0, /* FIXME: param num */\n");
+    *typeformat_offset += 4;
+
+    return start_offset;
+}
+
 static int get_ptr_attr(const type_t *t, int def_type)
 {
     while (TRUE)
@@ -1894,6 +2006,9 @@ static size_t write_typeformatstring_var(FILE *file, int indent, const func_t *f
 {
     int pointer_type;
     size_t offset;
+
+    if (is_context_handle(type))
+        return write_contexthandle_tfs(file, type, var, typeformat_offset);
 
     if (is_user_type(type))
     {
@@ -1919,7 +2034,23 @@ static size_t write_typeformatstring_var(FILE *file, int indent, const func_t *f
         return write_string_tfs(file, var->attrs, type, var->name, typeformat_offset);
 
     if (is_array(type))
-        return write_array_tfs(file, var->attrs, type, var->name, typeformat_offset);
+    {
+        size_t off;
+        off = write_array_tfs(file, var->attrs, type, var->name, typeformat_offset);
+        if (pointer_type != RPC_FC_RP)
+        {
+            unsigned int absoff = type->typestring_offset;
+            short reloff = absoff - (*typeformat_offset + 2);
+            off = *typeformat_offset;
+            print_file(file, 0, "/* %d */\n", off);
+            print_file(file, 2, "0x%x, 0x0,\t/* %s */\n", pointer_type,
+                       string_of_type(pointer_type));
+            print_file(file, 2, "NdrFcShort(0x%hx),\t/* Offset= %hd (%u) */\n",
+                       reloff, reloff, absoff);
+            *typeformat_offset += 4;
+        }
+        return off;
+    }
 
     if (!is_ptr(type))
     {
@@ -2041,6 +2172,10 @@ static int write_embedded_types(FILE *file, const attr_list_t *attrs, type_t *ty
             retmask |= 1;
         }
     }
+    else if (last_array(type) && is_attr(attrs, ATTR_STRING))
+    {
+        write_string_tfs(file, attrs, type, name, tfsoff);
+    }
     else if (type->declarray && is_conformant_array(type))
         ;    /* conformant arrays and strings are handled specially */
     else if (is_array(type))
@@ -2140,16 +2275,14 @@ void write_typeformatstring(FILE *file, const ifref_list_t *ifaces, int for_obje
 static unsigned int get_required_buffer_size_type(
     const type_t *type, const char *name, unsigned int *alignment)
 {
-    size_t size = 0;
-
     *alignment = 0;
     if (is_user_type(type))
     {
         const char *uname;
         const type_t *utype = get_user_type(type, &uname);
-        size = get_required_buffer_size_type(utype, uname, alignment);
+        return get_required_buffer_size_type(utype, uname, alignment);
     }
-    else if (!is_ptr(type))
+    else
     {
         switch (type->type)
         {
@@ -2158,16 +2291,14 @@ static unsigned int get_required_buffer_size_type(
         case RPC_FC_USMALL:
         case RPC_FC_SMALL:
             *alignment = 4;
-            size = 1;
-            break;
+            return 1;
 
         case RPC_FC_WCHAR:
         case RPC_FC_USHORT:
         case RPC_FC_SHORT:
         case RPC_FC_ENUM16:
             *alignment = 4;
-            size = 2;
-            break;
+            return 2;
 
         case RPC_FC_ULONG:
         case RPC_FC_LONG:
@@ -2175,14 +2306,12 @@ static unsigned int get_required_buffer_size_type(
         case RPC_FC_FLOAT:
         case RPC_FC_ERROR_STATUS_T:
             *alignment = 4;
-            size = 4;
-            break;
+            return 4;
 
         case RPC_FC_HYPER:
         case RPC_FC_DOUBLE:
             *alignment = 8;
-            size = 8;
-            break;
+            return 8;
 
         case RPC_FC_IGNORE:
         case RPC_FC_BIND_PRIMITIVE:
@@ -2191,6 +2320,7 @@ static unsigned int get_required_buffer_size_type(
         case RPC_FC_STRUCT:
         case RPC_FC_PSTRUCT:
         {
+            size_t size = 0;
             const var_t *field;
             if (!type->fields) return 0;
             LIST_FOR_EACH_ENTRY( field, type->fields, const var_t, entry )
@@ -2199,48 +2329,42 @@ static unsigned int get_required_buffer_size_type(
                 size += get_required_buffer_size_type(field->type, field->name,
                                                       &alignment);
             }
-            break;
+            return size;
         }
 
         case RPC_FC_RP:
-            if (is_base_type( type->ref->type ) || type->ref->type == RPC_FC_STRUCT)
-                size = get_required_buffer_size_type( type->ref, name, alignment );
-            break;
+            return
+                is_base_type( type->ref->type ) || type->ref->type == RPC_FC_STRUCT
+                ? get_required_buffer_size_type( type->ref, name, alignment )
+                : 0;
 
         case RPC_FC_SMFARRAY:
         case RPC_FC_LGFARRAY:
-            size = type->dim * get_required_buffer_size_type(type->ref, name, alignment);
-            break;
-
-        case RPC_FC_SMVARRAY:
-        case RPC_FC_LGVARRAY:
-            get_required_buffer_size_type(type->ref, name, alignment);
-            size = 0;
-            break;
-
-        case RPC_FC_CARRAY:
-        case RPC_FC_CVARRAY:
-            get_required_buffer_size_type(type->ref, name, alignment);
-            size = sizeof(void *);
-            break;
+            return type->dim * get_required_buffer_size_type(type->ref, name, alignment);
 
         default:
-            error("get_required_buffer_size: Unknown/unsupported type: %s (0x%02x)\n", name, type->type);
             return 0;
         }
     }
-    return size;
 }
 
 static unsigned int get_required_buffer_size(const var_t *var, unsigned int *alignment, enum pass pass)
 {
     int in_attr = is_attr(var->attrs, ATTR_IN);
     int out_attr = is_attr(var->attrs, ATTR_OUT);
+    const type_t *t;
 
     if (!in_attr && !out_attr)
         in_attr = 1;
 
     *alignment = 0;
+
+    for (t = var->type; is_ptr(t); t = t->ref)
+        if (is_attr(t->attrs, ATTR_CONTEXTHANDLE))
+        {
+            *alignment = 4;
+            return 20;
+        }
 
     if (pass == PASS_OUT)
     {
@@ -2520,7 +2644,39 @@ void write_remoting_arguments(FILE *file, int indent, const func_t *func,
 
         rtype = type->type;
 
-        if (is_user_type(var->type))
+        if (is_context_handle(type))
+        {
+            if (phase == PHASE_MARSHAL)
+            {
+                if (pass == PASS_IN)
+                {
+                    print_file(file, indent, "NdrClientContextMarshall(\n");
+                    print_file(file, indent + 1, "&_StubMsg,\n");
+                    print_file(file, indent + 1, "(NDR_CCONTEXT)%s%s,\n", is_ptr(type) ? "*" : "", var->name);
+                    print_file(file, indent + 1, "%s);\n", in_attr && out_attr ? "1" : "0");
+                }
+                else
+                {
+                    print_file(file, indent, "NdrServerContextMarshall(\n");
+                    print_file(file, indent + 1, "&_StubMsg,\n");
+                    print_file(file, indent + 1, "(NDR_SCONTEXT)%s,\n", var->name);
+                    print_file(file, indent + 1, "(NDR_RUNDOWN)%s_rundown);\n", get_context_handle_type_name(var->type));
+                }
+            }
+            else if (phase == PHASE_UNMARSHAL)
+            {
+                if (pass == PASS_OUT)
+                {
+                    print_file(file, indent, "NdrClientContextUnmarshall(\n");
+                    print_file(file, indent + 1, "&_StubMsg,\n");
+                    print_file(file, indent + 1, "(NDR_CCONTEXT *)%s,\n", var->name);
+                    print_file(file, indent + 1, "_Handle);\n");
+                }
+                else
+                    print_file(file, indent, "%s = NdrServerContextUnmarshall(&_StubMsg);\n", var->name);
+            }
+        }
+        else if (is_user_type(var->type))
         {
             print_phase_function(file, indent, "UserMarshal", phase, var, start_offset);
         }
@@ -2547,11 +2703,9 @@ void write_remoting_arguments(FILE *file, int indent, const func_t *func,
         else if (is_array(type))
         {
             unsigned char tc = type->type;
-            const char *array_type;
+            const char *array_type = "FixedArray";
 
-            if (tc == RPC_FC_SMFARRAY || tc == RPC_FC_LGFARRAY)
-                array_type = "FixedArray";
-            else if (tc == RPC_FC_SMVARRAY || tc == RPC_FC_LGVARRAY)
+            if (tc == RPC_FC_SMVARRAY || tc == RPC_FC_LGVARRAY)
             {
                 if (is_size_needed_for_phase(phase))
                 {
@@ -2572,22 +2726,28 @@ void write_remoting_arguments(FILE *file, int indent, const func_t *func,
                 }
                 array_type = "ConformantArray";
             }
-            else if (tc == RPC_FC_CVARRAY)
+            else if (tc == RPC_FC_CVARRAY || tc == RPC_FC_BOGUS_ARRAY)
             {
                 if (is_size_needed_for_phase(phase))
                 {
-                    print_file(file, indent, "_StubMsg.MaxCount = (unsigned long)");
-                    write_expr(file, type->size_is, 1);
-                    fprintf(file, ";\n");
-                    print_file(file, indent, "_StubMsg.Offset = (unsigned long)0;\n"); /* FIXME */
-                    print_file(file, indent, "_StubMsg.ActualCount = (unsigned long)");
-                    write_expr(file, type->length_is, 1);
-                    fprintf(file, ";\n\n");
+                    if (type->size_is)
+                    {
+                        print_file(file, indent, "_StubMsg.MaxCount = (unsigned long)");
+                        write_expr(file, type->size_is, 1);
+                        fprintf(file, ";\n");
+                    }
+                    if (type->length_is)
+                    {
+                        print_file(file, indent, "_StubMsg.Offset = (unsigned long)0;\n"); /* FIXME */
+                        print_file(file, indent, "_StubMsg.ActualCount = (unsigned long)");
+                        write_expr(file, type->length_is, 1);
+                        fprintf(file, ";\n\n");
+                    }
                 }
-                array_type = "ConformantVaryingArray";
+                array_type = (tc == RPC_FC_BOGUS_ARRAY
+                              ? "ComplexArray"
+                              : "ConformantVaryingArray");
             }
-            else
-                array_type = "ComplexArray";
 
             if (!in_attr && phase == PHASE_FREE)
             {
@@ -2597,10 +2757,8 @@ void write_remoting_arguments(FILE *file, int indent, const func_t *func,
             }
             else if (phase != PHASE_FREE)
             {
-                if (pointer_type == RPC_FC_UP)
-                    print_phase_function(file, indent, "Pointer", phase, var, start_offset);
-                else
-                    print_phase_function(file, indent, array_type, phase, var, start_offset);
+                const char *t = pointer_type == RPC_FC_RP ? array_type : "Pointer";
+                print_phase_function(file, indent, t, phase, var, start_offset);
             }
         }
         else if (!is_ptr(var->type) && is_base_type(rtype))
@@ -2845,28 +3003,33 @@ void declare_stub_args( FILE *file, int indent, const func_t *func )
         if (!out_attr && !in_attr)
             in_attr = 1;
 
-        if (!in_attr && !var->type->size_is && !is_string)
+        if (is_context_handle(var->type))
+            print_file(file, indent, "NDR_SCONTEXT %s;\n", var->name);
+        else
         {
+            if (!in_attr && !var->type->size_is && !is_string)
+            {
+                print_file(file, indent, "");
+                write_type(file, var->type->ref, FALSE, "_W%u", i++);
+                fprintf(file, ";\n");
+            }
+
             print_file(file, indent, "");
-            write_type(file, var->type->ref, FALSE, "_W%u", i++);
+            write_type_left(file, var->type);
+            fprintf(file, " ");
+            if (var->type->declarray) {
+                fprintf(file, "( *");
+                write_name(file, var);
+                fprintf(file, " )");
+            } else
+                write_name(file, var);
+            write_type_right(file, var->type, FALSE);
             fprintf(file, ";\n");
+
+            if (decl_indirect(var->type))
+                print_file(file, indent, "void *_p_%s = &%s;\n",
+                           var->name, var->name);
         }
-
-        print_file(file, indent, "");
-        write_type_left(file, var->type);
-        fprintf(file, " ");
-        if (var->type->declarray) {
-            fprintf(file, "( *");
-            write_name(file, var);
-            fprintf(file, " )");
-        } else
-            write_name(file, var);
-        write_type_right(file, var->type, FALSE);
-        fprintf(file, ";\n");
-
-        if (decl_indirect(var->type))
-            print_file(file, indent, "void *_p_%s = &%s;\n",
-                       var->name, var->name);
     }
 }
 

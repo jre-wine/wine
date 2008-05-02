@@ -59,10 +59,8 @@ static ULONG WINAPI HTMLDOMNode_AddRef(IHTMLDOMNode *iface)
 {
     HTMLDOMNode *This = HTMLDOMNODE_THIS(iface);
 
-    if(This->impl.unk)
-        return IUnknown_AddRef(This->impl.unk);
-
     TRACE("(%p)\n", This);
+
     return IHTMLDocument2_AddRef(HTMLDOC(This->doc));
 }
 
@@ -70,10 +68,8 @@ static ULONG WINAPI HTMLDOMNode_Release(IHTMLDOMNode *iface)
 {
     HTMLDOMNode *This = HTMLDOMNODE_THIS(iface);
 
-    if(This->impl.unk)
-        return IUnknown_Release(This->impl.unk);
-
     TRACE("(%p)\n", This);
+
     return IHTMLDocument2_Release(HTMLDOC(This->doc));
 }
 
@@ -348,7 +344,6 @@ static HTMLDOMNode *create_node(HTMLDocument *doc, nsIDOMNode *nsnode)
         break;
     default:
         ret = mshtml_alloc(sizeof(HTMLDOMNode));
-        ret->node_type = NT_UNKNOWN;
         ret->impl.unk = NULL;
         ret->destructor = NULL;
     }

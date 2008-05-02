@@ -288,9 +288,14 @@
 @ stdcall SetupDiCreateDeviceInfoListExA(ptr long str ptr)
 @ stdcall SetupDiCreateDeviceInfoListExW(ptr long str ptr)
 @ stdcall SetupDiCreateDeviceInfoW(long wstr ptr wstr long long ptr)
+@ stdcall SetupDiCreateDeviceInterfaceA(ptr ptr ptr str long ptr)
+@ stdcall SetupDiCreateDeviceInterfaceW(ptr ptr ptr wstr long ptr)
+@ stdcall SetupDiCreateDeviceInterfaceRegKeyA(ptr ptr long long ptr ptr)
+@ stdcall SetupDiCreateDeviceInterfaceRegKeyW(ptr ptr long long ptr ptr)
 @ stub SetupDiDeleteDevRegKey
 @ stub SetupDiDeleteDeviceInfo
 @ stub SetupDiDeleteDeviceInterfaceData
+@ stdcall SetupDiDeleteDeviceInterfaceRegKey(ptr ptr long)
 @ stub SetupDiDeleteDeviceRegKey
 @ stub SetupDiDestroyClassImageList
 @ stdcall SetupDiDestroyDeviceInfoList(long)
@@ -324,13 +329,13 @@
 @ stdcall SetupDiGetDeviceInfoListDetailW(ptr ptr)
 @ stdcall SetupDiGetDeviceInstallParamsA(ptr ptr ptr)
 @ stub SetupDiGetDeviceInstallParamsW
-@ stub SetupDiGetDeviceInstanceIdA
-@ stub SetupDiGetDeviceInstanceIdW
+@ stdcall SetupDiGetDeviceInstanceIdA(ptr ptr ptr long ptr)
+@ stdcall SetupDiGetDeviceInstanceIdW(ptr ptr ptr long ptr)
 @ stub SetupDiGetDeviceInterfaceAlias
 @ stdcall SetupDiGetDeviceInterfaceDetailA(long ptr ptr long ptr ptr)
 @ stdcall SetupDiGetDeviceInterfaceDetailW(long ptr ptr long ptr ptr)
 @ stdcall SetupDiGetDeviceRegistryPropertyA(long ptr long ptr ptr long ptr)
-@ stub SetupDiGetDeviceRegistryPropertyW
+@ stdcall SetupDiGetDeviceRegistryPropertyW(long ptr long ptr ptr long ptr)
 @ stub SetupDiGetDriverInfoDetailA
 @ stub SetupDiGetDriverInfoDetailW
 @ stub SetupDiGetDriverInstallParamsA
@@ -365,7 +370,7 @@
 @ stdcall SetupDiOpenDeviceInterfaceA(ptr str long ptr)
 @ stub SetupDiOpenDeviceInterfaceRegKey
 @ stdcall SetupDiOpenDeviceInterfaceW(ptr wstr long ptr)
-@ stub SetupDiRegisterDeviceInfo
+@ stdcall SetupDiRegisterDeviceInfo(ptr ptr long ptr ptr ptr)
 @ stub SetupDiRemoveDevice
 @ stub SetupDiRemoveDeviceInterface
 @ stub SetupDiSelectDevice
@@ -374,8 +379,8 @@
 @ stub SetupDiSetClassInstallParamsW
 @ stub SetupDiSetDeviceInstallParamsA
 @ stub SetupDiSetDeviceInstallParamsW
-@ stub SetupDiSetDeviceRegistryPropertyA
-@ stub SetupDiSetDeviceRegistryPropertyW
+@ stdcall SetupDiSetDeviceRegistryPropertyA(ptr ptr long ptr ptr)
+@ stdcall SetupDiSetDeviceRegistryPropertyW(ptr ptr long ptr ptr)
 @ stub SetupDiSetDriverInstallParamsA
 @ stub SetupDiSetDriverInstallParamsW
 @ stub SetupDiSetSelectedDevice

@@ -67,6 +67,22 @@ static ULONG  WINAPI IWineD3DPixelShaderImpl_AddRef(IWineD3DPixelShader *iface) 
     return InterlockedIncrement(&This->ref);
 }
 
+static void destroy_glsl_pshader(IWineD3DPixelShaderImpl *This) {
+    struct list *linked_programs = &This->baseShader.linked_programs;
+
+    TRACE("Deleting linked programs\n");
+    if (linked_programs->next) {
+        struct glsl_shader_prog_link *entry, *entry2;
+        LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs, struct glsl_shader_prog_link, pshader_entry) {
+            delete_glsl_program_entry(This->baseShader.device, entry);
+        }
+    }
+
+    TRACE("Deleting shader object %u\n", This->baseShader.prgId);
+    GL_EXTCALL(glDeleteObjectARB(This->baseShader.prgId));
+    checkGLcall("glDeleteObjectARB");
+}
+
 static ULONG  WINAPI IWineD3DPixelShaderImpl_Release(IWineD3DPixelShader *iface) {
     IWineD3DPixelShaderImpl *This = (IWineD3DPixelShaderImpl *)iface;
     ULONG ref;
@@ -74,19 +90,7 @@ static ULONG  WINAPI IWineD3DPixelShaderImpl_Release(IWineD3DPixelShader *iface)
     ref = InterlockedDecrement(&This->ref);
     if (ref == 0) {
         if (This->baseShader.shader_mode == SHADER_GLSL && This->baseShader.prgId != 0) {
-            struct list *linked_programs = &This->baseShader.linked_programs;
-
-            TRACE("Deleting linked programs\n");
-            if (linked_programs->next) {
-                struct glsl_shader_prog_link *entry, *entry2;
-                LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs, struct glsl_shader_prog_link, pshader_entry) {
-                    delete_glsl_program_entry(This->baseShader.device, entry);
-                }
-            }
-
-            TRACE("Deleting shader object %u\n", This->baseShader.prgId);
-            GL_EXTCALL(glDeleteObjectARB(This->baseShader.prgId));
-            checkGLcall("glDeleteObjectARB");
+            destroy_glsl_pshader(This);
         }
         shader_delete_constant_list(&This->baseShader.constantsF);
         shader_delete_constant_list(&This->baseShader.constantsB);
@@ -171,22 +175,12 @@ CONST SHADER_OPCODE IWineD3DPixelShaderImpl_shader_ins[] = {
     {WINED3DSIO_FRC,  "frc",  "FRC", 1, 2, pshader_hw_map2gl, shader_glsl_map2gl, 0, 0},
     {WINED3DSIO_CND,  "cnd",  NULL, 1, 4, pshader_hw_cnd, shader_glsl_cnd, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,4)},
     {WINED3DSIO_CMP,  "cmp",  NULL, 1, 4, pshader_hw_cmp, shader_glsl_cmp, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(3,0)},
-    {WINED3DSIO_POW,  "pow",  "POW", 1, 3, NULL, shader_glsl_pow, 0, 0},
-    {WINED3DSIO_CRS,  "crs",  "XPS", 1, 3, NULL, shader_glsl_cross, 0, 0},
-    /* TODO: xyz normalise can be performed as VS_ARB using one temporary register,
-        DP3 tmp , vec, vec;
-        RSQ tmp, tmp.x;
-        MUL vec.xyz, vec, tmp;
-    but I think this is better because it accounts for w properly.
-        DP3 tmp , vec, vec;
-        RSQ tmp, tmp.x;
-        MUL vec, vec, tmp;
-    */
-    {WINED3DSIO_NRM,      "nrm",      NULL, 1, 2, NULL, shader_glsl_map2gl, 0, 0},
-    {WINED3DSIO_SINCOS,   "sincos",   NULL, 1, 4, NULL, shader_glsl_sincos, WINED3DPS_VERSION(2,0), WINED3DPS_VERSION(2,1)},
-    {WINED3DSIO_SINCOS,   "sincos",   NULL, 1, 2, NULL, shader_glsl_sincos, WINED3DPS_VERSION(3,0), -1},
-    /* TODO: dp2add can be made out of multiple instuctions */
-    {WINED3DSIO_DP2ADD,   "dp2add",   GLNAME_REQUIRE_GLSL,  1, 4, NULL, pshader_glsl_dp2add, WINED3DPS_VERSION(2,0), -1},
+    {WINED3DSIO_POW,  "pow",  "POW", 1, 3, pshader_hw_map2gl, shader_glsl_pow, 0, 0},
+    {WINED3DSIO_CRS,  "crs",  "XPD", 1, 3, pshader_hw_map2gl, shader_glsl_cross, 0, 0},
+    {WINED3DSIO_NRM,      "nrm",      NULL, 1, 2, shader_hw_nrm, shader_glsl_map2gl, 0, 0},
+    {WINED3DSIO_SINCOS,   "sincos",   NULL, 1, 4, shader_hw_sincos, shader_glsl_sincos, WINED3DPS_VERSION(2,0), WINED3DPS_VERSION(2,1)},
+    {WINED3DSIO_SINCOS,   "sincos",   "SCS", 1, 2, shader_hw_sincos, shader_glsl_sincos, WINED3DPS_VERSION(3,0), -1},
+    {WINED3DSIO_DP2ADD,   "dp2add",   NULL, 1, 4, pshader_hw_dp2add, pshader_glsl_dp2add, WINED3DPS_VERSION(2,0), -1},
     /* Matrix */
     {WINED3DSIO_M4x4, "m4x4", "undefined", 1, 3, NULL, shader_glsl_mnxn, 0, 0},
     {WINED3DSIO_M4x3, "m4x3", "undefined", 1, 3, NULL, shader_glsl_mnxn, 0, 0},
@@ -234,10 +228,10 @@ CONST SHADER_OPCODE IWineD3DPixelShaderImpl_shader_ins[] = {
     {WINED3DSIO_TEXM3x3SPEC,  "texm3x3spec",  "undefined", 1, 3, pshader_hw_texm3x3spec, pshader_glsl_texm3x3spec, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXM3x3VSPEC, "texm3x3vspec",  "undefined", 1, 2, pshader_hw_texm3x3vspec, pshader_glsl_texm3x3vspec, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXM3x3TEX,   "texm3x3tex",   "undefined", 1, 2, pshader_hw_texm3x3tex, pshader_glsl_texm3x3tex, WINED3DPS_VERSION(1,0), WINED3DPS_VERSION(1,3)},
-    {WINED3DSIO_TEXDP3TEX,    "texdp3tex",    GLNAME_REQUIRE_GLSL, 1, 2, NULL, pshader_glsl_texdp3tex, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
-    {WINED3DSIO_TEXM3x2DEPTH, "texm3x2depth", GLNAME_REQUIRE_GLSL, 1, 2, NULL, pshader_glsl_texm3x2depth, WINED3DPS_VERSION(1,3), WINED3DPS_VERSION(1,3)},
-    {WINED3DSIO_TEXDP3,   "texdp3",   GLNAME_REQUIRE_GLSL, 1, 2, NULL, pshader_glsl_texdp3, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
-    {WINED3DSIO_TEXM3x3,  "texm3x3",  GLNAME_REQUIRE_GLSL, 1, 2, NULL, pshader_glsl_texm3x3, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
+    {WINED3DSIO_TEXDP3TEX,    "texdp3tex",    NULL, 1, 2, pshader_hw_texdp3tex, pshader_glsl_texdp3tex, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
+    {WINED3DSIO_TEXM3x2DEPTH, "texm3x2depth", GLNAME_REQUIRE_GLSL, 1, 2, pshader_hw_texm3x2depth, pshader_glsl_texm3x2depth, WINED3DPS_VERSION(1,3), WINED3DPS_VERSION(1,3)},
+    {WINED3DSIO_TEXDP3,   "texdp3",   NULL, 1, 2, pshader_hw_texdp3, pshader_glsl_texdp3, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
+    {WINED3DSIO_TEXM3x3,  "texm3x3",  NULL, 1, 2, pshader_hw_texm3x3, pshader_glsl_texm3x3, WINED3DPS_VERSION(1,2), WINED3DPS_VERSION(1,3)},
     {WINED3DSIO_TEXDEPTH, "texdepth", NULL, 1, 1, pshader_hw_texdepth, pshader_glsl_texdepth, WINED3DPS_VERSION(1,4), WINED3DPS_VERSION(1,4)},
     {WINED3DSIO_BEM,      "bem",      "undefined",         1, 3, pshader_hw_bem, pshader_glsl_bem, WINED3DPS_VERSION(1,4), WINED3DPS_VERSION(1,4)},
     {WINED3DSIO_DSX,      "dsx",      NULL, 1, 2, NULL, shader_glsl_map2gl, WINED3DPS_VERSION(2,1), -1},
@@ -395,6 +389,23 @@ static inline VOID IWineD3DPixelShaderImpl_GenerateShader(
             else
                 shader_addline(&buffer, "gl_FragColor.xyz = mix(gl_Fog.color.xyz, gl_FragColor.xyz, Fog);\n");
         }
+        if(This->srgb_enabled) {
+            const char *fragcolor;
+
+            if(GL_SUPPORT(ARB_DRAW_BUFFERS)) {
+                fragcolor = "gl_FragData[0]";
+            } else {
+                fragcolor = "gl_FragColor";
+            }
+            shader_addline(&buffer, "tmp0.xyz = pow(%s.xyz, vec3(%f, %f, %f)) * vec3(%f, %f, %f) - vec3(%f, %f, %f);\n",
+                            fragcolor, srgb_pow, srgb_pow, srgb_pow, srgb_mul_high, srgb_mul_high, srgb_mul_high,
+                            srgb_sub_high, srgb_sub_high, srgb_sub_high);
+            shader_addline(&buffer, "tmp1.xyz = %s.xyz * srgb_mul_low.xyz;\n", fragcolor);
+            shader_addline(&buffer, "%s.x = %s.x < srgb_comparison.x ? tmp1.x : tmp0.x;\n", fragcolor, fragcolor);
+            shader_addline(&buffer, "%s.y = %s.y < srgb_comparison.y ? tmp1.y : tmp0.y;\n", fragcolor, fragcolor);
+            shader_addline(&buffer, "%s.z = %s.z < srgb_comparison.z ? tmp1.z : tmp0.z;\n", fragcolor, fragcolor);
+            shader_addline(&buffer, "%s = clamp(%s, 0.0, 1.0);\n", fragcolor, fragcolor);
+        }
 
         shader_addline(&buffer, "}\n");
 
@@ -436,12 +447,41 @@ static inline VOID IWineD3DPixelShaderImpl_GenerateShader(
          * -1/(e-s) and e/(e-s) respectively.
          */
         shader_addline(&buffer, "MAD_SAT TMP_FOG, fragment.fogcoord, state.fog.params.y, state.fog.params.z;\n");
-        if (This->baseShader.hex_version < WINED3DPS_VERSION(2,0)) {
-            shader_addline(&buffer, "LRP result.color.rgb, TMP_FOG.x, R0, state.fog.color;\n");
-            shader_addline(&buffer, "MOV result.color.a, R0.a;\n");
+
+        if(This->srgb_enabled) {
+            if (This->baseShader.hex_version < WINED3DPS_VERSION(2,0)) {
+                shader_addline(&buffer, "LRP TMP_COLOR.rgb, TMP_FOG.x, R0, state.fog.color;\n");
+                shader_addline(&buffer, "MOV result.color.a, R0.a;\n");
+            } else {
+                shader_addline(&buffer, "LRP TMP_COLOR.rgb, TMP_FOG.x, TMP_COLOR, state.fog.color;\n");
+                shader_addline(&buffer, "MOV result.color.a, TMP_COLOR.a;\n");
+            }
+            /* Perform sRGB write correction. See GLX_EXT_framebuffer_sRGB */
+
+            /* Calculate the > 0.0031308 case */
+            shader_addline(&buffer, "POW TMP.x, TMP_COLOR.x, srgb_pow.x;\n");
+            shader_addline(&buffer, "POW TMP.y, TMP_COLOR.y, srgb_pow.y;\n");
+            shader_addline(&buffer, "POW TMP.z, TMP_COLOR.z, srgb_pow.z;\n");
+            shader_addline(&buffer, "MUL TMP, TMP, srgb_mul_hi;\n");
+            shader_addline(&buffer, "SUB TMP, TMP, srgb_sub_hi;\n");
+            /* Calculate the < case */
+            shader_addline(&buffer, "MUL TMP2, srgb_mul_low, TMP_COLOR;\n");
+            /* Get 1.0 / 0.0 masks for > 0.0031308 and < 0.0031308 */
+            shader_addline(&buffer, "SLT TA, srgb_comparison, TMP_COLOR;\n");
+            shader_addline(&buffer, "SGE TB, srgb_comparison, TMP_COLOR;\n");
+            /* Store the components > 0.0031308 in the destination */
+            shader_addline(&buffer, "MUL TMP_COLOR, TMP, TA;\n");
+            /* Add the components that are < 0.0031308 */
+            shader_addline(&buffer, "MAD result.color.xyz, TMP2, TB, TMP_COLOR;\n");
+            /* [0.0;1.0] clamping. Not needed, this is done implicitly */
         } else {
-            shader_addline(&buffer, "LRP result.color.rgb, TMP_FOG.x, TMP_COLOR, state.fog.color;\n");
-            shader_addline(&buffer, "MOV result.color.a, TMP_COLOR.a;\n");
+            if (This->baseShader.hex_version < WINED3DPS_VERSION(2,0)) {
+                shader_addline(&buffer, "LRP result.color.rgb, TMP_FOG.x, R0, state.fog.color;\n");
+                shader_addline(&buffer, "MOV result.color.a, R0.a;\n");
+            } else {
+                shader_addline(&buffer, "LRP result.color.rgb, TMP_FOG.x, TMP_COLOR, state.fog.color;\n");
+                shader_addline(&buffer, "MOV result.color.a, TMP_COLOR.a;\n");
+            }
         }
 
         shader_addline(&buffer, "END\n"); 
@@ -523,11 +563,49 @@ static HRESULT WINAPI IWineD3DPixelShaderImpl_CompileShader(IWineD3DPixelShader 
     IWineD3DPixelShaderImpl *This =(IWineD3DPixelShaderImpl *)iface;
     IWineD3DDeviceImpl *deviceImpl = (IWineD3DDeviceImpl*) This->baseShader.device;
     CONST DWORD *function = This->baseShader.function;
+    UINT i, sampler;
+    IWineD3DBaseTextureImpl *texture;
 
     TRACE("(%p) : function %p\n", iface, function);
 
-    /* We're already compiled. */
-    if (This->baseShader.is_compiled) return WINED3D_OK;
+    /* We're already compiled, but check if any of the hardcoded stateblock assumptions
+     * changed.
+     */
+    if (This->baseShader.is_compiled) {
+        char srgbenabled = deviceImpl->stateBlock->renderState[WINED3DRS_SRGBWRITEENABLE] ? 1 : 0;
+        for(i = 0; i < This->baseShader.num_sampled_samplers; i++) {
+            sampler = This->baseShader.sampled_samplers[i];
+            texture = (IWineD3DBaseTextureImpl *) deviceImpl->stateBlock->textures[sampler];
+            if(texture && texture->baseTexture.shader_conversion_group != This->baseShader.sampled_format[sampler]) {
+                WARN("Recompiling shader %p due to format change on sampler %d\n", This, sampler);
+                WARN("Old format group %s, new is %s\n",
+                     debug_d3dformat(This->baseShader.sampled_format[sampler]),
+                     debug_d3dformat(texture->baseTexture.shader_conversion_group));
+                goto recompile;
+            }
+        }
+
+        /* TODO: Check projected textures */
+        /* TODO: Check texture types(2D, Cube, 3D) */
+
+        if(srgbenabled != This->srgb_enabled && This->srgb_mode_hardcoded) {
+            WARN("Recompiling shader because srgb correction is different and hardcoded\n");
+            goto recompile;
+        }
+
+        return WINED3D_OK;
+
+        recompile:
+        if(This->baseShader.recompile_count > 50) {
+            FIXME("Shader %p recompiled more than 50 times\n", This);
+        } else {
+            This->baseShader.recompile_count++;
+        }
+
+        if (This->baseShader.shader_mode == SHADER_GLSL && This->baseShader.prgId != 0) {
+            destroy_glsl_pshader(This);
+        }
+    }
 
     /* We don't need to compile */
     if (!function) {
@@ -546,6 +624,9 @@ static HRESULT WINAPI IWineD3DPixelShaderImpl_CompileShader(IWineD3DPixelShader 
         if (FAILED(hr)) return hr;
         /* FIXME: validate reg_maps against OpenGL */
     }
+
+    /* Reset fields tracking stateblock values beeing hardcoded in the shader */
+    This->baseShader.num_sampled_samplers = 0;
 
     /* Generate the HW shader */
     TRACE("(%p) : Generating hardware program\n", This);
