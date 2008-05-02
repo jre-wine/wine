@@ -1,0 +1,57 @@
+#!/bin/sh
+set -e
+if [ "$1" != "--upstream-version" ]
+then
+  echo "Usage: $0 --upstream-version VERSION FILENAME"
+  exit 1
+fi
+upstream_version="$2"
+origfilename="$3"
+
+# dereference symlink, we'll stash the original filename into pristine-tar
+# (currently, debian does not allow .tar.bz2 source packages anyway, so this
+# reserves the .orig.tar.* names for what's actually uploaded to Debian)
+filename=`find "$origfilename" -printf "%h/%l"`
+
+# craft the .orig.tar.gz for the Debian source package
+debfilename="`dirname "$origfilename"`/wine_$upstream_version.orig.tar.gz"
+if [ "$filename" != "$origfilename" ] && [ "$origfilename" != "$debfilename" ]
+then
+  # kill .orig.tar.bz2, we won't use it
+  rm "$origfilename"
+fi
+if [ ! -f "$debfilename" ]
+then
+  # convert .orig.tar.gz
+  bzcat "$filename"|gzip -9 > "$debfilename"
+fi
+
+# if we're not building from a git tree, use regular uupdate
+if [ ! -d ".git" ]
+then
+  exec uupdate --no-symlink "$*"
+fi
+
+# pull from upstream git repository
+upstream_tag="wine-$upstream_version"
+git checkout upstream
+git pull winehq tag "$upstream_tag"
+# format my verbose "New upstream release" messages, including ANNOUNCE file
+tag_time=`git-cat-file tag "$upstream_tag"|sed -n 's/tagger .*<.*> \([0-9]*\) .*/\1/p'`
+release_date=`date -u -d "@$tag_time" +"%b %-d, %Y"`
+echo "New upstream release $upstream_version, released $release_date." > debian/announce.tmp
+sed -n 's/^  - \(.*\)/- \1/p' ANNOUNCE >> debian/announce.tmp
+
+# load original .tar.bz2 into pristine-tar
+git checkout master
+pristine-tar -v commit "$filename" "$upstream_tag"
+
+# load converted .tar.gz into pristine-tar
+pristine-tar -v commit "$debfilename" "$upstream_tag"
+
+# merge from upstream into master branch
+git checkout -q master
+git merge upstream
+
+# amend the merge commit message
+$0-done --upstream-version "$upstream_version"

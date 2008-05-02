@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+rm -f debian/amd64.tar.lzma.uu
+version=`dpkg-parsechangelog|sed -n 's/Version: \(.*\)/\1/p'`
+last_version=`dpkg-parsechangelog -o1 -c1|sed -n 's/Version: \(.*\)/\1/p'`
+git-dch --release --auto --full --meta \
+ --debian-tag="wine-$last_version" \
+ --git-log="--first-parent"
+git add debian/changelog
+git commit -m "Release $version"
+export DEB_FIXDIFF=yes
+git-buildpackage --git-pristine-tar \
+ --git-upstream-tag="wine-%(version)s" \
+ --git-debian-tag="wine-%(version)s" \
+ --git-tag \
+ "$@"

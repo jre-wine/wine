@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+if [ "$1" != "--upstream-version" ]
+then
+  echo "Usage: $0 --upstream-version VERSION"
+  exit 1
+fi
+upstream_version="$2"
+# Create changelog entry, so build tools can find the upstream version
+dch -v "$upstream_version-1" --distribution UNRELEASED --preserve \
+ "Merge upstream Wine $upstream_version"
+git add debian/changelog
+# Amend the merge commit message
+if [ -f debian/announce.tmp ]
+then
+  git commit --amend -F debian/announce.tmp
+  rm debian/announce.tmp
+else
+  git commit --amend
+fi

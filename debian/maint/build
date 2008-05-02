@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+rm -f debian/amd64.tar.lzma.uu
+export DEB_FIXDIFF=yes
+git-buildpackage --git-pristine-tar \
+ --git-upstream-tag="wine-%(version)s" \
+ --git-debian-tag="wine-%(version)s" \
+ "$@"
