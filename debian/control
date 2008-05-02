@@ -10,11 +10,13 @@ Build-Depends: debhelper (>= 4.1.16), flex-old | flex (<< 2.5.31), bison,
  libxxf86dga-dev | xlibs-static-dev (<< 6) | xlibs-dev (<< 4.3),
  libxxf86vm-dev | xlibs-static-dev (<< 6) | xlibs-dev (<< 4.3),
  libxinerama-dev | xlibs-static-dev (<< 6) | xlibs-dev (<< 4.3),
+ libxcomposite-dev | xlibs-static-dev (<< 6) | xlibs-dev (<< 4.3),
  xlibmesa-gl-dev | xlibmesa-dev (<< 4.3) | libgl-dev,
  libglu1-xorg-dev | xlibmesa-glu-dev | xlibmesa-dev (<= 4.2.1-4) | libglu-dev,
  freeglut3-dev | libglut-dev | glutg3-dev, libxmu-dev | xlibs-dev (<< 4.3),
  libxcursor-dev | xlibs-dev (<< 4.3), libncurses5-dev, libcupsys2-dev,
- libjpeg62-dev | libjpeg-dev, libungif4-dev, libfreetype6-dev,
+ libjpeg62-dev | libjpeg-dev, libpng12-dev | libpng3-dev | libpng-dev,
+ libungif4-dev, libfreetype6-dev,
  libasound2-dev [!kfreebsd-i386 !kfreebsd-amd64 !hurd-i386],
  libjack0.100.0-dev | libjack0.80.0-dev | libjack0.71.2-dev | libjack0.50.0-dev,
  libaudio-dev | nas-dev, libesd0-dev, libsane-dev, libusb-dev,
@@ -31,10 +33,8 @@ Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerp
 Depends: wine-bin (= ${binary:Version}), wine-utils (= ${binary:Version}),
  libwine-alsa (= ${binary:Version}) [i386 amd64 powerpc sparc] | libwine-oss (= ${binary:Version}) | libwine-esd (= ${binary:Version}) | libwine-jack (= ${binary:Version}) | libwine-nas (= ${binary:Version}),
  libwine-gl (= ${binary:Version}), libwine-print (= ${binary:Version}), libwine-sane (= ${binary:Version}),
- libwine-cms (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version}),
- libwine-capi (= ${binary:Version}) [i386 amd64 powerpc sparc]
-Recommends: msttcorefonts
-Suggests: wine-doc, binfmt-support, avscan | klamav | clamav
+ libwine-cms (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version})
+Suggests: wine-doc, binfmt-support, msttcorefonts, avscan | klamav | clamav
 Description: Windows API Implementation (standard suite)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -75,7 +75,7 @@ Description: Windows API Implementation (Development files)
 Package: libwine
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: ${shlibs:Depends}${freetype}, ia32-libs (>= 1.19) [amd64]
+Depends: ${shlibs:Depends}, ia32-libs (>= 1.19) [amd64]
 Replaces: libwine0.0.971116, wine (<< 0.9.11-1), libwine-twain (<< 0.9.13)
 Conflicts: libwine0.0.971116
 Recommends: libwine-print, libwine-gl
@@ -169,7 +169,7 @@ Description: Windows API Implementation (Camera Module)
 Package: libwine-jack
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}${jack}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Description: Windows API Implementation (JACK Sound Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -220,7 +220,7 @@ Description: Windows API Implementation (OSS Sound Module)
 Package: libwine-print
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine (= ${binary:Version}), ${shlibs:Depends}${freetype}${cupsys}
+Depends: libwine (= ${binary:Version}), ${shlibs:Depends}
 Replaces: libwine (<< 0.0.20020710)
 Description: Windows API Implementation (Printing Module)
  This is a BETA release of Wine, the free MS-Windows API implementation.

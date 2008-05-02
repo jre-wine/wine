@@ -3,13 +3,13 @@ wine for Debian
 
 Wine is now split up into the following packages:
 
+wine            (metapackage)
 wine-bin        (core binaries and configuration)
 libwine         (core libraries)
 libwine-print   (printing modules)
 libwine-sane    (scanner access module)
 libwine-gphoto2 (camera access module)
 libwine-gl      (OpenGL/Direct3D module)
-libwine-arts    (aRts sound module)
 libwine-alsa    (ALSA sound module)
 libwine-esd     (EsounD sound module)
 libwine-jack    (JACK sound module)

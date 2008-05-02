@@ -9,7 +9,7 @@ cd ..
 echo Updating $DIFFNAME.gz...
 gunzip $DIFFNAME
 filterdiff -x "*/debian/amd64.tar.lzma.uu" $DIFFNAME > wine-temp.diff
-diff -uN $DIR.orig/debian/amd64.tar.lzma.uu $DIR/debian/amd64.tar.lzma.uu >> wine-temp.diff
+diff -u --label $DIR.orig/debian/amd64.tar.lzma.uu /dev/null --label $DIR/debian/amd64.tar.lzma.uu $DIR/debian/amd64.tar.lzma.uu >> wine-temp.diff
 mv wine-temp.diff $DIFFNAME
 gzip -9 $DIFFNAME
 echo Updating $DSCNAME...

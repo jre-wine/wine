@@ -285,37 +285,15 @@ ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM), i486-linux-gnu)
 		| lzma -c9 | uuencode - > debian/amd64.tar.lzma.uu
 ifneq (,$(DEB_FIXDIFF))
 	# okay, try to change the .diff.gz
-	sh debian/diff-amd64.sh
+	bash debian/diff-amd64.sh
 endif
 endif
 
 	dh_makeshlibs -s
 	dh_installdeb -s
-	dh_shlibdeps -s -L libwine -l$(NATIVE_BUILD)/libs/wine
-
-	# if the distro we're compiling for has freetype, depend on it
-ifneq ($(DEB_HOST_GNU_CPU), x86_64)
-	(dpkg -s libfreetype6-dev >/dev/null && \
-	 echo "freetype=, libfreetype6" >> debian/libwine.substvars && \
-	 echo "freetype=, libfreetype6" >> debian/libwine-print.substvars) || \
-	true
-
-	# if the distro we're compiling for has cups, depend on it
-	(dpkg -s libcupsys2-dev >/dev/null && \
-	 echo "cupsys=, libcupsys2-gnutls10 | libcupsys2" >> debian/libwine-print.substvars) || \
-	true
-
-	# if the distro we're compiling for has jack, depend on it
-	(dpkg -s libjack0.100.0-dev >/dev/null && \
-	 echo "jack=, libjack0.100.0-0" >> debian/libwine-jack.substvars) || \
-	(dpkg -s libjack0.80.0-dev >/dev/null && \
-	 echo "jack=, libjack0.80.0-0" >> debian/libwine-jack.substvars) || \
-	(dpkg -s libjack0.71.2-dev >/dev/null && \
-	 echo "jack=, libjack0.71.2-0" >> debian/libwine-jack.substvars) || \
-	(dpkg -s libjack0.50.0-dev >/dev/null && \
-	 echo "jack=, libjack0.50.0-0" >> debian/libwine-jack.substvars) || \
-	true
-endif
+	bash debian/gendeps.sh
+	dh_shlibdeps -s -Llibwine -l$(NATIVE_BUILD)/libs/wine
+	bash debian/cleandeps.sh
 
 	dh_gencontrol -s
 	dh_md5sums -s

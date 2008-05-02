@@ -1,3 +1,22 @@
+wine (0.9.49-2) unstable; urgency=low
+
+  * When creating the diff to update the source package, suppress
+    the timestamps. Closes: #456422.
+  * Change the Recommends on msttcorefonts to Suggests.
+    Closes: #360610.
+  * Add Build-Depends for libpng12-dev and libxcomposite-dev.
+  * Replaced the debian/rules hacks that I've used to e.g. force
+    libwine-print to depend on cups and stuff with a more general
+    mechanism, where I can put libraries I want packages to depend
+    on into <package>.deps files, and then arrange for dh_shlibdeps
+    to determine the appropriate dependency, by having a shell
+    script compile some dummy executables before invoking it.
+  * Decided to remove libwine-capi dependency from wine metapackage.
+  * Removed mention of libwine-arts from README.Debian, since it
+    no longer exists.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 16 Dec 2007 04:38:26 +0100
+
 wine (0.9.49-1) unstable; urgency=low
 
   * New upstream release 0.9.49.
