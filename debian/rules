@@ -116,7 +116,7 @@ endif
 
 	touch build-arch64-stamp
 
-build-arch: $(subst build,build-arch,$(BUILDS))
+build-arch: $(patsubst build%,build-arch%,$(BUILDS))
 build: build-indep build-arch
 
 clean-arch32:
@@ -141,7 +141,7 @@ else
 	mv build64 /tmp
 endif
 
-clean: $(subst build,clean-arch,$(BUILDS))
+clean: $(patsubst build%,clean-arch%,$(BUILDS))
 	dh_testdir
 	dh_testroot
 	rm -f install-arch-stamp build-indep-stamp
@@ -202,7 +202,7 @@ install-arch64-stamp: build-arch64-stamp
 	touch install-arch64-stamp
 
 install-arch: install-arch-stamp
-install-arch-stamp: $(subst build,install-arch,$(BUILDS))-stamp
+install-arch-stamp: $(patsubst build%,install-arch%-stamp,$(BUILDS))
 	dh_testdir
 	dh_testroot
 
@@ -312,7 +312,7 @@ endif
 	dh_makeshlibs -plibwine -n -V "libwine (= $(VERSION))"
 
 	bash debian/gendeps.sh $(patsubst build%,%,$(BUILDS))
-	dh_shlibdeps -s -Llibwine -ldebian/libwine/usr/lib
+	dh_shlibdeps -s -Llibwine -ldebian/libwine/usr/lib -- --ignore-missing-info
 	bash debian/cleandeps.sh
 
 	# relaxed libwine dependencies for everyone else

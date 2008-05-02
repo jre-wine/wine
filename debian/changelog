@@ -1,3 +1,23 @@
+wine (0.9.58-1) unstable; urgency=low
+
+  * New upstream release 0.9.58.
+    - The default version is now Windows XP.
+    - Many Richedit improvements.
+    - Beginning of jscript dll support.
+    - Shell folders now respect XDG directory configuration.
+    - Many translation updates.
+    - Lots of bug fixes.
+  * This version was released Mar 21, 2008.
+  * Fixed the install-arch*-stamp rules which I added to debian/rules
+    in my previous upload, so they now work on more than my own machine.
+    Closes: #472650.
+  * Added --ignore-missing-info to the dh_shlibdeps in debian/rules,
+    to see if it might work around the broken ia32-libs package that
+    the Debian amd64 port is currently suffering from. (Suggested by
+    Robert Millan.)
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 26 Mar 2008 11:33:08 +0100
+
 wine (0.9.57-1) unstable; urgency=low
 
   * New upstream release 0.9.57.
