@@ -1,3 +1,15 @@
+wine (0.9.41-1) unstable; urgency=low
+
+  * New upstream release 0.9.41.
+    - A number of gdiplus functions.
+    - More complete pdh.dll implementation.
+    - Support for MSI remote calls.
+    - Messaging support in crypt32.dll.
+    - Lots of bug fixes.
+  * This version was released Jul 13, 2007.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 22 Aug 2007 16:06:01 -0400
+
 wine (0.9.40-1) unstable; urgency=low
 
   * New upstream release 0.9.40.
