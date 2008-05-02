@@ -813,6 +813,7 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
   void *payload = NULL;
 
   *Header = NULL;
+  pMsg->Buffer = NULL;
 
   TRACE("(%p, %p, %p)\n", Connection, Header, pMsg);
 
@@ -869,14 +870,14 @@ RPC_STATUS RPCRT4_Receive(RpcConnection *Connection, RpcPktHdr **Header,
       goto fail;
     }
 
-    if ((CurrentHeader->common.flags & RPC_FLG_FIRST) != first_flag) {
+    if (CurrentHeader->common.auth_len != auth_length) {
       WARN("auth_len header field changed from %ld to %d\n",
-        auth_length, (*Header)->common.auth_len);
+        auth_length, CurrentHeader->common.auth_len);
       status = RPC_S_PROTOCOL_ERROR;
       goto fail;
     }
 
-    if (((*Header)->common.flags & RPC_FLG_FIRST) != first_flag) {
+    if ((CurrentHeader->common.flags & RPC_FLG_FIRST) != first_flag) {
       TRACE("invalid packet flags\n");
       status = RPC_S_PROTOCOL_ERROR;
       goto fail;
@@ -964,6 +965,8 @@ fail:
   if (CurrentHeader != *Header)
     RPCRT4_FreeHeader(CurrentHeader);
   if (status != RPC_S_OK) {
+    I_RpcFree(pMsg->Buffer);
+    pMsg->Buffer = NULL;
     RPCRT4_FreeHeader(*Header);
     *Header = NULL;
   }

@@ -132,13 +132,10 @@ HBITMAP WINAPI CreateBitmap( INT width, INT height, UINT planes,
 HBITMAP WINAPI CreateCompatibleBitmap( HDC hdc, INT width, INT height)
 {
     HBITMAP hbmpRet = 0;
-    DC *dc;
 
     TRACE("(%p,%d,%d) =\n", hdc, width, height);
 
-    if (!(dc = DC_GetDCPtr(hdc))) return 0;
-
-    if (GDIMAGIC( dc->header.wMagic ) != MEMORY_DC_MAGIC)
+    if (GetObjectType( hdc ) != OBJ_MEMDC)
     {
         hbmpRet = CreateBitmap(width, height,
                                GetDeviceCaps(hdc, PLANES),
@@ -147,14 +144,18 @@ HBITMAP WINAPI CreateCompatibleBitmap( HDC hdc, INT width, INT height)
     }
     else  /* Memory DC */
     {
-        BITMAPOBJ *bmp = GDI_GetObjPtr( dc->hBitmap, BITMAP_MAGIC );
+        DIBSECTION dib;
+        HBITMAP bitmap = GetCurrentObject( hdc, OBJ_BITMAP );
+        INT size = GetObjectW( bitmap, sizeof(dib), &dib );
 
-        if (!bmp->dib)
+        if (!size) return 0;
+
+        if (size == sizeof(BITMAP))
         {
             /* A device-dependent bitmap is selected in the DC */
             hbmpRet = CreateBitmap(width, height,
-                                   bmp->bitmap.bmPlanes,
-                                   bmp->bitmap.bmBitsPixel,
+                                   dib.dsBm.bmPlanes,
+                                   dib.dsBm.bmBitsPixel,
                                    NULL);
         }
         else
@@ -174,19 +175,19 @@ HBITMAP WINAPI CreateCompatibleBitmap( HDC hdc, INT width, INT height)
                 bi->bmiHeader.biSize          = sizeof(bi->bmiHeader);
                 bi->bmiHeader.biWidth         = width;
                 bi->bmiHeader.biHeight        = height;
-                bi->bmiHeader.biPlanes        = bmp->dib->dsBmih.biPlanes;
-                bi->bmiHeader.biBitCount      = bmp->dib->dsBmih.biBitCount;
-                bi->bmiHeader.biCompression   = bmp->dib->dsBmih.biCompression;
+                bi->bmiHeader.biPlanes        = dib.dsBmih.biPlanes;
+                bi->bmiHeader.biBitCount      = dib.dsBmih.biBitCount;
+                bi->bmiHeader.biCompression   = dib.dsBmih.biCompression;
                 bi->bmiHeader.biSizeImage     = 0;
-                bi->bmiHeader.biXPelsPerMeter = bmp->dib->dsBmih.biXPelsPerMeter;
-                bi->bmiHeader.biYPelsPerMeter = bmp->dib->dsBmih.biYPelsPerMeter;
-                bi->bmiHeader.biClrUsed       = bmp->dib->dsBmih.biClrUsed;
-                bi->bmiHeader.biClrImportant  = bmp->dib->dsBmih.biClrImportant;
+                bi->bmiHeader.biXPelsPerMeter = dib.dsBmih.biXPelsPerMeter;
+                bi->bmiHeader.biYPelsPerMeter = dib.dsBmih.biYPelsPerMeter;
+                bi->bmiHeader.biClrUsed       = dib.dsBmih.biClrUsed;
+                bi->bmiHeader.biClrImportant  = dib.dsBmih.biClrImportant;
 
                 if (bi->bmiHeader.biCompression == BI_BITFIELDS)
                 {
                     /* Copy the color masks */
-                    CopyMemory(bi->bmiColors, bmp->dib->dsBitfields, 3 * sizeof(DWORD));
+                    CopyMemory(bi->bmiColors, dib.dsBitfields, 3 * sizeof(DWORD));
                 }
                 else if (bi->bmiHeader.biBitCount <= 8)
                 {
@@ -198,9 +199,7 @@ HBITMAP WINAPI CreateCompatibleBitmap( HDC hdc, INT width, INT height)
                 HeapFree(GetProcessHeap(), 0, bi);
             }
         }
-        GDI_ReleaseObj(dc->hBitmap);
     }
-    DC_ReleaseDCPtr( dc );
 
     TRACE("\t\t%p\n", hbmpRet);
     return hbmpRet;
@@ -511,14 +510,10 @@ LONG WINAPI SetBitmapBits(
  */
 HBITMAP BITMAP_CopyBitmap(HBITMAP hbitmap)
 {
-    BITMAPOBJ *bmp = (BITMAPOBJ *) GDI_GetObjPtr( hbitmap, BITMAP_MAGIC );
     HBITMAP res = 0;
     BITMAP bm;
 
-    if(!bmp) return 0;
-
-    bm = bmp->bitmap;
-    bm.bmBits = NULL;
+    if (!GetObjectW( hbitmap, sizeof(bm), &bm )) return 0;
     res = CreateBitmapIndirect(&bm);
 
     if(res) {
@@ -528,8 +523,6 @@ HBITMAP BITMAP_CopyBitmap(HBITMAP hbitmap)
 	SetBitmapBits (res, bm.bmWidthBytes * bm.bmHeight, buf);
 	HeapFree( GetProcessHeap(), 0, buf );
     }
-
-    GDI_ReleaseObj( hbitmap );
     return res;
 }
 
@@ -577,13 +570,8 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
     BITMAPOBJ *bitmap;
     DC *dc;
 
-    if (!(bitmap = GDI_GetObjPtr( handle, BITMAP_MAGIC ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
-    if (!(dc = get_dc_ptr( hdc )))
-    {
-        GDI_ReleaseObj( handle );
-        return 0;
-    }
     if (GetObjectType( hdc ) != OBJ_MEMDC)
     {
         ret = 0;
@@ -592,34 +580,44 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
     ret = dc->hBitmap;
     if (handle == dc->hBitmap) goto done;  /* nothing to do */
 
+    if (!(bitmap = GDI_GetObjPtr( handle, BITMAP_MAGIC )))
+    {
+        ret = 0;
+        goto done;
+    }
+
     if (bitmap->header.dwCount && (handle != GetStockObject(DEFAULT_BITMAP)))
     {
         WARN( "Bitmap already selected in another DC\n" );
+        GDI_ReleaseObj( handle );
         ret = 0;
         goto done;
     }
 
     if (!bitmap->funcs && !BITMAP_SetOwnerDC( handle, dc ))
     {
+        GDI_ReleaseObj( handle );
         ret = 0;
         goto done;
     }
 
-    if (dc->funcs->pSelectBitmap) handle = dc->funcs->pSelectBitmap( dc->physDev, handle );
-
-    if (handle)
+    if (dc->funcs->pSelectBitmap && !dc->funcs->pSelectBitmap( dc->physDev, handle ))
+    {
+        GDI_ReleaseObj( handle );
+        ret = 0;
+    }
+    else
     {
         dc->hBitmap = handle;
         GDI_inc_ref_count( handle );
         dc->dirty = 0;
         SetRectRgn( dc->hVisRgn, 0, 0, bitmap->bitmap.bmWidth, bitmap->bitmap.bmHeight);
+        GDI_ReleaseObj( handle );
         DC_InitDC( dc );
         GDI_dec_ref_count( ret );
     }
-    else ret = 0;
 
  done:
-    GDI_ReleaseObj( handle );
     release_dc_ptr( dc );
     return ret;
 }

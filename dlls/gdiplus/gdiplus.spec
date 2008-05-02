@@ -575,7 +575,7 @@
 @ stdcall GdipSetPenLineCap197819(ptr long long long)
 @ stdcall GdipSetPenLineJoin(ptr long)
 @ stdcall GdipSetPenMiterLimit(ptr long)
-@ stub GdipSetPenMode
+@ stdcall GdipSetPenMode(ptr long)
 @ stdcall GdipSetPenStartCap(ptr long)
 @ stub GdipSetPenTransform
 @ stub GdipSetPenUnit
@@ -587,7 +587,7 @@
 @ stdcall GdipSetSolidFillColor(ptr ptr)
 @ stdcall GdipSetStringFormatAlign(ptr long)
 @ stub GdipSetStringFormatDigitSubstitution
-@ stub GdipSetStringFormatFlags
+@ stdcall GdipSetStringFormatFlags(ptr long)
 @ stdcall GdipSetStringFormatHotkeyPrefix(ptr long)
 @ stdcall GdipSetStringFormatLineAlign(ptr long)
 @ stub GdipSetStringFormatMeasurableCharacterRanges

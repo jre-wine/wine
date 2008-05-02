@@ -112,6 +112,7 @@ static const struct message test_dtm_set_range_swap_min_max_seq[] = {
 
 static const struct message test_dtm_set_and_get_system_time_seq[] = {
     { DTM_SETSYSTEMTIME, sent|wparam, 0x00000001 },
+    { 0x0090, sent|optional }, /* Vista */
     { WM_DESTROY, sent|wparam|lparam, 0x00000000, 0x00000000 },
     { WM_NCDESTROY, sent|wparam|lparam, 0x00000000, 0x00000000 },
     { DTM_SETSYSTEMTIME, sent|wparam, 0x00000001 },
@@ -125,6 +126,7 @@ static const struct message test_dtm_set_and_get_system_time_seq[] = {
 };
 
 static const struct message destroy_window_seq[] = {
+    { 0x0090, sent|optional }, /* Vista */
     { WM_DESTROY, sent|wparam|lparam, 0x00000000, 0x00000000 },
     { WM_NCDESTROY, sent|wparam|lparam, 0x00000000, 0x00000000 },
     { 0 }
@@ -560,7 +562,21 @@ static void test_datetime_control(void)
 
 START_TEST(datetime)
 {
-    InitCommonControls();
+    HMODULE hComctl32;
+    BOOL (WINAPI *pInitCommonControlsEx)(const INITCOMMONCONTROLSEX*);
+    INITCOMMONCONTROLSEX iccex;
+
+    hComctl32 = GetModuleHandleA("comctl32.dll");
+    pInitCommonControlsEx = (void*)GetProcAddress(hComctl32, "InitCommonControlsEx");
+    if (!pInitCommonControlsEx)
+    {
+        skip("InitCommonControlsEx() is missing. Skipping the tests\n");
+        return;
+    }
+    iccex.dwSize = sizeof(iccex);
+    iccex.dwICC  = ICC_DATE_CLASSES;
+    pInitCommonControlsEx(&iccex);
+
     init_msg_sequences(sequences, NUM_MSG_SEQUENCES);
 
     test_datetime_control();

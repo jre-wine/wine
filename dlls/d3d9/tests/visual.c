@@ -119,7 +119,7 @@ static IDirect3DDevice9 *init_d3d9(void)
     present_parameters.EnableAutoDepthStencil = TRUE;
     present_parameters.AutoDepthStencilFormat = D3DFMT_D16;
 
-    hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, present_parameters.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
+    hr = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_REF, present_parameters.hDeviceWindow, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device_ptr);
     ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "IDirect3D_CreateDevice returned: %s\n", DXGetErrorString9(hr));
 
     return device_ptr;
@@ -557,7 +557,7 @@ static void test_mova(IDirect3DDevice9 *device)
     IDirect3DVertexShader9 *mova_shader = NULL;
     IDirect3DVertexShader9 *mov_shader = NULL;
     HRESULT hr;
-    int i, j;
+    UINT i, j;
 
     hr = IDirect3DDevice9_CreateVertexShader(device, mova_test, &mova_shader);
     ok(SUCCEEDED(hr), "CreateVertexShader failed (%08x)\n", hr);
@@ -862,7 +862,8 @@ static void test_cube_wrap(IDirect3DDevice9 *device)
     IDirect3DSurface9 *surface = NULL;
     D3DLOCKED_RECT locked_rect;
     HRESULT hr;
-    INT x, y, face;
+    UINT x;
+    INT y, face;
 
     hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &vertex_declaration);
     ok(SUCCEEDED(hr), "CreateVertexDeclaration failed (0x%08x)\n", hr);
@@ -2364,7 +2365,9 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad1, 5 * sizeof(float));
         ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
 
-        /* What does this mean? Not sure... */
+        /* D3DTFF_COUNT1 does not work on Nvidia drivers. It behaves like D3DTTFF_DISABLE. On ATI drivers
+         * it behaves like COUNT2 because normal textures require 2 coords
+         */
         IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT1);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad4, 5 * sizeof(float));
@@ -2397,9 +2400,11 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 160, 120);
     ok(color == 0x00000000, "quad 2 has color %08x, expected 0x0000000\n", color);
     color = getPixelColor(device, 480, 120);
-    ok(color == 0x00ff8000 || color == 0x00fe7f00, "quad 3 has color %08x, expected 0x00ff8000\n", color);
+    ok(color == 0x00ff8000 || color == 0x00fe7f00 || color == 0x00000000,
+       "quad 3 has color %08x, expected 0x00ff8000\n", color);
     color = getPixelColor(device, 480, 360);
-    ok(color == 0x0033cc00 || color == 0x0032cb00, "quad 4 has color %08x, expected 0x0033cc00\n", color);
+    ok(color == 0x0033cc00 || color == 0x0032cb00 || color == 0x00FF0000 || color == 0x00FE0000,
+       "quad 4 has color %08x, expected 0x0033cc00\n", color);
 
     IDirect3DTexture9_Release(texture);
 
@@ -2478,9 +2483,9 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
              1.0,       0.0,       0.1,     1.0,    1.0,    1.0
         };
         float mat[16] = {1.0, 0.0, 0.0, 0.0,
-                          0.0, 0.0, 1.0, 0.0,
-                          0.0, 1.0, 0.0, 0.0,
-                          0.0, 0.0, 0.0, 1.0};
+                         0.0, 0.0, 1.0, 0.0,
+                         0.0, 1.0, 0.0, 0.0,
+                         0.0, 0.0, 0.0, 1.0};
         hr = IDirect3DDevice9_SetVertexDeclaration(device, decl);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %s\n", DXGetErrorString9(hr));
 
@@ -2497,7 +2502,8 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         /* Now disable the w coordinate. Does that change the input, or the output. The coordinates
          * are swapped by the matrix. If it changes the input, the v coord will be missing(green),
          * otherwise the w will be missing(blue).
-         * turns out that the blue color is missing, so it is an output modification
+         * turns out that on nvidia cards the blue color is missing, so it is an output modification.
+         * On ATI cards the COUNT2 is ignored, and it behaves in the same way as COUNT3.
          */
         IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
@@ -2514,7 +2520,9 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad3, 5 * sizeof(float));
         ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
 
-        /* D3DTTFF_COUNT1. Set a NULL matrix, and count1, pass in all values as 1.0 */
+        /* D3DTTFF_COUNT1. Set a NULL matrix, and count1, pass in all values as 1.0. Nvidia has count1 ==
+         * disable. ATI extends it up to the amount of values needed for the volume texture
+         */
         memset(mat, 0, sizeof(mat));
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) mat);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %s\n", DXGetErrorString9(hr));
@@ -2534,11 +2542,12 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 160, 360);
     ok(color == 0x00ffffff, "quad 1 has color %08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 160, 120);
-    ok(color == 0x00ffff00, "quad 2 has color %08x, expected 0x00ffff00\n", color);
+    ok(color == 0x00ffff00 /* NV*/ || color == 0x00ffffff /* ATI */,
+       "quad 2 has color %08x, expected 0x00ffff00\n", color);
     color = getPixelColor(device, 480, 120);
     ok(color == 0x000000ff, "quad 3 has color %08x, expected 0x000000ff\n", color);
     color = getPixelColor(device, 480, 360);
-    ok(color == 0x00ffffff, "quad 4 has color %08x, expected 0x00ffffff\n", color);
+    ok(color == 0x00ffffff || color == 0x0000ff00, "quad 4 has color %08x, expected 0x00ffffff\n", color);
 
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff303030, 0.0, 0);
     ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %s\n", DXGetErrorString9(hr));
@@ -3070,7 +3079,8 @@ static void x8l8v8u8_test(IDirect3DDevice9 *device)
     hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %s\n", DXGetErrorString9(hr));
     color = getPixelColor(device, 578, 430);
-    ok(color == 0x008262ca || color == 0x008363ca, "D3DFMT_X8L8V8U8 = 0x112131ca returns color %08x, expected 0x008262ca\n", color);
+    ok(color == 0x008262ca || color == 0x008363ca || color == 0x008362ca,
+       "D3DFMT_X8L8V8U8 = 0x112131ca returns color %08x, expected 0x008262ca\n", color);
 
     hr = IDirect3DDevice9_SetPixelShader(device, shader2);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed (%08x)\n", hr);
@@ -5449,6 +5459,7 @@ struct vertex_floatcolor {
 static void fixed_function_decl_test(IDirect3DDevice9 *device)
 {
     HRESULT hr;
+    BOOL s_ok, ub_ok, f_ok;
     DWORD color, size, i;
     void *data;
     static const D3DVERTEXELEMENT9 decl_elements_d3dcolor[] = {
@@ -5588,6 +5599,7 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
 
     hr = IDirect3DDevice9_BeginScene(device);
     ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed (%08x)\n", hr);
+    f_ok = FALSE; s_ok = FALSE; ub_ok = FALSE;
     if(SUCCEEDED(hr)) {
         if(dcl_color) {
             hr = IDirect3DDevice9_SetVertexDeclaration(device, dcl_color);
@@ -5596,25 +5608,32 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
             ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %#08x\n", hr);
         }
 
+        /* Tests with non-standard fixed function types fail on the refrast. The ATI driver partially
+         * accepts them, the nvidia driver accepts them all. All those differences even though we're
+         * using software vertex processing. Doh!
+         */
         if(dcl_ubyte) {
             hr = IDirect3DDevice9_SetVertexDeclaration(device, dcl_ubyte);
             ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed (%08x)\n", hr);
             hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad2, sizeof(quad2[0]));
-            ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %#08x\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "DrawPrimitiveUP failed, hr = %#08x\n", hr);
+            ub_ok = SUCCEEDED(hr);
         }
 
         if(dcl_short) {
             hr = IDirect3DDevice9_SetVertexDeclaration(device, dcl_short);
             ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed (%08x)\n", hr);
             hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad3, sizeof(quad3[0]));
-            ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %#08x\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "DrawPrimitiveUP failed, hr = %#08x\n", hr);
+            s_ok = SUCCEEDED(hr);
         }
 
         if(dcl_float) {
             hr = IDirect3DDevice9_SetVertexDeclaration(device, dcl_float);
             ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed (%08x)\n", hr);
             hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad4, sizeof(quad4[0]));
-            ok(hr == D3D_OK, "DrawPrimitiveUP failed, hr = %#08x\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "DrawPrimitiveUP failed, hr = %#08x\n", hr);
+            f_ok = SUCCEEDED(hr);
         }
 
         hr = IDirect3DDevice9_EndScene(device);
@@ -5624,12 +5643,12 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
     IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     if(dcl_short) {
         color = getPixelColor(device, 480, 360);
-        ok(color == 0x000000ff,
+        ok(color == 0x000000ff || !s_ok,
            "D3DDECLTYPE_USHORT4N returned color %08x, expected 0x000000ff\n", color);
     }
     if(dcl_ubyte) {
         color = getPixelColor(device, 160, 120);
-        ok(color == 0x0000ffff,
+        ok(color == 0x0000ffff || !ub_ok,
            "D3DDECLTYPE_UBYTE4N returned color %08x, expected 0x0000ffff\n", color);
     }
     if(dcl_color) {
@@ -5639,7 +5658,7 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
     }
     if(dcl_float) {
         color = getPixelColor(device, 480, 120);
-        ok(color == 0x00ff0000,
+        ok(color == 0x00ff0000 || !f_ok,
            "D3DDECLTYPE_FLOAT4 returned color %08x, expected 0x00ff0000\n", color);
     }
 
@@ -5648,6 +5667,7 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
      * with vertex buffers. It makes sure that the vertex buffer one works, while the above tests
      * whether the immediate mode code works
      */
+    f_ok = FALSE; s_ok = FALSE; ub_ok = FALSE;
     hr = IDirect3DDevice9_BeginScene(device);
     ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed (%08x)\n", hr);
     if(SUCCEEDED(hr)) {
@@ -5676,7 +5696,9 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
             hr = IDirect3DDevice9_SetStreamSource(device, 0, vb, 0, sizeof(quad2[0]));
             ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %s\n", DXGetErrorString9(hr));
             hr = IDirect3DDevice9_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, 0, 2);
-            ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL,
+               "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            ub_ok = SUCCEEDED(hr);
         }
 
         if(dcl_short) {
@@ -5690,7 +5712,9 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
             hr = IDirect3DDevice9_SetStreamSource(device, 0, vb, 0, sizeof(quad3[0]));
             ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %s\n", DXGetErrorString9(hr));
             hr = IDirect3DDevice9_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, 0, 2);
-            ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL,
+               "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            s_ok = SUCCEEDED(hr);
         }
 
         if(dcl_float) {
@@ -5704,7 +5728,9 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
             hr = IDirect3DDevice9_SetStreamSource(device, 0, vb, 0, sizeof(quad4[0]));
             ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed with %s\n", DXGetErrorString9(hr));
             hr = IDirect3DDevice9_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, 0, 2);
-            ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL,
+               "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            f_ok = SUCCEEDED(hr);
         }
 
         hr = IDirect3DDevice9_EndScene(device);
@@ -5719,12 +5745,12 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
     IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     if(dcl_short) {
         color = getPixelColor(device, 480, 360);
-        ok(color == 0x000000ff,
+        ok(color == 0x000000ff || !s_ok,
            "D3DDECLTYPE_USHORT4N returned color %08x, expected 0x000000ff\n", color);
     }
     if(dcl_ubyte) {
         color = getPixelColor(device, 160, 120);
-        ok(color == 0x0000ffff,
+        ok(color == 0x0000ffff || !ub_ok,
            "D3DDECLTYPE_UBYTE4N returned color %08x, expected 0x0000ffff\n", color);
     }
     if(dcl_color) {
@@ -5734,7 +5760,7 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
     }
     if(dcl_float) {
         color = getPixelColor(device, 480, 120);
-        ok(color == 0x00ff0000,
+        ok(color == 0x00ff0000 || !f_ok,
            "D3DDECLTYPE_FLOAT4 returned color %08x, expected 0x00ff0000\n", color);
     }
 
@@ -5847,11 +5873,14 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
 
         hr = IDirect3DDevice9_BeginScene(device);
         ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed with %s\n", DXGetErrorString9(hr));
+        ub_ok = FALSE;
         if(SUCCEEDED(hr)) {
             hr = IDirect3DDevice9_SetVertexDeclaration(device, dcl_ubyte_2);
             ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %s\n", DXGetErrorString9(hr));
             hr = IDirect3DDevice9_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, 0, 2);
-            ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL,
+               "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            ub_ok = SUCCEEDED(hr);
 
             hr = IDirect3DDevice9_SetVertexDeclaration(device, dcl_color_2);
             ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %s\n", DXGetErrorString9(hr));
@@ -5861,7 +5890,9 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
             hr = IDirect3DDevice9_SetVertexDeclaration(device, dcl_ubyte_2);
             ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %s\n", DXGetErrorString9(hr));
             hr = IDirect3DDevice9_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, 8, 2);
-            ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL,
+               "IDirect3DDevice9_DrawPrimitive failed, hr = %#08x\n", hr);
+            ok(ub_ok == SUCCEEDED(hr), "dcl_ubyte_2 returned two different results\n");
 
             hr = IDirect3DDevice9_EndScene(device);
             ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %s\n", DXGetErrorString9(hr));
@@ -5871,16 +5902,16 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
         if(i == 0) {
             color = getPixelColor(device, 480, 360);
             ok(color == 0x00ff0000,
-            "D3DDECLTYPE_USHORT4N returned color %08x, expected 0x00ff0000\n", color);
+               "D3DDECLTYPE_D3DCOLOR returned color %08x, expected 0x00ff0000\n", color);
             color = getPixelColor(device, 160, 120);
             ok(color == 0x00ffffff,
-            "Unused quad returned color %08x, expected 0x00ffffff\n", color);
+                "Unused quad returned color %08x, expected 0x00ffffff\n", color);
             color = getPixelColor(device, 160, 360);
-            ok(color == 0x000000ff,
-            "D3DDECLTYPE_D3DCOLOR returned color %08x, expected 0x000000ff\n", color);
+            ok(color == 0x000000ff || !ub_ok,
+               "D3DDECLTYPE_UBYTE4N returned color %08x, expected 0x000000ff\n", color);
             color = getPixelColor(device, 480, 120);
-            ok(color == 0x000000ff,
-            "D3DDECLTYPE_FLOAT4 returned color %08x, expected 0x000000ff\n", color);
+            ok(color == 0x000000ff || !ub_ok,
+               "D3DDECLTYPE_UBYTE4N returned color %08x, expected 0x000000ff\n", color);
         } else {
             color = getPixelColor(device, 480, 360);
             ok(color == 0x000000ff,
@@ -5889,10 +5920,10 @@ static void fixed_function_decl_test(IDirect3DDevice9 *device)
             ok(color == 0x00ffffff,
                "Unused quad returned color %08x, expected 0x00ffffff\n", color);
             color = getPixelColor(device, 160, 360);
-            ok(color == 0x00ff0000,
+            ok(color == 0x00ff0000 || !ub_ok,
                "D3DDECLTYPE_UBYTE4N returned color %08x, expected 0x00ff0000\n", color);
             color = getPixelColor(device, 480, 120);
-            ok(color == 0x00ff0000,
+            ok(color == 0x00ff0000 || !ub_ok,
                "D3DDECLTYPE_UBYTE4N returned color %08x, expected 0x00ff0000\n", color);
         }
     }
@@ -6056,6 +6087,124 @@ static void test_vshader_float16(IDirect3DDevice9 *device)
     IDirect3DVertexBuffer9_Release(buffer);
 }
 
+static void conditional_np2_repeat_test(IDirect3DDevice9 *device)
+{
+    D3DCAPS9 caps;
+    IDirect3DTexture9 *texture;
+    HRESULT hr;
+    D3DLOCKED_RECT rect;
+    unsigned int x, y;
+    DWORD *dst, color;
+    const float quad[] = {
+        -1.0,   -1.0,   0.1,   -0.2,   -0.2,
+         1.0,   -1.0,   0.1,    1.2,   -0.2,
+        -1.0,    1.0,   0.1,   -0.2,    1.2,
+         1.0,    1.0,   0.1,    1.2,    1.2
+    };
+    memset(&caps, 0, sizeof(caps));
+
+    hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+    ok(hr == D3D_OK, "IDirect3DDevice9_GetDeviceCaps failed hr=%s\n", DXGetErrorString9(hr));
+    if(!(caps.TextureCaps & D3DPTEXTURECAPS_POW2)) {
+        /* NP2 conditional requires the POW2 flag. Check that while we're at it */
+        ok((caps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL) == 0,
+           "Card has conditional NP2 support without power of two restriction set\n");
+        skip("Card has unconditional pow2 support, skipping conditional NP2 tests\n");
+        return;
+    } else if(!(caps.TextureCaps & D3DPTEXTURECAPS_POW2)) {
+        skip("No conditional NP2 support, skipping conditional NP2 tests\n");
+        return;
+    }
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff000000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear failed, hr=%s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_CreateTexture(device, 10, 10, 1, 0, D3DFMT_X8R8G8B8, D3DPOOL_MANAGED, &texture, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_CreateTexture failed hr=%s\n", DXGetErrorString9(hr));
+
+    memset(&rect, 0, sizeof(rect));
+    hr = IDirect3DTexture9_LockRect(texture, 0, &rect, NULL, 0);
+    ok(hr == D3D_OK, "IDirect3DTexture9_LockRect failed hr=%s\n", DXGetErrorString9(hr));
+    for(y = 0; y < 10; y++) {
+        for(x = 0; x < 10; x++) {
+            dst = (DWORD *) ((BYTE *) rect.pBits + y * rect.Pitch + x * sizeof(DWORD));
+            if(x == 0 || x == 9 || y == 0 || y == 9) {
+                *dst = 0x00ff0000;
+            } else {
+                *dst = 0x000000ff;
+            }
+        }
+    }
+    hr = IDirect3DTexture9_UnlockRect(texture, 0);
+    ok(hr == D3D_OK, "IDirect3DTexture9_UnlockRect failed hr=%s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, (IDirect3DBaseTexture9 *) texture);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetSamplerState(device, 0, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetSamplerState failed hr=%s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed, hr=%s\n", DXGetErrorString9(hr));
+
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene failed hr=%s\n", DXGetErrorString9(hr));
+    if(SUCCEEDED(hr)) {
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(float) * 5);
+        ok(hr == D3D_OK, "IDirect3DDevice9_DrawPrimitiveUP failed, hr=%s\n", DXGetErrorString9(hr));
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed hr=%s\n", DXGetErrorString9(hr));
+    }
+
+    IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+
+    color = getPixelColor(device,    1,  1);
+    ok(color == 0x00ff0000, "NP2: Pixel   1,  1 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 639, 479);
+    ok(color == 0x00ff0000, "NP2: Pixel 639, 479 has color %08x, expected 0x00ff0000\n", color);
+
+    color = getPixelColor(device, 135, 101);
+    ok(color == 0x00ff0000, "NP2: Pixel 135, 101 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 140, 101);
+    ok(color == 0x00ff0000, "NP2: Pixel 140, 101 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 135, 105);
+    ok(color == 0x00ff0000, "NP2: Pixel 135, 105 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 140, 105);
+    ok(color == 0x000000ff, "NP2: Pixel 140, 105 has color %08x, expected 0x000000ff\n", color);
+
+    color = getPixelColor(device, 135, 376);
+    ok(color == 0x00ff0000, "NP2: Pixel 135, 376 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 140, 376);
+    ok(color == 0x000000ff, "NP2: Pixel 140, 376 has color %08x, expected 0x000000ff\n", color);
+    color = getPixelColor(device, 135, 379);
+    ok(color == 0x00ff0000, "NP2: Pixel 135, 379 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 140, 379);
+    ok(color == 0x00ff0000, "NP2: Pixel 140, 379 has color %08x, expected 0x00ff0000\n", color);
+
+    color = getPixelColor(device, 500, 101);
+    ok(color == 0x00ff0000, "NP2: Pixel 500, 101 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 504, 101);
+    ok(color == 0x00ff0000, "NP2: Pixel 504, 101 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 500, 105);
+    ok(color == 0x000000ff, "NP2: Pixel 500, 105 has color %08x, expected 0x000000ff\n", color);
+    color = getPixelColor(device, 504, 105);
+    ok(color == 0x00ff0000, "NP2: Pixel 504, 105 has color %08x, expected 0x00ff0000\n", color);
+
+    color = getPixelColor(device, 500, 376);
+    ok(color == 0x000000ff, "NP2: Pixel 500, 376 has color %08x, expected 0x000000ff\n", color);
+    color = getPixelColor(device, 504, 376);
+    ok(color == 0x00ff0000, "NP2: Pixel 504, 376 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 500, 380);
+    ok(color == 0x00ff0000, "NP2: Pixel 500, 380 has color %08x, expected 0x00ff0000\n", color);
+    color = getPixelColor(device, 504, 380);
+    ok(color == 0x00ff0000, "NP2: Pixel 504, 380 has color %08x, expected 0x00ff0000\n", color);
+
+    hr = IDirect3DDevice9_SetTexture(device, 0, NULL);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetTexture failed hr=%s\n", DXGetErrorString9(hr));
+    IDirect3DTexture9_Release(texture);
+}
+
 START_TEST(visual)
 {
     IDirect3DDevice9 *device_ptr;
@@ -6137,6 +6286,7 @@ START_TEST(visual)
     texture_transform_flags_test(device_ptr);
     autogen_mipmap_test(device_ptr);
     fixed_function_decl_test(device_ptr);
+    conditional_np2_repeat_test(device_ptr);
 
     if (caps.VertexShaderVersion >= D3DVS_VERSION(1, 1))
     {

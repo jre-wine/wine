@@ -406,6 +406,39 @@ void WINAPI ReleaseBindInfo(BINDINFO* pbindinfo)
     pbindinfo->cbSize = size;
 }
 
+/***********************************************************************
+ *           CopyStgMedium (URLMON.@)
+ */
+HRESULT WINAPI CopyStgMedium(const STGMEDIUM *src, STGMEDIUM *dst)
+{
+    TRACE("(%p %p)\n", src, dst);
+
+    if(!src || !dst)
+        return E_POINTER;
+
+    memcpy(dst, src, sizeof(STGMEDIUM));
+
+    switch(dst->tymed) {
+    case TYMED_NULL:
+        break;
+    case TYMED_ISTREAM:
+        if(dst->u.pstm)
+            IStream_AddRef(dst->u.pstm);
+        break;
+    case TYMED_ISTORAGE:
+        if(dst->u.pstg)
+            IStorage_AddRef(dst->u.pstg);
+        break;
+    default:
+        FIXME("Unimplemented tymed %d\n", src->tymed);
+    }
+
+    if(dst->pUnkForRelease)
+        IUnknown_AddRef(dst->pUnkForRelease);
+
+    return S_OK;
+}
+
 static BOOL text_richtext_filter(const BYTE *b, DWORD size)
 {
     return size > 5 && !memcmp(b, "{\\rtf", 5);
@@ -604,16 +637,25 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
         } mime_filters[] = {
             {wszTextHtml,       text_html_filter},
             {wszTextRichtext,   text_richtext_filter},
+         /* {wszAudioXAiff,     audio_xaiff_filter}, */
+         /* {wszAudioBasic,     audio_basic_filter}, */
             {wszAudioWav,       audio_wav_filter},
             {wszImageGif,       image_gif_filter},
             {wszImagePjpeg,     image_pjpeg_filter},
             {wszImageTiff,      image_tiff_filter},
             {wszImageXPng,      image_xpng_filter},
+         /* {wszImageXBitmap,   image_xbitmap_filter}, */
             {wszImageBmp,       image_bmp_filter},
+         /* {wszImageXJg,       image_xjg_filter}, */
+         /* {wszImageXEmf,      image_xemf_filter}, */
+         /* {wszImageXWmf,      image_xwmf_filter}, */
             {wszVideoAvi,       video_avi_filter},
             {wszVideoMpeg,      video_mpeg_filter},
             {wszAppPostscript,  application_postscript_filter},
+         /* {wszAppBase64,      application_base64_filter}, */
+         /* {wszAppMacbinhex40, application_macbinhex40_filter}, */
             {wszAppPdf,         application_pdf_filter},
+         /* {wszAppXCompressed, application_xcompressed_filter}, */
             {wszAppXZip,        application_xzip_filter},
             {wszAppXGzip,       application_xgzip_filter},
             {wszAppJava,        application_java_filter},

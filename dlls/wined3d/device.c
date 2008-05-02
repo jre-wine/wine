@@ -207,92 +207,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetParent(IWineD3DDevice *iface, IUnkno
     return WINED3D_OK;
 }
 
-static void CreateVBO(IWineD3DVertexBufferImpl *object) {
-    IWineD3DDeviceImpl *This = object->resource.wineD3DDevice;  /* Needed for GL_EXTCALL */
-    GLenum error, glUsage;
-    DWORD vboUsage = object->resource.usage;
-    if(object->Flags & VBFLAG_VBOCREATEFAIL) {
-        WARN("Creating a vbo failed once, not trying again\n");
-        return;
-    }
-
-    TRACE("Creating an OpenGL vertex buffer object for IWineD3DVertexBuffer %p  Usage(%s)\n", object, debug_d3dusage(vboUsage));
-
-    /* Make sure that a context is there. Needed in a multithreaded environment. Otherwise this call is a nop */
-    ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
-    ENTER_GL();
-
-    /* Make sure that the gl error is cleared. Do not use checkGLcall
-      * here because checkGLcall just prints a fixme and continues. However,
-      * if an error during VBO creation occurs we can fall back to non-vbo operation
-      * with full functionality(but performance loss)
-      */
-    while(glGetError() != GL_NO_ERROR);
-
-    /* Basically the FVF parameter passed to CreateVertexBuffer is no good
-      * It is the FVF set with IWineD3DDevice::SetFVF or the Vertex Declaration set with
-      * IWineD3DDevice::SetVertexDeclaration that decides how the vertices in the buffer
-      * look like. This means that on each DrawPrimitive call the vertex buffer has to be verified
-      * to check if the rhw and color values are in the correct format.
-      */
-
-    GL_EXTCALL(glGenBuffersARB(1, &object->vbo));
-    error = glGetError();
-    if(object->vbo == 0 || error != GL_NO_ERROR) {
-        WARN("Failed to create a VBO with error %s (%#x)\n", debug_glerror(error), error);
-        goto error;
-    }
-
-    GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, object->vbo));
-    error = glGetError();
-    if(error != GL_NO_ERROR) {
-        WARN("Failed to bind the VBO with error %s (%#x)\n", debug_glerror(error), error);
-        goto error;
-    }
-
-    /* Don't use static, because dx apps tend to update the buffer
-     * quite often even if they specify 0 usage. Because we always keep the local copy
-     * we never read from the vbo and can create a write only opengl buffer.
-     */
-    switch(vboUsage & (WINED3DUSAGE_WRITEONLY | WINED3DUSAGE_DYNAMIC) ) {
-        case WINED3DUSAGE_WRITEONLY | WINED3DUSAGE_DYNAMIC:
-        case WINED3DUSAGE_DYNAMIC:
-            TRACE("Gl usage = GL_STREAM_DRAW\n");
-            glUsage = GL_STREAM_DRAW_ARB;
-            break;
-        case WINED3DUSAGE_WRITEONLY:
-        default:
-            TRACE("Gl usage = GL_DYNAMIC_DRAW\n");
-            glUsage = GL_DYNAMIC_DRAW_ARB;
-            break;
-    }
-
-    /* Reserve memory for the buffer. The amount of data won't change
-     * so we are safe with calling glBufferData once with a NULL ptr and
-     * calling glBufferSubData on updates
-     */
-    GL_EXTCALL(glBufferDataARB(GL_ARRAY_BUFFER_ARB, object->resource.size, NULL, glUsage));
-    error = glGetError();
-    if(error != GL_NO_ERROR) {
-        WARN("glBufferDataARB failed with error %s (%#x)\n", debug_glerror(error), error);
-        goto error;
-    }
-    object->vbo_size = object->resource.size;
-    object->vbo_usage = glUsage;
-
-    LEAVE_GL();
-
-    return;
-    error:
-    /* Clean up all vbo init, but continue because we can work without a vbo :-) */
-    FIXME("Failed to create a vertex buffer object. Continuing, but performance issues can occur\n");
-    if(object->vbo) GL_EXTCALL(glDeleteBuffersARB(1, &object->vbo));
-    object->vbo = 0;
-    object->Flags |= VBFLAG_VBOCREATEFAIL;
-    LEAVE_GL();
-    return;
-}
-
 static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexBuffer(IWineD3DDevice *iface, UINT Size, DWORD Usage, 
                              DWORD FVF, WINED3DPOOL Pool, IWineD3DVertexBuffer** ppVertexBuffer, HANDLE *sharedHandle,
                              IUnknown *parent) {
@@ -347,7 +261,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexBuffer(IWineD3DDevice *ifac
     } else if(dxVersion <= 7 && conv) {
         TRACE("Not creating a vbo because dxVersion is 7 and the fvf needs conversion\n");
     } else {
-        CreateVBO(object);
+        object->Flags |= VBFLAG_CREATEVBO;
     }
     return WINED3D_OK;
 }
@@ -3941,7 +3855,8 @@ process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIndex, DWORD dwCo
      * write correct opengl data into it. It's cheap and allows us to run drawStridedFast
      */
     if(!dest->vbo && GL_SUPPORT(ARB_VERTEX_BUFFER_OBJECT)) {
-        CreateVBO(dest);
+        dest->Flags |= VBFLAG_CREATEVBO;
+        IWineD3DVertexBuffer_PreLoad((IWineD3DVertexBuffer *) dest);
     }
 
     if(dest->vbo) {
@@ -4800,6 +4715,7 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfa
     RECT vp_rect;
     WINED3DVIEWPORT *vp = &This->stateBlock->viewport;
     UINT drawable_width, drawable_height;
+    IWineD3DSurfaceImpl *depth_stencil = (IWineD3DSurfaceImpl *) This->stencilBufferTarget;
 
     /* When we're clearing parts of the drawable, make sure that the target surface is well up to date in the
      * drawable. After the clear we'll mark the drawable up to date, so we have to make sure that this is true
@@ -4858,6 +4774,26 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfa
         checkGLcall("glClearDepth");
         glMask = glMask | GL_DEPTH_BUFFER_BIT;
         IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_ZWRITEENABLE));
+
+        if(This->depth_copy_state == WINED3D_DCS_COPY) {
+            if(vp->X != 0 || vp->Y != 0 ||
+               vp->Width < depth_stencil->currentDesc.Width || vp->Height < depth_stencil->currentDesc.Height) {
+                depth_copy((IWineD3DDevice *) This);
+            }
+            else if(This->stateBlock->renderState[WINED3DRS_SCISSORTESTENABLE] && (
+               This->stateBlock->scissorRect.left > 0 || This->stateBlock->scissorRect.top > 0 ||
+               This->stateBlock->scissorRect.right < depth_stencil->currentDesc.Width ||
+               This->stateBlock->scissorRect.bottom < depth_stencil->currentDesc.Height)) {
+                depth_copy((IWineD3DDevice *) This);
+            }
+            else if(Count > 0 && pRects && (
+               pRects[0].x1 > 0 || pRects[0].y1 > 0 ||
+               pRects[0].x2 < depth_stencil->currentDesc.Width ||
+               pRects[0].y2 < depth_stencil->currentDesc.Height)) {
+                depth_copy((IWineD3DDevice *) This);
+            }
+        }
+        This->depth_copy_state = WINED3D_DCS_INITIAL;
     }
 
     if (Flags & WINED3DCLEAR_TARGET) {
@@ -6766,7 +6702,7 @@ static void updateSurfaceDesc(IWineD3DSurfaceImpl *surface, WINED3DPRESENT_PARAM
     }
     surface->currentDesc.Width = pPresentationParameters->BackBufferWidth;
     surface->currentDesc.Height = pPresentationParameters->BackBufferHeight;
-    if (GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO)) {
+    if (GL_SUPPORT(ARB_TEXTURE_NON_POWER_OF_TWO) || GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
         surface->pow2Width = pPresentationParameters->BackBufferWidth;
         surface->pow2Height = pPresentationParameters->BackBufferHeight;
     } else {
@@ -6774,6 +6710,11 @@ static void updateSurfaceDesc(IWineD3DSurfaceImpl *surface, WINED3DPRESENT_PARAM
         while (surface->pow2Width < pPresentationParameters->BackBufferWidth) surface->pow2Width <<= 1;
         while (surface->pow2Height < pPresentationParameters->BackBufferHeight) surface->pow2Height <<= 1;
     }
+    surface->glRect.left = 0;
+    surface->glRect.top = 0;
+    surface->glRect.right = surface->pow2Width;
+    surface->glRect.bottom = surface->pow2Height;
+
     if(surface->glDescription.textureName) {
         ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
         ENTER_GL();
@@ -6799,6 +6740,61 @@ static HRESULT WINAPI reset_unload_resources(IWineD3DResource *resource, void *d
     return S_OK;
 }
 
+static void reset_fbo_state(IWineD3DDevice *iface) {
+    IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
+    unsigned int i;
+
+    ENTER_GL();
+    GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0));
+    checkGLcall("glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0)");
+
+    if (This->fbo) {
+        GL_EXTCALL(glDeleteFramebuffersEXT(1, &This->fbo));
+        This->fbo = 0;
+    }
+    if (This->src_fbo) {
+        GL_EXTCALL(glDeleteFramebuffersEXT(1, &This->src_fbo));
+        This->src_fbo = 0;
+    }
+    if (This->dst_fbo) {
+        GL_EXTCALL(glDeleteFramebuffersEXT(1, &This->dst_fbo));
+        This->dst_fbo = 0;
+    }
+    checkGLcall("Tear down fbos\n");
+    LEAVE_GL();
+
+    for (i = 0; i < GL_LIMITS(buffers); ++i) {
+        This->fbo_color_attachments[i] = NULL;
+    }
+    This->fbo_depth_attachment = NULL;
+}
+
+static BOOL is_display_mode_supported(IWineD3DDeviceImpl *This, WINED3DPRESENT_PARAMETERS *pp) {
+    UINT i, count;
+    WINED3DDISPLAYMODE m;
+    HRESULT hr;
+
+    /* All Windowed modes are supported, as is leaving the current mode */
+    if(pp->Windowed) return TRUE;
+    if(!pp->BackBufferWidth) return TRUE;
+    if(!pp->BackBufferHeight) return TRUE;
+
+    count = IWineD3D_GetAdapterModeCount(This->wineD3D, This->adapter->num, WINED3DFMT_UNKNOWN);
+    for(i = 0; i < count; i++) {
+        memset(&m, 0, sizeof(m));
+        hr = IWineD3D_EnumAdapterModes(This->wineD3D, This->adapter->num, WINED3DFMT_UNKNOWN, i, &m);
+        if(FAILED(hr)) {
+            ERR("EnumAdapterModes failed\n");
+        }
+        if(m.Width == pp->BackBufferWidth && m.Height == pp->BackBufferHeight) {
+            /* Mode found, it is supported */
+            return TRUE;
+        }
+    }
+    /* Mode not found -> not supported */
+    return FALSE;
+}
+
 static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRESENT_PARAMETERS* pPresentationParameters) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
     IWineD3DSwapChainImpl *swapchain;
@@ -6806,12 +6802,21 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
     BOOL DisplayModeChanged = FALSE;
     WINED3DDISPLAYMODE mode;
     IWineD3DBaseShaderImpl *shader;
+    IWineD3DSurfaceImpl *target;
+    UINT i;
     TRACE("(%p)\n", This);
 
     hr = IWineD3DDevice_GetSwapChain(iface, 0, (IWineD3DSwapChain **) &swapchain);
     if(FAILED(hr)) {
         ERR("Failed to get the first implicit swapchain\n");
         return hr;
+    }
+
+    if(!is_display_mode_supported(This, pPresentationParameters)) {
+        WARN("Rejecting Reset() call because the requested display mode is not supported\n");
+        WARN("Requested mode: %d, %d\n", pPresentationParameters->BackBufferWidth,
+             pPresentationParameters->BackBufferHeight);
+        return WINED3DERR_INVALIDCALL;
     }
 
     /* Is it necessary to recreate the gl context? Actually every setting can be changed
@@ -6859,12 +6864,39 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
         ERR("What do do about a changed auto depth stencil parameter?\n");
     }
 
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO) {
+        reset_fbo_state((IWineD3DDevice *) This);
+    }
+
     IWineD3DDevice_EnumResources(iface, reset_unload_resources, NULL);
     LIST_FOR_EACH_ENTRY(shader, &This->shaders, IWineD3DBaseShaderImpl, baseShader.shader_list_entry) {
         This->shader_backend->shader_destroy((IWineD3DBaseShader *) shader);
     }
 
-    if(pPresentationParameters->Windowed) {
+    ENTER_GL();
+    if(This->depth_blt_texture) {
+        glDeleteTextures(1, &This->depth_blt_texture);
+        This->depth_blt_texture = 0;
+    }
+    This->shader_backend->shader_destroy_depth_blt(iface);
+
+    for (i = 0; i < GL_LIMITS(textures); i++) {
+        /* The stateblock initialization below will recreate them */
+        glDeleteTextures(1, &This->dummyTextureName[i]);
+        checkGLcall("glDeleteTextures(1, &This->dummyTextureName[i])");
+        This->dummyTextureName[i] = 0;
+    }
+    LEAVE_GL();
+
+    while(This->numContexts) {
+        DestroyContext(This, This->contexts[0]);
+    }
+    This->activeContext = NULL;
+    HeapFree(GetProcessHeap(), 0, swapchain->context);
+    swapchain->context = NULL;
+    swapchain->num_contexts = 0;
+
+     if(pPresentationParameters->Windowed) {
         mode.Width = swapchain->orig_width;
         mode.Height = swapchain->orig_height;
         mode.RefreshRate = 0;
@@ -6901,6 +6933,10 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
         for(i = 0; i < swapchain->presentParms.BackBufferCount; i++) {
             updateSurfaceDesc((IWineD3DSurfaceImpl *)swapchain->backBuffer[i], pPresentationParameters);
         }
+        if(This->auto_depth_stencil_buffer) {
+            updateSurfaceDesc((IWineD3DSurfaceImpl *)This->auto_depth_stencil_buffer, pPresentationParameters);
+        }
+
 
         /* Now set the new viewport */
         IWineD3DDevice_SetViewport(iface, &vp);
@@ -6922,7 +6958,39 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
             IWineD3DDevice_SetFullscreen(iface, FALSE);
         }
         swapchain->presentParms.Windowed = pPresentationParameters->Windowed;
+    } else if(!pPresentationParameters->Windowed) {
+        DWORD style = This->style, exStyle = This->exStyle;
+        /* If we're in fullscreen, and the mode wasn't changed, we have to get the window back into
+         * the right position. Some applications(Battlefield 2, Guild Wars) move it and then call
+         * Reset to clear up their mess. Guild Wars also loses the device during that.
+         */
+        This->style = 0;
+        This->exStyle = 0;
+        IWineD3DDeviceImpl_SetupFullscreenWindow(iface, This->ddraw_window);
+        This->style = style;
+        This->exStyle = exStyle;
     }
+
+    /* Recreate the primary swapchain's context */
+    swapchain->context = HeapAlloc(GetProcessHeap(), 0, sizeof(*swapchain->context));
+    if(swapchain->backBuffer) {
+        target = (IWineD3DSurfaceImpl *) swapchain->backBuffer[0];
+    } else {
+        target = (IWineD3DSurfaceImpl *) swapchain->frontBuffer;
+    }
+    swapchain->context[0] = CreateContext(This, target, swapchain->win_handle, FALSE,
+                                          &swapchain->presentParms);
+    swapchain->num_contexts = 1;
+    This->activeContext = swapchain->context[0];
+
+    hr = IWineD3DStateBlock_InitStartupStateBlock((IWineD3DStateBlock *) This->stateBlock);
+    if(FAILED(hr)) {
+        ERR("Resetting the stateblock failed with error 0x%08x\n", hr);
+    }
+
+    /* All done. There is no need to reload resources or shaders, this will happen automatically on the
+     * first use
+     */
 
     IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
     return WINED3D_OK;

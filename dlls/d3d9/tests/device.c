@@ -716,7 +716,7 @@ static void test_reset(void)
     IDirect3D9                  *pD3d               = NULL;
     IDirect3DDevice9            *pDevice            = NULL;
     D3DPRESENT_PARAMETERS        d3dpp;
-    D3DDISPLAYMODE               d3ddm;
+    D3DDISPLAYMODE               d3ddm, d3ddm2;
     D3DVIEWPORT9                 vp;
     DWORD                        width, orig_width = GetSystemMetrics(SM_CXSCREEN);
     DWORD                        height, orig_height = GetSystemMetrics(SM_CYSCREEN);
@@ -724,6 +724,8 @@ static void test_reset(void)
     IDirect3DSurface9            *surface;
     IDirect3DTexture9            *texture;
     IDirect3DVertexShader9       *shader;
+    BOOL                         support_800x600 = FALSE;
+    UINT                         i;
 
     pD3d = pDirect3DCreate9( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D9 object\n");
@@ -739,6 +741,27 @@ static void test_reset(void)
     d3dpp.BackBufferHeight  = 600;
     d3dpp.BackBufferFormat = d3ddm.Format;
 
+    for(i = 0; i < IDirect3D9_GetAdapterModeCount(pD3d, D3DADAPTER_DEFAULT, d3ddm.Format); i++) {
+        ZeroMemory( &d3ddm2, sizeof(d3ddm2) );
+        hr = IDirect3D9_EnumAdapterModes(pD3d, D3DADAPTER_DEFAULT, d3ddm.Format, i, &d3ddm2);
+        ok(hr == D3D_OK, "IDirect3D9Impl_EnumAdapterModes returned %#x\n", hr);
+
+        if(d3ddm2.Width == 800 && d3ddm2.Height == 600) {
+            support_800x600 = TRUE;
+        }
+        /* We use them as invalid modes */
+        if((d3ddm2.Width == 801 && d3ddm2.Height == 600) ||
+           (d3ddm2.Width == 32 && d3ddm2.Height == 32)) {
+            skip("This system supports a screen resolution of %dx%d, not running mode tests\n",
+                 d3ddm2.Width, d3ddm2.Height);
+            goto cleanup;
+        }
+    }
+    if(!support_800x600) {
+        skip("Mode 800x600 not supported, skipping mode tests\n");
+        goto cleanup;
+    }
+
     hr = IDirect3D9_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
 
@@ -747,6 +770,8 @@ static void test_reset(void)
         skip("could not create device, IDirect3D9_CreateDevice returned %#x\n", hr);
         goto cleanup;
     }
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice9_TestCooperativeLevel after creation returned %#x\n", hr);
 
     width = GetSystemMetrics(SM_CXSCREEN);
     height = GetSystemMetrics(SM_CYSCREEN);
@@ -779,6 +804,8 @@ static void test_reset(void)
     d3dpp.BackBufferFormat = d3ddm.Format;
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3D_OK, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice9_TestCooperativeLevel after a successfull reset returned %#x\n", hr);
 
     ZeroMemory(&vp, sizeof(vp));
     hr = IDirect3DDevice9_GetViewport(pDevice, &vp);
@@ -820,6 +847,8 @@ static void test_reset(void)
     d3dpp.BackBufferHeight  = 300;
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3D_OK, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice9_TestCooperativeLevel after a successfull reset returned %#x\n", hr);
 
     width = GetSystemMetrics(SM_CXSCREEN);
     height = GetSystemMetrics(SM_CYSCREEN);
@@ -865,26 +894,38 @@ static void test_reset(void)
     ok(hr == D3D_OK, "IDirect3DDevice9_CreateOffscreenPlainSurface returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3DERR_DEVICENOTRESET, "IDirect3DDevice9_TestCooperativeLevel after a failed reset returned %#x\n", hr);
     IDirect3DSurface9_Release(surface);
     /* Reset again to get the device out of the lost state */
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3D_OK, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice9_TestCooperativeLevel after a successfull reset returned %#x\n", hr);
 
     /* Scratch, sysmem and managed pools are fine */
     hr = IDirect3DDevice9_CreateOffscreenPlainSurface(pDevice, 16, 16, D3DFMT_R5G6B5, D3DPOOL_SCRATCH, &surface, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_CreateOffscreenPlainSurface returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3D_OK, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice9_TestCooperativeLevel after a successfull reset returned %#x\n", hr);
     IDirect3DSurface9_Release(surface);
+
     hr = IDirect3DDevice9_CreateOffscreenPlainSurface(pDevice, 16, 16, D3DFMT_R5G6B5, D3DPOOL_SYSTEMMEM, &surface, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_CreateOffscreenPlainSurface returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3D_OK, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice9_TestCooperativeLevel after a successfull reset returned %#x\n", hr);
     IDirect3DSurface9_Release(surface);
+
     hr = IDirect3DDevice9_CreateTexture(pDevice, 16, 16, 0, 0, D3DFMT_R5G6B5, D3DPOOL_MANAGED, &texture, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_CreateTexture returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3D_OK, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice9_TestCooperativeLevel after a successfull reset returned %#x\n", hr);
     IDirect3DTexture9_Release(texture);
 
     /* A reference held to an implicit surface causes failures as well */
@@ -892,9 +933,13 @@ static void test_reset(void)
     ok(hr == D3D_OK, "IDirect3DDevice9_GetBackBuffer returned %s\n", DXGetErrorString9(hr));
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3DERR_DEVICENOTRESET, "IDirect3DDevice9_TestCooperativeLevel after a failed reset returned %#x\n", hr);
     IDirect3DSurface9_Release(surface);
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3D_OK, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3D_OK, "IDirect3DDevice9_TestCooperativeLevel after a successfull reset returned %#x\n", hr);
 
     /* Shaders are fine as well */
     hr = IDirect3DDevice9_CreateVertexShader(pDevice, simple_vs, &shader);
@@ -902,6 +947,27 @@ static void test_reset(void)
     hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
     ok(hr == D3D_OK, "IDirect3DDevice9_Reset failed with %s\n", DXGetErrorString9(hr));
     IDirect3DVertexShader9_Release(shader);
+
+    /* Try setting invalid modes */
+    ZeroMemory( &d3dpp, sizeof(d3dpp) );
+    d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    d3dpp.Windowed         = FALSE;
+    d3dpp.BackBufferWidth  = 32;
+    d3dpp.BackBufferHeight  = 32;
+    hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_Reset to w=32, h=32, windowed=FALSE failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3DERR_DEVICENOTRESET, "IDirect3DDevice9_TestCooperativeLevel after a failed reset returned %#x\n", hr);
+
+    ZeroMemory( &d3dpp, sizeof(d3dpp) );
+    d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    d3dpp.Windowed         = FALSE;
+    d3dpp.BackBufferWidth  = 801;
+    d3dpp.BackBufferHeight  = 600;
+    hr = IDirect3DDevice9_Reset(pDevice, &d3dpp);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_Reset to w=801, h=600, windowed=FALSE failed with %s\n", DXGetErrorString9(hr));
+    hr = IDirect3DDevice9_TestCooperativeLevel(pDevice);
+    ok(hr == D3DERR_DEVICENOTRESET, "IDirect3DDevice9_TestCooperativeLevel after a failed reset returned %#x\n", hr);
 
 cleanup:
     if(pD3d) IDirect3D9_Release(pD3d);
@@ -1755,34 +1821,38 @@ static void test_set_stream_source(void)
     hr = IDirect3DDevice9_CreateVertexBuffer( device, 512, 0, 0, D3DPOOL_DEFAULT, &pVertexBuffer, NULL );
     ok(hr == D3D_OK, "Failed to create a vertex buffer, hr = %s\n", DXGetErrorString9(hr));
     if (SUCCEEDED(hr)) {
-	hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 0, 32);
-	ok(hr == D3D_OK, "Failed to set the stream source, offset 0, hr = %s\n",
-	   DXGetErrorString9(hr));
-	hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 1, 32);
-	ok(hr == D3DERR_INVALIDCALL, "Unexpected result when setting the stream source, offset 1, hr = %s\n",
-	   DXGetErrorString9(hr));
-	hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 2, 32);
-	ok(hr == D3DERR_INVALIDCALL, "Unexpected result when setting the stream source, offset 2, hr = %s\n",
-	   DXGetErrorString9(hr));
-	hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 3, 32);
-	ok(hr == D3DERR_INVALIDCALL, "Unexpected result when setting the stream source, offset 3, hr = %s\n",
-	   DXGetErrorString9(hr));
-	hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 4, 32);
-	ok(hr == D3D_OK, "Failed to set the stream source, offset 4, hr = %s\n",
-	  DXGetErrorString9(hr));
+        /* Some cards(Geforce 7400 at least) accept non-aligned offsets, others(radeon 9000 verified) reject it,
+         * so accept both results. Wine currently rejects this to be able to optimize the vbo conversion, but writes
+         * a WARN
+         */
+        hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 0, 32);
+        ok(hr == D3D_OK, "Failed to set the stream source, offset 0, hr = %s\n",
+           DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 1, 32);
+        ok(hr == D3DERR_INVALIDCALL || hr == D3D_OK, "Unexpected result when setting the stream source, offset 1, hr = %s\n",
+           DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 2, 32);
+        ok(hr == D3DERR_INVALIDCALL || hr == D3D_OK, "Unexpected result when setting the stream source, offset 2, hr = %s\n",
+           DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 3, 32);
+        ok(hr == D3DERR_INVALIDCALL || hr == D3D_OK, "Unexpected result when setting the stream source, offset 3, hr = %s\n",
+           DXGetErrorString9(hr));
+        hr = IDirect3DDevice9_SetStreamSource(device, 0, pVertexBuffer, 4, 32);
+        ok(hr == D3D_OK, "Failed to set the stream source, offset 4, hr = %s\n",
+          DXGetErrorString9(hr));
     }
     /* Try to set the NULL buffer with an offset and stride 0 */
     hr = IDirect3DDevice9_SetStreamSource(device, 0, NULL, 0, 0);
     ok(hr == D3D_OK, "Failed to set the stream source, offset 0, hr = %s\n",
        DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetStreamSource(device, 0, NULL, 1, 0);
-    ok(hr == D3DERR_INVALIDCALL, "Unexpected result when setting the stream source, offset 1, hr = %s\n",
+    ok(hr == D3DERR_INVALIDCALL || hr == D3D_OK, "Unexpected result when setting the stream source, offset 1, hr = %s\n",
        DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetStreamSource(device, 0, NULL, 2, 0);
-    ok(hr == D3DERR_INVALIDCALL, "Unexpected result when setting the stream source, offset 2, hr = %s\n",
+    ok(hr == D3DERR_INVALIDCALL || hr == D3D_OK, "Unexpected result when setting the stream source, offset 2, hr = %s\n",
        DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetStreamSource(device, 0, NULL, 3, 0);
-    ok(hr == D3DERR_INVALIDCALL, "Unexpected result when setting the stream source, offset 3, hr = %s\n",
+    ok(hr == D3DERR_INVALIDCALL || hr == D3D_OK, "Unexpected result when setting the stream source, offset 3, hr = %s\n",
        DXGetErrorString9(hr));
     hr = IDirect3DDevice9_SetStreamSource(device, 0, NULL, 4, 0);
     ok(hr == D3D_OK, "Failed to set the stream source, offset 4, hr = %s\n",
@@ -1815,6 +1885,7 @@ START_TEST(device)
         test_refcount();
         test_mipmap_levels();
         test_cursor();
+        test_reset();
         test_reset();
         test_scene();
         test_limits();

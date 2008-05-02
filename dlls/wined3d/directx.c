@@ -512,6 +512,25 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     gl_string = (const char *) glGetString(GL_VERSION);
     if (gl_string != NULL) {
 
+        /* First, parse the generic opengl version. This is supposed not to be convoluted with
+         * driver specific information
+         */
+        gl_string_cursor = gl_string;
+        major = atoi(gl_string_cursor);
+        if(major <= 0) {
+            ERR("Invalid opengl major version: %d\n", major);
+        }
+        while (*gl_string_cursor <= '9' && *gl_string_cursor >= '0') {
+            ++gl_string_cursor;
+        }
+        if (*gl_string_cursor++ != '.') {
+            ERR_(d3d_caps)("Invalid opengl version string: %s\n", debugstr_a(gl_string));
+        }
+        minor = atoi(gl_string_cursor);
+        TRACE_(d3d_caps)("Found OpenGL version: %d.%d\n", major, minor);
+        gl_info->gl_version = MAKEDWORD_VERSION(major, minor);
+
+        /* Now parse the driver specific string which we'll report to the app */
         switch (gl_info->gl_vendor) {
         case VENDOR_NVIDIA:
             gl_string_cursor = strstr(gl_string, "NVIDIA");
@@ -635,8 +654,14 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             major = 0;
             minor = 9;
         }
-        gl_info->gl_driver_version = MAKEDWORD_VERSION(major, minor);
-        TRACE_(d3d_caps)("found GL_VERSION  (%s)->%i.%i->(0x%08x)\n", debugstr_a(gl_string), major, minor, gl_info->gl_driver_version);
+        gl_info->driver_version = MAKEDWORD_VERSION(major, minor);
+        TRACE_(d3d_caps)("found driver version (%s)->%i.%i->(0x%08x)\n", debugstr_a(gl_string), major, minor, gl_info->driver_version);
+        /* Current Windows drivers have versions like 6.14.... (some older have an earlier version) */
+        gl_info->driver_version_hipart = MAKEDWORD_VERSION(6, 14);
+    } else {
+        FIXME("OpenGL driver did not return version information\n");
+        gl_info->driver_version = MAKEDWORD_VERSION(0, 0);
+        gl_info->driver_version_hipart = MAKEDWORD_VERSION(6, 14);
     }
 
     TRACE_(d3d_caps)("found GL_RENDERER (%s)->(0x%04x)\n", debugstr_a(gl_info->gl_renderer), gl_info->gl_card);
@@ -726,7 +751,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
 #define USE_GL_FUNC(type, pfn, ext, replace) { \
             DWORD ver = ver_for_ext(ext); \
             if(gl_info->supported[ext]) gl_info->pfn = (type) pwglGetProcAddress(#pfn); \
-            else if(ver && ver <= gl_info->gl_driver_version) gl_info->pfn = (type) pwglGetProcAddress(#replace); \
+            else if(ver && ver <= gl_info->gl_version) gl_info->pfn = (type) pwglGetProcAddress(#replace); \
             else gl_info->pfn = NULL; \
         }
         GL_EXT_FUNCS_GEN;
@@ -742,7 +767,7 @@ BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
          */
         for (i = 0; i < (sizeof(EXTENSION_MAP) / sizeof(*EXTENSION_MAP)); ++i) {
             if (gl_info->supported[EXTENSION_MAP[i].extension] == FALSE &&
-                EXTENSION_MAP[i].version <= gl_info->gl_driver_version && EXTENSION_MAP[i].version) {
+                EXTENSION_MAP[i].version <= gl_info->gl_version && EXTENSION_MAP[i].version) {
                 TRACE_(d3d_caps)(" GL CORE: %s support\n", EXTENSION_MAP[i].extension_string);
                 gl_info->supported[EXTENSION_MAP[i].extension] = TRUE;
             }
@@ -1531,9 +1556,8 @@ static HRESULT WINAPI IWineD3DImpl_GetAdapterIdentifier(IWineD3D *iface, UINT Ad
 
     /* Note dx8 doesn't supply a DeviceName */
     if (NULL != pIdentifier->DeviceName) strcpy(pIdentifier->DeviceName, "\\\\.\\DISPLAY"); /* FIXME: May depend on desktop? */
-    /* Current Windows drivers have versions like 6.14.... (some older have an earlier version) */
-    pIdentifier->DriverVersion->u.HighPart = MAKEDWORD_VERSION(6, 14);
-    pIdentifier->DriverVersion->u.LowPart = Adapters[Adapter].gl_info.gl_driver_version;
+    pIdentifier->DriverVersion->u.HighPart = Adapters[Adapter].gl_info.driver_version_hipart;
+    pIdentifier->DriverVersion->u.LowPart = Adapters[Adapter].gl_info.driver_version;
     *(pIdentifier->VendorId) = Adapters[Adapter].gl_info.gl_vendor;
     *(pIdentifier->DeviceId) = Adapters[Adapter].gl_info.gl_card;
     *(pIdentifier->SubSysId) = 0;
@@ -1903,22 +1927,12 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
         return WINED3DERR_NOTAVAILABLE;
     }
 
-    if (GL_SUPPORT(EXT_TEXTURE_COMPRESSION_S3TC)) {
-        switch (CheckFormat) {
-        case WINED3DFMT_DXT1:
-        case WINED3DFMT_DXT2:
-        case WINED3DFMT_DXT3:
-        case WINED3DFMT_DXT4:
-        case WINED3DFMT_DXT5:
-          TRACE_(d3d_caps)("[OK]\n");
-          return WINED3D_OK;
-        default:
-            break; /* Avoid compiler warnings */
-        }
-    }
-
     /* Check for supported sRGB formats (Texture loading and framebuffer) */
-    if (GL_SUPPORT(EXT_TEXTURE_SRGB) && (Usage & WINED3DUSAGE_QUERY_SRGBREAD)) {
+    if (Usage & WINED3DUSAGE_QUERY_SRGBREAD) {
+        if(!GL_SUPPORT(EXT_TEXTURE_SRGB)) {
+            TRACE_(d3d_caps)("[FAILED] GL_EXT_texture_sRGB not supported\n");
+        }
+
         switch (CheckFormat) {
             case WINED3DFMT_A8R8G8B8:
             case WINED3DFMT_X8R8G8B8:
@@ -1931,28 +1945,11 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
             case WINED3DFMT_DXT4:
             case WINED3DFMT_DXT5:
                 TRACE_(d3d_caps)("[OK]\n");
-                return WINED3D_OK;
+                break; /* Continue with checking other flags */
 
             default:
                 TRACE_(d3d_caps)("[FAILED] Gamma texture format %s not supported.\n", debug_d3dformat(CheckFormat));
                 return WINED3DERR_NOTAVAILABLE;
-        }
-    }
-
-    if (GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
-
-        BOOL half_pixel_support = GL_SUPPORT(ARB_HALF_FLOAT_PIXEL);
-
-        switch (CheckFormat) {
-            case WINED3DFMT_R16F:
-            case WINED3DFMT_A16B16G16R16F:
-                if (!half_pixel_support) break;
-            case WINED3DFMT_R32F:
-            case WINED3DFMT_A32B32G32R32F:
-                TRACE_(d3d_caps)("[OK]\n");
-                return WINED3D_OK;
-            default:
-                break; /* Avoid compiler warnings */
         }
     }
 
@@ -2031,14 +2028,19 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
             WARN_(d3d_caps)("[FAILED]\n");
             return WINED3DERR_NOTAVAILABLE;
 
-        /*****
-         *  DXTN Formats: Handled above
-         * WINED3DFMT_DXT1
-         * WINED3DFMT_DXT2
-         * WINED3DFMT_DXT3
-         * WINED3DFMT_DXT4
-         * WINED3DFMT_DXT5
-         */
+        case WINED3DFMT_DXT1:
+        case WINED3DFMT_DXT2:
+        case WINED3DFMT_DXT3:
+        case WINED3DFMT_DXT4:
+        case WINED3DFMT_DXT5:
+            if (GL_SUPPORT(EXT_TEXTURE_COMPRESSION_S3TC)) {
+                TRACE_(d3d_caps)("[OK]\n");
+                return WINED3D_OK;
+            } else {
+                TRACE_(d3d_caps)("[FAILED]\n");
+                return WINED3DERR_NOTAVAILABLE;
+            }
+
 
         /*****
          *  Odd formats - not supported
@@ -2051,10 +2053,8 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
             return WINED3DERR_NOTAVAILABLE;
 
         /*****
-         *  Float formats: Not supported right now
+         *  WINED3DFMT_CxV8U8: Not supported right now
          */
-        case WINED3DFMT_G16R16F:
-        case WINED3DFMT_G32R32F:
         case WINED3DFMT_CxV8U8:
             TRACE_(d3d_caps)("[FAILED]\n"); /* Enable when implemented */
             return WINED3DERR_NOTAVAILABLE;
@@ -2063,6 +2063,31 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
         case WINED3DFMT_A16B16G16R16:
         case WINED3DFMT_A8R3G3B2:
             TRACE_(d3d_caps)("[FAILED]\n"); /* Enable when implemented */
+            return WINED3DERR_NOTAVAILABLE;
+
+            /* Floating point formats */
+        case WINED3DFMT_R16F:
+        case WINED3DFMT_A16B16G16R16F:
+            if(GL_SUPPORT(ARB_HALF_FLOAT_PIXEL)) {
+                TRACE_(d3d_caps)("[OK]\n");
+                return WINED3D_OK;
+            } else {
+                TRACE_(d3d_caps)("[FAILED]\n");
+                return WINED3DERR_NOTAVAILABLE;
+            }
+        case WINED3DFMT_R32F:
+        case WINED3DFMT_A32B32G32R32F:
+            if (GL_SUPPORT(ARB_TEXTURE_FLOAT)) {
+                TRACE_(d3d_caps)("[OK]\n");
+                return WINED3D_OK;
+            } else {
+                TRACE_(d3d_caps)("[FAILED]\n");
+                return WINED3DERR_NOTAVAILABLE;
+            }
+
+        case WINED3DFMT_G16R16F:
+        case WINED3DFMT_G32R32F:
+            TRACE_(d3d_caps)("[FAILED]\n");
             return WINED3DERR_NOTAVAILABLE;
 
         /* ATI instancing hack: Although ATI cards do not support Shader Model 3.0, they support
@@ -2848,8 +2873,52 @@ static BOOL implementation_is_apple(WineD3D_GL_Info *gl_info) {
     }
 }
 
+/* Certain applications(Steam) complain if we report an outdated driver version. In general,
+ * reporting a driver version is moot because we are not the Windows driver, and we have different
+ * bugs, features, etc.
+ *
+ * If a card is not found in this table, the gl driver version is reported
+ */
+struct driver_version_information {
+    WORD vendor;                        /* reported PCI card vendor ID  */
+    WORD card;                          /* reported PCI card device ID  */
+    WORD hipart_hi, hipart_lo;          /* driver hiword to report      */
+    WORD lopart_hi, lopart_lo;          /* driver loword to report      */
+};
+
+static const struct driver_version_information driver_version_table[] = {
+    /* Nvidia drivers. Geforce FX and newer cards are supported by the current driver */
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5200,     7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5600,     7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5800,     7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6200,       7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6600GT,     7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6800,       7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7400,       7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7300,       7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7600,       7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7800GT,     7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8300GS,     7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600GT,     7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600MGT,    7,  15, 10, 16921   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8800GTS,    7,  15, 10, 16921   },
+
+    /* ATI cards. The driver versions are somewhat similar, but not quite the same. Let's hardcode */
+    {VENDOR_ATI,        CARD_ATI_RADEON_9500,           6,  14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_X700,           6,  14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_X1600,          6,  14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_HD2300,         6,  14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_HD2600,         6,  14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_HD2900,         6,  14, 10, 6764    },
+
+    /* TODO: Add information about legacy nvidia and ATI hardware, Intel and other cards */
+};
+
 static void fixup_extensions(WineD3D_GL_Info *gl_info) {
-    if(implementation_is_apple(gl_info)) {
+    unsigned int i;
+    BOOL apple = implementation_is_apple(gl_info);
+
+    if(apple) {
         /* MacOS advertises more GLSL vertex shader uniforms than supported by the hardware, and if more are
          * used it falls back to software. While the compiler can detect if the shader uses all declared
          * uniforms, the optimization fails if the shader uses relative addressing. So any GLSL shader
@@ -2892,6 +2961,20 @@ static void fixup_extensions(WineD3D_GL_Info *gl_info) {
         if(gl_info->gl_vendor == VENDOR_INTEL) {
             TRACE("Enabling vertex texture coord fixes in vertex shaders\n");
             gl_info->set_texcoord_w = TRUE;
+        }
+    }
+
+    /* Fixup the driver version */
+    for(i = 0; i < (sizeof(driver_version_table) / sizeof(driver_version_table[0])); i++) {
+        if(gl_info->gl_vendor == driver_version_table[i].vendor &&
+           gl_info->gl_card   == driver_version_table[i].card) {
+            TRACE_(d3d_caps)("Found card 0x%04x, 0x%04x in driver version DB\n", gl_info->gl_vendor, gl_info->gl_card);
+
+            gl_info->driver_version        = MAKEDWORD_VERSION(driver_version_table[i].lopart_hi,
+                                                               driver_version_table[i].lopart_lo);
+            gl_info->driver_version_hipart = MAKEDWORD_VERSION(driver_version_table[i].hipart_hi,
+                                                               driver_version_table[i].hipart_lo);
+            break;
         }
     }
 }

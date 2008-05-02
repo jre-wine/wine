@@ -62,7 +62,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wininet);
 
-static const WCHAR g_szHttp1_0[] = {' ','H','T','T','P','/','1','.','0',0 };
 static const WCHAR g_szHttp1_1[] = {' ','H','T','T','P','/','1','.','1',0 };
 static const WCHAR g_szReferer[] = {'R','e','f','e','r','e','r',0};
 static const WCHAR g_szAccept[] = {'A','c','c','e','p','t',0};
@@ -257,7 +256,7 @@ static void HTTP_FixURL( LPWININETHTTPREQW lpwhr)
     }
 }
 
-static LPWSTR HTTP_BuildHeaderRequestString( LPWININETHTTPREQW lpwhr, LPCWSTR verb, LPCWSTR path, BOOL http1_1 )
+static LPWSTR HTTP_BuildHeaderRequestString( LPWININETHTTPREQW lpwhr, LPCWSTR verb, LPCWSTR path )
 {
     LPWSTR requestString;
     DWORD len, n;
@@ -279,7 +278,7 @@ static LPWSTR HTTP_BuildHeaderRequestString( LPWININETHTTPREQW lpwhr, LPCWSTR ve
     req[n++] = verb;
     req[n++] = szSpace;
     req[n++] = path;
-    req[n++] = http1_1 ? g_szHttp1_1 : g_szHttp1_0;
+    req[n++] = g_szHttp1_1;
 
     /* Append custom request headers */
     for (i = 0; i < lpwhr->nCustHeaders; i++)
@@ -797,7 +796,7 @@ BOOL WINAPI HttpEndRequestA(HINTERNET hRequest,
 
             FIXME("Do we need to translate info out of these buffer?\n");
 
-            HeapFree(GetProcessHeap(),0,(LPVOID)ptrW->lpvBuffer);
+            HeapFree(GetProcessHeap(),0,ptrW->lpvBuffer);
             ptrW2 = ptrW->Next;
             HeapFree(GetProcessHeap(),0,ptrW);
             ptrW = ptrW2;
@@ -1187,9 +1186,11 @@ static UINT HTTP_DecodeBase64( LPCWSTR base64, LPSTR bin )
  *
  *   Insert or delete the authorization field in the request header.
  */
-static BOOL HTTP_InsertAuthorizationForHeader( LPWININETHTTPREQW lpwhr, struct HttpAuthInfo *pAuthInfo, LPCWSTR header )
+static BOOL HTTP_InsertAuthorization( LPWININETHTTPREQW lpwhr, LPCWSTR header, BOOL first )
 {
     WCHAR *authorization = NULL;
+    struct HttpAuthInfo *pAuthInfo = lpwhr->pAuthInfo;
+    DWORD flags;
 
     if (pAuthInfo && pAuthInfo->auth_data_len)
     {
@@ -1222,32 +1223,14 @@ static BOOL HTTP_InsertAuthorizationForHeader( LPWININETHTTPREQW lpwhr, struct H
 
     TRACE("Inserting authorization: %s\n", debugstr_w(authorization));
 
-    HTTP_ProcessHeader(lpwhr, header, authorization,
-                       HTTP_ADDHDR_FLAG_REPLACE | HTTP_ADDHDR_FLAG_REQ);
+    /* make sure not to overwrite any caller supplied authorization header */
+    flags = HTTP_ADDHDR_FLAG_REQ;
+    flags |= first ? HTTP_ADDHDR_FLAG_ADD_IF_NEW : HTTP_ADDHDR_FLAG_REPLACE;
+
+    HTTP_ProcessHeader(lpwhr, header, authorization, flags);
 
     HeapFree(GetProcessHeap(), 0, authorization);
-
     return TRUE;
-}
-
-/***********************************************************************
- *  HTTP_InsertAuthorization
- *
- *   Insert the authorization field in the request header
- */
-static BOOL HTTP_InsertAuthorization( LPWININETHTTPREQW lpwhr )
-{
-    return HTTP_InsertAuthorizationForHeader(lpwhr, lpwhr->pAuthInfo, szAuthorization);
-}
-
-/***********************************************************************
- *  HTTP_InsertProxyAuthorization
- *
- *   Insert the proxy authorization field in the request header
- */
-static BOOL HTTP_InsertProxyAuthorization( LPWININETHTTPREQW lpwhr )
-{
-    return HTTP_InsertAuthorizationForHeader(lpwhr, lpwhr->pProxyAuthInfo, szProxy_Authorization);
 }
 
 /***********************************************************************
@@ -1666,7 +1649,7 @@ static BOOL WINAPI HTTP_HttpQueryInfoW( LPWININETHTTPREQW lpwhr, DWORD dwInfoLev
             BOOL ret;
 
             if (request_only)
-                headers = HTTP_BuildHeaderRequestString(lpwhr, lpwhr->lpszVerb, lpwhr->lpszPath, FALSE);
+                headers = HTTP_BuildHeaderRequestString(lpwhr, lpwhr->lpszVerb, lpwhr->lpszPath);
             else
                 headers = lpwhr->lpszRawHeaders;
 
@@ -2536,7 +2519,7 @@ static BOOL HTTP_SecureProxyConnect(LPWININETHTTPREQW lpwhr)
 
     lpszPath = HeapAlloc( GetProcessHeap(), 0, (lstrlenW( lpwhs->lpszHostName ) + 13)*sizeof(WCHAR) );
     sprintfW( lpszPath, szFormat, lpwhs->lpszHostName, lpwhs->nHostPort );
-    requestString = HTTP_BuildHeaderRequestString( lpwhr, szConnect, lpszPath, FALSE );
+    requestString = HTTP_BuildHeaderRequestString( lpwhr, szConnect, lpszPath );
     HeapFree( GetProcessHeap(), 0, lpszPath );
 
     len = WideCharToMultiByte( CP_ACP, 0, requestString, -1,
@@ -2582,6 +2565,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
     BOOL loop_next;
     INTERNET_ASYNC_RESULT iar;
     static const WCHAR szClose[] = { 'C','l','o','s','e',0 };
+    static const WCHAR szPost[] = { 'P','O','S','T',0 };
     static const WCHAR szContentLength[] =
         { 'C','o','n','t','e','n','t','-','L','e','n','g','t','h',':',' ','%','l','i','\r','\n',0 };
     WCHAR contentLengthStr[sizeof szContentLength/2 /* includes \r\n */ + 20 /* int */ ];
@@ -2594,9 +2578,11 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
     INTERNET_SetLastError(0);
 
     HTTP_FixVerb(lpwhr);
-    
-    sprintfW(contentLengthStr, szContentLength, dwContentLength);
-    HTTP_HttpAddRequestHeadersW(lpwhr, contentLengthStr, -1L, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REPLACE);
+    if (dwContentLength || !strcmpW(lpwhr->lpszVerb, szPost))
+    {
+        sprintfW(contentLengthStr, szContentLength, dwContentLength);
+        HTTP_HttpAddRequestHeadersW(lpwhr, contentLengthStr, -1L, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REPLACE);
+    }
 
     do
     {
@@ -2621,8 +2607,8 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
                            lpwhr->hdr.dwFlags & INTERNET_FLAG_KEEP_CONNECTION ? szKeepAlive : szClose,
                            HTTP_ADDHDR_FLAG_REQ | HTTP_ADDHDR_FLAG_REPLACE);
 
-        HTTP_InsertAuthorization(lpwhr);
-        HTTP_InsertProxyAuthorization(lpwhr);
+        HTTP_InsertAuthorization(lpwhr, szAuthorization, !loop_next);
+        HTTP_InsertAuthorization(lpwhr, szProxy_Authorization, !loop_next);
 
         /* add the headers the caller supplied */
         if( lpszHeaders && dwHeaderLength )
@@ -2631,7 +2617,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
                         HTTP_ADDREQ_FLAG_ADD | HTTP_ADDHDR_FLAG_REPLACE);
         }
 
-        requestString = HTTP_BuildHeaderRequestString(lpwhr, lpwhr->lpszVerb, lpwhr->lpszPath, FALSE);
+        requestString = HTTP_BuildHeaderRequestString(lpwhr, lpwhr->lpszVerb, lpwhr->lpszPath);
  
         TRACE("Request header -> %s\n", debugstr_w(requestString) );
 
@@ -2794,6 +2780,12 @@ HINTERNET HTTP_Connect(LPWININETAPPINFOW hIC, LPCWSTR lpszServerName,
     HINTERNET handle = NULL;
 
     TRACE("-->\n");
+
+    if (!lpszServerName || !lpszServerName[0])
+    {
+        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
+        goto lerror;
+    }
 
     assert( hIC->hdr.htype == WH_HINIT );
 

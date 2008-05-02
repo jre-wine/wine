@@ -206,12 +206,12 @@ struct symt_function
     struct vector               vchildren;      /* locals, params, blocks, start/end, labels */
 };
 
-struct symt_function_point
+struct symt_hierarchy_point
 {
     struct symt                 symt;           /* either SymTagFunctionDebugStart, SymTagFunctionDebugEnd, SymTagLabel */
-    struct symt_function*       parent;
+    struct hash_table_elt       hash_elt;       /* if label (and in compiland's hash table if global) */
+    struct symt*                parent;         /* symt_function or symt_compiland */
     struct location             loc;
-    const char*                 name;           /* for labels */
 };
 
 struct symt_public
@@ -256,6 +256,7 @@ struct symt_basic
 struct symt_enum
 {
     struct symt                 symt;
+    struct symt*                base_type;
     const char*                 name;
     struct vector               vchildren;
 };
@@ -548,7 +549,7 @@ extern struct symt_block*
                     symt_close_func_block(struct module* module, 
                                           struct symt_function* func,
                                           struct symt_block* block, unsigned pc);
-extern struct symt_function_point*
+extern struct symt_hierarchy_point*
                     symt_add_function_point(struct module* module, 
                                             struct symt_function* func,
                                             enum SymTagEnum point, 
@@ -568,6 +569,10 @@ extern struct symt_data*
                                       struct symt_compiland* parent,
                                       const char* name, struct symt* type,
                                       const VARIANT* v);
+extern struct symt_hierarchy_point*
+                    symt_new_label(struct module* module,
+                                   struct symt_compiland* compiland,
+                                   const char* name, unsigned long address);
 
 /* type.c */
 extern void         symt_init_basic(struct module* module);
@@ -587,7 +592,8 @@ extern BOOL         symt_add_udt_element(struct module* module,
                                          struct symt* elt_type, unsigned offset, 
                                          unsigned size);
 extern struct symt_enum*
-                    symt_new_enum(struct module* module, const char* typename);
+                    symt_new_enum(struct module* module, const char* typename,
+                                  struct symt* basetype);
 extern BOOL         symt_add_enum_element(struct module* module, 
                                           struct symt_enum* enum_type, 
                                           const char* name, int value);

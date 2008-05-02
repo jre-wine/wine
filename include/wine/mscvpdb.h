@@ -343,9 +343,9 @@ union codeview_type
     {
         unsigned short int      len;
         short int               id;
-        unsigned                this_type;
-        unsigned int            class_type;
         unsigned int            rvtype;
+        unsigned int            class_type;
+        unsigned                this_type;
         unsigned char           call;
         unsigned char           reserved;
         unsigned short          params;
@@ -732,7 +732,17 @@ union codeview_fieldtype
  * bit mode.  There are many other types listed in the documents, but these
  * are apparently not used by the compiler, or represent pointer types
  * that are not used.
+ *
+ * Official MS documentation says that type (< 0x4000, so 12 bits) is made of:
+ *        +----------+------+------+----------+------+
+ *        |    11    | 10-8 | 7-4  |     3    | 2-0  |
+ *        +----------+------+------+----------+------+
+ *        | reserved | mode | type | reserved | size |
+ *        +----------+------+------+----------+------+
+ * In recent PDB files, type 8 exists, and is seen as an HRESULT... So we've
+ * added this basic type... as if bit 3 had been integrated into the size field
  */
+
 /* the type number of a built-in type is a 16-bit value specified in the following format:
     bit #   |   11     |   10-8   |   7-4    |    3     |    2-0   |
     field   | reserved |   mode   |   type   | reserved |   size   |
@@ -817,6 +827,7 @@ union codeview_fieldtype
 #define T_NBASICSTR         0x0005  /* near basic string */
 #define T_FBASICSTR         0x0006  /* far basic string */
 #define T_NOTTRANS          0x0007  /* untranslated type record from MS symbol format */
+#define T_HRESULT           0x0008  /* Hresult - or error code ??? */
 #define T_CHAR              0x0010  /* signed char */
 #define T_SHORT             0x0011  /* short */
 #define T_LONG              0x0012  /* long */
@@ -951,6 +962,7 @@ union codeview_fieldtype
 
 /* 32-bit near pointers to basic types */
 #define T_32PVOID           0x0403  /* 32-bit near pointer to void */
+#define T_32PHRESULT        0x0408  /* 16:32 near pointer to Hresult - or error code ??? */
 #define T_32PCHAR           0x0410  /* 16:32 near pointer to 8-bit signed */
 #define T_32PSHORT          0x0411  /* 16:32 near pointer to 16-bit signed */
 #define T_32PLONG           0x0412  /* 16:32 near pointer to 32-bit signed */
@@ -1031,8 +1043,6 @@ union codeview_fieldtype
 #define T_NEAR32PTR_BITS    0x0400
 #define T_FAR32PTR_BITS     0x0500
 #define T_NEAR64PTR_BITS    0x0600
-
-
 
 #define LF_MODIFIER_V1          0x0001
 #define LF_POINTER_V1           0x0002
@@ -1333,6 +1343,16 @@ union codeview_symbol
 
     struct
     {
+        short int               len;            /* Total length of this entry */
+        short int               id;             /* Always S_BPREL_V3 */
+        int                     offset;         /* Stack offset relative to BP */
+        unsigned int            symtype;
+        unsigned short          unknown;
+        char                    name[1];
+    } stack_xxxx_v3;
+
+    struct
+    {
 	short int	        len;	        /* Total length of this entry */
 	short int	        id;		/* Always S_REGISTER */
         unsigned short          type;
@@ -1573,6 +1593,7 @@ union codeview_symbol
 #define S_PUB_V3        0x110E
 #define S_LPROC_V3      0x110F
 #define S_GPROC_V3      0x1110
+#define S_BPREL_XXXX_V3 0x1111  /* not really understood, but looks like bprel... */
 #define S_MSTOOL_V3     0x1116  /* compiler command line options and build information */
 #define S_PUB_FUNC1_V3  0x1125  /* didn't get the difference between the two */
 #define S_PUB_FUNC2_V3  0x1127

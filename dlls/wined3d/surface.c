@@ -55,7 +55,8 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
         return;
     }
 
-    if(This->Flags & SFLAG_CONVERTED) {
+    /* Only support read back of converted P8 surfaces */
+    if(This->Flags & SFLAG_CONVERTED && (This->resource.format != WINED3DFMT_P8)) {
         FIXME("Read back converted textures unsupported, format=%s\n", debug_d3dformat(This->resource.format));
         return;
     }
@@ -86,8 +87,16 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
         LEAVE_GL();
     } else {
         void *mem;
+        GLenum format = This->glDescription.glFormat;
+        GLenum type = This->glDescription.glType;
         int src_pitch = 0;
         int dst_pitch = 0;
+
+        /* In case of P8 the index is stored in the alpha component if the primary render target uses P8 */
+        if(This->resource.format == WINED3DFMT_P8) {
+            format = GL_ALPHA;
+            type = GL_UNSIGNED_BYTE;
+        }
 
         if (This->Flags & SFLAG_NONPOW2) {
             unsigned char alignment = This->resource.wineD3DDevice->surface_alignment;
@@ -100,21 +109,21 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
         }
 
         TRACE("(%p) : Calling glGetTexImage level %d, format %#x, type %#x, data %p\n", This, This->glDescription.level,
-                This->glDescription.glFormat, This->glDescription.glType, mem);
+                format, type, mem);
 
         if(This->Flags & SFLAG_PBO) {
             GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, This->pbo));
             checkGLcall("glBindBufferARB");
 
-            glGetTexImage(This->glDescription.target, This->glDescription.level, This->glDescription.glFormat,
-                          This->glDescription.glType, NULL);
+            glGetTexImage(This->glDescription.target, This->glDescription.level, format,
+                          type, NULL);
             checkGLcall("glGetTexImage()");
 
             GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0));
             checkGLcall("glBindBufferARB");
         } else {
-            glGetTexImage(This->glDescription.target, This->glDescription.level, This->glDescription.glFormat,
-                          This->glDescription.glType, mem);
+            glGetTexImage(This->glDescription.target, This->glDescription.level, format,
+                          type, mem);
             checkGLcall("glGetTexImage()");
         }
         LEAVE_GL();
@@ -510,24 +519,42 @@ static void surface_remove_pbo(IWineD3DSurfaceImpl *This) {
 static void WINAPI IWineD3DSurfaceImpl_UnLoad(IWineD3DSurface *iface) {
     IWineD3DBaseTexture *texture = NULL;
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *) iface;
+    renderbuffer_entry_t *entry, *entry2;
     TRACE("(%p)\n", iface);
 
-    /* Default pool resources are supposed to be destroyed before Reset is called.
-     * Implicit resources stay however. So this means we have an implicit render target
-     * or depth stencil, and the content isn't supposed to survive the reset anyway
-     */
     if(This->resource.pool == WINED3DPOOL_DEFAULT) {
-        TRACE("Default pool - nothing to do\n");
-        return;
+        /* Default pool resources are supposed to be destroyed before Reset is called.
+         * Implicit resources stay however. So this means we have an implicit render target
+         * or depth stencil. The content may be destroyed, but we still have to tear down
+         * opengl resources, so we cannot leave early.
+         */
+        IWineD3DSurface_ModifyLocation(iface, SFLAG_INSYSMEM, TRUE);
+    } else {
+        /* Load the surface into system memory */
+        IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
     }
-
-    /* Load the surface into system memory */
-    IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+    IWineD3DSurface_ModifyLocation(iface, SFLAG_INTEXTURE, FALSE);
+    IWineD3DSurface_ModifyLocation(iface, SFLAG_INDRAWABLE, FALSE);
+    This->Flags &= ~SFLAG_ALLOCATED;
 
     /* Destroy PBOs, but load them into real sysmem before */
     if(This->Flags & SFLAG_PBO) {
         surface_remove_pbo(This);
     }
+
+    /* Destroy fbo render buffers. This is needed for implicit render targets, for
+     * all application-created targets the application has to release the surface
+     * before calling _Reset
+     */
+    LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &This->renderbuffers, renderbuffer_entry_t, entry) {
+        ENTER_GL();
+        GL_EXTCALL(glDeleteRenderbuffersEXT(1, &entry->id));
+        LEAVE_GL();
+        list_remove(&entry->entry);
+        HeapFree(GetProcessHeap(), 0, entry);
+    }
+    list_init(&This->renderbuffers);
+    This->current_renderbuffer = NULL;
 
     /* If we're in a texture, the texture name belongs to the texture. Otherwise,
      * destroy it
@@ -1372,7 +1399,7 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
                 }
             }
             else if(!GL_SUPPORT(EXT_PALETTED_TEXTURE) && GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
-                *format = GL_RED;
+                *format = GL_ALPHA;
                 *internal = GL_RGBA;
                 *type = GL_UNSIGNED_BYTE;
                 *target_bpp = 1;
@@ -1912,15 +1939,14 @@ static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4]
             table[i][1] = device->palettes[device->currentPalette][i].peGreen;
             table[i][2] = device->palettes[device->currentPalette][i].peBlue;
 
-            if(index_in_alpha) {
+            /* BltOverride uses a GL_ALPHA_TEST based on GL_NOT_EQUAL 0, so the alpha component
+              of pixels that should be masked away should be 0. When inde_in_alpha is set,
+              we will store the palette index (the glReadPixels code reads GL_ALPHA back)
+              or else we store 0xff. */
+            if(colorkey && (i >= This->SrcBltCKey.dwColorSpaceLowValue) &&  (i <= This->SrcBltCKey.dwColorSpaceHighValue)) {
+                table[i][3] = 0;
+            } else if(index_in_alpha) {
                 table[i][3] = i;
-            } else if (colorkey &&
-                (i >= This->SrcBltCKey.dwColorSpaceLowValue) &&
-                (i <= This->SrcBltCKey.dwColorSpaceHighValue)) {
-                /* We should maybe here put a more 'neutral' color than the standard bright purple
-                   one often used by application to prevent the nice purple borders when bi-linear
-                   filtering is on */
-                table[i][3] = 0x00;
             } else {
                 table[i][3] = 0xFF;
             }
@@ -1933,16 +1959,14 @@ static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4]
             table[i][1] = pal->palents[i].peGreen;
             table[i][2] = pal->palents[i].peBlue;
 
-            if(index_in_alpha) {
-                table[i][3] = i;
-            }
-            else if (colorkey &&
-                (i >= This->SrcBltCKey.dwColorSpaceLowValue) &&
-                (i <= This->SrcBltCKey.dwColorSpaceHighValue)) {
-                /* We should maybe here put a more 'neutral' color than the standard bright purple
-                   one often used by application to prevent the nice purple borders when bi-linear
-                   filtering is on */
+            /* BltOverride uses a GL_ALPHA_TEST based on GL_NOT_EQUAL 0, so the alpha component
+              of pixels that should be masked away should be 0. When inde_in_alpha is set,
+              we will store the palette index (the glReadPixels code reads GL_ALPHA back)
+              or else we store 0xff. */
+            if(colorkey && (i >= This->SrcBltCKey.dwColorSpaceLowValue) &&  (i <= This->SrcBltCKey.dwColorSpaceHighValue)) {
                 table[i][3] = 0x00;
+            } else if(index_in_alpha) {
+                table[i][3] = i;
             } else if(pal->Flags & WINEDDPCAPS_ALPHA) {
                 table[i][3] = pal->palents[i].peFlags;
             } else {
@@ -1956,9 +1980,9 @@ const char *fragment_palette_conversion =
     "!!ARBfp1.0\n"
     "TEMP index;\n"
     "PARAM constants = { 0.996, 0.00195, 0, 0 };\n" /* { 255/256, 0.5/255*255/256, 0, 0 } */
-    "TEX index.x, fragment.texcoord[0], texture[0], 2D;\n" /* store the red-component of the current pixel */
-    "MAD index.x, index.x, constants.x, constants.y;\n" /* Scale the index by 255/256 and add a bias of '0.5' in order to sample in the middle */
-    "TEX result.color, index, texture[1], 1D;\n" /* use the red-component as a index in the palette to get the final color */
+    "TEX index, fragment.texcoord[0], texture[0], 2D;\n" /* The alpha-component contains the palette index */
+    "MAD index.a, index.a, constants.x, constants.y;\n" /* Scale the index by 255/256 and add a bias of '0.5' in order to sample in the middle */
+    "TEX result.color, index.a, texture[1], 1D;\n" /* use the alpha-component as a index in the palette to get the final color */
     "END";
 
 /* This function is used in case of 8bit paletted textures to upload the palette.
@@ -2087,11 +2111,18 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface, BO
         /* To perform the color key conversion we need a sysmem copy of
          * the surface. Make sure we have it
          */
+
         IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+        /* Make sure the texture is reloaded because of the color key change, this kills performance though :( */
+        /* TODO: This is not necessarily needed with hw palettized texture support */
+        This->Flags &= ~SFLAG_INTEXTURE;
     } else if(palette9_changed(This)) {
         TRACE("Reloading surface because the d3d8/9 palette was changed\n");
         /* TODO: This is not necessarily needed with hw palettized texture support */
         IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL);
+
+        /* Make sure the texture is reloaded because of the color key change, this kills performance though :( */
+        This->Flags &= ~SFLAG_INTEXTURE;
     } else {
         TRACE("surface is already in texture\n");
         return WINED3D_OK;

@@ -463,6 +463,8 @@ extern BOOL X11DRV_IsSolidColor(COLORREF color);
 extern COLORREF X11DRV_PALETTE_ToLogical(int pixel);
 extern int X11DRV_PALETTE_ToPhysical(X11DRV_PDEVICE *physDev, COLORREF color);
 
+extern unsigned int depth_to_bpp( unsigned int depth );
+
 /* GDI escapes */
 
 #define X11DRV_ESCAPE 6789
@@ -710,7 +712,7 @@ extern void X11DRV_ResetSelectionOwner(void);
 extern void X11DRV_SetFocus( HWND hwnd );
 extern Cursor X11DRV_GetCursor( Display *display, struct tagCURSORICONINFO *ptr );
 extern BOOL X11DRV_ClipCursor( LPCRECT clip );
-extern void X11DRV_InitKeyboard(void);
+extern void X11DRV_InitKeyboard( Display *display );
 extern void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD dwFlags, DWORD time,
                                         DWORD dwExtraInfo, UINT injected_flags );
 extern void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,

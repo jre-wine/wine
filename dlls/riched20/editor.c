@@ -4,6 +4,7 @@
  * Copyright 2004 by Krzysztof Foltman
  * Copyright 2005 by Cihan Altinay
  * Copyright 2005 by Phil Krylov
+ * Copyright 2008 Eric Pouech
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -506,6 +507,148 @@ static void ME_RTFParAttrHook(RTF_Info *info)
     if (fmt.cTabCount < MAX_TAB_STOPS)
       fmt.rgxTabs[fmt.cTabCount++] = info->rtfParam;
     break;
+  case rtfKeep:
+    fmt.dwMask = PFM_KEEP;
+    fmt.wEffects = PFE_KEEP;
+    break;
+  case rtfNoWidowControl:
+    fmt.dwMask = PFM_NOWIDOWCONTROL;
+    fmt.wEffects = PFE_NOWIDOWCONTROL;
+    break;
+  case rtfKeepNext:
+    fmt.dwMask = PFM_KEEPNEXT;
+    fmt.wEffects = PFE_KEEPNEXT;
+    break;
+  case rtfSpaceAfter:
+    fmt.dwMask = PFM_SPACEAFTER;
+    fmt.dySpaceAfter = info->rtfParam;
+    break;
+  case rtfSpaceBefore:
+    fmt.dwMask = PFM_SPACEBEFORE;
+    fmt.dySpaceBefore = info->rtfParam;
+    break;
+  case rtfSpaceBetween:
+    fmt.dwMask = PFM_LINESPACING;
+    if ((int)info->rtfParam > 0)
+    {
+      fmt.dyLineSpacing = info->rtfParam;
+      fmt.bLineSpacingRule = 3;
+    }
+    else
+    {
+      fmt.dyLineSpacing = info->rtfParam;
+      fmt.bLineSpacingRule = 4;
+    }
+  case rtfSpaceMultiply:
+    fmt.dwMask = PFM_LINESPACING;
+    fmt.dyLineSpacing = info->rtfParam * 20;
+    fmt.bLineSpacingRule = 5;
+    break;
+  case rtfParBullet:
+    fmt.dwMask = PFM_NUMBERING;
+    fmt.wNumbering = PFN_BULLET;
+    break;
+  case rtfParSimple:
+    fmt.dwMask = PFM_NUMBERING;
+    fmt.wNumbering = 2; /* FIXME: MSDN says it's not used ?? */
+    break;
+  case rtfParNumDecimal:
+    fmt.dwMask = PFM_NUMBERING;
+    fmt.wNumbering = 2; /* FIXME: MSDN says it's not used ?? */
+    break;
+  case rtfParNumIndent:
+    fmt.dwMask = PFM_NUMBERINGTAB;
+    fmt.wNumberingTab = info->rtfParam;
+    break;
+  case rtfParNumStartAt:
+    fmt.dwMask = PFM_NUMBERINGSTART;
+    fmt.wNumberingStart = info->rtfParam;
+    break;
+  case rtfBorderLeft:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    if (!(fmt.dwMask & PFM_BORDER))
+    {
+      fmt.dwMask |= PFM_BORDER;
+      fmt.wBorderSpace = 0;
+      fmt.wBorderWidth = 1;
+      fmt.wBorders = 0;
+    }
+    fmt.wBorders |= 1;
+    break;
+  case rtfBorderRight:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    if (!(fmt.dwMask & PFM_BORDER))
+    {
+      fmt.dwMask |= PFM_BORDER;
+      fmt.wBorderSpace = 0;
+      fmt.wBorderWidth = 1;
+      fmt.wBorders = 0;
+    }
+    fmt.wBorders |= 2;
+    break;
+  case rtfBorderTop:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    if (!(fmt.dwMask & PFM_BORDER))
+    {
+      fmt.dwMask |= PFM_BORDER;
+      fmt.wBorderSpace = 0;
+      fmt.wBorderWidth = 1;
+      fmt.wBorders = 0;
+    }
+    fmt.wBorders |= 4;
+    break;
+  case rtfBorderBottom:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    if (!(fmt.dwMask & PFM_BORDER))
+    {
+      fmt.dwMask |= PFM_BORDER;
+      fmt.wBorderSpace = 0;
+      fmt.wBorderWidth = 1;
+      fmt.wBorders = 0;
+    }
+    fmt.wBorders |= 8;
+    break;
+  case rtfBorderSingle:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    /* we assume that borders have been created before (RTF spec) */
+    fmt.wBorders &= ~0x70;
+    fmt.wBorders |= 1 << 8;
+    break;
+  case rtfBorderThick:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    /* we assume that borders have been created before (RTF spec) */
+    fmt.wBorders &= ~0x70;
+    fmt.wBorders |= 2 << 8;
+    break;
+  case rtfBorderShadow:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    /* we assume that borders have been created before (RTF spec) */
+    fmt.wBorders &= ~0x70;
+    fmt.wBorders |= 10 << 8;
+    break;
+  case rtfBorderDouble:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    /* we assume that borders have been created before (RTF spec) */
+    fmt.wBorders &= ~0x70;
+    fmt.wBorders |= 7 << 8;
+    break;
+  case rtfBorderDot:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    /* we assume that borders have been created before (RTF spec) */
+    fmt.wBorders &= ~0x70;
+    fmt.wBorders |= 11 << 8;
+    break;
+  case rtfBorderWidth:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    /* we assume that borders have been created before (RTF spec) */
+    fmt.wBorders &= ~0x70;
+    fmt.wBorders |= ((info->rtfParam / 15) & 7) << 8;
+    break;
+  case rtfBorderSpace:
+    ME_GetSelectionParaFormat(info->editor, &fmt);
+    /* we assume that borders have been created before (RTF spec) */
+    fmt.wBorderSpace = info->rtfParam;
+    break;
   }  
   if (fmt.dwMask) {
     RTFFlushOutputBuffer(info);
@@ -547,6 +690,204 @@ static void ME_RTFTblAttrHook(RTF_Info *info)
       para->member.para.pLastCell->nRightBoundary = info->rtfParam;
       break;
   }
+}
+
+static BOOL ME_RTFInsertOleObject(RTF_Info *info, HENHMETAFILE h, const SIZEL* sz)
+{
+  LPOLEOBJECT         lpObject = NULL;
+  LPSTORAGE           lpStorage = NULL;
+  LPOLECLIENTSITE     lpClientSite = NULL;
+  LPDATAOBJECT        lpDataObject = NULL;
+  LPOLECACHE          lpOleCache = NULL;
+  STGMEDIUM           stgm;
+  FORMATETC           fm;
+  CLSID               clsid;
+  BOOL                ret = FALSE;
+  DWORD               conn;
+
+  stgm.tymed = TYMED_ENHMF;
+  stgm.u.hEnhMetaFile = h;
+  stgm.pUnkForRelease = NULL;
+
+  fm.cfFormat = CF_ENHMETAFILE;
+  fm.ptd = NULL;
+  fm.dwAspect = DVASPECT_CONTENT;
+  fm.lindex = -1;
+  fm.tymed = stgm.tymed;
+
+  if (!info->lpRichEditOle)
+  {
+    CreateIRichEditOle(info->editor, (VOID**)&info->lpRichEditOle);
+  }
+
+  if (OleCreateDefaultHandler(&CLSID_NULL, NULL, &IID_IOleObject, (void**)&lpObject) == S_OK &&
+#if 0
+      /* FIXME: enable it when rich-edit properly implements this method */
+      IRichEditOle_GetClientSite(info->lpRichEditOle, &lpClientSite) == S_OK &&
+      IOleObject_SetClientSite(lpObject, lpClientSite) == S_OK &&
+#endif
+      IOleObject_GetUserClassID(lpObject, &clsid) == S_OK &&
+      IOleObject_QueryInterface(lpObject, &IID_IOleCache, (void**)&lpOleCache) == S_OK &&
+      IOleCache_Cache(lpOleCache, &fm, 0, &conn) == S_OK &&
+      IOleObject_QueryInterface(lpObject, &IID_IDataObject, (void**)&lpDataObject) == S_OK &&
+      IDataObject_SetData(lpDataObject, &fm, &stgm, TRUE) == S_OK)
+  {
+    REOBJECT            reobject;
+
+    reobject.cbStruct = sizeof(reobject);
+    reobject.cp = REO_CP_SELECTION;
+    reobject.clsid = clsid;
+    reobject.poleobj = lpObject;
+    reobject.pstg = lpStorage;
+    reobject.polesite = lpClientSite;
+    /* convert from twips to .01 mm */
+    reobject.sizel.cx = MulDiv(sz->cx, 254, 144);
+    reobject.sizel.cy = MulDiv(sz->cy, 254, 144);
+    reobject.dvaspect = DVASPECT_CONTENT;
+    reobject.dwFlags = 0; /* FIXME */
+    reobject.dwUser = 0;
+
+    /* FIXME: could be simpler */
+    ret = IRichEditOle_InsertObject(info->lpRichEditOle, &reobject) == S_OK;
+  }
+
+  if (lpObject)       IOleObject_Release(lpObject);
+  if (lpClientSite)   IOleClientSite_Release(lpClientSite);
+  if (lpStorage)      IStorage_Release(lpStorage);
+  if (lpDataObject)   IDataObject_Release(lpDataObject);
+  if (lpOleCache)     IOleCache_Release(lpOleCache);
+
+  return ret;
+}
+
+static void ME_RTFReadPictGroup(RTF_Info *info)
+{
+  SIZEL         sz;
+  BYTE*         buffer = NULL;
+  unsigned      bufsz, bufidx;
+  BOOL          flip;
+  BYTE          val;
+  METAFILEPICT  mfp;
+  HENHMETAFILE  hemf;
+
+  RTFGetToken (info);
+  if (info->rtfClass == rtfEOF)
+    return;
+  mfp.mm = MM_TEXT;
+  /* fetch picture type */
+  if (RTFCheckMM (info, rtfPictAttr, rtfWinMetafile))
+  {
+    mfp.mm = info->rtfParam;
+  }
+  else
+  {
+    FIXME("%d %d\n", info->rtfMajor, info->rtfMinor);
+    goto skip_group;
+  }
+  sz.cx = sz.cy = 0;
+  /* fetch picture attributes */
+  for (;;)
+  {
+    RTFGetToken (info);
+    if (info->rtfClass == rtfEOF)
+      return;
+    if (info->rtfClass == rtfText)
+      break;
+    if (!RTFCheckCM (info, rtfControl, rtfPictAttr))
+    {
+      ERR("Expected picture attribute (%d %d)\n",
+        info->rtfClass, info->rtfMajor);
+      goto skip_group;
+    }
+    else if (RTFCheckMM (info, rtfPictAttr, rtfPicWid))
+      mfp.xExt = info->rtfParam;
+    else if (RTFCheckMM (info, rtfPictAttr, rtfPicHt))
+      mfp.yExt = info->rtfParam;
+    else if (RTFCheckMM (info, rtfPictAttr, rtfPicGoalWid))
+      sz.cx = info->rtfParam;
+    else if (RTFCheckMM (info, rtfPictAttr, rtfPicGoalHt))
+      sz.cy = info->rtfParam;
+    else
+      FIXME("Non supported attribute: %d %d %d\n", info->rtfClass, info->rtfMajor, info->rtfMinor);
+  }
+  /* fetch picture data */
+  bufsz = 1024;
+  bufidx = 0;
+  buffer = HeapAlloc(GetProcessHeap(), 0, bufsz);
+  val = info->rtfMajor;
+  for (flip = TRUE;; flip = !flip)
+  {
+    RTFGetToken (info);
+    if (info->rtfClass == rtfEOF)
+    {
+      HeapFree(GetProcessHeap(), 0, buffer);
+      return; /* Warn ?? */
+    }
+    if (RTFCheckCM(info, rtfGroup, rtfEndGroup))
+      break;
+    if (info->rtfClass != rtfText) goto skip_group;
+    if (flip)
+    {
+      if (bufidx >= bufsz &&
+          !(buffer = HeapReAlloc(GetProcessHeap(), 0, buffer, bufsz += 1024)))
+        goto skip_group;
+      buffer[bufidx++] = RTFCharToHex(val) * 16 + RTFCharToHex(info->rtfMajor);
+    }
+    else
+      val = info->rtfMajor;
+  }
+  if (flip) FIXME("wrong hex string\n");
+
+  if ((hemf = SetWinMetaFileBits(bufidx, buffer, NULL, &mfp)))
+    ME_RTFInsertOleObject(info, hemf, &sz);
+  HeapFree(GetProcessHeap(), 0, buffer);
+  RTFRouteToken (info);	/* feed "}" back to router */
+  return;
+skip_group:
+  HeapFree(GetProcessHeap(), 0, buffer);
+  RTFSkipGroup(info);
+  RTFRouteToken(info);	/* feed "}" back to router */
+}
+
+/* for now, lookup the \result part and use it, whatever the object */
+static void ME_RTFReadObjectGroup(RTF_Info *info)
+{
+  for (;;)
+  {
+    RTFGetToken (info);
+    if (info->rtfClass == rtfEOF)
+      return;
+    if (RTFCheckCM(info, rtfGroup, rtfEndGroup))
+      break;
+    if (RTFCheckCM(info, rtfGroup, rtfBeginGroup))
+    {
+      RTFGetToken (info);
+      if (info->rtfClass == rtfEOF)
+        return;
+      if (RTFCheckCMM(info, rtfControl, rtfDestination, rtfObjResult))
+      {
+	int	level = 1;
+
+	while (RTFGetToken (info) != rtfEOF)
+	{
+          if (info->rtfClass == rtfGroup)
+          {
+            if (info->rtfMajor == rtfBeginGroup) level++;
+            else if (info->rtfMajor == rtfEndGroup && --level < 0) break;
+          }
+          RTFRouteToken(info);
+	}
+      }
+      else RTFSkipGroup(info);
+      continue;
+    }
+    if (!RTFCheckCM (info, rtfControl, rtfObjAttr))
+    {
+      FIXME("Non supported attribute: %d %d %d\n", info->rtfClass, info->rtfMajor, info->rtfMinor);
+      return;
+    }
+  }
+  RTFRouteToken(info);	/* feed "}" back to router */
 }
 
 static void ME_RTFReadHook(RTF_Info *info) {
@@ -687,12 +1028,16 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
       WriterInit(&parser);
       RTFInit(&parser);
       RTFSetReadHook(&parser, ME_RTFReadHook);
+      RTFSetDestinationCallback(&parser, rtfPict, ME_RTFReadPictGroup);
+      RTFSetDestinationCallback(&parser, rtfObject, ME_RTFReadObjectGroup);
       BeginFile(&parser);
-  
+
       /* do the parsing */
       RTFRead(&parser);
       RTFFlushOutputBuffer(&parser);
       RTFDestroy(&parser);
+      if (parser.lpRichEditOle)
+        IRichEditOle_Release(parser.lpRichEditOle);
 
       style = parser.style;
     }
@@ -2081,7 +2426,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
     ex.flags = GT_USECRLF;
     ex.codepage = unicode ? 1200 : CP_ACP;
     ex.lpDefaultChar = NULL;
-    ex.lpUsedDefaultChar = NULL;
+    ex.lpUsedDefChar = NULL;
     rc = RichEditWndProc_common(hWnd, EM_GETTEXTEX, (WPARAM)&ex, unicode ? (LPARAM)bufferW : (LPARAM)bufferA, unicode);
 
     if (unicode)
@@ -2135,7 +2480,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
       buffer = heap_alloc((crlfmul*nCount + 1) * sizeof(WCHAR));
 
       buflen = ME_GetTextW(editor, buffer, nStart, nCount, ex->flags & GT_USECRLF);
-      rc = WideCharToMultiByte(ex->codepage, flags, buffer, -1, (LPSTR)lParam, ex->cb, ex->lpDefaultChar, ex->lpUsedDefaultChar);
+      rc = WideCharToMultiByte(ex->codepage, flags, buffer, -1, (LPSTR)lParam, ex->cb, ex->lpDefaultChar, ex->lpUsedDefChar);
       if (rc) rc--; /* do not count 0 terminator */
 
       heap_free(buffer);

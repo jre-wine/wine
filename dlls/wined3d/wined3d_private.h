@@ -196,6 +196,7 @@ struct SHADER_OPCODE_ARG;
 typedef struct {
     void (*shader_select)(IWineD3DDevice *iface, BOOL usePS, BOOL useVS);
     void (*shader_select_depth_blt)(IWineD3DDevice *iface);
+    void (*shader_destroy_depth_blt)(IWineD3DDevice *iface);
     void (*shader_load_constants)(IWineD3DDevice *iface, char usePS, char useVS);
     void (*shader_cleanup)(IWineD3DDevice *iface);
     void (*shader_color_correction)(struct SHADER_OPCODE_ARG *arg);
@@ -409,6 +410,8 @@ extern glAttribFunc normal_funcs[WINED3DDECLTYPE_UNUSED];
 
 #define GET_TEXCOORD_SIZE_FROM_FVF(d3dvtVertexType, tex_num) \
     (((((d3dvtVertexType) >> (16 + (2 * (tex_num)))) + 1) & 0x03) + 1)
+
+void depth_copy(IWineD3DDevice *iface);
 
 /* Routines and structures related to state management */
 typedef struct WineD3DContext WineD3DContext;
@@ -701,6 +704,10 @@ struct IWineD3DDeviceImpl
     GLuint                  src_fbo;
     GLuint                  dst_fbo;
     GLenum                  *draw_buffers;
+    GLuint                  depth_blt_texture;
+    GLuint                  depth_blt_vprogram_id;
+    GLuint                  depth_blt_fprogram_id;
+    GLhandleARB             depth_blt_glsl_program_id;
 
     /* Cursor management */
     BOOL                    bCursorVisible;
@@ -881,7 +888,7 @@ extern const IWineD3DVertexBufferVtbl IWineD3DVertexBuffer_Vtbl;
 #define VBFLAG_OPTIMIZED      0x02    /* Optimize has been called for the VB */
 #define VBFLAG_DIRTY          0x04    /* Buffer data has been modified */
 #define VBFLAG_HASDESC        0x08    /* A vertex description has been found */
-#define VBFLAG_VBOCREATEFAIL  0x10    /* An attempt to create a vbo has failed */
+#define VBFLAG_CREATEVBO      0x10    /* Attempt to create a VBO next PreLoad */
 
 /*****************************************************************************
  * IWineD3DIndexBuffer implementation structure (extends IWineD3DResourceImpl)
@@ -1622,6 +1629,7 @@ unsigned int count_bits(unsigned int mask);
     extern DWORD WINAPI IWineD3DBaseTextureImpl_SetPriority(IWineD3DBaseTexture *iface, DWORD  PriorityNew);
     extern DWORD WINAPI IWineD3DBaseTextureImpl_GetPriority(IWineD3DBaseTexture *iface);
     extern void WINAPI IWineD3DBaseTextureImpl_PreLoad(IWineD3DBaseTexture *iface);
+    extern void WINAPI IWineD3DBaseTextureImpl_UnLoad(IWineD3DBaseTexture *iface);
     extern WINED3DRESOURCETYPE WINAPI IWineD3DBaseTextureImpl_GetType(IWineD3DBaseTexture *iface);
     /*** IWineD3DBaseTexture methods ***/
     extern DWORD WINAPI IWineD3DBaseTextureImpl_SetLOD(IWineD3DBaseTexture *iface, DWORD LODNew);

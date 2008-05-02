@@ -156,7 +156,7 @@ static WCHAR szCDataXML[] = {'<','!','[','C','D','A','T','A','[','[','1',']','*'
 static WCHAR szCDataNodeText[] = {'#','c','d','a','t','a','-','s','e','c','t','i','o','n',0 };
 static WCHAR szDocFragmentText[] = {'#','d','o','c','u','m','e','n','t','-','f','r','a','g','m','e','n','t',0 };
 
-static WCHAR szEntityRef[] = {'E','n','t','i','t','y','r','e','f',0 };
+static WCHAR szEntityRef[] = {'e','n','t','i','t','y','r','e','f',0 };
 static WCHAR szEntityRefXML[] = {'&','e','n','t','i','t','y','r','e','f',';',0 };
 
 #define expect_bstr_eq_and_free(bstr, expect) { \
@@ -719,7 +719,7 @@ static void test_domnode( void )
         V_VT(&var) = VT_I4;
         V_I4(&var) = 0x1234;
         r = IXMLDOMElement_getAttribute( element, str, &var );
-        ok( r == S_FALSE, "getAttribute ret %08x\n", r );
+        ok( r == E_FAIL, "getAttribute ret %08x\n", r );
         ok( V_VT(&var) == VT_NULL, "vt = %x\n", V_VT(&var));
         VariantClear(&var);
         SysFreeString( str );
@@ -1721,6 +1721,7 @@ static void test_XPath(void)
 
     ole_expect(IXMLDOMDocument_selectNodes(doc, _bstr_("root//foo:c"), &list), E_FAIL);
 
+    VariantClear(&var);
     todo_wine ole_check(IXMLDOMDocument2_getProperty(doc, _bstr_("SelectionNamespaces"), &var));
     todo_wine expect_eq(V_VT(&var), VT_BSTR, int, "%x");
     if (V_VT(&var) == VT_BSTR)
@@ -2298,7 +2299,7 @@ static void test_xmlTypes(void)
                 /* test get_xml*/
                 hr = IXMLDOMEntityReference_get_xml(pEntityRef, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                todo_wine ok( !lstrcmpW( str, szEntityRefXML ), "incorrect xml string\n");
+                ok( !lstrcmpW( str, szEntityRefXML ), "incorrect xml string\n");
                 SysFreeString(str);
 
                 IXMLDOMEntityReference_Release(pEntityRef);

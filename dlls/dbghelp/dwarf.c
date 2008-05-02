@@ -167,6 +167,13 @@ typedef struct dwarf2_traverse_context_s
     unsigned char               word_size;
 } dwarf2_traverse_context_t;
 
+/* symt_cache indexes */
+#define sc_void 0
+#define sc_int1 1
+#define sc_int2 2
+#define sc_int4 3
+#define sc_num  4
+
 typedef struct dwarf2_parse_context_s
 {
     const dwarf2_section_t*     sections;
@@ -179,6 +186,7 @@ typedef struct dwarf2_parse_context_s
     unsigned long               load_offset;
     unsigned long               ref_offset;
     unsigned char               word_size;
+    struct symt*                symt_cache[sc_num]; /* void, int1, int2, int4 */
 } dwarf2_parse_context_t;
 
 /* stored in the dbghelp's module internal structure for later reuse */
@@ -932,7 +940,7 @@ static struct symt* dwarf2_parse_base_type(dwarf2_parse_context_t* ctx,
     struct attribute size;
     struct attribute encoding;
     enum BasicType bt;
-
+    int cache_idx = -1;
     if (di->symt) return di->symt;
 
     TRACE("%s, for %s\n", dwarf2_debug_ctx(ctx), dwarf2_debug_di(di)); 
@@ -956,6 +964,25 @@ static struct symt* dwarf2_parse_base_type(dwarf2_parse_context_t* ctx,
     default:                    bt = btNoType; break;
     }
     di->symt = &symt_new_basic(ctx->module, bt, name.u.string, size.u.uvalue)->symt;
+    switch (bt)
+    {
+    case btVoid:
+        assert(size.u.uvalue == 0);
+        cache_idx = sc_void;
+        break;
+    case btInt:
+        switch (size.u.uvalue)
+        {
+        case 1: cache_idx = sc_int1; break;
+        case 2: cache_idx = sc_int2; break;
+        case 4: cache_idx = sc_int4; break;
+        }
+        break;
+    default: break;
+    }
+    if (!ctx->symt_cache[cache_idx])
+        ctx->symt_cache[cache_idx] = di->symt;
+
     if (di->abbrev->have_child) FIXME("Unsupported children\n");
     return di->symt;
 }
@@ -991,8 +1018,10 @@ static struct symt* dwarf2_parse_pointer_type(dwarf2_parse_context_t* ctx,
 
     if (!dwarf2_find_attribute(ctx, di, DW_AT_byte_size, &size)) size.u.uvalue = 0;
     if (!(ref_type = dwarf2_lookup_type(ctx, di)))
-        ref_type = &symt_new_basic(ctx->module, btVoid, "void", 0)->symt;
-
+    {
+        ref_type = ctx->symt_cache[sc_void];
+        assert(ref_type);
+    }
     di->symt = &symt_new_pointer(ctx->module, ref_type)->symt;
     if (di->abbrev->have_child) FIXME("Unsupported children\n");
     return di->symt;
@@ -1216,15 +1245,24 @@ static struct symt* dwarf2_parse_enumeration_type(dwarf2_parse_context_t* ctx,
 {
     struct attribute    name;
     struct attribute    size;
+    struct symt_basic*  basetype;
 
     if (di->symt) return di->symt;
 
     TRACE("%s, for %s\n", dwarf2_debug_ctx(ctx), dwarf2_debug_di(di)); 
 
     if (!dwarf2_find_attribute(ctx, di, DW_AT_name, &name)) name.u.string = NULL;
-    if (!dwarf2_find_attribute(ctx, di, DW_AT_byte_size, &size)) size.u.uvalue = 0;
+    if (!dwarf2_find_attribute(ctx, di, DW_AT_byte_size, &size)) size.u.uvalue = 4;
 
-    di->symt = &symt_new_enum(ctx->module, name.u.string)->symt;
+    switch (size.u.uvalue) /* FIXME: that's wrong */
+    {
+    case 1: basetype = symt_new_basic(ctx->module, btInt, "char", 1); break;
+    case 2: basetype = symt_new_basic(ctx->module, btInt, "short", 2); break;
+    default:
+    case 4: basetype = symt_new_basic(ctx->module, btInt, "int", 4); break;
+    }
+
+    di->symt = &symt_new_enum(ctx->module, name.u.string, &basetype->symt)->symt;
 
     if (di->abbrev->have_child) /* any interest to not have child ? */
     {
@@ -1555,7 +1593,10 @@ static struct symt* dwarf2_parse_subprogram(dwarf2_parse_context_t* ctx,
         is_decl.u.uvalue = 0;
         
     if (!(ret_type = dwarf2_lookup_type(ctx, di)))
-        ret_type = &symt_new_basic(ctx->module, btVoid, "void", 0)->symt;
+    {
+        ret_type = ctx->symt_cache[sc_void];
+        assert(ret_type);
+    }
 
     /* FIXME: assuming C source code */
     sig_type = symt_new_function_signature(ctx->module, ret_type, CV_CALL_FAR_C);
@@ -1648,7 +1689,10 @@ static struct symt* dwarf2_parse_subroutine_type(dwarf2_parse_context_t* ctx,
     TRACE("%s, for %s\n", dwarf2_debug_ctx(ctx), dwarf2_debug_di(di));
 
     if (!(ret_type = dwarf2_lookup_type(ctx, di)))
-        ret_type = &symt_new_basic(ctx->module, btVoid, "void", 0)->symt;
+    {
+        ret_type = ctx->symt_cache[sc_void];
+        assert(ret_type);
+    }
 
     /* FIXME: assuming C source code */
     sig_type = symt_new_function_signature(ctx->module, ret_type, CV_CALL_FAR_C);
@@ -1970,6 +2014,8 @@ static BOOL dwarf2_parse_compilation_unit(const dwarf2_section_t* sections,
     ctx.thunks = thunks;
     ctx.load_offset = load_offset;
     ctx.ref_offset = comp_unit_cursor - sections[section_debug].address;
+    memset(ctx.symt_cache, 0, sizeof(ctx.symt_cache));
+    ctx.symt_cache[sc_void] = &symt_new_basic(module, btVoid, "void", 0)->symt;
 
     traverse.start_data = comp_unit_cursor + sizeof(dwarf2_comp_unit_stream_t);
     traverse.data = traverse.start_data;
@@ -2070,7 +2116,7 @@ static enum location_error loc_compute_frame(struct process* pcs,
         psym = vector_at(&func->vchildren, i);
         if ((*psym)->tag == SymTagCustom)
         {
-            pframe = &((struct symt_function_point*)*psym)->loc;
+            pframe = &((struct symt_hierarchy_point*)*psym)->loc;
 
             /* First, recompute the frame information, if needed */
             switch (pframe->kind)

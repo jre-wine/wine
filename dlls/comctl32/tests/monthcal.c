@@ -280,6 +280,7 @@ static const struct message destroy_monthcal_parent_msgs_seq[] = {
 
 /* expected message sequence for child*/
 static const struct message destroy_monthcal_child_msgs_seq[] = {
+    { 0x0090, sent|optional }, /* Vista */
     { WM_SHOWWINDOW, sent|wparam|lparam, 0, 0},
     { WM_WINDOWPOSCHANGING, sent|wparam, 0},
     { WM_WINDOWPOSCHANGED, sent|wparam, 0},
@@ -289,6 +290,7 @@ static const struct message destroy_monthcal_child_msgs_seq[] = {
 };
 
 static const struct message destroy_monthcal_multi_sel_style_seq[] = {
+    { 0x0090, sent|optional }, /* Vista */
     { WM_DESTROY, sent|wparam|lparam, 0, 0},
     { WM_NCDESTROY, sent|wparam|lparam, 0, 0},
     { 0 }
@@ -296,6 +298,7 @@ static const struct message destroy_monthcal_multi_sel_style_seq[] = {
 
 /* expected message sequence for parent window*/
 static const struct message destroy_parent_seq[] = {
+    { 0x0090, sent|optional }, /* Vista */
     { WM_WINDOWPOSCHANGING, sent|wparam, 0},
     { WM_WINDOWPOSCHANGED, sent|wparam, 0},
     { WM_NCACTIVATE, sent|wparam|lparam, 0, 0},
@@ -315,7 +318,6 @@ static void test_monthcal(void)
     SYSTEMTIME st[2], st1[2];
     int res, month_range;
 
-    InitCommonControls();
     hwnd = CreateWindowA(MONTHCAL_CLASSA, "MonthCal", WS_POPUP | WS_VISIBLE, CW_USEDEFAULT,
                          0, 300, 300, 0, 0, NULL, NULL);
     ok(hwnd != NULL, "Failed to create MonthCal\n");
@@ -477,8 +479,6 @@ static HWND create_monthcal_control(DWORD style, HWND parent_window)
 {
     struct subclass_info *info;
     HWND hwnd;
-
-    InitCommonControls();
 
     info = HeapAlloc(GetProcessHeap(), 0, sizeof(struct subclass_info));
     if (!info)
@@ -1109,7 +1109,22 @@ static void test_monthcal_MaxSelDay(HWND hwnd)
 
 START_TEST(monthcal)
 {
+    HMODULE hComctl32;
+    BOOL (WINAPI *pInitCommonControlsEx)(const INITCOMMONCONTROLSEX*);
+    INITCOMMONCONTROLSEX iccex;
     HWND hwnd, parent_wnd;
+
+    hComctl32 = GetModuleHandleA("comctl32.dll");
+    pInitCommonControlsEx = (void*)GetProcAddress(hComctl32, "InitCommonControlsEx");
+    if (!pInitCommonControlsEx)
+    {
+        skip("InitCommonControlsEx() is missing. Skipping the tests\n");
+        return;
+    }
+    iccex.dwSize = sizeof(iccex);
+    iccex.dwICC  = ICC_DATE_CLASSES;
+    pInitCommonControlsEx(&iccex);
+
     test_monthcal();
 
     init_msg_sequences(sequences, NUM_MSG_SEQUENCES);

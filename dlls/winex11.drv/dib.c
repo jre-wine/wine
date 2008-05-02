@@ -2643,7 +2643,7 @@ static void X11DRV_DIB_SetImageBits_24( int lines, const BYTE *srcbits,
             /* Windows only supports one 24bpp DIB format: RGB888 */
             srcbits+=left*3;
             for (h = lines - 1; h >= 0; h--) {
-                srcbyte=(const BYTE*)srcbits;
+                srcbyte = srcbits;
                 for (x = left; x < width+left; x++) {
                     XPutPixel(bmpImage, x, h,
                               X11DRV_PALETTE_ToPhysical
@@ -4856,7 +4856,7 @@ HGLOBAL X11DRV_DIB_CreateDIBFromPixmap(Pixmap pixmap, HDC hdc)
      * Create an HBITMAP with the same dimensions and BPP as the pixmap,
      * and make it a container for the pixmap passed.
      */
-    hBmp = CreateBitmap( width, height, 1, depth, NULL );
+    if (!(hBmp = CreateBitmap( width, height, 1, depth_to_bpp(depth), NULL ))) return 0;
 
     /* force bitmap to be owned by a screen DC */
     hdcMem = CreateCompatibleDC( hdc );

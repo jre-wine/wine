@@ -112,7 +112,17 @@ void     WINAPI        IWineD3DBaseTextureImpl_PreLoad(IWineD3DBaseTexture *ifac
 }
 
 void     WINAPI        IWineD3DBaseTextureImpl_UnLoad(IWineD3DBaseTexture *iface) {
-    IWineD3DResourceImpl_UnLoad((IWineD3DResource *)iface);
+    IWineD3DTextureImpl *This = (IWineD3DTextureImpl *)iface;
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+
+    if(This->baseTexture.textureName) {
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+        ENTER_GL();
+        glDeleteTextures(1, &This->baseTexture.textureName);
+        This->baseTexture.textureName = 0;
+        LEAVE_GL();
+    }
+    This->baseTexture.dirty = TRUE;
 }
 
 WINED3DRESOURCETYPE WINAPI IWineD3DBaseTextureImpl_GetType(IWineD3DBaseTexture *iface) {
@@ -364,6 +374,12 @@ static inline void apply_wrap(const GLint textureDimensions, const DWORD state, 
         if(textureDimensions==GL_TEXTURE_CUBE_MAP_ARB) {
             /* Cubemaps are always set to clamp, regardless of the sampler state. */
             wrapParm = GL_CLAMP_TO_EDGE;
+        } else if(textureDimensions==GL_TEXTURE_RECTANGLE_ARB) {
+            if(state == WINED3DTADDRESS_WRAP) {
+                wrapParm = GL_CLAMP_TO_EDGE;
+            } else {
+                wrapParm = stateLookup[WINELOOKUP_WARPPARAM][state - minLookup[WINELOOKUP_WARPPARAM]];
+            }
         } else {
             wrapParm = stateLookup[WINELOOKUP_WARPPARAM][state - minLookup[WINELOOKUP_WARPPARAM]];
         }

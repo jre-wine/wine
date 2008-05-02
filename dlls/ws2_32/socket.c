@@ -1670,8 +1670,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
-            if (getsockopt(fd,(int) level, optname, optval,
-                        (unsigned int *)optlen) != 0 )
+            if (getsockopt(fd, level, optname, optval, (unsigned int *)optlen) != 0 )
             {
                 SetLastError((errno == EBADF) ? WSAENOTSOCK : wsaErrno());
                 ret = SOCKET_ERROR;
@@ -1792,7 +1791,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
                 return SOCKET_ERROR;
 
             convert_sockopt(&level, &optname);
-            if (getsockopt(fd,(int) level, optname, &tv, &len) != 0 )
+            if (getsockopt(fd, level, optname, &tv, &len) != 0 )
             {
                 SetLastError((errno == EBADF) ? WSAENOTSOCK : wsaErrno());
                 ret = SOCKET_ERROR;
@@ -1886,8 +1885,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
-            if (getsockopt(fd,(int) level, optname, optval,
-                        (unsigned int *)optlen) != 0 )
+            if (getsockopt(fd, level, optname, optval, (unsigned int *)optlen) != 0 )
             {
                 SetLastError((errno == EBADF) ? WSAENOTSOCK : wsaErrno());
                 ret = SOCKET_ERROR;
@@ -1915,8 +1913,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
-            if (getsockopt(fd,(int) level, optname, optval,
-                        (unsigned int *)optlen) != 0 )
+            if (getsockopt(fd, level, optname, optval, (unsigned int *)optlen) != 0 )
             {
                 SetLastError((errno == EBADF) ? WSAENOTSOCK : wsaErrno());
                 ret = SOCKET_ERROR;
@@ -2291,6 +2288,11 @@ INT WINAPI WSAIoctl(SOCKET s,
    case WS_SIO_FLUSH:
 	FIXME("SIO_FLUSH: stub.\n");
 	break;
+
+   case WS_SIO_GET_EXTENSION_FUNCTION_POINTER:
+       FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER %s: stub\n", debugstr_guid(lpvInBuffer));
+       WSASetLastError(WSAEOPNOTSUPP);
+       return SOCKET_ERROR;
 
    default:
        FIXME("unsupported WS_IOCTL cmd (%08x)\n", dwIoControlCode);

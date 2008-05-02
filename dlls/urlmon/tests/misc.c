@@ -18,6 +18,7 @@
 
 #define COBJMACROS
 #define CONST_VTABLE
+#define NONAMELESSUNION
 
 #include <wine/test.h>
 #include <stdarg.h>
@@ -258,6 +259,9 @@ static const WCHAR url6[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
 static const WCHAR url7[] = {'f','t','p',':','/','/','w','i','n','e','h','q','.','o','r','g','/',
         'f','i','l','e','.','t','e','s','t',0};
 static const WCHAR url8[] = {'t','e','s','t',':','1','2','3','a','b','c',0};
+static const WCHAR url9[] =
+    {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.','o','r','g',
+     '/','s','i','t','e','/','a','b','o','u','t',0};
 
 
 static const WCHAR url4e[] = {'f','i','l','e',':','s','o','m','e',' ','f','i','l','e',
@@ -1174,6 +1178,37 @@ static void test_ReleaseBindInfo(void)
     ok(bi.pUnk == &unk, "bi.pUnk=%p, expected %p\n", bi.pUnk, &unk);
 }
 
+static void test_CopyStgMedium(void)
+{
+    STGMEDIUM src, dst;
+    HRESULT hres;
+
+    memset(&src, 0xf0, sizeof(src));
+    memset(&dst, 0xe0, sizeof(dst));
+    src.tymed = TYMED_NULL;
+    src.pUnkForRelease = NULL;
+    hres = CopyStgMedium(&src, &dst);
+    ok(hres == S_OK, "CopyStgMedium failed: %08x\n", hres);
+    ok(dst.tymed == TYMED_NULL, "tymed=%d\n", dst.tymed);
+    ok(dst.u.hGlobal == (void*)0xf0f0f0f0, "u=%p\n", dst.u.hGlobal);
+    ok(!dst.pUnkForRelease, "pUnkForRelease=%p, expected NULL\n", dst.pUnkForRelease);
+
+    memset(&dst, 0xe0, sizeof(dst));
+    src.tymed = TYMED_ISTREAM;
+    src.u.pstm = NULL;
+    src.pUnkForRelease = NULL;
+    hres = CopyStgMedium(&src, &dst);
+    ok(hres == S_OK, "CopyStgMedium failed: %08x\n", hres);
+    ok(dst.tymed == TYMED_ISTREAM, "tymed=%d\n", dst.tymed);
+    ok(!dst.u.pstm, "pstm=%p\n", dst.u.pstm);
+    ok(!dst.pUnkForRelease, "pUnkForRelease=%p, expected NULL\n", dst.pUnkForRelease);
+
+    hres = CopyStgMedium(&src, NULL);
+    ok(hres == E_POINTER, "CopyStgMedium failed: %08x, expected E_POINTER\n", hres);
+    hres = CopyStgMedium(NULL, &dst);
+    ok(hres == E_POINTER, "CopyStgMedium failed: %08x, expected E_POINTER\n", hres);
+}
+
 static void test_UrlMkGetSessionOption(void)
 {
     DWORD encoding, size;
@@ -1271,6 +1306,54 @@ static void test_ObtainUserAgentString(void)
     HeapFree(GetProcessHeap(), 0, str2);
 }
 
+static void test_MkParseDisplayNameEx(void)
+{
+    IMoniker *mon = NULL;
+    LPWSTR name;
+    DWORD issys;
+    ULONG eaten = 0;
+    IBindCtx *bctx;
+    HRESULT hres;
+
+    static const WCHAR clsid_nameW[] = {'c','l','s','i','d',':',
+            '2','0','D','0','4','F','E','0','-','3','A','E','A','-','1','0','6','9','-','A','2','D','8',
+            '-','0','8','0','0','2','B','3','0','3','0','9','D',':',0};
+
+    CreateBindCtx(0, &bctx);
+
+    hres = MkParseDisplayNameEx(bctx, url9, &eaten, &mon);
+    ok(hres == S_OK, "MkParseDisplayNameEx failed: %08x\n", hres);
+    ok(eaten == sizeof(url9)/sizeof(WCHAR)-1, "eaten=%d\n", eaten);
+    ok(mon != NULL, "mon == NULL\n");
+
+    hres = IMoniker_GetDisplayName(mon, NULL, 0, &name);
+    ok(hres == S_OK, "GetDiasplayName failed: %08x\n", hres);
+    ok(!lstrcmpW(name, url9), "wrong display name %s\n", debugstr_w(name));
+    CoTaskMemFree(name);
+
+    hres = IMoniker_IsSystemMoniker(mon, &issys);
+    ok(hres == S_OK, "IsSystemMoniker failed: %08x\n", hres);
+    ok(issys == MKSYS_URLMONIKER, "issys=%x\n", issys);
+
+    IMoniker_Release(mon);
+
+    hres = MkParseDisplayNameEx(bctx, clsid_nameW, &eaten, &mon);
+    ok(hres == S_OK, "MkParseDisplayNameEx failed: %08x\n", hres);
+    ok(eaten == sizeof(clsid_nameW)/sizeof(WCHAR)-1, "eaten=%d\n", eaten);
+    ok(mon != NULL, "mon == NULL\n");
+
+    hres = IMoniker_IsSystemMoniker(mon, &issys);
+    ok(hres == S_OK, "IsSystemMoniker failed: %08x\n", hres);
+    ok(issys == MKSYS_CLASSMONIKER, "issys=%x\n", issys);
+
+    IMoniker_Release(mon);
+
+    hres = MkParseDisplayNameEx(bctx, url8, &eaten, &mon);
+    ok(FAILED(hres), "MkParseDisplayNameEx succeeded: %08x\n", hres);
+
+    IBindCtx_Release(bctx);
+}
+
 START_TEST(misc)
 {
     OleInitialize(NULL);
@@ -1288,8 +1371,10 @@ START_TEST(misc)
     test_NameSpace();
     test_MimeFilter();
     test_ReleaseBindInfo();
+    test_CopyStgMedium();
     test_UrlMkGetSessionOption();
     test_ObtainUserAgentString();
+    test_MkParseDisplayNameEx();
 
     OleUninitialize();
 }

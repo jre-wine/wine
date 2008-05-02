@@ -112,6 +112,7 @@ static void UuidConversionAndComparison(void) {
 	    ok( (UuidFromStringA((unsigned char*)str, &Uuid1) == RPC_S_INVALID_STRING_UUID), "Invalid UUID String\n" );
 	    str[i2] = x; /* change it back so remaining tests are interesting. */
 	}
+	RpcStringFree((unsigned char **)&str);
     }
 
     /* Uuid to String to Uuid (wchar) */
@@ -132,6 +133,7 @@ static void UuidConversionAndComparison(void) {
 	    ok( (UuidFromStringW(wstr, &Uuid1) == RPC_S_INVALID_STRING_UUID), "Invalid UUID WString\n" );
 	    wstr[i2] = wx; /* change it back so remaining tests are interesting. */
 	}
+	RpcStringFreeW(&wstr);
     }
 }
 
@@ -323,6 +325,12 @@ static void test_towers(void)
 
     ret = TowerConstruct(&mapi_if_id, &ndr_syntax, "ncacn_ip_tcp", "135", "10.0.0.1", &tower);
     ok(ret == RPC_S_OK, "TowerConstruct failed with error %ld\n", ret);
+    if (ret == RPC_S_INVALID_RPC_PROTSEQ)
+    {
+        /* Windows Vista fails with this error and crashes if we continue */
+        skip("TowerConstruct failed, we are most likely on Windows Vista\n");
+        return;
+    }
 
     /* first check we have the right amount of data */
     ok(tower->tower_length == sizeof(tower_data_tcp_ip1) ||
@@ -390,6 +398,12 @@ static void test_I_RpcMapWin32Status(void)
 {
     LONG win32status;
     RPC_STATUS rpc_status;
+    BOOL w2k3 = FALSE;
+
+    /* Windows 2003 returns STATUS_UNSUCCESSFUL if given an unknown status */
+    win32status = I_RpcMapWin32Status(9999);
+    if (win32status == STATUS_UNSUCCESSFUL)
+        w2k3 = TRUE;
 
     for (rpc_status = 0; rpc_status < 10000; rpc_status++)
     {
@@ -397,6 +411,7 @@ static void test_I_RpcMapWin32Status(void)
         win32status = I_RpcMapWin32Status(rpc_status);
         switch (rpc_status)
         {
+        case ERROR_SUCCESS: expected_win32status = ERROR_SUCCESS; break;
         case ERROR_ACCESS_DENIED: expected_win32status = STATUS_ACCESS_DENIED; break;
         case ERROR_INVALID_HANDLE: expected_win32status = RPC_NT_SS_CONTEXT_MISMATCH; break;
         case ERROR_OUTOFMEMORY: expected_win32status = STATUS_NO_MEMORY; break;
@@ -503,7 +518,11 @@ static void test_I_RpcMapWin32Status(void)
         case RPC_X_PIPE_EMPTY: expected_win32status = RPC_NT_PIPE_EMPTY; break;
         case ERROR_PASSWORD_MUST_CHANGE: expected_win32status = STATUS_PASSWORD_MUST_CHANGE; break;
         case ERROR_ACCOUNT_LOCKED_OUT: expected_win32status = STATUS_ACCOUNT_LOCKED_OUT; break;
-        default: expected_win32status = rpc_status;
+        default:
+            if (w2k3)
+                expected_win32status = STATUS_UNSUCCESSFUL;
+            else
+                expected_win32status = rpc_status;
         }
         ok(win32status == expected_win32status, "I_RpcMapWin32Status(%ld) should have returned 0x%x instead of 0x%x\n",
             rpc_status, expected_win32status, win32status);
