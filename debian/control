@@ -24,7 +24,7 @@ Build-Depends: debhelper (>= 4.1.16), flex-old | flex (<< 2.5.31), bison,
  libhal-dev, libdbus-1-dev | dbus-1-dev, libgphoto2-2-dev, liblcms1-dev, libldap2-dev,
  libxml2-dev, libxslt1-dev, fontforge, prelink,
  dctrl-tools | grep-dctrl, lzma, sharutils,
- libc6-dev-i386 [amd64 kfreebsd-amd64], ia32-libs (>= 1.19) [amd64 kfreebsd-amd64],
+ gcc-multilib [amd64 kfreebsd-amd64], ia32-libs (>= 1.19) [amd64 kfreebsd-amd64],
  lib32ncurses5-dev [amd64 kfreebsd-amd64], lib32asound2-dev [amd64]
 Standards-Version: 3.6.2
 

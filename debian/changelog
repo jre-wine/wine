@@ -1,3 +1,23 @@
+wine (0.9.51-2) unstable; urgency=low
+
+  * On amd64, Build-Depend on gcc-multilib instead of libc6-dev-i386.
+    Closes: #457557.
+  * Changed debian/gendeps.sh and debian/cleandeps.sh to always
+    return success, so the package will build even if not all
+    the expected dependencies are available to link against
+    (typically the case on amd64).
+  * debian/gendeps.sh is now able to build for 32-bit or 64-bit,
+    as specified on its command line; debian/rules now invokes it
+    as appropriate for the target architecture.
+  * The build-indep rule no longer depends on a configure rule. There's
+    currently no architecture-independent stuff to build, after all.
+  * Removed dh_undocumented from debian/rules, and a few other
+    minor cleanups.
+  * Removed unnecessary whitespace from ifeq/ifneq conditions in
+    debian/rules, in case it matters on some systems.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Tue, 25 Dec 2007 15:55:24 +0100
+
 wine (0.9.51-1) unstable; urgency=low
 
   * New upstream release 0.9.51.

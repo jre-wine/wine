@@ -1,9 +1,14 @@
 #!/bin/bash
+ARCHS="$@"
 echo Forcing extra dependencies...
 for dep in debian/*.deps; do
   package="$(basename "$dep" .deps)"
   path="debian/$package"
   deplist=$(sed 's,^,-l,' $dep)
 #  echo $path: $deplist
-  gcc -o "$path/extradep" debian/extradep.c $deplist
+  for arch in $ARCHS; do
+    gcc -m$arch -o "$path/extradep$arch" debian/extradep.c $deplist
+  done
 done
+# return success
+true

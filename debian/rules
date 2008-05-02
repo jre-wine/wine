@@ -20,36 +20,28 @@ DEB_HOST_GNU_CPU	?= $(shell dpkg-architecture -qDEB_HOST_GNU_CPU)
 # On amd64, build 32-bit package by simply unpacking amd64.tar.lzma.uu
 # if it exists, otherwise build from source using 32-bit compiler.
 
-ifeq ($(DEB_HOST_GNU_CPU), x86_64)
-ifeq ($(DEB_HOST_GNU_SYSTEM), linux-gnu)
+ifeq ($(DEB_HOST_GNU_CPU),x86_64)
+ifeq ($(DEB_HOST_GNU_SYSTEM),linux-gnu)
 ifneq (,$(wildcard debian/amd64.tar.lzma.uu))
 AMD64_COPY = true
 endif
 endif
 ifeq (,$(AMD64_COPY))
-BUILD_TARGETS = build-arch32
-INSTALL_TARGETS = install-arch32
-CLEAN_TARGETS = clean32
+BUILDS = build32
 else
-BUILD_TARGETS =
-INSTALL_TARGETS =
-CLEAN_TARGETS =
+BUILDS =
 endif
 # Not ready yet: build Win64 version
-#BUILD_TARGETS += build-arch64
-#INSTALL_TARGETS += install-arch64
-#CLEAN_TARGETS += clean64
+#BUILDS += build64
 #NATIVE_BUILD = build64
 NATIVE_BUILD = build32
 else
-BUILD_TARGETS = build-arch32
-INSTALL_TARGETS = install-arch32
-CLEAN_TARGETS = clean32
+BUILDS = build32
 NATIVE_BUILD = build32
 endif
 
-configure32: configure32-stamp
-configure32-stamp:
+configure-arch32: configure-arch32-stamp
+configure-arch32-stamp:
 	dh_testdir
 ifeq (,$(DEB_SAVEBUILD))
 	mkdir build32 || true
@@ -66,10 +58,10 @@ else
 	mv /tmp/build32 .
 endif
 
-	touch configure32-stamp
+	touch configure-arch32-stamp
 
-configure64: configure64-stamp
-configure64-stamp:
+configure-arch64: configure-arch64-stamp
+configure-arch64-stamp:
 	dh_testdir
 ifeq (,$(DEB_SAVEBUILD))
 	mkdir build64 || true
@@ -86,16 +78,16 @@ else
 	mv /tmp/build64 .
 endif
 
-	touch configure64-stamp
+	touch configure-arch64-stamp
 
 build-indep: build-indep-stamp
-build-indep-stamp: $(subst build,configure,$(NATIVE_BUILD))
+build-indep-stamp:
 	dh_testdir
 
 	touch build-indep-stamp
 
 build-arch32: build-arch32-stamp
-build-arch32-stamp: configure32-stamp
+build-arch32-stamp: configure-arch32-stamp
 	dh_testdir
 
 ifeq (,$(DEB_SAVEBUILD))
@@ -109,7 +101,7 @@ endif
 	touch build-arch32-stamp
 
 build-arch64: build-arch64-stamp
-build-arch64-stamp: configure64-stamp
+build-arch64-stamp: configure-arch64-stamp
 	dh_testdir
 
 ifeq (,$(DEB_SAVEBUILD))
@@ -122,13 +114,13 @@ endif
 
 	touch build-arch64-stamp
 
-build-arch: $(BUILD_TARGETS)
+build-arch: $(subst build,build-arch,$(BUILDS))
 build: build-indep build-arch
 
-clean32:
+clean-arch32:
 	dh_testdir
 	dh_testroot
-	rm -f build-arch32-stamp configure32-stamp
+	rm -f build-arch32-stamp configure-arch32-stamp
 #	-$(MAKE) -C build32 distclean
 ifeq (,$(DEB_SAVEBUILD))
 	rm -rf build32
@@ -136,10 +128,10 @@ else
 	mv build32 /tmp
 endif
 
-clean64:
+clean-arch64:
 	dh_testdir
 	dh_testroot
-	rm -f build-arch64-stamp configure64-stamp
+	rm -f build-arch64-stamp configure-arch64-stamp
 #	-$(MAKE) -C build64 distclean
 ifeq (,$(DEB_SAVEBUILD))
 	rm -rf build64
@@ -147,7 +139,7 @@ else
 	mv build64 /tmp
 endif
 
-clean: $(CLEAN_TARGETS)
+clean: $(subst build,clean-arch,$(BUILDS))
 	dh_testdir
 	dh_testroot
 	rm -f build-indep-stamp
@@ -199,7 +191,7 @@ install-arch64: build-arch64
 	$(MAKE) -C build64/programs install prefix=`pwd`/debian/tmp/usr
 	install build64/tools/fnt2bdf debian/tmp/usr/bin
 
-install-arch: $(INSTALL_TARGETS)
+install-arch: $(subst build,install-arch,$(BUILDS))
 	dh_testdir
 	dh_testroot
 
@@ -241,7 +233,7 @@ ifeq (,$(AMD64_COPY))
 	dh_install -s
 
 	# split up libwine
-ifeq ($(DEB_HOST_GNU_SYSTEM), linux-gnu)
+ifeq ($(DEB_HOST_GNU_SYSTEM),linux-gnu)
 	mv debian/libwine/usr/lib/wine/winealsa* debian/libwine-alsa/usr/lib/wine
 	mv debian/libwine/usr/lib/wine/capi*     debian/libwine-capi/usr/lib/wine
 endif
@@ -268,7 +260,6 @@ endif
 #	dh_installmenu -s
 	dh_installmime -s
 
-	dh_undocumented -s
 	dh_installchangelogs -s ChangeLog
 	dh_link -s
 	dh_strip -s
@@ -279,7 +270,7 @@ ifneq (,$(AMD64_COPY))
 	# Using compressed 32-bit build.  Make sure it's the latest one!!
 	uudecode < debian/amd64.tar.lzma.uu | lzma -d | tar -xpf -
 endif
-ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM), i486-linux-gnu)
+ifeq ($(DEB_HOST_GNU_CPU)-$(DEB_HOST_GNU_SYSTEM),i486-linux-gnu)
 	# Generating compressed 32-bit build.  Make sure to keep your *_i386.deb in sync with this file in your *.diff.gz!!
 	tar -cpf - `grep-dctrl -v "Architecture: all" debian/control | grep "^Package: " | sed -e "s,^Package: ,debian/,g"` \
 		| lzma -c9 | uuencode - > debian/amd64.tar.lzma.uu
@@ -291,8 +282,8 @@ endif
 
 	dh_makeshlibs -s
 	dh_installdeb -s
-	bash debian/gendeps.sh
-	dh_shlibdeps -s -Llibwine -l$(NATIVE_BUILD)/libs/wine
+	bash debian/gendeps.sh $(patsubst build%,%,$(BUILDS))
+	dh_shlibdeps -s -Llibwine $(patsubst %,-l%/libs/wine,$(BUILDS))
 	bash debian/cleandeps.sh
 
 	dh_gencontrol -s
@@ -301,8 +292,8 @@ endif
 
 binary: binary-arch binary-indep
 
-.PHONY: configure32 configure64 \
+.PHONY: configure-arch32 configure-arch64 \
 	build-indep build-arch32 build-arch64 build-arch build \
-	clean32 clean64 clean \
+	clean-arch32 clean-arch64 clean \
 	install-indep install-arch32 install-arch64 install-arch install \
 	binary-indep binary-arch binary
